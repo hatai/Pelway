@@ -1,0 +1,317 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>AI協業チャット 仕様変更の一日（モック）</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&family=Noto+Sans+JP:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#E6E5E0;--tile:#F8F8F4;--well:#EEEEE9;--ink:#111214;--sub:#5A5852;--mute:#66635B;--acc:#2B37FF;--accw:#E3E5FF;--r:24px;--sh:0 1px 2px rgba(17,18,20,.05),0 10px 30px rgba(17,18,20,.06)}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--ink);font:400 15px/24px "Geist","Noto Sans JP",sans-serif;height:100vh;overflow:hidden}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+.app{display:grid;grid-template-columns:220px minmax(0,1fr);gap:16px;padding:20px;height:100vh}
+.app.pane{grid-template-columns:220px minmax(0,1fr) 400px}
+.t{background:var(--tile);border-radius:var(--r);box-shadow:var(--sh);padding:20px 22px;min-height:0;position:relative}
+.mono{font-family:"Geist Mono","Noto Sans JP",monospace}
+.cap{display:flex;align-items:center;gap:8px;font:400 12px/16px "Geist Mono","Noto Sans JP";color:var(--mute)}
+.cap:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--acc)}
+.cap.n:before{background:var(--ink)}
+/* rail */
+.rail{display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.org{font-weight:600;font-size:15px}
+.who{font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute);margin:2px 0 14px}
+.it{display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:12px;font-size:14px;color:var(--sub);text-align:left;width:100%}
+.it:hover{background:var(--well)}
+.it.on{background:var(--accw);color:var(--acc);font-weight:600}
+.it.b{color:var(--ink);font-weight:600}
+.it .c{margin-left:auto;font:600 11px/18px "Geist Mono";background:var(--acc);color:#fff;border-radius:9px;min-width:20px;padding:0 6px;text-align:center}
+.it.on .c{background:var(--acc)}
+.grp{font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute);margin:14px 10px 4px}
+.mini{width:20px;height:20px;border-radius:7px;display:grid;place-items:center;font-size:10px;font-weight:600;background:var(--well);color:var(--ink);flex:none}
+.mini.ai{background:var(--acc);color:#fff}
+.sl{margin-left:auto;font:500 10px/14px "Geist Mono","Noto Sans JP";color:var(--mute)}.sl.w{color:var(--acc)}.sl.n{color:var(--ink)}
+.ctl{margin-top:auto;display:flex;flex-direction:column;gap:8px;padding-top:12px}
+.sc{font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute)}
+.sc b{display:block;font:500 13px/18px "Geist","Noto Sans JP";color:var(--ink);margin-top:2px}
+.row{display:flex;gap:6px}
+.cb{flex:1;height:36px;border-radius:18px;background:var(--well);font-weight:500;font-size:13px}
+.cb.p{background:var(--ink);color:#F8F8F4}
+.cb:disabled{opacity:.35;cursor:default}
+.note{font-size:11px;line-height:16px;color:var(--mute)}
+/* main */
+.main{display:flex;flex-direction:column;overflow:hidden;padding:0}
+.top{display:flex;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid var(--well)}
+.srch{margin-left:auto;display:flex;align-items:center;gap:8px;height:34px;padding:0 14px;border-radius:17px;background:var(--well);color:var(--mute);font-size:13px;width:260px}
+.srch .k{margin-left:auto;font:500 11px/16px "Geist Mono";color:var(--sub)}
+.body{flex:1;overflow:auto;padding:24px 22px}
+.col{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1{font-weight:500;font-size:22px;line-height:28px;letter-spacing:-.01em}
+.mem{font-size:13px;color:var(--mute)}
+.day{font:400 11px/16px "Geist Mono";color:var(--mute);text-align:center}
+.unread{display:flex;align-items:center;gap:10px;font:500 11px/16px "Geist Mono","Noto Sans JP";color:var(--acc)}
+.unread:after{content:"";flex:1;height:1px;background:var(--acc)}
+.m{display:flex;gap:12px;border-radius:14px;padding:6px 8px;margin:-6px -8px}
+.m.hl{background:var(--accw)}
+.av{width:34px;height:34px;border-radius:12px;flex:none;display:grid;place-items:center;font-size:13px;font-weight:600;background:var(--well)}
+.av.ai{background:var(--acc);color:#fff}
+.nm{font-size:13px;line-height:20px;color:var(--mute)}.nm b{color:var(--ink);font-weight:500;margin-right:6px}
+.tag{font:500 10px/14px "Geist Mono";color:var(--acc);box-shadow:inset 0 0 0 1px currentColor;border-radius:6px;padding:0 4px;margin-right:6px}
+.at{color:var(--acc);font-weight:500}
+.rx{display:flex;gap:6px;margin-top:6px}
+.pill{height:24px;padding:0 9px;border-radius:12px;background:var(--well);font-size:12px;display:inline-flex;align-items:center;gap:4px;color:var(--sub)}
+.dec{margin-top:6px;display:inline-flex;align-items:center;gap:6px;font:500 11px/16px "Geist Mono","Noto Sans JP";color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink);border-radius:8px;padding:2px 8px}
+.thl{margin-top:8px;display:inline-flex;align-items:center;gap:10px;font-size:13px;color:var(--acc);font-weight:500;background:var(--well);border-radius:12px;padding:5px 12px}
+.thl .s{color:var(--sub);font-weight:400}
+.wk{display:inline-flex;align-items:center;gap:6px}.wk:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--acc);animation:pl 1.6s infinite}
+@keyframes pl{50%{opacity:.3}}
+.ho{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--sub);background:var(--well);border-radius:14px;padding:9px 14px}
+.ho b{color:var(--ink);font-weight:500}
+.ho .lk{margin-left:auto}
+.lk{color:var(--acc);font-size:13px;text-decoration:underline;text-underline-offset:3px}
+.wait{font-size:13px;color:var(--ink);display:flex;align-items:center;gap:8px}.wait:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ink)}
+.see{font-size:13px;font-weight:500;color:var(--acc);margin-left:8px}
+.priv{font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute);margin-top:4px}
+.comp{margin-top:auto;padding:0 22px 18px}
+.comp div{max-width:720px;margin:0 auto;background:var(--well);border-radius:16px;height:48px;display:flex;align-items:center;padding:0 18px;color:var(--mute);font-size:14px}
+/* judgement card */
+.card{margin-top:10px;background:var(--ink);color:#F8F8F4;border-radius:18px;padding:16px 18px;max-width:520px}
+.card .lab{font:400 11px/16px "Geist Mono","Noto Sans JP";color:#B9B8B1}
+.card .q{font-size:16px;font-weight:500;margin-top:6px}
+.card .d{font-size:13px;color:#D8D7D0;margin-top:4px}
+.card .rw{display:flex;align-items:center;gap:10px;margin-top:14px}
+.card .go{height:36px;padding:0 20px;border-radius:18px;background:#F8F8F4;color:var(--ink);font-weight:600;font-size:14px}
+.card .fx{height:36px;padding:0 16px;border-radius:18px;box-shadow:inset 0 0 0 1px #6B6A64;color:#F8F8F4;font-size:14px}
+.card .lock{margin-left:auto;font:400 11px/16px "Geist Mono","Noto Sans JP";color:#B9B8B1}
+.done{margin-top:10px;font-size:13px;color:var(--sub);display:flex;gap:8px}.done:before{content:"✓";color:var(--acc);font-weight:600}
+/* today */
+.sec{background:var(--well);border-radius:20px;padding:6px}
+.sh{display:flex;align-items:center;gap:8px;padding:10px 12px 6px;font-weight:500;font-size:14px}
+.sh .n{font:600 11px/18px "Geist Mono";background:var(--ink);color:#fff;border-radius:9px;padding:0 7px}
+.li{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:14px;width:100%;text-align:left}
+.li:hover,.li.focus{background:#E3E5FF}
+.li .tx{flex:1;min-width:0}
+.li .tp{font-size:14px;line-height:20px;color:var(--ink)}
+.li .mt{font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute)}
+.li .go{font-size:12px;color:var(--acc);font-weight:500}
+.mail .ad{font:400 13px "Geist Mono",monospace;color:#F8F7F4;margin-left:6px}.sec.emp .sh{padding:10px 12px}.sec.emp .sh .n{font-weight:400;color:var(--mute)}.sec .ref{padding:2px 12px 10px 56px;font-size:12px;color:#66635B}.card .rw button{white-space:nowrap;flex:none}.mail .dl{color:#C3C8FF;text-decoration:underline;text-underline-offset:3px}.empty{padding:8px 12px 12px;font-size:13px;color:var(--mute)}
+/* pane */
+.pn{display:flex;flex-direction:column;overflow:hidden}
+.pn .hd{display:flex;align-items:center;gap:10px}
+.pn .hd h2{font-size:16px;font-weight:500}
+.pn .x{margin-left:auto;font-size:13px;color:var(--sub);text-decoration:underline;text-underline-offset:3px}
+.pn .bd{flex:1;overflow:auto;display:flex;flex-direction:column;gap:16px;margin-top:16px}
+.src{font-size:12px;color:var(--mute);background:var(--well);border-radius:12px;padding:8px 12px}
+.ring{display:flex;gap:4px;margin-top:6px}.ring i{flex:1;height:4px;border-radius:2px;background:#D9D9D2}.ring i.on{background:var(--acc)}
+.lg{font:400 12px/20px "Geist Mono","Noto Sans JP";color:var(--sub);display:flex;gap:10px}.lg span:first-child{color:var(--mute);width:40px;flex:none}
+.res{background:var(--well);border-radius:14px;padding:12px 14px;font-size:13px}
+.res li{margin-left:18px}
+.ex{position:fixed;right:28px;bottom:10px;font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute)}
+
+.it .cnt{margin-left:auto;font:500 11px/16px "Geist Mono";color:var(--acc)}
+.sh .n{font:500 13px/18px "Geist Mono";background:none;color:var(--ink);padding:0}
+.li{min-height:56px}
+.li.jd{position:relative}.li.jd:before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;background:var(--ink);border-radius:0}
+.li .mt{font-size:12px}
+.m{position:relative}
+.m:hover .menu{display:flex}
+.menu{display:none;position:absolute;right:6px;top:-14px;background:var(--tile);box-shadow:var(--sh);border-radius:10px;padding:3px;gap:2px;z-index:2}
+.menu span{font-size:12px;color:var(--sub);padding:2px 8px;border-radius:7px}.menu span:hover{background:var(--well)}
+.m.flash{animation:fl 1.2s ease-out}
+@keyframes fl{0%,60%{background:var(--accw)}100%{background:transparent}}
+.m.rng{box-shadow:inset 3px 0 0 var(--acc)}
+.rr{font:400 12px/16px "Geist Mono","Noto Sans JP";color:var(--acc);margin:2px 0 4px;display:inline-flex;gap:6px;align-items:center;text-decoration:underline;text-underline-offset:3px}
+.thl{height:28px;padding:0 12px}
+.dec{box-shadow:none;padding:0;font:400 12px/16px "Geist Mono","Noto Sans JP";color:var(--ink)}
+.dec:before{content:"◆";font-size:10px}
+.ho .un{font:500 11px/16px "Geist Mono";color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink);border-radius:6px;padding:0 6px}
+.ho .rcv{height:28px;padding:0 12px;border-radius:14px;background:var(--ink);color:#F8F8F4;font-size:12px;font-weight:600}
+.me-only{background:#E7E5E0;border-radius:14px;padding:10px 12px;margin:-4px -8px}
+.me-only .lb{font:500 11px/16px "Geist Mono","Noto Sans JP";color:var(--sub);margin-bottom:4px}
+.opt{display:block;width:100%;text-align:left;margin-top:8px;background:#1E2023;border-radius:12px;padding:10px 12px;color:#F8F8F4}
+.opt:hover{background:#2A2C2F}
+.opt b{font-weight:600;font-size:14px}.opt .why{font-size:12px;color:#D8D7D0;display:block;margin-top:2px}
+.opt .src2{font:400 11px/16px "Geist Mono","Noto Sans JP";color:#B9B8B1;text-decoration:underline}
+.mail{background:#1E2023;border-radius:12px;padding:10px 12px;margin-top:10px;font-size:13px;color:#E6E5DF;line-height:21px}
+.mail .h{font:400 11px/16px "Geist Mono","Noto Sans JP";color:#B9B8B1}
+.focus{max-width:720px;margin:0 auto 8px;font-size:13px;color:var(--ink);display:flex;gap:8px;align-items:center}.focus:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--mute)}
+.tcomp{margin-top:12px;display:flex;gap:8px}
+.tcomp input{flex:1;height:44px;border:0;border-radius:14px;background:var(--well);padding:0 14px;font:inherit;font-size:14px;color:var(--ink);outline:none}
+.tcomp input:focus{box-shadow:inset 0 0 0 1.5px var(--acc)}
+.endday{text-align:center;color:var(--sub);font-size:14px;padding:40px 0}
+.hop{font-size:13px;color:var(--sub);margin-top:4px;display:flex;gap:8px;align-items:center}.hop b{color:var(--ink);font-family:"Geist Mono"}
+.mk{height:28px;padding:0 12px;border-radius:14px;box-shadow:inset 0 0 0 1.5px var(--ink);font-size:12px;font-weight:600;color:var(--ink)}
+.ho{align-items:flex-start}.mail{background:none;padding:0}.mail .h{font-size:12px;color:#D8D7D0;margin-top:2px}
+.mb2{background:#F8F7F4;color:#141416;font-size:13px;line-height:22px;border-radius:12px;padding:12px 14px;margin-top:8px}
+.ref{font-size:12px;color:var(--sub);padding:0 18px;display:flex;gap:10px;align-items:center;font-family:"Geist Mono","Noto Sans JP"}
+</style></head><body><div id="app"></div>
+<div class="ex">会社・人物・時刻・見積もりはすべて架空の例です</div>
+<script>const P={濱田:'濱',田中:'田',佐藤:'佐'},A={ユイ:'ユ',リク:'リ',ハル:'ハ'};
+const S=[
+ {t:'8:30',me:'濱田',ttl:'朝の入口',v:'today',stg:0},
+ {t:'9:20〜9:40',me:'田中',ttl:'人同士の相談からリクを呼ぶ',v:'case',stg:1},
+ {t:'11:00',me:'佐藤',ttl:'スレッドで調査結果と修正案',v:'case',stg:2},
+ {t:'15:00',me:'濱田',ttl:'引き継ぎと方針の判断',v:'case',stg:3},
+ {t:'15:15',me:'濱田',ttl:'顧客宛てメールを確認して送る',v:'case',stg:4},
+ {t:'翌朝 9:10',me:'佐藤',ttl:'決まったことから再開',v:'today',stg:5},
+ {t:'翌朝 9:30',me:'田中',ttl:'残っている顧客連絡',v:'today',stg:6,nt:'この場面の説明：夜のあいだの作業完了では通知を鳴らさず、次にすることを「今日」に残しています。'},
+];
+const U=new URLSearchParams(location.search);
+let st={s:+(U.get('s')||0),pane:U.get('pane'),alt:U.get('v'),jump:null,draft:'修正案1で進めます。テストは',tsc:0,rcv:false,dec:false,sent:false,hl:null,rng:false};
+if(st.s>=4||U.get('rcv'))st.rcv=true; if(st.s>=5)st.sent=true; if(st.s>=4)st.dec=true;
+const sc=()=>S[st.s];
+const me=()=>st.jump?st.jump.me:sc().me;
+const stg=()=>st.jump?st.jump.stg:sc().stg;
+const av=n=>A[n]?`<div class="av ai">${A[n]}</div>`:`<div class="av">${P[n]}</div>`;
+const nm=(n,t)=>`<div class="nm"><b>${n}</b>${A[n]?'<span class="tag">AI</span>':''}${t}</div>`;
+const menu=n=>A[n]?`<div class="menu"><span>ここから読んで</span></div>`:`<div class="menu">${n===me()?'<span>決定にする</span>':''}<span>返信</span></div>`;
+const msg=(id,n,t,body,cls='')=>`<div class="m ${cls}" data-id="${id}">${av(n)}<div style="flex:1;min-width:0">${nm(n,t)}<div>${body}</div></div>${menu(n)}</div>`;
+const rx=t=>`<div class="rx" style="margin:-12px 0 0 46px"><span class="pill">${t}</span></div>`;
+const dec=(w,t)=>`<div style="margin:-12px 0 0 46px"><span class="dec">決定 · ${w} ${t}</span></div>`;
+/* ---------- rail ---------- */
+function todayCount(){const m=me(),g=stg();
+ if(m==='濱田')return g===0?3:g===3?(st.dec?0:1):g===4?(st.sent?0:1):1;
+ if(m==='佐藤')return g===5?1:0; if(m==='田中')return g===6?1:0; return 0;}
+function rail(){
+ const m=me(),g=stg(),c=todayCount(),v=st.alt||(st.jump?'case':sc().v);
+ const rik=g===1?['作業中','w']:g===5?['待機中','']:['待機中',''],hal=g===4&&!st.sent?['判断待ち','n']:['待機中',''];
+ const ai=(n,s)=>`<div class="it"><span class="mini ai">${A[n]}</span>${n}<span class="sl ${s[1]}">${s[0]}</span></div>`;
+ const people=Object.keys(P).filter(n=>n!==m).map(n=>`<button class="it ${v==='dm'&&st.dmw===n?'on':''}" data-dm="${n}"><span class="mini">${P[n]}</span>${n}<span class="sl">${n==='佐藤'&&g===3?'16時まで集中':''}</span></button>`).join('');
+ return `<div class="t rail"><div class="org">株式会社サンプル開発</div><div class="who">${m}として表示・${st.jump?st.jump.t:sc().t}</div>
+ <button class="it ${v==='today'?'on':''}" data-today="1">今日</button>
+ <div class="grp">チャンネル</div><div class="it"># 案件A</div>
+ <button class="it ${v==='case'?'on':'b'}" data-case="1"># 案件B</button>
+ <div class="it"># 全体</div><button class="it ${v==='chat'?'on':'b'}" data-alt="chat"># 雑談</button>
+ <div class="grp">DM・人</div>${people}
+ <div class="grp">DM・AI社員</div>${ai('ユイ',['待機中',''])}${ai('リク',rik)}${ai('ハル',hal)}
+ <div class="ctl"><div class="sc">場面 ${st.s+1}/${S.length}・${sc().t}<b>${sc().ttl}</b></div>
+ <div class="row"><button class="cb" id="pv" ${st.s?'':'disabled'}>前へ</button><button class="cb p" id="nx" ${st.s<S.length-1?'':'disabled'}>次へ</button></div>
+ ${sc().nt?`<div class="note">${sc().nt}</div>`:''}<div class="note">台本の1本の流れだけを再現しています。検索・通知・送信は見た目だけで、実際には動きません。</div></div></div>`;
+}
+const hdr=(h,mem)=>`<div class="top"><h1>${h}</h1><span class="mem">${mem}</span><div class="srch">⌕ 会話と作業記録を検索<span class="k">⌘K</span></div></div>`;
+/* ---------- today ---------- */
+const li=(who,meta,tp,go,jd)=>`<button class="li ${jd?'jd':''}" data-go='${JSON.stringify(go)}'>${av(who)}<div class="tx"><div class="mt">${meta}</div><div class="tp">${tp}</div></div></button>`;
+const sec=(t,rows,x='')=>rows.length?`<div class="sec"><div class="sh">${t}<span class="n">${rows.length}</span></div>${rows.join('')}${x}</div>`:`<div class="sec emp"><div class="sh">${t}<span class="n">なし</span></div></div>`;
+function today(){
+ const m=me(),g=stg();
+ if(m==='佐藤'&&g===5) return hdr('今日','佐藤さん宛て・昨日16:00から')+`<div class="body"><div class="col">
+ ${sec('あなたへの相談',[li('リク','# 案件B · 2:10','CSV出力の実装が終わりました。レビューをお願いします',{stg:5,me:'佐藤',hl:'r9',t:'翌朝 9:10'})])}
+ ${sec('判断待ち',[])}
+ ${sec('離れている間に決まったこと',[li('濱田','◆ # 案件B · 昨日 15:12','12/1のままCSVだけ出す。絞り込みは次回に',{stg:5,me:'佐藤',hl:'h3',back:3,t:'翌朝 9:10'}),],`<div class="ref">参考：顧客回答 · 田中 · 昨日 13:20　文字コードはUTF-8（BOM付き）<button class="lk" data-go='{"stg":5,"me":"佐藤","pane":"thread","hl":"t5","t":"翌朝 9:10"}'>元の返信</button></div>`)}
+ </div></div>`;
+ if(m==='田中'&&g===6) return hdr('今日','田中さん宛て・昨日18:00から')+`<div class="body"><div class="col">
+ ${sec('あなたへの相談',[li('リク','# 案件B · 9:24','テストが通りました。B社への納品連絡をお願いします',{stg:6,me:'田中',hl:'r11',back:2,t:'翌朝 9:30'})])}
+ ${sec('判断待ち',[])}
+ ${sec('離れている間に決まったこと',[li('濱田','◆ # 案件B · 昨日 15:12','12/1のままCSVだけ出す。絞り込みは次回に',{stg:6,me:'田中',hl:'h3',back:3,t:'翌朝 9:30'})],`<div class="ref">B社へ送信済み · 濱田 15:20 · 顧客回答待ち<button class="lk" data-go='{"stg":6,"me":"田中","hl":"h5","back":3,"t":"翌朝 9:30"}'>メールを見る</button></div>`)}
+  </div></div>`;
+ if(m==='濱田'&&todayCount()===0) return hdr('今日','濱田さん宛て')+`<div class="body"><div class="col"><div class="endday">急ぎはありません</div></div></div>`;
+ return hdr('今日','濱田さん宛て・昨夜から')+`<div class="body"><div class="col">
+ ${sec('あなたへの相談',[li('田中','# 案件B · 18:42','B社の仕様変更（CSV出力）、夕方に方針を相談させてください',{stg:0,me:'濱田',hl:'a2',t:'8:30'}),li('佐藤','DM · 8:05','検証環境の権限を1つ追加してほしい',null)])}
+ ${sec('判断待ち',[li('ユイ','# 案件A · 7:50','A社向けの週報を共有してよいか',null,true)])}
+ ${sec('離れている間に決まったこと',[li('田中','◆ # 案件A · 昨日 19:30','リリースを11/12に1日延期',null)])}
+ </div></div>`;
+}
+/* ---------- case B ---------- */
+function caseB(){
+ const g=stg(),m=me();let h='';
+ h+=`<div class="day">11月9日（月）</div>`;
+ h+=msg('a1','田中','18:40','B社からの要望の要点です。注文一覧にCSV出力を足したい。納期の12/1は変えたくない、とのこと。');
+ h+=msg('a2','田中','18:42','<span class="at">@濱田</span> さん、方針は明日の夕方に相談させてください。');
+ if(g>=1){
+  h+=`<div class="day">11月10日（火）</div>`;
+  h+=msg('b1','田中','9:20','佐藤さん、影響どう見ます？');
+  h+=msg('b2','佐藤','9:24','CSVだけなら1日。ただ文字コードの指定がないと手戻りしそう。')+rx('👍 1');
+  h+=msg('b3','田中','9:30','<span class="at">@リク</span> 影響範囲と修正案を調べて。文字コードの扱いも。');
+  const n=g===1?3:g===2?4:5,stt=g===1?'<span class="s wk">リク 作業中</span>':'<span class="s">· 完了 10:58 · 影響は3か所、修正案は2つ</span>';
+  h+=msg('b4','リク','9:30',`<button class="rr" data-rng="1">昨日18:40〜今日9:30の5件を読みました</button><br>調べます。続きはスレッドで進めます。<br><button class="thl" data-pane="thread">返信${n}件 ${stt}</button>`);
+ }
+ if(g>=3){
+  if(g===3&&m==='濱田') h+=`<div class="unread">ここから未読</div>`;
+  h+=`<div class="ho"><span class="mini">田</span><div style="flex:1"><div style="display:flex;align-items:center;gap:10px"><span><b>田中 → 濱田</b>　仕様変更の件</span><a class="lk" href="#" data-hl="a1" style="margin-left:auto">経緯を見る</a>${st.rcv?'<span class="mono" style="font-size:11px;color:var(--sub)">受領 · 濱田 15:03</span>':'<span class="un">未受領</span><button class="rcv" id="rcv">受けました</button>'}</div>
+  <div class="mono" style="font-size:12px;color:var(--ink);margin-top:4px">納期の決定：濱田（代表）</div>
+  <div class="hop"><b>A</b>　範囲を絞って12/1（CSVだけ。約1日）<a class="lk" href="#" data-hl="b4">根拠</a></div>
+  <div class="hop"><b>B</b>　絞り込みも含めて12/3に延ばす（+2日）<a class="lk" href="#" data-hl="b2">根拠</a></div></div></div>`;
+  h+=msg('h1','田中','15:00','打ち合わせに入るので、この件 <span class="at">@濱田</span> さんに渡します。上の2案から方針だけ決めてください。');
+  if(m==='濱田'){
+   h+=msg('h2','濱田','15:04','<span class="at">@リク</span> ここまでの経緯を3行で。');
+   h+=`<div class="m me-only" data-id="h2r">${av('リク')}<div style="flex:1"><div class="lb">あなただけに表示</div>${nm('リク','15:04')}<div>①B社がCSV出力を要望、納期12/1は固定希望 ②文字コードはBOM付きUTF-8で確定 ③田中さんの案はA（範囲を絞って12/1）とB（12/3に延ばす）の2つです</div></div></div>`;
+  }
+  if(st.rcv||g>=4) h+=msg('h3','濱田','15:12','Aで進めます。範囲を絞って12/1、絞り込みは次回にまわします。')+(st.dec?dec('濱田','15:12'):`<div style="margin:-12px 0 0 46px"><button class="mk" id="mk">◆ 決定にする</button><span class="mem" style="margin-left:8px">自分の発言に付けられます</span></div>`);
+ }
+ if(g>=4){
+  h+=msg('h4','濱田','15:14','<span class="at">@ハル</span> この方針をB社に伝えるメールを作って。');
+  const mail=`<div class="card"><div class="lab">社外への送信 · 濱田さんの確認待ち</div><div class="q">B社ご担当様にメールを送りますか</div>
+   <div class="mail"><div class="h">宛先：B社 ご担当 様（例） <span class="ad">csv-support@b-sha.example</span></div><div class="h">件名：CSV出力の対応方針について</div><div class="h">根拠：<a class="dl" href="#" data-hl="h3">◆ 決定 · 濱田 15:12</a></div><div class="mb2">いつもお世話になっております。ご依頼のCSV出力は、納期12/1のまま対応いたします。文字コードはUTF-8（BOM付き）です。今回の対象はCSV出力です。絞り込み対応は今回の対象に含みません。</div></div>
+   <div class="rw"><button class="go" id="send">送る</button><button class="fx">直す</button><span class="lock">🔒 社外への送信は毎回確認・「送る」を押すと、濱田さんの送信承認として記録されます</span></div></div>`;
+  h+=msg('h5','ハル','15:16','作りました。社外に送るので、内容を確認してください。'+(st.sent?`<div class="done">濱田 15:20 送信 · 顧客回答待ち</div>`:mail));
+ }
+ if(g>=5){
+  h+=`<div class="day">11月11日（水）</div><div class="unread">ここから未読</div>`;
+  h+=msg('r9','リク','2:10','<span class="at">@佐藤</span> さん、CSV出力の実装が終わりました。レビューをお願いします。残りはレビューとB社への納品連絡です。');
+ }
+ if(g>=6){
+  h+=msg('r10','佐藤','9:20','レビューしました。問題ありません。');
+  h+=msg('r11','リク','9:24','テストもすべて通りました。<span class="at">@田中</span> さん、B社への納品連絡をお願いします。');
+ }
+ return hdr('# 案件B','田中・佐藤・濱田・リク ほか')+`<div class="body" id="mb"><div class="col">${h}</div></div><div class="comp"><div># 案件B にメッセージ</div></div>`;
+}
+/* ---------- thread / desk ---------- */
+function pane(){
+ const g=stg();
+ if(st.pane==='desk'){const done=g>=2;
+  return `<div class="t pn"><div class="hd"><span class="mini ai">リ</span><h2>リクの作業</h2><button class="x" data-pane="thread">スレッドに戻る</button></div>
+ <div class="bd"><div><div class="cap">手順 ${done?6:3}/6・${done?'完了':'コードを読んでいます'}</div><div class="ring">${[0,1,2,3,4,5].map(i=>`<i class="${i<(done?6:3)?'on':''}"></i>`).join('')}</div></div>
+ <div class="src">依頼元：# 案件B · 田中 9:30 ／ 読んだ範囲：5件</div>
+ <div><div class="lg"><span>9:31</span><span>リポジトリ b-portal を取得</span></div><div class="lg"><span>9:40</span><span>注文一覧APIの呼び出し元を検索（12か所）</span></div><div class="lg"><span>9:52</span><span>10月の打ち合わせメモを確認</span></div>${done?'<div class="lg"><span>10:30</span><span>影響箇所を3つに分類</span></div><div class="lg"><span>10:55</span><span>修正案を2つ作成</span></div><div class="lg"><span>10:58</span><span>スレッドに報告</span></div>':''}</div>
+ <div class="mem">作業の途中経過は会話には出しません。</div></div></div>`;}
+ let h=msg('t1','リク','9:30','<span class="rr">5件を読みました</span><br>調べます。続きはスレッドで進めます。');
+ h+=msg('t2','リク','9:36','文字コードの指定が見つかりません。10月の打ち合わせメモに「Excelで開きたい」とあります。B社に確認しますか、社内で決めますか。');
+ h+=msg('t3','田中','9:38','Excelで開けるように、UTF-8のBOM付きで進めて。B社には私から念のため確認します。');
+ h+=msg('t4','リク','9:38','了解です。BOM付きUTF-8の前提で進めます。');
+ if(g>=2) h+=msg('t6','リク','10:58',`影響は3か所です。<div class="res"><ul><li>注文一覧API（出力形式の追加）</li><li>注文一覧画面（ボタンの追加）</li><li>既存の絞り込み条件（CSVに反映するかどうか）</li></ul><div style="margin-top:6px"><b>修正案1</b>：CSVだけ追加。約1日で12/1に間に合います。<br><b>修正案2</b>：絞り込みもCSVに反映。+2日で12/3の見込みです。</div></div>`);
+ if(g>=3) h+=msg('t5','田中','13:20','B社から返事。UTF-8のBOM付きでOKとのこと。')+`<div style="margin:-12px 0 0 46px" class="mono"><span style="font-size:12px;color:var(--sub)">顧客回答 · 田中 ／ 根拠：B社からのメール（11/8）</span></div>`;
+ const n=g===1?3:g===2?4:5;
+ return `<div class="t pn"><div class="hd"><h2>スレッド</h2><span class="mem"># 案件B · 返信${n}件</span><button class="x" data-pane="">閉じる</button></div>
+ <div class="bd" id="tb">${h}${g===1?'<div class="wk" style="font-size:13px;color:var(--acc)">リク 作業中<button class="see" data-pane="desk">作業を見る</button></div>':'<div style="font-size:13px;color:var(--sub)">✓ リク 完了 10:58<button class="see" data-pane="desk">作業を見る</button></div>'}</div>
+ <div class="tcomp"><input id="draft" value="${me()==='佐藤'&&g===2?st.draft:''}" placeholder="スレッドに返信"></div></div>`;
+}
+/* ---------- chat / dm ---------- */
+function chat(){
+ let h=`<div class="day">11月10日（火）</div>`+msg('c1','田中','12:02','年末のオンライン忘年会、12/18（金）でどうですか？')+rx('👍 4')+msg('c2','佐藤','12:05','いいですね！')+msg('c3','濱田','12:10','<span class="at">@ユイ</span> 去年の忘年会っていつだった？')+msg('c4','ユイ','12:10','12月20日（金）です。# 雑談の昨年12/2の投稿にありました。');
+ return hdr('# 雑談','全員')+`<div class="body"><div class="col">${h}<div class="mem" style="text-align:center">雑談では、AIは呼ばれたときだけその場に短く返します。</div></div></div><div class="comp"><div># 雑談 にメッセージ</div></div>`;
+}
+function dm(){
+ const w=st.dmw,m=me();
+ let h=`<div class="day">11月10日（火）</div>`+msg('d1',m,'12:10',`${w}さん、ちょっと確認したいことがあります。`);
+ const f=w==='佐藤'&&stg()===3?`<div class="focus">佐藤さんは16時まで集中中です。メッセージは届きますが、16時まで通知は鳴りません。</div>`:'';
+ return hdr(w,'DM')+`<div class="body"><div class="col">${h}</div></div><div class="comp">${f}<div>${w} にメッセージ</div></div>`;
+}
+/* ---------- render ---------- */
+function render(){
+ const tb=document.getElementById('tb');if(tb)st.tsc=tb.scrollTop;
+ let main,v=st.alt||(st.jump?'case':sc().v);
+ main=v==='chat'?chat():v==='dm'?dm():v==='today'?today():caseB();
+ const showPane=v==='case'&&st.pane&&stg()>=1;
+ document.getElementById('app').innerHTML=`<div class="app ${showPane?'pane':''}">${rail()}<div class="t main">${main}</div>${showPane?pane():''}</div>`;
+ const q=(x,f)=>document.querySelectorAll(x).forEach(e=>e.onclick=f);
+ const go=i=>{st.s=i;st.alt=null;st.jump=null;st.hl=null;st.rng=false;const g=S[i].stg;st.pane=(g===1||g===2)?'thread':null;st.rcv=g>=3&&i>3;st.dec=i>=4;st.sent=i>=5;render();};
+ q('#nx',()=>go(st.s+1));q('#pv',()=>go(st.s-1));
+ q('[data-pane]',e=>{e.stopPropagation();st.pane=e.currentTarget.dataset.pane||null;render()});
+ q('[data-alt]',e=>{st.alt=e.currentTarget.dataset.alt;render()});
+ q('[data-dm]',e=>{st.alt='dm';st.dmw=e.currentTarget.dataset.dm;render()});
+ q('[data-today]',()=>{st.alt='today';render()});
+ q('[data-case]',()=>{st.alt=null;if(sc().v==='today'&&!st.jump)st.jump={stg:sc().stg,me:sc().me,t:sc().t};render()});
+ q('#send',()=>{st.sent=true;render()});
+ q('#rcv',()=>{st.rcv=true;render()});
+ q('#mk',()=>{st.dec=true;st.hl='h3';render()});
+ q('[data-rng]',()=>{st.rng=!st.rng;render()});
+ q('[data-go]',e=>{const d=JSON.parse(e.currentTarget.dataset.go);if(!d)return;st.alt=null;st.jump=d;st.pane=d.pane||null;st.hl=d.hl;st.back=d.back||0;render()});
+ q('[data-hl]',e=>{e.preventDefault();e.stopPropagation();st.hl=e.currentTarget.dataset.hl;st.back=0;flash()});
+ const d=document.getElementById('draft');if(d)d.oninput=()=>{st.draft=d.value};
+ const t2=document.getElementById('tb');if(t2)t2.scrollTop=st.tsc;
+ if(st.rng)['a1','a2','b1','b2','b3'].forEach(i=>{const x=document.querySelector(`#mb [data-id=${i}]`);if(x)x.classList.add('rng')});
+ if(st.hl)flash(); else if(stg()===4&&!st.alt){setTimeout(()=>{const b=document.getElementById('mb');if(b)b.scrollTop=b.scrollHeight;},300);} else {const u=document.querySelector('#mb .unread');if(u)u.scrollIntoView({block:'start'});}
+}
+function flash(){
+ const all=[...document.querySelectorAll('[data-id]')];const i=all.findIndex(x=>x.dataset.id===st.hl);if(i<0)return;
+ const el=all[i];(all[Math.max(0,i-(st.back||0))]).scrollIntoView({block:'start'});
+ el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash');st.hl=null;
+}
+if((sc().stg===1||sc().stg===2)&&st.pane==null)st.pane='thread';
+render();
+</script></body></html>
