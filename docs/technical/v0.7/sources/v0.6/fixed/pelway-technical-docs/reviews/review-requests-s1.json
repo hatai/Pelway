@@ -1,0 +1,14 @@
+{
+  "checked_jst": "2026-11-08T23:20:37.535856",
+  "working_version": "v0.5 draft, not final",
+  "s1": "unresolved; no exception adopted; completion and actual external I/O adoption withheld",
+  "technical_product": "requested via group priority message",
+  "codex_s1": {
+    "status": "started; not read yet",
+    "shell_id": 377685,
+    "pid": 645117,
+    "prompt_sha256": "0fcb8894f6465d6e2590f7f493ab3f71aa6c74df6960e29f474fb82fa9cb8f7e"
+  },
+  "v0.4": "four specialist focused confirmations requested; only to that frozen version",
+  "baseline_originals_match": true
+}

@@ -1,0 +1,9 @@
+{
+  "proposal": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+  "sha256": "125ab191a620506f1515c1d9797324bc208eea54bb7a53941bc828dae33d25bf",
+  "frozen_files_unchanged": 128,
+  "delivered_zip_unchanged": true,
+  "status": "integrated proposal; not approved; actual external I/O disabled",
+  "legal_sources": "PPC relevant sections fetched; MOJ attributed to legal reviewer, not independently rechecked",
+  "self_review": "J2 meaning consistent; no pending reviewer input misreported as received; formal adoption and runtime verification pending"
+}

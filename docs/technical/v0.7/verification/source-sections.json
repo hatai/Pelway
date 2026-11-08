@@ -1,0 +1,702 @@
+[
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "source_line": 1,
+    "heading": "# 01 ローカル構成と責任分界",
+    "target": "body/01-architecture.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "source_line": 5,
+    "heading": "## 全体図",
+    "target": "body/01-architecture.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "source_line": 57,
+    "heading": "## ホストとコンテナ",
+    "target": "body/01-architecture.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "source_line": 70,
+    "heading": "## 仕事の往復",
+    "target": "body/01-architecture.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "source_line": 97,
+    "heading": "## 永続化と正しさ",
+    "target": "body/01-architecture.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 1,
+    "heading": "# 02 技術比較と依存採用案",
+    "target": "body/02-stack-comparison.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 5,
+    "heading": "## ネイティブUI",
+    "target": "body/02-stack-comparison.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 9,
+    "heading": "### 確認日と版",
+    "target": "body/02-stack-comparison.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 24,
+    "heading": "### Slintのライセンス：利用と配布の形ごと（一次資料：[LICENSE.md](https://github.com/slint-ui/slint/blob/master/LICENSE.md)、[Royalty-free License 2.0本文](https://github.com/slint-ui/slint/blob/master/LICENSES/LicenseRef-Slint-Royalty-free-2.0.md)、[FAQ](https://github.com/slint-ui/slint/blob/master/FAQ.md)。masterブランチの条文、2026-11-08確認。リリース版v1.18.1に同梱の条文と同じかは未確認）",
+    "target": "body/02-stack-comparison.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 37,
+    "heading": "### チャット要件での評価",
+    "target": "body/02-stack-comparison.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 50,
+    "heading": "## ブラウザ版と共通核",
+    "target": "body/02-stack-comparison.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 61,
+    "heading": "### 二重UI実装の部分工数",
+    "target": "body/02-stack-comparison.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 82,
+    "heading": "## サーバー・AI層の比較",
+    "target": "body/02-stack-comparison.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 97,
+    "heading": "## Discordの事例",
+    "target": "body/02-stack-comparison.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 1,
+    "heading": "# 03 Bot実行・権限・承認・隔離",
+    "target": "body/03-ai-bot-runtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 3,
+    "heading": "## 役割と起動",
+    "target": "body/03-ai-bot-runtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 9,
+    "heading": "## 9状態と遷移",
+    "target": "body/03-ai-bot-runtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 58,
+    "heading": "## 開始受理案の採用を止める安全課題 S1",
+    "target": "body/03-ai-bot-runtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 62,
+    "heading": "## 固定承認と外部副作用",
+    "target": "body/03-ai-bot-runtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 77,
+    "heading": "## 実行所有者、再開、引継ぎ、取消",
+    "target": "body/03-ai-bot-runtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 87,
+    "heading": "## 隔離と秘密",
+    "target": "body/03-ai-bot-runtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 102,
+    "heading": "## 監査とローカル推論",
+    "target": "body/03-ai-bot-runtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 108,
+    "heading": "## 「作業を見る」の境界",
+    "target": "body/03-ai-bot-runtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 112,
+    "heading": "## 理由/境界の共通翻訳キー案",
+    "target": "body/03-ai-bot-runtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 127,
+    "heading": "## 論理操作・固定承認・試行の関係",
+    "target": "body/03-ai-bot-runtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 137,
+    "heading": "### 承認版・提供元キーと復旧の追加条件",
+    "target": "body/03-ai-bot-runtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 1,
+    "heading": "# 04 データモデル・API・同期の契約案",
+    "target": "body/04-data-api-realtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 5,
+    "heading": "## 永続データ",
+    "target": "body/04-data-api-realtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 29,
+    "heading": "## API",
+    "target": "body/04-data-api-realtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 52,
+    "heading": "## 順序と再接続",
+    "target": "body/04-data-api-realtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 64,
+    "heading": "## キャッシュと削除",
+    "target": "body/04-data-api-realtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 68,
+    "heading": "## 配置/データ所在の最小境界",
+    "target": "body/04-data-api-realtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 76,
+    "heading": "## 同時更新と成果物の耐久化",
+    "target": "body/04-data-api-realtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 84,
+    "heading": "## 外部イベントの帰属",
+    "target": "body/04-data-api-realtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 90,
+    "heading": "## 操作種類の正規値",
+    "target": "body/04-data-api-realtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 94,
+    "heading": "## 外部I/Oの開始受理と復旧",
+    "target": "body/04-data-api-realtime.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "source_line": 1,
+    "heading": "# 05 3OSのローカル開発・試験・配布設計",
+    "target": "body/05-local-dev.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "source_line": 5,
+    "heading": "## OS別の境界",
+    "target": "body/05-local-dev.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "source_line": 17,
+    "heading": "## WindowsとWSL 2",
+    "target": "body/05-local-dev.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "source_line": 25,
+    "heading": "## macOSとApple container",
+    "target": "body/05-local-dev.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "source_line": 33,
+    "heading": "## Linuxと起動構成",
+    "target": "body/05-local-dev.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "source_line": 43,
+    "heading": "## 試験と配布",
+    "target": "body/05-local-dev.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/06-i18n.md",
+    "source_line": 1,
+    "heading": "# 06 日本語・英語の共通資源",
+    "target": "body/06-i18n.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/06-i18n.md",
+    "source_line": 7,
+    "heading": "## 表示と入力の規則",
+    "target": "body/06-i18n.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/06-i18n.md",
+    "source_line": 18,
+    "heading": "## 配布前の試験条件",
+    "target": "body/06-i18n.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/06-i18n.md",
+    "source_line": 24,
+    "heading": "## 状態の理由と責任分界の翻訳",
+    "target": "body/06-i18n.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "source_line": 1,
+    "heading": "# 07 性能・メモリ・入力品質の評価計画",
+    "target": "body/07-performance-plan.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "source_line": 5,
+    "heading": "## 比較の順番",
+    "target": "body/07-performance-plan.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "source_line": 9,
+    "heading": "## 負荷と記録",
+    "target": "body/07-performance-plan.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "source_line": 20,
+    "heading": "## 指標と合格基準案",
+    "target": "body/07-performance-plan.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "source_line": 38,
+    "heading": "## 工数と試験段階",
+    "target": "body/07-performance-plan.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 1,
+    "heading": "# 08 採用案・差分・未決事項",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 5,
+    "heading": "## 判断記録案",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 22,
+    "heading": "## 既存計画との差分",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 35,
+    "heading": "## 実装前の判断と残課題",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 45,
+    "heading": "## レビューと完成判定",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 53,
+    "heading": "## 試験の追跡表（いずれも未実施）",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 78,
+    "heading": "## 外部レビューで明確化した実装前の判断",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 89,
+    "heading": "## 安全ゲート・障害注入の追跡",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 109,
+    "heading": "### 入力T6との明示的な追加差分",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 115,
+    "heading": "### v0.2外部レビューの追加修正",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 119,
+    "heading": "## 安全課題 S1：開始受理後・外部呼出前の取消窓（採用保留）",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 123,
+    "heading": "### S1の統合判断表（案A〜CとJ1〜J3）",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 133,
+    "heading": "### S1提案からそのまま採らない点",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 140,
+    "heading": "### S1提案の代替・予備条件の採否",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 147,
+    "heading": "### 実外部I/Oを有効にする前の必須条件（未達）",
+    "target": "body/08-decisions-open.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "source_line": 1,
+    "heading": "# 09 根拠と確認範囲",
+    "target": "body/09-sources.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "source_line": 5,
+    "heading": "## 詳細な出典台帳",
+    "target": "body/09-sources.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "source_line": 12,
+    "heading": "## 主な一次資料",
+    "target": "body/09-sources.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "source_line": 26,
+    "heading": "## Discord情報の扱い",
+    "target": "body/09-sources.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "source_line": 34,
+    "heading": "## 直接依存と許諾の対応（M-03）",
+    "target": "body/09-sources.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "source_line": 59,
+    "heading": "## レビューへ提示する証拠の範囲",
+    "target": "body/09-sources.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 1,
+    "heading": "# 10 Pelway本体の国内限定と外部連携の責任分界",
+    "target": "body/10-domestic-only.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 3,
+    "heading": "## 最新要件と保証範囲",
+    "target": "body/10-domestic-only.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 11,
+    "heading": "## 場所・経路の台帳",
+    "target": "body/10-domestic-only.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 31,
+    "heading": "## 通信policyを二つに分ける",
+    "target": "body/10-domestic-only.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 43,
+    "heading": "## 構築時と実行時",
+    "target": "body/10-domestic-only.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 49,
+    "heading": "## 試験条件案",
+    "target": "body/10-domestic-only.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 70,
+    "heading": "## 将来の地域への境界だけ残す",
+    "target": "body/10-domestic-only.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 77,
+    "heading": "### 実送出の有効化と設定上の同意の区別",
+    "target": "body/10-domestic-only.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 1,
+    "heading": "# 11 AIネイティブ連携の共通契約",
+    "target": "body/11-integrations.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 5,
+    "heading": "## 共通の単位",
+    "target": "body/11-integrations.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 13,
+    "heading": "## IntegrationPortの能力",
+    "target": "body/11-integrations.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 33,
+    "heading": "## 接続手段の選び方",
+    "target": "body/11-integrations.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 47,
+    "heading": "## 公式手段の確認例",
+    "target": "body/11-integrations.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 60,
+    "heading": "## 受信、再接続、重複、取消",
+    "target": "body/11-integrations.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 72,
+    "heading": "## 業務状態と外部実行の対応（追加提案・要確認）",
+    "target": "body/11-integrations.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 89,
+    "heading": "## 表示契約",
+    "target": "body/11-integrations.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 102,
+    "heading": "## 外部agentの権限を過信しない",
+    "target": "body/11-integrations.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 108,
+    "heading": "## 三つの往復例",
+    "target": "body/11-integrations.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 114,
+    "heading": "## 今と後の範囲",
+    "target": "body/11-integrations.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 122,
+    "heading": "## 入力一式・実行区画・資格情報の制約",
+    "target": "body/11-integrations.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 132,
+    "heading": "## 取消後の限定確認",
+    "target": "body/11-integrations.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 139,
+    "heading": "### 実送出の有効化と設定上の同意の区別",
+    "target": "body/11-integrations.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/README.md",
+    "source_line": 1,
+    "heading": "# Pelway技術設計 v0.6固定候補（安全課題S1の判断待ち）：ローカル構成",
+    "target": "body/README.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/README.md",
+    "source_line": 5,
+    "heading": "## 推奨構成",
+    "target": "body/README.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/README.md",
+    "source_line": 22,
+    "heading": "## 国内限定と利用者が選ぶ外部連携",
+    "target": "body/README.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/README.md",
+    "source_line": 30,
+    "heading": "## 配置方針と範囲",
+    "target": "body/README.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/README.md",
+    "source_line": 36,
+    "heading": "## 読む順",
+    "target": "body/README.md",
+    "disposition": "pending_semantic_integration"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/README.md",
+    "source_line": 55,
+    "heading": "### この固定候補の読み方",
+    "target": "body/README.md",
+    "disposition": "pending_semantic_integration"
+  }
+]

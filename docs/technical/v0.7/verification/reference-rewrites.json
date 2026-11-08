@@ -1,0 +1,152 @@
+[
+  {
+    "file": "11-integrations.md",
+    "url": "research/existing-chat-and-agent-oss.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md"
+  },
+  {
+    "file": "11-integrations.md",
+    "url": "input/ui.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/input/ui.md"
+  },
+  {
+    "file": "11-integrations.md",
+    "url": "reviews/ui-v0.3.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/reviews/ui-v0.3.md"
+  },
+  {
+    "file": "13-operational-defaults.md",
+    "url": "secrecy-addendum-v0.2.md",
+    "target": "12-communication-secrecy.md"
+  },
+  {
+    "file": "13-operational-defaults.md",
+    "url": "user-decision-2026-11-09.md",
+    "target": "../sources/addenda/2026-11-09-secrecy/user-decision-2026-11-09.md"
+  },
+  {
+    "file": "13-operational-defaults.md",
+    "url": "../2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "03-ai-bot-runtime.md"
+  },
+  {
+    "file": "13-operational-defaults.md",
+    "url": "operational-defaults-disposition-v0.1.md",
+    "target": "../sources/addenda/2026-11-09-secrecy/operational-defaults-disposition-v0.1.md"
+  },
+  {
+    "file": "13-operational-defaults.md",
+    "url": "operational-defaults-legal-evidence-v0.1.md",
+    "target": "../sources/addenda/2026-11-09-secrecy/operational-defaults-legal-evidence-v0.1.md"
+  },
+  {
+    "file": "12-communication-secrecy.md",
+    "url": "../2026-11-09-best-effort-cancel/secrecy-design-review-2026-11-09.md",
+    "target": "../sources/addenda/2026-11-09-best-effort-cancel/secrecy-design-review-2026-11-09.md"
+  },
+  {
+    "file": "12-communication-secrecy.md",
+    "url": "../2026-11-09-best-effort-cancel/legal-review-2026-11-09.md",
+    "target": "../sources/addenda/2026-11-09-best-effort-cancel/legal-review-2026-11-09.md"
+  },
+  {
+    "file": "02-stack-comparison.md",
+    "url": "input/ui.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/input/ui.md"
+  },
+  {
+    "file": "02-stack-comparison.md",
+    "url": "reviews/technical-license-ledger-v0.1.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/reviews/technical-license-ledger-v0.1.md"
+  },
+  {
+    "file": "02-stack-comparison.md",
+    "url": "research/existing-chat-and-agent-oss.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md"
+  },
+  {
+    "file": "04-data-api-realtime.md",
+    "url": "research/existing-chat-and-agent-oss.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md"
+  },
+  {
+    "file": "08-decisions-open.md",
+    "url": "../pelway-milestones/long-term-milestones.md",
+    "target": "../sources/v0.6/fixed/pelway-milestones/long-term-milestones.md"
+  },
+  {
+    "file": "08-decisions-open.md",
+    "url": "../pelway-milestones/mid-term-milestones.md",
+    "target": "../sources/v0.6/fixed/pelway-milestones/mid-term-milestones.md"
+  },
+  {
+    "file": "08-decisions-open.md",
+    "url": "../pelway-milestones/short-term-milestones.md",
+    "target": "../sources/v0.6/fixed/pelway-milestones/short-term-milestones.md"
+  },
+  {
+    "file": "08-decisions-open.md",
+    "url": "references/plan-gates.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/references/plan-gates.md"
+  },
+  {
+    "file": "03-ai-bot-runtime.md",
+    "url": "reviews/product-v0.2.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/reviews/product-v0.2.md"
+  },
+  {
+    "file": "09-sources.md",
+    "url": "research/existing-chat-and-agent-oss.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md"
+  },
+  {
+    "file": "09-sources.md",
+    "url": "input/ui.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/input/ui.md"
+  },
+  {
+    "file": "09-sources.md",
+    "url": "input/technical.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/input/technical.md"
+  },
+  {
+    "file": "09-sources.md",
+    "url": "input/technical-draft/README.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/input/technical-draft/README.md"
+  },
+  {
+    "file": "09-sources.md",
+    "url": "input/product.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/input/product.md"
+  },
+  {
+    "file": "09-sources.md",
+    "url": "research/existing-chat-and-agent-oss.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md"
+  },
+  {
+    "file": "09-sources.md",
+    "url": "reviews/market-v0.1.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/reviews/market-v0.1.md"
+  },
+  {
+    "file": "09-sources.md",
+    "url": "reviews/technical-license-ledger-v0.1.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/reviews/technical-license-ledger-v0.1.md"
+  },
+  {
+    "file": "09-sources.md",
+    "url": "reviews/discord-primary-post-evidence.txt",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/reviews/discord-primary-post-evidence.txt"
+  },
+  {
+    "file": "09-sources.md",
+    "url": "reviews/market-v0.1.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/reviews/market-v0.1.md"
+  },
+  {
+    "file": "09-sources.md",
+    "url": "reviews/technical-license-ledger-v0.1.md",
+    "target": "../sources/v0.6/fixed/pelway-technical-docs/reviews/technical-license-ledger-v0.1.md"
+  }
+]

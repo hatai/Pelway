@@ -1,0 +1,83 @@
+{
+  "v0.1_canonical": {
+    "count": 12,
+    "mismatches": []
+  },
+  "v0.2_canonical": {
+    "count": 12,
+    "mismatches": []
+  },
+  "v0.2_dependencies": {
+    "count": 74,
+    "navigation": 4,
+    "mismatches": []
+  },
+  "v0.3_canonical": {
+    "count": 12,
+    "mismatches": []
+  },
+  "v0.3_dependencies": {
+    "count": 78,
+    "navigation": 4,
+    "mismatches": []
+  },
+  "v0.4_canonical": {
+    "count": 12,
+    "mismatches": []
+  },
+  "v0.4_dependencies": {
+    "count": 87,
+    "navigation": 4,
+    "mismatches": []
+  },
+  "v0.5_canonical": {
+    "count": 12,
+    "mismatches": []
+  },
+  "v0.5_dependencies": {
+    "count": 102,
+    "navigation": 4,
+    "mismatches": []
+  },
+  "v0.6_canonical": {
+    "count": 12,
+    "mismatches": []
+  },
+  "v0.6_dependencies": {
+    "count": 112,
+    "navigation": 4,
+    "mismatches": []
+  },
+  "protected_originals": {
+    "count": 15,
+    "mismatches": []
+  },
+  "delivery_fixed_copy": {
+    "mismatches": []
+  },
+  "v0.5_to_v0.6_changed_canonical": [
+    "README.md",
+    "03-ai-bot-runtime.md",
+    "08-decisions-open.md"
+  ],
+  "internal_links": {
+    "checked": 166,
+    "missing": [],
+    "anchor_checks": [
+      {
+        "source": "fixed/pelway-public-docs/publish/docs/brand-ui.md",
+        "target": "competitors.md#名称衝突",
+        "exact_heading_found": true
+      }
+    ]
+  },
+  "boundary_desc_exact_match": true,
+  "not_performed": [
+    "runtime/real external I/O",
+    "S1 resolution",
+    "actual OS tests",
+    "domestic compliance",
+    "legal or license approval"
+  ],
+  "passed": true
+}

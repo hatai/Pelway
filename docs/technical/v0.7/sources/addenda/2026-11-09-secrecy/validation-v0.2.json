@@ -1,0 +1,52 @@
+{
+  "state": "document integrated and static checks complete; policy adoption/legal application/runtime tests pending",
+  "protected_files_unchanged": 283,
+  "relative_links_resolved": [
+    [
+      "secrecy-addendum-v0.2.md",
+      "disposition-v0.2.md"
+    ],
+    [
+      "secrecy-addendum-v0.2.md",
+      "../2026-11-09-best-effort-cancel/proposal-v0.3.md"
+    ],
+    [
+      "secrecy-addendum-v0.2.md",
+      "../../delivery-v0.6/README.md"
+    ],
+    [
+      "secrecy-addendum-v0.2.md",
+      "../../delivery-v0.6/final-confirmation.md"
+    ],
+    [
+      "secrecy-addendum-v0.2.md",
+      "../2026-11-09-best-effort-cancel/secrecy-design-review-2026-11-09.md"
+    ],
+    [
+      "secrecy-addendum-v0.2.md",
+      "../2026-11-09-best-effort-cancel/legal-review-2026-11-09.md"
+    ]
+  ],
+  "document_requirement_checks": {
+    "separate_v02": true,
+    "initial_function_confirmation_table": true,
+    "incident_routes": true,
+    "post_cancellation_not_legal_waiver": true,
+    "unknown_result_owner_pending": true,
+    "overseas_unknown_country_not_blanket_block": true,
+    "no_emergency_body_without_reviewer": true,
+    "scope_of_delete_confirmation": true,
+    "statutory_records_preserved": true,
+    "pending_decisions_explicit": true
+  },
+  "acceptance_cases_defined_not_executed": 20,
+  "judgments_pending": 7,
+  "implementation_or_external_IO_performed": false,
+  "new_document_sha256": {
+    "secrecy-addendum-v0.2.md": "0af16b0615309fed520eeaa45724ae59a1e5ea1f4ebe71ef11098a336628f5ec",
+    "disposition-v0.2.md": "329e245199b0e2c9c33313847e3c6a9aabfa5286269c2895f5d33f971146d62b"
+  },
+  "additional_input_sha256": {
+    "../../reviews/ui-secrecy-input-2026-11-09.md": "11c37623544ccbc2f6c80830450c7d2788a5c10520b8c8cfccfc42d895c65f50"
+  }
+}

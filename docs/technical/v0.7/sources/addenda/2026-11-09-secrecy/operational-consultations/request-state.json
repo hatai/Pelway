@@ -1,0 +1,22 @@
+{
+  "state": "completed_answers_read_and_disposition_recorded",
+  "runtime_tests": "not_run",
+  "reviews": {
+    "codex-operations-v0.1.md": {
+      "bytes": 7054,
+      "sha256": "c9fa5d3e5532aadfa9d49db50fa2881158e8070cf6ef9089db7833a48b178a3f"
+    },
+    "claude-operations-v0.1.md": {
+      "bytes": 7395,
+      "sha256": "f5d9afeeca168c199b926370f41560f89b593c68f8f83a813d54b572c39f0ce7"
+    },
+    "codex-final-delta-v0.1.md": {
+      "bytes": 371,
+      "sha256": "1ef45487207d6a7ab61e450ce227cfb936e23307ad00f87062df1e04198c2811"
+    },
+    "claude-final-delta-v0.1.md": {
+      "bytes": 3683,
+      "sha256": "200d0f6ac3b1dd47bfe24ae5bb20cc625dab0910448b536856909fe87fe0464e"
+    }
+  }
+}

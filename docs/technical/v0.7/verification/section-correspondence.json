@@ -1,0 +1,1442 @@
+[
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "source_line": 1,
+    "source_heading": "# 01 ローカル構成と責任分界",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "target": "body/01-architecture.md#ch01-s01",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "source_line": 5,
+    "source_heading": "## 全体図",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "target": "body/01-architecture.md#ch01-s02",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "source_line": 57,
+    "source_heading": "## ホストとコンテナ",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "target": "body/01-architecture.md#ch01-s03",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "source_line": 70,
+    "source_heading": "## 仕事の往復",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "target": "body/01-architecture.md#ch01-s04",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "source_line": 97,
+    "source_heading": "## 永続化と正しさ",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/01-architecture.md",
+    "target": "body/01-architecture.md#ch01-s05",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 1,
+    "source_heading": "# 02 技術比較と依存採用案",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "target": "body/02-stack-comparison.md#ch02-s01",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 5,
+    "source_heading": "## ネイティブUI",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "target": "body/02-stack-comparison.md#ch02-s02",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 9,
+    "source_heading": "### 確認日と版",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "target": "body/02-stack-comparison.md#ch02-s03",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 24,
+    "source_heading": "### Slintのライセンス：利用と配布の形ごと（一次資料：[LICENSE.md](https://github.com/slint-ui/slint/blob/master/LICENSE.md)、[Royalty-free License 2.0本文](https://github.com/slint-ui/slint/blob/master/LICENSES/LicenseRef-Slint-Royalty-free-2.0.md)、[FAQ](https://github.com/slint-ui/slint/blob/master/FAQ.md)。masterブランチの条文、2026-11-08確認。リリース版v1.18.1に同梱の条文と同じかは未確認）",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "target": "body/02-stack-comparison.md#ch02-s04",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 37,
+    "source_heading": "### チャット要件での評価",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "target": "body/02-stack-comparison.md#ch02-s05",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 50,
+    "source_heading": "## ブラウザ版と共通核",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "target": "body/02-stack-comparison.md#ch02-s06",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 61,
+    "source_heading": "### 二重UI実装の部分工数",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "target": "body/02-stack-comparison.md#ch02-s07",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 82,
+    "source_heading": "## サーバー・AI層の比較",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "target": "body/02-stack-comparison.md#ch02-s08",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "source_line": 97,
+    "source_heading": "## Discordの事例",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md",
+    "target": "body/02-stack-comparison.md#ch02-s09",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 1,
+    "source_heading": "# 03 Bot実行・権限・承認・隔離",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s01",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 3,
+    "source_heading": "## 役割と起動",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s02",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 9,
+    "source_heading": "## 9状態と遷移",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s03",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 58,
+    "source_heading": "## 開始受理案の採用を止める安全課題 S1",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s04",
+    "disposition": "置換",
+    "reason": "旧節を現行の採用済み方針へ置換。過去の規則はsourcesだけに保持"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 62,
+    "source_heading": "## 固定承認と外部副作用",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s05",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 77,
+    "source_heading": "## 実行所有者、再開、引継ぎ、取消",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s06",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 87,
+    "source_heading": "## 隔離と秘密",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s07",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 102,
+    "source_heading": "## 監査とローカル推論",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s08",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 108,
+    "source_heading": "## 「作業を見る」の境界",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s09",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 112,
+    "source_heading": "## 理由/境界の共通翻訳キー案",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s10",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 127,
+    "source_heading": "## 論理操作・固定承認・試行の関係",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s11",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "source_line": 137,
+    "source_heading": "### 承認版・提供元キーと復旧の追加条件",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s12",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 1,
+    "source_heading": "# 04 データモデル・API・同期の契約案",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "target": "body/04-data-api-realtime.md#ch04-s01",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 5,
+    "source_heading": "## 永続データ",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "target": "body/04-data-api-realtime.md#ch04-s02",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 29,
+    "source_heading": "## API",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "target": "body/04-data-api-realtime.md#ch04-s03",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 52,
+    "source_heading": "## 順序と再接続",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "target": "body/04-data-api-realtime.md#ch04-s04",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 64,
+    "source_heading": "## キャッシュと削除",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "target": "body/04-data-api-realtime.md#ch04-s05",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 68,
+    "source_heading": "## 配置/データ所在の最小境界",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "target": "body/04-data-api-realtime.md#ch04-s06",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 76,
+    "source_heading": "## 同時更新と成果物の耐久化",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "target": "body/04-data-api-realtime.md#ch04-s07",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 84,
+    "source_heading": "## 外部イベントの帰属",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "target": "body/04-data-api-realtime.md#ch04-s08",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 90,
+    "source_heading": "## 操作種類の正規値",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "target": "body/04-data-api-realtime.md#ch04-s09",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "source_line": 94,
+    "source_heading": "## 外部I/Oの開始受理と復旧",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md",
+    "target": "body/04-data-api-realtime.md#ch04-s10",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "source_line": 1,
+    "source_heading": "# 05 3OSのローカル開発・試験・配布設計",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "target": "body/05-local-dev.md#ch05-s01",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "source_line": 5,
+    "source_heading": "## OS別の境界",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "target": "body/05-local-dev.md#ch05-s02",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "source_line": 17,
+    "source_heading": "## WindowsとWSL 2",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "target": "body/05-local-dev.md#ch05-s03",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "source_line": 25,
+    "source_heading": "## macOSとApple container",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "target": "body/05-local-dev.md#ch05-s04",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "source_line": 33,
+    "source_heading": "## Linuxと起動構成",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "target": "body/05-local-dev.md#ch05-s05",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "source_line": 43,
+    "source_heading": "## 試験と配布",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/05-local-dev.md",
+    "target": "body/05-local-dev.md#ch05-s06",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/06-i18n.md",
+    "source_line": 1,
+    "source_heading": "# 06 日本語・英語の共通資源",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/06-i18n.md",
+    "target": "body/06-i18n.md#ch06-s01",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/06-i18n.md",
+    "source_line": 7,
+    "source_heading": "## 表示と入力の規則",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/06-i18n.md",
+    "target": "body/06-i18n.md#ch06-s02",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/06-i18n.md",
+    "source_line": 18,
+    "source_heading": "## 配布前の試験条件",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/06-i18n.md",
+    "target": "body/06-i18n.md#ch06-s03",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/06-i18n.md",
+    "source_line": 24,
+    "source_heading": "## 状態の理由と責任分界の翻訳",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/06-i18n.md",
+    "target": "body/06-i18n.md#ch06-s04",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "source_line": 1,
+    "source_heading": "# 07 性能・メモリ・入力品質の評価計画",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "target": "body/07-performance-plan.md#ch07-s01",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "source_line": 5,
+    "source_heading": "## 比較の順番",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "target": "body/07-performance-plan.md#ch07-s02",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "source_line": 9,
+    "source_heading": "## 負荷と記録",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "target": "body/07-performance-plan.md#ch07-s03",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "source_line": 20,
+    "source_heading": "## 指標と合格基準案",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "target": "body/07-performance-plan.md#ch07-s04",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "source_line": 38,
+    "source_heading": "## 工数と試験段階",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/07-performance-plan.md",
+    "target": "body/07-performance-plan.md#ch07-s05",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 1,
+    "source_heading": "# 08 採用案・差分・未決事項",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#ch08-s01",
+    "disposition": "置換",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 5,
+    "source_heading": "## 判断記録案",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#ch08-s05",
+    "disposition": "変更",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 22,
+    "source_heading": "## 既存計画との差分",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#ch08-s02",
+    "disposition": "置換",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 35,
+    "source_heading": "## 実装前の判断と残課題",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#ch08-s03",
+    "disposition": "置換",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 45,
+    "source_heading": "## レビューと完成判定",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#ch08-s04",
+    "disposition": "置換",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 53,
+    "source_heading": "## 試験の追跡表（いずれも未実施）",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#ch08-s06",
+    "disposition": "変更",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 78,
+    "source_heading": "## 外部レビューで明確化した実装前の判断",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#ch08-s03",
+    "disposition": "置換",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 89,
+    "source_heading": "## 安全ゲート・障害注入の追跡",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#ch08-s07",
+    "disposition": "変更",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 109,
+    "source_heading": "### 入力T6との明示的な追加差分",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#u06",
+    "disposition": "置換",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 115,
+    "source_heading": "### v0.2外部レビューの追加修正",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#ch08-s03",
+    "disposition": "置換",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 119,
+    "source_heading": "## 安全課題 S1：開始受理後・外部呼出前の取消窓（採用保留）",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#u01",
+    "disposition": "置換",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 123,
+    "source_heading": "### S1の統合判断表（案A〜CとJ1〜J3）",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#u01",
+    "disposition": "置換",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 133,
+    "source_heading": "### S1提案からそのまま採らない点",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#u01",
+    "disposition": "置換",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 140,
+    "source_heading": "### S1提案の代替・予備条件の採否",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#u01",
+    "disposition": "置換",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "source_line": 147,
+    "source_heading": "### 実外部I/Oを有効にする前の必須条件（未達）",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md",
+    "target": "body/08-decisions-open.md#u01",
+    "disposition": "置換",
+    "reason": "採用済みのP/運用値は決定へ、真の残確認はU01〜07へ集約。旧安全条件の要件変更は08冒頭に明記"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "source_line": 1,
+    "source_heading": "# 09 根拠と確認範囲",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "target": "body/09-sources.md#ch09-s01",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "source_line": 5,
+    "source_heading": "## 詳細な出典台帳",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "target": "body/09-sources.md#ch09-s02",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "source_line": 12,
+    "source_heading": "## 主な一次資料",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "target": "body/09-sources.md#ch09-s03",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "source_line": 26,
+    "source_heading": "## Discord情報の扱い",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "target": "body/09-sources.md#ch09-s04",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "source_line": 34,
+    "source_heading": "## 直接依存と許諾の対応（M-03）",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "target": "body/09-sources.md#ch09-s05",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "source_line": 59,
+    "source_heading": "## レビューへ提示する証拠の範囲",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/09-sources.md",
+    "target": "body/09-sources.md#ch09-s06",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 1,
+    "source_heading": "# 10 Pelway本体の国内限定と外部連携の責任分界",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "target": "body/10-domestic-only.md#ch10-s01",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 3,
+    "source_heading": "## 最新要件と保証範囲",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "target": "body/10-domestic-only.md#ch10-s02",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 11,
+    "source_heading": "## 場所・経路の台帳",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "target": "body/10-domestic-only.md#ch10-s03",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 31,
+    "source_heading": "## 通信policyを二つに分ける",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "target": "body/10-domestic-only.md#ch10-s04",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 43,
+    "source_heading": "## 構築時と実行時",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "target": "body/10-domestic-only.md#ch10-s05",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 49,
+    "source_heading": "## 試験条件案",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "target": "body/10-domestic-only.md#ch10-s06",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 70,
+    "source_heading": "## 将来の地域への境界だけ残す",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "target": "body/10-domestic-only.md#ch10-s07",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "source_line": 77,
+    "source_heading": "### 実送出の有効化と設定上の同意の区別",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md",
+    "target": "body/10-domestic-only.md#ch10-s08",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 1,
+    "source_heading": "# 11 AIネイティブ連携の共通契約",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "target": "body/11-integrations.md#ch11-s01",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 5,
+    "source_heading": "## 共通の単位",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "target": "body/11-integrations.md#ch11-s02",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 13,
+    "source_heading": "## IntegrationPortの能力",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "target": "body/11-integrations.md#ch11-s03",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 33,
+    "source_heading": "## 接続手段の選び方",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "target": "body/11-integrations.md#ch11-s04",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 47,
+    "source_heading": "## 公式手段の確認例",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "target": "body/11-integrations.md#ch11-s05",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 60,
+    "source_heading": "## 受信、再接続、重複、取消",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "target": "body/11-integrations.md#ch11-s06",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 72,
+    "source_heading": "## 業務状態と外部実行の対応（追加提案・要確認）",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "target": "body/11-integrations.md#ch11-s07",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 89,
+    "source_heading": "## 表示契約",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "target": "body/11-integrations.md#ch11-s08",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 102,
+    "source_heading": "## 外部agentの権限を過信しない",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "target": "body/11-integrations.md#ch11-s09",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 108,
+    "source_heading": "## 三つの往復例",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "target": "body/11-integrations.md#ch11-s10",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 114,
+    "source_heading": "## 今と後の範囲",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "target": "body/11-integrations.md#ch11-s11",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 122,
+    "source_heading": "## 入力一式・実行区画・資格情報の制約",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "target": "body/11-integrations.md#ch11-s12",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 132,
+    "source_heading": "## 取消後の限定確認",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "target": "body/11-integrations.md#ch11-s13",
+    "disposition": "維持",
+    "reason": "本文の意味を継承（相対参照と明示アンカーのみ整理）"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "source_line": 139,
+    "source_heading": "### 実送出の有効化と設定上の同意の区別",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md",
+    "target": "body/11-integrations.md#ch11-s14",
+    "disposition": "変更",
+    "reason": "節の主要構造を継承し、取消P/根拠/運用値/参照又は表示条件を統合。詳細は採否記録"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/README.md",
+    "source_line": 1,
+    "source_heading": "# Pelway技術設計 v0.6固定候補（安全課題S1の判断待ち）：ローカル構成",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/README.md",
+    "target": "body/README.md#ch00-s01",
+    "disposition": "置換",
+    "reason": "v0.7案内と該当本文章に置換。v0.6固定候補の判断待ちは現行採用状態へ更新"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/README.md",
+    "source_line": 5,
+    "source_heading": "## 推奨構成",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/README.md",
+    "target": "body/01-architecture.md#ch01-s02",
+    "disposition": "置換",
+    "reason": "v0.7案内と該当本文章に置換。v0.6固定候補の判断待ちは現行採用状態へ更新"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/README.md",
+    "source_line": 22,
+    "source_heading": "## 国内限定と利用者が選ぶ外部連携",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/README.md",
+    "target": "body/10-domestic-only.md#ch10-s02",
+    "disposition": "置換",
+    "reason": "v0.7案内と該当本文章に置換。v0.6固定候補の判断待ちは現行採用状態へ更新"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/README.md",
+    "source_line": 30,
+    "source_heading": "## 配置方針と範囲",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/README.md",
+    "target": "body/01-architecture.md#ch01-s05",
+    "disposition": "置換",
+    "reason": "v0.7案内と該当本文章に置換。v0.6固定候補の判断待ちは現行採用状態へ更新"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/README.md",
+    "source_line": 36,
+    "source_heading": "## 読む順",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/README.md",
+    "target": "body/README.md#ch00-s02",
+    "disposition": "置換",
+    "reason": "v0.7案内と該当本文章に置換。v0.6固定候補の判断待ちは現行採用状態へ更新"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/delivery-v0.6/fixed/pelway-technical-docs/README.md",
+    "source_line": 55,
+    "source_heading": "### この固定候補の読み方",
+    "archive": "sources/v0.6/fixed/pelway-technical-docs/README.md",
+    "target": "body/README.md#ch00-s01",
+    "disposition": "置換",
+    "reason": "v0.7案内と該当本文章に置換。v0.6固定候補の判断待ちは現行採用状態へ更新"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md 表題/適用範囲",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s01",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §2",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s02",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §3",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s03",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §3",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s04",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §3",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s05",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §3",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s06",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §4",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s07",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §5",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s08",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §6",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s09",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §6",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s10",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §7",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s11",
+    "disposition": "追加/統合（候補を採用値へ置換）",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §7",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s12",
+    "disposition": "追加/統合（候補を採用値へ置換）",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §8",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s13",
+    "disposition": "追加/統合（候補を採用値へ置換）",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §8",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s14",
+    "disposition": "追加/統合（候補を採用値へ置換）",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §8",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s15",
+    "disposition": "追加/統合（候補を採用値へ置換）",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §9",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s16",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "user-decision-2026-11-09.md、取消legal-review §3〜6、secrecy §10",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s17",
+    "disposition": "置換/追加",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "user-decision-2026-11-09.md、取消legal-review §3〜6、secrecy §10",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s18",
+    "disposition": "置換/追加",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "user-decision-2026-11-09.md、取消legal-review §3〜6、secrecy §10",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s19",
+    "disposition": "置換/追加",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "source_line": null,
+    "source_heading": "secrecy-addendum-v0.2.md §11",
+    "archive": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md",
+    "target": "body/12-communication-secrecy.md#ch12-s20",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": null,
+    "source_heading": "operational-defaults-v0.1.md 表題/適用範囲",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/13-operational-defaults.md#ch13-s01",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": null,
+    "source_heading": "operational-defaults-v0.1.md §1",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/13-operational-defaults.md#ch13-s02",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": null,
+    "source_heading": "operational-defaults-v0.1.md §2",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/13-operational-defaults.md#ch13-s03",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": null,
+    "source_heading": "operational-defaults-v0.1.md §3",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/13-operational-defaults.md#ch13-s04",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": null,
+    "source_heading": "operational-defaults-v0.1.md §4",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/13-operational-defaults.md#ch13-s05",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": null,
+    "source_heading": "operational-defaults-v0.1.md §5",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/13-operational-defaults.md#ch13-s06",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": null,
+    "source_heading": "operational-defaults-v0.1.md §6",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/13-operational-defaults.md#ch13-s07",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": null,
+    "source_heading": "operational-defaults-v0.1.md §7",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/13-operational-defaults.md#ch13-s08",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": null,
+    "source_heading": "operational-defaults-v0.1.md §8",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/13-operational-defaults.md#ch13-s09",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": null,
+    "source_heading": "operational-defaults-v0.1.md §9",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/13-operational-defaults.md#ch13-s10",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": null,
+    "source_heading": "operational-defaults-v0.1.md §10",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/13-operational-defaults.md#ch13-s11",
+    "disposition": "追加/継承",
+    "reason": "当該節を統合。法的当てはめ/実装/人員/実I/O未完は08参照"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "# 選択外部連携とベストエフォート取消：追補統合案 v0.3",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s04",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "## 1. 基準と依頼の範囲",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s04",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "## 2. 企画の推奨と代替",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s04",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "## 3. 維持する境界",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "body/11-integrations.md#ch11-s12",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "## 4. 取消境界の最小案（技術/製品の確認前）",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s04",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "## 5. 説明・同意・承認",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "body/10-domestic-only.md#ch10-s09",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "## 6. 最小表示・監査案",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s10",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "## 7. S1/J1〜J3の差分",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "body/08-decisions-open.md#u01",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "## 8. 致命的懸念と次の確認",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "body/08-decisions-open.md#u01",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "## 9. 入力・採否記録",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "reviews/disposition-v0.7.md",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "### 9.1 事業チームの入力採否",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "reviews/disposition-v0.7.md",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "### 9.2 日英表示案（未採用）",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s10",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "## 10. プロ会議の採否（今回のルーム投稿が根拠）",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "reviews/disposition-v0.7.md",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "### 法務根拠と未決",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "body/12-communication-secrecy.md#ch12-s18",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "source_line": null,
+    "source_heading": "## 11. Grok Botへ返す結論・正式判断を要する点",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md",
+    "target": "body/08-decisions-open.md#u01",
+    "disposition": "統合/置換",
+    "reason": "P採用・Q/Rと旧候補を履歴化。表示/根拠は06/12、具体値は13、残課題は08へ分離"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/user-decision-2026-11-09.md",
+    "source_line": 1,
+    "source_heading": "J-S01〜07の暫定採用とP要件変更",
+    "archive": "sources/addenda/2026-11-09-secrecy/user-decision-2026-11-09.md",
+    "target": "body/08-decisions-open.md#ch08-s02",
+    "disposition": "追加",
+    "reason": "採用の優先順位を一元化"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/disposition-v0.2.md",
+    "source_line": 1,
+    "source_heading": "通信秘密v0.2の採否記録",
+    "archive": "sources/addenda/2026-11-09-secrecy/disposition-v0.2.md",
+    "target": "reviews/disposition-v0.7.md",
+    "disposition": "追加",
+    "reason": "前回採否を踏まえ今回の統合判断を区別"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/legal-review-2026-11-09.md",
+    "source_line": 1,
+    "source_heading": "§3〜6 契約・根拠・責任と残る当てはめ",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/legal-review-2026-11-09.md",
+    "target": "body/12-communication-secrecy.md#ch12-s18",
+    "disposition": "追加",
+    "reason": "法令と運用提案を分離し、免責・賠償制限を事実別に確認"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-best-effort-cancel/legal-review-2026-11-09.md",
+    "source_line": 1,
+    "source_heading": "§3〜6 個人データ・外国移転の事実分類",
+    "archive": "sources/addenda/2026-11-09-best-effort-cancel/legal-review-2026-11-09.md",
+    "target": "body/12-communication-secrecy.md#ch12-s19",
+    "disposition": "追加",
+    "reason": "提供主体/委託/第三者等を区別"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": 1,
+    "source_heading": "§2〜9（保持・制限・容量・表示・試験）および通信秘密v0.2§3〜9",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/11-integrations.md#ch11-s15",
+    "disposition": "追加",
+    "reason": "採用した追補を本文へ実装契約として統合。担当入力/今回相談の具体的採否はreviews/disposition-v0.7.md"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": 1,
+    "source_heading": "§2〜9（保持・制限・容量・表示・試験）および通信秘密v0.2§3〜9",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/06-i18n.md#ch06-s05",
+    "disposition": "追加",
+    "reason": "採用した追補を本文へ実装契約として統合。担当入力/今回相談の具体的採否はreviews/disposition-v0.7.md"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": 1,
+    "source_heading": "§2〜9（保持・制限・容量・表示・試験）および通信秘密v0.2§3〜9",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/06-i18n.md#ch06-notices",
+    "disposition": "追加",
+    "reason": "採用した追補を本文へ実装契約として統合。担当入力/今回相談の具体的採否はreviews/disposition-v0.7.md"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": 1,
+    "source_heading": "§2〜9（保持・制限・容量・表示・試験）および通信秘密v0.2§3〜9",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/06-i18n.md#ch06-s06",
+    "disposition": "追加",
+    "reason": "採用した追補を本文へ実装契約として統合。担当入力/今回相談の具体的採否はreviews/disposition-v0.7.md"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": 1,
+    "source_heading": "§2〜9（保持・制限・容量・表示・試験）および通信秘密v0.2§3〜9",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/README.md#ch00-s03",
+    "disposition": "追加",
+    "reason": "採用した追補を本文へ実装契約として統合。担当入力/今回相談の具体的採否はreviews/disposition-v0.7.md"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": 1,
+    "source_heading": "§2〜9（保持・制限・容量・表示・試験）および通信秘密v0.2§3〜9",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/07-performance-plan.md#ch07-s06",
+    "disposition": "追加",
+    "reason": "採用した追補を本文へ実装契約として統合。担当入力/今回相談の具体的採否はreviews/disposition-v0.7.md"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": 1,
+    "source_heading": "§2〜9（保持・制限・容量・表示・試験）および通信秘密v0.2§3〜9",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/04-data-api-realtime.md#ch04-s11",
+    "disposition": "追加",
+    "reason": "採用した追補を本文へ実装契約として統合。担当入力/今回相談の具体的採否はreviews/disposition-v0.7.md"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": 1,
+    "source_heading": "user-decisionと運用値採否。未決U01〜07を集約",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/08-decisions-open.md#ch08-s08",
+    "disposition": "追加",
+    "reason": "採用した追補を本文へ実装契約として統合。担当入力/今回相談の具体的採否はreviews/disposition-v0.7.md"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": 1,
+    "source_heading": "§2〜9（保持・制限・容量・表示・試験）および通信秘密v0.2§3〜9",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/01-architecture.md#ch01-s06",
+    "disposition": "追加",
+    "reason": "採用した追補を本文へ実装契約として統合。担当入力/今回相談の具体的採否はreviews/disposition-v0.7.md"
+  },
+  {
+    "source": "/workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "source_line": 1,
+    "source_heading": "§2〜9（保持・制限・容量・表示・試験）および通信秘密v0.2§3〜9",
+    "archive": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md",
+    "target": "body/03-ai-bot-runtime.md#ch03-s13",
+    "disposition": "追加",
+    "reason": "採用した追補を本文へ実装契約として統合。担当入力/今回相談の具体的採否はreviews/disposition-v0.7.md"
+  }
+]

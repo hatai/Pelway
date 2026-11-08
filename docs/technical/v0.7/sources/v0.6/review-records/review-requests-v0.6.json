@@ -1,0 +1,55 @@
+{
+  "requested_at_jst": "2026-11-08T23:46:07.768657+09:00",
+  "scope": "D5-01..06 correction-only review; no full-package re-review",
+  "entry": "v0.6-snapshot/pelway-technical-docs/README.md",
+  "prior_v0.5_specialists": "all four agree; original files read",
+  "market": "no new request; market-scope canonical files unchanged",
+  "specialists": {
+    "technical": {
+      "state": "received and read",
+      "verdict": "agree; no remaining mandatory correction in requested delta",
+      "file": "technical-v0.6-delta.md",
+      "sha256": "4cdbe5fdeb9a77e2dba85dc28d21ff2e410eecc125d6caf62e8dd2f90a0886eb"
+    },
+    "product": {
+      "state": "received and read",
+      "verdict": "agree; no remaining mandatory correction in requested delta",
+      "file": "product-v0.6-delta.md",
+      "sha256": "52f4442406fb8c761b231ea65a4960e1925272a9af52f178547f0e1139ce8ce0"
+    },
+    "ui": {
+      "state": "received and read",
+      "verdict": "agree; no remaining mandatory correction in requested delta",
+      "file": "ui-v0.6-delta.md",
+      "sha256": "8c0a9218fb761bc7c3ae151935648f3bcb91cc11995dab245199afd09da82bb9"
+    }
+  },
+  "codex": {
+    "state": "completed and read",
+    "shell_id": "377688",
+    "pid": 667754,
+    "output": "codex-v0.6-delta.md",
+    "exit_code": 0,
+    "verdict": "D5-01..06 closed; no remaining mandatory correction",
+    "elapsed_ms": 17180
+  },
+  "claude": {
+    "state": "completed and read",
+    "shell_id": "377689",
+    "pid": 667796,
+    "output": "claude-v0.6-delta.md",
+    "exit_code": 0,
+    "elapsed_ms": 48483,
+    "verdict": "D5 substance closed; D5-05 reference clarification condition remains"
+  },
+  "S1": "unresolved; actual external I/O disabled",
+  "claude_reference_clarification": {
+    "state": "completed and read",
+    "shell_id": "377690",
+    "pid": 669282,
+    "scope": "one evidence-copy reference fact; not a repeated document review",
+    "exit_code": 0,
+    "elapsed_ms": 16819,
+    "verdict": "D5-05 closed; no further check needed; requested final reference wording applied in mutable final record, frozen originals preserved"
+  }
+}

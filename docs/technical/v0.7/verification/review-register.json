@@ -1,0 +1,51 @@
+{
+  "updated_at_jst": "2026-11-09T01:46:49.435766+09:00",
+  "scope": "文書統合の担当差分。実装/法適合/人員受諾/実I/O許可ではない",
+  "reviews": [
+    {
+      "role": "法務",
+      "status": "確認済み・追加必須なし",
+      "evidence": "reviews/legal-integration.md §限定最終確認"
+    },
+    {
+      "role": "市場",
+      "status": "確認済み・追加必須なし",
+      "evidence": "reviews/market-v0.7-body-check.md"
+    },
+    {
+      "role": "製品",
+      "status": "限定確認済み・指摘2件を反映し自己点検",
+      "evidence": "ルーム最終所見：PR01〜10反映、after-start文言/U07のAPI条件を補正"
+    },
+    {
+      "role": "技術",
+      "status": "限定確認済み・UI関連補正を反映し自己点検",
+      "evidence": "ルーム最終所見：01/03/04/05/08/10/11に重大不整合なし"
+    },
+    {
+      "role": "UI",
+      "status": "限定確認済み・§5の2件を反映し自己点検",
+      "evidence": "reviews/ui-v0.7-input.md §5/6。stop-confirming削除案は撤回"
+    },
+    {
+      "role": "財務",
+      "status": "限定最終確認済み・追加修正不要",
+      "evidence": "2026-11-09 01:46 JST プロ会議の担当回答：統合本文と採否を照合し重大な反映漏れなし。設定値/内部目標/原価/稼働未受諾の分離を確認"
+    },
+    {
+      "role": "営業",
+      "status": "限定最終確認済み・重大欠落なし",
+      "evidence": "2026-11-09 01:46 JST プロ会議の担当回答：旧保証置換、365日/source期限、全件入力しないこと、説明キーを確認。許可範囲表現とU06維持に異論なし"
+    },
+    {
+      "role": "Codex",
+      "status": "今回の固定統合稿へ回答済み・R01/R02採用",
+      "evidence": "consultations/codex-review.md"
+    },
+    {
+      "role": "Claude",
+      "status": "今回の固定統合稿へ回答済み・R1〜R4採用",
+      "evidence": "consultations/claude-review.md"
+    }
+  ]
+}

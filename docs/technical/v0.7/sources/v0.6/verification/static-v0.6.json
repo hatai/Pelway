@@ -1,0 +1,74 @@
+{
+  "v0.1_canonical": {
+    "count": 12,
+    "mismatches": []
+  },
+  "v0.2_canonical": {
+    "count": 12,
+    "mismatches": []
+  },
+  "v0.2_dependencies": {
+    "count": 74,
+    "navigation": 4,
+    "mismatches": []
+  },
+  "v0.3_canonical": {
+    "count": 12,
+    "mismatches": []
+  },
+  "v0.3_dependencies": {
+    "count": 78,
+    "navigation": 4,
+    "mismatches": []
+  },
+  "v0.4_canonical": {
+    "count": 12,
+    "mismatches": []
+  },
+  "v0.4_dependencies": {
+    "count": 87,
+    "navigation": 4,
+    "mismatches": []
+  },
+  "v0.5_canonical": {
+    "count": 12,
+    "mismatches": []
+  },
+  "v0.5_dependencies": {
+    "count": 102,
+    "navigation": 4,
+    "mismatches": []
+  },
+  "v0.6_canonical": {
+    "count": 12,
+    "mismatches": []
+  },
+  "v0.6_dependencies": {
+    "count": 112,
+    "navigation": 4,
+    "mismatches": []
+  },
+  "protected_originals": {
+    "count": 15,
+    "mismatches": []
+  },
+  "internal_markdown_file_links": {
+    "checked": 141,
+    "missing": [],
+    "anchor_checks": [
+      {
+        "source": "pelway-public-docs/publish/docs/brand-ui.md",
+        "target": "competitors.md#名称衝突",
+        "exact_heading_found": true
+      }
+    ]
+  },
+  "not_performed": [
+    "runtime/real external I/O",
+    "license/legal approval",
+    "domestic compliance",
+    "actual OS tests",
+    "S1 resolution"
+  ],
+  "passed": true
+}

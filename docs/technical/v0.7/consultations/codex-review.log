@@ -1,0 +1,1723 @@
+OpenAI Codex v0.166.0
+--------
+workdir: /workspace/pelway-technical-docs/addenda/2026-11-09-secrecy/operational-consultations
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 01a1bc05-1f58-7383-89ba-13c3b575074b
+--------
+user
+Pelway統合版v0.7の完成前・一度限りの仕様レビューです。日本語で回答。実装/実接続/新調査/ファイル変更/UI外観の審査はしない。与える固定本文だけを読み、重大な内部矛盾・元の決定の取り落し・実I/O禁止を弱める誤記を優先し、最大8件。問題ごとにID、章/見出しと具体文、なぜ矛盾するか、最小置換案。重大問題がなければ明記し、推測で指摘を作らない。方式の実装・法的適合・人員が未検証であること自体は本文完成を妨げない。
+
+今回決定: J-S01〜07推奨をユーザー暫定採用。取消Pは明示的な旧要件変更。取消commit後の新規内部開始受理を禁止、受理済み個別操作は物理送出前競合を含め停止非保証だが、根拠失効と合理的抑止義務は免除しない。S1解消済みではなく実外部I/O無効。
+運用値は365日/source内memory365日、索引source準拠、prompt永続0/run60min、backup日次02:00JST復旧対象14日/物理消去24h内部目標。10GiB/50MiB、80%warn/100%超拒否、作業2GiB/記録予算2GiB/backup予算192GiB（作業checkpointは対象外）。5秒は資格発行→内部開始受理、一操作一回、外部HTTP完了期限ではない。未知結果即表示/照合0・5・15分最大3回/24h昇格、無断再実行なし。通常support枠20〜21時は本人受諾前仮定、緊急本文アクセスなし、通常調査60分で適切な別人顧客承認必要。法定記録は方法別1/3暦年、同意証拠は継続+365日、抑止記録90日以上かつ関連復旧copy/未解決を覆う。新RAG/wiki/実装/支出/Gitなし。既存試験回数を保持。未決正本08 U01〜06。
+
+以下が本文固定コピーです。
+
+# v0.7 完成前の確認用スナップショット
+
+このファイルは相談用の固定コピー。正本はbody。sourcesは歴史資料。実I/Oは無効。
+
+
+<!-- FILE: 01-architecture.md -->
+<a id="ch01-s01"></a>
+# 01 ローカル構成と責任分界
+
+この章は構成の説明。国内に物理設置された管理端末で動くローカル構成を設計する。設置場所と管理状態は未確認。クラウド本番を構築しない。
+
+<a id="ch01-s02"></a>
+## 全体図
+
+```mermaid
+flowchart LR
+ subgraph JP[日本国内設置ホスト・管理ネットワーク：未検証の前提]
+  GUI[Rust + Slint GUI]
+  WEB[ブラウザ DOM UI]
+  CORE[Rust client-core / WASM]
+  subgraph APP[ローカル本体・外向き既定拒否]
+   API[server: axum / 認証と承認]
+   DB[(PostgreSQL / outbox / 監査)]
+   FILE[(添付・成果物・Botメモリ・バックアップ)]
+   RUN[runner: リース / 手順再開]
+   LOCAL[LLM gateway: スタブ / ローカル推論]
+   GW[連携gateway: 権限 / 秘密 / 通信policy]
+   CTRL[隔離されたsandbox起動controller]
+   SB[タスクsandbox: 秘密なし / 外部出口なし]
+   AD[信頼側Adapter: 型付き要求 / secretなし]
+  end
+ end
+ subgraph CLIENT[任意の利用者管理端末：所在・接続条件は別審査]
+  BR[local bridge / CLI / hook：将来案]
+ end
+ subgraph EXT[利用者が明示選択する外部サービス：国外処理・保存あり得る]
+  AG[Claude Code / Cursor等]
+  TOOL[Datadog / Google Workspace等]
+ end
+ GUI --> CORE
+ WEB --> CORE
+ CORE -->|loopback HTTP/WS（合成データ試験）| API
+ API --> DB
+ API --> FILE
+ RUN --> DB
+ RUN --> LOCAL
+ RUN --> CTRL
+ CTRL --> SB
+ SB -->|操作要求のみ| GW
+ GW -->|内部ファイル操作| FILE
+ GW -->|承認済み固定入力| AD
+ AD -->|型付き要求: 外部出口はGWだけ| GW
+ GW -->|予約/直前再検査/attempt記録| API
+ GW -.->|将来の認証接続：方式未決・初期未実装| BR
+ BR -.-> AG
+ GW -.->|許可済みtransportだけ| AG
+ GW -.->|許可済みtransportだけ| TOOL
+ AG -.->|進捗 / 差分 / 失敗：未信頼データ| GW
+ TOOL -.->|文書 / アラート：未信頼データ| GW
+ GW -->|帰属/署名検証してinboxへ保存| API
+```
+
+実線の本体データは国内ローカル保存・処理の設計。破線は利用者選択の例外経路で、本体の「国外送信なし」に含めて保証しない。外部から取り込んだ成果物のPelway保存コピーは国内に置く。提供元に残るコピー・ログ・セッションは外部サービスの責任分界。local bridgeは利用者端末で動く案で、管理host内に固定しない。ただし国外端末への接続許可を得た意味ではなく、所在/認証/端末管理を別に確認する。
+
+<a id="ch01-s03"></a>
+## ホストとコンテナ
+
+| 部品 | 実行 | ビルド・試験 |
+|---|---|---|
+| ネイティブGUI | 各ホストの通常プロセス | Windows MSVC、macOSのSDK、Linuxのネイティブ環境。IME、GPU、通知、読み上げはホストで試す |
+| Web UIとWASM | ホストブラウザ | 静的資源のビルドはコンテナ可。ブラウザ機能の試験はホスト |
+| server、runner、gateway | Linuxコンテナ。論理境界として別プロセス | Linux向けイメージ。最低3プロセスであり「2プロセス」とは呼ばない |
+| sandbox controller | 信頼するホスト/コンテナランタイム側の限定API | 任意のruntime socketをBotやsandboxへ公開しない |
+| DB、ファイル、推論 | Linux側。GPU推論がホストAPIを要する場合は国内ホストの別プロセス | CPU別イメージとdriverを検証。macOSのGPUをLinuxコンテナから当然使えるとはしない |
+| サンドボックス | 同一ランタイムの独立したコンテナ | 入れ子コンテナを既定にしない。ホストホームやruntime socketをマウントしない |
+
+WindowsのWSL 2とmacOSのApple containerはLinux実行基盤。Windows/macOS GUIの製品試験や署名を代替しない。GUIからの入口はloopback限定。localhostでもOrigin検査、CSRF対策、認証を省略しない。
+
+<a id="ch01-s04"></a>
+## 仕事の往復
+
+```mermaid
+sequenceDiagram
+ participant H as 人
+ participant S as Pelway server
+ participant R as runner
+ participant G as 連携gateway
+ participant E as 選択済み外部agent
+ H->>S: メンションと依頼
+ S->>R: taskとrunを永続化して開始
+ R->>G: scopeと送信payloadを指定
+ G->>S: 固定payloadと必要承認の提示
+ S-->>H: 送信先・データ・国外可能性・権限の確認
+ H->>S: 当該操作を承認
+ G->>S: 予約済attemptの最終検査と開始受理を要求
+ S->>S: 検査と条件付き開始更新を同一transactionで永続commit
+ S-->>G: 成功した一つの実行だけに一回限りの開始資格
+ Note over S,G: commit/応答不明・重複・再起動では呼び出さず照合
+ G->>E: run/operation ID付きで仕事を渡す
+ E-->>S: 進捗・成果物・差分・失敗をinbox経由で返す
+ S-->>H: 判断待ちと未確認成果物
+ H->>S: 確認 / 修正依頼 / 再開 / 取消依頼 / 引継ぎ
+```
+
+Adapter未実装の初期ローカル検証では、外部agentを疑似サービスに置き換える。外部サービス選択の許可は、現在の実接続・実送信の承認ではない。
+
+<a id="ch01-s05"></a>
+## 永続化と正しさ
+
+業務の正本はserverとPostgreSQL。状態変更、監査、配信用outboxは同じDBトランザクションで確定する。WebSocketは通知経路であり正本ではない。DBキューを使い、ローカル初版へ別のメッセージブローカーを持ち込まない。
+
+Botの人格、役割、メモリと、実行コンテナの寿命を分ける。ファイルとチェックポイントは国内の管理領域に残す。担当交代で他Botのボリューム全体を渡さず、taskに結び付く検査済み成果物・手順だけを権限付き参照で引き継ぐ。
+
+配置先の共通境界はPlacementPolicyとし、04/10に定義する。今は日本local単一で、将来のUS/EU/JPは選択肢の例示だけ。外部連携4製品も例示であり限定しない。
+
+初期のloopback構成は、単一host上の複数アカウントによる合成データ検証専用。別端末の実メンバーが共同利用できる完成品ではない。LAN公開・TLS・端末認証・具体的ローカル認証方式は未決とし、localhostというだけで認証を省かない。APIの承認検査/attempt記録をgatewayからserverへ要求し、成功後だけ外部transportを呼ぶ。
+
+<a id="ch01-s06"></a>
+## 全構成に適用する情報取扱い制御
+
+server/runner/推論/gateway/公開/検索/運営/復旧は[12](12-communication-secrecy.md)の現権限・目的・根拠とsource制限を共有する。保存・quota・期限・有人枠は[13](13-operational-defaults.md)の選定値に従う。P方針は内部開始受理を境界とする取消契約の暫定変更であり、S1の技術的解消や実I/O許可ではない。未決の正本は[08](08-decisions-open.md)だけとする。
+
+明示メモリは作成/根拠を確認した明示更新から最長365日、全source期限以内。閲覧で延長せず、毎回全件をAIに入力しない。必要範囲だけを取得し、将来の索引/RAGを初期必須機能には戻さない。
+
+
+<!-- FILE: 02-stack-comparison.md -->
+<a id="ch02-s01"></a>
+# 02 技術比較と依存採用案
+
+確定要件はRustベースのWindows/macOS/Linuxネイティブ、非WebViewを既定、ブラウザ対応、日英対応。外観を変えない。以下の採用は文書上の案で、組込み済み・試験済みを意味しない。
+
+<a id="ch02-s02"></a>
+## ネイティブUI
+
+推奨はSlint、対照はegui。GPUIはWindows読み上げの阻害から初版の採用比較では保留する。UI担当と技術担当の案としてSlintを採用案とする（実機試験と固定版ライセンスの確認まで未確定）。公式issueの存在は、固定版で現在も再現する証拠ではないため、実機で再確認する。
+
+<a id="ch02-s03"></a>
+### 確認日と版
+
+以下はUI担当の一次情報調査を統合した表。確認日は2026-11-08（日本時間）。
+
+
+| 候補 | ライセンス | 最新リリース | 日本語入力（IME） | アクセシビリティ | 文字の選択 |
+|---|---|---|---|---|---|
+| [Slint](https://github.com/slint-ui/slint) | 3つから選べる。[Royalty-free 2.0](https://github.com/slint-ui/slint/blob/master/LICENSE.md)（非公開アプリも無料。ただしSlintを使っていることの表示が条件）／GPL-3.0-only／Slint Software 3.0（商用） | v1.18.1（2026-09-21） | デスクトップは対応。未解決の課題あり：[IME変換中にフォーカスが外れると最後の文字が消える #10861](https://github.com/slint-ui/slint/issues/10861) | AccessKitで対応。[大きいListViewでaccessibility機能の性能への影響が大きい #3867](https://github.com/slint-ui/slint/issues/3867)（未解決）。[仮想リストのフォーカス修正 #13425](https://github.com/slint-ui/slint/pull/13425)は済み | 未確認（複数のメッセージにまたがる選択の可否を実装前に確かめる） |
+| [egui](https://github.com/emilk/egui) | Apache-2.0／MIT | 0.37.0（2026-10-15） | 0.35で改善（[変更履歴](https://github.com/emilk/egui/blob/master/CHANGELOG.md)）。未解決：[fcitx5で日本語IMEが動かない #2529](https://github.com/emilk/egui/issues/2529)、[X11＋fcitx5で変換中の文字が入力欄に出ない #7975](https://github.com/emilk/egui/issues/7975)、[同じ入力欄の中で変換が途切れる #8813](https://github.com/emilk/egui/issues/8813) | AccessKitを常に組み込み（[#7701](https://github.com/emilk/egui/pull/7701)） | ラベルの文字は選べる（[#3814](https://github.com/emilk/egui/pull/3814)）。部品をまたぐ選択は未確認 |
+| [iced](https://github.com/iced-rs/iced) | MIT | 0.14.0（2025-12-07） | 0.14で対応（[#2777](https://github.com/iced-rs/iced/pull/2777)） | **未対応**。[Accessibility support #3281](https://github.com/iced-rs/iced/pull/3281)は取り込まれずに閉じた。[#552](https://github.com/iced-rs/iced/issues/552)は未解決 | [Text Selection #3497](https://github.com/iced-rs/iced/pull/3497)は2026-10-02に取り込み済みだが、リリース版にはまだ入っていない |
+| [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)（Zedのフレームワーク） | Apache-2.0（[Cargo.toml](https://github.com/zed-industries/zed/blob/main/crates/gpui/Cargo.toml)） | crateのversion 0.2.2。Zed本体と一緒に開発 | 対応しているが未解決が多い：[Windowsで変換中の文字の幅が違う #61724](https://github.com/zed-industries/zed/issues/61724)、[候補窓の位置ずれ #64850](https://github.com/zed-industries/zed/issues/64850)、[macOSの日本語IMEでメニューバーが壊れる #55835](https://github.com/zed-industries/zed/issues/55835) | [Windowsでスクリーンリーダーがまったく使えない #41138](https://github.com/zed-industries/zed/issues/41138)（2025-10から未解決） | エディタ部分は強い。チャットの表示に使えるかは未確認 |
+| [Freya](https://github.com/marc2332/freya) | MIT | v0.5.0（2026-11-05） | 未確認 | READMEに改善の記述があるだけで、対応範囲は未確認 | 未確認 |
+
+ほかに[Xilem](https://github.com/linebender/xilem)（Apache-2.0、v0.4.0）、[Blitz](https://github.com/DioxusLabs/blitz)（Apache-2.0、リリースなし）、[Makepad](https://github.com/makepad/makepad)（MIT、リリースなし）も見たが、リリースの状況から今回は比較の対象外にした。対象外にしたのは成熟度の判断で、性能の判断ではない。
+
+<a id="ch02-s04"></a>
+### Slintのライセンス：利用と配布の形ごと（一次資料：[LICENSE.md](https://github.com/slint-ui/slint/blob/master/LICENSE.md)、[Royalty-free License 2.0本文](https://github.com/slint-ui/slint/blob/master/LICENSES/LicenseRef-Slint-Royalty-free-2.0.md)、[FAQ](https://github.com/slint-ui/slint/blob/master/FAQ.md)。masterブランチの条文、2026-11-08確認。リリース版v1.18.1に同梱の条文と同じかは未確認）
+
+| 利用・配布の形 | Royalty-free 2.0 | GPL-3.0-only | 商用 |
+|---|---|---|---|
+| Pelwayのデスクトップ版を非公開のソースで配る（Windows/macOS/Linux） | 使える。ただし次のどちらかが条件：(a) アプリの最上位メニューから開ける「About」画面に`AboutSlint`の部品を出す（About画面がなければ起動画面に出す）、(b) 配布ページなどの公開Webページに「Made with Slint」の表示を置く | 使えない（アプリ全体をGPL互換で公開する場合だけ使える） | 使える（有料。価格は[料金ページ](https://slint.dev/pricing)、今回は確認も購入もしない） |
+| Pelwayのデスクトップ版をオープンソースで公開する | 使える | 使える。自分のコードはMITなどGPL互換のままでよいが、組み合わせた全体はGPLになる | 使える |
+| Web版にSlintを使う | 条文上は「Web Application」として使える。ただしUI担当の推奨ではWeb版にSlintは使わない（Web版の比較を参照） | — | — |
+| 組み込み機器（専用端末など） | 使えない | 使える | 使える |
+| Slintを単体で配る／アプリからSlintのAPIを外に出す（例：利用者やBotがSlintのAPIで画面を拡張できるプラグイン） | 使えない（第3条） | GPLの条件で可 | 契約次第（未確認） |
+
+UI担当の判断：Pelwayの初期のデスクトップ版では、Royalty-freeの(a)か(b)を満たせば費用なしで使える見込み。ただし、画面の拡張をプラグインとして外に開く設計にすると第3条に触れる恐れがあるので、その設計は避けるか商用ライセンスを検討する。最終的な判断は濱田さんで、法的な確認は情報セキュリティ・法務の担当に回す。外観については、About画面に`AboutSlint`の部品を置くことは画面の構成に関わるので、置く場所はUI担当が決める。
+
+
+<a id="ch02-s05"></a>
+### チャット要件での評価
+
+| 観点 | Slint | egui | その他候補と判断 |
+|---|---|---|---|
+| 長文・大量履歴 | ListView等を利用し可変高さ・読んでいる位置の保持・読み上げを検証。大規模リストの課題あり | 表示範囲と長文選択を実装・検証 | GPUIはエディタ実績をチャット全体の保証にしない |
+| 和英混在・IME | 3OSの変換中の文字、フォーカス移動、候補窓の位置を試す | Linux fcitx5課題を先に試す | icedにもIME実装はあるが読み上げ条件が不足 |
+| 選択・コピー | 複数messageに跨がる選択は未確認 | 同じく未確認 | OS clipboard連携だけでは要件合格ではない |
+| アクセシビリティ | AccessKitを使いNVDA/VoiceOver/Orcaで合格確認 | AccessKitを使い同条件比較 | icedとGPUIは初版条件に対して阻害あり。対象版の再確認が必要 |
+| 通知 | framework外のhost adapterでローカル通知 | 同じ | Windows/macOS/Linuxのpermission・focus復帰・本文漏えいを別試験。APNs/FCMは初期不使用 |
+| 保守・配布 | 上表のreleaseとlicense条文を固定tagで再照合 | MIT/Apacheと同梱fontの条文を照合 | 保守頻度や「対応」宣言はSLA・実機保証ではない |
+
+SlintのRoyalty-freeは標準的なpermissive OSS licenseと同じとは扱わない。AboutSlint等の条件、APIを外へ公開する制限を固定版で確認する。外部AI連携のAdapterはUI拡張APIと分離し、Slint APIを外部へ公開しない。技術的に分離しただけで法的適合を断定しない。
+
+<a id="ch02-s06"></a>
+## ブラウザ版と共通核
+
+| 案 | 長所 | 負担 | 判断 |
+|---|---|---|---|
+| TS＋React DOM UI、Rust同期核をWASM | browserのIME・読み上げ・文字選択を使う。状態・同期契約を共有 | UIは二重実装。WASM bridgeと保存adapterが要る | 推奨 |
+| Slint/eguiをWASMで共通UI化 | 画面コード共有の可能性 | canvas系の表示とブラウザの検索・選択・読み上げの整合を別途検証 | 初版では採らない |
+| Rust DOM UI（Leptos等） | Rustで記述統一 | ネイティブ部品は結局別。新しいUI基盤の評価が増える | 初版では採らない |
+| Webの同期まで全部TS | WASM bridge不要 | 同期規則の実装が二つになる | WASM費用が大きい場合の代替 |
+
+共有するのはdomain enum、API型、同期・dedup、翻訳資源、表示規則、デザイントークン。共有しないのは画面部品、focus、IME、OS通知、clipboard、ファイル選択。承認規則を共通核で表示しても、最終判定はserverで強制する。
+
+<a id="ch02-s07"></a>
+### 二重UI実装の部分工数
+
+
+UI担当の[input/ui.md](../sources/v0.6/fixed/pelway-technical-docs/input/ui.md) §3a・§5に基づく粗い仮定。考慮したのは部品ごとの状態と、[07の比較の順番・負荷と記録](07-performance-plan.md)の試験項目で、定量的な係数/実績で裏付けた見積もりではない。実装する人の人時で、botの作業時間は含めない。短期・中期の人時には足さず、別枠として扱う。実際の値は、07の確認試験で1つ目の部品を作ったあとに見直す。
+
+| 部品 | Web版 | ネイティブ版 | ネイティブ版が重い理由 |
+|---|---|---|---|
+| メッセージの一覧（仮想スクロール） | 8〜16h | 16〜32h | 行の高さがばらばらな仮想リストと、読み上げとの両立を自前で確かめる |
+| メッセージ入力欄（日本語入力・メンション候補） | 6〜12h | 12〜24h | 3つのOSの日本語入力の試験が要る |
+| 承認の画面と状態の表示 | 6〜10h | 8〜14h | 状態の変化を読み上げに伝える仕組みをOSごとに確かめる |
+| 判断待ちの一覧 | 4〜8h | 6〜10h | キーボード操作の試験 |
+| 「作業を見る」画面（静止画と手順のログ） | 4〜8h | 6〜12h | 画像の更新と読み上げの両立 |
+| 通知 | 2〜4h | 6〜12h | OSごとの通知の仕組み（技術担当の選定次第） |
+| 設定と言語の切り替え | 2〜4h | 4〜8h | 再起動なしの切り替え |
+| **合計** | **32〜62h** | **58〜112h** | |
+
+この表に入っていないもの（未見積もり。0時間とは扱わない）：07の確認試験の準備と実施、試験後の修正、デザインの値と文言を1か所にまとめる仕組みの準備。
+
+
+外部連携の表示、bridge、service Adapter、国内境界の確認、OS署名・配布は上表に含めない。合計90〜174人時は2列を足した部分工数であり、総開発工数ではない。通知の参考値を含み、実績・実装担当者の技能・再利用可能部品を確認していない。短期v0.1や中期v0.4の人時に自動で加算しない。Web先行か同時進行かの順番も今回決定しない。
+
+<a id="ch02-s08"></a>
+## サーバー・AI層の比較
+
+| 用途 | 推奨案 | 代替と採用理由 |
+|---|---|---|
+| 非同期/HTTP | tokio、axum、tower | actix-webも比較可能。Rust共通型とmiddlewareで認証・traceを統一する案 |
+| DB | PostgreSQL＋sqlx | SQLite serverは部品が少ないが並行処理と将来の会社分離を別検証。今回は既存Postgres方針を維持 |
+| client保存 | rusqlite / IndexedDB adapter | SQLiteをbrowserへ無理に同じ実装で持ち込まない |
+| full text | Postgresの権限付き検索を入口とし、日本語tokenizer/拡張は未選定 | pg_bigm、Tantivy/Linderaは比較候補。初版で無断導入しない |
+| RAG | 初版必須ではない。必要時に国内モデル＋pgvectorを比較 | wiki/Q&A自動生成は範囲外。外部embeddingへ自動接続しない |
+| MCP | rmcpを条件付き依存採用案 | protocol実装を流用し、業務承認やsandboxはPelway側 |
+| LLM adapter | llama.cppの事前取得modelを第一候補、rigは必要なら小範囲 | LangGraph/OpenHands/Gooseは参考。全runtimeを組み込まない |
+| 観測 | tracingのローカル出力 | OpenTelemetryは将来の相互運用候補。外部exporterや自動設定を初期有効にしない |
+
+直接依存の許諾は[09の対応表](09-sources.md)と[技術照合記録](../sources/v0.6/fixed/pelway-technical-docs/reviews/technical-license-ledger-v0.1.md)に示す（2026-11-08、可変ブランチ/最新版の観測値であり採用版ではない）。rmcpはApache-2.0への移行中でMIT部分が残る。全推移依存・NOTICE・SBOMは未作成、固定版の条文/脆弱性確認も未了。適切なOSSの採用は進めるが、安全境界をOSSの既定動作へ任せない。
+
+<a id="ch02-s09"></a>
+## Discordの事例
+
+[Discord CTO本人の投稿](https://x.com/svishnevskiy/status/2118081920194203799)は保存済み公開投稿の取得記録で確認した（今回の差分レビューで新規取得したものではない）。2026-11-05 05:44（日本時間）の投稿は、Electron/React NativeからRustへの移行方針とGPUI採用を説明し、ユーザー試験は今後とする。移行完了や一般配布まで確認したとはしない。一方、「1.3GB→300MB」の同条件のメモリ比較は未検証。移行方針と数値の確からしさを分け、どちらもPelwayのUI採用根拠や性能保証へ転用しない。取得証拠はreviews/discord-primary-post-evidence.txt。
+
+[市場調査の一次資料と未確認範囲](../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md) を参照。Rust・非WebViewはユーザー要件として維持し、自分たちの07の測定で判断する。
+
+
+<!-- FILE: 03-ai-bot-runtime.md -->
+<a id="ch03-s01"></a>
+# 03 Bot実行・権限・承認・隔離
+
+<a id="ch03-s02"></a>
+## 役割と起動
+
+Botは会社・チャンネルのメンバーで、AI表示を持つ。メンションされた依頼だけを既存の起動条件とする。外部アラートをメンションなしで受け付ける機能は将来案で未承認。外部文書やログの「実行せよ」は依頼に昇格させない。
+
+`task`は仕事、`run`は実行の試行、`step`は再開できる手順、`operation`は外部副作用の単位。runの再作成とoperationの再送を同一視しない。人格・会話・永続メモリは実行環境の外に置く。
+
+<a id="ch03-s03"></a>
+## 9状態と遷移
+
+正規定義はRustの `TaskState` 一つ。API schema、TypeScript型、翻訳キー、両UIの表示をそこへ対応付ける。
+
+| enum | 日本語 | 英語の表示案 |
+|---|---|---|
+| requested | 依頼済み | Requested |
+| working | 作業中 | Working |
+| awaiting_decision | 判断待ち | Awaiting decision |
+| awaiting_send_approval | 送信承認待ち | Awaiting send approval |
+| sending | 送信中 | Sending |
+| sent_awaiting_reply | 送信済み・顧客回答待ち | Sent, awaiting customer reply |
+| outcome_unknown | 結果不明 | Outcome unknown |
+| stopped | 止まっている | Stopped |
+| done | 完了 | Done |
+
+| 移る前 | 移る先 | きっかけと条件 |
+|---|---|---|
+| なし | 依頼済み | 人のメンションによる依頼をserverが受付 |
+| 依頼済み | 作業中 | runnerが実行リースを取得 |
+| 作業中 | 判断待ち | Botの質問。判断者と論点を必須保存 |
+| 判断待ち | 作業中 | 権限ある人の決定。短い「Aで」は決定候補。server提示の不変版/選択肢を権限ある人がUIで確認して決定する初期安全提案。自然な返信からのserver確定規則は[プロダクトv0.2の5条件案](../sources/v0.6/fixed/pelway-technical-docs/reviews/product-v0.2.md)と08を参照。濱田さんの正式仕様判断待ち |
+| 作業中 | 送信承認待ち | 外へ出す操作のpayloadを固定 |
+| 送信承認待ち | 作業中 | 人が修正を依頼 |
+| 送信承認待ち | 送信中 | 有効な固定承認と権限を検査し、dispatchを予約。外部呼出はまだ行わない |
+| 送信中 | 送信済み・顧客回答待ち | 顧客向け送信の成功証拠を保存 |
+| 送信中 | 止まっている | 開始受理前の検査で拒否し、開始更新が成立しておらず未送信が確定している場合だけ。理由は権限・承認の失効。I/O直前の追加中止検査とは区別する |
+| 送信中 | 結果不明 | attempt_started記録後の応答断・実行所有者喪失、または開始受理の永続commit/応答が不明で未送信を確定できない場合。送らず照合し、実際には未送信でも保守的に扱う |
+| 結果不明 | 送信済み・顧客回答待ち | 顧客向け送信の照会証拠を見た人が「送れていた」と判断 |
+| 結果不明 | 送信承認待ち | serverが技術的未実行の確証または提供元の有効な冪等保証を検証し、人が再承認を選ぶ場合だけ。証拠不足なら結果不明を保持。予約時にも再検査 |
+| 送信済み・顧客回答待ち | 完了 | 顧客の合意を確認 |
+| 作業中 | 完了 | 社内完結の成果と必要な人の確認が揃う |
+| 作業中 | 止まっている | 障害・上限・権限不足。ただし未停止の外部runがあれば停止済みとは扱わず、以下の取消確認を適用 |
+| 作業中 | 作業中 | ［提案・要確認］取消要求を記録し新dispatch禁止。外部run/runnerの停止未確認なら理由は停止確認中 |
+| 作業中 | 止まっている | ［提案・要確認］取消要求済みで対象runの終了/停止を証拠で確認。sending/unknownの操作は結果を別途保持 |
+| 止まっている | 作業中 | 人が復旧条件を確認して再開 |
+| なし | 依頼済み | ［提案・要確認］serverが親taskと委任scopeから子taskを作成。Botの文章だけでは作成しない |
+| 送信済み・顧客回答待ち | 作業中 | ［提案・要確認］顧客の修正要求を確認。既送信を取り消した扱いにしない |
+| 依頼済み | 止まっている | ［提案・要確認］取消要求、権限/連携喪失で受付を止める |
+| 判断待ち | 止まっている | ［提案・要確認］取消要求、判断者/権限/連携の喪失。未停止の外部runがないか、停止証拠を確認できた場合だけ |
+| 判断待ち | 判断待ち | ［提案・要確認］取消要求時に外部runの停止未確認なら元状態を保ち、取り消し依頼 · 停止確認中を添える。判断の確定や新dispatchは許可しない |
+| 送信承認待ち | 止まっている | ［提案・要確認］取消、期限切れ、権限/連携失効。未実行の承認を失効する |
+| 送信中 | 作業中 | ［提案・要確認］agentへの委任/業務tool操作を提供元が受理したと確認。顧客向け送信以外に限る |
+| 結果不明 | 作業中 | ［提案・要確認］顧客向け以外の操作で、人が照会証拠を見て受理済みと判断 |
+
+上表の追加提案を除く行は作業用PRD §5を具体化したもの。予約前の編集は前承認を失効させ送信承認待ちのままとする。予約済み（送信中）で開始受理前の編集/失効は、未送信を確定できる場合だけ表の送信中→止まっている（承認の失効）を使い、送信承認待ちへ直接戻さない。再開には新しい承認決定版が必要で、同じ承認版を再予約しない。開始後は元snapshot/operation/試行/結果を不変で残し、編集を後続案として保存する。元操作が結果不明なら後続案の別ID/別承認による代替送信も解決まで保留する。既送信確定後の修正送信は元送信に関連する別操作とする。追加の取消遷移・agent/tool受理後に作業中へ戻す遷移は［提案・要確認］で、元PRDを変更しない。送信中/結果不明は取消要求だけでstoppedへ移さず、結果照会を継続する。送信中で未送信が確定した直前拒否だけは表の既存拒否行を使える。attempt_started後はこの例外を使わない。
+
+再接続中や重複受信だけではタスクを結果不明にしない。接続状態は別の欄に持つ。外部runの終了と仕事の完了は別で、成果物未取込・未確認なら完了にしない。
+
+<a id="ch03-s04"></a>
+## 暫定採用した取消P方針と残るS1
+
+通常のtask/operation取消は、取消commit後の新しい内部開始受理を禁止し、既に開始受理した一操作は停止・撤回を保証しない。開始受理後かつ物理送出前の競合も含む。これは濱田さんがJ-S07で暫定採用した明示的な要件変更であり、旧S1の技術的解消ではない。開始受理と取消を同じ操作状態で一意に順序化し、未開始の後続・resume・再試行で取消を迂回しない。
+
+内部開始受理は送信済みの証拠ではない。送出結果と外部run停止を別々に保持する。根拠失効は通常取消とは別に検査し、停止可能な処理と新段階への移行を抑止する。法定義務を非保証で免除しない。S1の方式・障害/復旧検証は未達で実外部I/Oは無効。残確認は[未決U01](08-decisions-open.md#u01)へ集約する。
+
+<a id="ch03-s05"></a>
+## 固定承認と外部副作用
+
+1. gatewayが操作名、送信アカウント、宛先、本文、添付の内容hash、参照版、許可scope、integration版を正規化する。添付名だけでは固定しない。
+2. serverは不変の `ActionSnapshot` を保存し、diffと送信先・利用データを人に提示する。外部連携では国外処理・保存の可能性と未確認を表示する。
+3. 承認者はそのsnapshotのhashとversionへ承認する。決定する権限と送信する権限を分ける。有効化への同意はこの個別承認を代替しない。
+4. 承認確定時に目的、source、必要当事者を覆う根拠版/epoch、保持/出力先、会社、依頼者、チャンネル、担当、承認者、連携アカウントの現権限、scope、有効化版、承認期限、snapshot一致を再検査する。
+5. DBの条件付き更新でdispatch予約を一度だけ確保する。固定承認版の処理keyは一つ。個々の賛成票ごとには作らない。同時承認にはversion競合を返す。提供元の副作用keyは下記のlogical operationへ固定する。予約は送信を試みた証拠ではない。
+6. 予約済みの一操作/attempt/payloadに対しserverが一回限りの開始資格を発行する。発行時刻を耐久記録し、発行から内部開始受理まで5秒を上限とする。task全体/後続queueへ資格をまとめて発行しない。発行は開始受理でも物理送出でもない。
+7. gatewayは外部呼出直前にその資格でserverへ開始受理を要求する。serverは現在の権限・目的/根拠・取消・snapshot hash/承認期限/集合・policy/grant epoch/version・lease/fence・5秒期限を同じlock/transaction内で検査し、予約済みかつ未開始で資格が一致する一行だけを消費済み/attempt_startedへ更新する。取消更新と一意に順序化する。永続commitを確認した成功応答は当該gateway実行にだけ返す。重複要求/受理照会/再起動で資格を再発行せず、成功応答を再実行許可へ読み替えない。commit又は受理応答不明なら送信せずoutcome_unknownへ回す。拒否だけで過去の引渡し済み試行の未送信を確定しない。DBの耐久設定・方式は未検証で実I/Oは無効。
+8. 受理を確認した当該gatewayだけが固定payloadで外部I/Oを一回試みる。HTTP client/proxyを含む自動再試行を禁止する。開始記録後のクラッシュ/応答断ではoutcome_unknownとし、同じ開始記録から再実行しない。P方針では受理後・実送出前の取消でも送出し得る残余リスクを説明する。Pは暫定採用済みの要件変更だが、方式の実装適合は未検証。I/O直前の追加の中止検査は新しい未送信証拠にせず、開始後の不確実な結果を保持する。DBと外部HTTPを原子的な一処理とはしない。
+
+本文・宛先・添付・送信アカウント・権限scopeの変更は再承認。既存承認を上書きしない。snapshot承認の期限・複数承認者の規則は[未決U06](08-decisions-open.md#u06)。開始資格の5秒とは別である。
+
+提供元が冪等キーや照会を持たない場合、Pelway内の二重dispatch防止しか保証できない。ローカルで送信前記録と実際の外部副作用を完全に一トランザクションにはできない。初期の疑似送信で限界を試し、照会・照合方法がない外部更新は原則保留する。例外採用にはリスクを示した別判断を要する。
+
+<a id="ch03-s06"></a>
+## 実行所有者、再開、引継ぎ、取消
+
+`run`のリース取得でfencing tokenを増やす。gatewayとDBは古いtokenの更新・新dispatchを拒否する。期限切れを理由に同じ外部操作を別runnerへ再送させない。checkpointには完了手順、未完了手順、operation結果、成果物参照を保存する。再開は未完了手順からで、成功済み副作用を再実行しない。
+
+引継ぎ欄には、決まった内容と決定者・時刻、送った宛先・本文・添付・時刻、現在状態、残作業、誰の判断待ちかを残す。作業途中のファイルとログへの権限付き参照も渡す。担当交代で承認を有効のまま保つかは入力間に差がある。初版推奨は安全側に新実行者の確認と必要時再承認。内容・アカウント・scopeが変わった承認は必ず失効させる。この差分は08に残す。
+
+取消は第10状態を確定せず、`cancel_requested_at` と `stop_reason`、外部runの停止確認を別に持つ。新dispatchを止めて協調的取消を送る。外部停止が未確認なら理由「停止確認中」を添え、停止済みとは表示しない。送信中や結果不明の操作は元状態を保ち、取消で記録を消さず、結果照会を残す。開始記録より後の取消には `reason-cancel-after-start` を表示し、「取り消しました」とは表示しない。その他の状態で止まっているへ移せるのは上表の追加提案に該当する場合に限る。取消要求は新たな仕事の実行runを無条件に作らない。
+
+BotがBotへ依頼する子タスクは親taskへ関連付ける。人の確認要否は既存未決。初期案は読み取りと内部下書きだけで、親の権限・承認を複製しない。
+
+<a id="ch03-s07"></a>
+## 隔離と秘密
+
+| 案 | 利点 | 制約 | 初版の判断 |
+|---|---|---|---|
+| Botごとの常時VM | 作業環境・常駐プロセスを維持しやすい | ローカル機材を消費。停止復元の試験が必要 | 比較対象 |
+| タスクごとのコンテナ＋永続成果物 | Linuxツールを共通化、必要時だけ起動 | カーネル共有。ログイン済みブラウザの継続等は別課題 | 合成データ検証の推奨案。安全承認前に実行しない |
+| microVM / gVisor等 | 分離強化の候補 | CPU・OS・syscall・起動費用の検証 | 将来比較 |
+| ホストOS別sandbox | ホストツールに近い | 3OS別実装、ホスト侵害の検証範囲が大きい | 初版では採らない |
+
+sandboxは非root、capabilityなし、read-onlyルート、task用の書込領域のみ。CPU・メモリ・PID・時間の上限を設定する。ホストホーム、DB資格情報、container runtime socketを渡さない。起動controllerは許可済みイメージとvolumeだけを受け付ける。
+
+秘密はgatewayの資格情報brokerに置く。OS credential storeの参照とコンテナ内プロセスの関係は05の境界で設計し、Bot・LLM・成果物・ログへ値を出さない。短命でtask/scopeを限定したbroker用tokenと本サービスのrefresh tokenを区別する。
+
+MCPはツール呼出し方式の一つで、外部agentの全ジョブ管理・隔離ではない。CLI、hook、API、webhookも同じgatewayの権限・承認を通す。ツール説明や外部文書はデータであり、管理者の許可を拡張しない。
+
+<a id="ch03-s08"></a>
+## 監査とローカル推論
+
+監査はDBの専用書込権限による追記型とし、actor、承認snapshot、policy版、操作、結果、時刻、correlation IDを保存する。hash chainは改ざん検知の補助で、ホスト管理者まで変更不能にする仕組みではない。保持・削除・国内バックアップは[13のR11/R15とD01〜05](13-operational-defaults.md)を適用する。
+
+安全試験はスタブを用いる。実推論候補は国内ホストのllama.cppと事前取得モデル。モデル名・hash・ライセンスと量子化条件を固定し、起動時のダウンロードや国外fallbackを禁じる。外部コーディングagentが自分の提供元で推論することは11の利用者選択連携であり、本体推論をそこへ無断で転送しない。
+
+<a id="ch03-s09"></a>
+## 「作業を見る」の境界
+
+作業画面は自動で開かず、利用者が「作業を見る」を押して開く。基本は数秒おきの静止画と手順log。live remote desktop/動画配信を初期要件へ追加しない。取得対象はtaskに許可された作業領域だけで、host desktop全体・secret入力画面を収集しない。画像もartifactと同じ権限/保持/国内保存を適用し、外部連携へ自動送付しない。
+
+<a id="ch03-s10"></a>
+## 理由/境界の共通翻訳キー案
+
+| 安定ID | 日本語 | English |
+|---|---|---|
+| reason-stop-confirming | 停止確認中 | Awaiting stop confirmation |
+| reason-reconnecting | 再接続中 | Reconnecting |
+| reason-integration-revoked | 連携の取り消し | Integration revoked |
+| reason-cancel-requested | 取り消し依頼 | Cancellation requested |
+| reason-cancel-after-start | 取り消し依頼済み（送信は撤回されない可能性があります） | Cancellation requested (the send may not be reversed) |
+| boundary-selected-external | 国内限定の外 | Outside Pelway's domestic-only scope |
+| boundary-selected-external-desc | Pelway本体の国内限定の範囲外です。送り先で国外処理・保存される可能性があります（未確認の場合を含む）。 | Outside Pelway's domestic-only scope. The destination may process or store data outside Japan, or this has not been confirmed. |
+| content-external-unverified | 外部由来・未確認 | External content, unverified |
+
+9状態を増やさず理由/接続表示を別キーで付ける。将来地域が増えた場合の表示文は配置方針へ関連付けるが、今は日本単一の文言だけを設計する。
+
+<a id="ch03-s11"></a>
+## 論理操作・固定承認・試行の関係
+
+`logical_operation_id`は、宛先/account/型付き操作/目的/payload hashが固定された一つの意図した副作用を表す。同じ文章を別の目的で2回送るなら、人が別操作を指定する。内容hashだけをIDとしない。`action_snapshot`はその入力とpolicyの不変版、`approval_decision`はsnapshotへの承認集合（複数人の票を含め得る）、`dispatch_attempt`は試行の記録である。
+
+1つの固定承認版に1つのローカル処理keyを付ける。一方、提供元へ送る冪等keyはlogical operationへ固定し、同じ副作用の再承認だけで変えない。提供元account/APIとpayloadが同じで、key保持期限・再試行意味が有効な場合に限り再使用する。新payload/別操作なら新operationとkeyにし、旧operationとの関連を保存する。
+
+同一operationに同時に複数の未解決試行を作れない。結果不明の間は別ID/別承認で迂回しない。人の『送れていないと思う』だけを技術的な未実行証拠にしない。提供元の確定未実行証拠も有効な冪等保証もない場合、通常の再試行は保留する。例外は残る二重実行リスクを示した別判断であり、今回採用しない。providerがkeyを無視/期限切れにした場合の正しさを保証しない。
+
+取消/失効とattempt受理は同じoperation/関連policy epochを使って順序化する。予約だけなら新規試行を阻止できるが、attempt_started確定後は外部副作用の取消を保証しない。観測/停止は11の限定経路を用い、資格情報を全面取消したときは自動照会不能と明示する。
+
+<a id="ch03-s12"></a>
+### 承認版・提供元キーと復旧の追加条件
+
+`approval_version_id`は固定snapshotに対する一つの承認decision版で、個別の票IDではない。再承認は新しいdecision版を作る。予約にunique(workspace, approval_version_id)を置き、同じ版の重複処理で開始資格を増やさない。
+
+提供元keyは(provider, provider_account_ref, APIの冪等名前空間, key)の一意な対応表で一つのlogical operationへ結ぶ。実際の提供元が保証する範囲/保持期限をAdapter能力に保存し、scopeが広ければより厳しく衝突を拒否する。同じoperationの再承認/別attemptは同じ対応行を参照し、新keyで迂回しない。期限切れ/期限不明なら冪等保証を再試行根拠にせず、独立の確定未実行証拠がない限り保留する。
+
+過去backupからの復旧では外部dispatchを全体で既定停止し、復旧点以後に生じた副作用の可能性を復旧DBとは独立した記録/提供元証拠で照合する。該当操作自体が復旧DBから消えている可能性もあるため、列挙/照合範囲が証明できなければ対象連携の停止を解除しない。古いcheckpointを未実行証拠にしない。具体的なDB耐久設定/照合記録/backup手順は実装前の阻害として残す。
+
+<a id="ch03-s13"></a>
+## 通信目的と根拠・開始資格・結果不明の追加契約
+
+権限/固定snapshotの検査に加え、[12のP01〜08と実行点別判定](12-communication-secrecy.md)の目的、必要当事者、説明版、根拠版/epoch、source範囲、保持期限を検査する。国内AIへ渡す時、結果を公開する時、メモリへ保存する時にも再検査する。
+
+開始資格はserver発行から内部開始受理まで5秒、operation/attempt/payloadへ一回限り。資格の発行と開始受理を区別し、受理と取消commitの順序を一意にする。上の手順6〜7は開始要求の検査と受理の耐久記録であり、資格の期限を外部HTTP完了まで延ばすものではない。5秒超過時は新しい内部開始受理をしない。引渡し済みの試行の未実行が証明できなければ結果不明とし、runnerの「呼出しなし」logだけで未送信にしない。
+
+結果不明は発生直後に現権限内の判断待ちへ表示する。読取照合は0/5/15分の最大3回、照会不能は即有人確認、24時間未解決で会社の決定権者へ昇格する。タイムアウトは結果の確定ではなく、既存IDの再利用や新IDでの代替再送を許可しない。[13のX01〜06](13-operational-defaults.md)を適用する。
+
+
+<!-- FILE: 04-data-api-realtime.md -->
+<a id="ch04-s01"></a>
+# 04 データモデル・API・同期の契約案
+
+この章は初版の参照仕様。実装コードや確定したDBスキーマではない。
+
+<a id="ch04-s02"></a>
+## 永続データ
+
+会社の主キーは `workspace_id`。各tenant表はこれを持ち、複合外部キーで他社参照を拒否する。`workspaces`自体は `id = workspace_id` が根。Botの会社IDをLLMの文字列から決めない。会社・チャンネル閲覧権限は取得・検索・添付・イベント・監査参照すべてに適用する。
+
+| 表 | 主な項目と制約 |
+|---|---|
+| actors / members | actor ID、kind(human/bot/external_agent/external_tool)、所有者、会社。チャンネル参加はmembers側。外部主体は単独で権限を持たず委任元を参照 |
+| bot_profiles | member、役割、許可policy、国内メモリ参照（source/根拠/期限付き、R02の最長365日以内）、利用上限 |
+| channels / channel_members | channel、参加者、役割、次のmessage seq |
+| messages | channel、seq、author、client_msg_id、本文版、thread_root。unique(workspace,channel,seq)、unique(workspace,author,client_msg_id) |
+| tasks | source message、親task、担当、9状態、version、判断者・論点、stop_reason、cancel request |
+| runs / sessions / task_steps | task、attempt、外部session参照、executor、lease、fence、checkpoint、step結果。sessionは認証cookieや秘密ではない |
+| artifacts / attachments | task/run/message、内容hash、版、国内storage key、MIME、size、信頼区分、検査結果、原提供元ref |
+| decisions / handoffs | 不変の案版、判断者・時刻、引継ぎの5項目と参照 |
+| action_snapshots / approvals | action_kind・操作・宛先・本文・添付hash・account・scope・policy版、承認decision集合、個別の承認票、承認者・期限・状態。snapshotは不変、票は集合へ多対1 |
+| external_actions | logical operation、固定payload、action_kind、提供元key対応行。unique(workspace,logical_operation_id)。承認/試行履歴は別表とし、同一operationへ関連付ける |
+| dispatch_attempts | attempt ID、operation、approval_version_id、予約、attempt_started_at、検査時epoch/version/fence/hash、拒否/結果、開始資格を得たgateway実行ID。unique(workspace,approval_version_id)、同一operationの未解決試行は最大1。同じattempt_startedから資格を再発行しない |
+| provider_operation_keys | unique(provider,provider_account_ref,API冪等名前空間,key)、logical operationへの不変対応、保証範囲/期限。再承認や別attemptは同じ行を参照 |
+| integrations / grants | provider、owner/admin、有効化版、scope、送信data分類、送信先、国外可能性、社内有効化説明版と通信当事者の根拠refを分離、credential ref、失効epoch |
+| inbox / outbox / sync_events | unique(workspace,integration,external_account,source_event_id)、payload hash、stream_pos、subject version、未処理/処理済み。取込と業務適用を分離 |
+| audit_events | actor、subject、操作、結果、snapshot hash、policy版、日時、prev_hash。秘密・prompt全文を既定で含めない |
+
+同一 `client_msg_id` の再送で本文が違えば409を返し、異なる本文で既存成功を偽装しない。添付storage keyは利用者指定パスをそのまま使わず、path traversalを拒否する。編集・削除・権限取消は本文追加と別のversion付きイベント。
+
+<a id="ch04-s03"></a>
+## API
+
+入口はHTTP JSON、配信はWebSocket。全操作で認証・会社/チャンネル権限・versionと、12の目的・source・必要当事者を覆う根拠版/epoch・保持/出力範囲を確認する。localhostでもブラウザOriginとCSRF、WebSocket認証を検査する。正式なOpenAPI/JSON Schema生成は後の実装段階。
+
+| method/path案 | 入力/動作 |
+|---|---|
+| POST /v1/channels/{id}/messages | client_msg_idと本文、添付版。重複でも同じ結果 |
+| GET /v1/channels/{id}/messages | before_seq/after_seqとlimit。権限の範囲だけ |
+| POST /v1/tasks/{id}/handoffs | expected_version、新担当、引継ぎ参照。未決判断者の付替え |
+| POST /v1/tasks/{id}/resume | checkpoint ref、expected_version。外部成功操作は再dispatchしない |
+| POST /v1/tasks/{id}/cancel | 取消要求を記録し新dispatch禁止。停止確認と同義ではない |
+| POST /v1/decisions/{id}/confirm | server提示の不変案版/選択肢ID、expected_version。権限ある人の明示UI確認だけで判断確定。チャット文は候補まで |
+| POST /v1/approvals/{id}/decide | snapshot hash、expected_version、決定。期限・actor再検査、競合409 |
+| GET /v1/actions/{id}/evidence | 国内に保存済みの証拠だけ返す。新たな外部通信を起こさない |
+| POST /v1/actions/{id}/refresh-evidence | 外部照会は別の明示要求とgrant/送出範囲の検査へ。通常grant取消後は自動呼出しない |
+| POST /v1/actions/{id}/resolve | 人の送れていた/いない判断と証拠ref。再送は新承認へ |
+| POST /v1/integrations/{id}/enable | scope、送信先・データ分類、国外可能性の説明版と明示同意、対象scopeのintegration.enable権限（委譲された利用者または管理者） |
+| POST /v1/integrations/{id}/revoke | epoch増加、broker拒否、未dispatchを停止、外部停止確認を追跡 |
+| POST /v1/integrations/{id}/events | 将来の受信口。署名・再送検証とinbox永続化のみでACK。初期ローカルは公開しない |
+| GET /v1/sync?since= | 権限付き差分またはresync_requiredとsnapshot watermark |
+
+オフライン中の承認・外部dispatch・権限変更をキューへ積まない。通常メッセージの未送信draftのみ送信キューへ保存し、再接続後に自動送信しない案とし、各メッセージの未送信表示と「送る／破棄」を出す。一括送信を入れるなら件数/宛先channelを確認する。UI提案であり正式決定は08の未決。
+
+<a id="ch04-s04"></a>
+## 順序と再接続
+
+messageの `seq` はチャンネル内の発言順。message編集や権限変更には独立の `event_id` と `subject_version` を持つ。両者を混同しない。会社内の `stream_pos` は差分取得用の不透明cursor。DBトランザクションのcommit順で公開する。採番sequenceだけではcommit順が揃わないため、初版はworkspaceごとの行ロックをcommitまで保持して順序化する案。負荷は07で測る。
+
+状態更新・監査・outboxを同一transactionへ書く。配信後にcursorを保存し、クライアントは適用済みevent IDとversionで重複排除する。取得済み最大cursorより前にcommitしたイベントを落とさない。通知のACKは実行・承認の成功ではない。
+
+再接続時は保存cursorから差分を取得する。cursor期限切れなら権限付きsnapshotとwatermarkを一緒に取得し、その後の差分へ切り替える。全subject・権限・watermarkを同じPostgreSQLのREPEATABLE READ読取snapshotから作る。読取途中のcommitでwatermarkだけ先へ進めない。初期の小規模試験は1回で整合したsnapshotを返す案。分割が必要ならimmutableなsnapshot manifest/取得点を固定し、ページごとに新たな最新状態へ混ぜない。転送時の現権限も再検査し、取得中に閲覧を失ったscopeは返さず再同期を要求する。チャンネル履歴だけの取り直しでは、編集・削除・タスク・権限変更が戻らないため、全subjectのsnapshotを対象にする。権限取消で見えなくなったchannelのcacheを消すtombstoneも反映する。
+
+欠番と古いsubject versionは再取得・照合する。指数backoffの上限30秒は設計仮定であり性能保証ではない。外部イベントに順序番号がない場合、受信時刻だけで因果順を決めずproviderの状態を照会する。重複・並べ替えで現在状態を後退させない。
+
+Matrixの増分syncと送信transaction ID、Zulipのevent queueを参考にする。仕様と適用差は [調査原稿](../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md) を参照。外部副作用のexactly-once保証ではない。
+
+<a id="ch04-s05"></a>
+## キャッシュと削除
+
+ネイティブはSQLite、WebはIndexedDBに閲覧範囲の限定cacheを置く。正本ではなく、承認はオンラインserverだけで確定する。端末の暗号化・同期設定は別確認。logout・会社離脱・権限失効の削除と、オフライン残存期限を設計し、未確認の端末で機密cacheを有効にしない。機密cacheは最終オンライン確認から24時間、端末/workspaceごと256MiBまで。失効/離脱/logoutは先に制限する。保持・利用停止・世代削除/復旧は[13のR14/R15/R16とD01〜05](13-operational-defaults.md)に従う。
+
+<a id="ch04-s06"></a>
+## 配置/データ所在の最小境界
+
+`workspaces.placement_policy_ref`で同一の配置方針版を参照する案。今の有効値はJP-local単一だけ。方針には保存、AI処理、log、backupの配置先と`core_domestic_policy`、選択外部連携のgrant判定への参照を置く。送信先が国外であり得る外部連携を、この値で国内と再分類しない。設定は構成ファイル上の設計例で、地域選択UIや動的切替APIを今作る意味ではない。
+
+将来US/EU/JPへ広げる場合、同じ境界を実装できる余地だけ残す。region変更時の既存data・backup移行、契約、運用access、停止時間は未検討。自由切替・自動移行・法適合を保証しない。
+
+workspace行lockがボトルネックになった場合は、commit済みoutboxを永続dispatcherが採番して配る方式を将来の代替として比較する。dispatcher再起動/重複/原transaction順の保持を別検証し、今の設計へ無断置換しない。
+
+<a id="ch04-s07"></a>
+## 同時更新と成果物の耐久化
+
+lock順序はworkspace順序行→subject（種類/ID順）→承認/operation行の一定順とし、全更新APIとinbox適用で共有する。lock中に外部I/O・ファイル取込を行わず、transactionを短く保つ。監査のprev_hashはworkspace内の鎖で、全社共通lockを作らない。管理者の改ざん耐性を保証するものではない。
+
+ファイルはtask専用の一時領域へ保存→size/MIME/内容hash検査→許可された国内volume上の不変keyへ原子的renameとファイル/親directoryの耐久化→DBのartifact参照/checkpointを確定する。DBとfilesystemの原子commitは主張しない。失敗で残る孤立ファイルは参照/保持を照合して後から回収し、参照確定前の一時ファイルを成功artifactとして出さない。
+
+復旧時にDB参照とhash/ファイルの存在を照合する。欠損があればrun再開を保留し、外部副作用済みのstepを自動再実行しない。DBとvolumeのbackupは同じ整合取得点/参照manifestを持つ手順が必要で、方式は未決。別時点のbackupを組み合わせて復旧成功としない。
+
+<a id="ch04-s08"></a>
+## 外部イベントの帰属
+
+submit時にworkspace・integration・account・提供元job/run/session・内部task/runの対応を保存する。署名は送信元の確認で、task所有権の証明ではない。外部payloadのtask_id/run_idは照合用に限り、業務適用先は保存した対応から解決する。未登録/不一致/別channelのイベントは隔離し、状態/成果物を適用しない。署名が正しくてもこの検査を省かない。
+
+重複keyに同じhashなら既存ACKを返す。同じkeyに異なるpayload hashなら不整合として隔離し、通常の重複として捨てない。
+
+<a id="ch04-s09"></a>
+## 操作種類の正規値
+
+ActionSnapshotの`action_kind`は`customer_send`（顧客送信）、`agent_handoff`（外部への受け渡し）、`tool_read`（ツール読み取り）、`tool_write`（ツール更新）の4値案に統一する。翻訳キーはそれぞれ`action-customer-send` / `action-agent-handoff` / `action-tool-read` / `action-tool-write`。06/11の文字表示と成功後の遷移はこの値から決め、提供元の文章をenumに昇格しない。
+
+<a id="ch04-s10"></a>
+## 外部I/Oの開始受理と復旧
+
+03の現権限/承認/epoch/fenceの最終検査と予約→attempt_startedへの条件付き更新を同一transactionで行う。開始資格は予約済みoperation/attempt/payloadとgateway実行へ一回発行し、発行から5秒以内の開始受理で一回消費する。成功の耐久commitを確認した当該gatewayだけが外部I/Oへ進める。重複要求や再起動で資格を取り直せない。失効/取消更新も同じ順序で競合させる。永続commitと受理応答を確認できないgatewayは外部を呼ばずoutcome_unknownとして照合へ回す。同期commit/ストレージ耐久の設定と障害試験は着手前に確認し、未確認の構成では外部I/Oを始めない。
+
+復旧DBはbackup取得後の外部成功を知らない可能性がある。復旧時はdispatchを既定停止し、復旧点以後の操作を独立記録/提供元証拠で照合する。範囲を列挙できない/照合できない連携は止めたままにする。DB/volumeのhash整合だけでは再送安全としない。
+
+03のP方針はJ-S07で明示的変更として暫定採用済み。取消commit後の新しい内部開始受理を禁止し、受理済みの物理送出前競合を含む停止非保証を説明する。旧S1を解消したとはしない。方式・根拠失効・障害/復旧の検証と別承認前は実外部I/Oを無効のままにする。
+
+<a id="ch04-s11"></a>
+## 目的別根拠・派生物・容量予約のデータ契約
+
+[12 §3.2](12-communication-secrecy.md)のcommunication_use_policies、communication_basis_records、context_authorizations、派生物のsource/ACL/目的/根拠/期限、support_access_grant、削除・制限記録を既存workspace境界へ追加する。名称は論理単位で確定DDLではない。根拠未確定の機能は無効とし、管理者設定を同意の代用にしない。
+
+削除の有効受付と制限確定を同じtransactionで行い、sourceの参照先全件の物理削除完了を待たず読取/検索/再利用/公開を拒否する。復旧DBから独立した制限記録を再適用するまでは再開しない。
+
+保存は使用量と同時処理の予約量を合わせてquota検査する。10GiBには本文/添付/成果物/メモリ/索引を含め、作業・診断/安全監視/監査/同意・backup・端末cacheは[13のC01〜08](13-operational-defaults.md)へ分類する。分類不明の永続保存は禁止。法定記録を上限到達で捨てず、新しい業務を止め安全記録のreserveを守る。
+
+
+<!-- FILE: 05-local-dev.md -->
+<a id="ch05-s01"></a>
+# 05 3OSのローカル開発・試験・配布設計
+
+環境準備・インストール・ユーザーPC操作は今回実施しない。以下は承認後に用いる構成案で、手順の成功報告ではない。
+
+<a id="ch05-s02"></a>
+## OS別の境界
+
+| 項目 | Windows | macOS | Linux |
+|---|---|---|---|
+| GUI build/run | Windows MSVCのRustとWindows SDK | macOSのRustとApple SDK | Linux native toolchain |
+| backend/tool | WSL 2内PodmanまたはDocker Engine | Apple container。Intel/未対応OSの代替はPodman machineを別審査 | rootless Podman |
+| CPU | x86_64/ARM64を別targetとして確認 | Apple containerはApple silicon。Intel Macへそのまま使わない | x86_64/ARM64を別imageで確認 |
+| native試験 | Microsoft IME、NVDA、通知、clipboard、DPI | 日本語入力、VoiceOver、通知、権限、Retina | fcitx5/IBus、Orca、X11/Wayland、font |
+| hostで行う配布工程 | MSI/MSIX等と署名・SmartScreen挙動の確認 | app/dmg、署名、公証、Gatekeeper確認 | deb/AppImage/Flatpakの選定・依存確認 |
+
+Linux containerのbuild成功はWindows/macOS GUIのbuild成功を意味しない。共有するのはソースとOCI image定義であり、CPU arch別のnative binaryまで同一ではない。
+
+<a id="ch05-s03"></a>
+## WindowsとWSL 2
+
+Microsoftの[WSL install](https://learn.microsoft.com/en-us/windows/wsl/install)はWindows 10 version 2004 build19041以降、またはWindows 11を示す。これはインストール方法の条件で、利用予定Windowsの保守状況や全container機能の保証とは別。仮想化・CPU・kernel・network要件を実環境で確認する。
+
+GUIはWindows、Linux backendはWSL内で動かす。WSLgのLinux GUIはWindows向け製品試験の代わりにしない。単一ソースの置き場所案はWindows側の同期外workspace、backend build contextをWSLの管理volumeへコピーする方式。共有mountでのfile I/O性能は未測定で、Windows側にソースを置くこと自体が技術上必須ではない。
+
+Docker Desktopの要件と費用条件をPodman/Docker Engineへ転用しない。[Desktopの要件](https://docs.docker.com/desktop/setup/install/windows-install)と[license条件](https://docs.docker.com/subscription-billing/desktop-license)は別製品の比較資料。初期案はDesktopではなくWSL内runtime。runtimeの更新・image取得・diagnostic通信も10で確認する。
+
+<a id="ch05-s04"></a>
+## macOSとApple container
+
+[apple/container](https://github.com/apple/container)の公式資料に従いApple siliconとmacOS 26を想定する。対象releaseのサポート範囲は実装直前に再照合。Linux containerを軽量VMで動かす構成であり、Rust GUIやApple固有APIはmacOS hostに残る。
+
+[BUILDING.md](https://github.com/apple/container/blob/main/BUILDING.md)のvmnet関連制約を確認し、作業ディレクトリ例は同期外の `~/projects` とする。ただしディレクトリ名だけでiCloud等の同期外を保証しない。内部専用network、複数containerの起動順、DNS、port公開、rootless性、GPU可用性は要確認。Apple containerへDocker Composeの設定がそのまま使えるとはしない。
+
+Apple siliconのGPUをLinux VMから直接使える前提を置かない。ローカル推論でhost backendを使う場合、国内ホストの専用プロセスをloopbackで接続し、sandboxにはそのsocketを直接渡さない。CPU推論またはスタブでも設計試験を続けられる。
+
+<a id="ch05-s05"></a>
+## Linuxと起動構成
+
+Linuxはrootless Podmanを推奨。X11/Wayland、fcitx5/IBusを別試験にする。host kernel共有のcontainer隔離をmicroVMと同じ強度とは言わない。Apple containerのVMも構成・管理権限次第であり、他OSより無条件に安全とは断定しない。
+
+起動単位はpostgres、server、runner、integration gateway、sandbox controller、stub/local inference、dummy mail、task sandbox。`app` と `sandbox` networkを分け、DBはsandboxから到達不能にする。未確認のruntimeは外向き遮断を実証するまで機密実行に使わない。
+
+外部連携を使う場合だけ、gatewayから許可済みAdapterへの別出口を設ける。本体推論・DB・sandboxへ広いインターネット接続を与えない。外部サービスのcallbackを受けるためにローカルhostへ勝手にtunnelや公開portを作らない。polling/loopback bridgeで足りるか、公開ingressが将来必要かは11の制約として扱う。
+
+秘密はhostのcredential storeとgatewayのbrokerで管理する案。host storeをcontainerへ丸ごとmountせず、認証済みの限定IPCで必要操作だけ仲介する。3OSのbroker実装と暗号化鍵の管理は未検証。DB管理者キーをBotへ渡さない。
+
+<a id="ch05-s06"></a>
+## 試験と配布
+
+| 試験 | 場所 | 対象 |
+|---|---|---|
+| domain単体 | Linux containerとhost | 9状態、hash固定、scope、順序、承認失効 |
+| 結合 | ローカルcontainer群 | DB/outbox、lease/fence、疑似agent、応答断・再起動・重複・権限取消 |
+| GUI | 3OS host | Slintとeguiの同一fixture。headless試験だけでIME/読み上げ合格にしない |
+| Web | host browser | DOM、WASM、focus、composition、アクセシビリティ、snapshot再同期 |
+| 国内境界・連携例外 | host/VM/container全体 | 10の通信観測と11のscope逸脱・取消試験 |
+
+既存計画の応答断20回、再承認20回、権限取消の条件別試験を減らさない。試験実行は別承認後で、現在は未実施。
+
+ローカルの未署名buildと一般配布を分ける。Windowsの配布形式に応じた署名要件・証明書/サービス費用、macOS Developer ID署名・公証の登録、Linuxのpackage署名と配布方式は未決。『あらゆる署名は必ず有料』とは言わない。有料登録・証明書購入は今回行わず、選定後に確認する。
+
+署名や公証は外部通信を伴い得る。機密データを含めないbuild成果物の配布工程と、機密実行時の本体国内境界を分離する。release用SBOM、NOTICE、再現build、image digest、model hash、CPU別配布物、手動update/rollbackを記録する設計。OS installerだけでLinux backendやmodelが自動で準備できると見せない。
+
+controllerは信頼する管理側の高権限部品で、侵害時にhostへ影響し得る。runtime socketへ触る範囲をcontrollerだけへ限定するが、Docker Engineのroot権限相当の影響が消えるとはしない。初期Windowsの実機試験はWSL2＋rootless Podmanを第一候補として一つに絞る案で、Docker Engineは別見積もり/承認の代替。Podman/Engine/Apple containerごとのcontroller実装・保守・試験工数は未見積もり。
+
+macOSのhost推論endpointをLinux VMから呼ぶ場合はloopbackとは別経路で、runner/gatewayだけに限定する。task sandboxとCLI連携区画からhost推論portへ到達できないことを10のD4で試す。未検証なら機密実行を許可しない。
+
+
+<!-- FILE: 06-i18n.md -->
+<a id="ch06-s01"></a>
+# 06 日本語・英語の共通資源
+
+初版から日英の両方を対象にする。翻訳資源はFluent `.ftl`、キーは `task-state-working` のような安定IDとする。RustとJavaScriptのformat adapterから同じ資源を読む。enum名をそのまま利用者へ表示しない。
+
+`pelway-domain` は状態とイベントschemaを定義する。翻訳内容と状態の意味を区別し、片方の言語だけで意味を増やさない。WebのIntlとRustのICU系formatterは日付・複数形・数値のfixtureを共有し、比較するbrowser/ICU/CLDRの版と差異を記録して固定する。翻訳資源やfontを実行時に外部CDNへ取りに行かない。
+
+<a id="ch06-s02"></a>
+## 表示と入力の規則
+
+- 初期言語はOS/browserを参考にし、利用者の設定で日英を切替。再起動なしの切替を設計する。翻訳なしのキーを画面へ露出させず、build時に不足を検出する。
+- 保存時刻はUTCとし、ローカル試作の期限・受付・経過表示はJSTの絶対日時に残日数を添える。将来の利用者timezone切替とは分ける。監査APIはUTC offsetを保持する。言語とtimezoneは独立。
+- 英文を文字数の増減だけで切り詰めず、複数形と埋込変数をFluentの機能で表す。文を部品ごとに連結しない。
+- CJK禁則、和英混在、絵文字のgrapheme、RTL入力、コードの等幅と長URLを試す。自動翻訳・外部spellcheckは本体機能に含めない。
+- IME変換中のEnterは送信にしない。composition開始/終了とキーイベントを各OSで試す。候補窓がcaretへ追随し、focus移動で文字を落とさない。
+- 読み上げの名前は表示名・主体の種類（人／Bot／外部エージェント／外部ツール）・状態を含める。外部主体では連携名も読み上げる。重複eventのlive announcementは一度だけ。
+
+コピーの初期提案は、通常の範囲選択では選択本文をコピーし、構造化された「会話をコピー」では送信者・4種類の主体ラベル・時刻を含める。両UIで同じfixtureを使う。複数メッセージにまたがる選択は実機で未確認。クリップボード同期による持出しは10の未保証境界。
+
+<a id="ch06-s03"></a>
+## 配布前の試験条件
+
+日英双方でログイン、チャンネル、メンション入力、9状態、承認snapshot、差分、失敗理由、連携有効化の国外可能性表示を試す。200%拡大と高コントラスト、NVDA/VoiceOver/Orcaの結果を別々に記録する。WCAG 2.2 AAを目標にするが、AccessKitを組み込んだだけで適合とは言わない。
+
+フォントは同梱を推奨する。Noto Sans JP等の具体的な配布ファイルとライセンス、CJK fallback、emojiのOS利用と同梱条件を実装前に確認する。UIの外観・配色は変更しない。
+
+<a id="ch06-s04"></a>
+## 状態の理由と責任分界の翻訳
+
+状態名だけでなく理由と境界表示も安定IDへ対応させる。表示案は03の理由表、共通表示契約は11を正とする。サービス名を翻訳キーの条件分岐にせず、連携定義とPlacementPolicyから文言を選ぶ。外部由来本文の文字列を認可/承認のボタンに使わない。
+
+日英両方で、有効中連携の一覧/主体表示に「国内限定の外」の文字、外部本文/logに「外部由来・未確認」の帯、4主体の文字ラベルがあることを確かめる。本体の画面に「国内で完結」「準拠」「適合」を表示しない。翻訳不足/読み上げ/高コントラストでも境界を失わない。
+
+操作の種類（04のcustomer_send／agent_handoff／tool_read／tool_writeに対応する日本語（顧客送信／外部への受け渡し／ツール読み取り／ツール更新））も翻訳キーにする。送信承認待ち/送信中のラベルと判断待ち一覧へ操作の種類/連携名を渡し、種類で見分け/並び替えできるようにする。種類はActionSnapshotの固定値から取り、外部本文から推測しない。
+
+<a id="ch06-s05"></a>
+## 取消・削除・サポートの表示契約
+
+内部開始受理だけで「送信済み」にしない。取消受付、未開始抑止、外部停止要求、停止確認、操作結果の件数と証拠を分ける。結果不明は即時の判断待ちと経過時間を出す。24時間は昇格の期限であって初回表示までの待ち時間ではない。
+
+期限はJSTの絶対日時と残日数、7日未満の現権限内強調。容量は80%警告と100%超過の保存前拒否を表示する。95%停止は採用しない。
+
+削除はオンライン/索引/メモリ/端末/backup/外部先の確認範囲を別表示する。backupの14日は復旧対象の上限で、物理消去確認は別。未同期端末を含め一括完了にしない。24時間削除、有人応答時間は保証文にしない。有人枠を本人が受諾するまでは「有人対応の時間帯は未確定」とする。全表示の値は[13](13-operational-defaults.md)から参照し、日英で意味を一致させる。外観は変更しない。
+
+<a id="ch06-notices"></a>
+## 状況文言の安定ID案
+
+意味は既存方針を継承する。識別子と英訳は文書上の案で実装済みではない。非同意者を名指しせず、「同意」のみを根拠にする表現にも固定しない。
+
+| ID案 | 日本語 | 英語案 |
+|---|---|---|
+| notice-consented-scope-only | 許可された範囲だけを参照しました。 | Only authorized sources were used. |
+| notice-deletion-accepted | 削除を受け付けました。対象の利用停止を先に処理し、確認できた状態を表示します。 | Deletion request received. We will restrict use first and show the status we can verify. |
+| notice-support-hours-unset | 受付済み。有人対応の時間帯は未確定です。 | Request received. Staffed support hours have not been confirmed. |
+| notice-outcome-unknown-24h | 結果を確認中です。再実行はしていません。 | The result is still being checked. The action has not been retried. |
+
+
+<!-- FILE: 07-performance-plan.md -->
+<a id="ch07-s01"></a>
+# 07 性能・メモリ・入力品質の評価計画
+
+測定は未実施。機材も未確認。以下の負荷・目標値は企画統合の試験仮定であり、既存見積もりや性能保証ではない。
+
+<a id="ch07-s02"></a>
+## 比較の順番
+
+Slintとeguiを同条件で比較する。まず3OSのIME、文字選択、NVDA/VoiceOver/Orcaで最低限の操作が成立するかを調べる。合格候補だけを製品採用の性能比較へ進める。GPUIはWindows読み上げ等の阻害が解消するまで採用候補の比較から外す。技術担当が望む参考計測を追加する場合も、工数と承認を別に取り、合格候補と混ぜない。
+
+<a id="ch07-s03"></a>
+## 負荷と記録
+
+| 項目 | 試験案 |
+|---|---|
+| 基本負荷 | 架空の5万message。和文6割・英文4割、可変高さ、長文2万字、code/link/emoji、50channel |
+| ストレス負荷 | 同条件で10万message。基本と分けて記録し、DB履歴全体と同時表示windowを区別 |
+| 読み方 | 先頭からスクロール、中間で新規受信、過去message編集/削除、画像遅延読込、読み上げで画面外へ移動 |
+| 操作 | 長文編集、変換確定、複数message選択、承認diff、切断・再接続、30分idle |
+| 環境 | OS版、CPU、GPU、RAM/VRAM、driver、runtime版、framework固定版、font、倍率、viewport、display refresh、build最適化、電源設定を記録 |
+| 繰返し | 各5回の中央値・範囲、p95 frame/input latency、失敗回数。cold/warm cacheは別 |
+
+<a id="ch07-s04"></a>
+## 指標と合格基準案
+
+ネイティブの初期メモリ目標は300MiB以下を仮置きする。対象はGUI＋client-coreのプロセス木で、コンテナ・DB・LLMは含まない。DB・推論を隠した「アプリ全体300MiB」とは呼ばない。Discordの数値を根拠にせず、機材と表示windowを固定した後にこの目標を見直す。目標を満たせなくても無断でWebViewへ変更しない。
+
+| 指標 | 測定・評価 |
+|---|---|
+| GUIメモリ | Win private working set/commit、macOS footprint、Linux PSS/RSSを別々に記録。異なるOSの数値を同一尺度として順位付けしない |
+| Webメモリ | renderer、WASM、workerの範囲を示し、他tab・ブラウザ共有分の扱いを記録 |
+| 全体メモリ | GUI、server、runner、gateway、DB、sandbox、LLM、Linux VMの重複しない合計と各内訳。LLM有/無を別表 |
+| 描画 | 60Hz条件でframe p95 16.7ms以下を仮目標。スクリーンリーダーon/off双方、文字200%拡大、高コントラストの各条件を分けて測る |
+| IME入力 | 確定Enter誤送信0、文字欠落0、caretと候補位置の誤り0を必須機能条件とする |
+| 履歴・コピー | 中間挿入で読んだ位置が飛ばない、画面外を含む選択の欠落0、読み上げとfocus対象が一致 |
+| 起動・再接続 | 最初の操作可能表示まで、差分同期完了まで、WASM転送/展開サイズを測定。上限値は機材決定後に設定し、未決を0にしない |
+| sandbox・推論 | 起動/停止/再開時間、tokens/s、first token、context長、peak RAM/VRAMをCPU/量子化別に記録 |
+| 国内境界 | 10のD試験。全体通信を観測し、許可済み連携以外へ本体データが出ないか検証 |
+
+ローカル推論品質は、架空の指示・日本語要約・tool引数・外部文章の攻撃例で評価する。モデル出力の正しさと、強制承認・権限制御の正しさは別に試す。モデルの安全な返事だけでゲート合格にしない。
+
+<a id="ch07-s05"></a>
+## 工数と試験段階
+
+二重UI実装の部分概算は02。ここに記した確認試験準備・実施・修正、機材、3OS環境、AI連携追加の工数は未見積もり。短期の人時へ足したことにはしない。
+
+局所試作は31日目以降、別見積もりと上限・安全環境の承認後。B/Cの部分試験とAの全受入を区別する。P1bの合格試験は合成データで行い、実顧客データはP1b合格と別の利用許可後にのみ扱う。安全反復回数等は既存計画を下げない。
+
+<a id="ch07-s06"></a>
+## 保持・復旧・人手の原価計測
+
+保存量とAI再読取量を分け、索引増幅、作業2GiB、記録計測予算2GiB、backup予算192GiB、RAM、端末cacheを重複なく記録する。10GiBだけを一社の総保存原価としない。backup予算は(10+2)×14=168GiBに24GiBの余裕を加えた未測定仮定。作業領域/checkpointはbackup対象外で全checkpoint復元は保証しない。
+
+同意確認、問い合わせ、削除失敗、連携先条件の継続確認、未解決照合、月次復元演習・権限点検の人の実時間も測る。合成試作後30日又は最初の内部目標逸脱の早い方で見直す。追加の運用/試験工数を既存局所試作の人時に算入済みとしない。未測定の料金・粗利・有人体制費は確定しない。
+
+
+<!-- FILE: 08-decisions-open.md -->
+<a id="ch08-s01"></a>
+# 08 採用記録・未決の正本・受入試験
+
+本章が統合版の未決一覧の正本である。他章の未確認・無効条件はここへ参照する。文書内の要求は実装すべき仕様で、実装済み/安全ゲート合格/実行許可の報告ではない。
+
+<a id="ch08-s02"></a>
+## 採用の優先順位と今回の置換
+
+濱田さんのJ-S01〜07推奨案の暫定採用（2026-11-09 00:33 JST）と、その後の運用値決定の委任を優先する。取消Pは明示的要件変更として暫定採用した。v0.6の「厳密な取消後ゼロ送出の保証を緩和しない」「A〜Cは未選択」「Pは未採用」は現行要求として残さない。過去文書の原本はsourcesに保全し、本文の正本にはしない。
+
+通常取消は取消commit後の新しい内部開始受理を禁止する。開始受理済みの一操作は物理送出前の競合を含め停止・撤回を保証しない。内部受理は送信済みの証拠ではなく、根拠失効への合理的抑止・未開始後続抑止・payload境界・不明結果の無断再送禁止は維持する。Pで旧S1を技術的に解いたとはしない。実I/Oは無効のまま。
+
+本文/添付365日、メモリsource期限内で最長365日、backup14日、10GiB、開始資格5秒、照合0/5/15分・24時間昇格、通常調査60分などの数値は13へ統合した。旧候補の本文180日/メモリ30日/backup30日、候補の30秒開始資格、95%停止、平日日中対応は現行値として残さない。候補に戻さない一方、人の受諾や実測を完了扱いにしない。
+
+<a id="ch08-s03"></a>
+## 未決と推奨の一元表
+
+| ID | 残る確認・推奨 | 現在の制限・終了条件 |
+|---|---|---|
+| <a id="u01"></a> U01 S1・送出/取消/根拠失効 | P方針の下で個別操作の発行/開始受理/送出を分離し、取消と開始受理の一意順序、検査後中断/後日再開/旧gateway/接続再利用/DB復旧を検証する。法的効力とcommitの当てはめはU03とも照合 | 実外部I/O無効。5秒だけでゼロ競合を証明しない。S1を解消したと記載しない。方式と証拠を固定し合成試験・別承認が必要 |
+| <a id="u02"></a> U02 人員・稼働の受諾 | 運営/事故判断/鍵復旧/顧客の照合決定者を実在の人へ記名し、本人の受諾・守秘・権限・不在時経路を確認。予定枠平日20〜21時JSTは候補で確約ではない | 実データ前に確定。AIで責任者・独立審査者を埋めない。緊急本文アクセス非提供。通常調査も実行者と別人の適切な顧客側承認がなければ無効 |
+| <a id="u03"></a> U03 法的当てはめ | 通信当事者/代理権/目的別根拠、P01〜08の適用、APPIの委託/第三者/外国移転と方法別法定記録、事故報告/通知、免責と賠償制限を事実に当てはめる。必要箇所は弁護士確認 | 未確定の機能/scopeだけ無効。長期保存や管理者設定で根拠不足を埋めない。未完を理由に合成設計全体を停止しない |
+| <a id="u04"></a> U04 連携先の実条件 | provider/account/API別の権限・冪等key名前空間/保持期間・結果照会・取消/停止・データ地域/保持/再提供/学習利用/事故条件を確定。認証時通信と業務データを区別 | 許可のない実接続なし。所在未確認だけで一律禁止せず、不足するデータ/scopeを拒否。照会不能で自動再接続や再送をしない |
+| <a id="u05"></a> U05 実装・機材・鍵/復旧・原価 | server認証/Origin/TLS/service identity、DB耐久/volume整合、独立制限記録、暗号鍵/連携token分離、sandbox/CLI区画/全通信、Slint固定版とrmcp推移依存/NOTICE/SBOM、3OS/IME/読み上げ/モデル機材、容量/削除/人手原価を測定 | 本体国内適合・E2EE・管理者からの完全秘匿を保証しない。遮断/監査/保護/復旧不明の経路は無効。支出/実装/実データは別承認。新サービスを自動追加しない |
+| <a id="u06"></a> U06 未承認の製品細部 | T6はlocal承認版keyとprovider logical-operation keyを分ける案を推奨。短い自然返信は5条件の完全一致と曖昧時確認を要し、当面の安全案はUIで不変版確認。担当交代は新実行者確認/必要時再承認、変更されたscope/account/payloadは必ず再承認。子taskは内部読取/下書きのみを推奨 | これらの正式PRD採否、承認期限/複数承認者、追加遷移、幅390/360px、offline draftの送る/破棄、国外端末/持出し/mail・地域移行は未確定。現行のメンション起動・dummy mail・新payloadの個別承認を維持。追加機能へ自動拡張しない |
+
+<a id="ch08-s04"></a>
+## 今回の完成判定と確認範囲
+
+担当/プロ会議/Codex/Claudeの今回の回答・採否はreviewsに保存する。過去版への賛同をv0.7への賛同に読み替えず、未受領は未受領とする。外部相談は仕様・運用・実装可能性に限り、UI外観を審査対象にしない。最終の本文/対応表/採否/保全/リンク検査とZIP内容一致の確認後に文書完成とする。runtime試験と法的適合は未確認のまま。
+
+<a id="ch08-s05"></a>
+## 継承する技術選定
+
+| ID | 論点と推奨 | 代替/条件 | 未検証・阻害と確認方法 |
+|---|---|---|---|
+| A1 | Rust非WebViewのSlint GUI | eguiを同条件の比較対象。GPUI/icedは現時点の読み上げ制約から主候補にしない | 固定版のlicense、IME、長文選択、NVDA/VoiceOver/Orca、大量可変高リスト。Slint issueを再現し測定する |
+| A2 | WebはTypeScript/React/DOM、状態と同期はRust/WASM | 全TS coreも比較可能。UI部品は共有しない | WASM起動/サイズと型生成維持費。Web32〜62h＋native58〜112hは部品の部分概算だけ。試験/修正/連携は未見積もり |
+| A3 | Rust tokio/axum＋sqlx/PostgreSQL、ローカル添付 | クラウド型backendを既定にしない | 会社境界、権限、復旧、transaction/配信の整合を合成データで確認 |
+| A4 | seq/client_msg_id、workspace commit順cursor、snapshot再同期 | 04の行lock方式は小規模初版案。負荷増時の代替は将来 | 遅延commit、cursor失効、取消後cache消去、二重送信/承認の競合を試す |
+| A5 | 既存9状態。取消は要求と外部停止確認を分ける | 第10状態を増やさない設計。停止確認までは元の状態（作業中など）を保ち「取り消し依頼 · 停止確認中」を添え、停止の証拠を確認した後だけ止まっているへ移す。送信中/結果不明の結果は保持する | cancelと完了競合、引継ぎでの承認継続条件を確認 |
+| A6 | task使い捨てcontainerとBotの永続checkpointを分離 | 常時Bot VMを維持する代替。microVM等は将来の隔離比較 | 同kernelの隔離限界、本番水準、runtime socket非公開、資源/network/volume境界。管理者権限なしに運用可か |
+| A7 | 本体AIは国内hostのstub/条件付きlocal inference | 国内完結の根拠が揃った別提供元は将来審査 | モデルlicense/配布、品質、GPU/RAM/CPU、通信。満たせないならstubのまま |
+| A8 | 本体egress deny、選択外部連携は別grant | 国内性未確認でも権限ある利用者が説明を見て明示有効化可 | 個別操作承認/監査/秘密管理は維持。外部LLMへの自動fallback禁止。10のD1〜D12 |
+| A9 | 共通IntegrationPortと能力定義/Adapter | MCP、REST、webhook、CLI/hook、A2Aを役割で使い分け | サービス固有制約、提供元内の副作用制御、結果照会、取消可否。11参照 |
+| A10 | PlacementPolicyへ保存/AI/log/backup/送信方針を関連付け | 今はJP local単一。US/EU/JP選択は将来例だけ | region変更時の既存data/backup/契約/運用権限の移行は未決。リージョン選択≠法適合 |
+
+
+<a id="ch08-s06"></a>
+## 試験の追跡表（いずれも未実施）
+
+| product試験 | 本文の対応/追加試験 | 段階 |
+|---|---|---|
+| T1〜T4 | 03固定hash/期限/権限、04承認API | 承認後の局所試作、疑似操作のみ |
+| T5〜T8 | 03attempt境界/結果不明/競合、D3 | 局所試作の疑似送信、外部接続なし |
+| T9 | 03lease/fence/checkpoint、05結合試験 | 局所試作は一部。全受入とはしない |
+| T10 | 03引継ぎ5項目、04担当変更 | P1a。局所試作に前倒ししない |
+| T11 | 03提供元ごとの冪等/照会、11能力定義 | P1a以降、別の接続許可後 |
+| T12 | 07実データのゲート | P1b合格＋別の実データ利用許可後。P1b自体は合成データ |
+| T13 | D1/D4/D10、10policy強制 | 局所経路の疑似要求/拒否だけ部分試験。構成全体のD1/D4/D10は対応基盤の別見積もり/承認後 |
+| T14 | D2、本体LLM fallback禁止 | 局所stub経路だけ部分試験。全実行経路は基盤構築の別承認後 |
+| T15 | D3/D4、11の再送と照会 | 局所の疑似送信経路だけ部分試験。実隔離/CLI区画のD4は別見積もり/承認後 |
+| T16 | D5/D7、国内crash記録 | 局所logの疑似試験だけ。host全経路D7は対応基盤/観測手段の別見積もり/承認後 |
+| T17〜T20 | 11inbox/順序/未信頼/再接続/停止確認、D11 | 合成データの疑似agent |
+| T21′ | D9、11明示有効化/責任分界表示 | 合成データ、外部接続なし |
+| T22 | 11権限共通部分、D10/D12 | 同上 |
+| T23 | D9/11個別操作承認 | 同上 |
+| T24 | D2/D12、本体の自動fallback禁止 | 同上 |
+
+この表は将来の要求と試験先の対応で、既存の局所試作へ実装/工数を追加する許可ではない。局所経路の部分試験をD全体の合格へ数えない。実権限・会社間分離・snapshot再同期・CLI区画・複数AI・VM復元の構築/試験は、既存中期の局所範囲に含めず、対応機能の別見積もり/承認後（P1a/P1b等の必要段階）へ回す。
+
+D6はoffline表示、D7は依存/host全経路、D8はmail未許可を補う。製品入力の原文はinput/product.mdの§3/7/10/11を参照。表は試験計画の対応だけで、実施やgate通過を示さない。
+
+<a id="ch08-s07"></a>
+## 安全ゲート・障害注入の追跡
+
+原本は[長期v0.5](../sources/v0.6/fixed/pelway-milestones/long-term-milestones.md)の§5〜6、[中期v0.4](../sources/v0.6/fixed/pelway-milestones/mid-term-milestones.md)の§1/6、[短期v0.1](../sources/v0.6/fixed/pelway-milestones/short-term-milestones.md)の着手条件。原文の抜粋/行番号/hashは[参照資料](../sources/v0.6/fixed/pelway-technical-docs/references/plan-gates.md)。31日目は承認したT0からの相対日数で、現在の開始許可/納期を示さない。A担当交代・B承認内容変更・C失敗後再開を満たす条件は既存計画のまま。
+
+| 不変条件/既存gate | 障害注入・試験 | 期待する永続状態 | 回数/段階 |
+|---|---|---|---|
+| P0：課題/需要の実例 | 面談/協力条件を確認 | 事実/推測/未達を分けて記録 | 長期§5の4独立チーム/計8人程度ほかの提案条件。文書完成で代替しない |
+| P0-T：合成成果物の復元 | 実環境で停止→再開、保存/復旧 | hash一致した成果物/手順が残る | 10回全件保存。局所モックは代替不可 |
+| P0-T：通信/予算/提供元仕様 | 未許可通信、予算上限、冪等/照会を実検証 | 通信拒否/新LLM呼出停止/提供元の実結果 | 原本で数値未指定は事前に回数固定。アカウント等の別承認前は未実施 |
+| 局所B/C・D3：応答断 | attempt_started後/応答保存前にcrash | outcome_unknown、再送0、operation/provider key維持 | 応答断20回。P1aは連携ごと20回以上、全受入の代用不可 |
+| 局所B：入力変更 | 宛先/本文を承認後に変更 | 旧snapshot失効、新承認要求 | 20回。添付/account/policy等は別条件を固定 |
+| D11：権限取消競合 | 予約前/予約後開始前/開始後で失効 | 取消commit後は新規内部開始受理を拒否。未送信の確証がない引渡し済み試行は結果不明。開始後は停止非保証と結果照合を別記録 | 局所は疑似epoch経路だけ部分試験。実権限の各主体5回以上は基盤の別承認後。開始後の取消は撤回保証なしと別集計 |
+| A：担当交代 | 人/AIを交代、判断者変更 | 引継ぎ5項目、作業参照、権限/承認再検査 | P1a。局所試作では未実施。事前に条件別回数固定 |
+| B/C・P1a：競合/復元/注入 | 同時承認、古いlease、外部偽指示、鍵/session、監査 | 一副作用/隔離/追記/範囲内データだけ。run復元 | 通常取消の旧ゼロ送出保証だけP方針に置換し、それ以外の長期§6の適用全項目。未指定回数は試験前固定 |
+| 再同期/帰属/ファイル追加試験 | snapshot中更新/権限取消、別runの署名event、rename/DB確定途中crash | 取込欠落0、他channel適用0、欠損時再開保留 | 対応基盤の別見積もり/承認後。既存局所試作へ足さない。回数未決を0/合格にしない |
+| DB耐久/backup巻戻り | commit応答断/DB再起動/古いbackup復元と復元点以後の外部成功 | 開始資格の再発行0、復旧直後dispatch停止、照合不能の連携は保留 | 対応基盤/復旧方式の別見積もり/承認後。回数と障害モデルは実行前固定 |
+| P1b：実データ利用前 | 会社間分離/backup復旧/書出し削除/全安全回帰 | 他社参照0、復旧照合、保持/削除条件 | 合成データで全安全条件。実データは合格後＋別許可 |
+
+各結果にOS/版/構成/注入時刻/実行ログ/確認者/実人時/合否/未実施を付ける。未決の数値を今回新しく合格基準として発明しない。現在、すべてのruntime試験とgate判定は未実施。
+
+
+<a id="ch08-s08"></a>
+## 追補で追加する受入条件
+
+12のS01〜20と13のV01〜09を既存D1〜D12/P0/P0-T/P1a/P1bへ対応付ける。既存の応答断20回、実権限の各主体5回以上、復元10回等を削らない。Pの通常取消契約に関わる旧ゼロ送出期待だけを置換し、未開始抑止・根拠失効・冪等性・会社間分離等は緩和しない。全runtime試験は未実施。
+
+
+<!-- FILE: 09-sources.md -->
+<a id="ch09-s01"></a>
+# 09 根拠と確認範囲
+
+担当調査の確認日は2026-11-08（日本時間）。動く版の一次資料を読んだこと、固定版と同一であること、実機で動いたこと、契約/法的条件を満たすことは別である。原稿中の調査を統合し、すべてを実機検証したとはしない。
+
+<a id="ch09-s02"></a>
+## 詳細な出典台帳
+
+- [市場・既存チャット/AI OSS調査](../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md)は公式仕様、repo、release、license、通信、連携APIの出典を識別子で保持する。各表の事実・設計提案・未確認を区別する。
+- [UI入力](../sources/v0.6/fixed/pelway-technical-docs/input/ui.md)はSlint/egui/iced/GPUI等の確認版、確認日、licenseとIME/読み上げissueを保持する。master条文とrelease同梱licenseの同一性は未確認。
+- [技術入力](../sources/v0.6/fixed/pelway-technical-docs/input/technical.md)と[旧技術下書き](../sources/v0.6/fixed/pelway-technical-docs/input/technical-draft/README.md)は構成・OS・実行境界の素材。古い要件や撤回案は本統合の採用判断ではない。
+- [プロダクト入力](../sources/v0.6/fixed/pelway-technical-docs/input/product.md)は既存PRDに対する整合要求と試験。既存文書は変更しない。
+
+<a id="ch09-s03"></a>
+## 主な一次資料
+
+| 論点 | 一次資料 | 限界 |
+|---|---|---|
+| Slint | [license](https://github.com/slint-ui/slint/blob/master/LICENSE.md)、[大規模list/a11y issue](https://github.com/slint-ui/slint/issues/3867) | issueの存在は再現/未修正の永久保証ではない。固定配布版で再確認 |
+| egui | [公式repo](https://github.com/emilk/egui) | IME/selection/a11yは対象OSとbackend次第 |
+| iced/GPUI | [iced a11y PR](https://github.com/iced-rs/iced/pull/3281)、[GPUI Windows読み上げissue](https://github.com/zed-industries/zed/issues/41138) | 現状制約の調査根拠。版更新時は再確認 |
+| Windows | [WSL install](https://learn.microsoft.com/en-us/windows/wsl/install)、[Docker Desktop条件](https://docs.docker.com/desktop/setup/install/windows-install/) | Desktop条件をWSL内Engine/Podmanへそのまま外挿しない |
+| macOS | [Apple container](https://github.com/apple/container)、[build](https://github.com/apple/container/blob/main/BUILDING.md) | OS/CPU条件、network、build手順を確認。コンテナ内でMac GUI/署名ができる意味ではない |
+| 同期 | [Matrix client-server](https://spec.matrix.org/latest/client-server-api/)、[Zulip events](https://zulip.com/api/get-events) | 参考で、server/UIのコードを採用しない |
+| MCP | [公式Rust SDK](https://github.com/modelcontextprotocol/rust-sdk/) | 固定版license、全通信、接続toolの審査が条件 |
+| local inference | [llama.cpp server](https://github.com/ggml-org/llama.cpp/blob/46dba9fc/tools/server/README.md)、[vLLM usage stats](https://docs.vllm.ai/en/stable/usage/usage_stats/) | model/配布物のlicenseと全通信は別。offline optionだけで適合とはしない |
+| 外部連携 | [11の公式手段表](11-integrations.md)、[市場原稿のE1〜E19](../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md) | API公開、プラン、beta、地域/処理/保管、実機接続は別 |
+
+<a id="ch09-s04"></a>
+## Discord情報の扱い
+
+[Discord CTO本人の投稿](https://x.com/svishnevskiy/status/2118081920194203799)は保存済み公開投稿の取得記録に基づき、移行方針/GPUI採用/今後の試験予定を確認した。移行完了や一般配布とはしない。「ElectronからRustで1.3GBが300MBになった」という同条件比較は一次資料で未検証で、UI選定・性能目標・Rust非WebView要件の根拠に使わない。[DiscordのGo→Rust記事](https://discord.com/blog/why-discord-is-switching-from-go-to-rust)は別の話であり、desktopの数値の証明にならない。SNSの本文で確認できる範囲と、画像/報道の数値・条件不明を分ける。
+
+性能目標や工数は仮定として02/07に限定する。公式単価をこの文書で追加せず、既存の原価表や段階計画も書き換えない。
+
+Discord役職の追加確認は市場レビューM-01の[公式companyページ](https://discord.com/company/)に基づく。投稿は移行方針であり、GPUIのWindows読み上げ阻害が解消した証拠ではない。詳細出典は[市場レビュー](../sources/v0.6/fixed/pelway-technical-docs/reviews/market-v0.1.md)。
+
+<a id="ch09-s05"></a>
+## 直接依存と許諾の対応（M-03）
+
+技術担当の[照合記録](../sources/v0.6/fixed/pelway-technical-docs/reviews/technical-license-ledger-v0.1.md)を統合した。確認日は2026-11-08（日本時間）。15件と比較候補を区別する。下表の版は観測対象で、採用版の決定ではない。可変ブランチ/最新版のLICENSEやCargo.tomlに基づく情報であり、固定配布物の条文・全推移依存・NOTICE・SBOMは未照合/未作成。法的適合や検証完了とはしない。
+
+| 対象 | 区分（02の分類） | 確認した版 | 公式の許諾 | 出典 | 同梱・表示 | 未確認条件 |
+|---|---|---|---|---|---|---|
+| tokio | 条件付き依存採用候補 | repo master | MIT | [LICENSE](https://github.com/tokio-rs/tokio/blob/master/LICENSE) | 著作権表示と許諾文 | 固定版の条文 |
+| axum | 同上 | crates.io 0.8.9（2026-04-14） | MIT（crate）。workspace定義は `MIT OR Apache-2.0` | [LICENSE](https://github.com/tokio-rs/axum/blob/main/LICENSE) | 著作権表示と許諾文 | crateとworkspaceで表記が違う理由。固定版で再確認 |
+| tower | 同上 | repo master | MIT | [LICENSE](https://github.com/tower-rs/tower/blob/master/LICENSE) | 同上 | 固定版の条文 |
+| tracing | 同上 | repo main | MIT | [LICENSE](https://github.com/tokio-rs/tracing/blob/main/LICENSE) | 同上 | 外部exporterは使わない（02:93） |
+| sqlx | 同上 | crates.io 0.9.0（2026-05-21） | MIT OR Apache-2.0 | [LICENSE-APACHE](https://github.com/transact-rs/sqlx/blob/main/LICENSE-APACHE)（旧 launchbadge/sqlx からリダイレクト） | 選んだ方の条文。Apacheを選ぶならNOTICEの有無を確認 | repo移管の経緯、固定版の条文 |
+| PostgreSQL | 同上（サーバー部品、同梱するかは配布形態次第） | repo master | PostgreSQL License（GitHub上はNOASSERTION表示） | [COPYRIGHT](https://github.com/postgres/postgres/blob/master/COPYRIGHT) | 同梱するなら著作権表示 | 同梱か利用者環境か。拡張（pg_bigm、pgvector）は別台帳 |
+| rusqlite | 同上（client保存） | repo master | MIT | [LICENSE](https://github.com/rusqlite/rusqlite/blob/master/LICENSE) | 同上 | bundled SQLiteを使う場合のSQLite本体（パブリックドメイン宣言）は別確認 |
+| rmcp（MCP公式Rust SDK） | 条件付き依存採用案 | crates.io 3.9.0（2026-11-05） | crate表記はApache-2.0。ただしLICENSE本文は「MITからApache-2.0へ移行中。再許諾の同意がない旧寄稿はMITのまま」 | [LICENSE](https://github.com/modelcontextprotocol/rust-sdk/blob/main/LICENSE)、[Cargo.toml](https://github.com/modelcontextprotocol/rust-sdk/blob/main/Cargo.toml) | Apache-2.0とMITの両方の条文を同梱する前提で考える | 固定版でMIT部分がどこか。単純に「Apache-2.0のみ」と書かない |
+| llama.cpp | LLM adapterの第一候補 | repo master | MIT | [LICENSE](https://github.com/ggml-org/llama.cpp/blob/master/LICENSE) | 著作権表示と許諾文 | モデル・tokenizerの許諾は別台帳（08:A7）。同梱する依存（ggml等）の条文 |
+| rig | 必要なら小範囲（02:92） | repo main | MIT | [LICENSE](https://github.com/0xPlaygrounds/rig/blob/main/LICENSE) | 同上 | 使う範囲が決まるまで未判定 |
+| Slint | 採用案（実機試験と固定版ライセンス確認まで未確定） | crates.io 1.18.1（2026-09-21） | `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0` | [LICENSE.md](https://github.com/slint-ui/slint/blob/master/LICENSE.md) | Royalty-freeならAboutSlint等の表示条件（02:24〜34） | **要確認（濱田さん判断・法務確認）**：どの許諾を選ぶか、固定版同梱の条文、UI拡張を外に開かない設計の維持 |
+| egui | 対照 | repo main | MIT OR Apache-2.0 | [LICENSE-APACHE](https://github.com/emilk/egui/blob/main/LICENSE-APACHE)、[Cargo.toml](https://github.com/emilk/egui/blob/main/Cargo.toml) | 選んだ方の条文。default fontsは別条件 | フォントの条文 |
+| wasm-bindgen | Web同期核のWASM化 | repo main | MIT OR Apache-2.0（Cargo.toml） | [LICENSE-APACHE](https://github.com/wasm-bindgen/wasm-bindgen/blob/main/LICENSE-APACHE)（旧 rustwasm/wasm-bindgen からリダイレクト） | 同上 | 固定版の条文 |
+| TypeScript | Web（ビルド時） | repo main | Apache-2.0 | [LICENSE.txt](https://github.com/microsoft/TypeScript/blob/main/LICENSE.txt) | 配布物に含めるならNOTICE確認 | 実行時には同梱しない想定（仮定） |
+| React | Web DOM UI | repo main | MIT | [LICENSE](https://github.com/react/react/blob/main/LICENSE)（旧 facebook/react からリダイレクト） | 著作権表示と許諾文 | 固定版の条文 |
+| pgvector、pg_bigm、Tantivy/Lindera | 比較候補のみ（02:89〜90） | 未調査 | 未確認 | — | — | 導入を決めたときに台帳へ追加 |
+
+rmcpは移行中のMIT部分を残すため「Apache-2.0のみ」としない。Slintの許諾は濱田さんの選択と法務確認待ち。sqlx、wasm-bindgen、Reactの出典は移管後URLであり、旧URLのリダイレクト到達は固定版の真正性を保証しない。
+
+<a id="ch09-s06"></a>
+## レビューへ提示する証拠の範囲
+
+Discordの独立読取は[保存済み公開投稿の証拠](../sources/v0.6/fixed/pelway-technical-docs/reviews/discord-primary-post-evidence.txt)と[担当レビュー](../sources/v0.6/fixed/pelway-technical-docs/reviews/market-v0.1.md)による。直接依存台帳の[技術原稿](../sources/v0.6/fixed/pelway-technical-docs/reviews/technical-license-ledger-v0.1.md)も固定snapshotへ同梱する。v0.2のCLIレビューは読取ツール無効のため、snapshotにあってもpromptに全文添付しなかったファイルを確認できなかった。次の差分レビューではこの証拠/製品入力/status/台帳を明示的に添付する。未取得の事実を確認済みへ格上げしない。
+
+
+<!-- FILE: 10-domestic-only.md -->
+<a id="ch10-s01"></a>
+# 10 Pelway本体の国内限定と外部連携の責任分界
+
+<a id="ch10-s02"></a>
+## 最新要件と保証範囲
+
+2026-11-08 22:25（日本時間）の修正を優先する。Pelway本体のAI処理・保存は国内限定を維持する。利用者が選ぶ外部サービス連携は別枠で、国外処理・保存の可能性を表示して明示有効化できる。国内未確認を理由にその連携を一律禁止しない。
+
+「国内保存」は保存場所の条件。「国外送信なし」は推論・ツール・ログ・運用閲覧等の経路も含む別条件。外部連携を有効にした全システムについて後者を保証しない。本体の適合もまだ未検証であり、今回の成果は設計と評価計画に留まる。
+
+国内設置hostは物理配置の前提であって確認済み事実ではない。運用者・サポート・再委託先による国外閲覧も本体の確認対象。IPやTokyoというendpoint名だけで国内完結と判定しない。
+
+<a id="ch10-s03"></a>
+## 場所・経路の台帳
+
+| データ・処理 | 本体の保存・処理場所案 | 越境候補 | 初期制御/未保証 |
+|---|---|---|---|
+| chat/添付/成果物 | 国内hostのDB・同期外volume | cloud sync、外部preview、利用者選択連携へのexport | 自動preview/外部画像取得なし。exportは明示scopeと操作承認 |
+| 本体LLMの入出力 | 国内hostのスタブ/ローカル推論 | API/fallback、model download、trace | 外部LLM fallbackなし。機材/品質/全通信未確認 |
+| embedding/RAG | 必要時のみ国内modelとDB | embedding API、index telemetry | 初版の必須機能にしない。使う前に同じ審査 |
+| Botメモリ/step/checkpoint | 国内DB/volume | remote storage、ツールによる持出し | 明示メモリは作成/根拠確認した更新から最長365日かつ全source期限内。閲覧で延長しない。checkpointは13 R07。sandboxへDB鍵を置かない |
+| ツール実行 | 国内sandbox、gateway | MCP/API/CLI子processの通信 | sandboxはgateway以外拒否。stdioでも無通信と見なさない |
+| client cache | 管理端末のSQLite/IndexedDB | 端末同期、国外端末閲覧 | 初期loopback利用。管理済み国内端末以外へ拡張は未決 |
+| log/audit/crash | 国内DB/ローカルfile | OTLP、crash upload、support添付 | exporterなし。秘密除去。hash chainでも管理者耐性は未保証 |
+| backup/復旧 | 国内管理記憶装置 | cloud backup、国外復旧担当 | 日次02:00 JST、復旧対象は作成から最大14日。世代の物理消去24時間は内部目標。独立制限記録を復旧前に再適用。device/運用者/鍵/容量/復旧は未確認、RPO/RTO保証なし |
+| font/emoji/画像 | 同梱/国内server | CDN/外部font/remote media | 同梱権利と無通信を確認 |
+| update/依存/model取得 | 構築専用経路から国内へ事前搬入 | registry、build script、model code、診断 | 機密実行と分離、固定hash、取得tokenとproject名漏えいも棚卸し |
+| DNS/NTP/TLS検証/OS/driver/IME | 国内管理端末の機能 | resolver、OCSP、telemetry、cloud変換、翻訳 | 全host/VMを棚卸し。アプリ設定だけで遮断済みとしない |
+| 選択済み外部連携 | 提供元の処理/保存/運用先。国外あり得る | export payload、検索語、成果物、外部model | 別責任分界。送信先・data・国外可能性を表示、初期off、明示有効化とscope/承認/監査 |
+| 外部メール | 初期はdummyのみ | 宛先、配送経路、受信先 | 利用者選択の外部連携の例外をmail全般へ適用してよいか未決。自動で例外化しない |
+
+画面撮影、コピー、clipboard同期、download後の持出しは製品だけで完全防止できない。これを要件から除外した許可が出たとはしない。UI案は添付downloadを初期無効、コピーは保持し未保証表示。導入端末の管理条件・可否は判断待ちで、本体国内適合を宣言しない。国外端末アクセスの責任分界は外部連携許可と別の未決事項。
+
+<a id="ch10-s04"></a>
+## 通信policyを二つに分ける
+
+`core_domestic_policy` は本体のDB、推論、保管、診断、backupに適用する。初期はloopbackと内部networkだけ。外向き通信は既定拒否。本体の推論を外部Adapterへ逃がすfallbackは禁止。
+
+`integration_grant` は会社・連携・アカウント・操作・data分類・宛先・有効化版ごとの許可。初期は空。integration.enableの対象scope権限を持つ利用者または管理者は国外性が未確認でも、説明を読み、通信当事者を覆う必要な利用/提供根拠も別確認して設定上の有効化を行える。実I/Oは無効のまま。一般のBotはgrantを作れない。外部連携が増えても本体network全体のdenyを解除しない。
+
+gatewayは両policyを通して要求の分類と権限を確認する。Botが本体の秘密・会話全体を『外部連携の入力』へ分類し直して送れないように、taskごとのexport対象を固定する。readツールでも検索語や文書IDが外へ出るので、読み取りを無条件の無送信と見なさない。
+
+ホスト・VM・containerのfirewallと限定proxyで強制する。直接IP、IPv6、DNS、proxy環境変数、redirect、別hostname、retryも同じ判定を通す。API path/操作/dataの制限はhostname/IP許可だけでは実現できないためapplication gatewayでも確認する。
+
+外部連携停止はgrant epochを増やし、broker tokenと新dispatchを拒否する。既に外部へ出たデータや実行を回収できるとは言わない。外部停止と提供元での保持は11で追跡する。
+
+<a id="ch10-s05"></a>
+## 構築時と実行時
+
+依存・OCI image・model・fontは機密データのない取得環境で検査し、固定hashとlicenseを付け国内の実行環境へ搬入する。構築時も国外への通信が『何も送らない』わけではない。IP、依存名、取得token等を記録し、機密データを載せない。
+
+実行中の自動download、更新確認、crash export、link previewは無効。外部連携を明示有効化してもこれらを一括でオンにしない。localhostのGUIがhostのcloud機能から送信し得る点は管理環境で確認する。
+
+<a id="ch10-s06"></a>
+## 試験条件案
+
+全試験は合成データで行い、適合確認前に実データを入れない。P1b合格と別の利用許可後まで実顧客データは扱わない。
+
+| ID | 操作 | 合格条件案 |
+|---|---|---|
+| D1 | core-onlyで起動・依頼・保存・再接続しhost/VM/containerを記録 | 本体の許可外送信0。拒否した接続試行も別記録し、成功通信0と混同しない |
+| D2 | ローカル推論を停止 | stopped理由表示。外部LLM fallback0 |
+| D3 | dispatch中のtimeout/retry/runner crash | 許可外送信0、結果不明の自動再送0 |
+| D4 | 直接IP/IPv6/redirect/DNS変更/proxy経由で逸脱を試す | grant外への到達0。redirect先も検査。診断に秘密がない |
+| D5 | UI/runner/libraryを故意にcrash | 自動外部report0、国内にのみ必要最小の記録 |
+| D6 | 完全offline起動と通信遮断 | font/emoji表示、UI応答、ローカル保存が成立。無限retryしない |
+| D7 | image/model/update/driver/OS/IME/clipboard/backupを棚卸し | 未確認経路を残して適合とはしない。試験範囲と残リスクを明記 |
+| D8 | 未設定mailの操作 | dummy以外へdispatch0。個別例外の許可がないことを確認 |
+| D9 | 国内未確認の模擬外部連携を明示有効化 | 説明・社内有効化権限・通信当事者を覆う利用/提供根拠が揃えば設定上の有効化可。実I/O許可ではない。scope内承認済みpayloadだけ送出し本体policyは変わらない。一覧/主体に「国内限定の外」、本文に「外部由来・未確認」、本体に適合/国内完結の保証表示がない |
+| D10 | 有効化を行わず同じ連携を呼ぶ/別accountへ変更 | dispatch拒否。国外性だけでなくgrant不足を理由表示 |
+| D11 | 外部連携有効化後に失効/取消 | 新dispatch拒否。外部停止未確認を停止済みと見せない |
+| D12 | 外部serviceへ本体LLM fallbackや全DB exportを要求 | 利用者選択の例外を転用せず拒否 |
+
+通信観測一回で『国外へ1byteも出ない』の永続保証にはしない。対象版、固定設定、OS、driver、ネットワーク、観測点、未観測部分を結果に添える。Apple containerで内部専用networkを作れるかは実装前の阻害。遮断を構成できなければ機密実行を始めない。
+
+<a id="ch10-s07"></a>
+## 将来の地域への境界だけ残す
+
+`PlacementPolicy`を保存先・AI処理先・log/backup先・送信方針の共通参照にし、日本という条件を各Adapterへ散らさない。本体の`core_domestic_policy`と外部の`integration_grant`は同じ配置方針へ関連付くが別の判定。現在はJP-local単一のみを構成する。US/EU/JPは長期の選択肢例示で、今回のnetwork/法務/設定UI/移行設計を増やさない。リージョン選択はデータ所在の制御であって法適合の保証ではない。既存data/backup移動、契約、アクセス管理等は将来要検討で、自動/自由移行は保証しない。
+
+D4では、task sandboxおよび将来のCLI連携区画からhostの推論port/DB/runtime APIへ到達できないことを追加確認する。D11は取消/失効をdispatch予約前・予約後attempt_started前・attempt_started直後・応答保存前に注入し、開始前でも未送信を確定できた場合だけ未送信/拒否とし、開始受理の永続commit/応答が不明なら結果不明とする。開始後の不確実な結果も保持し自動再送しないことを記録する。開始記録より後の取消には03の `reason-cancel-after-start` の日英文言を表示し、「取り消しました」とは表示しないこともD11で確認する。上記は期待値であり未実施。
+
+
+<a id="ch10-s08"></a>
+### 実送出の有効化と設定上の同意の区別
+
+本章の明示有効化は将来の設定/権限条件で、実接続の着手許可や安全試験の合格ではない。[08のS1](08-decisions-open.md)は未解決で、実外部I/Oは無効のまま。国内性が未確認だから禁止するのではなく、P方針は明示的要件変更として暫定採用済みだが、送出制御・根拠失効・障害/復旧等の検証と実行の別承認が未達のためである。模擬経路の期待値は実接続試験の実施を意味しない。
+
+<a id="ch10-s09"></a>
+## 連携設定・個別承認・法的根拠の三層
+
+会社の有効化設定、権限者の個別snapshot承認、通信当事者の利用/提供根拠を別々に記録し、すべてが必要範囲を満たす場合だけ処理を許可する。[12](12-communication-secrecy.md)の目的・提供先台帳と実行点検査を適用する。国外又は国未特定だけを一律禁止の理由にしないが、受領者/目的/取扱条件が白紙なら有効化しない。外国未特定時のAPPI代替説明は通信秘密の同意範囲や受領者確認を省略する根拠ではない。
+
+接続時の認証・能力確認に必要なアカウント識別子/IP等を説明する。接続だけで会話/添付/repo/logを同期・索引化・送出しない。業務検索語/文書ID/promptも提供データとして検査する。通常取消のP非保証と法的根拠失効を分け、停止/照会に許された限定権限だけを使う。全面失効を別account/再認証で迂回しない。
+
+
+<!-- FILE: 11-integrations.md -->
+<a id="ch11-s01"></a>
+# 11 AIネイティブ連携の共通契約
+
+Claude Code、Cursor、Datadog、Google Workspaceは例示であり限定しない。他のAIエージェントや業務ツールを同じ能力定義とAdapterで追加できる設計とする。今回は文書上の契約とデータモデルだけで、traitやbridgeを実装しない。サービスの接続・登録・公開ingressの準備もしない。
+
+<a id="ch11-s02"></a>
+## 共通の単位
+
+`actor`は人、Pelway Bot、外部agent、外部toolの4種。外部主体はintegration、提供元のID、有効化した所有者、依頼者、委任scopeを持つ。サービス名やLLMが名乗った名前だけで認証しない。
+
+`task`に複数の`run`を結び、runに`session`参照、`step`、`artifact`を関連付ける。外部sessionは複数runを含み得るので、外部session IDを全run共通の一意キーにしない。外部job・run・sessionのIDはintegrationと提供元accountで名前空間を分ける。再開で同じsessionを使うか新runを使うかは提供元の契約に合わせる。
+
+`artifact`は国内保存コピーと外部ref、内容hash、version、検査結果、未信頼区分を持つ。外部URLだけを成果物として信頼しない。取得時にも権限、redirect、size、MIME、archive展開、path traversalを検査する。
+
+<a id="ch11-s03"></a>
+## IntegrationPortの能力
+
+| 能力/操作案 | 契約 |
+|---|---|
+| describe_capabilities | submit、observe、resume、cancel、fetch_artifact、read、write等。対応の有無、beta条件、提供元の冪等key/結果照会/scope、source event IDの名前空間と有効期間、重複判定・version/順序・cursor失効時の照合規則を返す |
+| describe_data_boundary | 送信先、送信data、処理/保存場所、国外可能性/未確認、region選択、保持/運用条件の説明版 |
+| submit | operation ID、承認snapshot、task/run、input artifact、scopeを受け、外部refまたはunknownを返す |
+| observe | cursor付きpoll/stream、または署名付きcallbackを正規化。受信を実行命令にしない |
+| resume | 外部契約で可能なrun/sessionへの追加指示。新しい外部payloadとして既定で新snapshot/個別送信承認を要する。非冪等steerの自動再送は禁止 |
+| cancel | 取消要求を送る。acceptedとstopped_confirmedを別に返す。未対応なら未対応と示す |
+| fetch_artifact | 取得許可・内容hash・size/型を検査し国内保存へ取り込む |
+| execute_tool | tool名と型付き引数、read/write、副作用の可能性、必要承認を明示 |
+| revoke | 新dispatch停止、epoch失効、資格情報broker拒否、外部停止/保持確認の未完を返す |
+
+同じevent keyに違う内容hashは隔離し、黙って重複扱いしない。外部IDから内部runへの帰属は04の登録済対応から決める。
+
+上表はRust traitへ後で落とす設計で、固定コードではない。Adapterが持たない能力はUIで「できる」と表示しない。サービス固有のraw eventは保持できるが、業務状態を直接上書きしない。
+
+権限は、会社ルール、依頼者、Bot役割、task scope、integration grant、接続account、個別承認、および12の目的/source/必要当事者を覆う利用・提供根拠の共通部分を超えない。grantの初期値はoff。国外性未確認でも、権限ある利用者/管理者が説明を読んで明示設定上の有効化ができるが、通信当事者の根拠と個別承認は別に必要。提供元のscopeが広い場合でもPelwayの操作範囲を広げない。
+
+<a id="ch11-s04"></a>
+## 接続手段の選び方
+
+| 手段 | 主な役割 | 限界と採用案 |
+|---|---|---|
+| MCP | 型付きtool/resource呼出し | 長期job、sandbox、業務承認の全てを代替しない。rmcpは条件付き依存候補 |
+| REST/GraphQL | jobの作成・取得・取消、文書操作 | endpointごとの冪等性・version/ETag・結果照会をAdapterが表す |
+| webhook | 進捗/成果/alertのpush | 署名・timestamp/replay確認、inbox永続化後ACK、順不同・再送を扱う。初期は外部公開しない |
+| SSE/polling | 長時間jobの観測 | cursor期限切れや切断で再submitしない。状態照会へ戻る |
+| CLIとlocal bridge | 国内hostまたは別審査した利用者端末のagentとの入出力 | shell文字列を連結せず引数を型付け。bridge認証・OS権限・作業directoryを限定 |
+| hooks | lifecycle進捗、tool実行前後の通知 | 設定によりfail-openもあり得る。hookだけを強制承認境界にしない |
+| A2A | agent間task/context/artifactの委任 | 参考候補。社内権限・秘密・国内性・exactly-onceの保証ではない |
+
+local bridgeと同じ端末のCLIとの接続は、loopbackの認証済みIPCまたはstdioを使う設計。管理hostと別端末のbridgeの接続/認証方式は将来の未決で、localhost APIをそのまま外へ公開しない。国外端末への接続許可を含まない。本人のCLIログインをBotへ複製しない。任意コマンドを外部イベントから起動しない。利用者PCでの実装と環境変更は今回範囲外。
+
+<a id="ch11-s05"></a>
+## 公式手段の確認例
+
+確認日は2026-11-08（日本時間）。以下の「今可能」は公式に公開手段があるという意味で、Pelway接続済みの意味ではない。国外性の情報は利用者の判断材料で、所在地だけで有効化を拒否しない。
+
+| 例 | 今可能/制約/未確認 | データと責任分界の確認 |
+|---|---|---|
+| Claude Code | [headless CLI](https://code.claude.com/docs/en/headless)のprint/stream-json/session resume、[hooks](https://code.claude.com/docs/en/hooks)、MCP。Slack連携のプラン・契約差は利用時点で確認 | prompt、context、repoが提供元へ出る可能性。cloud sessionの処理国/保持は未確認。CLIというだけで国内推論とはしない |
+| Cursor | [hooks](https://cursor.com/docs/hooks)、[Slack等](https://cursor.com/docs/integrations/slack)、[Cloud Agents API](https://cursor.com/docs/cloud-agent/api/endpoints)。調査時v1はpublic beta、SSE/取得/取消。v1 webhookは将来案との記載、旧v0と分ける | cloud/self-hostedの実行と管理plane/LLMを分ける。self-hostedを国内完結としない。prompt/repo/環境/成果物の保存先は要確認 |
+| Datadog | [MCP](https://docs.datadoghq.com/mcp_server.md)、REST、webhook等。toolsetと権限、betaの範囲は個別確認 | log/query/incident、tool引数が送られる。[site](https://docs.datadoghq.com/getting_started/site.md)と全AI/運用地域を同一視しない。利用情報の収集を説明 |
+| Google Workspace | Chat/Drive/Docs/Gmail公式API、[remote MCP](https://developers.google.com/workspace/guides/configure-mcp-servers)は調査時Developer Preview条件、[Events](https://developers.google.com/workspace/events/guides/create-subscription)はPub/Subと製品別制約 | 文書・検索語・mail・tool引数、OAuth scopeを説明。[data regions](https://knowledge.workspace.google.com/admin/compliance/choose-a-geographic-location-for-your-data)の対象製品/editionと処理を確認。Cloud TokyoをWorkspace全体へ外挿しない |
+
+詳細な公式出典と利用者判断欄は [市場原稿](../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md) の連携節を正とする。存在未確認のAPIを将来の必須依存にしない。
+
+<a id="ch11-s06"></a>
+## 受信、再接続、重複、取消
+
+イベントの共通封筒案は `event_id, integration_id, source_event_id, external_account, task_id, run_id, external_session_id, provider_seq/cursor, subject_version, occurred_at, received_at, type, payload_ref, trust_level`。秘密は入れない。
+
+署名検証後にinboxへ保存し、そのtransactionの成功後にACKする。unique(workspace,integration,external_account,source_event_id)で重複を除く。送信側にevent IDがない場合、payload hashだけでは同じ内容の正当な複数eventも潰してしまう。Adapterごとにresource/version等と組み合わせる規則を決め、根拠がなければ重複と断定せず照会する。
+
+受信順の番号はPelway内の記録順であり、外部の因果順ではない。provider cursor/versionがあれば使用する。なければ取得APIで照合し、古い進捗でterminal結果を戻さない。再接続だけでは結果不明にしない。結果不明は外部副作用の実行結果が確定しない場合に使う。
+
+dispatchのoutbox再試行と外部副作用の再送を分ける。送信した可能性のあるoperationは新IDで勝手に再submitしない。照会証拠を人へ示す。duplicate eventは業務表示と業務監査を二重にせず、受信/replayの診断件数は別に残す。
+
+連携取消で新dispatchとtoken利用を止める。外部停止未確認なら理由「停止確認中」を添え、作業中なら停止確認まで作業中を保持する追加提案に合わせる。取消と完了が競合した場合、遅れて来た成果物を『取消要求後に到着』として保存し、自動採用・送信しない。既に送ったデータや提供元の保持を取消で消せると保証しない。
+
+<a id="ch11-s07"></a>
+## 業務状態と外部実行の対応（追加提案・要確認）
+
+9状態は増やさず、ActionSnapshotの固定項目に`action_kind`（04のcustomer_send / agent_handoff / tool_read / tool_write）を付ける案。runの提供元状態と業務状態は別に保持する。次表の非顧客操作を作業中へ戻す遷移は、PRD未承認の追加で、今回PRDを書き換えない。
+
+| 外部との往復 | 業務状態 | 条件 |
+|---|---|---|
+| 人が依頼/範囲を調整 | 依頼済み→作業中→必要なら判断待ち | 監視alertだけでは自動受付を始めない |
+| 外へ送る入力/範囲を固定 | 送信承認待ち | grantの有効化とは別に個別snapshotを承認 |
+| gatewayが実行を予約/試行 | 送信中 | 03の直前再確認とattempt_started境界。返事なしは結果不明 |
+| agent委任/tool操作の受理確認 | 作業中 | 外部jobが終わった意味ではない。03の追加提案 |
+| 進捗/成果物/失敗を取込 | 作業中／判断待ち／止まっている＋理由 | 人の判断が必要なら判断待ち。障害時は理由を付ける |
+| 人が成果/差分を採用 | 作業中→完了、または修正の次runへ | 必要な確認なしに外部doneだけで完了にしない |
+| 顧客向け送信の成功 | 送信済み・顧客回答待ち | この表示は顧客への送信だけに使う。外部メールは利用可否未決 |
+| 取消要求/連携失効 | 03の未実行時取消、または元状態を保ち結果照会 | sending/outcome_unknownの副作用結果を隠さない。外部停止が未確認なら停止確認中 |
+
+入力artifact/範囲を変える次runは新承認。単なる観測の再接続は再submitしない。resume/追加promptを含む新しい外部payloadは、既定で新snapshotと個別送信承認を必須とする。将来承認を省略できる条件だけを08の未決に残す。今は省略条件を定義しない。副作用の再試行は03の証拠/再承認条件も満たす。
+
+<a id="ch11-s08"></a>
+## 表示契約
+
+入力は[input/ui.md](../sources/v0.6/fixed/pelway-technical-docs/input/ui.md)の§8。外観を変えず、既存部品の情報表示だけを揃える。
+
+- 送信承認待ち/送信中の横には、ActionSnapshot由来の操作の種類と連携名を文字で出す（例：送信承認待ち（外部への受け渡し：Cursor））。判断待ち一覧でも顧客送信と区別し、種類の翻訳キー/並び替えに同じ値を使う。
+- 有効中の外部連携は、連携一覧と会話の主体表示の両方に「国内限定の外」の文字ラベルを常に付ける。日本単一の配置方針に結び付け、画面ごとに直書きしない。このラベルは「Pelway本体の国内限定の保証範囲外。国外処理・保存の可能性がある」という意味の説明を併記する。国外設置の断定でも、利用禁止の表示でもない。日本語/英語の文言は[UI v0.3の確認済み案](../sources/v0.6/fixed/pelway-technical-docs/reviews/ui-v0.3.md)を用いる。説明は `boundary-selected-external-desc` として、日「Pelway本体の国内限定の範囲外です。送り先で国外処理・保存される可能性があります（未確認の場合を含む）。」、英「Outside Pelway's domestic-only scope. The destination may process or store data outside Japan, or this has not been confirmed.」とする。外観は変えない。
+- 外部由来の本文/logは「外部由来・未確認」の帯を付け、Pelwayの操作/承認欄と区別する。本文に書かれた『ボタン』や指示を操作にしない。
+- 人／Bot／外部エージェント／外部ツールを文字ラベルでも区別する。色だけに頼らず、読み上げには種類と外部連携名を含める。
+- 本体画面に「国内で完結」「準拠」「適合」と表示しない。配置先は所在の制御であり、法適合や外部サービスまでの保証を意味しない。
+- 有効化/個別承認時に送り先・データ・国外処理/保存の可能性/未確認・利用者の責任を表示する。有効化だけで操作権限を広げず、制約されている能力は制約も表示する。
+
+日英の翻訳/読み上げ条件は06、表示の合成データ試験は10のD9へ対応させる。
+
+<a id="ch11-s09"></a>
+## 外部agentの権限を過信しない
+
+外部agentの出力・文書・logは未信頼データ。命令、secret要求、URL、tool追加をそのまま実行しない。承認UIはPelway側の型付き操作から作り、本文内の偽のボタンや指示を操作にしない。
+
+外部の自律agentが提供元内で直接push・送信・削除できる場合、Pelway gatewayだけでは各副作用を強制承認できない。初期の委任scopeは読取/隔離作業/差分返却に限定し、外部更新権限を渡さない案。提供元側の権限で制約できないAdapterは、その能力を安全条件付きで使えるとは表示しない。利用者責任の国外処理許可は、個別操作承認を無視する許可ではない。
+
+<a id="ch11-s10"></a>
+## 三つの往復例
+
+- コード作業は、人のメンション（依頼済み）から入力/scopeを調整（作業中）、送信承認待ちで人が固定入力を確認、送信中を経て受理確認で作業中へ戻す。進捗/patchを取り込み、人がdiffを判断（判断待ち）、採用後に完了、または修正を次run（作業中→新たな送信承認待ち）へ結ぶ。push/PR/mergeは別の個別操作承認。外部停止未確認では停止済みとしない。
+- 監視調査は、alertをinboxに保存するだけでは業務taskを開始せず、人のメンション（依頼済み）で受付。検索範囲を固定（作業中→送信承認待ち）、外部toolを呼ぶ（送信中→受理確認後作業中）。log/調査メモを未確認artifactで返し（判断待ち）、人が判断して朝の担当へ引継ぐ（作業中）。メンションなし自動受付は将来の未決。
+- 文書は、人の依頼（依頼済み）から検索入力の承認（作業中→送信承認待ち）を経てtool呼出（送信中→作業中）。版付き下書きを返し（判断待ち）、文書ID/既存revision/ETag/差分を固定して人が更新を承認（送信承認待ち）、更新確認（送信中→作業中）と必要な人の確認を経て完了。外部版が変われば適用せず判断待ちで再取得/再承認。共有設定変更や送付は別操作で、外部メール許可の未決を回避しない。
+
+<a id="ch11-s11"></a>
+## 今と後の範囲
+
+今は上記の能力定義・関連ID・policy・表示契約・模擬試験を文書にする。後でAdapter、bridge、callback公開、資格情報brokerの実装と各サービス契約を審査する。4製品の網羅調査や実装は今回増やさない。
+
+合成データで、duplicate/out-of-order、cursor失効、無応答、失効grant、停止未確認、偽の外部指示、scopeを超えるartifact取得、同時承認を試す計画。連携工数は未見積もりで既存人時へ加算しない。
+
+共通契約はPlacementPolicyの版とintegration grant版を記録する。現在の配置はJP-localのみ。将来の地域変更をAdapterの自動fallbackとして実装しない。
+
+<a id="ch11-s12"></a>
+## 入力一式・実行区画・資格情報の制約
+
+外部agentへは承認した不変のexport一式だけを渡す。ファイルmanifestと内容hash、repoのcommit/tree、含む/含まないパス、prompt、session所有task/履歴範囲をsnapshotへ結び付ける。作業directory名だけを許可にしない。変更可能なhost directoryや別taskの過去sessionを暗黙に読ませず、初期案ではtaskをまたぐsession再利用をしない。入力以外のファイルを読めない制約が提供元側で確認できない能力は、使えるとはしない。
+
+CLI型agentはhostへ直実行せず、本体DB/volume/secret/runtime socketへ届かない専用の連携実行区画を必要とする。出口は承認した当該提供元/操作だけ、入力mountは上記exportだけ。coreの外部出口なしsandboxの設定を緩めて代用しない。CLIの認証主体・資格情報方式・OSごとの区画方式は未決で、今回作らない。制御不能なCLIにhost権限や本人の既存sessionを渡す実装は採らない。
+
+Adapterは監査/固定版確認を要する信頼側の部品とし、追加しただけでtrusted codeや出口権限を自動付与しない。Adapterは型付きの固定要求をgatewayへ返し、brokerのrefresh tokenを受け取らない。実HTTP transportはgateway側でpayload hash/account/path/data分類を再確認し、brokerが資格情報を付与する。提供元のtokenをscope限定できない場合でも、Bot/モデル/無権限プラグインへそのtokenを渡さない。Adapter自身の任意ネットワーク出口を認めず、連携ごとの許可済みtransportを経由する。これを満たせるかはAdapter採用試験で確認する。
+
+有効化は全章で『integration.enableの対象scope権限を持つ利用者または管理者』に統一する。閲覧できるだけで外部送出を許さず、会社が許可したexportデータ分類・依頼者の閲覧範囲・task scopeの共通部分だけを送れる。会社単位のデータ分類/例外方針の設定は管理者の権限とし、有効化した人の同意を他者/顧客データ全体の持出し許可とみなさない。
+
+<a id="ch11-s13"></a>
+## 取消後の限定確認
+
+通常grant取消は新submit/更新と通常broker利用を止める。既存operationだけの停止要求/読取照会を継続するかは別の限定権限として明示同意を得る設計案で、通常grantを黙って残さない。限定機能を分離できない/全面資格情報取消の場合は自動確認不能とし、人が提供元画面等で証拠を確認する。証拠なしの『送れなかった』判断で再試行しない。資格情報を戻したり別accountで迂回したりしない。提供元で止められたか/データを消せたかは別結果として残す。
+
+PlacementPolicyの版・送出データ分類・宛先・必要権限が変わればgrantと未実行承認の適合を再検査する。新しい版を旧同意で自動有効にせず、影響するgrantは再同意まで停止する。将来のリージョン切替機能を追加した意味ではない。
+
+
+<a id="ch11-s14"></a>
+### 実送出の有効化と設定上の同意の区別
+
+本章の明示有効化は将来の設定/権限条件で、実接続の着手許可や安全試験の合格ではない。[08のS1](08-decisions-open.md)は未解決で、実外部I/Oは無効のまま。国内性が未確認だから禁止するのではなく、P方針は明示的要件変更として暫定採用済みだが、送出制御・根拠失効・障害/復旧等の検証と実行の別承認が未達のためである。模擬経路の期待値は実接続試験の実施を意味しない。
+
+<a id="ch11-s15"></a>
+## 連携設定・個別承認・法的根拠の三層
+
+会社の有効化設定、権限者の個別snapshot承認、通信当事者の利用/提供根拠を別々に記録し、すべてが必要範囲を満たす場合だけ処理を許可する。[12](12-communication-secrecy.md)の目的・提供先台帳と実行点検査を適用する。国外又は国未特定だけを一律禁止の理由にしないが、受領者/目的/取扱条件が白紙なら有効化しない。外国未特定時のAPPI代替説明は通信秘密の同意範囲や受領者確認を省略する根拠ではない。
+
+接続時の認証・能力確認に必要なアカウント識別子/IP等を説明する。接続だけで会話/添付/repo/logを同期・索引化・送出しない。業務検索語/文書ID/promptも提供データとして検査する。通常取消のP非保証と法的根拠失効を分け、停止/照会に許された限定権限だけを使う。全面失効を別account/再認証で迂回しない。
+
+
+<!-- FILE: 12-communication-secrecy.md -->
+<a id="ch12-s01"></a>
+# 12 通信秘密・目的別根拠・可視範囲・運営アクセス
+
+J-S01〜07の推奨は暫定採用済み。この章は当該方針を具体化する参照仕様であり、法的適合・実装済み対策の認証ではない。未決の正本は[08 U01〜06](08-decisions-open.md)。§番号は本章内の番号で、旧追補の§2〜9との追跡を維持する。
+
+<a id="ch12-s02"></a>
+## 2. 判定する対象と責任
+
+通信の秘密の対象分類は本文だけにしない。通信相手、日時、channelやthreadの関係、配送情報、通信の存在を示す件数、検索候補、監査情報も、個別の通信との関係に応じて対象とする。識別子やhashだけでも、他の情報と結び付けば秘密を明らかにする場合がある。
+
+`actor`は既存のhuman、bot、external_agent、external_toolを維持する。Botの参加は技術上の権限設定であり、必要な人や法人の同意を作らない。会社管理者は会社方針と委譲権限を設定する。運営者は適用する根拠と実行制御を確認する。操作を承認する社員は当該操作の権限を持つ。三者の責任を一つの「利用者責任」で置換しない。会社による連携有効化、権限者の個別操作承認、通信当事者の同意等を含む利用・提供の法的根拠は別に記録する。管理者権限やデータの閲覧権限だけで、代理権や外部提供権限があるとは扱わない。Botの自動全履歴読取や常時要約を追加せず、v0.6のメンション起動を維持する。
+
+広告、モデルの学習・fine-tuning、会社横断の分析、別taskの人格メモリへの転用は初期不許可とする。要約・メモリへの同意を、モデル重みへの学習許可と読み替えない。委託先にも同じ目的制限を適用する。
+
+通常の配送等は、必要な正当業務行為等を根拠とする場合と、同意を根拠とする場合を分ける。「会社が便利と判断」「国内処理」「閲覧権限あり」「管理者が有効化」だけを通信秘密の法的根拠として登録しない。正当業務行為の根拠には、目的の正当性、必要性、手段の相当性と取扱範囲を記録する。
+
+<a id="ch12-s03"></a>
+## 3. 目的と根拠の表
+
+各目的は本文とmetadataの分類、対象scope、取扱主体、説明版、保持方針を持つ。同意を使う場合は、必要な通信当事者又は具体的に委任された代理の同意が対象scopeを覆うことを確認する。本人を特定する記録と、同意の有効性・代理権を確認する記録は分け、単なるチェック済みフラグだけで充足としない。外部guestや取引先の通信を会社管理者一人の同意で覆ったとみなさない。
+
+| 目的ID | 目的と対象 | 根拠の登録と初期制限 | 説明版・撤回時の扱い |
+|---|---|---|---|
+| P01 | 指定参加者への本文・添付の保存、配送、本人の履歴閲覧 | サービス提供に必要な正当業務行為等の範囲を確認。依頼された保存・配送を超えるAI分析へ流用しない | 基本サービスの説明版を保持。退会、削除請求、契約終了と任意AI同意の撤回を分ける |
+| P02 | 配送障害、不正アクセス、課金、苦情等に必要なmetadata処理 | 必要最小限の業務上の根拠を定義。行動分析、広告、営業用閲覧への流用は禁止 | 目的、項目、保持、閲覧者を説明。保存の必要性を失えば消去。個別保全は別記録 |
+| P03 | 依頼された国内AIの読取、要約、下書き | 対象の会話・履歴・添付、出力先、国内取扱主体を具体化した有効な同意等。未登録は無効 | 国内AI説明版を参照。撤回対象の以後の入力・再利用・出力を停止し、実行中は§5で扱う |
+| P04 | Botの永続メモリ、将来の検索・RAG | P03と区別して将来再利用の範囲と期間を説明。単なる一回の要約承認から永続記憶を推定しない。RAGは初版必須外 | メモリ利用の説明版を保持。撤回で対象メモリとindexを検索対象から除外し、削除・隔離を処理する |
+| P05 | 他のchannelや人への要約・引用・成果物公開 | sourceの全可視範囲内なら現在の権限と目的を再検査。範囲を広げる開示は別の権限と法的根拠が必要 | 出力先を説明scopeに含める。元の根拠失効後の新規公開を停止する。公開済みコピーの回収は保証しない |
+| P06 | 外部AI、業務APIへの本文・metadata提供 | 会社のgrant、個別snapshot承認、通信秘密の提供根拠を別々に確認。個人データにはAPPI上の委託・外国移転等も確認 | 受領者、目的、対象、保持、再利用、国外情報等の説明版を参照。変更と撤回は影響する範囲だけ再判定 |
+| P07 | 認証と能力確認 | 接続に必要な項目と宛先だけに限定。業務内容を含む確認要求はP06へ分類 | 接続説明版を保持。資格情報取消で通常の利用を停止。限定照会権限は別に明示 |
+| P08 | supportの内容調査、事故時の緊急アクセス | §7の具体的な依頼又は正当な事故対応等の根拠と一時権限。support担当であることだけでは許可しない | 調査目的・範囲・期限の説明と証拠を保持。緊急時は事後審査と通知可否を記録 |
+
+P03、P04、P06を根拠なしに有効とする初期設定は認めない。P01とP02の必要処理まで、任意AIの同意と抱き合わせにして拒否不能の同意を作らない。
+
+<a id="ch12-s04"></a>
+### 3.1 同意の取得と版の変更
+
+利用開始時又は参加時に、機能ごとの対象情報、主体、目的、方法、対象履歴、保持、撤回方法を具体的に示し、その範囲の事前同意を取得できる設計とする。個別操作承認は、既存の製品安全契約として別に維持する。
+
+必要当事者の範囲や代理権は§10 J-S01で確認する。事前同意が有効な範囲の処理について、全メッセージごとに全員の再クリックは求めない。反対に、明示した範囲を超えるAI利用や外部提供を、会社管理者の一括同意で追加しない。
+
+新規参加者が同意しても、過去の通信当事者の根拠や過去履歴の閲覧権限が自動で増えることはない。必要な当事者の根拠が欠ける会話はAI入力から除外する。混在するデータから安全に分離できなければ処理全体を拒否する。
+
+説明文の版、目的の版、権限の版は区別する。宛先、取扱主体、利用目的、データ分類、保持、公開範囲を実質的に拡張する変更は、影響するscopeを保留して必要な再同意を得る。表記修正だけで全件再同意にしない。変更が実質的かの判定と理由を保存する。新目的への同意を後から取得して、過去の無根拠な利用を適法化したと扱わない。
+
+参加時の説明は、根拠確認済みの通常配送等と任意AIに分ける。前者は必要処理の説明、後者は目的ごとに短い説明と初期オフの選択を置く。任意AIを断っても通常利用できることを明示し、全目的を一括選択するボタンを置かない。通常処理に別途同意が必要な場合は、必要処理と表示するだけで取得済みとせず、確認した根拠に応じて扱う。
+
+同意時点の推奨候補は、channel参加時に自分の発言をAIに読ませる範囲を選び、本人の依頼で機能を使う時点ではその依頼に必要な同意等を確認する組み合わせである。呼出者一人の初回同意で他の参加者の発言を覆わない。参加時の説明を超える過去履歴やguestの代理同意も推定しない。正式な同意主体・代理権・取得時点はJ-S01で確認する。
+
+入力を一部除外して処理できる場合、出力を会話全体の検討結果と見せない。出力先が除外元の存在を知る権限も持つときは、出力の先頭に「一部の発言を除外して処理しました（利用の同意を確認できない範囲）」を出す。誰が同意していないかは名指ししない。件数等は元channelの現閲覧権限と業務上の必要性を検査した相手だけに返し、個別の同意状態・理由は権限のある本人又は管理担当に限定する。存在自体を知らせられない出力先では、発言の存在や同意状況を示さず「許可された範囲のみを参照しました」とするか、漏えいを避けられなければ出力を保留する。件数をchannel内全員に見せるか依頼者に限るかはJ-S02に残す。
+
+撤回は初期設定又は明示した窓口で受け付け、対象目的・scope、受付時刻、反映状態を確認できる形にする。取得より不当に難しい手順にしない。復帰には当該scopeの新しい有効な根拠を記録し、旧runを自動再開しない。
+
+<a id="ch12-s05"></a>
+### 3.2 最小データ契約
+
+既存の`integrations/grants`の同意版と失効epoch、`action_snapshots/approvals`、`audit_events`を利用する。ただし、連携設定の同意と通信当事者の根拠を同じ列で代用しない。次の名称は論理上の保存単位であり、確定DDLや新サービスの指定ではない。
+
+| 保存単位 | 最小項目・制約 |
+|---|---|
+| `communication_use_policies` | `workspace_id, purpose_id, version, data_classes, source_scope, processors, allowed_outputs, explanation_version, retention_policy_ref`。変更前の版は証拠参照として残す |
+| `communication_basis_records` | `workspace_id, basis_id, basis_version, basis_type, purpose_id, scope, party_coverage_ref, grantor_ref, representative_authority_ref, explanation_version, evidence_ref, collected_at, effective_at, expires_at, withdrawn_at, withdrawal_method_ref, status, epoch`。必要な当事者と代理権の確認方法を保持。人物情報や本文の不要な複製を避ける |
+| `context_authorizations` | `task/run/snapshot_ref, purpose_id, source_manifest_ref, source_acl_versions, basis_refs/epochs, decision, reason, checked_at`。承認時の証拠であり、将来の無条件な通行許可にしない |
+| 派生物の属性 | artifact、memory、index、checkpointに`source_refs, access_scope_ref, purpose_ids, basis_refs, retention_policy_ref, expires_at, restricted_at, deletion_state`を関連付ける。元との関係が不明なら公開・再利用しない |
+| 運営アクセスと削除記録 | `support_access_grant`に目的、対象、担当、根拠、承認者、期限。削除・制限記録に対象ID、種類、発効順序、保全理由、処理結果を保持。本文を削除記録へ複写しない |
+
+根拠の有効性は`active`等の状態、期間、scope、目的、必要当事者の充足で決める。`pending`、欠落、不明、期限切れ、撤回済みは同意根拠として使わない。同意不要の処理は、確認済みの別の根拠を登録する。失効を避けるために実行中だけ根拠の種類を付け替えない。
+
+<a id="ch12-s06"></a>
+### 3.3 初期機能の根拠確定用表
+
+下表は実データ利用前に埋める確定用の台帳である。実在の同意者、取得担当、委任、法的根拠が既に確認された記録ではない。具体的な通信当事者は送受信と契約の事実から法務が確認し、会社代表、管理者、呼出者又はchannelメンバー全員のどれかへ一律に置き換えない。候補の根拠名だけを登録して有効化しない。
+
+| 初期に対象とする機能 | 必要な通信当事者の確定 | 同意取得者・根拠確認担当 | 代理権の確認方法 | 使う根拠と確定状態 |
+|---|---|---|---|---|
+| P01/P02 通常保存・配送と必要metadata | 対象通信の送受信主体・法人と個人の関係を特定。未確定 | 取得又は確認を行う運営/顧客の権限者を記名する。未指定 | 代理取得をする場合だけ、委任者、委任内容、対象目的、履歴、期間を証拠参照で確認 | サービスに必要な正当業務行為等の範囲を個別確認。追加AIへの流用は不可。未確定 |
+| P03 国内AIの読取・要約・下書き | 入力に含む発言・履歴・添付の当事者と対象範囲を特定。未確定 | 参加時等の範囲別説明を届け、本人又は確認済み代理から取得する担当を記名。未指定 | 会社による委任で覆える範囲と社員・guest等の個別範囲を分け、委任証拠を確認 | 具体的な事前同意等を使えるか事実に当てはめる。呼出者の承認だけでは不足。未確定、対象AI利用は無効 |
+| P05 成果物公開・既存の引継ぎ | sourceと出力先の当事者・現閲覧権限を特定。未確定 | 元の根拠との整合と拡張時の説明を確認する担当を記名。未指定 | 元の委任に新受領者・目的が含まれるか確認。不足する代理権は推定しない | source内でも目的と現在の根拠を再検査。公開範囲拡張の根拠は別確認。未確定の公開は無効 |
+| P06/P07 選択外部連携と認証 | 認証通信と操作データを分け、通信当事者、提供主体、受領者を特定。未確定 | 連携条件の確認担当、必要な同意の取得担当、操作承認者を別に記名。未指定 | 会社の連携許可だけで提供代理権を作らず、委任scopeの証拠を確認 | 通信秘密の利用・提供根拠とAPPIの適用根拠を別確定。未確定の業務データ提供は無効 |
+
+P04の永続メモリ・検索を初期提供へ加える場合は、目的・期間・必要当事者を分けた行を追加してから有効化する。将来のRAGやwikiを今回の必須機能へ戻さない。緊急アクセスP08は§7の別記録を使う。J-S01/J-S06は自由選択できる製品設定ではなく、必要な法務確認が済むまで機能又は不足scopeを無効に保つ条件である。
+
+<a id="ch12-s07"></a>
+## 4. 可視範囲の継承表
+
+認可はserverで強制する。UIで隠すだけにしない。会社境界の複合FK、全取得経路のchannel認可、失効時tombstoneは[v0.6/04:7,31,58–66](../sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md)を継承する。
+
+| 対象 | 採用時の可視範囲と継承規則 |
+|---|---|
+| 通常・非公開channel | 明示されたchannelメンバーと役割だけ。参加前履歴を含む対象期間は会社方針で明示。方針未設定の過去履歴は返さない |
+| DM | 限定参加者channelとして扱う。会社管理者を自動的な閲覧者にしない。参加者追加は通常の権限変更として明示し、過去履歴を自動開示しない |
+| thread | 親channelの可視範囲を継承し、広げない。thread固有の非公開機能は初期対象外。対応していないACL例外を黙って親公開へ落とさない |
+| guest | 招待先channel、許可期間、許可された履歴範囲だけ。全社名簿、他channel、全社検索を自動付与しない。退出・期限切れで現在のアクセスを拒否 |
+| 添付・作業画像・成果物 | 元message又はtaskのsource scopeを継承。storage keyやURLを知るだけでは取得不可。取得時にも現権限を検査。画像も同じ保持と削除を適用 |
+| 要約・引用・下書き | source参照を保持。複数sourceを使う出力は、原則として全sourceへの現在の閲覧権限を持つ相手だけに公開。広い共有は別の開示根拠と承認がある場合だけ |
+| メモリ・checkpoint・引継ぎ | taskとsourceの権限・目的を保持。他Botのvolumeや人格メモリ全体へ統合しない。新担当にも現在の権限と根拠を検査 |
+| 検索・embedding・RAG | indexの作成前と検索結果の返却前に検査。本文、snippet、タイトル、件数、候補語から無権限sourceの存在を漏らさない。検索できてもAI利用の根拠は別に必要 |
+| 通知・監査・履歴一覧 | 本文以外の相手・日時・channel名も同じ分類で扱う。非参加者の通知、検索候補、全社一覧へ秘密を出さない。運用目的の監査参照は§7で別に制限 |
+| client cache・書出し | 現在の閲覧範囲だけを保存。logout、退出、権限取消で削除要求を適用。未管理端末の機密cacheは無効。コピー後の完全回収は保証しない |
+
+複数のsourceの一部だけが許可される場合、許可部分だけの再生成は可能な範囲に限定する。禁止sourceの要約、存在、件数が混ざった結果をそのまま返さない。安全に分離できるか不明なら対象出力を保留する。
+
+元の権限が変わった場合、保存時のACLだけで許可し続けない。出力を狭めたり安全に再生成できない場合は、出力を保留する。モデルに「秘密を出さないで」と指示するだけでは代用しない。
+
+<a id="ch12-s08"></a>
+## 5. 取消、撤回、削除の扱い
+
+三つの操作を区別して記録する。取消受付、未開始抑止、外部への停止要求、実停止確認、送出・受領・副作用の結果は別の事実である。取消受付や停止要求の記録だけで「止まっている」「取り消しました」と表示しない。
+
+| 受付の種類 | 効果 |
+|---|---|
+| task又はoperationの通常取消 | 対象の未開始処理を抑止する。開始済み操作は取消方針v0.3の競合と停止非保証を別に表示。法的根拠全体の撤回とはみなさない |
+| integration grant取消 | 通常の新submit、更新、broker利用を止める。既存operationの停止・照会だけを残す場合は別の限定権限。全面取消を別accountで迂回しない |
+| 通信利用の同意撤回・法的根拠失効 | 対象目的とscopeのepochを更新し、以後の入力、検索、再利用、公開、外部提供を拒否する。内部開始記録だけを送信許可にしない。別根拠で必要な保存・事故対応が残る場合は、その根拠と限定範囲を示す |
+
+撤回を受けた国内AI runは停止可能な処理を止める。既に推論へ渡った情報を「渡していない」と扱わない。返ってきた結果は現在の根拠を再検査し、根拠を失った公開・メモリ書込み・外部送信を止める。作業用の入力、出力、cacheを削除又は利用停止し、処理結果を記録する。 対象には、利用している国内推論serverのprompt cache・slot保存、要約やメモリ作成用に一時fileへ書き出した入力、embedding indexを含める。llama.cpp等を使う場合も同じ分類を適用する。今回これらの製品や機能の新規導入は要求しない。撤回時にも§8.2のsource参照による影響範囲列挙を行い、除外前の発言から作った要約・メモリ・checkpointを経由する迂回再利用を止める。
+
+同意撤回は、適法に保存している元の配送記録を全て直ちに削除する要求と同義ではない。削除請求、契約上の保持、法令上の保全は別に判定する。停止可能な処理の失効反映と、物理削除の完了を別に表示する。 「以後の利用を停止しました」は抑止の確認時だけ、「削除処理中」は物理削除の確認前に表示する。削除完了は§8.2で確認できた対象に限定する。
+
+取消判定と実送出の競合、開始直前の中断、後日の復旧は既存S1に関係する。本章はゼロ競合を証明済みとしない。少なくとも現在の失効が判明した経路は新規実行せず、未開始要求を止める。直前再検査と短い開始資格、停止・照会の具体方式は13のX01〜06と整合させる。法的根拠がなくなった後も一律に送信できる免責条項は置かない。
+
+「開始受理」は、承認された個別操作の権限等を確認し、送信開始を内部で受け付けた記録で、実送出や外部受付の証拠ではない。キュー投入、task全体、大量の事前資格発行を開始受理にしない。暫定採用した取消P方針でも、開始受理済みの操作がまだ物理送出前であり、取消受付後に送られる競合があり得ることを利用前と操作承認時に説明する。取消受付を遅らせて開始を先取りする設計は採らない。
+
+法的根拠失効が判明した後に、通常取消の非保証を理由として可能な抑止を放置しない。停止・照会は許可された範囲で行い、全面取消を別accountや再認証で迂回しない。照会不能なら理由と利用者による確認方法を示す。法定の事故報告・本人通知の判定はJ2の通常エスカレーションを待たない。通知・請求の法的効力と製品のcommit時点が常に一致するとは断定せず、残る法的当てはめは08のU03で確認する。
+
+<a id="ch12-s09"></a>
+## 6. 実行点ごとの認可差分と既定拒否
+
+共通判定は`workspace → actor/委任 → sourceの現ACL → purpose → 有効な根拠と必要当事者 → 出力先/宛先 → 保持条件`の順に評価する。外部操作には既存grant、snapshot、承認、account、epoch、fenceも必要。権限があることと法的根拠があることの両方を満たす。
+
+| 実行点 | 追加検査と拒否時の動作 |
+|---|---|
+| serverの取得・context作成 | 許可されたsourceのID・版・履歴範囲を確定。会社全体のDBをrunnerへ渡さない。必要な当事者、目的、根拠を満たせないsourceを除外。分離不能なら処理保留 |
+| runnerの国内AI入力 | 実際の入力manifestとcontext認可証跡を照合し、現ACLと根拠epochを再確認。失効・変更・不一致ならモデルを呼ばない。Botメンバーシップや国内hostを根拠の代用にしない |
+| 検索・メモリ読取 | 依頼者とBot双方の現scopeで絞る。利用目的、根拠、期限、source制限を検査。候補や件数にも同じ制限を適用 |
+| メモリ・index書込 | 将来再利用の許可、source参照、ACL、期限が揃う場合だけ保存。P03だけの一回処理をP04の永続記憶にしない |
+| 出力公開・引継ぎ | 表示直前にsourceと受領者の現権限、目的と根拠を再確認。非同期生成中に失効した結果は保留。別channelへ投稿して制限を迂回しない |
+| egress gateway | 固定payloadとaccount、宛先、操作、source scope、通信秘密の提供根拠版・epochを照合。APPI条件が必要ならその確認も要求。既存03の予約・開始判定のtransactionに検査値を結び付ける |
+| 外部callback・成果物取込 | 既存の署名と保存済み帰属対応を検査。受信だけで次のrunや公開を始めない。撤回後の到着物は隔離し、必要な最小照合以外へ再利用しない |
+| support・backup復旧 | §7の一時権限、§8の保持と削除・制限記録を検査。復旧した古い同意、ACL、資格情報で自動再開しない |
+
+以下のいずれかに該当する場合、当該AI利用、追加利用、公開又は提供を既定拒否する。
+
+- 会社、source、依頼者、Bot、委任元又は受領者の帰属・現権限が不明。
+- 必要な通信当事者、代理権、目的別の根拠又はその証拠が不足。
+- 説明版の範囲を超える変更、撤回、期限切れ、epoch不一致がある。
+- source、派生物、実入力、公開先の対応を確定できない。
+- 保持期限、削除責任、必要な受領者条件が未設定のまま永続保存・外部提供しようとする。海外又は所在未確認という事実だけをこの不足と同一視せず、必要な根拠・説明の充足を個別判定する。
+- 認可台帳に接続できず、現時点の許可を確認できない。
+
+拒否は理由コードと対象操作だけを権限ある人へ返す。非権限者へchannel名、参加者、内容、件数を理由文で漏らさない。根拠のない操作を、空の成功結果や「停止確認済み」に置き換えない。通常の配送等の必要処理は登録された別根拠で判定し、任意AIの同意不足だけで無関係な配送を止めない。
+
+<a id="ch12-s10"></a>
+### 6.1 提供先・委託先の確認記録
+
+既存の`describe_data_boundary`の説明版と、提供先ごとの確認記録を結ぶ。実装時に別の管理画面や外部サービスを必須とせず、構造化された設定と証跡参照で始める。
+
+| 確認区分 | 保持する内容と検査 |
+|---|---|
+| 操作の許可 | 会社の有効化、依頼者・Bot・taskの権限、account、snapshotと個別承認。通信当事者の根拠とは別の参照 |
+| 通信秘密の提供根拠 | 対象本文・metadata、source scope、受領者、目的、必要当事者、根拠版、説明版、epoch。APPI上の委託や同意だけで代用しない |
+| 個人データの根拠 | 提供主体、委託・再委託・第三者・非取扱いの事実分類、27条側の根拠、外国移転があれば28条の適用根拠と、そのルートに応じた説明・措置。非個人データでも通信秘密の検査を省略しない |
+| 受領者と条件 | 法人、処理・保存・保守の主体と地域、内容・metadataの閲覧者、再委託先、目的、保持、学習・広告等の独自利用、再提供、停止・削除、事故通知、確認日・版・担当・証拠ref |
+| 継続監督 | 委託には必要な監督を適用。APPIの相当措置ルートは受領者が扱う間の継続確認等を別に管理し、連携解除だけで終了しない。同意ルートへ同じ義務を機械的に重ねないが、他の該当義務は残る |
+
+外国未特定時の代替説明はAPPI上の説明方法の例外であり、通信秘密の同意範囲や提供先確認を省略する根拠ではない。受領者、目的、取扱条件まで白紙の状態では有効化しない。
+
+本体の委託・再委託では国内保守アクセス、目的外の再利用禁止、再委託管理、事故連絡、消去確認を契約と運用で満たす。所在の実態を確認するまでは国内保証済みと表示しない。選択した外部連携は受領者の利用条件を説明し、許されない独自利用がある場合は当該データを送らない。送信後も停止・削除・結果照会と事故対応の未完事項を追跡する。
+
+<a id="ch12-s11"></a>
+## 7. 運営者、support、鍵保持者のアクセス
+
+会社管理者、通常support、事故対応者、DB管理者、鍵保持者を役割として区別する。初期は既存serverの認可と国内の管理アカウントで表現し、外部の権限管理サービスを必須にしない。担当者の守秘義務、訓練、異動・退職時の即時権限失効、アクセスの定期点検を運用条件にする。
+
+| 場面 | 条件と記録 |
+|---|---|
+| 通常support | 本文・添付・DMを既定で閲覧不可。許可された診断metadataだけを利用。顧客の調査依頼でも他の通信当事者の情報を無条件に開示しない |
+| 内容を伴う調査 | 目的、workspace、resource、担当、必要性、根拠、顧客側承認者と期限を一時権限へ固定。最大60分、延長は新承認、書出しは別権限。顧客側の適切な承認者と実行者を分け、自己承認しない。権限の確保は08 U02/U03で確認 |
+| 緊急本文アクセス | 初期は非提供。緊急を理由に本文/DMを閲覧せず、本文を見ない隔離・停止と必要最小の診断だけに限定する |
+| DB、host、backupの管理 | 個人別の管理認証と必要な権限だけを使う。共有rootアカウントでの恒常調査を認めない。直接DB操作・backup読取も一時権限と監査の対象。アプリのACLを迂回できる主体は運用上の信頼対象として開示する |
+| 鍵保持 | host credential storeと国内brokerの境界を維持。鍵をBot、LLM、sandbox、ログへ出さない。連携の認証tokenと保存時暗号鍵は別の管理対象とする。復号可能な役割、鍵の保管・更新・失効・復旧手順を定める。鍵へのアクセスとデータアクセスの権限を分離できる範囲を明示 |
+
+監査には担当、目的、根拠、対象ID、承認、時刻、操作、結果を残す。本文や資格情報を監査へ複写しない。通常調査は事前監査が保存できなければ拒否する。緊急時の記録も残せない経路を無記録の例外にしない。
+
+初期は緊急本文アクセスを提供しない。単独運営では本文を読まない隔離・停止・必要な診断metadataで対処する。通常調査は当事者を覆う根拠、適切な顧客側の別人による承認、一時権限を必要とする。担当と実稼働の確保は08 U02、法的当てはめはU03へ集約する。
+
+保存時暗号化、端末からserverへの通信保護、service identityの方式は[v0.6/08:80–83,117](../sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md)の未決を解消してから共同利用へ進む。E2EEは一律に必須としない。serverと国内runnerが平文を扱う信頼モデルを明示する。TLS、保存時暗号化、hash chainは、host管理者や鍵保持者が絶対に読めない証明ではない。別権限で保護する監査と定期的なアクセス点検を組み合わせる。
+
+<a id="ch12-s12"></a>
+### 7.1 事故対応の担当と報告経路
+
+実データの試験導入前に、事故判断担当、連絡窓口、不在時の代替担当と対応時間を記名して確定する。現時点は未指定であり、24時間有人対応の提供を約束しない。検知者から事故判断担当へ集約し、封じ込めと証拠保全、該当性判定、顧客・当事者・当局への連絡を担当が追跡する。
+
+通信の秘密の漏えいについての総務省等への報告と、個人データの漏えい等についてのPPCへの報告・本人通知は別々に該当性を判定する。顧客への連絡だけで双方を完了としない。事故認知時刻、判断担当、対象事実、適用期限とその根拠、通知先、判断・連絡の履歴を記録する。翌営業日のアクセス審査や取消・照合の確認待ちを理由に初動を遅らせない。具体的な報告要否・適用期限は事案と適用規定に沿って確認し、未確認の一律日数をここで作らない。
+
+<a id="ch12-s13"></a>
+## 8. 保存、削除、バックアップ
+
+<a id="ch12-s14"></a>
+### 8.1 採用した保持方針
+
+区分・起算点・例外・検証/見直し条件は[13 §2〜8](13-operational-defaults.md)を適用する。本文/添付/成果物は365日、メモリはsource期限内で最長365日、索引はsourceに従い独立TTLなし、生prompt/response/KVは永続0、backupの復旧対象は作成から最大14日。メモリ30日・180日ごとの全件確認やbackup30日の旧候補を現行値として残さない。
+
+法定記録は作成方法別の1年/3年・各起算点を適用し、同意証拠の終了後365日より長い該当期限を優先する。R12/R13/R16は通常AI利用から隔離する。30日保全点検を期限延長や法定記録消去の理由にしない。公開要約は別のP05等の有効根拠と元source制限を満たす必要があり、記憶の撤回だけで元の適法な配送記録まで必ず消すとはしない。
+
+<a id="ch12-s15"></a>
+### 8.2 削除と復旧の順序
+
+1. serverは現在の削除・制限を確定し、対象の読取、検索、再利用、公開を先に止める。
+2. source参照を使い、message、添付、要約、メモリ、index、画像、checkpoint、一時fileの影響範囲を列挙する。削除、再生成、限定保全を区別する。
+3. オンラインの物理削除24時間以内は選定済みの内部目標であり、実測前の対外保証にしない。失敗は担当へ上げ、利用停止を解除しない。削除確認前に完了と表示しない。
+4. clientへtombstoneを配信する。オフライン端末の残存は別に表示し、次回同期で削除を先に適用する。通信できない端末の即時消去は保証しない。保持期限を端末で強制できない構成では機密cacheを有効にしない。
+5. backupは期限内の限定残存として管理する。法的保全に切り替える場合は理由、対象、別の期限、閲覧条件を記録する。
+6. 復旧時は認可と外部dispatchを既定停止する。復旧DBと独立して保全した削除・制限・撤回記録を先に再適用し、現ACLと根拠を再確認する。適用範囲を列挙できなければ対象scopeのAI、検索、公開、外部送信を再開しない。
+
+削除の表示は対象別の確認状態に結び付ける。「削除完了（オンライン・索引・メモリ・端末で確認済み）」は列挙した全対象の削除証拠が揃った場合だけ使う。未同期端末があればこの一括文言を出さず、オンライン等の確認済み範囲と「未同期の端末に残っている可能性があります」を分ける。対象外の分類は省略し、確認できない対象を確認済みとしない。backupが残る場合は、採用済み保持期限と復旧時の削除再適用を詳細へ示す。backupの14日は復旧対象の上限、世代の物理消去24時間は内部目標であることを区別し、全backupまで消えたとは称さない。
+
+独立記録の具体方式は国内の限定権限による別保存とし、復元するDBの古いsnapshotだけに依存しない。新しい外部サービスや国外backupを必須にしない。現在のDB・volume整合復旧と二重送信防止に、この削除・権限制限の再反映を追加する。採用時は定期処理と失敗通知で削除・失効・復旧後の再適用を追跡する。今回その実装や実行は行わない。
+
+<a id="ch12-s16"></a>
+## 9. 受け入れ基準と試験観点
+
+全試験は合成データで実施する。以下は今後の受け入れ条件であり、今回の試験実行報告ではない。既存D1–D12、P1a、P1bを置き換えず、対象となる段階へ対応付ける。具体的な障害反復回数は試験開始前に固定し、既存計画の回数を下げない。[v0.6/05:53](../sources/v0.6/fixed/pelway-technical-docs/05-local-dev.md)、[v0.6/08:98–107](../sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md)の応答断・承認変更20回、実権限取消の各主体5回以上等を継承する。
+
+S01–S08、S15–S16、S20はP1a等の対応する実認可・監査基盤の別承認後、S09–S14とS17はD3–D5・D9–D12へ追加対応、S18–S19は[v0.6/08:104–105](../sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md)のbackup復旧とP1bの削除・安全回帰へ対応付ける。局所の疑似経路だけの試験を全体合格にしない。実顧客データはP1b合格と別の利用許可後とする（[v0.6/07:42](../sources/v0.6/fixed/pelway-technical-docs/07-performance-plan.md)、[v0.6/10:51](../sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md)）。
+
+| ID | 条件と操作 | 期待する結果・証拠 |
+|---|---|---|
+| S01 | 配送根拠だけの会話を国内AIに渡す | AI呼出しなし。P03不足の判断と対象operationだけを監査 |
+| S02 | 必要な当事者を覆う具体的な事前同意の範囲で複数回要約 | 都度の全員クリックを求めず実行可。scope、説明版、根拠版、入力manifestが一致 |
+| S03 | guest同意不足、過去履歴範囲外、代理権未確認の入力 | 対象sourceと関連する派生入力を除外。分離不能なら拒否。出力の限定範囲を漏えいなく示す。管理者設定だけで通らない |
+| S04 | P03のみで永続メモリを保存、又は別taskへcacheを転用 | 書込・再利用を拒否。P04へ自動昇格しない |
+| S05 | DMや非公開channelの要約を、元を読めない参加者へ投稿 | 公開なし。添付、引用、snippet、件数、通知にも漏えいなし |
+| S06 | thread、guest、添付URL、監査API、検索候補から権限を迂回 | 各入口で拒否。別workspaceの内容・存在を返さない |
+| S07 | context作成後に退出、同意撤回、説明範囲変更を注入 | 次のAI入力・検索・メモリ書込・公開の再検査で拒否。古い認可証跡だけでは実行しない |
+| S08 | 国内推論へ入力済みのrunで根拠失効 | 停止可能部分を止める。結果の公開・記憶・外部提供は再判定で拒否。入力済みの事実を隠さない。推論cache、slot保存、一時入力、派生要約・メモリ・indexも利用停止対象として追跡 |
+| S09 | 外部接続だけを実行 | 説明済み認証・能力確認だけ。会話、添付、検索語、repo、業務logの自動送出なし |
+| S10 | grantと操作承認は有効だが通信秘密の提供根拠が不足 | egressで拒否。逆に根拠だけ有効でも操作承認を省略しない |
+| S11 | 固定payload、account、宛先、source、根拠epochを変更 | snapshot一致又は現在の認可検査で拒否。追加promptは新承認へ |
+| S12 | 外国情報未特定でも法定の代替説明等と必要な根拠が成立 | 所在不明だけを理由に一律拒否しない。ただし通信秘密の同意範囲、受領者・目的・取扱条件の確認が別に揃わなければ拒否。本体policyを緩和せず承認payloadだけ扱う |
+| S13 | 根拠失効が最終検査前に確定、又は通常取消後に新規要求 | 未開始要求を拒否。最終検査後の競合はP方針の暫定採用とS1の方式・検証未完を分けて記録し、ゼロ競合合格と偽らない |
+| S14 | 外部応答断、取消後成果到着、全面資格情報取消 | 結果不明を保持、自動再送なし。到着物は公開しない。限定照会不能を明示 |
+| S15 | 通常support、期限切れ一時権限、管理者のDM閲覧 | 根拠と範囲がなければ拒否。延長や書出しを暗黙に許可しない |
+| S16 | 緊急本文アクセスを要求、又は監査保存に失敗 | 緊急本文アクセスを拒否。通常調査の根拠・別人の適切な顧客側承認・最大60分の範囲を検査し、無記録の調査を拒否 |
+| S17 | log、通知、作業画像、crash記録を確認 | prompt全文・秘密値・無許可の相手や本文なし。外部exporterやcrash自動送信なし |
+| S18 | 各保持期限、削除、個別保全、物理削除失敗 | 期限と保全理由どおり処理。先に利用停止し、失敗を完了にしない。オンライン等とbackup残存を区別。未同期端末がある場合に端末を含む一括の削除完了を表示しない |
+| S19 | 削除・撤回前のbackupを復元 | 再適用前はAI、検索、公開、外部dispatchを停止。削除済み内容や旧同意・ACLを復活させない |
+| S20 | 台帳障害、source不明、鍵権限不足、service identity不一致 | 既定拒否。LLM、直接DB、別account、旧cacheで迂回しない |
+
+証拠は版、構成、fixture、操作主体、source scope、期待値、実結果、拒否理由、発生順序、監査参照を残す。試験用でも実在の通信や秘密をfixtureに使わない。「許可外の出力0」は定義したfixture内の結果であり、あらゆる障害の数学的保証ではない。
+
+
+<a id="ch12-s17"></a>
+## 10. 暫定採用済みの判断と適用条件
+
+| 判断 | 現行方針 | 未完確認の参照 |
+|---|---|---|
+| J-S01 | 通信当事者/代理権を目的と履歴scopeごとに確認。参加時の具体的事前同意と本人初回確認を組み合わせ、全員都度クリックにも管理者の全面代理にも置き換えない | U03 |
+| J-S02 | 明示履歴/source内だけ、派生物も同じ根拠/ACL。DM/guest/参加前履歴を自動拡張しない。RAG/wikiは初期必須にしない | U03/U06 |
+| J-S03 | 緊急本文アクセス非提供。通常調査は別人の適切な顧客側承認と根拠、60分の一時権限 | U02/U03 |
+| J-S04 | 一つの保持方針とquota。採用値は13、法定記録は別管理 | U05 |
+| J-S05 | 保存時鍵と連携tokenを分離し、制限記録は復旧DBから独立保全。E2EE/新鍵サービスを一律必須にはしない | U05 |
+| J-S06 | 受領者/目的/metadata/独自利用/再提供/監督条件と通信秘密/APPI根拠を別確認 | U03/U04 |
+| J-S07 | Pを明示的要件変更として暫定採用。開始受理と物理送出を区別し、既受理操作は物理送出前でも取消後送信の可能性を説明。通常取消で法定義務や失効後の抑止を免除しない | U01/U03 |
+
+<a id="ch12-s18"></a>
+### 10.1 契約と責任の設計境界
+
+本体運営は国内の法人向けホスト型チャットを基本仮定とし、通信媒介/管理主体・設備に沿って届出等を確認する。B2B/閉域だけで通信秘密や届出の適用除外としない。ソフト配布だけの場合とは分ける。自然人の私用契約は消費者契約法の追加審査が必要で、「社員が仕事に使う」だけで事業者と判定しない。
+
+停止結果の非保証とPelwayの権限検査/安全管理/合理的抑止/報告義務を分ける。故意・重大な過失には免責・賠償上限を適用しない方針を安全側の契約提案とするが、金額・損害範囲・第三者請求/外部料金補償は未決U03で確認する。B2Bの全責任制限が一律無効という法的結論にはしない。通常過失の扱いも全面免責を自動採用しない。
+
+濱田さんの企画上のP採用は既存顧客契約の変更合意ではない。既存契約があるなら保証変更の明示合意等を別に確認する。法的通知の到達と製品取消commitは同一と断定しない。対外意思表示/申込み等の代理行為は単なる情報検索と分けて確認する。
+
+<a id="ch12-s19"></a>
+### 10.2 個人データ・外国移転の事実分類
+
+以下は日本法確認§5を継承する当てはめの分岐で、連携ごとの該当性はU03/U04に残す。
+
+| 事実関係 | 必要な整理 |
+|---|---|
+| 国内の真の委託/再委託（目的達成に必要な範囲） | 27条5項1号の第三者非該当。一般の第三者提供同意は不要でも23・25条等の安全管理・必要な監督。独自目的の学習・広告等を勝手に委託扱いしない |
+| 外国の取扱事業者へ本人同意ルート | 28条1・2項、規則17条2項。事前に外国名、制度、受領者の保護措置等を本人へ示し、外国第三者提供を認める同意。**国外委託も、27条5項だけで28条の条件を免れない** |
+| 外国の受領者が相当措置を継続する体制を整備 | 28条1項の特別の外国移転同意は不要になり得るが、27条側の同意/委託等の根拠は別に必要。28条3項・規則18条の継続確認、本人への求めに応じた情報提供等。契約/DPA締結だけで運用確認を省略しない |
+| PPC指定の同等水準国（現行案内はEU/英国） | 28条の外国の除外。ただし27条、目的制限、安全管理等は残る。単なる「十分そうな国」を自社判断で追加しない |
+| 27条1項各号の法令等の例外 | 条文の要件に合う場合のみ。一般の業務上便利・顧客が承認しただけではこの例外にならない |
+| クラウド事業者が個人データを取り扱わない | 契約上の非取扱いと適切なアクセス制御等の実態を確認。PPC FAQ7-53・12-3上、第三者提供にも委託にも当たらない場合がある。ただし23条の安全管理、外国の制度等の把握、32条の公表等は残る。promptを解析する外部AIを「学習なし」「保存なし」「TLSあり」だけで非取扱い扱いしない |
+| 利用者の選択した提供を裁量なく仲介するだけ | PPC通則3-6-1の注記に沿い、提供主体が利用者側となる場合がある。Pelway/Botが送付先・範囲を自律決定し加工/再利用する構成まで機械的に同じ扱いにしない |
+
+**外国名等が未特定の場合：** 規則17条3項・外国移転ガイドライン5-3-1は、同意時に外国を特定できない場合、未特定の事実と理由、候補国等の本人に参考となる代替情報を示す方式を認める。17条4項・5-3-2は受領者措置の情報を提供できない場合の事実・理由の説明を定める。「海外かも/自己責任」のみで足りるという意味ではない。他の義務や同意の実質が満たせるなら、不明という一点だけの一律禁止は不要。
+
+**相当措置ルートの継続義務：** 外国移転ガイドライン6・6-1、規則18条。相当措置の実施状況とそれに影響する外国制度を定期的に確認（公式解釈は年1回程度以上等）。支障があれば必要かつ適切な措置、継続実施の確保が困難なら提供停止。提供先がデータを扱う間は継続し、連携解除だけで終えない。**有効な本人同意ルートで提供した場合に、この28条3項義務が当然に重ね掛けされるわけではない**（同ガイドライン6）。それでも23・25条等の該当義務は別に残る。
+
+**通常運用で残すもの：** 受領法人/アカウント、データと目的、外部処理/保存/保守地域、同意又は相当措置等の根拠、委託/再委託関係、再利用・保持・削除・事故通知、アクセス制御、確認日/版/担当。29・30条の提供/受領記録は該当性に応じて作成保存する（委託等の除外、外国同意ルートの扱いを区別）。監査のために本文や秘密を無制限複製しない。
+
+**事故と本人請求：** 26条・施行規則7～10条の報告対象等に該当すれば漏えいのおそれ段階を含む事故対応、PPC等への報告・本人通知を検討。委託元への所定の通知による受託者の報告免除はあるが「顧客責任」と書くだけでは足りない。35条の利用/提供停止請求等は要件・代替措置・通知の規定に従う。全件削除を保証する必要も、通常の取消非保証で拒絶する権利も一律には導けない。
+
+
+<a id="ch12-s20"></a>
+## 11. 根拠資料
+
+本追補の設計評価は[通信秘密の設計監査](../sources/addenda/2026-11-09-best-effort-cancel/secrecy-design-review-2026-11-09.md)と[日本法確認](../sources/addenda/2026-11-09-best-effort-cancel/legal-review-2026-11-09.md)を継承する。法令、行政解釈、本仕様の設計提案を区別する。今回のプロ会議の補正と根拠は採否記録にも採録する。
+
+- 電気通信事業法4条・164条3項。[電気通信事業法](https://laws.e-gov.go.jp/law/359AC0000000086/)
+- 総務省「通信の秘密FAQ」問2-2、2-3、3-1、3-2。保存済み記録、metadata、知得・利用・提供の根拠。[通信の秘密FAQ](https://www.soumu.go.jp/main_sosiki/joho_tsusin/d_syohi/th_faq.html)
+- 総務省「同意取得の在り方に関する参照文書」3-2アと脚注25、3-3、4-1-1から4-1-3。都度全員同意を一律に要求せず、各取扱い時点の有効性と容易な撤回を整理。[同意取得参照文書](https://www.soumu.go.jp/main_content/000735985.pdf)
+- 電気通信分野のガイドライン解説2-17、保存・安全管理の項目、5-1、別添9。通信履歴の必要最小限の記録・保存、アクセス制御、識別認証、委託先監督。[電気通信分野ガイドライン解説](https://www.soumu.go.jp/main_content/001064462.pdf)
+- 個人情報保護法23条から30条、35条。[個人情報保護法](https://laws.e-gov.go.jp/law/415AC0000000057/) 。記録保存の作成方法別の扱いはPPC通則3-6-5等を参照。[PPC通則ガイドライン](https://www.ppc.go.jp/personalinfo/legal/guidelines_tsusoku/)
+- PPC外国第三者提供ガイドライン2、5、6。本人同意と相当措置の区別、未特定時の情報提供、継続確認。[PPC外国第三者提供ガイドライン](https://www.ppc.go.jp/personalinfo/legal/guidelines_offshore/)
+
+- プロ会議の法務所見の事故対応根拠。[総務省FAQ問4-1](https://www.soumu.go.jp/main_sosiki/joho_tsusin/d_syohi/th_faq.html)、[PPC漏えい等の対応案内](https://www.ppc.go.jp/personalinfo/legal/leakAction/)。今回の集約では既存調査と提示された根拠を継承し、弁護士の最終判断を得たとはしない。
+
+本仕様のschema名、初期日数、supportの時間制限、可視範囲の保守的な継承はPelwayへの設計提案であり、法律がその値や方式を一律に指定しているという説明には使わない。
+
+
+<!-- FILE: 13-operational-defaults.md -->
+<a id="ch13-s01"></a>
+# 13 運用初期値・保持・削除・容量・有人対応
+
+状態：統合v0.7の確認用稿。元の運用初期仕様へのCodex・Claude所見を継承し、v0.7への再確認は採否記録で別管理。2026-11-09 JST。実装・実運用は未実施。
+
+<a id="ch13-s02"></a>
+## 1. 適用範囲と決定の意味
+
+[通信秘密追補v0.2](12-communication-secrecy.md)、[暫定採用記録](../sources/addenda/2026-11-09-secrecy/user-decision-2026-11-09.md)、[取消proposal-v0.3](03-ai-bot-runtime.md)を基準に、委任された範囲で企画がローカル試作の初期値を選定した。全担当の全数値への賛同や、濱田さんの稼働承諾を意味しない。旧候補と異なる数値は本書を優先するが、凍結文書とv0.2本文は変更しない。[採否記録](../sources/addenda/2026-11-09-secrecy/operational-defaults-disposition-v0.1.md)に対立案・撤回・理由を残す。
+
+期間と容量は、法定と明記したものを除き未測定の運用仮定。保持期限・権限制限は実装すべき仕様制限、削除所要時間・回答所要時間は内部目標であり、いずれも現状の実装済み対策・契約上の保証ではない。時刻表示はJST、経過時間は保存した時点から計算する。1日は24時間、GiBは2^30 bytes、MiBは2^20 bytes。法定の「年」は暦年で計算し365/1095日固定にしない。
+
+実装、Git、実接続、実外部I/Oの有効化、実顧客データ投入、課金・購入、新サービス追加、実機の設定変更は対象外。相談は既存のCodex/Claude経路への仕様テキストのみで、実顧客情報や認証情報を入力しない。外部連携に関する以下の規則も、将来の設計であって今回の送信許可ではない。
+
+<a id="ch13-s03"></a>
+## 2. 共通の期限・利用制限
+
+各保存物に分類、作成時刻、期限、source参照、取扱根拠、現権限、担当役割を持たせる。保持中でも期限切れ・削除・根拠失効時は読取/検索/AI入力/公開を拒否する。全メモリを毎回LLMへ入力しない。索引や要約を経由した参照にも同じ制限を適用する。
+
+複数sourceを用いた不可分の派生物の期限は、当該分類の上限と全sourceの有効期限の最小。sourceから独立した保存は有効根拠を持つ別の分類として明示確認した場合だけで、単なる再保存や移動で期限を洗い替えない。失効時は依存関係を列挙して停止/削除/再生成/個別保全を区別する。
+
+R12・R13・R16は内容利用の権限ではなく、説明責任・法定保存・復旧抑止のための最小証跡として、保存時から通常のAI入力/検索と分離する。取扱い終了又は未解決の解消という終了条件と、90日未解決時/以後30日ごとの点検を管理し、無期限の本文利用へ変えない。これらを作成後365日で一律消去する案は、継続取扱い中の証拠や法定期間を欠くため採用しない。
+
+法定保存・個別保全の例外は必要な記録だけを通常のAI利用から隔離する。原文全体の自動延長には使わない。理由、範囲、人の責任者、適用期限、次回点検日を記録する。保全の必要性は30日ごとに人が点検する内部目標とし、未点検だから法定記録を削除することはない。
+
+<a id="ch13-s04"></a>
+## 3. 保持の決定値
+
+表のV番号は§9の未実施の検証観点。共通例外は§2。再評価はまず合成データ試作で行い、実データ計測には別の利用許可が必要。
+
+| ID/対象 | 採用値・起算点 | 理由・仮定 | 例外・補足 | 検証/見直し条件 |
+|---|---|---|---|---|
+| R01 本文・添付・明示成果物 | 作成から365日。添付は親messageの期限以内 | 長期の経緯を残し、無期限保存を避ける。容量上限と併用 | 編集/閲覧だけでは延長しない。元sourceを含む成果物は§2も適用 | V01。短期削除要望・容量到達・継続業務の欠落で再評価 |
+| R02 明示保存メモリ | 作成/根拠を確認した明示更新から最長365日、かつsourceの期限以内 | 営業・財務・法務の最終365日案を採用。30日消去と半年ごとの全件承認を避ける | 閲覧で延長しない。再保存は新版/根拠/確認者を記録。180日未確認だけでは自動隔離しない | V01/V02。誤った古い記憶や確認負荷が問題になれば目的別ルールを再検討 |
+| R03 索引・embedding | 独立TTLなし。対象source/メモリと同じ期限 | 技術案。別期限による削除漏れを避ける | 候補/件数にも現ACL。再生成でもsource期限を延長しない | V02。削除漏れ/索引増大時 |
+| R04 生prompt/response、KV/slot cache | 永続保存0。run終了・停止・失効時に破棄。1runは最長60分 | 技術案のRAM限定を採用。60分は企画の孤立run防止用仮定 | 会社/run間流用、slot保存、swapやcore dumpへの本文の自動退避を許可しない。保護を確認できない推論経路は無効。成果物/checkpointは別の明示分類だけ | V02/V03。正常runが上限で頻繁に止まる/設定上の残存がある場合 |
+| R05 作業一時file | 作成から最大24時間、不要になれば先に除去 | 財務/法務/技術一致 | 失敗/孤立fileも対象。内容をログへ移して残さない | V03。孤立容量/削除失敗時 |
+| R06 作業画像 | task終了から7日、かつ作成から最大37日とsource期限の早い方 | 7日は原案継承。37日は未終了taskの無期限残存を防ぐ企画上限 | 正式成果物への採用は別の根拠と分類を確認 | V01/V03。調査に足りない/不要画像が多い時 |
+| R07 checkpoint | task終了から30日、かつ当該checkpoint作成から最大60日とsource期限の早い方 | 終了後再開の余地を残し、未終了による無期限保存を防ぐ | taskの内部作業は無活動30日で停止要求対象、作成から365日を上限とする。未確認の外部runをstoppedへ自動遷移させず、03の9状態と証拠条件を適用する。停止したtaskの外部結果不明は別管理し消去しない | V03/V07。長期taskの有効な再開が妨げられる時 |
+| R08 配送の診断用重複metadata | 配送確定から7日 | 原案継承、履歴表示の属性とは区別 | 未確定操作の再送抑止/照合の最小記録はR16へ分離。本文を含めない | V04/V07。未解決時に抑止が消えないこと |
+| R09 診断log | 記録から14日 | 原案継承、長期の本文複製を作らない | 本文/生prompt/秘密値なし。事故対象だけ個別保全 | V04。調査に不足/容量増大時 |
+| R10 安全監視log | 記録から30日 | 原案継承 | 本文/秘密値なし。個別保全は§2 | V04。事故の検知遅延が期間を超えた時 |
+| R11 業務・アクセス監査 | 記録から365日 | 操作/権限/担当を後から追える期間 | 法定記録兼用ならR13を優先。本文を複写しない | V04/V08。監査需要/容量増大時 |
+| R12 同意・委任等の証拠 | 当該根拠による取扱い継続中＋終了後365日 | 連携解除後の外部残存にも対応 | 外部取扱い終了が確認できなければ解除日で終了扱いにしない。法定記録兼用はR13の長い期限を満たす | V04/V08。根拠の対象/外部残存条件が変わる時 |
+| R13 法定の提供/受領記録 | §8の方法別の1年又は3年・各起算点を適用 | PPC一次資料に基づく。任意値ではない | 全チャットを一律3年保存しない。未分類の対象処理は無効。保存だけで提供の適法性を補わない | V08。法令変更/取扱分類変更時 |
+| R14 client機密cache | 最終オンライン確認から24時間。logout/退出/失効時は期限前にも削除要求 | 原案継承。通信不能端末の残存は別に扱う | 期限強制・端末保護を確認できない構成では機密cache無効。オフラインの再読取を認可の代替にしない | V02/V05。端末方式変更時 |
+| R15 国内backup | 1日1回（予定02:00 JST）、snapshot作成から最大14日 | 技術14日案を採用。ローカル試作では世代残存を短くする。14日で破損発見できる保証ではない | 正常時の想定復旧点間隔24時間で、RPO/RTO保証なし。期限判定は15分ごと、作成14日で復旧対象外。世代の物理消去24時間は内部目標。残存失敗を隠さない | V05。復元演習は月1回、日次整合確認。14日超の遅延検知/削除失敗で再評価 |
+| R16 削除・失効・操作抑止/照合記録 | 制限発効又は結果確定から最低90日、かつ関連する復元可能copy/未完処理がなくなるまで | 復旧・遅延callback・結果不明で制限を復活させない | 未解決の最小操作記録は消さない。未解決90日で人の点検、その後30日ごと。本文や永続的に使える認証tokenは含めない | V05/V07。外部の再送/照合窓が長い場合 |
+
+契約終了に相当する利用終了操作の初期仕様は、通常のAI処理/外部送信を停止し、権限ある会社管理者に最大30日間の書出し猶予を設ける。これはR01等の期限を延ばさず、期限到来分は先に停止・削除する。30日経過で通常データを削除対象へ移す。書出し自体も根拠・現在の権限を確認する。法定記録・個別保全・未解決の最小操作記録は隔離して別管理する。
+
+<a id="ch13-s05"></a>
+## 4. 削除・失効反映の内部目標
+
+| ID/対象 | 採用値・起算点 | 理由・例外 | 検証/見直し |
+|---|---|---|---|
+| D01 利用停止 | 有効な削除の受付/権限確認を記録するtransactionで制限を確定 | 読取/検索/AI入力/出力の入口で現制限を確認。派生物列挙の完了を待って停止する設計にしない | V02。古いcacheだけで参照できたら当該経路を止める |
+| D02 失効/期限の検査 | 利用の都度検査。定期回収は15分ごと | 期限超過15分まで読めるという猶予ではない。run停止/除去の確認がない間は完了扱いにしない | V01/V02/V03。遅延が24時間に近づく時 |
+| D03 オンライン物理削除 | 実行可能と確認した受付から24時間以内を内部目標 | 法定請求の審査待ちと実行待ちを別表示。原受付時刻も残す。backup/端末/外部先の完了とは別 | V05。目標超過が1件でもあれば原因確認 |
+| D04 自動再試行 | 初回に加え最大5回。初回時点から5分/15分/1時間/3時間/6時間後の絶対offset | 技術の5回案を明確化。sourceは同じ制限のまま。削除の冪等な再試行だけで、外部の業務操作の再送はしない | V06。失敗率/回復所要時間で再評価 |
+| D05 失敗通知 | 初回失敗で担当の一覧へ。3回連続失敗（15分時点）と最終6時間失敗で段階通知。24時間未完で会社管理担当へ状況を表示 | 同じ段階の通知は重複させない。6回失敗後は人の確認待ちを維持。権限不備など再試行で解消しない失敗は初回から要対応にし、無意味な再試行をしない。物理削除を諦めて完了にしない | V06/V09。通知過多/気付けない失敗時 |
+
+以後の利用停止と物理削除完了は別状態。表示は「削除受付後、対象の利用停止を先行して処理し、確認できた状態を表示します」を説明文とする。実装前に「直ちに/24時間以内に消えます」と対外保証しない。
+
+削除画面は受付日時JSTと、オンライン/索引/メモリ/端末/backup/外部先の状態を区別する。「削除完了（オンライン・索引・メモリ・端末で確認済み）」は列挙対象すべての証拠が揃った時だけ。未同期端末が残ればその部分を未確認とする。backup詳細は本書採用の「復旧対象は作成から最大14日。物理消去の確認状態は別途表示。復元前に削除・撤回を再適用」とし、候補30日を残さない。隔離保全は削除完了と呼ばない。
+
+<a id="ch13-s06"></a>
+## 5. 容量と逼迫時の停止条件
+
+保存分類の算入先を固定する。R01/R02/R03はC01、R05/R06/R07はC04、R08/R09/R10/R11/R12/R13/R16はC05、R15はC06、R14はC08。R04はRAMのみで永続領域への算入なし。正式成果物へ移す時はC01へ予約・分類変更し二重計上を避ける。算入先不明の保存は許可しない。R10の事故検知に必要な安全記録と既存の停止/削除/制限の記録は非必須書込停止の対象外としC07のreserveで継続する。記録できない時は新業務を停止し、安全な隔離と人の対応へ移す。
+
+
+| ID/対象 | 採用値 | 理由・例外 | 検証/見直し |
+|---|---|---|---|
+| C01 顧客データ | 1社/1workspace合計10GiB | 財務案採用。本文/添付/成果物/メモリに索引も加えて別計測かつ総量へ算入。表示上の原データ量も区別。20GB案は初期不採用 | V06。圧縮前後/索引増幅/実原価で見直す |
+| C02 1件 | 添付・添付扱いの成果物は1件50MiBまで | 財務案。分割して総量上限を迂回しない。展開物は一時領域にも計上 | V06。業務上必要な大容量が多い時 |
+| C03 警告/保存拒否 | 使用率80%で管理担当へ1段階通知。新規保存の予約量込みで100%を超えるものを保存前に拒否 | 95%一律停止は不採用。10GiBを使える仕様と整合。多重upload/索引生成も原子的に予約する | V06。同時保存で超過/通知過多がある時 |
+| C04 一時作業領域 | 1workspace合計2GiB、80%警告、100%で容量を増やすrun/一時出力を停止 | 企画の検証用仮定。顧客保存枠・model本体・RAMとは別。期限だけでは急増を防げない | V03/V06。正常runが止まる/孤立file増大時 |
+| C05 診断/安全監視/監査/同意/制限記録 | 1workspaceの計測予算2GiB。80%警告、100%予測時は当該記録を必要とする新業務処理を拒否 | 企画仮定。法定記録を容量で削らない。既存の停止/削除/照合記録にはC07のreserveを使い、人が対処 | V06/V08。記録増大/法定期間変更時 |
+| C06 backup | 1workspace最大192GiBの検証用予算 | C01の10GiB＋C05の2GiBを14世代=168GiB、残り24GiBを形式/制限記録等の余裕とした上限仮定。圧縮・差分削減を原価へ先取りしない。追加diskは購入しない | V05/V06。形式の実容量/復旧方式が判明したら再設定 |
+| C08 client機密cache | 端末・workspaceごと256MiB、到達予測で新規cacheを作らずオンライン読取へ。R14の24時間も適用 | 企画の検証用仮定。端末側で強制できるまで無効 | V02/V06。端末方式/実容量で見直す |
+| C07 物理領域 | 空き25%以下で警告、15%以下又は1GiB以下で非必須書込を停止。停止/削除/失効/事故証拠に最低1GiBを別途reserveする設計 | Claude案を補正採用。主データ/backupの各実volumeで検査。reserve未確保又は保護記録が書けなければ関連業務を既定拒否。安全停止まで拒否する仕様にはしない | V06。容量測定・reserve枯渇試験で再設定 |
+
+backupの対象はC01/C05と必要な構成記録。生prompt/cacheとC04の作業コピーは対象外で、task再開位置の完全復旧は保証しない。復元でcheckpointがなくても未解決operationを新規実行せず、独立したR16から照合する。
+
+C01/C04/C05/C06/C08は未測定のローカル試作用設定で、保存容量を購入済み/確保済みとは扱わない。現在の機械に同時最大量が収まるとは言わない。配置する実volumeごとにreserveと必要量を合成データで確認し、足りなければ新規保存/業務を停止する。勝手な古い履歴の削除・法定記録の圧縮廃棄・追加課金・backupの期限前消去をしない。backupを作れない場合は失敗を記録して人へ上げ、次の正常世代を確認するまで新しい顧客データの増分保存を保留する。
+
+<a id="ch13-s07"></a>
+## 6. 取消・開始資格・結果不明
+
+| ID/対象 | 採用値・起算点 | 理由・例外 | 検証/見直し |
+|---|---|---|---|
+| X01 開始資格 | 発行から5秒、単一operation/attempt/payloadで一回限り | 財務5秒案を採用、技術30秒案は不採用。ネットワーク完了時間でなく内部開始受理の短い窓。30秒が必要な実測根拠はない。5秒も安全性の証明ではない | V07。正常な開始受理が頻繁に失効すれば発行位置を先に見直す |
+| X02 期限切れ | 引渡し済み試行の結果を証明できなければ即結果不明 | 実行側の「送信呼出しなし」logだけで未送信にしない。未発行の待機処理の取消と区別。期限延長/新attemptによる盲目的再送なし | V07。最終検査直後の中断/再開/時計ずれ |
+| X03 判断待ち | 結果不明の発生直後に依頼者の一覧へ。経過時間を表示 | 24時間まで一覧を空にしない。照合をAIが補助しても会社の人間を判断担当とする | V07/V09。権限変更/依頼者不在時 |
+| X04 自動照合 | 結果不明発生から0分/5分/15分の最大3回、読取照会だけ | Claude案採用。連携先が許可する照会API/認証/根拠がある時だけ。429等ならRetry-Afterを尊重し、15分窓を超えた未照会は人へ。照会不能は直ちに人の確認待ち | V07。rate limit/費用/照会仕様が異なる連携 |
+| X05 有人着手/昇格 | 15分未解決で要有人確認を強調。次の通常対応枠内に着手を内部目標。24時間未解決で会社指定の決定権者へ昇格 | 運営の通常枠を待つ間も一覧は表示。会社側担当が未指定なら未担当警告。営業日と24時間を混用しない | V07/V09。実際の稼働/顧客体制の確認時 |
+| X06 24時間の状況表示 | 発生から24時間で権限ある依頼者/会社担当のアプリ内に定型の未解決状況を1回掲示 | 人の調査完了と無関係に「結果確認中・再実行しない」を示す。本文/非公開名を載せず現ACL確認。メール/外部チャット送信はこの仕様で自動許可しない | V09。失効/通知失敗時も結果や保存期限は変えない |
+
+開始資格の5秒はserverの発行から開始受理までとする。開始受理と取消commitは同じ操作状態について順序を一意にし、受理時に固定payload・現ACL・有効根拠・未取消・期限を検査する。古いoperation IDの再提示を新規操作へ読み替えず拒否する。根拠失効後の新規読取・推論・送出段階への移行を抑止し、実行中の停止も試みる。最終検査後の競合がゼロだと証明したとは扱わない。
+
+内部の開始受理は物理送出/外部受付/課金の確定ではない。取消commit後の新しい内部開始受理を禁止するP案、承認範囲の出口検査、既定の外部通信拒否、未開始・後続・自動再送の抑止は維持。開始受理後の物理送出前競合も含め停止・巻戻しは保証しないが、根拠失効の抑止義務を通常取消の非保証で置き換えない。5秒・15分・24時間の到来は成功/未送信/未課金/失敗の証明にならない。照合の元根拠が失効したら無理に再接続しない。S1と復旧・鍵の未検証は残り、実外部I/Oを無効のまま維持する。
+
+<a id="ch13-s08"></a>
+## 7. 有人対応、役割、一時権限
+
+通常の予定対応枠は月〜金20:00〜21:00 JST（日本の祝日を除く）。初回の人による回答は受付後の次の2対応枠以内を内部目標とする。枠内受付は当該枠を1枠目に数える。24時間受付のシステム記録と24時間有人対応を区別し、AIの返答で人の回答済みにしない。次の2枠は固定の48時間ではない。平日日中対応案は会社員の稼働確認前に約束できないため不採用。
+
+この枠は設計用の初期設定で、濱田さんの確約ではない。実際の担当・時間が受諾されるまで対外文面は「受付済み。有人対応の時間帯は未確定」であり、「次の平日に必ず対応」も表示しない。受諾後は予定枠と現在の受付状態を説明する。復旧所要時間/24時間即応は保証しない。
+
+| 役割 | 設計上の責務/候補 | 本人確認と必要条件 |
+|---|---|---|
+| 運営・通常support | 濱田さんを候補。失敗一覧の確認、削除再試行の再開等 | 役割/時間/守秘/個別権限の受諾未確認 |
+| 事故判断・当局/本人通知の担当 | 人間。濱田さんを候補とし、未指定と明記 | 事故連絡経路と不在時の代替人員を実データ前に確定。通常枠や照合15分/24時間を待たせない |
+| 会社側の照合判断担当 | 依頼者と会社が指定した実在の人間 | 退職/不在時の決定権者も登録。運営だけで顧客の業務判断を代行しない |
+| 鍵・復旧担当 | 運営権限を持つ人間。濱田さんは候補 | 鍵アクセスとデータアクセスの境界、復旧手順は未検証 |
+| 独立審査者 | 対象操作を実行した人とは別の権限ある人 | 未確保。AIや本人の自己審査を独立審査と称さない |
+
+初期の緊急本文アクセスは非提供。審査者がいないことを理由に無記録で読む経路を作らない。本文を読まない隔離/停止/診断metadataで対処する。通常の内容調査の一時権限は承認/有効化から最大60分、理由・対象・根拠・担当・承認者を固定する。承認者は必要な根拠を確認できる顧客側の権限ある人とし、調査実行者による自己承認を禁止する。別人の有効な承認を確保できなければ内容調査は無効。通常調査のために別の専任鍵担当者まで新設することは必須にしない。延長は改めて承認し、書出しは別承認。根拠不足・責任者未指定・監査不能なら当該内容調査は無効。
+
+運営アカウントと権限の人による点検は30日ごと、復元演習は月1回を内部目標とする。機械の整合確認は毎日とし、未実施/失敗を可視化する。人の確保が済まない間は合成データで仕様を検討できるが、実データ運用条件を満たしたとは扱わない。
+
+<a id="ch13-s09"></a>
+## 8. 法定保存と製品設定を混ぜない
+
+[一次資料照合](../sources/addenda/2026-11-09-secrecy/operational-defaults-legal-evidence-v0.1.md)、[PPC通則ガイドライン§3-6-5/6](https://www.ppc.go.jp/personalinfo/legal/guidelines_tsusoku/)を参照する。
+
+| 対象/方法 | 法定期間・起算点 |
+|---|---|
+| 提供側：規則19条3項の契約書等代替記録 | 最後の提供から1年（規則21条） |
+| 提供側：規則19条2項ただし書の反復一括記録 | 最後の提供から3年 |
+| 提供側：その他 | 記録作成から3年 |
+| 受領側：規則23条3項の契約書等代替記録 | 最後の受領から1年（規則25条） |
+| 受領側：規則23条2項の反復一括記録 | 最後の受領から3年 |
+| 受領側：その他 | 記録作成から3年 |
+
+法29条/30条の対象・例外、当該記録方式の適用は事実に基づいて分類する。同意証拠/監査が法定記録を兼ねるなら、該当する複数の必要期限を満たしてから消す。分類が不明な将来の提供を「仮に3年残せば適法」として有効化しない。既に発生した疑義記録は必要範囲を隔離し、人が分類・保全を判断する。人の確認待ちで設計全体を止めず、その未確認scopeだけ無効とする。
+
+事故の通信秘密に関する報告とAPPIの報告/本人通知は別々に判定する。事故認知時刻、人の判断担当、適用期限、通知先を記録する。会社への状況表示だけで法定の報告を済ませない。
+
+<a id="ch13-s10"></a>
+## 9. 検証計画と見直し
+
+以下は設計の受け入れ観点であって、今回実行した試験ではない。基準文書のS01〜20、D系試験の範囲・反復回数を削らない。
+
+| 観点 | 今後の合成試験・測る値 |
+|---|---|
+| V01 期限 | 作成/編集/明示更新/終了/失効の前後、複数sourceの最短期限、暦年と日数、書出し猶予の非延長 |
+| V02 派生・cache | source撤回時にindex/要約/memory/slot/通知件数へ迂回できない。端末未同期と完了表示の整合 |
+| V03 孤立処理 | 60分run、24時間一時file、30日無活動/365日task、37日画像/60日checkpointの各上限と容量 |
+| V04 証拠最小化 | logに本文/認証情報なし、監査/同意/結果抑止の分類と起算、未解決でdedupeが消えない |
+| V05 削除・復旧 | 消去失敗/backup失敗/旧snapshot復元。独立制限記録を先に適用し未適用時は再開しない。日次/14世代/物理消去の遅延を測る |
+| V06 容量・再試行 | 同時upload/索引増幅/各quota/物理空き15%/reserve。削除と監査を止めない。0/5/15/60/180/360分の削除試行と通知 |
+| V07 取消・不明 | 5秒境界、最終検査直後の中断、遅延callback、再認可、照会APIなし/429、0/5/15分と24時間でも無断再送・未送信判定なし |
+| V08 法定記録 | 6通りの期間/起算点、兼用証拠の最大期限、保全の別管理、未分類の対象だけ無効 |
+| V09 役割/画面 | 即時判断待ち、昇格24時間、金曜夜/祝日/次の2枠、人未指定、現ACLによる通知範囲、AI応答を人対応済みにしない |
+
+最初の合成試作で人手・保存量・再読取量を分けて記録する。人手には同意/問い合わせ/削除失敗/連携先条件確認も含む。数値の実用性は試作後30日又は最初の目標逸脱時の早い方で見直す内部目標。実測前の料金確定や利用者向け性能保証はしない。
+
+<a id="ch13-s11"></a>
+## 10. 残る確認の正本
+
+数値は本章で選定済み。人員受諾、法的当てはめ、連携条件、S1・鍵/復旧/削除等の実装検証、実行の別承認は[08 U01〜06](08-decisions-open.md)へ集約する。運用値の再選択待ちへ戻さない。
+
+codex
+固定本文だけを照合した結果、修正すべき重大な内部不整合は2件です。実装・法的適合・人員の未検証自体は指摘に含めていません。
+
+**R-01｜01「仕事の往復」：開始資格と開始受理の順序が逆**
+
+具体文：
+
+> G->>S: 予約済attemptの最終検査と開始受理を要求  
+> S->>S: 検査と条件付き開始更新を同一transactionで永続commit  
+> S-->>G: 成功した一つの実行だけに一回限りの開始資格
+
+**なぜ矛盾するか：** 03「固定承認と外部副作用」手順6〜7、04「外部I/Oの開始受理と復旧」、13 X01では、資格発行→資格を使った開始受理要求→資格消費・耐久commitの順です。この図では開始受理後に資格を発行しており、決定済みの「資格発行から内部開始受理まで5秒」を表現できません。
+
+**最小置換案：** 上記3行を次に置換する。
+
+```text
+S-->>G: 予約済operation/attempt/payloadへの一回限りの開始資格を発行
+G->>S: 発行から5秒以内に当該資格で最終検査と開始受理を要求
+S->>S: 検査と資格消費・条件付き開始更新を同一transactionで永続commit
+S-->>G: 当該gateway実行だけに開始受理の成功応答
+```
+
+**R-02｜12「3. 目的と根拠の表」P08：緊急アクセスの許容記述が残存**
+
+具体文：
+
+> P08｜supportの内容調査、事故時の緊急アクセス  
+> §7の具体的な依頼又は正当な事故対応等の根拠と一時権限。  
+> 緊急時は事後審査と通知可否を記録
+
+**なぜ矛盾するか：** 今回決定、同章§7、J-S03、13 §7は「初期の緊急本文アクセス非提供」で一致しています。P08の行は内容調査と緊急アクセスをまとめ、事故対応の根拠と事後審査によって緊急本文アクセスを許せるように読めます。
+
+**最小置換案：** P08の行を次に置換する。
+
+> P08｜supportの内容調査、本文を伴わない事故対応｜内容調査は§7の具体的依頼、必要な根拠、実行者とは別人の適切な顧客側承認、最大60分の一時権限を必要とする。緊急本文アクセスは初期非提供。事故対応は本文を見ない隔離・停止と必要最小の診断に限定する｜目的・範囲・期限・承認と対応証拠を保持する。事故対応の審査と通知可否を記録する
+
+この2件以外に、提示された今回決定と明確に衝突する重大問題、または実外部I/O無効を解除する記述は確認できませんでした。
+tokens used
+67,571
+固定本文だけを照合した結果、修正すべき重大な内部不整合は2件です。実装・法的適合・人員の未検証自体は指摘に含めていません。
+
+**R-01｜01「仕事の往復」：開始資格と開始受理の順序が逆**
+
+具体文：
+
+> G->>S: 予約済attemptの最終検査と開始受理を要求  
+> S->>S: 検査と条件付き開始更新を同一transactionで永続commit  
+> S-->>G: 成功した一つの実行だけに一回限りの開始資格
+
+**なぜ矛盾するか：** 03「固定承認と外部副作用」手順6〜7、04「外部I/Oの開始受理と復旧」、13 X01では、資格発行→資格を使った開始受理要求→資格消費・耐久commitの順です。この図では開始受理後に資格を発行しており、決定済みの「資格発行から内部開始受理まで5秒」を表現できません。
+
+**最小置換案：** 上記3行を次に置換する。
+
+```text
+S-->>G: 予約済operation/attempt/payloadへの一回限りの開始資格を発行
+G->>S: 発行から5秒以内に当該資格で最終検査と開始受理を要求
+S->>S: 検査と資格消費・条件付き開始更新を同一transactionで永続commit
+S-->>G: 当該gateway実行だけに開始受理の成功応答
+```
+
+**R-02｜12「3. 目的と根拠の表」P08：緊急アクセスの許容記述が残存**
+
+具体文：
+
+> P08｜supportの内容調査、事故時の緊急アクセス  
+> §7の具体的な依頼又は正当な事故対応等の根拠と一時権限。  
+> 緊急時は事後審査と通知可否を記録
+
+**なぜ矛盾するか：** 今回決定、同章§7、J-S03、13 §7は「初期の緊急本文アクセス非提供」で一致しています。P08の行は内容調査と緊急アクセスをまとめ、事故対応の根拠と事後審査によって緊急本文アクセスを許せるように読めます。
+
+**最小置換案：** P08の行を次に置換する。
+
+> P08｜supportの内容調査、本文を伴わない事故対応｜内容調査は§7の具体的依頼、必要な根拠、実行者とは別人の適切な顧客側承認、最大60分の一時権限を必要とする。緊急本文アクセスは初期非提供。事故対応は本文を見ない隔離・停止と必要最小の診断に限定する｜目的・範囲・期限・承認と対応証拠を保持する。事故対応の審査と通知可否を記録する
+
+この2件以外に、提示された今回決定と明確に衝突する重大問題、または実外部I/O無効を解除する記述は確認できませんでした。

@@ -1,0 +1,41 @@
+{
+  "stage": "v0.2 differential/final-candidate review",
+  "observed_jst": "2026-11-08T22:43:54.511658",
+  "prompt_sha256": "624cc223ac55896a77fa7d3ae7760d13435244b09d1ad1483725e399cbb8885a",
+  "snapshot_manifest_sha256": "44dfb00c76cfdf094ef591d7fe14966c5b98daaa283dc2f883a363dfdc120915",
+  "codex": {
+    "status": "completed and read; conditional agreement",
+    "shell_id": 377681,
+    "pid": 629527,
+    "output": "reviews/codex-v0.2.md",
+    "exit_code": 0,
+    "elapsed_ms": 82174,
+    "output_sha256": "8193aa654b923ccb3238fe5db7f0411c1dc418b45f71b6a9e815400642dcccfe"
+  },
+  "claude": {
+    "status": "completed and read; conditional agreement",
+    "shell_id": 377682,
+    "pid": 629569,
+    "output": "reviews/claude-v0.2.md",
+    "exit_code": 0,
+    "elapsed_ms": 126117,
+    "output_sha256": "7aae714be6c830cc12e0e04ed96400d458b330119fbea0d8abd4e6e7edd5910e"
+  },
+  "not_claimed": [
+    "final approval",
+    "runtime tests",
+    "compliance"
+  ],
+  "specialist_requests": {
+    "status": "requesting four final differential reviews in group",
+    "target": "reviews/v0.2-snapshot/pelway-technical-docs/README.md",
+    "focus": [
+      "original issue resolution",
+      "new required corrections",
+      "explicit agree/conditional/disagree",
+      "T6 local approval versus provider key",
+      "natural reply server confirmation proposal"
+    ]
+  },
+  "results_observed_jst": "2026-11-08T23:14:28.883647"
+}

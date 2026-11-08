@@ -1,0 +1,70 @@
+{
+  "checked_at_jst": "2026-11-09T01:54:04.898501+09:00",
+  "original_files": 183,
+  "original_changed": [],
+  "original_missing": [],
+  "archive_copies_verified": 182,
+  "archive_copy_errors": [],
+  "frozen_zip_sha256": "d00c771272000d529197b7dca16d1d16fe56b07e82c0d0e4b315da8e4e7c3927",
+  "frozen_zip_expected": "d00c771272000d529197b7dca16d1d16fe56b07e82c0d0e4b315da8e4e7c3927",
+  "current_markdown_files": 20,
+  "relative_links_checked": 416,
+  "relative_link_errors": [],
+  "original_sections": 100,
+  "original_sections_without_mapping": [],
+  "current_sections": 130,
+  "current_sections_without_mapping": [],
+  "correspondence_rows": 160,
+  "duplicate_body_anchor_ids": [],
+  "latest_ui_regression_errors": [],
+  "runtime_tests": "not run",
+  "final_role_confirmation": [
+    {
+      "role": "法務",
+      "status": "確認済み・追加必須なし",
+      "evidence": "reviews/legal-integration.md §限定最終確認"
+    },
+    {
+      "role": "市場",
+      "status": "確認済み・追加必須なし",
+      "evidence": "reviews/market-v0.7-body-check.md"
+    },
+    {
+      "role": "製品",
+      "status": "限定確認済み・指摘2件を反映し自己点検",
+      "evidence": "ルーム最終所見：PR01〜10反映、after-start文言/U07のAPI条件を補正"
+    },
+    {
+      "role": "技術",
+      "status": "限定確認済み・UI関連補正を反映し自己点検",
+      "evidence": "ルーム最終所見：01/03/04/05/08/10/11に重大不整合なし"
+    },
+    {
+      "role": "UI",
+      "status": "限定確認済み・§5の2件を反映し自己点検",
+      "evidence": "reviews/ui-v0.7-input.md §5/6。stop-confirming削除案は撤回"
+    },
+    {
+      "role": "財務",
+      "status": "限定最終確認済み・追加修正不要",
+      "evidence": "2026-11-09 01:46 JST プロ会議の担当回答：統合本文と採否を照合し重大な反映漏れなし。設定値/内部目標/原価/稼働未受諾の分離を確認"
+    },
+    {
+      "role": "営業",
+      "status": "限定最終確認済み・重大欠落なし",
+      "evidence": "2026-11-09 01:46 JST プロ会議の担当回答：旧保証置換、365日/source期限、全件入力しないこと、説明キーを確認。許可範囲表現とU06維持に異論なし"
+    },
+    {
+      "role": "Codex",
+      "status": "今回の固定統合稿へ回答済み・R01/R02採用",
+      "evidence": "consultations/codex-review.md"
+    },
+    {
+      "role": "Claude",
+      "status": "今回の固定統合稿へ回答済み・R1〜R4採用",
+      "evidence": "consultations/claude-review.md"
+    }
+  ],
+  "zip": "separate packaging check: /workspace/pelway-technical-docs-v0.7.zip.verify.json (outside ZIP to avoid self-reference)",
+  "static_pass": true
+}

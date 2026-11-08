@@ -1,0 +1,17 @@
+{
+  "entry": "v0.6-snapshot/pelway-technical-docs/README.md",
+  "canonical": {
+    "README.md": "cb52470b54f98af5eb924efd8e10b3a2941160353f1a9f43af69122847fe2940",
+    "01-architecture.md": "efd5b7b75986a71ea4763ac57a7e4512210a5ee4e6bfb9f127dca363b2234617",
+    "02-stack-comparison.md": "b8e3f1913b1742b533501089b56402e2d9921dca3622f11517e0da7597326052",
+    "03-ai-bot-runtime.md": "9024d3262e5178015674b030fbdd1c12590ecd560ad7c465f36a1d023cad3521",
+    "04-data-api-realtime.md": "675aa8ac486490744fed2aa98e89bda05f39f6d274edb870f6f4053e7211f842",
+    "05-local-dev.md": "a42c19e46c06d361baa4db7f0b0e3a48de7fe225444a51292cf4e9065612a614",
+    "06-i18n.md": "0d82595a76e9b99e2542d476008ea13ceb69335d73dd6ed7b7fd953716a3ba8e",
+    "07-performance-plan.md": "a1f776f1cd09d133082a58d5c17e4202b1de7a20589218e863af1cf3fce9cea5",
+    "08-decisions-open.md": "7280701e4a8488ec54a7dc0e5e1a43defc4444fd676f67188f7c878d843e1d26",
+    "09-sources.md": "1137c7074b83ae40b8e68576e0703c02a90ca9de15ecc24500ae1af8ed8199af",
+    "10-domestic-only.md": "b9448735c7d3658199c1e970245d7064e0f3c13299d460e1bc30df0b7416d55b",
+    "11-integrations.md": "f15531968139722d57999c9661a2b63ed63e2247c3699bd6398430d25e096625"
+  }
+}

@@ -1,0 +1,1666 @@
+[
+  {
+    "from": "body/01-architecture.md",
+    "to": "12-communication-secrecy.md"
+  },
+  {
+    "from": "body/01-architecture.md",
+    "to": "13-operational-defaults.md"
+  },
+  {
+    "from": "body/01-architecture.md",
+    "to": "08-decisions-open.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/input/ui.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "07-performance-plan.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "09-sources.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/reviews/technical-license-ledger-v0.1.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md"
+  },
+  {
+    "from": "body/03-ai-bot-runtime.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/reviews/product-v0.2.md"
+  },
+  {
+    "from": "body/03-ai-bot-runtime.md",
+    "to": "08-decisions-open.md#u01"
+  },
+  {
+    "from": "body/03-ai-bot-runtime.md",
+    "to": "08-decisions-open.md#u06"
+  },
+  {
+    "from": "body/03-ai-bot-runtime.md",
+    "to": "13-operational-defaults.md"
+  },
+  {
+    "from": "body/03-ai-bot-runtime.md",
+    "to": "12-communication-secrecy.md"
+  },
+  {
+    "from": "body/03-ai-bot-runtime.md",
+    "to": "13-operational-defaults.md"
+  },
+  {
+    "from": "body/04-data-api-realtime.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md"
+  },
+  {
+    "from": "body/04-data-api-realtime.md",
+    "to": "13-operational-defaults.md"
+  },
+  {
+    "from": "body/04-data-api-realtime.md",
+    "to": "12-communication-secrecy.md"
+  },
+  {
+    "from": "body/04-data-api-realtime.md",
+    "to": "13-operational-defaults.md"
+  },
+  {
+    "from": "body/06-i18n.md",
+    "to": "13-operational-defaults.md"
+  },
+  {
+    "from": "body/08-decisions-open.md",
+    "to": "../sources/v0.6/fixed/pelway-milestones/long-term-milestones.md"
+  },
+  {
+    "from": "body/08-decisions-open.md",
+    "to": "../sources/v0.6/fixed/pelway-milestones/mid-term-milestones.md"
+  },
+  {
+    "from": "body/08-decisions-open.md",
+    "to": "../sources/v0.6/fixed/pelway-milestones/short-term-milestones.md"
+  },
+  {
+    "from": "body/08-decisions-open.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/references/plan-gates.md"
+  },
+  {
+    "from": "body/09-sources.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md"
+  },
+  {
+    "from": "body/09-sources.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/input/ui.md"
+  },
+  {
+    "from": "body/09-sources.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/input/technical.md"
+  },
+  {
+    "from": "body/09-sources.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/input/technical-draft/README.md"
+  },
+  {
+    "from": "body/09-sources.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/input/product.md"
+  },
+  {
+    "from": "body/09-sources.md",
+    "to": "11-integrations.md"
+  },
+  {
+    "from": "body/09-sources.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md"
+  },
+  {
+    "from": "body/09-sources.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/reviews/market-v0.1.md"
+  },
+  {
+    "from": "body/09-sources.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/reviews/technical-license-ledger-v0.1.md"
+  },
+  {
+    "from": "body/09-sources.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/reviews/discord-primary-post-evidence.txt"
+  },
+  {
+    "from": "body/09-sources.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/reviews/market-v0.1.md"
+  },
+  {
+    "from": "body/09-sources.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/reviews/technical-license-ledger-v0.1.md"
+  },
+  {
+    "from": "body/10-domestic-only.md",
+    "to": "08-decisions-open.md"
+  },
+  {
+    "from": "body/10-domestic-only.md",
+    "to": "12-communication-secrecy.md"
+  },
+  {
+    "from": "body/11-integrations.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md"
+  },
+  {
+    "from": "body/11-integrations.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/input/ui.md"
+  },
+  {
+    "from": "body/11-integrations.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/reviews/ui-v0.3.md"
+  },
+  {
+    "from": "body/11-integrations.md",
+    "to": "10-domestic-only.md#ch10-s08"
+  },
+  {
+    "from": "body/11-integrations.md",
+    "to": "10-domestic-only.md#ch10-s09"
+  },
+  {
+    "from": "body/12-communication-secrecy.md",
+    "to": "08-decisions-open.md"
+  },
+  {
+    "from": "body/12-communication-secrecy.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md"
+  },
+  {
+    "from": "body/12-communication-secrecy.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "body/12-communication-secrecy.md",
+    "to": "13-operational-defaults.md"
+  },
+  {
+    "from": "body/12-communication-secrecy.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/05-local-dev.md"
+  },
+  {
+    "from": "body/12-communication-secrecy.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "body/12-communication-secrecy.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "body/12-communication-secrecy.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/07-performance-plan.md"
+  },
+  {
+    "from": "body/12-communication-secrecy.md",
+    "to": "../sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md"
+  },
+  {
+    "from": "body/12-communication-secrecy.md",
+    "to": "../sources/addenda/2026-11-09-best-effort-cancel/secrecy-design-review-2026-11-09.md"
+  },
+  {
+    "from": "body/12-communication-secrecy.md",
+    "to": "../sources/addenda/2026-11-09-best-effort-cancel/legal-review-2026-11-09.md"
+  },
+  {
+    "from": "body/13-operational-defaults.md",
+    "to": "12-communication-secrecy.md"
+  },
+  {
+    "from": "body/13-operational-defaults.md",
+    "to": "../sources/addenda/2026-11-09-secrecy/user-decision-2026-11-09.md"
+  },
+  {
+    "from": "body/13-operational-defaults.md",
+    "to": "03-ai-bot-runtime.md"
+  },
+  {
+    "from": "body/13-operational-defaults.md",
+    "to": "../sources/addenda/2026-11-09-secrecy/operational-defaults-disposition-v0.1.md"
+  },
+  {
+    "from": "body/13-operational-defaults.md",
+    "to": "../sources/addenda/2026-11-09-secrecy/operational-defaults-legal-evidence-v0.1.md"
+  },
+  {
+    "from": "body/13-operational-defaults.md",
+    "to": "08-decisions-open.md"
+  },
+  {
+    "from": "body/README.md",
+    "to": "01-architecture.md"
+  },
+  {
+    "from": "body/README.md",
+    "to": "02-stack-comparison.md"
+  },
+  {
+    "from": "body/README.md",
+    "to": "03-ai-bot-runtime.md"
+  },
+  {
+    "from": "body/README.md",
+    "to": "04-data-api-realtime.md"
+  },
+  {
+    "from": "body/README.md",
+    "to": "05-local-dev.md"
+  },
+  {
+    "from": "body/README.md",
+    "to": "06-i18n.md"
+  },
+  {
+    "from": "body/README.md",
+    "to": "07-performance-plan.md"
+  },
+  {
+    "from": "body/README.md",
+    "to": "08-decisions-open.md"
+  },
+  {
+    "from": "body/README.md",
+    "to": "09-sources.md"
+  },
+  {
+    "from": "body/README.md",
+    "to": "10-domestic-only.md"
+  },
+  {
+    "from": "body/README.md",
+    "to": "11-integrations.md"
+  },
+  {
+    "from": "body/README.md",
+    "to": "12-communication-secrecy.md"
+  },
+  {
+    "from": "body/README.md",
+    "to": "13-operational-defaults.md"
+  },
+  {
+    "from": "README.md",
+    "to": "body/README.md"
+  },
+  {
+    "from": "README.md",
+    "to": "source-correspondence.md"
+  },
+  {
+    "from": "README.md",
+    "to": "reviews/disposition-v0.7.md"
+  },
+  {
+    "from": "README.md",
+    "to": "verification/report-v0.7.md"
+  },
+  {
+    "from": "README.md",
+    "to": "final-confirmation.md"
+  },
+  {
+    "from": "README.md",
+    "to": "status.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "reviews/disposition-v0.7.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/01-architecture.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/01-architecture.md#ch01-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/01-architecture.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/01-architecture.md#ch01-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/01-architecture.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/01-architecture.md#ch01-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/01-architecture.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/01-architecture.md#ch01-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/01-architecture.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/01-architecture.md#ch01-s05"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/02-stack-comparison.md#ch02-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/02-stack-comparison.md#ch02-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/02-stack-comparison.md#ch02-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/02-stack-comparison.md#ch02-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/02-stack-comparison.md#ch02-s05"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/02-stack-comparison.md#ch02-s06"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/02-stack-comparison.md#ch02-s07"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/02-stack-comparison.md#ch02-s08"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/02-stack-comparison.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/02-stack-comparison.md#ch02-s09"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s05"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s06"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s07"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s08"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s09"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s10"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s11"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/03-ai-bot-runtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s12"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/04-data-api-realtime.md#ch04-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/04-data-api-realtime.md#ch04-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/04-data-api-realtime.md#ch04-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/04-data-api-realtime.md#ch04-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/04-data-api-realtime.md#ch04-s05"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/04-data-api-realtime.md#ch04-s06"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/04-data-api-realtime.md#ch04-s07"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/04-data-api-realtime.md#ch04-s08"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/04-data-api-realtime.md#ch04-s09"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/04-data-api-realtime.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/04-data-api-realtime.md#ch04-s10"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/05-local-dev.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/05-local-dev.md#ch05-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/05-local-dev.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/05-local-dev.md#ch05-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/05-local-dev.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/05-local-dev.md#ch05-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/05-local-dev.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/05-local-dev.md#ch05-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/05-local-dev.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/05-local-dev.md#ch05-s05"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/05-local-dev.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/05-local-dev.md#ch05-s06"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/06-i18n.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/06-i18n.md#ch06-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/06-i18n.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/06-i18n.md#ch06-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/06-i18n.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/06-i18n.md#ch06-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/06-i18n.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/06-i18n.md#ch06-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/07-performance-plan.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/07-performance-plan.md#ch07-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/07-performance-plan.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/07-performance-plan.md#ch07-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/07-performance-plan.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/07-performance-plan.md#ch07-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/07-performance-plan.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/07-performance-plan.md#ch07-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/07-performance-plan.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/07-performance-plan.md#ch07-s05"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#ch08-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#ch08-s05"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#ch08-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#ch08-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#ch08-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#ch08-s06"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#ch08-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#ch08-s07"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#u06"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#ch08-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#u01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#u01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#u01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#u01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/08-decisions-open.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#u01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/09-sources.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/09-sources.md#ch09-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/09-sources.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/09-sources.md#ch09-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/09-sources.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/09-sources.md#ch09-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/09-sources.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/09-sources.md#ch09-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/09-sources.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/09-sources.md#ch09-s05"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/09-sources.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/09-sources.md#ch09-s06"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/10-domestic-only.md#ch10-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/10-domestic-only.md#ch10-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/10-domestic-only.md#ch10-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/10-domestic-only.md#ch10-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/10-domestic-only.md#ch10-s05"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/10-domestic-only.md#ch10-s06"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/10-domestic-only.md#ch10-s07"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/10-domestic-only.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/10-domestic-only.md#ch10-s08"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s05"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s06"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s07"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s08"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s09"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s10"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s11"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s12"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s13"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/11-integrations.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s14"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/README.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/README.md#ch00-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/README.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/01-architecture.md#ch01-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/README.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/10-domestic-only.md#ch10-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/README.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/01-architecture.md#ch01-s05"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/README.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/README.md#ch00-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/v0.6/fixed/pelway-technical-docs/README.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/README.md#ch00-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s05"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s06"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s07"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s08"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s09"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s10"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s11"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s12"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s13"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s14"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s15"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s16"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s17"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s18"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s19"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/secrecy-addendum-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s20"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/13-operational-defaults.md#ch13-s01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/13-operational-defaults.md#ch13-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/13-operational-defaults.md#ch13-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/13-operational-defaults.md#ch13-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/13-operational-defaults.md#ch13-s05"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/13-operational-defaults.md#ch13-s06"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/13-operational-defaults.md#ch13-s07"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/13-operational-defaults.md#ch13-s08"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/13-operational-defaults.md#ch13-s09"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/13-operational-defaults.md#ch13-s10"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/13-operational-defaults.md#ch13-s11"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s12"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s04"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/10-domestic-only.md#ch10-s09"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s10"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#u01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#u01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "reviews/disposition-v0.7.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "reviews/disposition-v0.7.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s10"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "reviews/disposition-v0.7.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s18"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/proposal-v0.3.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#u01"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/user-decision-2026-11-09.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#ch08-s02"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/disposition-v0.2.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "reviews/disposition-v0.7.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/legal-review-2026-11-09.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s18"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-best-effort-cancel/legal-review-2026-11-09.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/12-communication-secrecy.md#ch12-s19"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/11-integrations.md#ch11-s15"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/06-i18n.md#ch06-s05"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/06-i18n.md#ch06-notices"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/06-i18n.md#ch06-s06"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/README.md#ch00-s03"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/07-performance-plan.md#ch07-s06"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/04-data-api-realtime.md#ch04-s11"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/08-decisions-open.md#ch08-s08"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/01-architecture.md#ch01-s06"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "sources/addenda/2026-11-09-secrecy/operational-defaults-v0.1.md"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/03-ai-bot-runtime.md#ch03-s13"
+  },
+  {
+    "from": "status.md",
+    "to": "body/08-decisions-open.md#ch08-s03"
+  },
+  {
+    "from": "status.md",
+    "to": "reviews/disposition-v0.7.md"
+  },
+  {
+    "from": "status.md",
+    "to": "verification/review-register.json"
+  },
+  {
+    "from": "status.md",
+    "to": "verification/report-v0.7.md"
+  },
+  {
+    "from": "final-confirmation.md",
+    "to": "body/README.md"
+  },
+  {
+    "from": "final-confirmation.md",
+    "to": "source-correspondence.md"
+  },
+  {
+    "from": "final-confirmation.md",
+    "to": "reviews/disposition-v0.7.md"
+  },
+  {
+    "from": "final-confirmation.md",
+    "to": "verification/review-register.json"
+  },
+  {
+    "from": "final-confirmation.md",
+    "to": "verification/report-v0.7.md"
+  },
+  {
+    "from": "final-confirmation.md",
+    "to": "verification/static-checks.json"
+  },
+  {
+    "from": "final-confirmation.md",
+    "to": "body/08-decisions-open.md#ch08-s02"
+  },
+  {
+    "from": "verification/report-v0.7.md",
+    "to": "static-checks.json"
+  },
+  {
+    "from": "verification/report-v0.7.md",
+    "to": "relative-links.json"
+  },
+  {
+    "from": "verification/report-v0.7.md",
+    "to": "source-preservation.json"
+  },
+  {
+    "from": "verification/report-v0.7.md",
+    "to": "section-correspondence.json"
+  },
+  {
+    "from": "verification/report-v0.7.md",
+    "to": "../reviews/disposition-v0.7.md"
+  },
+  {
+    "from": "verification/report-v0.7.md",
+    "to": "../status.md"
+  }
+]

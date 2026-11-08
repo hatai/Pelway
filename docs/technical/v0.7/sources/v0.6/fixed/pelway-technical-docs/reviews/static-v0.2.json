@@ -1,0 +1,26 @@
+{
+  "observed_jst": "2026-11-08T22:43:22.874430",
+  "canonical_files": 12,
+  "dependency_original_files": 74,
+  "generated_navigation_files": 4,
+  "snapshot_relative_files_missing": [],
+  "fragment_references": [
+    {
+      "from": "pelway-public-docs/publish/docs/brand-ui.md",
+      "target": "competitors.md#名称衝突"
+    }
+  ],
+  "protected_matches": 15,
+  "v0.1_matches": 12,
+  "snapshot_main_matches_current": true,
+  "runtime_tests": "not performed",
+  "anchor_scope": "Only one local fragment reference in dependency closure; exact matching heading verified",
+  "fragment_reference_validation": [
+    {
+      "target": "pelway-public-docs/publish/docs/competitors.md#名称衝突",
+      "heading_line": 56,
+      "heading": "## 名称衝突",
+      "match": true
+    }
+  ]
+}

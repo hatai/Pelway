@@ -1,0 +1,680 @@
+{
+  "11-integrations.md": [
+    {
+      "heading": "# 11 AIネイティブ連携の共通契約",
+      "line": 2,
+      "anchor": "ch11-s01"
+    },
+    {
+      "heading": "## 共通の単位",
+      "line": 7,
+      "anchor": "ch11-s02"
+    },
+    {
+      "heading": "## IntegrationPortの能力",
+      "line": 16,
+      "anchor": "ch11-s03"
+    },
+    {
+      "heading": "## 接続手段の選び方",
+      "line": 37,
+      "anchor": "ch11-s04"
+    },
+    {
+      "heading": "## 公式手段の確認例",
+      "line": 52,
+      "anchor": "ch11-s05"
+    },
+    {
+      "heading": "## 受信、再接続、重複、取消",
+      "line": 66,
+      "anchor": "ch11-s06"
+    },
+    {
+      "heading": "## 業務状態と外部実行の対応（追加提案・要確認）",
+      "line": 79,
+      "anchor": "ch11-s07"
+    },
+    {
+      "heading": "## 表示契約",
+      "line": 97,
+      "anchor": "ch11-s08"
+    },
+    {
+      "heading": "## 外部agentの権限を過信しない",
+      "line": 111,
+      "anchor": "ch11-s09"
+    },
+    {
+      "heading": "## 三つの往復例",
+      "line": 118,
+      "anchor": "ch11-s10"
+    },
+    {
+      "heading": "## 今と後の範囲",
+      "line": 125,
+      "anchor": "ch11-s11"
+    },
+    {
+      "heading": "## 入力一式・実行区画・資格情報の制約",
+      "line": 134,
+      "anchor": "ch11-s12"
+    },
+    {
+      "heading": "## 取消後の限定確認",
+      "line": 145,
+      "anchor": "ch11-s13"
+    },
+    {
+      "heading": "### 実送出の有効化と設定上の同意の区別",
+      "line": 153,
+      "anchor": "ch11-s14"
+    },
+    {
+      "heading": "## 連携設定・個別承認・法的根拠の三層",
+      "line": 158,
+      "anchor": "ch11-s15"
+    }
+  ],
+  "06-i18n.md": [
+    {
+      "heading": "# 06 日本語・英語の共通資源",
+      "line": 2,
+      "anchor": "ch06-s01"
+    },
+    {
+      "heading": "## 表示と入力の規則",
+      "line": 9,
+      "anchor": "ch06-s02"
+    },
+    {
+      "heading": "## 配布前の試験条件",
+      "line": 21,
+      "anchor": "ch06-s03"
+    },
+    {
+      "heading": "## 状態の理由と責任分界の翻訳",
+      "line": 28,
+      "anchor": "ch06-s04"
+    },
+    {
+      "heading": "## 取消・削除・サポートの表示契約",
+      "line": 37,
+      "anchor": "ch06-s05"
+    },
+    {
+      "heading": "## 状況文言の安定ID案",
+      "line": 46,
+      "anchor": "ch06-notices"
+    },
+    {
+      "heading": "## 情報取扱いの追加表示キー",
+      "line": 60,
+      "anchor": "ch06-s06"
+    }
+  ],
+  "13-operational-defaults.md": [
+    {
+      "heading": "# 13 運用初期値・保持・削除・容量・有人対応",
+      "line": 2,
+      "anchor": "ch13-s01"
+    },
+    {
+      "heading": "## 1. 適用範囲と決定の意味",
+      "line": 7,
+      "anchor": "ch13-s02"
+    },
+    {
+      "heading": "## 2. 共通の期限・利用制限",
+      "line": 16,
+      "anchor": "ch13-s03"
+    },
+    {
+      "heading": "## 3. 保持の決定値",
+      "line": 27,
+      "anchor": "ch13-s04"
+    },
+    {
+      "heading": "## 4. 削除・失効反映の内部目標",
+      "line": 53,
+      "anchor": "ch13-s05"
+    },
+    {
+      "heading": "## 5. 容量と逼迫時の停止条件",
+      "line": 68,
+      "anchor": "ch13-s06"
+    },
+    {
+      "heading": "## 6. 取消・開始資格・結果不明",
+      "line": 89,
+      "anchor": "ch13-s07"
+    },
+    {
+      "heading": "## 7. 有人対応、役割、一時権限",
+      "line": 105,
+      "anchor": "ch13-s08"
+    },
+    {
+      "heading": "## 8. 法定保存と製品設定を混ぜない",
+      "line": 124,
+      "anchor": "ch13-s09"
+    },
+    {
+      "heading": "## 9. 検証計画と見直し",
+      "line": 142,
+      "anchor": "ch13-s10"
+    },
+    {
+      "heading": "## 10. 残る確認の正本",
+      "line": 161,
+      "anchor": "ch13-s11"
+    }
+  ],
+  "README.md": [
+    {
+      "heading": "# Pelway 技術仕様 統合版 v0.7",
+      "line": 2,
+      "anchor": "ch00-s01"
+    },
+    {
+      "heading": "## 読む順と章の役割",
+      "line": 9,
+      "anchor": "ch00-s02"
+    },
+    {
+      "heading": "## 出力と記録",
+      "line": 22,
+      "anchor": "ch00-s03"
+    }
+  ],
+  "12-communication-secrecy.md": [
+    {
+      "heading": "# 12 通信秘密・目的別根拠・可視範囲・運営アクセス",
+      "line": 2,
+      "anchor": "ch12-s01"
+    },
+    {
+      "heading": "## 2. 判定する対象と責任",
+      "line": 7,
+      "anchor": "ch12-s02"
+    },
+    {
+      "heading": "## 3. 目的と根拠の表",
+      "line": 18,
+      "anchor": "ch12-s03"
+    },
+    {
+      "heading": "### 3.1 同意の取得と版の変更",
+      "line": 36,
+      "anchor": "ch12-s04"
+    },
+    {
+      "heading": "### 3.2 最小データ契約",
+      "line": 55,
+      "anchor": "ch12-s05"
+    },
+    {
+      "heading": "### 3.3 初期機能の根拠確定用表",
+      "line": 70,
+      "anchor": "ch12-s06"
+    },
+    {
+      "heading": "## 4. 可視範囲の継承表",
+      "line": 84,
+      "anchor": "ch12-s07"
+    },
+    {
+      "heading": "## 5. 取消、撤回、削除の扱い",
+      "line": 106,
+      "anchor": "ch12-s08"
+    },
+    {
+      "heading": "## 6. 実行点ごとの認可差分と既定拒否",
+      "line": 127,
+      "anchor": "ch12-s09"
+    },
+    {
+      "heading": "### 6.1 提供先・委託先の確認記録",
+      "line": 154,
+      "anchor": "ch12-s10"
+    },
+    {
+      "heading": "## 7. 運営者、support、鍵保持者のアクセス",
+      "line": 171,
+      "anchor": "ch12-s11"
+    },
+    {
+      "heading": "### 7.1 事故対応の担当と報告経路",
+      "line": 190,
+      "anchor": "ch12-s12"
+    },
+    {
+      "heading": "## 8. 保存、削除、バックアップ",
+      "line": 197,
+      "anchor": "ch12-s13"
+    },
+    {
+      "heading": "### 8.1 採用した保持方針",
+      "line": 200,
+      "anchor": "ch12-s14"
+    },
+    {
+      "heading": "### 8.2 削除と復旧の順序",
+      "line": 207,
+      "anchor": "ch12-s15"
+    },
+    {
+      "heading": "## 9. 受け入れ基準と試験観点",
+      "line": 221,
+      "anchor": "ch12-s16"
+    },
+    {
+      "heading": "## 10. 暫定採用済みの判断と適用条件",
+      "line": 254,
+      "anchor": "ch12-s17"
+    },
+    {
+      "heading": "### 10.1 契約と責任の設計境界",
+      "line": 267,
+      "anchor": "ch12-s18"
+    },
+    {
+      "heading": "### 10.2 個人データ・外国移転の事実分類",
+      "line": 276,
+      "anchor": "ch12-s19"
+    },
+    {
+      "heading": "## 11. 根拠資料",
+      "line": 300,
+      "anchor": "ch12-s20"
+    }
+  ],
+  "05-local-dev.md": [
+    {
+      "heading": "# 05 3OSのローカル開発・試験・配布設計",
+      "line": 2,
+      "anchor": "ch05-s01"
+    },
+    {
+      "heading": "## OS別の境界",
+      "line": 7,
+      "anchor": "ch05-s02"
+    },
+    {
+      "heading": "## WindowsとWSL 2",
+      "line": 20,
+      "anchor": "ch05-s03"
+    },
+    {
+      "heading": "## macOSとApple container",
+      "line": 29,
+      "anchor": "ch05-s04"
+    },
+    {
+      "heading": "## Linuxと起動構成",
+      "line": 38,
+      "anchor": "ch05-s05"
+    },
+    {
+      "heading": "## 試験と配布",
+      "line": 49,
+      "anchor": "ch05-s06"
+    }
+  ],
+  "10-domestic-only.md": [
+    {
+      "heading": "# 10 Pelway本体の国内限定と外部連携の責任分界",
+      "line": 2,
+      "anchor": "ch10-s01"
+    },
+    {
+      "heading": "## 最新要件と保証範囲",
+      "line": 5,
+      "anchor": "ch10-s02"
+    },
+    {
+      "heading": "## 場所・経路の台帳",
+      "line": 14,
+      "anchor": "ch10-s03"
+    },
+    {
+      "heading": "## 通信policyを二つに分ける",
+      "line": 35,
+      "anchor": "ch10-s04"
+    },
+    {
+      "heading": "## 構築時と実行時",
+      "line": 48,
+      "anchor": "ch10-s05"
+    },
+    {
+      "heading": "## 試験条件案",
+      "line": 55,
+      "anchor": "ch10-s06"
+    },
+    {
+      "heading": "## 将来の地域への境界だけ残す",
+      "line": 77,
+      "anchor": "ch10-s07"
+    },
+    {
+      "heading": "### 実送出の有効化と設定上の同意の区別",
+      "line": 85,
+      "anchor": "ch10-s08"
+    },
+    {
+      "heading": "## 連携設定・個別承認・法的根拠の三層",
+      "line": 90,
+      "anchor": "ch10-s09"
+    }
+  ],
+  "07-performance-plan.md": [
+    {
+      "heading": "# 07 性能・メモリ・入力品質の評価計画",
+      "line": 2,
+      "anchor": "ch07-s01"
+    },
+    {
+      "heading": "## 比較の順番",
+      "line": 7,
+      "anchor": "ch07-s02"
+    },
+    {
+      "heading": "## 負荷と記録",
+      "line": 12,
+      "anchor": "ch07-s03"
+    },
+    {
+      "heading": "## 指標と合格基準案",
+      "line": 24,
+      "anchor": "ch07-s04"
+    },
+    {
+      "heading": "## 工数と試験段階",
+      "line": 43,
+      "anchor": "ch07-s05"
+    },
+    {
+      "heading": "## 保持・復旧・人手の原価計測",
+      "line": 50,
+      "anchor": "ch07-s06"
+    }
+  ],
+  "02-stack-comparison.md": [
+    {
+      "heading": "# 02 技術比較と依存採用案",
+      "line": 2,
+      "anchor": "ch02-s01"
+    },
+    {
+      "heading": "## ネイティブUI",
+      "line": 7,
+      "anchor": "ch02-s02"
+    },
+    {
+      "heading": "### 確認日と版",
+      "line": 12,
+      "anchor": "ch02-s03"
+    },
+    {
+      "heading": "### Slintのライセンス：利用と配布の形ごと（一次資料：[LICENSE.md](https://github.com/slint-ui/slint/blob/master/LICENSE.md)、[Royalty-free License 2.0本文](https://github.com/slint-ui/slint/blob/master/LICENSES/LicenseRef-Slint-Royalty-free-2.0.md)、[FAQ](https://github.com/slint-ui/slint/blob/master/FAQ.md)。masterブランチの条文、2026-11-08確認。リリース版v1.18.1に同梱の条文と同じかは未確認）",
+      "line": 28,
+      "anchor": "ch02-s04"
+    },
+    {
+      "heading": "### チャット要件での評価",
+      "line": 42,
+      "anchor": "ch02-s05"
+    },
+    {
+      "heading": "## ブラウザ版と共通核",
+      "line": 56,
+      "anchor": "ch02-s06"
+    },
+    {
+      "heading": "### 二重UI実装の部分工数",
+      "line": 68,
+      "anchor": "ch02-s07"
+    },
+    {
+      "heading": "## サーバー・AI層の比較",
+      "line": 90,
+      "anchor": "ch02-s08"
+    },
+    {
+      "heading": "## Discordの事例",
+      "line": 106,
+      "anchor": "ch02-s09"
+    }
+  ],
+  "04-data-api-realtime.md": [
+    {
+      "heading": "# 04 データモデル・API・同期の契約案",
+      "line": 2,
+      "anchor": "ch04-s01"
+    },
+    {
+      "heading": "## 永続データ",
+      "line": 7,
+      "anchor": "ch04-s02"
+    },
+    {
+      "heading": "## API",
+      "line": 32,
+      "anchor": "ch04-s03"
+    },
+    {
+      "heading": "## 順序と再接続",
+      "line": 56,
+      "anchor": "ch04-s04"
+    },
+    {
+      "heading": "## キャッシュと削除",
+      "line": 69,
+      "anchor": "ch04-s05"
+    },
+    {
+      "heading": "## 配置/データ所在の最小境界",
+      "line": 74,
+      "anchor": "ch04-s06"
+    },
+    {
+      "heading": "## 同時更新と成果物の耐久化",
+      "line": 83,
+      "anchor": "ch04-s07"
+    },
+    {
+      "heading": "## 外部イベントの帰属",
+      "line": 92,
+      "anchor": "ch04-s08"
+    },
+    {
+      "heading": "## 操作種類の正規値",
+      "line": 99,
+      "anchor": "ch04-s09"
+    },
+    {
+      "heading": "## 外部I/Oの開始受理と復旧",
+      "line": 104,
+      "anchor": "ch04-s10"
+    },
+    {
+      "heading": "## 目的別根拠・派生物・容量予約のデータ契約",
+      "line": 113,
+      "anchor": "ch04-s11"
+    }
+  ],
+  "08-decisions-open.md": [
+    {
+      "heading": "# 08 採用記録・未決の正本・受入試験",
+      "line": 2,
+      "anchor": "ch08-s01"
+    },
+    {
+      "heading": "## 採用の優先順位と今回の置換",
+      "line": 7,
+      "anchor": "ch08-s02"
+    },
+    {
+      "heading": "## 未決と推奨の一元表",
+      "line": 16,
+      "anchor": "ch08-s03"
+    },
+    {
+      "heading": "## 今回の完成判定と確認範囲",
+      "line": 29,
+      "anchor": "ch08-s04"
+    },
+    {
+      "heading": "## 継承する技術選定",
+      "line": 34,
+      "anchor": "ch08-s05"
+    },
+    {
+      "heading": "## 試験の追跡表（いずれも未実施）",
+      "line": 51,
+      "anchor": "ch08-s06"
+    },
+    {
+      "heading": "## 安全ゲート・障害注入の追跡",
+      "line": 76,
+      "anchor": "ch08-s07"
+    },
+    {
+      "heading": "## 追補で追加する受入条件",
+      "line": 98,
+      "anchor": "ch08-s08"
+    }
+  ],
+  "01-architecture.md": [
+    {
+      "heading": "# 01 ローカル構成と責任分界",
+      "line": 2,
+      "anchor": "ch01-s01"
+    },
+    {
+      "heading": "## 全体図",
+      "line": 7,
+      "anchor": "ch01-s02"
+    },
+    {
+      "heading": "## ホストとコンテナ",
+      "line": 60,
+      "anchor": "ch01-s03"
+    },
+    {
+      "heading": "## 仕事の往復",
+      "line": 74,
+      "anchor": "ch01-s04"
+    },
+    {
+      "heading": "## 永続化と正しさ",
+      "line": 103,
+      "anchor": "ch01-s05"
+    },
+    {
+      "heading": "## 全構成に適用する情報取扱い制御",
+      "line": 114,
+      "anchor": "ch01-s06"
+    }
+  ],
+  "03-ai-bot-runtime.md": [
+    {
+      "heading": "# 03 Bot実行・権限・承認・隔離",
+      "line": 2,
+      "anchor": "ch03-s01"
+    },
+    {
+      "heading": "## 役割と起動",
+      "line": 5,
+      "anchor": "ch03-s02"
+    },
+    {
+      "heading": "## 9状態と遷移",
+      "line": 12,
+      "anchor": "ch03-s03"
+    },
+    {
+      "heading": "## 暫定採用した取消P方針と残るS1",
+      "line": 62,
+      "anchor": "ch03-s04"
+    },
+    {
+      "heading": "## 固定承認と外部副作用",
+      "line": 69,
+      "anchor": "ch03-s05"
+    },
+    {
+      "heading": "## 実行所有者、再開、引継ぎ、取消",
+      "line": 85,
+      "anchor": "ch03-s06"
+    },
+    {
+      "heading": "## 隔離と秘密",
+      "line": 96,
+      "anchor": "ch03-s07"
+    },
+    {
+      "heading": "## 監査とローカル推論",
+      "line": 112,
+      "anchor": "ch03-s08"
+    },
+    {
+      "heading": "## 「作業を見る」の境界",
+      "line": 119,
+      "anchor": "ch03-s09"
+    },
+    {
+      "heading": "## 理由/境界の共通翻訳キー案",
+      "line": 124,
+      "anchor": "ch03-s10"
+    },
+    {
+      "heading": "## 論理操作・固定承認・試行の関係",
+      "line": 141,
+      "anchor": "ch03-s11"
+    },
+    {
+      "heading": "### 承認版・提供元キーと復旧の追加条件",
+      "line": 152,
+      "anchor": "ch03-s12"
+    },
+    {
+      "heading": "## 通信目的と根拠・開始資格・結果不明の追加契約",
+      "line": 163,
+      "anchor": "ch03-s13"
+    }
+  ],
+  "09-sources.md": [
+    {
+      "heading": "# 09 根拠と確認範囲",
+      "line": 2,
+      "anchor": "ch09-s01"
+    },
+    {
+      "heading": "## 詳細な出典台帳",
+      "line": 7,
+      "anchor": "ch09-s02"
+    },
+    {
+      "heading": "## 主な一次資料",
+      "line": 15,
+      "anchor": "ch09-s03"
+    },
+    {
+      "heading": "## Discord情報の扱い",
+      "line": 30,
+      "anchor": "ch09-s04"
+    },
+    {
+      "heading": "## 直接依存と許諾の対応（M-03）",
+      "line": 39,
+      "anchor": "ch09-s05"
+    },
+    {
+      "heading": "## レビューへ提示する証拠の範囲",
+      "line": 65,
+      "anchor": "ch09-s06"
+    }
+  ]
+}

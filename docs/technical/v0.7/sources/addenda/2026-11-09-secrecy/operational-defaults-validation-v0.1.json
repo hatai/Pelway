@@ -1,0 +1,77 @@
+{
+  "checked_at_jst": "2026-11-09T01:12:03.466563+09:00",
+  "protected_files": 286,
+  "protected_changes": [],
+  "frozen_zip_sha256": "d00c771272000d529197b7dca16d1d16fe56b07e82c0d0e4b315da8e4e7c3927",
+  "frozen_zip_unchanged": true,
+  "relative_links": [
+    {
+      "source": "operational-defaults-v0.1.md",
+      "link": "secrecy-addendum-v0.2.md",
+      "exists": true
+    },
+    {
+      "source": "operational-defaults-v0.1.md",
+      "link": "user-decision-2026-11-09.md",
+      "exists": true
+    },
+    {
+      "source": "operational-defaults-v0.1.md",
+      "link": "../2026-11-09-best-effort-cancel/proposal-v0.3.md",
+      "exists": true
+    },
+    {
+      "source": "operational-defaults-v0.1.md",
+      "link": "operational-defaults-disposition-v0.1.md",
+      "exists": true
+    },
+    {
+      "source": "operational-defaults-v0.1.md",
+      "link": "operational-defaults-legal-evidence-v0.1.md",
+      "exists": true
+    },
+    {
+      "source": "operational-defaults-disposition-v0.1.md",
+      "link": "operational-defaults-v0.1.md",
+      "exists": true
+    },
+    {
+      "source": "operational-defaults-disposition-v0.1.md",
+      "link": "../../reviews/technical-operational-defaults-input-2026-11-09.md",
+      "exists": true
+    },
+    {
+      "source": "operational-defaults-disposition-v0.1.md",
+      "link": "operational-consultations/codex-operations-v0.1.md",
+      "exists": true
+    },
+    {
+      "source": "operational-defaults-disposition-v0.1.md",
+      "link": "operational-consultations/claude-operations-v0.1.md",
+      "exists": true
+    },
+    {
+      "source": "operational-defaults-disposition-v0.1.md",
+      "link": "operational-consultations/codex-final-delta-v0.1.md",
+      "exists": true
+    },
+    {
+      "source": "operational-defaults-disposition-v0.1.md",
+      "link": "operational-consultations/claude-final-delta-v0.1.md",
+      "exists": true
+    }
+  ],
+  "missing_ids": [],
+  "document_sha256": {
+    "operational-defaults-v0.1.md": "c4ad0e6532e3bee3b4ebd345e23a89a31cecf94c429adb9975edc6dcf8b05478",
+    "operational-defaults-disposition-v0.1.md": "40eb3bf6597225a9718408aaf666a7b49fe8f1baa0d6eed5761cabd21952b1bd",
+    "operational-defaults-legal-evidence-v0.1.md": "cc9acbd42cde5f876b270de4455ff60ba6a9139cbcb0bdb609bd48c1bb867f6c"
+  },
+  "runtime_V01_V09": "NOT_RUN",
+  "legal_applicability": "NOT_CONFIRMED",
+  "real_external_io": "DISABLED",
+  "consultation_outputs_present": true,
+  "static_checks_passed": true,
+  "market_benchmark_file_received": false,
+  "market_benchmark_status": "NO_INPUT_RESEARCH_STOPPED_AS_INSTRUCTED_NOT_WAITING"
+}

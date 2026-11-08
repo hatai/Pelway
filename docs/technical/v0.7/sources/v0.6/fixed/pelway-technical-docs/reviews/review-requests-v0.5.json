@@ -1,0 +1,50 @@
+{
+  "requested_at_jst": "2026-11-08T23:28:53.313229+09:00",
+  "entry": "v0.5-snapshot/pelway-technical-docs/README.md",
+  "scope": "document completion only; S1 remains unresolved and actual external I/O disabled",
+  "specialists": {
+    "market": {
+      "state": "received and read",
+      "verdict": "agree; no mandatory market-scope document correction",
+      "file": "market-v0.5.md",
+      "sha256": "22ff65e720ba92ddeb1998806841e4705b2d74b61cc683d9a60a737c7cf2f6ed"
+    },
+    "product": {
+      "state": "received and read",
+      "verdict": "agree; no mandatory document correction",
+      "file": "product-v0.5.md",
+      "sha256": "8018b32765dda5e86700e6c21f53d241585d1a6dd722b14a6e6af7aa5f87bd49"
+    },
+    "technical": {
+      "state": "received and read",
+      "verdict": "agree; no mandatory document correction",
+      "file": "technical-v0.5.md",
+      "sha256": "6b51a5868dd7ad2b219087d9065f30b25414f603e3a1ffff29aa6cfc9525e5ba"
+    },
+    "ui": {
+      "state": "received and read",
+      "verdict": "agree; no mandatory document correction",
+      "file": "ui-v0.5.md",
+      "sha256": "7d48da9e81a1f24dfa2b9f136b353eedc79b8b26f6679600c82d1404bf30fb83"
+    }
+  },
+  "codex": {
+    "state": "completed and read",
+    "shell_id": "377686",
+    "pid": 652502,
+    "output": "codex-v0.5.md",
+    "exit_code": 0,
+    "elapsed_ms": 35012,
+    "verdict": "agree; no mandatory document correction"
+  },
+  "claude": {
+    "state": "completed and read",
+    "shell_id": "377687",
+    "pid": 652517,
+    "output": "claude-v0.5.md",
+    "exit_code": 0,
+    "elapsed_ms": 128798,
+    "verdict": "conditional: D5-01..04 mandatory; D5-05/06 low"
+  },
+  "implementation_gate": "S1 unresolved; actual external I/O remains disabled; no option adopted"
+}
