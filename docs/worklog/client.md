@@ -335,3 +335,38 @@
   - 値の照合に ±1/255 の許容を付けた（丸めの実装差で偽陰性を出さないため。緩すぎる検査にはならない程度の最小限）。
   - `$to` の二役にどちらかの意味を固定せず、そのまま1組の仮値を渡して結合段階に先送り（承認済みの `.ftl` を書き換えない）。
 - ネットワーク・書き込み範囲: cargo はすべて `CARGO_NET_OFFLINE=true` + `--offline`（lock 更新の 1 回だけ `--locked` を外した）。`cargo fetch`・`cargo update`・`cargo add` は不使用。worktree の外への書き込みなし（`/tmp` を含む。一時ファイルは worktree 内の `target/` のみで、赤の確認後に削除済み）。git の push・fetch なし。amend・rebase・reset・stash・force・`--no-verify` も不使用。`crates/pelway-client-core` は変更なし。
+
+### 2026-11-10 第11枠（段階B-2 r5：Codex 第6回指摘の修正）
+- start: 2026-11-10 00:00 JST
+- stop:  2026-11-10 00:14 JST
+- glm: long（T3 Code スレッドで OpenCode + zai-coding-plan/glm-5.3 が実装。起点 `dc5e57c` の worktree `demo-t3-client-ui-r5` で実施）
+- 使った skills: tdd と verification-before-completion の考え方に従った（ファイルは worktree 外のため読んでいない）。2件ともテストを先に直し、実装を一時的に壊して落ちること（赤）と戻して通ること（緑）の exit code を記録し、最後に指定のコマンドを全部動かして exit code と件数を記録した。
+- 対象: 指示書「Slint の画面の骨組み 段階B-2 r5」の §2-1・§2-2（Codex 第6回レビューの should-fix 2件のみ）。§2-3 の除外項目（crate 追加・`.slint`・`.ftl`・トークン JSON・AccessKit・窓を開く・About）には手を付けていない。コミットは2件＋作業ログ1件（`dc5e57c` の後ろへ。push はしていない）。
+- 最初の確認: `pwd` = worktree `demo-t3-client-ui-r5`、ブランチ `demo-t3/client-ui-r5`、HEAD `dc5e57c`、`git status --short` 空（引き継ぎどおり）。
+- 2-1（色の照合の許容幅をなくす。コミット `90ee72d`）:
+  - 指摘の実証: 現行テスト（±1/255 の許容）のまま `light/ink` の red を 1 LSB 下げる一時変更を入れても theme_tokens 11件が全部合格（**exit 0**）。`0.0784×255 = 19.992` のように ×255 の小数部が 0.5 超の成分は、正しい丸め（20）から 1 LSB 下がった値（19）との差が 0.992 ≤ 1.0 に収まるため。一方 `light/bg` の red（`0.902×255 = 230.01`）は 1 LSB 下げると差 1.01 > 1.0 で落ちる——許容幅は「×255 がほぼ整数の成分の、丸めと同じ向きのずれ」を見逃していた。
+  - **Slint の丸めの観察**: `slint::Color::from_argb_f32` → `red()` 等の u8 変換は floor でも round でもなく **`ceil(x×255 − 0.5)`**（×255 が .5 ちょうどのときは切り下げ、それ以外は最近接）だった。観察値: `0.5×255=127.5→127`・`0.1f32×255` が f32 掛け算の丸めでちょうど `25.5` になる→`25`・`0.25×255=63.75→64`・`0.10000001f32×255=25.500002→26`・`0.09999999f32×255=25.499996→25`。一時テストファイル `tests/zz_probe_tmp.rs` で観察し、観察後に削除した。
+  - **期待値の計算は f64 ではなく f32 の経路**（実装と同じ）: JSON の f64 を `as f32` して `255.0f32` を掛けてから丸める。f64 のまま `0.1×255 = 25.500000000000004` を `ceil(x−0.5)` すると 26 になり、実装（25）と一致しない（境界値で偽の失敗が出る）。
+  - **テスト側で同じ決まりを独立に書いた**（共通関数化はしなかった）。理由: 実装の丸めは `slint::Color::from_argb_f32` の中で行われるため、共通化には実装を自前の丸め（`from_argb_u8`）への書き換えが要り、slint の丸めと自前の丸めが全チャネルで同じ値になる保証を新たに作ることになる（画面の見た目を変えるリスク）。テスト側の `expected_channel(json_value)`（f32 経路の `ceil(x×255−0.5)`）が正本の成分から期待値を作り、`assert_channel` を `assert_eq!` の完全一致に変えた。許容幅は廃止。
+  - 赤→緑: 修正後テスト + `light/ink` の red を 1 LSB 下げる一時変更（`src/theme.rs` の `token_value`）→ **exit 101**（`token_values_match_canonical_json` が FAILED: `light/ink の red`）。一時変更を戻して **exit 0**（11件合格）。`git diff --stat` に `src/theme.rs` が残っていないことを確認。
+- 2-2（`apply_translations` が全キーを渡すことの振る舞いでの確認。コミット `b0fa8ad`）:
+  - `tests/slint_window.rs` に `USED_KEYS` の全キーと `MainWindow` の対応する `tr-*` getter の対応表 `TR_GETTERS` を1か所にまとめた（`USED_KEYS.len()` = **49 件**で、指示の見立てと同じ）。型は `type TrGetter = fn(&MainWindow) -> SharedString;` に切り出した（初回コミットで pre-commit の clippy が `clippy::type_complexity` を出したため。コミットは作り直さず型の切り出しを直したあとにコミット）。
+  - 表の件数が `USED_KEYS.len()` と同じこと・キーの集合（昇順比較）が `USED_KEYS` と一致することをテストで確認（表から1つキーが漏れたら落ちる）。
+  - 日英それぞれで `apply_translations` のあと、全キーについて `getter(&window)` の値が `messages.message(key, &vars)` の結果と一致することを確認（窓は開かない。文言の本文は出力していない）。ja→en の順に適用するため、en の適用で値が実際に切り替わることもこの照合が見る（ja の文言が残っていれば en 側で落ちる）。旧の部分照合（`tr-rail-today`・`tr-unread-divider` の2つだけ）は全キー照合に置き換えた。
+  - 赤→緑: `src/i18n.rs` の `apply_translations` から `set_tr_composer_placeholder` の1行だけを一時的に外す → **exit 101**（`slint_window` が FAILED: ja 適用後の `composer-placeholder` の照合）。このとき返り値の `missing` は空のまま（指摘どおり setter が1つ消えても `missing` では検出できない）。戻して **exit 0**（1件合格）。`git diff --stat` に `src/i18n.rs` が残っていないことを確認。
+- 検証（コマンドと exit code。すべて `CARGO_NET_OFFLINE=true` 付き。HEAD `b0fa8ad` で）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 0
+  - `cargo test --workspace --locked --offline` 0（90 件合格・失敗 0: pelway-client-core 54 = approval 24・contract 14・input 16 ／ pelway-client-ui 35 = bridge 10・i18n_fluent 3・i18n_keys 6・no_color_values 4・slint_window 1・theme_tokens 11 ／ pelway-dev-smoke 1）
+  - `cargo build -p pelway-client-ui --locked --offline` 0（build.rs 経由で `ui/main.slint` を含むビルド）
+  - `git status --short`（最終確認時）: 空（このログの追記前）
+  - `git diff --name-only dc5e57c` は `crates/pelway-client-ui/tests/slint_window.rs`・`crates/pelway-client-ui/tests/theme_tokens.rs` の2件のみ（`Cargo.toml`・`Cargo.lock`・`ui/main.slint`・`tokens/pelway.tokens.json`・`i18n/*.ftl`・`crates/pelway-client-core` は 0 変更）
+- 未検証・未決:
+  - U01〜U07 は未決のまま。`$to` の二役（`mention-read-range` と `ext-card-question`）は前の回の判断のまま結合段階に先送り（`.ftl` は変えていない）。
+  - **Slint の丸めの観察（`ceil(x×255−0.5)`）は slint `=1.18.1` での実測に基づく**。版を変えるときは `expected_channel` の決まりを見直す必要がある。
+  - 窓を開いての確認はしていない（testing backend のまま）。
+- 迷って安全側にした点:
+  - 期待値の丸めを共通関数化せずテスト側に独立に書いた（実装を自前の丸めに書き換えると画面の見た目を変えるリスクがあるため。上記の理由）。
+  - 期待値の計算経路を f64 でなく実装と同じ f32 に合わせた（f64 では `0.1` のような値で偽の失敗が出ることを観察で確認したため）。
+  - 赤の確認に使った一時変更（`src/theme.rs`・`src/i18n.rs`）は、戻すたびに `git diff --stat` に現れないことを確認した。
+- ネットワーク・書き込み範囲: cargo はすべて `CARGO_NET_OFFLINE=true` + `--offline --locked`。`cargo fetch`・`cargo update`・`cargo add` は不使用。worktree の外への書き込みなし（`/tmp` を含む。一時ファイルは `tests/zz_probe_tmp.rs` のみで観察後に削除。`target/` への出力も残していない）。git の push・fetch なし。amend・rebase・reset・stash・force・`--no-verify` も不使用。`crates/pelway-client-core` は変更なし。
