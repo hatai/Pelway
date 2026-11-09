@@ -1003,6 +1003,49 @@ fn slow_trickle_body_hits_connection_deadline() {
     );
 }
 
+// (y) 本文の読み取り中も同じ: 期限の直前に読み取り待ちに入ってから何も送らず、
+// 接続が切れるまでの時間が全体期限 + 0.5 秒以内に収まる（リード決定 20:36、
+// リード補足 20:43）。本文を少し送って読み取り待ちにしてから待つ。
+#[test]
+fn body_read_wait_is_cut_at_deadline_not_3s() {
+    let deadline = Duration::from_millis(2000);
+    let ledger = shared_ledger(&["card-y"]);
+    let addr = serve_with_connection_deadline("127.0.0.1:0".parse().unwrap(), ledger, deadline)
+        .expect("serve with short deadline")
+        .local_addr();
+
+    let mut stream = TcpStream::connect(addr).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(6)))
+        .expect("client read timeout");
+    let started = Instant::now();
+    let head = "POST /v1/cards/card-y/comments HTTP/1.1\r\nHost: d\r\n\
+                x-pelway-member-id: m-human-http\r\nx-pelway-member-kind: human\r\n\
+                Content-Length: 100\r\n\r\n";
+    stream.write_all(head.as_bytes()).expect("write head");
+    // 本文の一部だけを少しの間隔で送り、期限の直前（約 0.5 秒前）に読み取り待ちに
+    // 入ったまま何も送らない。1 回の読み取りタイムアウト（3 秒）には引っかからない。
+    for _ in 0..5 {
+        stream.write_all(&[b'z'; 10]).expect("write partial body");
+        thread::sleep(Duration::from_millis(300));
+    }
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf).expect("408 must arrive");
+    let elapsed = started.elapsed();
+    assert!(buf.starts_with("HTTP/1.1 408"), "got: {buf}");
+    assert!(buf.contains("request_timeout"), "got: {buf}");
+    // 上限は全体期限 + 0.5 秒（QA の受入条件）。下限は時計とスケジューリングの
+    // ぶれのために 0.1 秒だけ許容する（期限前に切れないことの確認）。
+    assert!(
+        elapsed <= deadline + Duration::from_millis(500),
+        "期限から 0.5 秒以内に切れていない: {elapsed:?}"
+    );
+    assert!(
+        elapsed + Duration::from_millis(100) >= deadline,
+        "期限前に切れている: {elapsed:?}"
+    );
+}
+
 // (q) 413 のあとの読み捨ても全体期限で打ち切る。3 秒未満の間隔で送り続けると、
 // 期限で接続を閉じられる（読み捨ての 1 MiB 上限はそのまま）。
 #[test]
