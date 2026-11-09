@@ -1,9 +1,9 @@
 //! 色の値の不在検査。
 //!
-//! `crates/pelway-client-ui` の `.slint`・`.rs`・`.ftl` に、色の値
-//! （# のあとに 16 進 3・4・6・8 桁、rgb / rgba / hsl / hsla の関数呼び出し、
-//! Slint の Colors シングルトン参照）が書かれていないことを確かめる。
-//! 色はトークン名だけで参照する。
+//! `crates/pelway-client-ui` の `.slint`・`.rs`・`.ftl`（クレート直下の
+//! `build.rs` を含む）に、色の値（# のあとに 16 進 3・4・6・8 桁、
+//! rgb / rgba / hsl / hsla の関数呼び出し、Slint の Colors シングルトン参照）が
+//! 書かれていないことを確かめる。色はトークン名だけで参照する。
 //!
 //! このテスト自身が検出対象に含まれるため、パターンの文字列は分割して組み立てる
 //! （このファイルに連続した色のリテラルを置かない。上の説明にも書かない）。
@@ -64,12 +64,17 @@ fn scan_color_values(text: &str) -> Vec<String> {
 }
 
 /// クレート内の `.rs`・`.slint`・`.ftl` を列挙する（cargo の出力物は除く）。
+/// クレート直下の `build.rs` も `.rs` として対象に含める。
 fn source_files() -> Vec<PathBuf> {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut files = Vec::new();
     for dir in ["src", "tests", "ui", "i18n"] {
         let dir_path = manifest.join(dir);
         collect_files(&dir_path, &mut files);
+    }
+    let build_rs = manifest.join("build.rs");
+    if build_rs.is_file() {
+        files.push(build_rs);
     }
     files.sort();
     files
@@ -149,6 +154,8 @@ fn bundled_slint_and_ftl_are_part_of_the_scan() {
     assert!(files.contains(&manifest.join("ui/main.slint")));
     assert!(files.contains(&manifest.join("i18n/ja/main.ftl")));
     assert!(files.contains(&manifest.join("i18n/en/main.ftl")));
+    // クレート直下の build.rs も走査対象に入っていること。
+    assert!(files.contains(&manifest.join("build.rs")));
     // スキャン関数が実際に空でないテキストを検査できていること。
     assert!(!SLINT.is_empty() || !JA.is_empty() || !EN.is_empty());
 }
