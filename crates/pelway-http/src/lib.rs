@@ -3,14 +3,26 @@
 //!
 //! - 経路は docs/technical/v0.7 に comments/approve の定義が無いための
 //!   **仮の経路** `POST /v1/cards/{card_id}/comments` と `POST /v1/cards/{card_id}/approve`。
-//! - 認証は無い（デモ用）。要求者は合成ヘッダー（`x-pelway-member-id`、
-//!   `x-pelway-member-kind: human|ai`）で受ける。
+//! - QA-GDPR-02 で加えた **仮の経路**（根拠記録・利用方針の作成・読取・撤回。
+//!   12 §3.2 の論理保存単位に対応する仮の名前で、確定 DDL ではない）:
+//!   `POST|GET /v1/workspaces/{workspace_id}/communication-basis-records`、
+//!   `POST /v1/workspaces/{workspace_id}/communication-basis-records/{basis_id}/withdraw`
+//!   （撤回 = 取得と同じ1操作）、`POST|GET /v1/workspaces/{workspace_id}/communication-use-policies`。
+//!   保存は [`pelway_contract::store::DataStore`]（メモリのみ・ディスクに書かない）。
+//! - 認証は無い（デモ用）。comments/approve の要求者は合成ヘッダー
+//!   （`x-pelway-member-id`、`x-pelway-member-kind: human|ai`）で受ける。
+//!   QA-GDPR-02 の仮経路では、**合成の利用者 ID を引数（要求本文・クエリの
+//!   `actor`）で受け取る**（開発リードの仮の決め方 2026-11-10。ヘッダーや環境から
+//!   本人を推定しない）。
+//! - 保存する記録の ID・時刻・版・epoch・status はサーバーが付ける。要求に偽の
+//!   値があっても正本にしない（未知フィールドとして 400 で拒否）。
 //! - 待ち受けは 127.0.0.1 だけ。127.0.0.2 など 127/8 のほかのアドレスや `::1` を含む
 //!   IPv6 も拒否（QA 18:21、リード決定 2026-11-09 19:14）。外部への接続はしない。
 //! - [`ApprovalLedger`](pelway_contract::ledger::ApprovalLedger) 全体を 1 つの
 //!   `std::sync::Mutex` で包んで共有する。1 つの要求の中で予約から模擬送信・
 //!   完了までをロックを持ったまま行い、途中で別の要求が割り込まない。
-//!   ロックが poison した場合は 500 を返して状態を変えない。
+//!   ロックが poison した場合は 500 を返して状態を変えない
+//!   （[`pelway_contract::store::DataStore`] も同じ扱い）。
 //! - 要求本文の上限は [`MAX_BODY_BYTES`]（64 KiB）。`Content-Length` が上限を超えたら
 //!   **本文を読み込む前に** 413 を返す（残余の読み捨ては応答の後）。
 //!   ヘッダーは大きさ [`MAX_HEAD_BYTES`] と行数 [`MAX_HEADER_LINES`] で制限し、超えたら 431。
@@ -32,22 +44,28 @@
 //! - 応答のエラー本文は契約エラー（`ApproveError` / `CommentError`）と同じ形の
 //!   JSON（tag="code"、snake_case）。HTTP 層独自のエラーも [`HttpError`] で同じ形にする。
 //! - 構造化ログ（[`log`]）: 出来事は列挙型で、項目は仮名化 ID・種別・数値・結果
-//!   コードだけ。本文・コメント・`client_msg_id`・秘密はログに入れない
-//!   （QA-GDPR-07・QA-GDPR-12・QA-MSG-02）。既定の出力先は無し
+//!   コードだけ。本文・コメント・`client_msg_id`・秘密・参照列の中身はログに入れない
+//!   （QA-GDPR-07・QA-GDPR-12・QA-MSG-02・QA-GDPR-02）。既定の出力先は無し
 //!   （[`serve`]）。[`serve_with_logger`] で出力先を指定する（テストと既知 salt
 //!   の検証用）。[`serve_with_logger_urandom`] は salt を必ず `/dev/urandom`
 //!   から作り、読み取りに失敗したら起動しない（salt の採取元は引数に取らない。
-//!   本番のログ付き起動はこの入口）。
+//!   本番のログ付き起動はこの入口。QA-GDPR-02 の保存部を渡すのは
+//!   [`serve_with_store_and_logger_urandom`]）。
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use pelway_contract::approval::{ApproveRequest, SaveCommentRequest};
-use pelway_contract::ids::MemberId;
+use pelway_contract::ids::{BasisId, MemberId, WorkspaceId};
 use pelway_contract::ledger::ApprovalLedger;
 use pelway_contract::member::MemberKind;
+use pelway_contract::store::{
+    CreateBasisRecordRequest, CreateUsePolicyRequest, DataStore, NewBasisRecord, NewUsePolicy,
+    StoreError, WithdrawBasisRecordRequest,
+};
 use serde::Serialize;
 
 pub mod log;
@@ -57,6 +75,11 @@ pub mod log;
 // ことに伴い src 内に移した（検証内容は無変更。詳細はモジュールの doc と作業ログ）。
 #[cfg(test)]
 mod no_body_logs;
+
+// QA-GDPR-02 の仮経路（根拠記録・利用方針）とログの検証（QA 用）。`Logger::with_sink` が
+// `pub(crate)` のため src 内の `#[cfg(test)]` テストとしている（no_body_logs と同じ理由）。
+#[cfg(test)]
+mod gdpr02_routes;
 
 /// 要求本文の上限（バイト）。超えたら 413。
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
@@ -79,6 +102,9 @@ const MEMBER_KIND_HEADER: &str = "x-pelway-member-kind";
 
 /// HTTP 層から見る台帳の共有状態。
 pub type SharedLedger = Arc<Mutex<ApprovalLedger>>;
+
+/// HTTP 層から見る QA-GDPR-02 保存部（合成データ・メモリのみ）の共有状態。
+pub type SharedDataStore = Arc<Mutex<DataStore>>;
 
 /// 起動の失敗。
 #[derive(Debug)]
@@ -203,6 +229,7 @@ impl Server {
 }
 
 /// サーバーを起動する。接続ごとにスレッドを割り当てる。
+/// QA-GDPR-02 の保存部（根拠記録・利用方針の仮経路）は空のものを内部で用意する。
 ///
 /// # Errors
 /// 127.0.0.1 以外のアドレス、またはソケットの失敗。
@@ -210,6 +237,7 @@ pub fn serve(addr: SocketAddr, ledger: SharedLedger) -> Result<Server, ServeErro
     serve_inner(
         addr,
         ledger,
+        Arc::new(Mutex::new(DataStore::new())),
         CONNECTION_DEADLINE,
         Arc::new(log::Logger::disabled()),
     )
@@ -230,6 +258,7 @@ pub fn serve_with_connection_deadline(
     serve_inner(
         addr,
         ledger,
+        Arc::new(Mutex::new(DataStore::new())),
         connection_deadline,
         Arc::new(log::Logger::disabled()),
     )
@@ -248,7 +277,13 @@ pub fn serve_with_logger(
     ledger: SharedLedger,
     logger: Arc<log::Logger>,
 ) -> Result<Server, ServeError> {
-    serve_inner(addr, ledger, CONNECTION_DEADLINE, logger)
+    serve_inner(
+        addr,
+        ledger,
+        Arc::new(Mutex::new(DataStore::new())),
+        CONNECTION_DEADLINE,
+        logger,
+    )
 }
 
 /// [`serve_with_logger`] と同じログ付き起動だが、[`log::Logger`] はこちらで作る:
@@ -270,6 +305,58 @@ pub fn serve_with_logger_urandom(
     serve_with_logger_salt_from(addr, ledger, sink, Path::new(log::SALT_SOURCE))
 }
 
+/// [`serve`] と同じだが、QA-GDPR-02 の保存部（根拠記録・利用方針の仮経路で使う）
+/// を呼び出し側が指定する。ログは無し。
+///
+/// # Errors
+/// 127.0.0.1 以外のアドレス、またはソケットの失敗。
+pub fn serve_with_store(
+    addr: SocketAddr,
+    ledger: SharedLedger,
+    store: SharedDataStore,
+) -> Result<Server, ServeError> {
+    serve_inner(
+        addr,
+        ledger,
+        store,
+        CONNECTION_DEADLINE,
+        Arc::new(log::Logger::disabled()),
+    )
+}
+
+/// [`serve_with_logger`] に QA-GDPR-02 の保存部を加えたもの。**テストと既知 salt の
+/// 検証用**（ログ付き・保存部指定）。本番相当のログ付き起動は
+/// [`serve_with_store_and_logger_urandom`] を使う。
+///
+/// # Errors
+/// 127.0.0.1 以外のアドレス、またはソケットの失敗。
+pub fn serve_with_store_and_logger(
+    addr: SocketAddr,
+    ledger: SharedLedger,
+    store: SharedDataStore,
+    logger: Arc<log::Logger>,
+) -> Result<Server, ServeError> {
+    serve_inner(addr, ledger, store, CONNECTION_DEADLINE, logger)
+}
+
+/// [`serve_with_logger_urandom`] に QA-GDPR-02 の保存部を加えたもの（本番相当の
+/// ログ付き起動）。salt は必ず [`log::SALT_SOURCE`]（`/dev/urandom`）から
+/// [`log::SALT_BYTES`] バイト読み、読み取りに失敗したら待ち受けを始めない
+/// （フォールバックなし）。
+///
+/// # Errors
+/// salt の読み取りに失敗、127.0.0.1 以外のアドレス、またはソケットの失敗。
+pub fn serve_with_store_and_logger_urandom(
+    addr: SocketAddr,
+    ledger: SharedLedger,
+    store: SharedDataStore,
+    sink: Arc<dyn log::LogSink>,
+) -> Result<Server, ServeError> {
+    let salt = log::read_salt_from(Path::new(log::SALT_SOURCE)).map_err(ServeError::Io)?;
+    let logger = Arc::new(log::Logger::with_sink(sink, salt.to_vec()));
+    serve_inner(addr, ledger, store, CONNECTION_DEADLINE, logger)
+}
+
 /// [`serve_with_logger_urandom`] の実体。salt の採取元を `salt_path` で受ける。
 /// 公開入口は [`log::SALT_SOURCE`] 固定でこの関数に委譲する。採取元を引数に
 /// 受けるのは**クレート内部のテストだけ**（salt の読み取り失敗を注入するために
@@ -288,12 +375,19 @@ pub(crate) fn serve_with_logger_salt_from(
 ) -> Result<Server, ServeError> {
     let salt = log::read_salt_from(salt_path).map_err(ServeError::Io)?;
     let logger = Arc::new(log::Logger::with_sink(sink, salt.to_vec()));
-    serve_inner(addr, ledger, CONNECTION_DEADLINE, logger)
+    serve_inner(
+        addr,
+        ledger,
+        Arc::new(Mutex::new(DataStore::new())),
+        CONNECTION_DEADLINE,
+        logger,
+    )
 }
 
 fn serve_inner(
     addr: SocketAddr,
     ledger: SharedLedger,
+    store: SharedDataStore,
     connection_deadline: std::time::Duration,
     logger: Arc<log::Logger>,
 ) -> Result<Server, ServeError> {
@@ -306,13 +400,16 @@ fn serve_inner(
     let addr = listener.local_addr().map_err(ServeError::Io)?;
     std::thread::spawn(move || {
         for stream in listener.incoming() {
-            let (Ok(mut stream), ledger, logger) =
-                (stream, Arc::clone(&ledger), Arc::clone(&logger))
-            else {
+            let (Ok(mut stream), ledger, store, logger) = (
+                stream,
+                Arc::clone(&ledger),
+                Arc::clone(&store),
+                Arc::clone(&logger),
+            ) else {
                 continue;
             };
             std::thread::spawn(move || {
-                handle_conn(&mut stream, &ledger, connection_deadline, &logger);
+                handle_conn(&mut stream, &ledger, &store, connection_deadline, &logger);
             });
         }
     });
@@ -347,6 +444,7 @@ fn deadline_at(now: std::time::Instant, budget: std::time::Duration) -> std::tim
 fn handle_conn(
     stream: &mut TcpStream,
     ledger: &SharedLedger,
+    store: &SharedDataStore,
     connection_deadline: std::time::Duration,
     logger: &log::Logger,
 ) {
@@ -356,7 +454,7 @@ fn handle_conn(
     // 1 回の読み取りのタイムアウトは read_once / drain が読み取りのたびに設定する。
     let deadline = deadline_at(std::time::Instant::now(), connection_deadline);
     let (response, route) = match read_request(stream, deadline) {
-        Ok(req) => route(&req, ledger, logger),
+        Ok(req) => route(&req, ledger, store, logger),
         Err(resp) => (resp, log::Route::Unknown),
     };
     let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -576,7 +674,28 @@ fn header<'a>(req: &'a Request, name: &str) -> Option<&'a str> {
         .map(|(_, v)| v.as_str())
 }
 
-fn route(req: &Request, ledger: &SharedLedger, logger: &log::Logger) -> (Response, log::Route) {
+/// クエリパラメータの値（簡単な `?a=b&c=d` の形だけ。URL デコードはしない。
+/// 合成の利用者 ID は ASCII の想定）。
+fn query_param(path: &str, key: &str) -> Option<String> {
+    let (_, query) = path.split_once('?')?;
+    query.split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        (k == key).then(|| v.to_owned())
+    })
+}
+
+/// サーバーが付ける現在時刻（UNIX エポックからのミリ秒）。保存部の正本の時刻は
+/// すべてこの値（要求の値は正本にしない）。
+fn now_ms() -> u64 {
+    log::unix_millis(SystemTime::now())
+}
+
+fn route(
+    req: &Request,
+    ledger: &SharedLedger,
+    store: &SharedDataStore,
+    logger: &log::Logger,
+) -> (Response, log::Route) {
     let path = req.path.split('?').next().unwrap_or("");
     let segments: Vec<&str> = path.split('/').collect();
     let method = if req.method == "POST" {
@@ -613,6 +732,60 @@ fn route(req: &Request, ledger: &SharedLedger, logger: &log::Logger) -> (Respons
             _ => Response::error(404, &HttpError::NotFound, log::Code::NotFound),
         };
         return (resp, route_kind);
+    }
+    // 仮の経路（QA-GDPR-02）: /v1/workspaces/{workspace_id}/communication-basis-records
+    // （POST 作成・GET 一覧）、.../{basis_id}/withdraw（POST 撤回 = 取得と同じ1操作）、
+    // /v1/workspaces/{workspace_id}/communication-use-policies（POST 作成・GET 一覧）。
+    if segments.len() >= 5
+        && segments[1] == "v1"
+        && segments[2] == "workspaces"
+        && !segments[3].is_empty()
+    {
+        let workspace = segments[3];
+        let route_kind = if segments.len() == 5 && segments[4] == "communication-basis-records" {
+            Some(log::Route::BasisRecords)
+        } else if segments.len() == 7
+            && segments[4] == "communication-basis-records"
+            && !segments[5].is_empty()
+            && segments[6] == "withdraw"
+        {
+            Some(log::Route::BasisWithdrawal)
+        } else if segments.len() == 5 && segments[4] == "communication-use-policies" {
+            Some(log::Route::UsePolicies)
+        } else {
+            None
+        };
+        if let Some(route_kind) = route_kind {
+            // 要求を受けた: 経路・メソッドだけ（この経路に card_id は無い）。
+            logger.emit(log::Event::RequestReceived {
+                route: route_kind,
+                method,
+                card: None,
+            });
+            let resp = match (route_kind, req.method.as_str()) {
+                (log::Route::BasisRecords, "POST") => {
+                    handle_create_basis_record(req, workspace, store, logger)
+                }
+                (log::Route::BasisRecords, "GET") => {
+                    handle_list_basis_records(req, workspace, store, logger)
+                }
+                (log::Route::BasisWithdrawal, "POST") => {
+                    handle_withdraw_basis_record(req, workspace, segments[5], store, logger)
+                }
+                (log::Route::UsePolicies, "POST") => {
+                    handle_create_use_policy(req, workspace, store, logger)
+                }
+                (log::Route::UsePolicies, "GET") => {
+                    handle_list_use_policies(req, workspace, store, logger)
+                }
+                _ => Response::error(
+                    405,
+                    &HttpError::MethodNotAllowed,
+                    log::Code::MethodNotAllowed,
+                ),
+            };
+            return (resp, route_kind);
+        }
     }
     logger.emit(log::Event::RequestReceived {
         route: log::Route::Unknown,
@@ -740,6 +913,153 @@ fn handle_approve(
         }
         Err(_) => internal_error(),
     }
+}
+
+/// 根拠記録の作成（QA-GDPR-02 の仮の経路）。要求からは ID・時刻・status・epoch を
+/// 受け取らない（`deny_unknown_fields` で拒否）。正本はすべてサーバーが付ける。
+fn handle_create_basis_record(
+    req: &Request,
+    workspace: &str,
+    store: &SharedDataStore,
+    logger: &log::Logger,
+) -> Response {
+    let Ok(input) = serde_json::from_slice::<CreateBasisRecordRequest>(&req.body) else {
+        return bad_request();
+    };
+    let workspace_pid = logger.id(workspace);
+    let actor_pid = logger.id(input.actor.as_str());
+    let Ok(mut store) = store.lock() else {
+        return internal_error();
+    };
+    let record = store.create_basis_record(
+        &WorkspaceId::from(workspace),
+        NewBasisRecord::from(input),
+        now_ms(),
+    );
+    // 保存した: 仮名 ID・種別だけ。参照列（evidence_ref 等）の中身は出さない。
+    logger.emit(log::Event::BasisRecordSaved {
+        workspace: workspace_pid,
+        basis: logger.id(record.basis_id.as_str()),
+        actor: actor_pid,
+        purpose: record.purpose_id,
+    });
+    Response::json(200, &record)
+}
+
+/// 根拠記録の読み取り（一覧）。合成の利用者 ID（actor）はクエリで受け取る（引数扱い）。
+fn handle_list_basis_records(
+    req: &Request,
+    workspace: &str,
+    store: &SharedDataStore,
+    logger: &log::Logger,
+) -> Response {
+    let Some(actor) = query_param(&req.path, "actor").filter(|a| !a.is_empty()) else {
+        return bad_request();
+    };
+    let workspace_pid = logger.id(workspace);
+    let actor_pid = logger.id(&actor);
+    let Ok(store) = store.lock() else {
+        return internal_error();
+    };
+    let records = store.basis_records(&WorkspaceId::from(workspace));
+    logger.emit(log::Event::BasisRecordsListed {
+        workspace: workspace_pid,
+        actor: actor_pid,
+    });
+    Response::json(200, &records)
+}
+
+/// 根拠記録の撤回（取得と同じ1操作の POST 1 回）。epoch を進め、`withdrawn_at`・
+/// status をサーバー値で更新する。撤回後の読取・検索・AI 入力の拒否は QA-GDPR-03
+/// の範囲（ここでは実装しない）。
+fn handle_withdraw_basis_record(
+    req: &Request,
+    workspace: &str,
+    basis_id: &str,
+    store: &SharedDataStore,
+    logger: &log::Logger,
+) -> Response {
+    let Ok(input) = serde_json::from_slice::<WithdrawBasisRecordRequest>(&req.body) else {
+        return bad_request();
+    };
+    let workspace_pid = logger.id(workspace);
+    let basis_pid = logger.id(basis_id);
+    let actor_pid = logger.id(input.actor.as_str());
+    let Ok(mut store) = store.lock() else {
+        return internal_error();
+    };
+    match store.withdraw_basis_record(
+        &WorkspaceId::from(workspace),
+        &BasisId::from(basis_id),
+        input.withdrawal_method_ref,
+        now_ms(),
+    ) {
+        Ok(record) => {
+            logger.emit(log::Event::BasisWithdrawn {
+                workspace: workspace_pid,
+                basis: basis_pid,
+                actor: actor_pid,
+                epoch: record.epoch,
+            });
+            Response::json(200, &record)
+        }
+        Err(StoreError::NotFound) => {
+            Response::error(404, &HttpError::NotFound, log::Code::NotFound)
+        }
+    }
+}
+
+/// 利用方針の作成（QA-GDPR-02 の仮の経路）。version・時刻はサーバー付け。
+/// 変更前の版は保存部に証拠として残る。
+fn handle_create_use_policy(
+    req: &Request,
+    workspace: &str,
+    store: &SharedDataStore,
+    logger: &log::Logger,
+) -> Response {
+    let Ok(input) = serde_json::from_slice::<CreateUsePolicyRequest>(&req.body) else {
+        return bad_request();
+    };
+    let workspace_pid = logger.id(workspace);
+    let actor_pid = logger.id(input.actor.as_str());
+    let Ok(mut store) = store.lock() else {
+        return internal_error();
+    };
+    let policy = store.create_use_policy(
+        &WorkspaceId::from(workspace),
+        NewUsePolicy::from(input),
+        now_ms(),
+    );
+    logger.emit(log::Event::UsePolicySaved {
+        workspace: workspace_pid,
+        actor: actor_pid,
+        purpose: policy.purpose_id,
+        version: policy.version,
+    });
+    Response::json(200, &policy)
+}
+
+/// 利用方針の読み取り（一覧。変更前の版を含む）。actor はクエリで受け取る。
+fn handle_list_use_policies(
+    req: &Request,
+    workspace: &str,
+    store: &SharedDataStore,
+    logger: &log::Logger,
+) -> Response {
+    let Some(actor) = query_param(&req.path, "actor").filter(|a| !a.is_empty()) else {
+        return bad_request();
+    };
+    let workspace_pid = logger.id(workspace);
+    let actor_pid = logger.id(&actor);
+    let Ok(store) = store.lock() else {
+        return internal_error();
+    };
+    let policies = store.use_policies(&WorkspaceId::from(workspace));
+    logger.emit(log::Event::UsePoliciesListed {
+        workspace: workspace_pid,
+        actor: actor_pid,
+    });
+    Response::json(200, &policies)
 }
 
 fn reason_phrase(status: u16) -> &'static str {
