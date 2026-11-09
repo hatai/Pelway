@@ -7,9 +7,9 @@
 # 除外: lib.sh の除外（scripts/demo-check/、tests/fixtures/、testdata/、docs/ など）。ワークツリー外のパスには適用しない。
 # シンボリックリンク: 走査の途中で出会ったリンクはたどらない（DC-03）。
 #   暗黙の走査ルート（target/ logs/ log/）が作業ツリーの外を指すリンクのときは、外を読まずに
-#   検査異常（exit 2）で止める（slot5 指摘2）。ただし実体が mbx 共有ビルドキャッシュ
-#   （${XDG_CACHE_HOME:-${HOME}/.cache}/mbx/targets/ 配下）のときだけ例外として走査する
-#   （開発リード確定。リンクを通した論理パスで報告する）。
+#   検査異常（exit 2）で止める（slot5 指摘2）。例外は作業ツリー直下の target だけ:
+#   実体を解決すると $HOME/.cache/mbx/targets/（mr-boxington のビルドキャッシュ）の下を指す
+#   ときは、その中身を走査する（開発リード決定 2026-11-09 17:56。リンクを通した論理パスで報告する）。
 #   DEMO_CHECK_EXTRA_PATHS はワークツリー外のパスを明示的に指定するものなので、この検査の対象にしない。
 # ファイル名の区切り: 改行を含むファイル名でも壊れないよう NUL 区切りで扱う（DC-04）。
 # 走査するものが 1 つも無いときは "no artifacts to scan" と表示する。
@@ -30,10 +30,12 @@ implicit_targets=()
 [ -e "${DC_ROOT}/target" ] && implicit_targets+=("${DC_ROOT}/target")
 for d in logs log; do [ -d "${DC_ROOT}/${d}" ] && implicit_targets+=("${DC_ROOT}/${d}"); done
 
-# 暗黙の走査ルートが作業ツリーの中（または mbx 共有キャッシュ）に解決されることを確かめてから
-# 走査する（slot5 指摘2）。それ以外の外を指すリンクなら、読まずに exit 2 で止める。
+# 暗黙の走査ルートが作業ツリーの中に解決されることを確かめてから走査する（slot5 指摘2）。
+# 例外は作業ツリー直下の target だけ（開発リード決定 2026-11-09 17:56）: 実体を解決すると
+# $HOME/.cache/mbx/targets/（mr-boxington のビルドキャッシュ）の下を指すときは走査する。
+# それ以外の外を指す走査ルートは、読まずに exit 2 で止める。
 root_real="$(realpath -- "${DC_ROOT}")" || { echo "canary: cannot resolve ${DC_ROOT}" >&2; exit 2; }
-mbx_root="${XDG_CACHE_HOME:-${HOME}/.cache}/mbx/targets"
+mbx_root="${HOME}/.cache/mbx/targets"
 mbx_real=""
 if [ -d "${mbx_root}" ]; then
   mbx_real="$(realpath -- "${mbx_root}")" || mbx_real=""
@@ -45,7 +47,7 @@ for t in "${implicit_targets[@]}"; do
   case "${t_real}" in
     "${root_real}" | "${root_real}"/*) inside=1 ;;
   esac
-  if [ "${inside}" -eq 0 ] && [ -n "${mbx_real}" ]; then
+  if [ "${inside}" -eq 0 ] && [ "${t}" = "${DC_ROOT}/target" ] && [ -n "${mbx_real}" ]; then
     case "${t_real}" in
       "${mbx_real}" | "${mbx_real}"/*) inside=1 ;;
     esac

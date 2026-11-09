@@ -15,7 +15,7 @@
 #     文字列外の // コメントや path//file は誤検知しない（DC-02）。
 #     行コメント内の引用符付き URL も誤検知しない（slot5 指摘3）
 #   - 走査中のシンボリックリンクをたどらない。ルート自体が作業ツリーの外を指すリンクなら
-#     読まずに exit 2（mbx 共有ビルドキャッシュ配下のみ例外として走査する）（DC-03・slot5 指摘2）
+#     読まずに exit 2（例外は target が $HOME/.cache/mbx/targets/ 配下を指す場合だけ）（DC-03・slot5 指摘2）
 #   - 改行を含むファイル名でも壊れない（DC-04）
 #   - find などの走査失敗（読めないディレクトリ）で exit 2（DC-05: pipefail）。
 #     canary の目印検索でもファイルが読めなければ exit 2（slot5 指摘4）
@@ -276,7 +276,8 @@ if [ "${RC}" -eq 0 ]; then ok "canary: a symlinked log is not followed"; else ng
 rm -f "${r}/crates/x/src/link.rs" "${r}/assets/link.svg" "${r}/logs/link.log"
 
 # 指摘2（slot5）: ルート自体が作業ツリーの外を指すリンクなら、外を読まずに exit 2。
-# ただし実体が mbx 共有ビルドキャッシュ（~/.cache/mbx/targets/ 配下）のときだけ例外として走査する
+# 例外は target が $HOME/.cache/mbx/targets/ 配下を指す場合だけ（開発リード決定 17:56）。
+# 本物の ~/.cache は触らず、HOME を一時ディレクトリに差し替えて確認する
 r="${tmp}/case"; make_clean "${r}"
 mkdir -p "${tmp}/realtarget/debug"
 printf 'PELWAY_CANARY_APIKEY_9c21\n' > "${tmp}/realtarget/debug/app"
@@ -294,6 +295,26 @@ run_stage "${r}" canary HOME="${tmp}/fakehome"
 if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -qF "target/debug/app:"; then
   ok "canary: target/ linking into the mbx cache is still scanned"
 else ng "canary: mbx cache root link (exit ${RC})"; show "${OUT}"; fi
+
+# 決定（17:56）のとおり、例外は「target が $HOME/.cache/mbx/targets/ 配下」だけ。
+# XDG_CACHE_HOME では例外は広がらず、logs/ がキャッシュを指しても例外にならない
+r="${tmp}/case"; make_clean "${r}"
+mkdir -p "${tmp}/xdgcache/mbx/targets/v1/proj/debug"
+printf 'PELWAY_CANARY_BODY_7f3a\n' > "${tmp}/xdgcache/mbx/targets/v1/proj/debug/app"
+ln -s "${tmp}/xdgcache/mbx/targets/v1/proj" "${r}/target"
+run_stage "${r}" canary HOME="${tmp}/fakehome" XDG_CACHE_HOME="${tmp}/xdgcache"
+if [ "${RC}" -eq 2 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_BODY"; then
+  ok "canary: XDG_CACHE_HOME does not widen the exception (only \$HOME/.cache/mbx/targets counts)"
+else ng "canary: XDG_CACHE_HOME target link (exit ${RC})"; show "${OUT}"; fi
+
+r="${tmp}/case"; make_clean "${r}"
+mkdir -p "${tmp}/fakehome/.cache/mbx/targets/v1/logsroot"
+printf 'PELWAY_CANARY_PII_4e8d\n' > "${tmp}/fakehome/.cache/mbx/targets/v1/logsroot/app.log"
+ln -s "${tmp}/fakehome/.cache/mbx/targets/v1/logsroot" "${r}/logs"
+run_stage "${r}" canary HOME="${tmp}/fakehome"
+if [ "${RC}" -eq 2 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_PII"; then
+  ok "canary: the mbx exception is only for target/ (a logs/ link into the cache exits 2)"
+else ng "canary: logs/ link into mbx cache (exit ${RC})"; show "${OUT}"; fi
 
 # --- DC-04: 改行を含むファイル名でも壊れない ---
 r="${tmp}/case"; make_clean "${r}"
