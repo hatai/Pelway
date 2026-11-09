@@ -370,3 +370,96 @@
     dev-smoke 1・http 13。計 78 passed / 0 failed / 0 ignored）
 - 未検証・未決:
   - 差分の Codex 再レビュー・QA は未実施。
+
+### 2026-11-09 第10枠（Codex レビュー4 指摘1〜4の修正と全体期限・GLM 枠）
+- start: 2026-11-09 19:15 JST 以降（バックエンド作業依頼 5 の受領後。正確な時刻は未記録）
+- stop:  2026-11-09 20:10 JST（`date` で確認）
+- glm: long（T3 Code 上で GLM が実装。バックエンド作業依頼 5 のとおり）
+- worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-backend-fix5`、branch `demo-t3/backend-fix5`（base `a78f0b0`）
+- 開始時の確認: HEAD `a78f0b0f85c9671aa23dc900d50db8d2f2448531`、`git status --porcelain` 空。
+- skills:
+  - Matt Pocock Agent Skills の `tdd` を使用。指摘ごとのテストを先に書き、実装前に失敗（red）を
+    確認してから実装（green）した。
+- 開発リードの決定（2026-11-09 19:00頃）:
+  1. ヘッダーが 16 KiB または 100 行を超えたら 431。
+  2. 区切りのないヘッダー行・不正なヘッダー名・Content-Length の重複や不正値は 400。本文の大きさ超過は 413 のまま。
+  3. 接続元は IPv4 の 127.0.0.0/8 だけ受け付け、::1 は拒否（デモ用、あとで見直す）。
+  4. 3 秒で 408、413 は応答を先に書く。
+- 決定の変更（2026-11-09 19:14 リード）: 待ち受け先は 127.0.0.1 だけに絞る（上の3の「127/8」を、QA の条件に合わせて絞った）。
+- 追加の決定（2026-11-09 19:15 リード）: ヘッダー読み取りと 413 後の読み捨てを合わせて 1 接続 10 秒の全体期限。3 秒の読み取りごとのタイムアウトは残す。413 後の読み捨ての上限は 1 MiB のまま。
+- Codex レビュー4（スレッド d893efe6、所見ファイル sha256 `9f5ebc330f83b58ec9dd27da8f8d96e92eaf152be45139d2385cfc423c224ab9`）の指摘1〜4と対処、テスト名:
+  - 指摘1（ヘッダーのサイズ判定、`src/lib.rs` 251-255 付近）: `read_request` のループで、
+    終端（空行）を探す **前に**、受け取った合計バイト数で `MAX_HEAD_BYTES`（16 KiB）を判定し、
+    超えたら 431 にした。終端が上限を超えた最後の読み取りに含まれる場合も 431。
+    テスト: `head_bytes_exactly_16kib_ok_and_one_more_431`（16 KiB ちょうどは受理、
+    16 KiB+1 は 431。+1 のケースでは終端の空行が上限を超える最後の読み取りに含まれる）。
+  - 指摘2（形の不正を 400 に、267-270・280-283 付近）: リクエスト行の HTTP バージョンが
+    `HTTP/1.1` の形でなければ 400。ヘッダー名が空、または空白・区切り文字を含む
+    （RFC 9110 の token でない、`is_tchar` で判定）なら 400。どちらも台帳に触れず状態を変えない。
+    テスト: `bad_version_and_bad_header_names_return_400_and_keep_state`
+    （HTTP/2.0・HTTP/1.0・HTTP バージョンでない形・空のヘッダー名・空白入りヘッダー名・
+    コロンの前の空白・区切り文字 `()` 入り。有効な Content-Length と本文付きで 400 になり、
+    カードの hash・コメント数・版が変わらない）。
+  - 指摘3（bind 先を 127.0.0.1 だけに、176-181 付近）: `serve`（実体は
+    `serve_with_connection_deadline`）で、アドレスの IP が 127.0.0.1 ちょうどでなければ
+    `ServeError::NotLoopback` で拒否。127.0.0.2・127.255.255.255（127/8 のほか）、
+    0.0.0.0、`::`、`::1` も拒否。
+    テスト: 既存 `serve_refuses_non_loopback_addresses` に `127.0.0.2:0` と
+    `127.255.255.255:0` を追加（既存の拒否ケースは残したまま）。
+  - 指摘4（500 本文の回帰テスト、`tests/http.rs` 328-330 付近）: poison したロックでの 500 応答の
+    本文 JSON のキーと値をすべて確かめ、決まった `code` 以外の詳細（エラー文・ファイルパス・
+    型名・panic の文）が入らないことを確かめる回帰テストに強化した。
+    テスト: `poisoned_lock_returns_500_with_exact_body_and_keeps_state`
+    （旧 `poisoned_lock_returns_500` の強化。本文が `{"code":"internal"}` だけであることと、
+    poison 前後でカード状態が変わらないことも確認。実装変更を伴わない回帰テストのため
+    red は無し——現行実装で pass を確認。第8枠の作業1と同じ扱い）。
+  - 全体期限（リード決定 19:15、5.）: `handle_conn` の開始時から `CONNECTION_DEADLINE`（本番 10 秒）で、
+    ヘッダー読み取り（`read_request`）と 413 後の読み捨て（`drain`）を合わせて打ち切って接続を閉じる。
+    ヘッダー読み取り中の期限切れには 408 を返してから閉じる。1 回の読み取りごとの 3 秒
+    （`READ_TIMEOUT`）はそのまま。読み捨ての 1 MiB 上限もそのまま。
+    期限は引数で差し替えられる形（`serve_with_connection_deadline`。`serve` は 10 秒を渡すだけ）。
+    テスト: `slow_trickle_head_hits_connection_deadline`（150ms 間隔で送り続けると 800ms の
+    期限前後で 408 と切断。本番値 10 秒もあわせて assert）、
+    `slow_trickle_after_413_stops_draining_at_deadline`（413 の応答を受け取ったあと
+    少しずつ送り続けると、期限で接続を閉じられる）。
+- red-first の証拠（tdd）:
+  - テストと、期限を無視するスタブの `serve_with_connection_deadline`（中身は従来の `serve`
+    と同じ）を先に置いて実行: `cargo test --offline -p pelway-http --test http` →
+    exit 101、12 passed / 5 failed。
+    - `head_bytes_exactly_16kib_ok_and_one_more_431`: 16 KiB+1 が 200 で受理されていた（指摘1）。
+    - `bad_version_and_bad_header_names_return_400_and_keep_state`: HTTP/2.0 が 200 で
+      受理されていた（指摘2。最初のケースで失敗）。
+    - `serve_refuses_non_loopback_addresses`: `127.0.0.2:0` での起動が受理されていた（指摘3）。
+    - `slow_trickle_head_hits_connection_deadline` / `slow_trickle_after_413_stops_draining_at_deadline`:
+      切断されず 6.0s / 3.0s（全体期限）。
+  - green: 実装後に `cargo test --offline -p pelway-http --test http` → exit 0、17 passed / 0 failed。
+- 検証（コマンドと exit code、オフライン）:
+  - `cargo fmt --all --check`: 初回 1（整形の指摘のみ）。`cargo fmt --all` 適用後に 0。
+  - `cargo clippy --workspace --all-targets --offline -- -D warnings` 0
+  - `cargo test --workspace --offline` 0（at-rest 8・aead 12・contract 34・serde_contract 10・
+    dev-smoke 1・http 17。計 82 passed / 0 failed / 0 ignored）
+  - `git diff -- Cargo.lock` は空（変更なし。依存クレートの追加も無し）。
+- 迷った点（安全側で進めたもの）:
+  - HTTP/1.0 の受理: 依頼文は「必要なら HTTP/1.0 も」のため、受理しない（HTTP/1.1 だけ）を
+    選んだ（厳しい方。テストも HTTP/1.0 → 400 を固定）。
+  - 全体期限切れの応答: 決定文は「打ち切り、接続を閉じる」だけで応答の有無を定めないため、
+    ヘッダー読み取り中の期限切れには 408 を返してから閉じることにした（408 は読み取り超過の
+    標準の状態コード。第9枠の 408 採用と同じ理由）。413 後の読み捨ては応答済みなので
+    追記せず閉じるだけ。
+  - ヘッダー読み取りループの判定順: サイズ判定（431）→ 終端探索 → 期限（408）→ 読み取り。
+    受け取った合計が上限内で終端まで揃った要求は、期限ぎりぎりでも受理する
+    （期限は読み取りを防ぐためのものなので、読み終えた要求は捨てない）。
+  - 全体期限の適用範囲: 決定は「ヘッダー読み取りと 413 後の読み捨て」のため、本文読み取り
+    （Content-Length 64 KiB 以下の正当な要求の本体）には全体期限をかけていない。本文を
+    3 秒未満の間隔で少しずつ送る接続は、1 回の読み取りごとの 3 秒タイムアウトだけでは
+    切断されないまま残る。要リード判断。
+  - `ServeError::NotLoopback` の名前: 127.0.0.2 は loopback だが拒否するようになったため
+    名前と意味がずれたが、名称変更は差分が広がるためそのままにし、doc とメッセージ
+    （`serve address must be exactly 127.0.0.1`）を更新した。
+  - 16 KiB ちょうどの受理テストは、ヘッダーだけを先に送ってサーバーに読み終えてもらってから
+    本体を送る形にした（本体まで同じ読み取りに含まれると、合計バイト数判定で 431 に
+    なるため。判定は「受け取った合計バイト数」のとおり）。
+  - AGENTS.md の「Prior art first」（GitHub 検索）は、依頼文の外部ネットワーク接続禁止に
+    従い実施しなかった。
+- 未検証・未決:
+  - 差分の Codex 再レビュー・QA は未実施。U01〜U07 は未決のまま（確定していない）。
