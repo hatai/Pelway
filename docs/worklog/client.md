@@ -370,3 +370,56 @@
   - 期待値の計算経路を f64 でなく実装と同じ f32 に合わせた（f64 では `0.1` のような値で偽の失敗が出ることを観察で確認したため）。
   - 赤の確認に使った一時変更（`src/theme.rs`・`src/i18n.rs`）は、戻すたびに `git diff --stat` に現れないことを確認した。
 - ネットワーク・書き込み範囲: cargo はすべて `CARGO_NET_OFFLINE=true` + `--offline --locked`。`cargo fetch`・`cargo update`・`cargo add` は不使用。worktree の外への書き込みなし（`/tmp` を含む。一時ファイルは `tests/zz_probe_tmp.rs` のみで観察後に削除。`target/` への出力も残していない）。git の push・fetch なし。amend・rebase・reset・stash・force・`--no-verify` も不使用。`crates/pelway-client-core` は変更なし。
+
+### 2026-11-10 第12枠（QA-GDPR-13: 端末に本文・個人情報を残さないことを試験で固定）
+- start: 2026-11-10 05:03 JST
+- stop:  2026-11-10 05:39 JST
+- glm: long（T3 Code スレッドで OpenCode + zai-coding-plan/glm-5.3 が実装。起点 `e46668b` の worktree `demo-t3-client-gdpr-13` で実施）
+- 使った skills: tdd（テストを先に書き、一時的な書き込み注入で赤を出し、戻して緑を確認）/ verification-before-completion（完了報告の前に指定コマンドをすべて再実行して exit code と件数を記録）。skill の本文は OpenCode の skill 読み込み機能で読んだ（worktree 外のファイルを直接開いてはいない）。
+- 最初の確認: `pwd` = `/home/hatai/.t3/worktrees/Pelway/demo-t3-client-gdpr-13`（想定どおり）、ブランチ `demo-t3/client-gdpr-13`、HEAD `e46668bd49863e07b2af964defe8f1f3aa925ed9`（基点と一致）、`git log --oneline -3` の先頭は `e46668b`（r5 第11枠の追記コミット）、`git status --short` 空。
+- 方針（依頼書どおり）: 保存方式はメモリ（ユーザー決定 2026-11-09 13:03 JST）。`docs/technical/v0.7` の 04「キャッシュと削除」（ネイティブ SQLite・Web IndexedDB）は製品向けの記述でありデモでは採用しないため、SQLite・IndexedDB・その他の本文キャッシュファイルはこの回では作らない。共有コアは通信もファイルの読み書きもしない（開発リード決定 2026-11-09 13:14/13:20 JST）。終了時削除だけに頼らず「残存なし」を安全側とする。
+- 棚卸し（変更の前に実施。worktree の中だけを調査）:
+  - 依存: `pelway-client-core` は `[dependencies]` 空（依存ゼロ）。`pelway-client-ui` は `pelway-client-core`（path）・`slint =1.18.1`・`fluent-bundle 0.15`・`unic-langid 0.9`（build-dependencies: `slint-build =1.18.1`、dev-dependencies: `i-slint-backend-testing =1.18.1`）。`pelway-dev-smoke` は依存ゼロ。`rusqlite`・`indexed_db`・`web-sys` の Storage/IndexedDB・`directories` 等の、本文の永続化やファイル I/O につながる依存は 0 件。
+  - ファイル書き込み経路: `crates/` 全域で `std::fs` の使用は `crates/pelway-client-ui/tests/no_color_values.rs`（`fs::read_dir`・`fs::read_to_string`。ソース走査のための読み取り専用）の1か所だけ。`OpenOptions`・`File::create`・`fs::write`・設定ディレクトリへの書き込みは 0 件。本文・プロフィール・メモ・イベントをファイルや DB に書く経路なし。
+  - ログ経路: `tracing`・`log` クレートは不使用。`eprintln!`・`println!`・`dbg!` は製品コードに 0 件（`tests/theme_tokens.rs` の `write!` は文字列バッファへの `fmt::Write`）。`panic!`/`expect` の文言に本文を埋め込む箇所なし（文言は固定）。`Effect` は bridge が保持するだけ（「ログにも出さない」は第8枠からの設計どおり）。
+  - 起動時のホーム・XDG・OS 一時領域の参照: 0 件（`HOME`・`XDG_*`・`temp_dir` への言及なし）。`.ftl`・トークン JSON は `include_str!` で実行形式に取り込み、実行時のファイル読み取りなし。
+  - 判定: 本文・個人情報をディスクやログに出す経路は現時点で存在しない。よって実装の修正は不要と判断し、指示 2-1・2-3 のとおり「無いこと」を自動試験で固定する。言語・窓サイズなど会話でも個人情報でもない設定だけを書く既存経路も存在しないため、新規には作らない。
+- 追加した試験: `crates/pelway-client-ui/tests/no_body_persist.rs`（5 件。slint の窓は開かない。`MainWindow` も作らない）:
+  - canary は本文用・個人情報用の 2 つの合成トークン（実在の値ではない。バックエンド QA-GDPR-07 の canary とは別）。完全な canary がソースやコンパイル済みバイナリ（`target/` の成果物）に入ると走査の意味が無くなるため、テスト定数としては前半の平文リテラル＋後半の逆順リテラルを実行時に復元する形で置く。単純な 2 分割（`no_color_values.rs` 流）では不十分だった——リンカが 2 つのリテラルを `.rodata` 上で隣接させ、バイト列として連結した完全な canary がテストバイナリと incremental の `.o` に現れることを実際の走査で確認した（下記「走査での発見」）。逆順格納ならリテラルがどう並んでも連結できない。
+  - (a) `conversation_state_with_canaries_writes_no_files`: canary 入りの会話状態（表示名・メッセージ本文・「あなただけに表示」・社外送信カード本文）を `state::sample` ベースのメモリ上の状態に載せ、中核（コメント保存要求・承認押下・409 確認の流れ）と橋も動かしたあと、サンドボックス（`target/gdpr-13-sandbox/` 以下）と環境変数（HOME・TMPDIR・XDG_*）が指すディレクトリのうち worktree 内のものを走査し、canary が 0 件であること。
+  - (b) `client_output_streams_carry_no_canary`: 同じテストバイナリを子プロセスとして起動し（`--exact` + 専用環境変数）、canary 入りの状態を動かしたときの標準出力・標準エラーを吸い取って canary が 0 件であること（ファイルログの仕組みは無いため標準エラーの吸い取りで確かめる。ログの仕組みは新規に作らない）。
+  - (c) `scanner_detects_canaries_in_memory_and_in_files`: 陽性対照。検査関数に canary を含む文字列を渡すと「見つかった」と判定されること（常に 0 件を返す欠陥を通さない）。ファイル経路の検出力も、sandbox 内の一時ファイルに canary を書いて `scan_tree` が検出し、確認後すぐ消す形で確認（ファイルには残さない）。sandbox 全体を走査する (a)(c)(d) は排他鍵で直列化し、陽性対照の一時ファイルが他の走査に混ざらないようにした。
+  - (d) `core_api_surface_has_no_file_io`: 共有コアに本文を書く API が無いことの固定。① core の `src/*.rs` にファイル入出力・出力・プロセス起動の禁止語（`std::fs`・`OpenOptions`・`File::`・`fs::`・`read_dir`・`create_dir`・`remove_file`・`remove_dir`・`hard_link`・`write!`・`writeln!`・`print!`・`println!`・`eprint!`・`eprintln!`・`dbg!`・`std::process`・`Command`）が 0 件であること（追加前に grep で 0 件を確認済み）、② core の `Cargo.toml` の `[dependencies]` が空のまま（依存ゼロ＝fs をする crate も入らない）であること、③ 振る舞いとして、canary 入りの本文を渡して中核と橋を動かしても探査ディレクトリにファイルが 1 つもできず、sandbox 全走査でも 0 件であること。
+  - (e) `scan_roots_stay_inside_the_worktree`: 走査対象が worktree の外（`/tmp`・`/home/...`・`..` で外へ出るパス）を指していないこと。候補の内外判定はファイルシステムに触れない純粋なパス判定で行い、外の候補（本物のホームを含む）は `read_dir` すらしない。走査では symlink も辿らない（`target/` が mbx の管理対象になる可能性への安全側）。
+- 実行環境（安全側）: cargo は rustup の実バイナリ（toolchain 1.96.0 の `bin/cargo`）を直接実行。`HOME`・`XDG_DATA_HOME`・`XDG_CACHE_HOME`・`XDG_CONFIG_HOME`・`XDG_STATE_HOME`・`TMPDIR` をすべて `target/gdpr-13-sandbox/` の下の別々のディレクトリへ向け、`CARGO_HOME=/home/hatai/.cargo` だけ実パスを明示（cargo が自分のキャッシュを読むのは許可済みのため。mise shim はリダイレクト下で壊れるため使わない）。`CARGO_NET_OFFLINE=true` + `--offline --locked` 固定。
+- TDD の赤→緑（注入による確認。既存コードに漏れが無いため、テストを正しく落とせることを一時注入で証明する）:
+  - 1 回目の注入: `crates/pelway-client-core/src/approval.rs` の `request_save_comment` の先頭に、本文を `eprintln!` で標準エラーへ出す行と、本文を `target/gdpr-13-sandbox/leak-demo.txt` へ `std::fs::write` する行を一時追加。`cargo test -p pelway-client-ui --test no_body_persist --locked --offline` は **exit 101**。ただし落ちたのは (a) と (d) の 2 件だけ（(a) は canary 入りファイル 1 件を検出、(d) は禁止語 `std::fs`・`fs::`・`eprintln!` 等を検出）。**(b) が通ってしまい、テスト側の設計欠陥が発覚**: 子プロセスでは libtest の出力捕捉が `eprintln!` を溜め込み、親プロセスから見えなくなっていた。
+  - (b) の修正: 子プロセスに `--nocapture` を渡して捕捉を切った。
+  - 2 回目の赤: 同コマンドで **exit 101、3 件失敗**——(a) ファイル検出 1 件、(b) 「クライアントの動作中の stderr に canary が出ていないこと」、(d) 禁止語。(c)(e) は合格（注入の影響を受けない検査）。
+  - 復元: 注入を削除して `rm target/gdpr-13-sandbox/leak-demo.txt`（対象を明示した削除）。`git diff --stat -- crates/pelway-client-core` が空（一時変更が残っていないこと）を確認し、再実行で **exit 0（5 件合格）**。
+- 走査での発見（canary のバイナリ混入）と修正:
+  - §5 の canary 走査（`rg -a -F -f <パターンファイル>`、`--no-ignore --hidden`、除外は `.git/`・`.opencode/`・パターンファイル自身。パターンファイルは値を端末に出さないよう分割 printf で `target/gdpr-13-sandbox/` の下に作り、走査後に明示削除）で、初回は **3 件ヒット**: `target/debug/deps/no_body_persist-<hash>`（テストバイナリ）と incremental の `.o` 2 件。原因は上記のとおり `.rodata` 上でのリテラル隣接。
+  - 修正（前半平文＋後半逆順の実行時復元）のあと、`cargo clean`（cargo 自身の target 管理機能。8113 ファイル・6.2GiB。sandbox ディレクトリは直後に再作成）で古い成果物をすべて消して再ビルドし、同じ走査で **rg exit 1＝0 件**（ソース・`target/` の成果・sandbox 内のすべてで完全な canary は不在）。
+- 検証（コマンドと exit code。すべて `CARGO_NET_OFFLINE=true` + サンドボックス環境変数付き。最終版のソースで）:
+  - `cargo fmt --all --check` **0**
+  - `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` **0**
+  - `cargo test --workspace --locked --offline` **0**（**95 件合格・失敗 0**: pelway-client-core 54 = approval 24・contract 14・input 16 ／ pelway-client-ui 40 = bridge 10・i18n_fluent 3・i18n_keys 6・**no_body_persist 5**・no_color_values 4・slint_window 1・theme_tokens 11 ／ pelway-dev-smoke 1）
+  - canary 走査（上記）**exit 1＝0 件**
+  - `git diff --stat e46668b -- Cargo.lock` → 空（**Cargo.lock の差分なし**。新しい依存・workspace メンバーなし）
+  - `ls -ld target`（検証時点）→ worktree 内の通常ディレクトリ。ただし最初のコミットのとき、pre-commit フック経由の cargo（mise + mr_boxington）が `target/` を `~/.cache/mbx/targets/v1/<hash>` への symlink に移し替えた（下記「ネットワーク・書き込み範囲」参照）。上記の検証・走査はすべて変換前の worktree 内 `target/` で完了している。移行後もサンドボックスのパス（`<worktree>/target/gdpr-13-sandbox`）は lexical には worktree 内のままで、試験はそのまま動く。
+- 未検証・未決:
+  - **窓を開いての確認はしていない**（slint の testing backend も使っておらず、`MainWindow` も作っていない）。ウィンドウを開いたときだけ起きる端末残存（ウィンドウシステムの描画バッファ・スワップへのページアウト等）はこの回では**未検証**（合格扱いにしない）。
+  - **mlock は使わない**（デモの決定どおり）。メモリ上の本文・表示名がスワップへ書き出される余地は残る。PC の設定（スワップ無効化等）は変えていない。リスクの記録のみ。
+  - (a)(d) の走査対象はサンドボックスと環境変数の向け先（worktree 内）。`crates/` 直下への書き込みのような「作業ディレクトリ相対の書き込み」は (a) の走査だけでは見えない。これに対しては (d) の core 禁止語走査と依存ゼロの固定、(b) の出力検査、棚卸し（ui 側に fs 書き込みなし）で担保している。ui 側ソースへの禁止語走査の拡張は今後の候補として記録する（この回では指示 (d) の範囲（core）にとどめた）。
+  - U01〜U07 は未決のまま（この回では判定していない）。`TODO(U0x)` も触っていない。
+  - 文書とコードの不一致（AGENTS.md「Code over docs」の観点）: `docs/technical/v0.7` の 04「キャッシュと削除」はネイティブ SQLite・Web IndexedDB を製品仕様として書いているが、デモの方針（ユーザー決定 2026-11-09 13:03 JST）はメモリのため、この回では採用していない。ユーザー指示により文書は変えていない。
+  - 書き出し（JSON）画面・保存ダイアログ・QA-WASM-03（ブラウザの localStorage 等）・QA-GDPR-02/07 の仕組みは対象外。
+- 迷って安全側にした点:
+  - canary は単純分割でなく逆順格納＋実行時復元にした（隣接配置による連結を実測で確認したため）。
+  - canary 走査は `rg -a`（バイナリも全文検索）で実行した。
+  - mbx（mr_boxington）経由を避け、toolchain の cargo 実バイナリを直接実行（`target/` が worktree 外の共有ストアへ向く可能性を避ける。実際には通常ディレクトリのまま）。
+  - mise shim を使わず、PATH の先頭に toolchain の `bin/` を置き `RUSTC` を明示した（リダイレクト環境下で shim が壊れることを最初の実行で確認したため）。
+  - (b) の子プロセスに `--nocapture` を渡した（libtest の捕捉により空振りすることを赤確認で発見したため）。
+  - 一時ファイル（`leak-demo.txt`・`scan-patterns.txt`・`positive-control/`）は、確認のたびに対象を明示した `rm` で削除した。`cargo clean` は cargo 自身の成果物管理として使った（`rm -rf` は不使用）。
+- ネットワーク・書き込み範囲: cargo はすべて `CARGO_NET_OFFLINE=true` + `--offline --locked`（`cargo fetch`・`cargo update`・`cargo add` 不使用。lock の更新なし）。worktree の外への書き込みなし（`/tmp`・`/dev/shm`・本物のホームを含む。`TMPDIR`・`HOME`・`XDG_*` はすべて `target/gdpr-13-sandbox/` の下へ向けた。cargo が `CARGO_HOME=/home/hatai/.cargo` のキャッシュを読むことだけ許可済みの範囲）。git の push・fetch なし。amend・rebase・reset・stash・force・`--no-verify` 不使用。`.opencode/` は読み書きとも不使用。r5 の worktree（`demo-t3-client-ui-r5`・`review-codex-client-e46668b-r1`）とブランチ `demo-t3/client-ui-r5` には不接触。ネットワーク接続なし。
+  - 注記: 最初のコミット時、pre-commit フック（hk → mise → cargo）の実行で mbx（mr_boxington）が「既存の `target/` を管理ルートへ移動」し、`target/` が `~/.cache/mbx/targets/v1/<hash>` への symlink になった（フックのログで確認）。これはプロジェクト標準のコミット工程（`mise.toml` の `mr_boxington = true`）によるもので、`--no-verify` 不用の通常コミットの結果。私が直接実行した検証コマンド（§5）による worktree 外への書き込みはない（検証は変換前の worktree 内 `target/` で実施）。
