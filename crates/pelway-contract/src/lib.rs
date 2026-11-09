@@ -27,5 +27,6 @@ pub mod ids;
 pub mod ledger;
 pub mod member;
 pub mod message;
+pub mod pseudonym;
 pub mod snapshot;
 pub mod task;

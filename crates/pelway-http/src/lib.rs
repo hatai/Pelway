@@ -31,6 +31,10 @@
 //!   あっても、接続ごとにスレッドを割り当てるため他の要求は処理される。
 //! - 応答のエラー本文は契約エラー（`ApproveError` / `CommentError`）と同じ形の
 //!   JSON（tag="code"、snake_case）。HTTP 層独自のエラーも [`HttpError`] で同じ形にする。
+//! - 構造化ログ（[`log`]）: 出来事は列挙型で、項目は仮名化 ID・種別・数値・結果
+//!   コードだけ。本文・コメント・`client_msg_id`・秘密はログに入れない
+//!   （QA-GDPR-07・QA-GDPR-12・QA-MSG-02）。既定の出力先は無し
+//!   （[`serve`]）。[`serve_with_logger`] で出力先を指定する。
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -41,6 +45,8 @@ use pelway_contract::ids::MemberId;
 use pelway_contract::ledger::ApprovalLedger;
 use pelway_contract::member::MemberKind;
 use serde::Serialize;
+
+pub mod log;
 
 /// 要求本文の上限（バイト）。超えたら 413。
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
@@ -127,12 +133,14 @@ impl HttpError {
     }
 }
 
-/// 応答（状態コードと JSON 本文）。
+/// 応答（状態コードと JSON 本文）。`code` は拒否ログ用の結果コード（4xx/5xx で設定）。
 struct Response {
     status: u16,
     body: String,
     /// 応答を書いた後に読み捨てる残りバイト数（413 のとき。本文を読み込む前に応答するため）。
     drain_after_write: Option<usize>,
+    /// 拒否の結果コード。成功応答では `None`。
+    code: Option<log::Code>,
 }
 
 impl Response {
@@ -141,32 +149,34 @@ impl Response {
             status,
             body: serde_json::to_string(value).expect("response serializes"),
             drain_after_write: None,
+            code: None,
         }
     }
 
-    fn error<E: Serialize>(status: u16, error: &E) -> Self {
+    fn error<E: Serialize>(status: u16, error: &E, code: log::Code) -> Self {
         Self {
             status,
             body: serde_json::to_string(error).expect("error serializes"),
             drain_after_write: None,
+            code: Some(code),
         }
     }
 }
 
 fn bad_request() -> Response {
-    Response::error(400, &HttpError::BadRequest)
+    Response::error(400, &HttpError::BadRequest, log::Code::BadRequest)
 }
 
 fn request_timeout() -> Response {
-    Response::error(408, &HttpError::RequestTimeout)
+    Response::error(408, &HttpError::RequestTimeout, log::Code::RequestTimeout)
 }
 
 fn headers_too_large() -> Response {
-    Response::error(431, &HttpError::HeadersTooLarge)
+    Response::error(431, &HttpError::HeadersTooLarge, log::Code::HeadersTooLarge)
 }
 
 fn internal_error() -> Response {
-    Response::error(500, &HttpError::Internal)
+    Response::error(500, &HttpError::Internal, log::Code::Internal)
 }
 
 /// 起動したサーバー。テスト用に待ち受けアドレスだけ返す。
@@ -187,7 +197,12 @@ impl Server {
 /// # Errors
 /// 127.0.0.1 以外のアドレス、またはソケットの失敗。
 pub fn serve(addr: SocketAddr, ledger: SharedLedger) -> Result<Server, ServeError> {
-    serve_with_connection_deadline(addr, ledger, CONNECTION_DEADLINE)
+    serve_inner(
+        addr,
+        ledger,
+        CONNECTION_DEADLINE,
+        Arc::new(log::Logger::disabled()),
+    )
 }
 
 /// [`serve`] と同じだが、1 接続の全体期限（既定は [`CONNECTION_DEADLINE`]）を指定できる。
@@ -202,6 +217,34 @@ pub fn serve_with_connection_deadline(
     ledger: SharedLedger,
     connection_deadline: std::time::Duration,
 ) -> Result<Server, ServeError> {
+    serve_inner(
+        addr,
+        ledger,
+        connection_deadline,
+        Arc::new(log::Logger::disabled()),
+    )
+}
+
+/// [`serve`] と同じだが、ログの出力先（と仮名化の salt を持つ [`log::Logger`]）を
+/// 指定する。ログに出る ID はすべて仮名化され、本文・コメント・`client_msg_id`・
+/// 秘密はログに入らない。1 接続の全体期限は [`CONNECTION_DEADLINE`]。
+///
+/// # Errors
+/// 127.0.0.1 以外のアドレス、またはソケットの失敗。
+pub fn serve_with_logger(
+    addr: SocketAddr,
+    ledger: SharedLedger,
+    logger: Arc<log::Logger>,
+) -> Result<Server, ServeError> {
+    serve_inner(addr, ledger, CONNECTION_DEADLINE, logger)
+}
+
+fn serve_inner(
+    addr: SocketAddr,
+    ledger: SharedLedger,
+    connection_deadline: std::time::Duration,
+    logger: Arc<log::Logger>,
+) -> Result<Server, ServeError> {
     // 待ち受けは 127.0.0.1 だけ（QA 18:21、リード決定 2026-11-09 19:14）。
     // 127.0.0.2 など 127/8 のほか、`::1` を含む IPv6 も拒否する。
     if addr.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
@@ -211,10 +254,14 @@ pub fn serve_with_connection_deadline(
     let addr = listener.local_addr().map_err(ServeError::Io)?;
     std::thread::spawn(move || {
         for stream in listener.incoming() {
-            let (Ok(mut stream), ledger) = (stream, Arc::clone(&ledger)) else {
+            let (Ok(mut stream), ledger, logger) =
+                (stream, Arc::clone(&ledger), Arc::clone(&logger))
+            else {
                 continue;
             };
-            std::thread::spawn(move || handle_conn(&mut stream, &ledger, connection_deadline));
+            std::thread::spawn(move || {
+                handle_conn(&mut stream, &ledger, connection_deadline, &logger);
+            });
         }
     });
     Ok(Server { addr })
@@ -249,15 +296,35 @@ fn handle_conn(
     stream: &mut TcpStream,
     ledger: &SharedLedger,
     connection_deadline: std::time::Duration,
+    logger: &log::Logger,
 ) {
+    let started = std::time::Instant::now();
     // 全体期限（リード決定 2026-11-09 19:15、20:36 に本文の読み取りへ拡大）:
     // ヘッダー読み取り・本文読み取り・413 後の読み捨てを合わせた全体。
     // 1 回の読み取りのタイムアウトは read_once / drain が読み取りのたびに設定する。
     let deadline = deadline_at(std::time::Instant::now(), connection_deadline);
-    let response = match read_request(stream, deadline) {
-        Ok(req) => route(&req, ledger),
-        Err(resp) => resp,
+    let (response, route) = match read_request(stream, deadline) {
+        Ok(req) => route(&req, ledger, logger),
+        Err(resp) => (resp, log::Route::Unknown),
     };
+    let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    // 拒否（4xx）と内部エラー（5xx）の出来事。結果コードは応答と一緒に作ったもの。
+    if response.status >= 500 {
+        logger.emit(log::Event::InternalError { route });
+    } else if response.status >= 400 {
+        logger.emit(log::Event::Rejected {
+            route,
+            status: response.status,
+            code: response.code.unwrap_or(log::Code::Unknown),
+        });
+    }
+    // 応答した: 経路・状態コード・本文バイト数・所要ミリ秒だけ。
+    logger.emit(log::Event::Responded {
+        route,
+        status: response.status,
+        body_bytes: response.body.len(),
+        elapsed_ms,
+    });
     write_response(stream, &response);
     // 413 のときは応答を先に書き、残りはこの後で読み捨てる。
     if let Some(remaining) = response.drain_after_write {
@@ -425,7 +492,8 @@ fn read_request(stream: &mut TcpStream, deadline: std::time::Instant) -> Result<
         // 応答後に読み捨てる残り。大きすぎる（>1 MiB）場合は読み捨てない。
         let already = buf.len().saturating_sub(head_end + 4);
         let remaining = content_length.saturating_sub(already);
-        let mut resp = Response::error(413, &HttpError::PayloadTooLarge);
+        let mut resp =
+            Response::error(413, &HttpError::PayloadTooLarge, log::Code::PayloadTooLarge);
         resp.drain_after_write = (content_length <= DRAIN_LIMIT_BYTES).then_some(remaining);
         return Err(resp);
     }
@@ -456,9 +524,14 @@ fn header<'a>(req: &'a Request, name: &str) -> Option<&'a str> {
         .map(|(_, v)| v.as_str())
 }
 
-fn route(req: &Request, ledger: &SharedLedger) -> Response {
+fn route(req: &Request, ledger: &SharedLedger, logger: &log::Logger) -> (Response, log::Route) {
     let path = req.path.split('?').next().unwrap_or("");
     let segments: Vec<&str> = path.split('/').collect();
+    let method = if req.method == "POST" {
+        log::Method::Post
+    } else {
+        log::Method::Other
+    };
     // 仮の経路: /v1/cards/{card_id}/comments と /v1/cards/{card_id}/approve
     if segments.len() == 5
         && segments[1] == "v1"
@@ -466,17 +539,71 @@ fn route(req: &Request, ledger: &SharedLedger) -> Response {
         && !segments[3].is_empty()
     {
         let card = segments[3];
-        return match (segments[4], req.method.as_str()) {
-            ("comments", "POST") => handle_comments(req, card, ledger),
-            ("approve", "POST") => handle_approve(req, card, ledger),
-            ("comments", _) | ("approve", _) => Response::error(405, &HttpError::MethodNotAllowed),
-            _ => Response::error(404, &HttpError::NotFound),
+        let route_kind = match segments[4] {
+            "comments" => log::Route::Comments,
+            "approve" => log::Route::Approve,
+            _ => log::Route::Unknown,
         };
+        // 要求を受けた: 経路・メソッド・経路の card_id（仮名化）だけ。
+        logger.emit(log::Event::RequestReceived {
+            route: route_kind,
+            method,
+            card: Some(logger.id(card)),
+        });
+        let resp = match (segments[4], req.method.as_str()) {
+            ("comments", "POST") => handle_comments(req, card, ledger, logger),
+            ("approve", "POST") => handle_approve(req, card, ledger, logger),
+            ("comments", _) | ("approve", _) => Response::error(
+                405,
+                &HttpError::MethodNotAllowed,
+                log::Code::MethodNotAllowed,
+            ),
+            _ => Response::error(404, &HttpError::NotFound, log::Code::NotFound),
+        };
+        return (resp, route_kind);
     }
-    Response::error(404, &HttpError::NotFound)
+    logger.emit(log::Event::RequestReceived {
+        route: log::Route::Unknown,
+        method,
+        card: None,
+    });
+    (
+        Response::error(404, &HttpError::NotFound, log::Code::NotFound),
+        log::Route::Unknown,
+    )
 }
 
-fn handle_comments(req: &Request, path_card: &str, ledger: &SharedLedger) -> Response {
+/// 契約のコメント保存エラー → 拒否ログの結果コード。
+fn comment_error_code(e: &pelway_contract::approval::CommentError) -> log::Code {
+    use pelway_contract::approval::CommentError as E;
+    match e {
+        E::CardNotFound => log::Code::CardNotFound,
+        E::EmptyBody => log::Code::EmptyBody,
+        E::TooLong { .. } => log::Code::TooLong,
+        E::NotAwaitingApproval { .. } => log::Code::NotAwaitingApproval,
+    }
+}
+
+/// 契約の承認エラー → 拒否ログの結果コード。
+fn approve_error_code(e: &pelway_contract::approval::ApproveError) -> log::Code {
+    use pelway_contract::approval::ApproveError as E;
+    match e {
+        E::CardNotFound => log::Code::CardNotFound,
+        E::CardIdMismatch => log::Code::CardIdMismatch,
+        E::VersionConflict { .. } => log::Code::VersionConflict,
+        E::SnapshotMismatch => log::Code::SnapshotMismatch,
+        E::NotAwaitingApproval { .. } => log::Code::NotAwaitingApproval,
+        E::ApprovalInProgress => log::Code::ApprovalInProgress,
+        E::IdempotencyKeyReused => log::Code::IdempotencyKeyReused,
+    }
+}
+
+fn handle_comments(
+    req: &Request,
+    path_card: &str,
+    ledger: &SharedLedger,
+    logger: &log::Logger,
+) -> Response {
     // 認証は無い（デモ用）。合成ヘッダーで要求者を受ける。
     let Some(member_id) = header(req, MEMBER_ID_HEADER).filter(|v| !v.is_empty()) else {
         return bad_request();
@@ -495,36 +622,70 @@ fn handle_comments(req: &Request, path_card: &str, ledger: &SharedLedger) -> Res
     };
     // comments には契約側に check_path 相当が無いため、HTTP 層で同じ 422 にする。
     if save_req.card_id.as_str() != path_card {
-        return Response::error(422, &HttpError::CardIdMismatch);
+        return Response::error(422, &HttpError::CardIdMismatch, log::Code::CardIdMismatch);
     }
 
     // 保存はロックを持ったまま 1 回で行う。
     match ledger.lock() {
         Ok(mut ledger) => {
+            // ログ用の仮名 ID を先に作る（save_req はこの後動かす）。
+            let card_pid = logger.id(save_req.card_id.as_str());
+            let author_pid = logger.id(member_id);
             match ledger.save_comment(MemberId::from(member_id), member_kind, save_req) {
-                Ok(saved) => Response::json(200, &saved),
-                Err(e) => Response::error(e.http_status(), &e),
+                Ok(saved) => {
+                    // コメントを保存した: カード・書き手（ともに仮名化）と種別だけ。
+                    logger.emit(log::Event::CommentSaved {
+                        card: card_pid,
+                        author: author_pid,
+                        member_kind: member_kind.into(),
+                    });
+                    Response::json(200, &saved)
+                }
+                Err(e) => Response::error(e.http_status(), &e, comment_error_code(&e)),
             }
         }
         Err(_) => internal_error(),
     }
 }
 
-fn handle_approve(req: &Request, path_card: &str, ledger: &SharedLedger) -> Response {
+fn handle_approve(
+    req: &Request,
+    path_card: &str,
+    ledger: &SharedLedger,
+    logger: &log::Logger,
+) -> Response {
     let Ok(approve_req) = serde_json::from_slice::<ApproveRequest>(&req.body) else {
         return bad_request();
     };
     // 経路と本文の card_id は既存の check_path に従う。
     if let Err(e) = approve_req.check_path(&pelway_contract::ids::CardId::from(path_card)) {
-        return Response::error(e.http_status(), &e);
+        return Response::error(e.http_status(), &e, approve_error_code(&e));
     }
 
     // 予約から模擬送信・完了までをロックを持ったまま行い、割り込みを許さない。
     match ledger.lock() {
-        Ok(mut ledger) => match ledger.approve(approve_req) {
-            Ok(outcome) => Response::json(200, &outcome),
-            Err(e) => Response::error(e.http_status(), &e),
-        },
+        Ok(mut ledger) => {
+            // 冪等リプレイ（再送）では send_log が増えない。この要求で新しい
+            // 疑似送信が行われたときだけ承認・模擬送信の出来事を出す。
+            let sends_before = ledger.send_log().len();
+            match ledger.approve(approve_req) {
+                Ok(outcome) => {
+                    if ledger.send_log().len() > sends_before {
+                        let card_pid = logger.id(outcome.card_id.as_str());
+                        let send_pid = logger.id(outcome.simulated_send_id.as_str());
+                        logger.emit(log::Event::Approved {
+                            card: card_pid.clone(),
+                        });
+                        logger.emit(log::Event::SimulatedSend {
+                            card: card_pid,
+                            send: send_pid,
+                        });
+                    }
+                    Response::json(200, &outcome)
+                }
+                Err(e) => Response::error(e.http_status(), &e, approve_error_code(&e)),
+            }
+        }
         Err(_) => internal_error(),
     }
 }
