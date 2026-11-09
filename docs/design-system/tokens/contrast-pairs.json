@@ -1,0 +1,1201 @@
+[
+  {
+    "fg": "#141416",
+    "bg": "#F8F8F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#E6E5E0",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#EEEEE9",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#5A5852",
+    "bg": "#F8F8F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#5A5852",
+    "bg": "#EEEEE9",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#66635B",
+    "bg": "#F8F8F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#66635B",
+    "bg": "#EEEEE9",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#66635B",
+    "bg": "#E6E5E0",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#66635B",
+    "bg": "#E3E5FF",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#66635B",
+    "bg": "#E7E5E0",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#66635B",
+    "bg": "#EEECE7",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#F8F8F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#EEEEE9",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#E3E5FF",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#2B36FF",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#F8F8F4",
+    "bg": "#141416",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#141416",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#F8F8F4",
+    "bg": "#3A3935",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#F8F8F4",
+    "bg": "#111214",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#B9B8B1",
+    "bg": "#111214",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#D8D7D0",
+    "bg": "#111214",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#C3C8FF",
+    "bg": "#111214",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#E6E5DF",
+    "bg": "#141416",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#B9B8B1",
+    "bg": "#141416",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#D8D7D0",
+    "bg": "#141416",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#C3C8FF",
+    "bg": "#141416",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#F8F7F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#F8F8F4",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "light"
+  },
+  {
+    "fg": "#6B6A64",
+    "bg": "#111214",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "light"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#EEEEE9",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "light"
+  },
+  {
+    "fg": "#B42318",
+    "bg": "#FBE4E0",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#B42318",
+    "bg": "#F8F8F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#8A5A00",
+    "bg": "#F7ECD6",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#8A5A00",
+    "bg": "#F8F8F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#E3E5FF",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#1B5E3B",
+    "bg": "#D8EDE2",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#1B5E3B",
+    "bg": "#F8F8F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#EEECE7",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#F8F8F4",
+    "bg": "#2A2B2F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#F8F8F4",
+    "bg": "#000000",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#2A2B2F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#000000",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#EEECE7",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "light"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#F8F8F4",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "light"
+  },
+  {
+    "fg": "#7A7871",
+    "bg": "#F8F8F4",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "light"
+  },
+  {
+    "fg": "#7A7871",
+    "bg": "#EEEEE9",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "light"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#2530E6",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#1F29CC",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light"
+  },
+  {
+    "fg": "#EEEEE9",
+    "bg": "#F8F8F4",
+    "min": 3,
+    "kind": "decorative",
+    "theme": "light",
+    "$description": "装飾・1.4.11対象外（well／tile：入力欄やくぼみ面の地。操作の唯一の手がかりでないため）"
+  },
+  {
+    "fg": "#D9D9D2",
+    "bg": "#F8F8F4",
+    "min": 3,
+    "kind": "decorative",
+    "theme": "light",
+    "$description": "装飾・1.4.11対象外（track／tile：進捗の未完了部分。数値テキストを併記する面。操作の唯一の手がかりでないため）"
+  },
+  {
+    "fg": "#F8F8F4",
+    "bg": "#E6E5E0",
+    "min": 3,
+    "kind": "decorative",
+    "theme": "light",
+    "$description": "装飾・1.4.11対象外（tile／bg：タイルと背景の境。影で補う面。操作の唯一の手がかりでないため）"
+  },
+  {
+    "fg": "#EDEBE6",
+    "bg": "#1C1C1F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#EDEBE6",
+    "bg": "#121214",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#EDEBE6",
+    "bg": "#26262A",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#A3A098",
+    "bg": "#1C1C1F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#A3A098",
+    "bg": "#26262A",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#A3A098",
+    "bg": "#121214",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#A3A098",
+    "bg": "#23285C",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#8F96FF",
+    "bg": "#1C1C1F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#8F96FF",
+    "bg": "#26262A",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#8F96FF",
+    "bg": "#23285C",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#EDEBE6",
+    "bg": "#23285C",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#2B36FF",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#121214",
+    "bg": "#C9C7C0",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#F8F7F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#66635B",
+    "bg": "#F8F7F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#F8F7F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#EEECE7",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#141416",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#121214",
+    "bg": "#EDEBE6",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#8F96FF",
+    "bg": "#2A2C4A",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#FF8A7A",
+    "bg": "#3D1E1B",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#FF8A7A",
+    "bg": "#1C1C1F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#E0B65A",
+    "bg": "#3A2E14",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#E0B65A",
+    "bg": "#1C1C1F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#8FDBA0",
+    "bg": "#1A2A1A",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#8FDBA0",
+    "bg": "#1C1C1F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#3F4AFF",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#333EFF",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark"
+  },
+  {
+    "fg": "#EDEBE6",
+    "bg": "#26262A",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "dark"
+  },
+  {
+    "fg": "#EDEBE6",
+    "bg": "#1C1C1F",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "dark"
+  },
+  {
+    "fg": "#75736D",
+    "bg": "#1C1C1F",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "dark"
+  },
+  {
+    "fg": "#75736D",
+    "bg": "#26262A",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "dark"
+  },
+  {
+    "fg": "#8F96FF",
+    "bg": "#1C1C1F",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "dark"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#1C1C1F",
+    "min": 3,
+    "kind": "known-exception",
+    "theme": "dark",
+    "$description": "標準ダークは群青塗り維持。ハイコントラストで解消（オーナー決定）"
+  },
+  {
+    "fg": "#2E2E33",
+    "bg": "#1C1C1F",
+    "min": 3,
+    "kind": "decorative",
+    "theme": "dark",
+    "$description": "装飾・1.4.11対象外（line／tile：ダークのタイル枠。面の区切りの線。操作の唯一の手がかりでないため）"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#F8F8F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#E6E5E0",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#EEEEE9",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#5A5852",
+    "bg": "#F8F8F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#5A5852",
+    "bg": "#EEEEE9",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#66635B",
+    "bg": "#F8F8F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#66635B",
+    "bg": "#EEEEE9",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#66635B",
+    "bg": "#E6E5E0",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#66635B",
+    "bg": "#E3E5FF",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#66635B",
+    "bg": "#E7E5E0",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#66635B",
+    "bg": "#EEECE7",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#F8F8F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#EEEEE9",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#E3E5FF",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#2B36FF",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#F8F8F4",
+    "bg": "#141416",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#141416",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#F8F8F4",
+    "bg": "#3A3935",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#F8F8F4",
+    "bg": "#111214",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#B9B8B1",
+    "bg": "#111214",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#D8D7D0",
+    "bg": "#111214",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#C3C8FF",
+    "bg": "#111214",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#E6E5DF",
+    "bg": "#141416",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#B9B8B1",
+    "bg": "#141416",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#D8D7D0",
+    "bg": "#141416",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#C3C8FF",
+    "bg": "#141416",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#F8F7F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#F8F8F4",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#6B6A64",
+    "bg": "#111214",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#EEEEE9",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#B42318",
+    "bg": "#FBE4E0",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#B42318",
+    "bg": "#F8F8F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#8A5A00",
+    "bg": "#F7ECD6",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#8A5A00",
+    "bg": "#F8F8F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#E3E5FF",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#1B5E3B",
+    "bg": "#D8EDE2",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#1B5E3B",
+    "bg": "#F8F8F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#EEECE7",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#F8F8F4",
+    "bg": "#2A2B2F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#F8F8F4",
+    "bg": "#000000",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#2A2B2F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#000000",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#EEECE7",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#F8F8F4",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#7A7871",
+    "bg": "#F8F8F4",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#7A7871",
+    "bg": "#EEEEE9",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#2530E6",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#1F29CC",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "light-high-contrast"
+  },
+  {
+    "fg": "#EEEEE9",
+    "bg": "#F8F8F4",
+    "min": 3,
+    "kind": "decorative",
+    "theme": "light-high-contrast",
+    "$description": "装飾・1.4.11対象外（well／tile：入力欄やくぼみ面の地。操作の唯一の手がかりでないため）"
+  },
+  {
+    "fg": "#D9D9D2",
+    "bg": "#F8F8F4",
+    "min": 3,
+    "kind": "decorative",
+    "theme": "light-high-contrast",
+    "$description": "装飾・1.4.11対象外（track／tile：進捗の未完了部分。数値テキストを併記する面。操作の唯一の手がかりでないため）"
+  },
+  {
+    "fg": "#F8F8F4",
+    "bg": "#E6E5E0",
+    "min": 3,
+    "kind": "decorative",
+    "theme": "light-high-contrast",
+    "$description": "装飾・1.4.11対象外（tile／bg：タイルと背景の境。影で補う面。操作の唯一の手がかりでないため）"
+  },
+  {
+    "fg": "#EDEBE6",
+    "bg": "#1C1C1F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#EDEBE6",
+    "bg": "#121214",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#EDEBE6",
+    "bg": "#26262A",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#A3A098",
+    "bg": "#1C1C1F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#A3A098",
+    "bg": "#26262A",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#A3A098",
+    "bg": "#121214",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#A3A098",
+    "bg": "#2A2C4A",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#8F96FF",
+    "bg": "#1C1C1F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#8F96FF",
+    "bg": "#26262A",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#8F96FF",
+    "bg": "#2A2C4A",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#EDEBE6",
+    "bg": "#2A2C4A",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#121214",
+    "bg": "#8F96FF",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#121214",
+    "bg": "#C9C7C0",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#F8F7F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#66635B",
+    "bg": "#F8F7F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#F8F7F4",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#141416",
+    "bg": "#EEECE7",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#FFFFFF",
+    "bg": "#141416",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#121214",
+    "bg": "#EDEBE6",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#FF8A7A",
+    "bg": "#3D1E1B",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#FF8A7A",
+    "bg": "#1C1C1F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#E0B65A",
+    "bg": "#3A2E14",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#E0B65A",
+    "bg": "#1C1C1F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#8FDBA0",
+    "bg": "#1A2A1A",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#8FDBA0",
+    "bg": "#1C1C1F",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#121214",
+    "bg": "#A5ABFF",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#121214",
+    "bg": "#7D85F2",
+    "min": 4.5,
+    "kind": "text",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#EDEBE6",
+    "bg": "#26262A",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#EDEBE6",
+    "bg": "#1C1C1F",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#75736D",
+    "bg": "#1C1C1F",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#75736D",
+    "bg": "#26262A",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#8F96FF",
+    "bg": "#1C1C1F",
+    "min": 3,
+    "kind": "nontext",
+    "theme": "dark-high-contrast"
+  },
+  {
+    "fg": "#2E2E33",
+    "bg": "#1C1C1F",
+    "min": 3,
+    "kind": "decorative",
+    "theme": "dark-high-contrast",
+    "$description": "装飾・1.4.11対象外（line／tile：ダークのタイル枠。面の区切りの線。操作の唯一の手がかりでないため）"
+  }
+]
