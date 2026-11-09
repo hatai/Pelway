@@ -241,3 +241,63 @@
   - 指摘4の担保は読み取り可否の事前確認であり、検索中の races（確認と検索の間に権限が変わる場合）は
     対象外
   - 行コメントの除去は // 形式のみ（# 形式や /* */ ブロックコメントは対象外）
+
+### 2026-11-09 第6枠（修正依頼3: canary 走査0件の未検証失敗化。slot6）
+- start: 2026-11-09 19:46 JST
+- stop:  2026-11-09 20:24 JST（目安）
+- glm: long（T3 Code / OpenCode・zai-coding-plan/glm-5.3。thread ID は記録時点で取得できず未記入）
+- worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-platform-slot6` / branch: `demo-t3/platform-slot6`
+  （第5枠までの `demo-t3-platform` から複製された slot 6 用の worktree。開始 HEAD a5cc3f6・クリーンを確認）
+- 使用skill: tdd・receiving-code-review（~/.agents/skills の Matt Pocock 版）
+- 内容（コミット 2d3f0b8（修正）・この作業ログのコミット（記録））:
+  - 指示: 開発リード作成の指示文（19:46 頃に届いた「canary 0件を未検証失敗にする／作業ログへ例外を追記」）。
+    ハンドオフが予告していた「Codex方式2のレビュー本文（sha256 付き）」は本枠には届いておらず、
+    指摘内容を開発リードが指示文に整理した形。レビュー本文の sha256 は記録できない（下の未決に記載）。
+  - canary.sh: 走査対象 0 件のとき "canary: scanned 0 file(s), 0 hit(s)" と
+    "no artifacts to scan (...)" を出して exit 1（未検証の失敗）。受入（ACCEPTANCE）専用だった分岐は
+    廃止し、受入・通常で挙動は同じ。"PASS with note: nothing was scanned" の合格表現は出さない。
+    対象 1 件以上のときは従来どおり scanned N file(s), H hit(s) を出し、目印なし exit 0 / あり exit 1。
+    exit 2（リスト欠落・走査失敗）の意味は不変。
+  - run.sh: コードは不変（canary の exit 1 は既存の段階失敗の経路で全体 exit 1 になる）。
+    ヘッダコメントの DEMO_CHECK_ACCEPTANCE 説明を新しい既定に合わせて更新。
+    終了コード: canary 未検証（0 件）は段階失敗扱いで run.sh 全体は exit 1（既存体系と同じ。
+    検査異常の exit 2 も従来どおり段階失敗として run.sh は exit 1）。
+  - selftest.sh: 115 → 114 件。
+    - clean tree の合格ループから canary を外し、「0 件は exit 1 + scanned 0 + no artifacts +
+      合格表現なし」を確認するケースに書き換え。
+    - canary の ACCEPTANCE 専用ケース（0 件は exit 1）は通常と同じになったため削除（二重を避ける）。
+    - clean tree の full run は canary だけ失敗（failed: canary）して exit 1 になるよう書き換え、
+      canary に走査対象があるとき full run が exit 0 になるケースを追加。
+    - symlink をたどらない確認（logs/link.log）は、0 件が失敗になる仕様になったため
+      実ファイル（クリーン）を 1 つ置いて「symlink の中身を読まない（目印を出さず exit 0）」だけを確認する形に変更。
+  - TDD: selftest を新しい期待に書き換えてから修正前に RED を確認
+    （112 passed, 2 failed: 「canary 0 件は exit 1」canary.sh が exit 0、"clean tree の full run が
+    exit 0" run.sh が exit 0。ほかの新規ケースは現行でも緑）。修正後 114 件すべて緑。
+- 規則例外の記録（開発リードの指示による。指示文 19:46 頃、例外は 19:19〜19:26 JST）:
+  - worktree 外の読み取り 2 件と兄弟 worktree の ls（自動許可 19:23:47〜48 JST）:
+    `sha256sum /tmp/opencode/handoff-demo-check-slot6.md`、`/tmp/opencode/*` の読み取り、
+    兄弟 worktree `demo-t3-platform/target` の ls。19:19:53〜19:23:47 の答え待ちのあと、
+    auto モードで約 4 分後に自動許可されたもの。
+  - `/tmp/opencode` への書き込み 2 件（規則から外れた 3 件目として扱う）:
+    19:25:43 JST `slot6-selftest.log`、19:26:10 JST `slot6-run.log`。書いた者はスレッド出力からは
+    未確定のため、安全側で GLM の例外として記録する。ファイルは指示どおり消していない（残置）。
+  - 19:19:53〜19:23:47 JST の答え待ちでの停止（auto 許可までの空白）。
+  - 開発基盤担当が T3 内部データ `statev2.sqlite` を読み取りで開いたこと（今後は開かない。
+    リード決定どおり `t3 thread show` とスレッド出力だけで追う）。
+- 検証（コマンドと exit code）:
+  - bash scripts/demo-check/selftest.sh（修正前 RED）→ 1（112 passed, 2 failed）
+  - bash scripts/demo-check/selftest.sh（修正後）→ 0（114 passed, 0 failed）
+  - bash scripts/demo-check/run.sh → 1（full run。loopback PASS・leak-phrases PASS・external-refs PASS、
+    canary は "scanned 0 file(s), 0 hit(s)" + "no artifacts to scan (...)" で FAIL、failed: canary。
+    この worktree には target/ リンクが無く走査対象 0 件のため。対象 0 件が PASS 扱いになっていないことを確認）
+  - DEMO_CHECK_ACCEPTANCE=1 bash scripts/demo-check/run.sh → 1（ACCEPTANCE MODE 表示。
+    failed: loopback canary。loopback は runtime PENDING、canary は 0 件）
+  - bash -n scripts/demo-check/*.sh → 0
+  - shellcheck は未導入のため未実行
+- 未検証・未決:
+  - loopback の runtime 検査は未実装（PENDING のまま）
+  - ハンドオフが予告していた Codex方式2のレビュー本文（sha256 付き）は本枠に届いていない。
+    指示文は開発リード作成のため、レビュー本文の内容・sha256 は未確認のまま
+  - この worktree には target/（mbx キャッシュへのリンク）が存在しない。実リポジトリ相当での
+    canary 走査（対象あり・exit 0）は selftest の合成ツリーで確認（mbx 例外のケース含む）。
+    実 worktree での target ありの run.sh は未確認（ビルド禁止のため成果物を作らない）
