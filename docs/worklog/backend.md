@@ -167,6 +167,34 @@
 - 未検証・未決:
   - 検査順序の変更（採否待ち）。変更する場合は doc（`# Errors`）とテストも合わせて直す。
 
+### 2026-11-09 第7枠（should-fix 指摘の実装・GLM 枠）
+- start: 2026-11-09 16:22 JST
+- stop:  2026-11-09 16:26 JST
+- glm: long
+- 判断の根拠:
+  - 第6枠の時点では採否待ちとしたが、その後 `0267988`（第5枠への追記、リード決定 16:11）を確認した。
+    「コメント保存は `AwaitingSendApproval` 以外のすべての状態で 409 `not_awaiting_approval`
+    として断る。`SentAwaitingReply` も含む。」と既に決定済みで、本文の内容に条件は付いていない。
+    should-fix 指摘はこの決定への準拠が不完全なだけと解釈し、実装した。解釈が違えば差し戻す。
+- 内容:
+  - `save_comment` の検査順序を「本文（422）→ カード存在（404）→ 状態（409）」から
+    「カード存在（404）→ 状態（409）→ 本文（422）」に変更。`begin_approve` と同じく
+    カードの存在が先。承認待ちのカードでは挙動不变（本文検証のみに到達）。
+  - `# Errors` の doc を新しい順序とリード決定 16:11 の根拠に合わせて更新。
+- テスト（tdd: red → green）:
+  - red: `invalid_body_on_non_awaiting_card_returns_409_not_422` を追加。Sending・
+    SentAwaitingReply × 空白本文・4001 コードポイント本文の 4 ケースすべてで
+    `NotAwaitingApproval`（409）を期待。変更前は `EmptyBody`/`TooLong`（422）が先に返り fail。
+  - green: 順序変更後に全テスト通過。既存テスト（承認待ちカードの空白・超過の 422 拒否を含む）
+    はすべて挙動不变。
+- 検証（コマンドと exit code、オフライン）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 0
+  - `cargo test --workspace --locked --offline` 0（pelway-contract 単体 34・serde_contract 10、
+    ほか前枠と同じく計 65 件 passed / 0 failed / 0 ignored）
+- 未検証・未決:
+  - 差分の Codex 再々レビュー・QA は未実施。
+
 ### 2026-11-09 第5枠の追記（リード決定 16:11、送信記録、仕様確認）
 - 記録者: バックエンド・AI連携エンジニア（docs のみの追記。コードは変更しない）
 - HEAD before: 5600c99
