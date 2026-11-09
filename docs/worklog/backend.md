@@ -328,3 +328,45 @@
 - 未検証・未決:
   - 差分の Codex 再レビュー・QA は未実施。
   - U01〜U07 は未決のまま（Sending からの回復は実装していない）。
+
+### 2026-11-09 第9枠（QA 18:21 の5点・GLM 枠）
+- start: 2026-11-09 18:47 JST
+- stop:  2026-11-09 18:55 JST
+- glm: long
+- skills: Matt Pocock Agent Skills の `tdd`（QA 5点のテストを先に書いて red を記録し、実装して green）。
+- red の証拠: `cargo test --offline -p pelway-http --test http` → exit 101、8 passed / 5 failed。
+  - `serve_refuses_non_loopback_addresses`: `::1` が受理されていた（QA 1）。
+  - `oversize_content_length_answers_413_before_reading_body`: 本文を送らないまま
+    `Content-Length: 100000` の要求に応答が無く、クライアントの読み取り（2秒）がタイムアウト（QA 2）。
+  - `content_length_must_be_single_decimal_and_te_rejected`: `+` 付き Content-Length が 200 で
+    受理されていた（QA 3。負・非数字・重複・Transfer-Encoding は依頼 2 の実装で既に 400）。
+  - `stalled_connection_times_out_and_does_not_block_others`: 放置した接続が切断されず
+    クライアントの読み取りがタイムアウト（QA 4。他の要求の処理は接続ごとのスレッドで
+    依頼 2 の時点で妨げられていなかった）。
+  - `header_size_and_line_limits_return_431`: 120 行のヘッダーが受理されて 200（QA 2 の行数上限）。
+- 内容（QA 5点の対処）:
+  1. 待ち受けを 127.0.0.1（IPv4 ループバック 127.0.0.0/8）だけにした。`::1` を含む IPv6 は
+     `ServeError::NotLoopback` で拒否。**判断**: QA 文の「127.0.0.1 だけ」に忠実に IPv4 のみとし、
+     依頼 2 で認めていた `::1` の受理を取りやめた（迷った点。外部に出ない意味では ::1 も安全だが、
+     文言に忠実な方を採った）。
+  2. `Content-Length` が上限（64 KiB）を超えたら**本文を読み込む前に** 413 を返す。残余の読み捨ては
+     応答を書いた後（1 MiB まで。それ以上は読み捨てない）。ヘッダー上限は大きさ 16 KiB
+     （`MAX_HEAD_BYTES`）と行数 100（`MAX_HEADER_LINES`）。**超えたら 431 にした**
+     （431 か 400 の選択: ヘッダー由来の失敗を呼応答で区別できる 431 を採用。サイズ超過も
+     依頼 2 実装の 400 から 431 に統一した）。
+  3. `Content-Length` は ASCII 数字のみ受理（空・`-5`・`+26`・`abc` は 400。`+26` は従来
+     `usize::parse` が受理していたが拒否するようにした）。重複は 400。`Transfer-Encoding` 付きは 400。
+  4. 読み取りタイムアウト `READ_TIMEOUT` = 3 秒（`set_read_timeout`）。超えた接続には 408
+     `request_timeout` を返して切断（**408 にした判断**: 読み取り超過を示す標準の状態コードのため）。
+     放置接続があっても他の要求は処理される（接続ごとのスレッド）ことをテストで確認。
+  5. `Cargo.lock` は今回変更なし。`git diff 8d37fe6 -- Cargo.lock` は依頼 2 で加えた
+     `pelway-http` パッケージの追記 1 か所のみ（依存は `pelway-contract`・`serde`・`serde_json`
+     の既存 3 つで、新しい外部クレートは増えていない）。ネットワーク接続なし（`--offline`）。
+- green の証拠: `cargo test --offline -p pelway-http --test http` → exit 0、13 passed / 0 failed。
+- 検証（コマンドと exit code、オフライン）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 0
+  - `cargo test --workspace --locked --offline` 0（at-rest 8・aead 12・contract 34・serde_contract 10・
+    dev-smoke 1・http 13。計 78 passed / 0 failed / 0 ignored）
+- 未検証・未決:
+  - 差分の Codex 再レビュー・QA は未実施。
