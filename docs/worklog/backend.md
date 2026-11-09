@@ -618,3 +618,131 @@
     新しいテストだけでは実装前の失敗を示せないため。
 - 未検証・未決:
   - 差分の Codex 再レビュー・QA は未実施。U01〜U07 は未決のまま（確定していない）。
+
+### 2026-11-09 第13枠（Codex 再レビュー6 指摘1〜3の修正・GLM 枠）
+- start: 2026-11-09 22:03 JST頃（バックエンド作業依頼 7 の受領後）
+- stop:  2026-11-09 22:18 JST（`date` で確認）
+- glm: long（T3 Code 上で GLM が実装。バックエンド作業依頼 7 のとおり）
+- worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-backend-fix7`、branch `demo-t3/backend-fix7`（base `e37c5a0`）
+- 開始時の確認: cwd はこの worktree（本体フォルダではない）、HEAD `e37c5a0`（指定と一致）、
+  branch `demo-t3/backend-fix7`、`git status --porcelain` 空。
+- 開発リードの決定（2026-11-09 21:48 JST）: Codex 再レビュー6（スレッド c2e75113、所見ファイル
+  review-findings-6.md、sha256 `81e5f3679ef6c48866d6b710ff2183bfa61303dacf8ae879aa43944b9562dfe8`）
+  の指摘1〜3をすべて採用。
+- AGENTS.md の「Prior art first」（GitHub 検索）: 外部ネットワーク接続禁止のため未実施。
+- skills:
+  - Matt Pocock Agent Skills の `tdd` を使用。修正1はテストを先に書いて実装前の失敗
+    （red）を確認してから実装（green）。修正2は「修正前のテストが条件を満たしていない
+    こと」を確認してからテストを本当の条件に置き換えた。修正3はテスト強化のため実装は
+    変更なし（第8枠作業1・第10枠指摘4と同じ扱い）だが、過去実装に対する red を別途記録。
+- 内容（`crates/pelway-http` のみ。依存クレートの追加なし、`Cargo.lock` 変更なし）:
+  - 指摘1（期限の作り方の panic、`src/lib.rs` 236 付近）: `Instant::now() + connection_deadline`
+    を新しい `deadline_at(now, budget)` に置き換え、`checked_add` で作る。あふれる
+    （`None`）ときは **1 年（31,536,000 秒）に丸め**、それでも表せないときは `now`
+    （残り 0 の期限切れとして扱われる）を返す。どの場合も panic しない。
+    **丸めとエラーのどちらにしたか**: 丸め。理由: (a) あふれるほど巨大な期限
+    （`Duration::MAX` など）は「無期限」の意図であり、本番 10 秒より十分長い 1 年は
+    実運用上それと区別がつかない、(b) `Instant` の表現範囲（基準時刻から数百年）には
+    十分収まる、(c) `ServeError` は待ち受けアドレス・ソケットの失敗を表すもので、
+    期限の大きさの解釈で起動を失敗させる（エラーを返す）のは不釣り合いで、テスト
+    注入用の引数に新しいエラー処理を強いるのも過剰なため。
+    `serve_with_connection_deadline` の doc にも丸めの旨を追記。
+    テスト: `duration_max_deadline_does_not_panic_and_serves`（(z)。`Duration::MAX` を
+    渡して起動し、通常の comments 要求に 200 が返ること。接続スレッドで panic すると
+    応答のないまま接続が切れるため、200 が返ること自体が panic していないことの証明）。
+  - 指摘2（テストB、`tests/http.rs` 762-788 付近）: Content-Length が 64 KiB を超える
+    要求で、ヘッダー（16 KiB ちょうど）と **64 KiB を超える本文の全体（100,000 バイト）**
+    を 1 回の `write_all` で送り、431 ではなく 413 が返ることを確かめる形にした。
+    **既存テストは置き換えた**（旧 `oversize_cl_head_16kib_body_start_in_one_write_answers_413`
+    → 新 `oversize_cl_head_16kib_whole_body_in_one_write_answers_413`）。理由: 新しい版は
+    旧版の条件（1 回の write に本文のバイトが混ざる）を含む上位集合であり、同じ場面の
+    弱い版を並べて重複させないため。本文の先頭（2 KiB）だけを 1 回の write に混ぜる
+    場面は既存 (u) `oversize_cl_straddled_head_answers_413_not_431` が別途カバーしている。
+    実装の変更は無し（レビュー5実装が既にこの条件を満たすことを確認）。
+  - 指摘3（テストC の2か所、`tests/http.rs` (v)(w)）: ヘッダー読み取り中の (v)
+    `head_read_wait_is_cut_at_deadline_not_3s` と 413 後の読み捨て中の (w)
+    `drain_read_wait_after_413_is_cut_at_deadline` を、(y) と同じ「期限の直前に
+    読み取り待ちに入る」形にした。期限より前は 300ms 間隔（3 秒未満のため 1 回の
+    読み取りタイムアウトには引っかからない）で少しずつ送り続け、最後の送信が期限の
+    約 0.5 秒前になる時点でやめて読み取り待ちに入り、そのあと何も送らない。
+    (v) は 408 が「全体期限 + 0.5 秒」以内に来ること、(w) は期限 + 0.3 秒の時点で
+    接続が既に切れていること（1 バイト書き→0.1 秒空けて 2 回目の書き込みが失敗。
+    判定方法は第11枠 (w) と同じ）に加え、trickle 中の書き込みが期限前に失敗しない
+    こと（期限前の切断は失敗とみなす下限判定）を確認。本文読み取り中の (y)
+    `body_read_wait_is_cut_at_deadline_not_3s` は依頼どおり残した。
+    実装の変更は無し。
+- テストC の余裕の値と理由（第11枠・第12枠と同じ）:
+  - 上限は「全体期限 + 0.5 秒」（QA の受入条件どおり）。期限の差し替え: (v)(w) とも
+    2.0 秒（テスト時間を短くするため。本番の値 10 秒・3 秒はそのまま、(v) は
+    READ_TIMEOUT=3 秒を assert）。
+  - 下限は「全体期限 − 0.1 秒」。期限前に切れないことの確認で、時計とスレッド
+    スケジューリングのぶれに 0.1 秒だけ許容した。(v) は 408 到着時刻、(w) は
+    trickle 失敗時刻で判定。
+  - trickle の間隔は 300ms。最後の送信が「期限の約 0.5 秒前」になる時点でやめる
+    （while `elapsed + 0.5s < deadline`）。0.5 秒の理由: スケジューリングの遅れで
+    最後の送信が期限をまたいでも書き込みエラー→即 408 読み取りで破綻しない程度の
+    余裕があり、かつ「1 回の読み取りタイムアウトに全体期限そのもの（2.0 秒）を
+    誤って使う実装」なら待ち開始（約 1.5 秒）から 2.0 秒後 = 期限 + 約 1.5 秒に
+    切れるため、+0.5 秒の上限で必ず検出できる距離。
+  - (w) の判定時刻は期限 + 0.3 秒（+0.5 秒の内側）。閉じた後の最初の書き込みに対する
+    RST が戻るのに時間が要るため、1 回目と 2 回目の書き込みの間に 0.1 秒空けた。
+- red-first の証拠（tdd）:
+  - 修正1: テスト (z) を追加して実装前に実行: `cargo test --offline -p pelway-http
+    --test http duration_max` → exit 101、0 passed / 1 failed。接続スレッドで
+    `overflow when adding duration to instant`（std/src/time.rs:429）の panic、
+    クライアントは `ConnectionReset` で応答なし。実装後に同コマンド → exit 0、
+    1 passed。
+  - 修正2: 修正前のテストが条件を満たしていないことの確認: `git show e37c5a0:
+    crates/pelway-http/tests/http.rs`（762-788 行）で、1 回の write に入れているのは
+    本文の先頭 8 KiB（`raw.extend_from_slice(&vec![b'z'; 8 * 1024])`）だけで、
+    64 KiB を超える本文の全体ではなかった。置き換え後 `cargo test --offline
+    -p pelway-http --test http oversize_cl_head` → exit 0、1 passed（実装変更なし）。
+  - 修正3: 実装変更を伴わないテスト強化のため現行実装では red は無し（http スイート
+    全体で 26 passed / 0 failed、3 回再実行して確認）。代わりに第12枠と同じ方法で
+    過去実装に対する red を記録: 実装だけを `git checkout cc86038 -- crates/pelway-http/src/lib.rs`
+    で一時的に差し替え（第11枠の「読み取りごとの残り時間タイムアウト」導入前。
+    コミット済み状態での一時差し替えで履歴には触れず、実行後に
+    `git checkout HEAD -- crates/pelway-http/src/lib.rs` で戻し `git status --porcelain`
+    で空を確認）して `cargo test --offline -p pelway-http --test http read_wait`
+    → exit 101、0 passed / 3 failed:
+    - (v) `head_read_wait_is_cut_at_deadline_not_3s`: 4.64 秒で切断（期限 2.0 秒 +
+      0.5 秒を超過）。旧実装は読み取り待ちに入った時点からの 3 秒固定タイムアウトで
+      切るため、期限の直前に待ちに入る形だと期限 + 約 2.6 秒になる。旧 (v)（開始
+      直後に待ちに入る形）ではこの差を検出できなかった。
+    - (w) `drain_read_wait_after_413_is_cut_at_deadline`: 期限 + 0.3 秒の時点で
+      1・2 回目の書き込みがどちらも成功（接続がまだ開いていた）。旧実装の読み捨ては
+      期限を過ぎても 3 秒固定の読み取り待ちを続けていた。
+    - (y) `body_read_wait_is_cut_at_deadline_not_3s`: 4.38 秒で切断（第12枠の red と
+      同一の挙動）。
+- 検証（コマンドと exit code、オフライン）:
+  - `cargo fmt --all --check`: 初回は 1（テスト (z) の整形の指摘のみ）。`cargo fmt --all`
+    適用後に 0。
+  - `cargo clippy --workspace --all-targets --offline -- -D warnings` 0
+  - `cargo test --workspace --offline` 0（at-rest 単体 8・aead 12・contract 単体 34・
+    serde_contract 10・dev-smoke 1・http 26。計 91 passed / 0 failed / 0 ignored。
+    http スイートはさらに 3 回再実行して 26 passed / 0 failed を確認）
+- 迷った点（安全側で進めたもの）:
+  - 修正1の丸め先を 1 年にした理由は上記のとおり。`FAR_FUTURE` に丸めた結果も
+    表せない（基準時刻から数百年後という実用上あり得ない場合）は `now` を返して
+    即期限切れ（408）にする安全側に倒した。
+  - 修正2で既存テストを消した理由は上記のとおり（置き換え）。弱い版を残す選択も
+    あったが、同じ場面の重複になるため採らなかった。
+  - 修正3の (w) は、読み捨て中の切断をクライアントの読み取りでは観測できないため
+    （413 応答済みでサーバーの書き込み側は shutdown 済み）、書き込み 2 回での判定を
+    第11枠から踏襲した。trickle 中の書き込み失敗を期限前切断の下限判定に使うために
+    失敗時刻を記録する形にした。
+  - cc86038 差し替えによる red の再現は破壊的gitには当たらない（履歴・コミット不変、
+    即時復元、`git status --porcelain` で空を確認）が、第12枠と同じ判断で実施した。
+  - cargo test のフィルタ引数は 1 つだけのため、複数テストを指定しようとして
+    `error: unexpected argument`（exit 1）が 1 回出た。フィルタを `read_wait`
+    （3 件に一致）に変えて再実行し、目的の red を取得した。
+  - worklog への追記で第12枠の見出し行を誤って置き換えてしまった（第11枠と同じ
+    事故）。sed で当該ブロックを削除し、見出し・start 行を復元してから末尾に
+    追記し直した。`git diff` で既存部分（第12枠まで）に差分が無いことを確認済み。
+- コミット: `c8a0f87`（修正1〜3のコードとテスト。pre-commit hook の trailing_whitespace・
+  newlines・cargo_clippy・cargo_fmt・cargo_check はすべて合格）と、この追記の worklog
+  コミット。
+- 逸脱: なし（worktree・ブランチの中だけ。push・fetch なし、外部接続なし、破壊的gitなし、
+  一時ファイルは作成せず）。
+- 未検証・未決:
+  - 差分の Codex 再レビュー・QA は未実施。U01〜U07 は未決のまま（確定していない）。
