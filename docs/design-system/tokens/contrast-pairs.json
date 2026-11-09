@@ -1197,5 +1197,86 @@
     "kind": "decorative",
     "theme": "dark-high-contrast",
     "$description": "装飾・1.4.11対象外（line／tile：ダークのタイル枠。面の区切りの線。操作の唯一の手がかりでないため）"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#1C1C1F",
+    "min": 3,
+    "kind": "known-exception",
+    "theme": "dark",
+    "token": "avatar-ai-bg / tile",
+    "$description": "オーナー決定：標準ダークは群青#2B36FF塗り維持（acc-fill・avatar-ai・primary同色）。dark-high-contrastでは基準達成"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#1C1C1F",
+    "min": 3,
+    "kind": "known-exception",
+    "theme": "dark",
+    "token": "primary-bg / tile",
+    "$description": "オーナー決定：標準ダークは群青#2B36FF塗り維持（acc-fill・avatar-ai・primary同色）。dark-high-contrastでは基準達成"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#121214",
+    "min": 3,
+    "kind": "known-exception",
+    "theme": "dark",
+    "token": "acc-fill / bg",
+    "$description": "オーナー決定：標準ダークは群青#2B36FF塗り維持（acc-fill・avatar-ai・primary同色）。dark-high-contrastでは基準達成"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#26262A",
+    "min": 3,
+    "kind": "known-exception",
+    "theme": "dark",
+    "token": "acc-fill / well",
+    "$description": "オーナー決定：標準ダークは群青#2B36FF塗り維持（acc-fill・avatar-ai・primary同色）。dark-high-contrastでは基準達成"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#3A3A40",
+    "min": 3,
+    "kind": "known-exception",
+    "theme": "dark",
+    "token": "acc-fill / track",
+    "$description": "オーナー決定：標準ダークは群青#2B36FF塗り維持（acc-fill・avatar-ai・primary同色）。dark-high-contrastでは基準達成"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#26262A",
+    "min": 3,
+    "kind": "known-exception",
+    "theme": "dark",
+    "token": "avatar-ai-bg / well",
+    "$description": "オーナー決定：標準ダークは群青#2B36FF塗り維持（acc-fill・avatar-ai・primary同色）。dark-high-contrastでは基準達成"
+  },
+  {
+    "fg": "#2B36FF",
+    "bg": "#26262A",
+    "min": 3,
+    "kind": "known-exception",
+    "theme": "dark",
+    "token": "primary-bg / well",
+    "$description": "オーナー決定：標準ダークは群青#2B36FF塗り維持（acc-fill・avatar-ai・primary同色）。dark-high-contrastでは基準達成"
+  },
+  {
+    "fg": "#3F4AFF",
+    "bg": "#1C1C1F",
+    "min": 3,
+    "kind": "known-exception",
+    "theme": "dark",
+    "token": "acc-fill-hover / tile",
+    "$description": "オーナー決定：標準ダークは群青#2B36FF塗り維持（acc-fill・avatar-ai・primary同色）。dark-high-contrastでは基準達成"
+  },
+  {
+    "fg": "#333EFF",
+    "bg": "#1C1C1F",
+    "min": 3,
+    "kind": "known-exception",
+    "theme": "dark",
+    "token": "acc-fill-pressed / tile",
+    "$description": "オーナー決定：標準ダークは群青#2B36FF塗り維持（acc-fill・avatar-ai・primary同色）。dark-high-contrastでは基準達成"
   }
 ]
