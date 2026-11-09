@@ -1,5 +1,5 @@
-// 4564e88 の写し。統合のときに差し替える
-//! 承認 API 契約の仮写し。原本はブランチ `demo-t3/backend` の commit 4564e88
+// 99ee013 の写し。統合のときに差し替える
+//! 承認 API 契約の仮写し。原本はブランチ `demo-t3/backend` の commit 99ee013
 //! `crates/pelway-contract`（`src/approval.rs`・`src/ids.rs`・`src/task.rs`）。
 //! 統合時にこのファイルを差し替える。
 //!
@@ -283,16 +283,35 @@ impl ApproveError {
 pub enum CommentError {
     CardNotFound,
     EmptyBody,
-    TooLong { max_chars: usize },
+    TooLong {
+        max_chars: usize,
+    },
+    /// 送信承認待ちではない（送信中・送信済み等）。コメント保存は
+    /// `snapshot_hash` を変えるので、予約・送信記録と食い違うのを防ぐために断る。
+    NotAwaitingApproval {
+        state: TaskState,
+    },
 }
 
 impl CommentError {
+    /// ワイヤ上のエラーコード。原本の serde タグ（`snake_case`）と同じ値。
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::CardNotFound => "card_not_found",
+            Self::EmptyBody => "empty_body",
+            Self::TooLong { .. } => "too_long",
+            Self::NotAwaitingApproval { .. } => "not_awaiting_approval",
+        }
+    }
+
     /// HTTP ステータスへの対応。
     #[must_use]
     pub fn http_status(&self) -> u16 {
         match self {
             Self::CardNotFound => 404,
             Self::EmptyBody | Self::TooLong { .. } => 422,
+            Self::NotAwaitingApproval { .. } => 409,
         }
     }
 }

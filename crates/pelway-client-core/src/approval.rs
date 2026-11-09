@@ -17,6 +17,8 @@
 //! コメント欄はコメント API だけを呼び、承認は承認ボタンからだけ呼ぶ。
 //! コメントを保存したら応答の `snapshot_hash` に差し替える。`card_version` は
 //! 表示中の値をそのまま承認に送る（コメント保存では版は変わらない）。
+//! コメント保存が 409 `not_awaiting_approval` や 404 `card_not_found` を返したら、
+//! 自動で再送せず読み直しを求める状態へ移し、`snapshot_hash` は差し替えない。
 
 use crate::contract::{
     ApproveError, ApproveOutcome, ApproveRequest, COMMENT_MAX_CHARS, CardId, CommentError,
@@ -301,8 +303,8 @@ impl<K: KeySource, C: Clock> ApprovalMachine<K, C> {
             Err(CommentError::TooLong { .. }) => CommentAttempt::Reject(Notice::CommentTooLong {
                 max_chars: COMMENT_MAX_CHARS,
             }),
-            Err(CommentError::CardNotFound) => {
-                unreachable!("クライアント側の検査では CardNotFound は出ない")
+            Err(CommentError::CardNotFound) | Err(CommentError::NotAwaitingApproval { .. }) => {
+                unreachable!("クライアント側の検査では CardNotFound・NotAwaitingApproval は出ない")
             }
         }
     }
@@ -313,6 +315,20 @@ impl<K: KeySource, C: Clock> ApprovalMachine<K, C> {
     pub fn on_comment_saved(&mut self, saved: CommentSaved) {
         if saved.card_id == self.card.card_id {
             self.card.snapshot_hash = saved.snapshot_hash;
+        }
+    }
+
+    /// コメント API のエラー応答を戻す。
+    /// 409 `not_awaiting_approval`（と 404 `card_not_found`）は自動で再送せず、
+    /// カードの読み直しを求める状態へ移す。`snapshot_hash` は差し替えない。
+    /// クライアント側で先に弾いているはずの `empty_body`・`too_long` は状態を変えない。
+    pub fn on_comment_error(&mut self, err: CommentError) -> Option<Effect> {
+        match err {
+            CommentError::NotAwaitingApproval { state } => {
+                self.enter_needs_reload(ReloadReason::NotAwaitingApproval { state })
+            }
+            CommentError::CardNotFound => self.enter_needs_reload(ReloadReason::CardNotFound),
+            CommentError::EmptyBody | CommentError::TooLong { .. } => None,
         }
     }
 

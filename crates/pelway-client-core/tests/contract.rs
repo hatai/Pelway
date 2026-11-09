@@ -133,6 +133,36 @@ fn approve_error_http_status_matches_contract() {
     assert_eq!(ApproveError::CardNotFound.http_status(), 404);
 }
 
+// --- コメント保存 API のエラー（99ee013 で追加された 409 を含む） ---
+
+#[test]
+fn comment_error_codes_match_wire_tags() {
+    assert_eq!(
+        CommentError::NotAwaitingApproval {
+            state: TaskState::Sending
+        }
+        .code(),
+        "not_awaiting_approval"
+    );
+    assert_eq!(CommentError::EmptyBody.code(), "empty_body");
+    assert_eq!(CommentError::TooLong { max_chars: 4000 }.code(), "too_long");
+    assert_eq!(CommentError::CardNotFound.code(), "card_not_found");
+}
+
+#[test]
+fn comment_error_http_status_matches_contract() {
+    assert_eq!(
+        CommentError::NotAwaitingApproval {
+            state: TaskState::Sending
+        }
+        .http_status(),
+        409
+    );
+    assert_eq!(CommentError::CardNotFound.http_status(), 404);
+    assert_eq!(CommentError::EmptyBody.http_status(), 422);
+    assert_eq!(CommentError::TooLong { max_chars: 4000 }.http_status(), 422);
+}
+
 // --- ID 型（原本 ids.rs の写し） ---
 
 #[test]

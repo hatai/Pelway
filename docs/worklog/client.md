@@ -78,3 +78,24 @@
     - コメント API のエラー応答（`CommentError::CardNotFound` 等）の表示は呼び出し側（UI）の仕事とし、状態機械には成功応答（`on_comment_saved`）だけを用意した。
   - Slint UI（第2段階以降）、実時間 `Clock`・UUID `KeySource` の実装、HTTP 通信層は未実装（この枠の対象外）。
   - U01〜U07 の未決事項はこの枠では決めていない（`ui-pro-draft-v0.1/tokens/pelway.tokens.json` は不使用）。
+
+### 2026-11-09 第2枠（写し元を 99ee013 へ差し替え）
+- start: 2026-11-09 16:22 JST
+- stop:  2026-11-09 16:31 JST
+- glm: long（T3 Code スレッドで OpenCode + zai-coding-plan/glm-5.3 が実装）
+- 使った skills: tdd / domain-modeling / verification-before-completion（第1枠と同じ使い方）
+- 内容:
+  - **写し元を `4564e88` から `99ee013`（ブランチ `demo-t3/backend`）に替えた。理由: 99ee013 でコメント保存のエラー `CommentError` に `not_awaiting_approval`（409、`state` 付き）が入ったため。** `git show 99ee013:...` で読み直しただけで、checkout・merge はしていない。
+  - `src/contract.rs`: 先頭行を `// 99ee013 の写し。統合のときに差し替える` に更新。`CommentError` に `NotAwaitingApproval { state: TaskState }` を追加（原本のドキュメントコメントも写し）、`http_status()` に 409 を反映。serde のタグ名は `ApproveError::code()` と同じ手法で `CommentError::code()` も新設し `not_awaiting_approval` / `empty_body` / `too_long` / `card_not_found` を返す。`COMMENT_MAX_CHARS = 4000` と `comment_len` の数え方（コードポイント数）は不変。
+  - `src/approval.rs`: `on_comment_error(err)` を追加。409 `not_awaiting_approval` は自動で再送せず `NeedsReload` へ移し、`snapshot_hash` は差し替えない。404 `card_not_found` も同じ扱い。クライアント側で先に弾く `empty_body`・`too_long` は状態を変えない。`request_save_comment` の事前検査に新しいバリアントは影響しない（`validate_comment` は空白・長すぎだけを返す）。
+  - テスト追加（赤→緑: 追加テストのコンパイルエラー E0599/E0433/E0004 を確認してから実装）:
+    - `tests/contract.rs`（+2）: `CommentError` のコード名と HTTP ステータス（`not_awaiting_approval` は 409）。
+    - `tests/approval.rs`（+2）: コメント保存が 409 `not_awaiting_approval` を返したら読み直しを求める状態へ（`snapshot_hash` 不変・自動再送なし・reload で承認待ちに戻る）、404 `card_not_found` も読み直し。
+- 検証（コマンドと exit code）:
+  - `cargo test -p pelway-client-core` 0（47 件: approval 20・contract 14・input 13、失敗 0）
+  - `cargo clippy -p pelway-client-core --all-targets -- -D warnings` 0
+  - `cargo fmt --all --check` 0
+  - `cargo test --workspace --locked` 0
+- 未検証・未決:
+  - 第1枠の未決（メッセージ欄の修飾キー付き Enter 等）は変わらず未決。
+  - コメント保存の 409 で読み直したあと、未保存のコメント本文を入力欄に残すか破棄するかは UI 層の判断（この状態機械の対象外）。

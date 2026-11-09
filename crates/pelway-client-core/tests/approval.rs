@@ -6,8 +6,8 @@ use pelway_client_core::approval::{
     ReloadReason,
 };
 use pelway_client_core::contract::{
-    ApproveError, ApproveOutcome, ApproveRequest, CardId, CommentId, CommentSaved, IdempotencyKey,
-    SimulatedSendId, TaskState,
+    ApproveError, ApproveOutcome, ApproveRequest, CardId, CommentError, CommentId, CommentSaved,
+    IdempotencyKey, SimulatedSendId, TaskState,
 };
 
 // ---- テスト用のキー源と時計 ----
@@ -405,6 +405,62 @@ fn comment_cannot_be_saved_while_approving() {
         m.request_save_comment("了解".to_string()),
         CommentAttempt::Reject(Notice::CommentLocked)
     );
+}
+
+#[test]
+fn comment_not_awaiting_approval_requires_reload_without_resaving_or_snapshot_swap() {
+    let clock = FakeClock::new();
+    let mut m = machine_with(&clock);
+
+    // コメント保存を要求 → API を呼ぶ。
+    assert!(matches!(
+        m.request_save_comment("了解".to_string()),
+        CommentAttempt::Send(_)
+    ));
+
+    // 応答が 409 not_awaiting_approval → 読み直しを求める。snapshot_hash は差し替えない。
+    assert_eq!(
+        m.on_comment_error(CommentError::NotAwaitingApproval {
+            state: TaskState::SentAwaitingReply
+        }),
+        Some(Effect::Notice(Notice::NeedsReload {
+            reason: ReloadReason::NotAwaitingApproval {
+                state: TaskState::SentAwaitingReply
+            }
+        }))
+    );
+    assert_eq!(m.card().snapshot_hash, "snap-a");
+    assert_eq!(m.card().card_version, 3);
+
+    // 自動で再送しない（コメント欄は読み取り専用）。
+    assert!(!m.comment_editable());
+    assert_eq!(
+        m.request_save_comment("もう一度".to_string()),
+        CommentAttempt::Reject(Notice::CommentLocked)
+    );
+    assert_eq!(m.press_approve(), None);
+
+    // 読み直しで承認待ちに戻る。
+    m.reload(card_v3());
+    assert!(m.comment_editable());
+    assert!(m.approve_button_enabled());
+}
+
+#[test]
+fn comment_card_not_found_requires_reload() {
+    let clock = FakeClock::new();
+    let mut m = machine_with(&clock);
+    assert!(matches!(
+        m.request_save_comment("了解".to_string()),
+        CommentAttempt::Send(_)
+    ));
+    assert_eq!(
+        m.on_comment_error(CommentError::CardNotFound),
+        Some(Effect::Notice(Notice::NeedsReload {
+            reason: ReloadReason::CardNotFound
+        }))
+    );
+    assert_eq!(m.card().snapshot_hash, "snap-a");
 }
 
 #[test]
