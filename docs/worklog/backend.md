@@ -746,3 +746,155 @@
   一時ファイルは作成せず）。
 - 未検証・未決:
   - 差分の Codex 再レビュー・QA は未実施。U01〜U07 は未決のまま（確定していない）。
+
+### 2026-11-09 第14枠（バックエンド作業依頼 GDPR-07・本文を残さないログ・GLM 枠）
+- start: 2026-11-09 23:01 JST頃（バックエンド作業依頼 GDPR-07 の受領後。期限 2026-11-13 21:00 JST）
+- stop:  2026-11-09 23:44 JST（`date` で確認。コミット・検証はこの後）
+- glm: long（T3 Code 上で GLM が実装。バックエンド作業依頼 GDPR-07 のとおり）
+- worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-backend-gdpr-07`、branch
+  `demo-t3/backend-gdpr-07`（base `88cf51b` = fix7 受入後）
+- 開始時の確認: cwd はこの worktree（本体フォルダではない）、HEAD `88cf51b`（指定と一致）、
+  branch `demo-t3/backend-gdpr-07`、`git status --porcelain` 空。
+- AGENTS.md の「Prior art first」（GitHub 検索）: 外部ネットワーク接続禁止のため未実施
+  （第13枠と同じ）。
+- skills:
+  - Matt Pocock Agent Skills の `tdd` を使用。結合テスト（no_body_logs）を先に書き、
+    「出力点が未接続の足場」でコンパイルは通るがログが出ない red を取ってから接続を実装
+    （green）。契約側（pseudonymize）の単体テストは新関数のため red はコンパイルエラー
+    のみ（依頼が red の証拠を求めたのは結合テスト (a)(b)(c) のため、それらは意味のある
+    失敗まで持っていった）。
+  - 同 `verification-before-completion` を最終検証の前に使用。各受入条件に対応する
+    コマンドと exit code を実行・記録してから完了を主張した。
+- 内容（`crates/pelway-contract` と `crates/pelway-http` のみ。依存追加なし、
+  `Cargo.lock` 変更なし、新クレートなし。std + 既存の sha2/serde/serde_json だけ）:
+  - **ID の仮名化**（`crates/pelway-contract/src/pseudonym.rs` 新）:
+    `pseudonymize(salt, id)` は SHA-256 で `"pid:" + 小文字16進64桁` を返す。入力は
+    snapshot.rs と同じ 8 バイト BE 長さ前置き（salt/ID の境界に曖昧さなし、ドメ分離
+    `pelway-contract/pseudonym/v1`）。salt は引数で受け取る（環境変数から読まない。
+    依頼の約束）。単体テスト 4 件（書式・決定性・salt/ID 変化・境界）。
+  - **構造化ログ**（`crates/pelway-http/src/log.rs` 新）:
+    - 出来事は列挙型 `Event`: `request_received`（経路・メソッド・経路の card_id の
+      仮名）、`responded`（経路・状態コード・応答本文バイト数・所要ミリ秒）、
+      `comment_saved`（カード・書き手の仮名、書き手種別）、`approved`（カードの仮名）、
+      `simulated_send`（カード・疑似送信 ID の仮名）、`rejected`（経路・状態コード・
+      結果コード）、`internal_error`（経路）。項目は仮名 ID・種別・数値・結果コード
+      **だけ**で、本文・コメント・宛先・エラー文言・要求の中身・`client_msg_id` を
+      入れる欄は持たせない（許可リスト方式）。`Debug` で要求や本文の型を書き出さない
+      （`Request` 型は `Debug` を実装しないまま）。
+    - 結果コード `Code` は契約エラー（ApproveError/CommentError）と HTTP 層エラーを
+      平坦化した列挙型（文言は持たない）。`Response` に `code` を載せ、全エラー生成点
+      で設定（4xx/5xx で `rejected`/`internal_error` が出る）。
+    - 出力は JSON Lines（1 行 1 JSON、`ts_ms` はサーバーが記録時に付ける UNIX エポック
+      ミリ秒）。出力先は `LogSink` で差し替え: テスト用 `MemorySink`、ファイル出力
+      `FileSink`（`target/demo-logs/` の下だけ。ファイル名は 1 成分のみで `/`・`\`・
+      `..` を拒否、最初の追記でディレクトリ作成・ファイルを作り直し）、既定 `NullSink`
+      （`serve` は従前どおりログを出さない）。外部 exporter なし（S17・10-domestic-only
+      の log/audit/crash 行）。
+    - `Logger` は salt を持ち、ログにも `Debug` にも出さない（`finish_non_exhaustive`）。
+  - **出力点の接続**（`crates/pelway-http/src/lib.rs`）:
+    - `serve_with_logger(addr, ledger, logger)` を追加（既存 `serve`・
+      `serve_with_connection_deadline` は引数不变・挙動不变、内部で `serve_inner` に統一）。
+    - 接続スレッドで `request_received`（route で経路確定後）→ ハンドラで
+      `comment_saved` / `approved` + `simulated_send` → 応答前に
+      `rejected`/`internal_error` + `responded`。要求の本文・コメント・`client_msg_id`
+      はログに渡さない。既存の 500 応答（`{"code":"internal"}` だけ）は不变。
+    - 冪等リプレイ（同じキー・同じ内容の再送で send_log が増えない）では
+      `approved`/`simulated_send` を出さない（この要求で新規送信があったときだけ。
+      偽の送信記録を作らない安全側）。
+    - panic の文言・`expect` の文言に本文が入る箇所は既存コードに無いことを確認
+      （`expect` はすべて固定語句）。追加点も固定語句のみ。
+  - **example**（`crates/pelway-http/examples/demo-log-emit.rs` 新）:
+    `127.0.0.1:0` でサーバーを立て、合成データ（カード 2 枚、本文に本文 canary、
+    要求ヘッダーに秘密 canary、未知フィールドに client_msg_id canary）で
+    コメント保存（200）→ 承認（200）→ 拒否 409（snapshot_hash に秘密 canary）→
+    拒否 400（未知フィールド）→ 内部エラー 500（ロック poison）を流し、
+    `target/demo-logs/backend.jsonl` に書いて終わる。外部へ何も送らない。環境変数を
+    読まない（`PELWAY_LLM_API_KEY` 等の名前もコードに書かない）。
+- **salt の作り方と理由**: `process_salt(now)` は PID + 起動時刻（UNIX エポックからの
+  ナノ秒、引数で注入）+ ヒープ確保アドレス（`Box` の `{:p}`、ASLR の影響）のバイト列を
+  連結して返す（hash は `pseudonymize` の中で掛かる）。環境変数を読まないのは依頼の
+  約束。`/dev/urandom` を使わなかったのは「読むのは worktree の中だけ」の制約で
+  worktree 外のファイルを読めないため。定数 salt はプロセス横断で仮名を突き合わせ
+  られるため避け、プロセスごとに変わる値だけ混ぜた。安全性の定量的評価は未検証
+  （実運用では CSPRNG が望ましい）。
+- red-first の証拠（tdd）:
+  - 結合テストを先に書き、出力点が未接続の足場（`serve_with_logger` は存在するが
+    接続経路がログを出さない）で実行: `cargo test --offline -p pelway-http --test
+    no_body_logs` → **exit 101、2 passed / 4 failed**。失敗の要点（すべて「ログが
+    出ていない」ことが正しい理由）:
+    - (a) `logs_have_no_canary_and_at_least_one_event`: 「ログが1件も出ていない」
+    - (b) `raw_ids_absent_and_pseudonyms_present`: 「仮名化した card_id がない」
+    - (c) `rejected_and_internal_error_have_no_canary_anywhere`:
+      「拒否・内部エラーでもログが出ていない」
+    - (f) `full_flow_emits_all_event_kinds_with_pseudonyms_only`:
+      「request_received がない: []」
+    - (d) 陽性対照・(e) パス検査は実装に依存しないため素通り（期待どおり）。
+  - 接続を実装して green: 同コマンド → exit 0、6 passed / 0 failed。
+  - 実装途中の red（単体テストが拾ったもの、正直に記録）:
+    - `FileSink` の最初の実装は `OpenOptions` に `append(true).truncate(true)` を
+      指定し、このツールチェーンの検証「creating or truncating a file requires write
+      or append access」で open が失敗した（exit 101、単体テスト 2 件失敗）。
+      `write(true)` を追加しても同様（append+truncate の併用が拒否される）。
+      単一ハンドルを持ち続ける設計なので `append` を外し `create+write+truncate`
+      で開いて逐次書き込みに修正 → green。
+    - `process_salt` の最初の単体テストは同一入力の決定性を主張したが、ヒープ確保
+      アドレスは呼び出しごとに変わる追加密のため失敗（exit 101）。アドレス分の
+      エントロピーは意図どおりなので、テストを「空でないこと・時刻が変われば必ず
+      変わること」に修正 → green。
+- example の実行コマンドと出力:
+  - `mkdir -p target/demo-logs`（shell の `2>` 差し替え先のため。`target/demo-logs/`
+    自体は FileSink が最初の追記時に作るが、リダイレクトはプログラム起動前に開くため
+    初回は先に作る必要があった）。
+  - `cargo run --offline -p pelway-http --example demo-log-emit 2> target/demo-logs/stderr.txt`
+    → exit 0、stdout「demo-log-emit: statuses = [200, 200, 409, 400, 500]」。
+  - 出力ファイル: `target/demo-logs/backend.jsonl`（16 行）、
+    `target/demo-logs/stderr.txt`（15 行。cargo のビルド出力と poison 用 panic の
+    固定語句のみ）。
+  - canary の件数: `rg -c 'PELWAY-CANARY-BODY-7Q2M9X|PELWAY-CANARY-SECRET-4K8T1Z|
+    3f6c2a9e-8b1d-4c7a-9e2f-5a1b7c3d9e04' target/demo-logs/` → 出力なし・exit 1
+    （**3種とも 0 件**）。エラー応答の本文（`{"code":"snapshot_mismatch"}`・
+    `{"code":"bad_request"}`・`{"code":"internal"}`）と panic の文言にも 0 件
+    （テスト (c) と stderr.txt の内容で確認）。
+  - 出来事の件数（backend.jsonl 16 行）: request_received 5・responded 5・
+    comment_saved 1・approved 1・simulated_send 1・rejected 2（409 と 400）・
+    internal_error 1。受けた・応答した・承認した・模擬送信した・拒否した・内部エラー
+    がそれぞれ 1 件以上。
+  - 生 ID の走査: `rg -c 'card-gdpr07|m-human-gdpr07|sim-00000001' …backend.jsonl` →
+    exit 1（0 件）。`ws-synthetic-gdpr07|ch-synthetic-gdpr07|cmt-00000001|
+    gdpr07-approve-key` も 0 件。仮名（`"pid:`）は 8 行にあり。
+- 検証（コマンドと exit code、オフライン）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy --workspace --all-targets --offline -- -D warnings` 0
+  - `cargo test --workspace --offline` 0（at-rest 単体 8・aead 12・contract 単体 38
+    （pseudonym 4 を追加）・serde_contract 10・dev-smoke 単体 0+smoke 1・http 単体 5
+    （log 5 を追加）・http 結合 26・no_body_logs 6。**計 106 passed / 0 failed /
+    0 ignored**）
+  - example 実行・canary 走査・行数は上記のとおり。
+- 迷った点（安全側に倒した内容）:
+  - 冪等リプレイで approved/simulated_send を出すか: 台帳の `send_log()` 件数の増減で
+    「この要求で新しい疑似送信」のときだけ出すことにした（リプレイで偽の送信記録を
+    作らない）。HTTP 層は従前どおり `approve` だけを呼び、予約を持ち出さない方針を維持。
+  - `FileSink` の書き込み失敗は best-effort で握る（接続スレッドで panic しない）。
+    C05/C07 の「記録できない時は新業務を停止」はこのデモの範囲外（未実施として記録）。
+  - `FileSink` は CWD 相対の `target/demo-logs` に置く。cargo 経由の実行（ワークスペース
+    ルートが CWD）を前提とし、それ以外の起動は想定しない（worktree の外への書き込みを
+    防ぐファイル名検査は実装済み）。
+  - canary の UUID は comments の JSON に未知フィールド (`client_msg_id`) として埋めた
+    （deny_unknown_fields で 400 になる。拒否経路で本文に canary があっても出ないことの
+    確認にもなる）。`idempotency_key` には canary を使わなかった（書式制限があり、
+    かつ「client_msg_id 用」の目印だから）。
+  - 仮名化は sim ID・コメント ID などサーバー採番 ID にも適用（生値は 1 つも出さない
+    安全側）。`responded`/`rejected`/`internal_error` はそもそも ID を持たない。
+- コミット: 仕組みとテスト・example（下記コミット SHA 参照）と、この worklog 追記。
+  `target/` の下のログはコミットしない（`/target` は gitignore 済み。単体テストの
+  掃除で `crates/pelway-http/target/` にファイルは残っていない）。
+- 逸脱: なし（worktree・ブランチの中だけ。push・fetch なし、外部接続なし、
+  破壊的gitなし、`~/.cargo` の ls・cat・find なし、cargo はすべて `--offline`。
+  worktree の外に書いたファイルはない。一時ファイルは作成せず）。
+- 未検証・未決:
+  - クライアントログは対象外（クライアント担当）。仮名化の法的な十分性は未検証。
+  - U01〜U07 は未決のまま（`TODO(U0x)` は残している）。ログの保持期限
+    （R09 14日・R10 30日・R11 365日）と容量（C05）はこのデモでは未実装。
+  - salt のエントロピー（PID+時刻+ASLR）の定量的評価は未検証。実運用では CSPRNG。
+  - Codex レビュー・QA（QA-GDPR-07/12・QA-MSG-02・QA-ENC-04/K5 の正式な受入）・
+    開発基盤の canary 走査は未実施。
