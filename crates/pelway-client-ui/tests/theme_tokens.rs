@@ -7,6 +7,7 @@
 //!   `docs/design-system/tokens/pelway.tokens.json`）。
 //! - その写しのバイト列が、97fb70d の正本と sha256 で一致すること
 //!   （名前の照合だけでは値や構造のずれを検出できないため）。
+//! - Rust が返すトークンの値（色）が正本 JSON の `$value` と一致すること。
 
 use pelway_client_ui::theme::{TOKEN_NAMES, Theme, token_value};
 
@@ -15,19 +16,24 @@ const CANONICAL_TOKENS: &str = include_str!("../tokens/pelway.tokens.json");
 
 // ---- 正本 JSON の最小の読み取り（std だけ） ----
 //
-// このテストに必要なのは「オブジェクトのキー」と「その値が `$value` を持つトークンか」
-// だけなので、文字列・数値・真偽値・null の中身は読まずに構造だけを読む。
-// 限界: キーの文字列のエスケープは解かない（正本のキー名にエスケープはない。
-// スキャナは文字列リテラルを解釈しないため、コメントにも色の値のパターンを
-// 書かない運用と同じく、この読み方の前提は docs/worklog/client.md 第9枠に記録）。
+// このテストに必要なのは「オブジェクトのキー」「$value の形（文字列か、
+// colorSpace / components / alpha を持つオブジェクトか）」「components と alpha の数値」
+// だけのため、真偽値・null の中身は読まずに読み飛ばす。
+// 限界: キーと文字列の値のエスケープは解かない（正本のキー名と colorSpace の値に
+// エスケープはない。スキャナは文字列リテラルを解釈しないため、コメントにも色の値の
+// パターンを書かない運用と同じく、この読み方の前提は docs/worklog/client.md に記録）。
 
 /// 構造だけを読んだ JSON の値。
 enum Json {
     /// オブジェクト（キーと値の並び）。
     Object(Vec<(String, Json)>),
-    /// 配列（中身の要素はこのテストでは読まない）。
-    Array,
-    /// 文字列・数値・真偽値・null（中身は使わない）。
+    /// 配列。
+    Array(Vec<Json>),
+    /// 文字列（参照などの判定に使う）。
+    Str(String),
+    /// 数値（components・alpha の読み取りに使う）。
+    Number(f64),
+    /// 真偽値・null（中身は使わない）。
     Scalar,
 }
 
@@ -90,19 +96,33 @@ impl<'a> JsonReader<'a> {
         match self.peek() {
             Some(b'{') => self.read_object(),
             Some(b'[') => self.read_array(),
-            Some(b'"') => {
-                self.read_string();
-                Json::Scalar
-            }
-            Some(_) => {
-                // 数値・真偽値・null: 次の区切りまで読み飛ばす。
+            Some(b'"') => Json::Str(self.read_string().to_owned()),
+            Some(c) if c == b'-' || c.is_ascii_digit() => self.read_number(),
+            Some(b't' | b'f' | b'n') => {
+                // true / false / null: 次の区切りまで読み飛ばす（中身は使わない）。
                 while !matches!(self.peek(), None | Some(b',' | b'}' | b']')) {
                     self.pos += 1;
                 }
                 Json::Scalar
             }
             None => panic!("正本 JSON が途中で終わっている: バイト位置 {}", self.pos),
+            _ => panic!("正本 JSON の値が読めない: バイト位置 {}", self.pos),
         }
+    }
+
+    /// 数値を読む（次の区切りまでを f64 として解釈する）。
+    fn read_number(&mut self) -> Json {
+        let start = self.pos;
+        while !matches!(self.peek(), None | Some(b',' | b'}' | b']')) {
+            self.pos += 1;
+        }
+        let raw = std::str::from_utf8(&self.bytes[start..self.pos])
+            .expect("正本 JSON は UTF-8 のこと")
+            .trim();
+        let n: f64 = raw
+            .parse()
+            .unwrap_or_else(|e| panic!("正本 JSON の数値 {raw} が読めない: {e}"));
+        Json::Number(n)
     }
 
     fn read_object(&mut self) -> Json {
@@ -132,17 +152,18 @@ impl<'a> JsonReader<'a> {
 
     fn read_array(&mut self) -> Json {
         self.expect(b'[', "配列の開始");
+        let mut items = Vec::new();
         loop {
             self.skip_ws();
             match self.peek() {
                 Some(b']') => {
                     self.pos += 1;
-                    return Json::Array;
+                    return Json::Array(items);
                 }
                 Some(b',') => self.pos += 1,
                 // 要素は読み飛ばす（このテストで配列の中身は使わない）。
                 _ => {
-                    self.read_value();
+                    items.push(self.read_value());
                 }
             }
         }
@@ -390,6 +411,48 @@ fn canonical_color_token_names(json: &Json, theme: &str) -> Vec<String> {
     names
 }
 
+/// 正本 JSON の `color.<theme>.<token>` の `$value` を `(alpha, r, g, b)` で返す。
+///
+/// `$value` が文字列（DTCG の参照）や、colorSpace が srgb 以外・components が
+/// 3つの数値でないなど、直接の色として読めない形なら `None`。
+fn canonical_color_token_value(
+    json: &Json,
+    theme: &str,
+    token: &str,
+) -> Option<(f64, f64, f64, f64)> {
+    let color = object_get(json, "color")?;
+    let theme_obj = object_get(color, theme)?;
+    let token_obj = object_get(theme_obj, token)?;
+    let value = object_get(token_obj, "$value")?;
+    if matches!(value, Json::Str(_)) {
+        return None;
+    }
+    let Json::Str(space) = object_get(value, "colorSpace")? else {
+        return None;
+    };
+    if *space != "srgb" {
+        return None;
+    }
+    let Json::Array(items) = object_get(value, "components")? else {
+        return None;
+    };
+    let mut rgb = [0.0f64; 3];
+    if items.len() != 3 {
+        return None;
+    }
+    for (slot, item) in rgb.iter_mut().zip(items) {
+        let Json::Number(n) = item else {
+            return None;
+        };
+        *slot = *n;
+    }
+    let alpha = match object_get(value, "alpha") {
+        Some(Json::Number(n)) => *n,
+        _ => 1.0,
+    };
+    Some((alpha, rgb[0], rgb[1], rgb[2]))
+}
+
 /// [`TOKEN_NAMES`] を昇順にしたもの（正本との照合用）。
 fn sorted_token_names() -> Vec<String> {
     let mut names = TOKEN_NAMES.to_vec();
@@ -453,14 +516,85 @@ fn token_names_have_no_duplicates() {
     assert_eq!(len_before, sorted.len(), "トークン名に重複がないこと");
 }
 
+/// 読めないトークン（正本の `$value` が直接の色でないもの）。
+///
+/// `avatar-human-bg-section` は4テーマすべてで `{color.<theme>.avatar-human-bg}`
+/// の形の参照（DTCG のエイリアス）。自分で参照を解決して値を作らないため、
+/// このトークンは値なし（`None`）のまま残す。
+const UNREADABLE_TOKENS: &[&str] = &["avatar-human-bg-section"];
+
+/// JSON の成分（0〜1）と、色のチャネル（0〜255）が丸めの誤差の範囲で一致すること。
+fn assert_channel(theme: &str, token: &str, what: &str, json_value: f64, channel: u8) {
+    let expected = json_value * 255.0;
+    let got = f64::from(channel);
+    assert!(
+        (got - expected).abs() <= 1.0,
+        "{theme}/{token} の {what}: JSON の成分と色のチャネルが 1/255 の範囲で一致しない"
+    );
+}
+
 #[test]
-fn token_values_are_not_filled_yet() {
-    // トークンの値は未確定。テーマごとの値の表は「TODO: トークン確定後に入れる」の空の形。
+fn token_values_match_canonical_json() {
+    // 4テーマすべてで、TOKEN_NAMES の各トークンについて、Rust が返す値が
+    // 正本 JSON の $value（srgb の成分と alpha）と一致すること。
+    // 読めないトークン（UNREADABLE_TOKENS）は両方とも値なしであること。
+    let json = parse_canonical();
     for theme in Theme::ALL {
+        let mut filled = 0usize;
         for token in TOKEN_NAMES {
+            let expected = canonical_color_token_value(&json, theme.name(), token);
+            let got = token_value(theme, token);
+            if UNREADABLE_TOKENS.contains(token) {
+                assert!(
+                    expected.is_none(),
+                    "{token} は読めないトークンの前提（正本の $value が直接の色でない）"
+                );
+                assert!(
+                    got.is_none(),
+                    "読めないトークン {theme:?}/{token} に値を入れていないこと"
+                );
+                continue;
+            }
+            let Some((exp_a, exp_r, exp_g, exp_b)) = expected else {
+                panic!(
+                    "正本の {}/{token} が直接の色として読める前提が崩れた",
+                    theme.name()
+                );
+            };
+            let got = got.unwrap_or_else(|| {
+                panic!(
+                    "トークン {}/{token} の値が None（実装が正本を読めていない）",
+                    theme.name()
+                )
+            });
+            assert_channel(theme.name(), token, "alpha", exp_a, got.alpha());
+            assert_channel(theme.name(), token, "red", exp_r, got.red());
+            assert_channel(theme.name(), token, "green", exp_g, got.green());
+            assert_channel(theme.name(), token, "blue", exp_b, got.blue());
+            filled += 1;
+        }
+        assert_eq!(
+            filled,
+            TOKEN_NAMES.len() - UNREADABLE_TOKENS.len(),
+            "テーマ {} で値を入れたトークンの件数（読めないトークンを除く）",
+            theme.name()
+        );
+    }
+}
+
+#[test]
+fn unreadable_tokens_match_canonical_json_forms() {
+    // 読めないトークンの前提: 4テーマすべてで正本の $value が参照（文字列）であること。
+    // 正本がこの形をやめたら（直接の色になったら）、このテストが落ちる。
+    // そのときは UNREADABLE_TOKENS から外して値を入れてよいかを確かめる。
+    let json = parse_canonical();
+    for theme in Theme::ALL {
+        for token in UNREADABLE_TOKENS {
+            let value = canonical_color_token_value(&json, theme.name(), token);
             assert!(
-                token_value(theme, token).is_none(),
-                "トークン {token} の値を入れてはならない（確定後に入れる）"
+                value.is_none(),
+                "正本の {}/{token} が直接の色として読める形になった（前提の見直し）",
+                theme.name()
             );
         }
     }
@@ -484,7 +618,8 @@ fn slint_design_token_refs_are_all_known() {
 #[test]
 fn slint_does_not_define_its_own_token_names() {
     // global DesignTokens のプロパティ名も一覧のトークン名だけ。
-    // `out property <brush> xxx;` の形を抜き出す（DesignTokens ブロック内のみ）。
+    // `in-out property <brush> xxx;` の形を抜き出す（DesignTokens ブロック内のみ。
+    // 値は Rust から設定するため in-out。.slint の中に色の値は書かない）。
     let start = SLINT
         .find("export global DesignTokens")
         .expect("DesignTokens global があること");
@@ -495,7 +630,7 @@ fn slint_does_not_define_its_own_token_names() {
     let block = &SLINT[start..end];
     for line in block.lines() {
         let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("out property <brush> ") {
+        if let Some(rest) = trimmed.strip_prefix("in-out property <brush> ") {
             let name = rest.trim_end_matches(';').trim();
             assert!(
                 TOKEN_NAMES.contains(&name),

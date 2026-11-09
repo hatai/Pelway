@@ -1,11 +1,12 @@
-//! Pelway デスクトップクライアントの UI 骨組み（段階B-1）。
+//! Pelway デスクトップクライアントの UI 骨組み（段階B-2）。
 //!
 //! 段階B-1: `slint` 1.18.1 に依存し、build.rs が `ui/main.slint` をコンパイルする。
-//! 窓を開いての確認・Fluent の crate による文言の取得・トークンの値・
+//! 段階B-2: トークンの値（色）を正本 JSON から読んで `DesignTokens` へ設定する。
+//! 窓を開いての確認・Fluent の crate による文言の取得・
 //! accessible-role / accessible-label は、この回ではまだ行わない。
 //!
-//! - モジュール [`theme`]:テーマ（4種）とデザイントークンの名前。名前は正本
-//!   `tokens/pelway.tokens.json` の `color.<theme>` と一致させる。値は未確定のため入れない。
+//! - モジュール [`theme`]:テーマ（4種）とデザイントークン。名前も値も正本
+//!   `tokens/pelway.tokens.json` から読む（`.rs`・`.slint`・`.ftl` に色の値は書かない）。
 //! - モジュール [`i18n`]:画面の文言の Fluent キー。Fluent の crate は未導入。
 //! - モジュール [`state`]:画面の表示用の状態（Slint 非依存）と合成データ。
 //! - モジュール [`bridge`]:中核ロジック（`input::on_key`・`ApprovalMachine`）へのつなぎ。

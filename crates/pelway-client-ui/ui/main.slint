@@ -10,8 +10,8 @@
 //
 // 決まりごと:
 // - 色は DesignTokens（下の global）のトークン名だけで参照し、色の値は書かない。
-//   トークンの値は未確定のため、プロパティに初期値を入れない
-//   （TODO: トークン確定後に入れる）。
+//   値もここには置かない（初期値なし）。Rust がトークンの正本 JSON
+//   （tokens/pelway.tokens.json）から読んだ値をテーマごとに設定する。
 // - 利用者に見える文言はここに書かず、Rust が Fluent（i18n/{ja,en}/main.ftl）から
 //   引いた文字列を tr-* プロパティで受け取る。Slint の @tr()（gettext）は使わない
 //   （仕様が Fluent のため）。
@@ -21,66 +21,66 @@
 //   AccessKit を組み込んだだけで読み上げが合格したとは言わない。NVDA・VoiceOver・Orca
 //   での確認は未検証。
 
-// デザイントークン。名前だけ。テーマごとの値は Rust 側から設定する。
-// TODO: トークン確定後に入れる（プロパティに初期値を書かない）。
+// デザイントークン。名前だけ。テーマごとの値は Rust 側から設定する
+// （out のグローバルは Rust から値を渡せないため in-out にする。初期値は置かない）。
 export global DesignTokens {
     // 面と文字
-    out property <brush> bg;
-    out property <brush> tile;
-    out property <brush> well;
-    out property <brush> ink;
-    out property <brush> sub;
-    out property <brush> mute;
-    out property <brush> line;
+    in-out property <brush> bg;
+    in-out property <brush> tile;
+    in-out property <brush> well;
+    in-out property <brush> ink;
+    in-out property <brush> sub;
+    in-out property <brush> mute;
+    in-out property <brush> line;
     // 強調
-    out property <brush> acc;
-    out property <brush> acc-fill;
-    out property <brush> acc-fill-hover;
-    out property <brush> acc-fill-pressed;
-    out property <brush> acc-wash;
-    out property <brush> on-acc;
+    in-out property <brush> acc;
+    in-out property <brush> acc-fill;
+    in-out property <brush> acc-fill-hover;
+    in-out property <brush> acc-fill-pressed;
+    in-out property <brush> acc-wash;
+    in-out property <brush> on-acc;
     // 主ボタン
-    out property <brush> primary-bg;
-    out property <brush> primary-fg;
-    out property <brush> primary-bg-hover;
-    out property <brush> primary-bg-pressed;
+    in-out property <brush> primary-bg;
+    in-out property <brush> primary-fg;
+    in-out property <brush> primary-bg-hover;
+    in-out property <brush> primary-bg-pressed;
     // アバター
-    out property <brush> avatar-human-bg;
-    out property <brush> avatar-human-fg;
-    out property <brush> avatar-ai-bg;
-    out property <brush> avatar-ai-fg;
-    out property <brush> ai-badge-bg;
-    out property <brush> ai-badge-fg;
+    in-out property <brush> avatar-human-bg;
+    in-out property <brush> avatar-human-fg;
+    in-out property <brush> avatar-ai-bg;
+    in-out property <brush> avatar-ai-fg;
+    in-out property <brush> ai-badge-bg;
+    in-out property <brush> ai-badge-fg;
     // 状態
-    out property <brush> pending-bg;
-    out property <brush> pending-bar;
-    out property <brush> success-fg;
-    out property <brush> success-bg;
-    out property <brush> danger-fg;
-    out property <brush> danger-bg;
-    out property <brush> warning-fg;
-    out property <brush> warning-bg;
-    out property <brush> unread;
-    out property <brush> private-bg;
+    in-out property <brush> pending-bg;
+    in-out property <brush> pending-bar;
+    in-out property <brush> success-fg;
+    in-out property <brush> success-bg;
+    in-out property <brush> danger-fg;
+    in-out property <brush> danger-bg;
+    in-out property <brush> warning-fg;
+    in-out property <brush> warning-bg;
+    in-out property <brush> unread;
+    in-out property <brush> private-bg;
     // 社外送信カード
-    out property <brush> ext-bg;
-    out property <brush> ext-fg;
-    out property <brush> ext-label;
-    out property <brush> ext-meta;
-    out property <brush> ext-address;
-    out property <brush> ext-link;
-    out property <brush> ext-body-bg;
-    out property <brush> ext-body-fg;
-    out property <brush> ext-go-bg;
-    out property <brush> ext-go-fg;
-    out property <brush> ext-fx-fg;
-    out property <brush> ext-fx-line;
-    out property <brush> ext-divider;
+    in-out property <brush> ext-bg;
+    in-out property <brush> ext-fg;
+    in-out property <brush> ext-label;
+    in-out property <brush> ext-meta;
+    in-out property <brush> ext-address;
+    in-out property <brush> ext-link;
+    in-out property <brush> ext-body-bg;
+    in-out property <brush> ext-body-fg;
+    in-out property <brush> ext-go-bg;
+    in-out property <brush> ext-go-fg;
+    in-out property <brush> ext-fx-fg;
+    in-out property <brush> ext-fx-line;
+    in-out property <brush> ext-divider;
     // その他
-    out property <brush> focus-ring;
-    out property <brush> link;
-    out property <brush> selected-wash;
-    out property <brush> border-form;
+    in-out property <brush> focus-ring;
+    in-out property <brush> link;
+    in-out property <brush> selected-wash;
+    in-out property <brush> border-form;
 }
 
 // 現在のテーマ。安定名の定義元は Rust の Theme enum（src/theme.rs）。
