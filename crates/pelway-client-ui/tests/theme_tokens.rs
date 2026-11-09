@@ -523,13 +523,32 @@ fn token_names_have_no_duplicates() {
 /// このトークンは値なし（`None`）のまま残す。
 const UNREADABLE_TOKENS: &[&str] = &["avatar-human-bg-section"];
 
-/// JSON の成分（0〜1）と、色のチャネル（0〜255）が丸めの誤差の範囲で一致すること。
+/// JSON の成分（0〜1）から 8 bit のチャネルの期待値を作る丸め。
+///
+/// 実装（`slint::Color::from_argb_f32`）と同じ決まりをテスト側で独立に書く:
+/// JSON の f64 を f32 に変換してから 255 を掛け、0.5 を引いて切り上げる
+/// （×255 が .5 ちょうどのときは切り捨て、それ以外は最近接に丸まる。
+/// f64 のまま計算すると f32 の掛け算の丸め（例: `0.1f32 * 255.0 == 25.5`
+/// ちょうど）を再現できないため、実装と同じ f32 の経路で計算する）。
+///
+/// 共通の関数を 1 か所にまとめて実装とテストの両方から使う形にはしない。
+/// 実装の丸めは `slint::Color::from_argb_f32` の中で行われるため、共通化に
+/// は実装を自前の丸め（`from_argb_u8`）への書き換えが要り、この slint の
+/// 丸めと自前の丸めが全チャネルで同じ値になる保証を新たに作ることになる
+/// （画面の見た目を変えるリスク）。テストが同じ決まりを独立に書くことで、
+/// 実装が正本の成分を正しく Slint に渡していることを完全一致で検査できる。
+fn expected_channel(json_value: f64) -> u8 {
+    let scaled = json_value as f32 * 255.0f32;
+    (scaled - 0.5).ceil() as u8
+}
+
+/// 実装の色のチャネル（0〜255）が、正本 JSON の成分からこのテストの決まりで
+/// 作った期待値と完全に一致すること（許容幅なし）。
 fn assert_channel(theme: &str, token: &str, what: &str, json_value: f64, channel: u8) {
-    let expected = json_value * 255.0;
-    let got = f64::from(channel);
-    assert!(
-        (got - expected).abs() <= 1.0,
-        "{theme}/{token} の {what}: JSON の成分と色のチャネルが 1/255 の範囲で一致しない"
+    assert_eq!(
+        channel,
+        expected_channel(json_value),
+        "{theme}/{token} の {what}: 実装のチャネルが正本 JSON の成分の丸めと一致しない"
     );
 }
 
