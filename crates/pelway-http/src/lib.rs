@@ -15,7 +15,10 @@
 //!   `actor`）で受け取る**（開発リードの仮の決め方 2026-11-10。ヘッダーや環境から
 //!   本人を推定しない）。
 //! - 保存する記録の ID・時刻・版・epoch・status はサーバーが付ける。要求に偽の
-//!   値があっても正本にしない（未知フィールドとして 400 で拒否）。
+//!   値があっても正本にしない（未知フィールドとして 400 で拒否）。`scope` と
+//!   参照列（`*_ref`、`source_scope`、`retention_policy_ref`）は保存部が合成の
+//!   参照形式だけを受け付け、形式に合わない値（本文や人物情報の自由文の複製）は
+//!   400 で拒否する（作成応答・GET 一覧の直列化に出さない）。
 //! - 待ち受けは 127.0.0.1 だけ。127.0.0.2 など 127/8 のほかのアドレスや `::1` を含む
 //!   IPv6 も拒否（QA 18:21、リード決定 2026-11-09 19:14）。外部への接続はしない。
 //! - [`ApprovalLedger`](pelway_contract::ledger::ApprovalLedger) 全体を 1 つの
@@ -917,6 +920,8 @@ fn handle_approve(
 
 /// 根拠記録の作成（QA-GDPR-02 の仮の経路）。要求からは ID・時刻・status・epoch を
 /// 受け取らない（`deny_unknown_fields` で拒否）。正本はすべてサーバーが付ける。
+/// `scope` と参照列（`*_ref`）は保存部が合成の参照形式だけを受け付け、形式に合わない
+/// 値（本文や人物情報の自由文)は 400 で拒否する（作成応答・一覧に出さない）。
 fn handle_create_basis_record(
     req: &Request,
     workspace: &str,
@@ -931,11 +936,17 @@ fn handle_create_basis_record(
     let Ok(mut store) = store.lock() else {
         return internal_error();
     };
-    let record = store.create_basis_record(
+    let record = match store.create_basis_record(
         &WorkspaceId::from(workspace),
         NewBasisRecord::from(input),
         now_ms(),
-    );
+    ) {
+        Ok(record) => record,
+        // 参照形式以外の値(本文等の複製)は保存しない。列名は応答に出さない。
+        Err(StoreError::InvalidReference { .. }) => return bad_request(),
+        // create で NotFound は起こらない(網羅のための安全側)。
+        Err(StoreError::NotFound) => return internal_error(),
+    };
     // 保存した: 仮名 ID・種別だけ。参照列（evidence_ref 等）の中身は出さない。
     logger.emit(log::Event::BasisRecordSaved {
         workspace: workspace_pid,
@@ -1003,6 +1014,8 @@ fn handle_withdraw_basis_record(
             });
             Response::json(200, &record)
         }
+        // 撤回方法の参照が合成の参照形式でなければ 400(状態は変えていない)。
+        Err(StoreError::InvalidReference { .. }) => bad_request(),
         Err(StoreError::NotFound) => {
             Response::error(404, &HttpError::NotFound, log::Code::NotFound)
         }
@@ -1010,7 +1023,8 @@ fn handle_withdraw_basis_record(
 }
 
 /// 利用方針の作成（QA-GDPR-02 の仮の経路）。version・時刻はサーバー付け。
-/// 変更前の版は保存部に証拠として残る。
+/// 変更前の版は保存部に証拠として残る。`source_scope` と `retention_policy_ref` は
+/// 保存部が合成の参照形式だけを受け付け、形式に合わない値は 400 で拒否する。
 fn handle_create_use_policy(
     req: &Request,
     workspace: &str,
@@ -1025,11 +1039,16 @@ fn handle_create_use_policy(
     let Ok(mut store) = store.lock() else {
         return internal_error();
     };
-    let policy = store.create_use_policy(
+    let policy = match store.create_use_policy(
         &WorkspaceId::from(workspace),
         NewUsePolicy::from(input),
         now_ms(),
-    );
+    ) {
+        Ok(policy) => policy,
+        Err(StoreError::InvalidReference { .. }) => return bad_request(),
+        // create で NotFound は起こらない(網羅のための安全側)。
+        Err(StoreError::NotFound) => return internal_error(),
+    };
     logger.emit(log::Event::UsePolicySaved {
         workspace: workspace_pid,
         actor: actor_pid,

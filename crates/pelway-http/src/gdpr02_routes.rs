@@ -134,6 +134,44 @@ fn post_withdraw(addr: SocketAddr, basis_id: &str, body: &str) -> (u16, String) 
     )
 }
 
+/// 利用方針作成の要求 JSON（`overrides` はテストから差し替える項目）。
+fn policy_request(overrides: Value) -> String {
+    let mut v = json!({
+        "actor": ACTOR,
+        "purpose_id": "p04",
+        "data_classes": ["message-body"],
+        "source_scope": "ch-synthetic-02",
+        "processors": ["processor-synthetic-1"],
+        "allowed_outputs": ["summary"],
+        "explanation_version": "expl-v1",
+        "retention_policy_ref": "ref:retention-1",
+    });
+    for (k, new) in overrides.as_object().into_iter().flatten() {
+        v[k] = new.clone();
+    }
+    v.to_string()
+}
+
+fn post_policy(addr: SocketAddr, body: &str) -> (u16, String) {
+    http(
+        addr,
+        "POST",
+        &format!("/v1/workspaces/{WS}/communication-use-policies"),
+        &[("Content-Type", "application/json")],
+        body.as_bytes(),
+    )
+}
+
+fn get_policy_list(addr: SocketAddr) -> (u16, String) {
+    http(
+        addr,
+        "GET",
+        &format!("/v1/workspaces/{WS}/communication-use-policies?actor={ACTOR}"),
+        &[],
+        b"",
+    )
+}
+
 /// ログ行を JSON にパースし、`kind`（出来事の種別）を返す。
 fn kinds(lines: &[String]) -> Vec<String> {
     lines
@@ -238,15 +276,19 @@ fn route_logs_have_no_body_or_client_msg_id_canary() {
     let sink = Arc::new(MemorySink::new());
     let (addr, _store) = spawn_logged(&sink);
 
-    // 作成: 自由文字列欄（scope・evidence_ref）に本文 canary を仕込む。
-    // （保存された正本が応答に戻るので、応答本文にこの canary があるのは正しい。
-    // ここで見るのは 07 のログに漏れないこと。）
+    // 作成: 正当な 1 件を作る（ログに basis の仮名が出る）。
+    let (status, _) = post_basis(addr, &basis_request(json!({})));
+    assert_eq!(status, 200);
+
+    // 作成: 参照欄（scope・evidence_ref）に本文 canary を仕込んだ要求は、r3 では
+    // 参照形式の検証で 400 として拒否される（テスト8）。ここで見るのは、拒否された
+    // 要求の中身（canary を含む参照文字列）が 07 のログに漏れないこと。
     let body = basis_request(json!({
         "scope": format!("ch-synthetic-02 {CANARY_BODY}"),
         "evidence_ref": format!("ref:evidence-1 {CANARY_BODY}"),
     }));
     let (status, _resp) = post_basis(addr, &body);
-    assert_eq!(status, 200);
+    assert_eq!(status, 400);
 
     // 読み取り。
     let (status, _) = get_basis_list(addr);
@@ -496,4 +538,141 @@ fn http_creates_and_lists_use_policies_with_versions() {
     // 保存部にも同じ 2 件。
     let guard = store.lock().expect("store lock");
     assert_eq!(guard.use_policies(&WorkspaceId::from(WS)).len(), 2);
+}
+
+// テスト8: 本文 canary を `scope` または `*_ref` に入れた作成要求では、作成応答と
+// GET 一覧を含む根拠記録・利用方針の直列化に canary が出ない(参照列は参照だけに
+// する。本文や自由文の複製を持たせない)。陽性対照も書く。
+#[test]
+fn http_rejects_body_canary_in_scope_and_ref_columns() {
+    let sink = Arc::new(MemorySink::new());
+    let (addr, store) = spawn_logged(&sink);
+
+    // 根拠記録: canary 単体と、正当な参照に canary を混ぜた文字列を、scope と
+    // 各参照列に入れる。いずれも 400 で拒否され、拒否応答に canary を出さない。
+    let basis_cases = [
+        json!({ "scope": CANARY_BODY }),
+        json!({ "scope": format!("ch-synthetic-02 {CANARY_BODY}") }),
+        json!({ "party_coverage_ref": CANARY_BODY }),
+        json!({ "party_coverage_ref": format!("ref:party-coverage-1 {CANARY_BODY}") }),
+        json!({ "grantor_ref": CANARY_BODY }),
+        json!({ "grantor_ref": format!("ref:grantor-1 {CANARY_BODY}") }),
+        json!({ "representative_authority_ref": CANARY_BODY }),
+        json!({ "representative_authority_ref": format!("ref:rep-1 {CANARY_BODY}") }),
+        json!({ "evidence_ref": CANARY_BODY }),
+        json!({ "evidence_ref": format!("ref:evidence-1 {CANARY_BODY}") }),
+    ];
+    for case in &basis_cases {
+        let (status, resp) = post_basis(addr, &basis_request(case.clone()));
+        assert_eq!(
+            status, 400,
+            "canary 入り欄が受理されている: {case:?} -> {resp}"
+        );
+        assert!(!resp.contains(CANARY_BODY), "拒否応答に canary: {resp}");
+    }
+    // 拒否された分は 1 件も保存されていない。
+    {
+        let guard = store.lock().expect("store lock");
+        assert!(guard.basis_records(&WorkspaceId::from(WS)).is_empty());
+    }
+
+    // 正当な形式の要求は 200 で通る(検証が空振りしていないことの対照)。
+    let (status, resp) = post_basis(addr, &basis_request(json!({})));
+    assert_eq!(status, 200, "{resp}");
+    let v: Value = serde_json::from_str(&resp).expect("json");
+    assert_eq!(
+        v["scope"], "ch-synthetic-02",
+        "正当な scope が保存された: {resp}"
+    );
+    assert_eq!(v["evidence_ref"], "ref:evidence-1");
+    let basis_id = v["basis_id"].as_str().expect("basis_id").to_owned();
+
+    // GET 一覧: 保存された正当な 1 件だけが載り、canary は 0 件。
+    let (status, list) = get_basis_list(addr);
+    assert_eq!(status, 200, "{list}");
+    assert_eq!(
+        list.matches(CANARY_BODY).count(),
+        0,
+        "根拠記録の一覧に canary: {list}"
+    );
+    let arr: Vec<Value> = serde_json::from_str(&list).expect("json array");
+    assert_eq!(arr.len(), 1, "canary 入りが保存されている: {list}");
+    let arr_json = serde_json::to_string(&arr).expect("serialize list");
+    assert!(!arr_json.contains(CANARY_BODY));
+
+    // 保存部の正本(直列化しても)canary が出ない。
+    {
+        let guard = store.lock().expect("store lock");
+        let records_json =
+            serde_json::to_string(guard.basis_records(&WorkspaceId::from(WS)).as_slice())
+                .expect("serialize records");
+        assert!(!records_json.contains(CANARY_BODY), "{records_json}");
+    }
+
+    // 撤回の withdrawal_method_ref に canary → 400(撤回自体は取得と同じ1操作のまま)。
+    let body = json!({
+        "actor": ACTOR,
+        "withdrawal_method_ref": format!("ref:withdraw-method-1 {CANARY_BODY}"),
+    })
+    .to_string();
+    let (status, resp) = post_withdraw(addr, &basis_id, &body);
+    assert_eq!(
+        status, 400,
+        "撤回の参照欄に canary が受理されている: {resp}"
+    );
+    let body =
+        json!({ "actor": ACTOR, "withdrawal_method_ref": CANARY_BODY.to_owned() }).to_string();
+    let (status, resp) = post_withdraw(addr, &basis_id, &body);
+    assert_eq!(status, 400, "{resp}");
+
+    // 利用方針: source_scope / retention_policy_ref に canary → 400。
+    let policy_cases = [
+        json!({ "source_scope": CANARY_BODY }),
+        json!({ "source_scope": format!("ch-synthetic-02 {CANARY_BODY}") }),
+        json!({ "retention_policy_ref": CANARY_BODY }),
+        json!({ "retention_policy_ref": format!("ref:retention-1 {CANARY_BODY}") }),
+    ];
+    for case in &policy_cases {
+        let (status, resp) = post_policy(addr, &policy_request(case.clone()));
+        assert_eq!(
+            status, 400,
+            "canary 入り欄が受理されている: {case:?} -> {resp}"
+        );
+        assert!(!resp.contains(CANARY_BODY), "拒否応答に canary: {resp}");
+    }
+    {
+        let guard = store.lock().expect("store lock");
+        assert!(
+            guard.use_policies(&WorkspaceId::from(WS)).is_empty(),
+            "canary 入りの方針が保存されている"
+        );
+    }
+    // 正当な方針は 200。
+    let (status, resp) = post_policy(addr, &policy_request(json!({})));
+    assert_eq!(status, 200, "{resp}");
+    let (status, list) = get_policy_list(addr);
+    assert_eq!(status, 200, "{list}");
+    assert_eq!(
+        list.matches(CANARY_BODY).count(),
+        0,
+        "利用方針の一覧に canary: {list}"
+    );
+
+    // ログにも canary 0 件(作成・読取・拒否・撤回拒否のどの出来事にも出ない)。
+    let joined = sink.lines().join("\n");
+    assert_eq!(
+        joined.matches(CANARY_BODY).count(),
+        0,
+        "ログに本文 canary: {joined}"
+    );
+
+    // 陽性対照: canary を含む文字列は同じ検査(matches/contains)で見つかる。
+    assert_eq!(format!("x {CANARY_BODY} y").matches(CANARY_BODY).count(), 1);
+    assert!(format!("{{\"scope\":\"{CANARY_BODY}\"}}").contains(CANARY_BODY));
+    // 空の応答でなく検査が応答本文に対して効くこと: 正当な作成応答には
+    // 保存された scope が(そのままの形で)見つかる。
+    assert!(
+        resp.contains("ch-synthetic-02"),
+        "応答本文の検査が空振り: {resp}"
+    );
 }

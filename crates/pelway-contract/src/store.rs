@@ -6,6 +6,11 @@
 //! - 保存する記録の ID・時刻・版・epoch は **サーバーが付ける**。要求や画面から来た
 //!   値を正本にしない（12 §3.2 の `communication_basis_records` /
 //!   `communication_use_policies` の列名は論理単位で、確定 DDL ではない）。
+//! - `scope` と参照列（`*_ref`、`source_scope`、`retention_policy_ref`）は **参照だけ**
+//!   にする。保存前に合成の参照形式（ASCII 小文字・数字・`-`・`_` の識別子。
+//!   参照列は `ref:` で始まる）の検証を通し、形式に合わない値＝本文や人物情報の
+//!   自由文の複製は [`StoreError::InvalidReference`] として **保存しない**
+//!   （12 §3.2「人物情報や本文の不要な複製を避ける」）。
 //! - `client_msg_id` はこの保存部に入れない。メッセージも既存の
 //!   [`crate::message::Message`] ではなく `client_msg_id` の無い [`StoredMessage`]
 //!   を使う。
@@ -146,7 +151,7 @@ pub struct UsePolicy {
     pub version: u64,
     /// データ分類（合成）。
     pub data_classes: Vec<String>,
-    /// source の範囲（合成の参照表現）。
+    /// source の範囲（合成の参照形式のみ。本文や人物情報の自由文は入れない）。
     pub source_scope: String,
     /// 取扱主体（合成）。
     pub processors: Vec<String>,
@@ -154,7 +159,7 @@ pub struct UsePolicy {
     pub allowed_outputs: Vec<String>,
     /// 説明版。
     pub explanation_version: String,
-    /// 保持方針への参照。
+    /// 保持方針への参照（参照のみ。`ref:` で始まる合成の参照形式）。
     pub retention_policy_ref: String,
     /// サーバーが付けた作成時刻（12 §3.2 の列に加えた追加列。時刻はサーバー付けの約束のため）。
     pub created_at: TsMs,
@@ -173,16 +178,17 @@ pub struct BasisRecord {
     /// 合成の根拠の種類（実際の当てはめは未決・U03）。
     pub basis_type: BasisType,
     pub purpose_id: PurposeId,
-    /// 対象 scope（合成の参照表現）。
+    /// 対象 scope（合成の参照形式のみ。`ch-synthetic-02` 等の識別子で、本文や
+    /// 人物情報の自由文は入れない）。
     pub scope: String,
-    /// 通信当事者の充足状況への参照（参照のみ）。
+    /// 通信当事者の充足状況への参照（参照のみ。`ref:` で始まる合成の参照形式）。
     pub party_coverage_ref: String,
-    /// 同意取得者・根拠確認担当への参照（参照のみ）。
+    /// 同意取得者・根拠確認担当への参照（参照のみ。`ref:` で始まる合成の参照形式）。
     pub grantor_ref: String,
-    /// 代理権の確認方法への参照（参照のみ）。
+    /// 代理権の確認方法への参照（参照のみ。`ref:` で始まる合成の参照形式）。
     pub representative_authority_ref: Option<String>,
     pub explanation_version: String,
-    /// 証拠への参照（参照のみ）。
+    /// 証拠への参照（参照のみ。`ref:` で始まる合成の参照形式）。
     pub evidence_ref: String,
     /// サーバーが付けた取得時刻。
     pub collected_at: TsMs,
@@ -192,7 +198,7 @@ pub struct BasisRecord {
     pub expires_at: Option<TsMs>,
     /// 撤回時刻（サーバーが付けた。未撤回なら `None`）。
     pub withdrawn_at: Option<TsMs>,
-    /// 撤回方法への参照（参照のみ）。
+    /// 撤回方法への参照（参照のみ。`ref:` で始まる合成の参照形式）。
     pub withdrawal_method_ref: Option<String>,
     pub status: BasisStatus,
     /// 失効の世代（撤回で進む）。
@@ -350,6 +356,22 @@ pub struct NewBasisRecord {
     pub evidence_ref: String,
 }
 
+impl NewBasisRecord {
+    /// `scope` と参照列（`*_ref`）が合成の参照形式か（本文や人物情報の複製を
+    /// 参照欄に入れさせない。[`create_basis_record`](DataStore::create_basis_record)
+    /// が保存前に必ずこの検証を通す）。
+    fn validate(&self) -> Result<(), StoreError> {
+        validate_scope("scope", &self.scope)?;
+        validate_ref("party_coverage_ref", &self.party_coverage_ref)?;
+        validate_ref("grantor_ref", &self.grantor_ref)?;
+        validate_opt_ref(
+            "representative_authority_ref",
+            self.representative_authority_ref.as_deref(),
+        )?;
+        validate_ref("evidence_ref", &self.evidence_ref)
+    }
+}
+
 /// 利用方針作成の入力（version はサーバー付け）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewUsePolicy {
@@ -360,6 +382,15 @@ pub struct NewUsePolicy {
     pub allowed_outputs: Vec<String>,
     pub explanation_version: String,
     pub retention_policy_ref: String,
+}
+
+impl NewUsePolicy {
+    /// `source_scope` と `retention_policy_ref` が合成の参照形式か
+    /// （[`create_use_policy`](DataStore::create_use_policy) が保存前に必ず通す）。
+    fn validate(&self) -> Result<(), StoreError> {
+        validate_scope("source_scope", &self.source_scope)?;
+        validate_ref("retention_policy_ref", &self.retention_policy_ref)
+    }
 }
 
 /// 削除・制限記録の入力。
@@ -454,17 +485,77 @@ impl From<CreateUsePolicyRequest> for NewUsePolicy {
 pub enum StoreError {
     /// 対象の記録が無い。
     NotFound,
+    /// 参照列（`*_ref`）または `scope`/`source_scope` の値が合成の参照形式でない
+    /// （本文や人物情報など、参照以外の複製を入れさせない検証。どの列かは `column`）。
+    InvalidReference {
+        /// 検証に失敗した列の名前（ログ・デバッグ用。HTTP 応答には出さない）。
+        column: &'static str,
+    },
 }
 
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotFound => f.write_str("target record not found"),
+            Self::InvalidReference { column } => {
+                write!(f, "column {column} is not a synthetic reference form")
+            }
         }
     }
 }
 
 impl std::error::Error for StoreError {}
+
+/// 合成の参照列（`*_ref`）の形式: `ref:` の後に ASCII 小文字・数字・`-`・`_` だけが
+/// 1 文字以上並び、全体（`ref:` を含む）が [`MAX_REF_BYTES`] バイト以内。
+/// この形式は **合成データ用の仮の規則**（12 §3.2 は論理単位のみを定め、確定 DDL
+/// ではない）。大文字・空白・記号・多バイト文字を含む値＝本文や人物情報のような
+/// 自由文は、参照列への複製として **受け付けない**。
+const REF_PREFIX: &str = "ref:";
+
+/// 参照列・scope の長さの上限（バイト）。参照識別子には十分で、本文の複製には短い。
+const MAX_REF_BYTES: usize = 64;
+
+fn is_allowed_ref_char(b: u8) -> bool {
+    b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_'
+}
+
+/// 参照列（`*_ref`）の値が合成の参照形式か。
+fn is_synthetic_ref(value: &str) -> bool {
+    let Some(rest) = value.strip_prefix(REF_PREFIX) else {
+        return false;
+    };
+    !rest.is_empty() && value.len() <= MAX_REF_BYTES && rest.bytes().all(is_allowed_ref_char)
+}
+
+/// scope / source_scope の値が合成の参照形式か（`ref:` 無しの識別子形式。
+/// `ch-synthetic-02` 等、参照先の種別 + 識別子）。
+fn is_synthetic_scope(value: &str) -> bool {
+    !value.is_empty() && value.len() <= MAX_REF_BYTES && value.bytes().all(is_allowed_ref_char)
+}
+
+fn validate_ref(column: &'static str, value: &str) -> Result<(), StoreError> {
+    if is_synthetic_ref(value) {
+        Ok(())
+    } else {
+        Err(StoreError::InvalidReference { column })
+    }
+}
+
+fn validate_opt_ref(column: &'static str, value: Option<&str>) -> Result<(), StoreError> {
+    match value {
+        Some(v) => validate_ref(column, v),
+        None => Ok(()),
+    }
+}
+
+fn validate_scope(column: &'static str, value: &str) -> Result<(), StoreError> {
+    if is_synthetic_scope(value) {
+        Ok(())
+    } else {
+        Err(StoreError::InvalidReference { column })
+    }
+}
 
 /// 合成データ用のメモリ内保存部。ディスクには書かない。
 #[derive(Debug, Default)]
@@ -606,13 +697,20 @@ impl DataStore {
 
     /// 根拠記録を 1 件作る。ID・版・時刻・status（`pending`）・epoch はサーバー付け
     /// （要求からは指定できない）。作成直後は未確定（[`BasisStatus::Pending`]）で、
-    /// 同意根拠として使える状態にはしない。
+    /// 同意根拠として使える状態にはしない。`scope` と参照列（`*_ref`）は保存前に
+    /// 合成の参照形式の検証を通り、形式に合わない値（本文や人物情報の自由文)は
+    /// [`StoreError::InvalidReference`] として保存しない（参照列は参照だけにする）。
+    ///
+    /// # Errors
+    /// `scope` または参照列が合成の参照形式でないとき
+    /// [`StoreError::InvalidReference`]。
     pub fn create_basis_record(
         &mut self,
         workspace_id: &WorkspaceId,
         input: NewBasisRecord,
         now: TsMs,
-    ) -> BasisRecord {
+    ) -> Result<BasisRecord, StoreError> {
+        input.validate()?;
         self.next_basis += 1;
         let record = BasisRecord {
             workspace_id: workspace_id.clone(),
@@ -635,7 +733,7 @@ impl DataStore {
             epoch: 1,
         };
         self.basis_records.push(record.clone());
-        record
+        Ok(record)
     }
 
     /// workspace の根拠記録一覧。
@@ -662,10 +760,13 @@ impl DataStore {
     /// 撤回する（取得と同じ 1 操作）。対象の `epoch` を 1 進め、`withdrawn_at`（サーバー
     /// 付け）と status を更新する。撤回後の読取・検索・AI 入力の拒否そのものは
     /// QA-GDPR-03 の範囲（ここでは実装しない）。撤回済みの記録の再撤回も受け付ける
-    /// （epoch をさらに進める。取得より難しい別手順にはしない）。
+    /// （epoch をさらに進める。取得より難しい別手順にはしない）。`withdrawal_method_ref`
+    /// は合成の参照形式だけを受け付ける（形式に合わない値は保存しない）。
     ///
     /// # Errors
     /// 対象の記録が見つからないとき [`StoreError::NotFound`]。
+    /// `withdrawal_method_ref` が合成の参照形式でないとき
+    /// [`StoreError::InvalidReference`]（この場合状態を変えない）。
     pub fn withdraw_basis_record(
         &mut self,
         workspace_id: &WorkspaceId,
@@ -673,6 +774,7 @@ impl DataStore {
         withdrawal_method_ref: Option<String>,
         now: TsMs,
     ) -> Result<BasisRecord, StoreError> {
+        validate_opt_ref("withdrawal_method_ref", withdrawal_method_ref.as_deref())?;
         let Some(record) = self
             .basis_records
             .iter_mut()
@@ -690,13 +792,20 @@ impl DataStore {
     }
 
     /// 利用方針を 1 件作る（version はサーバー付け。同じ workspace × purpose で
-    /// 1 から振る）。変更前の版は証拠参照として削除せず残す。
+    /// 1 から振る）。変更前の版は証拠参照として削除せず残す。`source_scope` と
+    /// `retention_policy_ref` は保存前に合成の参照形式の検証を通り、形式に合わない
+    /// 値は [`StoreError::InvalidReference`] として保存しない。
+    ///
+    /// # Errors
+    /// `source_scope` または `retention_policy_ref` が合成の参照形式でないとき
+    /// [`StoreError::InvalidReference`]。
     pub fn create_use_policy(
         &mut self,
         workspace_id: &WorkspaceId,
         input: NewUsePolicy,
         now: TsMs,
-    ) -> UsePolicy {
+    ) -> Result<UsePolicy, StoreError> {
+        input.validate()?;
         let version = u64::try_from(
             self.use_policies
                 .iter()
@@ -718,7 +827,7 @@ impl DataStore {
             created_at: now,
         };
         self.use_policies.push(policy.clone());
-        policy
+        Ok(policy)
     }
 
     /// workspace の利用方針一覧（変更前の版を含む）。
@@ -858,7 +967,9 @@ mod tests {
     fn basis_records_are_created_and_read_for_all_purposes() {
         let mut store = DataStore::new();
         for (i, purpose) in PurposeId::ALL.iter().enumerate() {
-            let rec = store.create_basis_record(&ws(), new_basis(*purpose), 1000 + i as TsMs);
+            let rec = store
+                .create_basis_record(&ws(), new_basis(*purpose), 1000 + i as TsMs)
+                .expect("正当な参照形式で作成できる");
             assert_eq!(rec.purpose_id, *purpose);
             assert_eq!(rec.basis_id.as_str(), format!("bas-{:08}", i + 1));
             assert_eq!(rec.status, BasisStatus::Pending, "作成直後は未確定");
@@ -899,8 +1010,12 @@ mod tests {
             20,
         );
 
-        let rec = store.create_basis_record(&ws(), new_basis(PurposeId::P03), 30);
-        let pol = store.create_use_policy(&ws(), new_policy("expl-v1"), 40);
+        let rec = store
+            .create_basis_record(&ws(), new_basis(PurposeId::P03), 30)
+            .expect("create basis");
+        let pol = store
+            .create_use_policy(&ws(), new_policy("expl-v1"), 40)
+            .expect("create policy");
 
         let rec_json = serde_json::to_string(&rec).expect("basis record serializes");
         let pol_json = serde_json::to_string(&pol).expect("use policy serializes");
@@ -937,7 +1052,9 @@ mod tests {
     #[test]
     fn server_assigns_ids_timestamps_and_epoch_at_creation() {
         let mut store = DataStore::new();
-        let rec = store.create_basis_record(&ws(), new_basis(PurposeId::P06), 12_345);
+        let rec = store
+            .create_basis_record(&ws(), new_basis(PurposeId::P06), 12_345)
+            .expect("create basis");
         assert_eq!(rec.basis_id.as_str(), "bas-00000001", "ID はサーバー採番");
         assert_eq!(rec.basis_version, 1, "版はサーバー採番");
         assert_eq!(rec.epoch, 1, "epoch はサーバー採番");
@@ -946,7 +1063,9 @@ mod tests {
         assert_eq!(rec.withdrawn_at, None);
         assert_eq!(rec.status, BasisStatus::Pending);
         // 2 件目は別のサーバー ID。
-        let rec2 = store.create_basis_record(&ws(), new_basis(PurposeId::P06), 12_500);
+        let rec2 = store
+            .create_basis_record(&ws(), new_basis(PurposeId::P06), 12_500)
+            .expect("create basis 2");
         assert_eq!(rec2.basis_id.as_str(), "bas-00000002");
     }
 
@@ -963,7 +1082,9 @@ mod tests {
         }
         // 未確定（pending）の根拠記録を作っても有効にしない。
         for purpose in [PurposeId::P03, PurposeId::P04, PurposeId::P06] {
-            store.create_basis_record(&ws(), new_basis(purpose), 100);
+            store
+                .create_basis_record(&ws(), new_basis(purpose), 100)
+                .expect("create basis");
         }
         for purpose in PurposeId::ALL {
             assert!(
@@ -983,7 +1104,9 @@ mod tests {
     #[test]
     fn withdrawal_updates_epoch_status_and_time_in_one_call() {
         let mut store = DataStore::new();
-        let rec = store.create_basis_record(&ws(), new_basis(PurposeId::P03), 1000);
+        let rec = store
+            .create_basis_record(&ws(), new_basis(PurposeId::P03), 1000)
+            .expect("create basis");
         assert_eq!(rec.epoch, 1);
         assert_eq!(rec.status, BasisStatus::Pending);
 
@@ -1083,9 +1206,13 @@ mod tests {
     #[test]
     fn use_policy_keeps_previous_versions() {
         let mut store = DataStore::new();
-        let p1 = store.create_use_policy(&ws(), new_policy("expl-v1"), 10);
+        let p1 = store
+            .create_use_policy(&ws(), new_policy("expl-v1"), 10)
+            .expect("create policy");
         assert_eq!(p1.version, 1);
-        let p2 = store.create_use_policy(&ws(), new_policy("expl-v2"), 20);
+        let p2 = store
+            .create_use_policy(&ws(), new_policy("expl-v2"), 20)
+            .expect("create policy 2");
         assert_eq!(p2.version, 2, "版はサーバーが進める");
         let all = store.use_policies(&ws());
         assert_eq!(all.len(), 2, "変更前の版も残る");
@@ -1113,6 +1240,145 @@ mod tests {
         assert_ne!(HaltKind::OperationCancellation, HaltKind::BasisInvalidation);
         assert_ne!(HaltKind::BasisInvalidation, HaltKind::DeletionSuspension);
         assert_eq!(store.deletion_restrictions(&ws()).len(), 1);
+    }
+
+    // テスト8(contract 側): 参照列・scope は合成の参照形式だけを受け付ける。
+    // 本文 canary(単体・混在)や自由文・空・長すぎは InvalidReference として保存しない。
+    #[test]
+    fn reference_columns_accept_only_synthetic_reference_forms() {
+        let mut store = DataStore::new();
+        // scope の不正値: canary 単体・canary 混在・空・大文字・空白・多バイト・長すぎ。
+        let bad_scopes = [
+            CANARY_BODY.to_owned(),
+            format!("ch-synthetic-02 {CANARY_BODY}"),
+            String::new(),
+            "CH-synthetic-02".to_owned(),
+            "ch synthetic".to_owned(),
+            "チャンネル".to_owned(),
+            "ref:x".to_owned(), // scope に参照プレフィックスは付けさせない
+            format!("{}x", "a".repeat(MAX_REF_BYTES)),
+        ];
+        for bad in &bad_scopes {
+            let mut input = new_basis(PurposeId::P03);
+            input.scope = bad.clone();
+            assert_eq!(
+                store.create_basis_record(&ws(), input.clone(), 1),
+                Err(StoreError::InvalidReference { column: "scope" }),
+                "scope が受理されている: {bad:?}"
+            );
+        }
+        // 参照列も同じ(canary・`ref:` 無し・空・混在・大文字)。
+        for bad in [
+            CANARY_BODY.to_owned(),
+            format!("ref:evidence-1 {CANARY_BODY}"),
+            String::new(),
+            "evidence-1".to_owned(),
+            "REF:evidence-1".to_owned(),
+            "ref:にほんご".to_owned(),
+        ] {
+            let mut input = new_basis(PurposeId::P03);
+            input.evidence_ref = bad.clone();
+            assert_eq!(
+                store.create_basis_record(&ws(), input.clone(), 1),
+                Err(StoreError::InvalidReference {
+                    column: "evidence_ref"
+                }),
+                "evidence_ref が受理されている: {bad:?}"
+            );
+            let mut input = new_basis(PurposeId::P03);
+            input.party_coverage_ref = bad.clone();
+            assert_eq!(
+                store.create_basis_record(&ws(), input.clone(), 1),
+                Err(StoreError::InvalidReference {
+                    column: "party_coverage_ref"
+                }),
+                "party_coverage_ref が受理されている: {bad:?}"
+            );
+            let mut input = new_basis(PurposeId::P03);
+            input.grantor_ref = bad.clone();
+            assert_eq!(
+                store.create_basis_record(&ws(), input.clone(), 1),
+                Err(StoreError::InvalidReference {
+                    column: "grantor_ref"
+                }),
+                "grantor_ref が受理されている: {bad:?}"
+            );
+            let mut input = new_basis(PurposeId::P03);
+            input.representative_authority_ref = Some(bad.clone());
+            assert_eq!(
+                store.create_basis_record(&ws(), input.clone(), 1),
+                Err(StoreError::InvalidReference {
+                    column: "representative_authority_ref"
+                }),
+                "representative_authority_ref が受理されている: {bad:?}"
+            );
+        }
+        // representative_authority_ref = None は正当(必須ではない)。
+        store
+            .create_basis_record(&ws(), new_basis(PurposeId::P03), 1)
+            .expect("None は正当");
+        // 不正値は 1 件も保存されていない。
+        assert_eq!(store.basis_records(&ws()).len(), 1);
+        // 正当な形式の参照列はそのまま保存される(参照だけが残る)。
+        let (saved_scope, saved_evidence, basis_id) = {
+            let rec = &store.basis_records(&ws())[0];
+            (
+                rec.scope.clone(),
+                rec.evidence_ref.clone(),
+                rec.basis_id.clone(),
+            )
+        };
+        assert_eq!(saved_scope, "ch-synthetic-02");
+        assert_eq!(saved_evidence, "ref:evidence-1");
+
+        // 利用方針: source_scope / retention_policy_ref も同じ検査。
+        for bad in [
+            CANARY_BODY.to_owned(),
+            format!("ch-synthetic-02 {CANARY_BODY}"),
+            "ref:retention-1 x!".to_owned(),
+        ] {
+            let mut policy = new_policy("expl-v1");
+            policy.source_scope = bad.clone();
+            assert_eq!(
+                store.create_use_policy(&ws(), policy.clone(), 2),
+                Err(StoreError::InvalidReference {
+                    column: "source_scope"
+                }),
+                "source_scope が受理されている: {bad:?}"
+            );
+            let mut policy = new_policy("expl-v1");
+            policy.retention_policy_ref = bad.clone();
+            assert_eq!(
+                store.create_use_policy(&ws(), policy.clone(), 2),
+                Err(StoreError::InvalidReference {
+                    column: "retention_policy_ref"
+                }),
+                "retention_policy_ref が受理されている: {bad:?}"
+            );
+        }
+        assert!(store.use_policies(&ws()).is_empty());
+
+        // 撤回: withdrawal_method_ref に canary は InvalidReference(状態を変えない)。
+        assert_eq!(
+            store.withdraw_basis_record(
+                &ws(),
+                &basis_id,
+                Some(format!("ref:withdraw-method-1 {CANARY_BODY}")),
+                3
+            ),
+            Err(StoreError::InvalidReference {
+                column: "withdrawal_method_ref"
+            })
+        );
+        let unchanged = store.basis_record(&ws(), &basis_id).expect("record");
+        assert_eq!(unchanged.epoch, 1, "検証失敗で epoch は進まない");
+        assert_eq!(unchanged.status, BasisStatus::Pending);
+
+        // 陽性対照: canary を含む文字列は同じ直列化検査で見つかる。
+        // (canary 入り参照が保存されることがあれば直列化に出る、の対照。
+        //   上の検査で保存は拒否されるため、ここでは文字列検査の有効性だけ示す。)
+        let positive = serde_json::to_string(&json!({ "scope": CANARY_BODY })).expect("json");
+        assert_eq!(positive.matches(CANARY_BODY).count(), 1);
     }
 
     // 登録簿: 各保存部が自分を登録し、外の保存部（07 のログ出力先など）も登録できる。
