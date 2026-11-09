@@ -7,12 +7,16 @@ use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use pelway_contract::approval::ApproveRequest;
 use pelway_contract::ids::IdempotencyKey;
 use pelway_contract::ledger::{ApprovalLedger, BeginApproval, NewCard};
 use pelway_contract::task::ActionKind;
-use pelway_http::{MAX_BODY_BYTES, SharedLedger, serve};
+use pelway_http::{
+    CONNECTION_DEADLINE, MAX_BODY_BYTES, MAX_HEAD_BYTES, SharedLedger, serve,
+    serve_with_connection_deadline,
+};
 use serde_json::{Value, json};
 
 fn new_card(id: &str) -> NewCard {
@@ -300,21 +304,31 @@ fn malformed_json_400_and_oversized_413_keep_state() {
     assert_eq!(card_state(&ledger, "card-f"), before);
 }
 
-// (g) ループバック以外の待ち受けアドレスでの起動は拒否される。
+// (g) 127.0.0.1 以外の待ち受けアドレスでの起動は拒否される。
+// 127.0.0.2 など 127/8 のほかのアドレスも拒否（リード決定 2026-11-09 19:14）。
 #[test]
 fn serve_refuses_non_loopback_addresses() {
     let ledger = shared_ledger(&[]);
-    for bad in ["0.0.0.0:0", "192.168.0.1:8080", "[::]:0", "[::1]:0"] {
+    for bad in [
+        "0.0.0.0:0",
+        "192.168.0.1:8080",
+        "[::]:0",
+        "[::1]:0",
+        "127.0.0.2:0",
+        "127.255.255.255:0",
+    ] {
         let addr: SocketAddr = bad.parse().unwrap();
         assert!(serve(addr, Arc::clone(&ledger)).is_err(), "{bad}");
     }
 }
 
-// (h) ロックが poison したら 500。状態には触らない。
+// (h) ロックが poison したら 500。状態には触らない。本文 JSON は code 以外に
+// 何も含まない（エラー文・ファイルパス・型名・panic の文を出さない）。
 #[test]
-fn poisoned_lock_returns_500() {
+fn poisoned_lock_returns_500_with_exact_body_and_keeps_state() {
     let ledger = shared_ledger(&["card-p"]);
     let addr = spawn_server(Arc::clone(&ledger));
+    let before = card_state(&ledger, "card-p");
 
     // 別スレッドでロックを保持したまま panic させ、poison させる。
     let poison_ledger = Arc::clone(&ledger);
@@ -325,9 +339,37 @@ fn poisoned_lock_returns_500() {
     .join();
     assert!(ledger.is_poisoned());
 
-    let (status, json) = post_comments(addr, "card-p", "poison 後のコメント");
+    let (status, body) = http(
+        addr,
+        "POST",
+        "/v1/cards/card-p/comments",
+        &[
+            ("Content-Type", "application/json"),
+            ("x-pelway-member-id", "m-human-http"),
+            ("x-pelway-member-kind", "human"),
+        ],
+        json!({"card_id": "card-p", "body": "poison 後のコメント"})
+            .to_string()
+            .as_bytes(),
+    );
     assert_eq!(status, 500);
-    assert_eq!(json["code"], "internal");
+    // 本文のキーと値をすべて確かめる（余分なキーは無いこと）。
+    let json: Value = serde_json::from_str(&body).expect("500 body is JSON");
+    assert_eq!(json, json!({"code": "internal"}), "body: {body}");
+    assert_eq!(body, "{\"code\":\"internal\"}");
+    assert!(!body.contains("poison"), "body: {body}");
+    assert!(!body.contains("panicked"), "body: {body}");
+    assert!(!body.contains("ledger"), "body: {body}");
+
+    // poison したロックは into_inner で読み、状態が変わっていないことを見る。
+    let after = {
+        let g = ledger
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let c = g.card(&"card-p".into()).expect("card");
+        (c.snapshot_hash.clone(), c.comments.len(), c.card_version)
+    };
+    assert_eq!(after, before);
 }
 
 // (i) 経路の card_id と本文の card_id の食い違いは 422 card_id_mismatch。
@@ -513,4 +555,216 @@ fn post_json_with_headers(
     let (status, body) = http(addr, "POST", path, &headers, body.as_bytes());
     let json = serde_json::from_str(&body).unwrap_or(Value::Null);
     (status, json)
+}
+
+/// 応答全体（状態行 + ヘッダー + 本文）から (状態コード, 本文の JSON) を取り出す。
+fn parse_response(buf: &str) -> (u16, Value) {
+    let status = buf
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .expect("status line");
+    let body = buf.split("\r\n\r\n").nth(1).unwrap_or("");
+    (status, serde_json::from_str(body).unwrap_or(Value::Null))
+}
+
+/// ヘッダー全体（最後の空行まで）の合計バイト数が total になるよう、X-Pad の値で
+/// 詰め物をした comments 要求のヘッダーを作る（(n) 用）。
+fn head_padded_to(total: usize, card: &str, body_len: usize) -> String {
+    let pre = format!(
+        "POST /v1/cards/{card}/comments HTTP/1.1\r\nHost: demo.local\r\n\
+         Content-Type: application/json\r\n\
+         x-pelway-member-id: m-human-http\r\nx-pelway-member-kind: human\r\n"
+    );
+    let post = format!("Content-Length: {body_len}\r\n\r\n");
+    let pad = total - pre.len() - post.len() - "X-Pad: ".len() - "\r\n".len();
+    assert!(pad > 0, "no room to pad to {total}");
+    let head = format!("{pre}X-Pad: {}\r\n{post}", "p".repeat(pad));
+    assert_eq!(head.len(), total);
+    head
+}
+
+// (n) ヘッダーの合計バイト数は 16 KiB ちょうどまで受理、16 KiB+1 は 431。
+// 16 KiB+1 のケースでは終端（空行）が上限を超えた最後の読み取りに含まれるが、
+// やはり 431（受け取った合計バイト数で判定するため）。
+#[test]
+fn head_bytes_exactly_16kib_ok_and_one_more_431() {
+    let ledger = shared_ledger(&["card-n"]);
+    let addr = spawn_server(ledger.clone());
+    let body = json!({"card_id": "card-n", "body": "本文"}).to_string();
+
+    // 16 KiB ちょうど: ヘッダーだけを先に送って読み終えてもらい、それから本体を送る
+    // （本体まで同じ読み取りに含まれると、受け取った合計が上限を超えてしまうため）。
+    let head = head_padded_to(MAX_HEAD_BYTES, "card-n", body.len());
+    let mut stream = TcpStream::connect(addr).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("client read timeout");
+    stream.write_all(head.as_bytes()).expect("write head");
+    thread::sleep(Duration::from_millis(300));
+    stream.write_all(body.as_bytes()).expect("write body");
+    let _ = stream.shutdown(Shutdown::Write);
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf).expect("read response");
+    let (status, json) = parse_response(&buf);
+    assert_eq!(status, 200, "16 KiB ちょうどは受理される: {buf}");
+    assert_eq!(json["card_id"], "card-n");
+    assert_eq!(json["state"], "awaiting_send_approval");
+
+    // 16 KiB + 1 バイト: 終端（空行）はこの最後の 1 バイトで完成するが、
+    // 受け取った合計バイト数が上限を超えるので 431。
+    let head = head_padded_to(MAX_HEAD_BYTES + 1, "card-n", body.len());
+    let mut stream = TcpStream::connect(addr).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("client read timeout");
+    stream.write_all(head.as_bytes()).expect("write head");
+    stream.write_all(body.as_bytes()).expect("write body");
+    let _ = stream.shutdown(Shutdown::Write);
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf).expect("read response");
+    let (status, json) = parse_response(&buf);
+    assert_eq!(status, 431, "16 KiB+1 は 431: {buf}");
+    assert_eq!(json["code"], "headers_too_large");
+}
+
+// (o) リクエスト行の HTTP バージョンは HTTP/1.1 の形だけ。ヘッダー名は空・空白・
+// 区切り文字入り（RFC 9110 の token でない）なら 400。有効な Content-Length と本文を
+// 付けて送っても受理せず、カードの状態（hash・コメント数・版）も変わらない。
+#[test]
+fn bad_version_and_bad_header_names_return_400_and_keep_state() {
+    let ledger = shared_ledger(&["card-o"]);
+    let addr = spawn_server(ledger.clone());
+    let before = card_state(&ledger, "card-o");
+    let body = json!({"card_id": "card-o", "body": "本文"}).to_string();
+
+    let raw_for = |version: &str, extra: &str| {
+        format!(
+            "POST /v1/cards/card-o/comments {version}\r\nHost: demo.local\r\n\
+             x-pelway-member-id: m-human-http\r\nx-pelway-member-kind: human\r\n\
+             {extra}Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+    };
+    for (label, raw) in [
+        ("HTTP/2.0", raw_for("HTTP/2.0", "")),
+        ("HTTP/1.0", raw_for("HTTP/1.0", "")),
+        ("HTTP バージョンでない", raw_for("FOO/1.1", "")),
+        ("空のヘッダー名", raw_for("HTTP/1.1", ": no name\r\n")),
+        (
+            "空白を含むヘッダー名",
+            raw_for("HTTP/1.1", "X-Bad Name: v\r\n"),
+        ),
+        ("コロンの前の空白", raw_for("HTTP/1.1", "X-Bad : v\r\n")),
+        (
+            "区切り文字を含むヘッダー名",
+            raw_for("HTTP/1.1", "X-Bad(): v\r\n"),
+        ),
+    ] {
+        let (status, json) = http_raw(addr, &raw);
+        assert_eq!(status, 400, "{label}");
+        assert_eq!(json["code"], "bad_request", "{label}");
+    }
+    assert_eq!(card_state(&ledger, "card-o"), before);
+}
+
+// (p) 全体期限: 3 秒未満の間隔で少しずつ送り続ける接続は、期限（本番 10 秒）で
+// 408 を返して切断される。テストでは期限を短く差し替える。
+#[test]
+fn slow_trickle_head_hits_connection_deadline() {
+    assert_eq!(
+        CONNECTION_DEADLINE,
+        Duration::from_secs(10),
+        "本番の全体期限は 10 秒のまま"
+    );
+    let ledger = shared_ledger(&[]);
+    let addr = serve_with_connection_deadline(
+        "127.0.0.1:0".parse().unwrap(),
+        ledger,
+        Duration::from_millis(800),
+    )
+    .expect("serve with short deadline")
+    .local_addr();
+
+    let mut writer = TcpStream::connect(addr).expect("connect");
+    let mut reader = writer.try_clone().expect("clone reader");
+    let started = Instant::now();
+    let reader_handle = thread::spawn(move || {
+        reader
+            .set_read_timeout(Some(Duration::from_secs(4)))
+            .expect("reader timeout");
+        let mut buf = String::new();
+        let _ = reader.read_to_string(&mut buf);
+        buf
+    });
+    writer
+        .write_all(b"POST /v1/cards/card-p/comments HTTP/1.1\r\nHost: d\r\n")
+        .expect("write first line");
+    // 3 秒未満の間隔で送り続けるので、1 回の読み取りタイムアウト（3 秒）には引っかからない。
+    for _ in 0..40 {
+        thread::sleep(Duration::from_millis(150));
+        if writer.write_all(b"X-Trickle: 1\r\n").is_err() {
+            break; // サーバーに切断された
+        }
+    }
+    let buf = reader_handle.join().expect("join reader");
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(600),
+        "期限前に切断された: {elapsed:?}"
+    );
+    assert!(
+        elapsed <= Duration::from_millis(2500),
+        "期限前後で切断されない: {elapsed:?}"
+    );
+    assert!(buf.starts_with("HTTP/1.1 408"), "got: {buf}");
+    assert!(buf.contains("request_timeout"), "got: {buf}");
+}
+
+// (q) 413 のあとの読み捨ても全体期限で打ち切る。3 秒未満の間隔で送り続けると、
+// 期限で接続を閉じられる（読み捨ての 1 MiB 上限はそのまま）。
+#[test]
+fn slow_trickle_after_413_stops_draining_at_deadline() {
+    let ledger = shared_ledger(&["card-q"]);
+    let addr = serve_with_connection_deadline(
+        "127.0.0.1:0".parse().unwrap(),
+        ledger,
+        Duration::from_millis(800),
+    )
+    .expect("serve with short deadline")
+    .local_addr();
+
+    let mut stream = TcpStream::connect(addr).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .expect("client read timeout");
+    stream
+        .write_all(
+            b"POST /v1/cards/card-q/comments HTTP/1.1\r\nHost: d\r\n\
+               Content-Length: 100000\r\n\r\n",
+        )
+        .expect("write head");
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf).expect("413 arrives first");
+    assert!(buf.starts_with("HTTP/1.1 413"), "got: {buf}");
+
+    // 応答のあと、3 秒未満の間隔で少しずつ送り続ける。
+    let started = Instant::now();
+    let mut closed_at = None;
+    for _ in 0..20 {
+        thread::sleep(Duration::from_millis(150));
+        if stream.write_all(b"trickle").is_err() {
+            closed_at = Some(started.elapsed());
+            break; // サーバーに切断された
+        }
+    }
+    let closed_at = closed_at.unwrap_or_else(|| started.elapsed());
+    assert!(
+        closed_at >= Duration::from_millis(600),
+        "期限前に切断された: {closed_at:?}"
+    );
+    assert!(
+        closed_at <= Duration::from_millis(2500),
+        "期限前後で切断されない: {closed_at:?}"
+    );
 }

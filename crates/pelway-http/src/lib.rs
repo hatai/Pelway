@@ -5,21 +5,26 @@
 //!   **仮の経路** `POST /v1/cards/{card_id}/comments` と `POST /v1/cards/{card_id}/approve`。
 //! - 認証は無い（デモ用）。要求者は合成ヘッダー（`x-pelway-member-id`、
 //!   `x-pelway-member-kind: human|ai`）で受ける。
-//! - 待ち受けは 127.0.0.1（IPv4 ループバック 127.0.0.0/8）だけ。`::1` を含む IPv6 や
-//!   ほかのアドレスは拒否（QA 18:21 の「127.0.0.1 だけ」に忠実に）。外部への接続はしない。
+//! - 待ち受けは 127.0.0.1 だけ。127.0.0.2 など 127/8 のほかのアドレスや `::1` を含む
+//!   IPv6 も拒否（QA 18:21、リード決定 2026-11-09 19:14）。外部への接続はしない。
 //! - [`ApprovalLedger`](pelway_contract::ledger::ApprovalLedger) 全体を 1 つの
 //!   `std::sync::Mutex` で包んで共有する。1 つの要求の中で予約から模擬送信・
 //!   完了までをロックを持ったまま行い、途中で別の要求が割り込まない。
 //!   ロックが poison した場合は 500 を返して状態を変えない。
 //! - 要求本文の上限は [`MAX_BODY_BYTES`]（64 KiB）。`Content-Length` が上限を超えたら
 //!   **本文を読み込む前に** 413 を返す（残余の読み捨ては応答の後）。
-//!   ヘッダーは大きさ [`MAX_HEAD_BYTES`] と行数 [`MAX_HEADER_LINES`] で制限し、
-//!   超えたら 431。
+//!   ヘッダーは大きさ [`MAX_HEAD_BYTES`]（受け取った合計バイト数で判定）と行数
+//!   [`MAX_HEADER_LINES`] で制限し、超えたら 431。
 //! - `Content-Length` は ASCII 数字 1 つだけを受け付ける（重複・負・`+` 付き・非数字は 400）。
 //!   `Transfer-Encoding` 付きの要求は扱わず 400。不正な JSON も 400。
-//!   どちらも台帳の状態は変えない。
-//! - 読み取りは [`READ_TIMEOUT`] 秒で打ち切る（408 `request_timeout`）。止まった接続が
-//!   あっても、接続ごとにスレッドを割り当てるため他の要求は処理される。
+//!   リクエスト行の HTTP バージョンは `HTTP/1.1` の形だけ、ヘッダー名は RFC 9110 の
+//!   token（空・空白・区切り文字入りは不可）でなければ 400。
+//!   いずれも台帳の状態は変えない。
+//! - 読み取りは [`READ_TIMEOUT`] 秒で打ち切る（408 `request_timeout`）。さらにヘッダー
+//!   読み取りと 413 後の読み捨てを合わせた 1 接続あたりの全体期限
+//!   [`CONNECTION_DEADLINE`]（10 秒）があり、超えたら 408 を返して接続を閉じる
+//!   （リード決定 2026-11-09 19:15）。止まった接続があっても、接続ごとにスレッドを
+//!   割り当てるため他の要求は処理される。
 //! - 応答のエラー本文は契約エラー（`ApproveError` / `CommentError`）と同じ形の
 //!   JSON（tag="code"、snake_case）。HTTP 層独自のエラーも [`HttpError`] で同じ形にする。
 
@@ -37,6 +42,9 @@ use serde::Serialize;
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 /// 読み取りのタイムアウト。超えた接続は 408 で切断する。
 pub const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+/// 1 接続の全体期限（ヘッダー読み取りと 413 後の読み捨ての合計）。
+/// 超えたら 408 を返して接続を閉じる（リード決定 2026-11-09 19:15）。
+pub const CONNECTION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
 /// ヘッダ部の上限（バイト）。超えたら 431。
 pub const MAX_HEAD_BYTES: usize = 16 * 1024;
 /// ヘッダ行数の上限。超えたら 431。
@@ -53,7 +61,7 @@ pub type SharedLedger = Arc<Mutex<ApprovalLedger>>;
 /// 起動の失敗。
 #[derive(Debug)]
 pub enum ServeError {
-    /// 127.0.0.1（IPv4 ループバック）以外の待ち受けアドレス。`::1` も含む。
+    /// 127.0.0.1 以外の待ち受けアドレス。127.0.0.2 など 127/8 のほか、`::1` も含む。
     NotLoopback(SocketAddr),
     /// ソケットの失敗。
     Io(std::io::Error),
@@ -63,10 +71,7 @@ impl std::fmt::Display for ServeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotLoopback(addr) => {
-                write!(
-                    f,
-                    "serve address must be IPv4 loopback (127.0.0.1), got {addr}"
-                )
+                write!(f, "serve address must be exactly 127.0.0.1, got {addr}")
             }
             Self::Io(e) => write!(f, "{e}"),
         }
@@ -90,7 +95,8 @@ pub enum HttpError {
     MethodNotAllowed,
     /// 本文が [`MAX_BODY_BYTES`] を超えた。
     PayloadTooLarge,
-    /// 読み取りが [`READ_TIMEOUT`] 秒を超えた。
+    /// 読み取りが [`READ_TIMEOUT`] 秒を超えた、または接続全体が
+    /// [`CONNECTION_DEADLINE`] を超えた。
     RequestTimeout,
     /// ヘッダーが大きすぎる、または行数が [`MAX_HEADER_LINES`] を超えた。
     HeadersTooLarge,
@@ -172,10 +178,24 @@ impl Server {
 /// サーバーを起動する。接続ごとにスレッドを割り当てる。
 ///
 /// # Errors
-/// 127.0.0.1（IPv4 ループバック）以外のアドレス、またはソケットの失敗。
+/// 127.0.0.1 以外のアドレス、またはソケットの失敗。
 pub fn serve(addr: SocketAddr, ledger: SharedLedger) -> Result<Server, ServeError> {
-    // 待ち受けは 127.0.0.1 だけ（QA 18:21 の1点目）。::1 を含む IPv6 は拒否する。
-    if !matches!(addr.ip(), std::net::IpAddr::V4(v4) if v4.is_loopback()) {
+    serve_with_connection_deadline(addr, ledger, CONNECTION_DEADLINE)
+}
+
+/// [`serve`] と同じだが、1 接続の全体期限（既定は [`CONNECTION_DEADLINE`]）を指定できる。
+/// テストで短い期限を注入するために分けてある。
+///
+/// # Errors
+/// 127.0.0.1 以外のアドレス、またはソケットの失敗。
+pub fn serve_with_connection_deadline(
+    addr: SocketAddr,
+    ledger: SharedLedger,
+    connection_deadline: std::time::Duration,
+) -> Result<Server, ServeError> {
+    // 待ち受けは 127.0.0.1 だけ（QA 18:21、リード決定 2026-11-09 19:14）。
+    // 127.0.0.2 など 127/8 のほか、`::1` を含む IPv6 も拒否する。
+    if addr.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
         return Err(ServeError::NotLoopback(addr));
     }
     let listener = TcpListener::bind(addr).map_err(ServeError::Io)?;
@@ -185,7 +205,7 @@ pub fn serve(addr: SocketAddr, ledger: SharedLedger) -> Result<Server, ServeErro
             let (Ok(mut stream), ledger) = (stream, Arc::clone(&ledger)) else {
                 continue;
             };
-            std::thread::spawn(move || handle_conn(&mut stream, &ledger));
+            std::thread::spawn(move || handle_conn(&mut stream, &ledger, connection_deadline));
         }
     });
     Ok(Server { addr })
@@ -198,23 +218,32 @@ struct Request {
     body: Vec<u8>,
 }
 
-fn handle_conn(stream: &mut TcpStream, ledger: &SharedLedger) {
+fn handle_conn(
+    stream: &mut TcpStream,
+    ledger: &SharedLedger,
+    connection_deadline: std::time::Duration,
+) {
+    // 全体期限（リード決定 2026-11-09 19:15）: ヘッダー読み取りと 413 後の読み捨ての合計。
+    let deadline = std::time::Instant::now() + connection_deadline;
     let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
-    let response = match read_request(stream) {
+    let response = match read_request(stream, deadline) {
         Ok(req) => route(&req, ledger),
         Err(resp) => resp,
     };
     write_response(stream, &response);
     // 413 のときは応答を先に書き、残りはこの後で読み捨てる。
     if let Some(remaining) = response.drain_after_write {
-        drain(stream, remaining);
+        drain(stream, remaining, deadline);
     }
 }
 
-/// 応答後の読み捨て。EOF・タイムアウト・エラーは打ち切って終了。
-fn drain(stream: &mut TcpStream, mut remaining: usize) {
+/// 応答後の読み捨て。EOF・タイムアウト・エラー、または全体期限で打ち切って終了。
+fn drain(stream: &mut TcpStream, mut remaining: usize, deadline: std::time::Instant) {
     let mut sink = [0u8; 4096];
     while remaining > 0 {
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
         match stream.read(&mut sink) {
             Ok(0) | Err(_) => break,
             Ok(n) => remaining -= n.min(remaining),
@@ -242,17 +271,45 @@ fn find_terminate(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
-/// 要求を読む。ヘッダ上限・Content-Length の検査・本文上限をここで行う。
+/// RFC 9110 の token 構成文字（tchar）なら true。ヘッダー名は 1*token でなければ 400。
+fn is_tchar(b: u8) -> bool {
+    b.is_ascii_alphanumeric()
+        || matches!(
+            b,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
+        )
+}
+
+/// 要求を読む。ヘッダ上限・Content-Length の検査・本文上限・全体期限をここで行う。
 /// `Err` のときはそのまま書くべき応答（413 は応答後に読み捨てる分を含む）。
-fn read_request(stream: &mut TcpStream) -> Result<Request, Response> {
+fn read_request(stream: &mut TcpStream, deadline: std::time::Instant) -> Result<Request, Response> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     let head_end = loop {
+        // 大きさの上限は「受け取った合計バイト数」で判定する（終端を探す前に）。
+        // 終端（空行）が上限を超えた最後の読み取りに含まれる場合も 431。
+        if buf.len() > MAX_HEAD_BYTES {
+            return Err(headers_too_large());
+        }
         if let Some(pos) = find_terminate(&buf) {
             break pos;
         }
-        if buf.len() > MAX_HEAD_BYTES {
-            return Err(headers_too_large());
+        // 全体期限（リード決定 19:15）。超えたら 408 を返して接続を閉じる。
+        if std::time::Instant::now() >= deadline {
+            return Err(request_timeout());
         }
         let n = read_once(stream, &mut chunk)?;
         if n == 0 {
@@ -264,8 +321,9 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, Response> {
     let head = String::from_utf8_lossy(&buf[..head_end]).into_owned();
     let mut lines = head.split("\r\n");
     let mut parts = lines.next().unwrap_or("").split_whitespace();
+    // リクエスト行の HTTP バージョンは HTTP/1.1 の形だけ（ほかは 400）。
     let (method, path) = match (parts.next(), parts.next(), parts.next(), parts.next()) {
-        (Some(method), Some(path), Some(_version), None) => (method, path),
+        (Some(method), Some(path), Some("HTTP/1.1"), None) => (method, path),
         _ => return Err(bad_request()),
     };
 
@@ -280,7 +338,11 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, Response> {
         let Some((name, value)) = line.split_once(':') else {
             return Err(bad_request());
         };
-        headers.push((name.trim().to_ascii_lowercase(), value.trim().to_owned()));
+        // ヘッダー名は RFC 9110 の token だけ（空・空白・区切り文字入りは 400）。
+        if name.is_empty() || !name.bytes().all(is_tchar) {
+            return Err(bad_request());
+        }
+        headers.push((name.to_ascii_lowercase(), value.trim().to_owned()));
     }
 
     let mut content_length: Option<usize> = None;
