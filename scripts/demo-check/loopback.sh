@@ -18,7 +18,7 @@
 #   既定では "runtime: PENDING (NOT IMPLEMENTED)" と表示し、static 合格なら exit 0（runtime は未検査）。
 #   DEMO_CHECK_ACCEPTANCE=1 のときは runtime PENDING を受入不合格として exit 1 にする。
 # exit 0 = static 合格（runtime は未検査、ACCEPTANCE 未設定時）/ 1 = static 違反 or ACCEPTANCE で runtime PENDING /
-# 2 = 検査異常（リスト欠落・設定やソースの走査失敗）
+# 2 = 検査異常（リスト欠落・設定やソースの走査失敗・bind 走査の停滞）
 set -uo pipefail
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -81,13 +81,23 @@ for f in "${files[@]}"; do
   while IFS= read -r ln; do
     [ -n "${ln}" ] && report "${f}:${ln}" "unspecified (all-interfaces) address"
   done < <(grep -nE "${any_re}" -- "${DC_ROOT}/${f}" | cut -d: -f1)
-  # PELWAY_BIND_ADDR を経由しない bind("...") の宛先。同じ行に複数あってもすべて検査する（指摘1）
+  # PELWAY_BIND_ADDR を経由しない bind("...") の宛先。同じ行に複数あってもすべて検査する（指摘1）。
+  # 判定関数内の [[ =~ ]] が BASH_REMATCH を上書きするため、一致全体と引数は先にコピーして使う
+  # （Codex r2 指摘1）。次の検索位置は「rest 内の一致全体の直後」とする: マッチ長だけ先頭から
+  # 進めると一致の開始位置に届かず、同じ bind を再検査して多重報告する。進まなければ exit 2。
   while IFS=: read -r ln line; do
     [ -n "${line:-}" ] || continue
     rest="${line}"
     while [[ "${rest}" =~ ${bind_cap_re} ]]; do
-      ok_bind_target "${BASH_REMATCH[2]}" || report "${f}:${ln}" "bind argument is not 127.0.0.1:<port 0-65535> or [::1]:<port 0-65535>"
-      rest="${rest:${#BASH_REMATCH[0]}}"
+      m="${BASH_REMATCH[0]}"
+      arg="${BASH_REMATCH[2]}"
+      ok_bind_target "${arg}" || report "${f}:${ln}" "bind argument is not 127.0.0.1:<port 0-65535> or [::1]:<port 0-65535>"
+      nxt="${rest#*"${m}"}"
+      if [ "${#nxt}" -eq "${#rest}" ]; then
+        echo "loopback: bind scan did not advance at ${f}:${ln}" >&2
+        exit 2
+      fi
+      rest="${nxt}"
     done
   done < <(grep -nE "${bind_scan_re}" -- "${DC_ROOT}/${f}")
 done

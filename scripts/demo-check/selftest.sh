@@ -240,6 +240,29 @@ expect_case loopback 0 "bind(\"[::1]:0\") passes" "${R}" 'fn b4() { let _ = std:
 expect_case loopback 1 "allowed bind then localhost bind on one line" "${R}" 'fn m1() { let _ = std::net::TcpListener::bind("127.0.0.1:1").unwrap(); let _ = std::net::TcpListener::bind("localhost:2").unwrap(); }\n'
 expect_case loopback 1 "localhost bind then allowed bind on one line" "${R}" 'fn m2() { let _ = std::net::TcpListener::bind("localhost:2").unwrap(); let _ = std::net::TcpListener::bind("[::1]:3").unwrap(); }\n'
 expect_case loopback 0 "two allowed binds on one line" "${R}" 'fn m3() { let _ = std::net::TcpListener::bind("127.0.0.1:1").unwrap(); let _ = std::net::TcpListener::bind("[::1]:2").unwrap(); }\n'
+# Codex r2 指摘1: 判定関数内の [[ =~ ]] が BASH_REMATCH を上書きしてもループ位置は壊れないこと
+bind_count() { printf '%s\n' "${OUT}" | grep -c 'bind argument is not' || true; }
+r="${tmp}/case"; make_clean "${r}"
+printf 'fn a0() { let _ = std::net::TcpListener::bind("localhost"); }\n' > "${r}/crates/x/src/bind0.rs"
+OUT="$(timeout 5 env DEMO_CHECK_ROOT="${r}" DEMO_CHECK_LIST_DIR="${here}" bash "${here}/loopback.sh" 2>&1)"; RC=$?
+if [ "${RC}" -eq 1 ] && [ "$(bind_count)" -eq 1 ]; then
+  ok "loopback: a portless bind argument finishes within 5s and reports exactly once"
+else ng "loopback: portless bind (exit ${RC}, reports $(bind_count))"; show "$(printf '%s\n' "${OUT}" | head -8)"; fi
+
+r="${tmp}/case"; make_clean "${r}"
+printf 'fn b0() { let _ = std::net::TcpListener::bind("0.0.0.0:80"); }\n' > "${r}/crates/x/src/bind0.rs"
+OUT="$(timeout 5 env DEMO_CHECK_ROOT="${r}" DEMO_CHECK_LIST_DIR="${here}" bash "${here}/loopback.sh" 2>&1)"; RC=$?
+if [ "${RC}" -eq 1 ] && [ "$(bind_count)" -eq 1 ]; then
+  ok "loopback: a single bad bind on a line is reported exactly once"
+else ng "loopback: single bad bind (exit ${RC}, reports $(bind_count))"; show "$(printf '%s\n' "${OUT}" | head -8)"; fi
+
+r="${tmp}/case"; make_clean "${r}"
+printf 'fn c0() { let _ = std::net::TcpListener::bind("127.0.0.1:80").unwrap(); let _ = std::net::TcpListener::bind("0.0.0.0:80").unwrap(); }\n' > "${r}/crates/x/src/bind0.rs"
+OUT="$(timeout 5 env DEMO_CHECK_ROOT="${r}" DEMO_CHECK_LIST_DIR="${here}" bash "${here}/loopback.sh" 2>&1)"; RC=$?
+if [ "${RC}" -eq 1 ] && [ "$(bind_count)" -eq 1 ]; then
+  ok "loopback: an allowed and a bad bind on one line reports only the bad one"
+else ng "loopback: allowed+bad bind (exit ${RC}, reports $(bind_count))"; show "$(printf '%s\n' "${OUT}" | head -8)"; fi
+
 # DC-06: ポートは 0〜65535（0 は自動割り当て）。65536〜99999 は違反
 expect_case loopback 1 "PELWAY_BIND_ADDR port 65536 is a violation" mise.toml '[env]\nPELWAY_BIND_ADDR = "127.0.0.1:65536"\n' replace
 expect_case loopback 1 "PELWAY_BIND_ADDR port 99999 is a violation" mise.toml '[env]\nPELWAY_BIND_ADDR = "127.0.0.1:99999"\n' replace
@@ -325,6 +348,34 @@ run_stage "${r}" canary HOME="${tmp}/fakehome"
 if [ "${RC}" -eq 2 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_PII"; then
   ok "canary: the mbx exception is only for target/ (a logs/ link into the cache exits 2)"
 else ng "canary: logs/ link into mbx cache (exit ${RC})"; show "${OUT}"; fi
+
+# Codex r2 指摘（自己テストが無かった点）: worktree の外へ出るリンクは、../ 相対・2段のリンク・
+# targets-evil のような接頭辞だけが一致する先のどれでも、外を読まずに exit 2 で終わること
+r="${tmp}/case"; make_clean "${r}"
+mkdir -p "${tmp}/outside-deeper"
+printf 'PELWAY_CANARY_BODY_7f3a\n' > "${tmp}/outside-deeper/app"
+ln -s ../outside-deeper "${r}/target"
+run_stage "${r}" canary
+if [ "${RC}" -eq 2 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_BODY"; then
+  ok "canary: a ../ relative target link outside the tree exits 2 without reading it"
+else ng "canary: ../ relative target link (exit ${RC})"; show "${OUT}"; fi
+
+r="${tmp}/case2"; make_clean "${r}"
+ln -s "${tmp}/outside-deeper" "${tmp}/hop-target"
+ln -s "${tmp}/hop-target" "${r}/target"
+run_stage "${r}" canary
+if [ "${RC}" -eq 2 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_BODY"; then
+  ok "canary: a two-hop target link outside the tree exits 2 without reading it"
+else ng "canary: two-hop target link (exit ${RC})"; show "${OUT}"; fi
+
+r="${tmp}/case3"; make_clean "${r}"
+mkdir -p "${tmp}/fakehome/.cache/mbx/targets-evil/proj"
+printf 'PELWAY_CANARY_BODY_7f3a\n' > "${tmp}/fakehome/.cache/mbx/targets-evil/proj/app"
+ln -s "${tmp}/fakehome/.cache/mbx/targets-evil/proj" "${r}/target"
+run_stage "${r}" canary HOME="${tmp}/fakehome"
+if [ "${RC}" -eq 2 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_BODY"; then
+  ok "canary: a targets-evil prefix link is outside the mbx exception (exit 2)"
+else ng "canary: targets-evil prefix link (exit ${RC})"; show "${OUT}"; fi
 
 # --- DC-04: 改行を含むファイル名でも壊れない ---
 r="${tmp}/case"; make_clean "${r}"
