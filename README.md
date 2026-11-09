@@ -36,20 +36,14 @@ Pelway名と選定済みAロゴを維持します。同名のAI教育製品に�
 前提: mise 2026.9.2 以上（これ未満では `mise.toml` の `min_version` がエラーで停止します）。未導入の場合は [公式のインストール手順](https://mise.jdx.dev/installing-mise.html) に従ってください。
 
 ```bash
-# 1. このリポジトリの mise 設定を信頼する
+# 1. このリポジトリの mise 設定を信頼する（初回のみ）
 mise trust
 
-# 2. ツール一式をユーザー領域に入れる（Rust 1.96.0・hk・fnox・pitchfork・mr boxington）
-mise install
-
-# 3. git hook をこのリポジトリだけに導入する
-mise exec -- hk install --mise
-
-# 4. 環境の一括確認（fmt / check / clippy / test / build と各種検査）
-mise run verify
-
-# 5. コンテナが必要な場合のみ: rootless Podman 一式の導入（sudo のパスワード入力あり）
-mise bootstrap packages apply --manager apt
+# 2. 環境構築を1コマンドで完了させる
+#    ツール一式（Rust 1.96.0・hk・fnox・pitchfork・mr boxington）→
+#    rootless Podman 一式（確認プロンプトと sudo のパスワード入力があります）→
+#    git hook の導入 → fmt / check / clippy / test / build の一括確認
+mise bootstrap
 ```
 
 - 日常のタスクは `mise run fmt` / `check` / `clippy` / `test` / `build` / `verify` を使います。

@@ -97,3 +97,13 @@ fi
 [tasks.verify]
 description = "開発環境の一括確認（依存タスクは並列実行）"
 depends = ["fmt-check", "check", "clippy", "test", "build", "toolchain-check", "hk-validate", "hk-check", "fnox-check", "pitchfork-check"]
+
+# `mise bootstrap` は packages（apt:podman・sudo）→ tools（mise install 相当）→ このタスクの順で実行する。
+# これにより mise trust 後の mise bootstrap 1回で環境構築が完了する。
+# このタスクは mise bootstrap のたびに実行されるが、hk install と verify はともに冪等。
+[tasks.bootstrap]
+description = "mise bootstrap の最後に自動実行: hk フックの導入と環境の一括確認"
+run = [
+  "hk install --mise",
+  "mise run verify",
+]
