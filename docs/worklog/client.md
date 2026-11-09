@@ -184,3 +184,17 @@
   - `cargo test -p pelway-client-core --locked --offline` 0（54 件: approval 24・contract 14・input 16、失敗 0）
 - 未検証・未決:
   - `on_key` は入力状況を引数で受ける純粋関数で、一覧の開閉状態の管理（`AcceptMention` 後に閉じる等）は呼び出し側（UI）の責任。テストはその遷移をシミュレートして検証した。実 UI での結合は第2段階（Slint）で確かめる。
+
+### 2026-11-09 第7枠（Codex 第3回レビューの指摘への対処）
+- start: 2026-11-09 18:55 JST
+- stop:  2026-11-09 18:59 JST
+- glm: long（T3 Code スレッドで OpenCode + zai-coding-plan/glm-5.3 が実装）
+- レビュー: Codex 第3回（review-findings-client-3.md、sha256 `ca569dc6c6db34ccf87ae0c8c337a8493955a327ff5ee9f6520e353615b805d8`）。前回指摘1・2は「直った」確認済み。新指摘は1件（nit）のみ。
+- 使った skills: verification-before-completion（修正後に指定 3 コマンドを再実行して exit code を確認）。
+- 対処:
+  - 新指摘1（nit）: `tests/contract.rs` 先頭 2〜3 行目の説明で「（コードポイント数・エラーコード。」の括弧が閉じられていなかったのを、「（コードポイント数・エラーコード）。」で閉じ、次行の `CommentError::NotAwaitingApproval` は 99ee013 で追加された、を独立した文にした。前回の2件（写し元の記載・連続操作テスト）は直っているのでやり直していない。
+- 確かめたコマンドと結果:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy -p pelway-client-core --all-targets --locked --offline -- -D warnings` 0
+  - `cargo test -p pelway-client-core --locked --offline` 0（54 件: approval 24・contract 14・input 16、失敗 0）
+- 未検証・未決: なし（この枠の範囲で新たな未決は無し）。
