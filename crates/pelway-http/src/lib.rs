@@ -5,14 +5,21 @@
 //!   **仮の経路** `POST /v1/cards/{card_id}/comments` と `POST /v1/cards/{card_id}/approve`。
 //! - 認証は無い（デモ用）。要求者は合成ヘッダー（`x-pelway-member-id`、
 //!   `x-pelway-member-kind: human|ai`）で受ける。
-//! - 待ち受けはループバック（127.0.0.1 / ::1）だけ。ほかのアドレスは拒否。
-//!   外部への接続はしない。
+//! - 待ち受けは 127.0.0.1（IPv4 ループバック 127.0.0.0/8）だけ。`::1` を含む IPv6 や
+//!   ほかのアドレスは拒否（QA 18:21 の「127.0.0.1 だけ」に忠実に）。外部への接続はしない。
 //! - [`ApprovalLedger`](pelway_contract::ledger::ApprovalLedger) 全体を 1 つの
 //!   `std::sync::Mutex` で包んで共有する。1 つの要求の中で予約から模擬送信・
 //!   完了までをロックを持ったまま行い、途中で別の要求が割り込まない。
 //!   ロックが poison した場合は 500 を返して状態を変えない。
-//! - 要求本文の上限は [`MAX_BODY_BYTES`]（64 KiB）。超えたら 413。
-//!   不正な JSON は 400。どちらも台帳の状態は変えない。
+//! - 要求本文の上限は [`MAX_BODY_BYTES`]（64 KiB）。`Content-Length` が上限を超えたら
+//!   **本文を読み込む前に** 413 を返す（残余の読み捨ては応答の後）。
+//!   ヘッダーは大きさ [`MAX_HEAD_BYTES`] と行数 [`MAX_HEADER_LINES`] で制限し、
+//!   超えたら 431。
+//! - `Content-Length` は ASCII 数字 1 つだけを受け付ける（重複・負・`+` 付き・非数字は 400）。
+//!   `Transfer-Encoding` 付きの要求は扱わず 400。不正な JSON も 400。
+//!   どちらも台帳の状態は変えない。
+//! - 読み取りは [`READ_TIMEOUT`] 秒で打ち切る（408 `request_timeout`）。止まった接続が
+//!   あっても、接続ごとにスレッドを割り当てるため他の要求は処理される。
 //! - 応答のエラー本文は契約エラー（`ApproveError` / `CommentError`）と同じ形の
 //!   JSON（tag="code"、snake_case）。HTTP 層独自のエラーも [`HttpError`] で同じ形にする。
 
@@ -28,8 +35,12 @@ use serde::Serialize;
 
 /// 要求本文の上限（バイト）。超えたら 413。
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
-/// ヘッダ部の上限（バイト）。超えたら 400。
-const MAX_HEAD_BYTES: usize = 16 * 1024;
+/// 読み取りのタイムアウト。超えた接続は 408 で切断する。
+pub const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+/// ヘッダ部の上限（バイト）。超えたら 431。
+pub const MAX_HEAD_BYTES: usize = 16 * 1024;
+/// ヘッダ行数の上限。超えたら 431。
+pub const MAX_HEADER_LINES: usize = 100;
 /// 413 のとき読み捨てする上限（バイト）。これを超える要求は読み捨てずに切る。
 const DRAIN_LIMIT_BYTES: usize = 1024 * 1024;
 
@@ -42,7 +53,7 @@ pub type SharedLedger = Arc<Mutex<ApprovalLedger>>;
 /// 起動の失敗。
 #[derive(Debug)]
 pub enum ServeError {
-    /// ループバック以外の待ち受けアドレス。
+    /// 127.0.0.1（IPv4 ループバック）以外の待ち受けアドレス。`::1` も含む。
     NotLoopback(SocketAddr),
     /// ソケットの失敗。
     Io(std::io::Error),
@@ -51,7 +62,12 @@ pub enum ServeError {
 impl std::fmt::Display for ServeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotLoopback(addr) => write!(f, "serve address must be loopback, got {addr}"),
+            Self::NotLoopback(addr) => {
+                write!(
+                    f,
+                    "serve address must be IPv4 loopback (127.0.0.1), got {addr}"
+                )
+            }
             Self::Io(e) => write!(f, "{e}"),
         }
     }
@@ -74,6 +90,10 @@ pub enum HttpError {
     MethodNotAllowed,
     /// 本文が [`MAX_BODY_BYTES`] を超えた。
     PayloadTooLarge,
+    /// 読み取りが [`READ_TIMEOUT`] 秒を超えた。
+    RequestTimeout,
+    /// ヘッダーが大きすぎる、または行数が [`MAX_HEADER_LINES`] を超えた。
+    HeadersTooLarge,
     /// ロックが poison するなど、内部状態に触れない。
     Internal,
 }
@@ -87,6 +107,8 @@ impl HttpError {
             Self::NotFound => 404,
             Self::MethodNotAllowed => 405,
             Self::PayloadTooLarge => 413,
+            Self::RequestTimeout => 408,
+            Self::HeadersTooLarge => 431,
             Self::Internal => 500,
         }
     }
@@ -96,6 +118,8 @@ impl HttpError {
 struct Response {
     status: u16,
     body: String,
+    /// 応答を書いた後に読み捨てる残りバイト数（413 のとき。本文を読み込む前に応答するため）。
+    drain_after_write: Option<usize>,
 }
 
 impl Response {
@@ -103,6 +127,7 @@ impl Response {
         Self {
             status,
             body: serde_json::to_string(value).expect("response serializes"),
+            drain_after_write: None,
         }
     }
 
@@ -110,12 +135,21 @@ impl Response {
         Self {
             status,
             body: serde_json::to_string(error).expect("error serializes"),
+            drain_after_write: None,
         }
     }
 }
 
 fn bad_request() -> Response {
     Response::error(400, &HttpError::BadRequest)
+}
+
+fn request_timeout() -> Response {
+    Response::error(408, &HttpError::RequestTimeout)
+}
+
+fn headers_too_large() -> Response {
+    Response::error(431, &HttpError::HeadersTooLarge)
 }
 
 fn internal_error() -> Response {
@@ -138,9 +172,10 @@ impl Server {
 /// サーバーを起動する。接続ごとにスレッドを割り当てる。
 ///
 /// # Errors
-/// ループバック以外のアドレス、またはソケットの失敗。
+/// 127.0.0.1（IPv4 ループバック）以外のアドレス、またはソケットの失敗。
 pub fn serve(addr: SocketAddr, ledger: SharedLedger) -> Result<Server, ServeError> {
-    if !addr.ip().is_loopback() {
+    // 待ち受けは 127.0.0.1 だけ（QA 18:21 の1点目）。::1 を含む IPv6 は拒否する。
+    if !matches!(addr.ip(), std::net::IpAddr::V4(v4) if v4.is_loopback()) {
         return Err(ServeError::NotLoopback(addr));
     }
     let listener = TcpListener::bind(addr).map_err(ServeError::Io)?;
@@ -164,19 +199,51 @@ struct Request {
 }
 
 fn handle_conn(stream: &mut TcpStream, ledger: &SharedLedger) {
+    let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
     let response = match read_request(stream) {
         Ok(req) => route(&req, ledger),
         Err(resp) => resp,
     };
     write_response(stream, &response);
+    // 413 のときは応答を先に書き、残りはこの後で読み捨てる。
+    if let Some(remaining) = response.drain_after_write {
+        drain(stream, remaining);
+    }
+}
+
+/// 応答後の読み捨て。EOF・タイムアウト・エラーは打ち切って終了。
+fn drain(stream: &mut TcpStream, mut remaining: usize) {
+    let mut sink = [0u8; 4096];
+    while remaining > 0 {
+        match stream.read(&mut sink) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => remaining -= n.min(remaining),
+        }
+    }
+}
+
+/// 1 回読む。タイムアウトは 408、それ以外の読み取り失敗は 400 に対応付ける。
+fn read_once(stream: &mut TcpStream, chunk: &mut [u8; 4096]) -> Result<usize, Response> {
+    match stream.read(chunk) {
+        Ok(n) => Ok(n),
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) =>
+        {
+            Err(request_timeout())
+        }
+        Err(_) => Err(bad_request()),
+    }
 }
 
 fn find_terminate(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
-/// 要求を読む。ヘッダ上限・Content-Length の有無・本文上限をここで検査する。
-/// `Err` のときはそのまま書くべき応答。
+/// 要求を読む。ヘッダ上限・Content-Length の検査・本文上限をここで行う。
+/// `Err` のときはそのまま書くべき応答（413 は応答後に読み捨てる分を含む）。
 fn read_request(stream: &mut TcpStream) -> Result<Request, Response> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
@@ -185,9 +252,9 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, Response> {
             break pos;
         }
         if buf.len() > MAX_HEAD_BYTES {
-            return Err(bad_request());
+            return Err(headers_too_large());
         }
-        let n = stream.read(&mut chunk).map_err(|_| bad_request())?;
+        let n = read_once(stream, &mut chunk)?;
         if n == 0 {
             return Err(bad_request());
         }
@@ -207,6 +274,9 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, Response> {
         if line.is_empty() {
             continue;
         }
+        if headers.len() >= MAX_HEADER_LINES {
+            return Err(headers_too_large());
+        }
         let Some((name, value)) = line.split_once(':') else {
             return Err(bad_request());
         };
@@ -217,6 +287,10 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, Response> {
     for (name, value) in &headers {
         match name.as_str() {
             "content-length" => {
+                // ASCII 数字だけを受け付ける（負・+付き・非数字・空は 400）。
+                if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+                    return Err(bad_request());
+                }
                 let len: usize = value.parse().map_err(|_| bad_request())?;
                 if content_length.replace(len).is_some() {
                     return Err(bad_request()); // 重複は断る
@@ -231,24 +305,18 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, Response> {
     };
 
     if content_length > MAX_BODY_BYTES {
-        // RST で応答が壊れないよう、小さな超過なら読み捨ててから 413 を返す。
-        if content_length <= DRAIN_LIMIT_BYTES {
-            let mut remaining = content_length.saturating_sub(buf.len() - head_end - 4);
-            let mut sink = [0u8; 4096];
-            while remaining > 0 {
-                let n = stream.read(&mut sink).unwrap_or(0);
-                if n == 0 {
-                    break;
-                }
-                remaining -= n.min(remaining);
-            }
-        }
-        return Err(Response::error(413, &HttpError::PayloadTooLarge));
+        // 本文を読み込む前に 413 を返す（QA 18:21 の2点目）。
+        // 応答後に読み捨てる残り。大きすぎる（>1 MiB）場合は読み捨てない。
+        let already = buf.len().saturating_sub(head_end + 4);
+        let remaining = content_length.saturating_sub(already);
+        let mut resp = Response::error(413, &HttpError::PayloadTooLarge);
+        resp.drain_after_write = (content_length <= DRAIN_LIMIT_BYTES).then_some(remaining);
+        return Err(resp);
     }
 
     let mut body = buf[head_end + 4..].to_vec();
     while body.len() < content_length {
-        let n = stream.read(&mut chunk).map_err(|_| bad_request())?;
+        let n = read_once(stream, &mut chunk)?;
         if n == 0 {
             return Err(bad_request());
         }
@@ -350,9 +418,11 @@ fn reason_phrase(status: u16) -> &'static str {
         400 => "Bad Request",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        408 => "Request Timeout",
         409 => "Conflict",
         413 => "Payload Too Large",
         422 => "Unprocessable Entity",
+        431 => "Request Header Fields Too Large",
         500 => "Internal Server Error",
         _ => "Unknown",
     }
@@ -368,4 +438,6 @@ fn write_response(stream: &mut TcpStream, resp: &Response) {
     let _ = stream.write_all(head.as_bytes());
     let _ = stream.write_all(resp.body.as_bytes());
     let _ = stream.flush();
+    // 応答を先に届かせる（Connection: close）。読み捨てはこの後。
+    let _ = stream.shutdown(std::net::Shutdown::Write);
 }

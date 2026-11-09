@@ -304,13 +304,10 @@ fn malformed_json_400_and_oversized_413_keep_state() {
 #[test]
 fn serve_refuses_non_loopback_addresses() {
     let ledger = shared_ledger(&[]);
-    for bad in ["0.0.0.0:0", "192.168.0.1:8080", "[::]:0"] {
+    for bad in ["0.0.0.0:0", "192.168.0.1:8080", "[::]:0", "[::1]:0"] {
         let addr: SocketAddr = bad.parse().unwrap();
         assert!(serve(addr, Arc::clone(&ledger)).is_err(), "{bad}");
     }
-    // ループバック（::1）は受理する。
-    let ok = serve("[::1]:0".parse().unwrap(), ledger).expect("::1 is loopback");
-    assert!(ok.local_addr().ip().is_loopback());
 }
 
 // (h) ロックが poison したら 500。状態には触らない。
@@ -358,4 +355,162 @@ fn path_body_card_id_mismatch_returns_422() {
     let (status, json) = post_json(addr, "/v1/cards/card-await/approve", &json, false);
     assert_eq!(status, 422);
     assert_eq!(json["code"], "card_id_mismatch");
+}
+
+/// 完全な生の要求を書き、(状態コード, 応答本文の JSON) を読む。
+fn http_raw(addr: SocketAddr, raw: &str) -> (u16, Value) {
+    let mut stream = TcpStream::connect(addr).expect("connect");
+    stream.write_all(raw.as_bytes()).expect("write raw");
+    let _ = stream.shutdown(Shutdown::Write);
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf).expect("read response");
+    let status = buf
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .expect("status line");
+    let body = buf.split("\r\n\r\n").nth(1).unwrap_or("").to_owned();
+    let json = serde_json::from_str(&body).unwrap_or(Value::Null);
+    (status, json)
+}
+
+// (j) Content-Length が上限を超えたら、本文を読み込む前に 413 を返す。
+#[test]
+fn oversize_content_length_answers_413_before_reading_body() {
+    let ledger = shared_ledger(&["card-j"]);
+    let addr = spawn_server(ledger.clone());
+
+    // 100000 バイトの本文を「これから送る」とだけ宣言し、本文も接続終了も送らない。
+    let mut stream = TcpStream::connect(addr).expect("connect");
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .expect("client read timeout");
+    stream
+        .write_all(
+            b"POST /v1/cards/card-j/comments HTTP/1.1\r\nHost: demo.local\r\n\
+               x-pelway-member-id: m-human-http\r\nx-pelway-member-kind: human\r\n\
+               Content-Length: 100000\r\n\r\n",
+        )
+        .expect("write head");
+    // 本文を送らない・接続を閉じないまま、応答を待つ。
+    let mut buf = String::new();
+    stream
+        .read_to_string(&mut buf)
+        .expect("413 must arrive without the body being sent");
+    assert!(buf.starts_with("HTTP/1.1 413"), "got: {buf}");
+    assert!(buf.contains("payload_too_large"), "got: {buf}");
+}
+
+// (k) Content-Length は ASCII 数字1つだけ。重複・非数字・負・+付き・TE は 400。
+#[test]
+fn content_length_must_be_single_decimal_and_te_rejected() {
+    let ledger = shared_ledger(&["card-k"]);
+    let addr = spawn_server(ledger.clone());
+
+    let body = json!({"card_id": "card-k", "body": "本文"}).to_string();
+    // '+' 付き（usize としては妥当でも）数字以外なので 400。正当な本文を送っても受理しない。
+    let raw = format!(
+        "POST /v1/cards/card-k/comments HTTP/1.1\r\nHost: d\r\n\
+         x-pelway-member-id: m-human-http\r\nx-pelway-member-kind: human\r\n\
+         Content-Length: +{}\r\n\r\n{body}",
+        body.len()
+    );
+    let (status, json) = http_raw(addr, &raw);
+    assert_eq!(status, 400, "plus-prefixed length must be rejected");
+    assert_eq!(json["code"], "bad_request");
+
+    let head = "POST /v1/cards/card-k/comments HTTP/1.1\r\nHost: d\r\n\
+                x-pelway-member-id: m-human-http\r\nx-pelway-member-kind: human\r\n";
+    for (label, raw) in [
+        ("negative", format!("{head}Content-Length: -5\r\n\r\n")),
+        ("non-numeric", format!("{head}Content-Length: abc\r\n\r\n")),
+        (
+            "duplicated",
+            format!("{head}Content-Length: 10\r\nContent-Length: 20\r\n\r\n"),
+        ),
+        (
+            "transfer-encoding",
+            format!("{head}Content-Length: 10\r\nTransfer-Encoding: chunked\r\n\r\n"),
+        ),
+    ] {
+        let (status, json) = http_raw(addr, &raw);
+        assert_eq!(status, 400, "{label}");
+        assert_eq!(json["code"], "bad_request", "{label}");
+    }
+}
+
+// (l) 途中で止まった接続は READ_TIMEOUT で切断され、ほかの要求を妨げない。
+#[test]
+fn stalled_connection_times_out_and_does_not_block_others() {
+    let ledger = shared_ledger(&["card-l"]);
+    let addr = spawn_server(ledger.clone());
+
+    // 接続 A: ヘッダが終わる前に書くのをやめて放置する。
+    let mut stalled = TcpStream::connect(addr).expect("connect A");
+    stalled
+        .write_all(b"POST /v1/cards/card-l/comments HTTP/1.1\r\nHost: d\r\n")
+        .expect("write partial head");
+    stalled
+        .set_read_timeout(Some(std::time::Duration::from_secs(
+            pelway_http::READ_TIMEOUT.as_secs() + 3,
+        )))
+        .expect("client read timeout");
+
+    // 接続 B: 放置された A があっても、普通に処理される。
+    let (status, json) = post_comments(addr, "card-l", "止まった接続があっても保存できる");
+    assert_eq!(status, 200, "other connections must be served");
+    assert_eq!(json["state"], "awaiting_send_approval");
+
+    // A はサーバーから 408 で切断される。
+    let mut buf = String::new();
+    stalled
+        .read_to_string(&mut buf)
+        .expect("server must close the stalled connection");
+    assert!(buf.starts_with("HTTP/1.1 408"), "got: {buf}");
+    assert!(buf.contains("request_timeout"), "got: {buf}");
+}
+
+// (m) ヘッダーの大きさ・行数の上限を超えたら 431。
+#[test]
+fn header_size_and_line_limits_return_431() {
+    let ledger = shared_ledger(&["card-m"]);
+    let addr = spawn_server(ledger.clone());
+
+    // 行数上限（junk ヘッダー 120 行 + 通常ヘッダー）。
+    let junk: Vec<(&str, String)> = (0..120).map(|i| ("x-junk", format!("v{i}"))).collect();
+    let owned: Vec<(&str, &str)> = junk.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let (status, json) = post_json_with_headers(
+        addr,
+        "/v1/cards/card-m/comments",
+        &json!({"card_id": "card-m", "body": "本文"}).to_string(),
+        &owned,
+    );
+    assert_eq!(status, 431, "too many header lines");
+    assert_eq!(json["code"], "headers_too_large");
+
+    // 大きさ上限（1 行 20 KiB のヘッダー）。
+    let big = "x".repeat(20 * 1024);
+    let (status, json) = post_json_with_headers(
+        addr,
+        "/v1/cards/card-m/comments",
+        &json!({"card_id": "card-m", "body": "本文"}).to_string(),
+        &[("x-big", big.as_str())],
+    );
+    assert_eq!(status, 431, "header too large");
+    assert_eq!(json["code"], "headers_too_large");
+}
+
+/// ヘッダーを差し替えられる comments POST（(m) 用。post_json と同じ読み取り）。
+fn post_json_with_headers(
+    addr: SocketAddr,
+    path: &str,
+    body: &str,
+    extra: &[(&str, &str)],
+) -> (u16, Value) {
+    let mut headers: Vec<(&str, &str)> = extra.to_vec();
+    headers.push(("x-pelway-member-id", "m-human-http"));
+    headers.push(("x-pelway-member-kind", "human"));
+    let (status, body) = http(addr, "POST", path, &headers, body.as_bytes());
+    let json = serde_json::from_str(&body).unwrap_or(Value::Null);
+    (status, json)
 }
