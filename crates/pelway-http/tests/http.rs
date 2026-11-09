@@ -585,16 +585,16 @@ fn head_padded_to(total: usize, card: &str, body_len: usize) -> String {
 }
 
 // (n) ヘッダーの合計バイト数は 16 KiB ちょうどまで受理、16 KiB+1 は 431。
-// 16 KiB+1 のケースでは終端（空行）が上限を超えた最後の読み取りに含まれるが、
-// やはり 431（受け取った合計バイト数で判定するため）。
+// 16 KiB+1 のケースでは終端（空行）までのバイト数が上限を超えるため 431
+// （ヘッダーの終端までの長さで判定するため。本文が同じ読み取りに混ざる
+// ケースは (r)/(t) で確認する）。
 #[test]
 fn head_bytes_exactly_16kib_ok_and_one_more_431() {
     let ledger = shared_ledger(&["card-n"]);
     let addr = spawn_server(ledger.clone());
     let body = json!({"card_id": "card-n", "body": "本文"}).to_string();
 
-    // 16 KiB ちょうど: ヘッダーだけを先に送って読み終えてもらい、それから本体を送る
-    // （本体まで同じ読み取りに含まれると、受け取った合計が上限を超えてしまうため）。
+    // 16 KiB ちょうど: ヘッダーだけを先に送って読み終えてもらい、それから本体を送る。
     let head = head_padded_to(MAX_HEAD_BYTES, "card-n", body.len());
     let mut stream = TcpStream::connect(addr).expect("connect");
     stream
@@ -611,8 +611,7 @@ fn head_bytes_exactly_16kib_ok_and_one_more_431() {
     assert_eq!(json["card_id"], "card-n");
     assert_eq!(json["state"], "awaiting_send_approval");
 
-    // 16 KiB + 1 バイト: 終端（空行）はこの最後の 1 バイトで完成するが、
-    // 受け取った合計バイト数が上限を超えるので 431。
+    // 16 KiB + 1 バイト: 終端（空行）までのバイト数が上限を超えるので 431。
     let head = head_padded_to(MAX_HEAD_BYTES + 1, "card-n", body.len());
     let mut stream = TcpStream::connect(addr).expect("connect");
     stream
@@ -719,6 +718,289 @@ fn slow_trickle_head_hits_connection_deadline() {
     );
     assert!(buf.starts_with("HTTP/1.1 408"), "got: {buf}");
     assert!(buf.contains("request_timeout"), "got: {buf}");
+}
+
+/// 本文のバイト数が total ちょうどになる comments 用の JSON を作る
+/// （(r)/(t) 用。Content-Length と実際の本文の長さを一致させる）。
+fn json_body_padded_to(card: &str, total: usize) -> String {
+    let pre = format!("{{\"card_id\": \"{card}\", \"body\": \"");
+    let pad = total - pre.len() - "\"}".len();
+    assert!(pad > 0, "no room to pad to {total}");
+    format!("{pre}{}\"}}", "y".repeat(pad))
+}
+
+// (r) ちょうど 16 KiB のヘッダーと有効な本文を 1 回の write で続けて送っても受理される
+// （431 にならない。レビュー5 指摘1）。
+#[test]
+fn head_16kib_and_body_in_one_write_accepted() {
+    let ledger = shared_ledger(&["card-r"]);
+    let addr = spawn_server(ledger.clone());
+    let body = json_body_padded_to("card-r", 2048);
+    let head = head_padded_to(MAX_HEAD_BYTES, "card-r", body.len());
+
+    let mut stream = TcpStream::connect(addr).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("client read timeout");
+    let mut raw = head.into_bytes();
+    raw.extend_from_slice(body.as_bytes());
+    stream
+        .write_all(&raw)
+        .expect("write head+body in one write");
+    let _ = stream.shutdown(Shutdown::Write);
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf).expect("read response");
+    let (status, json) = parse_response(&buf);
+    assert_eq!(
+        status, 200,
+        "16 KiB ちょうどのヘッダーと本文が同じ write でも受理: {buf}"
+    );
+    assert_eq!(json["card_id"], "card-r");
+    assert_eq!(json["state"], "awaiting_send_approval");
+}
+
+// (s) Content-Length が 64 KiB を超える要求を、ヘッダー（16 KiB ちょうど）と本文の先頭を
+// 1 回の write で続けて送ると、431 ではなく 413 が返る（レビュー5 指摘1）。
+#[test]
+fn oversize_cl_head_16kib_body_start_in_one_write_answers_413() {
+    let ledger = shared_ledger(&["card-s"]);
+    let addr = spawn_server(ledger.clone());
+    let head = head_padded_to(MAX_HEAD_BYTES, "card-s", 100_000);
+
+    let mut stream = TcpStream::connect(addr).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("client read timeout");
+    let mut raw = head.into_bytes();
+    raw.extend_from_slice(&vec![b'z'; 8 * 1024]);
+    stream
+        .write_all(&raw)
+        .expect("write head+body start in one write");
+    let _ = stream.shutdown(Shutdown::Write);
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf).expect("read response");
+    let (status, json) = parse_response(&buf);
+    assert_eq!(
+        status, 413,
+        "本文の先頭が同じ write に含まれていても 431 ではなく 413: {buf}"
+    );
+    assert_eq!(json["code"], "payload_too_large");
+}
+
+// (t) 16 KiB ちょうどのヘッダーの終端を含む読み取りに本文のバイトが混ざっても、
+// 本文のバイトはヘッダーの上限に数えない（レビュー5 指摘1）。
+// サーバーの読み取りの境界を確実にずらすため、ヘッダーを 13000 バイトまで先に送り、
+// 残りのヘッダーと本文を 1 回の write で送る。
+#[test]
+fn body_in_final_head_read_not_counted_in_16kib_limit() {
+    let ledger = shared_ledger(&["card-t"]);
+    let addr = spawn_server(ledger.clone());
+    let body = json_body_padded_to("card-t", 2048);
+    let head = head_padded_to(MAX_HEAD_BYTES, "card-t", body.len());
+    let (prefix, rest) = head.split_at(13000);
+
+    let mut stream = TcpStream::connect(addr).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("client read timeout");
+    stream
+        .write_all(prefix.as_bytes())
+        .expect("write head prefix");
+    // この間にサーバーは 13000 バイトを読み終え、次の読み取りで待機する。
+    thread::sleep(Duration::from_millis(300));
+    let mut tail = rest.as_bytes().to_vec();
+    tail.extend_from_slice(body.as_bytes());
+    stream
+        .write_all(&tail)
+        .expect("write head rest + body in one write");
+    let _ = stream.shutdown(Shutdown::Write);
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf).expect("read response");
+    let (status, json) = parse_response(&buf);
+    assert_eq!(
+        status, 200,
+        "最後の読み取りに本文が混ざっても 16 KiB ちょうどのヘッダーは受理: {buf}"
+    );
+    assert_eq!(json["card_id"], "card-t");
+}
+
+// (u) Content-Length が 64 KiB を超える要求では、ヘッダーの終端を含む読み取りに
+// 本文の先頭が混ざっていても 431 ではなく 413 を返す（レビュー5 指摘1）。
+// (t) と同じく、ヘッダーを 13000 バイトまで先に送って読み取りの境界をずらす。
+#[test]
+fn oversize_cl_straddled_head_answers_413_not_431() {
+    let ledger = shared_ledger(&["card-u"]);
+    let addr = spawn_server(ledger.clone());
+    let head = head_padded_to(MAX_HEAD_BYTES, "card-u", 100_000);
+    let (prefix, rest) = head.split_at(13000);
+
+    let mut stream = TcpStream::connect(addr).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("client read timeout");
+    stream
+        .write_all(prefix.as_bytes())
+        .expect("write head prefix");
+    thread::sleep(Duration::from_millis(300));
+    let mut tail = rest.as_bytes().to_vec();
+    tail.extend_from_slice(&vec![b'z'; 2048]);
+    stream
+        .write_all(&tail)
+        .expect("write head rest + body start in one write");
+    let _ = stream.shutdown(Shutdown::Write);
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf).expect("read response");
+    let (status, json) = parse_response(&buf);
+    assert_eq!(status, 413, "431 ではなく 413: {buf}");
+    assert_eq!(json["code"], "payload_too_large");
+}
+
+// (v) 1 回の読み取りのタイムアウトは「3 秒」と「全体期限までの残り」の短いほう。
+// ヘッダー読み取り中に読み取り待ちのまま期限が来たら、3 秒を待たずに 408 で切る
+// （レビュー5 指摘2）。期限 + 0.5 秒以内（QA の受入条件）。
+#[test]
+fn head_read_wait_is_cut_at_deadline_not_3s() {
+    assert_eq!(
+        pelway_http::READ_TIMEOUT,
+        Duration::from_secs(3),
+        "本番の読み取りごとのタイムアウトは 3 秒のまま"
+    );
+    let deadline = Duration::from_millis(2000);
+    let ledger = shared_ledger(&[]);
+    let addr = serve_with_connection_deadline("127.0.0.1:0".parse().unwrap(), ledger, deadline)
+        .expect("serve with short deadline")
+        .local_addr();
+
+    let mut stream = TcpStream::connect(addr).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(6)))
+        .expect("client read timeout");
+    let started = Instant::now();
+    stream
+        .write_all(b"POST /v1/cards/card-v/comments HTTP/1.1\r\nHost: d\r\n")
+        .expect("write partial head");
+    // ここから読み取り待ちに入ったまま、何も送らない。
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf).expect("408 must arrive");
+    let elapsed = started.elapsed();
+    assert!(buf.starts_with("HTTP/1.1 408"), "got: {buf}");
+    assert!(buf.contains("request_timeout"), "got: {buf}");
+    // 上限は全体期限 + 0.5 秒（QA の受入条件）。下限は時計とスケジューリングの
+    // ぶれのために 0.1 秒だけ許容する（期限前に切れないことの確認）。
+    assert!(
+        elapsed <= deadline + Duration::from_millis(500),
+        "期限から 0.5 秒以内に切れていない: {elapsed:?}"
+    );
+    assert!(
+        elapsed + Duration::from_millis(100) >= deadline,
+        "期限前に切れている: {elapsed:?}"
+    );
+}
+
+// (w) 413 のあとの読み捨て中も同じ: 読み取り待ちのまま期限が来たら、3 秒を待たずに
+// 接続を閉じる（413 は応答済みなので追記は無い。レビュー5 指摘2）。
+// 期限 + 0.3 秒の時点で接続が既に切れていることを、書き込みのエラーで確かめる。
+#[test]
+fn drain_read_wait_after_413_is_cut_at_deadline() {
+    let deadline = Duration::from_millis(2000);
+    let ledger = shared_ledger(&["card-w"]);
+    let addr = serve_with_connection_deadline("127.0.0.1:0".parse().unwrap(), ledger, deadline)
+        .expect("serve with short deadline")
+        .local_addr();
+
+    let mut stream = TcpStream::connect(addr).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .expect("client read timeout");
+    let started = Instant::now();
+    stream
+        .write_all(
+            b"POST /v1/cards/card-w/comments HTTP/1.1\r\nHost: d\r\n\
+               Content-Length: 100000\r\n\r\n",
+        )
+        .expect("write head");
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf).expect("413 arrives first");
+    assert!(buf.starts_with("HTTP/1.1 413"), "got: {buf}");
+
+    // 読み捨て中の読み取り待ちに入ったまま、期限 + 0.3 秒まで何も送らない。
+    while started.elapsed() < deadline + Duration::from_millis(300) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    // 1 バイト目を送り、少し待ってから 2 回目の書き込みが失敗すれば、1 バイト目を
+    // 送った時点で接続が既に閉じられていたことになる（サーバーがまだ読み取り待ちなら
+    // 1 バイト目は読み捨てに消費され、2 回目も成功する。閉じた後の最初の書き込みに
+    // 対する RST が戻るのに少し時間が要るため、間を空ける）。
+    let first = stream.write_all(b"x");
+    thread::sleep(Duration::from_millis(100));
+    let second = stream.write_all(b"x");
+    assert!(
+        second.is_err(),
+        "期限の時点で接続が閉じられているべき: first={first:?} second={second:?}"
+    );
+    assert!(
+        started.elapsed() <= deadline + Duration::from_millis(500),
+        "期限から 0.5 秒以内に切れていない: {:?}",
+        started.elapsed()
+    );
+}
+
+// (x) 全体期限は本文の読み取りにもかかる（リード決定 2026-11-09 20:36）。
+// 正しい大きさの本文を 3 秒未満の間隔で少しずつ送り続けると、全体期限前後で
+// 408 と切断が来る（1 回の読み取りごとの 3 秒には引っかからない）。
+#[test]
+fn slow_trickle_body_hits_connection_deadline() {
+    assert_eq!(
+        CONNECTION_DEADLINE,
+        Duration::from_secs(10),
+        "本番の全体期限は 10 秒のまま"
+    );
+    let deadline = Duration::from_millis(800);
+    let ledger = shared_ledger(&["card-x"]);
+    let addr = serve_with_connection_deadline("127.0.0.1:0".parse().unwrap(), ledger, deadline)
+        .expect("serve with short deadline")
+        .local_addr();
+
+    let body = json_body_padded_to("card-x", 240);
+    let head = format!(
+        "POST /v1/cards/card-x/comments HTTP/1.1\r\nHost: demo.local\r\n\
+         x-pelway-member-id: m-human-http\r\nx-pelway-member-kind: human\r\n\
+         Content-Length: {}\r\n\r\n",
+        body.len()
+    );
+    let mut writer = TcpStream::connect(addr).expect("connect");
+    let mut reader = writer.try_clone().expect("clone reader");
+    let started = Instant::now();
+    let reader_handle = thread::spawn(move || {
+        reader
+            .set_read_timeout(Some(Duration::from_secs(4)))
+            .expect("reader timeout");
+        let mut buf = String::new();
+        let _ = reader.read_to_string(&mut buf);
+        buf
+    });
+    writer.write_all(head.as_bytes()).expect("write head");
+    // 3 秒未満の間隔で少しずつ送り続ける（4 バイト × 60 回 = 本文 240 バイト）。
+    // 1 回の読み取りタイムアウト（3 秒）には引っかからない。
+    for _ in 0..60 {
+        thread::sleep(Duration::from_millis(150));
+        if writer.write_all(b"yyyy").is_err() {
+            break; // サーバーに切断された
+        }
+    }
+    let buf = reader_handle.join().expect("join reader");
+    let elapsed = started.elapsed();
+    let (status, json) = parse_response(&buf);
+    assert_eq!(status, 408, "got: {buf}");
+    assert_eq!(json["code"], "request_timeout", "got: {buf}");
+    assert!(
+        elapsed + Duration::from_millis(100) >= deadline,
+        "期限前に切断された: {elapsed:?}"
+    );
+    assert!(
+        elapsed <= deadline + Duration::from_millis(500),
+        "期限前後で切断されない: {elapsed:?}"
+    );
 }
 
 // (q) 413 のあとの読み捨ても全体期限で打ち切る。3 秒未満の間隔で送り続けると、

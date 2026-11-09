@@ -13,18 +13,22 @@
 //!   ロックが poison した場合は 500 を返して状態を変えない。
 //! - 要求本文の上限は [`MAX_BODY_BYTES`]（64 KiB）。`Content-Length` が上限を超えたら
 //!   **本文を読み込む前に** 413 を返す（残余の読み捨ては応答の後）。
-//!   ヘッダーは大きさ [`MAX_HEAD_BYTES`]（受け取った合計バイト数で判定）と行数
-//!   [`MAX_HEADER_LINES`] で制限し、超えたら 431。
+//!   ヘッダーは大きさ [`MAX_HEAD_BYTES`] と行数 [`MAX_HEADER_LINES`] で制限し、超えたら 431。
+//!   大きさはヘッダーの終端（空行）までのバイト数で判定し、同じ読み取りに本文の
+//!   バイトが混ざっていても数えない（レビュー5 指摘1）。終端がまだ見つからない
+//!   ときは受け取ったバイト数で判定する（ヘッダーだけで超えている場合）。
 //! - `Content-Length` は ASCII 数字 1 つだけを受け付ける（重複・負・`+` 付き・非数字は 400）。
 //!   `Transfer-Encoding` 付きの要求は扱わず 400。不正な JSON も 400。
 //!   リクエスト行の HTTP バージョンは `HTTP/1.1` の形だけ、ヘッダー名は RFC 9110 の
 //!   token（空・空白・区切り文字入りは不可）でなければ 400。
 //!   いずれも台帳の状態は変えない。
-//! - 読み取りは [`READ_TIMEOUT`] 秒で打ち切る（408 `request_timeout`）。さらにヘッダー
-//!   読み取りと 413 後の読み捨てを合わせた 1 接続あたりの全体期限
-//!   [`CONNECTION_DEADLINE`]（10 秒）があり、超えたら 408 を返して接続を閉じる
-//!   （リード決定 2026-11-09 19:15）。止まった接続があっても、接続ごとにスレッドを
-//!   割り当てるため他の要求は処理される。
+//! - 読み取りは 1 回あたり [`READ_TIMEOUT`] 秒で打ち切る（408 `request_timeout`）。
+//!   1 回の読み取りのタイムアウトは「3 秒」と「全体期限までの残り」の短いほうで、
+//!   残りが 0 以下なら読まずに打ち切る（レビュー5 指摘2）。
+//!   ヘッダー読み取り・本文読み取り・413 後の読み捨てを合わせた 1 接続あたりの全体期限
+//!   [`CONNECTION_DEADLINE`]（10 秒）を超えても 408 を返して接続を閉じる
+//!   （リード決定 2026-11-09 19:15、20:36 に本文の読み取りへ拡大）。止まった接続が
+//!   あっても、接続ごとにスレッドを割り当てるため他の要求は処理される。
 //! - 応答のエラー本文は契約エラー（`ApproveError` / `CommentError`）と同じ形の
 //!   JSON（tag="code"、snake_case）。HTTP 層独自のエラーも [`HttpError`] で同じ形にする。
 
@@ -40,10 +44,12 @@ use serde::Serialize;
 
 /// 要求本文の上限（バイト）。超えたら 413。
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
-/// 読み取りのタイムアウト。超えた接続は 408 で切断する。
+/// 1 回の読み取りのタイムアウトの上限。実際のタイムアウトは「この 3 秒」と
+/// 「全体期限までの残り」の短いほう（超えた接続は 408 で切断する）。
 pub const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
-/// 1 接続の全体期限（ヘッダー読み取りと 413 後の読み捨ての合計）。
-/// 超えたら 408 を返して接続を閉じる（リード決定 2026-11-09 19:15）。
+/// 1 接続の全体期限（ヘッダー読み取り・本文読み取り・413 後の読み捨ての合計）。
+/// 超えたら 408 を返して接続を閉じる（リード決定 2026-11-09 19:15、
+/// 20:36 に本文の読み取りへ拡大）。
 pub const CONNECTION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
 /// ヘッダ部の上限（バイト）。超えたら 431。
 pub const MAX_HEAD_BYTES: usize = 16 * 1024;
@@ -96,7 +102,8 @@ pub enum HttpError {
     /// 本文が [`MAX_BODY_BYTES`] を超えた。
     PayloadTooLarge,
     /// 読み取りが [`READ_TIMEOUT`] 秒を超えた、または接続全体が
-    /// [`CONNECTION_DEADLINE`] を超えた。
+    /// [`CONNECTION_DEADLINE`] を超えた（1 回の読み取りのタイムアウトは
+    /// 3 秒と全体期限までの残りの短いほう）。
     RequestTimeout,
     /// ヘッダーが大きすぎる、または行数が [`MAX_HEADER_LINES`] を超えた。
     HeadersTooLarge,
@@ -223,9 +230,10 @@ fn handle_conn(
     ledger: &SharedLedger,
     connection_deadline: std::time::Duration,
 ) {
-    // 全体期限（リード決定 2026-11-09 19:15）: ヘッダー読み取りと 413 後の読み捨ての合計。
+    // 全体期限（リード決定 2026-11-09 19:15、20:36 に本文の読み取りへ拡大）:
+    // ヘッダー読み取り・本文読み取り・413 後の読み捨てを合わせた全体。
+    // 1 回の読み取りのタイムアウトは read_once / drain が読み取りのたびに設定する。
     let deadline = std::time::Instant::now() + connection_deadline;
-    let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
     let response = match read_request(stream, deadline) {
         Ok(req) => route(&req, ledger),
         Err(resp) => resp,
@@ -237,13 +245,27 @@ fn handle_conn(
     }
 }
 
-/// 応答後の読み捨て。EOF・タイムアウト・エラー、または全体期限で打ち切って終了。
+/// 1 回の読み取りのタイムアウト: [`READ_TIMEOUT`]（3 秒）と全体期限までの残りの
+/// 短いほう。残りが 0 以下（期限切れ）のときは `None`（0 秒のタイムアウトは
+/// 設定できないため、期限切れは読み取りの前に判定する）。
+fn read_timeout_for(deadline: std::time::Instant) -> Option<std::time::Duration> {
+    let remaining = deadline.checked_duration_since(std::time::Instant::now())?;
+    if remaining.is_zero() {
+        return None;
+    }
+    Some(READ_TIMEOUT.min(remaining))
+}
+
+/// 応答後の読み捨て。EOF・タイムアウト・エラー、または全体期限で打ち切って終了
+/// （413 は応答済みなので、応答を追記せず接続を閉じるだけ）。
 fn drain(stream: &mut TcpStream, mut remaining: usize, deadline: std::time::Instant) {
     let mut sink = [0u8; 4096];
     while remaining > 0 {
-        if std::time::Instant::now() >= deadline {
+        // 1 回の読み取りも全体期限で打ち切る。期限が来ていれば読まずに終わる。
+        let Some(timeout) = read_timeout_for(deadline) else {
             break;
-        }
+        };
+        let _ = stream.set_read_timeout(Some(timeout));
         match stream.read(&mut sink) {
             Ok(0) | Err(_) => break,
             Ok(n) => remaining -= n.min(remaining),
@@ -251,8 +273,17 @@ fn drain(stream: &mut TcpStream, mut remaining: usize, deadline: std::time::Inst
     }
 }
 
-/// 1 回読む。タイムアウトは 408、それ以外の読み取り失敗は 400 に対応付ける。
-fn read_once(stream: &mut TcpStream, chunk: &mut [u8; 4096]) -> Result<usize, Response> {
+/// 1 回読む。タイムアウト（3 秒と全体期限までの残りの短いほう）は 408、それ以外の
+/// 読み取り失敗は 400 に対応付ける。残りが 0 以下なら読まずに 408 を返す。
+fn read_once(
+    stream: &mut TcpStream,
+    chunk: &mut [u8; 4096],
+    deadline: std::time::Instant,
+) -> Result<usize, Response> {
+    let Some(timeout) = read_timeout_for(deadline) else {
+        return Err(request_timeout());
+    };
+    let _ = stream.set_read_timeout(Some(timeout));
     match stream.read(chunk) {
         Ok(n) => Ok(n),
         Err(e)
@@ -299,19 +330,22 @@ fn read_request(stream: &mut TcpStream, deadline: std::time::Instant) -> Result<
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     let head_end = loop {
-        // 大きさの上限は「受け取った合計バイト数」で判定する（終端を探す前に）。
-        // 終端（空行）が上限を超えた最後の読み取りに含まれる場合も 431。
+        // 大きさの上限はヘッダーの終端（空行）までのバイト数で判定する
+        // （レビュー5 指摘1）。同じ読み取りに本文のバイトが混ざっていても
+        // 上限には数えない。
+        if let Some(pos) = find_terminate(&buf) {
+            if pos + 4 > MAX_HEAD_BYTES {
+                return Err(headers_too_large());
+            }
+            break pos;
+        }
+        // 終端がまだ見つからない: 受け取ったバイト数が上限を超えていれば、
+        // ヘッダーだけで超えているので 431。
         if buf.len() > MAX_HEAD_BYTES {
             return Err(headers_too_large());
         }
-        if let Some(pos) = find_terminate(&buf) {
-            break pos;
-        }
-        // 全体期限（リード決定 19:15）。超えたら 408 を返して接続を閉じる。
-        if std::time::Instant::now() >= deadline {
-            return Err(request_timeout());
-        }
-        let n = read_once(stream, &mut chunk)?;
+        // 全体期限は read_once が読み取りごとに見る（期限切れは 408）。
+        let n = read_once(stream, &mut chunk, deadline)?;
         if n == 0 {
             return Err(bad_request());
         }
@@ -378,7 +412,8 @@ fn read_request(stream: &mut TcpStream, deadline: std::time::Instant) -> Result<
 
     let mut body = buf[head_end + 4..].to_vec();
     while body.len() < content_length {
-        let n = read_once(stream, &mut chunk)?;
+        // 本文の読み取りにも同じ全体期限をかける（リード決定 2026-11-09 20:36）。
+        let n = read_once(stream, &mut chunk, deadline)?;
         if n == 0 {
             return Err(bad_request());
         }
