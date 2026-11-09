@@ -33,6 +33,10 @@ mise exec -- hk install --mise
 
 # 4. 環境の一括確認（後述の verify タスク）
 mise run verify
+
+# 5.（コンテナが必要な場合）podman 一式の導入。sudo のパスワード入力が必要
+#    この環境では2026-11-09に実施済み。詳細は「コンテナ（Docker を使わない）」の節
+mise bootstrap packages apply --manager apt
 ```
 
 - `mise install` と `mise.lock` の生成は `mise.toml` の `[settings] lockfile = true` でこのプロジェクト自身が指定する（ユーザーのグローバル設定に依存しない）。`mise.lock` と `Cargo.lock` はコミット対象。
@@ -84,23 +88,21 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 
 ### この WSL の確認結果（2026-11-09、このマシンでの観測例。他の環境では異なりうる）
 
-- 非 Docker 系のランタイム（podman・nerdctl・containerd・crun/runc・systemd-nspawn・proot）は**いずれも未導入**（`command -v` で確認）。
-- `bwrap`（bubblewrap）はあるが、これはサンドボックス用ツールでありコンテナランタイムではない。
-- 非特権ユーザーネームスペースは有効（`unshare -Ur /bin/true` が成功、`max_user_namespaces=159629`）。このため rootless Podman を導入すれば動作できる素地はある。
-- **mise 経由の導入は不可（2026-11-09確認）**: mise レジストリの podman（`github:podman-container-tools/podman`）を Linux にインストールすると、配置されるのは `podman-remote`（接続先の podman サービスまたは VM を前提とするクライアント単体）のみで、ローカルでコンテナを起動するエンジン本体は配布されていない。加えて rootless 実行に必要な部品（crun・fuse-overlayfs・pasta/slirp4netns は mise レジストリに未登録、`newuidmap` は setuid バイナリのためユーザー空間では導入・有効化できない）も揃えられない。nerdctl はレジストリにあるが containerd デーモンと同じ rootless 部品群が必要で同じ結論。
-- **ブロッカー**: podman の導入にはシステム変更（sudo）が必要。本環境構築ではシステム変更が禁止のため実施していない。mise の bootstrap（`[bootstrap.packages]` の `apt:podman`）も導入手段として使えるが、mise 公式ドキュメント（apt のページ、2026-11-09取得）は「root でない実行時は sudo を使う」と明記し、実際の dry-run（2026-11-09、リポジトリ外の実験設定で実施）は `sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -- podman` を予定とした。つまり bootstrap は手順の宣言化であって sudo・システム変更の回避手段ではない。承認後は次で導入する:
-
-```toml
-# 承認後に mise.toml へ追加する宣言（追加承認が必要・今回未実施）
-[bootstrap.packages]
-"apt:podman" = "latest"
-```
+- 導入前の観測: 非 Docker 系のランタイム（podman・nerdctl・containerd・crun/runc・systemd-nspawn・proot）はいずれも未導入だった（`command -v` で確認）。`bwrap`（bubblewrap）はあったが、サンドボックス用ツールでありコンテナランタイムではない。
+- 非特権ユーザーネームスペースは有効（`unshare -Ur /bin/true` が成功、`max_user_namespaces=159629`）。
+- **mise の `[tools]`（レジストリ）経由の導入は不可**: mise レジストリの podman（`github:podman-container-tools/podman`）を Linux にインストールすると、配置されるのは `podman-remote`（接続先の podman サービスまたは VM を前提とするクライアント単体）のみで、ローカルでコンテナを起動するエンジン本体は配布されていない。nerdctl はレジストリにあるが containerd デーモンと同じ rootless 部品群が必要で同じ結論。
+- **mise bootstrap 経由で導入済み（2026-11-09、濱田さんが実行）**: `mise.toml` の `[bootstrap.packages]`（`apt:podman`）を `mise bootstrap packages apply --manager apt` で適用し、podman 4.9.3（Ubuntu noble のパッケージ）と rootless 実行に必要な依存一式（uidmap・crun・passt・slirp4netns・fuse-overlayfs・netavark・aardvark-dns・conmon・catatonit・buildah）が入った。root でない実行では mise が sudo を使う（mise 公式ドキュメントの apt ページ、2026-11-09取得。適用前の dry-run で `sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -- podman` となることを確認済み）。
+- **smoke 確認済み**: `podman run --rm quay.io/podman/hello` が "Hello Podman World" を出力して正常終了した（rootless、イメージは quay.io から取得）。導入後の `podman info` は `rootless: true`、ociRuntime は crun、networkBackend は netavark＋aardvark-dns、cgroup v2。
+- 観測: 初回実行時に `WARN[0000] "/" is not a shared mount, this could cause issues or missing mounts with rootless containers` が出た。hello の実行には影響しなかった。bind mount を使う場面への影響は**未確認**。
+- 補足: `[bootstrap.packages]` が適用されるのは `mise bootstrap`（または `mise bootstrap packages apply`）を明示的に実行したときだけ。日常の `mise install`・`mise run` では発動しない（mise 公式ドキュメントの記載）。他の Linux マシンでも同じ手順で導入できる:
 
 ```bash
-mise bootstrap packages apply --manager apt --dry-run   # 予定の確認
+mise bootstrap packages apply --manager apt --dry-run   # 予定の確認（何も実行しない）
 mise bootstrap packages apply --manager apt             # 適用（sudo のパスワード入力あり）
-podman run --rm quay.io/podman/hello                    # hello 程度の smoke
+podman run --rm quay.io/podman/hello                    # hello 程度の smoke（quay.io からイメージを取得）
 ```
+
+- 補足: `[bootstrap.packages]` が適用されるのは `mise bootstrap`（または `mise bootstrap packages apply`）を明示的に実行したときだけ。日常の `mise install`・`mise run` では発動しない（mise 公式ドキュメントの記載）。
 
 ### macOS（Apple container）— 未検証
 
@@ -126,7 +128,7 @@ container run --rm alpine echo hello   # hello 程度の smoke
 
 ## 既知の事項・未解決
 
-1. **コンテナランタイムの導入は追加承認が必要**（上記ブロッカー）。
+1. **WSL での `/` shared mount 警告**: podman の rootless 実行時に `/` が shared mount でない旨の警告が出る（2026-11-09観測）。hello には影響しなかったが、bind mount を使う場面への影響は未確認。実使用時に検証する。
 2. `docs/architecture-v0.7.md` の実行ビット（100755）は今回修正していない（変更禁止のため）。報告のみ。
 3. macOS（Apple container）の手順は未検証。Intel Mac は対象外。
 4. `mise activate`（シェル統合）は `~/.bashrc` 等の変更が必要なため設定していない。必要なら利用者が各自で設定する（[シェル設定](https://mise.jdx.dev/shell-setup.html)）。それまでは `mise exec --` を使う。

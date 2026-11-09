@@ -29,6 +29,34 @@
 
 Pelway名と選定済みAロゴを維持します。同名のAI教育製品に関する第三者掲載があり、名称調査と機能比較を分けています。商標・ドメインの利用可否を保証しません。
 
+## ローカル開発環境の構築
+
+言語・ツール・環境変数は [mise](https://mise.jdx.dev) で、git hook は [hk](https://hk.jdx.dev) で、シークレットは [fnox](https://fnox.jdx.dev) で管理します。バージョンとタスクは `mise.toml` に定義します。詳細な手順と採否の記録は [ローカル開発環境](docs/dev-environment.md) を参照してください。
+
+前提: mise 2026.9.2 以上（これ未満では `mise.toml` の `min_version` がエラーで停止します）。未導入の場合は [公式のインストール手順](https://mise.jdx.dev/installing-mise.html) に従ってください。
+
+```bash
+# 1. このリポジトリの mise 設定を信頼する
+mise trust
+
+# 2. ツール一式をユーザー領域に入れる（Rust 1.96.0・hk・fnox・pitchfork・mr boxington）
+mise install
+
+# 3. git hook をこのリポジトリだけに導入する
+mise exec -- hk install --mise
+
+# 4. 環境の一括確認（fmt / check / clippy / test / build と各種検査）
+mise run verify
+
+# 5. コンテナが必要な場合のみ: rootless Podman 一式の導入（sudo のパスワード入力あり）
+mise bootstrap packages apply --manager apt
+```
+
+- 日常のタスクは `mise run fmt` / `check` / `clippy` / `test` / `build` / `verify` を使います。
+- `git commit` では hk の品質ゲート（fmt・clippy `-D warnings`・check）、`git push` では `cargo test` が走る構成です。失敗したら `mise run fmt` や `mise exec -- hk fix` で直します。
+- `crates/dev-smoke` とルートの `Cargo.toml` は環境確認用のスケルトンであり、製品機能のコードではありません。
+- コンテナは Windows では WSL2 内の rootless Podman、macOS では Apple container を使い、Docker には依存しません。
+
 ## AIエージェントでの開発の進め方
 
 開発には [mattpocock/skills](https://github.com/mattpocock/skills) のエージェントスキルを使います。スキルは Claude Code や Codex などのコーディングエージェントから `/スキル名` で呼び出します。

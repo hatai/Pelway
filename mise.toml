@@ -22,6 +22,15 @@ hk = "2.11.1"
 fnox = "1.47.0"
 pitchfork = "2.33.1"
 
+# コンテナ実行環境（非 Docker・要件は docs/dev-environment.md）。
+# rootless Podman 一式を apt から導入する宣言。適用は明示的な bootstrap 実行時だけ
+# （日常の mise install / mise run では発動しない）。
+# root でない実行では sudo を使うため、対話的なパスワード入力で実施する:
+#   mise bootstrap packages apply --manager apt --dry-run   # 予定確認
+#   mise bootstrap packages apply --manager apt             # 適用
+[bootstrap.packages]
+"apt:podman" = "latest"
+
 [env]
 # 秘密を含む環境変数は mise に置かず fnox で管理する（fnox.toml 参照）。
 # ここには秘密にならない既定値だけを置く。
