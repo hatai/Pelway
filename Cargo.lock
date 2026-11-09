@@ -3,5 +3,9 @@
 version = 4
 
 [[package]]
+name = "pelway-client-core"
+version = "0.0.0"
+
+[[package]]
 name = "pelway-dev-smoke"
 version = "0.0.0"

@@ -1,0 +1,10 @@
+[package]
+# Pelway デスクトップクライアントの中核ロジック（UI 非依存）。Slint への依存を持たない。
+# src/contract.rs はバックエンド契約（4564e88）の仮写しで、統合時に差し替える。
+name = "pelway-client-core"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "UI-independent core logic for the Pelway desktop client (no Slint dependency)."
+
+[dependencies]
