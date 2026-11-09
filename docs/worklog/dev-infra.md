@@ -68,3 +68,31 @@
   - 「安全」「安心」は語が広く、UI 文言の範囲（資産・UI 系ファイル全体と Rust の文字列リテラル）に絞っても、否定文や内部メッセージで誤検出しうる
   - shellcheck は未導入のため未実施
   - 独立コードレビュー（Claude または Codex）は未実施
+
+### 2026-11-09 第3枠（GLM 不使用枠）
+- start: 2026-11-09 15:02 JST
+- stop:  2026-11-09 15:09 JST
+- glm: none（T3 thread は使っていない）
+- 内容（QA の 2ef065a レビュー指摘とリード確定 15:01/15:03 を反映。コミット d707dfc）:
+  - 必須修正: `run.sh` は段階名の完全一致（loopback / leak-phrases / external-refs / canary）だけを受け付け、それ以外の引数（パス・未知の名前・空文字）が 1 つでもあれば何も実行せず exit 2。
+  - 段階を指定した実行は `PARTIAL RUN: not valid for acceptance` と表示し、まとめに「受入は引数なしの全段階実行だけ」と出す。
+  - loopback: PELWAY_BIND_ADDR は 127.0.0.1:<port> と [::1]:<port> の完全一致だけ（localhost・0.0.0.0・127.0.0.10・括弧なし ::1 は不可）。
+  - allowed-hosts.txt: 127.0.0.1 と ::1 だけ（localhost を削除）。
+  - forbidden-phrases.txt: 英語の secure / safe / encrypted / fully deleted / permanently deleted（語単位・大文字小文字を区別しない）、24/72 時間・hours の表記そのもの（以前の「近くに通知」より厳しい）、秘密値の形（PRIVATE KEY ブロック・Bearer トークン・sk- トークン）を追加。冒頭に対象ファイル範囲（利用者向け文言と外向け文書だけ）を明記。状態はリード確定 2026-11-09 15:01/15:03。
+  - 外向け文書として docs/public/ を走査対象に追加（docs/ のそれ以外は対象外のまま）。
+  - Rust の文字列リテラル先頭にある語（例 "24時間"）を見落とす不具合を修正（自己テストで発見）。
+  - 新しい段階 canary と canaries.txt（ダミーの目印 3 つ）。target/・logs/・log/・*.log・DEMO_CHECK_EXTRA_PATHS を走査し、走査対象が無ければ "no artifacts to scan" と明示して合格扱い。
+  - 自己テストを 68 件に拡充。
+- 検証（コマンドと exit code）:
+  - `bash -n scripts/demo-check/*.sh` すべて 0
+  - `mise run demo-check` 0（full run、4 段階。loopback static 0 件・runtime PENDING、leak-phrases 0 件、external-refs 0 件、canary 0 件。走査はソース 43 ファイル、canary 49 ファイル＝target/ の中身）
+  - `bash scripts/demo-check/run.sh canary` 0（PARTIAL RUN 表示を確認）
+  - `bash scripts/demo-check/run.sh ../../x/ok` 2（何も実行しない）
+  - `mise run demo-check-selftest` 0（68 passed, 0 failed）
+  - `mise run fmt-check` 0 / `mise run check` 0 / `mise run hk-check` 0
+- 未検証・未決:
+  - loopback の runtime 検査は未実装（デモの起動方法の決定待ち）
+  - canary は今の target/ が開発確認用クレートの中身だけで、合成データを使ったデモのビルド・ログではまだ未確認
+  - 英語の safe / secure は語単位でも、否定文や技術的な説明文（例: thread-safe の safe）で誤検出しうる
+  - shellcheck は未導入のため未実施
+  - 独立コードレビュー（Claude または Codex）は未実施
