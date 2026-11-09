@@ -240,3 +240,48 @@
   - **英語の文言は仮訳**（最終文言は未決）。
   - 読み上げ（AccessKit）は段階B。NVDA・VoiceOver・Orca での確認は未検証。
   - 迷って安全側にした点: （1）検索の ⌕・決定の ◆・送信後の ✓・鍵の 🔒 を .slint に直書きせず .ftl の文言に含めた（文言の直書き禁止を記号にも広げた）。（2）`no_color_values` のスキャナは文字列リテラルを解釈しないため、コメントにも色の値のパターンを書かない方針にした。（3）承認ボタンのキー操作（Enter/Space）は中核が `Action::Approve` を返したら橋経由で `press_approve` に結びつけたが、カードが押せなければ何も起こさない（UI の無効表示だけに頼らない中核の保証をそのまま活かす）。
+
+### 2026-11-09 第9枠（段階B-1：Codex 指摘の修正と Slint のコンパイル）
+- start: 2026-11-09 21:35 JST
+- stop:  2026-11-09 22:18 JST
+- glm: long（T3 Code スレッドで OpenCode + zai-coding-plan/glm-5.3 が実装。起点 `1971708` の worktree `demo-t3-client-ui-r3` で実施）
+- 使った skills: tdd と verification-before-completion の考え方に従った（ファイルは worktree 外のため読んでいない）。テストを先に書いて落ちることを確かめてから直し、最後に指定のコマンドを全部動かして exit code を記録した。
+- 対象: Codex 第4回レビューの should-fix 1件（トークン照合が正本 JSON を読んでいない）と、Slint 追加による `ui/main.slint` の初コンパイル。指示書「Slint の画面の骨組み 段階B-1」の §2-1・§2-2 のみ。§2-3（Fluent・accessible・トークン値・KeySource・Clock・Effect・About）は手を付けていない。
+- 2-1（Codex 指摘の修正）:
+  - 正本の写しを `git show 97fb70d:docs/design-system/tokens/pelway.tokens.json` で読み（checkout・merge・cherry-pick は不使用）、そのまま `crates/pelway-client-ui/tokens/pelway.tokens.json` に置いた。sha256 は `4f523ce19145250df391975dea3924aa7b5bdcbd417c0c31e910f3b17c543953`（期待値と一致）。
+  - `tests/theme_tokens.rs` に正本との照合テストを追加: std だけの最小の JSON 構造読み取り（オブジェクト・配列の構造だけ読み、文字列・数値の中身は読まない）で `color.<theme>` の直下のトークン名（`$` 始まりのメタキーと `mobile` などの子グループを除く、`$value` を持つもの）を取り出し、4テーマ分すべてと `TOKEN_NAMES` の一致を確かめる。**読み方の限界**: キーのエスケープは解かない（正本のキー名にエスケープなし）、`color.<theme>` の直下（デスクトップが使う普通の名前）だけが対象で `mobile` 上書き（10名・すべて直下の名前の部分集合）・`brand`/`font`/`typography`/`space`/`size`/`radius`/`border`/`shadow`/`themed`/`motion` の各グループは対象外。JSON が壊れていればパニックで落ちる。
+  - 差分: 正本（62名）にあって `TOKEN_NAMES`（50名）になかった 12 名を `TOKEN_NAMES` に追加した —— `avatar-human-bg-section`・`ext-option-bg`・`ext-option-hover`・`grabber`・`line-tabbar`・`menu-bg`・`scrim`・`sheet-bg`・`sheet-inset-bg`・`toast-bg`・`toast-fg`・`track`。逆（`TOKEN_NAMES` にあって正本にない名前）は 0 件。`.slint` が参照する 37 名はすべて正本にあるため「足りないトークン」はなし（件数バッジのトークン不足は第8枠どおり未決のまま）。
+  - `src/theme.rs` の説明が `ui-pro-draft-v0.1` を指していたのを、正本の写し（97fb70d 由来の `tokens/pelway.tokens.json`）を指すように直した。
+  - `tests/no_color_values.rs` の走査対象に `.json` は入れていない（拡張子は rs/slint/ftl のまま。トークンの正本だけが色の値を持つ）。
+  - TDD の赤→緑: テストを先に書き `cargo test -p pelway-client-ui --test theme_tokens --locked --offline` が exit 101（`token_names_match_canonical_json` が不一致で失敗、差分 12 名を表示）するのを確認してから `theme.rs` を直し、exit 0（8件合格）を確認した。
+- 2-2（Slint の追加）:
+  - `Cargo.toml`: `slint = "=1.18.1"`（dependencies）・`slint-build = "=1.18.1"`（build-dependencies）・`i-slint-backend-testing = "=1.18.1"`（dev-dependencies）。**features は既定のままで解決・コンパイルできた**（減らす試行は不要だった）。
+  - `Cargo.lock`: `CARGO_NET_OFFLINE=true cargo check -p pelway-client-ui --offline` を `--locked` なしで 1 回だけ実行して更新。追加された package は **560**（`+name` 562 件のうち 2 件は `pelway-client-ui`・`pelway-dev-smoke` の項目の再配置＝同じ内容で場所が動いただけ）。既存 package の版が変わったものは **0 件**（`-version` 行は再配置 2 件の `0.0.0` のみ）。
+  - `build.rs`: `slint_build::compile("ui/main.slint")`。`src/lib.rs`: `slint::include_modules!()` で `MainWindow` などを読み込み。**Slint は `pelway-client-ui` の中だけで使い、`pelway-client-core` には入れていない。**
+  - `ui/main.slint` の修正は構文と型の誤りだけ（並び・見た目は変えない方針）:
+    1. `out property <callback> x();`（19箇所）→ `callback x();`。`out callback` も Slint の構文にないため修飾子なし（callback の既定の向きが「部品が呼ぶ・外が受ける」）。
+    2. `Text` に `underline` プロパティはないため `LinkText` の `underline: true;` を削除（**下線は付かない**。リンクは色だけで示す）。
+    3. `LinkText` に `callback touched();` を宣言（4箇所の `touched => {...}` が通るように）。**touched を発火する入力はまだ置いていない**（押せるようにするのは結合の段階）。
+    4. 未読の横線の `vertical-alignment: center;`（`Rectangle` に無いプロパティ）を削除。HorizontalLayout の交差軸で固定サイズの子は中央に置かれる前提（Qt 流）。**実際の見た目は未検証**。
+    5. 入力欄の `composer-ta`・`reply-ta` を `TouchArea` から `FocusScope` に（`has-focus` は `TouchArea` に無く `FocusScope` にある。この2つの TouchArea はクリック処理に使っていなかったため機能の喪失なし）。
+    6. `AiBadgeView` の `padding-left/right` は layout 要素にしか効かないため、中に `HorizontalLayout` を置いて同じ余白を実現（警告 2 件の解消）。
+    7. `ThemeState.current-name` を `out` から `in-out` に変更。**理由**: 生成物で確認したところ `out` のグローバルプロパティは Rust 側の setter が空のスタブになり値を渡せない（第8枠の設計「Rust の `Theme::name()` から渡す」と矛盾するため）。
+  - unsafe の取扱い: 生成物の `ItemTreeVTable_static` 内に `#[allow(unsafe_code)]` があり、クレートの `#![forbid(unsafe_code)]` と衝突して E0453 になるため、**`forbid` を `deny` に緩めた**（生成物は自分自身を許可している。手書きのコードは unsafe 禁止のまま）。
+  - `tests/slint_window.rs`: `i-slint-backend-testing` と `SLINT_BACKEND=testing`（テスト関数の先頭で 1 回だけ設定。並列実行の競合を避けるため検査は 1 関数にまとめた）で、`MainWindow` が作れること・テーマ名 4 つ（`light`・`dark`・`light-high-contrast`・`dark-high-contrast`）を `ThemeState.current-name` に渡せること・`tr-*` と切替プロパティを渡せることを確認（**窓は開いていない**）。グローバルへのアクセスは `slint::Global` トレイトの `ThemeState::get(&window)` 経由。
+  - トークンの値（色）は `.slint` に入れていない（`DesignTokens` は名前だけ・初期値なしのまま。値の入れ方は段階B-2で決める）。
+- hk.pkl の変更（この枠で迷って安全側にした点）: 正本の写しは sha256 固定のため末尾改行を付けることができないが、pre-commit の newlines チェック（end-of-file-fixer）がこれを弾いた。`docs/**`（凍結文書）と同じ理由で、`crates/pelway-client-ui/tokens/**` を trailing whitespace / newlines の対象外に 1 行追加した（--no-verify は不使用）。
+- 検証（コマンドと exit code。すべて `CARGO_NET_OFFLINE=true` 付き）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 0
+  - `cargo test --workspace --locked --offline` 0（pelway-client-core 54 件: approval 24・contract 14・input 16、失敗 0 ／ pelway-client-ui 29 件: bridge 10・i18n_keys 6・no_color_values 4・slint_window 1・theme_tokens 8、失敗 0 ／ pelway-dev-smoke 1 件、失敗 0）
+  - `cargo build -p pelway-client-ui --locked --offline` 0（build.rs 経由で `ui/main.slint` を含むビルド）
+  - `git status --short`（最終確認時）: 空
+- 未検証・未決:
+  - **窓を開いての確認はしていない**（デザイン担当・QA が別に行う）。`FocusScope` 化・下線の削除・未読横線の中央寄せ前提・`AiBadgeView` の余白の実際の見た目は未検証。
+  - **U01〜U07 は未決のまま**。とくに U05（Slint のライセンス）: Royalty-free かどうか・表示義務の有無・置き場所は決めていないため About 画面等は作っていない。**Slint を依存に足したことと、ライセンス表示をどこにどう出すかは未決のまま残す。**
+  - `LinkText.touched` は宣言だけで発火する入力なし（結合の段階で付ける）。
+  - `ThemeState.current-name` を in-out にした結果、.slint 側からも書けるようになっているが、書き方はしていない（テーマ名の定義元は `Theme::name()` のまま）。
+  - `DesignTokens` は `out property` のまま。段階B-2で Rust から値を渡す際には `ThemeState` と同じ問題（out は Rust から渡せない）が予想されるため、そのとき `in-out` 化と `theme_tokens.rs` の `out property <brush>` を読むテストの更新が必要。
+  - 17:30 の記録にある `light-accessible`・`dark-accessible` は古い名前のまま使っていない（`from_name` は引き続き拒否。テストで確認）。
+  - 正本 JSON の `mobile` 上書き・`color` 以外のグループ（`space`・`size`・`radius` 等）は `TOKEN_NAMES` の対象外のまま（デスクトップの色トークンだけが今の対象）。
+- ネットワーク・書き込み範囲: cargo はすべて `CARGO_NET_OFFLINE=true` + `--offline`（lock 更新の 1 回だけ `--locked` を外した）。`cargo fetch`・`cargo update`・`cargo add` は不使用。worktree の外への書き込みなし（一時ファイルは worktree 内の `target/` のみ。前回のような `/tmp/opencode` への出力はしていない）。git の push・fetch なし。`crates/pelway-client-core` は変更なし。
