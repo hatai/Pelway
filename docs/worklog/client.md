@@ -99,3 +99,31 @@
 - 未検証・未決:
   - 第1枠の未決（メッセージ欄の修飾キー付き Enter 等）は変わらず未決。
   - コメント保存の 409 で読み直したあと、未保存のコメント本文を入力欄に残すか破棄するかは UI 層の判断（この状態機械の対象外）。
+
+### 2026-11-09 第3枠（リード決定: コメント欄は承認待ちのときだけ書ける）
+- start: 2026-11-09 16:35 JST
+- stop:  2026-11-09 16:44 JST
+- glm: long（T3 Code スレッドで OpenCode + zai-coding-plan/glm-5.3 が実装）
+- 使った skills: tdd / domain-modeling / verification-before-completion（第1枠と同じ使い方）
+- **これはリードの決定（2026-11-09 16:12ごろ）の反映**:
+  1. コメント欄はカードが承認待ちのときだけ書ける。承認待ち以外の状態（送信中・送信後など）ではいつも読み取り専用にし、コメント API を呼ばない。前の依頼の「承認の通信中だけ読み取り専用」はこれに置き換えた。
+  2. 送ったあとに 409 `not_awaiting_approval` が返ったとき（承認でもコメント保存でも）は「再読み込みして、次の承認は新しいキー」の扱いにする。自動では送り直さない。
+- 内容:
+  - `CardView` に `state: TaskState` を追加。`reload` でカードごと差し替わり、承認成功（`ApproveOutcome.state`）で送信側の状態に移る。コメント保存では状態は変わらない。
+  - `comment_editable()`: カードが `TaskState::AwaitingSendApproval` のときだけ true。承認の通信中かどうかは見ない（カードが承認待ちなら、承認要求の応答待ち・`approval_in_progress` の確認待ち・確認あきらめ後も書ける）。承認待ち以外のカード状態ではいつも false。加えて、読み直し待ち（`NeedsReload`）・クライアント不具合（`ClientBug`）・承認済み（`Approved`）の各フェーズでは、手持ちのカード状態に関係なく読み取り専用にする（409 の直後に同じコメント API を再送させないため。私の追加判断）。
+  - `approve_button_enabled()`: 承認待ちのカードで、かつ待機中か確認あきらめ後のときだけ true（承認待ちでないカードで押させない。指示にはないが一貫性のための最小の追加）。
+  - 409 `not_awaiting_approval`（承認・コメント保存の両方）: `NeedsReload` へ移し、自動再送なし。`reload` で承認待ちに戻り、次の承認は新しいキー。`snapshot_hash` は差し替えない。
+  - テスト（+4、書き換え1、削除1）:
+    - 追加: `comment_box_is_editable_only_when_the_card_awaits_send_approval`（9 状態ごとに書けるか・コメント API を呼ぶかを検査）、`comment_box_stays_editable_while_approving_as_long_as_the_card_awaits_approval`（承認の通信中も書ける。「承認の通信中だけ読み取り専用」の撤廃）、`approve_success_moves_the_card_to_the_send_side_and_locks_the_comment_box`、`reloaded_card_not_awaiting_approval_keeps_the_comment_box_read_only`。
+    - 拡張: `not_awaiting_approval_requires_reload`（reload → 次の承認は新しいキー）、`comment_not_awaiting_approval...`（reload → 新しいキーでの承認要求を確認）。
+    - 削除: `comment_cannot_be_saved_while_approving`（新仕様の逆。上の置き換えテストが担当）。
+    - 修正: 通信中・確認あきらめ後のコメント欄の期待を「書ける」に更新。
+  - TDD: テスト追加→赤（`CardView` に `state` なし E0560/E0609、旧期待の4件失敗）→ 実装→緑。
+- 検証（コマンドと exit code）:
+  - `cargo test -p pelway-client-core` 0（50 件: approval 23・contract 14・input 13、失敗 0）
+  - `cargo clippy -p pelway-client-core --all-targets -- -D warnings` 0
+  - `cargo fmt --all --check` 0
+  - `cargo test --workspace --locked` 0、`cargo clippy --workspace --all-targets --locked -- -D warnings` 0
+- 未検証・未決:
+  - 承認の通信中にコメントを保存すると `snapshot_hash` が変わり、進行中の承認要求と食い違う可能性がある。その場合はサーバーが 409 `snapshot_mismatch` を返し、「再読み込みして次の承認は新しいキー」で処理する（リード決定の運用）。UI 側で保存ボタン等の制御をするかは第2段階（Slint）で決める。
+  - `NeedsReload`・`ClientBug` 中もコメント欄を読み取り専用にする条件は指示に明記がなく私の追加判断。異論があれば外す。

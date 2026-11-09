@@ -57,11 +57,20 @@ fn card_v3() -> CardView {
         card_id: CardId::from("card-1"),
         card_version: 3,
         snapshot_hash: "snap-a".to_string(),
+        state: TaskState::AwaitingSendApproval,
     }
+}
+
+fn card_v3_with_state(state: TaskState) -> CardView {
+    CardView { state, ..card_v3() }
 }
 
 fn machine_with(clock: &FakeClock) -> ApprovalMachine<FakeKeys, &FakeClock> {
     ApprovalMachine::new(card_v3(), FakeKeys::new(), clock)
+}
+
+fn machine_with_card(card: CardView, clock: &FakeClock) -> ApprovalMachine<FakeKeys, &FakeClock> {
+    ApprovalMachine::new(card, FakeKeys::new(), clock)
 }
 
 fn approve_req_of(effect: Option<Effect>) -> ApproveRequest {
@@ -99,9 +108,9 @@ fn pressing_approve_uses_a_fresh_key_and_the_shown_version_and_snapshot() {
     assert_eq!(req.snapshot_hash, "snap-a");
     assert_eq!(req.idempotency_key.as_str(), "test-key-0000001");
 
-    // 承認の通信中はボタンもコメント欄も無効。
+    // 承認の通信中はボタンは無効（二重送信しない）。コメント欄はカードが承認待ちなので書ける。
     assert!(!m.approve_button_enabled());
-    assert!(!m.comment_editable());
+    assert!(m.comment_editable());
 }
 
 #[test]
@@ -162,10 +171,10 @@ fn in_progress_is_rechecked_with_the_same_key_at_1s_2s_4s_then_gives_up() {
         m.on_approve_response(in_progress()),
         Some(Effect::Notice(Notice::CannotCheckApproval))
     );
-    // 自動の確認はもうない。ボタンは押せる。コメント欄は承認未確定のため読み取り専用のまま。
+    // 自動の確認はもうない。ボタンは押せる。カードは承認待ちのままなのでコメント欄も書ける。
     assert_eq!(m.poll(), None);
     assert!(m.approve_button_enabled());
-    assert!(!m.comment_editable());
+    assert!(m.comment_editable());
 }
 
 #[test]
@@ -248,7 +257,7 @@ fn snapshot_mismatch_requires_reload() {
 fn not_awaiting_approval_requires_reload() {
     let clock = FakeClock::new();
     let mut m = machine_with(&clock);
-    let _ = m.press_approve();
+    let first = approve_req_of(m.press_approve());
     assert_eq!(
         m.on_approve_response(Err(ApproveError::NotAwaitingApproval {
             state: TaskState::Done
@@ -259,6 +268,13 @@ fn not_awaiting_approval_requires_reload() {
             }
         }))
     );
+    // 自動では送り直さない。
+    assert_eq!(m.press_approve(), None);
+    assert_eq!(m.poll(), None);
+    // 再読み込みしたら、次の承認は新しいキー。
+    m.reload(card_v3());
+    let second = approve_req_of(m.press_approve());
+    assert_ne!(second.idempotency_key, first.idempotency_key);
 }
 
 #[test]
@@ -285,6 +301,7 @@ fn reload_restores_idle_and_the_next_approval_uses_a_new_key_and_new_snapshot() 
         card_id: CardId::from("card-1"),
         card_version: 5,
         snapshot_hash: "snap-b".to_string(),
+        state: TaskState::AwaitingSendApproval,
     };
     m.reload(reloaded);
     assert!(m.approve_button_enabled());
@@ -396,15 +413,88 @@ fn saving_a_comment_swaps_snapshot_hash_and_keeps_the_shown_version() {
     assert_eq!(req.card_version, 3);
 }
 
+// ---- コメント欄はカードが承認待ちのときだけ書ける（リード決定 2026-11-09 16:12） ----
+
 #[test]
-fn comment_cannot_be_saved_while_approving() {
+fn comment_box_is_editable_only_when_the_card_awaits_send_approval() {
+    let clock = FakeClock::new();
+    for state in [
+        TaskState::Requested,
+        TaskState::Working,
+        TaskState::AwaitingDecision,
+        TaskState::AwaitingSendApproval,
+        TaskState::Sending,
+        TaskState::SentAwaitingReply,
+        TaskState::OutcomeUnknown,
+        TaskState::Stopped,
+        TaskState::Done,
+    ] {
+        let mut m = machine_with_card(card_v3_with_state(state), &clock);
+        let editable = m.comment_editable();
+        assert_eq!(
+            editable,
+            state == TaskState::AwaitingSendApproval,
+            "state={state:?}"
+        );
+        // コメント API を呼ぶのは承認待ちのときだけ。
+        match m.request_save_comment("了解".to_string()) {
+            CommentAttempt::Send(_) => {
+                assert_eq!(state, TaskState::AwaitingSendApproval, "state={state:?}");
+            }
+            CommentAttempt::Reject(Notice::CommentLocked) => {
+                assert_ne!(state, TaskState::AwaitingSendApproval, "state={state:?}");
+            }
+            other => panic!("unexpected attempt for {state:?}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn comment_box_stays_editable_while_approving_as_long_as_the_card_awaits_approval() {
+    // 「承認の通信中だけ読み取り専用」は撤廃。カードが承認待ちなら承認の通信中も書ける。
     let clock = FakeClock::new();
     let mut m = machine_with(&clock);
     let _ = m.press_approve();
-    assert_eq!(
-        m.request_save_comment("了解".to_string()),
+    assert!(m.comment_editable());
+    assert!(matches!(
+        m.request_save_comment("承認の通信中のメモ".to_string()),
+        CommentAttempt::Send(_)
+    ));
+    // 確認の待ち時間中も書ける。
+    m.on_approve_response(in_progress());
+    clock.advance(1000);
+    let _ = m.poll();
+    assert!(m.comment_editable());
+}
+
+#[test]
+fn approve_success_moves_the_card_to_the_send_side_and_locks_the_comment_box() {
+    let clock = FakeClock::new();
+    let mut m = machine_with(&clock);
+    let _ = m.press_approve();
+    m.on_approve_response(Ok(outcome()));
+    assert_eq!(m.card().state, TaskState::SentAwaitingReply);
+    assert!(!m.comment_editable());
+    assert!(matches!(
+        m.request_save_comment("送信後のメモ".to_string()),
         CommentAttempt::Reject(Notice::CommentLocked)
-    );
+    ));
+    // 承認済み・送信側のカードでは承認ボタンも押せない。
+    assert!(!m.approve_button_enabled());
+    assert_eq!(m.press_approve(), None);
+}
+
+#[test]
+fn reloaded_card_not_awaiting_approval_keeps_the_comment_box_read_only() {
+    let clock = FakeClock::new();
+    let mut m = machine_with(&clock);
+    m.reload(card_v3_with_state(TaskState::SentAwaitingReply));
+    assert!(!m.comment_editable());
+    assert!(!m.approve_button_enabled());
+    // 承認待ちに戻ったカードを読み直すと書ける。
+    m.reload(card_v3());
+    assert!(m.comment_editable());
+    assert!(m.approve_button_enabled());
 }
 
 #[test]
@@ -440,10 +530,13 @@ fn comment_not_awaiting_approval_requires_reload_without_resaving_or_snapshot_sw
     );
     assert_eq!(m.press_approve(), None);
 
-    // 読み直しで承認待ちに戻る。
+    // 読み直しで承認待ちに戻る。次の承認は新しいキー。
     m.reload(card_v3());
     assert!(m.comment_editable());
     assert!(m.approve_button_enabled());
+    let after_reload = approve_req_of(m.press_approve());
+    assert_eq!(after_reload.snapshot_hash, "snap-a");
+    assert_eq!(after_reload.card_version, 3);
 }
 
 #[test]

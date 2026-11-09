@@ -15,10 +15,13 @@
 //! 扱い、再送しない。
 //!
 //! コメント欄はコメント API だけを呼び、承認は承認ボタンからだけ呼ぶ。
+//! コメント欄はカードが承認待ちのときだけ書ける（リード決定 2026-11-09 16:12）。
+//! 承認待ち以外（送信中・送信後など）ではいつも読み取り専用にし、コメント API を
+//! 呼ばない。かつての「承認の通信中だけ読み取り専用」はこの規則に置き換えた。
 //! コメントを保存したら応答の `snapshot_hash` に差し替える。`card_version` は
 //! 表示中の値をそのまま承認に送る（コメント保存では版は変わらない）。
-//! コメント保存が 409 `not_awaiting_approval` や 404 `card_not_found` を返したら、
-//! 自動で再送せず読み直しを求める状態へ移し、`snapshot_hash` は差し替えない。
+//! 承認でもコメント保存でも 409 `not_awaiting_approval`（や 404 `card_not_found`）
+//! が返ったら自動で再送せず読み直しを求め、次の承認は新しいキーで行う。
 
 use crate::contract::{
     ApproveError, ApproveOutcome, ApproveRequest, COMMENT_MAX_CHARS, CardId, CommentError,
@@ -54,11 +57,14 @@ impl<T: Clock + ?Sized> Clock for &T {
 const RECHECK_DELAYS_MS: [u64; 3] = [1000, 2000, 4000];
 
 /// 表示中の承認カード。承認・コメント保存の要求はこの値を使う。
+/// コメント欄が書けるのはこのカードが承認待ち（`state` が
+/// [`TaskState::AwaitingSendApproval`]）のときだけ。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CardView {
     pub card_id: CardId,
     pub card_version: u64,
     pub snapshot_hash: String,
+    pub state: TaskState,
 }
 
 /// 読み直しが必要な理由（409 系と 404）。
@@ -94,7 +100,7 @@ pub enum Notice {
     CommentBlank,
     /// コメント本文が長すぎる。
     CommentTooLong { max_chars: usize },
-    /// コメント欄が読み取り専用の間はコメント API を呼ばない。
+    /// コメント欄が読み取り専用（カードが承認待ちでない）のためコメント API を呼ばない。
     CommentLocked,
 }
 
@@ -171,18 +177,24 @@ impl<K: KeySource, C: Clock> ApprovalMachine<K, C> {
         &self.card
     }
 
-    /// コメント欄が編集可能か。承認待ち（[`Phase::Idle`]）のときだけ true。
-    /// 承認の通信中は読み取り専用にし、確認未了・読み直し待ち・不具合・承認済みも
-    /// 安全のため読み取り専用のままにする。
+    /// コメント欄が編集可能か。カードが承認待ちのときだけ true（リード決定 2026-11-09 16:12）。
+    /// 承認待ち以外（送信中・送信後など）ではいつも読み取り専用にし、コメント API を
+    /// 呼ばない。承認の通信中かどうかは見ない（カードが承認待ちなら通信中も書ける）。
+    /// 読み直し待ち・不具合・承認済みの各状態では、カードの状態に関係なく読み取り専用にする。
     #[must_use]
     pub fn comment_editable(&self) -> bool {
-        matches!(self.phase, Phase::Idle)
+        self.card.state == TaskState::AwaitingSendApproval
+            && !matches!(
+                self.phase,
+                Phase::NeedsReload { .. } | Phase::ClientBug { .. } | Phase::Approved
+            )
     }
 
-    /// 承認ボタンが押せるか。承認待ちと、確認あきらめ後（同じキーでの確認し直し）。
+    /// 承認ボタンが押せるか。承認待ちのカードで、承認待機中か確認あきらめ後のとき。
     #[must_use]
     pub fn approve_button_enabled(&self) -> bool {
         matches!(self.phase, Phase::Idle | Phase::CannotCheck { .. })
+            && self.card.state == TaskState::AwaitingSendApproval
     }
 
     /// 承認ボタンを押した。押すたびに新しい冪等キーを 1 つ作る。
@@ -236,7 +248,9 @@ impl<K: KeySource, C: Clock> ApprovalMachine<K, C> {
             _ => return None,
         };
         match result {
-            Ok(_) => {
+            Ok(outcome) => {
+                // 承認でカードは送信側の状態へ移る。コメント欄は以後読み取り専用。
+                self.card.state = outcome.state;
                 self.phase = Phase::Approved;
                 None
             }
@@ -288,8 +302,9 @@ impl<K: KeySource, C: Clock> ApprovalMachine<K, C> {
     }
 
     /// コメントを保存しようとする。コメント欄はコメント API だけを呼ぶ。
+    /// カードが承認待ちのときだけ呼べる（承認待ち以外では読み取り専用）。
     /// 本文は [`crate::contract::validate_comment`] で先に検査し、空白・長すぎは
-    /// API を呼ばず [`CommentAttempt::Reject`] を返す。コメント欄が読み取り専用の間も呼ばない。
+    /// API を呼ばず [`CommentAttempt::Reject`] を返す。
     pub fn request_save_comment(&mut self, body: String) -> CommentAttempt {
         if !self.comment_editable() {
             return CommentAttempt::Reject(Notice::CommentLocked);
