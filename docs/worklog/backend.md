@@ -143,3 +143,30 @@
 - 未検証・未決:
   - HTTP 層の変更（ledger 全体の Mutex 化、`abort_before_send` の非公開化）は今回の対象外（依頼どおり未実施）。
   - 差分の Codex 再レビュー・QA は未実施。
+
+### 2026-11-09 第5枠の追記（リード決定 16:11、送信記録、仕様確認）
+- 記録者: バックエンド・AI連携エンジニア（docs のみの追記。コードは変更しない）
+- HEAD before: 5600c99
+- 修正4の決定（リード決定 16:11、案(c)）: 実装しない。既知の制限として記録する。
+- 既知の制限（追加）:
+  - `hkdf 0.12.4` 内部の HMAC 鍵（PRK）は、使用後に消去されない。自前コードの `file_key`、`okm`、`MasterKey` は drop 時に消去される。
+  - 直すには zeroize に対応したライブラリの版へ切り替える必要があり、ネットワークの許可が要るため、デモ後に検討する。
+  - 案(a)（HKDF の自前実装）は不採用（暗号処理を自作しないため）。
+- 挙動の変更（リード決定 16:11）:
+  - コメント保存は `AwaitingSendApproval` 以外のすべての状態で 409 `not_awaiting_approval` として断る。`SentAwaitingReply` も含む。
+  - 理由: 承認後にコメントが変わると、承認した内容の記録（snapshot_hash）と食い違うため。
+  - 旧テスト `comment_after_send_keeps_state_and_does_not_resend`（送信後のコメント保存が成功することを期待）は、この理由で `comment_after_send_is_rejected_and_does_not_resend`（拒否・hash 不変・再送は最初の結果のまま）に書き換えた（コミット 99ee013）。
+- 仕様確認（2026-11-09 16:12〜16:14 JST、読み取りのみ）:
+  - 対象: `docs/technical/v0.7/` 全体と `docs/architecture-v0.7.md`（base と同じ文書）。
+  - 検索語: コメント、comment、送信後、承認後、SentAwaitingReply、sent_awaiting_reply、送信済、編集、attempt_started前。
+  - 結果: 送信後・承認後にコメントを保存できるとする記述はない。本文（body/、architecture）にはコメントについての記述そのものがない。
+  - 関連: `docs/technical/v0.7/body/03-ai-bot-runtime.md:57` は、開始後は元の snapshot・operation・試行・結果を変えずに残し、編集は後続案として保存するとしている。今回の拒否はこれと矛盾しない。
+- 送信記録（4-1）:
+  - 送信先: `mcp:253c6c92-be03-4997-a781-a708b553dd97`（バックエンドの GLM 実装スレッドのみ）
+  - 送信時刻: 2026-11-09 15:58:19 JST（`t3 thread send <id> -`、exit 0）
+  - 本文: バックエンド・AI連携エンジニアのコンピューター上の `/workspace/pelway-be/fix-instruction-1.md`、sha256 `93d7ac9882a4e2ddeb41046963899e435161752a31f29110483331393858b1ab`
+  - それより前の 3 回の試行は届いていない（2 回は sha256 照合で送信前に停止、1 回は MINISFORUM に一時的につながらず実行されなかった。届いていないことはスレッドの runCount が 1 のままであることで確認した）。
+- 逸脱（リード承認済みの記録事項）: Windows のコマンド行が引用符を落とすため、本文を base64 にして WSL 内で戻し、sha256 が一致したときだけ送った。Windows・WSL に一時ファイルは置いていない。
+- 未検証: GLM が報告した TDD の red（先に失敗するテストを確認した）段階は GLM の自己申告で、こちらでは確認していない（未検証）。
+- 独立の再実行（2026-11-09 16:10 JST、HEAD 5600c99、オフライン）: `cargo fmt --all --check` 0、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 0、`cargo test --workspace --locked --offline` 0（64 passed / 0 failed / 0 ignored）。
+- 次: 17b71a4..（この追記のコミット）を案2で Codex に再レビューしてもらい、そのあと QA。
