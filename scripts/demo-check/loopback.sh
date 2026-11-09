@@ -12,6 +12,7 @@
 #   3. PELWAY_BIND_ADDR を経由しない bind(...) の引数も許可値と完全一致で照合する（DC-01）。
 #      例: TcpListener::bind("localhost:8080") や 127.0.0.1 以外の IP は違反。
 #      引数が "..." の文字列リテラルで書かれている場合だけが対象（変数は静的に見えないため）。
+#      同じ行に複数の bind(...) があっても、すべての呼び出しを検査する（slot5 指摘1）。
 # runtime（未実装）:
 #   デモ起動中の待受ソケットを列挙して許可値以外を検出する検査は、デモの起動方法が決まってから実装する。
 #   既定では "runtime: PENDING (NOT IMPLEMENTED)" と表示し、static 合格なら exit 0（runtime は未検査）。
@@ -80,12 +81,14 @@ for f in "${files[@]}"; do
   while IFS= read -r ln; do
     [ -n "${ln}" ] && report "${f}:${ln}" "unspecified (all-interfaces) address"
   done < <(grep -nE "${any_re}" -- "${DC_ROOT}/${f}" | cut -d: -f1)
-  # PELWAY_BIND_ADDR を経由しない bind("...") の宛先（1 行に複数あっても先頭の 1 件だけ）
+  # PELWAY_BIND_ADDR を経由しない bind("...") の宛先。同じ行に複数あってもすべて検査する（指摘1）
   while IFS=: read -r ln line; do
     [ -n "${line:-}" ] || continue
-    if [[ "${line}" =~ ${bind_cap_re} ]]; then
+    rest="${line}"
+    while [[ "${rest}" =~ ${bind_cap_re} ]]; do
       ok_bind_target "${BASH_REMATCH[2]}" || report "${f}:${ln}" "bind argument is not 127.0.0.1:<port 0-65535> or [::1]:<port 0-65535>"
-    fi
+      rest="${rest:${#BASH_REMATCH[0]}}"
+    done
   done < <(grep -nE "${bind_scan_re}" -- "${DC_ROOT}/${f}")
 done
 

@@ -9,12 +9,16 @@
 #   - DEMO_CHECK_ACCEPTANCE=1 のとき loopback の runtime PENDING と canary の走査ゼロが
 #     exit 1 になり、ACCEPTANCE MODE と表示される（未設定時の挙動は不変）
 #   - PELWAY_BIND_ADDR を経由しない bind("...") の宛先も許可値（127.0.0.1/[::1]:0-65535）と
-#     完全一致で照合される（DC-01）。ポートは 0〜65535 で 65536〜99999 は違反（DC-06）
+#     完全一致で照合される（DC-01）。同じ行に複数の bind があってもすべて検査する（slot5 指摘1）。
+#     ポートは 0〜65535 で 65536〜99999 は違反（DC-06）
 #   - 引用符の直後の「//ホスト名」（JS などの文字列内のプロトコル相対参照）を検出し、
-#     行頭の // コメントや文字列内の path//file は誤検知しない（DC-02）
-#   - 走査中のシンボリックリンクをたどらない。target/ などルート自体がリンクなら実体を走査する（DC-03）
+#     文字列外の // コメントや path//file は誤検知しない（DC-02）。
+#     行コメント内の引用符付き URL も誤検知しない（slot5 指摘3）
+#   - 走査中のシンボリックリンクをたどらない。ルート自体が作業ツリーの外を指すリンクなら
+#     読まずに exit 2（mbx 共有ビルドキャッシュ配下のみ例外として走査する）（DC-03・slot5 指摘2）
 #   - 改行を含むファイル名でも壊れない（DC-04）
-#   - find などの走査失敗（読めないディレクトリ）で exit 2（DC-05: pipefail）
+#   - find などの走査失敗（読めないディレクトリ）で exit 2（DC-05: pipefail）。
+#     canary の目印検索でもファイルが読めなければ exit 2（slot5 指摘4）
 # を確かめる。本物のリスト（forbidden-phrases.txt / allowed-hosts.txt / canaries.txt）を使う。
 # リポジトリには書き込まない。
 set -uo pipefail
@@ -202,6 +206,10 @@ expect_case external-refs 1 "quoted //host in a Rust string literal" "${R}" 'pub
 expect_case external-refs 1 "backtick template //host in JS" web/app3.js 'const t = `//cdn.example.dev/a`;\n'
 expect_case external-refs 0 "a // comment naming a host is not a reference" web/guard.js '// api.example.com には依存しない（コメント行）\nlet q = a / b / c;\n'
 expect_case external-refs 0 "path//inside/a string is not a reference" web/guard2.js 'const p = "path//to/file";\n'
+# 指摘3（slot5）: 行コメント内の引用符付き URL は誤検出しない。実コードの引用符付き参照は引き続き検出する
+expect_case external-refs 0 "quoted //host inside a JS line comment is not a ref" web/c.js '// セットアップ: "//api.example.com/v1" を参照\n'
+expect_case external-refs 0 "quoted https URL inside a JS line comment is not a ref" web/c2.js '// ドキュメント: "https://docs.example.com/intro" を参照\n'
+expect_case external-refs 1 "quoted //host in code with a trailing // comment" web/c3.js 'const u = "//cdn.example.com/a"; // 本物はこちら\n'
 
 # --- loopback ---
 expect_case loopback 0 "PELWAY_BIND_ADDR = [::1]:8080 is allowed" mise.toml '[env]\nPELWAY_BIND_ADDR = "[::1]:8080"\n' replace
@@ -221,6 +229,10 @@ expect_case loopback 1 "TcpListener::bind(\"localhost:8080\") is a violation" "$
 expect_case loopback 1 "bind to a non-loopback IPv4 is a violation" "${R}" 'fn b2() { let _ = std::net::TcpListener::bind("192.168.10.4:9000"); }\n'
 expect_case loopback 0 "bind(\"127.0.0.1:8080\") passes" "${R}" 'fn b3() { let _ = std::net::TcpListener::bind("127.0.0.1:8080"); }\n'
 expect_case loopback 0 "bind(\"[::1]:0\") passes" "${R}" 'fn b4() { let _ = std::net::TcpListener::bind("[::1]:0"); }\n'
+# 指摘1（slot5）: 同じ行に複数の bind があってもすべて検査する
+expect_case loopback 1 "allowed bind then localhost bind on one line" "${R}" 'fn m1() { let _ = std::net::TcpListener::bind("127.0.0.1:1").unwrap(); let _ = std::net::TcpListener::bind("localhost:2").unwrap(); }\n'
+expect_case loopback 1 "localhost bind then allowed bind on one line" "${R}" 'fn m2() { let _ = std::net::TcpListener::bind("localhost:2").unwrap(); let _ = std::net::TcpListener::bind("[::1]:3").unwrap(); }\n'
+expect_case loopback 0 "two allowed binds on one line" "${R}" 'fn m3() { let _ = std::net::TcpListener::bind("127.0.0.1:1").unwrap(); let _ = std::net::TcpListener::bind("[::1]:2").unwrap(); }\n'
 # DC-06: ポートは 0〜65535（0 は自動割り当て）。65536〜99999 は違反
 expect_case loopback 1 "PELWAY_BIND_ADDR port 65536 is a violation" mise.toml '[env]\nPELWAY_BIND_ADDR = "127.0.0.1:65536"\n' replace
 expect_case loopback 1 "PELWAY_BIND_ADDR port 99999 is a violation" mise.toml '[env]\nPELWAY_BIND_ADDR = "127.0.0.1:99999"\n' replace
@@ -228,6 +240,9 @@ expect_case loopback 1 "PELWAY_BIND_ADDR [::1]:65536 is a violation" mise.toml '
 expect_case loopback 0 "PELWAY_BIND_ADDR port 65535 passes" mise.toml '[env]\nPELWAY_BIND_ADDR = "127.0.0.1:65535"\n' replace
 expect_case loopback 0 "PELWAY_BIND_ADDR port 0 (auto-assign) still passes" mise.toml '[env]\nPELWAY_BIND_ADDR = "127.0.0.1:0"\n' replace
 expect_case loopback 1 "bind port 65536 in Rust is a violation" "${R}" 'fn b5() { let _ = std::net::TcpListener::bind("127.0.0.1:65536"); }\n'
+# DC-06 確定（開発リード 17:02）: 許可ホストでなければポート 0 でも違反。65536 以上はどのホストでも違反
+expect_case loopback 1 "PELWAY_BIND_ADDR = localhost:0 (port 0 does not allow a bad host)" mise.toml '[env]\nPELWAY_BIND_ADDR = "localhost:0"\n' replace
+expect_case loopback 1 "PELWAY_BIND_ADDR = localhost:65536 (bad host and bad port)" mise.toml '[env]\nPELWAY_BIND_ADDR = "localhost:65536"\n' replace
 
 # --- canary ---
 expect_case canary 1 "body canary in a built binary under target/" target/debug/app '\x7fELF\x00\x00PELWAY_CANARY_BODY_7f3a\x00'
@@ -260,15 +275,25 @@ run_stage "${r}" canary
 if [ "${RC}" -eq 0 ]; then ok "canary: a symlinked log is not followed"; else ng "canary: symlink not followed (exit ${RC})"; show "${OUT}"; fi
 rm -f "${r}/crates/x/src/link.rs" "${r}/assets/link.svg" "${r}/logs/link.log"
 
-# ルート自体がシンボリックリンク（target/ → 実体ディレクトリ）なら実体を走査する
+# 指摘2（slot5）: ルート自体が作業ツリーの外を指すリンクなら、外を読まずに exit 2。
+# ただし実体が mbx 共有ビルドキャッシュ（~/.cache/mbx/targets/ 配下）のときだけ例外として走査する
 r="${tmp}/case"; make_clean "${r}"
 mkdir -p "${tmp}/realtarget/debug"
 printf 'PELWAY_CANARY_APIKEY_9c21\n' > "${tmp}/realtarget/debug/app"
 ln -s "${tmp}/realtarget" "${r}/target"
 run_stage "${r}" canary
+if [ "${RC}" -eq 2 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_APIKEY"; then
+  ok "canary: target/ linking outside the work tree exits 2 without reading it"
+else ng "canary: outside root link (exit ${RC})"; show "${OUT}"; fi
+
+r="${tmp}/case"; make_clean "${r}"
+mkdir -p "${tmp}/fakehome/.cache/mbx/targets/v1/proj/debug"
+printf 'PELWAY_CANARY_BODY_7f3a\n' > "${tmp}/fakehome/.cache/mbx/targets/v1/proj/debug/app"
+ln -s "${tmp}/fakehome/.cache/mbx/targets/v1/proj" "${r}/target"
+run_stage "${r}" canary HOME="${tmp}/fakehome"
 if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -qF "target/debug/app:"; then
-  ok "canary: target/ itself being a symlink is still scanned (root is resolved)"
-else ng "canary: symlinked target root (exit ${RC})"; show "${OUT}"; fi
+  ok "canary: target/ linking into the mbx cache is still scanned"
+else ng "canary: mbx cache root link (exit ${RC})"; show "${OUT}"; fi
 
 # --- DC-04: 改行を含むファイル名でも壊れない ---
 r="${tmp}/case"; make_clean "${r}"
@@ -291,6 +316,23 @@ if [ "$(id -u)" -ne 0 ]; then
   chmod 755 "${r}/crates/x/src/locked"
   if [ "${rc_leak}" -eq 2 ]; then ok "leak-phrases: an unreadable directory makes the scan exit 2"; else ng "leak-phrases: scan failure exit (${rc_leak}, want 2)"; show "${OUT}"; fi
   if [ "${rc_loop}" -eq 2 ]; then ok "loopback: an unreadable directory makes the config scan exit 2"; else ng "loopback: scan failure exit (${rc_loop}, want 2)"; fi
+
+  # 指摘4（slot5）: canary の目印検索でファイルが読めなければ exit 2
+  r="${tmp}/case"; make_clean "${r}"
+  mkdir -p "${r}/target/debug"
+  printf 'clean artifact\n' > "${r}/target/debug/app"
+  printf 'PELWAY_CANARY_PII_4e8d\n' > "${r}/target/debug/locked"
+  chmod 000 "${r}/target/debug/locked"
+  run_stage "${r}" canary
+  rc_file="${RC}"
+  chmod 644 "${r}/target/debug/locked"
+  mkdir -p "${r}/target/lockeddir"
+  chmod 000 "${r}/target/lockeddir"
+  run_stage "${r}" canary
+  rc_dir="${RC}"
+  chmod 755 "${r}/target/lockeddir"
+  if [ "${rc_file}" -eq 2 ]; then ok "canary: an unreadable artifact file exits 2"; else ng "canary: unreadable file (exit ${rc_file}, want 2)"; show "${OUT}"; fi
+  if [ "${rc_dir}" -eq 2 ]; then ok "canary: an unreadable directory under target/ exits 2"; else ng "canary: unreadable dir (exit ${rc_dir}, want 2)"; fi
 else
   ok "scan-failure checks skipped (running as root: unreadable directories stay readable)"
 fi

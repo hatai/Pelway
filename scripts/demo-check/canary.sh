@@ -5,13 +5,18 @@
 #   logs/ log/ 配下のすべて、ワークツリー内の *.log（.git と上記を除く）
 #   DEMO_CHECK_EXTRA_PATHS（コロン区切り。端末の保存領域などワークツリー外のパス）。存在しないパスは exit 2
 # 除外: lib.sh の除外（scripts/demo-check/、tests/fixtures/、testdata/、docs/ など）。ワークツリー外のパスには適用しない。
-# シンボリックリンク: 走査の途中で出会ったリンクはたどらない（DC-03）。target/ など走査ルート自体が
-#   リンクのときは realpath で実体を走査する（リンクを通した論理パスで報告する）。
+# シンボリックリンク: 走査の途中で出会ったリンクはたどらない（DC-03）。
+#   暗黙の走査ルート（target/ logs/ log/）が作業ツリーの外を指すリンクのときは、外を読まずに
+#   検査異常（exit 2）で止める（slot5 指摘2）。ただし実体が mbx 共有ビルドキャッシュ
+#   （${XDG_CACHE_HOME:-${HOME}/.cache}/mbx/targets/ 配下）のときだけ例外として走査する
+#   （開発リード確定。リンクを通した論理パスで報告する）。
+#   DEMO_CHECK_EXTRA_PATHS はワークツリー外のパスを明示的に指定するものなので、この検査の対象にしない。
 # ファイル名の区切り: 改行を含むファイル名でも壊れないよう NUL 区切りで扱う（DC-04）。
 # 走査するものが 1 つも無いときは "no artifacts to scan" と表示する。
 #   既定では exit 0（何も検査していないことを明示するだけ）。
 #   DEMO_CHECK_ACCEPTANCE=1 のときは受入不合格として exit 1 にする。
 # 違反は「ファイル:行: 目印」（バイナリは「ファイル:(binary): 目印 (N件)」）で出す。行の中身は出さない。
+# 目印検索の前に、対象ファイルがすべて読めることを確認する。読めなければ exit 2（slot5 指摘4）。
 # exit 0 合格 / 1 目印あり or ACCEPTANCE で走査対象ゼロ / 2 検査異常（リスト欠落・走査失敗を含む）
 set -uo pipefail
 # shellcheck source=lib.sh
@@ -21,9 +26,36 @@ list="${DC_LIST_DIR}/canaries.txt"
 markers="$(dc_list_lines "${list}")" || exit 2
 [ -n "${markers}" ] || { echo "canary: no markers in ${list}" >&2; exit 2; }
 
+implicit_targets=()
+[ -e "${DC_ROOT}/target" ] && implicit_targets+=("${DC_ROOT}/target")
+for d in logs log; do [ -d "${DC_ROOT}/${d}" ] && implicit_targets+=("${DC_ROOT}/${d}"); done
+
+# 暗黙の走査ルートが作業ツリーの中（または mbx 共有キャッシュ）に解決されることを確かめてから
+# 走査する（slot5 指摘2）。それ以外の外を指すリンクなら、読まずに exit 2 で止める。
+root_real="$(realpath -- "${DC_ROOT}")" || { echo "canary: cannot resolve ${DC_ROOT}" >&2; exit 2; }
+mbx_root="${XDG_CACHE_HOME:-${HOME}/.cache}/mbx/targets"
+mbx_real=""
+if [ -d "${mbx_root}" ]; then
+  mbx_real="$(realpath -- "${mbx_root}")" || mbx_real=""
+fi
 targets=()
-[ -e "${DC_ROOT}/target" ] && targets+=("${DC_ROOT}/target")
-for d in logs log; do [ -d "${DC_ROOT}/${d}" ] && targets+=("${DC_ROOT}/${d}"); done
+for t in "${implicit_targets[@]}"; do
+  t_real="$(realpath -- "${t}")" || { echo "canary: cannot resolve ${t#"${DC_ROOT}"/}" >&2; exit 2; }
+  inside=0
+  case "${t_real}" in
+    "${root_real}" | "${root_real}"/*) inside=1 ;;
+  esac
+  if [ "${inside}" -eq 0 ] && [ -n "${mbx_real}" ]; then
+    case "${t_real}" in
+      "${mbx_real}" | "${mbx_real}"/*) inside=1 ;;
+    esac
+  fi
+  if [ "${inside}" -eq 0 ]; then
+    echo "canary: scan root resolves outside the work tree (not the mbx cache): ${t#"${DC_ROOT}"/} -> ${t_real}" >&2
+    exit 2
+  fi
+  targets+=("${t}")
+done
 if [ -n "${DEMO_CHECK_EXTRA_PATHS:-}" ]; then
   IFS=: read -r -a extra <<< "${DEMO_CHECK_EXTRA_PATHS}"
   for p in "${extra[@]}"; do
@@ -77,6 +109,14 @@ if [ "${#files[@]}" -eq 0 ]; then
   echo "canary: PASS with note: nothing was scanned"
   exit 0
 fi
+
+# 目印検索の前に、対象ファイルがすべて読めることを確認する（読めなければ検査異常 exit 2。指摘4）
+for f in "${files[@]}"; do
+  if [ ! -r "${f}" ]; then
+    echo "canary: cannot read: ${f#"${DC_ROOT}"/}" >&2
+    exit 2
+  fi
+done
 
 pf="$(mktemp)"
 trap 'rm -f "${pf}"' EXIT

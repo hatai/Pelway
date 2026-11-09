@@ -12,6 +12,9 @@
 #   3. 文字列リテラル "…" 全体がホスト名（例 "fonts.example.com" "api.example.com:443"）か IPv4 アドレス
 # 例外（ネットワーク参照ではないもの）:
 #   xmlns="…" / xmlns:xx="…" 属性の値（XML 名前空間の識別子。取得されない）
+#   行コメント（行頭または空白の直後の // から行末まで）。引用符で囲んだ例示 URL を
+#   コメントに書いても外部参照に数えない（slot5 指摘3）。引用符の直前の // は
+#   文字列内のプロトコル相対参照なので消さない
 # 同じファイル:行:ホストの重複報告は 1 件にまとめる（複数の規則が同じものを見つけたとき）。
 # 違反は「ファイル:行: ホスト」で出す（URL の残り＝パスやクエリは出さない）。exit 0 合格 / 1 違反 / 2 検査異常。
 set -uo pipefail
@@ -74,30 +77,32 @@ for f in "${files[@]}"; do
     continue
   fi
   dc_is_text "${f}" || continue
-  # xmlns 属性を消してから探す（行番号は保たれる）
+  # xmlns 属性を消し、さらに文字列外の行コメント（行頭か空白の直後の // から行末）を消してから
+  # 探す（行番号は保たれる）。引用符の直前の // は文字列内の参照なので残る
   stripped="$(sed -E 's/xmlns(:[A-Za-z0-9_.-]+)?[[:space:]]*=[[:space:]]*("[^"]*"|'"'"'[^'"'"']*'"'"')//g' -- "${path}")"
+  nocomment="$(printf "%s\n" "${stripped}" | sed -E 's@(^|[[:space:]])//.*$@@')"
   while IFS=: read -r ln m; do
     [ -n "${m:-}" ] || continue
     h="$(url_host "${m}")"
     is_allowed "${h}" || report "${f}:${ln}" "${h}"
-  done < <(printf "%s\n" "${stripped}" | grep -noE "${url_re}")
+  done < <(printf "%s\n" "${nocomment}" | grep -noE "${url_re}")
   while IFS=: read -r ln m; do
     [ -n "${m:-}" ] || continue
     h="${m##*//}"
     is_allowed "${h}" || report "${f}:${ln}" "${h}"
-  done < <(printf "%s\n" "${stripped}" | grep -noE "${pr_re}")
+  done < <(printf "%s\n" "${nocomment}" | grep -noE "${pr_re}")
   # 引用符の直後の //ホスト（JS などの文字列内のプロトコル相対参照。DC-02）
   while IFS=: read -r ln m; do
     [ -n "${m:-}" ] || continue
     h="${m##*//}"
     is_host_shape "${h}" || continue
     is_allowed "${h}" || report "${f}:${ln}" "${h}"
-  done < <(printf "%s\n" "${stripped}" | grep -noE "${qpr_re}")
+  done < <(printf "%s\n" "${nocomment}" | grep -noE "${qpr_re}")
   while IFS=: read -r ln m; do
     [ -n "${m:-}" ] || continue
     h="${m//\"/}"; h="${h%%:*}"
     is_allowed "${h}" || report "${f}:${ln}" "${h}"
-  done < <(printf "%s\n" "${stripped}" | grep -noE "${host_re}")
+  done < <(printf "%s\n" "${nocomment}" | grep -noE "${host_re}")
 done
 
 echo "external-refs: scanned ${#files[@]} file(s), ${hits} hit(s)"
