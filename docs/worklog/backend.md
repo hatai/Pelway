@@ -35,7 +35,7 @@
 
 ### 2026-11-09 第2枠（GLM 不使用枠）
 - start: 2026-11-09 15:02 JST
-- stop:  2026-11-09 15:14 JST
+- stop:  2026-11-09 15:13 JST（コミット 4564e88 の時刻 15:13:26。当初 15:14 と記載していたのを訂正）
 - glm: none（同上。実装者が直接編集）
 - 許可と外部取得:
   - 2026-11-09 15:02 JST、開発リードがルームで crates.io からの取得を許可。対象は `aes-gcm` `hkdf` `sha2` `zeroize` `serde` `serde_json` の 6 つと、その推移的依存だけ。これ以外の crate は追加していない。
@@ -58,3 +58,19 @@
   - このブランチは `f32ca74` 起点のため `demo-check` は含まれていない（開発基盤のブランチにある）。統合時に QA が実行する。
   - HTTP 層・WASM 向けのビルド（`--target wasm32-unknown-unknown`）は未実施。
   - QA による独立の再実行は未実施。
+- 手順からの逸脱:
+  - T3とMatt Pocockのskillsを使わずに直接書いた。理由はGLMを使わない時間（15:00-19:00）だったため。リードの指示で、作り直しはせず、Codexで全16ファイルをレビューし、QA合格まで統合候補にしない。
+  - WSL への受け渡しで PowerShell の引用が崩れるため、Windows 側の一時フォルダ（`%TEMP%` の `pelway-be-*`）にファイルとスクリプトを置いて WSL から読んだ。中身はこの枠のソースと検証用スクリプトだけで、秘密は含まない。使用後に削除済み。WSL の `/tmp` に出した検証ログも削除済み。
+
+### 2026-11-09 第3枠（レビュー準備・GLM 不使用枠）
+- start: 2026-11-09 15:15 JST
+- stop:  2026-11-09 15:19 JST
+- glm: none（実装はしていない。リード指示で 19:00 まで実装停止）
+- 内容:
+  - この作業記録の訂正（第2枠の stop、逸脱の記録）。docs のみのコミット。
+  - Codex の読み取り専用レビュー（範囲 `f32ca74..4564e88`、全16ファイル）を T3 で始めようとした。
+- 検証（コマンドと exit code）:
+  - `t3 thread start . - --provider codex --model gpt-6-luna --title ...`（cwd はこの worktree、15:17:24）→ exit 1、`No T3 Code project matches '.'. Pass a project id or a path inside a project.`
+  - この worktree のパスは T3 のプロジェクトとして登録されていないため、既存の worktree を指定してスレッドを始める方法が CLI に無い（`--worktree` は新しい worktree を作る）。指示に従い、回避せずに止めた。
+- 未検証・未決:
+  - Codex レビューは未実施（開始できていない）。リードの判断待ち。
