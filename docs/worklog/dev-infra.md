@@ -301,3 +301,47 @@
   - この worktree には target/（mbx キャッシュへのリンク）が存在しない。実リポジトリ相当での
     canary 走査（対象あり・exit 0）は selftest の合成ツリーで確認（mbx 例外のケース含む）。
     実 worktree での target ありの run.sh は未確認（ビルド禁止のため成果物を作らない）
+
+### 2026-11-09 第7枠（修正依頼4: loopback bind ループの BASH_REMATCH 上書き。Codex r2）
+- start: 2026-11-09 20:31 JST
+- stop:  2026-11-09 21:26 JST（目安）
+- glm: long（T3 Code / OpenCode・zai-coding-plan/glm-5.3。thread ID は記録時点で取得できず未記入）
+- 使用skill: tdd・receiving-code-review（~/.agents/skills の Matt Pocock 版）
+- 内容（コミット 7926499（修正+テスト）・この作業ログのコミット（記録））:
+  - 根拠: 開発リード指示文（Codex レビュー `mcp:b9379805`、指摘ファイル sha256
+    321ccbf86c2cc56784dff136d3a20591299d98228358c43431e9b5847e17e3c2 の指摘1。QA が一時シェルで再現済み）。
+    レビュー本文・指摘ファイルは本 worktree 内に存在せず、指示文の引用と selftest での再現のみで対処。
+  - 不具合: loopback.sh の bind 引数ループ（旧90行）が次の検索位置を BASH_REMATCH[0] の長さで
+    進めていた。判定関数 ok_bind_target 内の [[ =~ ]] が BASH_REMATCH を上書きするため:
+    ポートのない引数（bind("localhost")）ではマッチ失敗で BASH_REMATCH が空になり（bash 5.2）進まず
+    無限ループ、正しい引数でも進む幅が実際の一致位置まで足りず同じ bind を再検査して多重報告。
+    実測（RED 時）: localhost は timeout 5 までに 41919 回報告して exit 124、
+    bind("0.0.0.0:80") 単独で 5 回報告、許可+不許可の同一行で 6 回報告。
+  - 修正: 一致全体（m）と引数（arg）を判定関数の呼び出し前にコピーし、次の検索位置は
+    nxt="${rest#*"${m}"}"（rest 内の一致全体の直後）で計算。マッチ長だけ先頭から進めると一致の
+    開始位置に届かないため（最初の修正で 3 重報告が残った点を確認済み）。進まなければ
+    exit 2（検査異常）で止まる安全弁つき。
+  - selftest.sh: 114 → 120 件。
+    - A: ポートなし bind 引数が timeout 5 の中で終わり（124 にならず）報告 1 回。
+    - B: 不正 bind 1 件の行で報告がちょうど 1 件。
+    - C: 許可 bind と不正 bind が同一行に 1 件ずつで報告が不正の分の 1 件。
+    - D（Codex の「自己テストがない」指摘）: canary で ../ 相対リンク・2 段リンク・
+      targets-evil 接頭辞リンクのいずれも外を読まずに exit 2（いずれも現行実装で最初から緑。
+      実装変更なしの確認の固定）。
+- 検証（コマンドと exit code）:
+  - bash scripts/demo-check/selftest.sh（修正前 RED）→ 1（117 passed, 3 failed: A/B/C。
+    D の 3 ケースは緑）
+  - bash scripts/demo-check/selftest.sh（修正後）→ 0（120 passed, 0 failed）
+  - bash scripts/demo-check/run.sh → 1（full run。loopback 0 hit PASS・leak-phrases 43 ファイル
+    0 件 PASS・external-refs 43 ファイル 0 件 PASS・canary 対象 0 件 FAIL（第6枠の仕様どおり）。
+    failed: canary）
+  - DEMO_CHECK_ACCEPTANCE=1 bash scripts/demo-check/run.sh → 1（ACCEPTANCE MODE。
+    failed: loopback canary）
+  - bash -n scripts/demo-check/*.sh → 0
+  - shellcheck は未導入のため未実行
+- 未検証・未決:
+  - loopback の runtime 検査は未実装（PENDING のまま）
+  - nxt="${rest#*"${m}"}" は「rest 内の最初の m 出現の直後」に進める。同一行に一致全体と同一の
+    文字列がより手前に出る場合のみ再検査になり得るが、進まないことはなく最終的に全部消化する
+    （テスト B/C で単一報告を確認）
+  - Codex レビュー本文・指摘ファイルの内容は指示文の引用のみで確認（未受領のため sha256 の検証は未実施）
