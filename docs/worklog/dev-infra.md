@@ -96,3 +96,73 @@
   - 英語の safe / secure は語単位でも、否定文や技術的な説明文（例: thread-safe の safe）で誤検出しうる
   - shellcheck は未導入のため未実施
   - 独立コードレビュー（Claude または Codex）は未実施
+
+### 2026-11-09 第4枠（修正依頼1: Codexレビュー DC-01〜DC-07 の対処）
+- start: 2026-11-09 16:33 JST
+- stop:  2026-11-09 16:47 JST
+- glm: long（T3 Code / OpenCode・zai-coding-plan/glm-5.3。本作業スレッド自身の T3 thread ID は記録時点で取得できず未記入）
+- 内容（コミット a4411e6（修正）・この作業ログのコミット（記録））:
+  - 第1〜3枠は T3 を通さずに直接書いていた逸脱。リード判断（2026-11-09）: 作り直しは不要とし、
+    全体の Codex レビューと QA の合格を統合の条件とする。
+  - 止める前に残っていた未コミット変更（scripts/demo-check の7ファイル・+45/−16）の扱い（ファイルごと）:
+    - allowed-hosts.txt: 使わなかった。未コミット版が追記していた「QA合意（6cfa813 再確認）」は
+      検証できなかったため、コミット済みの「リード確定」のみの文言に戻した（QA ラベルが無いことを確認）。
+    - canaries.txt: 使った。「QA未合意」ラベルの追記を維持（ラベルは残す方針）。
+    - forbidden-phrases.txt: 使った。「数字境界のリテラル先頭修正済み」の追記を維持（QA 再確認までラベルは残す）。
+    - leak-phrases.sh: 使った。文字列リテラルの先頭・末尾パディングの修正を維持し、DC-05（pipefail・dc_load_files）を追加。
+    - loopback.sh: 使った。ACCEPTANCE 部分を維持し、DC-01（bind 引数の照合）・DC-06（ポート 0〜65535）・DC-05 を追加。
+    - canary.sh: 使った。ACCEPTANCE 部分を維持し、DC-03/04/05 でファイル列挙を再構成
+      （ルートを realpath で解決・NUL 区切り・走査失敗で exit 2）。
+    - run.sh: 使った。ACCEPTANCE MODE 表示を維持し、DC-05 の pipefail を追加。
+  - Codex レビュー（f32ca74..6cfa813、スレッド mcp:3f306166-ba6d-450a-a950-9aefed39cfc9、full-access）の
+    指摘 DC-01〜DC-07 と対処。Codex が読み取り専用で動いたこと・実行コマンドの内容は「自己申告・未検証」。
+    こちらで確かめたのは修正前後の比較（6cfa813 と作業後の差分、selftest の失敗→合格）のみ:
+    - DC-01: PELWAY_BIND_ADDR を経由しない bind("...")（例: TcpListener::bind("localhost:8080")、
+      127.0.0.1 以外の IP）も 127.0.0.1/[::1]:ポート と完全一致で照合。不一致は exit 1。
+      引数が文字列リテラルの場合のみ対象（変数は静かに見えない）。
+    - DC-02: src=/href= 以外の、引用符（" ' `）の直後の「//ホスト名」（JS の文字列内など）も検出。
+      ホスト部はドット付き TLD か IPv4 の形だけに限り、行頭 // コメント・path//file は誤検知しない。
+      同じファイル:行:ホストの重複報告は1件にまとめた。
+    - DC-03: find から -L を外し、走査中に出会ったシンボリックリンクをたどらない。
+      canary の target/ などルート自体がリンクのときは realpath で実体を走査する
+      （mbx の target リンクは引き続き読む。報告はこれまでの論理パスのまま）。
+    - DC-04: dc_all_files・canary のファイル列挙を NUL 区切りに変え、改行を含むファイル名でも壊れない。
+    - DC-05: 全スクリプトに set -o pipefail を追加。find 等の失敗（読めないディレクトリ等）は exit 2
+      （dc_load_files・loopback の設定走査・canary の成果物走査が失敗状態を検査する）。
+    - DC-06: ポートを 0〜65535 の数値で検査し、65536〜99999 を違反に。0 は従来どおり自動割り当てとして許可
+      （リード確定 15:01/15:03 の仕様と mise.toml の 127.0.0.1:0 を維持。1〜65535 に厳密にすると
+      mise.toml 自体が違反になるため。厳密にしたい場合は指示を乞う）。
+    - DC-07: DC-01〜DC-06 の違反・通過ケースを selftest に追加（68 → 102 件）。
+  - 繰越項目:
+    - 数字の境目: Rust のリテラル先頭・末尾の 24/72（日本語・英語）を検出（未コミット修正を維持）。
+      selftest に 24/72 開始の日本語・英語リテラルと、「1024 hours」が通るケースを追加。
+    - DEMO_CHECK_ACCEPTANCE=1: loopback の runtime PENDING と canary の走査ゼロを exit 1 にし、
+      出力に ACCEPTANCE MODE と表示（未コミット修正を維持）。未設定時の挙動は不変。
+      PARTIAL RUN での動作も selftest に追加。
+    - ラベル: allowed-hosts.txt から QA ラベルを外す（リード確定のみ）。forbidden-phrases.txt は
+      QA 再確認までラベル維持、canaries.txt の「QA未合意」も維持。
+  - TDD: 各項目の失敗ケースを先に selftest に追加し、HEAD（6cfa813）版スクリプトを /tmp に置いて
+    22 件の RED を確認してから修正した（この時点の worktree では未コミット修正により繰越項目は既に緑、
+    DC 項目の 16 件が赤）。修正後に 102 件すべて緑。
+  - 記録だけ（対処なし）:
+    - run.sh は 4 段階すべてを名前で指定すると partial=0 になる（引数なしの全段階実行と区別が付かない）。
+      受入は引数なしの全段階実行だけ、という運用で問題なし。
+    - Rust の文字列リテラルの取り出しは sed ベースで、エスケープ（\" など）・raw 文字列（r"..."）・
+      複数行リテラルに弱い。
+  - 使用skill: tdd・receiving-code-review（~/.agents/skills の Matt Pocock 版）。
+- 検証（コマンドと exit code）:
+  - bash scripts/demo-check/selftest.sh → 0（102 passed, 0 failed）
+  - bash scripts/demo-check/run.sh → 0（4段階・full run。loopback static 0 件・runtime PENDING、
+    leak-phrases 43 ファイル 0 件、external-refs 43 ファイル 0 件、canary 49 ファイル 0 件）
+  - DEMO_CHECK_ACCEPTANCE=1 bash scripts/demo-check/run.sh → 1（loopback の runtime PENDING が
+    受入不合格になる。仕様どおり。failed: loopback）
+  - bash scripts/demo-check/run.sh loopback → 0（PARTIAL RUN 表示を確認）
+  - bash -n scripts/demo-check/*.sh → 0
+  - HEAD 版スクリプトに対する RED 確認（/tmp/opencode/old-dc に退避して実行）→ 1
+    （80 passed, 22 failed。DC-01〜06 と繰越項目の失敗が出る）
+  - shellcheck は未導入のため未実行
+- 未検証・未決:
+  - DC-06 のポート 0 の扱い（0〜65535 として実装。上記の判断理由）
+  - loopback の runtime 検査は未実装（PENDING のまま）
+  - 仕様の未決事項 U01〜U07 はこの枠では決めていない
+  - 外部レビュー担当が読み取り専用で動いたか・どんなコマンドで調べたかは自己申告・未検証
