@@ -192,6 +192,8 @@ pub fn serve(addr: SocketAddr, ledger: SharedLedger) -> Result<Server, ServeErro
 
 /// [`serve`] と同じだが、1 接続の全体期限（既定は [`CONNECTION_DEADLINE`]）を指定できる。
 /// テストで短い期限を注入するために分けてある。
+/// 期限が `Instant` で表せる範囲を超えるとき（`Duration::MAX` など）は丸めて
+/// panic しない（[`deadline_at`] の説明どおり）。
 ///
 /// # Errors
 /// 127.0.0.1 以外のアドレス、またはソケットの失敗。
@@ -225,6 +227,24 @@ struct Request {
     body: Vec<u8>,
 }
 
+/// 接続開始時刻 `now` から全体期限（`Instant`）を作る。`budget` が `Instant` で
+/// 表せる範囲を超える（`checked_add` が `None`）ときは 1 年に丸め、それでも
+/// 表せないときは `now`（残り 0 の期限切れとして扱われる）を返す。
+/// どの場合も panic しない（レビュー6 指摘1）。
+///
+/// 丸めを選んだ理由: あふれるほど巨大な期限は「無期限」の意図であり、本番の
+/// 10 秒より十分長い 1 年は実運用上それと区別がつかない。エラーにしないのは、
+/// [`ServeError`] は待ち受けアドレス・ソケットの失敗を表すもので、期限の大きさの
+/// 解釈で起動を失敗させるのが不釣り合いなため。
+fn deadline_at(now: std::time::Instant, budget: std::time::Duration) -> std::time::Instant {
+    /// あふれる指定を丸める先。本番・テストのどの期限より十分長く、`Instant` の
+    /// 表現範囲（基準時刻から数百年）には十分収まる。
+    const FAR_FUTURE: std::time::Duration = std::time::Duration::from_secs(365 * 24 * 60 * 60);
+    now.checked_add(budget)
+        .or_else(|| now.checked_add(FAR_FUTURE))
+        .unwrap_or(now)
+}
+
 fn handle_conn(
     stream: &mut TcpStream,
     ledger: &SharedLedger,
@@ -233,7 +253,7 @@ fn handle_conn(
     // 全体期限（リード決定 2026-11-09 19:15、20:36 に本文の読み取りへ拡大）:
     // ヘッダー読み取り・本文読み取り・413 後の読み捨てを合わせた全体。
     // 1 回の読み取りのタイムアウトは read_once / drain が読み取りのたびに設定する。
-    let deadline = std::time::Instant::now() + connection_deadline;
+    let deadline = deadline_at(std::time::Instant::now(), connection_deadline);
     let response = match read_request(stream, deadline) {
         Ok(req) => route(&req, ledger),
         Err(resp) => resp,

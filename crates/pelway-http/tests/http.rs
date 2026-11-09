@@ -759,30 +759,32 @@ fn head_16kib_and_body_in_one_write_accepted() {
     assert_eq!(json["state"], "awaiting_send_approval");
 }
 
-// (s) Content-Length が 64 KiB を超える要求を、ヘッダー（16 KiB ちょうど）と本文の先頭を
-// 1 回の write で続けて送ると、431 ではなく 413 が返る（レビュー5 指摘1）。
+// (s) Content-Length が 64 KiB を超える要求で、ヘッダー（16 KiB ちょうど）と
+// 64 KiB を超える本文の全体を 1 回の write_all で送ると、431 ではなく 413 が返る
+// （レビュー5 指摘1。レビュー6 指摘2 で「本文の先頭」から「本文の全体」に強化）。
 #[test]
-fn oversize_cl_head_16kib_body_start_in_one_write_answers_413() {
+fn oversize_cl_head_16kib_whole_body_in_one_write_answers_413() {
     let ledger = shared_ledger(&["card-s"]);
     let addr = spawn_server(ledger.clone());
-    let head = head_padded_to(MAX_HEAD_BYTES, "card-s", 100_000);
+    let body_len = 100_000usize;
+    let head = head_padded_to(MAX_HEAD_BYTES, "card-s", body_len);
 
     let mut stream = TcpStream::connect(addr).expect("connect");
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .expect("client read timeout");
     let mut raw = head.into_bytes();
-    raw.extend_from_slice(&vec![b'z'; 8 * 1024]);
+    raw.extend_from_slice(&vec![b'z'; body_len]);
     stream
         .write_all(&raw)
-        .expect("write head+body start in one write");
+        .expect("write head+whole body in one write");
     let _ = stream.shutdown(Shutdown::Write);
     let mut buf = String::new();
     stream.read_to_string(&mut buf).expect("read response");
     let (status, json) = parse_response(&buf);
     assert_eq!(
         status, 413,
-        "本文の先頭が同じ write に含まれていても 431 ではなく 413: {buf}"
+        "64 KiB を超える本文の全体が同じ write に含まれていても 431 ではなく 413: {buf}"
     );
     assert_eq!(json["code"], "payload_too_large");
 }
@@ -856,8 +858,12 @@ fn oversize_cl_straddled_head_answers_413_not_431() {
 }
 
 // (v) 1 回の読み取りのタイムアウトは「3 秒」と「全体期限までの残り」の短いほう。
-// ヘッダー読み取り中に読み取り待ちのまま期限が来たら、3 秒を待たずに 408 で切る
-// （レビュー5 指摘2）。期限 + 0.5 秒以内（QA の受入条件）。
+// ヘッダー読み取り中、期限より前は 3 秒未満の間隔で少しずつ送り続け、期限の直前に
+// 読み取り待ちに入ってから何も送らないと、3 秒を待たずに 408 で切る
+// （レビュー5 指摘2。レビュー6 指摘3 で「期限の直前に読み取り待ちに入る」形に強化。
+// 読み取り待ちの開始が期限から遠いと、全体期限そのものを 1 回のタイムアウトに
+// 使う実装でも通ってしまい、実際の条件を検証できないため）。
+// 期限 + 0.5 秒以内（QA の受入条件）。
 #[test]
 fn head_read_wait_is_cut_at_deadline_not_3s() {
     assert_eq!(
@@ -879,7 +885,15 @@ fn head_read_wait_is_cut_at_deadline_not_3s() {
     stream
         .write_all(b"POST /v1/cards/card-v/comments HTTP/1.1\r\nHost: d\r\n")
         .expect("write partial head");
-    // ここから読み取り待ちに入ったまま、何も送らない。
+    // 期限より前は 3 秒未満の間隔（300ms）でヘッダー行を少しずつ送り続ける
+    // （1 回の読み取りタイムアウトの 3 秒には引っかからない）。最後の送信が
+    // 期限の約 0.5 秒前になる時点でやめ、読み取り待ちに入ったまま何も送らない。
+    while started.elapsed() + Duration::from_millis(500) < deadline {
+        thread::sleep(Duration::from_millis(300));
+        if stream.write_all(b"X-Trickle: 1\r\n").is_err() {
+            break; // サーバーに切断された
+        }
+    }
     let mut buf = String::new();
     stream.read_to_string(&mut buf).expect("408 must arrive");
     let elapsed = started.elapsed();
@@ -897,8 +911,10 @@ fn head_read_wait_is_cut_at_deadline_not_3s() {
     );
 }
 
-// (w) 413 のあとの読み捨て中も同じ: 読み取り待ちのまま期限が来たら、3 秒を待たずに
-// 接続を閉じる（413 は応答済みなので追記は無い。レビュー5 指摘2）。
+// (w) 413 のあとの読み捨て中も同じ: 期限より前は 3 秒未満の間隔で少しずつ送り続け、
+// 期限の直前に読み取り待ちに入ってから何も送らないと、期限で接続を閉じる
+// （413 は応答済みなので追記は無い。レビュー5 指摘2。レビュー6 指摘3 で
+// 「期限の直前に読み取り待ちに入る」形に強化）。
 // 期限 + 0.3 秒の時点で接続が既に切れていることを、書き込みのエラーで確かめる。
 #[test]
 fn drain_read_wait_after_413_is_cut_at_deadline() {
@@ -923,14 +939,33 @@ fn drain_read_wait_after_413_is_cut_at_deadline() {
     stream.read_to_string(&mut buf).expect("413 arrives first");
     assert!(buf.starts_with("HTTP/1.1 413"), "got: {buf}");
 
-    // 読み捨て中の読み取り待ちに入ったまま、期限 + 0.3 秒まで何も送らない。
+    // 読み捨て中、期限より前は 3 秒未満の間隔（300ms）で少しずつ送り続ける
+    // （1 回の読み取りタイムアウトの 3 秒には引っかからない）。最後の送信が
+    // 期限の約 0.5 秒前になる時点でやめ、読み取り待ちに入ったまま何も送らない。
+    let mut trickle_failed_at = None;
+    while started.elapsed() + Duration::from_millis(500) < deadline {
+        thread::sleep(Duration::from_millis(300));
+        if stream.write_all(b"trickle").is_err() {
+            trickle_failed_at = Some(started.elapsed());
+            break; // サーバーに切断された
+        }
+    }
+    // 期限前の切断は失敗: 順当なら最後の trickle は期限の約 0.5 秒前に成功している。
+    // 時計とスケジューリングのぶれには 0.1 秒だけ許容する。
+    if let Some(t) = trickle_failed_at {
+        assert!(
+            t + Duration::from_millis(100) >= deadline,
+            "期限前に切断された: {t:?}"
+        );
+    }
+    // 期限 + 0.3 秒まで待つ。
     while started.elapsed() < deadline + Duration::from_millis(300) {
         thread::sleep(Duration::from_millis(20));
     }
     // 1 バイト目を送り、少し待ってから 2 回目の書き込みが失敗すれば、1 バイト目を
-    // 送った時点で接続が既に閉じられていたことになる（サーバーがまだ読み取り待ちなら
-    // 1 バイト目は読み捨てに消費され、2 回目も成功する。閉じた後の最初の書き込みに
-    // 対する RST が戻るのに少し時間が要るため、間を空ける）。
+    // 送った時点で接続が既に閉じられていたことになる（サーバーがまだ読み取り待ちで
+    // 残り時間を無視するなら 1 バイト目は読み捨てに消費され、2 回目も成功する。
+    // 閉じた後の最初の書き込みに対する RST が戻るのに少し時間が要るため、間を空ける）。
     let first = stream.write_all(b"x");
     thread::sleep(Duration::from_millis(100));
     let second = stream.write_all(b"x");
@@ -1092,4 +1127,25 @@ fn slow_trickle_after_413_stops_draining_at_deadline() {
         closed_at <= Duration::from_millis(2500),
         "期限前後で切断されない: {closed_at:?}"
     );
+}
+
+// (z) 全体期限に Duration::MAX を渡しても panic せず、通常の要求に正しく応える
+// （レビュー6 指摘1）。あふれる指定は扱える上限に丸めるため、通常の 200 が返る。
+// 接続スレッドで panic するとこの要求への応答が来ないまま接続が切れるので、
+// 200 が返ること自体が panic していないことの証明になる。
+#[test]
+fn duration_max_deadline_does_not_panic_and_serves() {
+    let ledger = shared_ledger(&["card-z"]);
+    let addr =
+        serve_with_connection_deadline("127.0.0.1:0".parse().unwrap(), ledger, Duration::MAX)
+            .expect("serve with Duration::MAX deadline")
+            .local_addr();
+
+    let (status, json) = post_comments(addr, "card-z", "巨大な期限でも通常どおり保存できる");
+    assert_eq!(
+        status, 200,
+        "Duration::MAX でも panic せず通常の要求に応える"
+    );
+    assert_eq!(json["card_id"], "card-z");
+    assert_eq!(json["state"], "awaiting_send_approval");
 }
