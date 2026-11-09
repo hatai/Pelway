@@ -413,3 +413,63 @@
   - 前枠から繰り越しの未検証3点（canary の実データ走査・loopback の本番待受確認・
     loopback.sh の did not advance で exit 2 になる道）は本枠では手を付けていない
   - Codex r3 レビュー本文は未受領（指示文の引用のみ。must-fix 0・should-fix 1 の確認も指示文による）
+
+### 2026-11-09 第9枠（修正依頼6: 受入モードの canary 0件を単独ケースで固定。Codex slot8-r1 should-fix。slot9）
+- start: 2026-11-09 22:55 JST（目安）
+- stop:  2026-11-09 23:10 JST（目安。記録時点）
+- glm: long（T3 Code / OpenCode・zai-coding-plan/glm-5.3。thread ID は記録時点で取得できず未記入）
+- worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-platform-slot9` / branch: `demo-t3/platform-slot9`
+  （slot 8 の先端 858e4dd から作った slot 9 用 worktree。開始 HEAD 858e4dd905766dc32068df30bf6921852f9123d8・
+  クリーンであることを確認してから着手）
+- 手順: tdd（Matt Pocock 版を明示ロード。テストを先に書く → 現行実装でGREEN →
+  わざと壊して該当ケースが落ちることを確認（RED相当） → 復元 → GREEN）。
+- 内容（コミット（修正）・この作業ログのコミット（記録）の2つに分ける）:
+  - 根拠: 開発リード指示文（Codex slot8-r1 レビュー（666738d..858e4dd）の should-fix を開発リードが
+    22:51 に採用。対象ファイル sha256 827276e1…e4fb）。must-fix 0・should-fix 1。レビュー本文は本
+    worktree 内に存在せず、指示文の引用のみで対処。shellcheck は未導入（入れない）。
+  - 問題: selftest.sh の受入モード canary 個別ケースは「成果物あり」だけだった。受入モードの
+    run.sh 全体実行は exit 1 を見ているが、その 1 は loopback の PENDING だけでも出るため、
+    「受入モードで canary 0件が未検証の失敗（exit 1）」を canary 単独では確かめていなかった。
+  - 修正（selftest.sh のみ。canary.sh・run.sh・lib.sh は無変更。+11行/−1行）:
+    - 受入モードの canary 個別ケースに「成果物0件」の単独ケースを追加。run_stage に
+      DEMO_CHECK_ACCEPTANCE=1 を引数で明示的に渡し（run_stage の env は -u の後に渡した方が
+      勝つ。slot8 の仕組み）、canary.sh 単独で回して exit 1・「canary: scanned 0 file(s)」・
+      「no artifacts to scan」のメッセージ・PASS を出さないことの4点を確認。loopback には頼らない。
+    - 通常モードの0件ケース（env -u で固定）と受入モードの成果物ありケースは無変更。
+      旧コメント「canary の走査ゼロは ACCEPTANCE 専用ではなくなったため、専用ケースは置かない」は
+      単独ケースを置く方針に変わったため削除し、理由（loopback の PENDING だけでも全体 exit 1 に
+      なるため単独で固定する）を書いたコメントに置換。
+    - ヘッダコメントに slot9 の1項目を追記。selftest.sh は 120 → 121 ケース。
+  - わざと壊しての検出確認（指示文の手順どおり。slot8 の自己申告 118 passed / 2 failed の実測相当）:
+    - canary.sh の0件分岐（exit 1 の直前）に `[ "${DEMO_CHECK_ACCEPTANCE:-}" = "1" ] && exit 0` を
+      一時的に挿入し、`bash scripts/demo-check/selftest.sh` を実行 → exit 1（119 passed, 2 failed）。
+      落ちたケース:
+      1. 「canary: ACCEPTANCE no artifacts must fail alone with scanned 0 (exit 0)」（今回追加した
+         単独ケース。exit 0 を直接検出）
+      2. 「run.sh: full run under ACCEPTANCE (exit 1)」（失敗段階リストの grep による間接検出。
+         この壊しでは全体実行の exit code は loopback の PENDING だけで 1 のまま＝exit 1 の値だけでは
+         canary の失敗と loopback の失敗を分けられない、というのがレビュー指摘の本体）
+      通常モードの0件ケースは壊しが受入モード限定のため ok のまま（壊しが通常モードに影響しない
+      ことの確認も兼ねた）。
+    - 確認後、canary.sh を必ず元に戻し、`git diff --stat scripts/demo-check/canary.sh` と
+      `git status --short scripts/demo-check/canary.sh` が両方空（差分なし）であることを確認。
+- 検証（コマンドと exit code）:
+  - bash scripts/demo-check/selftest.sh（修正前ベースライン）→ 0（120 passed, 0 failed）
+  - bash scripts/demo-check/selftest.sh（修正後）→ 0（121 passed, 0 failed）
+  - DEMO_CHECK_ACCEPTANCE=1 bash scripts/demo-check/selftest.sh（修正後）→ 0（121 passed, 0 failed）
+  - わざと壊し（canary.sh 一時変更）で bash scripts/demo-check/selftest.sh → 1
+    （119 passed, 2 failed。上記2ケース。確認後に canary.sh を復元し差分なしを確認）
+  - bash scripts/demo-check/run.sh → 1（full run。loopback static PASS（runtime PENDING は通常モード
+    では失敗にならず）・leak-phrases PASS・external-refs PASS・canary 対象 0 件 FAIL。failed: canary。
+    仕様どおり。※指示文の「canary 0件と loopback PENDING のため」は、通常モードでは loopback の
+    PENDING が失敗にならないため実際の失敗は canary 0件のみ。第8枠と同様に実測をそのまま記録）
+  - DEMO_CHECK_ACCEPTANCE=1 bash scripts/demo-check/run.sh → 1（ACCEPTANCE MODE。
+    failed: loopback canary）
+  - bash -n scripts/demo-check/selftest.sh canary.sh run.sh → 0
+  - shellcheck は未導入のため未実行
+- 未検証・未決:
+  - loopback の runtime 検査は未実装（PENDING のまま）
+  - Codex slot8-r1 レビュー本文・対象ファイル sha256 は指示文の引用のみで確認（未受領のため
+    sha256 の検証は未実施）
+  - 前枠から繰り越しの未検証3点（canary の実データ走査・loopback の本番待受確認・
+    loopback.sh の did not advance で exit 2 になる道）は本枠では手を付けていない
