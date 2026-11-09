@@ -34,9 +34,10 @@
 //! - 構造化ログ（[`log`]）: 出来事は列挙型で、項目は仮名化 ID・種別・数値・結果
 //!   コードだけ。本文・コメント・`client_msg_id`・秘密はログに入れない
 //!   （QA-GDPR-07・QA-GDPR-12・QA-MSG-02）。既定の出力先は無し
-//!   （[`serve`]）。[`serve_with_logger`] で出力先を指定する。
-//!   [`serve_with_logger_salt_from`] は salt を `/dev/urandom` から作り、
-//!   読み取りに失敗したら起動しない。
+//!   （[`serve`]）。[`serve_with_logger`] で出力先を指定する（テストと既知 salt
+//!   の検証用）。[`serve_with_logger_urandom`] は salt を必ず `/dev/urandom`
+//!   から作り、読み取りに失敗したら起動しない（salt の採取元は引数に取らない。
+//!   本番のログ付き起動はこの入口）。
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -229,8 +230,10 @@ pub fn serve_with_connection_deadline(
 }
 
 /// [`serve`] と同じだが、ログの出力先（と仮名化の salt を持つ [`log::Logger`]）を
-/// 指定する。ログに出る ID はすべて仮名化され、本文・コメント・`client_msg_id`・
-/// 秘密はログに入らない。1 接続の全体期限は [`CONNECTION_DEADLINE`]。
+/// 指定する。**テストと既知 salt の検証用**。本番では `/dev/urandom` 固定の入口
+/// （[`serve_with_logger_urandom`]）を使う。ログに出る ID はすべて仮名化され、
+/// 本文・コメント・`client_msg_id`・秘密はログに入らない。1 接続の全体期限は
+/// [`CONNECTION_DEADLINE`]。
 ///
 /// # Errors
 /// 127.0.0.1 以外のアドレス、またはソケットの失敗。
@@ -243,15 +246,35 @@ pub fn serve_with_logger(
 }
 
 /// [`serve_with_logger`] と同じログ付き起動だが、[`log::Logger`] はこちらで作る:
-/// salt を `salt_path` から [`log::SALT_BYTES`] バイト読む（本番は
-/// [`log::SALT_SOURCE`] = `/dev/urandom`）。salt の読み取りは待ち受け（bind）より
-/// **前**に行い、失敗したら [`ServeError::Io`] で `Err` を返して待ち受けを
-/// 始めない。フォールバック（代替の salt）は作らない。PID・時刻・アドレスを
-/// 使う経路も無い。
+/// salt を必ず [`log::SALT_SOURCE`]（`/dev/urandom`）から [`log::SALT_BYTES`]
+/// バイト読む。**salt の採取元を引数に取らない**（呼び出し側が固定内容のファイル
+/// などを渡せない形。実体は [`log::SALT_SOURCE`] 固定で
+/// `serve_with_logger_salt_from` に委譲）。salt の読み取りは待ち受け（bind）より
+/// **前** に行い、失敗したら [`ServeError::Io`] で `Err` を返して待ち受けを始めない。
+/// フォールバック（代替の salt）は作らない。PID・時刻・アドレスを使う経路も無い。
+/// 本番のログ付き起動はこの入口を使う。
 ///
 /// # Errors
 /// salt の読み取りに失敗、127.0.0.1 以外のアドレス、またはソケットの失敗。
-pub fn serve_with_logger_salt_from(
+pub fn serve_with_logger_urandom(
+    addr: SocketAddr,
+    ledger: SharedLedger,
+    sink: Arc<dyn log::LogSink>,
+) -> Result<Server, ServeError> {
+    serve_with_logger_salt_from(addr, ledger, sink, Path::new(log::SALT_SOURCE))
+}
+
+/// [`serve_with_logger_urandom`] の実体。salt の採取元を `salt_path` で受ける。
+/// 公開入口は [`log::SALT_SOURCE`] 固定でこの関数に委譲する。採取元を引数に
+/// 受けるのは**クレート内部のテストだけ**（salt の読み取り失敗を注入するために
+/// 採取元を差し替える）。クレートの外からは見えない（`pub(crate)`）。本番・
+/// example はパスを取らない [`serve_with_logger_urandom`] を使う。salt の読み取りは
+/// 待ち受け（bind）より **前** に行い、失敗したら [`ServeError::Io`] で `Err` を
+/// 返して待ち受けを始めない。フォールバック（代替の salt）は作らない。
+///
+/// # Errors
+/// salt の読み取りに失敗、127.0.0.1 以外のアドレス、またはソケットの失敗。
+pub(crate) fn serve_with_logger_salt_from(
     addr: SocketAddr,
     ledger: SharedLedger,
     sink: Arc<dyn log::LogSink>,
@@ -741,4 +764,42 @@ fn write_response(stream: &mut TcpStream, resp: &Response) {
     let _ = stream.flush();
     // 応答を先に届かせる（Connection: close）。読み捨てはこの後。
     let _ = stream.shutdown(std::net::Shutdown::Write);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use pelway_contract::ledger::ApprovalLedger;
+
+    use super::{ServeError, SharedLedger, serve_with_logger_salt_from};
+    use crate::log::{LogSink, MemorySink};
+
+    // (s2) salt の読み取りが失敗する状態では、ログ付きのサーバー起動は Err を返し、
+    // 待ち受けを始めない（salt の読み取りは bind より前。フォールバックなし）。
+    // 元は結合テスト（tests/no_body_logs.rs）だったが、salt のパスを受けるこの入口を
+    // クレート外に公開しない（pub(crate)）形にしたため、ここに移した。
+    #[test]
+    fn serve_with_failing_salt_source_returns_err_without_listening() {
+        let ledger: SharedLedger = Arc::new(Mutex::new(ApprovalLedger::new()));
+        let sink = Arc::new(MemorySink::new());
+        let res = serve_with_logger_salt_from(
+            "127.0.0.1:0".parse().unwrap(),
+            Arc::clone(&ledger),
+            Arc::clone(&sink) as Arc<dyn LogSink>,
+            std::path::Path::new("target/demo-logs/absent-salt-source"),
+        );
+        // Err の時点でリスナーは立っていない（salt の読み取りは bind の前。
+        // Ok が返る場合のみ待ち受けを始める）。
+        let err = res
+            .map(|_| ())
+            .expect_err("salt の読み取りに失敗したら起動は Err");
+        match err {
+            ServeError::Io(e) => {
+                assert_eq!(e.kind(), std::io::ErrorKind::NotFound);
+            }
+            other => panic!("salt 由来の Io エラーではない: {other:?}"),
+        }
+        assert!(sink.lines().is_empty());
+    }
 }

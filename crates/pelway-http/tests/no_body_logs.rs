@@ -15,7 +15,7 @@ use pelway_contract::ledger::{ApprovalLedger, NewCard};
 use pelway_contract::pseudonym::pseudonymize;
 use pelway_contract::task::ActionKind;
 use pelway_http::log::{FileSink, LogSink, Logger, MemorySink};
-use pelway_http::{SharedLedger, serve_with_logger, serve_with_logger_salt_from};
+use pelway_http::{SharedLedger, serve_with_logger};
 use serde_json::{Value, json};
 
 /// 本文・コメント用の合成 canary（実在の値ではない）。
@@ -384,28 +384,6 @@ fn full_flow_emits_all_event_kinds_with_pseudonyms_only() {
     assert_ne!(send_value, "sim-00000001");
 }
 
-// (g) salt の読み取りが失敗する状態では、ログ付きのサーバー起動は Err を返し、
-// 待ち受けを始めない（salt の読み取りは bind より前。フォールバックなし）。
-#[test]
-fn serve_with_failing_salt_source_returns_err_without_listening() {
-    let ledger: SharedLedger = Arc::new(Mutex::new(ApprovalLedger::new()));
-    let sink = Arc::new(MemorySink::new());
-    let res = serve_with_logger_salt_from(
-        "127.0.0.1:0".parse().unwrap(),
-        Arc::clone(&ledger),
-        Arc::clone(&sink) as Arc<dyn LogSink>,
-        std::path::Path::new("target/demo-logs/absent-salt-source"),
-    );
-    // Err の時点でリスナーは立っていない（salt の読み取りは bind の前。
-    // Ok が返る場合のみ待ち受けを始める）。
-    let err = res
-        .map(|_| ())
-        .expect_err("salt の読み取りに失敗したら起動は Err");
-    match err {
-        pelway_http::ServeError::Io(e) => {
-            assert_eq!(e.kind(), std::io::ErrorKind::NotFound);
-        }
-        other => panic!("salt 由来の Io エラーではない: {other:?}"),
-    }
-    assert!(sink.lines().is_empty());
-}
+// (g) に相当する salt 読み取り失敗の注入テスト (s2) は、salt のパスを受ける入口を
+// クレート外に公開しない形にしたため、`src/lib.rs` の単体テストに移した
+// （`serve_with_failing_salt_source_returns_err_without_listening`）。
