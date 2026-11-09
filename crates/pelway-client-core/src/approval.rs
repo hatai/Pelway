@@ -199,8 +199,13 @@ impl<K: KeySource, C: Clock> ApprovalMachine<K, C> {
 
     /// 承認ボタンを押した。押すたびに新しい冪等キーを 1 つ作る。
     /// ただし確認あきらめ後の再押下は、二重送信を避けるため同じキーで確認し直す。
-    /// 押せない状態（通信中・読み直し待ち・不具合・承認済み）では `None` を返し何もしない。
+    /// 表示中のカードが承認待ちでなければ `None` を返し、キーを消費しない
+    /// （レビュー指摘2: UI の無効表示だけに頼らず状態機械自身が防ぐ）。
+    /// 押せない状態（通信中・読み直し待ち・不具合・承認済み）でも `None` を返し何もしない。
     pub fn press_approve(&mut self) -> Option<Effect> {
+        if self.card.state != TaskState::AwaitingSendApproval {
+            return None;
+        }
         let reuse = match &self.phase {
             Phase::Idle => None,
             Phase::CannotCheck { key } => Some(key.clone()),

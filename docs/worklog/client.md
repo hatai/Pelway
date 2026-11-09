@@ -127,3 +127,20 @@
 - 未検証・未決:
   - 承認の通信中にコメントを保存すると `snapshot_hash` が変わり、進行中の承認要求と食い違う可能性がある。その場合はサーバーが 409 `snapshot_mismatch` を返し、「再読み込みして次の承認は新しいキー」で処理する（リード決定の運用）。UI 側で保存ボタン等の制御をするかは第2段階（Slint）で決める。
   - `NeedsReload`・`ClientBug` 中もコメント欄を読み取り専用にする条件は指示に明記がなく私の追加判断。異論があれば外す。
+
+### 2026-11-09 第4枠（第1段階レビューの指摘1・2の修正）
+- start: 2026-11-09 17:30 JST
+- stop:  2026-11-09 17:39 JST
+- glm: long（T3 Code スレッドで OpenCode + zai-coding-plan/glm-5.3 が実装）
+- 使った skills: tdd（テストを先に書き、実装前の失敗を見た） / domain-modeling / verification-before-completion。テストが先に失敗するのを見たか: **見た**（input 1 件・approval 1 件の失敗を確認してから実装。下記）。
+- レビュー対応（レビュー: Codex gpt-6-luna、範囲 `f32ca74..8f331be`、指摘ファイルの sha256 `f832289272aed3c5bbc99e930a368425e18895e778571d19bf192cc1a4e9a640`）:
+  - **指摘1（must-fix）→ 修正**: `on_key` は IME 変換中でも、候補一覧が開いている間（メッセージ入力欄）は Enter で `AcceptMention`、Esc で `DismissMentionList` を返すようにした（QA-MEN-01 は IME 状態を理由に例外を設けない）。いずれも送信しない。コメント欄の QA-APR-01（変換中は IME 操作を優先）は従来どおり。テスト: `composing_keys_go_to_ime_even_with_mention_list_open` を削除し、`open_mention_list_enter_and_esc_work_even_while_composing`（Composing/NotComposing 両方で Enter=AcceptMention・Esc=DismissMentionList・送信なし）と `composing_keys_still_go_to_ime_in_the_comment_box` に置き換え。赤: 修正前に新テストが失敗するのを確認。
+  - **指摘2（high）→ 修正**: `press_approve` は表示中カードが `AwaitingSendApproval` でなければ `None` を返し、冪等キーを消費しない（`KeySource` を呼ばない）。テスト: `press_approve_rejects_cards_not_awaiting_approval_and_consumes_no_key`（初期カードと reload 後カード×承認待ち以外の 8 状態で `None`、その後承認待ちに戻して押すと 1 個目のキーが出ることで非消費を検証）。赤: 修正前に失敗するのを確認（`press_approve` が要求を作ってしまっていた）。
+  - **指摘3（should-fix）・指摘4（nit）→ 今回は不対応**: 開発リードの判断待ちのため触っていない。
+- 運用記録:
+  - 2026-11-09 16:20〜16:28（JST）に GLM が 3 つ同時に動いた。当時のルール（GLM は同時に 2 つまで）では違反だった。16:55 にユーザーが「同時実行数は厳密に管理しなくてよい」と決定したため、それ以降は違反扱いとしない。
+  - 色の値は画面のコードに直接書かず、トークン名で参照する方針。テーマは light / dark / light-accessible / dark-accessible の 4 つになる前提。現時点のコミットに色の値は入っていない（第1段階は UI なしのため）。
+- 検証（コマンドと exit code）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy -p pelway-client-core --all-targets --locked --offline -- -D warnings` 0
+  - `cargo test -p pelway-client-core --locked --offline` 0（52 件: approval 24・contract 14・input 14、失敗 0）

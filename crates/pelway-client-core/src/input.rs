@@ -10,7 +10,8 @@
 //! IME の確定だけ（この層は何もしない）。承認は承認ボタンでの Enter/Space（修飾なし）だけ。
 //!
 //! QA-MEN-01: 候補一覧が開いている間の Enter は候補を 1 つ入れて一覧を閉じ、
-//! 送信しない。Esc は一覧を閉じるだけ。一覧が閉じたあとの Enter は送信 1 回。
+//! 送信しない（IME 変換中でも同じ）。Esc は入力文字を残して一覧だけを閉じる
+//! （これも IME 変換中でも同じ）。一覧が閉じたあとの Enter は送信 1 回。
 
 /// キー操作の宛先になる部品。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,11 +79,23 @@ pub enum Action {
 
 /// キー操作 1 つから、次にすることを決める。
 ///
-/// 変換中（[`ImeState::Composing`]）のキーは IME の操作（確定・変換・キャンセル）を
-/// 優先し、この層は常に [`Action::None`] を返す。確定後の Enter・Ctrl/Cmd+Enter・
-/// Shift+Enter のいずれも、コメント欄では改行 1 つになる（承認も送信もしない）。
+/// 候補一覧が開いている間（メッセージ入力欄）の Enter と Esc は、IME が変換中でも
+/// 有効: Enter は候補を 1 つ入れて一覧を閉じ、Esc は入力文字を残して一覧だけを閉じる
+/// （どちらも送信しない。QA-MEN-01 は IME 状態を理由に例外を設けない）。
+/// それ以外の部品では、変換中（[`ImeState::Composing`]）のキーは IME の操作
+/// （確定・変換・キャンセル）を優先し、この層は常に [`Action::None`] を返す。
+/// 確定後の Enter・Ctrl/Cmd+Enter・Shift+Enter のいずれも、コメント欄では
+/// 改行 1 つになる（承認も送信もしない）。
 #[must_use]
 pub fn on_key(ctx: &InputContext, key: Key, mods: Modifiers) -> Action {
+    // QA-MEN-01: 一覧が開いている間の Enter・Esc は IME 状態より優先する。
+    if ctx.mention_list_open && ctx.focus == Focus::MessageInput {
+        return match key {
+            Key::Enter => Action::AcceptMention,
+            Key::Escape => Action::DismissMentionList,
+            Key::Space => Action::None,
+        };
+    }
     if ctx.ime == ImeState::Composing {
         return Action::None;
     }
@@ -96,19 +109,10 @@ pub fn on_key(ctx: &InputContext, key: Key, mods: Modifiers) -> Action {
             (Key::Enter | Key::Space, true) => Action::Approve,
             _ => Action::None,
         },
-        Focus::MessageInput => {
-            if ctx.mention_list_open {
-                match key {
-                    Key::Enter => Action::AcceptMention,
-                    Key::Escape => Action::DismissMentionList,
-                    Key::Space => Action::None,
-                }
-            } else {
-                match (key, plain) {
-                    (Key::Enter, true) => Action::Send,
-                    _ => Action::None,
-                }
-            }
-        }
+        // ここへ来るとき候補一覧は閉じている（開いていれば上で返している）。
+        Focus::MessageInput => match (key, plain) {
+            (Key::Enter, true) => Action::Send,
+            _ => Action::None,
+        },
     }
 }

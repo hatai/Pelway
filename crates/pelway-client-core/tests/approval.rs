@@ -121,6 +121,42 @@ fn pressing_approve_again_while_approving_is_ignored() {
     assert_eq!(m.press_approve(), None);
 }
 
+/// レビュー指摘2: 承認待ちでないカードでは press_approve は None を返し、
+/// 冪等キーを消費しない。初期カードと reload 後のカードの両方で確かめる。
+#[test]
+fn press_approve_rejects_cards_not_awaiting_approval_and_consumes_no_key() {
+    let clock = FakeClock::new();
+    for state in [
+        TaskState::Requested,
+        TaskState::Working,
+        TaskState::AwaitingDecision,
+        TaskState::Sending,
+        TaskState::SentAwaitingReply,
+        TaskState::OutcomeUnknown,
+        TaskState::Stopped,
+        TaskState::Done,
+    ] {
+        // 初期カードが承認待ちでない。
+        let mut m = machine_with_card(card_v3_with_state(state), &clock);
+        assert!(!m.approve_button_enabled(), "initial state={state:?}");
+        assert_eq!(m.press_approve(), None, "initial state={state:?}");
+
+        // reload 後のカードが承認待ちでない。
+        m.reload(card_v3_with_state(state));
+        assert!(!m.approve_button_enabled(), "reloaded state={state:?}");
+        assert_eq!(m.press_approve(), None, "reloaded state={state:?}");
+
+        // キーを消費していない: 承認待ちに戻して押すと 1 個目のキーが出る。
+        m.reload(card_v3());
+        let req = approve_req_of(m.press_approve());
+        assert_eq!(
+            req.idempotency_key.as_str(),
+            "test-key-0000001",
+            "state={state:?}"
+        );
+    }
+}
+
 #[test]
 fn approve_success_disables_further_approval_and_scheduling() {
     let clock = FakeClock::new();

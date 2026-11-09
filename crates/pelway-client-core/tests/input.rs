@@ -234,13 +234,28 @@ fn closed_mention_list_enter_sends_once() {
     );
 }
 
-/// IME 変換中の Enter・Esc は IME の操作（確定・キャンセル）を優先し、
-/// 候補の挿入も一覧のクローズも送信もしない。
+/// QA-MEN-01: 候補一覧が開いている間の Enter と Esc は、IME 変換中でも有効。
+/// Enter は候補を 1 つ入れて一覧を閉じ、Esc は入力文字を残して一覧だけを閉じる。
+/// どちらも送信しない（レビュー指摘1: IME 状態を理由にした例外は設けない）。
 #[test]
-fn composing_keys_go_to_ime_even_with_mention_list_open() {
+fn open_mention_list_enter_and_esc_work_even_while_composing() {
+    for ime in [ImeState::Composing, ImeState::NotComposing] {
+        let enter = on_key(&ctx(Focus::MessageInput, ime, true), Key::Enter, NO_MODS);
+        assert_eq!(enter, Action::AcceptMention, "{ime:?}");
+        assert_ne!(enter, Action::Send, "{ime:?}");
+
+        let esc = on_key(&ctx(Focus::MessageInput, ime, true), Key::Escape, NO_MODS);
+        assert_eq!(esc, Action::DismissMentionList, "{ime:?}");
+        assert_ne!(esc, Action::Send, "{ime:?}");
+    }
+}
+
+/// コメント欄では従来どおり、変換中のキーは IME の操作を優先する（QA-APR-01）。
+#[test]
+fn composing_keys_still_go_to_ime_in_the_comment_box() {
     assert_eq!(
         on_key(
-            &ctx(Focus::MessageInput, ImeState::Composing, true),
+            &ctx(Focus::CommentBox, ImeState::Composing, false),
             Key::Enter,
             NO_MODS
         ),
@@ -248,7 +263,7 @@ fn composing_keys_go_to_ime_even_with_mention_list_open() {
     );
     assert_eq!(
         on_key(
-            &ctx(Focus::MessageInput, ImeState::Composing, true),
+            &ctx(Focus::CommentBox, ImeState::Composing, false),
             Key::Escape,
             NO_MODS
         ),
