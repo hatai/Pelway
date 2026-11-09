@@ -7,6 +7,8 @@
 #   - run.sh が段階名以外の引数（パス・未知の名前）を拒否し、何も実行しない
 #   - 段階指定の実行が PARTIAL RUN と表示される
 #   - canary の走査ゼロ（no artifacts to scan）は常に exit 1（未検証。受入・通常で共通。slot6）
+#   - 受入モード（DEMO_CHECK_ACCEPTANCE=1 を明示）でも canary の走査ゼロは、loopback に頼らず
+#     単独ケースで exit 1・走査0件・未検証のメッセージになる（slot9）
 #   - DEMO_CHECK_ACCEPTANCE=1 のとき loopback の runtime PENDING が exit 1 になり、
 #     ACCEPTANCE MODE と表示される（未設定時の挙動は不変）
 #   - run_stage と run.sh の直接呼び出しは、外の DEMO_CHECK_ACCEPTANCE を引き継がない。
@@ -113,7 +115,15 @@ if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "ACCEPTANCE MODE"; then
   ok "loopback: runtime PENDING is a failure under ACCEPTANCE (exit 1)"
 else ng "loopback: ACCEPTANCE runtime PENDING (exit ${RC})"; show "${OUT}"; fi
 
-# （canary の走査ゼロは ACCEPTANCE 専用ではなくなったため、専用ケースは置かない）
+# slot9: 受入モードで成果物0件のとき、canary 単独で exit 1・走査0件・未検証のメッセージを出すこと。
+# run.sh の受入モード全体実行の exit 1 は loopback の PENDING だけでも出るので、canary 0件の
+# 失敗はこの単独ケースで固定する（loopback には頼らない）。通常モードの0件ケースは上で別にある
+make_clean "${tmp}/case"
+run_stage "${tmp}/case" canary DEMO_CHECK_ACCEPTANCE=1
+if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "no artifacts to scan" && printf '%s\n' "${OUT}" | grep -q "canary: scanned 0 file(s)" && ! printf '%s\n' "${OUT}" | grep -q "PASS"; then
+  ok "canary: no artifacts to scan is a failure under ACCEPTANCE alone (exit 1, scanned 0)"
+else ng "canary: ACCEPTANCE no artifacts must fail alone with scanned 0 (exit ${RC})"; show "${OUT}"; fi
+
 make_clean "${tmp}/case"
 mkdir -p "${tmp}/case/target/debug"
 printf 'clean artifact\n' > "${tmp}/case/target/debug/app"
