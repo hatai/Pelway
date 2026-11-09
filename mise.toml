@@ -1,0 +1,90 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+# Pelway のローカル開発環境（mise 管理分）。
+# 方針・手順: docs/dev-environment.md
+# グローバル設定（mise use -g）は使わない。このファイルがプロジェクトの単一のバージョン管理元。
+
+# mr_boxington オプション（cargo を mbx 経由にする）には mise 2026.9.2 以上が必要。
+# それ未満の mise はエラーで停止する（ハード最小値）。
+min_version = "2026.9.2"
+
+[settings]
+# このプロジェクトで mise.lock を生成・使用する（ユーザーのグローバル設定に依存しない）。
+lockfile = true
+
+[tools]
+# rust は mise 経由で rustup のツールチェーンを固定する。
+# mr_boxington = true で cargo を mbx（Cargo ビルド共有キャッシュ）経由にする。
+# components で rustfmt・clippy を明示し、最小構成のツールチェーンでも
+# fmt・lint が再現されるようにする（toolchain-check タスクが存在検査する）。
+rust = { version = "1.96.0", mr_boxington = true, components = ["rustfmt", "clippy"] }
+mr-boxington = "1.29.2"
+hk = "2.11.1"
+fnox = "1.47.0"
+pitchfork = "2.33.1"
+
+[env]
+# 秘密を含む環境変数は mise に置かず fnox で管理する（fnox.toml 参照）。
+# ここには秘密にならない既定値だけを置く。
+CARGO_TERM_COLOR = "auto"
+PELWAY_BIND_ADDR = "127.0.0.1:0"
+
+# ---- 日常タスク（mise run <タスク名>） ----
+
+[tasks.fmt]
+description = "rustfmt で全コードを整形する"
+run = "cargo fmt --all"
+
+[tasks.fmt-check]
+description = "整形済みかの検査のみ（書き換えない）"
+run = "cargo fmt --all --check"
+
+[tasks.check]
+description = "cargo check（--locked で Cargo.lock を強制）"
+run = "cargo check --workspace --all-targets --locked"
+
+[tasks.clippy]
+description = "clippy を -D warnings（警告即エラー）で実行する（--locked）"
+run = "cargo clippy --workspace --all-targets --locked -- -D warnings"
+
+[tasks.test]
+description = "全テストを実行する（--locked）"
+run = "cargo test --workspace --locked"
+
+[tasks.build]
+description = "デバッグビルドを作る（--locked）"
+run = "cargo build --workspace --locked"
+
+[tasks.toolchain-check]
+description = "rustfmt・cargo-clippy 成分の存在確認（minimal 構成だとここで失敗する）"
+run = """
+rustc --version
+cargo --version
+rustfmt --version
+cargo clippy --version
+"""
+
+[tasks.hk-validate]
+description = "hk.pkl の構文検証"
+run = "hk validate"
+
+[tasks.hk-check]
+description = "hk でリポジトリ全体を検査（読み取り専用）"
+run = "hk check --all"
+
+[tasks.fnox-check]
+description = "fnox の定義一覧を確認（秘密値の取得・表示は行わない）"
+run = "fnox list"
+
+[tasks.pitchfork-check]
+description = "pitchfork のバージョン確認と、pitchfork.toml が未配置であることの確認"
+run = """
+pitchfork --version
+if [ -e pitchfork.toml ]; then
+  echo "pitchfork.toml が存在します（方針では未配置のはず。docs/dev-environment.md 参照）" >&2
+  exit 1
+fi
+"""
+
+[tasks.verify]
+description = "開発環境の一括確認（依存タスクは並列実行）"
+depends = ["fmt-check", "check", "clippy", "test", "build", "toolchain-check", "hk-validate", "hk-check", "fnox-check", "pitchfork-check"]

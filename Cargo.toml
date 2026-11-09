@@ -1,0 +1,7 @@
+# Pelway の Cargo ワークスペース。
+# 現時点のメンバーは開発環境の確認用スケルトンだけで、製品機能のコードは含まない。
+# 位置づけと手順は docs/dev-environment.md を参照。
+
+[workspace]
+resolver = "3"
+members = ["crates/*"]

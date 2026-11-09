@@ -1,0 +1,9 @@
+[package]
+# 開発環境の確認用スケルトン。製品機能を含まない（docs/dev-environment.md 参照）。
+name = "pelway-dev-smoke"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Development environment smoke skeleton. Not a product feature."
+
+[dependencies]

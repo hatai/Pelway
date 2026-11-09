@@ -1,0 +1,23 @@
+#:schema https://fnox.jdx.dev/schema.json
+# Pelway のシークレット定義。
+# このファイルにはシークレットの「名前」と、秘密を含まないローカル開発用の
+# 既定テンプレートだけを置く。実際の秘密値（value）を書かないこと。
+# 本物の値は各自が fnox set で暗号化して登録する。運用手順は docs/dev-environment.md。
+
+# このディレクトリで設定探索を止め、親ディレクトリの設定を誤って継承しない。
+root = true
+
+# 既定は fail-closed: 値を解決できないシークレットがあればコマンドをエラーで止める。
+# 値の登録を当分必須にしないものだけ、個別に if_missing = "ignore" を指定する。
+if_missing = "error"
+
+[secrets]
+# --- ローカル開発の既定値（秘密を含まないテンプレート） ---
+
+# 接続文字列には将来パスワード等の秘密を含めうるため、非秘密でも fnox 側で管理する。
+# 既定値は loopback・パスワードなし。実運用の値は各自が設定する。
+PELWAY_DATABASE_URL = { default = "postgres://pelway@127.0.0.1:5432/pelway", description = "ローカル開発用のPostgreSQL接続先（loopback・パスワードなしの既定値）" }
+
+# --- 将来必要になる秘密の名前だけの宣言（値なし・当面未使用のため個別に ignore） ---
+
+PELWAY_LLM_API_KEY = { if_missing = "ignore", description = "LLMゲートウェイのAPI鍵。実装が進んだ時点で各自が設定する。現時点では未使用" }

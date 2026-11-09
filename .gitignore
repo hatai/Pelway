@@ -1,0 +1,21 @@
+# Rust / mr boxington（target は mbx の管理対象への symlink になる）
+/target
+
+# fnox 個人用オーバーライド（秘密値を含みうるためコミットしない）
+fnox.local.toml
+.fnox.local.toml
+.config/fnox.local.toml
+
+# mise / hk 個人用オーバーライド
+mise.local.toml
+.mise.local.toml
+hk.local.pkl
+
+# 環境変数ファイルの誤コミット防止（秘密は fnox で管理）
+# .env.example はテンプレートとしてコミットを許可する
+.env
+.env.*
+!.env.example
+
+# OS・エディタの一時ファイル
+.DS_Store

@@ -1,0 +1,67 @@
+amends "package://github.com/jdx/hk/releases/download/v2.11.1/hk@2.11.1#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v2.11.1/hk@2.11.1#/Builtins.pkl"
+
+// Pelway の git hook とチェック構成。手順は docs/dev-environment.md。
+// ツールのバージョンは mise.toml で固定し、hk は mise 経由で起動する。
+// フックの導入は初回セットアップの手順として mise exec -- hk install --mise を実行する。
+
+min_hk_version = "2.11.1"
+default_branch = "main"
+
+// 凍結文書（docs/）とブランド素材（assets/）は自動修正の対象外とする。
+// 特に docs/technical/v0.7/ は保全対象のため、trailing whitespace 等で書き換えない。
+exclude = List("docs/**", "assets/**")
+
+// cargo 系ステップはメンバークレート単位ではなくワークスペース全体を検査する。
+// glob に Cargo.toml / Cargo.lock を含め、Rust ファイル以外の変更でも検査を起動する。
+steps {
+  // hk 自身のユーティリティで完結する汎用ステップ（追加ツール不要）。
+  ["trailing_whitespace"] = Builtins.trailing_whitespace
+  ["newlines"] = Builtins.newlines
+
+  ["cargo_fmt"] {
+    glob = List("**/*.rs", "**/Cargo.toml", "Cargo.lock", "**/rustfmt.toml", "**/.rustfmt.toml")
+    check = "cargo fmt --all --check"
+    fix = "cargo fmt --all"
+    diagnostic_format = "rustfmt"
+  }
+
+  ["cargo_clippy"] {
+    glob = List("**/*.rs", "**/Cargo.toml", "Cargo.lock")
+    check = "cargo clippy --workspace --all-targets --locked --quiet -- -D warnings"
+    fix = "cargo clippy --workspace --all-targets --quiet --fix --allow-dirty --allow-staged"
+    diagnostic_format = "rustc"
+    env {
+      ["CARGO_TERM_PROGRESS_WHEN"] = "never"
+    }
+  }
+
+  ["cargo_check"] {
+    glob = List("**/*.rs", "**/Cargo.toml", "Cargo.lock")
+    check = "cargo check --workspace --all-targets --locked --quiet"
+    fix = "cargo fix --workspace --allow-dirty --allow-staged --quiet"
+    diagnostic_format = "rustc"
+    env {
+      ["CARGO_TERM_PROGRESS_WHEN"] = "never"
+    }
+  }
+}
+
+// pre-commit は品質ゲートとして使う: fix を実行せず、check コマンドの失敗でコミットを阻止する。
+// clippy の -D warnings はここで初めて効く。修正は mise run fmt / mise exec -- hk fix で行う。
+hooks {
+  ["pre-commit"] {
+    fix = false
+    stage = false
+  }
+
+  // pre-push ではテストを実行する（pre-commit に含めるとコミットが重くなるため）。
+  ["pre-push"] {
+    steps {
+      ["cargo_test"] {
+        // glob なしのステップはファイル選択に関係なく常に実行される。
+        check = "cargo test --workspace --locked --quiet"
+      }
+    }
+  }
+}
