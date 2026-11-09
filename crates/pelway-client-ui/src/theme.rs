@@ -50,7 +50,10 @@ impl Theme {
 
 /// デザイントークンの名前の一覧。
 ///
-/// 書き出し時点（`ui-pro-draft-v0.1` の tokens）にある名前をそのまま使う。
+/// 正本はこのクレートに入れた `tokens/pelway.tokens.json`（97fb70d の
+/// `docs/design-system/tokens/pelway.tokens.json` の写し）の `color.<theme>`。
+/// この一覧はそのトークン名と一致させる（`tests/theme_tokens.rs` が正本を
+/// 読んで照合する。正本で名前が増えた・消えた・変わったらテストが落ちる）。
 /// 値は確定していないため、この一覧は名前だけ。`ui-pro-draft-v0.1` の
 /// 生成物（`pelway_tokens.slint` など）は使わない。
 pub const TOKEN_NAMES: &[&str] = &[
@@ -62,6 +65,7 @@ pub const TOKEN_NAMES: &[&str] = &[
     "sub",
     "mute",
     "line",
+    "line-tabbar",
     // 強調
     "acc",
     "acc-fill",
@@ -76,6 +80,7 @@ pub const TOKEN_NAMES: &[&str] = &[
     "primary-bg-pressed",
     // アバター
     "avatar-human-bg",
+    "avatar-human-bg-section",
     "avatar-human-fg",
     "avatar-ai-bg",
     "avatar-ai-fg",
@@ -92,6 +97,15 @@ pub const TOKEN_NAMES: &[&str] = &[
     "warning-bg",
     "unread",
     "private-bg",
+    "track",
+    "grabber",
+    "scrim",
+    // 面（メニュー・シート・トースト）
+    "menu-bg",
+    "sheet-bg",
+    "sheet-inset-bg",
+    "toast-bg",
+    "toast-fg",
     // 社外送信カード
     "ext-bg",
     "ext-fg",
@@ -106,6 +120,8 @@ pub const TOKEN_NAMES: &[&str] = &[
     "ext-fx-fg",
     "ext-fx-line",
     "ext-divider",
+    "ext-option-bg",
+    "ext-option-hover",
     // その他
     "focus-ring",
     "link",
