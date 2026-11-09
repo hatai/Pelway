@@ -483,14 +483,15 @@
   - 赤: `cargo test -p pelway-client-ui --test no_body_persist --locked --offline`（`CARGO_NET_OFFLINE=true` + サンドボックス環境変数付き）→ **exit 101**。落ちたのは `canary_body_matches_the_specified_value`（実行時アサーション。バイト列比較の left/right が後半の並びで不一致——r1 の値と指定値の差を直接示す落ち方。コンパイルエラーではない）。ほか 7 件（pii の固定テストを含む）は合格。
   - 緑: 実装修正後に同コマンド → **exit 0（8 件合格）**。
 - clippy の道中のトラブルと対処: 初回 `cargo clippy` が E0514（1.96.0 でビルド済みの rmeta を 1.94.1 のドライバが読む）で **exit 101**。`--verbose` で、cargo-clippy が rustup のアクティブ解決で `stable`（1.94.1）の clippy-driver を `RUSTC` に指定していたことを確認（rustup の既定 toolchain が stable のため）。`RUSTUP_TOOLCHAIN=1.96.0-x86_64-unknown-linux-gnu` を明示して同じコマンド → **exit 0**。プロジェクト固定の toolchain（mise.toml の rust 1.96.0）と同じ版で検証した。
-- サンドボックスの実際のパス: `<worktree>/target/gdpr-13-sandbox/`（`target/` はこの worktree では通常ディレクトリ。`readlink -f` で解決先が worktree 内であることを確認）。`HOME`・`TMPDIR`・`XDG_*` はその下の別々のディレクトリへ向け、`CARGO_HOME`・`RUSTUP_HOME` だけ実パスを明示。
+- サンドボックスの実際のパス: コミット前は `<worktree>/target/gdpr-13-sandbox/`（`target/` はこの worktree では通常ディレクトリ。`readlink -f` で解決先が worktree 内であることを確認）。コミット後（mbx が `target/` を symlink 化）は退避先 `<worktree>/.gdpr-13-sandbox/`（worktree 内の実ディレクトリ）。`HOME`・`TMPDIR`・`XDG_*` はそれぞれのサンドボックスの下の別々のディレクトリへ向け、`CARGO_HOME`・`RUSTUP_HOME` だけ実パスを明示。
 - 検証（コマンドと exit code。すべて `CARGO_NET_OFFLINE=true` + サンドボックス環境変数 + toolchain 1.96.0 実バイナリ直接実行。最終版のソースで）:
   - `cargo fmt --all --check` **0**
   - `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` **0**
   - `cargo test --workspace --locked --offline` **0**（**98 件合格・失敗 0**: pelway-client-core 54 = approval 24・contract 14・input 16 ／ pelway-client-ui 43 = bridge 10・i18n_fluent 3・i18n_keys 6・**no_body_persist 8**・no_color_values 4・slint_window 1・theme_tokens 11 ／ pelway-dev-smoke 1。r2 の 96 + canary 固定 2）
   - canary 走査（`rg -a -F -l -f <パターンファイル>`、`--no-ignore --hidden`、除外 `.git`・`.opencode`・パターンファイル自身。パターンファイルは分割 printf で sandbox 内に作成し走査後に明示削除。rg は symlink を辿らないため走査対象は解決先が worktree 内のパスのみ）: **exit 1＝0 件**（ソース・`target/` の成果物・sandbox のすべてで、指定値の完全な canary は定数定義ファイル含め不在）。検出力の self-check（canary 入り一時ファイル 1 件）は exit 0・1 件で確認済み。
   - `git diff --stat 2bf3835 -- Cargo.lock` → 空（**Cargo.lock の差分なし**。依存・workspace メンバーの追加なし）
-- コミット: テスト修正＋`.gitignore`、次にこの作業ログ。**push していない**。
+  - コミット後の再検証（pre-commit フックの cargo_check で mbx が `target/`（6.8 GiB）を `~/.cache/mbx/targets/v1/<hash>` へ移管・symlink 化した後。第12・13枠と同じプロジェクト標準のコミット工程で、`--no-verify` 不使用）: `cargo test --workspace --locked --offline` **0（98 件）**。このときサンドボックスは退避先 `<worktree>/.gdpr-13-sandbox/`（worktree 内の実ディレクトリ。`readlink -f` で確認）を自動使用し、環境変数（HOME・TMPDIR・XDG_*）も同じ退避先の下へ向けた（解決先が worktree 内になる向き）。canary 走査もコミット後実施で **exit 1＝0 件**（rg は symlink を辿らないため走査対象は解決先が worktree 内のパスのみ。self-check は exit 0・1 件）。no_body_persist 単体も **0（8 件）**。
+- コミット: `f4c1196`（テスト修正＋`.gitignore`）→ `ec416d1`（この作業ログの第14枠初版）→ 第14枠へコミット後の再検証を追記した追加コミット。いずれも通常の新しいコミット（pre-commit フックは trailing_whitespace・cargo_check・cargo_fmt・newlines・cargo_clippy すべて合格）。**push していない**。
 - 未検証・未決:
   - **窓を開いての確認はしていない**（第12枠・第13枠どおり未検証・合格扱いにしない）。ウィンドウを開いたときだけ起きる端末残存はこの試験の対象外のまま。
   - **U01〜U07 は未決のまま**（この回では判定していない）。`TODO(U0x)` も触れていない。
