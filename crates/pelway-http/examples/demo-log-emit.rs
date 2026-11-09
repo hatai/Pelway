@@ -10,6 +10,8 @@
 //! ```
 //!
 //! - 待ち受けは `127.0.0.1:0` だけ。外部への接続・送信は無い。環境変数は読まない。
+//! - 仮名化の salt は起動時に `/dev/urandom` から 32 バイト読む
+//!   （`serve_with_logger_salt_from`）。読み取りに失敗したら起動しない。
 //! - 合成データに 3 種の canary（本文・コメント用・秘密の代わり・`client_msg_id` 形）
 //!   を埋めて要求を流す。ログ（`target/demo-logs/backend.jsonl`）・標準エラー・
 //!   エラー応答の本文・panic の文言のどこにも canary が出ないことを、開発基盤の
@@ -19,14 +21,14 @@
 
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::SystemTime;
 
 use pelway_contract::ledger::{ApprovalLedger, NewCard};
 use pelway_contract::task::ActionKind;
-use pelway_http::log::{FileSink, LogSink, Logger, process_salt};
-use pelway_http::{SharedLedger, serve_with_logger};
+use pelway_http::log::{FileSink, LogSink, SALT_SOURCE};
+use pelway_http::{SharedLedger, serve_with_logger_salt_from};
 
 /// 本文・コメント用の合成 canary（実在の値ではない）。
 const CANARY_BODY: &str = "PELWAY-CANARY-BODY-7Q2M9X";
@@ -38,16 +40,14 @@ const CANARY_MSG_ID: &str = "3f6c2a9e-8b1d-4c7a-9e2f-5a1b7c3d9e04";
 fn main() {
     let sink =
         Arc::new(FileSink::create("backend.jsonl").expect("create sink under target/demo-logs"));
-    let logger = Arc::new(Logger::with_sink(
-        Arc::clone(&sink) as Arc<dyn LogSink>,
-        process_salt(SystemTime::now()),
-    ));
-
     let ledger = synthetic_ledger();
-    let addr = serve_with_logger(
+    // salt は serve_with_logger_salt_from が /dev/urandom から 32 バイト読む。
+    // 読み取りに失敗したら起動しない（フォールバックなし）。
+    let addr = serve_with_logger_salt_from(
         "127.0.0.1:0".parse().expect("loopback addr"),
         Arc::clone(&ledger),
-        Arc::clone(&logger),
+        Arc::clone(&sink) as Arc<dyn LogSink>,
+        Path::new(SALT_SOURCE),
     )
     .expect("serve on 127.0.0.1:0")
     .local_addr();

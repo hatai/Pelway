@@ -35,9 +35,12 @@
 //!   コードだけ。本文・コメント・`client_msg_id`・秘密はログに入れない
 //!   （QA-GDPR-07・QA-GDPR-12・QA-MSG-02）。既定の出力先は無し
 //!   （[`serve`]）。[`serve_with_logger`] で出力先を指定する。
+//!   [`serve_with_logger_salt_from`] は salt を `/dev/urandom` から作り、
+//!   読み取りに失敗したら起動しない。
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use pelway_contract::approval::{ApproveRequest, SaveCommentRequest};
@@ -236,6 +239,26 @@ pub fn serve_with_logger(
     ledger: SharedLedger,
     logger: Arc<log::Logger>,
 ) -> Result<Server, ServeError> {
+    serve_inner(addr, ledger, CONNECTION_DEADLINE, logger)
+}
+
+/// [`serve_with_logger`] と同じログ付き起動だが、[`log::Logger`] はこちらで作る:
+/// salt を `salt_path` から [`log::SALT_BYTES`] バイト読む（本番は
+/// [`log::SALT_SOURCE`] = `/dev/urandom`）。salt の読み取りは待ち受け（bind）より
+/// **前**に行い、失敗したら [`ServeError::Io`] で `Err` を返して待ち受けを
+/// 始めない。フォールバック（代替の salt）は作らない。PID・時刻・アドレスを
+/// 使う経路も無い。
+///
+/// # Errors
+/// salt の読み取りに失敗、127.0.0.1 以外のアドレス、またはソケットの失敗。
+pub fn serve_with_logger_salt_from(
+    addr: SocketAddr,
+    ledger: SharedLedger,
+    sink: Arc<dyn log::LogSink>,
+    salt_path: &Path,
+) -> Result<Server, ServeError> {
+    let salt = log::read_salt_from(salt_path).map_err(ServeError::Io)?;
+    let logger = Arc::new(log::Logger::with_sink(sink, salt.to_vec()));
     serve_inner(addr, ledger, CONNECTION_DEADLINE, logger)
 }
 

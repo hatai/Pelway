@@ -9,12 +9,14 @@
 //! - 出力先は [`LogSink`] で差し替えられる。テスト用のメモリ出力 [`MemorySink`] と
 //!   ファイル出力 [`FileSink`]（置き場所は `target/demo-logs/` の下だけ）。
 //! - ID の仮名化は [`pelway_contract::pseudonym::pseudonymize`]。salt は
-//!   [`Logger`] が持ち、ログにも [`Debug`] にも出さない。
+//!   [`Logger`] が持ち、ログにも [`Debug`] にも出さない。salt 自体は
+//!   [`process_salt`] が `/dev/urandom` から 32 バイト読んで作る（読み取りに
+//!   失敗したら起動側は失敗する。フォールバックなし）。
 //! - 外部 exporter は無い（S17 と `10-domestic-only` の log/audit/crash 行:
 //!   exporter なし・秘密除去）。保持期限（R09/R10/R11）はこのデモでは未実装。
 
 use std::fmt;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -283,7 +285,9 @@ impl Logger {
         }
     }
 
-    /// 出力先と salt を指定して作る。salt はログに出ない。
+    /// 出力先と salt を指定して作る。salt はログに出ない。本番の salt は
+    /// [`process_salt`]（`/dev/urandom` から 32 バイト）。テストは固定 salt で
+    /// 仮名の決定性を確認する。
     #[must_use]
     pub fn with_sink(sink: Arc<dyn LogSink>, salt: Vec<u8>) -> Self {
         Self { sink, salt }
@@ -318,24 +322,35 @@ fn unix_millis(now: SystemTime) -> u64 {
     u64::try_from(now.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis())).unwrap_or(u64::MAX)
 }
 
-/// プロセスごとの salt を作る。
+/// salt の長さ（バイト）。[`SALT_SOURCE`] から読むバイト数。
+pub const SALT_BYTES: usize = 32;
+
+/// 本番の salt の採取元（OS の CSPRNG）。
+pub const SALT_SOURCE: &str = "/dev/urandom";
+
+/// `path` を開いて [`SALT_BYTES`] バイトを `read_exact` で読み、salt として返す。
+/// テストで失敗を注入できるよう採取元を引数で受ける（本番は [`SALT_SOURCE`]）。
+/// 短い読み取りも `read_exact` の仕様どおり失敗にする。フォールバック（代替の
+/// 値に落とす経路）は無く、失敗は [`std::io::Error`] のまま呼び出し側へ返す。
 ///
-/// 環境変数を読まない（依頼の約束）。worktree の外のファイルも読まないため
-/// `/dev/urandom` も使わず、PID・起動時刻（ナノ秒）・ヒープ確保アドレス
-/// （ASLR の影響を受ける）のバイト列を連結して返す。hash は
-/// [`pseudonymize`] の中で掛かるため、ここでは一意性の素材だけを混ぜる。
-/// 実運用では CSPRNG からの採取が望ましい（このデモでは未検証）。
-#[must_use]
-pub fn process_salt(now: SystemTime) -> Vec<u8> {
-    let mut salt = Vec::new();
-    salt.extend_from_slice(&std::process::id().to_ne_bytes());
-    let nanos = now
-        .duration_since(UNIX_EPOCH)
-        .map_or(0u128, |d| d.as_nanos());
-    salt.extend_from_slice(&nanos.to_ne_bytes());
-    let probe = Box::new(0u8);
-    salt.extend_from_slice(format!("{:p}", &*probe).as_bytes());
-    salt
+/// # Errors
+/// `path` を開けない・読めない・[`SALT_BYTES`] バイトに満たないとき。
+pub(crate) fn read_salt_from(path: &Path) -> std::io::Result<[u8; SALT_BYTES]> {
+    let mut file = std::fs::File::open(path)?;
+    let mut salt = [0u8; SALT_BYTES];
+    file.read_exact(&mut salt)?;
+    Ok(salt)
+}
+
+/// プロセスごとの salt を [`SALT_SOURCE`]（`/dev/urandom`）から [`SALT_BYTES`]
+/// バイト読んで作る。環境変数は読まない（依頼の約束）。PID・時刻・アドレスは
+/// 使わない。読み取りに失敗したらその `Err` を返し、呼び出し側（サーバー起動）
+/// は起動に失敗する（フォールバックなし）。
+///
+/// # Errors
+/// [`SALT_SOURCE`] を開けない・読めない・[`SALT_BYTES`] バイトに満たないとき。
+pub fn process_salt() -> std::io::Result<[u8; SALT_BYTES]> {
+    read_salt_from(Path::new(SALT_SOURCE))
 }
 
 #[cfg(test)]
@@ -409,14 +424,34 @@ mod tests {
         }
     }
 
+    // (s1) 存在しないパスは Err（フォールバックなし）。
     #[test]
-    fn process_salt_varies_with_time_and_is_never_empty() {
-        let t1 = SystemTime::now();
-        let t2 = t1 + std::time::Duration::from_nanos(1);
-        // 同一入力でも呼び出しごとに変わる（ヒープ確保アドレス分の追加密は意図どおり）。
-        // ここでは保証する性質だけ確かめる: 空でないことと、時刻が変われば必ず変わること。
-        assert!(!process_salt(t1).is_empty());
-        assert!(!process_salt(t2).is_empty());
-        assert_ne!(process_salt(t1), process_salt(t2));
+    fn read_salt_from_missing_path_is_err() {
+        let err = read_salt_from(Path::new("target/demo-logs/absent-salt-source"))
+            .map(|_| ())
+            .expect_err("存在しないパスは Err");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    // (s3) /dev/urandom から2回読んだ salt は 32 バイトで、互いに異なる。
+    #[test]
+    fn urandom_salts_are_32_bytes_and_distinct() {
+        let a = process_salt().expect("salt a");
+        let b = process_salt().expect("salt b");
+        assert_eq!(a.len(), SALT_BYTES);
+        assert_eq!(b.len(), SALT_BYTES);
+        assert_ne!(a, b);
+    }
+
+    // (s4) 同じ salt と同じ入力なら仮名は同じ、salt が違えば仮名は違う。
+    #[test]
+    fn same_salt_same_pseudonym_and_different_salt_differs() {
+        let sink = Arc::new(NullSink) as Arc<dyn LogSink>;
+        let salt_a = process_salt().expect("salt a");
+        let salt_b = process_salt().expect("salt b");
+        let la = Logger::with_sink(Arc::clone(&sink), salt_a.to_vec());
+        let lb = Logger::with_sink(sink, salt_b.to_vec());
+        assert_eq!(la.id("card-s4"), la.id("card-s4"));
+        assert_ne!(la.id("card-s4"), lb.id("card-s4"));
     }
 }
