@@ -570,6 +570,8 @@ mod tests {
         let mut sending = ledger_with_card("card-2");
         let sending_req = current_req(&sending, "card-2", "a");
         let _ticket = reserve(&mut sending, &sending_req);
+        let sent_before = card_summary(&sent, "card-1");
+        let sending_before = card_summary(&sending, "card-2");
         for (ledger, card, state) in [
             (&mut sent, "card-1", TaskState::SentAwaitingReply),
             (&mut sending, "card-2", TaskState::Sending),
@@ -587,6 +589,15 @@ mod tests {
                 assert_eq!(res.unwrap_err().http_status(), 409);
             }
         }
+        // 拒否のあと、snapshot_hash・コメント数・版は呼び出し前と変わらない。
+        assert_eq!(card_summary(&sent, "card-1"), sent_before);
+        assert_eq!(card_summary(&sending, "card-2"), sending_before);
+    }
+
+    /// カードの (snapshot_hash, コメント数, card_version)。拒否で何も変わっていないことの確認用。
+    fn card_summary(ledger: &ApprovalLedger, card: &str) -> (String, usize, u64) {
+        let c = ledger.card(&card.into()).unwrap();
+        (c.snapshot_hash.clone(), c.comments.len(), c.card_version)
     }
 
     #[test]
