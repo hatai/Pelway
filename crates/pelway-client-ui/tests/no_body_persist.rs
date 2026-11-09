@@ -51,9 +51,12 @@ use pelway_client_ui::testkit::{FixedClock, FixedKeySource};
 
 /// 本文用の canary。完全な文字列はどこにも書かない（先頭の説明のとおり、
 /// 単純分割はリテラルの隣接配置で破られるため、後半は逆順に格納する）。
+/// 組み立て値が受入条件の指定値と一致することは
+/// `canary_body_matches_the_specified_value` で固定している（r3。r1 から引き
+/// 継いだ値のままになっていた不一致の修正）。
 fn canary_body() -> String {
     let mut whole = String::from("PELWAY-CANARY-CLIENT-B");
-    whole.push_str(&"27WK3R-YDO".chars().rev().collect::<String>());
+    whole.push_str(&"2W7K3R-YDO".chars().rev().collect::<String>());
     whole
 }
 
@@ -67,6 +70,52 @@ fn canary_pii() -> String {
 /// 走査で探す canary の一覧。
 fn canaries() -> Vec<String> {
     vec![canary_body(), canary_pii()]
+}
+
+// ---- canary の指定値の固定（QA-GDPR-13 r3。Codex 指摘の採択） ----
+// r2 までは本文用 canary の組み立て値が r1 の値のままで、受入条件の指定値と
+// 一致していなかった（docs/worklog/client.md 第13枠の未決事項）。以後のずれを
+// この試験で検出する。
+
+/// 受入条件の本文用 canary の指定値。実装 (`canary_body`) と同じ「前半平文＋後半
+/// 逆順リテラル」の格納しつつ、組み立ては別の手順（逆順リテラルを先に戻してから
+/// `concat` で連結）で行う。完全な文字列をソースにもバイナリにも置かない方針は不変。
+fn spec_body_from_acceptance() -> String {
+    let tail: String = "2W7K3R-YDO".chars().rev().collect();
+    ["PELWAY-CANARY-CLIENT-B", tail.as_str()].concat()
+}
+
+/// 受入条件の個人情報用 canary の指定値。同じ組み立て方。
+fn spec_pii_from_acceptance() -> String {
+    let tail: String = "6P4N8H-I".chars().rev().collect();
+    ["PELWAY-CANARY-CLIENT-PI", tail.as_str()].concat()
+}
+
+/// 本文用 canary は受入条件の指定値とバイト単位で一致すること。植える・比較する・
+/// 走査する値はすべて `canary_body()` 経由なので、この一致が全検査の使用値を固定する。
+#[test]
+fn canary_body_matches_the_specified_value() {
+    assert_eq!(
+        canary_body().as_bytes(),
+        spec_body_from_acceptance().as_bytes(),
+        "本文用 canary が受入条件の指定値とバイト単位で一致すること"
+    );
+    assert_eq!(
+        canaries(),
+        vec![spec_body_from_acceptance(), spec_pii_from_acceptance()],
+        "走査の needle 一覧（植える・比較する・走査する値）が指定値そのものであること"
+    );
+}
+
+/// 個人情報用 canary も受入条件の指定値とバイト単位で一致すること（r1 から指定値
+/// どおり。指定値から外れないことを固定する）。
+#[test]
+fn canary_pii_matches_the_specified_value() {
+    assert_eq!(
+        canary_pii().as_bytes(),
+        spec_pii_from_acceptance().as_bytes(),
+        "個人情報用 canary が受入条件の指定値とバイト単位で一致すること"
+    );
 }
 
 // ---- 検査関数（走査） ----
