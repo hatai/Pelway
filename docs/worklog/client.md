@@ -466,3 +466,39 @@
   - `ensure_dir_inside` は作成前に既存の最深祖先の解決先を確認する（外への symlink の下はもちろん、壊れた symlink の下にも何も作らない）。
   - 環境変数の候補は、字面が worktree 内でも解決できないものは走査対象から捨てる（読めないものを読まない）。
 - ネットワーク・書き込み範囲: cargo はすべて `CARGO_NET_OFFLINE=true` + `--offline --locked`（`cargo fetch`・`cargo update`・`cargo add` 不使用。lock 更新なし）。worktree の外への書き込みなし（`/tmp`・`/dev/shm`・本物のホーム・mbx キャッシュを含む。`HOME`・`TMPDIR`・`XDG_*` はサンドボックス内へ向けた。clippy の exit code 記録の際に一度だけ出力を `/dev/null` へ破棄したが、ファイルは作っていない）。cargo が `CARGO_HOME=/home/hatai/.cargo`・`RUSTUP_HOME=/home/hatai/.rustup` を読むことだけ許可済みの範囲（mise shim はリダイレクト下で壊れるため、第12枠と同じく toolchain 1.96.0 の実バイナリ `/home/hatai/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/` を直接実行）。git の push・fetch なし。amend・rebase・reset・stash・force・`--no-verify` 不使用。`.opencode/` は読み書きとも不使用。r1・r5 の worktree とブランチには不接触。ネットワーク接続なし。
+
+### 2026-11-10 第14枠（QA-GDPR-13 r3: 本文用 canary を受入条件の指定値に揃える）
+- start: 2026-11-10 07:09 JST
+- stop:  2026-11-10 07:22 JST
+- glm: long（T3 Code スレッドで OpenCode + zai-coding-plan/glm-5.3 が実装。起点 `2bf3835` の worktree `demo-t3-client-gdpr-13-r3`（新規ブランチ `demo-t3/client-gdpr-13-r3`）で実施）
+- 使った skills: tdd（指定値との一致を固定するテストを先に書き、実装前の赤を実行時アサーションで確認してから実装）/ verification-before-completion（§6 のコマンドを最終ソースで再実行して exit code と件数を記録）。skill の本文は OpenCode の skill 読み込み機能で読んだ。
+- 対応: Codex レビュー（review-findings-client-gdpr-13-r2.md、sha256 `ee18cad6…85235` 一致を確認）の重大度 high 1 件（`canary_body()` の実行時組み立て値が受入条件の指定する本文用 canary と一致しない。第13枠が r1 の値の維持を記録したため、検査 (a)(b)(c)(d)(f) が指定値を検出できていない）を開発リードの割り当てどおり採択・修正。
+- 最初の確認: `pwd` = `/home/hatai/.t3/worktrees/Pelway/demo-t3-client-gdpr-13-r3`（想定どおり）、ブランチ `demo-t3/client-gdpr-13-r3`、HEAD `2bf383552a7bbbea66dc0999295187e9c7bcaa29`（基点と一致）、`git log --oneline -3` の先頭は `2bf3835`（r2 第13枠の追記コミット）、`git status --short` 空。
+- 修正の経路（変更ファイルは `crates/pelway-client-ui/tests/no_body_persist.rs`（+54/−1。うち実装は逆順リテラル 1 行）と `.gitignore`（+4））:
+  - `canary_body()`: 逆順格納リテラルを指定値の後半の逆順に 1 か所修正（前半平文リテラルと実行時組み立ての方式は不変で、結果が受入条件の指定値とバイト単位で一致する）。`canary_pii()` は r1 から指定値どおりのため無変更。
+  - 新テスト `canary_body_matches_the_specified_value`・`canary_pii_matches_the_specified_value`: 指定値を独立に組み立てるヘルパー（`spec_body_from_acceptance`/`spec_pii_from_acceptance`。実装とは別の手順で連結）とバイト単位で比較し、`canaries()`（植える・比較する・走査する needle 一覧）も指定値そのものの集合であることを固定。完全な canary をソース・バイナリに置かない方針（前半平文＋後半逆順）は不変。
+  - 陽性対照 (c)(f)・(a)(b)(d) の植え値はすべて `canary_body()`/`canary_pii()`/`canaries()` 経由のため、上記の固定により指定値に揃った（検査本体のロジックは無変更。r2 の symlink 判定・退避サンドボックスの仕組みも無変更）。
+  - `.gitignore` に `.gdpr-13-sandbox/`（退避サンドボックス。中身はコミットしない）を追加（指示で許可済み。第13枠の未決事項を実施）。
+- TDD の赤→緑:
+  - 赤: `cargo test -p pelway-client-ui --test no_body_persist --locked --offline`（`CARGO_NET_OFFLINE=true` + サンドボックス環境変数付き）→ **exit 101**。落ちたのは `canary_body_matches_the_specified_value`（実行時アサーション。バイト列比較の left/right が後半の並びで不一致——r1 の値と指定値の差を直接示す落ち方。コンパイルエラーではない）。ほか 7 件（pii の固定テストを含む）は合格。
+  - 緑: 実装修正後に同コマンド → **exit 0（8 件合格）**。
+- clippy の道中のトラブルと対処: 初回 `cargo clippy` が E0514（1.96.0 でビルド済みの rmeta を 1.94.1 のドライバが読む）で **exit 101**。`--verbose` で、cargo-clippy が rustup のアクティブ解決で `stable`（1.94.1）の clippy-driver を `RUSTC` に指定していたことを確認（rustup の既定 toolchain が stable のため）。`RUSTUP_TOOLCHAIN=1.96.0-x86_64-unknown-linux-gnu` を明示して同じコマンド → **exit 0**。プロジェクト固定の toolchain（mise.toml の rust 1.96.0）と同じ版で検証した。
+- サンドボックスの実際のパス: `<worktree>/target/gdpr-13-sandbox/`（`target/` はこの worktree では通常ディレクトリ。`readlink -f` で解決先が worktree 内であることを確認）。`HOME`・`TMPDIR`・`XDG_*` はその下の別々のディレクトリへ向け、`CARGO_HOME`・`RUSTUP_HOME` だけ実パスを明示。
+- 検証（コマンドと exit code。すべて `CARGO_NET_OFFLINE=true` + サンドボックス環境変数 + toolchain 1.96.0 実バイナリ直接実行。最終版のソースで）:
+  - `cargo fmt --all --check` **0**
+  - `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` **0**
+  - `cargo test --workspace --locked --offline` **0**（**98 件合格・失敗 0**: pelway-client-core 54 = approval 24・contract 14・input 16 ／ pelway-client-ui 43 = bridge 10・i18n_fluent 3・i18n_keys 6・**no_body_persist 8**・no_color_values 4・slint_window 1・theme_tokens 11 ／ pelway-dev-smoke 1。r2 の 96 + canary 固定 2）
+  - canary 走査（`rg -a -F -l -f <パターンファイル>`、`--no-ignore --hidden`、除外 `.git`・`.opencode`・パターンファイル自身。パターンファイルは分割 printf で sandbox 内に作成し走査後に明示削除。rg は symlink を辿らないため走査対象は解決先が worktree 内のパスのみ）: **exit 1＝0 件**（ソース・`target/` の成果物・sandbox のすべてで、指定値の完全な canary は定数定義ファイル含め不在）。検出力の self-check（canary 入り一時ファイル 1 件）は exit 0・1 件で確認済み。
+  - `git diff --stat 2bf3835 -- Cargo.lock` → 空（**Cargo.lock の差分なし**。依存・workspace メンバーの追加なし）
+- コミット: テスト修正＋`.gitignore`、次にこの作業ログ。**push していない**。
+- 未検証・未決:
+  - **窓を開いての確認はしていない**（第12枠・第13枠どおり未検証・合格扱いにしない）。ウィンドウを開いたときだけ起きる端末残存はこの試験の対象外のまま。
+  - **U01〜U07 は未決のまま**（この回では判定していない）。`TODO(U0x)` も触れていない。
+  - mlock は不使用（第12枠どおり）。メモリ上の本文・表示名のスワップへの書き出し余地は記録のみ。
+  - `target/` symlink 配下（mbx ストア側）の走査は意図的に行っていない（「走査対象は解決先が worktree 内のパスに限る」ため）。
+- 迷って安全側にした点:
+  - 指定値との比較はバイト単位（`as_bytes()`）で行い、文字列の正規化・類似ではなく完全一致を固定した。
+  - 期待値ヘルパーは実装と同じリテラル方式（前半平文＋後半逆順）だが組み立て手順を別（`concat`）にし、完全な canary がソース・バイナリに置かれない方針を崩さなかった。
+  - canary の値は本記録・報告・端末に出していない（テストの失敗表示のみ。パターンファイル作成も分割 printf）。
+  - ツールチェーンは mise shim を使わず 1.96.0 の実バイナリを直接実行し、clippy も `RUSTUP_TOOLCHAIN` で 1.96.0 に揃えた（stable のドライバ混入を防ぐ）。
+- ネットワーク・書き込み範囲: cargo はすべて `CARGO_NET_OFFLINE=true` + `--offline --locked`（`cargo fetch`・`cargo update`・`cargo add` 不使用。lock 更新なし）。worktree の外への書き込みなし（`/tmp`・`/dev/shm`・本物のホーム・mbx キャッシュを含む。`HOME`・`TMPDIR`・`XDG_*` はサンドボックス内へ向けた）。cargo が `CARGO_HOME=/home/hatai/.cargo`・`RUSTUP_HOME=/home/hatai/.rustup`（toolchain 1.96.0）を読むことだけ許可済みの範囲。findings ファイル（review-codex-client-2bf3835-r1 worktree 内）は指摘確認のためだけ読んだ（sha256 一致を確認）。git の push・fetch なし。amend・rebase・reset・stash・force・`--no-verify` 不使用。`.opencode/` は読み書きとも不使用。r1・r2・r5 の worktree とブランチ（`demo-t3/client-gdpr-13`・`demo-t3/client-gdpr-13-r2`・`demo-t3/client-ui-r5`）には不接触。`target/` の symlink の削除・付け替え・掃去はしていない（この worktree の `target/` は検証時点で通常ディレクトリ）。ネットワーク接続なし。
