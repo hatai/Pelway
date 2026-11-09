@@ -463,3 +463,111 @@
     従い実施しなかった。
 - 未検証・未決:
   - 差分の Codex 再レビュー・QA は未実施。U01〜U07 は未決のまま（確定していない）。
+
+### 2026-11-09 第11枠（Codex 再レビュー5 指摘1〜2の修正と全体期限の本文への拡大・GLM 枠）
+- start: 2026-11-09 20:59 JST
+- stop:  2026-11-09 21:18 JST（`date` で確認）
+- glm: long（T3 Code 上で GLM が実装。バックエンド作業依頼 6 のとおり）
+- worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-backend-fix6`、branch `demo-t3/backend-fix6`（base `cc86038`）
+- 開始時の確認: cwd はこの worktree（本体フォルダではない）、HEAD
+  `cc8603884db316bda3323458f55271b363ca40aa`（指定と一致）、branch `demo-t3/backend-fix6`、
+  `git status --porcelain` 空。
+- 開発リードの決定（2026-11-09 20:36〜20:40 JST）:
+  - Codex 再レビュー5（スレッド 4570f41c、所見ファイル review-findings-5.md、sha256
+    `937eb7837afca3150ee2bd85a306322d46102f3eb7a1dbadbadd4f177bfc8b82`）の指摘1・2を
+    どちらも採用。
+  - 全体期限を本文の読み取りにも広げる（1 接続あたり同じ 10 秒。3 秒の読み取りごとの
+    上限と読み捨ての 1 MiB 上限はそのまま）。
+- 安全側の選択の承認（リード 20:36）: HTTP/1.0 を拒否すること（HTTP/1.1 の形だけ受理）、
+  期限切れで 408 を返すこと、`ServeError::NotLoopback` の名前をそのまま使うこと。
+- AGENTS.md の「Prior art first」（GitHub 検索）: 外部ネットワーク接続禁止のため未実施。
+- skills:
+  - Matt Pocock Agent Skills の `tdd` を使用。修正1（テスト (r)〜(u)）と修正2・3
+    （テスト (v)〜(x)）をそれぞれ実装前に実行して red を記録し、実装後に green を確認。
+- 内容（`crates/pelway-http` のみ。依存クレートの追加なし、`Cargo.lock` 変更なし）:
+  - 指摘1（431 の判定、`src/lib.rs` ヘッダー読み取りループ）: 大きさの上限の判定を
+    「受け取った合計バイト数」から「ヘッダーの終端（空行）までのバイト数」に変更。
+    同じ読み取りに本文のバイトが混ざっていても上限に数えない。終端がまだ見つからない
+    ときは、受け取ったバイト数が 16 KiB を超えた時点で 431（ヘッダーだけで超えている
+    場合）。行数 100 の上限は変更なし。
+    テスト: `head_16kib_and_body_in_one_write_accepted`（テストA。16 KiB ちょうどの
+    ヘッダーと有効な本文を 1 回の write で続けて送って受理）、
+    `oversize_cl_head_16kib_body_start_in_one_write_answers_413`（テストB。
+    Content-Length 100000 の要求をヘッダーと本文の先頭 8 KiB を 1 回の write で送って
+    413）、`body_in_final_head_read_not_counted_in_16kib_limit`（ヘッダーを 13000 バイト
+    まで先に送って読み取りの境界をずらし、残りのヘッダーと本文を 1 回の write で送って
+    受理）、`oversize_cl_straddled_head_answers_413_not_431`（同じ送り方で
+    Content-Length 100000 → 431 ではなく 413）。
+    既存 `head_bytes_exactly_16kib_ok_and_one_more_431`（16 KiB+1 は 431）は残したまま。
+  - 指摘2（1 回の読み取りのタイムアウト、`drain`・`read_once`・`handle_conn`）:
+    新しい `read_timeout_for` が「3 秒（READ_TIMEOUT）」と「全体期限までの残り」の短い
+    ほうを返し、`read_once` と `drain` が読み取りのたびに `set_read_timeout` で設定する。
+    残りが 0 以下なら読まずに打ち切る。期限切れはこれまでの安全側の選択どおり 408 を
+    返して閉じる（413 のあとの読み捨て中は 413 応答済みのため追記せず閉じるだけ）。
+    0 秒のタイムアウトは設定できないため、残り 0 は期限切れとして読み取りの前に判定。
+    `handle_conn` 開始時の 1 回だけの `set_read_timeout` とヘッダー読み取りループ先頭の
+    期限確認は削除（read_once が毎回残りを見るため。期限ぎりぎりに読み終わった要求は
+    従来どおり受理）。
+    テスト: `head_read_wait_is_cut_at_deadline_not_3s`（テストC・ヘッダー読み取り中）、
+    `drain_read_wait_after_413_is_cut_at_deadline`（テストC・読み捨て中。下記の判定方法）。
+  - 決定3（全体期限を本文の読み取りへ拡大、リード 20:36）: 本文の読み取りループも同じ
+    `deadline` を `read_once` に渡す。ヘッダー読み取り・本文読み取り・413 後の読み捨ての
+    すべてに 1 接続あたり同じ 10 秒。
+    テスト: `slow_trickle_body_hits_connection_deadline`（テストD。正しい大きさの本文を
+    150ms 間隔で少しずつ送り続けると、差し替えた期限 800ms 前後で 408 と切断）。
+  - モジュール doc・定数の doc・`HttpError::RequestTimeout` の doc を新しい判定と期限の
+    範囲に合わせて更新。既存テスト (n) のコメントも新しい判定に合わせて修正。
+- テストCの余裕の値と理由:
+  - 上限は「全体期限 + 0.5 秒」（QA の受入条件どおり）。期限の差し替え: (v)(w) は 2.0 秒、
+    (x) は 0.8 秒（テスト時間を短くするため。本番の値 10 秒・3 秒はそのまま、(v) は
+    READ_TIMEOUT=3 秒を、(x) は CONNECTION_DEADLINE=10 秒を assert）。
+  - 下限は「全体期限 − 0.1 秒」。期限前に切れないことの確認で、時計とスレッド
+    スケジューリングのぶれに 0.1 秒だけ許容した。
+  - (w) の判定時刻は期限 + 0.3 秒（+0.5 秒の内側）。閉じた後の最初の書き込みに対する
+    RST が戻るのに時間が要るため、1 回目と 2 回目の書き込みの間に 0.1 秒空けた。
+- red-first の証拠（tdd）:
+  - 修正1のテストを追加して実装前に実行: `cargo test --offline -p pelway-http --test http`
+    → exit 101、19 passed / 2 failed。
+    - `body_in_final_head_read_not_counted_in_16kib_limit`: 431 が返った（200 期待）。
+    - `oversize_cl_straddled_head_answers_413_not_431`: 431 が返った（413 期待）。
+    - テストA・B相当の 1 回の write だけの 2 件（`head_16kib_and_body_in_one_write_accepted`・
+      `oversize_cl_head_16kib_body_start_in_one_write_answers_413`）は実装前も通った。
+      ループバックではサーバーの読み取りが 4096 バイト（チャンク）単位で区切られ、
+      16 KiB ちょうどのヘッダーの終端が本文と同じ読み取りに混ざらないため。red の証拠は
+      読み取りの境界を確実にまたがらせた上の 2 件で取った（テストA・Bは受理の受け
+      テストとして残す）。
+  - 修正2・3のテストを追加して（まだ実装前に）実行: 同コマンド → exit 101、
+    19 passed / 5 failed（上の 2 件に加えて）:
+    - `head_read_wait_is_cut_at_deadline_not_3s`: 3.19 秒で切断（期限 2.0 秒 + 0.5 秒を超過）。
+    - `drain_read_wait_after_413_is_cut_at_deadline`: 期限 + 0.3 秒の時点で 2 回の書き込みが
+      どちらも成功（接続がまだ開いている。修正前は 3 秒の読み取りタイムアウトが
+      優先されていた）。
+    - `slow_trickle_body_hits_connection_deadline`: 本文を読み終えるまで応答が来ない
+      （本文の読み取りに全体期限が無かった）。
+  - green: 実装後に同コマンド → exit 0、24 passed / 0 failed。さらに 3 回再実行して
+    24 passed / 0 failed を確認（時間を使うテストの揺らぎ対策）。
+- 検証（コマンドと exit code、オフライン）:
+  - `cargo fmt --all --check`: 初回は 1（整形の指摘のみ）。`cargo fmt --all` 適用後に 0。
+  - `cargo clippy --workspace --all-targets --offline -- -D warnings` 0
+  - `cargo test --workspace --offline` 0（at-rest 単体 8・aead 12・contract 単体 34・
+    serde_contract 10・dev-smoke 1・http 24。計 89 passed / 0 failed / 0 ignored）
+- 迷った点（安全側で進めたもの）:
+  - 終端までの長さの数え方: 終端（空行 `\r\n\r\n`）を含む長さ（`find_terminate` の位置 +4）
+    で判定した。既存の 16 KiB+1 テスト（終端の完成が最後の 1 バイト）が 431 のまま
+    成立するのはこちらの解釈だけのため。
+  - (w) の検出方法: 413 のあとの読み捨て中の切断は、応答書き込み済み（write 側
+    shutdown 済み）のためクライアントの読み取りでは観測できない。期限 + 0.3 秒に
+    1 バイトを書き、0.1 秒空けて 2 回目の書き込みが失敗すれば「1 バイト目の時点で
+    既に閉じていた」と判定できる（サーバーがまだ読み取り待ちなら 1 バイト目は読み捨てに
+    消費され、2 回目も成功する）。
+  - 実装途中で (w) だけ残って失敗した: 1 回目と 2 回目の書き込みを連続で実行したため、
+    1 回目に対する RST が戻る前に 2 回目が終わってしまい、どちらも成功した。上の
+    0.1 秒の間隔を入れて解決（既存テスト (q) が書き込み 150ms 間隔で検出できているのと
+    同じ理屈）。
+  - ヘッダー読み取りループ先頭の期限確認の削除: read_once が読み取りごとに残りを見る
+    ための重複。受け取った合計が上限内で終端まで揃った要求は期限ぎりぎりでも受理する
+    従来の挙動は不变。
+- 逸脱: なし（worktree・ブランチの中だけ。push・fetch なし、外部接続なし、破壊的gitなし。
+  一度 worklog の第10枠の見出し行を誤って編集したが、すぐ戻して `git diff` で空を確認）。
+- 未検証・未決:
+  - 差分の Codex 再レビュー・QA は未実施。U01〜U07 は未決のまま（確定していない）。
