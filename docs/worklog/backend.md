@@ -1244,3 +1244,128 @@
   - `serve_with_logger` は `pub` のまま（呼び出し元がクレート内テストのみに
     なったが、今回の対象は `with_sink`/`process_salt` の2つだけのため）。
   - 差分の Codex 再レビュー・QA は未実施。U01〜U07 は未決のまま。
+
+### 2026-11-10 第18枠（QA-GDPR-02・目的ごとの根拠の記録と共通のメモリ保存・GLM 枠）
+
+- 依頼: 「バックエンド作業依頼 QA-GDPR-02（目的ごとの根拠の記録と、共通のメモリ保存）」
+  （開発リード割り当て、期限 2026-11-14 21:00 JST）。
+- worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-backend-gdpr-02-r2`（新規作成された
+  このスレッドの worktree）、ブランチ `demo-t3/backend-gdpr-02-r2`、
+  base `cb161520252ed3c262d60e76f9bb43a5cb6892af`。開始 2026-11-10 04:52 JST、
+  終了 2026-11-10 05:10 JST。開始時の `git status --porcelain` は空（クリーン）。
+- 使った skills: `tdd`（red → green のループ参照。テストは公開インターフェース
+  （`DataStore` の公開メソッドと HTTP 経路）越しに振る舞いだけを検証し、内部構造に
+  依存しない形にした。依頼どおりテスト先行で、実装前に red を記録してから green にした）。
+- red-first の証拠（実装前にテストを書き、最小スケルトン＝型と空のメソッドだけの
+  状態で実行。コンパイルエラーで終わらせず、正しい理由での実行時失敗を記録した）:
+  - `cargo test --offline -p pelway-contract --lib store::` → **exit 101**、
+    3 passed / 6 failed。要点: テスト1（P01〜P08 の作成・読取）は basis_id が空・
+    保存されず 0 件で失敗。テスト2（canary 不出力）は、red 確認用に一時入れた
+    「メッセージ本文を複製して持つ不正な実装（`debug_messages_echo`）」が直列化に
+    canary を漏らし、`根拠レコードの直列化に本文 canary がある` で検出失敗。
+    テスト3（サーバー付け）は `left: "" right: "bas-00000001"` で失敗。
+    テスト6（撤回）は epoch が 0 のまま（撤回が未実装で必ず NotFound）で失敗。
+  - `cargo test --offline -p pelway-http --lib gdpr02_routes` → **exit 101**、
+    0 passed / 6 failed。要点: 全テストが 404 `{"code":"not_found"}`（経路未実装）。
+    テスト3・6 も 404 で落ちた（期待 200/400 に対し 404）。
+  - green: 実装後 `cargo test --offline -p pelway-contract --lib store::` → exit 0
+    （9 passed / 0 failed）、`cargo test --offline -p pelway-http --lib gdpr02_routes` →
+    exit 0（6 passed / 0 failed）。一時フィールド `debug_messages_echo` は red 記録後
+    に削除した（テスト2が「検出できた」ことの陽性対照を兼ねる）。
+  - 途中経過: テスト2 の HTTP 側で「応答本文に canary 無し」の検証を入れていたが、
+    これは誤り（要求で送った自由文字列は保存された正本として応答に戻るのが正しい）。
+    検証目的は「07 のログに漏れないこと」なので当該 assert を削除して通るようにした。
+- 「本人」の仮の決め方（開発リード 2026-11-10）: デモに認証は無く、**合成の利用者 ID
+  （`actor`）を API・関数の引数で渡す**（作成・撤回は要求本文、読取はクエリ）。
+  ヘッダーや Cookie、環境、作業ディレクトリから本人を推定しない。この決め方は仮で、
+  U01〜U07 と法的な当てはめ（どの根拠の種類がどの目的に当てはまるかを含む）は
+  **未決のまま**。`basis_type` は `synthetic_consent` / `synthetic_non_consent` の
+  合成の値のみで、実際の根拠分類との対応は決めていない。
+- 作ったもの:
+  - `crates/pelway-contract/src/store.rs`（新規・DataStore の置き場）:
+    workspace・channel・message・明示メモリ・根拠記録・利用方針・削除/制限記録を
+    **メモリだけ**で持つ（ディスクに書かない。07 のログ以外ファイルを作らない）。
+    04・05・10 が使う前提の置き場と型のみ用意（削除処理・本人書き出し・所在一覧 API
+    は実装しない）。ID・時刻・版・epoch はすべてサーバー付け（`bas-{:08}`、
+    `msg-{:08}`、`mem-{:08}`、`del-{:08}`、version・seq・`collected_at` 等）。
+    `client_msg_id` は保存しない（既存 `Message` 型を使わず `StoredMessage` を新設）。
+    保存物の `purpose_id` は `PurposeId`（P01〜P08 のみ）で必須・非 Option。未設定・
+    不正値（`p09`・大文字・数字等）は serde の脱直列化エラーとして拒否（HTTP は 400）。
+    学習・広告・会社横断分析の経路は作っていない。
+  - 列の持ち方: 12 §3.2 の **名前の列** を省略せずそのまま持つ。利用方針
+    `workspace_id, purpose_id, version, data_classes, source_scope, processors,
+    allowed_outputs, explanation_version, retention_policy_ref`（＋サーバー付け時刻の
+    `created_at` を追加。時刻はサーバー付けの約束のため）、根拠記録
+    `workspace_id, basis_id, basis_version, basis_type, purpose_id, scope,
+    party_coverage_ref, grantor_ref, representative_authority_ref, explanation_version,
+    evidence_ref, collected_at, effective_at, expires_at, withdrawn_at,
+    withdrawal_method_ref, status, epoch`（全列）。`party_coverage_ref` 等の参照列は
+    参照だけ（文字列）で本文や人物情報の複製は持たない。利用方針の変更前の版は
+    削除せず残す（版は同じ workspace×purpose で 1 から採番）。
+  - status を未確定側にした理由: 12 §3.3「根拠未確定の機能は無効」「`pending`、欠落、
+    不明、期限切れ、撤回済みは同意根拠として使わない」に従い、作成直後は必ず
+    `pending`。有効（`active`）な根拠記録を作る経路は **意図的に用意しない**
+    （有効化には U03 の法的当てはめの確定が必要なため）。`is_purpose_enabled` は
+    active・期間内・目的一致の記録があるときだけ true を返す実装だが、active な記録を
+    作る経路が無いため常に false（P03/P04/P06 は根拠なし・pending だけでは有効に
+    ならない＝初期オフ。他の目的も同様）。
+  - 取消P・同意撤回（根拠失効）・削除の利用停止は別状態として保持: `HaltKind`
+    （`operation_cancellation` / `basis_invalidation` / `deletion_suspension`）と
+    `HaltState`（`received` / `suspended`）を削除・制限記録に持たせた。撤回
+    （`basis_invalidation`）だけ実装（根拠記録の status→`withdrawn`、epoch+1、
+    `withdrawn_at` 更新）。03 の 9 状態には「取消」を足していない（`task.rs` 無変更）。
+  - 登録簿: `StorageRegistry`（メモリ内）。`DataStore::new()` で 7 保存部が自分を登録し、
+    `register_location` で外の保存部（07 のログ出力先など）も登録できる。所在一覧の
+    応答 API は作らない（10 の範囲）。
+  - 仮の経路（`crates/pelway-http`）: `POST|GET /v1/workspaces/{workspace_id}/
+    communication-basis-records`、`POST /v1/workspaces/{workspace_id}/
+    communication-basis-records/{basis_id}/withdraw`（撤回 = 取得と同じ1操作の POST
+    1回）、`POST|GET /v1/workspaces/{workspace_id}/communication-use-policies`。
+    **経路名は仮**。要求型は `deny_unknown_fields` で、偽の `basis_id`/`collected_at`/
+    `status`/`epoch` 等は未知フィールドとして 400 で拒否（保存されない）。
+    既存 comments/approve の振る舞いは無変更（既存テスト 26＋15 件がそのまま通る）。
+  - 起動入口: 既存 `serve` / `serve_with_logger` / `serve_with_logger_urandom` 等の
+    署名は変えず、内部で空の DataStore を作る（既存の振る舞い不变）。新規は
+    `serve_with_store`（ログ無し）、`serve_with_store_and_logger`（テスト・検証用・
+    既知 salt）、`serve_with_store_and_logger_urandom`（本番相当・salt は
+    /dev/urandom 固定・読み取り失敗で起動しない）。
+- salt / ログの仕組みは変えていない: `log.rs` の salt 採取（`/dev/urandom` 固定・
+  フォールバックなし）、`with_sink`/`serve_with_logger_salt_from` の `pub(crate)`、
+  `process_salt` の `#[cfg(test)]`、許可リスト方式（項目は仮名化 ID・種別・数値・
+  結果コードだけ）はそのまま。追加したのは `Route` の 3 バリアント
+  （`basis_records` / `basis_withdrawal` / `use_policies`）と出来事 5 種
+  （`basis_record_saved` / `basis_records_listed` / `basis_withdrawn` /
+  `use_policy_saved` / `use_policies_listed`。仮名 ID・`PurposeId`・版・epoch のみで、
+  参照列の中身・本文・`client_msg_id` は出さない）、`unix_millis` の `pub(crate)` 化
+  （サーバー付け時刻の共用のため。仕組みの変更ではない）。撤回後の読取・検索・AI 入力の
+  拒否は QA-GDPR-03 の範囲なので実装していない（撤回で epoch・status・時刻が更新される
+  ところまで）。
+- 検証（すべて `--offline`、コマンド・exit code・件数）:
+  - `cargo fmt --all -- --check` → **exit 0**（整形 1 回適用後）。
+  - `cargo clippy --workspace --all-targets --offline -- -D warnings` → **exit 0**。
+  - `cargo test --workspace --offline` → **exit 0**、**計 125 passed / 0 failed /
+    0 ignored**（at-rest 単体 8・aead 12・contract 単体 47（旧 38＋新 9）・
+    serde_contract 10・dev-smoke 単体 0＋smoke 1・http 単体 21（旧 15＋新 6）・
+    http 結合 26。doc-tests 各 0）。前回（第17枠）110 → 125（+15）。
+- 迷った点と安全側の判断:
+  - `BasisStatus` に `active` バリアントを置いたが、**active に遷移させる経路は作ら
+    なかった**（有効化は U03 確定後に開発リードが決める。初期オフ要件の安全側）。
+  - 偽 ID・時刻の入った要求は「無視して保存」ではなく **400 で拒否**した
+    （`deny_unknown_fields`）。要求型に偽を受け取る欄自体が無いため、正本がサーバー値
+    であることは型で保証され、HTTP では拒否の形で確認できる。
+  - 撤回の再実行は冪等に epoch をさらに進める形にした（取得より難しい手順にしない
+    要件の安全側。`withdrawal_method_ref` は再撤回で消さない）。
+  - `expires_at` を要求から受け取らない（全時刻をサーバー付けに統一）。期限切れ判定は
+    `is_valid_consent_basis_at` の期間比較のみ（この実装では常に false）。
+  - ログの読取出来事に件数を出さない（12 §6 の件数の扱いの安全側）。
+  - GET の actor はクエリ引数（URL デコードはしない。合成 ID は ASCII 想定と明記）。
+  - `is_purpose_enabled` は P03/P04/P06 に限らず全目的で「active な根拠が無ければ
+    false」にした（どの目的にどの根拠が要るかは未決のため、一律の安全側）。
+  - 既存 `serve` 系の公開署名は変えず、新規入口を足すだけにした（既存呼び出し元
+    （example・テスト）への影響ゼロ。振る舞い不变は結合テスト 26 件で確認）。
+- 未検証・範囲外: 日英画面はクライアント担当。撤回後の読取・検索・AI 入力の拒否は
+  QA-GDPR-03。本人 JSON 書き出し（04）、削除処理（05）、所在一覧 API（10）は未実装
+  （置き場・型・登録簿のみ用意）。法定記録・保持期限の運用、法的部分（L-04）と根拠の
+  当てはめ（U03、通信当事者・代理権の確認方法を含む）は未決のまま。worktree で
+  `target/demo-logs/` にログを出す example の再実行は今回の対象外。Codex レビューと
+  QA は未実施。`Cargo.lock` は無変更（`git diff <base>..HEAD -- Cargo.lock` は空）。
