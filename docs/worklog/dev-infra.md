@@ -166,3 +166,67 @@
   - loopback の runtime 検査は未実装（PENDING のまま）
   - 仕様の未決事項 U01〜U07 はこの枠では決めていない
   - 外部レビュー担当が読み取り専用で動いたか・どんなコマンドで調べたかは自己申告・未検証
+
+### 2026-11-09 第5枠（修正依頼2: Codex再レビュー slot5 の対処）
+- start: 2026-11-09 18:12 JST（目安）
+- stop:  2026-11-09 18:35 JST
+- glm: long（T3 Code / OpenCode・zai-coding-plan/glm-5.3。thread ID は記録時点で取得できず未記入）
+- 使用skill: tdd・receiving-code-review（~/.agents/skills の Matt Pocock 版。スロット4と同じものを使用）
+- 内容（コミット 3a883e8（修正）・この作業ログのコミット（記録））:
+  - レビュー: Codex 再レビュー（範囲 6cfa813..60f6b28、レビュー本文 sha256
+    d99c6160fd82476cfa2967e5e78d7c120348215ffa6253b704583f18c9582a73）。4件とも開発リードが採用。
+    レビュー担当がスクリプトを実行していないこと・添付のコマンド一覧で調べたことは自己申告・未検証。
+    こちらで確かめたのは修正前後の selftest（失敗→合格）と実リポジトリでの run.sh のみ:
+    - 指摘1（loopback.sh、must-fix）: 同じ行に複数の bind(...) があってもすべて検査するよう、
+      1行ごとに正規表現マッチを消化して繰り返す形に修正。selftest に「許可→localhost」「localhost→許可」
+      「許可→許可」の同一行3ケースを追加。
+    - 指摘2（canary.sh、must-fix）: 暗黙の走査ルート（target/ logs/ log/）の実体が作業ツリーの外に
+      解決されるなら読まずに exit 2。ただし実体が mbx 共有ビルドキャッシュ
+      （${XDG_CACHE_HOME:-${HOME}/.cache}/mbx/targets/ 配下）のときだけ例外として走査する
+      （開発リードが本枠の質問への回答で確定。selftest は HOME を一時ディレクトリに差し替えて確認）。
+      旧「リンク先を実体走査して検出」の selftest は「外を読まずに exit 2」を確かめる形に書き換え、
+      mbx 例外の通る例（検出できること）を1件追加。DEMO_CHECK_EXTRA_PATHS は明示指定のため検査対象外。
+    - 指摘3（external-refs.sh、should-fix・採用）: 参照走査の前に、文字列外の行コメント
+      （行頭または空白の直後の // から行末まで）を消すように修正（引用符の直前の // は
+      文字列内のプロトコル相対参照なので残る）。selftest に JS 行コメント内の引用符付き //ホスト・
+      https URL が誤検出されない2ケースと、末尾に行コメントが付いた実コードの引用符付き参照が
+      引き続き検出される1ケースを追加。
+    - 指摘4（canary.sh、must-fix）: 目印検索の前に、走査対象ファイルがすべて読めることを確認し、
+      読めなければ exit 2（xargs 経由の grep の終了状態は no-match と区別できないため、
+      読み取り可否の事前確認で担保）。selftest に権限のないファイル（chmod 000）と
+      権限のないディレクトリで canary が exit 2 になる2ケースを追加。
+    - DC-06: ポートは 0〜65535 で確定（開発リード 17:02）。挙動は変えていない。
+      selftest に「許可リストにないホスト(localhost)ではポート 0 でも違反」と
+      「localhost:65536（ホストもポートも不許可）は違反」の2ケースを追加
+      （いずれも最初から緑。確認用の固定）。
+  - TDD: 新しい失敗ケースを先に selftest に追加し、修正前に RED を確認
+    （113件中5件が失敗: 指摘1の「許可→localhost」、指摘2の exit 2、指摘3の誤検出2件、指摘4の
+    読めないファイル。ほかの新規ケースは不許可先が先頭に来る場合やガードとして最初から緑）。
+    修正後に 113 件すべて緑。
+  - 指摘2の質問と確定: 実装前に「この worktree の target/ が mbx 共有キャッシュへのシンボリックリンクで、
+    レビューどおり exit 2 にすると run.sh が 1 になる」ことを開発リードに質問し、
+    「mbx キャッシュ配下のみ例外として走査、それ以外の外を指すリンクは exit 2」で確定した。
+- 追加の記録（開発リードの指示による）:
+  - 2026-11-09 16:20〜16:28（JST）に、開発基盤・Rust・バックエンドの GLM 3つが同時に動いていた。
+    当時の「同時実行は2担当まで」というルールに反していた（このルールは 16:55 以降に廃止）。
+  - allowed-hosts.txt の WIP 版にあった「QA合意（6cfa813 再確認）」の文言: slot4 レビュー時に作業ツリーに
+    残っていた未コミットの WIP に含まれていたもの。QA は 6cfa813 に合意していない（QA が部屋で確認）。
+    どの作業で入ったかは git 履歴では特定できず「出所不明」（git log -S で確認: allowed-hosts.txt の
+    履歴に存在しない。コミットされたことは一度もない）。検証できないため slot4 では採らず、
+    コミット済みの「リード確定」のみの文面に戻した（開発リードが妥当と判断）。
+  - shellcheck は入っていないため、走らせていない。
+- 検証（コマンドと exit code）:
+  - bash scripts/demo-check/selftest.sh → 0（113 passed, 0 failed）
+  - bash scripts/demo-check/run.sh → 0（4段階・full run。loopback static 0 件・runtime PENDING、
+    leak-phrases 43 ファイル 0 件、external-refs 43 ファイル 0 件、canary 49 ファイル 0 件。
+    target/ → mbx キャッシュのリンクは例外として引き続き走査）
+  - DEMO_CHECK_ACCEPTANCE=1 bash scripts/demo-check/run.sh → 1（ACCEPTANCE MODE 表示。
+    loopback の runtime PENDING が受入不合格。failed: loopback）
+  - 修正前の RED 確認（selftest に新ケースを追加した直後の実行）→ 1（108 passed, 5 failed）
+  - bash -n scripts/demo-check/*.sh → 0
+  - shellcheck は未導入のため未実行
+- 未検証・未決:
+  - loopback の runtime 検査は未実装（PENDING のまま）
+  - 指摘4の担保は読み取り可否の事前確認であり、検索中の races（確認と検索の間に権限が変わる場合）は
+    対象外
+  - 行コメントの除去は // 形式のみ（# 形式や /* */ ブロックコメントは対象外）
