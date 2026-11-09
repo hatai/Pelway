@@ -270,3 +270,61 @@
 - 開発リード判断（17:04頃 JST）: `d51ef28` と `47b94c1` を確定。16:31の条件（fmt / clippy 終了コード0、Codex 再レビュー）を満たしたため。
 - ルール変更の記録: 16:55頃に濱田さんが GLM 同時実行数を厳密に管理しなくてよいと指示。開発リードが上限を撤廃。指摘は引き続き先にファイルへ書き、部屋へ記録し sha256 をそろえたら、担当が待たず自分のスレッドへ送る。16:20〜16:28 の3本同時は、当時のルール違反として記録は残す。
 - 次: `f32ca74..<このコミット>` を QA へ引き渡し。
+
+### 2026-11-09 第8枠（HTTP 層の追加とテストの強化・GLM 枠）
+- start: 2026-11-09 18:26 JST
+- stop:  2026-11-09 18:40 JST
+- glm: long
+- skills:
+  - Matt Pocock Agent Skills の `tdd` を使用。作業3〜4は red（スケルトンに対する失敗）→ green（実装）の順。
+- 内容:
+  - 作業1（17:29 リード採用）: `invalid_body_on_non_awaiting_card_returns_409_not_422` に、拒否のあと
+    `snapshot_hash`・コメント数・`card_version` が呼び出し前と変わらないことの確認（`card_summary` ヘルパー）
+    を追加。実装変更を伴わないテスト強化のため red は無し（現行実装で pass を確認）。
+    コミット 2e51597。
+  - 作業2: `ApprovalLedger::abort_before_send` を `pub(crate)` に。HTTP 層は `approve` だけを呼び、
+    予約を持ち出さない。単体テスト（同一クレート）はそのまま。lib 部で未使用になるため
+    `#[cfg_attr(not(test), allow(dead_code))]` を付けてテスト専用と明示。
+    台帳の共有は `pub type SharedLedger = Arc<Mutex<ApprovalLedger>>`（std::sync のみ）。
+    1 要求の中で `lock()` を取り、approve（予約→模擬送信→完了）をロック保持のまま 1 回で行う。
+    poison した場合は 500 `internal` を返して状態に触れない（テスト (h) で確認）。
+  - 作業3: 新クレート `crates/pelway-http`。std::net::TcpListener による最小の HTTP/1.1
+    （接続ごとにスレッド、Connection: close、keep-alive・chunked は非対応）。依存は
+    `pelway-contract`（path）と `serde` / `serde_json`（既存の Cargo.lock のみで解決、--offline）。
+  - 作業4: 結合テスト `tests/http.rs`（(a)〜(g) + poison (h) + 経路/本文 card_id 食い違い (i)）。
+    `127.0.0.1:0` で起動し `std::net::TcpStream` で実際に HTTP 要求を送って状態コードと本文 JSON を確認。
+    接続先は 127.0.0.1（と (g) の ::1 起動確認）のみ。外部への接続は無い。
+- red-first の証拠（作業3〜4）:
+  - スケルトン（bind して全要求に 501 を返すだけ・ループバック検査なし）を先に置き、
+    テスト 9 件を書いて実行: `cargo test --offline -p pelway-http --test http` → exit 101、
+    0 passed / 9 failed。(a) 409期待が501、(b) 422期待が501、(c) 200期待が501、(d) 409期待が501、
+    (e) 200が0件、(f) 400期待が501、(g) 非ループバックが受理される、(h) 500期待が501、
+    (i) 422期待が501。その後 本実装で 9 passed / 0 failed。
+- 検証（コマンドと exit code、オフライン）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 0
+  - `cargo test --workspace --locked --offline` 0（at-rest 8・aead 12・contract 34・serde_contract 10・
+    dev-smoke 1・http 9。計 74 passed / 0 failed / 0 ignored）
+- 判断が必要な点（リード確認用）:
+  - **仮の経路**: `POST /v1/cards/{card_id}/comments` と `POST /v1/cards/{card_id}/approve`。
+    docs/technical/v0.7（body/04-data-api-realtime.md:44）には `POST /v1/approvals/{id}/decide` の
+    定義だけがあり、comments 保存と contract 型の approve に対応する経路の定義は無いため。
+    contract の既存定数 `COMMENTS_PATH` / `APPROVE_PATH`（`/v1/approvals/{card_id}/...`）とは
+    プレフィックスが異なる。contract 側の定数を HTTP 層に合わせるかは未決（今回は HTTP 層の実装のみ）。
+  - comments の経路と本文の card_id 食い違い: `CommentError` に mismatch バリアントが無いため、
+    HTTP 層のエラー `card_id_mismatch`（422）として返す（approve は既存の `check_path`・
+    `ApproveError::CardIdMismatch` をそのまま）。独自バリアントを contract に足すかは未決。
+  - 認証なし・デモ用。要求者は合成ヘッダー `x-pelway-member-id` / `x-pelway-member-kind: human|ai`
+    （comments のみ必須。欠落・不正は 400）。
+  - poison の扱い: 500 `internal` を返して状態に触れない（作業2の指示どおり）。
+  - そのほかの HTTP 細部（判断として記録）: 不正なリクエストライン/ヘッダー/JSON は 400 `bad_request`、
+    本文 64 KiB 超は 413 `payload_too_large`（1 MiB までは読み捨ててから応答）、知らない経路は 404、
+    経路あり・メソッド違いは 405、応答はすべて JSON（Connection: close）、シャットダウン API は無し
+    （テストはプロセス終了で止まる）。
+- 既知の制限（前枠のものはそのまま）に今回の分を追加:
+  - keep-alive・chunked（Transfer-Encoding）非対応。Content-Length 必須。
+  - シャットダウン API が無い。スレッドは放置（テストプロセスの終了と共に止まる）。
+  - 認証なし。ヘッダーは誰でも偽装できる（デモ用）。
+- 未検証・未決:
+  - 差分の Codex 再レビュー・QA は未実施。
+  - U01〜U07 は未決のまま（Sending からの回復は実装していない）。
