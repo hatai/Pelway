@@ -5,6 +5,7 @@
 //! ため、このファイルの検査は 1 つのテスト関数にまとめて直列に動かす
 //! （並列実行での環境変数の競合を避ける。窓は開かない）。
 
+use pelway_client_ui::i18n::{FluentVars, Messages, apply_translations};
 use pelway_client_ui::theme::{Theme, apply_design_tokens, token_value};
 use pelway_client_ui::{DesignTokens, MainWindow, ThemeState};
 use slint::{Brush, Global};
@@ -65,6 +66,42 @@ fn main_window_can_be_created_and_accepts_all_theme_names() {
     // 文言のプロパティ（tr-*）にも Rust から値を渡せること。
     window.set_tr_rail_today("今日".into());
     assert_eq!(window.get_tr_rail_today().as_str(), "今日");
+
+    // Fluent から引いた文言を tr-* に渡せること（本文は出力しない。
+    // ja と en で同じキーに別の文言が入ること）。
+    let vars = FluentVars::sample();
+    let ja = Messages::new("ja").expect("ja の bundle が作れること");
+    let missing_ja = apply_translations(&window, &ja, &vars);
+    assert!(
+        missing_ja.is_empty(),
+        "ja で渡せないキーがあった: {missing_ja:?}"
+    );
+    let ja_today = ja.message("rail-today", &vars).expect("ja の rail-today");
+    assert_eq!(
+        window.get_tr_rail_today().as_str(),
+        ja_today.as_str(),
+        "渡したあと tr-rail-today が ja の文言になっていること"
+    );
+    let ja_unread = ja
+        .message("unread-divider", &vars)
+        .expect("ja の unread-divider");
+    assert_eq!(
+        window.get_tr_unread_divider().as_str(),
+        ja_unread.as_str(),
+        "渡したあと tr-unread-divider が ja の文言になっていること"
+    );
+    let en = Messages::new("en").expect("en の bundle が作れること");
+    let missing_en = apply_translations(&window, &en, &vars);
+    assert!(
+        missing_en.is_empty(),
+        "en で渡せないキーがあった: {missing_en:?}"
+    );
+    let en_today = en.message("rail-today", &vars).expect("en の rail-today");
+    assert_eq!(
+        window.get_tr_rail_today().as_str(),
+        en_today.as_str(),
+        "en に切り替えると tr-rail-today が en の文言になっていること"
+    );
 
     // 切替のプロパティもそのまま渡せること（窓は開かない）。
     window.set_show_today(false);
