@@ -5,10 +5,15 @@
 #   logs/ log/ 配下のすべて、ワークツリー内の *.log（.git と上記を除く）
 #   DEMO_CHECK_EXTRA_PATHS（コロン区切り。端末の保存領域などワークツリー外のパス）。存在しないパスは exit 2
 # 除外: lib.sh の除外（scripts/demo-check/、tests/fixtures/、testdata/、docs/ など）。ワークツリー外のパスには適用しない。
-# 走査するものが 1 つも無いときは "no artifacts to scan" と表示して exit 0（何も検査していないことを明示する）。
+# シンボリックリンク: 走査の途中で出会ったリンクはたどらない（DC-03）。target/ など走査ルート自体が
+#   リンクのときは realpath で実体を走査する（リンクを通した論理パスで報告する）。
+# ファイル名の区切り: 改行を含むファイル名でも壊れないよう NUL 区切りで扱う（DC-04）。
+# 走査するものが 1 つも無いときは "no artifacts to scan" と表示する。
+#   既定では exit 0（何も検査していないことを明示するだけ）。
+#   DEMO_CHECK_ACCEPTANCE=1 のときは受入不合格として exit 1 にする。
 # 違反は「ファイル:行: 目印」（バイナリは「ファイル:(binary): 目印 (N件)」）で出す。行の中身は出さない。
-# exit 0 合格 / 1 目印あり / 2 検査異常
-set -u
+# exit 0 合格 / 1 目印あり or ACCEPTANCE で走査対象ゼロ / 2 検査異常（リスト欠落・走査失敗を含む）
+set -uo pipefail
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -31,25 +36,44 @@ if [ -n "${DEMO_CHECK_EXTRA_PATHS:-}" ]; then
   done
 fi
 
+# 走査ルートを realpath で実体に解決し、-L なしでたどる。報告はルートの論理パスで行う。
+# find などに失敗したら戻り値を非 0 にする（呼び出し側は exit 2 にする）。
 list_files() {
-  local t
-  for t in "${targets[@]}"; do find -L "${t}" -type f 2>/dev/null; done
+  local t pr rf st=0
+  for t in "${targets[@]}"; do
+    pr="$(realpath -- "${t}")" || return 2
+    find "${pr}" -type f -print0 | while IFS= read -r -d '' rf; do
+      printf "%s\0" "${t}${rf#"${pr}"}"
+    done || st=2
+  done
   (
     cd "${DC_ROOT}" || exit 2
-    find . \( -path ./.git -o -path ./target -o -path ./logs -o -path ./log \) -prune -o -type f -name "*.log" -print
-  ) | while IFS= read -r f; do printf "%s/%s\n" "${DC_ROOT}" "${f#./}"; done
+    find . \( -path ./.git -o -path ./target -o -path ./logs -o -path ./log \) -prune -o -type f -name "*.log" -print0
+  ) | while IFS= read -r -d '' f; do printf "%s\0" "${DC_ROOT}/${f#./}"; done || st=2
+  return "${st}"
 }
 
-mapfile -t files < <(
-  list_files | sort -u | while IFS= read -r f; do
+lf="$(mktemp)" || exit 2
+if ! list_files > "${lf}"; then
+  rm -f "${lf}"
+  echo "canary: artifact scan failed" >&2
+  exit 2
+fi
+mapfile -d '' -t files < <(
+  sort -z -u "${lf}" | while IFS= read -r -d '' f; do
     rel="${f#"${DC_ROOT}"/}"
     if [ "${rel}" != "${f}" ] && dc_is_excluded "${rel}"; then continue; fi
-    printf "%s\n" "${f}"
+    printf "%s\0" "${f}"
   done
 )
+rm -f "${lf}"
 
 if [ "${#files[@]}" -eq 0 ]; then
   echo "canary: no artifacts to scan (target/, logs/, log/, *.log and DEMO_CHECK_EXTRA_PATHS are absent or empty)"
+  if [ "${DEMO_CHECK_ACCEPTANCE:-}" = "1" ]; then
+    echo "canary: ACCEPTANCE MODE: no artifacts to scan is a failure" >&2
+    exit 1
+  fi
   echo "canary: PASS with note: nothing was scanned"
   exit 0
 fi
@@ -59,7 +83,7 @@ trap 'rm -f "${pf}"' EXIT
 printf "%s\n" "${markers}" > "${pf}"
 
 hits=0
-mapfile -t hitfiles < <(printf "%s\0" "${files[@]}" | xargs -0 -r grep -laF -f "${pf}" --)
+mapfile -d '' -t hitfiles < <(printf "%s\0" "${files[@]}" | xargs -0 -r grep -laFZ -f "${pf}" --)
 for f in "${hitfiles[@]}"; do
   [ -n "${f}" ] || continue
   disp="${f#"${DC_ROOT}"/}"

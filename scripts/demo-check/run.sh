@@ -8,11 +8,17 @@
 # 引数は上の段階名の完全一致だけ受け付ける。それ以外（パス・未知の名前）が 1 つでもあれば
 # 何も実行せずに exit 2 で終わる（任意のスクリプトを実行させないため）。
 # 段階を指定した実行は PARTIAL RUN で、受入には使えない。受入は引数なしの全段階実行だけ。
+# DEMO_CHECK_ACCEPTANCE=1 のとき（受入モード）:
+#   - まとめに ACCEPTANCE MODE と表示する
+#   - loopback の runtime PENDING は exit 1（段階失敗）
+#   - canary の "no artifacts to scan"（走査 0 件）は exit 1（段階失敗）
+#   既定（未設定）の挙動は変えない。DEMO_CHECK_REQUIRE_RUNTIME は作らない。
 # 全段階を最後まで実行し、1 段でも失敗すれば全体も非 0 で終わる。
 # 使い方: mise run demo-check                       # 全段階（受入に有効）
+#         DEMO_CHECK_ACCEPTANCE=1 mise run demo-check
 #         bash scripts/demo-check/run.sh loopback   # 段階を指定（PARTIAL RUN）
 #         mise run demo-check-selftest              # 検査自体の自己テスト
-set -u
+set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 all_stages=(loopback leak-phrases external-refs canary)
@@ -45,6 +51,7 @@ else
   stages=("${all_stages[@]}")
 fi
 [ "${partial}" -eq 1 ] && echo "PARTIAL RUN: not valid for acceptance (selected: ${stages[*]})"
+[ "${DEMO_CHECK_ACCEPTANCE:-}" = "1" ] && echo "ACCEPTANCE MODE"
 
 failed=()
 for s in "${stages[@]}"; do
@@ -59,13 +66,21 @@ for s in "${stages[@]}"; do
 done
 
 echo "== demo-check summary: ${#stages[@]} stage(s), ${#failed[@]} failed =="
+if [ "${DEMO_CHECK_ACCEPTANCE:-}" = "1" ]; then
+  echo "ACCEPTANCE MODE"
+fi
 if [ "${partial}" -eq 1 ]; then
   echo "PARTIAL RUN: not valid for acceptance; acceptance requires a full run (mise run demo-check with no arguments)"
 else
   echo "full run: all ${#all_stages[@]} stages"
 fi
 case " ${stages[*]} " in
-  *" loopback "*) echo "note: loopback runtime check is PENDING (not implemented); loopback PASS covers static checks only" ;;
+  *" loopback "*)
+    if [ "${DEMO_CHECK_ACCEPTANCE:-}" = "1" ]; then
+      echo "note: loopback runtime PENDING fails under ACCEPTANCE MODE"
+    else
+      echo "note: loopback runtime check is PENDING (not implemented); loopback PASS covers static checks only"
+    fi ;;
 esac
 if [ "${#failed[@]}" -gt 0 ]; then
   echo "failed: ${failed[*]}" >&2

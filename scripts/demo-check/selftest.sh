@@ -6,9 +6,18 @@
 #   - 秘密に見える値（SYNTHETIC を含む合成値）を出力しない
 #   - run.sh が段階名以外の引数（パス・未知の名前）を拒否し、何も実行しない
 #   - 段階指定の実行が PARTIAL RUN と表示される
+#   - DEMO_CHECK_ACCEPTANCE=1 のとき loopback の runtime PENDING と canary の走査ゼロが
+#     exit 1 になり、ACCEPTANCE MODE と表示される（未設定時の挙動は不変）
+#   - PELWAY_BIND_ADDR を経由しない bind("...") の宛先も許可値（127.0.0.1/[::1]:0-65535）と
+#     完全一致で照合される（DC-01）。ポートは 0〜65535 で 65536〜99999 は違反（DC-06）
+#   - 引用符の直後の「//ホスト名」（JS などの文字列内のプロトコル相対参照）を検出し、
+#     行頭の // コメントや文字列内の path//file は誤検知しない（DC-02）
+#   - 走査中のシンボリックリンクをたどらない。target/ などルート自体がリンクなら実体を走査する（DC-03）
+#   - 改行を含むファイル名でも壊れない（DC-04）
+#   - find などの走査失敗（読めないディレクトリ）で exit 2（DC-05: pipefail）
 # を確かめる。本物のリスト（forbidden-phrases.txt / allowed-hosts.txt / canaries.txt）を使う。
 # リポジトリには書き込まない。
-set -u
+set -uo pipefail
 export LC_ALL=C.UTF-8
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tmp="$(mktemp -d)"
@@ -83,6 +92,26 @@ if printf '%s\n' "${OUT}" | grep -q "runtime: PENDING"; then ok "loopback: runti
 run_stage "${tmp}/case" canary
 if printf '%s\n' "${OUT}" | grep -q "no artifacts to scan"; then ok "canary: 'no artifacts to scan' is reported when nothing exists"; else ng "canary: 'no artifacts to scan' is reported"; show "${OUT}"; fi
 
+# --- DEMO_CHECK_ACCEPTANCE=1（受入モード）。未設定時の挙動は変えない ---
+make_clean "${tmp}/case"
+run_stage "${tmp}/case" loopback DEMO_CHECK_ACCEPTANCE=1
+if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "ACCEPTANCE MODE"; then
+  ok "loopback: runtime PENDING is a failure under ACCEPTANCE (exit 1)"
+else ng "loopback: ACCEPTANCE runtime PENDING (exit ${RC})"; show "${OUT}"; fi
+
+run_stage "${tmp}/case" canary DEMO_CHECK_ACCEPTANCE=1
+if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "ACCEPTANCE MODE"; then
+  ok "canary: no artifacts to scan is a failure under ACCEPTANCE (exit 1)"
+else ng "canary: ACCEPTANCE no artifacts (exit ${RC})"; show "${OUT}"; fi
+
+make_clean "${tmp}/case"
+mkdir -p "${tmp}/case/target/debug"
+printf 'clean artifact\n' > "${tmp}/case/target/debug/app"
+run_stage "${tmp}/case" canary DEMO_CHECK_ACCEPTANCE=1
+if [ "${RC}" -eq 0 ]; then
+  ok "canary: artifacts present and no canary passes under ACCEPTANCE"
+else ng "canary: ACCEPTANCE with artifacts (exit ${RC})"; show "${OUT}"; fi
+
 # --- run.sh: 引数の検査と PARTIAL RUN ---
 make_clean "${tmp}/case"
 OUT="$(DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" 2>&1)"; RC=$?
@@ -109,6 +138,18 @@ if [ "${RC}" -eq 2 ] && [ ! -e "${tmp}/pwned" ] && ! printf '%s\n' "${OUT}" | gr
   ok "run.sh: a valid stage mixed with a path is rejected before running anything"
 else ng "run.sh: valid+path mix (exit ${RC})"; show "${OUT}"; fi
 
+# --- run.sh: 受入モード（全段階・一部段階の両方） ---
+make_clean "${tmp}/case"
+OUT="$(DEMO_CHECK_ROOT="${tmp}/case" DEMO_CHECK_ACCEPTANCE=1 bash "${here}/run.sh" 2>&1)"; RC=$?
+if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "ACCEPTANCE MODE" && printf '%s\n' "${OUT}" | grep -q "failed: loopback canary"; then
+  ok "run.sh: full run under ACCEPTANCE fails (loopback PENDING + canary no artifacts) and prints ACCEPTANCE MODE"
+else ng "run.sh: full run under ACCEPTANCE (exit ${RC})"; show "${OUT}"; fi
+
+OUT="$(DEMO_CHECK_ROOT="${tmp}/case" DEMO_CHECK_ACCEPTANCE=1 bash "${here}/run.sh" loopback 2>&1)"; RC=$?
+if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "PARTIAL RUN" && printf '%s\n' "${OUT}" | grep -q "ACCEPTANCE MODE"; then
+  ok "run.sh: partial run under ACCEPTANCE still fails and prints both marks"
+else ng "run.sh: partial run under ACCEPTANCE (exit ${RC})"; show "${OUT}"; fi
+
 # --- leak-phrases ---
 expect_case leak-phrases 1 "GDPR準拠 in a Rust comment (all scope)" "${R}" '// GDPR準拠\n'
 expect_case leak-phrases 1 "GDPR compliant, mixed case, in HTML" assets/v.html '<p>GDPR Compliant</p>\n'
@@ -125,6 +166,13 @@ expect_case leak-phrases 1 "72時間 in HTML" assets/v.html '<p>72時間以内�
 expect_case leak-phrases 1 "24時間 in a Rust string" "${R}" 'pub const E: &str = "24時間";\n'
 expect_case leak-phrases 1 "24 hours in HTML" assets/v.html '<p>within 24 hours.</p>\n'
 expect_case leak-phrases 1 "72-hours in a locale" locales/en.ftl 'msg = a 72-hours window\n'
+# 数字の境目: Rust の文字列リテラルの先頭・末尾にある 24/72（日本語・英語）も見逃さない
+expect_case leak-phrases 1 "\"72 hours...\" at the start of a Rust literal" "${R}" 'pub const NB1: &str = "72 hours notice";\n'
+expect_case leak-phrases 1 "\"24 hours\" fills a Rust literal exactly" "${R}" 'pub const NB2: &str = "24 hours";\n'
+expect_case leak-phrases 1 "\"...within 72 hours\" at the end of a Rust literal" "${R}" 'pub const NB3: &str = "within 72 hours";\n'
+expect_case leak-phrases 1 "\"24時間以内...\" at the start of a Rust literal" "${R}" 'pub const NB4: &str = "24時間以内にお知らせ";\n'
+expect_case leak-phrases 1 "\"72時間\" fills a Rust literal exactly" "${R}" 'pub const NB5: &str = "72時間";\n'
+expect_case leak-phrases 0 "\"1024 hours\" is not a 24/72 boundary match" "${R}" 'pub const NB6: &str = "1024 hours";\n'
 expect_case leak-phrases 1 "outward doc docs/public is scanned" docs/public/help.md 'これは安全です\n'
 expect_case leak-phrases 1 "PELWAY_LLM_API_KEY referenced (value not printed)" "${R}" 'fn k() { let _ = std::env::var("PELWAY_LLM_API_KEY"); } // SYNTHETICVALUE\n'
 expect_case leak-phrases 1 "private key block (content not printed)" assets/v.txt '-----BEGIN RSA PRIVATE KEY-----\nSYNTHETICabc\n'
@@ -147,6 +195,13 @@ expect_case external-refs 1 "IPv6 non-loopback URL" "${R}" 'pub const V6: &str =
 expect_case external-refs 1 "IPv4 non-loopback literal" "${R}" 'pub const IP: &str = "203.0.113.5";\n'
 expect_case external-refs 1 "URL inside a .wasm artifact" target/wasm32-unknown-unknown/release/x.wasm '\x00asm\x01\x00\x00\x00https://cdn.example.com/a.js\x00'
 expect_case external-refs 0 "http://127.0.0.1 and http://[::1] and ws://127.0.0.1 pass" "${R}" 'pub const A: &str = "http://127.0.0.1:9/";\npub const B: &str = "http://[::1]:9/";\npub const C: &str = "ws://127.0.0.1:9/ws";\n'
+# DC-02: 引用符の直後の「//ホスト名」（JS などの文字列内のプロトコル相対参照）
+expect_case external-refs 1 "quoted //host in a JS string (assignment)" web/app.js 'const ep = "//api.example.com/v1";\n'
+expect_case external-refs 1 "quoted //host inside fetch()" web/app2.js 'fetch("//static.example.io/x")\n'
+expect_case external-refs 1 "quoted //host in a Rust string literal" "${R}" 'pub const PR: &str = "//cdn.example.com/a.js";\n'
+expect_case external-refs 1 "backtick template //host in JS" web/app3.js 'const t = `//cdn.example.dev/a`;\n'
+expect_case external-refs 0 "a // comment naming a host is not a reference" web/guard.js '// api.example.com には依存しない（コメント行）\nlet q = a / b / c;\n'
+expect_case external-refs 0 "path//inside/a string is not a reference" web/guard2.js 'const p = "path//to/file";\n'
 
 # --- loopback ---
 expect_case loopback 0 "PELWAY_BIND_ADDR = [::1]:8080 is allowed" mise.toml '[env]\nPELWAY_BIND_ADDR = "[::1]:8080"\n' replace
@@ -161,6 +216,18 @@ expect_case loopback 1 "PELWAY_BIND_ADDR=localhost in .env" .env 'PELWAY_BIND_AD
 expect_case loopback 1 "bind 0.0.0.0 in Rust" "${R}" 'fn b() { let _ = std::net::TcpListener::bind("0.0.0.0:80"); }\n'
 expect_case loopback 1 "Ipv6Addr::UNSPECIFIED in Rust" "${R}" 'use std::net::Ipv6Addr; const A: Ipv6Addr = Ipv6Addr::UNSPECIFIED;\n'
 expect_case loopback 1 "[::]:port in a config asset" assets/v.json '{"listen": "[::]:8080"}\n'
+# DC-01: PELWAY_BIND_ADDR を経由しない bind("...") の宛先も許可値と完全一致で照合
+expect_case loopback 1 "TcpListener::bind(\"localhost:8080\") is a violation" "${R}" 'fn b1() { let _ = std::net::TcpListener::bind("localhost:8080"); }\n'
+expect_case loopback 1 "bind to a non-loopback IPv4 is a violation" "${R}" 'fn b2() { let _ = std::net::TcpListener::bind("192.168.10.4:9000"); }\n'
+expect_case loopback 0 "bind(\"127.0.0.1:8080\") passes" "${R}" 'fn b3() { let _ = std::net::TcpListener::bind("127.0.0.1:8080"); }\n'
+expect_case loopback 0 "bind(\"[::1]:0\") passes" "${R}" 'fn b4() { let _ = std::net::TcpListener::bind("[::1]:0"); }\n'
+# DC-06: ポートは 0〜65535（0 は自動割り当て）。65536〜99999 は違反
+expect_case loopback 1 "PELWAY_BIND_ADDR port 65536 is a violation" mise.toml '[env]\nPELWAY_BIND_ADDR = "127.0.0.1:65536"\n' replace
+expect_case loopback 1 "PELWAY_BIND_ADDR port 99999 is a violation" mise.toml '[env]\nPELWAY_BIND_ADDR = "127.0.0.1:99999"\n' replace
+expect_case loopback 1 "PELWAY_BIND_ADDR [::1]:65536 is a violation" mise.toml '[env]\nPELWAY_BIND_ADDR = "[::1]:65536"\n' replace
+expect_case loopback 0 "PELWAY_BIND_ADDR port 65535 passes" mise.toml '[env]\nPELWAY_BIND_ADDR = "127.0.0.1:65535"\n' replace
+expect_case loopback 0 "PELWAY_BIND_ADDR port 0 (auto-assign) still passes" mise.toml '[env]\nPELWAY_BIND_ADDR = "127.0.0.1:0"\n' replace
+expect_case loopback 1 "bind port 65536 in Rust is a violation" "${R}" 'fn b5() { let _ = std::net::TcpListener::bind("127.0.0.1:65536"); }\n'
 
 # --- canary ---
 expect_case canary 1 "body canary in a built binary under target/" target/debug/app '\x7fELF\x00\x00PELWAY_CANARY_BODY_7f3a\x00'
@@ -173,6 +240,60 @@ run_stage "${r}" canary DEMO_CHECK_EXTRA_PATHS="${tmp}/nothing-here:${tmp}/devic
 if [ "${RC}" -eq 2 ]; then ok "canary: missing DEMO_CHECK_EXTRA_PATHS entry is exit 2"; else ng "canary: missing extra path (exit ${RC})"; show "${OUT}"; fi
 run_stage "${r}" canary DEMO_CHECK_EXTRA_PATHS="${tmp}/device"
 if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -qF "${tmp}/device/store/db.bin:(binary)"; then ok "canary: hit in DEMO_CHECK_EXTRA_PATHS (device storage) fails"; else ng "canary: extra path hit (exit ${RC})"; show "${OUT}"; fi
+
+# --- DC-03: 走査中のシンボリックリンクをたどらない（リンク先を走査ルートの外に置く） ---
+r="${tmp}/case"; make_clean "${r}"
+printf '// GDPR準拠\n' > "${tmp}/outside-src.rs"
+ln -s "${tmp}/outside-src.rs" "${r}/crates/x/src/link.rs"
+run_stage "${r}" leak-phrases
+if [ "${RC}" -eq 0 ]; then ok "leak-phrases: a symlinked source file is not followed"; else ng "leak-phrases: symlink not followed (exit ${RC})"; show "${OUT}"; fi
+
+printf 'x https://evil.example.com/y\n' > "${tmp}/outside-ref.txt"
+ln -s "${tmp}/outside-ref.txt" "${r}/assets/link.svg"
+run_stage "${r}" external-refs
+if [ "${RC}" -eq 0 ]; then ok "external-refs: a symlinked asset is not followed"; else ng "external-refs: symlink not followed (exit ${RC})"; show "${OUT}"; fi
+
+mkdir -p "${r}/logs"
+printf 'PELWAY_CANARY_BODY_7f3a\n' > "${tmp}/outside-canary.log"
+ln -s "${tmp}/outside-canary.log" "${r}/logs/link.log"
+run_stage "${r}" canary
+if [ "${RC}" -eq 0 ]; then ok "canary: a symlinked log is not followed"; else ng "canary: symlink not followed (exit ${RC})"; show "${OUT}"; fi
+rm -f "${r}/crates/x/src/link.rs" "${r}/assets/link.svg" "${r}/logs/link.log"
+
+# ルート自体がシンボリックリンク（target/ → 実体ディレクトリ）なら実体を走査する
+r="${tmp}/case"; make_clean "${r}"
+mkdir -p "${tmp}/realtarget/debug"
+printf 'PELWAY_CANARY_APIKEY_9c21\n' > "${tmp}/realtarget/debug/app"
+ln -s "${tmp}/realtarget" "${r}/target"
+run_stage "${r}" canary
+if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -qF "target/debug/app:"; then
+  ok "canary: target/ itself being a symlink is still scanned (root is resolved)"
+else ng "canary: symlinked target root (exit ${RC})"; show "${OUT}"; fi
+
+# --- DC-04: 改行を含むファイル名でも壊れない ---
+r="${tmp}/case"; make_clean "${r}"
+wname=$'we\nird.rs'
+printf 'pub const NL: &str = "GDPR準拠";\n' > "${r}/crates/x/src/${wname}"
+run_stage "${r}" leak-phrases
+if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -qF "ird.rs:1"; then
+  ok "leak-phrases: a filename containing a newline is scanned and reported"
+else ng "leak-phrases: newline filename (exit ${RC})"; show "${OUT}"; fi
+
+# --- DC-05: find などの走査に失敗したら exit 2（pipefail） ---
+if [ "$(id -u)" -ne 0 ]; then
+  r="${tmp}/case"; make_clean "${r}"
+  mkdir -p "${r}/crates/x/src/locked"
+  chmod 000 "${r}/crates/x/src/locked"
+  run_stage "${r}" leak-phrases
+  rc_leak="${RC}"
+  run_stage "${r}" loopback
+  rc_loop="${RC}"
+  chmod 755 "${r}/crates/x/src/locked"
+  if [ "${rc_leak}" -eq 2 ]; then ok "leak-phrases: an unreadable directory makes the scan exit 2"; else ng "leak-phrases: scan failure exit (${rc_leak}, want 2)"; show "${OUT}"; fi
+  if [ "${rc_loop}" -eq 2 ]; then ok "loopback: an unreadable directory makes the config scan exit 2"; else ng "loopback: scan failure exit (${rc_loop}, want 2)"; fi
+else
+  ok "scan-failure checks skipped (running as root: unreadable directories stay readable)"
+fi
 
 echo "selftest: ${pass} passed, ${fail} failed"
 [ "${fail}" -eq 0 ]

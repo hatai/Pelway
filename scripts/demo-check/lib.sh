@@ -14,10 +14,13 @@
 #                         … 製品に同梱されない（mise.toml の PELWAY_BIND_ADDR だけは loopback 段階が個別に見る）
 #   */tests/fixtures/* */testdata/* … 違反を意図的に含むテスト用データ
 #   .git/
+# シンボリックリンク: find に -L を付けず、走査の途中で出会ったリンクはたどらない
+#   （リンク先が走査ルートの外でも読まない。ルート自体がリンクのときは各段階が realpath で実体を走査する）
+# ファイル名の区切り: 改行を含むファイル名でも壊れないよう、ファイル一覧は NUL 区切りで渡す
 # 出力: 違反は「ファイル:行: 規則」の形で出す。行の中身は出さない（秘密値を表示しないため）。
 #       *.wasm はバイナリのため「ファイル:(binary): 規則 (N件)」とする。
-# 終了コード: 0 = 合格、1 = 違反あり、2 = 検査自体の異常（リスト欠落など）
-set -u
+# 終了コード: 0 = 合格、1 = 違反あり、2 = 検査自体の異常（リスト欠落・走査失敗など）
+set -uo pipefail
 export LC_ALL=C.UTF-8
 
 DC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,20 +40,39 @@ dc_is_excluded() {
   return 1
 }
 
-# 走査対象のファイル（ルートからの相対パス、1行1件）。テキストもバイナリも含む。
+# 走査対象のファイル（ルートからの相対パス、NUL 区切りで 1 件 1 エントリ）。テキストもバイナリも含む。
+# find などの走査に失敗したら戻り値を非 0 にする（呼び出し側は exit 2 にする）。
 dc_all_files() {
+  local d st=0
   (
     cd "${DC_ROOT}" || exit 2
-    local d
     for d in "${DC_SOURCE_DIRS[@]}" target/demo; do
-      [ -d "${d}" ] && find -L "${d}" -type f
+      if [ -d "${d}" ]; then
+        find "${d}" -type f -print0 || st=2
+      fi
     done
     for d in target/wasm32-unknown-unknown/debug target/wasm32-unknown-unknown/release; do
-      [ -d "${d}" ] && find -L "${d}" -maxdepth 1 -type f \( -name "*.wasm" -o -name "*.js" -o -name "*.html" -o -name "*.css" \)
+      if [ -d "${d}" ]; then
+        find "${d}" -maxdepth 1 -type f \( -name "*.wasm" -o -name "*.js" -o -name "*.html" -o -name "*.css" \) -print0 || st=2
+      fi
     done
-  ) | while IFS= read -r f; do
-    dc_is_excluded "${f}" || printf "%s\n" "${f}"
-  done | sort -u
+    exit "${st}"
+  ) | while IFS= read -r -d '' f; do
+    dc_is_excluded "${f}" || printf "%s\0" "${f}"
+  done | sort -z -u
+}
+
+# dc_all_files の結果を配列に読み込む。走査に失敗したら exit 2 する（DC-05）。
+dc_load_files() { # dc_load_files <配列名>
+  local __dst="$1" __tmp
+  __tmp="$(mktemp)" || exit 2
+  if ! dc_all_files > "${__tmp}"; then
+    rm -f "${__tmp}"
+    echo "demo-check: file scan failed under ${DC_ROOT}" >&2
+    exit 2
+  fi
+  mapfile -d '' -t "${__dst}" < "${__tmp}"
+  rm -f "${__tmp}"
 }
 
 # UI 文言を含みうるファイル（行全体を見る）: 資産・UI 系ディレクトリと UI 系拡張子
