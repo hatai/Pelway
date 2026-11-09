@@ -345,3 +345,71 @@
     文字列がより手前に出る場合のみ再検査になり得るが、進まないことはなく最終的に全部消化する
     （テスト B/C で単一報告を確認）
   - Codex レビュー本文・指摘ファイルの内容は指示文の引用のみで確認（未受領のため sha256 の検証は未実施）
+
+### 2026-11-09 第8枠（修正依頼5: selftest の0件ケースを通常モードに固定。Codex r3 should-fix。slot8）
+- start: 2026-11-09 22:05 JST（目安）
+- stop:  2026-11-09 22:22 JST（目安。記録時点）
+- glm: long（T3 Code / OpenCode・zai-coding-plan/glm-5.3。thread ID は記録時点で取得できず未記入）
+- worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-platform-slot8` / branch: `demo-t3/platform-slot8`
+  （slot6 の流れ（60f6b28→…→666738d）から作られた slot 8 用 worktree。開始 HEAD 666738d・クリーンを確認）
+- 手順: tdd の手順（テストを先に直す → RED → 修正 → GREEN → わざと壊して検出確認 → 復元）。
+  skill の明示ロードはなし（第7枠までと同じ Matt Pocock 版 tdd 相当の手順）。
+- 内容（コミット（修正）・この作業ログのコミット（記録）の2つに分ける）:
+  - 根拠: 開発リード指示文（Codex 3回目レビュー（a5cc3f6..666738d）の should-fix を開発リードが
+    21:59 に採用。must-fix 0・should-fix 1）。レビュー本文は本 worktree 内に存在せず、
+    指示文の引用のみで対処。
+  - 問題: selftest.sh の run_stage が外の DEMO_CHECK_ACCEPTANCE を環境ごと引き継ぐため、
+    外で DEMO_CHECK_ACCEPTANCE=1 を付けて selftest を実行すると、canary 成果物0件のケース
+    （通常モードのつもり）が受入モードで動き、「通常モードでも0件は exit 1」を確かめたことに
+    ならない。canary.sh 自体は slot6 以降モードで挙動が同じなので現実には exit 1 のまま通るが、
+    将来 canary.sh が通常モードで0件を合格に変えた場合に selftest が検出できない。
+  - 修正（selftest.sh のみ。canary.sh・run.sh は無変更）:
+    - run_stage の env に -u DEMO_CHECK_ACCEPTANCE を追加。run_stage 経由のケースは
+      すべて通常モードに固定。受入モードで回す2ケース（loopback・canary）は従来どおり引数で
+      DEMO_CHECK_ACCEPTANCE=1 を渡し、env の引数は左から右に効くため -u の後の渡しが勝つ
+      （env -u X X=1 で X=1 になることを実機確認済み）。
+    - run.sh を直接呼び出す通常モード3件（clean tree の full run / 成果物あり full run /
+      単一段階 PARTIAL RUN）にも env -u DEMO_CHECK_ACCEPTANCE を追加。受入モードの run.sh
+      2件（明示的に DEMO_CHECK_ACCEPTANCE=1 を付ける）は変更なし。引数検査のループ
+      （exit 2 が先で ACCEPTANCE に依存しない）も変更なし。
+    - ヘッダコメントに「外の DEMO_CHECK_ACCEPTANCE を引き継がない」旨を追記。
+  - 迷った点と判断: 指示文の「0件ケース（通常モード）の呼び出し」だけでなく、修正前に
+    DEMO_CHECK_ACCEPTANCE=1 外付けで selftest を走らせたところ loopback の通常モード
+    8件（run_stage 経由。受入では runtime PENDING が失敗になるため）と run.sh 直接呼び出し
+    3件の計11件も落ちることを確認。完了条件（両モードで selftest が exit 0）を満たすには
+    同じ欠陥の一括修正が必要なため、run_stage の定義ごと（＝run_stage 経由全ケース）と
+    run.sh 直接呼び出しの通常モード3件を直す方針にした。個別呼び出しごとの env -u より
+    呼び出し側の変更が少なく、受入モードのケース（引数渡し）は一字も変えていない。
+  - わざと壊しての検出確認（TDD の RED 相当。指示文の手順どおり）:
+    - canary.sh の0件分岐に「通常モード（DEMO_CHECK_ACCEPTANCE 未設定）では exit 0」を
+      一時的に挿入し、`DEMO_CHECK_ACCEPTANCE=1 bash scripts/demo-check/selftest.sh` を実行 →
+      exit 1（118 passed, 2 failed）。落ちたケース:
+      「canary: no artifacts to scan must fail with scanned 0 (exit 0)」（指摘の0件ケース。
+      run_stage が通常モード固定で回ったため、壊しを検出）と
+      「run.sh: full run on a clean tree (exit 0)」（0件が合格になることで full run が
+      exit 0 になったことも検出）。
+    - 確認後、canary.sh を必ず元に戻し、`git diff --stat scripts/demo-check/canary.sh` と
+      `git status --short scripts/demo-check/canary.sh` が両方空（差分なし）であることを確認。
+      修正前の selftest（run_stage が環境を引き継ぐ版）では、この壊しは外付け
+      DEMO_CHECK_ACCEPTANCE=1 のもとで0件ケースが受入モードで動くため検出できない
+      （修正前 RED 実行で同ケースが "ok" だったことで確認）。
+- 検証（コマンドと exit code）:
+  - DEMO_CHECK_ACCEPTANCE=1 bash scripts/demo-check/selftest.sh（修正前 RED）→ 1
+    （109 passed, 11 failed: loopback 通常モード8件＋run.sh 直接呼び出し3件。
+    0件ケースはこの時点では ok＝受入モードで動いただけ、が指摘の本体）
+  - bash scripts/demo-check/selftest.sh（修正後）→ 0（120 passed, 0 failed）
+  - DEMO_CHECK_ACCEPTANCE=1 bash scripts/demo-check/selftest.sh（修正後）→ 0（120 passed, 0 failed）
+  - わざと壊し（canary.sh 一時変更＋DEMO_CHECK_ACCEPTANCE=1 外付け）→ 1
+    （118 passed, 2 failed。上記2ケース。確認後に canary.sh を復元し差分なしを確認）
+  - bash scripts/demo-check/run.sh → 1（full run。loopback static PASS・runtime PENDING は
+    通常モードのため失敗にならず、leak-phrases PASS・external-refs PASS、canary は対象 0 件で
+    FAIL。failed: canary。exit 1 は仕様どおり）
+    ※指示文には「canary 0件と loopback PENDING のため」とあったが、通常モードでは loopback の
+    PENDING は失敗にならないため、実際の失敗は canary 0件のみ。実測をそのまま記録。
+  - bash -n scripts/demo-check/*.sh → 0
+  - shellcheck は未導入のため未実行
+- 未検証・未決:
+  - loopback の runtime 検査は未実装（PENDING のまま）
+  - 前枠から繰り越しの未検証3点（canary の実データ走査・loopback の本番待受確認・
+    loopback.sh の did not advance で exit 2 になる道）は本枠では手を付けていない
+  - Codex r3 レビュー本文は未受領（指示文の引用のみ。must-fix 0・should-fix 1 の確認も指示文による）
