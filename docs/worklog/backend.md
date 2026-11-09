@@ -898,3 +898,110 @@
   - salt のエントロピー（PID+時刻+ASLR）の定量的評価は未検証。実運用では CSPRNG。
   - Codex レビュー・QA（QA-GDPR-07/12・QA-MSG-02・QA-ENC-04/K5 の正式な受入）・
     開発基盤の canary 走査は未実施。
+
+### 2026-11-10 第15枠（QA-GDPR-07 追補・salt を /dev/urandom から・GLM 枠）
+- start: 2026-11-10 00:12 JST頃（追補依頼「be-salt-u1」の受領後）
+- stop:  2026-11-10 00:23 JST（`date` で確認。コミットはこの後）
+- glm: long（T3 Code 上で GLM が実装。依頼の決まり文句どおり）
+- worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-backend-gdpr-07-salt`、branch
+  `demo-t3/backend-gdpr-07-salt`（base `549ab8b` = 第14枠の worklog コミット）
+- 開始時の確認: HEAD `549ab8b`（指定と一致）、`git status --porcelain` 空。
+- AGENTS.md の「Prior art first」（GitHub 検索）: 外部ネットワーク接続禁止のため未実施
+  （第13・14枠と同じ）。
+- skills: Matt Pocock Agent Skills の `tdd` のみ（他は足さず）。red → green。
+- 内容（`crates/pelway-http` のみ。Cargo.toml・Cargo.lock 不变、新クレートなし、
+  標準ライブラリだけ。実装が実行時に読むファイルは `/dev/urandom` だけ
+  ＝依頼の例外1つ。エージェント自身が `/dev/urandom` を読んでいない）:
+  - 変えたファイル:
+    - `src/log.rs`: `process_salt(now)`（PID+起動時刻+ヒープアドレス）を削除。
+      新しく `SALT_BYTES`(=32)・`SALT_SOURCE`(="/dev/urandom") の定数、
+      `pub(crate) fn read_salt_from(path) -> io::Result<[u8; 32]>`
+      （`std::fs::File::open` + `read_exact`。短い読み取りも失敗）、
+      `pub fn process_salt() -> io::Result<[u8; 32]>`（`read_salt_from(SALT_SOURCE)`）
+      を追加。フォールバック（代替値に落とす経路）なし。PID・時刻・アドレスを
+      使うコードは残していない（`rg 'process::id|to_ne_bytes|as_nanos|Box::new|:p}'`
+      で確認、マッチ 0）。doc コメント（「`/dev/urandom` も使わず」の箇所）を
+      新しい動きに書き換え。`SystemTime` は `ts_ms` 用なので残る（salt には不使用）。
+    - `src/lib.rs`: `serve_with_logger_salt_from(addr, ledger, sink, salt_path)` を
+      追加。salt の読み取りを **bind より前**に行い、失敗したら `ServeError::Io`
+      で `Err` を返して待ち受けを始めない。既存 `serve`・
+      `serve_with_connection_deadline`・`serve_with_logger`（固定 salt の
+      `Arc<Logger>` を渡す形）は引数・挙動とも不变。
+    - `examples/demo-log-emit.rs`: `serve_with_logger_salt_from` +
+      `Path::new(SALT_SOURCE)` に切り替え（salt の読み取り失敗で起動が失敗する
+      経路を使う）。doc ヘッダーに salt の方針を追記。
+    - `tests/no_body_logs.rs`: (s2) を (g) として追加（下記）。
+  - テストの入れ替え: 単体 `process_salt_varies_with_time_and_is_never_empty`
+    （旧実装専用）を削除し、(s1) `read_salt_from_missing_path_is_err`・
+    (s3) `urandom_salts_are_32_bytes_and_distinct`・
+    (s4) `same_salt_same_pseudonym_and_different_salt_differs` を追加。
+    結合 (s2) `serve_with_failing_salt_source_returns_err_without_listening` を
+    `no_body_logs.rs` に追加（存在しない salt パス → `Err(ServeError::Io)` で
+    `ErrorKind::NotFound`、ログ 0 行）。既存6件 (a)〜(f) は無変更。
+- red-first の証拠（tdd）: まず「常に Ok を返す足場」
+  （`read_salt_from` は常に `Ok([0u8; 32])`、`serve_with_logger_salt_from` は
+  読み取り失敗を `unwrap_or` で握って常に Ok）を置き、テストを実行:
+  - `cargo test --offline -p pelway-http --lib` → **exit 101、4 passed / 3 failed**。
+    失敗の要点（すべてコンパイルエラーではなく挙動の失敗）:
+    - (s1)「存在しないパスは Err: ()」— 足場が `Ok` を返したため
+    - (s3) `assert_ne!` failed: 左右とも全ゼロの 32 バイト（salt が変わらない）
+    - (s4) `assert_ne!` failed: 左右の仮名が同一（salt が同一のため）
+  - `cargo test --offline -p pelway-http --test no_body_logs` → **exit 101、
+    6 passed / 1 failed**。(s2)「salt の読み取りに失敗したら起動は Err」—
+    足場がフォールバックで `Ok`（リスナー起動）を返したため。
+- green の証拠: 足場を本実装（`File::open` + `read_exact`、`map_err(ServeError::Io)`、
+  フォールバック削除）に置き換えて:
+  - `cargo test --offline -p pelway-http` → exit 0（単体 7・結合 http 26・
+    no_body_logs 7、すべて passed）。
+- 検証（コマンドと exit code、オフライン）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy --workspace --all-targets --offline -- -D warnings` 0
+  - `cargo test --offline --workspace` 0（**計 109 passed / 0 failed / 0 ignored**:
+    at-rest 単体 8・aead 12・contract 単体 38・serde_contract 10・dev-smoke 単体 0
+    ＋smoke 1・http 単体 7（旧 5 から入れ替えで +2）・http 結合 26・
+    no_body_logs 7（既存6件はそのまま通過 + 新 (s2)）。doc-tests は各 0）
+  - no_body_logs の既存6件が引き続き通ること: 上記のとおり 6+1 で全通過。
+- ログの取り直し（前回=第14枠と同じ手順）:
+  - `mkdir -p target/demo-logs` → `cargo run --offline -p pelway-http --example
+    demo-log-emit 2> target/demo-logs/stderr.txt` → exit 0、stdout
+    「demo-log-emit: statuses = [200, 200, 409, 400, 500]」。
+  - `target/demo-logs/backend.jsonl`: **16 行**（前回と同じ構成: request_received 5・
+    responded 5・comment_saved 1・approved 1・simulated_send 1・rejected 2・
+    internal_error 1。仮名 `pid:` は 8 行）、
+    sha256 `741e5aabcf83455e8096b8b930e3763d992b793755cfb0a9fbeec94095f3b70f`。
+  - `target/demo-logs/stderr.txt`: **16 行**（前回 15 行から +1。cargo のビルド
+    メッセージの構成差。poison 用 panic の固定語句のみで canary なし）、
+    sha256 `e8167b26b18b3fa0468c5f7ba792c3b471f8afff43a64b840ccb6f6aab21ac15`。
+  - canary 走査 `rg -c 'PELWAY-CANARY-BODY-7Q2M9X|PELWAY-CANARY-SECRET-4K8T1Z|
+    3f6c2a9e-8b1d-4c7a-9e2f-5a1b7c3d9e04' target/demo-logs/` → 出力なし・exit 1
+    （3種とも 0 件）。生 ID（`card-gdpr07|m-human-gdpr07|sim-00000001`）も 0 件。
+- 迷った点（質問で止まらず安全側で進めた）:
+  - (s2) の「待ち受けを始めない」の観察方法: リスナー非起動は外部から直接観測
+    できないため、(i) 実装で salt の読み取りを bind より前に置く、(ii) `Err` の
+    中身が `ErrorKind::NotFound`（ファイル由来。bind 失敗では出ない種別）である
+    こと、で担保した（Ok を返す場合のみリスナーが立つ）。
+  - (s4) を固定 salt ではなく `process_salt()` の実 salt 2 個で書いた: 固定 salt だと
+    現行実装でも最初から green になり「意味のある red」が取れないため。足場では
+    salt が同一になって仮名も同一になり、落ちる（s3 の性質と結合する形）。
+  - `serve_with_logger`（呼び出し側が固定 salt の `Logger` を渡す形）は残した:
+    テストは salt 既知のまま仮名の決定性を検査する必要があり、公開 API の形を
+    なるべく変えないため。本番経路（example）は新しい
+    `serve_with_logger_salt_from` に切り替えた。
+  - `process_salt` のシグネチャ変更（引数 `SystemTime` 削除・戻り値を
+    `io::Result<[u8; 32]>`）: 失敗を呼び出し側へ伝えるには `Result` が必須のため。
+    関数名は残した（利用者は example のみで、上記のとおり切り替え）。
+  - salt パスを `serve_with_logger_salt_from` の**公開**引数にした: 結合テストから
+    失敗を注入するため（`read_salt_from` は `pub(crate)` の内部関数）。本番の
+    既定パスは `log::SALT_SOURCE` 定数で、example が使うのもこちら。
+- コミット: 実装とテスト・example（下記コミット SHA 参照）と、この worklog 追記。
+  `target/` の下のログはコミットしない（`/target` は gitignore 済み）。push はしない。
+- 逸脱: なし（worktree の中だけ。push・fetch なし、外部接続なし、破壊的gitなし、
+  `~/.cargo` 不変、cargo はすべて `--offline`、webfetch/websearch/MCP 不使用。
+  `/dev/urandom` は実装・テスト・example の実行時にコードが読んだだけで、
+  エージェント自身は cat していない）。
+- 未検証・未決:
+  - 第14枠の salt 記載（PID+時刻+アドレス）はこの追補で置き換えられた
+    （第14枠の記述は当時の記録として残す）。
+  - getrandom(2) の直接使用（`/dev/urandom` より推奨される場合がある）は新依存に
+    なるため不使用。Linux 以外の OS の CSPRNG パスは想定外。
+  - salt の再読み込み・ローテーション、プロセス間での salt 共有は対象外。
