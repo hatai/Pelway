@@ -52,6 +52,12 @@ use serde::Serialize;
 
 pub mod log;
 
+// GDPR-07「本文を残さないログ」の検証（QA 用）。もともと tests/no_body_logs.rs の
+// 結合テストだったが、r3 で `Logger::with_sink` をクレート外に公開しない形にした
+// ことに伴い src 内に移した（検証内容は無変更。詳細はモジュールの doc と作業ログ）。
+#[cfg(test)]
+mod no_body_logs;
+
 /// 要求本文の上限（バイト）。超えたら 413。
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 /// 1 回の読み取りのタイムアウトの上限。実際のタイムアウトは「この 3 秒」と
@@ -801,5 +807,101 @@ mod tests {
             other => panic!("salt 由来の Io エラーではない: {other:?}"),
         }
         assert!(sink.lines().is_empty());
+    }
+
+    /// 生の HTTP/1.1 POST を 1 回送り、(状態コード, 本文) を返す。接続先はループバックだけ。
+    fn http_post(
+        addr: std::net::SocketAddr,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> (u16, String) {
+        use std::io::{Read, Write};
+        use std::net::{Shutdown, TcpStream};
+
+        let mut stream = TcpStream::connect(addr).expect("connect 127.0.0.1");
+        let mut req = format!("POST {path} HTTP/1.1\r\nHost: demo.local\r\nConnection: close\r\n");
+        for (k, v) in headers {
+            req.push_str(&format!("{k}: {v}\r\n"));
+        }
+        req.push_str(&format!("Content-Length: {}\r\n\r\n", body.len()));
+        stream.write_all(req.as_bytes()).expect("write head");
+        stream.write_all(body).expect("write body");
+        let _ = stream.shutdown(Shutdown::Write);
+        let mut buf = String::new();
+        stream.read_to_string(&mut buf).expect("read response");
+        let status = buf
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .expect("status line");
+        let resp_body = buf.split("\r\n\r\n").nth(1).unwrap_or("").to_owned();
+        (status, resp_body)
+    }
+
+    // (s5) 本番の入口の実体（serve_with_logger_urandom から呼ばれる
+    // serve_with_logger_salt_from）が、salt ファイルから読んだ salt を本当に
+    // 仮名化に使っていること。決まった中身の 32 バイトの salt ファイル（テスト用の
+    // 一時ファイル、target/demo-logs/ の下＝worktree の中）を読ませて入口から
+    // ログを出し、ログの仮名が同じ salt で別に計算した仮名と一致することを確かめる。
+    // （入口が読んだ salt を捨てて 0 埋めの salt を Logger に渡す改変では落ちる。）
+    #[test]
+    fn entry_uses_salt_read_from_file_for_log_pseudonyms() {
+        use pelway_contract::pseudonym::pseudonymize;
+
+        // 決まった中身の salt（32 バイト）。
+        const KNOWN_SALT: &[u8; crate::log::SALT_BYTES] = b"known-salt-for-entry-test-012345";
+        let salt_path = std::path::Path::new(crate::log::LOG_DIR).join("known-salt-entry-test");
+        std::fs::create_dir_all(crate::log::LOG_DIR).expect("create target/demo-logs");
+        std::fs::write(&salt_path, KNOWN_SALT).expect("write known salt file");
+
+        let ledger: SharedLedger = Arc::new(Mutex::new(ApprovalLedger::new()));
+        let sink = Arc::new(MemorySink::new());
+        let server = serve_with_logger_salt_from(
+            "127.0.0.1:0".parse().unwrap(),
+            Arc::clone(&ledger),
+            Arc::clone(&sink) as Arc<dyn LogSink>,
+            &salt_path,
+        )
+        .expect("serve with known salt file");
+        let addr = server.local_addr();
+
+        // 入口からログを出す。本文を不正な JSON にして 400 になる要求でも、
+        // request_received の card 仮名は出る（route が要求受け付け時点で出す）。
+        let (status, _) = http_post(
+            addr,
+            "/v1/cards/card-s5-entry/comments",
+            &[
+                ("x-pelway-member-id", "m-human-s5"),
+                ("x-pelway-member-kind", "human"),
+            ],
+            b"not-json",
+        );
+        assert_eq!(status, 400);
+
+        let lines = sink.lines();
+        let joined = lines.join("\n");
+        assert!(!joined.is_empty(), "入口からログが出ていない");
+        assert!(
+            !joined.contains("card-s5-entry"),
+            "生の card_id がログにある: {joined}"
+        );
+        // 同じ salt で別に計算した仮名と、ログの request_received の仮名が一致する。
+        let expected = pseudonymize(KNOWN_SALT, "card-s5-entry");
+        let mut request_card = None;
+        for line in &lines {
+            let v: serde_json::Value = serde_json::from_str(line).expect("each log line is JSON");
+            if v["kind"] == "request_received" {
+                request_card = v["card"].as_str().map(str::to_owned);
+            }
+        }
+        let request_card = request_card.expect("request_received がある");
+        assert_eq!(
+            request_card, expected,
+            "入口のログの仮名が同じ salt で別に計算した仮名と一致しない"
+        );
+
+        // 後片付け（target/ の下で git には見えない）。
+        let _ = std::fs::remove_file(&salt_path);
     }
 }

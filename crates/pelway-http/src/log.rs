@@ -10,8 +10,9 @@
 //!   ファイル出力 [`FileSink`]（置き場所は `target/demo-logs/` の下だけ）。
 //! - ID の仮名化は [`pelway_contract::pseudonym::pseudonymize`]。salt は
 //!   [`Logger`] が持ち、ログにも [`Debug`] にも出さない。salt 自体は
-//!   [`process_salt`] が `/dev/urandom` から 32 バイト読んで作る（読み取りに
-//!   失敗したら起動側は失敗する。フォールバックなし）。
+//!   `read_salt_from` が [`SALT_SOURCE`]（`/dev/urandom`）から [`SALT_BYTES`]
+//!   バイト読んで作る（本番のログ付き起動は [`crate::serve_with_logger_urandom`]
+//!   が同じ読み取りを使う。読み取りに失敗したら起動側は失敗する。フォールバックなし）。
 //! - 外部 exporter は無い（S17 と `10-domestic-only` の log/audit/crash 行:
 //!   exporter なし・秘密除去）。保持期限（R09/R10/R11）はこのデモでは未実装。
 
@@ -285,11 +286,13 @@ impl Logger {
         }
     }
 
-    /// 出力先と salt を指定して作る。salt はログに出ない。本番の salt は
-    /// [`process_salt`]（`/dev/urandom` から 32 バイト）。テストは固定 salt で
-    /// 仮名の決定性を確認する。
+    /// 出力先と salt を指定して作る。**テスト・検証用**（既知 salt で仮名の決定性を
+    /// 確かめるテストと、`serve_with_logger_salt_from` が salt ファイルから読んだ
+    /// salt で Logger を作る経路だけが使う）。クレートの外からは呼べない
+    /// （`pub(crate)`）。salt はログにも [`Debug`] にも出ない。本番の salt は
+    /// `read_salt_from`（[`SALT_SOURCE`] から [`SALT_BYTES`] バイト）で作る。
     #[must_use]
-    pub fn with_sink(sink: Arc<dyn LogSink>, salt: Vec<u8>) -> Self {
+    pub(crate) fn with_sink(sink: Arc<dyn LogSink>, salt: Vec<u8>) -> Self {
         Self { sink, salt }
     }
 
@@ -342,14 +345,17 @@ pub(crate) fn read_salt_from(path: &Path) -> std::io::Result<[u8; SALT_BYTES]> {
     Ok(salt)
 }
 
-/// プロセスごとの salt を [`SALT_SOURCE`]（`/dev/urandom`）から [`SALT_BYTES`]
-/// バイト読んで作る。環境変数は読まない（依頼の約束）。PID・時刻・アドレスは
-/// 使わない。読み取りに失敗したらその `Err` を返し、呼び出し側（サーバー起動）
-/// は起動に失敗する（フォールバックなし）。
+/// テスト・検証用（クレート内のテストだけが使う。`#[cfg(test)]`）: プロセスごとの
+/// salt を [`SALT_SOURCE`]（`/dev/urandom`）から [`SALT_BYTES`] バイト読んで作る。
+/// 本番の salt は `serve_with_logger_urandom`（`serve_with_logger_salt_from` 経由）
+/// が同じ読み取り（`read_salt_from`）で作るため、クレート外には公開しない。
+/// 環境変数は読まない（依頼の約束）。PID・時刻・アドレスは使わない。読み取りに
+/// 失敗したらその `Err` を返す（フォールバックなし）。
 ///
 /// # Errors
 /// [`SALT_SOURCE`] を開けない・読めない・[`SALT_BYTES`] バイトに満たないとき。
-pub fn process_salt() -> std::io::Result<[u8; SALT_BYTES]> {
+#[cfg(test)]
+fn process_salt() -> std::io::Result<[u8; SALT_BYTES]> {
     read_salt_from(Path::new(SALT_SOURCE))
 }
 
@@ -443,15 +449,19 @@ mod tests {
         assert_ne!(a, b);
     }
 
-    // (s4) 同じ salt と同じ入力なら仮名は同じ、salt が違えば仮名は違う。
+    // (s4) 同じ salt から別々に作った2つの Logger の仮名は同じに、salt が違えば
+    // 違う仮名になること。どちらも2つの Logger を別々に作って比べる。
     #[test]
     fn same_salt_same_pseudonym_and_different_salt_differs() {
         let sink = Arc::new(NullSink) as Arc<dyn LogSink>;
         let salt_a = process_salt().expect("salt a");
         let salt_b = process_salt().expect("salt b");
-        let la = Logger::with_sink(Arc::clone(&sink), salt_a.to_vec());
+        // 同じ salt で別々に作った2つの Logger。
+        let la1 = Logger::with_sink(Arc::clone(&sink), salt_a.to_vec());
+        let la2 = Logger::with_sink(Arc::clone(&sink), salt_a.to_vec());
+        // 違う salt でもう1つ（これも別々に作った Logger）。
         let lb = Logger::with_sink(sink, salt_b.to_vec());
-        assert_eq!(la.id("card-s4"), la.id("card-s4"));
-        assert_ne!(la.id("card-s4"), lb.id("card-s4"));
+        assert_eq!(la1.id("card-s4"), la2.id("card-s4"));
+        assert_ne!(la1.id("card-s4"), lb.id("card-s4"));
     }
 }

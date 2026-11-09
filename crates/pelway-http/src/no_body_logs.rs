@@ -1,4 +1,8 @@
-//! GDPR-07「本文を残さないログ」の結合テスト（QA 用）。
+//! GDPR-07「本文を残さないログ」の検証（QA 用）。
+//!
+//! もともと `tests/no_body_logs.rs` の結合テストだったが、r3 で
+//! `Logger::with_sink` をクレート外に公開しない形（`pub(crate)`）にしたのに伴い、
+//! src 内の `#[cfg(test)]` テストとして移した（検証内容は無変更）。
 //!
 //! `127.0.0.1:0` で起動したサーバーに `std::net::TcpStream` で実際に HTTP/1.1
 //! 要求を送り、メモリ出力（[`MemorySink`]）のログに canary（合成本文・合成秘密・
@@ -14,9 +18,10 @@ use std::thread;
 use pelway_contract::ledger::{ApprovalLedger, NewCard};
 use pelway_contract::pseudonym::pseudonymize;
 use pelway_contract::task::ActionKind;
-use pelway_http::log::{FileSink, LogSink, Logger, MemorySink};
-use pelway_http::{SharedLedger, serve_with_logger};
 use serde_json::{Value, json};
+
+use crate::log::{FileSink, LogSink, Logger, MemorySink};
+use crate::{SharedLedger, serve_with_logger};
 
 /// 本文・コメント用の合成 canary（実在の値ではない）。
 const CANARY_BODY: &str = "PELWAY-CANARY-BODY-7Q2M9X";
