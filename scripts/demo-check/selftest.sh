@@ -6,8 +6,9 @@
 #   - 秘密に見える値（SYNTHETIC を含む合成値）を出力しない
 #   - run.sh が段階名以外の引数（パス・未知の名前）を拒否し、何も実行しない
 #   - 段階指定の実行が PARTIAL RUN と表示される
-#   - DEMO_CHECK_ACCEPTANCE=1 のとき loopback の runtime PENDING と canary の走査ゼロが
-#     exit 1 になり、ACCEPTANCE MODE と表示される（未設定時の挙動は不変）
+#   - canary の走査ゼロ（no artifacts to scan）は常に exit 1（未検証。受入・通常で共通。slot6）
+#   - DEMO_CHECK_ACCEPTANCE=1 のとき loopback の runtime PENDING が exit 1 になり、
+#     ACCEPTANCE MODE と表示される（未設定時の挙動は不変）
 #   - PELWAY_BIND_ADDR を経由しない bind("...") の宛先も許可値（127.0.0.1/[::1]:0-65535）と
 #     完全一致で照合される（DC-01）。同じ行に複数の bind があってもすべて検査する（slot5 指摘1）。
 #     ポートは 0〜65535 で 65536〜99999 は違反（DC-06）
@@ -89,12 +90,14 @@ expect_case() {
 
 R=crates/x/src/v.rs
 
-# --- 合格するべきツリー ---
-for s in loopback leak-phrases external-refs canary; do expect_case "${s}" 0 "clean tree passes" "" ""; done
+# --- 合格するべきツリー（canary は走査対象ゼロで未検証になるため別ケース） ---
+for s in loopback leak-phrases external-refs; do expect_case "${s}" 0 "clean tree passes" "" ""; done
 run_stage "${tmp}/case" loopback
 if printf '%s\n' "${OUT}" | grep -q "runtime: PENDING"; then ok "loopback: runtime PENDING is reported"; else ng "loopback: runtime PENDING is reported"; fi
 run_stage "${tmp}/case" canary
-if printf '%s\n' "${OUT}" | grep -q "no artifacts to scan"; then ok "canary: 'no artifacts to scan' is reported when nothing exists"; else ng "canary: 'no artifacts to scan' is reported"; show "${OUT}"; fi
+if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "no artifacts to scan" && printf '%s\n' "${OUT}" | grep -q "canary: scanned 0 file(s)" && ! printf '%s\n' "${OUT}" | grep -q "PASS"; then
+  ok "canary: no artifacts to scan is a failure (exit 1, scanned 0)"
+else ng "canary: no artifacts to scan must fail with scanned 0 (exit ${RC})"; show "${OUT}"; fi
 
 # --- DEMO_CHECK_ACCEPTANCE=1（受入モード）。未設定時の挙動は変えない ---
 make_clean "${tmp}/case"
@@ -103,11 +106,7 @@ if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "ACCEPTANCE MODE"; then
   ok "loopback: runtime PENDING is a failure under ACCEPTANCE (exit 1)"
 else ng "loopback: ACCEPTANCE runtime PENDING (exit ${RC})"; show "${OUT}"; fi
 
-run_stage "${tmp}/case" canary DEMO_CHECK_ACCEPTANCE=1
-if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "ACCEPTANCE MODE"; then
-  ok "canary: no artifacts to scan is a failure under ACCEPTANCE (exit 1)"
-else ng "canary: ACCEPTANCE no artifacts (exit ${RC})"; show "${OUT}"; fi
-
+# （canary の走査ゼロは ACCEPTANCE 専用ではなくなったため、専用ケースは置かない）
 make_clean "${tmp}/case"
 mkdir -p "${tmp}/case/target/debug"
 printf 'clean artifact\n' > "${tmp}/case/target/debug/app"
@@ -117,11 +116,19 @@ if [ "${RC}" -eq 0 ]; then
 else ng "canary: ACCEPTANCE with artifacts (exit ${RC})"; show "${OUT}"; fi
 
 # --- run.sh: 引数の検査と PARTIAL RUN ---
+# slot6: canary の走査対象ゼロは未検証（exit 1）なので、clean tree の full run は canary だけ失敗
 make_clean "${tmp}/case"
 OUT="$(DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" 2>&1)"; RC=$?
-if [ "${RC}" -eq 0 ] && ! printf '%s\n' "${OUT}" | grep -q "PARTIAL RUN" && printf '%s\n' "${OUT}" | grep -q "full run: all 4 stages"; then
-  ok "run.sh: full run on a clean tree passes and is not PARTIAL"
+if [ "${RC}" -eq 1 ] && ! printf '%s\n' "${OUT}" | grep -q "PARTIAL RUN" && printf '%s\n' "${OUT}" | grep -q "full run: all 4 stages" && printf '%s\n' "${OUT}" | grep -q "failed: canary"; then
+  ok "run.sh: full run on a clean tree fails only at canary and is not PARTIAL"
 else ng "run.sh: full run on a clean tree (exit ${RC})"; show "${OUT}"; fi
+
+mkdir -p "${tmp}/case/target/debug"
+printf 'clean artifact\n' > "${tmp}/case/target/debug/app"
+OUT="$(DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" 2>&1)"; RC=$?
+if [ "${RC}" -eq 0 ] && ! printf '%s\n' "${OUT}" | grep -q "PARTIAL RUN" && printf '%s\n' "${OUT}" | grep -q "full run: all 4 stages"; then
+  ok "run.sh: full run passes (exit 0) once canary has artifacts to scan"
+else ng "run.sh: full run with canary artifacts (exit ${RC})"; show "${OUT}"; fi
 
 OUT="$(DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" loopback 2>&1)"; RC=$?
 if [ "${RC}" -eq 0 ] && printf '%s\n' "${OUT}" | grep -q "PARTIAL RUN: not valid for acceptance" && printf '%s\n' "${OUT}" | grep -q "acceptance requires a full run"; then
@@ -268,11 +275,14 @@ ln -s "${tmp}/outside-ref.txt" "${r}/assets/link.svg"
 run_stage "${r}" external-refs
 if [ "${RC}" -eq 0 ]; then ok "external-refs: a symlinked asset is not followed"; else ng "external-refs: symlink not followed (exit ${RC})"; show "${OUT}"; fi
 
+# slot6: 走査対象ゼロは未検証（exit 1）になるので、実ファイル（クリーン）を 1 つ置き、
+# symlink の中身を読まないこと（目印を出さず exit 0）だけを確認する
 mkdir -p "${r}/logs"
+printf 'clean line\n' > "${r}/logs/app.log"
 printf 'PELWAY_CANARY_BODY_7f3a\n' > "${tmp}/outside-canary.log"
 ln -s "${tmp}/outside-canary.log" "${r}/logs/link.log"
 run_stage "${r}" canary
-if [ "${RC}" -eq 0 ]; then ok "canary: a symlinked log is not followed"; else ng "canary: symlink not followed (exit ${RC})"; show "${OUT}"; fi
+if [ "${RC}" -eq 0 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_BODY"; then ok "canary: a symlinked log is not followed"; else ng "canary: symlink not followed (exit ${RC})"; show "${OUT}"; fi
 rm -f "${r}/crates/x/src/link.rs" "${r}/assets/link.svg" "${r}/logs/link.log"
 
 # 指摘2（slot5）: ルート自体が作業ツリーの外を指すリンクなら、外を読まずに exit 2。

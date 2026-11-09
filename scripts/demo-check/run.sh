@@ -11,7 +11,8 @@
 # DEMO_CHECK_ACCEPTANCE=1 のとき（受入モード）:
 #   - まとめに ACCEPTANCE MODE と表示する
 #   - loopback の runtime PENDING は exit 1（段階失敗）
-#   - canary の "no artifacts to scan"（走査 0 件）は exit 1（段階失敗）
+#   canary の走査 0 件（no artifacts to scan）は未検証として、受入・通常ともに canary が
+#   exit 1 になり全体も exit 1（slot6）。
 #   既定（未設定）の挙動は変えない。DEMO_CHECK_REQUIRE_RUNTIME は作らない。
 # 全段階を最後まで実行し、1 段でも失敗すれば全体も非 0 で終わる。
 # 使い方: mise run demo-check                       # 全段階（受入に有効）

@@ -12,12 +12,11 @@
 #   ときは、その中身を走査する（開発リード決定 2026-11-09 17:56。リンクを通した論理パスで報告する）。
 #   DEMO_CHECK_EXTRA_PATHS はワークツリー外のパスを明示的に指定するものなので、この検査の対象にしない。
 # ファイル名の区切り: 改行を含むファイル名でも壊れないよう NUL 区切りで扱う（DC-04）。
-# 走査するものが 1 つも無いときは "no artifacts to scan" と表示する。
-#   既定では exit 0（何も検査していないことを明示するだけ）。
-#   DEMO_CHECK_ACCEPTANCE=1 のときは受入不合格として exit 1 にする。
+# 走査するものが 1 つも無いときは "scanned 0 file(s)" と "no artifacts to scan" を表示して
+#   exit 1（未検証の失敗。受入・通常で共通。slot6）。
 # 違反は「ファイル:行: 目印」（バイナリは「ファイル:(binary): 目印 (N件)」）で出す。行の中身は出さない。
 # 目印検索の前に、対象ファイルがすべて読めることを確認する。読めなければ exit 2（slot5 指摘4）。
-# exit 0 合格 / 1 目印あり or ACCEPTANCE で走査対象ゼロ / 2 検査異常（リスト欠落・走査失敗を含む）
+# exit 0 合格 / 1 目印あり or 走査対象ゼロ（未検証） / 2 検査異常（リスト欠落・走査失敗を含む）
 set -uo pipefail
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -103,13 +102,9 @@ mapfile -d '' -t files < <(
 rm -f "${lf}"
 
 if [ "${#files[@]}" -eq 0 ]; then
-  echo "canary: no artifacts to scan (target/, logs/, log/, *.log and DEMO_CHECK_EXTRA_PATHS are absent or empty)"
-  if [ "${DEMO_CHECK_ACCEPTANCE:-}" = "1" ]; then
-    echo "canary: ACCEPTANCE MODE: no artifacts to scan is a failure" >&2
-    exit 1
-  fi
-  echo "canary: PASS with note: nothing was scanned"
-  exit 0
+  echo "canary: scanned 0 file(s), 0 hit(s)"
+  echo "canary: no artifacts to scan (target/, logs/, log/, *.log and DEMO_CHECK_EXTRA_PATHS are absent or empty)" >&2
+  exit 1
 fi
 
 # 目印検索の前に、対象ファイルがすべて読めることを確認する（読めなければ検査異常 exit 2。指摘4）
