@@ -168,11 +168,11 @@
   - 外部レビュー担当が読み取り専用で動いたか・どんなコマンドで調べたかは自己申告・未検証
 
 ### 2026-11-09 第5枠（修正依頼2: Codex再レビュー slot5 の対処）
-- start: 2026-11-09 18:12 JST（目安）
-- stop:  2026-11-09 18:35 JST
+- start: 2026-11-09 17:35 JST（目安。17:41:58 に開発リードへ質問）
+- stop:  2026-11-09 18:46 JST
 - glm: long（T3 Code / OpenCode・zai-coding-plan/glm-5.3。thread ID は記録時点で取得できず未記入）
 - 使用skill: tdd・receiving-code-review（~/.agents/skills の Matt Pocock 版。スロット4と同じものを使用）
-- 内容（コミット 3a883e8（修正）・この作業ログのコミット（記録））:
+- 内容（コミット 3a883e8（修正）・e94d4ec（17:56 決定への揃え直し）・この作業ログのコミット（記録））:
   - レビュー: Codex 再レビュー（範囲 6cfa813..60f6b28、レビュー本文 sha256
     d99c6160fd82476cfa2967e5e78d7c120348215ffa6253b704583f18c9582a73）。4件とも開発リードが採用。
     レビュー担当がスクリプトを実行していないこと・添付のコマンド一覧で調べたことは自己申告・未検証。
@@ -181,11 +181,14 @@
       1行ごとに正規表現マッチを消化して繰り返す形に修正。selftest に「許可→localhost」「localhost→許可」
       「許可→許可」の同一行3ケースを追加。
     - 指摘2（canary.sh、must-fix）: 暗黙の走査ルート（target/ logs/ log/）の実体が作業ツリーの外に
-      解決されるなら読まずに exit 2。ただし実体が mbx 共有ビルドキャッシュ
-      （${XDG_CACHE_HOME:-${HOME}/.cache}/mbx/targets/ 配下）のときだけ例外として走査する
-      （開発リードが本枠の質問への回答で確定。selftest は HOME を一時ディレクトリに差し替えて確認）。
-      旧「リンク先を実体走査して検出」の selftest は「外を読まずに exit 2」を確かめる形に書き換え、
-      mbx 例外の通る例（検出できること）を1件追加。DEMO_CHECK_EXTRA_PATHS は明示指定のため検査対象外。
+      解決されるなら読まずに exit 2。例外は作業ツリー直下の target だけ: 実体を解決すると
+      $HOME/.cache/mbx/targets/（mr-boxington のビルドキャッシュ）の下を指すときはその中身を走査する
+      （開発リード決定 17:56。selftest は HOME を一時ディレクトリに差し替えて確認し、本物の
+      ~/.cache には触らない）。旧「リンク先を実体走査して検出」の selftest は「外を読まずに
+      exit 2」を確かめる形に書き換え、通る例（mbx 配下の target は検出できること）と止まる例
+      （それ以外のリンク）を追加。さらに決定文どおり正確に揃えるため、XDG_CACHE_HOME では例外が
+      広がらないことと、logs/ がキャッシュを指しても例外にならない（exit 2）ことの2ケースを追加。
+      DEMO_CHECK_EXTRA_PATHS は明示指定のため検査対象外。
     - 指摘3（external-refs.sh、should-fix・採用）: 参照走査の前に、文字列外の行コメント
       （行頭または空白の直後の // から行末まで）を消すように修正（引用符の直前の // は
       文字列内のプロトコル相対参照なので残る）。selftest に JS 行コメント内の引用符付き //ホスト・
@@ -202,10 +205,17 @@
   - TDD: 新しい失敗ケースを先に selftest に追加し、修正前に RED を確認
     （113件中5件が失敗: 指摘1の「許可→localhost」、指摘2の exit 2、指摘3の誤検出2件、指摘4の
     読めないファイル。ほかの新規ケースは不許可先が先頭に来る場合やガードとして最初から緑）。
-    修正後に 113 件すべて緑。
-  - 指摘2の質問と確定: 実装前に「この worktree の target/ が mbx 共有キャッシュへのシンボリックリンクで、
-    レビューどおり exit 2 にすると run.sh が 1 になる」ことを開発リードに質問し、
-    「mbx キャッシュ配下のみ例外として走査、それ以外の外を指すリンクは exit 2」で確定した。
+    修正後に 113 件すべて緑。17:56 の決定文への揃え直しでも同じ手順をもう一度:
+    XDG_CACHE_HOME と logs/ の2ケースの RED（113 passed, 2 failed）を確認してから修正し、
+    115 件すべて緑。
+  - 指摘2の質問と確定（17:41:58 に質問、開発リードが 17:56 に決定）: 実装前に「この worktree の
+    target/ が mbx 共有キャッシュへのシンボリックリンクで、レビューどおり exit 2 にすると
+    run.sh が 1 になる」ことを開発リードに質問。決定: 作業ツリー直下の target が実体を解決すると
+    $HOME/.cache/mbx/targets/ の下を指しているときだけ例外としてその中身を走査し、それ以外の
+    場所を指す走査ルートは外を読まずに exit 2 で止める。selftest は一時ディレクトリで HOME を
+    差し替えて確認する（本物の ~/.cache は触らない）。
+    初回実装（3a883e8）は XDG_CACHE_HOME による代替解決を含み、例外を logs/ log/ にも適用して
+    いたが、決定文に正確に揃え、別コミット（e94d4ec）で絞り込んだ。
 - 追加の記録（開発リードの指示による）:
   - 2026-11-09 16:20〜16:28（JST）に、開発基盤・Rust・バックエンドの GLM 3つが同時に動いていた。
     当時の「同時実行は2担当まで」というルールに反していた（このルールは 16:55 以降に廃止）。
@@ -216,13 +226,14 @@
     コミット済みの「リード確定」のみの文面に戻した（開発リードが妥当と判断）。
   - shellcheck は入っていないため、走らせていない。
 - 検証（コマンドと exit code）:
-  - bash scripts/demo-check/selftest.sh → 0（113 passed, 0 failed）
+  - bash scripts/demo-check/selftest.sh → 0（115 passed, 0 failed）
   - bash scripts/demo-check/run.sh → 0（4段階・full run。loopback static 0 件・runtime PENDING、
     leak-phrases 43 ファイル 0 件、external-refs 43 ファイル 0 件、canary 49 ファイル 0 件。
     target/ → mbx キャッシュのリンクは例外として引き続き走査）
   - DEMO_CHECK_ACCEPTANCE=1 bash scripts/demo-check/run.sh → 1（ACCEPTANCE MODE 表示。
     loopback の runtime PENDING が受入不合格。failed: loopback）
   - 修正前の RED 確認（selftest に新ケースを追加した直後の実行）→ 1（108 passed, 5 failed）
+  - 決定文への揃え直し前の RED 確認（XDG_CACHE_HOME・logs/ の2ケース追加直後）→ 1（113 passed, 2 failed）
   - bash -n scripts/demo-check/*.sh → 0
   - shellcheck は未導入のため未実行
 - 未検証・未決:
