@@ -323,7 +323,12 @@ impl ApprovalLedger {
 
     /// 何も送らないまま中止する（送信前の失敗）。キーを解放し、カードを
     /// 「送信承認待ち」に戻す。送信が始まったかもしれない場合には使わないこと。
-    pub fn abort_before_send(&mut self, ticket: SendTicket) {
+    ///
+    /// クレート内（単体テスト）でのみ使う。HTTP 層は `approve` だけを呼び、
+    /// 予約を持ち出さない（依頼 2・作業2 の方針）。
+    /// ライブラリ部では呼ばれないため、テスト専用として許可する。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn abort_before_send(&mut self, ticket: SendTicket) {
         self.idempotency.remove(&ticket.key);
         if let Some(card) = self.cards.get_mut(&ticket.binding.card_id)
             && card.state == TaskState::Sending
