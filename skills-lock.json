@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "skills": {
+    "penpot-anti-slop": {
+      "source": "penpot/penpot-ai-kit",
+      "sourceType": "github",
+      "skillPath": "skills/penpot-anti-slop/SKILL.md",
+      "computedHash": "fee89b49035d015150737fd17c85ea096c5ea5da8182b9b973fc9530784876d8"
+    },
+    "penpot-audit-accessibility": {
+      "source": "penpot/penpot-ai-kit",
+      "sourceType": "github",
+      "skillPath": "skills/penpot-audit-accessibility/SKILL.md",
+      "computedHash": "025bfea010fda8bd5c46528ffd86f168730231ea596241d74d51b27efce23f80"
+    },
+    "penpot-audit-tokens": {
+      "source": "penpot/penpot-ai-kit",
+      "sourceType": "github",
+      "skillPath": "skills/penpot-audit-tokens/SKILL.md",
+      "computedHash": "98eda0cd495b47d3e8fb08b8c9b14096a33213a8e874913273b47053364da139"
+    },
+    "penpot-build-deck": {
+      "source": "penpot/penpot-ai-kit",
+      "sourceType": "github",
+      "skillPath": "skills/penpot-build-deck/SKILL.md",
+      "computedHash": "3eff5908068b7eb01319046b79b6b29919ed70f8623e4f60ee28327f28c724fb"
+    },
+    "penpot-build-from-code": {
+      "source": "penpot/penpot-ai-kit",
+      "sourceType": "github",
+      "skillPath": "skills/penpot-build-from-code/SKILL.md",
+      "computedHash": "42c0166476cc879407b1ea77486e53d2c09a3024b673078741823f455f092dbb"
+    },
+    "penpot-build-screen": {
+      "source": "penpot/penpot-ai-kit",
+      "sourceType": "github",
+      "skillPath": "skills/penpot-build-screen/SKILL.md",
+      "computedHash": "fb8fbf8c5b92daf3b253eae42ec21789211bae686a7df04923df4ec8d0aea1a8"
+    },
+    "penpot-component-factory": {
+      "source": "penpot/penpot-ai-kit",
+      "sourceType": "github",
+      "skillPath": "skills/penpot-component-factory/SKILL.md",
+      "computedHash": "90bc33abc635240706d336729056b81ee335d32376941f3850078bc05cc30e9a"
+    },
+    "penpot-design-md": {
+      "source": "penpot/penpot-ai-kit",
+      "sourceType": "github",
+      "skillPath": "skills/penpot-design-md/SKILL.md",
+      "computedHash": "014428212629f89c225be66b06c88a2a82398558e3e9ce4728026c31711dec59"
+    },
+    "penpot-design-to-code-review": {
+      "source": "penpot/penpot-ai-kit",
+      "sourceType": "github",
+      "skillPath": "skills/penpot-design-to-code-review/SKILL.md",
+      "computedHash": "b64493e3672ba295cd1c522dc5cddbc215151b665b27788fdbfcf738ecc97dda"
+    },
+    "penpot-document-handoff": {
+      "source": "penpot/penpot-ai-kit",
+      "sourceType": "github",
+      "skillPath": "skills/penpot-document-handoff/SKILL.md",
+      "computedHash": "ddd69fe2b7fb98ce481880794cc2a602eb8ec8a93d5218bb5694190d308236e3"
+    },
+    "penpot-foundations": {
+      "source": "penpot/penpot-ai-kit",
+      "sourceType": "github",
+      "skillPath": "skills/penpot-foundations/SKILL.md",
+      "computedHash": "b67ec3356cd640ae07cde6d4b381e4bc45990d66c555704f693ecf762296e69e"
+    },
+    "penpot-rename-layers": {
+      "source": "penpot/penpot-ai-kit",
+      "sourceType": "github",
+      "skillPath": "skills/penpot-rename-layers/SKILL.md",
+      "computedHash": "0943d3c62ba47c5238b193bd5b7a98d076bd7aa1ea7cf75f349cc8005a3e9c93"
+    },
+    "penpot-router": {
+      "source": "penpot/penpot-ai-kit",
+      "sourceType": "github",
+      "skillPath": "skills/penpot-router/SKILL.md",
+      "computedHash": "d386b4784f8adcfe72590d512852544bb3cc0406463c7e10bd88377cdcf01bb2"
+    }
+  }
+}
