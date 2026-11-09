@@ -1,0 +1,11 @@
+[package]
+# Pelway デスクトップクライアントの UI 骨組み。段階A: 外部の crate に依存せず、
+# pelway-client-core だけを使う。Slint は段階Bで依存に足す（docs/worklog/client.md 第8枠）。
+name = "pelway-client-ui"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Skeleton UI shell for the Pelway desktop client (stage A: no external UI dependencies yet)."
+
+[dependencies]
+pelway-client-core = { path = "../pelway-client-core" }

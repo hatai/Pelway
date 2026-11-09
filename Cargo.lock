@@ -7,5 +7,12 @@ name = "pelway-client-core"
 version = "0.0.0"
 
 [[package]]
+name = "pelway-client-ui"
+version = "0.0.0"
+dependencies = [
+ "pelway-client-core",
+]
+
+[[package]]
 name = "pelway-dev-smoke"
 version = "0.0.0"

@@ -198,3 +198,45 @@
   - `cargo clippy -p pelway-client-core --all-targets --locked --offline -- -D warnings` 0
   - `cargo test -p pelway-client-core --locked --offline` 0（54 件: approval 24・contract 14・input 16、失敗 0）
 - 未検証・未決: なし（この枠の範囲で新たな未決は無し）。
+
+### 2026-11-09 第8枠（Slint の画面の骨組み 段階A・やり直し）
+- start: 2026-11-09 20:31 JST
+- stop:  2026-11-09 21:05 JST
+- glm: long（T3 Code スレッドで OpenCode + zai-coding-plan/glm-5.3 が実装）
+- 使った skills: tdd と verification-before-completion の考え方に従った（ファイルは worktree 外のため読んでいない）。テストを先に書き、実装前の失敗を見て、完了の前に13章のコマンドを全部動かし直して出力で報告した。
+- この枠は段階Aだけ（外部の crate を足さず、標準ライブラリと `pelway-client-core` だけ）。**Slint で窓を開く段階Bは手を付けていない（別指示）。**
+- 経緯: 前の回のスレッド（`mcp:d1770ef8`）が誤って `demo-t3-client` に書いたため、この回（スレッド `demo-t3-client-ui-r2`、起点 `bd4cb78`）でやり直した。`demo-t3-client`・`demo-t3-client-ui` の worktree と `demo-t3/client`・`demo-t3/client-ui` ブランチには読み書き含めて一切触れていない（前の回がそこに書いた未追跡ファイルも見ていない・参考にしていない）。
+- ネットワーク: 19:12 JST に crates.io からの取得が1回あったのは、ユーザー本人がそのとき1回だけ出した許可によるもの（前の回の文脈）。この回では許可を得ておらず、取得していない。cargo はすべて `CARGO_NET_OFFLINE=true` + `--offline` で動かし、lock 更新の1回だけ `--locked` を外した（下記）。
+- Prior art first（AGENTS.md）について: Slint は仕様（docs/technical/v0.7/body/02-stack-comparison.md）で採用案として決まっており、WebView・Electron・Tauri を使わないことも要件なので、今回の「骨組み」作業には事例調査を当てはめなかった。GitHub・Web の検索はしていない。
+- 内容:
+  - 新クレート `crates/pelway-client-ui`（`publish = false`、`edition = "2024"`、`#![forbid(unsafe_code)]`、依存は path の `pelway-client-core` だけ）。`pelway-client-core` は変更していない。
+  - `src/theme.rs`: テーマの enum（`Theme::Light` / `Dark` / `LightHighContrast` / `DarkHighContrast`）。**テーマ名は `light`・`dark`・`light-high-contrast`・`dark-high-contrast` の 4 つで確定**（`Theme::name()` が唯一の定義元。Slint 側 `ThemeState.current-name` は Rust から渡される文字列を受けるだけ）。第4枠（17:30 の記録）にあった `light-accessible`・`dark-accessible` は古い名前であり、`from_name` は受け付けない（テストで確認）。トークン名の一覧 `TOKEN_NAMES`（6章の指示書の一覧どおり 50 名）。**トークンの値は入れていない**。テーマごとの値の表 `token_value()` は「TODO: トークン確定後に入れる」の空の形で常に `None`（値を入れていないことをテストで確認）。
+  - `src/i18n.rs`: Rust が使う Fluent キーの一覧 `USED_KEYS`（49 キー）。段階Aでは Fluent の crate を使えないため、キーの一覧だけ。**`@tr()`（gettext）は使わない判断**（仕様が Fluent のため。docs/technical/v0.7/body/06-i18n.md）。段階Bで Fluent から引いた文字列を Slint の `tr-*` プロパティへ渡す。
+  - `src/testkit.rs`: 決まった値を返す `FixedKeySource`（`fixed-key-000001` 形の連番・16 文字ちょうど）と `FixedClock`（固定ミリ秒）。本物の UUID・実時間は段階B。
+  - `src/state.rs`: 表示用の状態（Slint 非依存）と合成データ `sample()`。モックの架空の会社名・人名（株式会社サンプル開発・濱田・田中・佐藤・ユイ・リク・ハル・B社）だけを使い、実在の情報は入れていない。`AvatarKind`（人=円・AI=四角+印）、`AiPresence`、`TodaySection`（3区切り）、`TimelineEntry`（日付区切り・メッセージ・未読・決定の印・引き継ぎ・あなただけに表示・社外送信カード）、`ExternalSendState`（待ち/送信後）。
+  - `src/bridge.rs`: 中核へのつなぎ。`ShellBridge`（フォーカス・IME・候補一覧の開閉を持ち、キー操作をすべて `input::on_key` に渡し、返ってきた `Action` だけで状態を変える。UI 側で判定を書き直していない）と `ApprovalCardBridge`（「送る」= `press_approve`、押せるか = `approve_button_enabled()`）。**`Effect` は未接続**: 通信を書かず、ログにも出さず、`last_effect` として保持するだけ。**コメント欄はモックに見た目がないため画面には置かない**。`comment_editable()` は表示用の状態としてだけ持つ（「モックにコメント欄がない」は未決）。
+  - `i18n/ja/main.ftl`・`i18n/en/main.ftl`: 日英 49 キー。キーは `rail-today` 型の安定した名前。**英語は意味の分かる仮の訳**（最終文言は未決）。◆・✓・⌕・🔒 の記号は文言側（.ftl）に置き、`.slint`・Rust に利用者に見える文言を直接書かないようにした。
+  - `ui/main.slint`: 画面の骨組み（rail・上の帯・今日の3区切り・チャンネル画面・右の枠・入力欄。モックにない部品と台本操作は除く）。**この回では slint に依存していないため未コンパイル・未検証**。色は `DesignTokens` global のトークン名だけで参照（値の初期値なし）。文言は `tr-*` プロパティで受ける。accessible-role/accessible-label は段階Bのため未実装。
+  - モック（読むだけ）: `docs/ui-mocks/csv.html`（sha256 `b5a540ece91abc7cd0741d9daf90ec40d427cada12ad5add99862b2ee83d3220`）と `docs/ui-mocks/csv_dark.html`（sha256 `f72603d7465157723a6818d9e99b68cb831f1d0c5edb45918a940473f77e0aac`）。どちらも「試作モック、暫定承認（11/8）、最終承認は未」のため、骨組みの配置の参考にだけ使った。色の値とフォントの URL は写していない（ダーク版はライト版にダーク用スタイル上書きを足しただけの同じ構成）。
+  - `Cargo.lock`: `CARGO_NET_OFFLINE=true cargo check --workspace --offline` を1回だけ（`--locked` なし）動かして更新。`git diff Cargo.lock` は `pelway-client-ui` の項目（依存 `pelway-client-core` のみ）の追加だけで、他の行は変わっていない。
+- TDD の赤→緑の記録:
+  - テスト4ファイル（bridge 10・i18n_keys 6・no_color_values 4・theme_tokens 6 = 26 件）を先に書き、実装前に `cargo test -p pelway-client-ui --locked --offline` を実行: **exit 101、E0432**（`pelway_client_ui::bridge` / `i18n` / `testkit` / `theme` が未実装）で4テストともコンパイル失敗。テスト側の誤り1件（`&sample4` に参照を渡し忘れた E0308）を直したうえで、改めて未実装による E0432 の赤を確認してから実装した。
+  - 実装中に一度 `no_color_values_anywhere_in_the_crate` が失敗: テストファイル自身のドキュメントコメントに `rgb(` 等のリテラルが書いてあり自己検出した。コメントの書き方を直して解消（スキャナは文字列リテラルを解釈しないため、コメントにも書かないのが安全側）。
+  - 色の値の混入確認: `ui/main.slint` に一時的に `#c0ffee` を1つ入れて `cargo test -p pelway-client-ui --test no_color_values` が **exit 101 で失敗**（`main.slint: ["#c0ffee"]` を検出）することを確認し、入れた値は消した。消したあとは緑（exit 0）。
+- 検証（コマンドと exit code。すべて `CARGO_NET_OFFLINE=true` 付き）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 0
+  - `cargo test --workspace --locked --offline` 0（pelway-client-core 54 件: approval 24・contract 14・input 16、失敗 0 ／ pelway-client-ui 26 件: bridge 10・i18n_keys 6・no_color_values 4・theme_tokens 6、失敗 0 ／ pelway-dev-smoke 1 件、失敗 0）
+  - `cargo build -p pelway-client-ui --locked --offline` 0（**段階Aの範囲＝Slint なしのライブラリとしてのビルド**。`ui/main.slint` は含まない）
+  - `git status --short`: `M Cargo.lock`、`?? crates/pelway-client-ui/`（ほかに変わったものなし）
+- 未検証・未決:
+  - **`.slint` は未コンパイル・未検証**（段階Bで slint を依存に足して初めてコンパイルする。構文ミスの可能性は残る）。
+  - **トークンの値は未確定**。テーマごとの値の表は「TODO: トークン確定後に入れる」の空の形。`ui-pro-draft-v0.1/tokens/pelway.tokens.json` とその生成物は不使用。
+  - **足りないトークン**: 「今日」の区切りの件数バッジ（地と文字のペア）が一覧にない。`.slint` では数字だけを並記し、見た目はトークン確定後に整える。この名前は作っていない（指示どおり新規の名前は作らない）。
+  - **コメント欄はモックに見た目がないため画面に置かない**（未決）。つなぎの `comment_editable()` は表示用の状態としてだけ保持。
+  - **`Effect` は未接続**（通信を書かない。保持するだけ）。
+  - **フォントは未決**（06-i18n.md は同梱を推奨。Noto Sans JP 等の配布ファイルとライセンスは実装前に確認する。モックの Web フォント URL は写していない）。
+  - **ライセンスは未決**: Slint のライセンス許諾は U05 で未決。Royalty-free の表示義務（AboutSlint または「Made with Slint」）の要否・置き場所も未決のため、この骨組みには About 画面等を入れていない。
+  - **英語の文言は仮訳**（最終文言は未決）。
+  - 読み上げ（AccessKit）は段階B。NVDA・VoiceOver・Orca での確認は未検証。
+  - 迷って安全側にした点: （1）検索の ⌕・決定の ◆・送信後の ✓・鍵の 🔒 を .slint に直書きせず .ftl の文言に含めた（文言の直書き禁止を記号にも広げた）。（2）`no_color_values` のスキャナは文字列リテラルを解釈しないため、コメントにも色の値のパターンを書かない方針にした。（3）承認ボタンのキー操作（Enter/Space）は中核が `Action::Approve` を返したら橋経由で `press_approve` に結びつけたが、カードが押せなければ何も起こさない（UI の無効表示だけに頼らない中核の保証をそのまま活かす）。
