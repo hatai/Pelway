@@ -7,9 +7,11 @@
 //!
 //! 棚卸し（docs/worklog/client.md 第12枠）のとおり、現時点で書き込み・ログ出力の
 //! 経路は存在しないため、この試験は「無いこと」を固定する:
-//! - (a) 合成 canary 入りの会話状態をメモリに載せたあと、サンドボックス
-//!   （`target/gdpr-13-sandbox/` 以下）と環境変数が指すディレクトリ（worktree 内の
-//!   ものだけ）を走査し、canary が 0 件であること。
+//! - (a) 合成 canary 入りの会話状態をメモリに載せたあと、サンドボックスと環境変数が
+//!   指すディレクトリ（字面と symlink の解決先の両方で worktree 内のものだけ）を走査し、
+//!   canary が 0 件であること。サンドボックスは `target/gdpr-13-sandbox/` を基本とし、
+//!   `target/` が worktree 外へ解決される symlink（mbx 管理等）の環境では worktree 内の
+//!   退避先（`.gdpr-13-sandbox/`・git 管理外）へ置く。
 //! - (b) クライアントの動作中の標準出力・標準エラーに canary が出ないこと
 //!   （このテストバイナリを子プロセスとして起動して吸い取る）。
 //! - (c) 陽性対照: 検査関数に canary を含む文字列を渡すと「見つかった」と判定される
@@ -17,6 +19,8 @@
 //! - (d) 共有コアに本文を書く API が無いこと（ソースの禁止語走査 +
 //!   「本文を渡してもファイルができない」振る舞い）。
 //! - (e) 走査の対象パスが worktree の外（`/tmp`・本物のホーム等）を指していないこと。
+//!   文字列の接頭辞だけでなく、走査ルート自身を含む解決済み（canonical）パスで
+//!   判定する（走査ルート自体が worktree 外への symlink になる環境を含む）。
 //!
 //! canary について: 本文用・個人情報用の 2 つの合成トークン（実在の値ではない）を
 //! 使う。完全な文字列をどこにも書かない: 完全な canary がソースやコンパイル済み
@@ -73,16 +77,21 @@ fn bytes_contain(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 /// ディレクトリ以下を再帰的に走査し、canary を含むファイルのパスを返す。
-/// 読めない場所は何も無いのと同じ扱い。symlink は辿らない（worktree の外へ
-/// 出ないようにする安全側）。
+/// 読めない場所は何も無いのと同じ扱い。子の symlink は辿らない。さらに開始パスも
+/// 再帰する各ディレクトリも、symlink を解決した先（canonical）が worktree ルート
+/// （同じく canonical）の外なら、そこに入って読まない・列挙しない（走査ルート
+/// 自身が worktree 外への symlink になる環境への安全側）。
 fn scan_tree(root: &Path, needles: &[String]) -> Vec<PathBuf> {
     let mut hits = Vec::new();
-    walk_tree(root, needles, &mut hits);
+    walk_tree(root, &worktree_real(), needles, &mut hits);
     hits
 }
 
-fn walk_tree(dir: &Path, needles: &[String], hits: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
+fn walk_tree(dir: &Path, worktree_real: &Path, needles: &[String], hits: &mut Vec<PathBuf>) {
+    let Some(real_dir) = resolved_dir_inside(worktree_real, dir) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(&real_dir) else {
         return;
     };
     for entry in entries.flatten() {
@@ -94,7 +103,7 @@ fn walk_tree(dir: &Path, needles: &[String], hits: &mut Vec<PathBuf>) {
         }
         let path = entry.path();
         if file_type.is_dir() {
-            walk_tree(&path, needles, hits);
+            walk_tree(&path, worktree_real, needles, hits);
         } else if file_type.is_file() {
             let Ok(bytes) = fs::read(&path) else {
                 continue;
@@ -116,6 +125,21 @@ fn workspace_root() -> PathBuf {
         .and_then(Path::parent)
         .expect("manifest は crates/pelway-client-ui にあるため、2 つ上が worktree のルート");
     root.to_path_buf()
+}
+
+/// ワークスペースルートを symlink も含めて解決した（canonical）パス。内外の判定は
+/// この解決済みルートに対して行う（字面だけだと、worktree 内に見えても解決先が
+/// worktree 外になるパス（`target/` が mbx 管理の symlink になる環境等）を見逃すため）。
+fn worktree_real() -> PathBuf {
+    fs::canonicalize(workspace_root()).expect("worktree のルートが解決できること")
+}
+
+/// パスを symlink も含めて解決し、解決先が worktree 内の実ディレクトリなら
+/// その解決済みパスを返す。解決先が外・解決できない・ディレクトリでない場合は
+/// None（その場所には入って読まない・列挙しない）。
+fn resolved_dir_inside(worktree_real: &Path, candidate: &Path) -> Option<PathBuf> {
+    let real = fs::canonicalize(candidate).ok()?;
+    (real.is_dir() && real.starts_with(worktree_real)).then_some(real)
 }
 
 /// パスが root の中かどうかの純粋な（ファイルシステムに触れない）判定。
@@ -142,13 +166,37 @@ fn lexically_inside(root: &Path, candidate: &Path) -> bool {
     PathBuf::from_iter(components).starts_with(root)
 }
 
-/// 候補のうち root の中にあるものだけを残す。外の候補はファイルシステムに
-/// 触れずに捨てる（`/tmp` や本物のホームは読まない）。
+/// ディレクトリ候補を「worktree 内の実ディレクトリ」として用意する。候補の既存の
+/// 祖先（`target/` 等。候補自身が既にある場合は候補自身）の解決先が worktree 外なら
+/// 何も作らず None を返す（外へ書かない）。作れた場合は解決済み（canonical）パスを返す。
+fn ensure_dir_inside(root_real: &Path, primary: &Path) -> Option<PathBuf> {
+    // 既存の最も深い祖先を解決して判定する（祖先が全て無ければ、worktree ルートまで
+    // 遡って必ず何かに当たる）。
+    let anchor = primary.ancestors().find(|p| p.exists())?;
+    let anchor_real = fs::canonicalize(anchor).ok()?;
+    if !anchor_real.starts_with(root_real) {
+        return None;
+    }
+    let _ = fs::create_dir_all(primary);
+    resolved_dir_inside(root_real, primary)
+}
+
+/// 候補のうち root の中にあるものだけを残す。判定は 2 段階: ① 字面（lexical）が外の
+/// 候補はファイルシステムに触れずに捨てる（`/tmp` や本物のホームは読まない）、
+/// ② 字面が中でも symlink を解決した先が worktree ルート（canonical）の外になる
+/// 候補（ルート自身が外への symlink を含む場合）は走査対象として受け入れず捨てる。
+/// 解決できない候補・実ディレクトリでない候補も捨てる（読めないため）。
 fn keep_inside(root: &Path, candidates: &[PathBuf]) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let root_real = fs::canonicalize(root).ok();
     let mut kept = Vec::new();
     let mut dropped = Vec::new();
     for candidate in candidates {
-        if lexically_inside(root, candidate) {
+        let resolves_inside = lexically_inside(root, candidate)
+            && matches!(
+                (&root_real, fs::canonicalize(candidate)),
+                (Some(root_real), Ok(real)) if real.starts_with(root_real)
+            );
+        if resolves_inside {
             kept.push(candidate.clone());
         } else {
             dropped.push(candidate.clone());
@@ -157,13 +205,27 @@ fn keep_inside(root: &Path, candidates: &[PathBuf]) -> (Vec<PathBuf>, Vec<PathBu
     (kept, dropped)
 }
 
-/// 走査対象のルート一覧。サンドボックス（`target/gdpr-13-sandbox`）と、環境変数
-/// （HOME・TMPDIR・XDG_*）が指すディレクトリのうち worktree 内のもの。
+/// 走査・陽性対照に使うサンドボックス。解決先が worktree 内の実ディレクトリで
+/// なければならない。基本は `target/gdpr-13-sandbox` だが、`target/` が worktree
+/// 外へ解決される symlink（mbx 管理の共有ストア等）の環境ではその下に作らず
+/// （canary を worktree の外へ書かない）、worktree 内の退避先（`.gdpr-13-sandbox/`・
+/// git 管理外・コミットしない）へ置く。戻り値は解決済み（canonical）パス。
+fn sandbox_dir(root: &Path, root_real: &Path) -> PathBuf {
+    let primary = root.join("target").join("gdpr-13-sandbox");
+    if let Some(real) = ensure_dir_inside(root_real, &primary) {
+        return real;
+    }
+    let fallback = root.join(".gdpr-13-sandbox");
+    ensure_dir_inside(root_real, &fallback)
+        .expect("退避サンドボックスが worktree 内の実ディレクトリとして作れること")
+}
+
+/// 走査対象のルート一覧。サンドボックスと、環境変数（HOME・TMPDIR・XDG_*）が指す
+/// ディレクトリのうち、字面と symlink の解決先の両方で worktree 内のもの。
 fn scan_roots() -> Vec<PathBuf> {
     let root = workspace_root();
-    let sandbox = root.join("target").join("gdpr-13-sandbox");
-    // サンドボックスが無ければ作る（環境変数の向け先が整っていなくても走査はできる）。
-    let _ = fs::create_dir_all(&sandbox);
+    let root_real = worktree_real();
+    let sandbox = sandbox_dir(&root, &root_real);
     let mut candidates = vec![sandbox];
     for key in [
         "HOME",
@@ -183,8 +245,8 @@ fn scan_roots() -> Vec<PathBuf> {
     kept
 }
 
-/// サンドボックス全体を走査する試験どうしの並走を避ける鍵（(a)(c)(d) で共有）。
-/// 陽性対照 (c) が一時的に canary 入りファイルを作るため、(a)(d) の走査と
+/// サンドボックス全体を走査する試験どうしの並走を避ける鍵（(a)(c)(d)(f) で共有）。
+/// 陽性対照 (c)・(f) が一時的に canary 入りファイルを作るため、(a)(d) の走査と
 /// 直列に動かす。
 fn sandbox_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -364,11 +426,10 @@ fn scanner_detects_canaries_in_memory_and_in_files() {
     );
 
     // ファイル経路: scan_tree が canary 入りファイルを必ず検出できること
-    // （走査が常に空を返す欠陥を通さない）。ファイルは消す。
-    let probe = workspace_root()
-        .join("target")
-        .join("gdpr-13-sandbox")
-        .join("positive-control");
+    // （走査が常に空を返す欠陥を通さない）。ファイルは消す。サンドボックスは
+    // 解決先が worktree 内の実ディレクトリであるものを使う（`target/` が
+    // worktree 外への symlink の環境では退避先に変わる）。
+    let probe = sandbox_dir(&workspace_root(), &worktree_real()).join("positive-control");
     fs::create_dir_all(&probe).expect("陽性対照用のディレクトリを作れること");
     let probe_file = probe.join("bait.txt");
     fs::write(&probe_file, &bait_bytes).expect("陽性対照用のファイルを書けること");
@@ -480,11 +541,9 @@ fn core_api_surface_has_no_file_io() {
     );
 
     // ③ 振る舞い: 空の探査ディレクトリを用意し、canary 入りの本文を渡して
-    // 中核と橋を動かしても、ファイルが 1 つもできないこと。
-    let probe = root
-        .join("target")
-        .join("gdpr-13-sandbox")
-        .join("core-fs-probe");
+    // 中核と橋を動かしても、ファイルが 1 つもできないこと。探査ディレクトリも
+    // サンドボックス（解決先が worktree 内の実ディレクトリ）の下に置く。
+    let probe = sandbox_dir(&root, &worktree_real()).join("core-fs-probe");
     fs::create_dir_all(&probe).expect("探査ディレクトリを作れること");
     for entry in fs::read_dir(&probe)
         .expect("探査ディレクトリが読めること")
@@ -548,20 +607,29 @@ fn scan_roots_stay_inside_the_worktree() {
         "外の候補はすべて除外されること"
     );
 
-    // 実際の走査対象: すべて worktree の中で、サンドボックスを含むこと。
+    // 実際の走査対象: 字面だけでなく、symlink を解決した先でも worktree の中であること。
+    let root_real = worktree_real();
     let roots = scan_roots();
     assert!(!roots.is_empty(), "走査対象が少なくとも 1 つあること");
     for scan_root in &roots {
         assert!(
             lexically_inside(&root, scan_root),
-            "走査対象が worktree の中であること: {}",
+            "走査対象が字面でも worktree の中であること: {}",
             scan_root.display()
         );
+        let real = fs::canonicalize(scan_root)
+            .expect("走査対象が解決できること（解決できない候補は選別で落ちるはず）");
+        assert!(
+            real.starts_with(&root_real),
+            "走査対象の解決先が worktree の中であること: {} -> {}",
+            scan_root.display(),
+            real.display()
+        );
     }
+    // サンドボックス（解決先が worktree 内の実ディレクトリ。`target/` が
+    // worktree 外への symlink の環境では退避先）が走査対象に含まれること。
     assert!(
-        roots
-            .iter()
-            .any(|path| path.ends_with("target/gdpr-13-sandbox")),
+        roots.contains(&sandbox_dir(&root, &root_real)),
         "サンドボックスが走査対象に含まれること"
     );
 
@@ -573,4 +641,88 @@ fn scan_roots_stay_inside_the_worktree() {
             assert!(!roots.contains(&home), "worktree の外の HOME は走査しない");
         }
     }
+}
+
+// ---- (f) 走査ルート自身が worktree 外へ解決される symlink の場合 ----
+
+/// 走査ルートが worktree 内に置いた symlink で、解決先が worktree 外になる場合:
+/// そのルートを正式な走査対象として受け入れず、走査も外のファイルを読まない・
+/// 列挙しないこと（`target/` が mbx 管理の symlink になり、
+/// `target/gdpr-13-sandbox` 経由で worktree 外を読み得る環境を想定）。
+/// worktree の外へは何も書かない（外を指す symlink を置くだけ。先へは書き込まない）。
+#[cfg(unix)]
+#[test]
+fn scan_root_symlink_resolving_outside_is_rejected_and_not_walked() {
+    let _guard = sandbox_lock().lock().unwrap_or_else(|p| p.into_inner());
+    let root = workspace_root();
+    let root_real = worktree_real();
+    let needles = canaries();
+
+    // 陽性対照: sandbox 内の実ディレクトリに置いた canary 入りファイルは、
+    // 同じ検査（scan_tree）で必ず見つかる（常に空を返す欠陥を通さない）。
+    let sandbox = sandbox_dir(&root, &root_real);
+    let probe = sandbox.join("symlink-root-probe");
+    fs::create_dir_all(&probe).expect("陽性対照用のディレクトリを作れること");
+    let mut bait = String::from("prefix ");
+    bait.push_str(&canary_body());
+    bait.push_str(" middle ");
+    bait.push_str(&canary_pii());
+    bait.push_str(" suffix");
+    let bait_file = probe.join("bait.txt");
+    fs::write(&bait_file, bait.as_bytes()).expect("陽性対照用のファイルを書けること");
+    assert_eq!(
+        scan_tree(&probe, &needles),
+        vec![bait_file.clone()],
+        "canary 入りファイルを検出できること（陽性対照）"
+    );
+
+    // worktree 内に、解決先が worktree 外になる symlink を走査ルートとして置く。
+    let link = sandbox.join("root-symlink-to-outside");
+    std::os::unix::fs::symlink("/tmp", &link).expect("外を指す symlink を作れること");
+    let resolved = fs::canonicalize(&link).expect("symlink が解決できること");
+    assert!(
+        !resolved.starts_with(&root_real),
+        "前提: symlink の解決先は worktree の外であること: {}",
+        resolved.display()
+    );
+
+    // (e) と同じ選別: 解決先が外になるルートは、走査対象として受け入れない。
+    let (kept, dropped) = keep_inside(&root, std::slice::from_ref(&link));
+    assert!(
+        kept.is_empty(),
+        "解決先が worktree 外の symlink ルートは走査対象にしない（字面だけでなく\
+         symlink を解決した先で判定すること）: {:?}",
+        kept
+    );
+    assert_eq!(dropped.len(), 1, "外へ解決されるルートは除外されること");
+
+    // 走査そのものも、ルートの symlink を通して外のファイルを読まない・列挙しない。
+    assert!(
+        scan_tree(&link, &needles).is_empty(),
+        "走査ルートの symlink を通して worktree の外を読まないこと"
+    );
+
+    // サンドボックスの置き場所も同じ決まり: 外へ解決される symlink の下には
+    // ディレクトリを作らない（作ろうとすらしない）こと。
+    let under_link = link.join("gdpr-13-sandbox");
+    assert!(
+        ensure_dir_inside(&root_real, &under_link).is_none(),
+        "外へ解決される symlink の下にはサンドボックスを作らないこと"
+    );
+    assert!(
+        !under_link.exists(),
+        "外への symlink の先に何も作っていないこと"
+    );
+    // 対照: worktree 内の実パスなら作れること。
+    let inside_probe = sandbox.join("ensure-dir-probe");
+    let ensured = ensure_dir_inside(&root_real, &inside_probe)
+        .expect("worktree 内の実パスにはサンドボックスと同じ仕組みでディレクトリを作れること");
+    assert!(ensured.starts_with(&root_real) && ensured.is_dir());
+    fs::remove_dir(&inside_probe).expect("対照ディレクトリを消すこと");
+
+    // 後片付け（worktree の中だけ）。
+    fs::remove_file(&link).expect("symlink を消すこと");
+    fs::remove_file(&bait_file).expect("陽性対照のファイルを消すこと");
+    fs::remove_dir(&probe).expect("陽性対照のディレクトリを消すこと");
+    assert!(!probe.exists(), "陽性対照を残していないこと");
 }
