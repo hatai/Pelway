@@ -1005,3 +1005,111 @@
   - getrandom(2) の直接使用（`/dev/urandom` より推奨される場合がある）は新依存に
     なるため不使用。Linux 以外の OS の CSPRNG パスは想定外。
   - salt の再読み込み・ローテーション、プロセス間での salt 共有は対象外。
+
+### 2026-11-10 第16枠（QA-GDPR-07 salt 追補 r2・salt の読み込み元を公開経路から外す・GLM 枠）
+- start: 2026-11-10 00:26 JST頃（追補依頼「be-salt-u2」の受領後）
+- stop:  2026-11-10 00:48 JST（`date` で確認。コミットはこの後）
+- glm: long（T3 Code 上で GLM が実装。依頼の決まり文句どおり）
+- worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-backend-gdpr-07-salt-r2`、branch
+  `demo-t3/backend-gdpr-07-salt-r2`（base `9d8ab09` = 第15枠の worklog コミット）
+- 開始時の確認: HEAD `9d8ab09`（指定と一致）、`git status --porcelain` 空。
+- AGENTS.md の「Prior art first」（GitHub 検索）: 外部ネットワーク接続禁止のため未実施
+  （第13〜15枠と同じ）。
+- skills: Matt Pocock Agent Skills の `tdd` のみ（他は足さず）。red → green。
+- 目的: `serve_with_logger_salt_from` は salt を読むパスを**公開の引数**で受けており、
+  本番の呼び出し側が `/dev/urandom` 以外（固定内容のファイルなど）を渡せてしまった。
+  公開の入口を salt 必ず `log::SALT_SOURCE`（`/dev/urandom`）から読む形だけにする。
+- 内容（`crates/pelway-http` のみ。Cargo.toml・Cargo.lock 不变、新クレートなし、
+  標準ライブラリだけ。実装が実行時に読むファイルは `/dev/urandom` だけ
+  ＝依頼の例外1つ。エージェント自身が `/dev/urandom` を読んでいない）:
+  - 変えたファイル:
+    - `src/lib.rs`: 公開入口 `serve_with_logger_urandom(addr, ledger, sink)` を追加
+      （パス引数なし。`log::SALT_SOURCE` 固定で後述の `pub(crate)` 版へ委譲）。
+      `serve_with_logger_salt_from(addr, ledger, sink, salt_path)` は `pub` →
+      `pub(crate)` にして公開から外す（`#[doc(hidden)]` は付けていない。単に
+      クレート外から見えない）。doc コメントは「`serve_with_logger_urandom` の実体・
+      採取元を引数に受けるのはクレート内部のテストだけ」と書き換え。
+      `serve_with_logger`（固定 salt の `Arc<Logger>` を渡す形）は**形を変えず**
+      doc に「テストと既知 salt の検証用。本番では `/dev/urandom` 固定の入口
+      （`serve_with_logger_urandom`）を使う」と追記。クレート先頭のモジュールdoc の
+      ログ説明も新しい入口に差し替え。`#[cfg(test)] mod tests` を新設し、
+      (s2) `serve_with_failing_salt_source_returns_err_without_listening` を移設。
+    - `tests/no_body_logs.rs`: (g) として置いていた (s2) を削除し、移設先を明記する
+      コメントだけ残した。`serve_with_logger_salt_from` の import も削除。
+    - `examples/demo-log-emit.rs`: `serve_with_logger_urandom` に切り替え
+      （`Path::new(SALT_SOURCE)` と `std::path::Path`・`SALT_SOURCE` の import を削除。
+      salt はこの入口が `/dev/urandom` から読む）。doc ヘッダーも更新。
+- 「公開の入口がパスを取らないこと」のテストについて: これは**コンパイル時の性質**
+  （シグネチャと可視性）なので、ランタイムのテストとして置けない。代わりに:
+  (i) 公開入口はパス引数を持たないシグネチャそのもの、(ii) rustc の可視性検査を
+  証拠として確認 — 結合テストから一時的に `use pelway_http::serve_with_logger_salt_from;`
+  したところ `error[E0603]: function serve_with_logger_salt_from is private`
+  （`cargo test --offline -p pelway-http --test no_body_logs` → exit 101）。
+  確認後すぐに戻した（`git diff` で一時行なしを確認）。
+- red-first の証拠（tdd）: まず (s2) を `src/lib.rs` の単体テストに移し、
+  `serve_with_logger_salt_from` を足場（`read_salt_from(...).unwrap_or([0u8; 32])`
+  で読み取り失敗を握りつぶして常に Ok）に差し替えて実行:
+  - `cargo test --offline -p pelway-http --lib` → **exit 101、7 passed / 1 failed**。
+    失敗の要点（コンパイルエラーではなく挙動の失敗）:
+    - (s2) `panicked at ...: salt の読み取りに失敗したら起動は Err: ()`
+      — 足場がフォールバックで `Ok`（リスナー起動）を返したため。
+- green の証拠: 足場を本実装（`map_err(ServeError::Io)`、フォールバックなし）に
+  置き換え、`serve_with_logger_urandom` を追加して:
+  - `cargo test --offline -p pelway-http --lib` → exit 0（**8 passed**。log 7 + 移した (s2) 1）。
+  - `cargo test --offline -p pelway-http` → exit 0（単体 8・結合 http 26・
+    no_body_logs 6・doc-tests 0、すべて passed）。
+- 検証（コマンドと exit code、オフライン）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy --workspace --all-targets --offline -- -D warnings` 0
+  - `cargo test --offline --workspace` 0（**計 109 passed / 0 failed / 0 ignored**:
+    at-rest 単体 8・aead 12・contract 単体 38・serde_contract 10・dev-smoke 単体 0
+    ＋smoke 1・http 単体 8・http 結合 26・no_body_logs 6。doc-tests は各 0）
+  - 件数の変化（(s2) の移動）: http 単体 7 → **8**（+1）、no_body_logs 7 → **6**
+    （−1）。合計は第15枠と同じ 109（移動であって増減なし）。
+    (s1)・(s3)・(s4)（`src/log.rs` 単体）と no_body_logs 既存6件 (a)〜(f) は
+    無変更で通過。
+- ログの取り直し（前回=第15枠と同じ手順）:
+  - `mkdir -p target/demo-logs` → `cargo run --offline -p pelway-http --example
+    demo-log-emit 2> target/demo-logs/stderr.txt` → exit 0、stdout
+    「demo-log-emit: statuses = [200, 200, 409, 400, 500]」。
+  - `target/demo-logs/backend.jsonl`: **16 行**（前回と同じ構成: request_received 5・
+    responded 5・comment_saved 1・approved 1・simulated_send 1・rejected 2・
+    internal_error 1。仮名 `pid:` は 8 行）、
+    sha256 `f98b84245f673db5e9f6d78f20dd6654b28d80ac6ff2c82ac05ac87f88ebb8db`。
+    ※salt が実ランダムなのでハッシュは毎回変わる（行数・構成が同じことが確認点）。
+  - `target/demo-logs/stderr.txt`: **13 行**（前回 16 行からの差は cargo のビルド
+    メッセージの構成差（キャッシュ）。poison 用 panic の固定語句のみで canary なし）、
+    sha256 `02188d092fe9bd7ec44f125d68b543cd49d1b32ff9b579b2315acfcf5b5bf99c`。
+  - canary 走査 `rg -c 'PELWAY-CANARY-BODY-7Q2M9X|PELWAY-CANARY-SECRET-4K8T1Z|
+    3f6c2a9e-8b1d-4c7a-9e2f-5a1b7c3d9e04' target/demo-logs/` → 出力なし・exit 1
+    （3種とも 0 件）。生 ID（`card-gdpr07|m-human-gdpr07|sim-00000001`）も 0 件。
+- 迷った点（質問で止まらず安全側で進めた）:
+  - 依頼の選択肢は (a)（(s2) を `src/` 内 `#[cfg(test)]` 単体テストへ移し
+    `pub(crate)` 関数を直接呼ぶ）を選んだ。しかし素朴な `pub(crate)` のままだと
+    非テストビルドで唯一の呼び出し方が無くなり、clippy の `-D dead_code` が
+    exit 101 になった。`#[allow(dead_code)]` で握るのも案 (b)（`#[cfg(test)]` 専用の
+    入口）にするのも変だと判断し、**公開入口から `SALT_SOURCE` 固定で `pub(crate)` 版に
+    委譲する形**で解決（実質 (a) のまま。読み込み・bind 前判定の実装は 1 か所で、
+    公開入口は定数以外のパスを構造的に渡せない）。
+  - `serve_with_logger`（固定 salt の `Logger` を渡す形）を変えなかった理由:
+    結合テスト `no_body_logs` の (a)〜(f) が「salt 既知のまま仮名の決定性を検査する」
+    前提でこの入口を使っており、形を変えると既存6件の意味が崩れる。テスト専用と
+    位置づけを doc に明示する方が影響が小さい（依頼4の指定どおり）。
+  - (s2) の移設先を `src/lib.rs` 直下の `mod tests` にした: 移動元が結合テストの
+    末尾 (g) で lib に依存する他の単体テストは `src/log.rs` にあるが、対象関数は
+    lib.rs にあるため同一モジュールツリーの lib.rs 末尾に置いた。
+  - E0603 確認用の一時 import を結合テストに入れた（証拠取得のために一瞬だけ）:
+    worktree の中への一時差し込みで、確認直後に戻し、`git diff --stat` で
+    意図した 3 ファイルのみになっていることを確認した。
+- コミット: 実装とテスト・example（下記コミット SHA 参照）と、この worklog 追記。
+  `target/` の下のログはコミットしない（`/target` は gitignore 済み）。push はしない。
+- 逸脱: なし（worktree の中だけ。push・fetch なし、外部接続なし、破壊的gitなし、
+  `~/.cargo` 不変、cargo はすべて `--offline`、webfetch/websearch/MCP 不使用。
+  `/dev/urandom` は実装・テスト・example の実行時にコードが読んだだけで、
+  エージェント自身は cat していない）。
+- 未検証・未決:
+  - 第15枠の「salt パスを公開引数にした」判断はこの追補で置き換えられた
+    （第15枠の記述は当時の記録として残す）。
+  - `log::process_salt()` は lib から直接呼ばなくなったが、`pub` のまま残す
+    （salt 作成の公開 API。example も今回の入口経由で間接的に使う）。
+  - salt のローテーション・プロセス間共有は引き続き対象外。
