@@ -189,19 +189,19 @@ impl ApprovalLedger {
     ///
     /// 送信承認待ちでないカード（送信中・送信済み等）への保存は
     /// [`CommentError::NotAwaitingApproval`] で断る。コメントで `snapshot_hash` が変わると、
-    /// 予約・疑似送信の記録が持つ予約時の hash と食い違うため。
+    /// 予約・疑似送信の記録が持つ予約時の hash と食い違うため。本文の内容（空白・上限超過）
+    /// より先に状態を確かめ、承認待ちでなければすべて 409 にする（リード決定 16:11）。
     ///
     /// # Errors
-    /// カードが無い、本文が空白だけ、または長すぎる場合（[`validate_comment`]）。
-    /// カードが送信承認待ちでない場合（[`CommentError::NotAwaitingApproval`]、
-    /// `snapshot_hash` は変えない）。
+    /// カードが無い場合。カードが送信承認待ちでない場合
+    /// （[`CommentError::NotAwaitingApproval`]、`snapshot_hash` は変えない）。
+    /// 本文が空白だけ、または長すぎる場合（[`validate_comment`]）。
     pub fn save_comment(
         &mut self,
         author_id: MemberId,
         member_kind: MemberKind,
         req: SaveCommentRequest,
     ) -> Result<CommentSaved, CommentError> {
-        validate_comment(&req.body)?;
         let card = self
             .cards
             .get_mut(&req.card_id)
@@ -209,6 +209,7 @@ impl ApprovalLedger {
         if card.state != TaskState::AwaitingSendApproval {
             return Err(CommentError::NotAwaitingApproval { state: card.state });
         }
+        validate_comment(&req.body)?;
         self.next_comment += 1;
         let comment_id = CommentId(format!("cmt-{:08}", self.next_comment));
         card.comments.push(CardComment {
@@ -556,6 +557,36 @@ mod tests {
             comment(&mut ledger, "card-1", "中止後のメモ").state,
             TaskState::AwaitingSendApproval
         );
+    }
+
+    #[test]
+    fn invalid_body_on_non_awaiting_card_returns_409_not_422() {
+        // リード決定（16:11）: AwaitingSendApproval 以外のすべての状態で 409 not_awaiting_approval。
+        // 本文の検証（422）より状態の検査（409）が先。
+        let blank = " \n ".to_owned();
+        let over = "あ".repeat(COMMENT_MAX_CHARS + 1);
+        let mut sent = ledger_with_card("card-1");
+        sent.approve(current_req(&sent, "card-1", "a")).unwrap();
+        let mut sending = ledger_with_card("card-2");
+        let sending_req = current_req(&sending, "card-2", "a");
+        let _ticket = reserve(&mut sending, &sending_req);
+        for (ledger, card, state) in [
+            (&mut sent, "card-1", TaskState::SentAwaitingReply),
+            (&mut sending, "card-2", TaskState::Sending),
+        ] {
+            for body in [&blank, &over] {
+                let res = ledger.save_comment(
+                    "m-human-1".into(),
+                    MemberKind::Human,
+                    SaveCommentRequest {
+                        card_id: card.into(),
+                        body: body.clone(),
+                    },
+                );
+                assert_eq!(res, Err(CommentError::NotAwaitingApproval { state }));
+                assert_eq!(res.unwrap_err().http_status(), 409);
+            }
+        }
     }
 
     #[test]
