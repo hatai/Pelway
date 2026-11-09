@@ -31,25 +31,7 @@ Pelway名と選定済みAロゴを維持します。同名のAI教育製品に�
 
 ## ローカル開発環境の構築
 
-言語・ツール・環境変数は [mise](https://mise.jdx.dev) で、git hook は [hk](https://hk.jdx.dev) で、シークレットは [fnox](https://fnox.jdx.dev) で管理します。バージョンとタスクは `mise.toml` に定義します。詳細な手順と採否の記録は [ローカル開発環境](docs/dev-environment.md) を参照してください。
-
-前提: mise 2026.9.2 以上（これ未満では `mise.toml` の `min_version` がエラーで停止します）。未導入の場合は [公式のインストール手順](https://mise.jdx.dev/installing-mise.html) に従ってください。
-
-```bash
-# 1. このリポジトリの mise 設定を信頼する（初回のみ）
-mise trust
-
-# 2. 環境構築を1コマンドで完了させる
-#    ツール一式（Rust 1.96.0・hk・fnox・pitchfork・mr boxington）→
-#    rootless Podman 一式（確認プロンプトと sudo のパスワード入力があります）→
-#    git hook の導入 → fmt / check / clippy / test / build の一括確認
-mise bootstrap
-```
-
-- 日常のタスクは `mise run fmt` / `check` / `clippy` / `test` / `build` / `verify` を使います。
-- `git commit` では hk の品質ゲート（fmt・clippy `-D warnings`・check）、`git push` では `cargo test` が走る構成です。失敗したら `mise run fmt` や `mise exec -- hk fix` で直します。
-- `crates/dev-smoke` とルートの `Cargo.toml` は環境確認用のスケルトンであり、製品機能のコードではありません。
-- コンテナは Windows では WSL2 内の rootless Podman、macOS では Apple container を使い、Docker には依存しません。
+ローカル開発環境の構築手順・日常のタスク・git hook・シークレットの扱い・コンテナ（Docker 不使用）の方針は、[ローカル開発環境](docs/dev-environment.md) に一元化しています。要点は `mise trust` → `mise bootstrap` の2コマンドで構築が完了することです（rootless Podman の導入時に確認プロンプトと sudo のパスワード入力があります）。言語・ツール・環境変数は [mise](https://mise.jdx.dev) で管理します。
 
 ## AIエージェントでの開発の進め方
 
