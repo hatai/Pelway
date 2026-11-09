@@ -86,7 +86,9 @@ export global DesignTokens {
 // 現在のテーマ。安定名の定義元は Rust の Theme enum（src/theme.rs）。
 // テーマを切り替える画面は作らない。
 export global ThemeState {
-    out property <string> current-name;
+    // Rust（Theme::name()）から受け取る。out だと Rust から値を渡せない
+    // （setter が空のスタブになる）ため in-out にする（第9枠に記録）。
+    in-out property <string> current-name;
 }
 
 // ---- 小さい部品 ----
@@ -113,14 +115,18 @@ component AiBadgeView inherits Rectangle {
     height: 14px;
     border-radius: 6px;
     background: DesignTokens.ai-badge-bg;
-    padding-left: 4px;
-    padding-right: 4px;
-    Text {
-        text: root.label;
-        color: DesignTokens.ai-badge-fg;
-        font-size: 10px;
-        font-weight: 500;
-        vertical-alignment: center;
+    // 注: padding は layout 要素にしか効かないため、中に HorizontalLayout を置く
+    // （第9枠に記録。左右 4px の余白で「AI」の文字を置く）。
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        Text {
+            text: root.label;
+            color: DesignTokens.ai-badge-fg;
+            font-size: 10px;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
     }
 }
 
@@ -128,7 +134,7 @@ component AiBadgeView inherits Rectangle {
 component RailRow inherits Rectangle {
     in property <string> label;
     in property <bool> selected: false;
-    out property <callback> pressed();
+    callback pressed();
     height: 32px;
     border-radius: 12px;
     background: root.selected ? DesignTokens.selected-wash : DesignTokens.tile;
@@ -182,7 +188,9 @@ component GroupLabel inherits Text {
 component LinkText inherits Text {
     color: DesignTokens.link;
     font-size: 13px;
-    underline: true;
+    // 注: Slint 1.18 の Text に underline のプロパティはないため下線は付かない
+    // （第9枠に記録）。押されたことを外に伝える callback。
+    callback touched();
 }
 
 // ---- 左の列（rail） ----
@@ -213,7 +221,7 @@ component RailView inherits Rectangle {
     in property <string> data-ai-2-presence;
     in property <string> data-ai-3;
     in property <string> data-ai-3-presence;
-    out property <callback> today-pressed();
+    callback today-pressed();
     VerticalLayout {
         padding: 20px;
         spacing: 2px;
@@ -569,7 +577,7 @@ component ThreadLead inherits Rectangle {
     in property <string> tr-thread-view-work;
     in property <bool> data-working: false;
     in property <bool> data-done: true;
-    out property <callback> view-work-pressed();
+    callback view-work-pressed();
     height: 28px;
     border-radius: 12px;
     background: DesignTokens.well;
@@ -634,7 +642,7 @@ component HandoffCardView inherits Rectangle {
     in property <bool> data-acknowledged: true;
     in property <string> data-option-a;
     in property <string> data-option-b;
-    out property <callback> acknowledge-pressed();
+    callback acknowledge-pressed();
     background: DesignTokens.well;
     border-radius: 14px;
     VerticalLayout {
@@ -764,8 +772,8 @@ component ExternalSendCardView inherits Rectangle {
     in property <string> data-basis;
     in property <string> data-body;
     in property <bool> data-sent: false;
-    out property <callback> send-pressed();
-    out property <callback> fix-pressed();
+    callback send-pressed();
+    callback fix-pressed();
     background: DesignTokens.ext-bg;
     border-radius: 18px;
     VerticalLayout {
@@ -929,10 +937,10 @@ component ChannelView inherits Rectangle {
     in property <string> data-ext-basis;
     in property <string> data-ext-body;
     in property <bool> data-ext-sent: false;
-    out property <callback> send-pressed();
-    out property <callback> fix-pressed();
-    out property <callback> acknowledge-pressed();
-    out property <callback> view-work-pressed();
+    callback send-pressed();
+    callback fix-pressed();
+    callback acknowledge-pressed();
+    callback view-work-pressed();
     background: DesignTokens.tile;
     VerticalLayout {
         // 時系列
@@ -991,7 +999,8 @@ component ChannelView inherits Rectangle {
                     Rectangle {
                         height: 1px;
                         background: DesignTokens.unread;
-                        vertical-alignment: center;
+                        // 注: Rectangle に vertical-alignment はない。HorizontalLayout の
+                        // 交差軸で固定サイズの子は中央に置かれる（第9枠に記録）。
                     }
                 }
                 HandoffCardView {
@@ -1067,7 +1076,7 @@ component ChannelView inherits Rectangle {
                             vertical-alignment: center;
                         }
                     }
-                    composer-ta := TouchArea {}
+                    composer-ta := FocusScope {}
                 }
             }
         }
@@ -1098,8 +1107,8 @@ component ThreadPaneView inherits Rectangle {
     in property <string> data-msg2-time;
     in property <string> data-msg2-body;
     in property <bool> data-done: true;
-    out property <callback> close-pressed();
-    out property <callback> view-work-pressed();
+    callback close-pressed();
+    callback view-work-pressed();
     background: DesignTokens.tile;
     border-radius: 24px;
     VerticalLayout {
@@ -1183,7 +1192,7 @@ component ThreadPaneView inherits Rectangle {
                     vertical-alignment: center;
                 }
             }
-            reply-ta := TouchArea {}
+            reply-ta := FocusScope {}
         }
     }
 }
@@ -1206,7 +1215,7 @@ component AiWorkPaneView inherits Rectangle {
     in property <string> data-log1-text;
     in property <string> data-log2-time;
     in property <string> data-log2-text;
-    out property <callback> back-pressed();
+    callback back-pressed();
     background: DesignTokens.tile;
     border-radius: 24px;
     VerticalLayout {
@@ -1423,13 +1432,13 @@ export component MainWindow inherits Window {
     in property <string> data-ai-work-log2-time;
     in property <string> data-ai-work-log2-text;
 
-    out property <callback> today-pressed();
-    out property <callback> send-pressed();
-    out property <callback> fix-pressed();
-    out property <callback> acknowledge-pressed();
-    out property <callback> close-pane-pressed();
-    out property <callback> back-to-thread-pressed();
-    out property <callback> view-work-pressed();
+    callback today-pressed();
+    callback send-pressed();
+    callback fix-pressed();
+    callback acknowledge-pressed();
+    callback close-pane-pressed();
+    callback back-to-thread-pressed();
+    callback view-work-pressed();
 
     background: DesignTokens.bg;
     HorizontalLayout {
