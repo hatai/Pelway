@@ -285,3 +285,53 @@
   - 17:30 の記録にある `light-accessible`・`dark-accessible` は古い名前のまま使っていない（`from_name` は引き続き拒否。テストで確認）。
   - 正本 JSON の `mobile` 上書き・`color` 以外のグループ（`space`・`size`・`radius` 等）は `TOKEN_NAMES` の対象外のまま（デスクトップの色トークンだけが今の対象）。
 - ネットワーク・書き込み範囲: cargo はすべて `CARGO_NET_OFFLINE=true` + `--offline`（lock 更新の 1 回だけ `--locked` を外した）。`cargo fetch`・`cargo update`・`cargo add` は不使用。worktree の外への書き込みなし（一時ファイルは worktree 内の `target/` のみ。前回のような `/tmp/opencode` への出力はしていない）。git の push・fetch なし。`crates/pelway-client-core` は変更なし。
+
+### 2026-11-09 第10枠（段階B-2：Codex 第5回指摘の修正・トークンの値・Fluent）
+- start: 2026-11-09 22:50 JST
+- stop:  2026-11-09 23:50 JST
+- glm: long（T3 Code スレッドで OpenCode + zai-coding-plan/glm-5.3 が実装。起点 `f41c276` の worktree `demo-t3-client-ui-r4` で実施）
+- 使った skills: tdd と verification-before-completion の考え方に従った（ファイルは worktree 外のため読んでいない）。各項目でテストを先に書いて落ちることを確かめてから直し、最後に指定のコマンドを全部動かして exit code を記録した。
+- 対象: 指示書「Slint の画面の骨組み 段階B-2」の §2-1（Codex 第5回レビューの should-fix 2件）・§2-2（トークンの値）・§2-3（Fluent）。§2-4（accessible・窓を開く・LinkText.touched の発火・KeySource・Clock・Effect・About・フォント）は手を付けていない。コミットは3件＋作業ログ1件（`f41c276` の後ろへ。push はしていない）。
+- 最初の確認: `pwd` = worktree `demo-t3-client-ui-r4`、ブランチ `demo-t3/client-ui-r4`、HEAD `f41c276`、`git status --short` 空（引き継ぎどおり）。
+- 2-1（Codex 第5回指摘の修正。コミット `689c115`）:
+  - 指摘1（写しと正本の一致）: `tests/theme_tokens.rs` に `token_copy_bytes_match_canonical_by_sha256` を追加。`tokens/pelway.tokens.json` のバイト列の SHA-256 が `4f523ce19145250df391975dea3924aa7b5bdcbd417c0c31e910f3b17c543953` に一致することを確かめる。
+  - **SHA-256 の計算方法: sha2 は使わず std だけの実装をテスト内に書いた**。理由: `Cargo.lock` に sha2（とその依存一式）が入っていない（`grep '^name = "sha2"'` が 0 件）。オフラインで dev-dependencies に足しても解決できる保証がなく、lock を動かすリスクを避けた。実装の正しさは `sha256_known_answers`（FIPS 180-4 の既知の答え: 空の入力と `abc`）で確認する。
+  - 赤→緑（指摘1）: 写しの1バイトを変えて（`$extensions.pelway.generated` の日付を1文字）`cargo test -p pelway-client-ui --test theme_tokens --locked --offline` が **exit 101**（`token_copy_bytes_match_canonical_by_sha256` が FAILED、ほか9件は合格）。`git checkout -- crates/pelway-client-ui/tokens/pelway.tokens.json` で戻して **exit 0**（10件合格）。`sha256sum` が上の値に戻り、`git diff --stat` から tokens JSON が消えたことも確認。
+  - 指摘2（build.rs の走査漏れ）: `tests/no_color_values.rs` の `source_files()` にクレート直下の `build.rs` を加えた（`.rs` の決まり。`.json` は引き続き対象外）。`bundled_slint_and_ftl_are_part_of_the_scan` にも build.rs の存在確認を追加。
+  - 赤→緑（指摘2）: build.rs に色の値のパターンを一時的に1つ入れて（パターンそのものはここにも書かない）`cargo test -p pelway-client-ui --test no_color_values --locked --offline` が **exit 101**（`no_color_values_anywhere_in_the_crate` が FAILED）。戻して **exit 0**（4件合格）。build.rs の差分が消えたことを確認。
+- 2-2（トークンに値を入れる。コミット `3e41cb5`）:
+  - **読み方: (b) `include_str!` で JSON を実行形式に取り込み、実行時に標準ライブラリだけで読む**。理由: build.rs は slint のコンパイルだけに保てる（読み方 a のコード生成を足さない）、JSON を読む crate を新しく足さない、テストと同じ std の最小の読み取り器で済む。`LazyLock` で初回呼び出しのときに 1 回だけパースする。`Cargo.lock`・`Cargo.toml` はこの項目では変更していない。
+  - 値の出どころは `tokens/pelway.tokens.json` の `color.<theme>` の直下だけ。`$value` は DTCG 形式（`colorSpace: "srgb"`・`components: [r, g, b]`・`alpha`、すべて 0〜1）で、`slint::Color::from_argb_f32` で色にする。`mobile` の上書きは使っていない。
+  - **読めないトークン: `avatar-human-bg-section`（4テーマすべて）**。`$value` が `{color.<theme>.avatar-human-bg}` の形の参照（DTCG のエイリアス）のため、自分で参照を解決せず値なし（`token_value` が `None`）のまま。**62名中 61 名に値を入れた**。テスト側に `UNREADABLE_TOKENS` として明記し、正本がこの形をやめたら落ちる検査（`unreadable_tokens_match_canonical_json_forms`）も置いた。
+  - `token_value` は `Option<slint::Color>` を返す形に変更（旧: `Option<&'static str>`・常に `None`）。`apply_design_tokens(&MainWindow, Theme)` が `DesignTokens` グローバルの全プロパティ（50）に値を設定する。
+  - `ui/main.slint` の `DesignTokens` を `out property` から `in-out property` に変更（第9枠の予見どおり、out のグローバルは Rust から setter 経由で値を渡せないため）。初期値は付けていない（.slint に色の値を書かない決まりは不変）。`tests/theme_tokens.rs` の `slint_does_not_define_its_own_token_names` を `in-out property <brush>` の行を読む形に更新（検査の意味は弱めていない）。
+  - テスト: `token_values_match_canonical_json` —— 4テーマ × 61トークン（読めない1名を除く）で、Rust が返す値の各チャネル（alpha/red/green/blue）が JSON の成分 × 255 と **1 以内の差**で一致すること。許容を付けた理由: JSON の f64 と Slint の色の u8 チャネルの間の丸め（`from_argb_f32` の丸め方の実装差を含む）で 1 LSB ずれる余地があるため。`token_values_are_not_filled_yet`（値を入れていないことの検査）は値を入れたため削除。
+  - `tests/slint_window.rs`: `apply_design_tokens` で light→dark に切り替えると `DesignTokens.bg`・`ink` の値が変わることを確認（`i-slint-backend-testing`。窓は開かない）。
+  - 赤→緑: まずスタブ（`token_value` は常に `None`・`apply_design_tokens` は何もしない）で `token_values_match_canonical_json` と `slint_window` が **exit 101**。実装して **exit 0**。
+- 2-3（Fluent。コミット `01a26a1`）:
+  - `fluent-bundle`・`unic-langid` は `Cargo.lock` に無かったが、`Cargo.toml` に `fluent-bundle = "0.15"`・`unic-langid = "0.9"` を足して `CARGO_NET_OFFLINE=true cargo check -p pelway-client-ui --offline`（`--locked` なし・1回だけ）を動かしたら **成功**（exit 0）。icu4x 一式（icu_provider 等）は slint 経由で既に lock に入っていたため、新規のダウンロードは要らなかった（手元のキャッシュで解決）。
+  - `Cargo.lock`: +97 行。**追加された package は 10**（`+name = ` が 10 件）: fluent-bundle 0.15.3・fluent-langneg 0.13.1・fluent-syntax 0.11.1・intl-memoizer 0.5.3・intl_pluralrules 7.0.2・self_cell 0.10.3 と 1.3.0（2版併存）・type-map 0.5.1・unic-langid 0.9.6・unic-langid-impl 0.9.6。**既存 package の版の変更・項目の再配置は 0 件**（`git diff Cargo.lock` の `-` 行は diff ヘッダのみ）。
+  - `src/i18n.rs`: `Messages::new("ja"/"en")`（`.ftl` は `include_str!` で取り込み、実行時にファイルを読まない）・`message(key, vars)`（Fluent の整形に誤りが出たら `None`）・`apply_translations(window, messages, vars)`（`USED_KEYS` 全 49 キーを `tr-*` に渡し、渡せなかったキーのリストを返す）。`@tr()` は使っていない（前の回の判断のまま）。英語は仮訳のまま。
+  - 変数（`{ $name }` 等8種）は `FluentVars::sample()` の仮の値（合成データと同じ架空の値）を全キーに渡している。**既知の限界: `.ftl` の `$to` が `mention-read-range`（読んだ範囲の終わり＝時刻）と `ext-card-question`（メールの宛先＝人）の二役のため、1 組の仮値では両方の意味は同時に満たせない**。画面のデータとの結合は B-3 以降のためそのままにし、ここに記録する（`.ftl` は承認済みの文言なので書き換えない）。
+  - テスト: `tests/i18n_fluent.rs`（3件）—— ja/en の bundle が作れること・他の言語（fr・空文字列）は拒むこと、日英それぞれで `USED_KEYS` 全キーが `Some` かつ空でないこと（Fluent の誤りが出たら `None` になるので、これで誤りなしを検査）、無いキーは `None`。`tests/slint_window.rs` —— ja を適用して `tr-rail-today`・`tr-unread-divider` が ja の文言、en に切り替えると `tr-rail-today` が en の文言になること（窓は開かない。文言の本文は出力していない）。
+  - 赤→緑: スタブ（`new` は常に `None`）で `i18n_fluent` 3件と `slint_window` 1件が **exit 101**。実装して **exit 0**。
+- 検証（コマンドと exit code。すべて `CARGO_NET_OFFLINE=true` 付き。HEAD `01a26a1` で）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 0
+  - `cargo test --workspace --locked --offline` 0（pelway-client-core 54 件: approval 24・contract 14・input 16 ／ pelway-client-ui 35 件: bridge 10・i18n_fluent 3・i18n_keys 6・no_color_values 4・slint_window 1・theme_tokens 11 ／ pelway-dev-smoke 1 件、失敗 0、合計 90）
+  - `cargo build -p pelway-client-ui --locked --offline` 0（build.rs 経由で `ui/main.slint` を含むビルド）
+  - `git status --short`（最終確認時）: 空（このログの追記前）
+  - `tokens/pelway.tokens.json` の sha256 は最終確認時も `4f523ce19145250df391975dea3924aa7b5bdcbd417c0c31e910f3b17c543953`（変更なし）
+- 未検証・未決:
+  - **U01〜U07 は未決のまま**。U05（Slint のライセンス）に加え、**fluent 関連 crate のライセンス表示をどこにどう出すかも未決**（fluent-bundle 0.15.3 は MPL-2.0 / Apache-2.0 デュアルライセンス。About 画面は作っていない）。
+  - **窓を開いての確認はしていない**（デザイン担当・QA が別に行う）。テーマを切り替えたときの実際の見た目も未検証（testing backend での値の検査のみ）。
+  - `avatar-human-bg-section` は値なしのまま（正本が参照をやめたら `unreadable_tokens_match_canonical_json_forms` が落ちて気付く）。
+  - `FluentVars` は仮の固定値。`$to` の二役（上記）は結合の段階で直す。
+  - accessible-role / accessible-label・`LinkText.touched` の発火入力・本物の `KeySource`（UUID）と `Clock`（実時間）・`Effect` の通信への接続・About 画面・フォントの同梱は B-3 以降。
+  - 17:30 の記録の `light-accessible`・`dark-accessible` は引き続き不使用（`from_name` が拒否するのをテストで確認）。
+- 迷って安全側にした点:
+  - sha2 を足さず std 実装にした（上記の理由。lock を動かさず、ダウンロード不可でも確実）。
+  - 参照トークン（`avatar-human-bg-section`）を自分で解決せず `None` のまま（指示どおり「自分で値を作らない」）。
+  - 値の照合に ±1/255 の許容を付けた（丸めの実装差で偽陰性を出さないため。緩すぎる検査にはならない程度の最小限）。
+  - `$to` の二役にどちらかの意味を固定せず、そのまま1組の仮値を渡して結合段階に先送り（承認済みの `.ftl` を書き換えない）。
+- ネットワーク・書き込み範囲: cargo はすべて `CARGO_NET_OFFLINE=true` + `--offline`（lock 更新の 1 回だけ `--locked` を外した）。`cargo fetch`・`cargo update`・`cargo add` は不使用。worktree の外への書き込みなし（`/tmp` を含む。一時ファイルは worktree 内の `target/` のみで、赤の確認後に削除済み）。git の push・fetch なし。amend・rebase・reset・stash・force・`--no-verify` も不使用。`crates/pelway-client-core` は変更なし。
