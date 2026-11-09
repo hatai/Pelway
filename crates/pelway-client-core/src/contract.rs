@@ -1,15 +1,33 @@
 // 99ee013 の写し。統合のときに差し替える
-//! 承認 API 契約の仮写し。原本はブランチ `demo-t3/backend` の commit 99ee013
-//! `crates/pelway-contract`（`src/approval.rs`・`src/ids.rs`・`src/task.rs`）。
-//! 統合時にこのファイルを差し替える。
+//! 承認 API 契約の仮写し（部分写し）。原本はブランチ `demo-t3/backend` の commit
+//! 99ee013 `crates/pelway-contract`。このファイルは原本と同形ではなく、
+//! クライアントコアが必要とする部分だけを写している。統合時に差し替える。
 //!
-//! 写した範囲: コメント本文の検査（[`COMMENT_MAX_CHARS`]・[`comment_len`]・
-//! [`validate_comment`]）、承認 API のエラー（[`ApproveError`]）とエラーコード、
-//! 状態機械が必要とする要求・応答型と ID。値と数え方（コードポイント数）は変えない。
+//! # 原本のどこから何を写したか
 //!
-//! この crate は外部依存を持たないため、原本の serde derive は外してある。
+//! - `src/approval.rs`（99ee013）から写したもの:
+//!   [`COMMENT_MAX_CHARS`]・[`comment_len`]・[`validate_comment`]（コメント本文の
+//!   検査。数え方はコードポイント数のまま）、[`SaveCommentRequest`]・
+//!   [`CommentSaved`]・[`ApproveRequest`]（[`ApproveRequest::check_path`] 含む）・
+//!   [`ApproveOutcome`]・[`ApproveError`]（`http_status` 含む）・[`CommentError`]
+//!   （`http_status` 含む。99ee013 で追加された `NotAwaitingApproval` を含む）。
+//! - `src/approval.rs` から**省いた**もの: `COMMENTS_PATH`・`APPROVE_PATH` の定数、
+//!   `ApprovalCard`・`CardComment`（この crate は状態機械独自の
+//!   [`crate::approval::CardView`] を使う）。
+//! - `src/ids.rs` から足したもの: `string_id!` マクロと [`CardId`]・[`CommentId`]・
+//!   [`SimulatedSendId`]、[`IdempotencyKey`]（`InvalidIdempotencyKey` 含む）。
+//!   `WorkspaceId` 等の残りの ID は省いた。
+//! - `src/task.rs` から足したもの: [`TaskState`]（`is_send_side` 含む）。`ActionKind`
+//!   は省いた。
+//! - `src/member.rs`・`src/message.rs`・`src/snapshot.rs`・`src/ledger.rs` は写していない。
+//!   （ids.rs と task.rs は 4564e88 と 99ee013 で同一のため、由来の表記は 99ee013 に統一。）
+//!
+//! # serde 属性の代わり
+//!
+//! この crate は外部依存を持たないため、原本の `#[cfg_attr(feature = "serde", ...)]`
+//! derive と `#[serde(tag = "code", rename_all = "snake_case")]` 属性は外してある。
 //! ワイヤ上のエラーコード（serde タグ `snake_case` の値）は [`ApproveError::code`]
-//! が同じ文字列を返す。
+//! と [`CommentError::code`] が同じ文字列を返す。`http_status()` の値は原本のまま。
 
 use std::fmt;
 

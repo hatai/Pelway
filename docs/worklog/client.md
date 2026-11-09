@@ -144,3 +144,23 @@
   - `cargo fmt --all --check` 0
   - `cargo clippy -p pelway-client-core --all-targets --locked --offline -- -D warnings` 0
   - `cargo test -p pelway-client-core --locked --offline` 0（52 件: approval 24・contract 14・input 14、失敗 0）
+
+### 2026-11-09 第5枠（レビュー指摘3・4の修正。開発リード判断 17:5x JST）
+- start: 2026-11-09 17:58 JST
+- stop:  2026-11-09 18:08 JST
+- glm: long（T3 Code スレッドで OpenCode + zai-coding-plan/glm-5.3 が実装）
+- 使った skills: verification-before-completion（原本との照合をコマンドで確認してから書き直した）。テストが先に失敗するのを見たか: 未確認（この枠はドキュメントコメントとコメントの書き直しが中心で、振る舞いを変えないため既存 52 件の通過確認のみ）。
+- 指摘3・4は開発リードの判断（2026-11-09 17:5x JST）で直すことになった（前枠では判断待ちとして保留していたもの）。
+- 写し元を確かめたコマンドと結果:
+  - `git diff 4564e88 99ee013 -- crates/pelway-contract/src/approval.rs` → 差分は (a) API 表の doc 1 行、(b) `CommentError` への `NotAwaitingApproval { state }` 追加、(c) `http_status` への 409 行追加、(d) `TooLong` の整形のみ。
+  - `git diff --stat 4564e88 99ee013 -- crates/pelway-contract/src/ids.rs crates/pelway-contract/src/task.rs crates/pelway-contract/src/member.rs` → 出力なし（ids.rs・task.rs は両コミットで同一）。
+  - `crates/pelway-client-core/src/contract.rs` は `CommentError::NotAwaitingApproval` を含む（99ee013 版）ため、**写し元は 99ee013**。
+- 内容:
+  - 指摘3: `src/contract.rs` の先頭説明を事実どおりに書き直した。99ee013 の `approval.rs` から写したもの（`COMMENT_MAX_CHARS`・`comment_len`・`validate_comment`・`SaveCommentRequest`・`CommentSaved`・`ApproveRequest`（`check_path` 含む）・`ApproveOutcome`・`ApproveError`・`CommentError`、各 `http_status` 含む）、`approval.rs` から省いたもの（`COMMENTS_PATH`・`APPROVE_PATH`・`ApprovalCard`・`CardComment`）、`ids.rs` から足したもの（`string_id!` マクロ・`CardId`・`CommentId`・`SimulatedSendId`・`IdempotencyKey`・`InvalidIdempotencyKey`）、`task.rs` から足したもの（`TaskState`。`ActionKind` は省略）、写していないファイル（`member.rs`・`message.rs`・`snapshot.rs`・`ledger.rs`）、serde 属性の代わりに `ApproveError::code()` / `CommentError::code()` がワイヤのタグ値（`snake_case`）を返すこと、を明記。
+  - 指摘4: 確かめた値（99ee013）に 3 か所をそろえた。`crates/pelway-client-core/Cargo.toml`（4564e88 → 99ee013）、`docs/worklog/client.md`（第2枠の記録は 99ee013 で正しく、この枠に確かめた過程を追記）、`src/contract.rs`（先頭行は第2枠から 99ee013 のまま）。あわせて `src/lib.rs` のモジュール一覧に残っていた `4564e88` の記載も 99ee013 に直した（記載不整合の解消）。
+  - ついでに `cargo doc` の `redundant explicit link target` 警告 4 件（`lib.rs` 3 件・`approval.rs` 1 件）を解消（明示リンクターゲットの削除。前回の `doc_nested_refdefs` 回避と両立する書式に）。
+- 検証（コマンドと exit code）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy -p pelway-client-core --all-targets --locked --offline -- -D warnings` 0
+  - `cargo test -p pelway-client-core --locked --offline` 0（52 件、失敗 0）
+  - `cargo doc -p pelway-client-core --no-deps --locked --offline` 0（警告 0）

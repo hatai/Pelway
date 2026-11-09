@@ -150,7 +150,7 @@ enum Phase {
 
 /// 承認カード 1 枚の状態機械。
 ///
-/// 通信そのものは行わない。[`Effect`](Effect) を呼び出し側が実行し、
+/// 通信そのものは行わない。[`Effect`] を呼び出し側が実行し、
 /// その応答を `on_*` メソッドで戻す。時間が経ったら [`ApprovalMachine::poll`] を
 /// 呼び出す（確認の再試行タイマーの期限が来ていれば確認要求を返す）。
 pub struct ApprovalMachine<K: KeySource, C: Clock> {
