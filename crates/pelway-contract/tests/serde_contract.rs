@@ -105,6 +105,25 @@ fn approve_error_is_tagged_by_code() {
 }
 
 #[test]
+fn comment_error_not_awaiting_approval_is_tagged_with_state() {
+    let json = serde_json::to_string(&CommentError::NotAwaitingApproval {
+        state: TaskState::Sending,
+    })
+    .unwrap();
+    assert_eq!(
+        json,
+        r#"{"code":"not_awaiting_approval","state":"sending"}"#
+    );
+    let round: CommentError = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        round,
+        CommentError::NotAwaitingApproval {
+            state: TaskState::Sending
+        }
+    );
+}
+
+#[test]
 fn comment_limit_is_importable_and_counts_code_points() {
     // クライアントが取り込む公開の定数と関数。
     assert_eq!(COMMENT_MAX_CHARS, 4000);

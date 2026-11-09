@@ -187,8 +187,14 @@ impl ApprovalLedger {
     /// コメントを保存する。**状態も `card_version` も変えず、送信もしない。**
     /// コメントは `snapshot_hash` に含まれるので、保存後の新しい `snapshot_hash` を返す。
     ///
+    /// 送信承認待ちでないカード（送信中・送信済み等）への保存は
+    /// [`CommentError::NotAwaitingApproval`] で断る。コメントで `snapshot_hash` が変わると、
+    /// 予約・疑似送信の記録が持つ予約時の hash と食い違うため。
+    ///
     /// # Errors
     /// カードが無い、本文が空白だけ、または長すぎる場合（[`validate_comment`]）。
+    /// カードが送信承認待ちでない場合（[`CommentError::NotAwaitingApproval`]、
+    /// `snapshot_hash` は変えない）。
     pub fn save_comment(
         &mut self,
         author_id: MemberId,
@@ -200,6 +206,9 @@ impl ApprovalLedger {
             .cards
             .get_mut(&req.card_id)
             .ok_or(CommentError::CardNotFound)?;
+        if card.state != TaskState::AwaitingSendApproval {
+            return Err(CommentError::NotAwaitingApproval { state: card.state });
+        }
         self.next_comment += 1;
         let comment_id = CommentId(format!("cmt-{:08}", self.next_comment));
         card.comments.push(CardComment {
@@ -343,7 +352,7 @@ impl ApprovalLedger {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::approval::COMMENT_MAX_CHARS;
+    use crate::approval::{COMMENT_MAX_CHARS, comment_len};
 
     const PAYLOAD_V1: &str = "sha256:synthetic-payload-v1";
     const PAYLOAD_V2: &str = "sha256:synthetic-payload-v2";
@@ -486,17 +495,67 @@ mod tests {
     }
 
     #[test]
-    fn comment_after_send_keeps_state_and_does_not_resend() {
+    fn comment_after_send_is_rejected_and_does_not_resend() {
         let mut ledger = ledger_with_card("card-1");
         let req = current_req(&ledger, "card-1", "a");
         let out = ledger.approve(req.clone()).unwrap();
-        let saved = comment(&mut ledger, "card-1", "送ったあとのメモ");
-        assert_eq!(saved.state, TaskState::SentAwaitingReply);
-        assert_eq!(saved.card_version, out.card_version);
+        let before = hash_of(&ledger, "card-1");
+        let res = ledger.save_comment(
+            "m-human-1".into(),
+            MemberKind::Human,
+            SaveCommentRequest {
+                card_id: "card-1".into(),
+                body: "送ったあとのメモ".to_owned(),
+            },
+        );
+        assert_eq!(
+            res,
+            Err(CommentError::NotAwaitingApproval {
+                state: TaskState::SentAwaitingReply
+            })
+        );
+        assert_eq!(res.unwrap_err().http_status(), 409);
+        // 拒否されたコメントで hash は変わらない。
+        assert_eq!(hash_of(&ledger, "card-1"), before);
+        assert!(ledger.card(&"card-1".into()).unwrap().comments.is_empty());
         assert_eq!(ledger.send_log().len(), 1);
-        // 送信後のコメントで hash が変わっても、同じキーの再送は最初の結果のまま。
+        // 同じキーの再送は最初の結果のまま。
         assert_eq!(ledger.approve(req).unwrap(), out);
         assert_eq!(ledger.send_log().len(), 1);
+    }
+
+    #[test]
+    fn comment_on_sending_card_is_rejected_and_hash_stays() {
+        let mut ledger = ledger_with_card("card-1");
+        let req = current_req(&ledger, "card-1", "a");
+        let ticket = reserve(&mut ledger, &req);
+        let before = hash_of(&ledger, "card-1");
+        let res = ledger.save_comment(
+            "m-human-1".into(),
+            MemberKind::Human,
+            SaveCommentRequest {
+                card_id: "card-1".into(),
+                body: "送信中のメモ".to_owned(),
+            },
+        );
+        // 送信中へのコメントは 409。予約・送信記録が持つ古い hash を壊さない。
+        assert_eq!(
+            res,
+            Err(CommentError::NotAwaitingApproval {
+                state: TaskState::Sending
+            })
+        );
+        assert_eq!(res.unwrap_err().http_status(), 409);
+        assert_eq!(hash_of(&ledger, "card-1"), before);
+        let card = ledger.card(&"card-1".into()).unwrap();
+        assert!(card.comments.is_empty());
+        assert_eq!(card.state, TaskState::Sending);
+        // 送信前に中止して承認待ちに戻れば、コメントは保存できる。
+        ledger.abort_before_send(ticket);
+        assert_eq!(
+            comment(&mut ledger, "card-1", "中止後のメモ").state,
+            TaskState::AwaitingSendApproval
+        );
     }
 
     #[test]
@@ -532,6 +591,38 @@ mod tests {
         let body = "\u{1F600}".repeat(COMMENT_MAX_CHARS);
         let saved = comment(&mut ledger, "card-1", &body);
         assert_eq!(saved.card_version, 1);
+    }
+
+    #[test]
+    fn comment_limit_counts_code_points_with_flags() {
+        // 国旗は地域指示子 2 つ = 2 コードポイント。上限はコードポイント数で数える。
+        let flag = "\u{1F1EF}\u{1F1F5}";
+        assert_eq!(comment_len(flag), 2);
+        let mut ledger = ledger_with_card("card-1");
+        // 2000 個でちょうど 4000 コードポイント：受理。
+        let exact = flag.repeat(COMMENT_MAX_CHARS / 2);
+        assert_eq!(comment_len(&exact), COMMENT_MAX_CHARS);
+        let saved = comment(&mut ledger, "card-1", &exact);
+        assert_eq!(saved.card_version, 1);
+        assert_eq!(saved.snapshot_hash, hash_of(&ledger, "card-1"));
+        // 地域指示子をもう 1 つ（+1 コードポイント）で 4001：too_long で拒否、hash は変わらない。
+        let before = hash_of(&ledger, "card-1");
+        let over = format!("{exact}\u{1F1EF}");
+        assert_eq!(comment_len(&over), COMMENT_MAX_CHARS + 1);
+        assert_eq!(
+            ledger.save_comment(
+                "m-human-1".into(),
+                MemberKind::Human,
+                SaveCommentRequest {
+                    card_id: "card-1".into(),
+                    body: over,
+                },
+            ),
+            Err(CommentError::TooLong {
+                max_chars: COMMENT_MAX_CHARS
+            })
+        );
+        assert_eq!(hash_of(&ledger, "card-1"), before);
     }
 
     // ---- 承認と疑似送信 ----
@@ -820,6 +911,13 @@ mod tests {
         assert_eq!(ApproveError::ApprovalInProgress.http_status(), 409);
         assert_eq!(ApproveError::IdempotencyKeyReused.http_status(), 422);
         assert_eq!(CommentError::EmptyBody.http_status(), 422);
+        assert_eq!(
+            CommentError::NotAwaitingApproval {
+                state: TaskState::Sending
+            }
+            .http_status(),
+            409
+        );
     }
 
     #[test]

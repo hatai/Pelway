@@ -5,7 +5,7 @@
 //!
 //! | method/path | 入力 | 動作 |
 //! |---|---|---|
-//! | `POST /v1/approvals/{card_id}/comments` | [`SaveCommentRequest`] | コメントを保存するだけ。状態・`card_version` を変えず、送信しない。新しい `snapshot_hash` を返す |
+//! | `POST /v1/approvals/{card_id}/comments` | [`SaveCommentRequest`] | コメントを保存するだけ。状態・`card_version` を変えず、送信しない。新しい `snapshot_hash` を返す。送信承認待ちでないカードには 409 `not_awaiting_approval` |
 //! | `POST /v1/approvals/{card_id}/approve` | [`ApproveRequest`] | 版・snapshot・冪等キーを検査し、疑似送信を 1 回だけ行う |
 //!
 //! # UI とサーバーの役割分担
@@ -224,7 +224,14 @@ impl ApproveError {
 pub enum CommentError {
     CardNotFound,
     EmptyBody,
-    TooLong { max_chars: usize },
+    TooLong {
+        max_chars: usize,
+    },
+    /// 送信承認待ちではない（送信中・送信済み等）。コメント保存は
+    /// `snapshot_hash` を変えるので、予約・送信記録と食い違うのを防ぐために断る。
+    NotAwaitingApproval {
+        state: TaskState,
+    },
 }
 
 impl CommentError {
@@ -234,6 +241,7 @@ impl CommentError {
         match self {
             Self::CardNotFound => 404,
             Self::EmptyBody | Self::TooLong { .. } => 422,
+            Self::NotAwaitingApproval { .. } => 409,
         }
     }
 }
