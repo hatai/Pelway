@@ -100,8 +100,12 @@ description = "開発環境の一括確認（依存タスクは並列実行）"
 depends = ["fmt-check", "check", "clippy", "test", "build", "toolchain-check", "hk-validate", "hk-check", "fnox-check", "pitchfork-check"]
 
 [tasks.demo-check]
-description = "デモ受入前の 3 段階検査（loopback / leak-phrases / external-refs）。未実装段階は非 0 で失敗する"
+description = "デモ受入前の 3 段階検査（loopback / leak-phrases / external-refs）。1 段でも違反があれば非 0。loopback の runtime 検査は未実装（PENDING 表示）"
 run = "bash scripts/demo-check/run.sh"
+
+[tasks.demo-check-selftest]
+description = "demo-check の自己テスト（一時ディレクトリの合成データで、違反を検出し・正常を通すことを確認）"
+run = "bash scripts/demo-check/selftest.sh"
 
 # `mise bootstrap` は packages（apt:podman・sudo）→ tools（mise install 相当）→ このタスクの順で実行する。
 # これにより mise trust 後の mise bootstrap 1回で環境構築が完了する。

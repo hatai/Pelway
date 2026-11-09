@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# demo-check: デモ受入前の 3 段階検査の土台（ランナー）。
-#   (a) loopback      : デモの待受が 127.0.0.1 だけであること
-#   (b) leak-phrases  : ビルド成果物・ログに禁止語（漏えい時に問題になる語句）が無いこと
-#   (c) external-refs : デモ資産に外部 URL・外部ホスト参照が無いこと
-# 未実装の段階は "NOT IMPLEMENTED" を出して非 0 で終わる。
-# 全段階を最後まで実行し、1 段でも失敗すれば全体も非 0 で終わる（未実装を合格にしない）。
-# 使い方: mise run demo-check                 # 全段階
-#         bash scripts/demo-check/run.sh loopback  # 段階を指定
+# demo-check: デモ受入前の 3 段階検査のランナー。
+#   (a) loopback      : デモの待受が 127.0.0.1 だけであること（static は実施、runtime は PENDING）
+#   (b) leak-phrases  : 製品ソース・資産・ビルド成果物に禁止語が無いこと（forbidden-phrases.txt）
+#   (c) external-refs : 製品ソース・資産・ビルド成果物に外部ホスト参照が無いこと（allowed-hosts.txt）
+# 走査範囲と除外は lib.sh。リストは QA未合意/暫定。
+# 全段階を最後まで実行し、1 段でも失敗すれば全体も非 0 で終わる。
+# 使い方: mise run demo-check                       # 全段階
+#         bash scripts/demo-check/run.sh loopback   # 段階を指定
+#         mise run demo-check-selftest              # 検査自体の自己テスト
 set -u
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,6 +38,9 @@ for s in "${stages[@]}"; do
 done
 
 echo "== demo-check summary: ${#stages[@]} stage(s), ${#failed[@]} failed =="
+case " ${stages[*]} " in
+  *" loopback "*) echo "note: loopback runtime check is PENDING (not implemented); PASS above covers static checks only" ;;
+esac
 if [ "${#failed[@]}" -gt 0 ]; then
   echo "failed: ${failed[*]}" >&2
   exit 1

@@ -1,10 +1,48 @@
 #!/usr/bin/env bash
-# demo-check 段階 (b) leak-phrases: ビルド成果物・ログの禁止語検索
-# 予定する検査内容（未実装）:
-#   - target/ のデモ成果物・デモ実行ログ・fixture を対象に禁止語リストを検索し、1 件でもあれば失敗
-#   - 禁止語リストの置き場所と中身は QA と合意してから決める（ここでは定めない）
-#   - 秘密値そのものはリストに書かない（ハッシュ照合などの方式は未決）
-# 実装するまでは NOT IMPLEMENTED を出して非 0（3）で終わる。
+# demo-check 段階 (b) leak-phrases: 製品ソース・資産・ビルド成果物の禁止語検索。
+# 禁止語は forbidden-phrases.txt（QA未合意/暫定）。走査範囲と除外は lib.sh を参照。
+# 違反は「ファイル:行: 規則」で出し、行の中身は出さない。exit 0 合格 / 1 違反 / 2 検査異常。
 set -u
-echo "NOT IMPLEMENTED: demo-check stage leak-phrases (ビルド成果物・ログの禁止語検索)" >&2
-exit 3
+# shellcheck source=lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+list="${DC_LIST_DIR}/forbidden-phrases.txt"
+rules="$(dc_list_lines "${list}")" || exit 2
+[ -n "${rules}" ] || { echo "leak-phrases: no rules in ${list}" >&2; exit 2; }
+mapfile -t files < <(dc_all_files)
+
+hits=0
+report() { echo "$1: [$2] /$3/"; hits=$((hits + 1)); }
+
+while IFS=$'\t' read -r scope icase pat; do
+  [ -n "${pat:-}" ] || { echo "leak-phrases: malformed rule line in ${list}" >&2; exit 2; }
+  gflags=(-E)
+  [ "${icase}" = "i" ] && gflags+=(-i)
+  for f in "${files[@]}"; do
+    path="${DC_ROOT}/${f}"
+    if dc_is_wasm "${f}"; then
+      n="$(grep -a -c "${gflags[@]}" -e "${pat}" -- "${path}" || true)"
+      [ "${n:-0}" -gt 0 ] && report "${f}:(binary)" "${scope}" "${pat} (${n}件)"
+      continue
+    fi
+    dc_is_text "${f}" || continue
+    case "${scope}" in
+      all | ident)
+        lines="$(grep -n "${gflags[@]}" -e "${pat}" -- "${path}" | cut -d: -f1)" ;;
+      copy)
+        if dc_is_copy_file "${f}"; then
+          lines="$(grep -n "${gflags[@]}" -e "${pat}" -- "${path}" | cut -d: -f1)"
+        elif [[ "${f}" == *.rs ]]; then
+          lines="$(grep -n "${gflags[@]}" -e "\"[^\"]*(${pat})[^\"]*\"" -- "${path}" \
+            | grep -vE '^[0-9]+:[[:space:]]*//' | cut -d: -f1)"
+        else
+          lines=""
+        fi ;;
+      *) echo "leak-phrases: unknown scope '${scope}' in ${list}" >&2; exit 2 ;;
+    esac
+    for l in ${lines}; do report "${f}:${l}" "${scope}" "${pat}"; done
+  done
+done <<< "${rules}"
+
+echo "leak-phrases: scanned ${#files[@]} file(s), ${hits} hit(s)"
+[ "${hits}" -eq 0 ]
