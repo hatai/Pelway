@@ -234,6 +234,54 @@ fn closed_mention_list_enter_sends_once() {
     );
 }
 
+/// QA-MEN-01 の連続した操作: 一覧が開いた状態の Enter で候補が 1 つ入って一覧が閉じ、
+/// その状態のまま次の Enter で送信がちょうど 1 回起きる。一覧の開閉状態は呼び出し側
+/// （UI）が持つため、`AcceptMention` の結果で一覧を閉じる遷移を含めて確かめる
+/// （レビュー第2回 指摘2）。
+#[test]
+fn mention_accept_closes_list_then_next_enter_sends_exactly_once() {
+    // UI 側の入力状況を模す: 変換済みで、メンション候補一覧が開いている。
+    let mut context = ctx(Focus::MessageInput, ImeState::NotComposing, true);
+
+    // 1 回目の Enter: 候補を 1 つ入れて一覧を閉じる。この時点では送信しない。
+    let first = on_key(&context, Key::Enter, NO_MODS);
+    assert_eq!(first, Action::AcceptMention);
+    assert_ne!(first, Action::Send);
+
+    // AcceptMention を処理した UI は候補一覧を閉じる。
+    context.mention_list_open = false;
+
+    // 2 回目の Enter: 送信 1 回。ここまでの Enter 2 回に対する送信はこの 1 回だけ。
+    let second = on_key(&context, Key::Enter, NO_MODS);
+    assert_eq!(second, Action::Send);
+
+    // 続けて Enter を押しても、一覧が閉じている限り毎回「送信 1 回」であり、
+    // 候補の挿入や一覧操作には戻らない。
+    let third = on_key(&context, Key::Enter, NO_MODS);
+    assert_eq!(third, Action::Send);
+    assert_ne!(third, Action::AcceptMention);
+}
+
+/// 一覧が閉じていて IME 変換中の Enter は送信しない（IME の確定を優先し、この層は何もしない）。
+#[test]
+fn closed_mention_list_composing_enter_does_not_send() {
+    let action = on_key(
+        &ctx(Focus::MessageInput, ImeState::Composing, false),
+        Key::Enter,
+        NO_MODS,
+    );
+    assert_eq!(action, Action::None);
+    assert_ne!(action, Action::Send);
+
+    // 続けて変換を確定させた（NotComposing に戻した）あとの Enter は送信 1 回。
+    let after_commit = on_key(
+        &ctx(Focus::MessageInput, ImeState::NotComposing, false),
+        Key::Enter,
+        NO_MODS,
+    );
+    assert_eq!(after_commit, Action::Send);
+}
+
 /// QA-MEN-01: 候補一覧が開いている間の Enter と Esc は、IME 変換中でも有効。
 /// Enter は候補を 1 つ入れて一覧を閉じ、Esc は入力文字を残して一覧だけを閉じる。
 /// どちらも送信しない（レビュー指摘1: IME 状態を理由にした例外は設けない）。

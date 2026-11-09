@@ -1,5 +1,6 @@
 //! 契約写し（`src/contract.rs`）の公開 API のテスト。
-//! 期待値は原本 4564e88 `pelway-contract` のテストと同じ値（コードポイント数・エラーコード）。
+//! 期待値は原本 99ee013 `pelway-contract` の契約と同じ値（コードポイント数・エラーコード。
+//! `CommentError::NotAwaitingApproval` は 99ee013 で追加された）。
 
 use pelway_client_core::contract::{
     ApproveError, COMMENT_MAX_CHARS, CardId, CommentError, IdempotencyKey, TaskState, comment_len,

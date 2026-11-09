@@ -33,6 +33,7 @@
 - 内容:
   - 新クレート `crates/pelway-client-core`（ライブラリ、外部依存なし・標準ライブラリのみ、Slint 非依存）。
   - `src/contract.rs`: `4564e88`（`demo-t3/backend` の `crates/pelway-contract`）からの写し。写した範囲はコメント本文の検査（`COMMENT_MAX_CHARS = 4000`、`comment_len`＝コードポイント数、`validate_comment`、`CommentError`）、承認 API の要求・応答型（`SaveCommentRequest`・`CommentSaved`・`ApproveRequest`・`ApproveOutcome`）、`ApproveError`（エラーコード `version_conflict`+`current_version` / `snapshot_mismatch` / `not_awaiting_approval`+`state` / `approval_in_progress` / `idempotency_key_reused` / `card_id_mismatch` / `card_not_found`）、ID 型（`CardId`・`CommentId`・`SimulatedSendId`・`IdempotencyKey`）、`TaskState`。値と数え方は不変。このクレートは serde を使わないため、ワイヤのタグ名（snake_case）は `ApproveError::code()` が同じ値を返す（`http_status()` も写しのまま）。ファイル先頭に「4564e88 の写し。統合のときに差し替える」を置いた。`ApprovalCard`・`CardComment`・`ActionKind`・`MemberKind`・`snapshot.rs`・`ledger.rs` はこの段階で不要のため写していない（統合時に本体ごと差し替え）。
+    - 注記: この初回記録の写し元 `4564e88` は、のちに第2枠で `99ee013` に差し替えた。現在の写し元は `99ee013`（第5枠で git により確認済み）。
   - `src/input.rs`: キー操作の判定。`Focus`（コメント欄・承認ボタン・メッセージ入力欄）×`Key`（Enter・Space・Esc）×`Modifiers`（Ctrl/Cmd・Shift）×`ImeState`（変換中・確定済み）×候補一覧の開閉から `Action`（改行 1 つ・何もしない・承認 1 回・候補を 1 つ入れて一覧を閉じる・一覧を閉じるだけ・送信 1 回）を返す純粋関数 `on_key`。QA-APR-01・QA-MEN-01 をそのまま仕様表にしたテストを `tests/input.rs` に置いた。
   - `src/approval.rs`: 承認カードの状態機械。通信は書かず `Effect`（`Approve`・`SaveComment`・`Notice`）を返す。冪等キー生成は `KeySource` trait、時計は `Clock` trait（`now_ms(&self)`・ミリ秒）で注入。内部状態 `Phase`（`Idle` / `AwaitingResponse` / `RecheckScheduled` / `CannotCheck` / `NeedsReload` / `ClientBug` / `Approved`）。
     - 押すたびに新しいキーを 1 つ作る。同じキーの再利用は（a）`approval_in_progress` の確認、（b）確認あきらめ後の再押下での確認、のときだけ。
@@ -164,3 +165,22 @@
   - `cargo clippy -p pelway-client-core --all-targets --locked --offline -- -D warnings` 0
   - `cargo test -p pelway-client-core --locked --offline` 0（52 件、失敗 0）
   - `cargo doc -p pelway-client-core --no-deps --locked --offline` 0（警告 0）
+
+### 2026-11-09 第6枠（Codex 第2回レビューの指摘への対処）
+- start: 2026-11-09 18:18 JST
+- stop:  2026-11-09 18:28 JST
+- glm: long（T3 Code スレッドで OpenCode + zai-coding-plan/glm-5.3 が実装）
+- レビュー: Codex 第2回（review-findings-client-2.md、sha256 `0eab5d310c22d92ee213282c20ce2351e204643e30be1f48d5ed783722b3cd0f`）。前回指摘1〜3は「直った」、指摘4（nit）が新指摘1（should-fix）として継承。
+- 使った skills: tdd（連続操作のテストを先に書き、実装変更前に実行して結果を記録）/ verification-before-completion。
+- 対処:
+  - 前回指摘4＋新指摘1（写し元の記載）: `tests/contract.rs` の先頭説明を「期待値は原本 99ee013 の契約と同じ値（`CommentError::NotAwaitingApproval` は 99ee013 で追加）」に直した。`docs/worklog/client.md` 第1枠の初回記録（写し元 4564e88）は過去の記録としてそのまま残し、「のちに第2枠で 99ee013 に差し替えた。現在の写し元は 99ee013（第5枠で確認済み）」の注記行を足した。
+  - 新指摘2（候補一覧の連続操作のテスト）: `tests/input.rs` に2件追加。
+    - `mention_accept_closes_list_then_next_enter_sends_exactly_once`: 一覧が開いた状態の Enter → `AcceptMention`（≠Send）、UI が一覧を閉じる遷移（`mention_list_open = false`）を挟み、次の Enter → `Send` ちょうど 1 回、続けて Enter しても毎回送信で候補操作に戻らない、を状態の移り変わり込みで検証。
+    - `closed_mention_list_composing_enter_does_not_send`: 一覧が閉じていて変換中の Enter は `None`（IME の確定を優先・送信しない）、確定後（NotComposing）の Enter は `Send`。
+  - テストが先に失敗するか: **最初から通った**（実装変更前の `cargo test --test input` で 16 件中 2 件の追加テストを含め全部合格、exit 0）。実装（`on_key`）はすでに仕様どおりで、振る舞いの修正は不要だった。
+- 確かめたコマンドと結果:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy -p pelway-client-core --all-targets --locked --offline -- -D warnings` 0
+  - `cargo test -p pelway-client-core --locked --offline` 0（54 件: approval 24・contract 14・input 16、失敗 0）
+- 未検証・未決:
+  - `on_key` は入力状況を引数で受ける純粋関数で、一覧の開閉状態の管理（`AcceptMention` 後に閉じる等）は呼び出し側（UI）の責任。テストはその遷移をシミュレートして検証した。実 UI での結合は第2段階（Slint）で確かめる。
