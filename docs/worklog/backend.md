@@ -571,3 +571,50 @@
   一度 worklog の第10枠の見出し行を誤って編集したが、すぐ戻して `git diff` で空を確認）。
 - 未検証・未決:
   - 差分の Codex 再レビュー・QA は未実施。U01〜U07 は未決のまま（確定していない）。
+
+### 2026-11-09 第12枠（テストC を本文読み取り中に拡大・GLM 枠）
+- start: 2026-11-09 21:21 JST頃（リード補足決定 20:43 の受領後）
+- stop:  2026-11-09 21:25 JST（`date` で確認）
+- glm: long（T3 Code 上で GLM が実装）
+- 開発リードの決定（2026-11-09 20:43 JST、依頼6への補足）: テストC は「ヘッダーの
+  読み取り中」「本文の読み取り中」「413 のあとの読み捨て中」の 3 か所それぞれで行う。
+  どの場面でも、期限の直前に読み取り待ちに入ってから何も送らず、接続が切れるまでの
+  時間が全体期限 + 0.5 秒以内に収まることを確かめる。
+- skills: Matt Pocock Agent Skills の `tdd`（新しいテストを先に書き、実装前の失敗
+  （red）を確認してから実装側で green を確認）。
+- 内容:
+  - 第11枠では (v) ヘッダー読み取り中・(w) 読み捨て中の 2 か所だったテストCに、
+    本文読み取り中の (y) を追加。ヘッダー（Content-Length: 100）を送ったあと本文を
+    10 バイトずつ 300ms 間隔で 5 回（計 50 バイト）だけ送り、期限（差し替え 2.0 秒）の
+    約 0.5 秒前に読み取り待ちに入ったまま何も送らない。408 が「全体期限 + 0.5 秒」以内
+    （下限は期限 − 0.1 秒。余裕の値と理由は第11枠と同じ）に来ることを確認。
+    テスト名: `body_read_wait_is_cut_at_deadline_not_3s`。
+  - 実装の変更は無し（第11枠の指摘2・3の実装が本文の読み取りにも効いていることを
+    確認するのが目的）。
+- red-first の証拠（tdd）:
+  - テストを追加した後、実装側だけを base `cc86038` に一時的に戻して実行
+    （`git checkout cc86038 -- crates/pelway-http/src/lib.rs`。テストは HEAD のまま。
+    コミット済みの状態での一時差し替えで、履歴には触れない。実行後に
+    `git checkout HEAD -- crates/pelway-http/src/lib.rs` で戻し、`git status --porcelain`
+    で tests/http.rs のみの変更であることを確認）:
+    `cargo test --offline -p pelway-http --test http body_read_wait` → exit 101、
+    0 passed / 1 failed。「期限から 0.5 秒以内に切れていない: 4.407011233s」
+    （base では本文読み取りの 3 秒タイムアウトが優先され、最後の部分送信から約 3 秒後
+    の切断になっていた）。
+  - green: `lib.rs` を HEAD に戻して同コマンド → exit 0、1 passed（2.03 秒で切断）。
+- 検証（コマンドと exit code、オフライン）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy --workspace --all-targets --offline -- -D warnings` 0
+  - `cargo test --workspace --offline` 0（at-rest 単体 8・aead 12・contract 単体 34・
+    serde_contract 10・dev-smoke 1・http 25。計 90 passed / 0 failed / 0 ignored。
+    http スイートはさらに 2 回再実行して 25 passed / 0 failed を確認）
+- 迷った点:
+  - 「期限の直前に読み取り待ちに入る」の再現方法: 本文を 300ms 間隔で少しずつ送り、
+    期限約 0.5 秒前に送るのをやめる形にした（送る間隔は 3 秒未満なので 1 回の読み取り
+    タイムアウトには引っかからない）。(v)(w) と同じく、期限は読み取り待ちの最中に来る。
+  - red を取るための `git checkout <commit> -- <path>` による一時的な差し替え:
+    破壊的gitには当たらず（履歴・コミット不変、即時復元、status で確認）、worktree の
+    中だけの操作のため実施した。実施理由は、実装が第11枠で既にコミット済みであり、
+    新しいテストだけでは実装前の失敗を示せないため。
+- 未検証・未決:
+  - 差分の Codex 再レビュー・QA は未実施。U01〜U07 は未決のまま（確定していない）。
