@@ -100,7 +100,7 @@ description = "開発環境の一括確認（依存タスクは並列実行）"
 depends = ["fmt-check", "check", "clippy", "test", "build", "toolchain-check", "hk-validate", "hk-check", "fnox-check", "pitchfork-check"]
 
 [tasks.demo-check]
-description = "デモ受入前の 3 段階検査（loopback / leak-phrases / external-refs）。1 段でも違反があれば非 0。loopback の runtime 検査は未実装（PENDING 表示）"
+description = "デモ受入前の 4 段階検査（loopback / leak-phrases / external-refs / canary）。1 段でも違反があれば非 0。受入は引数なしの全段階実行だけ有効。loopback の runtime 検査は未実装（PENDING 表示）"
 run = "bash scripts/demo-check/run.sh"
 
 [tasks.demo-check-selftest]

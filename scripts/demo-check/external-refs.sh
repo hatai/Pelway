@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # demo-check 段階 (c) external-refs: 製品ソース・資産・ビルド成果物に外部参照が無いことの検査。
-# 許可ホストは allowed-hosts.txt（QA未合意/暫定。初期値 localhost / 127.0.0.1 / ::1）。
+# 許可ホストは allowed-hosts.txt（リード確定 2026-11-09 15:01/15:03。127.0.0.1 と ::1 だけ。localhost は不可）。
+# 角括弧なしの "localhost" のような点を含まない語はホスト名リテラルとしては検出しない（URL 内の localhost は検出する）。
 # 検出するもの:
 #   1. http:// https:// ws:// wss:// の URL（ホスト部を取り出して許可リストと照合）
 #   2. スキーム省略の //host（HTML/CSS/JS/SVG の src= href= url( @import の直後だけ）

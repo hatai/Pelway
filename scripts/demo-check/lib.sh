@@ -3,12 +3,13 @@
 #
 # 走査範囲（存在するものだけ）:
 #   製品ソース・資産 : crates/ assets/ ui/ web/ static/ locales/ i18n/ dist/
+#   外向け文書       : docs/public/（docs/ のうち、ここだけは利用者・社外に出す文書として走査する）
 #   ビルド成果物     : target/demo/ 配下すべて、
 #                      target/wasm32-unknown-unknown/{debug,release}/ 直下の *.wasm *.js *.html *.css
 #                      （deps/ build/ incremental/ などの中間物は対象外）
 # 除外（理由）:
-#   docs/                 … 仕様・計画文書。禁止語を「禁止語として」記載するため
-#   scripts/demo-check/   … 検査そのもの（禁止語・許可ホストのリストを含む）
+#   docs/（docs/public/ を除く） … 内部の仕様・計画文書。禁止語を「禁止語として」記載するため
+#   scripts/demo-check/   … 検査そのもの（禁止語・許可ホスト・カナリアのリストを含む）
 #   README.md AGENTS.md mise.toml mise.lock hk.pkl fnox.toml など直下の開発ツール設定
 #                         … 製品に同梱されない（mise.toml の PELWAY_BIND_ADDR だけは loopback 段階が個別に見る）
 #   */tests/fixtures/* */testdata/* … 違反を意図的に含むテスト用データ
@@ -23,9 +24,13 @@ DC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DC_ROOT="${DEMO_CHECK_ROOT:-$(cd "${DC_DIR}/../.." && pwd)}"
 DC_LIST_DIR="${DEMO_CHECK_LIST_DIR:-${DC_DIR}}"
 
-DC_SOURCE_DIRS=(crates assets ui web static locales i18n dist)
+DC_SOURCE_DIRS=(crates assets ui web static locales i18n dist docs/public)
 
 dc_is_excluded() {
+  case "$1" in
+    docs/public/*/tests/fixtures/* | docs/public/*/testdata/*) return 0 ;;
+    docs/public/*) return 1 ;;
+  esac
   case "$1" in
     docs/* | scripts/demo-check/* | .git/* | */tests/fixtures/* | tests/fixtures/* | */testdata/* | testdata/*) return 0 ;;
   esac
@@ -51,7 +56,7 @@ dc_all_files() {
 # UI 文言を含みうるファイル（行全体を見る）: 資産・UI 系ディレクトリと UI 系拡張子
 dc_is_copy_file() {
   case "$1" in
-    assets/* | ui/* | web/* | static/* | locales/* | i18n/* | dist/* | target/*) return 0 ;;
+    assets/* | ui/* | web/* | static/* | locales/* | i18n/* | dist/* | docs/public/* | target/*) return 0 ;;
     *.html | *.htm | *.css | *.js | *.mjs | *.ts | *.svg | *.ftl | *.po | *.json | *.yaml | *.yml | *.md | *.txt) return 0 ;;
   esac
   return 1

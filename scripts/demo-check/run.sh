@@ -1,34 +1,55 @@
 #!/usr/bin/env bash
-# demo-check: デモ受入前の 3 段階検査のランナー。
-#   (a) loopback      : デモの待受が 127.0.0.1 だけであること（static は実施、runtime は PENDING）
-#   (b) leak-phrases  : 製品ソース・資産・ビルド成果物に禁止語が無いこと（forbidden-phrases.txt）
+# demo-check: デモ受入前の 4 段階検査のランナー。
+#   (a) loopback      : 待受・接続先が 127.0.0.1 / ::1 だけであること（static は実施、runtime は PENDING）
+#   (b) leak-phrases  : 製品ソース・資産・ビルド成果物に禁止語・秘密値の形が無いこと（forbidden-phrases.txt）
 #   (c) external-refs : 製品ソース・資産・ビルド成果物に外部ホスト参照が無いこと（allowed-hosts.txt）
-# 走査範囲と除外は lib.sh。リストは QA未合意/暫定。
+#   (d) canary        : ビルド成果物・ログ・端末保存領域に合成データの目印が無いこと（canaries.txt）
+# 走査範囲と除外は lib.sh。
+# 引数は上の段階名の完全一致だけ受け付ける。それ以外（パス・未知の名前）が 1 つでもあれば
+# 何も実行せずに exit 2 で終わる（任意のスクリプトを実行させないため）。
+# 段階を指定した実行は PARTIAL RUN で、受入には使えない。受入は引数なしの全段階実行だけ。
 # 全段階を最後まで実行し、1 段でも失敗すれば全体も非 0 で終わる。
-# 使い方: mise run demo-check                       # 全段階
-#         bash scripts/demo-check/run.sh loopback   # 段階を指定
+# 使い方: mise run demo-check                       # 全段階（受入に有効）
+#         bash scripts/demo-check/run.sh loopback   # 段階を指定（PARTIAL RUN）
 #         mise run demo-check-selftest              # 検査自体の自己テスト
 set -u
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-all_stages=(loopback leak-phrases external-refs)
+all_stages=(loopback leak-phrases external-refs canary)
 
+is_stage() {
+  local s
+  for s in "${all_stages[@]}"; do [ "$1" = "${s}" ] && return 0; done
+  return 1
+}
+
+bad=0
+for a in "$@"; do
+  if ! is_stage "${a}"; then
+    echo "demo-check: invalid stage argument: '${a}' (allowed: ${all_stages[*]})" >&2
+    bad=1
+  fi
+done
+if [ "${bad}" -ne 0 ]; then
+  echo "demo-check: nothing was run" >&2
+  exit 2
+fi
+
+partial=0
 if [ "$#" -gt 0 ]; then
   stages=("$@")
+  for s in "${all_stages[@]}"; do
+    case " $* " in *" ${s} "*) ;; *) partial=1 ;; esac
+  done
 else
   stages=("${all_stages[@]}")
 fi
+[ "${partial}" -eq 1 ] && echo "PARTIAL RUN: not valid for acceptance (selected: ${stages[*]})"
 
 failed=()
 for s in "${stages[@]}"; do
-  script="${here}/${s}.sh"
   echo "== demo-check: ${s} =="
-  if [ ! -f "${script}" ]; then
-    echo "-- ${s}: FAIL (unknown stage; expected one of: ${all_stages[*]})" >&2
-    failed+=("${s}")
-    continue
-  fi
-  if bash "${script}"; then
+  if bash "${here}/${s}.sh"; then
     echo "-- ${s}: PASS"
   else
     rc=$?
@@ -38,8 +59,13 @@ for s in "${stages[@]}"; do
 done
 
 echo "== demo-check summary: ${#stages[@]} stage(s), ${#failed[@]} failed =="
+if [ "${partial}" -eq 1 ]; then
+  echo "PARTIAL RUN: not valid for acceptance; acceptance requires a full run (mise run demo-check with no arguments)"
+else
+  echo "full run: all ${#all_stages[@]} stages"
+fi
 case " ${stages[*]} " in
-  *" loopback "*) echo "note: loopback runtime check is PENDING (not implemented); PASS above covers static checks only" ;;
+  *" loopback "*) echo "note: loopback runtime check is PENDING (not implemented); loopback PASS covers static checks only" ;;
 esac
 if [ "${#failed[@]}" -gt 0 ]; then
   echo "failed: ${failed[*]}" >&2
