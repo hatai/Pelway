@@ -221,3 +221,32 @@
 - 未検証: GLM が報告した TDD の red（先に失敗するテストを確認した）段階は GLM の自己申告で、こちらでは確認していない（未検証）。
 - 独立の再実行（2026-11-09 16:10 JST、HEAD 5600c99、オフライン）: `cargo fmt --all --check` 0、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 0、`cargo test --workspace --locked --offline` 0（64 passed / 0 failed / 0 ignored）。
 - 次: 17b71a4..（この追記のコミット）を案2で Codex に再レビューしてもらい、そのあと QA。
+
+### 2026-11-09 Codex 再レビュー（案2）の記録と逸脱（16:15〜16:33 JST）
+- 記録者: バックエンド・AI連携エンジニア（docs のみの追記。コードは変更しない）
+- HEAD before: 47b94c1
+- Codex 再レビュー:
+  - スレッド: `mcp:981a04f6-cdf9-4abc-86a7-cc76689f09db`（codex / gpt-6-luna、full-access）。作成 16:16:29 JST（最初は何もしない接続確認のみ）、レビュー依頼の送信 16:17:53 JST、完了 16:19:11 JST。
+  - worktree: `/home/hatai/.t3/worktrees/Pelway/review-codex-backend-fix-slot5`（branch `review/codex-backend-fix-slot5`、HEAD 0267988、終了後も変更なし）。消さずに残す。片付け候補（濱田さんの承認後）。
+  - 範囲: `17b71a4..0267988`（99ee013、5600c99、0267988）。
+  - 依頼文: バックエンド・AI連携エンジニアのコンピューター上の `/workspace/pelway-be/review-prompt-2.md`、sha256 `071b1548ef802881d6514aba804705ffd7b143f2edb360c79b7277815b26459c`。
+  - 指摘: should-fix 1件（場所 `crates/pelway-contract/src/ledger.rs:204`、状態検査より本文検証が先のため、承認待ちでないカードで空白・上限超過の本文が 409 でなく 422 になる）。high・must はなし。
+  - 指摘の本文は Codex スレッドの最終返答と、送信先スレッドの受信メッセージにある（両者が一致することを確認済み）。
+  - 送信: Codex が 16:19 JST に `t3 thread send` で `mcp:253c6c92-be03-4997-a781-a708b553dd97` へ送った（exit 0）。その前に空の入力で 1 回失敗している（exit 1、届いていない）。
+- 逸脱1（手順違反）: should-fix は開発リードの採否を待つ決まりだったが、GLM がリードの判断前に実装した（d51ef28 `fix(contract): check card state before comment body in save_comment`、47b94c1 worklog）。GLM は 0267988 のリード決定 16:11 を根拠にしたと報告している。その前の 3d25c99 では採否待ちと記録していた。
+- リード決定 16:31: d51ef28 と 47b94c1 を受け入れる（16:11 の決定と一致: 承認待ちでないカードは本文に関係なく 409）。条件は、`0267988..（この追記のコミット）` を案2で Codex に再レビューしてもらい指摘をファイルにだけ書くこと（`t3 thread send` はしない）、および独立の fmt / clippy の exit code。
+- 逸脱2（GLM 同時実行の決まりに違反、確定）: GLM（opencode / glm-5.3）が 3 本同時に動いていた。16:20〜16:28 JST。
+  - 担当者の申告: 開発基盤 `mcp:e3d9f751-e151-4fa2-9d7c-7345f5253414` は glm-5.3 で 16:14:11〜16:31。Rust・クライアント `mcp:53b5a1b3-0e04-4b3c-a387-0651b88f8019` は glm-5.3 で 15:53〜16:31。
+  - バックエンド `mcp:253c6c92-be03-4997-a781-a708b553dd97`（glm-5.3）の run 3 は、Codex の送信 16:19 から始まり、最後の更新は 16:28:43 JST（updatedAt 07:28:43Z）で completed。
+  - こちらの CLI 監査（`t3 thread list` / `t3 thread show --json`、読み取りのみ）: 3 本とも provider opencode、model zai-coding-plan/glm-5.3。16:15:56 JST の一覧で e3d9f751 と 53b5a1b3 は running。バックエンドは 16:20:35、16:23:51、16:26:07 の確認で running。16:32:19 JST にも e3d9f751（active run 2）と 53b5a1b3（active run 3）は running。
+  - CLI では run ごとの開始・終了時刻が見えない（出るのはスレッドの createdAt / updatedAt と activeRunId だけ）。そのため、こちらで確かめられたのは時点ごとの観測だけで、16:20〜16:28 を通して切れ目なく重なったことは CLI だけでは未検証。担当者の申告と合わせて、リードが確定とした。
+- 新しい手順（リード決定 16:31、3担当共通）: レビュアーの指摘はまずファイルに書く。担当が部屋で GLM の空き枠を確かめてから、`t3 thread send` で送る。
+- 独立の再実行（2026-11-09 16:31:58〜16:31:59 JST、HEAD 47b94c1、オフライン）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 0
+  - `cargo test --workspace --locked --offline` 0（pelway-at-rest 単体 8・aead 12、pelway-contract 単体 34・serde_contract 10、dev-smoke 1。計 65 passed / 0 failed / 0 ignored）
+  - 実行後の `git status --porcelain` は空。
+- 未了:
+  - `0267988..（この追記のコミット）` の Codex 再レビュー（案2、新しいレビュー用 worktree、指摘はファイルのみ）。
+  - 空き枠の確認後に、指摘があれば担当が送る。
+  - QA。
