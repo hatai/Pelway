@@ -98,3 +98,48 @@
 - 次の作業:
   - high の指摘は 19:00 以降に T3 で直す。そのあと、直した差分を、新しいレビュー用 worktree（案②）で Codex に再レビューしてもらい、そのあと QA に回す。
   - それまでの間、QA は `4564e88` と `607ffa3` を統合候補から外している。
+
+### 2026-11-09 第5枠（Codex レビュー high 指摘の対処ほか、GLM 枠）
+- start: 2026-11-09 16:01 JST
+- stop:  2026-11-09 16:06 JST
+- glm: long（T3 Code 上で GLM が実装。バックエンド・AI連携エンジニアの依頼文どおり）
+- skills:
+  - Matt Pocock Agent Skills の `tdd` を使用。red（失敗するテストを先に書く）→ green（最小実装）の順で進め、
+    最初の `cargo test -p pelway-contract` で新テスト 3 件の失敗を確認してから `save_comment` に状態検査を入れた。
+- 内容（依頼 4 件のうち 1〜3 を実施、4 は対処せず報告）:
+  - 修正1（high 指摘）: `save_comment` がカードの状態を見るようにした。送信承認待ちでないカード
+    （Sending・SentAwaitingReply 等）へのコメント保存は `CommentError::NotAwaitingApproval`
+    （`state` 付き、HTTP 409）で拒否し、`snapshot_hash` を変えない。`CommentError` は
+    `ApproveError` と同じ serde の形（tag="code"、snake_case）で `not_awaiting_approval` バリアントを追加。
+    既存テスト `comment_after_send_keeps_state_and_does_not_resend` は新しい挙動
+    （送信後のコメントは拒否・hash 不変・再送は最初の結果のまま）に書き換えた。
+    テストは (a) Sending へのコメントが not_awaiting_approval、(b) このとき snapshot_hash が変わらない、
+    (c) JSON が `{"code":"not_awaiting_approval","state":"sending"}`（serde_contract.rs）。
+  - 修正2: 国旗（地域指示子 2 つ = 2 コードポイント）2000 個でちょうど 4000 コードポイントのコメントは受理、
+    地域指示子を 1 つ足した 4001 は `too_long` で拒否（hash 不変）ことを `ledger.rs` 単体テストに追加。
+  - 修正3: ルート `Cargo.toml` のコメントを実際の workspace 構成（pelway-contract・pelway-at-rest・
+    pelway-dev-smoke の 3 クレート）に合わせて修正。コメントのみで、セクションや依存は変えていない。
+  - 修正4（`hmac` の鍵素材の zeroize）: 実装せず報告に切り替えた。理由は下記。
+- 修正4の調査結果（リード判断待ち）:
+  - `hmac` はこのリポジトリの直接依存ではなく `hkdf` 0.12.4 の推移的依存。HKDF 内部の PRK
+    （HMAC の鍵素材）を保持する `hkdf::Hkdf` は Drop 時に zeroize せず、この挙動を有効にする機能は
+    オフラインキャッシュにある hmac 0.12.1（features は `reset`・`std` のみ）と hkdf 0.12.4 の
+    いずれにも存在しない。
+  - 自前のコードで直接扱う HKDF の入力（file_key）・出力（okm）と `MasterKey` は既に `Zeroizing` で保持済み。
+  - 残る対応案は (i) HKDF を自前実装して PRK を `Zeroizing` で持つ（暗号処理の自作になる。hkdf 依存の除去）、
+    (ii) zeroize に対応した hmac/hkdf を取得する（ネットワークが必要で今回の禁止対象）の 2 つで、
+    どちらも今回の範囲を超えるため実装していない。
+- TODO（未決、U01）: 送信結果が不明な Sending 状態からの回復。決めない。
+- 既知の制限:
+  - ファイル全体の差し替え、または古い版への巻き戻しは検出しない。
+  - `MasterKey::from_bytes` は呼び出し側に鍵のコピーを残す。
+  - wrap nonce はランダムのため、目安は鍵1つあたり約 2^32 ファイルまで。
+- 検証（コマンドと exit code、いずれもオフライン）:
+  - `cargo fmt --all --check`：初回は 1（doc 付きバリアントの改行形式の指摘）。`cargo fmt --all` で整形後、
+    再実行で 0。
+  - `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 0
+  - `cargo test --workspace --locked --offline` 0（pelway-at-rest 単体 8・aead 12、pelway-contract 単体 33・
+    serde_contract 10、dev-smoke 1。計 64 件 passed / 0 failed / 0 ignored）
+- 未検証・未決:
+  - HTTP 層の変更（ledger 全体の Mutex 化、`abort_before_send` の非公開化）は今回の対象外（依頼どおり未実施）。
+  - 差分の Codex 再レビュー・QA は未実施。
