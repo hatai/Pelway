@@ -1113,3 +1113,134 @@
   - `log::process_salt()` は lib から直接呼ばなくなったが、`pub` のまま残す
     （salt 作成の公開 API。example も今回の入口経由で間接的に使う）。
   - salt のローテーション・プロセス間共有は引き続き対象外。
+
+### 2026-11-10 第17枠（QA-GDPR-07 salt 追補 r3・入口の salt 利用テストと公開範囲の縮小・GLM 枠）
+- start: 2026-11-10 01:13 JST頃（追補依頼「be-salt-u3」の受領後）
+- stop:  2026-11-10 01:23 JST（`date` で確認。コミットはこの後）
+- glm: long（T3 Code 上で GLM が実装。依頼の決まり文句どおり）
+- worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-backend-gdpr-07-salt-r3`、branch
+  `demo-t3/backend-gdpr-07-salt-r3`（base `bc0152f` = 第16枠の worklog コミット）
+- 開始時の確認: cwd はこの worktree（本体フォルダではない）、HEAD
+  `bc0152faa4466613e9d70e14f7195e4ecba7a636`（指定と一致）、
+  `git status --short` 空。
+- AGENTS.md の「Prior art first」（GitHub 検索）: 外部ネットワーク接続禁止のため未実施
+  （第13〜16枠と同じ）。
+- 依頼3の `rg` 調査（コマンド `rg -n 'Logger::with_sink|process_salt' --type rust`）:
+  - `Logger::with_sink`: クレート外からの呼び出しは `tests/no_body_logs.rs:62`
+    （結合テスト (a)〜(f) の spawn_logged。**tests/ だけ**）。ほかはクレート内
+    （`src/lib.rs:284`（serve_with_logger_salt_from の本実装）と
+    `src/log.rs:364,396,452,453`（単体テスト））。examples/・他クレートからの呼び出し無し。
+  - `process_salt`: 呼び出し元は `src/log.rs` の単体テスト（439,440,450,451 行）のみ。
+    tests/・examples/・他クレートからの呼び出し無し（tests/no_body_logs.rs:28 は
+    コメント内の言及のみ）。
+- 依頼1（本番の入口が読んだ salt を本当に使っていることのテスト）:
+  - テスト (s5) `entry_uses_salt_read_from_file_for_log_pseudonyms` を `src/lib.rs` の
+    `#[cfg(test)] mod tests` に追加（r2 で (s2) を移した場所と同じ。同じ入口
+    `serve_with_logger_salt_from` のテストのため）。
+  - 内容: 決まった中身の 32 バイト（`b"known-salt-for-entry-test-012345"`）を
+    `target/demo-logs/known-salt-entry-test`（パッケージルート相対＝worktree の中、
+    gitignore 済み。既存単体テストと同じ置き場所の前提）に書き、
+    `serve_with_logger_salt_from` に読ませて `127.0.0.1:0` で起動。comments への
+    要求（本文を不正 JSON にして 400 になる）を送り、ログの `request_received` の
+    card 仮名が、同じ salt で `pseudonymize` を別に計算した仮名と一致することを
+    確かめる（生の card_id がログに無いことも確認。テスト終了時に salt ファイルを削除）。
+  - red（一時改変）: `serve_with_logger_salt_from` を、salt ファイルの読み取りは
+    そのままに、読んだ salt を捨てて 0 埋め 32 バイト（`vec![0u8; SALT_BYTES]`）を
+    Logger に渡すように一時的に書き換えて実行:
+    `cargo test --offline -p pelway-http --lib entry_uses_salt` → **exit 101、
+    0 passed / 1 failed**。出力:
+    `assertion left == right failed: 入口のログの仮名が同じ salt で別に計算した仮名と一致しない
+    left: "pid:cb70f23ab7b31c525a5a5c7cb7ce25ee087b0d3cdb3f6768ee99e20dc9bbf538"
+    right: "pid:a2ce0b1eaeb5030be421731037db6ffb5906b57f316dbf960c1a57261de51dd7"`
+    （left が 0 埋め salt で仮名化したログの仮名、right が salt ファイルの中身で
+    別に計算した仮名）。出力を確認後、すぐに改変を戻した。
+  - green（改変を戻したあと）: 同コマンド → **exit 0、1 passed**。
+    なお追加直後・改変前に一度実行して現行実装で pass することも確認済み
+    （テストが常時落ちでないことの確認）。
+- 依頼2（(s4) を別々に作った2つの Logger で比べる形に）:
+  - `src/log.rs` の (s4) `same_salt_same_pseudonym_and_different_salt_differs` を書き直し。
+    旧: 同じ Logger `la` の `id` を2回呼んで一致を見る（`la.id == la.id`）。
+    新: 同じ salt で**別々に作った**2つの Logger `la1`/`la2` で一致を、違う salt で
+    作った `lb` との不一致も Logger 同士で比べる（`la1.id == la2.id`、
+    `la1.id != lb.id`）。salt は従来どおり `process_salt()` で 2 個採取。
+  - 実装変更を伴わないテストの書き直しのため red は無し（現行実装で pass を確認。
+    第8枠作業1・第10枠指摘4と同じ扱い）。仮名化実装の検証（red）は上記 (s5) の
+    一時改変で担保。
+- 依頼3（可視性の縮小）:
+  - `Logger::with_sink`（`src/log.rs`）: `pub` → `pub(crate)`。唯一のクレート外呼び出し元が
+    tests/ の結合テストだけだったため、依頼の優先（「そのテストを src 内の
+    `#[cfg(test)]` に移して `pub(crate)` にする」「迷ったら移す側」）どおり、
+    `tests/no_body_logs.rs`（(a)〜(f) の6件とヘルパー）を `src/no_body_logs.rs` に
+    移設（`git mv` で移動し、import を `crate::` に、モジュール doc に移設の経緯を
+    書き換えただけ。**検証内容は無変更**）。doc コメントに「テスト・検証用」を明記。
+  - `process_salt`（`src/log.rs`）: `pub` → `#[cfg(test)]`（クレート外からの呼び出し
+    無し。呼び出し元は同ファイルの単体テスト (s3)(s4) のみのため。`pub(crate)` の
+    ままだと非テストビルドで dead_code が出るため `#[cfg(test)]` を選んだ）。
+    doc コメントに「テスト・検証用（クレート内のテストだけが使う）」を明記。
+  - 付随する doc の更新: `src/log.rs` のモジュール doc が参照していた `process_salt`
+    の説明を `read_salt_from`（`SALT_SOURCE` から `SALT_BYTES` バイト。本番は
+    `serve_with_logger_urandom` 経由）の記述に差し替え。
+  - `serve_with_logger`（固定 salt の `Arc<Logger>` を渡す公開入口）は**今回の対象外**のため
+    `pub` のまま。移設後の呼び出し元は `src/no_body_logs.rs`（クレート内テスト）のみに
+    なったが、doc の「テストと既知 salt の検証用」の明記は既存のものを残した。
+- 追加の記録（32 バイトより短い salt ファイルのテストの有無）: **無い**。
+  `read_salt_from` は `read_exact` なので短い読み取りは失敗（`UnexpectedEof`）に
+  なる設計だが、それを確かめるテストは今回も追加していない。**既知の制限**として記録する
+  （依頼どおり実装・テストとも足していない）。
+- 検証（コマンドと exit code、オフライン）:
+  - `cargo fmt --all -- --check` 0
+  - `cargo clippy --offline --workspace --all-targets -- -D warnings` 0
+  - `cargo test --offline --workspace` 0（**計 110 passed / 0 failed / 0 ignored**:
+    at-rest 単体 8・aead 12・contract 単体 38・serde_contract 10・dev-smoke 単体 0
+    ＋smoke 1・http 単体 **15**（log 7＋lib.rs 2＝(s2)+(s5)＋no_body_logs 6）・
+    http 結合 26。doc-tests は各 0）
+  - 件数の変化: http 単体 8 → 15（no_body_logs 6 件の移設 ＋ 新 (s5) ＋1）、
+    no_body_logs 結合 6 → 0（テスト目標ごと src へ移設）。合計 109 → 110
+    （+1 は (s5) の追加。6 件は移動であって増減なし）。
+- ログの取り直し（前回=第16枠と同じ手順）:
+  - `mkdir -p target/demo-logs` → `cargo run --offline -p pelway-http --example
+    demo-log-emit 2> target/demo-logs/stderr.txt` → exit 0、stdout
+    「demo-log-emit: statuses = [200, 200, 409, 400, 500]」。
+  - `target/demo-logs/backend.jsonl`: **16 行**（前回と同じ構成: request_received 5・
+    responded 5・comment_saved 1・approved 1・simulated_send 1・rejected 2・
+    internal_error 1。仮名 `pid:` は 8 行）、
+    sha256 `5b6ba3f1291c229860e4751ab83f9b5b2c140e22fc7aa1ae6197ec75d0db3842`。
+    ※salt が実ランダムなのでハッシュは毎回変わる（行数・構成が同じことが確認点）。
+  - `target/demo-logs/stderr.txt`: **10 行**（cargo のビルドメッセージの構成差を含む。
+    poison 用 panic の固定語句のみで canary なし）、
+    sha256 `b927e6929cbe7ddc21e8a3aa4e1598420475791f6aad1f9829dd44da31ca5b12`。
+  - canary 走査 `rg -c 'PELWAY-CANARY-BODY-7Q2M9X|PELWAY-CANARY-SECRET-4K8T1Z|
+    3f6c2a9e-8b1d-4c7a-9e2f-5a1b7c3d9e04' target/demo-logs/` → 出力なし・exit 1
+    （3種とも 0 件）。生 ID（`card-gdpr07|m-human-gdpr07|sim-00000001`）も 0 件。
+- 迷った点（質問で止まらず安全側で進めた）:
+  - (s5) の要求を 400 になる不正 JSON にした: `request_received` の仮名は route が
+    要求受け付け時点で出すため、台帳にカードを用意しなくても「入口が読んだ salt で
+    仮名化していること」は確かめられる。正当な 200 フローと比べて依存が減り、
+    red の一時改変にも同じように効く。
+  - (s5) の salt ファイルを `target/demo-logs/`（パッケージルート相対）に置いた:
+    既存の単体テスト（`read_salt_from_missing_path_is_err`・(s2)）と同じ CWD の前提。
+    worktree の中で gitignore 済み。テスト終了時に削除する。
+  - (s5) を lib.rs の tests モジュールに置き、no_body_logs の移設は純粋な移動にした:
+    (s2) と同じ入口のテストは同じ場所に集める。移設ファイルは import と doc の
+    書き換えだけ（diff で「検証内容は無変更」を示せる）。
+  - `process_salt` を `pub(crate)` でなく `#[cfg(test)]` にした: 呼び出し元が
+    同ファイルの単体テストだけのため（上記のとおり dead_code 回避）。
+  - テストの移設で no_body_logs の「結合テストとしての性質」（クレート外から
+    public API 経由で検証すること）は失われるが、依頼文の「移す側を優先」
+    「迷ったら移す側を選ぶ」に従った。QA が `cargo test --test no_body_logs` で
+    個別実行していた場合は、今後は `cargo test -p pelway-http --lib no_body_logs` になる。
+- コミット: `548cf09`（実装・テスト・移設。pre-commit hook の trailing_whitespace・
+  newlines・cargo_fmt・cargo_check・cargo_clippy はすべて合格）と、この worklog 追記
+  （コミットは最大2つ、push はしない）。`target/` の下のログはコミットしない
+  （`/target` は gitignore 済み）。
+- 逸脱: なし（worktree の中だけ。push・fetch なし、外部接続なし、破壊的gitなし、
+  `~/.cargo` 不変、cargo はすべて `--offline`、webfetch/websearch/MCP 不使用。
+  `/dev/urandom` はテスト実行時にコードが読んだだけで、エージェント自身は
+  cat していない。red 確認用の一時改変は worktree 内で、出力を記録後にすぐ戻し、
+  `git diff` で改変が残っていないことを確認）。
+- 未検証・未決:
+  - 32 バイト未満の salt ファイルを読んだときの挙動（設計上は `UnexpectedEof` で
+    失敗）を確かめるテストは無い（既知の制限として上記に記録）。
+  - `serve_with_logger` は `pub` のまま（呼び出し元がクレート内テストのみに
+    なったが、今回の対象は `with_sink`/`process_salt` の2つだけのため）。
+  - 差分の Codex 再レビュー・QA は未実施。U01〜U07 は未決のまま。
