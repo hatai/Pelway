@@ -1369,3 +1369,99 @@
   当てはめ（U03、通信当事者・代理権の確認方法を含む）は未決のまま。worktree で
   `target/demo-logs/` にログを出す example の再実行は今回の対象外。Codex レビューと
   QA は未実施。`Cargo.lock` は無変更（`git diff <base>..HEAD -- Cargo.lock` は空）。
+
+### 2026-11-10 第19枠(QA-GDPR-02 r3: 参照列と本文 canary の修正)
+- start: 2026-11-10 05:40 JST
+- stop:  2026-11-10 05:54 JST
+- glm: long(T3 thread。OpenCode + zai-coding-plan/glm-5.3)
+- 依頼: QA-GDPR-02 r3(目的ごとの根拠の記録: 参照列と本文 canary の修正)
+  - worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-backend-gdpr-02-r3`(新規作成)
+  - branch: `demo-t3/backend-gdpr-02-r3`、base `c9bc3041aa02051587dd1de89212004b3b3d6f48`(r2 の最終 sha。r2 ブランチは早送りしていない)
+  - 初期確認: `pwd` = 上記 worktree、`git rev-parse HEAD` = `c9bc3041…`、`git branch --show-current` = `demo-t3/backend-gdpr-02-r3`、`git status --porcelain` 空(開始時)。
+- 採択した findings: `/home/hatai/.t3/worktrees/Pelway/review-codex-backend-c9bc304-r1/review-findings-gdpr-02-r2.md`
+  (sha256 `9a79701523b4c3bc84641a1b9a869b44a62abe7e5f380975db394d86355571a0`、
+  重大度 high の 1 件を採択)。
+  - 指摘: `scope` と `*_ref` が通常の `String` のまま保存され JSON 応答に載る。本文
+    canary を `scope`/`evidence_ref` に入れた POST が拒否されず、作成応答と GET 一覧に
+    canary が出る。既存テストはこの経路を見ていない。
+- 使った skills: `tdd`(Matt Pocock の Agent Skills。red → green ループ、シームは
+  「`DataStore` の公開 API」と「ループバックの実 HTTP による仮経路」の 2 つ。垂直
+  スライスでテスト8 → 実装 → 既存テスト追従の順に進めた)。
+- red-first の証拠(テスト8):
+  - 最初に `crates/pelway-http/src/gdpr02_routes.rs` に
+    `http_rejects_body_canary_in_scope_and_ref_columns` を追加し、実装前に実行:
+    `cargo test -p pelway-http --offline --lib http_rejects_body_canary_in_scope_and_ref_columns`
+    → **exit 101**。失敗の要点: 最初のケース `{"scope": "PELWAY-CANARY-BODY-7Q2M9X"}`
+    が **400 でなく 200 で受理され**、作成応答 JSON の `"scope"` に canary がそのまま
+    直列化されている(left: 200, right: 400)。コンパイルエラーではなく、指摘と同じ
+    経路で落ちた。
+  - 実装後(戻し確認): 同コマンド → **exit 0**、`1 passed`(gdpr02_routes 内)。
+    contract 側 `reference_columns_accept_only_synthetic_reference_forms` も
+    `cargo test -p pelway-contract --offline --lib reference_columns_accept_only_synthetic_reference_forms`
+    → **exit 0**、`1 passed`。
+- 直した内容:
+  - `crates/pelway-contract/src/store.rs`: `scope` と参照列
+    (`party_coverage_ref`/`grantor_ref`/`representative_authority_ref`/`evidence_ref`/
+    `withdrawal_method_ref`、利用方針の `source_scope`/`retention_policy_ref`)を
+    **合成の参照形式だけ** に制限した。形式は「参照列 = `ref:` + ASCII 小文字・数字・
+    `-`・`_` のみ 1..=60 文字(全体 ≤ 64 バイト)」「scope 系 = 同じ文字種で `ref:` 無し
+    1..=64 バイト」。既存の合成 ID(`msg-00000001`、`ch-synthetic-02`、`ref:*`)と同じ
+    文字種。大文字・空白・記号・多バイト文字を含む値(本文や人物情報の自由文、本文
+    canary)は [`StoreError::InvalidReference { column }]`(新設)として **保存しない**。
+    `create_basis_record`/`create_use_policy`/`withdraw_basis_record` が `Result` を
+    返す形に変えた(検証失敗では状態を変えない。撤回の `epoch` も進めない)。
+  - `crates/pelway-http/src/lib.rs`: 仮経路の作成・撤回ハンドラが
+    `InvalidReference` を **400 `{"code":"bad_request"}`** に写す(列名は応答・ログに
+    出さない)。拒否は既存の `rejected` ログ(code=bad_request)として出る。
+  - テスト: テスト8(HTTP。canary 単体・混在を全参照欄と scope へ → 400・応答/一覧/
+    保存部正本の直列化/ログに canary 0 件・正当な形式は 200 で通る対照・陽性対照)と
+    contract 側の参照形式検証テスト(どの列が `InvalidReference` になるか・検証失敗で
+    状態が変わらないこと)を追加。**テスト4(route_logs_have_no_body_or_client_msg_id_canary)
+    は r3 の挙動に追従**: canary 入り scope/evidence_ref の POST が 200→400 になった
+    ため、「正当な 1 件を作ってから canary 入り要求を 400 で出し、拒否時のログにも
+    canary が出ない」形に変えた(検証意図=ログに本文 canary を出さない、は無変更)。
+    既存テスト 1〜7 の検証意図は壊していない(戻り値型の追従で `.expect` を追加した
+    箇所のみ)。comments/approve の結合テスト 26 件は無変更で通る。
+  - 参照形式の 64 バイト上限と `ref:` プレフィックスは **合成データ用の仮の規則**
+    (12 §3.2 は論理単位のみを定め、確定 DDL ではない。本修正のための仮決め)。
+- 「本人」の仮の決め方(開発リード 2026-11-10): 合成の利用者 ID を API/関数の
+  **引数**(仮経路では要求本文・クエリの `actor`)で渡す。ヘッダーや Cookie、環境、
+  作業ディレクトリから本人を推定しない。**この決め方は仮** であり、U01〜U07 と
+  法的当てはめ(どの根拠の種類が P01〜P08 に当たるか、通信当事者・代理権の確認方法
+  を含む)は **未決のまま**(今回も確定していない。`TODO(U0x)` も残している)。
+- 変えていないもの: 仮の経路名(`POST|GET /v1/workspaces/{ws}/communication-basis-records`、
+  `POST .../{basis_id}/withdraw`、`POST|GET /v1/workspaces/{ws}/communication-use-policies`)、
+  DataStore の置き場(`pelway-contract/src/store.rs`・メモリのみ)、12 §3.2 の列の
+  持ち方(列の省略・追加なし)、salt / ログの仕組み(`/dev/urandom` 固定、
+  `with_sink`/`serve_with_logger_salt_from` の `pub(crate)`、`process_salt` の
+  `#[cfg(test)]`、許可リスト方式のままで本番 `lib.rs`/`log.rs` に canary 定数は無い)、
+  comments/approve の振る舞い、`Cargo.lock`。ログ系の `Route`/`Event` への追加も無し
+  (既存 `rejected` に載るだけ)。
+- 検証(すべて `--offline`、コマンドと exit code):
+  - `cargo fmt --all -- --check` → **exit 0**
+  - `cargo clippy --workspace --all-targets --offline -- -D warnings` → **exit 0**
+  - `cargo test --workspace --offline` → **exit 0**、**計 127 passed / 0 failed /
+    0 ignored**(at-rest 単体 8・aead 12・contract 単体 48(旧 47＋新 1)・
+    serde_contract 10・dev-smoke 単体 0＋smoke 1・http 単体 22(旧 21＋新 1)・
+    http 結合 26。doc-tests 各 0)。前回(第18枠)125 → 127(+2)。
+- 迷った点と安全側の判断:
+  - 参照形式の文字種・長さの規則はドキュメントに確定仕様が無いため、**既存の合成
+    ID の慣習(小文字・数字・`-`)に合わせた仮の規則** として実装し、doc に「仮」と
+    明記した(確定は開発リードの判断)。
+  - 検証を serde 層でなく **保存部の境界(DataStore)で** 行った(HTTP 以外の呼び出し
+    (04/05/10 の将来実装)でも同じ制約が効く。HTTP は 400 に写すだけ)。
+  - `StoreError::InvalidReference` の列名はエラー詳細として持つが、HTTP 応答には
+    `{"code":"bad_request"}` だけを返すようにした(仕様の漏出を出さない安全側)。
+  - テスト4 の追従(200→400)は「既存テストを壊さない」趣旨の判断。検証意図(ログに
+    本文 canary を出さない)は維持し、canary を入れる経路が拒否に変わったことだけ
+    追従した。
+  - 指摘対象外の列(`explanation_version`、`data_classes`、`processors`、
+    `allowed_outputs`)には今回の形式検証を入れて **いない**(findings の範囲は
+    `scope` と `*_ref`。列の意味を勝手に広げない)。canary をこれらに入れた要求は
+    現状も通るため、継続案件として開発リードに報告する。
+  - `is_purpose_enabled` は相変わらず常に false(active への遷移経路は今回も作って
+    いない。初期オフ要件の維持)。
+- 未検証・範囲外: 日英画面(クライアント担当)。撤回後の読取・検索・AI 入力の拒否は
+  QA-GDPR-03。本人 JSON 書き出し(04)、削除処理(05)、所在一覧 API(10)は未実装のまま。
+  法的部分(L-04)と根拠の当てはめ(U03)は未決のまま。この修正に対する Codex レビュー
+  と QA は未実施。`Cargo.lock` は無変更。
