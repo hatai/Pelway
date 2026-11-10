@@ -143,6 +143,22 @@ fn fnox_get(name: &str, project: &Path) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// 送信本文の一時ファイルの置き場所。状態ディレクトリの下の、所有者だけが入れる（0700）ディレクトリ。
+/// 共有の /tmp を使わないので、他のユーザーが同じ名前のファイルやシンボリックリンクを先に置けない。
+fn private_body_path() -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    let dir = state_path().with_file_name("agent-watch-tmp");
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)?;
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
+    let path = dir.join(format!("body-{}.json", std::process::id()));
+    // 前回の異常終了で残ったものは消してから作る（create_new が失敗しないように）
+    let _ = fs::remove_file(&path);
+    Ok(path)
+}
+
 fn curl_quote(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
@@ -156,16 +172,19 @@ pub fn send(payload: &Value, project: &Path) -> SendResult {
     ) else {
         return SendResult::DryRunNoSecret;
     };
-    let body_path =
-        std::env::temp_dir().join(format!("agent-watch-body-{}.json", std::process::id()));
+    let body_path = match private_body_path() {
+        Ok(p) => p,
+        Err(e) => return SendResult::Failed(format!("tmpfile: {e}")),
+    };
+    // 所有者だけが入れるディレクトリの中に、既存のファイルを開かない形（create_new）で作る
     let written = fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
         .open(&body_path)
         .and_then(|mut f| f.write_all(payload.to_string().as_bytes()));
     if let Err(e) = written {
+        let _ = fs::remove_file(&body_path);
         return SendResult::Failed(format!("tmpfile: {e}"));
     }
     let config = format!(
