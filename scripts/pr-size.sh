@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PR の差分行数（追加 + 削除）を数え、上限を超えたら失敗する。
-# .gitattributes で linguist-generated を付けたファイルとバイナリは数えない。
+# base 側の .gitattributes で linguist-generated を付けたファイルとバイナリは数えない。
 # 使い方: scripts/pr-size.sh [--base <ref>] [--limit <n>]（既定: origin/main, 800）
 # 終了コード: 0 = 上限以下、1 = 上限超え、2 = 引数の誤り
 set -euo pipefail
@@ -18,10 +18,15 @@ while (($#)); do
   esac
 done
 [[ "$limit" =~ ^[0-9]+$ ]] || usage
+if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+  echo "pr-size: base $base が見つかりません（git fetch origin main を先に実行する）" >&2
+  exit 2
+fi
 
 is_generated() {
   local value
-  value="$(git check-attr linguist-generated -- "$1" | sed 's/^.*: linguist-generated: //')"
+  # 属性は base 側の .gitattributes から読む。PR 自身の .gitattributes で自分を除外させない。
+  value="$(git check-attr --source "$base" linguist-generated -- "$1" | sed 's/^.*: linguist-generated: //')"
   [[ "$value" == "set" || "$value" == "true" ]]
 }
 

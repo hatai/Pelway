@@ -6,3 +6,7 @@ skills-lock.json linguist-generated=true
 .github/workflows/actions.lock linguist-generated=true
 .agents/skills/** linguist-generated=true
 .claude/skills/** linguist-generated=true
+# このリポジトリで書いている skill はベンダー扱いにせず、行数に数え、差分も折りたたまない。
+.agents/skills/implement-issue/** -linguist-generated
+.agents/skills/review-pr/** -linguist-generated
+.agents/skills/write-pull-request/** -linguist-generated

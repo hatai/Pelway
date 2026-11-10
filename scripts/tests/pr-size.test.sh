@@ -46,8 +46,10 @@ run_case under_limit "$d" 0 "pr-size: 10 / 800 lines" --base base --limit 800
 d="$(new_repo)"; lines 801 >"$d/a.rs"; commit_all "$d"
 run_case over_limit "$d" 1 "pr-size: 801 / 800 lines" --base base --limit 800
 
-d="$(new_repo)"; lines 900 >"$d/tokens.json"; printf 'tokens.json linguist-generated=true\n' >"$d/.gitattributes"; lines 5 >"$d/a.rs"; commit_all "$d"
-run_case generated_excluded "$d" 0 "pr-size: 6 / 800 lines" --base base --limit 800
+# 生成物の指定は base 側の .gitattributes から読む。
+d="$(new_repo)"; printf 'tokens.json linguist-generated=true\n' >"$d/.gitattributes"; commit_all "$d"; git -C "$d" tag -f base >/dev/null
+lines 900 >"$d/tokens.json"; lines 5 >"$d/a.rs"; commit_all "$d"
+run_case generated_excluded "$d" 0 "pr-size: 5 / 800 lines" --base base --limit 800
 
 d="$(new_repo)"; printf '\x00\x01\x02binary' >"$d/blob.bin"; commit_all "$d"
 run_case binary_ignored "$d" 0 "pr-size: 0 / 800 lines" --base base --limit 800
@@ -58,6 +60,14 @@ run_case space_in_name "$d" 0 "pr-size: 3 / 800 lines" --base base --limit 800
 d="$(new_repo)"; lines 100 >"$d/old.rs"; commit_all "$d"; git -C "$d" tag -f base >/dev/null
 git -C "$d" mv old.rs new.rs; sed -i '50s/.*/changed/' "$d/new.rs"; commit_all "$d"
 run_case rename_counts_changes_only "$d" 0 "pr-size: 2 / 800 lines" --base base --limit 800
+
+# PR 自身が .gitattributes で自分を生成物扱いにしても、base の属性で数える。
+d="$(new_repo)"; printf '* linguist-generated=true\n' >"$d/.gitattributes"; lines 900 >"$d/a.rs"; commit_all "$d"
+run_case self_exemption_ignored "$d" 1 "pr-size: 901 / 800 lines" --base base --limit 800
+
+# base が解決できないときは 0 行で通さず、引数の誤りとして止まる。
+d="$(new_repo)"; lines 900 >"$d/a.rs"; commit_all "$d"
+run_case missing_base_fails "$d" 2 "" --base origin/nope --limit 800
 
 d="$(new_repo)"
 run_case bad_args "$d" 2 "" --base base --limit abc
