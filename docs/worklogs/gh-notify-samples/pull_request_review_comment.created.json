@@ -1,0 +1,26 @@
+{
+  "action": "created",
+  "comment": {
+    "body": "COMMENT-BODY-MUST-NOT-APPEAR",
+    "user": { "login": "example-commenter" }
+  },
+  "pull_request": {
+    "number": 42,
+    "merged": false,
+    "title": "PR-TITLE-MUST-NOT-APPEAR",
+    "body": "PR-BODY-MUST-NOT-APPEAR",
+    "user": { "login": "example-user" },
+    "head": {
+      "ref": "feature/demo",
+      "sha": "1111111111111111111111111111111111111111",
+      "repo": { "full_name": "example-org/pelway" }
+    },
+    "base": {
+      "ref": "main",
+      "sha": "2222222222222222222222222222222222222222",
+      "repo": { "full_name": "example-org/pelway" }
+    }
+  },
+  "repository": { "full_name": "example-org/pelway" },
+  "sender": { "login": "example-commenter" }
+}

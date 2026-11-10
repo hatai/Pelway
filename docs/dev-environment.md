@@ -80,6 +80,20 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 - workflow の静的検査は jactionlint（`mise.toml` で `2.5.0` をピン）を CI の mise-action のあとに実行する。jactionlint は actions.lock による sha 固定を受け付ける。lock 生成後、暫定の inline ignore は撤去済み。
 - 2026-11-10 時点で GitHub 上での実際の run は未確認（ブランチの push・PR 作成の承認待ち。作業ログ: `docs/worklogs/2026-11-10-platform-pr-ci-r1.md`）。
 
+## GitHub 通知（Grok Bot webhook・notify-grokbot）
+
+`.github/workflows/notify-grokbot.yml` が、PR 系イベント（pull_request / review / review comment / PR への issue_comment）と verify workflow の完了（`workflow_run`）、手動実行（`workflow_dispatch`）を Grok Bot の webhook に POST する。送るのはメタデータのみで、PR タイトル・本文、コメント本文、レビュー本文、ラベル、メールアドレス等は送らない。
+
+- Secret（リポジトリの Settings → Secrets and variables → Actions → New repository secret で登録。値はドキュメント・コードに置かない）:
+  - `GROKBOT_WEBHOOK_URL` — webhook の URL
+  - `GROKBOT_WEBHOOK_AUTH` — `Authorization` ヘッダーの値全体
+- 送る JSON のキーは 13 個固定: `schema`（`"pelway.github-notify/v1"`）, `repo`, `event`, `action`, `pr_number`, `head_branch`, `head_sha`, `merged`, `conclusion`, `workflow_name`, `run_url`, `actor`, `occurred_at`。値の無いものは `null`。
+- 送らない条件（通知をスキップし、ジョブは成功で終わる。CI は落ちない）:
+  - 上記 Secret のどちらかが未設定のとき
+  - fork 由来のイベント（PR 系は head リポジトリ、workflow_run は head_repository の full_name がこのリポジトリと違うとき）
+  - PR 以外の issue コメント（ジョブごと skip）。PR へのコメントは payload だけでは fork 判定できないため、`head_branch` / `head_sha` は `null` のまま送る（API 呼び出しも権限もなし）
+- 手動実行（workflow_dispatch）は `event: "test"` のテスト通知を 1 通送る。送信の失敗（タイムアウト・HTTP エラー）で CI は落ちない。
+
 ## シークレットの扱い（fnox）
 
 - `fnox.toml` には**シークレットの名前と、秘密を含まないローカル開発用の既定値だけ**を置く。実際の秘密値（`value`）をこのファイルへ書かないこと。

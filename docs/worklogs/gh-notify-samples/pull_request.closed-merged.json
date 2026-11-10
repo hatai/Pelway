@@ -1,0 +1,23 @@
+{
+  "action": "closed",
+  "number": 42,
+  "pull_request": {
+    "number": 42,
+    "merged": true,
+    "title": "PR-TITLE-MUST-NOT-APPEAR",
+    "body": "PR-BODY-MUST-NOT-APPEAR",
+    "user": { "login": "example-user" },
+    "head": {
+      "ref": "feature/demo",
+      "sha": "3333333333333333333333333333333333333333",
+      "repo": { "full_name": "example-org/pelway" }
+    },
+    "base": {
+      "ref": "main",
+      "sha": "2222222222222222222222222222222222222222",
+      "repo": { "full_name": "example-org/pelway" }
+    }
+  },
+  "repository": { "full_name": "example-org/pelway" },
+  "sender": { "login": "example-user" }
+}

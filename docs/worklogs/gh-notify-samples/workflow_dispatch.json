@@ -1,0 +1,7 @@
+{
+  "inputs": {
+    "reason": "MANUAL-INPUT-MUST-NOT-APPEAR"
+  },
+  "repository": { "full_name": "example-org/pelway" },
+  "sender": { "login": "example-admin" }
+}
