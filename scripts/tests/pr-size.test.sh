@@ -72,6 +72,24 @@ run_case missing_base_fails "$d" 2 "" --base origin/nope --limit 800
 d="$(new_repo)"
 run_case bad_args "$d" 2 "" --base base --limit abc
 
+# check_help <name> <arg>: 使い方（usage: で始まる行）を標準出力に出し、終了コード 0 で終わる。
+check_help() {
+  local name="$1" arg="$2"
+  local out rc
+  out="$(bash "$SCRIPT" "$arg" 2>/dev/null)"
+  rc=$?
+  if [[ "$rc" != 0 ]]; then
+    failures+=("$name: exit $rc, want 0")
+    return
+  fi
+  if ! grep -q '^usage:' <<<"$out"; then
+    failures+=("$name: stdout does not contain a 'usage:' line")
+  fi
+}
+
+check_help help_long --help
+check_help help_short -h
+
 if ((${#failures[@]})); then
   printf 'FAIL %s\n' "${failures[@]}"
   exit 1

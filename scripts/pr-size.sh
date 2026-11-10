@@ -8,10 +8,30 @@ set -euo pipefail
 base="origin/main"
 limit=800
 
-usage() { echo "usage: $0 [--base <ref>] [--limit <n>]" >&2; exit 2; }
+usage_text="usage: $0 [--base <ref>] [--limit <n>]"
+
+usage() { echo "$usage_text" >&2; exit 2; }
+
+help() {
+  cat <<EOF
+$usage_text
+
+PR の差分行数（追加 + 削除）を数え、上限を超えたら失敗する。
+base 側の .gitattributes で linguist-generated を付けたファイルとバイナリは数えない。
+
+options:
+  --base <ref>   比較元の ref（既定: origin/main）
+  --limit <n>    差分行数の上限（既定: 800）
+  -h, --help     この使い方を標準出力に出して終了する
+
+終了コード: 0 = 上限以下、1 = 上限超え、2 = 引数の誤り
+EOF
+  exit 0
+}
 
 while (($#)); do
   case "$1" in
+    -h|--help) help ;;
     --base) (($# >= 2)) || usage; base="$2"; shift 2 ;;
     --limit) (($# >= 2)) || usage; limit="$2"; shift 2 ;;
     *) usage ;;
