@@ -339,7 +339,8 @@ jactionlint は actionlint と同じ検査をするリポジトリピンの fork
 ## コミット
 
 - メッセージ: `fix(ci): use per-run concurrency group in gh-notify`
-- hk pre-commit の結果はコミット実行後に本節へ追記する。
+- コミット: `87346ad`（base `d6f8f85` の上。3 files changed, 76 insertions(+), 6 deletions(-)）
+- hk pre-commit の結果（コミット時に自動発火）: **trailing_whitespace ✔ / newlines ✔**（対象は staged の `.github/workflows/notify-grokbot.yml` 1ファイル。cargo 系は対象ファイルなしのためか実行されず）。mise の channel sync・self-update チェックと「mise WARN missing: rust@1.96.0」の警告は直し1と同様（成分 up to date・`mise.lock` 不変・意図的なネット接続なし）。
 
 ## 未検証（直し2分も合格としない）
 
