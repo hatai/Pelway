@@ -31,7 +31,10 @@ jobs:
     steps:
       - name: Checkout
         # 浮動タグを避け、コミット sha でピン留めする（v4.2.2）。
+        # 後続ステップで git 認証情報は使わないため残置しない（jactionlint artipacked）。
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       # mise 公式 Action で mise 本体の導入とツールの導入を行う（curl / インストーラ不使用）。
       # - version: mise 本体を 2026.11.5 に固定（mise.toml の min_version を満たす検証済みバージョン）
@@ -41,6 +44,9 @@ jobs:
       # jdx/mise-action のコミット sha は GitHub 公式 lockfile（.github/workflows/actions.lock）
       # で固定する。オフライン環境では sha を取得できないため @v2 タグで参照する（作業ログ参照）。
       - name: Setup mise (official action)
+        # jactionlint ignore=unpinned-uses
+        # ↑ sha 固定は actions.lock（GitHub 公式 lockfile）で行う。jactionlint は actions.lock の
+        #   ピンを受け付けるため、lock 生成後にこの ignore は撤去する（作業ログ参照）。
         uses: jdx/mise-action@v2
         with:
           version: v2026.11.5
@@ -54,6 +60,11 @@ jobs:
       # 公式 Action が mise install --locked 済み。ここでは信頼登録のみ（冪等）。
       - name: Trust project config
         run: mise trust
+
+      # workflow / composite action の静的 lint（jactionlint は mise.toml で 2.5.0 をピン）。
+      # --online は使わない。問題があればこの時点で fail させる（速い検査を先に）。
+      - name: Lint workflows (jactionlint)
+        run: mise exec -- jactionlint
 
       # ローカルと同じ一括確認: fmt-check / check / clippy / test / build /
       # toolchain-check / hk-validate / hk-check / fnox-check / pitchfork-check
@@ -80,10 +91,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       # verify ジョブと同じ導入（mise 公式 Action・キャッシュなし・--locked）。
       # rust 1.96.0 に llvm-tools-preview 成分が入る（mise.toml の components で宣言）。
       - name: Setup mise (official action)
+        # jactionlint ignore=unpinned-uses
+        # ↑ sha 固定は actions.lock で行う。lock 生成後に撤去する（verify ジョブ側のコメント参照）。
         uses: jdx/mise-action@v2
         with:
           version: v2026.11.5
@@ -110,8 +125,9 @@ jobs:
 
       # octocov で PR コメント（増減表示）を作る。レポートの保存・比較は
       # GitHub Actions の artifact のみ（.octocov.yml の diff.storage.artifacts）。
-      # バージョンは未ピン（ubi が最新を取得）。オンライン確認後にピン留めする。
+      # バージョンは担当が公式リリースを確認の上 v0.83.5 にピン留め
+      # （出典: https://github.com/k1LoW/octocov/releases/tag/v0.83.5 公開 2026-11-05）。
       - name: Run octocov
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: mise x ubi:k1LoW/octocov -- octocov
+        run: mise x ubi:k1LoW/octocov@v0.83.5 -- octocov

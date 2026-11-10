@@ -179,4 +179,49 @@
 
 1. mise-action の実機動作（入力名 `version`・`install_args` の仕様、--locked 挙動、自動 trust、mise の PATH 付与）。GitHub 上の初回 run で確認する。
 2. `.github/workflows/actions.lock` の生成・`--verify`（担当実施）。
-3. jactionlint の追加（バージョン・lock 生成にネットが必要）。
+3. jactionlint の追加（バージョン・lock 生成にネットが必要）。→ **追記3で解消（下記）**
+
+---
+
+# 追記3（r1）: octocov の pin と jactionlint の追加 — 2026-11-10
+
+- 追記指示の受領: 2026-11-10 11:13 JST 付の指示書を本スレッド（mcp:1b65aff3）で1回受領し、このラウンドで処理した（自己送信はせず）。`246f294…` は実装完了としない、の指摘に対応。
+
+## 1. octocov のピン留め（実施済み）
+
+- workflow の `mise x ubi:k1LoW/octocov` を **`mise x ubi:k1LoW/octocov@v0.83.5`** に修正。コメントに出典（<https://github.com/k1LoW/octocov/releases/tag/v0.83.5> 公開 2026-11-05。担当が公式リリースを確認した値）を記載。docs・本ログの「未ピン」記述を更新。
+- 閾値で job を落とす設定はしていない（`.octocov.yml` に閾値なし）。`mise run verify` ゲートは不変。
+
+## 2. jactionlint の追加（実施済み・追記2の見送りを解消）
+
+- `mise.toml` に `jactionlint = "2.5.0"` をピン追加（出典: <https://github.com/jdx/jactionlint/releases/latest> 2026-11-05 公開の v2.5.0。担当確認値）。グローバル設定は不変。
+- **`mise.lock` は手作りしていない**: ピン追加後の `mise run verify`（自己検証の必須コマンド）実行中に、mise が jactionlint@2.5.0 を自動導入し **lock エントリを mise 自身が生成した**（全プラットフォーム分・実 checksum・sigstore signer 付き、+47行）。`mise use` 等の導入コマンドは実行していない。→ これは llvm-tools と同種の「サンクション済みコマンド中の mise 自動同期」事象の2回目。前回の事象から発生可能性は予見していたため、検証コマンドの実行判断とともにここに記録する。意図した導入コマンドの実行（=`mise install`）はしていない。
+- CI: verify ジョブの mise-action のあと（`mise run verify` の前）に `mise exec -- jactionlint` を追加。curl・検証なし導入は不使用。`--online` 不使用。
+
+### jactionlint の実行結果と対応（ローカル・オフライン）
+
+初回: 4件の指摘（exit 非0）。
+
+| 指摘 | 対応 |
+|---|---|
+| `artipacked` ×2（両 Checkout）: GITHUB_TOKEN が workspace の git config に残る | **修正**: 両 checkout に `persist-credentials: false` を追加。後続ステップに git 認証の利用者はいない（octocov は `GITHUB_TOKEN` 環境変数を使い git config は使わない） |
+| `unpinned-uses` ×2（`jdx/mise-action@v2`）: sha ピンがない | **条件付き抑制**: `# jactionlint ignore=unpinned-uses` を inline コメントで付与。理由: sha は actions.lock（GitHub 公式 lockfile）で固定する計画で、jactionlint は `unpinned-uses` のオプション `actions-lock: true`（既定）により **actions.lock で sha 固定されたタグ参照を受け付ける**（`jactionlint --explain unpinned-uses` で確認）。lock 生成後にこの ignore 2件を撤去すれば、lock ベースの強制が効く。撤去条件を workflow コメントと本ログに明記 |
+
+修正後: **exit 0・指摘ゼロ**。`shellcheck was not found` の注記（情報レベル）のみ残る — shellcheck を導入しない限り run スクリプトの shellcheck 検査はスキップされる。shellcheck 追加は本ラウンドでは見送り（別ツールの lock 生成にまたネット同期が要るため。必要なら次ラウンドで検討）。
+
+## 検証コマンドと結果（追記3分）
+
+| コマンド | 結果 |
+|---|---|
+| `mise run verify`（jactionlint 追加後） | **exit 0**（この実行中に mise が jactionlint を自動導入・lock 自動生成） |
+| `mise exec -- jactionlint`（修正前） | 4件指摘（artipacked ×2、unpinned-uses ×2） |
+| `mise exec -- jactionlint`（修正後） | **exit 0・指摘ゼロ**（shellcheck 未導入の注記のみ） |
+| `git diff mise.lock` | jactionlint エントリ +47行（mise 生成。手作り部分なし） |
+| workflow YAML 構文（pyyaml） | 最終検証パスで実施（下記コミット前に確認） |
+
+## 未検証（追記3分）
+
+1. GitHub 上での jactionlint step 実行（runner 上の mise 経由導入と `mise exec --` の解決）。
+2. actions.lock 生成（担当実施）と、生成後の inline ignore 2件の撤去。
+3. mise-action の実機動作（追記2分と同じ）。
+4. octocov v0.83.5 の実機実行（ピン先は担当確認済みだが、runner 上の挙動は未検証）。

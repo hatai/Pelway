@@ -76,7 +76,8 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 - mise の導入は公式 Action（`jdx/mise-action`）で行う。`version: v2026.11.5`・`install_args: --locked`・`cache: false` を指定し、導入後にバージョンを検証している。mise-action のツールキャッシュは復元内容を `mise.lock` と突き合わせない（公式の注意）ため無効化し、ダウンロード用のキャッシュも足さない。`actions/checkout` はコミット sha でピン留め。Action 参照の sha 固定には GitHub 公式 lockfile（`.github/workflows/actions.lock`、`gh actions-lock` で生成）を使う予定（2026-11-10 時点で未生成。生成は担当が行う）。
 - リモートキャッシュ（GitHub Actions cache・S3 等）はローカルの mbx と同じ方針で設定しない。CI のビルドはランナー内のローカルキャッシュのみで完結する。
 - この workflow に秘密は不要（`permissions: contents: read`）。`fnox-check` は `fnox list`（定義一覧の確認）のみで、秘密値の取得・表示はしない。
-- カバレッジの増減計測は同じ workflow の `coverage` ジョブで行う（品質ゲートとは独立）。cargo-llvm-cov（バージョン指定）で LCOV を `lcov.info` に出し、`.octocov.yml` に従って octocov が PR コメントを作る。比較用レポートの保存は GitHub Actions の artifact のみ。rust にはカバレッジ計測用の `llvm-tools-preview` 成分を `mise.toml` の `components` で宣言する。
+- カバレッジの増減計測は同じ workflow の `coverage` ジョブで行う（品質ゲートとは独立）。cargo-llvm-cov（バージョン指定）で LCOV を `lcov.info` に出し、`.octocov.yml` に従って octocov（`v0.83.5` をピン）が PR コメントを作る。比較用レポートの保存は GitHub Actions の artifact のみ。rust にはカバレッジ計測用の `llvm-tools-preview` 成分を `mise.toml` の `components` で宣言する。
+- workflow の静的検査は jactionlint（`mise.toml` で `2.5.0` をピン）を CI の mise-action のあとに実行する。jactionlint は actions.lock による sha 固定を受け付けるため、`jdx/mise-action@v2` のタグ参照は lock 生成後に sha 固定として効く（それまでの暫定の inline ignore は lock 生成後に撤去する）。
 - 2026-11-10 時点で GitHub 上での実際の run は未確認（ブランチの push・PR 作成の承認待ち。作業ログ: `docs/worklogs/2026-11-10-platform-pr-ci-r1.md`）。
 
 ## シークレットの扱い（fnox）
