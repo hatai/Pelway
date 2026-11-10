@@ -1,6 +1,10 @@
 # Rust / mr boxington（target は mbx の管理対象への symlink になる）
 /target
 
+# QA-GDPR-13 走査試験の退避サンドボックス（target/ が worktree 外へ解決される
+# symlink の環境で使う。中身はコミットしない）
+.gdpr-13-sandbox/
+
 # fnox 個人用オーバーライド（秘密値を含みうるためコミットしない）
 fnox.local.toml
 .fnox.local.toml

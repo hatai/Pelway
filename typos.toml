@@ -12,17 +12,15 @@
 extend-exclude = [".agents/skills", ".claude/skills"]
 
 [default.extend-words]
-# 誤検出の除外（いずれも実在する名前・URL・用語で、訂正すると壊れるため変更しない）。
-# 中小企業庁サイトの実在URLパス要素（.../pamflet/hakusyo/...）。直すとリンク切れ。
+# RTO は Recovery Time Objective（障害復旧時間目標）の業界略語。
+rto = "rto"
+# 中小企業庁サイトの白書 URL は実パスの綴りが "pamflet"。直すとリンクが壊れる。
 pamflet = "pamflet"
-# RTO（Recovery Time Objective）。RPO と対で使う障害回復の標準用語。
-RTO = "RTO"
-# docs/ui-mocks/ の UI モックで使う CSS クラス名（識別子）。
-pn = "pn"
-# Rust の TUI クレート ratatui（ulyssa/iamb 等が使用）の正式なクレート名。
-ratatui = "ratatui"
-# rootless Podman の依存パッケージ passt（docs/dev-environment.md）。
+# passt は rootless podman の依存パッケージ（PASST）の実名。
 passt = "passt"
-# crates/pelway-client-ui/tests/no_color_values.rs の分割リテラル断片
-# （"rg" + "ba(" で "rgba(" を組み立てるテスト構造。中身を変えない）。
+# docs/ui-mocks の CSS クラス名（pane の略）。既存の "on" クラスと衝突するため改名しない。
+pn = "pn"
+# Rust 製 TUI ライブラリの実名 ratatui。
+ratatui = "ratatui"
+# pelway-client-ui のテストが "rgba(" を分割組み立てするための断片（no_color_values.rs）。
 ba = "ba"
