@@ -261,3 +261,58 @@
 - toolchain-check: rustc/cargo 1.96.0、rustfmt 1.9.0-stable、clippy 0.1.96、`llvm-profdata` と `llvm-cov` は LLVM 22.1.2-rust-1.96.0-stable。
 - キャッシュ再確認（ファイル）: `verify.yml` の両ジョブで mise-action `cache: false`。`actions/cache` ステップなし。downloads 用 Actions cache なし。mbx/Cargo リモートキャッシュ設定なし。今回の test ログは `0 B downloaded, 0 B uploaded`。
 - llvm-tools 通信・共有 rustup への既存書き込み、および今回の channel sync / self-update チェックは合格にしない。GitHub 上の実行は未検証。
+
+---
+
+# 追記6（12:57 JST 受領、エージェント）: octocov の取得物ピン（採用分のみ）
+
+- 指示を受領（本スレッド mcp:1b65aff3 に1回。ヘッダ時刻記載なしなので受領処理開始時刻を記す）。リード追記の `e4502b4`（actions.lock + ignore 撤去）と `efd5f18`（toolchain-check 強化）はそのまま残している。不採用2件（toolchain-check の順序・目的、verify と coverage の並列）にも手を入れていない。
+
+## やったこと（準備まで。コミット前で停止）
+
+1. `mise.toml` の `[tools]` に `"aqua:k1LoW/octocov" = "0.83.5"` を追加。
+   - 短縮名 `octocov` は mise レジストリに存在しない（`mise registry octocov` → `tool not found in registry`。オフライン実行・12:57 JST）。
+   - octocov 向けの packslip バックエンドは確認できないため、指示どおり「lock に内容の固定が残る宣言方法」として aqua バックエンド（`aqua:k1LoW/octocov`）を採った。aqua は mise.lock にプラットフォーム別の URL と checksum を記録する（既存の packslip 系エントリと同じ形式を想定）。
+   - バージョンは `0.83.5` のまま（出典: https://github.com/k1LoW/octocov/releases/tag/v0.83.5 公開 2026-11-05。担当確認値）。
+2. `.github/workflows/verify.yml` の coverage ジョブ: `mise x ubi:k1LoW/octocov@v0.83.5 -- octocov` を廃止し、`mise exec -- octocov` に変更。mise-action の `mise install --locked` で導入されたロック済みバイナリを実行する（jactionlint と同一パターン）。`GITHUB_TOKEN` env は既存どおり。
+3. `docs/dev-environment.md`・本ログを内容ピンの事実に合わせて更新。
+
+## なぜコミット前に止まったか
+
+- octocov はローカルに未導入。`mise.lock` に octocov エントリ（URL・checksum）を書くには、mise が aqua レジストリと GitHub リリースを解決しに行く=ネット接続が必要。指示により「checksum は mise 自身に書かせる」「自分では接続しない」「不完全な lock はコミットしない」ため、**lock を書かせて完了させることはできない**と判断した。
+- したがって本ラウンドは `mise run verify` も実行していない（宣言済みの octocov が欠けているため、mise の自動導入がネットへ接続し得る。llvm-tools / jactionlint の2事例とは逆に、今回は指示が明示的にこれを禁じている）。検証は下記のオフライン項目に留めた。
+- 変更は worktree に**未コミット**で残している（`git status` 参照）。
+
+## 検証（オフラインのみ・このラウンド）
+
+| コマンド | 結果 |
+|---|---|
+| `python3`（tomllib）で `mise.toml` 解析 | OK。`tools` に `aqua:k1LoW/octocov = "0.83.5"` を確認 |
+| `python3`（pyyaml）で `verify.yml` 解析 | OK。coverage ジョブ末尾 = `Run octocov` → `mise exec -- octocov` |
+| jactionlint 2.5.0 を**mise を介さず直接実行**（`~/.local/share/mise/installs/jactionlint/2.5.0/jactionlint`） | **exit 0・指摘ゼロ**（shellcheck 未導入の注記のみ）。mise 経由を避けたのは、mise 実行が未導入 octocov の自動取得を誘発するのを防ぐため |
+
+## 担当が実行すべきコマンド（lock を完成させてコミットするまで）
+
+```bash
+cd /home/hatai/.t3/worktrees/Pelway/demo-t3-platform-pr-ci-r1
+mise install          # octocov@0.83.5 を取得し、mise.lock に URL・checksum を書かせる
+grep -A4 'tools.octocov' mise.lock   # エントリに checksum があることを確認してから先へ
+mise exec -- jactionlint             # workflow 変更の再確認（exit 0 想定）
+mise run verify       # 公式スイート全件（octocov 導入後なので自動取得は発生しない）
+git add mise.toml mise.lock .github/workflows/verify.yml docs/dev-environment.md docs/worklogs/2026-11-10-platform-pr-ci-r1.md
+git commit
+```
+
+- もし `mise install` の結果、lock の octocov エントリに **checksum が無い**場合は、その lock はコミットせず、バックエンドの再選定（例: ubi と aqua の切り替え）をこのスレッドに戻ってほしい。
+- `mise install` 時の channel sync / rustup self-update チェックは担当記録（追記4・5）と同じ扱い（合格にしない）。
+
+## 触っていないこと
+
+- 不採用2件（toolchain-check の順序、`needs:` 無しの並列）は不変。`actions.lock`・checkout / mise-action のピン・`cache: false`・リモートキャッシュ不使用・jactionlint・カバレッジと verify の独立も不変。
+- push / fetch なし、`gh` なし、webfetch / websearch / 外部 MCP なし、curl なし。このラウンドで意図的なネット接続はゼロ（検証はすべてローカル）。`~/.rustup`・`target/`・mbx キャッシュ・`~/.config/opencode`・notify プラグインも不変。
+- octocov 宣言後は mise コマンドを1回も実行していない（jactionlint はバイナリ直実行）。
+
+## 未検証（このラウンドも未検証のまま）
+
+- GitHub 上の実行全般、octocov の実機動作（PR コメント・artifact による増減）、channel sync / rustup self-update、mise-action の実機動作。
+- aqua バックエンドで mise が lock に checksum を残すかどうかの実機確認（上記の手順で担当確認を要する）。

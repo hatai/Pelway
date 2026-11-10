@@ -130,9 +130,11 @@ jobs:
 
       # octocov で PR コメント（増減表示）を作る。レポートの保存・比較は
       # GitHub Actions の artifact のみ（.octocov.yml の diff.storage.artifacts）。
-      # バージョンは担当が公式リリースを確認の上 v0.83.5 にピン留め
-      # （出典: https://github.com/k1LoW/octocov/releases/tag/v0.83.5 公開 2026-11-05）。
+      # octocov は mise.toml で 0.83.5 を宣言し、mise.lock が URL と checksum で
+      # 取得物を固定する（出典: https://github.com/k1LoW/octocov/releases/tag/v0.83.5
+      # 公開 2026-11-05）。mise install --locked（mise-action）で導入したロック済み
+      # バイナリを mise exec で実行する（タグだけのその場取得はしない）。
       - name: Run octocov
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: mise x ubi:k1LoW/octocov@v0.83.5 -- octocov
+        run: mise exec -- octocov

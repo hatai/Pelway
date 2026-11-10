@@ -25,6 +25,11 @@ pitchfork = "2.33.1"
 # CI（GitHub Actions）の workflow 静的 lint。担当が公式リリースを確認の上でピン。
 # 出典: https://github.com/jdx/jactionlint/releases/latest （2026-11-05 公開の v2.5.0）
 jactionlint = "2.5.0"
+# CI のカバレッジ増減表示（octocov）。担当が公式リリースを確認の上でピン。
+# 出典: https://github.com/k1LoW/octocov/releases/tag/v0.83.5 （公開 2026-11-05）
+# 短縮名 octocov は mise レジストリに無い（tool not found）。octocov 向けの packslip
+# バックエンドも無いため、mise.lock に URL と checksum が残る aqua バックエンドで宣言する。
+"aqua:k1LoW/octocov" = "0.83.5"
 
 # コンテナ実行環境（非 Docker・要件は docs/dev-environment.md）。
 # rootless Podman 一式を apt から導入する宣言。適用は明示的な bootstrap 実行時だけ
