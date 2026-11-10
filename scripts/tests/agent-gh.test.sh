@@ -10,11 +10,12 @@ failures=()
 BIN="$ROOT/bin"
 mkdir -p "$BIN"
 
-# 偽の fnox: `fnox get NAME` に FAKE_<NAME> の値を返す。値が空なら失敗する。
+# 偽の fnox: `fnox -c <config> get NAME` に FAKE_<NAME> の値を返す。値が空なら失敗する。
 cat >"$BIN/fnox" <<'EOF'
 #!/usr/bin/env bash
-[[ "$1" == "get" ]] || exit 9
-var="FAKE_$2"
+printf '%s\n' "$*" >>"$CALL_LOG.fnox-args"
+[[ "$1" == "-c" && "$3" == "get" ]] || exit 9
+var="FAKE_$4"
 [[ -n "${!var:-}" ]] || exit 1
 printf '%s\n' "${!var}"
 EOF
@@ -48,6 +49,7 @@ EOF
 chmod +x "$BIN"/*
 
 export PATH="$BIN:$PATH"
+export PELWAY_AGENT_FNOX_CONFIG="$ROOT/agent-fnox.toml"
 export FAKE_PELWAY_AGENT_GH_TOKEN=dev-token
 export FAKE_PELWAY_AGENT_GIT_EMAIL=1+pelway-agent@users.noreply.github.com
 export FAKE_PELWAY_REVIEW_APP_ID=111
@@ -59,7 +61,7 @@ run() {
   local name="$1"
   shift
   export CALL_LOG="$ROOT/$name.log"
-  rm -f "$CALL_LOG"
+  rm -f "$CALL_LOG" "$CALL_LOG.fnox-args"
   OUT="$(bash "$SCRIPT" "$@" 2>&1)"
   RC=$?
 }
@@ -72,6 +74,9 @@ expect_log() {
 run dev_sets_token dev pr list
 expect_log dev_sets_token "GH_TOKEN=dev-token"
 expect_log dev_sets_token "ARGS=pr list"
+
+grep -qF -- "-c $ROOT/agent-fnox.toml get PELWAY_AGENT_GH_TOKEN" "$ROOT/dev_sets_token.log.fnox-args" 2>/dev/null ||
+  failures+=("uses_machine_config: fnox not called with PELWAY_AGENT_FNOX_CONFIG")
 
 run token_not_leaked dev pr list
 [[ "$OUT" != *dev-token* ]] || failures+=("token_not_leaked: token printed")

@@ -3,18 +3,19 @@
 #   scripts/agent-gh dev <gh の引数...>        実装担当 pelway-agent（PAT）
 #   scripts/agent-gh review <gh の引数...>     レビュー担当 GitHub App pelway-review（インストールトークン）
 #   scripts/agent-gh <dev|review> git <git の引数...>   その名義の認証で git を実行する
-# トークンは fnox から取り、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。
+# トークンは fnox（マシンごとの設定）から取り、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。
 # 終了コード: 2 = 役割の誤り、3 = トークンを取れない、それ以外は gh / git の終了コード
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 値はリポジトリの fnox.toml ではなく、マシンごとの設定に age で暗号化して置く（scripts/setup/agent-accounts.sh が作る）。
+fnox_config="${PELWAY_AGENT_FNOX_CONFIG:-$HOME/.config/pelway-agent/fnox.toml}"
 
 usage() { echo "usage: $0 <dev|review> [git] <args...>" >&2; exit 2; }
 
 secret() {
   local value
-  if ! value="$(cd "$repo_root" && fnox get "$1" 2>/dev/null)" || [[ -z "$value" ]]; then
-    echo "agent-gh: fnox から $1 を取れません（fnox set $1 で登録する）" >&2
+  if ! value="$(fnox -c "$fnox_config" get "$1" 2>/dev/null)" || [[ -z "$value" ]]; then
+    echo "agent-gh: $fnox_config から $1 を取れません（scripts/setup/agent-accounts.sh で登録する）" >&2
     exit 3
   fi
   printf '%s' "$value"
