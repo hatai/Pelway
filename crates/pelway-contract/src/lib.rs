@@ -29,4 +29,5 @@ pub mod member;
 pub mod message;
 pub mod pseudonym;
 pub mod snapshot;
+pub mod store;
 pub mod task;

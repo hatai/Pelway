@@ -143,8 +143,10 @@ jobs:
 
       # LCOV 形式でレポートを出す（cargo-llvm-cov が llvm-tools の profdata/cov を駆動）。
       # 出力先 lcov.info は .octocov.yml の coverage.paths と対応する。
+      # --no-cfg-coverage を付ける: 既定の --cfg coverage ビルドは、cfg(coverage) で
+      # nightly 専用 #![feature] を有効にする依存があると stable の E0554 で失敗するため。
       - name: Generate LCOV (cargo llvm-cov)
-        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --locked --no-cfg-coverage --lcov --output-path lcov.info
 
       # octocov で PR コメント（増減表示）を作る。レポートの保存・比較は
       # GitHub Actions の artifact のみ（.octocov.yml の diff.storage.artifacts）。

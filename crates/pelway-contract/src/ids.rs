@@ -64,6 +64,18 @@ string_id!(
     /// 実外部の提供元 ID ではない。
     SimulatedSendId
 );
+string_id!(
+    /// 根拠記録 ID（サーバー採番）。12 §3.2 `communication_basis_records` の `basis_id`。
+    BasisId
+);
+string_id!(
+    /// 明示メモリの ID（サーバー採番）。
+    MemoryId
+);
+string_id!(
+    /// 削除・制限記録の ID（サーバー採番）。
+    DeletionRestrictionId
+);
 
 /// 承認の冪等キー。クライアントが承認操作ごとに 1 つ生成する（例：UUID v4）。
 ///

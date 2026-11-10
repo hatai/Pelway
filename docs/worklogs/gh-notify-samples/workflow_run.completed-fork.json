@@ -1,0 +1,15 @@
+{
+  "action": "completed",
+  "workflow_run": {
+    "id": 8888888888,
+    "name": "verify",
+    "conclusion": "success",
+    "head_branch": "patch-1",
+    "head_sha": "6666666666666666666666666666666666666666",
+    "html_url": "https://github.com/random-outside/pelway/actions/runs/8888888888",
+    "head_repository": { "full_name": "random-outside/pelway" },
+    "pull_requests": []
+  },
+  "repository": { "full_name": "example-org/pelway" },
+  "sender": { "login": "random-outside" }
+}

@@ -6,6 +6,13 @@ coverage:
   paths:
     - lcov.info
 
+# 公式 v0.83.5 の comment: で PR にカバレッジ報告を投稿する。
+# https://github.com/k1LoW/octocov/blob/v0.83.5/README.md
+# body:（PR 本文への挿入）は使わない。同じコメントを更新する。
+comment:
+  if: is_pull_request
+  updatePrevious: true
+
 diff:
   storage:
     artifacts:

@@ -1,0 +1,206 @@
+# GitHub の出来事を Grok Bot の webhook に通知する（platform-gh-notify-r1）。
+# - 送るのはメタデータだけ（13 キー固定）。PR タイトル・本文、コメント本文、
+#   レビュー本文、ラベル、メールアドレス等は送らない
+# - checkout も GitHub API も使わないため permissions は空（{}）
+# - Secret は GROKBOT_WEBHOOK_URL（URL）/ GROKBOT_WEBHOOK_AUTH（Authorization
+#   ヘッダーの値全体）。登録手順は docs/dev-environment.md の
+#   「GitHub 通知（Grok Bot webhook・notify-grokbot）」
+# - URL・鍵は curl の引数とエラー出力に出さない（--config - で標準入力から渡す）
+
+name: notify-grokbot
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - closed
+      - synchronize
+      - ready_for_review
+  pull_request_review:
+    types:
+      - submitted
+  pull_request_review_comment:
+    types:
+      - created
+  # fork 由来の run を扱い得る trigger。gate step で head リポジトリの full_name
+  # がこのリポジトリと一致するときだけ送り、fork はスキップ。artifact の
+  # ダウンロード・PR コードの実行はないため抑制する。
+  workflow_run: # jactionlint ignore=dangerous-triggers
+    # .github/workflows/verify.yml の name:（workflow 名）と正確に一致させる。
+    workflows:
+      - verify
+    types:
+      - completed
+  workflow_dispatch:
+
+# イベント payload の読み取りと outbound POST だけなので権限は不要。
+permissions: {}
+
+# 実行ごとに別のグループにするので、待っている実行が新しい実行に
+# 置き換えられず通知が落ちない。jactionlint の concurrency-limits を
+# 満たすために置いている。group の値（github.workflow と github.run_id）は
+# GitHub が決めるもので、外から中身を変えられない。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    name: notify-grokbot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      # コメント系2イベント（pull_request_review / pull_request_review_comment）の
+      # 投稿者判定（r1 追加受入条件・19:13 訂正版）。
+      # 投稿者の author_association が OWNER / MEMBER / COLLABORATOR のときだけ
+      # "true"。上記2イベント以外では常に "true"（投稿者判定は行わない）。
+      # 判定はこの式＋Send step の if: で行い、run: には ${{ }} を書かない。
+      # 19:13 の訂正で github-actions[bot] 例外は削除した（ボット起点のコメントは
+      # 通知しない。octocov 等の結果は verify の workflow_run 通知で把握する）。
+      COMMENT_ALLOWED: >-
+        ${{
+          (
+            github.event_name != 'pull_request_review' &&
+            github.event_name != 'pull_request_review_comment'
+          ) || (
+            contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) ||
+            contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association)
+          )
+        }}
+      # スキップ時の notice ログ用（公開情報のみを載せる。判定には使わない）。
+      AUTHOR_ASSOC: ${{ github.event.comment.author_association || github.event.review.author_association }}
+      COMMENTER_LOGIN: ${{ github.event.comment.user.login || github.event.review.user.login }}
+    steps:
+      # 送る・送らないの判断。Secret 未設定・fork 由来のイベントは
+      # 通知せずにこのジョブを成功で終える（CI を落とさない）。
+      # ジョブ全体の if ではなく step で判定するのは、skip ではなく
+      # 「成功」で終わらせるため。
+      - name: Decide whether to notify
+        id: gate
+        env:
+          # head commit が属するリポジトリ（fork だと GITHUB_REPOSITORY と違う）。
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || github.event.workflow_run.head_repository.full_name }}
+          WEBHOOK_URL: ${{ secrets.GROKBOT_WEBHOOK_URL }}
+          WEBHOOK_AUTH: ${{ secrets.GROKBOT_WEBHOOK_AUTH }}
+        run: |
+          set -eu
+          skip_reason=""
+          if [ -z "$WEBHOOK_URL" ] || [ -z "$WEBHOOK_AUTH" ]; then
+            skip_reason="GROKBOT_WEBHOOK_URL / GROKBOT_WEBHOOK_AUTH secrets are not configured"
+          else
+            case "$GITHUB_EVENT_NAME" in
+              pull_request|pull_request_review|pull_request_review_comment|workflow_run)
+                if [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+                  skip_reason="event comes from fork repository $HEAD_REPO"
+                fi
+                ;;
+            esac
+          fi
+          if [ -n "$skip_reason" ]; then
+            echo "::notice::Skipping Grok Bot notification: $skip_reason."
+            echo "should_send=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_send=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # コメント系イベントで投稿者が基準（OWNER / MEMBER / COLLABORATOR）を
+      # 満たさないとき: 送らずに成功で終える（判定は Send step の if: と共通の
+      # env で行い、ここでは理由の記録のみ）。
+      - name: Note comment-author skip
+        if: steps.gate.outputs.should_send == 'true' && env.COMMENT_ALLOWED != 'true'
+        run: |
+          set -eu
+          echo "::notice::Skipping Grok Bot notification: comment author_association=${AUTHOR_ASSOC:-none} login=${COMMENTER_LOGIN:-unknown} is not OWNER/MEMBER/COLLABORATOR."
+
+      # メタデータだけの JSON を組み立てて POST する。
+      # ${{ }} は run: に直接書かず、必要な値はすべてこの step の env: 経由で渡す。
+      # 数値（pr_number）と真偽値（merged）は --argjson、値が空なら null。
+      - name: Send notification
+        # 2つのゲートを通ったときだけ送る:
+        #   1) gate step: Secret あり・fork 由来ではない（should_send）
+        #   2) env.COMMENT_ALLOWED: コメント系イベントは投稿者の
+        #      author_association が OWNER / MEMBER / COLLABORATOR のときのみ
+        if: steps.gate.outputs.should_send == 'true' && env.COMMENT_ALLOWED == 'true'
+        env:
+          REPO: ${{ github.repository }}
+          # 手動実行（workflow_dispatch）は event: "test" のテスト通知を送る。
+          EVENT: ${{ github.event_name == 'workflow_dispatch' && 'test' || github.event_name }}
+          ACTION: ${{ github.event.action }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref || github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          # workflow_run のときは対象 run の html_url。それ以外は空になり、
+          # run: 側で自分の run の URL（$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID）に落ちる。
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          ACTOR: ${{ github.actor }}
+          WEBHOOK_URL: ${{ secrets.GROKBOT_WEBHOOK_URL }}
+          WEBHOOK_AUTH: ${{ secrets.GROKBOT_WEBHOOK_AUTH }}
+        run: |
+          set -eu
+
+          payload="$(jq -n \
+            --arg schema "pelway.github-notify/v1" \
+            --arg repo "$REPO" \
+            --arg event "$EVENT" \
+            --arg action "${ACTION:-}" \
+            --argjson pr_number "${PR_NUMBER:-null}" \
+            --arg head_branch "${HEAD_BRANCH:-}" \
+            --arg head_sha "${HEAD_SHA:-}" \
+            --argjson merged "${MERGED:-null}" \
+            --arg conclusion "${CONCLUSION:-}" \
+            --arg workflow_name "${WORKFLOW_NAME:-}" \
+            --arg run_url "${RUN_URL:-$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID}" \
+            --arg actor "${ACTOR:-}" \
+            --arg occurred_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+              schema: $schema,
+              repo: $repo,
+              event: $event,
+              action: (if $action == "" then null else $action end),
+              pr_number: $pr_number,
+              head_branch: (if $head_branch == "" then null else $head_branch end),
+              head_sha: (if $head_sha == "" then null else $head_sha end),
+              merged: $merged,
+              conclusion: (if $conclusion == "" then null else $conclusion end),
+              workflow_name: (if $workflow_name == "" then null else $workflow_name end),
+              run_url: $run_url,
+              actor: (if $actor == "" then null else $actor end),
+              occurred_at: $occurred_at
+            }')"
+
+          # URL と Authorization の値を curl の引数・エラー出力に出さないため、
+          # 両方とも標準入力の設定ファイル（--config -）で渡す（-H @- では URL が
+          # 引数に残るため不採用）。設定ファイルの引用符構文に合わせて \ と " をエスケープする。
+          esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+          curl_config="$(printf 'url = "%s"\nheader = "Authorization: %s"\n' \
+            "$(esc "$WEBHOOK_URL")" "$(esc "$WEBHOOK_AUTH")")"
+
+          # 送信失敗で CI を落とさない（|| true 相当: 以降で非 0 を返さない）。
+          # ログに出すのは HTTP ステータス（と失敗時の curl 終了コード）だけ。
+          set +e
+          http_code="$(printf '%s\n' "$curl_config" | curl --config - \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data-binary "$payload" \
+            --max-time 10 \
+            --silent \
+            --output /dev/null \
+            --write-out '%{http_code}' 2>/dev/null)"
+          curl_exit=$?
+          set -e
+
+          if [ "$curl_exit" -ne 0 ]; then
+            echo "::warning::Grok Bot notification was not delivered (curl exit $curl_exit; no HTTP status)."
+          else
+            case "$http_code" in
+              2??) echo "Grok Bot notification delivered. HTTP status: $http_code" ;;
+              *) echo "::warning::Grok Bot webhook responded with HTTP status $http_code." ;;
+            esac
+          fi
