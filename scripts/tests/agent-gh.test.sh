@@ -119,6 +119,49 @@ expect_log dev_git_identity "-c url.https://github.com/.pushInsteadOf=ssh://git@
 run bad_role admin pr list
 [[ "$RC" == 2 ]] || failures+=("bad_role: exit $RC, want 2")
 
+# run_help <name> <args...>: run と同じだが stderr を <name>.stderr に分け、OUT には標準出力だけを入れる。
+run_help() {
+  local name="$1"
+  shift
+  export CALL_LOG="$ROOT/$name.log"
+  rm -f "$CALL_LOG" "$CALL_LOG.fnox-args" "$CALL_LOG.token-args" "$ROOT/$name.stderr"
+  OUT="$(bash "$SCRIPT" "$@" 2>"$ROOT/$name.stderr")"
+  RC=$?
+}
+
+# expect_no_calls <name>: fnox・gh・git のどれも呼ばれていない（呼ぶと CALL_LOG 系ができる）
+expect_no_calls() {
+  local name="$1"
+  local log="$ROOT/$name.log"
+  [[ ! -e "$log" && ! -e "$log.fnox-args" && ! -e "$log.token-args" ]] ||
+    failures+=("$name: fnox or gh was called")
+}
+
+# --help: usage: で始まる行を標準出力に出し、終了コード 0。fnox も gh も呼ばない。
+run_help help_long --help
+[[ "$RC" == 0 ]] || failures+=("help_long: exit $RC, want 0")
+grep -q '^usage:' <<<"$OUT" || failures+=("help_long: stdout lacks 'usage:' line")
+[[ ! -s "$ROOT/help_long.stderr" ]] || failures+=("help_long: wrote to stderr")
+expect_no_calls help_long
+
+# -h: --help と同じ動き
+run_help help_short -h
+[[ "$RC" == 0 ]] || failures+=("help_short: exit $RC, want 0")
+grep -q '^usage:' <<<"$OUT" || failures+=("help_short: stdout lacks 'usage:' line")
+[[ ! -s "$ROOT/help_short.stderr" ]] || failures+=("help_short: wrote to stderr")
+expect_no_calls help_short
+
+# 認証情報が無い環境（fnox が何も返さない）でも --help は終了コード 0
+export CALL_LOG="$ROOT/help_no_credentials.log"
+rm -f "$CALL_LOG" "$CALL_LOG.fnox-args" "$CALL_LOG.token-args"
+OUT="$(env -u FAKE_PELWAY_DEV_APP_ID -u FAKE_PELWAY_DEV_APP_INSTALLATION_ID -u FAKE_PELWAY_DEV_APP_KEY \
+  -u FAKE_PELWAY_DEV_GIT_EMAIL -u FAKE_PELWAY_REVIEW_APP_ID -u FAKE_PELWAY_REVIEW_APP_INSTALLATION_ID \
+  -u FAKE_PELWAY_REVIEW_APP_KEY bash "$SCRIPT" --help 2>"$ROOT/help_no_credentials.stderr")"
+RC=$?
+[[ "$RC" == 0 ]] || failures+=("help_no_credentials: exit $RC, want 0")
+grep -q '^usage:' <<<"$OUT" || failures+=("help_no_credentials: stdout lacks 'usage:' line")
+expect_no_calls help_no_credentials
+
 FAKE_PELWAY_DEV_APP_KEY="" run missing_token_fails_closed dev pr list
 [[ "$RC" == 3 ]] || failures+=("missing_token_fails_closed: exit $RC, want 3")
 [[ ! -e "$ROOT/missing_token_fails_closed.log" ]] || failures+=("missing_token_fails_closed: gh was called")
