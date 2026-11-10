@@ -100,6 +100,11 @@ expect_log dev_git_identity "-c user.name=pelway-agent"
 expect_log dev_git_identity "-c user.email=1+pelway-agent@users.noreply.github.com"
 expect_log dev_git_identity "-c credential.helper= -c credential.helper=!gh auth git-credential"
 expect_log dev_git_identity "commit -m x"
+# origin が SSH でも、push / fetch を HTTPS（= GH_TOKEN の名義）に向ける。SSH のままだと hatai の鍵で push される。
+expect_log dev_git_identity "-c url.https://github.com/.insteadOf=git@github.com:"
+expect_log dev_git_identity "-c url.https://github.com/.insteadOf=ssh://git@github.com/"
+expect_log dev_git_identity "-c url.https://github.com/.pushInsteadOf=git@github.com:"
+expect_log dev_git_identity "-c url.https://github.com/.pushInsteadOf=ssh://git@github.com/"
 
 run bad_role admin pr list
 [[ "$RC" == 2 ]] || failures+=("bad_role: exit $RC, want 2")

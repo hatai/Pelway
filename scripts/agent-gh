@@ -54,7 +54,13 @@ esac
 
 if [[ "${1:-}" == "git" ]]; then
   shift
-  GH_TOKEN="$token" exec git "${git_identity[@]}" \
+  # origin が SSH（git@github.com:）だと credential helper は使われず、hatai の SSH 鍵で認証される。
+  # GitHub への URL を HTTPS に書き換え、GH_TOKEN の名義で認証させる。
+  https_rewrite=()
+  for kind in insteadOf pushInsteadOf; do
+    https_rewrite+=(-c "url.https://github.com/.$kind=git@github.com:" -c "url.https://github.com/.$kind=ssh://git@github.com/")
+  done
+  GH_TOKEN="$token" exec git "${git_identity[@]}" "${https_rewrite[@]}" \
     -c credential.helper= -c 'credential.helper=!gh auth git-credential' "$@"
 fi
 
