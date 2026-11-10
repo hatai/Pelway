@@ -4,6 +4,7 @@
 pub mod ci;
 pub mod parse;
 pub mod payload;
+pub mod t3;
 pub mod watch;
 
-pub use parse::{extract_report, issue_number, parse_utc_epoch};
+pub use parse::{extract_report, format_utc, issue_number, parse_utc_epoch};
