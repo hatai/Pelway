@@ -245,3 +245,19 @@
 - GitHub 上の run と、lockfile の sha がランナーで実際に使われること、リポジトリの Require lockfile ポリシーの有無は未検証。push はしていない。
 
 - 独立した `mise run verify`（担当実行、11:39:01–11:39:08 JST）: exit 0。`cargo test` は smoke 1件 ok。同じ実行中にも rust channel sync と rustup self-update チェックがあった（"installing 1 tool" が2回、コンポーネントは unchanged、`llvm-tools is up to date`）。`mise.lock` は変化なし。
+
+## 追記5（12:23 JST、担当）
+
+- llvm-tools-preview は既に `mise.toml` の rust.components と `mise.lock` でピン済みだった。今回は暗黙の自動ダウンロードに頼らないよう、`toolchain-check` で sysroot 上の `llvm-profdata` / `llvm-cov` の実行ファイル存在を確認するようにした。欠けていれば失敗する。CI の verify / coverage 両ジョブは `mise install` のあと、この検査を先に実行する。既存の `~/.rustup` は削除も変更もしていない。
+- 公式 `mise run verify` を worktree 内で再実行（12:22:38–12:23:35 JST）。10 依存タスクを個別に実行したあと、公式の結合 `mise run verify` も実行。すべて exit 0。
+  - fmt-check 6.965s、check 4.249s、clippy 4.552s、test 5.688s、build 5.005s、toolchain-check 5.234s、hk-validate 5.948s、hk-check 4.684s、fnox-check 4.111s、pitchfork-check 4.789s
+  - 結合 `mise run verify` 4.868s（mise 内部 Finished in 356.8ms）、exit 0
+- 壁時計の大半は各 mise 起動時の rust channel sync と rustup self-update チェック。cargo 自体は既存 `target/` による増分で 0.00–0.06s 程度。`target/` と mbx キャッシュは削除・付け替えしていない。
+- test の対象: ワークスペースメンバーは `crates/dev-smoke`（pelway-dev-smoke）のみ。`cargo test --workspace --locked -- --list`:
+  - unittests `src/lib.rs`: 0件
+  - `tests/smoke.rs`: 1件 `dev_environment_smoke`
+  - Doc-tests `pelway_dev_smoke`: 0件
+  実行結果も同じで、`dev_environment_smoke` は ok。切り詰めではなく、現時点の公式テストスイートの全件。
+- toolchain-check: rustc/cargo 1.96.0、rustfmt 1.9.0-stable、clippy 0.1.96、`llvm-profdata` と `llvm-cov` は LLVM 22.1.2-rust-1.96.0-stable。
+- キャッシュ再確認（ファイル）: `verify.yml` の両ジョブで mise-action `cache: false`。`actions/cache` ステップなし。downloads 用 Actions cache なし。mbx/Cargo リモートキャッシュ設定なし。今回の test ログは `0 B downloaded, 0 B uploaded`。
+- llvm-tools 通信・共有 rustup への既存書き込み、および今回の channel sync / self-update チェックは合格にしない。GitHub 上の実行は未検証。

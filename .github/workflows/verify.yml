@@ -58,6 +58,11 @@ jobs:
       - name: Trust project config
         run: mise trust
 
+      # llvm-tools-preview が mise install 時点で入っていることを確認する。
+      # 欠けていればここで失敗し、後続コマンド中の暗黙の rustup 自動ダウンロードには頼らない。
+      - name: Assert llvm-tools-preview is present
+        run: mise run toolchain-check
+
       # workflow / composite action の静的 lint（jactionlint は mise.toml で 2.5.0 をピン）。
       # --online は使わない。問題があればこの時点で fail させる（速い検査を先に）。
       - name: Lint workflows (jactionlint)
@@ -106,6 +111,11 @@ jobs:
 
       - name: Trust project config
         run: mise trust
+
+      # coverage ジョブは mise run verify を走らせないため、ここで同じ存在確認をする。
+      # 欠けていれば cargo llvm-cov 実行中の暗黙の rustup 自動ダウンロードには頼らない。
+      - name: Assert llvm-tools-preview is present
+        run: mise run toolchain-check
 
       # cargo-llvm-cov をバージョン指定で導入（--locked で Cargo.lock 通りにビルド）。
       - name: Install cargo-llvm-cov (pinned)
