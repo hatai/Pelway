@@ -14,7 +14,7 @@
 | [hk](https://hk.jdx.dev) | git hook の管理 | 採用。`hk.pkl` に手順を定義し、フックはリポジトリローカルの Git 設定にインストール |
 | [typos](https://github.com/crate-ci/typos) | スペルチェッカ | 採用。`hk.pkl` の `Builtins.typos` ステップ（pre-commit と `hk check --all`＝CI で実行）。ツールは mise で 1.52.0 に固定し、除外は `typos.toml` に置く |
 | [fnox](https://fnox.jdx.dev) | シークレットの管理 | 採用。`fnox.toml` にはシークレットの名前と秘密を含まないテンプレートだけを置く |
-| [pitchfork](https://pitchfork.jdx.dev) | ローカル開発用プロセスマネージャー | 採用するが設定ファイルは置かない。動かすプロセス（server・runner・DB 等）が存在しないため。ツールのみ mise で固定 |
+| [pitchfork](https://pitchfork.jdx.dev) | ローカル開発用プロセスマネージャー | 採用。`pitchfork.toml` に AI 開発チームの見張り役 `agent-watch` を定義する。ツールは mise で固定 |
 
 ## セットアップ手順（初回）
 
@@ -55,7 +55,7 @@ mise bootstrap    # 上の1〜3を順に実行
 | `mise run toolchain-check` | rustc / cargo / rustfmt / clippy の存在とバージョン確認（rustfmt・clippy を含まない最小構成だと失敗する） |
 | `mise run hk-validate` / `hk-check` | `hk.pkl` の検証 / リポジトリ全体の読み取り専用検査 |
 | `mise run fnox-check` | `fnox list`（定義の一覧確認。秘密値の取得・表示はしない） |
-| `mise run pitchfork-check` | pitchfork のバージョン確認と、`pitchfork.toml` が未配置であることの確認 |
+| `mise run pitchfork-check` | pitchfork のバージョン確認と、`pitchfork.toml` に `agent-watch` が定義されていることの確認 |
 | `mise run verify` | 上記すべての一括確認（依存タスクは**並列**実行） |
 | `mise exec -- hk fix` | 修正の適用（ワークツリー。ステージはしない） |
 
@@ -146,10 +146,22 @@ container run --rm alpine echo hello   # hello 程度の smoke
 - `mbx doctor` の setup 検査は「Cargo shim is not installed」と警告しうる。mise ネイティブ統合では shim を使わないためで、mbx 公式ドキュメント（Getting started）に説明がある。ラップの実態は上の確認方法で判断する。
 - リモートキャッシュ（GitHub Actions cache・S3 等）は設定しない。
 
-## pitchfork について（採用済み・設定保留）
+## pitchfork について
 
-- ツールは mise で 2.33.1 に固定する。loopback 限定の smoke（HTTP サーバーの起動・readiness・ログ・停止）で動作を確認済み。
-- v0.7 の05章が想定する起動単位（postgres・server・runner・integration gateway・sandbox controller・stub inference・dummy mail・task sandbox）が実装された時点で、loopback 限定の `pitchfork.toml` を追加する。動かない設定だけを残さないため、実装前に置かない。`mise run pitchfork-check` が未配置を検査する。
+- ツールは mise で 2.33.1 に固定する。
+- `pitchfork.toml` には AI 開発チームの見張り役 `agent-watch`（`crates/pelway-agent-watch`）だけを定義する。T3 のスレッドの状態変化を Grok Bot の webhook に通知する常駐プロセスで、仕様は `docs/superpowers/specs/agent-team.md`「見張り役と通知」。
+- 起動・停止・ログ（リポジトリの直下で実行する）:
+
+  | コマンド | 内容 |
+  |---|---|
+  | `pitchfork start agent-watch` | 起動（異常終了したら 10 回まで再起動する） |
+  | `pitchfork stop agent-watch` | 停止 |
+  | `pitchfork status agent-watch` | 状態の確認 |
+  | `pitchfork logs agent-watch` | ログ（送ったイベントと HTTP ステータス。秘密と返答の本文は出さない） |
+
+- 状態は `~/.local/state/pelway/agent-watch.json` に置く。初めて起動したときは既存のスレッドを記録するだけで、通知しない。
+- 送らずに試すには `cargo run -p pelway-agent-watch -- --once --dry-run`（payload を標準出力に出す）。
+- v0.7 の05章が想定する起動単位（postgres・server・runner など）は、実装された時点で loopback 限定の定義を `pitchfork.toml` に足す。
 
 ## 既知の事項・未解決
 

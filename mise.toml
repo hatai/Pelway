@@ -108,11 +108,11 @@ description = "fnox の定義一覧を確認（秘密値の取得・表示は行
 run = "fnox list"
 
 [tasks.pitchfork-check]
-description = "pitchfork のバージョン確認と、pitchfork.toml が未配置であることの確認"
+description = "pitchfork のバージョン確認と、pitchfork.toml に見張り役 agent-watch が定義されていることの確認"
 run = """
 pitchfork --version
-if [ -e pitchfork.toml ]; then
-  echo "pitchfork.toml が存在します（方針では未配置のはず。docs/dev-environment.md 参照）" >&2
+if ! grep -q '^\\[daemons.agent-watch\\]' pitchfork.toml 2>/dev/null; then
+  echo "pitchfork.toml に [daemons.agent-watch] がありません（docs/dev-environment.md 参照）" >&2
   exit 1
 fi
 """
