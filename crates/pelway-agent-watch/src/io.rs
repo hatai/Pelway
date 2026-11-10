@@ -129,7 +129,16 @@ pub fn save_state(path: &Path, state: &State) -> Result<(), String> {
     }
     let tmp = path.with_extension("json.tmp");
     let body = serde_json::to_string(state).map_err(|e| e.to_string())?;
-    fs::write(&tmp, body).map_err(|e| e.to_string())?;
+    // 送信待ちの payload（報告行を含む）が入るので、所有者だけが読み書きできる 0600 で書く。
+    // 前回の一時ファイルが残っていれば消し、create_new で作り直す（既存の権限を引き継がない）
+    let _ = fs::remove_file(&tmp);
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)
+        .and_then(|mut f| f.write_all(body.as_bytes()))
+        .map_err(|e| e.to_string())?;
     fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 

@@ -216,3 +216,14 @@ fn unwritable_state_does_not_repeat_events() {
         "stderr: {stderr}"
     );
 }
+
+#[test]
+fn state_file_is_owner_only() {
+    // 状態ファイルには送信待ちの payload（報告行を含む）が入るので、所有者だけが読めるようにする
+    let sb = Sandbox::new("mode");
+    sb.fake("list.json", LIST_DONE);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success());
+    let mode = fs::metadata(sb.state_file()).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "mode {mode:o}");
+}
