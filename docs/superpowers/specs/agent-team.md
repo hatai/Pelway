@@ -31,6 +31,7 @@ Grok Bot・T3 Code・opencode（glm-5.3）・Codex で組む開発チームの�
 - GLM は終日使う。時間帯による使用制限はない
 - Grok Bot が渡すプロンプトは Issue 番号と使う skill 名だけにする。作業ルールは AGENTS.md と skill に置く
 - main はブランチ保護で守る。`CODEOWNERS` の `* @hatai` により人間の Approve が必須、CI の `mise run verify` と `pr-size` の成功が必須
+- hatai 自身が作った PR は hatai が Approve できないため、hatai が管理者として保護を迂回してマージする（`enforce_admins: false`）。エージェントの PR は迂回せず、hatai の Approve でマージする
 
 ## 状態の表し方
 
