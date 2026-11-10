@@ -199,7 +199,7 @@ finish() {
 # ──────────────────────────────────────────────────────────────────────────
 
 # AI 開発チーム（docs/superpowers/specs/agent-team.md）の GitHub 名義をそろえる手順書。
-# 実装担当のマシンユーザー pelway-agent、レビュー担当の GitHub App pelway-review を作り、
+# 実装担当の GitHub App pelway-dev と、レビュー担当の GitHub App pelway-review を作り、
 # 認証情報を ~/.config/pelway-agent/fnox.toml（age で暗号化）に置き、ブランチ保護と Projects ボードを設定する。
 # scripts/agent-gh はこの設定から認証情報を読む。
 
@@ -215,6 +215,51 @@ fnox_set() {
   printf '  %s✓ saved%s %s → %s\n' "$GREEN" "$RESET" "$1" "$CFG"
 }
 
+# App の作成・秘密鍵の保存・インストールを 3 段階で案内する。
+# app_stages <名前> <fnox の接頭辞> <役割の説明> <権限の説明>
+app_stages() {
+  local name="$1" prefix="$2" role="$3" perms="$4" slug_var="$2_SLUG" id_var="$2_ID_INPUT" inst_var="$2_INSTALLATION_INPUT" key_var="$2_KEY_PATH" slug
+
+  stage "GitHub App $name を作る"
+  say "$role の名義。hatai でログインしたブラウザで作業する。"
+  open_url "https://github.com/settings/apps/new"
+  step "GitHub App name: $name（使われていたら別名にし、下の warn を読む）"
+  step "Homepage URL: https://github.com/$REPO"
+  step "Webhook: Active のチェックを外す"
+  step "Repository permissions: $perms（Metadata は自動で Read-only）"
+  step "Where can this GitHub App be installed?: Only on this account → Create GitHub App"
+  warn "名前が $name 以外になった場合は、CI（verify.yml）と skill の $name を合わせて直す必要がある。"
+  step "作成後の General ページに出る App ID と、URL の /settings/apps/<slug> の slug を控える。"
+  ask "$id_var" "App ID:"
+  ask "$slug_var" "slug（URL の apps/ の後ろ）:"
+  printf '%s' "${!id_var}" | fnox_set "${prefix}_APP_ID"
+  pause
+
+  slug="${!slug_var}"
+  stage "$slug の秘密鍵を保存する"
+  open_url "https://github.com/settings/apps/$slug"
+  step "General ページ下部の Private keys → Generate a private key。.pem ファイルがダウンロードされる。"
+  note "WSL からは /mnt/c/Users/<Windows のユーザー名>/Downloads/... で見える。"
+  ask "$key_var" "ダウンロードした .pem のパス:"
+  [[ -f "${!key_var}" ]] || { warn "${!key_var} が見つからない"; exit 1; }
+  fnox_set "${prefix}_APP_KEY" <"${!key_var}"
+  if confirm "保存したので、ダウンロードした ${!key_var} を削除する？"; then
+    rm -f -- "${!key_var}"
+    printf '  %s✓ removed%s %s\n' "$GREEN" "$RESET" "${!key_var}"
+  else
+    SKIPPED+=("${!key_var} を削除する")
+  fi
+  pause
+
+  stage "$slug を $REPO にインストールする"
+  open_url "https://github.com/apps/$slug/installations/new"
+  step "Only select repositories → $REPO を選ぶ → Install"
+  step "インストール後の URL https://github.com/settings/installations/<数字> の数字を控える。"
+  ask "$inst_var" "Installation ID（URL の数字）:"
+  printf '%s' "${!inst_var}" | fnox_set "${prefix}_APP_INSTALLATION_ID"
+  pause
+}
+
 run_wizard() {
 
 TOTAL_STAGES=11
@@ -222,7 +267,7 @@ TOTAL_STAGES=11
 banner "Pelway AI 開発チームの GitHub 名義とブランチ保護"
 
 stage "gh 拡張 gh-token を入れる"
-say "レビュー担当（GitHub App）のトークンは gh 拡張 Link-/gh-token で発行する。"
+say "実装担当とレビュー担当（どちらも GitHub App）のトークンは gh 拡張 Link-/gh-token で発行する。"
 if gh extension list 2>/dev/null | grep -q "gh-token"; then
   note "インストール済み"
 elif confirm "gh extension install Link-/gh-token を実行する？"; then
@@ -262,100 +307,27 @@ EOF
 fi
 pause
 
-stage "マシンユーザー pelway-agent を作る"
-say "実装担当のエージェントが PR を作るための GitHub アカウント。"
-step "hatai からログアウトするか、ブラウザのプライベートウィンドウで開く。"
-open_url "https://github.com/signup"
-step "ユーザー名 pelway-agent でアカウントを作る（メールは自分が受け取れるもの）。"
-warn "別の名前になった場合は、skill implement-issue の名義確認と AGENTS.md の pelway-agent を直す必要がある。"
-ask AGENT_LOGIN "作ったユーザー名（例: pelway-agent）:"
-pause
+app_stages "pelway-dev" "PELWAY_DEV" "実装担当のエージェントが push と PR 作成に使う" \
+  "Contents = Read and write / Pull requests = Read and write / Issues = Read and write / Workflows = Read and write（.github/workflows を直す PR の push に必要）"
 
-stage "pelway-agent を collaborator に招待する"
-say "$REPO に Write 権限で招待する。hatai の gh で実行する。"
-if confirm "gh api で $AGENT_LOGIN を $REPO の collaborator（push 権限）に招待する？"; then
-  gh api --method PUT "repos/$REPO/collaborators/$AGENT_LOGIN" -f permission=push >/dev/null
-  printf '  %s✓ invited%s %s\n' "$GREEN" "$RESET" "$AGENT_LOGIN"
-else
-  SKIPPED+=("$AGENT_LOGIN を $REPO の collaborator に招待する")
-fi
-step "$AGENT_LOGIN でログインしたウィンドウで招待を受ける。"
-open_url "https://github.com/$REPO/invitations"
-pause "受けたら Enter"
+# コミットの作成者に使うメールアドレス（<bot ユーザーの ID>+<slug>[bot]@users.noreply.github.com）
+dev_bot_id="$(gh api "/users/${PELWAY_DEV_SLUG}%5Bbot%5D" --jq .id)"
+printf '%s' "$dev_bot_id+${PELWAY_DEV_SLUG}[bot]@users.noreply.github.com" | fnox_set PELWAY_DEV_GIT_EMAIL
 
-stage "pelway-agent の PAT を作る"
-say "$AGENT_LOGIN でログインしたウィンドウで作業する。"
-step "まず fine-grained PAT を試す: Resource owner に hatai、Repository access で $REPO を選べるか確かめる。"
-step "選べたら Repository permissions を Contents / Pull requests / Issues = Read and write にして作る。"
-open_url "https://github.com/settings/personal-access-tokens/new"
-step "選べなかったら classic PAT にする: Note に pelway-agent (Pelway)、スコープは repo だけ。"
-note "classic の repo スコープは全リポジトリに効くが、このアカウントが触れるのは $REPO だけ。"
-note "classic PAT の作成ページ: https://github.com/settings/tokens/new?scopes=repo"
-ask_secret AGENT_TOKEN "作った PAT を貼る:"
-agent_login_seen="$(GH_TOKEN="$AGENT_TOKEN" gh api user --jq .login)"
-if [[ "$agent_login_seen" != "$AGENT_LOGIN" ]]; then
-  warn "この PAT の名義は $agent_login_seen（期待は $AGENT_LOGIN）。作り直してからやり直す。"
-  exit 1
-fi
-agent_id="$(GH_TOKEN="$AGENT_TOKEN" gh api user --jq .id)"
-printf '%s' "$AGENT_TOKEN" | fnox_set PELWAY_AGENT_GH_TOKEN
-printf '%s' "$agent_id+$AGENT_LOGIN@users.noreply.github.com" | fnox_set PELWAY_AGENT_GIT_EMAIL
-unset AGENT_TOKEN
-pause
-
-stage "GitHub App pelway-review を作る"
-say "レビュー担当の名義。hatai でログインしたウィンドウで作業する。"
-open_url "https://github.com/settings/apps/new"
-step "GitHub App name: pelway-review（使われていたら pelway-review-hatai など）"
-step "Homepage URL: https://github.com/$REPO"
-step "Webhook: Active のチェックを外す"
-step "Repository permissions: Contents = Read-only / Pull requests = Read and write / Issues = Read-only（Metadata は自動で Read-only）"
-step "Where can this GitHub App be installed?: Only on this account → Create GitHub App"
-step "作成後の General ページに出る App ID と、URL の /settings/apps/<slug> の slug を控える。"
-ask REVIEW_APP_ID "App ID:"
-ask REVIEW_APP_SLUG "slug（URL の apps/ の後ろ）:"
-printf '%s' "$REVIEW_APP_ID" | fnox_set PELWAY_REVIEW_APP_ID
-pause
-
-stage "pelway-review の秘密鍵を保存する"
-open_url "https://github.com/settings/apps/$REVIEW_APP_SLUG"
-step "General ページ下部の Private keys → Generate a private key。.pem ファイルがダウンロードされる。"
-note "WSL からは /mnt/c/Users/<Windows のユーザー名>/Downloads/... で見える。"
-ask KEY_PATH "ダウンロードした .pem のパス:"
-[[ -f "$KEY_PATH" ]] || { warn "$KEY_PATH が見つからない"; exit 1; }
-fnox_set PELWAY_REVIEW_APP_KEY <"$KEY_PATH"
-if confirm "保存したので、ダウンロードした $KEY_PATH を削除する？"; then
-  rm -f -- "$KEY_PATH"
-  printf '  %s✓ removed%s %s\n' "$GREEN" "$RESET" "$KEY_PATH"
-else
-  SKIPPED+=("$KEY_PATH を削除する")
-fi
-pause
-
-stage "pelway-review を $REPO にインストールする"
-open_url "https://github.com/apps/$REVIEW_APP_SLUG/installations/new"
-step "Only select repositories → $REPO を選ぶ → Install"
-step "インストール後の URL https://github.com/settings/installations/<数字> の数字を控える。"
-ask REVIEW_INSTALLATION_ID "Installation ID（URL の数字）:"
-printf '%s' "$REVIEW_INSTALLATION_ID" | fnox_set PELWAY_REVIEW_APP_INSTALLATION_ID
-pause
+app_stages "pelway-review" "PELWAY_REVIEW" "レビュー担当のエージェントがレビューを投稿するのに使う" \
+  "Contents = Read-only / Pull requests = Read and write / Issues = Read-only"
 
 stage "名義を確かめる"
 say "scripts/agent-gh で、それぞれの名義が GitHub に通るか確かめる。"
-dev_login="$(bash "$REPO_ROOT/scripts/agent-gh" dev api user --jq .login || true)"
-review_repos="$(bash "$REPO_ROOT/scripts/agent-gh" review api /installation/repositories --jq '.repositories[].full_name' || true)"
-if [[ "$dev_login" == "$AGENT_LOGIN" ]]; then
-  printf '  %s✓%s dev → %s\n' "$GREEN" "$RESET" "$dev_login"
-else
-  warn "dev の名義が $AGENT_LOGIN にならない（得られた値: ${dev_login:-なし}）"
-  SKIPPED+=("scripts/agent-gh dev の名義確認")
-fi
-if [[ "$review_repos" == *"$REPO"* ]]; then
-  printf '  %s✓%s review → %s にアクセスできる\n' "$GREEN" "$RESET" "$REPO"
-else
-  warn "review のトークンで $REPO にアクセスできない"
-  SKIPPED+=("scripts/agent-gh review の確認")
-fi
+for role in dev review; do
+  repos="$(bash "$REPO_ROOT/scripts/agent-gh" "$role" api /installation/repositories --jq '.repositories[].full_name' || true)"
+  if [[ "$repos" == *"$REPO"* ]]; then
+    printf '  %s✓%s %s → %s にアクセスできる\n' "$GREEN" "$RESET" "$role" "$REPO"
+  else
+    warn "$role のトークンで $REPO にアクセスできない"
+    SKIPPED+=("scripts/agent-gh $role の確認")
+  fi
+done
 pause
 
 stage "main のブランチ保護を有効にする"
