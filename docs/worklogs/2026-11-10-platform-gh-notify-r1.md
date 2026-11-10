@@ -290,7 +290,61 @@ jactionlint は actionlint と同じ検査をするリポジトリピンの fork
 
 ## 未検証（直し1分も合格としない）
 
-1. GitHub 上での実際の run・送信（push は担当が行う）。※ jactionlint の concurrency-limits 指摘が残るため、push 後は CI の verify ジョブが落ちる見込み（迷った点1）。
+1. GitHub 上での実際の run・送信（push は担当が行う）。※ jactionlint の concurrency-limits 指摘が残るため、push 後は CI の verify ジョブが落ちる見込み（迷った点1）。→ **直し2で concurrency を付けたことで解消（下記）**
+
+---
+
+# 直し2: 実行ごとに別グループの concurrency を入れる — 2026-11-10（リード決定 20:39 JST）
+
+- 開始: 2026-11-10 20:41 JST
+- リードの決定（20:39）: 直し1で concurrency を消した結果、jactionlint が `concurrency-limits` で exit 1 になった。20:15 の「concurrency を消す」決定の狙いは、待っている実行が消されて通知が落ちないことだった。**実行ごとに別のグループなら同じ結果になる**ため、決定を「per-run グループの concurrency を入れる」に変更。
+
+## 作業環境（最初に記録）
+
+| コマンド | 出力 |
+|---|---|
+| `pwd` | `/home/hatai/.t3/worktrees/Pelway/demo-t3-platform-gh-not-7fc68e92ad361f68` |
+| `git branch --show-current` | `demo-t3/platform-gh-notify-r1-fix1`（指示どおり） |
+| `git rev-parse HEAD` | `d6f8f857c565a4a660c78c97f057cdefc1e30d2c`（指示の base と一致） |
+| `git status --porcelain` | 空（指示どおり） |
+
+## 変更内容
+
+1. `.github/workflows/notify-grokbot.yml` — `permissions: {}` と `jobs:` の間（job の外）に、理由コメント付きで次を追加（指示の YAML そのまま）:
+   ```yaml
+   concurrency:
+     group: ${{ github.workflow }}-${{ github.run_id }}
+     cancel-in-progress: false
+   ```
+   コメントには、実行ごとに別のグループなので待っている実行が新しい実行に置き換えられず通知が落ちないこと、jactionlint の concurrency-limits を満たすためであること、group の値は GitHub が決めるもので外から中身を変えられないことを記載。
+2. `docs/worklogs/gh-notify-samples/check.sh` — 静的検査を更新。「issue_comment が無いこと」は残し、「concurrency が無いこと」の検査を「`group: ${{ github.workflow }}-${{ github.run_id }}` であること（grep -qF）」と「`cancel-in-progress: false` であること」の2検査に置き換え。ヘッダーの確認項目5も更新。
+3. `docs/dev-environment.md` — concurrency についての記述は元々無いため変更なし（指示「無ければ足さない」どおり）。
+4. 変更なし: `issue_comment` trigger（入れない）、`permissions: {}`、Secret gate、fork gate、13 キーの jq、`curl --config -`、ほかの workflow（verify.yml 等）、lint 規則の ignore コメント（付けない）。
+
+## 検証コマンドと結果（すべて実施済み・送信なし）
+
+| コマンド | exit code / 結果 |
+|---|---|
+| `bash docs/worklogs/gh-notify-samples/check.sh` | **exit 0** — 静的検査（no issue_comment / per-run concurrency without cancel）＋ゲート判定 8件＋payload 6件、すべて PASS |
+| `~/.local/share/mise/installs/jactionlint/2.5.0/jactionlint .github/workflows/notify-grokbot.yml` | **exit 0**（concurrency-limits 解消。shellcheck 未導入の注記のみ） |
+| 同上・引数なし（CI の verify と同じ全 workflow 検査） | **exit 0** |
+| `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/notify-grokbot.yml'))"` | OK |
+| `grep -n issue_comment .github/workflows/notify-grokbot.yml` | 一致なし（exit 1） |
+| 行末空白・最終改行（変更2ファイル） | 行末空白なし・最終改行あり |
+
+## 迷った点（直し2分）
+
+- 特になし。concurrency ブロック・コメントは指示の文面どおり。check.sh の group 検査は `${{ }}` を正規表現ではなく固定文字列（`grep -qF`）で照合した（`$` を正規表現アンカーと誤解釈させないため）。
+
+## コミット
+
+- メッセージ: `fix(ci): use per-run concurrency group in gh-notify`
+- hk pre-commit の結果はコミット実行後に本節へ追記する。
+
+## 未検証（直し2分も合格としない）
+
+1. GitHub 上での実際の run・送信・concurrency の実際の挙動（push は担当が行う）。per-run グループでは直列化も打ち切りも実質発生しない見込みだが、実機確認はまだ。
+
 
 
 

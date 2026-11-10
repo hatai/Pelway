@@ -9,7 +9,8 @@
 #   2. 送るイベントの JSON: キーが指示の 13 個だけであること
 #   3. タイトル・本文等のテキスト（*-MUST-NOT-APPEAR マーカー）が混入していないこと
 #   4. イベントごとの期待値（null の扱い、run_url の切り替え等）が合っていること
-#   5. workflow 自体が issue_comment trigger と concurrency を持たないこと
+#   5. workflow 自体が issue_comment trigger を持たず、concurrency が実行ごとの
+#      別グループ（cancel-in-progress: false）であること
 #
 # 使い方: bash docs/worklogs/gh-notify-samples/check.sh
 set -euo pipefail
@@ -191,12 +192,19 @@ main() {
   local own_run_url="https://github.com/example-org/pelway/actions/runs/123456789"
   local workflow_file="$samples_dir/../../../.github/workflows/notify-grokbot.yml"
 
-  # --- workflow 自体の検査: issue_comment trigger と concurrency は持たない ---
-  if grep -n 'issue_comment\|concurrency' "$workflow_file"; then
-    echo "FAIL notify-grokbot.yml still contains issue_comment / concurrency"
+  # --- workflow 自体の検査: issue_comment trigger を持たないことと、
+  #     concurrency が実行ごとの別グループ（cancel しない）であること ---
+  if grep -n 'issue_comment' "$workflow_file"; then
+    echo "FAIL notify-grokbot.yml still contains issue_comment"
+    failures=$((failures + 1))
+  elif ! grep -qF 'group: ${{ github.workflow }}-${{ github.run_id }}' "$workflow_file"; then
+    echo "FAIL notify-grokbot.yml: concurrency group is not per-run (github.workflow-github.run_id)"
+    failures=$((failures + 1))
+  elif ! grep -qF 'cancel-in-progress: false' "$workflow_file"; then
+    echo "FAIL notify-grokbot.yml: cancel-in-progress is not false"
     failures=$((failures + 1))
   else
-    echo "PASS notify-grokbot.yml (no issue_comment / concurrency)"
+    echo "PASS notify-grokbot.yml (no issue_comment / per-run concurrency without cancel)"
   fi
 
   # --- ゲート判定: 全8サンプル。6件は送る、2件（fork×2）は送らない ---

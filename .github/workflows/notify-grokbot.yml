@@ -37,6 +37,14 @@ on:
 # イベント payload の読み取りと outbound POST だけなので権限は不要。
 permissions: {}
 
+# 実行ごとに別のグループにするので、待っている実行が新しい実行に
+# 置き換えられず通知が落ちない。jactionlint の concurrency-limits を
+# 満たすために置いている。group の値（github.workflow と github.run_id）は
+# GitHub が決めるもので、外から中身を変えられない。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   notify:
     name: notify-grokbot
