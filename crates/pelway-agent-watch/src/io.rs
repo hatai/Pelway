@@ -166,6 +166,19 @@ fn curl_quote(s: &str) -> String {
 /// payload を webhook に送る。URL と鍵は curl の設定として標準入力から渡す（引数・プロセス一覧に出さない）。
 /// 本文は所有者だけが読める一時ファイルに置き、送ったら消す。
 pub fn send(payload: &Value, project: &Path) -> SendResult {
+    // 受け手が一時的に応答しないことがあるので、失敗したら 2 秒おいて最大 2 回まで送り直す
+    let mut result = send_once(payload, project);
+    for _ in 0..2 {
+        if !matches!(result, SendResult::Failed(_)) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        result = send_once(payload, project);
+    }
+    result
+}
+
+fn send_once(payload: &Value, project: &Path) -> SendResult {
     let (Some(url), Some(key)) = (
         fnox_get("PELWAY_NOTIFY_WEBHOOK_URL", project),
         fnox_get("PELWAY_NOTIFY_WEBHOOK_KEY", project),
@@ -199,7 +212,7 @@ pub fn send(payload: &Value, project: &Path) -> SendResult {
             "--connect-timeout",
             "2",
             "--max-time",
-            "5",
+            "10",
             "-X",
             "POST",
         ])
@@ -227,11 +240,15 @@ pub fn send(payload: &Value, project: &Path) -> SendResult {
             if code.len() == 3 && code.starts_with('2') {
                 SendResult::Sent(code)
             } else {
-                SendResult::Failed(if code.is_empty() {
-                    "000".to_string()
-                } else {
-                    code
-                })
+                // curl の終了コードだけを残す（エラー文には URL のホスト名が入りうるので出さない）
+                let exit = out
+                    .status
+                    .code()
+                    .map_or_else(|| "signal".to_string(), |c| c.to_string());
+                SendResult::Failed(format!(
+                    "http={} curl_exit={exit}",
+                    if code.is_empty() { "000" } else { &code }
+                ))
             }
         }
         Err(e) => SendResult::Failed(format!("curl: {e}")),
