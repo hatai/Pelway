@@ -12,3 +12,17 @@
 # scripts/setup/agent-accounts.sh の前半は wizard skill のテンプレートをそのまま写したライブラリで、
 # 手で直さない（コメントの "NAMEs" が誤検出される）。
 extend-exclude = [".agents/skills", ".claude/skills", "scripts/setup/agent-accounts.sh"]
+
+[default.extend-words]
+# RTO は Recovery Time Objective（障害復旧時間目標）の業界略語。
+rto = "rto"
+# 中小企業庁サイトの白書 URL は実パスの綴りが "pamflet"。直すとリンクが壊れる。
+pamflet = "pamflet"
+# passt は rootless podman の依存パッケージ（PASST）の実名。
+passt = "passt"
+# docs/ui-mocks の CSS クラス名（pane の略）。既存の "on" クラスと衝突するため改名しない。
+pn = "pn"
+# Rust 製 TUI ライブラリの実名 ratatui。
+ratatui = "ratatui"
+# pelway-client-ui のテストが "rgba(" を分割組み立てするための断片（no_color_values.rs）。
+ba = "ba"
