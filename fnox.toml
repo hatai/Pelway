@@ -21,3 +21,12 @@ PELWAY_DATABASE_URL = { default = "postgres://pelway@127.0.0.1:5432/pelway", des
 # --- 将来必要になる秘密の名前だけの宣言（値なし・当面未使用のため個別に ignore） ---
 
 PELWAY_LLM_API_KEY = { if_missing = "ignore", description = "LLMゲートウェイのAPI鍵。実装が進んだ時点で各自が設定する。現時点では未使用" }
+
+# --- AI 開発チームの GitHub 名義（scripts/agent-gh が使う。docs/superpowers/specs/agent-team.md） ---
+# 登録手順は scripts/setup/agent-accounts.sh。未登録の環境では agent-gh が終了コード 3 で止まる。
+
+PELWAY_AGENT_GH_TOKEN = { if_missing = "ignore", description = "実装担当のマシンユーザー pelway-agent の PAT" }
+PELWAY_AGENT_GIT_EMAIL = { if_missing = "ignore", description = "pelway-agent のコミット用メールアドレス（<id>+pelway-agent@users.noreply.github.com）。秘密ではないが置き場所をそろえる" }
+PELWAY_REVIEW_APP_ID = { if_missing = "ignore", description = "レビュー担当の GitHub App pelway-review の App ID" }
+PELWAY_REVIEW_APP_INSTALLATION_ID = { if_missing = "ignore", description = "pelway-review を hatai/Pelway に入れたときの Installation ID" }
+PELWAY_REVIEW_APP_KEY = { if_missing = "ignore", description = "pelway-review の秘密鍵（PEM）" }
