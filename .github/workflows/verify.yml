@@ -48,8 +48,9 @@ jobs:
         run: mise trust
 
       # ツール導入は mise install に限る（mise bootstrap は使わない）。
-      # rust / mr-boxington / hk / fnox / pitchfork が mise.lock の checksum 付きで入る。
-      # hk の初回実行に必要な Pkl パッケージの取得は verify ステップ内で行われる。
+      # rust（llvm-tools-preview 成分を含む）/ mr-boxington / hk / fnox / pitchfork が
+      # mise.lock の checksum 付きで入る。hk の初回実行に必要な Pkl パッケージの
+      # 取得は verify ステップ内で行われる。
       - name: Install tools (mise install)
         run: mise install
 
@@ -57,3 +58,60 @@ jobs:
       # toolchain-check / hk-validate / hk-check / fnox-check / pitchfork-check
       - name: Verify (mise run verify)
         run: mise run verify
+
+  # カバレッジの増減計測（octocov）。品質ゲート（verify ジョブ）とは独立に走らせる:
+  #   - verify はローカルの mise run verify と完全に同じコマンドのまま保つ
+  #   - 計測ビルド（-C instrument-coverage）とゲートビルドの target / mbx キャッシュを分離する
+  #   - カバレッジツールの故障で品質ゲートがブロックされないようにする
+  # （テストは2回走るが、ジョブは並列なので PR の待ち時間は増えない）
+  coverage:
+    name: octocov (coverage diff)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      # PR へのカバレッジコメント投稿に必要。fork PR の読み取り専用 token では投稿が
+      # スキップされるだけで job は落とさない。
+      pull-requests: write
+    env:
+      # カバレッジ生成ツールのバージョン（ピン留め）。
+      CARGO_LLVM_COV_VERSION: 0.6.17
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install mise (pinned)
+        env:
+          MISE_VERSION: v2026.11.5
+        run: |
+          curl -fsSL https://mise.run | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          mise --version
+          mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
+
+      - name: Trust project config
+        run: mise trust
+
+      # rust 1.96.0 に llvm-tools-preview 成分が入る（mise.toml の components で宣言）。
+      - name: Install tools (mise install)
+        run: mise install
+
+      # cargo-llvm-cov をバージョン指定で導入（--locked で Cargo.lock 通りにビルド）。
+      - name: Install cargo-llvm-cov (pinned)
+        run: |
+          cargo install cargo-llvm-cov --locked --version "$CARGO_LLVM_COV_VERSION"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      # LCOV 形式でレポートを出す（cargo-llvm-cov が llvm-tools の profdata/cov を駆動）。
+      # 出力先 lcov.info は .octocov.yml の coverage.paths と対応する。
+      - name: Generate LCOV (cargo llvm-cov)
+        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+
+      # octocov で PR コメント（増減表示）を作る。レポートの保存・比較は
+      # GitHub Actions の artifact のみ（.octocov.yml の diff.storage.artifacts）。
+      # バージョンは未ピン（ubi が最新を取得）。オンライン確認後にピン留めする。
+      - name: Run octocov
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: mise x ubi:k1LoW/octocov -- octocov

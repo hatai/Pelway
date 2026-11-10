@@ -14,9 +14,10 @@ lockfile = true
 [tools]
 # rust は mise 経由で rustup のツールチェーンを固定する。
 # mr_boxington = true で cargo を mbx（Cargo ビルド共有キャッシュ）経由にする。
-# components で rustfmt・clippy を明示し、最小構成のツールチェーンでも
-# fmt・lint が再現されるようにする（toolchain-check タスクが存在検査する）。
-rust = { version = "1.96.0", mr_boxington = true, components = ["rustfmt", "clippy"] }
+# components で rustfmt・clippy に加え CI のカバレッジ計測（cargo-llvm-cov）が
+# 必要とする llvm-tools-preview を明示し、最小構成のツールチェーンでも
+# fmt・lint・coverage が再現されるようにする（toolchain-check タスクが存在検査する）。
+rust = { version = "1.96.0", mr_boxington = true, components = ["rustfmt", "clippy", "llvm-tools-preview"] }
 mr-boxington = "1.29.2"
 hk = "2.11.1"
 fnox = "1.47.0"

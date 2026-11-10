@@ -166,4 +166,4 @@ backend = "core:rust"
 specifiers = ["1.96.0"]
 
 [tools.rust.options]
-components = "clippy,rustfmt"
+components = "clippy,llvm-tools-preview,rustfmt"

@@ -76,6 +76,7 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 - mise 本体は公式インストーラ（mise.run）で導入し、`MISE_VERSION` で 2026.11.5 に固定してインストール後にバージョンを検証している。`actions/checkout` はコミット sha でピン留め。
 - リモートキャッシュ（GitHub Actions cache・S3 等）はローカルの mbx と同じ方針で設定しない。CI のビルドはランナー内のローカルキャッシュのみで完結する。
 - この workflow に秘密は不要（`permissions: contents: read`）。`fnox-check` は `fnox list`（定義一覧の確認）のみで、秘密値の取得・表示はしない。
+- カバレッジの増減計測は同じ workflow の `coverage` ジョブで行う（品質ゲートとは独立）。cargo-llvm-cov（バージョン指定）で LCOV を `lcov.info` に出し、`.octocov.yml` に従って octocov が PR コメントを作る。比較用レポートの保存は GitHub Actions の artifact のみ。rust にはカバレッジ計測用の `llvm-tools-preview` 成分を `mise.toml` の `components` で宣言する。
 - 2026-11-10 時点で GitHub 上での実際の run は未確認（ブランチの push・PR 作成の承認待ち。作業ログ: `docs/worklogs/2026-11-10-platform-pr-ci-r1.md`）。
 
 ## シークレットの扱い（fnox）

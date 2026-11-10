@@ -85,3 +85,48 @@
 ## 次の一手
 
 リードがブランチを push して PR を作成 → workflow の初回 run を確認（上記「未検証」を潰す）→ 必要なら mise-action の sha ピンへの移行を検討。
+
+---
+
+# 追記（r1 + octocov）: PR のカバレッジ増減計測 — 2026-11-10
+
+- 追記指示の受領: 2026-11-10 10:27 JST 付の指示書を本スレッド（mcp:1b65aff3）で1回受領し、このラウンドで処理した。スレッド自己送信はエコーループになるため行っていない。
+- 期限: 自己検証報告 12:00 JST まで（延長措置）。
+
+## 追記の目的・範囲
+
+- CI でカバレッジを octocov が読める形式（LCOV）で出し、PR で前回（または base）との増減を表示する。
+- 追加変更: `.github/workflows/verify.yml` に `coverage` ジョブ追加、`.octocov.yml` 新規、`mise.toml` / `mise.lock` の rust `components` に `llvm-tools-preview` 追加、docs・本ログ。
+- 品質ゲート `mise run verify`（verify ジョブ）はコマンド不変で残す。低下で job を落とす閾値は設定しない。
+
+## 追加の設計判断（迷った点と安全側）
+
+1. **ジョブ分離とテスト二重実行**: coverage は独立ジョブで並列実行。根拠: (a) verify ジョブはローカルのゲートと完全に同じコマンドに保つ、(b) 計装ビルド（`-C instrument-coverage`）と通常ビルドの target / mbx ローカルキャッシュ混在をランナー分離で避ける、(c) 新ツール（cargo-llvm-cov / octocov）の故障で品質ゲートをブロックしない。テストは2回走るが PR の待ち時間は増えない。
+2. **公式 Action（k1LoW/octocov）不使用**: sha ピン留めが指示要件だが、オフラインで妥当なコミット sha を検証する手段がなく、捏造 sha より安全なのはバイナリ実行と判断。`mise x ubi:k1LoW/octocov` で実行する（**バージョン未ピン** — オフラインで実在 tag を確認できなかったため。オンライン確認後のピン留めを QA 必須項目とする）。リードの mise 環境でも `ubi:k1LoW/tbls` の実績がある ubi バックエンドを採用。
+3. **cargo-llvm-cov のバージョン**: `0.6.17` を `cargo install --locked --version` でピン。crates.io の実在確認はオフライン不可能（存在すれば恒久的に有効）。不実在なら CI が即 fail する。**QA がオンラインで 0.6.17 の存在（または最新版への差し替え）を確認すること。**
+4. **llvm-tools-preview の導入方法**: `mise.toml` の rust `components` に追加し `mise.lock` の `options` を手動同期（lock の該当節は checksum を持たないため、ジェネレータ出力と一致する形式で編集可）。CI は `mise install` で導入。ローカルには成份が無かった。
+5. **比較用保存は artifact のみ**: `.octocov.yml` の `diff.storage.artifacts`（`if-no-artifact: pass`）。S3・GitHub Actions cache は不使用。ただし r1 と同じく main への push トリガは無いため、base 側（main のコミット）に artifact が無い。初回 PR は増減なし、同一PRの2回目以降の push で前回 run との比較が効く。main push トリガの追加はオンライン確認後に別途判断。
+6. **octocov への権限**: `pull-requests: write` のみ追加（PR コメント投稿用）。fork PR の読み取り専用 token ではコメントがスキップされるだけで job は落とさない。`GITHUB_TOKEN`（自動マスク）のみ使い、他の秘密は不使用。fnox の秘密値には触れない。
+
+## 検証コマンドと結果（追記分・自己検証）
+
+| コマンド | 結果 |
+|---|---|
+| `mise run verify`（mise.toml 変更後） | **exit 0**（全タスク成功） |
+| 計装ビルド `RUSTFLAGS="-C instrument-coverage" cargo test --workspace --locked --target-dir /tmp/opencode/cov-target` | exit 0。テストバイナリ2つ（lib 単体・統合）を特定 |
+| `llvm-profdata merge -sparse` → `llvm-cov export -format=lcov`（`-object` 指定） | **exit 0**。`/tmp/opencode/lcov.info`（28行）: `crates/dev-smoke/src/lib.rs` と `tests/smoke.rs` が 100%（`LH:3/LF:3`、`FNDA:1`）。このチェーン（計装テスト→profdata→LCOV）は cargo-llvm-cov が自動化するものと同じ部品（llvm-tools-preview）を使う |
+| `.octocov.yml` / workflow の YAML 構文（pyyaml） | OK。`coverage.paths: [lcov.info]` ≡ workflow の `--output-path lcov.info` を突合 |
+| 秘密パターン grep（追加・変更ファイル） | 該当なし |
+
+- LCOV の実生成は cargo-llvm-cov 本体ではなく、同じ部品の直接実行で証拠化した（cargo-llvm-cov のバイナリはローカル未導入かつ取得不可のため）。作業ファイルは worktree 外の承認済み一時領域 `/tmp/opencode/` に置き、worktree の共有ビルドキャッシュを汚していない。
+
+## 事故記録（正直な記録）
+
+- `mise.toml` への成份追加後の最初の `mise run verify` で、mise が不足成分 `llvm-tools` を**自動的にダウンロードした**（static.rust-lang.org、約10秒、成功）。実装エージェントからの能動的なネット接続は行わない制約の想定外の副作用であった。以後の verify 実行では成份の再ダウンロードは発生しないことを確認した（rustup のチャンネル manifest 同期チェック自体は毎回走るが、実ダウンロードなし。この同期がネットワーク参照かローカルキャッシュかはログから判別不能）。この事故によりローカルに llvm-tools が入り、上記の実 LCOV 検証が可能になった。
+
+## 未検証（追記分）
+
+1. GitHub 上の coverage ジョブ実行・octocov の PR コメント・artifact による増減表示。
+2. octocov 実行（ローカルにバイナリ無し）。`.octocov.yml` は YAML 構文と公式設定知識による静的レビューのみ。`if-no-artifact` 等のキー名はオンライン確認要。
+3. `cargo-llvm-cov 0.6.17` の crates.io 実在性と Rust 1.96.0 でのビルド。
+4. `ubi:k1LoW/octocov` の解決とバージョンピン留め（QA 時に実施）。
