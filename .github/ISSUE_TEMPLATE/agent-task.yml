@@ -1,0 +1,49 @@
+name: エージェント向けタスク
+description: AI 開発チームに渡す実装タスク。中身を確かめてから ready-for-agent を付ける
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        1 Issue = 1 PR。PR の差分は 800 行まで（`mise run pr-size` で数える。lockfile と生成物は除く）。
+        書き終えたら内容を確かめ、`ready-for-agent` を付けると着手の合図になる。
+  - type: textarea
+    id: goal
+    attributes:
+      label: 目的
+      description: 何のために、何を変えるか
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 受け入れ条件
+      description: テストで確かめられる形で、1 行に 1 条件
+      placeholder: |
+        - [ ] 〜のとき、〜を返す
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: 対象外
+      description: この Issue では触らないこと
+    validations:
+      required: true
+  - type: dropdown
+    id: size
+    attributes:
+      label: 規模の見積もり
+      options:
+        - 〜200 行
+        - 〜800 行
+        - 800 行超（分割が必要）
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: 採用する方式
+      description: Prior art first で人間が選んだ方式。慣れた機能なら空でよい
+    validations:
+      required: false
