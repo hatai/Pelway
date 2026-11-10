@@ -4,7 +4,7 @@
 #   - ツールのバージョンは mise.toml / mise.lock が単一の管理元（Rust 1.96.0、hk 2.11.1 等）
 #   - mise の導入は公式 Action（jdx/mise-action）。リモートキャッシュ（GitHub Actions cache・S3）
 #     は mbx / Cargo と同じ方針で設定しない（mise-action も cache: false）
-#   - CI では mise bootstrap（apt・sudo・podman）を実行しない。mise install と mise run verify に限る
+#   - CI では mise bootstrap（apt:podman・sudo）を実行しない。クライアントビルド用の libfontconfig1-dev は両ジョブで apt-get により入れる
 #   - fnox-check は fnox list（定義一覧の確認）だけで、秘密値の取得・表示はしない
 
 name: verify
@@ -35,6 +35,15 @@ jobs:
         uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
+
+      # クライアント（yeslogic-fontconfig-sys など）のビルドに必要な Linux システムパッケージ。
+      # GitHub-hosted ubuntu-24.04 には fontconfig.pc が無い。今回足りなかった
+      # libfontconfig1-dev を入れる（noble では libfontconfig-dev を引く移行パッケージ）。
+      # mise bootstrap（apt:podman）は docs/dev-environment.md の CI 方針どおり使わない。
+      - name: Install Linux native dependencies for client builds
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libfontconfig1-dev
 
       # mise 公式 Action で mise 本体の導入とツールの導入を行う（curl / インストーラ不使用）。
       # - version: mise 本体を 2026.11.5 に固定（mise.toml の min_version を満たす検証済みバージョン）
@@ -95,6 +104,15 @@ jobs:
         uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
+
+      # クライアント（yeslogic-fontconfig-sys など）のビルドに必要な Linux システムパッケージ。
+      # GitHub-hosted ubuntu-24.04 には fontconfig.pc が無い。今回足りなかった
+      # libfontconfig1-dev を入れる（noble では libfontconfig-dev を引く移行パッケージ）。
+      # mise bootstrap（apt:podman）は docs/dev-environment.md の CI 方針どおり使わない。
+      - name: Install Linux native dependencies for client builds
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libfontconfig1-dev
 
       # verify ジョブと同じ導入（mise 公式 Action・キャッシュなし・--locked）。
       # rust 1.96.0 に llvm-tools-preview 成分が入る（mise.toml の components で宣言）。
