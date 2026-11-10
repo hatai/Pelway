@@ -1,0 +1,12 @@
+#:schema https://raw.githubusercontent.com/crate-ci/typos/master/typos.schema.json
+# typos（スペルチェッカ）のリポジトリ共通設定。
+# typos は mise.toml でピンした typos を、hk.pkl の Builtins.typos ステップ
+# （pre-commit・hk check --all＝CI）から --force-exclude 付きで呼び出される形で使う。
+# このファイルの除外はその経路すべて（素の typos 実行を含む）で効く。
+
+[files]
+# 外部管理のベンダー込みスキルは検査対象外。
+# .agents/skills/ と .claude/skills/ は skills-lock.json がハッシュ込みで
+# 外部リポジトリ（actionbook/rust-skills・penpot/penpot-ai-kit）から固定する内容で、
+# 手元で直すとハッシュ不一致になり、更新時に上書きされるため。
+extend-exclude = [".agents/skills", ".claude/skills"]
