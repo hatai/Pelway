@@ -24,6 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pelway_contract::member::MemberKind;
 use pelway_contract::pseudonym::pseudonymize;
+use pelway_contract::store::PurposeId;
 use serde::Serialize;
 
 /// ファイル出力の置き場所（プロセスの CWD からの相対）。cargo 経由の実行では
@@ -160,6 +161,12 @@ impl LogSink for FileSink {
 pub enum Route {
     Comments,
     Approve,
+    /// 根拠記録の作成・読取（QA-GDPR-02 の **仮の経路**。経路名は作業ログ参照）。
+    BasisRecords,
+    /// 根拠記録の撤回（QA-GDPR-02 の仮の経路。撤回は取得と同じ1操作）。
+    BasisWithdrawal,
+    /// 利用方針の作成・読取（QA-GDPR-02 の仮の経路）。
+    UsePolicies,
     /// 経路が確定しない読み取りエラー・未知の経路。
     Unknown,
 }
@@ -261,6 +268,38 @@ pub enum Event {
     },
     /// 内部エラー（5xx。応答本文は `{"code":"internal"}` のまま）。
     InternalError { route: Route },
+    /// 根拠記録を保存した（QA-GDPR-02 の仮の経路。workspace・basis・actor は仮名化、
+    /// 目的は種別。参照列の中身は出さない）。
+    BasisRecordSaved {
+        workspace: Pseudonym,
+        basis: Pseudonym,
+        actor: Pseudonym,
+        purpose: PurposeId,
+    },
+    /// 根拠記録を読み取った（一覧。件数は出さない）。
+    BasisRecordsListed {
+        workspace: Pseudonym,
+        actor: Pseudonym,
+    },
+    /// 根拠記録を撤回した（根拠失効。撤回後の epoch だけを数値で出す）。
+    BasisWithdrawn {
+        workspace: Pseudonym,
+        basis: Pseudonym,
+        actor: Pseudonym,
+        epoch: u64,
+    },
+    /// 利用方針を保存した（新規版。版はサーバー採番の数値）。
+    UsePolicySaved {
+        workspace: Pseudonym,
+        actor: Pseudonym,
+        purpose: PurposeId,
+        version: u64,
+    },
+    /// 利用方針を読み取った（一覧。件数は出さない）。
+    UsePoliciesListed {
+        workspace: Pseudonym,
+        actor: Pseudonym,
+    },
 }
 
 /// 出力先と仮名化の salt を持つ。`Arc<Logger>` で接続スレッドに共有する。
@@ -321,7 +360,9 @@ struct LogRecord<'a> {
     event: &'a Event,
 }
 
-fn unix_millis(now: SystemTime) -> u64 {
+/// 現在時刻（UNIX エポックからのミリ秒）。ログの `ts_ms` と QA-GDPR-02 の保存部の
+/// サーバー付け時刻で使う（crate 内で共用）。
+pub(crate) fn unix_millis(now: SystemTime) -> u64 {
     u64::try_from(now.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis())).unwrap_or(u64::MAX)
 }
 
