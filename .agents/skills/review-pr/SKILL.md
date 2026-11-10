@@ -11,7 +11,10 @@ AI 開発チームのレビュー担当が、PR 1 本をレビューして GitHu
 ## 決まり（毎回守る）
 
 - ファイルを書き換えない。コミットしない。push しない。
-- 実行してよいコマンドは `git` の読み取り系、PR の head を取り出す `scripts/agent-gh review pr checkout <N>`、`mise run verify`、`mise run pr-size`、`scripts/agent-gh review ...` だけ。
+- 実行してよいコマンドは `git` の読み取り系、PR の head を取り出す `scripts/agent-gh review pr checkout <N> --detach`、`mise run verify`、`mise run pr-size`、`scripts/agent-gh review ...` だけ。
+- 自分の worktree の外でコマンドを実行しない。PR の head が取り出せないときは、他の worktree で代わりに検査せず、`verdict: failed` で報告する。
+- `pr ready` は実行しない（レビュー担当の App には権限がない。Ready for review への切り替えは実装担当の App が行う）。
+- 投稿系のコマンドは `&&` でつながず 1 つずつ実行し、終了コードを確かめる。失敗したら `verdict: failed` で報告する。成功していない投稿を成功と報告しない。
 - GitHub への投稿は必ず `scripts/agent-gh review ...` で行う。投稿者が `pelway-review[bot]` になる。
 - 判定は 2 種類だけ。must-fix が 1 つでもあれば Request changes、なければ Approve。
 
@@ -30,7 +33,7 @@ Issue 番号は `closingIssuesReferences` から取る。Issue の「受け入�
 ### 2. 検査する
 
 ```bash
-scripts/agent-gh review pr checkout <N>
+scripts/agent-gh review pr checkout <N> --detach
 git fetch origin main
 mise run verify
 mise run pr-size
@@ -64,16 +67,15 @@ Reviewed: <headRefOid>
 
 must-fix がなければ「なし」と書く。
 
-Approve の前に、PR が Draft なら Ready for review にする。Draft のままだと Approve を受け付けない場合がある。
+PR が Draft のままでも投稿する。
 
 ```bash
-scripts/agent-gh review pr ready <N>   # isDraft が true のときだけ
 scripts/agent-gh review pr review <N> --approve --body-file - <<'EOF'
 ...
 EOF
 ```
 
-must-fix があるときは Draft のまま Request changes にする。
+must-fix があるときは Request changes にする。
 
 ```bash
 scripts/agent-gh review pr review <N> --request-changes --body-file - <<'EOF'
@@ -81,12 +83,22 @@ scripts/agent-gh review pr review <N> --request-changes --body-file - <<'EOF'
 EOF
 ```
 
+投稿したら、PR に自分のレビューが付いたことを確かめる。
+
+```bash
+scripts/agent-gh review pr view <N> --json reviews --jq '.reviews[-1] | {author: .author.login, state}'
+```
+
+`state` が `APPROVED` か `CHANGES_REQUESTED` で、投稿した判定と一致していれば成功。そうでなければ `verdict: failed` で報告する。
+
 ### 5. 終わりの報告
 
 最後の返答は次の 3 行だけにする。Grok Bot はこの 3 行だけを読む。
 
 ```
 pr: #<N>
-verdict: approve | request-changes
+verdict: approve | request-changes | failed
 must-fix: <件数>
 ```
+
+`failed` のときは 4 行目に `error: <失敗したコマンドとエラーの 1 行>` を足す。
