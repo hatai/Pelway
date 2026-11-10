@@ -12,6 +12,10 @@ Before implementing a feature you are unfamiliar with, search GitHub for open-so
 
 When a repository's documentation and its existing code disagree, follow the conventions used in the existing code, and in your final reply point out each inconsistency you found between the documentation and the code.
 
+## Facts over history
+
+Skills and docs state facts only: rules, procedures, definitions, current state. Do not write chronological information — dates, event narratives, what-happened-when — in them. Chronological information lives in `git log` and in documents where the timeline itself is the point, such as worklogs under `docs/worklogs/`.
+
 ## Agent skills
 
 ### Issue tracker
