@@ -1,0 +1,8 @@
+# linguist-generated を付けたファイルは scripts/pr-size.sh の行数に数えない（GitHub の差分表示でも折りたたまれる）。
+# lockfile と、外部リポジトリから固定するベンダー込みスキル。
+Cargo.lock linguist-generated=true
+mise.lock linguist-generated=true
+skills-lock.json linguist-generated=true
+.github/workflows/actions.lock linguist-generated=true
+.agents/skills/** linguist-generated=true
+.claude/skills/** linguist-generated=true
