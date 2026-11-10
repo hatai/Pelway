@@ -34,6 +34,8 @@ esac
         );
         // 偽の gh: 開いている PR はない。
         write_exec(&root.join("bin/gh"), "#!/usr/bin/env bash\necho '[]'\n");
+        // 偽の fnox: 秘密は取れない（本物の webhook に送らないため。送信は「送れなかった」扱いになる）
+        write_exec(&root.join("bin/fnox"), "#!/usr/bin/env bash\nexit 1\n");
         Sandbox { root }
     }
 
@@ -46,13 +48,19 @@ esac
     }
 
     fn run(&self) -> Output {
+        self.run_with(&["--once", "--dry-run"])
+    }
+
+    fn run_with(&self, args: &[&str]) -> Output {
         let path = format!(
             "{}:{}",
             self.root.join("bin").display(),
             std::env::var("PATH").unwrap()
         );
         Command::new(env!("CARGO_BIN_EXE_pelway-agent-watch"))
-            .args(["--once", "--dry-run", "--project", "."])
+            .args(args)
+            .args(["--project", "."])
+            .env("PELWAY_AGENT_WATCH_POLL_SECS", "0")
             .env("PATH", path)
             .env("FAKE_DIR", self.root.join("fake"))
             .env("XDG_STATE_HOME", self.root.join("state"))
@@ -88,7 +96,7 @@ const STATE_A_RUNNING: &str = r#"{"initialized":true,"threads":{
 fn once_first_run_prints_nothing() {
     let sb = Sandbox::new("first");
     sb.fake("list.json", LIST_DONE);
-    let out = sb.run();
+    let out = sb.run_with(&["--once"]);
     assert!(
         out.status.success(),
         "stderr: {}",
@@ -139,10 +147,72 @@ fn once_corrupt_state_is_baseline() {
     let sb = Sandbox::new("corrupt");
     sb.fake("list.json", LIST_DONE);
     fs::write(sb.state_file(), "{").unwrap();
-    let out = sb.run();
+    let out = sb.run_with(&["--once"]);
     assert!(out.status.success());
     assert!(out.stdout.is_empty());
     let state: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
     assert_eq!(state["initialized"], true);
+}
+
+#[test]
+fn dry_run_does_not_touch_state() {
+    let sb = Sandbox::new("dryrun-state");
+    sb.fake("list.json", LIST_DONE);
+    sb.fake("show-mcp_a.json", SHOW_A_DONE);
+    fs::write(sb.state_file(), STATE_A_RUNNING).unwrap();
+    let out = sb.run();
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8(out.stdout).unwrap().lines().count(), 1);
+    assert_eq!(
+        fs::read_to_string(sb.state_file()).unwrap(),
+        STATE_A_RUNNING
+    );
+}
+
+#[test]
+fn unsent_payload_is_kept_in_outbox() {
+    let sb = Sandbox::new("outbox");
+    sb.fake("list.json", LIST_DONE);
+    sb.fake("show-mcp_a.json", SHOW_A_DONE);
+    fs::write(sb.state_file(), STATE_A_RUNNING).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
+    let outbox = state["outbox"].as_array().unwrap();
+    assert_eq!(outbox.len(), 1);
+    assert_eq!(outbox[0]["event"], "finished");
+    assert_eq!(state["threads"]["mcp:a"]["status"], "completed");
+}
+
+#[test]
+fn unwritable_state_does_not_repeat_events() {
+    let sb = Sandbox::new("readonly");
+    sb.fake("list.json", LIST_DONE);
+    sb.fake("show-mcp_a.json", SHOW_A_DONE);
+    fs::write(sb.state_file(), STATE_A_RUNNING).unwrap();
+    let dir = sb.state_file().parent().unwrap().to_path_buf();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+    let out = sb.run_with(&["--cycles", "3"]);
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        stderr.matches("queued event=finished").count(),
+        1,
+        "stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("ERROR cannot save state"),
+        "stderr: {stderr}"
+    );
 }

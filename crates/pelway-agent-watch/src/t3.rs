@@ -9,7 +9,7 @@ pub fn parse_list(json: &str) -> Result<Vec<ListedThread>, String> {
     serde_json::from_str(json).map_err(|e| format!("t3 thread list: {e}"))
 }
 
-/// `t3 thread show --json` の出力を読む。最後の assistant の返答を `last_assistant_text` に入れる。
+/// `t3 thread show --json` の出力を読む。最後のメッセージが assistant の返答なら `last_assistant_text` に入れる。
 pub fn parse_show(json: &str) -> Result<ThreadDetail, String> {
     let v: Value = serde_json::from_str(json).map_err(|e| format!("t3 thread show: {e}"))?;
     let t = &v["thread"];
@@ -23,7 +23,9 @@ pub fn parse_show(json: &str) -> Result<ThreadDetail, String> {
     let id = text("threadId").ok_or("t3 thread show: threadId がない")?;
     let last_assistant_text = v["messages"]
         .as_array()
-        .and_then(|ms| ms.iter().rev().find(|m| m["role"] == "assistant"))
+        // 最後のメッセージが assistant のときだけ。後ろに user の指示があれば、その返答はまだ無い
+        .and_then(|ms| ms.last())
+        .filter(|m| m["role"] == "assistant")
         .and_then(|m| m["text"].as_str())
         .map(str::to_string);
     Ok(ThreadDetail {
@@ -71,6 +73,15 @@ mod tests {
         assert_eq!(d.run_count, 2);
         assert_eq!(d.pending_requests, 0);
         assert_eq!(d.last_assistant_text.as_deref(), Some("issue: #80"));
+    }
+
+    #[test]
+    fn show_ignores_assistant_text_followed_by_user() {
+        let d = parse_show(r#"{"thread":{"threadId":"c","status":"failed","updatedAt":"t","branch":null,
+          "providerInstanceId":"p","model":"m","runCount":2,"pendingRequestCount":0,"link":"l"},
+          "messages":[{"role":"assistant","text":"verify: pass"},{"role":"user","text":"fix it"}]}"#)
+        .unwrap();
+        assert_eq!(d.last_assistant_text, None);
     }
 
     #[test]

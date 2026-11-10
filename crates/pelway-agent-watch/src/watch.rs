@@ -49,9 +49,15 @@ pub struct ThreadMemo {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct State {
     pub initialized: bool,
+    /// 初回の記録をした時刻（UNIX 秒）。これより前に更新された未知のスレッドは通知しない。
+    #[serde(default)]
+    pub baseline_at: i64,
     pub threads: BTreeMap<String, ThreadMemo>,
-    /// ブランチごとに、`ci-failed-twice` を送ったときの最新の head sha。
+    /// ブランチごとに、`ci-failed-twice` を送った（または初回に記録した）ときの最新の head sha。
     pub ci_notified: BTreeMap<String, String>,
+    /// 送れなかった payload。次の周回で送り直す。
+    #[serde(default)]
+    pub outbox: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +116,11 @@ pub fn step(
     now: i64,
 ) -> Vec<(Event, ThreadDetail)> {
     if !state.initialized {
+        // 空の一覧（T3 の起動直後など）では記録しない。空のまま記録すると、次の周回で全スレッドを新規と誤解する
+        if listed.is_empty() {
+            return Vec::new();
+        }
+        state.baseline_at = now;
         for l in listed {
             state.threads.insert(
                 l.id.clone(),
@@ -130,7 +141,8 @@ pub fn step(
 
         if let Some(event) = terminal_event(&d.status) {
             let emit = match &prev {
-                None => true,
+                // 初回の記録より前に更新されたもの（初回の一覧に欠けていた古いスレッド）は通知しない
+                None => parse_utc_epoch(&d.updated_at).is_some_and(|t| t >= state.baseline_at),
                 Some(p) if !is_terminal(&p.status) => true,
                 // 前回も終わっていたが、その間に 1 往復した（実行回数が増えた）。
                 // 実行回数が分からない記録（初回に記録したもの）では判断しない。
@@ -430,6 +442,41 @@ mod tests {
         );
         assert!(out.is_empty());
         assert_eq!(state.threads["a"].run_count, 3);
+    }
+
+    #[test]
+    fn first_run_empty_list_does_not_baseline() {
+        let mut state = State::default();
+        let out = step(&mut state, &[], &[], now_after(T0, 5));
+        assert!(out.is_empty());
+        assert!(!state.initialized);
+    }
+
+    #[test]
+    fn baseline_records_time() {
+        let mut state = State::default();
+        step(
+            &mut state,
+            &[],
+            &[listed("a", "completed", T0)],
+            now_after(T1, 0),
+        );
+        assert_eq!(state.baseline_at, now_after(T1, 0));
+    }
+
+    #[test]
+    fn unknown_thread_updated_before_baseline_is_silent() {
+        // 初回の一覧に欠けていた古いスレッドは、あとで見つかっても通知しない
+        let mut state = initialized(&[]);
+        state.baseline_at = now_after(T1, 0);
+        let out = step(
+            &mut state,
+            &[detail("old", "completed", T0, 1, 0)],
+            &[listed("old", "completed", T0)],
+            now_after(T1, 30),
+        );
+        assert!(out.is_empty());
+        assert_eq!(state.threads["old"].status, "completed");
     }
 
     #[test]

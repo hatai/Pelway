@@ -26,8 +26,9 @@ pub fn ci_failed_twice(runs_newest_first: &[RunInfo]) -> Option<String> {
     }
 }
 
-/// まだ通知していない連続失敗なら記録して true を返す。
-pub fn ci_should_notify(state: &mut State, branch: &str, runs: &[RunInfo]) -> bool {
+/// まだ通知していない連続失敗なら記録し、`emit` が true なら true を返す。
+/// 初回の周回では `emit = false` で呼び、既にある連続失敗を記録だけする。
+pub fn ci_should_notify(state: &mut State, branch: &str, runs: &[RunInfo], emit: bool) -> bool {
     let Some(sha) = ci_failed_twice(runs) else {
         return false;
     };
@@ -35,7 +36,7 @@ pub fn ci_should_notify(state: &mut State, branch: &str, runs: &[RunInfo]) -> bo
         return false;
     }
     state.ci_notified.insert(branch.to_string(), sha);
-    true
+    emit
 }
 
 #[cfg(test)]
@@ -75,12 +76,20 @@ mod tests {
     }
 
     #[test]
+    fn ci_baseline_records_without_notifying() {
+        let mut state = State::default();
+        let runs = [run("failure", "b"), run("failure", "a")];
+        assert!(!ci_should_notify(&mut state, "agent/1-x", &runs, false));
+        assert!(!ci_should_notify(&mut state, "agent/1-x", &runs, true));
+    }
+
+    #[test]
     fn ci_notify_once_per_sha() {
         let mut state = State::default();
         let runs = [run("failure", "b"), run("failure", "a")];
-        assert!(ci_should_notify(&mut state, "agent/1-x", &runs));
-        assert!(!ci_should_notify(&mut state, "agent/1-x", &runs));
+        assert!(ci_should_notify(&mut state, "agent/1-x", &runs, true));
+        assert!(!ci_should_notify(&mut state, "agent/1-x", &runs, true));
         let newer = [run("failure", "c"), run("failure", "b")];
-        assert!(ci_should_notify(&mut state, "agent/1-x", &newer));
+        assert!(ci_should_notify(&mut state, "agent/1-x", &newer, true));
     }
 }

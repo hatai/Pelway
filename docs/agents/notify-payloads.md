@@ -7,7 +7,7 @@ Grok Bot の webhook には 2 種類の JSON が届く。`schema` で見分け�
 | `pelway.agent-watch/v1` | 見張り役 `agent-watch`（`crates/pelway-agent-watch`、pitchfork で常駐） | T3 のエージェントのスレッドの状態変化 |
 | `pelway.github-notify/v2` | `.github/workflows/notify-grokbot.yml` | GitHub の PR・レビュー・CI の出来事 |
 
-どちらも `urgency` を持つ。`immediate` はすぐ対応し、`digest` は朝と夕方のまとめにだけ反映する。
+送れなかった通知は送り直すので、同じ通知が 2 回届くことがある（`thread_id` と `round` と `event` が同じなら同じ出来事）。どちらも `urgency` を持つ。`immediate` はすぐ対応し、`digest` は朝と夕方のまとめにだけ反映する。
 
 ## `pelway.agent-watch/v1`
 
@@ -18,13 +18,13 @@ Grok Bot の webhook には 2 種類の JSON が届く。`schema` で見分け�
 | `schema` | string | `"pelway.agent-watch/v1"` |
 | `event` | string | `finished` / `failed` / `cancelled` / `waiting` / `stalled` |
 | `urgency` | string | 常に `"immediate"` |
-| `thread_id` | string | T3 のスレッド ID（`t3 thread send` の宛先）。`stall_reason` が `ci-failed-twice` のときは空文字 |
+| `thread_id` | string | T3 のスレッド ID（`t3 thread send` の宛先）。`stall_reason` が `ci-failed-twice` のときは空文字（このときは `provider` / `model` / `link` も空文字、`round` は 0。スレッドは `issue_number` から探す） |
 | `provider` | string | `opencode`（実装担当）/ `codex`（レビュー担当）など |
 | `model` | string | 例: `zai-coding-plan/glm-5.3` |
 | `branch` | string / null | スレッドの worktree のブランチ |
 | `issue_number` | number / null | `branch` が `agent/<番号>-...` のときの番号 |
 | `round` | number | スレッドの実行回数（最初の指示が 1、`t3 thread send` のたびに 1 増える） |
-| `report` | string / null | スレッドの最後の返答が `キー: 値` の行だけで 5 行以内のとき、その本文 |
+| `report` | string / null | `event` が `finished` で、スレッドの最後のメッセージが `キー: 値` の行だけで 5 行以内の返答のとき、その本文。形だけで判定するので、値の中身は検査しない |
 | `stall_reason` | string / null | `event` が `stalled` のとき `no-activity`（実行中のまま 45 分更新なし）か `ci-failed-twice`（`agent/` ブランチで verify が 2 回続けて失敗） |
 | `link` | string | T3 の画面でスレッドを開く URL |
 | `host` | string | 見張り役が動いているマシン名 |

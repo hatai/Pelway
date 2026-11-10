@@ -47,7 +47,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 
 エージェントの状態の通知は、見張り役 `pelway-agent-watch`（`crates/pelway-agent-watch`、pitchfork で常駐）が一元的に出す。エージェントごとのフック（OpenCode プラグイン、Codex / Claude の hooks）は使わない。
 
-- 30 秒ごとに `t3 thread list --json` を読み、状態が変わったスレッドだけ `t3 thread show` で詳しく見る
+- 30 秒ごとに `t3 thread list --json` を読み、状態が変わったスレッドと実行中のスレッドを `t3 thread show` で詳しく見る
 - 送るイベント（すべて即時対応）
   - `finished` / `failed` / `cancelled`: スレッドの実行が終わった
   - `waiting`: 承認や入力の待ちが発生した
@@ -55,7 +55,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
     - `no-activity`: 実行中のまま 45 分更新がない
     - `ci-failed-twice`: `agent/` ブランチで verify が 2 回続けて失敗した（5 分ごとに `gh run list` で確かめる）
 - payload は `pelway.agent-watch/v1`。スレッド ID、ブランチ、`issue_number`（`agent/<番号>-` から取る）、`round`（スレッドの実行回数）、`report`（最後の返答が `キー: 値` 形式 5 行以内のときだけ、その本文）を含む
-- 同じ出来事は 1 回だけ送る。状態は `~/.local/state/pelway/agent-watch.json` に置く
+- 同じ出来事からイベントを作るのは 1 回だけ。送れなかったものは送信待ちの列に残して送り直す（受け手には重複して届きうる）。状態は `~/.local/state/pelway/agent-watch.json` に置く
 - 修正が何回目かは `round` で Grok Bot が判断する。修正を出す前に `round` が 4 以上なら（最初の実装 + 修正 3 回）、修正を出さずにエスカレーションする
 
 ## 停止・迷走への対処

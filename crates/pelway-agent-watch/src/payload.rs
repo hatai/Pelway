@@ -28,7 +28,10 @@ pub fn build_payload(event: &Event, d: &ThreadDetail, host: &str, occurred_at: &
         "branch": d.branch,
         "issue_number": d.branch.as_deref().and_then(issue_number),
         "round": d.run_count,
-        "report": d.last_assistant_text.as_deref().and_then(extract_report),
+        // 報告行は実行が完了したときだけ。失敗・停滞のときの最後の返答は前の回のものでありうる
+        "report": matches!(event, Event::Finished)
+            .then(|| d.last_assistant_text.as_deref().and_then(extract_report))
+            .flatten(),
         "stall_reason": stall_reason,
         "link": d.link,
         "host": host,
@@ -110,6 +113,19 @@ mod tests {
             "t",
         );
         assert_eq!(v["report"], "pr: #81\nverdict: approve\nmust-fix: 0");
+    }
+
+    #[test]
+    fn payload_report_only_for_finished() {
+        let d = detail(None, 1, Some("pr: #81\nverdict: approve"));
+        assert_eq!(
+            build_payload(&Event::Failed, &d, "h", "t")["report"],
+            Value::Null
+        );
+        assert_eq!(
+            build_payload(&Event::Stalled(StallReason::NoActivity), &d, "h", "t")["report"],
+            Value::Null
+        );
     }
 
     #[test]

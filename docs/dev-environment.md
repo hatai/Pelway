@@ -154,13 +154,14 @@ container run --rm alpine echo hello   # hello 程度の smoke
 
   | コマンド | 内容 |
   |---|---|
+  | `mise run agent-watch-install` | 見張り役を `~/.local/bin/pelway-agent-watch` にインストールする。コードを変えたら実行し、`pitchfork restart agent-watch` で入れ替える |
   | `pitchfork start agent-watch` | 起動（異常終了したら 10 回まで再起動する） |
   | `pitchfork stop agent-watch` | 停止 |
   | `pitchfork status agent-watch` | 状態の確認 |
   | `pitchfork logs agent-watch` | ログ（送ったイベントと HTTP ステータス。秘密と返答の本文は出さない） |
 
-- 状態は `~/.local/state/pelway/agent-watch.json` に置く。初めて起動したときは既存のスレッドを記録するだけで、通知しない。
-- 送らずに試すには `cargo run -p pelway-agent-watch -- --once --dry-run`（payload を標準出力に出す）。
+- 状態は `$XDG_STATE_HOME/pelway/agent-watch.json`（未設定なら `~/.local/state/pelway/agent-watch.json`）に置く。初めて起動したときは既存のスレッドを記録するだけで、通知しない。送れなかった通知は状態の送信待ちの列に残り、次の周回で送り直す。
+- 送らずに試すには `cargo run -p pelway-agent-watch -- --once --dry-run`（新しいイベントの payload を標準出力に出す。状態ファイルは読むだけで書き換えない）。
 - v0.7 の05章が想定する起動単位（postgres・server・runner など）は、実装された時点で loopback 限定の定義を `pitchfork.toml` に足す。
 
 ## 既知の事項・未解決

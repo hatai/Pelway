@@ -15,8 +15,14 @@ use serde_json::Value;
 /// Grok Bot の webhook の URL と鍵を置く fnox 設定（pelway-agent-notify と共用）。
 const NOTIFY_FNOX: &str = ".config/pelway-agent-notify/fnox.toml";
 
+/// 外部コマンド 1 回あたりの制限時間（秒）。固まったコマンドで見張り役ごと止まらないため。
+const COMMAND_TIMEOUT_SECS: &str = "30";
+
 fn run(cmd: &str, args: &[&str], cwd: &Path) -> Result<String, String> {
-    let out = Command::new(cmd)
+    // coreutils の timeout で包む。制限を超えたら終了コード 124 で失敗扱いになる
+    let out = Command::new("timeout")
+        .arg(COMMAND_TIMEOUT_SECS)
+        .arg(cmd)
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::null())

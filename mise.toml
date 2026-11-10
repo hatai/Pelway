@@ -125,6 +125,10 @@ run = "bash scripts/pr-size.sh"
 description = "scripts/ のシェルスクリプトのテスト"
 run = "bash scripts/tests/pr-size.test.sh && bash scripts/tests/agent-gh.test.sh"
 
+[tasks.agent-watch-install]
+description = "見張り役 pelway-agent-watch を ~/.local/bin にインストールする（pitchfork の agent-watch が動かすバイナリ）"
+run = "cargo install --path crates/pelway-agent-watch --locked --root ~/.local --force"
+
 [tasks.verify]
 description = "開発環境の一括確認（依存タスクは並列実行）"
 depends = ["fmt-check", "check", "clippy", "test", "build", "toolchain-check", "hk-validate", "hk-check", "fnox-check", "pitchfork-check", "script-test"]

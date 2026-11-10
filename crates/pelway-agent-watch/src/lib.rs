@@ -2,6 +2,7 @@
 //! 外部コマンドを呼ぶ処理は `main.rs` 側に置き、ここには純粋関数だけを置く。
 
 pub mod ci;
+pub mod outbox;
 pub mod parse;
 pub mod payload;
 pub mod t3;
