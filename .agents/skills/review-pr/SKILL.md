@@ -40,7 +40,7 @@ mise run pr-size
 
 | 種類 | 当てはまるもの |
 |---|---|
-| must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / verify か pr-size が失敗 / 正しさ・セキュリティの欠陥 / ブランチが `agent/` で始まるのに PR の作成者（`author.login`）が `pelway-agent` でない |
+| must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / verify か pr-size が失敗 / 正しさ・セキュリティの欠陥 / ブランチが `agent/` で始まるのに PR の作成者（`author.login`）が `app/pelway-dev` でない |
 | nit | 上に当てはまらない改善案 |
 
 ### 4. 投稿する

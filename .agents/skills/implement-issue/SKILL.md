@@ -1,6 +1,6 @@
 ---
 name: implement-issue
-description: "Use when a T3 thread is told to implement a GitHub issue (\"Issue #N を実装\"), or receives a fix request for a PR it opened. Keywords: implement issue, Issue を実装, 修正依頼, agent-task, ready-for-agent, pelway-agent, Draft PR"
+description: "Use when a T3 thread is told to implement a GitHub issue (\"Issue #N を実装\"), or receives a fix request for a PR it opened. Keywords: implement issue, Issue を実装, 修正依頼, agent-task, ready-for-agent, pelway-dev, Draft PR"
 ---
 
 # Implement Issue
@@ -20,10 +20,11 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 
 | 条件 | Issue に書くこと |
 |---|---|
-| 名義の確認で `pelway-agent` 以外が返った | 返った名義 |
+| 名義の確認で `hatai/Pelway` が返らなかった | 返った内容かエラー |
 | 受け入れ条件がテストで確かめられる形になっていない | どの条件がなぜ確かめられないか |
 | 慣れない機能で、Issue の「採用する方式」が空 | `gh search` で比べた 2 つ以上の方式と、それぞれ採るもの・捨てるもの |
 | `mise run pr-size` が 800 行を超える | 分割案（PR ごとの範囲と見込み行数） |
+| 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 
 止まり方:
 
@@ -39,10 +40,10 @@ scripts/agent-gh dev issue edit <N> --add-label needs-human
 ### 1. 名義を確かめる
 
 ```bash
-scripts/agent-gh dev api user --jq .login
+scripts/agent-gh dev api /installation/repositories --jq '.repositories[].full_name'
 ```
 
-`pelway-agent` 以外なら止まる。
+実装担当の GitHub App `pelway-dev` のトークンで `hatai/Pelway` に届くことを確かめる。`hatai/Pelway` が返らなければ止まる。
 
 ### 2. Issue を読む
 

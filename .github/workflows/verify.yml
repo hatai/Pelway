@@ -175,15 +175,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # agent/ ブランチの PR は実装担当 pelway-agent が作る決まり。素の gh で作られて
+      # agent/ ブランチの PR は実装担当の GitHub App pelway-dev が作る決まり。素の gh で作られて
       # 作成者が別人（hatai など）になった PR をここで止める（docs/superpowers/specs/agent-team.md）。
       - name: Check agent PR author
         env:
           HEAD_REF: ${{ github.head_ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
-          if [[ "$HEAD_REF" == agent/* && "$PR_AUTHOR" != "pelway-agent" ]]; then
-            echo "agent/ ブランチの PR の作成者が $PR_AUTHOR です（pelway-agent であるべき）。scripts/agent-gh dev pr create で作り直してください。" >&2
+          if [[ "$HEAD_REF" == agent/* && "$PR_AUTHOR" != "pelway-dev[bot]" ]]; then
+            echo "agent/ ブランチの PR の作成者が $PR_AUTHOR です（pelway-dev[bot] であるべき）。scripts/agent-gh dev pr create で作り直してください。" >&2
             exit 1
           fi
 

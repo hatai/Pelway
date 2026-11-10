@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # エージェントの名義で gh / git を実行する。
-#   scripts/agent-gh dev <gh の引数...>        実装担当 pelway-agent（PAT）
-#   scripts/agent-gh review <gh の引数...>     レビュー担当 GitHub App pelway-review（インストールトークン）
+#   scripts/agent-gh dev <gh の引数...>        実装担当 GitHub App pelway-dev
+#   scripts/agent-gh review <gh の引数...>     レビュー担当 GitHub App pelway-review
 #   scripts/agent-gh <dev|review> git <git の引数...>   その名義の認証で git を実行する
-# トークンは fnox（マシンごとの設定）から取り、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。
+# 呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。
 # 終了コード: 2 = 役割の誤り、3 = トークンを取れない、それ以外は gh / git の終了コード
 set -euo pipefail
+# コマンド置換 $(...) の中でも set -e を効かせる（app_token 内の secret の失敗で止めるため）。
+shopt -s inherit_errexit
 
 # 値はリポジトリの fnox.toml ではなく、マシンごとの設定に age で暗号化して置く（scripts/setup/agent-accounts.sh が作る）。
 fnox_config="${PELWAY_AGENT_FNOX_CONFIG:-$HOME/.config/pelway-agent/fnox.toml}"
@@ -21,6 +23,30 @@ secret() {
   printf '%s' "$value"
 }
 
+# app_token <PREFIX>: fnox の <PREFIX>_APP_ID / _APP_INSTALLATION_ID / _APP_KEY から
+# GitHub App のインストールトークンを発行して出力する。
+app_token() {
+  local app_id installation_id key key_file response token
+  app_id="$(secret "$1_APP_ID")"
+  installation_id="$(secret "$1_APP_INSTALLATION_ID")"
+  key="$(secret "$1_APP_KEY")"
+  # 秘密鍵は argv（ps で見える）に載せず、所有者だけが読める一時ファイルで渡し、使ったらすぐ消す。
+  key_file="$(mktemp)"
+  trap 'rm -f "${key_file:-}"' EXIT
+  chmod 600 "$key_file"
+  printf '%s\n' "$key" >"$key_file"
+  # gh 拡張 Link-/gh-token。出力は JSON（{"token": "...", ...}）。
+  if ! response="$(gh token generate --app-id "$app_id" --installation-id "$installation_id" --key "$key_file" 2>/dev/null)"; then
+    rm -f "$key_file"
+    echo "agent-gh: GitHub App のトークンを発行できません（gh extension install Link-/gh-token が必要）" >&2
+    exit 3
+  fi
+  rm -f "$key_file"
+  token="$(sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' <<<"$response")"
+  [[ -n "$token" ]] || { echo "agent-gh: トークン発行の応答に token がありません" >&2; exit 3; }
+  printf '%s' "$token"
+}
+
 (($# >= 1)) || usage
 role="$1"
 shift
@@ -28,26 +54,12 @@ shift
 git_identity=()
 case "$role" in
   dev)
-    token="$(secret PELWAY_AGENT_GH_TOKEN)"
-    git_identity=(-c user.name=pelway-agent -c "user.email=$(secret PELWAY_AGENT_GIT_EMAIL)")
+    token="$(app_token PELWAY_DEV)"
+    email="$(secret PELWAY_DEV_GIT_EMAIL)"
+    git_identity=(-c "user.name=pelway-dev[bot]" -c "user.email=$email")
     ;;
   review)
-    app_id="$(secret PELWAY_REVIEW_APP_ID)"
-    installation_id="$(secret PELWAY_REVIEW_APP_INSTALLATION_ID)"
-    key="$(secret PELWAY_REVIEW_APP_KEY)"
-    # 秘密鍵は argv（ps で見える）に載せず、所有者だけが読める一時ファイルで渡し、使ったらすぐ消す。
-    key_file="$(mktemp)"
-    trap 'rm -f "$key_file"' EXIT
-    chmod 600 "$key_file"
-    printf '%s\n' "$key" >"$key_file"
-    # gh 拡張 Link-/gh-token。出力は JSON（{"token": "...", ...}）。
-    if ! response="$(gh token generate --app-id "$app_id" --installation-id "$installation_id" --key "$key_file" 2>/dev/null)"; then
-      echo "agent-gh: GitHub App のトークンを発行できません（gh extension install Link-/gh-token が必要）" >&2
-      exit 3
-    fi
-    rm -f "$key_file"
-    token="$(sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' <<<"$response")"
-    [[ -n "$token" ]] || { echo "agent-gh: トークン発行の応答に token がありません" >&2; exit 3; }
+    token="$(app_token PELWAY_REVIEW)"
     ;;
   *) usage ;;
 esac

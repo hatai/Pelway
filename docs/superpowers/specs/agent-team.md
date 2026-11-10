@@ -8,8 +8,10 @@ Grok Bot・T3 Code・opencode（glm-5.3）・Codex で組む開発チームの�
 |---|---|---|---|
 | 人間（濱田さん） | — | `hatai` | 本人 |
 | 指揮 | Grok Bot（クラウド） | — | T3 Connect 経由の MCP |
-| 実装 | T3 スレッド・opencode `zai-coding-plan/glm-5.3` | マシンユーザー `pelway-agent` | PAT（fine-grained。対象に選べなければ classic の `repo` スコープ）。`~/.config/pelway-agent/fnox.toml` に age で暗号化して置く |
-| レビュー | T3 スレッド・Codex | GitHub App `pelway-review`（`pelway-review[bot]`） | App のインストールトークン（レビューごとに発行） |
+| 実装 | T3 スレッド・opencode `zai-coding-plan/glm-5.3` | GitHub App `pelway-dev`（`pelway-dev[bot]`） | App のインストールトークン（呼び出しごとに発行） |
+| レビュー | T3 スレッド・Codex | GitHub App `pelway-review`（`pelway-review[bot]`） | App のインストールトークン（呼び出しごとに発行） |
+
+App は 2 つに分ける。同じ名義では自分の PR を Approve できないため。App の秘密鍵と ID は `~/.config/pelway-agent/fnox.toml` に age で暗号化して置き、`scripts/agent-gh` が呼び出しごとにトークンを発行する。
 
 人間が行うのは次の 2 つだけ。
 
@@ -19,13 +21,14 @@ Grok Bot・T3 Code・opencode（glm-5.3）・Codex で組む開発チームの�
 ## タスクの流れ
 
 1. `ready-for-agent` の Issue を Grok Bot が拾い、`agent:working` を付けて実装スレッドを立てる
-2. 実装スレッドは skill `implement-issue` に従い、ブランチ `agent/<issue番号>-<slug>` に push し、Draft PR（本文に `Closes #<issue番号>`）を作る
+2. 実装スレッドは skill `implement-issue` に従い、`pelway-dev` の名義でブランチ `agent/<issue番号>-<slug>` に push し、Draft PR（本文に `Closes #<issue番号>`）を作る
 3. レビュースレッドは skill `review-pr` に従い、PR に Approve か Request changes を投稿する
 4. Request changes なら、Grok Bot は同じ実装スレッドに `t3 thread send` で修正を指示する。同じスレッドでの修正は 3 回まで。超えたら要約を渡して新しいスレッドにする
 5. Approve と CI 成功がそろったら、人間が Approve してマージする。マージ後、worktree は自動で削除する
 
 ## 制約
 
+- `pelway-dev` には GitHub App の Workflows 権限を付けない。`.github/workflows/` の変更は人間が行う（push で動く workflow は承認前に secret を読めるため）
 - PR 1 本の差分は 800 行まで。`.gitattributes` で `linguist-generated` を付けたファイルは数えない
 - GLM の実装スレッドは同時に 3 本まで。超えた分は Grok Bot が順番待ちにする
 - GLM は終日使う。時間帯による使用制限はない
