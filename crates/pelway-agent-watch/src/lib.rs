@@ -2,5 +2,6 @@
 //! 外部コマンドを呼ぶ処理は `main.rs` 側に置き、ここには純粋関数だけを置く。
 
 pub mod parse;
+pub mod watch;
 
 pub use parse::{extract_report, issue_number, parse_utc_epoch};
