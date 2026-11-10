@@ -282,6 +282,7 @@
 - octocov はローカルに未導入。`mise.lock` に octocov エントリ（URL・checksum）を書くには、mise が aqua レジストリと GitHub リリースを解決しに行く=ネット接続が必要。指示により「checksum は mise 自身に書かせる」「自分では接続しない」「不完全な lock はコミットしない」ため、**lock を書かせて完了させることはできない**と判断した。
 - したがって本ラウンドは `mise run verify` も実行していない（宣言済みの octocov が欠けているため、mise の自動導入がネットへ接続し得る。llvm-tools / jactionlint の2事例とは逆に、今回は指示が明示的にこれを禁じている）。検証は下記のオフライン項目に留めた。
 - 変更は worktree に**未コミット**で残している（`git status` 参照）。
+  - **→ その後の現状: この停止状態は bf40488（13:26 JST）で解消済み。担当が `mise install` を実行し、mise が lock に URL と sha256 を書き、コミットされた。詳細は下記「追記7」。**
 
 ## 検証（オフラインのみ・このラウンド）
 
@@ -316,3 +317,31 @@ git commit
 
 - GitHub 上の実行全般、octocov の実機動作（PR コメント・artifact による増減）、channel sync / rustup self-update、mise-action の実機動作。
 - aqua バックエンドで mise が lock に checksum を残すかどうかの実機確認（上記の手順で担当確認を要する）。
+
+---
+
+# 追記7（13:59 JST 受領、エージェント）: 作業ログを bf40488 の現状に合わせる（Codex low 採用分のみ）
+
+- 指示を受領（本スレッド mcp:1b65aff3 に1回）。Codex 再レビュー（mcp:7290e396、bf40488、13:28 JST 完了）の low 指摘1件（作業ログが現状と食い違う）への対応で、**このラウンドで変更したのは本ログのみ**。`mise.lock` / `mise.toml` / `.github/workflows/verify.yml` / `docs/dev-environment.md` は変更していない。
+
+## 追記6の時点からの変化（bf40488、13:26 JST、担当実施・観察）
+
+- 担当が 13:24 JST にこの作業ツリーで `mise install` を実行。octocov 0.83.5 の公式リリースが shared の mise 導入先へダウンロードされ、**checksum は mise 自身が書いた**（手書き・推測なし）。
+- `mise.lock` は既存行を変えず **7 プラットフォーム分の URL と sha256 を追加**（+46/−0）。lock を読んだ確認（このラウンド・読み取りのみ）:
+  - セクション `[[tools."aqua:k1LoW/octocov"]]`、`version = "0.83.5"`、`backend = "aqua:k1LoW/octocov"`。
+  - プラットフォーム: `linux-arm64` / `linux-arm64-musl` / `linux-x64` / `linux-x64-musl` / `macos-arm64` / `macos-x64` / `windows-x64` の7つ。それぞれ公式リリースの `octocov_v0.83.5_*` アセット URL と sha256 がある。
+- 担当観察: `mise exec -- octocov --version` は `0.83.5`。公式 `mise run verify` は 13:25:19〜13:25:24 JST に exit 0（10 タスクすべて、テスト 1 passed）。
+- これらは bf40488（親 `efd5f18`、メッセージ `ci: pin octocov 0.83.5 contents via mise.lock checksums (aqua backend)`）としてコミット済み。追記6の「担当がこれから `mise install` して lock を完成させる」「checksum が無ければコミットしない」「aqua で checksum が残るかは未確認」は**すべて解消済み**（当時の記録として追記6にはそのまま残す）。
+
+## 残る未検証（合格にしない）
+
+1. **checksum と公式配布物の一致**: lock の sha256 が公式配布物と独立に一致するかは未検証。
+2. **GitHub 上の CI**: push / PR 許可まで未検証のまま。
+3. **個人設定が原因のローカル `mise install --locked` 失敗**: 担当観察（参考・合格にしない）— ローカルの `mise install --locked` は個人の `~/.config/mise/config.toml` にある node / python / pnpm / poetry の4つだけで失敗し、Pelway のツール（octocov を含む）は lock どおり導入できていた。GitHub-hosted ランナーにこの個人設定は無いが、CI で通るかは push まで未検証。
+4. **rustup の自己更新**: rust ツールチェーンが自己更新の確認で通信することは未検証のまま。
+
+## このラウンドの検証と実施内容
+
+- `git log` / `git status` で HEAD が bf40488・作業ツリー清潔であることを確認（13:59 JST）。
+- `mise.lock` から octocov エントリのセクション名・プラットフォーム名・sha256 件数（7）を読み取り専用で確認。
+- 本ログ以外のファイルは変更なし。`mise install` 等のネットに出るコマンドは実行していない（ログのみの変更のため `mise run verify` も必須ではないため実行せず）。意図的なネット接続ゼロ、push / fetch なし。
