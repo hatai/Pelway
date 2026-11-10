@@ -1,9 +1,10 @@
 //! Slint が生成した `MainWindow` の検査（テスト用 backend。窓は開かない）。
 //!
 //! dev-dependency の `i-slint-backend-testing` が頭なしのテスト用 backend を
-//! 提供する。`SLINT_BACKEND=testing` の選択は backend の初期化より前に必要な
-//! ため、このファイルの検査は 1 つのテスト関数にまとめて直列に動かす
-//! （並列実行での環境変数の競合を避ける。窓は開かない）。
+//! 提供する。backend は環境変数（`SLINT_BACKEND`）ではなく
+//! [`init_testing_backend_once`] での明示的な初期化で入れる——slint の backend
+//! 選択は `testing` という名前を知らず、画面のない環境（CI）では winit への
+//! fallback で失敗するため。初期化はプロセスで 1 回だけ（`Once` で保証）。
 
 use pelway_client_ui::i18n::{FluentVars, Messages, USED_KEYS, apply_translations};
 use pelway_client_ui::theme::{Theme, apply_design_tokens, token_value};
@@ -84,11 +85,22 @@ const TR_GETTERS: &[(&str, TrGetter)] = &[
     ("composer-placeholder", |w| w.get_tr_composer_placeholder()),
 ];
 
+/// テスト用 backend の初期化をプロセスで 1 回だけ行う。
+///
+/// `i_slint_backend_testing::init_no_event_loop()` は内部で `set_platform` を
+/// 呼び、backend が既に初期化されていると落ちるため、`Once` で 1 回だけ
+/// 呼ぶ（このファイルの検査は 1 関数だが、テストが増えても同じプロセスで
+/// 2 回呼んで落ちないようにする）。
+fn init_testing_backend_once() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(i_slint_backend_testing::init_no_event_loop);
+}
+
 #[test]
 fn main_window_can_be_created_and_accepts_all_theme_names() {
-    // 安全性: 環境変数はこのテストバイナリの他のスレッドが動く前に設定する
-    // （このファイルの検査はこの 1 関数だけ）。
-    unsafe { std::env::set_var("SLINT_BACKEND", "testing") };
+    // テスト用 backend は環境変数でなく明示的に初期化する（ファイル先頭の
+    // doc コメント参照。このファイルの検査はこの 1 関数だけ）。
+    init_testing_backend_once();
 
     let window = MainWindow::new().expect("MainWindow を作れること（テスト用 backend）");
     let theme_state = ThemeState::get(&window);
