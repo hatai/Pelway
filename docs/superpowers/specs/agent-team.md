@@ -28,6 +28,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 
 ## 制約
 
+- `pelway-dev` には GitHub App の Workflows 権限を付けない。`.github/workflows/` の変更は人間が行う（push で動く workflow は承認前に secret を読めるため）
 - PR 1 本の差分は 800 行まで。`.gitattributes` で `linguist-generated` を付けたファイルは数えない
 - GLM の実装スレッドは同時に 3 本まで。超えた分は Grok Bot が順番待ちにする
 - GLM は終日使う。時間帯による使用制限はない

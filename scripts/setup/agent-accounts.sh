@@ -308,7 +308,7 @@ fi
 pause
 
 app_stages "pelway-dev" "PELWAY_DEV" "実装担当のエージェントが push と PR 作成に使う" \
-  "Contents = Read and write / Pull requests = Read and write / Issues = Read and write / Workflows = Read and write（.github/workflows を直す PR の push に必要）"
+  "Contents = Read and write / Pull requests = Read and write / Issues = Read and write（Workflows は付けない。付けると .github/workflows に push で動く workflow を置き、承認前に secret を読めてしまう）"
 
 # コミットの作成者に使うメールアドレス（<bot ユーザーの ID>+<slug>[bot]@users.noreply.github.com）
 dev_bot_id="$(gh api "/users/${PELWAY_DEV_SLUG}%5Bbot%5D" --jq .id)"
