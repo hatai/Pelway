@@ -158,3 +158,36 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: mise exec -- octocov
+
+  # PR の差分行数の上限（800 行）を検査する。git と bash だけで動くので mise は入れない。
+  # 数え方は scripts/pr-size.sh（linguist-generated とバイナリは除く）。
+  pr-size:
+    name: pr-size
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        # タグ参照。コミット sha は .github/workflows/actions.lock で固定する（v4.2.2）。
+        # base ブランチとの merge-base を取るため履歴をすべて取得する。
+        uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # agent/ ブランチの PR は実装担当 pelway-agent が作る決まり。素の gh で作られて
+      # 作成者が別人（hatai など）になった PR をここで止める（docs/superpowers/specs/agent-team.md）。
+      - name: Check agent PR author
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          if [[ "$HEAD_REF" == agent/* && "$PR_AUTHOR" != "pelway-agent" ]]; then
+            echo "agent/ ブランチの PR の作成者が $PR_AUTHOR です（pelway-agent であるべき）。scripts/agent-gh dev pr create で作り直してください。" >&2
+            exit 1
+          fi
+
+      - name: Check PR size
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: bash scripts/pr-size.sh --base "origin/$BASE_REF"
