@@ -3,6 +3,10 @@
 # Docs: https://gh.io/actions-lockfile
 version: 'v0.0.3'
 workflows:
+    '.github/workflows/mise-bump.yml':
+        - 'actions/checkout@v4.2.2'
+        - 'jdx/mise-action@v2.4.4'
+    '.github/workflows/notify-grokbot.yml': []
     '.github/workflows/verify.yml':
         - 'actions/checkout@v4.2.2'
         - 'jdx/mise-action@v2.4.4'
