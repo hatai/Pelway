@@ -10,7 +10,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 
 ## 決まり（毎回守る）
 
-- GitHub への操作はすべて `scripts/agent-gh dev ...`、git の commit と push は `scripts/agent-gh dev git ...` で行う。素の `gh` と素の `git push` は使わない。素の `gh` で作った PR は作成者が hatai になり、hatai が Approve できずマージできなくなる。
+- GitHub への操作はすべて `scripts/agent-gh dev ...`、git の commit と push は `scripts/agent-gh dev git ...` で行う。素の `gh` と素の `git push` は使わない。素の `gh` で作った PR は作成者が hatai になり、hatai が Approve できないため、ブランチ保護を迂回しないとマージできない。素の `git push` は hatai の SSH 鍵で push される。
 - ネットワークは `scripts/agent-gh dev` 経由の GitHub だけ使う。`gh search repos` / `gh search code` もここに含まれる。
 - worktree の外に書き込まない。`rm -rf` はしない。main に push しない。PR をマージしない。
 - 迷っても質問で止まらない。判断とその理由は PR 本文か Issue のコメントに書いて進める。
@@ -65,17 +65,19 @@ scripts/agent-gh dev issue view <N> --json title,body,labels,comments
 
 テストが最初から通ったら、そのテストは条件を確かめていない。書き直す。
 
-### 5. 検査してコミットする
+### 5. 検査してコミットし、行数を確かめてから push する
 
 ```bash
 mise run verify
-mise run pr-size
 scripts/agent-gh dev git add <files>
 scripts/agent-gh dev git commit -m "<type>: <英語の要約>"
+scripts/agent-gh dev git fetch origin main
+mise run pr-size
 scripts/agent-gh dev git push -u origin HEAD
 ```
 
-`mise run verify` が失敗したらコミットしない。直してからやり直す。
+- `mise run verify` が失敗したらコミットしない。直してからやり直す。
+- `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。800 行を超えたら push せずに止まる。
 
 ### 6. Draft PR を作る（初回だけ）
 

@@ -19,7 +19,7 @@ GitHub PR のタイトルと説明本文を書く・直す手順。
 - worktree の外への書き込みは、許可が出ても実行しない。
 - `rm -rf` は、許可が出ても実行しない。
 - 使ってよいネット / `gh` は `gh pr list` / `gh pr view` / `gh pr create` / `gh pr edit` / `gh issue view` / `gh issue comment` / `gh issue edit` / `gh search repos` / `gh search code` だけ。これ以外のネット接続はしない。
-- AI 開発チームのエージェントは、`gh` を `scripts/agent-gh dev` 経由で実行する（例: `scripts/agent-gh dev pr create ...`）。素の `gh` で作った PR は作成者が hatai になり、マージできなくなる。
+- AI 開発チームのエージェントは、`gh` を `scripts/agent-gh dev` 経由で実行する（例: `scripts/agent-gh dev pr create ...`）。素の `gh` で作った PR は作成者が hatai になり、hatai が Approve できないため、ブランチ保護を迂回しないとマージできない。
 - AI 開発チームのエージェントが作る PR は Draft にする（`--draft`）。
 - 迷ったら質問で止まらず、作業ログ(`docs/worklogs/YYYY-MM-DD-<slug>.md`)に書いて進める。
 - PR 作成・更新中は、製品コード、他ブランチ、他 worktree、無関係な既存 PR を変えない。スキル本文も、このスキルを「使う」作業の目的外では直さない。
@@ -41,12 +41,14 @@ git diff <base>...HEAD
 
 ### 2. 既存 PR の有無を確認
 
+以下のコマンド例は AI 開発チームのエージェント向けの形（`scripts/agent-gh dev` 経由）で書く。人間が使うときは `scripts/agent-gh dev` を `gh` に読み替える。
+
 ```
-gh pr list --head <ブランチ名>
+scripts/agent-gh dev pr list --head <ブランチ名>
 ```
 
-- 既存がある → `gh pr edit <番号>` でタイトル・本文を更新。重複 PR を作らない。
-- 無い → `gh pr create` 。エージェントは `scripts/agent-gh dev pr create --draft`。
+- 既存がある → `scripts/agent-gh dev pr edit <番号>` でタイトル・本文を更新。重複 PR を作らない。
+- 無い → `scripts/agent-gh dev pr create --draft`。
 
 ### 3. タイトルを書く
 
@@ -76,7 +78,7 @@ gh pr list --head <ブランチ名>
 本文は heredoc で渡す:
 
 ```
-gh pr create --title "..." --body-file - <<'EOF'
+scripts/agent-gh dev pr create --draft --title "..." --body-file - <<'EOF'
 ...本文...
 EOF
 ```

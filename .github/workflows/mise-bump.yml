@@ -13,8 +13,10 @@
 #     （mise.lock を共有するため分割の意味が薄く、verify CI の実行回数も増える）
 #   - PR 作成は GITHUB_TOKEN + gh CLI。専用 action（peter-evans/create-pull-request 等）は
 #     使わず、actions.lock の更新も不要にする
-#   - GITHUB_TOKEN 製 PR の pull_request run は GitHub 仕様で承認待ちになる。
-#     verify が自動で走らない場合は PR の checks から Approve workflows to run を一度押す
+#   - GITHUB_TOKEN による push / PR 作成では pull_request の workflow が起動しない（GitHub 仕様）。
+#     そこで PR を作成・更新した後に verify を workflow_dispatch で bump ブランチに対して起動する。
+#     これで main のブランチ保護が必須にしている "mise run verify" が head のコミットに付く
+#     （"pr-size" ジョブは pull_request 以外ではスキップされ、必須チェックとしては成功扱いになる）
 
 name: mise-bump
 
@@ -41,6 +43,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # verify を workflow_dispatch で起動するため
+      actions: write
     env:
       # ローリング PR のブランチ名。PR が open の間は毎回このブランチを作り直す。
       BUMP_BRANCH: chore/mise-tools-bump
@@ -115,7 +119,7 @@ jobs:
             echo "- 更新コマンド: \`mise upgrade --bump --no-global --minimum-release-age 7d --yes\`"
             echo "- \`mise.toml\` と \`mise.lock\` を同時に更新しています"
             echo "- 公開から7日未満の版は \`--minimum-release-age\` で除外しています（上の表に新しい版があっても適用されない場合があります）"
-            echo "- \`verify\` ワークフローがこの PR で実行されます。GITHUB_TOKEN 製 PR のため、checks が承認待ちになる場合は \`Approve workflows to run\` を一度押してください"
+            echo "- \`verify\` ワークフローはこの workflow が bump ブランチに対して workflow_dispatch で起動します"
           } > /tmp/pr-body.md
 
           title="chore: bump mise-managed tools"
@@ -126,3 +130,7 @@ jobs:
           else
             gh pr create --base main --head "$BUMP_BRANCH" --title "$title" --body-file /tmp/pr-body.md
           fi
+
+      - name: Run verify on the bump branch
+        if: steps.changes.outputs.changed == 'true'
+        run: gh workflow run verify.yml --ref "$BUMP_BRANCH"

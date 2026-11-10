@@ -20,7 +20,7 @@ AI 開発チームのレビュー担当が、PR 1 本をレビューして GitHu
 ### 1. 材料を集める
 
 ```bash
-scripts/agent-gh review pr view <N> --json title,body,headRefName,headRefOid,isDraft,closingIssuesReferences
+scripts/agent-gh review pr view <N> --json title,body,author,headRefName,headRefOid,isDraft,closingIssuesReferences
 scripts/agent-gh review pr diff <N>
 scripts/agent-gh review issue view <Issue 番号> --json body
 ```
@@ -31,6 +31,7 @@ Issue 番号は `closingIssuesReferences` から取る。Issue の「受け入�
 
 ```bash
 scripts/agent-gh review pr checkout <N>
+git fetch origin main
 mise run verify
 mise run pr-size
 ```
@@ -39,7 +40,7 @@ mise run pr-size
 
 | 種類 | 当てはまるもの |
 |---|---|
-| must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / verify か pr-size が失敗 / 正しさ・セキュリティの欠陥 |
+| must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / verify か pr-size が失敗 / 正しさ・セキュリティの欠陥 / ブランチが `agent/` で始まるのに PR の作成者（`author.login`）が `pelway-agent` でない |
 | nit | 上に当てはまらない改善案 |
 
 ### 4. 投稿する
@@ -63,25 +64,24 @@ Reviewed: <headRefOid>
 
 must-fix がなければ「なし」と書く。
 
+Approve の前に、PR が Draft なら Ready for review にする。Draft のままだと Approve を受け付けない場合がある。
+
 ```bash
+scripts/agent-gh review pr ready <N>   # isDraft が true のときだけ
 scripts/agent-gh review pr review <N> --approve --body-file - <<'EOF'
 ...
 EOF
-# must-fix があるとき
+```
+
+must-fix があるときは Draft のまま Request changes にする。
+
+```bash
 scripts/agent-gh review pr review <N> --request-changes --body-file - <<'EOF'
 ...
 EOF
 ```
 
-### 5. Approve したら Ready for review にする
-
-PR が Draft のままなら次を実行する。人間のマージ待ちに進む合図になる。
-
-```bash
-scripts/agent-gh review pr ready <N>
-```
-
-### 6. 終わりの報告
+### 5. 終わりの報告
 
 最後の返答は次の 3 行だけにする。Grok Bot はこの 3 行だけを読む。
 

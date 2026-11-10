@@ -8,7 +8,7 @@ Grok Bot・T3 Code・opencode（glm-5.3）・Codex で組む開発チームの�
 |---|---|---|---|
 | 人間（濱田さん） | — | `hatai` | 本人 |
 | 指揮 | Grok Bot（クラウド） | — | T3 Connect 経由の MCP |
-| 実装 | T3 スレッド・opencode `zai-coding-plan/glm-5.3` | マシンユーザー `pelway-agent` | fine-grained PAT（fnox 管理） |
+| 実装 | T3 スレッド・opencode `zai-coding-plan/glm-5.3` | マシンユーザー `pelway-agent` | PAT（fine-grained。対象に選べなければ classic の `repo` スコープ）。`~/.config/pelway-agent/fnox.toml` に age で暗号化して置く |
 | レビュー | T3 スレッド・Codex | GitHub App `pelway-review`（`pelway-review[bot]`） | App のインストールトークン（レビューごとに発行） |
 
 人間が行うのは次の 2 つだけ。
