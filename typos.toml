@@ -10,3 +10,19 @@
 # 外部リポジトリ（actionbook/rust-skills・penpot/penpot-ai-kit）から固定する内容で、
 # 手元で直すとハッシュ不一致になり、更新時に上書きされるため。
 extend-exclude = [".agents/skills", ".claude/skills"]
+
+[default.extend-words]
+# 誤検出の除外（いずれも実在する名前・URL・用語で、訂正すると壊れるため変更しない）。
+# 中小企業庁サイトの実在URLパス要素（.../pamflet/hakusyo/...）。直すとリンク切れ。
+pamflet = "pamflet"
+# RTO（Recovery Time Objective）。RPO と対で使う障害回復の標準用語。
+RTO = "RTO"
+# docs/ui-mocks/ の UI モックで使う CSS クラス名（識別子）。
+pn = "pn"
+# Rust の TUI クレート ratatui（ulyssa/iamb 等が使用）の正式なクレート名。
+ratatui = "ratatui"
+# rootless Podman の依存パッケージ passt（docs/dev-environment.md）。
+passt = "passt"
+# crates/pelway-client-ui/tests/no_color_values.rs の分割リテラル断片
+# （"rg" + "ba(" で "rgba(" を組み立てるテスト構造。中身を変えない）。
+ba = "ba"
