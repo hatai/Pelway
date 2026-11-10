@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# notify-grokbot.yml の payload 組立をローカルで確認する（curl は実行しない）。
+# notify-grokbot.yml の「送る/送らない」判定と payload 組立をローカルで確認する
+# （curl は実行しない）。
 #
-# このディレクトリの見本 payload（github.event 相当・架空値）ごとに、
-# workflow の "Send notification" step と同じ env 名・同じ jq の組み立てを
-# 実行し、次を確かめる:
-#   1. 出力 JSON のキーが指示の 13 個だけであること
-#   2. タイトル・本文等のテキスト（*-MUST-NOT-APPEAR マーカー）が混入していないこと
-#   3. イベントごとの期待値（null の扱い、run_url の切り替え等）が合っていること
+# このディレクトリの見本 payload（github.event 相当・架空値）ごとに、workflow と
+# 同じ判定・同じ env 名・同じ jq の組み立てを実行し、次を確かめる:
+#   1. ゲート判定: 送るべきイベントは "send"、送らないイベント（外部投稿者の
+#      コメント・fork 由来）は "skip" になること
+#   2. 送るイベントの JSON: キーが指示の 13 個だけであること
+#   3. タイトル・本文等のテキスト（*-MUST-NOT-APPEAR マーカー）が混入していないこと
+#   4. イベントごとの期待値（null の扱い、run_url の切り替え等）が合っていること
 #
 # 使い方: bash docs/worklogs/gh-notify-samples/check.sh
 set -euo pipefail
@@ -54,6 +56,67 @@ build_payload() {
     }'
 }
 # --- 逐語コピー（ここまで） ---
+
+# --- workflow のゲート判定と同じ対応で "send" / "skip" を返す ---
+# 対応関係（いずれも run: への ${{ }} 書き込みなし・if:/env 相当の再現）:
+#   1. job if        : issue_comment は issue.pull_request のあるものだけ
+#                      （見本はすべて PR 由来のため、ここでは全件対象）
+#   2. gate step     : pull_request / pull_request_review /
+#                      pull_request_review_comment / workflow_run は
+#                      HEAD_REPO（= pull_request.head.repo.full_name または
+#                      workflow_run.head_repository.full_name）が
+#                      GITHUB_REPOSITORY と違えば fork として送らない
+#   3. COMMENT_ALLOWED(job env 式) + Send step if: コメント系3イベントは
+#                      投稿者の author_association が OWNER / MEMBER /
+#                      COLLABORATOR のいずれか、または user.login が
+#                      github-actions[bot] のときだけ送る
+gate_decision() {
+  local ev="$1" event_name="$2"
+  local head_repo assoc login
+  local should_send=true comment_allowed=true
+
+  # gate step の fork 判定（HEAD_REPO != GITHUB_REPOSITORY）
+  head_repo="$(jq -r '.pull_request.head.repo.full_name // .workflow_run.head_repository.full_name // empty' <<<"$ev")"
+  case "$event_name" in
+    pull_request|pull_request_review|pull_request_review_comment|workflow_run)
+      if [ "$head_repo" != "$GITHUB_REPOSITORY" ]; then
+        should_send=false
+      fi
+      ;;
+  esac
+
+  # COMMENT_ALLOWED 式のコメント系3イベントの投稿者判定
+  case "$event_name" in
+    issue_comment|pull_request_review|pull_request_review_comment)
+      assoc="$(jq -r '.comment.author_association // .review.author_association // empty' <<<"$ev")"
+      login="$(jq -r '.comment.user.login // .review.user.login // empty' <<<"$ev")"
+      case "$assoc" in
+        OWNER|MEMBER|COLLABORATOR) ;;
+        *)
+          if [ "$login" != "github-actions[bot]" ]; then
+            comment_allowed=false
+          fi
+          ;;
+      esac
+      ;;
+  esac
+
+  if [ "$should_send" = true ] && [ "$comment_allowed" = true ]; then
+    echo send
+  else
+    echo skip
+  fi
+}
+
+check_gate() {
+  local file="$1" event_name="$2" want="$3" got
+  got="$(gate_decision "$(cat "$samples_dir/$file")" "$event_name")"
+  if [ "$got" != "$want" ]; then
+    echo "FAIL $file: gate decision is $got, want $want"
+    return 1
+  fi
+  echo "PASS $file (gate: $want)"
+}
 
 # workflow の env: 式と同じ対応で github.event payload から env 値を用意する。
 #   REPO         <- github.repository                          (= GITHUB_REPOSITORY)
@@ -125,13 +188,27 @@ run_sample() {
       return 1
     fi
   done
-  echo "PASS $file"
+  echo "PASS $file (payload)"
 }
 
 main() {
   local failures=0
   local own_run_url="https://github.com/example-org/pelway/actions/runs/123456789"
 
+  # --- ゲート判定: 全10サンプル。7件は送る、3件（外部コメント・fork×2）は送らない ---
+  check_gate pull_request.opened.json pull_request send || failures=$((failures + 1))
+  check_gate pull_request.closed-merged.json pull_request send || failures=$((failures + 1))
+  check_gate pull_request_review.submitted.json pull_request_review send || failures=$((failures + 1))
+  check_gate pull_request_review_comment.created.json pull_request_review_comment send || failures=$((failures + 1))
+  check_gate issue_comment.created-pr.json issue_comment send || failures=$((failures + 1))
+  check_gate workflow_run.completed.json workflow_run send || failures=$((failures + 1))
+  check_gate workflow_dispatch.json workflow_dispatch send || failures=$((failures + 1))
+  check_gate issue_comment.created-external.json issue_comment skip || failures=$((failures + 1))
+  check_gate pull_request.opened-fork.json pull_request skip || failures=$((failures + 1))
+  check_gate workflow_run.completed-fork.json workflow_run skip || failures=$((failures + 1))
+
+  # --- payload 組立（送る判定になる7サンプルのみ。送らない3件は workflow でも
+  #     Send step の if: が false になり jq までは来ない） ---
   run_sample pull_request.opened.json pull_request \
     'action=opened' 'pr_number=42' 'head_branch=feature/demo' \
     'head_sha=1111111111111111111111111111111111111111' \
@@ -168,10 +245,10 @@ main() {
     "run_url=$own_run_url" 'actor=example-admin' || failures=$((failures + 1))
 
   if [ "$failures" -ne 0 ]; then
-    echo "$failures sample(s) FAILED"
+    echo "$failures check(s) FAILED"
     exit 1
   fi
-  echo "all 7 samples passed"
+  echo "all checks passed (10 gate decisions + 7 payload assemblies)"
 }
 
 main "$@"

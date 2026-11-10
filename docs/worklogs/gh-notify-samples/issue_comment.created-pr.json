@@ -11,6 +11,7 @@
   },
   "comment": {
     "body": "COMMENT-BODY-MUST-NOT-APPEAR",
+    "author_association": "MEMBER",
     "user": { "login": "example-commenter" }
   },
   "repository": { "full_name": "example-org/pelway" },

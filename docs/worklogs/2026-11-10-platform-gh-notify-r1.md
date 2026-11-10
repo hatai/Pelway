@@ -133,4 +133,57 @@ jactionlint は actionlint と同じ検査をするリポジトリピンの fork
 
 - `git commit` がリポジトリ標準の hk pre-commit フック（`mise x -- hk run pre-commit --from-hook`）を発火させ、その中で mise が rust 1.96.0 の channel sync と rustup self-update チェックを行った（"info: syncing channel updates"・"checking for self-update"。成分はすべて up to date で新規ダウンロード無し・`mise.lock` の変化無し）。前例 worklog（platform-pr-ci-r1 追記4・5）と同種の「サンクションドコマンド中の mise 副作用」であり、意図的なネット接続はしていないが通信の可能性は記録する。フック本体の検査（trailing whitespace / 最終改行）はすべてパス。
 
+---
+
+# 追記（r1 + 追加受入条件）: コメント投稿者の権限ゲートと fork/外部見本 — 2026-11-10（リード決定 19:10 JST を反映）
+
+- 指示: 上記5件の追加受入条件（同一ブランチで継続。r1 の作業は破棄せず、本節の変更は `a841ecb` の上への別コミット）。
+- 実送信・push は引き続きゼロ。
+
+## 変更内容
+
+1. `.github/workflows/notify-grokbot.yml`
+   - job レベル `env.COMMENT_ALLOWED` 式を追加。issue_comment / pull_request_review / pull_request_review_comment の3イベントでは、投稿者の `author_association`（comment または review オブジェクトのもの）が `OWNER` / `MEMBER` / `COLLABORATOR` のいずれか、または `user.login` が `github-actions[bot]` のときだけ `"true"`。3イベント以外は常に `"true"`（投稿者判定なし）。
+   - Send step の `if:` を `steps.gate.outputs.should_send == 'true' && env.COMMENT_ALLOWED == 'true'` に拡張（判定は if: のみ。`run:` への `${{ }}` なし）。
+   - 「Note comment-author skip」step を追加: 投稿者ゲートで送らないとき、理由（`author_association` とログイン — 公開情報のみ）を notice ログに 1 行残して成功で終える。
+2. `docs/dev-environment.md` — 「送らない条件」に投稿者判定を追記し、`github-actions[bot]` 条件が実質動かない見込みの補足を追加。
+3. `docs/worklogs/gh-notify-samples/` — 見本 3件追加（`issue_comment.created-external.json`＝`author_association: NONE`、`pull_request.opened-fork.json`、`workflow_run.completed-fork.json`）。既存のコメント系 3見本に `author_association`（OWNER / MEMBER / COLLABORATOR）を追加。
+4. `check.sh` — `gate_decision()`（job if / gate step の fork 判定 / `COMMENT_ALLOWED` / Send if: と同じ判定の再現）を追加。全 10見本の送る/送らない判定と、送る 7見本の payload を検査。
+
+## 追加受入条件への対応（番号は指示どおり）
+
+| # | 条件 | 対応 |
+|---|---|---|
+| 1 | コメント系3イベントの投稿者ゲート（判定は if:・`run:` に `${{ }}` なし） | job env の `COMMENT_ALLOWED` 式 + Send step の `if:`。job の if: にしなかったのは「何も送らずに成功で終える」のため（job if だと結論が skipped になる）。`github-actions[bot]` 条件は指示の補足どおり、GITHUB_TOKEN 起点のコメントでは workflow 自体が起動しないため実質動かない見込み。条件のみ残した |
+| 2 | fork 除外は PR 系 `pull_request.head.repo.full_name` と `workflow_run.head_repository.full_name` の両方で | r1 実装のまま（gate step で `HEAD_REPO != GITHUB_REPOSITORY` を4イベントに適用）。head repo が null（削除済み fork 等）でも ≠ となり安全側で skip |
+| 3 | `pull_request_target` 不使用・checkout / `uses:` 不使用 | 従来から不使用。grep で確認（`uses:`・`pull_request_target` の実使用なし。一致は「checkout なし」等のコメント行のみ） |
+| 4 | URL/鍵を echo しない・`set -x` / `curl -v` 不使用・Secret 無しと curl 失敗で exit 0 | 従来どおり（grep で確認: `set -x` なし・`curl -v` なし・WEBHOOK 変数の echo なし）。Secret 無し → gate step が `should_send=false` で成功終了。curl 失敗 → Send step は非 0 を返さない（`--max-time 10`・stderr 破棄・HTTP ステータスのみログ） |
+| 5 | 外部コメント（NONE）と fork の PR・workflow_run の見本 + 送らない判定の確認 | 見本 3件追加。`check.sh` のゲート判定で 3件とも `skip` になることを確認（下表）。送信はしていない |
+
+## 迷った点と安全側の判断（追記分）
+
+1. **判定の実装場所**: 指示は「job か step の if:」。job の if: だと結論が skipped になり「成功で終える」から外れるため、Send step の if: にした。条件式の実体は job レベル `env.COMMENT_ALLOWED` の式展開で、`run:` への `${{ }}` はゼロのまま。
+2. **author_association の参照先**: 「投稿者」＝コメント/レビューの作成者と解釈。issue_comment と review comment は `comment.author_association`、review は `review.author_association` を使用（`issue.author_association` は PR 起案者でありコメント投稿者ではないため不使用）。
+3. **pull_request イベントへの投稿者ゲートは未適用**: 指示はコメント系3イベントのみ。pull_request 系は fork 除外で外部由来を実質排除済み（同一リポジトリに branch を push できるのは書き込み権限保有者のみのため、同一 repo の PR 作成者は最低 COLLABORATOR）。
+4. **スキップ理由の notice**: 判定漏れの調査ができるよう、送らない理由を notice 1行で残した（載せるのは `author_association` とログインという公開情報のみ）。
+
+## 検証コマンドと結果（追記分・すべて実施済み・送信なし）
+
+| コマンド | exit code / 結果 |
+|---|---|
+| `~/.local/share/mise/installs/jactionlint/2.5.0/jactionlint .github/workflows/notify-grokbot.yml` | **exit 0**（新規の `COMMENT_ALLOWED` 式・notice step・拡張 if: を含む。shellcheck 未導入の注記のみ） |
+| 同上・引数なし（CI の verify と同じ全 workflow 検査） | **exit 0** |
+| `bash docs/worklogs/gh-notify-samples/check.sh` | **exit 0** — ゲート判定 10件（送る 7・送らない 3: `issue_comment.created-external` / `pull_request.opened-fork` / `workflow_run.completed-fork`）＋ payload 組立 7件、すべて PASS |
+| `python3 -c "import yaml; yaml.safe_load(...)"` | OK |
+| `grep -nE 'set -x\|curl .*(-v\|--verbose)\|pull_request_target\|uses:\|checkout' .github/workflows/notify-grokbot.yml` | 実使用なし（一致 2件は「checkout なし」等のコメント行のみ） |
+| `grep -n 'echo.*WEBHOOK' .github/workflows/notify-grokbot.yml` | なし（URL・鍵の echo なし） |
+| `run:` 内の `${{ }}`（awk 抽出・コメント行を除く） | なし |
+
+## 未検証（追記分も合格としない）
+
+1. GitHub 上での `author_association` の実際の値の分布と判定（`FIRST_TIMER` / `CONTRIBUTOR` 等は通知されない）。実データでは未確認。
+2. `github-actions[bot]` 条件の実効性（GITHUB_TOKEN 起点のコメントは workflow が起動しない見込み — 指示の補足どおり条件のみ残している）。
+3. GitHub 上での run・実際の送信は引き続き未実施（push は担当が行う）。
+
+
 

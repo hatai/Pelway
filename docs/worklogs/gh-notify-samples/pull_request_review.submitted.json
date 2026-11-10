@@ -3,6 +3,7 @@
   "review": {
     "state": "approved",
     "body": "REVIEW-BODY-MUST-NOT-APPEAR",
+    "author_association": "OWNER",
     "user": { "login": "example-reviewer" }
   },
   "pull_request": {

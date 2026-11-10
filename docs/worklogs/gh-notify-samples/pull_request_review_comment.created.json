@@ -2,6 +2,7 @@
   "action": "created",
   "comment": {
     "body": "COMMENT-BODY-MUST-NOT-APPEAR",
+    "author_association": "COLLABORATOR",
     "user": { "login": "example-commenter" }
   },
   "pull_request": {

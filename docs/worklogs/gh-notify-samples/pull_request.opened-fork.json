@@ -1,0 +1,23 @@
+{
+  "action": "opened",
+  "number": 43,
+  "pull_request": {
+    "number": 43,
+    "merged": false,
+    "title": "PR-TITLE-MUST-NOT-APPEAR",
+    "body": "PR-BODY-MUST-NOT-APPEAR",
+    "user": { "login": "random-outside" },
+    "head": {
+      "ref": "patch-1",
+      "sha": "5555555555555555555555555555555555555555",
+      "repo": { "full_name": "random-outside/pelway" }
+    },
+    "base": {
+      "ref": "main",
+      "sha": "2222222222222222222222222222222222222222",
+      "repo": { "full_name": "example-org/pelway" }
+    }
+  },
+  "repository": { "full_name": "example-org/pelway" },
+  "sender": { "login": "random-outside" }
+}
