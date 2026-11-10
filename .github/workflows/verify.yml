@@ -1,0 +1,140 @@
+# Pelway のPR品質検査（main 向け Pull Request）。
+# ローカルの公式確認（mise run verify）と同じ検査を GitHub-hosted runner で回す。
+# 方針は docs/dev-environment.md に従う:
+#   - ツールのバージョンは mise.toml / mise.lock が単一の管理元（Rust 1.96.0、hk 2.11.1 等）
+#   - mise の導入は公式 Action（jdx/mise-action）。リモートキャッシュ（GitHub Actions cache・S3）
+#     は mbx / Cargo と同じ方針で設定しない（mise-action も cache: false）
+#   - CI では mise bootstrap（apt・sudo・podman）を実行しない。mise install と mise run verify に限る
+#   - fnox-check は fnox list（定義一覧の確認）だけで、秘密値の取得・表示はしない
+
+name: verify
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# この workflow は秘密を使わないため、権限は読み取りのみに制限する。
+permissions:
+  contents: read
+
+# 同じPRで新しい push が来たら古い実行を打ち切る。
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: mise run verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        # タグ参照。コミット sha は .github/workflows/actions.lock で固定する（v4.2.2）。
+        # 後続ステップで git 認証情報は使わないため残置しない（jactionlint artipacked）。
+        uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+
+      # mise 公式 Action で mise 本体の導入とツールの導入を行う（curl / インストーラ不使用）。
+      # - version: mise 本体を 2026.11.5 に固定（mise.toml の min_version を満たす検証済みバージョン）
+      # - install_args: --locked で mise.lock 通りの導入を強制（lock と不一致なら fail）
+      # - cache: false — mise-action のツールキャッシュは復元内容を mise.lock と突き合わせない
+      #   （公式の注意）。リモートキャッシュを使わない方針のため無効化する。追加の cache も足さない。
+      # jdx/mise-action のコミット sha は GitHub 公式 lockfile（.github/workflows/actions.lock）
+      # で固定する。workflow 側は公式 lock 生成が書き換えた具体タグ @v2.4.4 を参照する。
+      - name: Setup mise (official action)
+        uses: jdx/mise-action@v2.4.4
+        with:
+          version: v2026.11.5
+          install: true
+          install_args: --locked
+          cache: false
+
+      - name: Assert mise version
+        run: mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
+
+      # 公式 Action が mise install --locked 済み。ここでは信頼登録のみ（冪等）。
+      - name: Trust project config
+        run: mise trust
+
+      # llvm-tools-preview が mise install 時点で入っていることを確認する。
+      # 欠けていればここで失敗し、後続コマンド中の暗黙の rustup 自動ダウンロードには頼らない。
+      - name: Assert llvm-tools-preview is present
+        run: mise run toolchain-check
+
+      # workflow / composite action の静的 lint（jactionlint は mise.toml で 2.5.0 をピン）。
+      # --online は使わない。問題があればこの時点で fail させる（速い検査を先に）。
+      - name: Lint workflows (jactionlint)
+        run: mise exec -- jactionlint
+
+      # ローカルと同じ一括確認: fmt-check / check / clippy / test / build /
+      # toolchain-check / hk-validate / hk-check / fnox-check / pitchfork-check
+      - name: Verify (mise run verify)
+        run: mise run verify
+
+  # カバレッジの増減計測（octocov）。品質ゲート（verify ジョブ）とは独立に走らせる:
+  #   - verify はローカルの mise run verify と完全に同じコマンドのまま保つ
+  #   - 計測ビルド（-C instrument-coverage）とゲートビルドの target / mbx キャッシュを分離する
+  #   - カバレッジツールの故障で品質ゲートがブロックされないようにする
+  # （テストは2回走るが、ジョブは並列なので PR の待ち時間は増えない）
+  coverage:
+    name: octocov (coverage diff)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      # PR へのカバレッジコメント投稿に必要。fork PR の読み取り専用 token では投稿が
+      # スキップされるだけで job は落とさない。
+      pull-requests: write
+    env:
+      # カバレッジ生成ツールのバージョン（ピン留め）。
+      CARGO_LLVM_COV_VERSION: 0.6.17
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+
+      # verify ジョブと同じ導入（mise 公式 Action・キャッシュなし・--locked）。
+      # rust 1.96.0 に llvm-tools-preview 成分が入る（mise.toml の components で宣言）。
+      - name: Setup mise (official action)
+        uses: jdx/mise-action@v2.4.4
+        with:
+          version: v2026.11.5
+          install: true
+          install_args: --locked
+          cache: false
+
+      - name: Assert mise version
+        run: mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
+
+      - name: Trust project config
+        run: mise trust
+
+      # coverage ジョブは mise run verify を走らせないため、ここで同じ存在確認をする。
+      # 欠けていれば cargo llvm-cov 実行中の暗黙の rustup 自動ダウンロードには頼らない。
+      - name: Assert llvm-tools-preview is present
+        run: mise run toolchain-check
+
+      # cargo-llvm-cov をバージョン指定で導入（--locked で Cargo.lock 通りにビルド）。
+      - name: Install cargo-llvm-cov (pinned)
+        run: |
+          cargo install cargo-llvm-cov --locked --version "$CARGO_LLVM_COV_VERSION"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      # LCOV 形式でレポートを出す（cargo-llvm-cov が llvm-tools の profdata/cov を駆動）。
+      # 出力先 lcov.info は .octocov.yml の coverage.paths と対応する。
+      - name: Generate LCOV (cargo llvm-cov)
+        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+
+      # octocov で PR コメント（増減表示）を作る。レポートの保存・比較は
+      # GitHub Actions の artifact のみ（.octocov.yml の diff.storage.artifacts）。
+      # octocov は mise.toml で 0.83.5 を宣言し、mise.lock が URL と checksum で
+      # 取得物を固定する（出典: https://github.com/k1LoW/octocov/releases/tag/v0.83.5
+      # 公開 2026-11-05）。mise install --locked（mise-action）で導入したロック済み
+      # バイナリを mise exec で実行する（タグだけのその場取得はしない）。
+      - name: Run octocov
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: mise exec -- octocov
