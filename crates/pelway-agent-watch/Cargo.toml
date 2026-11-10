@@ -1,0 +1,12 @@
+[package]
+# AI 開発チームの見張り役。T3 のスレッドの状態変化を Grok Bot の webhook に通知する
+# （docs/superpowers/specs/agent-team.md「見張り役と通知」）。開発用ツールで、製品機能ではない。
+name = "pelway-agent-watch"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Watches T3 agent threads and notifies the Grok Bot webhook on state changes."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
