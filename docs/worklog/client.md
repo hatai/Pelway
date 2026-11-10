@@ -504,3 +504,28 @@
   - canary の値は本記録・報告・端末に出していない（テストの失敗表示のみ。パターンファイル作成も分割 printf）。
   - ツールチェーンは mise shim を使わず 1.96.0 の実バイナリを直接実行し、clippy も `RUSTUP_TOOLCHAIN` で 1.96.0 に揃えた（stable のドライバ混入を防ぐ）。
 - ネットワーク・書き込み範囲: cargo はすべて `CARGO_NET_OFFLINE=true` + `--offline --locked`（`cargo fetch`・`cargo update`・`cargo add` 不使用。lock 更新なし）。worktree の外への書き込みなし（`/tmp`・`/dev/shm`・本物のホーム・mbx キャッシュを含む。`HOME`・`TMPDIR`・`XDG_*` はサンドボックス内へ向けた）。cargo が `CARGO_HOME=/home/hatai/.cargo`・`RUSTUP_HOME=/home/hatai/.rustup`（toolchain 1.96.0）を読むことだけ許可済みの範囲。findings ファイル（review-codex-client-2bf3835-r1 worktree 内）は指摘確認のためだけ読んだ（sha256 一致を確認）。git の push・fetch なし。amend・rebase・reset・stash・force・`--no-verify` 不使用。`.opencode/` は読み書きとも不使用。r1・r2・r5 の worktree とブランチ（`demo-t3/client-gdpr-13`・`demo-t3/client-gdpr-13-r2`・`demo-t3/client-ui-r5`）には不接触。`target/` の状態の時系列は次のとおり。コミット前の検証（上記の fmt / clippy / workspace test / canary 走査）の時点では、この worktree の `target/` は通常ディレクトリだった（`readlink -f` で解決先が worktree 内であることを確認）。`f4c1196` の pre-commit フック（cargo_check）で、mbx が `target/`（6.8 GiB）を `~/.cache/mbx/targets/v1/<hash>` へ移管し symlink 化した。コミット後の再検証の時点では、`target/` はその symlink のままだった。`target/` の symlink の削除・付け替え・掃去はしていない。ネットワーク接続なし。
+
+### 2026-11-10 第15枠（CI 画面なし対応）
+- start: 2026-11-10 19:15 JST
+- stop:  2026-11-10 19:31 JST
+- glm: long（T3 Code スレッドで OpenCode + zai-coding-plan/glm-5.3 が実装。起点 `07c6d9d` の worktree `demo-t3-client-ui-r5-he`・ブランチ `demo-t3/client-ui-r5-headless` で実施）
+- 使った skills: tdd と verification-before-completion の考え方に従った（ファイルは worktree 外のため読んでいない）。直す前に現行テストの失敗（赤）の exit code を記録し、直したあと同じコマンドの成功（緑）と指定のコマンド全部の exit code・件数を記録した。
+- 対象: 指示書「`tests/slint_window.rs` を画面なし（CI と同じ）で通るようにする」。GitHub Actions（`DISPLAY`・`WAYLAND_DISPLAY` なし）でのみ落ちていた `slint_window` 1件の修正のみ。`ui/`・`tokens/`・`i18n/`・`crates/pelway-client-core`・`Cargo.toml`・`Cargo.lock` は 0 変更。
+- 最初の確認: `pwd` = worktree `demo-t3-client-ui-r5-he`、ブランチ `demo-t3/client-ui-r5-headless`、HEAD `07c6d9d`（指示どおり）、`git status --short` 空。
+- 探索: `rg -n "SLINT_BACKEND|MainWindow::new" crates/` は `crates/pelway-client-ui/tests/slint_window.rs` の 3 件のみ（doc コメント 1・`set_var` 1・`MainWindow::new()` 1）。同じ crate のほかのテストファイル（bridge・i18n_fluent・i18n_keys・no_color_values・theme_tokens）に `SLINT_BACKEND` や `MainWindow::new()` はなく、修正は不要だった。
+- 原因の確認: 旧実装は `unsafe { std::env::set_var("SLINT_BACKEND", "testing") }` に頼っていたが、slint の backend 選択（`i-slint-backend-selector`）は `testing` という名前を解決できず「Could not load rendering backend testing, fallback to default」で winit に落ち、画面がないと X 接続失敗で `MainWindow::new()` が落きる。WSL（WSLg）では画面があるため気づかなかった。
+- 修正（`tests/slint_window.rs` のみ。+18/−6）:
+  - `set_var` をやめ、`init_testing_backend_once()` ヘルパー（`static INIT: std::sync::Once` で `i_slint_backend_testing::init_no_event_loop()` を 1 回だけ呼ぶ）をテスト関数の最初（`MainWindow::new()` の前）に置いた。`init_no_event_loop()` は内部の `set_platform(...).expect("platform already initialized")` が既に初期化済みだと落きるため、`Once` で包んだ（このファイルの検査は 1 関数だが、テストが増えても同じプロセスで 2 回呼んで落ちないようにする）。crate の API は `~/.cargo/registry/src/…/i-slint-backend-testing-1.18.1/lib.rs` の `pub fn init_no_event_loop()`（37行目）で確認した（オフラインのソース読みのみ）。
+  - ファイル先頭の doc コメントを環境変数版の説明から明示的初期化の説明に書き換えた。
+  - dev-dependency の `i-slint-backend-testing = "=1.18.1"` は既にあったため、`Cargo.toml`・`Cargo.lock` は変えていない（crate 追加なし）。
+- 赤→緑（`env -u DISPLAY -u WAYLAND_DISPLAY -u SLINT_BACKEND` 付き。CI と同じ画面なし）:
+  - 修正前: `cargo test -p pelway-client-ui --test slint_window --locked --offline` → **exit 101**（`MainWindow を作れること（テスト用 backend）: Could not initialize backend. Error from Winit backend: … Failed to open connection to X server / No backends configured.`）
+  - 修正後: 同コマンド → **exit 0**（1件合格）。
+- 検証（コマンドと exit code。すべて `CARGO_NET_OFFLINE=true` 付き）:
+  - `cargo fmt --all --check` 0
+  - `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 0
+  - `env -u DISPLAY -u WAYLAND_DISPLAY -u SLINT_BACKEND cargo test --workspace --locked --offline` 0（**199 件合格・失敗 0**: pelway-at-rest 20 = container 等 8・aead 12 ／ pelway-client-core 54 = approval 24・contract 14・input 16 ／ pelway-client-ui 35 = bridge 10・i18n_fluent 3・i18n_keys 6・no_color_values 4・slint_window 1・theme_tokens 11 ／ pelway-contract 48 = unit 38・serde_contract 10 ／ pelway-dev-smoke 1 ／ pelway-http 41 = log 等 15・http 26。第11枠の 90 件からの増分は `07c6d9d` での main マージで入った at-rest・contract・http 分）
+  - `git status --short`（最終確認時）: このログの追記とコミット前は `crates/pelway-client-ui/tests/slint_window.rs` のみ。
+- 未検証・未決: U01〜U07 は未決のまま。GitHub Actions 上での実走行はしていない（ローカルで `DISPLAY`/`WAYLAND_DISPLAY`/`SLINT_BACKEND` を外した同じ条件での検証のみ）。
+- 迷って安全側にした点: `init_no_event_loop()` の代わりに event loop ありの `init_integration_test_with_mock_time()` を使わなかった（このテストは event loop を使わず、頭なし版のほうが制約が少なく crate 側 doc の想定にも合うため）。`OnceLock` でなく `Once` + `call_once` にした（機能は同じで、この repo の既存コードに静的初期化の慣習がなかったため標準的な `Once` とした）。
+- ネットワーク・書き込み範囲: cargo はすべて `CARGO_NET_OFFLINE=true` + `--offline --locked`。`cargo fetch`・`cargo update`・`cargo add` は不使用。worktree の外への書き込みなし（`/tmp` を含む。一時ファイルは作っていない）。git の push・fetch なし。amend・rebase・reset・stash・force・`--no-verify` も不使用。`crates/pelway-client-core`・`ui/`・`tokens/`・`i18n/` は変更なし。
