@@ -3,8 +3,9 @@
 #   scripts/agent-gh dev <gh の引数...>        実装担当 GitHub App pelway-dev
 #   scripts/agent-gh review <gh の引数...>     レビュー担当 GitHub App pelway-review
 #   scripts/agent-gh <dev|review> git <git の引数...>   その名義の認証で git を実行する
+#   scripts/agent-gh -h | --help               使い方を標準出力に出して終了コード 0（fnox も gh も呼ばない）
 # 呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。
-# 終了コード: 2 = 役割の誤り、3 = トークンを取れない、それ以外は gh / git の終了コード
+# 終了コード: 2 = 役割の誤り、3 = トークンを取れない、それ以外は gh / git の終了コード（--help / -h は 0）
 set -euo pipefail
 # コマンド置換 $(...) の中でも set -e を効かせる（app_token 内の secret の失敗で止めるため）。
 shopt -s inherit_errexit
@@ -13,6 +14,23 @@ shopt -s inherit_errexit
 fnox_config="${PELWAY_AGENT_FNOX_CONFIG:-$HOME/.config/pelway-agent/fnox.toml}"
 
 usage() { echo "usage: $0 <dev|review> [git] <args...>" >&2; exit 2; }
+
+# --help / -h の本体。使い方を標準出力に出して終了コード 0 で返る。
+# builtin しか使わず fnox も gh も呼ばないので、PATH や認証情報が無い環境でも動く。
+help() {
+  printf '%s\n' \
+    "usage: $0 <dev|review> [git] <args...>" \
+    "" \
+    "エージェントの名義で gh / git を実行する。" \
+    "  $0 dev <gh の引数...>               実装担当 GitHub App pelway-dev" \
+    "  $0 review <gh の引数...>            レビュー担当 GitHub App pelway-review" \
+    "  $0 <dev|review> git <git の引数...>  その名義の認証で git を実行する" \
+    "  $0 -h | --help                      この使い方を標準出力に出して終了する" \
+    "" \
+    "呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。" \
+    "終了コード: 2 = 役割の誤り、3 = トークンを取れない、それ以外は gh / git の終了コード"
+  exit 0
+}
 
 secret() {
   local value
@@ -60,6 +78,9 @@ case "$role" in
     ;;
   review)
     token="$(app_token PELWAY_REVIEW)"
+    ;;
+  -h|--help)
+    help
     ;;
   *) usage ;;
 esac
