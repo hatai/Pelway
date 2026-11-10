@@ -40,14 +40,14 @@ while IFS= read -r -d '' record; do
   deleted="${rest%%$'\t'*}"
   path="${rest#*$'\t'}"
   if [[ -z "$path" ]]; then
-    IFS= read -r -d '' _old
+    IFS= read -r -d '' _ # rename の旧パス（数えない）
     IFS= read -r -d '' path
   fi
   [[ "$added" == "-" ]] && continue
   is_generated "$path" && continue
-  n=$((added + deleted))
-  total=$((total + n))
-  per_file+=("$n"$'\t'"$path")
+  file_lines=$((added + deleted))
+  total=$((total + file_lines))
+  per_file+=("$file_lines"$'\t'"$path")
 done < <(git diff --numstat -z -M "$base...HEAD")
 
 echo "pr-size: $total / $limit lines"

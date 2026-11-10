@@ -24,13 +24,13 @@ fnox = "1.47.0"
 pitchfork = "2.33.1"
 # スペルチェッカ（typos）。git hook（hk.pkl の Builtins.typos ステップ）と
 # hk check --all（verify タスク・CI）で実行する。担当が公式リリースを確認の上でピン。
-# 出典: https://github.com/crate-ci/typos/releases/tag/v1.52.0 （公開 2026-11-02）
+# 出典: https://github.com/crate-ci/typos/releases/tag/v1.52.0
 typos = "1.52.0"
 # CI（GitHub Actions）の workflow 静的 lint。担当が公式リリースを確認の上でピン。
-# 出典: https://github.com/jdx/jactionlint/releases/latest （2026-11-05 公開の v2.5.0）
+# 出典: https://github.com/jdx/jactionlint/releases/latest （v2.5.0）
 jactionlint = "2.5.0"
 # CI のカバレッジ増減表示（octocov）。担当が公式リリースを確認の上でピン。
-# 出典: https://github.com/k1LoW/octocov/releases/tag/v0.83.5 （公開 2026-11-05）
+# 出典: https://github.com/k1LoW/octocov/releases/tag/v0.83.5
 # 短縮名 octocov は mise レジストリに無い（tool not found）。octocov 向けの packslip
 # バックエンドも無いため、mise.lock に URL と checksum が残る aqua バックエンドで宣言する。
 "aqua:k1LoW/octocov" = "0.83.5"

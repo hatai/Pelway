@@ -338,7 +338,7 @@ skill に入れる決まりは次のとおり。
 2. `scripts/agent-gh dev issue view <N> --json title,body,labels,comments` で Issue を読む。受け入れ条件がテストで確かめられない形なら、その理由を Issue にコメントし、`needs-human` を付けて止まる
 3. 慣れない機能で、Issue の「採用する方式」が空なら、AGENTS.md の Prior art first に従う。`gh search` で 2 つ以上の方式を比べた結果を Issue にコメントし、`needs-human` を付けて止まる
 4. ブランチは `agent/<N>-<slug>`。受け入れ条件ごとにテストを先に書く（TDD）
-5. コミットの前に `mise run verify` と `mise run pr-size` を実行する。pr-size が 800 行を超えたら、分割の案を Issue にコメントし、`needs-human` を付けて止まる
+5. コミットの後に `mise run verify` と `mise run pr-size` を実行する（pr-size は `base...HEAD` を数えるため、コミット後でないと差分に入らない）。pr-size が 800 行を超えたら、分割の案を Issue にコメントし、`needs-human` を付けて止まる
 6. コミットと push は `scripts/agent-gh dev git ...` で行う
 7. PR は `write-pull-request` skill に従い、`scripts/agent-gh dev pr create --draft` で作る。本文に `Closes #<N>` を入れる
 8. 修正の指示（`t3 thread send`）を受けたら、同じブランチに積む。新しいブランチは作らない

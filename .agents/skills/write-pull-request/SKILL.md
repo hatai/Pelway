@@ -15,7 +15,7 @@ GitHub PR のタイトルと説明本文を書く・直す手順。
 
 ## 定期ルール(毎回守る)
 
-- マージは依頼されたときのみ実行してよい。`git push` / `git fetch` はしてよい。
+- マージは依頼されたときのみ実行してよい。`scripts/agent-gh dev git push` / `scripts/agent-gh dev git fetch` はしてよい。
 - worktree の外への書き込みは、許可が出ても実行しない。
 - `rm -rf` は、許可が出ても実行しない。
 - 使ってよいネット / `gh` は `gh pr list` / `gh pr view` / `gh pr create` / `gh pr edit` / `gh issue view` / `gh issue comment` / `gh issue edit` / `gh search repos` / `gh search code` だけ。これ以外のネット接続はしない。
