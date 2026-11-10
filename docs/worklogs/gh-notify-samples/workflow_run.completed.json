@@ -1,0 +1,20 @@
+{
+  "action": "completed",
+  "workflow_run": {
+    "id": 9999999999,
+    "name": "verify",
+    "conclusion": "success",
+    "head_branch": "feature/demo",
+    "head_sha": "4444444444444444444444444444444444444444",
+    "html_url": "https://github.com/example-org/pelway/actions/runs/9999999999",
+    "head_repository": { "full_name": "example-org/pelway" },
+    "pull_requests": [
+      {
+        "number": 42,
+        "title": "PR-TITLE-MUST-NOT-APPEAR"
+      }
+    ]
+  },
+  "repository": { "full_name": "example-org/pelway" },
+  "sender": { "login": "example-user" }
+}
