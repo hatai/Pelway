@@ -225,3 +225,23 @@
 2. actions.lock 生成（担当実施）と、生成後の inline ignore 2件の撤去。
 3. mise-action の実機動作（追記2分と同じ）。
 4. octocov v0.83.5 の実機実行（ピン先は担当確認済みだが、runner 上の挙動は未検証）。
+
+
+---
+
+# 追記4（r1）: 担当による actions.lock 生成 — 2026-11-10 11:32 JST（Asia/Tokyo）
+
+- 担当が worktree ルートで公式手順どおり実行した（エージェントには `gh` を実行させていない）。lockfile は手編集していない。
+- `gh extension install github/gh-actions-lock`（それまでは `github/gh-stack` のみ）。続いて `gh actions-lock`。
+- 生成物: `.github/workflows/actions.lock`（19行、sha256 `0c0d43a2e4f13cf2fda9d873b1ca24d3750e8bc08c39f0710c58dc5b95467449`）。公式ツールは workflow の `uses` も書き換えた（[公式案内](https://docs.github.com/en/actions/how-tos/secure-your-work/lock-workflow-dependencies)どおり、より具体的なタグへ）。
+  - `actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2` → `actions/checkout@v4.2.2`
+  - `jdx/mise-action@v2` → `jdx/mise-action@v2.4.4`（verify / coverage の両方）
+- lockfile のコミットを GitHub API で独立確認した:
+  - `actions/checkout@v4.2.2` = `11bd71901bbe5b1630ceea73d27597364c9af683`
+  - `jdx/mise-action@v2.4.4` = `c37c93293d6b742fc901e1406b8f764f6fb19dac`
+- `gh actions-lock --verify`: All 1 workflow valid（ignore 撤去後も再確認して valid）。
+- lock 生成後、暫定の `# jactionlint ignore=unpinned-uses` 2件を撤去。担当実行の `mise exec -- jactionlint` は exit 0（shellcheck 未導入の注記のみ）。
+- この `mise exec` の際、mise は rust 1.96.0 の channel sync と rustup の self-update チェックを行った（"installing 1 tool"、コンポーネントは unchanged、`llvm-tools is up to date`）。通信はあった。新規の llvm-tools ダウンロードはこの実行では見ていない。`mise.lock` は変化なし。この項目は合格にしない。
+- GitHub 上の run と、lockfile の sha がランナーで実際に使われること、リポジトリの Require lockfile ポリシーの有無は未検証。push はしていない。
+
+- 独立した `mise run verify`（担当実行、11:39:01–11:39:08 JST）: exit 0。`cargo test` は smoke 1件 ok。同じ実行中にも rust channel sync と rustup self-update チェックがあった（"installing 1 tool" が2回、コンポーネントは unchanged、`llvm-tools is up to date`）。`mise.lock` は変化なし。

@@ -30,9 +30,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout
-        # 浮動タグを避け、コミット sha でピン留めする（v4.2.2）。
+        # タグ参照。コミット sha は .github/workflows/actions.lock で固定する（v4.2.2）。
         # 後続ステップで git 認証情報は使わないため残置しない（jactionlint artipacked）。
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
 
@@ -42,12 +42,9 @@ jobs:
       # - cache: false — mise-action のツールキャッシュは復元内容を mise.lock と突き合わせない
       #   （公式の注意）。リモートキャッシュを使わない方針のため無効化する。追加の cache も足さない。
       # jdx/mise-action のコミット sha は GitHub 公式 lockfile（.github/workflows/actions.lock）
-      # で固定する。オフライン環境では sha を取得できないため @v2 タグで参照する（作業ログ参照）。
+      # で固定する。workflow 側は公式 lock 生成が書き換えた具体タグ @v2.4.4 を参照する。
       - name: Setup mise (official action)
-        # jactionlint ignore=unpinned-uses
-        # ↑ sha 固定は actions.lock（GitHub 公式 lockfile）で行う。jactionlint は actions.lock の
-        #   ピンを受け付けるため、lock 生成後にこの ignore は撤去する（作業ログ参照）。
-        uses: jdx/mise-action@v2
+        uses: jdx/mise-action@v2.4.4
         with:
           version: v2026.11.5
           install: true
@@ -90,16 +87,14 @@ jobs:
       CARGO_LLVM_COV_VERSION: 0.6.17
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
 
       # verify ジョブと同じ導入（mise 公式 Action・キャッシュなし・--locked）。
       # rust 1.96.0 に llvm-tools-preview 成分が入る（mise.toml の components で宣言）。
       - name: Setup mise (official action)
-        # jactionlint ignore=unpinned-uses
-        # ↑ sha 固定は actions.lock で行う。lock 生成後に撤去する（verify ジョブ側のコメント参照）。
-        uses: jdx/mise-action@v2
+        uses: jdx/mise-action@v2.4.4
         with:
           version: v2026.11.5
           install: true

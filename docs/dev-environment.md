@@ -73,11 +73,11 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 
 - `.github/workflows/verify.yml` が、`main` 向け Pull Request と手動実行（`workflow_dispatch`）で、ローカルと同じ `mise run verify` を GitHub-hosted runner（`ubuntu-24.04`）で実行する。
 - CI で実行するのはツール導入（`mise install --locked` 相当）と `mise run verify`（一括確認）だけ。`mise bootstrap`（apt・sudo・podman）は使わない。ツールのバージョンは `mise.toml` / `mise.lock` に従う。
-- mise の導入は公式 Action（`jdx/mise-action`）で行う。`version: v2026.11.5`・`install_args: --locked`・`cache: false` を指定し、導入後にバージョンを検証している。mise-action のツールキャッシュは復元内容を `mise.lock` と突き合わせない（公式の注意）ため無効化し、ダウンロード用のキャッシュも足さない。`actions/checkout` はコミット sha でピン留め。Action 参照の sha 固定には GitHub 公式 lockfile（`.github/workflows/actions.lock`、`gh actions-lock` で生成）を使う予定（2026-11-10 時点で未生成。生成は担当が行う）。
+- mise の導入は公式 Action（`jdx/mise-action`）で行う。`version: v2026.11.5`・`install_args: --locked`・`cache: false` を指定し、導入後にバージョンを検証している。mise-action のツールキャッシュは復元内容を `mise.lock` と突き合わせない（公式の注意）ため無効化し、ダウンロード用のキャッシュも足さない。Action 参照の sha 固定には GitHub 公式 lockfile（`.github/workflows/actions.lock`、担当が `gh actions-lock` で生成）を使う。workflow 側の参照は `actions/checkout@v4.2.2` と `jdx/mise-action@v2.4.4`。lockfile 上のコミットはそれぞれ `11bd71901bbe5b1630ceea73d27597364c9af683` と `c37c93293d6b742fc901e1406b8f764f6fb19dac`（2026-11-10 に GitHub API で公式タグと一致することを確認）。
 - リモートキャッシュ（GitHub Actions cache・S3 等）はローカルの mbx と同じ方針で設定しない。CI のビルドはランナー内のローカルキャッシュのみで完結する。
 - この workflow に秘密は不要（`permissions: contents: read`）。`fnox-check` は `fnox list`（定義一覧の確認）のみで、秘密値の取得・表示はしない。
 - カバレッジの増減計測は同じ workflow の `coverage` ジョブで行う（品質ゲートとは独立）。cargo-llvm-cov（バージョン指定）で LCOV を `lcov.info` に出し、`.octocov.yml` に従って octocov（`v0.83.5` をピン）が PR コメントを作る。比較用レポートの保存は GitHub Actions の artifact のみ。rust にはカバレッジ計測用の `llvm-tools-preview` 成分を `mise.toml` の `components` で宣言する。
-- workflow の静的検査は jactionlint（`mise.toml` で `2.5.0` をピン）を CI の mise-action のあとに実行する。jactionlint は actions.lock による sha 固定を受け付けるため、`jdx/mise-action@v2` のタグ参照は lock 生成後に sha 固定として効く（それまでの暫定の inline ignore は lock 生成後に撤去する）。
+- workflow の静的検査は jactionlint（`mise.toml` で `2.5.0` をピン）を CI の mise-action のあとに実行する。jactionlint は actions.lock による sha 固定を受け付ける。lock 生成後、暫定の inline ignore は撤去済み。
 - 2026-11-10 時点で GitHub 上での実際の run は未確認（ブランチの push・PR 作成の承認待ち。作業ログ: `docs/worklogs/2026-11-10-platform-pr-ci-r1.md`）。
 
 ## シークレットの扱い（fnox）
