@@ -130,3 +130,53 @@
 2. octocov 実行（ローカルにバイナリ無し）。`.octocov.yml` は YAML 構文と公式設定知識による静的レビューのみ。`if-no-artifact` 等のキー名はオンライン確認要。
 3. `cargo-llvm-cov 0.6.17` の crates.io 実在性と Rust 1.96.0 でのビルド。
 4. `ubi:k1LoW/octocov` の解決とバージョンピン留め（QA 時に実施）。
+
+---
+
+# 追記2（r1）: mise 公式 Action・Actions lockfile・jactionlint — 2026-11-10
+
+- 追記指示の受領: 2026-11-10 10:29 JST 付の指示書を本スレッド（mcp:1b65aff3）で1回受領し、このラウンドで処理した（自己送信はエコーループ防止で行わず）。
+
+## 1. mise を公式 Action に変更（実施済み）
+
+- 両ジョブの curl インストーラ導入を削除し、`jdx/mise-action@v2` に置換。inputs:
+  - `version: v2026.11.5`（mise 本体のピン。ローカル検証済みバージョン）
+  - `install: true` + `install_args: --locked`（`mise.lock` があるため `mise install --locked` 相当を明示的に強制）
+  - `cache: false`（mise-action のツールキャッシュは復元内容を mise.lock と突き合わせない公式の注意のため。ダウンロード用の Actions cache も追加しない）
+- 導入後の `mise --version` 断言 step は残置（インストーラ経路が変わっても「静かなバージョンずれ」を排除する）。
+- **コミット sha ピンについて**: jdx/mise-action の実 sha はオフライン環境で取得できなかった（捏造 sha は確実に run を壊すため不可）。そこで GitHub 公式の workflow dependency lockfile（`.github/workflows/actions.lock`）による sha 固定をpin の実体とする。これは lockfile 機能の公式の使い方（workflow はタグ参照、lockfile が sha を固定・検証する）。`actions/checkout` は従来どおり生 sha 参照（v4.2.2 = `11bd71901bbe5b1630ceea73d27597364c9af683`）で、これも lockfile でカバーされる。
+- 出典: jdx/mise-action（公式 Action。inputs の仕様は README の知識ベース。オフラインのため入力名 `version` 等の実機確認は未検証 — 誤入力名は warning のみで落ち、バージョン断言が即 fail で検知する設計）。
+
+## 2. GitHub Actions lockfile（actions.lock）— 未生成、理由と手順
+
+- `.github/workflows/actions.lock` は**未生成のまま**。理由: 生成は `gh extension install github/gh-actions-lock` + `gh actions-lock` が必要で、エージェントはネット接続も `gh` 実行も禁止、lockfile の手作り・手編集も禁止のため。
+- 担当の手順（リポジトリルートで）: `gh extension install github/gh-actions-lock` → `gh actions-lock` → 生成物を `uses:` 参照（`actions/checkout@11bd719…`、`jdx/mise-action@v2` ×2）と突き合わせてコミット。CI での `gh actions-lock --verify` も担当実施（runner 上では gh 拡張と認証が必要なため、このラウンドでは CI step を追加していない）。
+- lockfile 未生成の間、`jdx/mise-action@v2` はタグ解決のまま動く（sha 固定は未完了状態）。生成までが QA の必須項目。
+
+## 3. jactionlint — mise.toml への追加は見送り（理由と適用手順）
+
+- **見送りの理由**: `mise.toml` へのバージョンピンと `mise.lock` 更新には、(a) 実在バージョンの確認、(b) lock に必要なプラットフォーム別 URL・checksum の取得、いずれもネットワークが必要。エージェントはオフラインのため両方不可能。推測バージョンや捏造 checksum を書くと `mise install --locked` が失敗し、品質ゲート（verify ジョブ）全体を壊す。安全側として追加しない判断した。
+- ローカルで確認できたこと: `mise registry jactionlint`（オフライン・bundled registry）→ backends `packslip:github.com/jdx/jactionlint, aqua:jdx/jactionlint, github:jdx/jactionlint`。ツールの存在とレジストリ名は確認済み。
+- 適用手順（ネット許可後、または担当が実施）:
+  1. `mise use jactionlint@<実在バージョン>`（mise.lock が自動更新される）→ コミット
+  2. workflow の verify ジョブ（mise-action の後）に次を追加:
+     ```yaml
+     - name: Lint workflows (jactionlint)
+       run: mise exec -- jactionlint
+     ```
+  3. `mise run verify` と CI で jactionlint が走ることを確認（`mise run verify` への task 追加は、verify の意味を変えないためこのラウンドでは提案しない）
+- CI での curl・検証なし導入は使っていない（そもそも CI に jactionlint step を追加していない）。
+
+## 検証コマンドと結果（追記2分）
+
+| コマンド | 結果 |
+|---|---|
+| workflow YAML 構文（pyyaml） | OK。両ジョブとも Checkout → mise-action（`version`/`install`/`install_args: --locked`/`cache: false`）→ バージョン断言 → trust →（verify または cargo-llvm-cov → octocov）。curl インストーラの step は削除済み（コメント内の言及のみ） |
+| `mise registry jactionlint` | 上記のとおり（オフラインで実行可能なローカルコマンド） |
+| `mise run verify`（最終状態） | 下記「最終検証」のとおり exit 0 |
+
+## 未検証（追記2分）
+
+1. mise-action の実機動作（入力名 `version`・`install_args` の仕様、--locked 挙動、自動 trust、mise の PATH 付与）。GitHub 上の初回 run で確認する。
+2. `.github/workflows/actions.lock` の生成・`--verify`（担当実施）。
+3. jactionlint の追加（バージョン・lock 生成にネットが必要）。

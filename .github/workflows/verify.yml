@@ -2,7 +2,8 @@
 # ローカルの公式確認（mise run verify）と同じ検査を GitHub-hosted runner で回す。
 # 方針は docs/dev-environment.md に従う:
 #   - ツールのバージョンは mise.toml / mise.lock が単一の管理元（Rust 1.96.0、hk 2.11.1 等）
-#   - リモートキャッシュ（GitHub Actions cache・S3 等）は設定しない
+#   - mise の導入は公式 Action（jdx/mise-action）。リモートキャッシュ（GitHub Actions cache・S3）
+#     は mbx / Cargo と同じ方針で設定しない（mise-action も cache: false）
 #   - CI では mise bootstrap（apt・sudo・podman）を実行しない。mise install と mise run verify に限る
 #   - fnox-check は fnox list（定義一覧の確認）だけで、秘密値の取得・表示はしない
 
@@ -32,27 +33,27 @@ jobs:
         # 浮動タグを避け、コミット sha でピン留めする（v4.2.2）。
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Install mise (pinned)
-        env:
-          # mise 本体のバージョン。mise.toml の min_version (2026.9.2) を満たし、
-          # このリポジトリの mise.toml でローカル検証済みのバージョンに固定する。
-          MISE_VERSION: v2026.11.5
-        run: |
-          curl -fsSL https://mise.run | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.local/bin:$PATH"
-          mise --version
-          mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
+      # mise 公式 Action で mise 本体の導入とツールの導入を行う（curl / インストーラ不使用）。
+      # - version: mise 本体を 2026.11.5 に固定（mise.toml の min_version を満たす検証済みバージョン）
+      # - install_args: --locked で mise.lock 通りの導入を強制（lock と不一致なら fail）
+      # - cache: false — mise-action のツールキャッシュは復元内容を mise.lock と突き合わせない
+      #   （公式の注意）。リモートキャッシュを使わない方針のため無効化する。追加の cache も足さない。
+      # jdx/mise-action のコミット sha は GitHub 公式 lockfile（.github/workflows/actions.lock）
+      # で固定する。オフライン環境では sha を取得できないため @v2 タグで参照する（作業ログ参照）。
+      - name: Setup mise (official action)
+        uses: jdx/mise-action@v2
+        with:
+          version: v2026.11.5
+          install: true
+          install_args: --locked
+          cache: false
 
+      - name: Assert mise version
+        run: mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
+
+      # 公式 Action が mise install --locked 済み。ここでは信頼登録のみ（冪等）。
       - name: Trust project config
         run: mise trust
-
-      # ツール導入は mise install に限る（mise bootstrap は使わない）。
-      # rust（llvm-tools-preview 成分を含む）/ mr-boxington / hk / fnox / pitchfork が
-      # mise.lock の checksum 付きで入る。hk の初回実行に必要な Pkl パッケージの
-      # 取得は verify ステップ内で行われる。
-      - name: Install tools (mise install)
-        run: mise install
 
       # ローカルと同じ一括確認: fmt-check / check / clippy / test / build /
       # toolchain-check / hk-validate / hk-check / fnox-check / pitchfork-check
@@ -80,22 +81,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Install mise (pinned)
-        env:
-          MISE_VERSION: v2026.11.5
-        run: |
-          curl -fsSL https://mise.run | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.local/bin:$PATH"
-          mise --version
-          mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
+      # verify ジョブと同じ導入（mise 公式 Action・キャッシュなし・--locked）。
+      # rust 1.96.0 に llvm-tools-preview 成分が入る（mise.toml の components で宣言）。
+      - name: Setup mise (official action)
+        uses: jdx/mise-action@v2
+        with:
+          version: v2026.11.5
+          install: true
+          install_args: --locked
+          cache: false
+
+      - name: Assert mise version
+        run: mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
 
       - name: Trust project config
         run: mise trust
-
-      # rust 1.96.0 に llvm-tools-preview 成分が入る（mise.toml の components で宣言）。
-      - name: Install tools (mise install)
-        run: mise install
 
       # cargo-llvm-cov をバージョン指定で導入（--locked で Cargo.lock 通りにビルド）。
       - name: Install cargo-llvm-cov (pinned)
