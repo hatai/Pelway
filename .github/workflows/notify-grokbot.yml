@@ -10,7 +10,7 @@
 name: notify-grokbot
 
 on:
-  push: 
+  push:
     branches:
       - main
   pull_request:
