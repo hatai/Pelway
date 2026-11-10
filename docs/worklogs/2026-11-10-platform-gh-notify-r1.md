@@ -182,8 +182,45 @@ jactionlint は actionlint と同じ検査をするリポジトリピンの fork
 ## 未検証（追記分も合格としない）
 
 1. GitHub 上での `author_association` の実際の値の分布と判定（`FIRST_TIMER` / `CONTRIBUTOR` 等は通知されない）。実データでは未確認。
-2. `github-actions[bot]` 条件の実効性（GITHUB_TOKEN 起点のコメントは workflow が起動しない見込み — 指示の補足どおり条件のみ残している）。
+2. `github-actions[bot]` 条件の実効性（GITHUB_TOKEN 起点のコメントは workflow が起動しない見込み — 指示の補足どおり条件のみ残している）。→ **追記2で条件ごと削除（下記）**
 3. GitHub 上での run・実際の送信は引き続き未実施（push は担当が行う）。
+
+---
+
+# 追記2（r1）: 投稿者ゲートから github-actions[bot] 例外を削除 — 2026-11-10（リード決定 19:13 JST）
+
+- 指示: 前追加条件1の訂正。`github-actions[bot]` を例外として送る条件は入れない（入れていたら外す）。コメント系3イベント（issue_comment / pull_request_review / pull_request_review_comment）は `author_association` が `OWNER` / `MEMBER` / `COLLABORATOR` のときだけ送る。octocov の結果は verify の `workflow_run` 通知で知らせるので十分、のため。
+- 対応コミット: `9eb3f8d` の上への別コミット。実送信・push は引き続きゼロ。
+
+## 変更内容
+
+1. `.github/workflows/notify-grokbot.yml`
+   - `COMMENT_ALLOWED` 式から `github.event.comment.user.login == 'github-actions[bot]'` と `github.event.review.user.login == 'github-actions[bot]'` の2条件を削除。コメント系3イベントの判定は `author_association` の3値のみになった。
+   - notice step のメッセージから「(and not github-actions[bot])」を削除。トリガー行・Send step・env ブロックのコメントを訂正版の内容に更新（env コメントに 19:13 訂正の経緯を明記）。
+   - `COMMENTER_LOGIN`（job env）は判定には使わず、スキップ時の notice の説明用として残した（公開情報のみ）。
+2. `docs/worklogs/gh-notify-samples/check.sh` — `gate_decision()` から bot 例外（login 比較）を削除し、`comment_allowed` は `author_association` の3値のみで判定。ヘッダコメントも更新。
+3. `docs/dev-environment.md` — 「送らない条件」の投稿者判定の記述を3値のみに修正。bot 例外が実質動かない見込みだった旨の補足を削除し、「ボット例外なし。octocov 等の結果は verify の workflow_run 通知で把握する」と訂正理由を記載。
+4. 見本 payload は変更なし（bot 例外に依存する見本は無かった。`NONE` コメントは引き続き skip、OWNER / MEMBER / COLLABORATOR の3見本は引き続き send）。
+
+## 検証コマンドと結果（追記2分・すべて実施済み・送信なし）
+
+| コマンド | exit code / 結果 |
+|---|---|
+| `~/.local/share/mise/installs/jactionlint/2.5.0/jactionlint .github/workflows/notify-grokbot.yml` | **exit 0**（shellcheck 未導入の注記のみ） |
+| 同上・引数なし（全 workflow） | **exit 0** |
+| `bash docs/worklogs/gh-notify-samples/check.sh` | **exit 0** — ゲート判定 10件（送る 7・送らない 3）＋ payload 7件、すべて PASS |
+| `python3 -c "import yaml; yaml.safe_load(...)"` | OK |
+| `grep -n 'github-actions\[bot\]'`（workflow / check.sh / dev-environment.md） | 機能的な使用なし（一致 2件は訂正経緯を説明するコメント行のみ） |
+
+## 迷った点（追記2分）
+
+- 特になし（条件の削除のみ）。`COMMENTER_LOGIN` を残すか迷ったが、スキップ理由の notice から投稿者を特定しやすいため説明用に保持した（判定経路には入っていない）。
+
+## 未検証（追記2分も合格としない）
+
+1. GitHub 上での実際の run・送信（引き続き push は担当が行う）。
+2. 実データでの `author_association` の分布（`CONTRIBUTOR` 等の内部協力者も通知対象外になることの確認）。
+
 
 
 

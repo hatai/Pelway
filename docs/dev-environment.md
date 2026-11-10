@@ -91,9 +91,8 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 - 送らない条件（通知をスキップし、ジョブは成功で終わる。CI は落ちない）:
   - 上記 Secret のどちらかが未設定のとき
   - fork 由来のイベント（PR 系は head リポジトリ、workflow_run は head_repository の full_name がこのリポジトリと違うとき）
-  - コメント系イベント（issue_comment / pull_request_review / pull_request_review_comment）で、投稿者の `author_association` が `OWNER` / `MEMBER` / `COLLABORATOR` のいずれでもなく、投稿者のログインも `github-actions[bot]` でないとき
+  - コメント系イベント（issue_comment / pull_request_review / pull_request_review_comment）で、投稿者の `author_association` が `OWNER` / `MEMBER` / `COLLABORATOR` のいずれでもないとき（ボット例外なし。octocov 等の結果は verify の `workflow_run` 通知で把握する）
   - PR 以外の issue コメント（ジョブごと skip）。PR へのコメントは payload だけでは fork 判定できないため、`head_branch` / `head_sha` は `null` のまま送る（API 呼び出しも権限もなし）
-- 補足: `GITHUB_TOKEN` が作ったコメントでは workflow 自体が起動しないため、`github-actions[bot]` の条件は実際には機能しない見込み（条件のみ定義してある）。
 - 手動実行（workflow_dispatch）は `event: "test"` のテスト通知を 1 通送る。送信の失敗（タイムアウト・HTTP エラー）で CI は落ちない。
 
 ## シークレットの扱い（fnox）

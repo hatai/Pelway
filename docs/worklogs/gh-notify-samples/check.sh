@@ -68,11 +68,11 @@ build_payload() {
 #                      GITHUB_REPOSITORY と違えば fork として送らない
 #   3. COMMENT_ALLOWED(job env 式) + Send step if: コメント系3イベントは
 #                      投稿者の author_association が OWNER / MEMBER /
-#                      COLLABORATOR のいずれか、または user.login が
-#                      github-actions[bot] のときだけ送る
+#                      COLLABORATOR のいずれかのときだけ送る
+#                      （19:13 訂正: github-actions[bot] 例外なし）
 gate_decision() {
   local ev="$1" event_name="$2"
-  local head_repo assoc login
+  local head_repo assoc
   local should_send=true comment_allowed=true
 
   # gate step の fork 判定（HEAD_REPO != GITHUB_REPOSITORY）
@@ -86,17 +86,13 @@ gate_decision() {
   esac
 
   # COMMENT_ALLOWED 式のコメント系3イベントの投稿者判定
+  # （author_association が OWNER / MEMBER / COLLABORATOR のいずれかのみ）
   case "$event_name" in
     issue_comment|pull_request_review|pull_request_review_comment)
       assoc="$(jq -r '.comment.author_association // .review.author_association // empty' <<<"$ev")"
-      login="$(jq -r '.comment.user.login // .review.user.login // empty' <<<"$ev")"
       case "$assoc" in
         OWNER|MEMBER|COLLABORATOR) ;;
-        *)
-          if [ "$login" != "github-actions[bot]" ]; then
-            comment_allowed=false
-          fi
-          ;;
+        *) comment_allowed=false ;;
       esac
       ;;
   esac
