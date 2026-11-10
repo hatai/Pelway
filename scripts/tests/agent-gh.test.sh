@@ -24,6 +24,16 @@ cat >"$BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1 $2" == "token generate" ]]; then
   printf '%s\n' "$*" >"$CALL_LOG.token-args"
+  # --key <file> の中身と権限を記録する（秘密鍵が argv に載らないことの確認用）
+  prev=""
+  for a in "$@"; do
+    if [[ "$prev" == "--key" ]]; then
+      cat "$a" >"$CALL_LOG.key-content"
+      stat -c %a "$a" >"$CALL_LOG.key-mode"
+      printf '%s\n' "$a" >"$CALL_LOG.key-path"
+    fi
+    prev="$a"
+  done
   printf '{"token":"review-token","expires_at":"x"}\n'
   exit 0
 fi
@@ -72,6 +82,12 @@ expect_log review_mints_token "ARGS=pr review 1 --approve"
 grep -qF -- "--app-id 111 --installation-id 222" "$ROOT/review_mints_token.log.token-args" 2>/dev/null ||
   failures+=("review_mints_token: token generate args wrong")
 [[ "$OUT" != *review-token* && "$OUT" != *pem-body* ]] || failures+=("review_mints_token: secret printed")
+L="$ROOT/review_mints_token.log"
+! grep -qF -- "pem-body" "$L.token-args" 2>/dev/null || failures+=("review_key_not_in_argv: key on command line")
+! grep -qF -- "$(printf pem-body | base64 -w 0)" "$L.token-args" 2>/dev/null || failures+=("review_key_not_in_argv: base64 key on command line")
+[[ "$(cat "$L.key-content" 2>/dev/null)" == "pem-body" ]] || failures+=("review_key_file: --key file lacks key")
+[[ "$(cat "$L.key-mode" 2>/dev/null)" == "600" ]] || failures+=("review_key_file: mode not 600")
+[[ -n "$(cat "$L.key-path" 2>/dev/null)" && ! -e "$(cat "$L.key-path" 2>/dev/null)" ]] || failures+=("review_key_file: key file not removed")
 
 run dev_git_identity dev git commit -m x
 expect_log dev_git_identity "GH_TOKEN=dev-token"

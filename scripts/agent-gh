@@ -33,12 +33,18 @@ case "$role" in
   review)
     app_id="$(secret PELWAY_REVIEW_APP_ID)"
     installation_id="$(secret PELWAY_REVIEW_APP_INSTALLATION_ID)"
-    key_b64="$(secret PELWAY_REVIEW_APP_KEY | base64 -w 0)"
+    key="$(secret PELWAY_REVIEW_APP_KEY)"
+    # 秘密鍵は argv（ps で見える）に載せず、所有者だけが読める一時ファイルで渡し、使ったらすぐ消す。
+    key_file="$(mktemp)"
+    trap 'rm -f "$key_file"' EXIT
+    chmod 600 "$key_file"
+    printf '%s\n' "$key" >"$key_file"
     # gh 拡張 Link-/gh-token。出力は JSON（{"token": "...", ...}）。
-    response="$(gh token generate --app-id "$app_id" --installation-id "$installation_id" --base64-key "$key_b64" 2>/dev/null)" || {
+    if ! response="$(gh token generate --app-id "$app_id" --installation-id "$installation_id" --key "$key_file" 2>/dev/null)"; then
       echo "agent-gh: GitHub App のトークンを発行できません（gh extension install Link-/gh-token が必要）" >&2
       exit 3
-    }
+    fi
+    rm -f "$key_file"
     token="$(sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' <<<"$response")"
     [[ -n "$token" ]] || { echo "agent-gh: トークン発行の応答に token がありません" >&2; exit 3; }
     ;;
