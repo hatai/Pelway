@@ -9,6 +9,7 @@
 #   2. 送るイベントの JSON: キーが指示の 13 個だけであること
 #   3. タイトル・本文等のテキスト（*-MUST-NOT-APPEAR マーカー）が混入していないこと
 #   4. イベントごとの期待値（null の扱い、run_url の切り替え等）が合っていること
+#   5. workflow 自体が issue_comment trigger と concurrency を持たないこと
 #
 # 使い方: bash docs/worklogs/gh-notify-samples/check.sh
 set -euo pipefail
@@ -59,14 +60,12 @@ build_payload() {
 
 # --- workflow のゲート判定と同じ対応で "send" / "skip" を返す ---
 # 対応関係（いずれも run: への ${{ }} 書き込みなし・if:/env 相当の再現）:
-#   1. job if        : issue_comment は issue.pull_request のあるものだけ
-#                      （見本はすべて PR 由来のため、ここでは全件対象）
-#   2. gate step     : pull_request / pull_request_review /
+#   1. gate step     : pull_request / pull_request_review /
 #                      pull_request_review_comment / workflow_run は
 #                      HEAD_REPO（= pull_request.head.repo.full_name または
 #                      workflow_run.head_repository.full_name）が
 #                      GITHUB_REPOSITORY と違えば fork として送らない
-#   3. COMMENT_ALLOWED(job env 式) + Send step if: コメント系3イベントは
+#   2. COMMENT_ALLOWED(job env 式) + Send step if: コメント系2イベントは
 #                      投稿者の author_association が OWNER / MEMBER /
 #                      COLLABORATOR のいずれかのときだけ送る
 #                      （19:13 訂正: github-actions[bot] 例外なし）
@@ -85,10 +84,10 @@ gate_decision() {
       ;;
   esac
 
-  # COMMENT_ALLOWED 式のコメント系3イベントの投稿者判定
+  # COMMENT_ALLOWED 式のコメント系2イベントの投稿者判定
   # （author_association が OWNER / MEMBER / COLLABORATOR のいずれかのみ）
   case "$event_name" in
-    issue_comment|pull_request_review|pull_request_review_comment)
+    pull_request_review|pull_request_review_comment)
       assoc="$(jq -r '.comment.author_association // .review.author_association // empty' <<<"$ev")"
       case "$assoc" in
         OWNER|MEMBER|COLLABORATOR) ;;
@@ -118,7 +117,7 @@ check_gate() {
 #   REPO         <- github.repository                          (= GITHUB_REPOSITORY)
 #   EVENT        <- event_name=='workflow_dispatch' ? 'test' : event_name
 #   ACTION       <- github.event.action
-#   PR_NUMBER    <- pull_request.number || issue.number || workflow_run.pull_requests[0].number
+#   PR_NUMBER    <- pull_request.number || workflow_run.pull_requests[0].number
 #   HEAD_BRANCH  <- pull_request.head.ref  || workflow_run.head_branch
 #   HEAD_SHA     <- pull_request.head.sha  || workflow_run.head_sha
 #   MERGED       <- pull_request.merged（無ければ ""、あれば "true"/"false" 文字列）
@@ -135,7 +134,7 @@ load_env_from_event() {
     EVENT="$event_name"
   fi
   ACTION="$(jq -r '.action // empty' <<<"$ev")"
-  PR_NUMBER="$(jq -r '.pull_request.number // .issue.number // .workflow_run.pull_requests[0].number // empty' <<<"$ev")"
+  PR_NUMBER="$(jq -r '.pull_request.number // .workflow_run.pull_requests[0].number // empty' <<<"$ev")"
   HEAD_BRANCH="$(jq -r '.pull_request.head.ref // .workflow_run.head_branch // empty' <<<"$ev")"
   HEAD_SHA="$(jq -r '.pull_request.head.sha // .workflow_run.head_sha // empty' <<<"$ev")"
   MERGED="$(jq -r 'if .pull_request.merged == null then "" else (.pull_request.merged | tostring) end' <<<"$ev")"
@@ -190,20 +189,27 @@ run_sample() {
 main() {
   local failures=0
   local own_run_url="https://github.com/example-org/pelway/actions/runs/123456789"
+  local workflow_file="$samples_dir/../../../.github/workflows/notify-grokbot.yml"
 
-  # --- ゲート判定: 全10サンプル。7件は送る、3件（外部コメント・fork×2）は送らない ---
+  # --- workflow 自体の検査: issue_comment trigger と concurrency は持たない ---
+  if grep -n 'issue_comment\|concurrency' "$workflow_file"; then
+    echo "FAIL notify-grokbot.yml still contains issue_comment / concurrency"
+    failures=$((failures + 1))
+  else
+    echo "PASS notify-grokbot.yml (no issue_comment / concurrency)"
+  fi
+
+  # --- ゲート判定: 全8サンプル。6件は送る、2件（fork×2）は送らない ---
   check_gate pull_request.opened.json pull_request send || failures=$((failures + 1))
   check_gate pull_request.closed-merged.json pull_request send || failures=$((failures + 1))
   check_gate pull_request_review.submitted.json pull_request_review send || failures=$((failures + 1))
   check_gate pull_request_review_comment.created.json pull_request_review_comment send || failures=$((failures + 1))
-  check_gate issue_comment.created-pr.json issue_comment send || failures=$((failures + 1))
   check_gate workflow_run.completed.json workflow_run send || failures=$((failures + 1))
   check_gate workflow_dispatch.json workflow_dispatch send || failures=$((failures + 1))
-  check_gate issue_comment.created-external.json issue_comment skip || failures=$((failures + 1))
   check_gate pull_request.opened-fork.json pull_request skip || failures=$((failures + 1))
   check_gate workflow_run.completed-fork.json workflow_run skip || failures=$((failures + 1))
 
-  # --- payload 組立（送る判定になる7サンプルのみ。送らない3件は workflow でも
+  # --- payload 組立（送る判定になる6サンプルのみ。送らない2件は workflow でも
   #     Send step の if: が false になり jq までは来ない） ---
   run_sample pull_request.opened.json pull_request \
     'action=opened' 'pr_number=42' 'head_branch=feature/demo' \
@@ -225,10 +231,6 @@ main() {
     'head_sha=1111111111111111111111111111111111111111' \
     'merged=false' 'conclusion=null' 'workflow_name=null' \
     "run_url=$own_run_url" 'actor=example-commenter' || failures=$((failures + 1))
-  run_sample issue_comment.created-pr.json issue_comment \
-    'action=created' 'pr_number=42' 'head_branch=null' 'head_sha=null' \
-    'merged=null' 'conclusion=null' 'workflow_name=null' \
-    "run_url=$own_run_url" 'actor=example-commenter' || failures=$((failures + 1))
   run_sample workflow_run.completed.json workflow_run \
     'action=completed' 'pr_number=42' 'head_branch=feature/demo' \
     'head_sha=4444444444444444444444444444444444444444' \
@@ -244,7 +246,7 @@ main() {
     echo "$failures check(s) FAILED"
     exit 1
   fi
-  echo "all checks passed (10 gate decisions + 7 payload assemblies)"
+  echo "all checks passed (workflow static + 8 gate decisions + 6 payload assemblies)"
 }
 
 main "$@"

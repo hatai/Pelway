@@ -221,6 +221,76 @@ jactionlint は actionlint と同じ検査をするリポジトリピンの fork
 1. GitHub 上での実際の run・送信（引き続き push は担当が行う）。
 2. 実データでの `author_association` の分布（`CONTRIBUTOR` 等の内部協力者も通知対象外になることの確認）。
 
+---
+
+# 直し1: issue_comment trigger と concurrency を削除 — 2026-11-10（リード決定 20:15 JST）
+
+- 開始: 2026-11-10 20:25 JST
+- Codex レビューの必須指摘2件への対応（リードが 20:15 JST に直し方を決定）。同一ブランチ（fix1）で継続。実送信・push は引き続きゼロ。
+  1. fork から来た PR に OWNER / MEMBER / COLLABORATOR がコメントすると、issue_comment では fork かどうか分からないため Send に届いてしまう → trigger から `issue_comment` を外す（`permissions: {}` はそのまま）
+  2. `concurrency` のグループで、待っている run が新しい run に置き換えられ通知が抜ける → `concurrency` を丸ごと消す
+
+## 作業環境（最初に記録）
+
+| コマンド | 出力 |
+|---|---|
+| `pwd` | `/home/hatai/.t3/worktrees/Pelway/demo-t3-platform-gh-not-7fc68e92ad361f68` |
+| `git branch --show-current` | `demo-t3/platform-gh-notify-r1-fix1` |
+| `git rev-parse HEAD` | `0e2d5b465383de47c7070c71dc866b1c120c9ad1`（指示の base と一致） |
+| `git status --porcelain` | 空（指示どおり） |
+
+## 変更内容
+
+1. `.github/workflows/notify-grokbot.yml`
+   - `on:` から `issue_comment`（`# jactionlint ignore=dangerous-triggers` の注記ごと）を削除
+   - job の `if:`（issue_comment を `github.event.issue.pull_request` の有無で PR 由来に絞る式）を削除（trigger が消えたため恒真になる）
+   - `COMMENT_ALLOWED` 式から `github.event_name != 'issue_comment' &&` の分岐を削除。コメント系2イベント（pull_request_review / pull_request_review_comment）の投稿者制限（OWNER / MEMBER / COLLABORATOR）はそのまま
+   - `PR_NUMBER` 式から `github.event.issue.number`（issue_comment 専用の参照）を削除
+   - env ブロックのコメント「コメント系3イベント」→「コメント系2イベント」に更新
+   - `concurrency:` ブロックと説明コメントを丸ごと削除
+   - 変更なし: `permissions: {}`、Secret 未設定の gate、fork（HEAD_REPO 別 repo）の gate、13 キーの jq、`curl --config -`
+   - ファイル内に `issue_comment` / `concurrency` の文字はゼロ（grep・check.sh で確認）
+2. `docs/dev-environment.md` — 通知の節
+   - 対象イベントから「PR への issue_comment」を削除
+   - 投稿者ゲートの対象を pull_request_review / pull_request_review_comment の2イベントに修正
+   - 「PR 以外の issue コメント（ジョブごと skip）…」の行を削除し、代わりに「対象外」の文を追加: PR の会話欄に書いた普通のコメント（issue_comment）は通知しない。fork から来た PR へのコメントを安全に見分けられないため。あとで足す場合は `pull-requests: read` で PR を調べて fork を除く形にし、別の PR で行う
+3. `docs/worklogs/gh-notify-samples/`
+   - `issue_comment.created-external.json` / `issue_comment.created-pr.json` を `git rm`
+   - `check.sh`: issue_comment 2見本のゲート判定・payload 組立を削除（ゲート判定 10→8、payload 7→6）。`gate_decision()` の case から issue_comment を削除、`PR_NUMBER` 導出から `.issue.number` を削除、ヘッダー・件数コメントを更新。workflow が `issue_comment` / `concurrency` を持たないことの grep 検査を追加
+4. 本ログに本節を追記
+
+## 検証コマンドと結果（すべて実施済み・送信なし）
+
+| コマンド | exit code / 結果 |
+|---|---|
+| `bash docs/worklogs/gh-notify-samples/check.sh` | **exit 0** — workflow 静的検査（issue_comment / concurrency なし）＋ゲート判定 8件（送る 6・送らない 2: fork×2）＋ payload 組立 6件、すべて PASS |
+| `~/.local/share/mise/installs/jactionlint/2.5.0/jactionlint .github/workflows/notify-grokbot.yml` | **exit 1** — concurrency-limits 1件（下記「迷った点」1。shellcheck 未導入の注記付き） |
+| 同上・引数なし（CI の verify と同じ全 workflow 検査） | **exit 1** — 同上（notify-grokbot.yml の concurrency-limits 1件のみ） |
+| `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/notify-grokbot.yml'))"` | OK |
+| `grep -n 'issue_comment\|concurrency' .github/workflows/notify-grokbot.yml` | なし（exit 1） |
+| `grep -nE 'set -x\|curl .*(-v\|--verbose)\|pull_request_target\|uses:\|checkout'`（workflow） | 実使用なし（一致1件は「checkout なし」の注記コメント行のみ） |
+| `grep -n 'echo.*WEBHOOK'`（workflow） | なし |
+| `run:` 内の `${{ }}`（awk 抽出） | 実使用なし（一致1件は注記コメント行のみ） |
+| 行末空白・最終改行（変更4ファイル） | 行末空白なし・最終改行あり |
+
+## 迷った点と安全側の判断（直し1分）
+
+1. **jactionlint の concurrency-limits が再燃し exit 1**。concurrency の削除はリード決定だが、本 workflow の r1 では「concurrency-limits 規則に引っかかると CI の verify ジョブが落ちる」ことを理由に concurrency を付けていた（本ログ・追記前の迷った点2 (a)）。今回の削除でこの指摘が復活し、push 後は CI の verify ジョブ（jactionlint で全 workflow を検査）が落ちる状態になる。対応は3通り考えた: (a) `on:` 行に `# jactionlint ignore=concurrency-limits` を付ける — 指示の完了条件「ファイルの中に `issue_comment` と `concurrency` の文字が残らないようにする」に違反するため不採用、(b) verify.yml 側の jactionlint 実行に ignore を追加 — 「ほかの workflow を変えない」禁止に違反するため不採用、(c) concurrency を戻す — リード決定に反するため不採用。字面の指示をすべて守った結果として exit 1 が残ることを本節と報告に明記し、判断はリードに委ねる。
+2. **`github.event.issue.number` を PR_NUMBER から削除**。指示の「`issue_comment` に関わる条件・コメント・gate の case・`COMMENT_ALLOWED` の式の分岐をすべて消す」に、PR_NUMBER 式の `issue.number`（issue_comment 専用の参照）も含まれると解釈した。残しても動作には影響しないが、issue_comment 依存が残るため削除した（check.sh の対応導出も同様）。
+3. **job の `if:` を丸ごと削除**。この if は issue_comment を PR 由来に絞るためだけのもの。trigger から issue_comment が消えた時点で恒真になるため、コメントごと削除した。
+4. **`docs/dev-environment.md` の「2026-11-10 時点で GitHub 上での実際の run は未確認」はそのまま残した**。この文は CI（verify.yml）節にあり、verify.yml も notify-grokbot も今回時点で GitHub 上での run は未確認のまま（push は担当が行うため）。「未確認のままが正しい」状態のため修正不要と判断した。
+5. **コメント系の skip 経路を見本で検証できなくなった**: author_association が基準外（NONE 等）のコメント系見本は issue_comment.created-external.json だけだったため、削除後に check.sh で COMMENT_ALLOWED の skip 判定を直接検証する見本が無くなった（fork 2件の skip は検証する）。trigger から issue_comment が消えた以上、同イベントの見本を残す意味がないため指示どおり削除した。投稿者ゲートの式自体は pull_request_review / pull_request_review_comment 見本（send 側）で確認できる。
+
+## コミット
+
+- メッセージ: `fix(ci): drop issue_comment trigger and concurrency from gh-notify`
+- hk pre-commit の結果はコミット実行後に本節へ追記する。
+
+## 未検証（直し1分も合格としない）
+
+1. GitHub 上での実際の run・送信（push は担当が行う）。※ jactionlint の concurrency-limits 指摘が残るため、push 後は CI の verify ジョブが落ちる見込み（迷った点1）。
+
+
 
 
 

@@ -82,7 +82,7 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 
 ## GitHub 通知（Grok Bot webhook・notify-grokbot）
 
-`.github/workflows/notify-grokbot.yml` が、PR 系イベント（pull_request / review / review comment / PR への issue_comment）と verify workflow の完了（`workflow_run`）、手動実行（`workflow_dispatch`）を Grok Bot の webhook に POST する。送るのはメタデータのみで、PR タイトル・本文、コメント本文、レビュー本文、ラベル、メールアドレス等は送らない。
+`.github/workflows/notify-grokbot.yml` が、PR 系イベント（pull_request / review / review comment）と verify workflow の完了（`workflow_run`）、手動実行（`workflow_dispatch`）を Grok Bot の webhook に POST する。送るのはメタデータのみで、PR タイトル・本文、コメント本文、レビュー本文、ラベル、メールアドレス等は送らない。
 
 - Secret（リポジトリの Settings → Secrets and variables → Actions → New repository secret で登録。値はドキュメント・コードに置かない）:
   - `GROKBOT_WEBHOOK_URL` — webhook の URL
@@ -91,8 +91,8 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 - 送らない条件（通知をスキップし、ジョブは成功で終わる。CI は落ちない）:
   - 上記 Secret のどちらかが未設定のとき
   - fork 由来のイベント（PR 系は head リポジトリ、workflow_run は head_repository の full_name がこのリポジトリと違うとき）
-  - コメント系イベント（issue_comment / pull_request_review / pull_request_review_comment）で、投稿者の `author_association` が `OWNER` / `MEMBER` / `COLLABORATOR` のいずれでもないとき（ボット例外なし。octocov 等の結果は verify の `workflow_run` 通知で把握する）
-  - PR 以外の issue コメント（ジョブごと skip）。PR へのコメントは payload だけでは fork 判定できないため、`head_branch` / `head_sha` は `null` のまま送る（API 呼び出しも権限もなし）
+  - コメント系イベント（pull_request_review / pull_request_review_comment）で、投稿者の `author_association` が `OWNER` / `MEMBER` / `COLLABORATOR` のいずれでもないとき（ボット例外なし。octocov 等の結果は verify の `workflow_run` 通知で把握する）
+- 対象外: PR の会話欄に書いた普通のコメント（issue_comment）は通知しない。fork から来た PR へのコメントを安全に見分けられないため。あとで足す場合は、`pull-requests: read` で PR を調べて fork を除く形にし、別の PR で行う。
 - 手動実行（workflow_dispatch）は `event: "test"` のテスト通知を 1 通送る。送信の失敗（タイムアウト・HTTP エラー）で CI は落ちない。
 
 ## シークレットの扱い（fnox）
