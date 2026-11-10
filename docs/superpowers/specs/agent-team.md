@@ -43,23 +43,32 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - ラベルは `ready-for-agent`（人間が付ける）、`agent:working`（Grok Bot が付ける）、`needs-human`（エスカレーション時）の 3 つ
 - 「レビュー待ち」「修正待ち」「マージ待ち」は PR の Draft 状態・レビュー状態・CI 結果から Projects の組み込みワークフローで反映する
 
-## 停止・迷走の検知と対処
+## 見張り役と通知
 
-- ローカルの見張りデーモン（pitchfork で常駐、`~/.config/pelway-agent-notify/` に置く）が `t3 thread list --json` と `gh` を見て、次のどれかで `stalled` を Webhook 送信する
-  - スレッドが動作中のまま 45 分イベントがない
-  - 同じ Issue の修正が 3 回目に入った
-  - 同じ PR で CI が 2 回続けて失敗した
+エージェントの状態の通知は、見張り役 `pelway-agent-watch`（`crates/pelway-agent-watch`、pitchfork で常駐）が一元的に出す。エージェントごとのフック（OpenCode プラグイン、Codex / Claude の hooks）は使わない。
+
+- 30 秒ごとに `t3 thread list --json` を読み、状態が変わったスレッドだけ `t3 thread show` で詳しく見る
+- 送るイベント（すべて即時対応）
+  - `finished` / `failed` / `cancelled`: スレッドの実行が終わった
+  - `waiting`: 承認や入力の待ちが発生した
+  - `stalled`: 次のどれか。理由を `stall_reason` に入れる
+    - `no-activity`: 実行中のまま 45 分更新がない
+    - `ci-failed-twice`: `agent/` ブランチで verify が 2 回続けて失敗した（5 分ごとに `gh run list` で確かめる）
+- payload は `pelway.agent-watch/v1`。スレッド ID、ブランチ、`issue_number`（`agent/<番号>-` から取る）、`round`（スレッドの実行回数）、`report`（最後の返答が `キー: 値` 形式 5 行以内のときだけ、その本文）を含む
+- 同じ出来事は 1 回だけ送る。状態は `~/.local/state/pelway/agent-watch.json` に置く
+- 修正が何回目かは `round` で Grok Bot が判断する。修正を出す前に `round` が 4 以上なら（最初の実装 + 修正 3 回）、修正を出さずにエスカレーションする
+
+## 停止・迷走への対処
+
 - 1 回目の `stalled`: Grok Bot が状況を要約し、新しいスレッドでやり直させる
 - 2 回目の `stalled`: Issue に `needs-human` を付け、部屋で人間に知らせる
 - しきい値は `docs/agents/grokbot-runbook.md` で調整する
 
-## 通知
+## GitHub からの通知
 
-- 通知プラグインは自分の worktree 以外のセッションのイベントを `notify.sh` 起動前に捨てる
-- インストーラーは古いバージョンのプラグインを上書きする
-- payload に `issue_number` と `round` を含める
-- 即時対応するイベント: failed、waiting_permission、waiting_input、stalled、Request changes のレビュー、CI 失敗、マージ
-- 上記以外は Grok Bot が朝と夕方の 1 日 2 回のまとめにだけ反映する。部屋で聞かれたときはその場で答える
+- `notify-grokbot.yml` が送るのは、PR のクローズ（マージを含む）、レビューの投稿（OWNER / MEMBER / COLLABORATOR のもの）、verify の完了だけ
+- payload に `urgency` を付ける。`digest`（まとめにだけ反映）は verify の成功と、Approve のレビュー。それ以外は `immediate`
+- Grok Bot は `digest` を朝と夕方の 1 日 2 回のまとめにだけ反映する。部屋で聞かれたときはその場で答える
 
 ## レビュー担当の権限
 
@@ -73,7 +82,6 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 ## 導入の段階
 
 1. リポジトリ側: AGENTS.md・skill・Issue Form・ラベル・PR サイズ検査・ブランチ保護・エージェント用アカウント
-2. 通知側: プラグインの重複修正、payload の拡張、イベントの絞り込み
-3. 見張りデーモン
-4. Grok Bot の runbook とレビュー担当の sandbox
-5. 試運転: #59 と #62 を 800 行以下の積み重ね PR に分割する
+2. 見張り役と通知: 見張り役の常駐、旧来のフックの廃止、GitHub 通知の絞り込み
+3. Grok Bot の runbook とレビュー担当の sandbox
+4. 試運転: #59 と #62 を 800 行以下の積み重ね PR に分割する
