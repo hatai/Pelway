@@ -69,6 +69,15 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 - 一時的に無効化するには `HK=0` を付ける（例: `HK=0 git commit ...`）。hk の既定動作。
 - 初回の `hk` 実行は `hk.pkl` の `amends` URL から GitHub 経由で Pkl パッケージを取得するため**ネットワークが必要**（2回目以降はキャッシュ）。
 
+## CI（GitHub Actions）
+
+- `.github/workflows/verify.yml` が、`main` 向け Pull Request と手動実行（`workflow_dispatch`）で、ローカルと同じ `mise run verify` を GitHub-hosted runner（`ubuntu-24.04`）で実行する。
+- CI で実行するのは `mise install`（ツール導入）と `mise run verify`（一括確認）だけ。`mise bootstrap`（apt・sudo・podman）は使わない。ツールのバージョンは `mise.toml` / `mise.lock` に従う。
+- mise 本体は公式インストーラ（mise.run）で導入し、`MISE_VERSION` で 2026.11.5 に固定してインストール後にバージョンを検証している。`actions/checkout` はコミット sha でピン留め。
+- リモートキャッシュ（GitHub Actions cache・S3 等）はローカルの mbx と同じ方針で設定しない。CI のビルドはランナー内のローカルキャッシュのみで完結する。
+- この workflow に秘密は不要（`permissions: contents: read`）。`fnox-check` は `fnox list`（定義一覧の確認）のみで、秘密値の取得・表示はしない。
+- 2026-11-10 時点で GitHub 上での実際の run は未確認（ブランチの push・PR 作成の承認待ち。作業ログ: `docs/worklogs/2026-11-10-platform-pr-ci-r1.md`）。
+
 ## シークレットの扱い（fnox）
 
 - `fnox.toml` には**シークレットの名前と、秘密を含まないローカル開発用の既定値だけ**を置く。実際の秘密値（`value`）をこのファイルへ書かないこと。
