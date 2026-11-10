@@ -284,7 +284,9 @@ jactionlint は actionlint と同じ検査をするリポジトリピンの fork
 ## コミット
 
 - メッセージ: `fix(ci): drop issue_comment trigger and concurrency from gh-notify`
-- hk pre-commit の結果はコミット実行後に本節へ追記する。
+- コミット: `2feb077`（base `0e2d5b4` の上。6 files changed, 96 insertions(+), 82 deletions(-)）
+- hk pre-commit の結果（コミット時に自動発火）: **trailing_whitespace ✔ / newlines ✔**（対象は staged の `.github/workflows/notify-grokbot.yml` 1ファイル。cargo fmt / clippy / check は今回の変更が YAML・MD・sh・JSON のみのためか実行されず）
+- 事故記録（正直な記録）: pre-commit 起動時に mise が rust 1.96.0 の channel sync と self-update チェックを実行（"info: syncing channel updates"・"checking for self-update"。成分はすべて up to date で新規ダウンロード無し）。「mise WARN missing: rust@1.96.0」の警告も出たが、`mise.lock` は不変（コミット後の `git status --porcelain` が空で確認）。r1 の事故記録と同種の「サンクションドコマンド中の mise 副作用」であり、意図的なネット接続はしていないが通信の可能性は記録する。
 
 ## 未検証（直し1分も合格としない）
 
