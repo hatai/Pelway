@@ -72,7 +72,7 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 ## CI（GitHub Actions）
 
 - `.github/workflows/verify.yml` が、`main` 向け Pull Request と手動実行（`workflow_dispatch`）で、ローカルと同じ `mise run verify` を GitHub-hosted runner（`ubuntu-24.04`）で実行する。
-- CI で実行するのはツール導入（`mise install --locked` 相当）と `mise run verify`（一括確認）だけ。`mise bootstrap`（apt・sudo・podman）は使わない。ツールのバージョンは `mise.toml` / `mise.lock` に従う。
+- CI で実行するのはツール導入（`mise install --locked` 相当）と `mise run verify`（一括確認）に加え、クライアントのビルドに必要な Linux システムパッケージの導入である。verify / coverage の両ジョブで `apt-get` により `libfontconfig1-dev` を入れる（Ubuntu 24.04 では `libfontconfig-dev` を引く移行パッケージ。`fontconfig.pc` を提供する）。`mise bootstrap`（apt:podman・sudo）は使わない。ツールのバージョンは `mise.toml` / `mise.lock` に従う。
 - mise の導入は公式 Action（`jdx/mise-action`）で行う。`version: v2026.11.5`・`install_args: --locked`・`cache: false` を指定し、導入後にバージョンを検証している。mise-action のツールキャッシュは復元内容を `mise.lock` と突き合わせない（公式の注意）ため無効化し、ダウンロード用のキャッシュも足さない。Action 参照の sha 固定には GitHub 公式 lockfile（`.github/workflows/actions.lock`、担当が `gh actions-lock` で生成）を使う。workflow 側の参照は `actions/checkout@v4.2.2` と `jdx/mise-action@v2.4.4`。lockfile 上のコミットはそれぞれ `11bd71901bbe5b1630ceea73d27597364c9af683` と `c37c93293d6b742fc901e1406b8f764f6fb19dac`（2026-11-10 に GitHub API で公式タグと一致することを確認）。
 - リモートキャッシュ（GitHub Actions cache・S3 等）はローカルの mbx と同じ方針で設定しない。CI のビルドはランナー内のローカルキャッシュのみで完結する。
 - この workflow に秘密は不要（`permissions: contents: read`）。`fnox-check` は `fnox list`（定義一覧の確認）のみで、秘密値の取得・表示はしない。

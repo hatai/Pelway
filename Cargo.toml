@@ -1,6 +1,8 @@
 # Pelway の Cargo ワークスペース。
-# 現時点のメンバーは開発環境の確認用スケルトンだけで、製品機能のコードは含まない。
-# 位置づけと手順は docs/dev-environment.md を参照。
+# メンバーは crates/* の 3 クレート: pelway-contract（承認 API の契約型）、
+# pelway-at-rest（保存時の分割 AES-256-GCM コンテナ）、pelway-dev-smoke（開発環境の
+# 確認用スケルトン）。contract と at-rest は製品機能の下書きで、確定スキーマではない。
+# 開発環境の位置づけと手順は docs/dev-environment.md を参照。
 
 [workspace]
 resolver = "3"
