@@ -1,0 +1,13 @@
+# octocov の設定（k1LoW/octocov）。
+# 実行は .github/workflows/verify.yml の coverage ジョブから（PR コメントで増減を表示）。
+# 比較用レポートの保存先は GitHub Actions の artifact に限る（S3・GitHub Actions cache は使わない）。
+
+coverage:
+  paths:
+    - lcov.info
+
+diff:
+  storage:
+    artifacts:
+      # base 側（main や前回 run）の artifact がまだ無い場合は増減なしとして続行する。
+      if-no-artifact: pass

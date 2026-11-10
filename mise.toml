@@ -14,13 +14,22 @@ lockfile = true
 [tools]
 # rust は mise 経由で rustup のツールチェーンを固定する。
 # mr_boxington = true で cargo を mbx（Cargo ビルド共有キャッシュ）経由にする。
-# components で rustfmt・clippy を明示し、最小構成のツールチェーンでも
-# fmt・lint が再現されるようにする（toolchain-check タスクが存在検査する）。
-rust = { version = "1.96.0", mr_boxington = true, components = ["rustfmt", "clippy"] }
+# components で rustfmt・clippy に加え CI のカバレッジ計測（cargo-llvm-cov）が
+# 必要とする llvm-tools-preview を明示し、最小構成のツールチェーンでも
+# fmt・lint・coverage が再現されるようにする（toolchain-check タスクが存在検査する）。
+rust = { version = "1.96.0", mr_boxington = true, components = ["rustfmt", "clippy", "llvm-tools-preview"] }
 mr-boxington = "1.29.2"
 hk = "2.11.1"
 fnox = "1.47.0"
 pitchfork = "2.33.1"
+# CI（GitHub Actions）の workflow 静的 lint。担当が公式リリースを確認の上でピン。
+# 出典: https://github.com/jdx/jactionlint/releases/latest （2026-11-05 公開の v2.5.0）
+jactionlint = "2.5.0"
+# CI のカバレッジ増減表示（octocov）。担当が公式リリースを確認の上でピン。
+# 出典: https://github.com/k1LoW/octocov/releases/tag/v0.83.5 （公開 2026-11-05）
+# 短縮名 octocov は mise レジストリに無い（tool not found）。octocov 向けの packslip
+# バックエンドも無いため、mise.lock に URL と checksum が残る aqua バックエンドで宣言する。
+"aqua:k1LoW/octocov" = "0.83.5"
 
 # コンテナ実行環境（非 Docker・要件は docs/dev-environment.md）。
 # rootless Podman 一式を apt から導入する宣言。適用は明示的な bootstrap 実行時だけ
@@ -64,12 +73,22 @@ description = "デバッグビルドを作る（--locked）"
 run = "cargo build --workspace --locked"
 
 [tasks.toolchain-check]
-description = "rustfmt・cargo-clippy 成分の存在確認（minimal 構成だとここで失敗する）"
+description = "rustfmt・cargo-clippy・llvm-tools-preview 成分の存在確認（欠けていれば失敗し、暗黙の自動ダウンロードには頼らない）"
 run = """
 rustc --version
 cargo --version
 rustfmt --version
 cargo clippy --version
+sysroot=$(rustc --print sysroot)
+host=$(rustc -vV | awk '/^host:/{print $2}')
+profdata="$sysroot/lib/rustlib/$host/bin/llvm-profdata"
+cov="$sysroot/lib/rustlib/$host/bin/llvm-cov"
+if [ ! -x "$profdata" ] || [ ! -x "$cov" ]; then
+  echo "llvm-tools-preview is missing from the project toolchain (expected $profdata and $cov). Declare it in mise.toml rust.components and run mise install --locked. Do not rely on implicit rustup auto-download." >&2
+  exit 1
+fi
+"$profdata" --version
+"$cov" --version
 """
 
 [tasks.hk-validate]
