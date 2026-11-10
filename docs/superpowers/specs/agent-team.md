@@ -24,7 +24,8 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 2. 実装スレッドは skill `implement-issue` に従い、`pelway-dev` の名義でブランチ `agent/<issue番号>-<slug>` に push し、Draft PR（本文に `Closes #<issue番号>`）を作る
 3. レビュースレッドは skill `review-pr` に従い、PR に Approve か Request changes を投稿する
 4. Request changes なら、Grok Bot は同じ実装スレッドに `t3 thread send` で修正を指示する。同じスレッドでの修正は 3 回まで。超えたら要約を渡して新しいスレッドにする
-5. Approve と CI 成功がそろったら、人間が Approve してマージする。マージ後、worktree は自動で削除する
+5. Approve されたら、Grok Bot が実装スレッドに知らせ、実装担当が `pr ready` で Draft を解除する（レビュー担当の App には Draft を解除する権限がない）
+6. CI 成功がそろったら、人間が Approve してマージする。マージ後、worktree は自動で削除する
 
 ## 制約
 

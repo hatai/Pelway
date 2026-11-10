@@ -13,6 +13,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 - GitHub への操作はすべて `scripts/agent-gh dev ...`、git の commit と push は `scripts/agent-gh dev git ...` で行う。素の `gh` と素の `git push` は使わない。素の `gh` で作った PR は作成者が hatai になり、hatai が Approve できないため、ブランチ保護を迂回しないとマージできない。素の `git push` は hatai の SSH 鍵で push される。
 - ネットワークは `scripts/agent-gh dev` 経由の GitHub だけ使う。`gh search repos` / `gh search code` もここに含まれる。
 - worktree の外に書き込まない。`rm -rf` はしない。main に push しない。PR をマージしない。
+- コマンドの終了コードを確かめる。失敗したコマンドの結果を成功と報告しない。
 - 迷っても質問で止まらない。判断とその理由は PR 本文か Issue のコメントに書いて進める。
 - 止まってよいのは下の「止まる条件」に当てはまるときだけ。止まるときは必ず Issue にコメントし、`needs-human` ラベルを付ける。
 
@@ -92,7 +93,23 @@ EOF
 
 修正依頼の場合は PR を作り直さない。push したあと `scripts/agent-gh dev pr edit` で本文の「レビューと QA」と「対象」の sha を更新する。
 
-### 7. 終わりの報告
+PR を作ったら、実在することを確かめる。
+
+```bash
+scripts/agent-gh dev pr view <PR 番号> --json number,isDraft,author --jq '{number, isDraft, author: .author.login}'
+```
+
+`author` が `app/pelway-dev` でなければ、止まる条件と同じ扱いにする。
+
+### 7. レビューで Approve されたら Ready for review にする
+
+Grok Bot から「Approve された」と届いたら、次を実行する。レビュー担当の App には Draft を解除する権限がないため、実装担当が行う。
+
+```bash
+scripts/agent-gh dev pr ready <PR 番号>
+```
+
+### 8. 終わりの報告
 
 最後の返答は次の 4 行だけにする。Grok Bot はこの 4 行だけを読む。
 
