@@ -41,9 +41,10 @@ jobs:
       # libfontconfig1-dev を入れる（noble では libfontconfig-dev を引く移行パッケージ）。
       # mise bootstrap（apt:podman）は docs/dev-environment.md の CI 方針どおり使わない。
       - name: Install Linux native dependencies for client builds
+        # runner の名前解決が一時的に失敗することがあるので、apt に取得の再試行をさせる。
         run: |
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libfontconfig1-dev
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends libfontconfig1-dev
 
       # mise 公式 Action で mise 本体の導入とツールの導入を行う（curl / インストーラ不使用）。
       # - version: mise 本体を 2026.11.5 に固定（mise.toml の min_version を満たす検証済みバージョン）
@@ -110,9 +111,10 @@ jobs:
       # libfontconfig1-dev を入れる（noble では libfontconfig-dev を引く移行パッケージ）。
       # mise bootstrap（apt:podman）は docs/dev-environment.md の CI 方針どおり使わない。
       - name: Install Linux native dependencies for client builds
+        # runner の名前解決が一時的に失敗することがあるので、apt に取得の再試行をさせる。
         run: |
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libfontconfig1-dev
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends libfontconfig1-dev
 
       # verify ジョブと同じ導入（mise 公式 Action・キャッシュなし・--locked）。
       # rust 1.96.0 に llvm-tools-preview 成分が入る（mise.toml の components で宣言）。

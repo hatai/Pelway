@@ -3486,6 +3486,10 @@ dependencies = [
 [[package]]
 name = "pelway-client-core"
 version = "0.0.0"
+dependencies = [
+ "pelway-contract",
+ "serde_json",
+]
 
 [[package]]
 name = "pelway-client-ui"

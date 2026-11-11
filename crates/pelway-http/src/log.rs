@@ -181,19 +181,23 @@ pub enum Method {
     Other,
 }
 
-/// コメント書き手の種別（`x-pelway-member-kind`）。
+/// コメント書き手の種別（`x-pelway-member-kind`。仕様 04 §2 の 4 値）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActorKind {
     Human,
-    Ai,
+    Bot,
+    ExternalAgent,
+    ExternalTool,
 }
 
 impl From<MemberKind> for ActorKind {
     fn from(kind: MemberKind) -> Self {
         match kind {
             MemberKind::Human => Self::Human,
-            MemberKind::Ai => Self::Ai,
+            MemberKind::Bot => Self::Bot,
+            MemberKind::ExternalAgent => Self::ExternalAgent,
+            MemberKind::ExternalTool => Self::ExternalTool,
         }
     }
 }
