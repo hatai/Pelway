@@ -94,11 +94,33 @@ UI担当の[input/ui.md](../sources/v0.6/fixed/pelway-technical-docs/input/ui.md
 | 非同期/HTTP | tokio、axum、tower | actix-webも比較可能。Rust共通型とmiddlewareで認証・traceを統一する案 |
 | DB | PostgreSQL＋sqlx | SQLite serverは部品が少ないが並行処理と将来の会社分離を別検証。今回は既存Postgres方針を維持 |
 | client保存 | rusqlite / IndexedDB adapter | SQLiteをbrowserへ無理に同じ実装で持ち込まない |
-| full text | Postgresの権限付き検索を入口とし、日本語tokenizer/拡張は未選定 | pg_bigm、Tantivy/Linderaは比較候補。初版で無断導入しない |
+| full text | Postgresの権限付き検索を入口とし、PGroonga（TokenBigram＋NormalizerNFKC）を第一候補とする | pg_bigmと合成データで比べてから正式に決める。Tantivy/LinderaはAI検索の補助indexが必要になったときの将来候補。[調査](../../../research/japanese-full-text-search.md) |
 | RAG | 初版必須ではない。必要時に国内モデル＋pgvectorを比較 | wiki/Q&A自動生成は範囲外。外部embeddingへ自動接続しない |
 | MCP | rmcpを条件付き依存採用案 | protocol実装を流用し、業務承認やsandboxはPelway側 |
 | LLM adapter | llama.cppの事前取得modelを第一候補、rigは必要なら小範囲 | LangGraph/OpenHands/Gooseは参考。全runtimeを組み込まない |
-| 観測 | tracingのローカル出力 | OpenTelemetryは将来の相互運用候補。外部exporterや自動設定を初期有効にしない |
+| 観測 | tracingのローカル出力。承認・開始資格・結果照会の各段階に同じtrace idを最初から付ける | OpenTelemetryは将来の相互運用候補。外部exporterや自動設定を初期有効にしない |
+
+<a id="調査を受けた採否"></a>
+## 調査を受けた採否
+
+[技術調査](../../../research/README.md)と[競合調査](../../../competitors.md)を受けた採否。「MVP前に検証」は採用の決定ではなく、合成データ・局所試作で確かめてから採否を決める項目。
+
+| 領域 | 採否 | 内容 |
+|---|---|---|
+| 非同期実行 | 採用：DBキュー | `FOR UPDATE SKIP LOCKED`とleaseの定番パターンに限る。止まったworkflowの再開は状態tableから判断する。Temporal・Restateは採らない。River（`riverqueue`）とMVP前に比較する |
+| server間の通知 | 採用：`LISTEN/NOTIFY` | 起こす合図だけに使い、正本は`seq`。合図を取りこぼしても定期の追いつき検索で補う。Redisは入れない |
+| テナント分離 | 採用：Row Level Security | `workspace_id`の複合外部キーとアプリの絞り込みに加える二重の守り。[ADR 0005](../../../adr/0005-postgres-row-level-security.md) |
+| 全文検索 | MVP前に検証 | PGroonga第一候補、pg_bigmと比較。WAL・復元、rootless Podman、英字/コードの部分一致、表記ゆれを試す |
+| サンドボックス | MVP前に検証 | gVisor（runsc）とcrun＋libkrunを、rootless Podmanとの組み合わせ・起動時間・syscall互換・egress拒否の維持で測る |
+| 添付の保存 | 採用：`object_store`経由 | 保存先はローカルのまま、S3互換interfaceで扱う |
+| ローカルLLM・埋め込み | MVP前に検証 | llama.cpp＋Apache-2.0の日本語model（LLM-jp-4、Qwen3-Swallow）、ruri-v3。各modelのLICENSE全文を確認する |
+| MCP | MVP前に検証 | rmcp。tool annotationsは信頼しない（[ADR 0004](../../../adr/0004-declared-action-tiers.md)） |
+| 認証 | MVP前に検証 | webauthn-rs（passkey）とopenidconnect-rs（顧客IdP）をaxumに組み込む。Ory Kratos/Hydraは将来候補。Keto・OpenFGA・SpiceDBは12の外部権限サービス不要の方針により採らない |
+| クライアント | MVP前に検証 | A1にTauri＋React（Webと画面共有）を比較候補として加える。Slint issue #3867・#10861の再現、ts-rsまたはspecta、wasm-opt |
+| バックアップ | MVP前に検証 | pgBackRest。保存期間は件数指定か別の削除処理で14日上限を守る。2.59.3以上 |
+| 監査 | MVP前に検証 | `prev_hash`の鎖を残し、最新hashと行数に署名したcheckpointをDB管理者と別の場所へ保存する |
+| 外部エージェント | 採らない（MVP） | ACPによるClaude Code・Codex等の参加は国内完結の前提と衝突する。選択外部連携の枠で将来候補 |
+| 将来の候補 | 採否は将来 | OpenBao、Cedar、Ory Kratos、LiveKit、OpenMLS、YomiToku（商用ライセンスが必要）、NDLOCR-Lite、PaddleOCR、pgvector、OpenTelemetry Collector |
 
 直接依存の許諾は[09の対応表](09-sources.md)と[技術照合記録](../sources/v0.6/fixed/pelway-technical-docs/reviews/technical-license-ledger-v0.1.md)に示す（2026-11-08、可変ブランチ/最新版の観測値であり採用版ではない）。rmcpはApache-2.0への移行中でMIT部分が残る。全推移依存・NOTICE・SBOMは未作成、固定版の条文/脆弱性確認も未了。適切なOSSの採用は進めるが、安全境界をOSSの既定動作へ任せない。
 

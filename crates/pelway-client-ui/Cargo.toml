@@ -1,6 +1,6 @@
 [package]
 # Pelway デスクトップクライアントの UI 骨組み。段階B-1: Slint 1.18.1 に依存し、
-# build.rs で ui/main.slint をコンパイルする（docs/worklog/client.md 第9枠）。
+# build.rs で ui/main.slint をコンパイルする（docs/worklogs/client.md 第9枠）。
 # Slint のライセンス（U05）は未決のため、表示の置き場所はまだ決めていない。
 name = "pelway-client-ui"
 version = "0.0.0"
