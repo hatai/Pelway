@@ -48,7 +48,7 @@ t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree m
 
 ### レビューを始める
 
-実装スレッドの `finished` の `report` に `pr:` があり、手順 5 の確認が済み、レビューの枠が空いているとき。
+実装スレッドの `finished` の `report` に `pr:` があり、手順 5 の確認が済み、PR の必須チェック（`mise run verify` と `pr-size`）が終わっていて、レビューの枠が空いているとき。チェックがまだ動いていれば、その PR の verify の完了（`pelway.github-notify/v2` の `workflow_run`）を待ってから始める。
 
 レビュースレッドを次の内容で立てる（`t3 thread start` の形で書くが、権限を指定するため実際は MCP で立てる）。
 
@@ -82,7 +82,7 @@ PR を Projects ボードに載せる（ボードの組み込みワークフロ�
 |---|---|
 | `approve` | 実装スレッドに「PR #<M> は Approve された。skill implement-issue の手順 7 に従う。」を送る |
 | `request-changes` | 実装スレッドの `round` が 4 以上なら 6 のエスカレーション。3 以下なら「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を送る |
-| `failed` | 新しいレビュースレッドを 1 回だけ立て直す。2 回目なら 6 のエスカレーション |
+| `failed` | `error: checks pending` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 6 のエスカレーション |
 
 実装スレッドは `branch` の `agent/<N>-` から Issue 番号を、`thread_id` から送り先を取る。レビュースレッドから実装スレッドを探すときは、PR のブランチ名と同じ `branch` を持つスレッドを `t3 thread list` から選ぶ。
 

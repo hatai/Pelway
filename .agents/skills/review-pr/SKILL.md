@@ -43,14 +43,13 @@ scripts/agent-gh review pr view <N> --json files --jq '.files[].path'
 
 PR で変わっていないファイルは worktree（main）の版を読めばよい。
 
-PR のチェックが終わるのを待ち、結果を読む。
+PR のチェックの結果を読む。待たない（Grok Bot はチェックが終わってからレビューを頼む）。
 
 ```bash
-scripts/agent-gh review pr checks <N> --required --watch --interval 30
 scripts/agent-gh review pr checks <N> --required --json name,bucket
 ```
 
-`mise run verify` と `pr-size` の `bucket` が `pass` なら pass、`fail` なら fail。どちらかが `pending` のまま終わったとき、または見つからないときは、`verdict: failed` で報告する。
+`mise run verify` と `pr-size` の `bucket` が `pass` なら pass、`fail` なら fail。どちらかが `pending` か、見つからないときは、レビューを投稿せずに `verdict: failed`、`error: checks pending` で報告する。
 
 ### 3. 指摘を 2 種類に分ける
 
