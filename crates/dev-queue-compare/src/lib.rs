@@ -101,7 +101,9 @@ pub async fn notify_wake_in_tx(tx: &mut PgConnection) -> sqlx::Result<()> {
 
 /// 実行可能なジョブを 1 件引き当て、lease を取る。`FOR UPDATE SKIP LOCKED` により、
 /// 他の worker が処理中の行は飛ぶ。`queued` で `run_at` を過ぎた行に加え、`running` の
-/// まま lease が切れた行（worker が停止したとき）も回収する。該当がなければ `None`。
+/// まま lease が切れた行（worker が停止したとき）も回収する。このとき `max_attempts`
+/// に達している行は `dead` にして再取得しない（`fail` 経由と同じ上限。worker の停止を
+/// 繰り返しても試行回数が上限を超えて増えないようにする）。該当がなければ `None`。
 ///
 /// # Errors
 ///
@@ -111,7 +113,17 @@ where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
     let claimed = sqlx::query_as::<_, (i64, String, Json, i32, i32)>(
-        "UPDATE devq_queue_job AS j
+        "WITH reaped AS (\
+             UPDATE devq_queue_job AS r \
+             SET state = 'dead', lease_until = NULL, updated_at = now() \
+             WHERE r.id IN (\
+                 SELECT id FROM devq_queue_job \
+                 WHERE state = 'running' AND lease_until IS NOT NULL AND lease_until < now() \
+                   AND attempts >= max_attempts \
+                 FOR UPDATE SKIP LOCKED\
+             ) \
+         ) \
+         UPDATE devq_queue_job AS j
          SET state = 'running',
              attempts = j.attempts + 1,
              lease_until = now() + make_interval(secs => $1::double precision),
@@ -119,7 +131,8 @@ where
          WHERE j.id IN (
              SELECT id FROM devq_queue_job
              WHERE (state = 'queued' AND run_at <= now())
-                OR (state = 'running' AND lease_until IS NOT NULL AND lease_until < now())
+                OR (state = 'running' AND lease_until IS NOT NULL AND lease_until < now()
+                    AND attempts < max_attempts)
              ORDER BY id
              LIMIT 1
              FOR UPDATE SKIP LOCKED

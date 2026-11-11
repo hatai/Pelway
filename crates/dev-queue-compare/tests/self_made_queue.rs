@@ -44,6 +44,17 @@ async fn enqueue(pool: &PgPool, kind: &str, max_attempts: i32) -> i64 {
     id
 }
 
+/// worker が fail/complete を呼ばないまま停止したことを模擬する（lease を過去に戻す）。
+async fn backdate_lease(pool: &PgPool, id: i64) {
+    sqlx::query(
+        "UPDATE devq_queue_job SET lease_until = now() - interval '1 second' WHERE id = $1",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 /// 業務行（状態・監査・outbox）とジョブを 1 トランザクションに載せる。
 async fn write_all(pool: &PgPool) -> (i64, i64, Transaction<'_, Postgres>) {
     let mut tx = pool.begin().await.unwrap();
@@ -188,13 +199,7 @@ async fn lease_expiry_retry_cap_and_stop_requests() {
         .expect("最初の引き当て");
     assert_eq!((first.id, first.attempts), (id, 1));
     // worker が停止したことにする: lease を過去に戻す（検証だけが行う操作）。
-    sqlx::query(
-        "UPDATE devq_queue_job SET lease_until = now() - interval '1 second' WHERE id = $1",
-    )
-    .bind(id)
-    .execute(&db.pool)
-    .await
-    .unwrap();
+    backdate_lease(&db.pool, id).await;
     let second = dequeue(&db.pool, 60)
         .await
         .unwrap()
@@ -238,6 +243,43 @@ async fn lease_expiry_retry_cap_and_stop_requests() {
     );
     mark_stopped(&db.pool, running_id).await.unwrap();
     assert_eq!(state(&db.pool, running_id).await, "cancelled");
+    db.dispose().await;
+}
+
+/// AC2（レビュー #107 の must-fix）: lease 期限切れの回収でも再実行上限を適用する。
+/// 上限に達した期限切れ行は dead になり、再取得されず、別の実行可能行は引き当てる。
+#[tokio::test]
+async fn lease_expiry_reap_applies_max_attempts_cap() {
+    if skip() {
+        return;
+    }
+    let db = TestDb::new().await.unwrap();
+
+    // max_attempts=1 のジョブを 1 回実行し、fail を呼ばないまま停止する。
+    let capped_id = enqueue(&db.pool, "reap_capped", 1).await;
+    let first = dequeue(&db.pool, 60)
+        .await
+        .unwrap()
+        .expect("最初の引き当て");
+    assert_eq!(
+        (first.id, first.attempts, first.max_attempts),
+        (capped_id, 1, 1)
+    );
+    // 別の実行可能ジョブを置いてから、停止を模擬する。
+    let runnable_id = enqueue(&db.pool, "reap_next", 3).await;
+    backdate_lease(&db.pool, capped_id).await;
+
+    let claimed = dequeue(&db.pool, 60)
+        .await
+        .unwrap()
+        .expect("上限到達行は飛ばして別の実行可能行を引き当てる");
+    assert_eq!(claimed.id, runnable_id, "上限に達した行は再取得しない");
+    assert_eq!(claimed.attempts, 1);
+    assert_eq!(
+        state(&db.pool, capped_id).await,
+        "dead",
+        "回収時に上限を適用して dead にする"
+    );
     db.dispose().await;
 }
 
