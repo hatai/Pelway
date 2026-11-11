@@ -38,3 +38,17 @@ pub enum ActionKind {
     ToolRead,
     ToolWrite,
 }
+
+impl ActionKind {
+    /// ワイヤ上の値（serde の `snake_case` タグと同じ 4 値）。
+    /// `snapshot_hash` の種類タグなど、素の文字列として hash に入れるために使う。
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CustomerSend => "customer_send",
+            Self::AgentHandoff => "agent_handoff",
+            Self::ToolRead => "tool_read",
+            Self::ToolWrite => "tool_write",
+        }
+    }
+}

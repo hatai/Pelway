@@ -27,9 +27,9 @@ use crate::ids::{
     CardId, ChannelId, CommentId, IdempotencyKey, MemberId, SimulatedSendId, WorkspaceId,
 };
 use crate::member::MemberKind;
-use crate::snapshot::compute_snapshot_hash;
+use crate::snapshot::{ActionPayload, compute_snapshot_hash};
 use crate::store::TsMs;
-use crate::task::{ActionKind, TaskState};
+use crate::task::TaskState;
 
 /// 新しい承認カードの入力（合成データのみ）。
 #[derive(Debug, Clone)]
@@ -37,11 +37,8 @@ pub struct NewCard {
     pub workspace_id: WorkspaceId,
     pub channel_id: ChannelId,
     pub card_id: CardId,
-    /// 固定 payload の hash。`snapshot_hash` はこれとコメントから計算する。
-    pub payload_hash: String,
-    pub action_kind: ActionKind,
-    pub recipient: String,
-    pub body: String,
+    /// 正規化した操作の中身。`snapshot_hash` はこれだけから計算する。
+    pub payload: ActionPayload,
     /// 依頼した人（「自分の依頼」タブの判定）。
     pub requester: MemberId,
     /// 誰の判断待ちか（承認者。`AgentHandoff` では引き継ぎ先の担当）。
@@ -56,7 +53,7 @@ pub struct SimulatedSendRecord {
     pub simulated_send_id: SimulatedSendId,
     pub card_id: CardId,
     pub card_version_approved: u64,
-    /// 承認された `snapshot_hash`（承認時点のコメントを含む）。
+    /// 承認された `snapshot_hash`（正規化した payload の hash。コメントは含まない）。
     pub snapshot_hash: String,
 }
 
@@ -137,17 +134,14 @@ impl ApprovalLedger {
         if self.cards.contains_key(&new.card_id) {
             return None;
         }
-        let snapshot_hash = compute_snapshot_hash(&new.payload_hash, &[]);
+        let snapshot_hash = compute_snapshot_hash(&new.payload);
         let card = ApprovalCard {
             workspace_id: new.workspace_id,
             channel_id: new.channel_id,
             card_id: new.card_id.clone(),
             card_version: 1,
-            payload_hash: new.payload_hash,
+            payload: new.payload,
             snapshot_hash,
-            action_kind: new.action_kind,
-            recipient: new.recipient,
-            body: new.body,
             state: TaskState::AwaitingSendApproval,
             requester: new.requester,
             decider: new.decider,
@@ -177,8 +171,7 @@ impl ApprovalLedger {
     pub fn revise_snapshot(
         &mut self,
         card_id: &CardId,
-        payload_hash: String,
-        body: String,
+        payload: ActionPayload,
     ) -> Result<u64, ApproveError> {
         let card = self
             .cards
@@ -187,20 +180,20 @@ impl ApprovalLedger {
         if card.state != TaskState::AwaitingSendApproval {
             return Err(ApproveError::NotAwaitingApproval { state: card.state });
         }
-        card.payload_hash = payload_hash;
-        card.snapshot_hash = compute_snapshot_hash(&card.payload_hash, &card.comments);
-        card.body = body;
+        card.payload = payload;
+        card.snapshot_hash = compute_snapshot_hash(&card.payload);
         card.card_version += 1;
         Ok(card.card_version)
     }
 
-    /// コメントを保存する。**状態も `card_version` も変えず、送信もしない。**
-    /// コメントは `snapshot_hash` に含まれるので、保存後の新しい `snapshot_hash` を返す。
+    /// コメントを保存する。**状態も `card_version` も `snapshot_hash` も変えず、
+    /// 送信もしない。**コメントは `snapshot_hash` に含まれないため（#87）、
+    /// 保存前の hash での承認はそのまま有効。
     ///
     /// 送信承認待ちでないカード（送信中・送信済み等）への保存は
-    /// [`CommentError::NotAwaitingApproval`] で断る。コメントで `snapshot_hash` が変わると、
-    /// 予約・疑似送信の記録が持つ予約時の hash と食い違うため。本文の内容（空白・上限超過）
-    /// より先に状態を確かめ、承認待ちでなければすべて 409 にする（リード決定 16:11）。
+    /// [`CommentError::NotAwaitingApproval`] で断る。承認が確定したカードの
+    /// 議論欄を後から変えないため。本文の内容（空白・上限超過）より先に状態を
+    /// 確かめ、承認待ちでなければすべて 409 にする（リード決定 16:11）。
     ///
     /// # Errors
     /// カードが無い場合。カードが送信承認待ちでない場合
@@ -228,7 +221,6 @@ impl ApprovalLedger {
             member_kind,
             body: req.body,
         });
-        card.snapshot_hash = compute_snapshot_hash(&card.payload_hash, &card.comments);
         Ok(CommentSaved {
             card_id: card.card_id.clone(),
             comment_id,
@@ -382,9 +374,27 @@ impl ApprovalLedger {
 mod tests {
     use super::*;
     use crate::approval::{COMMENT_MAX_CHARS, comment_len};
+    use crate::task::ActionKind;
 
-    const PAYLOAD_V1: &str = "sha256:synthetic-payload-v1";
-    const PAYLOAD_V2: &str = "sha256:synthetic-payload-v2";
+    fn payload() -> ActionPayload {
+        ActionPayload {
+            action_kind: ActionKind::CustomerSend,
+            recipient: "customer@example.invalid".to_owned(),
+            body: "合成データの本文\n".to_owned(),
+            attachments: vec!["sha256:att-1".to_owned()],
+            account: "acct-cw-1".to_owned(),
+            scope: vec!["tickets:write".to_owned()],
+        }
+    }
+
+    /// `payload()` と内容が違う改訂版（宛先と本文を変える）。
+    fn payload_v2() -> ActionPayload {
+        ActionPayload {
+            recipient: "other@example.invalid".to_owned(),
+            body: "改訂後の本文".to_owned(),
+            ..payload()
+        }
+    }
 
     fn key(s: &str) -> IdempotencyKey {
         IdempotencyKey::new(format!("test-key-{s}-000000")).expect("valid key")
@@ -395,10 +405,7 @@ mod tests {
             workspace_id: "ws-synthetic".into(),
             channel_id: "ch-synthetic".into(),
             card_id: id.into(),
-            payload_hash: PAYLOAD_V1.to_owned(),
-            action_kind: ActionKind::CustomerSend,
-            recipient: "customer@example.invalid".to_owned(),
-            body: "合成データの本文".to_owned(),
+            payload: payload(),
             requester: "m-human-1".into(),
             decider: "m-human-1".into(),
             deadline: None,
@@ -459,7 +466,7 @@ mod tests {
         assert_eq!(card.state, TaskState::AwaitingSendApproval);
         assert!(card.simulated_send_id.is_none());
         assert!(ledger.send_log().is_empty());
-        assert_eq!(card.snapshot_hash, compute_snapshot_hash(PAYLOAD_V1, &[]));
+        assert_eq!(card.snapshot_hash, compute_snapshot_hash(&payload()));
     }
 
     #[test]
@@ -487,43 +494,33 @@ mod tests {
 
     // ---- コメントと snapshot_hash ----
 
+    // #87 の受け入れ条件: コメントは snapshot_hash に含まれない。
     #[test]
-    fn comment_changes_snapshot_hash_but_not_version() {
+    fn comment_keeps_snapshot_hash_and_version() {
         let mut ledger = ledger_with_card("card-1");
         let before = hash_of(&ledger, "card-1");
         let saved = comment(&mut ledger, "card-1", "宛先を確認しました");
         assert_eq!(saved.card_version, 1);
-        assert_ne!(saved.snapshot_hash, before);
+        assert_eq!(saved.snapshot_hash, before);
         assert_eq!(saved.snapshot_hash, hash_of(&ledger, "card-1"));
         let saved2 = comment(&mut ledger, "card-1", "宛先を確認しました");
-        // 同じ本文でも別のコメントなので hash は変わる。
-        assert_ne!(saved2.snapshot_hash, saved.snapshot_hash);
+        // 同じ本文の別コメントでも hash は同じまま。
+        assert_eq!(saved2.snapshot_hash, before);
         assert_eq!(saved2.card_version, 1);
     }
 
+    // #87 の主訴求: コメントを書くだけで承認が無効にならない。
     #[test]
-    fn approve_with_pre_comment_hash_is_rejected_and_returned_hash_succeeds() {
+    fn approve_with_pre_comment_hash_succeeds_after_comments() {
         let mut ledger = ledger_with_card("card-1");
         let pre = hash_of(&ledger, "card-1");
-        let saved = comment(&mut ledger, "card-1", "本文に追記してから送って");
-        // コメント前の画面のまま承認：拒否、送信なし、キーは記録しない。
-        let stale = ledger.approve(approve_req("card-1", 1, &pre, "a"));
-        assert_eq!(stale, Err(ApproveError::SnapshotMismatch));
-        assert_eq!(stale.unwrap_err().http_status(), 409);
-        assert!(ledger.send_log().is_empty());
-        assert!(ledger.idempotency_state(&key("a")).is_none());
-        // コメント保存の応答の値で承認：成功。
-        let out = ledger
-            .approve(approve_req(
-                "card-1",
-                saved.card_version,
-                &saved.snapshot_hash,
-                "b",
-            ))
-            .unwrap();
+        comment(&mut ledger, "card-1", "本文に追記してから送って");
+        comment(&mut ledger, "card-1", "宛先も確認済み");
+        // コメント前の画面の hash のまま承認できる。
+        let out = ledger.approve(approve_req("card-1", 1, &pre, "a")).unwrap();
         assert_eq!(out.state, TaskState::SentAwaitingReply);
         assert_eq!(ledger.send_log().len(), 1);
-        assert_eq!(ledger.send_log()[0].snapshot_hash, saved.snapshot_hash);
+        assert_eq!(ledger.send_log()[0].snapshot_hash, pre);
     }
 
     #[test]
@@ -724,7 +721,7 @@ mod tests {
     fn version_mismatch_is_rejected_and_sends_nothing() {
         let mut ledger = ledger_with_card("card-1");
         assert_eq!(
-            ledger.revise_snapshot(&"card-1".into(), PAYLOAD_V2.to_owned(), "改訂".to_owned()),
+            ledger.revise_snapshot(&"card-1".into(), payload_v2()),
             Ok(2)
         );
         let h = hash_of(&ledger, "card-1");
@@ -745,19 +742,36 @@ mod tests {
         );
     }
 
+    // #87 の受け入れ条件: hash の対象は正規化した payload だけ。
     #[test]
-    fn revise_keeps_comments_in_snapshot_hash() {
+    fn revise_changes_snapshot_hash_only_when_payload_changes() {
         let mut ledger = ledger_with_card("card-1");
         comment(&mut ledger, "card-1", "メモ");
+        let before = hash_of(&ledger, "card-1");
+        // 内容の違う payload への改訂: hash が変わり、版も上がる。
         ledger
-            .revise_snapshot(&"card-1".into(), PAYLOAD_V2.to_owned(), "改訂".to_owned())
+            .revise_snapshot(&"card-1".into(), payload_v2())
             .unwrap();
         let card = ledger.card(&"card-1".into()).unwrap();
-        assert_eq!(
-            card.snapshot_hash,
-            compute_snapshot_hash(PAYLOAD_V2, &card.comments)
-        );
-        assert_ne!(card.snapshot_hash, compute_snapshot_hash(PAYLOAD_V2, &[]));
+        assert_eq!(card.snapshot_hash, compute_snapshot_hash(&card.payload));
+        assert_ne!(card.snapshot_hash, before);
+        assert_eq!(card.card_version, 2);
+    }
+
+    // #87 の受け入れ条件: 同じ意味の payload（正規化で同一）は同じ hash。
+    #[test]
+    fn revise_to_equivalent_payload_keeps_hash_but_bumps_version() {
+        let mut ledger = ledger_with_card("card-1");
+        let before = hash_of(&ledger, "card-1");
+        // 本文の改行コードだけが違う（同じ意味の）payload への改訂。
+        let mut equivalent = payload();
+        equivalent.body = "合成データの本文\r\n".to_owned();
+        ledger
+            .revise_snapshot(&"card-1".into(), equivalent)
+            .unwrap();
+        let card = ledger.card(&"card-1".into()).unwrap();
+        assert_eq!(card.snapshot_hash, before);
+        assert_eq!(card.card_version, 2);
     }
 
     #[test]
@@ -997,11 +1011,8 @@ mod tests {
     fn duplicate_card_id_is_refused() {
         let mut ledger = ledger_with_card("card-1");
         let mut dup = new_card("card-1");
-        dup.payload_hash = PAYLOAD_V2.to_owned();
+        dup.payload = payload_v2();
         assert!(ledger.create_card(dup).is_none());
-        assert_eq!(
-            ledger.card(&"card-1".into()).unwrap().payload_hash,
-            PAYLOAD_V1
-        );
+        assert_eq!(ledger.card(&"card-1".into()).unwrap().payload, payload());
     }
 }

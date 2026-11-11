@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use pelway_contract::ids::{CardId, MemberId, WorkspaceId};
 use pelway_contract::ledger::{ApprovalLedger, NewCard};
+use pelway_contract::snapshot::ActionPayload;
 use pelway_contract::store::TsMs;
 use pelway_contract::task::{ActionKind, TaskState};
 use pelway_http::{SharedLedger, serve};
@@ -23,10 +24,14 @@ fn new_card(id: &str, decider: &str, requester: &str, deadline: Option<TsMs>) ->
         workspace_id: WorkspaceId::from(WS),
         channel_id: "ch-synthetic-inbox".into(),
         card_id: CardId::from(id),
-        payload_hash: format!("sha256:synthetic-payload-{id}"),
-        action_kind: ActionKind::CustomerSend,
-        recipient: "customer@example.invalid".to_owned(),
-        body: "合成データの本文".to_owned(),
+        payload: ActionPayload {
+            action_kind: ActionKind::CustomerSend,
+            recipient: "customer@example.invalid".to_owned(),
+            body: format!("合成データの本文 {id}"),
+            attachments: Vec::new(),
+            account: "acct-cw-1".to_owned(),
+            scope: Vec::new(),
+        },
         requester: MemberId::from(requester),
         decider: MemberId::from(decider),
         deadline,
@@ -84,12 +89,9 @@ fn ledger() -> SharedLedger {
     ledger
         .create_card(new_card("card-approve-me", ME, ME, Some(30_000)))
         .expect("new card");
-    ledger
-        .create_card(NewCard {
-            action_kind: ActionKind::AgentHandoff,
-            ..new_card("card-handoff-me", ME, OTHER, Some(10_000))
-        })
-        .expect("new card");
+    let mut handoff = new_card("card-handoff-me", ME, OTHER, Some(10_000));
+    handoff.payload.action_kind = ActionKind::AgentHandoff;
+    ledger.create_card(handoff).expect("new card");
     ledger
         .create_card(new_card("card-my-request", OTHER, ME, Some(20_000)))
         .expect("new card");

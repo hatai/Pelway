@@ -9,8 +9,10 @@
 //! - サーバーは **承認 API（approve）が呼ばれない限り何も送らない**。
 //!   コメント保存は送信状態へ一切遷移しない。
 //! - 承認には `card_id`・`card_version`・`snapshot_hash`・`idempotency_key` が必須。
-//! - `snapshot_hash` は固定 payload の hash とコメントから計算する。コメントを保存すると
-//!   `snapshot_hash` が変わり（`card_version` は変わらない）、保存前の hash での承認は拒否する。
+//! - `snapshot_hash` は正規化した操作の中身（[`snapshot::ActionPayload`]：操作の種類・
+//!   宛先・本文・添付・使うアカウント・範囲）からだけ計算する。コメントは対象外で、
+//!   コメント保存で `snapshot_hash` は変わらない（#87）。変わるのは payload 改訂のとき
+//!   （そのとき `card_version` も上がる）。
 //! - 冪等キーは送信前に「処理中」として (`card_id`, `card_version`, `snapshot_hash`) に
 //!   結び付けて記録し、送信が終わったら「完了」にする。何も送っていない失敗のときだけ解放する。
 //! - 疑似送信の結果はサーバーが採番した安定 ID（[`ids::SimulatedSendId`]）を持ち、
