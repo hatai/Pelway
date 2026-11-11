@@ -12,6 +12,40 @@ pub struct RunInfo {
     pub head_sha: String,
 }
 
+/// 見張る PR: このリポジトリ内の `agent/` ブランチから出ている open な PR。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentPr {
+    pub branch: String,
+    pub head_sha: String,
+}
+
+/// `gh pr list --json headRefName,headRefOid,isCrossRepository` の出力を読む。
+/// fork からの PR は、ブランチ名が `agent/` でも外す（外部の人がブランチ名を選べるため）。
+pub fn parse_agent_prs(json: &str) -> Result<Vec<AgentPr>, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("gh pr list: {e}"))?;
+    Ok(v.as_array()
+        .into_iter()
+        .flatten()
+        .filter(|p| p["isCrossRepository"] == false)
+        .filter_map(|p| {
+            let branch = p["headRefName"].as_str()?;
+            let head_sha = p["headRefOid"].as_str()?;
+            branch.starts_with("agent/").then(|| AgentPr {
+                branch: branch.to_string(),
+                head_sha: head_sha.to_string(),
+            })
+        })
+        .collect())
+}
+
+/// 最新の実行が PR の head に対するものか。fork の実行は同じブランチ名でも head が違うので外れる。
+pub fn newest_run_is_head(runs_newest_first: &[RunInfo], head_sha: &str) -> bool {
+    runs_newest_first
+        .first()
+        .is_some_and(|r| r.head_sha == head_sha)
+}
+
 /// 直近 2 件（新しい順）がどちらも失敗で、別のコミットに対するものなら、新しい方の sha を返す。
 pub fn ci_failed_twice(runs_newest_first: &[RunInfo]) -> Option<String> {
     match runs_newest_first {
@@ -48,6 +82,37 @@ mod tests {
             conclusion: conclusion.into(),
             head_sha: sha.into(),
         }
+    }
+
+    #[test]
+    fn agent_prs_skip_forks_and_other_branches() {
+        let prs = parse_agent_prs(
+            r#"[{"headRefName":"agent/1-x","headRefOid":"s1","isCrossRepository":false},
+                {"headRefName":"agent/2-y","headRefOid":"s2","isCrossRepository":true},
+                {"headRefName":"feat/z","headRefOid":"s3","isCrossRepository":false}]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            prs,
+            vec![AgentPr {
+                branch: "agent/1-x".into(),
+                head_sha: "s1".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn agent_prs_missing_cross_repo_flag_is_skipped() {
+        let prs = parse_agent_prs(r#"[{"headRefName":"agent/1-x","headRefOid":"s1"}]"#).unwrap();
+        assert!(prs.is_empty());
+    }
+
+    #[test]
+    fn newest_run_must_match_head() {
+        let runs = [run("failure", "b"), run("failure", "a")];
+        assert!(newest_run_is_head(&runs, "b"));
+        assert!(!newest_run_is_head(&runs, "x"));
+        assert!(!newest_run_is_head(&[], "b"));
     }
 
     #[test]

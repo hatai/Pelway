@@ -7,7 +7,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use pelway_agent_watch::ci::RunInfo;
+use pelway_agent_watch::ci::{AgentPr, RunInfo, parse_agent_prs};
 use pelway_agent_watch::t3::{parse_list, parse_show};
 use pelway_agent_watch::watch::{ListedThread, State, ThreadDetail};
 use serde_json::Value;
@@ -56,20 +56,20 @@ pub fn t3_show(id: &str) -> Result<ThreadDetail, String> {
 }
 
 /// 開いている PR のうち `agent/` ブランチのもの。
-pub fn open_agent_branches(project: &Path) -> Result<Vec<String>, String> {
+pub fn open_agent_prs(project: &Path) -> Result<Vec<AgentPr>, String> {
     let out = run(
         "gh",
-        &["pr", "list", "--state", "open", "--json", "headRefName"],
+        &[
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--json",
+            "headRefName,headRefOid,isCrossRepository",
+        ],
         project,
     )?;
-    let v: Value = serde_json::from_str(&out).map_err(|e| format!("gh pr list: {e}"))?;
-    Ok(v.as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|p| p["headRefName"].as_str())
-        .filter(|b| b.starts_with("agent/"))
-        .map(str::to_string)
-        .collect())
+    parse_agent_prs(&out)
 }
 
 pub fn gh_runs(project: &Path, branch: &str) -> Result<Vec<RunInfo>, String> {

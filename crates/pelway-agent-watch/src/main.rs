@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use pelway_agent_watch::ci::ci_should_notify;
+use pelway_agent_watch::ci::{ci_should_notify, newest_run_is_head};
 use pelway_agent_watch::format_utc;
 use pelway_agent_watch::outbox;
 use pelway_agent_watch::payload::build_payload;
@@ -192,20 +192,25 @@ impl Watcher {
     /// `agent/` ブランチの PR で verify が続けて失敗していれば `stalled(ci-failed-twice)`。
     /// payload に付くのはブランチだけで、スレッドの詳細は付かない。
     fn ci_events(&mut self, emit: bool) -> Vec<(Event, ThreadDetail)> {
-        let branches = match io::open_agent_branches(&self.opts.project) {
-            Ok(b) => b,
+        let prs = match io::open_agent_prs(&self.opts.project) {
+            Ok(p) => p,
             Err(e) => {
                 eprintln!("agent-watch: {e}");
                 return Vec::new();
             }
         };
         let mut out = Vec::new();
-        for branch in branches {
+        for pr in prs {
+            let branch = pr.branch;
             let Ok(runs) =
                 io::gh_runs(&self.opts.project, &branch).map_err(|e| eprintln!("agent-watch: {e}"))
             else {
                 continue;
             };
+            // 同じブランチ名の fork の実行を拾わないよう、最新の実行が PR の head に対するものだけを見る
+            if !newest_run_is_head(&runs, &pr.head_sha) {
+                continue;
+            }
             if ci_should_notify(&mut self.state, &branch, &runs, emit) {
                 let detail = ThreadDetail {
                     branch: Some(branch),
