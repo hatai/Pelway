@@ -26,6 +26,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 4. Request changes なら、Grok Bot は同じ実装スレッドに `t3 thread send` で修正を指示する。同じスレッドでの修正は 3 回まで。超えたら要約を渡して新しいスレッドにする
 5. Approve されたら、Grok Bot が実装スレッドに知らせ、実装担当が `pr ready` で Draft を解除する（レビュー担当の App には Draft を解除する権限がない）
 6. CI 成功がそろったら、人間が Approve してマージする
+7. 終わった worktree は人間が `mise run agent-worktree-prune` で消す
 
 ## 制約
 
@@ -60,8 +61,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 
 ## 停止・迷走への対処
 
-- 1 回目の `stalled`: Grok Bot が状況を要約し、新しいスレッドでやり直させる
-- 2 回目の `stalled`: Issue に `needs-human` を付け、部屋で人間に知らせる
+- `stalled` を受けたら、Grok Bot は状況を要約して Issue にコメントし、`needs-human` を付けて部屋で人間に知らせる
 - しきい値は `docs/agents/grokbot-runbook.md` で調整する
 
 ## GitHub からの通知
