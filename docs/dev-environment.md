@@ -14,7 +14,7 @@
 | [hk](https://hk.jdx.dev) | git hook の管理 | 採用。`hk.pkl` に手順を定義し、フックはリポジトリローカルの Git 設定にインストール |
 | [typos](https://github.com/crate-ci/typos) | スペルチェッカ | 採用。`hk.pkl` の `Builtins.typos` ステップ（pre-commit と `hk check --all`＝CI で実行）。ツールは mise で 1.52.0 に固定し、除外は `typos.toml` に置く |
 | [fnox](https://fnox.jdx.dev) | シークレットの管理 | 採用。`fnox.toml` にはシークレットの名前と秘密を含まないテンプレートだけを置く |
-| [pitchfork](https://pitchfork.jdx.dev) | ローカル開発用プロセスマネージャー | 採用するが設定ファイルは置かない。動かすプロセス（server・runner・DB 等）が存在しないため。ツールのみ mise で固定 |
+| [pitchfork](https://pitchfork.jdx.dev) | ローカル開発用プロセスマネージャー | 採用。`pitchfork.toml` に AI 開発チームの見張り役 `agent-watch` を定義する。ツールは mise で固定 |
 
 ## セットアップ手順（初回）
 
@@ -55,7 +55,7 @@ mise bootstrap    # 上の1〜3を順に実行
 | `mise run toolchain-check` | rustc / cargo / rustfmt / clippy の存在とバージョン確認（rustfmt・clippy を含まない最小構成だと失敗する） |
 | `mise run hk-validate` / `hk-check` | `hk.pkl` の検証 / リポジトリ全体の読み取り専用検査 |
 | `mise run fnox-check` | `fnox list`（定義の一覧確認。秘密値の取得・表示はしない） |
-| `mise run pitchfork-check` | pitchfork のバージョン確認と、`pitchfork.toml` が未配置であることの確認 |
+| `mise run pitchfork-check` | pitchfork のバージョン確認と、`pitchfork.toml` に `agent-watch` が定義されていることの確認 |
 | `mise run verify` | 上記すべての一括確認（依存タスクは**並列**実行） |
 | `mise exec -- hk fix` | 修正の適用（ワークツリー。ステージはしない） |
 
@@ -84,16 +84,16 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 
 ## GitHub 通知（Grok Bot webhook・notify-grokbot）
 
-`.github/workflows/notify-grokbot.yml` が、PR 系イベント（pull_request / review / review comment）と verify workflow の完了（`workflow_run`）、手動実行（`workflow_dispatch`）を Grok Bot の webhook に POST する。送るのはメタデータのみで、PR タイトル・本文、コメント本文、レビュー本文、ラベル、メールアドレス等は送らない。
+`.github/workflows/notify-grokbot.yml` が、Grok Bot が動く必要のあるイベント（PR のクローズ（マージを含む）、レビューの投稿、verify workflow の完了（`workflow_run`））と手動実行（`workflow_dispatch`）を Grok Bot の webhook に POST する。エージェントのスレッドの状態は見張り役 `agent-watch` が別に送る（「pitchfork について」参照）。送るのはメタデータのみで、PR タイトル・本文、コメント本文、レビュー本文、ラベル、メールアドレス等は送らない。
 
 - Secret（リポジトリの Settings → Secrets and variables → Actions → New repository secret で登録。値はドキュメント・コードに置かない）:
   - `GROKBOT_WEBHOOK_URL` — webhook の URL
   - `GROKBOT_WEBHOOK_AUTH` — `Authorization` ヘッダーの値全体
-- 送る JSON のキーは 13 個固定: `schema`（`"pelway.github-notify/v1"`）, `repo`, `event`, `action`, `pr_number`, `head_branch`, `head_sha`, `merged`, `conclusion`, `workflow_name`, `run_url`, `actor`, `occurred_at`。値の無いものは `null`。
+- 送る JSON のキーは 14 個固定: `schema`（`"pelway.github-notify/v2"`）, `urgency`（`digest` は verify の成功と Approve のレビュー、それ以外は `immediate`）, `repo`, `event`, `action`, `pr_number`, `head_branch`, `head_sha`, `merged`, `conclusion`, `workflow_name`, `run_url`, `actor`, `occurred_at`。値の無いものは `null`。
 - 送らない条件（通知をスキップし、ジョブは成功で終わる。CI は落ちない）:
   - 上記 Secret のどちらかが未設定のとき
   - fork 由来のイベント（PR 系は head リポジトリ、workflow_run は head_repository の full_name がこのリポジトリと違うとき）
-  - コメント系イベント（pull_request_review / pull_request_review_comment）で、投稿者の `author_association` が `OWNER` / `MEMBER` / `COLLABORATOR` のいずれでもないとき（ボット例外なし。octocov 等の結果は verify の `workflow_run` 通知で把握する）
+  - レビュー（pull_request_review）で、投稿者の `author_association` が `OWNER` / `MEMBER` / `COLLABORATOR` のいずれでもないとき（ボット例外なし。レビュー担当の GitHub App の結果は `agent-watch` がスレッドの報告行として送る）
 - 対象外: PR の会話欄に書いた普通のコメント（issue_comment）は通知しない。fork から来た PR へのコメントを安全に見分けられないため。あとで足す場合は、`pull-requests: read` で PR を調べて fork を除く形にし、別の PR で行う。
 - 手動実行（workflow_dispatch）は `event: "test"` のテスト通知を 1 通送る。送信の失敗（タイムアウト・HTTP エラー）で CI は落ちない。
 
@@ -146,10 +146,23 @@ container run --rm alpine echo hello   # hello 程度の smoke
 - `mbx doctor` の setup 検査は「Cargo shim is not installed」と警告しうる。mise ネイティブ統合では shim を使わないためで、mbx 公式ドキュメント（Getting started）に説明がある。ラップの実態は上の確認方法で判断する。
 - リモートキャッシュ（GitHub Actions cache・S3 等）は設定しない。
 
-## pitchfork について（採用済み・設定保留）
+## pitchfork について
 
-- ツールは mise で 2.33.1 に固定する。loopback 限定の smoke（HTTP サーバーの起動・readiness・ログ・停止）で動作を確認済み。
-- v0.7 の05章が想定する起動単位（postgres・server・runner・integration gateway・sandbox controller・stub inference・dummy mail・task sandbox）が実装された時点で、loopback 限定の `pitchfork.toml` を追加する。動かない設定だけを残さないため、実装前に置かない。`mise run pitchfork-check` が未配置を検査する。
+- ツールは mise で 2.33.1 に固定する。
+- `pitchfork.toml` には AI 開発チームの見張り役 `agent-watch`（`crates/pelway-agent-watch`）だけを定義する。T3 のスレッドの状態変化を Grok Bot の webhook に通知する常駐プロセスで、仕様は `docs/superpowers/specs/agent-team.md`「見張り役と通知」。
+- 起動・停止・ログ（リポジトリの直下で実行する）:
+
+  | コマンド | 内容 |
+  |---|---|
+  | `mise run agent-watch-install` | 見張り役を `~/.local/bin/pelway-agent-watch` にインストールする。コードを変えたら実行し、`pitchfork restart agent-watch` で入れ替える |
+  | `pitchfork start agent-watch` | 起動（異常終了したら 10 回まで再起動する） |
+  | `pitchfork stop agent-watch` | 停止 |
+  | `pitchfork status agent-watch` | 状態の確認 |
+  | `pitchfork logs agent-watch` | ログ（送ったイベントと HTTP ステータス。秘密と返答の本文は出さない） |
+
+- 状態は `$XDG_STATE_HOME/pelway/agent-watch.json`（未設定なら `~/.local/state/pelway/agent-watch.json`）に置く。初めて起動したときは既存のスレッドを記録するだけで、通知しない。送れなかった通知は状態の送信待ちの列に残り、次の周回で送り直す。
+- 送らずに試すには `cargo run -p pelway-agent-watch -- --once --dry-run`（新しいイベントの payload を標準出力に出す。状態ファイルは読むだけで書き換えない）。
+- v0.7 の05章が想定する起動単位（postgres・server・runner など）は、実装された時点で loopback 限定の定義を `pitchfork.toml` に足す。
 
 ## 既知の事項・未解決
 
