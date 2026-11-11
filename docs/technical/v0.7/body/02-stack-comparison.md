@@ -107,8 +107,8 @@ UI担当の[input/ui.md](../sources/v0.6/fixed/pelway-technical-docs/input/ui.md
 
 | 領域 | 採否 | 内容 |
 |---|---|---|
-| 非同期実行 | 採用：DBキュー | `FOR UPDATE SKIP LOCKED`とleaseの定番パターンに限る。止まったworkflowの再開は状態tableから判断する。Temporal・Restateは採らない。River（`riverqueue`）とMVP前に比較する |
-| server間の通知 | 採用：`LISTEN/NOTIFY` | 起こす合図だけに使い、正本は`seq`。合図を取りこぼしても定期の追いつき検索で補う。Redisは入れない |
+| 非同期実行 | 採用：DBキュー（自作SKIP LOCKED+lease） | `FOR UPDATE SKIP LOCKED`とleaseの定番パターンに限る。止まったworkflowの再開は状態tableから判断する。Temporal・Restateは採らない。River（`riverqueue`）と比較した結果、自作を採りRiverは将来の候補（[ADR 0006](../../../adr/0006-db-queue-choice.md)） |
+| server間の通知 | 採用：`LISTEN/NOTIFY` | 起こす合図だけに使い、正本は`seq`。合図を取りこぼしても定期の追いつき検索で補う（[ADR 0006](../../../adr/0006-db-queue-choice.md)で実証）。Redisは入れない |
 | テナント分離 | 採用：Row Level Security | `workspace_id`の複合外部キーとアプリの絞り込みに加える二重の守り。[ADR 0005](../../../adr/0005-postgres-row-level-security.md) |
 | 全文検索 | MVP前に検証 | PGroonga第一候補、pg_bigmと比較。WAL・復元、rootless Podman、英字/コードの部分一致、表記ゆれを試す |
 | サンドボックス | MVP前に検証 | gVisor（runsc）とcrun＋libkrunを、rootless Podmanとの組み合わせ・起動時間・syscall互換・egress拒否の維持で測る |
