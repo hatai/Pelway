@@ -39,6 +39,7 @@ use crate::ids::{
     CardId, ChannelId, CommentId, IdempotencyKey, MemberId, SimulatedSendId, WorkspaceId,
 };
 use crate::member::MemberKind;
+use crate::store::TsMs;
 use crate::task::{ActionKind, TaskState};
 
 /// コメント保存 API のパス。
@@ -99,6 +100,16 @@ pub struct ApprovalCard {
     /// 表示用の本文（合成データのみ）。
     pub body: String,
     pub state: TaskState,
+    /// 依頼した人（04 §2 の `tasks` の source message を出した人に当たる）。
+    /// 判断待ち一覧の「自分の依頼」タブの判定に使う。
+    pub requester: MemberId,
+    /// 誰の判断待ちか（ADR 0002 の承認者。`action_kind` が `AgentHandoff` の
+    /// カードでは引き継ぎ先の担当に当たる）。判断待ち一覧の
+    /// 「自分の判断待ち」タブの判定に使う。承認 API での身元検査は #86 の範囲。
+    pub decider: MemberId,
+    /// 判断の期限（ADR 0002）。判断待ち一覧を期限の近い順へ並べるキー。
+    /// 期限切れの状態・通知はこの crate では作らない（別作業）。
+    pub deadline: Option<TsMs>,
     pub comments: Vec<CardComment>,
     /// 疑似送信済みなら、その安定 ID。
     pub simulated_send_id: Option<SimulatedSendId>,

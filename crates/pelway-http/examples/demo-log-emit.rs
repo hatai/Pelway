@@ -176,6 +176,9 @@ fn synthetic_ledger() -> SharedLedger {
                 action_kind: ActionKind::CustomerSend,
                 recipient: "customer@example.invalid".to_owned(),
                 body: format!("合成データの本文（{id}）{CANARY_BODY}"),
+                requester: "m-human-gdpr07".into(),
+                decider: "m-human-gdpr07".into(),
+                deadline: None,
             })
             .expect("create synthetic card");
     }

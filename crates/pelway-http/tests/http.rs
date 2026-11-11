@@ -28,6 +28,9 @@ fn new_card(id: &str) -> NewCard {
         action_kind: ActionKind::CustomerSend,
         recipient: "customer@example.invalid".to_owned(),
         body: "合成データの本文".to_owned(),
+        requester: "m-human-http".into(),
+        decider: "m-human-http".into(),
+        deadline: None,
     }
 }
 
