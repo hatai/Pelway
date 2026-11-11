@@ -540,8 +540,10 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 /// 共有コアに本文を書く API が無いこと。① ソースの禁止語走査、② `[dependencies]`
-/// が空のまま（依存ゼロ＝fs をする crate も入らない）、③ 振る舞いとして
-/// 「本文を渡してもファイルができない」ことで固定する。
+/// がワークスペース内の path 依存だけ（レジストリ依存ゼロ＝fs をする外部 crate も
+/// 入らない。pelway-contract は同一ワークスペースの契約型 crate。Issue #91 で手写し
+/// に代えて直接使うようにした）、③ 振る舞いとして「本文を渡してもファイルが
+/// できない」ことで固定する。
 #[test]
 fn core_api_surface_has_no_file_io() {
     let _guard = sandbox_lock().lock().unwrap_or_else(|p| p.into_inner());
@@ -568,7 +570,8 @@ fn core_api_surface_has_no_file_io() {
         source_hits.join("\n")
     );
 
-    // ② Cargo.toml の [dependencies] が空のまま。
+    // ② Cargo.toml の [dependencies] はワークスペース内の path 依存だけ。
+    // レジストリ由来の依存（`serde_json = "1"` の形。path を持たない）を拒否する。
     let core_manifest = root
         .join("crates")
         .join("pelway-client-core")
@@ -580,13 +583,13 @@ fn core_api_surface_has_no_file_io() {
         .nth(1)
         .expect("core の Cargo.toml に [dependencies] があること");
     let section = &rest[..rest.find('[').unwrap_or(rest.len())];
-    let has_dependency = section.lines().any(|line| {
+    let has_registry_dependency = section.lines().any(|line| {
         let trimmed = line.trim();
-        !trimmed.is_empty() && !trimmed.starts_with('#')
+        !trimmed.is_empty() && !trimmed.starts_with('#') && !trimmed.contains("path = ")
     });
     assert!(
-        !has_dependency,
-        "core の [dependencies] は空のまま（依存を足さない）"
+        !has_registry_dependency,
+        "core の [dependencies] はワークスペース内の path 依存だけ（レジストリ依存を足さない）"
     );
 
     // ③ 振る舞い: 空の探査ディレクトリを用意し、canary 入りの本文を渡して
