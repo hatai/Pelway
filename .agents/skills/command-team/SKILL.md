@@ -60,6 +60,7 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 - pr-size の失敗が許されるのは、指揮役が Issue にコメントで超過を認めたときだけ。
 - Approve の後に PR に push があったら、新しいコミットが main の取り込みだけであることを確かめる（`git rev-list <レビューした sha>..<head> --no-merges ^origin/main` が 0 件）。それ以外のコミットがあればレビューをやり直す。
 - 同じファイルを触る PR が続くときは、先にマージした後、残りの PR に `scripts/agent-gh dev pr update-branch` で main を取り込み、CI が通ってからマージする。
+- 別の PR に積んだ PR は、土台の PR をマージした後に base を main に替える。base を替えただけでは CI が動かないので、`scripts/agent-gh dev pr update-branch` で main を取り込んで CI を起こす。
 - マージしたら Issue から `agent:working` を外し、人間に報告する。
 
 ## 3. エスカレーション
