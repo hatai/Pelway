@@ -50,9 +50,13 @@ t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree m
 
 実装スレッドの `finished` の `report` に `pr:` があり、手順 5 の確認が済み、レビューの枠が空いているとき。
 
+レビュースレッドを次の内容で立てる（`t3 thread start` の形で書くが、権限を指定するため実際は MCP で立てる）。
+
 ```
 t3 thread start --provider codex_review --model gpt-6-luna --worktree main --branch review/<M>-<k> <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。"
 ```
+
+T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-accept-edits` にする。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP で立てる。
 
 `codex_review` はネットワークを GitHub だけに絞った Codex（`docs/dev-environment.md` の「レビュー担当の Codex」）。`<k>` はその PR のレビュースレッドの通し番号（1 から）。worktree は必ず `main` から作る（レビュー担当は worktree の `scripts/agent-gh` を使うため、PR やほかのブランチの版を使わない）。
 

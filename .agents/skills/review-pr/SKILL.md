@@ -11,9 +11,9 @@ AI 開発チームのレビュー担当が、PR 1 本をレビューして GitHu
 ## 決まり（毎回守る）
 
 - PR のコードを実行しない（`mise run`、`cargo`、テスト、PR の中のスクリプトを含む）。PR のコードはレビュー担当の秘密鍵を読めるため。verify と pr-size は PR のチェック（CI）の結果で判断する。
-- ファイルを書き換えない。コミットしない。push しない。PR の head を worktree に取り出さない（`git checkout`・`git switch` をしない）。取り出すと worktree の `scripts/agent-gh` が PR の版に置き換わり、それを実行することになるため。
-- 実行してよいコマンドは `git` の読み取り系（`git show`・`git diff`・`git log`・`git grep`）、`scripts/agent-gh review ...` だけ。
-- GitHub との通信は `scripts/agent-gh review ...` だけで行う。素の `git fetch` や `gh pr checkout` は SSH で接続するため、ネットワークの制限で通らない。
+- ファイルを書き換えない。コミットしない。push しない。PR の head を worktree に取り出さない（`git checkout`・`git switch`・`gh pr checkout` をしない）。取り出すと worktree の `scripts/agent-gh` が PR の版に置き換わり、それを実行することになるため。
+- 実行してよいコマンドは `git` の読み取り系（`git show`・`git diff`・`git log`・`git grep`。worktree の main を読むため）と `scripts/agent-gh review ...` だけ。PR の側のファイルは GitHub API で読む。
+- GitHub との通信は `scripts/agent-gh review ...` だけで行う。レビュースレッドの sandbox はネットワークを GitHub だけに絞り、`.git` を読み取り専用にしているため、`git fetch` は通らない。
 - 自分の worktree の外でコマンドを実行しない。PR の head を取ってこられないときは、他の worktree で代わりに検査せず、`verdict: failed` で報告する。
 - `pr ready` は実行しない（レビュー担当の App には権限がない。Ready for review への切り替えは実装担当の App が行う）。
 - 投稿系のコマンドは `&&` でつながず 1 つずつ実行し、終了コードを確かめる。失敗したら `verdict: failed` で報告する。成功していない投稿を成功と報告しない。
@@ -34,16 +34,14 @@ Issue 番号は `closingIssuesReferences` から取る。Issue の「受け入�
 
 ### 2. 検査する
 
-PR の head を取ってきて、worktree には取り出さずに読む。
+差分の周りのコードは、1 の `headRefOid` の版を GitHub API で読む。
 
 ```bash
-scripts/agent-gh review git fetch origin pull/<N>/head
-git rev-parse FETCH_HEAD
-git show FETCH_HEAD:<パス>
-git grep <語> FETCH_HEAD
+scripts/agent-gh review api "repos/hatai/Pelway/contents/<パス>?ref=<headRefOid>" --jq .content | base64 -d
+scripts/agent-gh review pr view <N> --json files --jq '.files[].path'
 ```
 
-`git rev-parse FETCH_HEAD` が 1 の `headRefOid` と一致しなければ、`verdict: failed` で報告する。
+PR で変わっていないファイルは worktree（main）の版を読めばよい。
 
 PR のチェックが終わるのを待ち、結果を読む。
 
