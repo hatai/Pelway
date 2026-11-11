@@ -51,6 +51,7 @@ issue: #80
 pr: https://github.com/hatai/Pelway/pull/81
 verify: pass
 pr-size: 66 / 800
+memo: docs/worklogs/issue-80.md（round 1）
 ```
 
 止まったときは `pr:` の代わりに `stopped: <止まった理由>`。

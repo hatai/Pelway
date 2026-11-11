@@ -80,7 +80,7 @@ PR を Projects ボードに載せる（ボードの組み込みワークフロ�
 
 | `verdict` | すること |
 |---|---|
-| `approve` | 実装スレッドに「PR #<M> は Approve された。skill implement-issue の手順 7 に従う。」を送る |
+| `approve` | 実装スレッドに「PR #<M> は Approve された。skill implement-issue の手順 8 に従う。」を送る |
 | `request-changes` | 実装スレッドの `round` が 4 以上なら 6 のエスカレーション。3 以下なら「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を送る |
 | `failed` | `error: checks pending` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 6 のエスカレーション |
 
@@ -107,6 +107,7 @@ PR を Projects ボードに載せる（ボードの組み込みワークフロ�
 | `pr:` | `gh pr view <番号> --json author,isDraft,headRefName` で、作成者が `app/pelway-dev`、ブランチが `agent/<Issue 番号>-` で始まる |
 | `verify:` | PR のチェック `mise run verify` の結果 |
 | `pr-size:` | PR のチェック `pr-size` の結果 |
+| `memo:` | PR の変更ファイルに `docs/worklogs/issue-<Issue 番号>.md` があり、報告の round の「実装者メモ」が 5 項目そろっている。止まった場合は Issue のコメントに実装者メモがある |
 | `verdict:` | `gh pr view <番号> --json reviews` で、`pelway-review` の最新のレビューの状態（`APPROVED` か `CHANGES_REQUESTED`）と一致する |
 
 一致しなければ、`report` の値では動かず 6 のエスカレーションにする。
