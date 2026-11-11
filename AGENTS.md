@@ -20,10 +20,11 @@ Skills and docs state facts only: rules, procedures, definitions, current state.
 
 ## Agent workflow
 
-The AI dev team (Grok Bot, T3 Code, opencode, Codex) follows `docs/superpowers/specs/agent-team.md`.
+The AI dev team (the conductor, T3 Code, opencode, Codex, Claude) follows `docs/superpowers/specs/agent-team.md`.
 
-- Implementer threads follow the `implement-issue` skill; reviewer threads follow the `review-pr` skill.
-- Grok Bot follows `docs/agents/grokbot-runbook.md`.
+- Implementer threads follow the `implement-issue` skill and leave an implementer memo in `docs/worklogs/issue-<N>.md`; reviewer threads follow the `review-pr` skill.
+- The conductor (Grok Bot, or a substitute agent named by the human) follows `docs/agents/grokbot-runbook.md` for events and the `command-team` skill for routing, escalation, merging, the improvement loop, and substitution.
+- Shared rules and skills live only where every tool reads them: `AGENTS.md`, `.agents/skills/`, `docs/`. Each `.claude/skills/<name>` is a symlink to `.agents/skills/<name>`; after a change, `diff -r .claude/skills/<name> .agents/skills/<name>` must be empty.
 - Agents run `gh` and `git` against GitHub through `scripts/agent-gh <dev|review>`, never through plain `gh`, so that PRs are authored by the GitHub App `pelway-dev[bot]` and reviews by the GitHub App `pelway-review[bot]`.
 - A PR's diff stays within 800 lines as counted by `mise run pr-size`.
 - Labels and who sets them: `docs/agents/triage-labels.md`.
