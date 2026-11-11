@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use pelway_agent_watch::ci::{ci_should_notify, newest_run_is_head};
+use pelway_agent_watch::ci::{ci_should_notify, runs_belong_to_pr};
 use pelway_agent_watch::format_utc;
 use pelway_agent_watch::outbox;
 use pelway_agent_watch::payload::build_payload;
@@ -201,14 +201,14 @@ impl Watcher {
         };
         let mut out = Vec::new();
         for pr in prs {
-            let branch = pr.branch;
+            let branch = pr.branch.clone();
             let Ok(runs) =
                 io::gh_runs(&self.opts.project, &branch).map_err(|e| eprintln!("agent-watch: {e}"))
             else {
                 continue;
             };
-            // 同じブランチ名の fork の実行を拾わないよう、最新の実行が PR の head に対するものだけを見る
-            if !newest_run_is_head(&runs, &pr.head_sha) {
+            // 同じブランチ名の fork の実行を拾わないよう、PR 自身のコミットに対する実行だけを見る
+            if !runs_belong_to_pr(&runs, &pr) {
                 continue;
             }
             if ci_should_notify(&mut self.state, &branch, &runs, emit) {

@@ -65,7 +65,7 @@ pub fn open_agent_prs(project: &Path) -> Result<Vec<AgentPr>, String> {
             "--state",
             "open",
             "--json",
-            "headRefName,headRefOid,isCrossRepository",
+            "headRefName,headRefOid,isCrossRepository,commits",
         ],
         project,
     )?;

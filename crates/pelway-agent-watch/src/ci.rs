@@ -17,9 +17,11 @@ pub struct RunInfo {
 pub struct AgentPr {
     pub branch: String,
     pub head_sha: String,
+    /// PR に含まれるコミットの sha。
+    pub commits: Vec<String>,
 }
 
-/// `gh pr list --json headRefName,headRefOid,isCrossRepository` の出力を読む。
+/// `gh pr list --json headRefName,headRefOid,isCrossRepository,commits` の出力を読む。
 /// fork からの PR は、ブランチ名が `agent/` でも外す（外部の人がブランチ名を選べるため）。
 pub fn parse_agent_prs(json: &str) -> Result<Vec<AgentPr>, String> {
     let v: serde_json::Value =
@@ -34,16 +36,26 @@ pub fn parse_agent_prs(json: &str) -> Result<Vec<AgentPr>, String> {
             branch.starts_with("agent/").then(|| AgentPr {
                 branch: branch.to_string(),
                 head_sha: head_sha.to_string(),
+                commits: p["commits"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|c| c["oid"].as_str().map(str::to_string))
+                    .collect(),
             })
         })
         .collect())
 }
 
-/// 最新の実行が PR の head に対するものか。fork の実行は同じブランチ名でも head が違うので外れる。
-pub fn newest_run_is_head(runs_newest_first: &[RunInfo], head_sha: &str) -> bool {
-    runs_newest_first
-        .first()
-        .is_some_and(|r| r.head_sha == head_sha)
+/// 判定に使う直近 2 件の実行がこの PR のものか: 最新は PR の head、1 つ前も PR のコミットに対するもの。
+/// `gh run list --branch` は同じブランチ名の fork の実行も返すため、sha で PR のものに絞る。
+pub fn runs_belong_to_pr(runs_newest_first: &[RunInfo], pr: &AgentPr) -> bool {
+    match runs_newest_first {
+        [newest, previous, ..] => {
+            newest.head_sha == pr.head_sha && pr.commits.contains(&previous.head_sha)
+        }
+        _ => false,
+    }
 }
 
 /// 直近 2 件（新しい順）がどちらも失敗で、別のコミットに対するものなら、新しい方の sha を返す。
@@ -87,7 +99,8 @@ mod tests {
     #[test]
     fn agent_prs_skip_forks_and_other_branches() {
         let prs = parse_agent_prs(
-            r#"[{"headRefName":"agent/1-x","headRefOid":"s1","isCrossRepository":false},
+            r#"[{"headRefName":"agent/1-x","headRefOid":"s1","isCrossRepository":false,
+                  "commits":[{"oid":"s0"},{"oid":"s1"}]},
                 {"headRefName":"agent/2-y","headRefOid":"s2","isCrossRepository":true},
                 {"headRefName":"feat/z","headRefOid":"s3","isCrossRepository":false}]"#,
         )
@@ -96,7 +109,8 @@ mod tests {
             prs,
             vec![AgentPr {
                 branch: "agent/1-x".into(),
-                head_sha: "s1".into()
+                head_sha: "s1".into(),
+                commits: vec!["s0".into(), "s1".into()],
             }]
         );
     }
@@ -108,11 +122,27 @@ mod tests {
     }
 
     #[test]
-    fn newest_run_must_match_head() {
-        let runs = [run("failure", "b"), run("failure", "a")];
-        assert!(newest_run_is_head(&runs, "b"));
-        assert!(!newest_run_is_head(&runs, "x"));
-        assert!(!newest_run_is_head(&[], "b"));
+    fn runs_must_be_this_prs_commits() {
+        let pr = AgentPr {
+            branch: "agent/1-x".into(),
+            head_sha: "b".into(),
+            commits: vec!["a".into(), "b".into()],
+        };
+        assert!(runs_belong_to_pr(
+            &[run("failure", "b"), run("failure", "a")],
+            &pr
+        ));
+        // 最新が head でない
+        assert!(!runs_belong_to_pr(
+            &[run("failure", "x"), run("failure", "a")],
+            &pr
+        ));
+        // 1 つ前が fork の実行（PR に無いコミット）
+        assert!(!runs_belong_to_pr(
+            &[run("failure", "b"), run("failure", "f")],
+            &pr
+        ));
+        assert!(!runs_belong_to_pr(&[], &pr));
     }
 
     #[test]
