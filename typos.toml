@@ -24,5 +24,10 @@ passt = "passt"
 pn = "pn"
 # Rust 製 TUI ライブラリの実名 ratatui。
 ratatui = "ratatui"
+# 仮想スクロールの npm パッケージの実名 virtua（docs/competitors/buzz.md）。
+virtua = "virtua"
+# Azure Kubernetes Service の略称 AKS と、デザインサービスの実名 Canva（docs/competitors/）。
+aks = "aks"
+canva = "canva"
 # pelway-client-ui のテストが "rgba(" を分割組み立てするための断片（no_color_values.rs）。
 ba = "ba"
