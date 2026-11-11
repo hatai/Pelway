@@ -24,7 +24,7 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 ## 1. サイクルの始め
 
 1. `scripts/conductor-watch.sh` が動いていることを確かめる（動いていなければ起動する）
-2. `t3 thread list --json` と `gh pr list` で、実行中のスレッド、Draft の PR、レビュー待ちの PR を数える
+2. `t3 thread list --json` と `scripts/agent-gh dev pr list` で、実行中のスレッド、Draft の PR、レビュー待ちの PR を数える
 3. runbook の「同時数と順番待ち」の順で、次の一手を 1 つずつ決める
 
 ## 2. 振り分け
@@ -55,7 +55,7 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 
 ### マージ
 
-`pelway-review` の Approve と、必須チェック（`mise run verify`、`pr-size`）の通過を確かめたら、指揮役が `gh pr merge --merge --admin --delete-branch` でマージする（`CODEOWNERS` の人間の Approve を、人間から委任された形で迂回する）。
+`pelway-review` の Approve と、必須チェック（`mise run verify`、`pr-size`）の通過を確かめたら、指揮役が `gh pr merge --merge --admin --delete-branch` でマージする（`CODEOWNERS` の人間の Approve を、人間から委任された形で迂回する）。`--admin` は管理者の権限が要り App のトークンでは使えないので、このマージだけは人間の名義の `gh` で行う。それ以外の GitHub の操作（読み取り、ラベル、コメント、`pr update-branch`）は `scripts/agent-gh dev` で行う。
 
 - pr-size の失敗が許されるのは、指揮役が Issue にコメントで超過を認めたときだけ。
 - Approve の後に PR に push があったら、新しいコミットが main の取り込みだけであることを確かめる（`git rev-list <レビューした sha>..<head> --no-merges ^origin/main` が 0 件）。それ以外のコミットがあればレビューをやり直す。

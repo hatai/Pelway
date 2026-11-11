@@ -17,7 +17,7 @@ Grok Bot は Issue を実装スレッドとレビュースレッドに割り振�
 | PR を Projects ボード `Pelway agent team`（https://github.com/users/hatai/projects/7）に載せる | GitHub |
 | Issue・PR・レビュー・CI の結果を読む | GitHub |
 | スレッドのモデル・effort を変える | T3 Connect の MCP（`t3_thread_configure`） |
-| `pelway-review` が Approve し必須チェックが通った PR をマージする | `gh pr merge --merge --admin --delete-branch`（人間から委任された迂回。条件は skill `command-team` の「マージ」） |
+| `pelway-review` が Approve し必須チェックが通った PR をマージする | `gh pr merge --merge --admin --delete-branch`（人間から委任された迂回。条件は skill `command-team` の「マージ」）。`--admin` は App のトークンでは使えないため、このマージだけは人間の名義の `gh` で行い、ほかの操作は `scripts/agent-gh dev` で行う |
 
 しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更、スレッドの取り消し。
 
@@ -112,11 +112,11 @@ PR を Projects ボードに載せる（ボードの組み込みワークフロ�
 
 | 行 | 確かめること |
 |---|---|
-| `pr:` | `gh pr view <番号> --json author,isDraft,headRefName` で、作成者が `app/pelway-dev`、ブランチが `agent/<Issue 番号>-` で始まる |
+| `pr:` | `scripts/agent-gh dev pr view <番号> --json author,isDraft,headRefName` で、作成者が `app/pelway-dev`、ブランチが `agent/<Issue 番号>-` で始まる |
 | `verify:` | PR のチェック `mise run verify` の結果 |
 | `pr-size:` | PR のチェック `pr-size` の結果 |
 | `memo:` | PR の変更ファイルに `docs/worklogs/issue-<Issue 番号>.md` があり、報告の round の「実装者メモ」が 5 項目そろっている。止まった場合は Issue のコメントに実装者メモがある |
-| `verdict:` | `gh pr view <番号> --json reviews` で、`pelway-review` の最新のレビューの状態（`APPROVED` か `CHANGES_REQUESTED`）と一致する |
+| `verdict:` | `scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` の最新のレビューの状態（`APPROVED` か `CHANGES_REQUESTED`）と一致する |
 
 一致しなければ、`report` の値では動かず 6 のエスカレーションにする。
 

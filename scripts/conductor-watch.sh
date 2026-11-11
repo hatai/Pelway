@@ -6,7 +6,7 @@ D="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch"; mkdir -p "$D"
 cd "$(dirname "$0")/.." || exit 1
 while true; do
   t3 thread list --json > "$D/threads.json" 2>/dev/null || true
-  gh pr list --state all --limit 30 --json number,state,isDraft,headRefName,reviewDecision,statusCheckRollup > "$D/prs.json" 2>/dev/null || true
+  scripts/agent-gh dev pr list --state all --limit 30 --json number,state,isDraft,headRefName,reviewDecision,statusCheckRollup > "$D/prs.json" 2>/dev/null || true
   python3 -I - "$D" <<'PY'
 import json, sys, time, os
 d = sys.argv[1]; sp = os.path.join(d, "state.json")
