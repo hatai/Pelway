@@ -99,7 +99,7 @@ BotがBotへ依頼する子タスクは親taskへ関連付ける。人の確認�
 |---|---|---|---|
 | Botごとの常時VM | 作業環境・常駐プロセスを維持しやすい | ローカル機材を消費。停止復元の試験が必要 | 比較対象 |
 | タスクごとのコンテナ＋永続成果物 | Linuxツールを共通化、必要時だけ起動 | カーネル共有。ログイン済みブラウザの継続等は別課題 | 合成データ検証の推奨案。安全承認前に実行しない |
-| microVM / gVisor等 | 分離強化の候補 | CPU・OS・syscall・起動費用の検証 | 将来比較 |
+| microVM / gVisor等 | 分離強化の候補（gVisor runsc、crun＋libkrun） | CPU・OS・syscall・起動費用・egress拒否の維持の検証 | MVP前に比較 |
 | ホストOS別sandbox | ホストツールに近い | 3OS別実装、ホスト侵害の検証範囲が大きい | 初版では採らない |
 
 sandboxは非root、capabilityなし、read-onlyルート、task用の書込領域のみ。CPU・メモリ・PID・時間の上限を設定する。ホストホーム、DB資格情報、container runtime socketを渡さない。起動controllerは許可済みイメージとvolumeだけを受け付ける。
