@@ -24,6 +24,7 @@
 
 pub mod approval;
 pub mod ids;
+pub mod inbox;
 pub mod ledger;
 pub mod member;
 pub mod message;

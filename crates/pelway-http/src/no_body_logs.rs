@@ -54,6 +54,9 @@ fn new_card(id: &str) -> NewCard {
         action_kind: ActionKind::CustomerSend,
         recipient: "customer@example.invalid".to_owned(),
         body: format!("合成データの本文 {CANARY_BODY}"),
+        requester: "m-human-gdpr07".into(),
+        decider: "m-human-gdpr07".into(),
+        deadline: None,
     }
 }
 
@@ -116,7 +119,7 @@ fn post_comment(addr: SocketAddr, card: &str, body: &str) -> (u16, String) {
     http(
         addr,
         "POST",
-        &format!("/v1/cards/{card}/comments"),
+        &pelway_contract::approval::comments_path(&card.into()),
         &comment_headers(),
         json.as_bytes(),
     )
@@ -144,7 +147,7 @@ fn post_approve(addr: SocketAddr, body: &str) -> (u16, String) {
     http(
         addr,
         "POST",
-        "/v1/cards/card-flow-1/approve",
+        &pelway_contract::approval::approve_path(&"card-flow-1".into()),
         &[("Content-Type", "application/json")],
         body.as_bytes(),
     )
@@ -186,7 +189,7 @@ fn logs_have_no_canary_and_at_least_one_event() {
     let (status, resp_body) = http(
         addr,
         "POST",
-        "/v1/cards/card-log-a/comments",
+        &pelway_contract::approval::comments_path(&"card-log-a".into()),
         &headers,
         body.as_bytes(),
     );
@@ -242,7 +245,7 @@ fn rejected_and_internal_error_have_no_canary_anywhere() {
     let (status, resp) = http(
         addr,
         "POST",
-        "/v1/cards/card-rej/approve",
+        &pelway_contract::approval::approve_path(&"card-rej".into()),
         &[("Content-Type", "application/json")],
         body.as_bytes(),
     );
@@ -260,7 +263,7 @@ fn rejected_and_internal_error_have_no_canary_anywhere() {
     let (status, resp) = http(
         addr,
         "POST",
-        "/v1/cards/card-rej/comments",
+        &pelway_contract::approval::comments_path(&"card-rej".into()),
         &comment_headers(),
         body.as_bytes(),
     );

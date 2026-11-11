@@ -9,7 +9,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use pelway_contract::approval::ApproveRequest;
+use pelway_contract::approval::{ApproveRequest, approve_path, comments_path};
 use pelway_contract::ids::IdempotencyKey;
 use pelway_contract::ledger::{ApprovalLedger, BeginApproval, NewCard};
 use pelway_contract::task::ActionKind;
@@ -28,6 +28,9 @@ fn new_card(id: &str) -> NewCard {
         action_kind: ActionKind::CustomerSend,
         recipient: "customer@example.invalid".to_owned(),
         body: "合成データの本文".to_owned(),
+        requester: "m-human-http".into(),
+        decider: "m-human-http".into(),
+        deadline: None,
     }
 }
 
@@ -88,7 +91,8 @@ fn post_json(addr: SocketAddr, path: &str, body: &str, member_headers: bool) -> 
 
 fn post_comments(addr: SocketAddr, card: &str, body: &str) -> (u16, Value) {
     let json = json!({"card_id": card, "body": body}).to_string();
-    post_json(addr, &format!("/v1/cards/{card}/comments"), &json, true)
+    // 経路は契約の定数（COMMENTS_PATH）から作る（Issue #91: 定数と経路の一致）。
+    post_json(addr, &comments_path(&card.into()), &json, true)
 }
 
 /// カードの (snapshot_hash, コメント数, card_version)。状態が変わっていないことの確認用。
@@ -143,6 +147,65 @@ fn send_directly(ledger: &SharedLedger, card: &str, key: &str) {
         idempotency_key: IdempotencyKey::new(key).expect("valid key"),
     };
     g.approve(req).expect("approve");
+}
+
+// (a0) 契約の経路定数（COMMENTS_PATH / APPROVE_PATH の `{card_id}` 置換）で
+// サーバーが受け付けること。旧・仮経路 `/v1/cards/...` はもう経路が無いこと。
+// このテストは経路を文字列リテラルで書かず comments_path / approve_path で作る
+// （定数とサーバーの経路の一致を構造的に確かめる）。
+#[test]
+fn approval_routes_match_contract_path_constants() {
+    let ledger = shared_ledger(&["card-route"]);
+    let addr = spawn_server(ledger.clone());
+
+    // comments_path（定数 COMMENTS_PATH 由来）でコメント保存 → 200。
+    let json = json!({"card_id": "card-route", "body": "送信前に確認"}).to_string();
+    let (status, body) = post_json(addr, &comments_path(&"card-route".into()), &json, true);
+    assert_eq!(status, 200);
+    assert_eq!(body["card_id"], "card-route");
+    assert_eq!(body["state"], "awaiting_send_approval");
+
+    // approve_path（定数 APPROVE_PATH 由来）で承認 → 200。
+    let json = approve_json_for(&ledger, "card-route", "a0-route-key-0000001");
+    let (status, _) = post_json(addr, &approve_path(&"card-route".into()), &json, false);
+    assert_eq!(status, 200);
+
+    // 旧・仮経路 /v1/cards/... は 404（NotFound）。
+    let json = json!({"card_id": "card-route", "body": "旧経路"}).to_string();
+    let (status, json) = post_json(addr, "/v1/cards/card-route/comments", &json, true);
+    assert_eq!(status, 404);
+    assert_eq!(json["code"], "not_found");
+}
+
+// (a1) x-pelway-member-kind は仕様 04 §2 の 4 値を受け付ける。旧・デモの `ai` は 400。
+#[test]
+fn member_kind_header_accepts_four_spec_kinds_and_rejects_ai() {
+    let ledger = shared_ledger(&["card-kind"]);
+    let addr = spawn_server(ledger.clone());
+    let path = comments_path(&"card-kind".into());
+    for kind in ["human", "bot", "external_agent", "external_tool"] {
+        let json = json!({"card_id": "card-kind", "body": "確認"}).to_string();
+        let headers = [
+            ("Content-Type", "application/json"),
+            ("x-pelway-member-id", "m-human-http"),
+            ("x-pelway-member-kind", kind),
+        ];
+        let (status, body) = http(addr, "POST", &path, &headers, json.as_bytes());
+        assert_eq!(status, 200, "{kind}");
+        let body: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+        assert_eq!(body["card_id"], "card-kind", "{kind}");
+    }
+    // 旧・デモの 2 値の `ai` は未知の値として 400（状態は変えない）。
+    let json = json!({"card_id": "card-kind", "body": "旧デモの種別"}).to_string();
+    let headers = [
+        ("Content-Type", "application/json"),
+        ("x-pelway-member-id", "m-human-http"),
+        ("x-pelway-member-kind", "ai"),
+    ];
+    let (status, body) = http(addr, "POST", &path, &headers, json.as_bytes());
+    assert_eq!(status, 400);
+    let body: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    assert_eq!(body["code"], "bad_request");
 }
 
 // (a) 承認待ちでないカードへのコメントは 409 not_awaiting_approval。状態も変わらない。
@@ -215,13 +278,13 @@ fn approve_progress_and_key_reuse_map_to_409_and_422() {
 
     // 処理中のキー・同じ内容の再送: 409 approval_in_progress。
     let body = approve_json_for(&ledger, "card-inprog", "d-inprog-key-0000001");
-    let (status, json) = post_json(addr, "/v1/cards/card-inprog/approve", &body, false);
+    let (status, json) = post_json(addr, &approve_path(&"card-inprog".into()), &body, false);
     assert_eq!(status, 409);
     assert_eq!(json["code"], "approval_in_progress");
 
     // 完了済みキーを別内容（版を 1 つ進めた）で使う: 422 idempotency_key_reused。
     let body = approve_json_for(&ledger, "card-reuse", "d-reuse-key-000000001");
-    let (status, _) = post_json(addr, "/v1/cards/card-reuse/approve", &body, false);
+    let (status, _) = post_json(addr, &approve_path(&"card-reuse".into()), &body, false);
     assert_eq!(status, 200);
     let (_, _, version) = card_state(&ledger, "card-reuse");
     let hash = card_state(&ledger, "card-reuse").0;
@@ -232,7 +295,7 @@ fn approve_progress_and_key_reuse_map_to_409_and_422() {
         "idempotency_key": "d-reuse-key-000000001",
     })
     .to_string();
-    let (status, json) = post_json(addr, "/v1/cards/card-reuse/approve", &body, false);
+    let (status, json) = post_json(addr, &approve_path(&"card-reuse".into()), &body, false);
     assert_eq!(status, 422);
     assert_eq!(json["code"], "idempotency_key_reused");
 }
@@ -255,7 +318,7 @@ fn concurrent_approves_send_exactly_once() {
             // 全スレッド同じ内容（版 1・予約前の hash）、鍵だけ別。
             let body = approve_json_for(&ledger, "card-conc", &format!("e-conc-{i:02}-key-00001"));
             barrier.wait();
-            let (status, _) = post_json(addr, "/v1/cards/card-conc/approve", &body, false);
+            let (status, _) = post_json(addr, &approve_path(&"card-conc".into()), &body, false);
             tx.send(status).expect("send status");
         }));
     }
@@ -279,7 +342,7 @@ fn malformed_json_400_and_oversized_413_keep_state() {
 
     let (status, json) = post_json(
         addr,
-        "/v1/cards/card-f/comments",
+        &comments_path(&"card-f".into()),
         "{\"card_id\": \"card-f\", ",
         true,
     );
@@ -289,7 +352,7 @@ fn malformed_json_400_and_oversized_413_keep_state() {
     let (status, body) = http(
         addr,
         "POST",
-        "/v1/cards/card-f/comments",
+        &comments_path(&"card-f".into()),
         &[
             ("Content-Type", "application/json"),
             ("x-pelway-member-id", "m-human-http"),
@@ -342,7 +405,7 @@ fn poisoned_lock_returns_500_with_exact_body_and_keeps_state() {
     let (status, body) = http(
         addr,
         "POST",
-        "/v1/cards/card-p/comments",
+        &comments_path(&"card-p".into()),
         &[
             ("Content-Type", "application/json"),
             ("x-pelway-member-id", "m-human-http"),
@@ -380,7 +443,7 @@ fn path_body_card_id_mismatch_returns_422() {
 
     // comments: 本文の card_id が経路と食い違う。
     let json = json!({"card_id": "card-other", "body": "本文"}).to_string();
-    let (status, json) = post_json(addr, "/v1/cards/card-await/comments", &json, true);
+    let (status, json) = post_json(addr, &comments_path(&"card-await".into()), &json, true);
     assert_eq!(status, 422);
     assert_eq!(json["code"], "card_id_mismatch");
 
@@ -394,7 +457,7 @@ fn path_body_card_id_mismatch_returns_422() {
         "idempotency_key": "i-mismatch-key-0000001",
     })
     .to_string();
-    let (status, json) = post_json(addr, "/v1/cards/card-await/approve", &json, false);
+    let (status, json) = post_json(addr, &approve_path(&"card-await".into()), &json, false);
     assert_eq!(status, 422);
     assert_eq!(json["code"], "card_id_mismatch");
 }
@@ -429,7 +492,7 @@ fn oversize_content_length_answers_413_before_reading_body() {
         .expect("client read timeout");
     stream
         .write_all(
-            b"POST /v1/cards/card-j/comments HTTP/1.1\r\nHost: demo.local\r\n\
+            b"POST /v1/approvals/card-j/comments HTTP/1.1\r\nHost: demo.local\r\n\
                x-pelway-member-id: m-human-http\r\nx-pelway-member-kind: human\r\n\
                Content-Length: 100000\r\n\r\n",
         )
@@ -452,7 +515,7 @@ fn content_length_must_be_single_decimal_and_te_rejected() {
     let body = json!({"card_id": "card-k", "body": "本文"}).to_string();
     // '+' 付き（usize としては妥当でも）数字以外なので 400。正当な本文を送っても受理しない。
     let raw = format!(
-        "POST /v1/cards/card-k/comments HTTP/1.1\r\nHost: d\r\n\
+        "POST /v1/approvals/card-k/comments HTTP/1.1\r\nHost: d\r\n\
          x-pelway-member-id: m-human-http\r\nx-pelway-member-kind: human\r\n\
          Content-Length: +{}\r\n\r\n{body}",
         body.len()
@@ -461,7 +524,7 @@ fn content_length_must_be_single_decimal_and_te_rejected() {
     assert_eq!(status, 400, "plus-prefixed length must be rejected");
     assert_eq!(json["code"], "bad_request");
 
-    let head = "POST /v1/cards/card-k/comments HTTP/1.1\r\nHost: d\r\n\
+    let head = "POST /v1/approvals/card-k/comments HTTP/1.1\r\nHost: d\r\n\
                 x-pelway-member-id: m-human-http\r\nx-pelway-member-kind: human\r\n";
     for (label, raw) in [
         ("negative", format!("{head}Content-Length: -5\r\n\r\n")),
@@ -490,7 +553,7 @@ fn stalled_connection_times_out_and_does_not_block_others() {
     // 接続 A: ヘッダが終わる前に書くのをやめて放置する。
     let mut stalled = TcpStream::connect(addr).expect("connect A");
     stalled
-        .write_all(b"POST /v1/cards/card-l/comments HTTP/1.1\r\nHost: d\r\n")
+        .write_all(b"POST /v1/approvals/card-l/comments HTTP/1.1\r\nHost: d\r\n")
         .expect("write partial head");
     stalled
         .set_read_timeout(Some(std::time::Duration::from_secs(
@@ -523,7 +586,7 @@ fn header_size_and_line_limits_return_431() {
     let owned: Vec<(&str, &str)> = junk.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let (status, json) = post_json_with_headers(
         addr,
-        "/v1/cards/card-m/comments",
+        &comments_path(&"card-m".into()),
         &json!({"card_id": "card-m", "body": "本文"}).to_string(),
         &owned,
     );
@@ -534,7 +597,7 @@ fn header_size_and_line_limits_return_431() {
     let big = "x".repeat(20 * 1024);
     let (status, json) = post_json_with_headers(
         addr,
-        "/v1/cards/card-m/comments",
+        &comments_path(&"card-m".into()),
         &json!({"card_id": "card-m", "body": "本文"}).to_string(),
         &[("x-big", big.as_str())],
     );
@@ -572,7 +635,7 @@ fn parse_response(buf: &str) -> (u16, Value) {
 /// 詰め物をした comments 要求のヘッダーを作る（(n) 用）。
 fn head_padded_to(total: usize, card: &str, body_len: usize) -> String {
     let pre = format!(
-        "POST /v1/cards/{card}/comments HTTP/1.1\r\nHost: demo.local\r\n\
+        "POST /v1/approvals/{card}/comments HTTP/1.1\r\nHost: demo.local\r\n\
          Content-Type: application/json\r\n\
          x-pelway-member-id: m-human-http\r\nx-pelway-member-kind: human\r\n"
     );
@@ -639,7 +702,7 @@ fn bad_version_and_bad_header_names_return_400_and_keep_state() {
 
     let raw_for = |version: &str, extra: &str| {
         format!(
-            "POST /v1/cards/card-o/comments {version}\r\nHost: demo.local\r\n\
+            "POST /v1/approvals/card-o/comments {version}\r\nHost: demo.local\r\n\
              x-pelway-member-id: m-human-http\r\nx-pelway-member-kind: human\r\n\
              {extra}Content-Length: {}\r\n\r\n{body}",
             body.len()
@@ -697,7 +760,7 @@ fn slow_trickle_head_hits_connection_deadline() {
         buf
     });
     writer
-        .write_all(b"POST /v1/cards/card-p/comments HTTP/1.1\r\nHost: d\r\n")
+        .write_all(b"POST /v1/approvals/card-p/comments HTTP/1.1\r\nHost: d\r\n")
         .expect("write first line");
     // 3 秒未満の間隔で送り続けるので、1 回の読み取りタイムアウト（3 秒）には引っかからない。
     for _ in 0..40 {
@@ -883,7 +946,7 @@ fn head_read_wait_is_cut_at_deadline_not_3s() {
         .expect("client read timeout");
     let started = Instant::now();
     stream
-        .write_all(b"POST /v1/cards/card-v/comments HTTP/1.1\r\nHost: d\r\n")
+        .write_all(b"POST /v1/approvals/card-v/comments HTTP/1.1\r\nHost: d\r\n")
         .expect("write partial head");
     // 期限より前は 3 秒未満の間隔（300ms）でヘッダー行を少しずつ送り続ける
     // （1 回の読み取りタイムアウトの 3 秒には引っかからない）。最後の送信が
@@ -931,7 +994,7 @@ fn drain_read_wait_after_413_is_cut_at_deadline() {
     let started = Instant::now();
     stream
         .write_all(
-            b"POST /v1/cards/card-w/comments HTTP/1.1\r\nHost: d\r\n\
+            b"POST /v1/approvals/card-w/comments HTTP/1.1\r\nHost: d\r\n\
                Content-Length: 100000\r\n\r\n",
         )
         .expect("write head");
@@ -998,7 +1061,7 @@ fn slow_trickle_body_hits_connection_deadline() {
 
     let body = json_body_padded_to("card-x", 240);
     let head = format!(
-        "POST /v1/cards/card-x/comments HTTP/1.1\r\nHost: demo.local\r\n\
+        "POST /v1/approvals/card-x/comments HTTP/1.1\r\nHost: demo.local\r\n\
          x-pelway-member-id: m-human-http\r\nx-pelway-member-kind: human\r\n\
          Content-Length: {}\r\n\r\n",
         body.len()
@@ -1054,7 +1117,7 @@ fn body_read_wait_is_cut_at_deadline_not_3s() {
         .set_read_timeout(Some(Duration::from_secs(6)))
         .expect("client read timeout");
     let started = Instant::now();
-    let head = "POST /v1/cards/card-y/comments HTTP/1.1\r\nHost: d\r\n\
+    let head = "POST /v1/approvals/card-y/comments HTTP/1.1\r\nHost: d\r\n\
                 x-pelway-member-id: m-human-http\r\nx-pelway-member-kind: human\r\n\
                 Content-Length: 100\r\n\r\n";
     stream.write_all(head.as_bytes()).expect("write head");
@@ -1100,7 +1163,7 @@ fn slow_trickle_after_413_stops_draining_at_deadline() {
         .expect("client read timeout");
     stream
         .write_all(
-            b"POST /v1/cards/card-q/comments HTTP/1.1\r\nHost: d\r\n\
+            b"POST /v1/approvals/card-q/comments HTTP/1.1\r\nHost: d\r\n\
                Content-Length: 100000\r\n\r\n",
         )
         .expect("write head");

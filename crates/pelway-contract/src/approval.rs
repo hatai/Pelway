@@ -39,12 +39,27 @@ use crate::ids::{
     CardId, ChannelId, CommentId, IdempotencyKey, MemberId, SimulatedSendId, WorkspaceId,
 };
 use crate::member::MemberKind;
+use crate::store::TsMs;
 use crate::task::{ActionKind, TaskState};
 
 /// コメント保存 API のパス。
 pub const COMMENTS_PATH: &str = "/v1/approvals/{card_id}/comments";
 /// 承認 API のパス。
 pub const APPROVE_PATH: &str = "/v1/approvals/{card_id}/approve";
+
+/// [`COMMENTS_PATH`] の `{card_id}` を差し替えて、要求に使う実際の経路を作る。
+/// サーバー（`pelway-http`）の経路判定もテストもこの関数で経路を作り、
+/// 文字列リテラルで書き写さない（定数と経路の一致を構造的に保つ）。
+#[must_use]
+pub fn comments_path(card_id: &CardId) -> String {
+    COMMENTS_PATH.replace("{card_id}", card_id.as_str())
+}
+
+/// [`APPROVE_PATH`] の `{card_id}` を差し替えて、要求に使う実際の経路を作る。
+#[must_use]
+pub fn approve_path(card_id: &CardId) -> String {
+    APPROVE_PATH.replace("{card_id}", card_id.as_str())
+}
 
 /// コメント本文の上限。単位は Unicode のコードポイント数（Rust の `str::chars().count()`）。
 /// 数え方は [`comment_len`] に一本化する。サーバーもクライアントもこの定数と関数を使う。
@@ -99,6 +114,16 @@ pub struct ApprovalCard {
     /// 表示用の本文（合成データのみ）。
     pub body: String,
     pub state: TaskState,
+    /// 依頼した人（04 §2 の `tasks` の source message を出した人に当たる）。
+    /// 判断待ち一覧の「自分の依頼」タブの判定に使う。
+    pub requester: MemberId,
+    /// 誰の判断待ちか（ADR 0002 の承認者。`action_kind` が `AgentHandoff` の
+    /// カードでは引き継ぎ先の担当に当たる）。判断待ち一覧の
+    /// 「自分の判断待ち」タブの判定に使う。承認 API での身元検査は #86 の範囲。
+    pub decider: MemberId,
+    /// 判断の期限（ADR 0002）。判断待ち一覧を期限の近い順へ並べるキー。
+    /// 期限切れの状態・通知はこの crate では作らない（別作業）。
+    pub deadline: Option<TsMs>,
     pub comments: Vec<CardComment>,
     /// 疑似送信済みなら、その安定 ID。
     pub simulated_send_id: Option<SimulatedSendId>,
@@ -308,5 +333,15 @@ mod tests {
             assert_eq!(validate_comment(blank), Err(CommentError::EmptyBody));
         }
         assert_eq!(validate_comment("\n了解\n"), Ok(()));
+    }
+
+    #[test]
+    fn path_builders_replace_the_card_id_segment() {
+        let card = CardId::from("card-1");
+        assert_eq!(comments_path(&card), "/v1/approvals/card-1/comments");
+        assert_eq!(approve_path(&card), "/v1/approvals/card-1/approve");
+        // テンプレートのプレフィックスは仕様 04 §3 の approvals の下。
+        assert!(comments_path(&card).starts_with("/v1/approvals/"));
+        assert!(approve_path(&card).starts_with("/v1/approvals/"));
     }
 }

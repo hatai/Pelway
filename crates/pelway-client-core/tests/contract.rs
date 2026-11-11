@@ -1,11 +1,38 @@
-//! 契約写し（`src/contract.rs`）の公開 API のテスト。
-//! 期待値は原本 99ee013 `pelway-contract` の契約と同じ値（コードポイント数・エラーコード）。
-//! `CommentError::NotAwaitingApproval` は 99ee013 で追加された。
+//! 契約モジュール（`src/contract.rs` の再エクスポート）の公開 API のテスト。
+//! 契約型は `pelway-contract` をそのまま再エクスポートしており、写しではない。
+//! 期待値は原本 `pelway-contract` の契約と同じ値（コードポイント数・ワイヤのエラータグ）。
 
 use pelway_client_core::contract::{
     ApproveError, COMMENT_MAX_CHARS, CardId, CommentError, IdempotencyKey, TaskState, comment_len,
     validate_comment,
 };
+
+// --- 再エクスポートが pelway-contract と同一型であること（写しでないこと） ---
+// 写し（別型の複製）のままだとこれらの代入はコンパイルが通らない。
+
+#[test]
+fn contract_reexports_pelway_contract_types_verbatim() {
+    // ids: CardId（ 他の ID 型も同じ newtype マクロ由来 ）。
+    let card = pelway_client_core::contract::CardId::from("card-1");
+    let original: pelway_contract::ids::CardId = card;
+    assert_eq!(original.as_str(), "card-1");
+    let back: pelway_client_core::contract::CardId = original;
+    assert_eq!(back.as_str(), "card-1");
+    // approval: CommentSaved。
+    let saved = pelway_client_core::contract::CommentSaved {
+        card_id: CardId::from("c1"),
+        comment_id: pelway_client_core::contract::CommentId::from("cmt-1"),
+        card_version: 1,
+        snapshot_hash: "sha256:abc".to_owned(),
+        state: TaskState::AwaitingSendApproval,
+    };
+    let original: pelway_contract::approval::CommentSaved = saved;
+    assert_eq!(original.card_version, 1);
+    // task: TaskState。
+    let state = pelway_client_core::contract::TaskState::Sending;
+    let original: pelway_contract::task::TaskState = state;
+    assert!(original.is_send_side());
+}
 
 // --- comment_len: コードポイント数で数える ---
 
@@ -88,80 +115,68 @@ fn validate_comment_rejects_blank_body() {
     assert_eq!(validate_comment("\n了解\n"), Ok(()));
 }
 
-// --- 承認 API のエラーコード（原本の serde タグ snake_case と同じ値） ---
+// --- 承認 API のエラーのワイヤ形式（原本 pelway-contract の serde タグと同じ値） ---
+// 契約を再エクスポートしたため、タグは serde derive が作る。直列化で確かめる。
+// http_status() の対応は同一型の pelway-contract 側（ledger のテスト）が検証する。
 
 #[test]
 fn approve_error_codes_match_wire_tags() {
     assert_eq!(
-        ApproveError::VersionConflict { current_version: 3 }.code(),
-        "version_conflict"
+        serde_json::to_string(&ApproveError::VersionConflict { current_version: 3 }).unwrap(),
+        r#"{"code":"version_conflict","current_version":3}"#
     );
-    assert_eq!(ApproveError::SnapshotMismatch.code(), "snapshot_mismatch");
     assert_eq!(
-        ApproveError::NotAwaitingApproval {
+        serde_json::to_string(&ApproveError::SnapshotMismatch).unwrap(),
+        r#"{"code":"snapshot_mismatch"}"#
+    );
+    assert_eq!(
+        serde_json::to_string(&ApproveError::NotAwaitingApproval {
             state: TaskState::SentAwaitingReply
-        }
-        .code(),
-        "not_awaiting_approval"
+        })
+        .unwrap(),
+        r#"{"code":"not_awaiting_approval","state":"sent_awaiting_reply"}"#
     );
     assert_eq!(
-        ApproveError::ApprovalInProgress.code(),
-        "approval_in_progress"
+        serde_json::to_string(&ApproveError::ApprovalInProgress).unwrap(),
+        r#"{"code":"approval_in_progress"}"#
     );
     assert_eq!(
-        ApproveError::IdempotencyKeyReused.code(),
-        "idempotency_key_reused"
+        serde_json::to_string(&ApproveError::IdempotencyKeyReused).unwrap(),
+        r#"{"code":"idempotency_key_reused"}"#
     );
-    assert_eq!(ApproveError::CardIdMismatch.code(), "card_id_mismatch");
-    assert_eq!(ApproveError::CardNotFound.code(), "card_not_found");
+    assert_eq!(
+        serde_json::to_string(&ApproveError::CardIdMismatch).unwrap(),
+        r#"{"code":"card_id_mismatch"}"#
+    );
+    assert_eq!(
+        serde_json::to_string(&ApproveError::CardNotFound).unwrap(),
+        r#"{"code":"card_not_found"}"#
+    );
 }
 
-#[test]
-fn approve_error_http_status_matches_contract() {
-    let conflict = ApproveError::VersionConflict { current_version: 1 };
-    assert_eq!(conflict.http_status(), 409);
-    assert_eq!(ApproveError::SnapshotMismatch.http_status(), 409);
-    assert_eq!(
-        ApproveError::NotAwaitingApproval {
-            state: TaskState::Done
-        }
-        .http_status(),
-        409
-    );
-    assert_eq!(ApproveError::ApprovalInProgress.http_status(), 409);
-    assert_eq!(ApproveError::IdempotencyKeyReused.http_status(), 422);
-    assert_eq!(ApproveError::CardIdMismatch.http_status(), 422);
-    assert_eq!(ApproveError::CardNotFound.http_status(), 404);
-}
-
-// --- コメント保存 API のエラー（99ee013 で追加された 409 を含む） ---
+// --- コメント保存 API のエラー ---
 
 #[test]
 fn comment_error_codes_match_wire_tags() {
     assert_eq!(
-        CommentError::NotAwaitingApproval {
+        serde_json::to_string(&CommentError::NotAwaitingApproval {
             state: TaskState::Sending
-        }
-        .code(),
-        "not_awaiting_approval"
+        })
+        .unwrap(),
+        r#"{"code":"not_awaiting_approval","state":"sending"}"#
     );
-    assert_eq!(CommentError::EmptyBody.code(), "empty_body");
-    assert_eq!(CommentError::TooLong { max_chars: 4000 }.code(), "too_long");
-    assert_eq!(CommentError::CardNotFound.code(), "card_not_found");
-}
-
-#[test]
-fn comment_error_http_status_matches_contract() {
     assert_eq!(
-        CommentError::NotAwaitingApproval {
-            state: TaskState::Sending
-        }
-        .http_status(),
-        409
+        serde_json::to_string(&CommentError::EmptyBody).unwrap(),
+        r#"{"code":"empty_body"}"#
     );
-    assert_eq!(CommentError::CardNotFound.http_status(), 404);
-    assert_eq!(CommentError::EmptyBody.http_status(), 422);
-    assert_eq!(CommentError::TooLong { max_chars: 4000 }.http_status(), 422);
+    assert_eq!(
+        serde_json::to_string(&CommentError::TooLong { max_chars: 4000 }).unwrap(),
+        r#"{"code":"too_long","max_chars":4000}"#
+    );
+    assert_eq!(
+        serde_json::to_string(&CommentError::CardNotFound).unwrap(),
+        r#"{"code":"card_not_found"}"#
+    );
 }
 
 // --- ID 型（原本 ids.rs の写し） ---

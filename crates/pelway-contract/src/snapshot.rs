@@ -10,20 +10,12 @@
 use sha2::{Digest, Sha256};
 
 use crate::approval::CardComment;
-use crate::member::MemberKind;
 
 const DOMAIN: &[u8] = b"pelway-contract/snapshot/v1";
 
 fn put(hasher: &mut Sha256, field: &[u8]) {
     hasher.update((field.len() as u64).to_be_bytes());
     hasher.update(field);
-}
-
-fn kind_tag(kind: MemberKind) -> &'static [u8] {
-    match kind {
-        MemberKind::Human => b"human",
-        MemberKind::Ai => b"ai",
-    }
 }
 
 /// 固定 payload の hash とコメント列から `snapshot_hash` を計算する。
@@ -36,7 +28,8 @@ pub fn compute_snapshot_hash(payload_hash: &str, comments: &[CardComment]) -> St
     for c in comments {
         put(&mut hasher, c.comment_id.as_str().as_bytes());
         put(&mut hasher, c.author_id.as_str().as_bytes());
-        put(&mut hasher, kind_tag(c.member_kind));
+        // 種類のタグは MemberKind::as_str（serde のワイヤ値と同じ 4 値）。
+        put(&mut hasher, c.member_kind.as_str().as_bytes());
         put(&mut hasher, c.body.as_bytes());
     }
     let digest = hasher.finalize();
@@ -54,6 +47,7 @@ const HEX: &[u8; 16] = b"0123456789abcdef";
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::member::MemberKind;
 
     fn c(id: &str, body: &str) -> CardComment {
         CardComment {
@@ -79,9 +73,16 @@ mod tests {
         assert_ne!(base, compute_snapshot_hash("p1", &[]));
         assert_ne!(base, compute_snapshot_hash("p1", &[c("cmt-1", "b")]));
         assert_ne!(base, compute_snapshot_hash("p1", &[c("cmt-2", "a")]));
-        let mut ai = c("cmt-1", "a");
-        ai.member_kind = MemberKind::Ai;
-        assert_ne!(base, compute_snapshot_hash("p1", &[ai]));
+        // 種類（仕様 04 §2 の 4 値）が変われば hash も変わる。
+        for kind in [
+            MemberKind::Bot,
+            MemberKind::ExternalAgent,
+            MemberKind::ExternalTool,
+        ] {
+            let mut other = c("cmt-1", "a");
+            other.member_kind = kind;
+            assert_ne!(base, compute_snapshot_hash("p1", &[other]), "{kind:?}");
+        }
         assert_eq!(base, compute_snapshot_hash("p1", &[c("cmt-1", "a")]));
     }
 
