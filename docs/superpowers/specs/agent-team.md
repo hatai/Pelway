@@ -25,13 +25,13 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 3. レビュースレッドは skill `review-pr` に従い、PR に Approve か Request changes を投稿する
 4. Request changes なら、Grok Bot は同じ実装スレッドに `t3 thread send` で修正を指示する。同じスレッドでの修正は 3 回まで。超えたら要約を渡して新しいスレッドにする
 5. Approve されたら、Grok Bot が実装スレッドに知らせ、実装担当が `pr ready` で Draft を解除する（レビュー担当の App には Draft を解除する権限がない）
-6. CI 成功がそろったら、人間が Approve してマージする。マージ後、worktree は自動で削除する
+6. CI 成功がそろったら、人間が Approve してマージする
 
 ## 制約
 
 - `pelway-dev` には GitHub App の Workflows 権限を付けない。`.github/workflows/` の変更は人間が行う（push で動く workflow は承認前に secret を読めるため）
 - PR 1 本の差分は 800 行まで。`.gitattributes` で `linguist-generated` を付けたファイルは数えない
-- GLM の実装スレッドは同時に 3 本まで。超えた分は Grok Bot が順番待ちにする
+- GLM の実装スレッドは同時に 3 本まで、Codex のレビュースレッドは同時に 2 本まで。超えた分は Grok Bot が順番待ちにする
 - GLM は終日使う。時間帯による使用制限はない
 - Grok Bot が渡すプロンプトは Issue 番号と使う skill 名だけにする。作業ルールは AGENTS.md と skill に置く
 - main はブランチ保護で守る。`CODEOWNERS` の `* @hatai` により人間の Approve が必須、CI の `mise run verify` と `pr-size` の成功が必須
@@ -68,7 +68,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 
 - `notify-grokbot.yml` が送るのは、PR のクローズ（マージを含む）、レビューの投稿（OWNER / MEMBER / COLLABORATOR のもの）、verify の完了だけ
 - payload に `urgency` を付ける。`digest`（まとめにだけ反映）は verify の成功と、Approve のレビュー。それ以外は `immediate`
-- Grok Bot は `digest` を朝と夕方の 1 日 2 回のまとめにだけ反映する。部屋で聞かれたときはその場で答える
+- Grok Bot は `digest` を 9:00 と 18:00（日本時間）の 1 日 2 回のまとめにだけ反映する。部屋で聞かれたときはその場で答える
 
 ## レビュー担当の権限
 
