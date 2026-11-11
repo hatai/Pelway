@@ -48,6 +48,53 @@ checksum_source = "mise-versions"
 url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_windows_amd64.zip"
 url_api = "https://api.github.com/repos/k1LoW/octocov/releases/assets/711698411"
 
+[[tools."aqua:taiki-e/cargo-llvm-cov"]]
+version = "0.6.17"
+backend = "aqua:taiki-e/cargo-llvm-cov"
+specifiers = ["0.6.17"]
+
+[tools."aqua:taiki-e/cargo-llvm-cov"."platforms.linux-arm64"]
+checksum = "sha256:483cce0c669c747e845292428156fdf99a53af48acc728731c1f153171f8ca0d"
+checksum_source = "mise-versions"
+url = "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.6.17/cargo-llvm-cov-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/taiki-e/cargo-llvm-cov/releases/assets/270350894"
+
+[tools."aqua:taiki-e/cargo-llvm-cov"."platforms.linux-arm64-musl"]
+checksum = "sha256:c7244f998e53db610e195e8e2419b9fc099a93e0ca9fdd037c3367d7088f3d18"
+checksum_source = "mise-versions"
+url = "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.6.17/cargo-llvm-cov-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/taiki-e/cargo-llvm-cov/releases/assets/270350886"
+
+[tools."aqua:taiki-e/cargo-llvm-cov"."platforms.linux-x64"]
+checksum = "sha256:070c98c1b6093aa8ce1ecf66bae64c41ca2488b0e86fb68224f88067059ae114"
+checksum_source = "mise-versions"
+url = "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.6.17/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/taiki-e/cargo-llvm-cov/releases/assets/270350853"
+
+[tools."aqua:taiki-e/cargo-llvm-cov"."platforms.linux-x64-musl"]
+checksum = "sha256:68002f4e33a316c4e378c506227f29a8f75e9f7cd701c950a6e98126bc634272"
+checksum_source = "mise-versions"
+url = "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.6.17/cargo-llvm-cov-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/taiki-e/cargo-llvm-cov/releases/assets/270350889"
+
+[tools."aqua:taiki-e/cargo-llvm-cov"."platforms.macos-arm64"]
+checksum = "sha256:ea91a9b2ad2b067ab2ad85b0197e0902bf06095b4e53435b86f2b3705eb26a18"
+checksum_source = "mise-versions"
+url = "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.6.17/cargo-llvm-cov-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/taiki-e/cargo-llvm-cov/releases/assets/270351059"
+
+[tools."aqua:taiki-e/cargo-llvm-cov"."platforms.macos-x64"]
+checksum = "sha256:d25070f61cb5b512c2eb4d800809b9fb834b35cea685d2548fed84abe10112ee"
+checksum_source = "mise-versions"
+url = "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.6.17/cargo-llvm-cov-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/taiki-e/cargo-llvm-cov/releases/assets/270350914"
+
+[tools."aqua:taiki-e/cargo-llvm-cov"."platforms.windows-x64"]
+checksum = "sha256:3c9e3874f8dc7720dda8ddecef530aa4821d1c3c6d401db8f5fb3c90a8b5d04a"
+checksum_source = "mise-versions"
+url = "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.6.17/cargo-llvm-cov-x86_64-pc-windows-msvc.tar.gz"
+url_api = "https://api.github.com/repos/taiki-e/cargo-llvm-cov/releases/assets/270350956"
+
 [[tools.fnox]]
 version = "1.47.0"
 backend = "packslip:github.com/jdx/fnox"
