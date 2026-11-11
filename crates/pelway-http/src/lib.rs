@@ -13,6 +13,10 @@
 //!   `POST /v1/workspaces/{workspace_id}/communication-basis-records/{basis_id}/withdraw`
 //!   （撤回 = 取得と同じ1操作）、`POST|GET /v1/workspaces/{workspace_id}/communication-use-policies`。
 //!   保存は [`pelway_contract::store::DataStore`]（メモリのみ・ディスクに書かない）。
+//! - #88 で加えた **仮の経路** `GET /v1/workspaces/{workspace_id}/inbox?actor={member_id}`
+//!   （判断待ち一覧）。一覧用のデータは保存せず、台帳
+//!   （[`pelway_contract::ledger::ApprovalLedger`]）の承認カードを検索して
+//!   その場で組み立てる。
 //! - 認証は無い（デモ用）。comments/approve の要求者は合成ヘッダー
 //!   （`x-pelway-member-id`、`x-pelway-member-kind`。値は仕様 04 §2 の
 //!   `human|bot|external_agent|external_tool`）で受ける。
@@ -781,6 +785,8 @@ fn route(
             Some(log::Route::BasisWithdrawal)
         } else if segments.len() == 5 && segments[4] == "communication-use-policies" {
             Some(log::Route::UsePolicies)
+        } else if segments.len() == 5 && segments[4] == "inbox" {
+            Some(log::Route::Inbox)
         } else {
             None
         };
@@ -807,6 +813,7 @@ fn route(
                 (log::Route::UsePolicies, "GET") => {
                     handle_list_use_policies(req, workspace, store, logger)
                 }
+                (log::Route::Inbox, "GET") => handle_inbox(req, workspace, ledger, logger),
                 _ => Response::error(
                     405,
                     &HttpError::MethodNotAllowed,
@@ -1104,6 +1111,35 @@ fn handle_list_use_policies(
         actor: actor_pid,
     });
     Response::json(200, &policies)
+}
+
+/// 判断待ち一覧の読み取り（#88 の仮の経路 `GET /v1/workspaces/{id}/inbox`）。
+/// 一覧用のデータは保存せず、台帳の承認カード（状態のテーブル）を検索して
+/// その場で組み立てる（[`pelway_contract::inbox::build_inbox`]）。表示対象の
+/// メンバーはクエリ `actor`（合成の利用者 ID。QA-GDPR-02 の仮経路と同じ受け取り）。
+fn handle_inbox(
+    req: &Request,
+    workspace: &str,
+    ledger: &SharedLedger,
+    logger: &log::Logger,
+) -> Response {
+    let Some(actor) = query_param(&req.path, "actor").filter(|a| !a.is_empty()) else {
+        return bad_request();
+    };
+    let workspace_pid = logger.id(workspace);
+    let actor_pid = logger.id(&actor);
+    let Ok(ledger) = ledger.lock() else {
+        return internal_error();
+    };
+    let inbox = ledger.inbox(
+        &WorkspaceId::from(workspace),
+        &MemberId::from(actor.as_str()),
+    );
+    logger.emit(log::Event::InboxListed {
+        workspace: workspace_pid,
+        actor: actor_pid,
+    });
+    Response::json(200, &inbox)
 }
 
 fn reason_phrase(status: u16) -> &'static str {

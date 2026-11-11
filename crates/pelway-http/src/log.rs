@@ -167,6 +167,8 @@ pub enum Route {
     BasisWithdrawal,
     /// 利用方針の作成・読取（QA-GDPR-02 の仮の経路）。
     UsePolicies,
+    /// 判断待ち一覧の読み取り（#88 の仮の経路。workspace ごと・actor はクエリ）。
+    Inbox,
     /// 経路が確定しない読み取りエラー・未知の経路。
     Unknown,
 }
@@ -301,6 +303,11 @@ pub enum Event {
     },
     /// 利用方針を読み取った（一覧。件数は出さない）。
     UsePoliciesListed {
+        workspace: Pseudonym,
+        actor: Pseudonym,
+    },
+    /// 判断待ち一覧を読み取った（#88。件数も項目も出さない）。
+    InboxListed {
         workspace: Pseudonym,
         actor: Pseudonym,
     },

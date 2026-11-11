@@ -28,6 +28,7 @@ use crate::ids::{
 };
 use crate::member::MemberKind;
 use crate::snapshot::compute_snapshot_hash;
+use crate::store::TsMs;
 use crate::task::{ActionKind, TaskState};
 
 /// 新しい承認カードの入力（合成データのみ）。
@@ -41,6 +42,12 @@ pub struct NewCard {
     pub action_kind: ActionKind,
     pub recipient: String,
     pub body: String,
+    /// 依頼した人（「自分の依頼」タブの判定）。
+    pub requester: MemberId,
+    /// 誰の判断待ちか（承認者。`AgentHandoff` では引き継ぎ先の担当）。
+    pub decider: MemberId,
+    /// 判断の期限（並べ替えのキー。期限切れの状態は作らない）。
+    pub deadline: Option<TsMs>,
 }
 
 /// 疑似送信 1 件の記録。実外部への送信ではない。
@@ -142,6 +149,9 @@ impl ApprovalLedger {
             recipient: new.recipient,
             body: new.body,
             state: TaskState::AwaitingSendApproval,
+            requester: new.requester,
+            decider: new.decider,
+            deadline: new.deadline,
             comments: Vec::new(),
             simulated_send_id: None,
         };
@@ -353,6 +363,19 @@ impl ApprovalLedger {
     pub fn send_log(&self) -> &[SimulatedSendRecord] {
         &self.send_log
     }
+
+    /// workspace 内のメンバーの判断待ち一覧（[`crate::inbox::Inbox`]）を作る。
+    /// 一覧用のデータは別に保存せず、この台帳のカード（状態のテーブル）を
+    /// 検索してその場で組み立てる。詳細は [`crate::inbox`] のモジュール説明。
+    #[must_use]
+    pub fn inbox(&self, workspace_id: &WorkspaceId, member: &MemberId) -> crate::inbox::Inbox {
+        crate::inbox::build_inbox(
+            member,
+            self.cards
+                .values()
+                .filter(|c| &c.workspace_id == workspace_id),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -376,6 +399,9 @@ mod tests {
             action_kind: ActionKind::CustomerSend,
             recipient: "customer@example.invalid".to_owned(),
             body: "合成データの本文".to_owned(),
+            requester: "m-human-1".into(),
+            decider: "m-human-1".into(),
+            deadline: None,
         }
     }
 

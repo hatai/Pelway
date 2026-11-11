@@ -54,6 +54,9 @@ fn new_card(id: &str) -> NewCard {
         action_kind: ActionKind::CustomerSend,
         recipient: "customer@example.invalid".to_owned(),
         body: format!("合成データの本文 {CANARY_BODY}"),
+        requester: "m-human-gdpr07".into(),
+        decider: "m-human-gdpr07".into(),
+        deadline: None,
     }
 }
 
