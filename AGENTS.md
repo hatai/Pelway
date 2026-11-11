@@ -23,6 +23,7 @@ Skills and docs state facts only: rules, procedures, definitions, current state.
 The AI dev team (Grok Bot, T3 Code, opencode, Codex) follows `docs/superpowers/specs/agent-team.md`.
 
 - Implementer threads follow the `implement-issue` skill; reviewer threads follow the `review-pr` skill.
+- Grok Bot follows `docs/agents/grokbot-runbook.md`.
 - Agents run `gh` and `git` against GitHub through `scripts/agent-gh <dev|review>`, never through plain `gh`, so that PRs are authored by the GitHub App `pelway-dev[bot]` and reviews by the GitHub App `pelway-review[bot]`.
 - A PR's diff stays within 800 lines as counted by `mise run pr-size`.
 - Labels and who sets them: `docs/agents/triage-labels.md`.
