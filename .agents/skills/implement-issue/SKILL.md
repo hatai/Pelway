@@ -27,13 +27,13 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | `mise run pr-size` が 800 行を超える | 分割案（PR ごとの範囲と見込み行数）。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 
-止まり方（Issue のコメントには、手順 5 の実装者メモも続けて貼る）:
+止まり方（止まった時点で、どの手順の途中でも手順 5 の形で実装者メモを書き、Issue のコメントに続けて貼る。push しないので `docs/worklogs/` には書かなくてよい）:
 
 ```bash
 scripts/agent-gh dev issue comment <N> --body-file - <<'EOF'
 （上の表の内容）
 
-（手順 5 の実装者メモ）
+（手順 5 の形の実装者メモ）
 EOF
 scripts/agent-gh dev issue edit <N> --add-label needs-human
 ```
