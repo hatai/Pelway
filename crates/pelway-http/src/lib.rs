@@ -1,8 +1,12 @@
 //! HTTP 層（下書き・デモ用・認証なし・ループバックのみ）。製品機能の下書きで、
 //! 確定スキーマではない。
 //!
-//! - 経路は docs/technical/v0.7 に comments/approve の定義が無いための
-//!   **仮の経路** `POST /v1/cards/{card_id}/comments` と `POST /v1/cards/{card_id}/approve`。
+//! - 経路は契約（`pelway-contract`）の [`COMMENTS_PATH`](pelway_contract::approval::COMMENTS_PATH)
+//!   / [`APPROVE_PATH`](pelway_contract::approval::APPROVE_PATH)
+//!   （`/v1/approvals/{card_id}/comments`・`/v1/approvals/{card_id}/approve`）。
+//!   仕様 04 §3 の `POST /v1/approvals/{id}/decide` をデモ向けに「コメント保存」と
+//!   「承認」の 2 API に分けたもの（`pelway-contract` の approval.rs 参照）。
+//!   判定は [`match_path`] でテンプレート定数と照合し、経路を書き写さない（Issue #91）。
 //! - QA-GDPR-02 で加えた **仮の経路**（根拠記録・利用方針の作成・読取・撤回。
 //!   12 §3.2 の論理保存単位に対応する仮の名前で、確定 DDL ではない）:
 //!   `POST|GET /v1/workspaces/{workspace_id}/communication-basis-records`、
@@ -10,7 +14,8 @@
 //!   （撤回 = 取得と同じ1操作）、`POST|GET /v1/workspaces/{workspace_id}/communication-use-policies`。
 //!   保存は [`pelway_contract::store::DataStore`]（メモリのみ・ディスクに書かない）。
 //! - 認証は無い（デモ用）。comments/approve の要求者は合成ヘッダー
-//!   （`x-pelway-member-id`、`x-pelway-member-kind: human|ai`）で受ける。
+//!   （`x-pelway-member-id`、`x-pelway-member-kind`。値は仕様 04 §2 の
+//!   `human|bot|external_agent|external_tool`）で受ける。
 //!   QA-GDPR-02 の仮経路では、**合成の利用者 ID を引数（要求本文・クエリの
 //!   `actor`）で受け取る**（開発リードの仮の決め方 2026-11-10。ヘッダーや環境から
 //!   本人を推定しない）。
@@ -693,6 +698,28 @@ fn now_ms() -> u64 {
     log::unix_millis(SystemTime::now())
 }
 
+/// パステンプレート（`/v1/approvals/{card_id}/comments` など）と経路のセグメントを
+/// 照合する。`{name}` は空でなければどの値にも一致し、出現順に返す。契約の経路定数と
+/// サーバーの経路の一致を構造的に保つ（経路を文字列リテラルで書き写さない。Issue #91）。
+fn match_path<'a>(template: &str, segments: &[&'a str]) -> Option<Vec<&'a str>> {
+    let tmpl: Vec<&str> = template.split('/').collect();
+    if tmpl.len() != segments.len() {
+        return None;
+    }
+    let mut params = Vec::new();
+    for (t, s) in tmpl.iter().zip(segments) {
+        if t.starts_with('{') && t.ends_with('}') {
+            if s.is_empty() {
+                return None;
+            }
+            params.push(*s);
+        } else if *t != *s {
+            return None;
+        }
+    }
+    Some(params)
+}
+
 fn route(
     req: &Request,
     ledger: &SharedLedger,
@@ -706,33 +733,32 @@ fn route(
     } else {
         log::Method::Other
     };
-    // 仮の経路: /v1/cards/{card_id}/comments と /v1/cards/{card_id}/approve
-    if segments.len() == 5
-        && segments[1] == "v1"
-        && segments[2] == "cards"
-        && !segments[3].is_empty()
+    // 契約の経路定数（pelway-contract）と照合する。comments/approve は仕様 04 §3 の
+    // `POST /v1/approvals/{id}/decide` をデモ向けに 2 API に分けたもの。
+    let approval = if let Some(params) =
+        match_path(pelway_contract::approval::COMMENTS_PATH, &segments)
     {
-        let card = segments[3];
-        let route_kind = match segments[4] {
-            "comments" => log::Route::Comments,
-            "approve" => log::Route::Approve,
-            _ => log::Route::Unknown,
-        };
+        params.first().map(|&card| (card, log::Route::Comments))
+    } else if let Some(params) = match_path(pelway_contract::approval::APPROVE_PATH, &segments) {
+        params.first().map(|&card| (card, log::Route::Approve))
+    } else {
+        None
+    };
+    if let Some((card, route_kind)) = approval {
         // 要求を受けた: 経路・メソッド・経路の card_id（仮名化）だけ。
         logger.emit(log::Event::RequestReceived {
             route: route_kind,
             method,
             card: Some(logger.id(card)),
         });
-        let resp = match (segments[4], req.method.as_str()) {
-            ("comments", "POST") => handle_comments(req, card, ledger, logger),
-            ("approve", "POST") => handle_approve(req, card, ledger, logger),
-            ("comments", _) | ("approve", _) => Response::error(
+        let resp = match (route_kind, req.method.as_str()) {
+            (log::Route::Comments, "POST") => handle_comments(req, card, ledger, logger),
+            (log::Route::Approve, "POST") => handle_approve(req, card, ledger, logger),
+            _ => Response::error(
                 405,
                 &HttpError::MethodNotAllowed,
                 log::Code::MethodNotAllowed,
             ),
-            _ => Response::error(404, &HttpError::NotFound, log::Code::NotFound),
         };
         return (resp, route_kind);
     }
@@ -839,10 +865,9 @@ fn handle_comments(
     let Some(kind) = header(req, MEMBER_KIND_HEADER) else {
         return bad_request();
     };
-    let member_kind = match kind {
-        "human" => MemberKind::Human,
-        "ai" => MemberKind::Ai,
-        _ => return bad_request(),
+    // 種類は仕様 04 §2 の 4 値（MemberKind::parse が serde のワイヤ値と同じ対応を持つ）。
+    let Some(member_kind) = MemberKind::parse(kind) else {
+        return bad_request();
     };
 
     let Ok(save_req) = serde_json::from_slice::<SaveCommentRequest>(&req.body) else {
@@ -1207,9 +1232,10 @@ mod tests {
 
         // 入口からログを出す。本文を不正な JSON にして 400 になる要求でも、
         // request_received の card 仮名は出る（route が要求受け付け時点で出す）。
+        // 経路は契約の定数（COMMENTS_PATH）から作る。
         let (status, _) = http_post(
             addr,
-            "/v1/cards/card-s5-entry/comments",
+            &pelway_contract::approval::comments_path(&"card-s5-entry".into()),
             &[
                 ("x-pelway-member-id", "m-human-s5"),
                 ("x-pelway-member-kind", "human"),

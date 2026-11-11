@@ -46,6 +46,20 @@ pub const COMMENTS_PATH: &str = "/v1/approvals/{card_id}/comments";
 /// 承認 API のパス。
 pub const APPROVE_PATH: &str = "/v1/approvals/{card_id}/approve";
 
+/// [`COMMENTS_PATH`] の `{card_id}` を差し替えて、要求に使う実際の経路を作る。
+/// サーバー（`pelway-http`）の経路判定もテストもこの関数で経路を作り、
+/// 文字列リテラルで書き写さない（定数と経路の一致を構造的に保つ）。
+#[must_use]
+pub fn comments_path(card_id: &CardId) -> String {
+    COMMENTS_PATH.replace("{card_id}", card_id.as_str())
+}
+
+/// [`APPROVE_PATH`] の `{card_id}` を差し替えて、要求に使う実際の経路を作る。
+#[must_use]
+pub fn approve_path(card_id: &CardId) -> String {
+    APPROVE_PATH.replace("{card_id}", card_id.as_str())
+}
+
 /// コメント本文の上限。単位は Unicode のコードポイント数（Rust の `str::chars().count()`）。
 /// 数え方は [`comment_len`] に一本化する。サーバーもクライアントもこの定数と関数を使う。
 pub const COMMENT_MAX_CHARS: usize = 4000;
@@ -308,5 +322,15 @@ mod tests {
             assert_eq!(validate_comment(blank), Err(CommentError::EmptyBody));
         }
         assert_eq!(validate_comment("\n了解\n"), Ok(()));
+    }
+
+    #[test]
+    fn path_builders_replace_the_card_id_segment() {
+        let card = CardId::from("card-1");
+        assert_eq!(comments_path(&card), "/v1/approvals/card-1/comments");
+        assert_eq!(approve_path(&card), "/v1/approvals/card-1/approve");
+        // テンプレートのプレフィックスは仕様 04 §3 の approvals の下。
+        assert!(comments_path(&card).starts_with("/v1/approvals/"));
+        assert!(approve_path(&card).starts_with("/v1/approvals/"));
     }
 }

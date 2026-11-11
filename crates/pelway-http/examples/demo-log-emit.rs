@@ -58,7 +58,7 @@ fn main() {
         format!("{{\"card_id\": \"card-gdpr07-01\", \"body\": \"確認しました {CANARY_BODY}\"}}");
     let r1 = post(
         addr,
-        "/v1/cards/card-gdpr07-01/comments",
+        &pelway_contract::approval::comments_path(&"card-gdpr07-01".into()),
         &[
             ("Content-Type", "application/json"),
             ("x-pelway-member-id", "m-human-gdpr07"),
@@ -73,7 +73,7 @@ fn main() {
     let approve = approve_json(&ledger, "card-gdpr07-01", "gdpr07-approve-key-000001", None);
     let r2 = post(
         addr,
-        "/v1/cards/card-gdpr07-01/approve",
+        &pelway_contract::approval::approve_path(&"card-gdpr07-01".into()),
         &[("Content-Type", "application/json")],
         &approve,
     );
@@ -88,7 +88,7 @@ fn main() {
     );
     let r3 = post(
         addr,
-        "/v1/cards/card-gdpr07-02/approve",
+        &pelway_contract::approval::approve_path(&"card-gdpr07-02".into()),
         &[("Content-Type", "application/json")],
         &wrong,
     );
@@ -100,7 +100,7 @@ fn main() {
     );
     let r4 = post(
         addr,
-        "/v1/cards/card-gdpr07-02/comments",
+        &pelway_contract::approval::comments_path(&"card-gdpr07-02".into()),
         &[
             ("Content-Type", "application/json"),
             ("x-pelway-member-id", "m-human-gdpr07"),
@@ -116,7 +116,7 @@ fn main() {
     let body = "{\"card_id\": \"card-gdpr07-02\", \"body\": \"内部エラー後のコメント\"}".to_owned();
     let r5 = post(
         addr,
-        "/v1/cards/card-gdpr07-02/comments",
+        &pelway_contract::approval::comments_path(&"card-gdpr07-02".into()),
         &[
             ("Content-Type", "application/json"),
             ("x-pelway-member-id", "m-human-gdpr07"),

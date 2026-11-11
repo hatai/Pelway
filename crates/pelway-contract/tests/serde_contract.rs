@@ -13,14 +13,43 @@ fn member_kind_is_required() {
     let missing = r#"{"member_id":"m1","display_name":"合成ユーザー"}"#;
     assert!(serde_json::from_str::<ChannelMember>(missing).is_err());
 
-    let ok = r#"{"member_id":"m1","display_name":"合成Bot","member_kind":"ai"}"#;
+    let ok = r#"{"member_id":"m1","display_name":"合成Bot","member_kind":"bot"}"#;
     let member: ChannelMember = serde_json::from_str(ok).unwrap();
-    assert_eq!(member.member_kind, MemberKind::Ai);
+    assert_eq!(member.member_kind, MemberKind::Bot);
+}
+
+// 仕様 04 §2 の actors.kind は 4 値。すべて受け付け、同じ値に往復する。
+// as_str / parse（ヘッダー等の素の文字列との変換）も serde のワイヤ値と同じ対応。
+#[test]
+fn member_kind_accepts_all_four_spec_kinds_and_round_trips() {
+    for (wire, kind) in [
+        ("human", MemberKind::Human),
+        ("bot", MemberKind::Bot),
+        ("external_agent", MemberKind::ExternalAgent),
+        ("external_tool", MemberKind::ExternalTool),
+    ] {
+        let json = format!(r#"{{"member_id":"m1","display_name":"x","member_kind":"{wire}"}}"#);
+        let member: ChannelMember =
+            serde_json::from_str(&json).unwrap_or_else(|e| panic!("{wire}: {e}"));
+        assert_eq!(member.member_kind, kind, "{wire}");
+        assert_eq!(
+            serde_json::to_string(&member.member_kind).unwrap(),
+            format!(r#""{wire}""#),
+            "{wire}"
+        );
+        assert_eq!(kind.as_str(), wire, "{wire}");
+        assert_eq!(MemberKind::parse(wire), Some(kind), "{wire}");
+    }
+    // parse は未知の値（旧・デモの `ai`・空・大文字）を拒否する。
+    for bad in ["ai", "", "Human"] {
+        assert_eq!(MemberKind::parse(bad), None, "{bad}");
+    }
 }
 
 #[test]
 fn unknown_member_kind_is_rejected() {
-    for bad in ["robot", "bot", "external_agent", "Human"] {
+    // `ai` は仕様 04 §2 の 4 値に無いため拒否する（旧・デモの 2 値）。
+    for bad in ["robot", "ai", "Human", "external"] {
         let json = format!(r#"{{"member_id":"m1","display_name":"x","member_kind":"{bad}"}}"#);
         assert!(
             serde_json::from_str::<ChannelMember>(&json).is_err(),
