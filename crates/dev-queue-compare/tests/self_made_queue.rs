@@ -136,7 +136,9 @@ async fn enqueue_shares_transaction_with_state_audit_outbox() {
     assert_eq!(claimed.kind, "deliver_state");
     assert_eq!(claimed.payload, json!({"state_row_id": state_id}));
     assert_eq!((claimed.attempts, claimed.max_attempts), (1, 5));
-    complete(&db.pool, claimed.id).await.unwrap();
+    complete(&db.pool, claimed.id, claimed.lease_generation)
+        .await
+        .unwrap();
     assert_eq!(state(&db.pool, claimed.id).await, "done");
     db.dispose().await;
 }
@@ -161,7 +163,7 @@ async fn skip_locked_two_workers_claim_each_job_exactly_once() {
             match dequeue(&pool, 30).await.unwrap() {
                 Some(job) => {
                     claimed.lock().unwrap().push(job.id);
-                    complete(&pool, job.id).await.unwrap();
+                    complete(&pool, job.id, job.lease_generation).await.unwrap();
                 }
                 None => return,
             }
@@ -208,8 +210,8 @@ async fn lease_expiry_retry_cap_and_stop_requests() {
 
     // 再実行上限に達したジョブは dead になり、それ以上引き当てない。
     assert_eq!(
-        fail(&db.pool, id).await.unwrap(),
-        FailOutcome::Dead { attempts: 2 },
+        fail(&db.pool, id, second.lease_generation).await.unwrap(),
+        Some(FailOutcome::Dead { attempts: 2 }),
         "max_attempts=2 の 2 回目の失敗は dead"
     );
     assert_eq!(dequeue(&db.pool, 60).await.unwrap(), None);
@@ -220,8 +222,10 @@ async fn lease_expiry_retry_cap_and_stop_requests() {
     let claimed = dequeue(&db.pool, 60).await.unwrap().unwrap();
     assert_eq!(claimed.id, retry_id);
     assert_eq!(
-        fail(&db.pool, retry_id).await.unwrap(),
-        FailOutcome::Requeued { attempts: 1 },
+        fail(&db.pool, retry_id, claimed.lease_generation)
+            .await
+            .unwrap(),
+        Some(FailOutcome::Requeued { attempts: 1 }),
         "max_attempts=3 の 1 回目の失敗は再実行待ち"
     );
     assert_eq!(state(&db.pool, retry_id).await, "queued");
@@ -241,7 +245,9 @@ async fn lease_expiry_retry_cap_and_stop_requests() {
         stop_requested(&db.pool, running_id).await.unwrap(),
         "実行中ジョブには停止要求フラグが立つ"
     );
-    mark_stopped(&db.pool, running_id).await.unwrap();
+    mark_stopped(&db.pool, running_id, claimed.lease_generation)
+        .await
+        .unwrap();
     assert_eq!(state(&db.pool, running_id).await, "cancelled");
     db.dispose().await;
 }
@@ -283,6 +289,73 @@ async fn lease_expiry_reap_applies_max_attempts_cap() {
     db.dispose().await;
 }
 
+/// レビュー #107 第2回 must-fix（fencing token）: lease 期限切れで別の worker が
+/// 再取得したジョブを、古い worker の complete/fail/mark_stopped が上書きしない。
+#[tokio::test]
+async fn stale_worker_cannot_overwrite_reclaimed_job() {
+    if skip() {
+        return;
+    }
+    let db = TestDb::new().await.unwrap();
+
+    // 古い worker が引き当てた後、lease が切れて別の worker が再取得する。
+    let done_id = enqueue(&db.pool, "fencing_done", 3).await;
+    let old = dequeue(&db.pool, 60)
+        .await
+        .unwrap()
+        .expect("最初の引き当て");
+    assert_eq!(old.id, done_id);
+    backdate_lease(&db.pool, done_id).await;
+    let fresh = dequeue(&db.pool, 60)
+        .await
+        .unwrap()
+        .expect("lease 期限切れの再取得");
+    assert_eq!(fresh.id, done_id);
+    assert!(
+        fresh.lease_generation > old.lease_generation,
+        "再取得で fencing token が進む"
+    );
+
+    // 古い worker の完了は拒否され、新しい実行は実行中のまま。
+    assert!(
+        !complete(&db.pool, old.id, old.lease_generation)
+            .await
+            .unwrap(),
+        "失効した worker の complete は拒否される"
+    );
+    assert_eq!(state(&db.pool, done_id).await, "running");
+    // 新しい worker の完了は受け付けられる。
+    assert!(
+        complete(&db.pool, fresh.id, fresh.lease_generation)
+            .await
+            .unwrap(),
+        "現在の世代の complete は受け付けられる"
+    );
+    assert_eq!(state(&db.pool, done_id).await, "done");
+
+    // 失敗の報告も同様に、古い世代は拒否される。
+    let fail_id = enqueue(&db.pool, "fencing_fail", 3).await;
+    let old = dequeue(&db.pool, 60).await.unwrap().unwrap();
+    assert_eq!(old.id, fail_id);
+    backdate_lease(&db.pool, fail_id).await;
+    let fresh = dequeue(&db.pool, 60).await.unwrap().unwrap();
+    assert_eq!(
+        fail(&db.pool, old.id, old.lease_generation).await.unwrap(),
+        None,
+        "失効した worker の fail は拒否される"
+    );
+    assert_eq!(state(&db.pool, fail_id).await, "running");
+    assert_eq!(
+        fail(&db.pool, fresh.id, fresh.lease_generation)
+            .await
+            .unwrap(),
+        Some(FailOutcome::Requeued { attempts: 2 }),
+        "現在の世代の fail は受け付けられる"
+    );
+    assert_eq!(state(&db.pool, fail_id).await, "queued");
+    db.dispose().await;
+}
+
 /// AC3: NOTIFY は起こす合図として commit と同時に届き、取りこぼしても
 /// 定期の追いつき検索（dequeue の呼び出し）だけでジョブを処理できる。
 #[tokio::test]
@@ -295,19 +368,27 @@ async fn missed_notify_is_covered_by_periodic_catchup_polling() {
     // (a) commit と同時に起こす合図が LISTEN している接続に届く。
     let mut listener = PgListener::connect_with(&db.pool).await.unwrap();
     listener.listen(WAKE_CHANNEL).await.unwrap();
-    let signalled_id = {
+    {
         let mut tx = db.pool.begin().await.unwrap();
-        let id = enqueue_in_tx(&mut tx, "wake", &json!({}), 3).await.unwrap();
+        enqueue_in_tx(&mut tx, "wake", &json!({}), 3).await.unwrap();
         notify_wake_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
-        id
-    };
+    }
     let notification = tokio::time::timeout(std::time::Duration::from_secs(5), listener.recv())
         .await
         .expect("commit と同時に合図が届く")
         .unwrap();
     assert_eq!(notification.channel(), WAKE_CHANNEL);
-    complete(&db.pool, signalled_id).await.unwrap();
+    // (a) のジョブを片付けておく（(b) の引き当て対象を迷わせないため）。
+    let wake = dequeue(&db.pool, 60)
+        .await
+        .unwrap()
+        .expect("wake ジョブを引き当てる");
+    assert!(
+        complete(&db.pool, wake.id, wake.lease_generation)
+            .await
+            .unwrap()
+    );
 
     // (b) 合図を取りこぼす（LISTEN している者を消す）。
     drop(listener);
@@ -332,6 +413,8 @@ async fn missed_notify_is_covered_by_periodic_catchup_polling() {
     .await
     .expect("合図を取りこぼしても定期検索で追いつく");
     assert_eq!(claimed.id, missed_id);
-    complete(&db.pool, claimed.id).await.unwrap();
+    complete(&db.pool, claimed.id, claimed.lease_generation)
+        .await
+        .unwrap();
     db.dispose().await;
 }

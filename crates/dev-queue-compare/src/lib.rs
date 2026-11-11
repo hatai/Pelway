@@ -35,6 +35,7 @@ pub fn create_table_sql() -> &'static str {
         max_attempts     INT         NOT NULL,
         run_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
         lease_until      TIMESTAMPTZ,
+        lease_generation BIGINT      NOT NULL DEFAULT 0,
         cancel_requested BOOLEAN     NOT NULL DEFAULT false,
         created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -42,7 +43,9 @@ pub fn create_table_sql() -> &'static str {
     CREATE INDEX IF NOT EXISTS devq_queue_job_pick ON devq_queue_job (state, run_at, id);"
 }
 
-/// [`dequeue`] が引き当てたジョブ。
+/// [`dequeue`] が引き当てたジョブ。`lease_generation` はこの引き当ての fencing token で、
+/// [`complete`] / [`fail`] / [`mark_stopped`] に渡す。別の worker が lease 期限切れで
+/// 再取得すると世代が進むため、古い世代からの完了・失敗の更新は拒否される。
 #[derive(Debug, PartialEq)]
 pub struct ClaimedJob {
     pub id: i64,
@@ -50,6 +53,7 @@ pub struct ClaimedJob {
     pub payload: Json,
     pub attempts: i32,
     pub max_attempts: i32,
+    pub lease_generation: i64,
 }
 
 /// [`fail`] の結果。`attempts` は失敗後の試行回数。
@@ -105,6 +109,10 @@ pub async fn notify_wake_in_tx(tx: &mut PgConnection) -> sqlx::Result<()> {
 /// に達している行は `dead` にして再取得しない（`fail` 経由と同じ上限。worker の停止を
 /// 繰り返しても試行回数が上限を超えて増えないようにする）。該当がなければ `None`。
 ///
+/// 引き当てのたびに `lease_generation`（fencing token）を 1 進める。呼び出し元は
+/// この値を [`complete`] / [`fail`] / [`mark_stopped`] に渡し、lease 期限切れで別の
+/// worker に再取得された後の古い実行が新しい実行を上書きしないようにする。
+///
 /// # Errors
 ///
 /// SQL の実行に失敗したとき [`sqlx::Error`] を返す。
@@ -112,7 +120,7 @@ pub async fn dequeue<'e, E>(executor: E, lease_secs: i64) -> sqlx::Result<Option
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    let claimed = sqlx::query_as::<_, (i64, String, Json, i32, i32)>(
+    let claimed = sqlx::query_as::<_, (i64, String, Json, i32, i32, i64)>(
         "WITH reaped AS (\
              UPDATE devq_queue_job AS r \
              SET state = 'dead', lease_until = NULL, updated_at = now() \
@@ -127,6 +135,7 @@ where
          SET state = 'running',
              attempts = j.attempts + 1,
              lease_until = now() + make_interval(secs => $1::double precision),
+             lease_generation = j.lease_generation + 1,
              updated_at = now()
          WHERE j.id IN (
              SELECT id FROM devq_queue_job
@@ -137,45 +146,56 @@ where
              LIMIT 1
              FOR UPDATE SKIP LOCKED
          )
-         RETURNING j.id, j.kind, j.payload, j.attempts, j.max_attempts",
+         RETURNING j.id, j.kind, j.payload, j.attempts, j.max_attempts, j.lease_generation",
     )
     .bind(lease_secs)
     .fetch_optional(executor)
     .await?;
-    Ok(
-        claimed.map(|(id, kind, payload, attempts, max_attempts)| ClaimedJob {
+    Ok(claimed.map(
+        |(id, kind, payload, attempts, max_attempts, lease_generation)| ClaimedJob {
             id,
             kind,
             payload,
             attempts,
             max_attempts,
-        }),
-    )
+            lease_generation,
+        },
+    ))
 }
 
-/// ジョブを完了にする。
+/// ジョブを完了にする。`lease_generation` は [`dequeue`] が返した fencing token。
+/// lease 期限切れで別の worker に再取得済みの世代の完了は拒否され、戻り値は `false`。
 ///
 /// # Errors
 ///
 /// SQL の実行に失敗したとき [`sqlx::Error`] を返す。
-pub async fn complete<'e, E>(executor: E, id: i64) -> sqlx::Result<()>
+pub async fn complete<'e, E>(executor: E, id: i64, lease_generation: i64) -> sqlx::Result<bool>
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    sqlx::query("UPDATE devq_queue_job SET state = 'done', lease_until = NULL, updated_at = now() WHERE id = $1")
-        .bind(id)
-        .execute(executor)
-        .await?;
-    Ok(())
+    let updated: Option<i64> = sqlx::query_scalar(
+        "UPDATE devq_queue_job SET state = 'done', lease_until = NULL, updated_at = now() \
+         WHERE id = $1 AND lease_generation = $2 AND state = 'running' RETURNING id",
+    )
+    .bind(id)
+    .bind(lease_generation)
+    .fetch_optional(executor)
+    .await?;
+    Ok(updated.is_some())
 }
 
 /// ジョブを失敗として処理する。`max_attempts` に達していなければ、試行回数の
-/// 2 乗秒（上限 60 秒）のバックオフ付きで再実行待ちに戻す。
+/// 2 乗秒（上限 60 秒）のバックオフ付きで再実行待ちに戻す。`lease_generation` は
+/// [`dequeue`] が返した fencing token で、再取得済みの古い世代の失敗は `None` で拒否。
 ///
 /// # Errors
 ///
-/// SQL の実行に失敗したとき、または該当行が無いとき [`sqlx::Error`] を返す。
-pub async fn fail<'e, E>(executor: E, id: i64) -> sqlx::Result<FailOutcome>
+/// SQL の実行に失敗したとき [`sqlx::Error`] を返す。
+pub async fn fail<'e, E>(
+    executor: E,
+    id: i64,
+    lease_generation: i64,
+) -> sqlx::Result<Option<FailOutcome>>
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
@@ -185,17 +205,20 @@ where
              run_at = now() + make_interval(secs => LEAST(j.attempts * j.attempts, 60)::double precision),
              lease_until = NULL,
              updated_at = now()
-         WHERE id = $1
+         WHERE id = $1 AND lease_generation = $2 AND state = 'running'
          RETURNING state, attempts",
     )
     .bind(id)
+    .bind(lease_generation)
     .fetch_optional(executor)
     .await?;
-    match outcome {
-        Some((state, attempts)) if state == "dead" => Ok(FailOutcome::Dead { attempts }),
-        Some((_state, attempts)) => Ok(FailOutcome::Requeued { attempts }),
-        None => Err(sqlx::Error::RowNotFound),
-    }
+    Ok(outcome.map(|(state, attempts)| {
+        if state == "dead" {
+            FailOutcome::Dead { attempts }
+        } else {
+            FailOutcome::Requeued { attempts }
+        }
+    }))
 }
 
 /// ジョブに停止を要求する。未実行（`queued`）なら即座に `cancelled` にする。
@@ -239,18 +262,23 @@ where
     Ok(requested.unwrap_or(false))
 }
 
-/// 停止要求を拾った worker がジョブを `cancelled` にする。
+/// 停止要求を拾った worker がジョブを `cancelled` にする。`lease_generation` は
+/// [`dequeue`] が返した fencing token で、再取得済みの古い世代の停止は `false` で拒否。
 ///
 /// # Errors
 ///
 /// SQL の実行に失敗したとき [`sqlx::Error`] を返す。
-pub async fn mark_stopped<'e, E>(executor: E, id: i64) -> sqlx::Result<()>
+pub async fn mark_stopped<'e, E>(executor: E, id: i64, lease_generation: i64) -> sqlx::Result<bool>
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    sqlx::query("UPDATE devq_queue_job SET state = 'cancelled', updated_at = now() WHERE id = $1 AND state = 'running'")
-        .bind(id)
-        .execute(executor)
-        .await?;
-    Ok(())
+    let updated: Option<i64> = sqlx::query_scalar(
+        "UPDATE devq_queue_job SET state = 'cancelled', updated_at = now() \
+         WHERE id = $1 AND lease_generation = $2 AND state = 'running' RETURNING id",
+    )
+    .bind(id)
+    .bind(lease_generation)
+    .fetch_optional(executor)
+    .await?;
+    Ok(updated.is_some())
 }
