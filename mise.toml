@@ -129,6 +129,23 @@ run = "bash scripts/tests/pr-size.test.sh && bash scripts/tests/agent-gh.test.sh
 description = "T3 が作った worktree のうち、PR がマージ済み・クローズ済みのものを確認してから消す（--dry-run で一覧だけ）"
 run = "bash scripts/agent-worktree-prune"
 
+[tasks.codex-review-check]
+description = "レビュー担当の Codex（codex_review）のネットワークが GitHub だけに絞られているかを確かめる（Codex を更新したら実行する）"
+run = """
+#!/usr/bin/env bash
+set -uo pipefail
+probe() { codex sandbox --enable network_proxy -P review -- curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$@" 2>/dev/null; }
+ok=1
+for u in https://api.github.com https://github.com; do
+  code="$(probe "$u")"; echo "$u -> $code"; [[ "$code" == 200 ]] || ok=0
+done
+for u in https://example.com; do
+  code="$(probe "$u")"; echo "$u -> ${code:-000}"; [[ "$code" == 000 || -z "$code" ]] || ok=0
+  code="$(probe --noproxy '*' "$u")"; echo "$u (noproxy) -> ${code:-000}"; [[ "$code" == 000 || -z "$code" ]] || ok=0
+done
+((ok)) && echo "codex-review-check: ok" || { echo "codex-review-check: NG（~/.codex/config.toml の [permissions.review] と features を確かめる）"; exit 1; }
+"""
+
 [tasks.agent-watch-install]
 description = "見張り役 pelway-agent-watch を ~/.local/bin にインストールする（pitchfork の agent-watch が動かすバイナリ）"
 run = "cargo install --path crates/pelway-agent-watch --locked --root ~/.local --force"
