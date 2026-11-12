@@ -1,0 +1,127 @@
+{
+  "tokens_path": "/workspace/pelway-design-system/claude-design-export-round3-2026-11-09/pelway.tokens.json",
+  "expected_path": "/workspace/pelway-design-system/ui-pro-review/claude-design-fix-round3-2026-11-09/expected-values.json",
+  "ok": true,
+  "structure": {
+    "dollar_value_count": 514,
+    "looks_dtcg": true,
+    "forbidden_root_keys_present": [],
+    "forbidden_substring_hits": [],
+    "has_2B37FF": false
+  },
+  "value_mismatches": [],
+  "missing_themes": [],
+  "missing_keys": [],
+  "unreadable_values": [],
+  "contrast_issues": [],
+  "personal_name_hits": [],
+  "notes": [],
+  "contrast_pairs_path": "/workspace/pelway-design-system/claude-design-export-round3-2026-11-09/contrast-pairs.json",
+  "known_exception_check": {
+    "required_count": 10,
+    "ke_entries_in_file": 10,
+    "ke_count_ok": true,
+    "present_tokens": [
+      "acc-fill / tile",
+      "avatar-ai-bg / tile",
+      "primary-bg / tile",
+      "acc-fill / bg",
+      "acc-fill / well",
+      "acc-fill / track",
+      "avatar-ai-bg / well",
+      "primary-bg / well",
+      "acc-fill-hover / tile",
+      "acc-fill-pressed / tile"
+    ],
+    "missing_tokens": [],
+    "missing_count": 0,
+    "ratio_mismatches": [],
+    "kind_counts": {
+      "text": 137,
+      "nontext": 24,
+      "decorative": 8,
+      "known-exception": 10
+    },
+    "kind_counts_expected": {
+      "text": 137,
+      "nontext": 24,
+      "decorative": 8,
+      "known-exception": 10
+    },
+    "pair_count": 179,
+    "pair_count_expected": 179,
+    "auto_enumerated_dark_fill_fails": [
+      {
+        "token": "acc-fill / tile",
+        "fg": "#2B36FF",
+        "bg": "#1C1C1F",
+        "ratio": 2.49
+      },
+      {
+        "token": "acc-fill / bg",
+        "fg": "#2B36FF",
+        "bg": "#121214",
+        "ratio": 2.74
+      },
+      {
+        "token": "acc-fill / well",
+        "fg": "#2B36FF",
+        "bg": "#26262A",
+        "ratio": 2.21
+      },
+      {
+        "token": "acc-fill / track",
+        "fg": "#2B36FF",
+        "bg": "#3A3A40",
+        "ratio": 1.65
+      },
+      {
+        "token": "avatar-ai-bg / tile",
+        "fg": "#2B36FF",
+        "bg": "#1C1C1F",
+        "ratio": 2.49
+      },
+      {
+        "token": "avatar-ai-bg / well",
+        "fg": "#2B36FF",
+        "bg": "#26262A",
+        "ratio": 2.21
+      },
+      {
+        "token": "primary-bg / tile",
+        "fg": "#2B36FF",
+        "bg": "#1C1C1F",
+        "ratio": 2.49
+      },
+      {
+        "token": "primary-bg / well",
+        "fg": "#2B36FF",
+        "bg": "#26262A",
+        "ratio": 2.21
+      },
+      {
+        "token": "acc-fill-hover / tile",
+        "fg": "#3F4AFF",
+        "bg": "#1C1C1F",
+        "ratio": 2.94
+      },
+      {
+        "token": "acc-fill-pressed / tile",
+        "fg": "#333EFF",
+        "bg": "#1C1C1F",
+        "ratio": 2.65
+      }
+    ],
+    "auto_uncovered": []
+  },
+  "summary": {
+    "pass": true,
+    "mismatch_count": 0,
+    "missing_key_count": 0,
+    "contrast_issue_count": 0,
+    "personal_name_hit_count": 0,
+    "known_exception_missing_count": 0,
+    "known_exception_file_count": 10,
+    "known_exception_required": 10
+  }
+}
