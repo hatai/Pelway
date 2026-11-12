@@ -15,5 +15,6 @@ v0.7の技術選定を、既存のOSSと競合の構成と比べた調査です�
 | 文書 | 内容 |
 |---|---|
 | [サンドボックス隔離の測定](sandbox-isolation-measurements.md) | WSL2+rootless PodmanでのgVisor（runsc）とcrunの比較。起動時間、syscall互換性、資源使用量、egress拒否、KVM可否 |
+| [Slint と Tauri＋React のクライアント比較](slint-tauri-client-measurements.md) | Slint 1.18.1 の読み上げ時の ListView の重さ（#3867）、可変高の仮想リスト、#10861 の再現可否、wry の Linux のインライン変換、型生成（ts-rs/specta）、wasm-opt の WASM サイズ |
 
 各文書の判定は「MVP前に検証」「将来の候補」「見送り」の3つです。記載は公式ドキュメントと公開リポジトリにもとづき、実機での検証はしていません（測定報告を除く）。
