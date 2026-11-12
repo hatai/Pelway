@@ -5,7 +5,7 @@
 //!
 //! | method/path | 入力 | 動作 |
 //! |---|---|---|
-//! | `POST /v1/approvals/{card_id}/comments` | [`SaveCommentRequest`] | コメントを保存するだけ。状態・`card_version` を変えず、送信しない。新しい `snapshot_hash` を返す。送信承認待ちでないカードには 409 `not_awaiting_approval` |
+//! | `POST /v1/approvals/{card_id}/comments` | [`SaveCommentRequest`] | コメントを保存するだけ。状態・`card_version`・`snapshot_hash` のいずれも変えず、送信しない。現在の `snapshot_hash` を返す。送信承認待ちでないカードには 409 `not_awaiting_approval` |
 //! | `POST /v1/approvals/{card_id}/approve` | [`ApproveRequest`] | 版・snapshot・冪等キーを検査し、疑似送信を 1 回だけ行う |
 //!
 //! # UI とサーバーの役割分担
@@ -18,8 +18,9 @@
 //!
 //! 1. `approve` が呼ばれない限り、何も送らない（コメント保存は送信状態へ移さない）。
 //! 2. `approve` は `card_id`・`card_version`・`snapshot_hash` がすべて現在のカードと
-//!    一致したときだけ受け付ける。コメント保存で `snapshot_hash` は変わるので、
-//!    クライアントはコメント保存の応答 [`CommentSaved::snapshot_hash`] を承認に使う。
+//!    一致したときだけ受け付ける。`snapshot_hash` は正規化した payload
+//!    （[`crate::snapshot::ActionPayload`]）から計算し、コメント保存では変わらない
+//!    （#87）。変わるのは payload 改訂のときだけで、そのときは版も上がる。
 //! 3. 冪等キーは送信前に「処理中」として (`card_id`, `card_version`, `snapshot_hash`) に
 //!    結び付けて記録し、送信が終わったら「完了」にする。
 //!    - 同じキー・同じ内容の再送：完了なら最初と同じ結果を返し、2 回目の送信をしない。
@@ -39,8 +40,9 @@ use crate::ids::{
     CardId, ChannelId, CommentId, IdempotencyKey, MemberId, SimulatedSendId, WorkspaceId,
 };
 use crate::member::MemberKind;
+use crate::snapshot::ActionPayload;
 use crate::store::TsMs;
-use crate::task::{ActionKind, TaskState};
+use crate::task::TaskState;
 
 /// コメント保存 API のパス。
 pub const COMMENTS_PATH: &str = "/v1/approvals/{card_id}/comments";
@@ -94,7 +96,7 @@ pub fn validate_comment(body: &str) -> Result<(), CommentError> {
 /// 承認カード。1 枚が 1 つの不変 `ActionSnapshot`（の現在版）を表す。
 ///
 /// `card_version` は承認に関わる内容（payload の改訂、状態遷移）でだけ増える。
-/// コメント保存では増えないが、`snapshot_hash` は変わる。
+/// コメント保存では `card_version` も `snapshot_hash` も変わらない（#87）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
@@ -103,16 +105,11 @@ pub struct ApprovalCard {
     pub channel_id: ChannelId,
     pub card_id: CardId,
     pub card_version: u64,
-    /// 固定 payload（宛先・本文・添付 hash・scope 等）の hash。
-    pub payload_hash: String,
-    /// 承認者が承認する値。`payload_hash` とコメントから
-    /// [`crate::snapshot::compute_snapshot_hash`] で計算する。
+    /// 正規化した操作の中身（操作の種類・宛先・本文・添付・使うアカウント・範囲）。
+    pub payload: ActionPayload,
+    /// 承認者が承認する hash。`payload` から
+    /// [`crate::snapshot::compute_snapshot_hash`] で計算する。コメントは対象外。
     pub snapshot_hash: String,
-    pub action_kind: ActionKind,
-    /// 表示用の宛先（合成データのみ）。
-    pub recipient: String,
-    /// 表示用の本文（合成データのみ）。
-    pub body: String,
     pub state: TaskState,
     /// 依頼した人（04 §2 の `tasks` の source message を出した人に当たる）。
     /// 判断待ち一覧の「自分の依頼」タブの判定に使う。
@@ -129,7 +126,7 @@ pub struct ApprovalCard {
     pub simulated_send_id: Option<SimulatedSendId>,
 }
 
-/// カードに付いたコメント。`snapshot_hash` の計算に含まれる。
+/// カードに付いたコメント。`snapshot_hash` の計算には含まれない（#87）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
@@ -150,8 +147,9 @@ pub struct SaveCommentRequest {
     pub body: String,
 }
 
-/// コメント保存の結果。状態と版は保存前と同じ値、`snapshot_hash` は保存後の新しい値。
-/// クライアントは承認にこの `snapshot_hash` と `card_version` を使う。
+/// コメント保存の結果。状態・版・`snapshot_hash` はいずれも保存前と同じ値
+/// （コメントは hash に含まれない、#87）。クライアントは承認にこの
+/// `snapshot_hash` と `card_version` をそのまま使える。
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
@@ -214,7 +212,7 @@ pub enum ApproveError {
     VersionConflict {
         current_version: u64,
     },
-    /// 画面の snapshot が古い（コメント保存や payload 改訂のあと）。読み直してから承認し直す。
+    /// 画面の snapshot が古い（payload 改訂のあと）。読み直してから承認し直す。
     SnapshotMismatch,
     /// 送信承認待ちではない（承認済み・送信済み・止まっている等）。
     NotAwaitingApproval {
@@ -252,8 +250,9 @@ pub enum CommentError {
     TooLong {
         max_chars: usize,
     },
-    /// 送信承認待ちではない（送信中・送信済み等）。コメント保存は
-    /// `snapshot_hash` を変えるので、予約・送信記録と食い違うのを防ぐために断る。
+    /// 送信承認待ちではない（送信中・送信済み等）。承認が確定したカードの
+    /// 議論欄を後から変えないために断る（`snapshot_hash` はコメントでは
+    /// 変わらないので、hash 整合のためではない）。
     NotAwaitingApproval {
         state: TaskState,
     },

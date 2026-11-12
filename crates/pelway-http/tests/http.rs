@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use pelway_contract::approval::{ApproveRequest, approve_path, comments_path};
 use pelway_contract::ids::IdempotencyKey;
 use pelway_contract::ledger::{ApprovalLedger, BeginApproval, NewCard};
+use pelway_contract::snapshot::ActionPayload;
 use pelway_contract::task::ActionKind;
 use pelway_http::{
     CONNECTION_DEADLINE, MAX_BODY_BYTES, MAX_HEAD_BYTES, SharedLedger, serve,
@@ -24,10 +25,14 @@ fn new_card(id: &str) -> NewCard {
         workspace_id: "ws-synthetic".into(),
         channel_id: "ch-synthetic".into(),
         card_id: id.into(),
-        payload_hash: "sha256:synthetic-payload-v1".to_owned(),
-        action_kind: ActionKind::CustomerSend,
-        recipient: "customer@example.invalid".to_owned(),
-        body: "合成データの本文".to_owned(),
+        payload: ActionPayload {
+            action_kind: ActionKind::CustomerSend,
+            recipient: "customer@example.invalid".to_owned(),
+            body: format!("合成データの本文 {id}"),
+            attachments: Vec::new(),
+            account: "acct-cw-1".to_owned(),
+            scope: Vec::new(),
+        },
         requester: "m-human-http".into(),
         decider: "m-human-http".into(),
         deadline: None,

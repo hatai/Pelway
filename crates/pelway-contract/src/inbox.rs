@@ -74,8 +74,8 @@ impl InboxItem {
         Self {
             card_id: card.card_id.clone(),
             channel_id: card.channel_id.clone(),
-            action_kind: card.action_kind,
-            recipient: card.recipient.clone(),
+            action_kind: card.payload.action_kind,
+            recipient: card.payload.recipient.clone(),
             state: card.state,
             requester: card.requester.clone(),
             decider: card.decider.clone(),
@@ -118,7 +118,7 @@ where
     let mut inbox = Inbox::default();
     for card in cards {
         if card.decider == *member && is_awaiting_person(card.state) {
-            let reason = if card.action_kind == ActionKind::AgentHandoff {
+            let reason = if card.payload.action_kind == ActionKind::AgentHandoff {
                 InboxReason::Handoff
             } else {
                 InboxReason::Approval
@@ -158,6 +158,7 @@ fn sort_by_deadline(items: &mut [InboxItem]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::snapshot::ActionPayload;
 
     const ME: &str = "m-human-inbox";
     const OTHER: &str = "m-human-other";
@@ -169,11 +170,15 @@ mod tests {
             channel_id: "ch-synthetic-inbox".into(),
             card_id: id.into(),
             card_version: 1,
-            payload_hash: "sha256:synthetic-payload-inbox".to_owned(),
+            payload: ActionPayload {
+                action_kind: ActionKind::CustomerSend,
+                recipient: "customer@example.invalid".to_owned(),
+                body: "合成データの本文".to_owned(),
+                attachments: Vec::new(),
+                account: "acct-cw-1".to_owned(),
+                scope: Vec::new(),
+            },
             snapshot_hash: "sha256:synthetic-snapshot-inbox".to_owned(),
-            action_kind: ActionKind::CustomerSend,
-            recipient: "customer@example.invalid".to_owned(),
-            body: "合成データの本文".to_owned(),
             state,
             requester: ME.into(),
             decider: ME.into(),
@@ -192,10 +197,9 @@ mod tests {
     #[test]
     fn needs_my_decision_lists_what_awaits_me_and_nothing_else() {
         let mine = card("card-approve-me", TaskState::AwaitingSendApproval);
-        let handoff = ApprovalCard {
-            action_kind: ActionKind::AgentHandoff,
-            ..card("card-handoff-me", TaskState::AwaitingDecision)
-        };
+        let mut handoff_card = card("card-handoff-me", TaskState::AwaitingDecision);
+        handoff_card.payload.action_kind = ActionKind::AgentHandoff;
+        let handoff = handoff_card;
         let unknown = card("card-outcome-unknown", TaskState::OutcomeUnknown);
         let not_mine = ApprovalCard {
             decider: OTHER.into(),
@@ -322,10 +326,7 @@ mod tests {
                 workspace_id: "ws-synthetic-inbox".into(),
                 channel_id: "ch-synthetic-inbox".into(),
                 card_id: "card-live".into(),
-                payload_hash: "sha256:synthetic-payload-inbox".to_owned(),
-                action_kind: ActionKind::CustomerSend,
-                recipient: "customer@example.invalid".to_owned(),
-                body: "合成データの本文".to_owned(),
+                payload: card("card-live", TaskState::AwaitingSendApproval).payload,
                 requester: ME.into(),
                 decider: ME.into(),
                 deadline: Some(10_000),
@@ -368,10 +369,7 @@ mod tests {
                     workspace_id: ws.into(),
                     channel_id: "ch-synthetic-inbox".into(),
                     card_id: id.into(),
-                    payload_hash: "sha256:synthetic-payload-inbox".to_owned(),
-                    action_kind: ActionKind::CustomerSend,
-                    recipient: "customer@example.invalid".to_owned(),
-                    body: "合成データの本文".to_owned(),
+                    payload: card(id, TaskState::AwaitingSendApproval).payload,
                     requester: ME.into(),
                     decider: ME.into(),
                     deadline: None,
