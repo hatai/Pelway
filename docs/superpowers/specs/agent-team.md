@@ -1,22 +1,22 @@
 # AI 開発チームの運用仕様
 
-Grok Bot・T3 Code・opencode（glm-5.3）・Codex で組む開発チームの運用ルール。人間の手間を最小にし、品質を保ち、Grok Bot のトークン消費を抑えることを目的とする。
+指揮役（正本は Grok Bot）・T3 Code・opencode（glm-5.3）・Codex・Claude で組む開発チームの運用ルール。人間の手間を最小にし、品質を保ち、指揮役のトークン消費を抑えることを目的とする。この文書は体制と上限の正本で、イベントごとの対応は `docs/agents/grokbot-runbook.md`、指揮役の判断の手順は skill `command-team` に置く。
 
 ## 役割と GitHub 上の名義
 
 | 役割 | 実体 | GitHub 名義 | 認証 |
 |---|---|---|---|
 | 人間（濱田さん） | — | `hatai` | 本人 |
-| 指揮 | Grok Bot（クラウド） | — | T3 Connect 経由の MCP |
+| 指揮 | Grok Bot（クラウド）。動かないときは人間が指名したエージェントが代行する（runbook の「代行」） | — | T3 Connect 経由の MCP |
 | 実装 | T3 スレッド・opencode `zai-coding-plan/glm-5.3` | GitHub App `pelway-dev`（`pelway-dev[bot]`） | App のインストールトークン（呼び出しごとに発行） |
-| レビュー | T3 スレッド・Codex | GitHub App `pelway-review`（`pelway-review[bot]`） | App のインストールトークン（呼び出しごとに発行） |
+| レビュー | T3 スレッド・Codex（`codex_review`）と Claude（`claude_review`、高リスクの PR と抜き取り） | GitHub App `pelway-review`（`pelway-review[bot]`） | App のインストールトークン（呼び出しごとに発行） |
 
 App は 2 つに分ける。同じ名義では自分の PR を Approve できないため。App の秘密鍵と ID は `~/.config/pelway-agent/fnox.toml` に age で暗号化して置き、`scripts/agent-gh` が呼び出しごとにトークンを発行する。
 
 人間が行うのは次の 2 つだけ。
 
 1. タスク定義: Issue Form `agent-task` で Issue を書き、`ready-for-agent` を付ける
-2. マージ承認: PR を `hatai` として Approve し、マージする
+2. マージの委任: 指揮役が、`pelway-review` の Approve と必須チェックの通過を確かめた PR を `--admin` でマージすることを認める（判定が割れた PR、`needs-human` の PR は人間が判断する）
 
 ## タスクの流れ
 
@@ -25,18 +25,19 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 3. レビュースレッドは skill `review-pr` に従い、PR に Approve か Request changes を投稿する
 4. Request changes なら、Grok Bot は同じ実装スレッドに `t3 thread send` で修正を指示する。同じスレッドでの修正は 3 回まで。超えたら要約を渡して新しいスレッドにする
 5. Approve されたら、Grok Bot が実装スレッドに知らせ、実装担当が `pr ready` で Draft を解除する（レビュー担当の App には Draft を解除する権限がない）
-6. CI 成功がそろったら、人間が Approve してマージする
+6. CI 成功がそろったら、指揮役が skill `command-team` の「マージ」に従ってマージする
 7. 終わった worktree は人間が `mise run agent-worktree-prune` で消す
 
 ## 制約
 
 - `pelway-dev` には GitHub App の Workflows 権限を付けない。`.github/workflows/` の変更は人間が行う（push で動く workflow は承認前に secret を読めるため）
-- PR 1 本の差分は追加 800 行・削除 2000 行まで（`mise run pr-size` が追加行と削除行を分けて数える）。`.gitattributes` で `linguist-generated` を付けたファイルは数えない
-- GLM の実装スレッドは同時に 3 本まで、Codex のレビュースレッドは同時に 2 本まで。超えた分は Grok Bot が順番待ちにする
+- PR 1 本の差分は追加 800 行・削除 2000 行まで（`mise run pr-size` が追加行と削除行を分けて数える）。`.gitattributes` で `linguist-generated` を付けたファイルは数えない。指揮役が Issue のコメントで超過を認め `pr-size-exception` ラベルを付けた PR は、pr-size の失敗のままマージしてよい（レビュー担当はこのラベルがあれば pr-size の失敗を must-fix に数えない）
+- GLM の実装スレッドは同時に 3 本まで、Codex のレビュースレッドは同時に 2 本まで、Claude のレビュースレッドは同時に 1 本まで。超えた分は指揮役が順番待ちにする。上限は、Codex の見落とし率とレビューの待ち時間をもとに見直す
 - GLM は終日使う。時間帯による使用制限はない
-- Grok Bot が渡すプロンプトは Issue 番号と使う skill 名だけにする。作業ルールは AGENTS.md と skill に置く
+- 指揮役が渡すプロンプトは Issue 番号と使う skill 名だけにする。作業ルールは AGENTS.md と skill に置く
+- 実装とレビューのモデル・effort は、pr-size の行数、変更パス、ラベル、修正の回数で振り分ける。しきい値は skill `command-team` に置き、改善ループで調整する
 - main はブランチ保護で守る。`CODEOWNERS` の `* @hatai` により人間の Approve が必須、CI の `mise run verify` と `pr-size` の成功が必須
-- hatai 自身が作った PR は hatai が Approve できないため、hatai が管理者として保護を迂回してマージする（`enforce_admins: false`）。エージェントの PR は迂回せず、hatai の Approve でマージする
+- hatai 自身が作った PR は hatai が Approve できないため、hatai が管理者として保護を迂回してマージする（`enforce_admins: false`）。エージェントの PR と指揮役が作った PR は、`pelway-review` の Approve の後、指揮役が委任を受けて保護を迂回してマージする
 
 ## 状態の表し方
 
@@ -57,7 +58,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
     - `ci-failed-twice`: `agent/` ブランチで verify が 2 回続けて失敗した（5 分ごとに `gh run list` で確かめる）
 - payload は `pelway.agent-watch/v1`。スレッド ID、ブランチ、`issue_number`（`agent/<番号>-` から取る）、`round`（スレッドの実行回数）、`report`（最後の返答が `キー: 値` 形式 5 行以内のときだけ、その本文）を含む
 - 同じ出来事からイベントを作るのは 1 回だけ。送れなかったものは送信待ちの列に残して送り直す（受け手には重複して届きうる）。状態は `~/.local/state/pelway/agent-watch.json` に置く
-- 修正が何回目かは `round` で Grok Bot が判断する。修正を出す前に `round` が 4 以上なら（最初の実装 + 修正 3 回）、修正を出さずにエスカレーションする
+- 修正が何回目かは `round` で指揮役が判断する。`round` が 3 の修正では、先に effort を上げるかモデルを替える。修正を出す前に `round` が 4 以上なら（最初の実装 + 修正 3 回）、修正を出さずにエスカレーションする
 
 ## 停止・迷走への対処
 
@@ -75,11 +76,22 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - レビュー担当は PR のコードを実行しない。PR の head は worktree に取り出さずに読み、verify と pr-size は PR のチェック（CI）の結果で判断する（PR のコードはレビュー担当の秘密鍵を読めるため）
 - レビュースレッドは T3 の Codex インスタンス `codex_review` で動かす。ネットワークは `api.github.com` と `github.com` だけに絞る（Codex の `network_proxy` と、`~/.codex/config.toml` の権限プロファイル `review`）
 - レビュースレッドは T3 の権限 `auto-accept-edits`（Codex の `workspaceWrite`）で立てる。`full-access` ではコマンドが sandbox の外で動き、ネットワークの制限が効かない。この権限では `.git` が読み取り専用になるので、PR の側のファイルは GitHub API で読む
+- Claude のレビュースレッドは T3 の Claude インスタンス `claude_review` で動かす。skill `review-pr` をそのまま使い、使えるコマンドを読み取り系の `git` と `scripts/agent-gh review` に絞り、ネットワークを `api.github.com` と `github.com` だけに絞る。設定と確認の方法は `docs/dev-environment.md` の「レビュー担当の Claude」。確認が済むまでは使わない
+- 指揮役はレビューを兼ねない。指揮役が作った PR もレビュースレッドに回す
 
-## Grok Bot の運用ルール
+## 指揮役の運用ルール
 
-- 正本は `docs/agents/grokbot-runbook.md`（役割、同時数の上限、イベントごとの対応表、エスカレーション手順、まとめの書式）
+- イベントごとの対応表は `docs/agents/grokbot-runbook.md`、毎サイクルの判断の手順は skill `command-team`
 - Grok Bot のルーティンとメモリには「この runbook を読んで従う」とだけ書く
+- 見張りと状態は、リポジトリのスクリプト（`pelway-agent-watch`、代行時は `scripts/conductor-watch.sh`）と `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない
+
+## 改善ループ
+
+- 対象は指揮役・実装担当（opencode＋GLM）・レビュー担当（Codex、Claude）の両側
+- 材料は、実装担当が残す実装者メモ（`docs/worklogs/issue-<N>.md`、skill `implement-issue` の手順 5）を一次情報とし、レビューの指摘・差し戻しとセッションの記録で裏を取る。食い違ったら成果物とセッションの記録を優先する
+- 学びとルールは両方のツールが読む共有層（`AGENTS.md`、`.agents/skills/`、`docs/`）だけに書く。`.claude/skills/<name>` は `.agents/skills/<name>` へのシンボリックリンクにし、差分ゼロを確かめる
+- 効果は GLM の成果物でも測る（同じ種類のレビュー指摘・差し戻しの減少）。古い学び・矛盾する学びは改善のたびに直すか消す
+- 手順は skill `command-team` の手順 4
 
 ## 導入の段階
 
