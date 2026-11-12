@@ -17,6 +17,7 @@ Grok Bot がセッションのレート制限で動かない間、Claude Code �
 
 | 8 | CODEOWNERS（`* @hatai`）により、`pelway-review` の Approve だけではマージできない | hatai の承認により、`pelway-review` の Approve と必須チェックの通過を確かめた PR は指揮役が `--admin` でマージする。手順書と仕様に反映する |
 | 9 | pr-size の超過を指揮役が認めても、レビュー担当は「pr-size が失敗」を must-fix に数える決まり | レビューの指示に例外を書き足して回避した（手順書は「指示は Issue 番号と skill 名だけ」）。例外を示すラベル（例：`pr-size-exception`）を作り、review-pr skill が読むようにする |
+| 13 | GLM（zai-coding-plan）の 5 時間あたりの利用上限に達すると、実装スレッドは理由を残さずに `failed` になる（T3 のスレッドの activity にだけ「Usage limit reached」が出る）。runbook の「2 回目の `failed` でエスカレーション」をそのまま当てはめると、上限による失敗まで人間に上げてしまう | 見張り（`scripts/conductor-watch.sh`）が `failed` のときに activity の error の title を読んで出力に含める。利用上限による失敗は、リセット時刻まで新しい実装スレッドを止め、リセット後にやり直しを送る手順を command-team に足す |
 | 10 | 指揮役が PR #113 を、先にマージした PR #111（`NewCard` を `payload` に変更）を取り込まずにマージし、main のビルドを壊した。ファイルが重ならないため取り込みを省いた | skill `command-team` の「マージ」を、マージの直前に PR が今の main を含むかを必ず確かめ、含まなければ取り込んで CI を通す形に直した。main の修正は PR #114 に含めた |
 | 11 | 指揮役と実装担当は、どちらも `pelway-dev` の名義で Issue にコメントするので、`<!-- pr-size-exception -->` のコメントを誰が書いたかをレビュー担当が区別できない（実装担当には skill で禁じているだけ） | 指揮役用の名義（別の GitHub App、または hatai の名義）を分けるか、ラベルを付けた者をタイムラインの API で確かめる方式を検討する |
 | 12 | 再起動の後に T3 がスレッドを自動で再開すると、その分も実行回数（`round`）に数えられる（#100 は差し戻し 1 回目で ordinal 5） | `round` をスレッドの実行回数ではなく、指揮役が送った修正の指示の回数で数える方式を検討する |
