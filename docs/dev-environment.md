@@ -57,6 +57,8 @@ mise bootstrap    # 上の1〜3を順に実行
 | `mise run hk-validate` / `hk-check` | `hk.pkl` の検証 / リポジトリ全体の読み取り専用検査（cargo を伴わないステップだけ。cargo を伴う検査は `fmt-check` / `clippy` が担当する） |
 | `mise run fnox-check` | `fnox list`（定義の一覧確認。秘密値の取得・表示はしない） |
 | `mise run pitchfork-check` | pitchfork のバージョン確認と、`pitchfork.toml` に `agent-watch` が定義されていることの確認 |
+| `mise run demo-check` | デモ受入前の 4 段階検査（`scripts/demo-check/run.sh`。受入は引数なしの全段階実行だけ有効。canary 段階は成果物が無いと未検証で失敗するため、製品をビルドしたあとに実行する） |
+| `mise run demo-check-selftest` | demo-check の自己テスト（`script-test` 経由で `verify-test` にも含まれる） |
 | `mise run verify-lint` / `verify-test` / `verify-static` | 検査の 3 グループ（cargo でコンパイルするのは `verify-lint` と `verify-test` の 2 つだけ） |
 | `mise run verify` | 上記 3 グループの一括確認（依存タスクは**並列**実行） |
 | `mise exec -- hk fix` | 修正の適用（ワークツリー。ステージはしない） |
@@ -181,6 +183,7 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.claude_review` | `driver: claudeAgent`、`environment` に `CLAUDE_CONFIG_DIR=~/.claude-review`（指揮役・実装担当の Claude と設定を分ける） |
 | `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドを読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`）と `scripts/agent-gh review` に絞り、ファイルの書き込みを拒否する |
+| socat | Claude Code の sandbox（Linux）が使う。`mise.toml` の `conda:socat` で `mise install`（`mise bootstrap`）が入れる。apt と sudo は要らない |
 | ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
 
 運用に入る前に、`auto-accept-edits` のスレッドで次を確かめる。確かめるまでは `claude_review` を使わない。
