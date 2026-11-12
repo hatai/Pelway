@@ -18,6 +18,8 @@ tokio = { version = "1", features = ["macros", "rt"] }
 # 合成データ（JSON）の読み込みと表の組み立て。
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# `--base-url` の検証（http/https の URL だけを受け付ける）。
+url = "2"
 
 [dev-dependencies]
 # テスト内のモックHTTPサーバー（ローカルのみ・外部に出ない）。

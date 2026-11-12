@@ -99,7 +99,7 @@ description = "依存クレートを取得する（--locked で Cargo.lock を�
 run = "cargo fetch --locked"
 
 [tasks.llm-eval]
-description = "LLMゲートウェイの測定（#95）。合成データ（日本語の業務文）を chat/embed に流し、スキーマ適合率・応答時間・トークン数・recall@k の表を出力。実行例: mise run llm-eval -- --provider zai（fnox の PELWAY_LLM_API_KEY を使用。モック向けは --base-url http://127.0.0.1:PORT/v1）。CI は tests/eval.rs のモック試験のみ"
+description = "LLMゲートウェイの測定（#95）。合成データでスキーマ適合率・応答時間・トークン数・recall@k の表を出力。例: mise run llm-eval -- --provider zai（fnox の PELWAY_LLM_API_KEY 使用。CI は tests/eval.rs のモック試験のみ）"
 run = "cargo run --quiet -p pelway-dev-llm-eval --locked"
 
 [tasks.toolchain-check]

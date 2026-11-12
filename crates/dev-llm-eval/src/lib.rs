@@ -272,7 +272,7 @@ pub struct CliOptions {
     pub https_only: bool,
 }
 
-/// 引数を解析する。不明なフラグは `Err`。
+/// 引数を解析する。不明なフラグ・空の値・範囲や形式に合わない値は `Err`（`--k` は1以上、PR #176 の must-fix）。
 pub fn parse_args(args: impl Iterator<Item = String>) -> Result<CliOptions, String> {
     let mut provider = "zai".to_string();
     let mut base_url: Option<String> = None;
@@ -287,6 +287,9 @@ pub fn parse_args(args: impl Iterator<Item = String>) -> Result<CliOptions, Stri
         let Some(value) = items.get(index + 1) else {
             return Err(format!("{flag} には値が要ります"));
         };
+        if value.is_empty() {
+            return Err(format!("{flag} に空の値は指定できません"));
+        }
         match flag {
             "--provider" => provider = value.clone(),
             "--base-url" => base_url = Some(value.clone()),
@@ -295,12 +298,27 @@ pub fn parse_args(args: impl Iterator<Item = String>) -> Result<CliOptions, Stri
             "--api-key-env" => api_key_env = value.clone(),
             "--k" => {
                 k = value
-                    .parse()
-                    .map_err(|_| format!("--k には正の整数を指定してください: {value}"))?;
+                    .parse::<std::num::NonZeroUsize>()
+                    .map_err(|_| format!("--k には1以上の整数を指定してください: {value}"))?
+                    .get();
             }
             other => return Err(format!("不明な引数です: {other}")),
         }
         index += 2;
+    }
+    if provider != "zai" && provider != "openai" {
+        return Err(format!(
+            "--provider には zai か openai を指定してください: {provider}"
+        ));
+    }
+    if let Some(base_url) = &base_url
+        && !base_url
+            .parse::<url::Url>()
+            .is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https"))
+    {
+        return Err(format!(
+            "--base-url には http/https の URL を指定してください: {base_url}"
+        ));
     }
     let effective_base = base_url
         .clone()

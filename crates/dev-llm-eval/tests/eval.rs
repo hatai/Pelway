@@ -226,3 +226,61 @@ fn args_defaults_and_overrides() {
 
     assert!(parse_args(["llm-eval".to_string(), "--nope".to_string()].into_iter()).is_err());
 }
+
+/// 引数の範囲・形式の検証（PR #176 の must-fix と同じ種類の抜け）。
+#[test]
+fn args_reject_invalid_values() {
+    for bad in ["0", "-1", "abc"] {
+        let err =
+            parse_args(["llm-eval".to_string(), "--k".to_string(), bad.to_string()].into_iter());
+        assert!(err.is_err(), "--k {bad} は拒否されるべき");
+    }
+    assert!(
+        parse_args(["llm-eval".to_string(), "--k".to_string(), "999".to_string()].into_iter())
+            .is_ok()
+    );
+    for flag in [
+        "--provider",
+        "--base-url",
+        "--chat-model",
+        "--embed-model",
+        "--api-key-env",
+    ] {
+        let err =
+            parse_args(["llm-eval".to_string(), flag.to_string(), "".to_string()].into_iter());
+        assert!(err.is_err(), "{flag} の空の値は拒否されるべき");
+    }
+    assert!(
+        parse_args(
+            [
+                "llm-eval".to_string(),
+                "--provider".to_string(),
+                "foo".to_string()
+            ]
+            .into_iter()
+        )
+        .is_err()
+    );
+    for bad in ["notaurl", "ftp://example.com/v1", "http://", "https:///"] {
+        let err = parse_args(
+            [
+                "llm-eval".to_string(),
+                "--base-url".to_string(),
+                bad.to_string(),
+            ]
+            .into_iter(),
+        );
+        assert!(err.is_err(), "--base-url {bad} は拒否されるべき");
+    }
+    assert!(
+        parse_args(
+            [
+                "llm-eval".to_string(),
+                "--base-url".to_string(),
+                "https://api.z.ai/api/paas/v4".to_string()
+            ]
+            .into_iter()
+        )
+        .is_ok()
+    );
+}
