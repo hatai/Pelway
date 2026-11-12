@@ -259,6 +259,13 @@ impl ApprovalLedger {
         member_kind: MemberKind,
         req: SaveCommentRequest,
     ) -> Result<CommentSaved, CommentError> {
+        // #103: 承認カードからの一連の処理に、カードから決まる共通の trace id を付ける。
+        let span = tracing::info_span!(
+            "save_comment",
+            trace_id = %crate::trace::trace_id_for_card(&req.card_id),
+            card = %req.card_id,
+        );
+        let _guard = span.enter();
         let card = self
             .cards
             .get_mut(&req.card_id)
@@ -292,6 +299,13 @@ impl ApprovalLedger {
     /// [`ApproveError`] のいずれか。エラーのときは何も送らず、キーも記録しない
     /// （既存の記録は変えない）。
     pub fn begin_approve(&mut self, req: &ApproveRequest) -> Result<BeginApproval, ApproveError> {
+        // #103: 承認の前半にも同じ trace id（カードから決まる）。
+        let span = tracing::info_span!(
+            "begin_approve",
+            trace_id = %crate::trace::trace_id_for_card(&req.card_id),
+            card = %req.card_id,
+        );
+        let _guard = span.enter();
         let binding = ApprovalBinding::of(req);
         if let Some(entry) = self.idempotency.get(&req.idempotency_key) {
             if entry.binding != binding {
@@ -345,6 +359,13 @@ impl ApprovalLedger {
         &mut self,
         ticket: SendTicket,
     ) -> Result<ApproveOutcome, ApproveError> {
+        // #103: 承認の後半にも同じ trace id。チケット（予約）のカードから決める。
+        let span = tracing::info_span!(
+            "perform_simulated_send",
+            trace_id = %crate::trace::trace_id_for_card(&ticket.binding.card_id),
+            card = %ticket.binding.card_id,
+        );
+        let _guard = span.enter();
         let card = self
             .cards
             .get_mut(&ticket.binding.card_id)
@@ -385,6 +406,13 @@ impl ApprovalLedger {
     /// ライブラリ部では呼ばれないため、テスト専用として許可する。
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn abort_before_send(&mut self, ticket: SendTicket) {
+        // #103: 送信前の中止にも同じ trace id。
+        let span = tracing::info_span!(
+            "abort_before_send",
+            trace_id = %crate::trace::trace_id_for_card(&ticket.binding.card_id),
+            card = %ticket.binding.card_id,
+        );
+        let _guard = span.enter();
         self.idempotency.remove(&ticket.key);
         if let Some(card) = self.cards.get_mut(&ticket.binding.card_id)
             && card.state == TaskState::Sending
@@ -398,6 +426,14 @@ impl ApprovalLedger {
     /// # Errors
     /// [`ApproveError`] のいずれか。
     pub fn approve(&mut self, req: ApproveRequest) -> Result<ApproveOutcome, ApproveError> {
+        // #103: 承認の全体にも同じ trace id。内側の begin_approve・
+        // perform_simulated_send の span はこの span の下に並ぶ。
+        let span = tracing::info_span!(
+            "approve",
+            trace_id = %crate::trace::trace_id_for_card(&req.card_id),
+            card = %req.card_id,
+        );
+        let _guard = span.enter();
         match self.begin_approve(&req)? {
             BeginApproval::Replay(outcome) => Ok(outcome),
             BeginApproval::Reserved(ticket) => self.perform_simulated_send(ticket),
@@ -1352,5 +1388,173 @@ mod tests {
             ledger.create_card(self_a).unwrap_err(),
             CreateCardError::RequesterAsDeciderNotAllowed
         );
+    }
+
+    // ---- tracing: 承認カードからの一連の処理で共通の trace id（#103） ----
+
+    /// テストバイナリ全体で一度だけ大域の subscriber（中身のない [`Registry`]）を設定する。
+    ///
+    /// span の macro は大域にキャッシュした callsite の interest を先に見る。ほかの
+    /// テストスレッドが subscriber 無しで同じ callsite を先に評価すると「無効」が
+    /// キャッシュされ、このテストの `with_default` 側で span が作られなくなる
+    /// （実行順で結果が変わる）。大域に実subscriber を置いておけば、interest の評価が
+    /// 常に「無効」で終わらず、スレッドごとの `with_default` が正しく効く。
+    ///
+    /// [`Registry`]: tracing_subscriber::registry::Registry
+    fn install_global_test_registry() {
+        use std::sync::OnceLock;
+        static GLOBAL: OnceLock<()> = OnceLock::new();
+        GLOBAL.get_or_init(|| {
+            let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry());
+        });
+    }
+
+    /// テスト用の span 記録器。span の名前と `trace_id`・`card` フィールドを取る。
+    /// （テキスト整形に依存せず、意味的な値を直接確かめる。）
+    #[derive(Default, Clone)]
+    struct SpanCapture {
+        spans: std::sync::Arc<std::sync::Mutex<Vec<(String, String, String)>>>,
+    }
+
+    impl SpanCapture {
+        fn take(&self) -> Vec<(String, String, String)> {
+            self.spans.lock().expect("span capture lock").clone()
+        }
+    }
+
+    struct CaptureFields {
+        trace_id: String,
+        card: String,
+    }
+
+    impl tracing::field::Visit for CaptureFields {
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            match field.name() {
+                "trace_id" => self.trace_id = value.to_owned(),
+                "card" => self.card = value.to_owned(),
+                _ => {}
+            }
+        }
+
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            // `%`（Display）で記録したフィールドは Debug 経由で届く。
+            match field.name() {
+                "trace_id" => self.trace_id = format!("{value:?}"),
+                "card" => self.card = format!("{value:?}"),
+                _ => {}
+            }
+        }
+    }
+
+    impl<S> tracing_subscriber::Layer<S> for SpanCapture
+    where
+        S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    {
+        fn on_new_span(
+            &self,
+            attrs: &tracing::span::Attributes<'_>,
+            _id: &tracing::span::Id,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            let mut fields = CaptureFields {
+                trace_id: String::new(),
+                card: String::new(),
+            };
+            attrs.record(&mut fields);
+            self.spans.lock().expect("span capture lock").push((
+                attrs.metadata().name().to_owned(),
+                fields.trace_id,
+                fields.card,
+            ));
+        }
+    }
+
+    /// #103 の受け入れ条件: コメント保存も承認（予約・疑似送信を含む）も、
+    /// 同じカードならすべて同じ trace id の span に載る。
+    #[test]
+    fn approval_chain_spans_share_trace_id_per_card() {
+        install_global_test_registry();
+        let capture = SpanCapture::default();
+        {
+            use tracing_subscriber::layer::SubscriberExt;
+            let subscriber = tracing_subscriber::registry().with(capture.clone());
+            tracing::subscriber::with_default(subscriber, || {
+                let mut ledger = ApprovalLedger::new();
+                ledger.create_card(new_card("card-a")).expect("new card");
+                ledger.create_card(new_card("card-b")).expect("new card");
+
+                comment(&mut ledger, "card-a", "宛先を確認しました");
+                let approve_request = current_req(&ledger, "card-a", "k1");
+                ledger.approve(approve_request).expect("approved");
+                comment(&mut ledger, "card-b", "先方に問い合わせ中");
+            });
+        }
+
+        let spans = capture.take();
+        assert!(
+            !spans.is_empty(),
+            "承認まわりの操作で span が 1 つも出ていない"
+        );
+        let expected_a = crate::trace::trace_id_for_card(&"card-a".into()).to_string();
+        let expected_b = crate::trace::trace_id_for_card(&"card-b".into()).to_string();
+        assert_ne!(expected_a, expected_b);
+
+        // すべての span が trace_id と card を持つ。
+        for (name, trace_id, card) in &spans {
+            assert!(!trace_id.is_empty(), "{name} に trace_id が無い");
+            assert!(!card.is_empty(), "{name} に card が無い");
+        }
+
+        // card-a: コメント保存・承認の全体・予約・疑似送信が同じ trace id。
+        for phase in [
+            "save_comment",
+            "approve",
+            "begin_approve",
+            "perform_simulated_send",
+        ] {
+            let phase_spans: Vec<&(String, String, String)> = spans
+                .iter()
+                .filter(|(name, _, card)| name == phase && card == "card-a")
+                .collect();
+            assert_eq!(phase_spans.len(), 1, "{phase} の span が {phase_spans:?}");
+            assert_eq!(
+                phase_spans[0].1, expected_a,
+                "{phase} の trace_id が導出値と違う"
+            );
+        }
+
+        // card-b のコメント保存は別の trace id。
+        let card_b = spans
+            .iter()
+            .find(|(name, _, card)| name == "save_comment" && card == "card-b")
+            .expect("card-b の save_comment span");
+        assert_eq!(card_b.1, expected_b);
+    }
+
+    /// 送信前の中止（`abort_before_send`）も同じカードの trace id を載せる。
+    #[test]
+    fn abort_before_send_shares_the_card_trace_id() {
+        install_global_test_registry();
+        let capture = SpanCapture::default();
+        {
+            use tracing_subscriber::layer::SubscriberExt;
+            let subscriber = tracing_subscriber::registry().with(capture.clone());
+            tracing::subscriber::with_default(subscriber, || {
+                let mut ledger = ledger_with_card("card-a");
+                let req = current_req(&ledger, "card-a", "k1");
+                let ticket = reserve(&mut ledger, &req);
+                ledger.abort_before_send(ticket);
+            });
+        }
+        let spans = capture.take();
+        let expected = crate::trace::trace_id_for_card(&"card-a".into()).to_string();
+        for phase in ["begin_approve", "abort_before_send"] {
+            assert!(
+                spans.iter().any(|(name, trace_id, card)| name == phase
+                    && card == "card-a"
+                    && *trace_id == expected),
+                "{phase} の span が {spans:?} に無い"
+            );
+        }
     }
 }

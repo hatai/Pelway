@@ -82,6 +82,7 @@ use pelway_contract::store::{
 use serde::Serialize;
 
 pub mod log;
+pub mod trace;
 
 // GDPR-07「本文を残さないログ」の検証（QA 用）。もともと tests/no_body_logs.rs の
 // 結合テストだったが、r3 で `Logger::with_sink` をクレート外に公開しない形にした
