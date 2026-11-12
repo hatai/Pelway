@@ -3,13 +3,15 @@
 //!
 //! モックサーバーは `tokio::net::TcpListener` 上の最小の HTTP/1.1 サーバーで、
 //! 受け取った要求（メソッド・パス・Authorization・本文）を記録し、
-//! テストが指定した応答を返す。応答は `Connection: close` で
+//! テストが指定した応答（即時 / 遅延）を返す。応答は `Connection: close` で
 //! 接続を閉じるため、要求1件ごとに接続が1本になる。
 
+use std::io::Write;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pelway_llm::token::{SecretToken, TokenSource};
+use pelway_llm::token::{FnoxEnvTokenSource, SecretToken, TokenSource};
 use pelway_llm::{
     CallBudget, ChatMessage, ChatRequest, GatewayOptions, LlmError, LlmGateway, OpenAiGateway,
     ProviderConfig, ResponseFormatCapability,
@@ -29,7 +31,16 @@ struct Recorded {
 
 /// モックの応答方法。
 enum Reply {
-    Json { status: u16, body: String },
+    Json {
+        status: u16,
+        body: String,
+    },
+    /// `after` 待ってから応答する（クライアントの全体タイムアウトを試す）。
+    DelayedJson {
+        after: Duration,
+        status: u16,
+        body: String,
+    },
 }
 
 impl Reply {
@@ -57,6 +68,18 @@ struct Mock {
 impl Mock {
     fn records(&self) -> Vec<Recorded> {
         self.records.lock().unwrap().clone()
+    }
+
+    /// 記録が `count` 件に届くまで待つ（遅延応答の試験で使う）。
+    async fn await_records(&self, count: usize) -> Vec<Recorded> {
+        for _ in 0..100 {
+            let records = self.records();
+            if records.len() >= count {
+                return records;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        self.records()
     }
 }
 
@@ -142,6 +165,14 @@ async fn serve_connection(
     records.lock().unwrap().push(record.clone());
     match handler(&record) {
         Reply::Json { status, body } => write_response(&mut stream, status, &body).await?,
+        Reply::DelayedJson {
+            after,
+            status,
+            body,
+        } => {
+            tokio::time::sleep(after).await;
+            write_response(&mut stream, status, &body).await?;
+        }
     }
     stream.shutdown().await.ok();
     Ok(())
@@ -472,6 +503,249 @@ async fn usage_accumulates_and_budget_stops_before_send() {
     assert!(matches!(err, LlmError::NotSent(_)), "{err:?}");
     // 上限での停止は送信前: モックは2件しか受けていない。
     assert_eq!(mock.records().len(), 2);
+}
+
+// ---- 受け入れ条件: 再送しない（5xx・タイムアウトで要求は1回）----
+
+/// 5xx と 429 は拒否として返り、再送されない（要求は1回だけ）。
+#[tokio::test]
+async fn rejected_responses_are_returned_without_retry() {
+    for status in [500u16, 429] {
+        let mock = mock_server(Arc::new(move |_: &Recorded| Reply::status(status))).await;
+        let gateway = test_gateway(
+            &mock.base_url,
+            ResponseFormatCapability::JsonSchema,
+            options(),
+        );
+        let err = chat(&gateway, "要約して").await.unwrap_err();
+        match err {
+            LlmError::Rejected { status: got, .. } => assert_eq!(got, status),
+            other => panic!("{status} は Rejected になるべき: {other:?}"),
+        }
+        // 自動再送も提供元の切替もしない: 設定した1つのオリジンへ1回だけ。
+        assert_eq!(mock.records().len(), 1);
+    }
+}
+
+/// 応答が遅く全体タイムアウトを過ぎると結果不明。要求は1回だけ。
+#[tokio::test]
+async fn timeout_after_send_is_outcome_unknown_without_resend() {
+    let slow_body = chat_json("\"遅い\"");
+    let mock = mock_server(Arc::new(move |_: &Recorded| Reply::DelayedJson {
+        after: Duration::from_secs(30),
+        status: 200,
+        body: slow_body.clone(),
+    }))
+    .await;
+    let mut opts = options();
+    opts.timeout = Duration::from_millis(500);
+    let gateway = test_gateway(&mock.base_url, ResponseFormatCapability::JsonSchema, opts);
+    let err = chat(&gateway, "要約して").await.unwrap_err();
+    assert!(matches!(err, LlmError::OutcomeUnknown(_)), "{err:?}");
+    assert_eq!(mock.await_records(1).await.len(), 1);
+}
+
+// ---- 受け入れ条件: エラーの4分類 ----
+
+/// 接続先がない（接続拒否）場合は未送信。
+#[tokio::test]
+async fn connection_refused_is_not_sent() {
+    // 使っていないポートを1つ確保して閉じ、そこへ向ける。
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let gateway = test_gateway(
+        &format!("http://{addr}/v1"),
+        ResponseFormatCapability::JsonSchema,
+        options(),
+    );
+    let err = chat(&gateway, "要約して").await.unwrap_err();
+    assert!(matches!(err, LlmError::NotSent(_)), "{err:?}");
+}
+
+/// 200 でも解釈できない本文は Invalid。
+#[tokio::test]
+async fn malformed_success_response_is_invalid() {
+    let mock = mock_server(Arc::new(|_: &Recorded| {
+        Reply::ok("これは JSON ではありません")
+    }))
+    .await;
+    let gateway = test_gateway(
+        &mock.base_url,
+        ResponseFormatCapability::JsonSchema,
+        options(),
+    );
+    let err = chat(&gateway, "要約して").await.unwrap_err();
+    assert!(matches!(err, LlmError::Invalid(_)), "{err:?}");
+
+    // JSON だが chat completions の形でない（choices がない）場合も Invalid。
+    let bad_shape = r#"{"id":"cmpl-mock","model":"mock-chat"}"#;
+    let mock = mock_server(Arc::new(move |_: &Recorded| Reply::ok(bad_shape))).await;
+    let gateway = test_gateway(
+        &mock.base_url,
+        ResponseFormatCapability::JsonSchema,
+        options(),
+    );
+    let err = chat(&gateway, "要約して").await.unwrap_err();
+    assert!(matches!(err, LlmError::Invalid(_)), "{err:?}");
+}
+
+// ---- 受け入れ条件: トークン（要求ごとの取り出し・秘匿）----
+
+/// 呼出しごとに TokenSource からトークンを取り出して Authorization に使う。
+#[tokio::test]
+async fn token_is_fetched_per_request() {
+    struct Rotating(AtomicUsize);
+    impl TokenSource for Rotating {
+        fn token(&self) -> Result<pelway_llm::SecretToken, LlmError> {
+            Ok(pelway_llm::SecretToken::new(format!(
+                "tok-{}",
+                self.0.fetch_add(1, Ordering::SeqCst)
+            )))
+        }
+    }
+    let payload = chat_json("\"ok\"");
+    let mock = mock_server(Arc::new(move |_: &Recorded| Reply::ok(&payload))).await;
+    let gateway = OpenAiGateway::new(
+        &config(&mock.base_url, ResponseFormatCapability::JsonSchema),
+        Arc::new(Rotating(AtomicUsize::new(0))),
+        &options(),
+    )
+    .unwrap();
+    chat(&gateway, "1 回目").await.unwrap();
+    chat(&gateway, "2 回目").await.unwrap();
+    let records = mock.records();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].authorization.as_deref(), Some("Bearer tok-0"));
+    assert_eq!(records[1].authorization.as_deref(), Some("Bearer tok-1"));
+}
+
+/// トークン取得に失敗すると要求は送られない。
+#[tokio::test]
+async fn token_failure_aborts_before_send() {
+    struct Broken;
+    impl TokenSource for Broken {
+        fn token(&self) -> Result<pelway_llm::SecretToken, LlmError> {
+            Err(LlmError::NotSent("トークンが無効".to_string()))
+        }
+    }
+    let payload = chat_json("\"ok\"");
+    let mock = mock_server(Arc::new(move |_: &Recorded| Reply::ok(&payload))).await;
+    let gateway = OpenAiGateway::new(
+        &config(&mock.base_url, ResponseFormatCapability::JsonSchema),
+        Arc::new(Broken),
+        &options(),
+    )
+    .unwrap();
+    let err = chat(&gateway, "要約して").await.unwrap_err();
+    assert!(matches!(err, LlmError::NotSent(_)), "{err:?}");
+    assert!(mock.records().is_empty());
+}
+
+/// Debug 出力とログにトークンが出ない。
+#[tokio::test]
+async fn token_never_appears_in_debug_or_logs() {
+    let token = "sk-secret-do-not-print-1234";
+    let payload = chat_json("\"ok\"");
+    let mock = mock_server(Arc::new(move |_: &Recorded| Reply::ok(&payload))).await;
+    let gateway = OpenAiGateway::new(
+        &config(&mock.base_url, ResponseFormatCapability::JsonSchema),
+        Arc::new(token.to_string()),
+        &options(),
+    )
+    .unwrap();
+    let debug = format!("{gateway:?}");
+    assert!(!debug.contains(token), "Debug にトークンが出た: {debug}");
+
+    // rig のログ（TRACE まで出す）を捕まえて、トークンが一度も出ないことを確かめる。
+    let sink = Arc::new(Mutex::new(Vec::<u8>::new()));
+    #[derive(Clone)]
+    struct SharedWriter(Arc<Mutex<Vec<u8>>>);
+    impl Write for SharedWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedWriter {
+        type Writer = SharedWriter;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(SharedWriter(sink.clone()))
+        .with_ansi(false)
+        .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    chat(&gateway, "要約して").await.unwrap();
+    let logs = String::from_utf8_lossy(&sink.lock().unwrap()).into_owned();
+    assert!(!logs.contains(token), "ログにトークンが出た: {logs}");
+}
+
+/// fnox の環境変数（PELWAY_LLM_API_KEY）からトークンを取る。
+/// ほかのテストと並行しても壊れないよう、環境変数の変更は排他する。
+/// このテストがロックを取っている間に同じロックを取るタスクは無い
+/// （#[tokio::test] は current_thread。env を使うのはこのテストだけ）ため、
+/// await をまたいでの保持を許す。
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn fnox_env_token_source_reads_pelway_llm_api_key() {
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    let _guard = ENV_LOCK.lock().unwrap();
+
+    let source = FnoxEnvTokenSource::new();
+    assert_eq!(source.var, "PELWAY_LLM_API_KEY");
+    // 未設定なら未送信として失敗する。
+    unsafe { std::env::remove_var("PELWAY_LLM_API_KEY") };
+    assert!(matches!(source.token(), Err(LlmError::NotSent(_))));
+
+    let payload = chat_json("\"ok\"");
+    let mock = mock_server(Arc::new(move |_: &Recorded| Reply::ok(&payload))).await;
+    unsafe { std::env::set_var("PELWAY_LLM_API_KEY", "env-token-value") };
+    let gateway = OpenAiGateway::new(
+        &config(&mock.base_url, ResponseFormatCapability::JsonSchema),
+        Arc::new(FnoxEnvTokenSource::new()),
+        &options(),
+    )
+    .unwrap();
+    chat(&gateway, "要約して").await.unwrap();
+    unsafe { std::env::remove_var("PELWAY_LLM_API_KEY") };
+    let records = mock.records();
+    assert_eq!(
+        records[0].authorization.as_deref(),
+        Some("Bearer env-token-value")
+    );
+}
+
+// ---- 受け入れ条件: 利用量と上限 ----
+
+// ---- 受け入れ条件: HTTPクライアントの設定 ----
+
+/// プロキシはゲートウェイ構築時に渡る。不正な URL のプロキシは
+/// `reqwest::Proxy::all` の段階で弾かれる（ゲートウェイまで届かない）。
+#[tokio::test]
+async fn proxy_is_applied_at_gateway_construction() {
+    assert!(reqwest::Proxy::all("this is not a url").is_err());
+    let proxy = reqwest::Proxy::all("http://127.0.0.1:9").unwrap();
+    let opts = GatewayOptions {
+        https_only: false,
+        proxy: Some(proxy),
+        ..GatewayOptions::default()
+    };
+    let gateway = OpenAiGateway::new(
+        &config(
+            "http://127.0.0.1:1/v1",
+            ResponseFormatCapability::JsonSchema,
+        ),
+        Arc::new("t".to_string()),
+        &opts,
+    );
+    assert!(gateway.is_ok());
 }
 
 // ---- 受け入れ条件: 並行呼び出しでも利用量の上限を超えない ----
