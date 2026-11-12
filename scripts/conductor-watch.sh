@@ -19,18 +19,22 @@ try: prs = json.load(open(os.path.join(d, "prs.json")))
 except Exception: prs = []
 now = time.time()
 for t in threads:
-    if t.get("settled"): continue
     tid, s = t["threadId"], t.get("status")
     cur["threads"][tid] = s
     if prev is not None and prev["threads"].get(tid) != s:
         print(f"THREAD {s} {tid} prev={prev['threads'].get(tid)} {t.get('title','')[:40]}", flush=True)
+    # 停滞: 実行中のまま、スレッドの手順の数（itemCount）が 45 分変わらない。
+    ic = t.get("itemCount")
+    last = cur["since"].get(tid)
+    if not isinstance(last, dict): last = None
     if s == "running":
-        st = cur["since"].setdefault(tid, now)
-        if now - st > 2700 and not cur["since"].get(tid + "!"):
-            cur["since"][tid + "!"] = 1
+        if not last or last.get("items") != ic:
+            cur["since"][tid] = {"items": ic, "at": now, "warned": False}
+        elif now - last["at"] > 2700 and not last.get("warned"):
+            last["warned"] = True
             print(f"THREAD stalled-45m {tid} {t.get('title','')[:40]}", flush=True)
     else:
-        cur["since"].pop(tid, None); cur["since"].pop(tid + "!", None)
+        cur["since"].pop(tid, None)
 for pr in prs:
     if not pr["headRefName"].startswith("agent/"): continue
     ch = {(c.get("name") or c.get("context")): (c.get("conclusion") or c.get("state") or c.get("status") or "") for c in (pr.get("statusCheckRollup") or [])}
