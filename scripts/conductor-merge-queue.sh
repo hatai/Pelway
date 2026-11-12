@@ -26,10 +26,12 @@ pr_size_exception() {
 # マージする head に対する条件をまとめて確かめる。0 = マージしてよい、1 = 止める、2 = 待つ（CI 未完了）。
 # pelway-review の最新のレビューが Approve で、本文の "Reviewed: <sha>" がレビュー済み sha と一致するか。
 approved_at() {
-  local pr=$1 rsha=$2 last
-  last=$(gh_dev pr view "$pr" --json reviews -q '[.reviews[]|select(.author.login=="pelway-review")]|last|"\(.state) \(.body)"') || return 1
-  case "$last" in APPROVED*) ;; *) return 1 ;; esac
-  printf '%s\n' "$last" | grep -qE "^(APPROVED )?Reviewed: $rsha\b"
+  local pr=$1 rsha=$2 state body
+  state=$(gh_dev pr view "$pr" --json reviews -q '[.reviews[]|select(.author.login=="pelway-review")]|last|.state') || return 1
+  [ "$state" = APPROVED ] || return 1
+  body=$(gh_dev pr view "$pr" --json reviews -q '[.reviews[]|select(.author.login=="pelway-review")]|last|.body') || return 1
+  # review-pr の本文は複数行で、2 行目に "Reviewed: <sha>" がある。行ごとに照合する。
+  printf '%s\n' "$body" | grep -qE "^Reviewed: $rsha([[:space:]]|$)"
 }
 
 check_head() {
