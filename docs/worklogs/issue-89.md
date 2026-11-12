@@ -16,3 +16,12 @@
 4. 足りなかった情報・検証手段: なし（分割の範囲と行数は Issue の分割案コメントのとおり）。
 5. 改善案: .agents/skills/implement-issue/SKILL.md の「止まる条件」の表に「分割が承認されたときの再開手順（後続 PR の base は前段 PR の head ブランチにする）」を足す。
 
+## 実装者メモ（round 3）
+
+1. 詰まった箇所: crates/pelway-http/src/lib.rs: `Ok(decision @ HandoffDecision::Accepted { ref record })` のパターンが E0505（move と借用の衝突）になり、ログを出してから `HandoffDecision` を作り直す形に直した。
+2. 曖昧だった文: 「PR 2 は PR 1 のブランチに積んで出してください（PR 2 の本文に PR 1 への依存を書く）」（Issue #89 の指揮役コメント）
+3. 仮定と解釈: `mise run pr-size` の base は既定の `origin/main` ではなく `--base agent/89-ai-handoff-record` で数える（PR 2 の差分は HTTP 分だけが対象）。GitHub 側も base ブランチを `agent/89-ai-handoff-record` にする。選ばなかった解釈: base を main にして PR 1 の差分を重複して表示する案（差分行数も 800 制限を二重に食うため）。
+4. 足りなかった情報・検証手段: ブランチ保護で PR の base に main 以外を指定できるかは本番確認前（作成時のエラー有無で判断する）。
+5. 改善案: なし（round 2 の改善案に同じ）。
+
+
