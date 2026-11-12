@@ -83,7 +83,7 @@ jobs:
       - name: Checkout
         # タグ参照。コミット sha は .github/workflows/actions.lock で固定する（v4.2.2）。
         # 後続ステップで git 認証情報は使わないため残置しない（jactionlint artipacked）。
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -125,7 +125,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -193,7 +193,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -261,7 +261,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -355,7 +355,7 @@ jobs:
       - name: Checkout
         # タグ参照。コミット sha は .github/workflows/actions.lock で固定する（v4.2.2）。
         # base ブランチとの merge-base を取るため履歴をすべて取得する。
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
