@@ -43,9 +43,8 @@ export component ProbeWindow inherits Window {
     }
 }
 
-// #10861（IME 変換中に OS レベルのフォーカスが外れると変換中の最後の文字が消える）
-// の再現用。LineEdit 1 つだけの窓を出し、テキストの変化を Rust 側に通知する。
-// Rust 側（src/bin/ime.rs）が active の変化も見て stdout に記録する。
+// #10861（IME 変換中に OS レベルのフォーカスが外れると変換中の最後の文字が消える）の
+// 再現用。LineEdit 1 つだけの窓を出す。Rust 側（src/bin/ime.rs）が記録する。
 export component ImeWindow inherits Window {
     width: 420px;
     height: 120px;

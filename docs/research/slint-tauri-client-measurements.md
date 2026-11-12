@@ -85,7 +85,7 @@
 
 ## 6. 読み上げ（NVDA / VoiceOver / Orca）の比較
 
-事実（仕組み）: Slint は AccessKit を使う（Linux は AT-SPI → Orca、Windows は UI Automation → NVDA、macOS は AX → VoiceOver）。読み上げはブラウザではなく、ウィジェット単位に届く。Tauri は WebView を介する（WebKitGTK → AT-SPI、WebView2 → UI Automation、WKWebView → AX）で、読み上げは DOM 単位に届く。
+事実（仕組み）: Slint は AccessKit を使う（Linux は AT-SPI → Orca、Windows は UI Automation → NVDA、macOS は AX → VoiceOver）。読み上げはウィジェット単位に届く。Tauri は WebView を介する（WebKitGTK → AT-SPI、WebView2 → UI Automation、WKWebView → AX）で、読み上げは DOM 単位に届く。
 
 事実（実測）: **この環境では読めない。** Windows と macOS の機械が無く、Linux にも Orca が入っていない（導入には apt と sudo が必要）。
 
