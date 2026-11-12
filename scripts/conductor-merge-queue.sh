@@ -7,18 +7,18 @@ merge_one() {
   pr=$1; br=$2; rsha=$3
   until [ "$(scripts/agent-gh dev pr view "$pr" --json isDraft -q .isDraft 2>/dev/null)" = false ]; do sleep 20; done
   for attempt in 1 2 3; do
-    git fetch -q origin
+    scripts/agent-gh dev git fetch -q origin 2>/dev/null
     H=$(git rev-parse "origin/$br")
     n=$(git rev-list "$rsha..$H" --no-merges ^origin/main | wc -l)
     if [ "$n" != 0 ]; then echo "#$pr new non-main commits ($n) since review; re-review needed"; return 1; fi
     if ! git merge-base --is-ancestor origin/main "$H"; then
       scripts/agent-gh dev pr update-branch "$pr" >/dev/null 2>&1 || { echo "#$pr update-branch failed (conflict?)"; return 1; }
-      sleep 20; git fetch -q origin; H=$(git rev-parse "origin/$br")
+      sleep 20; scripts/agent-gh dev git fetch -q origin 2>/dev/null; H=$(git rev-parse "origin/$br")
     fi
-    until [ "$(gh run list --branch "$br" --workflow verify --json headSha,status -q ".[]|select(.headSha==\"$H\" and .status==\"completed\")|.status" | head -1)" = completed ]; do sleep 30; done
-    c=$(gh run list --branch "$br" --workflow verify --json headSha,conclusion -q ".[]|select(.headSha==\"$H\")|.conclusion" | head -1)
+    until [ "$(scripts/agent-gh dev run list --branch "$br" --workflow verify --json headSha,status -q ".[]|select(.headSha==\"$H\" and .status==\"completed\")|.status" 2>/dev/null | head -1)" = completed ]; do sleep 30; done
+    c=$(scripts/agent-gh dev run list --branch "$br" --workflow verify --json headSha,conclusion -q ".[]|select(.headSha==\"$H\")|.conclusion" 2>/dev/null | head -1)
     [ "$c" = success ] || { echo "#$pr verify=$c"; return 1; }
-    git fetch -q origin
+    scripts/agent-gh dev git fetch -q origin 2>/dev/null
     if git merge-base --is-ancestor origin/main "$H"; then
       gh pr merge "$pr" --merge --admin --delete-branch --match-head-commit "$H" >/dev/null 2>&1 && { echo "#$pr merged"; return; }
       echo "#$pr head moved since verify; rechecking"
