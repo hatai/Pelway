@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use pelway_contract::handoff::handoffs_path;
 use pelway_contract::ids::{CardId, MemberId};
 use pelway_contract::ledger::{ApprovalLedger, NewCard};
+use pelway_contract::snapshot::ActionPayload;
 use pelway_contract::task::ActionKind;
 use pelway_http::{SharedLedger, serve};
 use serde_json::{Value, json};
@@ -49,10 +50,14 @@ fn shared_ledger() -> SharedLedger {
             workspace_id: "ws-synthetic-handoff".into(),
             channel_id: "ch-synthetic-handoff".into(),
             card_id: "card-handoff".into(),
-            payload_hash: "sha256:synthetic-payload-v1".to_owned(),
-            action_kind: ActionKind::AgentHandoff,
-            recipient: "m-bot-2".to_owned(),
-            body: "合成データの本文".to_owned(),
+            payload: ActionPayload {
+                action_kind: ActionKind::AgentHandoff,
+                recipient: "m-bot-2".to_owned(),
+                body: "合成データの本文".to_owned(),
+                attachments: vec!["sha256:att-1".to_owned()],
+                account: "acct-cw-1".to_owned(),
+                scope: vec!["tickets:write".to_owned()],
+            },
             requester: "m-human-handoff".into(),
             decider: "m-bot-1".into(),
             deadline: None,

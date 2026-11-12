@@ -24,4 +24,12 @@
 4. 足りなかった情報・検証手段: ブランチ保護で PR の base に main 以外を指定できるかは本番確認前（作成時のエラー有無で判断する）。
 5. 改善案: なし（round 2 の改善案に同じ）。
 
+## 実装者メモ（round 4）
+
+1. 詰まった箇所: crates/pelway-contract/src/handoff.rs: PR #113 のマージ時に PR #111（`NewCard` が `payload: ActionPayload` に集約）を取り込んでいなかったため、main の `cargo test` が `E0560`（`payload_hash`・`action_kind`・`recipient`・`body` は無い）で落ちた。`handoff_card` ヘルパー（contract・http 両方）を `ActionPayload` に載せ替えた。
+2. 曖昧だった文: 「PR #114 の修正に ledger.rs のテストの修正も含め、mise run verify が通ることを確かめてから push する」（本スレッドへの修正依頼）
+3. 仮定と解釈: 「ledger.rs のテスト」とは該当ヘルパーの実体が置いてある `handoff.rs`（contract の `#[cfg(test)]`）を含むと解釈した（エラー箇所は handoff.rs:278-281。ledger.rs 自体のテストは PR #111 で更新済み）。`hand_off` の実装コードは `ApprovalCard` の `channel_id`・`decider`・`requester` しか触らないため変更不要と判断した。
+4. 足りなかった情報・検証手段: main の壊れを CI で検出できなかった原因（#113 マージ時点の CI が通った理由）は本スレッドからは確認できない。
+5. 改善案: マージ前の「他 PR との競合で落ちるテスト」を防ぐ手段（マージキュー等）の検討を docs/decisions.md に記録する案。
+
 

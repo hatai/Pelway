@@ -240,6 +240,7 @@ mod tests {
     use crate::ids::{CardId, MemberId};
     use crate::ledger::{ApprovalLedger, NewCard};
     use crate::member::MemberKind;
+    use crate::snapshot::ActionPayload;
     use crate::store::{DataStore, NewMessage, PurposeId};
     use crate::task::{ActionKind, TaskState};
 
@@ -270,15 +271,20 @@ mod tests {
     }
 
     /// 担当 `decider` の AgentHandoff カード（依頼者は m-human-1）。
+    /// payload は PR #111 からの `ActionPayload`（NewCard が持つのはこれ 1 つ）。
     fn handoff_card(id: &str, decider: &str) -> NewCard {
         NewCard {
             workspace_id: "ws-synthetic".into(),
             channel_id: "ch-synthetic".into(),
             card_id: id.into(),
-            payload_hash: "sha256:synthetic-payload-v1".to_owned(),
-            action_kind: ActionKind::AgentHandoff,
-            recipient: "m-bot-2".to_owned(),
-            body: "合成データの本文".to_owned(),
+            payload: ActionPayload {
+                action_kind: ActionKind::AgentHandoff,
+                recipient: "m-bot-2".to_owned(),
+                body: "合成データの本文".to_owned(),
+                attachments: vec!["sha256:att-1".to_owned()],
+                account: "acct-cw-1".to_owned(),
+                scope: vec!["tickets:write".to_owned()],
+            },
             requester: member("m-human-1"),
             decider: member(decider),
             deadline: None,
