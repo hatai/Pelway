@@ -1,0 +1,21 @@
+[package]
+# 連携gateway（下書き・スパイク）。MCP サーバーへの接続に rmcp を使えるか確かめる（#96）。
+# ツールの annotations は管理者の画面の手がかりとして読み取るだけで、段階の判定には
+# 使わない（ADR 0004）。実外部 I/O は無効（S1 検証前、U01）。
+name = "pelway-gateway"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Draft integration gateway spike for the Pelway demo backend (MCP client via rmcp). Not a fixed schema."
+
+[dependencies]
+# MCP 公式 Rust SDK（#96 の検証対象）。固定版 3.9.0（crates.io、2026-11-05）。
+# ライセンス: crate の表記は Apache-2.0（workspace の license = "Apache-2.0" を継承）。
+# ただし同梱 LICENSE 本文は「MIT から Apache-2.0 へ移行中。再許諾の同意がない旧寄稿は
+# MIT のまま」で、Apache-2.0・MIT・CC-BY-4.0（文書）の3条文を含む。NOTICE ファイルは
+# パッケージにもタグ rmcp-v3.9.0 のリポジトリにも無い（#96 の確認結果）。
+# 両条文の同梱を前提に扱う（docs/technical/v0.7/body/09-sources.md、U05）。
+# 段階の宣言と annotations の扱い（この時点の実装）は model 型（ToolAnnotations）
+# だけを使うため、feature は無効のままにする。接続（client・transport 系）を足す
+# ときに features を追加する。
+rmcp = { version = "=3.9.0", default-features = false }
