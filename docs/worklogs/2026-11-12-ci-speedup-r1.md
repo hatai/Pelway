@@ -114,6 +114,53 @@ run `43078088810`（PR #112、workflow 変更前の状態。旧 workflow のま�
 
 つまり待ち時間を実際に縮めるのは workflow 側の変更（B: CI 固有の cargo プロファイル / C: ジョブ分割 / D: キャッシュ / E: 事前ビルドバイナリ）で、mise.toml 側の変更（F: 冗長な cargo 呼び出しの削減）だけでは縮まらない。
 
+### CI 実測（ジョブ分割後）
+
+run `43128754617`（PR #112、ジョブ分割とキャッシュを適用。キャッシュは空だったためコールドビルド）。
+
+| ジョブ | 変更前（1 ジョブ） | 変更後 |
+|---|---|---|
+| `static` | — | 27s |
+| `lint` | — | 28s（失敗。下記） |
+| `test` | — | **2m37s** |
+| `coverage` | 3m41s | **3m13s** |
+| `pr-size` | 3s | 6s |
+| 品質ゲート（集約 `mise run verify`） | **5m06s** | **2m44s** |
+
+`test` ジョブの 2m03s はコンパイル、テスト実行は 3.6s。変更前は 1 ジョブで clippy と test が target dir のロックを奪い合っていたため 4m21s かかっていたが、ジョブを分けると 2m03s で済む。
+
+### lint ジョブの失敗と対策
+
+run `43128754617` の `lint` ジョブは、**コードの問題ではなく crates.io の一時的な取得失敗**で落ちた。
+
+```
+error: failed to get `parking_lot_core` as a dependency of package `parking_lot v0.12.5`
+Caused by: unable to update registry `crates-io`
+Caused by: download of pa/rk/parking_lot_core failed
+Caused by: curl failed
+Caused by: [16] Error in the HTTP2 framing layer
+```
+
+`Cargo.lock` が変わったためレジストリのキャッシュが不完全で、新しく増えた `dev-queue-compare`（sqlx 系）の依存を取得中出现した。対策:
+
+1. `CARGO_HTTP_MULTIPLEXING=false` — HTTP/2 の多重化で起きる既知の不具合を避ける（cargo / libcurl の問題）。
+2. `CARGO_NET_RETRY=10` — 一時的な失敗の再試行回数を既定の 2 から増やす。
+3. `mise run fetch`（`cargo fetch --locked`）をビルド前に 1 回走らせる — 取得をビルドと分離し、取得の失敗で数分のコンパイルが無駄にならないようにする。
+
+1 と 2 は `mise.toml` の `[env]` にも置いてあるため、CI ではないコンテキストからも効く。
+
+### 追加の最適化
+
+| 案 | 内容 | 採否 |
+|---|---|---|
+| crates.io の取得設定 | `CARGO_HTTP_MULTIPLEXING=false` / `CARGO_NET_RETRY=10` | 採用（上記） |
+| 依存の取得をビルドから分離 | `mise run fetch` をビルド前に走らせる | 採用（上記） |
+| キャッシュを 2 段に分ける | レジストリは 3 ジョブで共有、ビルド成果物はジョブごと | 採用。キャッシュ容量の削減（実測 616MB / 823MB 程度）と、成果物が混ざるのを防ぐ |
+| mise のツールインストールをキャッシュ | `~/.local/share/mise/installs` を `mise.lock` のハッシュでキャッシュする | 不採用。復元（約 1GB）はダウンロードと同程度で、待ち時間の短縮にならない |
+| static ジョブで rust ツールチェーンを省く | `mise install --locked hk typos fnox pitchfork jactionlint` | 不採用。static ジョブは品質ゲート上のクリティカルパスではなく（27s 対 2m37s）、ツール構成を分ける割りに価値が小さい |
+| sccache | コンパイラ出力を共有キャッシュする | 不採用。clippy と test はフラグが違い出力も別で、計測ビルド（instrument-coverage）も別。共有できる場面がほとんどない |
+| Slint のフィーチャを絞る | 依存 399 → 249 クレート（CI のコンパイル対象 -37%） | 不採用（案 A と同じ。製品側の判断が必要） |
+
 ### 効果の見積り
 
 - 2 つの cargo グループが別ジョブ・別ランナーで走るため、同一 target dir でのロック競合と clippy↔test の重複コンパイル（214 回）がなくなる。

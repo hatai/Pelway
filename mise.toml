@@ -55,6 +55,13 @@ jactionlint = "2.5.0"
 # ここには秘密にならない既定値だけを置く。
 CARGO_TERM_COLOR = "auto"
 PELWAY_BIND_ADDR = "127.0.0.1:0"
+# crates.io の取得失敗を減らすための cargo の設定（ローカル・CI の両方）。
+# CARGO_HTTP_MULTIPLEXING=false: HTTP/2 の多重化で起きる
+# 「Error in the HTTP2 framing layer」で crates.io の取得が失敗する既知の不具合を避ける。
+# CARGO_NET_RETRY=10: 一時的な失敗（ネットワーク・レジストリ障害）の再試行回数を増やす
+# （既定は 2）。
+CARGO_HTTP_MULTIPLEXING = "false"
+CARGO_NET_RETRY = "10"
 
 # ---- 日常タスク（mise run <タスク名>） ----
 
@@ -81,6 +88,10 @@ run = "cargo test --workspace --locked"
 [tasks.build]
 description = "デバッグビルドを作る（--locked）"
 run = "cargo build --workspace --locked"
+
+[tasks.fetch]
+description = "依存クレートを取得する（--locked で Cargo.lock を強制）。ビルド前に明示的に取得し、一時的な取得失敗をビルドを中断した状態で残さない"
+run = "cargo fetch --locked"
 
 [tasks.toolchain-check]
 description = "rustfmt・cargo-clippy・llvm-tools-preview 成分の存在確認（欠けていれば失敗し、暗黙の自動ダウンロードには頼らない）"

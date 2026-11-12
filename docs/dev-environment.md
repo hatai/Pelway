@@ -52,6 +52,7 @@ mise bootstrap    # 上の1〜3を順に実行
 | `mise run clippy` | `cargo clippy --workspace --all-targets --locked -- -D warnings` |
 | `mise run test` | `cargo test --workspace --locked` |
 | `mise run build` | `cargo build --workspace --locked` |
+| `mise run fetch` | 依存クレートの取得（`cargo fetch --locked`）。ビルド前に取得を済ませる |
 | `mise run toolchain-check` | rustc / cargo / rustfmt / clippy の存在とバージョン確認（rustfmt・clippy を含まない最小構成だと失敗する） |
 | `mise run hk-validate` / `hk-check` | `hk.pkl` の検証 / リポジトリ全体の読み取り専用検査（cargo を伴わないステップだけ。cargo を伴う検査は `fmt-check` / `clippy` が担当する） |
 | `mise run fnox-check` | `fnox list`（定義の一覧確認。秘密値の取得・表示はしない） |
@@ -107,13 +108,26 @@ workflow レベルの `env` で、ローカルの開発環境には影響させ�
 | `CARGO_PROFILE_TEST_DEBUG` | `0` | 同上（test プロファイル） |
 | `MISE_RUST_MR_BOXINGTON` | `0` | CI では mbx を使わず素の cargo にする。mbx は `target` を `~/.cache/mbx` への symlink にするため、次のキャッシュに `target` を保存できない |
 | `CARGO_TARGET_DIR` | `${{ github.workspace }}/target-ci` | ビルド成果物の置き場所。mbx の symlink 先が変わってもキャッシュが壊れないよう `target` とは別の固定の場所に置く |
+| `CARGO_HTTP_MULTIPLEXING` | `false` | crates.io の取得で起きる既知の不具合（HTTP/2 の多重化による "Error in the HTTP2 framing layer"）を避ける |
+| `CARGO_NET_RETRY` | `10` | crates.io の一時的な障害で取得が失敗したときの再試行回数を増やす（既定は 2） |
 
 debuginfo を落としても検査の中身（clippy の警告もテストの結果も）は変わらない。
 
+`CARGO_HTTP_MULTIPLEXING` と `CARGO_NET_RETRY` は `mise.toml` の `[env]` にも同じ値を置いてある。CI ではないコンテキスト（エディタや補助スクリプト）から cargo を直接呼ぶときにも効かせるためで、ローカルでも取得の失敗を減らす。
+
+### 依存の取得
+
+- `mise run fetch`（`cargo fetch --locked`）で依存クレートをビルド前に 1 回だけ取得する。取得の一時失敗（crates.io の障害など）が数分のビルドの途中で起きるのを避けるため。取得は cargo の設定（`CARGO_HTTP_MULTIPLEXING=false` / `CARGO_NET_RETRY`）で再試行する。
+
 ### ビルドキャッシュ
 
-- `actions/cache` で cargo のレジストリ（`~/.cargo/registry`・`~/.cargo/git`）とビルド成果物（`target-ci`）を保存する。キャッシュキーは `Cargo.lock` と `mise.toml` のハッシュとジョブ名から作る（`<os>-cargo-<job>-<hash>`）。依存やツールのバージョンが変わるとキーが変わるため、古いキャッシュを黙って使い回さない。`restore-keys` で同じジョブの直前のキャッシュにフォールバックする。
-- キャッシュはジョブごとに分ける（`lint` / `test` / `coverage` は対象も最適化も違うため）。cargo の target はジョブごとに独立しているため、キャッシュを共有しても成果物が混ざることはない。
+- `actions/cache` を 2 段に分ける。cargo のレジストリ（`~/.cargo/registry`・`~/.cargo/git`）は 3 つの cargo ジョブで共有し、ビルド成果物（`target-ci`）はジョブごとに分ける。
+  | 対象 | キャッシュキー | 共有 |
+  |---|---|---|
+  | レジストリ | `<os>-cargo-registry-<hash(Cargo.lock)>` | 3 ジョブで共有 |
+  | ビルド成果物 | `<os>-cargo-target-<job>-<hash(Cargo.lock, mise.toml)>` | ジョブごと |
+- 依存やツールのバージョンが変わるとキーが変わるため、古いキャッシュを黙って使い回さない。`restore-keys` で同じジョブ（レジストリは全体）の直前のキャッシュにフォールバックする。
+- clippy と test は成果物が別（clippy はメタデータ、test はコード生成）なので、ビルド成果物のキャッシュを共有しない。
 - mise-action のツールキャッシュは有効化しない（復元内容を `mise.lock` と突き合わせないため。上の注意を参照）。
 - ローカルの mbx はローカルキャッシュ（`~/.cache/mbx`）のみで完結する。S3 等の外部キャッシュサーバは使わない。
 
