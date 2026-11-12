@@ -31,3 +31,29 @@
 3. 仮定と解釈: provider 種別を tenant 設定に新設せず、「非空の許可リストに対応する claim の一致を必須、両方空は `OidcStore::new` で `TenantConfigError`」と解釈した（既存の `is_some_and` 照合は非空リストで claim 必須を既に満たす。Google 向けに `allowed_tid` だけ登録する誤設定は tid 不在で拒否側に倒れる）。選ばなかった解釈: `provider` 列挙型を `OidcTenant` に追加し対応 claim だけを見る（spike の段階では型を増やさない判断）。
 4. 足りなかった情報・検証手段: 「設定エラー」の発生箇所が登録時かログイン時かの明記なし。fail fast のため `OidcStore::new`（登録時）で拒否したが、ログイン時 500 で返す設計もありえた。
 5. 改善案: `docs/agents/triage-labels.md` またはレビュー指針に「安全でない既定値の指摘は、拒否すべき層（登録時/起動時/要求時）を書く」例を足す。
+
+## 12 章との対照表（セッション・端末の認証・取り消し）
+
+対象: `docs/technical/v0.7/body/12-communication-secrecy.md`。範囲は本スパイク（passkey + OIDC + セッション）に関係する要件に絞る。
+
+| 12 章の該当要件 | 今回の実装での扱い | 未対応・未検証 |
+|---|---|---|
+| P07（§3）認証と能力確認: 接続に必要な項目と宛先だけに限定 | 応答は `pending_id`・challenge options・`member_id` のみ。セッション Cookie・JSON に認証情報の平文を出さない。OIDC の scope は `email` のみを追加要求 | member 属性（email 等）の保存・利用は本番の目的別分類（P表）で要確認 |
+| P07（§3）: 資格情報取消で通常の利用を停止 | credential 取消 → `SessionStore::revoke_member` で member の全セッションを削除（テストで取消後 401 を確認）。OIDC 側は tenant 設定の削除で同等に可能 | credential 単位のセッション特定（その端末だけ止める）と、失効端末・管理者による取消の正規経路は未実装（ハンドラ文書に記録） |
+| §3.3 P06/P07 行: 認証通信と操作データを分け | 認証は `/auth/*` に集約し、セッションは不透明 `Uuid` のみを運ぶ。member 情報はサーバー側 `Session` にだけ置く | `pelway-http` 本体との結合と、操作データ側の分離は未接続 |
+| §4: 認可は server で強制（UI で隠すだけにしない） | `whoami`・`revoke_credential` はサーバー側の `SessionStore`/tenant 許可リストで判定。member はセッション Cookie から特定（#145 のレビュー指摘を修正済み） | 管理者・監査用の認可モデルは spike に無い |
+| §5: 失効が判明した経路は新規実行しない | 消費済みの pending（passkey セレモニー・OIDC `state`）は one-shot で削除し再送を拒否。取消後のセッションは `lookup` に出ない | pending/セッションの期限切れ・永続化は未実装（メモリのみ） |
+| §6 / §9 S20: 台帳・証拠不足は既定拒否 | 許可リスト両方空の tenant は `OidcStore::new` が `TenantConfigError` で拒否（#146 レビュー指摘を修正済み）。unknown tenant/state/credential/セッションは 400/401/403/404 で拒否 | 認可台帳の永続ストア化は本番課題 |
+| §7: server が平文を扱う信頼モデルを明示 | crate 文書（lib.rs）に「secret・ID トークンはサーバーが平文で扱う」と明記 | host/DB 管理者の役割分離、鍵へのアクセスとデータアクセスの分離は本番検討 |
+| §7: 連携の認証 token と保存時暗号鍵は別管理 | セッション トークンは不透明 ID で暗号鍵を兼ねない。IdP 側の署名は検証のみで Pelway 側の署名鍵は持たない | 保存時暗号化の方式は 12 章の未決（v0.6/08 の未決解消待ち）どおり未対応 |
+| §7: 外部の権限管理サービスを必須にしない | Ory/Kanidm 等の IdP 製品を足さず、`webauthn-rs`・`openidconnect` の RP だけを axum に組み込んだ | — |
+| 端末の認証（credential 単位の識別） | passkey は `credential_id` を `AuthMethod::Passkey` に保持し、どの端末でログインしたかの監査手がかりにする。credential 取消も credential 単位 | OIDC ログインは端末に紐付かない（tenant+subject のみ）。credential counter の更新・clone 検出は未対応 |
+| §9 S17: log・記録に秘密値を出さない | エラー応答は `{"error":"<code>"}` のみ。ログ出力は実装していない | 構造化ログ・監査イベントとの連携は未実装 |
+
+## 実装者メモ（round 5）
+
+1. 詰まった箇所: PR #146 のレビュー must-fix（split-plan の受け入れ条件「セッション・端末の認証・取り消しを 12 章の要件と照らした表」が作業記録に無い）。crate 文書（lib.rs）には簡易の照合表があったが worklog には無かったため、要件ごとの扱い・未対応を対照表として追記した。
+2. 曖昧だった文: 「セッション・端末の認証・取り消しを 12 章の要件と照らした表」（Issue #97 本文の「やること」）。表の置き場所（worklog・crate 文書・別文書のどれか）と対象範囲・粒度が書かれていない。
+3. 仮定と解釈: レビューが `docs/worklogs/issue-97.md` を指名したため worklog に対照表を置くと解釈した。対象要件は P07（限定・取消）・§3.3（認証通信と操作データの分離）・§4（server 側認可）・§5（失効経路の未開始抑止）・§6/§9 S20（既定拒否）・§7（信頼モデル・鍵分離・外部権限管理不要）・§9 S17（記録への秘密値非含有）と、端末単位の識別（credential_id）に絞った。選ばなかった解釈: docs/technical 配下に別文書を作る。
+4. 足りなかった情報・検証手段: 12 章は認証そのものの詳細設計を持たず、P07 の行と §5〜§7 の断片的記述から該当要件を拾うしかなかった。端末認証の粒度（credential 単位のセッション特定まで要るか）は章に明記が無く、未対応として表に記した。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「手順 5」に「Issue が照合表・比較表を求める場合、実装の crate 文書に加えて `docs/worklogs/issue-<N>.md` にも置く」を足す。
