@@ -47,7 +47,7 @@ Grok Bot は Issue を実装スレッドとレビュースレッドに割り振�
 2. 実装スレッドを立てる
 
 ```
-t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree main --branch agent/<N>-<slug> <Pelway のパス> "Issue #<N> を実装する。skill implement-issue に従う。"
+t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree main --branch agent/<N>-<slug> --title "[実装] #<N> <要約>" <Pelway のパス> "Issue #<N> を実装する。skill implement-issue に従う。"
 ```
 
 `<slug>` は Issue の題名を英小文字とハイフンで 3〜5 語にしたもの。effort（opencode の variant）は skill `command-team` の「実装のモデルと effort」で決め、MCP の `t3_thread_launch` で立てるときは `modelSelection.options` に入れる。
@@ -59,7 +59,7 @@ t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree m
 レビュースレッドを次の内容で立てる（`t3 thread start` の形で書くが、権限を指定するため実際は MCP で立てる）。
 
 ```
-t3 thread start --provider codex_review --model gpt-6-luna --worktree main --branch review/<M>-<k> <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。"
+t3 thread start --provider codex_review --model gpt-6-luna --worktree main --branch review/<M>-<k> --title "[レビュー] PR #<M> <要約>" <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。"
 ```
 
 T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-accept-edits` にする。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP で立てる。
@@ -83,6 +83,7 @@ PR を Projects ボードに載せる（ボードの組み込みワークフロ�
 | `cancelled` | 人間が止めたもの。何もしない | 何もしない |
 | `waiting` | 部屋で人間に知らせる（スレッドの `link` を付ける） | 同じ |
 | `stalled` | 6 の「停滞」 | 6 の「停滞」 |
+| `bad-title`（`scripts/conductor-watch.sh`） | タイトルを skill `command-team` の「スレッド名」の形式に直す（`t3_thread_update` の rename） | 同じ |
 
 レビューの `verdict` ごとの対応:
 

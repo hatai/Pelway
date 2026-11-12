@@ -8,6 +8,7 @@ v0.7の技術選定を、既存のOSSと競合の構成と比べた調査です�
 | [エージェントの実行と安全](oss-agent-execution-and-safety.md) | サンドボックス、ローカルLLMと日本語モデル、埋め込みモデル、認可エンジン、秘密情報の仲介、MCPとエージェント間プロトコル、プロンプトインジェクション対策 |
 | [データと共同作業](oss-data-and-collaboration.md) | ジョブキュー、同期、共同編集、ベクトル検索、日本語OCR（YomiTokuを含む）、改ざん検出の監査ログ、バックアップ |
 | [基盤とクライアント](oss-platform-and-client.md) | 認証（Oryを含む）、エンドツーエンド暗号化、音声・ビデオ、通知、観測、クライアントの部品、相互接続 |
+| [RustのLLM APIクライアント比較](rust-llm-client-comparison.md) | async-openai、genai、rig-core、openai-api-rs、reqwest自前実装の比較。自動再試行、HTTPクライアント差込、構造化出力、Z.ai・OpenAI・Vertex AIの互換仕様 |
 
 測定報告（実機検証）:
 
