@@ -189,3 +189,21 @@ AGPL・EPL・CDDL は依存ツリーに無い。
 3. 仮定と解釈: 「警告にとどまる」の本体は「表示はされるが検査は失敗しない」で、表示先は mise タスクと CI の static ジョブのログで十分と解釈した（GitHub の annotation には出ない）。選ばなかった解釈: 選択肢 (1)（all + ignore、新規は失敗。停止が必要になるうえ、Issue 作成者の意図した「失敗させない」から外れる）。
 4. 足りなかった情報・検証手段: 「新規」の unmaintained / unsound の検出確認は差し込みを行わず、既知の 5 件が同じ検出・表示の経路（error[unmaintained] → awk → warning 行）を通っていることで担保した。
 5. 改善案: implement-issue skill の「決まり」に「mise タスクを複数行の bash にするときは `#!/usr/bin/env bash` と `set -euo pipefail` を先頭に置く（toolchain-check・codex-review-check と同じ）」を足す。
+
+## round 5: レビュー must-fix 対応（警告行の advisory ID の取り出し）
+
+### 経緯
+
+1. PR #234 に2度目の Request changes（pelway-review、must-fix 1 件）: 警告タスクの awk が `$3` を出しており、「`ID: RUSTSEC-…` の行では advisory の ID が field `$2` になる。そのため警告行の ID が空になる」という指摘。
+2. 実測と照合した: cargo-deny 0.20.2 の実際の出力では ID 行は「    ├ ID: RUSTSEC-…」であり、樹形図の接頭辞「├」の分だけフィールドが1つずれて ID は `$3` に現れる（`cat -A` でバイト列を確認。gawk 5.2.1 での round 4 の実行出力でも ID は正しく出ていた）。レビューの `$2` は接頭辞を数えない読み（「ID: RUSTSEC-…」だけの行として数えた場合）で、その読みでは `$3` が空になる。指摘の前提は実行すれば成立しないが、フィールド番号での取り出しが cargo-deny の出力形式の細部（接頭辞の付け方）に依存して脆いこと自体は正しいため、番号に依存しない取り出しに変えた。
+3. 対応: 抽出ロジックを `scripts/deny-warn-extract.sh` に切り出し、advisory の ID は `match()` + `substr()` の正規表現で取り出す（フィールド番号を使わない。POSIX awk の機能だけなので gawk・mawk の両方で動く）。mise.toml の `deny-check` はこのスクリプトを呼ぶ形にした。
+4. 指揮役の指示どおり、cargo-deny の実際の出力を写した固定サンプルで確かめる試験 `scripts/tests/deny-warn-extract.test.sh` を追加し、`script-test` タスク（`mise run verify` 経由）に繋いだ。サンプルは pin-utils（unmaintained）と rsa（vulnerability）のブロックを実出力からそのまま写し、unsound は現在の依存ツリーに実例が無いため同じ形式で合成（テスト内に明記）。検査内容: 見出し行、警告行が2行（unmaintained + unsound）で vulnerability を含まないこと、ID 付きの警告行が正しく出ること、すべての警告行が空でない ID（`^warning: RUSTSEC-…`）で始まること（本レビューの回帰防止）、unmaintained / unsound が無い出力では何も出ないこと。
+5. gawk（ローカルの /usr/bin/awk）と mawk の両方で同一の警告行が出ることを手元で確認した。
+
+## 実装者メモ（round 5）
+
+1. 詰まった箇所: なし — レビューの指摘（`$2`）と実測（`$3`）が食い違ったため、`cat -A` で ID 行のバイト列（`    ├ ID: RUSTSEC-…`）を確認してから方針を決めた。
+2. 曖昧だった文: 「The awk command prints `$3` from cargo-deny's `ID: RUSTSEC-…` line, where the advisory ID is field `$2`. The warning task therefore emits an empty ID for every unmaintained/unsound advisory」（PR #234 のレビュー）— 実際の出力では ID 行に樹形図の接頭辞「├」が付くため ID は `$3` に現れ、空にはならない（接頭辞を数えない読みでは `$2`）。「空になる」は実行しない読みの前提で、実行結果とは食い違うが、フィールド番号依存の脆さの指摘自体は正しいと判断した。
+3. 仮定と解釈: 警告行の形式（`warning: <ID> <診断の1行目>`）は維持するものと解釈した（レビューは「preserve the ID in the warning output」を求めており、表示形式の指定は無し）。unsound のサンプルは依存ツリーに実例が無いため実際の出力形式に合わせた合成でよいものとした（テスト内に明記）。選ばなかった解釈: レビューの字面どおり `$2` に変える（接頭辞付きの実際の出力ではこちらが ID を逃す）。
+4. 足りなかった情報・検証手段: CI の static ジョブの awk が gawk か mawk か確定できなかったため、両方を手元で実行して同一出力を確認した（`{n}` 量指定子など実装差の出る機能は使わず `match`/`substr` だけ）。
+5. 改善案: implement-issue skill の「よくある失敗」に「レビューの指摘が実行結果に依存する主張のときは、手元で再現を確かめてから直す。再現しなければ指摘の前提を PR 本文に書いたうえで、指摘が成立する場合と同等に壊れない直し方を選ぶ」を足す。
