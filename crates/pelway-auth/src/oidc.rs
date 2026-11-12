@@ -6,7 +6,8 @@
 //!   メモリに pending として置き、callback で一度だけ取り出す。
 //! - テナント制限: Google は `hd`（hosted domain）、Entra は `tid`
 //!   （tenant id）claim を `allowed_hd` / `allowed_tid` と照合する。
-//!   顧客の Workspace/テナント外のアカウントは拒否する。
+//!   顧客の Workspace/テナント外のアカウントは拒否する。両方の許可
+//!   リストが空のテナントは設定エラー（無制限ログインを許さない）。
 //! - バックチャネル（token endpoint / JWKS 取得）は `AsyncHttpClient` を実装する
 //!   呼び出し可能な値を外部から受け取る。スパイクではインメモリの偽 IdP を
 //!   接続し、本番は reqwest などの HTTPS クライアントに差し替える（未確認）。
@@ -93,9 +94,12 @@ pub struct OidcTenant {
     pub jwks_uri: String,
     /// Pelway 側の callback URL（IdP に登録する redirect_uri と一致させる）。
     pub redirect_uri: String,
-    /// 許可する Google Workspace の hosted domain（空 = `hd` を検査しない）。
+    /// 許可する Google Workspace の hosted domain。非空なら `hd` claim が
+    /// いずれかに一致することを必須にする。
     pub allowed_hd: Vec<String>,
-    /// 許可する Entra tenant id（空 = `tid` を検査しない）。
+    /// 許可する Entra tenant id。非空なら `tid` claim がいずれかに一致する
+    /// ことを必須にする。`allowed_hd` と両方空は `OidcStore::new` で設定
+    /// エラーになる。
     pub allowed_tid: Vec<String>,
 }
 
@@ -136,6 +140,18 @@ impl<'c> openidconnect::AsyncHttpClient<'c> for BackchannelClient {
     }
 }
 
+/// 許可リストが両方空のテナントを登録しようとした設定エラー。
+/// 空にすると任意の IdP アカウントでログインできてしまうため fail closed にする。
+#[derive(Debug)]
+pub struct TenantConfigError(pub String);
+
+impl fmt::Display for TenantConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "tenant {} has no allowed_hd/allowed_tid", self.0)
+    }
+}
+impl std::error::Error for TenantConfigError {}
+
 /// tenant 設定、進行中のログイン、(tenant, subject) -> member の対応表。
 pub struct OidcStore {
     pub tenants: HashMap<String, OidcTenant>,
@@ -152,12 +168,20 @@ struct OidcPending {
 }
 
 impl OidcStore {
-    pub fn new(tenants: HashMap<String, OidcTenant>) -> Self {
-        Self {
+    /// 許可リストが両方空のテナントがあれば `Err`（設定エラー）。
+    /// 片方でも非空なら、そのリストに対応する claim の一致を callback で
+    /// 必須にする。
+    pub fn new(tenants: HashMap<String, OidcTenant>) -> Result<Self, TenantConfigError> {
+        for (name, tenant) in &tenants {
+            if tenant.allowed_hd.is_empty() && tenant.allowed_tid.is_empty() {
+                return Err(TenantConfigError(name.clone()));
+            }
+        }
+        Ok(Self {
             tenants,
             pending: Mutex::new(HashMap::new()),
             members: Mutex::new(HashMap::new()),
-        }
+        })
     }
 }
 

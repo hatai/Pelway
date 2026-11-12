@@ -175,7 +175,7 @@ fn test_app() -> TestApp {
         allowed_hd: vec!["good.example.com".to_string()],
         allowed_tid: Vec::new(),
     };
-    let oidc = OidcStore::new(HashMap::from([("google".to_string(), tenant)]));
+    let oidc = OidcStore::new(HashMap::from([("google".to_string(), tenant)])).unwrap();
     let state = Arc::new(
         AuthState::new("localhost", RP_ORIGIN, oidc, bridge(FakeIdp::router(&idp)))
             .expect("auth state"),
@@ -413,7 +413,7 @@ async fn oidc_callback_rejects_replayed_state_and_bad_domain() {
     });
     // 偽 IdP を作り直したので bridge も張り替える
     let tenant = t_oidc_tenant(&t.idp);
-    let oidc = OidcStore::new(HashMap::from([("google".to_string(), tenant)]));
+    let oidc = OidcStore::new(HashMap::from([("google".to_string(), tenant)])).unwrap();
     let state = Arc::new(
         AuthState::new(
             "localhost",
@@ -460,6 +460,17 @@ async fn oidc_callback_rejects_replayed_state_and_bad_domain() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn oidc_store_rejects_tenant_without_allow_lists() {
+    let mut tenant = t_oidc_tenant(&Arc::new(FakeIdp::new()));
+    tenant.allowed_hd = Vec::new();
+    tenant.allowed_tid = Vec::new();
+    assert!(
+        OidcStore::new(HashMap::from([("google".to_string(), tenant)])).is_err(),
+        "empty allow lists must be a configuration error"
+    );
 }
 
 fn t_oidc_tenant(idp: &Arc<FakeIdp>) -> OidcTenant {

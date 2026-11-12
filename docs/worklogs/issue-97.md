@@ -23,3 +23,11 @@
 3. 仮定と解釈: rebase だと force-push になるため、`git merge agent/97-passkey-login` で取り込むと解釈した（main にも `Merge branch 'main' into agent/...` の履歴があり、このリポジトリは merge 取り込みの運用）。must-fix は「for a self-service endpoint derive the member ID from the session」の文言どおり、member をセッション Cookie から特定する本人向け経路にした。member 単位のセッション全失効は従来どおり（呼び出し元のセッションも消える）。選ばなかった解釈: `member_id` を body に残したまま管理者権限チェックを足す（管理者モデルが spike に無い）。
 4. 足りなかった情報・検証手段: 失効した端末・管理者による他人の credential 取消の正規経路は Issue・12 章ともに未定義で、ハンドラ文書に「本番で別経路を検討」と残すに留めた。worklog は PR-B 側のコミットにのみ置く分割のため、PR-A の修正コミット自体にはメモ更新を含められない。
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「手順 6」に「積み上げ PR の下流ブランチへの取り込みは merge で行う（rebase は force-push が要る）」を足す。
+
+## 実装者メモ（round 4）
+
+1. 詰まった箇所: PR #146 のレビュー must-fix（oidc.rs `allowed_hd`/`allowed_tid` が両方空だと任意の IdP アカウントでセッション発行）。`OidcStore::new` を `Result` 返しに変えるとテスト 2 箇所が変わる程度で波及は小さかった。ほか: 空リスト拒否の検証は偽 IdP 不用で `OidcStore::new` 単体で確かめられる普通の `#[test]` にした（`#[tokio::test]` 不要）。
+2. 曖昧だった文: 「少なくとも許可リスト未設定を設定エラーとして拒否してください（対象の provider claim も必須にする）」（PR #146 レビュー must-fix）。「対象の provider」が Google/Entra のどちらかを tenant 設定側で識別する型を求めているのか、claim 照合の必須化だけでよいのかが書かれていない。
+3. 仮定と解釈: provider 種別を tenant 設定に新設せず、「非空の許可リストに対応する claim の一致を必須、両方空は `OidcStore::new` で `TenantConfigError`」と解釈した（既存の `is_some_and` 照合は非空リストで claim 必須を既に満たす。Google 向けに `allowed_tid` だけ登録する誤設定は tid 不在で拒否側に倒れる）。選ばなかった解釈: `provider` 列挙型を `OidcTenant` に追加し対応 claim だけを見る（spike の段階では型を増やさない判断）。
+4. 足りなかった情報・検証手段: 「設定エラー」の発生箇所が登録時かログイン時かの明記なし。fail fast のため `OidcStore::new`（登録時）で拒否したが、ログイン時 500 で返す設計もありえた。
+5. 改善案: `docs/agents/triage-labels.md` またはレビュー指針に「安全でない既定値の指摘は、拒否すべき層（登録時/起動時/要求時）を書く」例を足す。
