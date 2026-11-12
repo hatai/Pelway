@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 
+use pelway_contract::approval::Decider;
 use pelway_contract::handoff::handoffs_path;
 use pelway_contract::ids::{CardId, MemberId};
 use pelway_contract::ledger::{ApprovalLedger, NewCard};
@@ -59,7 +60,7 @@ fn shared_ledger() -> SharedLedger {
                 scope: vec!["tickets:write".to_owned()],
             },
             requester: "m-human-handoff".into(),
-            decider: "m-bot-1".into(),
+            decider: Decider::Member("m-bot-1".into()),
             deadline: None,
         })
         .expect("new card");
