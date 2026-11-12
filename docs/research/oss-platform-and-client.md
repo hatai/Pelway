@@ -157,6 +157,12 @@ U05 は「新サービスを自動追加しない」とし、12 §7 は外部の
 - 当てはめ（筆者の判断）：Web（React）側で同じ `.ftl` を読むには、fluent.js 系（@fluent/bundle）を使えば資源を共有できる。翻訳キーの欠落検査は、Rust 側で ja と en のメッセージ ID の差分をテストで検査するのが軽い。
 - 判定：fluent.js による `.ftl` の共有は **MVP前に検証**（A2 の「翻訳資源を共有」）。
 
+### 6.5 Octane（Web クライアントの UI 候補）
+
+- 事実：octanejs/octane。MIT、1,485 stars、最終 push 2026-11-12。npm 版 0.16.7（2026-11-02）、状態は beta [GH (2026/11)] [npm (2026/11)]。React の API（`useState`、`useEffect`、`memo`、context、portals、Suspense、transition）を互換で提供し、コンパイラが直接 DOM のコードへ落とす（仮想 DOM を持たない）。Inferno の後継で、作者は Inferno の作者。React との差は、クラスコンポーネント・Server Components・合成イベントシステムを持たないこと [octane README (2026/11)]。
+- 当てはめ（筆者の判断）：A2 の UI 層（TS/React DOM）の候補。React と同じ API で書けるので学習の負担は React と同じだが、仮想 DOM を持たない分、描画の負荷は下回る可能性がある（実 DOM での測定は未実施）。型生成と WASM のサイズは UI フレームワークに依らないので、採否にかかわらず結果は変わらない [slint-tauri-client-measurements (2026/11)]。
+- 判定：Octane は **将来の候補**（A2 の UI 層の比較対象）。実 DOM での読み上げ・IME・描画負荷の比較は別 Issue に残す。
+
 ---
 
 ## 7. 相互接続・ブリッジ
@@ -179,6 +185,7 @@ U05 は「新サービスを自動追加しない」とし、12 §7 は外部の
 | Tauri 2（Linux IME、Orca） | MVP前に検証（比較候補） | A1 比較 |
 | ts-rs / specta、wasm-opt | MVP前に検証 | A2 |
 | fluent.js による .ftl の共有 | MVP前に検証 | A2 / 06 |
+| Octane（Web クライアントの UI 候補） | 将来の候補（比較対象） | A2 |
 | Ory Kratos (+Hydra) | 将来の候補 | U05 |
 | Kanidm / Rauthy / Keycloak | 将来の候補 | U05 |
 | Ory Keto / OpenFGA / SpiceDB | 見送り | 12 §7 |
@@ -251,6 +258,8 @@ U05 は「新サービスを自動追加しない」とし、12 §7 は外部の
 [wry #1724, 2026/11] tauri-apps. "feat(webkitgtk): make input method preedit configurable." GitHub PR. https://github.com/tauri-apps/wry/pull/1724
 [Matrix bridges, 2026/11] Matrix.org. "Bridges." https://matrix.org/ecosystem/bridges/
 [Mattermost LICENSE, 2026/11] Mattermost. "LICENSE.txt." GitHub. https://github.com/mattermost/mattermost/blob/master/LICENSE.txt
+[octane README, 2026/11] octanejs. "octane README." GitHub. https://github.com/octanejs/octane
+[npm, 2026/11] npm. "octane@0.16.7" のパッケージ情報. https://www.npmjs.com/package/octane
 
 ## 付録：リポジトリ一覧（GH (2026/11) の根拠）
 

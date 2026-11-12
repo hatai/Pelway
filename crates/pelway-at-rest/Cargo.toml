@@ -9,6 +9,8 @@ description = "Draft chunked AES-256-GCM container for data at rest (Pelway-spec
 
 [dependencies]
 aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc", "getrandom", "zeroize"] }
+futures = { version = "0.3", default-features = false, features = ["executor", "std"] }
 hkdf = "0.12"
+object_store = { version = "0.14.2", default-features = false, features = ["fs"] }
 sha2 = { version = "0.10", default-features = false }
 zeroize = "1"
