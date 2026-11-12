@@ -28,15 +28,12 @@ CREATE POLICY tenant_isolation ON messages
     USING (workspace_id = nullif(current_setting('app.workspace_id', true), ''))
     WITH CHECK (workspace_id = nullif(current_setting('app.workspace_id', true), ''));
 
--- 管理ロール（BYPASSRLS）の利用記録と、監査付きの管理経路。
--- ADR 0005 の Consequences（ポリシーを回避するロールの利用は監査の対象）に従う。
---
--- 権限の分離: 管理ステートメントの実行主体（pelway_admin_executor）には監査表への
--- 権限を一切与えない。監査表の所有者は別ロール（pelway_audit_writer）で、追記を
--- 行う関数だけを提供する。このため管理ステートメントから監査記録を削除・改変する
--- ことはできず、監査は追記のみ（append-only）になる。db_user には接続ユーザー
--- （session_user）を記録する。statement は 1 文だけ。search_path を固定して
--- 定義者権限の乗っ取りを防ぐ。
+-- 管理ロール（BYPASSRLS）の監査付き経路（ADR 0005 の Consequences）。
+-- 実行主体（pelway_admin_executor）は tenant 表への DML と監査表への SELECT のみ
+-- （削除・改変は不可能 = append-only）。監査表への書き込みは所有者
+-- （pelway_audit_writer）の関数だけが行う。実行手続きは同じ reason の監査行が
+-- 無ければ拒否し、呼び出し側（admin_exec ヘルパー）は監査行を先に別の文として
+-- 確定するため、ステートメントが失敗（拒否を含む）しても試行が監査に残る。
 CREATE TABLE admin_access_log (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     db_user     TEXT        NOT NULL,
@@ -44,47 +41,34 @@ CREATE TABLE admin_access_log (
     started_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE admin_access_log OWNER TO pelway_audit_writer;
+GRANT SELECT ON admin_access_log TO pelway_admin_executor;
 
--- 監査行の追記（executor から呼ばれる）。所有者権限で INSERT する。
+-- 監査行の追記。所有者権限で INSERT する。
 CREATE FUNCTION pelway_audit_write(reason text) RETURNS void
     LANGUAGE plpgsql
     SECURITY DEFINER
     SET search_path = pg_catalog, public
 AS $$ BEGIN INSERT INTO admin_access_log (db_user, reason) VALUES (session_user, reason); END $$;
 
-CREATE FUNCTION pelway_admin_exec(reason text, statement text) RETURNS void
+-- 管理ステートメント（1 文）の実行。search_path 固定で定義者権限の乗っ取りを防ぐ。
+CREATE PROCEDURE pelway_admin_exec(reason text, statement text)
     LANGUAGE plpgsql
     SECURITY DEFINER
     SET search_path = pg_catalog, public
 AS $$
 BEGIN
-    PERFORM pelway_audit_write(reason);
+    IF NOT EXISTS (SELECT 1 FROM admin_access_log WHERE admin_access_log.reason = pelway_admin_exec.reason) THEN
+        RAISE EXCEPTION 'admin statement requires a preceding audit row';
+    END IF;
     EXECUTE statement;
 END
 $$;
 
-CREATE FUNCTION pelway_admin_query(reason text, statement text) RETURNS text
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    SET search_path = pg_catalog, public
-AS $$
-DECLARE
-    result text;
-BEGIN
-    PERFORM pelway_audit_write(reason);
-    EXECUTE statement INTO result;
-    RETURN result;
-END
-$$;
-
-ALTER FUNCTION pelway_admin_exec(text, text) OWNER TO pelway_admin_executor;
-ALTER FUNCTION pelway_admin_query(text, text) OWNER TO pelway_admin_executor;
+ALTER PROCEDURE pelway_admin_exec(text, text) OWNER TO pelway_admin_executor;
 ALTER FUNCTION pelway_audit_write(text) OWNER TO pelway_audit_writer;
 
--- 関数の EXECUTE 権限は既定で PUBLIC に付く。奪って限定した相手だけに渡す。
-REVOKE ALL ON FUNCTION pelway_admin_exec(text, text),
-    pelway_admin_query(text, text), pelway_audit_write(text) FROM PUBLIC;
-GRANT EXECUTE
-    ON FUNCTION pelway_admin_exec(text, text), pelway_admin_query(text, text)
-    TO pelway_admin;
-GRANT EXECUTE ON FUNCTION pelway_audit_write(text) TO pelway_admin_executor;
+-- EXECUTE 権限は既定で PUBLIC に付く。奪って限定した相手だけに渡す。
+REVOKE ALL ON PROCEDURE pelway_admin_exec(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION pelway_audit_write(text) FROM PUBLIC;
+GRANT EXECUTE ON PROCEDURE pelway_admin_exec(text, text) TO pelway_admin;
+GRANT EXECUTE ON FUNCTION pelway_audit_write(text) TO pelway_admin;

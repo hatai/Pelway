@@ -1,13 +1,8 @@
 //! RLS 結合テストの共通セットアップ。`PELWAY_DATABASE_URL` が指す PostgreSQL に
 //! 一意な名前の scratch database を作り、マイグレーションを当てて、ロール別の
-//! プールを返す。
-//!
-//! `PELWAY_DATABASE_URL` 未設定なら `None` を返し、呼び出し側のテストは飛ぶ
-//! （CI には PostgreSQL が無いため）。設定があるのに接続や作成に失敗したときは
-//! パニックで落とす（黙って飛ばさない）。
-//!
-//! ロール（pelway_app / pelway_admin）はクラスタ全体で共有される。マイグレーションは
-//! 冪等に作るため、並行実行でも壊れない。マイグレーションと `SET ROLE` のどちらも
+//! プールを返す。未設定なら `None` を返し、呼び出し側のテストは飛ぶ（CI には
+//! PostgreSQL が無いため）。設定があるのに接続や作成に失敗したときはパニックで
+//! 落とす（黙って飛ばさない）。マイグレーションと `SET ROLE` のどちらも
 //! スーパーユーザー権限を前提とする（docs/dev-environment.md の開発用 PostgreSQL）。
 
 use std::str::FromStr;
@@ -29,12 +24,9 @@ pub struct TestDb {
 
 impl TestDb {
     /// scratch database を作り、マイグレーションを当てて、ロール別のプールを返す。
-    ///
-    /// ロール（pelway_app / pelway_admin）はクラスタ全体で共有され、PostgreSQL の
-    /// advisory lock はデータベースローカル。そのため scratch database ごとのロック
-    /// だけでは並行するテストプロセスと競合する。ここでは接続先データベース上の
-    /// advisory lock でマイグレーション全体を直列化する（マイグレーションの 0001
-    /// にも同じ意味のロックがあるが、あちらは同一データベース内の並行にしか効かない）。
+    /// ロールはクラスタ共有だが advisory lock はデータベースローカルのため、接続先
+    /// データベース上の advisory lock でマイグレーション全体を並行テストプロセスに対して
+    /// 直列化する。
     ///
     /// # Panics
     ///

@@ -24,3 +24,11 @@
 3. 仮定と解釈: 開発トポロジー（マイグレーション=スーパーユーザー）ではスーパーユーザー所有の関数は何でもできてしまうため、実行主体を非スーパーユーザーに分離するしかない、と仮置きした。選んだ解釈: 実行主体 `pelway_admin_executor`（BYPASSRLS + tenant 表 DML のみ）と監査表所有者 `pelway_audit_writer` の 2 ロール分離。選ばなかった解釈: ステートメントの構文ブラックリスト（抜けが出る）。
 4. 足りなかった情報・検証手段: 失敗した管理試行（tamper 等）は単一文トランザクションのロールバックで監査にも残らない。試行の記録には PROCEDURE と COMMIT 分割が必要で、この PR では対象外とした。
 5. 改善案: docs/adr/0005-postgres-row-level-security.md の「Consequences」に「管理経路の監査は追記のみで、実行ロールは監査表に権限を持たない」を足す。
+
+## 実装者メモ（round 4）
+
+1. 詰まった箇所: crates/pelway-db/migrations/0003_rls_and_admin_audit.sql: SECURITY DEFINER 手続き内の COMMIT が invalid transaction termination（2D000）で拒否される（psql 実験で確定。SECURITY INVOKER なら可）。監査とステートメントの同一手続きを断念し、監査行を別文で先に確定し、実行手続きが監査行の存在を検査して拒否する構成に変えた。
+2. 曖昧だった文: 「操作失敗時も監査記録が確定する経路に分離してください」（PR #115 の pelway-review レビュー must-fix）。
+3. 仮定と解釈: 「経路の分離」はヘルパーの 2 文構成（監査書き込み → 実行）で満たすと解釈した。実行手続きが同 reason の監査行を検査して拒否するため、監査なしの実行は DB 側で不可能。選ばなかった解釈: 監査行の捏造（pelway_audit_write の直接呼び出し）の禁止 — 捏造も db_user・reason・時刻として記録に残り、利用の秘匿には使えないため。
+4. 足りなかった情報・検証手段: 既存ロールの属性揃え込み（ALTER）の直接試験。並行テストが属性の一時的な破壊と干渉する恐れがあるため、マイグレーション後の属性値の表明検査のみ行った。
+5. 改善案: docs/adr/0005-postgres-row-level-security.md の「Consequences」に「監査は実行の前に別文として確定し、実行手続きは監査行の存在を検査する」を足す。
