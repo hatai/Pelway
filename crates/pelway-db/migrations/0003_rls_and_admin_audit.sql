@@ -28,13 +28,52 @@ CREATE POLICY tenant_isolation ON messages
     USING (workspace_id = nullif(current_setting('app.workspace_id', true), ''))
     WITH CHECK (workspace_id = nullif(current_setting('app.workspace_id', true), ''));
 
--- 管理ロール（BYPASSRLS）の利用記録。ADR 0005 の Consequences（ポリシーを回避する
--- ロールの利用は監査の対象）に従う。アプリロールには権限を与えない。
+-- 管理ロール（BYPASSRLS）の利用記録と、監査付きの管理経路。
+-- ADR 0005 の Consequences（ポリシーを回避するロールの利用は監査の対象）に従う。
 CREATE TABLE admin_access_log (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     db_user     TEXT        NOT NULL,
     reason      TEXT        NOT NULL,
     started_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-GRANT INSERT, SELECT ON admin_access_log TO pelway_admin;
-GRANT USAGE ON SEQUENCE admin_access_log_id_seq TO pelway_admin;
+
+-- pelway_admin には表への直接権限が無いため、この2つの SECURITY DEFINER 関数が
+-- 管理操作の唯一の経路になる。関数は監査行を書いてからステートメントを実行する
+-- （監査と操作は同じトランザクションで原子）。よってロールの能力を使えば必ず
+-- 監査行が残る。db_user には接続ユーザー（session_user）を記録する。
+--
+-- 関数の所有者はマイグレーションを実行したロール（開発ではスーパーユーザー）。
+-- 本番では表の所有者と別の、BYPASSRLS と表権限を持つ NOLOGIN ロールに所有させる
+-- （所有者だと FORCE ROW LEVEL SECURITY が効いてしまう）。
+-- statement は 1 文だけ。search_path を固定して定義者権限の乗っ取りを防ぐ。
+CREATE FUNCTION pelway_admin_exec(reason text, statement text) RETURNS void
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = pg_catalog, public
+AS $$
+BEGIN
+    INSERT INTO admin_access_log (db_user, reason) VALUES (session_user, reason);
+    EXECUTE statement;
+END
+$$;
+
+CREATE FUNCTION pelway_admin_query(reason text, statement text) RETURNS text
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    result text;
+BEGIN
+    INSERT INTO admin_access_log (db_user, reason) VALUES (session_user, reason);
+    EXECUTE statement INTO result;
+    RETURN result;
+END
+$$;
+
+-- 関数の EXECUTE 権限は既定で PUBLIC に付く。奪って管理ロールだけに渡す。
+REVOKE ALL ON FUNCTION pelway_admin_exec(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION pelway_admin_query(text, text) FROM PUBLIC;
+GRANT EXECUTE
+    ON FUNCTION pelway_admin_exec(text, text), pelway_admin_query(text, text)
+    TO pelway_admin;

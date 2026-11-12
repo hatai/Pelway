@@ -10,7 +10,9 @@
 //!   接続プールで次の利用者に持ち越されない。
 //! - 設定がないトランザクションはどの行も返さない（fail-closed）。
 //! - アプリは [`APP_ROLE`] で動き、ポリシーの適用を受ける。管理用の処理は
-//!   [`ADMIN_ROLE`]（BYPASSRLS）だけが行え、その利用は `admin_access_log` に
+//!   [`ADMIN_ROLE`]（BYPASSRLS）だけが行えるが、このロールに表への直接権限は
+//!   なく、監査付きの SECURITY DEFINER 関数（`pelway_admin_exec` /
+//!   `pelway_admin_query`）を呼ぶしかない。利用は必ず `admin_access_log` に
 //!   記録される（ADR 0005 の Consequences）。
 //!
 //! マイグレーション（`migrate`）は表の所有者（開発ではスーパーユーザー）で
@@ -41,7 +43,8 @@ pub const WORKSPACE_SETTING: &str = "app.workspace_id";
 pub const APP_ROLE: &str = "pelway_app";
 
 /// 管理用のロール。`BYPASSRLS` でポリシーを回避する。移行・バックアップ・横断の
-/// 運営作業だけに使う。利用は [`begin_admin_tx`] が `admin_access_log` に記録する。
+/// 運営作業だけに使う。表への直接権限は持たず、利用が必ず `admin_access_log` に
+/// 記録される監査付き関数（[`admin_exec`] / [`admin_query`]）だけを呼べる。
 pub const ADMIN_ROLE: &str = "pelway_admin";
 
 /// 埋め込みのマイグレーションを実行する。表の所有者（開発ではスーパーユーザー）の
@@ -113,25 +116,49 @@ where
     Ok(tx)
 }
 
-/// 管理用のトランザクションを開き、その利用を `admin_access_log` に記録する。
-/// [`ADMIN_ROLE`] のプールに対して使う。`reason` は何のために管理ロールを
-/// 使ったかを人間が読める形で書く。
+/// 管理用の書き込み（INSERT / UPDATE / DELETE / DDL）を監査付きで実行する。
+/// [`ADMIN_ROLE`] のプールに対して使う。DB 側の関数 `pelway_admin_exec` が
+/// `admin_access_log` に監査行を書いてから `statement` を実行する（監査と操作は
+/// 同じトランザクションで原子）。`statement` は 1 文だけ。
+///
+/// `pelway_admin` には表への直接権限がなく、この監査付き関数を呼ぶ以外に何も
+/// できないため、ロールの能力を使えば必ず監査行が残る（ADR 0005 の Consequences）。
+/// `reason` は何のために管理ロールを使ったかを人間が読める形で書く。
 ///
 /// # Errors
 ///
-/// トランザクションの開始または監査記録の INSERT に失敗したとき [`sqlx::Error`]
-/// を返す。
-pub async fn begin_admin_tx<'c, A>(
-    acquire: A,
-    reason: &str,
-) -> sqlx::Result<Transaction<'c, Postgres>>
+/// SQL の実行に失敗したとき [`sqlx::Error`] を返す。
+pub async fn admin_exec<'e, E>(executor: E, reason: &str, statement: &str) -> sqlx::Result<()>
 where
-    A: Acquire<'c, Database = Postgres>,
+    E: sqlx::Executor<'e, Database = Postgres>,
 {
-    let mut tx = acquire.begin().await?;
-    sqlx::query("INSERT INTO admin_access_log (db_user, reason) VALUES (current_user, $1)")
+    sqlx::query("SELECT pelway_admin_exec($1, $2)")
         .bind(reason)
-        .execute(&mut *tx)
+        .bind(statement)
+        .execute(executor)
         .await?;
-    Ok(tx)
+    Ok(())
+}
+
+/// 管理用の読み取りを監査付きで実行し、先頭行の先頭列を text で返す。
+/// [`ADMIN_ROLE`] のプールに対して使う。`statement` は 1 文で、1 列の text を
+/// 返す書き方にする（例: `SELECT count(*)::text FROM channels`）。行が無ければ
+/// `None` を返す。書き込みには [`admin_exec`] を使う。
+///
+/// # Errors
+///
+/// SQL の実行に失敗したとき [`sqlx::Error`] を返す。
+pub async fn admin_query<'e, E>(
+    executor: E,
+    reason: &str,
+    statement: &str,
+) -> sqlx::Result<Option<String>>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
+    sqlx::query_scalar("SELECT pelway_admin_query($1, $2)")
+        .bind(reason)
+        .bind(statement)
+        .fetch_one(executor)
+        .await
 }
