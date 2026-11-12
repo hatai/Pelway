@@ -6,6 +6,7 @@ use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 
+use pelway_contract::approval::Decider;
 use pelway_contract::ids::{CardId, MemberId, WorkspaceId};
 use pelway_contract::ledger::{ApprovalLedger, NewCard};
 use pelway_contract::snapshot::ActionPayload;
@@ -33,7 +34,7 @@ fn new_card(id: &str, decider: &str, requester: &str, deadline: Option<TsMs>) ->
             scope: Vec::new(),
         },
         requester: MemberId::from(requester),
-        decider: MemberId::from(decider),
+        decider: Decider::Member(MemberId::from(decider)),
         deadline,
     }
 }
@@ -142,7 +143,7 @@ fn my_requests_tab_lists_my_requests_with_progress() {
     let requested = &json["my_requests"][0];
     assert_eq!(requested["state"], "awaiting_send_approval");
     assert_eq!(requested["requester"], ME);
-    assert_eq!(requested["decider"], OTHER);
+    assert_eq!(requested["decider"]["member"], OTHER);
 }
 
 // 受け入れ条件4: 一覧は台帳の状態を検索して作る。承認で状態が変われば一覧も変わる。

@@ -9,7 +9,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use pelway_contract::approval::{ApproveRequest, approve_path, comments_path};
+use pelway_contract::approval::{ApproveRequest, Decider, approve_path, comments_path};
 use pelway_contract::ids::IdempotencyKey;
 use pelway_contract::ledger::{ApprovalLedger, BeginApproval, NewCard};
 use pelway_contract::snapshot::ActionPayload;
@@ -34,7 +34,7 @@ fn new_card(id: &str) -> NewCard {
             scope: Vec::new(),
         },
         requester: "m-human-http".into(),
-        decider: "m-human-http".into(),
+        decider: Decider::Member("m-human-http".into()),
         deadline: None,
     }
 }

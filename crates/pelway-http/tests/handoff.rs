@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 
+use pelway_contract::approval::Decider;
 use pelway_contract::handoff::handoffs_path;
 use pelway_contract::ids::{CardId, MemberId};
 use pelway_contract::ledger::{ApprovalLedger, NewCard};
@@ -59,7 +60,7 @@ fn shared_ledger() -> SharedLedger {
                 scope: vec!["tickets:write".to_owned()],
             },
             requester: "m-human-handoff".into(),
-            decider: "m-bot-1".into(),
+            decider: Decider::Member("m-bot-1".into()),
             deadline: None,
         })
         .expect("new card");
@@ -139,7 +140,7 @@ fn handoff_refusal_is_200_with_refused_not_4xx() {
         .unwrap()
         .decider
         .clone();
-    assert_eq!(decider, MemberId::from("m-human-handoff"));
+    assert_eq!(decider, Decider::Member(MemberId::from("m-human-handoff")));
 }
 
 #[test]

@@ -31,6 +31,7 @@
 //!   親 task へ関連付ける。初期案は読み取りと内部下書きだけで、親の権限・承認を
 //!   複製しない」）。子タスクの権限設計はこの crate の外。
 
+use crate::approval::Decider;
 use crate::ids::{CardId, ChannelId, HandoffId, MemberId};
 use crate::store::TsMs;
 use crate::task::TaskState;
@@ -150,9 +151,10 @@ pub enum HandoffError {
     CardNotFound,
     CardIdMismatch,
     /// 依頼元がカードの現在の担当ではない（既にほかのメンバーへ渡っている等）。
-    /// 現在の担当を読み直してから受け渡す。
+    /// 現在の担当を読み直してから受け渡す。指名した1人（[`Decider::Member`]）の
+    /// カードだけが受け渡せる（役割を担当にしたカードは対象外）。
     NotCurrentDecider {
-        current: MemberId,
+        current: Decider,
     },
     /// 依頼先が依頼元と同じ。受け渡しにならない。
     SelfHandoff,
@@ -286,7 +288,7 @@ mod tests {
                 scope: vec!["tickets:write".to_owned()],
             },
             requester: member("m-human-1"),
-            decider: member(decider),
+            decider: Decider::Member(member(decider)),
             deadline: None,
         }
     }
@@ -333,7 +335,9 @@ mod tests {
     }
 
     fn decider(ledger: &ApprovalLedger, card: &str) -> MemberId {
-        ledger.card(&card.into()).unwrap().decider.clone()
+        ledger
+            .resolve_decider(&ledger.card(&card.into()).unwrap().decider)
+            .expect("handoff テストのカードは指名した1人")
     }
 
     // ---- 受け入れ条件 1: 受け渡しは 5 項目を持つ記録としてサーバーを通る ----
@@ -446,7 +450,7 @@ mod tests {
         assert_eq!(
             ledger2.hand_off(handoff_req("m-bot-1", "m-bot-2"), NOW),
             Err(HandoffError::NotCurrentDecider {
-                current: member("m-bot-2")
+                current: Decider::Member(member("m-bot-2"))
             })
         );
     }
@@ -492,12 +496,12 @@ mod tests {
         assert_eq!(
             ledger.hand_off(handoff_req("m-bot-2", "m-bot-3"), NOW),
             Err(HandoffError::NotCurrentDecider {
-                current: member("m-bot-1")
+                current: Decider::Member(member("m-bot-1"))
             })
         );
         assert_eq!(
             HandoffError::NotCurrentDecider {
-                current: member("m-bot-1")
+                current: Decider::Member(member("m-bot-1"))
             }
             .http_status(),
             409
