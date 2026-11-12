@@ -223,6 +223,20 @@ async fn admin_role_can_only_act_through_audited_functions() {
         "関数の権限の拒否であるべき: {err}"
     );
 
+    // 管理ステートメントから監査記録を削除・改変することはできない。実行主体の
+    // pelway_admin_executor には監査表への権限が無く、監査は追記のみ（append-only）。
+    let err = admin_exec(
+        &db.admin,
+        "tamper: delete the audit log",
+        "DELETE FROM admin_access_log",
+    )
+    .await
+    .expect_err("監査記録の削除は拒否されるべき");
+    assert!(
+        err.to_string().contains("permission denied"),
+        "権限の拒否であるべき: {err}"
+    );
+
     // 管理経路の利用は監査記録に残る。db_user には接続ユーザー（session_user）が
     // 記録される。
     let session_user: String = sqlx::query_scalar("SELECT session_user")

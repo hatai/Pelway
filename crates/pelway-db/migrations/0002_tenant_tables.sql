@@ -34,6 +34,7 @@ CREATE TABLE messages (
 
 -- pelway_admin には表への直接権限を与えない。管理ロールができるのは 0003 の
 -- 監査付き関数（pelway_admin_exec / pelway_admin_query）の呼び出しだけで、
--- それ以外の経路では何も読み書きできない。
+-- それ以外の経路では何も読み書きできない。DML はその関数の実行主体
+-- pelway_admin_executor に与える。
 GRANT SELECT, INSERT, UPDATE, DELETE
-    ON workspaces, channels, messages TO pelway_app;
+    ON workspaces, channels, messages TO pelway_app, pelway_admin_executor;

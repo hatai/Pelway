@@ -30,29 +30,35 @@ CREATE POLICY tenant_isolation ON messages
 
 -- 管理ロール（BYPASSRLS）の利用記録と、監査付きの管理経路。
 -- ADR 0005 の Consequences（ポリシーを回避するロールの利用は監査の対象）に従う。
+--
+-- 権限の分離: 管理ステートメントの実行主体（pelway_admin_executor）には監査表への
+-- 権限を一切与えない。監査表の所有者は別ロール（pelway_audit_writer）で、追記を
+-- 行う関数だけを提供する。このため管理ステートメントから監査記録を削除・改変する
+-- ことはできず、監査は追記のみ（append-only）になる。db_user には接続ユーザー
+-- （session_user）を記録する。statement は 1 文だけ。search_path を固定して
+-- 定義者権限の乗っ取りを防ぐ。
 CREATE TABLE admin_access_log (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     db_user     TEXT        NOT NULL,
     reason      TEXT        NOT NULL,
     started_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE admin_access_log OWNER TO pelway_audit_writer;
 
--- pelway_admin には表への直接権限が無いため、この2つの SECURITY DEFINER 関数が
--- 管理操作の唯一の経路になる。関数は監査行を書いてからステートメントを実行する
--- （監査と操作は同じトランザクションで原子）。よってロールの能力を使えば必ず
--- 監査行が残る。db_user には接続ユーザー（session_user）を記録する。
---
--- 関数の所有者はマイグレーションを実行したロール（開発ではスーパーユーザー）。
--- 本番では表の所有者と別の、BYPASSRLS と表権限を持つ NOLOGIN ロールに所有させる
--- （所有者だと FORCE ROW LEVEL SECURITY が効いてしまう）。
--- statement は 1 文だけ。search_path を固定して定義者権限の乗っ取りを防ぐ。
+-- 監査行の追記（executor から呼ばれる）。所有者権限で INSERT する。
+CREATE FUNCTION pelway_audit_write(reason text) RETURNS void
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = pg_catalog, public
+AS $$ BEGIN INSERT INTO admin_access_log (db_user, reason) VALUES (session_user, reason); END $$;
+
 CREATE FUNCTION pelway_admin_exec(reason text, statement text) RETURNS void
     LANGUAGE plpgsql
     SECURITY DEFINER
     SET search_path = pg_catalog, public
 AS $$
 BEGIN
-    INSERT INTO admin_access_log (db_user, reason) VALUES (session_user, reason);
+    PERFORM pelway_audit_write(reason);
     EXECUTE statement;
 END
 $$;
@@ -65,15 +71,20 @@ AS $$
 DECLARE
     result text;
 BEGIN
-    INSERT INTO admin_access_log (db_user, reason) VALUES (session_user, reason);
+    PERFORM pelway_audit_write(reason);
     EXECUTE statement INTO result;
     RETURN result;
 END
 $$;
 
--- 関数の EXECUTE 権限は既定で PUBLIC に付く。奪って管理ロールだけに渡す。
-REVOKE ALL ON FUNCTION pelway_admin_exec(text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION pelway_admin_query(text, text) FROM PUBLIC;
+ALTER FUNCTION pelway_admin_exec(text, text) OWNER TO pelway_admin_executor;
+ALTER FUNCTION pelway_admin_query(text, text) OWNER TO pelway_admin_executor;
+ALTER FUNCTION pelway_audit_write(text) OWNER TO pelway_audit_writer;
+
+-- 関数の EXECUTE 権限は既定で PUBLIC に付く。奪って限定した相手だけに渡す。
+REVOKE ALL ON FUNCTION pelway_admin_exec(text, text),
+    pelway_admin_query(text, text), pelway_audit_write(text) FROM PUBLIC;
 GRANT EXECUTE
     ON FUNCTION pelway_admin_exec(text, text), pelway_admin_query(text, text)
     TO pelway_admin;
+GRANT EXECUTE ON FUNCTION pelway_audit_write(text) TO pelway_admin_executor;

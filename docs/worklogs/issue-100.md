@@ -16,3 +16,11 @@
 3. 仮定と解釈: BYPASSRLS はポリシーを回避するが GRANT は回避しない、を前提に「pelway_admin から表への直接権限をすべて剥奪し、監査付き SECURITY DEFINER 関数（pelway_admin_exec / pelway_admin_query、1 文だけ受け付ける汎形）のみを許す」設計にした。選ばなかった解釈: 表ごとの型付き管理関数を並べる（移行・バックアップの任意文を扱えず関数が膨らむ）。監査記録の db_user には current_user ではなく session_user を記録する方を選んだ（SECURITY DEFINER の中では current_user が関数所有者になるため）。
 4. 足りなかった情報・検証手段: 本番での関数所有者ロールの構成（表の所有者だと FORCE ROW LEVEL SECURITY が関数にも効く）。0003 に注意書きしたが、非スーパーユーザー所有者での実機検証はしていない。
 5. 改善案: docs/adr/0005-postgres-row-level-security.md の「Consequences」に「管理ロールは表への直接権限を持たず、監査付き SECURITY DEFINER 関数だけを使う」を足す。
+
+## 実装者メモ（round 3）
+
+1. 詰まった箇所: crates/pelway-db/migrations/0003_rls_and_admin_audit.sql: `pelway_audit_write` の関数本体を `BEGIN ... END` なしの 1 文で書いて plpgsql の構文エラー（42601）になった。ブロック形式に直した。
+2. 曖昧だった文: 「separate administrative execution from the audit store with privileges that the function's effective role cannot use to alter/delete audit rows」（PR #115 の pelway-review レビュー must-fix）。
+3. 仮定と解釈: 開発トポロジー（マイグレーション=スーパーユーザー）ではスーパーユーザー所有の関数は何でもできてしまうため、実行主体を非スーパーユーザーに分離するしかない、と仮置きした。選んだ解釈: 実行主体 `pelway_admin_executor`（BYPASSRLS + tenant 表 DML のみ）と監査表所有者 `pelway_audit_writer` の 2 ロール分離。選ばなかった解釈: ステートメントの構文ブラックリスト（抜けが出る）。
+4. 足りなかった情報・検証手段: 失敗した管理試行（tamper 等）は単一文トランザクションのロールバックで監査にも残らない。試行の記録には PROCEDURE と COMMIT 分割が必要で、この PR では対象外とした。
+5. 改善案: docs/adr/0005-postgres-row-level-security.md の「Consequences」に「管理経路の監査は追記のみで、実行ロールは監査表に権限を持たない」を足す。

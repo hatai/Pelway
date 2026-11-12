@@ -13,7 +13,8 @@
 //!   [`ADMIN_ROLE`]（BYPASSRLS）だけが行えるが、このロールに表への直接権限は
 //!   なく、監査付きの SECURITY DEFINER 関数（`pelway_admin_exec` /
 //!   `pelway_admin_query`）を呼ぶしかない。利用は必ず `admin_access_log` に
-//!   記録される（ADR 0005 の Consequences）。
+//!   記録され、管理ステートメントの実行主体には監査表への権限が無いため
+//!   監査記録は削除・改変できない（ADR 0005 の Consequences）。
 //!
 //! マイグレーション（`migrate`）は表の所有者（開発ではスーパーユーザー）で
 //! 実行すること。`pelway_admin` への BYPASSRLS 付与にはスーパーユーザー権限が
@@ -119,7 +120,9 @@ where
 /// 管理用の書き込み（INSERT / UPDATE / DELETE / DDL）を監査付きで実行する。
 /// [`ADMIN_ROLE`] のプールに対して使う。DB 側の関数 `pelway_admin_exec` が
 /// `admin_access_log` に監査行を書いてから `statement` を実行する（監査と操作は
-/// 同じトランザクションで原子）。`statement` は 1 文だけ。
+/// 同じトランザクションで原子）。`statement` は 1 文だけ。ステートメントの実行主体
+/// （pelway_admin_executor）には監査表への権限が無いため、監査記録を削除・改変する
+/// ステートメントは拒否される（監査は追記のみ）。
 ///
 /// `pelway_admin` には表への直接権限がなく、この監査付き関数を呼ぶ以外に何も
 /// できないため、ロールの能力を使えば必ず監査行が残る（ADR 0005 の Consequences）。
