@@ -1,0 +1,32 @@
+[package]
+# Issue #98 の型生成の検証用クレート。製品機能を含まない。
+# Rust の型から TypeScript の型を生成する道具（ts-rs と specta）を試し、
+# A2「同期を Rust/WASM、UI を TS/React DOM とする」場合の型生成維持費を
+# 確かめる。生成結果は bindings/ に置いて、差分をテストで検査する。
+name = "pelway-dev-typegen-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Rust to TypeScript type generation probe for issue #98. Not a product feature."
+
+[lib]
+# WASM ビルドで cdylib として書き出すため（wasm-opt でサイズを測る）。
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["serde"]
+# JSON 化（同期の往復）と WASM への書き出し。
+serde = ["dep:serde", "dep:serde_json"]
+
+[dependencies]
+# 型生成の道具 2 つ。ts-rs は素の derive、specta は 2.0 の RC。
+ts-rs = "12.0.1"
+specta = { version = "2.0.0-rc.28", features = ["derive"] }
+specta-typescript = "0.0.15"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+specta-serde = "0.0.15"
+
+# WASM ビルドのときだけ入る（ホストのビルドには影響しない）。
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"

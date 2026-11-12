@@ -12,7 +12,9 @@ default_branch = "main"
 // 特に docs/technical/v0.7/ は保全対象のため、trailing whitespace 等で書き換えない。
 // crates/pelway-client-ui/tokens/ は正本トークン JSON のバイト単位の写し
 // （sha256 固定）のため、末尾改行の付加も許さない。同じ理由で対象外とする。
-exclude = List("docs/**", "assets/**", "crates/pelway-client-ui/tokens/**")
+// crates/dev-typegen-probe/bindings/ は型生成の結果（生成物）で、生成元の
+// 出力そのままを置いて差分を検査する。書き換えると生成結果と一致しなくなる。
+exclude = List("docs/**", "assets/**", "crates/pelway-client-ui/tokens/**", "crates/dev-typegen-probe/bindings/**")
 
 // cargo 系ステップはメンバークレート単位ではなくワークスペース全体を検査する。
 // glob に Cargo.toml / Cargo.lock を含め、Rust ファイル以外の変更でも検査を起動する。

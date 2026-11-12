@@ -1,0 +1,38 @@
+[package]
+# Issue #98 の Slint 検証用クレート。製品機能を含まない。
+# Slint 1.18.1 の ListView が行ごとに高さが違う場合（可変高の仮想リスト）を
+# どう扱うかを確かめるための土台。測定手順と結果は
+# docs/research/slint-tauri-client-measurements.md にまとめる。
+name = "pelway-dev-slint-listview"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Slint ListView probe for issue #98. Not a product feature."
+
+[dependencies]
+# 版は 1.18.1 に固定（pelway-client-ui と同じ）。既定フィーチャは外し、必要な
+# ものだけを選ぶ。読み上げ（AccessKit / AT-SPI）の有無は、このクレートの
+# フィーチャ `a11y` で切り替え、同じソースを 2 通りでビルドして比較する
+# （無効は `--no-default-features`）。compat-1-18 は slint 1.18.1 の必須。
+slint = { version = "=1.18.1", default-features = false, features = [
+    "std",
+    "backend-winit",
+    "renderer-software",
+    "renderer-femtovg",
+    "compat-1-18",
+] }
+# スクロールイベントを送り込むための要素 API（要素の検索・スクロール送出）。
+# テスト用 backend 本体は使わない（初期化しない）が、このクレートの API を
+# 使うために依存する。
+i-slint-backend-testing = "=1.18.1"
+# プロセスが消費した CPU 時間を測るため。
+libc = "0.2"
+
+[features]
+default = ["a11y"]
+# 読み上げ（アクセシビリティ）を有効にする。
+a11y = ["slint/accessibility"]
+
+[build-dependencies]
+# ui/probe.slint をコンパイルする。
+slint-build = "=1.18.1"
