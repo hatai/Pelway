@@ -34,6 +34,14 @@
 4. 足りなかった情報・検証手段: `reqwest::Error` には公開コンストラクタが無く、単体試験で未送信（is_connect）/結果不明の実経路を再現できないため、それらは PR 4 の結合試験（接続拒否・タイムアウト）で確かめる。エラー分類の試験が分類の実装に結び付いていることの確認は変異検査（`Json` を Invalid から外すと `error_mapping_invalid_for_parse_and_shape_failures` が FAILED、戻すと 7/7 合格）で行った。
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順6に「積み上げ PR の pr-size は `bash scripts/pr-size.sh --base <親ブランチ>` で測る」を明記する（issue #96 round 2 のメモと同じ指摘だが skill 本文に反映されていない）。
 
+## 実装者メモ（round 5）
+
+1. 詰まった箇所: crates/pelway-llm/tests/gateway.rs: 全体から PR 3 の範囲（基本経路と利用量の試験）を切り出す際、python での行範囲削除が `Reply::status` と `await_records` の閉じ括弧と本体を残し、構文エラー（`unexpected closing delimiter`）になった。手直しして `cargo fmt`・clippy で確認した。ほか: `SecretToken` 化に伴い `BearerHook` の `format!("Bearer {token}")` は Display を要求するため `token.expose()` に変えた。
+2. 曖昧だった文: 「PR 3『gateway 本体と基本経路の結合試験』| ...（rig-core 接続、HTTP クライアントの差込み、要求ごとのトークン、利用量と上限）、モック HTTP サーバー、chat（スキーマなし／あり）・`json_object`・embed の結合試験」（Issue #95 の split-plan コメント）— 「要求ごとのトークン」の試験（取り出し・秘匿）は PR 4 に置いたまま、PR 3 の範囲でどこまでトークンを確認するかが決まっていない。
+3. 仮定と解釈: 仮定: PR 3 には BearerHook の存在確認（1 要求に Bearer が付く）だけで足りる。解釈: 基本経路の chat 試験に `Authorization: Bearer fixed-token` の確認を1行足した。差し替え・秘匿・ログ不出の試験は PR 4 のまま（split-plan の PR 4 行が「トークンの要求ごとの取り出しと秘匿」に置いているため）。選ばなかった: トークン試験一式を PR 3 へ移す（PR 3 が 800 行を超える）。
+4. 足りなかった情報・検証手段: PR 3 の試験は round 2 で TDD により開発したもの（当時の RED: `not implemented` で 14 失敗）の再配置であり、PR 3 単独での新規 RED は取れない。配置替え後の合格（5 試験）と `mise run verify` で代用した。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「よくある失敗」に「分割で試験を移動するときは移動先 PR で実行結果を引用し、出所（元の round）を明記する」を足す。
+
 ## 実装者メモ（round 8）
 
 1. 詰まった箇所: crates/pelway-llm/src/schema.rs: PR #163 の must-fix（未対応の `type` 名が `type_matches` の `_ => true` で常に一致する）を直す際、`type` の値だけ未知なら値の検証を飛ばす形も考えたが、誤記を含むスキーマが黙って全部を通すことのないよう、`validate` の先頭で `KNOWN_TYPES` にない名前をスキーマエラーとして拒否する形にした。`type_matches` の未知名も `_ => false` に変えた（防御）。
@@ -49,3 +57,11 @@
 3. 仮定と解釈: 仮定: 重複はValueの検証結果に影響しない。解釈: 重複した既知の型名（`["string","string"]`）はエラーにしない（指示の列挙に無く、検証の挙動は一意に決まるため）。選ばなかった: 重複もエラーにする（指示の範囲を超える厳格化で、正当なスキーマを誤って拒ける恐れ）。
 4. 足りなかった情報・検証手段: なし（RED: `schema_validation_rejects_malformed_type_shapes ... FAILED`（空配列・数値・`["string",3]` など11形が通る）→ GREEN: 9/9。`type` キーなしは検証しないまま通ることを正当側の試験に明記）。
 5. 改善案: `.agents/skills/review-pr` の must-fix 記録には既に含まれるため省略（レビュー運用は変えない）。
+
+## 実装者メモ（round 10）
+
+1. 詰まった箇所: crates/pelway-llm/src/gateway.rs: PR #167 の must-fix（`reserve_call` が `calls` を読むだけてロックを解放し、`record_usage` で初めて増やすため、並行呼び出しが両方通る）。`reserve_call` で判定と `calls += 1`（予約）を1つのロックで行い、`record_usage` は `calls` を増やさない形に変えた。chat/embed の本体を `chat_after_reservation` / `embed_after_reservation` に退け、trait メソッドは予約→本体→「未送信なら予約を戻す」の包みにした（予約後にスキーマ解釈が `NotSent` で失敗する経路も同じ包みで戻る）。ほか: この差分だけでは `Reply::status` が tests/gateway.rs に無い（PR 4 に移していた）ため、拒否の試験のために戻した。
+2. 曖昧だった文: 「送信前にロック下で予約数を原子的に増やす（失敗時の扱いも定義する）など、上限判定と予約を不可分にしてください。」（PR #167 のレビュー、pelway-review）+ 指揮役の指示「送信が失敗したときに予約をどう扱うかも決めて試験にする」— 「失敗」のうちどれが予約を戻すかが指示に書かれていない。
+3. 仮定と解釈: 仮定: 予約は「送った（送った可能性がある）呼出し」に対して消費する。解釈: `LlmError::NotSent`（何も送っていないことが確定: トークン取得失敗・接続拒否・送信前の検査失敗）だけが予約を戻し、`Rejected`・`OutcomeUnknown`・`Invalid`（応答は届いた）は予算を消費したままにする。Pelway 03「タイムアウトは結果の確定ではなく再送を許可しない」と同じ保守側。選ばなかった: 失敗はすべて予約を戻す（結果不明・拒否の呼出しも実際には提供元が処理している可能性があり、上限の意味が崩れる）ことと、すべて保持する（未送信で予算が無駄に減る）こと。
+4. 足りなかった情報・検証手段: なし（RED: 並行4本×予算2で `left: 4, right: 2`、拒否後の予算消費で `left: 0, right: 1` → GREEN: 結合 7/7・単体 9/9。並行試験は `tokio::spawn` で4本を同時に走らせ、モックの受取件数・成功/NotSent の内訳・`usage().calls` を確認）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「よくある失敗」に「並行安全性の指摘では、直す前に並行試験を先に書いて現行コードでの破れを記録する」を足す。

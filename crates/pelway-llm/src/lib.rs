@@ -2,24 +2,29 @@
 //! [`rig-core`](https://crates.io/crates/rig-core) 0.46 で呼ぶ（ADR 0008、#95）。
 //!
 //! - rig-core はこの crate の内側に隠す。公開するのは [`LlmGateway`] trait と
-//!   その型（OpenAI 互換 chat completions と embeddings 専用。rig の
-//!   エージェント・ツール・streaming は使わない）。
+//!   その実装 [`OpenAiGateway`]（OpenAI 互換 chat completions と embeddings 専用。
+//!   rig のエージェント・ツール・streaming は使わない）。
 //! - 提供元は設定（[`ProviderConfig`]）で1つだけ選ぶ。自動切替・fallback はない
 //!   （ADR 0008「提供元への接続には rig-core を使う」、Pelway 10 の D2/D3）。
+//! - HTTP クライアントは Pelway 側で作って rig に渡す。`reqwest::retry::never()`、
+//!   接続・全体のタイムアウト、プロキシを設定し、再送は一切しない。
 //! - トークンは要求ごとに [`TokenSource`] から取り出す（MVP は fnox の
 //!   `PELWAY_LLM_API_KEY`、将来の短時間トークンに差し替えられる形）。
 //!   トークンは [`SecretToken`] に包み、`Debug` 出力に出さない。
 //! - JSONスキーマ指定の応答は、提供元を問わず Pelway 側で検証する
-//!   （[`schema::validate`]）。
-//! - 試験はすべてローカルのモックHTTPサーバーで行い、外部ネットワークに出ない。
+//!   （[`schema::validate`]）。`json_object` だけの提供元にはスキーマをプロンプトへ渡す。
+//!
+//! 試験はすべてローカルのモックHTTPサーバーで行い、外部ネットワークに出ない。
 
 pub mod config;
 pub mod error;
+pub mod gateway;
 pub mod schema;
 pub mod token;
 
 pub use config::{ProviderConfig, ResponseFormatCapability};
 pub use error::LlmError;
+pub use gateway::{CallBudget, GatewayOptions, OpenAiGateway, UsageState};
 pub use token::{FnoxEnvTokenSource, SecretToken, TokenSource};
 
 use serde_json::Value;
@@ -110,7 +115,8 @@ pub struct EmbedReply {
 }
 
 /// 1呼出し分の利用量。提供元が報告しない項目は 0。
-/// `calls` はこのゲートウェイの累積呼出し回数（成功後に数える）。
+/// `calls` はこのゲートウェイの累積呼出し回数。送信前に予約として数え、
+/// 「未送信」に分類された失敗（何も送らなかったもの）は戻す。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Usage {
     pub input_tokens: u64,
