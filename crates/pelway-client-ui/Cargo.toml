@@ -13,7 +13,7 @@ pelway-client-core = { path = "../pelway-client-core" }
 # GUI の枠。版は 1.18.1 に固定（"=" で完全固定）。
 slint = "=1.18.1"
 # 画面の文言の取得（Fluent）。i18n/{ja,en}/main.ftl を読む。@tr()（gettext）は使わない。
-fluent-bundle = "0.15"
+fluent-bundle = "0.16"
 # FluentBundle の言語タグ（"ja" / "en"）。
 unic-langid = "0.9"
 
