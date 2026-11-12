@@ -74,7 +74,7 @@ PR を Projects ボードに載せる（ボードの組み込みワークフロ�
 
 ### `pelway.agent-watch/v1`
 
-スレッドが実装かレビューかは `provider` で見分ける（`opencode` が実装、`codex` がレビュー）。
+スレッドが実装かレビューかは `provider` で見分ける。`opencode` が実装で、それ以外（`codex`、`claudeAgent`。インスタンスは `codex_review`、`claude_review`）はレビュー。ブランチが `review/` で始まるかでも見分けられる。
 
 | `event` | 実装スレッド | レビュースレッド |
 |---|---|---|
@@ -90,6 +90,7 @@ PR を Projects ボードに載せる（ボードの組み込みワークフロ�
 |---|---|
 | `approve` | 実装スレッドに「PR #<M> は Approve された。skill implement-issue の手順 8 に従う。」を送る。Ready for review になり、必須チェックが通ったら、skill `command-team` の「マージ」に従ってマージする。Claude も付けた PR で判定が割れたらマージしない |
 | `request-changes` | 実装スレッドの `round` が 4 以上なら 6 のエスカレーション。3 なら skill `command-team` の手順 2 で effort を上げてから、2 以下ならそのまま「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を送る |
+| 同じ PR に Codex と Claude の両方を付けた | 両方の `verdict` がそろうまで、どちらにも基づいて動かない。そろったら、両方 `approve` なら `approve` の行、両方 `request-changes` なら must-fix をまとめて `request-changes` の行に進む。割れたら（片方が `approve`、片方が `request-changes`）マージせず、Issue に両方の要点をコメントして `needs-human` を付け、部屋で人間に知らせる |
 | `failed` | `error: checks pending` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 6 のエスカレーション |
 
 実装スレッドは `branch` の `agent/<N>-` から Issue 番号を、`thread_id` から送り先を取る。レビュースレッドから実装スレッドを探すときは、PR のブランチ名と同じ `branch` を持つスレッドを `t3 thread list` から選ぶ。
