@@ -327,11 +327,26 @@ jobs:
       # 出力先 lcov.info は .octocov.yml の coverage.paths と対応する。
       # --no-cfg-coverage を付ける: 既定の --cfg coverage ビルドは、cfg(coverage) で
       # nightly 専用 #![feature] を有効にする依存があると stable の E0554 で失敗するため。
+      # --exclude と --ignore-filename-regex で手書きの製品コード以外を集計から外す（#157）:
+      #   - --exclude は dev 用 crate と開発見張り役 pelway-agent-watch、CI に PostgreSQL が
+      #     無く恒常 0% の pelway-db をテスト・レポートの両方から外す。cargo の --exclude は
+      #     パッケージ名（Cargo.toml の name）を受け取るため、ディレクトリ名の
+      #     dev-client-probe ではなく pelway-dev-client-probe と書く。
+      #   - --ignore-filename-regex は build.rs の生成コード（out/ 配下）と統合テストの
+      #     コード自身（crates/<crate>/tests/）をレポートから外す。
       # cargo-llvm-cov は mise の [tools] で 0.6.17 をピンし、mise.lock が URL と
       # checksum で取得物を固定する（ソースからのビルドに 45 秒かかるため、
       # 事前ビルド済みのバイナリを使う）。
       - name: Generate LCOV (cargo llvm-cov)
-        run: mise exec -- cargo llvm-cov --workspace --locked --no-cfg-coverage --lcov --output-path lcov.info
+        run: |
+          mise exec -- cargo llvm-cov --workspace --locked --no-cfg-coverage \
+            --exclude pelway-dev-client-probe \
+            --exclude pelway-dev-queue-compare \
+            --exclude pelway-dev-smoke \
+            --exclude pelway-agent-watch \
+            --exclude pelway-db \
+            --ignore-filename-regex '([/\\]out[/\\]|crates/[^/]+/tests/)' \
+            --lcov --output-path lcov.info
 
       # octocov で PR コメント（増減表示）を作る。レポートの保存・比較は
       # GitHub Actions の artifact のみ（.octocov.yml の diff.storage.artifacts）。
