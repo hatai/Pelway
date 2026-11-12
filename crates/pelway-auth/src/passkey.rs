@@ -20,8 +20,13 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use webauthn_rs::prelude::*;
 
-use crate::session::AuthMethod;
+use crate::session::{AuthMethod, session_token};
 use crate::{AuthState, ErrorBody, SessionCookie, err};
+
+/// `pelway-http` と同じく poison したロックは中身を取り出して使い続ける。
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
+}
 
 /// member 名と passkey credential、進行中セレモニーのメモリ内保存。
 #[derive(Default)]
@@ -58,9 +63,7 @@ impl PasskeyStore {
 
     /// テスト・管理照会用: member の credential 数を返す。
     pub fn credential_count(&self, member_id: Uuid) -> usize {
-        self.members
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
+        lock(&self.members)
             .get(&member_id)
             .map(|m| m.credentials.len())
             .unwrap_or(0)
@@ -78,13 +81,7 @@ pub async fn register_start(
     State(state): State<Arc<AuthState>>,
     Json(body): Json<RegisterStartBody>,
 ) -> Result<Json<Value>, ErrorBody> {
-    if state
-        .passkeys
-        .names
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .contains_key(&body.member_name)
-    {
+    if lock(&state.passkeys.names).contains_key(&body.member_name) {
         return Err(err(StatusCode::CONFLICT, "name_taken"));
     }
     let member_id = Uuid::new_v4();
@@ -93,19 +90,14 @@ pub async fn register_start(
         .start_passkey_registration(member_id, &body.member_name, &body.display_name, None)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "registration_rejected"))?;
     let pending_id = Uuid::new_v4();
-    state
-        .passkeys
-        .pending
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .insert(
-            pending_id,
-            Pending::Register {
-                member_id,
-                member_name: body.member_name,
-                state: reg_state,
-            },
-        );
+    lock(&state.passkeys.pending).insert(
+        pending_id,
+        Pending::Register {
+            member_id,
+            member_name: body.member_name,
+            state: reg_state,
+        },
+    );
     Ok(Json(json!({ "pending_id": pending_id, "options": ccr })))
 }
 
@@ -121,12 +113,7 @@ pub async fn register_finish(
     State(state): State<Arc<AuthState>>,
     Json(body): Json<RegisterFinishBody>,
 ) -> Result<SessionCookie, ErrorBody> {
-    let pending = state
-        .passkeys
-        .pending
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .remove(&body.pending_id);
+    let pending = lock(&state.passkeys.pending).remove(&body.pending_id);
     let Pending::Register {
         member_id,
         member_name,
@@ -141,11 +128,7 @@ pub async fn register_finish(
         .map_err(|_| err(StatusCode::BAD_REQUEST, "registration_failed"))?;
     let credential_id = passkey.cred_id().to_vec();
     {
-        let mut members = state
-            .passkeys
-            .members
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut members = lock(&state.passkeys.members);
         members
             .entry(member_id)
             .or_insert(MemberRecord {
@@ -153,12 +136,7 @@ pub async fn register_finish(
             })
             .credentials
             .push(passkey);
-        state
-            .passkeys
-            .names
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(member_name, member_id);
+        lock(&state.passkeys.names).insert(member_name, member_id);
     }
     let token = state
         .sessions
@@ -177,18 +155,10 @@ pub async fn login_start(
     State(state): State<Arc<AuthState>>,
     Json(body): Json<LoginStartBody>,
 ) -> Result<Json<Value>, ErrorBody> {
-    let member_id = *state
-        .passkeys
-        .names
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
+    let member_id = *lock(&state.passkeys.names)
         .get(&body.member_name)
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_member"))?;
-    let credentials = state
-        .passkeys
-        .members
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
+    let credentials = lock(&state.passkeys.members)
         .get(&member_id)
         .map(|m| m.credentials.clone())
         .unwrap_or_default();
@@ -200,18 +170,13 @@ pub async fn login_start(
         .start_passkey_authentication(&credentials)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "authentication_rejected"))?;
     let pending_id = Uuid::new_v4();
-    state
-        .passkeys
-        .pending
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .insert(
-            pending_id,
-            Pending::Authenticate {
-                member_id,
-                state: auth_state,
-            },
-        );
+    lock(&state.passkeys.pending).insert(
+        pending_id,
+        Pending::Authenticate {
+            member_id,
+            state: auth_state,
+        },
+    );
     Ok(Json(json!({ "pending_id": pending_id, "options": rcr })))
 }
 
@@ -226,12 +191,7 @@ pub async fn login_finish(
     State(state): State<Arc<AuthState>>,
     Json(body): Json<LoginFinishBody>,
 ) -> Result<SessionCookie, ErrorBody> {
-    let pending = state
-        .passkeys
-        .pending
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .remove(&body.pending_id);
+    let pending = lock(&state.passkeys.pending).remove(&body.pending_id);
     let Pending::Authenticate {
         member_id,
         state: auth_state,
@@ -254,25 +214,27 @@ pub async fn login_finish(
 
 #[derive(Deserialize)]
 pub struct RevokeCredentialBody {
-    member_id: Uuid,
     credential_id: Vec<u8>,
 }
 
 /// `POST /auth/passkey/credentials/revoke`: credential を取り消す。
+/// member はセッション Cookie から特定し、本人の credential だけを対象にする
+/// （管理者操作や失効した端末からの取消は本番で別経路を検討）。
 /// 12 章「資格情報取消で通常の利用を停止」に合わせ、member のセッションを
-/// すべて消す（対象 credential のセッションだけに絞る選択肢は本番で検討）。
+/// すべて消す（呼び出したセッション自身も消える）。
 pub async fn revoke_credential(
     State(state): State<Arc<AuthState>>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<RevokeCredentialBody>,
 ) -> Result<Json<Value>, ErrorBody> {
+    let member_id = session_token(&headers)
+        .and_then(|token| state.sessions.lookup(&token))
+        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "no_session"))?
+        .member_id;
     let removed = {
-        let mut members = state
-            .passkeys
-            .members
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut members = lock(&state.passkeys.members);
         let record = members
-            .get_mut(&body.member_id)
+            .get_mut(&member_id)
             .ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_member"))?;
         let before = record.credentials.len();
         record
@@ -283,8 +245,8 @@ pub async fn revoke_credential(
     if !removed {
         return Err(err(StatusCode::NOT_FOUND, "unknown_credential"));
     }
-    let revoked_sessions = state.sessions.revoke_member(body.member_id);
+    let revoked_sessions = state.sessions.revoke_member(member_id);
     Ok(Json(
-        json!({ "member_id": body.member_id, "revoked_sessions": revoked_sessions }),
+        json!({ "member_id": member_id, "revoked_sessions": revoked_sessions }),
     ))
 }

@@ -49,6 +49,14 @@ fn post_json(path: &str, body: Value) -> Request<Body> {
         .unwrap()
 }
 
+fn post_json_auth(path: &str, body: Value, cookie: &str) -> Request<Body> {
+    Request::post(path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, cookie)
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
 fn set_cookie(headers: &axum::http::HeaderMap) -> String {
     headers
         .get(header::SET_COOKIE)
@@ -162,7 +170,7 @@ async fn credential_revocation_stops_sessions() {
     let cred_id = credential.raw_id.clone();
     let pending_id = body["pending_id"].as_str().unwrap().to_string();
 
-    let (_, headers, body) = call(
+    let (_, headers, _) = call(
         &t.app,
         post_json(
             "/auth/passkey/register/finish",
@@ -171,14 +179,26 @@ async fn credential_revocation_stops_sessions() {
     )
     .await;
     let cookie = set_cookie(&headers);
-    let member_id = body["member_id"].as_str().unwrap().to_string();
 
-    // credential を取消すとセッションが止まる（12 章: 資格情報取消で通常の利用を停止）
+    // 未認証の呼び出しは 401（member はセッション Cookie から特定する）
     let (status, _, _) = call(
         &t.app,
         post_json(
             "/auth/passkey/credentials/revoke",
-            json!({"member_id": member_id, "credential_id": cred_id}),
+            json!({"credential_id": cred_id}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // 本人のセッションで credential を取消すとセッションが止まる
+    // （12 章: 資格情報取消で通常の利用を停止）
+    let (status, _, _) = call(
+        &t.app,
+        post_json_auth(
+            "/auth/passkey/credentials/revoke",
+            json!({"credential_id": cred_id}),
+            &cookie,
         ),
     )
     .await;
