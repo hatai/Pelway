@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 指揮役のマージの順番待ち（skill command-team の「マージ」）。引数は "PR番号 ブランチ レビュー済みsha" の組を並べる。
 # 1 本ずつ、Ready for review を待ち、main を含まなければ取り込み、マージする head に対して次をすべて確かめてから
-# --admin でマージする: レビュー済み sha を含む / レビュー後に main 以外のコミットが無い / 今の main を含む /
+# --admin でマージする: pelway-review がレビュー済み sha を Approve している / レビュー済み sha を含む / レビュー後に main 以外のコミットが無い / 今の main を含む /
 # 必須チェック（mise run verify・pr-size）が成功（pr-size の失敗は pr-size-exception ラベルと hatai の目印コメントがあるときだけ許す）。
 # 途中のどの手順が失敗しても、その PR で止まり（終了コード 1）、後の PR には進まない。
 # 使い方: scripts/conductor-merge-queue.sh 128 agent/102-checkpoint-store fff6284... 130 agent/96-rmcp-connection 67aaa70...
@@ -24,8 +24,17 @@ pr_size_exception() {
 }
 
 # マージする head に対する条件をまとめて確かめる。0 = マージしてよい、1 = 止める、2 = 待つ（CI 未完了）。
+# pelway-review の最新のレビューが Approve で、本文の "Reviewed: <sha>" がレビュー済み sha と一致するか。
+approved_at() {
+  local pr=$1 rsha=$2 last
+  last=$(gh_dev pr view "$pr" --json reviews -q '[.reviews[]|select(.author.login=="pelway-review")]|last|"\(.state) \(.body)"') || return 1
+  case "$last" in APPROVED*) ;; *) return 1 ;; esac
+  printf '%s\n' "$last" | grep -qE "^(APPROVED )?Reviewed: $rsha\b"
+}
+
 check_head() {
   local pr=$1 br=$2 rsha=$3 H=$4 n rid v s
+  approved_at "$pr" "$rsha" || { echo "#$pr no pelway-review approval for the reviewed sha $rsha"; return 1; }
   git merge-base --is-ancestor "$rsha" "$H" || { echo "#$pr head does not contain the reviewed sha; re-review needed"; return 1; }
   n=$(git rev-list "$rsha..$H" --no-merges ^origin/main | wc -l) || { echo "#$pr cannot compare with reviewed sha"; return 1; }
   [ "$n" = 0 ] || { echo "#$pr new non-main commits ($n) since review; re-review needed"; return 1; }
