@@ -4,9 +4,13 @@
 //! ポイントとの照合で見つかる。鎖の歩査だけでは検出できないケース（全書き換え）を
 //! チェックポイントが担う。
 
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use pelway_audit_checkpoint::chain::{self, AuditEvent, StoredRow};
 use pelway_audit_checkpoint::checkpoint::{self, VerifyError};
 use pelway_audit_checkpoint::note::{self, NoteSigner};
+use pelway_audit_checkpoint::store::CheckpointLog;
 
 const ORIGIN: &str = "pelway.example/w/ws-1";
 
@@ -35,6 +39,22 @@ fn signed_at(k: usize) -> (String, note::NoteVerifier) {
     let signer = NoteSigner::from_bytes(ORIGIN, [0x42; 32]);
     let signed = checkpoint::sign_checkpoint(&rows_of(k), ORIGIN, &signer).unwrap();
     (signed, signer.verifying_key())
+}
+
+/// テストごとに一意な一時ファイル（cargo が用意するテスト用ディレクトリの下。
+/// 実行ごとに残骸が残らないよう、名前は PID と通し番号で一意にして先に消す）。
+fn tmp_log(tag: &str) -> (CheckpointLog, PathBuf) {
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let dir = std::env::var("CARGO_TARGET_TMPDIR")
+        .map_or_else(|_| std::env::temp_dir().join("opencode"), PathBuf::from);
+    let path = dir.join(format!(
+        "checkpoint-{tag}-{}-{}.log",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    // 前回の実行が同じ PID で残した場合に備えて、先に消しておく（無くてもよい）。
+    let _ = std::fs::remove_file(&path);
+    (CheckpointLog::open(&path), path)
 }
 
 /// 改ざんがなければ検証が通り、行数と最新ハッシュが読める。
@@ -156,4 +176,33 @@ fn other_origin_is_rejected() {
     let err = checkpoint::verify_checkpoint(&rows, &other, &[other_signer.verifying_key()], ORIGIN)
         .unwrap_err();
     assert_eq!(err, VerifyError::OriginMismatch);
+}
+
+/// 保管先（DB とは別の場所）に追記したチェックポイントで、DB を全て書き換えた
+/// 改ざんが見つかる。書き換え前は同じ保管先のチェックポイントで検証が通ることも
+/// 確かめる。保管先の長さ前置きが切れていたら、黙って空にせずエラーにする。
+#[test]
+fn stored_checkpoint_detects_full_db_rewrite() {
+    let (log, path) = tmp_log("rewrite");
+    let (signed, vkey) = signed_at(5);
+    log.append(&signed).unwrap();
+    let entries = log.entries().unwrap();
+    assert_eq!(entries.len(), 1);
+    // 保管したチェックポイントで、そのままの DB は検証が通る。
+    checkpoint::verify_checkpoint(
+        &rows_of(5),
+        &entries[0],
+        std::slice::from_ref(&vkey),
+        ORIGIN,
+    )
+    .unwrap();
+    // DB を全て書き換えて鎖も再計算すると、保管済みチェックポイントとの照合で見つかる。
+    let mut evs = events(5);
+    evs[2].actor = "attacker".to_owned();
+    let err = checkpoint::verify_checkpoint(&chain::build_chain(evs), &entries[0], &[vkey], ORIGIN)
+        .unwrap_err();
+    assert!(matches!(err, VerifyError::HashMismatch { .. }));
+    // 長さ前置きが切れた保管先は読み取りエラー（検証を黙って通さない）。
+    std::fs::write(&path, [0x00, 0x00, 0x00]).unwrap();
+    assert!(log.entries().is_err());
 }
