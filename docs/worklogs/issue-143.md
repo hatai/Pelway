@@ -10,7 +10,7 @@
 | leak-phrases（禁止語・秘密値の形の走査） | 製品ソースの禁止語走査は無い。`no_body_persist` の `core_forbidden_tokens` は `pelway-client-core` だけを対象に fs-API 名（`std::fs`・`println!` 等）を見る別目的・別範囲の検査 | 非重複 → 移植 |
 | external-refs（許可外ホストへの参照の走査） | 外部ホスト参照を走査する検査は無い | 非重複 → 移植 |
 | canary（成果物・ログ・端末保存領域の目印走査） | `no_body_logs` が実行時ログの canary 0件を、`no_body_persist` の (a)(c) が端末保存領域の canary 走査と陽性対照を担う（「ファイル・ログを canary で走査する」概念は同じ）。ただし demo-check の canary 段階は `target/` 成果物・`logs/`・`*.log` を `PELWAY_CANARY_*` の目印で受入時に走査し、走査対象・目印・実行時点（テストではなく受入ゲート）が異なる | 一部重複（概念）・検査自体は非重複 → 移植 |
-| selftest（違反を入れて検査が失敗することの確認） | `no_body_persist` の陽性対照 (c) はその試験自身の走査関数のもので、demo-check ハーネスの自己テストではない | 非重複 → 移植（後続 PR で入れる） |
+| selftest（違反を入れて検査が失敗することの確認） | `no_body_persist` の陽性対照 (c) はその試験自身の走査関数のもので、demo-check ハーネスの自己テストではない | 非重複 → 移植（積み PR `agent/143-demo-check-selftest` で入れる） |
 
 hk（typos・trailing_whitespace・newlines・cargo fmt/clippy/check）はスタイルと型の検査で、demo-check の各段階とは無関係。
 
@@ -25,7 +25,7 @@ hk（typos・trailing_whitespace・newlines・cargo fmt/clippy/check）はスタ
 ## `mise run verify` への組み込み判断
 
 `demo-check` 本体は verify に含めない。canary 段階は走査対象の成果物が無いと未検証（exit 1）になる設計で、クリーンな checkout（`target/` なし）では必ず失敗するため。またこれはデモ受入ゲートで、コミット前の衛生検査ではない。実行時点: デモ受入前に、製品をビルドしたあと `mise run demo-check`（全段階）。受入モードは `DEMO_CHECK_ACCEPTANCE=1`。
-`demo-check` の自己テスト（selftest）は後続 PR で `script-test` 経由の `verify-test` に入れる予定（ハーネス自体の退行を verify が検出できるようにするため）。
+`demo-check` の自己テスト（selftest）は `script-test` 経由で `verify-test` に含めた（積み PR `agent/143-demo-check-selftest`。ハーネス自体の退行を verify が検出できるようにするため。自己テストは一時ディレクトリで完結し成果物に依存しない）。
 
 ## 実装者メモ（round 1）
 
@@ -42,3 +42,11 @@ hk（typos・trailing_whitespace・newlines・cargo fmt/clippy/check）はスタ
 3. 仮定と解釈: PR B の比較元（base）は `agent/143-demo-check` と解釈し、`gh pr create --base` をそのブランチに向ける。`mise run pr-size` の既定は origin/main との差分なので、PR B の行数確認は `scripts/pr-size.sh --base origin/agent/143-demo-check` で数える解釈を置いた
 4. 足りなかった情報・検証手段: 積み PR の `mise run pr-size`（既定 origin/main 比較）が PR A 分も数えて失敗するかどうかは、CI 側の扱いが docs に見当たらず未確認。`--base` で積み元を指定すれば PR B 分だけ数えられる
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「積み PR では `scripts/pr-size.sh --base <積み元ブランチ>` で数える」と足す文の候補
+
+## 実装者メモ（round 3）
+
+1. 詰まった箇所: PR B（`agent/143-demo-check-selftest`）: `script-test` は `&&` でつなぐ既存の 1 行 `run` に selftest を追加する形にした（先の 3 テストが失敗したら selftest は走らない。逐一出すならタスク分割が必要だが、既存の形を変えない判断をした）
+2. 曖昧だった文: 「`mise.toml` の `demo-check-selftest` と `script-test` への組み込み、作業記録の追記」（Issue #143 の split-plan コメント「PR B」の範囲、作成者 hatai）
+3. 仮定と解釈: 「`script-test` への組み込み」は `script-test` タスクの `run` 行に selftest を追加することと解釈した。`verify-test` の `depends` 自体には触れない（`script-test` 経由で verify に効く）
+4. 足りなかった情報・検証手段: selftest の実行時間はこの環境で約 1 分（130 ケース）。verify-test への追加で CI 時間がどれだけ伸びるかは未計測（CI の実測が無い）
+5. 改善案: `docs/dev-environment.md` の CI 節に「`script-test` に demo-check selftest が含まれる（`verify-test`）」と足す文の候補
