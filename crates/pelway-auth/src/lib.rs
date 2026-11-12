@@ -1,9 +1,6 @@
-//! 認証スパイク（#97 の分割 1 本目）。passkey（`webauthn-rs`）の登録・
-//! ログインと、不透明セッション ID の発行・照会・取り消しを axum の
-//! 1 サービスに組み込めるか確かめるための下書き。確定スキーマではない。
-//! 顧客 IdP（`openidconnect`）でのログインはこのブランチに積む 2 本目の
-//! PR で `oidc` モジュールとして足す（`session::AuthMethod::Oidc` の
-//! 変種はその受け口として先に置く）。
+//! 認証スパイク（#97）。passkey（`webauthn-rs`）と顧客 IdP ログイン
+//! （`openidconnect`、Google Workspace / Microsoft Entra ID を想定）を
+//! axum の 1 サービスに組み込めるか確かめるための下書き。確定スキーマではない。
 //!
 //! # 12 章（通信秘密・目的別根拠・可視範囲・運営アクセス）との照合
 //!
@@ -18,14 +15,20 @@
 //!
 //! - passkey の登録・ログインは `Webauthn` の start/finish 4 API を axum の
 //!   handler に薄く包むだけで成立した（進行状態はサーバー側 one-shot 保存）。
-//! - 残課題（本番時）: credential counter の clone 検出、
+//! - OIDC RP は `ProviderMetadata` 手組み（discovery なしでも組める）+ PKCE +
+//!   state/nonce で axum の redirect/callback に載った。`hd`/`tid` のテナント
+//!   制限は `AdditionalClaims` の実装で取れた。
+//! - `AsyncHttpClient` は `Fn(HttpRequest) -> Future` に実装されているため、
+//!   本番の reqwest 等に差し替える継ぎ目を依存なしで作れた。
+//! - 残課題（本番時）: credential counter の clone 検出、JWKS キャッシュ、
 //!   pending/セッションの永続化と期限切れ、Cookie `Secure`、RP ID/Origin の
 //!   デプロイ別設定。
 //!
-//! 実外部 I/O は無い。テストは SoftPasskey をインメモリで接続する。
+//! 実外部 I/O は無い。テストは偽 IdP と SoftPasskey をインメモリで接続する。
 
 #![forbid(unsafe_code)]
 
+pub mod oidc;
 pub mod passkey;
 pub mod session;
 
@@ -40,6 +43,7 @@ use serde_json::json;
 use webauthn_rs::prelude::Uuid;
 use webauthn_rs::{Webauthn, WebauthnBuilder};
 
+use oidc::{Backchannel, OidcStore};
 use passkey::PasskeyStore;
 use session::{SessionStore, session_set_cookie};
 
@@ -92,12 +96,20 @@ pub struct AuthState {
     pub webauthn: Webauthn,
     pub sessions: SessionStore,
     pub passkeys: PasskeyStore,
+    pub oidc: OidcStore,
+    /// IdP バックチャネルに使う HTTP クライアント（注入）。
+    pub oidc_http: Backchannel,
 }
 
 impl AuthState {
     /// `rp_id`/`rp_origin`（例: `localhost`, `http://localhost:3000`）で
     /// passkey の RP を固定する。本番はデプロイごとの設定値。
-    pub fn new(rp_id: &str, rp_origin: &str) -> Result<Self, webauthn_rs::prelude::WebauthnError> {
+    pub fn new(
+        rp_id: &str,
+        rp_origin: &str,
+        oidc: OidcStore,
+        oidc_http: Backchannel,
+    ) -> Result<Self, webauthn_rs::prelude::WebauthnError> {
         let webauthn = WebauthnBuilder::new(
             rp_id,
             &webauthn_rs::prelude::Url::parse(rp_origin)
@@ -109,6 +121,8 @@ impl AuthState {
             webauthn,
             sessions: SessionStore::new(),
             passkeys: PasskeyStore::new(),
+            oidc,
+            oidc_http,
         })
     }
 }
@@ -118,6 +132,8 @@ impl AuthState {
 /// - `POST /auth/passkey/register/start` / `register/finish`
 /// - `POST /auth/passkey/login/start` / `login/finish`
 /// - `POST /auth/passkey/credentials/revoke`
+/// - `GET  /auth/oidc/{tenant}/start`（IdP へ 302）
+/// - `GET  /auth/oidc/callback`（code 交換・検証）
 /// - `POST /auth/logout`（Cookie のセッションを取消）
 /// - `GET  /auth/whoami`（セッション照会の試作経路）
 pub fn auth_router(state: Arc<AuthState>) -> Router {
@@ -136,6 +152,8 @@ pub fn auth_router(state: Arc<AuthState>) -> Router {
             "/auth/passkey/credentials/revoke",
             post(passkey::revoke_credential),
         )
+        .route("/auth/oidc/{tenant}/start", get(oidc::login_start))
+        .route("/auth/oidc/callback", get(oidc::callback))
         .route("/auth/logout", post(logout))
         .route("/auth/whoami", get(whoami))
         .with_state(state)
