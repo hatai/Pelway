@@ -1,0 +1,24 @@
+[package]
+# LLMゲートウェイの測定コマンド（#95 の PR 3）。合成データ（日本語の業務文）を
+# pelway-llm の chat / embed に流し、スキーマ適合率・応答時間・トークン数・
+# 検索の当たり（recall@k）を docs/research/ 向けの Markdown 表で出力する。
+# 実測は hatai が自分のトークンで行う（ADR 0008「測定」）。CI と cargo test は
+# ローカルのモックHTTPサーバーだけで動く。
+name = "pelway-dev-llm-eval"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Development measurement command for the Pelway LLM gateway: synthetic Japanese business texts, schema-conformance / latency / token / recall-at-k report. Not a fixed schema."
+
+[dependencies]
+# 測定対象の LLMゲートウェイ。
+pelway-llm = { path = "../pelway-llm" }
+# CLI と測定の実行に tokio（current_thread）。
+tokio = { version = "1", features = ["macros", "rt"] }
+# 合成データ（JSON）の読み込みと表の組み立て。
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# テスト内のモックHTTPサーバー（ローカルのみ・外部に出ない）。
+tokio = { version = "1", features = ["macros", "rt", "net", "io-util", "time"] }

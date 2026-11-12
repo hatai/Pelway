@@ -49,3 +49,11 @@
 3. 仮定と解釈: 仮定: 800 行上限は PR ごとに守る（round 1 と同じ。split-plan は例外ラベルには触れない）。解釈: PR 4 は「異常系の結合試験」に絞って出し、測定コマンドと合成データ（実装済み・round 3 で GREEN）は PR 5 としての分割を Issue コメントで提案する。選ばなかった: 2つを1本の PR にする（上限超過）ことと、テストや合成データを削って収める（skill が禁止）こと。
 4. 足りなかった情報・検証手段: split-plan 更新時に実装側の実測行数（round 1 コメントの +1464 の内訳と round 3 の +715）が参照されなかったため、PR 4 の見込みが立たなかった。
 5. 改善案: `.github/ISSUE_TEMPLATE/agent-task.yml` の「規模の見積もり」の description に「分割案には各 PR の実測・見込み行数を書く」を足す。
+
+## 実装者メモ（round 7）
+
+1. 詰まった箇所: crates/dev-llm-eval/tests/eval.rs: `TokenSource` の返り型を `SecretToken` に変えた（round 4）影響で、試験内の `Fixed` 実装が `Result<String, LlmError>` のまま E0053 になった。`SecretToken::new` で包み直した。ほか: mise.toml への `[tasks.llm-eval]` 追加位置（[tasks.fetch] の直後）に置き直した。
+2. 曖昧だった文: 「測定コマンドがモックで動き、`docs/research/` 向けの表を出力する → CI の試験」（Issue #95 の split-plan コメント、PR 4 の行）— 「CI の試験」が `mise run verify`（cargo test）に含まれるモック試験を指すのか、GitHub Actions の workflow を変えることまで含むかが決まっていない。
+3. 仮定と解釈: 仮定: CI は既存の `mise run verify` ジョブ（docs/dev-environment.md「CI（GitHub Actions）」）のまま。解釈: 測定コマンドのモック試験（tests/eval.rs）を cargo test に含めることで「CI では外部へつながらず、モックで動くことだけを試す」を満たす。`.github/workflows/` の変更はしない（pelway-dev[bot] には workflow を push する権限がなく、必要なら停止条件に当たる）。選ばなかった: 専用の workflow 追加（権限がなく停止条件に該当するため）。
+4. 足りなかった情報・検証手段: PR 5（測定コマンド）の割り当て（指揮役の判断待ち。ブランチ `agent/95-llm-eval-cmd` に実装済み・`mise run verify` EXIT=0・`cargo test -p pelway-dev-llm-eval` 3/3 合格）。
+5. 改善案: docs/dev-environment.md の「CI（GitHub Actions）」に「新しい cargo パッケージの試験は cargo test --workspace で自動的に CI に入る（workflow の変更は不要）」を明記する。
