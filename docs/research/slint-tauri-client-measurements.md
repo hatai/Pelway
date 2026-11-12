@@ -36,9 +36,7 @@
 
 （中央値。3 回 / 2 回の実行。1,000 回のスクロール。）
 
-解釈: **#3867 は 1.18.1 でも起きる。** 差の大きさは窓のアクセシビリティ木の大きさに依存する（静的 Text を 1,000 個置くと差が 2 倍以上になる）。これは「行が増減すると木全体を組み直す」ためで、木が大きくなるほど元のコストが効く。列表だけの窓なら 1 回のスクロールあたり約 0.8 ms、窓が大きければ約 2 ms の追加。**「読み上げを使う人には重い」とまでは言えないが、フレーム落ちの要因になりうる規模**である。
-
-既存測定との比較: macOS 27（Apple M5 Max）で 10 万行をスクロールした先行測定は、AccessKit 有効時 1 frame あたり +0.2〜1.5 ms、原因を「行の作成・破棄で木全体の再構築が起きる」としている [slint #3867 の tilladam のコメント (2026/11)]。先行測定と同じ見立てが、今回の Linux でも読み取れた。
+解釈: **#3867 は 1.18.1 でも起きる。** 差の大きさは窓のアクセシビリティ木の大きさに依存する（静的 Text を 1,000 個置くと差が 2 倍以上になる）。これは「行が増減すると木全体を組み直す」ためで、木が大きくなるほど元のコストが効く。列表だけの窓なら 1 回のスクロールあたり約 0.8 ms、窓が大きければ約 2 ms の追加。**「読み上げを使う人には重い」とまでは言えないが、フレーム落ちの要因になりうる規模**である。既存測定（macOS 27・Apple M5 Max）では AccessKit 有効時 1 frame あたり +0.2〜1.5 ms、原因を「行の作成・破棄で木全体の再構築」と同样的にしており、同じ見立てが今回の Linux でも読み取れた [slint #3867 の tilladam のコメント (2026/11)]。
 
 ## 3. Slint の可変高の仮想リスト
 
@@ -83,8 +81,7 @@
 
 事実:
 
-- wry #1724 は **未マージ**。提案は `WebViewBuilderExtUnix::with_input_method_preedit(bool)` で既定は false のまま。報告者は Ubuntu 24.04 + webkit2gtk-4.1 2.50.x + fcitx5-hangul / fcitx5-anthy で手動確認し、オプトインすればインライン preedit が出ると報告している [wry #1724 (2026/11)]。
-- 根本原因は wry が WebKitGTK に対して `set_enable_preedit(false)` を無条件に呼ぶことで、これは wry 0.29.0 で fcitx の popup 位置の問題（tauri#5986）を回避するために入った [wry #1724 (2026/11)]。つまり **現状の Tauri（Linux）は、日本語の変換中文字列をカーソル位置に出さない**。
+- wry #1724 は **未マージ**。提案は `WebViewBuilderExtUnix::with_input_method_preedit(bool)` で既定は false のまま。報告者は Ubuntu 24.04 + webkit2gtk-4.1 2.50.x + fcitx5-hangul / fcitx5-anthy で手動確認し、オプトインすればインライン preedit が出ると報告している [wry #1724 (2026/11)]。根本原因は wry が WebKitGTK に対して `set_enable_preedit(false)` を無条件に呼ぶことで、これは wry 0.29.0 で fcitx の popup 位置の問題（tauri#5986）を回避するために入った [wry #1724 (2026/11)]。つまり **現状の Tauri（Linux）は、日本語の変換中文字列をカーソル位置に出さない**。
 解釈: Slint は winit の IME イベントを受けて preedit を自前で描画する（4 節）ので、**インライン変換の点では Slint が素直で、Tauri は wry の PR が入ってオプトインできるまで弱い。** A1（Slint）と A2（Tauri 比較候補）の差として、**Linux の日本語入力には Tauri 側の未解決の制約がある**。Tauri を採用するなら wry #1724 の取り込みを前提に条件的判断する（Wayland は未検証とも出ている）。
 
 ## 6. 読み上げ（NVDA / VoiceOver / Orca）の比較
@@ -153,27 +150,14 @@
 ## 付録: 再現手順
 
 ```bash
-# 読み上げ支援が利用中の状態にする。
-busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true
-
-# 読み上げ有効 / 無効の 2 ビルドを用意する。
-cargo build -p pelway-dev-client-probe --release --bin perf
-cp target/release/perf /tmp/perf-a11y-on
-cargo build -p pelway-dev-client-probe --release --bin perf --no-default-features
-cp target/release/perf /tmp/perf-a11y-off
-
-# 同じ条件で走らせる（画面は Xvfb、描画はソフトウェア）。
+busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true  # 読み上げ支援を利用中にする
+cargo build -p pelway-dev-client-probe --release --bin perf && cp target/release/perf /tmp/perf-a11y-on
+cargo build -p pelway-dev-client-probe --release --bin perf --no-default-features && cp target/release/perf /tmp/perf-a11y-off
 for b in /tmp/perf-a11y-on /tmp/perf-a11y-off; do
-  SLINT_BACKEND=winit-software xvfb-run -a "$b" \
-    --rows 100000 --events 1000 --interval 5 --static-cells 1000
+  SLINT_BACKEND=winit-software xvfb-run -a "$b" --rows 100000 --events 1000 --interval 5 --static-cells 1000
 done
-
-# #10861 の再現プログラム（Windows 11 + 韓国語 IME の環境で実行する）。
-cargo run --release -p pelway-dev-client-probe --bin ime
-
-# 可変高の仮想リスト（ヘッドレスのテスト）／型生成の差分検査／WASM のサイズ。
+cargo run --release -p pelway-dev-client-probe --bin ime  # #10861 の再現（Windows 11 + 韓国語 IME）
 cargo test -p pelway-dev-client-probe
 cargo build -p pelway-dev-client-probe --target wasm32-unknown-unknown --release
-wasm-opt -Oz target/wasm32-unknown-unknown/release/pelway_dev_client_probe.wasm -o /tmp/probe.wasm
-ls -l /tmp/probe.wasm
+wasm-opt -Oz target/wasm32-unknown-unknown/release/pelway_dev_client_probe.wasm -o /tmp/probe.wasm && ls -l /tmp/probe.wasm
 ```
