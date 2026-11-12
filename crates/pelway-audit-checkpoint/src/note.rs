@@ -20,6 +20,11 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+// ed25519-dalek 3.x は rand_core 0.10 系。rand_core 0.10 に OsRng は無く、OS 乱数源は
+// getrandom 0.4 の SysRng（rand_core 0.10 の再エクスポート付き）を使う。UnwrapErr は
+// 失敗時 panics の包みで、2.x の rand_core::OsRng と同じ挙動にする。
+use getrandom::SysRng;
+use getrandom::rand_core::UnwrapErr;
 use sha2::{Digest, Sha256};
 
 /// Ed25519 の署名種別識別子（signed-note 仕様の割り当て）。
@@ -77,7 +82,7 @@ impl NoteSigner {
     pub fn generate(key_name: &str) -> Self {
         Self {
             name: key_name.to_owned(),
-            key: SigningKey::generate(&mut rand_core::OsRng),
+            key: SigningKey::generate(&mut UnwrapErr(SysRng)),
         }
     }
 

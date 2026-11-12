@@ -16,7 +16,7 @@
 - **bans**: `multiple-versions = "warn"`、`wildcards = "deny"`。
 - **sources**: `unknown-registry = "deny"`、`unknown-git = "deny"`（既定の allow-registry = crates.io index のみ）。
 
-## ライセンスの棚卸し（cargo deny list、評価対象 764 クレート、2026-11-13 時点）
+## ライセンスの棚卸し（round 1 時点。評価対象 764 クレート、2026-11-13 時点。round 3 のマージ後の表は下にある）
 
 | ライセンス | クレート数 | 備考 |
 |---|---|---|
@@ -42,7 +42,7 @@
 | 0BSD | 1 | |
 | （license 宣言なし） | 13 | すべてワークスペース内クレート。`[licenses.private] ignore = true` で対象外 |
 
-### コピーレフト系の内訳（停止理由）
+### コピーレフト系の内訳（round 1 の停止理由。記録として残す）
 
 **MPL-2.0（単独。OR の代替分岐なし。allow しない限り検査は通らない）**
 
@@ -117,12 +117,56 @@ AGPL・EPL・CDDL は依存ツリーに無い。
 | RUSTSEC-2026-0371（zbus_names 4.3.5） | ignore（unmaintained、台帳） | 同上 | #229 |
 | RUSTSEC-2026-0372（zvariant_derive 5.15.1） | ignore（unmaintained、台帳） | 同上 | #229 |
 
-ライセンスの例外（`[licenses.exceptions]`）は使っていない。重複バージョン 60 件（bans multiple-versions、警告）は意図的に例外登録せず警告のまま（上流の更新待ち。減ったら自動的に警告も減る）。
+ライセンスの例外（`[licenses.exceptions]`）は使っていない。重複バージョン（bans multiple-versions、警告）は意図的に例外登録せず警告のまま（上流の更新待ち。減ったら自動的に警告も減る）。
 
 ## 実装者メモ（round 2）
 
 1. 詰まった箇所: 手順4（deny.toml 作成）: `unmaintained = "none"` では ignore 台帳の unmaintained 系エントリが検査に現れず「未使用」扱いになるため、`unused-ignored-advisory` の挙動（既定 warn だと毎回警告が出る）の確認が必要だった → `allow` にして台帳運用とした。手順4（wildcards 対応）: `allow-wildcard-paths`（path 依存のワイルドカードを除外）と path 依存への version 追加のどちらにするか判断が要った → version 追加を採った（Issue の規模見積もりが「Cargo.toml の版の変更」を想定、`*` 指定の検出はそのまま残る）。
 2. 曖昧だった文: 「MPL-2.0 と LicenseRef-Slint-Royalty-free-2.0 以外のコピーレフト系・独自ライセンス（GPL・LGPL・AGPL・EPL・CDDL など）を**単独で要求する**クレートがあれば、allow リストに入れず…止まる」（Issue #168 受け入れ条件、round 2 版）— 「単独で要求する」を「OR 式の代替分岐なしで要求する」と解釈した。
 3. 仮定と解釈: 現在の依存ツリーに「単独で要求する」該当は無い（self_cell は Apache-2.0 分岐、r-efi は MIT/Apache-2.0 分岐、imgref は Apache-2.0 分岐で満たせる）ため止まらず、CDLA-Permissive-2.0（webpki-roots、単独）はコピーレフト・独自ライセンスの列挙に入らないパーミッシブなデータライセンスとして allow に入れた。選ばなかった解釈: CDLA も「独自ライセンス」に含めて止まる（ライセンス本文上パーミッシブであり、Issue の列挙の意図はコピーレフト系と読んだ）。
-4. 足りなかった情報・検証手段: `LicenseRef-Slint-Royalty-free-2.0` の allow リストでの受理は 0.20.2 での動作確認が必要だった（結果: 受理され `licenses ok`）。フォロー Issue の起票様式（write-issue の見出し・ラベル）を implement-issue の手順に明記の上で作った（needs-triage を付けて人間の確認待ちにした）。
+4. 足りなかった情報・検証手段: `LicenseRef-Slint-Royalty-free-2.0` の allow リストでの受理は 0.20.2 での動作確認が必要だった（結果: 受理され `licenses ok`）。フォロー Issue の起票様式（write-issue の見出し・ラベル）は implement-issue に明記が無いため、write-issue の形式（目的・受け入れ条件…）に倣って作り、needs-triage を付けて人間の確認待ちにした。
 5. 改善案: `implement-issue` skill の「よくある失敗」に「フォロー Issue を作るときは write-issue の見出し形式（目的・受け入れ条件…）で作り、needs-triage を付ける」を足す。
+
+## round 3: main との衝突解消（PR #234 の CI が動かないため）
+
+### 経緯
+
+1. PR #234 が main と衝突（mergeable: CONFLICTING）し CI が走らないため、`origin/main` をマージした。衝突は `Cargo.lock` 1 ファイルのみ（main 側の `pelway-dev-llm-eval` ブロック挿入位置と、当方ブランチの `pelway-db` ブロック整列が同じ位置に当たった）。main 側のブロックを挿入する形で解消し、`cargo metadata --locked` でマージ後のマニフェストとの一致を確認した（853 パッケージ）。
+2. `mise.toml` と `mise.lock` は自動マージで成立。main 側の内容（rust 1.99.1・socat・conda・`llm-eval` タスクなど）と当方の cargo-deny 追加（`[tools]` エントリ、`deny-check` タスク、`verify-static` の依存）の両方が残っていることを確認した（main は merge-base から `mise.lock` を変えていない）。
+3. main の新クレート `pelway-dev-llm-eval` の path 依存 `pelway-llm` に version が無く、wildcards 検査（deny）に違反したため、他の 5 件と同じく `version = "0.0.0"` を追加した（docs/dev-environment.md の cargo-deny 節の規約どおり。path 依存の解決には影響しない）。
+4. マージで依存ツリーが変わった（評価グラフ 764 → 784 クレート。pelway-llm / pelway-dev-llm-eval と rig-core・reqwest 0.13.5 系が加わる）ため、`cargo deny check` を再実行して全項目 ok を確認し、下の棚卸し表を更新した。allow リストに追加・削除は不要（MIT-0 は dunce・aws-lc-sys の OR 分岐で充足、CDLA-Permissive-2.0 は既に許可済みで webpki-root-certs が加わった）。
+
+### ライセンスの棚卸し（round 3、マージ後の依存ツリー。round 1 の表の件数はこれに置き換わる）
+
+| ライセンス | クレート数 | 備考 |
+|---|---|---|
+| MIT | 675 | |
+| Apache-2.0 | 548 | OR 式の一部として含むクレートあり |
+| Unicode-3.0 | 28 | |
+| Zlib | 23 | |
+| （license 宣言なし） | 15 | ワークスペース内クレート（pelway-llm・pelway-dev-llm-eval を含む）。`[licenses.private] ignore = true` で対象外 |
+| BSD-3-Clause | 15 | |
+| Unlicense | 14 | |
+| GPL-3.0-only | 13 | すべて Slint 系（OR 式の1分岐。Royalty-free で充足） |
+| LicenseRef-Slint-Royalty-free-2.0 | 13 | 同上 |
+| LicenseRef-Slint-Software-3.0 | 13 | 同上 |
+| ISC | 9 | |
+| MPL-2.0 | 8 | 単独ライセンス（webauthn 系・riverqueue 系・crypto-glue）。hatai の判断で allow（#168） |
+| Apache-2.0 WITH LLVM-exception | 7 | |
+| BSL-1.0 | 4 | |
+| BSD-2-Clause | 3 | |
+| MIT-0 | 2 | dunce・aws-lc-sys の OR 式の1分岐（Apache-2.0 で充足）。allow 不要 |
+| LGPL-2.1-or-later | 2 | r-efi の OR 式の1分岐（MIT で充足）。allow 不要 |
+| CDLA-Permissive-2.0 | 2 | webpki-roots・webpki-root-certs（単独。パーミッシブなデータライセンス）。allow 済み |
+| CC0-1.0 | 2 | imgref・dunce の OR 式の1分岐（Apache-2.0 で充足）。allow 不要 |
+| BSD-1-Clause | 2 | |
+| GPL-2.0-only | 1 | self_cell の OR 式の1分岐（Apache-2.0 で充足）。allow 不要 |
+| 0BSD | 1 | |
+
+## 実装者メモ（round 3）
+
+1. 詰まった箇所: 衝突解消後の `cargo deny check` で `error[wildcard]: pelway-dev-llm-eval` が出た（main の新クレートが version なしの path 依存を使っていた）。`crates/dev-llm-eval/Cargo.toml:15` に `version = "0.0.0"` を追加して解消。
+2. 曖昧だった文: 「mise.toml と mise.lock は main 側の変更（rust 1.99.1、socat、conda など）を残したうえで cargo-deny を足す」（修正依頼の指示）— main は merge-base から mise.lock を変えておらず、mise.toml の変更は `llm-eval` タスクの追加のみだった。列挙の内容（rust 1.99.1・socat・conda）は既に両側に存在していたため、「main 側の全内容を残す」と読んで、マージ結果の確認として処理した。
+3. 仮定と解釈: main の新クレートの path 依存への version 追加は、この PR で確立した wildcards ポリシーの適用範囲と解釈した（修正依頼には明示されていないが、`mise run verify` が通るために必須）。選ばなかった解釈: main 側のコードは変えず `allow-wildcard-paths` に切り替える（ポリシーを弱めるため不採用）。
+4. 足りなかった情報・検証手段: マージ後の依存ツリーの変化（評価グラフ 764 → 784）に伴い棚卸し表が古くなるため、`cargo deny list` を再実行して表を更新した。
+5. 改善案: `.github/ISSUE_TEMPLATE/agent-task.yml` の「関連情報」の description に「新しいクレート・依存を足す場合は deny.toml と docs/dev-environment.md の cargo-deny 節（path 依存の version、ライセンスの棚卸し）を確認する」を足す。
