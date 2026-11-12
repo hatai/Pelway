@@ -41,6 +41,17 @@ Grok Bot がセッションのレート制限で動かない間、Claude Code �
 | R2 | #110 round 1 | 見張りスクリプトとスキルが素の `gh` を使っていることを must-fix にした（AGENTS.md の `scripts/agent-gh` の決まり）。妥当な指摘 | 読み取りを `scripts/agent-gh dev` に直し、`--admin` のマージだけを例外として正本に書いた |
 | R1 | #108 round 1 | 差分の削除行（旧「4 行」）を、残っている記述と読んで must-fix にした。head には「4 行」の記述は無かった | review-pr に「must-fix は head の版のファイルで該当行を確かめてから書く（差分の `-` 行は消えた記述）」を足すか、同じ誤りが繰り返されたら判断する |
 
+## 割り当ての記録
+
+指揮役が実装・レビューを割り当てた記録。改善ループで、レビュー結果（`Reviewer:` の行）・実装者メモ（`Implementer:` の行）と対照する。下の表より前の割り当ては、T3 のスレッドの設定と Issue のコメントに残っている。
+
+| 日時（JST） | Issue・PR | 役割 | 担当 | モデル | effort | 理由 |
+|---|---|---|---|---|---|---|
+| 2026-11-12 | #102 | implement | opencode | zai-coding-plan/glm-5.3 | high | 監査（セキュリティの境界） |
+| 2026-11-12 | #103 | implement | opencode | zai-coding-plan/glm-5.3 | default | 通常のコード |
+| 2026-11-12 | PR #123 | review | codex | gpt-6-luna | medium | 文書が主の PR |
+| 2026-11-12 | PR #125 | review | codex | gpt-6-luna | medium | 運用文書の小さな変更 |
+
 ## 判断の記録
 
 - #91：pr-size 868/800 の超過は分割せずに進めた。超過の大半は client-core の契約型の手写し（331 行）の削除。hatai から、diff の上限を守れないときは `--admin` で迂回してマージしてよいと委任を受けている。

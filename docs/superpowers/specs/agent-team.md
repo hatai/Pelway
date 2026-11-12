@@ -34,7 +34,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - PR 1 本の差分は追加 800 行・削除 2000 行まで（`mise run pr-size` が追加行と削除行を分けて数える）。`.gitattributes` で `linguist-generated` を付けたファイルは数えない。指揮役が Issue のコメントで超過を認め `pr-size-exception` ラベルを付けた PR は、pr-size の失敗のままマージしてよい（レビュー担当はこのラベルがあれば pr-size の失敗を must-fix に数えない）
 - GLM の実装スレッドは同時に 3 本まで、Codex のレビュースレッドは同時に 2 本まで、Claude のレビュースレッドは同時に 1 本まで。超えた分は指揮役が順番待ちにする。上限は、Codex の見落とし率とレビューの待ち時間をもとに見直す
 - GLM は終日使う。時間帯による使用制限はない
-- 指揮役が渡すプロンプトは Issue 番号と使う skill 名だけにする。作業ルールは AGENTS.md と skill に置く
+- 指揮役が渡すプロンプトは Issue 番号と使う skill 名だけにする。作業ルールは AGENTS.md と skill に置く。例外として、スレッドを立てる指示には担当・モデル・effort を示す定型の割り当ての行を入れ、実装担当は PR 本文に `Implementer:`、レビュー担当はレビュー本文に `Reviewer:` の定型の行で写す（書式は skill `command-team`）
 - 実装とレビューのモデル・effort は、pr-size の行数、変更パス、ラベル、修正の回数で振り分ける。しきい値は skill `command-team` に置き、改善ループで調整する
 - main はブランチ保護で守る。`CODEOWNERS` の `* @hatai` により人間の Approve が必須、CI の `mise run verify` と `pr-size` の成功が必須
 - hatai 自身が作った PR は hatai が Approve できないため、hatai が管理者として保護を迂回してマージする（`enforce_admins: false`）。エージェントの PR と指揮役が作った PR は、`pelway-review` の Approve の後、指揮役が委任を受けて保護を迂回してマージする

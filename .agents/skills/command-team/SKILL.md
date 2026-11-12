@@ -17,7 +17,21 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 
 - 指揮役はコードを書かない。PR のレビューもしない（自分が関わった PR を自分で評価しない）。
 - 指揮役が自分で作った PR（運用文書やスキルの変更）も、レビュー担当のスレッドに回す。
-- スレッドに送る指示は、Issue 番号か PR 番号と skill 名だけにする。例外はラベル（例: `pr-size-exception`）と Issue のコメントで伝え、指示の文に書き足さない。
+- スレッドに送る指示は、Issue 番号か PR 番号と skill 名だけにする。例外はラベル（例: `pr-size-exception`）と Issue のコメントで伝え、指示の文に書き足さない。ただし、スレッドを立てる指示（と、effort やモデルを変えた後の最初の修正の指示）には、2 行目に割り当ての行を必ず入れる。
+
+  ```
+  Issue #<N> を実装する。skill implement-issue に従う。
+  Assigned: role=implement agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>
+  ```
+
+  ```
+  PR #<M> をレビューする。skill review-pr に従う。
+  Assigned: role=review agent=<codex|claude> model=<モデル名> effort=<low|medium|high|xhigh|max>
+  ```
+
+  実装担当はこの値を PR 本文の `Implementer:` の行に、レビュー担当はレビュー本文の `Reviewer:` の行に写す。
+- 割り当てのたびに、指揮役の作業ログの「割り当ての記録」の表に 1 行足す（日時、Issue・PR、役割、担当、モデル、effort、理由）。改善ループで、レビュー結果・実装者メモと対照する。
+- スレッドへの指示は、新しい実行として送る（MCP の `t3_thread_send` で `mode: queue`）。実行中のスレッドに `steer`（既定の `auto`）で送ると、実行の途中に差し込まれ、その実行が指示を扱わずに終わることがある。終わりの報告と PR の head で、指示が扱われたかを確かめる。
 - 判断はすべて Issue か PR にコメントで残す。セッションの文脈だけに置かない。
 - 見張りの状態は `scripts/conductor-watch.sh` が `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。
 
@@ -38,8 +52,10 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 | 定型・小規模（Issue の規模の見積もりが小、変更が文書・設定・テストだけ） | opencode `zai-coding-plan/glm-5.3`、variant `low` |
 | 通常 | opencode `zai-coding-plan/glm-5.3`（variant 指定なし） |
 | コア部分（`crates/pelway-contract`、承認・状態遷移・権限）、`unsafe` を含む・含みうる変更 | opencode `zai-coding-plan/glm-5.3`、variant `high` |
-| 同じ Issue の `round` が 2 を超えた（3 回目の修正に入る） | `t3_thread_configure` で variant を 1 段上げる（`low`→通常→`high`→`max`）。`max` でも直らなければモデルを替える。Issue に理由をコメントする |
-| `round` が 4 以上 | 修正を出さずにエスカレーション（runbook 6） |
+| 同じ Issue の修正の指示が 2 回を超えた（3 回目の修正に入る）。数えるのは、レビューの本物の must-fix に基づく指示だけ（分割計画が無い時期の誤判定や、再起動による自動の再開は数えない） | `t3_thread_configure` で variant を 1 段上げる（`low`→通常→`high`→`max`）。`max` でも直らなければモデルを替える。Issue に理由をコメントする |
+| 同じ Issue の修正の指示が 3 回を超えた（4 回目の修正に入る）。数え方は上の行と同じ | 修正を出さずにエスカレーション（runbook 6） |
+
+runbook と仕様の `round`（スレッドの実行回数）は、誤判定や再起動による再開でも増える。指揮役は `round` を目安にとどめ、effort の引き上げとエスカレーションは上の表の「修正の指示の回数」で判断する。
 
 ### レビュー担当と effort
 
