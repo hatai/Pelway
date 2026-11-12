@@ -10,29 +10,24 @@
 //! 検証に影響しないキーワードは無視する。測定用データのスキーマ
 //! （ネストした object・array・文字列・数値・enum）をカバーする範囲で、
 //! `oneOf`/`anyOf`/`$ref`/`pattern` 等は検証しない。未知のキーワードは無視するが、
-//! `type` の値として未知の名前（誤記を含む）は検証できないためスキーマエラーとして
-//! 拒否する（fail-closed）。
+//! `type` の値としては「知っている型名の文字列」か「知っている型名だけの空でない
+//! 配列」だけを許し、不正な形・未対応の名前（誤記を含む）は検証を黙って省かない
+//! ようスキーマエラーとして拒否する（fail-closed）。
 
 use serde_json::Value;
 
 /// `instance` が `schema`（部分集合）に従うか。従わなければ最初の違反を返す。
 ///
-/// 未対応の `type` 名（誤記を含む）は、何でも通してしまうことのないよう
-/// スキーマエラーとして拒否する（fail-closed）。
+/// `type` に許されるのは「知っている型名の文字列」か「知っている型名だけの
+/// 空でない配列」だけで、それ以外の形（数値・真偽値・null・オブジェクト・空配列・
+/// 文字列でない要素を含む配列）と未対応の型名（誤記を含む）は、検証を黙って
+/// 省かないようスキーマエラーとして拒否する（fail-closed）。
 pub fn validate(instance: &Value, schema: &Value) -> Result<(), String> {
     let Some(object) = schema.as_object() else {
         return Err("schema が JSON オブジェクトではありません".to_string());
     };
-    if let Some(types) = allowed_types(object.get("type"))
-        && !types.is_empty()
-    {
-        for name in &types {
-            if !KNOWN_TYPES.contains(&name.as_str()) {
-                return Err(format!(
-                    "スキーマの type「{name}」は未対応です（検証できないため拒否します）"
-                ));
-            }
-        }
+    if let Some(value) = object.get("type") {
+        let types = type_names(value)?;
         if !types.iter().any(|t| type_matches(instance, t)) {
             return Err(format!(
                 "type が違います: 期待 {}、実際 {}",
@@ -88,16 +83,40 @@ const KNOWN_TYPES: [&str; 7] = [
     "object", "array", "string", "integer", "number", "boolean", "null",
 ];
 
-fn allowed_types(value: Option<&Value>) -> Option<Vec<String>> {
-    match value? {
-        Value::String(s) => Some(vec![s.clone()]),
-        Value::Array(a) => Some(
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect(),
-        ),
-        _ => None,
+/// `type` の値から型名の列を取り出す。許されるのは「知っている型名の文字列」か
+/// 「知っている型名だけの空でない配列」だけで、それ以外はすべてスキーマエラー。
+fn type_names(value: &Value) -> Result<Vec<String>, String> {
+    match value {
+        Value::String(name) => {
+            if KNOWN_TYPES.contains(&name.as_str()) {
+                Ok(vec![name.clone()])
+            } else {
+                Err(format!(
+                    "スキーマの type「{name}」は未対応です（検証できないため拒否します）"
+                ))
+            }
+        }
+        Value::Array(names) if !names.is_empty() => {
+            let mut result = Vec::with_capacity(names.len());
+            for name in names {
+                let Some(name) = name.as_str() else {
+                    return Err(format!(
+                        "スキーマの type の配列に文字列でない要素があります: {name}"
+                    ));
+                };
+                if !KNOWN_TYPES.contains(&name) {
+                    return Err(format!(
+                        "スキーマの type「{name}」は未対応です（検証できないため拒否します）"
+                    ));
+                }
+                result.push(name.to_string());
+            }
+            Ok(result)
+        }
+        Value::Array(_) => {
+            Err("スキーマの type の配列が空です（検証できる型がありません）".to_string())
+        }
+        other => Err(format!("スキーマの type の形が不正です: {other}")),
     }
 }
 

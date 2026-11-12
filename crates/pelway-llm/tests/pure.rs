@@ -157,3 +157,41 @@ fn schema_validation_rejects_unknown_type_names() {
     });
     assert!(pelway_llm::schema::validate(&serde_json::json!({"a": true}), &nested).is_err());
 }
+
+/// `type` に来うる形をすべて挙げる。許されるのは「知っている型名の文字列」か
+/// 「知っている型名だけの空でない配列」だけで、それ以外はすべてスキーマエラー
+/// （PR #163 の must-fix: 不正な形で型の検証を黙って省かない）。
+#[test]
+fn schema_validation_rejects_malformed_type_shapes() {
+    use pelway_llm::schema::validate;
+    let value = serde_json::json!("x");
+    // 正当な形: 知っている型名の文字列。
+    assert!(validate(&value, &serde_json::json!({"type": "string"})).is_ok());
+    // 正当な形: 知っている型名だけの空でない配列。
+    assert!(validate(&value, &serde_json::json!({"type": ["string", "null"]})).is_ok());
+    // type キーなし: 型の検証は行わない（正当）。
+    assert!(validate(&value, &serde_json::json!({"enum": ["x", "y"]})).is_ok());
+
+    let malformed = [
+        // 空配列。
+        serde_json::json!({"type": []}),
+        // 文字列でない要素を含む配列。
+        serde_json::json!({"type": ["string", 3]}),
+        serde_json::json!({"type": [3]}),
+        serde_json::json!({"type": [null]}),
+        serde_json::json!({"type": [true]}),
+        serde_json::json!({"type": [{"type": "string"}]}),
+        // 数値・真偽値・null・オブジェクト。
+        serde_json::json!({"type": 3}),
+        serde_json::json!({"type": 1.5}),
+        serde_json::json!({"type": true}),
+        serde_json::json!({"type": null}),
+        serde_json::json!({"type": {"object": "string"}}),
+    ];
+    for schema in &malformed {
+        assert!(
+            validate(&value, schema).is_err(),
+            "不正な type の形が通りました: {schema}"
+        );
+    }
+}
