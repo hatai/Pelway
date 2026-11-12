@@ -118,7 +118,7 @@ UI担当の[input/ui.md](../sources/v0.6/fixed/pelway-technical-docs/input/ui.md
 | 認証 | MVP前に検証 | webauthn-rs（passkey）とopenidconnect-rs（顧客IdP）をaxumに組み込む。Ory Kratos/Hydraは将来候補。Keto・OpenFGA・SpiceDBは12の外部権限サービス不要の方針により採らない |
 | クライアント | MVP前に検証 | A1にTauri＋React（Webと画面共有）を比較候補として加える。Slint issue #3867・#10861の再現、ts-rsまたはspecta、wasm-opt |
 | バックアップ | MVP前に検証 | pgBackRest。保存期間は件数指定か別の削除処理で14日上限を守る。2.59.3以上 |
-| 監査 | MVP前に検証 | `prev_hash`の鎖を残し、最新hashと行数に署名したcheckpointをDB管理者と別の場所へ保存する |
+| 監査 | MVP前に検証 | `prev_hash`の鎖を残し、最新hashと行数に署名したcheckpointをDB管理者と別の場所へ保存する。形式と鍵・保管先の分離は[ADR 0007](../../../adr/0007-signed-audit-checkpoints.md)、下書き実装`crates/pelway-audit-checkpoint`で改ざん検出を検証済み |
 | 外部エージェント | 採らない（MVP） | ACPによるClaude Code・Codex等の参加は国内完結の前提と衝突する。選択外部連携の枠で将来候補 |
 | 将来の候補 | 採否は将来 | OpenBao、Cedar、Ory Kratos、LiveKit、OpenMLS、YomiToku（商用ライセンスが必要）、NDLOCR-Lite、PaddleOCR、pgvector、OpenTelemetry Collector |
 
