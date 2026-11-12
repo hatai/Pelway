@@ -49,13 +49,13 @@ PR のチェックの結果を読む。待たない（Grok Bot はチェック�
 scripts/agent-gh review pr checks <N> --required --json name,bucket
 ```
 
-`mise run verify` と `pr-size` の `bucket` が `pass` なら pass、`fail` なら fail。どちらかが `pending` か、見つからないときは、レビューを投稿せずに `verdict: failed`、`error: checks pending` で報告する。
+`mise run verify` と `pr-size` の `bucket` が `pass` なら pass、`fail` なら fail。pr-size が fail のときは、PR のラベルを読む（`scripts/agent-gh review pr view <N> --json labels --jq '.labels[].name'`）。`pr-size-exception` があれば、指揮役が Issue のコメントで超過を認めた PR なので must-fix に数えず、本文の検査の欄に `pr-size: fail（pr-size-exception）` と書く。どちらかが `pending` か、見つからないときは、レビューを投稿せずに `verdict: failed`、`error: checks pending` で報告する。
 
 ### 3. 指摘を 2 種類に分ける
 
 | 種類 | 当てはまるもの |
 |---|---|
-| must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / verify か pr-size が失敗 / 正しさ・セキュリティの欠陥 / ブランチが `agent/` で始まるのに PR の作成者（`author.login`）が `app/pelway-dev` でない |
+| must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / verify が失敗 / pr-size が失敗（PR に `pr-size-exception` ラベルが付いていれば数えない） / 正しさ・セキュリティの欠陥 / ブランチが `agent/` で始まるのに PR の作成者（`author.login`）が `app/pelway-dev` でない |
 | nit | 上に当てはまらない改善案 |
 
 ### 4. 投稿する

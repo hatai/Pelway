@@ -31,7 +31,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 ## 制約
 
 - `pelway-dev` には GitHub App の Workflows 権限を付けない。`.github/workflows/` の変更は人間が行う（push で動く workflow は承認前に secret を読めるため）
-- PR 1 本の差分は、追加行 800 行まで、削除行 2000 行まで（追加と削除を分けて数える。#109 で `mise run pr-size` に入るまでは、追加と削除の合計 800 行で判定する）。`.gitattributes` で `linguist-generated` を付けたファイルは数えない。指揮役が Issue のコメントで超過を認めた PR は、pr-size の失敗のままマージしてよい
+- PR 1 本の差分は、追加行 800 行まで、削除行 2000 行まで（追加と削除を分けて数える。#109 で `mise run pr-size` に入るまでは、追加と削除の合計 800 行で判定する）。`.gitattributes` で `linguist-generated` を付けたファイルは数えない。指揮役が Issue のコメントで超過を認め `pr-size-exception` ラベルを付けた PR は、pr-size の失敗のままマージしてよい（レビュー担当はこのラベルがあれば pr-size の失敗を must-fix に数えない）
 - GLM の実装スレッドは同時に 3 本まで、Codex のレビュースレッドは同時に 2 本まで、Claude のレビュースレッドは同時に 1 本まで。超えた分は指揮役が順番待ちにする。上限は、Codex の見落とし率とレビューの待ち時間をもとに見直す
 - GLM は終日使う。時間帯による使用制限はない
 - 指揮役が渡すプロンプトは Issue 番号と使う skill 名だけにする。作業ルールは AGENTS.md と skill に置く
