@@ -25,6 +25,7 @@ use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use pelway_contract::approval::Decider;
 use pelway_contract::ledger::{ApprovalLedger, NewCard};
 use pelway_contract::snapshot::ActionPayload;
 use pelway_contract::task::ActionKind;
@@ -182,7 +183,7 @@ fn synthetic_ledger() -> SharedLedger {
                     scope: Vec::new(),
                 },
                 requester: "m-human-gdpr07".into(),
-                decider: "m-human-gdpr07".into(),
+                decider: Decider::Member("m-human-gdpr07".into()),
                 deadline: None,
             })
             .expect("create synthetic card");

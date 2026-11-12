@@ -15,6 +15,7 @@ use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use pelway_contract::approval::Decider;
 use pelway_contract::ledger::{ApprovalLedger, NewCard};
 use pelway_contract::pseudonym::pseudonymize;
 use pelway_contract::snapshot::ActionPayload;
@@ -60,7 +61,7 @@ fn new_card(id: &str) -> NewCard {
             scope: Vec::new(),
         },
         requester: "m-human-gdpr07".into(),
-        decider: "m-human-gdpr07".into(),
+        decider: Decider::Member("m-human-gdpr07".into()),
         deadline: None,
     }
 }
