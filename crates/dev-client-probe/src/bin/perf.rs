@@ -4,7 +4,7 @@
 //! 読み上げ（アクセシビリティ）を有効にしたビルドと無効にしたビルドで同じ条件を
 //! 実行し、CPU 時間の差を比べる。有効なビルドは、セッションの dbus に
 //! `org.a11y.Status.IsEnabled` が true になっていることが前提。測定結果は
-//! docs/research/slint-tauri-client-measurements.md。
+//! docs/research/slint-tauri-client-measurements.md（手順は同書の付録）。
 
 use std::cell::Cell;
 use std::collections::HashMap;
