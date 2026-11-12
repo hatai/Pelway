@@ -4700,6 +4700,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pelway-db"
+version = "0.0.0"
+dependencies = [
+ "pelway-contract",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
 name = "pelway-dev-queue-compare"
 version = "0.0.0"
 dependencies = [
@@ -6319,6 +6328,7 @@ dependencies = [
  "sqlx-postgres",
  "sqlx-sqlite",
  "syn 2.0.119",
+ "thiserror 2.0.21",
  "tokio",
  "url",
 ]
