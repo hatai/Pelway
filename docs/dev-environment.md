@@ -181,6 +181,7 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.claude_review` | `driver: claudeAgent`、`environment` に `CLAUDE_CONFIG_DIR=~/.claude-review`（指揮役・実装担当の Claude と設定を分ける） |
 | `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドを読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`）と `scripts/agent-gh review` に絞り、ファイルの書き込みを拒否する |
+| socat | Claude Code の sandbox（Linux）が使う。`mise.toml` の `conda:socat` で `mise install`（`mise bootstrap`）が入れる。apt と sudo は要らない |
 | ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
 
 運用に入る前に、`auto-accept-edits` のスレッドで次を確かめる。確かめるまでは `claude_review` を使わない。
