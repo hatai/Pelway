@@ -97,6 +97,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 - 複数の PR を続けてマージするときは、`scripts/conductor-merge-queue.sh` に「PR 番号・ブランチ・レビューした sha」の組を並べて、1 本ずつ進める（main の取り込み、CI の待ち、レビュー後のコミットの確認、マージを順に行う）。このスクリプトを同時に 2 つ動かさない（同じリポジトリの `git fetch` がぶつかって両方止まる）。
 - PR ができたら mergeable を確かめる（`scripts/agent-gh dev pr view <M> --json mergeable`）。`CONFLICTING` の PR には GitHub が `pull_request` の workflow を動かさず、チェックが 1 つも付かない。実装担当に「main を取り込んで衝突を解消し、verify を通す」を送る。
 - マージしたら Issue から `agent:working` を外し、人間に報告する。
+- Dependabot が立てた依存更新の PR（`dependencies` ラベル、`build(deps):` で始まるコミット）も、通常の PR と同じレビュー（skill `review-pr`）とマージの決まりで扱う。
 
 ### 分割を認めるとき
 

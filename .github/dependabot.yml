@@ -1,0 +1,24 @@
+# 依存クレートの更新を Dependabot に週 1 回立てさせる（Issue #169）。
+# 設定の意味は https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+# github-actions は対象外: workflow の `uses:` の版は `.github/workflows/actions.lock`
+# （gh actions-lock が生成）で固定しており、Dependabot は actions.lock を作り直さない
+# ため両者がずれる。判断の経緯は docs/worklogs/issue-169.md。
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      # minor と patch は 1 本の PR にまとめる。major は破壊的な変更を含むため
+      # グループに入れず、個別の PR にする。
+      cargo-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "build(deps)"
+      include: scope
