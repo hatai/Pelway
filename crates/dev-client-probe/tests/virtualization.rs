@@ -1,12 +1,11 @@
 //! Slint 1.18.1 の ListView が行ごとに高さが違う場合（可変高の仮想リスト）を
 //! どう扱うかを確かめるテスト。確かめることは 3 つ: 見える行だけが生成されるか
-//! （仮想化）、行が重なったり抜けたりしないか（可変高のレイアウト）、遠い位置へ
-//! 飛んだあとも同じか（スクロール）。
+//! （仮想化）、行が重なったり抜けたりしないか、遠い位置へ飛んだあとも同じか。
 //!
 //! スクロールはテスト用 backend の要素 API からスクロールイベントを送って
 //! ListView 内部の flickable を動かして実現する（content-y を外側から差し替える
-//! 方式だと仮想化の範囲が追従しないため、その方式は採らない）。
-//! 測定結果は docs/research/slint-tauri-client-measurements.md。
+//! 方式だと仮想化の範囲が追従しないため）。測定結果は
+//! docs/research/slint-tauri-client-measurements.md。
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Once};
@@ -15,9 +14,8 @@ use i_slint_backend_testing::ElementRoot;
 use pelway_dev_client_probe::{Probe, ProbeWindow, new_probe_window, row_height};
 
 /// テスト用 backend（窓を開かない）を、テストごとに 1 回だけ入れる。Slint の
-/// platform はスレッドローカルなのでテストごとに初期化する（cargo test は各
-/// テストを別スレッドで走らせるため、プロセス-wide な Once では 2 つめ以降の
-/// テストが winit backend にフォールバックする）。
+/// platform はスレッドローカルなのでテストごとに初期化する（プロセス-wide な
+/// Once では 2 つめ以降のテストが winit backend にフォールバックする）。
 fn init_testing_backend_once() {
     thread_local! {
         static INIT: Once = const { Once::new() };
@@ -50,7 +48,7 @@ fn scroll_and_record(window: &ProbeWindow, probe: &Probe, delta_y: f32) -> BTree
 /// 記録された行が、それぞれの高さどおりに並んでいることを確かめる。
 fn assert_rows_follow_their_heights(positions: &BTreeMap<u32, f32>, variable: bool) {
     let indices: Vec<u32> = positions.keys().copied().collect();
-    assert!(!indices.is_empty(), "行が 1 つも生成されていない");
+    assert!(!indices.is_empty(), "行が生成されていない");
     for pair in indices.windows(2) {
         let (from, to) = (pair[0], pair[1]);
         // 間の行の高さ（作り直された行が記録に無いとき用）。
@@ -58,8 +56,8 @@ fn assert_rows_follow_their_heights(positions: &BTreeMap<u32, f32>, variable: bo
         let actual = positions[&to] - positions[&from];
         assert!(
             (actual - expected).abs() < 0.5,
-            "行 {from} と {to} の間が {actual}px（期待 {expected}px）。行の高さが\
-             反映されていないか、行が重なっている"
+            "行 {from} と {to} の間が {actual}px（期待 {expected}px）。高さが反映されて\
+             いないか、行が重なっている"
         );
     }
 }
@@ -115,7 +113,6 @@ fn scrolling_far_keeps_the_number_of_created_rows_small() {
     let first = *positions.keys().next().expect("行がある");
     assert!(
         first > 100,
-        "遠い位置へスクロールしたのに生成された行は {first} 番目から（スクロールが\
-         反映されていない）"
+        "遠い位置へスクロールしたのに生成された行は {first} 番目から（反映されていない）"
     );
 }

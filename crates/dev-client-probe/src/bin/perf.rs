@@ -1,13 +1,13 @@
 //! Issue #98 の slint #3867（読み上げを有効にすると大きな ListView が遅い）の
 //! 再現と実測のための計測プログラム。製品機能ではない。
 //!
-//! 読み上げ（アクセシビリティ）を有効にしたビルドと無効にしたビルドで同じ
-//! 条件を実行し、CPU 時間の差を比べる。有効なビルドは、セッションの dbus に
-//! `org.a11y.Status.IsEnabled` が true になっていることが前提（AccessKit は
-//! 読み上げ支援の利用が求められているときだけ木を作る）。
-//! 測定結果は docs/research/slint-tauri-client-measurements.md。
+//! 読み上げ（アクセシビリティ）を有効にしたビルドと無効にしたビルドで同じ条件を
+//! 実行し、CPU 時間の差を比べる。有効なビルドは、セッションの dbus に
+//! `org.a11y.Status.IsEnabled` が true になっていることが前提。測定結果は
+//! docs/research/slint-tauri-client-measurements.md。
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -31,18 +31,16 @@ fn cpu_time() -> Duration {
 
 fn main() {
     // 引数（既定値つき）。
-    let (mut rows, mut events, mut interval, mut static_cells) = (100_000, 2_000, 5, 0);
-    let mut iter = std::env::args().skip(1);
-    while let Some(flag) = iter.next() {
-        let value = iter.next().unwrap_or_default();
-        match flag.as_str() {
-            "--rows" => rows = value.parse().unwrap_or(rows),
-            "--events" => events = value.parse().unwrap_or(events),
-            "--interval" => interval = value.parse().unwrap_or(interval),
-            "--static-cells" => static_cells = value.parse().unwrap_or(static_cells),
-            _ => eprintln!("未知の引数: {flag}"),
-        }
+    let mut args = std::env::args().skip(1);
+    let mut values: HashMap<String, i64> = HashMap::new();
+    while let Some(flag) = args.next() {
+        let value = args.next().unwrap_or_default().parse().unwrap_or_default();
+        values.insert(flag, value);
     }
+    let rows = values.get("--rows").copied().unwrap_or(100_000) as i32;
+    let events = values.get("--events").copied().unwrap_or(2_000) as u32;
+    let interval = values.get("--interval").copied().unwrap_or(5) as u64;
+    let static_cells = values.get("--static-cells").copied().unwrap_or(0) as i32;
 
     let window = ProbeWindow::new().expect("ProbeWindow の生成");
     window.set_item_count(rows);

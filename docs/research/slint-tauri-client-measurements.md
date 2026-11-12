@@ -9,9 +9,9 @@
 
 1. **Slint #3867（読み上げを有効にすると大きな ListView が遅い）は 1.18.1 でも再現する。** 10 万行の ListView を 1,000 回スクロールした CPU 時間で、読み上げ有効時が 3,671 ms、無効時が 1,680 ms（2.2 倍、+2.0 ms/スクロール）。窓の他の所に静的 Text を 1,000 個置くと差は +800 ms から +2,000 ms に広がる。**読み上げ支援が有効なときは、アクセシビリティ木全体の作り直しが原価になる。**
 2. **可変高の仮想リストは扱える。** 10,000 行（行ごとに高さが違う）でも生成される行は可視範囲の 12 行だけ。行は自分の高さどおりに並び、隙間も重なりもない。遠い位置へスクロールしても生成数は変わらない（34,747 px スクロールして 8 行）。
-3. **#10861（IME 変換中にフォーカスが外れると最後の文字が消える）はこの環境では再現できなかった。** 測定環境は Linux のみで、IME（fcitx5・mozc）が無く sudo も使えない。Slint 1.18.1 が使う winit 0.30.13 は、報告者が「再現しなかった」と言った winit master より前の版なので、**人の手（Windows 11 + 韓国語 IME）での確認が必要**。
+3. **#10861（IME 変換中にフォーカスが外れると最後の文字が消える）は対象条件を満たす環境（Windows 11 + 韓国語 IME）が無く、再現できなかった。** コードレベルでは、Slint 1.18.1 の winit backend はフォーカスを失ったときに IME の確定を送らず（winit の `Ime::Commit` に依存）、再現の鍵が winit 側の Windows の IME 処理にあることまで分かった。再現プログラムと手順を用意し、Windows 11 + 韓国語 IME での確認は人に委ねる。
 4. **Tauri（wry）の Linux のインライン変換は、今も既定でできない。** wry は WebKitGTK に対して `set_enable_preedit(false)` を無条件に呼んでおり、wry #1724（未マージ）はオプトイン API を提案しているだけ。Slint は preedit を自前で描画するので、この点は Slint が有利。
-5. **型生成は ts-rs と specta の両方で試せた。** ts-rs は 1 型 1 ファイルで i64 は `bigint`。specta は 1 ファイルにまとめ、i64/u64 は既定で書き出しを拒否する（field ごとに `number` と明示する必要あり）。**ts-rs の方が維持費は小さい**（1 行の指定で済み、拒否もされない）。
+5. **型生成は ts-rs と specta の両方を試した。** ts-rs は 1 型 1 ファイルで i64 は `bigint`。specta は 1 ファイルにまとめ、i64/u64 は既定で書き出しを拒否する（field ごとに `number` と明示する必要あり）。**ts-rs の方が維持費は小さい**（1 行の指定で済み、拒否もされない）。
 6. **WASM のサイズは、型生成道具の選択と独立。** 同期処理の土台（serde + wasm-bindgen）を wasm32 にビルドしたものは 172,345 バイト、wasm-opt -Oz で 129,974 バイト（-24.6%）。
 7. **Octane は A2 の Web クライアントの UI 層の候補として残す**（[oss-platform-and-client.md](oss-platform-and-client.md) 6.5 節）。上の 5・6 の結果（型生成・WASM）は UI フレームワークに依らないので、Octane を選んでも変わらない。
 
@@ -53,13 +53,31 @@
 
 ## 4. Slint #10861: 変換中にフォーカスが外れると最後の文字が消える
 
-事実:
+事実（報告と一次資料）:
 
 - 報告は Slint 1.15.1 / Windows 11 / 韓国語 IME。ウィンドウの OS レベルのフォーカスが外れると、変換中の最後の文字が確定せず消える。同じ Slint ウィンドウ内の別の LineEdit に移ると確定する [slint #10861 (2026/11)]。Slint 開発者は Windows で再現を確認し、「winit master では再現しない。先行リリースで直るかもしれない」と書いている [slint #10861 (2026/11)]。
-- Slint 1.18.1 が依存する winit は **0.30.13**（Cargo.lock で確認）。winit 0.31 系の IME 改善（macOS の NSTextInputClient 再設計、iOS の multi-stage IME など）は未マージの PR として残っている [winit の IME 関連 PR (2026/11)]。Slint 側は winit の `Ime::Preedit` を受けて preedit 文字列を自前で描画する（`i-slint-backend-winit` の `winitwindowadapter.rs`、`i-slint-core` の `preedit_text`）。
-- この環境は WSL2 上の Linux で、IME（fcitx5・mozc）が入っておらず、sudo も使えないため、**変換中の文字が消える事象を再現できていない**。
+- Slint 1.18.1 が依存する winit は **0.30.13**（Cargo.lock で確認）。winit 0.31 系の IME 改善（macOS の NSTextInputClient 再設計、iOS の multi-stage IME など）は未マージの PR として残っている [winit の IME 関連 PR (2026/11)]。
 
-解釈: **Windows 11 + 韓国語 IME での確認を人間に委ねる必要がある。** Linux は報告の再現環境ではないので、Slint を A1 にする判断の材料にはしにくい。#10861 が 1.18.1 で直っていたとしても、**Linux の日本語入力（fcitx5 + mozc）でのインライン変換は別項目として必ず人の目で確かめるべき**である（Wayland と X11 のどちらでも）。
+事実（コードレベルの確認）: Slint 1.18.1 の winit backend は、フォーカスを失ったときに IME の確定を送らない。`i-slint-backend-winit` の `activation_changed` は `WindowEvent::WindowActiveChanged` を送るだけで、確定は winit が届ける `Ime::Commit` に依存している（受け取るのは `Ime::Preedit` と `Ime::Commit` のみ）。**つまり再現の鍵は winit の Windows の IME 処理にあり、Slint 1.18.1（winit 0.30.13）にその修正が入っているかは、コードの読み取りでは決められない。**
+
+事実（対象条件での試行）: **Windows 11 + 韓国語 IME の条件を満たす環境はこの作業環境に無く、再現は実施できなかった。** 試したことと結果:
+
+| 試したこと | 結果 |
+|---|---|
+| Linux 側の IME（fcitx5・ibus・mozc・nabyong）の有無 | いずれも無し（`/usr/share/fcitx5` などが存在しない） |
+| Linux 側への IME の導入 | 不可。`sudo -n apt-get install fcitx5 fcitx5-mozc` は `sudo: a password is required`、`apt-get install -y fcitx5` は `E: Unable to acquire the dpkg frontend lock ... are you root?` |
+| WSL2 の裏にある Windows ホストの IME | 韓国語 IME の実体（`C:\Windows\System32\IME\IMEKR`、フォントも malgun.ttf 等）はあるが、入力方式としての登録は確認できず（`reg query "HKLM\SOFTWARE\Microsoft\CTF\TIP" /k /f "0412"` が 0 件） |
+| Windows 版の Slint アプリのビルド | 不可。Windows 版 Rust ツールチェーンが無く（`where cargo` が 0 件）、MSVC も MinGW も無い |
+
+事実（再現的程序を用意した）: 人が対象条件で実行できるように、LineEdit 1 つだけの窓を出す再現プログラムを用意した（`crates/dev-client-probe` の `src/bin/ime.rs`）。テキストと入力の focused の変化を stdout に記録するので、変換中の文字が残ったかをログで判定できる。手順:
+
+1. `cargo run --release -p pelway-dev-client-probe --bin ime` で起動する（Windows 11 で行う）。
+2. LineEdit にフォーカスを当て、IME で「한글」と入力する（最後の「글」を変換中にしたままにする）。
+3. 別の窓（ブラウザなど）をクリックして、この窓から OS レベルのフォーカスを外す。
+4. 戻り、stdout の記録に最後の文字（글）が含まれるかを確認する（`text: "한글"` なら確定している、`text: "한"` なら文字が落ちた）。
+5. 記録（stdout の全文と、判定）をこの節に追記する。
+
+解釈: **Windows 11 + 韓国語 IME での確認を人間に委ねる必要がある。** Linux は報告の再現環境ではないため、この環境での結果で A1 の判断材料は作れない。Slint 側は「フォーカスを失ったときの IME 確定は winit に委ねている」ことがコードで分かったので、winit 側の修正状況（0.30.13 に入っているか）を追えば、1.18.1 で直っているかを推測できる。**Linux の日本語入力（fcitx5 + mozc）でのインライン変換は別項目として必ず人の目で確かめるべき**である（Wayland と X11 のどちらでも）。
 
 ## 5. Tauri（wry）の Linux でのインライン変換
 
@@ -87,13 +105,16 @@
 
 ## 7. Rust から TypeScript の型を生成する道具
 
-事実（`crates/dev-client-probe` で試した）:
+事実（`crates/dev-client-probe` で試した、ts-rs）:
 
-- **ts-rs 12.0.1**: derive 1 行で型が TS になる。1 型 1 ファイル（`import type` で相互参照）。i64/u64 は `bigint`（`TS_RS_LARGE_INT` で変えられる）。enum は判別可能な和集合になる。
-- **specta 2.0.0-rc.28**: 1 ファイルにすべての型をまとめる。**i64/u64 は既定で書き出しを拒否する**（`JSON.parse` が大きな整数を丸めるため。`BigIntForbidden` エラー）。field ごとに `#[specta(type = specta_typescript::Number)]` を書いて `number` として出すことを明示する必要がある。enum は `& { 別の variant?: never }` を含む和集合になる。
-- どちらの出力も、Rust の doc コメントを JSDoc として取り込む。
+- **ts-rs 12.0.1**: derive 1 行で型が TS になる。1 型 1 ファイル（`import type` で相互参照）。i64/u64 は `bigint`（`TS_RS_LARGE_INT` で変えられる）。enum は判別可能な和集合になる。Rust の doc コメントは JSDoc として取り込まれる。
 
-事実（維持費）: どちらの道具も「Rust の型を変えれば TS の型も変わる」ので、CI で差分を検査できる形にした。`crates/dev-client-probe` は `bindings/` に ts-rs の生成結果を置き、違えばテストが落ちる（`UPDATE_GOLDEN=1` で作り直せる）。**差分検査の実装はいずれの道具でも同じ工作量だった**（生成 → 置いたものと比べるだけ）。
+事実（試したが検証物には入れていない、specta）:
+
+- **specta 2.0.0-rc.28**: 1 ファイルにすべての型をまとめる。**i64/u64 は既定で書き出しを拒否する**（`JSON.parse` が大きな整数を丸めるため。`BigIntForbidden` エラー）。field ごとに `#[specta(type = specta_typescript::Number)]` を書いて `number` として出すことを明示する必要がある。enum は `& { 別の variant?: never }` を含む和集合になる [specta-typescript 0.0.15, Error 節]。
+- この検証物は ts-rs で実装している（specta は PR の差分が大きくなるため、測定結果の記録に留めた）。
+
+事実（維持費）: 「Rust の型を変えれば TS の型も変わる」ので、CI で差分を検査できる形にした。`crates/dev-client-probe` は `bindings/` に ts-rs の生成結果を置き、生成結果と違えばテストが落ちる（`UPDATE_GOLDEN=1` で作り直せる）。**差分検査の実装は、生成 → 置いたものと比べるだけで済み、型生成の道具が違っても同じ作業量だった**（specta なら 1 ファイルにまとめて比較する形になる）。
 
 解釈: **A2 では ts-rs を第一候補にする。** i64 を bigint として素直に出し、拒否の理由（JS の数値精度）を実装者が持つ必要がない。specta を選ぶ利点は Tauri 連携（tauri-specta）と RC 版であることだが、A2 は Web クライアントで Tauri を採用する前提ではない。specta の 2.0 が RC のまま（2026-11-12 時点で 2.0.0-rc.28）であることも、採用を後回しにする理由になる。
 
@@ -132,10 +153,10 @@
 ## 付録: 再現手順
 
 ```bash
-# 読み上げ支援が利用中の状態にする（AT-SPI のセッションがある環境）。
+# 読み上げ支援が利用中の状態にする。
 busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true
 
-# 読み上げ有効 / 無効の 2 ビルドを用意する（--no-default-features で無効）。
+# 読み上げ有効 / 無効の 2 ビルドを用意する。
 cargo build -p pelway-dev-client-probe --release --bin perf
 cp target/release/perf /tmp/perf-a11y-on
 cargo build -p pelway-dev-client-probe --release --bin perf --no-default-features
@@ -146,6 +167,9 @@ for b in /tmp/perf-a11y-on /tmp/perf-a11y-off; do
   SLINT_BACKEND=winit-software xvfb-run -a "$b" \
     --rows 100000 --events 1000 --interval 5 --static-cells 1000
 done
+
+# #10861 の再現プログラム（Windows 11 + 韓国語 IME の環境で実行する）。
+cargo run --release -p pelway-dev-client-probe --bin ime
 
 # 可変高の仮想リスト（ヘッドレスのテスト）／型生成の差分検査／WASM のサイズ。
 cargo test -p pelway-dev-client-probe

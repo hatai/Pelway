@@ -1,9 +1,9 @@
 // Issue #98: Slint 1.18.1 の ListView が行ごとに高さが違う場合（可変高の仮想リスト）を
-// どう扱うかを確かめるための UI。確かめることは 3 つ: 見える行だけが生成されるか
-// （仮想化）、行が重なったり抜けたりしないか、遠い位置へ飛んだあとも同じか。
-// 行の位置の変化（changed probe-y）は Rust 側のコールバックに記録する。
+// どう扱うかを確かめるための UI。確かめることは 3 つ: 見える行だけが生成されるか、
+// 行が重なったり抜けたりしないか、遠い位置へ飛んだあとも同じか。行の位置の変化
+// （changed probe-y）は Rust 側のコールバックに記録する。
 
-import { ListView } from "std-widgets.slint";
+import { LineEdit, ListView } from "std-widgets.slint";
 
 export component ProbeWindow inherits Window {
     width: 900px;
@@ -41,5 +41,21 @@ export component ProbeWindow inherits Window {
         x: 10px + Math.mod(c, 10) * 80px;
         y: 10px + Math.floor(c / 10) * 20px;
         text: "static " + c;
+    }
+}
+
+// #10861（IME 変換中に OS レベルのフォーカスが外れると変換中の最後の文字が消える）
+// の再現用。LineEdit 1 つだけの窓を出し、テキストの変化を Rust 側に通知する。
+// Rust 側（src/bin/ime.rs）が active の変化も見て stdout に記録する。
+export component ImeWindow inherits Window {
+    width: 420px;
+    height: 120px;
+
+    // Rust 側から読むための公開プロパティ。
+    out property <string> text: input.text;
+    out property <bool> input-has-focus: input.has-focus;
+
+    input := LineEdit {
+        width: 400px;
     }
 }

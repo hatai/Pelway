@@ -6,7 +6,6 @@ import type { NoticeLevel } from "./NoticeLevel";
  */
 export type MessageBody = { "Text": { body: string, } } | { "Notice": { body: string, level: NoticeLevel, } } | { "File": { name: string, 
 /**
- * サイズ（バイト）。specta は i64/u64 の書き出しを既定で拒むので、
- * number として出すことを明示する。
+ * サイズ（バイト）。
  */
 size_bytes: bigint, } };

@@ -1,14 +1,15 @@
 //! Rust の型から TypeScript の型を生成し、置いたもの（`bindings/`）と一致する
-//! ことを確認する。差分があればテストが落ちる。A2 は UI を TS/React DOM と
-//! するので、Rust 側の型を変えたのに TS 側の型を忘れると UI 側が古い型で
-//! コンパイルされる。CI でこの差分を検出できるようにするのがこのテストの目的。
+//! ことを確認する。差分があればテストが落ちる。A2 は UI を TS/React DOM とする
+//! ので、Rust 側の型を変えたのに TS 側の型を忘れると UI 側が古い型でコンパイル
+//! される。CI でこの差分を検出できるようにすることがこのテストの目的。
+//! （ts-rs で実装している。specta を試した結果も測定報告書に残している。）
 //!
 //! 置いた生成結果の更新は `UPDATE_GOLDEN=1 cargo test -p pelway-dev-client-probe`
 //! で行う（更新したあと、内容を確認してコミットする）。
 
 use std::path::{Path, PathBuf};
 
-use pelway_dev_client_probe::types::{Message, MessageBody, NoticeLevel};
+use pelway_dev_client_probe::types::Message;
 use ts_rs::TS;
 
 /// 置いている生成結果の置き場。
@@ -57,25 +58,4 @@ fn generated_typescript_matches_the_committed_bindings() {
         count += 1;
     }
     assert!(count >= 3, "ts-rs が {count} 個しか生成しなかった");
-
-    // specta: 1 ファイルにすべての型をまとめる。i64 の field は、型ごとに
-    // number として出すことを明示した Prelude（types.rs）だけが number になる。
-    let types = specta::Types::default()
-        .register::<Message>()
-        .register::<MessageBody>()
-        .register::<NoticeLevel>();
-    let actual = specta_typescript::Typescript::default()
-        .export(&types, specta_serde::Format)
-        .expect("specta で型を生成できる");
-    for expected in [
-        "export type Message = {",
-        "export type MessageBody =",
-        "export type NoticeLevel = \"Info\" | \"Warning\" | \"Critical\";",
-        "sent_at_ms: number,",
-    ] {
-        assert!(
-            actual.contains(expected),
-            "specta の出力に {expected} が無い:\n{actual}"
-        );
-    }
 }

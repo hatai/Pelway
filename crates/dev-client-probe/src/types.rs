@@ -1,11 +1,10 @@
-//! A2 の同期で往復する型の見本。実際の契約型は `pelway-contract` にある。
-//! 型生成ツール（ts-rs / specta）を試すのに足る範囲の型を置いて、生成結果を
-//! 見えるようにする。実際に入る型に近い形にしてある。
+//! A2 の同期で往復する型の見本。実際の契約型は `pelway-contract` にある。型生成
+//! ツール（ts-rs / specta）を試すのに足る範囲の型を置いてある。
 
 use serde::{Deserialize, Serialize};
 
 /// 通知の緊急度。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export_to = "bindings/")]
 pub enum NoticeLevel {
     Info,
@@ -14,7 +13,7 @@ pub enum NoticeLevel {
 }
 
 /// メッセージの本文の種別。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export_to = "bindings/")]
 pub enum MessageBody {
     /// ただの本文。
@@ -24,15 +23,13 @@ pub enum MessageBody {
     /// ファイル。
     File {
         name: String,
-        /// サイズ（バイト）。specta は i64/u64 の書き出しを既定で拒むので、
-        /// number として出すことを明示する。
-        #[specta(type = specta_typescript::Number)]
+        /// サイズ（バイト）。
         size_bytes: u64,
     },
 }
 
 /// 同期するメッセージ 1 件。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export_to = "bindings/")]
 pub struct Message {
     /// メッセージの識別子。
@@ -43,9 +40,7 @@ pub struct Message {
     pub author_id: String,
     /// 本文。
     pub body: MessageBody,
-    /// 投稿時刻（ミリ秒）。specta は i64/u64 の書き出しを既定で拒むので、
-    /// number として出すことを明示する。
-    #[specta(type = specta_typescript::Number)]
+    /// 投稿時刻（ミリ秒）。
     pub sent_at_ms: i64,
     /// 編集されたか。
     pub edited: bool,

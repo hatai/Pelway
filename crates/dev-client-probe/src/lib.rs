@@ -2,12 +2,11 @@
 //! 2 つを確かめる: 可変高（行ごとに高さが違う）の仮想リストを Slint 1.18.1 が
 //! どう扱うか（行の位置は [`Probe`] に記録する）、Rust の型から TypeScript の型を
 //! 生成する道具（ts-rs と specta。生成結果は `bindings/` に置き、差分を検査）。
-//! 測定結果は `docs/research/slint-tauri-client-measurements.md`。
 
 pub mod types;
 
-/// Slint を使う UI 側の検証（行の位置の記録など）。WASM ビルドには Slint を
-/// 入れない（同期処理の土台だけを測るため）。
+/// Slint を使う UI 側の検証。WASM ビルドには Slint を入れない（同期処理の土台
+/// だけを測るため）。
 #[cfg(not(target_arch = "wasm32"))]
 mod slint_probe {
     use std::collections::BTreeMap;
@@ -68,7 +67,7 @@ mod slint_probe {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use slint_probe::{Probe, ProbeWindow, new_probe_window, row_height};
+pub use slint_probe::{ImeWindow, Probe, ProbeWindow, new_probe_window, row_height};
 
 /// WASM 向けの導出（同期処理の土台）。WASM ビルドのときだけ有効。JS 側との境界
 /// は JSON 文字列で通す（Rust の構造体をそのまま境界に置くのは wasm-bindgen

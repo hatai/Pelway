@@ -22,8 +22,7 @@ author_id: string,
  */
 body: MessageBody, 
 /**
- * 投稿時刻（ミリ秒）。specta は i64/u64 の書き出しを既定で拒むので、
- * number として出すことを明示する。
+ * 投稿時刻（ミリ秒）。
  */
 sent_at_ms: bigint, 
 /**
