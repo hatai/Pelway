@@ -97,7 +97,7 @@ UI担当の[input/ui.md](../sources/v0.6/fixed/pelway-technical-docs/input/ui.md
 | full text | Postgresの権限付き検索を入口とし、PGroonga（TokenBigram＋NormalizerNFKC）を第一候補とする | pg_bigmと合成データで比べてから正式に決める。Tantivy/LinderaはAI検索の補助indexが必要になったときの将来候補。[調査](../../../research/japanese-full-text-search.md) |
 | RAG | 初版必須ではない。必要時に国内モデル＋pgvectorを比較 | wiki/Q&A自動生成は範囲外。外部embeddingへ自動接続しない |
 | MCP | rmcpを条件付き依存採用案 | protocol実装を流用し、業務承認やsandboxはPelway側 |
-| LLM adapter | llama.cppの事前取得modelを第一候補、rigは必要なら小範囲 | LangGraph/OpenHands/Gooseは参考。全runtimeを組み込まない |
+| LLM adapter | 提供元のOpenAI互換APIをrig-core（chat completionsとembeddingsだけ）で呼ぶ。BYOKは契約者の責任による例外（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)） | LangGraph/OpenHands/Gooseは参考。全runtimeを組み込まない |
 | 観測 | tracingのローカル出力。承認・開始資格・結果照会の各段階に同じtrace idを最初から付ける | OpenTelemetryは将来の相互運用候補。外部exporterや自動設定を初期有効にしない |
 
 <a id="調査を受けた採否"></a>
@@ -113,13 +113,13 @@ UI担当の[input/ui.md](../sources/v0.6/fixed/pelway-technical-docs/input/ui.md
 | 全文検索 | MVP前に検証 | PGroonga第一候補、pg_bigmと比較。WAL・復元、rootless Podman、英字/コードの部分一致、表記ゆれを試す |
 | サンドボックス | MVP前に検証 | gVisor（runsc）とcrun＋libkrunを、rootless Podmanとの組み合わせ・起動時間・syscall互換・egress拒否の維持で測る |
 | 添付の保存 | 採用：`object_store`経由 | 保存先はローカルのまま、S3互換interfaceで扱う |
-| ローカルLLM・埋め込み | MVP前に検証 | llama.cpp＋Apache-2.0の日本語model（LLM-jp-4、Qwen3-Swallow）、ruri-v3。各modelのLICENSE全文を確認する |
+| LLM・埋め込み | 採用：提供元のAPI（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)） | MVPはBYOK（Z.ai・OpenAI）で測る。一般提供の既定は日本リージョンのある提供元を別に選ぶ。ローカル推論（llama.cpp、日本語model、ruri-v3）はその選定の候補に残す |
 | MCP | MVP前に検証 | rmcp。tool annotationsは信頼しない（[ADR 0004](../../../adr/0004-declared-action-tiers.md)） |
 | 認証 | MVP前に検証 | webauthn-rs（passkey）とopenidconnect-rs（顧客IdP）をaxumに組み込む。Ory Kratos/Hydraは将来候補。Keto・OpenFGA・SpiceDBは12の外部権限サービス不要の方針により採らない |
 | クライアント | MVP前に検証 | A1にTauri＋React（Webと画面共有）を比較候補として加える。Slint issue #3867・#10861の再現、ts-rsまたはspecta、wasm-opt |
 | バックアップ | MVP前に検証 | pgBackRest。保存期間は件数指定か別の削除処理で14日上限を守る。2.59.3以上 |
 | 監査 | MVP前に検証 | `prev_hash`の鎖を残し、最新hashと行数に署名したcheckpointをDB管理者と別の場所へ保存する。形式と鍵・保管先の分離は[ADR 0007](../../../adr/0007-signed-audit-checkpoints.md)、下書き実装`crates/pelway-audit-checkpoint`で改ざん検出を検証済み |
-| 外部エージェント | 採らない（MVP） | ACPによるClaude Code・Codex等の参加は国内完結の前提と衝突する。選択外部連携の枠で将来候補 |
+| 外部エージェント | MVP後 | ACPによるClaude Code・Codex等の接続は、BYOKと同じ契約者の責任による例外の枠で扱う。LLMゲートウェイの実装の後に入れる（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)） |
 | 将来の候補 | 採否は将来 | OpenBao、Cedar、Ory Kratos、LiveKit、OpenMLS、YomiToku（商用ライセンスが必要）、NDLOCR-Lite、PaddleOCR、pgvector、OpenTelemetry Collector |
 
 直接依存の許諾は[09の対応表](09-sources.md)と[技術照合記録](../sources/v0.6/fixed/pelway-technical-docs/reviews/technical-license-ledger-v0.1.md)に示す（2026-11-08、可変ブランチ/最新版の観測値であり採用版ではない）。rmcpはApache-2.0への移行中でMIT部分が残る。全推移依存・NOTICE・SBOMは未作成、固定版の条文/脆弱性確認も未了。適切なOSSの採用は進めるが、安全境界をOSSの既定動作へ任せない。
