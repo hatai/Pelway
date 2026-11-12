@@ -8,8 +8,9 @@
 //!
 //! 英語の文言は意味の分かる仮の訳。
 //!
-//! fluent 関連 crate のライセンス表示をどこにどう出すかは未決
-//! （U05 の Slint と同じく、About 画面は作っていない）。
+//! Slint の attribution（Royalty-free License 2.0 §2 (a)）は About ダイアログの
+//! AboutSlint widget で表示する（Issue 237）。fluent 関連 crate のライセンス表示を
+//! どこにどう出すかは未決のまま。
 
 use fluent_bundle::{FluentArgs, FluentBundle, FluentResource};
 use unic_langid::LanguageIdentifier;
@@ -81,6 +82,11 @@ pub const USED_KEYS: &[&str] = &[
     "thread-input-placeholder",
     // 下のメッセージ入力欄
     "composer-placeholder",
+    // トップレベルメニューと About ダイアログ（Slint の attribution、Issue 237）
+    "menu-help",
+    "menu-about",
+    "about-title",
+    "about-close",
 ];
 
 /// 用意している言語（`.ftl` がある言語だけ）。
@@ -252,5 +258,9 @@ pub fn apply_translations(
     window.set_tr_pane_ai_note(text("pane-ai-note"));
     window.set_tr_thread_input_placeholder(text("thread-input-placeholder"));
     window.set_tr_composer_placeholder(text("composer-placeholder"));
+    window.set_tr_menu_help(text("menu-help"));
+    window.set_tr_menu_about(text("menu-about"));
+    window.set_tr_about_title(text("about-title"));
+    window.set_tr_about_close(text("about-close"));
     missing
 }
