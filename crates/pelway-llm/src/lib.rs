@@ -115,7 +115,8 @@ pub struct EmbedReply {
 }
 
 /// 1呼出し分の利用量。提供元が報告しない項目は 0。
-/// `calls` はこのゲートウェイの累積呼出し回数（成功後に数える）。
+/// `calls` はこのゲートウェイの累積呼出し回数。送信前に予約として数え、
+/// 「未送信」に分類された失敗（何も送らなかったもの）は戻す。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Usage {
     pub input_tokens: u64,

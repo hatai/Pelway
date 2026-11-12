@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pelway_llm::token::{FnoxEnvTokenSource, TokenSource};
+use pelway_llm::token::{FnoxEnvTokenSource, SecretToken, TokenSource};
 use pelway_llm::{
     CallBudget, ChatMessage, ChatRequest, GatewayOptions, LlmError, LlmGateway, OpenAiGateway,
     ProviderConfig, ResponseFormatCapability,
@@ -746,4 +746,133 @@ async fn proxy_is_applied_at_gateway_construction() {
         &opts,
     );
     assert!(gateway.is_ok());
+}
+
+// ---- 受け入れ条件: 並行呼び出しでも利用量の上限を超えない ----
+
+/// 上限の判定と予約は不可分。並行して4本走らせても、予算2本なら
+/// モックが受け取るのは2件だけ（PR #167 の must-fix）。
+#[tokio::test]
+async fn concurrent_calls_do_not_exceed_call_budget() {
+    let payload = chat_json("\"ok\"");
+    let mock = mock_server(Arc::new(move |_: &Recorded| Reply::ok(&payload))).await;
+    let opts = GatewayOptions {
+        https_only: false,
+        timeout: Duration::from_secs(5),
+        budget: Some(CallBudget { max_calls: 2 }),
+        ..GatewayOptions::default()
+    };
+    let gateway = Arc::new(
+        OpenAiGateway::new(
+            &config(&mock.base_url, ResponseFormatCapability::JsonSchema),
+            Arc::new("fixed-token".to_string()),
+            &opts,
+        )
+        .unwrap(),
+    );
+    let mut tasks = Vec::new();
+    for i in 0..4 {
+        let gateway = Arc::clone(&gateway);
+        tasks.push(tokio::spawn(async move {
+            gateway
+                .chat(ChatRequest::from_messages(vec![ChatMessage::user(
+                    format!("{i}"),
+                )]))
+                .await
+        }));
+    }
+    let mut ok = 0;
+    let mut not_sent = 0;
+    for task in tasks {
+        match task.await.unwrap() {
+            Ok(_) => ok += 1,
+            Err(LlmError::NotSent(_)) => not_sent += 1,
+            Err(other) => panic!("予算超過は NotSent のはず: {other:?}"),
+        }
+    }
+    assert_eq!(ok, 2, "予算2本なので成功も2件だけ");
+    assert_eq!(not_sent, 2);
+    assert_eq!(mock.records().len(), 2, "モックが受け取るのは2件だけ");
+    assert_eq!(gateway.usage().calls, 2);
+}
+
+/// 送信が失敗したときの予約の扱い:
+/// 「未送信」（トークン取得失敗など何も送らなかった失敗）は予約を戻し、
+/// 「送ったが失敗」（拒否など）は予約を保持する。
+#[tokio::test]
+async fn failed_send_reservation_policy() {
+    // 拒否（500）は送った扱い: 予算1なら、失敗した1件で予算を使い切る。
+    let mock = mock_server(Arc::new(|_: &Recorded| Reply::status(500))).await;
+    let opts = GatewayOptions {
+        https_only: false,
+        timeout: Duration::from_secs(5),
+        budget: Some(CallBudget { max_calls: 1 }),
+        ..GatewayOptions::default()
+    };
+    let gateway = OpenAiGateway::new(
+        &config(&mock.base_url, ResponseFormatCapability::JsonSchema),
+        Arc::new("fixed-token".to_string()),
+        &opts,
+    )
+    .unwrap();
+    let err = gateway
+        .chat(ChatRequest::from_messages(vec![ChatMessage::user("1")]))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, LlmError::Rejected { status: 500, .. }),
+        "{err:?}"
+    );
+    assert_eq!(
+        gateway.usage().calls,
+        1,
+        "送ったが失敗した呼出しは予算を消費する"
+    );
+    let err = gateway
+        .chat(ChatRequest::from_messages(vec![ChatMessage::user("2")]))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, LlmError::NotSent(_)), "{err:?}");
+    assert_eq!(mock.records().len(), 1);
+
+    // 未送信（トークン取得失敗）は予約を戻す: 予算1でも次の呼出しは送れる。
+    struct Broken;
+    impl TokenSource for Broken {
+        fn token(&self) -> Result<SecretToken, LlmError> {
+            Err(LlmError::NotSent("トークンが無効".to_string()))
+        }
+    }
+    let payload = chat_json("\"ok\"");
+    let mock = mock_server(Arc::new(move |_: &Recorded| Reply::ok(&payload))).await;
+    let opts = GatewayOptions {
+        https_only: false,
+        timeout: Duration::from_secs(5),
+        budget: Some(CallBudget { max_calls: 1 }),
+        ..GatewayOptions::default()
+    };
+    let broken = OpenAiGateway::new(
+        &config(&mock.base_url, ResponseFormatCapability::JsonSchema),
+        Arc::new(Broken),
+        &opts,
+    )
+    .unwrap();
+    let err = broken
+        .chat(ChatRequest::from_messages(vec![ChatMessage::user("1")]))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, LlmError::NotSent(_)), "{err:?}");
+    assert_eq!(broken.usage().calls, 0, "未送信の呼出しで予算は減らない");
+    assert!(mock.records().is_empty(), "何も送っていない");
+    // 同じ予算1のまま、次の呼出し（有効なトークン）は送れる。
+    let working = OpenAiGateway::new(
+        &config(&mock.base_url, ResponseFormatCapability::JsonSchema),
+        Arc::new("fixed-token".to_string()),
+        &opts,
+    )
+    .unwrap();
+    working
+        .chat(ChatRequest::from_messages(vec![ChatMessage::user("2")]))
+        .await
+        .unwrap();
+    assert_eq!(mock.records().len(), 1);
 }
