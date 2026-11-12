@@ -10,7 +10,7 @@ Pelwayは、複数の人間と複数の専門AI同僚が同じチャンネルで
 
 「未確認」は今回の資料で裏付けられなかった項目を指し、機能が存在しないという意味ではない。複数モデルの選択と、複数AIの同席も区別する。VM、コンテナ、タスク別sandbox、ローカルPCは別の構成であり、「AIがPCを使う」だけでAI別の分離を推定しない。
 
-価格の確認日は2026-11-08（JST）。Google、Grok Bot、OpenBot、Otti、Bullpenの価格は2026-11-11（JST）に再確認した。金額は公式の米ドル表示を使い、円換算はしない。契約期間と追加費用を区別し、最安総額の順位は作らない。提供元は公式のブランドを基本とし、運営法人名を確認できない場合は明記する。
+価格の確認日は2026-11-08（JST）。Google、Grok Bot、OpenBot、Otti、Bullpenの価格は2026-11-11（JST）に再確認した。Rakazoの価格は2026-11-13（JST）に確認した。金額は公式の米ドル表示を使い、円換算はしない。契約期間と追加費用を区別し、最安総額の順位は作らない。提供元は公式のブランドを基本とし、運営法人名を確認できない場合は明記する。
 
 ## サービス別の比較ドキュメント
 
@@ -18,7 +18,7 @@ Pelwayは、複数の人間と複数の専門AI同僚が同じチャンネルで
 
 | 区分 | 文書 |
 |---|---|
-| 既存チャットと個人・実行型エージェント | [Slack / Agentforce](competitors/slack-agentforce.md)、[Teams / Copilot](competitors/teams-copilot.md)、[Google Chat / Gemini](competitors/google-chat-gemini.md)、[Grok Bot](competitors/grok-bot.md)、[Muse](competitors/muse.md)、[OpenBot](competitors/openbot.md)、[Reason Machines](competitors/reason-machines.md) |
+| 既存チャットと個人・実行型エージェント | [Slack / Agentforce](competitors/slack-agentforce.md)、[Teams / Copilot](competitors/teams-copilot.md)、[Google Chat / Gemini](competitors/google-chat-gemini.md)、[Grok Bot](competitors/grok-bot.md)、[Muse](competitors/muse.md)、[OpenBot](competitors/openbot.md)、[Reason Machines](competitors/reason-machines.md)、[Rakazo](competitors/rakazo.md) |
 | 共有チャット・業務workspace | [Buzz](competitors/buzz.md)、[Otti ai](competitors/otti.md)、[CircleChat](competitors/circlechat.md)、[Context](competitors/context.md)、[Mantle Chat](competitors/mantle-chat.md)、[Cosmo](competitors/cosmo.md)、[GroupChat](competitors/groupchat.md)、[Bullpen](competitors/bullpen.md)、[GoodStrata](competitors/goodstrata.md)、[Elsewhere](competitors/elsewhere.md)、[Rerun](competitors/rerun.md) |
 
 ## 競合機能比較
@@ -34,6 +34,7 @@ Pelwayは、複数の人間と複数の専門AI同僚が同じチャンネルで
 | Muse。Meta。[公式発表][muse]・[muse.ai](https://muse.ai/) | 個人用agentとして説明。複数人＋複数専門AIの同一チャンネル参加は未確認。[発表][muse] [利用ガイド][museguide] | 名前・性格・好みの変更。複数の専門職AI配置は未確認。[利用ガイド][museguide] | Muse Secure VMの専用クラウドPC・ブラウザ、アプリ操作、文書生成。[発表][muse] [利用ガイド][museguide] | メール・購入などの確認、アクセス変更・解除、活動履歴、モデル外の重要な検査。確認要否は操作・connector・設定に依存。[安全性説明][musesafety] | 利用者が選ぶConnectorsとブラウザ。任意MCP接続は未確認。[安全性説明][musesafety] | 上限付き無料、Power $20/月、Maximum $100/月。地域・アカウントにより提供条件が変わる。[公式料金][museprice] |
 | OpenBot。CopilotKit。[Business公式][openbot] | 共有Bot、team workspace、Slack・Teams利用。宛先に2つ以上のBotを入れるとグループ会話になり、メールアドレスで人を追加できる。[Business公式][openbot] [グループ会話の実装][opengroup] | 自作AG-UI agent、組み込みBot、専門職とオーケストレーターの構成。[Business公式][openbot] | ブラウザ、ファイル、許可ツール、人による画面の引き継ぎ。ローカル・自社Kubernetes・ホスト運用。AI別VMの分離仕様は未確認。[Business公式][openbot] [公式README][openrepo] | Bot別ツール許可、禁止・承認ポリシー、監査、SSO・SCIM。[Business公式][openbot] | MCP、AG-UI、Slack、Teams、既存agent基盤の持ち込み。[Business公式][openbot] | MITライセンス、個人利用は無料でモデル費は提供元で別請求。Business Pay as you goは最大$29/利用者/月（月払い、契約期間の縛りなし）、Annualは個別見積もり。両プランとも組織の月間モデル利用額が$5,000を超えた分に5%。[公式README][openrepo] [公式料金][openprice] |
 | Reason / Reason Network。Reason Machines。[公式][reason] | teammate招待とagent間通信を確認。同一業務チャンネルで複数人＋複数AIが常駐する仕様は未確認。NetworkとReason本体を区別。[公式][reason] [プラン][reasonprice] | 名前と継続指示を持つReasonを職務別に作成、schedule・eventで起動。[AI employees][reasonjobs] | 自分のPCとcloud PCのコード編集・command実行、ブラウザ、ファイル、PR作成。[利用ガイド][reasonguide] [AI employees][reasonjobs] | 接続アカウントの権限。Gmail送信はプレビュー承認。他の重要操作はworkspaceルール・指示で承認を設定すると説明。[AI employees][reasonjobs] | Slack、Google Workspace、Stripe、PostHog、GitHub。開発連携にMCP・API・CLI。Networkは他agentとの通信。[利用ガイド][reasonguide] [AI employees][reasonjobs] | Pro $50/人/月、Max $200/人/月。週次creditsと追加購入、持ち込みモデルは提供元で別請求。Reason Networkは別の無料サービス。[公式プラン][reasonprice] |
+| Rakazo。開発はelie222（Elie Steinbock）、維持はInbox Zero Inc.。Apache-2.0で公開。[公式][rakazo] [リポジトリ][rakazorepo] | group chatは自分のボット2〜10体で、@Name・@everyoneで呼ぶ。複数人が同じgroup chatに入る仕様は未確認。共有スペースではメンバーがボットとチャットを共有し、ボットはメッセージを送った人のアカウントで動く。[グループ][rakazogroups] [スペース][rakazospaces] | ボットごとに名前・指示（上限2万字）・モデル・記憶（MEMORY.md、1行1事実・上限4 KB）を設定。テンプレートとスキル、ボットによるボット管理もある。[ボットとチャット][rakazobots] [ボット管理][rakazofleet] | ボットごとのコンピュータ（ブラウザ・ターミナル・ファイル・デスクトップ）。スペースで1台のTeam ComputerまたはPrivate。サンドボックス提供元は13種で、デスクトップアプリの自分のコンピュータも使える。[コンピュータ][rakazocomputer] [提供元][rakazoproviders] | Ask、Auto（承認モデルが依頼との一致を審査）、Never askの3モード。Allow once・Always allow（ツール・サイト単位）、Blockリスト優先、支出上限。カードへの応答はメッセージを送った本人だけ。承認者の別指定は未確認。[承認][rakazoapprovals] [スペース][rakazospaces] | カタログ連携（セルフホストではComposio/Pipedreamの設定時のみ）、任意のHTTPS MCPサーバー、OpenAPI・GraphQL。資格情報は暗号化。監査ログは常時有効で更新不可。[連携][rakazointegrations] [監査][rakazoaudit] | セルフホスト無料（Apache-2.0）。ホスト版はStandard $15/月（年払い$12/月、コンピュータ25時間）、Pro $49/月（100時間）、Max $99/月（200時間）、Rakazo creditsは$10/月から。7日間試用。2026-11-13 JST確認。[料金][rakazopricing] |
 
 `Muse`はMetaの製品、`open bot`はCopilotKitのOpenBotを、公式に確認できる比較対象として採用した。同名の別製品を混ぜていない。ただし元の表記だけから、依頼対象との対応を一意に確定したとは扱わない。[Meta][muse] [CopilotKit][openbot]
 
@@ -109,7 +110,7 @@ Pelwayに決まる前に検討し、既存利用を理由に見送った候補�
 
 ## 出典
 
-以下は2026-11-08（JST）にWebFetchまたはWebSearchで再確認した。製品自身による説明を根拠とし、安全性や成果の第三者保証とは扱わない。他社比較ページに載る他社価格は使っていない。数値を載せた価格は該当製品自身の表示に限る。
+以下は2026-11-08（JST）にWebFetchまたはWebSearchで再確認した。Rakazoの出典は2026-11-13（JST）に確認した。製品自身による説明を根拠とし、安全性や成果の第三者保証とは扱わない。他社比較ページに載る他社価格は使っていない。数値を載せた価格は該当製品自身の表示に限る。
 
 - [Slack：Agentforce利用ガイド](https://slack.com/help/articles/36218786859667-Use-Agentforce-in-Slack)
 - [Salesforce：Agentforce Pricing](https://www.salesforce.com/agentforce/pricing/)
@@ -165,6 +166,10 @@ Pelwayに決まる前に検討し、既存利用を理由に見送った候補�
 - [Rerun：Terms](https://rerun.build/terms)
 - [Rerun：公開リポジトリ](https://github.com/rerun-build/rerun)
 - [Rerun：Human in the loop](https://rerun.build/features/human-in-the-loop)
+- [Rakazo公式サイト](https://rakazo.com/)
+- [Rakazo：Pricing](https://rakazo.com/pricing/)
+- [Rakazo：elie222/rakazo README](https://github.com/elie222/rakazo)
+- [Rakazo：ドキュメント（Approvals、Spaces、Audit logほか）](https://rakazo.com/docs/)
 - [第三者：MDPDAの普惠智能掲載](http://www.mdpda.com/app/apk8030171.html)
 - [第三者：爱东东の普惠智能掲載](https://www.idongdong.com/app/218269.html)
 - [掲載上の公式：pelway.cn。HTTP/HTTPS本文取得失敗](http://www.pelway.cn/)
@@ -228,3 +233,15 @@ Pelwayに決まる前に検討し、既存利用を理由に見送った候補�
 [rerunterms]: https://rerun.build/terms
 [rerunrepo]: https://github.com/rerun-build/rerun
 [rerunhitl]: https://rerun.build/features/human-in-the-loop
+[rakazo]: https://rakazo.com/
+[rakazorepo]: https://github.com/elie222/rakazo
+[rakazopricing]: https://rakazo.com/pricing/
+[rakazobots]: https://rakazo.com/docs/bots-and-chats/
+[rakazogroups]: https://rakazo.com/docs/groups/
+[rakazospaces]: https://rakazo.com/docs/spaces/
+[rakazofleet]: https://rakazo.com/docs/fleet-management/
+[rakazocomputer]: https://rakazo.com/docs/computer/
+[rakazoproviders]: https://rakazo.com/docs/self-host-sandbox-providers/
+[rakazoapprovals]: https://rakazo.com/docs/approvals/
+[rakazointegrations]: https://rakazo.com/docs/integrations/
+[rakazoaudit]: https://rakazo.com/docs/self-host-audit-log/
