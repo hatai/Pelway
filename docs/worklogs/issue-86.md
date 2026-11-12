@@ -16,3 +16,11 @@
 4. 足りなかった情報・検証手段: 「承認者の明示的な再割当て」の操作（handoff は担当の受け渡し用で、承認カードの承認者変更に使えるかは #89 の範囲の解釈。今回は既存の handoff をそのまま）。
 5. 改善案: docs/superpowers/specs/agent-team.md のレビュー担当の節に「スタック PR の子が Issue を閉じるとき、親 PR の must-fix を子への案内として処理してよい条件」を足す。
 
+
+## 実装者メモ（round 4）
+
+1. 詰まった箇所: crates/pelway-contract/src/ledger.rs: `with_policy` を workspace 引数付きに変えたとき、テストの `ApprovalLedger::with_policy(ApprovalPolicy {...})` のような複数行リテラル引数の置換漏れが cargo check の E0061 で 4 件出た（順に直して解消）。
+2. 曖昧だった文: 「ADR と Issue の要件どおり workspace ごとの設定を保持し、`create_card` では `new.workspace_id` に対応するポリシーを使ってください」（PR #119 のレビュー3、pelway-review による must-fix。Reviewed: 6898287）
+3. 仮定と解釈: `ApprovalLedger.policies` を `HashMap<WorkspaceId, ApprovalPolicy>` にし、未設定のワークスペースは既定（兼任可・代表なし）を返す `policy(workspace_id)` を用意した。`with_policy` / `set_policy` も workspace 引数付きに変えた（台帳全体への単一設定はレビュー指摘の原因なので残さない）。解決はレビュー2どおりカード作成時の一度だけなので、承認・inbox・handoff は影響しない。
+4. 足りなかった情報・検証手段: ワークスペースごとのポリシーを HTTP で設定する経路（まだ無い。台帳の組立でのみ設定）。
+5. 改善案: docs/adr/0002-designated-approver-and-expiry.md の「ワークスペースの設定で決める」に「設定はワークスペースごと（台帳で共有しない）」を明記する。
