@@ -28,3 +28,12 @@ Issue の未決事項に従い、github-actions を Dependabot の対象にす�
 3. 仮定と解釈: `include: scope` を付ける意図はスコープ付き件名の統一と解釈し、`prefix: "build(deps)"` と `include: scope` を並記した。`prefix: "build"` 単独（スコープをクレート名にする解釈）は、件名が `build(deps):` で始まらないため選ばなかった。
 4. 足りなかった情報・検証手段: Dependabot が実際に立てるコミット件名の実物（マージ前は確認不可）。`uvx check-jsonschema` が環境に無く `uvx` で導入した。
 5. 改善案: `docs/dev-environment.md` の「検査ツール」に「`check-jsonschema` は `uvx check-jsonschema` で実行する」を足す。
+
+## 実装者メモ（round 2）
+
+1. 該まった箇所: `.github/dependabot.yml`: CI の static ジョブの jactionlint（dependabot-cooldown 規則）が「cooldown が無く Dependabot の暗黙の 3 日が 7 日未満」で失敗。`cooldown.default-days: 7` を追加して解消。
+2. 曖昧だった文: 「`mise run verify` が通る → CI の「mise run verify」」（Issue #169 の受け入れ条件）。
+3. 仮定と解釈: ローカルの `mise run verify` と CI の verify は同名でも内容が同じとは限らない、が前提。`mise exec -- jactionlint` を手元で実行して失敗（上のエラー）→ 修正後に exit=0 を確認した。
+4. 足りなかった情報・検証手段: `mise run verify` には jactionlint が含まれない（`mise.toml` の tasks に jactionlint タスクが無く、`verify.yml` の static ジョブの `mise exec -- jactionlint` ステップだけで走る）。ローカルで `mise run verify` を通しても workflow の lint は検証できていなかった。
+5. 改善案: `mise.toml` の「verify-static」に jactionlint を含める（`depends` に jactionlint タスクを追加する）か、`docs/dev-environment.md` の「CI（GitHub Actions）」に「jactionlint は CI の static ジョブのみで、ローカルの verify には含まれない」と書く。
+
