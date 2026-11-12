@@ -35,8 +35,8 @@
 
 | ID | 論点と推奨 | 代替/条件 | 未検証・阻害と確認方法 |
 |---|---|---|---|
-| A1 | Rust非WebViewのSlint GUI | eguiとTauri＋React（Webと画面を共有）を同条件の比較対象。GPUI/icedは現時点の読み上げ制約から主候補にしない | 固定版のlicense、IME、長文選択、NVDA/VoiceOver/Orca、大量可変高リスト。Slint issueを再現し測定する |
-| A2 | WebはTypeScript/React/DOM、状態と同期はRust/WASM | 全TS coreも比較可能。UI部品は共有しない | WASM起動/サイズと型生成維持費。Web32〜62h＋native58〜112hは部品の部分概算だけ。試験/修正/連携は未見積もり |
+| A1 | Rust非WebViewのSlint GUI | eguiとTauri＋Octane（+React。Webと画面を共有）を同条件の比較対象。GPUI/icedは現時点の読み上げ制約から主候補にしない | 固定版のlicense、IME、長文選択、NVDA/VoiceOver/Orca、大量可変高リスト。Slint issueを再現し測定する |
+| A2 | WebはTypeScript/Octane/DOM、状態と同期はRust/WASM | 全TS coreも比較可能。UI部品は共有しない | WASM起動/サイズと型生成維持費。Octaneはbeta版（npm最新0.16.7）のため固定版・コンパイラ・実DOMのIME/読み上げ/描画を確認。Web32〜62h＋native58〜112hは部品の部分概算だけ。試験/修正/連携は未見積もり |
 | A3 | Rust tokio/axum＋sqlx/PostgreSQL、ローカル添付 | クラウド型backendを既定にしない | 会社境界、権限、復旧、transaction/配信の整合を合成データで確認 |
 | A4 | seq/client_msg_id、workspace commit順cursor、snapshot再同期 | 04の行lock方式は小規模初版案。負荷増時の代替は将来 | 遅延commit、cursor失効、取消後cache消去、二重送信/承認の競合を試す |
 | A5 | 既存9状態。取消を第10状態にしない | 取消受付commit、未開始抑止、外部への停止要求、停止確認、操作結果を別項目で保持。止まっているへの移行は停止の証拠がある場合だけ。Pでもこの意味を弱めない | 取消遷移の行単位はU06、長引く外部run停止確認はU07 |
@@ -46,6 +46,17 @@
 | A9 | 共通IntegrationPortと能力定義/Adapter | MCP、REST、webhook、CLI/hook、A2Aを役割で使い分け | サービス固有制約、提供元内の副作用制御、結果照会、取消可否。11参照 |
 | A10 | PlacementPolicyへ保存/AI/log/backup/送信方針を関連付け | 今はJP local単一。US/EU/JP選択は将来例だけ | region変更時の既存data/backup/契約/運用権限の移行は未決。リージョン選択≠法適合 |
 
+A2 の Web UI（Octane）で実装時に決める事項（2026-11-12 の設計変更で React から変更）。SPA（SSR なし）と Octane バージョンの完全固定は確定済み。個別の選定は Web scaffold の実装 Issue で行い、結果を本章へ反映する。
+
+- ビルド基盤： Vite / Rspack / Rsbuild のプラグイン選択と `octane.config.ts`（jsxImportSource・requireDirective・strong mode）
+- 記述方言： `.tsrx` と `.tsx` の使い分け規約
+- エディタ・CI: `.tsrx` は plain `tsc` で型検査できない。`octane/compiler/volar`・`octane analyze`・ESLint/Biome 対応の確認
+- スタイリング: Octane の兄弟スコープ `<style>`・素の CSS/Tailwind・`@octanejs/*` バインディングの選択。Slint と共有するデザイントークンの扱い
+- 状態管理： `octane/signals` の併用可否、Strong mode（`"use strong"` / `compiler.strong`）の採否
+- テスト: `@octanejs/testing-library` の充足性
+- UI バインディング: 採用部品（仮想リスト・Markdown・シンタックスハイライト・リッチテキスト・アクセシブルプリミティブ等）ごとの実動作確認
+- React の併用： Octane は React 互換 API で React 向けライブラリも使える。`ReactCompat`/`OctaneCompat` による React 部品の混在や、場合によって React を使うか
+- エージェント連携： `octane mcp` 等コーディングエージェント向けツールの導入可否
 
 <a id="ch08-s06"></a>
 ## 試験の追跡表（いずれも未実施）

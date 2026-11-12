@@ -12,7 +12,7 @@
 flowchart LR
  subgraph CL["クライアント（設計・未実装）"]
   GUI["ネイティブGUI<br/>Rust＋Slint（採用案・実機試験前）"]
-  WEB["ブラウザUI<br/>TS＋React DOM（推奨案）"]
+  WEB["ブラウザUI<br/>TS＋Octane/DOM（推奨案）"]
   CORE["共通核 Rust client-core / WASM<br/>保存: rusqlite / IndexedDB"]
  end
  subgraph JP["日本国内のローカル本体（設置場所は未確認・外向き通信は既定で拒否）"]

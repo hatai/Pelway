@@ -13,7 +13,7 @@
 - 通知は framework 外の host adapter によるローカル通知。「APNs/FCMは初期不使用」[Pelway v0.7 02 (2026/11), チャット要件での評価]。
 - 観測は tracing のローカル出力。「OpenTelemetryは将来の相互運用候補。外部exporterや自動設定を初期有効にしない」[Pelway v0.7 02 (2026/11), サーバー・AI層の比較]。
 - Matrix と Zulip は同期設計の参考で、「server/UIのコードを採用しない」[Pelway v0.7 09 (2026/11), 同期]。
-- A1 は Slint で、検証項目に IME、NVDA/VoiceOver/Orca、大量可変高リストを挙げる。A2 は Web を TS/React DOM、同期を Rust/WASM とし、検証項目に「WASM起動/サイズと型生成維持費」を挙げる [Pelway v0.7 08 (2026/11), A1/A2]。
+- A1 は Slint で、検証項目に IME、NVDA/VoiceOver/Orca、大量可変高リストを挙げる。A2 は Web を TS/Octane/DOM、同期を Rust/WASM とし、検証項目に「WASM起動/サイズと型生成維持費」を挙げる [Pelway v0.7 08 (2026/11), A1/A2]。
 - 音声・ビデオの要件は v0.7 本文に見当たらなかった（`grep` で該当なし）。
 
 ---
@@ -154,14 +154,14 @@ U05 は「新サービスを自動追加しない」とし、12 §7 は外部の
 ### 6.4 日本語 i18n・Fluent
 
 - 事実：pelway-client-ui は `fluent-bundle = "0.15"` と `unic-langid` を使う。コメントには「@tr()（gettext）は使わない」とある（`crates/pelway-client-ui/Cargo.toml`）。fluent-rs は Apache-2.0、1,378 stars、最終 push 2026-09-27。fluent.js は 1,011 stars、最終 push 2026-05-22。cargo-i18n は 148 stars [GH (2026/11)]。
-- 当てはめ（筆者の判断）：Web（React）側で同じ `.ftl` を読むには、fluent.js 系（@fluent/bundle）を使えば資源を共有できる。翻訳キーの欠落検査は、Rust 側で ja と en のメッセージ ID の差分をテストで検査するのが軽い。
+- 当てはめ（筆者の判断）：Web（Octane）側で同じ `.ftl` を読むには、fluent.js 系（@fluent/bundle）を使えば資源を共有できる。翻訳キーの欠落検査は、Rust 側で ja と en のメッセージ ID の差分をテストで検査するのが軽い。
 - 判定：fluent.js による `.ftl` の共有は **MVP前に検証**（A2 の「翻訳資源を共有」）。
 
-### 6.5 Octane（Web クライアントの UI 候補）
+### 6.5 Octane（Web クライアントの UI）
 
 - 事実：octanejs/octane。MIT、1,485 stars、最終 push 2026-11-12。npm 版 0.16.7（2026-11-02）、状態は beta [GH (2026/11)] [npm (2026/11)]。React の API（`useState`、`useEffect`、`memo`、context、portals、Suspense、transition）を互換で提供し、コンパイラが直接 DOM のコードへ落とす（仮想 DOM を持たない）。Inferno の後継で、作者は Inferno の作者。React との差は、クラスコンポーネント・Server Components・合成イベントシステムを持たないこと [octane README (2026/11)]。
-- 当てはめ（筆者の判断）：A2 の UI 層（TS/React DOM）の候補。React と同じ API で書けるので学習の負担は React と同じだが、仮想 DOM を持たない分、描画の負荷は下回る可能性がある（実 DOM での測定は未実施）。型生成と WASM のサイズは UI フレームワークに依らないので、採否にかかわらず結果は変わらない [slint-tauri-client-measurements (2026/11)]。
-- 判定：Octane は **将来の候補**（A2 の UI 層の比較対象）。実 DOM での読み上げ・IME・描画負荷の比較は別 Issue に残す。
+- 当てはめ（筆者の判断）：A2 の UI 層に採用（2026-11-12 の設計変更で React から変更）。React と同じ API で書けるので学習の負担は React と同じだが、仮想 DOM を持たない分、描画の負荷は下回る可能性がある（実 DOM での測定は未実施）。型生成と WASM のサイズは UI フレームワークに依らないので、採否にかかわらず結果は変わらない。beta 版のため、固定版・コンパイラ・実 DOM の IME/読み上げ/描画は A2 の未検証項目 [slint-tauri-client-measurements (2026/11)]。
+- 判定：Octane は **採用**（A2 の Web UI。2026-11-12 の設計変更）。実 DOM での読み上げ・IME・描画負荷と `.tsrx` コンパイラの組み込みは A2 の未検証項目として残す。
 
 ---
 
@@ -185,7 +185,7 @@ U05 は「新サービスを自動追加しない」とし、12 §7 は外部の
 | Tauri 2（Linux IME、Orca） | MVP前に検証（比較候補） | A1 比較 |
 | ts-rs / specta、wasm-opt | MVP前に検証 | A2 |
 | fluent.js による .ftl の共有 | MVP前に検証 | A2 / 06 |
-| Octane（Web クライアントの UI 候補） | 将来の候補（比較対象） | A2 |
+| Octane（Web クライアントの UI） | 採用（A2 の UI 層。beta のため固定版・実 DOM の確認は未検証項目） | A2 |
 | Ory Kratos (+Hydra) | 将来の候補 | U05 |
 | Kanidm / Rauthy / Keycloak | 将来の候補 | U05 |
 | Ory Keto / OpenFGA / SpiceDB | 見送り | 12 §7 |

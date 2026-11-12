@@ -57,12 +57,14 @@ SlintのRoyalty-freeは標準的なpermissive OSS licenseと同じとは扱わ�
 
 | 案 | 長所 | 負担 | 判断 |
 |---|---|---|---|
-| TS＋React DOM UI、Rust同期核をWASM | browserのIME・読み上げ・文字選択を使う。状態・同期契約を共有 | UIは二重実装。WASM bridgeと保存adapterが要る | 推奨 |
+| TS＋Octane/DOM UI、Rust同期核をWASM | browserのIME・読み上げ・文字選択を使う。状態・同期契約を共有 | UIは二重実装。WASM bridgeと保存adapterが要る | 推奨 |
 | Slint/eguiをWASMで共通UI化 | 画面コード共有の可能性 | canvas系の表示とブラウザの検索・選択・読み上げの整合を別途検証 | 初版では採らない |
 | Rust DOM UI（Leptos等） | Rustで記述統一 | ネイティブ部品は結局別。新しいUI基盤の評価が増える | 初版では採らない |
 | Webの同期まで全部TS | WASM bridge不要 | 同期規則の実装が二つになる | WASM費用が大きい場合の代替 |
 
 共有するのはdomain enum、API型、同期・dedup、翻訳資源、表示規則、デザイントークン。共有しないのは画面部品、focus、IME、OS通知、clipboard、ファイル選択。承認規則を共通核で表示しても、最終判定はserverで強制する。
+
+Web UIのフレームワークはOctane（React互換のAPIをコンパイルする方式。MIT、beta版でnpm最新は0.16.7）とする。`.tsx`の部品から`.tsrx`へ段階的に移せる。実DOMでのIME・読み上げ・描画とコンパイラの組み込みは未検証項目（08:A2）。
 
 <a id="ch02-s07"></a>
 ### 二重UI実装の部分工数
@@ -116,7 +118,7 @@ UI担当の[input/ui.md](../sources/v0.6/fixed/pelway-technical-docs/input/ui.md
 | LLM・埋め込み | 採用：提供元のAPI（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)） | MVPはBYOK（Z.ai・OpenAI）で測る。一般提供の既定は日本リージョンのある提供元を別に選ぶ。ローカル推論（llama.cpp、日本語model、ruri-v3）はその選定の候補に残す |
 | MCP | MVP前に検証 | rmcp。tool annotationsは信頼しない（[ADR 0004](../../../adr/0004-declared-action-tiers.md)） |
 | 認証 | MVP前に検証 | webauthn-rs（passkey）とopenidconnect-rs（顧客IdP）をaxumに組み込む。Ory Kratos/Hydraは将来候補。Keto・OpenFGA・SpiceDBは12の外部権限サービス不要の方針により採らない |
-| クライアント | MVP前に検証 | A1にTauri＋React（Webと画面共有）を比較候補として加える。Slint issue #3867・#10861の再現、ts-rsまたはspecta、wasm-opt |
+| クライアント | MVP前に検証 | A1にTauri＋Octane（+React。Webと画面共有）を比較候補として加える。Slint issue #3867・#10861の再現、ts-rsまたはspecta、wasm-opt |
 | バックアップ | MVP前に検証 | pgBackRest。保存期間は件数指定か別の削除処理で14日上限を守る。2.59.3以上 |
 | 監査 | MVP前に検証 | `prev_hash`の鎖を残し、最新hashと行数に署名したcheckpointをDB管理者と別の場所へ保存する。形式と鍵・保管先の分離は[ADR 0007](../../../adr/0007-signed-audit-checkpoints.md)、下書き実装`crates/pelway-audit-checkpoint`で改ざん検出を検証済み |
 | 外部エージェント | MVP後 | ACPによるClaude Code・Codex等の接続は、BYOKと同じ契約者の責任による例外の枠で扱う。LLMゲートウェイの実装の後に入れる（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)） |

@@ -28,7 +28,7 @@ MVP（最初に実データで試す版）の前に検証する価値が高い�
 - 12 §8.2：削除と復旧の順序です。復旧時は、復旧 DB と独立に保全した削除・制限・撤回記録を先に再適用します。
 - 13 §3：R03（索引・embedding は独立 TTL なし、source と同じ期限）、R15（国内 backup は 1 日 1 回、作成から最大 14 日）、R16（削除・失効記録）。
 - 13 §4：D01（利用停止は受付トランザクションで確定）、D03（オンライン物理削除は 24 時間以内の内部目標）。
-- 08 継承する技術選定：A1（Rust の非 WebView GUI として Slint）、A2（Web は TypeScript/React、状態と同期は Rust/WASM）、A3（Rust tokio/axum＋sqlx/PostgreSQL）、A4（seq/client_msg_id と snapshot 再同期）。
+- 08 継承する技術選定：A1（Rust の非 WebView GUI として Slint）、A2（Web は TypeScript/Octane、状態と同期は Rust/WASM）、A3（Rust tokio/axum＋sqlx/PostgreSQL）、A4（seq/client_msg_id と snapshot 再同期）。
 - 仕様には共有キャンバス・文書の同時編集、添付ファイルの文書解析・OCR、ベクトル検索の要件はありません（v0.7 本文を grep で確認）。添付に関する記述は、hash 検査、承認対象としての添付 hash、quota に限られます。したがって領域 3・4・5 は「将来の候補」の評価です。
 
 ## 判定一覧
