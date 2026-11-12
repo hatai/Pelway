@@ -8,11 +8,13 @@ v0.7の技術選定を、既存のOSSと競合の構成と比べた調査です�
 | [エージェントの実行と安全](oss-agent-execution-and-safety.md) | サンドボックス、ローカルLLMと日本語モデル、埋め込みモデル、認可エンジン、秘密情報の仲介、MCPとエージェント間プロトコル、プロンプトインジェクション対策 |
 | [データと共同作業](oss-data-and-collaboration.md) | ジョブキュー、同期、共同編集、ベクトル検索、日本語OCR（YomiTokuを含む）、改ざん検出の監査ログ、バックアップ |
 | [基盤とクライアント](oss-platform-and-client.md) | 認証（Oryを含む）、エンドツーエンド暗号化、音声・ビデオ、通知、観測、クライアントの部品、相互接続 |
+| [RustのLLM APIクライアント比較](rust-llm-client-comparison.md) | async-openai、genai、rig-core、openai-api-rs、reqwest自前実装の比較。自動再試行、HTTPクライアント差込、構造化出力、Z.ai・OpenAI・Vertex AIの互換仕様 |
 
 測定報告（実機検証）:
 
 | 文書 | 内容 |
 |---|---|
 | [サンドボックス隔離の測定](sandbox-isolation-measurements.md) | WSL2+rootless PodmanでのgVisor（runsc）とcrunの比較。起動時間、syscall互換性、資源使用量、egress拒否、KVM可否 |
+| [Slint と Tauri＋React のクライアント比較](slint-tauri-client-measurements.md) | Slint 1.18.1 の読み上げ時の ListView の重さ（#3867）、可変高の仮想リスト、#10861 の再現可否、wry の Linux のインライン変換、型生成（ts-rs/specta）、wasm-opt の WASM サイズ |
 
 各文書の判定は「MVP前に検証」「将来の候補」「見送り」の3つです。記載は公式ドキュメントと公開リポジトリにもとづき、実機での検証はしていません（測定報告を除く）。

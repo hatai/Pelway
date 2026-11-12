@@ -15,7 +15,18 @@ description = "Draft integration gateway spike for the Pelway demo backend (MCP 
 # MIT のまま」で、Apache-2.0・MIT・CC-BY-4.0（文書）の3条文を含む。NOTICE ファイルは
 # パッケージにもタグ rmcp-v3.9.0 のリポジトリにも無い（#96 の確認結果）。
 # 両条文の同梱を前提に扱う（docs/technical/v0.7/body/09-sources.md、U05）。
-# 段階の宣言と annotations の扱い（この時点の実装）は model 型（ToolAnnotations）
-# だけを使うため、feature は無効のままにする。接続（client・transport 系）を足す
-# ときに features を追加する。
-rmcp = { version = "=3.9.0", default-features = false }
+# features: client（tools/list・tools/call の送信側）、transport-async-rw（in-process
+# 検証の duplex）、transport-child-process（本体の既定方式である stdio 子プロセス）、
+# transport-io と server（src/bin の echo サーバーとテスト内 in-process サーバー用。
+# cargo test では [[bin]] も通常依存の feature でビルドされる）。
+rmcp = { version = "=3.9.0", default-features = false, features = [
+  "client",
+  "server",
+  "transport-async-rw",
+  "transport-child-process",
+  "transport-io",
+] }
+# call_tool の引数（JSON オブジェクト）の組み立てに使う。
+serde_json = "1"
+# src/bin の echo サーバーの実行（#[tokio::main]）とテストの #[tokio::test]。
+tokio = { version = "1", features = ["rt", "macros"] }

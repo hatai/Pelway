@@ -20,7 +20,7 @@ flowchart LR
   DB[("PostgreSQL + sqlx<br/>正本・outbox・監査")]
   FILE[("ファイル保存<br/>添付・成果物・Botメモリ・backup")]
   RUN["runner<br/>リース・手順の再開"]
-  LLM["LLM gateway<br/>スタブ / llama.cpp（第一候補）"]
+  LLM["LLM gateway<br/>スタブ / 提供元のAPI（BYOK）"]
   CTRL["sandbox起動controller"]
   SB["タスクsandbox<br/>秘密なし・外へ出られない"]
   GW["連携gateway<br/>権限・秘密・通信policy / MCP: rmcp（条件付き）"]

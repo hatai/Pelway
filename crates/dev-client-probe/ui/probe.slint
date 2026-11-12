@@ -1,0 +1,59 @@
+// Issue #98: Slint 1.18.1 の ListView が行ごとに高さが違う場合（可変高の仮想リスト）を
+// どう扱うかを確かめるための UI。確かめることは 3 つ: 見える行だけが生成されるか、
+// 行が重なったり抜けたりしないか、遠い位置へ飛んだあとも同じか。
+
+import { LineEdit, ListView } from "std-widgets.slint";
+
+export component ProbeWindow inherits Window {
+    width: 900px;
+    height: 640px;
+    title: "slint listview probe";
+
+    // 行の位置が変わったときに呼ばれる（index は行番号、y は列表内の y 座標）。
+    callback record-move(index: int, y: length);
+
+    in property <int> item-count: 10000;
+    // 行ごとの高さを変えるか（true: 20px〜116px で変わる、false: 20px 固定）と、窓の
+    // 他の場所に置く静的 Text の個数（アクセシビリティ木の大きさを変える）。
+    in property <bool> variable-height: true;
+    in property <int> static-cells: 0;
+    // 可変高のときの行の高さ（97 行周期。隣り合う行の高さが違うので、記録した y 座標からどの行なのかを読み戻せる）。
+    in property <[length]> variable-heights: [20px, 21px, 22px, 23px, 24px, 25px, 26px, 27px, 28px, 29px, 30px, 31px, 32px, 33px, 34px, 35px, 36px, 37px, 38px, 39px, 40px, 41px, 42px, 43px, 44px, 45px, 46px, 47px, 48px, 49px, 50px, 51px, 52px, 53px, 54px, 55px, 56px, 57px, 58px, 59px, 60px, 61px, 62px, 63px, 64px, 65px, 66px, 67px, 68px, 69px, 70px, 71px, 72px, 73px, 74px, 75px, 76px, 77px, 78px, 79px, 80px, 81px, 82px, 83px, 84px, 85px, 86px, 87px, 88px, 89px, 90px, 91px, 92px, 93px, 94px, 95px, 96px, 97px, 98px, 99px, 100px, 101px, 102px, 103px, 104px, 105px, 106px, 107px, 108px, 109px, 110px, 111px, 112px, 113px, 114px, 115px, 116px];
+
+    list := ListView {
+        for i in root.item-count: Rectangle {
+            height: root.variable-height ? root.variable-heights[Math.mod(i, 97)] : 20px;
+            background: Math.mod(i, 2) == 0 ? #eeeeee : #ffffff;
+            // 行の中身（アクセシビリティ木の大きさに効くので Text を 2 つ置く）。
+            Text { text: "行 " + i; x: 4px; }
+            Text { text: "2026-11-12"; x: 300px; }
+            // y を写すプロパティと、その変化の通知（Rust 側の記録用）。
+            property <length> probe-y: self.y;
+            changed probe-y => {
+                root.record-move(i, self.probe-y);
+            }
+        }
+    }
+
+    // 窓の他の場所に置く静的 Text。
+    for c in root.static-cells: Text {
+        x: 10px + Math.mod(c, 10) * 80px;
+        y: 10px + Math.floor(c / 10) * 20px;
+        text: "static " + c;
+    }
+}
+
+// #10861（IME 変換中に OS レベルのフォーカスが外れると変換中の最後の文字が消える）の
+// 再現用。LineEdit 1 つだけの窓を出す。Rust 側（src/bin/ime.rs）が記録する。
+export component ImeWindow inherits Window {
+    width: 420px;
+    height: 120px;
+
+    // Rust 側から読むための公開プロパティ。
+    out property <string> text: input.text;
+    out property <bool> input-has-focus: input.has-focus;
+
+    input := LineEdit {
+        width: 400px;
+    }
+}

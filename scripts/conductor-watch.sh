@@ -8,11 +8,15 @@ while true; do
   t3 thread list --json > "$D/threads.json" 2>/dev/null || true
   scripts/agent-gh dev pr list --state all --limit 30 --json number,state,isDraft,headRefName,reviewDecision,statusCheckRollup > "$D/prs.json" 2>/dev/null || true
   python3 -I - "$D" <<'PY'
-import json, sys, time, os
+import json, sys, time, os, re
 d = sys.argv[1]; sp = os.path.join(d, "state.json")
+# スレッド名の形式（skill command-team の「スレッド名」）。指揮役が作ったスレッドだけを見る。
+TITLE = [re.compile(r"^\[実装\] #\d+ \S"), re.compile(r"^\[レビュー\] PR #\d+ \S"), re.compile(r"^\[(?!実装\]|レビュー\])[^\]\s]+\] \S")]
+def title_ok(t): return any(r.search(t) for r in TITLE)
 try: prev = json.load(open(sp))
 except Exception: prev = None
-cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("since", {})}
+cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("since", {}),
+       "badtitle": [] if prev is None else prev.get("badtitle", [])}
 try: threads = json.load(open(os.path.join(d, "threads.json")))
 except Exception: threads = []
 try: prs = json.load(open(os.path.join(d, "prs.json")))
@@ -23,6 +27,15 @@ for t in threads:
     cur["threads"][tid] = s
     if prev is not None and prev["threads"].get(tid) != s:
         print(f"THREAD {s} {tid} prev={prev['threads'].get(tid)} {t.get('title','')[:40]}", flush=True)
+    title = t.get("title") or ""
+    # 古い終わったスレッドは数えない（次に操作するときに直す）。動いているものと新しく現れたものだけを見る。
+    active = s in ("running", "starting", "preparing") or (prev is not None and tid not in prev["threads"])
+    if t.get("createdBy") == "agent" and not t.get("archived") and active and not title_ok(title):
+        if tid not in cur["badtitle"]:
+            cur["badtitle"].append(tid)
+            print(f"THREAD bad-title {tid} {title[:40]}", flush=True)
+    elif tid in cur["badtitle"]:
+        cur["badtitle"].remove(tid)
     # 停滞: 実行中のまま、スレッドの手順の数（itemCount）が 45 分変わらない。
     ic = t.get("itemCount")
     last = cur["since"].get(tid)
