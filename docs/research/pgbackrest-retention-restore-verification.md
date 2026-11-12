@@ -92,7 +92,7 @@ R15 の「snapshot 作成から最大 14 日で復旧対象外」を満たす。
 | 復元 | 成功。復元の前後で `probe` 5 行の md5 が一致（`7fc71136f31cc1c97659772b39202edb`） |
 | 改変の検知 | 実体ファイルを 1 バイト改変すると restore が失敗（`zlib threw error: [-3] data error`） |
 
-### 3.1 2.59.3 未満を避けない理由
+### 3.1 2.59.3 未満を避ける理由
 
 pgbackrest.org の「Weak Encryption Subkeys and Salts」によれば、2.59.3 未満は
 暗号化用の乱数生成が失敗しても検出せず、弱い subkey と salt を作る可能性が
@@ -100,7 +100,7 @@ pgbackrest.org の「Weak Encryption Subkeys and Salts」によれば、2.59.3 �
 subkey は `stanza-create` で一度生成され、その後も同じものが使われるため、
 アップグレードしても弱い subkey は置き換わらない。
 
-对策は 2.59.3 以上を使うこと。本検証は 2.60.0 を使い、公式ページの手順
+対策は 2.59.3 以上を使うこと。本検証は 2.60.0 を使い、公式ページの手順
 （`repo-get` で `cipher-pass` を取り出し、復号した subkey のゼロバイト数を
 数える）で弱さがないことも確認した。
 
