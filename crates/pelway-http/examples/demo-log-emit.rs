@@ -25,6 +25,7 @@ use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use pelway_contract::approval::Decider;
 use pelway_contract::ledger::{ApprovalLedger, NewCard};
 use pelway_contract::snapshot::ActionPayload;
 use pelway_contract::task::ActionKind;
@@ -75,7 +76,11 @@ fn main() {
     let r2 = post(
         addr,
         &pelway_contract::approval::approve_path(&"card-gdpr07-01".into()),
-        &[("Content-Type", "application/json")],
+        &[
+            ("Content-Type", "application/json"),
+            ("x-pelway-member-id", "m-human-gdpr07"),
+            ("x-pelway-member-kind", "human"),
+        ],
         &approve,
     );
     expect_status(&r2, 200, "承認");
@@ -90,7 +95,11 @@ fn main() {
     let r3 = post(
         addr,
         &pelway_contract::approval::approve_path(&"card-gdpr07-02".into()),
-        &[("Content-Type", "application/json")],
+        &[
+            ("Content-Type", "application/json"),
+            ("x-pelway-member-id", "m-human-gdpr07"),
+            ("x-pelway-member-kind", "human"),
+        ],
         &wrong,
     );
     expect_status(&r3, 409, "拒否（snapshot 不一致）");
@@ -182,7 +191,7 @@ fn synthetic_ledger() -> SharedLedger {
                     scope: Vec::new(),
                 },
                 requester: "m-human-gdpr07".into(),
-                decider: "m-human-gdpr07".into(),
+                decider: Decider::Member("m-human-gdpr07".into()),
                 deadline: None,
             })
             .expect("create synthetic card");

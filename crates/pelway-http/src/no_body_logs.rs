@@ -15,6 +15,7 @@ use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use pelway_contract::approval::Decider;
 use pelway_contract::ledger::{ApprovalLedger, NewCard};
 use pelway_contract::pseudonym::pseudonymize;
 use pelway_contract::snapshot::ActionPayload;
@@ -60,7 +61,7 @@ fn new_card(id: &str) -> NewCard {
             scope: Vec::new(),
         },
         requester: "m-human-gdpr07".into(),
-        decider: "m-human-gdpr07".into(),
+        decider: Decider::Member("m-human-gdpr07".into()),
         deadline: None,
     }
 }
@@ -153,7 +154,7 @@ fn post_approve(addr: SocketAddr, body: &str) -> (u16, String) {
         addr,
         "POST",
         &pelway_contract::approval::approve_path(&"card-flow-1".into()),
-        &[("Content-Type", "application/json")],
+        &comment_headers(),
         body.as_bytes(),
     )
 }
@@ -251,7 +252,7 @@ fn rejected_and_internal_error_have_no_canary_anywhere() {
         addr,
         "POST",
         &pelway_contract::approval::approve_path(&"card-rej".into()),
-        &[("Content-Type", "application/json")],
+        &comment_headers(),
         body.as_bytes(),
     );
     assert_eq!(status, 409);

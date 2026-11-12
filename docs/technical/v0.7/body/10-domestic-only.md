@@ -16,8 +16,8 @@
 | データ・処理 | 本体の保存・処理場所案 | 越境候補 | 初期制御/未保証 |
 |---|---|---|---|
 | chat/添付/成果物 | 国内hostのDB・同期外volume | cloud sync、外部preview、利用者選択連携へのexport | 自動preview/外部画像取得なし。exportは明示scopeと操作承認 |
-| 本体LLMの入出力 | 国内hostのスタブ/ローカル推論 | API/fallback、model download、trace | 外部LLM fallbackなし。機材/品質/全通信未確認 |
-| embedding/RAG | 必要時のみ国内modelとDB | embedding API、index telemetry | 初版の必須機能にしない。使う前に同じ審査 |
+| 本体LLMの入出力 | スタブ。BYOKを有効にしたテナントは契約者の提供元（国外あり得る） | BYOKの提供元、fallback、trace | BYOKは契約者の責任による例外で、初期off・明示有効化・表示・監査（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)）。外部LLM fallbackなし |
+| embedding/RAG | 必要時のみ。BYOKのテナントはチャットと同じ提供元 | embedding API、index telemetry | 初版の必須機能にしない。索引は提供元とモデルに結び付け、替えたら作り直す |
 | Botメモリ/step/checkpoint | 国内DB/volume | remote storage、ツールによる持出し | 明示メモリは作成/根拠確認した更新から最長365日かつ全source期限内。閲覧で延長しない。checkpointは13 R07。sandboxへDB鍵を置かない |
 | ツール実行 | 国内sandbox、gateway | MCP/API/CLI子processの通信 | sandboxはgateway以外拒否。stdioでも無通信と見なさない |
 | client cache | 管理端末のSQLite/IndexedDB | 端末同期、国外端末閲覧 | 初期loopback利用。管理済み国内端末以外へ拡張は未決 |

@@ -32,7 +32,8 @@
 //! クライアントは承認ボタンを押すたびに新しい冪等キーを作り、通信の失敗で送り直すときだけ
 //! 同じキーを使う。409 のあとはカードを読み直し、利用者がもう一度押したら新しいキーを作る。
 //!
-//! TODO(U06): 複数承認者・承認期限・担当交代時の再承認の規則は未決。ここでは単一承認者。
+//! TODO(U06): 承認者は単一（ADR 0002: 指名した1人か役割「代表」のどちらか。#86）。
+//! 複数承認者・「ワークスペースの誰でも承認できる」設定・承認期限は作らない。
 //! TODO(U01): 開始資格（5 秒）・attempt_started・結果不明への遷移は S1 検証前のため
 //! 疑似送信では表さない。実外部 I/O は無効。
 
@@ -43,6 +44,83 @@ use crate::member::MemberKind;
 use crate::snapshot::ActionPayload;
 use crate::store::TsMs;
 use crate::task::TaskState;
+
+/// 承認者の役割（ADR 0002「例：代表」）。MVP で作るのは代表だけ。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+pub enum ApproverRole {
+    /// ワークスペースの代表（[`ApprovalPolicy::representative`] の人）。
+    Representative,
+}
+
+impl ApproverRole {
+    /// ワイヤ上の値（serde の `snake_case` タグと同じ）。
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Representative => "representative",
+        }
+    }
+
+    /// ワイヤ上の値から作る。未知の値は `None`。
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "representative" => Some(Self::Representative),
+            _ => None,
+        }
+    }
+}
+
+/// 承認カードの承認者の指定（ADR 0002。カード作成時のみ使う）。
+/// 指名した1人か、役割のどちらか。役割は [`ApprovalPolicy`] で作成時に
+/// 「誰が承認できるか」へ解決し、解決先を [`ApprovalCard`] に固定する
+/// （作成後の代表の変更では動かない。ADR 0002「承認カードを作るときに承認者を決める」）。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+pub enum Decider {
+    /// 指名した1人。
+    Member(MemberId),
+    /// 役割（例: 代表）。作成時に解決できなければカードは作れない。
+    Role(ApproverRole),
+}
+
+/// ワークスペースごとの承認の設定（ADR 0002）。既定は「依頼者が承認者を
+/// 兼ねてよい」（既存の合成データ・デモの requester == decider を壊さない）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct ApprovalPolicy {
+    /// 依頼者が承認者を兼ねてよいか（ADR 0002）。`false` なら、承認者が依頼者に
+    /// 解決されるカード（指名・役割のどちらも）は作れない。
+    pub allow_requester_as_decider: bool,
+    /// 役割「代表」を持つメンバー（[`Decider::Role`] の解決先）。
+    /// `None` のとき代表を承認者にするカードは作れない。
+    pub representative: Option<MemberId>,
+}
+
+impl Default for ApprovalPolicy {
+    fn default() -> Self {
+        Self {
+            allow_requester_as_decider: true,
+            representative: None,
+        }
+    }
+}
+
+/// 承認者の指定（[`Decider`]）を「誰が承認できるか」に解決する（ADR 0002）。
+/// 指名した1人ならその人、役割なら [`ApprovalPolicy`] の対応する人
+/// （代表）。解決できなければ `None`（代表が未設定など）。
+/// カード作成時だけ使い、解決先は [`ApprovalCard::decider`] に固定する。
+#[must_use]
+pub fn resolve_decider(decider: &Decider, policy: &ApprovalPolicy) -> Option<MemberId> {
+    match decider {
+        Decider::Member(member) => Some(member.clone()),
+        Decider::Role(ApproverRole::Representative) => policy.representative.clone(),
+    }
+}
 
 /// コメント保存 API のパス。
 pub const COMMENTS_PATH: &str = "/v1/approvals/{card_id}/comments";
@@ -114,9 +192,12 @@ pub struct ApprovalCard {
     /// 依頼した人（04 §2 の `tasks` の source message を出した人に当たる）。
     /// 判断待ち一覧の「自分の依頼」タブの判定に使う。
     pub requester: MemberId,
-    /// 誰の判断待ちか（ADR 0002 の承認者。`action_kind` が `AgentHandoff` の
-    /// カードでは引き継ぎ先の担当に当たる）。判断待ち一覧の
-    /// 「自分の判断待ち」タブの判定に使う。承認 API での身元検査は #86 の範囲。
+    /// 誰の判断待ちか（ADR 0002 の承認者。作成時に決めた1人）。指名した1人、
+    /// または役割を作成時に解決した人（当時の代表）。`action_kind` が `AgentHandoff`
+    /// のカードでは引き継ぎ先の担当に当たる。判断待ち一覧の「自分の判断待ち」
+    /// タブの判定に使う。承認 API での身元検査は #86 の範囲。
+    /// 作成後の設定変更（代表の交代）では動かない。承認者の変更は明示的な
+    /// 再割当て（handoff）だけが行う。
     pub decider: MemberId,
     /// 判断の期限（ADR 0002）。判断待ち一覧を期限の近い順へ並べるキー。
     /// 期限切れの状態・通知はこの crate では作らない（別作業）。
@@ -208,6 +289,9 @@ pub struct ApproveOutcome {
 pub enum ApproveError {
     CardNotFound,
     CardIdMismatch,
+    /// 操作した人はこのカードの承認者ではない（ADR 0002・#86）。
+    /// 承認者に解決される人（指名された1人、または役割を持つ人）だけが承認できる。
+    NotDecider,
     /// 画面の版が古い。最新の版を読み直してから承認し直す。
     VersionConflict {
         current_version: u64,
@@ -231,6 +315,7 @@ impl ApproveError {
     pub fn http_status(&self) -> u16 {
         match self {
             Self::CardNotFound => 404,
+            Self::NotDecider => 403,
             Self::CardIdMismatch | Self::IdempotencyKeyReused => 422,
             Self::VersionConflict { .. }
             | Self::SnapshotMismatch
@@ -238,6 +323,19 @@ impl ApproveError {
             | Self::ApprovalInProgress => 409,
         }
     }
+}
+
+/// カード作成（合成データ）の失敗（ADR 0002・#86）。
+/// 作成の経路は HTTP に無く台帳メソッドのみなので、HTTP ステータスとの対応は持たない。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CreateCardError {
+    /// 同じ card_id のカードが既にある。
+    DuplicateCardId,
+    /// 依頼者が承認者を兼ねることは、このワークスペースの設定
+    /// （[`ApprovalPolicy::allow_requester_as_decider`]）で許されていない。
+    RequesterAsDeciderNotAllowed,
+    /// 承認者の役割が解決できない（代表が未設定など）。
+    UnresolvedDeciderRole,
 }
 
 /// コメント保存 API のエラー。
@@ -342,5 +440,18 @@ mod tests {
         // テンプレートのプレフィックスは仕様 04 §3 の approvals の下。
         assert!(comments_path(&card).starts_with("/v1/approvals/"));
         assert!(approve_path(&card).starts_with("/v1/approvals/"));
+    }
+
+    // #86: 役割のワイヤ値（serde のタグと同じ対応）。
+    #[test]
+    fn approver_role_str_round_trips_known_value() {
+        assert_eq!(ApproverRole::Representative.as_str(), "representative");
+        assert_eq!(
+            ApproverRole::parse("representative"),
+            Some(ApproverRole::Representative)
+        );
+        for bad in ["", "Representative", "owner", "member"] {
+            assert_eq!(ApproverRole::parse(bad), None, "{bad:?}");
+        }
     }
 }

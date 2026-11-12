@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mobile · simulated wrap · ja</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Sans+JP:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E6E5E0;--tile:#F8F8F4;--well:#EEEEE9;--ink:#111214;--sub:#5A5852;--mute:#66635B;
+  --acc:#2B36FF;--accw:#E3E5FF;--line:#DEDDD7;--page-bg:#D8D7D0;
+  --caution-fg:#8A5A00;--caution-bg:#F7ECD6;
+}
+*{box-sizing:border-box;margin:0}
+.review-page{min-height:100vh;background:var(--page-bg);color:var(--ink);font:400 14px/22px "Geist","Noto Sans JP",sans-serif;padding:20px 12px 48px}
+.review-head{max-width:400px;margin:0 auto 14px}
+.review-head h1{font:500 18px/24px "Geist","Noto Sans JP"}
+.meta{font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--sub);margin-top:4px}
+.badge-prop{display:inline-flex;font:500 10px/14px "Geist Mono";color:var(--caution-fg);background:var(--caution-bg);border-radius:6px;padding:1px 6px;margin-left:6px}
+.phone{max-width:360px;margin:0 auto;background:var(--tile);border-radius:20px;border:1px solid var(--line);overflow:hidden;box-shadow:0 10px 30px rgba(17,18,20,.08)}
+.top{padding:12px 14px;border-bottom:1px solid var(--well);display:flex;flex-direction:column;gap:8px}
+/* LEGAL: no text-overflow ellipsis; wrap up to 2 lines */
+.pill{display:inline-flex;align-items:flex-start;font:500 11px/16px "Geist Mono","Noto Sans JP";border-radius:8px;padding:4px 8px;max-width:100%;
+  white-space:normal;overflow:visible;text-overflow:clip;
+  display:-webkit-inline-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;
+  /* clamp only as soft max; never ellipsis — overflow visible + wrap */}
+.pill{display:inline-block;white-space:normal;overflow:visible;text-overflow:clip;word-break:break-word;max-width:100%}
+.pill.demo{background:var(--caution-bg);color:var(--caution-fg)}
+.pill-wrap{max-width:148px} /* force wrap at narrow; never ellipsis */
+.narrow-slot{max-width:148px}
+.pill.ai{background:var(--accw);color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc);font-weight:600;padding:2px 6px;border-radius:6px;font-size:10px;line-height:14px;vertical-align:1px}
+.ch{font:500 15px/22px "Geist","Noto Sans JP"}
+.body{padding:14px;display:flex;flex-direction:column;gap:12px}
+.card{background:var(--well);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.card h2{font:500 15px/22px "Geist","Noto Sans JP"}
+.card .lead{font-size:13px;line-height:20px;color:var(--sub)}
+.state-row{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap}
+.state-label{font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute);width:100%}
+/* LEGAL: state-sent-simulated — wrap, never truncate 「（模擬）」 */
+.state-val{font:500 14px/20px "Geist","Noto Sans JP";color:var(--ink);
+  white-space:normal;overflow:visible;text-overflow:clip;word-break:break-word;max-width:100%;
+  background:var(--tile);border-radius:10px;padding:8px 12px;box-shadow:inset 0 0 0 1px var(--line)}
+.notif{margin-top:4px;background:var(--tile);border-radius:12px;padding:10px 12px;border:1px solid var(--line)}
+.notif .t{font:500 12px/18px "Geist","Noto Sans JP";white-space:normal;overflow:visible;text-overflow:clip;word-break:break-word}
+.notif .s{font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute);margin-top:2px}
+.anno{max-width:360px;margin:14px auto 0;font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute)}
+.rule{color:var(--caution-fg);background:var(--caution-bg);border-radius:8px;padding:8px 10px;margin-top:8px}
+</style></head>
+<body><div class="review-page">
+<header class="review-head"><h1>狭い幅 · （模擬）折り返し<span class="badge-prop">提案</span></h1>
+<p class="meta">360px · S00 banner + S04 sent-simulated · ja · no ellipsis</p></header>
+<div class="phone">
+  <div class="top">
+    <span class="pill demo pill-wrap" data-ftl="banner-demo-mock">デモ・模擬応答</span>
+    <div class="ch"># 案件B · 送信承認</div>
+  </div>
+  <div class="body">
+    <div class="card" aria-label="S04 sent simulated">
+      <h2>顧客への返信案</h2>
+      <p class="lead">承認後の状態表示。製品状態は sent_awaiting_reply。文言だけデモ専用。</p>
+      <div class="state-row">
+        <div class="state-label">状態</div>
+        <div class="state-val narrow-slot" data-ftl="state-sent-simulated">送信済み（模擬）</div>
+      </div>
+      <div class="notif" aria-label="notification sample">
+        <div class="t narrow-slot" data-ftl="state-sent-simulated">送信済み（模擬）</div>
+        <div class="s">通知でも「（模擬）」を落とさない</div>
+      </div>
+    </div>
+  </div>
+</div>
+<p class="anno">規則：text-overflow:ellipsis 禁止。狭い幅は2行まで折り返す。「（模擬）」を省略しない。</p>
+<p class="anno rule">LEGAL 2026-11-09 · via lead</p>
+</div></body></html>

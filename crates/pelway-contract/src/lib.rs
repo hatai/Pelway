@@ -35,3 +35,4 @@ pub mod pseudonym;
 pub mod snapshot;
 pub mod store;
 pub mod task;
+pub mod trace;

@@ -23,8 +23,8 @@
 //!
 //! # まだ決まらないこと（このモジュールでは扱わない）
 //!
-//! - 承認 API での承認者の身元検査は #86、承認期限が切れたときの状態と通知は
-//!   別作業。ここは一覧の判定と並べ替えだけを行う。
+//! - 承認期限が切れたときの状態と通知は別作業。ここは一覧の判定と並べ替えだけを
+//!   行う。承認 API での承認者の身元検査は #86（`ApprovalLedger::approve`）。
 
 use crate::approval::ApprovalCard;
 use crate::ids::{CardId, ChannelId, MemberId};
@@ -60,7 +60,7 @@ pub struct InboxItem {
     pub state: TaskState,
     /// 依頼した人。
     pub requester: MemberId,
-    /// 誰の判断待ちか（承認者。引き継ぎでは受け取る担当）。
+    /// 誰の判断待ちか（承認者。作成時に決めた1人。引き継ぎでは受け取る担当）。
     pub decider: MemberId,
     /// 判断の期限（なければ `None`）。
     pub deadline: Option<TsMs>,
@@ -110,6 +110,7 @@ const fn is_awaiting_person(state: TaskState) -> bool {
 /// `cards` は呼び出し側が範囲（workspace 等）を絞ったものを渡す
 /// （[`crate::ledger::ApprovalLedger::inbox`] が workspace で絞って渡す）。
 /// 一覧用のデータは保存せず、渡されたカードからその場で組み立てる。
+/// カードの承認者は作成時に決まった1人（ADR 0002・#86）なので、判定は比較だけ。
 #[must_use]
 pub fn build_inbox<'a, I>(member: &MemberId, cards: I) -> Inbox
 where
@@ -328,7 +329,7 @@ mod tests {
                 card_id: "card-live".into(),
                 payload: card("card-live", TaskState::AwaitingSendApproval).payload,
                 requester: ME.into(),
-                decider: ME.into(),
+                decider: crate::approval::Decider::Member(ME.into()),
                 deadline: Some(10_000),
             })
             .expect("new card");
@@ -340,12 +341,16 @@ mod tests {
         // 承認すると「自分の判断待ち」から消え、「自分の依頼」の進み具合が変わる。
         let c = ledger.card(&"card-live".into()).unwrap();
         ledger
-            .approve(crate::approval::ApproveRequest {
-                card_id: "card-live".into(),
-                card_version: c.card_version,
-                snapshot_hash: c.snapshot_hash.clone(),
-                idempotency_key: IdempotencyKey::new("test-key-inbox-000001").expect("valid key"),
-            })
+            .approve(
+                crate::approval::ApproveRequest {
+                    card_id: "card-live".into(),
+                    card_version: c.card_version,
+                    snapshot_hash: c.snapshot_hash.clone(),
+                    idempotency_key: IdempotencyKey::new("test-key-inbox-000001")
+                        .expect("valid key"),
+                },
+                &ME.into(),
+            )
             .expect("approve");
 
         let after = ledger.inbox(&"ws-synthetic-inbox".into(), &ME.into());
@@ -371,7 +376,7 @@ mod tests {
                     card_id: id.into(),
                     payload: card(id, TaskState::AwaitingSendApproval).payload,
                     requester: ME.into(),
-                    decider: ME.into(),
+                    decider: crate::approval::Decider::Member(ME.into()),
                     deadline: None,
                 })
                 .expect("new card");

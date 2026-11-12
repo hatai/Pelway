@@ -2,9 +2,10 @@
 #![cfg(feature = "serde")]
 
 use pelway_contract::approval::{
-    ApproveError, ApproveRequest, COMMENT_MAX_CHARS, CommentError, CommentSaved, comment_len,
-    validate_comment,
+    ApprovalPolicy, ApproveError, ApproveRequest, ApproverRole, COMMENT_MAX_CHARS, CommentError,
+    CommentSaved, Decider, comment_len, validate_comment,
 };
+use pelway_contract::ids::MemberId;
 use pelway_contract::member::{ChannelMember, MemberKind};
 use pelway_contract::task::TaskState;
 
@@ -163,4 +164,87 @@ fn comment_limit_is_importable_and_counts_code_points() {
     );
     let json = serde_json::to_string(&CommentError::TooLong { max_chars: 4000 }).unwrap();
     assert_eq!(json, r#"{"code":"too_long","max_chars":4000}"#);
+}
+
+// #86: 承認者の指定（カード作成時のみ使う Decider。指名した1人・役割）と
+// 承認の設定のワイヤ形式。カード自体の decider は作成時に解決した MemberId。
+#[test]
+fn decider_wire_shape_member_and_role() {
+    let member = Decider::Member(MemberId::from("m-1"));
+    let json = serde_json::to_string(&member).unwrap();
+    assert_eq!(json, r#"{"member":"m-1"}"#);
+    assert_eq!(
+        serde_json::from_str::<Decider>(&json).unwrap(),
+        member,
+        "指名した1人は往復する"
+    );
+
+    let role = Decider::Role(ApproverRole::Representative);
+    let json = serde_json::to_string(&role).unwrap();
+    assert_eq!(json, r#"{"role":"representative"}"#);
+    assert_eq!(
+        serde_json::from_str::<Decider>(&json).unwrap(),
+        role,
+        "役割（代表）は往復する"
+    );
+
+    // 未知の役割・未知の形は拒否（未知タグ・両方指定・空）。
+    for bad in [
+        r#"{"role":"owner"}"#,
+        r#"{"member":"m-1","role":"representative"}"#,
+        r#"{}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<Decider>(bad).is_err(),
+            "{bad} は拒否する"
+        );
+    }
+}
+
+// #86: not_decider エラーのタグ（403）。
+#[test]
+fn not_decider_error_is_tagged_by_code() {
+    let json = serde_json::to_string(&ApproveError::NotDecider).unwrap();
+    assert_eq!(json, r#"{"code":"not_decider"}"#);
+    assert_eq!(
+        serde_json::from_str::<ApproveError>(&json).unwrap(),
+        ApproveError::NotDecider
+    );
+    assert_eq!(ApproveError::NotDecider.http_status(), 403);
+}
+
+// #86: 承認の設定（ワークスペース）。allow_requester_as_decider は必須、
+// representative の欠落は `None` と同じ扱い、未知フィールドは拒否。
+#[test]
+fn approval_policy_wire_shape_and_defaults() {
+    let json = serde_json::to_string(&ApprovalPolicy::default()).unwrap();
+    assert_eq!(
+        json,
+        r#"{"allow_requester_as_decider":true,"representative":null}"#
+    );
+    assert_eq!(
+        serde_json::from_str::<ApprovalPolicy>(&json).unwrap(),
+        ApprovalPolicy::default()
+    );
+    let with_rep = serde_json::to_string(&ApprovalPolicy {
+        allow_requester_as_decider: false,
+        representative: Some(MemberId::from("m-rep")),
+    })
+    .unwrap();
+    assert_eq!(
+        with_rep,
+        r#"{"allow_requester_as_decider":false,"representative":"m-rep"}"#
+    );
+    let no_rep: ApprovalPolicy =
+        serde_json::from_str(r#"{"allow_requester_as_decider":true}"#).unwrap();
+    assert_eq!(no_rep.representative, None);
+    for bad in [
+        r#"{"representative":null}"#,
+        r#"{"allow_requester_as_decider":true,"representative":null,"extra":1}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<ApprovalPolicy>(bad).is_err(),
+            "{bad} は拒否する"
+        );
+    }
 }

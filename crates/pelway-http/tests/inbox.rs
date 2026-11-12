@@ -6,6 +6,7 @@ use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 
+use pelway_contract::approval::Decider;
 use pelway_contract::ids::{CardId, MemberId, WorkspaceId};
 use pelway_contract::ledger::{ApprovalLedger, NewCard};
 use pelway_contract::snapshot::ActionPayload;
@@ -33,7 +34,7 @@ fn new_card(id: &str, decider: &str, requester: &str, deadline: Option<TsMs>) ->
             scope: Vec::new(),
         },
         requester: MemberId::from(requester),
-        decider: MemberId::from(decider),
+        decider: Decider::Member(MemberId::from(decider)),
         deadline,
     }
 }
@@ -166,7 +167,7 @@ fn inbox_reflects_state_changes_in_the_ledger() {
             idempotency_key: pelway_contract::ids::IdempotencyKey::new("test-key-http-inbox-0001")
                 .expect("valid key"),
         };
-        ledger.approve(req).expect("approve");
+        ledger.approve(req, &MemberId::from(ME)).expect("approve");
     }
 
     let (status, after) = get_inbox(addr, ME);

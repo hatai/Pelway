@@ -9,7 +9,8 @@
 //! 戻し、もう一度押されたら同じキーで確認し直す（新しい送信をしない）。
 //!
 //! 409 の `version_conflict`・`snapshot_mismatch`・`not_awaiting_approval`（と
-//! `card_not_found`）は自動で再送しない。読み直し（[`ApprovalMachine::reload`]）を
+//! 404 `card_not_found`）、403 `not_decider`（操作した人が承認者でない。#86）は
+//! 自動で再送しない。読み直し（[`ApprovalMachine::reload`]）を
 //! 求める状態に移し、次の承認は新しいキーで行う。
 //! 422 の `idempotency_key_reused`・`card_id_mismatch` はクライアントの不具合として
 //! 扱い、再送しない。
@@ -79,6 +80,10 @@ pub enum ReloadReason {
     NotAwaitingApproval { state: TaskState },
     /// カードが見つからない。
     CardNotFound,
+    /// 操作した人がカードの承認者ではなかった（403。ADR 0002・#86）。
+    /// 読み直しても承認者は変わらないが、再送を止めるために読み直し状態へ移す
+    /// （UI はこのアカウントでは承認できないことを示す）。
+    NotDecider,
 }
 
 /// クライアントの不具合の内容（422 系）。
@@ -289,6 +294,7 @@ impl<K: KeySource, C: Clock> ApprovalMachine<K, C> {
                     self.enter_needs_reload(ReloadReason::NotAwaitingApproval { state })
                 }
                 ApproveError::CardNotFound => self.enter_needs_reload(ReloadReason::CardNotFound),
+                ApproveError::NotDecider => self.enter_needs_reload(ReloadReason::NotDecider),
                 ApproveError::IdempotencyKeyReused => {
                     let reason = BugReason::IdempotencyKeyReused;
                     self.phase = Phase::ClientBug {

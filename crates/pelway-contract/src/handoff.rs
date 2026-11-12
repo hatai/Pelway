@@ -237,6 +237,7 @@ pub enum HandoffDecision {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::approval::Decider;
     use crate::ids::{CardId, MemberId};
     use crate::ledger::{ApprovalLedger, NewCard};
     use crate::member::MemberKind;
@@ -286,7 +287,7 @@ mod tests {
                 scope: vec!["tickets:write".to_owned()],
             },
             requester: member("m-human-1"),
-            decider: member(decider),
+            decider: Decider::Member(member(decider)),
             deadline: None,
         }
     }

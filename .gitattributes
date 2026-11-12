@@ -6,6 +6,12 @@ skills-lock.json linguist-generated=true
 .github/workflows/actions.lock linguist-generated=true
 .agents/skills/** linguist-generated=true
 .claude/skills/** linguist-generated=true
+# 型生成の結果（生成物。UPDATE_GOLDEN=1 で作り直せる）。
+crates/dev-client-probe/bindings/** linguist-generated=true
+# Claude Design の書き出しと検査ツールの結果（生成物。docs/design-system/tokens/README.md 参照）。
+docs/design-system/tokens/pelway.tokens.json linguist-generated=true
+docs/design-system/tokens/check-result.json linguist-generated=true
+docs/design-system/tokens/check-v4-result.json linguist-generated=true
 # このリポジトリで書いている skill はベンダー扱いにせず、行数に数え、差分も折りたたまない。
 .agents/skills/implement-issue/** -linguist-generated
 .agents/skills/review-pr/** -linguist-generated

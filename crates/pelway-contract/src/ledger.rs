@@ -20,8 +20,8 @@
 use std::collections::HashMap;
 
 use crate::approval::{
-    ApprovalCard, ApproveError, ApproveOutcome, ApproveRequest, CardComment, CommentError,
-    CommentSaved, SaveCommentRequest, validate_comment,
+    ApprovalCard, ApprovalPolicy, ApproveError, ApproveOutcome, ApproveRequest, CardComment,
+    CommentError, CommentSaved, CreateCardError, Decider, SaveCommentRequest, validate_comment,
 };
 use crate::handoff::{
     HandoffDecision, HandoffError, HandoffNotification, HandoffRecord, HandoffRefusal,
@@ -45,8 +45,8 @@ pub struct NewCard {
     pub payload: ActionPayload,
     /// 依頼した人（「自分の依頼」タブの判定）。
     pub requester: MemberId,
-    /// 誰の判断待ちか（承認者。`AgentHandoff` では引き継ぎ先の担当）。
-    pub decider: MemberId,
+    /// 誰の判断待ちか（承認者。指名した1人または役割。`AgentHandoff` では引き継ぎ先の担当）。
+    pub decider: Decider,
     /// 判断の期限（並べ替えのキー。期限切れの状態は作らない）。
     pub deadline: Option<TsMs>,
 }
@@ -125,6 +125,11 @@ pub struct ApprovalLedger {
     send_log: Vec<SimulatedSendRecord>,
     /// カードごとの受け渡し記録（#89）。古い順に並ぶ。
     handoff_log: HashMap<CardId, Vec<HandoffRecord>>,
+    /// ワークスペースごとの承認の設定（ADR 0002・#86）。承認者の解決と
+    /// 「依頼者が承認者を兼ねてよいか」の検査に使う。**カード作成時だけ**参照し、
+    /// 既存カードの承認者（作成時に固定）には影響しない。
+    /// 未設定のワークスペースは既定（[`ApprovalPolicy::default`]）。
+    policies: HashMap<WorkspaceId, ApprovalPolicy>,
     next_comment: u64,
     next_send: u64,
     next_handoff: u64,
@@ -136,10 +141,52 @@ impl ApprovalLedger {
         Self::default()
     }
 
-    /// カードを「送信承認待ち」・版 1 で作る。同じ ID が既にあれば `None`。
-    pub fn create_card(&mut self, new: NewCard) -> Option<&ApprovalCard> {
+    /// ワークスペース `workspace_id` の承認の設定（ADR 0002）を指定して作る。
+    #[must_use]
+    pub fn with_policy(workspace_id: &WorkspaceId, policy: ApprovalPolicy) -> Self {
+        let mut ledger = Self::default();
+        ledger.set_policy(workspace_id, policy);
+        ledger
+    }
+
+    /// ワークスペース `workspace_id` の承認の設定（ADR 0002）を差し替える。
+    /// **既存カードの承認者には影響しない**（承認者はカード作成時に解決して固定
+    /// する。ADR 0002）。この差し替えは以降のカード作成の解決（役割→代表）にだけ
+    /// 効く。ほかのワークスペースの設定も変えない（設定は workspace ごと）。
+    pub fn set_policy(&mut self, workspace_id: &WorkspaceId, policy: ApprovalPolicy) {
+        self.policies.insert(workspace_id.clone(), policy);
+    }
+
+    /// ワークスペース `workspace_id` の現在の承認の設定。
+    /// 未設定なら既定（[`ApprovalPolicy::default`]）。
+    #[must_use]
+    pub fn policy(&self, workspace_id: &WorkspaceId) -> ApprovalPolicy {
+        self.policies.get(workspace_id).cloned().unwrap_or_default()
+    }
+
+    /// カードを「送信承認待ち」・版 1 で作る。同じ ID が既にあれば
+    /// [`CreateCardError::DuplicateCardId`]。
+    /// 承認者（`decider`）はここで解決してカードに固定する（ADR 0002）:
+    /// 指名した1人ならその人、役割なら**カードのワークスペース**の作成時点の代表。
+    /// 役割が解決できなければ [`CreateCardError::UnresolvedDeciderRole`]。
+    /// 依頼者が承認者に解決され、設定（[`ApprovalPolicy::allow_requester_as_decider`]）が
+    /// 兼ねることを許さなければ [`CreateCardError::RequesterAsDeciderNotAllowed`]（#86）。
+    ///
+    /// # Errors
+    /// 上のとおり。エラーのときは台帳の状態を変えない。
+    pub fn create_card(&mut self, new: NewCard) -> Result<&ApprovalCard, CreateCardError> {
         if self.cards.contains_key(&new.card_id) {
-            return None;
+            return Err(CreateCardError::DuplicateCardId);
+        }
+        // 設定はカードのワークスペースのものを使う（workspace ごとの設定）。
+        let policy = self.policy(&new.workspace_id);
+        // 承認者を作成時に解決して固定する（以後、設定を変えても動かない）。
+        let decider = crate::approval::resolve_decider(&new.decider, &policy)
+            .ok_or(CreateCardError::UnresolvedDeciderRole)?;
+        // 依頼者が承認者を兼ねてよいかはワークスペースの設定で決める（ADR 0002・#86）。
+        // 役割が依頼者に解決される場合も兼ねているのと同じ扱い。
+        if !policy.allow_requester_as_decider && decider == new.requester {
+            return Err(CreateCardError::RequesterAsDeciderNotAllowed);
         }
         let snapshot_hash = compute_snapshot_hash(&new.payload);
         let card = ApprovalCard {
@@ -151,12 +198,12 @@ impl ApprovalLedger {
             snapshot_hash,
             state: TaskState::AwaitingSendApproval,
             requester: new.requester,
-            decider: new.decider,
+            decider,
             deadline: new.deadline,
             comments: Vec::new(),
             simulated_send_id: None,
         };
-        Some(self.cards.entry(new.card_id).or_insert(card))
+        Ok(self.cards.entry(new.card_id).or_insert(card))
     }
 
     #[must_use]
@@ -212,6 +259,13 @@ impl ApprovalLedger {
         member_kind: MemberKind,
         req: SaveCommentRequest,
     ) -> Result<CommentSaved, CommentError> {
+        // #103: 承認カードからの一連の処理に、カードから決まる共通の trace id を付ける。
+        let span = tracing::info_span!(
+            "save_comment",
+            trace_id = %crate::trace::trace_id_for_card(&req.card_id),
+            card = %req.card_id,
+        );
+        let _guard = span.enter();
         let card = self
             .cards
             .get_mut(&req.card_id)
@@ -239,13 +293,36 @@ impl ApprovalLedger {
 
     /// 承認の前半。冪等キーを確かめ、検査に通ったら送信前にキーを「処理中」で記録する。
     ///
-    /// 検査順：冪等キーの既存記録 → カードの存在 → 版 → snapshot hash → 状態。
+    /// 検査順：カードの存在 → 操作者の身元（承認者か。ADR 0002・#86）→ 冪等キーの
+    /// 既存記録 → 版 → snapshot hash → 状態。操作者が承認者でなければ
+    /// [`ApproveError::NotDecider`]（403）で、キーも記録しない。
     ///
     /// # Errors
     /// [`ApproveError`] のいずれか。エラーのときは何も送らず、キーも記録しない
     /// （既存の記録は変えない）。
-    pub fn begin_approve(&mut self, req: &ApproveRequest) -> Result<BeginApproval, ApproveError> {
+    pub fn begin_approve(
+        &mut self,
+        req: &ApproveRequest,
+        operator: &MemberId,
+    ) -> Result<BeginApproval, ApproveError> {
+        // #103: 承認の前半にも同じ trace id（カードから決まる）。
+        let span = tracing::info_span!(
+            "begin_approve",
+            trace_id = %crate::trace::trace_id_for_card(&req.card_id),
+            card = %req.card_id,
+        );
+        let _guard = span.enter();
         let binding = ApprovalBinding::of(req);
+        // カードの存在を先に確かめる（身元・キー・版より前。ADR 0002・#86）。
+        if !self.cards.contains_key(&req.card_id) {
+            return Err(ApproveError::CardNotFound);
+        }
+        // 操作した人がカードの承認者か（ADR 0002・#86）。承認者はカード作成時に
+        // 解決して固定した1人なので、比較はそれだけでよい。冪等キーの検査より前で
+        // 断るので、承認者でない人はキーのリプレイ（完了済み結果の再取得）もできない。
+        if self.cards[&req.card_id].decider != *operator {
+            return Err(ApproveError::NotDecider);
+        }
         if let Some(entry) = self.idempotency.get(&req.idempotency_key) {
             if entry.binding != binding {
                 return Err(ApproveError::IdempotencyKeyReused);
@@ -298,6 +375,13 @@ impl ApprovalLedger {
         &mut self,
         ticket: SendTicket,
     ) -> Result<ApproveOutcome, ApproveError> {
+        // #103: 承認の後半にも同じ trace id。チケット（予約）のカードから決める。
+        let span = tracing::info_span!(
+            "perform_simulated_send",
+            trace_id = %crate::trace::trace_id_for_card(&ticket.binding.card_id),
+            card = %ticket.binding.card_id,
+        );
+        let _guard = span.enter();
         let card = self
             .cards
             .get_mut(&ticket.binding.card_id)
@@ -338,6 +422,13 @@ impl ApprovalLedger {
     /// ライブラリ部では呼ばれないため、テスト専用として許可する。
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn abort_before_send(&mut self, ticket: SendTicket) {
+        // #103: 送信前の中止にも同じ trace id。
+        let span = tracing::info_span!(
+            "abort_before_send",
+            trace_id = %crate::trace::trace_id_for_card(&ticket.binding.card_id),
+            card = %ticket.binding.card_id,
+        );
+        let _guard = span.enter();
         self.idempotency.remove(&ticket.key);
         if let Some(card) = self.cards.get_mut(&ticket.binding.card_id)
             && card.state == TaskState::Sending
@@ -347,11 +438,25 @@ impl ApprovalLedger {
     }
 
     /// 明示的な承認（[`Self::begin_approve`] → [`Self::perform_simulated_send`]）。
+    /// `operator` は操作した人の身元（#86）。カードの承認者でなければ
+    /// [`ApproveError::NotDecider`] で断る。
     ///
     /// # Errors
     /// [`ApproveError`] のいずれか。
-    pub fn approve(&mut self, req: ApproveRequest) -> Result<ApproveOutcome, ApproveError> {
-        match self.begin_approve(&req)? {
+    pub fn approve(
+        &mut self,
+        req: ApproveRequest,
+        operator: &MemberId,
+    ) -> Result<ApproveOutcome, ApproveError> {
+        // #103: 承認の全体にも同じ trace id。内側の begin_approve・
+        // perform_simulated_send の span はこの span の下に並ぶ。
+        let span = tracing::info_span!(
+            "approve",
+            trace_id = %crate::trace::trace_id_for_card(&req.card_id),
+            card = %req.card_id,
+        );
+        let _guard = span.enter();
+        match self.begin_approve(&req, operator)? {
             BeginApproval::Replay(outcome) => Ok(outcome),
             BeginApproval::Reserved(ticket) => self.perform_simulated_send(ticket),
         }
@@ -398,6 +503,7 @@ impl ApprovalLedger {
         now: TsMs,
     ) -> Result<HandoffDecision, HandoffError> {
         // 1. 検査（4xx）。ここで断った要求はカードも記録も変えない。
+        //    承認者はカード作成時に固定した1人（ADR 0002）なので素直に比較する。
         let card = self
             .cards
             .get_mut(&req.card_id)
@@ -520,9 +626,14 @@ mod tests {
             card_id: id.into(),
             payload: payload(),
             requester: "m-human-1".into(),
-            decider: "m-human-1".into(),
+            decider: Decider::Member("m-human-1".into()),
             deadline: None,
         }
+    }
+
+    /// テストのカードの承認者（`new_card` が指名した人）。
+    fn decider() -> MemberId {
+        "m-human-1".into()
     }
 
     fn ledger_with_card(id: &str) -> ApprovalLedger {
@@ -564,7 +675,7 @@ mod tests {
     }
 
     fn reserve(ledger: &mut ApprovalLedger, req: &ApproveRequest) -> SendTicket {
-        match ledger.begin_approve(req).expect("reserved") {
+        match ledger.begin_approve(req, &decider()).expect("reserved") {
             BeginApproval::Reserved(t) => t,
             BeginApproval::Replay(_) => panic!("expected a reservation"),
         }
@@ -630,7 +741,9 @@ mod tests {
         comment(&mut ledger, "card-1", "本文に追記してから送って");
         comment(&mut ledger, "card-1", "宛先も確認済み");
         // コメント前の画面の hash のまま承認できる。
-        let out = ledger.approve(approve_req("card-1", 1, &pre, "a")).unwrap();
+        let out = ledger
+            .approve(approve_req("card-1", 1, &pre, "a"), &decider())
+            .unwrap();
         assert_eq!(out.state, TaskState::SentAwaitingReply);
         assert_eq!(ledger.send_log().len(), 1);
         assert_eq!(ledger.send_log()[0].snapshot_hash, pre);
@@ -640,7 +753,7 @@ mod tests {
     fn comment_after_send_is_rejected_and_does_not_resend() {
         let mut ledger = ledger_with_card("card-1");
         let req = current_req(&ledger, "card-1", "a");
-        let out = ledger.approve(req.clone()).unwrap();
+        let out = ledger.approve(req.clone(), &decider()).unwrap();
         let before = hash_of(&ledger, "card-1");
         let res = ledger.save_comment(
             "m-human-1".into(),
@@ -662,7 +775,7 @@ mod tests {
         assert!(ledger.card(&"card-1".into()).unwrap().comments.is_empty());
         assert_eq!(ledger.send_log().len(), 1);
         // 同じキーの再送は最初の結果のまま。
-        assert_eq!(ledger.approve(req).unwrap(), out);
+        assert_eq!(ledger.approve(req, &decider()).unwrap(), out);
         assert_eq!(ledger.send_log().len(), 1);
     }
 
@@ -707,7 +820,8 @@ mod tests {
         let blank = " \n ".to_owned();
         let over = "あ".repeat(COMMENT_MAX_CHARS + 1);
         let mut sent = ledger_with_card("card-1");
-        sent.approve(current_req(&sent, "card-1", "a")).unwrap();
+        sent.approve(current_req(&sent, "card-1", "a"), &decider())
+            .unwrap();
         let mut sending = ledger_with_card("card-2");
         let sending_req = current_req(&sending, "card-2", "a");
         let _ticket = reserve(&mut sending, &sending_req);
@@ -813,7 +927,9 @@ mod tests {
     #[test]
     fn approve_sends_once_with_stable_id_and_sent_awaiting_reply() {
         let mut ledger = ledger_with_card("card-1");
-        let out = ledger.approve(current_req(&ledger, "card-1", "a")).unwrap();
+        let out = ledger
+            .approve(current_req(&ledger, "card-1", "a"), &decider())
+            .unwrap();
         assert_eq!(out.state, TaskState::SentAwaitingReply);
         assert_eq!(out.card_version, 2);
         assert_eq!(out.simulated_send_id.as_str(), "sim-00000001");
@@ -838,12 +954,12 @@ mod tests {
             Ok(2)
         );
         let h = hash_of(&ledger, "card-1");
-        let stale = ledger.approve(approve_req("card-1", 1, &h, "a"));
+        let stale = ledger.approve(approve_req("card-1", 1, &h, "a"), &decider());
         assert_eq!(
             stale,
             Err(ApproveError::VersionConflict { current_version: 2 })
         );
-        let future = ledger.approve(approve_req("card-1", 9, &h, "b"));
+        let future = ledger.approve(approve_req("card-1", 9, &h, "b"), &decider());
         assert_eq!(
             future,
             Err(ApproveError::VersionConflict { current_version: 2 })
@@ -890,7 +1006,7 @@ mod tests {
     #[test]
     fn snapshot_mismatch_is_rejected_and_sends_nothing() {
         let mut ledger = ledger_with_card("card-1");
-        let res = ledger.approve(approve_req("card-1", 1, "sha256:wrong", "a"));
+        let res = ledger.approve(approve_req("card-1", 1, "sha256:wrong", "a"), &decider());
         assert_eq!(res, Err(ApproveError::SnapshotMismatch));
         assert!(ledger.send_log().is_empty());
     }
@@ -901,7 +1017,7 @@ mod tests {
     fn conflict_409_before_send_releases_the_key() {
         let mut ledger = ledger_with_card("card-1");
         let h = hash_of(&ledger, "card-1");
-        let res = ledger.approve(approve_req("card-1", 7, &h, "a"));
+        let res = ledger.approve(approve_req("card-1", 7, &h, "a"), &decider());
         assert_eq!(res.as_ref().unwrap_err().http_status(), 409);
         assert!(ledger.idempotency_state(&key("a")).is_none());
         assert_eq!(
@@ -909,7 +1025,9 @@ mod tests {
             TaskState::AwaitingSendApproval
         );
         // クライアントは 409 のあと読み直し、新しいキーで承認する（クライアントの規則）。
-        let out = ledger.approve(current_req(&ledger, "card-1", "b")).unwrap();
+        let out = ledger
+            .approve(current_req(&ledger, "card-1", "b"), &decider())
+            .unwrap();
         assert_eq!(ledger.send_log().len(), 1);
         // 解放されたキー a は何にも結び付いていない。
         assert!(ledger.idempotency_state(&key("a")).is_none());
@@ -925,8 +1043,16 @@ mod tests {
         // （クライアントは新しいキーを作る規則。これはサーバー側の性質の確認。）
         let mut ledger = ledger_with_card("card-1");
         let h = hash_of(&ledger, "card-1");
-        assert!(ledger.approve(approve_req("card-1", 7, &h, "a")).is_err());
-        assert!(ledger.approve(approve_req("card-1", 1, &h, "a")).is_ok());
+        assert!(
+            ledger
+                .approve(approve_req("card-1", 7, &h, "a"), &decider())
+                .is_err()
+        );
+        assert!(
+            ledger
+                .approve(approve_req("card-1", 1, &h, "a"), &decider())
+                .is_ok()
+        );
         assert_eq!(ledger.send_log().len(), 1);
     }
 
@@ -935,11 +1061,11 @@ mod tests {
         let mut ledger = ledger_with_card("card-1");
         let req = current_req(&ledger, "card-1", "a");
         // 1 回目：送信は成功したが、応答がクライアントに届かなかった（結果を捨てる）。
-        let first = ledger.approve(req.clone()).unwrap();
+        let first = ledger.approve(req.clone(), &decider()).unwrap();
         assert_eq!(ledger.send_log().len(), 1);
         // クライアントは同じキーで送り直す。2 回目の送信は起きず、同じ結果が返る。
         for _ in 0..5 {
-            assert_eq!(ledger.approve(req.clone()).unwrap(), first);
+            assert_eq!(ledger.approve(req.clone(), &decider()).unwrap(), first);
         }
         assert_eq!(ledger.send_log().len(), 1);
         assert_eq!(first.simulated_send_id.as_str(), "sim-00000001");
@@ -959,12 +1085,12 @@ mod tests {
             TaskState::Sending
         );
         // 処理中に同じキー・同じ内容で再送：409 の処理中、送信しない。
-        let retry = ledger.approve(req.clone());
+        let retry = ledger.approve(req.clone(), &decider());
         assert_eq!(retry, Err(ApproveError::ApprovalInProgress));
         assert_eq!(retry.unwrap_err().http_status(), 409);
         assert!(ledger.send_log().is_empty());
         // 処理中に別のキーで承認：送信承認待ちではないので拒否、送信しない。
-        let other = ledger.approve(req_with_key(&req, "b"));
+        let other = ledger.approve(req_with_key(&req, "b"), &decider());
         assert_eq!(
             other,
             Err(ApproveError::NotAwaitingApproval {
@@ -975,7 +1101,7 @@ mod tests {
         assert!(ledger.send_log().is_empty());
         // 最初の処理が終わると、同じキーの再送は最初の結果を返す。
         let out = ledger.perform_simulated_send(ticket).unwrap();
-        assert_eq!(ledger.approve(req).unwrap(), out);
+        assert_eq!(ledger.approve(req, &decider()).unwrap(), out);
         assert_eq!(ledger.send_log().len(), 1);
     }
 
@@ -994,7 +1120,7 @@ mod tests {
         let mut other = req.clone();
         other.snapshot_hash = "sha256:other".to_owned();
         assert_eq!(
-            ledger.approve(other),
+            ledger.approve(other, &decider()),
             Err(ApproveError::IdempotencyKeyReused)
         );
         assert_eq!(
@@ -1009,7 +1135,7 @@ mod tests {
         let mut ledger = ledger_with_card("card-1");
         ledger.create_card(new_card("card-2")).unwrap();
         let req = current_req(&ledger, "card-1", "a");
-        let first = ledger.approve(req.clone()).unwrap();
+        let first = ledger.approve(req.clone(), &decider()).unwrap();
 
         let mut other_card = current_req(&ledger, "card-2", "a");
         other_card.card_version = req.card_version;
@@ -1019,7 +1145,7 @@ mod tests {
         other_hash.snapshot_hash = "sha256:other".to_owned();
 
         for bad in [other_card, other_version, other_hash] {
-            let res = ledger.approve(bad);
+            let res = ledger.approve(bad, &decider());
             // 前の結果を返さずに断る。
             assert_eq!(res, Err(ApproveError::IdempotencyKeyReused));
             assert_eq!(res.unwrap_err().http_status(), 422);
@@ -1049,7 +1175,7 @@ mod tests {
         );
         assert!(ledger.send_log().is_empty());
         // 何も送っていないので、同じ内容でもう一度承認できる。
-        assert!(ledger.approve(req).is_ok());
+        assert!(ledger.approve(req, &decider()).is_ok());
         assert_eq!(ledger.send_log().len(), 1);
     }
 
@@ -1057,15 +1183,17 @@ mod tests {
     fn second_approval_with_new_key_never_sends_twice() {
         let mut ledger = ledger_with_card("card-1");
         let h = hash_of(&ledger, "card-1");
-        ledger.approve(approve_req("card-1", 1, &h, "a")).unwrap();
+        ledger
+            .approve(approve_req("card-1", 1, &h, "a"), &decider())
+            .unwrap();
         // 同時に開いていた別画面（古い版）からの承認。
-        let stale = ledger.approve(approve_req("card-1", 1, &h, "b"));
+        let stale = ledger.approve(approve_req("card-1", 1, &h, "b"), &decider());
         assert_eq!(
             stale,
             Err(ApproveError::VersionConflict { current_version: 2 })
         );
         // 最新の版を読み直しても、送信済みなので受け付けない。
-        let fresh = ledger.approve(current_req(&ledger, "card-1", "c"));
+        let fresh = ledger.approve(current_req(&ledger, "card-1", "c"), &decider());
         assert_eq!(
             fresh,
             Err(ApproveError::NotAwaitingApproval {
@@ -1079,8 +1207,12 @@ mod tests {
     fn simulated_send_ids_are_unique_per_card() {
         let mut ledger = ledger_with_card("card-1");
         ledger.create_card(new_card("card-2")).unwrap();
-        let a = ledger.approve(current_req(&ledger, "card-1", "a")).unwrap();
-        let b = ledger.approve(current_req(&ledger, "card-2", "b")).unwrap();
+        let a = ledger
+            .approve(current_req(&ledger, "card-1", "a"), &decider())
+            .unwrap();
+        let b = ledger
+            .approve(current_req(&ledger, "card-2", "b"), &decider())
+            .unwrap();
         assert_ne!(a.simulated_send_id, b.simulated_send_id);
     }
 
@@ -1088,7 +1220,7 @@ mod tests {
     fn unknown_card_and_path_mismatch_are_rejected() {
         let mut ledger = ledger_with_card("card-1");
         let h = hash_of(&ledger, "card-1");
-        let res = ledger.approve(approve_req("card-x", 1, &h, "a"));
+        let res = ledger.approve(approve_req("card-x", 1, &h, "a"), &decider());
         assert_eq!(res, Err(ApproveError::CardNotFound));
         assert!(ledger.idempotency_state(&key("a")).is_none());
         let req = approve_req("card-1", 1, &h, "b");
@@ -1125,7 +1257,448 @@ mod tests {
         let mut ledger = ledger_with_card("card-1");
         let mut dup = new_card("card-1");
         dup.payload = payload_v2();
-        assert!(ledger.create_card(dup).is_none());
+        assert_eq!(
+            ledger.create_card(dup).unwrap_err(),
+            CreateCardError::DuplicateCardId
+        );
         assert_eq!(ledger.card(&"card-1".into()).unwrap().payload, payload());
+    }
+
+    // ---- #86: 承認者の身元と権限 ----
+
+    /// 承認者を指名した1人にしたカードと、役割（代表）にしたカード。
+    fn card_with_decider(id: &str, decider: Decider) -> NewCard {
+        NewCard {
+            decider,
+            ..new_card(id)
+        }
+    }
+
+    /// 代表を m-human-rep にした設定。
+    fn policy_with_representative() -> ApprovalPolicy {
+        ApprovalPolicy {
+            allow_requester_as_decider: true,
+            representative: Some("m-human-rep".into()),
+        }
+    }
+
+    // #86 のやること1 + レビュー2 (PR #119): 承認者は作成時に解決してカードに
+    // 固定する (ADR 0002「承認カードを作るときに承認者を決める」)。
+    // 指名した1人ならその人、役割なら作成時点の代表。カードは解決後の1人を持ち、
+    // 作成後の代表の変更 (set_policy) でも差し替わらない。承認者の変更は明示的な
+    // 再割当て (handoff) だけが行う。
+    #[test]
+    fn create_card_resolves_the_decider_at_creation() {
+        let mut ledger =
+            ApprovalLedger::with_policy(&"ws-synthetic".into(), policy_with_representative());
+        ledger
+            .create_card(card_with_decider(
+                "card-member",
+                Decider::Member("m-human-2".into()),
+            ))
+            .expect("new card");
+        ledger
+            .create_card(card_with_decider(
+                "card-role",
+                Decider::Role(crate::approval::ApproverRole::Representative),
+            ))
+            .expect("new card");
+        assert_eq!(
+            ledger.card(&"card-member".into()).unwrap().decider,
+            "m-human-2".into(),
+            "指名した1人はそのまま承認者になる"
+        );
+        assert_eq!(
+            ledger.card(&"card-role".into()).unwrap().decider,
+            "m-human-rep".into(),
+            "役割は作成時の代表に解決される"
+        );
+        // 作成後に代表を変えても、既存カードの承認者は作成時のまま動かない。
+        ledger.set_policy(
+            &"ws-synthetic".into(),
+            ApprovalPolicy {
+                allow_requester_as_decider: true,
+                representative: Some("m-human-new-rep".into()),
+            },
+        );
+        assert_eq!(
+            ledger.card(&"card-role".into()).unwrap().decider,
+            "m-human-rep".into(),
+            "代表の変更が既存カードの承認者を差し替えない"
+        );
+    }
+
+    // #86 のやること2・4: 承認者でない人の承認（依頼者を含む）は拒否され、何も送らない。
+    #[test]
+    fn approve_by_non_decider_is_rejected_and_sends_nothing() {
+        let mut ledger = ApprovalLedger::new();
+        ledger
+            .create_card(card_with_decider(
+                "card-1",
+                Decider::Member("m-human-2".into()),
+            ))
+            .expect("new card");
+        let req = current_req(&ledger, "card-1", "a");
+        let before = card_summary(&ledger, "card-1");
+        // m-human-1 は依頼者（new_card の requester）だが承認者ではない。
+        let res = ledger.approve(req, &"m-human-1".into());
+        assert_eq!(res, Err(ApproveError::NotDecider));
+        assert_eq!(res.unwrap_err().http_status(), 403);
+        // 状態は変わらない。送信記録も冪等キーの記録も無い。
+        assert_eq!(card_summary(&ledger, "card-1"), before);
+        assert_eq!(
+            ledger.card(&"card-1".into()).unwrap().state,
+            TaskState::AwaitingSendApproval
+        );
+        assert!(ledger.send_log().is_empty());
+        assert!(ledger.idempotency_state(&key("a")).is_none());
+        // 指名された人なら承認できる。
+        ledger
+            .approve(current_req(&ledger, "card-1", "b"), &"m-human-2".into())
+            .expect("decider can approve");
+        assert_eq!(ledger.send_log().len(), 1);
+    }
+
+    // #86: 役割（代表）を承認者にしたカードは、代表だけが承認できる。
+    #[test]
+    fn role_decider_allows_only_the_representative() {
+        let mut ledger =
+            ApprovalLedger::with_policy(&"ws-synthetic".into(), policy_with_representative());
+        ledger
+            .create_card(card_with_decider(
+                "card-role",
+                Decider::Role(crate::approval::ApproverRole::Representative),
+            ))
+            .expect("new card");
+        let req = current_req(&ledger, "card-role", "a");
+        // 代表でない人は拒否。
+        assert_eq!(
+            ledger.approve(req.clone(), &"m-human-1".into()),
+            Err(ApproveError::NotDecider)
+        );
+        assert!(ledger.send_log().is_empty());
+        // レビュー2 (PR #119): 作成後に代表が変わっても、承認できるのは
+        // カード作成時の代表だけ（承認者は作成時に固定。ADR 0002）。
+        ledger.set_policy(
+            &"ws-synthetic".into(),
+            ApprovalPolicy {
+                allow_requester_as_decider: true,
+                representative: Some("m-human-new-rep".into()),
+            },
+        );
+        assert_eq!(
+            ledger.approve(req.clone(), &"m-human-new-rep".into()),
+            Err(ApproveError::NotDecider),
+            "新しい代表では承認できない"
+        );
+        // 作成時の代表なら承認できる。
+        ledger
+            .approve(req, &"m-human-rep".into())
+            .expect("the representative at card creation can approve");
+        assert_eq!(ledger.send_log().len(), 1);
+    }
+
+    // #86: 承認済みキーのリプレイも、承認者でなければ 403（キーの検査より前）。
+    #[test]
+    fn non_decider_cannot_replay_completed_key() {
+        let mut ledger = ApprovalLedger::new();
+        ledger
+            .create_card(card_with_decider(
+                "card-1",
+                Decider::Member("m-human-2".into()),
+            ))
+            .expect("new card");
+        let req = current_req(&ledger, "card-1", "a");
+        let out = ledger.approve(req.clone(), &"m-human-2".into()).unwrap();
+        // 他人が同じキー・同じ内容で送り直しても最初の結果を返さない。
+        assert_eq!(
+            ledger.approve(req.clone(), &"m-human-1".into()),
+            Err(ApproveError::NotDecider)
+        );
+        assert_eq!(ledger.send_log().len(), 1);
+        // 承認済みキー「a」の再送はリプレイとして同じ結果を返す。
+        let replay = ledger.approve(req, &"m-human-2".into()).unwrap();
+        assert_eq!(replay, out);
+        assert_eq!(ledger.send_log().len(), 1);
+    }
+
+    // #86 のやること3: 依頼者が承認者を兼ねてよいかはワークスペースの設定で切り替える。
+    // 指名・役割のどちらでも、承認者が依頼者に解決されるカードが対象。
+    #[test]
+    fn requester_as_decider_policy_toggles_card_creation() {
+        // 兼ねてよい（既定）: 依頼者を承認者にしたカードを作れる。
+        let mut allowed = ApprovalLedger::new();
+        assert!(
+            allowed
+                .policy(&"ws-synthetic".into())
+                .allow_requester_as_decider
+        );
+        allowed.create_card(new_card("card-ok")).expect("new card");
+
+        // 兼ねてはならない: 依頼者に解決されるカードは作れない。
+        let mut ledger = ApprovalLedger::with_policy(
+            &"ws-synthetic".into(),
+            ApprovalPolicy {
+                allow_requester_as_decider: false,
+                representative: Some("m-human-rep".into()),
+            },
+        );
+        assert_eq!(
+            ledger.create_card(new_card("card-self")).unwrap_err(),
+            CreateCardError::RequesterAsDeciderNotAllowed
+        );
+        assert!(ledger.card(&"card-self".into()).is_none());
+        // 依頼者と承認者が別なら作れる。
+        let mut other = new_card("card-other");
+        other.decider = Decider::Member("m-human-2".into());
+        ledger.create_card(other).expect("new card");
+        // 役割が依頼者に解決される場合も兼ねているのと同じ。
+        let mut rep_self = new_card("card-rep-self");
+        rep_self.requester = "m-human-rep".into();
+        rep_self.decider = Decider::Role(crate::approval::ApproverRole::Representative);
+        assert_eq!(
+            ledger.create_card(rep_self).unwrap_err(),
+            CreateCardError::RequesterAsDeciderNotAllowed
+        );
+    }
+
+    // #86: 役割が解決できない（代表が未設定）カードは作れない。
+    #[test]
+    fn unresolved_role_cannot_create_card() {
+        let mut ledger = ApprovalLedger::new();
+        assert!(
+            ledger
+                .policy(&"ws-synthetic".into())
+                .representative
+                .is_none()
+        );
+        assert_eq!(
+            ledger
+                .create_card(card_with_decider(
+                    "card-role",
+                    Decider::Role(crate::approval::ApproverRole::Representative),
+                ))
+                .unwrap_err(),
+            CreateCardError::UnresolvedDeciderRole
+        );
+        assert!(ledger.card(&"card-role".into()).is_none());
+    }
+
+    // レビュー3 (PR #119): ApprovalPolicy は workspace ごとの設定。あるワークスペースの
+    // 代表・兼任可否が、同じ台帳の別ワークスペースで作るカードに適用されない。
+    #[test]
+    fn policies_are_scoped_per_workspace() {
+        let mut ledger = ApprovalLedger::new();
+        // ws-a だけ設定（代表 m-rep-a・依頼者の兼任不可）。ws-b は無設定（既定）。
+        ledger.set_policy(
+            &"ws-a".into(),
+            ApprovalPolicy {
+                allow_requester_as_decider: false,
+                representative: Some("m-rep-a".into()),
+            },
+        );
+        // ws-a: 役割カードは ws-a の代表に解決される。
+        let mut role_a = card_with_decider(
+            "card-role-a",
+            Decider::Role(crate::approval::ApproverRole::Representative),
+        );
+        role_a.workspace_id = "ws-a".into();
+        ledger.create_card(role_a).expect("new card");
+        assert_eq!(
+            ledger.card(&"card-role-a".into()).unwrap().decider,
+            "m-rep-a".into()
+        );
+        // ws-b: 役割カードは解決できない（ws-a の代表は使われない）。
+        let mut role_b = card_with_decider(
+            "card-role-b",
+            Decider::Role(crate::approval::ApproverRole::Representative),
+        );
+        role_b.workspace_id = "ws-b".into();
+        assert_eq!(
+            ledger.create_card(role_b).unwrap_err(),
+            CreateCardError::UnresolvedDeciderRole,
+            "別ワークスペースの代表で解決しない"
+        );
+        // ws-b: 依頼者＝承認者のカードは作れる（既定は兼任可。ws-a の不可は適用されない）。
+        let mut self_b = new_card("card-self-b");
+        self_b.workspace_id = "ws-b".into();
+        ledger.create_card(self_b).expect("ws-b は既定のまま兼任可");
+        // ws-a: 依頼者＝承認者のカードは拒否される。
+        let mut self_a = new_card("card-self-a");
+        self_a.workspace_id = "ws-a".into();
+        assert_eq!(
+            ledger.create_card(self_a).unwrap_err(),
+            CreateCardError::RequesterAsDeciderNotAllowed
+        );
+    }
+
+    // ---- tracing: 承認カードからの一連の処理で共通の trace id（#103） ----
+
+    /// テストバイナリ全体で一度だけ大域の subscriber（中身のない [`Registry`]）を設定する。
+    ///
+    /// span の macro は大域にキャッシュした callsite の interest を先に見る。ほかの
+    /// テストスレッドが subscriber 無しで同じ callsite を先に評価すると「無効」が
+    /// キャッシュされ、このテストの `with_default` 側で span が作られなくなる
+    /// （実行順で結果が変わる）。大域に実subscriber を置いておけば、interest の評価が
+    /// 常に「無効」で終わらず、スレッドごとの `with_default` が正しく効く。
+    ///
+    /// [`Registry`]: tracing_subscriber::registry::Registry
+    fn install_global_test_registry() {
+        use std::sync::OnceLock;
+        static GLOBAL: OnceLock<()> = OnceLock::new();
+        GLOBAL.get_or_init(|| {
+            let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry());
+        });
+    }
+
+    /// テスト用の span 記録器。span の名前と `trace_id`・`card` フィールドを取る。
+    /// （テキスト整形に依存せず、意味的な値を直接確かめる。）
+    #[derive(Default, Clone)]
+    struct SpanCapture {
+        spans: std::sync::Arc<std::sync::Mutex<Vec<(String, String, String)>>>,
+    }
+
+    impl SpanCapture {
+        fn take(&self) -> Vec<(String, String, String)> {
+            self.spans.lock().expect("span capture lock").clone()
+        }
+    }
+
+    struct CaptureFields {
+        trace_id: String,
+        card: String,
+    }
+
+    impl tracing::field::Visit for CaptureFields {
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            match field.name() {
+                "trace_id" => self.trace_id = value.to_owned(),
+                "card" => self.card = value.to_owned(),
+                _ => {}
+            }
+        }
+
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            // `%`（Display）で記録したフィールドは Debug 経由で届く。
+            match field.name() {
+                "trace_id" => self.trace_id = format!("{value:?}"),
+                "card" => self.card = format!("{value:?}"),
+                _ => {}
+            }
+        }
+    }
+
+    impl<S> tracing_subscriber::Layer<S> for SpanCapture
+    where
+        S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    {
+        fn on_new_span(
+            &self,
+            attrs: &tracing::span::Attributes<'_>,
+            _id: &tracing::span::Id,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            let mut fields = CaptureFields {
+                trace_id: String::new(),
+                card: String::new(),
+            };
+            attrs.record(&mut fields);
+            self.spans.lock().expect("span capture lock").push((
+                attrs.metadata().name().to_owned(),
+                fields.trace_id,
+                fields.card,
+            ));
+        }
+    }
+
+    /// #103 の受け入れ条件: コメント保存も承認（予約・疑似送信を含む）も、
+    /// 同じカードならすべて同じ trace id の span に載る。
+    #[test]
+    fn approval_chain_spans_share_trace_id_per_card() {
+        install_global_test_registry();
+        let capture = SpanCapture::default();
+        {
+            use tracing_subscriber::layer::SubscriberExt;
+            let subscriber = tracing_subscriber::registry().with(capture.clone());
+            tracing::subscriber::with_default(subscriber, || {
+                let mut ledger = ApprovalLedger::new();
+                ledger.create_card(new_card("card-a")).expect("new card");
+                ledger.create_card(new_card("card-b")).expect("new card");
+
+                comment(&mut ledger, "card-a", "宛先を確認しました");
+                let approve_request = current_req(&ledger, "card-a", "k1");
+                ledger
+                    .approve(approve_request, &decider())
+                    .expect("approved");
+                comment(&mut ledger, "card-b", "先方に問い合わせ中");
+            });
+        }
+
+        let spans = capture.take();
+        assert!(
+            !spans.is_empty(),
+            "承認まわりの操作で span が 1 つも出ていない"
+        );
+        let expected_a = crate::trace::trace_id_for_card(&"card-a".into()).to_string();
+        let expected_b = crate::trace::trace_id_for_card(&"card-b".into()).to_string();
+        assert_ne!(expected_a, expected_b);
+
+        // すべての span が trace_id と card を持つ。
+        for (name, trace_id, card) in &spans {
+            assert!(!trace_id.is_empty(), "{name} に trace_id が無い");
+            assert!(!card.is_empty(), "{name} に card が無い");
+        }
+
+        // card-a: コメント保存・承認の全体・予約・疑似送信が同じ trace id。
+        for phase in [
+            "save_comment",
+            "approve",
+            "begin_approve",
+            "perform_simulated_send",
+        ] {
+            let phase_spans: Vec<&(String, String, String)> = spans
+                .iter()
+                .filter(|(name, _, card)| name == phase && card == "card-a")
+                .collect();
+            assert_eq!(phase_spans.len(), 1, "{phase} の span が {phase_spans:?}");
+            assert_eq!(
+                phase_spans[0].1, expected_a,
+                "{phase} の trace_id が導出値と違う"
+            );
+        }
+
+        // card-b のコメント保存は別の trace id。
+        let card_b = spans
+            .iter()
+            .find(|(name, _, card)| name == "save_comment" && card == "card-b")
+            .expect("card-b の save_comment span");
+        assert_eq!(card_b.1, expected_b);
+    }
+
+    /// 送信前の中止（`abort_before_send`）も同じカードの trace id を載せる。
+    #[test]
+    fn abort_before_send_shares_the_card_trace_id() {
+        install_global_test_registry();
+        let capture = SpanCapture::default();
+        {
+            use tracing_subscriber::layer::SubscriberExt;
+            let subscriber = tracing_subscriber::registry().with(capture.clone());
+            tracing::subscriber::with_default(subscriber, || {
+                let mut ledger = ledger_with_card("card-a");
+                let req = current_req(&ledger, "card-a", "k1");
+                let ticket = reserve(&mut ledger, &req);
+                ledger.abort_before_send(ticket);
+            });
+        }
+        let spans = capture.take();
+        let expected = crate::trace::trace_id_for_card(&"card-a".into()).to_string();
+        for phase in ["begin_approve", "abort_before_send"] {
+            assert!(
+                spans.iter().any(|(name, trace_id, card)| name == phase
+                    && card == "card-a"
+                    && *trace_id == expected),
+                "{phase} の span が {spans:?} に無い"
+            );
+        }
     }
 }

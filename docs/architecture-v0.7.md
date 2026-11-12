@@ -2,7 +2,7 @@
 
 状態：統合版 v0.7 本文の図解。設計であり、実装・導入・接続済みではない。実外部I/Oは無効（S1の実装検証待ち）。
 
-根拠（v0.7パッケージ `delivery-v0.7/body/` 内のファイル名。このリポジトリには未収録）：01-architecture.md、02-stack-comparison.md、03-ai-bot-runtime.md、04-data-api-realtime.md、08-decisions-open.md、10-domestic-only.md、11-integrations.md。
+根拠（[v0.7本文](technical/v0.7/body/)内のファイル。01-architecture.md、02-stack-comparison.md、03-ai-bot-runtime.md、04-data-api-realtime.md、08-decisions-open.md、10-domestic-only.md、11-integrations.md）。
 
 ## 1. 全体構成
 
@@ -20,7 +20,7 @@ flowchart LR
   DB[("PostgreSQL + sqlx<br/>正本・outbox・監査")]
   FILE[("ファイル保存<br/>添付・成果物・Botメモリ・backup")]
   RUN["runner<br/>リース・手順の再開"]
-  LLM["LLM gateway<br/>スタブ / llama.cpp（第一候補）"]
+  LLM["LLM gateway<br/>スタブ / 提供元のAPI（BYOK）"]
   CTRL["sandbox起動controller"]
   SB["タスクsandbox<br/>秘密なし・外へ出られない"]
   GW["連携gateway<br/>権限・秘密・通信policy / MCP: rmcp（条件付き）"]

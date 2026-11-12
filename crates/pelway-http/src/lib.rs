@@ -20,6 +20,8 @@
 //! - 認証は無い（デモ用）。comments/approve の要求者は合成ヘッダー
 //!   （`x-pelway-member-id`、`x-pelway-member-kind`。値は仕様 04 §2 の
 //!   `human|bot|external_agent|external_tool`）で受ける。
+//!   approve では操作した人がカードの承認者（ADR 0002。指名した1人または役割）
+//!   であることを台帳が確かめ、違えば 403 `not_decider` で断る（#86）。
 //!   QA-GDPR-02 の仮経路では、**合成の利用者 ID を引数（要求本文・クエリの
 //!   `actor`）で受け取る**（開発リードの仮の決め方 2026-11-10。ヘッダーや環境から
 //!   本人を推定しない）。
@@ -82,6 +84,7 @@ use pelway_contract::store::{
 use serde::Serialize;
 
 pub mod log;
+pub mod trace;
 
 // GDPR-07「本文を残さないログ」の検証（QA 用）。もともと tests/no_body_logs.rs の
 // 結合テストだったが、r3 で `Logger::with_sink` をクレート外に公開しない形にした
@@ -856,6 +859,7 @@ fn approve_error_code(e: &pelway_contract::approval::ApproveError) -> log::Code 
     match e {
         E::CardNotFound => log::Code::CardNotFound,
         E::CardIdMismatch => log::Code::CardIdMismatch,
+        E::NotDecider => log::Code::NotDecider,
         E::VersionConflict { .. } => log::Code::VersionConflict,
         E::SnapshotMismatch => log::Code::SnapshotMismatch,
         E::NotAwaitingApproval { .. } => log::Code::NotAwaitingApproval,
@@ -930,6 +934,20 @@ fn handle_approve(
     ledger: &SharedLedger,
     logger: &log::Logger,
 ) -> Response {
+    // 認証は無い（デモ用）。合成ヘッダーで承認する人を受ける（#86）。
+    // 台帳がカードの承認者であることを確かめ、違えば 403 で断る。
+    let Some(member_id) = header(req, MEMBER_ID_HEADER).filter(|v| !v.is_empty()) else {
+        return bad_request();
+    };
+    let Some(kind) = header(req, MEMBER_KIND_HEADER) else {
+        return bad_request();
+    };
+    // 種類は仕様 04 §2 の 4 値（MemberKind::parse が serde のワイヤ値と同じ対応を持つ）。
+    // 承認の身元検査（承認者との一致）は member_id だけで行う。kind は形式だけ検証する。
+    let Some(_member_kind) = MemberKind::parse(kind) else {
+        return bad_request();
+    };
+
     let Ok(approve_req) = serde_json::from_slice::<ApproveRequest>(&req.body) else {
         return bad_request();
     };
@@ -944,7 +962,8 @@ fn handle_approve(
             // 冪等リプレイ（再送）では send_log が増えない。この要求で新しい
             // 疑似送信が行われたときだけ承認・模擬送信の出来事を出す。
             let sends_before = ledger.send_log().len();
-            match ledger.approve(approve_req) {
+            let operator = MemberId::from(member_id);
+            match ledger.approve(approve_req, &operator) {
                 Ok(outcome) => {
                     if ledger.send_log().len() > sends_before {
                         let card_pid = logger.id(outcome.card_id.as_str());
