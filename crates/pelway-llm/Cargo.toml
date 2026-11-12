@@ -1,0 +1,27 @@
+[package]
+# LLMゲートウェイ（下書き）。提供元の OpenAI 互換 API を rig-core で呼ぶ（ADR 0008、#95）。
+# rig-core はこの crate の内側に隠し、chat completions と embeddings だけに使う。
+# エージェント・ツール・streaming にはrigを使わない。提供元の自動切替はしない。
+name = "pelway-llm"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Draft LLM gateway for Pelway: OpenAI-compatible chat and embeddings behind a Pelway trait, rig-core hidden inside. Not a fixed schema."
+
+[dependencies]
+# rig-core 0.46（hatai が選定。比較: docs/research/rust-llm-client-comparison.md、ADR 0008）。
+# ライセンス: MIT。MSRV 1.97.1 のため、ワークスペースのツールチェーンを 1.99.1 に上げている。
+# 既定の feature（derive・rustls）は使わない: トランスポートは Pelway 側で作った
+# reqwest::Client を渡すため、共有クライアント（feature "reqwest"）も要らない。
+# エラーの分類（error.rs）が ProviderError から pelway 側の型への写すために使う。
+rig-core = { version = "=0.46.0", default-features = false }
+# エラー分類で transport エラー（reqwest::Error の is_connect 等）を調べるために
+# 直接依存する。rig-reqwest と同じ 0.13 系。TLS は rustls のみ。
+# ライセンス: MIT OR Apache-2.0。
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+# スキーマ指定（serde_json::Value）と応答の JSON 扱い。
+serde_json = "1"
+
+[dev-dependencies]
+# 単体試験で ProviderError::Url の構築に使う（rig-core と同じ 2 系）。
+url = "2"
