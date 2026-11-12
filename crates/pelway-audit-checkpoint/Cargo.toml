@@ -9,7 +9,7 @@ description = "Draft signed checkpoints for the Pelway audit log hash chain (C2S
 
 [dependencies]
 # 署名行・ハッシュ行の base64（RFC 4648・パディングあり。正規形以外は弾く）。
-base64 = "0.22"
+base64 = "0.23"
 # チェックポイントの署名（RFC 8032 Ed25519）。既定の機能に zeroize が入る。
 # rand_core 機能で SigningKey::generate（OS 乱数源からの鍵生成）が使える。
 ed25519-dalek = { version = "2", features = ["rand_core"] }
@@ -20,6 +20,6 @@ sha2 = { version = "0.10", default-features = false }
 
 [dev-dependencies]
 # 署名行の素材をテストで組み立てるための base64（本体と同じ版）。
-base64 = "0.22"
+base64 = "0.23"
 # 有効な公開鍵の素材（NoteVerifier::from_public_key の引数）をテストで作る。
 ed25519-dalek = { version = "2", features = ["rand_core"] }
