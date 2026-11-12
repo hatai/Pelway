@@ -4871,6 +4871,7 @@ version = "0.0.0"
 dependencies = [
  "aes-gcm",
  "futures",
+ "getrandom 0.4.3",
  "hkdf 0.12.4",
  "object_store",
  "sha2 0.10.9",
