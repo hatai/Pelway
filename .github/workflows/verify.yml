@@ -2,10 +2,16 @@
 # ローカルの公式確認（mise run verify）と同じ検査を GitHub-hosted runner で回す。
 # 方針は docs/dev-environment.md に従う:
 #   - ツールのバージョンは mise.toml / mise.lock が単一の管理元（Rust 1.96.0、hk 2.11.1 等）
-#   - mise の導入は公式 Action（jdx/mise-action）。リモートキャッシュ（GitHub Actions cache・S3）
-#     は mbx / Cargo と同じ方針で設定しない（mise-action も cache: false）
-#   - CI では mise bootstrap（apt:podman・sudo）を実行しない。クライアントビルド用の libfontconfig1-dev は両ジョブで apt-get により入れる
+#   - mise の導入は公式 Action（jdx/mise-action）。mise-action のツールキャッシュは
+#     復元内容を mise.lock と突き合わせないため使わない（cache: false）。cargo の
+#     レジストリとビルド成果物だけは actions/cache で保存する
+#   - CI では mise bootstrap（apt:podman・sudo）を実行しない。クライアントビルド用の libfontconfig1-dev は
+#     cargo をビルドするジョブで apt-get により入れる
 #   - fnox-check は fnox list（定義一覧の確認）だけで、秘密値の取得・表示はしない
+#   - 検査は mise.toml の verify-lint / verify-test / verify-static の 3 グループに分ける。CI でも
+#     同じグループを 1 ジョブずつ走らせ、cargo でコンパイルするグループを 2 つに絞ることで
+#     依存クレートの二重コンパイルを避ける（cargo は target を共有するため、同じジョブで
+#     clippy と test を走らせると同じ依存を 2 回コンパイルすることになる）
 
 name: verify
 
@@ -23,11 +29,56 @@ concurrency:
   group: verify-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # CI だけで効く cargo / mise の設定（ローカルの開発環境には影響させない）。
+  #
+  # - CARGO_INCREMENTAL=0: 1 回きりのビルドでは incremental は無駄なオーバーヘッドになる。
+  # - CARGO_PROFILE_DEV_DEBUG=0 / CARGO_PROFILE_TEST_DEBUG=0: debuginfo の生成とリンクを
+  #   省いてビルドを短縮する。検査の中身（clippy の警告もテストの結果も）は変わらない。
+  # - MISE_RUST_MR_BOXINGTON=0: CI では mbx を使わず素の cargo にする。mbx は target を
+  #   ~/.cache/mbx への symlink にするため、下の actions/cache で target を保存できない。
+  # - CARGO_TARGET_DIR: ビルド成果物の置き場所。mbx の symlink 先が変わってもキャッシュが
+  #   壊れないよう、target とは別の固定の場所に置く。
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  MISE_RUST_MR_BOXINGTON: "0"
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target-ci
+  # crates.io の取得設定は mise.toml の [env] にも同じ値を置いてある（CI ではない
+  # コンテキストでも cargo を直接呼ぶため、ここにも置く）。
+  CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_NET_RETRY: "10"
+
 jobs:
+  # 品質ゲート。static / lint / test の 3 ジョブがすべて成功した場合だけ成功する。
+  # ジョブ名は PR の必須チェック名として使うため "mise run verify" のままにする
+  # （docs/agents/grokbot-runbook.md と .agents/skills/review-pr/SKILL.md が参照する）。
   verify:
     name: mise run verify
+    needs: [static, lint, test]
+    if: always()
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 5
+    steps:
+      - name: Check results
+        env:
+          STATIC_RESULT: ${{ needs.static.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          echo "static=$STATIC_RESULT lint=$LINT_RESULT test=$TEST_RESULT"
+          for result in "$STATIC_RESULT" "$LINT_RESULT" "$TEST_RESULT"; do
+            if [ "$result" != "success" ]; then
+              echo "::error::検査ジョブが成功していません（static=$STATIC_RESULT lint=$LINT_RESULT test=$TEST_RESULT）"
+              exit 1
+            fi
+          done
+
+  # cargo を伴わない検査。待ち時間は短い（ツール導入を含めても 1 分程度）。
+  static:
+    name: static (hk / fnox / pitchfork)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Checkout
         # タグ参照。コミット sha は .github/workflows/actions.lock で固定する（v4.2.2）。
@@ -35,16 +86,6 @@ jobs:
         uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
-
-      # クライアント（yeslogic-fontconfig-sys など）のビルドに必要な Linux システムパッケージ。
-      # GitHub-hosted ubuntu-24.04 には fontconfig.pc が無い。今回足りなかった
-      # libfontconfig1-dev を入れる（noble では libfontconfig-dev を引く移行パッケージ）。
-      # mise bootstrap（apt:podman）は docs/dev-environment.md の CI 方針どおり使わない。
-      - name: Install Linux native dependencies for client builds
-        # runner の名前解決が一時的に失敗することがあるので、apt に取得の再試行をさせる。
-        run: |
-          sudo apt-get -o Acquire::Retries=5 update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends libfontconfig1-dev
 
       # mise 公式 Action で mise 本体の導入とツールの導入を行う（curl / インストーラ不使用）。
       # - version: mise 本体を 2026.11.5 に固定（mise.toml の min_version を満たす検証済みバージョン）
@@ -68,26 +109,147 @@ jobs:
       - name: Trust project config
         run: mise trust
 
-      # llvm-tools-preview が mise install 時点で入っていることを確認する。
-      # 欠けていればここで失敗し、後続コマンド中の暗黙の rustup 自動ダウンロードには頼らない。
-      - name: Assert llvm-tools-preview is present
-        run: mise run toolchain-check
-
       # workflow / composite action の静的 lint（jactionlint は mise.toml で 2.5.0 をピン）。
       # --online は使わない。問題があればこの時点で fail させる（速い検査を先に）。
       - name: Lint workflows (jactionlint)
         run: mise exec -- jactionlint
 
-      # ローカルと同じ一括確認: fmt-check / check / clippy / test / build /
-      # toolchain-check / hk-validate / hk-check / fnox-check / pitchfork-check
-      - name: Verify (mise run verify)
-        run: mise run verify
+      # hk / fnox / pitchfork の検査。cargo を伴わないためビルド成果物のキャッシュは不要。
+      - name: Verify (mise run verify-static)
+        run: mise run verify-static
+
+  # 整形と clippy。clippy は型検査も行うため、cargo check は別に走らせない。
+  lint:
+    name: lint (fmt / clippy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+
+      # クライアント（yeslogic-fontconfig-sys など）のビルドに必要な Linux システムパッケージ。
+      # GitHub-hosted ubuntu-24.04 には fontconfig.pc が無い。今回足りなかった
+      # libfontconfig1-dev を入れる（noble では libfontconfig-dev を引く移行パッケージ）。
+      # mise bootstrap（apt:podman）は docs/dev-environment.md の CI 方針どおり使わない。
+      - name: Install Linux native dependencies for client builds
+        # runner の名前解決が一時的に失敗することがあるので、apt に取得の再試行をさせる。
+        run: |
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends libfontconfig1-dev
+
+      - name: Setup mise (official action)
+        uses: jdx/mise-action@v2.4.4
+        with:
+          version: v2026.11.5
+          install: true
+          install_args: --locked
+          cache: false
+
+      - name: Assert mise version
+        run: mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
+
+      - name: Trust project config
+        run: mise trust
+
+      # 依存クレートのダウンロードとビルド成果物のキャッシュ。cargo の registry と
+      # target-ci を対象にする。キーに Cargo.lock と mise.toml のハッシュを入れるため、
+      # 依存やツールのバージョンが変わったら新しいキャッシュになる。
+      # crates.io の取得キャッシュ。3 つの cargo ジョブで共有する（target は別）。
+      - name: Restore cargo registry cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      # ビルド成果物のキャッシュ。clippy と test は成果物が別なのでジョブごとに分ける。
+      - name: Restore build cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: target-ci
+          key: ${{ runner.os }}-cargo-target-${{ github.job }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-${{ github.job }}-
+
+      # 依存クレートはビルド前に 1 回だけ取得する。取得の一時失敗（crates.io の障害など）が
+      # 数分のビルドの途中で起きるのを避けるため。取得は cargo の設定
+      # （CARGO_HTTP_MULTIPLEXING=false / CARGO_NET_RETRY）で再試行する。
+      - name: Fetch dependencies
+        run: mise run fetch
+
+      # ローカルと同じ検査: fmt-check / clippy / toolchain-check / hk-validate
+      - name: Verify (mise run verify-lint)
+        run: mise run verify-lint
+
+  # テスト。cargo test は cargo build と同じ成果物を作るため、build は別に走らせない。
+  test:
+    name: test (cargo test)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install Linux native dependencies for client builds
+        run: |
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends libfontconfig1-dev
+
+      - name: Setup mise (official action)
+        uses: jdx/mise-action@v2.4.4
+        with:
+          version: v2026.11.5
+          install: true
+          install_args: --locked
+          cache: false
+
+      - name: Assert mise version
+        run: mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
+
+      - name: Trust project config
+        run: mise trust
+
+      # crates.io の取得キャッシュ。3 つの cargo ジョブで共有する（target は別）。
+      - name: Restore cargo registry cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      # ビルド成果物のキャッシュ。clippy と test は成果物が別なのでジョブごとに分ける。
+      - name: Restore build cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: target-ci
+          key: ${{ runner.os }}-cargo-target-${{ github.job }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-${{ github.job }}-
+
+      # 依存クレートはビルド前に 1 回だけ取得する。取得の一時失敗（crates.io の障害など）が
+      # 数分のビルドの途中で起きるのを避けるため。取得は cargo の設定
+      # （CARGO_HTTP_MULTIPLEXING=false / CARGO_NET_RETRY）で再試行する。
+      - name: Fetch dependencies
+        run: mise run fetch
+
+      # ローカルと同じ検査: test / script-test
+      - name: Verify (mise run verify-test)
+        run: mise run verify-test
 
   # カバレッジの増減計測（octocov）。品質ゲート（verify ジョブ）とは独立に走らせる:
-  #   - verify はローカルの mise run verify と完全に同じコマンドのまま保つ
-  #   - 計測ビルド（-C instrument-coverage）とゲートビルドの target / mbx キャッシュを分離する
+  #   - 計測ビルド（-C instrument-coverage）とゲートビルドの target / キャッシュを分離する
   #   - カバレッジツールの故障で品質ゲートがブロックされないようにする
-  # （テストは2回走るが、ジョブは並列なので PR の待ち時間は増えない）
+  # （ジョブは並列なので PR の待ち時間は増えない）
   coverage:
     name: octocov (coverage diff)
     runs-on: ubuntu-24.04
@@ -97,9 +259,6 @@ jobs:
       # PR へのカバレッジコメント投稿に必要。fork PR の読み取り専用 token では投稿が
       # スキップされるだけで job は落とさない。
       pull-requests: write
-    env:
-      # カバレッジ生成ツールのバージョン（ピン留め）。
-      CARGO_LLVM_COV_VERSION: 0.6.17
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
@@ -137,18 +296,42 @@ jobs:
       - name: Assert llvm-tools-preview is present
         run: mise run toolchain-check
 
-      # cargo-llvm-cov をバージョン指定で導入（--locked で Cargo.lock 通りにビルド）。
-      - name: Install cargo-llvm-cov (pinned)
-        run: |
-          cargo install cargo-llvm-cov --locked --version "$CARGO_LLVM_COV_VERSION"
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      # 計測ビルドはプロファイルが通常と違うため、ゲートビルドとは別のキャッシュにする。
+      # crates.io の取得キャッシュ。3 つの cargo ジョブで共有する（target は別）。
+      - name: Restore cargo registry cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      # ビルド成果物のキャッシュ。clippy と test は成果物が別なのでジョブごとに分ける。
+      - name: Restore build cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: target-ci
+          key: ${{ runner.os }}-cargo-target-${{ github.job }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-${{ github.job }}-
+
+      # 依存クレートはビルド前に 1 回だけ取得する。取得の一時失敗（crates.io の障害など）が
+      # 数分のビルドの途中で起きるのを避けるため。取得は cargo の設定
+      # （CARGO_HTTP_MULTIPLEXING=false / CARGO_NET_RETRY）で再試行する。
+      - name: Fetch dependencies
+        run: mise run fetch
 
       # LCOV 形式でレポートを出す（cargo-llvm-cov が llvm-tools の profdata/cov を駆動）。
       # 出力先 lcov.info は .octocov.yml の coverage.paths と対応する。
       # --no-cfg-coverage を付ける: 既定の --cfg coverage ビルドは、cfg(coverage) で
       # nightly 専用 #![feature] を有効にする依存があると stable の E0554 で失敗するため。
+      # cargo-llvm-cov は mise の [tools] で 0.6.17 をピンし、mise.lock が URL と
+      # checksum で取得物を固定する（ソースからのビルドに 45 秒かかるため、
+      # 事前ビルド済みのバイナリを使う）。
       - name: Generate LCOV (cargo llvm-cov)
-        run: cargo llvm-cov --workspace --locked --no-cfg-coverage --lcov --output-path lcov.info
+        run: mise exec -- cargo llvm-cov --workspace --locked --no-cfg-coverage --lcov --output-path lcov.info
 
       # octocov で PR コメント（増減表示）を作る。レポートの保存・比較は
       # GitHub Actions の artifact のみ（.octocov.yml の diff.storage.artifacts）。

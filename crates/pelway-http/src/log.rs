@@ -161,6 +161,8 @@ impl LogSink for FileSink {
 pub enum Route {
     Comments,
     Approve,
+    /// 受け渡し（#89。Bot → Bot のタスク受け渡し）。
+    Handoffs,
     /// 根拠記録の作成・読取（QA-GDPR-02 の **仮の経路**。経路名は作業ログ参照）。
     BasisRecords,
     /// 根拠記録の撤回（QA-GDPR-02 の仮の経路。撤回は取得と同じ1操作）。
@@ -222,6 +224,10 @@ pub enum Code {
     IdempotencyKeyReused,
     EmptyBody,
     TooLong,
+    /// 受け渡し (#89): 依頼元がカードの現在の担当でない。
+    NotCurrentDecider,
+    /// 受け渡し (#89): 依頼先が依頼元と同じ。
+    SelfHandoff,
     /// 応答は拒否だが対応する結果コードが不明（通常は出ない）。
     Unknown,
 }
@@ -266,6 +272,22 @@ pub enum Event {
     Approved { card: Pseudonym },
     /// 模擬送信した（実外部 I/O は無い。メモリ上の記録のみ）。
     SimulatedSend { card: Pseudonym, send: Pseudonym },
+    /// 受け渡しを受け入れた（#89。依頼元から依頼先へ担当を移した）。
+    /// from・to は仮名化、段数は数値。
+    HandoffAccepted {
+        card: Pseudonym,
+        from: Pseudonym,
+        to: Pseudonym,
+        depth: u32,
+    },
+    /// 受け渡しを拒否した（#89。段数の上限・同じ 2 者の行き来）。
+    /// 担当を依頼者に戻した。拒否理由の安定 ID は出さない（種別は結果で判別可能）。
+    HandoffRefused {
+        card: Pseudonym,
+        from: Pseudonym,
+        to: Pseudonym,
+        depth: u32,
+    },
     /// 拒否した（4xx）。
     Rejected {
         route: Route,

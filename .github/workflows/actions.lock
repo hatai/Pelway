@@ -8,9 +8,15 @@ workflows:
         - 'jdx/mise-action@v2.4.4'
     '.github/workflows/notify-grokbot.yml': []
     '.github/workflows/verify.yml':
+        - 'actions/cache@v6.1.0'
         - 'actions/checkout@v4.2.2'
         - 'jdx/mise-action@v2.4.4'
 dependencies:
+    'actions/cache@v6.1.0':
+        ref: 'v6.1.0'
+        commit: 'sha1-55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
+        owner_id: 44036562
+        repo_id: 215566462
     'actions/checkout@v4.2.2':
         ref: 'v4.2.2'
         commit: 'sha1-11bd71901bbe5b1630ceea73d27597364c9af683'

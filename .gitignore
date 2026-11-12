@@ -1,6 +1,10 @@
 # Rust / mr boxington（target は mbx の管理対象への symlink になる）
 /target
 
+# CI のビルド成果物置き場（.github/workflows/verify.yml の CARGO_TARGET_DIR）。
+# mbx の symlink 先が変わってもキャッシュが壊れないよう、target とは別にする。
+/target-ci
+
 # QA-GDPR-13 走査試験の退避サンドボックス（target/ が worktree 外へ解決される
 # symlink の環境で使う。中身はコミットしない）
 .gdpr-13-sandbox/
