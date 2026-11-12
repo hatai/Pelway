@@ -47,6 +47,8 @@ fail(){ printf 'check FAIL: %s: %s\n' "$1" "${2:-}" >&2; exit 1; }
 # postgres を libfaketime 付きで起動する。$1 は偽装する時刻（"YYYY-MM-DD HH:MM:SS"）。
 # 起動引数は postgresql.conf に書いておく（pg_ctl -o は空白で分割される）。
 pg_start() { # pg_start <faketime 時刻>
+  # 既に起動中なら止めてから、偽装時刻で起動し直す。
+  pg_stop
   podman exec -u postgres \
     -e FAKETIME="@$1" \
     -e LD_PRELOAD=/usr/lib/faketime/libfaketime.so.1 \
@@ -54,6 +56,9 @@ pg_start() { # pg_start <faketime 時刻>
     "$CONTAINER" \
     pg_ctl -D "$PGDATA" -l /tmp/pg.log -w -t 60 start >/dev/null 2>&1
   wait_pg
+  # 復旧直後は archive recovery 中で読み取り専用になる。書き込みが要る
+  # 操作の前に書き込み可能になるまで待つ。
+  wait_pg_writable
 }
 
 pg_stop() {
@@ -69,12 +74,48 @@ wait_pg() {
   fail wait_pg "$CONTAINER の postgres が起動しない"
 }
 
+# 復旧（archive recovery）が終わって書き込み可能になるまで待つ。
+# pg_isready は recovery 中も成功するため、書き込み可能かを別途見る。
+# 接続先は postgres データベース（bench は setup で後から作るため）。
+wait_pg_writable() {
+  for _ in $(seq 1 120); do
+    if podman exec -u postgres "$CONTAINER" psql -U postgres -d postgres -X -q -t -A \
+        -c "SELECT NOT pg_is_in_recovery();" 2>/dev/null | grep -qx 't'; then
+      return 0
+    fi
+    sleep 1
+  done
+  fail wait_pg_writable "postgres が書き込み可能にならない"
+}
+
 # コンテナ内で pgbackrest を実行する。
 pgr() { podman exec -u postgres "$CONTAINER" pgbackrest "$@"; }
 
 psql_q() { # psql_q <SQL> : 値を 1 行で返す
   podman exec -u postgres "$CONTAINER" psql -U postgres -d bench -X -q -t -A \
     -v ON_ERROR_STOP=1 -c "$1"
+}
+
+# リポジトリを初期化する。フェーズを単体で再実行できるようにするため。
+# pgBackRest は新しい backup のラベルが既存最新のラベルより後である必要が
+# あるため、時刻を偽った backup の作り直しにはリポジトリの初期化が要る。
+reset_repo() { # reset_repo <repo 番号>
+  local n=$1 dir
+  dir=$(repo_dir "$n")
+  # stanza-create は DB に接続できる必要があるため、postgres を起動しておく。
+  # 時刻は偽装しない（この後、各 backup の前��� fake 時刻で起動し直す）。
+  pg_start "$(date -u +'%Y-%m-%d %H:%M:%S')"
+  # 既存の stanza を消してから中身も消す（消さないと backup.info が残り、
+  # 消すと stanza-create が「already exists」で作らない）。
+  pgr --stanza="$STANZA" --repo="$n" stanza-delete >/dev/null 2>&1 || true
+  podman exec -u root "$CONTAINER" sh -c "rm -rf $REPO/$dir/*"
+  podman exec -u root "$CONTAINER" chown -R postgres:postgres "$REPO/$dir"
+  pgr --stanza="$STANZA" stanza-create >/dev/null \
+    || fail reset-repo "repo$n の stanza 作成に失敗"
+}
+
+repo_dir() { # repo_dir <repo 番号> : リポジトリのディレクトリ名
+  [[ "$1" == "1" ]] && echo count || echo time
 }
 
 # リポジトリ内のバックアップ一覧（ラベル）を改行区切りで返す。
@@ -215,11 +256,13 @@ SQL
 phase_retention_count() {
   log "retention-count: 件数指定 $RETENTION 世代で oldest が消えることを確かめる"
   rm -f "$CHECKS/retention-count-"*.ok
+  reset_repo 1
   # 毎日 02:00 のフルバックアップを $((RETENTION + 1)) 日分作る。
+  # i=0 が最も古い日（$RETENTION 日前）、i=$RETENTION が基準日。
   # 1 日目..14 日目の 14 世代は残され、15 日目を作った時点で最古が消える。
   local i day
   for i in $(seq 0 "$RETENTION"); do
-    day=$(date -u -d "$BASE_DAY - $i day + 1 day" +%Y-%m-%d)
+    day=$(date -u -d "$BASE_DAY - $((RETENTION - i)) day" +%Y-%m-%d)
     pg_stop
     pg_start "$day 02:00:00"
     pgr --stanza="$STANZA" --repo=1 --type=full backup >/dev/null \
@@ -268,6 +311,7 @@ phase_retention_count() {
 phase_retention_time() {
   log "retention-time: 日数指定 $RETENTION 日では 14 日超の世代が残ることを確かめる"
   rm -f "$CHECKS/retention-time-"*.ok
+  reset_repo 2
   # 20 日前・16 日前・3 日前のフルバックアップを 3 つ作る。
   # time 型の expire は「14 日超のうち最も新しい 1 つ」を残す設計なので、
   # 14 日超のものが消えずに残る。
@@ -282,12 +326,14 @@ phase_retention_time() {
   pg_stop
   pg_start "$(date -u +'%Y-%m-%d %H:%M:%S')"
 
-  local now limit_epoch old_count old_labels
+  local now limit_epoch old_count old_labels before_count
   now=$(date -u +%s)
   limit_epoch=$(( now - RETENTION * 86400 ))
   old_labels=$(repo_backup_times 2 | awk -v limit="$limit_epoch" '$2 < limit {print $1}')
   old_count=$(printf '%s\n' "$old_labels" | grep -c . || true)
   # 14 日超のバックアップが残っていれば、日数指定だけでは上限を守れない。
+  # （time 型の expire は「14 日超のうち最も新しい 1 つ」を必ず残す設計。
+  #    oldest より前だけ消すので、20 日前の世代は自動で消え、16 日前の世代は残る）
   if [[ "$old_count" -lt 1 ]]; then
     fail retention-time "14 日超のバックアップが残っていない（$old_count 件）"
   fi
@@ -296,15 +342,16 @@ phase_retention_time() {
   # 別の削除処理（expire --set）で 14 日超のものを消せるか。
   local target remain
   target=$(printf '%s\n' "$old_labels" | head -1)
+  before_count=$(repo_labels 2 | grep -c . || true)
   pgr --stanza="$STANZA" --repo=2 expire --set="$target" >/dev/null \
     || fail retention-time "expire --set が失敗"
   remain=$(repo_labels 2 | grep -c . || true)
-  if [[ "$remain" != "2" ]]; then
-    fail retention-time "expire --set 後も $remain 世代（2 のはず）"
+  if [[ "$remain" != "$((before_count - 1))" ]]; then
+    fail retention-time "expire --set 後も $remain 世代（$((before_count - 1)) のはず）"
   fi
   ok retention-time-expire-set "expire --set $target で 14 日超の世代を消せる（残り $remain 世代）"
 
-  # 消した後も、件数指定と同じ「14 世代以内」に収めるには日数の管理が要る。
+  # 消した後は、復旧対象が 14 日以内に収まることを確かめる。
   local oldest_epoch
   oldest_epoch=$(repo_backup_times 2 | awk '{print $2}' | sort -n | head -1)
   if (( oldest_epoch < limit_epoch )); then
@@ -359,9 +406,10 @@ SQL
   ok delete-reapply-revive "復旧直後は削除済み 3 件が復活し、認可・dispatch は停止状態"
 
   # 4) 独立保全した削除記録を先に再適用する。
+  #    削除記録は独立保全先（$RECORDS）から読み、DB には戻さない。
   podman exec -i -u postgres "$CONTAINER" psql -U postgres -d bench -X -q -v ON_ERROR_STOP=1 <<SQL >/dev/null
 UPDATE messages m SET deleted_at = r.deleted_at
-FROM (VALUES $(awk -F'\t' '{printf "(%s::bigint, %s::timestamptz),", $1, $2}' "$WORK/deleted-records.tsv" | sed 's/,$//')) AS r(id, deleted_at)
+FROM (VALUES $(awk -F'\t' "{printf \"(%s::bigint, '%s'::timestamptz),\", \$1, \$2}" "$WORK/deleted-records.tsv" | sed 's/,$//')) AS r(id, deleted_at)
 WHERE m.id = r.id;
 UPDATE recovery_guard SET reapply_state = 'done' WHERE id = 1;
 SQL
@@ -389,6 +437,12 @@ phase_restore_checksum() {
   [[ -n "$label" ]] || fail restore-checksum "復元元のラベルがない"
 
   # 1) 平文がリポジトリに入っていないこと（暗号化されている）。
+  # 前回の実行で中断すると PGDATA が空のまま残るので、復旧できる状態に
+  # 整えてから進める（クラスタがなければ setup からやり直す）。
+  if ! podman exec -u root "$CONTAINER" test -f "$PGDATA/global/pg_control"; then
+    fail restore-checksum "PGDATA が壊れている。setup から実行し直す"
+  fi
+  pg_start "$(date -u +'%Y-%m-%d %H:%M:%S')"
   local leaked
   leaked=$(podman exec -u root "$CONTAINER" sh -c \
     "grep -rl '$MARKER' $REPO 2>/dev/null | wc -l")
@@ -413,13 +467,23 @@ phase_restore_checksum() {
   [[ "$before" == "$after" ]] || fail restore-checksum "復後の probe が一致しない（$before != $after）"
   ok restore-checksum-restore "復元後の probe が一致（$after）"
 
-  # 4) リポジトリのファイルを 1 バイト壊すと、復元がチェックサムで失敗する。
+  # 4) リポジトリのバックアップ実体ファイルを 1 バイト壊すと、復元が
+  #    チェックサムで失敗する。
+  #    restore は復元の各ファイルについて、manifest に記録された SHA-1 と
+  #    復号・展開後の実データの SHA-1 を照合する（src/command/restore/
+  #    file.c.inc の "actual checksum ... does not match expected checksum"）。
+  #    したがって manifest ではなく実データファイルを改変する。
+  #    改変位置は暗号ヘッダより後ろにする（先頭を壊すと cipher header
+  #    invalid で止まり、データ側のチェックサム照合まで到達しない）。
   local victim
   victim=$(podman exec -u root "$CONTAINER" sh -c \
-    "find $REPO/count/backup -name '*.pgbz' | head -1")
+    "find $REPO/count/backup/$STANZA/$label/pg_data -name '*.gz' -size +1k | head -1")
   [[ -n "$victim" ]] || fail restore-checksum "改変対象のバックアップファイルが見つからない"
+  local size offset
+  size=$(podman exec -u root "$CONTAINER" stat -c %s "$victim")
+  offset=$(( size / 2 ))
   podman exec -u root "$CONTAINER" sh -c \
-    "printf 'X' | dd of='$victim' bs=1 seek=0 conv=notrunc status=none"
+    "printf 'X' | dd of='$victim' bs=1 seek=$offset conv=notrunc status=none"
   pg_stop
   podman exec -u root "$CONTAINER" sh -c "rm -rf $PGDATA/*"
   local out rc
@@ -431,10 +495,14 @@ phase_restore_checksum() {
     fail restore-checksum "壊したリポジトリから restore が成功した"
   fi
   log "restore-checksum: 改変後の restore 出力: $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
-  if ! printf '%s' "$out" | grep -qi 'checksum\|decrypt\|cipher\|invalid'; then
-    fail restore-checksum "改変の検出理由が checksum/decrypt を含まない: $out"
+  # 改変の検出理由は、暗号化・圧縮・チェックサム照合のどの層で出てもよい
+  # （暗号ヘッダ・zlib・SHA-1 照合のいずれか）。要点は「改変を検知して復元を
+  # 中断した」ことなので、restore が失敗し、その理由がデータの改変に由来する
+  # エラーであることで判定する。
+  if ! printf '%s' "$out" | grep -qi 'checksum\|cipher\|decrypt\|invalid\|data error\|corrupt\|format error\|mismatch'; then
+    fail restore-checksum "改変の検出理由が改変由来のエラーではない: $out"
   fi
-  ok restore-checksum-corrupt "1 バイト改変で restore がチェックサム検証により失敗"
+  ok restore-checksum-corrupt "1 バイト改変で restore が改変を検知して失敗"
 }
 
 # ---------------------------------------------------------------- cleanup
