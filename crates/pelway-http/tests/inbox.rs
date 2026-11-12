@@ -6,6 +6,7 @@ use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 
+use pelway_contract::approval::Decider;
 use pelway_contract::ids::{CardId, MemberId, WorkspaceId};
 use pelway_contract::ledger::{ApprovalLedger, NewCard};
 use pelway_contract::snapshot::ActionPayload;
@@ -33,7 +34,7 @@ fn new_card(id: &str, decider: &str, requester: &str, deadline: Option<TsMs>) ->
             scope: Vec::new(),
         },
         requester: MemberId::from(requester),
-        decider: MemberId::from(decider),
+        decider: Decider::Member(MemberId::from(decider)),
         deadline,
     }
 }
