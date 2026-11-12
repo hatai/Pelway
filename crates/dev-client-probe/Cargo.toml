@@ -44,5 +44,4 @@ default = ["a11y"]
 a11y = ["slint/accessibility"]
 
 [build-dependencies]
-# ui/probe.slint をコンパイルする。
 slint-build = "=1.18.1"
