@@ -124,24 +124,35 @@ impl OpenAiGateway {
         *self.meter.lock().expect("usage meter poisoned")
     }
 
-    /// 呼出し回数の予算を確認する。超えていれば送る前に止める（何も送らない）。
+    /// 呼出し回数の予算を予約する。上限の判定と予約（`calls` の加算）を
+    /// 1つのロックの中で行うため、並行する呼出しがどちらも通って
+    /// 上限を超えて送られることはない（PR #167 の must-fix）。
+    /// 予約は呼出しの失敗が「未送信」（[`LlmError::NotSent`]）に分類されたとき
+    /// [`Self::release_reservation`] で戻す。送った（拒否・結果不明を含む）呼出しは
+    /// 予算を消費したままにする。
     fn reserve_call(&self) -> Result<(), LlmError> {
-        if let Some(budget) = &self.budget {
-            let calls = self.meter.lock().expect("usage meter poisoned").calls;
-            if calls >= budget.max_calls {
-                return Err(LlmError::NotSent(format!(
-                    "呼出し回数の上限（{} 回）に達したため送信しません",
-                    budget.max_calls
-                )));
-            }
+        let mut state = self.meter.lock().expect("usage meter poisoned");
+        if let Some(budget) = &self.budget
+            && state.calls >= budget.max_calls
+        {
+            return Err(LlmError::NotSent(format!(
+                "呼出し回数の上限（{} 回）に達したため送信しません",
+                budget.max_calls
+            )));
         }
+        state.calls += 1;
         Ok(())
     }
 
+    /// 「未送信」に分類された呼出しの予約を戻す（何も送っていないため）。
+    fn release_reservation(&self) {
+        self.meter.lock().expect("usage meter poisoned").calls -= 1;
+    }
+
     /// 1呼出し分の利用量を記録し、応答に載せる形で返す。
+    /// `calls` は [`Self::reserve_call`] の予約で数えるため、ここでは増やさない。
     fn record_usage(&self, usage: &rig_core::completion::Usage) -> Usage {
         let mut state = self.meter.lock().expect("usage meter poisoned");
-        state.calls += 1;
         state.input_tokens += usage.input_tokens.unwrap_or(0);
         state.output_tokens += usage.output_tokens.unwrap_or(0);
         Usage {
@@ -156,8 +167,32 @@ impl OpenAiGateway {
 impl LlmGateway for OpenAiGateway {
     /// 最後のメッセージをプロンプト、残りを履歴として送る。
     /// スキーマ指定時は応答を JSON として解釈し、Pelway 側で検証する。
+    /// 失敗が「未送信」に分類されたときだけ予約を戻す。
     async fn chat(&self, req: ChatRequest) -> Result<ChatReply, LlmError> {
         self.reserve_call()?;
+        match self.chat_after_reservation(req).await {
+            Err(err @ LlmError::NotSent(_)) => {
+                self.release_reservation();
+                Err(err)
+            }
+            other => other,
+        }
+    }
+
+    async fn embed(&self, texts: Vec<String>) -> Result<EmbedReply, LlmError> {
+        self.reserve_call()?;
+        match self.embed_after_reservation(texts).await {
+            Err(err @ LlmError::NotSent(_)) => {
+                self.release_reservation();
+                Err(err)
+            }
+            other => other,
+        }
+    }
+}
+
+impl OpenAiGateway {
+    async fn chat_after_reservation(&self, req: ChatRequest) -> Result<ChatReply, LlmError> {
         let mut messages: Vec<Message> = req.messages.iter().map(to_rig_message).collect();
         let mut additional_params = None;
         if let Some(schema) = &req.schema
@@ -198,8 +233,7 @@ impl LlmGateway for OpenAiGateway {
         Ok(ChatReply { text, usage })
     }
 
-    async fn embed(&self, texts: Vec<String>) -> Result<EmbedReply, LlmError> {
-        self.reserve_call()?;
+    async fn embed_after_reservation(&self, texts: Vec<String>) -> Result<EmbedReply, LlmError> {
         if texts.is_empty() {
             return Err(LlmError::NotSent(
                 "埋め込み対象のテキストが空です".to_string(),
