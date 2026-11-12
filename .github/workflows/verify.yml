@@ -44,6 +44,10 @@ env:
   CARGO_PROFILE_TEST_DEBUG: "0"
   MISE_RUST_MR_BOXINGTON: "0"
   CARGO_TARGET_DIR: ${{ github.workspace }}/target-ci
+  # crates.io の取得設定は mise.toml の [env] にも同じ値を置いてある（CI ではない
+  # コンテキストでも cargo を直接呼ぶため、ここにも置く）。
+  CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_NET_RETRY: "10"
 
 jobs:
   # 品質ゲート。static / lint / test の 3 ジョブがすべて成功した場合だけ成功する。
@@ -152,16 +156,31 @@ jobs:
       # 依存クレートのダウンロードとビルド成果物のキャッシュ。cargo の registry と
       # target-ci を対象にする。キーに Cargo.lock と mise.toml のハッシュを入れるため、
       # 依存やツールのバージョンが変わったら新しいキャッシュになる。
-      - name: Restore cargo cache
+      # crates.io の取得キャッシュ。3 つの cargo ジョブで共有する（target は別）。
+      - name: Restore cargo registry cache
         uses: actions/cache@v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target-ci
-          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ github.job }}-
+            ${{ runner.os }}-cargo-registry-
+
+      # ビルド成果物のキャッシュ。clippy と test は成果物が別なのでジョブごとに分ける。
+      - name: Restore build cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: target-ci
+          key: ${{ runner.os }}-cargo-target-${{ github.job }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-${{ github.job }}-
+
+      # 依存クレートはビルド前に 1 回だけ取得する。取得の一時失敗（crates.io の障害など）が
+      # 数分のビルドの途中で起きるのを避けるため。取得は cargo の設定
+      # （CARGO_HTTP_MULTIPLEXING=false / CARGO_NET_RETRY）で再試行する。
+      - name: Fetch dependencies
+        run: mise run fetch
 
       # ローカルと同じ検査: fmt-check / clippy / toolchain-check / hk-validate
       - name: Verify (mise run verify-lint)
@@ -197,16 +216,31 @@ jobs:
       - name: Trust project config
         run: mise trust
 
-      - name: Restore cargo cache
+      # crates.io の取得キャッシュ。3 つの cargo ジョブで共有する（target は別）。
+      - name: Restore cargo registry cache
         uses: actions/cache@v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target-ci
-          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ github.job }}-
+            ${{ runner.os }}-cargo-registry-
+
+      # ビルド成果物のキャッシュ。clippy と test は成果物が別なのでジョブごとに分ける。
+      - name: Restore build cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: target-ci
+          key: ${{ runner.os }}-cargo-target-${{ github.job }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-${{ github.job }}-
+
+      # 依存クレートはビルド前に 1 回だけ取得する。取得の一時失敗（crates.io の障害など）が
+      # 数分のビルドの途中で起きるのを避けるため。取得は cargo の設定
+      # （CARGO_HTTP_MULTIPLEXING=false / CARGO_NET_RETRY）で再試行する。
+      - name: Fetch dependencies
+        run: mise run fetch
 
       # ローカルと同じ検査: test / script-test
       - name: Verify (mise run verify-test)
@@ -263,16 +297,31 @@ jobs:
         run: mise run toolchain-check
 
       # 計測ビルドはプロファイルが通常と違うため、ゲートビルドとは別のキャッシュにする。
-      - name: Restore cargo cache
+      # crates.io の取得キャッシュ。3 つの cargo ジョブで共有する（target は別）。
+      - name: Restore cargo registry cache
         uses: actions/cache@v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target-ci
-          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ github.job }}-
+            ${{ runner.os }}-cargo-registry-
+
+      # ビルド成果物のキャッシュ。clippy と test は成果物が別なのでジョブごとに分ける。
+      - name: Restore build cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: target-ci
+          key: ${{ runner.os }}-cargo-target-${{ github.job }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-${{ github.job }}-
+
+      # 依存クレートはビルド前に 1 回だけ取得する。取得の一時失敗（crates.io の障害など）が
+      # 数分のビルドの途中で起きるのを避けるため。取得は cargo の設定
+      # （CARGO_HTTP_MULTIPLEXING=false / CARGO_NET_RETRY）で再試行する。
+      - name: Fetch dependencies
+        run: mise run fetch
 
       # LCOV 形式でレポートを出す（cargo-llvm-cov が llvm-tools の profdata/cov を駆動）。
       # 出力先 lcov.info は .octocov.yml の coverage.paths と対応する。
