@@ -97,6 +97,23 @@ run `43017366934`（`ci/apt-retries` ブランチ、成功 run）のステップ
 | `mise exec -- cargo llvm-cov --workspace --locked --no-cfg-coverage --lcov` | 完了。lcov.info（1.9MB）を生成 |
 | `gh actions-lock` | `actions/cache@v6.1.0` → `sha1-55cc8345863c7cc4c66a329aec7e433d2d1c52a9` を actions.lock に記録 |
 
+### CI 実測（workflow 変更前の state）
+
+run `43078088810`（PR #112、workflow 変更前の状態。旧 workflow のまま）。
+
+| 項目 | 変更前（run 43017366934） | この run |
+|---|---|---|
+| `mise run verify` ジョブ全体 | 5m06s | 5m10s |
+| `mise run verify` ステップ | 4m31s | 4m38s |
+| hk-check | 263.16s | **2.37s** |
+| clippy | 248.94s | 260.24s |
+| test | 269.25s | 276.49s |
+| コンパイルイベント数 | 597（test 399 + clippy 198） | 688（test 446 + clippy 242） |
+
+この run は旧 workflow のままなので、待ち時間の改善 は出ない。hk-check が 263s → 2.4s になったのは、hk.pkl の cargo ステップ（cargo_fmt / cargo_clippy / cargo_check）を走らせなくなったためで、この 263s はもともとキャッシュヒットで待ち時間には寄与していなかった。逆にその分、clippy と test が自分で依存クレートをコンパイルするぶんイベント数が増えている（597 → 688）。
+
+つまり待ち時間を実際に縮めるのは workflow 側の変更（B: CI 固有の cargo プロファイル / C: ジョブ分割 / D: キャッシュ / E: 事前ビルドバイナリ）で、mise.toml 側の変更（F: 冗長な cargo 呼び出しの削減）だけでは縮まらない。
+
 ### 効果の見積り
 
 - 2 つの cargo グループが別ジョブ・別ランナーで走るため、同一 target dir でのロック競合と clippy↔test の重複コンパイル（214 回）がなくなる。
