@@ -21,6 +21,7 @@ merge_one() {
   for attempt in 1 2 3; do
     fetch || { echo "#$pr fetch failed"; return 1; }
     H=$(remote_head "$br") || { echo "#$pr branch $br not found"; return 1; }
+    git merge-base --is-ancestor "$rsha" "$H" || { echo "#$pr head does not contain the reviewed sha (rewound or rewritten); re-review needed"; return 1; }
     n=$(git rev-list "$rsha..$H" --no-merges ^origin/main | wc -l) || { echo "#$pr cannot compare with reviewed sha"; return 1; }
     [ "$n" = 0 ] || { echo "#$pr new non-main commits ($n) since review; re-review needed"; return 1; }
     if ! git merge-base --is-ancestor origin/main "$H"; then
@@ -48,6 +49,10 @@ merge_one() {
   return 1
 }
 
+if [ $# -eq 0 ] || [ $(( $# % 3 )) -ne 0 ]; then
+  echo "usage: $0 <PR> <branch> <reviewed-sha> [<PR> <branch> <reviewed-sha> ...]" >&2
+  exit 2
+fi
 while [ $# -ge 3 ]; do
   merge_one "$1" "$2" "$3" || { echo "stopped at #$1; later PRs were not merged"; exit 1; }
   shift 3
