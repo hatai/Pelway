@@ -56,10 +56,10 @@ Discord役職の追加確認は市場レビューM-01の[公式companyページ]
 | egui | 対照 | repo main | MIT OR Apache-2.0 | [LICENSE-APACHE](https://github.com/emilk/egui/blob/main/LICENSE-APACHE)、[Cargo.toml](https://github.com/emilk/egui/blob/main/Cargo.toml) | 選んだ方の条文。default fontsは別条件 | フォントの条文 |
 | wasm-bindgen | Web同期核のWASM化 | repo main | MIT OR Apache-2.0（Cargo.toml） | [LICENSE-APACHE](https://github.com/wasm-bindgen/wasm-bindgen/blob/main/LICENSE-APACHE)（旧 rustwasm/wasm-bindgen からリダイレクト） | 同上 | 固定版の条文 |
 | TypeScript | Web（ビルド時） | repo main | Apache-2.0 | [LICENSE.txt](https://github.com/microsoft/TypeScript/blob/main/LICENSE.txt) | 配布物に含めるならNOTICE確認 | 実行時には同梱しない想定（仮定） |
-| React | Web DOM UI | repo main | MIT | [LICENSE](https://github.com/react/react/blob/main/LICENSE)（旧 facebook/react からリダイレクト） | 著作権表示と許諾文 | 固定版の条文 |
+| Octane | Web DOM UI | repo main | MIT | [LICENSE](https://github.com/octanejs/octane/blob/main/LICENSE) | 著作権表示と許諾文 | 固定版の条文 |
 | pgvector、pg_bigm、Tantivy/Lindera | 比較候補のみ（02:89〜90） | 未調査 | 未確認 | — | — | 導入を決めたときに台帳へ追加 |
 
-rmcpは移行中のMIT部分を残すため「Apache-2.0のみ」としない。Slintの許諾は濱田さんの選択と法務確認待ち。sqlx、wasm-bindgen、Reactの出典は移管後URLであり、旧URLのリダイレクト到達は固定版の真正性を保証しない。
+rmcpは移行中のMIT部分を残すため「Apache-2.0のみ」としない。Slintの許諾は濱田さんの選択と法務確認待ち。sqlx、wasm-bindgenの出典は移管後URLであり、旧URLのリダイレクト到達は固定版の真正性を保証しない。
 
 <a id="ch09-s06"></a>
 ## レビューへ提示する証拠の範囲

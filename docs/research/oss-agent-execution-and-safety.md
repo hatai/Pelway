@@ -179,7 +179,7 @@ Pelwayが解きたい問題は、gatewayの資格情報brokerが短命でscope�
 - A2A：「an open source project under the Linux Foundation, contributed by Google」で、SDK一覧にRustが含まれます。Rust SDKが公式扱いかは未確認です。crates.ioの `a2a-rs` は第三者製です［A2A README (2026/11)］［crates.io a2a-rs (2026/11)］。
 - ACP：エディタ/IDEとコーディングエージェントの通信を標準化し、ローカルでは子プロセスのstdin/stdout上のJSON-RPCを使います［agentclientprotocol.com (2026/11)］。Rust crateは `agent-client-protocol` 5.2.0 です［crates.io agent-client-protocol (2026/11)］。作成主体と権限要求の仕組みは今回のページでは確認できず未確認です。
 - Pelwayへの当てはめ（筆者の整理）：11「外部agentの権限を過信しない」で扱う外部コーディングagentを、CLI出力の解析ではなく型付きプロトコルで包める可能性があります。
-- AG-UI：MIT・TypeScriptです［ag-ui repo (2026/11)］。PelwayはSlint/Reactと独自の同期を持つため（A1、A2、A4）、利点が見えず見送ります。プロトコルの中身は未確認です。
+- AG-UI：MIT・TypeScriptです［ag-ui repo (2026/11)］。PelwayはSlint/Octaneと独自の同期を持つため（A1、A2、A4）、利点が見えず見送ります。プロトコルの中身は未確認です。
 
 ## 6. 情報フロー制御とプロンプトインジェクション対策
 
