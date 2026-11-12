@@ -97,11 +97,16 @@ pub enum OpenError {
     Decrypt,
 }
 
-fn payload_cipher(file_key: &[u8; FILE_KEY_LEN], salt: &[u8; SALT_LEN]) -> Aes256Gcm {
+fn payload_key(file_key: &[u8; FILE_KEY_LEN], salt: &[u8; SALT_LEN]) -> Zeroizing<[u8; 32]> {
     let hk = Hkdf::<Sha256>::new(Some(salt), file_key);
     let mut okm = Zeroizing::new([0u8; 32]);
     hk.expand(PAYLOAD_KEY_INFO, okm.as_mut())
         .expect("32 bytes is a valid HKDF-SHA256 output length");
+    okm
+}
+
+fn payload_cipher(file_key: &[u8; FILE_KEY_LEN], salt: &[u8; SALT_LEN]) -> Aes256Gcm {
+    let okm = payload_key(file_key, salt);
     Aes256Gcm::new((&*okm).into())
 }
 
@@ -247,6 +252,21 @@ mod tests {
         0x64, 0x77, 0xc5,
     ];
     const AES_GCM_0_10_PLAINTEXT: &[u8] = b"pelway-at-rest format compatibility vector";
+
+    /// HKDF-SHA256 で導出する本文鍵の固定値（ikm = `FILE_KEY`、salt = `SALT`、
+    /// info = `PAYLOAD_KEY_INFO`）。hkdf 0.12.4 + sha2 0.10.9 で求めた値で、
+    /// 依存の版を上げても導出される鍵が変わらないことの保証。
+    const PAYLOAD_KEY_0_12: [u8; 32] = [
+        0x43, 0x19, 0x7c, 0xa4, 0x59, 0xfa, 0x5a, 0xaf, 0x53, 0xe0, 0xf7, 0x1d, 0x41, 0x40, 0xf6,
+        0x17, 0xb8, 0xd0, 0x21, 0x30, 0x22, 0x64, 0x88, 0xcc, 0xf0, 0xe1, 0xd3, 0x5e, 0x31, 0x50,
+        0xb1, 0x07,
+    ];
+
+    #[test]
+    fn payload_key_matches_hkdf_0_12_fixed_value() {
+        let okm = payload_key(&FILE_KEY, &SALT);
+        assert_eq!(&*okm, &PAYLOAD_KEY_0_12);
+    }
 
     #[test]
     fn container_format_is_compatible_with_aes_gcm_0_10() {

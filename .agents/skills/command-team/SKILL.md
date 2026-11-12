@@ -98,6 +98,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 - PR ができたら mergeable を確かめる（`scripts/agent-gh dev pr view <M> --json mergeable`）。`CONFLICTING` の PR には GitHub が `pull_request` の workflow を動かさず、チェックが 1 つも付かない。実装担当に「main を取り込んで衝突を解消し、verify を通す」を送る。
 - マージしたら Issue から `agent:working` を外し、人間に報告する。
 - Dependabot が立てた依存更新の PR（`dependencies` ラベル、`build(deps):` で始まるコミット）も、通常の PR と同じレビュー（skill `review-pr`）とマージの決まりで扱う。
+- Action の更新の PR（`ci(deps):` で始まるコミット）では、Dependabot は `.github/workflows/actions.lock` を作り直さないため、指揮役がマージ前にその PR のブランチを checkout して `gh actions-lock` を実行し、生成し直した `actions.lock` を同じブランチに push してから CI の通過を確かめる（`gh actions-lock` は人間の名義の `gh` 拡張で、App のトークンでは動かせない）。
 
 ### 分割を認めるとき
 
