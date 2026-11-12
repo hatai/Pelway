@@ -23,5 +23,8 @@ updates:
           - "minor"
           - "patch"
     commit-message:
-      prefix: "build(deps)"
+      # include: scope が prefix の後ろに "(deps)" を付けるため、件名は
+      # "build(deps): bump ..." になる（dependabot-options-reference の include）。
+      # prefix を "build(deps)" にすると "build(deps)(deps):" と二重になる。
+      prefix: "build"
       include: scope

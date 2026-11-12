@@ -37,3 +37,12 @@ Issue の未決事項に従い、github-actions を Dependabot の対象にす�
 4. 足りなかった情報・検証手段: `mise run verify` には jactionlint が含まれない（`mise.toml` の tasks に jactionlint タスクが無く、`verify.yml` の static ジョブの `mise exec -- jactionlint` ステップだけで走る）。ローカルで `mise run verify` を通しても workflow の lint は検証できていなかった。
 5. 改善案: `mise.toml` の「verify-static」に jactionlint を含める（`depends` に jactionlint タスクを追加する）か、`docs/dev-environment.md` の「CI（GitHub Actions）」に「jactionlint は CI の static ジョブのみで、ローカルの verify には含まれない」と書く。
 
+## 実装者メモ（round 3）
+
+1. 該まった箇所: `.github/dependabot.yml`: 指揮役の指摘どおり `prefix: "build(deps)"` + `include: scope` は件名が二重になる。`prefix: "build"` に修正。
+2. 曖昧だった文: 「When defined any prefix is followed by the type of dependencies updated in the commit: `deps` or `deps-dev`.」（dependabot-options-reference の `include`、https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#include）。
+3. 仮定と解釈: `include: scope` の `(deps)` は prefix の後に付く「依存の種類」で、prefix 側に `(deps)` を書く前提ではない。`prefix: "build"` + `include: scope` → `build(deps): bump ...` と解釈した。`prefix: "build(deps)"` のまま `include` を消す解釈は、Issue の受け入れ条件が `include: scope` の値を要求しているため選ばなかった。
+4. 足りなかった情報・検証手段: Dependabot が実際に出すコミット件名の実物（マージ後の初回 PR で確認する）。round 1 の時点でこの文書を読んでいれば防げた。
+5. 改善案: skill `implement-issue` の「よくある失敗」に「設定の値の意味は公式文書で確認する（Issue の受け入れ条件の表記をそのまま値に写さない）」を足す。
+
+
