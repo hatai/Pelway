@@ -1,8 +1,6 @@
 //! Issue #98 の slint #10861（IME 変換中にフォーカスが外れると、最後の文字が
-//! 消える）の再現用プログラム。製品機能ではない。
-//!
-//! LineEdit 1 つだけの窓を出し、テキストと入力の focused の変化を stdout に記録
-//! する。Windows 11 + 韓国語 IME の環境での手順（判定を含む）は
+//! 消える）の再現用プログラム。製品機能ではない。LineEdit 1 つだけの窓を出し、
+//! テキストと入力の focused の変化を stdout に記録する。手順と判定は
 //! docs/research/slint-tauri-client-measurements.md の 4 節にある。
 
 use std::cell::RefCell;
