@@ -32,9 +32,7 @@ CREATE TABLE messages (
     UNIQUE (workspace_id, channel_id, seq)
 );
 
--- pelway_admin には表への直接権限を与えない。管理ロールができるのは 0003 の
--- 監査付き関数（pelway_admin_exec / pelway_admin_query）の呼び出しだけで、
--- それ以外の経路では何も読み書きできない。DML はその関数の実行主体
--- pelway_admin_executor に与える。
+-- DML はアプリロールと管理ロールに与える。管理ロール（BYPASSRLS）は監査なしで
+-- 横断的な読み書きができ、その利用の監査は #149 で設計する。
 GRANT SELECT, INSERT, UPDATE, DELETE
-    ON workspaces, channels, messages TO pelway_app, pelway_admin_executor;
+    ON workspaces, channels, messages TO pelway_app, pelway_admin;

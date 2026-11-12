@@ -32,3 +32,11 @@
 3. 仮定と解釈: 「経路の分離」はヘルパーの 2 文構成（監査書き込み → 実行）で満たすと解釈した。実行手続きが同 reason の監査行を検査して拒否するため、監査なしの実行は DB 側で不可能。選ばなかった解釈: 監査行の捏造（pelway_audit_write の直接呼び出し）の禁止 — 捏造も db_user・reason・時刻として記録に残り、利用の秘匿には使えないため。
 4. 足りなかった情報・検証手段: 既存ロールの属性揃え込み（ALTER）の直接試験。並行テストが属性の一時的な破壊と干渉する恐れがあるため、マイグレーション後の属性値の表明検査のみ行った。
 5. 改善案: docs/adr/0005-postgres-row-level-security.md の「Consequences」に「監査は実行の前に別文として確定し、実行手続きは監査行の存在を検査する」を足す。
+
+## 実装者メモ（round 5）
+
+1. 詰まった箇所: crates/pelway-db/src/lib.rs: `Ok(tx);`（セミコロン付き）を oldString にして編集が一致せず、ファイルの実状（`Ok(tx)`）を読み直してから admin_exec の削除をやり直した。また main の取り込みで Cargo.toml の crate 一覧コメントが衝突し、両側の文言を併合して解決した。
+2. 曖昧だった文: 「管理ロールの監査の関数・ヘルパーは含めない（含める場合も監査の保証を主張しない）」（Issue #100 の split-plan コメント、hatai）。
+3. 仮定と解釈: 監査の関数・ヘルパー（admin_access_log、pelway_audit_write、pelway_admin_exec、admin_exec/admin_query、pelway_admin_executor/pelway_audit_writer）をすべて外し、管理ロールはテナント表への直接 DML 権限を持つ素朴な形に戻す、と解釈した。ロールの分離（pelway_app と pelway_admin）と属性の明示揃え込みは RLS の本体として残した。選ばなかった解釈: 管理ロール自体も #149 に寄せる（ADR 0005 の Consequences がロールの存在自体を求めているため）。
+4. 足りなかった情報・検証手段: 4 回目の must-fix（同じ reason の使い回し）への対応。監査機構ごと #149 に分離したため対応不要としたが、#149 の設計では再発しないようエスカレーションコメントの 4 つの穴を引き継ぐ必要がある。
+5. 改善案: docs/adr/0005-postgres-row-level-security.md の「Consequences」の監査の文に「設計と実装は #149」を追記する。

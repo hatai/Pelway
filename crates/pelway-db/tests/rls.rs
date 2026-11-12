@@ -3,8 +3,8 @@
 //! - AC1: トランザクションごとに現在の `workspace_id` を設定し、各テーブルの
 //!   ポリシーで絞り込む（読みも書きも自ワークスペースだけ）。
 //! - AC2: 接続プールで `workspace_id` の設定が次の利用者に持ち越されない。
-//! - AC3: ポリシーを回避する管理用のロールを分け、その利用を監査の対象にする
-//!   （管理ロールができるのは監査付き関数の呼び出しだけ）。
+//! - AC3: ポリシーを回避する管理用のロールをアプリ用ロールと分ける
+//!   （横断的な読み書きができる。その利用の監査は #149）。
 //! - AC4: アプリが絞り込みを書き忘れても、別のワークスペースの行が返らない。
 //!
 //! ポリシーの定義（pg_policies）ではなく、実際に返る行で確かめる。カタログの
@@ -14,7 +14,7 @@ mod common;
 
 use common::TestDb;
 use pelway_contract::ids::WorkspaceId;
-use pelway_db::{WORKSPACE_SETTING, admin_exec, begin_workspace_tx};
+use pelway_db::{WORKSPACE_SETTING, begin_workspace_tx};
 
 const WS_A: &str = "ws_rls_alpha";
 const WS_B: &str = "ws_rls_beta";
@@ -27,28 +27,28 @@ fn skip() {
     eprintln!("skip: PELWAY_DATABASE_URL が未設定（PostgreSQL が必要）");
 }
 
-/// 両ワークスペースの行を管理経路で登録する。チャンネルは A に 2 つ、B に 1 つ。
-/// ステートメントのリテラルはテスト用定数から組み立てる。
+/// 両ワークスペースの行を管理ロールで登録する。チャンネルは A に 2 つ、B に 1 つ。
 async fn seed_via_admin(admin: &sqlx::PgPool) {
-    admin_exec(
-        admin,
-        "seed workspaces for isolation tests",
-        &format!(
-            "INSERT INTO workspaces (id, name) VALUES ('{WS_A}', '{WS_A}'), ('{WS_B}', '{WS_B}')"
-        ),
+    let mut tx = admin
+        .begin()
+        .await
+        .expect("管理ロールのトランザクション開始に失敗した");
+    sqlx::query("INSERT INTO workspaces (id, name) VALUES ($1, $1), ($2, $2)")
+        .bind(WS_A)
+        .bind(WS_B)
+        .execute(&mut *tx)
+        .await
+        .expect("ワークスペースの登録に失敗した");
+    sqlx::query(
+        "INSERT INTO channels (workspace_id, id, name) VALUES \
+         ($1, 'ch_a1', 'a1'), ($1, 'ch_a2', 'a2'), ($2, 'ch_b1', 'b1')",
     )
+    .bind(WS_A)
+    .bind(WS_B)
+    .execute(&mut *tx)
     .await
-    .expect("監査付きの管理書き込み（ワークスペース）に失敗した");
-    admin_exec(
-        admin,
-        "seed channels for isolation tests",
-        &format!(
-            "INSERT INTO channels (workspace_id, id, name) VALUES \
-             ('{WS_A}', 'ch_a1', 'a1'), ('{WS_A}', 'ch_a2', 'a2'), ('{WS_B}', 'ch_b1', 'b1')"
-        ),
-    )
-    .await
-    .expect("監査付きの管理書き込み（チャンネル）に失敗した");
+    .expect("チャンネルの登録に失敗した");
+    tx.commit().await.expect("シードのコミットに失敗した");
 }
 
 /// AC1: workspace トランザクションの中では、現在の `workspace_id` の行だけが
@@ -148,94 +148,44 @@ async fn pooled_connection_does_not_carry_workspace_setting_to_next_user() {
     db.dispose().await;
 }
 
-/// AC3: 管理ロール（BYPASSRLS）の横断読み書きは監査付きの実行手続きだけができ、
-/// その利用は `admin_access_log` に記録される。表への直接アクセスは管理ロールにも
-/// 拒否され、アプリロールは監査付き経路を呼べない（監査の素通りがない）。
+/// AC3: ポリシーを回避する管理用のロール（BYPASSRLS）がアプリ用ロールと分かれて
+/// いる。管理ロールは全ワークスペースの行を横断的に読み書きできる。
+/// その利用の監査は #149 で設計し直すため、この PR では検証しない。
 #[tokio::test]
-async fn admin_role_can_only_act_through_audited_functions() {
+async fn admin_role_is_separate_and_bypasses_policies() {
     let Some(db) = test_db().await else {
         skip();
         return;
     };
     seed_via_admin(&db.admin).await;
 
-    // 横断の読み書きを 1 つの管理文で確かめる（全ワークスペースの行を読み、
-    // 全ワークスペースへ書く）。
-    admin_exec(
-        &db.admin,
-        "copy channels across workspaces",
+    // 管理ロールは全ワークスペースの行を見られる。
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM channels")
+        .fetch_one(&db.admin)
+        .await
+        .expect("管理ロールでのチャンネル数の取得に失敗した");
+    assert_eq!(n, 3, "管理ロールは全ワークスペースの行を見られる");
+
+    // 横断の読み書きもできる（全ワークスペースの行を読み、全ワークスペースへ書く）。
+    let copied = sqlx::query(
         "INSERT INTO channels (workspace_id, id, name) \
          SELECT workspace_id, 'copy_' || id, name FROM channels",
     )
+    .execute(&db.admin)
     .await
-    .expect("監査付きの管理書き込みに失敗した");
+    .expect("管理ロールでの横断書き込みに失敗した");
+    assert_eq!(copied.rows_affected(), 3);
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM channels")
         .fetch_one(&db.owner)
         .await
         .expect("チャンネル数の取得に失敗した");
-    assert_eq!(n, 6, "管理経路は全ワークスペースの行を読み書きできる");
-
-    // 管理ロールでも表への直接アクセスは拒否される（監査なしの読み書きはできない）。
-    let err = sqlx::query("SELECT count(*) FROM channels")
-        .execute(&db.admin)
-        .await
-        .expect_err("管理ロールの直接 SELECT は拒否されるべき");
-    assert!(
-        err.to_string().contains("permission denied"),
-        "権限の拒否であるべき: {err}"
-    );
-    let err = sqlx::query("INSERT INTO admin_access_log (db_user, reason) VALUES ('forged', 'x')")
-        .execute(&db.admin)
-        .await
-        .expect_err("管理ロールによる監査記録の直接書き込みは拒否されるべき");
-    assert!(
-        err.to_string().contains("permission denied"),
-        "権限の拒否であるべき: {err}"
-    );
-
-    // アプリロールは監査付き経路を呼べない。
-    let err = sqlx::query("CALL pelway_admin_exec('x', 'SELECT 1')")
-        .execute(&db.app)
-        .await
-        .expect_err("アプリロールによる監査付き経路の呼び出しは拒否されるべき");
-    assert!(
-        err.to_string().contains("permission denied"),
-        "権限の拒否であるべき: {err}"
-    );
-
-    // 管理ステートメントから監査記録を削除・改変することはできない。実行主体の
-    // pelway_admin_executor には監査表への SELECT しかなく、監査は追記のみ
-    // （append-only）。監査行はステートメントの前に別の文で確定するため、拒否された
-    // 試行も監査に残る。
-    let err = admin_exec(
-        &db.admin,
-        "tamper: delete the audit log",
-        "DELETE FROM admin_access_log",
-    )
-    .await
-    .expect_err("監査記録の削除は拒否されるべき");
-    assert!(
-        err.to_string().contains("permission denied"),
-        "権限の拒否であるべき: {err}"
-    );
-
-    // 監査行なしに実行手続きを直接呼ぶことはできない（ヘルパーを経由しない
-    // 呼び出しも、監査行の存在が必須）。
-    let err = sqlx::query("CALL pelway_admin_exec('unaudited try', 'SELECT 1')")
-        .execute(&db.admin)
-        .await
-        .expect_err("監査行なしの実行は拒否されるべき");
-    assert!(
-        err.to_string().contains("requires a preceding audit row"),
-        "監査行の存在検査であるべき: {err}"
-    );
+    assert_eq!(n, 6, "管理ロールは全ワークスペースの行を読み書きできる");
 
     // ロール属性はマイグレーションが保証する値（super / bypassrls / login）。
     // 既存ロールの揃え込み（ALTER）も同じ値に合わせる。
     let roles: Vec<(String, bool, bool, bool)> = sqlx::query_as(
         "SELECT rolname, rolsuper, rolbypassrls, rolcanlogin FROM pg_roles \
-         WHERE rolname IN ('pelway_admin', 'pelway_admin_executor', 'pelway_app', \
-         'pelway_audit_writer') ORDER BY rolname",
+         WHERE rolname IN ('pelway_admin', 'pelway_app') ORDER BY rolname",
     )
     .fetch_all(&db.owner)
     .await
@@ -244,31 +194,8 @@ async fn admin_role_can_only_act_through_audited_functions() {
         roles,
         vec![
             ("pelway_admin".into(), false, true, false),
-            ("pelway_admin_executor".into(), false, true, false),
             ("pelway_app".into(), false, false, false),
-            ("pelway_audit_writer".into(), false, false, false),
         ]
-    );
-
-    // 管理経路の利用は監査記録に残る。db_user には接続ユーザー（session_user）が
-    // 記録される。
-    let session_user: String = sqlx::query_scalar("SELECT session_user")
-        .fetch_one(&db.owner)
-        .await
-        .expect("接続ユーザーの取得に失敗した");
-    let rows: Vec<(String, String)> =
-        sqlx::query_as("SELECT db_user, reason FROM admin_access_log ORDER BY id")
-            .fetch_all(&db.owner)
-            .await
-            .expect("監査記録の取得に失敗した");
-    assert!(
-        rows.iter()
-            .any(|(user, reason)| *user == session_user && reason.contains("copy channels")),
-        "管理経路の利用が監査記録に残っているべき: {rows:?}"
-    );
-    assert!(
-        rows.iter().any(|(_, reason)| reason.contains("tamper")),
-        "拒否された管理試行も監査記録に残っているべき: {rows:?}"
     );
     db.dispose().await;
 }
