@@ -1,0 +1,141 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<title>Round2書き出しレビュー見本</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font:400 13px/1.5 "Geist","Noto Sans CJK JP","Noto Sans JP",sans-serif;background:#B8B7B1;color:#111214}
+h1{font-size:15px;margin:10px 14px 2px}
+.lead{margin:0 14px 8px;font-size:11px;color:#3A3935;max-width:1520px}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;padding:0 14px 14px}
+.col{border-radius:14px;padding:11px;min-height:520px}
+.col h2{margin:0 0 2px;font:600 11px/15px "Geist Mono",monospace}
+.col .sub{font:500 10px/13px "Geist Mono",monospace;margin:0 0 6px;opacity:.85}
+.badge{display:inline-block;font:600 10px/13px "Geist Mono",monospace;padding:2px 6px;border-radius:6px;margin-bottom:6px}
+.stage{border-radius:12px;padding:9px}.tile{border-radius:11px;padding:9px}.well{border-radius:9px;padding:7px;margin-top:7px}
+.btn{display:inline-flex;align-items:center;height:27px;padding:0 10px;border-radius:8px;font-weight:500;font-size:12px;margin:0 4px 4px 0;border:0}
+.focus{outline:2px solid var(--focus);outline-offset:2px}
+.av{width:30px;height:30px;display:inline-grid;place-items:center;font-size:11px;font-weight:600;margin-right:5px;vertical-align:middle}
+.circ{border-radius:50%}.sq{border-radius:9px}
+.ai{display:inline-flex;font:500 10px/14px "Geist Mono",monospace;padding:0 4px;border-radius:5px;margin-left:2px}
+.chip{display:inline-flex;align-items:center;gap:4px;font:500 11px/16px "Geist Mono",monospace;border-radius:7px;padding:2px 7px;margin:4px 4px 0 0}
+.chip svg{width:12px;height:12px}
+.ring{display:flex;gap:3px;margin-top:7px;height:6px}.ring i{flex:1;border-radius:2px}
+.ring i.todo{background:repeating-linear-gradient(135deg,var(--track) 0 2px,transparent 2px 4px);background-color:var(--track)}
+.row{display:flex;align-items:center;gap:6px;margin-top:7px;padding:5px 7px;border-radius:8px;position:relative}
+.row.sel{background:var(--wash)}.row.sel::before,.row.pend::before{content:"";position:absolute;left:0;top:5px;bottom:5px;width:2px;border-radius:1px}
+.row.sel::before{background:var(--acc)}.row.pend::before{background:var(--ink)}
+.unread{width:8px;height:8px;border-radius:50%;background:var(--unread);display:inline-block}
+.toast{border-radius:10px;padding:7px 9px;font-size:12px;margin-top:7px}
+.body{margin:5px 0 0;font-size:12px}.link{color:var(--link)}.link.u{text-decoration:underline}
+.tag{font:500 10px/12px "Geist Mono",monospace;opacity:.65;margin-bottom:4px}
+.ratios{margin-top:7px;font:400 9px/12px "Geist Mono",monospace;opacity:.9}
+.fail{color:#E07070}.ok{color:#5AAD6E}
+.L{--bg:#E6E5E0;--tile:#F8F8F4;--well:#EEEEE9;--ink:#141416;--track:#D9D9D2;--acc:#2B36FF;--fill:#2B36FF;--on:#FFFFFF;--wash:#E3E5FF;--focus:#2B36FF;--unread:#2B36FF;--link:#2B36FF;--hum:#3A3935;--humfg:#F8F8F4;--aibg:#2B36FF;--aifg:#FFFFFF;--badgebg:#E3E5FF;--badgef:#2B36FF;--toastbg:#141416;--toastfg:#F8F8F4;--pri:#141416;--prifg:#F8F8F4;--dangbg:#FBE4E0;--dangfg:#B42318;--warnbg:#F7ECD6;--warnfg:#8A5A00;--sucbg:#D8EDE2;--sucfg:#1B5E3B;--hov:#2530E6;--prs:#1F29CC;--prihov:#2A2B2F;--priprs:#000000;background:var(--bg);color:var(--ink)}
+.D{--bg:#121214;--tile:#1C1C1F;--well:#26262A;--ink:#EDEBE6;--track:#3A3A40;--acc:#8F96FF;--fill:#2B36FF;--on:#FFFFFF;--wash:#23285C;--focus:#8F96FF;--unread:#2B36FF;--link:#8F96FF;--hum:#C9C7C0;--humfg:#121214;--aibg:#2B36FF;--aifg:#FFFFFF;--badgebg:#2A2C4A;--badgef:#8F96FF;--toastbg:#EDEBE6;--toastfg:#121214;--pri:#2B36FF;--prifg:#FFFFFF;--dangbg:#3D1E1B;--dangfg:#FF8A7A;--warnbg:#3A2E14;--warnfg:#E0B65A;--sucbg:#1A2A1A;--sucfg:#8FDBA0;--hov:#3F4AFF;--prs:#333EFF;--prihov:#3F4AFF;--priprs:#333EFF;background:var(--bg);color:var(--ink)}
+.LH{--bg:#E6E5E0;--tile:#F8F8F4;--well:#EEEEE9;--ink:#141416;--track:#D9D9D2;--acc:#2B36FF;--fill:#2B36FF;--on:#FFFFFF;--wash:#E3E5FF;--focus:#2B36FF;--unread:#2B36FF;--link:#2B36FF;--hum:#3A3935;--humfg:#F8F8F4;--aibg:#2B36FF;--aifg:#FFFFFF;--badgebg:#E3E5FF;--badgef:#2B36FF;--toastbg:#141416;--toastfg:#F8F8F4;--pri:#141416;--prifg:#F8F8F4;--dangbg:#FBE4E0;--dangfg:#B42318;--warnbg:#F7ECD6;--warnfg:#8A5A00;--sucbg:#D8EDE2;--sucfg:#1B5E3B;--hov:#2530E6;--prs:#1F29CC;--prihov:#2A2B2F;--priprs:#000000;background:var(--bg);color:var(--ink)}
+.DH{--bg:#121214;--tile:#1C1C1F;--well:#26262A;--ink:#EDEBE6;--track:#3A3A40;--acc:#8F96FF;--fill:#8F96FF;--on:#121214;--wash:#2A2C4A;--focus:#8F96FF;--unread:#8F96FF;--link:#8F96FF;--hum:#C9C7C0;--humfg:#121214;--aibg:#8F96FF;--aifg:#121214;--badgebg:#2A2C4A;--badgef:#8F96FF;--toastbg:#EDEBE6;--toastfg:#121214;--pri:#8F96FF;--prifg:#121214;--dangbg:#3D1E1B;--dangfg:#FF8A7A;--warnbg:#3A2E14;--warnfg:#E0B65A;--sucbg:#1A2A1A;--sucfg:#8FDBA0;--hov:#A5ABFF;--prs:#7D85F2;--prihov:#A5ABFF;--priprs:#7D85F2;background:var(--bg);color:var(--ink)}
+.col .stage{background:var(--bg)}.col .tile{background:var(--tile)}.col .well{background:var(--well)}
+.L .badge,.LH .badge{background:#1A2A1A;color:#5AAD6E}
+.D .badge{background:#3D1E1B;color:#FF8A7A}
+.DH .badge{background:#1A2A1A;color:#8FDBA0}
+</style></head><body>
+<h1>Round2書き出しレビュー見本（UIプロ独立確認）· 2026-11-09 JST</h1>
+<p class="lead">色は claude-design-export-round2 のトークン値のみ。人＝円・AI＝角丸四角＋AI。危険＝八角形／注意＝三角形（仮SVG）。標準ダークの塗り未達は意図どおり残る。</p>
+<div class="grid">
+<div class="col L"><h2>light · 標準</h2>
+<p class="sub">export値 · 墨#141416 · 人塗り円</p>
+<span class="badge">デモ対象</span>
+<div class="stage"><div class="tile">
+  <div class="tag">送信 · hover · pressed · focus</div>
+  <span class="btn" style="background:var(--fill);color:var(--on)">送信</span>
+  <span class="btn" style="background:var(--hov);color:var(--on)">hover</span>
+  <span class="btn" style="background:var(--prs);color:var(--on)">pressed</span>
+  <span class="btn focus" style="background:var(--fill);color:var(--on)">focus</span>
+  <span class="btn" style="background:var(--pri);color:var(--prifg)">受けました</span><br>
+  <span class="av circ" style="background:var(--hum);color:var(--humfg)">濱</span>
+  <span class="av sq" style="background:var(--aibg);color:var(--aifg)">リ</span>
+  <span class="ai" style="background:var(--badgebg);color:var(--badgef)">AI</span>
+  <div class="well"><span class="btn" style="background:var(--fill);color:var(--on);margin:0">送信</span></div>
+  <div class="ring"><i style="background:var(--fill)"></i><i style="background:var(--fill)"></i><i class="todo"></i></div>
+  <div class="row sel"><span class="unread"></span><strong>未読 3</strong></div>
+  <div class="row pend" style="background:var(--well)"><span style="font-size:11px">承認待ち</span></div>
+  <span class="chip" style="background:var(--dangbg);color:var(--dangfg)"><svg viewBox="0 0 12 12"><polygon points="3.5,1 8.5,1 11,3.5 11,8.5 8.5,11 3.5,11 1,8.5 1,3.5" fill="currentColor"/><text x="6" y="9" text-anchor="middle" font-size="7" font-weight="700" fill="var(--dangbg)">!</text></svg>危険</span>
+  <span class="chip" style="background:var(--warnbg);color:var(--warnfg)"><svg viewBox="0 0 12 12"><polygon points="6,1.2 11,10.5 1,10.5" fill="currentColor"/><text x="6" y="9.2" text-anchor="middle" font-size="6" font-weight="700" fill="var(--warnbg)">!</text></svg>注意</span>
+  <span class="chip" style="background:var(--sucbg);color:var(--sucfg)"><svg viewBox="0 0 12 12"><polyline points="2.5,6.5 5,9 9.5,3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>完了</span>
+  <div class="toast" style="background:var(--toastbg);color:var(--toastfg)">下書きを保存しました</div>
+  <p class="body">本文。<a class="link" href="#">リンク</a>。</p>
+  <div class="ratios ok">提案色と一致。人/tile 合格。</div>
+</div></div></div>
+<div class="col D"><h2>dark · 標準</h2>
+<p class="sub">塗り#2B36FF維持 · 例外1件のみCP記載</p>
+<span class="badge">塗り未達は値そのまま・組の欠落あり</span>
+<div class="stage"><div class="tile">
+  <div class="tag">送信 · hover · pressed · focus</div>
+  <span class="btn" style="background:var(--fill);color:var(--on)">送信</span>
+  <span class="btn" style="background:var(--hov);color:var(--on)">hover</span>
+  <span class="btn" style="background:var(--prs);color:var(--on)">pressed</span>
+  <span class="btn focus" style="background:var(--fill);color:var(--on)">focus</span>
+  <span class="btn" style="background:var(--pri);color:var(--prifg)">受けました</span><br>
+  <span class="av circ" style="background:var(--hum);color:var(--humfg)">濱</span>
+  <span class="av sq" style="background:var(--aibg);color:var(--aifg)">リ</span>
+  <span class="ai" style="background:var(--badgebg);color:var(--badgef)">AI</span>
+  <div class="well"><span class="btn" style="background:var(--fill);color:var(--on);margin:0">送信</span></div>
+  <div class="ring"><i style="background:var(--fill)"></i><i style="background:var(--fill)"></i><i class="todo"></i></div>
+  <div class="row sel"><span class="unread"></span><strong>未読 3</strong></div>
+  <div class="row pend" style="background:var(--well)"><span style="font-size:11px">承認待ち</span></div>
+  <span class="chip" style="background:var(--dangbg);color:var(--dangfg)"><svg viewBox="0 0 12 12"><polygon points="3.5,1 8.5,1 11,3.5 11,8.5 8.5,11 3.5,11 1,8.5 1,3.5" fill="currentColor"/><text x="6" y="9" text-anchor="middle" font-size="7" font-weight="700" fill="var(--dangbg)">!</text></svg>危険</span>
+  <span class="chip" style="background:var(--warnbg);color:var(--warnfg)"><svg viewBox="0 0 12 12"><polygon points="6,1.2 11,10.5 1,10.5" fill="currentColor"/><text x="6" y="9.2" text-anchor="middle" font-size="6" font-weight="700" fill="var(--warnbg)">!</text></svg>注意</span>
+  <span class="chip" style="background:var(--sucbg);color:var(--sucfg)"><svg viewBox="0 0 12 12"><polyline points="2.5,6.5 5,9 9.5,3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>完了</span>
+  <div class="toast" style="background:var(--toastbg);color:var(--toastfg)">下書きを保存しました</div>
+  <p class="body">本文。<a class="link" href="#">リンク</a>。</p>
+  <div class="ratios fail">fill/tile 2.49はknown-exception。/bg・/well・/track等はCP欠落（要追加）。</div>
+</div></div></div>
+<div class="col LH"><h2>light-high-contrast</h2>
+<p class="sub">表示名案 · 最終名未定</p>
+<span class="badge">デモ外</span>
+<div class="stage"><div class="tile">
+  <div class="tag">送信 · hover · pressed · focus</div>
+  <span class="btn" style="background:var(--fill);color:var(--on)">送信</span>
+  <span class="btn" style="background:var(--hov);color:var(--on)">hover</span>
+  <span class="btn" style="background:var(--prs);color:var(--on)">pressed</span>
+  <span class="btn focus" style="background:var(--fill);color:var(--on)">focus</span>
+  <span class="btn" style="background:var(--pri);color:var(--prifg)">受けました</span><br>
+  <span class="av circ" style="background:var(--hum);color:var(--humfg)">濱</span>
+  <span class="av sq" style="background:var(--aibg);color:var(--aifg)">リ</span>
+  <span class="ai" style="background:var(--badgebg);color:var(--badgef)">AI</span>
+  <div class="well"><span class="btn" style="background:var(--fill);color:var(--on);margin:0">送信</span></div>
+  <div class="ring"><i style="background:var(--fill)"></i><i style="background:var(--fill)"></i><i class="todo"></i></div>
+  <div class="row sel"><span class="unread"></span><strong>未読 3</strong></div>
+  <div class="row pend" style="background:var(--well)"><span style="font-size:11px">承認待ち</span></div>
+  <span class="chip" style="background:var(--dangbg);color:var(--dangfg)"><svg viewBox="0 0 12 12"><polygon points="3.5,1 8.5,1 11,3.5 11,8.5 8.5,11 3.5,11 1,8.5 1,3.5" fill="currentColor"/><text x="6" y="9" text-anchor="middle" font-size="7" font-weight="700" fill="var(--dangbg)">!</text></svg>危険</span>
+  <span class="chip" style="background:var(--warnbg);color:var(--warnfg)"><svg viewBox="0 0 12 12"><polygon points="6,1.2 11,10.5 1,10.5" fill="currentColor"/><text x="6" y="9.2" text-anchor="middle" font-size="6" font-weight="700" fill="var(--warnbg)">!</text></svg>注意</span>
+  <span class="chip" style="background:var(--sucbg);color:var(--sucfg)"><svg viewBox="0 0 12 12"><polyline points="2.5,6.5 5,9 9.5,3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>完了</span>
+  <div class="toast" style="background:var(--toastbg);color:var(--toastfg)">下書きを保存しました</div>
+  <p class="body">本文。<a class="link u" href="#">リンク</a>。</p>
+  <div class="ratios ok">AA。形＋文字の手がかりあり。</div>
+</div></div></div>
+<div class="col DH"><h2>dark-high-contrast</h2>
+<p class="sub">塗り#8F96FF · 文字#121214</p>
+<span class="badge">デモ外</span>
+<div class="stage"><div class="tile">
+  <div class="tag">送信 · hover · pressed · focus</div>
+  <span class="btn" style="background:var(--fill);color:var(--on)">送信</span>
+  <span class="btn" style="background:var(--hov);color:var(--on)">hover</span>
+  <span class="btn" style="background:var(--prs);color:var(--on)">pressed</span>
+  <span class="btn focus" style="background:var(--fill);color:var(--on)">focus</span>
+  <span class="btn" style="background:var(--pri);color:var(--prifg)">受けました</span><br>
+  <span class="av circ" style="background:var(--hum);color:var(--humfg)">濱</span>
+  <span class="av sq" style="background:var(--aibg);color:var(--aifg)">リ</span>
+  <span class="ai" style="background:var(--badgebg);color:var(--badgef)">AI</span>
+  <div class="well"><span class="btn" style="background:var(--fill);color:var(--on);margin:0">送信</span></div>
+  <div class="ring"><i style="background:var(--fill)"></i><i style="background:var(--fill)"></i><i class="todo"></i></div>
+  <div class="row sel"><span class="unread"></span><strong>未読 3</strong></div>
+  <div class="row pend" style="background:var(--well)"><span style="font-size:11px">承認待ち</span></div>
+  <span class="chip" style="background:var(--dangbg);color:var(--dangfg)"><svg viewBox="0 0 12 12"><polygon points="3.5,1 8.5,1 11,3.5 11,8.5 8.5,11 3.5,11 1,8.5 1,3.5" fill="currentColor"/><text x="6" y="9" text-anchor="middle" font-size="7" font-weight="700" fill="var(--dangbg)">!</text></svg>危険</span>
+  <span class="chip" style="background:var(--warnbg);color:var(--warnfg)"><svg viewBox="0 0 12 12"><polygon points="6,1.2 11,10.5 1,10.5" fill="currentColor"/><text x="6" y="9.2" text-anchor="middle" font-size="6" font-weight="700" fill="var(--warnbg)">!</text></svg>注意</span>
+  <span class="chip" style="background:var(--sucbg);color:var(--sucfg)"><svg viewBox="0 0 12 12"><polyline points="2.5,6.5 5,9 9.5,3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>完了</span>
+  <div class="toast" style="background:var(--toastbg);color:var(--toastfg)">下書きを保存しました</div>
+  <p class="body">本文。<a class="link u" href="#">リンク</a>。</p>
+  <div class="ratios ok">塗り/tile 6.46。実質例外ゼロ。</div>
+</div></div></div>
+</div>
+</body></html>
