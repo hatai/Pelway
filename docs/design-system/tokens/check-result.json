@@ -1,0 +1,57 @@
+{
+  "tokens_path": "/workspace/pelway-design-system/claude-design-export-round2-2026-11-09/pelway.tokens.json",
+  "expected_path": "/workspace/pelway-design-system/ui-pro-review/claude-design-fix-round2-2026-11-09/expected-values.json",
+  "ok": true,
+  "structure": {
+    "dollar_value_count": 514,
+    "looks_dtcg": true,
+    "forbidden_root_keys_present": [],
+    "forbidden_substring_hits": [],
+    "theme_key_counts": {
+      "light": 62,
+      "dark": 62,
+      "light-high-contrast": 62,
+      "dark-high-contrast": 62
+    },
+    "has_2B37FF": false
+  },
+  "value_mismatches": [],
+  "missing_themes": [],
+  "missing_keys": [],
+  "unreadable_values": [],
+  "notes": [],
+  "round2": {
+    "missing_keys_round2": [],
+    "missing_keys_other": [],
+    "contrast_issues_count": 0,
+    "personal_name_hits": 0,
+    "value_mismatches_count": 0,
+    "only_round2_failures": false
+  },
+  "contrast_pairs_path": "/workspace/pelway-design-system/claude-design-export-round2-2026-11-09/contrast-pairs.json",
+  "contrast_exceptions_documented": [
+    {
+      "theme": "dark",
+      "fg": "#2B36FF",
+      "bg": "#1C1C1F",
+      "kind": "known-exception",
+      "ratio": 2.49,
+      "maps_to": "acc-fill / tile（標準）",
+      "reason": "オーナー決定：標準ダークは群青塗り維持。ハイコントラストで解消。判定では例外として別に数える。"
+    }
+  ],
+  "contrast_issues": [],
+  "personal_name_hits": [],
+  "summary": {
+    "mismatch_count": 0,
+    "missing_theme_count": 0,
+    "missing_key_count": 0,
+    "unreadable_count": 0,
+    "forbidden_root_count": 0,
+    "forbidden_substring_count": 0,
+    "contrast_issue_count": 0,
+    "personal_name_hit_count": 0,
+    "pass": true,
+    "only_round2_failures": false
+  }
+}
