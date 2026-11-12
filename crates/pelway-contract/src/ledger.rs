@@ -1326,7 +1326,8 @@ mod tests {
     // #86: 役割（代表）を承認者にしたカードは、代表だけが承認できる。
     #[test]
     fn role_decider_allows_only_the_representative() {
-        let mut ledger = ApprovalLedger::with_policy(policy_with_representative());
+        let mut ledger =
+            ApprovalLedger::with_policy(&"ws-synthetic".into(), policy_with_representative());
         ledger
             .create_card(card_with_decider(
                 "card-role",
@@ -1342,10 +1343,13 @@ mod tests {
         assert!(ledger.send_log().is_empty());
         // レビュー2 (PR #119): 作成後に代表が変わっても、承認できるのは
         // カード作成時の代表だけ（承認者は作成時に固定。ADR 0002）。
-        ledger.set_policy(ApprovalPolicy {
-            allow_requester_as_decider: true,
-            representative: Some("m-human-new-rep".into()),
-        });
+        ledger.set_policy(
+            &"ws-synthetic".into(),
+            ApprovalPolicy {
+                allow_requester_as_decider: true,
+                representative: Some("m-human-new-rep".into()),
+            },
+        );
         assert_eq!(
             ledger.approve(req.clone(), &"m-human-new-rep".into()),
             Err(ApproveError::NotDecider),
