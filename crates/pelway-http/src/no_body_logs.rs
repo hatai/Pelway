@@ -154,7 +154,7 @@ fn post_approve(addr: SocketAddr, body: &str) -> (u16, String) {
         addr,
         "POST",
         &pelway_contract::approval::approve_path(&"card-flow-1".into()),
-        &[("Content-Type", "application/json")],
+        &comment_headers(),
         body.as_bytes(),
     )
 }
@@ -252,7 +252,7 @@ fn rejected_and_internal_error_have_no_canary_anywhere() {
         addr,
         "POST",
         &pelway_contract::approval::approve_path(&"card-rej".into()),
-        &[("Content-Type", "application/json")],
+        &comment_headers(),
         body.as_bytes(),
     );
     assert_eq!(status, 409);
