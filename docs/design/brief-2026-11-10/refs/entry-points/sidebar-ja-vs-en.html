@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>S01 sidebar · ja vs en entry points</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Sans+JP:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E6E5E0;--tile:#F8F8F4;--well:#EEEEE9;--ink:#111214;--sub:#5A5852;--mute:#66635B;
+  --acc:#2B36FF;--acc-fill:#2B36FF;--accw:#E3E5FF;--acc-on:#fff;
+  --sh:0 1px 2px rgba(17,18,20,.05),0 10px 30px rgba(17,18,20,.06);
+  --line:#DEDDD7;--page-bg:#D8D7D0;
+  --caution-fg:#8A5A00;--caution-bg:#F7ECD6;
+}
+*{box-sizing:border-box;margin:0}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.review-page{min-height:100vh;background:var(--page-bg);color:var(--ink);font:400 15px/24px "Geist","Noto Sans JP",sans-serif;padding:28px 24px 60px}
+.review-head{max-width:1180px;margin:0 auto 20px}
+.review-head h1{font:500 22px/28px "Geist","Noto Sans JP"}
+.review-head .meta{font:400 12px/18px "Geist Mono","Noto Sans JP";color:var(--sub);margin-top:6px}
+.badge-prop{display:inline-flex;font:500 11px/16px "Geist Mono","Noto Sans JP";color:var(--caution-fg);background:var(--caution-bg);border-radius:8px;padding:2px 8px;margin-left:8px}
+.compare{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.state{background:var(--bg);border-radius:20px;padding:16px;box-shadow:var(--sh)}
+.state-label{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:0 4px;flex-wrap:wrap}
+.state-label .id{font:600 12px/16px "Geist Mono";background:var(--ink);color:var(--tile);border-radius:8px;padding:2px 8px}
+.state-label .ttl{font:500 14px/20px "Geist","Noto Sans JP"}
+.state-label .note{font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute);margin-left:auto}
+.app-shell{display:grid;grid-template-columns:220px 1fr;min-height:460px;background:var(--tile);border-radius:16px;overflow:hidden;border:1px solid var(--line)}
+.rail{display:flex;flex-direction:column;gap:2px;padding:14px 10px;background:var(--tile);border-right:1px solid var(--well);min-width:0}
+.rail .org{font-weight:600;font-size:13px;padding:0 8px}
+.rail .who{font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute);padding:2px 8px 10px}
+.rail .it{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 10px;border-radius:12px;font-size:13px;color:var(--sub);width:100%;text-align:left}
+.rail .it.on{background:var(--accw);color:var(--acc);font-weight:600}
+.rail .grp{font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute);margin:10px 10px 4px}
+.rail .acct{margin-top:auto;padding-top:10px}
+.rail .acct-btn{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border-radius:12px;text-align:left}
+.rail .acct-btn:hover{background:var(--well)}
+.av{width:28px;height:28px;border-radius:50%;background:var(--well);display:grid;place-items:center;font-size:11px;font-weight:600}
+.main{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.topbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.pill{display:inline-flex;font:500 11px/16px "Geist Mono","Noto Sans JP";border-radius:8px;padding:3px 8px}
+.pill.demo{background:var(--caution-bg);color:var(--caution-fg)}
+.pill.ai{background:var(--accw);color:var(--acc)}
+.ch-title{font:500 15px/22px "Geist","Noto Sans JP"}
+.msg{font-size:13px;line-height:20px;color:var(--sub);padding:8px 0}
+.gone{display:none !important}
+.legend{max-width:1180px;margin:20px auto 0;background:var(--tile);border-radius:16px;padding:16px 18px;border:1px solid var(--line);font-size:13px;line-height:20px}
+.legend h2{font:500 14px/20px "Geist","Noto Sans JP";margin-bottom:8px}
+.legend table{width:100%;border-collapse:collapse;font-size:12px}
+.legend th,.legend td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--well);vertical-align:top}
+.legend th{font:500 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute)}
+.tag-hide{display:inline-block;font:500 10px/14px "Geist Mono";color:var(--caution-fg);background:var(--caution-bg);border-radius:6px;padding:1px 6px}
+.tag-show{display:inline-block;font:500 10px/14px "Geist Mono";color:var(--acc);background:var(--accw);border-radius:6px;padding:1px 6px}
+.ex{max-width:1180px;margin:14px auto 0;font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute)}
+</style></head>
+<body><div class="review-page">
+<header class="review-head"><h1>S01 サイドバー入口 · 日英比較<span class="badge-prop">提案</span></h1>
+<p class="meta">§4 · English mode hides non-demo entries · no “switch to Japanese” tooltip · keyboard order stays continuous</p></header>
+
+<div class="compare">
+<section class="state" aria-label="JA sidebar">
+  <div class="state-label"><span class="id">S01-JA</span><span class="ttl">日本語</span><span class="note">wiki/通知はデモ外なので日英とも非表示</span></div>
+  <div class="app-shell">
+    <nav class="rail" aria-label="サイドバー">
+      <div class="org">株式会社サンプル開発</div>
+      <div class="who">濱田</div>
+      <div class="grp" data-ftl="nav-group-channels">チャンネル</div>
+      <button type="button" class="it on" data-ftl="nav-channel-cases"># 案件B</button>
+      <div class="grp" data-ftl="nav-group-tools">ツール</div>
+      <!-- wiki/notifications: out of demo in BOTH languages → gone -->
+      <button type="button" class="it gone" data-ftl="nav-wiki" tabindex="-1" aria-hidden="true">Wiki・ナレッジ</button>
+      <button type="button" class="it gone" data-ftl="nav-notifications" tabindex="-1" aria-hidden="true">通知</button>
+      <button type="button" class="it" data-ftl="nav-data-protection">データ保護</button>
+      <button type="button" class="it" data-ftl="nav-settings">設定</button>
+      <div class="acct">
+        <button type="button" class="acct-btn" aria-label="アカウント">
+          <div class="av">濱</div>
+          <div><div style="font-size:12px;font-weight:500">濱田</div><div style="font:400 10px/14px Geist Mono;color:var(--mute)">Language · 日本語</div></div>
+        </button>
+      </div>
+    </nav>
+    <div class="main">
+      <div class="topbar">
+        <span class="pill demo">デモ・模擬応答</span>
+        <span class="pill ai">AI</span>
+      </div>
+      <div class="ch-title"># 案件B</div>
+      <p class="msg">デモ経路のチャンネル。Wiki・通知の入口は DOM に出さない（空の tab ストップを残さない）。</p>
+    </div>
+  </div>
+</section>
+
+<section class="state" aria-label="EN sidebar">
+  <div class="state-label"><span class="id">S01-EN</span><span class="ttl">English</span><span class="note">non-demo entries hidden · language menu kept</span></div>
+  <div class="app-shell">
+    <nav class="rail" aria-label="Sidebar">
+      <div class="org">Sample Dev Inc.</div>
+      <div class="who">Hamada</div>
+      <div class="grp" data-ftl="nav-group-channels">Channels</div>
+      <button type="button" class="it on" data-ftl="nav-channel-cases"># Case B</button>
+      <div class="grp" data-ftl="nav-group-tools">Tools</div>
+      <button type="button" class="it gone" data-ftl="nav-wiki" tabindex="-1" aria-hidden="true">Wiki &amp; knowledge</button>
+      <button type="button" class="it gone" data-ftl="nav-notifications" tabindex="-1" aria-hidden="true">Notifications</button>
+      <!-- Data protection IS on the English demo path (S05) → shown -->
+      <button type="button" class="it" data-ftl="nav-data-protection">Data protection</button>
+      <button type="button" class="it" data-ftl="nav-settings">Settings</button>
+      <div class="acct">
+        <button type="button" class="acct-btn" aria-label="Account">
+          <div class="av">H</div>
+          <div><div style="font-size:12px;font-weight:500">Hamada</div><div style="font:400 10px/14px Geist Mono;color:var(--mute)">Language · English</div></div>
+        </button>
+      </div>
+    </nav>
+    <div class="main">
+      <div class="topbar">
+        <span class="pill demo">Demo · simulated responses</span>
+        <span class="pill ai">AI</span>
+      </div>
+      <div class="ch-title"># Case B</div>
+      <p class="msg">If language switches to English while on a non-demo-path screen, return to S01 and keep the language menu working. No mixed-language tooltip.</p>
+    </div>
+  </div>
+</section>
+</div>
+
+<div class="legend">
+  <h2>§4.2 入口ごとの扱い（UI決定）</h2>
+  <table>
+    <thead><tr><th>入口</th><th>日本語</th><th>English</th><th>根拠</th></tr></thead>
+    <tbody>
+      <tr><td>S01 チャンネル（案件B）</td><td><span class="tag-show">表示</span></td><td><span class="tag-show">show</span></td><td>デモ経路</td></tr>
+      <tr><td>S02 作業を見る / S03 判断待ち / S04 承認</td><td><span class="tag-show">表示</span>（経路内）</td><td><span class="tag-show">show</span>（デモで通るなら英語）</td><td>§4.1</td></tr>
+      <tr><td>S05 データ保護</td><td><span class="tag-show">表示</span></td><td><span class="tag-show">show</span></td><td>デモ経路。削除・同意は人が訳す</td></tr>
+      <tr><td>S06 言語切替</td><td><span class="tag-show">常時</span></td><td><span class="tag-show">always</span></td><td>入口制御に使う。消さない</td></tr>
+      <tr><td>Wiki／ナレッジ</td><td><span class="tag-hide">表示しない</span></td><td><span class="tag-hide">hide</span></td><td>デモ外（両言語）。RUI 147</td></tr>
+      <tr><td>通知</td><td><span class="tag-hide">表示しない</span></td><td><span class="tag-hide">hide</span></td><td>6段階外。RUI 158</td></tr>
+      <tr><td>ログイン単独・チャンネル一覧単独</td><td><span class="tag-hide">台本に無ければ非表示</span></td><td><span class="tag-hide">hide</span></td><td>§2.2 未確認 → デモ外扱い</td></tr>
+      <tr><td>製品化のみ（正式ROPA 等）</td><td><span class="tag-hide">表示しない</span></td><td><span class="tag-hide">hide</span></td><td>GDPR-BE 製品化まで</td></tr>
+      <tr><td>「日本語に切り替えて開く」ツールチップ</td><td colspan="2"><span class="tag-hide">出さない</span></td><td>言語混在＋デモ経路外へ誘導するため不採用</td></tr>
+    </tbody>
+  </table>
+</div>
+<p class="ex">Hidden entries use display:none / not rendered — no empty tab stops. S00 banners remain on every S00–S05 screen in both languages.</p>
+</div></body></html>

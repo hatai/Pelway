@@ -36,7 +36,7 @@ impl std::fmt::Display for AttachmentError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidSegment { segment } => {
-                write!(f, "安全な 1 パス成分でない: {segment:?}")
+                write!(f, "1 パス成分でない: {segment:?}")
             }
             Self::NotFound => write!(f, "添付が無い"),
             Self::Io(message) => write!(f, "添付の下位失敗: {message}"),

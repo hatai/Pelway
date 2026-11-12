@@ -1,0 +1,346 @@
+{
+  "meta": {
+    "generated": "2026-11-09 18:57 JST",
+    "round": 2,
+    "source": "round1 expected + v2 tokens + export pending-bg + オーナー了承 18:53（報告経由）",
+    "themes": [
+      "light",
+      "dark",
+      "light-high-contrast",
+      "dark-high-contrast"
+    ],
+    "notes": [
+      "欠け6トークンを4テーマに追加",
+      "pending-bg は行の地として残す（pending-bar は左帯。別意味）",
+      "contrast-pairs の面・線は decorative。標準 dark 塗り/面は known-exception。塗り色の text 組は acc に付け替え",
+      "書き出し内の個人名（特定の人名）は0件。design-system.md では「オーナー」に置換"
+    ]
+  },
+  "colors": {
+    "light": {
+      "bg": "#E6E5E0",
+      "tile": "#F8F8F4",
+      "well": "#EEEEE9",
+      "track": "#D9D9D2",
+      "ink": "#141416",
+      "sub": "#5A5852",
+      "mute": "#66635B",
+      "acc": "#2B36FF",
+      "acc-fill": "#2B36FF",
+      "acc-wash": "#E3E5FF",
+      "on-acc": "#FFFFFF",
+      "primary-bg": "#141416",
+      "primary-fg": "#F8F8F4",
+      "primary-bg-hover": "#2A2B2F",
+      "primary-bg-pressed": "#000000",
+      "acc-fill-hover": "#2530E6",
+      "acc-fill-pressed": "#1F29CC",
+      "avatar-human-bg": "#3A3935",
+      "avatar-human-fg": "#F8F8F4",
+      "avatar-ai-bg": "#2B36FF",
+      "avatar-ai-fg": "#FFFFFF",
+      "ai-badge-bg": "#E3E5FF",
+      "ai-badge-fg": "#2B36FF",
+      "toast-bg": "#141416",
+      "toast-fg": "#F8F8F4",
+      "danger-fg": "#B42318",
+      "danger-bg": "#FBE4E0",
+      "warning-fg": "#8A5A00",
+      "warning-bg": "#F7ECD6",
+      "success-fg": "#1B5E3B",
+      "success-bg": "#D8EDE2",
+      "focus-ring": "#2B36FF",
+      "unread": "#2B36FF",
+      "selected-wash": "#E3E5FF",
+      "link": "#2B36FF",
+      "pending-bar": "#141416",
+      "border-form": "#7A7871",
+      "pending-bg": "#EEECE7"
+    },
+    "dark": {
+      "bg": "#121214",
+      "tile": "#1C1C1F",
+      "well": "#26262A",
+      "track": "#3A3A40",
+      "ink": "#EDEBE6",
+      "sub": "#A3A098",
+      "mute": "#A3A098",
+      "acc": "#8F96FF",
+      "acc-fill": "#2B36FF",
+      "acc-wash": "#23285C",
+      "on-acc": "#FFFFFF",
+      "primary-bg": "#2B36FF",
+      "primary-fg": "#FFFFFF",
+      "primary-bg-hover": "#3F4AFF",
+      "primary-bg-pressed": "#333EFF",
+      "acc-fill-hover": "#3F4AFF",
+      "acc-fill-pressed": "#333EFF",
+      "avatar-human-bg": "#C9C7C0",
+      "avatar-human-fg": "#121214",
+      "avatar-ai-bg": "#2B36FF",
+      "avatar-ai-fg": "#FFFFFF",
+      "ai-badge-bg": "#2A2C4A",
+      "ai-badge-fg": "#8F96FF",
+      "toast-bg": "#EDEBE6",
+      "toast-fg": "#121214",
+      "danger-fg": "#FF8A7A",
+      "danger-bg": "#3D1E1B",
+      "warning-fg": "#E0B65A",
+      "warning-bg": "#3A2E14",
+      "success-fg": "#8FDBA0",
+      "success-bg": "#1A2A1A",
+      "focus-ring": "#8F96FF",
+      "unread": "#2B36FF",
+      "selected-wash": "#23285C",
+      "link": "#8F96FF",
+      "pending-bar": "#EDEBE6",
+      "border-form": "#75736D",
+      "pending-bg": "#26262A"
+    },
+    "light-high-contrast": {
+      "bg": "#E6E5E0",
+      "tile": "#F8F8F4",
+      "well": "#EEEEE9",
+      "track": "#D9D9D2",
+      "ink": "#141416",
+      "sub": "#5A5852",
+      "mute": "#66635B",
+      "acc": "#2B36FF",
+      "acc-fill": "#2B36FF",
+      "acc-wash": "#E3E5FF",
+      "on-acc": "#FFFFFF",
+      "primary-bg": "#141416",
+      "primary-fg": "#F8F8F4",
+      "primary-bg-hover": "#2A2B2F",
+      "primary-bg-pressed": "#000000",
+      "acc-fill-hover": "#2530E6",
+      "acc-fill-pressed": "#1F29CC",
+      "avatar-human-bg": "#3A3935",
+      "avatar-human-fg": "#F8F8F4",
+      "avatar-ai-bg": "#2B36FF",
+      "avatar-ai-fg": "#FFFFFF",
+      "ai-badge-bg": "#E3E5FF",
+      "ai-badge-fg": "#2B36FF",
+      "toast-bg": "#141416",
+      "toast-fg": "#F8F8F4",
+      "danger-fg": "#B42318",
+      "danger-bg": "#FBE4E0",
+      "warning-fg": "#8A5A00",
+      "warning-bg": "#F7ECD6",
+      "success-fg": "#1B5E3B",
+      "success-bg": "#D8EDE2",
+      "focus-ring": "#2B36FF",
+      "unread": "#2B36FF",
+      "selected-wash": "#E3E5FF",
+      "link": "#2B36FF",
+      "pending-bar": "#141416",
+      "border-form": "#7A7871",
+      "pending-bg": "#EEECE7"
+    },
+    "dark-high-contrast": {
+      "bg": "#121214",
+      "tile": "#1C1C1F",
+      "well": "#26262A",
+      "track": "#3A3A40",
+      "ink": "#EDEBE6",
+      "sub": "#A3A098",
+      "mute": "#A3A098",
+      "acc": "#8F96FF",
+      "acc-fill": "#8F96FF",
+      "acc-wash": "#2A2C4A",
+      "on-acc": "#121214",
+      "primary-bg": "#8F96FF",
+      "primary-fg": "#121214",
+      "primary-bg-hover": "#A5ABFF",
+      "primary-bg-pressed": "#7D85F2",
+      "acc-fill-hover": "#A5ABFF",
+      "acc-fill-pressed": "#7D85F2",
+      "avatar-human-bg": "#C9C7C0",
+      "avatar-human-fg": "#121214",
+      "avatar-ai-bg": "#8F96FF",
+      "avatar-ai-fg": "#121214",
+      "ai-badge-bg": "#2A2C4A",
+      "ai-badge-fg": "#8F96FF",
+      "toast-bg": "#EDEBE6",
+      "toast-fg": "#121214",
+      "danger-fg": "#FF8A7A",
+      "danger-bg": "#3D1E1B",
+      "warning-fg": "#E0B65A",
+      "warning-bg": "#3A2E14",
+      "success-fg": "#8FDBA0",
+      "success-bg": "#1A2A1A",
+      "focus-ring": "#8F96FF",
+      "unread": "#8F96FF",
+      "selected-wash": "#2A2C4A",
+      "link": "#8F96FF",
+      "pending-bar": "#EDEBE6",
+      "border-form": "#75736D",
+      "pending-bg": "#26262A"
+    }
+  },
+  "brand": {
+    "blue": "#2B36FF",
+    "ink": "#141416",
+    "ink-on-dark": "#EDEBE6"
+  },
+  "shape": {
+    "avatar-human": {
+      "shape": "circle",
+      "forbid_radius_px": [
+        12,
+        7
+      ],
+      "note": "brand-ui確定：人は丸。角丸12px/7px禁止"
+    },
+    "avatar-ai": {
+      "shape": "rounded-square",
+      "note": "AIは角丸四角"
+    },
+    "icon-danger": {
+      "shape": "octagon",
+      "label": "危険",
+      "provisional": true
+    },
+    "icon-warning": {
+      "shape": "triangle",
+      "label": "注意",
+      "provisional": true
+    }
+  },
+  "structure": {
+    "require_dollar_value": true,
+    "require_dollar_type": true,
+    "forbid_root_keys": [
+      "$meta",
+      "contrast",
+      "undecided",
+      "status",
+      "humanVsAi",
+      "changesFromMock"
+    ],
+    "forbid_value_substrings": [
+      "var(--",
+      "null",
+      "#2B37FF"
+    ],
+    "references_must_be_brace_form": true,
+    "contrast_pairs": "separate file contrast-pairs.json with {fg,bg,min,kind} OR omit; do not embed in tokens root",
+    "theme_paths": [
+      "color.light",
+      "color.dark",
+      "color.light-high-contrast",
+      "color.dark-high-contrast"
+    ],
+    "same_semantic_keys_across_themes": true,
+    "dimensions_must_have_unit": true,
+    "google_fonts_import": "keep for now (O9 legal pending)",
+    "forbid_personal_name_substrings": [
+      "濱田"
+    ],
+    "forbid_personal_name_label": "personal_name_ban"
+  },
+  "contrast_pairs_policy": [
+    {
+      "fg": "#EEEEE9",
+      "bg": "#F8F8F4",
+      "themes": [
+        "light",
+        "light-high-contrast"
+      ],
+      "expected_kind": "decorative",
+      "maps_to": "well / tile",
+      "reason": "面の段差のみ。操作の唯一の手がかりではない。入力欄の枠は border-form を使う。"
+    },
+    {
+      "fg": "#D9D9D2",
+      "bg": "#F8F8F4",
+      "themes": [
+        "light",
+        "light-high-contrast"
+      ],
+      "expected_kind": "decorative",
+      "maps_to": "track / tile",
+      "reason": "進み具合の「まだ」区間の地。済み側は acc-fill との差と斜線パターンで示す（ハイコントラスト）。"
+    },
+    {
+      "fg": "#F8F8F4",
+      "bg": "#E6E5E0",
+      "themes": [
+        "light",
+        "light-high-contrast"
+      ],
+      "expected_kind": "decorative",
+      "maps_to": "tile / bg",
+      "reason": "カードとページ背景の段差。装飾。"
+    },
+    {
+      "fg": "#2E2E33",
+      "bg": "#1C1C1F",
+      "themes": [
+        "dark",
+        "dark-high-contrast"
+      ],
+      "expected_kind": "decorative",
+      "maps_to": "line / tile",
+      "reason": "区切り線。状態の唯一手がかりではない。"
+    },
+    {
+      "fg": "#2B36FF",
+      "bg": "#1C1C1F",
+      "themes": [
+        "dark"
+      ],
+      "expected_kind": "known-exception",
+      "role": "nontext",
+      "maps_to": "acc-fill / tile（標準）",
+      "reason": "オーナー決定：標準ダークは群青塗り維持。ハイコントラストで解消。判定では例外として別に数える。"
+    },
+    {
+      "fg": "#2B36FF",
+      "bg": "#1C1C1F",
+      "themes": [
+        "dark"
+      ],
+      "expected_kind": "retarget-text",
+      "role": "text",
+      "maps_to": "誤って塗り色を文字にした組",
+      "reason": "暗い面の文字に #2B36FF を使わない。文字アクセントは既存 acc（#8F96FF、tileに対し6.46≥4.5）。contrast-pairs の text 組は fg を acc に直すか削除。"
+    }
+  ],
+  "pending_bg_decision": {
+    "action": "keep",
+    "values": {
+      "light": "#EEECE7",
+      "dark": "#26262A",
+      "light-high-contrast": "#EEECE7",
+      "dark-high-contrast": "#26262A"
+    },
+    "reason": "書き出しで --pw-pending-bg として承認待ち行の地に使われている。pending-bar（左2px帯）とは別役割。合格している面差（装飾扱い）なので残し、期待値に追加。"
+  },
+  "round2_missing_keys_expected_until_fixed": [
+    "light.primary-bg-hover",
+    "light.primary-bg-pressed",
+    "light.success-fg",
+    "light.success-bg",
+    "light.pending-bar",
+    "light.border-form",
+    "dark.primary-bg-hover",
+    "dark.primary-bg-pressed",
+    "dark.success-fg",
+    "dark.success-bg",
+    "dark.pending-bar",
+    "dark.border-form",
+    "light-high-contrast.primary-bg-hover",
+    "light-high-contrast.primary-bg-pressed",
+    "light-high-contrast.success-fg",
+    "light-high-contrast.success-bg",
+    "light-high-contrast.pending-bar",
+    "light-high-contrast.border-form",
+    "dark-high-contrast.primary-bg-hover",
+    "dark-high-contrast.primary-bg-pressed",
+    "dark-high-contrast.success-fg",
+    "dark-high-contrast.success-bg",
+    "dark-high-contrast.pending-bar",
+    "dark-high-contrast.border-form"
+  ]
+}
