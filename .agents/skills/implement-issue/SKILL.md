@@ -154,4 +154,5 @@ memo: docs/worklogs/issue-<N>.md（round <R>）
 | 修正のたびに新しいブランチを作る | 同じブランチに積む |
 | 素の `gh pr create` を使う | `scripts/agent-gh dev pr create --draft` |
 | 実装者メモに「特になし」や一般論を書く | 迷った文を「」で引用し、置いた仮定と選んだ解釈を書く |
+| `pr-size-exception` ラベルを付ける、または `<!-- pr-size-exception -->` で始まるコメントを書く | 付けない・書かない。pr-size の超過を認めるのは指揮役だけ。超えたら止まる |
 | pr-size を合わせるためにテストや説明を削る | 重複の除去で収まらなければ止まり、分割案と実装者メモを Issue に書く |

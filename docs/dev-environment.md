@@ -173,6 +173,22 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 
 `network_proxy` は Codex の試験的な機能で、`--enable network_proxy` が無いと権限プロファイルのネットワーク制限が効かない。Codex を更新したら `mise run codex-review-check` で、GitHub にはつながり、それ以外にはつながらないことを確かめる。
 
+## レビュー担当の Claude（claude_review）
+
+高リスクの PR と抜き取りのレビュースレッドは、T3 の Claude インスタンス `claude_review` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。Codex のレビュー担当と同じ条件にそろえる。
+
+| 場所 | 設定 |
+|---|---|
+| `~/.t3/userdata/settings.json` の `providerInstances.claude_review` | `driver: claudeAgent`、`environment` に `CLAUDE_CONFIG_DIR=~/.claude-review`（指揮役・実装担当の Claude と設定を分ける） |
+| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドを読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`）と `scripts/agent-gh review` に絞り、ファイルの書き込みを拒否する |
+| ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
+
+運用に入る前に、`auto-accept-edits` のスレッドで次を確かめる。確かめるまでは `claude_review` を使わない。
+
+- `scripts/agent-gh review api /rate_limit` が成功する（GitHub にはつながる）
+- `curl -sS https://example.com` が失敗する（GitHub 以外にはつながらない）
+- `git switch` と、ファイルの書き込みが拒否される
+
 ## シークレットの扱い（fnox）
 
 - `fnox.toml` には**シークレットの名前と、秘密を含まないローカル開発用の既定値だけ**を置く。実際の秘密値（`value`）をこのファイルへ書かないこと。
