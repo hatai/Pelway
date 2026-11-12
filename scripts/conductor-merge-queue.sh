@@ -10,7 +10,7 @@ merge_one() {
     git fetch -q origin
     H=$(git rev-parse "origin/$br")
     n=$(git rev-list "$rsha..$H" --no-merges ^origin/main | wc -l)
-    if [ "$n" != 0 ]; then echo "#$pr new non-main commits ($n) since review; re-review needed"; return; fi
+    if [ "$n" != 0 ]; then echo "#$pr new non-main commits ($n) since review; re-review needed"; return 1; fi
     if ! git merge-base --is-ancestor origin/main "$H"; then
       scripts/agent-gh dev pr update-branch "$pr" >/dev/null 2>&1 || { echo "#$pr update-branch failed (conflict?)"; return 1; }
       sleep 20; git fetch -q origin; H=$(git rev-parse "origin/$br")
