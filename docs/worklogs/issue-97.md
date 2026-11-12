@@ -15,3 +15,11 @@
 3. 仮定と解釈: PR-B の GitHub base を PR-A のブランチ（agent/97-passkey-login）にした積み上げ PR と解釈した（issue-96 の #129/#130 と同じ形。base 行には base ブランチ名と PR 番号を併記）。分割線は指揮役承認のコメント案どおり session+passkey / OIDC+worklog とし、`session::AuthMethod::Oidc` 変種は pub のため警告にならず B 側の受け口として A に残した。選ばなかった解釈: base=main の独立 2 PR（同じ差分が二重に載る）。
 4. 足りなかった情報・検証手段: PR-A（+798/-0）は上限 800 に 2 行の余裕しかなく、レビュー指摘で数行足すだけで超過しうる。超過時の扱い（例外ラベル or 再度分割）はコメント欄で指揮役判断を仰ぐしかない。
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の表に「分割が承認された積み上げ PR では base を親 PR のブランチにし、pr-size は --base <親ブランチ> で測る」を足す（issue-96 で scripts/pr-size.sh --base の使い方だけはログに残ったが skill 本文には無い）。
+
+## 実装者メモ（round 3）
+
+1. 詰まった箇所: PR #145 のレビュー must-fix（passkey.rs `revoke_credential` が未認証 JSON の `member_id`/`credential_id` で credential 削除と全セッション失効ができた）。直すと行数が増えるが PR-A は +798/800 で余力が無かったため、passkey.rs 内で 10 箇所に散らばっていた `.lock().unwrap_or_else(|p| p.into_inner())` を `lock` ヘルパーに集約し（重複の除去、-38 行）、修正分を吸収して +780/-0 に収めた。ほか: 一時 `cargo` が /usr/bin の rustc 1.75.0 を拾い thiserror の rust-version 検査で落ちる現象があった（再実行で mise 側 1.96.0 に戻った。hook も同じ原因と思われ `mise exec` 経由が安定）。
+2. 曖昧だった文: 「PR #146 は PR #145 のブランチに積んであるので、直したら PR #146 のブランチにも取り込む」（指揮役の t3 thread send）。取り込みが rebase か merge か書かれていない。
+3. 仮定と解釈: rebase だと force-push になるため、`git merge agent/97-passkey-login` で取り込むと解釈した（main にも `Merge branch 'main' into agent/...` の履歴があり、このリポジトリは merge 取り込みの運用）。must-fix は「for a self-service endpoint derive the member ID from the session」の文言どおり、member をセッション Cookie から特定する本人向け経路にした。member 単位のセッション全失効は従来どおり（呼び出し元のセッションも消える）。選ばなかった解釈: `member_id` を body に残したまま管理者権限チェックを足す（管理者モデルが spike に無い）。
+4. 足りなかった情報・検証手段: 失効した端末・管理者による他人の credential 取消の正規経路は Issue・12 章ともに未定義で、ハンドラ文書に「本番で別経路を検討」と残すに留めた。worklog は PR-B 側のコミットにのみ置く分割のため、PR-A の修正コミット自体にはメモ更新を含められない。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「手順 6」に「積み上げ PR の下流ブランチへの取り込みは merge で行う（rebase は force-push が要る）」を足す。
