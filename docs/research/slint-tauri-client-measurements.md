@@ -13,7 +13,7 @@
 4. **Tauri（wry）の Linux のインライン変換は、今も既定でできない。** wry は WebKitGTK に対して `set_enable_preedit(false)` を無条件に呼んでおり、wry #1724（未マージ）はオプトイン API を提案しているだけ。Slint は preedit を自前で描画するので、この点は Slint が有利。
 5. **型生成は ts-rs と specta の両方を試した。** ts-rs は 1 型 1 ファイルで i64 は `bigint`。specta は 1 ファイルにまとめ、i64/u64 は既定で書き出しを拒否する（field ごとに `number` と明示する必要あり）。**ts-rs の方が維持費は小さい**（1 行の指定で済み、拒否もされない）。
 6. **WASM のサイズは、型生成道具の選択と独立。** 同期処理の土台（serde + wasm-bindgen）を wasm32 にビルドしたものは 172,345 バイト、wasm-opt -Oz で 129,974 バイト（-24.6%）。
-7. **Octane は A2 の Web クライアントの UI 層の候補として残す**（[oss-platform-and-client.md](oss-platform-and-client.md) 6.5 節）。上の 5・6 の結果（型生成・WASM）は UI フレームワークに依らないので、Octane を選んでも変わらない。
+7. **Octane は A2 の Web クライアントの UI 層に採用された**（2026-11-12 の設計変更。[oss-platform-and-client.md](oss-platform-and-client.md) 6.5 節）。上の 5・6 の結果（型生成・WASM）は UI フレームワークに依らないので、Octane の採用で変わらない。
 
 ## 1. この文書の前提
 
@@ -89,7 +89,7 @@
 
 解釈: 両者とも同じ読み上げ支援に届くので、「読めない」という差別は無い。差が出るのは粒度（ウィジェットか DOM か）と、Linux の IME（5 節）にあり、**実測は人間に委ねる**。手順は次のとおり（同じ項目・同じ文言・同じ OS・同じ読み上げ支援で比較する）:
 
-| 項目 | Slint | Tauri ＋ React |
+| 項目 | Slint | Tauri ＋ Octane (+ React) |
 |---|---|---|
 | 日本語の読み上げ（本文が流れるか、漢字の読みが正しく出るか） | 未確認 | 未確認 |
 | フォーカスの移動（Tab / 矢印）と「現在どこにいるか」の読み上げ | 未確認 | 未確認 |
