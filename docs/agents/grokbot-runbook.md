@@ -21,7 +21,7 @@ Grok Bot は Issue を実装スレッドとレビュースレッドに割り振�
 
 しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更、スレッドの取り消し。
 
-スレッドに送る指示は Issue 番号か PR 番号と、使う skill 名だけにする。作業ルールは AGENTS.md と skill に書いてあるので、手順書の中身をスレッドに書き写さない。
+スレッドに送る指示は Issue 番号か PR 番号と、使う skill 名だけにする（スレッドを立てる指示には、2 行目に割り当ての行 `Assigned: ...` を入れる。書式は skill `command-team`）。作業ルールは AGENTS.md と skill に書いてあるので、手順書の中身をスレッドに書き写さない。
 
 ## 2. 同時数と順番待ち
 

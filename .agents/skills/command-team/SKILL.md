@@ -17,7 +17,20 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 
 - 指揮役はコードを書かない。PR のレビューもしない（自分が関わった PR を自分で評価しない）。
 - 指揮役が自分で作った PR（運用文書やスキルの変更）も、レビュー担当のスレッドに回す。
-- スレッドに送る指示は、Issue 番号か PR 番号と skill 名だけにする。例外はラベル（例: `pr-size-exception`）と Issue のコメントで伝え、指示の文に書き足さない。
+- スレッドに送る指示は、Issue 番号か PR 番号と skill 名だけにする。例外はラベル（例: `pr-size-exception`）と Issue のコメントで伝え、指示の文に書き足さない。ただし、スレッドを立てる指示（と、effort やモデルを変えた後の最初の修正の指示）には、2 行目に割り当ての行を必ず入れる。
+
+  ```
+  Issue #<N> を実装する。skill implement-issue に従う。
+  Assigned: role=implement agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>
+  ```
+
+  ```
+  PR #<M> をレビューする。skill review-pr に従う。
+  Assigned: role=review agent=<codex|claude> model=<モデル名> effort=<low|medium|high|xhigh|max>
+  ```
+
+  実装担当はこの値を PR 本文の `Implementer:` の行に、レビュー担当はレビュー本文の `Reviewer:` の行に写す。
+- 割り当てのたびに、指揮役の作業ログの「割り当ての記録」の表に 1 行足す（日時、Issue・PR、役割、担当、モデル、effort、理由）。改善ループで、レビュー結果・実装者メモと対照する。
 - スレッドへの指示は、新しい実行として送る（MCP の `t3_thread_send` で `mode: queue`）。実行中のスレッドに `steer`（既定の `auto`）で送ると、実行の途中に差し込まれ、その実行が指示を扱わずに終わることがある。終わりの報告と PR の head で、指示が扱われたかを確かめる。
 - 判断はすべて Issue か PR にコメントで残す。セッションの文脈だけに置かない。
 - 見張りの状態は `scripts/conductor-watch.sh` が `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。
