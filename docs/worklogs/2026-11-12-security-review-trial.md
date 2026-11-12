@@ -43,3 +43,5 @@ Trail of Bits のスキル集（https://github.com/trailofbits/skills 、2026-11
 |---|---|---|---|---|---|---|---|
 | #134 | high-risk（`.agents/skills/`） | codex gpt-6-luna medium | 0 | 0 | 0 | 0 | main にまだ無い security-review を、PR の中の版から読んで当てていた。結果は害なしだが、PR が持ち込む手順に従う形で、指示の混入と同じ経路。review-pr に「従う手順は worktree（main）のスキルだけ」を足した |
 | #135 | high-risk（`.agents/skills/`、`docs/agents/`） | codex gpt-6-luna medium | 0 | 0 | 0 | 0 | main に security-review がある状態での最初の試行。脅威所見なしとの判断は妥当。ただし `## security-review` の定型の節ではなく自由文の「セキュリティ確認」で書き、HIGH の一覧・未確認が欠けた。review-pr の本文の型に節の置き場所が無かったため、型に足した |
+| #136 | high-risk（`.agents/skills/`） | codex gpt-6-luna medium | 0 | 0 | 0 | 0 | 型を足した後の最初の試行。定型の節（発動・HIGH・所見・未確認）どおりに書いた |
+| #137 | sampling（security=yes） | codex gpt-6-luna high | 0 | 0 | 0 | 0 | 高リスクの条件に当たらない PR で、差分の `unsafe`（`libc::clock_gettime`）を見つけて HIGH に分け、安全と根拠付きで判断した。抜き取りが `unsafe` を拾えた例。立て直したスレッドでは自由文で書き、`Reviewer:` の行から `security=yes` が落ちた（定型の守り方にばらつき） |

@@ -8,7 +8,7 @@
 |---|---|---|---|
 | 人間（濱田さん） | — | `hatai` | 本人 |
 | 指揮 | Grok Bot（クラウド）。動かないときは人間が指名したエージェントが代行する（runbook の「代行」） | — | T3 Connect 経由の MCP |
-| 実装 | T3 スレッド・opencode `zai-coding-plan/glm-5.3` | GitHub App `pelway-dev`（`pelway-dev[bot]`） | App のインストールトークン（呼び出しごとに発行） |
+| 実装 | T3 スレッド・opencode `zai-coding-plan/glm-5.3`（予備は Devin SWE-2 など。skill `command-team` の「実装担当の予備」） | GitHub App `pelway-dev`（`pelway-dev[bot]`） | App のインストールトークン（呼び出しごとに発行） |
 | レビュー | T3 スレッド・Codex（`codex_review`）と Claude（`claude_review`、高リスクの PR と抜き取り） | GitHub App `pelway-review`（`pelway-review[bot]`） | App のインストールトークン（呼び出しごとに発行） |
 
 App は 2 つに分ける。同じ名義では自分の PR を Approve できないため。App の秘密鍵と ID は `~/.config/pelway-agent/fnox.toml` に age で暗号化して置き、`scripts/agent-gh` が呼び出しごとにトークンを発行する。

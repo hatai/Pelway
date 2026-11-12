@@ -21,7 +21,7 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 
   ```
   Issue #<N> を実装する。skill implement-issue に従う。
-  Assigned: role=implement agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>
+  Assigned: role=implement agent=<opencode|devin> model=<モデル名> effort=<low|default|high|max>
   ```
 
   ```
@@ -70,6 +70,17 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 | コア部分（`crates/pelway-contract`、承認・状態遷移・権限）、`unsafe` を含む・含みうる変更 | opencode `zai-coding-plan/glm-5.3`、variant `high` |
 | 同じ Issue の修正の指示が 2 回を超えた（3 回目の修正に入る）。数えるのは、レビューの本物の must-fix に基づく指示だけ（分割計画が無い時期の誤判定や、再起動による自動の再開は数えない） | `t3_thread_configure` で variant を 1 段上げる（`low`→通常→`high`→`max`）。`max` でも直らなければモデルを替える。Issue に理由をコメントする |
 | 同じ Issue の修正の指示が 3 回を超えた（4 回目の修正に入る）。数え方は上の行と同じ | 修正を出さずにエスカレーション（runbook 6） |
+
+### 実装担当の予備
+
+GLM が利用上限で止まったとき、または GLM の同時数の上限（3 本）を超えて並行させたいときは、次の予備を使う。予備で始めた Issue も、レビューと修正の数え方は上の表と同じ。
+
+| 予備 | 立て方 | 使える条件 |
+|---|---|---|
+| Devin `swe-2-high`（重い作業）、`swe-2-flash-medium`（定型・小規模） | `t3_thread_launch` で `instanceId: acpRegistry_devin`、`options: {mode: bypass, thought_level: high}`、`runtimeMode: full-access`。割り当ての行は `agent=devin` | 無料提供の期限（2026-11-30）まで |
+| opencode `opencode/minimax-m3.1-flash-free` | opencode のスレッドで `t3_thread_configure` でモデルを替える | 1 回の実行が十数分で報告なしに終わることがある。終わりの報告が無い `completed` には「続ける」を送り、短い実行が続いたら別の担当に替える |
+
+途中で担当を替えるときは、前の担当の worktree を `workspaceStrategy: existing_worktree` で渡して新しいスレッドを立て、最初の指示に、前の担当が残した作業（コミット済み・未コミット）と止まった所を書く。
 
 runbook と仕様の `round`（スレッドの実行回数）は、誤判定や再起動による再開でも増える。指揮役は `round` を目安にとどめ、effort の引き上げとエスカレーションは上の表の「修正の指示の回数」で判断する。
 

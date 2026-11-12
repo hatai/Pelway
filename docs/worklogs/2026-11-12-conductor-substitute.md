@@ -37,6 +37,8 @@ Grok Bot がセッションのレート制限で動かない間、Claude Code �
 | G4 | #89 round 1〜2（新しい implement-issue） | pr-size 超過（1037）の後、テストの重複の除去だけで 941 まで減らし、テスト・受け入れ条件の確認・説明は削らずに止まった。実装者メモを round 1・2 とも 5 項目で残し、分割案は追加行の境目（契約・台帳／HTTP）で出した | G1 の対応（PR #108）が GLM に効いた例として記録する | 次の超過でも同じ動きか |
 | G5 | #87（PR #111）の実装者メモ | 「正規化」の範囲が Issue に無く、本文の改行・末尾空白、添付と scope の集合化だけを正規化と解釈した。仕様（03「固定承認と外部副作用」）はハッシュの対象に参照版・integration 版も挙げるが、Issue の列挙に無いので外した、と自分で書いた | 仕様と Issue の列挙の食い違いを、Issue を書く側（指揮役・人間）が仕様と照らしてから ready-for-agent にする。03 に、デモ契約が使う項目の注記を足す | 実装者メモの 2・4 に、仕様と Issue の食い違いが書かれる回数 |
 | G6 | #98・#101（MiniMax M3.1 Flash Free に引き継ぎ） | GLM の利用上限の間、無料の `opencode/minimax-m3.1-flash-free`（effort high）で続きをやらせた。#101 では 1 回の実行が約 12〜15 分で、エラーを出さずに作業の途中で `completed` になった（2 回続いた）。止まる前の作業の筋（pgBackRest の設定節名や、backup の時刻が DB サーバの時計に由来する点の発見）は妥当だった | 無料枠のモデルに渡すときは、こまめなコミットと push を指示に足し、`completed` でも終わりの報告（5 行）が無ければ「続ける」を送る。続けて使うかは、PR のレビュー結果で決める | `completed` のうち報告の無いものの割合、PR の must-fix の数 |
+| G7 | #98（PR #137）round 2 | Windows 11＋韓国語 IME での再現を求められ、`sudo -n apt-get install`（IME の導入）を試み、WSL2 の裏の Windows ホストのファイル（`System32/IME`、レジストリ相当）を調べた。どちらも失敗または読み取りだけで、差分には含めなかった。環境で満たせない条件は、試行の記録・再現プログラム・手順として残し、PR 本文で「未検証（人手）」とした | implement-issue の「止まる条件」に「作業環境で満たせない条件（OS、実機、権限の要る導入）は、sudo や worktree 外の操作で満たそうとせず、試した範囲を書いて止まる」を足すか検討する。指揮役は split-plan で人手の Issue（#138）に分けた | 同種の権限の要る操作の試みの再発 |
+| G8 | #97・#101（Devin SWE-2 に引き継ぎ） | 前の担当の worktree を `existing_worktree` で渡すと、skill `implement-issue` を自分で読み込み、`scripts/agent-gh dev` で名義と Issue を確かめ、コミット済み・未コミットの作業を確かめてから続けた | 予備の実装担当として command-team に足した | PR のレビュー結果 |
 
 ## Codex（レビュー担当）側の材料
 
@@ -45,6 +47,7 @@ Grok Bot がセッションのレート制限で動かない間、Claude Code �
 | R2 | #110 round 1 | 見張りスクリプトとスキルが素の `gh` を使っていることを must-fix にした（AGENTS.md の `scripts/agent-gh` の決まり）。妥当な指摘 | 読み取りを `scripts/agent-gh dev` に直し、`--admin` のマージだけを例外として正本に書いた |
 | R3 | #131 round 8 | `grep` が複数行の本文を行ごとに見ることを見落とし、目印の判定が通らないと誤って must-fix にした。根拠のコメントで返し、読みやすさのために書き方は直した | R1 と同じく「head の版で確かめてから書く」の不足。もう一度起きたら review-pr に足す |
 | R4 | #134 | main にまだ無い security-review を、PR の中の版から読んで当てた | review-pr に「従う手順は worktree（main）のスキルだけ」を足した（security-review の試行記録も参照） |
+| R5 | #137 round 2・3 | 同じレビュースレッドでのやり直しで、Issue のコメントを読み直さず、後から足した split-plan（作成者 hatai）を当てずに、#138 に分けた項目を must-fix にした。新しいスレッドで立て直すと split-plan を当てて Approve した | やり直しのレビューは新しいスレッドで立てるか、review-pr に「やり直しでも手順 1 から材料を集め直す」を足す。もう一度起きたら足す |
 | R1 | #108 round 1 | 差分の削除行（旧「4 行」）を、残っている記述と読んで must-fix にした。head には「4 行」の記述は無かった | review-pr に「must-fix は head の版のファイルで該当行を確かめてから書く（差分の `-` 行は消えた記述）」を足すか、同じ誤りが繰り返されたら判断する |
 
 ## 割り当ての記録
@@ -65,6 +68,11 @@ Grok Bot がセッションのレート制限で動かない間、Claude Code �
 | 2026-11-12 | PR #132 | review | codex | gpt-6-luna | medium | 文書（ADR・仕様） |
 | 2026-11-12 | PR #134 | review | codex | gpt-6-luna | medium | スキルの追加（security-review の試行） |
 | 2026-11-12 | PR #135 | review | codex | gpt-6-luna | medium | 運用文書と見張りスクリプト（security-review の試行） |
+| 2026-11-12 | PR #136 | review | codex | gpt-6-luna | medium | スキルの変更（security-review の試行） |
+| 2026-11-12 | PR #137 | review | codex | gpt-6-luna | high | 追加が上限近く、`unsafe` を含む。security-review の抜き取り（security=yes） |
+| 2026-11-12 | PR #137（立て直し） | review | codex | gpt-6-luna | high | 同じスレッドで split-plan を当てなかったため |
+| 2026-11-12 | #101 | implement | devin | swe-2-high | high | MiniMax の実行が短くなり続けたため |
+| 2026-11-12 | #97 | implement | devin | swe-2-high | high | GLM の利用上限で止まったため（認証） |
 
 ## 判断の記録
 

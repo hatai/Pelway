@@ -74,7 +74,7 @@ PR を Projects ボードに載せる（ボードの組み込みワークフロ�
 
 ### `pelway.agent-watch/v1`
 
-スレッドが実装かレビューかは `provider` で見分ける。`opencode` が実装で、それ以外（`codex`、`claudeAgent`。インスタンスは `codex_review`、`claude_review`）はレビュー。ブランチが `review/` で始まるかでも見分けられる。
+スレッドが実装かレビューかは、タイトルの接頭辞（`[実装]`・`[レビュー]`。skill `command-team` の「スレッド名」）で見分ける。provider だけでは見分けない（実装の予備に Devin の `acpRegistry_devin` を使うことがある。レビューは `codex_review`・`claude_review`）。
 
 | `event` | 実装スレッド | レビュースレッド |
 |---|---|---|
