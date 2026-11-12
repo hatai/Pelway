@@ -12,12 +12,12 @@ merge_one() {
     n=$(git rev-list "$rsha..$H" --no-merges ^origin/main | wc -l)
     if [ "$n" != 0 ]; then echo "#$pr new non-main commits ($n) since review; re-review needed"; return; fi
     if ! git merge-base --is-ancestor origin/main "$H"; then
-      scripts/agent-gh dev pr update-branch "$pr" >/dev/null 2>&1 || { echo "#$pr update-branch failed (conflict?)"; return; }
+      scripts/agent-gh dev pr update-branch "$pr" >/dev/null 2>&1 || { echo "#$pr update-branch failed (conflict?)"; return 1; }
       sleep 20; git fetch -q origin; H=$(git rev-parse "origin/$br")
     fi
     until [ "$(gh run list --branch "$br" --workflow verify --json headSha,status -q ".[]|select(.headSha==\"$H\" and .status==\"completed\")|.status" | head -1)" = completed ]; do sleep 30; done
     c=$(gh run list --branch "$br" --workflow verify --json headSha,conclusion -q ".[]|select(.headSha==\"$H\")|.conclusion" | head -1)
-    [ "$c" = success ] || { echo "#$pr verify=$c"; return; }
+    [ "$c" = success ] || { echo "#$pr verify=$c"; return 1; }
     git fetch -q origin
     if git merge-base --is-ancestor origin/main "$H"; then
       gh pr merge "$pr" --merge --admin --delete-branch --match-head-commit "$H" >/dev/null 2>&1 && { echo "#$pr merged"; return; }
@@ -25,5 +25,9 @@ merge_one() {
     fi
   done
   echo "#$pr gave up after retries"
+  return 1
 }
-while [ $# -ge 3 ]; do merge_one "$1" "$2" "$3"; shift 3; done
+while [ $# -ge 3 ]; do
+  merge_one "$1" "$2" "$3" || { echo "stopped at #$1; later PRs were not merged"; exit 1; }
+  shift 3
+done
