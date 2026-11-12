@@ -93,14 +93,14 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 - pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。
 - Approve の後に PR に push があったら、新しいコミットが main の取り込みだけであることを確かめる（`git rev-list <レビューした sha>..<head> --no-merges ^origin/main` が 0 件）。それ以外のコミットがあればレビューをやり直す。
 - マージの直前に、PR が今の main を含んでいるかを確かめる（`git merge-base --is-ancestor origin/main origin/<PR のブランチ>`）。含んでいなければ、触るファイルが重ならなく見えても `scripts/agent-gh dev pr update-branch` で main を取り込み、CI が通ってからマージする（型や関数の変更は、ファイルが重ならなくてもビルドを壊す）。
-- 別の PR に積んだ PR は、土台の PR をマージした後に base を main に替える。base を替えただけでは CI が動かないので、`scripts/agent-gh dev pr update-branch` で main を取り込んで CI を起こす。
-- 複数の PR を続けてマージするときは、`scripts/conductor-merge-queue.sh` に「PR 番号・ブランチ・レビューした sha」の組を並べて、1 本ずつ進める（main の取り込み、CI の待ち、レビュー後のコミットの確認、マージを順に行う）。
+- 別の PR に積んだ PR は、土台の PR をマージする前に base を main に替える（`scripts/agent-gh dev pr edit <後の PR> --base main`）。マージは `--delete-branch` で土台のブランチを消すので、base のままだと GitHub が後の PR を閉じ、閉じた PR は base を替えられない。土台のマージ後に `scripts/agent-gh dev pr update-branch` で main を取り込んで CI を起こす。
+- 複数の PR を続けてマージするときは、`scripts/conductor-merge-queue.sh` に「PR 番号・ブランチ・レビューした sha」の組を並べて、1 本ずつ進める（main の取り込み、CI の待ち、レビュー後のコミットの確認、マージを順に行う）。このスクリプトを同時に 2 つ動かさない（同じリポジトリの `git fetch` がぶつかって両方止まる）。
 - PR ができたら mergeable を確かめる（`scripts/agent-gh dev pr view <M> --json mergeable`）。`CONFLICTING` の PR には GitHub が `pull_request` の workflow を動かさず、チェックが 1 つも付かない。実装担当に「main を取り込んで衝突を解消し、verify を通す」を送る。
 - マージしたら Issue から `agent:working` を外し、人間に報告する。
 
 ### 分割を認めるとき
 
-実装担当が pr-size の超過で止まり、分割案が追加行の境目できれいに分かれるときは、分割を認める。Issue に、行頭が `<!-- split-plan -->` で始まるコメントで、PR ごとの範囲と、その PR で確かめる受け入れ条件を表にして書く。受け入れ条件は skill `write-issue` の「受け入れ条件の書き方」に従う。レビュー担当（skill `review-pr`）は、この表でそれぞれの PR を判定する。後の PR は前の PR のブランチに積ませ、前の PR のマージ後に base を main に替える。
+実装担当が pr-size の超過で止まり、分割案が追加行の境目できれいに分かれるときは、分割を認める。Issue に、行頭が `<!-- split-plan -->` で始まるコメントで、PR ごとの範囲と、その PR で確かめる受け入れ条件を表にして書く。受け入れ条件は skill `write-issue` の「受け入れ条件の書き方」に従う。レビュー担当（skill `review-pr`）は、この表でそれぞれの PR を判定する。後の PR は前の PR のブランチに積ませ、前の PR のマージの前に base を main に替える（上の「マージ」の積んだ PR の項）。
 
 ### 利用上限で止まったとき
 

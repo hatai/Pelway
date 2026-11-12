@@ -1,14 +1,18 @@
-//! #97（分割 1 本目）の受け入れ確認テスト。
+//! #97 の受け入れ確認テスト。
 //!
 //! - passkey の登録とログインが axum の経路で完結する（SoftPasskey）。
+//! - 顧客 IdP との Authorization Code Flow + PKCE がインメモリの偽 IdP 相手に
+//!   完結し、`hd` / `tid` でテナントを制限できる。
 //! - セッション発行・照会・取り消し（資格情報取消に追従）が動く。
-//! - 顧客 IdP ログインの確認は 2 本目の PR のテストが担う。
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
+use axum::response::Json;
+use axum::routing::{get, post};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use url::Url;
@@ -16,18 +20,169 @@ use webauthn_authenticator_rs::WebauthnAuthenticator;
 use webauthn_authenticator_rs::softpasskey::SoftPasskey;
 use webauthn_rs::prelude::{CreationChallengeResponse, RequestChallengeResponse};
 
+use openidconnect::core::{
+    CoreGenderClaim, CoreJsonWebKeySet, CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm,
+    CoreRsaPrivateSigningKey, CoreTokenType,
+};
+use openidconnect::{
+    AccessToken, Audience, EmptyExtraTokenFields, HttpRequest, HttpResponse, IdToken,
+    IdTokenClaims, IssuerUrl, JsonWebKeyId, Nonce, PrivateSigningKey, StandardClaims,
+    SubjectIdentifier,
+};
+use pelway_auth::oidc::{Backchannel, BackchannelError, OidcStore, OidcTenant, TenantClaims};
 use pelway_auth::{AuthState, auth_router};
+use rsa::pkcs1::EncodeRsaPrivateKey;
 
 const RP_ORIGIN: &str = "http://localhost";
 
+/// テスト用の IdP。authorize の手続きは省略し、token endpoint が
+/// 事前に控えた nonce / hd / tid を含む署名済み ID トークンを返す。
+struct FakeIdp {
+    key: CoreRsaPrivateSigningKey,
+    issuer: String,
+    client_id: String,
+    subject: String,
+    hd: Option<String>,
+    tid: Option<String>,
+    /// authorize URL から取り出した nonce（実 IdP が request で受け取るもの）。
+    nonce: Mutex<Option<Nonce>>,
+}
+
+impl FakeIdp {
+    fn new() -> Self {
+        let rsa = rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 2048)
+            .expect("rsa keygen")
+            .to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)
+            .expect("pem");
+        Self {
+            key: CoreRsaPrivateSigningKey::from_pem(
+                rsa.as_str(),
+                Some(JsonWebKeyId::new("k1".to_string())),
+            )
+            .expect("signing key"),
+            issuer: "http://idp.test".to_string(),
+            client_id: "pelway-rp".to_string(),
+            subject: "idp-sub-1".to_string(),
+            hd: Some("good.example.com".to_string()),
+            tid: None,
+            nonce: Mutex::new(None),
+        }
+    }
+
+    fn router(idp: &Arc<Self>) -> Router {
+        Router::new()
+            .route(
+                "/token",
+                post({
+                    let idp = idp.clone();
+                    move || {
+                        let idp = idp.clone();
+                        async move {
+                            let nonce = idp.nonce.lock().unwrap().take();
+                            let claims = IdTokenClaims::new(
+                                IssuerUrl::new(idp.issuer.clone()).unwrap(),
+                                vec![Audience::new(idp.client_id.clone())],
+                                chrono::Utc::now() + chrono::Duration::seconds(300),
+                                chrono::Utc::now(),
+                                StandardClaims::new(SubjectIdentifier::new(idp.subject.clone())),
+                                TenantClaims {
+                                    hd: idp.hd.clone(),
+                                    tid: idp.tid.clone(),
+                                },
+                            )
+                            .set_nonce(nonce);
+                            let access = AccessToken::new("fake-access".to_string());
+                            let id_token: IdToken<
+                                _,
+                                CoreGenderClaim,
+                                CoreJweContentEncryptionAlgorithm,
+                                CoreJwsSigningAlgorithm,
+                            > = IdToken::new(
+                                claims,
+                                &idp.key,
+                                CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256,
+                                Some(&access),
+                                None,
+                            )
+                            .unwrap();
+                            let resp = pelway_auth::oidc::TenantTokenResponse::new(
+                                access,
+                                CoreTokenType::Bearer,
+                                pelway_auth::oidc::TenantIdTokenFields::new(
+                                    Some(id_token),
+                                    EmptyExtraTokenFields {},
+                                ),
+                            );
+                            Json(serde_json::to_value(resp).unwrap())
+                        }
+                    }
+                }),
+            )
+            .route(
+                "/jwks",
+                get({
+                    let idp = idp.clone();
+                    move || {
+                        let idp = idp.clone();
+                        async move {
+                            Json(
+                                serde_json::to_value(CoreJsonWebKeySet::new(vec![
+                                    idp.key.as_verification_key(),
+                                ]))
+                                .unwrap(),
+                            )
+                        }
+                    }
+                }),
+            )
+    }
+}
+
+/// バックチャネルを偽 IdP の axum Router に橋渡しする（TCP も TLS も使わない）。
+fn bridge(router: Router) -> Backchannel {
+    Arc::new(move |req: HttpRequest| {
+        let router = router.clone();
+        Box::pin(async move {
+            let (parts, body) = req.into_parts();
+            let response = router
+                .oneshot(Request::from_parts(parts, Body::from(body)))
+                .await
+                .map_err(|e| BackchannelError(format!("router: {e:?}")))?;
+            let (parts, body) = response.into_parts();
+            let bytes = axum::body::to_bytes(body, usize::MAX)
+                .await
+                .map_err(|e| BackchannelError(e.to_string()))?;
+            Ok(HttpResponse::from_parts(parts, bytes.to_vec()))
+        })
+    })
+}
+
 struct TestApp {
     app: Router,
+    idp: Arc<FakeIdp>,
 }
 
 fn test_app() -> TestApp {
-    let state = Arc::new(AuthState::new("localhost", RP_ORIGIN).expect("auth state"));
+    let idp = Arc::new(FakeIdp::new());
+    let tenant = OidcTenant {
+        client_id: idp.client_id.clone(),
+        client_secret: Some("secret".to_string()),
+        issuer: idp.issuer.clone(),
+        authorization_endpoint: format!("{}/authorize", idp.issuer),
+        token_endpoint: format!("{}/token", idp.issuer),
+        jwks_uri: format!("{}/jwks", idp.issuer),
+        redirect_uri: format!("{}/auth/oidc/callback", RP_ORIGIN),
+        allowed_hd: vec!["good.example.com".to_string()],
+        allowed_tid: Vec::new(),
+    };
+    let oidc = OidcStore::new(HashMap::from([("google".to_string(), tenant)])).unwrap();
+    let state = Arc::new(
+        AuthState::new("localhost", RP_ORIGIN, oidc, bridge(FakeIdp::router(&idp)))
+            .expect("auth state"),
+    );
     TestApp {
         app: auth_router(state),
+        idp,
     }
 }
 
@@ -207,4 +362,127 @@ async fn credential_revocation_stops_sessions() {
         whoami_status(&t.app, &cookie).await,
         StatusCode::UNAUTHORIZED
     );
+}
+
+#[tokio::test]
+async fn oidc_login_with_allowed_domain_issues_session() {
+    let t = test_app();
+
+    // /start は IdP へ 302 する
+    let resp = t
+        .app
+        .clone()
+        .oneshot(
+            Request::get("/auth/oidc/google/start")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
+    let location = Url::parse(resp.headers()[header::LOCATION].to_str().unwrap()).unwrap();
+    let params: HashMap<_, _> = location.query_pairs().into_owned().collect();
+    assert_eq!(params.get("client_id").unwrap(), "pelway-rp");
+    assert_eq!(params.get("code_challenge_method").unwrap(), "S256");
+
+    // 実 IdP は authorize request の nonce を ID トークンへ入れる
+    *t.idp.nonce.lock().unwrap() = Some(Nonce::new(params["nonce"].clone()));
+    let state = params["state"].clone();
+
+    let (status, headers, body) = call(
+        &t.app,
+        Request::get(format!("/auth/oidc/callback?code=fake-code&state={state}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "callback: {body}");
+    assert_eq!(
+        whoami_status(&t.app, &set_cookie(&headers)).await,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn oidc_callback_rejects_replayed_state_and_bad_domain() {
+    let mut t = test_app();
+    t.idp = Arc::new({
+        let mut idp = FakeIdp::new();
+        idp.hd = Some("evil.example.com".to_string());
+        idp
+    });
+    // 偽 IdP を作り直したので bridge も張り替える
+    let tenant = t_oidc_tenant(&t.idp);
+    let oidc = OidcStore::new(HashMap::from([("google".to_string(), tenant)])).unwrap();
+    let state = Arc::new(
+        AuthState::new(
+            "localhost",
+            RP_ORIGIN,
+            oidc,
+            bridge(FakeIdp::router(&t.idp)),
+        )
+        .expect("auth state"),
+    );
+    t.app = auth_router(state);
+
+    let resp = t
+        .app
+        .clone()
+        .oneshot(
+            Request::get("/auth/oidc/google/start")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let location = Url::parse(resp.headers()[header::LOCATION].to_str().unwrap()).unwrap();
+    let params: HashMap<_, _> = location.query_pairs().into_owned().collect();
+    *t.idp.nonce.lock().unwrap() = Some(Nonce::new(params["nonce"].clone()));
+    let state = params["state"].clone();
+
+    // 許可していない hosted domain は 403
+    let (status, _, body) = call(
+        &t.app,
+        Request::get(format!("/auth/oidc/callback?code=fake-code&state={state}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "callback: {body}");
+    assert_eq!(body["error"], "hosted_domain_denied");
+
+    // 使い回した state は one-shot 消費で 400
+    let (status, _, _) = call(
+        &t.app,
+        Request::get(format!("/auth/oidc/callback?code=fake-code&state={state}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn oidc_store_rejects_tenant_without_allow_lists() {
+    let mut tenant = t_oidc_tenant(&Arc::new(FakeIdp::new()));
+    tenant.allowed_hd = Vec::new();
+    tenant.allowed_tid = Vec::new();
+    assert!(
+        OidcStore::new(HashMap::from([("google".to_string(), tenant)])).is_err(),
+        "empty allow lists must be a configuration error"
+    );
+}
+
+fn t_oidc_tenant(idp: &Arc<FakeIdp>) -> OidcTenant {
+    OidcTenant {
+        client_id: idp.client_id.clone(),
+        client_secret: Some("secret".to_string()),
+        issuer: idp.issuer.clone(),
+        authorization_endpoint: format!("{}/authorize", idp.issuer),
+        token_endpoint: format!("{}/token", idp.issuer),
+        jwks_uri: format!("{}/jwks", idp.issuer),
+        redirect_uri: format!("{}/auth/oidc/callback", RP_ORIGIN),
+        allowed_hd: vec!["good.example.com".to_string()],
+        allowed_tid: Vec::new(),
+    }
 }
