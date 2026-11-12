@@ -20,7 +20,8 @@ merge_one() {
     [ "$c" = success ] || { echo "#$pr verify=$c"; return; }
     git fetch -q origin
     if git merge-base --is-ancestor origin/main "$H"; then
-      gh pr merge "$pr" --merge --admin --delete-branch >/dev/null 2>&1 && { echo "#$pr merged"; return; }
+      gh pr merge "$pr" --merge --admin --delete-branch --match-head-commit "$H" >/dev/null 2>&1 && { echo "#$pr merged"; return; }
+      echo "#$pr head moved since verify; rechecking"
     fi
   done
   echo "#$pr gave up after retries"
