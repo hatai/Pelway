@@ -17,3 +17,9 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 # 行ハッシュ・鍵 ID の SHA-256。
 sha2 = { version = "0.10", default-features = false }
+
+[dev-dependencies]
+# 署名行の素材をテストで組み立てるための base64（本体と同じ版）。
+base64 = "0.22"
+# 有効な公開鍵の素材（NoteVerifier::from_public_key の引数）をテストで作る。
+ed25519-dalek = { version = "2", features = ["rand_core"] }

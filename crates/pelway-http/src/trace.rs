@@ -170,4 +170,19 @@ version = "0.0.0"
         }
         assert!(checked >= 3, "crates を確認していない: {checked}");
     }
+
+    #[test]
+    fn init_local_tracing_returns_false_when_global_subscriber_exists() {
+        // グローバル subscriber は 1 度だけ設定できる（先に設定されたのが
+        // このテスト自身か別のテストかにかかわらず、2 回目は必ず失敗する）。
+        let _ = init_local_tracing();
+        assert!(!init_local_tracing());
+    }
+
+    #[test]
+    fn mem_writer_flush_is_ok() {
+        let mem = MemWriter::default();
+        let mut w = &mem;
+        std::io::Write::flush(&mut w).expect("flush");
+    }
 }
