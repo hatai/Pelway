@@ -17,6 +17,7 @@ Grok Bot がセッションのレート制限で動かない間、Claude Code �
 
 | 8 | CODEOWNERS（`* @hatai`）により、`pelway-review` の Approve だけではマージできない | hatai の承認により、`pelway-review` の Approve と必須チェックの通過を確かめた PR は指揮役が `--admin` でマージする。手順書と仕様に反映する |
 | 9 | pr-size の超過を指揮役が認めても、レビュー担当は「pr-size が失敗」を must-fix に数える決まり | レビューの指示に例外を書き足して回避した（手順書は「指示は Issue 番号と skill 名だけ」）。例外を示すラベル（例：`pr-size-exception`）を作り、review-pr skill が読むようにする |
+| 10 | 指揮役が PR #113 を、先にマージした PR #111（`NewCard` を `payload` に変更）を取り込まずにマージし、main のビルドを壊した。ファイルが重ならないため取り込みを省いた | skill `command-team` の「マージ」を、マージの直前に PR が今の main を含むかを必ず確かめ、含まなければ取り込んで CI を通す形に直した。main の修正は PR #114 に含めた |
 
 ## opencode＋GLM 側の材料
 
