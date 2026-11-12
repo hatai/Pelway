@@ -53,7 +53,7 @@ struct FakeIdp {
 
 impl FakeIdp {
     fn new() -> Self {
-        let rsa = rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 2048)
+        let rsa = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048)
             .expect("rsa keygen")
             .to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)
             .expect("pem");
