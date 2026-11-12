@@ -16,6 +16,12 @@ exclude = List("docs/**", "assets/**", "crates/pelway-client-ui/tokens/**")
 
 // cargo 系ステップはメンバークレート単位ではなくワークスペース全体を検査する。
 // glob に Cargo.toml / Cargo.lock を含め、Rust ファイル以外の変更でも検査を起動する。
+//
+// これらの cargo ステップは git hook（pre-commit）で使う。CI と `mise run hk-check` は
+// 同じ検査を二重に走らせないため、cargo を伴わないステップだけを選ぶ
+// （mise.toml の hk-check タスクを参照）。cargo_fmt / cargo_clippy は mise の
+// fmt-check / clippy タスクが担当する。cargo_check は clippy が型検査も行うため
+// 包含されている（check タスク自体は残してある）。
 steps {
   // hk 自身のユーティリティで完結する汎用ステップ（追加ツール不要）。
   ["trailing_whitespace"] = Builtins.trailing_whitespace

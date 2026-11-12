@@ -17,6 +17,7 @@ use std::thread;
 
 use pelway_contract::ledger::{ApprovalLedger, NewCard};
 use pelway_contract::pseudonym::pseudonymize;
+use pelway_contract::snapshot::ActionPayload;
 use pelway_contract::task::ActionKind;
 use serde_json::{Value, json};
 
@@ -50,10 +51,14 @@ fn new_card(id: &str) -> NewCard {
         workspace_id: "ws-synthetic-gdpr07".into(),
         channel_id: "ch-synthetic-gdpr07".into(),
         card_id: id.into(),
-        payload_hash: "sha256:synthetic-payload-gdpr07".to_owned(),
-        action_kind: ActionKind::CustomerSend,
-        recipient: "customer@example.invalid".to_owned(),
-        body: format!("合成データの本文 {CANARY_BODY}"),
+        payload: ActionPayload {
+            action_kind: ActionKind::CustomerSend,
+            recipient: "customer@example.invalid".to_owned(),
+            body: format!("合成データの本文 {CANARY_BODY}"),
+            attachments: Vec::new(),
+            account: "acct-cw-1".to_owned(),
+            scope: Vec::new(),
+        },
         requester: "m-human-gdpr07".into(),
         decider: "m-human-gdpr07".into(),
         deadline: None,

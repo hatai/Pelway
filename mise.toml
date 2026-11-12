@@ -34,6 +34,12 @@ jactionlint = "2.5.0"
 # 短縮名 octocov は mise レジストリに無い（tool not found）。octocov 向けの packslip
 # バックエンドも無いため、mise.lock に URL と checksum が残る aqua バックエンドで宣言する。
 "aqua:k1LoW/octocov" = "0.83.5"
+# CI のカバレッジ計測（cargo-llvm-cov）。ソースからのビルドは 45 秒ほどかかるため、
+# 公式配布の事前ビルド済みバイナリを aqua バックエンドで導入する（octocov と同じ
+# 経路。mise.lock が URL と checksum で取得物を固定する）。crates.io の同名
+# パッケージを cargo install するとソースビルドになるため使わない。
+# 出典: https://github.com/taiki-e/cargo-llvm-cov/releases/tag/v0.6.17
+"aqua:taiki-e/cargo-llvm-cov" = "0.6.17"
 
 # コンテナ実行環境（非 Docker・要件は docs/dev-environment.md）。
 # rootless Podman 一式を apt から導入する宣言。適用は明示的な bootstrap 実行時だけ
@@ -49,6 +55,13 @@ jactionlint = "2.5.0"
 # ここには秘密にならない既定値だけを置く。
 CARGO_TERM_COLOR = "auto"
 PELWAY_BIND_ADDR = "127.0.0.1:0"
+# crates.io の取得失敗を減らすための cargo の設定（ローカル・CI の両方）。
+# CARGO_HTTP_MULTIPLEXING=false: HTTP/2 の多重化で起きる
+# 「Error in the HTTP2 framing layer」で crates.io の取得が失敗する既知の不具合を避ける。
+# CARGO_NET_RETRY=10: 一時的な失敗（ネットワーク・レジストリ障害）の再試行回数を増やす
+# （既定は 2）。
+CARGO_HTTP_MULTIPLEXING = "false"
+CARGO_NET_RETRY = "10"
 
 # ---- 日常タスク（mise run <タスク名>） ----
 
@@ -76,6 +89,10 @@ run = "cargo test --workspace --locked"
 description = "デバッグビルドを作る（--locked）"
 run = "cargo build --workspace --locked"
 
+[tasks.fetch]
+description = "依存クレートを取得する（--locked で Cargo.lock を強制）。ビルド前に明示的に取得し、一時的な取得失敗をビルドを中断した状態で残さない"
+run = "cargo fetch --locked"
+
 [tasks.toolchain-check]
 description = "rustfmt・cargo-clippy・llvm-tools-preview 成分の存在確認（欠けていれば失敗し、暗黙の自動ダウンロードには頼らない）"
 run = """
@@ -100,8 +117,15 @@ description = "hk.pkl の構文検証"
 run = "hk validate"
 
 [tasks.hk-check]
-description = "hk でリポジトリ全体を検査（読み取り専用）"
-run = "hk check --all"
+description = "hk でリポジトリ全体を検査（読み取り専用・cargo を伴うステップは除く）"
+# hk.pkl には cargo_fmt / cargo_clippy / cargo_check のステップもあるが、同じ検査が
+# fmt-check / clippy タスクで走っており、hk 側でも走らせると依存クレートを
+# 二重にコンパイルすることになる（CI ではジョブ分割のため target が別になり、
+# 二重コンパイルがそのまま時間になる）。そのため hk は cargo を伴わない
+# ステップ（typos / trailing_whitespace / newlines）だけ走らせる。
+# cargo を伴う検査は mise の fmt-check / clippy タスクが担当する。
+# hk.pkl の cargo ステップは git hook（pre-commit）用に残す。
+run = "hk check --all --step typos --step trailing_whitespace --step newlines"
 
 [tasks.fnox-check]
 description = "fnox の定義一覧を確認（秘密値の取得・表示は行わない）"
@@ -152,7 +176,27 @@ run = "cargo install --path crates/pelway-agent-watch --locked --root ~/.local -
 
 [tasks.verify]
 description = "開発環境の一括確認（依存タスクは並列実行）"
-depends = ["fmt-check", "check", "clippy", "test", "build", "toolchain-check", "hk-validate", "hk-check", "fnox-check", "pitchfork-check", "script-test"]
+# 検査は 3 つのグループに分ける。CI でも同じグループを 1 ジョブずつ走らせる
+# （docs/dev-environment.md「CI（GitHub Actions）」を参照）。分け方の 이유는
+# cargo でコンパイルするグループを 2 つに絞って、依存クレートの二重コンパイル
+# を避けること。check は clippy に含まれ、build は test が同じ成果物を作るため
+# verify には含めない（check / build タスク自体は残す）。
+depends = ["verify-lint", "verify-test", "verify-static"]
+
+# cargo fmt / clippy と、ツールチェーン・hk.pkl の構文を確かめる。
+[tasks.verify-lint]
+description = "整形・clippy・ツールチェーンの検査"
+depends = ["fmt-check", "clippy", "toolchain-check", "hk-validate"]
+
+# テストと、スクリプトのテスト。
+[tasks.verify-test]
+description = "テストとスクリプトのテスト"
+depends = ["test", "script-test"]
+
+# cargo を伴わない検査（cargo は verify-lint / verify-test が担当する）。
+[tasks.verify-static]
+description = "cargo を伴わない検査（hk / fnox / pitchfork）"
+depends = ["hk-check", "fnox-check", "pitchfork-check"]
 
 # `mise bootstrap` は packages（apt:podman・sudo）→ tools（mise install 相当）→ このタスクの順で実行する。
 # これにより mise trust 後の mise bootstrap 1回で環境構築が完了する。
