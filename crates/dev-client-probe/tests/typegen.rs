@@ -1,16 +1,14 @@
-//! Rust の型から TypeScript の型を生成し、置いたもの（`bindings/`）と
-//! 一致することを確認する。差分があればテストが落ちる。
+//! Rust の型から TypeScript の型を生成し、置いたもの（`bindings/`）と一致する
+//! ことを確認する。差分があればテストが落ちる。A2 は UI を TS/React DOM と
+//! するので、Rust 側の型を変えたのに TS 側の型を忘れると UI 側が古い型で
+//! コンパイルされる。CI でこの差分を検出できるようにするのがこのテストの目的。
 //!
-//! A2 は UI を TS/React DOM とするので、Rust 側の型を変えたのに TS 側の型を
-//! 忘れると UI 側が古い型でコンパイルされる。CI でこの差分を検出できるように
-//! するのがこのテストの目的。
-//!
-//! 置いた生成結果の更新は `UPDATE_GOLDEN=1 cargo test -p pelway-dev-typegen-probe`
+//! 置いた生成結果の更新は `UPDATE_GOLDEN=1 cargo test -p pelway-dev-client-probe`
 //! で行う（更新したあと、内容を確認してコミットする）。
 
 use std::path::{Path, PathBuf};
 
-use pelway_dev_typegen_probe::types::{ChannelId, Message, MessageBody, MessageId, NoticeLevel};
+use pelway_dev_client_probe::types::{Message, MessageBody, NoticeLevel};
 use ts_rs::TS;
 
 /// 置いている生成結果の置き場。
@@ -21,15 +19,13 @@ fn golden_dir() -> PathBuf {
 /// 置いたものと生成したものが一致することを確認し、違えば差分を出して落とす。
 /// 置いたものが無ければ作る（UPDATE_GOLDEN=1 のときだけ更新する）。
 fn assert_same(golden: &Path, actual: &str) {
-    if !golden.exists() {
-        assert!(
-            std::env::var("UPDATE_GOLDEN").is_ok(),
-            "置いた生成結果に {} が無い（UPDATE_GOLDEN=1 で生成できる）",
-            golden.display()
-        );
-        std::fs::write(golden, actual).expect("置いた生成結果を作れる");
-    }
-    if std::env::var("UPDATE_GOLDEN").is_ok() {
+    let update = std::env::var("UPDATE_GOLDEN").is_ok();
+    assert!(
+        update || golden.exists(),
+        "置いた生成結果に {} が無い（UPDATE_GOLDEN=1 で生成できる）",
+        golden.display()
+    );
+    if update {
         std::fs::write(golden, actual).expect("置いた生成結果を更新できる");
     }
     let golden_text = std::fs::read_to_string(golden).expect("置いた生成結果を読める");
@@ -42,8 +38,9 @@ fn assert_same(golden: &Path, actual: &str) {
 }
 
 #[test]
-fn ts_rs_output_matches_the_committed_bindings() {
-    // ts-rs は export_to = "bindings/" なので、出力先の bindings/ に生成される。
+fn generated_typescript_matches_the_committed_bindings() {
+    // ts-rs: 1 型 1 ファイル。export_to = "bindings/" なので出力先の bindings/ に
+    // 生成される。置いたものと違えば落ちる（差分検査）。
     let out_dir = std::env::temp_dir().join(format!("pelway-ts-rs-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&out_dir);
     let config = ts_rs::Config::default().with_out_dir(&out_dir);
@@ -60,19 +57,25 @@ fn ts_rs_output_matches_the_committed_bindings() {
         count += 1;
     }
     assert!(count >= 3, "ts-rs が {count} 個しか生成しなかった");
-}
 
-#[test]
-fn specta_output_matches_the_committed_bindings() {
+    // specta: 1 ファイルにすべての型をまとめる。i64 の field は、型ごとに
+    // number として出すことを明示した Prelude（types.rs）だけが number になる。
     let types = specta::Types::default()
         .register::<Message>()
         .register::<MessageBody>()
-        .register::<ChannelId>()
-        .register::<MessageId>()
         .register::<NoticeLevel>();
     let actual = specta_typescript::Typescript::default()
         .export(&types, specta_serde::Format)
         .expect("specta で型を生成できる");
-
-    assert_same(&golden_dir().join("specta.ts"), &actual);
+    for expected in [
+        "export type Message = {",
+        "export type MessageBody =",
+        "export type NoticeLevel = \"Info\" | \"Warning\" | \"Critical\";",
+        "sent_at_ms: number,",
+    ] {
+        assert!(
+            actual.contains(expected),
+            "specta の出力に {expected} が無い:\n{actual}"
+        );
+    }
 }

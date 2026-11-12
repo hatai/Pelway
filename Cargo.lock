@@ -3938,6 +3938,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pelway-dev-client-probe"
+version = "0.0.0"
+dependencies = [
+ "i-slint-backend-testing",
+ "libc",
+ "serde",
+ "serde_json",
+ "slint",
+ "slint-build",
+ "specta",
+ "specta-serde",
+ "specta-typescript",
+ "ts-rs",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "pelway-dev-queue-compare"
 version = "0.0.0"
 dependencies = [
@@ -3949,31 +3966,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "pelway-dev-slint-listview"
-version = "0.0.0"
-dependencies = [
- "i-slint-backend-testing",
- "libc",
- "slint",
- "slint-build",
-]
-
-[[package]]
 name = "pelway-dev-smoke"
 version = "0.0.0"
-
-[[package]]
-name = "pelway-dev-typegen-probe"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
- "specta",
- "specta-serde",
- "specta-typescript",
- "ts-rs",
- "wasm-bindgen",
-]
 
 [[package]]
 name = "pelway-gateway"

@@ -7,7 +7,7 @@ skills-lock.json linguist-generated=true
 .agents/skills/** linguist-generated=true
 .claude/skills/** linguist-generated=true
 # 型生成の結果（生成物。UPDATE_GOLDEN=1 で作り直せる）。
-crates/dev-typegen-probe/bindings/** linguist-generated=true
+crates/dev-client-probe/bindings/** linguist-generated=true
 # このリポジトリで書いている skill はベンダー扱いにせず、行数に数え、差分も折りたたまない。
 .agents/skills/implement-issue/** -linguist-generated
 .agents/skills/review-pr/** -linguist-generated

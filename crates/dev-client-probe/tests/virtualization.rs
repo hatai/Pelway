@@ -1,27 +1,23 @@
 //! Slint 1.18.1 の ListView が行ごとに高さが違う場合（可変高の仮想リスト）を
-//! どう扱うかを確かめるテスト。
+//! どう扱うかを確かめるテスト。確かめることは 3 つ: 見える行だけが生成されるか
+//! （仮想化）、行が重なったり抜けたりしないか（可変高のレイアウト）、遠い位置へ
+//! 飛んだあとも同じか（スクロール）。
 //!
-//! 1. 見える行だけが生成されるか（仮想化）
-//! 2. 生成された行が重なったり抜けたりしないか（可変高のレイアウト）
-//! 3. スクロールしても同じことが保たれるか（遠い位置へ飛んだとき）
-//!
-//! スクロールは、テスト用 backend の要素 API からスクロールイベントを送って
-//! ListView 内部の flickable を動かして実現する。content-y を外側から差し替える
-//! 方式だと仮想化の範囲が追従しないため、その方式は採らない。
-//!
-//! 測定手順と結果のまとめは docs/research/slint-tauri-client-measurements.md。
+//! スクロールはテスト用 backend の要素 API からスクロールイベントを送って
+//! ListView 内部の flickable を動かして実現する（content-y を外側から差し替える
+//! 方式だと仮想化の範囲が追従しないため、その方式は採らない）。
+//! 測定結果は docs/research/slint-tauri-client-measurements.md。
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Once};
 
-use i_slint_backend_testing::{ElementHandle, ElementRoot};
-use pelway_dev_slint_listview::{Probe, ProbeWindow, new_probe_window, row_height};
+use i_slint_backend_testing::ElementRoot;
+use pelway_dev_client_probe::{Probe, ProbeWindow, new_probe_window, row_height};
 
-/// テスト用 backend（窓を開かない）を、テストごとに 1 回だけ入れる。
-///
-/// Slint の platform はスレッドローカルなので、テストごとに初期化する必要がある
-/// （cargo test は各テストを別スレッドで走らせるため、プロセス-wide な Once では
-/// 2 つめ以降のテストが winit backend にフォールバックする）。
+/// テスト用 backend（窓を開かない）を、テストごとに 1 回だけ入れる。Slint の
+/// platform はスレッドローカルなのでテストごとに初期化する（cargo test は各
+/// テストを別スレッドで走らせるため、プロセス-wide な Once では 2 つめ以降の
+/// テストが winit backend にフォールバックする）。
 fn init_testing_backend_once() {
     thread_local! {
         static INIT: Once = const { Once::new() };
@@ -38,19 +34,15 @@ fn setup(item_count: i32, variable_height: bool) -> (ProbeWindow, Arc<Probe>) {
     (window, probe)
 }
 
-/// ListView の要素を取り出す（スクロールイベントを送り込むため）。
-fn list_view(window: &ProbeWindow) -> ElementHandle {
-    window
+/// スクロールしてレイアウトを走らせ、記録された行の位置を返す。
+fn scroll_and_record(window: &ProbeWindow, probe: &Probe, delta_y: f32) -> BTreeMap<u32, f32> {
+    let list = window
         .root_element()
         .query_descendants()
         .match_type_name("ListView")
         .find_first()
-        .expect("検証用 UI に ListView がある")
-}
-
-/// スクロールしてレイアウトを走らせ、記録された行の位置を返す。
-fn scroll_and_record(window: &ProbeWindow, probe: &Probe, delta_y: f32) -> BTreeMap<u32, f32> {
-    list_view(window).scroll(0.0, delta_y);
+        .expect("検証用 UI に ListView がある");
+    list.scroll(0.0, delta_y);
     slint::platform::update_timers_and_animations();
     probe.positions()
 }
@@ -61,7 +53,7 @@ fn assert_rows_follow_their_heights(positions: &BTreeMap<u32, f32>, variable: bo
     assert!(!indices.is_empty(), "行が 1 つも生成されていない");
     for pair in indices.windows(2) {
         let (from, to) = (pair[0], pair[1]);
-        // 間の行の高さ（スクロールで作り直された行が記録に無いとき用）。
+        // 間の行の高さ（作り直された行が記録に無いとき用）。
         let expected: f32 = (from..to).map(|i| row_height(i, variable)).sum();
         let actual = positions[&to] - positions[&from];
         assert!(
@@ -73,7 +65,7 @@ fn assert_rows_follow_their_heights(positions: &BTreeMap<u32, f32>, variable: bo
 }
 
 #[test]
-fn visible_rows_only_are_created_for_ten_thousand_items() {
+fn visible_rows_only_are_created_and_placed_at_their_own_heights() {
     init_testing_backend_once();
     let (window, probe) = setup(10_000, true);
 
@@ -92,25 +84,12 @@ fn visible_rows_only_are_created_for_ten_thousand_items() {
     let indices: Vec<u32> = positions.keys().copied().collect();
     let contiguous = indices.windows(2).all(|w| w[1] == w[0] + 1);
     assert!(contiguous, "生成された行が連続していない: {indices:?}");
-}
-
-#[test]
-fn rows_are_placed_at_their_own_heights() {
-    init_testing_backend_once();
-    let (window, probe) = setup(10_000, true);
-
-    let positions = scroll_and_record(&window, &probe, -300.0);
-
     assert_rows_follow_their_heights(&positions, true);
-}
 
-#[test]
-fn fixed_height_rows_are_placed_at_the_same_height() {
-    init_testing_backend_once();
+    // 対照として、行の高さが固定でも同じ位置関係になる（高さの条件を確かめる検査が、
+    // 可変高のときだけ成立していないかの確認）。
     let (window, probe) = setup(10_000, false);
-
     let positions = scroll_and_record(&window, &probe, -300.0);
-
     assert_rows_follow_their_heights(&positions, false);
 }
 
