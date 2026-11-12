@@ -222,6 +222,8 @@ pub enum Code {
     NotAwaitingApproval,
     ApprovalInProgress,
     IdempotencyKeyReused,
+    /// 承認する人がカードの承認者ではなかった（#86。403）。
+    NotDecider,
     EmptyBody,
     TooLong,
     /// 受け渡し (#89): 依頼元がカードの現在の担当でない。

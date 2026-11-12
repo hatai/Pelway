@@ -8,11 +8,18 @@
 4. 足りなかった情報・検証手段: 却下 API の予定される経路・状態遷移（`TaskState::Stopped` への遷移操作は契約に無い）。承認者が承認した事実の記録（誰が承認したかの監査ログ項目。今回はログは既存の `approved` 出来事のまま）。
 5. 改善案: docs/superpowers/specs/agent-team.md の「実装者メモ」の節に「Issue に『採用する方式』の見出しや却下・承認など未実装操作への言及があるとき、実装者がどこまで実装し何を先送りしたかを PR 本文のどこに書くか」を足す。
 
+## 実装者メモ（round 2）
+
+1. 詰まった箇所: crates/pelway-contract/src/ledger.rs の #89 統合: 分割にあたり最新 main（PR #114 の handoff）に載せ直したら `hand_off` の `card.decider != req.from` が `Decider` と `MemberId` の比較で壊れた。受け渡しは指名した1人（`Decider::Member`）だけを対象にし、`HandoffError::NotCurrentDecider.current` を `Decider` 型にして解決した（役割を担当にしたカードは handoff の対象外と明記）。
+2. 曖昧だった文: 「PR 1 を先に Draft で出し、PR 2 は PR 1 のブランチに積んで Draft で出す」（Issue #86 の指揮役コメント）
+3. 仮定と解釈: PR 1 の本体は main、PR 2 の base は PR 1 のブランチ（agent/86-decider-and-policy）とし、PR 2 の本文に `Closes #86` を付ける側とした（PR 1 では付けない。`Closes` が付いた PR のマージで Issue が閉じるため、後続の PR 2 が残る順序では先に閉じられない）。round 1 の実装は一度 main に cherry-pick して #89 と統合した状態（full-merged-86）を作り、そこから PR 1（作成側）と PR 2（承認側）を切り分けた。
+4. 足りなかった情報・検証手段: 2 本の Draft を同時に出すときのレビュー順序（PR 1 → PR 2 を想定。PR 2 は PR 1 のマージ後に base を main に切り替える必要がある）。
+5. 改善案: scripts/pr-size.sh の「使い方」に、積み上げ PR（base が main 以外）での呼び出し例（`--base <親ブランチ>`）を足す。
 ## 実装者メモ（round 3）
 
 1. 詰まった箇所: crates/pelway-contract/src/handoff.rs のテスト置換: `Decider::Member(member("m-bot-1"))` を機械置換で `member("m-bot-1")` に戻したとき `Decider::Member(` の閉じカッコが残り、区切りの壊れたテストが一度できた（cargo check の mismatched closing delimiter で発見）。
 2. 曖昧だった文: 「作成時の解決先をカードに固定し、承認者の変更は明示的な再割当てとして新しい承認を要求してください」（PR #119 のレビュー2、pelway-review による must-fix）
-3. 仮定と解釈: レビュー2のとおり、`ApprovalCard.decider` を作成時に解決した `MemberId`（固定）に戻し、`Decider`（指名/役割）は `NewCard`（カード作成時の指定）だけが持つ形にした。`inbox` はカードの承認者との比較だけ（policy 引数を削除）、handoff も `MemberId` 比較に戻る。`set_policy` は「以降のカード作成の解決にだけ効く」ことを doc に明記した（既存カードに影響しなくなるため残す）。レビュー1（PR 単体で Issue の受け入れ条件が未達）は指揮役の分割判断（Issue コメント参照）により後続 PR #121 が満たすため、PR #119 にコメントして案内する（コード変更の対象外）。round 1 の仮定「承認時に毎回解決する形は選ばなかった」は本 round で完全に実現した。
+3. 仮定と解釈: レビュー2のとおり、`ApprovalCard.decider` を作成時に解決した `MemberId`（固定）に戻し、`Decider`（指名/役割）は `NewCard`（カード作成時の指定）だけが持つ形にした。`inbox` はカードの承認者との比較だけ（policy 引数を削除）、handoff も `MemberId` 比較に戻る。`set_policy` は「以降のカード作成の解決にだけ効く」ことを doc に明記した（既存カードに影響しなくなるため残す）。レビュー1（PR 単体で Issue の受け入れ条件が未達）は指揮役の分割判断（Issue コメント参照）により後続 PR #121 が満たすため、PR #119 にコメントして案内する（コード変更の対象外）。round 1 の仮定「承認時に毎回解決する形は選ばなかった」は本 round で完全に実現した。PR #121 への取り込みでは、承認者検査を `card.decider`（作成時固定の1人）と操作者の比較に単純化し、`role_decider_allows_only_the_representative` に「作成後に代表が変わっても承認できるのは作成時の代表だけ」を確認する断言を足した。
 4. 足りなかった情報・検証手段: 「承認者の明示的な再割当て」の操作（handoff は担当の受け渡し用で、承認カードの承認者変更に使えるかは #89 の範囲の解釈。今回は既存の handoff をそのまま）。
 5. 改善案: docs/superpowers/specs/agent-team.md のレビュー担当の節に「スタック PR の子が Issue を閉じるとき、親 PR の must-fix を子への案内として処理してよい条件」を足す。
 
