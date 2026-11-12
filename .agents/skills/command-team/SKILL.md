@@ -18,6 +18,7 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 - 指揮役はコードを書かない。PR のレビューもしない（自分が関わった PR を自分で評価しない）。
 - 指揮役が自分で作った PR（運用文書やスキルの変更）も、レビュー担当のスレッドに回す。
 - スレッドに送る指示は、Issue 番号か PR 番号と skill 名だけにする。例外はラベル（例: `pr-size-exception`）と Issue のコメントで伝え、指示の文に書き足さない。
+- スレッドへの指示は、新しい実行として送る（MCP の `t3_thread_send` で `mode: queue`）。実行中のスレッドに `steer`（既定の `auto`）で送ると、実行の途中に差し込まれ、その実行が指示を扱わずに終わることがある。終わりの報告と PR の head で、指示が扱われたかを確かめる。
 - 判断はすべて Issue か PR にコメントで残す。セッションの文脈だけに置かない。
 - 見張りの状態は `scripts/conductor-watch.sh` が `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。
 
@@ -38,7 +39,7 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 | 定型・小規模（Issue の規模の見積もりが小、変更が文書・設定・テストだけ） | opencode `zai-coding-plan/glm-5.3`、variant `low` |
 | 通常 | opencode `zai-coding-plan/glm-5.3`（variant 指定なし） |
 | コア部分（`crates/pelway-contract`、承認・状態遷移・権限）、`unsafe` を含む・含みうる変更 | opencode `zai-coding-plan/glm-5.3`、variant `high` |
-| 同じ Issue の `round` が 2 を超えた（3 回目の修正に入る） | `t3_thread_configure` で variant を 1 段上げる（`low`→通常→`high`→`max`）。`max` でも直らなければモデルを替える。Issue に理由をコメントする |
+| 同じ Issue の修正の指示が 2 回を超えた（3 回目の修正に入る）。数えるのは、レビューの本物の must-fix に基づく指示だけ（分割計画が無い時期の誤判定や、再起動による自動の再開は数えない） | `t3_thread_configure` で variant を 1 段上げる（`low`→通常→`high`→`max`）。`max` でも直らなければモデルを替える。Issue に理由をコメントする |
 | `round` が 4 以上 | 修正を出さずにエスカレーション（runbook 6） |
 
 ### レビュー担当と effort
