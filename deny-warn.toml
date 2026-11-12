@@ -1,0 +1,19 @@
+# unmaintained / unsound の advisory を検出して警告として見せるための検査専用設定。
+# mise.toml の deny-check タスク（第2段）が使う。単体で `cargo deny check` に使わないこと
+# （vulnerability を失敗させるゲートは deny.toml の方が担当する）。
+#
+# 経緯: cargo-deny 0.20.2 の [advisories] には unmaintained / unsound を警告レベルで出す
+# 設定が存在しない（all / workspace / transitive はエラー、none は完全な無視。公式
+# リファレンス docs/src/checks/advisories/cfg.md @ tag 0.20.2。v2 スキーマで lint level
+# フィールドは廃止）。Issue #168 の受け入れ条件「unmaintained と unsound は警告にとどまる」
+# （表示はされるが検査は失敗しない）を満たすため、ゲート（deny.toml では none）に加えて、
+# この設定で all として検出だけを行い、deny-check タスクが結果を警告として表示して
+# 終了コード 0 で終える。ignore を空にしているため、既知の 5 件（フォロー Issue #229）も
+# 毎回の verify で警告に出る。vulnerability（この設定でもエラーになる）はタスクが
+# unmaintained / unsound 以外を表示しないため出力されない（ゲートが担当）。
+[advisories]
+unmaintained = "all"
+unsound = "all"
+# yanked はゲート（deny.toml の yanked = "deny"）が失敗させる。ここでは重複して
+# 検出しない（表示もタスクが行わない）。
+yanked = "allow"

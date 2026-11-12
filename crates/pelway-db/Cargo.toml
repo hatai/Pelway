@@ -10,7 +10,7 @@ publish = false
 description = "PostgreSQL layer with tenant Row Level Security for Pelway (ADR 0005). Draft, not a fixed schema."
 
 [dependencies]
-pelway-contract = { path = "../pelway-contract", default-features = false }
+pelway-contract = { path = "../pelway-contract", version = "0.0.0", default-features = false } # version は cargo-deny の wildcards 検査のため（path 依存の解決には影響しない）
 sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio", "migrate", "macros"] }
 
 [dev-dependencies]
