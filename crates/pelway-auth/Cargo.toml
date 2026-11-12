@@ -1,0 +1,23 @@
+[package]
+# 認証スパイク（#97 の分割 1 本目）。passkey（webauthn-rs）の登録・ログインと
+# セッションを axum に組み込む下書き。顧客 IdP（openidconnect）は 2 本目の
+# PR で足す。確定スキーマではない。
+name = "pelway-auth"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Draft authentication spike for the Pelway demo backend (passkey on axum; OIDC RP lands in the stacked PR). Not a fixed schema."
+
+[dependencies]
+webauthn-rs = { version = "=0.6.2" }
+axum = { version = "=0.8.9" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt"] }
+tower = { version = "0.5", features = ["util"] }
+url = "2"
+webauthn-authenticator-rs = { version = "=0.6.2", features = ["softpasskey"] }
