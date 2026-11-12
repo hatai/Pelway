@@ -64,7 +64,7 @@
 | WSL2 の裏にある Windows ホストの IME | 韓国語 IME の実体（`C:\Windows\System32\IME\IMEKR`、フォントも malgun.ttf 等）はあるが、入力方式としての登録は確認できず（`reg query "HKLM\SOFTWARE\Microsoft\CTF\TIP" /k /f "0412"` が 0 件） |
 | Windows 版の Slint アプリのビルド | 不可。Windows 版 Rust ツールチェーンが無く（`where cargo` が 0 件）、MSVC も MinGW も無い |
 
-事実（再現的程序を用意した）: 人が対象条件で実行できるように、LineEdit 1 つだけの窓を出す再現プログラムを用意した（`crates/dev-client-probe` の `src/bin/ime.rs`）。テキストと入力の focused の変化を stdout に記録するので、変換中の文字が残ったかをログで判定できる。手順:
+事実（再現手順を用意した）: 人が対象条件で実行できるように、LineEdit 1 つだけの窓を出す再現プログラムを用意した（`crates/dev-client-probe` の `src/bin/ime.rs`）。テキストと入力の focused の変化を stdout に記録するので、変換中の文字が残ったかをログで判定できる。手順:
 
 1. `cargo run --release -p pelway-dev-client-probe --bin ime` で起動する（Windows 11 で行う）。
 2. LineEdit にフォーカスを当て、IME で「한글」と入力する（最後の「글」を変換中にしたままにする）。
