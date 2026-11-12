@@ -156,6 +156,6 @@ EXPLAIN ANALYZE の Execution Time 中央値（3 回）。単位 ms。
 - kill -9 試験はコミット済みトランザクションの消失を含まない（同期コミット後の
   強制停止）。WAL 生成中の破損パターンは再現できていない。
 - 本レポートの PR はベンチマーク基盤の PR を base にした stacked PR として出す。
-  この間、CI の pr-size は差分を正しく数えられず一時的に fail する
-  （実際の差分は `scripts/pr-size.sh --base <base ブランチ>` で確認できる）。
-  base が main に切り替わった後は解消する。
+  CI（verify.yml）は base が main の pull_request でだけ走るため、この間は CI が
+  走らない（実際の差分は `scripts/pr-size.sh --base <base ブランチ>` で確認できる）。
+  base が main に切り替わった後に CI が走り、pr-size は +178 に収まる。
