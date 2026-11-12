@@ -26,7 +26,7 @@
 //! - 承認期限が切れたときの状態と通知は別作業。ここは一覧の判定と並べ替えだけを
 //!   行う。承認 API での承認者の身元検査は #86（`ApprovalLedger::approve`）。
 
-use crate::approval::{ApprovalCard, ApprovalPolicy, Decider, resolve_decider};
+use crate::approval::ApprovalCard;
 use crate::ids::{CardId, ChannelId, MemberId};
 use crate::store::TsMs;
 use crate::task::{ActionKind, TaskState};
@@ -60,10 +60,8 @@ pub struct InboxItem {
     pub state: TaskState,
     /// 依頼した人。
     pub requester: MemberId,
-    /// 誰の判断待ちか（承認者。指名した1人または役割。引き継ぎでは受け取る担当）。
-    /// 役割が誰に解決されるかはこの一覧では解決しない（[`build_inbox`] が
-    /// 「自分の判断待ち」の判定のためにだけ解決する）。
-    pub decider: Decider,
+    /// 誰の判断待ちか（承認者。作成時に決めた1人。引き継ぎでは受け取る担当）。
+    pub decider: MemberId,
     /// 判断の期限（なければ `None`）。
     pub deadline: Option<TsMs>,
     /// このタブに入っている理由。
@@ -111,18 +109,16 @@ const fn is_awaiting_person(state: TaskState) -> bool {
 ///
 /// `cards` は呼び出し側が範囲（workspace 等）を絞ったものを渡す
 /// （[`crate::ledger::ApprovalLedger::inbox`] が workspace で絞って渡す）。
-/// `policy` は役割を承認者へ解決するために使う（ADR 0002・#86）。
 /// 一覧用のデータは保存せず、渡されたカードからその場で組み立てる。
+/// カードの承認者は作成時に決まった1人（ADR 0002・#86）なので、判定は比較だけ。
 #[must_use]
-pub fn build_inbox<'a, I>(member: &MemberId, policy: &ApprovalPolicy, cards: I) -> Inbox
+pub fn build_inbox<'a, I>(member: &MemberId, cards: I) -> Inbox
 where
     I: IntoIterator<Item = &'a ApprovalCard>,
 {
     let mut inbox = Inbox::default();
     for card in cards {
-        // 役割は policy で解決して「自分が承認者か」を判定する（ADR 0002・#86）。
-        let decider_is_me = resolve_decider(&card.decider, policy).is_some_and(|d| d == *member);
-        if decider_is_me && is_awaiting_person(card.state) {
+        if card.decider == *member && is_awaiting_person(card.state) {
             let reason = if card.payload.action_kind == ActionKind::AgentHandoff {
                 InboxReason::Handoff
             } else {
@@ -132,7 +128,7 @@ where
                 .needs_my_decision
                 .push(InboxItem::from_card(card, reason));
         } else if card.state == TaskState::OutcomeUnknown
-            && (card.requester == *member || decider_is_me)
+            && (card.requester == *member || card.decider == *member)
         {
             inbox
                 .needs_my_decision
@@ -186,7 +182,7 @@ mod tests {
             snapshot_hash: "sha256:synthetic-snapshot-inbox".to_owned(),
             state,
             requester: ME.into(),
-            decider: Decider::Member(ME.into()),
+            decider: ME.into(),
             deadline: None,
             comments: Vec::new(),
             simulated_send_id: None,
@@ -207,18 +203,17 @@ mod tests {
         let handoff = handoff_card;
         let unknown = card("card-outcome-unknown", TaskState::OutcomeUnknown);
         let not_mine = ApprovalCard {
-            decider: Decider::Member(OTHER.into()),
+            decider: OTHER.into(),
             ..card("card-other-decider", TaskState::AwaitingSendApproval)
         };
         let already_sent = card("card-sent", TaskState::SentAwaitingReply);
         let unknown_of_other = ApprovalCard {
             requester: OTHER.into(),
-            decider: Decider::Member(OTHER.into()),
+            decider: OTHER.into(),
             ..card("card-unknown-other", TaskState::OutcomeUnknown)
         };
         let inbox = build_inbox(
             &ME.into(),
-            &ApprovalPolicy::default(),
             [
                 &mine,
                 &handoff,
@@ -244,10 +239,10 @@ mod tests {
     #[test]
     fn outcome_unknown_appears_for_requester_too() {
         let requested_by_me = ApprovalCard {
-            decider: Decider::Member(OTHER.into()),
+            decider: OTHER.into(),
             ..card("card-unknown-mine", TaskState::OutcomeUnknown)
         };
-        let inbox = build_inbox(&ME.into(), &ApprovalPolicy::default(), [&requested_by_me]);
+        let inbox = build_inbox(&ME.into(), [&requested_by_me]);
         assert_eq!(ids(&inbox.needs_my_decision), ["card-unknown-mine"]);
         assert_eq!(
             inbox.needs_my_decision[0].reason,
@@ -266,11 +261,7 @@ mod tests {
             requester: OTHER.into(),
             ..card("card-not-mine", TaskState::Working)
         };
-        let inbox = build_inbox(
-            &ME.into(),
-            &ApprovalPolicy::default(),
-            [&working, &awaiting, &sent, &done, &others],
-        );
+        let inbox = build_inbox(&ME.into(), [&working, &awaiting, &sent, &done, &others]);
         assert_eq!(
             ids(&inbox.my_requests),
             ["card-awaiting", "card-done", "card-sent", "card-working"]
@@ -310,11 +301,7 @@ mod tests {
             deadline: Some(10_000),
             ..card("card-tie", TaskState::AwaitingSendApproval)
         };
-        let inbox = build_inbox(
-            &ME.into(),
-            &ApprovalPolicy::default(),
-            [&far, &none_z, &tie, &none_a, &near],
-        );
+        let inbox = build_inbox(&ME.into(), [&far, &none_z, &tie, &none_a, &near]);
         assert_eq!(
             ids(&inbox.needs_my_decision),
             [
@@ -342,7 +329,7 @@ mod tests {
                 card_id: "card-live".into(),
                 payload: card("card-live", TaskState::AwaitingSendApproval).payload,
                 requester: ME.into(),
-                decider: Decider::Member(ME.into()),
+                decider: crate::approval::Decider::Member(ME.into()),
                 deadline: Some(10_000),
             })
             .expect("new card");
@@ -385,7 +372,7 @@ mod tests {
                     card_id: id.into(),
                     payload: card(id, TaskState::AwaitingSendApproval).payload,
                     requester: ME.into(),
-                    decider: Decider::Member(ME.into()),
+                    decider: crate::approval::Decider::Member(ME.into()),
                     deadline: None,
                 })
                 .expect("new card");
