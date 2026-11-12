@@ -454,6 +454,26 @@ phase_restore_checksum() {
     || fail restore-checksum "pgbackrest verify が失敗"
   ok restore-checksum-verify "pgbackrest verify が通る"
 
+  # 2b) 暗号化の subkey が弱くないこと。
+  #     2.59.3 未満は乱数生成の失敗を検出せず、弱い subkey を作る可能性が
+  #     ある（pgbackrest.org/news.html「Weak Encryption Subkeys and Salts」）。
+  #     同ページの判定手順を使い、subkey のゼロバイト数を数える。
+  #     ランダムな subkey は 25 百万に 1 回未満で 6 バイト以上のゼロを持つ。
+  local subkey_zero
+  subkey_zero=$(podman exec -u postgres "$CONTAINER" sh -c "
+    for file in archive/$STANZA/archive.info backup/$STANZA/backup.info; do
+      pgbackrest --stanza=$STANZA --repo=1 repo-get \$file 2>/dev/null \
+        | grep '^cipher-pass=' | cut -d'\"' -f2 \
+        | while read -r key; do
+            printf '%s' \"\$key\" | base64 -d 2>/dev/null | od -An -v -tx1 | tr -s ' ' '\n' | grep -c '^00\$' || true
+          done
+    done" | sort -rn | head -1) || true
+  [[ -n "$subkey_zero" ]] || fail restore-checksum "暗号 subkey を読み取れなかった"
+  if [[ "$subkey_zero" -ge 6 ]]; then
+    fail restore-checksum "暗号 subkey が弱い（ゼロバイト数 $subkey_zero、6 以上は弱い）"
+  fi
+  ok restore-checksum-subkey "暗号 subkey は弱くない（ゼロバイト数 $subkey_zero）"
+
   # 3) 復元に成功し、probe の内容が一致すること。
   local before after
   before=$(psql_q "SELECT md5(string_agg(payload, ',' ORDER BY id)) FROM probe;")
