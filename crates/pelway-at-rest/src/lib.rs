@@ -14,6 +14,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod attachments;
 pub mod container;
 
 use std::fmt;
