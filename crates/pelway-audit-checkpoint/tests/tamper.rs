@@ -43,10 +43,13 @@ fn signed_at(k: usize) -> (String, note::NoteVerifier) {
 
 /// テストごとに一意な一時ファイル（cargo が用意するテスト用ディレクトリの下。
 /// 実行ごとに残骸が残らないよう、名前は PID と通し番号で一意にして先に消す）。
+/// `CARGO_TARGET_TMPDIR` が渡らない環境では `/tmp` 側へ落ちるため、ディレクトリが
+/// 無ければ作る（CI ランナーには事前に存在するとは限らない）。
 fn tmp_log(tag: &str) -> (CheckpointLog, PathBuf) {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let dir = std::env::var("CARGO_TARGET_TMPDIR")
         .map_or_else(|_| std::env::temp_dir().join("opencode"), PathBuf::from);
+    std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join(format!(
         "checkpoint-{tag}-{}-{}.log",
         std::process::id(),

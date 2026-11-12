@@ -23,3 +23,11 @@
 3. 仮定と解釈: 仮定: PR-1 を +818 からさらに削ると docs の説明を削ることになる。解釈: ADR ファイル全体を PR-2 に移し、PR-1 は +793 に収めた（リンク切れは PR 本文に明記）。選ばなかった: ADR から形式の節だけ残す部分移動（決定の記録が 2 つの PR に分かれ、ステータスの管理が曖昧になるため）。
 4. 足りなかった情報・検証手段: なし（round 1〜2 の情報で足りた。store の RED 出力は round 1 の実行記録に含まれる）。
 5. 改善案: .github/pull_request_template.md の「レビューと QA」に「一時的なリンク切れはここに書く（#92 の先行例あり）」を足す。
+
+## 実装者メモ（round 4）
+
+1. 詰まった箇所: crates/pelway-audit-checkpoint/tests/tamper.rs: 188 行目 `log.append(&signed).unwrap()` が CI で `NotFound`。フォールバック先 `/tmp/opencode` はローカルのハーネス環境では事前に作られているが CI ランナーには無く、`CARGO_TARGET_TMPDIR` も渡らないため、親ディレクトリが無いまま `create+append` でファイルを開いていた。
+2. 曖昧だった文: 「Prefer /tmp/opencode over generic system temporary directories such as /tmp; it is pre-created and approved for external access.」（実行環境の情報）— これはエージェントの操作向けの規約であり、CI を含む任意の環境で走るテストの実行時一時ファイルの置き場所にもそのまま当てはまるかが決まっていない。
+3. 仮定と解釈: 仮定: テストは一時ディレクトリの事前存在に依存すべきでない。解釈: テストヘルパー `tmp_log` がフォールバック先を `create_dir_all` で作る。選ばなかった: ライブラリ側（`CheckpointLog::append`）で親ディレクトリを作る（保存先の設定ミスを黙って成功させ、誤った場所への追記を隠すため）ことと、`CARGO_TARGET_TMPDIR` 未設定時に `/tmp` 直下へ戻す（ローカルの再実行で古い残骸と名前衝突するため）こと。
+4. 足りなかった情報・検証手段: CI ランナーで `CARGO_TARGET_TMPDIR` がテストへ渡らないことの直接の確認（GitHub Actions の失敗ログと `/tmp/opencode` の不存在からの推定。ローカルでも未設定だったことは `/tmp/opencode` 側に残骸が残ることで確認）。
+5. 改善案: .github/workflows/verify.yml の「test (cargo test)」ジョブの説明に「テストが書く一時ファイルの置き場所を `TMPDIR` で明示する」を足す。
