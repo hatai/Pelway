@@ -284,6 +284,9 @@ pub struct ApproveOutcome {
 pub enum ApproveError {
     CardNotFound,
     CardIdMismatch,
+    /// 操作した人はこのカードの承認者ではない（ADR 0002・#86）。
+    /// 承認者に解決される人（指名された1人、または役割を持つ人）だけが承認できる。
+    NotDecider,
     /// 画面の版が古い。最新の版を読み直してから承認し直す。
     VersionConflict {
         current_version: u64,
@@ -307,6 +310,7 @@ impl ApproveError {
     pub fn http_status(&self) -> u16 {
         match self {
             Self::CardNotFound => 404,
+            Self::NotDecider => 403,
             Self::CardIdMismatch | Self::IdempotencyKeyReused => 422,
             Self::VersionConflict { .. }
             | Self::SnapshotMismatch

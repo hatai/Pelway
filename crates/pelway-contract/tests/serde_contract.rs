@@ -200,6 +200,18 @@ fn decider_wire_shape_member_and_role() {
     }
 }
 
+// #86: not_decider エラーのタグ（403）。
+#[test]
+fn not_decider_error_is_tagged_by_code() {
+    let json = serde_json::to_string(&ApproveError::NotDecider).unwrap();
+    assert_eq!(json, r#"{"code":"not_decider"}"#);
+    assert_eq!(
+        serde_json::from_str::<ApproveError>(&json).unwrap(),
+        ApproveError::NotDecider
+    );
+    assert_eq!(ApproveError::NotDecider.http_status(), 403);
+}
+
 // #86: 承認の設定（ワークスペース）。allow_requester_as_decider は必須、
 // representative の欠落は `None` と同じ扱い、未知フィールドは拒否。
 #[test]

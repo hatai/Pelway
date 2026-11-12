@@ -354,12 +354,16 @@ mod tests {
         // 承認すると「自分の判断待ち」から消え、「自分の依頼」の進み具合が変わる。
         let c = ledger.card(&"card-live".into()).unwrap();
         ledger
-            .approve(crate::approval::ApproveRequest {
-                card_id: "card-live".into(),
-                card_version: c.card_version,
-                snapshot_hash: c.snapshot_hash.clone(),
-                idempotency_key: IdempotencyKey::new("test-key-inbox-000001").expect("valid key"),
-            })
+            .approve(
+                crate::approval::ApproveRequest {
+                    card_id: "card-live".into(),
+                    card_version: c.card_version,
+                    snapshot_hash: c.snapshot_hash.clone(),
+                    idempotency_key: IdempotencyKey::new("test-key-inbox-000001")
+                        .expect("valid key"),
+                },
+                &ME.into(),
+            )
             .expect("approve");
 
         let after = ledger.inbox(&"ws-synthetic-inbox".into(), &ME.into());

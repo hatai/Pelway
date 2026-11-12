@@ -167,7 +167,7 @@ fn inbox_reflects_state_changes_in_the_ledger() {
             idempotency_key: pelway_contract::ids::IdempotencyKey::new("test-key-http-inbox-0001")
                 .expect("valid key"),
         };
-        ledger.approve(req).expect("approve");
+        ledger.approve(req, &MemberId::from(ME)).expect("approve");
     }
 
     let (status, after) = get_inbox(addr, ME);
