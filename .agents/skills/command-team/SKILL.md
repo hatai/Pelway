@@ -80,6 +80,8 @@ GLM が利用上限で止まったとき、または GLM の同時数の上限�
 | Devin `swe-2-high`（重い作業）、`swe-2-flash-medium`（定型・小規模） | `t3_thread_launch` で `instanceId: acpRegistry_devin`、`options: {mode: bypass, thought_level: high}`、`runtimeMode: full-access`。割り当ての行は `agent=devin` | 無料提供の期限（2026-11-30）まで |
 | opencode `opencode/minimax-m3.1-flash-free` | opencode のスレッドで `t3_thread_configure` でモデルを替える | 1 回の実行が十数分で報告なしに終わることがある。終わりの報告が無い `completed` には「続ける」を送り、短い実行が続いたら別の担当に替える |
 
+予備の権限は opencode の実装担当と同じ（仕様の「実装担当の権限」）。予備にだけ広い権限を与えない。
+
 途中で担当を替えるときは、前の担当の worktree を `workspaceStrategy: existing_worktree` で渡して新しいスレッドを立て、最初の指示に、前の担当が残した作業（コミット済み・未コミット）と止まった所を書く。
 
 runbook と仕様の `round`（スレッドの実行回数）は、誤判定や再起動による再開でも増える。指揮役は `round` を目安にとどめ、effort の引き上げとエスカレーションは上の表の「修正の指示の回数」で判断する。
