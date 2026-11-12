@@ -158,10 +158,26 @@ fi
 """
 
 [tasks.deny-check]
-description = "cargo-deny で依存クレートを検査（RustSec 脆弱性・yanked・ライセンス・重複・取得元。設定は deny.toml）"
+description = "cargo-deny で依存クレートを検査（RustSec 脆弱性・yanked・ライセンス・重複・取得元は失敗、unmaintained / unsound は警告として表示）。設定は deny.toml と deny-warn.toml"
 # コンパイルはしない（cargo metadata と Cargo.lock を読むだけ）のため verify-static に入れる。
 # 例外（ignore・例外ライセンス）の足し方は docs/dev-environment.md の「cargo-deny」節。
-run = "cargo deny check"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+# 第1段（ゲート）: vulnerability・yanked・ライセンス・bans（wildcards）・sources は失敗。
+cargo deny check
+# 第2段（警告の表示）: unmaintained / unsound。deny.toml では none（ゲートを失敗させない）なので、
+# deny-warn.toml で all として検出だけ行い、結果を警告として表示して終了コード 0 で終える
+# （cargo-deny 0.20.2 に警告レベルの設定が無いための代替。Issue #168 の受け入れ条件）。
+# 既知の 5 件は毎回警告に出る（フォロー Issue #229 で解消。deny.toml の ignore が台帳）。
+# 新規のものが出たら、deny.toml の ignore に理由とフォロー Issue 番号を添えて登録するか依存を更新する。
+warn_out="$(cargo deny --config deny-warn.toml check advisories 2>&1 || true)"
+warn_lines="$(printf '%s\\n' "$warn_out" | awk '/^error\\[(unmaintained|unsound)\\]:/ { title = $0; keep = 1; next } keep && /ID: RUSTSEC-/ { print "warning: " $3 " " title; keep = 0 }')"
+if [ -n "$warn_lines" ]; then
+  echo "warning: unmaintained / unsound の advisory があります（検査は失敗しません）:" >&2
+  printf '%s\\n' "$warn_lines" >&2
+fi
+"""
 
 [tasks.pr-size]
 description = "PR の差分行数を数え、800 行を超えたら失敗する（linguist-generated とバイナリは除く）"

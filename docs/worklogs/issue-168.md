@@ -170,3 +170,22 @@ AGPL・EPL・CDDL は依存ツリーに無い。
 3. 仮定と解釈: main の新クレートの path 依存への version 追加は、この PR で確立した wildcards ポリシーの適用範囲と解釈した（修正依頼には明示されていないが、`mise run verify` が通るために必須）。選ばなかった解釈: main 側のコードは変えず `allow-wildcard-paths` に切り替える（ポリシーを弱めるため不採用）。
 4. 足りなかった情報・検証手段: マージ後の依存ツリーの変化（評価グラフ 764 → 784）に伴い棚卸し表が古くなるため、`cargo deny list` を再実行して表を更新した。
 5. 改善案: `.github/ISSUE_TEMPLATE/agent-task.yml` の「関連情報」の description に「新しいクレート・依存を足す場合は deny.toml と docs/dev-environment.md の cargo-deny 節（path 依存の version、ライセンスの棚卸し）を確認する」を足す。
+
+## round 4: レビュー must-fix 対応（unmaintained / unsound を警告として見せる）
+
+### 経緯
+
+1. PR #234 に Request changes（pelway-review、must-fix 1 件）: deny.toml の `unmaintained = "none"` / `unsound = "none"` は該当 advisory を警告にも表示せず無効化するため、Issue #168 の受け入れ条件「警告にとどまる」を満たさない。新たな未保守・不健全な依存が追加されても検出されない。
+2. 公式文書で確かめた: cargo-deny 0.20.2 の `[advisories]` に unmaintained / unsound を警告として出す設定は存在しない。`unmaintained` / `unsound` は `all` / `workspace` / `transitive`（いずれもエラーで検査が失敗）か `none`（completely ignored。警告も出ない）のみ（docs/src/checks/advisories/cfg.md @ tag 0.20.2）。lint level の `warn` を取れるのは `yanked` と `unused-ignored-advisory` だけ。
+3. 指揮役の選択肢のうち (2)「失敗させない別の検査の段として警告表示」を選んだ。(1)（all + ignore で新規は失敗 = 警告より厳しい）は受け入れ条件と違う挙動のため Issue コメントしての停止が必要になるが、(2) は受け入れ条件の意図（表示はされるが検査は失敗しない）と一致するため停止不要。
+4. 実装: `deny-warn.toml`（スタンドアロン。`unmaintained = "all"`、`unsound = "all"`、`yanked = "allow"`、ignore なし）を追加し、mise.toml の `deny-check` を2段構成にした。第1段は従来どおり `cargo deny check`（ゲート。vulnerability・yanked・ライセンス・wildcards・sources は失敗）。第2段は `deny-warn.toml` で `check advisories` を実行し（終了コードは無視）、awk で `error[unmaintained]` / `error[unsound]` の行と対応する `ID: RUSTSEC-…` を抜き出して `warning:` 行として表示して終了コード 0 で終える。既知の 5 件が毎回の verify で警告に出る（v1 スキーマの `unmaintained = "warn"` 相当の見え方）。新規の unmaintained / unsound も同じ経路で毎回警告に出る。
+5. `--config` は 0.20.2 で複数指定できない（`the argument '--config <CONFIG_PATH>' cannot be used multiple times`）ため、deny.toml への重ね合わせではなくスタンドアロン設定にした。vulnerability は第2段でもエラーになるが、タスクが unmaintained / unsound 以外を表示しないため出力されない（vulnerability の成否はゲートが担当）。
+6. deny.toml のコメント、docs/dev-environment.md の cargo-deny 節とタスク一覧を更新した。
+
+## 実装者メモ（round 4）
+
+1. 詰まった箇所: 手順4: `--config` を2つ渡す設定の重ね合わせが 0.20.2 で使えず（`cannot be used multiple times`）、スタンドアロンの deny-warn.toml に切り替えた。同じく手順4: deny-warn.toml での最初の検証実行が advisory DB 取得の停滞で 120 秒のタイムアウトになり、再実行で通った。
+2. 曖昧だった文: 「受け入れ条件と違う挙動（(1) のように失敗させるなど）を選ぶ場合は、理由を Issue にコメントして止まる」（修正依頼の指示）— (2) は受け入れ条件と同じ挙動（表示される・失敗しない）なので停止不要、と解釈した。
+3. 仮定と解釈: 「警告にとどまる」の本体は「表示はされるが検査は失敗しない」で、表示先は mise タスクと CI の static ジョブのログで十分と解釈した（GitHub の annotation には出ない）。選ばなかった解釈: 選択肢 (1)（all + ignore、新規は失敗。停止が必要になるうえ、Issue 作成者の意図した「失敗させない」から外れる）。
+4. 足りなかった情報・検証手段: 「新規」の unmaintained / unsound の検出確認は差し込みを行わず、既知の 5 件が同じ検出・表示の経路（error[unmaintained] → awk → warning 行）を通っていることで担保した。
+5. 改善案: implement-issue skill の「決まり」に「mise タスクを複数行の bash にするときは `#!/usr/bin/env bash` と `set -euo pipefail` を先頭に置く（toolchain-check・codex-review-check と同じ）」を足す。

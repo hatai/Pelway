@@ -12,15 +12,17 @@
 # vulnerability の lint level 設定は廃止され、ignore した ID 以外は常にエラー）。
 # yanked 版の使用も失敗させる（既定は warn なので明示する）。
 yanked = "deny"
-# unmaintained / unsound は検査を失敗させない（#168「警告にとどまる」）。
+# unmaintained / unsound は第1段（この設定）では検査を失敗させない（#168「警告にとどまる」）。
 # 0.20.2 の [advisories] に lint level の warn は存在せず、スコープ
 # all / workspace / transitive / none のみ。失敗しないのは none だけなので採る。
-# トレードオフ: unmaintained / unsound が検査出力に出なくなる。既知の該当は下の
-# ignore の台帳 + フォロー Issue で管理する（棚卸し: docs/worklogs/issue-168.md）。
+# none は診断を出さないため、deny-check タスクの第2段（deny-warn.toml で all として
+# 検出し、結果を警告として表示して終了コード 0 で終える）で可視化する。既知の該当は
+# 下の ignore の台帳 + フォロー Issue で管理する（棚卸し: docs/worklogs/issue-168.md）。
 unmaintained = "none"
 unsound = "none"
-# unmaintained = "none" のため、下の unmaintained 系の ignore エントリは検査に現れない
-# （未使用扱い）。台帳として意図的に残すので、未使用警告を出さない。
+# unmaintained = "none" のため、下の unmaintained 系の ignore エントリは第1段の検査に
+# 現れない（未使用扱い）。台帳として意図的に残すので、未使用警告を出さない。
+# （第2段の deny-warn.toml には ignore が無く、既知の 5 件も毎回警告として表示される）
 unused-ignored-advisory = "allow"
 # 例外の台帳。1 件ごとに理由と解消用のフォロー Issue の番号を必ず添える。
 ignore = [
