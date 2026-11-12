@@ -57,3 +57,11 @@
 3. 仮定と解釈: 仮定: CI は既存の `mise run verify` ジョブ（docs/dev-environment.md「CI（GitHub Actions）」）のまま。解釈: 測定コマンドのモック試験（tests/eval.rs）を cargo test に含めることで「CI では外部へつながらず、モックで動くことだけを試す」を満たす。`.github/workflows/` の変更はしない（pelway-dev[bot] には workflow を push する権限がなく、必要なら停止条件に当たる）。選ばなかった: 専用の workflow 追加（権限がなく停止条件に該当するため）。
 4. 足りなかった情報・検証手段: PR 5（測定コマンド）の割り当て（指揮役の判断待ち。ブランチ `agent/95-llm-eval-cmd` に実装済み・`mise run verify` EXIT=0・`cargo test -p pelway-dev-llm-eval` 3/3 合格）。
 5. 改善案: docs/dev-environment.md の「CI（GitHub Actions）」に「新しい cargo パッケージの試験は cargo test --workspace で自動的に CI に入る（workflow の変更は不要）」を明記する。
+
+## 実装者メモ（round 8）
+
+1. 詰まった箇所: crates/pelway-llm/src/schema.rs: PR #163 の must-fix（未対応の `type` 名が `type_matches` の `_ => true` で常に一致する）を直す際、`type` の値だけ未知なら値の検証を飛ばす形も考えたが、誤記を含むスキーマが黙って全部を通すことのないよう、`validate` の先頭で `KNOWN_TYPES` にない名前をスキーマエラーとして拒否する形にした。`type_matches` の未知名も `_ => false` に変えた（防御）。
+2. 曖昧だった文: 「未知の型名を不一致またはスキーマエラーとして拒否してください。」（PR #163 のレビュー、pelway-review）— どちらの挙動でもよいが、エラー文言でスキーマ側の問題か値側の問題かを区別できるかが書かれていない。
+3. 仮定と解釈: 仮定: レビューの意図は fail-closed（何でも通すことを許さない）で、挙動の選択は実装側に任されている。解釈: 未知の `type` 名はスキーマエラー（「スキーマの type「X」は未対応です（検証できないため拒否します）」）とし、値の不一致（「type が違います: 期待…」）と区別する。選ばなかった: 単なる不一致扱い（どの値でも必ず失敗するが、文言が値側の違反のように読め、スキーマの誤記に気づきにくい）。
+4. 足りなかった情報・検証手段: なし（RED: `schema_validation_rejects_unknown_type_names ... FAILED`（誤記スキーマが `Ok` を返す）→ GREEN: 8/8。入れ子の `properties` 内の未知名も再帰的に拒否されることを試験に含めた）。
+5. 改善案: `.agents/skills/review-pr` に相当する指摘のため省略（レビュー側の運用は変えない）。
