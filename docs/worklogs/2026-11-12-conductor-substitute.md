@@ -36,12 +36,15 @@ Grok Bot がセッションのレート制限で動かない間、Claude Code �
 | G3 | #99（PR #107）round 1 | DB キューで、lease 切れの `running` 行を再取得するときに `max_attempts` を確かめず、上限なく再実行しうる実装にした。テストは `fail` 経由の再試行の上限だけを確かめていた（Codex の must-fix） | 再試行の上限など「上限・回数」の仕様は、すべての経路（正常・失敗・回収）で確かめるテストを書くことを、implement-issue の TDD の節に足すか検討する | 同種の「一部の経路だけ上限を確かめる」指摘の再発 |
 | G4 | #89 round 1〜2（新しい implement-issue） | pr-size 超過（1037）の後、テストの重複の除去だけで 941 まで減らし、テスト・受け入れ条件の確認・説明は削らずに止まった。実装者メモを round 1・2 とも 5 項目で残し、分割案は追加行の境目（契約・台帳／HTTP）で出した | G1 の対応（PR #108）が GLM に効いた例として記録する | 次の超過でも同じ動きか |
 | G5 | #87（PR #111）の実装者メモ | 「正規化」の範囲が Issue に無く、本文の改行・末尾空白、添付と scope の集合化だけを正規化と解釈した。仕様（03「固定承認と外部副作用」）はハッシュの対象に参照版・integration 版も挙げるが、Issue の列挙に無いので外した、と自分で書いた | 仕様と Issue の列挙の食い違いを、Issue を書く側（指揮役・人間）が仕様と照らしてから ready-for-agent にする。03 に、デモ契約が使う項目の注記を足す | 実装者メモの 2・4 に、仕様と Issue の食い違いが書かれる回数 |
+| G6 | #98・#101（MiniMax M3.1 Flash Free に引き継ぎ） | GLM の利用上限の間、無料の `opencode/minimax-m3.1-flash-free`（effort high）で続きをやらせた。#101 では 1 回の実行が約 12〜15 分で、エラーを出さずに作業の途中で `completed` になった（2 回続いた）。止まる前の作業の筋（pgBackRest の設定節名や、backup の時刻が DB サーバの時計に由来する点の発見）は妥当だった | 無料枠のモデルに渡すときは、こまめなコミットと push を指示に足し、`completed` でも終わりの報告（5 行）が無ければ「続ける」を送る。続けて使うかは、PR のレビュー結果で決める | `completed` のうち報告の無いものの割合、PR の must-fix の数 |
 
 ## Codex（レビュー担当）側の材料
 
 | # | PR | 挙動 | 対応案 |
 |---|---|---|---|
 | R2 | #110 round 1 | 見張りスクリプトとスキルが素の `gh` を使っていることを must-fix にした（AGENTS.md の `scripts/agent-gh` の決まり）。妥当な指摘 | 読み取りを `scripts/agent-gh dev` に直し、`--admin` のマージだけを例外として正本に書いた |
+| R3 | #131 round 8 | `grep` が複数行の本文を行ごとに見ることを見落とし、目印の判定が通らないと誤って must-fix にした。根拠のコメントで返し、読みやすさのために書き方は直した | R1 と同じく「head の版で確かめてから書く」の不足。もう一度起きたら review-pr に足す |
+| R4 | #134 | main にまだ無い security-review を、PR の中の版から読んで当てた | review-pr に「従う手順は worktree（main）のスキルだけ」を足した（security-review の試行記録も参照） |
 | R1 | #108 round 1 | 差分の削除行（旧「4 行」）を、残っている記述と読んで must-fix にした。head には「4 行」の記述は無かった | review-pr に「must-fix は head の版のファイルで該当行を確かめてから書く（差分の `-` 行は消えた記述）」を足すか、同じ誤りが繰り返されたら判断する |
 
 ## 割り当ての記録
@@ -57,6 +60,11 @@ Grok Bot がセッションのレート制限で動かない間、Claude Code �
 | 2026-11-12 | #96 | implement | opencode | zai-coding-plan/glm-5.3 | default | 通常のコード |
 | 2026-11-12 | PR #125（2 回目） | review | codex | gpt-6-luna | high | 範囲が広がったため |
 | 2026-11-12 | PR #127 | review | codex | gpt-6-luna | high | 監査（セキュリティの境界） |
+| 2026-11-12 | #101 | implement | opencode | opencode/minimax-m3.1-flash-free | high | GLM の利用上限の間の引き継ぎ |
+| 2026-11-12 | #98 | implement | opencode | opencode/minimax-m3.1-flash-free | high | GLM の利用上限の間の引き継ぎ |
+| 2026-11-12 | PR #132 | review | codex | gpt-6-luna | medium | 文書（ADR・仕様） |
+| 2026-11-12 | PR #134 | review | codex | gpt-6-luna | medium | スキルの追加（security-review の試行） |
+| 2026-11-12 | PR #135 | review | codex | gpt-6-luna | medium | 運用文書と見張りスクリプト（security-review の試行） |
 
 ## 判断の記録
 
