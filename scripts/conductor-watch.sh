@@ -39,6 +39,9 @@ for pr in prs:
     n = str(pr["number"]); cur["prs"][n] = key
     if prev is not None and prev["prs"].get(n) != key and (n in prev["prs"] or pr["state"] == "OPEN"):
         print(f"PR #{n} {pr['headRefName']} {key}", flush=True)
+# 読み取りに失敗して空になったときは、前回の状態を残す（全スレッドを「新規」と誤報しない）。
+if prev is not None and not threads: cur["threads"] = prev["threads"]
+if prev is not None and not prs: cur["prs"] = prev["prs"]
 json.dump(cur, open(sp, "w"))
 PY
   sleep 30
