@@ -23,7 +23,7 @@ fn assert_same(golden: &Path, actual: &str) {
     let update = std::env::var("UPDATE_GOLDEN").is_ok();
     assert!(
         update || golden.exists(),
-        "置いた生成結果に {} が無い（UPDATE_GOLDEN=1 で生成できる）",
+        "置いた生成結果に {} が無い",
         golden.display()
     );
     if update {

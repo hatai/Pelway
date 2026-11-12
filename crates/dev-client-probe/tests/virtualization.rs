@@ -56,8 +56,7 @@ fn assert_rows_follow_their_heights(positions: &BTreeMap<u32, f32>, variable: bo
         let actual = positions[&to] - positions[&from];
         assert!(
             (actual - expected).abs() < 0.5,
-            "行 {from} と {to} の間が {actual}px（期待 {expected}px）。高さが反映されて\
-             いないか、行が重なっている"
+            "行 {from} と {to} の間が {actual}px（期待 {expected}px）"
         );
     }
 }
@@ -75,7 +74,7 @@ fn visible_rows_only_are_created_and_placed_at_their_own_heights() {
     );
     assert!(
         positions.len() <= 40,
-        "10,000 行のうち {} 行が生成された（可視範囲に収まっていない）",
+        "10,000 行のうち {} 行が生成された",
         positions.len()
     );
     // 生成された行は連続した範囲になっている（途中の行が抜けていない）。
@@ -107,12 +106,12 @@ fn scrolling_far_keeps_the_number_of_created_rows_small() {
     );
     assert!(
         positions.len() <= 40,
-        "遠い位置へスクロールした結果 {} 行が生成された（可視範囲に収まっていない）",
+        "遠い位置へスクロールした結果 {} 行が生成された",
         positions.len()
     );
     let first = *positions.keys().next().expect("行がある");
     assert!(
         first > 100,
-        "遠い位置へスクロールしたのに生成された行は {first} 番目から（反映されていない）"
+        "遠い位置へスクロールしたのに {first} 番目から（反映されていない）"
     );
 }
