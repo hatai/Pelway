@@ -34,6 +34,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - PR 1 本の差分は追加 800 行・削除 2000 行まで（`mise run pr-size` が追加行と削除行を分けて数える）。`.gitattributes` で `linguist-generated` を付けたファイルは数えない。指揮役が Issue のコメントで超過を認め `pr-size-exception` ラベルを付けた PR は、pr-size の失敗のままマージしてよい（レビュー担当はこのラベルがあれば pr-size の失敗を must-fix に数えない）
 - GLM の実装スレッドは同時に 3 本まで、Codex のレビュースレッドは同時に 2 本まで、Claude のレビュースレッドは同時に 1 本まで。超えた分は指揮役が順番待ちにする。上限は、Codex の見落とし率とレビューの待ち時間をもとに見直す
 - GLM は終日使う。時間帯による使用制限はない
+- Issue の書き方（タイトル、本文の見出し、受け入れ条件、分割、`ready-for-agent` の前のゲート、差し戻されたときの直し方）は skill `write-issue` に置く。`.github/ISSUE_TEMPLATE/agent-task.yml` はその写しで、空の Issue は作れない（`blank_issues_enabled: false`）
 - 指揮役が渡すプロンプトは Issue 番号と使う skill 名だけにする。作業ルールは AGENTS.md と skill に置く。例外として、スレッドを立てる指示には担当・モデル・effort を示す定型の割り当ての行を入れ、実装担当は PR 本文に `Implementer:`、レビュー担当はレビュー本文に `Reviewer:` の定型の行で写す（書式は skill `command-team`）
 - 指揮役が T3 で立てるスレッドには、必ず「役割・対象の番号・日本語の要約」を含むタイトル（例 `[実装] #101 …`、`[レビュー] PR #132 …`）を立てるときに付ける。タイトルが形式に合わないまま作業を始めさせない。形式と直し方は skill `command-team` の「スレッド名」
 - 実装とレビューのモデル・effort は、pr-size の行数、変更パス、ラベル、修正の回数で振り分ける。しきい値は skill `command-team` に置き、改善ループで調整する

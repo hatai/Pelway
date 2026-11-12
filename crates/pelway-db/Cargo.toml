@@ -1,0 +1,17 @@
+[package]
+# Issue #100: テナント分離の Row Level Security (ADR 0005)。
+# マイグレーション・ロール別プール・workspace トランザクションのヘルパー。
+# docs/technical/v0.7/body/04-data-api-realtime.md の表のうち、RLS を示すのに
+# 必要な最小の表だけを作る。確定スキーマではない。
+name = "pelway-db"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "PostgreSQL layer with tenant Row Level Security for Pelway (ADR 0005). Draft, not a fixed schema."
+
+[dependencies]
+pelway-contract = { path = "../pelway-contract", default-features = false }
+sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio", "migrate", "macros"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
