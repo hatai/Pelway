@@ -33,3 +33,11 @@
 3. 仮定と解釈: 仮定: トークンの「送信前の型」も PR 2 の `token` の範囲に含まれる。解釈: `TokenSource::token` の返り型を `String` から `SecretToken`（`Debug` は `[redacted]`、取り出しは `expose` だけ）に変え、単体試験で包んでも Debug に出ないことを確かめる。選ばなかった: gateway（PR 3）までこの条件の確認を先送りする（split-plan が PR 2 の受け入れ条件に挙げているため）。
 4. 足りなかった情報・検証手段: `reqwest::Error` には公開コンストラクタが無く、単体試験で未送信（is_connect）/結果不明の実経路を再現できないため、それらは PR 4 の結合試験（接続拒否・タイムアウト）で確かめる。エラー分類の試験が分類の実装に結び付いていることの確認は変異検査（`Json` を Invalid から外すと `error_mapping_invalid_for_parse_and_shape_failures` が FAILED、戻すと 7/7 合格）で行った。
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順6に「積み上げ PR の pr-size は `bash scripts/pr-size.sh --base <親ブランチ>` で測る」を明記する（issue #96 round 2 のメモと同じ指摘だが skill 本文に反映されていない）。
+
+## 実装者メモ（round 8）
+
+1. 詰まった箇所: crates/pelway-llm/src/schema.rs: PR #163 の must-fix（未対応の `type` 名が `type_matches` の `_ => true` で常に一致する）を直す際、`type` の値だけ未知なら値の検証を飛ばす形も考えたが、誤記を含むスキーマが黙って全部を通すことのないよう、`validate` の先頭で `KNOWN_TYPES` にない名前をスキーマエラーとして拒否する形にした。`type_matches` の未知名も `_ => false` に変えた（防御）。
+2. 曖昧だった文: 「未知の型名を不一致またはスキーマエラーとして拒否してください。」（PR #163 のレビュー、pelway-review）— どちらの挙動でもよいが、エラー文言でスキーマ側の問題か値側の問題かを区別できるかが書かれていない。
+3. 仮定と解釈: 仮定: レビューの意図は fail-closed（何でも通すことを許さない）で、挙動の選択は実装側に任されている。解釈: 未知の `type` 名はスキーマエラー（「スキーマの type「X」は未対応です（検証できないため拒否します）」）とし、値の不一致（「type が違います: 期待…」）と区別する。選ばなかった: 単なる不一致扱い（どの値でも必ず失敗するが、文言が値側の違反のように読め、スキーマの誤記に気づきにくい）。
+4. 足りなかった情報・検証手段: なし（RED: `schema_validation_rejects_unknown_type_names ... FAILED`（誤記スキーマが `Ok` を返す）→ GREEN: 8/8。入れ子の `properties` 内の未知名も再帰的に拒否されることを試験に含めた）。
+5. 改善案: `.agents/skills/review-pr` に相当する指摘のため省略（レビュー側の運用は変えない）。

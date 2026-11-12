@@ -139,3 +139,21 @@ fn schema_validation_subset() {
     assert!(pelway_llm::schema::validate(&serde_json::json!(["a", "b"]), &array_schema).is_ok());
     assert!(pelway_llm::schema::validate(&serde_json::json!([1]), &array_schema).is_err());
 }
+
+/// 未対応の type 名はスキーマエラーになる（fail-closed）。
+/// `type_matches` が未知の名前に常に一致すると、誤記を含むスキーマが
+/// すべての値を通してしまう（PR #163 の must-fix）。
+#[test]
+fn schema_validation_rejects_unknown_type_names() {
+    let typo = serde_json::json!({"type": "not-a-type", "properties": {}});
+    assert!(pelway_llm::schema::validate(&serde_json::json!("x"), &typo).is_err());
+    let partially_unknown = serde_json::json!({"type": ["string", "also-not-a-type"]});
+    assert!(pelway_llm::schema::validate(&serde_json::json!("x"), &partially_unknown).is_err());
+    // 入れ子のスキーマでも同じように拒否する。
+    let nested = serde_json::json!({
+        "type": "object",
+        "properties": {"a": {"type": "unknown"}},
+        "required": ["a"]
+    });
+    assert!(pelway_llm::schema::validate(&serde_json::json!({"a": true}), &nested).is_err());
+}
