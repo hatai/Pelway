@@ -65,6 +65,10 @@ string_id!(
     SimulatedSendId
 );
 string_id!(
+    /// 受け渡し記録 ID（サーバー採番）。#89 の Bot → Bot 受け渡し 1 件につき 1 つ。
+    HandoffId
+);
+string_id!(
     /// 根拠記録 ID（サーバー採番）。12 §3.2 `communication_basis_records` の `basis_id`。
     BasisId
 );

@@ -23,8 +23,12 @@ use crate::approval::{
     ApprovalCard, ApproveError, ApproveOutcome, ApproveRequest, CardComment, CommentError,
     CommentSaved, SaveCommentRequest, validate_comment,
 };
+use crate::handoff::{
+    HandoffDecision, HandoffError, HandoffNotification, HandoffRecord, HandoffRefusal,
+    HandoffRefusalReason, HandoffRequest, MAX_HANDOFF_DEPTH,
+};
 use crate::ids::{
-    CardId, ChannelId, CommentId, IdempotencyKey, MemberId, SimulatedSendId, WorkspaceId,
+    CardId, ChannelId, CommentId, HandoffId, IdempotencyKey, MemberId, SimulatedSendId, WorkspaceId,
 };
 use crate::member::MemberKind;
 use crate::snapshot::{ActionPayload, compute_snapshot_hash};
@@ -119,8 +123,11 @@ pub struct ApprovalLedger {
     cards: HashMap<CardId, ApprovalCard>,
     idempotency: HashMap<IdempotencyKey, IdempotencyEntry>,
     send_log: Vec<SimulatedSendRecord>,
+    /// カードごとの受け渡し記録（#89）。古い順に並ぶ。
+    handoff_log: HashMap<CardId, Vec<HandoffRecord>>,
     next_comment: u64,
     next_send: u64,
+    next_handoff: u64,
 }
 
 impl ApprovalLedger {
@@ -367,6 +374,112 @@ impl ApprovalLedger {
                 .values()
                 .filter(|c| &c.workspace_id == workspace_id),
         )
+    }
+
+    /// カードの受け渡し記録（#89。古い順）。
+    #[must_use]
+    pub fn handoff_log(&self, card_id: &CardId) -> &[HandoffRecord] {
+        self.handoff_log
+            .get(card_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// #89: Bot → Bot の受け渡し。引き継ぎの 5 項目を持つ記録として、サーバーを
+    /// 通して行う。詳細な不変条件は [`crate::handoff`] のモジュール説明。
+    ///
+    /// # Errors
+    /// [`HandoffError`] のいずれか（4xx。カードも記録も変えない）。
+    /// 段数の上限・同じ 2 者の行き来はエラーではなく [`HandoffDecision::Refused`]
+    /// （担当を依頼者に戻し、チャンネルへの通知を返す）。
+    pub fn hand_off(
+        &mut self,
+        req: HandoffRequest,
+        now: TsMs,
+    ) -> Result<HandoffDecision, HandoffError> {
+        // 1. 検査（4xx）。ここで断った要求はカードも記録も変えない。
+        let card = self
+            .cards
+            .get_mut(&req.card_id)
+            .ok_or(HandoffError::CardNotFound)?;
+        if card.decider != req.from {
+            return Err(HandoffError::NotCurrentDecider {
+                current: card.decider.clone(),
+            });
+        }
+        if req.from == req.to {
+            return Err(HandoffError::SelfHandoff);
+        }
+
+        // 2. 段数と行き来の検査（拒否）。どちらも担当を依頼者に戻し、通知を返す。
+        let chain = self.handoff_log.entry(req.card_id.clone()).or_default();
+        let depth = u32::try_from(chain.len())
+            .unwrap_or(u32::MAX)
+            .saturating_add(1);
+        if depth > MAX_HANDOFF_DEPTH {
+            return Ok(refuse_handoff(
+                card,
+                &req,
+                depth,
+                HandoffRefusalReason::DepthLimitExceeded {
+                    depth,
+                    max: MAX_HANDOFF_DEPTH,
+                },
+            ));
+        }
+        if chain.iter().any(|r| {
+            (r.from == req.from && r.to == req.to) || (r.from == req.to && r.to == req.from)
+        }) {
+            // 「同じ 2 者の間」は向きによらず同じ組として表す。
+            let mut between = [req.from.clone(), req.to.clone()];
+            between.sort();
+            return Ok(refuse_handoff(
+                card,
+                &req,
+                depth,
+                HandoffRefusalReason::Bouncing { between },
+            ));
+        }
+
+        // 3. 受理。担当（誰の判断待ちか）を依頼先へ移し、記録を台帳に残す。
+        //    段数・記録 ID・時刻はここでサーバーが決める。
+        self.next_handoff += 1;
+        let record = HandoffRecord {
+            handoff_id: HandoffId(format!("hnd-{:08}", self.next_handoff)),
+            card_id: req.card_id.clone(),
+            from: req.from,
+            to: req.to,
+            context: req.context,
+            depth,
+            created_at: now,
+        };
+        chain.push(record.clone());
+        card.decider = record.to.clone();
+        Ok(HandoffDecision::Accepted { record })
+    }
+}
+
+/// 受け渡しの拒否（段数の上限・同じ 2 者の行き来）。カードの担当を依頼者に戻し、
+/// チャンネルへの通知を作る。
+fn refuse_handoff(
+    card: &mut ApprovalCard,
+    req: &HandoffRequest,
+    depth: u32,
+    reason: HandoffRefusalReason,
+) -> HandoffDecision {
+    card.decider = card.requester.clone();
+    HandoffDecision::Refused {
+        refusal: HandoffRefusal {
+            reason: reason.clone(),
+            notification: HandoffNotification {
+                channel_id: card.channel_id.clone(),
+                reason_key: reason.notification_key().to_owned(),
+                from: req.from.clone(),
+                to: req.to.clone(),
+                depth,
+            },
+            returned_to: card.requester.clone(),
+        },
     }
 }
 

@@ -25,6 +25,7 @@
 #![forbid(unsafe_code)]
 
 pub mod approval;
+pub mod handoff;
 pub mod ids;
 pub mod inbox;
 pub mod ledger;
