@@ -71,6 +71,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use pelway_contract::approval::{ApproveRequest, SaveCommentRequest};
+use pelway_contract::handoff::{HandoffDecision, HandoffRequest};
 use pelway_contract::ids::{BasisId, MemberId, WorkspaceId};
 use pelway_contract::ledger::ApprovalLedger;
 use pelway_contract::member::MemberKind;
@@ -739,12 +740,15 @@ fn route(
     };
     // 契約の経路定数（pelway-contract）と照合する。comments/approve は仕様 04 §3 の
     // `POST /v1/approvals/{id}/decide` をデモ向けに 2 API に分けたもの。
+    // handoffs は #89 の Bot → Bot 受け渡し。
     let approval = if let Some(params) =
         match_path(pelway_contract::approval::COMMENTS_PATH, &segments)
     {
         params.first().map(|&card| (card, log::Route::Comments))
     } else if let Some(params) = match_path(pelway_contract::approval::APPROVE_PATH, &segments) {
         params.first().map(|&card| (card, log::Route::Approve))
+    } else if let Some(params) = match_path(pelway_contract::handoff::HANDOFFS_PATH, &segments) {
+        params.first().map(|&card| (card, log::Route::Handoffs))
     } else {
         None
     };
@@ -758,6 +762,7 @@ fn route(
         let resp = match (route_kind, req.method.as_str()) {
             (log::Route::Comments, "POST") => handle_comments(req, card, ledger, logger),
             (log::Route::Approve, "POST") => handle_approve(req, card, ledger, logger),
+            (log::Route::Handoffs, "POST") => handle_handoffs(req, card, ledger, logger),
             _ => Response::error(
                 405,
                 &HttpError::MethodNotAllowed,
@@ -859,6 +864,17 @@ fn approve_error_code(e: &pelway_contract::approval::ApproveError) -> log::Code 
     }
 }
 
+/// 契約の受け渡しエラー → 拒否ログの結果コード（#89）。
+fn handoff_error_code(e: &pelway_contract::handoff::HandoffError) -> log::Code {
+    use pelway_contract::handoff::HandoffError as E;
+    match e {
+        E::CardNotFound => log::Code::CardNotFound,
+        E::CardIdMismatch => log::Code::CardIdMismatch,
+        E::NotCurrentDecider { .. } => log::Code::NotCurrentDecider,
+        E::SelfHandoff => log::Code::SelfHandoff,
+    }
+}
+
 fn handle_comments(
     req: &Request,
     path_card: &str,
@@ -946,6 +962,61 @@ fn handle_approve(
                 Err(e) => Response::error(e.http_status(), &e, approve_error_code(&e)),
             }
         }
+        Err(_) => internal_error(),
+    }
+}
+
+/// 受け渡し（#89）: `POST /v1/approvals/{card_id}/handoffs`。Bot → Bot のタスクの
+/// 受け渡しを、引き継ぎの 5 項目を持つ記録としてサーバーを通して行う。
+///
+/// - 受け入れも拒否（段数の上限・同じ 2 者の行き来）も **200 で返す**。拒否は
+///   「依頼者にタスクを戻し、チャンネルへ知らせた」という業務結果であり、
+///   HTTP の失敗（4xx）ではない（本文の `result` で受け入れ `"accepted"` と
+///   拒否 `"refused"` を区別する）。
+/// - 検査の失敗（カード無し・現在の担当でない・自己受け渡し・経路と本文の
+///   card_id の不一致）は 4xx で、カードも受け渡し記録も変えない。
+fn handle_handoffs(
+    req: &Request,
+    path_card: &str,
+    ledger: &SharedLedger,
+    logger: &log::Logger,
+) -> Response {
+    let Ok(handoff_req) = serde_json::from_slice::<HandoffRequest>(&req.body) else {
+        return bad_request();
+    };
+    // 経路と本文の card_id は契約の check_path に従う。
+    if let Err(e) = handoff_req.check_path(&pelway_contract::ids::CardId::from(path_card)) {
+        return Response::error(e.http_status(), &e, handoff_error_code(&e));
+    }
+
+    // 検査・段数の計上・担当の移動（拒否時の依頼者への戻しを含む）を
+    // ロックを持ったまま 1 回で行う。受け入れ・拒否どちらも 200 で、
+    // 本文の `result`（accepted / refused）で区別する。
+    match ledger.lock() {
+        Ok(mut ledger) => match ledger.hand_off(handoff_req, now_ms()) {
+            Ok(HandoffDecision::Accepted { record }) => {
+                // 受け入れた: カード・from・to（仮名化）と段数（数値）だけ。
+                logger.emit(log::Event::HandoffAccepted {
+                    card: logger.id(record.card_id.as_str()),
+                    from: logger.id(record.from.as_str()),
+                    to: logger.id(record.to.as_str()),
+                    depth: record.depth,
+                });
+                Response::json(200, &HandoffDecision::Accepted { record })
+            }
+            Ok(HandoffDecision::Refused { refusal }) => {
+                // 拒否した: 担当を依頼者に戻した。通知の中身（本文・宛先）は
+                // ログに出さない。
+                logger.emit(log::Event::HandoffRefused {
+                    card: logger.id(path_card),
+                    from: logger.id(refusal.notification.from.as_str()),
+                    to: logger.id(refusal.notification.to.as_str()),
+                    depth: refusal.notification.depth,
+                });
+                Response::json(200, &HandoffDecision::Refused { refusal })
+            }
+            Err(e) => Response::error(e.http_status(), &e, handoff_error_code(&e)),
+        },
         Err(_) => internal_error(),
     }
 }
