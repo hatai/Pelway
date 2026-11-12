@@ -140,7 +140,7 @@ fn handoff_refusal_is_200_with_refused_not_4xx() {
         .unwrap()
         .decider
         .clone();
-    assert_eq!(decider, Decider::Member(MemberId::from("m-human-handoff")));
+    assert_eq!(decider, MemberId::from("m-human-handoff"));
 }
 
 #[test]

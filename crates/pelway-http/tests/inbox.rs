@@ -143,7 +143,7 @@ fn my_requests_tab_lists_my_requests_with_progress() {
     let requested = &json["my_requests"][0];
     assert_eq!(requested["state"], "awaiting_send_approval");
     assert_eq!(requested["requester"], ME);
-    assert_eq!(requested["decider"]["member"], OTHER);
+    assert_eq!(requested["decider"], OTHER);
 }
 
 // 受け入れ条件4: 一覧は台帳の状態を検索して作る。承認で状態が変われば一覧も変わる。

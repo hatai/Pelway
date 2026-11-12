@@ -166,7 +166,8 @@ fn comment_limit_is_importable_and_counts_code_points() {
     assert_eq!(json, r#"{"code":"too_long","max_chars":4000}"#);
 }
 
-// #86: 承認者（指名した1人・役割）と承認の設定のワイヤ形式。
+// #86: 承認者の指定（カード作成時のみ使う Decider。指名した1人・役割）と
+// 承認の設定のワイヤ形式。カード自体の decider は作成時に解決した MemberId。
 #[test]
 fn decider_wire_shape_member_and_role() {
     let member = Decider::Member(MemberId::from("m-1"));

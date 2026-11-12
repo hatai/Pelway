@@ -73,8 +73,10 @@ impl ApproverRole {
     }
 }
 
-/// 承認カードの承認者（ADR 0002）。指名した1人か、役割のどちらか。
-/// 役割は [`resolve_decider`] と [`ApprovalPolicy`] で「誰が承認できるか」に解決する。
+/// 承認カードの承認者の指定（ADR 0002。カード作成時のみ使う）。
+/// 指名した1人か、役割のどちらか。役割は [`ApprovalPolicy`] で作成時に
+/// 「誰が承認できるか」へ解決し、解決先を [`ApprovalCard`] に固定する
+/// （作成後の代表の変更では動かない。ADR 0002「承認カードを作るときに承認者を決める」）。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
@@ -108,9 +110,10 @@ impl Default for ApprovalPolicy {
     }
 }
 
-/// 承認者（[`Decider`]）を「誰が承認できるか」に解決する（ADR 0002）。
+/// 承認者の指定（[`Decider`]）を「誰が承認できるか」に解決する（ADR 0002）。
 /// 指名した1人ならその人、役割なら [`ApprovalPolicy`] の対応する人
 /// （代表）。解決できなければ `None`（代表が未設定など）。
+/// カード作成時だけ使い、解決先は [`ApprovalCard::decider`] に固定する。
 #[must_use]
 pub fn resolve_decider(decider: &Decider, policy: &ApprovalPolicy) -> Option<MemberId> {
     match decider {
@@ -189,11 +192,13 @@ pub struct ApprovalCard {
     /// 依頼した人（04 §2 の `tasks` の source message を出した人に当たる）。
     /// 判断待ち一覧の「自分の依頼」タブの判定に使う。
     pub requester: MemberId,
-    /// 誰の判断待ちか（ADR 0002 の承認者。指名した1人または役割。
-    /// `action_kind` が `AgentHandoff` のカードでは引き継ぎ先の担当に当たる）。
-    /// 判断待ち一覧の「自分の判断待ち」タブの判定と、承認 API での身元検査（#86）
-    /// に使う。
-    pub decider: Decider,
+    /// 誰の判断待ちか（ADR 0002 の承認者。作成時に決めた1人）。指名した1人、
+    /// または役割を作成時に解決した人（当時の代表）。`action_kind` が `AgentHandoff`
+    /// のカードでは引き継ぎ先の担当に当たる。判断待ち一覧の「自分の判断待ち」
+    /// タブの判定に使う。承認 API での身元検査は #86 の範囲。
+    /// 作成後の設定変更（代表の交代）では動かない。承認者の変更は明示的な
+    /// 再割当て（handoff）だけが行う。
+    pub decider: MemberId,
     /// 判断の期限（ADR 0002）。判断待ち一覧を期限の近い順へ並べるキー。
     /// 期限切れの状態・通知はこの crate では作らない（別作業）。
     pub deadline: Option<TsMs>,

@@ -148,7 +148,9 @@ impl ApprovalLedger {
         }
     }
 
-    /// 承認の設定（ADR 0002）を差し替える。
+    /// 承認の設定（ADR 0002）を差し替える。**既存カードの承認者には影響しない**
+    /// （承認者はカード作成時に解決して固定する。ADR 0002）。この差し替えは
+    /// 以降のカード作成の解決（役割→代表）にだけ効く。
     pub fn set_policy(&mut self, policy: ApprovalPolicy) {
         self.policy = policy;
     }
@@ -159,16 +161,11 @@ impl ApprovalLedger {
         &self.policy
     }
 
-    /// 承認者を「誰が承認できるか」に解決する（ADR 0002）。詳細は
-    /// [`crate::approval::resolve_decider`]。
-    #[must_use]
-    pub fn resolve_decider(&self, decider: &Decider) -> Option<MemberId> {
-        crate::approval::resolve_decider(decider, &self.policy)
-    }
-
     /// カードを「送信承認待ち」・版 1 で作る。同じ ID が既にあれば
     /// [`CreateCardError::DuplicateCardId`]。
-    /// 役割が解決できなければ [`CreateCardError::UnresolvedDeciderRole`]。
+    /// 承認者（`decider`）はここで解決してカードに固定する（ADR 0002）:
+    /// 指名した1人ならその人、役割なら作成時点の代表。役割が解決できなければ
+    /// [`CreateCardError::UnresolvedDeciderRole`]。
     /// 依頼者が承認者に解決され、設定（[`ApprovalPolicy::allow_requester_as_decider`]）が
     /// 兼ねることを許さなければ [`CreateCardError::RequesterAsDeciderNotAllowed`]（#86）。
     ///
@@ -178,13 +175,12 @@ impl ApprovalLedger {
         if self.cards.contains_key(&new.card_id) {
             return Err(CreateCardError::DuplicateCardId);
         }
-        // 役割は作成時に解決できるか確かめる（誰の判断待ちか分からないカードは作らない）。
-        let decider_member = self
-            .resolve_decider(&new.decider)
+        // 承認者を作成時に解決して固定する（以後、設定を変えても動かない）。
+        let decider = crate::approval::resolve_decider(&new.decider, &self.policy)
             .ok_or(CreateCardError::UnresolvedDeciderRole)?;
         // 依頼者が承認者を兼ねてよいかはワークスペースの設定で決める（ADR 0002・#86）。
         // 役割が依頼者に解決される場合も兼ねているのと同じ扱い。
-        if !self.policy.allow_requester_as_decider && decider_member == new.requester {
+        if !self.policy.allow_requester_as_decider && decider == new.requester {
             return Err(CreateCardError::RequesterAsDeciderNotAllowed);
         }
         let snapshot_hash = compute_snapshot_hash(&new.payload);
@@ -197,7 +193,7 @@ impl ApprovalLedger {
             snapshot_hash,
             state: TaskState::AwaitingSendApproval,
             requester: new.requester,
-            decider: new.decider,
+            decider,
             deadline: new.deadline,
             comments: Vec::new(),
             simulated_send_id: None,
@@ -302,12 +298,10 @@ impl ApprovalLedger {
         if !self.cards.contains_key(&req.card_id) {
             return Err(ApproveError::CardNotFound);
         }
-        // 操作した人が承認者に解決されるか（ADR 0002・#86）。冪等キーの検査より前で
+        // 操作した人がカードの承認者か（ADR 0002・#86）。承認者はカード作成時に
+        // 解決して固定した1人なので、比較はそれだけでよい。冪等キーの検査より前で
         // 断るので、承認者でない人はキーのリプレイ（完了済み結果の再取得）もできない。
-        let decider = self
-            .resolve_decider(&self.cards[&req.card_id].decider)
-            .ok_or(ApproveError::NotDecider)?;
-        if decider != *operator {
+        if self.cards[&req.card_id].decider != *operator {
             return Err(ApproveError::NotDecider);
         }
         if let Some(entry) = self.idempotency.get(&req.idempotency_key) {
@@ -436,12 +430,10 @@ impl ApprovalLedger {
     /// workspace 内のメンバーの判断待ち一覧（[`crate::inbox::Inbox`]）を作る。
     /// 一覧用のデータは別に保存せず、この台帳のカード（状態のテーブル）を
     /// 検索してその場で組み立てる。詳細は [`crate::inbox`] のモジュール説明。
-    /// カードの承認者が役割のときは、この台帳の設定（[`Self::policy`]）で解決する。
     #[must_use]
     pub fn inbox(&self, workspace_id: &WorkspaceId, member: &MemberId) -> crate::inbox::Inbox {
         crate::inbox::build_inbox(
             member,
-            &self.policy,
             self.cards
                 .values()
                 .filter(|c| &c.workspace_id == workspace_id),
@@ -470,12 +462,12 @@ impl ApprovalLedger {
         now: TsMs,
     ) -> Result<HandoffDecision, HandoffError> {
         // 1. 検査（4xx）。ここで断った要求はカードも記録も変えない。
-        //    指名した1人（Member）のカードだけが受け渡せる（役割は対象外）。
+        //    承認者はカード作成時に固定した1人（ADR 0002）なので素直に比較する。
         let card = self
             .cards
             .get_mut(&req.card_id)
             .ok_or(HandoffError::CardNotFound)?;
-        if card.decider != Decider::Member(req.from.clone()) {
+        if card.decider != req.from {
             return Err(HandoffError::NotCurrentDecider {
                 current: card.decider.clone(),
             });
@@ -527,7 +519,7 @@ impl ApprovalLedger {
             created_at: now,
         };
         chain.push(record.clone());
-        card.decider = Decider::Member(record.to.clone());
+        card.decider = record.to.clone();
         Ok(HandoffDecision::Accepted { record })
     }
 }
@@ -540,7 +532,7 @@ fn refuse_handoff(
     depth: u32,
     reason: HandoffRefusalReason,
 ) -> HandoffDecision {
-    card.decider = Decider::Member(card.requester.clone());
+    card.decider = card.requester.clone();
     HandoffDecision::Refused {
         refusal: HandoffRefusal {
             reason: reason.clone(),
@@ -1249,11 +1241,13 @@ mod tests {
         }
     }
 
-    // #86 のやること1: 承認カードが承認者（指名した1人、または役割）を持つ。
-    // 役割は人へ上書きせずそのまま保持する。解決は role_decider_allows_only_the_
-    // representative（承認時）と requester_as_decider_policy（作成時）で検証する。
+    // #86 のやること1 + レビュー2 (PR #119): 承認者は作成時に解決してカードに
+    // 固定する (ADR 0002「承認カードを作るときに承認者を決める」)。
+    // 指名した1人ならその人、役割なら作成時点の代表。カードは解決後の1人を持ち、
+    // 作成後の代表の変更 (set_policy) でも差し替わらない。承認者の変更は明示的な
+    // 再割当て (handoff) だけが行う。
     #[test]
-    fn card_holds_designated_and_role_deciders() {
+    fn create_card_resolves_the_decider_at_creation() {
         let mut ledger = ApprovalLedger::with_policy(policy_with_representative());
         ledger
             .create_card(card_with_decider(
@@ -1269,11 +1263,23 @@ mod tests {
             .expect("new card");
         assert_eq!(
             ledger.card(&"card-member".into()).unwrap().decider,
-            Decider::Member("m-human-2".into())
+            "m-human-2".into(),
+            "指名した1人はそのまま承認者になる"
         );
         assert_eq!(
             ledger.card(&"card-role".into()).unwrap().decider,
-            Decider::Role(crate::approval::ApproverRole::Representative)
+            "m-human-rep".into(),
+            "役割は作成時の代表に解決される"
+        );
+        // 作成後に代表を変えても、既存カードの承認者は作成時のまま動かない。
+        ledger.set_policy(ApprovalPolicy {
+            allow_requester_as_decider: true,
+            representative: Some("m-human-new-rep".into()),
+        });
+        assert_eq!(
+            ledger.card(&"card-role".into()).unwrap().decider,
+            "m-human-rep".into(),
+            "代表の変更が既存カードの承認者を差し替えない"
         );
     }
 
@@ -1325,10 +1331,21 @@ mod tests {
             Err(ApproveError::NotDecider)
         );
         assert!(ledger.send_log().is_empty());
-        // 代表なら承認できる。
+        // レビュー2 (PR #119): 作成後に代表が変わっても、承認できるのは
+        // カード作成時の代表だけ（承認者は作成時に固定。ADR 0002）。
+        ledger.set_policy(ApprovalPolicy {
+            allow_requester_as_decider: true,
+            representative: Some("m-human-new-rep".into()),
+        });
+        assert_eq!(
+            ledger.approve(req.clone(), &"m-human-new-rep".into()),
+            Err(ApproveError::NotDecider),
+            "新しい代表では承認できない"
+        );
+        // 作成時の代表なら承認できる。
         ledger
             .approve(req, &"m-human-rep".into())
-            .expect("representative can approve");
+            .expect("the representative at card creation can approve");
         assert_eq!(ledger.send_log().len(), 1);
     }
 
