@@ -30,7 +30,9 @@ scripts/agent-gh review pr diff <N>
 scripts/agent-gh review issue view <Issue 番号> --json body
 ```
 
-Issue 番号は `closingIssuesReferences` から取る。Issue の「受け入れ条件」と「対象外」がレビューの基準になる。
+Issue 番号は `closingIssuesReferences` から取る（無ければ PR 本文の `Part of #<N>` などから取る）。Issue の「受け入れ条件」と「対象外」がレビューの基準になる。
+
+Issue のコメントに、行頭が `<!-- split-plan -->` で始まる指揮役のコメントがあれば、その Issue は複数の PR に分けて実装する。そのコメントの表で、この PR に割り当てられた範囲の受け入れ条件だけを基準にする。ほかの PR に割り当てられた条件が満たされていないことは must-fix にしない。
 
 ### 2. 検査する
 
