@@ -77,9 +77,13 @@ Reviewed: <headRefOid>
 ## 検査（PR のチェック）
 - mise run verify: pass | fail
 - pr-size: pass | fail
+
+Reviewer: agent=<codex|claude> model=<モデル名> effort=<effort>
 ```
 
 must-fix がなければ「なし」と書く。
+
+最後の `Reviewer:` の行は必ず書く。値は、指揮役の指示の 2 行目 `Assigned: role=review agent=... model=... effort=...` から写す（`role=review` を除いた残りを、順番も表記も変えずに書く）。指示に `Assigned:` の行が無いときは、`Reviewer: agent=<codex|claude> model=unknown effort=unknown` と書く。改善ループが集計するので、自由文にしない。
 
 PR が Draft のままでも投稿する。
 

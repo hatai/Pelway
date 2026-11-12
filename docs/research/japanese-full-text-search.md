@@ -53,7 +53,7 @@ RAGFlow について: チャット本文の検索ではなく、添付・ナレ�
 - **捨てるもの**: TokenMecab（初期は使わない。精度寄りで、辞書の更新が必要なため）。外部の検索プロセス。
 - **理由**: ACL・期限・削除・利用制限を同じ SQL とトランザクションの中で判定できる。可視性もテーブル本体で判定されるので、D01 の「受付トランザクションで確定」と R03 の「索引に独立 TTL なし」にそのまま合う。順位付けと強調表示があり、pg_bigm より機能が多い。Zulip と Misskey が日本語対応の選択肢として PGroonga を用意している（どちらも既定ではない）。
 - **注意**: `pgroonga.enable_wal` の既定は off で、PGroonga は既定では WAL を生成しない。crash safe（`pgroonga_crash_safer`）は experimental で、回復に失敗すると Groonga のデータベースを作り直して REINDEX する。R15 のバックアップ・復元の演習で、索引を復元するのか REINDEX で作り直すのかを検証する必要がある。Groonga 本体は LGPL-2.1。
-- **注意（英字・コード）**: normalizer 付きの TokenBigram は ASCII を語単位で扱う。そのため識別子の途中の部分一致は当たらない（公式の例では「pp」で「Apple」は当たらない）。コードの部分一致が必要なら、TokenBigramSplit 系か TokenNgram の unify 系オプションを使う（公式は TokenNgram の unify 系を推奨しないと記載）。
+- **注意（英字・コード）**: normalizer 付きの TokenBigram は ASCII を語単位で扱う。そのため識別子の途中の部分一致は当たらない（公式の例では「pp」で「Apple」は当たらない）。コードの部分一致が必要なら、TokenBigramSplit 系か TokenNgram の unify 系オプションを使う（公式は TokenNgram の unify 系を推奨しないと記載）。TokenBigramSplit 系で実在する名前は `TokenBigramSplitSymbol`、`TokenBigramSplitSymbolAlpha`、`TokenBigramSplitSymbolAlphaDigit`（Groonga 16.1.3 の `tokenizer_list` で確認。#93 の計測）。「pp」で「Apple」を当てるには `TokenBigramSplitSymbolAlpha` を使う。
 - **誤字**: bigram 方式は誤字への耐性を意味しない。`pgroonga_condition` に `fuzzy_max_distance_ratio` という引数がある（3.1.6〜）が、挙動は未確認。
 - **開発環境への影響**: Postgres のコンテナを PGroonga の公式イメージか派生イメージに替える（rootless Podman での動作は未確認）。追加のプロセスはない。
 

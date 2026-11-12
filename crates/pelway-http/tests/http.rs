@@ -21,6 +21,11 @@ use pelway_http::{
 use serde_json::{Value, json};
 
 fn new_card(id: &str) -> NewCard {
+    new_card_with_decider(id, "m-human-http")
+}
+
+/// 承認者を `decider` に差し替えたテストカード（#86）。
+fn new_card_with_decider(id: &str, decider: &str) -> NewCard {
     NewCard {
         workspace_id: "ws-synthetic".into(),
         channel_id: "ch-synthetic".into(),
@@ -34,7 +39,7 @@ fn new_card(id: &str) -> NewCard {
             scope: Vec::new(),
         },
         requester: "m-human-http".into(),
-        decider: Decider::Member("m-human-http".into()),
+        decider: Decider::Member(decider.into()),
         deadline: None,
     }
 }
@@ -94,6 +99,24 @@ fn post_json(addr: SocketAddr, path: &str, body: &str, member_headers: bool) -> 
     (status, json)
 }
 
+/// 操作者を `member` に差し替えた POST（#86 の承認者検査のテスト用）。
+fn post_json_as(
+    addr: SocketAddr,
+    path: &str,
+    body: &str,
+    member: &str,
+    member_header: bool,
+) -> (u16, Value) {
+    let mut headers = vec![("Content-Type", "application/json")];
+    if member_header {
+        headers.push(("x-pelway-member-id", member));
+        headers.push(("x-pelway-member-kind", "human"));
+    }
+    let (status, body) = http(addr, "POST", path, &headers, body.as_bytes());
+    let json = serde_json::from_str(&body).unwrap_or(Value::Null);
+    (status, json)
+}
+
 fn post_comments(addr: SocketAddr, card: &str, body: &str) -> (u16, Value) {
     let json = json!({"card_id": card, "body": body}).to_string();
     // 経路は契約の定数（COMMENTS_PATH）から作る（Issue #91: 定数と経路の一致）。
@@ -133,7 +156,7 @@ fn reserve_directly(ledger: &SharedLedger, card: &str, key: &str) {
         idempotency_key: IdempotencyKey::new(key).expect("valid key"),
     };
     assert!(matches!(
-        g.begin_approve(&req),
+        g.begin_approve(&req, &"m-human-http".into()),
         Ok(BeginApproval::Reserved(_))
     ));
 }
@@ -151,7 +174,7 @@ fn send_directly(ledger: &SharedLedger, card: &str, key: &str) {
         snapshot_hash: hash,
         idempotency_key: IdempotencyKey::new(key).expect("valid key"),
     };
-    g.approve(req).expect("approve");
+    g.approve(req, &"m-human-http".into()).expect("approve");
 }
 
 // (a0) 契約の経路定数（COMMENTS_PATH / APPROVE_PATH の `{card_id}` 置換）で
@@ -172,7 +195,7 @@ fn approval_routes_match_contract_path_constants() {
 
     // approve_path（定数 APPROVE_PATH 由来）で承認 → 200。
     let json = approve_json_for(&ledger, "card-route", "a0-route-key-0000001");
-    let (status, _) = post_json(addr, &approve_path(&"card-route".into()), &json, false);
+    let (status, _) = post_json(addr, &approve_path(&"card-route".into()), &json, true);
     assert_eq!(status, 200);
 
     // 旧・仮経路 /v1/cards/... は 404（NotFound）。
@@ -283,13 +306,13 @@ fn approve_progress_and_key_reuse_map_to_409_and_422() {
 
     // 処理中のキー・同じ内容の再送: 409 approval_in_progress。
     let body = approve_json_for(&ledger, "card-inprog", "d-inprog-key-0000001");
-    let (status, json) = post_json(addr, &approve_path(&"card-inprog".into()), &body, false);
+    let (status, json) = post_json(addr, &approve_path(&"card-inprog".into()), &body, true);
     assert_eq!(status, 409);
     assert_eq!(json["code"], "approval_in_progress");
 
     // 完了済みキーを別内容（版を 1 つ進めた）で使う: 422 idempotency_key_reused。
     let body = approve_json_for(&ledger, "card-reuse", "d-reuse-key-000000001");
-    let (status, _) = post_json(addr, &approve_path(&"card-reuse".into()), &body, false);
+    let (status, _) = post_json(addr, &approve_path(&"card-reuse".into()), &body, true);
     assert_eq!(status, 200);
     let (_, _, version) = card_state(&ledger, "card-reuse");
     let hash = card_state(&ledger, "card-reuse").0;
@@ -300,7 +323,7 @@ fn approve_progress_and_key_reuse_map_to_409_and_422() {
         "idempotency_key": "d-reuse-key-000000001",
     })
     .to_string();
-    let (status, json) = post_json(addr, &approve_path(&"card-reuse".into()), &body, false);
+    let (status, json) = post_json(addr, &approve_path(&"card-reuse".into()), &body, true);
     assert_eq!(status, 422);
     assert_eq!(json["code"], "idempotency_key_reused");
 }
@@ -323,7 +346,7 @@ fn concurrent_approves_send_exactly_once() {
             // 全スレッド同じ内容（版 1・予約前の hash）、鍵だけ別。
             let body = approve_json_for(&ledger, "card-conc", &format!("e-conc-{i:02}-key-00001"));
             barrier.wait();
-            let (status, _) = post_json(addr, &approve_path(&"card-conc".into()), &body, false);
+            let (status, _) = post_json(addr, &approve_path(&"card-conc".into()), &body, true);
             tx.send(status).expect("send status");
         }));
     }
@@ -462,7 +485,7 @@ fn path_body_card_id_mismatch_returns_422() {
         "idempotency_key": "i-mismatch-key-0000001",
     })
     .to_string();
-    let (status, json) = post_json(addr, &approve_path(&"card-await".into()), &json, false);
+    let (status, json) = post_json(addr, &approve_path(&"card-await".into()), &json, true);
     assert_eq!(status, 422);
     assert_eq!(json["code"], "card_id_mismatch");
 }
@@ -1216,4 +1239,85 @@ fn duration_max_deadline_does_not_panic_and_serves() {
     );
     assert_eq!(json["card_id"], "card-z");
     assert_eq!(json["state"], "awaiting_send_approval");
+}
+
+// ---- #86: 承認 API で承認者の身元と権限を確かめる ----
+
+/// 承認者を `m-approver-http` にしたカード 1 枚の共有台帳。
+fn shared_ledger_with_decider() -> SharedLedger {
+    let mut ledger = ApprovalLedger::new();
+    ledger
+        .create_card(new_card_with_decider("card-decider", "m-approver-http"))
+        .expect("new card");
+    Arc::new(Mutex::new(ledger))
+}
+
+// (dec1) 承認者でない人の承認は 403 not_decider。状態も送信記録も変わらない。
+#[test]
+fn approve_by_non_decider_returns_403_and_changes_nothing() {
+    let ledger = shared_ledger_with_decider();
+    let addr = spawn_server(Arc::clone(&ledger));
+    let body = approve_json_for(&ledger, "card-decider", "dec1-other-key-00001");
+    let before = card_state(&ledger, "card-decider");
+
+    // ヘッダーの身元は m-human-http（依頼者）で、承認者は m-approver-http。
+    let (status, json) = post_json(addr, &approve_path(&"card-decider".into()), &body, true);
+    assert_eq!(status, 403, "{json}");
+    assert_eq!(json["code"], "not_decider", "{json}");
+
+    assert_eq!(card_state(&ledger, "card-decider"), before);
+    assert!(ledger.lock().expect("lock").send_log().is_empty());
+}
+
+// (dec2) 承認者（ヘッダーの身元がカードの承認者）の承認は 200 で送信される。
+// この検証は (a0) が承認者本人の承認（m-human-http が decider のカードを
+// m-human-http が承認して 200）として同じ形で行っているため、ここでは省く。
+
+// (dec3) 承認（approve）にも comments と同じ身元ヘッダーが必須。欠けたら 400。
+#[test]
+fn approve_requires_member_headers() {
+    let ledger = shared_ledger_with_decider();
+    let addr = spawn_server(Arc::clone(&ledger));
+    let body = approve_json_for(&ledger, "card-decider", "dec3-noheader-key-001");
+
+    // member-id も member-kind も無い。
+    let (status, json) = post_json(addr, &approve_path(&"card-decider".into()), &body, false);
+    assert_eq!(status, 400, "{json}");
+    assert_eq!(json["code"], "bad_request", "{json}");
+
+    // member-id だけ（member-kind 無し）。
+    let (status, json) = post_json_as(
+        addr,
+        &approve_path(&"card-decider".into()),
+        &body,
+        "m-approver-http",
+        false,
+    );
+    assert_eq!(status, 400, "{json}");
+    assert_eq!(json["code"], "bad_request", "{json}");
+
+    // kind が未知の値（旧・デモの ai）。comments 側 (a1) と同じ MemberKind::parse
+    // の経路検証だが、approve のヘッダー必須検証と同じ箇所を通るのでここでも確かめる。
+    let headers = [
+        ("Content-Type", "application/json"),
+        ("x-pelway-member-id", "m-approver-http"),
+        ("x-pelway-member-kind", "ai"),
+    ];
+    let (status, resp) = http(
+        addr,
+        "POST",
+        &approve_path(&"card-decider".into()),
+        &headers,
+        body.as_bytes(),
+    );
+    assert_eq!(status, 400);
+    let json: Value = serde_json::from_str(&resp).unwrap_or(Value::Null);
+    assert_eq!(json["code"], "bad_request");
+
+    assert!(ledger.lock().expect("lock").send_log().is_empty());
+    assert_eq!(
+        card_state(&ledger, "card-decider").2,
+        1,
+        "版は変わっていない"
+    );
 }
