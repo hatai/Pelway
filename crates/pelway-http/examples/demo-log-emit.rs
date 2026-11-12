@@ -76,7 +76,11 @@ fn main() {
     let r2 = post(
         addr,
         &pelway_contract::approval::approve_path(&"card-gdpr07-01".into()),
-        &[("Content-Type", "application/json")],
+        &[
+            ("Content-Type", "application/json"),
+            ("x-pelway-member-id", "m-human-gdpr07"),
+            ("x-pelway-member-kind", "human"),
+        ],
         &approve,
     );
     expect_status(&r2, 200, "承認");
@@ -91,7 +95,11 @@ fn main() {
     let r3 = post(
         addr,
         &pelway_contract::approval::approve_path(&"card-gdpr07-02".into()),
-        &[("Content-Type", "application/json")],
+        &[
+            ("Content-Type", "application/json"),
+            ("x-pelway-member-id", "m-human-gdpr07"),
+            ("x-pelway-member-kind", "human"),
+        ],
         &wrong,
     );
     expect_status(&r3, 409, "拒否（snapshot 不一致）");
