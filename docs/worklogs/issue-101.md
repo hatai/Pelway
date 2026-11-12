@@ -71,3 +71,22 @@
 5. 改善案: .agents/skills/implement-issue/SKILL.md の手順 6 に「stacked PR では
    mise run pr-size ではなく scripts/pr-size.sh --base <下段ブランチ> で数える」
    を足す。
+
+## 実装者メモ（round 4）
+
+1. 詰まった箇所: docs/research/pgbackrest-retention-restore-verification.md:
+   レビューの must-fix は容量見積りと文字列混入の 2 件だが、同種の混入
+   （확보・保险公司・통해・以此・了_List・短縮側・太字と括弧の崩れ・タブ）が
+   同じ文書に 9 か所残っていた。
+2. 曖昧だった文: 「修正依頼に書かれた must-fix だけ直す」
+   （.agents/skills/implement-issue/SKILL.md「よくある失敗」）— レビューが
+   見落とした、指摘と同種の客観的な欠陥まで直してよいか決まっていない。
+3. 仮定と解釈: 仮定: 「must-fix だけ」は主観的な nit を先回りしないための
+   決まりで、客観的な文字列混入は別の欠陥。解釈: must-fix の文字列混入と
+   同種の混入は全件直した。選ばなかった: 指摘の 2 件だけ直す（残りの混入が
+   次のレビューで同じ指摘を受けるのが明らかなため）。
+4. 足りなかった情報・検証手段: 混入文字列の網羅検査は
+   `grep -nP '[\x{AC00}-\x{D7AF}]|保险|了_|以此|Scholarly|Funding|copy'` で
+   行った。typos は日本語文へのハングル・簡体字混入を検出しない。
+5. 改善案: hk.pkl の検査ステップに、日本語文へのハングル・簡体字混入を
+   検出する grep パターンのチェックを足す。
