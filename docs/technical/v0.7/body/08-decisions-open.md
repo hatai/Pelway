@@ -40,7 +40,7 @@
 | A3 | Rust tokio/axum＋sqlx/PostgreSQL、ローカル添付 | クラウド型backendを既定にしない | 会社境界、権限、復旧、transaction/配信の整合を合成データで確認 |
 | A4 | seq/client_msg_id、workspace commit順cursor、snapshot再同期 | 04の行lock方式は小規模初版案。負荷増時の代替は将来 | 遅延commit、cursor失効、取消後cache消去、二重送信/承認の競合を試す |
 | A5 | 既存9状態。取消を第10状態にしない | 取消受付commit、未開始抑止、外部への停止要求、停止確認、操作結果を別項目で保持。止まっているへの移行は停止の証拠がある場合だけ。Pでもこの意味を弱めない | 取消遷移の行単位はU06、長引く外部run停止確認はU07 |
-| A6 | task使い捨てcontainerとBotの永続checkpointを分離 | 常時Bot VMを維持する代替。gVisor（runsc）とcrun＋libkrunはMVP前に隔離比較を測る | 同kernelの隔離限界、本番水準、runtime socket非公開、資源/network/volume境界。管理者権限なしに運用可か |
+| A6 | task使い捨てcontainerとBotの永続checkpointを分離 | 常時Bot VMを維持する代替。gVisor（runsc）とcrun＋libkrunの隔離比較はWSL2+rootlessで測定済み（docs/research/sandbox-isolation-measurements.md）。gVisorは動作（systrap不可、ptraceで+0.13秒/+50MB、egress拒否は保持）、libkrunは/dev/kvmの権限が前提で未測定 | 同kernelの隔離限界、本番水準、runtime socket非公開、資源/network/volume境界。管理者権限なしに運用可か |
 | A7 | 本体AIは国内hostのstub/条件付きlocal inference | 国内完結の根拠が揃った別提供元は将来審査 | モデルlicense/配布、品質、GPU/RAM/CPU、通信。満たせないならstubのまま |
 | A8 | 本体egress deny、選択外部連携は別grant | 国内性未確認でも権限ある利用者が説明を見て明示有効化可 | 個別操作承認/監査/秘密管理は維持。外部LLMへの自動fallback禁止。10のD1〜D12 |
 | A9 | 共通IntegrationPortと能力定義/Adapter | MCP、REST、webhook、CLI/hook、A2Aを役割で使い分け | サービス固有制約、提供元内の副作用制御、結果照会、取消可否。11参照 |

@@ -326,6 +326,23 @@ fn card_not_found_requires_reload() {
     );
 }
 
+// #86: 403 not_decider（操作した人がカードの承認者でない）。
+// 読み直しても承認者は変わらないが、再送を止めるために読み直し状態へ移す。
+// NeedsReload 移行後の挙動（ボタン無効・自動再送なし）は version_conflict 版と同じ。
+#[test]
+fn not_decider_requires_reload_without_auto_retry() {
+    let clock = FakeClock::new();
+    let mut m = machine_with(&clock);
+    let _ = m.press_approve();
+    assert_eq!(
+        m.on_approve_response(Err(ApproveError::NotDecider)),
+        Some(Effect::Notice(Notice::NeedsReload {
+            reason: ReloadReason::NotDecider
+        }))
+    );
+    assert_eq!(m.press_approve(), None);
+}
+
 #[test]
 fn reload_restores_idle_and_the_next_approval_uses_a_new_key_and_new_snapshot() {
     let clock = FakeClock::new();

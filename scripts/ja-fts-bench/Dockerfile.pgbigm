@@ -1,0 +1,19 @@
+# pg_bigm 計測用イメージ（rootless Podman でのビルド・実行を前提）。
+# pg_bigm は公式の配布イメージが存在しないため、postgres:16-alpine の上に
+# ソースからビルドする。拡張のビルドに必要なヘッダと PGXS は公式
+# postgres イメージに最初から含まれる（build-base の追加のみで足りる）。
+# 出典: https://pgbigm.github.io/pg_bigm/pg_bigm.html
+FROM docker.io/library/postgres:16-alpine
+
+ARG PG_BIGM_VERSION=1.2-20250903
+
+# icu-dev は PG16 のサーバヘッダ（utils/pg_locale.h）が unicode/ucol.h を
+# 要求するため、clang21 は PGXS が .bc（LLVM bitcode）を clang-21 で作る
+# ために入れる（postgres:16-alpine のビルドツールに合わせる）。
+RUN apk add --no-cache --virtual=.build-dependencies build-base icu-dev clang21 llvm21 \
+ && wget -q "https://github.com/pgbigm/pg_bigm/archive/refs/tags/v${PG_BIGM_VERSION}.tar.gz" \
+ && tar xf "v${PG_BIGM_VERSION}.tar.gz" \
+ && make -C "pg_bigm-${PG_BIGM_VERSION}" USE_PGXS=1 PG_CONFIG=pg_config \
+ && make -C "pg_bigm-${PG_BIGM_VERSION}" USE_PGXS=1 PG_CONFIG=pg_config install \
+ && rm -rf "pg_bigm-${PG_BIGM_VERSION}" "v${PG_BIGM_VERSION}.tar.gz" \
+ && apk del .build-dependencies

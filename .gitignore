@@ -27,3 +27,7 @@ hk.local.pkl
 
 # OS・エディタの一時ファイル
 .DS_Store
+
+# 日本語全文検索ベンチマーク（Issue #93）の作業ディレクトリ（計測ログ・
+# 結果。再生成は scripts/ja-fts-bench/bench.sh で行う）
+scripts/ja-fts-bench/work/
