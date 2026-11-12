@@ -34,6 +34,10 @@ jactionlint = "2.5.0"
 # 短縮名 octocov は mise レジストリに無い（tool not found）。octocov 向けの packslip
 # バックエンドも無いため、mise.lock に URL と checksum が残る aqua バックエンドで宣言する。
 "aqua:k1LoW/octocov" = "0.83.5"
+# Claude Code の sandbox（Linux）が使う socat。レビュー担当の Claude（docs/dev-environment.md の
+# 「レビュー担当の Claude」）のネットワーク制限に要る。apt と sudo を使わずに入れるため、
+# conda-forge のビルドを mise の conda バックエンドで導入する。Linux だけで入れる。
+"conda:socat" = { version = "1.8.1.3", os = ["linux"] }
 # CI のカバレッジ計測（cargo-llvm-cov）。ソースからのビルドは 45 秒ほどかかるため、
 # 公式配布の事前ビルド済みバイナリを aqua バックエンドで導入する（octocov と同じ
 # 経路。mise.lock が URL と checksum で取得物を固定する）。crates.io の同名
