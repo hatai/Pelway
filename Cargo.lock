@@ -5038,6 +5038,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pelway-dev-llm-eval"
+version = "0.0.0"
+dependencies = [
+ "pelway-llm",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "pelway-dev-queue-compare"
 version = "0.0.0"
 dependencies = [

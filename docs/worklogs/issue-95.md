@@ -50,6 +50,14 @@
 4. 足りなかった情報・検証手段: split-plan 更新時に実装側の実測行数（round 1 コメントの +1464 の内訳と round 3 の +715）が参照されなかったため、PR 4 の見込みが立たなかった。
 5. 改善案: `.github/ISSUE_TEMPLATE/agent-task.yml` の「規模の見積もり」の description に「分割案には各 PR の実測・見込み行数を書く」を足す。
 
+## 実装者メモ（round 7）
+
+1. 詰まった箇所: crates/dev-llm-eval/tests/eval.rs: `TokenSource` の返り型を `SecretToken` に変えた（round 4）影響で、試験内の `Fixed` 実装が `Result<String, LlmError>` のまま E0053 になった。`SecretToken::new` で包み直した。ほか: mise.toml への `[tasks.llm-eval]` 追加位置（[tasks.fetch] の直後）に置き直した。
+2. 曖昧だった文: 「測定コマンドがモックで動き、`docs/research/` 向けの表を出力する → CI の試験」（Issue #95 の split-plan コメント、PR 4 の行）— 「CI の試験」が `mise run verify`（cargo test）に含まれるモック試験を指すのか、GitHub Actions の workflow を変えることまで含むかが決まっていない。
+3. 仮定と解釈: 仮定: CI は既存の `mise run verify` ジョブ（docs/dev-environment.md「CI（GitHub Actions）」）のまま。解釈: 測定コマンドのモック試験（tests/eval.rs）を cargo test に含めることで「CI では外部へつながらず、モックで動くことだけを試す」を満たす。`.github/workflows/` の変更はしない（pelway-dev[bot] には workflow を push する権限がなく、必要なら停止条件に当たる）。選ばなかった: 専用の workflow 追加（権限がなく停止条件に該当するため）。
+4. 足りなかった情報・検証手段: PR 5（測定コマンド）の割り当て（指揮役の判断待ち。ブランチ `agent/95-llm-eval-cmd` に実装済み・`mise run verify` EXIT=0・`cargo test -p pelway-dev-llm-eval` 3/3 合格）。
+5. 改善案: docs/dev-environment.md の「CI（GitHub Actions）」に「新しい cargo パッケージの試験は cargo test --workspace で自動的に CI に入る（workflow の変更は不要）」を明記する。
+
 ## 実装者メモ（round 8）
 
 1. 詰まった箇所: crates/pelway-llm/src/schema.rs: PR #163 の must-fix（未対応の `type` 名が `type_matches` の `_ => true` で常に一致する）を直す際、`type` の値だけ未知なら値の検証を飛ばす形も考えたが、誤記を含むスキーマが黙って全部を通すことのないよう、`validate` の先頭で `KNOWN_TYPES` にない名前をスキーマエラーとして拒否する形にした。`type_matches` の未知名も `_ => false` に変えた（防御）。
@@ -73,3 +81,11 @@
 3. 仮定と解釈: 仮定: 予約は「送った（送った可能性がある）呼出し」に対して消費する。解釈: `LlmError::NotSent`（何も送っていないことが確定: トークン取得失敗・接続拒否・送信前の検査失敗）だけが予約を戻し、`Rejected`・`OutcomeUnknown`・`Invalid`（応答は届いた）は予算を消費したままにする。Pelway 03「タイムアウトは結果の確定ではなく再送を許可しない」と同じ保守側。選ばなかった: 失敗はすべて予約を戻す（結果不明・拒否の呼出しも実際には提供元が処理している可能性があり、上限の意味が崩れる）ことと、すべて保持する（未送信で予算が無駄に減る）こと。
 4. 足りなかった情報・検証手段: なし（RED: 並行4本×予算2で `left: 4, right: 2`、拒否後の予算消費で `left: 0, right: 1` → GREEN: 結合 7/7・単体 9/9。並行試験は `tokio::spawn` で4本を同時に走らせ、モックの受取件数・成功/NotSent の内訳・`usage().calls` を確認）。
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「よくある失敗」に「並行安全性の指摘では、直す前に並行試験を先に書いて現行コードでの破れを記録する」を足す。
+
+## 実装者メモ（round 11）
+
+1. 詰まった箇所: crates/dev-llm-eval/src/lib.rs: PR #176 の must-fix（`--k 0` を受け付け、上位文書が空になって recall@0 が常に 0 になる）。`--k` を `NonZeroUsize` で解析し直した。指揮役指示の「ほかの引数の抜け」も調べ、①全フラグの空の値 ②`--provider` の列挙検証が main.rs にしかない ③`--base-url` が任意の文字列で不正 URL は送信時まで遅れて出る、の3つを `parse_args` で弾いた（base-url は `url::Url` で scheme が http/https か確認）。
+2. 曖昧だった文: 「ほかの引数にも同じ種類の抜け（範囲の確認が無いもの）が無いかを確かめる。」（指揮役の指示）— 見つけた抜けを同じ PR で直すか、どこまで直すかが書かれていない。
+3. 仮定と解釈: 仮定: 見つけた抜けは同じ PR で直すのが意図。解釈: 空の値・provider の列挙・base-url の http/https 制限を試験可能な `parse_args` に入れ、main.rs の重複検証は保険として残した。`--k 999`（文書数を超える k）は数学的に意味があるため許した。選ばなかった: `--k` だけ直してほかは報告のみ（同種の fail-open を残す意味がない）。
+4. 足りなかった情報・検証手段: なし（RED: `--k 0 は拒否されるべき`・`--provider の空の値は拒否されるべき` → GREEN: 4/4。CLI 実行で `--k 0`・`--base-url notaurl` が使い方付きのエラーで異常終了することを確認）。
+5. 改善案: `.github/ISSUE_TEMPLATE/agent-task.yml` の「受け入れ条件」の description に「CLI 引数を持たせる場合は、引数の取りうる値と、範囲外の値の挙動を書く」を足す。
