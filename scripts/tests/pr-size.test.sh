@@ -40,30 +40,50 @@ run_case() {
   fi
 }
 
+# 追加主体: 上限内なら通る
 d="$(new_repo)"; lines 10 >"$d/a.rs"; commit_all "$d"
-run_case under_limit "$d" 0 "pr-size: 10 / 800 lines" --base base --limit 800
+run_case add_under_limit "$d" 0 "pr-size: +10 / -0（追加の上限 800、削除の上限 2000）" --base base --limit 800
 
+# 追加主体: 追加が 800 を超えたら失敗
 d="$(new_repo)"; lines 801 >"$d/a.rs"; commit_all "$d"
-run_case over_limit "$d" 1 "pr-size: 801 / 800 lines" --base base --limit 800
+run_case add_over_limit "$d" 1 "pr-size: +801 / -0（追加の上限 800、削除の上限 2000）" --base base --limit 800
+
+# 削除主体: 追加は少なく削除が 2000 以下なら通る
+d="$(new_repo)"; lines 1500 >"$d/old.rs"; commit_all "$d"; git -C "$d" tag -f base >/dev/null
+lines 300 >"$d/old.rs"; commit_all "$d"
+run_case delete_under_limit "$d" 0 "pr-size: +0 / -1200（追加の上限 800、削除の上限 2000）" --base base
+
+# 削除主体: 削除が 2000 を超えたら失敗
+d="$(new_repo)"; lines 2100 >"$d/old.rs"; commit_all "$d"; git -C "$d" tag -f base >/dev/null
+rm "$d/old.rs"; commit_all "$d"
+run_case delete_over_limit "$d" 1 "pr-size: +0 / -2100（追加の上限 800、削除の上限 2000）" --base base
+
+# 削除の上限は --delete-limit で変えられる
+run_case delete_limit_option "$d" 0 "pr-size: +0 / -2100（追加の上限 800、削除の上限 2100）" --base base --delete-limit 2100
+
+# 両方超えたら失敗
+d="$(new_repo)"; lines 2100 >"$d/old.rs"; commit_all "$d"; git -C "$d" tag -f base >/dev/null
+rm "$d/old.rs"; lines 801 >"$d/new.rs"; commit_all "$d"
+run_case both_over_limit "$d" 1 "pr-size: +801 / -2100（追加の上限 800、削除の上限 2000）" --base base
 
 # 生成物の指定は base 側の .gitattributes から読む。
 d="$(new_repo)"; printf 'tokens.json linguist-generated=true\n' >"$d/.gitattributes"; commit_all "$d"; git -C "$d" tag -f base >/dev/null
 lines 900 >"$d/tokens.json"; lines 5 >"$d/a.rs"; commit_all "$d"
-run_case generated_excluded "$d" 0 "pr-size: 5 / 800 lines" --base base --limit 800
+run_case generated_excluded "$d" 0 "pr-size: +5 / -0（追加の上限 800、削除の上限 2000）" --base base
 
 d="$(new_repo)"; printf '\x00\x01\x02binary' >"$d/blob.bin"; commit_all "$d"
-run_case binary_ignored "$d" 0 "pr-size: 0 / 800 lines" --base base --limit 800
+run_case binary_ignored "$d" 0 "pr-size: +0 / -0（追加の上限 800、削除の上限 2000）" --base base
 
 d="$(new_repo)"; lines 3 >"$d/my file.rs"; commit_all "$d"
-run_case space_in_name "$d" 0 "pr-size: 3 / 800 lines" --base base --limit 800
+run_case space_in_name "$d" 0 "pr-size: +3 / -0（追加の上限 800、削除の上限 2000）" --base base
 
 d="$(new_repo)"; lines 100 >"$d/old.rs"; commit_all "$d"; git -C "$d" tag -f base >/dev/null
 git -C "$d" mv old.rs new.rs; sed -i '50s/.*/changed/' "$d/new.rs"; commit_all "$d"
-run_case rename_counts_changes_only "$d" 0 "pr-size: 2 / 800 lines" --base base --limit 800
+run_case rename_counts_changes_only "$d" 0 "pr-size: +1 / -1（追加の上限 800、削除の上限 2000）" --base base
 
 # PR 自身が .gitattributes で自分を生成物扱いにしても、base の属性で数える。
 d="$(new_repo)"; printf '* linguist-generated=true\n' >"$d/.gitattributes"; lines 900 >"$d/a.rs"; commit_all "$d"
-run_case self_exemption_ignored "$d" 1 "pr-size: 901 / 800 lines" --base base --limit 800
+run_case self_exemption_ignored "$d" 1 "pr-size: +901 / -0（追加の上限 800、削除の上限 2000）" --base base
 
 # base が解決できないときは 0 行で通さず、引数の誤りとして止まる。
 d="$(new_repo)"; lines 900 >"$d/a.rs"; commit_all "$d"
@@ -71,6 +91,7 @@ run_case missing_base_fails "$d" 2 "" --base origin/nope --limit 800
 
 d="$(new_repo)"
 run_case bad_args "$d" 2 "" --base base --limit abc
+run_case bad_delete_limit "$d" 2 "" --base base --delete-limit abc
 
 # check_help <name> <arg>: 使い方（usage: で始まる行）を標準出力に出し、終了コード 0 で終わる。
 check_help() {

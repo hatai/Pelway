@@ -24,7 +24,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | 名義の確認で `hatai/Pelway` が返らなかった | 返った内容かエラー |
 | 受け入れ条件がテストで確かめられる形になっていない | どの条件がなぜ確かめられないか |
 | 慣れない機能で、Issue の「採用する方式」が空 | `gh search` で比べた 2 つ以上の方式と、それぞれ採るもの・捨てるもの |
-| `mise run pr-size` が 800 行を超える | 分割案（PR ごとの範囲と見込み行数）。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
+| `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 
 止まり方（止まった時点で、どの手順の途中でも手順 5 の形で実装者メモを書き、Issue のコメントに続けて貼る。push しないので `docs/worklogs/` には書かなくてよい）:
@@ -101,7 +101,7 @@ scripts/agent-gh dev git push -u origin HEAD
 
 - 手順 5 の `docs/worklogs/issue-<N>.md` も同じコミットに入れる。
 - `mise run verify` が失敗したらコミットしない。直してからやり直す。
-- `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。800 行を超えたら push せずに止まる。
+- `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたら push せずに止まる。
 
 ### 7. Draft PR を作る（初回だけ）
 
@@ -139,7 +139,7 @@ scripts/agent-gh dev pr ready <PR 番号>
 issue: #<N>
 pr: <PR の URL>
 verify: pass | fail
-pr-size: <数えた行数> / 800
+pr-size: +<追加行数> / -<削除行数>（上限は追加 800、削除 2000）
 memo: docs/worklogs/issue-<N>.md（round <R>）
 ```
 
