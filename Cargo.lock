@@ -4874,6 +4874,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pelway-db"
+version = "0.0.0"
+dependencies = [
+ "pelway-contract",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
 name = "pelway-dev-client-probe"
 version = "0.0.0"
 dependencies = [
@@ -4885,15 +4894,6 @@ dependencies = [
  "slint-build",
  "ts-rs",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "pelway-db"
-version = "0.0.0"
-dependencies = [
- "pelway-contract",
- "sqlx",
- "tokio",
 ]
 
 [[package]]

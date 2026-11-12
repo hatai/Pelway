@@ -45,6 +45,13 @@ jactionlint = "2.5.0"
 # パッケージを cargo install するとソースビルドになるため使わない。
 # 出典: https://github.com/taiki-e/cargo-llvm-cov/releases/tag/v0.6.17
 "aqua:taiki-e/cargo-llvm-cov" = "0.6.17"
+# 依存クレートの脆弱性（RustSec）・ライセンス・重複・取得元の検査（cargo-deny）。
+# deny.toml が検査の設定を持ち、verify-static タスク（CI の static ジョブ）が
+# cargo deny check を実行する。crates.io の同名パッケージを cargo install すると
+# ソースビルドになるため、公式配布の事前ビルド済みバイナリを aqua バックエンドで導入する
+# （octocov・cargo-llvm-cov と同じ経路。mise.lock が URL と checksum で取得物を固定する）。
+# 出典: https://github.com/EmbarkStudios/cargo-deny/releases/tag/0.20.2
+"aqua:EmbarkStudios/cargo-deny" = "0.20.2"
 
 # コンテナ実行環境（非 Docker・要件は docs/dev-environment.md）。
 # rootless Podman 一式を apt から導入する宣言。適用は明示的な bootstrap 実行時だけ
@@ -146,6 +153,12 @@ if ! grep -q '^\\[daemons.agent-watch\\]' pitchfork.toml 2>/dev/null; then
 fi
 """
 
+[tasks.deny-check]
+description = "cargo-deny で依存クレートを検査（RustSec 脆弱性・yanked・ライセンス・重複・取得元。設定は deny.toml）"
+# コンパイルはしない（cargo metadata と Cargo.lock を読むだけ）のため verify-static に入れる。
+# 例外（ignore・例外ライセンス）の足し方は docs/dev-environment.md の「cargo-deny」節。
+run = "cargo deny check"
+
 [tasks.pr-size]
 description = "PR の差分行数を数え、800 行を超えたら失敗する（linguist-generated とバイナリは除く）"
 run = "bash scripts/pr-size.sh"
@@ -206,10 +219,11 @@ depends = ["fmt-check", "clippy", "toolchain-check", "hk-validate"]
 description = "テストとスクリプトのテスト"
 depends = ["test", "script-test"]
 
-# cargo を伴わない検査（cargo は verify-lint / verify-test が担当する）。
+# cargo のコンパイルを伴わない検査（コンパイルは verify-lint / verify-test が担当する。
+# cargo-deny は cargo metadata と Cargo.lock を読むだけでコンパイルしない）。
 [tasks.verify-static]
-description = "cargo を伴わない検査（hk / fnox / pitchfork）"
-depends = ["hk-check", "fnox-check", "pitchfork-check"]
+description = "cargo をコンパイルに使わない検査（hk / fnox / pitchfork / cargo-deny）"
+depends = ["hk-check", "fnox-check", "pitchfork-check", "deny-check"]
 
 # `mise bootstrap` は packages（apt:podman・sudo）→ tools（mise install 相当）→ このタスクの順で実行する。
 # これにより mise trust 後の mise bootstrap 1回で環境構築が完了する。
