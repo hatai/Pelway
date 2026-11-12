@@ -33,3 +33,11 @@
 3. 仮定と解釈: 仮定: トークンの「送信前の型」も PR 2 の `token` の範囲に含まれる。解釈: `TokenSource::token` の返り型を `String` から `SecretToken`（`Debug` は `[redacted]`、取り出しは `expose` だけ）に変え、単体試験で包んでも Debug に出ないことを確かめる。選ばなかった: gateway（PR 3）までこの条件の確認を先送りする（split-plan が PR 2 の受け入れ条件に挙げているため）。
 4. 足りなかった情報・検証手段: `reqwest::Error` には公開コンストラクタが無く、単体試験で未送信（is_connect）/結果不明の実経路を再現できないため、それらは PR 4 の結合試験（接続拒否・タイムアウト）で確かめる。エラー分類の試験が分類の実装に結び付いていることの確認は変異検査（`Json` を Invalid から外すと `error_mapping_invalid_for_parse_and_shape_failures` が FAILED、戻すと 7/7 合格）で行った。
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順6に「積み上げ PR の pr-size は `bash scripts/pr-size.sh --base <親ブランチ>` で測る」を明記する（issue #96 round 2 のメモと同じ指摘だが skill 本文に反映されていない）。
+
+## 実装者メモ（round 5）
+
+1. 詰まった箇所: crates/pelway-llm/tests/gateway.rs: 全体から PR 3 の範囲（基本経路と利用量の試験）を切り出す際、python での行範囲削除が `Reply::status` と `await_records` の閉じ括弧と本体を残し、構文エラー（`unexpected closing delimiter`）になった。手直しして `cargo fmt`・clippy で確認した。ほか: `SecretToken` 化に伴い `BearerHook` の `format!("Bearer {token}")` は Display を要求するため `token.expose()` に変えた。
+2. 曖昧だった文: 「PR 3『gateway 本体と基本経路の結合試験』| ...（rig-core 接続、HTTP クライアントの差込み、要求ごとのトークン、利用量と上限）、モック HTTP サーバー、chat（スキーマなし／あり）・`json_object`・embed の結合試験」（Issue #95 の split-plan コメント）— 「要求ごとのトークン」の試験（取り出し・秘匿）は PR 4 に置いたまま、PR 3 の範囲でどこまでトークンを確認するかが決まっていない。
+3. 仮定と解釈: 仮定: PR 3 には BearerHook の存在確認（1 要求に Bearer が付く）だけで足りる。解釈: 基本経路の chat 試験に `Authorization: Bearer fixed-token` の確認を1行足した。差し替え・秘匿・ログ不出の試験は PR 4 のまま（split-plan の PR 4 行が「トークンの要求ごとの取り出しと秘匿」に置いているため）。選ばなかった: トークン試験一式を PR 3 へ移す（PR 3 が 800 行を超える）。
+4. 足りなかった情報・検証手段: PR 3 の試験は round 2 で TDD により開発したもの（当時の RED: `not implemented` で 14 失敗）の再配置であり、PR 3 単独での新規 RED は取れない。配置替え後の合格（5 試験）と `mise run verify` で代用した。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「よくある失敗」に「分割で試験を移動するときは移動先 PR で実行結果を引用し、出所（元の round）を明記する」を足す。
