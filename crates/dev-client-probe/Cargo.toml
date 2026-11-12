@@ -2,7 +2,7 @@
 # Issue #98 のクライアント技術の検証用クレート。製品機能を含まない。Slint 1.18.1 の
 # ListView（可変高の仮想リストと読み上げを有効にしたときの重さ）と、Rust から
 # TypeScript への型生成（ts-rs）を確かめる。測定結果は
-# docs/research/slint-tauri-client-measurements.md。
+# docs/research/slint-tauri-client-measurements.md（#10861 の再現プログラムを含む）。
 name = "pelway-dev-client-probe"
 version = "0.0.0"
 edition = "2024"
@@ -27,7 +27,6 @@ wasm-bindgen = "0.2"
 # Slint は版を 1.18.1 に固定（pelway-client-ui と同じ）。既定フィーチャは外し、必要な
 # ものだけを選ぶ。読み上げ（AccessKit / AT-SPI）の有無はフィーチャ `a11y` で切り替え、
 # 同じソースを 2 通りでビルドして比較する（無効は `--no-default-features`）。
-# compat-1-18 は slint 1.18.1 の必須。
 slint = { version = "=1.18.1", default-features = false, features = [
     "std",
     "backend-winit",

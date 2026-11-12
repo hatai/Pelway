@@ -1,7 +1,7 @@
 // Issue #98: Slint 1.18.1 の ListView が行ごとに高さが違う場合（可変高の仮想リスト）を
 // どう扱うかを確かめるための UI。確かめることは 3 つ: 見える行だけが生成されるか、
-// 行が重なったり抜けたりしないか、遠い位置へ飛んだあとも同じか。行の位置の変化
-// （changed probe-y）は Rust 側のコールバックに記録する。
+// 行が重なったり抜けたりしないか、遠い位置へ飛んだあとも同じか。行の位置の変化は
+// Rust 側のコールバックに記録する。
 
 import { LineEdit, ListView } from "std-widgets.slint";
 
@@ -10,7 +10,7 @@ export component ProbeWindow inherits Window {
     height: 640px;
     title: "slint listview probe";
 
-    // 行の位置が変わったときに呼ばれる。index は行番号、y は列表内の y 座標。
+    // 行の位置が変わったときに呼ばれる（index は行番号、y は列表内の y 座標）。
     callback record-move(index: int, y: length);
 
     in property <int> item-count: 10000;
