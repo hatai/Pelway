@@ -42,6 +42,14 @@
 4. 足りなかった情報・検証手段: PR 3 の試験は round 2 で TDD により開発したもの（当時の RED: `not implemented` で 14 失敗）の再配置であり、PR 3 単独での新規 RED は取れない。配置替え後の合格（5 試験）と `mise run verify` で代用した。
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「よくある失敗」に「分割で試験を移動するときは移動先 PR で実行結果を引用し、出所（元の round）を明記する」を足す。
 
+## 実装者メモ（round 6）
+
+1. 詰まった箇所: crates/pelway-llm/tests/gateway.rs: PR 3 から切り出した残りの試験を戻す際、full からの切り出しに利用量の試験が重複して入り（E0428）、`Reply::DelayedJson` の列挙子追加と `AtomicUsize` の import 戻し、`TokenSource` の返り型変更（`String` → `SecretToken`）に伴う試験内実装の修正が必要だった。
+2. 曖昧だった文: 「PR 4『異常系の結合試験と測定コマンド』| 5xx・タイムアウトで再送しない、接続拒否、不正応答、トークンの要求ごとの取り出しと秘匿、プロキシの結合試験、測定コマンドと合成データ」（Issue #95 の split-plan コメント）— この範囲の実測行数（異常系試験 約 +330、測定コマンド +715 = 約 +1045）が 800 行に収まらないときの扱いが決まっていない。
+3. 仮定と解釈: 仮定: 800 行上限は PR ごとに守る（round 1 と同じ。split-plan は例外ラベルには触れない）。解釈: PR 4 は「異常系の結合試験」に絞って出し、測定コマンドと合成データ（実装済み・round 3 で GREEN）は PR 5 としての分割を Issue コメントで提案する。選ばなかった: 2つを1本の PR にする（上限超過）ことと、テストや合成データを削って収める（skill が禁止）こと。
+4. 足りなかった情報・検証手段: split-plan 更新時に実装側の実測行数（round 1 コメントの +1464 の内訳と round 3 の +715）が参照されなかったため、PR 4 の見込みが立たなかった。
+5. 改善案: `.github/ISSUE_TEMPLATE/agent-task.yml` の「規模の見積もり」の description に「分割案には各 PR の実測・見込み行数を書く」を足す。
+
 ## 実装者メモ（round 8）
 
 1. 詰まった箇所: crates/pelway-llm/src/schema.rs: PR #163 の must-fix（未対応の `type` 名が `type_matches` の `_ => true` で常に一致する）を直す際、`type` の値だけ未知なら値の検証を飛ばす形も考えたが、誤記を含むスキーマが黙って全部を通すことのないよう、`validate` の先頭で `KNOWN_TYPES` にない名前をスキーマエラーとして拒否する形にした。`type_matches` の未知名も `_ => false` に変えた（防御）。
