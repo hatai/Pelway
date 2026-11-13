@@ -559,11 +559,13 @@
   - マージコミットの pre-commit フック: trailing_whitespace / newlines / typos / cargo check /
     cargo clippy / cargo fmt すべて通過（main の mise が rust 1.99.1 を要求したため mise install で導入）
   - bash -n scripts/demo-check/*.sh → 0
+  - PR #270 の再実行チェック（2026-11-14 0時過ぎ確認）: "Analyze (actions)" 合格・pr-size 合格・
+    static/lint 合格。CodeQL 失敗の原因は競合（merge ref 不作成＋古い merge-base）で確定。
+    Analyze (rust)・cargo test・octocov は確認時点で実行中
 - その他の対応:
   - 作業ログを main の規約（AGENTS.md「Worklogs live under docs/worklogs/」）に合わせて
     docs/worklog/dev-infra.md → docs/worklogs/dev-infra.md へ移動。
   - 以後の GitHub 操作（push・PR 編集）は main の新 AGENTS.md の規則に従い scripts/agent-gh dev 経由で行う。
 - 未検証・未決:
-  - CodeQL "Analyze (actions)" が競合解消で再実行されて通るかは push 後の確認待ち
   - main のフルツリーで run.sh が4段階とも失敗する状態は main 側の既存問題（Issue #143 の移植の
     範囲外）。当 PR では対処しない
