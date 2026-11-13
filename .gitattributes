@@ -16,3 +16,4 @@ docs/design-system/tokens/check-v4-result.json linguist-generated=true
 .agents/skills/implement-issue/** -linguist-generated
 .agents/skills/review-pr/** -linguist-generated
 .agents/skills/write-pull-request/** -linguist-generated
+.agents/skills/pr-watch/** -linguist-generated
