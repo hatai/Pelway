@@ -83,7 +83,7 @@ jobs:
       - name: Checkout
         # タグ参照。コミット sha は .github/workflows/actions.lock で固定する（v4.2.2）。
         # 後続ステップで git 認証情報は使わないため残置しない（jactionlint artipacked）。
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -93,9 +93,9 @@ jobs:
       # - cache: false — mise-action のツールキャッシュは復元内容を mise.lock と突き合わせない
       #   （公式の注意）。リモートキャッシュを使わない方針のため無効化する。追加の cache も足さない。
       # jdx/mise-action のコミット sha は GitHub 公式 lockfile（.github/workflows/actions.lock）
-      # で固定する。workflow 側は公式 lock 生成が書き換えた具体タグ @v2.4.4 を参照する。
+      # で固定する。workflow 側は公式 lock 生成が書き換えた具体タグ @v5.2.7 を参照する。
       - name: Setup mise (official action)
-        uses: jdx/mise-action@v2.4.4
+        uses: jdx/mise-action@v5.2.7
         with:
           version: v2026.11.5
           install: true
@@ -125,7 +125,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -140,7 +140,7 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends libfontconfig1-dev
 
       - name: Setup mise (official action)
-        uses: jdx/mise-action@v2.4.4
+        uses: jdx/mise-action@v5.2.7
         with:
           version: v2026.11.5
           install: true
@@ -193,7 +193,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -203,7 +203,7 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends libfontconfig1-dev
 
       - name: Setup mise (official action)
-        uses: jdx/mise-action@v2.4.4
+        uses: jdx/mise-action@v5.2.7
         with:
           version: v2026.11.5
           install: true
@@ -261,7 +261,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -278,7 +278,7 @@ jobs:
       # verify ジョブと同じ導入（mise 公式 Action・キャッシュなし・--locked）。
       # rust 1.96.0 に llvm-tools-preview 成分が入る（mise.toml の components で宣言）。
       - name: Setup mise (official action)
-        uses: jdx/mise-action@v2.4.4
+        uses: jdx/mise-action@v5.2.7
         with:
           version: v2026.11.5
           install: true
@@ -325,13 +325,15 @@ jobs:
 
       # LCOV 形式でレポートを出す（cargo-llvm-cov が llvm-tools の profdata/cov を駆動）。
       # 出力先 lcov.info は .octocov.yml の coverage.paths と対応する。
-      # --no-cfg-coverage を付ける: 既定の --cfg coverage ビルドは、cfg(coverage) で
-      # nightly 専用 #![feature] を有効にする依存があると stable の E0554 で失敗するため。
+      # 引数（--no-cfg-coverage と集計対象の絞り込み #157）は mise.toml の coverage
+      # タスクに置く。cargo-llvm-cov 自身は設定ファイルを持たないため、mise タスクが
+      # 設定の置き場所になり、CI とローカル検証（Issue #157 の検証コマンド）で同じ
+      # 引数を使うことが保証される。
       # cargo-llvm-cov は mise の [tools] で 0.6.17 をピンし、mise.lock が URL と
       # checksum で取得物を固定する（ソースからのビルドに 45 秒かかるため、
       # 事前ビルド済みのバイナリを使う）。
       - name: Generate LCOV (cargo llvm-cov)
-        run: mise exec -- cargo llvm-cov --workspace --locked --no-cfg-coverage --lcov --output-path lcov.info
+        run: mise run coverage
 
       # octocov で PR コメント（増減表示）を作る。レポートの保存・比較は
       # GitHub Actions の artifact のみ（.octocov.yml の diff.storage.artifacts）。
@@ -355,7 +357,7 @@ jobs:
       - name: Checkout
         # タグ参照。コミット sha は .github/workflows/actions.lock で固定する（v4.2.2）。
         # base ブランチとの merge-base を取るため履歴をすべて取得する。
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false

@@ -9,6 +9,7 @@ v0.7の技術選定を、既存のOSSと競合の構成と比べた調査です�
 | [データと共同作業](oss-data-and-collaboration.md) | ジョブキュー、同期、共同編集、ベクトル検索、日本語OCR（YomiTokuを含む）、改ざん検出の監査ログ、バックアップ |
 | [基盤とクライアント](oss-platform-and-client.md) | 認証（Oryを含む）、エンドツーエンド暗号化、音声・ビデオ、通知、観測、クライアントの部品、相互接続 |
 | [RustのLLM APIクライアント比較](rust-llm-client-comparison.md) | async-openai、genai、rig-core、openai-api-rs、reqwest自前実装の比較。自動再試行、HTTPクライアント差込、構造化出力、Z.ai・OpenAI・Vertex AIの互換仕様 |
+| [Slint Royalty-free License 2.0 の利用条件](slint-royalty-free-license.md) | Slint を無償ライセンスで使う条件（製品種類・attribution・Embedded Systems・API 公開・notice）と Pelway クライアントの現状 |
 
 測定報告（実機検証）:
 

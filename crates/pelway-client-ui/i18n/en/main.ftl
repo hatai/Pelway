@@ -62,3 +62,8 @@ pane-ai-note = Work in progress is not shown in the conversation.
 thread-input-placeholder = Reply in thread
 ## Message composer
 composer-placeholder = Message { $channel }
+## Top level menu and About dialog (Slint attribution, Issue 237)
+menu-help = Help
+menu-about = About This App
+about-title = About This App
+about-close = Close

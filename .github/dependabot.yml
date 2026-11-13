@@ -1,8 +1,9 @@
-# 依存クレートの更新を Dependabot に週 1 回立てさせる（Issue #169）。
+# 依存クレートと GitHub Actions の更新を Dependabot に週 1 回立てさせる
+# （クレートは Issue #169、github-actions は Issue #224）。
 # 設定の意味は https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
-# github-actions は対象外: workflow の `uses:` の版は `.github/workflows/actions.lock`
-# （gh actions-lock が生成）で固定しており、Dependabot は actions.lock を作り直さない
-# ため両者がずれる。判断の経緯は docs/worklogs/issue-169.md。
+# github-actions の更新で Dependabot は `.github/workflows/actions.lock`（gh actions-lock
+# が生成）を作り直さない。更新の PR では指揮役が PR のブランチで `gh actions-lock`
+# を実行して lock を作り直す（skill command-team の「マージ」の Dependabot の項）。
 version: 2
 updates:
   - package-ecosystem: cargo
@@ -27,4 +28,27 @@ updates:
       # "build(deps): bump ..." になる（dependabot-options-reference の include）。
       # prefix を "build(deps)" にすると "build(deps)(deps):" と二重になる。
       prefix: "build"
+      include: scope
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      # cargo と同じ 7 日（Issue #224 の受け入れ条件。jactionlint の
+      # dependabot-cooldown 規則は ecosystem ごとに 7 日以上を求める）。
+      default-days: 7
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      # cargo と同じく minor と patch は 1 本の PR にまとめ、major は
+      # 破壊的な変更を含むため個別の PR にする。
+      github-actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      # 件名は "ci(deps): bump ..." になる（cargo と同じ include: scope の
+      # 仕様で、prefix の後ろに "(deps)" が付く）。
+      prefix: "ci"
       include: scope

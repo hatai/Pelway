@@ -12,14 +12,15 @@ description = "Draft signed checkpoints for the Pelway audit log hash chain (C2S
 base64 = "0.23"
 # チェックポイントの署名（RFC 8032 Ed25519）。既定の機能に zeroize が入る。
 # rand_core 機能で SigningKey::generate（OS 乱数源からの鍵生成）が使える。
-ed25519-dalek = { version = "2", features = ["rand_core"] }
-# NoteSigner::generate の OS 乱数源（ed25519-dalek 2.x と同じ 0.6 系）。
-rand_core = { version = "0.6", features = ["getrandom"] }
+ed25519-dalek = { version = "3", features = ["rand_core"] }
+# NoteSigner::generate の OS 乱数源（ed25519-dalek 3.x は rand_core 0.10 系。
+# rand_core 0.10 から OsRng が外れたため、getrandom 0.4 の SysRng を使う）。
+getrandom = { version = "0.4", features = ["sys_rng"] }
 # 行ハッシュ・鍵 ID の SHA-256。
-sha2 = { version = "0.10", default-features = false }
+sha2 = { version = "0.11", default-features = false }
 
 [dev-dependencies]
 # 署名行の素材をテストで組み立てるための base64（本体と同じ版）。
 base64 = "0.23"
 # 有効な公開鍵の素材（NoteVerifier::from_public_key の引数）をテストで作る。
-ed25519-dalek = { version = "2", features = ["rand_core"] }
+ed25519-dalek = { version = "3", features = ["rand_core"] }

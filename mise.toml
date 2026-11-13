@@ -45,6 +45,13 @@ jactionlint = "2.5.0"
 # パッケージを cargo install するとソースビルドになるため使わない。
 # 出典: https://github.com/taiki-e/cargo-llvm-cov/releases/tag/v0.6.17
 "aqua:taiki-e/cargo-llvm-cov" = "0.6.17"
+# 依存クレートの脆弱性（RustSec）・ライセンス・重複・取得元の検査（cargo-deny）。
+# deny.toml が検査の設定を持ち、verify-static タスク（CI の static ジョブ）が
+# cargo deny check を実行する。crates.io の同名パッケージを cargo install すると
+# ソースビルドになるため、公式配布の事前ビルド済みバイナリを aqua バックエンドで導入する
+# （octocov・cargo-llvm-cov と同じ経路。mise.lock が URL と checksum で取得物を固定する）。
+# 出典: https://github.com/EmbarkStudios/cargo-deny/releases/tag/0.20.2
+"aqua:EmbarkStudios/cargo-deny" = "0.20.2"
 
 # コンテナ実行環境（非 Docker・要件は docs/dev-environment.md）。
 # rootless Podman 一式を apt から導入する宣言。適用は明示的な bootstrap 実行時だけ
@@ -89,6 +96,30 @@ run = "cargo clippy --workspace --all-targets --locked -- -D warnings"
 [tasks.test]
 description = "全テストを実行する（--locked）"
 run = "cargo test --workspace --locked"
+
+# CI（.github/workflows/verify.yml の coverage ジョブ）とローカルで共通のカバレッジ計測。
+# cargo-llvm-cov 自身は設定ファイルを持たないため、集計対象の絞り込みはこのタスクの引数で宣言する
+# （#157。ワークフローに引数をインラインで書くと、ローカル検証と CI で引数がずれる）。
+# --no-cfg-coverage: 既定の --cfg coverage ビルドは、cfg(coverage) で nightly 専用
+# #![feature] を有効にする依存があると stable の E0554 で失敗するため。
+# --exclude: dev 用 crate、開発見張り役 pelway-agent-watch、CI に PostgreSQL が無く
+# 恒常 0% の pelway-db をテスト・レポートの両方から外す。cargo の --exclude は
+# パッケージ名（Cargo.toml の name）を受け取るため、ディレクトリ名の dev-client-probe
+# ではなく pelway-dev-client-probe と書く。
+# --ignore-filename-regex: build.rs の生成コード（out/ 配下）と統合テストの
+# コード自身（crates/<crate>/tests/）をレポートから外す。
+[tasks.coverage]
+description = "カバレッジを lcov.info に計測する（手書きの製品コードのみを集計。verify.yml の coverage ジョブと共通）"
+run = '''
+cargo llvm-cov --workspace --locked --no-cfg-coverage \
+  --exclude pelway-dev-client-probe \
+  --exclude pelway-dev-queue-compare \
+  --exclude pelway-dev-smoke \
+  --exclude pelway-agent-watch \
+  --exclude pelway-db \
+  --ignore-filename-regex '([/\\]out[/\\]|crates/[^/]+/tests/)' \
+  --lcov --output-path lcov.info
+'''
 
 [tasks.build]
 description = "デバッグビルドを作る（--locked）"
@@ -150,13 +181,34 @@ if ! grep -q '^\\[daemons.agent-watch\\]' pitchfork.toml 2>/dev/null; then
 fi
 """
 
+[tasks.deny-check]
+description = "cargo-deny で依存クレートを検査（RustSec 脆弱性・yanked・ライセンス・重複・取得元は失敗、unmaintained / unsound は警告として表示）。設定は deny.toml と deny-warn.toml"
+# コンパイルはしない（cargo metadata と Cargo.lock を読むだけ）のため verify-static に入れる。
+# 例外（ignore・例外ライセンス）の足し方は docs/dev-environment.md の「cargo-deny」節。
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+# 第1段（ゲート）: vulnerability・yanked・ライセンス・bans（wildcards）・sources は失敗。
+cargo deny check
+# 第2段（警告の表示）: unmaintained / unsound。deny.toml では none（ゲートを失敗させない）なので、
+# deny-warn.toml で all として検出だけ行い、結果を警告として表示して終了コード 0 で終える
+# （cargo-deny 0.20.2 に警告レベルの設定が無いための代替。Issue #168 の受け入れ条件）。
+# 既知の 5 件は毎回警告に出る（フォロー Issue #229 で解消。deny.toml の ignore が台帳）。
+# 新規のものが出たら、deny.toml の ignore に理由とフォロー Issue 番号を添えて登録するか依存を更新する。
+# 警告行への組み立て（advisory の ID の抜き出しを含む）は scripts/deny-warn-extract.sh が担い、
+# scripts/tests/deny-warn-extract.test.sh（script-test 経由）が cargo-deny の実際の出力を
+# 写した固定サンプルで確かめる。
+warn_out="$(cargo deny --config deny-warn.toml check advisories 2>&1 || true)"
+printf '%s\\n' "$warn_out" | bash scripts/deny-warn-extract.sh >&2
+"""
+
 [tasks.pr-size]
 description = "PR の差分行数を数え、800 行を超えたら失敗する（linguist-generated とバイナリは除く）"
 run = "bash scripts/pr-size.sh"
 
 [tasks.script-test]
-description = "scripts/ のシェルスクリプトのテスト（demo-check の自己テストを含む）"
-run = "bash scripts/tests/pr-size.test.sh && bash scripts/tests/agent-gh.test.sh && bash scripts/tests/agent-worktree-prune.test.sh && bash scripts/demo-check/selftest.sh"
+description = "scripts/ のシェルスクリプトのテスト（demo-check の自己テストを含む）とスキル同梱ツールのテスト"
+run = "bash scripts/tests/pr-size.test.sh && bash scripts/tests/agent-gh.test.sh && bash scripts/tests/agent-worktree-prune.test.sh && bash scripts/tests/deny-warn-extract.test.sh && bash scripts/demo-check/selftest.sh && bash .agents/skills/pr-watch/pr-digest.test.sh"
 
 [tasks.demo-check]
 description = "デモ受入前の 4 段階検査（loopback / leak-phrases / external-refs / canary）。1 段でも違反があれば非 0。受入は引数なしの全段階実行だけ有効。loopback の runtime 検査は未実装（PENDING 表示）。canary 段階は走査対象の成果物が無いと未検証で失敗するため、製品をビルドしたあとに実行する"
@@ -210,10 +262,11 @@ depends = ["fmt-check", "clippy", "toolchain-check", "hk-validate"]
 description = "テストとスクリプトのテスト"
 depends = ["test", "script-test"]
 
-# cargo を伴わない検査（cargo は verify-lint / verify-test が担当する）。
+# cargo のコンパイルを伴わない検査（コンパイルは verify-lint / verify-test が担当する。
+# cargo-deny は cargo metadata と Cargo.lock を読むだけでコンパイルしない）。
 [tasks.verify-static]
-description = "cargo を伴わない検査（hk / fnox / pitchfork）"
-depends = ["hk-check", "fnox-check", "pitchfork-check"]
+description = "cargo をコンパイルに使わない検査（hk / fnox / pitchfork / cargo-deny）"
+depends = ["hk-check", "fnox-check", "pitchfork-check", "deny-check"]
 
 # `mise bootstrap` は packages（apt:podman・sudo）→ tools（mise install 相当）→ このタスクの順で実行する。
 # これにより mise trust 後の mise bootstrap 1回で環境構築が完了する。
