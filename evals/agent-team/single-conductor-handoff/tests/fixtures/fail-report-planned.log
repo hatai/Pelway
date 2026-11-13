@@ -1,0 +1,5 @@
+1 read: environment/notice.txt（Grok Bot 応答再開の兆候）と threads.json
+2 note: 正本が復帰している可能性。新しい作業の割り当ては行わない
+3 run: 作業ログ docs/worklogs/2026-11-12-conductor-substitute.md に進行中の Issue・PR と待ちのものを記録
+4 note: 作業ログがまとまったら人間に報告する予定（まだ送信していない）
+5 note: 巡回を終える

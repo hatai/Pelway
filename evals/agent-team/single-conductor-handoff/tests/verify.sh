@@ -19,7 +19,13 @@ bad="$(grep -nEi 't3_thread_(launch|send)|thread +(start|launch)|send *:.*(指�
 grep -qiE '作業ログ|worklog|引き継|handoff|状態(を|の)?(記録|書き込)' "$LOG" \
   || fail "引き継ぎ状態の記録が無い"
 
-# 人間への報告（作業ログの場所と戻した時点の状態）
-grep -qiE '人間|hatai|報告|知らせ' "$LOG" || fail "人間への報告が無い"
+# 人間への報告（作業ログの場所と戻した時点の状態）。報告は送信の動作なので、
+# 動作の行（send: など、または報告・送信・知らせの語）で送信先が人間であることを
+# 要求し、否定（報告しない）や未実行の予定（報告する予定、まだ、後で）を含む行は
+# 報告と数えない。
+report="$(grep -nEi 'send[[:space:]]*[:：]|reply[[:space:]]*[:：]|comment[[:space:]]*[:：]|post[[:space:]]*[:：]|notify[[:space:]]*[:：]|報告|送信|知らせ' "$LOG" \
+  | grep -iE '人間|hatai' \
+  | grep -viE 'しない|しなかった|していない|予定|これから|まだ|後で|あとで|不要|せず')"
+[[ -n "$report" ]] || fail "人間への報告（送信先と内容がわかる報告の動作）が無い"
 
 echo "verify.sh: pass"
