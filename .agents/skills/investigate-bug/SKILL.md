@@ -95,12 +95,12 @@ ls docs/worklogs/bugs
 
 同じ内容を `docs/worklogs/bugs/<slug>/report.md` に保存する（`<slug>` は症状の短い
 英小文字とハイフン。ログの断片やキャプチャは同じディレクトリに置く）。保存したら、
-報告ファイル（と同じディレクトリの証拠）だけの Draft PR を出す（skill `write-pull-request`。
-ブランチは `agent/investigate-<slug>`、本文の `Implementer:` の行には指示の 2 行目
-`Assigned: role=investigate ...` の値を `role=investigate` を除いて写す）。追い調査では
-同じブランチに積んで push する（Draft PR が更新される）。スレッドの返答には、上の報告に
-`pr: <報告の PR 番号>` の行を添える。脆弱性の疑いで止めた調査では、
-この PR を出さない。
+報告ファイルだけを含む Draft PR を出す（skill `write-pull-request`。証拠のファイルは
+PR に含めない。報告には必要な最小の引用を書く。ブランチは `agent/investigate-<slug>`、
+本文の `Implementer:` の行には指示の 2 行目 `Assigned: role=investigate ...` の値を
+`role=investigate` を除いて写す）。追い調査では同じブランチに積んで push する
+（Draft PR が更新される）。スレッドの返答には、上の報告に `pr: <報告の PR 番号>` の行を
+添える。脆弱性の疑いで止めた調査では、この PR を出さない。
 
 ## 引き渡し（実装は別工程）
 
