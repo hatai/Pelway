@@ -473,3 +473,59 @@
     sha256 の検証は未実施）
   - 前枠から繰り越しの未検証3点（canary の実データ走査・loopback の本番待受確認・
     loopback.sh の did not advance で exit 2 になる道）は本枠では手を付けていない
+
+### 2026-11-14 第10枠（main の取り込み: Issue #143 ポート版との add/add コンフリクト解消）
+- start: 2026-11-13 23:20 JST（目安。merge 着手）
+- stop:  2026-11-14 01:05 JST（目安。記録時点）
+- glm: long（T3 Code / OpenCode・zai-coding-plan/glm-5.3。thread ID は記録時点で取得できず未記入）
+- worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-platform` / branch: `demo-t3/platform`
+  （開始 HEAD 06de61b（slot9 先端）・クリーンであることを確認してから着手）
+- 手順: fix-merge-conflicts スキル（最小・正確優先の手動解決とロックファイル再生成）。
+  レビューは T3 の delegate_task で codex_review（gpt-6.1-sol・reasoningEffort high）に
+  読み取り専用で依頼し「Approve」（指摘なし）。
+- 内容（merge コミット af3a35c とこの作業ログのコミット（記録）の2つに分ける）:
+  - 根拠: 開発リード指示「まず最新の main を取り込んで」。`git fetch origin main` で
+    origin/main = 5889ab8 を確認し `git merge main --no-edit`。
+  - コンフリクト5ファイル: mise.toml・mise.lock（UU）、scripts/demo-check/
+    {lib,loopback,selftest}.sh（AA）。main 側には Issue #143 の demo-check ポート版
+    （e3d1cc0・f0e497d。docs/worklogs/issue-143.md）が入っていた。
+  - demo-check 3ファイルは main 側を採用。blob 比較（各コミットの ls-tree）で
+    main 側が本ブランチの slot4〜9 修正（multi-bind の while ループ・root-escape 例外・
+    ACCEPTANCE モード等）をすべて保持した純追加上位互換（差分は #143 適応のみ:
+    開発用 crate 除外・`::bind` 関連付け関数形式への絞り込み・selftest ケース追加）と確認。
+    本ブランチ側にのみ存在した修正の喪失なし（レビューでも a) として検証済み）。
+  - mise.toml は main 側を採用: rust 1.96.0+wasm32 targets → 1.99.1+llvm-tools-preview。
+    wasm32 targets 宣言の削除は #143 の確定決定「移植しない（target/wasm32-*/ の走査は
+    存在するものだけ扱い）」に従う。加えて auto-merge が残した [tasks.demo-check]・
+    [tasks.demo-check-selftest] の二重定義（TOML パースエラーになる）を、旧 ours 側
+    ブロック（verify-static の後ろ）を削除して解消（残すのは main 側の新しい定義）。
+  - mise.lock は main 側をベースに `mise lock` で再生成（74 targets。手編集なし）。
+  - merge コミット af3a35c の pre-commit フック（hk）は trailing_whitespace・newlines・
+    typos・cargo_fmt・cargo_clippy・cargo_check 全部合格（rust 1.99.1 で cargo 成功）。
+- 検証（コマンドと exit code）:
+  - bash scripts/demo-check/selftest.sh → 0（130 passed, 0 failed。旧115からの増分は
+    #143 適応ケース。本 worktree のソースに対して全件合格）
+  - bash scripts/demo-check/run.sh → 1（loopback: crates/pelway-http/tests/edge.rs の
+    0.0.0.0 3件・leak-phrases: crates/pelway-llm の19件・external-refs: pelway-auth/llm
+    の17件・canary: 走査対象なし。いずれも main 由来ソースに対する main 版スクリプトの
+    挙動で、merge 解決に起因しない。旧ベースライン（exit 0・canary 49ファイル）との差は
+    走査対象が本ブランチのみ→main 全体に広がったことによる）
+  - DEMO_CHECK_ACCEPTANCE=1 bash scripts/demo-check/run.sh → 1（ACCEPTANCE MODE 表示あり。
+    canary は 7864 file 走査 0 hit で PASS — merge コミット時の cargo 成果物が mbx 実体に
+    あったため。failed: loopback leak-phrases external-refs）
+  - bash -n scripts/demo-check/*.sh → 0
+  - mise tasks（mise.toml のパースとタスク一意性確認）→ 0
+  - コンフリクトマーカー残存 grep（mise.toml・mise.lock・scripts/demo-check/）→ 0件
+  - shellcheck は未導入のため未実行
+- 未検証・未決:
+  - run.sh の3段静的違反（edge.rs・pelway-llm・pelway-auth のテスト内参照）を除外リストに
+    加えるかは未決（開発リード判断待ち。main の #143 除外リストは 17:56 確定事項のため
+    本枠では触れず現状維持 = 安全側）。demo-check はデモ受入前ゲート設計（#143 メモ:
+    クリーンな checkout では失敗し得る）のため、この失敗自体は設計と矛盾しない。
+  - ハンドオフ文書（/tmp/opencode/handoff-demo-check-slot6.md・sha256 e9ba044e…f0ae）の
+    「slot 6 レビュー本文（60f6b28..a5cc3f6）」は未受領。ただし main 側 #143 に slot4〜9
+    修正がすべて取り込まれたため、指摘の多くは対応済みで終わる可能性が高い。本文を受領
+    したら指摘ごとに「main 側で対応済みか」の突き合わせから始める。
+  - 前枠から繰り越しの未検証3点（loopback の本番待受確認・loopback.sh の did not advance
+    で exit 2 になる道・canary の実データ走査は ACCEPTANCE 実行で 7864 file 0 hit を確認
+    済みだが通常モードでの再確認は未実施）は本枠では手を付けていない。
