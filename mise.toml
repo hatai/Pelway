@@ -44,7 +44,7 @@ jactionlint = "2.5.0"
 # 経路。mise.lock が URL と checksum で取得物を固定する）。crates.io の同名
 # パッケージを cargo install するとソースビルドになるため使わない。
 # 出典: https://github.com/taiki-e/cargo-llvm-cov/releases/tag/v0.6.17
-"aqua:taiki-e/cargo-llvm-cov" = "0.6.17"
+"aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 # 依存クレートの脆弱性（RustSec）・ライセンス・重複・取得元の検査（cargo-deny）。
 # deny.toml が検査の設定を持ち、verify-static タスク（CI の static ジョブ）が
 # cargo deny check を実行する。crates.io の同名パッケージを cargo install すると
