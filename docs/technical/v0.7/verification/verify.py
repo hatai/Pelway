@@ -19,10 +19,15 @@ def anchors(p):
  return ids
 manifest=json.loads((V/'source-preservation.json').read_text())['files']
 changed=[];missing=[];copyerr=[];copies=0
+# 原本ツリー（/workspace/pelway-technical-docs）は原本作成環境にだけ存在する。
+# 無い環境（CI 等）では原本自体の存在・hash照合を not-run とし、リポジトリ内の
+# コピー（sources/）が manifest の hash と一致するかの照合だけを行う。
+origavail=Path('/workspace/pelway-technical-docs').is_dir()
 for name,h in manifest.items():
  p=Path(name)
- if not p.exists():missing.append(name)
- elif digest(p)!=h:changed.append(name)
+ if origavail:
+  if not p.exists():missing.append(name)
+  elif digest(p)!=h:changed.append(name)
  if '/delivery-v0.6/' in name:q=R/'sources/v0.6'/name.split('/delivery-v0.6/',1)[1]
  elif '/addenda/' in name:q=R/'sources/addenda'/name.split('/addenda/',1)[1]
  else:continue
@@ -30,6 +35,10 @@ for name,h in manifest.items():
  else:copies+=1
 zipold=Path('/workspace/pelway-technical-docs-v0.6.zip')
 expected='d00c771272000d529197b7dca16d1d16fe56b07e82c0d0e4b315da8e4e7c3927'
+# 凍結 ZIP は原本作成環境（/workspace）にだけ存在する。無い環境（CI 等）では
+# sha256 を null・check を not-run として記録し、失敗には数えない。ある環境では
+# 従来どおり照合し、不一致は失敗に数える。
+zipsha=digest(zipold) if zipold.is_file() else None
 md=sorted((R/'body').glob('*.md'))
 md += [R/n for n in ['README.md','source-correspondence.md','status.md','final-confirmation.md','reviews/disposition-v0.7.md','verification/report-v0.7.md'] if (R/n).exists()]
 links=[];linkerr=[];cache={}
@@ -65,8 +74,8 @@ for p in (R/'body').glob('*.md'):
  for bad in ['reason-cancel-requested','取り消し依頼済み','以後送信なし']:
   if bad in p.read_text():ui.append(str(p.relative_to(R))+': '+bad)
 reg=json.loads((V/'review-register.json').read_text())
-result={'checked_at_jst':datetime.datetime.now().astimezone().isoformat(),'original_files':len(manifest),'original_changed':changed,'original_missing':missing,'archive_copies_verified':copies,'archive_copy_errors':copyerr,'frozen_zip_sha256':digest(zipold),'frozen_zip_expected':expected,'current_markdown_files':len(md),'relative_links_checked':len(links),'relative_link_errors':linkerr,'original_sections':len(original),'original_sections_without_mapping':om,'current_sections':sum(map(len,cur.values())),'current_sections_without_mapping':cm,'correspondence_rows':len(rows),'duplicate_body_anchor_ids':dup,'latest_ui_regression_errors':ui,'runtime_tests':'not run','final_role_confirmation':reg['reviews'],'zip':'separate packaging check: /workspace/pelway-technical-docs-v0.7.zip.verify.json (outside ZIP to avoid self-reference)'}
-failed=bool(changed or missing or copyerr or linkerr or om or cm or dup or ui or digest(zipold)!=expected)
+result={'checked_at_jst':datetime.datetime.now().astimezone().isoformat(),'original_files':len(manifest),'originals_check':'not-run: originals absent' if not origavail else 'run','original_changed':changed,'original_missing':missing,'archive_copies_verified':copies,'archive_copy_errors':copyerr,'frozen_zip_sha256':zipsha,'frozen_zip_expected':expected,'frozen_zip_check':'not-run: archive absent' if zipsha is None else ('pass' if zipsha==expected else 'fail'),'current_markdown_files':len(md),'relative_links_checked':len(links),'relative_link_errors':linkerr,'original_sections':len(original),'original_sections_without_mapping':om,'current_sections':sum(map(len,cur.values())),'current_sections_without_mapping':cm,'correspondence_rows':len(rows),'duplicate_body_anchor_ids':dup,'latest_ui_regression_errors':ui,'runtime_tests':'not run','final_role_confirmation':reg['reviews'],'zip':'separate packaging check: /workspace/pelway-technical-docs-v0.7.zip.verify.json (outside ZIP to avoid self-reference)'}
+failed=bool(changed or missing or copyerr or linkerr or om or cm or dup or ui or (zipsha is not None and zipsha!=expected))
 result['static_pass']=not failed
 dump('relative-links.json',links);dump('static-checks.json',result)
 print(json.dumps({k:v for k,v in result.items() if k not in ['final_role_confirmation']},ensure_ascii=False,indent=2))
