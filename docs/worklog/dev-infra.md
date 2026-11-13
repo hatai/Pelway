@@ -473,3 +473,53 @@
     sha256 の検証は未実施）
   - 前枠から繰り越しの未検証3点（canary の実データ走査・loopback の本番待受確認・
     loopback.sh の did not advance で exit 2 になる道）は本枠では手を付けていない
+
+### 2026-11-13 第9枠・続（修正依頼7: 受入モードの目印ありケース。slot9-r1 should-fix。slot9-r2）
+- start: 2026-11-13 23:10 JST（目安）
+- stop:  2026-11-13 23:35 JST（目安。記録時点）
+- glm: long（T3 Code / OpenCode・zai-coding-plan/glm-5.3。thread ID は記録時点で取得できず未記入）
+- worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-platform-slot9` / branch: `demo-t3/platform-slot9`
+  （第9枠と同じ worktree で継続。開始 HEAD 06de61b・クリーンを確認）
+- 手順: tdd（テストを先に書く → GREEN → わざと壊して RED → 復元 → GREEN）。
+- レビュー（slot9-r1）: ユーザー指示により T3 の delegate_task で自分と同じモデル
+  （opencode / zai-coding-plan/glm-5.3・新鮮なコンテキスト）をレビュアーとして起動し
+  858e4dd..06de61b をレビュー。結果: must-fix 0・should-fix 1・nit 2。
+  - should-fix: 受入モードの「目印あり → exit 1」個別ケースが無い。目印検出ケースは従来
+    すべて通常モード実行で、レビューアーが受入モード限定で canary.sh の hits を 0 にする壊しを
+    実証し、selftest が 121 passed, 0 failed のまま検出できないことを確認（worklog 未記載の新指摘）。
+  - nit 1: 単独呼び出しケースの `! grep -q "PASS"` は実質空振り（"PASS" は run.sh の出力）。無害。
+  - nit 2: 新ケースの判定式は通常モード0件ケースとほぼ同一。既存スタイルには合致。
+  - レビューの検証で worklog 記載の検証コマンド・件数がすべて再現したこと、変更が2ファイルのみ・
+    コミット分割が適切であることも確認済み。レビュー時点で worktree はクリーン。
+- 内容（コミット（修正）・この作業ログのコミット（記録）の2つに分ける）:
+  - 修正（selftest.sh のみ。canary.sh・run.sh・lib.sh は無変更。+12行）:
+    - 受入モードの canary 個別ケースに「目印あり」の単独ケースを追加。logs/app.log の2行目に
+      API-key 目印を置き、run_stage に DEMO_CHECK_ACCEPTANCE=1 を引数で明示的に渡して canary.sh
+      単独で回し、exit 1 と「logs/app.log:2: canary PELWAY_CANARY_APIKEY_9c21」の報告を確認。
+    - 新ケースには `! grep -q "PASS"` を付けない（レビュー nit 1 が「canary.sh 単独呼び出しでは
+      空振り」と指摘したため、新規コードには書かない。既存ケースの同チェックは無害なのでそのまま）。
+    - ヘッダコメントに slot9-r2 の1項目を追記。selftest.sh は 121 → 122 ケース。
+  - わざと壊しての検出確認（レビューアーの実証と同じ壊し）:
+    - canary.sh の目印集計直後（最終 echo の直前）に
+      `[ "${DEMO_CHECK_ACCEPTANCE:-}" = "1" ] && hits=0` を一時挿入し、
+      `bash scripts/demo-check/selftest.sh` を実行 → exit 1（121 passed, 1 failed）。
+      落ちたケースは追加した単独ケースのみ
+      「canary: ACCEPTANCE marker hit must fail alone (exit 0)」（直接検出）。
+      他ケース（0件ケース・通常モード目印ケース・run.sh 系）は影響なし。
+    - 確認後、canary.sh を元に戻し、`git diff --stat` と `git status --short` が両方空であることを確認。
+- 検証（コマンドと exit code）:
+  - bash scripts/demo-check/selftest.sh（修正後）→ 0（122 passed, 0 failed）
+  - DEMO_CHECK_ACCEPTANCE=1 bash scripts/demo-check/selftest.sh（修正後）→ 0（122 passed, 0 failed）
+  - わざと壊し（canary.sh 一時変更）→ 1（121 passed, 1 failed。上記1ケース。
+    確認後に復元し差分なしを確認）
+  - bash scripts/demo-check/run.sh → 1（full run。failed: canary。仕様どおり）
+  - bash -n scripts/demo-check/selftest.sh canary.sh → 0
+  - shellcheck は未導入のため未実行（Issue #265 で追跡）
+- 統合（第9枠の続きとして実施）:
+  - origin/demo-t3/platform を push 済み（06de61b）。demo-t3/platform は別 worktree で
+    チェックアウト中のため本 worktree からは更新できず、PR は同一線上の
+    demo-t3/platform-slot9（本修正込み）から main へ出す。
+  - 未検証・未決の細かい残件は Issue #262〜#265 に起票済み（ready-for-agent）。
+- 未検証・未決:
+  - loopback の runtime 検査は未実装（PENDING のまま。次枠候補。デモ起動方法の決定が前置き）
+  - レビュー nit 2件は無害として対処せず（本枠では新規コードに伝播させない対応のみ）
