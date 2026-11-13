@@ -12,7 +12,7 @@ Grok Bot は Issue を実装スレッドとレビュースレッドに割り振�
 | してよいこと | 方法 |
 |---|---|
 | スレッドを立てる・指示を送る・様子を見る | T3 Connect の MCP（`t3 thread start` / `send` / `show` / `list` と同じ操作） |
-| ラベルを付け外しする（`ready-for-agent`、`agent:working`、`needs-human`） | GitHub |
+| ラベルを付け外しする（`ready-for-agent`、`agent:working`、`agent:devin`、`needs-human`） | GitHub |
 | Issue にコメントする | GitHub |
 | PR を Projects ボード `Pelway agent team`（https://github.com/users/hatai/projects/7）に載せる | GitHub |
 | Issue・PR・レビュー・CI の結果を読む | GitHub |
