@@ -129,7 +129,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 | 行 | 確かめること |
 |---|---|
-| `pr:` | `scripts/agent-gh dev pr view <番号> --json author,isDraft,headRefName` で、作成者が `app/pelway-dev`、ブランチが `agent/<Issue 番号>-` で始まる |
+| `pr:` | `scripts/agent-gh dev pr view <番号> --json author,isDraft,headRefName` で、作成者が `app/pelway-dev`、ブランチが `agent/<Issue 番号>-` で始まる。調査スレッドの報告の PR のときは、作成者が `app/pelway-dev` で Draft であり、ブランチが `agent/investigate-` で始まる |
 | `verify:` | PR のチェック `mise run verify` の結果 |
 | `pr-size:` | PR のチェック `pr-size` の結果 |
 | `memo:` | PR の変更ファイルに `docs/worklogs/issue-<Issue 番号>.md` があり、報告の round の「実装者メモ」が 5 項目そろっている。止まった場合は Issue のコメントに実装者メモがある |

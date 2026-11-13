@@ -98,7 +98,8 @@ ls docs/worklogs/bugs
 報告ファイル（と同じディレクトリの証拠）だけの Draft PR を出す（skill `write-pull-request`。
 ブランチは `agent/investigate-<slug>`、本文の `Implementer:` の行には指示の 2 行目
 `Assigned: role=investigate ...` の値を `role=investigate` を除いて写す）。追い調査では
-同じブランチに積んで push する（Draft PR が更新される）。脆弱性の疑いで止めた調査では、
+同じブランチに積んで push する（Draft PR が更新される）。スレッドの返答には、上の報告に
+`pr: <報告の PR 番号>` の行を添える。脆弱性の疑いで止めた調査では、
 この PR を出さない。
 
 ## 引き渡し（実装は別工程）

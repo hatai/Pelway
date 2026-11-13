@@ -75,3 +75,11 @@
 3. 仮定と解釈: (a) 「起票しないときもマージする」を、起票の可否から独立した 1 項（command-team「調査の引き渡し」）として明示した（選ばなかった解釈: round 1 どおり「直す必要がないとき」の項に畳み込む。判断の前後関係が読み取れなくなるため）。(b) Approve 後の報告 PR の Draft 解除は実装スレッドと同じ扱い（調査スレッドに行わせる）と解釈し、runbook の調査スレッドの段落に書いた。(c) Issue の「関連情報」は round 1 同様の 2 点（報告のパスと調査スレッドのリンク）に戻した（hatai の判断の記録がこの形を述べているため）。
 4. 足りなかった情報・検証手段: 報告の Draft PR の本文形式（skill `write-pull-request` の見出しのうち報告に不要なもの、`Closes #<N>` を書かないこと）は判断にも Issue #249 にも指定が無く、investigate-bug は skill `write-pull-request` の参照だけを書いた
 5. 改善案: `.agents/skills/write-pull-request/SKILL.md` の「本文の構成」に報告 PR の注記（クローズする Issue が無いため `Closes` 行を書かない等）を足す（別 Issue）
+
+## 実装者メモ（round 5）
+
+1. 詰まった箇所: docs/agents/grokbot-runbook.md の「5. 報告行の扱い」: `memo:` 行（`docs/worklogs/issue-<Issue 番号>.md` の確認）も報告 PR には当てはまらないが、investigate-bug の返答に `memo:` 行は無い（6 項目の報告のみ）なので検証も発生せず、must-fix の指摘する `pr:` 行のみを直した
+2. 曖昧だった文: 「`agent/investigate-` の報告 PR も検証できる分岐を追加し、作成者・Draft 状態・ブランチ接頭辞を確認してください。」（PR #250 レビュー本文 must-fix）
+3. 仮定と解釈: (a) 報告 PR の検証には実装 PR と同じコマンド（`pr view --json author,isDraft,headRefName`）で足りると解釈し、表の `pr:` 行に条件文を追記した（選ばなかった解釈: `pr:`（調査の報告）として行を分ける。実装の行との対応が読みにくくなるため）。(b) must-fix の前提（調査担当が `pr:` 行を返す）は runbook 3「調査を始める」に書かれているのに investigate-bug が返答への `pr:` 行を指示していなかったため、手順 5 に「`pr: <報告の PR 番号>` の行を添える」の 1 文を足した（選ばなかった解釈: runbook だけ直す。検証対象の行が返答に現れず、手順が実行不能のまま残るため）
+4. 足りなかった情報・検証手段: `agent/investigate-` ブランチの実 PR に対する `pr view --json author,isDraft,headRefName` の動作確認。`scripts/conductor-watch.sh` が `agent/` の PR を監視しているため、検証用の PR を立てると指揮役の巡回に紛れ込み、文書の grep による確認のみ行った
+5. 改善案: `.agents/skills/investigate-bug/SKILL.md` の「5. 報告して止まる」に、返答の末尾を runbook 5 の報告行形式（`pr:` と、PR を出した場合は `verify:`・`pr-size:`）にそろえる旨を書く（今回は must-fix の前提の `pr:` 行のみ足した）
