@@ -523,3 +523,47 @@
 - 未検証・未決:
   - loopback の runtime 検査は未実装（PENDING のまま。次枠候補。デモ起動方法の決定が前置き）
   - レビュー nit 2件は無害として対処せず（本枠では新規コードに伝播させない対応のみ）
+
+### 2026-11-13 第9枠・続2（PR #270 の競合解消と CodeQL 失敗の調査）
+- start: 2026-11-13 23:40 JST（目安）
+- stop:  2026-11-13 23:55 JST（目安。記録時点）
+- glm: long（T3 Code / OpenCode・zai-coding-plan/glm-5.3。thread ID は記録時点で取得できず未記入）
+- 経緯: PR #270（demo-t3/platform-slot9 → main）で CodeQL の "Analyze (actions)" が失敗し、
+  main と競合した旨の通知が T3 Code から届いた。
+- CodeQL 失敗の調査:
+  - エラーは「CodeQL could not process any code written in GitHub Actions」。当 PR はワークフロー
+    ファイルを一切変更しないため、actions 抽出の対象が空のまま finalize で落ちている。
+  - 直近の他 PR（#258/#260/#261/#268）は成功。#260/#261/#251/#250 は .github 無変更でも成功しており、
+    refs/pull/<N>/head の解析も同じ。#270 だけの違いは「競合で merge ref が作れない＋merge-base が
+    古い（f32ca74）」こと。競合解消で merge-base が最新 main に寄るため、再実行で直るかを見る。
+- 競合の正体: main に当作業ラインの移植（e3d1cc0「port demo-check stages」・f0e497d「add demo-check
+  selftest」＝Issue #143。06de61b 相当＋移植適合）がすでに入っていた。
+  - main 側の適合: lib.sh に除外追加（crates/dev-*・pelway-agent-watch・pelway-client-ui/tokens・
+    pelway-http/tests/http.rs）、loopback.sh の bind 検出を ::bind("...") 形式に絞る（sqlx 等の
+    メソッド形式 .bind を除外）、selftest に移植分のケース追加（121 → 130 ケース）。
+  - mise.toml には demo-check / demo-check-selftest タスクあり（script-test から selftest を呼ぶ）。
+- 解消（マージコミット cae8760）:
+  - mise.toml / mise.lock: main 側を採用。demo-check タスクは main に既存。当ラインの slot1 の
+    rust wasm32 ターゲット追加は main の移植で採用されなかったため再追加しない（demo-check の
+    実行に不要。selftest は合成ツリーで完結）。
+  - scripts/demo-check/lib.sh / loopback.sh: main 側を採用（移植適合込み。slot7 修正も保持）。
+  - scripts/demo-check/selftest.sh: main 側（130 ケース）を土台に slot9-r2 の差分
+    （ヘッダ1行＋目印あり単独ケース）のみ再適用 → 131 ケース。
+  - マージ後の main との差分は selftest.sh +12 行と作業ログのみ（+537 行。pr-size 上限 800 内）。
+- 検証（コマンドと exit code）:
+  - bash scripts/demo-check/selftest.sh → 0（131 passed, 0 failed）
+  - DEMO_CHECK_ACCEPTANCE=1 bash scripts/demo-check/selftest.sh → 0（131 passed, 0 failed）
+  - bash scripts/demo-check/run.sh → 1（4段階とも FAIL。違反はすべて main 由来のファイル
+    （pelway-http/tests/edge.rs の all-interfaces、pelway-llm の APIキー識別子と sk- 形）で、
+    main の移植時点からの既存状態。main の CI が呼ぶのは selftest（script-test 経由）で run.sh ではない）
+  - マージコミットの pre-commit フック: trailing_whitespace / newlines / typos / cargo check /
+    cargo clippy / cargo fmt すべて通過（main の mise が rust 1.99.1 を要求したため mise install で導入）
+  - bash -n scripts/demo-check/*.sh → 0
+- その他の対応:
+  - 作業ログを main の規約（AGENTS.md「Worklogs live under docs/worklogs/」）に合わせて
+    docs/worklog/dev-infra.md → docs/worklogs/dev-infra.md へ移動。
+  - 以後の GitHub 操作（push・PR 編集）は main の新 AGENTS.md の規則に従い scripts/agent-gh dev 経由で行う。
+- 未検証・未決:
+  - CodeQL "Analyze (actions)" が競合解消で再実行されて通るかは push 後の確認待ち
+  - main のフルツリーで run.sh が4段階とも失敗する状態は main 側の既存問題（Issue #143 の移植の
+    範囲外）。当 PR では対処しない
