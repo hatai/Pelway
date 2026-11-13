@@ -35,3 +35,7 @@ scripts/ja-fts-bench/work/
 # pgBackRest 検証（Issue #101）の作業ディレクトリ（設定・チェック結果・
 # 削除記録。再生成は scripts/pgbackrest-verify/verify.sh で行う）
 scripts/pgbackrest-verify/work/
+
+# カバレッジ計測（cargo llvm-cov --lcov）のローカル検証生成物（#157。
+# .github/workflows/verify.yml の coverage ジョブと同じ引数で出力する）
+lcov.info
