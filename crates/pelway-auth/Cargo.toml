@@ -16,8 +16,11 @@ serde_json = "1"
 
 [dev-dependencies]
 chrono = "0.4"
-rand = "0.8"
-rsa = "0.9"
+rand = "0.10"
+# getrandom feature で rsa::rand_core::OsRng（OS 乱数源）が使える。
+# rand 0.10 の ThreadRng は rand_core 0.10 系で、rsa 0.9 の rand_core 0.6
+# の CryptoRngCore とは互換がないため、鍵生成には OsRng を渡す。
+rsa = { version = "0.9", features = ["getrandom"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt"] }

@@ -2,7 +2,6 @@
 //
 // この回では slint への依存を足さないため、このファイルは未コンパイル・未検証。
 // 段階B（別指示）で依存に足してコンパイルする。
-//
 // 部品の並びはデスクトップのモック（docs/ui-mocks/csv.html・csv_dark.html、
 // 試作モック・暫定承認 11/8・最終承認は未）を参考にした「枠と並びだけ」:
 // 左の列（rail）・上の帯・「今日」の画面・チャンネルの画面・右の枠（スレッド・AIの作業）・
@@ -20,6 +19,9 @@
 // - accessible-role / accessible-label による読み上げは段階Bで付ける（この回では未実装）。
 //   AccessKit を組み込んだだけで読み上げが合格したとは言わない。NVDA・VoiceOver・Orca
 //   での確認は未検証。
+
+// Slint の attribution widget（About ダイアログの中で使う。Issue 237）。
+import { AboutSlint } from "std-widgets.slint";
 
 // デザイントークン。名前だけ。テーマごとの値は Rust 側から設定する
 // （out のグローバルは Rust から値を渡せないため in-out にする。初期値は置かない）。
@@ -1289,6 +1291,68 @@ component AiWorkPaneView inherits Rectangle {
     }
 }
 
+// ---- About のダイアログ（Slint の attribution） ----
+
+// Slint Royalty-free License 2.0 §2 (a) の attribution（Issue 237）: AboutSlint widget
+// を、トップレベルメニューから到達できる About 画面/ダイアログに表示する。
+// Splash Screen と公開ページの badge は使わない（Issue 237 の「採用する方式」）。
+// 文言は Rust が Fluent から引いて tr-* で渡す。色は DesignTokens だけ。
+component AboutDialogView inherits Rectangle {
+    in property <string> tr-about-title;
+    in property <string> tr-about-close;
+    callback close-pressed();
+    // 背景の幕。トークンの色に opacity を掛けるだけ（色の値は書かない）。
+    Rectangle {
+        background: DesignTokens.bg;
+        opacity: 0.72;
+    }
+    VerticalLayout {
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            // カード
+            Rectangle {
+                width: 320px;
+                background: DesignTokens.tile;
+                border-radius: 20px;
+                VerticalLayout {
+                    padding: 24px;
+                    spacing: 16px;
+                    Text {
+                        text: root.tr-about-title;
+                        color: DesignTokens.ink;
+                        font-size: 18px;
+                        font-weight: 600;
+                    }
+                    // Slint の attribution widget（"Made with Slint" の badge と版・URL）。
+                    AboutSlint {}
+                    // 閉じる（主操作）。既存の主ボタンと同じ重ね方で TouchArea を置く。
+                    Rectangle {
+                        height: 36px;
+                        border-radius: 18px;
+                        background: DesignTokens.primary-bg;
+                        HorizontalLayout {
+                            padding-left: 16px;
+                            padding-right: 16px;
+                            Text {
+                                text: root.tr-about-close;
+                                color: DesignTokens.primary-fg;
+                                font-size: 14px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                                horizontal-alignment: center;
+                            }
+                        }
+                        ta := TouchArea {
+                            clicked => { root.close-pressed(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ---- 画面全体 ----
 
 export component MainWindow inherits Window {
@@ -1341,11 +1405,19 @@ export component MainWindow inherits Window {
     in property <string> tr-pane-ai-note;
     in property <string> tr-thread-input-placeholder;
     in property <string> tr-composer-placeholder;
+    // トップレベルメニューと About ダイアログ（Slint の attribution、Issue 237）
+    in property <string> tr-menu-help;
+    in property <string> tr-menu-about;
+    in property <string> tr-about-title;
+    in property <string> tr-about-close;
 
     // 表示の切替（骨組みでは Rust から切り替える）。
     in property <bool> show-today: true;
     in property <bool> show-right-pane: true;
     in property <bool> right-pane-ai-work: false;
+    // About ダイアログの表示。トップレベルメニューの項目から開き、「閉じる」で
+    // 閉じる（Slint 側で書き、Rust からも読むため in-out）。
+    in-out property <bool> show-about: false;
 
     // 合成データ（モックの架空の会社名・人名のみ）。
     in property <string> data-org-name;
@@ -1441,6 +1513,18 @@ export component MainWindow inherits Window {
     callback view-work-pressed();
 
     background: DesignTokens.bg;
+    // トップレベルメニュー。About ダイアログへの到達経路（Issue 237）。Window の中に
+    // 1つだけ置ける（Slint の決まり）。プラットフォームによって描かれ方が変わる
+    // （macOS では画面上部のネイティブメニューになる）。
+    MenuBar {
+        Menu {
+            title: root.tr-menu-help;
+            MenuItem {
+                title: root.tr-menu-about;
+                activated => { root.show-about = true; }
+            }
+        }
+    }
     HorizontalLayout {
         padding: 20px;
         spacing: 16px;
@@ -1616,5 +1700,11 @@ export component MainWindow inherits Window {
             data-log2-text: root.data-ai-work-log2-text;
             back-pressed => { root.back-to-thread-pressed(); }
         }
+    }
+    // About のダイアログ（メニューの項目で開く）。内容の上に重ねる。
+    if root.show-about : AboutDialogView {
+        tr-about-title: root.tr-about-title;
+        tr-about-close: root.tr-about-close;
+        close-pressed => { root.show-about = false; }
     }
 }

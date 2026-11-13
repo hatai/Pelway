@@ -35,7 +35,7 @@
 
 | ID | 論点と推奨 | 代替/条件 | 未検証・阻害と確認方法 |
 |---|---|---|---|
-| A1 | Rust非WebViewのSlint GUI | eguiとTauri＋Octane（+React。Webと画面を共有）を同条件の比較対象。GPUI/icedは現時点の読み上げ制約から主候補にしない | 固定版のlicense、IME、長文選択、NVDA/VoiceOver/Orca、大量可変高リスト。Slint issueを再現し測定する |
+| A1 | Rust非WebViewのSlint GUI | eguiとTauri＋Octane（+React。Webと画面を共有）を同条件の比較対象。GPUI/icedは現時点の読み上げ制約から主候補にしない | 固定版のlicense、IME、長文選択、NVDA/VoiceOver/Orca、大量可変高リスト。Slint issueを再現し測定する。Royalty-free 2.0 の利用条件は [docs/research/slint-royalty-free-license.md](../../../research/slint-royalty-free-license.md) を要件とし、attribution 表示は #237 で実装する |
 | A2 | WebはTypeScript/Octane/DOM、状態と同期はRust/WASM | 全TS coreも比較可能。UI部品は共有しない | WASM起動/サイズと型生成維持費。Octaneはbeta版（npm最新0.16.7）のため固定版・コンパイラ・実DOMのIME/読み上げ/描画を確認。Web32〜62h＋native58〜112hは部品の部分概算だけ。試験/修正/連携は未見積もり |
 | A3 | Rust tokio/axum＋sqlx/PostgreSQL、ローカル添付 | クラウド型backendを既定にしない | 会社境界、権限、復旧、transaction/配信の整合を合成データで確認 |
 | A4 | seq/client_msg_id、workspace commit順cursor、snapshot再同期 | 04の行lock方式は小規模初版案。負荷増時の代替は将来 | 遅延commit、cursor失効、取消後cache消去、二重送信/承認の競合を試す |
