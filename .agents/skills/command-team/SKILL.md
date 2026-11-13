@@ -21,12 +21,14 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 
   ```
   Issue #<N> を実装する。skill implement-issue に従う。
-  Assigned: role=implement agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>
+  Assigned: role=implement agent=<opencode|devin> model=<モデル名> effort=<effort>
   ```
+
+  実装の値は、opencode なら `model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>`、devin なら `model=swe-2-high effort=<medium|high|max>`（effort の値は `thought_level` に写す）にする。
 
   ```
   PR #<M> をレビューする。skill review-pr に従う。
-  Assigned: role=review agent=<codex|claude> model=<モデル名> effort=<low|medium|high|xhigh|max>
+  Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort>
   ```
 
   ```
@@ -108,9 +110,11 @@ PR や Issue に手を付けるときは、最初に対象 Issue の受け入れ
 | 条件 | モデル・effort |
 |---|---|
 | 定型・小規模（Issue の規模の見積もりが小、変更が文書・設定・テストだけ） | opencode `zai-coding-plan/glm-5.3`、variant `low` |
-| 通常 | opencode `zai-coding-plan/glm-5.3`（variant 指定なし） |
-| コア部分（`crates/pelway-contract`、承認・状態遷移・権限）、`unsafe` を含む・含みうる変更 | opencode `zai-coding-plan/glm-5.3`、variant `high` |
-| 同じ Issue の修正の指示が 2 回を超えた（3 回目の修正に入る）。数えるのは、レビューの本物の must-fix に基づく指示だけ（分割計画が無い時期の誤判定や、再起動による自動の再開は数えない） | `t3_thread_configure` で variant を 1 段上げる（`low`→通常→`high`→`max`）。`max` でも直らなければモデルを替える。Issue に理由をコメントする |
+| 通常（仕様が固まった実装） | GLM と Devin CLI の空いている方。同時に空いていれば Devin CLI を優先する（`acpRegistry_devin`、`swe-2-high`、`thought_level=high`）。GLM なら variant 指定なし |
+| 曖昧で長い調査・デバッグ系の Issue | opencode `zai-coding-plan/glm-5.3` |
+| 「Devin CLI のハーネスごと任せる」チケット（人間が Issue で明示するか、指揮役が「実装スレッドの枠組みでは進めにくい自律作業」と判断したもの。例: 環境構築を伴う検証、複数リポジトリにまたがる調査） | Devin CLI（`acpRegistry_devin`、`swe-2-high`）。Issue に `agent:devin` を付ける |
+| コア部分（`crates/pelway-contract`、承認・状態遷移・権限）、`unsafe` を含む・含みうる変更 | GLM なら variant `high`、Devin CLI なら `thought_level=max` |
+| 同じ Issue の修正の指示が 2 回を超えた（3 回目の修正に入る）。数えるのは、レビューの本物の must-fix に基づく指示だけ（分割計画が無い時期の誤判定や、再起動による自動の再開は数えない） | `t3_thread_configure` で variant または `thought_level` を 1 段上げる（GLM: `low`→通常→`high`→`max`。Devin CLI: `medium`→`high`→`max`）。`max` でも直らなければ Devin CLI の `swe-2-high`（`thought_level=max`）に替える。Issue に理由をコメントする |
 | 同じ Issue の修正の指示が 3 回を超えた（4 回目の修正に入る）。数え方は上の行と同じ | 修正を出さずにエスカレーション（runbook 6） |
 
 runbook と仕様の `round`（スレッドの実行回数）は、誤判定や再起動による再開でも増える。指揮役は `round` を目安にとどめ、effort の引き上げとエスカレーションは上の表の「修正の指示の回数」で判断する。
@@ -119,14 +123,17 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 | 条件 | レビュー担当 |
 |---|---|
-| 通常 | Codex（`codex_review`、`gpt-6-luna`） |
-| 高リスク: `unsafe`、セキュリティの境界（認証・権限・承認・秘密情報・ネットワーク）、`.github/workflows/` の変更、pr-size の追加行が 400 を超える | Codex と Claude（`claude_review`）の両方 |
-| 抜き取り | 通常の PR の 4 本に 1 本は Claude も付ける（見落とし率の測定のため） |
+| 通常 | Codex（`codex_review`、`gpt-6-luna`）と Devin CLI（`acpRegistry_devin`、`swe-2-high`）を交互に割り当てる |
+| 高リスク: `unsafe`、セキュリティの境界（認証・権限・承認・秘密情報・ネットワーク）、`.github/workflows/` の変更、pr-size の追加行が 400 を超える | Codex・Claude（`claude_review`）・Devin CLI の 3 人 |
+| 抜き取り | 通常の PR の 4 本に 1 本は Claude も付ける（Codex・Devin CLI の見落とし率の測定のため） |
 
+- Devin CLI が実装した PR には Devin CLI のレビューを付けない。ローテーションで Devin CLI の番が来ても Codex に回し、高リスクの PR でも Devin CLI の枠は外す。
+- Devin CLI のレビュー担当は、`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまで使わない。済むまでは通常は Codex、高リスクは Codex と Claude で回す。
+- Devin CLI のレビュースレッドでは、effort の値を `thought_level` に写す。
 - Claude のレビュー担当は、`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまで使わない。済むまでは Codex だけで回し、高リスクの PR は人間に知らせる。
-- 段階移行: 抜き取りの実施が 10 件に達するか、抜き取りの開始から 4 週間が経つか、どちらか早い方になったら、初回の見落とし率を集計する（定義は手順 4 の「Codex の見落とし」）。その集計をもって高リスク PR の二重レビュー（Codex と Claude の両方）を有効化し、有効化したことと集計結果を指揮役の作業ログに記録する。二人体制は段階的に有効化し、まず抜き取りから始める。抜き取りの実施件数は「割り当ての記録」の表で数え、集計のときに作業ログに残す。
+- 段階移行: 抜き取りの実施が 10 件に達するか、抜き取りの開始から 4 週間が経つか、どちらか早い方になったら、初回の見落とし率を集計する（定義は手順 4 の「Codex・Devin CLI の見落とし」）。その集計をもって高リスク PR の複数レビュー（Codex と Claude、確認済みなら Devin CLI も）を有効化し、有効化したことと集計結果を指揮役の作業ログに記録する。複数体制は段階的に有効化し、まず抜き取りから始める。抜き取りの実施件数は「割り当ての記録」の表で数え、集計のときに作業ログに残す。
 - effort は、追加行が 200 以下で高リスクでなければ既定、それ以外は `high`。同じ PR の 2 回目以降のレビューは 1 段上げる。
-- Codex と Claude の判定が割れたら（片方が approve、片方が request-changes）、マージせずに Issue に両方の要点をコメントし、`needs-human` を付ける。
+- 複数のレビュー担当を付けた PR で判定が割れたら（approve と request-changes が混ざったら）、マージせずに Issue にそれぞれの要点をコメントし、`needs-human` を付ける。
 
 ### レビュー待ちの滞留
 
@@ -190,7 +197,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 ### 利用上限で止まったとき
 
-実装スレッドやレビュースレッドが理由を残さずに `failed` になったら、`t3_thread_read`（`view: activity`）で error の項目を読む。「Usage limit reached」（GLM の 5 時間あたりの上限など）なら、Issue の中身の失敗ではないので、runbook の「2 回目の `failed` でエスカレーション」に数えない。リセット時刻まで新しいスレッドを立てるのを止め、リセット後に小さな試験のスレッドで使えることを確かめてから、止まったスレッドに「続きをやり直す」を送る。
+実装スレッドやレビュースレッドが理由を残さずに `failed` になったら、`t3_thread_read`（`view: activity`）で error の項目を読む。「Usage limit reached」（GLM の 5 時間あたりの上限、Devin のプランの上限など）なら、Issue の中身の失敗ではないので、runbook の「2 回目の `failed` でエスカレーション」に数えない。リセット時刻まで新しいスレッドを立てるのを止め、リセット後に小さな試験のスレッドで使えることを確かめてから、止まったスレッドに「続きをやり直す」を送る。
 
 ## 3. エスカレーション
 
@@ -198,7 +205,7 @@ runbook 6 の手順に従う。人間に上げる前に、手順 2 の「effort 
 
 ## 4. 改善ループ
 
-改善の対象は、指揮役のセッションだけでなく、実装担当（opencode＋GLM）とレビュー担当（Codex、Claude）の両側。
+改善の対象は、指揮役のセッションだけでなく、実装担当（opencode＋GLM、Devin CLI＋SWE-2）とレビュー担当（Codex、Devin CLI、Claude）の両側。
 
 ### 材料を集める
 
@@ -207,7 +214,7 @@ runbook 6 の手順に従う。人間に上げる前に、手順 2 の「effort 
 | 実装者メモ（一次情報） | `docs/worklogs/issue-<N>.md` の「実装者メモ」、止まったときは Issue のコメント |
 | 実装セッションの記録 | `t3 thread show <thread>`。圧縮のやり直し、ループ、誤読、取りこぼしを見る |
 | レビューの指摘・差し戻し | PR の `pelway-review` のレビュー本文 |
-| Codex の見落とし | 抜き取りで付けた Claude のレビューが、Codex の approve の後に must-fix を出したもの |
+| Codex・Devin CLI の見落とし | 抜き取りで付けた Claude のレビューが、Codex・Devin CLI の approve の後に must-fix を出したもの |
 | 指揮役の学び | 指揮役の作業ログ（`docs/worklogs/`） |
 
 ### 裏取りする
@@ -225,9 +232,9 @@ runbook 6 の手順に従う。人間に上げる前に、手順 2 の「effort 
 
 ### 効果を測る
 
-- 変更の効果は、Claude の挙動だけでなく GLM の成果物で測る。基準は、同じ種類のレビュー指摘・差し戻しの減少。
-- Claude では効いても GLM で効かなかった文言は「共有スキルとして未達」とし、モデルの差を前提に書き直す（例: 抽象的な原則より、手順と具体例と禁止事項で書く）。
-- Codex の見落とし率 = 抜き取りで Claude が must-fix を出した PR の数 ÷ 抜き取りの PR の数。改善ループの材料にし、同時数の上限の見直しにも使う。
+- 変更の効果は、Claude の挙動だけでなく GLM と SWE-2 の成果物で測る。基準は、同じ種類のレビュー指摘・差し戻しの減少。
+- Claude では効いても GLM・SWE-2 で効かなかった文言は「共有スキルとして未達」とし、モデルの差を前提に書き直す（例: 抽象的な原則より、手順と具体例と禁止事項で書く）。
+- レビュー担当ごとの見落とし率 = 抜き取りで Claude が must-fix を出した PR の数 ÷ 抜き取りの PR の数（Codex 担当分と Devin CLI 担当分で分けて数える）。改善ループの材料にし、同時数の上限の見直しにも使う。
 
 ### 棚卸しする
 

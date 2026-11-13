@@ -12,7 +12,7 @@ Grok Bot は Issue を実装スレッドとレビュースレッドに割り振�
 | してよいこと | 方法 |
 |---|---|
 | スレッドを立てる・指示を送る・様子を見る | T3 Connect の MCP（`t3 thread start` / `send` / `show` / `list` と同じ操作） |
-| ラベルを付け外しする（`ready-for-agent`、`agent:working`、`needs-human`） | GitHub |
+| ラベルを付け外しする（`ready-for-agent`、`agent:working`、`agent:devin`、`needs-human`） | GitHub |
 | Issue にコメントする | GitHub |
 | PR を Projects ボード `Pelway agent team`（https://github.com/users/hatai/projects/7）に載せる | GitHub |
 | Issue・PR・レビュー・CI の結果を読む | GitHub |
@@ -27,8 +27,10 @@ Grok Bot は Issue を実装スレッドとレビュースレッドに割り振�
 
 | スレッド | 同時に動かす上限 | 数え方 |
 |---|---|---|
-| 実装・調査（opencode `zai-coding-plan/glm-5.3`） | 3 | `agent:working` が付いていて、PR が Ready for review になっていない Issue の数と、実行中の調査スレッドの数の合計 |
+| 実装・調査（opencode `zai-coding-plan/glm-5.3`） | 3 | `agent:working` が付いていて、PR が Ready for review になっていない Issue のうち、対応スレッド（ブランチ `agent/<N>-`）の `providerInstanceId` が `opencode` のものの数と、実行中の調査スレッドの数の合計 |
+| 実装（Devin CLI `swe-2-high`） | 6 | `agent:working` が付いていて、PR が Ready for review になっていない Issue のうち、対応スレッドの `providerInstanceId` が `acpRegistry_devin` のものの数 |
 | レビュー（Codex `codex_review`） | 2 | 実行中（`running`）の Codex のレビュースレッドの数 |
+| レビュー（Devin CLI） | 2 | 実行中の Devin CLI のレビュースレッドの数。`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまでは 0 |
 | レビュー（Claude `claude_review`） | 1 | 実行中の Claude のレビュースレッドの数。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは 0 |
 
 上限に達しているときは新しいスレッドを立てない。空きが出たら、待っているものを次の順で始める。
@@ -43,14 +45,21 @@ Grok Bot は Issue を実装スレッドとレビュースレッドに割り振�
 
 `ready-for-agent` の付いた Issue があり、実装の枠が空いているとき。
 
-1. Issue から `ready-for-agent` を外し、`agent:working` を付ける
+1. Issue から `ready-for-agent` を外し、`agent:working` を付ける。Devin CLI に割り当てるときは `agent:devin` も付ける
 2. 実装スレッドを立てる
 
 ```
 t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree main --branch agent/<N>-<slug> --title "[実装] #<N> <要約>" <Pelway のパス> "Issue #<N> を実装する。skill implement-issue に従う。"
 ```
 
-`<slug>` は Issue の題名を英小文字とハイフンで 3〜5 語にしたもの。effort（opencode の variant）は skill `command-team` の「実装のモデルと effort」で決め、MCP の `t3_thread_launch` で立てるときは `modelSelection.options` に入れる。
+Devin CLI に割り当てるときは次で立てる。
+
+```
+t3 thread start --provider acpRegistry_devin --model swe-2-high --worktree main --branch agent/<N>-<slug> --title "[実装] #<N> <要約>" <Pelway のパス> "Issue #<N> を実装する。skill implement-issue に従う。
+Assigned: role=implement agent=devin model=swe-2-high effort=<medium|high|max>"
+```
+
+`<slug>` は Issue の題名を英小文字とハイフンで 3〜5 語にしたもの。effort（opencode の variant、Devin CLI の `thought_level`）は skill `command-team` の「実装のモデルと effort」で決め、MCP の `t3_thread_launch` で立てるときは `modelSelection.options` に入れる。Devin CLI の `mode` は `smart` までに限り、`bypass` は使わない（正本は `docs/superpowers/specs/agent-team.md` の「制約」）。
 
 ### レビューを始める
 
@@ -66,7 +75,7 @@ T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-ac
 
 `codex_review` はネットワークを GitHub だけに絞った Codex（`docs/dev-environment.md` の「レビュー担当の Codex」）。`<k>` はその PR のレビュースレッドの通し番号（1 から）。worktree は必ず `main` から作る（レビュー担当は worktree の `scripts/agent-gh` を使うため、PR やほかのブランチの版を使わない）。
 
-レビュー担当（Codex だけか、Claude も付けるか）と effort は skill `command-team` の「レビュー担当と effort」で決める。Claude のレビュースレッドは `--provider claude_review --model claude-opus-5-5`、ブランチは `review/<M>-c<k>` にし、同じく `auto-accept-edits` で立てる。
+レビュー担当（誰に付けるか）と effort は skill `command-team` の「レビュー担当と effort」で決める。Claude のレビュースレッドは `--provider claude_review --model claude-opus-5-5`、ブランチは `review/<M>-c<k>` にし、同じく `auto-accept-edits` で立てる。Devin CLI のレビュースレッドは `--provider acpRegistry_devin --model swe-2-high`、ブランチは `review/<M>-d<k>` にする。Devin CLI には `runtimeMode` の指定が無く、権限はモデルの `mode` オプションで `smart` までに限る（`bypass` は使わない）。effort（`thought_level`）は `modelSelection.options` に入れる。
 
 PR を Projects ボードに載せる（ボードの組み込みワークフローがレビューの状態を反映するのは、ボードに載っている PR だけ）。
 
@@ -85,7 +94,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 ### `pelway.agent-watch/v1`
 
-スレッドが実装かレビューかは `provider` で見分ける。`opencode` が実装で、それ以外（`codex`、`claudeAgent`。インスタンスは `codex_review`、`claude_review`）はレビュー。ブランチが `review/` で始まるかでも見分けられる。
+スレッドが実装かレビューかは `branch` で見分ける。`agent/` で始まるものが実装・調査、`review/` で始まるものがレビュー。`provider` でも補助的に見られるが、`acpRegistry_devin` は実装・レビューの両方に使うため、ブランチでの識別を正とする。
 
 | `event` | 実装スレッド | レビュースレッド |
 |---|---|---|
@@ -100,9 +109,9 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 | `verdict` | すること |
 |---|---|
-| `approve` | 実装スレッドに「PR #<M> は Approve された。skill implement-issue の手順 8 に従う。」を送る。Ready for review になり、必須チェックが通ったら、skill `command-team` の「マージ」に従ってマージする。Claude も付けた PR で判定が割れたらマージしない |
+| `approve` | 実装スレッドに「PR #<M> は Approve された。skill implement-issue の手順 8 に従う。」を送る。Ready for review になり、必須チェックが通ったら、skill `command-team` の「マージ」に従ってマージする。複数のレビュー担当を付けた PR で判定が割れたらマージしない |
 | `request-changes` | 実装スレッドの `round` が 4 以上なら 6 のエスカレーション。3 なら skill `command-team` の手順 2 で effort を上げてから、2 以下ならそのまま「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を送る |
-| 同じ PR に Codex と Claude の両方を付けた | 両方の `verdict` がそろうまで、どちらにも基づいて動かない。そろったら、両方 `approve` なら `approve` の行、両方 `request-changes` なら must-fix をまとめて `request-changes` の行に進む。割れたら（片方が `approve`、片方が `request-changes`）マージせず、Issue に両方の要点をコメントして `needs-human` を付け、部屋で人間に知らせる |
+| 同じ PR に複数のレビュー担当を付けた | 全員の `verdict` がそろうまで、どれか 1 つの `verdict` に基づいて動かない。そろったら、全員 `approve` なら `approve` の行、全員 `request-changes` なら must-fix をまとめて `request-changes` の行に進む。割れたら（`approve` と `request-changes` が混ざったら）マージせず、Issue にそれぞれの要点をコメントして `needs-human` を付け、部屋で人間に知らせる |
 | `failed` | `error: checks pending` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 6 のエスカレーション |
 
 実装スレッドは `branch` の `agent/<N>-` から Issue 番号を、`thread_id` から送り先を取る。レビュースレッドから実装スレッドを探すときは、PR のブランチ名と同じ `branch` を持つスレッドを `t3 thread list` から選ぶ。
@@ -113,7 +122,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 | 出来事 | `urgency` | すること |
 |---|---|---|
-| PR がマージされた（`pull_request` `closed`、`merged: true`） | `immediate` | Issue から `agent:working` を外す。実装の枠が 1 つ空く |
+| PR がマージされた（`pull_request` `closed`、`merged: true`） | `immediate` | Issue から `agent:working` と `agent:devin` を外す。実装の枠が 1 つ空く |
 | PR がマージされずに閉じた | `immediate` | 部屋で人間に知らせ、Issue に `needs-human` を付ける |
 | 人間のレビューが Request changes | `immediate` | 実装スレッドに「PR #<M> の hatai のレビューを直す。skill implement-issue に従う。」を送る（`round` の上限は同じ） |
 | 人間のレビューが Comment | `immediate` | 部屋で人間に、実装スレッドに送るかを聞く |
@@ -141,7 +150,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 ### エスカレーション
 
-1. Issue に `needs-human` を付け、`agent:working` を外す
+1. Issue に `needs-human` を付け、`agent:working` と `agent:devin` を外す
 2. Issue に次をコメントする: 何が起きたか（イベントと `report`）、試したこと、人間に決めてほしいこと、スレッドの `link`
 3. 部屋で人間に知らせる（Issue の URL を付ける）
 

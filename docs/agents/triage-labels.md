@@ -22,5 +22,6 @@ The AI dev team (see `docs/superpowers/specs/agent-team.md`) tracks a task's sta
 | ----- | ------ | ---------- | ------- |
 | `ready-for-agent` | Human, after checking an `agent-task` issue | Grok Bot, when it starts the task | Fully specified, ready for an agent |
 | `agent:working` | Grok Bot, when it starts the task | Grok Bot, when the PR merges or `needs-human` is added | An agent is working on it |
+| `agent:devin` | Grok Bot, when it assigns the task to Devin CLI | Grok Bot, when the PR merges or `needs-human` is added | The task's implementer is Devin CLI (SWE-2) |
 | `needs-human` | Grok Bot or an agent, when it stops | Human, after deciding | The agent stopped and needs a human decision |
 | `pr-size-exception` | The conductor, on a PR, after approving the pr-size overrun in an Issue comment that starts with `<!-- pr-size-exception -->` and is authored by `hatai` (implementers never set it) | The conductor, if the approval is withdrawn | Reviewers do not count a failed `pr-size` check as must-fix |

@@ -110,7 +110,7 @@ scripts/agent-gh dev git push -u origin HEAD
 `write-pull-request` skill に従って本文を書き、Draft で作る。本文の「概要」の最後に `Closes #<N>` を入れる。本文の「対象」の最後に、次の 1 行を必ず入れる。値は、指揮役の指示の 2 行目 `Assigned: role=implement agent=... model=... effort=...` から写す（`role=implement` を除いた残りを、順番も表記も変えずに書く）。指示に `Assigned:` の行が無いときは `model=unknown effort=unknown` と書く。
 
 ```
-Implementer: agent=opencode model=<モデル名> effort=<effort>
+Implementer: agent=<opencode|devin> model=<モデル名> effort=<effort>
 ```
 
 修正依頼で effort が変わったときは、「対象」の行を新しい値に書き換える。
