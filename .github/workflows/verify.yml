@@ -95,7 +95,7 @@ jobs:
       # jdx/mise-action のコミット sha は GitHub 公式 lockfile（.github/workflows/actions.lock）
       # で固定する。workflow 側は公式 lock 生成が書き換えた具体タグ @v2.4.4 を参照する。
       - name: Setup mise (official action)
-        uses: jdx/mise-action@v2.4.4
+        uses: jdx/mise-action@v5.2.7
         with:
           version: v2026.11.5
           install: true
@@ -140,7 +140,7 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends libfontconfig1-dev
 
       - name: Setup mise (official action)
-        uses: jdx/mise-action@v2.4.4
+        uses: jdx/mise-action@v5.2.7
         with:
           version: v2026.11.5
           install: true
@@ -203,7 +203,7 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends libfontconfig1-dev
 
       - name: Setup mise (official action)
-        uses: jdx/mise-action@v2.4.4
+        uses: jdx/mise-action@v5.2.7
         with:
           version: v2026.11.5
           install: true
@@ -278,7 +278,7 @@ jobs:
       # verify ジョブと同じ導入（mise 公式 Action・キャッシュなし・--locked）。
       # rust 1.96.0 に llvm-tools-preview 成分が入る（mise.toml の components で宣言）。
       - name: Setup mise (official action)
-        uses: jdx/mise-action@v2.4.4
+        uses: jdx/mise-action@v5.2.7
         with:
           version: v2026.11.5
           install: true
