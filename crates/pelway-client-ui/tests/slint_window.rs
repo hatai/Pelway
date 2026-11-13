@@ -83,6 +83,11 @@ const TR_GETTERS: &[(&str, TrGetter)] = &[
         w.get_tr_thread_input_placeholder()
     }),
     ("composer-placeholder", |w| w.get_tr_composer_placeholder()),
+    // トップレベルメニューと About ダイアログ（Slint の attribution、Issue 237）
+    ("menu-help", |w| w.get_tr_menu_help()),
+    ("menu-about", |w| w.get_tr_menu_about()),
+    ("about-title", |w| w.get_tr_about_title()),
+    ("about-close", |w| w.get_tr_about_close()),
 ];
 
 /// テスト用 backend の初期化をプロセスで 1 回だけ行う。

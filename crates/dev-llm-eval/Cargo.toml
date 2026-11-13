@@ -12,7 +12,8 @@ description = "Development measurement command for the Pelway LLM gateway: synth
 
 [dependencies]
 # 測定対象の LLMゲートウェイ。
-pelway-llm = { path = "../pelway-llm" }
+# version は cargo-deny の wildcards 検査のため（path 依存の解決には影響しない。deny.toml 参照）。
+pelway-llm = { path = "../pelway-llm", version = "0.0.0" }
 # CLI と測定の実行に tokio（current_thread）。
 tokio = { version = "1", features = ["macros", "rt"] }
 # 合成データ（JSON）の読み込みと表の組み立て。

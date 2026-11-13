@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
-use axum::response::Json;
+use axum::response::{IntoResponse, Json};
 use axum::routing::{get, post};
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -38,6 +38,19 @@ use rsa::pkcs1::EncodeRsaPrivateKey;
 
 const RP_ORIGIN: &str = "http://localhost";
 
+/// 偽 IdP の応答モード（エラー経路の試験で差し替える）。
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum FakeMode {
+    #[default]
+    Ok,
+    /// token endpoint が 500 を返す（`code_exchange_failed` の経路）。
+    TokenError,
+    /// token 応答から id_token を外す（`no_id_token` の経路）。
+    NoIdToken,
+    /// jwks endpoint が 500 を返す（`jwks_fetch_failed` の経路）。
+    JwksError,
+}
+
 /// テスト用の IdP。authorize の手続きは省略し、token endpoint が
 /// 事前に控えた nonce / hd / tid を含む署名済み ID トークンを返す。
 struct FakeIdp {
@@ -49,11 +62,13 @@ struct FakeIdp {
     tid: Option<String>,
     /// authorize URL から取り出した nonce（実 IdP が request で受け取るもの）。
     nonce: Mutex<Option<Nonce>>,
+    /// エラー経路の試験用モード（通常は `FakeMode::Ok`）。
+    mode: Mutex<FakeMode>,
 }
 
 impl FakeIdp {
     fn new() -> Self {
-        let rsa = rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 2048)
+        let rsa = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048)
             .expect("rsa keygen")
             .to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)
             .expect("pem");
@@ -69,6 +84,7 @@ impl FakeIdp {
             hd: Some("good.example.com".to_string()),
             tid: None,
             nonce: Mutex::new(None),
+            mode: Mutex::new(FakeMode::Ok),
         }
     }
 
@@ -81,6 +97,11 @@ impl FakeIdp {
                     move || {
                         let idp = idp.clone();
                         async move {
+                            let mode = *idp.mode.lock().unwrap();
+                            if mode == FakeMode::TokenError {
+                                return (StatusCode::INTERNAL_SERVER_ERROR, "idp down")
+                                    .into_response();
+                            }
                             let nonce = idp.nonce.lock().unwrap().take();
                             let claims = IdTokenClaims::new(
                                 IssuerUrl::new(idp.issuer.clone()).unwrap(),
@@ -95,28 +116,33 @@ impl FakeIdp {
                             )
                             .set_nonce(nonce);
                             let access = AccessToken::new("fake-access".to_string());
-                            let id_token: IdToken<
-                                _,
-                                CoreGenderClaim,
-                                CoreJweContentEncryptionAlgorithm,
-                                CoreJwsSigningAlgorithm,
-                            > = IdToken::new(
-                                claims,
-                                &idp.key,
-                                CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256,
-                                Some(&access),
-                                None,
-                            )
-                            .unwrap();
+                            let id_token = if mode == FakeMode::NoIdToken {
+                                None
+                            } else {
+                                let id_token: IdToken<
+                                    _,
+                                    CoreGenderClaim,
+                                    CoreJweContentEncryptionAlgorithm,
+                                    CoreJwsSigningAlgorithm,
+                                > = IdToken::new(
+                                    claims,
+                                    &idp.key,
+                                    CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256,
+                                    Some(&access),
+                                    None,
+                                )
+                                .unwrap();
+                                Some(id_token)
+                            };
                             let resp = pelway_auth::oidc::TenantTokenResponse::new(
                                 access,
                                 CoreTokenType::Bearer,
                                 pelway_auth::oidc::TenantIdTokenFields::new(
-                                    Some(id_token),
+                                    id_token,
                                     EmptyExtraTokenFields {},
                                 ),
                             );
-                            Json(serde_json::to_value(resp).unwrap())
+                            Json(serde_json::to_value(resp).unwrap()).into_response()
                         }
                     }
                 }),
@@ -128,12 +154,17 @@ impl FakeIdp {
                     move || {
                         let idp = idp.clone();
                         async move {
+                            if *idp.mode.lock().unwrap() == FakeMode::JwksError {
+                                return (StatusCode::INTERNAL_SERVER_ERROR, "jwks down")
+                                    .into_response();
+                            }
                             Json(
                                 serde_json::to_value(CoreJsonWebKeySet::new(vec![
                                     idp.key.as_verification_key(),
                                 ]))
                                 .unwrap(),
                             )
+                            .into_response()
                         }
                     }
                 }),
@@ -856,4 +887,416 @@ async fn credential_count_reports_members_credentials() {
         0,
         "知らない member は 0"
     );
+}
+
+// --- 以下、エラー経路のテスト（Issue #230: 行カバレッジ 97%） ---
+
+/// member を passkey で登録し、セッション Cookie と登録時の credential
+/// （JSON）を返す。
+async fn register_member(t: &TestApp, member_name: &str) -> (String, Value, SoftPasskey) {
+    let mut device = SoftPasskey::new(true);
+    let origin = Url::parse(RP_ORIGIN).unwrap();
+    let (_, _, body) = call(
+        &t.app,
+        post_json(
+            "/auth/passkey/register/start",
+            json!({"member_name": member_name, "display_name": member_name}),
+        ),
+    )
+    .await;
+    let ccr: CreationChallengeResponse = serde_json::from_value(body["options"].clone()).unwrap();
+    let credential = serde_json::to_value(device.do_registration(origin, ccr).unwrap()).unwrap();
+    let pending_id = body["pending_id"].as_str().unwrap().to_string();
+    let (status, headers, body) = call(
+        &t.app,
+        post_json(
+            "/auth/passkey/register/finish",
+            json!({"pending_id": pending_id, "credential": credential}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "register/finish: {body}");
+    (set_cookie(&headers), credential, device)
+}
+
+/// `/auth/oidc/{tenant}/start` を呼び、302 先の query パラメータを返す。
+async fn oidc_start_params(app: &Router, tenant: &str) -> HashMap<String, String> {
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/auth/oidc/{tenant}/start"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
+    let location = Url::parse(resp.headers()[header::LOCATION].to_str().unwrap()).unwrap();
+    location.query_pairs().into_owned().collect()
+}
+
+/// 偽 IdP が authorize request の nonce を正しく折り返す状態で callback を呼ぶ。
+async fn oidc_callback_with(
+    app: &Router,
+    idp: &Arc<FakeIdp>,
+    params: &HashMap<String, String>,
+) -> (StatusCode, axum::http::HeaderMap, Value) {
+    *idp.nonce.lock().unwrap() = Some(Nonce::new(params["nonce"].clone()));
+    call(
+        app,
+        Request::get(format!(
+            "/auth/oidc/callback?code=fake-code&state={}",
+            params["state"]
+        ))
+        .body(Body::empty())
+        .unwrap(),
+    )
+    .await
+}
+
+/// whoami は Cookie が無い・値が Uuid でない・未知のトークンの
+/// どれでも 401 `no_session`（Cookie の解析経路も含む）。
+#[tokio::test]
+async fn whoami_rejects_missing_or_unknown_cookie() {
+    let t = test_app();
+
+    let (status, _, body) = call(
+        &t.app,
+        Request::get("/auth/whoami").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"], "no_session");
+
+    let (status, _, body) = call(
+        &t.app,
+        Request::get("/auth/whoami")
+            .header(header::COOKIE, "pelway_session=not-a-uuid")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"], "no_session");
+
+    let (status, _, body) = call(
+        &t.app,
+        Request::get("/auth/whoami")
+            .header(header::COOKIE, format!("pelway_session={}", Uuid::new_v4()))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"], "no_session");
+}
+
+/// finish 系に未知の pending_id を渡すと 400 `pending_not_found`。
+#[tokio::test]
+async fn finish_rejects_unknown_pending() {
+    let t = test_app();
+    let (cookie, credential, mut device) = register_member(&t, "rika").await;
+
+    let (status, _, body) = call(
+        &t.app,
+        post_json_auth(
+            "/auth/passkey/register/finish",
+            json!({"pending_id": Uuid::new_v4(), "credential": credential}),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "register/finish: {body}");
+    assert_eq!(body["error"], "pending_not_found");
+
+    let (_, _, body) = call(
+        &t.app,
+        post_json("/auth/passkey/login/start", json!({"member_name": "rika"})),
+    )
+    .await;
+    let rcr: RequestChallengeResponse = serde_json::from_value(body["options"].clone()).unwrap();
+    let assertion = serde_json::to_value(
+        device
+            .do_authentication(Url::parse(RP_ORIGIN).unwrap(), rcr)
+            .unwrap(),
+    )
+    .unwrap();
+    let (status, _, body) = call(
+        &t.app,
+        post_json(
+            "/auth/passkey/login/finish",
+            json!({"pending_id": Uuid::new_v4(), "credential": assertion}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "login/finish: {body}");
+    assert_eq!(body["error"], "pending_not_found");
+}
+
+/// 別の登録セレモニーで得た credential（challenge が一致しない）は
+/// register/finish で 400 `registration_failed`。
+#[tokio::test]
+async fn register_finish_rejects_foreign_credential() {
+    let t = test_app();
+    let (_, foreign_credential, _) = register_member(&t, "rika").await;
+
+    // sumire の start で作った pending に rika の credential を渡す。
+    let (_, _, body) = call(
+        &t.app,
+        post_json(
+            "/auth/passkey/register/start",
+            json!({"member_name": "sumire", "display_name": "Sumire"}),
+        ),
+    )
+    .await;
+    let (status, _, body) = call(
+        &t.app,
+        post_json(
+            "/auth/passkey/register/finish",
+            json!({"pending_id": body["pending_id"], "credential": foreign_credential}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "register/finish: {body}");
+    assert_eq!(body["error"], "registration_failed");
+}
+
+/// 別の challenge に対して作った assertion は login/finish で
+/// 400 `authentication_failed`（challenge の不一致で検証が落ちる）。
+#[tokio::test]
+async fn login_finish_rejects_assertion_for_other_challenge() {
+    let t = test_app();
+    let (_, _, mut device) = register_member(&t, "rika").await;
+    let origin = Url::parse(RP_ORIGIN).unwrap();
+
+    let (_, _, body) = call(
+        &t.app,
+        post_json("/auth/passkey/login/start", json!({"member_name": "rika"})),
+    )
+    .await;
+    let rcr1: RequestChallengeResponse = serde_json::from_value(body["options"].clone()).unwrap();
+    let assertion = serde_json::to_value(device.do_authentication(origin, rcr1).unwrap()).unwrap();
+
+    // 2 回目の login/start の pending に、1 回目の challenge への assertion を渡す。
+    let (_, _, body) = call(
+        &t.app,
+        post_json("/auth/passkey/login/start", json!({"member_name": "rika"})),
+    )
+    .await;
+    let pending_id = body["pending_id"].as_str().unwrap().to_string();
+    let (status, _, body) = call(
+        &t.app,
+        post_json(
+            "/auth/passkey/login/finish",
+            json!({"pending_id": pending_id, "credential": assertion}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "login/finish: {body}");
+    assert_eq!(body["error"], "authentication_failed");
+}
+
+/// 登録されていない member_name での login/start は 404 `unknown_member`。
+#[tokio::test]
+async fn login_start_rejects_unknown_member() {
+    let t = test_app();
+    let (status, _, body) = call(
+        &t.app,
+        post_json("/auth/passkey/login/start", json!({"member_name": "ghost"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "login/start: {body}");
+    assert_eq!(body["error"], "unknown_member");
+}
+
+/// 空の member_name / display_name は webauthn-rs の検査（InvalidUsername）で
+/// 弾かれ、register/start は 400 `registration_rejected`。
+#[tokio::test]
+async fn register_start_rejects_empty_name() {
+    let t = test_app();
+    let (status, _, body) = call(
+        &t.app,
+        post_json(
+            "/auth/passkey/register/start",
+            json!({"member_name": "", "display_name": "Yui"}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "register/start: {body}");
+    assert_eq!(body["error"], "registration_rejected");
+
+    let (status, _, body) = call(
+        &t.app,
+        post_json(
+            "/auth/passkey/register/start",
+            json!({"member_name": "yui", "display_name": ""}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "register/start: {body}");
+    assert_eq!(body["error"], "registration_rejected");
+}
+
+/// OIDC ログインで作った member は passkey の credential を持たないため、
+/// credentials/revoke は 404 `unknown_member`（member はセッションから
+/// 特定できるが passkey store に記録がない経路）。
+#[tokio::test]
+async fn revoke_rejects_member_without_passkey_record() {
+    let t = test_app();
+    let params = oidc_start_params(&t.app, "google").await;
+    let (_, headers, body) = oidc_callback_with(&t.app, &t.idp, &params).await;
+    assert!(
+        headers.get(header::SET_COOKIE).is_some(),
+        "callback: {body}"
+    );
+    let cookie = set_cookie(&headers);
+
+    let (status, _, body) = call(
+        &t.app,
+        post_json_auth(
+            "/auth/passkey/credentials/revoke",
+            json!({"credential_id": [9, 9, 9]}),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "revoke: {body}");
+    assert_eq!(body["error"], "unknown_member");
+}
+
+/// 未登録テナントの /start は 404 `unknown_tenant`。
+#[tokio::test]
+async fn oidc_start_rejects_unknown_tenant() {
+    let t = test_app();
+    let (status, _, body) = call(
+        &t.app,
+        Request::get("/auth/oidc/unknown/start")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "start: {body}");
+    assert_eq!(body["error"], "unknown_tenant");
+}
+
+/// /start と callback の間にテナント設定が消えた場合、callback は
+/// 500 `tenant_removed`（pending は残っている）。router を手放してから
+/// `Arc::get_mut` で状態を書き換え、router を作り直して再現する。
+#[tokio::test]
+async fn oidc_callback_after_tenant_removal_is_500() {
+    let idp = Arc::new(FakeIdp::new());
+    let oidc =
+        OidcStore::new(HashMap::from([("google".to_string(), t_oidc_tenant(&idp))])).unwrap();
+    let mut state = Arc::new(
+        AuthState::new("localhost", RP_ORIGIN, oidc, bridge(FakeIdp::router(&idp)))
+            .expect("auth state"),
+    );
+    let app = auth_router(state.clone());
+    let params = oidc_start_params(&app, "google").await;
+    drop(app);
+
+    Arc::get_mut(&mut state)
+        .unwrap()
+        .oidc
+        .tenants
+        .remove("google");
+    let app = auth_router(state.clone());
+    let (status, _, body) = oidc_callback_with(&app, &idp, &params).await;
+    assert_eq!(
+        status,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "callback: {body}"
+    );
+    assert_eq!(body["error"], "tenant_removed");
+}
+
+/// /start と callback の間に jwks_uri が壊れた URL に変わった場合、
+/// callback は 500 `bad_tenant_urls`（jwks 取得 URL の組み立てで失敗）。
+#[tokio::test]
+async fn oidc_callback_with_bad_jwks_url_is_500() {
+    let idp = Arc::new(FakeIdp::new());
+    let oidc =
+        OidcStore::new(HashMap::from([("google".to_string(), t_oidc_tenant(&idp))])).unwrap();
+    let mut state = Arc::new(
+        AuthState::new("localhost", RP_ORIGIN, oidc, bridge(FakeIdp::router(&idp)))
+            .expect("auth state"),
+    );
+    let app = auth_router(state.clone());
+    let params = oidc_start_params(&app, "google").await;
+    drop(app);
+
+    Arc::get_mut(&mut state)
+        .unwrap()
+        .oidc
+        .tenants
+        .get_mut("google")
+        .unwrap()
+        .jwks_uri = "http://[::1".to_string();
+    let app = auth_router(state.clone());
+    let (status, _, body) = oidc_callback_with(&app, &idp, &params).await;
+    assert_eq!(
+        status,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "callback: {body}"
+    );
+    assert_eq!(body["error"], "bad_tenant_urls");
+}
+
+/// IdP の jwks endpoint が落ちていると callback は 502 `jwks_fetch_failed`。
+#[tokio::test]
+async fn oidc_callback_reports_jwks_fetch_failure() {
+    let t = test_app();
+    let params = oidc_start_params(&t.app, "google").await;
+    *t.idp.mode.lock().unwrap() = FakeMode::JwksError;
+
+    let (status, _, body) = oidc_callback_with(&t.app, &t.idp, &params).await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "callback: {body}");
+    assert_eq!(body["error"], "jwks_fetch_failed");
+}
+
+/// IdP の token endpoint が落ちていると callback は 401 `code_exchange_failed`。
+#[tokio::test]
+async fn oidc_callback_reports_code_exchange_failure() {
+    let t = test_app();
+    let params = oidc_start_params(&t.app, "google").await;
+    *t.idp.mode.lock().unwrap() = FakeMode::TokenError;
+
+    let (status, _, body) = oidc_callback_with(&t.app, &t.idp, &params).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "callback: {body}");
+    assert_eq!(body["error"], "code_exchange_failed");
+}
+
+/// token 応答に id_token が無いと callback は 401 `no_id_token`。
+#[tokio::test]
+async fn oidc_callback_reports_missing_id_token() {
+    let t = test_app();
+    let params = oidc_start_params(&t.app, "google").await;
+    *t.idp.mode.lock().unwrap() = FakeMode::NoIdToken;
+
+    let (status, _, body) = oidc_callback_with(&t.app, &t.idp, &params).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "callback: {body}");
+    assert_eq!(body["error"], "no_id_token");
+}
+
+/// ID トークンの nonce が authorize request と一致しないと callback は
+/// 401 `id_token_rejected`（署名は正しくても nonce 検証で落ちる）。
+#[tokio::test]
+async fn oidc_callback_rejects_bad_nonce() {
+    let t = test_app();
+    let params = oidc_start_params(&t.app, "google").await;
+    // authorize request の nonce ではなく、別の値を折り返させる。
+    *t.idp.nonce.lock().unwrap() = Some(Nonce::new("wrong-nonce".to_string()));
+
+    let (status, _, body) = call(
+        &t.app,
+        Request::get(format!(
+            "/auth/oidc/callback?code=fake-code&state={}",
+            params["state"]
+        ))
+        .body(Body::empty())
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "callback: {body}");
+    assert_eq!(body["error"], "id_token_rejected");
 }
