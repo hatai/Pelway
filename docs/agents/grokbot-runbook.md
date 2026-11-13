@@ -7,16 +7,17 @@ AI 開発チームの指揮役が従うイベント対応の手順。指揮役�
 
 ## 1. 役割と触ってよい範囲
 
-Grok Bot は Issue を実装スレッドとレビュースレッドに割り振り、通知を受けて次の一手を出し、人間に進み具合を伝える。コードは書かない。
+Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受けて次の一手を出し、人間に進み具合を伝える。通常の PR のレビューは実装担当が自分で委託する（skill `implement-issue`）ので、指揮役がレビューを割り当てるのは、指揮役自身の PR と外部投入の分だけ。コードは書かない。
 
 | してよいこと | 方法 |
 |---|---|
-| スレッドを立てる・指示を送る・様子を見る | T3 Connect の MCP（`t3 thread start` / `send` / `show` / `list` と同じ操作） |
+| スレッドを立てる・指示を送る・様子を見る | 指揮役が T3 のスレッドとして動いているときはネイティブの `t3_thread_launch`（作成）と `t3_thread_send`（指示）。Grok Bot（クラウド）のときは T3 Connect の MCP（`t3 thread start` / `send` / `show` / `list` と同じ操作） |
 | ラベルを付け外しする（`ready-for-agent`、`agent:working`、`agent:devin`、`needs-human`） | GitHub |
 | Issue にコメントする | GitHub |
 | PR を Projects ボード `Pelway agent team`（https://github.com/users/hatai/projects/7）に載せる | GitHub |
 | Issue・PR・レビュー・CI の結果を読む | GitHub |
 | スレッドのモデル・effort を変える | T3 Connect の MCP（`t3_thread_configure`） |
+| 終わったスレッドを settle する | T3 のスレッドの操作（`t3_thread_organize` の `action: settle`。Grok Bot は MCP 経由）。PR をスレッドに紐付けたものはマージで自動 settle |
 | `pelway-review` が Approve し必須チェックが通った PR をマージする | `gh pr merge --merge --admin --delete-branch`（人間から委任された迂回。条件は skill `command-team` の「マージ」）。`--admin` は App のトークンでは使えないため、このマージだけは人間の名義の `gh` で行い、ほかの操作は `scripts/agent-gh dev` で行う |
 
 しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更（`actions.lock` の再生成は例外。正本は `docs/superpowers/specs/agent-team.md` の「制約」）、スレッドの取り消し。
@@ -29,14 +30,14 @@ Grok Bot は Issue を実装スレッドとレビュースレッドに割り振�
 |---|---|---|
 | 実装・調査（opencode `zai-coding-plan/glm-5.3`） | 3 | `agent:working` が付いていて、PR が Ready for review になっていない Issue のうち、対応スレッド（ブランチ `agent/<N>-`）の `providerInstanceId` が `opencode` のものの数と、実行中の調査スレッドの数の合計 |
 | 実装（Devin CLI `swe-2-high`） | 6 | `agent:working` が付いていて、PR が Ready for review になっていない Issue のうち、対応スレッドの `providerInstanceId` が `acpRegistry_devin` のものの数 |
-| レビュー（Codex `codex_review`） | 2 | 実行中（`running`）の Codex のレビュースレッドの数 |
-| レビュー（Devin CLI） | 2 | 実行中の Devin CLI のレビュースレッドの数。`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまでは 0 |
-| レビュー（Claude `claude_review`） | 1 | 実行中の Claude のレビュースレッドの数。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは 0 |
+| レビュー（Codex `codex_review`） | 目安 2 | 通常の PR のレビューは実装担当が `delegate_task` で委託するため、この表では数えない。指揮役が立てたレビュースレッド（指揮役自身の PR・外部投入）だけを数える |
+| レビュー（Devin CLI） | 目安 2 | 同上。`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまでは使わない |
+| レビュー（Claude `claude_review`） | 目安 1 | 同上。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは使わない |
 
 上限に達しているときは新しいスレッドを立てない。空きが出たら、待っているものを次の順で始める。
 
-1. 修正の指示（既にあるスレッドへの `send`）
-2. レビュー（作成が古い PR から）
+1. 修正の指示（既にあるスレッドへの `send`。人間のレビューの指摘など）
+2. 指揮役が立てるレビュー（指揮役自身の PR・外部投入）
 3. 新しい実装（`ready-for-agent` を付けたのが古い Issue から）
 
 ## 3. 仕事の始め方
@@ -63,9 +64,9 @@ Assigned: role=implement agent=devin model=swe-2-high effort=<medium|high|max>"
 
 ### レビューを始める
 
-実装スレッドの `finished` の `report` に `pr:` があり、手順 5 の確認が済み、PR の必須チェック（`mise run verify` と `pr-size`）が終わっていて、レビューの枠が空いているとき。チェックがまだ動いていれば、その PR の verify の完了（`pelway.github-notify/v2` の `workflow_run`）を待ってから始める。
+指揮役がレビュースレッドを立てるのは、指揮役自身の PR と、外部投入（skill `command-team` の「外部からのレビュースレッド投入」）のときだけ。通常の実装担当の PR のレビューは、実装担当が `delegate_task` で自分で委託する（skill `implement-issue` の手順 8）ので、指揮役は立てない。
 
-レビュースレッドを次の内容で立てる（`t3 thread start` の形で書くが、権限を指定するため実際は MCP で立てる）。
+レビュースレッドを次の内容で立てる（`t3 thread start` の形で書くが、権限を指定するため実際は MCP または `t3_thread_launch` で立てる）。
 
 ```
 t3 thread start --provider codex_review --model gpt-6-luna --worktree main --branch review/<M>-<k> --title "[レビュー] PR #<M> <要約>" <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。"
@@ -98,21 +99,24 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 | `event` | 実装スレッド | レビュースレッド |
 |---|---|---|
-| `finished` | `report` を手順 5 で確かめる。`pr:` があればレビューを始める。`stopped:` があれば 6 の「実装担当が止まった」 | `report` を手順 5 で確かめ、`verdict` で下の表に進む |
+| `finished` | `report` を手順 5 で確かめる。`pr:` と `ready: done` があればマージの判断（skill `command-team` の「マージ」）。`stopped:` があれば 6 の「実装担当が止まった」 | `report` を手順 5 で確かめ、GitHub のレビュー状態と突き合わせて扱う（指揮役自身の PR なら「マージ」へ。外部投入なら結果を該当 Issue の実装スレッドに知らせる） |
 | `failed` | スレッドに 1 回だけ「続きをやり直す。skill implement-issue に従う。」を送る。同じスレッドで 2 回目の `failed` なら 6 のエスカレーション | 新しいレビュースレッドを 1 回だけ立て直す。2 回目なら 6 のエスカレーション |
 | `cancelled` | 人間が止めたもの。何もしない | 何もしない |
-| `waiting` | 部屋で人間に知らせる（スレッドの `link` を付ける） | 同じ |
+| `waiting` | 承認や入力の待ちなら部屋で人間に知らせる（スレッドの `link` を付ける）。レビュー委託の子の完了待ち（実装スレッドが `delegate_task` でレビューを待っている）は知らせない | 部屋で人間に知らせる（スレッドの `link` を付ける） |
 | `stalled` | 6 の「停滞」 | 6 の「停滞」 |
 | `bad-title`（`scripts/conductor-watch.sh`） | タイトルを skill `command-team` の「スレッド名」の形式に直す（`t3_thread_update` の rename） | 同じ |
 
-レビューの `verdict` ごとの対応:
+実装担当のレビュー委託の子スレッドは `t3 thread list` に現れない（委託の結果は実装スレッドが処理する）。この表の「レビュースレッド」は、指揮役が立てたトップレベルのレビュースレッドのこと。
+
+レビューの verdict ごとの対応:
 
 | `verdict` | すること |
 |---|---|
-| `approve` | 実装スレッドに「PR #<M> は Approve された。skill implement-issue の手順 8 に従う。」を送る。Ready for review になり、必須チェックが通ったら、skill `command-team` の「マージ」に従ってマージする。複数のレビュー担当を付けた PR で判定が割れたらマージしない |
-| `request-changes` | 実装スレッドの `round` が 4 以上なら 6 のエスカレーション。3 なら skill `command-team` の手順 2 で effort を上げてから、2 以下ならそのまま「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を送る |
-| 同じ PR に複数のレビュー担当を付けた | 全員の `verdict` がそろうまで、どれか 1 つの `verdict` に基づいて動かない。そろったら、全員 `approve` なら `approve` の行、全員 `request-changes` なら must-fix をまとめて `request-changes` の行に進む。割れたら（`approve` と `request-changes` が混ざったら）マージせず、Issue にそれぞれの要点をコメントして `needs-human` を付け、部屋で人間に知らせる |
+| `approve` | 指揮役自身の PR なら、Ready for review と必須チェックが通っていることを確かめて skill `command-team` の「マージ」に進む。外部投入なら「PR #<M> は Approve された。skill implement-issue の手順 10 に従う。」を実装スレッドに送る。複数のレビュー担当を付けた PR で判定が割れたらマージしない |
+| `request-changes` | 外部投入なら「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を実装スレッドに送る（回数の上限は skill `implement-issue` のとおり、実装スレッドが数える） |
 | `failed` | `error: checks pending` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 6 のエスカレーション |
+
+通常の PR のレビューの verdict（approve / request-changes / failed）は実装スレッドが処理する（skill `implement-issue` の手順 9）。指揮役は、実装スレッドの終わりの報告（`review:` と `ready:` の行）と GitHub の PR の状態（`pelway-review` の最新レビューとチェック）で進み具合を見る。
 
 実装スレッドは `branch` の `agent/<N>-` から Issue 番号を、`thread_id` から送り先を取る。レビュースレッドから実装スレッドを探すときは、PR のブランチ名と同じ `branch` を持つスレッドを `t3 thread list` から選ぶ。
 
@@ -139,10 +143,10 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 | 行 | 確かめること |
 |---|---|
 | `pr:` | `scripts/agent-gh dev pr view <番号> --json author,isDraft,headRefName` で、作成者が `app/pelway-dev`、ブランチが `agent/<Issue 番号>-` で始まる。調査スレッドの報告の PR のときは、作成者が `app/pelway-dev` で Draft であり、ブランチが `agent/investigate-` で始まる |
-| `verify:` | PR のチェック `mise run verify` の結果 |
-| `pr-size:` | PR のチェック `pr-size` の結果 |
+| `review:` | `scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` のレビュー件数が報告のラウンド数と一致し、最新が `APPROVED` である |
+| `ready:` | `scripts/agent-gh dev pr view <番号> --json isDraft` が `false` である |
 | `memo:` | PR の変更ファイルに `docs/worklogs/issue-<Issue 番号>.md` があり、報告の round の「実装者メモ」が 5 項目そろっている。止まった場合は Issue のコメントに実装者メモがある |
-| `verdict:` | `scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` の最新のレビューの状態（`APPROVED` か `CHANGES_REQUESTED`）と一致する |
+| `verdict:` | 指揮役が立てたレビュースレッドの報告だけ。`scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` の最新のレビューの状態（`APPROVED` か `CHANGES_REQUESTED`）と一致する |
 
 一致しなければ、`report` の値では動かず 6 のエスカレーションにする。
 
@@ -186,6 +190,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 ## 8. 片付け
 
 - Grok Bot はスレッドと worktree を消さない
+- 終わったスレッドを settle する。PR をスレッドに紐付けたものはマージで自動 settle。それ以外（報告が読まれた調査スレッド、verdict を出し終えた指揮役のレビュースレッド、失敗打ち切りやマージされずに閉じた PR のスレッド）は `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドと、止まっている・迷走中のスレッドは settle しない
 - worktree は人間が `mise run agent-worktree-prune` で消す（マージ済み・クローズ済みの PR のものだけ。一覧を見せてから確認する）
 - マージ後の Issue と PR はボードの組み込みワークフローが Done にする
 
@@ -212,7 +217,7 @@ Grok Bot が動かない（レート制限、障害）とき、人間が別の�
 
 | 項目 | 内容 |
 |---|---|
-| 代行する者 | 人間が指名したエージェント。T3 Connect の MCP（`https://<環境>.t3coderelay.com/mcp`、OAuth）につながること |
+| 代行する者 | 人間が指名したエージェント。T3 のスレッドとして動くときはネイティブの `t3_thread_launch` で作業スレッドを立てられること。T3 のスレッド以外で動くときは T3 Connect の MCP（`https://<環境>.t3coderelay.com/mcp`、OAuth）につながること |
 | 通知の受け口 | 代行者は Grok Bot の webhook を受けられないので、`scripts/conductor-watch.sh` の出力（スレッドの状態の変化と `agent/` の PR の変化）を通知の代わりに使う。`report` は `t3 thread show` で読む |
 | 「部屋」 | 代行者と人間の会話 |
 | 引き継ぐ状態 | GitHub（`agent:working`・`needs-human` の Issue、Draft・レビュー待ちの PR、Issue のコメントに残した判断）、T3 のスレッド、指揮役の作業ログ。代行者だけが知っている状態を作らない |

@@ -31,6 +31,8 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
   Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort>
   ```
 
+  このレビュー指示を使うのは、指揮役が自らレビュースレッドを立てるとき（指揮役自身の PR・外部投入）だけ。通常の実装担当の PR には使わない（実装担当が `delegate_task` で自分で委託する。skill `implement-issue` の手順 8）。
+
   ```
   <報告の対象> を調査する。skill investigate-bug に従う。
   Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>
@@ -76,7 +78,7 @@ PR や Issue に手を付けるときは、最初に対象 Issue の受け入れ
 2. `t3 thread list --json` と `scripts/agent-gh dev pr list` で、実行中のスレッド、Draft の PR、レビュー待ちの PR を数える。PR の中身（チェック・レビュー・コメントの状態）を見るときは、生の `gh api` を読む代わりに skill `pr-watch` の `pr-digest` を使う
 3. 実行中のスレッドのタイトルが「スレッド名」の形式に合っているかを見て、合わないものを直す
 4. runbook の「同時数と順番待ち」の順で、次の一手を 1 つずつ決める
-5. 実装担当からの報告に「レビューが回っていない（指揮役の巡回待ち）」（skill `pr-watch` の完了ゲート）があった PR は、この巡回でレビュー担当と effort を割り当てる（手順 2 の「レビュー担当と effort」）。割り当てたあとの見張りの再開は、レビューが Approve なら実装担当の完了ゲートの確認（skill `pr-watch` の完了ゲート）へ進ませ、Request changes なら指摘対応の push を待つ時点に戻す。再レビューは既存の再レビュー処理（runbook 4 の `request-changes`）に従う
+5. 実装スレッドがレビュー委託の完了待ちの間も、指揮役は何も割り当てない（修正とレビューの繰り返しは実装スレッドの内側で進む）。実装スレッドの終わりの報告（`pr:` と `ready: done`）を手順 5 で確かめられたら、マージの判断（下の「マージ」）に進む
 6. レビュー待ちの PR は、`pr-digest` の `review-wait` 行で滞留を見る（下の「レビュー待ちの滞留」）
 7. 週次の巡回（前回の棚卸しから 7 日以上経った巡回）では、下の「週次: 長命 PR の棚卸し」も行う
 
@@ -123,25 +125,26 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 | 条件 | レビュー担当 |
 |---|---|
-| 通常 | Codex（`codex_review`、`gpt-6-luna`）と Devin CLI（`acpRegistry_devin`、`swe-2-high`）を交互に割り当てる |
-| 高リスク: `unsafe`、セキュリティの境界（認証・権限・承認・秘密情報・ネットワーク）、`.github/workflows/` の変更、pr-size の追加行が 400 を超える | Codex・Claude（`claude_review`）・Devin CLI の 3 人 |
-| 抜き取り | 通常の PR の 4 本に 1 本は Claude も付ける（Codex・Devin CLI の見落とし率の測定のため） |
+| 通常 | PR 番号が偶数は Codex（`codex_review`、`gpt-6-luna`）、奇数は Devin CLI（`acpRegistry_devin`、`swe-2-high`）。使えない担当（下の確認ゲート）の番では Codex に回す |
+| 高リスク: `unsafe`、セキュリティの境界（認証・権限・承認・秘密情報・ネットワーク）、`.github/workflows/` の変更、pr-size の追加行が 400 を超える | Codex・Claude（`claude_review`）・Devin CLI の使えるもの全て（3 人） |
+| 抜き取り | PR 番号を 4 で割った余りが 0 の通常の PR には Claude も付ける（Codex・Devin CLI の見落とし率の測定のため） |
 
-- Devin CLI が実装した PR には Devin CLI のレビューを付けない。ローテーションで Devin CLI の番が来ても Codex に回し、高リスクの PR でも Devin CLI の枠は外す。
+- この表の適用は指揮役だけでなく実装担当も行う。実装担当はこの表でレビュー委託（`delegate_task`）の担当と effort を決め、Assigned 行に写す（skill `implement-issue` の手順 8）。通常と抜き取りの判定は PR 番号だけで決まり、割り当ての記録への記入は不要（実装担当の分は省く。指揮役が立てた分だけ記録する）
+- Devin CLI が実装した PR には Devin CLI のレビューを付けない。通常の番が奇数でも Codex に回し、高リスクの PR でも Devin CLI の枠は外す。
 - Devin CLI のレビュー担当は、`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまで使わない。済むまでは通常は Codex、高リスクは Codex と Claude で回す。
 - Devin CLI のレビュースレッドでは、effort の値を `thought_level` に写す。
 - Claude のレビュー担当は、`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまで使わない。済むまでは Codex だけで回し、高リスクの PR は人間に知らせる。
-- 段階移行: 抜き取りの実施が 10 件に達するか、抜き取りの開始から 4 週間が経つか、どちらか早い方になったら、初回の見落とし率を集計する（定義は手順 4 の「Codex・Devin CLI の見落とし」）。その集計をもって高リスク PR の複数レビュー（Codex と Claude、確認済みなら Devin CLI も）を有効化し、有効化したことと集計結果を指揮役の作業ログに記録する。複数体制は段階的に有効化し、まず抜き取りから始める。抜き取りの実施件数は「割り当ての記録」の表で数え、集計のときに作業ログに残す。
+- 段階移行: 抜き取りの実施が 10 件に達するか、抜き取りの開始から 4 週間が経つか、どちらか早い方になったら、初回の見落とし率を集計する（定義は手順 4 の「Codex・Devin CLI の見落とし」）。その集計をもって高リスク PR の複数レビュー（Codex と Claude、確認済みなら Devin CLI も）を有効化し、有効化したことと集計結果を指揮役の作業ログに記録する。複数体制は段階的に有効化し、まず抜き取りから始める。抜き取りの実施件数は PR のレビュー（Claude が付けられた PR の数）で数え、集計のときに作業ログに残す。
 - effort は、追加行が 200 以下で高リスクでなければ既定、それ以外は `high`。同じ PR の 2 回目以降のレビューは 1 段上げる。
-- 複数のレビュー担当を付けた PR で判定が割れたら（approve と request-changes が混ざったら）、マージせずに Issue にそれぞれの要点をコメントし、`needs-human` を付ける。
+- 複数のレビュー担当を付けた PR で判定が割れたら（approve と request-changes が混ざったら）、マージせずに Issue にそれぞれの要点をコメントし、`needs-human` を付ける。実装担当が委託した複数レビューで割れたときは、実装担当がこの形でエスカレーションする（skill `implement-issue` の手順 9）。
 
 ### レビュー待ちの滞留
 
 レビュー待ちの滞留は、PR ごとに skill `pr-watch` の `pr-digest` を出し、`review-wait` 行（レビュー待ちの経過時間と起点の時刻）で機械的に検出する。起点は PR が最初にレビュー可能になった時刻で一意に決まり、レビュー担当の再割当では戻らない（形式は skill `pr-watch`）。
 
-- 経過が目安の 24 時間を超えた PR の対応は、その時点の指揮役（正本の Grok Bot、代行中は代行者）が責任を持つ。責任の持ち方は、次のどちらかをその場で決めて実行することである。
-  1. レビュー担当を割り当てる（上の「レビュー担当と effort」で決める。レビューの枠が埋まっているときは、その PR を順番待ちの先頭に置く）
-  2. レビューの枠が当分空かない、割り当てたレビュー自体が止まっているときは、外部投入へエスカレーションする（下の「外部からのレビュースレッド投入」）
+- 経過が目安の 24 時間を超えた PR の対応は、その時点の指揮役（正本の Grok Bot、代行中は代行者）が責任を持つ。責任の持ち方は、対象によって次のとおりその場で決めて実行することである。
+  - 実装担当の PR: レビューの委託は実装担当の内側で進むため、まず実装スレッドの状態（実行中か・レビュー委託の子を待っているか・止まっているか）を `t3 thread list` と `t3 thread show` で確かめる。止まっていれば再開の指示か runbook 6 のエスカレーション、実装スレッドが動けないときは外部投入（下の「外部からのレビュースレッド投入」）へエスカレーションする
+  - 指揮役自身の PR: レビュー担当を割り当てる（上の「レビュー担当と effort」で決める。レビューの枠が埋まっているときは、その PR を順番待ちの先頭に置く）
 - 24 時間は目安であり、超えた時点で必ず上のどちらかを取る。何もしないまま放置しない。値は運用実績で見直す。
 
 ### 外部からのレビュースレッド投入
@@ -246,7 +249,7 @@ runbook 6 の手順に従う。人間に上げる前に、手順 2 の「effort 
 ### 開始のチェック
 
 1. Grok Bot が動かないことを人間が確かめ、代行を頼んだ
-2. T3 Connect の MCP につながる（レビュースレッドを `auto-accept-edits` で立てるために必要）
+2. T3 のスレッドとして動くなら `t3_thread_launch` で作業スレッドを、それ以外なら T3 Connect の MCP につながる（レビューの権限 `auto-accept-edits` を指定してスレッドを立てるために必要）
 3. `scripts/conductor-watch.sh` を起動した
 4. 引き継ぐ状態を読んだ: `agent:working` の Issue、Draft・レビュー待ちの PR、実行中のスレッド、`needs-human` の Issue、指揮役の作業ログ
 5. 代行の作業ログ `docs/worklogs/<日付>-conductor-substitute.md` を作った（判断と改善点を書く）

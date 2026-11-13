@@ -16,6 +16,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 - コマンドの終了コードを確かめる。失敗したコマンドの結果を成功と報告しない。
 - 迷っても質問で止まらない。判断とその理由は PR 本文か Issue のコメントに書いて進める。
 - 止まってよいのは下の「止まる条件」に当てはまるときだけ。止まるときは必ず Issue にコメントし、`needs-human` ラベルを付ける。
+- レビューの委託と、修正⇔レビューの繰り返しは、この手順（手順 8〜9）の内側で自分で行う。指揮役やレビュー担当スレッドからの指示を待たない。
 
 ## 止まる条件
 
@@ -28,6 +29,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | Issue の未決事項に挙がっておらず、避けて進めることもできず、受け入れ条件の成否に関わる判断が必要 | 必要な判断の内容と、避けられない理由。判断を仰ぐ相手（起票者か人間） |
 | `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
+| レビューの委託が 4 ラウンド目に入る（修正 3 回でも Approve が取れない）、委託が 2 回連続で `failed`（`checks pending` は数えない）、複数担当の判定が割れた | どれが起きたかと、試したこと（ラウンド数・担当・effort） |
 
 止まり方（止まった時点で、どの手順の途中でも手順 5 の形で実装者メモを書き、Issue のコメントに続けて貼る。push しないので `docs/worklogs/` には書かなくてよい）:
 
@@ -131,23 +133,81 @@ scripts/agent-gh dev pr view <PR 番号> --json number,isDraft,author --jq '{num
 
 `author` が `app/pelway-dev` でなければ、止まる条件と同じ扱いにする。
 
-### 8. レビューで Approve されたら Ready for review にする
+PR を作ったら、T3 のスレッドに PR を紐付ける（`link_pull_request`。マージでスレッドが自動的に settle される）。
 
-Grok Bot から「Approve された」と届いたら、次を実行する。レビュー担当の App には Draft を解除する権限がないため、実装担当が行う。
+### 8. レビューを委託する
+
+PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。チェックがまだ動いていれば、完了を待ってから委託する（待つ間は skill `pr-watch` の `pr-digest --watch` をバックグラウンドで使う。委託した子が `error: checks pending` を報告したときも、同じラウンドとして数えずに完了を待って再委託する）。
+
+担当と effort は skill `command-team` の「レビュー担当と effort」の表で決める（通常は PR 番号の偶奇、高リスクは使える担当全て、抜き取りは PR 番号を 4 で割った余りが 0 のとき Claude を追加。自分が Devin CLI で実装した PR には Devin CLI を付けない）。差分が `unsafe` を足している、`.github/workflows/`・`scripts/agent-gh`・`AGENTS.md`・`.agents/skills/`・`docs/agents/` のどれかが変わっている、認証・認可・トークン・鍵・暗号・sandbox・egress・gateway・テナント分離・監査に触れている、のどれかに当たるときは Assigned 行に `security=yes` を付ける。
+
+`delegate_task` で、ラウンドごとに新規に委託する（同じ委託への追記送信はしない）。task は次の 2 行にする（1 行目が skill 指示、2 行目が割り当ての行）:
+
+```
+PR #<M> をレビューする。skill review-pr に従う。
+Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes
+```
+
+`security=yes` が不要なときは書かない。target・mode は担当に応じる:
+
+| 担当 | `target.providerInstanceId` | `target.model` | `target.options` |
+|---|---|---|---|
+| codex | `codex_review` | `gpt-6-luna` | `reasoningEffort: <effort>` |
+| claude | `claude_review` | `claude-opus-5-5` | `effort: <effort>` |
+| devin | `acpRegistry_devin` | `swe-2-high` | `thought_level: <effort>`、`mode: smart` |
+
+これに `role: "review"`、`runtimeMode: "auto-accept-edits"`、`isolation: "worktree"` を付ける。委託したら返答を終えて完了の通知を待つ（ポーリングしない）。高リスクで複数担当にしたときは、全員の結果がそろうまで次に進まない。
+
+差分が `scripts/agent-gh` を変えるときはレビューを委託しない。終わりの報告で `ready:` の行を書かずに止まり、指揮役が main から立てるレビュースレッドに回るのを待つ（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
+
+### 9. レビュー結果を処理する
+
+委託の子の報告（`pr:` / `verdict:` / `must-fix:`）を、GitHub の実状態と突き合わせてから扱う:
+
+```bash
+scripts/agent-gh dev pr view <PR 番号> --json reviews --jq '.reviews[-1] | {author: .author.login, state}'
+```
+
+`pelway-review` の最新レビューの状態が報告と一致しなければ、もう一度読んで確かめる。
+
+Request changes のとき:
+
+1. must-fix を直す（nit は直さない）
+2. 手順 5（実装者メモ）と手順 6（verify・コミット・push）をやり直す。PR は作り直さず、本文の sha を更新する
+3. ラウンドサマリーを PR にコメントする（下の形）
+4. 手順 8 でレビューを再委託する。3 ラウンド目の委託では effort を 1 段上げる。4 ラウンド目に入る前に Approve が取れていなければ、止まる条件の形でエスカレーションする
+
+Approve のとき:
+
+1. ラウンドサマリーを PR にコメントする（下の形）
+2. Draft を解除する（レビュー担当の App には権限がないため、実装担当が行う）
 
 ```bash
 scripts/agent-gh dev pr ready <PR 番号>
 ```
 
-### 9. 終わりの報告
+3. 手順 10 に進む
+
+複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）修正を続けず、止まる条件の形でエスカレーションする。委託の子が `failed` を報告したら、`error: checks pending` は待って同じラウンドを数えずに再委託し、それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
+
+ラウンドサマリーは `scripts/agent-gh dev pr comment <PR 番号> --body-file -` で投稿する:
+
+```
+### review round <R>
+Reviewer: agent=<担当> model=<モデル名> effort=<effort>
+verdict: approve | request-changes（must-fix <件数>）
+must-fix: <対応した内容。Approve のときは「なし」>
+```
+
+### 10. 終わりの報告
 
 最後の返答は次の 5 行だけにする。Grok Bot はこの 5 行だけを読む。
 
 ```
 issue: #<N>
 pr: <PR の URL>
-verify: pass | fail
-pr-size: +<追加行数> / -<削除行数>（上限は追加 800、削除 2000）
+review: <ラウンド数> → approve
+ready: done
 memo: docs/worklogs/issue-<N>.md（round <R>）
 ```
 
@@ -157,6 +217,8 @@ memo: docs/worklogs/issue-<N>.md（round <R>）
 
 | 失敗 | 正しくは |
 |---|---|
+| レビューの結果を指揮役の指示として待つ | レビューの委託と修正は自分で回す（手順 8〜9） |
+| レビューの報告だけで GitHub を確かめずに進む | 報告は `pr view --json reviews` の実状態と突き合わせてから進む |
 | レビューの nit まで先回りして直す | 修正依頼に書かれた must-fix だけ直す。nit は指示があったときだけ |
 | テストを実行せずに「TDD で実装した」と書く | 失敗した出力と成功した出力を両方貼る |
 | 修正のたびに新しいブランチを作る | 同じブランチに積む |
