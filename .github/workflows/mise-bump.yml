@@ -52,7 +52,7 @@ jobs:
     steps:
       - name: Checkout
         # git push に認証情報を使うため persist-credentials は既定（有効）のまま残す。
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7.0.1
 
       # mise 本体とプロジェクトツールを導入する。verify.yml と同じピン
       # （jdx/mise-action v2.4.4 / mise v2026.11.5 / cache: false）。
