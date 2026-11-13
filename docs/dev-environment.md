@@ -222,11 +222,11 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 | ネットワーク制限の結果（`api.github.com` と `github.com` だけにつながるか。`curl -sS https://example.com` が失敗したか） | 未実施 | — |
 | Codex 側（`codex_review`）との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 未記入 | — |
 
-## レビュー担当の Devin（acpRegistry_devin）
+## レビュー担当の Devin CLI（acpRegistry_devin）
 
-通常の PR の Codex とのローテーションと、高リスク PR の 3 人目のレビュースレッドは、T3 の Devin インスタンス `acpRegistry_devin` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。モデルは `swe-2-high`。Devin には `runtimeMode` の指定が無く、権限はモデルの `mode` オプションで `smart` までに限る（`bypass` は使わない）。`thought_level` と `speed` はスレッドを立てるときの `modelSelection.options` に入れる。
+通常の PR の Codex とのローテーションと、高リスク PR の 3 人目のレビュースレッドは、T3 の Devin CLI インスタンス `acpRegistry_devin` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。モデルは `swe-2-high`。Devin CLI には `runtimeMode` の指定が無く、権限はモデルの `mode` オプションで `smart` までに限る（`bypass` は使わない）。`thought_level` と `speed` はスレッドを立てるときの `modelSelection.options` に入れる。
 
-Codex・Claude のレビュー担当と違い、Devin にはネットワークを `api.github.com` と `github.com` だけに絞る設定が無い。手順上のルール（「PR のコードを実行しない」など）だけでは外部通信を遮断できず、PR の説明や差分に埋め込まれた攻撃者制御の指示でレビュー環境の情報を外部へ送信しうる。このため Devin のレビューには、GitHub 以外への通信と任意コマンドの実行を実行時に遮断する仕組み（sandbox やプロキシ）をレビュー環境に用意することが前提になる。その仕組みが無い間はレビューに `acpRegistry_devin` を使わない。
+Codex・Claude のレビュー担当と違い、Devin CLI にはネットワークを `api.github.com` と `github.com` だけに絞る設定が無い。手順上のルール（「PR のコードを実行しない」など）だけでは外部通信を遮断できず、PR の説明や差分に埋め込まれた攻撃者制御の指示でレビュー環境の情報を外部へ送信しうる。このため Devin CLI のレビューには、GitHub 以外への通信と任意コマンドの実行を実行時に遮断する仕組み（sandbox やプロキシ）をレビュー環境に用意することが前提になる。その仕組みが無い間はレビューに `acpRegistry_devin` を使わない。
 
 運用に入る前に、遮断する仕組みを有効にした状態で `mode=smart` のレビュースレッドを立て、次を確かめる。確かめるまではレビューに `acpRegistry_devin` を使わない。
 
@@ -242,7 +242,7 @@ Codex・Claude のレビュー担当と違い、Devin にはネットワーク�
 
 | 項目 | 結果 | 実施日 |
 |---|---|---|
-| 実施日（レビュー用の Devin スレッドの初回起動を含む） | 未実施 | — |
+| 実施日（レビュー用の Devin CLI スレッドの初回起動を含む） | 未実施 | — |
 | 遮断する仕組み（名前と設定場所。無ければ「仕組みなし」で確認は打ち切り） | 未記入 | — |
 | ネットワーク制限の結果（`api.github.com` と `github.com` だけにつながるか。`curl -sS https://example.com` が失敗したか） | 未実施 | — |
 | コマンドの制限の結果（遮断を迂回する任意コマンドが拒否されたか） | 未実施 | — |

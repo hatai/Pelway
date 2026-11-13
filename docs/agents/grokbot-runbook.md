@@ -28,9 +28,9 @@ Grok Bot は Issue を実装スレッドとレビュースレッドに割り振�
 | スレッド | 同時に動かす上限 | 数え方 |
 |---|---|---|
 | 実装・調査（opencode `zai-coding-plan/glm-5.3`） | 3 | `agent:working` が付いていて、PR が Ready for review になっていない Issue のうち、対応スレッド（ブランチ `agent/<N>-`）の `providerInstanceId` が `opencode` のものの数と、実行中の調査スレッドの数の合計 |
-| 実装（Devin `swe-2-high`） | 6 | `agent:working` が付いていて、PR が Ready for review になっていない Issue のうち、対応スレッドの `providerInstanceId` が `acpRegistry_devin` のものの数 |
+| 実装（Devin CLI `swe-2-high`） | 6 | `agent:working` が付いていて、PR が Ready for review になっていない Issue のうち、対応スレッドの `providerInstanceId` が `acpRegistry_devin` のものの数 |
 | レビュー（Codex `codex_review`） | 2 | 実行中（`running`）の Codex のレビュースレッドの数 |
-| レビュー（Devin） | 2 | 実行中の Devin のレビュースレッドの数。`docs/dev-environment.md` の「レビュー担当の Devin」の確認が済むまでは 0 |
+| レビュー（Devin CLI） | 2 | 実行中の Devin CLI のレビュースレッドの数。`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまでは 0 |
 | レビュー（Claude `claude_review`） | 1 | 実行中の Claude のレビュースレッドの数。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは 0 |
 
 上限に達しているときは新しいスレッドを立てない。空きが出たら、待っているものを次の順で始める。
@@ -45,21 +45,21 @@ Grok Bot は Issue を実装スレッドとレビュースレッドに割り振�
 
 `ready-for-agent` の付いた Issue があり、実装の枠が空いているとき。
 
-1. Issue から `ready-for-agent` を外し、`agent:working` を付ける。Devin に割り当てるときは `agent:devin` も付ける
+1. Issue から `ready-for-agent` を外し、`agent:working` を付ける。Devin CLI に割り当てるときは `agent:devin` も付ける
 2. 実装スレッドを立てる
 
 ```
 t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree main --branch agent/<N>-<slug> --title "[実装] #<N> <要約>" <Pelway のパス> "Issue #<N> を実装する。skill implement-issue に従う。"
 ```
 
-Devin に割り当てるときは次で立てる。
+Devin CLI に割り当てるときは次で立てる。
 
 ```
 t3 thread start --provider acpRegistry_devin --model swe-2-high --worktree main --branch agent/<N>-<slug> --title "[実装] #<N> <要約>" <Pelway のパス> "Issue #<N> を実装する。skill implement-issue に従う。
 Assigned: role=implement agent=devin model=swe-2-high effort=<medium|high|max>"
 ```
 
-`<slug>` は Issue の題名を英小文字とハイフンで 3〜5 語にしたもの。effort（opencode の variant、Devin の `thought_level`）は skill `command-team` の「実装のモデルと effort」で決め、MCP の `t3_thread_launch` で立てるときは `modelSelection.options` に入れる。Devin の `mode` は `smart` までに限り、`bypass` は使わない（正本は `docs/superpowers/specs/agent-team.md` の「制約」）。
+`<slug>` は Issue の題名を英小文字とハイフンで 3〜5 語にしたもの。effort（opencode の variant、Devin CLI の `thought_level`）は skill `command-team` の「実装のモデルと effort」で決め、MCP の `t3_thread_launch` で立てるときは `modelSelection.options` に入れる。Devin CLI の `mode` は `smart` までに限り、`bypass` は使わない（正本は `docs/superpowers/specs/agent-team.md` の「制約」）。
 
 ### レビューを始める
 
@@ -75,7 +75,7 @@ T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-ac
 
 `codex_review` はネットワークを GitHub だけに絞った Codex（`docs/dev-environment.md` の「レビュー担当の Codex」）。`<k>` はその PR のレビュースレッドの通し番号（1 から）。worktree は必ず `main` から作る（レビュー担当は worktree の `scripts/agent-gh` を使うため、PR やほかのブランチの版を使わない）。
 
-レビュー担当（誰に付けるか）と effort は skill `command-team` の「レビュー担当と effort」で決める。Claude のレビュースレッドは `--provider claude_review --model claude-opus-5-5`、ブランチは `review/<M>-c<k>` にし、同じく `auto-accept-edits` で立てる。Devin のレビュースレッドは `--provider acpRegistry_devin --model swe-2-high`、ブランチは `review/<M>-d<k>` にする。Devin には `runtimeMode` の指定が無く、権限はモデルの `mode` オプションで `smart` までに限る（`bypass` は使わない）。effort（`thought_level`）は `modelSelection.options` に入れる。
+レビュー担当（誰に付けるか）と effort は skill `command-team` の「レビュー担当と effort」で決める。Claude のレビュースレッドは `--provider claude_review --model claude-opus-5-5`、ブランチは `review/<M>-c<k>` にし、同じく `auto-accept-edits` で立てる。Devin CLI のレビュースレッドは `--provider acpRegistry_devin --model swe-2-high`、ブランチは `review/<M>-d<k>` にする。Devin CLI には `runtimeMode` の指定が無く、権限はモデルの `mode` オプションで `smart` までに限る（`bypass` は使わない）。effort（`thought_level`）は `modelSelection.options` に入れる。
 
 PR を Projects ボードに載せる（ボードの組み込みワークフローがレビューの状態を反映するのは、ボードに載っている PR だけ）。
 
