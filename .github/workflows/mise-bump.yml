@@ -55,7 +55,7 @@ jobs:
         uses: actions/checkout@v7.0.1
 
       # mise 本体とプロジェクトツールを導入する。verify.yml と同じピン
-      # （jdx/mise-action v2.4.4 / mise v2026.11.5 / cache: false）。
+      # （jdx/mise-action v5.2.7 / mise v2026.11.5 / cache: false）。
       # install は省略できない: ツールが未導入（[MISSING]）の状態で mise upgrade を
       # 実行すると、各ツールを「最新の eligible 版」として install しようとし、
       # 公開から日が浅いピン（例: jactionlint 2.5.0）を旧版へ書き戻してしまう。
@@ -72,12 +72,20 @@ jobs:
 
       # PR 本文用に、bump 前の「ツール / 現行 / 最新」一覧を取っておく。
       # 失敗しても bump 自体は続行する（本文が空になるだけ）。
+      # mise-action v5.1.1 以降、action の GitHub token は後続の step に渡らない
+      # （persist_github_token の既定は false）。GitHub API で最新版を調べる次の 2 step にだけ、
+      # step の env で token を渡す。persist_github_token: true にすると、push や PR 作成の
+      # step も含むジョブの全 step に token が渡るため使わない。
       - name: Capture outdated tools
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
         run: mise outdated --bump --no-global 2>&1 | tee /tmp/mise-outdated.txt || true
 
       # mise.toml と mise.lock をまとめて更新する。--bump で「要求範囲内の最新」ではなく
       # 最新版に上げ、mise.toml の要求値自体を書き換える。
       - name: Bump mise tools
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
         run: mise upgrade --bump --no-global --minimum-release-age 7d --yes
 
       # 更新が無ければここで終わる（PR は作らない）。
