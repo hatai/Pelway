@@ -13,13 +13,15 @@ comment:
   if: is_pull_request
   updatePrevious: true
 
-# 公式 v0.83.5 の datastores による保存と比較（README「Comment report to pull request」の例と同じ形。
-# diff.storage は v0.83.5 の README に存在しない書き方のため使わない）。
+# 公式 v0.83.5 の datastores による保存と比較（README「Comment report to pull request」と
+# octocov-action の公式例と同じ形。diff.storage は v0.83.5 の README に存在しない書き方のため使わない）。
 # report: がこの run のレポートを artifact に保存し、diff: が base ブランチ（main）のレポートを読む。
-# main 側のレポートは main での run でしか保存されないため、増減は main でレポートが保存された
-# あとの PR から出る。比較相手が無いことでは run は落ちないが、保存（report.datastores）の失敗は
+# report.if: is_default_branch で保存を main の run に限る（diff が読むのは base ブランチの
+# レポートのため、PR の run が保存する必要は無い）。増減は main でレポートが保存されたあとの
+# PR から出る。比較相手が無いことでは run は落ちないが、保存（report.datastores）の失敗は
 # run を落とす（README「Exit status」）。
 report:
+  if: is_default_branch
   datastores:
     - artifact://${GITHUB_REPOSITORY}
 diff:

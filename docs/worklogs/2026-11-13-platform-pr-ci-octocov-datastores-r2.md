@@ -40,3 +40,30 @@
 ## コミット
 
 - `ci: store octocov reports via datastores and run verify on main`（.octocov.yml・.github/workflows/verify.yml・docs/dev-environment.md・本作業ログ）。
+
+## 修正1: coverage ジョブの octocov 保存失敗（PR #268 の CI、5d879e6）
+
+### 失敗の内容
+
+- PR #268 の最初の CI で `octocov (coverage diff)` のみ失敗（ほかの必須チェックは合格）。ログ: `Storing report...` のあと `Error: env ACTIONS_RUNTIME_TOKEN is only available from the context of an action`（exit 1）。
+- 原因: artifact へのレポート保存には ACTIONS_RUNTIME_TOKEN が必要だが、これは `run:` ステップには渡されず action（`uses:`）のコンテキストでしか取れない。octocov リポジトリ自身の CI にも同じ趣旨のコメントがある（`.github/workflows/ci.yml`「Uploading the page needs ACTIONS_RUNTIME_TOKEN, which a run step is not given」）。README v0.83.5 の Artifacts の節（L1121-1142）にこの記載は無い。
+
+### 直し（公式の octocov-action 経由に変更）
+
+- `.github/workflows/verify.yml`: `Run octocov` を `run: mise exec -- octocov` から `uses: k1LoW/octocov-action@v1.5.2`（`version: 0.83.5` + `checksum` 付き）に変更。action は内部で gh-setup が octocov 本体を導入し actions/github-script（action コンテキスト＝ランタイムトークンあり）から実行する。
+- チェックサムの根拠: v0.83.5 の linux_amd64 アセットは `octocov_v0.83.5_linux_amd64.tar.gz`（asset id 711698412）1つだけ（zip は darwin/windows のみ。deb/rpm/apk は gh-setup の content-type 対応外で除外される）。mise.lock の linux-x64 エントリと同一アセットのため、同じ sha256（`3aa6973a…555d8e9c`）を流用。gh-setup の checksum は `sha256:<hex>` 形式に対応、`application/x-gtar` は対応 content-type に含まれる（いずれも k1LoW/gh-setup の gh/gh.go で確認）。
+- 同ワークフローの coverage ジョブ権限: `actions: read` → `actions: write`。octocov-action の公式例が「過去レポートの取得と default ブランチの現行レポート artifact の削除」に `actions: write` を付与するため。
+- `.octocov.yml`: `report:` に `if: is_default_branch` を追加（octocov-action の公式例と同じ形。diff が読むのは base ブランチのレポートのため、PR の run は保存しない）。
+- `.github/workflows/actions.lock`: `scripts/agent-gh dev actions-lock` で再生成（octocov-action@v1.5.2 と、その複合アクション内の依存 k1Low/gh-setup@v1.11.9・actions/github-script@v9.0.0 が sha 固定で追加）。
+- `docs/dev-environment.md`: CI 節の2文を上記に合わせて更新（actions: write、octocov-action 経由の理由、version+checksum 固定）。
+
+### 検証（修正1）
+
+- `python3 -c "import yaml; …"` → `YAML OK`。
+- `mise exec -- jactionlint .github/workflows/verify.yml` → exit 0（shellcheck 未導入の note のみ）。
+- `scripts/agent-gh dev actions-lock` → 上記の追記で完了（エラーなし）。
+- 実機（PR の再 run で `Run octocov` が action 経由で成功すること）は未検証。push は workflow ファイル変更のため担当が行う。
+
+### コミット（修正1）
+
+- `ci: run octocov via official action for artifact datastore`（.octocov.yml・.github/workflows/verify.yml・.github/workflows/actions.lock・docs/dev-environment.md・本作業ログ）。
