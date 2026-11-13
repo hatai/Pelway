@@ -93,7 +93,7 @@ jobs:
       # - cache: false — mise-action のツールキャッシュは復元内容を mise.lock と突き合わせない
       #   （公式の注意）。リモートキャッシュを使わない方針のため無効化する。追加の cache も足さない。
       # jdx/mise-action のコミット sha は GitHub 公式 lockfile（.github/workflows/actions.lock）
-      # で固定する。workflow 側は公式 lock 生成が書き換えた具体タグ @v2.4.4 を参照する。
+      # で固定する。workflow 側は公式 lock 生成が書き換えた具体タグ @v5.2.7 を参照する。
       - name: Setup mise (official action)
         uses: jdx/mise-action@v5.2.7
         with:
