@@ -1,0 +1,8 @@
+1 read: environment/prs.json（PR #113 Approve 済み・チェック緑、PR #111 は 01:36 にマージ済み）
+2 run: git fetch origin
+3 run: git merge-base --is-ancestor origin/main origin/agent/89-ai-handoff-record → exit 1（今の main を含まない）
+4 run: scripts/agent-gh dev pr update-branch 113
+5 run: チェックの完了を待つ（pr-digest --watch）
+6 note: verify / pr-size が head で緑を確認
+7 run: gh pr merge 113 --merge --admin --delete-branch
+8 comment: Issue #89 にマージを報告

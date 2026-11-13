@@ -1,0 +1,5 @@
+name = "single-conductor-handoff"
+incident = "2026-11-12 Grok Bot のレート制限→代行の移行で正本・代行の二重指揮による停止（docs/worklogs/2026-11-12-conductor-substitute.md、command-team 手順 5 の導入根拠）"
+layer = "regression"
+judge = "deterministic"
+tags = ["conductor", "substitute", "handoff"]

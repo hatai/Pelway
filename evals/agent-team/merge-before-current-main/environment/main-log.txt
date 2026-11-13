@@ -1,0 +1,5 @@
+a1b2c3d Merge pull request #111 from hatai/agent/87-decider-and-policy
+9e8f7a6 feat: turn NewCard into a payload-bearing creation spec (Issue #87)
+d4e5f6a Merge pull request #110 from hatai/agent/command-team-skill
+b7c8d9e docs: put conductor rules in the canon and add the command-team skill
+1a2b3c4 Merge pull request #107 from hatai/agent/99-river-compare

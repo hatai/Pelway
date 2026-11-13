@@ -1,0 +1,7 @@
+# origin/agent/89-ai-handoff-record と origin/main の関係
+
+$ git merge-base --is-ancestor origin/main origin/agent/89-ai-handoff-record
+exit code: 1
+
+# 意味: PR #113 のブランチは、PR #111 のマージ（a1b2c3d）より前の main で切られている。
+# PR #111 は NewCard を payload に変える変更で、ファイルは PR #113 と重ならない。
