@@ -69,8 +69,8 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 
 ## GitHub からの通知
 
-- `notify-grokbot.yml` が送るのは、PR のクローズ（マージを含む）、レビューの投稿（OWNER / MEMBER / COLLABORATOR のもの）、verify の完了だけ
-- payload に `urgency` を付ける。`digest`（まとめにだけ反映）は verify の成功と、Approve のレビュー。それ以外は `immediate`
+- `notify-grokbot.yml` が送るのは、PR のクローズ（マージを含む）、レビューの投稿（OWNER / MEMBER / COLLABORATOR のもの）、verify と nightly（main の総点検）の完了だけ
+- payload に `urgency` を付ける。`digest`（まとめにだけ反映）は workflow_run の成功（verify・nightly）と、Approve のレビュー。それ以外は `immediate`
 - Grok Bot は `digest` を 9:00 と 18:00（日本時間）の 1 日 2 回のまとめにだけ反映する。部屋で聞かれたときはその場で答える
 
 ## レビュー担当の権限

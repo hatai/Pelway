@@ -149,14 +149,31 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 - `.github/workflows/mise-bump.yml` が、毎週月曜（UTC）と手動実行で、`mise upgrade --bump --no-global --minimum-release-age 7d --yes` により `[tools]` のバージョンを更新し、`chore/mise-tools-bump` ブランチのローリング PR を1本作る・更新する。dependabot は mise.toml を解釈できないため mise 自身に更新させる（rust の inline table を含む mise.toml と mise.lock を一貫して書き換える）。`--minimum-release-age 7d` で公開直後の版を除外する。mise 本体（`min_version`・mise-action の `version` ピン）は対象外。PR 作成は `GITHUB_TOKEN` + `gh` CLI で、専用 action は使わない。workflow レベルの `permissions` は空で、bump ジョブにだけ `contents: write` / `pull-requests: write` を付与する。GITHUB_TOKEN 製 PR の `pull_request` run は承認待ちになるため、`verify` が自動で走らない場合は PR の checks から `Approve workflows to run` を一度押す。
 - GitHub 上での実際の run は未確認（作業ログ: `docs/worklogs/2026-11-10-platform-pr-ci-r1.md`）。
 
+### nightly（main の総点検）
+
+- `.github/workflows/nightly.yml` が、毎日 21:00 UTC（06:00 JST）と手動実行（`workflow_dispatch`）で main に対して実行する。PR の verify では回せない重い検査を対象にし、merge 後の main の劣化を翌朝の指揮役の巡回までに検出する（Issue #180）。
+- ジョブ構成:
+
+| ジョブ | 実行するもの | PR の verify との違い |
+|---|---|---|
+| `test` | `mise run verify-test`（`cargo test --workspace`＋script-test）を PostgreSQL ありで実行 | PR では `PELWAY_DATABASE_URL` 未設定のため飛ぶ DB 結合テスト（pelway-db の RLS、dev-queue-compare のキュー比較）が実際に走る |
+| `hk-all` | `mise exec -- hk check --all`（cargo を伴うステップを含む全ステップ） | PR の hk-check タスクは cargo を伴わない 3 ステップ（typos / trailing_whitespace / newlines）だけ |
+| `deps` | `mise run deny-check`（cargo-deny） | コードが変わらなくても新規 advisory で落ちうるため、main に対して毎晩確かめ直す |
+| `docs-v07` | `python3 docs/technical/v0.7/verification/verify.py` | PR では実行していない文書検証 |
+
+- fmt / clippy / fnox / pitchfork / jactionlint 等は PR の verify が各 PR で検査済みのため nightly では走らせない。
+- `test` ジョブの PostgreSQL は `postgres:16-alpine` を digest 固定した service コンテナ（`PELWAY_DATABASE_URL` はスーパーユーザーの `postgres` ユーザー）。scratch database はテストごとに作られ、終了時に消える。
+- v0.7 の verify.py は、原本（`/workspace/pelway-technical-docs`）と凍結 ZIP が原本作成環境にだけ存在するため、それらを `not-run` として結果 JSON に記録し、リポジトリ内で確かめられる検査（コピーの hash・相対リンク・節対応・アンカー・UI 文言）だけで合否を判定する。
+- 通知は `notify-grokbot.yml` の `workflow_run`（`workflows` に `nightly` を登録）が担う。成功は `digest`、失敗は `immediate` で Grok Bot に届き、`run_url` から失敗ジョブを確認できる。
+
 ## GitHub 通知（Grok Bot webhook・notify-grokbot）
 
-`.github/workflows/notify-grokbot.yml` が、Grok Bot が動く必要のあるイベント（PR のクローズ（マージを含む）、レビューの投稿、verify workflow の完了（`workflow_run`））と手動実行（`workflow_dispatch`）を Grok Bot の webhook に POST する。エージェントのスレッドの状態は見張り役 `agent-watch` が別に送る（「pitchfork について」参照）。送るのはメタデータのみで、PR タイトル・本文、コメント本文、レビュー本文、ラベル、メールアドレス等は送らない。
+`.github/workflows/notify-grokbot.yml` が、Grok Bot が動く必要のあるイベント（PR のクローズ（マージを含む）、レビューの投稿、verify・nightly workflow の完了（`workflow_run`））と手動実行（`workflow_dispatch`）を Grok Bot の webhook に POST する。エージェントのスレッドの状態は見張り役 `agent-watch` が別に送る（「pitchfork について」参照）。送るのはメタデータのみで、PR タイトル・本文、コメント本文、レビュー本文、ラベル、メールアドレス等は送らない。
 
 - Secret（リポジトリの Settings → Secrets and variables → Actions → New repository secret で登録。値はドキュメント・コードに置かない）:
   - `GROKBOT_WEBHOOK_URL` — webhook の URL
   - `GROKBOT_WEBHOOK_AUTH` — `Authorization` ヘッダーの値全体
-- 送る JSON のキーは 14 個固定: `schema`（`"pelway.github-notify/v2"`）, `urgency`（`digest` は verify の成功と Approve のレビュー、それ以外は `immediate`）, `repo`, `event`, `action`, `pr_number`, `head_branch`, `head_sha`, `merged`, `conclusion`, `workflow_name`, `run_url`, `actor`, `occurred_at`。値の無いものは `null`。
+- 送る JSON のキーは 14 個固定: `schema`（`"pelway.github-notify/v2"`）, `urgency`（`digest` は workflow_run の成功（verify・nightly）と Approve のレビュー、それ以外は `immediate`）, `repo`, `event`, `action`, `pr_number`, `head_branch`, `head_sha`, `merged`, `conclusion`, `workflow_name`, `run_url`, `actor`, `occurred_at`。値の無いものは `null`。
 - 送らない条件（通知をスキップし、ジョブは成功で終わる。CI は落ちない）:
   - 上記 Secret のどちらかが未設定のとき
   - fork 由来のイベント（PR 系は head リポジトリ、workflow_run は head_repository の full_name がこのリポジトリと違うとき）
