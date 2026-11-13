@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# 呼び出しは `bash agent-gh-resign`（実行ビットを付けない。新規の実行ファイルは
+# createCommitOnBranch では表現できず、これ自体が署名できないコミットになるため。
+# 同じ理由で 100644 の scripts/deny-warn-extract.sh と同じ置き方にする）。
+# push 済みブランチの署名なしコミットを、GitHub の createCommitOnBranch で作り直した
+# 署名付き（Verified）コミットに付け替える。
+# GitHub App の名義ではローカル署名ができない（App アカウントに鍵を登録できない）ため、
+# GraphQL mutation で GitHub 側にコミットを作らせ、GitHub 自身の署名を受ける。
+# 手順: リモート先頭から遡れる署名なしコミットを洗い出し → 全件が API で表現できるか検査
+#   → ブランチを base に巻き戻し → 各コミットの差分を fileChanges として連鎖適用
+#   → 途中失敗時は ref を元の SHA に復元 → 成功したら fetch してローカル ref を揃える
+# 表現できない変更（新規の実行ファイル・mode 変更・symlink・submodule・マージ・空コミット）は
+#   fileChanges では作れないため、その push は警告して署名なしのままにする。
+# scripts/agent-gh が git push の成功後に呼ぶ。手で呼んでもよい。何度実行してもよい。
+# 前提: GH_TOKEN に対象リポジトリへ contents:write のトークンが入っている。
+# 終了コード: 0 = 署名付きにできた・署名の必要が無い・表現不能でスキップ、それ以外 = 途中失敗（ref は復元済み）
+set -euo pipefail
+
+fail() { echo "agent-gh-resign: $1" >&2; exit "${2:-1}"; }
+warn() { echo "agent-gh-resign: $1" >&2; }
+
+# 1. 対象ブランチを決める（引数 > upstream > origin/<現在のブランチ>）
+remote="${1:-}"
+branch="${2:-}"
+if [[ -z "$remote" || -z "$branch" ]]; then
+  upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+  if [[ -n "$upstream" ]]; then
+    remote="${remote:-${upstream%%/*}}"
+    branch="${branch:-${upstream#*/}}"
+  else
+    cur="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    remote="${remote:-origin}"
+    branch="${branch:-$cur}"
+  fi
+fi
+[[ -n "$remote" && -n "$branch" && "$branch" != "HEAD" ]] || exit 0
+
+tracking="refs/remotes/$remote/$branch"
+tip="$(git rev-parse --verify -q "$tracking" 2>/dev/null || true)"
+[[ -n "$tip" ]] || exit 0 # push 先がブランチ以外（タグ等）か、追跡 ref が無い場合は何もしない
+
+# 2. リモートの他 ref から到達できないコミットのうち、署名（gpgsig）が無いものを古い順に取る。
+mapfile -t others < <(git for-each-ref --format='%(refname) %(objectname)' refs/remotes/ |
+  awk -v self="$tracking" '$1 != self {print $2}')
+if ((${#others[@]})); then
+  mapfile -t range < <(git rev-list --topo-order --reverse "$tip" --not "${others[@]}")
+else
+  mapfile -t range < <(git rev-list --topo-order --reverse "$tip")
+fi
+unsigned=()
+for sha in ${range[@]+"${range[@]}"}; do
+  git cat-file -p "$sha" | grep -q '^gpgsig ' || unsigned+=("$sha")
+done
+((${#unsigned[@]})) || exit 0
+
+# 3. 全コミットが fileChanges で表現できるか検査する。
+#    fileChanges は「通常ファイルの内容（追加・変更・削除）」だけを表すため、
+#    マージ・mode 変更・新規の実行ファイル・symlink・submodule・空コミットは作れない。
+#    既存ファイルの内容変更は mode を保つ（100755 のまま）ことを実機で確かめ済み。
+unrep_reasons=()
+for sha in "${unsigned[@]}"; do
+  read -ra parents <<<"$(git log -1 --format=%P "$sha")"
+  if ((${#parents[@]} != 1)); then
+    unrep_reasons+=("$sha: マージまたは親なしコミット")
+    continue
+  fi
+  changed=0
+  while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+    changed=1
+    read -r oldmode newmode _os _ns st <<<"${meta#:}"
+    case "$st" in
+      A)
+        [[ "$newmode" == 100644 ]] || unrep_reasons+=("$sha: 新規ファイル $path の mode $newmode（API は 100644 固定）")
+        ;;
+      M)
+        { [[ "$oldmode" == "$newmode" ]] && [[ "$newmode" == 100644 || "$newmode" == 100755 ]]; } ||
+          unrep_reasons+=("$sha: $path の mode/type が通常ファイルの内容変更ではない（$oldmode → $newmode）")
+        ;;
+      D) ;;
+      *) unrep_reasons+=("$sha: $path の status $st は API では表現できない") ;;
+    esac
+  done < <(git diff-tree -r --no-commit-id --no-renames -z "$sha")
+  ((changed)) || unrep_reasons+=("$sha: 差分の無いコミット（空コミット）は API では作れない")
+done
+if ((${#unrep_reasons[@]})); then
+  warn "createCommitOnBranch で表現できないコミットが含まれるため、この push は署名なしのままにします:"
+  printf '  %s\n' "${unrep_reasons[@]}" >&2
+  exit 0
+fi
+
+# 4. 対象リポジトリの owner/repo を remote の URL から取る。取れなければ gh に解決させる。
+url="$(git remote get-url "$remote" 2>/dev/null || true)"
+repo=""
+case "$url" in
+  git@github.com:*) repo="${url#git@github.com:}" ;;
+  *github.com/*) repo="${url#*github.com/}" ;;
+esac
+repo="${repo%.git}"
+repo="${repo%/}"
+if [[ -z "$repo" ]]; then
+  repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)"
+fi
+[[ -n "$repo" ]] || fail "remote $remote の URL から GitHub のリポジトリ名を特定できません"
+
+# GitHub との fetch / push に使う設定（agent-gh と同じ HTTPS 書き換え + GH_TOKEN 認証）。
+gitcfg=(-c credential.helper= -c 'credential.helper=!gh auth git-credential')
+for kind in insteadOf pushInsteadOf; do
+  gitcfg+=(-c "url.https://github.com/.$kind=git@github.com:" -c "url.https://github.com/.$kind=ssh://git@github.com/")
+done
+
+# 5. リモートの先頭を確かめる。tip と違っていたら、自分の途中状態（base または署名付きの
+#    接頭辞）なら続行し、他人のコミットが積まれていれば中止する。
+remote_head="$(gh api "repos/$repo/git/refs/heads/$branch" --jq .object.sha)" ||
+  fail "リモートの ref を読めません"
+if [[ "$remote_head" != "$tip" ]]; then
+  git "${gitcfg[@]}" fetch -q "$remote" "refs/heads/$branch" 2>/dev/null || true
+  git cat-file -e "$remote_head" 2>/dev/null ||
+    fail "リモートの先頭（$remote_head）をローカルで検証できません"
+  mapfile -t rchain < <(git rev-list --topo-order --reverse "$remote_head" --not ${others[@]+"${others[@]}"} 2>/dev/null || true)
+  ok=1
+  ((${#rchain[@]} <= ${#unsigned[@]})) || ok=0
+  for i in "${!rchain[@]}"; do
+    git cat-file -p "${rchain[$i]}" | grep -q '^gpgsig ' || ok=0
+    [[ "$(git rev-parse "${rchain[$i]}^{tree}" 2>/dev/null)" == "$(git rev-parse "${unsigned[$i]}^{tree}")" ]] || ok=0
+  done
+  ((ok)) || fail "リモートの先頭が想定外です（$remote_head）。手で確かめてから再実行してください" 4
+fi
+
+base="$(git rev-parse "${unsigned[0]}^")"
+
+restore_ref() {
+  gh api -X PATCH "repos/$repo/git/refs/heads/$branch" --input - \
+    <<<"$(jq -n --arg sha "$1" '{sha: $sha, force: true}')" >/dev/null
+}
+
+# 6. ブランチを base に巻き戻し、コミットを 1 つずつ createCommitOnBranch で積み直す。
+restore_ref "$base" || fail "ブランチの巻き戻しに失敗しました（リモートは $remote_head のまま）" 4
+
+prev="$base"
+new_tip=""
+for sha in "${unsigned[@]}"; do
+  headline="$(git log -1 --format=%s "$sha")"
+  body="$(git log -1 --format=%b "$sha")"
+  adds='[]'
+  dels='[]'
+  while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+    read -r _om _nm _os _ns st <<<"${meta#:}"
+    if [[ "$st" == "D" ]]; then
+      dels="$(jq --arg path "$path" '. + [{path: $path}]' <<<"$dels")"
+    else
+      adds="$(jq --arg path "$path" --arg contents "$(git show "$sha:$path" | base64 -w0)" \
+        '. + [{path: $path, contents: $contents}]' <<<"$adds")"
+    fi
+  done < <(git diff-tree -r --no-commit-id --no-renames -z "$sha")
+  req="$(jq -n --arg repo "$repo" --arg branch "$branch" --arg head "$prev" \
+    --arg headline "$headline" --arg body "$body" --argjson adds "$adds" --argjson dels "$dels" \
+    '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
+      variables: {input: {branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+        expectedHeadOid: $head, message: {headline: $headline, body: $body},
+        fileChanges: {additions: $adds, deletions: $dels}}}}')"
+  if ! resp="$(gh api graphql --input - <<<"$req")"; then
+    restore_ref "$remote_head" || warn "ref の復元にも失敗しました。手で origin/$branch を $remote_head に戻してください"
+    fail "createCommitOnBranch の呼び出しに失敗しました（$sha）。ref は $remote_head に復元済みです" 4
+  fi
+  new_tip="$(jq -r '.data.createCommitOnBranch.commit.oid // empty' <<<"$resp")"
+  if [[ -z "$new_tip" ]]; then
+    restore_ref "$remote_head" || warn "ref の復元にも失敗しました。手で origin/$branch を $remote_head に戻してください"
+    fail "createCommitOnBranch がエラーを返しました（$sha）: $(jq -r '[.errors[]?.message] | join("; ")' <<<"$resp" 2>/dev/null || echo "$resp")" 4
+  fi
+  prev="$new_tip"
+done
+
+# 7. 署名付きオブジェクトをローカルに取り、追跡 ref と、古い tip を指すローカルブランチを揃える。
+git "${gitcfg[@]}" fetch -q "$remote" "refs/heads/$branch" ||
+  fail "署名付きコミットの fetch に失敗しました。リモートは署名付きのままです" 4
+git update-ref "$tracking" "$new_tip"
+while IFS= read -r ref; do
+  git update-ref "$ref" "$new_tip"
+done < <(git for-each-ref --format='%(refname)' --points-at "$tip" refs/heads/)
+
+echo "agent-gh-resign: ${#unsigned[@]} 件のコミットを署名付きに付け替えました（$branch: ${tip:0:7} → ${new_tip:0:7}）" >&2

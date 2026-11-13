@@ -46,10 +46,10 @@ fi
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
 EOF
 
-# 偽の git: GH_TOKEN と引数を記録する。
+# 偽の git: GH_TOKEN と引数を追記する（push 後の agent-gh-resign からの呼び出しも残すため追記）。
 cat >"$BIN/git" <<'EOF'
 #!/usr/bin/env bash
-{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
+{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
 EOF
 chmod +x "$BIN"/*
 
@@ -108,6 +108,8 @@ run dev_git_identity dev git commit -m x
 expect_log dev_git_identity "GH_TOKEN=dev-token"
 expect_log dev_git_identity "-c user.name=pelway-dev[bot]"
 expect_log dev_git_identity "-c user.email=9+pelway-dev[bot]@users.noreply.github.com"
+# 環境の署名設定が App 名義のコミットに混ざらないよう、ローカル署名は常に切る
+expect_log dev_git_identity "-c commit.gpgsign=false"
 expect_log dev_git_identity "-c credential.helper= -c credential.helper=!gh auth git-credential"
 expect_log dev_git_identity "commit -m x"
 # origin が SSH でも、push / fetch を HTTPS（= GH_TOKEN の名義）に向ける。SSH のままだと hatai の鍵で push される。
@@ -115,6 +117,27 @@ expect_log dev_git_identity "-c url.https://github.com/.insteadOf=git@github.com
 expect_log dev_git_identity "-c url.https://github.com/.insteadOf=ssh://git@github.com/"
 expect_log dev_git_identity "-c url.https://github.com/.pushInsteadOf=git@github.com:"
 expect_log dev_git_identity "-c url.https://github.com/.pushInsteadOf=ssh://git@github.com/"
+
+# git push の成功後は agent-gh-resign が upstream の確かめ（rev-parse @{u}）まで走る。
+# リポジトリ外で動かす（resign は upstream が無ければ何もしない）。
+mkdir -p "$ROOT/norepo"
+export CALL_LOG="$ROOT/dev_git_push.log"
+rm -f "$CALL_LOG"
+(cd "$ROOT/norepo" && bash "$SCRIPT" dev git push -u origin HEAD >/dev/null 2>&1)
+push_rc=$?
+[[ "$push_rc" == 0 ]] || failures+=("dev_git_push: exit $push_rc, want 0")
+expect_log dev_git_push "push -u origin HEAD"
+# resign が upstream を確かめる rev-parse を呼んだ形跡（= push 後に走った証拠）
+expect_log dev_git_push "rev-parse --abbrev-ref --symbolic-full-name @{u}"
+
+# PELWAY_AGENT_SKIP_RESIGN=1 のときは resign を呼ばない
+export CALL_LOG="$ROOT/dev_git_push_skip.log"
+rm -f "$CALL_LOG"
+(cd "$ROOT/norepo" && PELWAY_AGENT_SKIP_RESIGN=1 bash "$SCRIPT" dev git push >/dev/null 2>&1)
+push_rc=$?
+[[ "$push_rc" == 0 ]] || failures+=("dev_git_push_skip: exit $push_rc, want 0")
+expect_log dev_git_push_skip "push"
+! grep -qF 'rev-parse' "$ROOT/dev_git_push_skip.log" || failures+=("dev_git_push_skip: resign ran despite skip")
 
 run bad_role admin pr list
 [[ "$RC" == 2 ]] || failures+=("bad_role: exit $RC, want 2")

@@ -28,7 +28,8 @@ help() {
     "  $0 -h | --help                      この使い方を標準出力に出して終了する" \
     "" \
     "呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。" \
-    "終了コード: 2 = 役割の誤り、3 = トークンを取れない、それ以外は gh / git の終了コード"
+    "git push の成功後は scripts/agent-gh-resign がコミットを GitHub API の署名付きに付け替える（止めるときは PELWAY_AGENT_SKIP_RESIGN=1）。" \
+    "終了コード: 2 = 役割の誤り、3 = トークンを取れない、4 = 署名の付け替えに失敗、それ以外は gh / git の終了コード"
   exit 0
 }
 
@@ -89,12 +90,26 @@ if [[ "${1:-}" == "git" ]]; then
   shift
   # origin が SSH（git@github.com:）だと credential helper は使われず、hatai の SSH 鍵で認証される。
   # GitHub への URL を HTTPS に書き換え、GH_TOKEN の名義で認証させる。
-  https_rewrite=()
+  # commit.gpgsign=false: 環境の署名設定（hatai の鍵）が App 名義のコミットに混ざるのを防ぐ。
+  # 署名は push 後に agent-gh-resign が GitHub API で付け直す（GitHub App の Verified 署名）。
+  git_cfg=("${git_identity[@]}" -c commit.gpgsign=false)
   for kind in insteadOf pushInsteadOf; do
-    https_rewrite+=(-c "url.https://github.com/.$kind=git@github.com:" -c "url.https://github.com/.$kind=ssh://git@github.com/")
+    git_cfg+=(-c "url.https://github.com/.$kind=git@github.com:" -c "url.https://github.com/.$kind=ssh://git@github.com/")
   done
-  GH_TOKEN="$token" exec git "${git_identity[@]}" "${https_rewrite[@]}" \
-    -c credential.helper= -c 'credential.helper=!gh auth git-credential' "$@"
+  git_cfg+=(-c credential.helper= -c 'credential.helper=!gh auth git-credential')
+
+  if [[ "${1:-}" == "push" && -z "${PELWAY_AGENT_SKIP_RESIGN:-}" ]]; then
+    rc=0
+    GH_TOKEN="$token" git "${git_cfg[@]}" "$@" || rc=$?
+    if ((rc == 0)); then
+      if ! GH_TOKEN="$token" bash "$(cd "$(dirname "$0")" && pwd)/agent-gh-resign"; then
+        echo "agent-gh: 署名付きコミットへの付け替えに失敗しました（push 自体は成功）。再度 push すると再試行されます。スキップは PELWAY_AGENT_SKIP_RESIGN=1" >&2
+        exit 4
+      fi
+    fi
+    exit "$rc"
+  fi
+  GH_TOKEN="$token" exec git "${git_cfg[@]}" "$@"
 fi
 
 GH_TOKEN="$token" exec gh "$@"
