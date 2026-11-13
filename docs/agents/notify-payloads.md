@@ -81,7 +81,7 @@ must-fix: 0
 | キー | 意味 |
 |---|---|
 | `schema` | `"pelway.github-notify/v2"` |
-| `urgency` | `digest`: verify の成功、Approve のレビュー。それ以外は `immediate` |
+| `urgency` | `digest`: workflow_run の成功（verify・nightly）、Approve のレビュー。それ以外は `immediate` |
 | `repo` | `hatai/Pelway` |
 | `event` | `pull_request` / `pull_request_review` / `workflow_run` / `test`（手動実行） |
 | `action` | `closed`（`pull_request`）、`submitted`（`pull_request_review`）、`completed`（`workflow_run`） |
@@ -90,7 +90,7 @@ must-fix: 0
 | `head_sha` | PR の head のコミット |
 | `merged` | `pull_request` の `closed` でマージされたら `true` |
 | `conclusion` | `workflow_run` の結果（`success` / `failure` など） |
-| `workflow_name` | `workflow_run` の workflow 名（`verify`） |
+| `workflow_name` | `workflow_run` の workflow 名（`verify` / `nightly`） |
 | `run_url` | Actions の実行の URL |
 | `actor` | イベントを起こした GitHub ユーザー |
 | `occurred_at` | 送信時刻（UTC） |

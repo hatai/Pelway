@@ -22,6 +22,8 @@ description: "Use when a bug, an incident, or a user report arrives and the caus
 - GitHub への操作は `scripts/agent-gh dev ...` で行う（素の `gh` を使わない）。
 - 再現できない・確定できない原因を「見つけた原因」として報告しない。そのまま「未確定」と
   報告し、試したことと証拠を列挙する。
+- 根拠・事例を書くときは、一次記録（ログの行、読み取ったデータ、キャプチャ、Issue・PR の
+  コメント）からの引用を付ける。引用で裏付けられない内容は「想定」と明記する。
 
 ## 手順
 

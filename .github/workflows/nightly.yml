@@ -1,0 +1,228 @@
+# main の総点検（Issue #180）。PR の verify（verify.yml）では実行しない重い検査を、
+# 毎晩 main に対して実行し、merge 後の main の劣化（テスト・文書検証・依存の健全性）を
+# 翌朝の指揮役の巡回までに検出する。
+#
+# - 対象は PR の verify と重複しない範囲: PostgreSQL を立てた全テスト
+#   （PR では PELWAY_DATABASE_URL 未設定で飛ぶ DB 結合テストを含む）、hk check --all
+#   （cargo を伴うステップを含む全ステップ。PR の hk-check タスクは cargo を伴わない
+#   3 ステップだけを選ぶ）、cargo deny（コードが変わらなくても新規 advisory で
+#   落ちうる依存の健全性）、v0.7 文書検証
+# - fmt / clippy / fnox / pitchfork / script-test 等は PR の verify が各 PR で
+#   検査済みのためここでは走らせない
+# - 失敗の通知は notify-grokbot.yml の workflow_run（workflows に nightly を登録）が担う
+# - この workflow に秘密は不要（permissions: contents: read）
+
+name: nightly
+
+on:
+  schedule:
+    # 毎日 21:00 UTC（06:00 JST）。翌朝 9:00 JST の指揮役のまとめまでに結果が出る時刻。
+    - cron: "0 21 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 実行ごとに別のグループにする。前の実行が残っていても新しい実行を待たせず、
+# 打ち切りもしない（総点検の結果は実行ごとに独立して意味を持つ）。
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # verify.yml と同じ CI 固有の cargo / mise 設定（docs/dev-environment.md
+  # 「CI 固有の cargo 設定」）。ローカルの開発環境には影響しない。
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  MISE_RUST_MR_BOXINGTON: "0"
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target-ci
+  CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_NET_RETRY: "10"
+
+jobs:
+  # PostgreSQL を立てて全テストを実行する。PR の verify-test では
+  # PELWAY_DATABASE_URL 未設定のため飛ぶ DB 結合テスト（pelway-db の RLS、
+  # dev-queue-compare のキュー比較）がここで初めて実際に走る。
+  test:
+    name: test (cargo test + PostgreSQL)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        # docs/research/ の計測と dev-queue-compare の手順例に合わせて 16 系。
+        # タグは動くため digest で固定する（jactionlint unpinned-images）。
+        image: postgres:16-alpine@sha256:f377d590e5474681d4d7838635031a2b50647923b7abfa803ce9b5ff35d5c663
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        # タグ参照。コミット sha は .github/workflows/actions.lock で固定する（v4.2.2）。
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      # クライアント（yeslogic-fontconfig-sys など）のビルドに必要な Linux システムパッケージ。
+      # verify.yml の lint / test ジョブと同じ。
+      - name: Install Linux native dependencies for client builds
+        run: |
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends libfontconfig1-dev
+
+      # verify.yml と同じ導入（mise 公式 Action・キャッシュなし・--locked）。
+      - name: Setup mise (official action)
+        uses: jdx/mise-action@v5.2.7
+        with:
+          version: v2026.11.5
+          install: true
+          install_args: --locked
+          cache: false
+
+      - name: Assert mise version
+        run: mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
+
+      - name: Trust project config
+        run: mise trust
+
+      # crates.io の取得キャッシュ。verify.yml の cargo ジョブと共有する（target は別）。
+      - name: Restore cargo registry cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      # ビルド成果物のキャッシュ。ジョブ名 test は verify.yml の test ジョブと同じ
+      # 成果物（cargo test --workspace --locked）を作るためキャッシュを共有する。
+      - name: Restore build cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: target-ci
+          key: ${{ runner.os }}-cargo-target-${{ github.job }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-${{ github.job }}-
+
+      - name: Fetch dependencies
+        run: mise run fetch
+
+      # PELWAY_DATABASE_URL を与えると、pelway-db / dev-queue-compare の
+      # tests/common/mod.rs が scratch database を作り、DB 結合テストが
+      # スキップされずに走る。接続先は services の postgres（スーパーユーザー）。
+      - name: Verify (mise run verify-test)
+        env:
+          PELWAY_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+        run: mise run verify-test
+
+  # hk check --all の全ステップ。PR の hk-check タスクは cargo を伴わない
+  # 3 ステップ（typos / trailing_whitespace / newlines）だけを選ぶが、ここでは
+  # cargo_fmt / cargo_clippy / cargo_check を含む全ステップを実行する。
+  hk-all:
+    name: hk check --all (all steps)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Linux native dependencies for client builds
+        run: |
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends libfontconfig1-dev
+
+      - name: Setup mise (official action)
+        uses: jdx/mise-action@v5.2.7
+        with:
+          version: v2026.11.5
+          install: true
+          install_args: --locked
+          cache: false
+
+      - name: Assert mise version
+        run: mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
+
+      - name: Trust project config
+        run: mise trust
+
+      - name: Restore cargo registry cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Restore build cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: target-ci
+          key: ${{ runner.os }}-cargo-target-${{ github.job }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-${{ github.job }}-
+
+      - name: Fetch dependencies
+        run: mise run fetch
+
+      # cargo_fmt / cargo_clippy / cargo_check を含む全ステップ。
+      # cargo を伴う検査が二重に走るのは nightly なので許容する（PR の CI 方針とは別）。
+      - name: hk check --all
+        run: mise exec -- hk check --all
+
+  # 依存の健全性。cargo-deny は PR の verify-static でも走るが、依存のコードが
+  # 変わらなくても新規の RustSec advisory で落ちうるため、main に対して毎晩確かめ直す。
+  deps:
+    name: cargo deny check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup mise (official action)
+        uses: jdx/mise-action@v5.2.7
+        with:
+          version: v2026.11.5
+          install: true
+          install_args: --locked
+          cache: false
+
+      - name: Assert mise version
+        run: mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
+
+      - name: Trust project config
+        run: mise trust
+
+      - name: Verify (mise run deny-check)
+        run: mise run deny-check
+
+  # v0.7 文書検証。docs/technical/v0.7/verification/verify.py を実行し、
+  # 原本コピーの hash・相対リンク・節対応・アンカー重複・UI 文言回帰を検査する。
+  # 原本（/workspace）と凍結 ZIP は原本作成環境にだけ存在するため、verify.py は
+  # それらを not-run として記録し、リポジトリ内で確かめられる検査だけで判定する。
+  docs-v07:
+    name: v0.7 verification (verify.py)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run v0.7 verification
+        run: python3 docs/technical/v0.7/verification/verify.py
