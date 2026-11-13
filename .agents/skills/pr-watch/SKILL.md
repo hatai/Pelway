@@ -7,7 +7,9 @@ description: "Watch an open pull request to green — wait for CI, triage failin
 
 開いている PR（自分のブランチの PR か、番号を指定された PR）を緑の状態 — すべてのチェックが完走して通過し、未回答のレビュー指摘が無い状態 — まで持っていく。
 
-観察にはこのファイルと同じ場所にある `pr-digest` を使う。`gh api` を素手で呼んで毎サイクル同じ情報を再導出するのが、このループでトークンを最も浪費する箇所である。`pr-digest` はチェック・ステータス・未解決レビュースレッドを数行に圧縮して返す。GitHub との通信は `scripts/agent-gh dev` 経由で行う（Pelway の決まり）。
+観察にはこのファイルと同じ場所にある `pr-digest` を使う。`gh api` を素手で呼んで毎サイクル同じ情報を再導出するのが、このループでトークンを最も浪費する箇所である。`pr-digest` はチェック・ステータス・未解決レビュースレッド・レビュー待ちの経過時間を数行に圧縮して返す。GitHub との通信は `scripts/agent-gh dev` 経由で行う（Pelway の決まり）。
+
+`review-wait` 行は、PR が最初にレビュー可能になってからの経過時間（`12h` / `45m`）とその起点の時刻を `review-wait 12h (since 2026-01-02T02:00:00Z)` の形で出す。起点は、Draft だった PR は最初の `ready_for_review` イベントの時刻、Draft でなかった PR は作成時刻で一意に決まり、レビュー担当の再割当では戻らない。指揮役の巡回での滞留検出（skill `command-team` の「レビュー待ちの滞留」）に使う。今も Draft の PR と閉じた PR には出ない。
 
 ```bash
 PRD="$(git rev-parse --show-toplevel)/.agents/skills/pr-watch/pr-digest"
@@ -92,4 +94,4 @@ digest が示す未回答の指摘は 3 面から出る: インラインのレ�
 "$PRD" --reply ID BODY レビュースレッドに返信する
 ```
 
-終了コード: `0` green · `10` チェック失敗 · `11` 未回答の指摘 · `12` まだ実行中 · `20` 不一致 · `1` エラー。`gh`・`jq` が要る。動作は `PR_DIGEST_POLL`（ポーリング間隔、既定 30 秒）、`PR_DIGEST_DEADLINE`（watch の上限秒、既定 7200）、`PR_DIGEST_BODY_CHARS`（指摘本文の切り詰め、既定 600 文字）で調整できる。
+終了コード: `0` green · `10` チェック失敗 · `11` 未回答の指摘 · `12` まだ実行中 · `20` 不一致 · `1` エラー。`gh`・`jq` が要る。動作は `PR_DIGEST_POLL`（ポーリング間隔、既定 30 秒）、`PR_DIGEST_DEADLINE`（watch の上限秒、既定 7200）、`PR_DIGEST_BODY_CHARS`（指摘本文の切り詰め、既定 600 文字）、`PR_DIGEST_NOW`（review-wait の現在時刻の固定、テスト用）で調整できる。

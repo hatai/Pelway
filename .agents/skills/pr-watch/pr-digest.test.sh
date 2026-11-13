@@ -79,6 +79,7 @@ if [[ "$all" == api* ]]; then
     *"/status"*)             emit "$fix/status.json"; exit 0 ;;
     *"pulls/"*"/comments"*)  emit "$fix/inline.json"; exit 0 ;;
     *"issues/"*"/comments"*) emit "$fix/conversation.json"; exit 0 ;;
+    *"issues/"*"/timeline"*) emit "$fix/timeline.json"; exit 0 ;;
     *"pulls/"*"/reviews"*)   emit "$fix/reviews.json"; exit 0 ;;
     *"actions/jobs/"*)       emit "$fix/jobs.json"; exit 0 ;;
   esac
@@ -94,11 +95,12 @@ new_fixture() { # new_fixture <name> -> 名前を出力し、基本ファイル�
   local name="$1" fix="$ROOT/fx/$1"
   mkdir -p "$fix"
   cat >"$fix/pr-view.json" <<'EOF'
-{"headRefOid":"abc123def","state":"OPEN","mergeable":"MERGEABLE","headRefName":"agent/217-example","reviewDecision":"APPROVED"}
+{"headRefOid":"abc123def","state":"OPEN","mergeable":"MERGEABLE","headRefName":"agent/217-example","reviewDecision":"APPROVED","createdAt":"2026-01-02T00:00:00Z","isDraft":false}
 EOF
   echo '[]' >"$fix/inline.json"
   echo '[]' >"$fix/conversation.json"
   echo '[]' >"$fix/reviews.json"
+  echo '[]' >"$fix/timeline.json"
   echo "$fix"
 }
 
@@ -252,7 +254,7 @@ fix="$(new_fixture open_review_summary)"
 { check_run "mise run verify" completed success 10; } | jq -s '{check_runs: .}' >"$fix/check-runs.json"
 echo '{"statuses":[]}' >"$fix/status.json"
 cat >"$fix/pr-view.json" <<'EOF'
-{"headRefOid":"abc123def","state":"OPEN","mergeable":"MERGEABLE","headRefName":"agent/217-example","reviewDecision":"CHANGES_REQUESTED"}
+{"headRefOid":"abc123def","state":"OPEN","mergeable":"MERGEABLE","headRefName":"agent/217-example","reviewDecision":"CHANGES_REQUESTED","createdAt":"2026-01-02T00:00:00Z","isDraft":false}
 EOF
 cat >"$fix/reviews.json" <<'EOF'
 [{"id":701,"user":{"login":"pelway-review[bot]","type":"Bot"},"state":"CHANGES_REQUESTED",
@@ -327,6 +329,87 @@ echo '{"statuses":[]}' >"$fix/status.json"
 run_digest "$fix" --watch
 expect_rc watch_wakes 10
 expect_has watch_wakes "VERDICT failures"
+
+# ---- 15. review_wait_created: Draft でなかった PR は作成時刻が起点 --------------
+# review-wait の経過は PR_DIGEST_NOW で現在時刻を固定して確かめる。
+
+fix="$(new_fixture review_wait_created)"
+{ check_run "mise run verify" completed success 10; } | jq -s '{check_runs: .}' >"$fix/check-runs.json"
+echo '{"statuses":[]}' >"$fix/status.json"
+cat >"$fix/pr-view.json" <<'EOF'
+{"headRefOid":"abc123def","state":"OPEN","mergeable":"MERGEABLE","headRefName":"agent/217-example","reviewDecision":"","createdAt":"2026-01-01T00:00:00Z","isDraft":false}
+EOF
+echo '[]' >"$fix/timeline.json"
+PR_DIGEST_NOW="2026-01-02T06:00:00Z"; export PR_DIGEST_NOW
+run_digest "$fix"
+unset PR_DIGEST_NOW
+expect_rc review_wait_created 0
+expect_has review_wait_created "review-wait 30h (since 2026-01-01T00:00:00Z)"
+
+# ---- 16. review_wait_ready: Draft だった PR は最初の ready_for_review が起点 ---
+
+fix="$(new_fixture review_wait_ready)"
+{ check_run "mise run verify" completed success 10; } | jq -s '{check_runs: .}' >"$fix/check-runs.json"
+echo '{"statuses":[]}' >"$fix/status.json"
+cat >"$fix/pr-view.json" <<'EOF'
+{"headRefOid":"abc123def","state":"OPEN","mergeable":"MERGEABLE","headRefName":"agent/217-example","reviewDecision":"","createdAt":"2026-01-01T00:00:00Z","isDraft":false}
+EOF
+cat >"$fix/timeline.json" <<'EOF'
+[{"event":"review_requested","created_at":"2026-01-01T00:00:00Z"},
+ {"event":"ready_for_review","created_at":"2026-01-02T02:00:00Z"}]
+EOF
+PR_DIGEST_NOW="2026-01-03T00:00:00Z"; export PR_DIGEST_NOW
+run_digest "$fix"
+unset PR_DIGEST_NOW
+expect_rc review_wait_ready 0
+expect_has review_wait_ready "review-wait 22h (since 2026-01-02T02:00:00Z)"
+
+# ---- 17. review_wait_sticks: 再割当・再 Draft でも起点は最初の ready ----------
+
+fix="$(new_fixture review_wait_sticks)"
+{ check_run "mise run verify" completed success 10; } | jq -s '{check_runs: .}' >"$fix/check-runs.json"
+echo '{"statuses":[]}' >"$fix/status.json"
+cat >"$fix/pr-view.json" <<'EOF'
+{"headRefOid":"abc123def","state":"OPEN","mergeable":"MERGEABLE","headRefName":"agent/217-example","reviewDecision":"","createdAt":"2026-01-01T00:00:00Z","isDraft":false}
+EOF
+cat >"$fix/timeline.json" <<'EOF'
+[{"event":"ready_for_review","created_at":"2026-01-02T02:00:00Z"},
+ {"event":"ready_for_review","created_at":"2026-01-02T10:00:00Z"},
+ {"event":"review_requested","created_at":"2026-01-02T22:00:00Z"}]
+EOF
+PR_DIGEST_NOW="2026-01-03T00:00:00Z"; export PR_DIGEST_NOW
+run_digest "$fix"
+unset PR_DIGEST_NOW
+expect_rc review_wait_sticks 0
+expect_has review_wait_sticks "review-wait 22h (since 2026-01-02T02:00:00Z)"
+
+# ---- 18. review_wait_draft: 今も Draft の PR は経過を出さない ------------------
+
+fix="$(new_fixture review_wait_draft)"
+{ check_run "mise run verify" completed success 10; } | jq -s '{check_runs: .}' >"$fix/check-runs.json"
+echo '{"statuses":[]}' >"$fix/status.json"
+cat >"$fix/pr-view.json" <<'EOF'
+{"headRefOid":"abc123def","state":"OPEN","mergeable":"MERGEABLE","headRefName":"agent/217-example","reviewDecision":"","createdAt":"2026-01-01T00:00:00Z","isDraft":true}
+EOF
+echo '[]' >"$fix/timeline.json"
+run_digest "$fix"
+expect_rc review_wait_draft 0
+expect_lacks review_wait_draft "review-wait"
+
+# ---- 19. review_wait_minutes: 1 時間未満は分で出す -----------------------------
+
+fix="$(new_fixture review_wait_minutes)"
+{ check_run "mise run verify" completed success 10; } | jq -s '{check_runs: .}' >"$fix/check-runs.json"
+echo '{"statuses":[]}' >"$fix/status.json"
+cat >"$fix/pr-view.json" <<'EOF'
+{"headRefOid":"abc123def","state":"OPEN","mergeable":"MERGEABLE","headRefName":"agent/217-example","reviewDecision":"","createdAt":"2026-01-02T23:30:00Z","isDraft":false}
+EOF
+echo '[]' >"$fix/timeline.json"
+PR_DIGEST_NOW="2026-01-03T00:00:00Z"; export PR_DIGEST_NOW
+run_digest "$fix"
+unset PR_DIGEST_NOW
+expect_rc review_wait_minutes 0
+expect_has review_wait_minutes "review-wait 30m (since 2026-01-02T23:30:00Z)"
 
 # ---- 結果 -------------------------------------------------------------------
 

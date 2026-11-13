@@ -98,6 +98,29 @@ reply() {
   api "repos/$repo/pulls/$pr/comments/$id/replies" -f body="$body" --jq '"replied \(.id)"'
 }
 
+# レビュー待ちの経過時間の起点。Draft だった PR は最初の ready_for_review イベント、
+# Draft でなかった PR は作成時刻。review_requested は起点に使わない（担当の再割当で
+# 経過が戻らないようにするため）。今も Draft の PR はまだレビュー可能になって
+# いないので、呼び出し側はこの行を出さない。PR_DIGEST_NOW で現在時刻を固定できる
+# （テスト用）。
+review_wait() {
+  local repo=$1 pr=$2 created=$3 origin
+  origin=$(api --paginate "repos/$repo/issues/$pr/timeline?per_page=100" \
+    | jq -rs 'add // [] | map(select(.event == "ready_for_review" and .created_at != null))
+             | sort_by(.created_at) | .[0].created_at // ""') \
+    || die "PR $pr の timeline が読めない"
+  [ -n "$created" ] || die "PR $pr の作成時刻が読めない"
+  local now='now'
+  [ -n "${PR_DIGEST_NOW:-}" ] && now="\"$PR_DIGEST_NOW\" | fromdateiso8601"
+  jq -rn --arg origin "${origin:-$created}" "
+    ($now) as \$t
+    | (\$t - (\$origin | fromdateiso8601)) as \$s
+    | (if \$s < 0 then 0 else \$s end) as \$s
+    | \"review-wait \" +
+      (if \$s / 3600 >= 1 then \"\(\$s / 3600 | floor)h\" else \"\(\$s / 60 | floor)m\" end)
+      + \" (since \" + \$origin + \")\""
+}
+
 # 未回答の指摘をすべて JSON で OPEN に入れる。watch ループが付けたり外したりできるよう、
 # 出力でなくグローバル変数に置く。
 findings() {
@@ -179,7 +202,7 @@ digest() {
 
   local meta head state mergeable branch
   meta=$($GH pr view "$pr" --repo "$repo" \
-    --json headRefOid,state,mergeable,headRefName,reviewDecision) || die "PR $pr が無い"
+    --json headRefOid,state,mergeable,headRefName,reviewDecision,createdAt,isDraft) || die "PR $pr が無い"
   head=$(jq -r .headRefOid <<<"$meta")
   state=$(jq -r .state <<<"$meta")
   mergeable=$(jq -r .mergeable <<<"$meta")
@@ -188,6 +211,12 @@ digest() {
 
   echo "PR $pr · $branch · $state · $mergeable${decision:+ · $decision}"
   [ "$state" = "OPEN" ] || { echo "VERDICT $state"; return 0; }
+
+  # レビュー待ちの滞留は、この行の経過で機械的に検出する（skill command-team の
+  # 「レビュー待ちの滞留」。起点の決め方は review_wait のコメント）。
+  if [ "$(jq -r '.isDraft // false' <<<"$meta")" != "true" ]; then
+    review_wait "$repo" "$pr" "$(jq -r '.createdAt // ""' <<<"$meta")"
+  fi
 
   # 同期の確認は、この checkout が PR のブランチにいるときだけ意味がある。
   # 他の場所から他人の PR を調べるときの不一致は報告する値が無い。

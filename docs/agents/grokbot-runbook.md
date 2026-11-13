@@ -1,6 +1,6 @@
 # 指揮役 運用手順書
 
-AI 開発チームの指揮役が従うイベント対応の手順。指揮役の正本は Grok Bot で、Grok Bot が動かないときは「9. 代行」の手順で別のエージェントが代行する。この手順書の「Grok Bot」は、代行中は代行者と読み替える。
+AI 開発チームの指揮役が従うイベント対応の手順。指揮役の正本は Grok Bot で、Grok Bot が動かないときは「10. 代行」の手順で別のエージェントが代行する。この手順書の「Grok Bot」は、代行中は代行者と読み替える。
 
 - 体制と上限の正本は `docs/superpowers/specs/agent-team.md`、受け取る通知の形は `docs/agents/notify-payloads.md`
 - 毎サイクルの判断（振り分け、モデル・effort、エスカレーション、改善ループ、代行の開始・終了）は skill `command-team` に従う
@@ -180,7 +180,24 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 - worktree は人間が `mise run agent-worktree-prune` で消す（マージ済み・クローズ済みの PR のものだけ。一覧を見せてから確認する）
 - マージ後の Issue と PR はボードの組み込みワークフローが Done にする
 
-## 9. 代行
+## 9. 巡回状態の補助記録
+
+状態の正本は GitHub Issues と Projects ボードである。`~/.local/state/pelway/patrol-state.json` は正本を増やさないための補助記録で、GitHub に対応する置き場が無い情報（誰待ちか・待ち始めた時刻・次の担当）だけを持つ。
+
+対象（キーは Issue 番号）ごとの必須項目:
+
+| 項目 | 意味 | 値 |
+|---|---|---|
+| `waiting_on` | 誰待ちか | `human`（人間の判断待ち）/ `implement`（実装担当の作業待ち）/ `review`（レビュー待ち）/ `merge`（マージ待ち）/ `conductor`（指揮役の判断待ち・順番待ち） |
+| `waiting_since` | 待ち始めた時刻（ISO 8601） | `waiting_on` が同じ対象では前回値を引き継ぐ。変わったらリセットする |
+| `next_owner` | 次の担当 | `hatai` / `implement thread (#<N>)` / `reviewer (PR #<M>)` / `conductor` |
+| `updated_at` | その対象の最終更新時刻（ISO 8601） | 巡回のたびに書き換わる |
+
+巡回スクリプト `scripts/conductor-watch.sh` が巡回のたびに必須項目を更新する。記録と GitHub の実状態（Issue の状態とラベル、PR の Draft・レビュー・CI の状態）が食い違う場合は GitHub を正として記録を直す: Issue が閉じたら対象を記録から消し、ラベルと PR の状態から決まる `waiting_on` を毎巡回上書きし、`waiting_on` が変わった対象に `PATROL` 行を出力する。GitHub からの取得に失敗した巡回と、一覧の取得上限に達して打ち切られた巡回では記録を書き換えず、前回の記録を保持する。指揮役が GitHub に載せない判断の途中（例: レビューを始めるか迷っている）は、`waiting_on` が `conductor` の対象として記録の側にだけ残る。次の巡回で GitHub の状態が変われば、スクリプトが GitHub 側の値で上書きする。
+
+agents の表示（busy・working）はセッションの内側の値で、実態（判断待ち・停止）と食い違うことがある。指揮役は表示値を根拠にせず、GitHub の実状態とこの補助記録の突き合わせ結果で判断する。
+
+## 10. 代行
 
 Grok Bot が動かない（レート制限、障害）とき、人間が別のエージェント（例: Claude Code のセッション）に指揮役の代行を頼む。
 
@@ -193,3 +210,22 @@ Grok Bot が動かない（レート制限、障害）とき、人間が別の�
 | 判断の記録 | Issue・PR のコメントと、代行の作業ログ `docs/worklogs/<日付>-conductor-substitute.md` |
 
 開始と終了のチェックは skill `command-team` の手順 5。Grok Bot が戻るときは、Grok Bot が代行の作業ログを読み、GitHub の状態から続ける。
+
+### 引き継ぎの発動条件と順序
+
+代行の開始・交代（第1指揮役から代行者へ、代行者から次の代行者へ）は、次のどれかで発動する。
+
+- 第1指揮役が一定時間（45 分）活動を報告していない
+- 第1指揮役が blocked を記録した（`needs-human` の付与、判断保留のコメント）
+
+順序:
+
+1. GitHub の実状態を確認する（`agent:working`・`needs-human` の Issue、Draft・レビュー待ち・マージ待ちの PR、Issue のコメントに残った判断）
+2. `~/.local/state/pelway/patrol-state.json` を読み、対象ごとの「誰待ちか・待ち始めた時刻・次の担当」を把握する
+3. 記録と GitHub の実状態を突き合わせ、食い違う項目を GitHub を正として直す（巡回スクリプトの次の巡回でも直る）
+4. `waiting_on` が `conductor` の対象（前指揮役の判断待ち）を引き継ぎ、判断を進めるか人間に確認する
+
+引き継ぎの完了条件:
+
+- 補助記録の必須項目がすべての対象で埋まっていること（`waiting_on`・`waiting_since`・`next_owner`・`updated_at`）
+- GitHub の実状態と突き合わせて矛盾が無いこと
