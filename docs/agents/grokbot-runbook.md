@@ -119,6 +119,8 @@ effort は skill `command-team` の「調査の担当と effort」で決める�
 | 人間のレビューが Comment | `immediate` | 部屋で人間に、実装スレッドに送るかを聞く |
 | verify が失敗 | `immediate` | 何もしない（2 回続いたら見張り役が `ci-failed-twice` を送る） |
 | verify が成功、レビューが Approve | `digest` | まとめにだけ反映する |
+| nightly（main の総点検）が失敗 | `immediate` | `run_url` で失敗したジョブを確かめ、main の劣化として Issue を起票するか部屋で人間に知らせる |
+| nightly が成功 | `digest` | まとめにだけ反映する |
 | `test` | — | 何もしない |
 
 ## 5. 報告行の扱い

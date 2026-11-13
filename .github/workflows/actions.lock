@@ -6,6 +6,10 @@ workflows:
     '.github/workflows/mise-bump.yml':
         - 'actions/checkout@v7.0.1'
         - 'jdx/mise-action@v5.2.7'
+    '.github/workflows/nightly.yml':
+        - 'actions/cache@v6.1.0'
+        - 'actions/checkout@v7.0.1'
+        - 'jdx/mise-action@v5.2.7'
     '.github/workflows/notify-grokbot.yml': []
     '.github/workflows/verify.yml':
         - 'actions/cache@v6.1.0'
