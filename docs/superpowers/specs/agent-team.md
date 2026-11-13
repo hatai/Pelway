@@ -48,8 +48,8 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 ### 入口B（バグ・インシデント）の調査と起票
 
 1. 指揮役は原因が未理解の報告を受けたら、調査スレッド（skill `investigate-bug`）を立てる。調査スレッドは GLM の枠に数える（下の「制約」）
-2. 調査スレッドは原因の調査と報告（skill `investigate-bug` の手順 5）までを担い、修正のコードは書かない。報告は `docs/worklogs/bugs/<slug>/report.md` に残す
-3. 指揮役は報告を確認して起票可否を判断し、起票するときは skill `write-issue` で行う（判断の詳細は skill `command-team` の「調査の引き渡し」）。人間は `ready-for-agent` で承認し、入口A の流れに合流する
+2. 調査スレッドは原因の調査と報告（skill `investigate-bug` の手順 5）までを担い、修正のコードは書かない。報告は `docs/worklogs/bugs/<slug>/report.md` に書き、報告ブランチ `investigate/<slug>` に push する（PR は出さない）
+3. 指揮役は報告を GitHub 上の報告ブランチで確認して起票可否を判断し、起票するときは skill `write-issue` で行う（判断の詳細は skill `command-team` の「調査の引き渡し」）。人間は `ready-for-agent` で承認し、入口A の流れに合流する。報告ファイルは、起票した Issue の実装 PR が報告ブランチを取り込んで main に残し、マージ後に報告ブランチを消す
 4. 実装は、調査を担ったスレッドへの役割の追加としては行わない。実装スレッドとして割り当て替える（「役割と GitHub 上の名義」の役割の変更の原則）
 
 ## 制約

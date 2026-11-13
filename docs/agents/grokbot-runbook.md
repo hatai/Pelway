@@ -79,7 +79,7 @@ t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree m
 Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>"
 ```
 
-effort は skill `command-team` の「調査の担当と effort」で決める。調査スレッドの報告を受けたら、skill `command-team` の「調査の引き渡し」に従う。
+effort は skill `command-team` の「調査の担当と effort」で決める。調査スレッドの報告を受けたら、skill `command-team` の「調査の引き渡し」に従う（報告ファイルは、調査スレッドが push した報告ブランチ `investigate/<slug>` を GitHub 上で確認する）。
 
 ## 4. イベントごとの対応
 

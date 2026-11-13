@@ -59,3 +59,11 @@
 3. 仮定と解釈: (a)「規則を除く」の範囲は、Draft PR とブランチの規則とその周辺（Assigned 行の報告 PR への写し、runbook のイベント処理にある `pr:` とブランチ接頭辞での識別）まで含むと解釈した（選ばなかった解釈: investigate-bug の該当文のみ戻す。ほかの正本に整合しない言及が残るため）。(b) runbook の調査スレッドの識別は、ブランチ接頭辞に代えて既存のスレッド名形式のタイトル `[調査]` で書いた（選ばなかった解釈: 識別の文を消す。`finished` の報告を「調査の引き渡し」へ進める手がかりがなくなるため）
 4. 足りなかった情報・検証手段: 報告ファイル `docs/worklogs/bugs/<slug>/report.md` を main へ入れる経路（Draft PR を除いた結果、Issue #249 に指定が無いまま残った。報告はスレッドの返答と worktree 内のファイルで行われる）
 5. 改善案: `docs/superpowers/specs/agent-team.md` の「入口B（バグ・インシデント）の調査と起票」に「報告ファイルを main に入れる経路は未決（人間が決める）」を足す（新規の方式になるため別 Issue で人間と決める）
+
+## 実装者メモ（round 3）
+
+1. 詰まった箇所: docs/agents/grokbot-runbook.md の「調査を始める」: 調査スレッドの起動コマンドに `--branch` が無いことに気づいた。指揮役は起動時に `<slug>` を知らないためブランチ名を渡せず、ブランチの作成と push は調査スレッド側（skill investigate-bug の手順 5）で行う形にした
+2. 曖昧だった文: 「この手順には指揮役が報告ファイルを確認できる形で共有・保存する方法がなく、Issue に記すパスも main 上では参照できません。調査 worktree の削除後は報告も失われます。報告を指揮役が読めて main に残るまでの手順を定めてください。」（PR #250 レビュー本文 must-fix）
+3. 仮定と解釈: (a) main への残し方は、round 1 が書き round 2 が除いた「報告だけの Draft PR」とは別の方式（報告ブランチ `investigate/<slug>` を push し、起票された Issue の実装 PR が取り込む）を選んだ。Draft PR を復活させると round 2 の must-fix の根拠（Issue #249 の受け入れ条件から再構成した範囲を越える新規ルール）と再び衝突するため。ブランチ接頭辞を `agent/` にしなかったのは、`pelway-agent-watch` の `issue_number` 抽出（`agent/<番号>-`）と `conductor-watch.sh` の `agent/` PR 監視に結合させないため。(b) 指揮役の読み取りは GitHub API（contents の `?ref=`）とした（runbook 5「値をもとに動く前に GitHub で確かめる」と同じ原則）。(c) 直す必要が無いと判断された調査の報告は main に入らないが、ブランチとスレッドの返答に残ると解釈した（must-fix が問題にする「Issue に記すパスが main で参照できない」は起票された場合の話のため）
+4. 足りなかった情報・検証手段: スラッシュ入りブランチ名に対する GitHub API の DELETE `git/refs/heads/investigate/<slug>` と contents の `?ref=` が動くか。実ブランチ `investigate/round3-verify`（= 824308b）を作り、両コマンドの成功を確認して消した
+5. 改善案: mise.toml の `agent-worktree-prune` の「マージ済み・クローズ済みの PR のものだけ」に、PR を出さない調査 worktree を消す対象を加える（別 Issue。現状、調査 worktree は prune されないまま残る）

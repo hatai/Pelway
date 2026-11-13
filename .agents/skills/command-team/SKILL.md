@@ -106,10 +106,10 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 調査スレッドが報告を出したときの処理。
 
-- 報告は `docs/worklogs/bugs/<slug>/report.md`（skill `investigate-bug` の手順 5）。スレッドの返答で報告を受け、報告ファイルを確認する
+- 報告は `docs/worklogs/bugs/<slug>/report.md`（skill `investigate-bug` の手順 5）。スレッドの返答（報告の内容とブランチ名を含む）で報告を受け、報告ファイルは GitHub 上の報告ブランチで確認する: `scripts/agent-gh dev api "repos/hatai/Pelway/contents/docs/worklogs/bugs/<slug>/report.md?ref=investigate/<slug>" --jq .content | base64 -d`。返答とファイルが食い違ったら、ファイルを正とする
 - 指揮役が報告を確認して起票可否を判断する
-- 直す必要があるときは、指揮役が skill `write-issue` で起票する（実装の指示は出さない）。人間は `ready-for-agent` で承認し、入口A の流れに合流する。Issue 本文の「関連情報」には、報告のパス（`docs/worklogs/bugs/<slug>/report.md`）と調査スレッドのリンクを書く
-- 直す必要がないとき（仕様どおり、誤報告など）は Issue を立てない
+- 直す必要があるときは、指揮役が skill `write-issue` で起票する（実装の指示は出さない）。人間は `ready-for-agent` で承認し、入口A の流れに合流する。Issue 本文の「関連情報」には、報告のパス（`docs/worklogs/bugs/<slug>/report.md`）、報告ブランチ（`investigate/<slug>`）、調査スレッドのリンクの 3 つを書く。実装スレッドはこのブランチを取り込んで報告ファイルを実装 PR に含め（skill `implement-issue` の手順 3）、マージで main に残す。実装 PR のマージ後に、報告ブランチを消す: `scripts/agent-gh dev api -X DELETE repos/hatai/Pelway/git/refs/heads/investigate/<slug>`
+- 直す必要がないとき（仕様どおり、誤報告など）は Issue を立てない。報告はスレッドの返答と報告ブランチに残る
 - 調査で報告に不足があって `needs-info` を付けたときは、情報が届いたら原則として同じ調査スレッドを再開する（`t3_thread_send` で「続きを調査する。skill investigate-bug に従う。」）。新しい調査スレッドは立てない
 - 実装は、調査を担ったスレッドへの役割の追加としては行わない。起票した Issue の実装スレッドとして割り当て替える（正本の「役割と GitHub 上の名義」の役割の変更の原則）
 - 調査スレッドは脆弱性の疑いで止まることがある（skill `investigate-bug` の手順 4）。このとき報告ファイルは無いので、`needs-human` の判断を待つ
