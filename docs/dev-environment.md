@@ -222,6 +222,29 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 | ネットワーク制限の結果（`api.github.com` と `github.com` だけにつながるか。`curl -sS https://example.com` が失敗したか） | 未実施 | — |
 | Codex 側（`codex_review`）との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 未記入 | — |
 
+## レビュー担当の Devin（acpRegistry_devin）
+
+通常の PR の Codex とのローテーションと、高リスク PR の 3 人目のレビュースレッドは、T3 の Devin インスタンス `acpRegistry_devin` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。モデルは `swe-2-high`。Devin には `runtimeMode` の指定が無く、権限はモデルの `mode` オプションで `smart` までに限る（`bypass` は使わない）。`thought_level` と `speed` はスレッドを立てるときの `modelSelection.options` に入れる。
+
+Codex・Claude のレビュー担当と違い、Devin にはネットワークを `api.github.com` と `github.com` だけに絞る設定が無い。この差は「PR のコードを実行しない」ルール（仕様の「レビュー担当の権限」）と、次の確認で担保する。
+
+運用に入る前に、`mode=smart` のレビュースレッドで次を確かめる。確かめるまではレビューに `acpRegistry_devin` を使わない。
+
+- `scripts/agent-gh review api /rate_limit` が成功する（レビュー担当の GitHub App の認証が通る）
+- PR のファイルを読み、`verdict:` を含む報告と `Reviewer:` の行を正しい形で出せる
+- `scripts/agent-gh review pr review` でレビュー（Approve・Request changes）を投稿できる
+
+### 確認手順の結果（記録欄）
+
+確認手順を実施したら、結果を次の表に記録する。記録されるまで `acpRegistry_devin` のレビュー担当は使わない（command-team の保留）。
+
+| 項目 | 結果 | 実施日 |
+|---|---|---|
+| 実施日（レビュー用の Devin スレッドの初回起動を含む） | 未実施 | — |
+| `scripts/agent-gh review` が通ること（`/rate_limit` の成功） | 未実施 | — |
+| レビューの形（報告の `verdict:`、`Reviewer:` の行、`agent-gh review pr review` の投稿） | 未実施 | — |
+| Codex・Claude 側との差（ネットワーク制限が無いこと以外の差。無ければ「差なし」） | 未記入 | — |
+
 ## シークレットの扱い（fnox）
 
 - `fnox.toml` には**シークレットの名前と、秘密を含まないローカル開発用の既定値だけ**を置く。実際の秘密値（`value`）をこのファイルへ書かないこと。
