@@ -61,7 +61,7 @@ jobs:
       # 公開から日が浅いピン（例: jactionlint 2.5.0）を旧版へ書き戻してしまう。
       # --locked で mise.lock 通りに導入してから upgrade させる。
       - name: Setup mise (official action)
-        uses: jdx/mise-action@v2.4.4
+        uses: jdx/mise-action@v5.2.7
         with:
           version: v2026.11.5
           install_args: --locked
