@@ -19,7 +19,7 @@ Grok Bot は Issue を実装スレッドとレビュースレッドに割り振�
 | スレッドのモデル・effort を変える | T3 Connect の MCP（`t3_thread_configure`） |
 | `pelway-review` が Approve し必須チェックが通った PR をマージする | `gh pr merge --merge --admin --delete-branch`（人間から委任された迂回。条件は skill `command-team` の「マージ」）。`--admin` は App のトークンでは使えないため、このマージだけは人間の名義の `gh` で行い、ほかの操作は `scripts/agent-gh dev` で行う |
 
-しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更、スレッドの取り消し。
+しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更（`actions.lock` の再生成は例外。正本は `docs/superpowers/specs/agent-team.md` の「制約」）、スレッドの取り消し。
 
 スレッドに送る指示は Issue 番号か PR 番号と、使う skill 名だけにする（スレッドを立てる指示には、2 行目に割り当ての行 `Assigned: ...` を入れる。書式は skill `command-team`）。作業ルールは AGENTS.md と skill に書いてあるので、手順書の中身をスレッドに書き写さない。
 
@@ -27,7 +27,7 @@ Grok Bot は Issue を実装スレッドとレビュースレッドに割り振�
 
 | スレッド | 同時に動かす上限 | 数え方 |
 |---|---|---|
-| 実装（opencode `zai-coding-plan/glm-5.3`） | 3 | `agent:working` が付いていて、PR が Ready for review になっていない Issue の数 |
+| 実装・調査（opencode `zai-coding-plan/glm-5.3`） | 3 | `agent:working` が付いていて、PR が Ready for review になっていない Issue の数と、実行中の調査スレッドの数の合計 |
 | レビュー（Codex `codex_review`） | 2 | 実行中（`running`）の Codex のレビュースレッドの数 |
 | レビュー（Claude `claude_review`） | 1 | 実行中の Claude のレビュースレッドの数。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは 0 |
 
@@ -70,6 +70,17 @@ T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-ac
 
 PR を Projects ボードに載せる（ボードの組み込みワークフローがレビューの状態を反映するのは、ボードに載っている PR だけ）。
 
+### 調査を始める
+
+原因が未理解のバグ・インシデントの報告（入口B）があり、実装と調査を合算した枠が空いているとき。報告の対象が Issue なら、調査の間その Issue に `needs-info` が付くことがある（報告に不足があるとき。skill `investigate-bug`）。
+
+```
+t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree main --branch agent/investigate-<slug> --title "[調査] <対象があれば番号> <要約>" <Pelway のパス> "<報告の対象> を調査する。skill investigate-bug に従う。
+Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>"
+```
+
+`<slug>` は症状を英小文字とハイフンで短くしたもの。effort は skill `command-team` の「調査の担当と effort」で決める。調査スレッドの報告（`pr:` に報告の Draft PR）を受けたら、skill `command-team` の「調査の引き渡し」に従う。
+
 ## 4. イベントごとの対応
 
 ### `pelway.agent-watch/v1`
@@ -95,6 +106,8 @@ PR を Projects ボードに載せる（ボードの組み込みワークフロ�
 | `failed` | `error: checks pending` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 6 のエスカレーション |
 
 実装スレッドは `branch` の `agent/<N>-` から Issue 番号を、`thread_id` から送り先を取る。レビュースレッドから実装スレッドを探すときは、PR のブランチ名と同じ `branch` を持つスレッドを `t3 thread list` から選ぶ。
+
+調査スレッド（ブランチが `agent/investigate-` で始まる）も `opencode` なので、上の表の実装スレッドの列で扱う。ただし `finished` の `pr:` は調査の報告の Draft PR なので、レビューを始める前に skill `command-team` の「調査の引き渡し」で起票可否を判断する。調査が脆弱性の疑いで止まったとき（skill `investigate-bug` の手順 4）は、報告の対象の Issue に `needs-human` が付く。6 の「実装担当が止まった」と同じ扱いで人間に知らせる。
 
 ### `pelway.github-notify/v2`
 

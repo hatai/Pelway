@@ -13,12 +13,29 @@
 
 App は 2 つに分ける。同じ名義では自分の PR を Approve できないため。App の秘密鍵と ID は `~/.config/pelway-agent/fnox.toml` に age で暗号化して置き、`scripts/agent-gh` が呼び出しごとにトークンを発行する。
 
+役割の変更は、同じ主体への役割の追加として行わない。担当を変える必要があるとき（調査から実装への引き渡しなど）は、別の担当への割り当て替えとして扱う。
+
 人間が行うのは次の 2 つだけ。
 
 1. タスク定義: Issue Form `agent-task` で Issue を書き、`ready-for-agent` を付ける
 2. マージの委任: 指揮役が、`pelway-review` の Approve と必須チェックの通過を確かめた PR を `--admin` でマージすることを認める（判定が割れた PR、`needs-human` の PR は人間が判断する）
 
-## タスクの流れ
+## タスクの入口と流れ
+
+タスクは 3 つの入口のどれかで始まり、どの入口も起票後は同じ流れ（起票 → 実装 → レビュー → マージ）に合流する。入口B と入口C では、起票の前に調査の段階が入る。
+
+| 入口 | 対象 | 始まり |
+|---|---|---|
+| A: 通常の開発 | 機能追加・改善・原因が分かっている修正 | 人間が skill `write-issue` で起票し `ready-for-agent` を付ける |
+| B: バグ・インシデント | 原因が未理解のバグ・インシデントの報告 | 指揮役が調査スレッド（skill `investigate-bug`）を立てる |
+| C: 定期検出 | nightly 検証と eval ケースの自動検出 | 検出された異常の報告を入口B と同じ扱いにする |
+
+入口の対象範囲:
+
+- 原因が分かっている修正、既存 Issue への修正依頼、実装中に見つかったバグは、入口A（通常の起票）で扱う。調査スレッドを立てない
+- 入口C は自動検出が有効になった後の入口で、有効になるまでは異常の報告を受けた時点で入口B と同じ扱いにする
+
+### 入口A（通常の開発）の流れ
 
 1. `ready-for-agent` の Issue を Grok Bot が拾い、`agent:working` を付けて実装スレッドを立てる
 2. 実装スレッドは skill `implement-issue` に従い、`pelway-dev` の名義でブランチ `agent/<issue番号>-<slug>` に push し、Draft PR（本文に `Closes #<issue番号>`）を作る
@@ -28,11 +45,18 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 6. CI 成功がそろったら、指揮役が skill `command-team` の「マージ」に従ってマージする
 7. 終わった worktree は人間が `mise run agent-worktree-prune` で消す
 
+### 入口B（バグ・インシデント）の調査と起票
+
+1. 指揮役は原因が未理解の報告を受けたら、調査スレッド（skill `investigate-bug`）を立てる。調査スレッドは GLM の枠に数える（下の「制約」）
+2. 調査スレッドは原因の調査と報告（skill `investigate-bug` の手順 5）までを担い、修正のコードは書かない。報告は `docs/worklogs/bugs/<slug>/report.md` に残す
+3. 指揮役は報告を確認して起票可否を判断し、起票するときは skill `write-issue` で行う（判断の詳細は skill `command-team` の「調査の引き渡し」）。人間は `ready-for-agent` で承認し、入口A の流れに合流する
+4. 実装は、調査を担ったスレッドへの役割の追加としては行わない。実装スレッドとして割り当て替える（「役割と GitHub 上の名義」の役割の変更の原則）
+
 ## 制約
 
-- `pelway-dev` には GitHub App の Workflows 権限を付けない。`.github/workflows/` の変更は人間が行う（push で動く workflow は承認前に secret を読めるため）
+- `pelway-dev` には GitHub App の Workflows 権限を付けない。`.github/workflows/` の変更は人間が行う（push で動く workflow は承認前に secret を読めるため）。例外は Workflows 権限が必要なため人間の名義でしか行えない操作だけで、現在は `actions.lock` の再生成（`ci(deps):` の PR のマージ前。実施は skill `command-team` の「マージ」）の 1 つ
 - PR 1 本の差分は追加 800 行・削除 2000 行まで（`mise run pr-size` が追加行と削除行を分けて数える）。`.gitattributes` で `linguist-generated` を付けたファイルは数えない。指揮役が Issue のコメントで超過を認め `pr-size-exception` ラベルを付けた PR は、pr-size の失敗のままマージしてよい（レビュー担当はこのラベルがあれば pr-size の失敗を must-fix に数えない）
-- GLM の実装スレッドは同時に 3 本まで、Codex のレビュースレッドは同時に 2 本まで、Claude のレビュースレッドは同時に 1 本まで。超えた分は指揮役が順番待ちにする。上限は、Codex の見落とし率とレビューの待ち時間をもとに見直す
+- GLM の実装スレッドと調査スレッドは合算して同時に 3 本まで、Codex のレビュースレッドは同時に 2 本まで、Claude のレビュースレッドは同時に 1 本まで。超えた分は指揮役が順番待ちにする（満杯時の優先の判断は skill `command-team` の「調査の担当と effort」）。上限は、Codex の見落とし率とレビューの待ち時間をもとに見直す
 - GLM は終日使う。時間帯による使用制限はない
 - Issue の書き方（タイトル、本文の見出し、受け入れ条件、分割、`ready-for-agent` の前のゲート、差し戻されたときの直し方）は skill `write-issue` に置く。`.github/ISSUE_TEMPLATE/agent-task.yml` はその写しで、空の Issue は作れない（`blank_issues_enabled: false`）
 - 指揮役が渡すプロンプトは Issue 番号と使う skill 名だけにする。作業ルールは AGENTS.md と skill に置く。例外として、スレッドを立てる指示には担当・モデル・effort を示す定型の割り当ての行を入れ、実装担当は PR 本文に `Implementer:`、レビュー担当はレビュー本文に `Reviewer:` の定型の行で写す（書式は skill `command-team`）
