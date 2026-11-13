@@ -17,7 +17,7 @@ ed25519-dalek = { version = "3", features = ["rand_core"] }
 # rand_core 0.10 から OsRng が外れたため、getrandom 0.4 の SysRng を使う）。
 getrandom = { version = "0.4", features = ["sys_rng"] }
 # 行ハッシュ・鍵 ID の SHA-256。
-sha2 = { version = "0.10", default-features = false }
+sha2 = { version = "0.11", default-features = false }
 
 [dev-dependencies]
 # 署名行の素材をテストで組み立てるための base64（本体と同じ版）。
