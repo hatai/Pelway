@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# T3 が作った worktree のうち、仕事が終わったものを消す。
+#
+# 使い方: scripts/agent-worktree-prune [--dry-run | --yes]
+#   既定は一覧を見せてから y/N で確認する。--dry-run は一覧だけ、--yes は確認せずに消す。
+#
+# 対象は $PELWAY_T3_WORKTREES（既定 ~/.t3/worktrees/Pelway）の下の worktree だけ。消すのは次のどちらか。
+#   - HEAD が origin/main に取り込まれている → worktree とブランチを消す
+#   - ブランチの PR がマージ済み → worktree とブランチを消す
+#   - ブランチの PR が閉じている（開いている PR が無い） → worktree だけ消し、ブランチは残す
+# 変更が残っている worktree は消さない（旧通知プラグイン .opencode/plugins/pelway-agent-notify.ts だけは変更と数えない）。
+set -uo pipefail
+
+ROOT="${PELWAY_T3_WORKTREES:-$HOME/.t3/worktrees/Pelway}"
+PLUGIN=".opencode/plugins/pelway-agent-notify.ts"
+mode=ask
+case "${1:-}" in
+  --dry-run) mode=dry ;;
+  --yes) mode=yes ;;
+  "") ;;
+  *) echo "usage: agent-worktree-prune [--dry-run | --yes]" >&2; exit 2 ;;
+esac
+
+git fetch --quiet origin main || { echo "agent-worktree-prune: git fetch に失敗した" >&2; exit 1; }
+prs="$(gh pr list --state all --limit 1000 --json headRefName,state)" || { echo "agent-worktree-prune: gh pr list に失敗した" >&2; exit 1; }
+
+pr_state() { # ブランチの PR の状態: OPEN が 1 つでもあれば OPEN、次に MERGED、次に CLOSED、無ければ空
+  local b="$1" states
+  states="$(jq -r --arg b "$b" '.[] | select(.headRefName == $b) | .state' <<<"$prs")"
+  for s in OPEN MERGED CLOSED; do grep -qx "$s" <<<"$states" && { echo "$s"; return; }; done
+}
+
+is_dirty() {
+  [[ -n "$(git -C "$1" status --porcelain --untracked-files=all | grep -v -F " $PLUGIN")" ]]
+}
+
+remove=() delete_branch=() keep=()
+while read -r path branch; do
+  [[ "$path" == "$ROOT"/* ]] || continue
+  branch="${branch#refs/heads/}"
+  if is_dirty "$path"; then keep+=("$path (変更が残っている)"); continue; fi
+  head="$(git -C "$path" rev-parse HEAD)"
+  state=""
+  [[ "$branch" != DETACHED ]] && state="$(pr_state "$branch")"
+  if [[ "$state" == OPEN ]]; then
+    keep+=("$path (開いている PR がある)")
+  elif git merge-base --is-ancestor "$head" origin/main || [[ "$state" == MERGED ]]; then
+    remove+=("$path"); [[ "$branch" != DETACHED ]] && delete_branch+=("$branch")
+  elif [[ "$state" == CLOSED ]]; then
+    remove+=("$path")
+  else
+    keep+=("$path (main に未取り込みで PR も無い)")
+  fi
+done < <(git worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} /^branch /{print w" "$2} /^detached/{print w" DETACHED"}')
+
+printf '消す worktree: %d\n' "${#remove[@]}"
+for p in "${remove[@]}"; do printf '  %s\n' "$p"; done
+printf '消すブランチ: %d\n' "${#delete_branch[@]}"
+for b in "${delete_branch[@]}"; do printf '  %s\n' "$b"; done
+printf '残す worktree: %d\n' "${#keep[@]}"
+for p in "${keep[@]}"; do printf '  %s\n' "$p"; done
+
+[[ "$mode" == dry || ${#remove[@]} -eq 0 ]] && exit 0
+if [[ "$mode" == ask ]]; then
+  read -r -p "消しますか？ [y/N] " ans
+  [[ "$ans" == y || "$ans" == Y ]] || { echo "何もしなかった"; exit 0; }
+fi
+
+status=0
+for p in "${remove[@]}"; do
+  rm -f "$p/$PLUGIN"
+  git worktree remove "$p" || { echo "失敗: $p" >&2; status=1; }
+done
+for b in "${delete_branch[@]}"; do
+  git branch -D "$b" >/dev/null || { echo "失敗: ブランチ $b" >&2; status=1; }
+done
+exit "$status"

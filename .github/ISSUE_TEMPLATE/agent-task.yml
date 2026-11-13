@@ -1,0 +1,68 @@
+name: エージェント向けタスク
+description: AI 開発チームに渡す実装タスク。中身を確かめてから ready-for-agent を付ける
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        見出しと書き方の正本は skill `write-issue`（`.agents/skills/write-issue/SKILL.md`）。このフォームはその写しで、見出しを変えるときは両方を同じ PR で直す。
+        1 Issue = 1 PR。PR の差分は追加 800 行・削除 2000 行まで（`mise run pr-size` で数える。lockfile と生成物は除く）。
+        書き終えたら skill `write-issue` の手順 6 のゲートで確かめ、`ready-for-agent` を付けると着手の合図になる。
+  - type: textarea
+    id: goal
+    attributes:
+      label: 目的
+      description: 何のために、何を変えるか。2〜3 文。やり方の細部は書かない
+    validations:
+      required: true
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景・前提
+      description: この Issue が要る理由と、前提になる決定（ADR、Issue の番号）。決定の中身はリンクで足りる
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 受け入れ条件
+      description: 1 行に 1 条件。行末の「→」の後に確かめ方（テスト名・コマンド・確認の手順）。測れない言葉と実装の手順は書かない
+      placeholder: |
+        - 〜のとき、〜を返す → `cargo test -p <crate> <テスト名>`
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: 対象外
+      description: この Issue では触らないこと。分けた先の Issue 番号
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: 関連情報
+      description: 起票前に調べた ADR・調査・仕様・コード・Issue・PR へのリンク
+    validations:
+      required: true
+  - type: textarea
+    id: open-questions
+    attributes:
+      label: 未決事項
+      description: 決まっていないことと、だれが・いつ決めるか。無ければ「なし」。ほかの見出しに散らさない
+    validations:
+      required: true
+  - type: textarea
+    id: size
+    attributes:
+      label: 規模の見積もり
+      description: 見込みの追加行数とファイルごとの内訳。800 行を超えるなら分割案
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: 採用する方式
+      description: Prior art first で人間が選んだ方式。慣れた機能なら「なし」
+    validations:
+      required: false

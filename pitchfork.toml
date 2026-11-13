@@ -1,0 +1,9 @@
+# pitchfork（ローカル開発用プロセスマネージャー）のデーモン定義。手順は docs/dev-environment.md。
+#
+# agent-watch: AI 開発チームの見張り役。T3 のスレッドの状態変化を Grok Bot の webhook に通知する
+# （docs/superpowers/specs/agent-team.md「見張り役と通知」）。異常終了したら再起動する。
+# 動かすのは mise run agent-watch-install でインストールしたビルド済みのバイナリ。
+# 作業中のブランチのコードをその場でビルドしないので、ブランチを切り替えても止まらない。
+[daemons.agent-watch]
+run = "$HOME/.local/bin/pelway-agent-watch"
+retry = 10

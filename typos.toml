@@ -1,0 +1,33 @@
+#:schema https://raw.githubusercontent.com/crate-ci/typos/master/typos.schema.json
+# typos（スペルチェッカ）のリポジトリ共通設定。
+# typos は mise.toml でピンした typos を、hk.pkl の Builtins.typos ステップ
+# （pre-commit・hk check --all＝CI）から --force-exclude 付きで呼び出される形で使う。
+# このファイルの除外はその経路すべて（素の typos 実行を含む）で効く。
+
+[files]
+# 外部管理のベンダー込みスキルと、テンプレートを写した wizard は検査対象外。
+# .agents/skills/ と .claude/skills/ は skills-lock.json がハッシュ込みで
+# 外部リポジトリ（actionbook/rust-skills・penpot/penpot-ai-kit）から固定する内容で、
+# 手元で直すとハッシュ不一致になり、更新時に上書きされるため。
+# scripts/setup/agent-accounts.sh の前半は wizard skill のテンプレートをそのまま写したライブラリで、
+# 手で直さない（コメントの "NAMEs" が誤検出される）。
+extend-exclude = [".agents/skills", ".claude/skills", "scripts/setup/agent-accounts.sh"]
+
+[default.extend-words]
+# RTO は Recovery Time Objective（障害復旧時間目標）の業界略語。
+rto = "rto"
+# 中小企業庁サイトの白書 URL は実パスの綴りが "pamflet"。直すとリンクが壊れる。
+pamflet = "pamflet"
+# passt は rootless podman の依存パッケージ（PASST）の実名。
+passt = "passt"
+# docs/ui-mocks の CSS クラス名（pane の略）。既存の "on" クラスと衝突するため改名しない。
+pn = "pn"
+# Rust 製 TUI ライブラリの実名 ratatui。
+ratatui = "ratatui"
+# 仮想スクロールの npm パッケージの実名 virtua（docs/competitors/buzz.md）。
+virtua = "virtua"
+# Azure Kubernetes Service の略称 AKS と、デザインサービスの実名 Canva（docs/competitors/）。
+aks = "aks"
+canva = "canva"
+# pelway-client-ui のテストが "rgba(" を分割組み立てするための断片（no_color_values.rs）。
+ba = "ba"

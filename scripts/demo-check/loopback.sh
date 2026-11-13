@@ -13,6 +13,9 @@
 #      例: TcpListener::bind("localhost:8080") や 127.0.0.1 以外の IP は違反。
 #      引数が "..." の文字列リテラルで書かれている場合だけが対象（変数は静的に見えないため）。
 #      同じ行に複数の bind(...) があっても、すべての呼び出しを検査する（slot5 指摘1）。
+#      対象は関連付け関数の形 ::bind("..."）だけ（Issue #143 の移植で絞った）:
+#      sqlx などのメソッド形式 .bind("...") はソケットの待受・接続先ではないため対象外。
+#      メソッド形式のソケット bind に文字列リテラルを渡す形は検出しない（既知の限界）。
 # runtime（未実装）:
 #   デモ起動中の待受ソケットを列挙して許可値以外を検出する検査は、デモの起動方法が決まってから実装する。
 #   既定では "runtime: PENDING (NOT IMPLEMENTED)" と表示し、static 合格なら exit 0（runtime は未検査）。
@@ -72,8 +75,8 @@ done
 
 # 2. 全アドレス待受の記述、3. bind(...) の引数
 any_re='(^|[^0-9.])0\.0\.0\.0([^0-9.]|$)|"::"|\[::\]|Ipv4Addr::UNSPECIFIED|Ipv6Addr::UNSPECIFIED|INADDR_ANY|in6addr_any'
-bind_scan_re='(^|[^[:alnum:]_])bind[[:space:]]*\([[:space:]]*"'
-bind_cap_re='(^|[^[:alnum:]_])bind[[:space:]]*\([[:space:]]*"([^"]*)"'
+bind_scan_re='::[[:space:]]*bind[[:space:]]*\([[:space:]]*"'
+bind_cap_re='::[[:space:]]*bind[[:space:]]*\([[:space:]]*"([^"]*)"'
 dc_load_files files
 for f in "${files[@]}"; do
   dc_is_wasm "${f}" && continue
@@ -90,7 +93,7 @@ for f in "${files[@]}"; do
     rest="${line}"
     while [[ "${rest}" =~ ${bind_cap_re} ]]; do
       m="${BASH_REMATCH[0]}"
-      arg="${BASH_REMATCH[2]}"
+      arg="${BASH_REMATCH[1]}"
       ok_bind_target "${arg}" || report "${f}:${ln}" "bind argument is not 127.0.0.1:<port 0-65535> or [::1]:<port 0-65535>"
       nxt="${rest#*"${m}"}"
       if [ "${#nxt}" -eq "${#rest}" ]; then

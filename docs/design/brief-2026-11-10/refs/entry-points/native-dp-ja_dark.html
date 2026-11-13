@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ja" data-theme="dark">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Native data-protection panel · ja dark</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Sans+JP:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#1A1A1E;--tile:#121214;--well:#1E1E22;--ink:#E6E5DF;--sub:#B9B8B1;--mute:#8A8880;
+  --acc:#8F96FF;--acc-fill:#8F96FF;--accw:#2A2C4A;--acc-on:#121214;
+  --r:24px;--sh:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+  --line:#2E2E33;--page-bg:#0E0E10;
+  --danger-fg:#FF8A7A;--danger-bg:#3D1E1B;--caution-fg:#E0B65A;--caution-bg:#3A2E14;
+}
+*{box-sizing:border-box;margin:0}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.review-page{min-height:100vh;background:var(--page-bg);color:var(--ink);font:400 15px/24px "Geist","Noto Sans JP",sans-serif;padding:28px 24px 60px}
+.review-head{max-width:980px;margin:0 auto 20px}
+.review-head h1{font:500 22px/28px "Geist","Noto Sans JP";letter-spacing:-.01em}
+.review-head .meta{font:400 12px/18px "Geist Mono","Noto Sans JP";color:var(--sub);margin-top:6px}
+.badge-prop{display:inline-flex;align-items:center;gap:6px;font:500 11px/16px "Geist Mono","Noto Sans JP";color:var(--caution-fg);background:var(--caution-bg);border-radius:8px;padding:2px 8px;margin-left:8px}
+.layout{max-width:980px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px;align-items:start}
+.state{background:var(--bg);border-radius:20px;padding:16px;box-shadow:var(--sh)}
+.state-label{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:0 4px;flex-wrap:wrap}
+.state-label .id{font:600 12px/16px "Geist Mono";background:var(--ink);color:var(--tile);border-radius:8px;padding:2px 8px}
+.state-label .ttl{font:500 14px/20px "Geist","Noto Sans JP"}
+.state-label .note{font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute);margin-left:auto}
+.frame{background:var(--tile);border-radius:16px;overflow:hidden;border:1px solid var(--line);min-height:520px;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--well);flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:6px;font:500 11px/16px "Geist Mono","Noto Sans JP";border-radius:8px;padding:3px 8px}
+.pill.demo{background:var(--caution-bg);color:var(--caution-fg)}
+.pill.ai{background:var(--accw);color:var(--acc)}
+.topbar h2{font:500 16px/22px "Geist","Noto Sans JP";margin-left:4px}
+.topbar .plat{margin-left:auto;font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute)}
+.body{padding:18px 20px;display:flex;flex-direction:column;gap:14px;flex:1}
+.list{display:flex;flex-direction:column;gap:8px}
+.row{display:flex;align-items:center;gap:12px;min-height:48px;padding:10px 14px;border-radius:14px;background:var(--well);text-align:left;width:100%}
+.row .lab{flex:1;font-size:14px;font-weight:500}
+.row .chev{color:var(--mute);font-size:16px}
+.note-static{margin-top:8px;padding:12px 14px;border-radius:12px;background:var(--tile);border:1px dashed var(--line);font-size:13px;line-height:20px;color:var(--sub)}
+.note-static[tabindex]{outline:none}
+.ghost-label{font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute);margin-top:4px}
+.anno{background:#1E2023;color:#E6E5DF;border-radius:18px;padding:18px;position:sticky;top:16px;font-size:13px;line-height:20px}
+.anno .cap{font:400 11px/16px "Geist Mono","Noto Sans JP";color:#B9B8B1;display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.anno .cap:before{content:"";width:6px;height:6px;border-radius:50%;background:#E0B65A}
+.anno h2{font:500 15px/22px "Geist","Noto Sans JP";margin-bottom:10px}
+.anno ol{padding-left:18px;display:flex;flex-direction:column;gap:10px;color:#D8D7D0}
+.anno li strong{color:#F8F8F4;font-weight:500}
+.ex{max-width:980px;margin:18px auto 0;font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute)}
+.absent{font:400 11px/16px "Geist Mono","Noto Sans JP";color:var(--mute);padding:4px 2px}
+</style></head>
+<body><div class="review-page">
+<header class="review-head"><h1>ネイティブ版 · データ保護パネル<span class="badge-prop">提案</span></h1>
+<p class="meta">§3.4 · 削除／書き出し／同意の入口は表示しない · ja dark · desktop</p></header>
+<div class="layout">
+<section class="state" aria-label="Native DP ja dark">
+  <div class="state-label"><span class="id">N-DP</span><span class="ttl">残す3項目＋静的注記</span><span class="note">hide · not disabled</span></div>
+  <div class="frame">
+    <div class="topbar">
+      <span class="pill demo" data-ftl="banner-demo-mock">デモ・模擬応答</span>
+      <span class="pill ai" data-ftl="label-ai-member">AI</span>
+      <h2 data-ftl="native-dp-panel-title">データ保護</h2>
+      <span class="plat">Native · desktop · dark</span>
+    </div>
+    <div class="body">
+      <div class="list" role="list">
+        <button type="button" class="row" role="listitem"><span class="lab" data-ftl="native-dp-locations">データの置き場所一覧</span><span class="chev" aria-hidden="true">›</span></button>
+        <button type="button" class="row" role="listitem"><span class="lab" data-ftl="native-dp-legal-basis">目的ごとの根拠記録</span><span class="chev" aria-hidden="true">›</span></button>
+        <button type="button" class="row" role="listitem"><span class="lab" data-ftl="native-dp-no-body-logs">本文なしログの表示</span><span class="chev" aria-hidden="true">›</span></button>
+      </div>
+      <p class="note-static" data-ftl="native-dp-web-only-note" role="note">書き出し・削除・同意の操作はWeb版で行います。</p>
+      <p class="ghost-label">※ 書き出す／画面から削除する／同意する — ボタン・メニュー項目はDOMに出さない（disabledにもしない）</p>
+      <p class="absent">[absent] export · delete · consent entries</p>
+    </div>
+  </div>
+</section>
+<aside class="anno"><div class="cap">REVIEWER ONLY</div>
+<h2>§3.4 表示しない</h2>
+<ol>
+<li><strong>Hide</strong> delete / JSON export / consent. Do not render disabled controls.</li>
+<li>Kept: locations, legal basis, no-body logs.</li>
+<li>Static note is text only — no href, no button, no tabindex.</li>
+<li>S00 pills stay on every screen.</li>
+</ol></aside>
+</div>
+<p class="ex">WCAG 1.4.3 Incidental: inactive UI components have no contrast requirement — disabled labels are often unreadable; hide instead. https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html</p>
+</div></body></html>

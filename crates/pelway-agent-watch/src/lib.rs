@@ -1,0 +1,11 @@
+//! T3 のスレッドを見張り、状態の変化を Grok Bot に通知するための判定ロジック。
+//! 外部コマンドを呼ぶ処理は `main.rs` 側に置き、ここには純粋関数だけを置く。
+
+pub mod ci;
+pub mod outbox;
+pub mod parse;
+pub mod payload;
+pub mod t3;
+pub mod watch;
+
+pub use parse::{extract_report, format_utc, issue_number, parse_utc_epoch};

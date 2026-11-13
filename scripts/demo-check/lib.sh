@@ -13,6 +13,16 @@
 #   README.md AGENTS.md mise.toml mise.lock hk.pkl fnox.toml など直下の開発ツール設定
 #                         … 製品に同梱されない（mise.toml の PELWAY_BIND_ADDR だけは loopback 段階が個別に見る）
 #   */tests/fixtures/* */testdata/* … 違反を意図的に含むテスト用データ
+#   crates/dev-*/ crates/pelway-agent-watch/
+#                         … 製品ではない開発用 crate（Cargo.toml ワークスペースの
+#                           「開発用」区分。agent-watch は見張り役で GitHub 等への
+#                           正当な外部参照を持つ）。Issue #143 の移植で追加
+#   crates/pelway-client-ui/tokens/
+#                         … 正本トークンのバイト固定ミラー（hk.pkl の exclude と同じ理由）。
+#                           トークン名は利用者向け文言ではない識別子。Issue #143 の移植で追加
+#   crates/pelway-http/tests/http.rs
+#                         … 非ループバックを拒否する陰性試験が意図的に違反アドレスを含む。
+#                           Issue #143 の移植で追加
 #   .git/
 # シンボリックリンク: find に -L を付けず、走査の途中で出会ったリンクはたどらない
 #   （リンク先が走査ルートの外でも読まない。ルート自体がリンクのときは各段階が realpath で実体を走査する）
@@ -36,6 +46,7 @@ dc_is_excluded() {
   esac
   case "$1" in
     docs/* | scripts/demo-check/* | .git/* | */tests/fixtures/* | tests/fixtures/* | */testdata/* | testdata/*) return 0 ;;
+    crates/dev-*/* | crates/pelway-agent-watch/* | crates/pelway-client-ui/tokens/* | crates/pelway-http/tests/http.rs) return 0 ;;
   esac
   return 1
 }

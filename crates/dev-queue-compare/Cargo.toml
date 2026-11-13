@@ -1,0 +1,19 @@
+[package]
+# Issue #99 の比較検証用クレート。製品機能を含まない（docs/adr/0006-db-queue-choice.md 参照）。
+# 自作の FOR UPDATE SKIP LOCKED + lease キューと River（riverqueue 0.6）を、
+# 実際の PostgreSQL に対する結合テストで比べる。テストは PELWAY_DATABASE_URL が
+# 指す接続先でのみ実行される（未設定なら飛ばす。CI には PostgreSQL が無いため）。
+name = "pelway-dev-queue-compare"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "DB queue comparison harness for issue #99. Not a product feature."
+
+[dependencies]
+riverqueue = { version = "0.6.0", default-features = false, features = ["postgres"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+
+[dev-dependencies]

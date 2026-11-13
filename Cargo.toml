@@ -1,6 +1,12 @@
-# Pelway の Cargo ワークスペース。
-# 現時点のメンバーは開発環境の確認用スケルトンだけで、製品機能のコードは含まない。
-# 位置づけと手順は docs/dev-environment.md を参照。
+# Pelway の Cargo ワークスペース。メンバーは crates/* のすべて。
+# 製品機能の下書き（確定スキーマではない）: pelway-contract（承認 API の契約型）、
+# pelway-at-rest（保存時の分割 AES-256-GCM コンテナ）、pelway-db（テナント分離の
+# Row Level Security を持つ PostgreSQL 層）、pelway-audit-checkpoint（監査鎖の署名付き
+# チェックポイント）、pelway-http（デモ用 HTTP 層）、pelway-client-core /
+# pelway-client-ui（クライアント）、pelway-gateway（連携 gateway のスパイク。
+# MCP クライアントに rmcp を使う検証、#96）。
+# 開発用: dev-smoke（開発環境の確認用スケルトン）、pelway-agent-watch（AI 開発チームの見張り役）。
+# 開発環境の位置づけと手順は docs/dev-environment.md を参照。
 
 [workspace]
 resolver = "3"

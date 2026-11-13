@@ -10,14 +10,30 @@ default_branch = "main"
 
 // 凍結文書（docs/）とブランド素材（assets/）は自動修正の対象外とする。
 // 特に docs/technical/v0.7/ は保全対象のため、trailing whitespace 等で書き換えない。
-exclude = List("docs/**", "assets/**")
+// crates/pelway-client-ui/tokens/ は正本トークン JSON のバイト単位の写し
+// （sha256 固定）のため、末尾改行の付加も許さない。同じ理由で対象外とする。
+// crates/dev-typegen-probe/bindings/ は型生成の結果（生成物）で、生成元の
+// 出力そのままを置いて差分を検査する。書き換えると生成結果と一致しなくなる。
+exclude = List("docs/**", "assets/**", "crates/pelway-client-ui/tokens/**", "crates/dev-client-probe/bindings/**")
 
 // cargo 系ステップはメンバークレート単位ではなくワークスペース全体を検査する。
 // glob に Cargo.toml / Cargo.lock を含め、Rust ファイル以外の変更でも検査を起動する。
+//
+// これらの cargo ステップは git hook（pre-commit）で使う。CI と `mise run hk-check` は
+// 同じ検査を二重に走らせないため、cargo を伴わないステップだけを選ぶ
+// （mise.toml の hk-check タスクを参照）。cargo_fmt / cargo_clippy は mise の
+// fmt-check / clippy タスクが担当する。cargo_check は clippy が型検査も行うため
+// 包含されている（check タスク自体は残してある）。
 steps {
   // hk 自身のユーティリティで完結する汎用ステップ（追加ツール不要）。
   ["trailing_whitespace"] = Builtins.trailing_whitespace
   ["newlines"] = Builtins.newlines
+
+  // スペルチェッカ（typos）。hk のビルトインステップ（text ファイルのみ対象）。
+  // check は --diff 付きで報告し、fix は typos --write-changes。どちらも --force-exclude 付きで
+  // typos.toml の除外設定を尊重する。ツール実体は mise.toml でピンした typos を使う。
+  // docs/**・assets/** は上の exclude で対象外（凍結文書を書き換えない方針に合わせる）。
+  ["typos"] = Builtins.typos
 
   ["cargo_fmt"] {
     glob = List("**/*.rs", "**/Cargo.toml", "Cargo.lock", "**/rustfmt.toml", "**/.rustfmt.toml")

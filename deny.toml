@@ -1,0 +1,94 @@
+# cargo-deny の検査設定（スキーマは cargo-deny 0.20.2。mise.toml の [tools] で固定）。
+# 実行: mise.toml の deny-check タスク（verify-static の依存。CI は static ジョブ）。
+# 公式文書: https://embarkstudios.github.io/cargo-deny/
+# 例外（ignore・例外ライセンス）の足し方は docs/dev-environment.md の「cargo-deny」節。
+# 対象はワークスペース全部（dev- で始まる開発用クレートも含む。#168 の決定）。
+# Cargo.lock の全 835 エントリのうち、ターゲット固有・feature-gated などで cargo-deny の
+# 評価グラフに入らないものは自動的に除外される（グラフは cargo metadata の解決結果に従う）。
+
+# ---- RustSec advisory（脆弱性・yanked・unmaintained） ----
+[advisories]
+# vulnerability は 1 件でもあれば検査が失敗する（既定。0.20.2 の v2 スキーマでは
+# vulnerability の lint level 設定は廃止され、ignore した ID 以外は常にエラー）。
+# yanked 版の使用も失敗させる（既定は warn なので明示する）。
+yanked = "deny"
+# unmaintained / unsound は第1段（この設定）では検査を失敗させない（#168「警告にとどまる」）。
+# 0.20.2 の [advisories] に lint level の warn は存在せず、スコープ
+# all / workspace / transitive / none のみ。失敗しないのは none だけなので採る。
+# none は診断を出さないため、deny-check タスクの第2段（deny-warn.toml で all として
+# 検出し、結果を警告として表示して終了コード 0 で終える）で可視化する。既知の該当は
+# 下の ignore の台帳 + フォロー Issue で管理する（棚卸し: docs/worklogs/issue-168.md）。
+unmaintained = "none"
+unsound = "none"
+# unmaintained = "none" のため、下の unmaintained 系の ignore エントリは第1段の検査に
+# 現れない（未使用扱い）。台帳として意図的に残すので、未使用警告を出さない。
+# （第2段の deny-warn.toml には ignore が無く、既知の 5 件も毎回警告として表示される）
+unused-ignored-advisory = "allow"
+# 例外の台帳。1 件ごとに理由と解消用のフォロー Issue の番号を必ず添える。
+ignore = [
+    # rsa の Marvin Attack（タイミング側チャネルでの鍵復元）。依存ツリーの rsa 0.9.10
+    # （openidconnect 4.1.0 経由）と 0.10.0-rc.19（crypto-glue 0.2.2 経由）が対象。
+    # 修正の rsa >= 0.10.0 正式版は、crypto-glue 0.2.2 が同版で削除された feature sha2 を
+    # 要求するため適用不可。上流の対応待ち。
+    { id = "RUSTSEC-2023-0071", reason = "rsa >= 0.10.0 への更新が crypto-glue / webauthn-rs / openidconnect の対応待ち。解消は #228" },
+    # 以下は unmaintained（脆弱性ではない）。いずれも slint 1.18.1 の間接依存で、
+    # unmaintained = "none" のため検査には現れない。slint の更新で解消するまでの台帳。
+    { id = "RUSTSEC-2026-0441", reason = "pin-utils 0.1.1（slint の spin_on 経由）。解消は #229" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser 0.25.1（slint のテキスト描画）。解消は #229" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant 5.15.1（slint の zbus/atspi 経由）。解消は #229" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names 4.3.5（slint の zbus/atspi 経由）。解消は #229" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive 5.15.1（slint の zbus/atspi 経由）。解消は #229" },
+]
+
+# ---- ライセンス ----
+[licenses]
+# allow リストは現在の依存ツリーで実際に使われているライセンスだけ（棚卸し表:
+# docs/worklogs/issue-168.md。ライセンスごとのクレート数と一致させること）。
+# コピーレフトは MPL-2.0 のみ許可（hatai の判断、#168。webauthn-rs 系と riverqueue 系を
+# 改変せずに使う）。GPL-2.0-only / LGPL-2.1-or-later を含むクレート（self_cell / r-efi）は
+# OR 式のパーミッシブ分岐（Apache-2.0 / MIT）で満たせるため allow 不要。
+# slint は無償の LicenseRef-Slint-Royalty-free-2.0 で満たす（GPL-3.0-only は allow しない。
+# 無償ライセンスの表示条件は別途要件化する）。
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    # webpki-roots の単独ライセンス（RustLS の CA 証明書バンドル。パーミッシブなデータライセンス）
+    "CDLA-Permissive-2.0",
+    # hatai の判断（#168）: webauthn-rs 系・riverqueue 系・crypto-glue（改変せずに使う）
+    "MPL-2.0",
+    # hatai の判断（#168）: slint の無償ライセンス（GPL-3.0-only の代替分岐）
+    "LicenseRef-Slint-Royalty-free-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+# 既定値（0.8）。「0.8」と明示する: ライセンス判定の Confidence がこれ未満だと
+# unlicensed 扱いになる境界として把握しておくため。
+confidence-threshold = 0.8
+
+# ワークスペース内クレート（license 宣言なし・publish = false）は検査対象外。
+[licenses.private]
+ignore = true
+
+# ---- 重複・ワイルドカード ----
+[bans]
+# 同一クレートの複数版は警告（slint / webauthn 系の依存関係上、現在も複数版あり。
+# 減らすのは上流の更新待ち）。ワイルドカード指定（version = "*"、version なしの
+# path 依存）は失敗: 意図しない版の混入を防ぐ。ワークスペース内の path 依存には
+# version = "0.0.0" を付けてある（path 依存の解決には影響しない）。
+multiple-versions = "warn"
+wildcards = "deny"
+
+# ---- 取得元 ----
+[sources]
+# crates.io（既定の allow-registry）以外のレジストリと git 依存は失敗。
+# 取得元を固定し、意図しない供給経路を混ぜない。
+unknown-registry = "deny"
+unknown-git = "deny"
