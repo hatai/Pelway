@@ -1,0 +1,4 @@
+action=run cmd="echo merge-base"
+action=run cmd="echo rebase"
+action=ci state=pass
+action=merge pr=113
