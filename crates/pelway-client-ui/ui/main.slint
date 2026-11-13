@@ -1,0 +1,1710 @@
+// Pelway デスクトップクライアントの画面の骨組み（段階A）。
+//
+// この回では slint への依存を足さないため、このファイルは未コンパイル・未検証。
+// 段階B（別指示）で依存に足してコンパイルする。
+// 部品の並びはデスクトップのモック（docs/ui-mocks/csv.html・csv_dark.html、
+// 試作モック・暫定承認 11/8・最終承認は未）を参考にした「枠と並びだけ」:
+// 左の列（rail）・上の帯・「今日」の画面・チャンネルの画面・右の枠（スレッド・AIの作業）・
+// 下のメッセージ入力欄。モックにない部品・台本操作（場面 1/7・前へ・次へ）は置かない。
+//
+// 決まりごと:
+// - 色は DesignTokens（下の global）のトークン名だけで参照し、色の値は書かない。
+//   値もここには置かない（初期値なし）。Rust がトークンの正本 JSON
+//   （tokens/pelway.tokens.json）から読んだ値をテーマごとに設定する。
+// - 利用者に見える文言はここに書かず、Rust が Fluent（i18n/{ja,en}/main.ftl）から
+//   引いた文字列を tr-* プロパティで受け取る。Slint の @tr()（gettext）は使わない
+//   （仕様が Fluent のため）。
+// - テーマ名（light / dark / light-high-contrast / dark-high-contrast）の定義元は
+//   Rust の Theme enum（src/theme.rs）。ThemeState.current-name は Rust から渡される。
+// - accessible-role / accessible-label による読み上げは段階Bで付ける（この回では未実装）。
+//   AccessKit を組み込んだだけで読み上げが合格したとは言わない。NVDA・VoiceOver・Orca
+//   での確認は未検証。
+
+// Slint の attribution widget（About ダイアログの中で使う。Issue 237）。
+import { AboutSlint } from "std-widgets.slint";
+
+// デザイントークン。名前だけ。テーマごとの値は Rust 側から設定する
+// （out のグローバルは Rust から値を渡せないため in-out にする。初期値は置かない）。
+export global DesignTokens {
+    // 面と文字
+    in-out property <brush> bg;
+    in-out property <brush> tile;
+    in-out property <brush> well;
+    in-out property <brush> ink;
+    in-out property <brush> sub;
+    in-out property <brush> mute;
+    in-out property <brush> line;
+    // 強調
+    in-out property <brush> acc;
+    in-out property <brush> acc-fill;
+    in-out property <brush> acc-fill-hover;
+    in-out property <brush> acc-fill-pressed;
+    in-out property <brush> acc-wash;
+    in-out property <brush> on-acc;
+    // 主ボタン
+    in-out property <brush> primary-bg;
+    in-out property <brush> primary-fg;
+    in-out property <brush> primary-bg-hover;
+    in-out property <brush> primary-bg-pressed;
+    // アバター
+    in-out property <brush> avatar-human-bg;
+    in-out property <brush> avatar-human-fg;
+    in-out property <brush> avatar-ai-bg;
+    in-out property <brush> avatar-ai-fg;
+    in-out property <brush> ai-badge-bg;
+    in-out property <brush> ai-badge-fg;
+    // 状態
+    in-out property <brush> pending-bg;
+    in-out property <brush> pending-bar;
+    in-out property <brush> success-fg;
+    in-out property <brush> success-bg;
+    in-out property <brush> danger-fg;
+    in-out property <brush> danger-bg;
+    in-out property <brush> warning-fg;
+    in-out property <brush> warning-bg;
+    in-out property <brush> unread;
+    in-out property <brush> private-bg;
+    // 社外送信カード
+    in-out property <brush> ext-bg;
+    in-out property <brush> ext-fg;
+    in-out property <brush> ext-label;
+    in-out property <brush> ext-meta;
+    in-out property <brush> ext-address;
+    in-out property <brush> ext-link;
+    in-out property <brush> ext-body-bg;
+    in-out property <brush> ext-body-fg;
+    in-out property <brush> ext-go-bg;
+    in-out property <brush> ext-go-fg;
+    in-out property <brush> ext-fx-fg;
+    in-out property <brush> ext-fx-line;
+    in-out property <brush> ext-divider;
+    // その他
+    in-out property <brush> focus-ring;
+    in-out property <brush> link;
+    in-out property <brush> selected-wash;
+    in-out property <brush> border-form;
+}
+
+// 現在のテーマ。安定名の定義元は Rust の Theme enum（src/theme.rs）。
+// テーマを切り替える画面は作らない。
+export global ThemeState {
+    // Rust（Theme::name()）から受け取る。out だと Rust から値を渡せない
+    // （setter が空のスタブになる）ため in-out にする（第9枠に記録）。
+    in-out property <string> current-name;
+}
+
+// ---- 小さい部品 ----
+
+// アバター。人は円、AI は四角（AI であることはバッジでも示す）。
+component AvatarView inherits Rectangle {
+    in property <bool> is-ai: false;
+    in property <string> initial;
+    width: 34px;
+    height: 34px;
+    border-radius: self.is-ai ? 10px : 17px;
+    background: self.is-ai ? DesignTokens.avatar-ai-bg : DesignTokens.avatar-human-bg;
+    Text {
+        text: root.initial;
+        color: root.is-ai ? DesignTokens.avatar-ai-fg : DesignTokens.avatar-human-fg;
+        font-size: 13px;
+        font-weight: 600;
+    }
+}
+
+// AI 社員であることの印（「AI」）。
+component AiBadgeView inherits Rectangle {
+    in property <string> label;
+    height: 14px;
+    border-radius: 6px;
+    background: DesignTokens.ai-badge-bg;
+    // 注: padding は layout 要素にしか効かないため、中に HorizontalLayout を置く
+    // （第9枠に記録。左右 4px の余白で「AI」の文字を置く）。
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        Text {
+            text: root.label;
+            color: DesignTokens.ai-badge-fg;
+            font-size: 10px;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// 左の列の1行（今日・チャンネル・DM）。
+component RailRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    callback pressed();
+    height: 32px;
+    border-radius: 12px;
+    background: root.selected ? DesignTokens.selected-wash : DesignTokens.tile;
+    ta := TouchArea {
+        clicked => { root.pressed(); }
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Text {
+            text: root.label;
+            color: root.selected ? DesignTokens.acc : DesignTokens.sub;
+            font-size: 14px;
+            vertical-alignment: center;
+        }
+    }
+}// 左の列の AI 社員の行（名前＋在席状態）。
+component RailAiRow inherits Rectangle {
+    in property <string> label;
+    in property <string> presence;
+    height: 32px;
+    border-radius: 12px;
+    background: DesignTokens.tile;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 10px;
+        Text {
+            text: root.label;
+            color: DesignTokens.sub;
+            font-size: 14px;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.presence;
+            color: DesignTokens.mute;
+            font-size: 10px;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+        }
+    }
+}
+
+// 見出し（グループの小さいラベル）。
+component GroupLabel inherits Text {
+    color: DesignTokens.mute;
+    font-size: 11px;
+}
+
+// リンクの書式の行。
+component LinkText inherits Text {
+    color: DesignTokens.link;
+    font-size: 13px;
+    // 注: Slint 1.18 の Text に underline のプロパティはないため下線は付かない
+    // （第9枠に記録）。押されたことを外に伝える callback。
+    callback touched();
+}
+
+// ---- 左の列（rail） ----
+
+component RailView inherits Rectangle {
+    background: DesignTokens.tile;
+    border-radius: 24px;
+    // 文言（Rust から Fluent で引いて渡す）
+    in property <string> tr-rail-viewing-as;
+    in property <string> tr-rail-today;
+    in property <string> tr-rail-channels;
+    in property <string> tr-rail-dm-people;
+    in property <string> tr-rail-dm-ai;
+    // 合成データ
+    in property <string> data-org-name;
+    in property <string> data-channel-1;
+    in property <string> data-channel-2;
+    in property <string> data-channel-3;
+    in property <string> data-channel-4;
+    in property <bool> data-channel-2-selected: true;
+    in property <string> data-person-1;
+    in property <string> data-person-1-note;
+    in property <string> data-person-2;
+    in property <string> data-person-2-note;
+    in property <string> data-ai-1;
+    in property <string> data-ai-1-presence;
+    in property <string> data-ai-2;
+    in property <string> data-ai-2-presence;
+    in property <string> data-ai-3;
+    in property <string> data-ai-3-presence;
+    callback today-pressed();
+    VerticalLayout {
+        padding: 20px;
+        spacing: 2px;
+        Text {
+            text: root.data-org-name;
+            color: DesignTokens.ink;
+            font-size: 15px;
+            font-weight: 600;
+        }
+        GroupLabel {
+            text: root.tr-rail-viewing-as;
+        }
+        RailRow {
+            label: root.tr-rail-today;
+            pressed => { root.today-pressed(); }
+        }
+        GroupLabel { text: root.tr-rail-channels; }
+        RailRow { label: root.data-channel-1; }
+        RailRow {
+            label: root.data-channel-2;
+            selected: root.data-channel-2-selected;
+        }
+        RailRow { label: root.data-channel-3; }
+        RailRow { label: root.data-channel-4; }
+        GroupLabel { text: root.tr-rail-dm-people; }
+        RailRow {
+            label: root.data-person-1-note != "" ? root.data-person-1 + "　" + root.data-person-1-note : root.data-person-1;
+        }
+        RailRow {
+            label: root.data-person-2-note != "" ? root.data-person-2 + "　" + root.data-person-2-note : root.data-person-2;
+        }
+        GroupLabel { text: root.tr-rail-dm-ai; }
+        RailAiRow {
+            label: root.data-ai-1;
+            presence: root.data-ai-1-presence;
+        }
+        RailAiRow {
+            label: root.data-ai-2;
+            presence: root.data-ai-2-presence;
+        }
+        RailAiRow {
+            label: root.data-ai-3;
+            presence: root.data-ai-3-presence;
+        }
+    }
+}
+
+// ---- 上の帯 ----
+
+component TopBar inherits Rectangle {
+    background: DesignTokens.tile;
+    in property <string> data-title;
+    in property <string> data-members;
+    in property <string> tr-search-placeholder;
+    in property <string> tr-search-shortcut;
+    VerticalLayout {
+        HorizontalLayout {
+            padding: 16px;
+            padding-right: 22px;
+            padding-left: 22px;
+            spacing: 12px;
+            Text {
+                text: root.data-title;
+                color: DesignTokens.ink;
+                font-size: 22px;
+                font-weight: 500;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.data-members;
+                color: DesignTokens.mute;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                width: 260px;
+                height: 34px;
+                border-radius: 17px;
+                background: DesignTokens.well;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    Text {
+                        text: root.tr-search-placeholder;
+                        color: DesignTokens.mute;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.tr-search-shortcut;
+                        color: DesignTokens.sub;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                        horizontal-alignment: right;
+                    }
+                }
+            }
+        }
+        Rectangle {
+            height: 1px;
+            background: DesignTokens.line;
+        }
+    }
+}
+
+// ---- 「今日」の画面 ----
+
+// 区切りの1項目。「判断待ち」では行の地と左帯を変える。
+component TodayItemRow inherits Rectangle {
+    in property <bool> data-is-ai: false;
+    in property <string> data-initial;
+    in property <string> data-meta;
+    in property <string> data-text;
+    in property <bool> data-pending: false;
+    height: 56px;
+    border-radius: 14px;
+    background: root.data-pending ? DesignTokens.pending-bg : DesignTokens.tile;
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 12px;
+        Rectangle {
+            width: 3px;
+            visible: root.data-pending;
+            background: DesignTokens.pending-bar;
+        }
+        AvatarView {
+            is-ai: root.data-is-ai;
+            initial: root.data-initial;
+        }
+        VerticalLayout {
+            spacing: 2px;
+            Text {
+                text: root.data-meta;
+                color: DesignTokens.mute;
+                font-size: 11px;
+            }
+            Text {
+                text: root.data-text;
+                color: DesignTokens.ink;
+                font-size: 14px;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+component TodaySectionView inherits Rectangle {
+    in property <string> heading;
+    in property <string> empty-label;
+    in property <int> count;
+    // 区切りの項目（骨組みでは代表 2 つまで）
+    in property <bool> has-item-1: true;
+    in property <bool> item-1-is-ai: false;
+    in property <string> item-1-initial;
+    in property <string> item-1-meta;
+    in property <string> item-1-text;
+    in property <bool> item-1-pending: false;
+    in property <bool> has-item-2: false;
+    in property <bool> item-2-is-ai: false;
+    in property <string> item-2-initial;
+    in property <string> item-2-meta;
+    in property <string> item-2-text;
+    in property <bool> item-2-pending: false;
+    background: DesignTokens.well;
+    border-radius: 20px;
+    VerticalLayout {
+        padding: 6px;
+        spacing: 2px;
+        HorizontalLayout {
+            padding: 10px;
+            padding-bottom: 6px;
+            spacing: 8px;
+            Text {
+                text: root.heading;
+                color: DesignTokens.ink;
+                font-size: 14px;
+                font-weight: 500;
+                vertical-alignment: center;
+            }
+            // 件数。値のバッジ用のトークンがまだないため、数字だけを並記する
+            // （トークン確定後に見た目を整える）。
+            Text {
+                text: root.count;
+                color: root.count > 0 ? DesignTokens.ink : DesignTokens.mute;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+        }
+        if root.count == 0 : Text {
+            text: root.empty-label;
+            color: DesignTokens.mute;
+            font-size: 13px;
+        }
+        if root.has-item-1 : TodayItemRow {
+            data-is-ai: root.item-1-is-ai;
+            data-initial: root.item-1-initial;
+            data-meta: root.item-1-meta;
+            data-text: root.item-1-text;
+            data-pending: root.item-1-pending;
+        }
+        if root.has-item-2 : TodayItemRow {
+            data-is-ai: root.item-2-is-ai;
+            data-initial: root.item-2-initial;
+            data-meta: root.item-2-meta;
+            data-text: root.item-2-text;
+            data-pending: root.item-2-pending;
+        }
+    }
+}
+
+component TodayView inherits Rectangle {
+    in property <string> tr-today-title;
+    in property <string> tr-today-section-consultations;
+    in property <string> tr-today-section-pending;
+    in property <string> tr-today-section-decided;
+    in property <string> tr-today-section-empty;
+    in property <string> tr-today-quiet;
+    in property <int> data-consultations-count;
+    in property <int> data-pending-count;
+    in property <int> data-decided-count;
+    in property <bool> data-quiet: false;
+    in property <bool> data-c1-is-ai: false;
+    in property <string> data-c1-initial;
+    in property <string> data-c1-meta;
+    in property <string> data-c1-text;
+    in property <bool> data-c2-is-ai: false;
+    in property <string> data-c2-initial;
+    in property <string> data-c2-meta;
+    in property <string> data-c2-text;
+    in property <bool> data-p1-is-ai: false;
+    in property <string> data-p1-initial;
+    in property <string> data-p1-meta;
+    in property <string> data-p1-text;
+    in property <bool> data-d1-is-ai: false;
+    in property <string> data-d1-initial;
+    in property <string> data-d1-meta;
+    in property <string> data-d1-text;
+    background: DesignTokens.tile;
+    VerticalLayout {
+        padding: 24px;
+        padding-top: 20px;
+        spacing: 18px;
+        Text {
+            text: root.tr-today-title;
+            color: DesignTokens.ink;
+            font-size: 22px;
+            font-weight: 500;
+        }
+        if root.data-quiet : Text {
+            text: root.tr-today-quiet;
+            color: DesignTokens.sub;
+            font-size: 14px;
+            horizontal-alignment: center;
+        }
+        TodaySectionView {
+            heading: root.tr-today-section-consultations;
+            empty-label: root.tr-today-section-empty;
+            count: root.data-consultations-count;
+            has-item-1: root.data-consultations-count > 0;
+            item-1-is-ai: root.data-c1-is-ai;
+            item-1-initial: root.data-c1-initial;
+            item-1-meta: root.data-c1-meta;
+            item-1-text: root.data-c1-text;
+            has-item-2: root.data-consultations-count > 1;
+            item-2-is-ai: root.data-c2-is-ai;
+            item-2-initial: root.data-c2-initial;
+            item-2-meta: root.data-c2-meta;
+            item-2-text: root.data-c2-text;
+        }
+        TodaySectionView {
+            heading: root.tr-today-section-pending;
+            empty-label: root.tr-today-section-empty;
+            count: root.data-pending-count;
+            has-item-1: root.data-pending-count > 0;
+            item-1-is-ai: root.data-p1-is-ai;
+            item-1-initial: root.data-p1-initial;
+            item-1-meta: root.data-p1-meta;
+            item-1-text: root.data-p1-text;
+            item-1-pending: true;
+        }
+        TodaySectionView {
+            heading: root.tr-today-section-decided;
+            empty-label: root.tr-today-section-empty;
+            count: root.data-decided-count;
+            has-item-1: root.data-decided-count > 0;
+            item-1-is-ai: root.data-d1-is-ai;
+            item-1-initial: root.data-d1-initial;
+            item-1-meta: root.data-d1-meta;
+            item-1-text: root.data-d1-text;
+        }
+    }
+}
+
+// ---- チャンネルの画面 ----
+
+// メッセージ1件（人は円、AI は四角＋「AI」の印）。
+component MessageRow inherits Rectangle {
+    in property <string> data-sender;
+    in property <bool> data-is-ai: false;
+    in property <string> data-initial;
+    in property <string> data-body;
+    in property <string> data-time;
+    in property <string> tr-ai-badge;
+    in property <string> tr-mention-read-range;
+    in property <bool> data-show-read-range: false;
+    HorizontalLayout {
+        padding: 6px;
+        spacing: 12px;
+        AvatarView {
+            is-ai: root.data-is-ai;
+            initial: root.data-initial;
+        }
+        VerticalLayout {
+            spacing: 2px;
+            if root.data-show-read-range : LinkText {
+                text: root.tr-mention-read-range;
+                font-size: 12px;
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: root.data-sender;
+                    color: DesignTokens.ink;
+                    font-size: 13px;
+                    font-weight: 500;
+                    vertical-alignment: center;
+                }
+                if root.data-is-ai : AiBadgeView {
+                    label: root.tr-ai-badge;
+                }
+                Text {
+                    text: root.data-time;
+                    color: DesignTokens.mute;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+            Text {
+                text: root.data-body;
+                color: DesignTokens.ink;
+                font-size: 15px;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// メッセージの下のスレッドへの導線（「返信 N 件」＋作業中/完了＋「作業を見る」）。
+component ThreadLead inherits Rectangle {
+    in property <string> tr-thread-replies;
+    in property <string> tr-thread-working;
+    in property <string> tr-thread-done;
+    in property <string> tr-thread-view-work;
+    in property <bool> data-working: false;
+    in property <bool> data-done: true;
+    callback view-work-pressed();
+    height: 28px;
+    border-radius: 12px;
+    background: DesignTokens.well;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        Text {
+            text: root.tr-thread-replies;
+            color: DesignTokens.acc;
+            font-size: 13px;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+        Text {
+            visible: root.data-working;
+            text: root.tr-thread-working;
+            color: DesignTokens.acc;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+        Text {
+            visible: root.data-done && !root.data-working;
+            text: root.tr-thread-done;
+            color: DesignTokens.sub;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+        LinkText {
+            text: root.tr-thread-view-work;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            touched => { root.view-work-pressed(); }
+        }
+    }
+}
+
+// 決定の印（◆ 決定 · 誰 時刻）。
+component DecisionMarkView inherits Rectangle {
+    in property <string> tr-decision-mark;
+    height: 24px;
+    HorizontalLayout {
+        padding-left: 46px;
+        Text {
+            text: root.tr-decision-mark;
+            color: DesignTokens.ink;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// 引き継ぎカード。
+component HandoffCardView inherits Rectangle {
+    in property <string> tr-handoff-context;
+    in property <string> tr-handoff-acknowledged;
+    in property <string> tr-handoff-not-acknowledged;
+    in property <string> tr-handoff-acknowledge;
+    in property <string> tr-handoff-decision-owner;
+    in property <string> data-from-to;
+    in property <string> data-title;
+    in property <bool> data-acknowledged: true;
+    in property <string> data-option-a;
+    in property <string> data-option-b;
+    callback acknowledge-pressed();
+    background: DesignTokens.well;
+    border-radius: 14px;
+    VerticalLayout {
+        padding: 9px;
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 10px;
+            Text {
+                text: root.data-from-to + "　" + root.data-title;
+                color: DesignTokens.ink;
+                font-size: 13px;
+                font-weight: 500;
+                vertical-alignment: center;
+            }
+            LinkText {
+                text: root.tr-handoff-context;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+            }
+            if !root.data-acknowledged : Text {
+                text: root.tr-handoff-not-acknowledged;
+                color: DesignTokens.ink;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+            if root.data-acknowledged : Text {
+                text: root.tr-handoff-acknowledged;
+                color: DesignTokens.sub;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+            if !root.data-acknowledged : Rectangle {
+                height: 28px;
+                border-radius: 14px;
+                background: DesignTokens.ink;
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    Text {
+                        text: root.tr-handoff-acknowledge;
+                        color: DesignTokens.well;
+                        font-size: 12px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                    ta := TouchArea {
+                        clicked => { root.acknowledge-pressed(); }
+                    }
+                }
+            }
+        }
+        Text {
+            text: root.tr-handoff-decision-owner;
+            color: DesignTokens.ink;
+            font-size: 12px;
+        }
+        Text {
+            text: root.data-option-a;
+            color: DesignTokens.sub;
+            font-size: 13px;
+        }
+        Text {
+            text: root.data-option-b;
+            color: DesignTokens.sub;
+            font-size: 13px;
+        }
+    }
+}
+
+// 「あなただけに表示」の行。
+component PrivateNoteRow inherits Rectangle {
+    in property <string> tr-message-private-note;
+    in property <string> data-sender;
+    in property <bool> data-is-ai: false;
+    in property <string> data-initial;
+    in property <string> data-body;
+    background: DesignTokens.private-bg;
+    border-radius: 14px;
+    VerticalLayout {
+        padding: 10px;
+        padding-left: 12px;
+        spacing: 4px;
+        Text {
+            text: root.tr-message-private-note;
+            color: DesignTokens.sub;
+            font-size: 11px;
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            AvatarView {
+                is-ai: root.data-is-ai;
+                initial: root.data-initial;
+            }
+            VerticalLayout {
+                spacing: 2px;
+                Text {
+                    text: root.data-sender;
+                    color: DesignTokens.ink;
+                    font-size: 13px;
+                }
+                Text {
+                    text: root.data-body;
+                    color: DesignTokens.ink;
+                    font-size: 15px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+// 社外への送信の確認カード（「送る」「直す」と鍵の注記）と送信後の表示。
+component ExternalSendCardView inherits Rectangle {
+    in property <string> tr-ext-card-label;
+    in property <string> tr-ext-card-question;
+    in property <string> tr-ext-address-label;
+    in property <string> tr-ext-subject-label;
+    in property <string> tr-ext-basis-label;
+    in property <string> tr-ext-send;
+    in property <string> tr-ext-fix;
+    in property <string> tr-ext-lock-note;
+    in property <string> tr-ext-sent;
+    in property <string> data-address;
+    in property <string> data-subject;
+    in property <string> data-basis;
+    in property <string> data-body;
+    in property <bool> data-sent: false;
+    callback send-pressed();
+    callback fix-pressed();
+    background: DesignTokens.ext-bg;
+    border-radius: 18px;
+    VerticalLayout {
+        padding: 16px;
+        padding-left: 18px;
+        padding-right: 18px;
+        spacing: 4px;
+        Text {
+            text: root.tr-ext-card-label;
+            color: DesignTokens.ext-label;
+            font-size: 11px;
+        }
+        Text {
+            text: root.tr-ext-card-question;
+            color: DesignTokens.ext-fg;
+            font-size: 16px;
+            font-weight: 500;
+        }
+        if !root.data-sent : Rectangle {
+            border-radius: 12px;
+            background: DesignTokens.ext-body-bg;
+            VerticalLayout {
+                padding: 10px;
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 2px;
+                Text {
+                    text: root.tr-ext-address-label + " " + root.data-address;
+                    color: DesignTokens.ext-address;
+                    font-size: 11px;
+                }
+                Text {
+                    text: root.tr-ext-subject-label + " " + root.data-subject;
+                    color: DesignTokens.ext-meta;
+                    font-size: 11px;
+                }
+                Text {
+                    text: root.tr-ext-basis-label + " " + root.data-basis;
+                    color: DesignTokens.ext-link;
+                    font-size: 11px;
+                }
+                Text {
+                    text: root.data-body;
+                    color: DesignTokens.ext-body-fg;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+        if !root.data-sent : Rectangle {
+            height: 1px;
+            background: DesignTokens.ext-divider;
+        }
+        if !root.data-sent : HorizontalLayout {
+            spacing: 10px;
+            height: 36px;
+            // 「送る」（主操作）。押せるかは Rust 側（ApprovalCardBridge）が決める。
+            Rectangle {
+                width: 96px;
+                border-radius: 18px;
+                background: DesignTokens.ext-go-bg;
+                Text {
+                    text: root.tr-ext-send;
+                    color: DesignTokens.ext-go-fg;
+                    font-size: 14px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                ta := TouchArea {
+                    clicked => { root.send-pressed(); }
+                }
+            }
+            // 「直す」。
+            Rectangle {
+                width: 80px;
+                border-radius: 18px;
+                border-width: 1px;
+                border-color: DesignTokens.ext-fx-line;
+                Text {
+                    text: root.tr-ext-fix;
+                    color: DesignTokens.ext-fx-fg;
+                    font-size: 14px;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                ta2 := TouchArea {
+                    clicked => { root.fix-pressed(); }
+                }
+            }
+            Text {
+                text: root.tr-ext-lock-note;
+                color: DesignTokens.ext-label;
+                font-size: 11px;
+                wrap: word-wrap;
+                vertical-alignment: center;
+            }
+        }
+        // 送信後の表示。
+        if root.data-sent : Text {
+            text: root.tr-ext-sent;
+            color: DesignTokens.success-fg;
+            font-size: 13px;
+        }
+    }
+}
+
+// チャンネルの画面（時系列＋入力欄）。
+component ChannelView inherits Rectangle {
+    in property <string> tr-unread-divider;
+    in property <string> tr-ai-badge;
+    in property <string> tr-decision-mark;
+    in property <string> tr-message-private-note;
+    in property <string> tr-thread-replies;
+    in property <string> tr-thread-working;
+    in property <string> tr-thread-done;
+    in property <string> tr-thread-view-work;
+    in property <string> tr-mention-read-range;
+    in property <string> tr-handoff-context;
+    in property <string> tr-handoff-acknowledged;
+    in property <string> tr-handoff-not-acknowledged;
+    in property <string> tr-handoff-acknowledge;
+    in property <string> tr-handoff-decision-owner;
+    in property <string> tr-ext-card-label;
+    in property <string> tr-ext-card-question;
+    in property <string> tr-ext-address-label;
+    in property <string> tr-ext-subject-label;
+    in property <string> tr-ext-basis-label;
+    in property <string> tr-ext-send;
+    in property <string> tr-ext-fix;
+    in property <string> tr-ext-lock-note;
+    in property <string> tr-ext-sent;
+    in property <string> tr-composer-placeholder;
+    in property <string> data-day-label;
+    in property <string> data-msg1-sender;
+    in property <bool> data-msg1-is-ai: false;
+    in property <string> data-msg1-initial;
+    in property <string> data-msg1-time;
+    in property <string> data-msg1-body;
+    in property <string> data-msg2-sender;
+    in property <bool> data-msg2-is-ai: true;
+    in property <string> data-msg2-initial;
+    in property <string> data-msg2-time;
+    in property <string> data-msg2-body;
+    in property <bool> data-msg2-thread-done: true;
+    in property <string> data-handoff-from-to;
+    in property <string> data-handoff-title;
+    in property <bool> data-handoff-acknowledged: true;
+    in property <string> data-handoff-option-a;
+    in property <string> data-handoff-option-b;
+    in property <string> data-msg3-sender;
+    in property <string> data-msg3-initial;
+    in property <string> data-msg3-time;
+    in property <string> data-msg3-body;
+    in property <string> data-note-sender;
+    in property <bool> data-note-is-ai: true;
+    in property <string> data-note-initial;
+    in property <string> data-note-body;
+    in property <string> data-ext-address;
+    in property <string> data-ext-subject;
+    in property <string> data-ext-basis;
+    in property <string> data-ext-body;
+    in property <bool> data-ext-sent: false;
+    callback send-pressed();
+    callback fix-pressed();
+    callback acknowledge-pressed();
+    callback view-work-pressed();
+    background: DesignTokens.tile;
+    VerticalLayout {
+        // 時系列
+        Flickable {
+            VerticalLayout {
+                padding: 24px;
+                padding-top: 20px;
+                spacing: 8px;
+                alignment: start;
+                // 日付の区切り
+                Text {
+                    text: root.data-day-label;
+                    color: DesignTokens.mute;
+                    font-size: 11px;
+                    horizontal-alignment: center;
+                }
+                MessageRow {
+                    data-sender: root.data-msg1-sender;
+                    data-is-ai: root.data-msg1-is-ai;
+                    data-initial: root.data-msg1-initial;
+                    data-time: root.data-msg1-time;
+                    data-body: root.data-msg1-body;
+                    tr-ai-badge: root.tr-ai-badge;
+                    tr-mention-read-range: root.tr-mention-read-range;
+                }
+                MessageRow {
+                    data-sender: root.data-msg2-sender;
+                    data-is-ai: root.data-msg2-is-ai;
+                    data-initial: root.data-msg2-initial;
+                    data-time: root.data-msg2-time;
+                    data-body: root.data-msg2-body;
+                    tr-ai-badge: root.tr-ai-badge;
+                    tr-mention-read-range: root.tr-mention-read-range;
+                    data-show-read-range: true;
+                }
+                ThreadLead {
+                    tr-thread-replies: root.tr-thread-replies;
+                    tr-thread-working: root.tr-thread-working;
+                    tr-thread-done: root.tr-thread-done;
+                    tr-thread-view-work: root.tr-thread-view-work;
+                    data-working: !root.data-msg2-thread-done;
+                    data-done: root.data-msg2-thread-done;
+                    view-work-pressed => { root.view-work-pressed(); }
+                }
+                // 「ここから未読」の区切り
+                HorizontalLayout {
+                    height: 16px;
+                    spacing: 10px;
+                    Text {
+                        text: root.tr-unread-divider;
+                        color: DesignTokens.unread;
+                        font-size: 11px;
+                        font-weight: 500;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        height: 1px;
+                        background: DesignTokens.unread;
+                        // 注: Rectangle に vertical-alignment はない。HorizontalLayout の
+                        // 交差軸で固定サイズの子は中央に置かれる（第9枠に記録）。
+                    }
+                }
+                HandoffCardView {
+                    tr-handoff-context: root.tr-handoff-context;
+                    tr-handoff-acknowledged: root.tr-handoff-acknowledged;
+                    tr-handoff-not-acknowledged: root.tr-handoff-not-acknowledged;
+                    tr-handoff-acknowledge: root.tr-handoff-acknowledge;
+                    tr-handoff-decision-owner: root.tr-handoff-decision-owner;
+                    data-from-to: root.data-handoff-from-to;
+                    data-title: root.data-handoff-title;
+                    data-acknowledged: root.data-handoff-acknowledged;
+                    data-option-a: root.data-handoff-option-a;
+                    data-option-b: root.data-handoff-option-b;
+                    acknowledge-pressed => { root.acknowledge-pressed(); }
+                }
+                MessageRow {
+                    data-sender: root.data-msg3-sender;
+                    data-is-ai: false;
+                    data-initial: root.data-msg3-initial;
+                    data-time: root.data-msg3-time;
+                    data-body: root.data-msg3-body;
+                    tr-ai-badge: root.tr-ai-badge;
+                    tr-mention-read-range: root.tr-mention-read-range;
+                }
+                DecisionMarkView {
+                    tr-decision-mark: root.tr-decision-mark;
+                }
+                PrivateNoteRow {
+                    tr-message-private-note: root.tr-message-private-note;
+                    data-sender: root.data-note-sender;
+                    data-is-ai: root.data-note-is-ai;
+                    data-initial: root.data-note-initial;
+                    data-body: root.data-note-body;
+                }
+                ExternalSendCardView {
+                    tr-ext-card-label: root.tr-ext-card-label;
+                    tr-ext-card-question: root.tr-ext-card-question;
+                    tr-ext-address-label: root.tr-ext-address-label;
+                    tr-ext-subject-label: root.tr-ext-subject-label;
+                    tr-ext-basis-label: root.tr-ext-basis-label;
+                    tr-ext-send: root.tr-ext-send;
+                    tr-ext-fix: root.tr-ext-fix;
+                    tr-ext-lock-note: root.tr-ext-lock-note;
+                    tr-ext-sent: root.tr-ext-sent;
+                    data-address: root.data-ext-address;
+                    data-subject: root.data-ext-subject;
+                    data-basis: root.data-ext-basis;
+                    data-body: root.data-ext-body;
+                    data-sent: root.data-ext-sent;
+                    send-pressed => { root.send-pressed(); }
+                    fix-pressed => { root.fix-pressed(); }
+                }
+            }
+        }
+        // 下のメッセージ入力欄
+        Rectangle {
+            height: 84px;
+            HorizontalLayout {
+                padding: 18px;
+                padding-top: 0px;
+                composer := Rectangle {
+                    height: 48px;
+                    border-radius: 16px;
+                    background: DesignTokens.well;
+                    border-width: 1px;
+                    border-color: composer-ta.has-focus ? DesignTokens.focus-ring : DesignTokens.border-form;
+                    HorizontalLayout {
+                        padding-left: 18px;
+                        Text {
+                            text: root.tr-composer-placeholder;
+                            color: DesignTokens.mute;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                        }
+                    }
+                    composer-ta := FocusScope {}
+                }
+            }
+        }
+    }
+}
+
+// ---- 右の枠 ----
+
+// スレッドの枠。
+component ThreadPaneView inherits Rectangle {
+    in property <string> tr-pane-thread-title;
+    in property <string> tr-pane-close;
+    in property <string> tr-thread-working;
+    in property <string> tr-thread-done;
+    in property <string> tr-thread-view-work;
+    in property <string> tr-thread-input-placeholder;
+    in property <string> tr-ai-badge;
+    in property <string> tr-mention-read-range;
+    in property <string> data-channel;
+    in property <string> data-msg1-sender;
+    in property <bool> data-msg1-is-ai: true;
+    in property <string> data-msg1-initial;
+    in property <string> data-msg1-time;
+    in property <string> data-msg1-body;
+    in property <string> data-msg2-sender;
+    in property <bool> data-msg2-is-ai: false;
+    in property <string> data-msg2-initial;
+    in property <string> data-msg2-time;
+    in property <string> data-msg2-body;
+    in property <bool> data-done: true;
+    callback close-pressed();
+    callback view-work-pressed();
+    background: DesignTokens.tile;
+    border-radius: 24px;
+    VerticalLayout {
+        padding: 20px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 10px;
+            Text {
+                text: root.tr-pane-thread-title;
+                color: DesignTokens.ink;
+                font-size: 16px;
+                font-weight: 500;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.data-channel;
+                color: DesignTokens.mute;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+            LinkText {
+                text: root.tr-pane-close;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                touched => { root.close-pressed(); }
+            }
+        }
+        Flickable {
+            VerticalLayout {
+                spacing: 8px;
+                alignment: start;
+                MessageRow {
+                    data-sender: root.data-msg1-sender;
+                    data-is-ai: root.data-msg1-is-ai;
+                    data-initial: root.data-msg1-initial;
+                    data-time: root.data-msg1-time;
+                    data-body: root.data-msg1-body;
+                    tr-ai-badge: root.tr-ai-badge;
+                    tr-mention-read-range: root.tr-mention-read-range;
+                }
+                MessageRow {
+                    data-sender: root.data-msg2-sender;
+                    data-is-ai: root.data-msg2-is-ai;
+                    data-initial: root.data-msg2-initial;
+                    data-time: root.data-msg2-time;
+                    data-body: root.data-msg2-body;
+                    tr-ai-badge: root.tr-ai-badge;
+                    tr-mention-read-range: root.tr-mention-read-range;
+                }
+            }
+        }
+        Text {
+            visible: !root.data-done;
+            text: root.tr-thread-working;
+            color: DesignTokens.acc;
+            font-size: 13px;
+        }
+        Text {
+            visible: root.data-done;
+            text: root.tr-thread-done;
+            color: DesignTokens.sub;
+            font-size: 13px;
+        }
+        LinkText {
+            text: root.tr-thread-view-work;
+            touched => { root.view-work-pressed(); }
+        }
+        // スレッドへの返信の入力欄
+        Rectangle {
+            height: 44px;
+            border-radius: 14px;
+            background: DesignTokens.well;
+            border-width: 1px;
+            border-color: reply-ta.has-focus ? DesignTokens.focus-ring : DesignTokens.border-form;
+            HorizontalLayout {
+                padding-left: 14px;
+                Text {
+                    text: root.tr-thread-input-placeholder;
+                    color: DesignTokens.mute;
+                    font-size: 14px;
+                    vertical-alignment: center;
+                }
+            }
+            reply-ta := FocusScope {}
+        }
+    }
+}
+
+// AI の作業の枠。
+component AiWorkPaneView inherits Rectangle {
+    in property <string> tr-pane-back-to-thread;
+    in property <string> tr-pane-ai-work-title;
+    in property <string> tr-pane-ai-steps;
+    in property <string> tr-pane-ai-from;
+    in property <string> tr-pane-ai-read-range;
+    in property <string> tr-pane-ai-note;
+    in property <string> data-ai-name;
+    in property <string> data-ai-initial;
+    in property <int> data-steps-done;
+    in property <int> data-steps-total;
+    in property <string> data-source;
+    in property <int> data-read-range;
+    in property <string> data-log1-time;
+    in property <string> data-log1-text;
+    in property <string> data-log2-time;
+    in property <string> data-log2-text;
+    callback back-pressed();
+    background: DesignTokens.tile;
+    border-radius: 24px;
+    VerticalLayout {
+        padding: 20px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 10px;
+            AvatarView {
+                is-ai: true;
+                initial: root.data-ai-initial;
+            }
+            Text {
+                text: root.tr-pane-ai-work-title;
+                color: DesignTokens.ink;
+                font-size: 16px;
+                font-weight: 500;
+                vertical-alignment: center;
+            }
+            LinkText {
+                text: root.tr-pane-back-to-thread;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                touched => { root.back-pressed(); }
+            }
+        }
+        // 手順の進捗
+        Text {
+            text: root.tr-pane-ai-steps;
+            color: DesignTokens.mute;
+            font-size: 12px;
+        }
+        HorizontalLayout {
+            height: 4px;
+            spacing: 4px;
+            Rectangle {
+                width: 40px;
+                border-radius: 2px;
+                background: DesignTokens.acc-fill;
+            }
+            Rectangle {
+                border-radius: 2px;
+                background: DesignTokens.line;
+            }
+        }
+        Text {
+            text: root.tr-pane-ai-from + " " + root.data-source;
+            color: DesignTokens.mute;
+            font-size: 12px;
+        }
+        Text {
+            text: root.tr-pane-ai-read-range + " " + root.data-read-range;
+            color: DesignTokens.mute;
+            font-size: 12px;
+        }
+        // 手順のログ
+        Text {
+            text: root.data-log1-time + "　" + root.data-log1-text;
+            color: DesignTokens.sub;
+            font-size: 12px;
+        }
+        Text {
+            text: root.data-log2-time + "　" + root.data-log2-text;
+            color: DesignTokens.sub;
+            font-size: 12px;
+        }
+        Text {
+            text: root.tr-pane-ai-note;
+            color: DesignTokens.mute;
+            font-size: 12px;
+        }
+    }
+}
+
+// ---- About のダイアログ（Slint の attribution） ----
+
+// Slint Royalty-free License 2.0 §2 (a) の attribution（Issue 237）: AboutSlint widget
+// を、トップレベルメニューから到達できる About 画面/ダイアログに表示する。
+// Splash Screen と公開ページの badge は使わない（Issue 237 の「採用する方式」）。
+// 文言は Rust が Fluent から引いて tr-* で渡す。色は DesignTokens だけ。
+component AboutDialogView inherits Rectangle {
+    in property <string> tr-about-title;
+    in property <string> tr-about-close;
+    callback close-pressed();
+    // 背景の幕。トークンの色に opacity を掛けるだけ（色の値は書かない）。
+    Rectangle {
+        background: DesignTokens.bg;
+        opacity: 0.72;
+    }
+    VerticalLayout {
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            // カード
+            Rectangle {
+                width: 320px;
+                background: DesignTokens.tile;
+                border-radius: 20px;
+                VerticalLayout {
+                    padding: 24px;
+                    spacing: 16px;
+                    Text {
+                        text: root.tr-about-title;
+                        color: DesignTokens.ink;
+                        font-size: 18px;
+                        font-weight: 600;
+                    }
+                    // Slint の attribution widget（"Made with Slint" の badge と版・URL）。
+                    AboutSlint {}
+                    // 閉じる（主操作）。既存の主ボタンと同じ重ね方で TouchArea を置く。
+                    Rectangle {
+                        height: 36px;
+                        border-radius: 18px;
+                        background: DesignTokens.primary-bg;
+                        HorizontalLayout {
+                            padding-left: 16px;
+                            padding-right: 16px;
+                            Text {
+                                text: root.tr-about-close;
+                                color: DesignTokens.primary-fg;
+                                font-size: 14px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                                horizontal-alignment: center;
+                            }
+                        }
+                        ta := TouchArea {
+                            clicked => { root.close-pressed(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---- 画面全体 ----
+
+export component MainWindow inherits Window {
+    // 文言（Rust が Fluent から引いて渡す。@tr() は使わない）。
+    in property <string> tr-rail-viewing-as;
+    in property <string> tr-rail-today;
+    in property <string> tr-rail-channels;
+    in property <string> tr-rail-dm-people;
+    in property <string> tr-rail-dm-ai;
+    in property <string> tr-ai-presence-standby;    in property <string> tr-ai-presence-working;
+    in property <string> tr-ai-presence-waiting;
+    in property <string> tr-search-placeholder;
+    in property <string> tr-search-shortcut;
+    in property <string> tr-today-title;
+    in property <string> tr-today-section-consultations;
+    in property <string> tr-today-section-pending;
+    in property <string> tr-today-section-decided;
+    in property <string> tr-today-section-empty;
+    in property <string> tr-today-quiet;
+    in property <string> tr-unread-divider;
+    in property <string> tr-ai-badge;
+    in property <string> tr-decision-mark;
+    in property <string> tr-message-private-note;
+    in property <string> tr-thread-replies;
+    in property <string> tr-thread-working;
+    in property <string> tr-thread-done;
+    in property <string> tr-thread-view-work;
+    in property <string> tr-mention-read-range;
+    in property <string> tr-handoff-context;
+    in property <string> tr-handoff-acknowledged;
+    in property <string> tr-handoff-not-acknowledged;
+    in property <string> tr-handoff-acknowledge;
+    in property <string> tr-handoff-decision-owner;
+    in property <string> tr-ext-card-label;
+    in property <string> tr-ext-card-question;
+    in property <string> tr-ext-address-label;
+    in property <string> tr-ext-subject-label;
+    in property <string> tr-ext-basis-label;
+    in property <string> tr-ext-send;
+    in property <string> tr-ext-fix;
+    in property <string> tr-ext-lock-note;
+    in property <string> tr-ext-sent;
+    in property <string> tr-pane-thread-title;
+    in property <string> tr-pane-close;
+    in property <string> tr-pane-back-to-thread;
+    in property <string> tr-pane-ai-work-title;
+    in property <string> tr-pane-ai-steps;
+    in property <string> tr-pane-ai-from;
+    in property <string> tr-pane-ai-read-range;
+    in property <string> tr-pane-ai-note;
+    in property <string> tr-thread-input-placeholder;
+    in property <string> tr-composer-placeholder;
+    // トップレベルメニューと About ダイアログ（Slint の attribution、Issue 237）
+    in property <string> tr-menu-help;
+    in property <string> tr-menu-about;
+    in property <string> tr-about-title;
+    in property <string> tr-about-close;
+
+    // 表示の切替（骨組みでは Rust から切り替える）。
+    in property <bool> show-today: true;
+    in property <bool> show-right-pane: true;
+    in property <bool> right-pane-ai-work: false;
+    // About ダイアログの表示。トップレベルメニューの項目から開き、「閉じる」で
+    // 閉じる（Slint 側で書き、Rust からも読むため in-out）。
+    in-out property <bool> show-about: false;
+
+    // 合成データ（モックの架空の会社名・人名のみ）。
+    in property <string> data-org-name;
+    in property <string> data-channel-1;
+    in property <string> data-channel-2;
+    in property <string> data-channel-3;
+    in property <string> data-channel-4;
+    in property <string> data-person-1;
+    in property <string> data-person-1-note;
+    in property <string> data-person-2;
+    in property <string> data-person-2-note;
+    in property <string> data-ai-1-name;
+    in property <string> data-ai-1-presence;
+    in property <string> data-ai-2-name;
+    in property <string> data-ai-2-presence;
+    in property <string> data-ai-3-name;
+    in property <string> data-ai-3-presence;
+    in property <string> data-channel-title;
+    in property <string> data-channel-members;
+    in property <int> data-consultations-count;
+    in property <int> data-pending-count;
+    in property <int> data-decided-count;
+    in property <bool> data-c1-is-ai: false;
+    in property <string> data-c1-initial;
+    in property <string> data-c1-meta;
+    in property <string> data-c1-text;
+    in property <bool> data-c2-is-ai: false;
+    in property <string> data-c2-initial;
+    in property <string> data-c2-meta;
+    in property <string> data-c2-text;
+    in property <bool> data-p1-is-ai: false;
+    in property <string> data-p1-initial;
+    in property <string> data-p1-meta;
+    in property <string> data-p1-text;
+    in property <bool> data-d1-is-ai: false;
+    in property <string> data-d1-initial;
+    in property <string> data-d1-meta;
+    in property <string> data-d1-text;
+    in property <string> data-day-label;
+    in property <string> data-msg1-sender;
+    in property <string> data-msg1-initial;
+    in property <string> data-msg1-time;
+    in property <string> data-msg1-body;
+    in property <string> data-msg2-sender;
+    in property <string> data-msg2-initial;
+    in property <string> data-msg2-time;
+    in property <string> data-msg2-body;
+    in property <bool> data-msg2-thread-done: true;
+    in property <string> data-handoff-from-to;
+    in property <string> data-handoff-title;
+    in property <bool> data-handoff-acknowledged: true;
+    in property <string> data-handoff-option-a;
+    in property <string> data-handoff-option-b;
+    in property <string> data-msg3-sender;
+    in property <string> data-msg3-initial;
+    in property <string> data-msg3-time;
+    in property <string> data-msg3-body;
+    in property <string> data-note-sender;
+    in property <string> data-note-initial;
+    in property <string> data-note-body;
+    in property <string> data-ext-address;
+    in property <string> data-ext-subject;
+    in property <string> data-ext-basis;
+    in property <string> data-ext-body;
+    in property <bool> data-ext-sent: false;
+    in property <string> data-thread-msg1-sender;
+    in property <string> data-thread-msg1-initial;
+    in property <bool> data-thread-msg1-is-ai: true;
+    in property <string> data-thread-msg1-time;
+    in property <string> data-thread-msg1-body;
+    in property <string> data-thread-msg2-sender;
+    in property <string> data-thread-msg2-initial;
+    in property <bool> data-thread-msg2-is-ai: false;
+    in property <string> data-thread-msg2-time;
+    in property <string> data-thread-msg2-body;
+    in property <string> data-ai-work-name;
+    in property <string> data-ai-work-initial;
+    in property <int> data-ai-work-steps-done;
+    in property <int> data-ai-work-steps-total;
+    in property <string> data-ai-work-source;
+    in property <int> data-ai-work-read-range;
+    in property <string> data-ai-work-log1-time;
+    in property <string> data-ai-work-log1-text;
+    in property <string> data-ai-work-log2-time;
+    in property <string> data-ai-work-log2-text;
+
+    callback today-pressed();
+    callback send-pressed();
+    callback fix-pressed();
+    callback acknowledge-pressed();
+    callback close-pane-pressed();
+    callback back-to-thread-pressed();
+    callback view-work-pressed();
+
+    background: DesignTokens.bg;
+    // トップレベルメニュー。About ダイアログへの到達経路（Issue 237）。Window の中に
+    // 1つだけ置ける（Slint の決まり）。プラットフォームによって描かれ方が変わる
+    // （macOS では画面上部のネイティブメニューになる）。
+    MenuBar {
+        Menu {
+            title: root.tr-menu-help;
+            MenuItem {
+                title: root.tr-menu-about;
+                activated => { root.show-about = true; }
+            }
+        }
+    }
+    HorizontalLayout {
+        padding: 20px;
+        spacing: 16px;
+        // 左の列（rail）
+        RailView {
+            width: 220px;
+            tr-rail-viewing-as: root.tr-rail-viewing-as;
+            tr-rail-today: root.tr-rail-today;
+            tr-rail-channels: root.tr-rail-channels;
+            tr-rail-dm-people: root.tr-rail-dm-people;
+            tr-rail-dm-ai: root.tr-rail-dm-ai;
+            data-org-name: root.data-org-name;
+            data-channel-1: root.data-channel-1;
+            data-channel-2: root.data-channel-2;
+            data-channel-3: root.data-channel-3;
+            data-channel-4: root.data-channel-4;
+            data-channel-2-selected: root.data-channel-2 == root.data-channel-title;
+            data-person-1: root.data-person-1;
+            data-person-1-note: root.data-person-1-note;
+            data-person-2: root.data-person-2;
+            data-person-2-note: root.data-person-2-note;
+            data-ai-1: root.data-ai-1-name;
+            data-ai-1-presence: root.data-ai-1-presence;
+            data-ai-2: root.data-ai-2-name;
+            data-ai-2-presence: root.data-ai-2-presence;
+            data-ai-3: root.data-ai-3-name;
+            data-ai-3-presence: root.data-ai-3-presence;
+            today-pressed => { root.today-pressed(); }
+        }
+        // 中央（上の帯＋本文＋入力欄）
+        Rectangle {
+            background: DesignTokens.tile;
+            border-radius: 24px;
+            VerticalLayout {
+                TopBar {
+                    data-title: root.show-today ? root.tr-today-title : root.data-channel-title;
+                    data-members: root.show-today ? "" : root.data-channel-members;
+                    tr-search-placeholder: root.tr-search-placeholder;
+                    tr-search-shortcut: root.tr-search-shortcut;
+                }
+                if root.show-today : TodayView {
+                    tr-today-title: root.tr-today-title;
+                    tr-today-section-consultations: root.tr-today-section-consultations;
+                    tr-today-section-pending: root.tr-today-section-pending;
+                    tr-today-section-decided: root.tr-today-section-decided;
+                    tr-today-section-empty: root.tr-today-section-empty;
+                    tr-today-quiet: root.tr-today-quiet;
+                    data-consultations-count: root.data-consultations-count;
+                    data-pending-count: root.data-pending-count;
+                    data-decided-count: root.data-decided-count;
+                    data-quiet: root.data-consultations-count + root.data-pending-count + root.data-decided-count == 0;
+                    data-c1-is-ai: root.data-c1-is-ai;
+                    data-c1-initial: root.data-c1-initial;
+                    data-c1-meta: root.data-c1-meta;
+                    data-c1-text: root.data-c1-text;
+                    data-c2-is-ai: root.data-c2-is-ai;
+                    data-c2-initial: root.data-c2-initial;
+                    data-c2-meta: root.data-c2-meta;
+                    data-c2-text: root.data-c2-text;
+                    data-p1-is-ai: root.data-p1-is-ai;
+                    data-p1-initial: root.data-p1-initial;
+                    data-p1-meta: root.data-p1-meta;
+                    data-p1-text: root.data-p1-text;
+                    data-d1-is-ai: root.data-d1-is-ai;
+                    data-d1-initial: root.data-d1-initial;
+                    data-d1-meta: root.data-d1-meta;
+                    data-d1-text: root.data-d1-text;
+                }
+                if !root.show-today : ChannelView {
+                    tr-unread-divider: root.tr-unread-divider;
+                    tr-ai-badge: root.tr-ai-badge;
+                    tr-decision-mark: root.tr-decision-mark;
+                    tr-message-private-note: root.tr-message-private-note;
+                    tr-thread-replies: root.tr-thread-replies;
+                    tr-thread-working: root.tr-thread-working;
+                    tr-thread-done: root.tr-thread-done;
+                    tr-thread-view-work: root.tr-thread-view-work;
+                    tr-mention-read-range: root.tr-mention-read-range;
+                    tr-handoff-context: root.tr-handoff-context;
+                    tr-handoff-acknowledged: root.tr-handoff-acknowledged;
+                    tr-handoff-not-acknowledged: root.tr-handoff-not-acknowledged;
+                    tr-handoff-acknowledge: root.tr-handoff-acknowledge;
+                    tr-handoff-decision-owner: root.tr-handoff-decision-owner;
+                    tr-ext-card-label: root.tr-ext-card-label;
+                    tr-ext-card-question: root.tr-ext-card-question;
+                    tr-ext-address-label: root.tr-ext-address-label;
+                    tr-ext-subject-label: root.tr-ext-subject-label;
+                    tr-ext-basis-label: root.tr-ext-basis-label;
+                    tr-ext-send: root.tr-ext-send;
+                    tr-ext-fix: root.tr-ext-fix;
+                    tr-ext-lock-note: root.tr-ext-lock-note;
+                    tr-ext-sent: root.tr-ext-sent;
+                    tr-composer-placeholder: root.tr-composer-placeholder;
+                    data-day-label: root.data-day-label;
+                    data-msg1-sender: root.data-msg1-sender;
+                    data-msg1-initial: root.data-msg1-initial;
+                    data-msg1-time: root.data-msg1-time;
+                    data-msg1-body: root.data-msg1-body;
+                    data-msg2-sender: root.data-msg2-sender;
+                    data-msg2-is-ai: true;
+                    data-msg2-initial: root.data-msg2-initial;
+                    data-msg2-time: root.data-msg2-time;
+                    data-msg2-body: root.data-msg2-body;
+                    data-msg2-thread-done: root.data-msg2-thread-done;
+                    data-handoff-from-to: root.data-handoff-from-to;
+                    data-handoff-title: root.data-handoff-title;
+                    data-handoff-acknowledged: root.data-handoff-acknowledged;
+                    data-handoff-option-a: root.data-handoff-option-a;
+                    data-handoff-option-b: root.data-handoff-option-b;
+                    data-msg3-sender: root.data-msg3-sender;
+                    data-msg3-initial: root.data-msg3-initial;
+                    data-msg3-time: root.data-msg3-time;
+                    data-msg3-body: root.data-msg3-body;
+                    data-note-sender: root.data-note-sender;
+                    data-note-is-ai: true;
+                    data-note-initial: root.data-note-initial;
+                    data-note-body: root.data-note-body;
+                    data-ext-address: root.data-ext-address;
+                    data-ext-subject: root.data-ext-subject;
+                    data-ext-basis: root.data-ext-basis;
+                    data-ext-body: root.data-ext-body;
+                    data-ext-sent: root.data-ext-sent;
+                    send-pressed => { root.send-pressed(); }
+                    fix-pressed => { root.fix-pressed(); }
+                    acknowledge-pressed => { root.acknowledge-pressed(); }
+                    view-work-pressed => { root.view-work-pressed(); }
+                }
+            }
+        }
+        // 右の枠（スレッド・AIの作業）
+        if root.show-right-pane && !root.right-pane-ai-work : ThreadPaneView {
+            width: 400px;
+            tr-pane-thread-title: root.tr-pane-thread-title;
+            tr-pane-close: root.tr-pane-close;
+            tr-thread-working: root.tr-thread-working;
+            tr-thread-done: root.tr-thread-done;
+            tr-thread-view-work: root.tr-thread-view-work;
+            tr-thread-input-placeholder: root.tr-thread-input-placeholder;
+            tr-ai-badge: root.tr-ai-badge;
+            tr-mention-read-range: root.tr-mention-read-range;
+            data-channel: root.data-channel-title;
+            data-msg1-sender: root.data-thread-msg1-sender;
+            data-msg1-is-ai: root.data-thread-msg1-is-ai;
+            data-msg1-initial: root.data-thread-msg1-initial;
+            data-msg1-time: root.data-thread-msg1-time;
+            data-msg1-body: root.data-thread-msg1-body;
+            data-msg2-sender: root.data-thread-msg2-sender;
+            data-msg2-is-ai: root.data-thread-msg2-is-ai;
+            data-msg2-initial: root.data-thread-msg2-initial;
+            data-msg2-time: root.data-thread-msg2-time;
+            data-msg2-body: root.data-thread-msg2-body;
+            data-done: root.data-msg2-thread-done;
+            close-pressed => { root.close-pane-pressed(); }
+            view-work-pressed => { root.view-work-pressed(); }
+        }
+        if root.show-right-pane && root.right-pane-ai-work : AiWorkPaneView {
+            width: 400px;
+            tr-pane-back-to-thread: root.tr-pane-back-to-thread;
+            tr-pane-ai-work-title: root.tr-pane-ai-work-title;
+            tr-pane-ai-steps: root.tr-pane-ai-steps;
+            tr-pane-ai-from: root.tr-pane-ai-from;
+            tr-pane-ai-read-range: root.tr-pane-ai-read-range;
+            tr-pane-ai-note: root.tr-pane-ai-note;
+            data-ai-name: root.data-ai-work-name;
+            data-ai-initial: root.data-ai-work-initial;
+            data-steps-done: root.data-ai-work-steps-done;
+            data-steps-total: root.data-ai-work-steps-total;
+            data-source: root.data-ai-work-source;
+            data-read-range: root.data-ai-work-read-range;
+            data-log1-time: root.data-ai-work-log1-time;
+            data-log1-text: root.data-ai-work-log1-text;
+            data-log2-time: root.data-ai-work-log2-time;
+            data-log2-text: root.data-ai-work-log2-text;
+            back-pressed => { root.back-to-thread-pressed(); }
+        }
+    }
+    // About のダイアログ（メニューの項目で開く）。内容の上に重ねる。
+    if root.show-about : AboutDialogView {
+        tr-about-title: root.tr-about-title;
+        tr-about-close: root.tr-about-close;
+        close-pressed => { root.show-about = false; }
+    }
+}

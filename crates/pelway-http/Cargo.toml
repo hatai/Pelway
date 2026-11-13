@@ -1,0 +1,15 @@
+[package]
+# HTTP 層（下書き・デモ用・認証なし・ループバックのみ）。製品機能の下書きで、確定スキーマではない。
+# 経路は docs/technical/v0.7 に comments/approve の定義が無いための仮の経路（作業ログ参照）。
+name = "pelway-http"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Draft minimal loopback-only HTTP/1.1 layer for the Pelway demo backend (no auth). Not a fixed schema."
+
+[dependencies]
+pelway-contract = { path = "../pelway-contract", version = "0.0.0" } # version は cargo-deny の wildcards 検査のため（path 依存の解決には影響しない）
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }

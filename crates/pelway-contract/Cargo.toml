@@ -1,0 +1,23 @@
+[package]
+# デモ用バックエンドAPIの契約型（下書き）。docs/technical/v0.7/body/03・04 を根拠にする。
+# 確定したスキーマではない。未決 U01〜U07 は TODO(U0x) として残し、ここでは決めない。
+name = "pelway-contract"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Draft API contract types for the Pelway demo backend. Not a fixed schema."
+
+[features]
+# serde は既定で有効（ワイヤ形式の derive）。
+default = ["serde"]
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
+# snapshot_hash の計算（正規化した操作の中身の hash）に使う。
+sha2 = { version = "0.11", default-features = false }
+tracing = "0.1"
+
+[dev-dependencies]
+serde_json = "1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }

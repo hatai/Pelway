@@ -22,7 +22,7 @@
 | <a id="u03"></a> U03 法的当てはめ | 通信当事者/代理権/目的別根拠、P01〜08の適用、APPIの委託/第三者/外国移転と方法別法定記録、事故報告/通知、免責と賠償制限を事実に当てはめる。必要箇所は弁護士確認 | 未確定の機能/scopeだけ無効。長期保存や管理者設定で根拠不足を埋めない。未完を理由に合成設計全体を停止しない |
 | <a id="u04"></a> U04 連携先の実条件 | provider/account/API別の権限・冪等key名前空間/保持期間・結果照会・取消/停止・データ地域/保持/再提供/学習利用/事故条件を確定。認証時通信と業務データを区別 | 許可のない実接続なし。所在未確認だけで一律禁止せず、不足するデータ/scopeを拒否。照会不能で自動再接続や再送をしない |
 | <a id="u05"></a> U05 実装・機材・鍵/復旧・原価 | server認証/Origin/TLS/service identity、DB耐久/volume整合、独立制限記録、暗号鍵/連携token分離、sandbox/CLI区画/全通信、Slint固定版とrmcp推移依存/NOTICE/SBOM、3OS/IME/読み上げ/モデル機材、容量/削除/人手原価を測定 | 本体国内適合・E2EE・管理者からの完全秘匿を保証しない。遮断/監査/保護/復旧不明の経路は無効。支出/実装/実データは別承認。新サービスを自動追加しない |
-| <a id="u06"></a> U06 未承認の製品細部 | T6はlocal承認版keyとprovider logical-operation keyを分ける案を推奨。短い自然返信は5条件の完全一致と曖昧時確認を要し、当面の安全案はUIで不変版確認。担当交代は新実行者確認/必要時再承認、変更されたscope/account/payloadは必ず再承認。子taskは内部読取/下書きのみを推奨 | これらの正式PRD採否、承認期限/複数承認者、P方針に基づく取消遷移の行単位（採用推奨、未確認）・その他追加遷移、幅390/360px、offline draftの送る/破棄、国外端末/持出し/mail・地域移行は未確定。現行のメンション起動・dummy mail・新payloadの個別承認を維持。追加機能へ自動拡張しない |
+| <a id="u06"></a> U06 未承認の製品細部 | T6はlocal承認版keyとprovider logical-operation keyを分ける案を推奨。短い自然返信は5条件の完全一致と曖昧時確認を要し、当面の安全案はUIで不変版確認。担当交代は新実行者確認/必要時再承認、変更されたscope/account/payloadは必ず再承認。子taskは内部読取/下書きのみを推奨 | これらの正式PRD採否、P方針に基づく取消遷移の行単位（採用推奨、未確認）・その他追加遷移、幅390/360px、offline draftの送る/破棄、国外端末/持出し/mail・地域移行は未確定。現行のメンション起動・dummy mail・新payloadの個別承認を維持。追加機能へ自動拡張しない。承認者の指定・承認期限・複数承認者は[ADR 0002](../../../adr/0002-designated-approver-and-expiry.md)で決定済み。事前決裁された型へ一致する外部操作の自動実行と型の版管理・決裁者は[ADR 0009](../../../adr/0009-hybrid-approval-with-preapproved-types.md)で決定済み |
 | <a id="u07"></a> U07 長引く外部run停止確認 | 操作送信の結果不明X03〜06とは別に、停止要求済みの外部runの掲示/照合/昇格期限と実在担当を決める。推奨は発生直後に判断待ち、許可された読取照会0/5/15分、24時間で会社指定決定権者へ昇格。同じ値の流用はまだ未確認。相手側の状態照会APIの存在/条件も未確認で、APIのない相手では0/5/15分の自動照会は行えず、発生直後の人の確認待ちと24時間で会社決定権者へ上げる経路を推奨。自動の再取消・再送はしない | 13の決定値は変更しない。未確認runをタイマーでstoppedにしない。通常grant全面失効なら再認証せず有人確認、法定事故対応は待たせない |
 
 <a id="ch08-s04"></a>
@@ -35,17 +35,28 @@
 
 | ID | 論点と推奨 | 代替/条件 | 未検証・阻害と確認方法 |
 |---|---|---|---|
-| A1 | Rust非WebViewのSlint GUI | eguiを同条件の比較対象。GPUI/icedは現時点の読み上げ制約から主候補にしない | 固定版のlicense、IME、長文選択、NVDA/VoiceOver/Orca、大量可変高リスト。Slint issueを再現し測定する |
-| A2 | WebはTypeScript/React/DOM、状態と同期はRust/WASM | 全TS coreも比較可能。UI部品は共有しない | WASM起動/サイズと型生成維持費。Web32〜62h＋native58〜112hは部品の部分概算だけ。試験/修正/連携は未見積もり |
+| A1 | Rust非WebViewのSlint GUI | eguiとTauri＋Octane（+React。Webと画面を共有）を同条件の比較対象。GPUI/icedは現時点の読み上げ制約から主候補にしない | 固定版のlicense、IME、長文選択、NVDA/VoiceOver/Orca、大量可変高リスト。Slint issueを再現し測定する。Royalty-free 2.0 の利用条件は [docs/research/slint-royalty-free-license.md](../../../research/slint-royalty-free-license.md) を要件とし、attribution 表示は #237 で実装する |
+| A2 | WebはTypeScript/Octane/DOM、状態と同期はRust/WASM | 全TS coreも比較可能。UI部品は共有しない | WASM起動/サイズと型生成維持費。Octaneはbeta版（npm最新0.16.7）のため固定版・コンパイラ・実DOMのIME/読み上げ/描画を確認。Web32〜62h＋native58〜112hは部品の部分概算だけ。試験/修正/連携は未見積もり |
 | A3 | Rust tokio/axum＋sqlx/PostgreSQL、ローカル添付 | クラウド型backendを既定にしない | 会社境界、権限、復旧、transaction/配信の整合を合成データで確認 |
 | A4 | seq/client_msg_id、workspace commit順cursor、snapshot再同期 | 04の行lock方式は小規模初版案。負荷増時の代替は将来 | 遅延commit、cursor失効、取消後cache消去、二重送信/承認の競合を試す |
 | A5 | 既存9状態。取消を第10状態にしない | 取消受付commit、未開始抑止、外部への停止要求、停止確認、操作結果を別項目で保持。止まっているへの移行は停止の証拠がある場合だけ。Pでもこの意味を弱めない | 取消遷移の行単位はU06、長引く外部run停止確認はU07 |
-| A6 | task使い捨てcontainerとBotの永続checkpointを分離 | 常時Bot VMを維持する代替。microVM等は将来の隔離比較 | 同kernelの隔離限界、本番水準、runtime socket非公開、資源/network/volume境界。管理者権限なしに運用可か |
-| A7 | 本体AIは国内hostのstub/条件付きlocal inference | 国内完結の根拠が揃った別提供元は将来審査 | モデルlicense/配布、品質、GPU/RAM/CPU、通信。満たせないならstubのまま |
+| A6 | task使い捨てcontainerとBotの永続checkpointを分離 | 常時Bot VMを維持する代替。gVisor（runsc）とcrun＋libkrunの隔離比較はWSL2+rootlessで測定済み（docs/research/sandbox-isolation-measurements.md）。gVisorは動作（systrap不可、ptraceで+0.13秒/+50MB、egress拒否は保持）、libkrunは/dev/kvmの権限が前提で未測定 | 同kernelの隔離限界、本番水準、runtime socket非公開、資源/network/volume境界。管理者権限なしに運用可か |
+| A7 | 本体AIは提供元のAPIをLLMゲートウェイ経由で使う。MVPはBYOKだけ、未設定ならstub（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)） | 一般提供の既定は日本リージョンのある提供元。ローカル推論はその選定の候補 | BYOKの規約・表示・監査、スキーマ検証、利用量の上限、自動切替なし。既定の提供元はデータ所在と契約を確かめて選ぶ |
 | A8 | 本体egress deny、選択外部連携は別grant | 国内性未確認でも権限ある利用者が説明を見て明示有効化可 | 個別操作承認/監査/秘密管理は維持。外部LLMへの自動fallback禁止。10のD1〜D12 |
 | A9 | 共通IntegrationPortと能力定義/Adapter | MCP、REST、webhook、CLI/hook、A2Aを役割で使い分け | サービス固有制約、提供元内の副作用制御、結果照会、取消可否。11参照 |
 | A10 | PlacementPolicyへ保存/AI/log/backup/送信方針を関連付け | 今はJP local単一。US/EU/JP選択は将来例だけ | region変更時の既存data/backup/契約/運用権限の移行は未決。リージョン選択≠法適合 |
 
+A2 の Web UI（Octane）で実装時に決める事項（2026-11-12 の設計変更で React から変更）。SPA（SSR なし）と Octane バージョンの完全固定は確定済み。個別の選定は Web scaffold の実装 Issue で行い、結果を本章へ反映する。
+
+- ビルド基盤： Vite / Rspack / Rsbuild のプラグイン選択と `octane.config.ts`（jsxImportSource・requireDirective・strong mode）
+- 記述方言： `.tsrx` と `.tsx` の使い分け規約
+- エディタ・CI: `.tsrx` は plain `tsc` で型検査できない。`octane/compiler/volar`・`octane analyze`・ESLint/Biome 対応の確認
+- スタイリング: Octane の兄弟スコープ `<style>`・素の CSS/Tailwind・`@octanejs/*` バインディングの選択。Slint と共有するデザイントークンの扱い
+- 状態管理： `octane/signals` の併用可否、Strong mode（`"use strong"` / `compiler.strong`）の採否
+- テスト: `@octanejs/testing-library` の充足性
+- UI バインディング: 採用部品（仮想リスト・Markdown・シンタックスハイライト・リッチテキスト・アクセシブルプリミティブ等）ごとの実動作確認
+- React の併用： Octane は React 互換 API で React 向けライブラリも使える。`ReactCompat`/`OctaneCompat` による React 部品の混在や、場合によって React を使うか
+- エージェント連携： `octane mcp` 等コーディングエージェント向けツールの導入可否
 
 <a id="ch08-s06"></a>
 ## 試験の追跡表（いずれも未実施）

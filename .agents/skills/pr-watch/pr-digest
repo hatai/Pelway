@@ -1,0 +1,390 @@
+#!/usr/bin/env bash
+# PR の状態をエージェント向けに圧縮して出す。判断が要るものだけを数行で返す。
+#
+#   pr-digest [PR]            1 回のダイジェスト
+#   pr-digest --watch [PR]    チェックが落ち着く・チェックが新たに失敗する・
+#                             未見のレビュー指摘が届く、のどれかまで待ってから出す
+#   pr-digest --all [PR]      一度表示済みの指摘も全文で再表示する
+#   pr-digest --logs JOB_ID   失敗した CI ジョブのログ（ノイズを除いたもの）
+#   pr-digest --reply ID BODY レビューコメントのスレッドに返信する
+#
+# GitHub への呼び出しはすべて scripts/agent-gh dev 経由（PR_DIGEST_GH で差し替え可能）。
+# 終了コード: 0 green · 10 チェック失敗 · 11 未回答の指摘 · 12 まだ実行中
+#             20 手元とリモートが不一致 · 1 エラー
+set -uo pipefail
+
+# .agents/skills/pr-watch にも .claude/skills/pr-watch（symlink）にも置かれるため、
+# 実行されたパスから 3 つ上った所をリポジトリルートとする。
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+GH=${PR_DIGEST_GH:-"$ROOT/scripts/agent-gh dev"}
+
+POLL=${PR_DIGEST_POLL:-30}
+DEADLINE=${PR_DIGEST_DEADLINE:-7200}
+BODY_CHARS=${PR_DIGEST_BODY_CHARS:-600}
+# 既出の指摘の記録先。command-team の決まりに合わせて ~/.local/state/pelway/ 以下に置く。
+SEEN_DIR=${PR_DIGEST_SEEN_DIR:-"${XDG_STATE_HOME:-$HOME/.local/state}/pelway/pr-digest"}
+# チェックが 1 つも登録されていない PR を「チェックが無い」と認めるまでの空ポーリング回数。
+EMPTY_POLLS=${PR_DIGEST_EMPTY_POLLS:-3}
+SHOW_ALL=0
+
+die() { echo "pr-digest: $*" >&2; exit 1; }
+
+seen_path() { echo "$SEEN_DIR/${1//\//-}-$2"; }
+
+# head の sha・ジョブ URL を組み合わせた失敗の識別子。1 行 1 失敗。
+# 別コミットの失敗や再実行は、以前の失敗と区別される。
+failure_ids() {
+  local head=$1 runs=$2 statuses=$3
+  {
+    jq -r --arg h "$head" '.[] | select(.conclusion != null and (.conclusion | test("^(success|neutral|skipped)$") | not))
+      | "\($h) run \(.name) \(.html_url // "")"' <<<"$runs"
+    jq -r --arg h "$head" '.[] | select(.state | test("^(failure|error)$")) | "\($h) status \(.context)"' <<<"$statuses"
+  } | sort -u
+}
+
+# API 呼び出しの失敗が「綺麗な PR」に見えることは許さないので、取得のたびに必ず確かめる。
+# この die はコマンド置換の中でしか死なないため、呼び出し側もそれぞれ || die を付ける。
+# 標準エラー出力を混ぜない（JSON が壊れる）。
+api() {
+  local out
+  if ! out=$($GH api "$@" 2>/dev/null); then
+    die "GitHub API のリクエストが失敗した（再試行はしない）"
+  fi
+  printf '%s' "$out"
+}
+
+check_runs() {
+  api --paginate "repos/$1/commits/$2/check-runs?per_page=100" \
+    --jq '.check_runs[] | {name, status, conclusion, html_url}' | jq -s .
+}
+
+commit_statuses() {
+  api --paginate "repos/$1/commits/$2/status?per_page=100" \
+    --jq '.statuses[] | {context, state}' | jq -s .
+}
+
+# 失敗ログから、cargo と GitHub Actions のエラーに関係する行だけを残す。
+# ジョブ名・ステップ名・タイムスタンプの接頭辞を落とし、ANSI 色も落とす。
+logs() {
+  local job=$1 keep out
+  keep='^error(\[E[0-9]+\])?: |^test .+ FAILED$|^failures:$|^---- |^test result: |panicked at|^ *[0-9]+ \| |^ *\^|left: |right: |^##\[error\]|^Diff in '
+  out=$($GH run view --job "$job" --log-failed 2>/dev/null |
+    cut -f4- |
+    grep -E "$keep" |
+    sed -E $'s/\x1b\[[0-9;]*[A-Za-z]//g' |
+    awk '!/^##\[error\]/ || !seen[$0]++' |
+    tail -n "${PR_DIGEST_LOG_LINES:-80}")
+  if [ -n "$out" ]; then
+    echo "$out"
+    return 0
+  fi
+  # 絞り込んだ結果が空なら、末尾 40 行をそのまま出す（取りこぼしの保険）。
+  out=$($GH run view --job "$job" --log-failed 2>/dev/null |
+    cut -f4- |
+    grep -vE '^\s*$' | tail -n 40)
+  if [ -n "$out" ]; then
+    echo "$out"
+    return 0
+  fi
+  die "job $job の失敗ログが取れない"
+}
+
+# 返信先のエンドポイントには PR 番号が要る。番号はコメント自身が持っている。
+reply() {
+  local repo id=$1 body=$2 pr
+  repo=$($GH repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) || die "GitHub リポジトリの中ではない"
+  pr=$(api "repos/$repo/pulls/comments/$id" --jq '.pull_request_url | split("/") | last')
+  [ -n "$pr" ] || die "コメント $id の PR 番号が解決できない"
+  api "repos/$repo/pulls/$pr/comments/$id/replies" -f body="$body" --jq '"replied \(.id)"'
+}
+
+# レビュー待ちの経過時間の起点。Draft だった PR は最初の ready_for_review イベント、
+# Draft でなかった PR は作成時刻。review_requested は起点に使わない（担当の再割当で
+# 経過が戻らないようにするため）。今も Draft の PR はまだレビュー可能になって
+# いないので、呼び出し側はこの行を出さない。PR_DIGEST_NOW で現在時刻を固定できる
+# （テスト用）。
+review_wait() {
+  local repo=$1 pr=$2 created=$3 origin
+  origin=$(api --paginate "repos/$repo/issues/$pr/timeline?per_page=100" \
+    | jq -rs 'add // [] | map(select(.event == "ready_for_review" and .created_at != null))
+             | sort_by(.created_at) | .[0].created_at // ""') \
+    || die "PR $pr の timeline が読めない"
+  [ -n "$created" ] || die "PR $pr の作成時刻が読めない"
+  local now='now'
+  [ -n "${PR_DIGEST_NOW:-}" ] && now="\"$PR_DIGEST_NOW\" | fromdateiso8601"
+  jq -rn --arg origin "${origin:-$created}" "
+    ($now) as \$t
+    | (\$t - (\$origin | fromdateiso8601)) as \$s
+    | (if \$s < 0 then 0 else \$s end) as \$s
+    | \"review-wait \" +
+      (if \$s / 3600 >= 1 then \"\(\$s / 3600 | floor)h\" else \"\(\$s / 60 | floor)m\" end)
+      + \" (since \" + \$origin + \")\""
+}
+
+# 未回答の指摘をすべて JSON で OPEN に入れる。watch ループが付けたり外したりできるよう、
+# 出力でなくグローバル変数に置く。
+findings() {
+  local pr=$1 repo=$2 viewer=$3
+
+  # 本文の整形。長い本文は $n 文字で切り詰める。
+  local clean_def='
+    def clean:
+      gsub("<[^>]+>"; "") | gsub("\\s+"; " ")
+      | explode
+      | map(select(. >= 32 and (. < 127 or . > 159)))
+      | implode
+      | sub("^ +"; "") | sub(" +$"; "") | .[0:$n];'
+
+  # URL は完全なトークンとして比較する。部分一致や裸のコメント ID では比べない。
+  local link_def='
+    def links($url):
+      [scan("https?://[^\\s<>\\\"()\\[\\]]+")] | map(sub("[.,;:!?]+$"; "")) | index($url) != null;'
+
+  # インラインのレビュースレッド。自分が返信するまで未解決のまま。
+  # ボットの追従コメント（返信の確認）で解決済みにしてはならない。
+  local inline open
+  inline=$(api --paginate "repos/$repo/pulls/$pr/comments?per_page=100" | jq -s 'add // []') \
+    || die "レビューコメントが読めない"
+  open=$(jq --arg me "$viewer" --argjson n "$BODY_CHARS" "
+    $clean_def
+    [.[] | select(.in_reply_to_id != null and .user.login == \$me)] as \$mine
+    | [.[] | select(.in_reply_to_id == null and .user.login != \$me)
+            | . as \$root
+            | .updated_at as \$since
+            | select([\$mine[] | select(.in_reply_to_id == \$root.id
+                         and .created_at > \$since)] | length == 0)
+            | {key: \"\(.id):\(.updated_at)\", id, author: .user.login, path,
+               line: (.line // .original_line), body: (.body | clean)}]" <<<"$inline")
+
+  # 会話コメント（issue コメント）にはスレッドが無い。自分がその permalink を引用した
+  # 会話コメントを後から投稿するまで未解決とする。返信より後の編集は指摘を開き直す。
+  local convo convo_open
+  convo=$(api --paginate "repos/$repo/issues/$pr/comments?per_page=100" | jq -s 'add // []') \
+    || die "会話コメントが読めない"
+  convo_open=$(jq --arg me "$viewer" --argjson n "$BODY_CHARS" "
+    $clean_def
+    $link_def
+    [.[] | select(.user.login == \$me)
+         | {id, created_at, body, html_url}] as \$mine
+    | [.[]
+       | select(.user.login != \$me)
+       | . as \$c
+       | select(
+           [\$mine[]
+            | select(.created_at > \$c.updated_at
+                     and (.body | links(\$c.html_url)))]
+           | length == 0)
+       | {key: \"\(.id):\(.updated_at)\", id, author: .user.login,
+          path: \"(conversation)\", line: 0, body: (.body | clean)}]" <<<"$convo")
+
+  # 行コメントも会話コメントも付かない要約だけの Request changes があり得るので、
+  # レビュー本体も読む。1 レビューアーの最後の判断（Approve / Request changes / Dismiss）だけを見る。
+  local reviews review_open
+  reviews=$(api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100" | jq -s 'add // []') \
+    || die "レビューが読めない"
+  review_open=$(jq --arg me "$viewer" --argjson n "$BODY_CHARS" "
+    $clean_def
+    group_by(.user.login)
+    | map(sort_by(.submitted_at, .id)
+          | map(select(.state == \"APPROVED\" or .state == \"CHANGES_REQUESTED\" or .state == \"DISMISSED\"))
+          | last)
+    | [.[] | select(. != null and .user.login != \$me)
+         | select(.state == \"CHANGES_REQUESTED\" and (.body // \"\") != \"\")
+         | {key: \"r\(.id):\(.submitted_at)\", id, author: .user.login,
+            path: \"(review \(.state))\", line: 0, body: (.body | clean)}]" <<<"$reviews")
+
+  OPEN=$(jq -s 'add' <<<"$open$convo_open$review_open")
+  INLINE=$inline CONVO=$convo REVIEWS=$reviews
+}
+
+digest() {
+  local pr=$1 repo=$2 viewer=$3
+
+  local meta head state mergeable branch
+  meta=$($GH pr view "$pr" --repo "$repo" \
+    --json headRefOid,state,mergeable,headRefName,reviewDecision,createdAt,isDraft) || die "PR $pr が無い"
+  head=$(jq -r .headRefOid <<<"$meta")
+  state=$(jq -r .state <<<"$meta")
+  mergeable=$(jq -r .mergeable <<<"$meta")
+  branch=$(jq -r .headRefName <<<"$meta")
+  local decision; decision=$(jq -r '.reviewDecision // ""' <<<"$meta")
+
+  echo "PR $pr · $branch · $state · $mergeable${decision:+ · $decision}"
+  [ "$state" = "OPEN" ] || { echo "VERDICT $state"; return 0; }
+
+  # レビュー待ちの滞留は、この行の経過で機械的に検出する（skill command-team の
+  # 「レビュー待ちの滞留」。起点の決め方は review_wait のコメント）。
+  if [ "$(jq -r '.isDraft // false' <<<"$meta")" != "true" ]; then
+    review_wait "$repo" "$pr" "$(jq -r '.createdAt // ""' <<<"$meta")"
+  fi
+
+  # 同期の確認は、この checkout が PR のブランチにいるときだけ意味がある。
+  # 他の場所から他人の PR を調べるときの不一致は報告する値が無い。
+  # upstream が解決できない（shallow clone、追跡ブランチが無い）場合は「不明」であって
+  # 「不一致」ではなく、VERDICT の残りを覆ってはならない。
+  local sync=0 local_sha upstream_sha
+  if [ "$(git branch --show-current 2>/dev/null)" = "$branch" ]; then
+    local_sha=$(git rev-parse HEAD 2>/dev/null || echo "")
+    upstream_sha=$(git rev-parse '@{upstream}' 2>/dev/null || echo "")
+    if { [ -n "$local_sha" ] && [ "$local_sha" != "$head" ]; } ||
+       { [ -n "$upstream_sha" ] && [ "$upstream_sha" != "$head" ]; }; then
+      echo "OUT OF SYNC local=${local_sha:0:8} upstream=${upstream_sha:0:8} pr=${head:0:8}"
+      sync=20
+    fi
+  fi
+
+  local runs statuses pending failed
+  runs=$(check_runs "$repo" "$head") || die "check runs が読めない"
+  statuses=$(commit_statuses "$repo" "$head") || die "commit statuses が読めない"
+
+  # 旧来の commit status も check run と同じように PR の可否を決めるので、
+  # 表示だけではなく VERDICT まで届かせる。
+  pending=$(( $(jq '[.[] | select(.status != "completed")] | length' <<<"$runs") +
+              $(jq '[.[] | select(.state == "pending")] | length' <<<"$statuses") ))
+  failed=$(( $(jq '[.[] | select(.conclusion != null and (.conclusion | test("^(success|neutral|skipped)$") | not))] | length' <<<"$runs") +
+             $(jq '[.[] | select(.state | test("^(failure|error)$"))] | length' <<<"$statuses") ))
+
+  jq -r '"checks " + (if length == 0 then "none"
+    else ([.[].conclusion // "pending"] | group_by(.) | map("\(length) \(.[0])") | join(" · ")) end)' <<<"$runs"
+  jq -r '.[] | select(.state != "success") | "STATUS \(.context) \(.state)"' <<<"$statuses"
+
+  # 失敗したステップと、飛ばされた後続ステップを報告する。「後続が飛ばされた」だけでは
+  # テストが走ったかは分からない。assertion の失敗も後続ステップを飛ばすことがある。
+  if [ "$failed" -gt 0 ]; then
+    while IFS=$'\t' read -r name conclusion url; do
+      local job step_info=""
+      job=${url##*/job/}
+      if [[ $job =~ ^[0-9]+$ ]]; then
+        step_info=$(api "repos/$repo/actions/jobs/$job" --jq '
+          (.steps // []) as $s
+          | ([$s[] | select(.conclusion == "failure" or .conclusion == "cancelled")] | first) as $bad
+          | if $bad == null then ""
+            else " · step \"\($bad.name)\" \($bad.conclusion)"
+                 + (if ([$s[] | select(.number > $bad.number and .conclusion == "skipped")] | length) > 0
+                   then " (later steps skipped)" else "" end)
+            end' 2>/dev/null)
+      fi
+      echo "FAIL $name [$conclusion]$step_info"
+      echo "     job=$job $url"
+    done < <(jq -r '.[] | select(.conclusion != null and (.conclusion | test("^(success|neutral|skipped)$") | not)) | [.name,.conclusion,.html_url] | @tsv' <<<"$runs")
+  fi
+
+  findings "$pr" "$repo" "$viewer"
+  local open=$OPEN inline=$INLINE convo=$CONVO reviews=$REVIEWS
+  local open_n seen_file
+  open_n=$(jq length <<<"$open")
+  echo "comments $(jq length <<<"$inline") inline · $(jq length <<<"$convo") conversation · $(jq length <<<"$reviews") reviews · $open_n が返信待ち"
+  [ "$decision" = "CHANGES_REQUESTED" ] && echo "REVIEW changes requested"
+
+  if [ "$open_n" -gt 0 ]; then
+    # 指摘は 1 回だけ全文を出す。以降のサイクルでは 1 行に載せる（隠さないが、
+    # 直っていない PR を繰り返し観察するコストを抑える）。
+    seen_file=$(seen_path "$repo" "$pr")
+    mkdir -p "$SEEN_DIR"; touch "$seen_file"
+    if [ "$SHOW_ALL" = 1 ]; then
+      jq -r '.[] | "\n[\(.id)] \(.author) \(.path):\(.line)\n  \(.body)"' <<<"$open"
+    else
+      jq -r --rawfile seen "$seen_file" '
+        ($seen | split("\n")) as $s
+        | .[] | .key as $k
+        | if ($s | index($k)) then
+            "[\(.id)] \(.author) \(.path):\(.line) — still open (shown earlier)"
+          else "\n[\(.id)] \(.author) \(.path):\(.line)\n  \(.body)" end' <<<"$open"
+    fi
+    jq -r '.[].key' <<<"$open" >> "$seen_file"
+    sort -u -o "$seen_file" "$seen_file"
+  fi
+
+  # VERDICT は 1 コミットについてのみ正しい。読んでいる間に head が動いたら、
+  # 上の出力はすべて古い可能性がある。読み直しの失敗は「不一致」ではなくエラー。
+  # 呼び出し側は、見えない変化に合わせて push してはならない。
+  local head_now
+  head_now=$($GH pr view "$pr" --repo "$repo" --json headRefOid --jq .headRefOid) \
+    || die "PR $pr の head を読み直せない"
+  if [ "$head_now" != "$head" ]; then
+    echo "VERDICT out-of-sync (head moved during this observation)"
+    return 20
+  fi
+
+  if [ "$sync" -ne 0 ]; then echo "VERDICT out-of-sync"; return 20; fi
+  if [ "$failed" -gt 0 ]; then echo "VERDICT failures"; return 10; fi
+  if [ "$open_n" -gt 0 ] || [ "$decision" = "CHANGES_REQUESTED" ]; then
+    echo "VERDICT open-comments"; return 11
+  fi
+  if [ "$pending" -gt 0 ]; then echo "VERDICT pending ($pending)"; return 12; fi
+  echo "VERDICT green"
+  return 0
+}
+
+main() {
+  local watch=0 pr=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --watch) watch=1 ;;
+      --all) SHOW_ALL=1 ;;
+      --logs)
+        shift
+        logs "${1:?job id}"
+        exit $?
+        ;;
+      --reply) shift; reply "${1:?comment id}" "${2:?reply body}"; exit $? ;;
+      -h|--help) sed -n '3,13p' "$0"; exit 0 ;;
+      *) pr=$1 ;;
+    esac
+    shift
+  done
+
+  command -v jq >/dev/null || die "jq が無い"
+
+  local repo viewer
+  repo=$($GH repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) || die "GitHub リポジトリの中ではない"
+  # GraphQL を優先する。GitHub App のトークンでは GET /user が叩けないことが多く、
+  # 失敗した REST 呼び出しも標準出力にエラー本文を残すので、$(a || b) で繋ぐと
+  # 本物のログインにエラー本文が連結されてしまう。
+  viewer=$($GH api graphql -f query='query { viewer { login } }' --jq .data.viewer.login 2>/dev/null) \
+    || viewer=$($GH api user --jq .login 2>/dev/null) \
+    || die "認証ユーザーが解決できない"
+  case $viewer in ''|null|\{*) die "認証ユーザーが解決できない" ;; esac
+  [ -n "$pr" ] || pr=$($GH pr view --json number --jq .number 2>/dev/null) || die "このブランチの PR が無い"
+
+  if [ "$watch" -eq 1 ]; then
+    local started=$SECONDS head runs statuses empty=0 left baseline="" first=1 seen
+    seen=$(seen_path "$repo" "$pr")
+    while :; do
+      head=$($GH pr view "$pr" --repo "$repo" --json headRefOid --jq .headRefOid) \
+        || die "PR の head が読めない"
+      runs=$(check_runs "$repo" "$head") || die "check runs が読めない"
+      statuses=$(commit_statuses "$repo" "$head") || die "commit statuses が読めない"
+      # 一番遅いチェックが終わるまでではなく、動くべきことが起きたらすぐ起こす。
+      # 新たに失敗したチェック、まだ見せていない指摘。開始時に既にあった失敗は
+      # 「見た」ので、もう一度起こさない。
+      if [ "$first" = 1 ]; then
+        baseline=$(failure_ids "$head" "$runs" "$statuses"); first=0
+      elif [ -n "$(comm -13 <(echo "$baseline") <(failure_ids "$head" "$runs" "$statuses"))" ]; then
+        break
+      fi
+      findings "$pr" "$repo" "$viewer"
+      if [ -n "$(comm -13 <(sort -u "$seen" 2>/dev/null) <(jq -r '.[].key' <<<"$OPEN" | sort -u))" ]; then
+        break
+      fi
+      if [ "$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")" = "0" ] &&
+         [ "$(jq '[.[] | select(.state == "pending")] | length' <<<"$statuses")" = "0" ]; then
+        # 残りが無い。チェックがまだ登録途中の可能性があるので、何も報告していない
+        # PR は数ポーリング待ってから信じる。
+        if [ "$(jq 'length' <<<"$runs")" != "0" ] ||
+           [ "$(jq 'length' <<<"$statuses")" != "0" ] ||
+           [ "$empty" -ge "$EMPTY_POLLS" ]; then
+          break
+        fi
+        empty=$((empty + 1))
+      fi
+      left=$((DEADLINE - (SECONDS - started)))
+      [ "$left" -le 0 ] && break
+      sleep "$(( POLL < left ? POLL : left ))"
+    done
+  fi
+
+  digest "$pr" "$repo" "$viewer"
+}
+
+main "$@"

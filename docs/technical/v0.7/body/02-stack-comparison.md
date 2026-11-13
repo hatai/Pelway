@@ -57,12 +57,14 @@ SlintのRoyalty-freeは標準的なpermissive OSS licenseと同じとは扱わ�
 
 | 案 | 長所 | 負担 | 判断 |
 |---|---|---|---|
-| TS＋React DOM UI、Rust同期核をWASM | browserのIME・読み上げ・文字選択を使う。状態・同期契約を共有 | UIは二重実装。WASM bridgeと保存adapterが要る | 推奨 |
+| TS＋Octane/DOM UI、Rust同期核をWASM | browserのIME・読み上げ・文字選択を使う。状態・同期契約を共有 | UIは二重実装。WASM bridgeと保存adapterが要る | 推奨 |
 | Slint/eguiをWASMで共通UI化 | 画面コード共有の可能性 | canvas系の表示とブラウザの検索・選択・読み上げの整合を別途検証 | 初版では採らない |
 | Rust DOM UI（Leptos等） | Rustで記述統一 | ネイティブ部品は結局別。新しいUI基盤の評価が増える | 初版では採らない |
 | Webの同期まで全部TS | WASM bridge不要 | 同期規則の実装が二つになる | WASM費用が大きい場合の代替 |
 
 共有するのはdomain enum、API型、同期・dedup、翻訳資源、表示規則、デザイントークン。共有しないのは画面部品、focus、IME、OS通知、clipboard、ファイル選択。承認規則を共通核で表示しても、最終判定はserverで強制する。
+
+Web UIのフレームワークはOctane（React互換のAPIをコンパイルする方式。MIT、beta版でnpm最新は0.16.7）とする。`.tsx`の部品から`.tsrx`へ段階的に移せる。実DOMでのIME・読み上げ・描画とコンパイラの組み込みは未検証項目（08:A2）。
 
 <a id="ch02-s07"></a>
 ### 二重UI実装の部分工数
@@ -94,11 +96,33 @@ UI担当の[input/ui.md](../sources/v0.6/fixed/pelway-technical-docs/input/ui.md
 | 非同期/HTTP | tokio、axum、tower | actix-webも比較可能。Rust共通型とmiddlewareで認証・traceを統一する案 |
 | DB | PostgreSQL＋sqlx | SQLite serverは部品が少ないが並行処理と将来の会社分離を別検証。今回は既存Postgres方針を維持 |
 | client保存 | rusqlite / IndexedDB adapter | SQLiteをbrowserへ無理に同じ実装で持ち込まない |
-| full text | Postgresの権限付き検索を入口とし、日本語tokenizer/拡張は未選定 | pg_bigm、Tantivy/Linderaは比較候補。初版で無断導入しない |
+| full text | Postgresの権限付き検索を入口とし、PGroonga（TokenBigram＋NormalizerNFKC）を第一候補とする | pg_bigmと合成データで比べてから正式に決める。Tantivy/LinderaはAI検索の補助indexが必要になったときの将来候補。[調査](../../../research/japanese-full-text-search.md) |
 | RAG | 初版必須ではない。必要時に国内モデル＋pgvectorを比較 | wiki/Q&A自動生成は範囲外。外部embeddingへ自動接続しない |
 | MCP | rmcpを条件付き依存採用案 | protocol実装を流用し、業務承認やsandboxはPelway側 |
-| LLM adapter | llama.cppの事前取得modelを第一候補、rigは必要なら小範囲 | LangGraph/OpenHands/Gooseは参考。全runtimeを組み込まない |
-| 観測 | tracingのローカル出力 | OpenTelemetryは将来の相互運用候補。外部exporterや自動設定を初期有効にしない |
+| LLM adapter | 提供元のOpenAI互換APIをrig-core（chat completionsとembeddingsだけ）で呼ぶ。BYOKは契約者の責任による例外（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)） | LangGraph/OpenHands/Gooseは参考。全runtimeを組み込まない |
+| 観測 | tracingのローカル出力。承認・開始資格・結果照会の各段階に同じtrace idを最初から付ける | OpenTelemetryは将来の相互運用候補。外部exporterや自動設定を初期有効にしない |
+
+<a id="調査を受けた採否"></a>
+## 調査を受けた採否
+
+[技術調査](../../../research/README.md)と[競合調査](../../../competitors.md)を受けた採否。「MVP前に検証」は採用の決定ではなく、合成データ・局所試作で確かめてから採否を決める項目。
+
+| 領域 | 採否 | 内容 |
+|---|---|---|
+| 非同期実行 | 採用：DBキュー（自作SKIP LOCKED+lease） | `FOR UPDATE SKIP LOCKED`とleaseの定番パターンに限る。止まったworkflowの再開は状態tableから判断する。Temporal・Restateは採らない。River（`riverqueue`）と比較した結果、自作を採りRiverは将来の候補（[ADR 0006](../../../adr/0006-db-queue-choice.md)） |
+| server間の通知 | 採用：`LISTEN/NOTIFY` | 起こす合図だけに使い、正本は`seq`。合図を取りこぼしても定期の追いつき検索で補う（[ADR 0006](../../../adr/0006-db-queue-choice.md)で実証）。Redisは入れない |
+| テナント分離 | 採用：Row Level Security | `workspace_id`の複合外部キーとアプリの絞り込みに加える二重の守り。[ADR 0005](../../../adr/0005-postgres-row-level-security.md) |
+| 全文検索 | MVP前に検証 | PGroonga第一候補、pg_bigmと比較。WAL・復元、rootless Podman、英字/コードの部分一致、表記ゆれを試す |
+| サンドボックス | MVP前に検証 | gVisor（runsc）とcrun＋libkrunを、rootless Podmanとの組み合わせ・起動時間・syscall互換・egress拒否の維持で測る |
+| 添付の保存 | 採用：`object_store`経由 | 保存先はローカルのまま、S3互換interfaceで扱う |
+| LLM・埋め込み | 採用：提供元のAPI（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)） | MVPはBYOK（Z.ai・OpenAI）で測る。一般提供の既定は日本リージョンのある提供元を別に選ぶ。ローカル推論（llama.cpp、日本語model、ruri-v3）はその選定の候補に残す |
+| MCP | MVP前に検証 | rmcp。tool annotationsは信頼しない（[ADR 0004](../../../adr/0004-declared-action-tiers.md)） |
+| 認証 | MVP前に検証 | webauthn-rs（passkey）とopenidconnect-rs（顧客IdP）をaxumに組み込む。Ory Kratos/Hydraは将来候補。Keto・OpenFGA・SpiceDBは12の外部権限サービス不要の方針により採らない |
+| クライアント | MVP前に検証 | A1にTauri＋Octane（+React。Webと画面共有）を比較候補として加える。Slint issue #3867・#10861の再現、ts-rsまたはspecta、wasm-opt |
+| バックアップ | MVP前に検証 | pgBackRest。保存期間は件数指定か別の削除処理で14日上限を守る。2.59.3以上 |
+| 監査 | MVP前に検証 | `prev_hash`の鎖を残し、最新hashと行数に署名したcheckpointをDB管理者と別の場所へ保存する。形式と鍵・保管先の分離は[ADR 0007](../../../adr/0007-signed-audit-checkpoints.md)、下書き実装`crates/pelway-audit-checkpoint`で改ざん検出を検証済み |
+| 外部エージェント | MVP後 | ACPによるClaude Code・Codex等の接続は、BYOKと同じ契約者の責任による例外の枠で扱う。LLMゲートウェイの実装の後に入れる（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)） |
+| 将来の候補 | 採否は将来 | OpenBao、Cedar、Ory Kratos、LiveKit、OpenMLS、YomiToku（商用ライセンスが必要）、NDLOCR-Lite、PaddleOCR、pgvector、OpenTelemetry Collector |
 
 直接依存の許諾は[09の対応表](09-sources.md)と[技術照合記録](../sources/v0.6/fixed/pelway-technical-docs/reviews/technical-license-ledger-v0.1.md)に示す（2026-11-08、可変ブランチ/最新版の観測値であり採用版ではない）。rmcpはApache-2.0への移行中でMIT部分が残る。全推移依存・NOTICE・SBOMは未作成、固定版の条文/脆弱性確認も未了。適切なOSSの採用は進めるが、安全境界をOSSの既定動作へ任せない。
 

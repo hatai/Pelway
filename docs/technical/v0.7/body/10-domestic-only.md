@@ -16,8 +16,8 @@
 | データ・処理 | 本体の保存・処理場所案 | 越境候補 | 初期制御/未保証 |
 |---|---|---|---|
 | chat/添付/成果物 | 国内hostのDB・同期外volume | cloud sync、外部preview、利用者選択連携へのexport | 自動preview/外部画像取得なし。exportは明示scopeと操作承認 |
-| 本体LLMの入出力 | 国内hostのスタブ/ローカル推論 | API/fallback、model download、trace | 外部LLM fallbackなし。機材/品質/全通信未確認 |
-| embedding/RAG | 必要時のみ国内modelとDB | embedding API、index telemetry | 初版の必須機能にしない。使う前に同じ審査 |
+| 本体LLMの入出力 | スタブ。BYOKを有効にしたテナントは契約者の提供元（国外あり得る） | BYOKの提供元、fallback、trace | BYOKは契約者の責任による例外で、初期off・明示有効化・表示・監査（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)）。外部LLM fallbackなし |
+| embedding/RAG | 必要時のみ。BYOKのテナントはチャットと同じ提供元 | embedding API、index telemetry | 初版の必須機能にしない。索引は提供元とモデルに結び付け、替えたら作り直す |
 | Botメモリ/step/checkpoint | 国内DB/volume | remote storage、ツールによる持出し | 明示メモリは作成/根拠確認した更新から最長365日かつ全source期限内。閲覧で延長しない。checkpointは13 R07。sandboxへDB鍵を置かない |
 | ツール実行 | 国内sandbox、gateway | MCP/API/CLI子processの通信 | sandboxはgateway以外拒否。stdioでも無通信と見なさない |
 | client cache | 管理端末のSQLite/IndexedDB | 端末同期、国外端末閲覧 | 初期loopback利用。管理済み国内端末以外へ拡張は未決 |
@@ -89,6 +89,6 @@ D4では、task sandboxおよび将来のCLI連携区画からhostの推論port/
 <a id="ch10-s09"></a>
 ## 連携設定・個別承認・法的根拠の三層
 
-会社の有効化設定、権限者の個別snapshot承認、通信当事者の利用/提供根拠を別々に記録し、すべてが必要範囲を満たす場合だけ処理を許可する。[12](12-communication-secrecy.md)の目的・提供先台帳と実行点検査を適用する。国外又は国未特定だけを一律禁止の理由にしないが、受領者/目的/取扱条件が白紙なら有効化しない。外国未特定時のAPPI代替説明は通信秘密の同意範囲や受領者確認を省略する根拠ではない。
+会社の有効化設定、権限者の個別snapshot承認、通信当事者の利用/提供根拠を別々に記録し、すべてが必要範囲を満たす場合だけ処理を許可する。[12](12-communication-secrecy.md)の目的・提供先台帳と実行点検査を適用する。国外又は国未特定だけを一律禁止の理由にしないが、受領者/目的/取扱条件が白紙なら有効化しない。外国未特定時のAPPI代替説明は通信秘密の同意範囲や受領者確認を省略する根拠ではない。個別snapshot承認の代わりに事前決裁された型の版を承認根拠とする自動実行の経路は[ADR 0009](../../../adr/0009-hybrid-approval-with-preapproved-types.md)が定める。型経路でも有効化と法的根拠の層は同じ条件を課す。
 
 接続時の認証・能力確認に必要なアカウント識別子/IP等を説明する。接続だけで会話/添付/repo/logを同期・索引化・送出しない。業務検索語/文書ID/promptも提供データとして検査する。通常取消のP非保証と法的根拠失効を分け、停止/照会に許された限定権限だけを使う。全面失効を別account/再認証で迂回しない。

@@ -27,6 +27,12 @@
 #   - 改行を含むファイル名でも壊れない（DC-04）
 #   - find などの走査失敗（読めないディレクトリ）で exit 2（DC-05: pipefail）。
 #     canary の目印検索でもファイルが読めなければ exit 2（slot5 指摘4）
+#   - 製品ではない開発用 crate（crates/dev-* ・ crates/pelway-agent-watch）、
+#     正本トークンのバイト固定ミラー（crates/pelway-client-ui/tokens/）、
+#     非ループバック拒否の陰性試験（crates/pelway-http/tests/http.rs）は
+#     走査対象外（Issue #143 の移植時適応。除外の理由は lib.sh を参照）
+#   - bind("...") の検査は関連付け関数の形（::bind("..."）だけ。メソッド形式の
+#     .bind("...")（sqlx 等）はソケットの待受・接続先ではないため対象外（Issue #143）
 # を確かめる。本物のリスト（forbidden-phrases.txt / allowed-hosts.txt / canaries.txt）を使う。
 # リポジトリには書き込まない。
 set -uo pipefail
@@ -448,6 +454,28 @@ if [ "$(id -u)" -ne 0 ]; then
 else
   ok "scan-failure checks skipped (running as root: unreadable directories stay readable)"
 fi
+
+# --- Issue #143: 今の main への移植で加えた適応（走査範囲の除外と bind 判定） ---
+# 製品ではない開発用 crate（crates/dev-* ・crates/pelway-agent-watch）は走査対象外。
+# 製品の検査が開発ツールの正当な外部参照（GitHub 等）で止まらないようにするため。
+expect_case external-refs 0 "dev-* crate files are out of scope" crates/dev-x/src/lib.rs 'pub const U: &str = "https://github.com/x";\n'
+expect_case external-refs 0 "agent-watch is dev tooling (out of scope)" crates/pelway-agent-watch/src/x.rs 'pub const U: &str = "https://github.com/x";\n'
+expect_case leak-phrases 0 "dev-* crate files are out of scope" crates/dev-x/src/lib.rs 'pub const A: &str = "GDPR準拠";\n'
+expect_case loopback 0 "dev-* crate files are out of scope" crates/dev-x/src/lib.rs 'fn b() { let _ = std::net::TcpListener::bind("0.0.0.0:80"); }\n'
+
+# 正本トークンのバイト固定ミラー（hk.pkl の exclude と同じ理由）は走査対象外。
+# トークン名は識別子であって利用者向け文言ではない（safe-bottom-m 等）。
+expect_case leak-phrases 0 "tokens JSON (byte-pinned mirror) is out of scope" crates/pelway-client-ui/tokens/pelway.tokens.json '{"safe-bottom-m": "x"}\n'
+
+# 非ループバックを拒否することの陰性試験（crates/pelway-http/tests/http.rs）は
+# 意図的に違反アドレスを含むため走査対象外。
+expect_case loopback 0 "negative-test file with intentional bad addrs is excluded" crates/pelway-http/tests/http.rs 'fn t() { for bad in ["0.0.0.0:0", "[::]:0"] {} }\n'
+expect_case external-refs 0 "negative-test file is exempt from external-refs too" crates/pelway-http/tests/http.rs 'const A: &str = "192.168.0.1";\n'
+
+# bind("...") の検査はソケット関連付け関数の形（::bind("..."）だけを対象にする。
+# sqlx などのメソッド形式 .bind("...") はソケットの待受・接続先ではないため対象外。
+expect_case loopback 0 "method-style .bind(...) is not a socket bind" "${R}" 'fn q() { q.bind("v1").bind("state.changed"); }\n'
+expect_case loopback 1 "associated-function ::bind still flags a bad host" "${R}" 'fn b() { let _ = std::net::TcpListener::bind("192.168.10.4:9000"); }\n'
 
 echo "selftest: ${pass} passed, ${fail} failed"
 [ "${fail}" -eq 0 ]

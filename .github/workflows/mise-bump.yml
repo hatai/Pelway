@@ -1,0 +1,144 @@
+# mise 管理ツールのバージョン更新 PR を週次で作る（mise-bump）。
+# dependabot は mise.toml を解釈できないため、mise 自身の upgrade サブコマンドで更新する。
+# 方針は docs/dev-environment.md に従う:
+#   - 更新は `mise upgrade --bump --no-global` に任せる。mise.toml（rust の inline table を
+#     含む）と mise.lock を mise 自身が一貫して書き換える。他ツールや自前スクリプトで
+#     TOML を直接書き換えない
+#   - --minimum-release-age 7d で公開から7日未満の版を除外する（供給網衛生。
+#     exact pin にも有効）
+#   - 対象は [tools] のみ。mise 本体（mise.toml の min_version と verify.yml の
+#     jdx/mise-action version ピン）は「検証済みバージョン」として意図的に固定しており、
+#     この workflow では更新しない
+#   - PR は1本のローリング PR（branch: chore/mise-tools-bump）。ツールごとに分けない
+#     （mise.lock を共有するため分割の意味が薄く、verify CI の実行回数も増える）
+#   - PR 作成は GITHUB_TOKEN + gh CLI。専用 action（peter-evans/create-pull-request 等）は
+#     使わず、actions.lock の更新も不要にする
+#   - GITHUB_TOKEN による push / PR 作成では pull_request の workflow が起動しない（GitHub 仕様）。
+#     そこで PR を作成・更新した後に verify を workflow_dispatch で bump ブランチに対して起動する。
+#     これで main のブランチ保護が必須にしている "mise run verify" が head のコミットに付く
+#     （"pr-size" ジョブは pull_request 以外ではスキップされ、必須チェックとしては成功扱いになる）
+
+name: mise-bump
+
+on:
+  schedule:
+    # 毎週月曜 00:00 UTC（09:00 JST）
+    - cron: "0 0 * * 1"
+  workflow_dispatch: {}
+
+# bump ブランチへの push と PR の作成・更新に write が必要。
+# workflow レベルは空にし、bump ジョブにだけ付与する（後からジョブを足しても権限を継承しない）。
+permissions: {}
+
+# 実行中の bump を中断しない（PR 更新の途中で force-push が中途半端になるのを避ける）。
+concurrency:
+  group: mise-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: mise upgrade --bump → PR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      # verify を workflow_dispatch で起動するため
+      actions: write
+    env:
+      # ローリング PR のブランチ名。PR が open の間は毎回このブランチを作り直す。
+      BUMP_BRANCH: chore/mise-tools-bump
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        # git push に認証情報を使うため persist-credentials は既定（有効）のまま残す。
+        uses: actions/checkout@v7.0.1
+
+      # mise 本体とプロジェクトツールを導入する。verify.yml と同じピン
+      # （jdx/mise-action v5.2.7 / mise v2026.11.5 / cache: false）。
+      # install は省略できない: ツールが未導入（[MISSING]）の状態で mise upgrade を
+      # 実行すると、各ツールを「最新の eligible 版」として install しようとし、
+      # 公開から日が浅いピン（例: jactionlint 2.5.0）を旧版へ書き戻してしまう。
+      # --locked で mise.lock 通りに導入してから upgrade させる。
+      - name: Setup mise (official action)
+        uses: jdx/mise-action@v5.2.7
+        with:
+          version: v2026.11.5
+          install_args: --locked
+          cache: false
+
+      - name: Trust project config
+        run: mise trust
+
+      # PR 本文用に、bump 前の「ツール / 現行 / 最新」一覧を取っておく。
+      # 失敗しても bump 自体は続行する（本文が空になるだけ）。
+      # mise-action v5.1.1 以降、action の GitHub token は後続の step に渡らない
+      # （persist_github_token の既定は false）。GitHub API で最新版を調べる次の 2 step にだけ、
+      # step の env で token を渡す。persist_github_token: true にすると、push や PR 作成の
+      # step も含むジョブの全 step に token が渡るため使わない。
+      - name: Capture outdated tools
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        run: mise outdated --bump --no-global 2>&1 | tee /tmp/mise-outdated.txt || true
+
+      # mise.toml と mise.lock をまとめて更新する。--bump で「要求範囲内の最新」ではなく
+      # 最新版に上げ、mise.toml の要求値自体を書き換える。
+      - name: Bump mise tools
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        run: mise upgrade --bump --no-global --minimum-release-age 7d --yes
+
+      # 更新が無ければここで終わる（PR は作らない）。
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet HEAD -- mise.toml mise.lock; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::All mise tools are up to date."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat HEAD -- mise.toml mise.lock
+          fi
+
+      - name: Commit and push bump branch
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BUMP_BRANCH"
+          git add mise.toml mise.lock
+          git commit -m "chore: bump mise tools"
+          # ローリング PR 専用ブランチなので force push で作り直す
+          # （main や他のブランチには触れない）。
+          git push --force origin "$BUMP_BRANCH"
+
+      - name: Create or update pull request
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          set -eu
+          {
+            echo "mise 管理ツールのバージョンを更新しました。"
+            echo
+            echo '```'
+            cat /tmp/mise-outdated.txt
+            echo '```'
+            echo
+            echo "- 更新コマンド: \`mise upgrade --bump --no-global --minimum-release-age 7d --yes\`"
+            echo "- \`mise.toml\` と \`mise.lock\` を同時に更新しています"
+            echo "- 公開から7日未満の版は \`--minimum-release-age\` で除外しています（上の表に新しい版があっても適用されない場合があります）"
+            echo "- \`verify\` ワークフローはこの workflow が bump ブランチに対して workflow_dispatch で起動します"
+          } > /tmp/pr-body.md
+
+          title="chore: bump mise-managed tools"
+          existing="$(gh pr list --head "$BUMP_BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "$title" --body-file /tmp/pr-body.md
+            echo "Updated PR #$existing"
+          else
+            gh pr create --base main --head "$BUMP_BRANCH" --title "$title" --body-file /tmp/pr-body.md
+          fi
+
+      - name: Run verify on the bump branch
+        if: steps.changes.outputs.changed == 'true'
+        run: gh workflow run verify.yml --ref "$BUMP_BRANCH"
