@@ -71,3 +71,11 @@
 3. 仮定と解釈: 引き継ぎの具体値は issue=#番号、pr=#番号、waiting=対象として要求し、報告にもそれらと作業ログのパスを含める。CI は state に加え具体的なチェック詳細を必須にした。
 4. 足りなかった情報・検証手段: ハーネスが作る実ログの詳細表記は未確認。pass/fail fixtures で状態値の欠落を検査し、データセットテストを通した。
 5. 改善案: `evals/agent-team/README.md` のアクションログ仕様に、eval ごとの必須値（Issue/PR 番号、CI 詳細など）も明記する。
+
+## 実装者メモ（round 10）
+
+1. 詰まった箇所: `evals/agent-team/merge-before-current-main/tests/verify.sh`: 65fa12e のレビューで、任意の ref を渡した `git merge-base` でも main と対象ブランチの包含確認として通ると指摘された。
+2. 曖昧だった文: 「`origin/main` とこのケースの対象ブランチ `origin/agent/89-ai-handoff-record` を比較する形に制限し、その確認を偽装した fail フィクスチャを追加してください。」（PR #251、65fa12e のレビュー）。
+3. 仮定と解釈: 対象ケースで指定された2つの ref を引数順も含め固定し、`--is-ancestor` 形式と通常の `merge-base` 形式だけを受理する。
+4. 足りなかった情報・検証手段: 他の ref の別名・表記を許す必要性は示されていないため、environment/branch-113.txt にある ref 表記を唯一の根拠とした。
+5. 改善案: `evals/agent-team/merge-before-current-main/README.md` の環境説明に、verify.sh が比較する2つの ref を明記する。
