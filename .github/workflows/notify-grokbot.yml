@@ -22,9 +22,10 @@ on:
   # がこのリポジトリと一致するときだけ送り、fork はスキップ。artifact の
   # ダウンロード・PR コードの実行はないため抑制する。
   workflow_run: # jactionlint ignore=dangerous-triggers
-    # .github/workflows/verify.yml の name:（workflow 名）と正確に一致させる。
+    # .github/workflows/verify.yml と nightly.yml の name:（workflow 名）と正確に一致させる。
     workflows:
       - verify
+      - nightly
     types:
       - completed
   workflow_dispatch:
