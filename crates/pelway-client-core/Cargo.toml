@@ -10,10 +10,13 @@ description = "UI-independent core logic for the Pelway desktop client (no Slint
 [dependencies]
 # バックエンド契約（同一ワークスペースの pelway-contract）を直接使う。
 # かつて src/contract.rs に手写しを持っていたが、ずれの恐れがあるため統合した（Issue #91）。
-pelway-contract = { path = "../pelway-contract" }
+# version は cargo-deny の wildcards 検査（deny.toml の [bans] wildcards = "deny"）のための
+# ワイルドカード回避。path 依存の解決には影響しない（publish = false なので公開もしない）。
+pelway-contract = { path = "../pelway-contract", version = "0.0.0" }
 
 [dev-dependencies]
 # 契約モジュールが pelway-contract の再エクスポートであること(同一型であること)と
 # エラーのワイヤ形式(serde タグ)をテストで確かめるために使う。
-pelway-contract = { path = "../pelway-contract" }
+# version は cargo-deny の wildcards 検査のためのワイルドカード回避（上の [dependencies] と同じ理由）。
+pelway-contract = { path = "../pelway-contract", version = "0.0.0" }
 serde_json = "1"

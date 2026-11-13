@@ -15,7 +15,7 @@ serde = ["dep:serde"]
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
 # snapshot_hash の計算（正規化した操作の中身の hash）に使う。
-sha2 = { version = "0.10", default-features = false }
+sha2 = { version = "0.11", default-features = false }
 tracing = "0.1"
 
 [dev-dependencies]
