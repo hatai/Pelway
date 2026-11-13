@@ -94,20 +94,18 @@ ls docs/worklogs/bugs
 - 未解決の問い。
 
 同じ内容を `docs/worklogs/bugs/<slug>/report.md` に保存する（`<slug>` は症状の短い
-英小文字とハイフン。ログの断片やキャプチャは同じディレクトリに置く）。
-
-保存した報告は、報告ブランチ `investigate/<slug>` に commit して GitHub に push する
-（`scripts/agent-gh dev git`。PR は作らない。指揮役は GitHub 上のこのブランチで報告
-ファイルを確認する。追い調査では同じブランチに積んで push する）。スレッドの返答には、
-報告の内容とブランチ名を書く。
+英小文字とハイフン。ログの断片やキャプチャは同じディレクトリに置く）。保存したら、
+報告ファイル（と同じディレクトリの証拠）だけの Draft PR を出す（skill `write-pull-request`。
+ブランチは `agent/investigate-<slug>`、本文の `Implementer:` の行には指示の 2 行目
+`Assigned: role=investigate ...` の値を `role=investigate` を除いて写す）。追い調査では
+同じブランチに積んで push する（Draft PR が更新される）。脆弱性の疑いで止めた調査では、
+この PR を出さない。
 
 ## 引き渡し（実装は別工程）
 
 - 調査は手順 5 まで。修正のコードは書かない。同じ欠陥の列挙も直さず報告に残す。
 - 修正を進めるときは、報告と調査結果を `write-issue` の形にまとめて Issue を起票する。
-  「関連情報」に `docs/worklogs/bugs/<slug>/report.md` へのリンクと報告ブランチ
-  `investigate/<slug>` を置く。受け入れ条件には再現試験と、報告ファイル
-  （`docs/worklogs/bugs/<slug>/`）を実装 PR の差分に含めることを書く（実装は
-  `implement-issue` がその Issue を担い、報告ファイルはマージで main に残る）。
+  「関連情報」に `docs/worklogs/bugs/<slug>/report.md` へのリンクを置き、受け入れ条件には
+  再現試験を含める。実装は `implement-issue` がその Issue を担う。
 - 調査の結果「直す必要がない」（仕様どおり、誤報告など）と分かったら、そう報告して
   Issue は立てない。

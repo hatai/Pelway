@@ -34,7 +34,7 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
   Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>
   ```
 
-  実装担当はこの値を PR 本文の `Implementer:` の行に、レビュー担当はレビュー本文の `Reviewer:` の行に写す。
+  実装担当はこの値を PR 本文の `Implementer:` の行に、レビュー担当はレビュー本文の `Reviewer:` の行に、調査担当は報告の PR 本文の `Implementer:` の行に写す。
 - 巡回では、ほかのセッションが担当しているスレッドや PR に介入しない（割り当ての記録の表で担当を確かめる）。人間から依頼された代行・引き継ぎだけが例外で、手順 5 の「代行の開始と終了」に従う。
 - スレッドを立てるときは、必ず「スレッド名」の形式のタイトルを渡す。タイトルが形式に合わないまま作業を始めさせない。
 - 割り当てのたびに、指揮役の作業ログの「割り当ての記録」の表に 1 行足す（日時、Issue・PR、役割、担当、モデル、effort、理由）。改善ループで、レビュー結果・実装者メモと対照する。
@@ -118,13 +118,14 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 調査スレッドが報告を出したときの処理。
 
-- 報告は `docs/worklogs/bugs/<slug>/report.md`（skill `investigate-bug` の手順 5）。スレッドの返答（報告の内容とブランチ名を含む）で報告を受け、報告ファイルは GitHub 上の報告ブランチで確認する: `scripts/agent-gh dev api "repos/hatai/Pelway/contents/docs/worklogs/bugs/<slug>/report.md?ref=investigate/<slug>" --jq .content | base64 -d`。返答とファイルが食い違ったら、ファイルを正とする
-- 指揮役が報告を確認して起票可否を判断する
-- 直す必要があるときは、指揮役が skill `write-issue` で起票する（実装の指示は出さない）。人間は `ready-for-agent` で承認し、入口A の流れに合流する。Issue 本文の「関連情報」には、報告のパス（`docs/worklogs/bugs/<slug>/report.md`）、報告ブランチ（`investigate/<slug>`）、調査スレッドのリンクの 3 つを書く。実装スレッドはこのブランチを取り込んで報告ファイルを実装 PR に含め（skill `implement-issue` の手順 3）、マージで main に残す。実装 PR のマージ後に、報告ブランチを消す: `scripts/agent-gh dev api -X DELETE repos/hatai/Pelway/git/refs/heads/investigate/<slug>`
-- 直す必要がないとき（仕様どおり、誤報告など）は Issue を立てない。報告はスレッドの返答と報告ブランチに残る
+- 報告は `docs/worklogs/bugs/<slug>/report.md` と、そのファイルだけの Draft PR（skill `investigate-bug` の手順 5）。PR とスレッドの返答の両方で報告を確認する
+- 指揮役が報告を確認して起票可否を判断し、判断と理由を報告の PR にコメントする
+- 直す必要があるときは、指揮役が skill `write-issue` で起票する（実装の指示は出さない）。人間は `ready-for-agent` で承認し、入口A の流れに合流する。Issue 本文の「関連情報」には、報告のパス（`docs/worklogs/bugs/<slug>/report.md`）と調査スレッドのリンクを書く
+- 直す必要がないとき（仕様どおり、誤報告など）は Issue を立てない
+- 起票の可否にかかわらず、報告の PR はレビューに回してマージする（報告が main に残る）。レビューの割り当ては通常の PR と同じ「レビュー担当と effort」で行い、Draft の解除は調査スレッドにさせる（実装スレッドと同じ流れ）
 - 調査で報告に不足があって `needs-info` を付けたときは、情報が届いたら原則として同じ調査スレッドを再開する（`t3_thread_send` で「続きを調査する。skill investigate-bug に従う。」）。新しい調査スレッドは立てない
 - 実装は、調査を担ったスレッドへの役割の追加としては行わない。起票した Issue の実装スレッドとして割り当て替える（正本の「役割と GitHub 上の名義」の役割の変更の原則）
-- 調査スレッドは脆弱性の疑いで止まることがある（skill `investigate-bug` の手順 4）。このとき報告ファイルは無いので、`needs-human` の判断を待つ
+- 調査スレッドは脆弱性の疑いで止まることがある（skill `investigate-bug` の手順 4）。このとき報告の PR は無いので、`needs-human` の判断を待つ
 
 ### マージ
 

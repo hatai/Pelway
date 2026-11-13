@@ -67,3 +67,11 @@
 3. 仮定と解釈: (a) main への残し方は、round 1 が書き round 2 が除いた「報告だけの Draft PR」とは別の方式（報告ブランチ `investigate/<slug>` を push し、起票された Issue の実装 PR が取り込む）を選んだ。Draft PR を復活させると round 2 の must-fix の根拠（Issue #249 の受け入れ条件から再構成した範囲を越える新規ルール）と再び衝突するため。ブランチ接頭辞を `agent/` にしなかったのは、`pelway-agent-watch` の `issue_number` 抽出（`agent/<番号>-`）と `conductor-watch.sh` の `agent/` PR 監視に結合させないため。(b) 指揮役の読み取りは GitHub API（contents の `?ref=`）とした（runbook 5「値をもとに動く前に GitHub で確かめる」と同じ原則）。(c) 直す必要が無いと判断された調査の報告は main に入らないが、ブランチとスレッドの返答に残ると解釈した（must-fix が問題にする「Issue に記すパスが main で参照できない」は起票された場合の話のため）
 4. 足りなかった情報・検証手段: スラッシュ入りブランチ名に対する GitHub API の DELETE `git/refs/heads/investigate/<slug>` と contents の `?ref=` が動くか。実ブランチ `investigate/round3-verify`（= 824308b）を作り、両コマンドの成功を確認して消した
 5. 改善案: mise.toml の `agent-worktree-prune` の「マージ済み・クローズ済みの PR のものだけ」に、PR を出さない調査 worktree を消す対象を加える（別 Issue。現状、調査 worktree は prune されないまま残る）
+
+## 実装者メモ（round 4）
+
+1. 詰まった箇所: `.agents/skills/write-issue/SKILL.md` の関連情報の行: main 取り込みで衝突（CONFLICTING）。main 側（#253）が同じ行に「リポジトリ外の成果物は URL か判断に足る抜粋」を追加していたため、両方を併記して解消した。復帰範囲も迷った: 0c4aff0（round 1）からの復帰は investigate-bug・command-team・runbook だけでなく review-pr の段落と runbook のブランチ識別も含むか → hatai の判断が「1 回目のレビューの must-fix（Issue に無い新しい規則）は、この判断で範囲内になった」と明記しているため、round 1 の実装を基準に戻した
+2. 曖昧だった文: 「起票の判断の後、その PR はレビューに回してマージする（起票しないときもマージする）」（Issue #249 の指揮役（代行）コメントが記録した hatai の判断）
+3. 仮定と解釈: (a) 「起票しないときもマージする」を、起票の可否から独立した 1 項（command-team「調査の引き渡し」）として明示した（選ばなかった解釈: round 1 どおり「直す必要がないとき」の項に畳み込む。判断の前後関係が読み取れなくなるため）。(b) Approve 後の報告 PR の Draft 解除は実装スレッドと同じ扱い（調査スレッドに行わせる）と解釈し、runbook の調査スレッドの段落に書いた。(c) Issue の「関連情報」は round 1 同様の 2 点（報告のパスと調査スレッドのリンク）に戻した（hatai の判断の記録がこの形を述べているため）。
+4. 足りなかった情報・検証手段: 報告の Draft PR の本文形式（skill `write-pull-request` の見出しのうち報告に不要なもの、`Closes #<N>` を書かないこと）は判断にも Issue #249 にも指定が無く、investigate-bug は skill `write-pull-request` の参照だけを書いた
+5. 改善案: `.agents/skills/write-pull-request/SKILL.md` の「本文の構成」に報告 PR の注記（クローズする Issue が無いため `Closes` 行を書かない等）を足す（別 Issue）

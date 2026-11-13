@@ -63,8 +63,6 @@ scripts/agent-gh dev issue view <N> --json title,body,labels,comments
 新しい作業なら `git switch -c agent/<N>-<英小文字とハイフンの短い slug>`。
 修正依頼（`t3 thread send` で届いた指示）なら、今のブランチのまま続ける。新しいブランチは作らない。
 
-Issue 本文の「関連情報」に報告ブランチ（`investigate/<slug>`）が書かれているとき（調査起点の起票）は、`scripts/agent-gh dev git fetch origin investigate/<slug>` のあと `git merge --no-edit FETCH_HEAD` で報告ファイル（`docs/worklogs/bugs/<slug>/`）を作業ブランチに取り込む。報告ファイルは編集せず、この PR の差分に含めてマージで main に残す。
-
 ### 4. 受け入れ条件ごとにテストを先に書く
 
 1. 受け入れ条件 1 つにつき、それを確かめるテストを書く
