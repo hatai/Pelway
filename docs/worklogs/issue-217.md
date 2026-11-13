@@ -8,3 +8,11 @@
 4. 足りなかった情報・検証手段: 実在 PR に対する agent-gh 経由の実地確認（graphql viewer が `pelway-dev[bot]` を返すこと、`--logs` の cargo ログ絞り込みの実効性）は未検証。モックテストは網羅するが、実ログでの keep パターン調整は初回実運用で行うしかない。
 5. 改善案: `mise.toml` の「tasks.script-test」に「同梱テストの列挙が増えたら glob 収集（`.agents/skills/` 配下の `*.test.sh` を順に実行）に替える。スキル同梱ツールの規約は Issue が予定する別 Issue で扱う」の一行を足す。`.agents/skills/pr-watch/SKILL.md` の「リファレンス」に実運用で分かった `--logs` の絞り込み漏れパターンを追記する。
 6. 補足（.gitattributes と行数）: `.gitattributes` の `-linguist-generated` 列挙（implement-issue / review-pr / write-pull-request）に pr-watch を追加した。pr-size は base（origin/main）側の .gitattributes で判定するため、この PR のチェック上は pr-watch 配下が数えられず pass になるが、実効行数は +809 / -3（上限 800 を 9 行超える）。テスト・ツール・スキル本文は受け入れ条件に必要で削れず、分割にも収まらない規模のため、PR 本文に実効行数を明記してレビューで判断を仰ぐ。
+
+## 実装者メモ（round 2）
+
+1. 詰まった箇所: 2 つ。まず `mise.toml` の「tasks.script-test」: main 側で `scripts/tests/deny-warn-extract.test.sh`（#168 cargo-deny）が列挙に加わっており、本ブランチの `pr-digest.test.sh` 追加と衝突。両方を残し、main と同じ位置（agent-worktree-prune の直後）に deny-warn-extract、末尾に pr-digest を並べた。次に merge commit での push が `refusing to allow a GitHub App to create or update workflow .github/workflows/actions.lock without workflows permission` で拒否された（main 由来の #235 dependabot の変更が merge commit に含まれるため。`pelway-dev` に workflows 権限は無い）。
+2. 曖昧だった文: 「実効の追加行数 +810（上限を 9 行超）は、指揮役が pr-size-exception として認めます」（修正依頼、本スレッド）。例外の承認は指揮役が Issue への `<!-- pr-size-exception -->` コメントと PR ラベルで示すもの（skill `command-team` の「マージ」）なので、本 PR 側は実効行数の明記を維持するだけにし、ラベルやコメントの操作は行っていない。
+3. 仮定と解釈: main の取り込みは最初 merge commit で行ったが、上記の push 拒否を受け、ワークフローファイルを含まない自分のコミットだけを積み直す rebase に切り替えた（`git reset --hard` → `git rebase origin/main` → 同じ script-test の解消を適用）。これにより PR の差分は同じまま push が通る。rebase 後も command-team への参照 2 箇所と `.gitattributes` の pr-watch 行が残っていることを確認した。
+4. 足りなかった情報・検証手段: なし。rebase 後の `mise run verify` と `mise run pr-size` の実行結果で確認する。
+5. 改善案: round 1 と同じ（script-test の glob 収集化、`--logs` 絞り込みの実運用での追記）。
