@@ -19,8 +19,14 @@ cp "$REPO/scripts/conductor-watch.sh" "$ROOT/repo/scripts/"
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env bash
 # モック: issue list / pr list に $MOCK の JSON を返す。pr list の呼び出し回数を $MOCK/cycle に数える。
-if [[ "$2 $3" == "issue list" ]]; then cat "$MOCK/issues.json"; exit 0; fi
+# MOCK_ISSUE_FAIL / MOCK_PR_FAIL があれば、失敗（exit 9）の代わりに [] を標準出力に出してから失敗する
+# （一時的な API 失敗で空配列相当が stdout に残るケースの再現）。
+if [[ "$2 $3" == "issue list" ]]; then
+  [[ -n "${MOCK_ISSUE_FAIL:-}" ]] && { echo '[]'; exit 9; }
+  cat "$MOCK/issues.json"; exit 0
+fi
 if [[ "$2 $3" == "pr list" ]]; then
+  [[ -n "${MOCK_PR_FAIL:-}" ]] && { echo '[]'; exit 9; }
   echo $(( $(cat "$MOCK/cycle" 2>/dev/null || echo 0) + 1 )) > "$MOCK/cycle"
   cat "$MOCK/prs.json"; exit 0
 fi
@@ -77,7 +83,8 @@ EOF
 }
 
 start_watch() {
-  MOCK="$MOCK" SLEEP_MAX="${SLEEP_MAX:-}" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
+  MOCK="$MOCK" SLEEP_MAX="${SLEEP_MAX:-}" MOCK_ISSUE_FAIL="${MOCK_ISSUE_FAIL:-}" \
+  MOCK_PR_FAIL="${MOCK_PR_FAIL:-}" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
     bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
   WPID=$!
 }
@@ -179,6 +186,16 @@ mock_prs "$(jarr "$(pr 102 CLOSED false agent/12-old "" NONE)")"
 run_cycles 2
 check "queued issue is waiting_on=conductor" eq "$(sget 11 waiting_on)" "conductor"
 check "closed issue removed from record" eq "$(sget 12 waiting_on)" ""
+
+# 10. GitHub の取得に失敗した巡回（失敗時に [] が標準出力に残る）は記録を書き換えない
+MOCK_ISSUE_FAIL=1 run_cycles 2
+check "failed issue fetch keeps record" eq "$(sget 11 waiting_on)" "conductor"
+MOCK_ISSUE_FAIL=0 mock_issues "$(jarr "$(iss 11 OPEN agent:working)")"
+mock_prs "$(jarr "$(pr 101 OPEN false agent/11-abc "" NONE)")"
+run_cycles 2
+check "ready for review again" eq "$(sget 11 waiting_on)" "review"
+MOCK_PR_FAIL=1 run_cycles 2
+check "failed pr fetch keeps record" eq "$(sget 11 waiting_on)" "review"
 
 # --- runbook の記述 ---
 

@@ -10,8 +10,10 @@ P="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/patrol-state.json"
 cd "$(dirname "$0")/.." || exit 1
 while true; do
   t3 thread list --json > "$D/threads.json" 2>/dev/null || true
-  scripts/agent-gh dev issue list --state all --limit 50 --json number,state,labels > "$D/issues.json" 2>/dev/null || true
-  scripts/agent-gh dev pr list --state all --limit 30 --json number,state,isDraft,headRefName,reviewDecision,statusCheckRollup > "$D/prs.json" 2>/dev/null || true
+  # GitHub からの取得に失敗したらファイルを消す（空の実状態と区別する。python 側で取得失敗と扱い、
+  # 巡回状態の記録を書き換えさせない）。
+  scripts/agent-gh dev issue list --state all --limit 50 --json number,state,labels > "$D/issues.json" 2>/dev/null || rm -f "$D/issues.json"
+  scripts/agent-gh dev pr list --state all --limit 30 --json number,state,isDraft,headRefName,reviewDecision,statusCheckRollup > "$D/prs.json" 2>/dev/null || rm -f "$D/prs.json"
   python3 -I - "$D" "$P" <<'PY'
 import json, sys, time, os, re
 from datetime import datetime
