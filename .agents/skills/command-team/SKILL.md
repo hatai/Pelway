@@ -51,6 +51,17 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 - 立てた後で形式に合わないと分かったら、そのスレッドへの次の操作の前に `t3_thread_update`（`action: rename`）で直す。形式に合わない古いスレッドも、次に操作するときに直す。
 - `scripts/conductor-watch.sh` は、指揮役が立てたスレッドのうち、動いているものと新しく現れたもので形式に合わないタイトルを `THREAD bad-title` として知らせる。
 
+## 手当て・引き継ぎの前の確認
+
+PR や Issue に手を付けるときは、最初に対象 Issue の受け入れ条件と到達点の状態（「Draft PR の存在をもって完了とする」「マージまで行う」など、skill `write-issue` の受け入れ条件の書き方）を確認する。適用範囲は次の 4 つに限る。
+
+- (a) PR の Draft 解除と Draft への復帰
+- (b) PR への main 取り込み（update-branch）と base の変更
+- (c) Issue のクローズと再オープン
+- (d) 受け入れ条件に触れる Issue 本文の変更
+
+操作が受け入れ条件や到達点の状態と矛盾する場合（例: 到達点が「Draft PR の存在」なのに Draft を解除する）は実行せず、指揮役（代行の場合は hatai）へ報告して止まる。マージとレビュー投稿はこの確認の対象外（マージは「2. 振り分け」の「マージ」の決まりに、レビューの投稿は「2. 振り分け」の担当の決まりに従う）。
+
 ## 1. サイクルの始め
 
 1. `scripts/conductor-watch.sh` が動いていることを確かめる（動いていなければ起動する）
@@ -88,7 +99,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 ### マージ
 
-`pelway-review` の Approve と、必須チェック（`mise run verify`、`pr-size`）の通過を確かめたら、指揮役が `gh pr merge --merge --admin --delete-branch` でマージする（`CODEOWNERS` の人間の Approve を、人間から委任された形で迂回する）。`--admin` は管理者の権限が要り App のトークンでは使えないので、このマージは人間の名義の `gh` で行う。目印付きのコメント（`<!-- pr-size-exception -->`、`<!-- split-plan -->`）も人間の名義の `gh issue comment` で書く。レビュー担当は作成者が `hatai` であることで、実装担当（`pelway-dev`）や第三者のコメントと区別する。それ以外の GitHub の操作（読み取り、ラベル、ふつうのコメント、`pr update-branch`）は `scripts/agent-gh dev` で行う。
+`pelway-review` の Approve と、必須チェック（`mise run verify`、`pr-size`）の通過を確かめたら、指揮役が `gh pr merge --merge --admin --delete-branch` でマージする（`CODEOWNERS` の人間の Approve を、人間から委任された形で迂回する）。マージ以外の PR・Issue への操作（下の main の取り込みや base の変更、Draft の扱い、Issue のクローズ）は、先に「手当て・引き継ぎの前の確認」を通す。`--admin` は管理者の権限が要り App のトークンでは使えないので、このマージは人間の名義の `gh` で行う。目印付きのコメント（`<!-- pr-size-exception -->`、`<!-- split-plan -->`）も人間の名義の `gh issue comment` で書く。レビュー担当は作成者が `hatai` であることで、実装担当（`pelway-dev`）や第三者のコメントと区別する。それ以外の GitHub の操作（読み取り、ラベル、ふつうのコメント、`pr update-branch`）は `scripts/agent-gh dev` で行う。
 
 - pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。
 - 必須チェックの完了待ち（マージ前の CI 待ち、巡回での PR のベビーシット）には、ポーリングの代わりに skill `pr-watch` の `pr-digest --watch` をバックグラウンド実行して使う。ただし pr-watch の境界線のとおり、マージはこのスキルの外で人間の名義の `gh` で行う。
@@ -132,6 +143,7 @@ runbook 6 の手順に従う。人間に上げる前に、手順 2 の「effort 
 - 実装者メモは自己申告で、本人が気づいていない誤解は書かれない。レビューの指摘とセッションの記録で裏を取る。食い違ったら、実際の成果物とセッションの記録を優先する。
 - レビューで同じ種類の指摘が 2 回以上出たら、実装側の指示・スキルの不足として扱う。
 - レビュー担当の指摘が head の版のファイルと合わないときは、レビュー担当側の材料として扱う。
+- eval ケース・事例を材料にするときは、一次記録（Issue・PR のコメント、レビュー本文、実装者メモ、セッション記録）からの引用を付ける。引用で裏付けられない内容は「想定」と明記する。
 
 ### 共有層に反映する
 
