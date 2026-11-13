@@ -44,3 +44,7 @@ Default canonical labels: needs-triage, needs-info, ready-for-agent, ready-for-h
 ### Domain docs
 
 Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root, read when they exist (they are created lazily). See `docs/agents/domain.md`.
+
+### Skill helpers
+
+A skill's verifiable steps may ship as an executable helper with its test, bundled in the same directory as `SKILL.md` (local-managed skills only). Scope, test placement and execution, and treatment in both skill trees follow `docs/agents/skill-helpers.md`.
