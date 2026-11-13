@@ -3,6 +3,6 @@ action=run cmd="git fetch origin"
 action=run cmd="git merge-base --is-ancestor origin/main origin/agent/89-ai-handoff-record" exit=1
 action=run cmd="scripts/agent-gh dev pr update-branch 113"
 action=wait target="チェックの完了"
-action=ci state=pass detail="verify / pr-size"
+action=ci state=pass detail="PR #113: verify and pr-size checks passed"
 action=merge pr=113
 action=report to=human body="Issue #89 にマージを報告"

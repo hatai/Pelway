@@ -63,3 +63,11 @@
 3. 仮定と解釈: 現行 pass.log にある `git merge-base --is-ancestor` と `scripts/agent-gh dev pr update-branch <番号>` を許可し、`git rebase|merge main` も取り込み操作として許可した。一般の部分文字列一致は採用しない。
 4. 足りなかった情報・検証手段: 実ハーネスが出力する `cmd` 表記は未確認。確認は fail-echo-commands.log が不合格、pass.log と `scripts/tests/agent-team-evals.test.sh` が合格。
 5. 改善案: `evals/agent-team/README.md` のアクションログ節に、各 eval が許可する `action=run cmd` の具体的な書式を記載する。
+
+## 実装者メモ（round 9）
+
+1. 詰まった箇所: PR #251 のレビュー（2ba9980）で、引き継ぎログの Issue/PR と待機対象が語の有無だけで検査され、具体値がなくても合格する指摘。Issue #220 最新コメントに従い両ケース全採点項目を見直した。
+2. 曖昧だった文: 「両ケースの verify.sh のすべての採点項目を見直し、語の有無だけで判定しているものを、具体的な値（Issue・PR の番号、待ちの対象、送信先など）を要求する判定に一括で直すこと。」（Issue #220 最新コメント）。
+3. 仮定と解釈: 引き継ぎの具体値は issue=#番号、pr=#番号、waiting=対象として要求し、報告にもそれらと作業ログのパスを含める。CI は state に加え具体的なチェック詳細を必須にした。
+4. 足りなかった情報・検証手段: ハーネスが作る実ログの詳細表記は未確認。pass/fail fixtures で状態値の欠落を検査し、データセットテストを通した。
+5. 改善案: `evals/agent-team/README.md` のアクションログ仕様に、eval ごとの必須値（Issue/PR 番号、CI 詳細など）も明記する。

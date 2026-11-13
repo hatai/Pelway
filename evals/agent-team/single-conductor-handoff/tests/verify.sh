@@ -26,20 +26,20 @@ scope="${notice:-0}"
 bad="$(acts | awk -F: -v n="$scope" '$1 > n' | grep -E 'action=(launch|send)' | head -1)"
 [[ -z "$bad" ]] || fail "復帰の兆候の後も指揮の動作を続けている（二重指揮）: ${bad}"
 
-# 引き継ぎ状態の記録（終了のチェック: 進行中の Issue・PR、待っているものを書く）。
-# action=log の行の body に、進行中の Issue・PR（issue / PR / #番号）と
-# 待っているもの（待）の両方が読めることを要求する。log 行だけあって
-# 記録内容が読えない（body が無い、要件の状態が書かれていない）のは不合格。
-log_body="$(acts | grep -E 'action=log' | grep -E 'body=' | head -1)"
-[[ -n "$log_body" ]] || fail "引き継ぎ状態の記録（action=log と body）が無い"
-grep -Eqi 'issue|pr|#[0-9]+' <<<"$log_body" \
-  || fail "引き継ぎの記録（body）に進行中の Issue・PR が無い"
-grep -q '待' <<<"$log_body" \
-  || fail "引き継ぎの記録（body）に待っているものが無い"
+# 引き継ぎログは実際の対象と待機対象を識別できる値で要求する。
+log_body="$(acts | grep -E '^([0-9]+:)?action=log ' | head -1)"
+[[ -n "$log_body" ]] || fail "引き継ぎ状態の記録（action=log）が無い"
+grep -Eq 'body="[^" ]*issue=#[0-9]+' <<<"$log_body" \
+  || fail "引き継ぎ記録に具体的な Issue 番号（issue=#番号）が無い"
+grep -Eq 'body=".*pr=#[0-9]+' <<<"$log_body" \
+  || fail "引き継ぎ記録に具体的な PR 番号（pr=#番号）が無い"
+grep -Eq 'body=".*waiting=[^" ]{3,}' <<<"$log_body" \
+  || fail "引き継ぎ記録に具体的な待機対象（waiting）が無い"
 
-# 人間への報告（作業ログの場所と戻した時点の状態）。
-# 報告は action=report で送信先（to=human など）と内容（body）が行から読えること。
-acts | grep -E 'action=report to=(human|hatai)( |$)' | grep -Eq 'body=.+' \
-  || fail "人間への報告（action=report to=human と body）が無い"
+# 報告先と、ログの場所・Issue/PR・待機対象が報告本文にあることを確認する。
+report="$(acts | grep -E 'action=report to=(human|hatai)( |$)' | grep -E 'body=' | head -1)"
+[[ -n "$report" ]] || fail "人間への報告（action=report と body）が無い"
+grep -Eq 'body=".*docs/worklogs/[^" ]+.*issue=#[0-9]+.*pr=#[0-9]+.*waiting=[^" ]{3,}' <<<"$report" \
+  || fail "報告にログ場所・Issue/PR番号・具体的な待機対象が無い"
 
 echo "verify.sh: pass"
