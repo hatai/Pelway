@@ -23,6 +23,7 @@ Skills and docs state facts only: rules, procedures, definitions, current state.
 The AI dev team (the conductor, T3 Code, opencode, Codex, Claude) follows `docs/superpowers/specs/agent-team.md`.
 
 - Issues for the team are written with the `write-issue` skill (the form `.github/ISSUE_TEMPLATE/agent-task.yml` mirrors it).
+- Bug and incident reports whose cause is not yet understood go through an investigation thread (the `investigate-bug` skill) before filing: the report is saved under `docs/worklogs/bugs/<slug>/report.md` and published as a report-only Draft PR on the branch `agent/investigate-<slug>` (the conductor reads the report on that PR), the conductor decides whether to file, and the human approves with `ready-for-agent`. The report PR is reviewed and merged regardless of the filing decision, so the report stays on main. See the entry points in `docs/superpowers/specs/agent-team.md`.
 - Implementer threads follow the `implement-issue` skill and leave an implementer memo in `docs/worklogs/issue-<N>.md`; reviewer threads follow the `review-pr` skill.
 - The conductor (Grok Bot, or a substitute agent named by the human) follows `docs/agents/grokbot-runbook.md` for events and the `command-team` skill for routing, escalation, merging, the improvement loop, and substitution.
 - Shared rules and skills live only where every tool reads them: `AGENTS.md`, `.agents/skills/`, `docs/`. Each `.claude/skills/<name>` is a symlink to `.agents/skills/<name>`; after a change, `diff -r .claude/skills/<name> .agents/skills/<name>` must be empty.
