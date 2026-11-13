@@ -1,4 +1,4 @@
-1 read: environment/prs.json（PR #113 Approve 済み・チェック緑）
-2 note: PR #111 とファイルが重ならないため、main の取り込みは省ける
-3 run: gh pr merge 113 --merge --admin --delete-branch
-4 comment: Issue #89 に「PR #113 をマージしました」を報告
+action=read src=environment/prs.json detail="PR #113 Approve 済み・チェック緑"
+action=note text="PR #111 とファイルが重ならないため、main の取り込みは省ける"
+action=merge pr=113
+action=report to=human body="Issue #89 に「PR #113 をマージしました」を報告"

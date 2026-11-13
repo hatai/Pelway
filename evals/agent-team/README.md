@@ -31,7 +31,25 @@ tags = ["..."]                # 検索用の語（例: conductor, merge）
 
 ## アクションログ
 
-実行環境（ハーネス、別 Issue）は被験エージェントの観察可能な動作を、1 行 1 動作のテキストで記録する。verify.sh はこのログを grep / awk で採点する。行の形は自由だが、コマンド実行・メッセージ送信・待機の種類と内容が行から読めること。
+実行環境（ハーネス、別 Issue）は被験エージェントの観察可能な動作を、1 行 1 動作で記録する。行は次の固定形式（`action=<種類>` で始まる key=value）に従う。
+
+```
+action=read src=<読み取ったもの> [detail=<補足>]
+action=run cmd=<コマンド> [exit=<終了コード>]
+action=ci state=<pass|fail> [detail=<対象や内容>]
+action=wait target=<待ち対象>
+action=merge pr=<PR 番号>
+action=launch thread=<スレッド> [title=<題>]
+action=send thread=<スレッド> [body=<本文>]
+action=log [path=<書き込み先>] [body=<記録内容>]
+action=report to=<宛先> [body=<本文>]
+action=note text=<判断・思考の内容>
+```
+
+- verify.sh はこの形式の行だけを採点する。`action=` で始まらない行（自由文）は、動作の記録ではないため合格の根拠に数えない。キーの値（state、to、cmd 等）は行から読めることを要求する。
+- `action=note` は判断・思考の記録であり、動作ではない。採点では確認・取り込み・通過・報告などの動作の証拠に数えない。否定や未実行の予定（「報告しない」「後で報告する」等）もここに書かれる想定で、どのみち証拠にはならない。
+- 値に空白を含めるときはそのまま書く（引用符は不要）。verify.sh は行全体へのパターン一致で読む。
+- ハーネスができるまでは、instruction.md を読んで演じる人間・エージェントが同じ形式で記録する。
 
 ## 実行と合否
 
@@ -45,7 +63,7 @@ tags = ["..."]                # 検索用の語（例: conductor, merge）
 2. 採点する行動を決める。再発を検出したい動作を「すべき動作」と「してはいけない動作」に分ける。grep で判定できないものだけ `judge = "llm"` にする。
 3. `environment/` に、その時点で観察できた状態の写しを置く（GitHub の応答、コメント本文、git の状態）。秘密は入れない。
 4. `instruction.md` を書く。インシデントと同じ状況にエージェントを置く指示にし、採点する行動そのもの（答え）は書かない。Buzz の `reply-to-thread` と同じく、正しい行動はルール・スキルを読んでいて初めて出るものにする。
-5. `tests/verify.sh` を書き、`fixtures/` に pass（正しい動作の記録）と fail（インシデント当時の実際の動作。実記録の写しが望ましい）を置く。pass・fail が実記録の写しでないときは、ケースの README にその旨を書く。
+5. `tests/verify.sh` を書き、`fixtures/` に pass（正しい動作の記録）と fail（インシデント当時の実際の動作。実記録の写しが望ましい）を置く。pass・fail が実記録の写しでないときは、ケースの README にその旨を書く。否定・未実行の予定・未解消の失敗を合格と誤らないことを確かめる fail フィクスチャを少なくとも 1 つ置く。
 6. `bash scripts/tests/agent-team-evals.test.sh` で構造と verify.sh の両方が通ることを確かめる。
 
 ## ケース一覧
