@@ -4,7 +4,7 @@
 
 ### symlink 方式への準拠（既存方針の確認）
 
-- `.agents/skills/`（60 スキル）と `.claude/skills/` の一覧の突き合わせ（`comm -3`）: 差分なし
+- `.agents/skills/`（59 スキル）と `.claude/skills/` の一覧の突き合わせ（`comm -3`）: 差分なし
 - `.claude/skills/<name>` はすべて `../../.agents/skills/<name>` へのシンボリックリンク（実体コピーは 1 つも無い）
 - 確認方法: `comm -3 <(ls .agents/skills | sort) <(ls .claude/skills | sort)` が空、`readlink` の確認、変更した 4 スキルの `diff -r .claude/skills/<name> .agents/skills/<name>` が空
 - 結論: 全スキルが `.agents` 実体＋`.claude` symlink の方式に準拠している。寄せる対象なし
@@ -51,3 +51,11 @@
 3. 仮定と解釈: (a) 素案の内容は受け入れ条件の列挙と同じと解釈した（選ばなかった解釈: 素案を探して止まる。受け入れ条件が具体的で判定可能なため）。(b) 調査報告を GitHub 上で読めない指揮役（Grok Bot）が確認できるよう、調査スレッドが報告ファイルだけの Draft PR（ブランチ `agent/investigate-<slug>`）を出す運用を investigate-bug・command-team・runbook に書いた。Issue には報告の PR についての指定が無い（選ばなかった解釈: 起票後の実装 PR に含める。PR の無い期間に指揮役が GitHub 上で報告を確認できない）。(c) Dependabot の major/0.x の PR のクローズは人間の操作と書いた（runbook で指揮役は PR をクローズしないため）。(d) 入口C の検出元は正本に機能名（nightly 検証、eval ケース）で書き、Issue 番号（#180、#220）はこの作業ログに記録した（Facts over history）
 4. 足りなかった情報・検証手段: 調査報告の Draft PR のブランチ名の規則（`agent/investigate-<slug>` は本 PR で新たに決めた）。`agent/` 始まりのため pelway-agent-watch の `issue_number` は null になり、runbook の調査スレッドの行で `agent/investigate-` との区別を明示した
 5. 改善案: `.gitattributes` のコメント「このリポジトリで書いている skill…」の下に、上の「見つかった不揃い」の 3 スキルを `-linguist-generated` 列挙として足す
+
+## 実装者メモ（round 2）
+
+1. 詰まった箇所: `.agents/skills/investigate-bug/SKILL.md` の手順 5: must-fix が名指しする箇所のほか、同じ規則（報告の Draft PR と `agent/investigate-<slug>` ブランチ）が command-team・review-pr・grokbot-runbook にも書かれていた（round 1 の仮定 (b)）。1 か所だけ戻すと正本に実在しない PR への参照が残るため、規則ごと 4 ファイルから除去し、review-pr は報告 PR のレビュー基準の段落ごと戻した（結果として review-pr の差分は 0 になった）。棚卸しメモのスキル数は `ls .agents/skills | wc -l` の 59 に訂正した
+2. 曖昧だった文: 「この Draft PR とブランチ規則を除き、承認済み要件に含まれる報告・引き渡しだけを反映してください。」（PR #250 レビュー本文 must-fix 1）
+3. 仮定と解釈: (a)「規則を除く」の範囲は、Draft PR とブランチの規則とその周辺（Assigned 行の報告 PR への写し、runbook のイベント処理にある `pr:` とブランチ接頭辞での識別）まで含むと解釈した（選ばなかった解釈: investigate-bug の該当文のみ戻す。ほかの正本に整合しない言及が残るため）。(b) runbook の調査スレッドの識別は、ブランチ接頭辞に代えて既存のスレッド名形式のタイトル `[調査]` で書いた（選ばなかった解釈: 識別の文を消す。`finished` の報告を「調査の引き渡し」へ進める手がかりがなくなるため）
+4. 足りなかった情報・検証手段: 報告ファイル `docs/worklogs/bugs/<slug>/report.md` を main へ入れる経路（Draft PR を除いた結果、Issue #249 に指定が無いまま残った。報告はスレッドの返答と worktree 内のファイルで行われる）
+5. 改善案: `docs/superpowers/specs/agent-team.md` の「入口B（バグ・インシデント）の調査と起票」に「報告ファイルを main に入れる経路は未決（人間が決める）」を足す（新規の方式になるため別 Issue で人間と決める）

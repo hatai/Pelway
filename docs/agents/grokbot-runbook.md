@@ -75,11 +75,11 @@ PR を Projects ボードに載せる（ボードの組み込みワークフロ�
 原因が未理解のバグ・インシデントの報告（入口B）があり、実装と調査を合算した枠が空いているとき。報告の対象が Issue なら、調査の間その Issue に `needs-info` が付くことがある（報告に不足があるとき。skill `investigate-bug`）。
 
 ```
-t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree main --branch agent/investigate-<slug> --title "[調査] <対象があれば番号> <要約>" <Pelway のパス> "<報告の対象> を調査する。skill investigate-bug に従う。
+t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree main --title "[調査] <対象があれば番号> <要約>" <Pelway のパス> "<報告の対象> を調査する。skill investigate-bug に従う。
 Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>"
 ```
 
-`<slug>` は症状を英小文字とハイフンで短くしたもの。effort は skill `command-team` の「調査の担当と effort」で決める。調査スレッドの報告（`pr:` に報告の Draft PR）を受けたら、skill `command-team` の「調査の引き渡し」に従う。
+effort は skill `command-team` の「調査の担当と effort」で決める。調査スレッドの報告を受けたら、skill `command-team` の「調査の引き渡し」に従う。
 
 ## 4. イベントごとの対応
 
@@ -107,7 +107,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 実装スレッドは `branch` の `agent/<N>-` から Issue 番号を、`thread_id` から送り先を取る。レビュースレッドから実装スレッドを探すときは、PR のブランチ名と同じ `branch` を持つスレッドを `t3 thread list` から選ぶ。
 
-調査スレッド（ブランチが `agent/investigate-` で始まる）も `opencode` なので、上の表の実装スレッドの列で扱う。ただし `finished` の `pr:` は調査の報告の Draft PR なので、レビューを始める前に skill `command-team` の「調査の引き渡し」で起票可否を判断する。調査が脆弱性の疑いで止まったとき（skill `investigate-bug` の手順 4）は、報告の対象の Issue に `needs-human` が付く。6 の「実装担当が止まった」と同じ扱いで人間に知らせる。
+調査スレッド（タイトルが `[調査]` で始まる）も `opencode` なので、上の表の実装スレッドの列で扱う。ただし調査スレッドは PR を出さないので、`finished` の報告は skill `command-team` の「調査の引き渡し」で起票可否を判断する。調査が脆弱性の疑いで止まったとき（skill `investigate-bug` の手順 4）は、報告の対象の Issue に `needs-human` が付く。6 の「実装担当が止まった」と同じ扱いで人間に知らせる。
 
 ### `pelway.github-notify/v2`
 

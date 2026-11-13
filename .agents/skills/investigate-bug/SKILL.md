@@ -92,11 +92,7 @@ ls docs/worklogs/bugs
 - 未解決の問い。
 
 同じ内容を `docs/worklogs/bugs/<slug>/report.md` に保存する（`<slug>` は症状の短い
-英小文字とハイフン。ログの断片やキャプチャは同じディレクトリに置く）。保存したら、
-報告ファイル（と同じディレクトリの証拠）だけの Draft PR を出す（skill `write-pull-request`。
-ブランチは `agent/investigate-<slug>`、本文の `Implementer:` の行には指示の 2 行目
-`Assigned: role=investigate ...` の値を `role=investigate` を除いて写す）。脆弱性の疑いで
-止めた調査では、この PR を出さない。
+英小文字とハイフン。ログの断片やキャプチャは同じディレクトリに置く）。
 
 ## 引き渡し（実装は別工程）
 
