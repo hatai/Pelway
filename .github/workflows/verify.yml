@@ -1,4 +1,4 @@
-# Pelway のPR品質検査（main 向け Pull Request）。
+# Pelway のPR品質検査（main 向け Pull Request と main への push）。
 # ローカルの公式確認（mise run verify）と同じ検査を GitHub-hosted runner で回す。
 # 方針は docs/dev-environment.md に従う:
 #   - ツールのバージョンは mise.toml / mise.lock が単一の管理元（Rust 1.96.0、hk 2.11.1 等）
@@ -16,6 +16,10 @@
 name: verify
 
 on:
+  # main への push でも走らせる: octocov が main のカバレッジレポートを artifact に保存する
+  # （main のレポートは main での run でしか保存されない。octocov README v0.83.5）。
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -259,6 +263,10 @@ jobs:
       # PR へのカバレッジコメント投稿に必要。fork PR の読み取り専用 token では投稿が
       # スキップされるだけで job は落とさない。
       pull-requests: write
+      # octocov が base ブランチ（main）の過去 run の artifact を読むのに必要
+      # （README の公式例が actions: read を付与。Artifacts の節には必要権限の明記が
+      # 無いため、保存側の可否は最初の main run のログで確認する）。
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -336,7 +344,7 @@ jobs:
         run: mise run coverage
 
       # octocov で PR コメント（増減表示）を作る。レポートの保存・比較は
-      # GitHub Actions の artifact のみ（.octocov.yml の diff.storage.artifacts）。
+      # GitHub Actions の artifact のみ（.octocov.yml の report.datastores / diff.datastores）。
       # octocov は mise.toml で 0.83.5 を宣言し、mise.lock が URL と checksum で
       # 取得物を固定する（出典: https://github.com/k1LoW/octocov/releases/tag/v0.83.5
       # 公開 2026-11-05）。mise install --locked（mise-action）で導入したロック済み
