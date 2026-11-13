@@ -97,6 +97,30 @@ run = "cargo clippy --workspace --all-targets --locked -- -D warnings"
 description = "全テストを実行する（--locked）"
 run = "cargo test --workspace --locked"
 
+# CI（.github/workflows/verify.yml の coverage ジョブ）とローカルで共通のカバレッジ計測。
+# cargo-llvm-cov 自身は設定ファイルを持たないため、集計対象の絞り込みはこのタスクの引数で宣言する
+# （#157。ワークフローに引数をインラインで書くと、ローカル検証と CI で引数がずれる）。
+# --no-cfg-coverage: 既定の --cfg coverage ビルドは、cfg(coverage) で nightly 専用
+# #![feature] を有効にする依存があると stable の E0554 で失敗するため。
+# --exclude: dev 用 crate、開発見張り役 pelway-agent-watch、CI に PostgreSQL が無く
+# 恒常 0% の pelway-db をテスト・レポートの両方から外す。cargo の --exclude は
+# パッケージ名（Cargo.toml の name）を受け取るため、ディレクトリ名の dev-client-probe
+# ではなく pelway-dev-client-probe と書く。
+# --ignore-filename-regex: build.rs の生成コード（out/ 配下）と統合テストの
+# コード自身（crates/<crate>/tests/）をレポートから外す。
+[tasks.coverage]
+description = "カバレッジを lcov.info に計測する（手書きの製品コードのみを集計。verify.yml の coverage ジョブと共通）"
+run = '''
+cargo llvm-cov --workspace --locked --no-cfg-coverage \
+  --exclude pelway-dev-client-probe \
+  --exclude pelway-dev-queue-compare \
+  --exclude pelway-dev-smoke \
+  --exclude pelway-agent-watch \
+  --exclude pelway-db \
+  --ignore-filename-regex '([/\\]out[/\\]|crates/[^/]+/tests/)' \
+  --lcov --output-path lcov.info
+'''
+
 [tasks.build]
 description = "デバッグビルドを作る（--locked）"
 run = "cargo build --workspace --locked"
@@ -183,8 +207,8 @@ description = "PR の差分行数を数え、800 行を超えたら失敗する�
 run = "bash scripts/pr-size.sh"
 
 [tasks.script-test]
-description = "scripts/ のシェルスクリプトのテスト（demo-check の自己テストを含む）"
-run = "bash scripts/tests/pr-size.test.sh && bash scripts/tests/agent-gh.test.sh && bash scripts/tests/agent-worktree-prune.test.sh && bash scripts/tests/deny-warn-extract.test.sh && bash scripts/demo-check/selftest.sh"
+description = "scripts/ のシェルスクリプトのテスト（demo-check の自己テストを含む）とスキル同梱ツールのテスト"
+run = "bash scripts/tests/pr-size.test.sh && bash scripts/tests/agent-gh.test.sh && bash scripts/tests/agent-worktree-prune.test.sh && bash scripts/tests/deny-warn-extract.test.sh && bash scripts/demo-check/selftest.sh && bash .agents/skills/pr-watch/pr-digest.test.sh"
 
 [tasks.demo-check]
 description = "デモ受入前の 4 段階検査（loopback / leak-phrases / external-refs / canary）。1 段でも違反があれば非 0。受入は引数なしの全段階実行だけ有効。loopback の runtime 検査は未実装（PENDING 表示）。canary 段階は走査対象の成果物が無いと未検証で失敗するため、製品をビルドしたあとに実行する"
