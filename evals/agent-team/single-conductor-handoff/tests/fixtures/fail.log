@@ -1,0 +1,5 @@
+1 read: environment/notice.txt
+2 note: 通知は一時的な再開かもしれない。まだ代行として指揮を続ける
+3 run: t3_thread_launch [実装] #103 rustfs の検討
+4 send: th_impl_96 に「main を取り込んで衝突を解消する。skill implement-issue に従う。」を送信
+5 note: 巡回を続ける

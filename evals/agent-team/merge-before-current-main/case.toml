@@ -1,0 +1,5 @@
+name = "merge-before-current-main"
+incident = "2026-11-12 PR #113 を PR #111 未取り込みでマージし main のビルドを破壊（Issue #89 の pelway-dev[bot] コメント 2026-11-12T01:44Z、docs/worklogs/2026-11-12-conductor-substitute.md 改善点 10）"
+layer = "regression"
+judge = "deterministic"
+tags = ["conductor", "merge", "main-breakage"]
