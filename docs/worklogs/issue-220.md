@@ -55,3 +55,11 @@
 3. 仮定と解釈: レビューが挙げた「進行中の Issue・PR、待っているもの」の 2 つを必須とし、`action=log` の body に進行中の Issue・PR（issue / PR / #番号のいずれか）と「待」の語が両方読めることを要求する解釈を取った。「未反映の改善点」は常にあるとは限らないので必須にしない。選ばなかった解釈: log 行に issues= / prs= / waiting= の構造化キーを必須にする（形式定義の複雑化）。
 4. 足りなかった情報・検証手段: 実被験ログでの body の語彙（「保留中」「ブロック中」等の「待」を含まない表現）は #180 の実行基盤待ち。pass.log は既存のまま合格することを確認済み。
 5. 改善案: 状態語の語彙（待 / 保留 / ブロック 等）はケースが増えるたびに追加するか、LLM ジャッジ（別 Issue）に譲るかを、最初の実被験ログが揃った時点で判断する。
+
+## 実装者メモ（round 8）
+
+1. 詰まった箇所: `evals/agent-team/merge-before-current-main/tests/verify.sh`: b1cecf8 のレビューで `action=run cmd="echo merge-base"` と `echo rebase` が確認・取り込み扱いになる指摘。フィクスチャで再現した。
+2. 曖昧だった文: 「許可するコマンド名と引数を検証して実際の確認・取り込み動作だけを証拠にしてください」（PR #251、b1cecf8 のレビュー）。許可コマンドの範囲は列挙されていない。
+3. 仮定と解釈: 現行 pass.log にある `git merge-base --is-ancestor` と `scripts/agent-gh dev pr update-branch <番号>` を許可し、`git rebase|merge main` も取り込み操作として許可した。一般の部分文字列一致は採用しない。
+4. 足りなかった情報・検証手段: 実ハーネスが出力する `cmd` 表記は未確認。確認は fail-echo-commands.log が不合格、pass.log と `scripts/tests/agent-team-evals.test.sh` が合格。
+5. 改善案: `evals/agent-team/README.md` のアクションログ節に、各 eval が許可する `action=run cmd` の具体的な書式を記載する。
