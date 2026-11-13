@@ -28,7 +28,7 @@ Grok Bot は Issue を実装スレッドとレビュースレッドに割り振�
 | スレッド | 同時に動かす上限 | 数え方 |
 |---|---|---|
 | 実装・調査（opencode `zai-coding-plan/glm-5.3`） | 3 | `agent:working` が付いていて、PR が Ready for review になっていない Issue のうち、対応スレッド（ブランチ `agent/<N>-`）の `providerInstanceId` が `opencode` のものの数と、実行中の調査スレッドの数の合計 |
-| 実装（Devin `swe-2-high`） | 2（有料枠の追加後は 6） | `agent:working` が付いていて、PR が Ready for review になっていない Issue のうち、対応スレッドの `providerInstanceId` が `acpRegistry_devin` のものの数 |
+| 実装（Devin `swe-2-high`） | 6 | `agent:working` が付いていて、PR が Ready for review になっていない Issue のうち、対応スレッドの `providerInstanceId` が `acpRegistry_devin` のものの数 |
 | レビュー（Codex `codex_review`） | 2 | 実行中（`running`）の Codex のレビュースレッドの数 |
 | レビュー（Devin） | 2 | 実行中の Devin のレビュースレッドの数。`docs/dev-environment.md` の「レビュー担当の Devin」の確認が済むまでは 0 |
 | レビュー（Claude `claude_review`） | 1 | 実行中の Claude のレビュースレッドの数。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは 0 |

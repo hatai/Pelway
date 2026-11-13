@@ -56,12 +56,12 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 
 - `pelway-dev` には GitHub App の Workflows 権限を付けない。`.github/workflows/` の変更は人間が行う（push で動く workflow は承認前に secret を読めるため）。例外は Workflows 権限が必要なため人間の名義でしか行えない操作だけで、現在は `actions.lock` の再生成（`ci(deps):` の PR のマージ前。実施は skill `command-team` の「マージ」）の 1 つ
 - PR 1 本の差分は追加 800 行・削除 2000 行まで（`mise run pr-size` が追加行と削除行を分けて数える）。`.gitattributes` で `linguist-generated` を付けたファイルは数えない。指揮役が Issue のコメントで超過を認め `pr-size-exception` ラベルを付けた PR は、pr-size の失敗のままマージしてよい（レビュー担当はこのラベルがあれば pr-size の失敗を must-fix に数えない）
-- GLM の実装スレッドと調査スレッドは合算して同時に 3 本まで、Devin の実装スレッドは同時に 2 本まで（SWE-2 の無料モードの同時セッション上限に合わせる。有料枠を追加したら 6 本までにする）、Codex のレビュースレッドは同時に 2 本まで、Devin のレビュースレッドは同時に 2 本まで、Claude のレビュースレッドは同時に 1 本まで。`agent:working` が付いていて PR が Ready for review になっていない Issue は、対応するスレッド（ブランチ `agent/<N>-`）の `providerInstanceId` で GLM 枠・Devin 枠に振り分けて数える。調査スレッドは GLM 固定なので GLM の枠に数える。超えた分は指揮役が順番待ちにする（満杯時の優先の判断は skill `command-team` の「調査の担当と effort」）。上限は、レビュー担当ごとの見落とし率とレビューの待ち時間をもとに見直す
+- GLM の実装スレッドと調査スレッドは合算して同時に 3 本まで、Devin の実装スレッドは同時に 6 本まで、Codex のレビュースレッドは同時に 2 本まで、Devin のレビュースレッドは同時に 2 本まで、Claude のレビュースレッドは同時に 1 本まで。`agent:working` が付いていて PR が Ready for review になっていない Issue は、対応するスレッド（ブランチ `agent/<N>-`）の `providerInstanceId` で GLM 枠・Devin 枠に振り分けて数える。調査スレッドは GLM 固定なので GLM の枠に数える。超えた分は指揮役が順番待ちにする（満杯時の優先の判断は skill `command-team` の「調査の担当と effort」）。上限は、レビュー担当ごとの見落とし率とレビューの待ち時間をもとに見直す
 - GLM は終日使う。時間帯による使用制限はない。Devin のセッションに時間帯・時間量の上限はない
 - Devin のスレッドは `mode` を `smart` までに限って立てる（`bypass` は使わない）。Devin には Codex の `network_proxy` のようなネットワーク制限の設定が無いため、レビューへの使用は GitHub 以外への通信と任意コマンドの実行を実行時に遮断する仕組みを用意し、「レビュー担当の権限」の確認ゲートで確かめてからに限る（手順上のルールだけでは外部通信を遮断できず、PR の説明や差分に埋め込まれた攻撃者制御の指示でレビュー環境の情報を外部へ送信しうるため）
 - 実装の振り分け: 仕様が固まった実装は GLM と Devin の空いている方（同時に空いていれば Devin 優先）、曖昧で長い調査・デバッグ系は GLM、「Devin のハーネスごと任せる」チケットは SWE-2 一任（人間の明示か指揮役の判断）。条件と effort（Devin は `thought_level`）の値は skill `command-team` に置く
 - Devin に割り当てた Issue には `agent:devin` ラベルを付け、GitHub 上で担当が見えるようにする（`agent:working` と同じタイミングで付け外し。一覧は `docs/agents/triage-labels.md`）
-- SWE-2 は Devin のプランの無料枠で使う。実装スレッドの同時数は無料モードの同時セッション数（現在 2 本）を超えない範囲に揃え、有料枠を追加したときだけ 6 本まで引き上げる。有料枠の追加と上限の引き上げは改善ループで判断する
+- SWE-2 は Devin のプランの無料枠で使う。プランの無料モードの同時セッション上限（現在 2 本）は Devin Cloud のセッションの制限で、Devin CLI 経由のスレッドには適用されない。無料枠を超える利用が必要になったら、有料枠の追加か上限の見直しを改善ループで判断する
 - Issue の書き方（タイトル、本文の見出し、受け入れ条件、分割、`ready-for-agent` の前のゲート、差し戻されたときの直し方）は skill `write-issue` に置く。`.github/ISSUE_TEMPLATE/agent-task.yml` はその写しで、空の Issue は作れない（`blank_issues_enabled: false`）
 - 指揮役が渡すプロンプトは Issue 番号と使う skill 名だけにする。作業ルールは AGENTS.md と skill に置く。例外として、スレッドを立てる指示には担当・モデル・effort を示す定型の割り当ての行を入れ、実装担当は PR 本文に `Implementer:`、レビュー担当はレビュー本文に `Reviewer:` の定型の行で写す（書式は skill `command-team`）
 - 指揮役が T3 で立てるスレッドには、必ず「役割・対象の番号・日本語の要約」を含むタイトル（例 `[実装] #101 …`、`[レビュー] PR #132 …`）を立てるときに付ける。タイトルが形式に合わないまま作業を始めさせない。形式と直し方は skill `command-team` の「スレッド名」
