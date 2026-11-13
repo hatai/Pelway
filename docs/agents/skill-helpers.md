@@ -10,7 +10,7 @@
 - スキルの手順のうち機械な部分（集計、検査、変換、整形、条件待ち）をヘルパーに落とせる。落ちたものは同梱する。`SKILL.md` には判断（何を選ぶか、何を迷うか）とヘルパーの呼び出し方を書き、ヘルパーが計算・変換の中身を担う。
 - 文章でしか書けない判断（コードの良し悪し、指摘の重み）は無理にコード化しない。
 - 同梱は skills-lock.json が管理しないローカル管理のスキルに限る。skills-lock.json が外部リポジトリ（actionbook/rust-skills、penpot/penpot-ai-kit）からハッシュで固定するスキルには足せない（更新時に上書きされて消える）。
-- ヘルパーは bash スクリプト（`#!/usr/bin/env bash`、拡張子なし、実行可能ビット付き）。名前は動作を言う短い kebab-case 英語（pr-digest、catalog-gaps）。依存はリポジトリで既に使っているツール（bash、git、jq、scripts/agent-gh）だけにする。
+- ヘルパーは bash スクリプト（`#!/usr/bin/env bash`、拡張子なし、実行可能ビット付き）。名前は動作を言う短い kebab-case 英語（pr-digest、catalog-gaps）。依存は bash と POSIX の標準コマンド（grep、sed、awk、sort、comm、cut、head、tail など）、git、jq、scripts/agent-gh の範囲に限り、追加のランタイムやパッケージ（node、python、追加の cargo ツールなど）を持ち込まない。
 - GitHub との通信は `scripts/agent-gh dev` 経由（AGENTS.md の決まりと同じ）。
 
 ## テストの置き場と実行方法
