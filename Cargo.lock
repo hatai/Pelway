@@ -4832,7 +4832,7 @@ dependencies = [
  "base64 0.23.1",
  "ed25519-dalek",
  "getrandom 0.4.3",
- "sha2 0.10.9",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -4879,7 +4879,7 @@ version = "0.0.0"
 dependencies = [
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.1",
  "tracing",
  "tracing-subscriber",
 ]
