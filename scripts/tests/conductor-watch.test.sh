@@ -110,6 +110,13 @@ d = json.load(open(p)); d["subjects"][n]["waiting_since"] = v
 json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)' "$STATE" "$1" "$2"
 }
 
+set_updated() { # patrol-state.json の updated_at を書き換える（巡回が記録を書き換えたかの判定に使う）
+  python3 -I -c 'import json,sys
+p, n, v = sys.argv[1:4]
+d = json.load(open(p)); d["subjects"][n]["updated_at"] = v
+json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)' "$STATE" "$1" "$2"
+}
+
 check() {
   local name="$1"; shift
   if "$@"; then printf 'ok   %s\n' "$name"; else printf 'FAIL %s\n' "$name"; failures+=("$name"); fi
@@ -196,6 +203,32 @@ run_cycles 2
 check "ready for review again" eq "$(sget 11 waiting_on)" "review"
 MOCK_PR_FAIL=1 run_cycles 2
 check "failed pr fetch keeps record" eq "$(sget 11 waiting_on)" "review"
+
+# 11. 一覧の取得上限に達した（打ち切りの可能性がある）巡回は記録を書き換えない
+OLD_UPDATED="2020-01-01T00:00:00+09:00"
+python3 -I - > "$MOCK/issues.json" <<'EOF'
+import json
+# 上限（1000 件）ちょうど。対象の Issue #11 を含む
+issues = [{"number": 11, "state": "OPEN", "labels": [{"name": "agent:working"}]}]
+issues += [{"number": 2000 - i, "state": "CLOSED", "labels": []} for i in range(999)]
+print(json.dumps(issues))
+EOF
+set_updated 11 "$OLD_UPDATED"
+run_cycles 2
+check "issue list at limit keeps record" eq "$(sget 11 updated_at)" "$OLD_UPDATED"
+mock_issues "$(jarr "$(iss 11 OPEN agent:working)")"
+python3 -I - > "$MOCK/prs.json" <<'EOF'
+import json
+# 上限（1000 件）ちょうど。対象の PR #101 を含む
+prs = [{"number": 101, "state": "OPEN", "isDraft": False, "headRefName": "agent/11-abc",
+        "reviewDecision": None, "statusCheckRollup": []}]
+prs += [{"number": 5000 - i, "state": "MERGED", "isDraft": False, "headRefName": f"agent/{4000 + i}-x",
+         "reviewDecision": None, "statusCheckRollup": []} for i in range(999)]
+print(json.dumps(prs))
+EOF
+set_updated 11 "$OLD_UPDATED"
+run_cycles 2
+check "pr list at limit keeps record" eq "$(sget 11 updated_at)" "$OLD_UPDATED"
 
 # --- runbook の記述 ---
 

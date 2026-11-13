@@ -7,14 +7,17 @@
 # 使い方: scripts/conductor-watch.sh（止めるまで 30 秒ごとに見る）
 D="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch"; mkdir -p "$D"
 P="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/patrol-state.json"
+# 一覧の 1 回の取得上限。件数が上限に達した巡回は打ち切りの可能性があるため、
+# python 側で巡回状態を更新しない（窓外の対象を消したり誤判定したりしない）。
+IL=1000; PL=1000
 cd "$(dirname "$0")/.." || exit 1
 while true; do
   t3 thread list --json > "$D/threads.json" 2>/dev/null || true
   # GitHub からの取得に失敗したらファイルを消す（空の実状態と区別する。python 側で取得失敗と扱い、
   # 巡回状態の記録を書き換えさせない）。
-  scripts/agent-gh dev issue list --state all --limit 50 --json number,state,labels > "$D/issues.json" 2>/dev/null || rm -f "$D/issues.json"
-  scripts/agent-gh dev pr list --state all --limit 30 --json number,state,isDraft,headRefName,reviewDecision,statusCheckRollup > "$D/prs.json" 2>/dev/null || rm -f "$D/prs.json"
-  python3 -I - "$D" "$P" <<'PY'
+  scripts/agent-gh dev issue list --state all --limit "$IL" --json number,state,labels > "$D/issues.json" 2>/dev/null || rm -f "$D/issues.json"
+  scripts/agent-gh dev pr list --state all --limit "$PL" --json number,state,isDraft,headRefName,reviewDecision,statusCheckRollup > "$D/prs.json" 2>/dev/null || rm -f "$D/prs.json"
+  python3 -I - "$D" "$P" "$IL" "$PL" <<'PY'
 import json, sys, time, os, re
 from datetime import datetime
 d = sys.argv[1]; sp = os.path.join(d, "state.json")
@@ -76,10 +79,12 @@ json.dump(cur, open(sp, "w"))
 # （Issue のラベルと状態、PR の Draft・レビュー・CI の状態）で上書きし、食い違いは GitHub を
 # 正として直す。waiting_on が同じ対象だけ待ち始めた時刻を引き継ぐ。
 ps_path = sys.argv[2]
+issue_limit = int(sys.argv[3]); pr_limit = int(sys.argv[4])
 try: ps = json.load(open(ps_path))
 except Exception: ps = {}
 if not isinstance(ps.get("subjects"), dict): ps["subjects"] = {}
-if issues is not None and prs_ok:
+# 取得に成功し、かつどちらの一覧も打ち切られていない（件数が上限に達していない）ときだけ更新する。
+if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr_limit:
     pr_of = {}
     for p in prs:
         m = re.match(r"agent/(\d+)", p.get("headRefName") or "")

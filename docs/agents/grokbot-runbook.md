@@ -180,7 +180,7 @@ PR を Projects ボードに載せる（ボードの組み込みワークフロ�
 | `next_owner` | 次の担当 | `hatai` / `implement thread (#<N>)` / `reviewer (PR #<M>)` / `conductor` |
 | `updated_at` | その対象の最終更新時刻（ISO 8601） | 巡回のたびに書き換わる |
 
-巡回スクリプト `scripts/conductor-watch.sh` が巡回のたびに必須項目を更新する。記録と GitHub の実状態（Issue の状態とラベル、PR の Draft・レビュー・CI の状態）が食い違う場合は GitHub を正として記録を直す: Issue が閉じたら対象を記録から消し、ラベルと PR の状態から決まる `waiting_on` を毎巡回上書きし、`waiting_on` が変わった対象に `PATROL` 行を出力する。指揮役が GitHub に載せない判断の途中（例: レビューを始めるか迷っている）は、`waiting_on` が `conductor` の対象として記録の側にだけ残る。次の巡回で GitHub の状態が変われば、スクリプトが GitHub 側の値で上書きする。
+巡回スクリプト `scripts/conductor-watch.sh` が巡回のたびに必須項目を更新する。記録と GitHub の実状態（Issue の状態とラベル、PR の Draft・レビュー・CI の状態）が食い違う場合は GitHub を正として記録を直す: Issue が閉じたら対象を記録から消し、ラベルと PR の状態から決まる `waiting_on` を毎巡回上書きし、`waiting_on` が変わった対象に `PATROL` 行を出力する。GitHub からの取得に失敗した巡回と、一覧の取得上限に達して打ち切られた巡回では記録を書き換えず、前回の記録を保持する。指揮役が GitHub に載せない判断の途中（例: レビューを始めるか迷っている）は、`waiting_on` が `conductor` の対象として記録の側にだけ残る。次の巡回で GitHub の状態が変われば、スクリプトが GitHub 側の値で上書きする。
 
 agents の表示（busy・working）はセッションの内側の値で、実態（判断待ち・停止）と食い違うことがある。指揮役は表示値を根拠にせず、GitHub の実状態とこの補助記録の突き合わせ結果で判断する。
 
