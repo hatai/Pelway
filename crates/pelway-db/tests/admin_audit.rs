@@ -1,11 +1,8 @@
 //! Issue #149 の受け入れ条件ごとの結合テスト（管理ロールの利用の監査）。
 //! AC1 監査の先行確定 / AC2 ロールバック後の監査残存 / AC3 fail-closed /
-//! AC4 監査行の単一使用 / AC5 監査表の権限 / AC6 `prev_hash` 鎖の検証
-//! （各テストの doc コメントに条件の全文がある）。
-//!
-//! 「操作の前に」と「別トランザクション」は、AC2（操作のロールバックから独立に
-//! 監査が残る）と AC3（監査が無ければ操作しない）の組み合わせで振る舞いとして
-//! 確かめる（鎖の検証は行の内容だけを見るため、時刻の比較に頼らない）。
+//! AC4 監査行の単一使用 / AC5 監査表の権限 / AC6 `prev_hash` 鎖の検証（各テストの
+//! doc コメントに条件の全文がある）。「操作の前に」「別トランザクション」は
+//! AC2 と AC3 の組み合わせで振る舞いとして確かめる（時刻の比較に頼らない）。
 
 mod common;
 
@@ -54,8 +51,8 @@ impl AuditRow {
     async fn all(owner: &sqlx::PgPool) -> Vec<Self> {
         sqlx::query_as(
             "SELECT id, workspace_id, at_ms, actor, subject, reason, kind, result, \
-             snapshot_hash, policy_version, prev_hash, hash, ref_id \
-             FROM admin_audit_events ORDER BY id",
+             snapshot_hash, policy_version, prev_hash, hash, ref_id FROM admin_audit_events \
+             ORDER BY id",
         )
         .fetch_all(owner)
         .await
@@ -73,6 +70,9 @@ impl AuditRow {
             result: self.result.clone(),
             snapshot_hash: self.snapshot_hash.clone().try_into().expect("32 バイト"),
             policy_version: u64::try_from(self.policy_version).expect("負でない"),
+            ref_id: self
+                .ref_id
+                .map(|r| u64::try_from(r).expect("id は負でない")),
         };
         StoredRow {
             event,
@@ -82,9 +82,8 @@ impl AuditRow {
     }
 }
 
-/// ワークスペース 1 つとチャンネル 1 つを管理ロールで登録する（1 回の
-/// 複数文実行＝1 つの暗黙トランザクション）。ワークスペースの id
-/// （`ws_admin_audit`）は各テストの SQL と同じもの。
+/// ワークスペース 1 つとチャンネル 1 つを管理ロールで登録する（1 回の複数文
+/// 実行＝1 つの暗黙トランザクション。id は各テストの SQL と同じもの）。
 async fn seed(admin: &sqlx::PgPool) {
     sqlx::raw_sql(concat!(
         "INSERT INTO workspaces (id, name) VALUES ('ws_admin_audit', 'ws_admin_audit'); ",
@@ -123,14 +122,17 @@ async fn audit_row_committed_before_admin_op() {
     let rows = AuditRow::all(&db.owner).await;
     assert_eq!(rows.len(), 2, "intent 行と result 行の 2 行");
     let (intent, result) = (&rows[0], &rows[1]);
-    assert_eq!(
-        intent.id, out.intent_id,
-        "返り値のトークンは intent 行の id"
-    );
+    assert_eq!(intent.id, out, "返り値のトークンは intent 行の id");
     assert_eq!(intent.workspace_id, "admin");
-    assert_eq!(intent.actor, "ops@example");
-    assert_eq!(intent.subject, "channels");
-    assert_eq!(intent.reason, "issue #149 の受け入れ条件確認");
+    assert_eq!(
+        (
+            intent.actor.as_str(),
+            intent.subject.as_str(),
+            intent.reason.as_str()
+        ),
+        ("ops@example", "channels", "issue #149 の受け入れ条件確認"),
+        "監査行に実行者・対象・理由が記録される"
+    );
     assert_eq!(intent.kind, "admin-op-intent");
     assert_eq!(intent.result, "pending");
     assert_eq!(
@@ -162,7 +164,6 @@ async fn audit_row_committed_before_admin_op() {
         "result 行は intent 行の後ろに置かれる"
     );
 
-    // 操作の効果。
     assert_eq!(
         channels(&db.owner, "ch_ac1").await,
         1,
@@ -240,7 +241,7 @@ async fn admin_op_fails_closed_when_audit_commit_fails() {
         "管理操作は実行されていない"
     );
 
-    // 後続のテストのために戻す（scratch database でも権限は元に戻す）。
+    // 後続のために権限を戻す。
     sqlx::query("GRANT SELECT, INSERT ON admin_audit_events TO pelway_audit")
         .execute(&db.owner)
         .await
@@ -267,26 +268,21 @@ async fn audit_row_is_single_use() {
         .expect("2 回目の管理操作に失敗した");
 
     assert_ne!(
-        first.intent_id, second.intent_id,
+        first, second,
         "操作ごとに別々の intent 行（トークン）が発行される"
     );
 
     let rows = AuditRow::all(&db.owner).await;
-    let intents: Vec<&AuditRow> = rows
-        .iter()
-        .filter(|r| r.kind == "admin-op-intent")
-        .collect();
+    for (kind, want) in [("admin-op-intent", 2), ("admin-op-result", 2)] {
+        let n = rows.iter().filter(|r| r.kind == kind).count();
+        assert_eq!(n, want, "操作 2 回に対して {kind} は {want} 行");
+    }
     let results: Vec<&AuditRow> = rows
         .iter()
         .filter(|r| r.kind == "admin-op-result")
         .collect();
-    assert_eq!(intents.len(), 2, "操作 2 回に対して intent 行 2 行");
-    assert_eq!(results.len(), 2, "操作 2 回に対して result 行 2 行");
     assert_eq!(
-        results
-            .iter()
-            .filter(|r| r.ref_id == Some(first.intent_id))
-            .count(),
+        results.iter().filter(|r| r.ref_id == Some(first)).count(),
         1,
         "1 行の intent 行に結果行は 1 行だけ（使い回しの痕跡がない）"
     );
@@ -327,8 +323,11 @@ async fn admin_role_has_no_grant_on_audit_table() {
         ("pelway_audit", "delete", false), // append-only
     ];
     for (role, perm, want) in expected {
-        let got = privilege(&db.owner, role, perm).await;
-        assert_eq!(got, want, "{role} の監査表への {perm}");
+        assert_eq!(
+            privilege(&db.owner, role, perm).await,
+            want,
+            "{role} の {perm}"
+        );
     }
     db.dispose().await;
 }

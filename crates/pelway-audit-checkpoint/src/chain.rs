@@ -28,9 +28,11 @@ pub struct AuditEvent {
     /// 対象。
     pub subject: String,
     /// 操作の理由（#149 の管理操作の監査で追加）。`None` は従来の符号化（タグ
-    /// `0x00`）で既存の署名済みチェックポイントとバイト列が変わらず、`Some` は
-    /// 拡張符号化（タグ `0x01`）で理由も鎖の保護対象になる。
+    /// `0x00`）で既存の署名済みチェックポイントとバイト列が変わらない。
     pub reason: Option<String>,
+    /// result 行が参照する intent 行の id（#149 で追加。付け替えの検出のため
+    /// ハッシュに入る）。
+    pub ref_id: Option<u64>,
     /// 操作の種類。
     pub kind: String,
     /// 結果。
@@ -61,18 +63,19 @@ pub enum ChainError {
 }
 
 /// 行のハッシュ。内容と `prev_hash` だけから計算する。領域分離文字列の直後の
-/// タグは符号化の版: `reason` が `None` なら `0x00`（従来の符号化とバイト列が
-/// 同じ）、`Some` なら `0x01`（タグの直後に `reason` を長さ前置きで入れる）。
+/// タグは追加フィールドの有無のビット列（bit0 = `reason`、bit1 = `ref_id`）で、
+/// `0x00`（両方 `None`）は従来の符号化とバイト列が同じ（署名済みチェックポイント
+/// との照合に影響しない）。
 #[must_use]
 pub fn row_hash(event: &AuditEvent, prev_hash: &[u8; 32]) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(DOMAIN);
-    match &event.reason {
-        None => h.update([0x00]),
-        Some(reason) => {
-            h.update([0x01]);
-            put_str(&mut h, reason);
-        }
+    h.update([event.reason.is_some() as u8 | ((event.ref_id.is_some() as u8) << 1)]);
+    if let Some(reason) = &event.reason {
+        put_str(&mut h, reason);
+    }
+    if let Some(ref_id) = event.ref_id {
+        put_u64(&mut h, ref_id);
     }
     put_str(&mut h, &event.workspace_id);
     put_u64(&mut h, event.at_ms);

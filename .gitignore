@@ -39,7 +39,3 @@ scripts/pgbackrest-verify/work/
 # カバレッジ計測（cargo llvm-cov --lcov）のローカル検証生成物（#157。
 # .github/workflows/verify.yml の coverage ジョブと同じ引数で出力する）
 lcov.info
-
-# OpenCode ハーネスのセッションファイル（worktree に置かれる。hk stash 対策）
-opencode.json
-opencode.jsonc
