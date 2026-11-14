@@ -9,6 +9,7 @@
 #   - canary の走査ゼロ（no artifacts to scan）は常に exit 1（未検証。受入・通常で共通。slot6）
 #   - 受入モード（DEMO_CHECK_ACCEPTANCE=1 を明示）でも canary の走査ゼロは、loopback に頼らず
 #     単独ケースで exit 1・走査0件・未検証のメッセージになる（slot9）
+#   - 受入モードで目印あり（成果物に canary 目印）も canary 単独で exit 1 になる（slot9-r2）
 #   - DEMO_CHECK_ACCEPTANCE=1 のとき loopback の runtime PENDING が exit 1 になり、
 #     ACCEPTANCE MODE と表示される（未設定時の挙動は不変）
 #   - run_stage と run.sh の直接呼び出しは、外の DEMO_CHECK_ACCEPTANCE を引き継がない。
@@ -137,6 +138,17 @@ run_stage "${tmp}/case" canary DEMO_CHECK_ACCEPTANCE=1
 if [ "${RC}" -eq 0 ]; then
   ok "canary: artifacts present and no canary passes under ACCEPTANCE"
 else ng "canary: ACCEPTANCE with artifacts (exit ${RC})"; show "${OUT}"; fi
+
+# slot9-r2: 受入モードでも「目印あり → exit 1」を canary 単独で確かめる。目印検出のケースは
+# 従来すべて通常モード実行だったため、受入モード限定で検出を無効化する壊しを検出できなかった
+# （レビュー slot9-r1 の should-fix）
+make_clean "${tmp}/case"
+mkdir -p "${tmp}/case/logs"
+printf 'start\napi_key=PELWAY_CANARY_APIKEY_9c21\n' > "${tmp}/case/logs/app.log"
+run_stage "${tmp}/case" canary DEMO_CHECK_ACCEPTANCE=1
+if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -qF "logs/app.log:2: canary PELWAY_CANARY_APIKEY_9c21"; then
+  ok "canary: a marker in artifacts is a failure under ACCEPTANCE alone (exit 1)"
+else ng "canary: ACCEPTANCE marker hit must fail alone (exit ${RC})"; show "${OUT}"; fi
 
 # --- run.sh: 引数の検査と PARTIAL RUN ---
 # slot6: canary の走査対象ゼロは未検証（exit 1）なので、clean tree の full run は canary だけ失敗
