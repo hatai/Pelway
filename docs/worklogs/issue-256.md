@@ -35,6 +35,7 @@
 3. 仮定と解釈: 確認手順の全項目を委託子が承認なしで完走できると仮定していた。診断用の `echo` は承認要求になるため、確認項目は許可リスト内・deny リスト内のコマンドだけで構成し、環境変数の観測は親側（`/proc/<pid>/environ`）で行う形にした。選ばなかった解釈: 承認要求の出たコマンドを子に再試行させる（承認が人間待ちになるため）。
 4. 足りなかった情報・検証手段: 委託子の承認要求を親が代理で回答する手段が無い（`t3_pending_request` は空、`t3_thread_send` の steer は承認待ちのターンに届かない）。止まった委託は `task_cancel` で畳むしかない。
 5. 改善案: `docs/dev-environment.md`「レビュー担当の Claude」の記録欄の Codex 差の行に「許可・拒否のどちらにも載っていないコマンドは承認要求になる（`defaultMode: dontAsk` より acceptEdits が優先）」を足した。さらに本節の確認手順の箇条書きにも同じ注意を足す余地がある
+
 使ったスキル: `implement-issue`、`command-team`（レビュー割り当ての表）、`write-pull-request`（PR 本文の形）、`pr-watch`（`pr-digest`）。輸入スキルは未使用（試行の割り当てではない）
 
 ## 実装者メモ（round 6）
@@ -46,3 +47,13 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` 手順 9 の判定割れの文に「個別の指摘の妥当性で実装担当が重みづけしない（機械的にエスカレーション。指揮役の指示があれば従う）」を足す（round 5 と同じ案の再掲）
 
 使ったスキル: `implement-issue`、`command-team`（判定割れ後の再委託の形）
+
+## 実装者メモ（round 8）
+
+1. 詰まった箇所: hatai が deny に `scripts/agent-gh review git *`・`pr checkout *`・`alias *` を追加したあとの再実測。許可リスト経由の 4 形態（git switch・git ls-remote・git -c alias・pr checkout）はすべて permissions の deny で拒否され、許可経路（`api --hostname`）からの egress はプロキシで遮断、許可経路（`api /rate_limit`）は承認なしで成功した
+2. 曖昧だった文: must-fix の「`scripts/agent-gh review git ls-remote https://example.com/` が失敗する」。修復後はこの形は deny で拒否されるため egress の実測にはならない。egress の実測は許可経路の `api --hostname example.com` で行う形に読み替えた
+3. 仮定と解釈: deny の追加は `agent-gh review git` 全体を塞ぐため `git -c alias` 経由の任意実行も同時に塞がると解釈（実測でも拒否）。選ばなかった解釈: `git *` の deny は `ls-remote` など無害な読み取り形も塞ぐので過剰ではないか（review-pr の手順は `agent-gh review git` を使わないため実害なし）
+4. 足りなかった情報・検証手段: 許可経路から egress を試せる `gh api --hostname` の形はレビューの指摘になく自分で探した。deny 追加後も残る egress 経路が無いかの網羅的な検証手段は無い（許可リストの全形 × 到達先の組み合わせ）
+5. 改善案: `docs/dev-environment.md`「レビュー担当の Claude」の確認手順に、許可リスト経由の拒否と許可経路からの egress の 2 項目を足した。さらに「deny を追加・変更したら確認手順をやり直す」を設定表に足す余地がある
+
+使ったスキル: `implement-issue`、`command-team`（再委託の形）

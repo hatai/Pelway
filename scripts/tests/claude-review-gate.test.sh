@@ -36,10 +36,12 @@ if [[ -n "$claude_section" ]]; then
       failures+=("dev-environment.md: 記録欄に項目が無い: $label")
       continue
     fi
-    result_cell="$(awk -F'|' '{print $3}' <<<"$row" | sed 's/^ *//; s/ *$//')"
-    if [[ -z "$result_cell" || "$result_cell" =~ ^(—|--?|未定|未実施|未記入|TBD|N/?A)$ ]]; then
-      failures+=("dev-environment.md: 結果セルが空欄またはプレースホルダー: $label（'$result_cell'）")
-    fi
+    for col in 3 4; do
+      cell="$(awk -F'|' -v c="$col" '{print $c}' <<<"$row" | sed 's/^ *//; s/ *$//')"
+      if [[ -z "$cell" || "$cell" =~ ^(—|--?|未定|未実施|未記入|TBD|N/?A)$ ]]; then
+        failures+=("dev-environment.md: 結果・実施日セルが空欄またはプレースホルダー: $label（${col}列目='$cell'）")
+      fi
+    done
   done
   grep -nE '未実施|未記入' <<<"$claude_section" >/dev/null && \
     failures+=("dev-environment.md: 記録欄に未実施・未記入が残っている")
