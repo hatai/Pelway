@@ -39,6 +39,8 @@ Pelway名と選定済みAロゴを維持します。同名のAI教育製品に�
 
 開発には [mattpocock/skills](https://github.com/mattpocock/skills) のエージェントスキルを使います。スキルは Claude Code や Codex などのコーディングエージェントから `/スキル名` で呼び出します。
 
+この節の導入手順（プラグイン、ユーザーレベルの `npx skills`）は人間側の対話セッション向けの版です。AI 開発チームのスレッドが使う repo 配置の版（`.agents/skills/` に配置し `skills-lock.json` でハッシュ固定したもの）とは別に管理されます。repo 配置の版の取り込みと適用ルールは [docs/agents/external-skills.md](docs/agents/external-skills.md) を参照してください。
+
 ### 準備
 
 1. 使うエージェントにスキルを入れます。プラグインとして入れる方法と `npx skills` でファイルとして入れる方法のどちらか一方にしてください。両方入れるとスキルが重複します。他のエージェントでの入れ方は[上流の README](https://github.com/mattpocock/skills#installation-30-second-setup) を参照してください。
