@@ -21,3 +21,13 @@ Issue #200 のコメント（質問票 R1）に投稿したものを転記:
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」表に、「grill 試行のように本ラウンドの成果物が質問票である割り当てでは、PR を作らず質問票投稿＋報告で止まる」旨の行を足す（round 1 と同じ指摘。指揮役の回答コメントで改善ループ候補として記録済み）
 
 使ったスキル: `.agents/skills/grilling/SKILL.md`、`.agents/skills/domain-modeling/SKILL.md`、`implement-issue`、`write-pull-request`
+
+## 実装者メモ（round 3）
+
+1. 詰まった箇所: hatai の製品判断「ACP v2 を採用する」（Issue #200 コメント、2026-11-14）は round 2 の評価が出した推奨（当面プロトコル化しない）と逆向き。製品判断は評価の分析範囲外の要素を含めて優先されるため、結論節を採用決定の記録に変え、比較節は採用根拠と却下理由として残す構成に作り直した。分析との関係は「比較節が置いた再評価の引き金第 1 項が成立した」読みを、判断者未確認の解釈と明記して文書に残した
+2. 曖昧だった文: 「ACP v2」。round 2 時点の一次資料は `docs/protocol/v1/` だったが、リポジトリには `docs/protocol/v2/` が存在し、migration 文書によれば v2 は全体として draft ラベル。v2 の一次資料を取り直し、評価の ACP 列を v2 仕様で書き換えた（`requires_action` の第一級化、`session/request_permission` の `subject`、elicitation、`session/load` 廃止→`resume`、fs/terminal/mode API 廃止、permission が advisory である旨の security 明記など）
+3. 仮定と解釈: 採用要件は「境界の定義」「移行」「未決の実装論点」の 3 分割にした。概念写像（task↔session 等）は確定事項ではなく案とし、v2 draft のリスクは schema pin＋feature flag で扱う方向を移行節に書いた。round 2 で委託したレビューは成果物が変わるため完了前に task_cancel した（レビューは未完了で、失敗としては数えない）
+4. 足りなかった情報・検証手段: Rust schema crate（`agent-client-protocol`）の v2 対応状況、Streamable HTTP transport RFD の進捗は GitHub 資料から確認できず未確認事項に残した
+5. 改善案: なし（round 1 の指摘は引き続き有効）
+
+使ったスキル: `implement-issue`、`write-pull-request`
