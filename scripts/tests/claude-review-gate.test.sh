@@ -25,13 +25,21 @@ fi
 
 # 2. dev-environment.md「レビュー担当の Claude」節の記録欄:
 #    - 4 行分の項目がある
+#    - 各項目の結果セル（2 列目）が記入済み（空欄・プレースホルダーでない）
 #    - 未実施・未記入が残っていない
 claude_section="$(awk '/^## レビュー担当の Claude/{f=1} /^## レビュー担当の Devin CLI/{f=0} f' "$DOC")"
 [[ -n "$claude_section" ]] || failures+=("dev-environment.md: 'レビュー担当の Claude' 節が無い")
 if [[ -n "$claude_section" ]]; then
   for label in '実施日' '使えるコマンドの制限の結果' 'ネットワーク制限の結果' 'Codex 側（`codex_review`）との差'; do
-    grep -qF "$label" <<<"$claude_section" || \
+    row="$(grep -F "| ${label}" <<<"$claude_section" | grep -v '^| 項目' | head -1)"
+    if [[ -z "$row" ]]; then
       failures+=("dev-environment.md: 記録欄に項目が無い: $label")
+      continue
+    fi
+    result_cell="$(awk -F'|' '{print $3}' <<<"$row" | sed 's/^ *//; s/ *$//')"
+    if [[ -z "$result_cell" || "$result_cell" =~ ^(—|--?|未定|未実施|未記入|TBD|N/?A)$ ]]; then
+      failures+=("dev-environment.md: 結果セルが空欄またはプレースホルダー: $label（'$result_cell'）")
+    fi
   done
   grep -nE '未実施|未記入' <<<"$claude_section" >/dev/null && \
     failures+=("dev-environment.md: 記録欄に未実施・未記入が残っている")
