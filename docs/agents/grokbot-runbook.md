@@ -76,7 +76,7 @@ T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-ac
 
 `codex_review` はネットワークを GitHub だけに絞った Codex（`docs/dev-environment.md` の「レビュー担当の Codex」）。`<k>` はその PR のレビュースレッドの通し番号（1 から）。worktree は必ず `main` から作る（レビュー担当は worktree の `scripts/agent-gh` を使うため、PR やほかのブランチの版を使わない）。
 
-レビュー担当（誰に付けるか）と effort は skill `command-team` の「レビュー担当と effort」で決める。Claude のレビュースレッドは `--provider claude_review --model claude-opus-5-5`、ブランチは `review/<M>-c<k>` にし、同じく `auto-accept-edits` で立てる。Devin CLI のレビュースレッドは `--provider acpRegistry_devin --model swe-2-high`、ブランチは `review/<M>-d<k>` にする。Devin CLI には `runtimeMode` の指定が無く、権限はモデルの `mode` オプションで `smart` までに限る（`bypass` は使わない）。effort（`thought_level`）は `modelSelection.options` に入れる。
+レビュー担当（誰に付けるか）と effort は skill `command-team` の「レビュー担当と effort」で決める。Claude のレビュースレッドは `--provider claude_review --model claude-opus-5-5`、ブランチは `review/<M>-c<k>` にし、同じく `auto-accept-edits` で立てる。Devin CLI のレビュースレッドは `--provider devin_review --model swe-2-high`、ブランチは `review/<M>-d<k>` にする。Devin CLI には `runtimeMode` の指定が無く、`devin_review` のモデルオプションは `mode` だけを受け付ける。sandbox のため権限モードは Autonomous 一択で、`bypass` は使わない。effort の引き上げ（`thought_level`）は `devin_review` には渡せない。
 
 PR を Projects ボードに載せる（ボードの組み込みワークフローがレビューの状態を反映するのは、ボードに載っている PR だけ）。
 
@@ -95,7 +95,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 ### `pelway.agent-watch/v1`
 
-スレッドが実装かレビューかは `branch` で見分ける。`agent/` で始まるものが実装・調査、`review/` で始まるものがレビュー。`provider` でも補助的に見られるが、`acpRegistry_devin` は実装・レビューの両方に使うため、ブランチでの識別を正とする。
+スレッドが実装かレビューかは `branch` で見分ける。`agent/` で始まるものが実装・調査、`review/` で始まるものがレビュー。`provider` でも補助的に見られる（`acpRegistry_devin` は実装、`devin_review` はレビュー）が、ブランチでの識別を正とする。
 
 | `event` | 実装スレッド | レビュースレッド |
 |---|---|---|
