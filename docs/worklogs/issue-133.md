@@ -38,7 +38,7 @@
 
 ## 実装者メモ（round 6）
 
-対象 head: 3502718（この round の実装の実体を含むコミット。このメモを含むコミットの親。署名付け替え後の値に直す）
+対象 head: 0ec217d（この round の実装の実体を含むコミット。このメモを含むコミットの親。署名付け替え前は 3502718）
 
 1. 詰まった箇所: `src/acp.rs`: round 5 のレビュー must-fix 2 件。(a) grant と接続先の同一性が無かったため `initialize.info.name` と grant の連携を照合し、不一致なら session 開始前に `IntegrationMismatch` で拒否（監査 `identity_rejected`）。(b) 操作名申告を信頼する構造は、client capability・client 提供 MCP server を一切 advertise しないことを試験で固定し、residual risk を module doc に明記
 2. 曖昧だった文: 「Route protected actions through a gateway-controlled executor and derive the operation from that trusted call, or ensure the agent cannot perform those actions outside that executor.」（PR #304 round 5 レビュー本文）— gateway executor は R1-Q7(a) で後続 Issue 扱いと確定済みのため、この PR では「Pelway 仲介の副作用経路を持たない」ことを確かめる方向に読み替えた
