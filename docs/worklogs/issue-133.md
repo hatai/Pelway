@@ -14,7 +14,7 @@
 
 ## 実装者メモ（round 4）
 
-対象 head: 206ccda1e4406e78a7fe64256a162f4bd50b4f5a（この round の実装の実体を含むコミット。このメモを含むコミットの親）
+対象 head: 65dfcaa（この round の実装の実体を含むコミット。このメモを含むコミットの親。署名付け替え前は 206ccda）
 
 1. 詰まった箇所: `src/acp.rs`: round 3 のレビュー must-fix。`AgentGrant` のフィールドが公開で、`GrantRegistry::require` を通さず任意の grant を構築して `run_prompt` に渡せていた。フィールドを非公開化し、`ConnectAttempt` 監査に検証済みの連携×アカウント×操作を載せて dead_code も解消
 2. 曖昧だった文: 「grant を registry の検証でのみ生成できる型にし、その検証済み値を使う API にしてください」（PR #304 レビュー本文）— `run_prompt` 内で再検証する実装か、型で偽造不能にするか分かれた。`AcpClient` が registry を持たない設計のため、型レベルの偽造不能化（フィールド非公開）を選んだ
