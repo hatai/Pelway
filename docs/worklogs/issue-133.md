@@ -2,7 +2,7 @@
 
 ## 実装者メモ（round 3）
 
-対象 head: d60592ff7df7b29bceb7ff2bf28358ed32cea5f6（この round の実装の実体を含むコミット。このメモを含むコミットの親）
+対象 head: 4ab442d（この round の実装の実体を含むコミット。このメモを含むコミットの親。署名付け替え前は d60592f）
 
 1. 詰まった箇所: `src/acp.rs`: `connect_with` のコールバックが `Result<_, acp::Error>` 固定のため、`NoSessionCapability`/`Disconnected` の種別を保つ `Result<Result<SessionReport, AcpError>, Error>` の二重 Result にした。`tests/inprocess_gateway.rs`: feature `acp` で agent-client-protocol が `serde_json/preserve_order` を有効化し、引数の key 順が変わって既存試験が壊れた（順序仮定を内容含有の表明に直した）
 2. 曖昧だった文: 「task ごとの export 対象の固定」（Issue #133「決めること」）— export 対象が prompt 本文の構造までを指すか、コンテキスト一式の粒度を指すか分かれた。MVP では `ExportEnvelope`＝prompt 本文 1 本とし、追加データは「後続 Issue の限定 MCP サーバー」に読み替えた
