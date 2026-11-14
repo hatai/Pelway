@@ -16,8 +16,10 @@ name: nightly
 
 on:
   schedule:
-    # 毎日 21:00 UTC（06:00 JST）。翌朝 9:00 JST の指揮役のまとめまでに結果が出る時刻。
-    - cron: "0 21 * * *"
+    # 毎日 19:00 UTC（04:00 JST）。GitHub の schedule は混雑時に大幅に遅れる
+    # （実測で約 4 時間遅れ）。遅れても翌朝 9:00 JST の指揮役のまとめまでに
+    # 結果が出るよう、実行時間（約 6 分）を足して 04:53 JST より前に予定する。
+    - cron: "0 19 * * *"
   workflow_dispatch:
 
 permissions:
@@ -26,7 +28,7 @@ permissions:
 # 実行ごとに別のグループにする。前の実行が残っていても新しい実行を待たせず、
 # 打ち切りもしない（総点検の結果は実行ごとに独立して意味を持つ）。
 concurrency:
-  group: nightly-${{ github.ref }}
+  group: nightly-${{ github.run_id }}
   cancel-in-progress: false
 
 env:
