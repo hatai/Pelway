@@ -142,11 +142,22 @@ check cond15_observe "$CT" \
   '圧縮成功 10 回' \
   '1 か月'
 
-# 条件16: T3 の Claude スレッドの検証結果が dev-environment 側の記録に残っていること。
+# 条件16: T3 の全プロバイダ（opencode・Devin CLI・Codex・Claude）の検証結果が
+# dev-environment 側の記録に残っていること。
 check cond16_verification "$DE" \
   '明示的な圧縮操作' \
   'コンテキスト使用率' \
-  '自動圧縮の発生を検知'
+  '自動圧縮の有無と検知' \
+  '### opencode（GLM、zai-coding-plan/glm-5.3、OpenCode server 2.3.0）' \
+  '### Devin CLI（acpRegistry_devin、swe-2-high' \
+  '### Codex（codex_review、gpt-6-luna）' \
+  '### Claude（claude_review、claude-opus-5-5'
+
+# 条件17（hatai の指示による拡張）: プロバイダごとの差分が command-team の該当節に
+# 明記されていること（トリガー・予期しない圧縮・導入条件の 3 箇所）。
+check cond17_provider_diff "$CT" \
+  'プロバイダごとに異なる' \
+  'プロバイダ単位で行い'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2

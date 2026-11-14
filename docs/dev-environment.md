@@ -280,21 +280,52 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 
 ## 指揮役スレッドのコンテキスト圧縮の検証（Issue #296）
 
-指揮役（巡回を続ける長命スレッド）のコンテキスト圧縮の運用（skill `command-team` の「7. コンテキスト管理」）は、環境ごとに「圧縮操作の実行方法」「圧縮の検知方法」「使用率の取得方法」「交代手順」が検証済みの環境でのみ有効化する。T3 の Claude スレッド（`claude_review`、Claude Code 2.1.325、`CLAUDE_CONFIG_DIR=~/.claude-review`）について 2026-11-14 に検証した結果:
+指揮役（巡回を続ける長命スレッド）のコンテキスト圧縮の運用（skill `command-team` の「7. コンテキスト管理」）は、指揮役を動かす環境（プロバイダを含む）ごとに「圧縮操作の実行方法」「圧縮の検知方法」「使用率の取得方法」「交代手順」が検証済みであることでのみ有効化する。圧縮の仕組み（明示的な圧縮の可否・使用率の取得方法・自動圧縮の有無と検知）はプロバイダごとに異なるため、チームが使う全プロバイダ（opencode・Devin CLI・Codex・Claude）について 2026-11-14 に検証した結果を以下に置く。検証は各プロバイダの T3 スレッドでの報告と、T3 からの `/compact`・`/context` 送信の実測による。
+
+共通の結果: エージェント自身（スレッドの中のエージェント）が自分のセッションを圧縮する専用のツール・スラッシュコマンドは、検証したどのプロバイダにも無かった。圧縮の実行は T3 からスレッドへ `t3_thread_send` で `/compact` を送る形（ホスト側の操作）で行い、実行されるとスレッドの activity に `compaction`（"Context compacted"）アイテムが記録される（Claude・Codex・Devin CLI で実測）。opencode では、これに加えてエージェント自身が OpenCode サーバーの HTTP API で圧縮を実行できる（下の表）。
+
+### opencode（GLM、zai-coding-plan/glm-5.3、OpenCode server 2.3.0）
 
 | 項目 | 結果 | 実施日 |
 |---|---|---|
-| 明示的な圧縮操作 | できる（実行主体はスレッドの外側）。エージェント自身は `/compact` を実行できない（ビルトイン CLI コマンドで、Skill ツールでは "compact is a built-in CLI command, not a skill" と拒否される）。T3 からのスレッド送信（`t3_thread_send`）で `/compact` を送ると圧縮が実行され、スレッドの activity に `compaction`（"Context compacted"）、セッションのトランスクリプトに `compact_boundary`（`compactMetadata`: `trigger: manual`、`preTokens`）が記録される | 2026-11-14 |
+| 明示的な圧縮操作 | できる（エージェント自身も実行できる唯一のプロバイダ）。ツール一覧・スラッシュコマンドに compact 系は無いが、OpenCode サーバーの HTTP API `POST /api/session/{sessionID}/compact`（認証は Basic `opencode:<OPENCODE_PASSWORD>`。環境変数でサーバーから渡される）をエージェントが直接呼んで圧縮完了まで実証した（`reason=manual` の compaction メッセージが生成、サマリーは構造化 Markdown）。公式 CLI `opencode api` はこのサンドボックスでは読み取り専用 FS のログ書き込みで全コマンドが失敗するため、curl + Basic 認証が唯一の道だった。T3 からの `/compact` 送信の可否は未検証 | 2026-11-14 |
+| コンテキスト使用率 | 取得できる（計算を伴う）。`GET /api/session/{id}/context` で各メッセージの `tokens`（input・output・reasoning・cache）が返る。glm-5.3 の context window（1,000,000）で割って使用率を計算（実測: 約 119,246 トークン ≈ 12%）。使用率%・残り容量をそのまま返すエンドポイントは無く、モデルの window 値（サーバー埋め込みの models.dev データ）からの自行計算が必要 | 2026-11-14 |
+| 自動圧縮の有無と検知 | 仕様上存在する（`compaction.auto` はデフォルト true、`buffer` デフォルト 15% = window の 85% 到達で自動圧縮。auto の実際の発火は未観測）。検知はできる: SSE イベント `session.compaction.started` / `session.compaction.ended` が `reason: "auto" | "manual"` を区別して流れ、durable イベントログ（`GET /api/experimental/session/{id}/log`）とセッションのメッセージ一覧の `compaction` メッセージにも残るためポーリング検知も可能。サーバーログファイルには出力されない（実測 0 件）。イベント購読の `types` パラメータはカンマ区切り不可（1 リクエスト 1 型） | 2026-11-14 |
+
+### Devin CLI（acpRegistry_devin、swe-2-high、Devin CLI 3000.12.43）
+
+| 項目 | 結果 | 実施日 |
+|---|---|---|
+| 明示的な圧縮操作 | できる（実行主体はスレッドの外側）。エージェント用のツール一覧に compact 系は無く、起動フラグ `enable-devin-cli-swe2-self-compaction=false` でモデル主導の自己圧縮は無効。T3 からの `/compact` 送信で圧縮が実行され、スレッドの activity に `compaction` が記録される（エージェントが自分のスレッドへの `t3_thread_send` で注入できることも確認） | 2026-11-14 |
+| コンテキスト使用率 | 取得できる。T3 からの `/context` 送信に `72.0k/262.0k tokens (27.5%)` の形（System prompt・Tools・Messages・Free の内訳付き）で応答が返る。`~/.local/share/devin/cli/sessions.db` の `message_nodes.metadata`（`num_tokens_preceding`）からもトークン数の絶対値は読める | 2026-11-14 |
+| 自動圧縮の有無と検知 | 自動圧縮は有効（起動フラグ `enable-devin-cli-cloud-compaction-schedule=true`、設定 `agent.compaction_threshold_tokens` で閾値を調整可）。エージェントの会話内では検知できない（changelog に「Automatic context compaction is no longer surfaced in the scrollback or the ACP conversation view」と明記）。環境側では検知できる: ライフサイクルフック `PreCompact` / `PostCompact` / `PostCompaction`（manual/auto を区別、`PostCompaction` は summary を受け取る）、OTel イベント `compaction`、sessions.db の `summarized_from`、`~/.local/share/devin/cli/logs/` | 2026-11-14 |
+
+### Codex（codex_review、gpt-6-luna）
+
+| 項目 | 結果 | 実施日 |
+|---|---|---|
+| 明示的な圧縮操作 | できる（実行主体はスレッドの外側）。エージェント用のツール一覧に compact 系は無く、`codex debug` 等の CLI にも現在の T3 スレッドを圧縮する操作は無い。T3 からの `/compact` 送信で圧縮が実行され、スレッドの activity に `compaction` が記録される | 2026-11-14 |
+| コンテキスト使用率 | 取得できない。ツール一覧にも `codex debug --help` / `codex app-server --help` / `codex features` にも、セッションの使用トークン数・上限・残量を返す機能は見当たらない（`get_goal` のトークン情報は Goal 予算でありセッションの使用量ではない） | 2026-11-14 |
+| 自動圧縮の有無と検知 | 不明。auto-compact を制御・観測する機能や圧縮通知・イベント・ログを読む機能がセッション内に無く、圧縮を発生させる試験も未実施 | 2026-11-14 |
+
+### Claude（claude_review、claude-opus-5-5、Claude Code 2.1.325）
+
+| 項目 | 結果 | 実施日 |
+|---|---|---|
+| 明示的な圧縮操作 | できる（実行主体はスレッドの外側）。エージェント自身は `/compact` を実行できない（ビルトイン CLI コマンドで、Skill ツールでは "compact is a built-in CLI command, not a skill" と拒否される）。T3 からの `/compact` 送信で圧縮が実行され、スレッドの activity に `compaction`、セッションのトランスクリプトに `compact_boundary`（`compactMetadata`: `trigger: manual`、`preTokens`）が記録される | 2026-11-14 |
 | コンテキスト使用率 | 直接は取得できない。T3 のスレッド読み取り（`t3_thread_read`）にコンテキスト使用状況は現れない。セッションのトランスクリプト（`~/.claude-review/projects/<作業パス>/<SESSION_ID>.jsonl`）の `usage`（`input_tokens` + `cache_creation_input_tokens` + `cache_read_input_tokens`）からトークン数は間接的に読めるが、上限値はトランスクリプトに記録されないため使用率の計算にはモデルの上限を外から与える必要があり、値も直前の API 呼び出し時点の 1 ターン遅れになる | 2026-11-14 |
-| 自動圧縮の発生を検知 | 事後は検知できる。リアルタイムの通知は無い。トランスクリプトの `compact_boundary` 行（`compactMetadata.trigger` が manual/auto を記録）とスレッドの activity の `compaction` アイテムで、圧縮が走ったことを事後に確認できる。検証で確認できた実例は `trigger: manual` のみで、auto（自動圧縮）の実例は未確認 | 2026-11-14 |
-| 交代手順（新指揮役スレッドへの恒久交代） | 未検証 | — |
+| 自動圧縮の有無と検知 | 事後は検知できる。リアルタイムの通知は無い。トランスクリプトの `compact_boundary` 行（`compactMetadata.trigger` が manual/auto を記録）とスレッドの activity の `compaction` アイテムで、圧縮が走ったことを事後に確認できる。検証で確認できた実例は `trigger: manual` のみで、auto（自動圧縮）の実例は未確認 | 2026-11-14 |
 
-この環境での運用への適用:
+### 交代手順
 
-- 使用率が機械的に取得できないため、トリガーは代理指標（起算点から完了 Issue 5 件以上、または巡回 20 回以上）で運用する
-- 圧縮操作の実行方法（`/compact` の送信）と圧縮後の「発生確認済み」の確認手段（`compact_boundary` の記録）は検証済みのため、計画的圧縮はこの環境で有効化できる
-- 自動圧縮（auto）の検知は未確認のため、予期しない圧縮は検知できない前提で、巡回開始時の状態再取得と重要操作の直前の照合で対処する
-- 交代手順は未検証のため、この環境では交代を実行せず、人間確認へ進む
+新指揮役スレッドへの恒久交代（skill `command-team` の「7. コンテキスト管理」の恒久交代）は未検証（全プロバイダ共通）。
+
+### 運用への適用（プロバイダごと）
+
+- 明示的な圧縮の実行方法: Devin CLI・Codex・Claude は T3 からの `/compact` 送信（検証済み）。opencode は OpenCode サーバーの HTTP API（エージェント自身・外部のどちらからでも）。圧縮後の「発生確認済み」の確認手段（activity の `compaction`、Claude ではトランスクリプトの `compact_boundary`、Devin CLI ではフック・sessions.db、opencode は SSE イベントとメッセージ一覧）もある
+- 使用率が機械的に取得できるのは Devin CLI（`/context`）と opencode（context API の tokens 値と window からの計算）で、いずれも計算・応答形式にクセがある。Codex・Claude では代理指標（起算点から完了 Issue 5 件以上、または巡回 20 回以上）でトリガーを運用する
+- 自動圧縮の検知: opencode は SSE イベント（auto/manual を区別）とメッセージ一覧で可能。Devin CLI は環境側の手段（フック・OTel・sessions.db）で可能（未適用）。Claude は事後検知の仕組みがあるが auto の実例は未確認。Codex は不明。いずれのプロバイダでも auto の実際の発火は未観測のため、検知の実効性は運用で確認する。検知方法が未検証のプロバイダでは、予期しない圧縮は検知できない前提で、巡回開始時の状態再取得と重要操作の直前の照合で対処する
+- 交代手順は未検証のため、どのプロバイダでも交代を実行せず、人間確認へ進む
 
 ## シークレットの扱い（fnox）
 
