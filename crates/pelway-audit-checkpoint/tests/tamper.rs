@@ -22,6 +22,7 @@ fn events(n: usize) -> Vec<AuditEvent> {
             at_ms: 1_700_000_000_000 + i as u64,
             actor: if i % 2 == 0 { "bot-1" } else { "human-1" }.to_owned(),
             subject: format!("task-{i}"),
+            reason: None,
             kind: "tool_write".to_owned(),
             result: "ok".to_owned(),
             snapshot_hash: [i as u8; 32],
