@@ -11,3 +11,15 @@
 5. 改善案: `docs/research/agent-runtime-standard-protocols.md` の「未確認事項」に「Rust schema crate（`agent-client-protocol`）の v2 対応状況」があるが、rust-sdk v5.2.0 が `unstable_protocol_v2` で `Client.v2()`/`Agent.v2()` を提供済みと確かめたので、この項を「確認済み: rust-sdk 5.x が draft-v2 API を `unstable_protocol_v2` 後ろに提供」と更新する
 
 使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/grilling`（frontier の切り方）、`.agents/skills/write-pull-request`（PR 本文の形）
+
+## 実装者メモ（round 4）
+
+対象 head: 206ccda1e4406e78a7fe64256a162f4bd50b4f5a（この round の実装の実体を含むコミット。このメモを含むコミットの親）
+
+1. 詰まった箇所: `src/acp.rs`: round 3 のレビュー must-fix。`AgentGrant` のフィールドが公開で、`GrantRegistry::require` を通さず任意の grant を構築して `run_prompt` に渡せていた。フィールドを非公開化し、`ConnectAttempt` 監査に検証済みの連携×アカウント×操作を載せて dead_code も解消
+2. 曖昧だった文: 「grant を registry の検証でのみ生成できる型にし、その検証済み値を使う API にしてください」（PR #304 レビュー本文）— `run_prompt` 内で再検証する実装か、型で偽造不能にするか分かれた。`AcpClient` が registry を持たない設計のため、型レベルの偽造不能化（フィールド非公開）を選んだ
+3. 仮定と解釈: `AgentGrant` の `Clone` 派生は許容と解釈した（検証済み値の複製は偽造ではない）。`grant()` を呼べる側＝管理者の設定面と同じ信頼度とみなし、in-memory registry 自体の改ざん防止は対象外とした
+4. 足りなかった情報・検証手段: 「外部から構築できないこと」の機械的検証は trybuild 等のコンパイル失敗試験が必要だが、リポジトリにその基盤が無い。doc comment とレビュー観点で担保した
+5. 改善案: `docs/technical/v0.7/body/10-domestic-only.md` の `integration_grant` 節に「grant の実体は検証関数でのみ生成できる型（非公開フィールド）で表し、外部エージェント接続 API はその検証済み値だけを受け取る」を足す
+
+使ったスキル: `.agents/skills/implement-issue`
