@@ -74,11 +74,11 @@ PR や Issue に手を付けるときは、最初に対象 Issue の受け入れ
 
 ## 1. サイクルの始め
 
-1. `scripts/conductor-watch.sh` が動いていることを確かめる（動いていなければ起動する）
+1. `scripts/conductor-watch-ensure.sh` を実行する（冪等の起動入口。動いていなければ起き、動いていれば何もしない）
 2. `t3 thread list --json` と `scripts/agent-gh dev pr list` で、実行中のスレッド、Draft の PR、レビュー待ちの PR を数える。PR の中身（チェック・レビュー・コメントの状態）を見るときは、生の `gh api` を読む代わりに skill `pr-watch` の `pr-digest` を使う
 3. 実行中のスレッドのタイトルが「スレッド名」の形式に合っているかを見て、合わないものを直す
 4. runbook の「同時数と順番待ち」の順で、次の一手を 1 つずつ決める
-5. 実装スレッドがレビュー委託の完了待ちの間も、指揮役は何も割り当てない（修正とレビューの繰り返しは実装スレッドの内側で進む）。実装スレッドの終わりの報告（`pr:` と `ready: done`）を手順 5 で確かめられたら、マージの判断（下の「マージ」）に進む
+5. 実装スレッドがレビュー委託の完了待ちの間も、指揮役は何も割り当てない（修正とレビューの繰り返しは実装スレッドの内側で進む）。実装スレッドの終わりの報告（`pr:` と `ready: done`）を runbook の「報告行の扱い」で確かめられたら、マージの判断（下の「マージ」）に進む
 6. レビュー待ちの PR は、`pr-digest` の `review-wait` 行で滞留を見る（下の「レビュー待ちの滞留」）
 7. 週次の巡回（前回の棚卸しから 7 日以上経った巡回）では、下の「週次: 長命 PR の棚卸し」も行う
 
@@ -100,7 +100,7 @@ PR や Issue に手を付けるときは、最初に対象 Issue の受け入れ
   - 作り直す: 実装担当に新しいブランチ・PR で作り直させる
   - 閉じる: PR を閉じて Issue を `ready-for-human` か `wontfix` で整理する（`docs/agents/triage-labels.md`）
   - PR のクローズは指揮役の「しないこと」（runbook 1）なので、「作り直す」「閉じる」の操作は人間に依頼する（PR に依頼のコメントを書き、部屋で人間に知らせる）
-- 判断期限を過ぎても判断が残っている PR は、次の巡回で runbook 6 のエスカレーションにする。
+- 判断期限を過ぎても判断が残っている PR は、次の巡回で runbook 7 のエスカレーションにする。
 - 7 日という期間は目安であり、運用実績で見直す。
 
 ## 2. 振り分け
@@ -117,7 +117,7 @@ PR や Issue に手を付けるときは、最初に対象 Issue の受け入れ
 | 「Devin CLI のハーネスごと任せる」チケット（人間が Issue で明示するか、指揮役が「実装スレッドの枠組みでは進めにくい自律作業」と判断したもの。例: 環境構築を伴う検証、複数リポジトリにまたがる調査） | Devin CLI（`acpRegistry_devin`、`swe-2-high`）。Issue に `agent:devin` を付ける |
 | コア部分（`crates/pelway-contract`、承認・状態遷移・権限）、`unsafe` を含む・含みうる変更 | GLM なら variant `high`、Devin CLI なら `thought_level=max` |
 | 同じ Issue の修正の指示が 2 回を超えた（3 回目の修正に入る）。数えるのは、レビューの本物の must-fix に基づく指示だけ（分割計画が無い時期の誤判定や、再起動による自動の再開は数えない） | `t3_thread_configure` で variant または `thought_level` を 1 段上げる（GLM: `low`→通常→`high`→`max`。Devin CLI: `medium`→`high`→`max`）。`max` でも直らなければ Devin CLI の `swe-2-high`（`thought_level=max`）に替える。Issue に理由をコメントする |
-| 同じ Issue の修正の指示が 3 回を超えた（4 回目の修正に入る）。数え方は上の行と同じ | 修正を出さずにエスカレーション（runbook 6） |
+| 同じ Issue の修正の指示が 3 回を超えた（4 回目の修正に入る）。数え方は上の行と同じ | 修正を出さずにエスカレーション（runbook 7） |
 
 runbook と仕様の `round`（スレッドの実行回数）は、誤判定や再起動による再開でも増える。指揮役は `round` を目安にとどめ、effort の引き上げとエスカレーションは上の表の「修正の指示の回数」で判断する。
 
@@ -143,7 +143,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 レビュー待ちの滞留は、PR ごとに skill `pr-watch` の `pr-digest` を出し、`review-wait` 行（レビュー待ちの経過時間と起点の時刻）で機械的に検出する。起点は PR が最初にレビュー可能になった時刻で一意に決まり、レビュー担当の再割当では戻らない（形式は skill `pr-watch`）。
 
 - 経過が目安の 24 時間を超えた PR の対応は、その時点の指揮役（正本の Grok Bot、代行中は代行者）が責任を持つ。責任の持ち方は、対象によって次のとおりその場で決めて実行することである。
-  - 実装担当の PR: レビューの委託は実装担当の内側で進むため、まず実装スレッドの状態（実行中か・レビュー委託の子を待っているか・止まっているか）を `t3 thread list` と `t3 thread show` で確かめる。止まっていれば再開の指示か runbook 6 のエスカレーション、実装スレッドが動けないときは外部投入（下の「外部からのレビュースレッド投入」）へエスカレーションする
+  - 実装担当の PR: レビューの委託は実装担当の内側で進むため、まず実装スレッドの状態（実行中か・レビュー委託の子を待っているか・止まっているか）を `t3 thread list` と `t3 thread show` で確かめる。止まっていれば再開の指示か runbook 7 のエスカレーション、実装スレッドが動けないときは外部投入（下の「外部からのレビュースレッド投入」）へエスカレーションする
   - 指揮役自身の PR: レビュー担当を割り当てる（上の「レビュー担当と effort」で決める。レビューの枠が埋まっているときは、その PR を順番待ちの先頭に置く）
 - 24 時間は目安であり、超えた時点で必ず上のどちらかを取る。何もしないまま放置しない。値は運用実績で見直す。
 
@@ -153,7 +153,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 1. 投入前に、その PR に既存のレビュー担当が居ないか確かめる。`t3 thread list` でその PR のブランチ（`review/<PR 番号>-`）のレビュースレッドを探し、`scripts/agent-gh dev pr view <PR 番号> --json reviewDecision,reviews` で投稿済み・進行中のレビューを確かめる。担当が居れば投入しない。担当が居るのに止まっているときは、正本の指揮役（居なければ人間）に知らせる。
 2. 滞留の証拠（`pr-digest` の `review-wait` 行）を確かめてから、レビュースレッドを立てる。立て方は runbook の「レビューを始める」と同じ（skill `review-pr`、権限は `auto-accept-edits`、worktree は main から、スレッド名は「スレッド名」の形式）。
-3. 投入した事実を巡回記録に残す。投入した者が PR に投入の旨（誰が・いつ・なぜ）をコメントし、指揮役は次の巡回でそれを指揮役の作業ログの「割り当ての記録」の表に 1 行足す（日時、PR、役割 review、投入した者、モデル、effort、理由は「レビュー滞留への外部投入」）。投入されたスレッドは `t3 thread list` で見えるので、レビューの同時数の上限（runbook 2）に数える。
+3. 投入した事実を巡回記録に残す。投入した者が PR に投入の旨（誰が・いつ・なぜ）をコメントし、指揮役は次の巡回でそれを指揮役の作業ログの「割り当ての記録」の表に 1 行足す（日時、PR、役割 review、投入した者、モデル、effort、理由は「レビュー滞留への外部投入」）。投入されたスレッドは `t3 thread list` で見えるので、レビューの同時数の上限（runbook 3）に数える。
 
 ### 調査の担当と effort（入口B）
 
@@ -169,6 +169,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 調査スレッドが報告を出したときの処理。
 
 - 報告は `docs/worklogs/bugs/<slug>/report.md` と、そのファイルだけの Draft PR（skill `investigate-bug` の手順 5）。PR とスレッドの返答の両方で報告を確認する
+- 調査 Issue（ボード上の調査タスク）では、報告 PR がそのまま主 PR になる。報告 PR の本文には `Part of #<番号>` を必ず書かせること（`Part of` はクローズ用キーワードではないため、報告 PR のマージを検知したら指揮役が Status を Done にする）
 - 指揮役が報告を確認して起票可否を判断し、判断と理由を報告の PR にコメントする
 - 直す必要があるときは、指揮役が skill `write-issue` で起票する（実装の指示は出さない）。人間は `ready-for-agent` で承認し、入口A の流れに合流する。Issue 本文の「関連情報」には、報告のパス（`docs/worklogs/bugs/<slug>/report.md`）と調査スレッドのリンクを書く
 - 直す必要がないとき（仕様どおり、誤報告など）は Issue を立てない
@@ -177,9 +178,26 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 - 実装は、調査を担ったスレッドへの役割の追加としては行わない。起票した Issue の実装スレッドとして割り当て替える（正本の「役割と GitHub 上の名義」の役割の変更の原則）
 - 調査スレッドは脆弱性の疑いで止まることがある（skill `investigate-bug` の手順 4）。このとき報告の PR は無いので、`needs-human` の判断を待つ
 
+### hatai のレビューの扱い
+
+hatai 自身のレビューと、指揮役から hatai へのレビュー依頼（「hatai 待ち」）の判断基準。巡回での検知と Status の反映は runbook の「ボードと巡回」の「hatai のレビューに関する連動」が正本で、ここには指揮役が判断に使う基準だけを置く。
+
+有効な Approve: `pelway-review` の最新の有効なレビューが APPROVED で、対象が主 PR の現在の head であるもの（head が変われば失効し、レビューが無いものとして扱う。dismiss されたレビューは数えない）。
+
+「hatai 待ち」:
+
+- 依頼は主 PR に対してだけ行い、主 PR に定型コメント「[review-request-human] PR #<主 PR の番号>」を書いて記録する。取り消しは「[review-request-human] cancel PR #<番号>」。hatai が依頼した場合は、元の発言へのリンクを含めて指揮役が主 PR への依頼として記録し直す。判定は最新の定型コメントだけを見る
+- 完了証跡がそろい `needs-human` が付いていない「hatai 待ち」の Issue は、Status を Ready to merge に置く（完了証跡の対象別の内訳は runbook）
+- 依頼が終わるのは、その PR に hatai がレビューを投稿する・マージされる・Issue が閉じる・取り消しが書かれる、のいずれかで、最新の依頼コメントより後に起きたイベントだけが効く
+
+hatai の指摘の伝達:
+
+- hatai が紐づく PR（open のもの。主 PR 以外も含む）にレビュー・コメントを投稿したら、紐づく Issue の Status を Changes requested にし、実装スレッドに `t3 thread send` で伝える（`needs-human` 付きの Issue には手当スレッドを起動せず、伝達と対応済みの記録だけを行い、Status は Needs human のまま）
+- 実装スレッドが対応（修正の push、または対応不要の返答）したら、指揮役が確認して指摘の ID を補助記録の対応済みに残す。対応済みになった時点で Status を導出値に戻す
+
 ### マージ
 
-`pelway-review` の Approve と、必須チェック（`mise run verify`、`pr-size`）の通過を確かめたら、指揮役が `gh pr merge --merge --admin --delete-branch` でマージする（`CODEOWNERS` の人間の Approve を、人間から委任された形で迂回する）。マージ以外の PR・Issue への操作（下の main の取り込みや base の変更、Draft の扱い、Issue のクローズ）は、先に「手当て・引き継ぎの前の確認」を通す。`--admin` は管理者の権限が要り App のトークンでは使えないので、このマージは人間の名義の `gh` で行う。目印付きのコメント（`<!-- pr-size-exception -->`、`<!-- split-plan -->`）も人間の名義の `gh issue comment` で書く。レビュー担当は作成者が `hatai` であることで、実装担当（`pelway-dev`）や第三者のコメントと区別する。それ以外の GitHub の操作（読み取り、ラベル、ふつうのコメント、`pr update-branch`）は `scripts/agent-gh dev` で行う。
+有効な Approve（上の「hatai のレビューの扱い」）と、必須チェック（`mise run verify`、`pr-size`）の通過を確かめたら、指揮役が `gh pr merge --merge --admin --delete-branch` でマージする（`CODEOWNERS` の人間の Approve を、人間から委任された形で迂回する）。マージ以外の PR・Issue への操作（下の main の取り込みや base の変更、Draft の扱い、Issue のクローズ）は、先に「手当て・引き継ぎの前の確認」を通す。`--admin` は管理者の権限が要り App のトークンでは使えないので、このマージは人間の名義の `gh` で行う。目印付きのコメント（`<!-- pr-size-exception -->`、`<!-- split-plan -->`）も人間の名義の `gh issue comment` で書く。レビュー担当は作成者が `hatai` であることで、実装担当（`pelway-dev`）や第三者のコメントと区別する。それ以外の GitHub の操作（読み取り、ラベル、ふつうのコメント、`pr update-branch`）は `scripts/agent-gh dev` で行う。
 
 - pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。
 - 必須チェックの完了待ち（マージ前の CI 待ち、巡回での PR のベビーシット）には、ポーリングの代わりに skill `pr-watch` の `pr-digest --watch` をバックグラウンド実行して使う。ただし pr-watch の境界線のとおり、マージはこのスキルの外で人間の名義の `gh` で行う。
@@ -206,7 +224,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 ## 3. エスカレーション
 
-runbook 6 の手順に従う。人間に上げる前に、手順 2 の「effort を上げる・モデルを替える」の段を必ず挟む。上げるときは、試したこと（effort、モデル、round）を Issue のコメントに書く。
+runbook 7 の手順に従う。人間に上げる前に、手順 2 の「effort を上げる・モデルを替える」の段を必ず挟む。上げるときは、試したこと（effort、モデル、round）を Issue のコメントに書く。
 
 ## 4. 改善ループ
 
@@ -252,7 +270,7 @@ runbook 6 の手順に従う。人間に上げる前に、手順 2 の「effort 
 
 1. Grok Bot が動かないことを人間が確かめ、代行を頼んだ
 2. T3 のスレッドとして動くなら `t3_thread_launch` で作業スレッドを、それ以外なら T3 Connect の MCP につながる（レビューの権限 `auto-accept-edits` を指定してスレッドを立てるために必要）
-3. `scripts/conductor-watch.sh` を起動した
+3. `scripts/conductor-watch-ensure.sh` を実行した
 4. 引き継ぐ状態を読んだ: `agent:working` の Issue、Draft・レビュー待ちの PR、実行中のスレッド、`needs-human` の Issue、指揮役の作業ログ
 5. 代行の作業ログ `docs/worklogs/<日付>-conductor-substitute.md` を作った（判断と改善点を書く）
 
@@ -262,7 +280,7 @@ runbook 6 の手順に従う。人間に上げる前に、手順 2 の「effort 
 2. 作業ログに、進行中の Issue・PR、待っているもの、未反映の改善点を書く
 3. 作業ログを PR にしてマージする
 4. 人間に、作業ログの場所と、戻した時点の状態を報告する
-5. `scripts/conductor-watch.sh` を止める
+5. 見張りを止めた（systemd unit で動いていれば `systemctl --user stop pelway-conductor-watch.service`、直接起動ならプロセスの kill）
 
 ## 6. 輸入スキルの試行（mattpocock/skills）
 

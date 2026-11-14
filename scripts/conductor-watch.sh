@@ -4,7 +4,7 @@
 # $XDG_STATE_HOME/pelway/patrol-state.json に更新する。正本は GitHub Issues／Projects で、
 # 記録と GitHub の実状態が食い違うときは GitHub を正として記録を直す（runbook の「巡回状態の補助記録」）。
 # 状態は $XDG_STATE_HOME/pelway/conductor-watch/ に置く（セッションの一時フォルダに置かない）。
-# 使い方: scripts/conductor-watch.sh（止めるまで 30 秒ごとに見る）
+# 使い方: scripts/conductor-watch-ensure.sh で起動する（冪等の起動入口。止めるまで 30 秒ごとに見る）
 D="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch"; mkdir -p "$D"
 P="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/patrol-state.json"
 # 一覧の 1 回の取得上限。件数が上限に達した巡回は打ち切りの可能性があるため、
