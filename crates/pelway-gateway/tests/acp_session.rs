@@ -25,6 +25,8 @@ struct DoubleSpec {
     permission_tool: Option<&'static str>,
     /// 許可要求で提示する option の kind（提示順）。
     option_kinds: Vec<schema::PermissionOptionKind>,
+    /// initialize で返すエージェント名。`None` なら `acp-double`。
+    agent_name: Option<&'static str>,
 }
 
 /// 検証用の ACP Agent。v2 の baseline（initialize・session/new・prompt・cancel・
@@ -41,6 +43,10 @@ struct DoubleState {
     cancelled: bool,
     /// クライアントが permission request に返した結果の記録（表示用の文字列）。
     permission_outcome: Option<String>,
+    /// 受け取った initialize の client capabilities（零 capability の確認用）。
+    client_capabilities: Option<schema::ClientCapabilities>,
+    /// 受け取った session/new の `mcpServers` と `additionalDirectories` の件数。
+    new_session_channels: Option<(usize, usize)>,
 }
 
 const DOUBLE_SESSION: &str = "double-session-1";
@@ -185,33 +191,44 @@ fn spawn_double(
         .v2()
         .name("acp-double")
         .on_receive_request(
-            async |request: schema::InitializeRequest,
-                   responder: Responder<schema::InitializeResponse>,
-                   _c: ConnectionTo<Client>| {
-                responder.respond(
-                    schema::InitializeResponse::new(
-                        request.protocol_version,
-                        schema::Implementation::new("acp-double", "0.0.0"),
+            {
+                let double = double.clone();
+                async move |request: schema::InitializeRequest,
+                            responder: Responder<schema::InitializeResponse>,
+                            _c: ConnectionTo<Client>| {
+                    {
+                        let mut state = double.state.lock().expect("double state poisoned");
+                        state.client_capabilities = Some(request.capabilities.clone());
+                    }
+                    let name = double.spec.agent_name.unwrap_or("acp-double");
+                    responder.respond(
+                        schema::InitializeResponse::new(
+                            request.protocol_version,
+                            schema::Implementation::new(name, "0.0.0"),
+                        )
+                        .capabilities(
+                            schema::AgentCapabilities::new()
+                                .session(schema::SessionCapabilities::new()),
+                        ),
                     )
-                    .capabilities(
-                        schema::AgentCapabilities::new()
-                            .session(schema::SessionCapabilities::new()),
-                    ),
-                )
+                }
             },
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
             {
                 let double = double.clone();
-                async move |_request: schema::NewSessionRequest,
+                async move |request: schema::NewSessionRequest,
                             responder: Responder<schema::NewSessionResponse>,
                             _c: ConnectionTo<Client>| {
-                    double
-                        .state
-                        .lock()
-                        .expect("double state poisoned")
-                        .session_seq += 1;
+                    {
+                        let mut state = double.state.lock().expect("double state poisoned");
+                        state.session_seq += 1;
+                        state.new_session_channels = Some((
+                            request.mcp_servers.len(),
+                            request.additional_directories.len(),
+                        ));
+                    }
                     responder.respond(schema::NewSessionResponse::new(schema::SessionId::new(
                         DOUBLE_SESSION,
                     )))
@@ -275,13 +292,13 @@ fn declarations() -> TierDeclarations {
 
 fn grants() -> GrantRegistry {
     let mut registry = GrantRegistry::new();
-    registry.grant("codex-acp", "acme/alice", "acp.session");
+    registry.grant("acp-double", "acme/alice", "acp.session");
     registry
 }
 
 fn grant(registry: &GrantRegistry) -> pelway_gateway::acp::AgentGrant {
     registry
-        .require("codex-acp", "acme/alice", "acp.session")
+        .require("acp-double", "acme/alice", "acp.session")
         .expect("grant should exist")
 }
 
@@ -373,6 +390,7 @@ async fn permission_allow_once_for_declared_tool() {
             schema::PermissionOptionKind::AllowOnce,
             schema::PermissionOptionKind::RejectOnce,
         ],
+        ..DoubleSpec::default()
     });
     let server = tokio::spawn(serve);
 
@@ -418,6 +436,7 @@ async fn undeclared_operation_is_rejected_without_decider() {
             schema::PermissionOptionKind::AllowOnce,
             schema::PermissionOptionKind::RejectOnce,
         ],
+        ..DoubleSpec::default()
     });
     let server = tokio::spawn(serve);
 
@@ -461,6 +480,7 @@ async fn always_options_are_never_selected() {
             schema::PermissionOptionKind::AllowAlways,
             schema::PermissionOptionKind::RejectAlways,
         ],
+        ..DoubleSpec::default()
     });
     let server = tokio::spawn(serve);
 
@@ -498,6 +518,7 @@ async fn cancel_decision_cancels_session() {
             schema::PermissionOptionKind::AllowOnce,
             schema::PermissionOptionKind::RejectOnce,
         ],
+        ..DoubleSpec::default()
     });
     let server = tokio::spawn(serve);
 
@@ -519,6 +540,77 @@ async fn cancel_decision_cancels_session() {
     assert!(
         kinds.contains(&"cancel_sent".to_owned()),
         "cancel_sent が無い: {kinds:?}"
+    );
+    server.abort();
+}
+
+// 受け入れ条件: 接続先エージェントの initialize 名が grant の連携と一致
+// しなければ、session 開始・prompt 送信の前に拒否する（誤配送の防止）。
+#[tokio::test]
+async fn identity_mismatch_refuses_before_session() {
+    let (transport, serve, state) = spawn_double(DoubleSpec {
+        agent_name: Some("other-agent"),
+        ..DoubleSpec::default()
+    });
+    let server = tokio::spawn(serve);
+
+    let audit = Arc::new(Mutex::new(Vec::new()));
+    let client = AcpClient::new(declarations(), audit.clone());
+    let error = client
+        .run_prompt(
+            &grant(&grants()),
+            transport,
+            &ExportEnvelope::new("レビューして"),
+            Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
+        )
+        .await
+        .expect_err("名が違うエージェントへの送信を許した");
+
+    assert!(matches!(error, AcpError::IntegrationMismatch { .. }));
+    let state = state.lock().expect("double state poisoned");
+    assert_eq!(state.session_seq, 0, "session が開かれた");
+    drop(state);
+    let kinds = audit_events(&audit);
+    assert!(
+        kinds.contains(&"identity_rejected".to_owned()),
+        "identity_rejected が無い: {kinds:?}"
+    );
+    server.abort();
+}
+
+// 受け入れ条件: クライアントは副作用経路を advertise しない（initialize の
+// capability は空、session/new に MCP server も追加ディレクトリも無い）。
+// permission は情報面であり、Pelway 仲介の副作用経路は存在しない。
+#[tokio::test]
+async fn client_advertises_no_side_effect_channels() {
+    let (transport, serve, state) = spawn_double(DoubleSpec::default());
+    let server = tokio::spawn(serve);
+
+    let audit = Arc::new(Mutex::new(Vec::new()));
+    let client = AcpClient::new(declarations(), audit.clone());
+    client
+        .run_prompt(
+            &grant(&grants()),
+            transport,
+            &ExportEnvelope::new("レビューして"),
+            Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
+        )
+        .await
+        .expect("一往復に失敗");
+
+    let state = state.lock().expect("double state poisoned");
+    let capabilities = state
+        .client_capabilities
+        .as_ref()
+        .expect("initialize を受け取っていない");
+    assert!(
+        capabilities.auth.is_none() && capabilities.elicitation.is_none(),
+        "client capability を advertise している: {capabilities:?}"
+    );
+    assert_eq!(
+        state.new_session_channels,
+        Some((0, 0)),
+        "session/new に MCP server か追加ディレクトリがある"
     );
     server.abort();
 }

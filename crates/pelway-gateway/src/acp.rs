@@ -23,6 +23,16 @@
 //! 変数・cwd・ファイルシステム・ネットワーク）は呼び出し元の task
 //! container が transport を作る時点で強制し、ここでは隔離済みの
 //! transport だけを受け取る。
+//!
+//! `session/request_permission` の操作名はエージェント側の申告であり、
+//! 不届きなエージェントは要求の省略・操作名の詐称・拒否後の実行が
+//! ありうる。したがって permission は「承認カードへ反映する情報面」とし、
+//! Pelway が仲介する副作用経路は持たせない: この adapter は
+//! `initialize` で client capability を一切 advertise せず（auth・
+//! elicitation とも空）、`session/new` で client 提供の MCP server も
+//! 追加ディレクトリも渡さない。エージェント自身のアクセスは task
+//! container の隔離が止める前提で、操作実行を gateway 側 executor へ
+//! 集約する設計（限定 MCP サーバー）は後続 Issue の責務とする。
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
@@ -46,6 +56,14 @@ pub enum AcpError {
         /// 操作。
         operation: String,
     },
+    /// エージェントが initialize で返した名が grant の連携と一致しなかった
+    /// （別の連携宛の grant で別エージェントへ送る誤配送の防止）。
+    IntegrationMismatch {
+        /// grant の連携（期待したエージェント名）。
+        expected: String,
+        /// エージェントが initialize で返した名。
+        actual: String,
+    },
     /// エージェントが v2 の session capability を申告しなかった。
     NoSessionCapability,
     /// ACP プロトコル面の失敗（接続・initialize・session・prompt・close）。
@@ -64,6 +82,10 @@ impl std::fmt::Display for AcpError {
             } => write!(
                 f,
                 "integration_grant が無いため外部エージェントへの接続を拒否した: {integration} {account} {operation}"
+            ),
+            Self::IntegrationMismatch { expected, actual } => write!(
+                f,
+                "エージェントの名 {actual} が grant の連携 {expected} と一致しないため接続を拒否した"
             ),
             Self::NoSessionCapability => {
                 write!(
@@ -90,7 +112,9 @@ impl From<Error> for AcpError {
 /// `integration_grant` の許可（doc 10）。外部エージェント種別（連携）×
 /// アカウント×操作の粒度。有効化は管理者が説明を読んで行う（ADR 0008 と同型）。
 /// フィールドは非公開で [`GrantRegistry::require`] でしか取得できないため、
-/// [`AcpClient::run_prompt`] の引数が「許可済み」を型で表す。
+/// [`AcpClient::run_prompt`] の引数が「許可済み」を型で表す。`integration`
+/// は接続先エージェントが `initialize` で返す `info.name` と一致している
+/// 必要がある（一致しなければ session 開始前に拒否する）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentGrant {
     /// 連携（外部エージェント種別。例: `codex-acp`）。
@@ -229,6 +253,13 @@ pub enum AcpAuditEvent {
         /// エージェント名。
         agent: String,
     },
+    /// エージェントの申告名が grant の連携と一致せず接続を止めた。
+    IdentityRejected {
+        /// grant の連携（期待したエージェント名）。
+        expected: String,
+        /// エージェントが initialize で返した名。
+        actual: String,
+    },
     /// `session/new` の完了。
     SessionOpened {
         /// session ID。
@@ -272,6 +303,7 @@ impl AcpAuditEvent {
         match self {
             Self::ConnectAttempt { .. } => "connect_attempt",
             Self::Initialized { .. } => "initialized",
+            Self::IdentityRejected { .. } => "identity_rejected",
             Self::SessionOpened { .. } => "session_opened",
             Self::PromptSent => "prompt_sent",
             Self::PermissionRequested { .. } => "permission_requested",
@@ -336,7 +368,9 @@ impl AcpClient {
     /// cwd・ファイルシステム・ネットワークの隔離は呼び出し元（task
     /// container、doc 10 の runner 境界）が transport を作る時点で強制
     /// する前提。ここで transport を受け取ることで、隔離なしの起動経路を
-    /// 型のレベルで存在させない。
+    /// 型のレベルで存在させない。接続後は `initialize` で返ったエージェント
+    /// 名を grant の連携と照合し、一致しなければ prompt を送らず拒否する
+    /// （別連携宛の grant で別エージェントへ送る誤配送の防止）。
     pub async fn run_prompt(
         &self,
         grant: &AgentGrant,
@@ -357,6 +391,7 @@ impl AcpClient {
         let declarations = self.declarations.clone();
         let audit = Arc::clone(&self.audit);
         let envelope_body = envelope.body().to_owned();
+        let expected_integration = grant.integration.clone();
 
         Client
             .v2()
@@ -402,7 +437,12 @@ impl AcpClient {
                 // Disconnected）を保ったまま外へ出すため、内側の結果を
                 // Result<_, AcpError> で包む。SDK の Error は Protocol に詰める。
                 match self
-                    .run_session(&connection, &envelope_body, &mut update_rx)
+                    .run_session(
+                        &connection,
+                        &envelope_body,
+                        &mut update_rx,
+                        &expected_integration,
+                    )
                     .await
                 {
                     Ok(report) => Ok(Ok(report)),
@@ -423,6 +463,7 @@ impl AcpClient {
         connection: &ConnectionTo<Agent>,
         envelope_body: &str,
         update_rx: &mut UnboundedReceiver<schema::UpdateSessionNotification>,
+        expected_integration: &str,
     ) -> Result<SessionReport, AcpError> {
         let initialize = connection
             .send_request(schema::InitializeRequest::new(
@@ -433,6 +474,19 @@ impl AcpClient {
             .await?;
         if initialize.capabilities.session.is_none() {
             return Err(AcpError::NoSessionCapability);
+        }
+        // grant と接続先を結び付ける: initialize で返ったエージェント名が
+        // grant の連携と一致しなければ、envelope を別エージェントへ誤配送
+        // しないよう session 開始前に止める。
+        if initialize.info.name != expected_integration {
+            self.audit.record(AcpAuditEvent::IdentityRejected {
+                expected: expected_integration.to_owned(),
+                actual: initialize.info.name.clone(),
+            });
+            return Err(AcpError::IntegrationMismatch {
+                expected: expected_integration.to_owned(),
+                actual: initialize.info.name,
+            });
         }
         self.audit.record(AcpAuditEvent::Initialized {
             agent: initialize.info.name.clone(),
