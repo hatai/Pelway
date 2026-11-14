@@ -115,6 +115,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - Devin CLI のレビュースレッドは T3 の Devin CLI インスタンス `devin_review` で動かす。skill `review-pr` をそのまま使い、権限モードは Devin CLI 公式 sandbox の Autonomous 一択になる（`bypass` は使わない）。`devin_review` は起動ラッパーで `DEVIN_SANDBOX=true` と専用設定（ドメイン許可リスト・permissions deny）を付けて立ち上がり、GitHub 以外への通信とワークスペース外への書き込みを実行時に遮断する。仕組みと採用の条件（確認の記録）は `docs/dev-environment.md` の「レビュー担当の Devin CLI」
 - Devin CLI が実装した PR には Devin CLI のレビューを付けない。同じモデル系列が自分の出力を採点する偏りを避ける
 - 指揮役はレビューを兼ねない。指揮役が作った PR もレビュースレッドに回す
+- CI 上で動かす助言セキュリティレビューの起動の認可と実行の隔離は `docs/agents/ci-security-review.md` に定める
 
 ## 指揮役の運用ルール
 
