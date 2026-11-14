@@ -80,6 +80,8 @@ scripts/agent-gh dev issue view <N> --json title,body,labels,comments
 ```markdown
 ## 実装者メモ（round <R>）
 
+対象 head: <この round の終わりの報告が対象とする PR の head の SHA。終わりの報告を出さない round（途中経過・停止）では書かない>
+
 1. 詰まった箇所: <手順の番号かファイルのパス>: <何が起きたか>
 2. 曖昧だった文: 「<skill・Issue・AGENTS.md・docs の文をそのまま引用>」（<ファイルのパスと見出し>）
 3. 仮定と解釈: <置いた仮定>。<選んだ解釈と、選ばなかった解釈>
@@ -160,6 +162,12 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 
 これに `role: "review"`、`runtimeMode: "auto-accept-edits"`、`isolation: "worktree"` を付ける。委託したら返答を終えて完了の通知を待つ（ポーリングしない）。高リスクで複数担当にしたときは、全員の結果がそろうまで次に進まない。
 
+委託・再委託のたびに、対象 PR に委託記録コメントを残す（巡回がレビューの証跡として使う）。コメントの行頭がこの形であること（引用やコードブロック内の出現は証跡にならない）。`<SHA>` は委託時点の PR の head、`to:` はレビュー担当。
+
+```bash
+scripts/agent-gh dev pr comment <M> --body "[review-request] head: <SHA> to: <担当>"
+```
+
 差分が `scripts/agent-gh` を変えるときはレビューを委託しない。終わりの報告で `ready:` の行を書かずに止まり、指揮役が main から立てるレビュースレッドに回るのを待つ（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
 
 ### 9. レビュー結果を処理する
@@ -207,11 +215,13 @@ must-fix: <対応した内容。Approve のときは「なし」>
 
 ```
 issue: #<N>
-pr: <PR の URL>
+pr: <PR の URL>（head <SHA>）
 review: <ラウンド数> → approve
 ready: done
 memo: docs/worklogs/issue-<N>.md（round <R>）
 ```
+
+`pr:` の行には対象 head（`pr ready` を実行した時点の PR の head の SHA）を併記し、実装者メモの「対象 head」と同じ値にする（巡回が終わりの報告と head を結び付ける根拠）。
 
 止まった場合は `pr:` の代わりに `stopped: <止まる条件の表の 1 列目>` を書く。
 

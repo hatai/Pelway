@@ -100,7 +100,9 @@ ls docs/worklogs/bugs
 報告ファイルだけを含む Draft PR を出す（skill `write-pull-request`。証拠のファイルは
 PR に含めない。報告には必要な最小の引用を書く。ブランチは `agent/investigate-<slug>`、
 本文の `Implementer:` の行には指示の 2 行目 `Assigned: role=investigate ...` の値を
-`role=investigate` を除いて写す）。追い調査では同じブランチに積んで push する
+`role=investigate` を除いて写す）。報告の対象が Issue（調査 Issue）のときは、
+報告 PR の本文に `Part of #<Issue 番号>` を必ず書く（調査 Issue では報告 PR が
+そのまま主 PR になるため。`Part of` は Issue を自動で閉じない）。追い調査では同じブランチに積んで push する
 （Draft PR が更新される）。スレッドの返答には、上の報告に `pr: <報告の PR 番号>` の行を
 添える。脆弱性の疑いで止めた調査では、この PR を出さない。
 
