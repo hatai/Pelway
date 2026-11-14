@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「push 後は `agent-gh-resign` が head を付け替えるため、メモの対象 head は署名付き SHA で書き直してから push する」を足す（round 3・4 で 2 回踏んだ）
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（round 6）
+
+対象 head: 3502718（この round の実装の実体を含むコミット。このメモを含むコミットの親。署名付け替え後の値に直す）
+
+1. 詰まった箇所: `src/acp.rs`: round 5 のレビュー must-fix 2 件。(a) grant と接続先の同一性が無かったため `initialize.info.name` と grant の連携を照合し、不一致なら session 開始前に `IntegrationMismatch` で拒否（監査 `identity_rejected`）。(b) 操作名申告を信頼する構造は、client capability・client 提供 MCP server を一切 advertise しないことを試験で固定し、residual risk を module doc に明記
+2. 曖昧だった文: 「Route protected actions through a gateway-controlled executor and derive the operation from that trusted call, or ensure the agent cannot perform those actions outside that executor.」（PR #304 round 5 レビュー本文）— gateway executor は R1-Q7(a) で後続 Issue 扱いと確定済みのため、この PR では「Pelway 仲介の副作用経路を持たない」ことを確かめる方向に読み替えた
+3. 仮定と解釈: `initialize.info.name` を連携の識別子とするのは名前ベースの暫定 binding と解釈した（偽装は transport を作る呼び出し元の真正性に依存し、誤配送の防止が目的）。grant の integration 値は接続先の申告名に合わせる契約とした
+4. 足りなかった情報・検証手段: 「不届きなエージェントが拒否後も実行する」動的検証は adapter 層では原理的に不可能（permission は仕様上 advisory）。ゼロ capability・ゼロ MCP server を double 側で観測する試験で代替した
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 に「レビューが『実装不能・後続 Issue の責務』を must-fix にしたときは、同じ文を引用して代替の担保（試験・doc・型制約）を書いたうえで stop 条件かどうかを示す」を足す
+
+使ったスキル: `.agents/skills/implement-issue`
