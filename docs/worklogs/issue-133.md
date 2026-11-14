@@ -26,7 +26,7 @@
 
 ## 実装者メモ（round 5）
 
-対象 head: ab0f41c（この round の実装の実体を含むコミット。このメモを含むコミットの親。署名付け替え後の値に直す）
+対象 head: b7a30a8（この round の実装の実体を含むコミット。このメモを含むコミットの親。署名付け替え前は ab0f41c）
 
 1. 詰まった箇所: `src/acp.rs`: round 4 のレビュー must-fix。`run_stdio` が gateway の環境変数・cwd を継承した子プロセスを隔離なしに起動でき、ExportEnvelope の境界を迂回する経路だった。R1-Q6 案a「隔離は task container 側」の確定回答に沿い、`run_stdio` を削除して `run_prompt` が隔離済み transport のみを受け取る形にした
 2. 曖昧だった文: 「Run the agent in a sandbox with an explicit environment, cwd, filesystem mounts, and network policy before exposing this path, or make this API accept only an already-isolated transport.」（PR #304 round 4 レビュー本文）— adapter で sandbox を実装するか API 形状で防ぐか分かれたが、container 隔離は別層の責務なので後者を選んだ
