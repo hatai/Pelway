@@ -7,7 +7,7 @@ body:
       value: |
         見出しと書き方の正本は skill `write-issue`（`.agents/skills/write-issue/SKILL.md`）。このフォームはその写しで、見出しを変えるときは両方を同じ PR で直す。
         1 Issue = 1 PR。PR の差分は追加 800 行・削除 2000 行まで（`mise run pr-size` で数える。lockfile と生成物は除く）。
-        書き終えたら skill `write-issue` の手順 6 のゲートで確かめ、`ready-for-agent` を付けると着手の合図になる。
+        書き終えたら skill `write-issue` の手順 6 のゲートで確かめる。`ready-for-agent` を付けると GitHub Projects のボードの Backlog に載り、人間がカードを Todo へ動かすと着手の合図になる。
   - type: textarea
     id: goal
     attributes:

@@ -20,7 +20,7 @@ The AI dev team (see `docs/superpowers/specs/agent-team.md`) tracks a task's sta
 
 | Label | Set by | Removed by | Meaning |
 | ----- | ------ | ---------- | ------- |
-| `ready-for-agent` | Human, after checking an `agent-task` issue | Grok Bot, when it starts the task | Fully specified, ready for an agent |
+| `ready-for-agent` | Human, after checking an `agent-task` issue | Human only — agents keep it after starting (it is also the board's auto-add condition; see `docs/agents/grokbot-runbook.md` "ボードと巡回") | Fully specified, ready for an agent |
 | `agent:working` | Grok Bot, when it starts the task | Grok Bot, when the PR merges or `needs-human` is added | An agent is working on it |
 | `agent:devin` | Grok Bot, when it assigns the task to Devin CLI | Grok Bot, when the PR merges or `needs-human` is added | The task's implementer is Devin CLI (SWE-2) |
 | `needs-human` | Grok Bot or an agent, when it stops | Human, after deciding | The agent stopped and needs a human decision |
