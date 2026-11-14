@@ -74,7 +74,7 @@ PR や Issue に手を付けるときは、最初に対象 Issue の受け入れ
 
 ## 1. サイクルの始め
 
-1. `scripts/conductor-watch.sh` が動いていることを確かめる（動いていなければ起動する）
+1. `scripts/conductor-watch-ensure.sh` を実行する（冪等の起動入口。動いていなければ起き、動いていれば何もしない）
 2. `t3 thread list --json` と `scripts/agent-gh dev pr list` で、実行中のスレッド、Draft の PR、レビュー待ちの PR を数える。PR の中身（チェック・レビュー・コメントの状態）を見るときは、生の `gh api` を読む代わりに skill `pr-watch` の `pr-digest` を使う
 3. 実行中のスレッドのタイトルが「スレッド名」の形式に合っているかを見て、合わないものを直す
 4. runbook の「同時数と順番待ち」の順で、次の一手を 1 つずつ決める
@@ -252,7 +252,7 @@ runbook 6 の手順に従う。人間に上げる前に、手順 2 の「effort 
 
 1. Grok Bot が動かないことを人間が確かめ、代行を頼んだ
 2. T3 のスレッドとして動くなら `t3_thread_launch` で作業スレッドを、それ以外なら T3 Connect の MCP につながる（レビューの権限 `auto-accept-edits` を指定してスレッドを立てるために必要）
-3. `scripts/conductor-watch.sh` を起動した
+3. `scripts/conductor-watch-ensure.sh` を実行した
 4. 引き継ぐ状態を読んだ: `agent:working` の Issue、Draft・レビュー待ちの PR、実行中のスレッド、`needs-human` の Issue、指揮役の作業ログ
 5. 代行の作業ログ `docs/worklogs/<日付>-conductor-substitute.md` を作った（判断と改善点を書く）
 
@@ -262,4 +262,4 @@ runbook 6 の手順に従う。人間に上げる前に、手順 2 の「effort 
 2. 作業ログに、進行中の Issue・PR、待っているもの、未反映の改善点を書く
 3. 作業ログを PR にしてマージする
 4. 人間に、作業ログの場所と、戻した時点の状態を報告する
-5. `scripts/conductor-watch.sh` を止める
+5. 見張りを止めた（systemd unit で動いていれば `systemctl --user stop pelway-conductor-watch.service`、直接起動ならプロセスの kill）
