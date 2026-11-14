@@ -78,6 +78,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 ## 状態の表し方
 
 - 正本は GitHub Issues と GitHub Projects のボード（`users/hatai/projects/7`「Pelway agent team」）
+- 指揮役スレッドのコンテキスト圧縮は、状態の正本が GitHub と巡回記録にあるため、外部化と復元検証を伴う手順として仕組み化できる。詳細は skill `command-team` の「コンテキスト管理」
 - ボードの Status（Backlog・Todo・Working・In review・Changes requested・Ready to merge・Needs human・Done）が Issue の処理状態を表す。Status は巡回が導出規則（runbook の「ボードと巡回」）で補正した後の確定状態が正
 - ラベルは `ready-for-agent`（人間が付ける入場の条件。ボードへの自動追加の合図で、着手後も外さない）、`agent:working`（割り当て中。指揮役が付ける）、`agent:devin`（Devin CLI に割り当てたときに指揮役が付ける）、`needs-human`（人間の判断待ち）の 4 つ
 - 「レビュー待ち」「修正待ち」「マージ待ち」は PR の Draft 状態・レビュー状態・CI 結果と委託記録から、巡回が Status に反映する
