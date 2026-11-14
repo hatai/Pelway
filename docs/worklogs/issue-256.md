@@ -57,3 +57,13 @@
 5. 改善案: `docs/dev-environment.md`「レビュー担当の Claude」の確認手順に、許可リスト経由の拒否と許可経路からの egress の 2 項目を足した。さらに「deny を追加・変更したら確認手順をやり直す」を設定表に足す余地がある
 
 使ったスキル: `implement-issue`、`command-team`（再委託の形）
+
+## 実装者メモ（round 10）
+
+1. 詰まった箇所: hatai が許可を gh サブコマンド単位に絞ったあとの再実測。委託子で 7 項目（`repo clone`・`auth status`・`git switch` は deny、`api --hostname` はプロキシ遮断、`api /rate_limit`・`pr view`・`issue view` は成功）すべて想定どおり。許可の絞り込みでレビュー用コマンドが壊れていないことも併せて確認した
+2. 曖昧だった文: 「委託子で同じ 2 項目を再実測」（指揮役）。許可の形が変わったため、確認項目は deny される形の追加（`repo clone`・`auth status`）と許可経路の回帰確認（`pr view`・`issue view`）に広げて解釈した
+3. 仮定と解釈: 許可の列挙は review-pr の実使用形に基づくため `pr comment` は含めなかった（レビュー担当の投稿は `pr review`）。選ばなかった解釈: `pr comment` も許可に入れる（レビュー担当は `pr review` で投稿するため不要）
+4. 足りなかった情報・検証手段: 委託の round 数え方の境界（`checks pending` での失敗は数えないが、must-fix による修正→再委託は数える）。`pr checks --required` がこの repo で空を返すため委託子が誤判定することがある
+5. 改善案: `.agents/skills/review-pr/SKILL.md` に「`gh pr checks --required` は branch protection の必須チェックを返すため、この repo では空になる。通常の `pr checks` を使う」を足す（round 3 で両委託子が同じ誤判定をした）
+
+使ったスキル: `implement-issue`、`command-team`（委託の形）
