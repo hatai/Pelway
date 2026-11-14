@@ -194,6 +194,24 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 
 `network_proxy` は Codex の試験的な機能で、`--enable network_proxy` が無いと権限プロファイルのネットワーク制限が効かない。Codex を更新したら `mise run codex-review-check` で、GitHub にはつながり、それ以外にはつながらないことを確かめる。
 
+### レビュー委託（delegate_task）での確認
+
+通常の PR のレビューは、実装担当のスレッドが `delegate_task` で `codex_review` の子タスクとして委託する（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。委託の子がスレッドと同じ制限（権限プロファイル `review`、ネットワークは `api.github.com` と `github.com` だけ）を継承するかを、実 PR での初回委託により確かめる。初回の委託の指示には、次の確認を報告に含めるよう足す。記録されるまでは、2 回目以降の委託によるレビューを行わない。
+
+- `scripts/agent-gh review api /rate_limit` が成功する（GitHub にはつながる）
+- `curl -sS https://example.com` が失敗する（GitHub 以外にはつながらない）
+- worktree の外への書き込みと `git switch` が拒否される
+- `scripts/agent-gh review pr review` でレビューを投稿できる
+
+| 項目 | 結果 | 実施日 |
+|---|---|---|
+| 実施日（初回委託を行った PR） | 未実施 | — |
+| ネットワーク制限の結果（GitHub にはつながり、それ以外にはつながらないか） | 未実施 | — |
+| 書き込み・checkout の制限の結果 | 未実施 | — |
+| レビュー投稿の結果（`agent-gh review pr review` が通ったか） | 未実施 | — |
+
+`claude_review`・Devin CLI をレビュー委託で使うときも、それぞれの確認手順に加えてこの確認を済ませる。
+
 ## レビュー担当の Claude（claude_review）
 
 高リスクの PR と抜き取りのレビュースレッドは、T3 の Claude インスタンス `claude_review` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。Codex のレビュー担当と同じ条件にそろえる。
