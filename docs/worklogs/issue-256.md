@@ -77,3 +77,13 @@
 5. 改善案: command-team の記録不在時の文面を「Codex（確認済みなら Devin CLI も）で回し」に直す余地がある（claude の nit）
 
 使ったスキル: `implement-issue`、`command-team`（委託の形）
+
+## 実装者メモ（round 12）
+
+1. 詰まった箇所: なし。hatai が選択肢 (a) を承認し、残課題 2 件を別 Issue（#305・#306）として起票、記録欄と PR 本文に決裁を記録した
+2. 曖昧だった文: 「#295 と重複する部分は参照で繋げる」。#295 は agent-gh のサブコマンド絞り込みなので、2 件の Issue の「対象外」「関連情報」で相互に参照する形にした
+3. 仮定と解釈: 起票した Issue に `ready-for-agent` は付けない（write-issue のゲートは人間の判断）
+4. 足りなかった情報・検証手段: なし
+5. 改善案: なし
+
+使ったスキル: `implement-issue`、`command-team`（委託の形）、`write-issue`

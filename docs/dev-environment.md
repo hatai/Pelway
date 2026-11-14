@@ -242,6 +242,11 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 | ネットワーク制限の結果（`api.github.com` と `github.com` だけにつながるか。`curl -sS https://example.com` が失敗したか） | `curl -sS https://example.com` は permissions の deny で拒否（実行自体されない）。GitHub API には到達した。egress の実測: 許可経路の `scripts/agent-gh review api --hostname example.com /` は実行されるが sandbox のプロキシで遮断（`host is not on the allow list`）。`scripts/agent-gh review git ls-remote https://example.com/` は deny で拒否 | 2026-11-14 |
 | Codex 側（`codex_review`）との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 許可先は同じく GitHub のみ。遮断の仕組みが異なり、Codex は `network_proxy`＋権限プロファイル、Claude は `~/.claude-review/settings.json` の permissions（allow/deny）＋ sandbox。ファイルの書き込みは Write/Edit ツール自体が無効化される。許可・拒否のどちらにも載っていないコマンドは、T3 が `--permission-mode=acceptEdits` を渡すため承認要求になる（`defaultMode: dontAsk` より acceptEdits が優先される）。書き込みの遮断も異なり、Codex の権限プロファイルは `/tmp` 以外を読み取り専用にするが、Claude の OS sandbox は worktree と共有 `.git` への書き込みを許すため、permissions の deny が漏れる形（許可リスト経由）では書き込みが止まらない | 2026-11-14 |
 
+残っている既知の経路は hatai の決裁で別 Issue で追う（PR #287 の round 4 で両レビュー担当が request-changes として指摘し、hatai が残リスクを受容）:
+
+- `api -F <key>=@<file>`・`pr review --body-file <file>` で読み取り可能なローカルファイルを GitHub へ送信できる（#305）
+- 読み取り系 `git` の `--output=<path>` での書き込みと `git grep -O<cmd>` での実行が、sandbox が worktree・共有 `.git` への書き込みを許すことと重なって残る（#306）
+
 ## レビュー担当の Devin CLI（devin_review）
 
 通常の PR の Codex とのローテーションと、高リスク PR の 3 人目のレビュースレッドは、T3 の Devin CLI インスタンス `devin_review` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。モデルは `swe-2-high`。`devin_review` のモデルオプションは `mode` だけを受け付け、`thought_level`・`speed` は渡せない（effort の引き上げは行わない）。sandbox が効いているセッションでは権限モードは Autonomous 一択で、`mode` に `smart` などを渡しても内部では Autonomous の扱いになる。
