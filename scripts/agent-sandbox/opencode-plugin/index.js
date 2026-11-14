@@ -1,10 +1,8 @@
-// pelway-sandbox: T3 実装スレッド（worktree セッション）の opencode 用
-// sandbox プラグイン（Issue #151）。~/.t3/worktrees/ 配下のみ適用。
+// pelway-sandbox: T3 実装スレッド（worktree セッション）用 sandbox プラグイン
+//（Issue #151）。~/.t3/worktrees/ 配下のみ適用。
 //   1. shell フックで全コマンドを sandbox-shell（bwrap）経由にする。
-//      ネットワークは遮断しない（hatai の指示で許可リスト非採用）。
-//   2. ファイルツールが worktree 外や秘匿パスにアクセスするのを拒否する
-//      （bwrap を通らない経路）。検査は実体パスに対して行い、symlink 越し
-//      の脱走も防ぐ。
+//   2. ファイルツールの worktree 外・秘匿パスへのアクセスを拒否する
+//      （bwrap を通らない経路）。検査は実体パスで行い symlink 越しの脱走も防ぐ。
 
 import fs from "node:fs"
 import os from "node:os"

@@ -1,15 +1,27 @@
 #!/usr/bin/env bash
-# agent-sandbox: T3 実装スレッド用の OS レベル sandbox（Issue #151）。
-# bwrap で「worktree と必要なキャッシュだけ書き込み可、他は read-only」
-# の mount 名前空間を作り、その中でコマンドを実行する。
-#
-#   sandbox-shell -c 'command'        opencode の shell フック経由
-#   sandbox-shell --wrap -- cmd args  devin などプロセスごと包む（devin-impl）
-#
-# ネットワークはホスト共有（hatai の指示で許可リスト非採用）。
-# no-new-privileges により sudo/doas/pkexec は使えない。
+# agent-sandbox: T3 実装スレッド用の OS レベル sandbox（Issue #151）。bwrap で
+# 「worktree と必要なキャッシュだけ書き込み可」の mount 名前空間を作る。
+#   -c 'command'   opencode の shell フック経由
+#   --wrap -- cmd  devin などプロセスごと包む（devin-impl）
+#   --hook         .devin/hooks.v1.json の PreToolUse フック（exec を -c 経由に）
+# ネットワークはホスト共有（許可リスト非採用）。no-new-privileges で sudo 不可。
 
 set -euo pipefail
+
+# --hook: devin の PreToolUse フック。stdin の tool_input.command を
+# `sandbox-shell -c` 経由に書き換えて返す。devin 自体は wrap namespace
+#（credentials.toml 可視）で、agent のコマンドは資格情報をマスクした
+# ネスト namespace に入る。
+if [[ "${1:-}" == "--hook" ]]; then
+  command -v python3 >/dev/null 2>&1 || {
+    echo '{"decision":"block","reason":"pelway-sandbox: python3 不在"}'; exit 0; }
+  exec python3 -c 'import json,sys
+try: c=json.load(sys.stdin)["tool_input"]["command"]
+except Exception: c=""
+print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse",
+ "updatedInput":{"command":sys.argv[1]+" -c "+json.dumps(c)}}
+ } if c.strip() else {"decision":"block","reason":"pelway-sandbox"}))' "$0"
+fi
 
 mode=shell
 if [[ "${1:-}" == "--wrap" ]]; then

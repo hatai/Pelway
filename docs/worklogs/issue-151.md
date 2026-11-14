@@ -88,3 +88,13 @@ permissions は補助層で、境界は mount 側が担う。
 5. 改善案: `docs/dev-environment.md` の「実装担当の sandbox」に「ファイルツールの検査は実体パスで行う（symlink 越しの脱走対策）」を足した（round 1 のレビュー指摘対応として適用済み）
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 2）
+
+1. 詰まった箇所: hooks.v1.json の `command` に引数付きパスを書くと shell 解釈の問題で起動に失敗したため、引数なしの `devin-hook` エントリポイントを用意。また初版の `python3 -` は stdin をプログラムに使うためイベント JSON が読めず `python3 -c` に直した
+2. 曖昧だった文: 「`updatedInput` は `PreToolUse` `hookSpecificOutput` 内に返す」（devin CLI 公式ドキュメント hooks/overview）
+3. 仮定と解釈: devin プロセスは credentials.toml を読む必要があるため outer namespace では `~/.local/share/devin` を見せたままにし、exec コマンドだけをネストした sandbox（同パスは tmpfs マスク）に入れる。選ばなかった解釈: credentials.toml の ro-bind（atomic write で起動に失敗）
+4. 足りなかった情報・検証手段: hook の command の起動形式と `$HOME` 展開の有無はドキュメント未記載で、debug hook（stdin/stdout を tee 記録）で実機確認した
+5. 改善案: `docs/dev-environment.md` の devin-impl の行にフックによる資格情報分離を追記した
+
+使ったスキル: implement-issue

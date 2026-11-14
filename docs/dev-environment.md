@@ -290,8 +290,8 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 |---|---|
 | `scripts/agent-sandbox/sandbox-shell` | 共通の bwrap ラッパー。コマンドを「worktree と必要なキャッシュだけ書き込み可」の名前空間で実行する。`-c` 形式（シェル）と `--wrap` 形式（プロセスごと包む）の 2 つの呼び方がある |
 | `scripts/agent-sandbox/opencode-plugin/index.js` | opencode のグローバルプラグイン（V2 API、`id: pelway-sandbox`）。`~/.t3/worktrees/` 配下のセッションだけに適用され、(a) shell フックで全コマンドを `sandbox-shell` 経由にする、(b) ファイルツール（write/edit 等）の worktree 外への書き込みと秘匿パスの読み取りを拒否する（bwrap を通らない経路のため）。検査は実体パス（symlink 解決後。新規ファイルは最深の既存祖先まで解決）に対して行い、worktree 内 symlink 越しの脱走も防ぐ |
-| `scripts/agent-sandbox/devin-impl` + `devin-config.json` | `acpRegistry_devin` の `config.commandPath` に指定する起動ラッパーと専用設定。`devin acp` プロセス自体を `sandbox-shell --wrap` で包む。Devin 内蔵の `--sandbox` は使わない（後述） |
-| リポジトリの `opencode.json`・`.opencode/`・`.devin/config.json` | sandbox が read-only でマウントする同梱ファイル。sandbox 自身を無効化する設定（`plugins: ["-pelway-sandbox"]` や `.devin` の permissions/hooks）を worktree 内から作れなくする |
+| `scripts/agent-sandbox/devin-impl` + `devin-config.json` + `.devin/hooks.v1.json` | `acpRegistry_devin` の `config.commandPath` に指定する起動ラッパーと専用設定。`devin acp` プロセス自体を `sandbox-shell --wrap` で包み、さらに PreToolUse フック（`sandbox-shell --hook`）が exec のコマンドをネストした sandbox に送る。devin プロセスは `credentials.toml` を読めるが、agent のコマンドは `~/.local/share/devin` がマスクされた namespace で動くため資格情報を分離できる。Devin 内蔵の `--sandbox` は使わない（後述） |
+| リポジトリの `opencode.json`・`.opencode/`・`.devin/` | sandbox が read-only でマウントする同梱ファイル。sandbox 自身を無効化する設定（`plugins: ["-pelway-sandbox"]` や `.devin` の permissions/hooks の変更）を worktree 内から作れなくする |
 
 bwrap が作る名前空間の要点:
 
@@ -340,7 +340,7 @@ bwrap が作る名前空間の要点:
 
 - opencode のファイルツール遮断はプラグイン（プロセス内フック）で行い、OS 境界はシェル側の bwrap が担う。プラグイン自体の無効化は、worktree 内の `opencode.json[c]`・`.opencode/` を sandbox が read-only 化して塞いでいる
 - `sandbox-shell` はマスク対象パスが存在しない場合に tmpfs でマウントするが、bwrap はマウントポイントをホスト側のファイルシステムに作成する。Pelway は対象ファイルをリポジトリに同梱して常に ro-bind にしている。他リポジトリの worktree では、初回の sandbox 実行で空の `opencode.json`・`.opencode/`・`.devin/` が作られる
-- Devin の wrap 方式では `~/.local/share/devin/credentials.toml` は sandbox 内から読める（devin プロセス自身が必要とするためマスクできない）。同様に `~/.config/fnox/age.txt`・`~/.config/pelway-agent/fnox.toml` は `scripts/agent-gh` が必要とするため読める。ネットワークを開放しているため理論上は外部送信が可能であり、制限の第一目的はホストへの書き込み・昇格の防止である。共有 git dir も全体が書き込み可（他 worktree のメタデータや `objects/` も含まれるが、`config`・`hooks/` は read-only で保護）
+- Devin の wrap 方式では `~/.local/share/devin/credentials.toml` は devin プロセス自身（outer namespace）から読める必要があるため、`agent-gh` が使う `~/.config/fnox/age.txt`・`~/.config/pelway-agent/fnox.toml` と同様、ネットワークが開放である以上、理論上の外部送信経路は残る。agent の exec コマンドは `.devin/hooks.v1.json` のフックでネストした namespace（`~/.local/share/devin` は tmpfs マスク）に入るため、コマンドからは資格情報に届かない。共有 git dir も全体が書き込み可（`config`・`hooks/` は read-only で保護）
 
 ## シークレットの扱い（fnox）
 
