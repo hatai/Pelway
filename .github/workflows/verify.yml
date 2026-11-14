@@ -1,4 +1,4 @@
-# Pelway のPR品質検査（main 向け Pull Request）。
+# Pelway のPR品質検査（main 向け Pull Request と main への push）。
 # ローカルの公式確認（mise run verify）と同じ検査を GitHub-hosted runner で回す。
 # 方針は docs/dev-environment.md に従う:
 #   - ツールのバージョンは mise.toml / mise.lock が単一の管理元（Rust 1.96.0、hk 2.11.1 等）
@@ -16,6 +16,10 @@
 name: verify
 
 on:
+  # main への push でも走らせる: octocov が main のカバレッジレポートを artifact に保存する
+  # （main のレポートは main での run でしか保存されない。octocov README v0.83.5）。
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -259,6 +263,10 @@ jobs:
       # PR へのカバレッジコメント投稿に必要。fork PR の読み取り専用 token では投稿が
       # スキップされるだけで job は落とさない。
       pull-requests: write
+      # base ブランチ（main）の過去レポート artifact の取得と、保存のたびに前の main の
+      # レポート artifact を削除する掃除に必要（octocov-action の公式例が actions: write
+      # を付与）。
+      actions: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -336,15 +344,18 @@ jobs:
         run: mise run coverage
 
       # octocov で PR コメント（増減表示）を作る。レポートの保存・比較は
-      # GitHub Actions の artifact のみ（.octocov.yml の diff.storage.artifacts）。
-      # octocov は mise.toml で 0.83.5 を宣言し、mise.lock が URL と checksum で
-      # 取得物を固定する（出典: https://github.com/k1LoW/octocov/releases/tag/v0.83.5
-      # 公開 2026-11-05）。mise install --locked（mise-action）で導入したロック済み
-      # バイナリを mise exec で実行する（タグだけのその場取得はしない）。
+      # GitHub Actions の artifact のみ（.octocov.yml の report.datastores / diff.datastores）。
+      # artifact への保存には ACTIONS_RUNTIME_TOKEN が必要で、これは run: ステップには
+      # 渡されず action のコンテキストでしか取れないため、公式の octocov-action 経由で
+      # 実行する（action は gh-setup で octocov 本体を導入し actions/github-script から
+      # 実行する）。octocov 本体のバージョンは version + checksum で v0.83.5 に固定する。
+      # checksum は mise.lock が固定しているのと同一のリリースアセット
+      # （octocov_v0.83.5_linux_amd64.tar.gz）の sha256。
       - name: Run octocov
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: mise exec -- octocov
+        uses: k1LoW/octocov-action@v1.5.2
+        with:
+          version: 0.83.5
+          checksum: sha256:3aa6973a8e68036b640dac6ef0c5456dda12289c7abbdaf7b919a036555d8e9c
 
   # PR の差分行数の上限（800 行）を検査する。git と bash だけで動くので mise は入れない。
   # 数え方は scripts/pr-size.sh（linguist-generated とバイナリは除く）。
