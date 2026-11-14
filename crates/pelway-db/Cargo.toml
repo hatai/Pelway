@@ -11,6 +11,9 @@ description = "PostgreSQL layer with tenant Row Level Security for Pelway (ADR 0
 
 [dependencies]
 pelway-contract = { path = "../pelway-contract", version = "0.0.0", default-features = false } # version は cargo-deny の wildcards 検査のため（path 依存の解決には影響しない）
+# 管理操作の監査: prev_hash 鎖（ADR 0007 の形式）と snapshot_hash の SHA-256。
+pelway-audit-checkpoint = { path = "../pelway-audit-checkpoint", version = "0.0.0" }
+sha2 = { version = "0.11", default-features = false }
 sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio", "migrate", "macros"] }
 
 [dev-dependencies]
