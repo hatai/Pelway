@@ -60,23 +60,33 @@ EOF
   chmod +x "$ROOT/repo/scripts/agent-gh" "$ROOT/bin/t3"
 
   # systemctl を除いた最小 PATH。ここに無いコマンドは名前空間内で「無い」扱いになる。
-  for t in bash sh env setsid pgrep ps mkdir dirname python3 cat grep sed tr cut wc sleep flock kill ls head awk date; do
+  for t in bash sh env setsid pgrep ps mkdir dirname python3 cat grep sed tr cut wc sleep flock kill ls head tail awk date; do
     p="$(command -v "$t" 2>/dev/null)" && ln -s "$p" "$ROOT/sysbin/$t"
   done
 
-  # モックの systemctl。start は unit ファイルの ExecStart を読んで setsid で起動する
-  # （本物の unit ファイルが ensure に書かせた内容で動くことを確かめられる）。
+  # モックの systemctl。start は unit ファイルの ExecStart を読んで setsid で起動し、
+  # MainPID を記録する（本物の unit ファイルが ensure に書かせた内容で動くことを
+  # 確かめられる）。show -p MainPID --value・is-active・起動済みの start は本物に倣う。
   cat > "$ROOT/systemd-bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$MOCK/systemctl.log"
 [[ "${1:-}" == "--user" ]] && shift
-if [[ "${1:-}" == "start" ]]; then
-  unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$2"
-  exe="$(sed -n 's/^ExecStart=//p' "$unit" | head -1)"
-  [[ -n "$exe" ]] || exit 9
-  mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch"
-  setsid -f "$exe" 9>&- </dev/null >>"${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch/watch.log" 2>&1
-fi
+verb="${1:-}"; shift || true
+alive() { [[ -s "$MOCK/mainpid" ]] && kill -0 "$(cat "$MOCK/mainpid")" 2>/dev/null; }
+case "$verb" in
+  show)
+    if alive; then cat "$MOCK/mainpid"; else echo 0; fi ;;
+  is-active)
+    alive ;;
+  start)
+    alive && exit 0
+    unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$1"
+    exe="$(sed -n 's/^ExecStart=//p' "$unit" | head -1)"
+    [[ -n "$exe" ]] || exit 9
+    mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch"
+    setsid "$exe" 9>&- </dev/null >>"${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch/watch.log" 2>&1 &
+    echo $! > "$MOCK/mainpid" ;;
+esac
 exit 0
 EOF
   chmod +x "$ROOT/systemd-bin/systemctl"
@@ -99,6 +109,7 @@ UNIT="$ROOT/config/systemd/user/pelway-conductor-watch.service"
 count() { pgrep -f 'conductor-watch\.sh' | wc -l | tr -d ' '; }
 pids()  { pgrep -f 'conductor-watch\.sh' | head -1; }
 wait0() { local i; for i in 1 2 3 4 5 6 7 8 9 10; do [[ "$(count)" == 0 ]] && return 0; sleep 0.2; done; return 1; }
+waitn() { local i; for i in {1..15}; do [[ "$(count)" == "$1" ]] && return 0; sleep 0.2; done; [[ "$(count)" == "$1" ]]; }
 t() { local n="$1"; shift; if "$@"; then echo "ok   $n"; else echo "FAIL $n"; fi }
 eq() { [[ "$1" == "$2" ]]; }
 neq() { [[ "$1" != "$2" ]]; }
@@ -115,6 +126,15 @@ if [[ "$MODE" == systemd ]]; then
   p1="$(pids)"
   bash "$ENS" >>"$MOCK/out.log" 2>&1
   t "systemd: second ensure keeps 1"     eq "$(count)" "1"
+  # unit 外で動く見張りは、kill しても復旧しない形のため unit に置き換える
+  setsid -f bash "$ROOT/repo/scripts/conductor-watch.sh" >/dev/null 2>&1
+  waitn 2
+  foreign="$(pgrep -f 'conductor-watch\.sh' | grep -vx "$p1" | head -1)"
+  t "systemd: foreign watch present"     eq "$(count)" "2"
+  bash "$ENS" >>"$MOCK/out.log" 2>&1
+  t "systemd: foreign watch killed"      eq "$(kill -0 "$foreign" 2>/dev/null; echo $?)" "1"
+  t "systemd: unit watch kept"           eq "$(kill -0 "$p1" 2>/dev/null; echo $?)" "0"
+  t "systemd: count back to 1"           eq "$(count)" "1"
   kill "$p1" 2>/dev/null; wait0
   bash "$ENS" >>"$MOCK/out.log" 2>&1
   p2="$(pids)"
@@ -130,6 +150,23 @@ else
   t "fallback: second ensure keeps 1"    eq "$(count)" "1"
   bash "$ENS" >>"$MOCK/out.log" 2>&1
   t "fallback: third ensure keeps 1"     eq "$(count)" "1"
+  # セッションを切り離していない見張り（nohup & 相当）は切り離した形に置き換える
+  bash "$ROOT/repo/scripts/conductor-watch.sh" >/dev/null 2>&1 &
+  fragile=$!
+  waitn 2
+  t "fallback: fragile watch present"    eq "$(count)" "2"
+  bash "$ENS" >>"$MOCK/out.log" 2>&1
+  wait "$fragile" 2>/dev/null
+  t "fallback: fragile watch replaced"   eq "$(kill -0 "$fragile" 2>/dev/null; echo $?)" "1"
+  t "fallback: leader watch kept"        eq "$(kill -0 "$p1" 2>/dev/null; echo $?)" "0"
+  t "fallback: count back to 1"          eq "$(count)" "1"
+  # 切り離して起きた見張りが 2 つあるときは後からのものを落として 1 つにする
+  setsid -f bash "$ROOT/repo/scripts/conductor-watch.sh" >/dev/null 2>&1
+  waitn 2
+  t "fallback: extra leader present"     eq "$(count)" "2"
+  bash "$ENS" >>"$MOCK/out.log" 2>&1
+  t "fallback: extra leader killed"      eq "$(count)" "1"
+  t "fallback: original leader kept"     eq "$(kill -0 "$p1" 2>/dev/null; echo $?)" "0"
   kill "$p1" 2>/dev/null; wait0
   bash "$ENS" >>"$MOCK/out.log" 2>&1
   p2="$(pids)"
