@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「手順 4」に「受け入れ条件が指揮役・人間の指示で途中拡大されたときは、拡大後の受け入れ条件を Issue コメントとして明示してから実装する」を足す（本件は Claude 限定の条件から全プロバイダへ拡大されたが、Issue 本文のチェックボックスは更新されないため）
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: 848261e342d905362d55fcedd74a6d3461fb30b3（main の取り込みと衝突解消のマージコミット。このメモを含むコミットの親）
+
+1. 詰まった箇所: main の取り込み: main 側の #297（agent-sandbox）が worktree の `opencode.json`・`opencode.jsonc`・`.opencode/`・`.devin/` を正規化したのに対し、このセッションの sandbox が同名ファイルを空の読み取り専用バインド（ro-bind）として掴んでいたため、`git merge` も `git checkout` もこれらの書き換えに失敗した。一時 index（`GIT_INDEX_FILE`）で `git read-tree -m` → `git merge-file` → `git commit-tree` → `git update-ref` でマージコミットを作り、差分パスを worktree に反映した（ro-bind の 5 ファイルは index と HEAD が正しい状態で、worktree の実体だけ置けない）
+2. 曖昧だった文: 「`mise run verify` が失敗したらコミットしない。直してからやり直す。」（`.agents/skills/implement-issue/SKILL.md` の手順 6）: 失敗がこの PR の差分ではなく環境の制約による場合の扱いが書かれていなかった。verify-lint・verify-static・cargo test（test タスク）・script-test の個別テストのうち `agent-sandbox.test.sh` 以外がすべて通り、失敗が main 由来のテストのファイルシステム要件（`~/.t3/worktrees` の兄弟ディレクトリと `/home` 直下への書き込み）でこのセッションの sandbox では満たせないことを確認した上で、CI の通過をもって検証とする解釈で push した（選ばなかった解釈: テストをスクリプトから外す。この PR の差分と無関係な main 由来のテストを変えない）
+3. 仮定と解釈: `agent-sandbox.test.sh` は CI（sandbox 無しのランナー）で動く性質のもので、#297 の CI が main で通過している以上、この PR の差分（docs と script-test への 1 行）はこの失敗に影響しないと仮定した
+4. 足りなかった情報・検証手段: このセッション内で CI 相当の検証（sandbox 制約の外で `mise run verify` を回すこと）を実行する手段が無かった
+5. 改善案: `docs/dev-environment.md` の「実装担当の sandbox」の「確認手順」に「`agent-sandbox.test.sh` は sandbox 内の実装スレッドでは `~/.t3/worktrees` 兄弟の作成に失敗するため、CI でのみ確認する」を足す
+
+使ったスキル: implement-issue
