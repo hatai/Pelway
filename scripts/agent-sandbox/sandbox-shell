@@ -11,15 +11,16 @@ set -euo pipefail
 # --hook: devin の PreToolUse フック。stdin の tool_input.command を
 # `sandbox-shell -c` 経由に書き換えて返す。devin 自体は wrap namespace
 #（credentials.toml 可視）で、agent のコマンドは資格情報をマスクした
-# ネスト namespace に入る。
+# ネスト namespace に入る。コマンドは shlex.quote（single-quote）で囲む:
+# 二重引用符だと $(...) がネスト開始前に外側シェルで評価されて脱走する。
 if [[ "${1:-}" == "--hook" ]]; then
   command -v python3 >/dev/null 2>&1 || {
     echo '{"decision":"block","reason":"pelway-sandbox: python3 不在"}'; exit 0; }
-  exec python3 -c 'import json,sys
+  exec python3 -c 'import json,shlex,sys
 try: c=json.load(sys.stdin)["tool_input"]["command"]
 except Exception: c=""
 print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse",
- "updatedInput":{"command":sys.argv[1]+" -c "+json.dumps(c)}}
+ "updatedInput":{"command":sys.argv[1]+" -c "+shlex.quote(c)}}
  } if c.strip() else {"decision":"block","reason":"pelway-sandbox"}))' "$0"
 fi
 

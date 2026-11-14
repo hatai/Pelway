@@ -65,17 +65,7 @@ function collectPaths(input) {
   const push = (v) => {
     if (typeof v === "string") out.push(v)
   }
-  for (const k of [
-    "path",
-    "filePath",
-    "file_path",
-    "absolute_path",
-    "notebook_path",
-    "target_file",
-    "directory",
-  ]) {
-    push(input?.[k])
-  }
+  for (const k of ["path", "filePath", "file_path", "absolute_path", "notebook_path", "target_file", "directory"]) push(input?.[k])
   if (Array.isArray(input?.paths)) input.paths.forEach(push)
   for (const k of ["edits", "replacements", "files"]) {
     if (Array.isArray(input?.[k])) {

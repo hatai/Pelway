@@ -98,3 +98,13 @@ permissions は補助層で、境界は mount 側が担う。
 5. 改善案: `docs/dev-environment.md` の devin-impl の行にフックによる資格情報分離を追記した
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+1. 詰まった箇所: hook が返す `updatedInput.command` を `json.dumps` で囲むと二重引用符になり、`$(...)` が outer シェルで評価される（レビュー指摘）。`shlex.quote` の single-quote に変更
+2. 曖昧だった文: 「`updatedInput` は `PreToolUse` `hookSpecificOutput` 内に返す」— コマンドの「安全な埋め込み方」は書かれていない
+3. 仮定と解釈: devin は `updatedInput.command` をシェル経由で実行する、と仮定（静的には確認不可だが `bash --hook: invalid option` の挙動から shell 解釈があることは実測済み）。シェル経由なら single-quote 必須と判断
+4. 足りなかった情報・検証手段: devin が実際に `updatedInput.command` をどのシェルで評価するかはドキュメント未記載。テストは outer で `sh -c` した場合に `$(...)` が評価されないことを確認する回帰テストとした
+5. 改善案: `sandbox-shell --hook` のコメントに single-quote 必須の理由を追記した
+
+使ったスキル: implement-issue

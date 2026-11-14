@@ -23,24 +23,14 @@ install -m 0755 "$src/devin-hook" "$share_dir/devin-hook"
 install -m 0644 "$src/devin-config.json" "$config_dir/config.json"
 
 cat <<EOF
-インストール完了:
-  $plugin_dir/index.js
-  $plugin_dir/sandbox-shell
-  $share_dir/sandbox-shell
-  $HOME/.local/bin/devin-impl
-  $config_dir/config.json
+インストール完了: $plugin_dir $share_dir $HOME/.local/bin/devin-impl $config_dir
 
-次に T3 Code の settings.json（~/.t3/userdata/settings.json）で
-providerInstances.acpRegistry_devin.config に commandPath を追加:
+次に ~/.t3/userdata/settings.json の providerInstances.acpRegistry_devin
+.config に commandPath を追加し、T3 Code を再起動してください:
 
   "providerInstances": {
-    "acpRegistry_devin": {
-      "config": {
-        "commandPath": "$HOME/.local/bin/devin-impl"
-      }
-    }
+    "acpRegistry_devin": {"config": {"commandPath": "$HOME/.local/bin/devin-impl"}}
   }
 
-反映後に T3 Code を再起動し、docs/dev-environment.md「実装担当の
-sandbox」の確認手順を実行してください。
+確認手順は docs/dev-environment.md「実装担当の sandbox」を参照。
 EOF

@@ -136,14 +136,21 @@ NODE
   rm -rf "$pwt" "$HOME/sbx-plug-out"
 fi
 
-# 13. --hook: exec を -c 経由に書き換える（解釈不能なら block）
+# 13. --hook: exec を single-quote 付き -c 経由に書き換える（解釈不能なら block）
 out="$(echo '{"tool_input":{"command":"echo x"}}' | "$SCRIPT" --hook)"
-[[ "$out" == *"$SCRIPT -c \\\"echo x\\\""* ]] || failures+=("hook rewrite: got '$out'")
+[[ "$out" == *"$SCRIPT -c 'echo x'"* ]] || failures+=("hook rewrite: got '$out'")
 [[ "$(echo bad | "$SCRIPT" --hook)" == *'"decision": "block"'* ]] || failures+=("hook block")
 
-# 14. wrap 内でネストした shell は devin 資格情報を隠す（outer では見える）
+# 14. hook 出力の $(...) が outer シェルで評価されない（二重引用符だと脱走する）
+cmd="$(echo '{"tool_input":{"command":"echo $(mkdir -p ~/.local/share/devin/evil)"}}' \
+  | "$SCRIPT" --hook \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["hookSpecificOutput"]["updatedInput"]["command"])')"
+(cd "$wt" && PELWAY_SBX_ROOT="$wt" "$SCRIPT" --wrap -- sh -c "$cmd" >/dev/null)
+[[ ! -d "$HOME/.local/share/devin/evil" ]] || failures+=("hook outer-eval: $(...) が外側で評価された")
+
+# 15. wrap 内でネストした shell は devin 資格情報を隠す（outer では見える）
 mkdir -p "$HOME/.local/share/devin" && touch "$HOME/.local/share/devin/sbx-probe"
-trap 'rm -f "$HOME/.local/share/devin/sbx-probe"; chmod -R u+w "$base" 2>/dev/null; rm -rf "$base"' EXIT
+trap 'rm -rf "$HOME/.local/share/devin/evil"; rm -f "$HOME/.local/share/devin/sbx-probe"; chmod -R u+w "$base" 2>/dev/null; rm -rf "$base"' EXIT
 out="$(cd "$wt" && "$SCRIPT" --wrap -- bash -c "test -f ~/.local/share/devin/sbx-probe && echo OUTER; '$SCRIPT' -c 'test -f ~/.local/share/devin/sbx-probe && echo INNER-SEE || echo INNER-HIDDEN'")"
 check "wrap outer sees devin" "$(head -1 <<<"$out")" "OUTER"
 check "nested hides devin" "$(tail -1 <<<"$out")" "INNER-HIDDEN"
