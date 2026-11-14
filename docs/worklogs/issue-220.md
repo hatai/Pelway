@@ -103,3 +103,11 @@
 3. 仮定と解釈: レビュー指摘「通知の読み取りを必須にし、記録と報告がその後であること」に対し、代行が兆候に応答するというシナリオの意図から、`action=read` of notice.txt を必須とし `action=log`・`action=report` はその後の行のみ採点とした。取り込みコマンドについては「成功したものだけを数える」とし、`exit` 未記録は形式どおり有効（README が exit を任意と定義するため、必須化すると有効ログを不合格にする）。
 4. 足りなかった情報・検証手段: fail フィクスチャ `fail-no-notice.log`（通知の読み取りなし）・`fail-before-notice.log`（記録・報告が通知より前）・`fail-update-failed.log`（取り込み exit=1 の後に CI pass・merge）を追加し、agent-team-evals.test.sh で全件の合否を確認。
 5. 改善案: なし。
+
+## 実装者メモ（round 14）
+
+1. 詰まった箇所: なし。
+2. 曖昧だった文: レビュー指摘「CI pass も対象 PR #113 の記録に限定するか、ケース入力から対象番号を明示して同じ対象であることを検証」は二者択一の提示。環境（prs.json・branch-113.txt）が PR #113 を明示するため、update-branch と merge を 113 に固定する前者を採用し、CI 行は detail が別の PR 番号（#N かつ N≠113）を指すものを証拠から外す形にした（detail なしの `action=ci state=pass` は前ラウンドの指摘どおり有効なまま）。
+3. 仮定と解釈: `git rebase|merge origin/main` の取り込みは PR 番号を持たないため対象外とせず従来どおり受理。`action=merge pr=<113 以外>` は対象のマージではないため「マージしていない」経路の扱い（評価対象の動作ではない）。
+4. 足りなかった情報・検証手段: fail フィクスチャ `fail-wrong-pr.log`（別 PR の update・CI pass・merge を記録）を追加。CI 行の `#113` 判定は `#1134` 等の別番号に誤マッチしないよう番号の終端（`[^0-9]` か行末）を要求。agent-team-evals.test.sh: ok。
+5. 改善案: なし。
