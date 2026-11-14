@@ -190,6 +190,8 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 - 複数の PR を続けてマージするときは、`scripts/conductor-merge-queue.sh` に「PR 番号・ブランチ・レビューした sha」の組を並べて、1 本ずつ進める（main の取り込み、CI の待ち、レビュー後のコミットの確認、マージを順に行う）。このスクリプトを同時に 2 つ動かさない（同じリポジトリの `git fetch` がぶつかって両方止まる）。
 - PR ができたら mergeable を確かめる（`scripts/agent-gh dev pr view <M> --json mergeable`）。`CONFLICTING` の PR には GitHub が `pull_request` の workflow を動かさず、チェックが 1 つも付かない。実装担当に「main を取り込んで衝突を解消し、verify を通す」を送る。
 - マージしたら Issue から `agent:working` を外し、人間に報告する。
+- マージが完了したら、ローカルの `main` を `origin/main` へ一致させる。`git fetch origin main` の後、ローカルの `main` が `origin/main` の先祖になっていることを確かめ（`git merge-base --is-ancestor main origin/main`）、`git merge --ff-only origin/main` を `main` で実行して fast-forward のみで行う。ローカルの `main` に origin に無いコミットがあって fast-forward できないときは、強制せず（rebase も reset もしない）そこで止めて、指揮役（代行の場合は hatai）へ報告する。
+- `scripts/conductor-merge-queue.sh` で複数の PR を続けてマージするときも、最後のマージが済んだ時点で上の最新化を行い、ローカルの `main` が `origin/main` と一致した状態で終える（1 本ごとではなく、最後の 1 回でよい）。
 - Dependabot が立てた依存更新の PR（`dependencies` ラベル、`build(deps):` で始まるコミット）のうち、minor と patch は、通常の PR と同じレビュー（skill `review-pr`）とマージの決まりで扱う。
 - Dependabot の major と 0.x の更新は直接処理しない。移行 Issue（更新の影響範囲と検証内容を書く。skill `write-issue`）を切って通常フロー（入口A）へ回し、Dependabot の PR 自体はクローズせず残す（クローズは人間の操作）。
 - Action の更新の PR（`ci(deps):` で始まるコミット）では、Dependabot は `.github/workflows/actions.lock` を作り直さないため、指揮役がマージ前にその PR のブランチを checkout して `gh actions-lock` を実行し、生成し直した `actions.lock` を同じブランチに push してから CI の通過を確かめる（`gh actions-lock` は人間の名義の `gh` 拡張で、App のトークンでは動かせない）。この操作は、Workflows 権限が必要なために人間の名義で行う例外の 1 つで、例外の正本は `docs/superpowers/specs/agent-team.md` の「制約」。
