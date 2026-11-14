@@ -21,12 +21,12 @@ $ bash scripts/pgbackrest-verify/verify.sh cleanup  # コンテナ・ボリュ�
 ```
 
 フェーズ: `build` → `setup` → `retention-count` → `retention-time` →
-`delete-reapply` → `restore-checksum`（`all` はこの順に全部）。結果は
-`work/`（git 管理外）。
+`expire-count` → `delete-reapply` → `restore-checksum`（`all` はこの順に
+全部）。結果は `work/`（git 管理外）。
 
 各フェーズは判定を満たすと `work/checks/<name>.ok` を作り、満たさないと
 exit 1 で止まる。フェーズは単体で再実行できる（`retention-count` と
-`retention-time` は対象リポジトリを初期化してから始める）。
+`retention-time`、`expire-count` は対象リポジトリを初期化してから始める）。
 
 ## 構成
 
@@ -40,6 +40,10 @@ exit 1 で止まる。フェーズは単体で再実行できる（`retention-co
 - **保持**: 件数指定（`repo-retention-full=14`、count 型）と日数指定
   （`repo-retention-full-type=time`）を別リポジトリで比べた。件数指定は
   14 世代だけ残り、日数指定は 14 日超の 1 個が残る。
+- **件数指定 + `expire --set`**: 日次バックアップが 7 日分欠けた状況
+  （フル 14 世代で件数上限ちょうど）を count 型リポジトリに作り、
+  残った 14 日超の世代を `expire --set` で個別に消して復旧対象が
+  14 日以内に収まることを確かめる（#150）。
 - **時刻の制御**: pgBackRest のフルバックアップのタイムスタンプは DB サーバ
   の時計から取る（`src/command/backup/db.c.inc` の `backupTime` はオンライン時
   `dbTimeMSec` を使う）。したがって「何日前のバックアップ」を作るには
