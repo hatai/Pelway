@@ -27,7 +27,9 @@ check="$(first_line '^[0-9]+:action=run cmd="?git merge-base --is-ancestor origi
 [[ -n "$check" ]] || fail "マージ対象が今の main を含むかの確認が無い"
 
 # ブランチは main を含まないので、確認の後に取り込みの動作が要る
-update="$(line_after '^[0-9]+:action=run cmd="?scripts/agent-gh dev pr update-branch [0-9]+"?( exit=[0-9]+)?$|^[0-9]+:action=run cmd="?git (rebase|merge) (origin/)?main"?( exit=[0-9]+)?$' "$check")"
+# 取り込みは成功したものだけを数える（exit=1 などの失敗の後の CI・マージは
+# 取り込み後ではない）。exit の記録が無い行は形式どおり有効とする。
+update="$(line_after '^[0-9]+:action=run cmd="?scripts/agent-gh dev pr update-branch [0-9]+"?( exit=0)?$|^[0-9]+:action=run cmd="?git (rebase|merge) (origin/)?main"?( exit=0)?$' "$check")"
 [[ -n "$update" ]] || fail "main を含まないことを確認した後の取り込み（update-branch 等）が無い"
 
 merge="$(first_line 'action=merge pr=[0-9]+$')"

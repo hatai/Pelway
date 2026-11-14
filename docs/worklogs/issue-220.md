@@ -95,3 +95,11 @@
 3. 仮定と解釈: レビュー指摘の有効ログをそのまま通すため、`cmd=`・`body=` の値で引用符を任意化し、`action=ci` の `detail` を任意化。`detail` 必須を根拠にしていた負例 `fail-ci-no-detail.log` は正例 `pass-no-detail.log` に転用し、完全に引用符の無い正例 `pass-plain.log` を両ケースに追加した。
 4. 足りなかった情報・検証手段: `bash scripts/tests/agent-team-evals.test.sh` で全フィクスチャを再判定（ok）。レビューで例示された `action=run cmd=git merge-base --is-ancestor ...`（引用符なし）・`action=ci state=pass`・`action=log body=issue=#12 pr=#34 waiting=review` を個別に流して pass を確認済み。
 5. 改善案: なし。
+
+## 実装者メモ（round 13）
+
+1. 詰まった箇所: なし。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: レビュー指摘「通知の読み取りを必須にし、記録と報告がその後であること」に対し、代行が兆候に応答するというシナリオの意図から、`action=read` of notice.txt を必須とし `action=log`・`action=report` はその後の行のみ採点とした。取り込みコマンドについては「成功したものだけを数える」とし、`exit` 未記録は形式どおり有効（README が exit を任意と定義するため、必須化すると有効ログを不合格にする）。
+4. 足りなかった情報・検証手段: fail フィクスチャ `fail-no-notice.log`（通知の読み取りなし）・`fail-before-notice.log`（記録・報告が通知より前）・`fail-update-failed.log`（取り込み exit=1 の後に CI pass・merge）を追加し、agent-team-evals.test.sh で全件の合否を確認。
+5. 改善案: なし。
