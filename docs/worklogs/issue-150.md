@@ -2,7 +2,7 @@
 
 ## 実装者メモ（round 1）
 
-対象 head: 07b9c04ee1ca53d7a6133a7d505b6de3fd5f0859（この round の実装の実体を含むコミット。このメモを含むコミットの親）
+対象 head: 574b83d83223e9083b2fa76d48a6bbb6ecfc101b（この round の実装の実体を含むコミット。このメモを含むコミットの親。署名付け替え後の SHA）
 
 1. 詰まった箇所: scripts/pgbackrest-verify/verify.sh phase_expire_count:
    差分を全日分のフルの後に作ると、postgres の時計を -17 日に偽っていても
