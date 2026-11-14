@@ -56,6 +56,8 @@ scripts/agent-gh review pr checks <N> --required --json name,bucket
 
 `mise run verify` と `pr-size` の `bucket` が `pass` なら pass、`fail` なら fail。pr-size が fail のときは、PR のラベルを読む（`scripts/agent-gh review pr view <N> --json labels --jq '.labels[].name'`）。`pr-size-exception` があり、かつ PR が閉じる Issue のコメントに、行頭が `<!-- pr-size-exception -->` で始まり、作成者（`author.login`）が `hatai` のコメントがある（`scripts/agent-gh review issue view <Issue 番号> --json comments --jq '.comments[].body'`）ときだけ、must-fix に数えず、本文の検査の欄に `pr-size: fail（pr-size-exception）` と書く。どちらかが欠けていれば、通常どおり must-fix に数える。どちらかが `pending` か、見つからないときは、レビューを投稿せずに `verdict: failed`、`error: checks pending` で報告する。
 
+実装者メモ・調査報告などの成果物に「使ったスキル」の記録があれば、記録されたスキル（輸入スキル `tdd`・`diagnosing-bugs` など）が作業内容に反映されているかを抜き取りで確かめる。記録と実態が明らかに食い違うときは must-fix、判断が分かれるものは nit とする。輸入スキルの取り込み discipline（同梱スクリプトは実行しない、`agents/` のメタデータは使わない、採用していないスキルへの参照は無効、輸入品の本文より正本と適用ルールが優先）は役割スキルと `docs/agents/external-skills.md` に定める。
+
 次のどれかに当てはまるときは、skill `security-review` も行い、その結果を同じ投稿に入れる。
 
 - 差分が `unsafe` を足している

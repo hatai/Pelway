@@ -52,6 +52,34 @@ check cond5_command_team_handling_gate .agents/skills/command-team/SKILL.md \
   '(d) 受け入れ条件に触れる Issue 本文の変更' \
   'マージとレビュー投稿はこの確認の対象外'
 
+# 条件6: Issue #273 — mattpocock/skills の輸入スキルの適用ルールが役割スキルに落ちている。
+check cond6a_implement_issue_tdd .agents/skills/implement-issue/SKILL.md \
+  'tdd' \
+  '使ったスキル' \
+  'seam は受け入れ条件から決め' \
+  'codebase-design'
+check cond6b_investigate_bug_diagnosing .agents/skills/investigate-bug/SKILL.md \
+  'diagnosing-bugs' \
+  '使ったスキル' \
+  'Phase 5' \
+  'needs-info'
+check cond6c_command_team_grill .agents/skills/command-team/SKILL.md \
+  '推測で埋めずに人間に聞く' \
+  '質問票' \
+  '3 分類' \
+  '使ったスキル'
+check cond6d_review_pr_used_skills .agents/skills/review-pr/SKILL.md \
+  '使ったスキル' \
+  '抜き取り'
+check cond6e_external_skills_doc docs/agents/external-skills.md \
+  'mattpocock/skills' \
+  '5863806dd4e15c63174bee4e7515a4256792ecfa' \
+  'MIT License' \
+  'Copyright (c) 2026 Matt Pocock'
+check cond6f_readme_separate_versions README.md \
+  'repo 配置の版' \
+  'external-skills.md'
+
 if ((${#failures[@]})); then
   printf 'FAIL %s\n' "${failures[@]}"
   exit 1
