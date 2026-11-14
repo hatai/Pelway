@@ -87,3 +87,11 @@
 3. 仮定と解釈: rebase で 10 個の非 merge コミットを origin/main 上に再生し、push は `--force-with-lease` とした（merge commit 経由では workflows の差分を含む push が権限上不可能なため、実質の唯一の手段）。レビュー担当は PR #251（奇数）だが Devin CLI 実装のため Devin を外し Codex（gpt-6-luna）に回す判定とした（command-team「レビュー担当と effort」）。
 4. 足りなかった情報・検証手段: rebase 後の `mise run verify`・`script-test` で確認（exit 0、agent-team-evals: ok）。強制 push 後の既存レビュースレッドとの整合（古い sha のレビュー文脈）は GitHub 側の表示に委ねる。
 5. 改善案: `docs/agents/grokbot-runbook.md` か `implement-issue` の「よくある失敗」に「main の `.github/workflows/` 変更を含む期間は merge でなく rebase で取り込む（workflows 権限）」を足す。
+
+## 実装者メモ（round 12）
+
+1. 詰まった箇所: なし。
+2. 曖昧だった文: 「値に空白を含めるときはそのまま書く（引用符は不要）」（evals/agent-team/README.md「アクションログ」）。「不要」を「書いてはいけない」ではなく「なくてもよい（両方可）」と読み、verifier は引用符の有無・CI 行の detail の有無をどちらも受理する形に揃えた。選ばなかった解釈: 引用符を必須とする（前ラウンドでそうなっていたが、定義と矛盾して有効ログを不合格にする）。
+3. 仮定と解釈: レビュー指摘の有効ログをそのまま通すため、`cmd=`・`body=` の値で引用符を任意化し、`action=ci` の `detail` を任意化。`detail` 必須を根拠にしていた負例 `fail-ci-no-detail.log` は正例 `pass-no-detail.log` に転用し、完全に引用符の無い正例 `pass-plain.log` を両ケースに追加した。
+4. 足りなかった情報・検証手段: `bash scripts/tests/agent-team-evals.test.sh` で全フィクスチャを再判定（ok）。レビューで例示された `action=run cmd=git merge-base --is-ancestor ...`（引用符なし）・`action=ci state=pass`・`action=log body=issue=#12 pr=#34 waiting=review` を個別に流して pass を確認済み。
+5. 改善案: なし。

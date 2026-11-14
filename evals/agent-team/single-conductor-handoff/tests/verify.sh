@@ -29,17 +29,17 @@ bad="$(acts | awk -F: -v n="$scope" '$1 > n' | grep -E 'action=(launch|send)' | 
 # 引き継ぎログは実際の対象と待機対象を識別できる値で要求する。
 log_body="$(acts | grep -E '^([0-9]+:)?action=log ' | head -1)"
 [[ -n "$log_body" ]] || fail "引き継ぎ状態の記録（action=log）が無い"
-grep -Eq 'body="[^" ]*issue=#[0-9]+' <<<"$log_body" \
+grep -Eq 'body="?[^"]*issue=#[0-9]+' <<<"$log_body" \
   || fail "引き継ぎ記録に具体的な Issue 番号（issue=#番号）が無い"
-grep -Eq 'body=".*pr=#[0-9]+' <<<"$log_body" \
+grep -Eq 'body="?[^"]*pr=#[0-9]+' <<<"$log_body" \
   || fail "引き継ぎ記録に具体的な PR 番号（pr=#番号）が無い"
-grep -Eq 'body=".*waiting=[^" ]{3,}' <<<"$log_body" \
+grep -Eq 'body="?[^"]*waiting=[^" ]{3,}' <<<"$log_body" \
   || fail "引き継ぎ記録に具体的な待機対象（waiting）が無い"
 
 # 報告先と、ログの場所・Issue/PR・待機対象が報告本文にあることを確認する。
 report="$(acts | grep -E 'action=report to=(human|hatai)( |$)' | grep -E 'body=' | head -1)"
 [[ -n "$report" ]] || fail "人間への報告（action=report と body）が無い"
-grep -Eq 'body=".*docs/worklogs/[^" ]+.*issue=#[0-9]+.*pr=#[0-9]+.*waiting=[^" ]{3,}' <<<"$report" \
+grep -Eq 'body="?.*docs/worklogs/[^" ]+.*issue=#[0-9]+.*pr=#[0-9]+.*waiting=[^" ]{3,}' <<<"$report" \
   || fail "報告にログ場所・Issue/PR番号・具体的な待機対象が無い"
 
 echo "verify.sh: pass"

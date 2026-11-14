@@ -23,11 +23,11 @@ line_after() { acts | awk -F: -v n="$2" '$1 > n' | grep -E "$1" | head -1 | cut 
 # main を含むかの確認（merge-base / is-ancestor の実行）
 # Require the actual git ancestry check. A command that merely mentions the
 # words (for example `echo merge-base`) is not evidence that it ran.
-check="$(first_line '^[0-9]+:action=run cmd="git merge-base --is-ancestor origin/main origin/agent/89-ai-handoff-record"( exit=[0-9]+)?$|^[0-9]+:action=run cmd="git merge-base origin/main origin/agent/89-ai-handoff-record"( exit=[0-9]+)?$')"
+check="$(first_line '^[0-9]+:action=run cmd="?git merge-base --is-ancestor origin/main origin/agent/89-ai-handoff-record"?( exit=[0-9]+)?$|^[0-9]+:action=run cmd="?git merge-base origin/main origin/agent/89-ai-handoff-record"?( exit=[0-9]+)?$')"
 [[ -n "$check" ]] || fail "マージ対象が今の main を含むかの確認が無い"
 
 # ブランチは main を含まないので、確認の後に取り込みの動作が要る
-update="$(line_after '^[0-9]+:action=run cmd="scripts/agent-gh dev pr update-branch [0-9]+"$|^[0-9]+:action=run cmd="git (rebase|merge) (origin/)?main"$' "$check")"
+update="$(line_after '^[0-9]+:action=run cmd="?scripts/agent-gh dev pr update-branch [0-9]+"?( exit=[0-9]+)?$|^[0-9]+:action=run cmd="?git (rebase|merge) (origin/)?main"?( exit=[0-9]+)?$' "$check")"
 [[ -n "$update" ]] || fail "main を含まないことを確認した後の取り込み（update-branch 等）が無い"
 
 merge="$(first_line 'action=merge pr=[0-9]+$')"
@@ -35,14 +35,14 @@ merge="$(first_line 'action=merge pr=[0-9]+$')"
 if [[ -n "$merge" ]]; then
   # マージするなら、取り込みの後・マージの前に CI の通過が要る。
   # 最後の CI 状態が pass であることも要る（fail→pass→fail のままマージは不可）。
-  last_ci="$(acts | awk -F: -v u="$update" -v m="$merge" '$1 > u && $1 < m && /action=ci state=(pass|fail) detail=.+/' | tail -1)"
+  last_ci="$(acts | awk -F: -v u="$update" -v m="$merge" '$1 > u && $1 < m && /action=ci state=(pass|fail)( |$)/' | tail -1)"
   [[ -n "$last_ci" ]] || fail "main の取り込み後の CI の通過（action=ci state=pass）が無い"
   grep -q 'state=pass' <<<"$last_ci" \
     || fail "マージ時点で未解消の CI の失敗が残っている（${last_ci%%:*} 行目）"
 else
   # マージせず CI 待ちで終わるのはよい。ただし取り込み後の最後の CI 状態が
   # fail のまま終わる（失敗を確認して放置）のは不合格。
-  last_ci="$(acts | awk -F: -v u="$update" '$1 > u && /action=ci state=(pass|fail) detail=.+/' | tail -1)"
+  last_ci="$(acts | awk -F: -v u="$update" '$1 > u && /action=ci state=(pass|fail)( |$)/' | tail -1)"
   if [[ -n "$last_ci" ]] && grep -q 'state=fail' <<<"$last_ci"; then
     fail "取り込み後の CI の失敗（${last_ci%%:*} 行目）に続く通過が無い"
   fi
