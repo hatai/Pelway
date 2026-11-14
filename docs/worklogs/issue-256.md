@@ -67,3 +67,13 @@
 5. 改善案: `.agents/skills/review-pr/SKILL.md` に「`gh pr checks --required` は branch protection の必須チェックを返すため、この repo では空になる。通常の `pr checks` を使う」を足す（round 3 で両委託子が同じ誤判定をした）
 
 使ったスキル: `implement-issue`、`command-team`（委託の形）
+
+## 実装者メモ（round 11）
+
+1. 詰まった箇所: round 4 で両担当が再び request-changes。codex は `api -F <key>=@<file>`・`pr review --body-file <file>` の秘密持ち出し、claude は読み取り系 `git` の `--output`・`-O<cmd>` と sandbox の書き込み先を指した。implement-issue の上限に達したため修正サイクルを回さずエスカレーションした
+2. 曖昧だった文: なし
+3. 仮定と解釈: 両 must-fix は指揮役が別 Issue 候補として管理すると言った課題と一致すると解釈し、Issue に選択肢（この PR は進めて別 Issue で追うか、保留を維持するか）を提示した
+4. 足りなかった情報・検証手段: 別 Issue 候補がこの PR の保留解除を塞ぐかの最終判断
+5. 改善案: command-team の記録不在時の文面を「Codex（確認済みなら Devin CLI も）で回し」に直す余地がある（claude の nit）
+
+使ったスキル: `implement-issue`、`command-team`（委託の形）
