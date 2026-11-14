@@ -18,14 +18,18 @@
 //!
 //! ACP v2 の permission は advisory（仕様明記）のため、承認なしに外部 I/O を
 //! 試みない強制点はこの adapter（gateway 側）に残る。
+//!
+//! この adapter はエージェント・プロセスを起動しない。起動と隔離（環境
+//! 変数・cwd・ファイルシステム・ネットワーク）は呼び出し元の task
+//! container が transport を作る時点で強制し、ここでは隔離済みの
+//! transport だけを受け取る。
 
 use std::collections::{BTreeMap, HashMap};
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::{MaybeUndefined, ProtocolVersion};
 use agent_client_protocol::v2::{ConnectionTo, Responder, schema};
-use agent_client_protocol::{AcpAgent, Agent, Client, ConnectTo, Error};
+use agent_client_protocol::{Agent, Client, ConnectTo, Error};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 use crate::tier::TierDeclarations;
@@ -322,25 +326,17 @@ impl AcpClient {
         }
     }
 
-    /// 外部エージェントを stdio 子プロセスとして起動し、envelope を1往復
-    /// 送って session を閉じる。`command` は起動コマンド文字列（例:
-    /// `npx @zed-industries/codex-acp`）。
-    pub async fn run_stdio(
-        &self,
-        grant: &AgentGrant,
-        command: &str,
-        envelope: &ExportEnvelope,
-        decider: Arc<dyn PermissionDecider>,
-    ) -> Result<SessionReport, AcpError> {
-        let agent = AcpAgent::from_str(command)
-            .map_err(|error| AcpError::Protocol(format!("起動コマンドの解釈に失敗: {error}")))?;
-        self.run_prompt(grant, agent, envelope, decider).await
-    }
-
-    /// 任意の transport（子プロセスの `AcpAgent`、試験の in-process double）で
-    /// envelope を1往復送る。`initialize`（`protocolVersion: 2`）→
-    /// `session/new` → `session/prompt` → 前景が idle に戻るまで待ち →
-    /// `session/close`。許可要求は [`Self::answer_permission`] の関門を通る。
+    /// 隔離済みの transport（task container 内で起動された子プロセスの
+    /// stdio、試験の in-process double）で envelope を1往復送る。
+    /// `initialize`（`protocolVersion: 2`）→ `session/new` →
+    /// `session/prompt` → 前景が idle に戻るまで待ち → `session/close`。
+    /// 許可要求は [`Self::answer_permission`] の関門を通る。
+    ///
+    /// このアダプタはエージェントのプロセスを起動しない。起動・環境変数・
+    /// cwd・ファイルシステム・ネットワークの隔離は呼び出し元（task
+    /// container、doc 10 の runner 境界）が transport を作る時点で強制
+    /// する前提。ここで transport を受け取ることで、隔離なしの起動経路を
+    /// 型のレベルで存在させない。
     pub async fn run_prompt(
         &self,
         grant: &AgentGrant,
