@@ -78,10 +78,10 @@ RC=0
 run_stage() { # run_stage <root> <stage> [VAR=value ...]
   local r="$1" stage="$2"
   shift 2
-  # slot8: 外の DEMO_CHECK_ACCEPTANCE を引き継がない（通常モードに固定）。
-  # 受入モードで回すときは呼び出し側が DEMO_CHECK_ACCEPTANCE=1 を引数で渡す
+  # slot8: 外の DEMO_CHECK_ACCEPTANCE を、PR #279 レビュー指摘1 で DEMO_CHECK_RUNTIME を
+  # 引き継がない（通常モードに固定）。どちらも回すときは呼び出し側が引数で渡す
   # （env の引数は左から右に効くので、-u の後の渡し方が勝つ）。
-  OUT="$(env -u DEMO_CHECK_ACCEPTANCE DEMO_CHECK_ROOT="${r}" DEMO_CHECK_LIST_DIR="${here}" "$@" bash "${here}/${stage}.sh" 2>&1)"
+  OUT="$(env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${r}" DEMO_CHECK_LIST_DIR="${here}" "$@" bash "${here}/${stage}.sh" 2>&1)"
   RC=$?
 }
 
@@ -193,19 +193,19 @@ else ng "canary: ACCEPTANCE marker hit must fail alone (exit ${RC})"; show "${OU
 # slot6: canary の走査対象ゼロは未検証（exit 1）なので、clean tree の full run は canary だけ失敗
 # slot8: 通常モードを確かめる呼び出しは env -u で DEMO_CHECK_ACCEPTANCE を外して固定する
 make_clean "${tmp}/case"
-OUT="$(env -u DEMO_CHECK_ACCEPTANCE DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" 2>&1)"; RC=$?
+OUT="$(env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" 2>&1)"; RC=$?
 if [ "${RC}" -eq 1 ] && ! printf '%s\n' "${OUT}" | grep -q "PARTIAL RUN" && printf '%s\n' "${OUT}" | grep -q "full run: all 4 stages" && printf '%s\n' "${OUT}" | grep -q "failed: canary"; then
   ok "run.sh: full run on a clean tree fails only at canary and is not PARTIAL"
 else ng "run.sh: full run on a clean tree (exit ${RC})"; show "${OUT}"; fi
 
 mkdir -p "${tmp}/case/target/debug"
 printf 'clean artifact\n' > "${tmp}/case/target/debug/app"
-OUT="$(env -u DEMO_CHECK_ACCEPTANCE DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" 2>&1)"; RC=$?
+OUT="$(env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" 2>&1)"; RC=$?
 if [ "${RC}" -eq 0 ] && ! printf '%s\n' "${OUT}" | grep -q "PARTIAL RUN" && printf '%s\n' "${OUT}" | grep -q "full run: all 4 stages"; then
   ok "run.sh: full run passes (exit 0) once canary has artifacts to scan"
 else ng "run.sh: full run with canary artifacts (exit ${RC})"; show "${OUT}"; fi
 
-OUT="$(env -u DEMO_CHECK_ACCEPTANCE DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" loopback 2>&1)"; RC=$?
+OUT="$(env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" loopback 2>&1)"; RC=$?
 if [ "${RC}" -eq 0 ] && printf '%s\n' "${OUT}" | grep -q "PARTIAL RUN: not valid for acceptance" && printf '%s\n' "${OUT}" | grep -q "acceptance requires a full run"; then
   ok "run.sh: single stage prints PARTIAL RUN and the full-run requirement"
 else ng "run.sh: single stage PARTIAL RUN (exit ${RC})"; show "${OUT}"; fi
@@ -214,24 +214,24 @@ printf '#!/usr/bin/env bash\ntouch "%s/pwned"\n' "${tmp}" > "${tmp}/evil.sh"
 rel_evil="$(realpath --relative-to="${here}" "${tmp}/evil")"
 for arg in "${rel_evil}" "../../x/ok" "/tmp/x" "nosuch" "loopback.sh" ""; do
   rm -f "${tmp}/pwned"
-  OUT="$(DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" "${arg}" 2>&1)"; RC=$?
+  OUT="$(env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" "${arg}" 2>&1)"; RC=$?
   if [ "${RC}" -eq 2 ] && [ ! -e "${tmp}/pwned" ] && ! printf '%s\n' "${OUT}" | grep -q "== demo-check:"; then
     ok "run.sh: rejects argument '${arg}' with exit 2 and runs nothing"
   else ng "run.sh: argument '${arg}' (exit ${RC}, pwned=$([ -e "${tmp}/pwned" ] && echo yes || echo no))"; show "${OUT}"; fi
 done
-OUT="$(DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" loopback "${rel_evil}" 2>&1)"; RC=$?
+OUT="$(env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" loopback "${rel_evil}" 2>&1)"; RC=$?
 if [ "${RC}" -eq 2 ] && [ ! -e "${tmp}/pwned" ] && ! printf '%s\n' "${OUT}" | grep -q "== demo-check:"; then
   ok "run.sh: a valid stage mixed with a path is rejected before running anything"
 else ng "run.sh: valid+path mix (exit ${RC})"; show "${OUT}"; fi
 
 # --- run.sh: 受入モード（全段階・一部段階の両方） ---
 make_clean "${tmp}/case"
-OUT="$(DEMO_CHECK_ROOT="${tmp}/case" DEMO_CHECK_ACCEPTANCE=1 bash "${here}/run.sh" 2>&1)"; RC=$?
+OUT="$(env -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" DEMO_CHECK_ACCEPTANCE=1 bash "${here}/run.sh" 2>&1)"; RC=$?
 if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "ACCEPTANCE MODE" && printf '%s\n' "${OUT}" | grep -q "failed: loopback canary"; then
   ok "run.sh: full run under ACCEPTANCE fails (loopback PENDING + canary no artifacts) and prints ACCEPTANCE MODE"
 else ng "run.sh: full run under ACCEPTANCE (exit ${RC})"; show "${OUT}"; fi
 
-OUT="$(DEMO_CHECK_ROOT="${tmp}/case" DEMO_CHECK_ACCEPTANCE=1 bash "${here}/run.sh" loopback 2>&1)"; RC=$?
+OUT="$(env -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" DEMO_CHECK_ACCEPTANCE=1 bash "${here}/run.sh" loopback 2>&1)"; RC=$?
 if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "PARTIAL RUN" && printf '%s\n' "${OUT}" | grep -q "ACCEPTANCE MODE"; then
   ok "run.sh: partial run under ACCEPTANCE still fails and prints both marks"
 else ng "run.sh: partial run under ACCEPTANCE (exit ${RC})"; show "${OUT}"; fi

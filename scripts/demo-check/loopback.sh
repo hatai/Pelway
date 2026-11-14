@@ -123,7 +123,7 @@ if [ "${DEMO_CHECK_RUNTIME:-}" = "1" ]; then
   done <<< "${ss_out}"
   echo "loopback: runtime: checked ${rt_total} listening socket(s), ${rt_hits} hit(s)"
 else
-  echo "loopback: runtime: PENDING (DEMO_CHECK_RUNTIME is not set; listening sockets are not checked)"
+  echo "loopback: runtime: PENDING (DEMO_CHECK_RUNTIME is not 1; listening sockets are not checked)"
 fi
 if [ "${hits}" -ne 0 ] || [ "${rt_hits}" -ne 0 ]; then
   exit 1
