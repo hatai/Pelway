@@ -270,13 +270,13 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 
 | 項目 | 結果 | 実施日 |
 |---|---|---|
-| 実施日（レビュー用の Devin CLI スレッドの初回起動を含む） | 未実施 | — |
-| 遮断する仕組み（名前と設定場所。無ければ「仕組みなし」で確認は打ち切り） | 未記入 | — |
-| ネットワーク制限の結果（`api.github.com` と `github.com` だけにつながるか。`curl -sS https://example.com` が失敗したか） | 未実施 | — |
-| コマンドの制限の結果（遮断を迂回する任意コマンドが拒否されたか） | 未実施 | — |
-| `scripts/agent-gh review` が通ること（`/rate_limit` の成功） | 未実施 | — |
-| レビューの形（報告の `verdict:`、`Reviewer:` の行、`agent-gh review pr review` の投稿） | 未実施 | — |
-| Codex・Claude 側との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 未記入 | — |
+| 実施日（レビュー用の Devin CLI スレッドの初回起動を含む） | `devin_review` のレビュースレッド（PR #283 への検証委託）が起動し、確認コマンドを実行できた | 2026-11-14 |
+| 遮断する仕組み（名前と設定場所。無ければ「仕組みなし」で確認は打ち切り） | Devin CLI 公式の OS レベル sandbox（`DEVIN_SANDBOX=true`、Linux では bwrap + socat）＋ `~/.config/devin-review/config.json` の `sandbox.allowed_domains: ["**.github.com"]` と `permissions.deny`。起動ラッパー `/home/hatai/.local/bin/devin-review` | 2026-11-14 |
+| ネットワーク制限の結果（`api.github.com` と `github.com` だけにつながるか。`curl -sS https://example.com` が失敗したか） | `curl -sS https://example.com` が exit 28（タイムアウト）で失敗。GitHub API には到達できた | 2026-11-14 |
+| コマンドの制限の結果（遮断を迂回する任意コマンドが拒否されたか） | `touch $HOME/devin-outside-marker-$$` が `Read-only file system` で拒否（ファイル未作成） | 2026-11-14 |
+| `scripts/agent-gh review` が通ること（`/rate_limit` の成功） | `scripts/agent-gh review api /rate_limit` 成功（rate limit の JSON を返却） | 2026-11-14 |
+| レビューの形（報告の `verdict:`、`Reviewer:` の行、`agent-gh review pr review` の投稿） | `verdict: approve` と `Reviewer: agent=devin model=swe-2-high effort=high` の行を報告し、PR #283 に APPROVED として投稿済み（`pelway-review`） | 2026-11-14 |
+| Codex・Claude 側との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 許可先は同じく GitHub のみ。遮断の効き方が異なり、Codex は `network_proxy`、Devin CLI は OS sandbox ＋ドメイン許可リスト＋ `permissions.deny`（直接編集・MCP・秘密パスを塞ぐ）。権限モードは Devin では Autonomous 一択 | 2026-11-14 |
 
 ## シークレットの扱い（fnox）
 
