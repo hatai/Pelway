@@ -47,3 +47,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 に「レビューが『実装不能・後続 Issue の責務』を must-fix にしたときは、同じ文を引用して代替の担保（試験・doc・型制約）を書いたうえで stop 条件かどうかを示す」を足す
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（round 7）
+
+対象 head: d232bda（この round の実装の実体を含むコミット（origin/main の取り込み）。このメモを含むコミットの親。マージは署名付け替えの対象外）
+
+1. 詰まった箇所: 指揮役の指示で main（#302・#297・#299 込み）を取り込み。`git merge origin/main` は衝突なく完了し、`mise run verify` も緑だったため追加修正は無し
+2. 曖昧だった文: 「まず main を取り込んで head 9268d75 で fail している verify/test を緑に戻し」（指揮役の指示）— ローカル・CI とも 9268d75 時点で verify/test は緑（fail は例外承認の pr-size のみ）だったため、「取り込み後に緑を維持する」と解釈してマージを行った
+3. 仮定と解釈: 取り込みは merge commit とした（rebase はブランチ書き換え＝force push を要し、agent-gh の署名付け替えはマージを API で表現できず unsigned のまま残る）。round 4 の委託は指揮役の明示承認として止まる条件に抵触しないと解釈した
+4. 足りなかった情報・検証手段: 指揮役の言う「9268d75 で fail している verify/test」は GitHub 側の最新 check suite の再実行失敗を指す可能性があるが、`pr checks` の確認では該当する fail が見つからなかった
+5. 改善案: `.agents/skills/command-team/SKILL.md` の「レビュー担当と effort」に「止まる条件に達した後の追加ラウンドは、指揮役が明示承認した回数だけ委託できる」を足す（round 4 許可の根拠を明文化）
+
+使ったスキル: `.agents/skills/implement-issue`
