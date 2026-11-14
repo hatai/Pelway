@@ -278,6 +278,24 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 | レビューの形（報告の `verdict:`、`Reviewer:` の行、`agent-gh review pr review` の投稿） | `verdict: approve` と `Reviewer: agent=devin model=swe-2-high effort=high` の行を報告し、PR #283 に APPROVED として投稿済み（`pelway-review`） | 2026-11-14 |
 | Codex・Claude 側との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 許可先は同じく GitHub のみ。遮断の効き方が異なり、Codex は `network_proxy`、Devin CLI は OS sandbox ＋ドメイン許可リスト＋ `permissions.deny`（直接編集・MCP・秘密パスを塞ぐ）。権限モードは Devin では Autonomous 一択 | 2026-11-14 |
 
+## 指揮役スレッドのコンテキスト圧縮の検証（Issue #296）
+
+指揮役（巡回を続ける長命スレッド）のコンテキスト圧縮の運用（skill `command-team` の「7. コンテキスト管理」）は、環境ごとに「圧縮操作の実行方法」「圧縮の検知方法」「使用率の取得方法」「交代手順」が検証済みの環境でのみ有効化する。T3 の Claude スレッド（`claude_review`、Claude Code 2.1.325、`CLAUDE_CONFIG_DIR=~/.claude-review`）について 2026-11-14 に検証した結果:
+
+| 項目 | 結果 | 実施日 |
+|---|---|---|
+| 明示的な圧縮操作 | できる（実行主体はスレッドの外側）。エージェント自身は `/compact` を実行できない（ビルトイン CLI コマンドで、Skill ツールでは "compact is a built-in CLI command, not a skill" と拒否される）。T3 からのスレッド送信（`t3_thread_send`）で `/compact` を送ると圧縮が実行され、スレッドの activity に `compaction`（"Context compacted"）、セッションのトランスクリプトに `compact_boundary`（`compactMetadata`: `trigger: manual`、`preTokens`）が記録される | 2026-11-14 |
+| コンテキスト使用率 | 直接は取得できない。T3 のスレッド読み取り（`t3_thread_read`）にコンテキスト使用状況は現れない。セッションのトランスクリプト（`~/.claude-review/projects/<作業パス>/<SESSION_ID>.jsonl`）の `usage`（`input_tokens` + `cache_creation_input_tokens` + `cache_read_input_tokens`）からトークン数は間接的に読めるが、上限値はトランスクリプトに記録されないため使用率の計算にはモデルの上限を外から与える必要があり、値も直前の API 呼び出し時点の 1 ターン遅れになる | 2026-11-14 |
+| 自動圧縮の発生を検知 | 事後は検知できる。リアルタイムの通知は無い。トランスクリプトの `compact_boundary` 行（`compactMetadata.trigger` が manual/auto を記録）とスレッドの activity の `compaction` アイテムで、圧縮が走ったことを事後に確認できる。検証で確認できた実例は `trigger: manual` のみで、auto（自動圧縮）の実例は未確認 | 2026-11-14 |
+| 交代手順（新指揮役スレッドへの恒久交代） | 未検証 | — |
+
+この環境での運用への適用:
+
+- 使用率が機械的に取得できないため、トリガーは代理指標（起算点から完了 Issue 5 件以上、または巡回 20 回以上）で運用する
+- 圧縮操作の実行方法（`/compact` の送信）と圧縮後の「発生確認済み」の確認手段（`compact_boundary` の記録）は検証済みのため、計画的圧縮はこの環境で有効化できる
+- 自動圧縮（auto）の検知は未確認のため、予期しない圧縮は検知できない前提で、巡回開始時の状態再取得と重要操作の直前の照合で対処する
+- 交代手順は未検証のため、この環境では交代を実行せず、人間確認へ進む
+
 ## シークレットの扱い（fnox）
 
 - `fnox.toml` には**シークレットの名前と、秘密を含まないローカル開発用の既定値だけ**を置く。実際の秘密値（`value`）をこのファイルへ書かないこと。
