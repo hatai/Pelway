@@ -12,6 +12,9 @@
 #   - 受入モードで目印あり（成果物に canary 目印）も canary 単独で exit 1 になる（slot9-r2）
 #   - DEMO_CHECK_ACCEPTANCE=1 のとき loopback の runtime PENDING が exit 1 になり、
 #     ACCEPTANCE MODE と表示される（未設定時の挙動は不変）
+#   - DEMO_CHECK_RUNTIME=1 で loopback の runtime 検査が ss ベースで走る（Issue #269 方式B）:
+#     非ループバックの LISTEN は違反（exit 1）、ループバックのみは exit 0（ACCEPTANCE でも PENDING 規則なし）、
+#     ss の失敗は exit 2。ss はスタブに差し替えて確かめる
 #   - run_stage と run.sh の直接呼び出しは、外の DEMO_CHECK_ACCEPTANCE を引き継がない。
 #     通常モードのケースは env -u で通常モードに固定する（slot8。外で DEMO_CHECK_ACCEPTANCE=1 を
 #     付けて selftest を実行しても、canary の走査ゼロ（通常モード）で exit 1 になることを含め
@@ -110,6 +113,42 @@ R=crates/x/src/v.rs
 for s in loopback leak-phrases external-refs; do expect_case "${s}" 0 "clean tree passes" "" ""; done
 run_stage "${tmp}/case" loopback
 if printf '%s\n' "${OUT}" | grep -q "runtime: PENDING"; then ok "loopback: runtime PENDING is reported"; else ng "loopback: runtime PENDING is reported"; fi
+
+# runtime 検査（DEMO_CHECK_RUNTIME=1）: ss をスタブに差し替えて列挙結果を固定する（方式B。Issue #269）
+mkdir -p "${tmp}/fakesbin"
+r="${tmp}/case"; make_clean "${r}"
+cat > "${tmp}/fakesbin/ss" <<'SS'
+#!/usr/bin/env bash
+printf 'LISTEN 0 511 0.0.0.0:22 0.0.0.0:*\nLISTEN 0 511 127.0.0.1:8080 0.0.0.0:*\n'
+SS
+chmod +x "${tmp}/fakesbin/ss"
+run_stage "${r}" loopback PATH="${tmp}/fakesbin:${PATH}" DEMO_CHECK_RUNTIME=1
+if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -qF "0.0.0.0:22" && ! printf '%s\n' "${OUT}" | grep -q "runtime: PENDING"; then
+  ok "loopback: a non-loopback LISTEN socket is a runtime violation (exit 1)"
+else ng "loopback: runtime violation (exit ${RC})"; show "${OUT}"; fi
+
+cat > "${tmp}/fakesbin/ss" <<'SS'
+#!/usr/bin/env bash
+printf 'LISTEN 0 511 127.0.0.1:8080 0.0.0.0:*\nLISTEN 0 511 [::1]:9000 [::]:*\n'
+SS
+run_stage "${r}" loopback PATH="${tmp}/fakesbin:${PATH}" DEMO_CHECK_RUNTIME=1
+if [ "${RC}" -eq 0 ] && printf '%s\n' "${OUT}" | grep -qF "runtime: checked 2 listening socket(s), 0 hit(s)"; then
+  ok "loopback: loopback-only LISTEN sockets pass the runtime check"
+else ng "loopback: runtime clean (exit ${RC})"; show "${OUT}"; fi
+
+run_stage "${r}" loopback PATH="${tmp}/fakesbin:${PATH}" DEMO_CHECK_RUNTIME=1 DEMO_CHECK_ACCEPTANCE=1
+if [ "${RC}" -eq 0 ]; then
+  ok "loopback: a clean runtime check passes under ACCEPTANCE (the PENDING rule is not applied)"
+else ng "loopback: ACCEPTANCE clean runtime (exit ${RC})"; show "${OUT}"; fi
+
+cat > "${tmp}/fakesbin/ss" <<'SS'
+#!/usr/bin/env bash
+exit 1
+SS
+run_stage "${r}" loopback PATH="${tmp}/fakesbin:${PATH}" DEMO_CHECK_RUNTIME=1
+if [ "${RC}" -eq 2 ]; then
+  ok "loopback: a failing ss makes the runtime check exit 2"
+else ng "loopback: ss failure (exit ${RC}, want 2)"; show "${OUT}"; fi
 run_stage "${tmp}/case" canary
 if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "no artifacts to scan" && printf '%s\n' "${OUT}" | grep -q "canary: scanned 0 file(s)" && ! printf '%s\n' "${OUT}" | grep -q "PASS"; then
   ok "canary: no artifacts to scan is a failure (exit 1, scanned 0)"

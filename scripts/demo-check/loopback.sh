@@ -16,12 +16,14 @@
 #      対象は関連付け関数の形 ::bind("..."）だけ（Issue #143 の移植で絞った）:
 #      sqlx などのメソッド形式 .bind("...") はソケットの待受・接続先ではないため対象外。
 #      メソッド形式のソケット bind に文字列リテラルを渡す形は検出しない（既知の限界）。
-# runtime（未実装）:
-#   デモ起動中の待受ソケットを列挙して許可値以外を検出する検査は、デモの起動方法が決まってから実装する。
-#   既定では "runtime: PENDING (NOT IMPLEMENTED)" と表示し、static 合格なら exit 0（runtime は未検査）。
-#   DEMO_CHECK_ACCEPTANCE=1 のときは runtime PENDING を受入不合格として exit 1 にする。
-# exit 0 = static 合格（runtime は未検査、ACCEPTANCE 未設定時）/ 1 = static 違反 or ACCEPTANCE で runtime PENDING /
-# 2 = 検査異常（リスト欠落・設定やソースの走査失敗・bind 走査の停滞）
+# runtime（DEMO_CHECK_RUNTIME=1 で実施）:
+#   ss -H -ltn で LISTEN ソケットを列挙し、ローカルアドレスが 127.0.0.1 / [::1] 以外なら違反（exit 1）。
+#   方式は Issue #269 で方式B（ss の出力パース）を選定。ss が無い・失敗する環境では検査異常（exit 2）。
+#   未設定では "runtime: PENDING" と表示し、static 合格なら exit 0（runtime は未検査）。
+#   DEMO_CHECK_ACCEPTANCE=1 のときは runtime PENDING を受入不合格として exit 1 にする
+#   （runtime 有効のときは PENDING ではなく実検査の結果で判定する）。
+# exit 0 = 合格（static のみ、または static + runtime。ACCEPTANCE 未設定時）/ 1 = static 違反 or runtime 違反 or ACCEPTANCE で runtime PENDING /
+# 2 = 検査異常（リスト欠落・設定やソースの走査失敗・bind 走査の停滞・ss の失敗）
 set -uo pipefail
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -106,13 +108,33 @@ for f in "${files[@]}"; do
 done
 
 echo "loopback: static scanned ${#cfgs[@]} config + ${#files[@]} source file(s), ${hits} hit(s)"
-echo "loopback: runtime: PENDING (NOT IMPLEMENTED; listening sockets are not checked yet)"
-if [ "${hits}" -ne 0 ]; then
+rt_hits=0
+if [ "${DEMO_CHECK_RUNTIME:-}" = "1" ]; then
+  ss_out="$(ss -H -ltn 2>/dev/null)" || { echo "loopback: runtime: ss failed (iproute2 required)" >&2; exit 2; }
+  rt_total=0
+  # IFS= を付けないこと: 複数変数の read では IFS= が単語分割を無効にし laddr が空になる
+  while read -r _st _rq _sq laddr _peer; do
+    [ -n "${laddr:-}" ] || continue
+    rt_total=$((rt_total + 1))
+    case "${laddr}" in
+      127.0.0.1:*|\[::1\]:*) : ;;
+      *) echo "loopback: runtime: listening ${laddr} is not 127.0.0.1/[::1]"; rt_hits=$((rt_hits + 1)) ;;
+    esac
+  done <<< "${ss_out}"
+  echo "loopback: runtime: checked ${rt_total} listening socket(s), ${rt_hits} hit(s)"
+else
+  echo "loopback: runtime: PENDING (DEMO_CHECK_RUNTIME is not set; listening sockets are not checked)"
+fi
+if [ "${hits}" -ne 0 ] || [ "${rt_hits}" -ne 0 ]; then
   exit 1
 fi
-if [ "${DEMO_CHECK_ACCEPTANCE:-}" = "1" ]; then
+if [ "${DEMO_CHECK_ACCEPTANCE:-}" = "1" ] && [ "${DEMO_CHECK_RUNTIME:-}" != "1" ]; then
   echo "loopback: ACCEPTANCE MODE: runtime PENDING is a failure" >&2
   exit 1
 fi
-echo "loopback: static PASS (runtime unchecked)"
+if [ "${DEMO_CHECK_RUNTIME:-}" = "1" ]; then
+  echo "loopback: PASS (static + runtime)"
+else
+  echo "loopback: static PASS (runtime unchecked)"
+fi
 exit 0
