@@ -23,3 +23,15 @@
 5. 改善案: `docs/technical/v0.7/body/10-domestic-only.md` の `integration_grant` 節に「grant の実体は検証関数でのみ生成できる型（非公開フィールド）で表し、外部エージェント接続 API はその検証済み値だけを受け取る」を足す
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（round 5）
+
+対象 head: ab0f41c（この round の実装の実体を含むコミット。このメモを含むコミットの親。署名付け替え後の値に直す）
+
+1. 詰まった箇所: `src/acp.rs`: round 4 のレビュー must-fix。`run_stdio` が gateway の環境変数・cwd を継承した子プロセスを隔離なしに起動でき、ExportEnvelope の境界を迂回する経路だった。R1-Q6 案a「隔離は task container 側」の確定回答に沿い、`run_stdio` を削除して `run_prompt` が隔離済み transport のみを受け取る形にした
+2. 曖昧だった文: 「Run the agent in a sandbox with an explicit environment, cwd, filesystem mounts, and network policy before exposing this path, or make this API accept only an already-isolated transport.」（PR #304 round 4 レビュー本文）— adapter で sandbox を実装するか API 形状で防ぐか分かれたが、container 隔離は別層の責務なので後者を選んだ
+3. 仮定と解釈: `build_session_cwd()` が session/new に送る cwd は、隔離済み transport 前提では情報漏えいに当たらないと解釈した（ACP schema が session cwd を要求するため残置）
+4. 足りなかった情報・検証手段: 起動側の隔離強制は task container（別 Issue）側で確かめる経路であり、この PR の double 試験では検証できない。型で起動経路を消したことが静的な担保
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「push 後は `agent-gh-resign` が head を付け替えるため、メモの対象 head は署名付き SHA で書き直してから push する」を足す（round 3・4 で 2 回踏んだ）
+
+使ったスキル: `.agents/skills/implement-issue`
