@@ -154,7 +154,7 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 |---|---|---|---|
 | codex | `codex_review` | `gpt-6-luna` | `reasoningEffort: <effort>` |
 | claude | `claude_review` | `claude-opus-5-5` | `effort: <effort>` |
-| devin | `acpRegistry_devin` | `swe-2-high` | `thought_level: <effort>`、`mode: smart` |
+| devin | `devin_review` | `swe-2-high` | `mode` のみ受け付ける（省略してよい。`thought_level` は渡せず、effort の引き上げはできない） |
 
 これに `role: "review"`、`runtimeMode: "auto-accept-edits"`、`isolation: "worktree"` を付ける。委託したら返答を終えて完了の通知を待つ（ポーリングしない）。高リスクで複数担当にしたときは、全員の結果がそろうまで次に進まない。
 
