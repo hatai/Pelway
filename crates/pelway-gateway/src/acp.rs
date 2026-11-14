@@ -85,16 +85,16 @@ impl From<Error> for AcpError {
 
 /// `integration_grant` の許可（doc 10）。外部エージェント種別（連携）×
 /// アカウント×操作の粒度。有効化は管理者が説明を読んで行う（ADR 0008 と同型）。
-/// [`GrantRegistry::require`] でしか取得できないため、[`AcpClient::run_prompt`]
-/// の引数が「許可済み」を型で表す。
+/// フィールドは非公開で [`GrantRegistry::require`] でしか取得できないため、
+/// [`AcpClient::run_prompt`] の引数が「許可済み」を型で表す。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentGrant {
     /// 連携（外部エージェント種別。例: `codex-acp`）。
-    pub integration: String,
+    integration: String,
     /// アカウント（会社と利用者の識別。例: `acme/alice`）。
-    pub account: String,
+    account: String,
     /// 操作（`acp.session` など）。
-    pub operation: String,
+    operation: String,
 }
 
 /// 宣言済みの grant の表。初期は空（doc 10）。未登録の要求はすべて拒否する。
@@ -215,6 +215,10 @@ pub enum AcpAuditEvent {
     ConnectAttempt {
         /// 許可済みの連携。
         integration: String,
+        /// 許可済みのアカウント。
+        account: String,
+        /// 許可済みの操作。
+        operation: String,
     },
     /// `initialize` の完了（相手の名）。
     Initialized {
@@ -346,6 +350,8 @@ impl AcpClient {
     ) -> Result<SessionReport, AcpError> {
         self.audit.record(AcpAuditEvent::ConnectAttempt {
             integration: grant.integration.clone(),
+            account: grant.account.clone(),
+            operation: grant.operation.clone(),
         });
         let (update_tx, mut update_rx) = unbounded_channel();
         // toolCallId → 操作名の相関表。許可要求の subject が名前を持たない
