@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 use agent_client_protocol::v2::{ConnectionTo, Responder, schema};
 use agent_client_protocol::{Agent, ByteStreams, Client, ConnectTo, Result};
 use pelway_gateway::acp::{
-    AcpAuditEvent, AcpClient, AcpError, ExportEnvelope, GrantRegistry, PermissionAnswer,
-    PermissionAsk, PermissionDecider,
+    AcpAuditEvent, AcpClient, AcpError, ExportEnvelope, GrantRegistry, IsolatedTransport,
+    PermissionAnswer, PermissionAsk, PermissionDecider,
 };
 use pelway_gateway::tier::{ActionTier, TierDeclarations};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -27,6 +27,10 @@ struct DoubleSpec {
     option_kinds: Vec<schema::PermissionOptionKind>,
     /// initialize で返すエージェント名。`None` なら `acp-double`。
     agent_name: Option<&'static str>,
+    /// prompt への応答の前にこの数の小さい update を連投する（キュー溢れの確認）。
+    flood_updates: Option<usize>,
+    /// idle の前に 1 本の巨大テキストを送る（出力上限の確認）。
+    huge_output: bool,
 }
 
 /// 検証用の ACP Agent。v2 の baseline（initialize・session/new・prompt・cancel・
@@ -88,6 +92,17 @@ impl Double {
                 schema::RunningStateUpdate::new(),
             )),
         )?;
+
+        if self.spec.huge_output {
+            send_update(
+                &connection,
+                &session_id,
+                schema::SessionUpdate::AgentMessage(
+                    schema::AgentMessage::new(schema::MessageId::new("big-1"))
+                        .content(vec!["a".repeat(2 * 1024 * 1024).into()]),
+                ),
+            )?;
+        }
 
         if let Some(tool) = self.spec.permission_tool {
             send_update(
@@ -242,6 +257,21 @@ fn spawn_double(
                 async move |request: schema::PromptRequest,
                             responder: Responder<schema::PromptResponse>,
                             connection: ConnectionTo<Client>| {
+                    // 応答前に連投し、クライアント側の有界キューを溢れさせる。
+                    if let Some(n) = double.spec.flood_updates {
+                        for i in 0..n {
+                            send_update(
+                                &connection,
+                                &request.session_id.to_string(),
+                                schema::SessionUpdate::AgentMessage(
+                                    schema::AgentMessage::new(schema::MessageId::new(format!(
+                                        "flood-{i}"
+                                    )))
+                                    .content(vec!["x".into()]),
+                                ),
+                            )?;
+                        }
+                    }
                     responder.respond(schema::PromptResponse::new(schema::MessageId::new(
                         "user-msg-1",
                     )))?;
@@ -355,7 +385,7 @@ async fn roundtrip_echo_session() {
     let report = client
         .run_prompt(
             &grant(&grants()),
-            transport,
+            IsolatedTransport::assume_isolated(transport),
             &ExportEnvelope::new("レビューして"),
             Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
         )
@@ -400,7 +430,7 @@ async fn permission_allow_once_for_declared_tool() {
     let report = client
         .run_prompt(
             &grant(&grants()),
-            transport,
+            IsolatedTransport::assume_isolated(transport),
             &ExportEnvelope::new("post it"),
             decider.clone(),
         )
@@ -446,7 +476,7 @@ async fn undeclared_operation_is_rejected_without_decider() {
     client
         .run_prompt(
             &grant(&grants()),
-            transport,
+            IsolatedTransport::assume_isolated(transport),
             &ExportEnvelope::new("purge it"),
             decider.clone(),
         )
@@ -490,7 +520,7 @@ async fn always_options_are_never_selected() {
     client
         .run_prompt(
             &grant(&grants()),
-            transport,
+            IsolatedTransport::assume_isolated(transport),
             &ExportEnvelope::new("post it"),
             decider,
         )
@@ -528,7 +558,7 @@ async fn cancel_decision_cancels_session() {
     let report = client
         .run_prompt(
             &grant(&grants()),
-            transport,
+            IsolatedTransport::assume_isolated(transport),
             &ExportEnvelope::new("post it"),
             decider,
         )
@@ -559,7 +589,7 @@ async fn identity_mismatch_refuses_before_session() {
     let error = client
         .run_prompt(
             &grant(&grants()),
-            transport,
+            IsolatedTransport::assume_isolated(transport),
             &ExportEnvelope::new("レビューして"),
             Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
         )
@@ -591,7 +621,7 @@ async fn client_advertises_no_side_effect_channels() {
     client
         .run_prompt(
             &grant(&grants()),
-            transport,
+            IsolatedTransport::assume_isolated(transport),
             &ExportEnvelope::new("レビューして"),
             Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
         )
@@ -612,5 +642,57 @@ async fn client_advertises_no_side_effect_channels() {
         Some((0, 0)),
         "session/new に MCP server か追加ディレクトリがある"
     );
+    server.abort();
+}
+
+// 受け入れ条件: エージェントが処理能力を超える量の update を送っても、
+// キューは bounded で session は失敗する（メモリ枯渇の DoS 防止）。
+#[tokio::test]
+async fn flooding_updates_fail_the_session() {
+    let (transport, serve, _state) = spawn_double(DoubleSpec {
+        flood_updates: Some(400),
+        ..DoubleSpec::default()
+    });
+    let server = tokio::spawn(serve);
+
+    let audit = Arc::new(Mutex::new(Vec::new()));
+    let client = AcpClient::new(declarations(), audit.clone());
+    let error = client
+        .run_prompt(
+            &grant(&grants()),
+            IsolatedTransport::assume_isolated(transport),
+            &ExportEnvelope::new("レビューして"),
+            Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
+        )
+        .await
+        .expect_err("連投するエージェントを許した");
+
+    assert!(matches!(error, AcpError::UpdateOverflow), "{error:?}");
+    server.abort();
+}
+
+// 受け入れ条件: 累積する agent 出力が上限（1 MiB）を超えたら session を
+// 失敗させる（巨大出力によるメモリ枯渇の防止）。
+#[tokio::test]
+async fn oversized_output_fails_the_session() {
+    let (transport, serve, _state) = spawn_double(DoubleSpec {
+        huge_output: true,
+        ..DoubleSpec::default()
+    });
+    let server = tokio::spawn(serve);
+
+    let audit = Arc::new(Mutex::new(Vec::new()));
+    let client = AcpClient::new(declarations(), audit.clone());
+    let error = client
+        .run_prompt(
+            &grant(&grants()),
+            IsolatedTransport::assume_isolated(transport),
+            &ExportEnvelope::new("レビューして"),
+            Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
+        )
+        .await
+        .expect_err("巨大な出力を許した");
+
+    assert!(matches!(error, AcpError::OutputTooLarge), "{error:?}");
     server.abort();
 }

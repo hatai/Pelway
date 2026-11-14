@@ -35,14 +35,22 @@
 //! 集約する設計（限定 MCP サーバー）は後続 Issue の責務とする。
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::{MaybeUndefined, ProtocolVersion};
 use agent_client_protocol::v2::{ConnectionTo, Responder, schema};
 use agent_client_protocol::{Agent, Client, ConnectTo, Error};
-use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+use tokio::sync::mpsc::{Receiver, channel};
 
 use crate::tier::TierDeclarations;
+
+/// `session/update` の滞留を許す深さ。超過は資源枯渇として扱い session を
+/// 失敗させる（無制限キューによるメモリ枯渇の防止）。
+const UPDATE_QUEUE_DEPTH: usize = 256;
+
+/// 累積する agent テキストの上限（byte）。超過は資源枯渇として扱う。
+const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 
 /// ACP adapter の失敗。SDK の [`Error`] をそのまま外に漏らさないための詰め替え。
 #[derive(Debug)]
@@ -70,6 +78,10 @@ pub enum AcpError {
     Protocol(String),
     /// 完了の通知を待つ前にエージェントが切れた。
     Disconnected,
+    /// エージェントの更新通知が処理能力を超え、滞留を打ち切った。
+    UpdateOverflow,
+    /// エージェントの累積出力が上限を超えた。
+    OutputTooLarge,
 }
 
 impl std::fmt::Display for AcpError {
@@ -96,6 +108,12 @@ impl std::fmt::Display for AcpError {
             Self::Protocol(m) => write!(f, "ACP の処理が失敗した: {m}"),
             Self::Disconnected => {
                 write!(f, "prompt の完了を待つ前にエージェントとの接続が切れた")
+            }
+            Self::UpdateOverflow => {
+                write!(f, "エージェントの更新通知が処理能力を超えた")
+            }
+            Self::OutputTooLarge => {
+                write!(f, "エージェントの累積出力が上限を超えた")
             }
         }
     }
@@ -328,6 +346,23 @@ impl AcpAudit for Mutex<Vec<AcpAuditEvent>> {
     }
 }
 
+/// 呼び出し元の task container で隔離が強制されたエージェントへの
+/// transport。フィールドは非公開で、構築は [`Self::assume_isolated`]
+/// だけができる（doc 10 の runner 境界を型の確認点として残す）。
+pub struct IsolatedTransport<T>(T);
+
+impl<T> IsolatedTransport<T> {
+    /// 隔離済みであることを呼び出し元が確認して包む。task container が
+    /// 環境変数・cwd・ファイルシステム・ネットワークを制限した状態で
+    /// エージェントを起動し、その stdio 相当の transport のみを渡すこと。
+    /// 未隔離のエージェントを包むと `ExportEnvelope`・permission・
+    /// `integration` 照合のすべての境界が迂回される。
+    #[must_use]
+    pub fn assume_isolated(transport: T) -> Self {
+        Self(transport)
+    }
+}
+
 /// prompt 一往復の結果。
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionReport {
@@ -367,14 +402,15 @@ impl AcpClient {
     /// このアダプタはエージェントのプロセスを起動しない。起動・環境変数・
     /// cwd・ファイルシステム・ネットワークの隔離は呼び出し元（task
     /// container、doc 10 の runner 境界）が transport を作る時点で強制
-    /// する前提。ここで transport を受け取ることで、隔離なしの起動経路を
-    /// 型のレベルで存在させない。接続後は `initialize` で返ったエージェント
-    /// 名を grant の連携と照合し、一致しなければ prompt を送らず拒否する
-    /// （別連携宛の grant で別エージェントへ送る誤配送の防止）。
+    /// する前提。引数が [`IsolatedTransport`] なのは「隔離を確認した
+    /// transport だけが渡せる」ことを型で表すため。接続後は `initialize`
+    /// で返ったエージェント名を grant の連携と照合し、一致しなければ
+    /// prompt を送らず拒否する（別連携宛の grant で別エージェントへ
+    /// 送る誤配送の防止）。
     pub async fn run_prompt(
         &self,
         grant: &AgentGrant,
-        transport: impl ConnectTo<Client> + 'static,
+        transport: IsolatedTransport<impl ConnectTo<Client> + 'static>,
         envelope: &ExportEnvelope,
         decider: Arc<dyn PermissionDecider>,
     ) -> Result<SessionReport, AcpError> {
@@ -383,7 +419,11 @@ impl AcpClient {
             account: grant.account.clone(),
             operation: grant.operation.clone(),
         });
-        let (update_tx, mut update_rx) = unbounded_channel();
+        // エージェントからの更新通知を溜める有界キュー。満杯なら通知を
+        // 捨てて overflow を立て、wait_until_idle で session を失敗させる
+        // （無制限蓄積によるメモリ枯渇の防止）。
+        let (update_tx, mut update_rx) = channel(UPDATE_QUEUE_DEPTH);
+        let overflow = Arc::new(AtomicBool::new(false));
         // toolCallId → 操作名の相関表。許可要求の subject が名前を持たない
         // 場合に、先行する tool_call_update の `name` で引く（R1-Q5 案aの
         // 「toolCallId/名前は判定キーへの相関にだけ使う」）。
@@ -399,6 +439,7 @@ impl AcpClient {
             .on_receive_notification(
                 {
                     let seen_tools = Arc::clone(&seen_tools);
+                    let overflow = Arc::clone(&overflow);
                     async move |notification: schema::UpdateSessionNotification,
                                 _connection: ConnectionTo<Agent>| {
                         if let schema::SessionUpdate::ToolCallUpdate(tool_call) =
@@ -410,9 +451,10 @@ impl AcpClient {
                                 .expect("tool correlation poisoned")
                                 .insert(tool_call.tool_call_id.0.to_string(), name.clone());
                         }
-                        update_tx
-                            .send(notification)
-                            .map_err(Error::into_internal_error)
+                        if update_tx.try_send(notification).is_err() {
+                            overflow.store(true, Ordering::Relaxed);
+                        }
+                        Ok(())
                     }
                 },
                 agent_client_protocol::on_receive_notification!(),
@@ -432,7 +474,7 @@ impl AcpClient {
                 },
                 agent_client_protocol::on_receive_request!(),
             )
-            .connect_with(transport, async move |connection| {
+            .connect_with(transport.0, async move |connection| {
                 // AcpError の種別（GrantDenied 系・NoSessionCapability・
                 // Disconnected）を保ったまま外へ出すため、内側の結果を
                 // Result<_, AcpError> で包む。SDK の Error は Protocol に詰める。
@@ -442,6 +484,7 @@ impl AcpClient {
                         &envelope_body,
                         &mut update_rx,
                         &expected_integration,
+                        &overflow,
                     )
                     .await
                 {
@@ -462,8 +505,9 @@ impl AcpClient {
         &self,
         connection: &ConnectionTo<Agent>,
         envelope_body: &str,
-        update_rx: &mut UnboundedReceiver<schema::UpdateSessionNotification>,
+        update_rx: &mut Receiver<schema::UpdateSessionNotification>,
         expected_integration: &str,
+        overflow: &AtomicBool,
     ) -> Result<SessionReport, AcpError> {
         let initialize = connection
             .send_request(schema::InitializeRequest::new(
@@ -503,7 +547,7 @@ impl AcpClient {
         });
         session.send_prompt(envelope_body).block_task().await?;
         self.audit.record(AcpAuditEvent::PromptSent);
-        let mut report = wait_until_idle(update_rx, &session_id).await?;
+        let mut report = wait_until_idle(update_rx, &session_id, overflow).await?;
         report.session_id = session_id.clone();
         session.close().block_task().await?;
         self.audit
@@ -638,13 +682,17 @@ fn cancel(
 /// `running`/`requires_action`/未知の状態はすべて「作業中」として扱い、
 /// 未知の状態を idle と誤認しない（SDK の quickstart の注意どおり）。
 async fn wait_until_idle(
-    updates: &mut UnboundedReceiver<schema::UpdateSessionNotification>,
+    updates: &mut Receiver<schema::UpdateSessionNotification>,
     session_id: &str,
+    overflow: &AtomicBool,
 ) -> Result<SessionReport, AcpError> {
     let mut text = String::new();
     let mut observed_active = false;
     let mut saw_requires_action = false;
     loop {
+        if overflow.load(Ordering::Relaxed) {
+            return Err(AcpError::UpdateOverflow);
+        }
         let notification = updates.recv().await.ok_or(AcpError::Disconnected)?;
         if notification.session_id.0.as_ref() != session_id {
             continue;
@@ -680,6 +728,9 @@ async fn wait_until_idle(
                 }
             }
             _ => {}
+        }
+        if text.len() > MAX_OUTPUT_BYTES {
+            return Err(AcpError::OutputTooLarge);
         }
     }
 }
