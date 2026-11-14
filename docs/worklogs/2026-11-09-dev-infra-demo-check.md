@@ -1,5 +1,9 @@
 # 作業記録: 開発基盤（dev-infra）
 
+> ブランチ `demo-t3/platform`（2026-11-09〜11-14、slot 1〜10）の作業記録。機能本体
+> （demo-check）は Issue #143 で main に移植済み（e3d1cc0・f0e497d）。2026-11-14 に旧
+> `docs/worklog/dev-infra.md` から本書へ移動。以降のレビュー対応は main 上で行う。
+
 - 担当: Pelway 開発基盤エンジニア
 - worktree: `/home/hatai/.t3/worktrees/Pelway/demo-t3-platform`
 - branch: `demo-t3/platform`（base `f32ca74c25d8c5614e7655a11c2a929be8211a10`）
