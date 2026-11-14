@@ -19,6 +19,11 @@ set -euo pipefail
 fail() { echo "agent-gh-resign: $1" >&2; exit "${2:-1}"; }
 warn() { echo "agent-gh-resign: $1" >&2; }
 
+# 一時ファイル置き場。fileChanges の組立は jq への引数でなくファイル経由で行う
+# （コミットのファイル内容を base64 で引数に渡すと、1 引数あたりの上限 128KiB を超えるため）。
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+
 # 1. 対象ブランチを決める（引数 > upstream > origin/<現在のブランチ>）
 remote="${1:-}"
 branch="${2:-}"
@@ -141,24 +146,28 @@ new_tip=""
 for sha in "${unsigned[@]}"; do
   headline="$(git log -1 --format=%s "$sha")"
   body="$(git log -1 --format=%b "$sha")"
-  adds='[]'
-  dels='[]'
+  : >"$tmp_dir/adds.ndjson"
+  : >"$tmp_dir/dels.ndjson"
   while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
     read -r _om _nm _os _ns st <<<"${meta#:}"
     if [[ "$st" == "D" ]]; then
-      dels="$(jq --arg path "$path" '. + [{path: $path}]' <<<"$dels")"
+      jq -cn --arg path "$path" '{path: $path}' >>"$tmp_dir/dels.ndjson"
     else
-      adds="$(jq --arg path "$path" --arg contents "$(git show "$sha:$path" | base64 -w0)" \
-        '. + [{path: $path, contents: $contents}]' <<<"$adds")"
+      git show "$sha:$path" | base64 -w0 |
+        jq -Rn --arg path "$path" '{path: $path, contents: input}' >>"$tmp_dir/adds.ndjson"
     fi
   done < <(git diff-tree -r --no-commit-id --no-renames -z "$sha")
-  req="$(jq -n --arg repo "$repo" --arg branch "$branch" --arg head "$prev" \
-    --arg headline "$headline" --arg body "$body" --argjson adds "$adds" --argjson dels "$dels" \
+  # NDJSON 1 行=1 オブジェクトを配列にまとめる。空の入力は [] になる。
+  jq -s '.' <"$tmp_dir/adds.ndjson" >"$tmp_dir/adds.json"
+  jq -s '.' <"$tmp_dir/dels.ndjson" >"$tmp_dir/dels.json"
+  jq -n --arg repo "$repo" --arg branch "$branch" --arg head "$prev" \
+    --arg headline "$headline" --arg body "$body" \
+    --rawfile adds "$tmp_dir/adds.json" --rawfile dels "$tmp_dir/dels.json" \
     '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
       variables: {input: {branch: {repositoryNameWithOwner: $repo, branchName: $branch},
         expectedHeadOid: $head, message: {headline: $headline, body: $body},
-        fileChanges: {additions: $adds, deletions: $dels}}}}')"
-  if ! resp="$(gh api graphql --input - <<<"$req")"; then
+        fileChanges: {additions: ($adds|fromjson), deletions: ($dels|fromjson)}}}}' >"$tmp_dir/req.json"
+  if ! resp="$(gh api graphql --input - <"$tmp_dir/req.json")"; then
     restore_ref "$remote_head" || warn "ref の復元にも失敗しました。手で origin/$branch を $remote_head に戻してください"
     fail "createCommitOnBranch の呼び出しに失敗しました（$sha）。ref は $remote_head に復元済みです" 4
   fi

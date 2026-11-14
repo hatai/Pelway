@@ -18,5 +18,5 @@
 
 ## 残っている確認
 
-- `delegate_task` の子が `codex_review` の sandbox（ネットワーク GitHub 限定・権限プロファイル `review`）を継承するか。`docs/dev-environment.md` の「レビュー委託（delegate_task）での確認」の初回委託で確かめる。不通過なら委託によるレビューは止めて、指揮役立てに戻す再協議
+- `delegate_task` の子が `codex_review` の sandbox（ネットワーク GitHub 限定・権限プロファイル `review`）を継承するか → PR #275 の round 1 で実施し、4 点とも合格。`docs/dev-environment.md` の記録欄に記録済み
 - `claude_review`・Devin CLI のレビュー稼働ゲート（既存の確認欄が未実施のまま）

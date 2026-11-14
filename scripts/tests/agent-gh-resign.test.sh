@@ -270,7 +270,19 @@ git -C "$REMOTE_DIR" cat-file -p "$(git -C "$REMOTE_DIR" rev-parse refs/heads/ag
 [[ "$(git -C "$REPO" rev-parse HEAD)" == "$(git -C "$REMOTE_DIR" rev-parse refs/heads/agent/test-branch)" ]] ||
   failures+=("resign_retry: local not aligned")
 
-# --- 7. リポジトリ外では何もせず終了コード 0 ---
+# --- 7. 単一引数上限（128KiB）を超える大きいファイルを含むコミットも署名できる ---
+head -c 200000 /dev/zero | tr '\0' 'a' >"$REPO/big.txt"
+git -C "$REPO" add big.txt
+git -C "$REPO" commit -qm "feat: big file"
+git -C "$REPO" push -q origin HEAD
+run_resign resign_big_file
+[[ "$RC" == 0 ]] || failures+=("resign_big_file: exit $RC, want 0 ($(head -c 200 "$ROOT/resign_big_file.err"))")
+git -C "$REMOTE_DIR" cat-file -p "$(git -C "$REMOTE_DIR" rev-parse refs/heads/agent/test-branch)" | grep -q '^gpgsig ' ||
+  failures+=("resign_big_file: tip unsigned")
+[[ "$(git -C "$REMOTE_DIR" show refs/heads/agent/test-branch:big.txt | wc -c)" == 200000 ]] ||
+  failures+=("resign_big_file: big.txt content differs")
+
+# --- 8. リポジトリ外では何もせず終了コード 0 ---
 (cd "$ROOT" && GH_TOKEN=fake-token bash "$SCRIPT" >/dev/null 2>&1)
 [[ "$?" == 0 ]] || failures+=("outside_repo: non-zero exit outside repo")
 

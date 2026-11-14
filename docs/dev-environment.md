@@ -205,10 +205,10 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 
 | 項目 | 結果 | 実施日 |
 |---|---|---|
-| 実施日（初回委託を行った PR） | 未実施 | — |
-| ネットワーク制限の結果（GitHub にはつながり、それ以外にはつながらないか） | 未実施 | — |
-| 書き込み・checkout の制限の結果 | 未実施 | — |
-| レビュー投稿の結果（`agent-gh review pr review` が通ったか） | 未実施 | — |
+| 実施日（初回委託を行った PR） | PR #275（round 1。`checks pending` による再委託 1 回は回数に数えていない） | 2026-11-14 |
+| ネットワーク制限の結果（GitHub にはつながり、それ以外にはつながらないか） | 合格（`scripts/agent-gh review api /rate_limit` 成功、`curl -sS https://example.com` 拒否） | 2026-11-14 |
+| 書き込み・checkout の制限の結果 | 合格（worktree の外への書き込み拒否、`git switch` 拒否） | 2026-11-14 |
+| レビュー投稿の結果（`agent-gh review pr review` が通ったか） | 合格（PR #275 に `pelway-review` 名義で Approve を投稿、`Reviewed:` の sha が head と一致） | 2026-11-14 |
 
 `claude_review`・Devin CLI をレビュー委託で使うときも、それぞれの確認手順に加えてこの確認を済ませる。
 
