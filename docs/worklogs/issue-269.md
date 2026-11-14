@@ -30,3 +30,17 @@
 - レビュー結果: 指摘 2 件（must-fix 0 / should-fix 1 / nit 1）。should-fix は `DEMO_CHECK_RUNTIME=1 bash scripts/demo-check/selftest.sh` が 3 ケース fail する密閉性の欠落、nit は PENDING 文言 "is not set" → "is not 1"
 - 修正後: 通常 / DEMO_CHECK_RUNTIME=1 / DEMO_CHECK_ACCEPTANCE=1 / 両方 の 4 通りすべて selftest exit 0（135 passed, 0 failed）
 - `bash -n scripts/demo-check/*.sh` → 0
+
+## 実装者メモ（round 3 — 再レビュー指摘への対応）
+
+1. 詰まった箇所: scripts/demo-check/selftest.sh:322,329,336（Codex r2 の bind 走査ケース）— loopback.sh を直接呼ぶ 3 ヶ所だけ env -u が前置されていなかった。ss 無し環境（macOS 等）で外から DEMO_CHECK_RUNTIME=1 を付けると loopback.sh が ss 失敗の exit 2 を返し 3 ケースが落ちる。3 ヶ所に同一の -u 前置で解消
+2. 曖昧だった文: 「本開発機（Linux・ss あり）では害が隠れている」（再レビュー報告）— 実際に macOS 相当の検証はできていないが、run_stage・run.sh 直呼び・loopback.sh 直呼びの全経路で -u が揃い、環境変数の伝播経路は selftest 内に残っていないことを grep で確認した
+3. 仮定と解釈: nit（密閉コメントの文言が古い）もあわせて 3 ヶ所更新。ヘッダ・run_stage・run.sh 呼び出しのコメントが実装（両変数の除外）と一致
+4. 足りなかった情報・検証手段: ss が無い環境での実機検証（Linux 専用のため当環境では不可）。ss 失敗時 exit 2 はスタブケース（149-151 行）で既に担保
+5. 改善案: なし
+
+## 検証記録（round 3）
+
+- 通常 / DEMO_CHECK_RUNTIME=1 / DEMO_CHECK_ACCEPTANCE=1 / 両方 の 4 通りすべて selftest exit 0（135 passed, 0 failed）
+- `bash -n scripts/demo-check/*.sh` → 0
+- 直呼び経路の残存確認: `grep -n 'bash "${here}/loopback.sh"\|bash "${here}/run.sh"' scripts/demo-check/selftest.sh` の全行が env -u 付き

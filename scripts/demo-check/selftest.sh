@@ -15,10 +15,11 @@
 #   - DEMO_CHECK_RUNTIME=1 で loopback の runtime 検査が ss ベースで走る（Issue #269 方式B）:
 #     非ループバックの LISTEN は違反（exit 1）、ループバックのみは exit 0（ACCEPTANCE でも PENDING 規則なし）、
 #     ss の失敗は exit 2。ss はスタブに差し替えて確かめる
-#   - run_stage と run.sh の直接呼び出しは、外の DEMO_CHECK_ACCEPTANCE を引き継がない。
-#     通常モードのケースは env -u で通常モードに固定する（slot8。外で DEMO_CHECK_ACCEPTANCE=1 を
-#     付けて selftest を実行しても、canary の走査ゼロ（通常モード）で exit 1 になることを含め
-#     全ケースが意図したモードで動く）
+#   - run_stage と run.sh・loopback.sh の直接呼び出しは、外の DEMO_CHECK_ACCEPTANCE と
+#     DEMO_CHECK_RUNTIME を引き継がない。通常モードのケースは env -u で通常モードに固定する
+#     （slot8 + PR #279 レビュー。外で =1 を付けて selftest を実行しても、canary の走査ゼロ
+#     （通常モード）で exit 1 になることや ss 無し環境での誤失敗を含め、全ケースが意図した
+#     モードで動く）
 #   - PELWAY_BIND_ADDR を経由しない bind("...") の宛先も許可値（127.0.0.1/[::1]:0-65535）と
 #     完全一致で照合される（DC-01）。同じ行に複数の bind があってもすべて検査する（slot5 指摘1）。
 #     ポートは 0〜65535 で 65536〜99999 は違反（DC-06）
@@ -78,8 +79,8 @@ RC=0
 run_stage() { # run_stage <root> <stage> [VAR=value ...]
   local r="$1" stage="$2"
   shift 2
-  # slot8: 外の DEMO_CHECK_ACCEPTANCE を、PR #279 レビュー指摘1 で DEMO_CHECK_RUNTIME を
-  # 引き継がない（通常モードに固定）。どちらも回すときは呼び出し側が引数で渡す
+  # slot8 + PR #279 レビュー: 外の DEMO_CHECK_ACCEPTANCE と DEMO_CHECK_RUNTIME を
+  # 引き継がない（通常モードに固定）。どちらのモードで回すときも呼び出し側が引数で渡す
   # （env の引数は左から右に効くので、-u の後の渡し方が勝つ）。
   OUT="$(env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${r}" DEMO_CHECK_LIST_DIR="${here}" "$@" bash "${here}/${stage}.sh" 2>&1)"
   RC=$?
@@ -191,7 +192,8 @@ else ng "canary: ACCEPTANCE marker hit must fail alone (exit ${RC})"; show "${OU
 
 # --- run.sh: 引数の検査と PARTIAL RUN ---
 # slot6: canary の走査対象ゼロは未検証（exit 1）なので、clean tree の full run は canary だけ失敗
-# slot8: 通常モードを確かめる呼び出しは env -u で DEMO_CHECK_ACCEPTANCE を外して固定する
+# slot8 + PR #279 レビュー: 通常モードを確かめる呼び出しは env -u で DEMO_CHECK_ACCEPTANCE と
+# DEMO_CHECK_RUNTIME を外して固定する
 make_clean "${tmp}/case"
 OUT="$(env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" 2>&1)"; RC=$?
 if [ "${RC}" -eq 1 ] && ! printf '%s\n' "${OUT}" | grep -q "PARTIAL RUN" && printf '%s\n' "${OUT}" | grep -q "full run: all 4 stages" && printf '%s\n' "${OUT}" | grep -q "failed: canary"; then
@@ -319,21 +321,21 @@ expect_case loopback 0 "two allowed binds on one line" "${R}" 'fn m3() { let _ =
 bind_count() { printf '%s\n' "${OUT}" | grep -c 'bind argument is not' || true; }
 r="${tmp}/case"; make_clean "${r}"
 printf 'fn a0() { let _ = std::net::TcpListener::bind("localhost"); }\n' > "${r}/crates/x/src/bind0.rs"
-OUT="$(timeout 5 env DEMO_CHECK_ROOT="${r}" DEMO_CHECK_LIST_DIR="${here}" bash "${here}/loopback.sh" 2>&1)"; RC=$?
+OUT="$(timeout 5 env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${r}" DEMO_CHECK_LIST_DIR="${here}" bash "${here}/loopback.sh" 2>&1)"; RC=$?
 if [ "${RC}" -eq 1 ] && [ "$(bind_count)" -eq 1 ]; then
   ok "loopback: a portless bind argument finishes within 5s and reports exactly once"
 else ng "loopback: portless bind (exit ${RC}, reports $(bind_count))"; show "$(printf '%s\n' "${OUT}" | head -8)"; fi
 
 r="${tmp}/case"; make_clean "${r}"
 printf 'fn b0() { let _ = std::net::TcpListener::bind("0.0.0.0:80"); }\n' > "${r}/crates/x/src/bind0.rs"
-OUT="$(timeout 5 env DEMO_CHECK_ROOT="${r}" DEMO_CHECK_LIST_DIR="${here}" bash "${here}/loopback.sh" 2>&1)"; RC=$?
+OUT="$(timeout 5 env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${r}" DEMO_CHECK_LIST_DIR="${here}" bash "${here}/loopback.sh" 2>&1)"; RC=$?
 if [ "${RC}" -eq 1 ] && [ "$(bind_count)" -eq 1 ]; then
   ok "loopback: a single bad bind on a line is reported exactly once"
 else ng "loopback: single bad bind (exit ${RC}, reports $(bind_count))"; show "$(printf '%s\n' "${OUT}" | head -8)"; fi
 
 r="${tmp}/case"; make_clean "${r}"
 printf 'fn c0() { let _ = std::net::TcpListener::bind("127.0.0.1:80").unwrap(); let _ = std::net::TcpListener::bind("0.0.0.0:80").unwrap(); }\n' > "${r}/crates/x/src/bind0.rs"
-OUT="$(timeout 5 env DEMO_CHECK_ROOT="${r}" DEMO_CHECK_LIST_DIR="${here}" bash "${here}/loopback.sh" 2>&1)"; RC=$?
+OUT="$(timeout 5 env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${r}" DEMO_CHECK_LIST_DIR="${here}" bash "${here}/loopback.sh" 2>&1)"; RC=$?
 if [ "${RC}" -eq 1 ] && [ "$(bind_count)" -eq 1 ]; then
   ok "loopback: an allowed and a bad bind on one line reports only the bad one"
 else ng "loopback: allowed+bad bind (exit ${RC}, reports $(bind_count))"; show "$(printf '%s\n' "${OUT}" | head -8)"; fi
