@@ -1,0 +1,16 @@
+[package]
+# ルーティンの定期実行スケジュールの cron 解釈。解釈は croner に任せる（ADR 0010、#213）。
+# スケジュール実行基盤（キューとの接続）はこのクレートの対象外。
+name = "pelway-schedule"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Cron schedule interpretation for Pelway routines. Execution infrastructure is out of scope."
+
+[dependencies]
+# cron 式の解釈。クレート選定の根拠は docs/adr/0010-cron-schedule-parsing.md。
+croner = "4.0"
+chrono = "0.4"
+
+[dev-dependencies]
+chrono-tz = "0.10"
