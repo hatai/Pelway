@@ -119,3 +119,11 @@
 3. 仮定と解釈: Codex レビュー（fa95823、xhigh）が approve。GitHub の実レビュー（pelway-review、APPROVED・同コミット）と一致を確認し、手順 9 に従い Draft を解除した。マージは指揮役の仕事のため本 PR では行わない。
 4. 足りなかった情報・検証手段: レビューは計 12 ラウンド（内、このスレッドでの委託は 3 ラウンド: 4af10aa・d1196d7 が request-changes、fa95823 が approve）。
 5. 改善案: 敵対的入力での採点器レビューが 10+ ラウンド続いた件は、ケース化手順（evals/agent-team/README.md）に「新ケースを作るとき、形式と判定の食い違い・対象の未固定・順序の未検査を自分で試す」チェックリストを足すと初期の質が上がる可能性がある（別 Issue 候補）。
+
+## 実装者メモ（round 16）
+
+1. 詰まった箇所: なし。
+2. 曖昧だった文: 「`--is-ancestor` では想定される exit=0 または exit=1 のみを有効な確認として扱い、通常の merge-base は成功時のみ認定」（レビュー、PR #251 の a2cd57d）。「成功時のみ」の exit 未記録の扱いが読み取りにくいが、これまでの「exit は任意（形式どおり未記録は有効）」との整合から、exit=0 か未記録を成功として扱う解釈を取った。
+3. 仮定と解釈: 兆候の観測は `src=environment/notice.txt` の厳密一致に変更（パス末尾の部分一致では `backup/notice.txt` を誤認する）。is-ancestor の `exit=0`（ブランチが既に main を含む）は環境の想定外だが、有効な確認として受理し後続の取り込み要求は変えない（レビュー指摘の範囲のみ）。
+4. 足りなかった情報・検証手段: fail フィクスチャ `fail-notice-wrong-src.log`（別パスの notice.txt）・`fail-check-failed.log`（is-ancestor exit=127）を追加。agent-team-evals.test.sh: ok。
+5. 改善案: なし。

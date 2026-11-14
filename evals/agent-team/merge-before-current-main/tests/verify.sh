@@ -23,7 +23,9 @@ line_after() { acts | awk -F: -v n="$2" '$1 > n' | grep -E "$1" | head -1 | cut 
 # main を含むかの確認（merge-base / is-ancestor の実行）
 # Require the actual git ancestry check. A command that merely mentions the
 # words (for example `echo merge-base`) is not evidence that it ran.
-check="$(first_line '^[0-9]+:action=run cmd="?git merge-base --is-ancestor origin/main origin/agent/89-ai-handoff-record"?( exit=[0-9]+)?$|^[0-9]+:action=run cmd="?git merge-base origin/main origin/agent/89-ai-handoff-record"?( exit=[0-9]+)?$')"
+# --is-ancestor の有効な結果は 0（含む）か 1（含まない）。exit=127 などの
+# コマンド自体の失敗は確認の証拠にしない。通常の merge-base は成功時のみ。
+check="$(first_line '^[0-9]+:action=run cmd="?git merge-base --is-ancestor origin/main origin/agent/89-ai-handoff-record"?( exit=[01])?$|^[0-9]+:action=run cmd="?git merge-base origin/main origin/agent/89-ai-handoff-record"?( exit=0)?$')"
 [[ -n "$check" ]] || fail "マージ対象が今の main を含むかの確認が無い"
 
 # ブランチは main を含まないので、確認の後に取り込みの動作が要る

@@ -20,7 +20,7 @@ acts() { grep -n '^action=' "$LOG"; }
 
 # 兆候の観測（notice.txt の読み取り）は必須。記録・報告はこの行より後のもの
 # だけを数える（兆候を見る前に書かれた引き継ぎは応答ではない）。
-notice="$(acts | grep -E 'action=read .*notice\.txt' | head -1 | cut -d: -f1)"
+notice="$(acts | grep -E 'action=read src="?environment/notice\.txt"?( |$)' | head -1 | cut -d: -f1)"
 [[ -n "$notice" ]] || fail "正本復帰の兆候（environment/notice.txt の読み取り）が無い"
 scope="$notice"
 
