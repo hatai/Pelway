@@ -11,8 +11,9 @@
 //! - 設定がないトランザクションはどの行も返さない（fail-closed）。
 //! - アプリは [`APP_ROLE`] で動き、ポリシーの適用を受ける。管理用の処理は
 //!   [`ADMIN_ROLE`]（BYPASSRLS）だけが行え、テナント表への直接の DML 権限を持つ。
-//!   このロールの利用の監査は #149 で設計する（ADR 0005 の Consequences の
-//!   うち監査の部分。この crate は監査を保証しない）。
+//!   このロールの利用は [`admin`]（専用経路）が監査する: 操作の前に intent 行を
+//!   別トランザクションで確定し、確定できないときは操作を実行しない（#149）。
+//!   [`admin_pool_options`] を使ってよいのは専用経路だけ（規範）。
 //!
 //! マイグレーション（`migrate`）は表の所有者（開発ではスーパーユーザー）で
 //! 実行すること。`pelway_admin` への BYPASSRLS 付与にはスーパーユーザー権限が
@@ -30,6 +31,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod admin;
+
 use pelway_contract::ids::WorkspaceId;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Acquire, PgPool, Postgres, Transaction};
@@ -42,7 +45,8 @@ pub const WORKSPACE_SETTING: &str = "app.workspace_id";
 pub const APP_ROLE: &str = "pelway_app";
 
 /// 管理用のロール。`BYPASSRLS` でポリシーを回避する。移行・バックアップ・横断の
-/// 運営作業だけに使う。このロールの利用の監査は #149 で設計する。
+/// 運営作業だけに使う。このロールでの操作は [`admin`](crate::admin) の専用経路が
+/// 監査する（#149）。
 pub const ADMIN_ROLE: &str = "pelway_admin";
 
 /// 埋め込みのマイグレーションを実行する。表の所有者（開発ではスーパーユーザー）の
@@ -75,7 +79,7 @@ pub fn app_pool_options() -> PgPoolOptions {
 }
 
 /// [`ADMIN_ROLE`] で動くプールのオプション。ポリシーを回避できるため、
-/// 作る場所は移行・バックアップ・横断の運営作業に限定する。
+/// 作る場所は [`admin`](crate::admin) の専用経路（監査先行の管理操作）に限定する。
 #[must_use]
 pub fn admin_pool_options() -> PgPoolOptions {
     PgPoolOptions::new().after_connect(|conn, _| {

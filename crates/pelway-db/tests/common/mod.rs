@@ -18,6 +18,8 @@ pub struct TestDb {
     pub app: PgPool,
     /// 管理用ロール `pelway_admin` で動くプール。
     pub admin: PgPool,
+    /// 監査書き込みロール `pelway_audit` で動くプール（管理経路の監査用接続）。
+    pub audit: PgPool,
     maintenance: PgPool,
     name: String,
 }
@@ -85,6 +87,11 @@ impl TestDb {
             .connect_with(base())
             .await
             .expect("管理ロールでの接続に失敗した");
+        let audit = pelway_db::admin::audit_pool_options()
+            .max_connections(2)
+            .connect_with(base())
+            .await
+            .expect("監査ロールでの接続に失敗した");
         guard
             .commit()
             .await
@@ -93,6 +100,7 @@ impl TestDb {
             owner,
             app,
             admin,
+            audit,
             maintenance,
             name,
         })
@@ -102,6 +110,7 @@ impl TestDb {
     pub async fn dispose(self) {
         self.app.close().await;
         self.admin.close().await;
+        self.audit.close().await;
         self.owner.close().await;
         let drop = format!("DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)", self.name);
         sqlx::query(sqlx::AssertSqlSafe(drop.as_str()))

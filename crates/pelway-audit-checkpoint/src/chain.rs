@@ -1,6 +1,8 @@
-//! 監査行のハッシュ鎖（04 の `audit_events` の下書き）。
+//! 監査行のハッシュ鎖（04 の `audit_events` の下書き。#149 では管理操作の監査表
+//! `admin_audit_events` がこの形式を使う）。
 //!
-//! 鎖は workspace 内で線形につなぐ: `hash = SHA-256(領域分離 || prev_hash || 行の内容)`。
+//! 鎖は単位ごと（workspace 内、または管理操作の単一鎖）に線形につなぐ:
+//! `hash = SHA-256(領域分離 || タグ || 行の内容 || prev_hash)`。
 //! 最初の行の `prev_hash` は 32 バイトの 0（[`GENESIS`]）。行の内容の符号化は一意に
 //! 決まる長さ前置き（u64 ビッグエディアン）にするため、行の差し替え・並べ替え・
 //! workspace をまたぐ移植は歩査で検出できる。行の内容に秘密・prompt 全文は含めない
@@ -25,6 +27,12 @@ pub struct AuditEvent {
     pub actor: String,
     /// 対象。
     pub subject: String,
+    /// 操作の理由（#149 の管理操作の監査で追加）。`None` は従来の符号化（タグ
+    /// `0x00`）で既存の署名済みチェックポイントとバイト列が変わらない。
+    pub reason: Option<String>,
+    /// result 行が参照する intent 行の id（#149 で追加。付け替えの検出のため
+    /// ハッシュに入る）。
+    pub ref_id: Option<u64>,
     /// 操作の種類。
     pub kind: String,
     /// 結果。
@@ -54,12 +62,21 @@ pub enum ChainError {
     HashMismatch { row: usize },
 }
 
-/// 行のハッシュ。内容と `prev_hash` だけから計算する。
+/// 行のハッシュ。内容と `prev_hash` だけから計算する。領域分離文字列の直後の
+/// タグは追加フィールドの有無のビット列（bit0 = `reason`、bit1 = `ref_id`）で、
+/// `0x00`（両方 `None`）は従来の符号化とバイト列が同じ（署名済みチェックポイント
+/// との照合に影響しない）。
 #[must_use]
 pub fn row_hash(event: &AuditEvent, prev_hash: &[u8; 32]) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(DOMAIN);
-    h.update([0x00]);
+    h.update([event.reason.is_some() as u8 | ((event.ref_id.is_some() as u8) << 1)]);
+    if let Some(reason) = &event.reason {
+        put_str(&mut h, reason);
+    }
+    if let Some(ref_id) = event.ref_id {
+        put_u64(&mut h, ref_id);
+    }
     put_str(&mut h, &event.workspace_id);
     put_u64(&mut h, event.at_ms);
     put_str(&mut h, &event.actor);
