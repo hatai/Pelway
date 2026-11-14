@@ -135,3 +135,11 @@
 3. 仮定と解釈: CI 待ちの判定は取り込み後の `action=ci` 行か、`action=wait` で target が ci|check|チェック を含む行とした。`action=note`（「後で確認する」等の意図の記述）は動作ではないため証拠に数えない。
 4. 足りなかった情報・検証手段: `fail-no-ci-wait.log`（取り込み後に note・report だけで終了）と `pass-no-merge.log`（取り込み→CI 待ち→pass で終了）を追加。agent-team-evals.test.sh: ok。
 5. 改善案: なし。
+
+## 実装者メモ（round 18）
+
+1. 詰まった箇所: なし。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: Codex レビュー（419d97f、xhigh）が approve。GitHub の実レビュー（pelway-review、APPROVED・同コミット）と一致を確認。Draft は前ラウンドで解除済み。承認後にメモを積むと head が変わり head への承認が外れるため、メモを push した後の head にもう一度レビューを委託して承認を取る手順とした。
+4. 足りなかった情報・検証手段: レビューは計 13 ラウンド（このスレッドでの委託は 4 ラウンド）。
+5. 改善案: 実装者メモのコミットで head が動くたびに head への承認が外れる運用負荷は、承認後の docs 差分をレビュー対象外にするか、メモをマージ後の別 PR にする運用で軽くできる（別 Issue 候補）。
