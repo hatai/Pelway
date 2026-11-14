@@ -29,4 +29,24 @@ rmcp = { version = "=3.9.0", default-features = false, features = [
 # call_tool の引数（JSON オブジェクト）の組み立てに使う。
 serde_json = "1"
 # src/bin の echo サーバーの実行（#[tokio::main]）とテストの #[tokio::test]。
-tokio = { version = "1", features = ["rt", "macros"] }
+# io-util は acp 試験の in-process double（tokio::io::duplex）が使う。
+tokio = { version = "1", features = ["rt", "macros", "io-util"] }
+# ACP 公式 Rust SDK（#133、質問票 R1-Q1 の確定回答 A 案）。固定版 5.2.0。
+# `unstable_protocol_v2` で draft v2 の型付き API（Client.v2()）を有効にする。
+# v2 は仕様上 draft のため feature `acp` 後ろに囲い、版も pin する
+# （docs/research/agent-runtime-standard-protocols.md「移行」）。
+# `process` は外部エージェントを stdio 子プロセスとして起動する AcpAgent のため。
+# ライセンス: Apache-2.0（rust-sdk workspace の license 表記）。
+agent-client-protocol = { version = "=5.2.0", optional = true, features = [
+  "unstable_protocol_v2",
+  "process",
+] }
+
+[features]
+# ACP v2 による外部エージェント接続（#133）。既定では無効。
+acp = ["dep:agent-client-protocol"]
+
+[dev-dependencies]
+# acp 試験の in-process double 接続（tokio::io::duplex → futures AsyncRead/Write
+# への compat）。本番の接続は stdio 子プロセス（AcpAgent）。
+tokio-util = { version = "0.7", features = ["compat"] }
