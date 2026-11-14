@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# devin-impl: T3 の acpRegistry_devin の commandPath 用 wrapper（Issue #151）。
+# devin プロセス自体を bwrap の sandbox に入れて起動する。devin 内蔵の
+# --sandbox は使わない（exec の通信先が GitHub 系のみになる挙動のため）。
+set -euo pipefail
+exec "$HOME/.local/share/pelway-sandbox/sandbox-shell" --wrap -- \
+  "$HOME/.local/bin/devin" --config "$HOME/.config/devin-impl/config.json" "$@"

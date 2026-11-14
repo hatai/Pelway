@@ -1,0 +1,3 @@
+{
+  // sandbox 無効化を防ぐため agent-sandbox が ro-bind する（Issue #151）。
+}

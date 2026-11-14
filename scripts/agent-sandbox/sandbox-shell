@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# agent-sandbox: T3 実装スレッド用の OS レベル sandbox（Issue #151）。bwrap で
+# 「worktree と必要なキャッシュだけ書き込み可」の mount 名前空間を作る。
+#   -c 'command'   opencode の shell フック経由
+#   --wrap -- cmd  devin などプロセスごと包む（devin-impl）
+#   --hook         .devin/hooks.v1.json の PreToolUse フック（exec を -c 経由に）
+# ネットワークはホスト共有（許可リスト非採用）。no-new-privileges で sudo 不可。
+
+set -euo pipefail
+
+# --hook: devin の PreToolUse フック。stdin の tool_input.command を
+# `sandbox-shell -c` 経由に書き換えて返す。devin 自体は wrap namespace
+#（credentials.toml 可視）で、agent のコマンドは資格情報をマスクした
+# ネスト namespace に入る。コマンドは shlex.quote（single-quote）で囲む:
+# 二重引用符だと $(...) がネスト開始前に外側シェルで評価されて脱走する。
+if [[ "${1:-}" == "--hook" ]]; then
+  command -v python3 >/dev/null 2>&1 || {
+    echo '{"decision":"block","reason":"pelway-sandbox: python3 不在"}'; exit 0; }
+  exec python3 -c 'import json,shlex,sys
+try: c=json.load(sys.stdin)["tool_input"]["command"]
+except Exception: c=""
+print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse",
+ "updatedInput":{"command":sys.argv[1]+" -c "+shlex.quote(c)}}
+ } if c.strip() else {"decision":"block","reason":"pelway-sandbox"}))' "$0"
+fi
+
+mode=shell
+if [[ "${1:-}" == "--wrap" ]]; then
+  mode=wrap
+  shift
+  [[ "${1:-}" == "--" ]] && shift
+fi
+
+home="$HOME"
+
+# sandbox 内の書き込みルート。opencode プラグインは PELWAY_SBX_ROOT を
+# 渡す。未指定なら git の toplevel、非 git ディレクトリなら cwd。
+root="${PELWAY_SBX_ROOT:-}"
+if [[ -z "$root" ]]; then
+  root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+fi
+root="$(cd "$root" && pwd -P)"
+
+# bwrap マウント引数を組み立てる（fail-closed）。
+# 必要な top-level だけを ro-bind で明示マウントする: --ro-bind / は
+# /mnt/c 等の submount までミラーし Windows 側ファイルが見える（Issue #98）。
+args=(
+  --die-with-parent --new-session
+  --dev /dev --proc /proc --tmpfs /dev/shm
+  --ro-bind /usr /usr
+  --ro-bind /etc /etc
+  --ro-bind /home /home
+)
+for d in /bin /sbin /lib /lib64 /lib32 /libx32 /opt /var /run /srv /boot; do
+  if [[ -L "$d" ]]; then
+    args+=(--symlink "$(readlink "$d")" "$d")
+  elif [[ -d "$d" ]]; then
+    args+=(--ro-bind "$d" "$d")
+  fi
+done
+
+# mbx のハードリンクキャッシュ経由の書き換え事故を防ぐため、sandbox 内では
+# mbx を無効化し、worktree の target シンボリックリンクを実ディレクトリに戻す。
+if [[ -L "$root/target" ]]; then
+  rm -f "$root/target"
+  mkdir -p "$root/target"
+fi
+
+# 書き込み可: /tmp。広い bind は先に置く（後から親を bind すると子の
+# ro-bind が無効化される bwrap の挙動を実機で確認済み）。
+args+=(--bind /tmp /tmp)
+
+# 書き込み可: セッションの worktree
+args+=(--bind "$root" "$root")
+
+# 書き込み可: 共有 git dir（コミットに必要）。config と hooks/ には
+# read-only を重ねてマウントし、url rewrite や hook 設置を防ぐ。
+if common="$(git -C "$root" rev-parse --git-common-dir 2>/dev/null)"; then
+  common="$(cd "$common" && pwd -P)"
+  if [[ "$common" != "$root"/* ]]; then
+    args+=(--bind "$common" "$common")
+  fi
+  for f in config config.worktree; do
+    if [[ -f "$common/$f" && ! -L "$common/$f" ]]; then
+      args+=(--ro-bind "$common/$f" "$common/$f")
+    fi
+  done
+  if [[ -d "$common/hooks" && ! -L "$common/hooks" ]]; then
+    args+=(--ro-bind "$common/hooks" "$common/hooks")
+  fi
+fi
+
+# 書き込み可: ツールキャッシュ
+tool_dirs=(
+  "$home/.cargo" "$home/.rustup"
+  "$home/.local/share/mise" "$home/.local/state/mise"
+  "$home/.cache/mise" "$home/.cache/pkl" "$home/.pkl"
+  "$home/.npm" "$home/.cache/fnox"
+)
+if [[ "$mode" == wrap ]]; then
+  # devin-impl: devin 自身がログ・設定を書く。credentials.toml と --config
+  # は atomic write で更新されるため親ディレクトリごと書き込み可にする。
+  mkdir -p "$home/.local/share/devin" \
+    "$home/.config/devin/cli" "$home/.config/devin-impl" "$home/.cache/devin"
+  tool_dirs+=(
+    "$home/.local/share/devin"
+    "$home/.config/devin/cli" "$home/.config/devin-impl" "$home/.cache/devin"
+  )
+fi
+for d in "${tool_dirs[@]}"; do
+  if [[ -d "$d" && ! -L "$d" ]]; then
+    args+=(--bind "$d" "$d")
+  fi
+done
+# 秘匿パスを tmpfs で隠す。symlink は実体を解決して隠す（~/.aws → /mnt/...
+# のようなリンクは /mnt 自体が不在のため既に到達不能）。
+masks=(
+  "$home/.ssh" "$home/.gnupg" "$home/.docker" "$home/.kube" "$home/.aws"
+  "$home/.config/gh" "$home/.config/opencode" "$home/.config/devin"
+  "$home/.local/share/devin" "$home/.t3/userdata"
+)
+for m in "${masks[@]}"; do
+  target="$m"
+  if [[ -L "$target" ]]; then
+    target="$(readlink -f "$target" 2>/dev/null || true)"
+  fi
+  [[ "$target" == "$home"/* ]] || continue
+  # 実体が無いパスはスキップ（ro な親には作れず bwrap が失敗する）。
+  [[ -d "$target" || -f "$target" ]] || continue
+  if [[ "$mode" == wrap ]]; then
+    case "$target" in
+      "$home/.config/devin"|"$home/.local/share/devin") continue ;;
+    esac
+  fi
+  args+=(--tmpfs "$target")
+done
+
+# worktree 内で sandbox を無効化し得る設定面を塞ぐ（opencode.json[c] の
+# "plugins": ["-pelway-sandbox"] と .opencode/.devin 配下の設定作成を防ぐ）。
+empty_cfg="${XDG_RUNTIME_DIR:-/tmp}/pelway-sbx-empty.json"
+[[ -f "$empty_cfg" ]] || printf '{}\n' >"$empty_cfg"
+for f in opencode.json opencode.jsonc; do
+  p="$root/$f"
+  if [[ -f "$p" && ! -L "$p" ]]; then
+    args+=(--ro-bind "$p" "$p")
+  else
+    args+=(--ro-bind "$empty_cfg" "$p")
+  fi
+done
+for d in .opencode .devin; do
+  p="$root/$d"
+  if [[ -d "$p" && ! -L "$p" ]]; then
+    args+=(--ro-bind "$p" "$p")
+  else
+    args+=(--tmpfs "$p")
+  fi
+done
+
+# T3 接続資格情報を落とす（wrap 側の devin は ACP/MCP 接続に必要なので残す）。
+env_args=(env)
+if [[ "$mode" == shell ]]; then
+  for v in T3_ACP_MCP_AUTHORIZATION T3_ACP_MCP_ENDPOINT T3_ACP_MCP_NODE \
+           T3_ACP_MCP_ENTRYPOINT T3CODE_DESKTOP_HOST_SCOPE T3CODE_THREAD_ID; do
+    env_args+=(-u "$v")
+  done
+fi
+env_args+=(
+  MISE_RUST_MR_BOXINGTON=0
+  # .ssh を隠すため SSH 署名は必ず失敗する。push 後に agent-gh-resign が
+  # 作り直すため sandbox 内では署名を無効化する。
+  GIT_CONFIG_COUNT=2
+  GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false
+  GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
+)
+
+if [[ "$mode" == wrap ]]; then
+  exec bwrap "${args[@]}" -- "${env_args[@]}" "$@"
+else
+  # opencode は shell を `<shell> -c <command>` 形式で起動する
+  exec bwrap "${args[@]}" -- "${env_args[@]}" bash "$@"
+fi
