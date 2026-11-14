@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# scripts/agent-sandbox/sandbox-shell のテスト。一時的な git worktree を
-# 作り、sandbox 内で「worktree への書き込みは許可、それ以外は拒否」が
-# bwrap によって強制されることを確認する（Issue #151）。
+# scripts/agent-sandbox/ のテスト（Issue #151）。一時 worktree を作り、
+# sandbox の「worktree 以外書込拒否」とプラグインの実体パス検査を確かめる。
 set -uo pipefail
 
 TOP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,10 +29,8 @@ git -C "$main" init -q
 git -C "$main" -c user.email=t@t -c user.name=t commit -qm init --allow-empty
 git -C "$main" worktree add -q "$wt" -b wt-branch
 
-# リポジトリ同梱のマスク対象ファイルと同じレイアウトを作る
-# （存在するパスは ro-bind される。存在しないパスは tmpfs で吸収されるが、
-# bwrap がマウントポイントをホスト側に作成するため、本体リポジトリでは
-# ファイルを同梱して ro-bind にしている）。
+# リポジトリ同梱のマスク対象と同じレイアウトを作る（存在するパスは
+# ro-bind される。bwrap は無いパスのマウントポイントをホスト側に作る）。
 printf '{}\n' > "$wt/opencode.json"
 mkdir -p "$wt/.opencode" "$wt/.devin"
 printf '{}\n' > "$wt/.devin/config.json"
@@ -107,8 +104,7 @@ check "wrap run" "$(echo "$out" | head -1)" "WRAPOK"
 check "wrap home write" "$(echo "$out" | tail -1)" "DENIED"
 [[ -f "$HOME/sbx-wrap-home" ]] && failures+=("wrap: home file created")
 
-# 12. opencode プラグイン: ファイルツールの検査は実体パスに対して行う
-#     （worktree 内の symlink 越しに deny 対象・worktree 外へ出られない）
+# 12. opencode プラグイン: 実体パス検査（symlink 越しの脱走を拒否）
 if command -v node >/dev/null 2>&1; then
   pwt="$HOME/.t3/worktrees/sbx-plug-test"
   rm -rf "$pwt" && mkdir -p "$pwt" "$HOME/sbx-plug-out"

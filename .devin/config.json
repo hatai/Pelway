@@ -1,6 +1,5 @@
 {
-  // 実装スレッド向けの拒否ルール（Issue #151）。agent-sandbox が read-only
-  // マウントするためセッション内からは変更できない。
+  // 実装スレッド向けの拒否ルール（Issue #151）。agent-sandbox が ro-bind する。
   "permissions": {
     "deny": [
       "Exec(sudo)",

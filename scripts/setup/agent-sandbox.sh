@@ -1,16 +1,10 @@
 #!/usr/bin/env bash
-# agent-sandbox のホスト側インストーラ（Issue #151）。
-# リポジトリ内の scripts/agent-sandbox/ を各所に配置する。
-#
-#   ~/.config/opencode/plugins/pelway-sandbox/index.js      opencode プラグイン
-#   ~/.config/opencode/plugins/pelway-sandbox/sandbox-shell bwrap wrapper（共有）
-#   ~/.local/share/pelway-sandbox/sandbox-shell             同上（devin-impl 参照用）
-#   ~/.local/bin/devin-impl                                 acpRegistry_devin 用 wrapper
-#   ~/.config/devin-impl/config.json                        devin-impl の設定
-#
-# 前提: bwrap がインストール済み（mise/パッケージマネージャで導入）。
-# 実行後に表示される settings.json の差分を ~/.t3/userdata/settings.json の
-# providerInstances.acpRegistry_devin.config に反映し、T3 Code を再起動する。
+# agent-sandbox のホスト側インストーラ（Issue #151）。配置先:
+#   ~/.config/opencode/plugins/pelway-sandbox/{index.js,sandbox-shell}
+#   ~/.local/share/pelway-sandbox/sandbox-shell  ~/.local/bin/devin-impl
+#   ~/.config/devin-impl/config.json
+# 前提: bwrap 導入済み。実行後に表示される差分を
+# ~/.t3/userdata/settings.json に反映し T3 Code を再起動する。
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

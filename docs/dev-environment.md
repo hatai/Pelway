@@ -298,8 +298,7 @@ bwrap が作る名前空間の要点:
 - `/usr`・`/etc`・`/home` 等は read-only。`/` 全体をミラーする `--ro-bind /` は使わない（WSL の `/mnt/c` 等の submount まで写し、Windows 側ファイルが見えてしまうため、必要な top-level だけを明示的にマウントする）
 - 書き込み可は、セッションの worktree・共有 git dir・`/tmp`・ツールキャッシュ（`~/.cargo`・`~/.rustup`・`~/.local/{share,state}/mise`・`~/.cache/{mise,pkl,fnox}`・`~/.pkl`・`~/.npm`）のみ
 - 共有 git dir（worktree の commondir）はコミットのため書き込み可だが、`config`・`config.worktree`・`hooks/` には read-only を重ねてマウントする（url rewrite や hook の仕込みを防ぐ）
-- 秘匿パス（`~/.ssh`・`~/.gnupg`・`~/.docker`・`~/.config/gh`・`~/.config/opencode`・`~/.config/devin`・`~/.t3/userdata` 等）は tmpfs で隠すかマウントしない
-- bwrap の no-new-privileges により `sudo`/`doas`/`pkexec` は実行できない
+- 秘匿パス（`~/.ssh`・`~/.gnupg`・`~/.docker`・`~/.config/gh`・`~/.config/opencode`・`~/.config/devin`・`~/.t3/userdata` 等）は tmpfs で隠すかマウントしない。no-new-privileges により `sudo`/`doas`/`pkexec` も実行できない
 - ネットワークは遮断しない（ホストの経路をそのまま使う）。Issue #151 で hatai が「厳しくしすぎると調査が難しくなるので現時点では許可リストにしない」と指示したため
 - シェル環境から `T3_ACP_MCP_*`・`T3CODE_*` を落とし、`MISE_RUST_MR_BOXINGTON=0`（mbx のハードリンクキャッシュ経由の書き換えを防ぐ。worktree の `target` symlink は実ディレクトリに戻される）と `GIT_CONFIG_COUNT` 系の `commit.gpgsign=false`（`~/.ssh` を隠すため SSH 署名は必ず失敗する。push 後に `scripts/agent-gh-resign` が署名を作り直すので問題ない）を渡す
 - bwrap は広い bind を後から重ねると子の ro-bind が実質無効化されるため、マウントは「広い→狭い」の順で組み立てる（`scripts/tests/agent-sandbox.test.sh` で検証）
@@ -335,15 +334,13 @@ bwrap が作る名前空間の要点:
 | Devin wrap 方式の実セッション検査（`sandbox-shell --wrap -- devin --config <devin-impl> -p` 内で実施） | `curl https://example.com` 成功（200）、`scripts/agent-gh dev api /rate_limit` 成功、`touch $HOME/...` が `Read-only file system` で拒否、worktree 書込成功 | 2026-11-14 |
 | Devin 内蔵 sandbox の検査（比較のため） | `allowed_domains` 空・未指定で exec が github.com 系のみになり、crates.io・example.com タイムアウト（要件不適合のため不採用） | 2026-11-14 |
 | opencode の実セッション（worktree で `opencode run`） | シェル経由の `$HOME` 書込が `Read-only file system`、`sudo -n true` 失敗、worktree 書込成功。write ツールの worktree 外書込が `pelway-sandbox: write: worktree 外への書き込みは禁止` で拒否 | 2026-11-14 |
-| `devin-impl`（wrap 方式）の実セッション（`devin --config <devin-impl> -p` を `--wrap` 経由で実行） | `curl https://example.com` 200、`scripts/agent-gh dev api /rate_limit` 成功、`touch $HOME/...` が `Read-only file system`、worktree 書込成功 | 2026-11-14 |
 | T3 の実スレッド（`acpRegistry_devin`）での確認 | 未実施（settings の `commandPath` 反映と T3 再起動後の初回スレッドで実施） | — |
 
 ### 既知の残件
 
 - opencode のファイルツール遮断はプラグイン（プロセス内フック）で行い、OS 境界はシェル側の bwrap が担う。プラグイン自体の無効化は、worktree 内の `opencode.json[c]`・`.opencode/` を sandbox が read-only 化して塞いでいる
 - `sandbox-shell` はマスク対象パスが存在しない場合に tmpfs でマウントするが、bwrap はマウントポイントをホスト側のファイルシステムに作成する。Pelway は対象ファイルをリポジトリに同梱して常に ro-bind にしている。他リポジトリの worktree では、初回の sandbox 実行で空の `opencode.json`・`.opencode/`・`.devin/` が作られる
-- Devin の wrap 方式では `~/.local/share/devin/credentials.toml` は sandbox 内から読める（devin プロセス自身が必要とするためマスクできない。サブディレクトリだけを書き込み可にし、ファイル自体は read-only）。同様に `~/.config/fnox/age.txt`・`~/.config/pelway-agent/fnox.toml` は `scripts/agent-gh` が必要とするため読める。ネットワークを開放しているため、理論上はこれらの外部送信が可能であり、制限の第一目的はホストへの書き込み・昇格の防止である
-- 共有 git dir は全体が書き込み可で、他 worktree のメタデータや `objects/` も含まれる（コミットに必要な範囲を超えるが、`config`・`hooks/` は read-only で保護している）
+- Devin の wrap 方式では `~/.local/share/devin/credentials.toml` は sandbox 内から読める（devin プロセス自身が必要とするためマスクできない）。同様に `~/.config/fnox/age.txt`・`~/.config/pelway-agent/fnox.toml` は `scripts/agent-gh` が必要とするため読める。ネットワークを開放しているため理論上は外部送信が可能であり、制限の第一目的はホストへの書き込み・昇格の防止である。共有 git dir も全体が書き込み可（他 worktree のメタデータや `objects/` も含まれるが、`config`・`hooks/` は read-only で保護）
 
 ## シークレットの扱い（fnox）
 

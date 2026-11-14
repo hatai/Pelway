@@ -3,18 +3,11 @@
 # bwrap で「worktree と必要なキャッシュだけ書き込み可、他は read-only」
 # の mount 名前空間を作り、その中でコマンドを実行する。
 #
-# 呼び出し方:
-#   sandbox-shell -c 'command'        opencode の shell フック経由（シェルとして起動される）
-#   sandbox-shell --wrap -- cmd args  devin などのプロセスごと包む（devin-impl が使う）
+#   sandbox-shell -c 'command'        opencode の shell フック経由
+#   sandbox-shell --wrap -- cmd args  devin などプロセスごと包む（devin-impl）
 #
-# 設計上の性質:
-#   - ネットワークはホスト共有（遮断しない。Issue #151 で hatai が許可リスト
-#     非採用を指示したため）
-#   - bwrap は no-new-privileges を設定するため sudo/doas/pkexec は使えない
-#   - worktree 内の opencode.json[c]/.opencode/.devin はマスクし、sandbox
-#     自体を無効化する設定改変を防ぐ
-#   - 共有 git dir（worktree の commondir）はコミットのため書き込み可だが、
-#     config と hooks/ は read-only に重ねてマウントする
+# ネットワークはホスト共有（hatai の指示で許可リスト非採用）。
+# no-new-privileges により sudo/doas/pkexec は使えない。
 
 set -euo pipefail
 
@@ -35,11 +28,9 @@ if [[ -z "$root" ]]; then
 fi
 root="$(cd "$root" && pwd -P)"
 
-# bwrap マウント引数を組み立てる。失敗しても非 sandbox で動かさない
-# （fail-closed）ため、途中で落ちたらそのまま終了する。
-# / 全体ではなく必要な top-level だけを read-only で明示マウントする:
-# --ro-bind / は /mnt/c 等の submount までミラーしてしまい、Windows 側
-# ファイルが見える問題があった（Issue #98 の再現防止）。
+# bwrap マウント引数を組み立てる（fail-closed）。
+# 必要な top-level だけを ro-bind で明示マウントする: --ro-bind / は
+# /mnt/c 等の submount までミラーし Windows 側ファイルが見える（Issue #98）。
 args=(
   --die-with-parent --new-session
   --dev /dev --proc /proc --tmpfs /dev/shm
@@ -55,17 +46,15 @@ for d in /bin /sbin /lib /lib64 /lib32 /libx32 /opt /var /run /srv /boot; do
   fi
 done
 
-# mbx（mr_boxington）のハードリンクキャッシュ経由で共有オブジェクトを
-# 書き換える事故を防ぐため、sandbox 内では mbx を無効化し、worktree の
-# target シンボリックリンクを実ディレクトリに戻す。
+# mbx のハードリンクキャッシュ経由の書き換え事故を防ぐため、sandbox 内では
+# mbx を無効化し、worktree の target シンボリックリンクを実ディレクトリに戻す。
 if [[ -L "$root/target" ]]; then
   rm -f "$root/target"
   mkdir -p "$root/target"
 fi
 
-# 書き込み可: /tmp。広い bind は狭い bind より先に置く必要がある
-# （後から親を bind すると、先に置いた子の ro-bind が無効化される
-# bwrap の挙動を実機で確認済み）。
+# 書き込み可: /tmp。広い bind は先に置く（後から親を bind すると子の
+# ro-bind が無効化される bwrap の挙動を実機で確認済み）。
 args+=(--bind /tmp /tmp)
 
 # 書き込み可: セッションの worktree
@@ -96,11 +85,8 @@ tool_dirs=(
   "$home/.npm" "$home/.cache/fnox"
 )
 if [[ "$mode" == wrap ]]; then
-  # devin-impl: devin プロセス自身がログ・セッション・設定を書く。
-  # credentials.toml と --config のファイルは atomic write（同じ
-  # ディレクトリへの一時ファイル作成→rename）で更新されるため、親
-  # ディレクトリごと書き込み可にする必要がある。permissions は補助層で、
-  # これらが書き換わっても mount 境界は変わらない。
+  # devin-impl: devin 自身がログ・設定を書く。credentials.toml と --config
+  # は atomic write で更新されるため親ディレクトリごと書き込み可にする。
   mkdir -p "$home/.local/share/devin" \
     "$home/.config/devin/cli" "$home/.config/devin-impl" "$home/.cache/devin"
   tool_dirs+=(
@@ -113,9 +99,8 @@ for d in "${tool_dirs[@]}"; do
     args+=(--bind "$d" "$d")
   fi
 done
-# 秘匿パスを tmpfs で隠す。symlink はマウントできないので実体を解決して隠す
-# （~/.aws → /mnt/... のような symlink は /mnt 自体がマウントされないため
-# 既に到達不能で、マスク対象外とする）。
+# 秘匿パスを tmpfs で隠す。symlink は実体を解決して隠す（~/.aws → /mnt/...
+# のようなリンクは /mnt 自体が不在のため既に到達不能）。
 masks=(
   "$home/.ssh" "$home/.gnupg" "$home/.docker" "$home/.kube" "$home/.aws"
   "$home/.config/gh" "$home/.config/opencode" "$home/.config/devin"
@@ -127,8 +112,7 @@ for m in "${masks[@]}"; do
     target="$(readlink -f "$target" 2>/dev/null || true)"
   fi
   [[ "$target" == "$home"/* ]] || continue
-  # 実体が無いパスは隠すものが無いのでスキップ（ro な親には作れず
-  # bwrap が失敗するため必須）。
+  # 実体が無いパスはスキップ（ro な親には作れず bwrap が失敗する）。
   [[ -d "$target" || -f "$target" ]] || continue
   if [[ "$mode" == wrap ]]; then
     case "$target" in
@@ -138,9 +122,8 @@ for m in "${masks[@]}"; do
   args+=(--tmpfs "$target")
 done
 
-# worktree 内で sandbox を無効化し得る設定面を塞ぐ。
-# opencode.json[c]: "plugins": ["-pelway-sandbox"] による無効化を防ぐ。
-# .opencode/.devin: 配下の設定ファイル作成自体を防ぐ。
+# worktree 内で sandbox を無効化し得る設定面を塞ぐ（opencode.json[c] の
+# "plugins": ["-pelway-sandbox"] と .opencode/.devin 配下の設定作成を防ぐ）。
 empty_cfg="${XDG_RUNTIME_DIR:-/tmp}/pelway-sbx-empty.json"
 [[ -f "$empty_cfg" ]] || printf '{}\n' >"$empty_cfg"
 for f in opencode.json opencode.jsonc; do
@@ -160,8 +143,7 @@ for d in .opencode .devin; do
   fi
 done
 
-# コマンド側が使わない T3 接続資格情報を落とす。
-# --wrap 側（devin プロセス自身）は ACP/MCP 接続に必要なので落とさない。
+# T3 接続資格情報を落とす（wrap 側の devin は ACP/MCP 接続に必要なので残す）。
 env_args=(env)
 if [[ "$mode" == shell ]]; then
   for v in T3_ACP_MCP_AUTHORIZATION T3_ACP_MCP_ENDPOINT T3_ACP_MCP_NODE \
@@ -171,9 +153,8 @@ if [[ "$mode" == shell ]]; then
 fi
 env_args+=(
   MISE_RUST_MR_BOXINGTON=0
-  # .ssh を隠しているため git の SSH 署名は必ず失敗する。sandbox 内では
-  # 署名を無効化する（push 後に scripts/agent-gh-resign が GitHub App 名義の
-  # Verified 署名へ作り直すので問題ない）。
+  # .ssh を隠すため SSH 署名は必ず失敗する。push 後に agent-gh-resign が
+  # 作り直すため sandbox 内では署名を無効化する。
   GIT_CONFIG_COUNT=2
   GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false
   GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false

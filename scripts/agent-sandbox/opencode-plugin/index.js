@@ -1,12 +1,10 @@
 // pelway-sandbox: T3 実装スレッド（worktree セッション）の opencode 用
 // sandbox プラグイン（Issue #151）。~/.t3/worktrees/ 配下のみ適用。
-//
-//   1. shell フックで全コマンドを sandbox-shell（bwrap）経由にし、
-//      書き込みを worktree と必要なキャッシュに限定する。ネットワークは
-//      遮断しない（hatai の指示で許可リスト非採用）。
+//   1. shell フックで全コマンドを sandbox-shell（bwrap）経由にする。
+//      ネットワークは遮断しない（hatai の指示で許可リスト非採用）。
 //   2. ファイルツールが worktree 外や秘匿パスにアクセスするのを拒否する
-//      （bwrap を通らない経路）。検査は実体パスに対して行い、worktree 内
-//      symlink 越しの脱走も防ぐ。
+//      （bwrap を通らない経路）。検査は実体パスに対して行い、symlink 越し
+//      の脱走も防ぐ。
 
 import fs from "node:fs"
 import os from "node:os"
@@ -16,8 +14,7 @@ const HOME = os.homedir()
 const WORKTREE_PREFIX = `${HOME}/.t3/worktrees/`
 const SBX_SHELL = `${HOME}/.config/opencode/plugins/pelway-sandbox/sandbox-shell`
 
-// ファイルツールの read を拒否するパス（シェル側は sandbox-shell の
-// tmpfs マスクが同等の役割を持つ）。
+// ファイルツールの read を拒否するパス（シェル側は tmpfs マスクが担う）。
 const READ_DENY = [
   "/mnt",
   `${HOME}/.ssh`,
@@ -54,8 +51,7 @@ function resolvePath(base, p) {
   return path.normalize(p.startsWith("/") ? p : path.resolve(base, p))
 }
 
-// 実体パスを返す（worktree 内 symlink 越しの脱走対策）。末尾が存在しない
-// ときは最も深い既存の祖先まで realpathSync し、残りを継ぐ。
+// 実体パスを返す。末尾が存在しないときは最深の既存祖先まで解決し残りを継ぐ。
 function realPath(p) {
   try {
     return fs.realpathSync(p)
@@ -111,7 +107,7 @@ export default {
     if (typeof dir !== "string" || !dir.startsWith(WORKTREE_PREFIX)) return
     const root = path.normalize(dir)
     const realRoot = realPath(root)
-    // deny 対象自体が symlink の環境（例: ~/.aws → /mnt/c/...）では、
+    // deny 対象自体が symlink の環境（~/.aws → /mnt/c/... 等）では、
     // 字句パスと実体パスの両方を拒否リストに入れて検査する。
     const readDeny = new Set(READ_DENY.concat(READ_DENY.map(realPath)))
 
