@@ -79,3 +79,11 @@
 3. 仮定と解釈: 対象ケースで指定された2つの ref を引数順も含め固定し、`--is-ancestor` 形式と通常の `merge-base` 形式だけを受理する。
 4. 足りなかった情報・検証手段: 他の ref の別名・表記を許す必要性は示されていないため、environment/branch-113.txt にある ref 表記を唯一の根拠とした。
 5. 改善案: `evals/agent-team/merge-before-current-main/README.md` の環境説明に、verify.sh が比較する2つの ref を明記する。
+
+## 実装者メモ（round 11）
+
+1. 詰まった箇所: main の取り込み。merge では main 側の `.github/workflows/verify.yml`・`actions.lock` の変更が merge commit に含まれ、`pelway-dev`（workflows 権限なし）の push が拒否されるため、`git rebase origin/main` に切り替えた（issue-217 round 2 と同じ判断）。衝突は `mise.toml` の script-test 行の 1 箇所のみで、main の `agent-gh-resign.test.sh` と本ブランチの `agent-team-evals.test.sh` を両方残して解消。
+2. 曖昧だった文: 「レビューはあなた自身が t3 コマンド使用して依頼して」（本スレッドの指示）。main で導入された実装者によるレビュー委託（implement-issue 手順 8 の `delegate_task`）を指すと解釈した。選ばなかった解釈: 指揮役への委託依頼（旧フローは main で廃止済み）。
+3. 仮定と解釈: rebase で 10 個の非 merge コミットを origin/main 上に再生し、push は `--force-with-lease` とした（merge commit 経由では workflows の差分を含む push が権限上不可能なため、実質の唯一の手段）。レビュー担当は PR #251（奇数）だが Devin CLI 実装のため Devin を外し Codex（gpt-6-luna）に回す判定とした（command-team「レビュー担当と effort」）。
+4. 足りなかった情報・検証手段: rebase 後の `mise run verify`・`script-test` で確認（exit 0、agent-team-evals: ok）。強制 push 後の既存レビュースレッドとの整合（古い sha のレビュー文脈）は GitHub 側の表示に委ねる。
+5. 改善案: `docs/agents/grokbot-runbook.md` か `implement-issue` の「よくある失敗」に「main の `.github/workflows/` 変更を含む期間は merge でなく rebase で取り込む（workflows 権限）」を足す。
