@@ -218,7 +218,7 @@ Grok Bot が動かない（レート制限、障害）とき、人間が別の�
 | 項目 | 内容 |
 |---|---|
 | 代行する者 | 人間が指名したエージェント。T3 のスレッドとして動くときはネイティブの `t3_thread_launch` で作業スレッドを立てられること。T3 のスレッド以外で動くときは T3 Connect の MCP（`https://<環境>.t3coderelay.com/mcp`、OAuth）につながること |
-| 通知の受け口 | 代行者は Grok Bot の webhook を受けられないので、`scripts/conductor-watch.sh` の出力（スレッドの状態の変化と `agent/` の PR の変化）を通知の代わりに使う。`report` は `t3 thread show` で読む |
+| 通知の受け口 | 代行者は Grok Bot の webhook を受けられないので、`scripts/conductor-watch.sh` の出力（スレッドの状態の変化と `agent/` の PR の変化）を通知の代わりに使う。`report` は `t3 thread show` で読む。起動・復旧は `scripts/conductor-watch-ensure.sh` に任せる（冪等。`systemd --user` が使える環境では unit 経由で起き、プロセスが死んでも自動で再起動される） |
 | 「部屋」 | 代行者と人間の会話 |
 | 引き継ぐ状態 | GitHub（`agent:working`・`needs-human` の Issue、Draft・レビュー待ちの PR、Issue のコメントに残した判断）、T3 のスレッド、指揮役の作業ログ。代行者だけが知っている状態を作らない |
 | 判断の記録 | Issue・PR のコメントと、代行の作業ログ `docs/worklogs/<日付>-conductor-substitute.md` |
