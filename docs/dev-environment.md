@@ -280,6 +280,118 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 | レビューの形（報告の `verdict:`、`Reviewer:` の行、`agent-gh review pr review` の投稿） | `verdict: approve` と `Reviewer: agent=devin model=swe-2-high effort=high` の行を報告し、PR #283 に APPROVED として投稿済み（`pelway-review`） | 2026-11-14 |
 | Codex・Claude 側との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 許可先は同じく GitHub のみ。遮断の効き方が異なり、Codex は `network_proxy`、Devin CLI は OS sandbox ＋ドメイン許可リスト＋ `permissions.deny`（直接編集・MCP・秘密パスを塞ぐ）。権限モードは Devin では Autonomous 一択 | 2026-11-14 |
 
+## 実装担当の sandbox（agent-sandbox）
+
+実装スレッド（T3 の worktree スレッドで動く opencode と Devin CLI）は、Issue #151 の対応として OS レベルの sandbox の中で動かす。`scripts/agent-sandbox/` に方式を同梱し、`scripts/setup/agent-sandbox.sh` でホストへ導入する。
+
+### 方式
+
+遮断は bubblewrap（`bwrap`）による mount 名前空間で行う。エージェント側の権限設定（T3 の runtimeMode・各 CLI の permissions）は補助層で、境界は mount 側が担う。
+
+| 場所 | 設定 |
+|---|---|
+| `scripts/agent-sandbox/sandbox-shell` | 共通の bwrap ラッパー。コマンドを「worktree と必要なキャッシュだけ書き込み可」の名前空間で実行する。`-c` 形式（シェル）と `--wrap` 形式（プロセスごと包む）の 2 つの呼び方がある |
+| `scripts/agent-sandbox/opencode-plugin/index.js` | opencode のグローバルプラグイン（V2 API、`id: pelway-sandbox`）。`~/.t3/worktrees/` 配下のセッションだけに適用され、(a) shell フックで全コマンドを `sandbox-shell` 経由にする、(b) ファイルツール（write/edit 等）の worktree 外への書き込みと秘匿パスの読み取りを拒否する（bwrap を通らない経路のため）。検査は実体パス（symlink 解決後。新規ファイルは最深の既存祖先まで解決）に対して行い、worktree 内 symlink 越しの脱走も防ぐ |
+| `scripts/agent-sandbox/devin-impl` + `devin-config.json` + `.devin/hooks.v1.json` | `acpRegistry_devin` の `config.commandPath` に指定する起動ラッパーと専用設定。`devin acp` プロセス自体を `sandbox-shell --wrap` で包み、さらに PreToolUse フック（`sandbox-shell --hook`）が exec のコマンドをネストした sandbox に送る。devin プロセスは `credentials.toml` を読めるが、agent のコマンドは `~/.local/share/devin` がマスクされた namespace で動くため資格情報を分離できる。Devin 内蔵の `--sandbox` は使わない（後述） |
+| リポジトリの `opencode.json`・`.opencode/`・`.devin/` | sandbox が read-only でマウントする同梱ファイル。sandbox 自身を無効化する設定（`plugins: ["-pelway-sandbox"]` や `.devin` の permissions/hooks の変更）を worktree 内から作れなくする |
+
+bwrap が作る名前空間の要点:
+
+- `/usr`・`/etc`・`/home` 等は read-only。`/` 全体をミラーする `--ro-bind /` は使わない（WSL の `/mnt/c` 等の submount まで写し、Windows 側ファイルが見えてしまうため、必要な top-level だけを明示的にマウントする）
+- 書き込み可は、セッションの worktree・共有 git dir・`/tmp`・ツールキャッシュ（`~/.cargo`・`~/.rustup`・`~/.local/{share,state}/mise`・`~/.cache/{mise,pkl,fnox}`・`~/.pkl`・`~/.npm`）のみ
+- 共有 git dir（worktree の commondir）はコミットのため書き込み可だが、`config`・`config.worktree`・`hooks/` には read-only を重ねてマウントする（url rewrite や hook の仕込みを防ぐ）
+- 秘匿パス（`~/.ssh`・`~/.gnupg`・`~/.docker`・`~/.config/gh`・`~/.config/opencode`・`~/.config/devin`・`~/.t3/userdata` 等）は tmpfs で隠すかマウントしない。no-new-privileges により `sudo`/`doas`/`pkexec` も実行できない
+- ネットワークは遮断しない（ホストの経路をそのまま使う）。Issue #151 で hatai が「厳しくしすぎると調査が難しくなるので現時点では許可リストにしない」と指示したため
+- シェル環境から `T3_ACP_MCP_*`・`T3CODE_*` を落とし、`MISE_RUST_MR_BOXINGTON=0`（mbx のハードリンクキャッシュ経由の書き換えを防ぐ。worktree の `target` symlink は実ディレクトリに戻される）と `GIT_CONFIG_COUNT` 系の `commit.gpgsign=false`（`~/.ssh` を隠すため SSH 署名は必ず失敗する。push 後に `scripts/agent-gh-resign` が署名を作り直すので問題ない）を渡す
+- bwrap は広い bind を後から重ねると子の ro-bind が実質無効化されるため、マウントは「広い→狭い」の順で組み立てる（`scripts/tests/agent-sandbox.test.sh` で検証）
+
+### Devin 内蔵 sandbox を使わない理由
+
+`DEVIN_SANDBOX=true`（公式の bwrap+sandbox）を実装スレッドで検証したところ、`allowed_domains` を空にしても exec の通信がプロキシ経由で github.com 系のみになり、crates.io・npm・rustup の取得や一般サイトの調査ができなかった（`allowed_domains` 未指定・セクション自体の削除でも同じ。`*`/`**.**`/`*.**` 等のワイルドカードは全拒否になる）。これは hatai の「許可リストにしない」方針と両立しないため、Devin 側は内蔵 sandbox を使わず `sandbox-shell --wrap` で包む方式にした（wrap 方式ではネットワークは開放される）。その代わり、wrap 方式ではファイルツール経由の書き込みも同じ mount 境界に入るため、内蔵方式より境界が厳しい面もある。
+
+### 導入手順
+
+1. `bwrap` を導入する（このマシンでは linuxbrew の `/home/linuxbrew/.linuxbrew/bin/bwrap`）
+2. `bash scripts/setup/agent-sandbox.sh` を実行する（プラグイン・wrapper・devin-impl・設定ファイルをホストに配置する）
+3. `~/.t3/userdata/settings.json` の `providerInstances.acpRegistry_devin.config` に `"commandPath": "/home/hatai/.local/bin/devin-impl"` を追加し、T3 Code を再起動する
+4. 次の確認手順を実施する
+
+### 確認手順
+
+- `mise run script-test`（`scripts/tests/agent-sandbox.test.sh`）で wrapper の性質を検査する。worktree 内の書き込み・コミット成功、ホーム・`/etc` への書き込み拒否、秘匿パスの遮蔽、`sudo` 失敗、git の `config`/`hooks` の read-only、sandbox 無効化パスの read-only、環境変数の除去、`--wrap` モード、プラグインの実体パス検査（symlink 越しの拒否）を確認する
+- 導入後の初回の実装スレッド（opencode と Devin それぞれ）で、スレッド内から次を実行して結果を記録する
+  - `scripts/agent-gh dev api /rate_limit` が成功する（GitHub と fnox/age 鍵経路が通る）
+  - `touch "$HOME/sbx-marker"` が失敗する（worktree 外への書き込み拒否）
+  - `sudo -n true` が失敗する
+  - `curl -sS https://example.com` が**成功する**（ネットワークは開放であることを確認。遮断が意図通り働いていないときの検知にもなる）
+  - `ls /mnt` が失敗する（`/mnt` はマウントされない）
+- Devin 側は `acpRegistry_devin` のスレッドで同様に確認する（`devin-impl` wrapper 経由で起動されているかは、スレッド内で `findmnt` や `touch $HOME/...` の拒否で確かめられる）
+
+### 確認手順の結果（記録欄）
+
+| 項目 | 結果 | 実施日 |
+|---|---|---|
+| `sandbox-shell` の単体検査（`scripts/tests/agent-sandbox.test.sh`） | 合格（worktree 書込・コミット可、ホーム・`/etc`・git config/hooks・sandbox 設定面の書込拒否、秘匿パス遮蔽、`sudo` 失敗、`/mnt` 不在、wrap モード） | 2026-11-14 |
+| opencode プラグインのフック検査（`ctx.location` が `~/.t3/worktrees` 配下でのみ shell 差し替え・ファイルツール拒否が発火することを node で直接検証） | 合格 | 2026-11-14 |
+| Devin wrap 方式の実セッション検査（`sandbox-shell --wrap -- devin --config <devin-impl> -p` 内で実施） | `curl https://example.com` 成功（200）、`scripts/agent-gh dev api /rate_limit` 成功、`touch $HOME/...` が `Read-only file system` で拒否、worktree 書込成功 | 2026-11-14 |
+| Devin 内蔵 sandbox の検査（比較のため） | `allowed_domains` 空・未指定で exec が github.com 系のみになり、crates.io・example.com タイムアウト（要件不適合のため不採用） | 2026-11-14 |
+| opencode の実セッション（worktree で `opencode run`） | シェル経由の `$HOME` 書込が `Read-only file system`、`sudo -n true` 失敗、worktree 書込成功。write ツールの worktree 外書込が `pelway-sandbox: write: worktree 外への書き込みは禁止` で拒否 | 2026-11-14 |
+| T3 の実スレッド（`acpRegistry_devin`）での確認 | 未実施（settings の `commandPath` 反映と T3 再起動後の初回スレッドで実施） | — |
+
+### 既知の残件
+
+- opencode のファイルツール遮断はプラグイン（プロセス内フック）で行い、OS 境界はシェル側の bwrap が担う。プラグイン自体の無効化は、worktree 内の `opencode.json[c]`・`.opencode/` を sandbox が read-only 化して塞いでいる
+- `sandbox-shell` はマスク対象パスが存在しない場合に tmpfs でマウントするが、bwrap はマウントポイントをホスト側のファイルシステムに作成する。Pelway は対象ファイルをリポジトリに同梱して常に ro-bind にしている。他リポジトリの worktree では、初回の sandbox 実行で空の `opencode.json`・`.opencode/`・`.devin/` が作られる
+- Devin の wrap 方式では `~/.local/share/devin/credentials.toml` は devin プロセス自身（outer namespace）から読める必要があるため、`agent-gh` が使う `~/.config/fnox/age.txt`・`~/.config/pelway-agent/fnox.toml` と同様、ネットワークが開放である以上、理論上の外部送信経路は残る。agent の exec コマンドは `.devin/hooks.v1.json` のフックでネストした namespace（`~/.local/share/devin` は tmpfs マスク）に入るため、コマンドからは資格情報に届かない。共有 git dir も全体が書き込み可（`config`・`hooks/` は read-only で保護）
+## 指揮役スレッドのコンテキスト圧縮の検証（Issue #296）
+
+指揮役（巡回を続ける長命スレッド）のコンテキスト圧縮の運用（skill `command-team` の「7. コンテキスト管理」）は、指揮役を動かす環境（プロバイダを含む）ごとに「圧縮操作の実行方法」「圧縮の検知方法」「使用率の取得方法」「交代手順」が検証済みであることでのみ有効化する。圧縮の仕組み（明示的な圧縮の可否・使用率の取得方法・自動圧縮の有無と検知）はプロバイダごとに異なるため、チームが使う全プロバイダ（opencode・Devin CLI・Codex・Claude）について 2026-11-14 に検証した結果を以下に置く。検証は各プロバイダの T3 スレッドでの報告と、T3 からの `/compact`・`/context` 送信の実測による。
+
+共通の結果: エージェント自身（スレッドの中のエージェント）が自分のセッションを圧縮する専用のツール・スラッシュコマンドは、検証したどのプロバイダにも無かった。圧縮の実行は T3 からスレッドへ `t3_thread_send` で `/compact` を送る形（ホスト側の操作）で行い、実行されるとスレッドの activity に `compaction`（"Context compacted"）アイテムが記録される（Claude・Codex・Devin CLI で実測）。opencode では、これに加えてエージェント自身が OpenCode サーバーの HTTP API で圧縮を実行できる（下の表）。
+
+### opencode（GLM、zai-coding-plan/glm-5.3、OpenCode server 2.3.0）
+
+| 項目 | 結果 | 実施日 |
+|---|---|---|
+| 明示的な圧縮操作 | できる（エージェント自身も実行できる唯一のプロバイダ）。ツール一覧・スラッシュコマンドに compact 系は無いが、OpenCode サーバーの HTTP API `POST /api/session/{sessionID}/compact`（認証は Basic `opencode:<OPENCODE_PASSWORD>`。環境変数でサーバーから渡される）をエージェントが直接呼んで圧縮完了まで実証した（`reason=manual` の compaction メッセージが生成、サマリーは構造化 Markdown）。公式 CLI `opencode api` はこのサンドボックスでは読み取り専用 FS のログ書き込みで全コマンドが失敗するため、curl + Basic 認証が唯一の道だった。T3 からの `/compact` 送信の可否は未検証 | 2026-11-14 |
+| コンテキスト使用率 | 取得できる（計算を伴う）。`GET /api/session/{id}/context` で各メッセージの `tokens`（input・output・reasoning・cache）が返る。glm-5.3 の context window（1,000,000）で割って使用率を計算（実測: 約 119,246 トークン ≈ 12%）。使用率%・残り容量をそのまま返すエンドポイントは無く、モデルの window 値（サーバー埋め込みの models.dev データ）からの自行計算が必要 | 2026-11-14 |
+| 自動圧縮の有無と検知 | 仕様上存在する（`compaction.auto` はデフォルト true、`buffer` デフォルト 15% = window の 85% 到達で自動圧縮。auto の実際の発火は未観測）。検知はできる: SSE イベント `session.compaction.started` / `session.compaction.ended` が `reason: "auto" | "manual"` を区別して流れ、durable イベントログ（`GET /api/experimental/session/{id}/log`）とセッションのメッセージ一覧の `compaction` メッセージにも残るためポーリング検知も可能。サーバーログファイルには出力されない（実測 0 件）。イベント購読の `types` パラメータはカンマ区切り不可（1 リクエスト 1 型） | 2026-11-14 |
+
+### Devin CLI（acpRegistry_devin、swe-2-high、Devin CLI 3000.12.43）
+
+| 項目 | 結果 | 実施日 |
+|---|---|---|
+| 明示的な圧縮操作 | できる（実行主体はスレッドの外側）。エージェント用のツール一覧に compact 系は無く、起動フラグ `enable-devin-cli-swe2-self-compaction=false` でモデル主導の自己圧縮は無効。T3 からの `/compact` 送信で圧縮が実行され、スレッドの activity に `compaction` が記録される（エージェントが自分のスレッドへの `t3_thread_send` で注入できることも確認） | 2026-11-14 |
+| コンテキスト使用率 | 取得できる。T3 からの `/context` 送信に `72.0k/262.0k tokens (27.5%)` の形（System prompt・Tools・Messages・Free の内訳付き）で応答が返る。`~/.local/share/devin/cli/sessions.db` の `message_nodes.metadata`（`num_tokens_preceding`）からもトークン数の絶対値は読める | 2026-11-14 |
+| 自動圧縮の有無と検知 | 自動圧縮は有効（起動フラグ `enable-devin-cli-cloud-compaction-schedule=true`、設定 `agent.compaction_threshold_tokens` で閾値を調整可）。エージェントの会話内では検知できない（changelog に「Automatic context compaction is no longer surfaced in the scrollback or the ACP conversation view」と明記）。環境側では検知できる: ライフサイクルフック `PreCompact` / `PostCompact` / `PostCompaction`（manual/auto を区別、`PostCompaction` は summary を受け取る）、OTel イベント `compaction`、sessions.db の `summarized_from`、`~/.local/share/devin/cli/logs/` | 2026-11-14 |
+
+### Codex（codex_review、gpt-6-luna）
+
+| 項目 | 結果 | 実施日 |
+|---|---|---|
+| 明示的な圧縮操作 | できる（実行主体はスレッドの外側）。エージェント用のツール一覧に compact 系は無く、`codex debug` 等の CLI にも現在の T3 スレッドを圧縮する操作は無い。T3 からの `/compact` 送信で圧縮が実行され、スレッドの activity に `compaction` が記録される | 2026-11-14 |
+| コンテキスト使用率 | 取得できない。ツール一覧にも `codex debug --help` / `codex app-server --help` / `codex features` にも、セッションの使用トークン数・上限・残量を返す機能は見当たらない（`get_goal` のトークン情報は Goal 予算でありセッションの使用量ではない） | 2026-11-14 |
+| 自動圧縮の有無と検知 | 不明。auto-compact を制御・観測する機能や圧縮通知・イベント・ログを読む機能がセッション内に無く、圧縮を発生させる試験も未実施 | 2026-11-14 |
+
+### Claude（claude_review、claude-opus-5-5、Claude Code 2.1.325）
+
+| 項目 | 結果 | 実施日 |
+|---|---|---|
+| 明示的な圧縮操作 | できる（実行主体はスレッドの外側）。エージェント自身は `/compact` を実行できない（ビルトイン CLI コマンドで、Skill ツールでは "compact is a built-in CLI command, not a skill" と拒否される）。T3 からの `/compact` 送信で圧縮が実行され、スレッドの activity に `compaction`、セッションのトランスクリプトに `compact_boundary`（`compactMetadata`: `trigger: manual`、`preTokens`）が記録される | 2026-11-14 |
+| コンテキスト使用率 | 直接は取得できない。T3 のスレッド読み取り（`t3_thread_read`）にコンテキスト使用状況は現れない。セッションのトランスクリプト（`~/.claude-review/projects/<作業パス>/<SESSION_ID>.jsonl`）の `usage`（`input_tokens` + `cache_creation_input_tokens` + `cache_read_input_tokens`）からトークン数は間接的に読めるが、上限値はトランスクリプトに記録されないため使用率の計算にはモデルの上限を外から与える必要があり、値も直前の API 呼び出し時点の 1 ターン遅れになる | 2026-11-14 |
+| 自動圧縮の有無と検知 | 事後は検知できる。リアルタイムの通知は無い。トランスクリプトの `compact_boundary` 行（`compactMetadata.trigger` が manual/auto を記録）とスレッドの activity の `compaction` アイテムで、圧縮が走ったことを事後に確認できる。検証で確認できた実例は `trigger: manual` のみで、auto（自動圧縮）の実例は未確認 | 2026-11-14 |
+
+### 交代手順
+
+新指揮役スレッドへの恒久交代（skill `command-team` の「7. コンテキスト管理」の恒久交代）は未検証（全プロバイダ共通）。
+
+### 運用への適用（プロバイダごと）
+
+- 明示的な圧縮の実行方法: Devin CLI・Codex・Claude は T3 からの `/compact` 送信（検証済み）。opencode は OpenCode サーバーの HTTP API（エージェント自身・外部のどちらからでも）。圧縮後の「発生確認済み」の確認手段（activity の `compaction`、Claude ではトランスクリプトの `compact_boundary`、Devin CLI ではフック・sessions.db、opencode は SSE イベントとメッセージ一覧）もある
+- 使用率が機械的に取得できるのは Devin CLI（`/context`）と opencode（context API の tokens 値と window からの計算）で、いずれも計算・応答形式にクセがある。Codex・Claude では代理指標（起算点から完了 Issue 5 件以上、または巡回 20 回以上）でトリガーを運用する
+- 自動圧縮の検知: opencode は SSE イベント（auto/manual を区別）とメッセージ一覧で可能。Devin CLI は環境側の手段（フック・OTel・sessions.db）で可能（未適用）。Claude は事後検知の仕組みがあるが auto の実例は未確認。Codex は不明。いずれのプロバイダでも auto の実際の発火は未観測のため、検知の実効性は運用で確認する。検知方法が未検証のプロバイダでは、予期しない圧縮は検知できない前提で、巡回開始時の状態再取得と重要操作の直前の照合で対処する
+- 交代手順は未検証のため、どのプロバイダでも交代を実行せず、人間確認へ進む
+
 ## シークレットの扱い（fnox）
 
 - `fnox.toml` には**シークレットの名前と、秘密を含まないローカル開発用の既定値だけ**を置く。実際の秘密値（`value`）をこのファイルへ書かないこと。
