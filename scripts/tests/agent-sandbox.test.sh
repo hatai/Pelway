@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# scripts/agent-sandbox/sandbox-shell のテスト。一時的な git worktree を
+# 作り、sandbox 内で「worktree への書き込みは許可、それ以外は拒否」が
+# bwrap によって強制されることを確認する（Issue #151）。
+set -uo pipefail
+
+SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/agent-sandbox/sandbox-shell"
+failures=()
+
+check() { # check <name> <actual> <expected>
+  if [[ "$2" != "$3" ]]; then
+    failures+=("$1: got '$2', want '$3'")
+  fi
+}
+
+if ! command -v bwrap >/dev/null 2>&1; then
+  echo "SKIP: bwrap not installed"
+  exit 0
+fi
+
+# テスト用の本体リポジトリ + linked worktree を作る
+base="$(mktemp -d)"
+trap 'chmod -R u+w "$base" 2>/dev/null; rm -rf "$base"' EXIT
+main="$base/main"
+wt="$base/wt-1"
+mkdir -p "$main"
+git -C "$main" init -q
+git -C "$main" -c user.email=t@t -c user.name=t commit -qm init --allow-empty
+git -C "$main" worktree add -q "$wt" -b wt-branch
+
+# リポジトリ同梱のマスク対象ファイルと同じレイアウトを作る
+# （存在するパスは ro-bind される。存在しないパスは tmpfs で吸収されるが、
+# bwrap がマウントポイントをホスト側に作成するため、本体リポジトリでは
+# ファイルを同梱して ro-bind にしている）。
+printf '{}\n' > "$wt/opencode.json"
+mkdir -p "$wt/.opencode" "$wt/.devin"
+printf '{}\n' > "$wt/.devin/config.json"
+
+cd "$wt"
+export PELWAY_SBX_ROOT="$wt"
+export T3_ACP_MCP_AUTHORIZATION="secret-token"
+
+run() { PELWAY_SBX_ROOT="$wt" "$SCRIPT" -c "$1" 2>&1; }
+
+# 1. worktree 内は書き込み可
+out="$(run 'echo x > in-wt.txt && echo WTOK')"
+check "worktree write" "$out" "WTOK"
+[[ -f "$wt/in-wt.txt" ]] || failures+=("worktree write: file missing")
+
+# 2. $HOME 直下は read-only
+out="$(run 'echo x > "$HOME/sbx-test-home" && echo BAD || echo DENIED' | tail -1)"
+check "home write" "$out" "DENIED"
+[[ -f "$HOME/sbx-test-home" ]] && failures+=("home write: file created")
+
+# 3. /etc も read-only
+out="$(run 'echo x > /etc/sbx-test-etc && echo BAD || echo DENIED' | tail -1)"
+check "etc write" "$out" "DENIED"
+
+# 4. 秘匿パスが隠れる（tmpfs マスクまたは /mnt 自体の不在）
+out="$(run 'ls -A "$HOME/.ssh" | head -1; echo ssh-done')"
+check "ssh masked" "$out" "ssh-done"
+out="$(run 'ls /mnt 2>&1 | head -1')"
+check "mnt absent" "$out" "ls: cannot access '/mnt': No such file or directory"
+out="$(run 'ls -A "$HOME/.config/gh" 2>/dev/null | head -1; echo gh-done')"
+check "gh config masked" "$out" "gh-done"
+
+# 5. sudo は使えない（bwrap の no-new-privileges）
+out="$(run 'sudo -n true 2>/dev/null; echo rc=$?')"
+check "sudo denied" "$out" "rc=1"
+
+# 6. 共有 git dir にはコミットできるが config/hooks は read-only
+out="$(run 'git commit --allow-empty -qm t && git rev-parse HEAD >/dev/null && echo CTOK')"
+check "git commit" "$out" "CTOK"
+common="$(git -C "$wt" rev-parse --git-common-dir)"
+out="$(run "echo probe >> '$common/config' && echo BAD || echo DENIED" | tail -1)"
+check "git config ro" "$out" "DENIED"
+out="$(run "echo probe > '$common/hooks/sbx-hook' && echo BAD || echo DENIED" | tail -1)"
+check "git hooks ro" "$out" "DENIED"
+
+# 7. sandbox 無効化に使える worktree 内パスは ro-bind で変更不可
+out="$(run 'echo x > opencode.json && echo BAD || echo DENIED' | tail -1)"
+check "opencode.json ro" "$out" "DENIED"
+out="$(run 'echo x > .opencode/opencode.json && echo BAD || echo DENIED' | tail -1)"
+check ".opencode ro" "$out" "DENIED"
+out="$(run 'echo x > .devin/config.json && echo BAD || echo DENIED' | tail -1)"
+check ".devin ro" "$out" "DENIED"
+
+# 8. 環境変数: T3 接続変数を落とし mbx を無効化
+out="$(run 'echo "auth=[${T3_ACP_MCP_AUTHORIZATION:-}] mbx=${MISE_RUST_MR_BOXINGTON:-}"')"
+check "env scrub" "$out" "auth=[] mbx=0"
+
+# 9. /tmp は書き込み可
+out="$(run 'echo x > /tmp/sbx-test-tmp && cat /tmp/sbx-test-tmp && rm -f /tmp/sbx-test-tmp')"
+check "tmp write" "$out" "x"
+
+# 10. mbx の target シンボリックリンクは実ディレクトリに置き換わる
+ln -s "$base/mbx-cache" "$wt/target"
+run ':' >/dev/null
+[[ -L "$wt/target" ]] && failures+=("mbx target: still symlink")
+[[ -d "$wt/target" ]] || failures+=("mbx target: dir missing")
+
+# 11. --wrap モードでもコマンドが動く
+out="$(cd "$wt" && PELWAY_SBX_ROOT= "$SCRIPT" --wrap -- bash -c 'echo WRAPOK; echo x > "$HOME/sbx-wrap-home" 2>&1 || echo DENIED')"
+check "wrap run" "$(echo "$out" | head -1)" "WRAPOK"
+check "wrap home write" "$(echo "$out" | tail -1)" "DENIED"
+[[ -f "$HOME/sbx-wrap-home" ]] && failures+=("wrap: home file created")
+
+if ((${#failures[@]})); then
+  printf 'FAIL: %s\n' "${failures[@]}" >&2
+  exit 1
+fi
+echo "PASS: agent-sandbox"

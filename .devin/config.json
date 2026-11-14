@@ -1,0 +1,43 @@
+{
+  // 実装スレッド向けの拒否ルール（Issue #151）。agent-sandbox が read-only
+  // マウントするためセッション内からは変更できない。
+  "permissions": {
+    "deny": [
+      "Exec(sudo)",
+      "Exec(doas)",
+      "Exec(pkexec)",
+      "Exec(su)",
+      "Read(~/.ssh/**)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.docker/**)",
+      "Read(~/.kube/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.config/opencode/**)",
+      "Read(~/.config/fnox/**)",
+      "Read(~/.config/pelway-agent/**)",
+      "Read(~/.local/share/devin/credentials.toml)",
+      "Read(~/.t3/userdata/**)",
+      "Read(/mnt/**)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Write(~/.ssh/**)",
+      "Write(~/.gnupg/**)",
+      "Write(~/.aws/**)",
+      "Write(~/.docker/**)",
+      "Write(~/.kube/**)",
+      "Write(~/.config/**)",
+      "Write(~/.local/bin/**)",
+      "Write(~/.local/share/devin/credentials.toml)",
+      "Write(~/.gitconfig)",
+      "Write(~/.netrc)",
+      "Write(~/.bashrc)",
+      "Write(~/.bash_profile)",
+      "Write(~/.profile)",
+      "Write(~/.zshrc)",
+      "Write(~/.zprofile)",
+      "Write(/etc/**)",
+      "Write(/usr/**)"
+    ]
+  }
+}

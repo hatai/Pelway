@@ -1,0 +1,4 @@
+{
+  // opencode のプロジェクト設定。sandbox 無効化（plugins の無効化指定）を防ぐため
+  // agent-sandbox により read-only マウントされる（Issue #151）。
+}
