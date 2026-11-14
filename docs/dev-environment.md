@@ -240,23 +240,33 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 | ネットワーク制限の結果（`api.github.com` と `github.com` だけにつながるか。`curl -sS https://example.com` が失敗したか） | 未実施 | — |
 | Codex 側（`codex_review`）との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 未記入 | — |
 
-## レビュー担当の Devin CLI（acpRegistry_devin）
+## レビュー担当の Devin CLI（devin_review）
 
-通常の PR の Codex とのローテーションと、高リスク PR の 3 人目のレビュースレッドは、T3 の Devin CLI インスタンス `acpRegistry_devin` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。モデルは `swe-2-high`。Devin CLI には `runtimeMode` の指定が無く、権限はモデルの `mode` オプションで `smart` までに限る（`bypass` は使わない）。`thought_level` と `speed` はスレッドを立てるときの `modelSelection.options` に入れる。
+通常の PR の Codex とのローテーションと、高リスク PR の 3 人目のレビュースレッドは、T3 の Devin CLI インスタンス `devin_review` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。モデルは `swe-2-high`。`devin_review` のモデルオプションは `mode` だけを受け付け、`thought_level`・`speed` は渡せない（effort の引き上げは行わない）。sandbox が効いているセッションでは権限モードは Autonomous 一択で、`mode` に `smart` などを渡しても内部では Autonomous の扱いになる。
 
-Codex・Claude のレビュー担当と違い、Devin CLI にはネットワークを `api.github.com` と `github.com` だけに絞る設定が無い。手順上のルール（「PR のコードを実行しない」など）だけでは外部通信を遮断できず、PR の説明や差分に埋め込まれた攻撃者制御の指示でレビュー環境の情報を外部へ送信しうる。このため Devin CLI のレビューには、GitHub 以外への通信と任意コマンドの実行を実行時に遮断する仕組み（sandbox やプロキシ）をレビュー環境に用意することが前提になる。その仕組みが無い間はレビューに `acpRegistry_devin` を使わない。
+Codex・Claude のレビュー担当と違い、Devin CLI にはネットワークを `api.github.com` と `github.com` だけに絞る権限設定が無い。代わりに Devin CLI 公式の OS レベル sandbox（Linux では bubblewrap）でレビュースレッドを包み、組み込みプロキシのドメイン許可リストで通信先を GitHub に限る。このマシンでの設定は次の 3 つ。
 
-運用に入る前に、遮断する仕組みを有効にした状態で `mode=smart` のレビュースレッドを立て、次を確かめる。確かめるまではレビューに `acpRegistry_devin` を使わない。
+| 場所 | 設定 |
+|---|---|
+| `~/.t3/userdata/settings.json` の `providerInstances.devin_review` | `driver: acpRegistry`、`agentId: devin`、`config.commandPath: /home/hatai/.local/bin/devin-review`。acpRegistry は `<commandPath> acp` の形で起動し、registry の起動引数はそのまま渡る |
+| `/home/hatai/.local/bin/devin-review` | `env DEVIN_SANDBOX=true devin --config /home/hatai/.config/devin-review/config.json "$@"` を exec する起動ラッパー。`devin acp` は `--sandbox` フラグを受け付けず、ACP サーバは `DEVIN_SANDBOX` 環境変数で sandbox を有効化する |
+| `/home/hatai/.config/devin-review/config.json` | `devin_review` 専用のユーザー設定（`devin --config` で差し替え）。`sandbox.allowed_domains: ["**.github.com"]` で github.com とそのサブドメインだけを許可。`permissions.deny` に `edit`・`write`・`mcp__*`・`Exec(sudo)`・`Exec(rm)`・秘密パスの `Read(...)` を、`Fetch` は GitHub 以外を `ask` にして重ね防御する |
+
+sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbrew/bin/bwrap`）と `socat`（`mise.toml` の `conda:socat`）で、どちらか欠けるとセッションは起動を拒否する（fail-closed）。sandbox 配下では exec が許可リスト経由の組み込みプロキシを通り、ワークスペース以外のファイルシステムは読み取り専用になり、`Read(...)` deny のパスはコマンドから隠される。
+
+`Read(...)` deny に symlink を含めると、bwrap がリンク先にマウントできず exec が全滅する（例: `~/.aws` が `/mnt/c/...` への symlink の環境では `bwrap: Can't mount on symlink destination` になる）。deny に入れるパスは実体のあるものに限る。
+
+運用に入る前に、`devin_review` のレビュースレッドを立て、次を確かめる。確かめるまではレビューに `devin_review` を使わない。
 
 - `scripts/agent-gh review api /rate_limit` が成功する（GitHub にはつながる）
 - `curl -sS https://example.com` が失敗する（GitHub 以外にはつながらない）
-- 遮断する仕組みを迂回する任意コマンド（`mode=smart` で許可されない実行）が拒否される
+- 遮断する仕組みを迂回する任意コマンド（ワークスペース外への書き込みなど、Autonomous で自動許可されるが OS が拒否する実行）が拒否される
 - PR のファイルを読み、`verdict:` を含む報告と `Reviewer:` の行を正しい形で出せる
 - `scripts/agent-gh review pr review` でレビュー（Approve・Request changes）を投稿できる
 
 ### 確認手順の結果（記録欄）
 
-確認手順を実施したら、結果を次の表に記録する。記録されるまで `acpRegistry_devin` のレビュー担当は使わない（command-team の保留）。
+確認手順を実施したら、結果を次の表に記録する。記録されるまで `devin_review` のレビュー担当は使わない（command-team の保留）。
 
 | 項目 | 結果 | 実施日 |
 |---|---|---|

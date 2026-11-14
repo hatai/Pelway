@@ -125,14 +125,14 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 | 条件 | レビュー担当 |
 |---|---|
-| 通常 | PR 番号が偶数は Codex（`codex_review`、`gpt-6-luna`）、奇数は Devin CLI（`acpRegistry_devin`、`swe-2-high`）。使えない担当（下の確認ゲート）の番では Codex に回す |
+| 通常 | PR 番号が偶数は Codex（`codex_review`、`gpt-6-luna`）、奇数は Devin CLI（`devin_review`、`swe-2-high`）。使えない担当（下の確認ゲート）の番では Codex に回す |
 | 高リスク: `unsafe`、セキュリティの境界（認証・権限・承認・秘密情報・ネットワーク）、`.github/workflows/` の変更、pr-size の追加行が 400 を超える | Codex・Claude（`claude_review`）・Devin CLI の使えるもの全て（3 人） |
 | 抜き取り | PR 番号を 4 で割った余りが 0 の通常の PR には Claude も付ける（Codex・Devin CLI の見落とし率の測定のため） |
 
 - この表の適用は指揮役だけでなく実装担当も行う。実装担当はこの表でレビュー委託（`delegate_task`）の担当と effort を決め、Assigned 行に写す（skill `implement-issue` の手順 8）。通常と抜き取りの判定は PR 番号だけで決まり、割り当ての記録への記入は不要（実装担当の分は省く。指揮役が立てた分だけ記録する）
 - Devin CLI が実装した PR には Devin CLI のレビューを付けない。通常の番が奇数でも Codex に回し、高リスクの PR でも Devin CLI の枠は外す。
 - Devin CLI のレビュー担当は、`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまで使わない。済むまでは通常は Codex、高リスクは Codex と Claude で回す。
-- Devin CLI のレビュースレッドでは、effort の値を `thought_level` に写す。
+- Devin CLI のレビュースレッド（`devin_review`）では、モデルオプションは `mode` だけを受け付ける（`thought_level`・`speed` は渡せず、effort の引き上げは行えない）。sandbox のため権限モードは Autonomous 一択で、`mode` は省略してよい。設定は `docs/dev-environment.md` の「レビュー担当の Devin CLI」。
 - Claude のレビュー担当は、`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまで使わない。済むまでは Codex だけで回し、高リスクの PR は人間に知らせる。
 - 段階移行: 抜き取りの実施が 10 件に達するか、抜き取りの開始から 4 週間が経つか、どちらか早い方になったら、初回の見落とし率を集計する（定義は手順 4 の「Codex・Devin CLI の見落とし」）。その集計をもって高リスク PR の複数レビュー（Codex と Claude、確認済みなら Devin CLI も）を有効化し、有効化したことと集計結果を指揮役の作業ログに記録する。複数体制は段階的に有効化し、まず抜き取りから始める。抜き取りの実施件数は PR のレビュー（Claude が付けられた PR の数）で数え、集計のときに作業ログに残す。
 - effort は、追加行が 200 以下で高リスクでなければ既定、それ以外は `high`。同じ PR の 2 回目以降のレビューは 1 段上げる。

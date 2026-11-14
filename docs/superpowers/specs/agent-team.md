@@ -9,7 +9,7 @@
 | 人間（濱田さん） | — | `hatai` | 本人 |
 | 指揮 | Grok Bot（クラウド）。動かないときは人間が指名したエージェントが代行する（runbook の「代行」） | — | T3 Connect 経由の MCP |
 | 実装 | T3 スレッド・opencode `zai-coding-plan/glm-5.3`・Devin CLI（`acpRegistry_devin`、`swe-2-high`） | GitHub App `pelway-dev`（`pelway-dev[bot]`） | App のインストールトークン（呼び出しごとに発行） |
-| レビュー | 実装担当からのレビュー委託（`delegate_task` の子タスク）・Codex（`codex_review`）・Devin CLI（`acpRegistry_devin`、通常の PR の Codex とのローテーションと高リスクの PR）と Claude（`claude_review`、高リスクの PR と抜き取り）。指揮役がレビュースレッドを立てるのは、指揮役自身の PR と外部投入（skill `command-team` の「外部からのレビュースレッド投入」）の分だけ | GitHub App `pelway-review`（`pelway-review[bot]`） | App のインストールトークン（呼び出しごとに発行） |
+| レビュー | 実装担当からのレビュー委託（`delegate_task` の子タスク）・Codex（`codex_review`）・Devin CLI（`devin_review`、通常の PR の Codex とのローテーションと高リスクの PR）と Claude（`claude_review`、高リスクの PR と抜き取り）。指揮役がレビュースレッドを立てるのは、指揮役自身の PR と外部投入（skill `command-team` の「外部からのレビュースレッド投入」）の分だけ | GitHub App `pelway-review`（`pelway-review[bot]`） | App のインストールトークン（呼び出しごとに発行） |
 
 App は 2 つに分ける。同じ名義では自分の PR を Approve できないため。App の秘密鍵と ID は `~/.config/pelway-agent/fnox.toml` に age で暗号化して置き、`scripts/agent-gh` が呼び出しごとにトークンを発行する。
 
@@ -112,7 +112,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - レビュースレッドは T3 の Codex インスタンス `codex_review` で動かす。ネットワークは `api.github.com` と `github.com` だけに絞る（Codex の `network_proxy` と、`~/.codex/config.toml` の権限プロファイル `review`）
 - レビュースレッドは T3 の権限 `auto-accept-edits`（Codex の `workspaceWrite`）で立てる。`full-access` ではコマンドが sandbox の外で動き、ネットワークの制限が効かない。この権限では `.git` が読み取り専用になるので、PR の側のファイルは GitHub API で読む
 - Claude のレビュースレッドは T3 の Claude インスタンス `claude_review` で動かす。skill `review-pr` をそのまま使い、使えるコマンドを読み取り系の `git` と `scripts/agent-gh review` に絞り、ネットワークを `api.github.com` と `github.com` だけに絞る。設定と確認の方法は `docs/dev-environment.md` の「レビュー担当の Claude」。確認が済むまでは使わない
-- Devin CLI のレビュースレッドは T3 の Devin CLI インスタンス `acpRegistry_devin` で動かす。skill `review-pr` をそのまま使い、`mode` は `smart` までに限る（`bypass` は使わない）。Devin CLI にはネットワークを GitHub に絞る設定が無いため、GitHub 以外への通信と任意コマンドの実行を実行時に遮断する仕組み（sandbox やプロキシ）をレビュー環境に用意し、その遮断を `docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認で確かめるまでは使わない。手順上のルール（「PR のコードを実行しない」など）だけでは外部通信を遮断できないため、Codex・Claude のレビュー担当と同じ技術的な制限を満たすことが採用の条件になる
+- Devin CLI のレビュースレッドは T3 の Devin CLI インスタンス `devin_review` で動かす。skill `review-pr` をそのまま使い、権限モードは Devin CLI 公式 sandbox の Autonomous 一択になる（`bypass` は使わない）。`devin_review` は起動ラッパーで `DEVIN_SANDBOX=true` と専用設定（ドメイン許可リスト・permissions deny）を付けて立ち上がり、GitHub 以外への通信とワークスペース外への書き込みを実行時に遮断する。仕組みと採用の条件（確認の記録）は `docs/dev-environment.md` の「レビュー担当の Devin CLI」
 - Devin CLI が実装した PR には Devin CLI のレビューを付けない。同じモデル系列が自分の出力を採点する偏りを避ける
 - 指揮役はレビューを兼ねない。指揮役が作った PR もレビュースレッドに回す
 
