@@ -48,8 +48,13 @@ if [[ -n "$merge" ]]; then
   grep -q 'state=pass' <<<"$last_ci" \
     || fail "マージ時点で未解消の CI の失敗が残っている（${last_ci%%:*} 行目）"
 else
-  # マージせず CI 待ちで終わるのはよい。ただし取り込み後の最後の CI 状態が
-  # fail のまま終わる（失敗を確認して放置）のは不合格。
+  # マージせず終わるのは CI の通過を待っている場合だけ。取り込み後に CI の
+  # 状態の記録か、CI 待ちの動作（action=wait）が要る。
+  ci_evidence="$(cis | awk -F: -v u="$update" '$1 > u' | head -1)"
+  ci_wait="$(acts | awk -F: -v u="$update" '$1 > u' | grep -Ei 'action=wait target="?[^"]*(ci|check|チェック)' | head -1)"
+  [[ -n "$ci_evidence" || -n "$ci_wait" ]] \
+    || fail "マージせず終了するには、取り込み後に CI を待つ記録が要る"
+  # 取り込み後の最後の CI 状態が fail のまま終わる（失敗を確認して放置）は不合格。
   last_ci="$(cis | awk -F: -v u="$update" '$1 > u' | tail -1)"
   if [[ -n "$last_ci" ]] && grep -q 'state=fail' <<<"$last_ci"; then
     fail "取り込み後の CI の失敗（${last_ci%%:*} 行目）に続く通過が無い"

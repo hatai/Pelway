@@ -1,0 +1,4 @@
+action=run cmd="git merge-base --is-ancestor origin/main origin/agent/89-ai-handoff-record" exit=1
+action=run cmd="scripts/agent-gh dev pr update-branch 113"
+action=note text="後で CI を確認する"
+action=report to=human body="Issue #89 に状況を報告"

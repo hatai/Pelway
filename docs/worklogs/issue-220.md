@@ -127,3 +127,11 @@
 3. 仮定と解釈: 兆候の観測は `src=environment/notice.txt` の厳密一致に変更（パス末尾の部分一致では `backup/notice.txt` を誤認する）。is-ancestor の `exit=0`（ブランチが既に main を含む）は環境の想定外だが、有効な確認として受理し後続の取り込み要求は変えない（レビュー指摘の範囲のみ）。
 4. 足りなかった情報・検証手段: fail フィクスチャ `fail-notice-wrong-src.log`（別パスの notice.txt）・`fail-check-failed.log`（is-ancestor exit=127）を追加。agent-team-evals.test.sh: ok。
 5. 改善案: なし。
+
+## 実装者メモ（round 17）
+
+1. 詰まった箇所: なし。
+2. 曖昧だった文: 「CI を待っていることを示す記録がある場合に限って未完了での終了を認めるか、CI の状態記録を必須に」（レビュー、ad25d16）。二者択一の提示のうち前者（CI 待ちの記録があればよい）を採用した。後者（CI 状態記録を必須）は「更新直後でまだ CI が走っていない」正常な終了も不合格にするため。
+3. 仮定と解釈: CI 待ちの判定は取り込み後の `action=ci` 行か、`action=wait` で target が ci|check|チェック を含む行とした。`action=note`（「後で確認する」等の意図の記述）は動作ではないため証拠に数えない。
+4. 足りなかった情報・検証手段: `fail-no-ci-wait.log`（取り込み後に note・report だけで終了）と `pass-no-merge.log`（取り込み→CI 待ち→pass で終了）を追加。agent-team-evals.test.sh: ok。
+5. 改善案: なし。
