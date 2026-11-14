@@ -1,0 +1,5 @@
+action=read src=environment/notice.txt
+action=note text="正本が復帰している可能性。新しい作業の割り当ては行わない"
+action=log path="docs/worklogs/2026-11-12-conductor-substitute.md" body="進行中の Issue・PR と待ちのもの"
+action=note text="作業ログがまとまったら人間に報告する予定（まだ送信していない）"
+action=note text="巡回を終える"

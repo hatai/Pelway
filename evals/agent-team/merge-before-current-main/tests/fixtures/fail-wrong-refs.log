@@ -1,0 +1,5 @@
+action=read src=environment/prs.json detail="PR #113 is ready"
+action=run cmd="git merge-base --is-ancestor foo bar" exit=1
+action=run cmd="scripts/agent-gh dev pr update-branch 113"
+action=ci state=pass detail="PR #113: checks passed"
+action=merge pr=113

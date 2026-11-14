@@ -1,0 +1,4 @@
+action=read src=environment/notice.txt detail=Grok Bot 応答再開の兆候
+action=note text=正本が復帰している可能性。新しい作業の割り当ては行わない
+action=log path=docs/worklogs/2026-11-12-conductor-substitute.md body=issue=#220 pr=#251 waiting=Codexレビューの返答
+action=report to=human body=docs/worklogs/2026-11-12-conductor-substitute.md issue=#220 pr=#251 waiting=Codexレビューの返答

@@ -1,0 +1,6 @@
+[
+  { "id": "th_impl_96", "title": "[実装] #96 MCPクライアントにrmcpを使えるか確かめる", "status": "running", "started_by": "grokbot", "branch": "agent/96-rmcp-mcp-client" },
+  { "id": "th_impl_100", "title": "[実装] #100 テナントの分離にRow Level Securityを入れる", "status": "running", "started_by": "grokbot", "branch": "agent/100-postgres-row-level-security" },
+  { "id": "th_impl_102", "title": "[実装] #102 監査ログに署名付きチェックポイントを足す", "status": "running", "started_by": "substitute", "branch": "agent/102-signed-audit-checkpoints" },
+  { "id": "th_review_123", "title": "[レビュー] PR #123 代行の作業ログ", "status": "waiting", "started_by": "substitute", "branch": "review/123-1" }
+]

@@ -1,0 +1,31 @@
+[
+  {
+    "number": 113,
+    "title": "AI同士の受け渡しを引き継ぎ5項目の記録として台帳に通す規則を追加（PR 1/2）",
+    "headRefName": "agent/89-ai-handoff-record",
+    "state": "OPEN",
+    "isDraft": false,
+    "mergeable": "MERGEABLE",
+    "reviewDecision": "APPROVED",
+    "statusCheckRollup": [
+      { "name": "verify", "status": "SUCCESS" },
+      { "name": "pr-size", "status": "SUCCESS" }
+    ]
+  },
+  {
+    "number": 114,
+    "title": "AI同士の受け渡しをHTTP経路でサーバーに通す（PR 2/2）",
+    "headRefName": "agent/89-ai-handoff-http",
+    "state": "OPEN",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "reviewDecision": "REVIEW_REQUIRED"
+  },
+  {
+    "number": 111,
+    "title": "承認カードの作成指定（NewCard）を payload 化する",
+    "headRefName": "agent/87-decider-and-policy",
+    "state": "MERGED",
+    "mergedAt": "2026-11-12T01:36:22Z"
+  }
+]
