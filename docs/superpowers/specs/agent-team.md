@@ -78,6 +78,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 ## 状態の表し方
 
 - 正本は GitHub Issues と GitHub Projects のボード（`users/hatai/projects/7`「Pelway agent team」）
+- 指揮役スレッドのコンテキスト圧縮は、状態の正本が GitHub と巡回記録にあるため、外部化と復元検証を伴う手順として仕組み化できる。詳細は skill `command-team` の「コンテキスト管理」
 - ボードの Status（Backlog・Todo・Working・In review・Changes requested・Ready to merge・Needs human・Done）が Issue の処理状態を表す。Status は巡回が導出規則（runbook の「ボードと巡回」）で補正した後の確定状態が正
 - ラベルは `ready-for-agent`（人間が付ける入場の条件。ボードへの自動追加の合図で、着手後も外さない）、`agent:working`（割り当て中。指揮役が付ける）、`agent:devin`（Devin CLI に割り当てたときに指揮役が付ける）、`needs-human`（人間の判断待ち）の 4 つ
 - 「レビュー待ち」「修正待ち」「マージ待ち」は PR の Draft 状態・レビュー状態・CI 結果と委託記録から、巡回が Status に反映する
@@ -120,6 +121,16 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - Devin CLI が実装した PR には Devin CLI のレビューを付けない。同じモデル系列が自分の出力を採点する偏りを避ける
 - 指揮役はレビューを兼ねない。指揮役が作った PR もレビュースレッドに回す
 - CI 上で動かす助言セキュリティレビューの起動の認可と実行の隔離は `docs/agents/ci-security-review.md` に定める
+
+## 実装担当の権限
+
+- 実装スレッド（T3 の worktree スレッドで動く opencode と Devin CLI の `acpRegistry_devin`）は OS レベルの sandbox の中で動かす。遮断は `scripts/agent-sandbox/sandbox-shell`（bwrap）が行い、エージェント側の権限設定は補助層とする。仕組み・導入・確認の方法は `docs/dev-environment.md` の「実装担当の sandbox」
+- opencode の実装スレッドは、グローバルプラグイン `pelway-sandbox` が全シェルコマンドを bwrap 経由にし、ファイルツールの worktree 外への書き込みと秘匿パスの読み取りを拒否する。適用は `~/.t3/worktrees/` 配下のセッションに限る
+- Devin CLI の実装スレッドは、`acpRegistry_devin` の `commandPath` に指定した `devin-impl` ラッパーが `devin acp` プロセス自体を bwrap で包んで起動する。Devin 内蔵の `--sandbox` は、exec の通信先が GitHub 系のみになる挙動のため実装スレッドでは使わない（レビュー担当の `devin_review` とは別方式）。exec のコマンドは `.devin/hooks.v1.json` のフックでネストした sandbox に送り、`credentials.toml` 等の devin 用資格情報を agent のコマンドから分離する
+- sandbox 内では、書き込みはセッションの worktree・共有 git dir・`/tmp`・ツールキャッシュに限られ、`sudo` 等の昇格はできず、`~/.ssh`・`~/.gnupg`・`/mnt` 等の秘匿パスは見えない。共有 git dir の `config`・`hooks/` は read-only のまま
+- ネットワークは制限しない（hatai の判断。調査の自由度を優先し、現時点では許可リストにしない）
+- 実装スレッドの T3 権限モード（runtimeMode）は sandbox と独立して選んでよい。bwrap が境界を担うため、承認プロンプトの有無がホストへの影響範囲を変えない
+- 実装スレッドが sandbox を自身で無効化する経路は塞ぐ。リポジトリ同梱の `opencode.json`・`.opencode/`・`.devin/config.json` は sandbox が read-only でマウントし、worktree 内からプラグイン無効化や `.devin` の permissions/hooks の追加をできなくする
 
 ## 指揮役の運用ルール
 

@@ -5041,7 +5041,9 @@ dependencies = [
 name = "pelway-db"
 version = "0.0.0"
 dependencies = [
+ "pelway-audit-checkpoint",
  "pelway-contract",
+ "sha2 0.11.1",
  "sqlx",
  "tokio",
 ]

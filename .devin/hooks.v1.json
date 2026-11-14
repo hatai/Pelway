@@ -1,0 +1,2 @@
+{"PreToolUse": [{"matcher": "exec", "hooks": [
+  {"type": "command", "command": "$HOME/.local/share/pelway-sandbox/devin-hook"}]}]}

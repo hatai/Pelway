@@ -4,8 +4,8 @@
 #
 # 使い方:
 #   bash scripts/pgbackrest-verify/verify.sh <フェーズ>
-#   フェーズ: build | setup | retention-count | retention-time | delete-reapply |
-#            restore-checksum | cleanup | all
+#   フェーズ: build | setup | retention-count | retention-time | expire-count |
+#            delete-reapply | restore-checksum | cleanup | all
 #   環境変数: WORK_DIR（既定 scripts/pgbackrest-verify/work）
 #
 # 前提: rootless Podman が使えること。ネットワークは docker.io（ベースイメージ）、
@@ -377,6 +377,92 @@ phase_retention_time() {
   printf '%s\n' "$target" >"$WORK/expired-label-repo2.txt"
 }
 
+# ---------------------------------------------------------------- expire-count
+# 件数指定 + expire --set（#150）。日次バックアップが数日欠けると件数指定は
+# 14 日超の世代を消さない（件数上限に届かないため自動 expire が動かない）。
+# 残った 14 日超の世代を expire --set で個別に消し、復旧対象を 14 日以内に
+# 収められるかを確かめる。
+phase_expire_count() {
+  log "expire-count: 欠落日を含む件数指定リポジトリで expire --set を確かめる"
+  rm -f "$CHECKS/expire-count-"*.ok
+  reset_repo 1
+  # 日次フルが -20〜-15 日に 6 日続き、-14〜-8 日の 7 日分が欠け、-7 日〜
+  # 当日に再開した状況を作る。フルはちょうど $RETENTION 世代で件数上限に
+  # 達しないため、件数指定の自動 expire は 14 日超の世代を消さない。
+  # -17 日のフルの直後に差分を 1 つ作り、expire --set がフルに連なる差分も
+  # まとめて消すことを件数指定リポジトリで確かめる。差分は取得時点で
+  # リポジトリに存在する最新のフルに紐づくため、-16 日以降のフルより先に
+  # 作る必要がある（全日分の後に作ると当日のフルに紐づいてしまう）。
+  local i day
+  for i in 20 19 18 17 16 15 7 6 5 4 3 2 1 0; do
+    day=$(date -u -d "$BASE_DAY - $i day" +%Y-%m-%d)
+    pg_start "$day 02:00:00"
+    pgr --stanza="$STANZA" --repo=1 --type=full backup >/dev/null \
+      || fail expire-count "$day の backup が失敗"
+    if [[ "$i" == "17" ]]; then
+      pg_start "$day 14:00:00"
+      pgr --stanza="$STANZA" --repo=1 --type=diff backup >/dev/null \
+        || fail expire-count "$day の差分 backup が失敗"
+    fi
+  done
+  pg_start "$(date -u +'%Y-%m-%d %H:%M:%S')"
+
+  # 前提の確認: 件数指定だけでは 14 日超の世代が残る（欠落で件数上限に
+  # 届かないため自動 expire が動かない）。
+  local now limit_epoch
+  now=$(date -u +%s)
+  limit_epoch=$(( now - RETENTION * 86400 ))
+  # expire の対象は full のラベルにする。差分はフルの世代に連なって消える
+  # ため --set に差分のラベルは渡さない。
+  local old_full_labels old_count
+  old_full_labels=$(pgr --stanza="$STANZA" --repo=1 info --output=json \
+    | jq -r '.[].backup[]? | select(.type == "full") | "\(.label) \(.timestamp.start)"' \
+    | awk -v limit="$limit_epoch" '$2 < limit {print $1}' | sort)
+  old_count=$(repo_backup_times 1 | awk -v limit="$limit_epoch" '$2 < limit' | grep -c . || true)
+  [[ "$old_count" -ge 1 ]] \
+    || fail expire-count "14 日超の世代がない（前提が作れていない）"
+  ok expire-count-remain "件数指定のみでは 14 日超の世代が $old_count 世代残る"
+
+  # 14 日超のフルの世代を 1 つずつ expire --set で消す（§2.4 の削除処理の
+  # 単位）。消した世代の実体もリポジトリから消えていること（§4.3 の
+  # 物理消去）を各世代で確かめる。
+  local label
+  for label in $old_full_labels; do
+    pgr --stanza="$STANZA" --repo=1 expire --set="$label" >/dev/null \
+      || fail expire-count "expire --set $label が失敗"
+    rootx sh -c "test ! -e $REPO/count/backup/$STANZA/$label" \
+      || fail expire-count "expire した世代の実体 $label が残っている"
+  done
+  ok expire-count-set \
+    "expire --set で 14 日超のフルを $(printf '%s\n' "$old_full_labels" | grep -c .) 世代消せた"
+
+  # 消したフルに連なる差分も一緒に消えていること。
+  local diffs
+  diffs=$(pgr --stanza="$STANZA" --repo=1 info --output=json \
+    | jq -r '[.[].backup[]? | select(.type != "full")] | length')
+  [[ "$diffs" == "0" ]] \
+    || fail expire-count "消したフルの差分が $diffs 件残っている"
+  ok expire-count-dependent "expire --set はフルに連なる差分もまとめて消す"
+
+  # 消した後は、復旧対象が 14 日以内に収まること。
+  local remain_old remain_all oldest_epoch age_days
+  remain_old=$(repo_backup_times 1 | awk -v limit="$limit_epoch" '$2 < limit' | grep -c . || true)
+  [[ "$remain_old" == "0" ]] \
+    || fail expire-count "expire --set 後も 14 日超の世代が $remain_old 件残っている"
+  remain_all=$(repo_labels 1 | grep -c . || true)
+  oldest_epoch=$(repo_backup_times 1 | awk '{print $2}' | sort -n | head -1)
+  age_days=$(( (now - oldest_epoch) / 86400 ))
+  (( age_days <= RETENTION )) \
+    || fail expire-count "消した後も最も古い世代が $age_days 日前（上限 $RETENTION 日）"
+  ok expire-count-window "消した後は $remain_all 世代、最も古い $age_days 日前（$RETENTION 日以内）"
+
+  # 下流フェーズ（delete-reapply / restore-checksum）が参照する復元元の
+  # ラベルを、消去後に残った最新の世代に更新する。
+  repo_backup_times 1 | sort -n -k2 | tail -1 | awk '{print $1}' \
+    >"$WORK/latest-label-repo1.txt"
+  ok expire-count-label-saved "復元先のラベル $(cat "$WORK/latest-label-repo1.txt")"
+}
+
 # ---------------------------------------------------------------- delete-reapply
 # 12 §8.2 手順6: 復旧時は認可と外部dispatchを既定停止し、復旧DBと独立して
 # 保全した削除・制限・撤回記録を先に再適用する。
@@ -541,13 +627,14 @@ case "${1:-}" in
   setup)            phase_setup ;;
   retention-count)  phase_retention_count ;;
   retention-time)   phase_retention_time ;;
+  expire-count)     phase_expire_count ;;
   delete-reapply)   phase_delete_reapply ;;
   restore-checksum) phase_restore_checksum ;;
   cleanup)          phase_cleanup ;;
   all)
     phase_build; phase_setup
-    phase_retention_count; phase_retention_time
+    phase_retention_count; phase_retention_time; phase_expire_count
     phase_delete_reapply; phase_restore_checksum
     ;;
-  *) echo "usage: $0 <build|setup|retention-count|retention-time|delete-reapply|restore-checksum|cleanup|all>" >&2; exit 2 ;;
+  *) echo "usage: $0 <build|setup|retention-count|retention-time|expire-count|delete-reapply|restore-checksum|cleanup|all>" >&2; exit 2 ;;
 esac

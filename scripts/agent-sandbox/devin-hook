@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# devin の PreToolUse フックのエントリポイント（Issue #151。command は引数なしのパス 1 つに）。
+exec "$(dirname "$0")/sandbox-shell" --hook
