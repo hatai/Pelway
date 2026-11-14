@@ -4,7 +4,9 @@
 # bwrap によって強制されることを確認する（Issue #151）。
 set -uo pipefail
 
-SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/agent-sandbox/sandbox-shell"
+TOP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT="$TOP/agent-sandbox/sandbox-shell"
+PLUGIN="$TOP/agent-sandbox/opencode-plugin/index.js"
 failures=()
 
 check() { # check <name> <actual> <expected>
@@ -104,6 +106,39 @@ out="$(cd "$wt" && PELWAY_SBX_ROOT= "$SCRIPT" --wrap -- bash -c 'echo WRAPOK; ec
 check "wrap run" "$(echo "$out" | head -1)" "WRAPOK"
 check "wrap home write" "$(echo "$out" | tail -1)" "DENIED"
 [[ -f "$HOME/sbx-wrap-home" ]] && failures+=("wrap: home file created")
+
+# 12. opencode プラグイン: ファイルツールの検査は実体パスに対して行う
+#     （worktree 内の symlink 越しに deny 対象・worktree 外へ出られない）
+if command -v node >/dev/null 2>&1; then
+  pwt="$HOME/.t3/worktrees/sbx-plug-test"
+  rm -rf "$pwt" && mkdir -p "$pwt" "$HOME/sbx-plug-out"
+  ln -s /mnt "$pwt/mnt-link"
+  ln -s "$HOME/sbx-plug-out" "$pwt/out-link"
+  out="$(node - "$PLUGIN" "$pwt" <<'NODE'
+const hooks = {}
+const plugin = (await import(process.argv[2])).default
+await plugin.setup({
+  location: { directory: process.argv[3] },
+  shell: { hook: async (n, f) => { hooks[n] = f } },
+  tool: { hook: async (n, f) => { hooks["t:" + n] = f } },
+})
+const t = hooks["t:execute.before"]
+const allows = async (tool, fp) => {
+  try { await t({ tool, input: { filePath: fp } }); return true }
+  catch { return false }
+}
+const wt = process.argv[3]
+const bad = []
+if (await allows("read", `${wt}/mnt-link/c`)) bad.push("read via deny symlink")
+if (await allows("write", `${wt}/out-link/x`)) bad.push("write via dir symlink")
+if (!(await allows("write", `${wt}/x`))) bad.push("write inside")
+if (!(await allows("read", `${wt}/x`))) bad.push("read inside")
+console.log(bad.length ? "FAIL " + bad.join(",") : "OK")
+NODE
+)"
+  check "plugin file-tool" "$out" "OK"
+  rm -rf "$pwt" "$HOME/sbx-plug-out"
+fi
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2

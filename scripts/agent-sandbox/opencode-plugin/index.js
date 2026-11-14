@@ -1,22 +1,14 @@
 // pelway-sandbox: T3 実装スレッド（worktree セッション）の opencode 用
-// sandbox プラグイン（Issue #151）。
+// sandbox プラグイン（Issue #151）。~/.t3/worktrees/ 配下のみ適用。
 //
-// 役割は二つ:
 //   1. shell フックで全コマンドを sandbox-shell（bwrap）経由にし、
-//      書き込みをセッションの worktree と必要なキャッシュに限定する。
-//      ネットワークは遮断しない（Issue #151 で hatai が許可リスト
-//      非採用を指示したため）。
-//   2. ファイルツール（write/edit/read 等）が worktree 外や秘匿パスに
-//      アクセスするのを拒否する。シェル経由でない書き込みは bwrap を
-//      通らないため、この層が必要。
-//
-// 適用範囲: ~/.t3/worktrees/ 配下のロケーションのみ。人間の通常セッション
-// （本体チェックアウト等）には影響しない。
-//
-// 注意: このプラグインはプロセス内フックであり、OS 境界は sandbox-shell
-// 側の bwrap が担う。プラグイン自身の無効化を防ぐため、sandbox-shell は
-// worktree 内の opencode.json[c]/.opencode/ をマスクしている。
+//      書き込みを worktree と必要なキャッシュに限定する。ネットワークは
+//      遮断しない（hatai の指示で許可リスト非採用）。
+//   2. ファイルツールが worktree 外や秘匿パスにアクセスするのを拒否する
+//      （bwrap を通らない経路）。検査は実体パスに対して行い、worktree 内
+//      symlink 越しの脱走も防ぐ。
 
+import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
@@ -60,6 +52,18 @@ const ENV_FILE = /(^|\/)\.env(\..*)?$/
 function resolvePath(base, p) {
   if (typeof p !== "string" || p.length === 0) return null
   return path.normalize(p.startsWith("/") ? p : path.resolve(base, p))
+}
+
+// 実体パスを返す（worktree 内 symlink 越しの脱走対策）。末尾が存在しない
+// ときは最も深い既存の祖先まで realpathSync し、残りを継ぐ。
+function realPath(p) {
+  try {
+    return fs.realpathSync(p)
+  } catch {
+    const parent = path.dirname(p)
+    if (parent === p) return p
+    return path.join(realPath(parent), path.basename(p))
+  }
 }
 
 function collectPaths(input) {
@@ -106,6 +110,10 @@ export default {
     const dir = ctx?.location?.directory
     if (typeof dir !== "string" || !dir.startsWith(WORKTREE_PREFIX)) return
     const root = path.normalize(dir)
+    const realRoot = realPath(root)
+    // deny 対象自体が symlink の環境（例: ~/.aws → /mnt/c/...）では、
+    // 字句パスと実体パスの両方を拒否リストに入れて検査する。
+    const readDeny = new Set(READ_DENY.concat(READ_DENY.map(realPath)))
 
     await ctx.shell.hook("create.before", (event) => {
       event.shell = SBX_SHELL
@@ -127,10 +135,15 @@ export default {
         for (const raw of collectPaths(input)) {
           const p = resolvePath(root, raw)
           if (p === null) continue
-          if (!under(p, root)) {
+          const rp = realPath(p)
+          if (!under(p, root) || !under(rp, realRoot)) {
             deny(`${tool}: worktree 外への書き込みは禁止: ${raw}`)
           }
-          if (WORKTREE_DENY.test(p) || WORKTREE_DENY.test(path.normalize(raw))) {
+          if (
+            WORKTREE_DENY.test(p) ||
+            WORKTREE_DENY.test(rp) ||
+            WORKTREE_DENY.test(path.normalize(raw))
+          ) {
             deny(`${tool}: sandbox 設定・git 構成の変更は禁止: ${raw}`)
           }
         }
@@ -140,10 +153,13 @@ export default {
         for (const raw of collectPaths(input)) {
           const p = resolvePath(root, raw)
           if (p === null) continue
-          for (const d of READ_DENY) {
-            if (under(p, d)) deny(`${tool}: 秘匿パスの読み取りは禁止: ${raw}`)
+          const rp = realPath(p)
+          for (const d of readDeny) {
+            if (under(p, d) || under(rp, d)) {
+              deny(`${tool}: 秘匿パスの読み取りは禁止: ${raw}`)
+            }
           }
-          if (ENV_FILE.test(p)) {
+          if (ENV_FILE.test(p) || ENV_FILE.test(rp)) {
             deny(`${tool}: .env ファイルの読み取りは禁止: ${raw}`)
           }
         }
