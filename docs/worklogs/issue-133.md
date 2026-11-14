@@ -59,3 +59,12 @@
 5. 改善案: `.agents/skills/command-team/SKILL.md` の「レビュー担当と effort」に「止まる条件に達した後の追加ラウンドは、指揮役が明示承認した回数だけ委託できる」を足す（round 4 許可の根拠を明文化）
 
 使ったスキル: `.agents/skills/implement-issue`
+
+### round 8
+
+- 詰まったところ: Codex round 4 の must-fix が「transport は隔離済みであることを型で表す（または明示ポリシーで sandbox 起動）」で、in-process 検証の API と両立する形の設計が要った。
+- 曖昧だった表現: 「arbitrary transports」の「arbitrary」（duplex socketpair のようなクライアント側生成の transport は「接続先が任意の外部プロセス」を意味しない）。
+- 仮定・解釈: in-process の duplex は client が生成する socketpair で外部プロセス境界ではないため隔離を要さないと解釈し、外部接続のみ `IsolatedTransport` で通す境界にした。in-process 検証向けに `assume_isolated` を残した。
+- 足りなかった情報・検証手段: task container 側の隔離実装は本 Issue の範囲外であり、「隔離済み transport のみ」を API で強制する以上の実証はできない（doc と型名で責務を表す）。
+- 改善の提案: 隔離を作る側（task container / launcher）が実装された時点で `IsolatedTransport` のコンストラクタをそこだけが呼べる形に閉じる（sealed）と、assume_isolated の濫用余地が消える。
+- 対象 head: 19fa396876f735b40d2742a1ebc6d891c14e11aa
