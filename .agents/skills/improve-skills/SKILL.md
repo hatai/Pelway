@@ -87,7 +87,7 @@ command-team 手順 4（改善ループ）が、レビューの同種指摘な�
 ### 6. 検証する
 
 - `diff -r .claude/skills/<name> .agents/skills/<name>` の差分がゼロであること。
-- ヘルパーを足した・直した場合は、そのテストが通ること（`mise run script-test`）。新しいテストは `mise.toml` の script-test への登録まで行って初めて検証したことになる（登録漏れでも script-test 自体は成功してしまうため）。
+- ヘルパーを足した・直した場合は、そのテストが通ること（`mise run script-test`）。テストは `scripts/script-test.sh` が `scripts/tests/*.test.sh` と `.agents/skills/<name>/*.test.sh` を自動収集するため、置くだけで検証対象になる。
 - pr-size の計測は base 側の `.gitattributes` で判定されるため、同じ PR で `.gitattributes` の除外解除を書いても、その PR の計測には効かない。ヘルパーとテストは計測対象にすることが決まり（docs/agents/skill-helpers.md）なので、計測対象でないスキルにヘルパーを足す場合は、除外解除だけを先行する別の PR でマージしてから、ヘルパーの PR を出す。除外解除なしにヘルパーを足さない。
 - 参照しているファイル・スキル・コマンドが実在すること。改訂したスキル名でリポジトリ内を検索し、古い前提の参照が残っていないこと。
 - 他のスキルや AGENTS.md と矛盾する記述が無いこと（該当箇所を検索して読み比べる）。
