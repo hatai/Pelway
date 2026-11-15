@@ -3,7 +3,7 @@
 # 設定の意味は https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
 # github-actions の更新で Dependabot は `.github/workflows/actions.lock`（gh actions-lock
 # が生成）を作り直さない。更新の PR では指揮役が PR のブランチで `gh actions-lock`
-# を実行して lock を作り直す（skill command-team の「マージ」の Dependabot の項）。
+# を実行して lock を作り直す（docs/agents/command-team-details.md の「Dependabot の PR の扱い」）。
 version: 2
 updates:
   - package-ecosystem: cargo

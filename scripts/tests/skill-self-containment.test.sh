@@ -63,7 +63,7 @@ check cond6b_investigate_bug_diagnosing .agents/skills/investigate-bug/SKILL.md 
   '使ったスキル' \
   'Phase 5' \
   'needs-info'
-check cond6c_command_team_grill .agents/skills/command-team/SKILL.md \
+check cond6c_command_team_grill docs/agents/external-skills.md \
   '推測で埋めずに人間に聞く' \
   '質問票' \
   '3 分類' \
