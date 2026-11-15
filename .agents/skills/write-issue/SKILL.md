@@ -73,6 +73,8 @@ scripts/agent-gh dev issue create --title "..." --body-file - <<'EOF'
 EOF
 ```
 
+タイトルに非 ASCII を含めるときは argv に渡せない（`\uXXXX` に潰れて agent-gh が拒否する）。タイトルと本文を JSON ファイルに書き、`scripts/agent-gh dev api repos/{owner}/{repo}/issues -X POST --input <file>` で起票する。
+
 #### 受け入れ条件の書き方（このスキルの核）
 
 - 1 行に 1 条件。テストかコマンドか手順で、満たしたかどうかを判定できる形にする。
