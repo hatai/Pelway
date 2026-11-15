@@ -30,13 +30,13 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 
 巡回はボードの Todo を `gh project item-list` の返却順（全件取得、上限で打ち切らない）で読み、`ready-for-agent` 付きを並び順に割り当てる。処理順を覆した場合は理由を巡回記録に残す。巡回の処理順は次のとおり。
 
-1. 未完了の復元検証待ち記録があれば復元検証から始める（skill `command-team` の「7. コンテキスト管理」の復元検証。部分復旧の継続照合もここで行う）
+1. 未完了の復元検証待ち記録があれば復元検証から始める（`docs/agents/conductor-context.md` の「復元検証」。部分復旧の継続照合もここで行う）
 2. Done の分類と復旧
 3. 停止の検知と処理の続行
 4. 整合チェックの是正（ラベル・PR・ステータス・スレッドの 4 者の突き合わせ）
 5. 期限到来待ちの確認（フォローアップタイマー）: 補助記録の次回確認時刻（`next_check_at`）を過ぎた待ちを、その巡回で必ず確認する。待ちが解消していれば通常の手順（割り当て・マージの判断・伝達など）で進め、まだ待ちが続くなら確認結果を巡回記録に残して次回確認時刻を更新する。次回確認時刻が設定されていない・読めない待ちは、待ちの種類の目安でその巡回で補う（自己修復として扱い、特別な報告はしない。「10. 巡回状態の補助記録」の「次回確認時刻（フォローアップタイマー）」）
 6. 割り当て
-7. 圧縮要否の判定（巡回の区切り。skill `command-team` の「7. コンテキスト管理」のトリガーで判定し、該当すれば外部化チェックから計画的圧縮へ進む）
+7. 圧縮要否の判定（巡回の区切り。`docs/agents/conductor-context.md` の「トリガー」で判定し、該当すれば外部化チェックから計画的圧縮へ進む）
 
 整合チェックの走査対象は和集合: ボード上の全カード、4 ラベル（`ready-for-agent`・`agent:working`・`agent:devin`・`needs-human`）のいずれかが付いた全 Issue、作業状態の印が付いた全カード。停止処理中に Issue が閉じられた場合は、分類が意図したクローズであれば停止処理を中止して印を破棄し、復旧対象であれば復旧後に停止の要否を判定し直す。
 
@@ -140,7 +140,7 @@ Assigned: role=implement agent=devin model=swe-2-high effort=<medium|high|max>"
 
 ### レビューを始める
 
-指揮役がレビュースレッドを立てるのは、指揮役自身の PR と、外部投入（skill `command-team` の「外部からのレビュースレッド投入」）のときだけ。通常の実装担当の PR のレビューは、実装担当が `delegate_task` で自分で委託する（skill `implement-issue` の手順 8）ので、指揮役は立てない。
+指揮役がレビュースレッドを立てるのは、指揮役自身の PR と、外部投入（`docs/agents/command-team-details.md` の「外部からのレビュースレッド投入」）のときだけ。通常の実装担当の PR のレビューは、実装担当が `delegate_task` で自分で委託する（skill `implement-issue` の手順 8）ので、指揮役は立てない。
 
 レビュースレッドを次の内容で立てる（`t3 thread start` の形で書くが、権限を指定するため実際は MCP または `t3_thread_launch` で立てる）。
 
@@ -165,7 +165,7 @@ t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree m
 Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>"
 ```
 
-`<slug>` は症状を英小文字とハイフンで短くしたもの。effort は skill `command-team` の「調査の担当と effort」で決める。調査スレッドの報告（`pr:` に報告の Draft PR）を受けたら、skill `command-team` の「調査の引き渡し」に従う。
+`<slug>` は症状を英小文字とハイフンで短くしたもの。effort は `docs/agents/command-team-details.md` の「調査（入口B）」で決める。調査スレッドの報告（`pr:` に報告の Draft PR）を受けたら、同じ節の「調査の引き渡し」に従う。
 
 ## 5. イベントごとの対応
 
@@ -196,7 +196,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 実装スレッドは `branch` の `agent/<N>-` から Issue 番号を、`thread_id` から送り先を取る。レビュースレッドから実装スレッドを探すときは、PR のブランチ名と同じ `branch` を持つスレッドを `t3 thread list` から選ぶ。
 
-調査スレッド（ブランチが `agent/investigate-` で始まる）も `opencode` なので、上の表の実装スレッドの列で扱う。ただし `finished` の `pr:` は調査の報告の Draft PR なので、レビューを始める前に skill `command-team` の「調査の引き渡し」で起票可否を判断する。判断のあともレビューを経てマージするため、Approve 後の Draft 解除も実装スレッドと同じ扱いで調査スレッドに行わせる。調査が脆弱性の疑いで止まったとき（skill `investigate-bug` の手順 4）は、報告の対象の Issue に `needs-human` が付く。7 の「実装担当が止まった」と同じ扱いで人間に知らせる。
+調査スレッド（ブランチが `agent/investigate-` で始まる）も `opencode` なので、上の表の実装スレッドの列で扱う。ただし `finished` の `pr:` は調査の報告の Draft PR なので、レビューを始める前に `docs/agents/command-team-details.md` の「調査（入口B）」で起票可否を判断する。判断のあともレビューを経てマージするため、Approve 後の Draft 解除も実装スレッドと同じ扱いで調査スレッドに行わせる。調査が脆弱性の疑いで止まったとき（skill `investigate-bug` の手順 4）は、報告の対象の Issue に `needs-human` が付く。7 の「実装担当が止まった」と同じ扱いで人間に知らせる。
 
 ### `pelway.github-notify/v2`
 

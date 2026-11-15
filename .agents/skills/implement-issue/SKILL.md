@@ -81,7 +81,7 @@ scripts/agent-gh dev issue view <N> --json title,body,labels,comments
 ```markdown
 ## 実装者メモ（round <R>）
 
-対象 head: <この round の終わりの報告が対象とする PR の head の SHA。終わりの報告を出さない round（途中経過・停止）では書かない>
+対象 head: <メモを含むコミットの親、つまりこの round の実装の実体を含む最後のコミットの SHA（手順 6 で実装コミットを push した後、署名付け替え後の SHA を記入する）。終わりの報告を出さない round（途中経過・停止）では書かない>
 
 1. 詰まった箇所: <手順の番号かファイルのパス>: <何が起きたか>
 2. 曖昧だった文: 「<skill・Issue・AGENTS.md・docs の文をそのまま引用>」（<ファイルのパスと見出し>）
@@ -99,6 +99,8 @@ scripts/agent-gh dev issue view <N> --json title,body,labels,comments
 
 ### 6. 検査してコミットし、行数を確かめてから push する
 
+まずこの round の実装コミットを push する（この時点ではメモを含めない）:
+
 ```bash
 mise run verify
 scripts/agent-gh dev git add <files>
@@ -108,13 +110,22 @@ mise run pr-size
 scripts/agent-gh dev git push -u origin HEAD
 ```
 
-- 手順 5 の `docs/worklogs/issue-<N>.md` も同じコミットに入れる。
 - `mise run verify` が失敗したらコミットしない。直してからやり直す。
 - `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたら push せずに止まる。
 
+次に、実装コミットを push した後の PR の head の SHA を確かめ（push 後は `scripts/agent-gh-resign` による署名付け替えで SHA が変わるため、必ず push 後の値を取る。2 round 目以降は `scripts/agent-gh dev pr view <PR 番号> --json headRefOid --jq .headRefOid`。初回は Draft PR の作成が手順 7 のため PR 番号がまだ無く、手順 7 の後に行うか、push 後の `scripts/agent-gh dev git rev-parse HEAD` で確かめる（`agent-gh-resign` が push の成功後にローカル ref を署名付きコミットに付け替えるため、remote の `headRefOid` と同じ値になる））、それを手順 5 のメモの「対象 head」に記入して、メモだけを独立したコミットにして push する:
+
+```bash
+scripts/agent-gh dev git add docs/worklogs/issue-<N>.md
+scripts/agent-gh dev git commit -m "docs: add implementer memo for issue <N> round <R>"
+scripts/agent-gh dev git push
+```
+
+- 「対象 head」の記入を含むメモのコミットは、必ずレビュー委託（手順 8）の前に行う。メモはメモコミットの親の実装コミットに対応するため、メモを独立したコミットにしてよい。
+
 ### 7. Draft PR を作る（初回だけ）
 
-`write-pull-request` skill に従って本文を書き、Draft で作る。本文の「概要」の最後に `Closes #<N>` を入れる。本文の「対象」の最後に、次の 1 行を必ず入れる。値は、指揮役の指示の 2 行目 `Assigned: role=implement agent=... model=... effort=...` から写す（`role=implement` を除いた残りを、順番も表記も変えずに書く）。指示に `Assigned:` の行が無いときは `model=unknown effort=unknown` と書く。
+`write-pull-request` skill に従って本文を書き、Draft で作る。日本語を含むタイトル・本文・コメントは exec のコマンド引数に書かずファイル経由で渡す決まり（write-pull-request の「定期ルール」）に従うこと。特にタイトルは `--title` に日本語を書かず、英語の仮タイトルで作成したあと `scripts/agent-gh dev api PATCH ... --input <JSON ファイル>` で日本語タイトルを設定する。本文の「概要」の最後に `Closes #<N>` を入れる。本文の「対象」の最後に、次の 1 行を必ず入れる。値は、指揮役の指示の 2 行目 `Assigned: role=implement agent=... model=... effort=...` から写す（`role=implement` を除いた残りを、順番も表記も変えずに書く）。指示に `Assigned:` の行が無いときは `model=unknown effort=unknown` と書く。
 
 ```
 Implementer: agent=<opencode|devin> model=<モデル名> effort=<effort>
@@ -123,10 +134,12 @@ Implementer: agent=<opencode|devin> model=<モデル名> effort=<effort>
 修正依頼で effort が変わったときは、「対象」の行を新しい値に書き換える。
 
 ```bash
-scripts/agent-gh dev pr create --draft --title "..." --body-file - <<'EOF'
+scripts/agent-gh dev pr create --draft --title "wip" --body-file - <<'EOF'
 ...
 EOF
 ```
+
+（作成後、PR のタイトルを `api PATCH --input` で日本語に設定する。手順の詳細は write-pull-request skill の手順 3 を参照）
 
 修正依頼の場合は PR を作り直さない。push したあと `scripts/agent-gh dev pr edit` で本文の「レビューと QA」と「対象」の sha を更新する。
 
@@ -199,6 +212,8 @@ scripts/agent-gh dev pr ready <PR 番号>
 
 3. 手順 10 に進む
 
+Approve の後は PR に push しない。実装者メモのみのコミットでも head が動き、command-team のマージ規則によりレビューのやり直しになる。メモの追記が必要なときは、修正 round の手順 5・6（レビュー委託の前）で行う。
+
 複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）修正を続けず、止まる条件の形でエスカレーションする。委託の子が `failed` を報告したら、`error: checks pending` は待って同じラウンドを数えずに再委託し、それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
 
 ラウンドサマリーは `scripts/agent-gh dev pr comment <PR 番号> --body-file -` で投稿する:
@@ -222,7 +237,7 @@ ready: done
 memo: docs/worklogs/issue-<N>.md（round <R>）
 ```
 
-`pr:` の行には対象 head（`pr ready` を実行した時点の PR の head の SHA）を併記し、実装者メモの「対象 head」と同じ値にする（巡回が終わりの報告と head を結び付ける根拠）。
+`pr:` の行には終わりの報告時点（`pr ready` を実行した時点）の PR の head の SHA を併記する。実装者メモの「対象 head」はメモを含むコミットの親（その round の実装の実体を含むコミット）を指し、`pr:` 行の head は終わりの報告時点の PR の head（メモを含むコミット）を指す、という関係である（巡回はこの親関係で終わりの報告と実装を結び付ける）。
 
 止まった場合は `pr:` の代わりに `stopped: <止まる条件の表の 1 列目>` を書く。
 
