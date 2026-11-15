@@ -4,8 +4,9 @@
 //! - `.slint` が参照しているトークン名が、許可された一覧にあること。
 //! - 許可された一覧 [`TOKEN_NAMES`] が正本 JSON（`tokens/pelway.tokens.json`）の
 //!   `color.<theme>` のトークン名と一致すること（正本の写しは 97fb70d の
-//!   `docs/design-system/tokens/pelway.tokens.json`）。
-//! - その写しのバイト列が、97fb70d の正本と sha256 で一致すること
+//!   `docs/design-system/tokens/pelway.tokens.json`。Issue 323 で AI の呼称の説明文
+//!   だけ書き換え、トークンの名前と値は変えていない）。
+//! - その写しのバイト列が、正本と sha256 で一致すること
 //!   （名前の照合だけでは値や構造のずれを検出できないため）。
 //! - Rust が返すトークンの値（色）が正本 JSON の `$value` と一致すること。
 
@@ -711,14 +712,15 @@ fn token_copy_bytes_match_canonical_by_sha256() {
     // 97fb70d の docs/design-system/tokens/pelway.tokens.json を byte 単位で
     // 写したものが crates/pelway-client-ui/tokens/pelway.tokens.json。
     // 名前の照合（token_names_match_canonical_json）だけでは値や構造のずれを
-    // 検出できないため、バイト列の sha256 を 97fb70d 時点の値と比べる。
+    // 検出できないため、バイト列の sha256 を正本時点の値と比べる。
     // 正本が更新されたときは、git show で新しい正本の sha256 を確かめてから
     // この定数を書き換える（写し自身も同じバイト列に置き換える）。
+    // 現在の値は Issue 323（AI の呼称の説明文の書き換え）後の正本の sha256。
     const EXPECTED_SHA256: &str =
-        "4f523ce19145250df391975dea3924aa7b5bdcbd417c0c31e910f3b17c543953";
+        "7962eff69a02265495859cec13840efdf7821a7642f76180d93c750a49a6a99d";
     assert_eq!(
         sha256_hex(CANONICAL_TOKENS.as_bytes()),
         EXPECTED_SHA256,
-        "tokens/pelway.tokens.json のバイト列が 97fb70d の正本から変わっている"
+        "tokens/pelway.tokens.json のバイト列が正本から変わっている"
     );
 }

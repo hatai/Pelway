@@ -10,7 +10,7 @@
 pub enum AvatarKind {
     /// 人。引数はアバターの頭文字。
     Human(String),
-    /// AI 社員。引数はアバターの頭文字。
+    /// AI Bot。引数はアバターの頭文字。
     Ai(String),
 }
 
@@ -30,7 +30,7 @@ impl AvatarKind {
     }
 }
 
-/// AI 社員の在席状態（左の列の表示）。
+/// AI Botの在席状態（左の列の表示）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiPresence {
     /// 待機中。
@@ -41,7 +41,7 @@ pub enum AiPresence {
     WaitingDecision,
 }
 
-/// AI 社員の在席状態に対応する文言キー。
+/// AI Botの在席状態に対応する文言キー。
 #[must_use]
 pub fn ai_presence_key(presence: AiPresence) -> &'static str {
     match presence {
@@ -60,10 +60,10 @@ pub struct PersonDm {
     pub note: Option<String>,
 }
 
-/// DM・AI社員 の1項目。
+/// DM・AI Bot の1項目。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AiDm {
-    /// 表示名（架空の AI 社員）。
+    /// 表示名（架空の AI Bot）。
     pub name: String,
     /// 在席状態。
     pub presence: AiPresence,
@@ -82,7 +82,7 @@ pub struct RailData {
     pub selected_channel: Option<String>,
     /// DM・人 の一覧。
     pub people: Vec<PersonDm>,
-    /// DM・AI社員 の一覧。
+    /// DM・AI Bot の一覧。
     pub ai_staff: Vec<AiDm>,
 }
 
