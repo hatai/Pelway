@@ -16,6 +16,13 @@ hatai の指示「#300, #266, #273, #301, #303 を処理して」を受けた一
 | 2026-11-15 12:52 | #315 | implement | devin | swe-2-high | high | 通常枠（草案全文つきの新スキル導入＋command-team 接続） |
 | 2026-11-15 12:56 | #316 | implement | devin | swe-2-high | high | 通常枠。#273 と同じ取り込み経路のため（retro＋writing-for-agents の取り込みと retro 試行） |
 | 2026-11-15 13:24 | PR #321（worklog 追記の PR） | review | devin | swe-2-high | default | 指揮役自身の PR。奇数→Devin CLI。最初 Codex を誤って立てたが投稿前に停止し、Devin に立て直した（レビュー未投稿のため影響なし） |
+| 2026-11-15 21:40 | #229 | implement | opencode | zai-coding-plan/glm-5.3 | low | 定型・小規模（lockfile 数行＋deny.toml の ignore 削除）。Todo 先頭（hatai が Todo 全件を作業順に並べた指示に従う） |
+| 2026-11-15 21:44 | #228 | implement | opencode | zai-coding-plan/glm-5.3 | low | 定型・小規模（#229 と同型の依存更新＋deny.toml の ignore 削除）。Todo 2 番目 |
+| 2026-11-15 21:49 | #322 | implement | devin | swe-2-high | max | セキュリティ境界（ネットワーク隔離・launcher 境界・連携ID照合）を含む検証・実装のため高 effort。GLM・Devin とも空き→Devin 優先。Todo 4 番目（3 番目 #273 は報告待ちのためスキップ） |
+| 2026-11-15 21:53 | #323 | implement | opencode | zai-coding-plan/glm-5.3 | low | 定型・小規模（文書・UI 文言の置換が中心、識別子変更なし）。Todo 5 番目。GLM 枠 3 本目で満杯 |
+| 2026-11-15 21:57 | #325 | implement | devin | swe-2-high | high | 通常枠（sandbox シェル・テスト・文書の小規模変更、方式は実装担当が選択）。GLM 満杯のため Devin。Todo 6 番目 |
+| 2026-11-15 22:02 | #326 | implement | devin | swe-2-high | high | 通常枠（pelway-http の DataStore 拡張、小〜中）。デモ実装でブロックなし。Todo 7 番目 |
+| 2026-11-15 22:05 | #328 | implement | devin | swe-2-high | max | 「決定」の contract と状態遷移（確定後変更拒否）を新規作成するため高 effort（コア部分の状態遷移に該当）。ブロックなし。Todo 8 番目。Devin 枠 6 本目で満杯 |
 
 スレッド:
 
@@ -31,6 +38,8 @@ hatai の指示「#300, #266, #273, #301, #303 を処理して」を受けた一
 - #273: 実施済みの試行 4 件（実装・設計・grill 2 件）の結果を下の「試行結果の記録」に残した。残る受け入れ条件は調査 1 件（diagnosing-bugs）のみで、入口B（原因が未理解のバグ・インシデント報告）の該当が現時点で無いため報告を待つ。#273 は全条件が満たされるまで open のまま
 - #213 の試行記録（起動時の版・解決先・可読性）が worklog に落ちていなかったため、実装スレッドの最初の報告から issue-213.md に補遺として転記した（本 PR に含む）
 - ほかのセッションの担当（#256 の収尾、#133 の hatai 待ち）には手を触れていない
+- #229（2026-11-15 21:40 割り当て）: 実装スレッドが最新版を確認し、slint は 1.18.1 のまま上流更新が無く受け入れ条件を満たせないとして needs-human を付けた（[実装者メモ](https://github.com/hatai/Pelway/issues/229#issuecomment-6895213259)）。上流リリース待ちのため hatai の判断待ち（待つか別の対処か）。`agent:working` は残したまま GLM 枠 1 を消費し続ける
+- ボード不整合（2026-11-15 22:10 発見）: spec「状態の表し方」と runbook の導出規則 2 は Status に「Needs human」列を想定しているが、実ボードの Status フィールドの選択肢に「Needs human」が無い（Ready to merge / Changes requested / Backlog / Todo / Working / In review / Done のみ）。#229 は needs-human ラベル＋Working で運用。列の追加は hatai の判断待ち
 
 ## 試行結果の記録（Issue #273）
 
