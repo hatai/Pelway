@@ -11,3 +11,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の「`pr:` 行内の対象 head が `headRefOid` と一致する」の表記は新定義（pr: 行の head＝メモコミット、メモの対象 head＝その親）と語彙がずれるため、「行内の head が `headRefOid` と一致し、メモの対象 head がその親であること」への更新が要る
 
 使ったスキル: implement-issue, improve-skills, write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: 000d274ba44e276b3bda9933d7b8b95317def7de
+
+1. 詰まった箇所: なし（round 1 の must-fix 1 件への対応のみ）
+2. 曖昧だった文: 「初回は Draft PR の作成が手順 7 のため PR 番号がまだ無く、このコマンドは実行できない」（PR #349 の must-fix レビュー本文）
+3. 仮定と解釈: レビュー例示の後半（push 後の `git rev-parse HEAD` は resign がローカル ref を付け替えるため `headRefOid` と同じ値になる）をそのまま採用し、初回は手順 7 の後にメモコミットを行うか `rev-parse HEAD` を使う、の一文を手順 6 に足した。選ばなかった解釈: 手順 5〜7 の順序自体を入れ替える案（手順 7 が「push したあと」を前提としており影響が大きいため）
+4. 足りなかった情報・検証手段: なし（must-fix の文面が修正案を例示していた）
+5. 改善案: なし（round 1 の改善案に追加なし。grokbot-runbook.md:220 の語彙ずれはレビュー nit 指摘の通りで、本 PR の対象外）
+
+使ったスキル: implement-issue, improve-skills（must-fix は PR #349 のレビュー本文と突き合わせて確認）
