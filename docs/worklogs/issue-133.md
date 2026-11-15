@@ -104,3 +104,12 @@
 - 足りなかった情報・検証手段: なし（直接 toolchain で ACP 関連試験 21 件 pass 含め全緑、rustfmt・clippy -D warnings クリーン）。mise run verify は環境起因（/home ro-bind）で file-tool プラグインのみ失敗の既知事項あり、CI に委ねる。
 - 改善の提案: 相関表は許可要求 1 回で消費する前提のため、許可を求めない tool_call_update が多い長時間 session では上限（512）到達で正当 session も失敗しうる — 必要なら「直近 N 件のリングバッファ」への変更を検討する（現行は fail closed 側で安全）。
 - 対象 head: このメモを含むコミットの親（round 7 must-fix 適用の実装コミット）
+
+### round 13
+
+- 詰まったところ: Codex 最終検証の must-fix 1 件への対応。`bind_in_process` は `#[doc(hidden)]` でも通常ビルドに含まれる `pub` API で、中継タスク経由で外部 transport に繋げば任意の連携 ID 付き transport を偽造できた → `#[cfg(test)]` ゲートで通常ビルドから除去し、統合試験を `tests/acp_session.rs` からクレート内の `src/acp/session_tests.rs`（`acp` モジュールの `#[cfg(test)]` サブモジュール）へ移した。`bind`・`FrameLimitedRead`・`MAX_FRAME_BYTES` は通常ビルドで未使用になるため `#[allow(dead_code)]` を付けて型検査は維持（後続 Issue の launcher シーム）。
+- 曖昧だった表現: 「cfg(test) ゲートかテスト専用クレート」— tests/ の統合試験はクレート外部のため cfg(test) が効かず、試験をクレート内モジュールに移す形で対応した（テスト専用クレート化は二重依存を要するため不採用）。
+- 仮定・解釈: nit 2 件も適用。(a) キュー上限のコメント「frame 層は SDK 内部のためデコード前上限は掛けられない」は `FrameLimitedRead` 実装後の記述と矛盾していたため修正。(b) 待機解除試験は送信側が受信側の `recv()` 待機を同期していなかったため、double が prompt 応答後に 100ms 待ってから送信する形にした（完全な同期は跨タスクの時序が制御不能なため遅延で代替。sentinel が無ければ待機が解除されず試験は失敗方向に確実）。
+- 足りなかった情報・検証手段: なし（`cargo test -p pelway-gateway --features acp` で lib 29 件含め全緑、`cargo check` は acp 有効/無効ともクリーン、rustfmt・clippy -D warnings 通過）。
+- 改善の提案: launcher 実装時に `#[allow(dead_code)]` 3 箇所（`bind`・`FrameLimitedRead`・`MAX_FRAME_BYTES`）を外し、`bind` が唯一の本番構築経路であることを接続側から検査する試験を足す。
+- 対象 head: このメモを含むコミットの親（最終検証 must-fix 適用の実装コミット）

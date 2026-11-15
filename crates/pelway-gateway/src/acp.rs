@@ -64,6 +64,9 @@ const UPDATE_QUEUE_DEPTH: usize = 256;
 const MAX_UPDATE_BYTES: usize = 2 * 1024 * 1024;
 /// 受信する JSON-RPC frame（改行区切りの 1 message）の最大バイト数。
 /// SDK のデコード前に byte 層で強制する。
+// `bind` 経路（後続 Issue の launcher シーム）でのみ参照されるため、
+// launcher 実装まで通常ビルドでは未使用。
+#[allow(dead_code)]
 const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
 
 /// 累積する agent テキストの上限（byte）。超過は資源枯渇として扱う。
@@ -527,12 +530,16 @@ impl AcpAudit for Mutex<Vec<AcpAuditEvent>> {
 /// にする受信側ラッパ。SDK が1行をデコードする前（byte 層）で上限を強制し、
 /// 巨大 frame の解析メモリを抑える。超過は接続失敗として扱われる
 /// （[`AcpError::Disconnected`] または [`AcpError::Protocol`]）。
+// `bind` 経路（後続 Issue の launcher シーム）でのみ使われるため、
+// launcher 実装まで通常ビルドでは未使用。
+#[allow(dead_code)]
 struct FrameLimitedRead<R> {
     inner: R,
     /// 直前の改行以降に読んだバイト数（現在の frame の累計長）。
     frame_len: usize,
 }
 
+#[allow(dead_code)]
 impl<R> FrameLimitedRead<R> {
     fn new(inner: R) -> Self {
         Self {
@@ -592,7 +599,10 @@ impl IsolatedTransport {
     /// 結び付けて渡す。本 Issue の範囲では launcher はまだ実装されて
     /// いないため本番の構築経路はクレート内専用（後続 Issue で launcher
     /// 実装時に公開面を決める）。クレート外から構築できるのは
-    /// [`Self::bind_in_process`]（in-memory 専用）だけ。
+    /// 試験用の `bind_in_process`（`#[cfg(test)]` で通常ビルドに存在しない）
+    /// だけ。
+    // launcher が実装されるまで通常ビルドでは未使用（型検査は維持する）。
+    #[allow(dead_code)]
     pub(crate) fn bind<R, W>(read: R, write: W, integration: impl Into<String>) -> Self
     where
         R: AsyncRead + Send + Unpin + 'static,
@@ -607,14 +617,12 @@ impl IsolatedTransport {
         }
     }
 
-    /// 試験用の in-process 構築経路。`DuplexStream` は同一プロセス内の
-    /// メモリチャネルであり外部エージェントのプロセス境界をまたがない
-    /// ため、この経路で本番の隔離境界を偽造することはできない（子
-    /// プロセスの stdio・socket・file は型で受け付けない）。連携 ID の
-    /// 結び付けは本番経路と同じ形で練習する。
-    #[doc(hidden)]
+    /// 試験用の in-process 構築経路。`#[cfg(test)]` のため通常ビルドには
+    /// 存在せず、本番コード（中継タスク経由の偽造を含む）からは構築
+    /// できない。連携 ID の結び付けは本番経路と同じ形で練習する。
+    #[cfg(test)]
     #[must_use]
-    pub fn bind_in_process(
+    pub(crate) fn bind_in_process(
         stream: tokio::io::DuplexStream,
         integration: impl Into<String>,
     ) -> Self {
@@ -697,8 +705,9 @@ impl AcpClient {
         // 合計バイト数にも上限を持たせ（通知の JSON 表現サイズで計量）、
         // 超過した通知は捨てて overflow を立て、wait_until_idle で
         // session を失敗・停止させる（無制限蓄積によるメモリ枯渇の防止）。
-        // JSON-RPC の frame 層は SDK 内部のためデコード前のサイズ制限は
-        // 掛けられず、通知単位の計量で代替する。
+        // 1 message（改行区切りの JSON-RPC frame）の上限は transport
+        // 側の `FrameLimitedRead` が SDK デコード前に強制する。ここでは
+        // デコード後の通知を件数・合計バイト数でさらに有界にする。
         let (update_tx, mut update_rx) = channel(UPDATE_QUEUE_DEPTH);
         let overflow = Arc::new(AtomicBool::new(false));
         let pending_bytes = Arc::new(AtomicUsize::new(0));
@@ -1127,6 +1136,9 @@ async fn wait_until_idle(
         }
     }
 }
+
+#[cfg(test)]
+mod session_tests;
 
 #[cfg(test)]
 mod tests {

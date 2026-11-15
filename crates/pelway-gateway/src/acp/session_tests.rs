@@ -4,17 +4,15 @@
 //! grant 判定・段階の fail closed・once 系限定・cancel・監査記録を確かめる。
 //! 実エージェント（codex-acp 等）との接続は対象外（質問票 R1-Q2(b)・R1-Q7(a)）。
 
-#![cfg(feature = "acp")]
-
 use std::sync::{Arc, Mutex};
 
-use agent_client_protocol::v2::{ConnectionTo, Responder, schema};
-use agent_client_protocol::{Agent, ByteStreams, Client, Result};
-use pelway_gateway::acp::{
+use crate::acp::{
     AcpAuditEvent, AcpClient, AcpError, ApprovalEvidence, ExportEnvelope, GrantRegistry,
     IsolatedTransport, PermissionAnswer, PermissionAsk, PermissionDecider, PermissionDecision,
 };
-use pelway_gateway::tier::{ActionTier, TierDeclarations};
+use crate::tier::{ActionTier, TierDeclarations};
+use agent_client_protocol::v2::{ConnectionTo, Responder, schema};
+use agent_client_protocol::{Agent, ByteStreams, Client, Result};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Agent double の振る舞い指定。
@@ -125,8 +123,10 @@ impl Double {
         }
 
         if let Some(bytes) = self.spec.late_giant_bytes {
-            // クライアントが idle 待ちに入った後に、frame 上限未満・滞留
-            // byte 上限超過の単発通知を送り、受信側の待機解除を確かめる。
+            // クライアントが idle 待ち（`recv()` 待機）に入るまで待って
+            // から、frame 上限未満・滞留 byte 上限超過の単発通知を送り、
+            // 受信側の待機解除を確かめる。
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             send_update(
                 &connection,
                 &session_id,
@@ -403,7 +403,7 @@ fn grants() -> GrantRegistry {
     registry
 }
 
-fn grant(registry: &GrantRegistry) -> pelway_gateway::acp::AgentGrant {
+fn grant(registry: &GrantRegistry) -> crate::acp::AgentGrant {
     registry
         .require("acp-double", "acme/alice", "acp.session")
         .expect("grant should exist")
