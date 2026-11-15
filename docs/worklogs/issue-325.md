@@ -40,3 +40,15 @@
 - `mise run` は毎回 rustup が channel manifest を取りに行くため、sandbox 内の全コマンドで DNS が必須。今回の resolv.conf bind でまとめて解消される
 - 仮定: `/etc/resolv.conf` が実ファイルのホストでは `/etc` の ro-bind に含まれるため今回のコードパスは発火しない（`[[ -L ]]` ガード）
 - `~/.cache/agent-sandbox` はホスト FS 上に実在する新規ディレクトリ。sandbox を出た後も残るが、内容は mbx/hk/mise/pkl のキャッシュのみで秘匿情報は含まない
+
+## 実装者メモ（round 2）
+
+対象 head: 1fb4205（must-fix 対応コミット・署名付け替え後）
+
+1. 詰まった箇所: `docs/dev-environment.md` の「確認手順の結果（記録欄）」— round 1 でホスト通し実行をしていない新規検査を「合格」・未来日付（2026-11-18、コミットは 2026-11-15）で書いてしまい、claude レビューで must-fix になった。実態（ネスト sandbox で個別確認済み・ホスト通し未実施）と実日付に修正
+2. 曖昧だった文: 「`docs/dev-environment.md` の「実装担当の sandbox（agent-sandbox）」と「mr boxington（mbx）について」の記載が実態と合う → 差分で確認」（Issue #325 受け入れ条件 5）— 「記載」に記録欄の実績行が含まれるかが曖昧で、実績欄に検査の新規内容を入れるかの判断が必要だった
+3. 仮定と解釈: round 1 では記録欄を実績欄と読み、新規検査の記録を入れてよいと解釈した。ただし「合格」と確定日を書くのはホスト通し実行の記録があってからというのが正しい扱い（レビュー指摘で確定）。ホスト通し実行は実装スレッドから起こせないため hatai に依頼中
+4. 足りなかった情報・検証手段: ホストでの `bash scripts/tests/agent-sandbox.test.sh` 通し実行の結果（sandbox 内では `~/.t3/worktrees`・`$HOME` 直下にフィクスチャを作れず、CI は bwrap 不在なら skip する）
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 5・6 の間か止まり方の節に「記録欄・実績表には実行した事実だけを書く。未実施の検査を『合格』と書かない」という一文を足す（今回の round 1 で実際に踏んだ形）
+
+使ったスキル: implement-issue
