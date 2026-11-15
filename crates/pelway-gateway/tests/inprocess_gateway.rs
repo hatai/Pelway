@@ -189,11 +189,14 @@ async fn call_tool_passes_arguments_and_returns_text() {
         .await
         .expect("宣言済みツールは呼べる");
     assert!(!outcome.is_error);
-    // serde_json::Map は辞書順（BTreeMap）で並ぶため、引数の順序は key 名順。
-    assert_eq!(
-        outcome.text,
-        vec!["called post_message args(body=\"こんにちは\",channel=\"#general\")".to_owned()]
-    );
+    // 引数がサーバーへそのまま通る。key の並びは serde_json::Map の内部順序
+    // 依存（BTreeMap か preserve_order かは feature 構成で変わる）のため、
+    // 内容の含有で確かめる。
+    assert_eq!(outcome.text.len(), 1);
+    let echo = &outcome.text[0];
+    assert!(echo.starts_with("called post_message args("), "{echo}");
+    assert!(echo.contains("body=\"こんにちは\""), "{echo}");
+    assert!(echo.contains("channel=\"#general\""), "{echo}");
 }
 
 // 受け入れ条件（#96）: annotations は手がかりとして読み取るが、段階の判定には

@@ -108,14 +108,14 @@
 7. **transport の確定**：stdio 確定か、リモートランタイム要件の有無。
 8. **MCP サーバー構成**：`session/new` のクライアント提供 `mcpServers` を使うか、ランタイム内蔵の MCP 構成にするか（段階宣言・依存度に影響）。
 9. **永続化**：session ↔ task の永続化と `replayFrom`・`session/list`・`session/delete` の Pelway task 一覧との関係。
-10. **ライブラリ**：Rust schema crate（`agent-client-protocol`）の v2 対応状況（未確認）。
+10. **ライブラリ**：Rust SDK crate（`agent-client-protocol`、rust-sdk v5.2.0）は `unstable_protocol_v2` feature 後ろに draft-v2 の型付き API（`Client.v2()`/`Agent.v2()`/`Proxy.v2()`）を提供する（確認済み、#133）。crate 版を pin し、feature flag で囲って使う。
 11. **記録形式**：採用決定を `docs/adr/` に記録するか。
 
 ## 未確認事項
 
 - ACP v2 の安定化時期と `schema.unstable.json` の内容。
 - ACP の Streamable HTTP transport の仕様化状況（RFD 段階）。
-- Rust schema crate（`agent-client-protocol`）の v2 対応状況。
+- ~~Rust schema crate（`agent-client-protocol`）の v2 対応状況~~ → 確認済み（未決の実装論点 10 を参照）。
 - AG-UI に run の取消経路があるか（仕様文書では見つからず、HTTP 切断で扱う想定と推測）。
 - OpenBot・Buzz が各プロトコルのどこまでを実装しているか（本評価はプロトコル仕様のみを対象とし、実装の準拠度は見ていない）。
 
