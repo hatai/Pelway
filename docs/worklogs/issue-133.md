@@ -77,3 +77,12 @@
 - 足りなかった情報・検証手段: Issue 原文（案a・案ii の定義）と `mise run verify`・hk pre-commit・push が環境障害で不可。代替として toolchain 直実行で ACP 試験 11 件 pass・rustfmt・clippy -D warnings を確認。commit/push は復旧待ち。
 - 改善の提案: `docs/dev-environment.md` に「mise が rust 解決で network を要し、DNS 不通時は toolchain 直実行で `cargo test`/`rustfmt`/`clippy` が回せる（`~/.rustup/toolchains/<ver>/bin` を PATH 先頭に）」の退避手順を足す。
 - 対象 head: 43fcbbf（決3 反映の実装コミット。このメモを含むコミットの親。署名付け替え前は 2ad1f38）
+
+### round 10
+
+- 詰まったところ: Codex round 5 の must-fix 4 件への対応。(1) `assume_isolated` を公開にしたままでは任意コードが隔離境界を偽造できる → `IsolatedTransport` に launcher が結び付けた連携 ID を持たせ、構築はクレート内専用の `bind`（信頼済み launcher 用、後続 Issue で公開面を決める）＋ doc(hidden) の試験用 `bind_for_test` に分けた。(2) `initialize.info.name` は自己申告で認証にならない → 接続前に transport 束縛の連携 ID と grant を照合し、不一致なら接続自体を行わず `IntegrationMismatch`。initialize 名の照合は廃止。(3) キューは件数のみ → 通知の JSON 表現サイズで合計バイトも計量（上限 4 MiB）、超過は通知を捨てて overflow、失敗時は agent へ `session/cancel` を送り close を試行。frame 層は SDK 内部のためデコード前の上限は掛けられず、通知単位の計量で代替。(4) 証跡なしでも許可できた → `AllowOnce` は完全な証跡（指名承認者・期限・snapshot hash・開始資格）必須、`outcome_unknown` では絶対に許可しない不変条件を `answer_permission` に追加（監査 `permission_denied_incomplete_evidence`）。
+- 曖昧だった表現: 「信頼済み launcher のみ構築可」— launcher 実装は後続 Issue のため、本番構築経路を `pub(crate)` に閉じる形で「このクレート外の任意コードは構築できない」を担保した。
+- 仮定・解釈: 証跡なし・`outcome_unknown` での拒否は once 系の `reject_once` を優先（無ければ cancel）。byte 上限の試験は 5 MiB の単発通知で overflow を決定的に再現。nit 2 件は試験として追加（`outcome_unknown`・証跡なし許可・空操作名の fail closed、計 15 試験）。
+- 足りなかった情報・検証手段: JSON-RPC frame 層へのデコード前サイズ制限は SDK が口を出さないため未実施（doc に記載）。ローカル `mise run verify` は sandbox の /home ro-bind による `file-tool` プラグイン試験失敗のみ（コード非起因、CI で確認）。
+- 改善の提案: launcher 実装時に `IsolatedTransport::bind` を呼ぶ唯一の本番経路を task container 起動コードとして確立し、`bind_for_test` を `cfg` で試験ビルド限定にする。
+- 対象 head: このメモを含むコミットの親（round 5 must-fix 適用の実装コミット）

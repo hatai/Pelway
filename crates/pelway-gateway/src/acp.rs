@@ -35,7 +35,7 @@
 //! 集約する設計（限定 MCP サーバー）は後続 Issue の責務とする。
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::{MaybeUndefined, ProtocolVersion};
@@ -48,6 +48,8 @@ use crate::tier::TierDeclarations;
 /// `session/update` の滞留を許す深さ。超過は資源枯渇として扱い session を
 /// 失敗させる（無制限キューによるメモリ枯渇の防止）。
 const UPDATE_QUEUE_DEPTH: usize = 256;
+/// 通知キューに滞留できる合計バイト数の上限（通知の JSON 表現サイズの和）。
+const MAX_UPDATE_BYTES: usize = 4 * 1024 * 1024;
 
 /// 累積する agent テキストの上限（byte）。超過は資源枯渇として扱う。
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
@@ -333,6 +335,12 @@ pub enum AcpAuditEvent {
         /// 操作名。
         operation: String,
     },
+    /// 承認証跡が不完全、または `outcome_unknown` での許可を fail closed
+    /// で止めた（承認なしの許可・不明な結果への許可は認めない）。
+    PermissionDeniedIncompleteEvidence {
+        /// 操作名。
+        operation: String,
+    },
     /// 許可要求への応答。
     PermissionResolved {
         /// 応答の種別（`allow_once`/`reject_once`/`cancelled`）。
@@ -362,6 +370,9 @@ impl AcpAuditEvent {
             Self::PromptSent => "prompt_sent",
             Self::PermissionRequested { .. } => "permission_requested",
             Self::PermissionDeniedUndeclared { .. } => "permission_denied_undeclared",
+            Self::PermissionDeniedIncompleteEvidence { .. } => {
+                "permission_denied_incomplete_evidence"
+            }
             Self::PermissionResolved { .. } => "permission_resolved",
             Self::CancelSent { .. } => "cancel_sent",
             Self::SessionClosed { .. } => "session_closed",
@@ -383,19 +394,38 @@ impl AcpAudit for Mutex<Vec<AcpAuditEvent>> {
 }
 
 /// 呼び出し元の task container で隔離が強制されたエージェントへの
-/// transport。フィールドは非公開で、構築は [`Self::assume_isolated`]
-/// だけができる（doc 10 の runner 境界を型の確認点として残す）。
-pub struct IsolatedTransport<T>(T);
+/// transport。隔離を実施した信頼済み launcher だけが、接続先に結び付ける
+/// 連携 ID と一緒に構築する。連携 ID は launcher が保証する値で、
+/// エージェント自身の申告（`initialize` の name）とは独立に grant と
+/// 照合される。
+pub struct IsolatedTransport<T> {
+    transport: T,
+    /// launcher が transport に結び付けた連携 ID。grant の `integration`
+    /// と照合し、別連携宛の grant を別エージェントへ誤配送しない。
+    integration: String,
+}
 
 impl<T> IsolatedTransport<T> {
-    /// 隔離済みであることを呼び出し元が確認して包む。task container が
-    /// 環境変数・cwd・ファイルシステム・ネットワークを制限した状態で
-    /// エージェントを起動し、その stdio 相当の transport のみを渡すこと。
-    /// 未隔離のエージェントを包むと `ExportEnvelope`・permission・
-    /// `integration` 照合のすべての境界が迂回される。
+    /// 隔離を実施した launcher 専用の構築子。task container が環境変数・
+    /// cwd・ファイルシステム・ネットワークを制限した状態でエージェントを
+    /// 起動し、その stdio 相当の transport に連携 ID を結び付けて渡す。
+    /// 本 Issue の範囲では launcher はまだ実装されておらず、本番の構築
+    /// 経路はクレート内専用とする（後続 Issue で launcher 実装時に
+    /// 公開面を決める）。公開の構築経路は [`Self::bind_for_test`] のみ。
+    pub(crate) fn bind(transport: T, integration: impl Into<String>) -> Self {
+        Self {
+            transport,
+            integration: integration.into(),
+        }
+    }
+
+    /// 試験用の構築経路。`bind` と同じく連携 ID を結び付けるが、隔離を
+    /// 実施しない transport（in-process double 等）を包める。
+    /// 本番コードからは呼ばないこと。
+    #[doc(hidden)]
     #[must_use]
-    pub fn assume_isolated(transport: T) -> Self {
-        Self(transport)
+    pub fn bind_for_test(transport: T, integration: impl Into<String>) -> Self {
+        Self::bind(transport, integration)
     }
 }
 
@@ -438,11 +468,12 @@ impl AcpClient {
     /// このアダプタはエージェントのプロセスを起動しない。起動・環境変数・
     /// cwd・ファイルシステム・ネットワークの隔離は呼び出し元（task
     /// container、doc 10 の runner 境界）が transport を作る時点で強制
-    /// する前提。引数が [`IsolatedTransport`] なのは「隔離を確認した
-    /// transport だけが渡せる」ことを型で表すため。接続後は `initialize`
-    /// で返ったエージェント名を grant の連携と照合し、一致しなければ
-    /// prompt を送らず拒否する（別連携宛の grant で別エージェントへ
-    /// 送る誤配送の防止）。
+    /// する前提。引数が [`IsolatedTransport`] なのは「隔離を実施した
+    /// launcher が連携 ID を結び付けた transport だけが渡せる」ことを
+    /// 型で表すため。接続前に、transport に結び付けられた連携 ID が
+    /// grant の連携と一致するか照合し、一致しなければ何も送らず拒否する
+    /// （`initialize` の name はエージェント自身の申告値で認証になら
+    /// ないため、launcher が結び付けた ID で照合する）。
     pub async fn run_prompt(
         &self,
         grant: &AgentGrant,
@@ -455,11 +486,28 @@ impl AcpClient {
             account: grant.account.clone(),
             operation: grant.operation.clone(),
         });
-        // エージェントからの更新通知を溜める有界キュー。満杯なら通知を
-        // 捨てて overflow を立て、wait_until_idle で session を失敗させる
-        // （無制限蓄積によるメモリ枯渇の防止）。
+        // grant の連携と transport に結び付けられた連携 ID の照合。
+        // 一致しなければ接続自体を行わない（別連携宛の grant を別
+        // エージェントへ誤配送するのを防ぐ）。
+        if transport.integration != grant.integration {
+            self.audit.record(AcpAuditEvent::IdentityRejected {
+                expected: grant.integration.clone(),
+                actual: transport.integration.clone(),
+            });
+            return Err(AcpError::IntegrationMismatch {
+                expected: grant.integration.clone(),
+                actual: transport.integration.clone(),
+            });
+        }
+        // エージェントからの更新通知を溜める有界キュー。件数だけでなく
+        // 合計バイト数にも上限を持たせ（通知の JSON 表現サイズで計量）、
+        // 超過した通知は捨てて overflow を立て、wait_until_idle で
+        // session を失敗・停止させる（無制限蓄積によるメモリ枯渇の防止）。
+        // JSON-RPC の frame 層は SDK 内部のためデコード前のサイズ制限は
+        // 掛けられず、通知単位の計量で代替する。
         let (update_tx, mut update_rx) = channel(UPDATE_QUEUE_DEPTH);
         let overflow = Arc::new(AtomicBool::new(false));
+        let pending_bytes = Arc::new(AtomicUsize::new(0));
         // toolCallId → 操作名の相関表。許可要求の subject が名前を持たない
         // 場合に、先行する tool_call_update の `name` で引く（R1-Q5 案aの
         // 「toolCallId/名前は判定キーへの相関にだけ使う」）。
@@ -467,7 +515,6 @@ impl AcpClient {
         let declarations = self.declarations.clone();
         let audit = Arc::clone(&self.audit);
         let envelope_body = envelope.body().to_owned();
-        let expected_integration = grant.integration.clone();
 
         Client
             .v2()
@@ -476,6 +523,7 @@ impl AcpClient {
                 {
                     let seen_tools = Arc::clone(&seen_tools);
                     let overflow = Arc::clone(&overflow);
+                    let pending_bytes = Arc::clone(&pending_bytes);
                     async move |notification: schema::UpdateSessionNotification,
                                 _connection: ConnectionTo<Agent>| {
                         if let schema::SessionUpdate::ToolCallUpdate(tool_call) =
@@ -487,7 +535,15 @@ impl AcpClient {
                                 .expect("tool correlation poisoned")
                                 .insert(tool_call.tool_call_id.0.to_string(), name.clone());
                         }
-                        if update_tx.try_send(notification).is_err() {
+                        // 通知の JSON 表現サイズでキュー滞留量を計量する。
+                        let size = serde_json::to_vec(&notification)
+                            .map(|bytes| bytes.len())
+                            .unwrap_or(usize::MAX);
+                        let pending = pending_bytes.fetch_add(size, Ordering::Relaxed) + size;
+                        if pending > MAX_UPDATE_BYTES
+                            || update_tx.try_send((notification, size)).is_err()
+                        {
+                            pending_bytes.fetch_sub(size, Ordering::Relaxed);
                             overflow.store(true, Ordering::Relaxed);
                         }
                         Ok(())
@@ -510,7 +566,7 @@ impl AcpClient {
                 },
                 agent_client_protocol::on_receive_request!(),
             )
-            .connect_with(transport.0, async move |connection| {
+            .connect_with(transport.transport, async move |connection| {
                 // AcpError の種別（GrantDenied 系・NoSessionCapability・
                 // Disconnected）を保ったまま外へ出すため、内側の結果を
                 // Result<_, AcpError> で包む。SDK の Error は Protocol に詰める。
@@ -519,8 +575,8 @@ impl AcpClient {
                         &connection,
                         &envelope_body,
                         &mut update_rx,
-                        &expected_integration,
                         &overflow,
+                        &pending_bytes,
                     )
                     .await
                 {
@@ -541,9 +597,9 @@ impl AcpClient {
         &self,
         connection: &ConnectionTo<Agent>,
         envelope_body: &str,
-        update_rx: &mut Receiver<schema::UpdateSessionNotification>,
-        expected_integration: &str,
+        update_rx: &mut Receiver<(schema::UpdateSessionNotification, usize)>,
         overflow: &AtomicBool,
+        pending_bytes: &AtomicUsize,
     ) -> Result<SessionReport, AcpError> {
         let initialize = connection
             .send_request(schema::InitializeRequest::new(
@@ -554,19 +610,6 @@ impl AcpClient {
             .await?;
         if initialize.capabilities.session.is_none() {
             return Err(AcpError::NoSessionCapability);
-        }
-        // grant と接続先を結び付ける: initialize で返ったエージェント名が
-        // grant の連携と一致しなければ、envelope を別エージェントへ誤配送
-        // しないよう session 開始前に止める。
-        if initialize.info.name != expected_integration {
-            self.audit.record(AcpAuditEvent::IdentityRejected {
-                expected: expected_integration.to_owned(),
-                actual: initialize.info.name.clone(),
-            });
-            return Err(AcpError::IntegrationMismatch {
-                expected: expected_integration.to_owned(),
-                actual: initialize.info.name,
-            });
         }
         self.audit.record(AcpAuditEvent::Initialized {
             agent: initialize.info.name.clone(),
@@ -583,12 +626,32 @@ impl AcpClient {
         });
         session.send_prompt(envelope_body).block_task().await?;
         self.audit.record(AcpAuditEvent::PromptSent);
-        let mut report = wait_until_idle(update_rx, &session_id, overflow).await?;
-        report.session_id = session_id.clone();
-        session.close().block_task().await?;
-        self.audit
-            .record(AcpAuditEvent::SessionClosed { session_id });
-        Ok(report)
+        match wait_until_idle(update_rx, &session_id, overflow, pending_bytes).await {
+            Ok(mut report) => {
+                report.session_id = session_id.clone();
+                session.close().block_task().await?;
+                self.audit
+                    .record(AcpAuditEvent::SessionClosed { session_id });
+                Ok(report)
+            }
+            Err(error) => {
+                // リソース上限違反: agent に cancel を送って前景作業を
+                // 止め、session close を試みてから失敗を返す。エラーだけ
+                // 返して agent を動かし続けさせない。
+                let _ = connection.send_notification(schema::CancelSessionNotification::new(
+                    session.session_id().clone(),
+                ));
+                self.audit.record(AcpAuditEvent::CancelSent {
+                    session_id: session_id.clone(),
+                });
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    session.close().block_task(),
+                )
+                .await;
+                Err(error)
+            }
+        }
     }
 }
 
@@ -621,9 +684,24 @@ fn answer_permission(
     let decision = decider.decide(PermissionAsk {
         session_id: request.session_id.0.to_string(),
         tool_call_id,
-        operation,
+        operation: operation.clone(),
         title: request.title.clone(),
     });
+    // 不変条件（決3・案ii）: 許可には完全な承認証跡（指名承認者・期限・
+    // snapshot hash・開始資格）が必須。証跡が欠ける、または
+    // `outcome_unknown`（人の決定結果が不明）なら許可を選ばず
+    // fail closed で止める。
+    if decision.answer == PermissionAnswer::AllowOnce {
+        let evidence = &decision.evidence;
+        let complete = evidence.decider.is_some()
+            && evidence.expires_at.is_some()
+            && evidence.snapshot_hash.is_some()
+            && evidence.eligibility.is_some();
+        if evidence.outcome_unknown || !complete {
+            audit.record(AcpAuditEvent::PermissionDeniedIncompleteEvidence { operation });
+            return reject_or_cancel(request, connection, audit);
+        }
+    }
     let wanted = match decision.answer {
         PermissionAnswer::AllowOnce => schema::PermissionOptionKind::AllowOnce,
         PermissionAnswer::RejectOnce => schema::PermissionOptionKind::RejectOnce,
@@ -747,9 +825,10 @@ fn cancel(
 /// `running`/`requires_action`/未知の状態はすべて「作業中」として扱い、
 /// 未知の状態を idle と誤認しない（SDK の quickstart の注意どおり）。
 async fn wait_until_idle(
-    updates: &mut Receiver<schema::UpdateSessionNotification>,
+    updates: &mut Receiver<(schema::UpdateSessionNotification, usize)>,
     session_id: &str,
     overflow: &AtomicBool,
+    pending_bytes: &AtomicUsize,
 ) -> Result<SessionReport, AcpError> {
     let mut text = String::new();
     let mut observed_active = false;
@@ -758,7 +837,8 @@ async fn wait_until_idle(
         if overflow.load(Ordering::Relaxed) {
             return Err(AcpError::UpdateOverflow);
         }
-        let notification = updates.recv().await.ok_or(AcpError::Disconnected)?;
+        let (notification, size) = updates.recv().await.ok_or(AcpError::Disconnected)?;
+        pending_bytes.fetch_sub(size, Ordering::Relaxed);
         if notification.session_id.0.as_ref() != session_id {
             continue;
         }

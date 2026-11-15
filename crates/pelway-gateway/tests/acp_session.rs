@@ -29,6 +29,9 @@ struct DoubleSpec {
     agent_name: Option<&'static str>,
     /// prompt への応答の前にこの数の小さい update を連投する（キュー溢れの確認）。
     flood_updates: Option<usize>,
+    /// prompt への応答の前にこのバイト数の巨大 update を 1 本送る
+    /// （キューのバイト上限の確認）。
+    flood_bytes: Option<usize>,
     /// idle の前に 1 本の巨大テキストを送る（出力上限の確認）。
     huge_output: bool,
 }
@@ -275,6 +278,16 @@ fn spawn_double(
                             )?;
                         }
                     }
+                    if let Some(bytes) = double.spec.flood_bytes {
+                        send_update(
+                            &connection,
+                            &request.session_id.to_string(),
+                            schema::SessionUpdate::AgentMessage(
+                                schema::AgentMessage::new(schema::MessageId::new("flood-big"))
+                                    .content(vec!["x".repeat(bytes).into()]),
+                            ),
+                        )?;
+                    }
                     responder.respond(schema::PromptResponse::new(schema::MessageId::new(
                         "user-msg-1",
                     )))?;
@@ -341,9 +354,25 @@ struct RecordingDecider {
     decision: PermissionDecision,
 }
 
+/// 完全な承認証跡（許可を出せる試験用の値）。
+fn full_evidence() -> ApprovalEvidence {
+    ApprovalEvidence {
+        decider: Some("member:test-approver".to_owned()),
+        expires_at: Some("2030-01-01T00:00:00Z".to_owned()),
+        snapshot_hash: Some("sha256:test".to_owned()),
+        eligibility: Some("role:test".to_owned()),
+        outcome_unknown: false,
+    }
+}
+
 impl RecordingDecider {
+    /// 指定の応答を完全な証跡付きで返す decider。AllowOnce は証跡必須の
+    /// ため、証跡なしの許可を試したい場合は `decided` で空の証跡を渡す。
     fn answered(answer: PermissionAnswer) -> Self {
-        Self::decided(PermissionDecision::answered(answer))
+        Self::decided(PermissionDecision {
+            answer,
+            evidence: full_evidence(),
+        })
     }
 
     fn decided(decision: PermissionDecision) -> Self {
@@ -392,7 +421,7 @@ async fn roundtrip_echo_session() {
     let report = client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::assume_isolated(transport),
+            IsolatedTransport::bind_for_test(transport, "acp-double"),
             &ExportEnvelope::new("レビューして"),
             Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
         )
@@ -437,7 +466,7 @@ async fn permission_allow_once_for_declared_tool() {
     let report = client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::assume_isolated(transport),
+            IsolatedTransport::bind_for_test(transport, "acp-double"),
             &ExportEnvelope::new("post it"),
             decider.clone(),
         )
@@ -483,7 +512,7 @@ async fn undeclared_operation_is_rejected_without_decider() {
     client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::assume_isolated(transport),
+            IsolatedTransport::bind_for_test(transport, "acp-double"),
             &ExportEnvelope::new("purge it"),
             decider.clone(),
         )
@@ -527,7 +556,7 @@ async fn always_options_are_never_selected() {
     client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::assume_isolated(transport),
+            IsolatedTransport::bind_for_test(transport, "acp-double"),
             &ExportEnvelope::new("post it"),
             decider,
         )
@@ -565,7 +594,7 @@ async fn cancel_decision_cancels_session() {
     let report = client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::assume_isolated(transport),
+            IsolatedTransport::bind_for_test(transport, "acp-double"),
             &ExportEnvelope::new("post it"),
             decider,
         )
@@ -581,14 +610,12 @@ async fn cancel_decision_cancels_session() {
     server.abort();
 }
 
-// 受け入れ条件: 接続先エージェントの initialize 名が grant の連携と一致
-// しなければ、session 開始・prompt 送信の前に拒否する（誤配送の防止）。
+// 受け入れ条件: transport に結び付けられた連携 ID（launcher が保証する
+// 値）が grant の連携と一致しなければ、接続自体を行わず拒否する
+// （別連携宛の grant を別エージェントへ誤配送するのを防ぐ）。
 #[tokio::test]
 async fn identity_mismatch_refuses_before_session() {
-    let (transport, serve, state) = spawn_double(DoubleSpec {
-        agent_name: Some("other-agent"),
-        ..DoubleSpec::default()
-    });
+    let (transport, serve, state) = spawn_double(DoubleSpec::default());
     let server = tokio::spawn(serve);
 
     let audit = Arc::new(Mutex::new(Vec::new()));
@@ -596,7 +623,7 @@ async fn identity_mismatch_refuses_before_session() {
     let error = client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::assume_isolated(transport),
+            IsolatedTransport::bind_for_test(transport, "other-integration"),
             &ExportEnvelope::new("レビューして"),
             Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
         )
@@ -628,7 +655,7 @@ async fn client_advertises_no_side_effect_channels() {
     client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::assume_isolated(transport),
+            IsolatedTransport::bind_for_test(transport, "acp-double"),
             &ExportEnvelope::new("レビューして"),
             Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
         )
@@ -667,7 +694,7 @@ async fn flooding_updates_fail_the_session() {
     let error = client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::assume_isolated(transport),
+            IsolatedTransport::bind_for_test(transport, "acp-double"),
             &ExportEnvelope::new("レビューして"),
             Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
         )
@@ -693,7 +720,7 @@ async fn oversized_output_fails_the_session() {
     let error = client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::assume_isolated(transport),
+            IsolatedTransport::bind_for_test(transport, "acp-double"),
             &ExportEnvelope::new("レビューして"),
             Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
         )
@@ -734,7 +761,7 @@ async fn approval_evidence_is_carried_in_response_meta() {
     client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::assume_isolated(transport),
+            IsolatedTransport::bind_for_test(transport, "acp-double"),
             &ExportEnvelope::new("レビューして"),
             decider,
         )
@@ -757,5 +784,174 @@ async fn approval_evidence_is_carried_in_response_meta() {
     assert_eq!(pelway["eligibility"], "role:representative");
     drop(state);
 
+    server.abort();
+}
+
+// 不変条件（決3・案ii）: 承認証跡なしの許可は選ばない。decider が証跡を
+// 付けずに AllowOnce を返しても fail closed で reject 側に倒す。
+#[tokio::test]
+async fn allow_without_evidence_fails_closed() {
+    let (transport, serve, state) = spawn_double(DoubleSpec {
+        permission_tool: Some("post_message"),
+        option_kinds: vec![
+            schema::PermissionOptionKind::AllowOnce,
+            schema::PermissionOptionKind::RejectOnce,
+        ],
+        ..DoubleSpec::default()
+    });
+    let server = tokio::spawn(serve);
+
+    let audit = Arc::new(Mutex::new(Vec::new()));
+    let client = AcpClient::new(declarations(), audit.clone());
+    client
+        .run_prompt(
+            &grant(&grants()),
+            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            &ExportEnvelope::new("レビューして"),
+            Arc::new(RecordingDecider::decided(PermissionDecision {
+                answer: PermissionAnswer::AllowOnce,
+                evidence: ApprovalEvidence::default(),
+            })),
+        )
+        .await
+        .expect("ACP session failed");
+
+    let state = state.lock().expect("double state poisoned");
+    assert_eq!(
+        state.permission_outcome.as_deref(),
+        Some("selected:reject_once"),
+        "証跡なしの許可を通した"
+    );
+    drop(state);
+    let kinds = audit_events(&audit);
+    assert!(
+        kinds.contains(&"permission_denied_incomplete_evidence".to_owned()),
+        "permission_denied_incomplete_evidence が無い: {kinds:?}"
+    );
+    server.abort();
+}
+
+// 不変条件（決3・案ii）: `outcome_unknown`（人の決定結果が不明）は絶対に
+// 許可しない。証跡が揃っていても許可を選ばず fail closed で止める。
+#[tokio::test]
+async fn outcome_unknown_never_allows() {
+    let (transport, serve, state) = spawn_double(DoubleSpec {
+        permission_tool: Some("post_message"),
+        option_kinds: vec![
+            schema::PermissionOptionKind::AllowOnce,
+            schema::PermissionOptionKind::RejectOnce,
+        ],
+        ..DoubleSpec::default()
+    });
+    let server = tokio::spawn(serve);
+
+    let audit = Arc::new(Mutex::new(Vec::new()));
+    let client = AcpClient::new(declarations(), audit.clone());
+    client
+        .run_prompt(
+            &grant(&grants()),
+            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            &ExportEnvelope::new("レビューして"),
+            Arc::new(RecordingDecider::decided(PermissionDecision {
+                answer: PermissionAnswer::AllowOnce,
+                evidence: ApprovalEvidence {
+                    outcome_unknown: true,
+                    ..full_evidence()
+                },
+            })),
+        )
+        .await
+        .expect("ACP session failed");
+
+    let state = state.lock().expect("double state poisoned");
+    assert_eq!(
+        state.permission_outcome.as_deref(),
+        Some("selected:reject_once"),
+        "outcome_unknown での許可を通した"
+    );
+    drop(state);
+    let kinds = audit_events(&audit);
+    assert!(
+        kinds.contains(&"permission_denied_incomplete_evidence".to_owned()),
+        "permission_denied_incomplete_evidence が無い: {kinds:?}"
+    );
+    server.abort();
+}
+
+// 不変条件: 操作名を持たない（空の）許可要求は decider を呼ばず
+// fail closed で止める。
+#[tokio::test]
+async fn empty_operation_name_fails_closed() {
+    let (transport, serve, state) = spawn_double(DoubleSpec {
+        permission_tool: Some(""),
+        option_kinds: vec![
+            schema::PermissionOptionKind::AllowOnce,
+            schema::PermissionOptionKind::RejectOnce,
+        ],
+        ..DoubleSpec::default()
+    });
+    let server = tokio::spawn(serve);
+
+    let audit = Arc::new(Mutex::new(Vec::new()));
+    let client = AcpClient::new(declarations(), audit.clone());
+    let decider = Arc::new(RecordingDecider::answered(PermissionAnswer::AllowOnce));
+    client
+        .run_prompt(
+            &grant(&grants()),
+            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            &ExportEnvelope::new("レビューして"),
+            decider.clone(),
+        )
+        .await
+        .expect("ACP session failed");
+
+    let state = state.lock().expect("double state poisoned");
+    assert_eq!(
+        state.permission_outcome.as_deref(),
+        Some("selected:reject_once"),
+        "操作名なしの許可要求を decider に回した"
+    );
+    drop(state);
+    assert!(
+        decider.asks.lock().expect("decider poisoned").is_empty(),
+        "操作名なしの要求で decider を呼んだ"
+    );
+    let kinds = audit_events(&audit);
+    assert!(
+        kinds.contains(&"permission_denied_undeclared".to_owned()),
+        "permission_denied_undeclared が無い: {kinds:?}"
+    );
+    server.abort();
+}
+
+// 受け入れ条件: 通知の合計バイト数が上限を超えたら session を失敗させ、
+// agent に cancel を送って session を止める。
+#[tokio::test]
+async fn giant_updates_close_the_session() {
+    let (transport, serve, state) = spawn_double(DoubleSpec {
+        flood_bytes: Some(5 * 1024 * 1024),
+        ..DoubleSpec::default()
+    });
+    let server = tokio::spawn(serve);
+
+    let audit = Arc::new(Mutex::new(Vec::new()));
+    let client = AcpClient::new(declarations(), audit.clone());
+    let error = client
+        .run_prompt(
+            &grant(&grants()),
+            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            &ExportEnvelope::new("レビューして"),
+            Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
+        )
+        .await
+        .expect_err("巨大な通知を許した");
+
+    assert!(matches!(error, AcpError::UpdateOverflow), "{error:?}");
+    let kinds = audit_events(&audit);
+    assert!(
+        kinds.contains(&"cancel_sent".to_owned()),
+        "cancel_sent が無い: {kinds:?}"
+    );
+    drop(state);
     server.abort();
 }
