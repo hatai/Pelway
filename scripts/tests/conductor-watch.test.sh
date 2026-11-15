@@ -117,6 +117,21 @@ d = json.load(open(p)); d["subjects"][n]["updated_at"] = v
 json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)' "$STATE" "$1" "$2"
 }
 
+set_nca() { # patrol-state.json の next_check_at を書き換える（指揮役の延長・短縮の再現）
+  python3 -I -c 'import json,sys
+p, n, v = sys.argv[1:4]
+d = json.load(open(p)); d["subjects"][n]["next_check_at"] = v
+json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)' "$STATE" "$1" "$2"
+}
+
+nca_off() { # next_check_at の現在時刻からのずれ（時間単位で四捨五入）。読めなければ空
+  python3 -I -c 'import json,sys,datetime,time
+d = json.load(open(sys.argv[1]))
+s = d["subjects"].get(sys.argv[2], {}).get("next_check_at", "")
+try: print(round((datetime.datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp() - time.time()) / 3600))
+except Exception: print("")' "$STATE" "$1"
+}
+
 check() {
   local name="$1"; shift
   if "$@"; then printf 'ok   %s\n' "$name"; else printf 'FAIL %s\n' "$name"; failures+=("$name"); fi
@@ -230,16 +245,53 @@ set_updated 11 "$OLD_UPDATED"
 run_cycles 2
 check "pr list at limit keeps record" eq "$(sget 11 updated_at)" "$OLD_UPDATED"
 
+# 12. 次回確認時刻（next_check_at）: 待ちが発生したら目安で埋まる（review は 24 時間）。
+# waiting_on が同じ間は、指揮役が書き換えた値も含めて前回値を引き継ぐ
+mock_issues "$(jarr "$(iss 11 OPEN agent:working)")"
+mock_prs "$(jarr "$(pr 101 OPEN false agent/11-abc "" NONE)")"
+run_cycles 2
+check "next_check_at filled with default (review=24h)" eq "$(nca_off 11)" "24"
+set_nca 11 "2021-05-05T00:00:00+09:00"
+run_cycles 2
+check "same waiting_on keeps conductor-set next_check_at" eq "$(sget 11 next_check_at)" "2021-05-05T00:00:00+09:00"
+
+# 13. 期限到来: 過ぎた次回確認時刻に due 行を出す（同じ期限の値につき 1 回）。
+# 指揮役が期限を先へ延ばしたら due 行は止まる
+set_nca 11 "2020-01-01T00:00:00+09:00"
+: > "$ROOT/out.log"
+run_cycles 2
+check "due line emitted once for past deadline" \
+  eq "$(grep -c 'PATROL #11 due next_check_at=2020-01-01T00:00:00+09:00' "$ROOT/out.log")" "1"
+set_nca 11 "2999-01-01T00:00:00+09:00"
+: > "$ROOT/out.log"
+run_cycles 2
+check "pushed deadline stops due lines" nhas "$ROOT/out.log" "PATROL #11 due"
+
+# 14. waiting_on が変わったら目安で設定し直す（implement は 6 時間）。
+# 読めない値も目安で設定し直す（自己修復。特別な報告はしない）
+mock_prs "[]"
+run_cycles 2
+check "waiting_on change resets next_check_at (implement=6h)" eq "$(nca_off 11)" "6"
+set_nca 11 "not-a-date"
+run_cycles 2
+check "invalid next_check_at refilled with default" eq "$(nca_off 11)" "6"
+
 # --- runbook の記述 ---
 
 check "runbook: patrol-state.json format and required fields" \
-  has_all "$RUNBOOK" "patrol-state.json" "誰待ちか" "待ち始めた時刻" "次の担当" "最終更新時刻" "waiting_on" "waiting_since" "next_owner" "updated_at"
+  has_all "$RUNBOOK" "patrol-state.json" "誰待ちか" "待ち始めた時刻" "次の担当" "最終更新時刻" "waiting_on" "waiting_since" "next_owner" "next_check_at" "updated_at" "次回確認時刻"
 check "runbook: auxiliary record, GitHub is the source of truth" \
   has_all "$RUNBOOK" "補助記録" "正本は GitHub" "GitHub を正として"
 check "runbook: handover trigger, order, completion" \
   has_all "$RUNBOOK" "引き継ぎ" "一定時間" "blocked" "必須項目が" "矛盾が無い"
 check "runbook: agents display is not evidence" \
   has_all "$RUNBOOK" "busy" "根拠にせず" "突き合わせ"
+check "runbook: follow-up timer field, defaults table, both-places rule" \
+  has_all "$RUNBOOK" "フォローアップタイマー" "目安" "24 時間" "6 時間" "1 時間" "この表とスクリプトの両方を直す"
+check "runbook: due waits are always picked up in patrol order" \
+  has_all "$RUNBOOK" "期限到来待ちの確認" "その巡回で必ず確認" "次回確認時刻を更新" "自己修復として扱い、特別な報告はしない"
+check "runbook: setting a wait sets its follow-up timer (escalation)" \
+  has_all "$RUNBOOK" "を付けた時点で、巡回スクリプトが補助記録の次回確認時刻を目安" "人間の判断に期限を付けたいときは"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

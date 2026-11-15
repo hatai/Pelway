@@ -53,7 +53,8 @@ check cond3_abort "$CT" \
 check cond4_externalize "$CT" \
   '外部化チェック' \
   '割り当てと次アクション' \
-  'patrol-state の 3 項目' \
+  'patrol-state の 4 項目' \
+  '次回確認時刻' \
   '未記録の判断' \
   'ボード Status' \
   '復元検証待ち' \
