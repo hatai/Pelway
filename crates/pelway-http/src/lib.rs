@@ -1066,8 +1066,8 @@ fn handle_create_basis_record(
         Ok(record) => record,
         // 参照形式以外の値(本文等の複製)は保存しない。列名は応答に出さない。
         Err(StoreError::InvalidReference { .. }) => return bad_request(),
-        // create で NotFound は起こらない(網羅のための安全側)。
-        Err(StoreError::NotFound) => return internal_error(),
+        // create で NotFound・Conflict は起こらない(網羅のための安全側)。
+        Err(StoreError::NotFound | StoreError::Conflict) => return internal_error(),
     };
     // 保存した: 仮名 ID・種別だけ。参照列（evidence_ref 等）の中身は出さない。
     logger.emit(log::Event::BasisRecordSaved {
@@ -1141,6 +1141,8 @@ fn handle_withdraw_basis_record(
         Err(StoreError::NotFound) => {
             Response::error(404, &HttpError::NotFound, log::Code::NotFound)
         }
+        // 撤回で Conflict は起こらない(網羅のための安全側)。
+        Err(StoreError::Conflict) => internal_error(),
     }
 }
 
@@ -1168,8 +1170,8 @@ fn handle_create_use_policy(
     ) {
         Ok(policy) => policy,
         Err(StoreError::InvalidReference { .. }) => return bad_request(),
-        // create で NotFound は起こらない(網羅のための安全側)。
-        Err(StoreError::NotFound) => return internal_error(),
+        // create で NotFound・Conflict は起こらない(網羅のための安全側)。
+        Err(StoreError::NotFound | StoreError::Conflict) => return internal_error(),
     };
     logger.emit(log::Event::UsePolicySaved {
         workspace: workspace_pid,
