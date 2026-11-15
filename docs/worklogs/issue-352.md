@@ -11,3 +11,15 @@
 5. 改善案: `scripts/tests/agent-sandbox.test.sh` に、`$HOME` が書き込み不可な環境（`/home` 自体が ro マウント）ではスキップするガードを足すと、tmpfs マスク環境でも script-test が完走できる
 
 使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/improve-skills`
+
+## 実装者メモ（round 2）
+
+対象 head: 919979de41e2db871ba44f984474d69cff690649
+
+1. 詰まった箇所: PR #355 レビュー（codex must-fix 1・claude must-fix 2）: (a)「不正要求は `gh` を呼ばず」の厳格解釈（読み取り系 gh も不可）は、Status 名→選択肢 id・Issue 番号→item id の解決に読み取り gh が必須で実装不能のため、2 段解釈（ローカル拒否は gh 無呼出・解決失敗は item-edit 不呼出）を Issue コメントと runbook に明文化して仕様・実装を一致させた。(b) `.done.tmp`/`.error.tmp` への symlink で人間名義の任意ファイル上書き、(c) キューディレクトリの symlink 差し替えによるホストファイル削除と FIFO による巡回停止は、dir_fd ベースの O_NOFOLLOW 操作（ディレクトリ検証・要求の S_ISREG・上限・O_NONBLOCK、一時ファイルはランダム名 O_EXCL|O_NOFOLLOW）に作り替え、テスト 4 群を足した
+2. 曖昧だった文: 「静的検証だけで拒否できる条件と、プロジェクト状態の照会が必要な条件を Issue と合意したうえで仕様・実装を一致させてください」（PR #355 codex レビュー must-fix）
+3. 仮定と解釈: 「Issue と合意」は起票者の返答を待つ意味ではなく、Issue のコメントに解釈を記録して進める形と解釈した（implement-issue の「判断とその理由は PR 本文か Issue のコメントに書いて進める」に従う）。claude の nit 2 件（repository 絞り・使ったスキル欄）は must-fix だけ直す決まりにより未対応とした
+4. 足りなかった情報・検証手段: エージェント sandbox がホストと同じ uid で `/tmp` 直下に書けるかはこの環境からは未確認（claude レビューの「未確認」に同じ）
+5. 改善案: `scripts/tests/agent-sandbox.test.sh` の ro マウント環境でのスキップガード（round 1 と同じ）
+
+使ったスキル: `.agents/skills/implement-issue`
