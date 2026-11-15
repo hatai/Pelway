@@ -11,6 +11,10 @@ hatai の指示「#300, #266, #273, #301, #303 を処理して」を受けた一
 | 2026-11-15 11:35 | #303 | implement | opencode | zai-coding-plan/glm-5.3 | low | 定型・小規模（command-team の文書改訂のみ） |
 | 2026-11-15 11:35 | #266 | triage | — | — | — | 本文が「-」のみのため needs-info に変更（判断の記録参照） |
 | 2026-11-15 11:45 | PR #309（本 worklog の PR） | review | devin | swe-2-high | default | 指揮役自身の PR。PR 番号が奇数のため Devin CLI（追加 67 行、高リスクなし） |
+| 2026-11-15 12:40 | #307 | implement | opencode | zai-coding-plan/glm-5.3 | default | 小規模だが conductor-watch.sh に触れうるため既定。runbook §9＋巡回手順＋patrol-state |
+| 2026-11-15 12:40 | #308 | implement | devin | swe-2-high | high | 通常枠。GLM 側が埋まり気味のため分散（command-team 改善ループ＋runbook＋初回走査） |
+| 2026-11-15 12:52 | #315 | implement | devin | swe-2-high | high | 通常枠（草案全文つきの新スキル導入＋command-team 接続） |
+| 2026-11-15 12:56 | #316 | implement | devin | swe-2-high | high | 通常枠。#273 と同じ取り込み経路のため（retro＋writing-for-agents の取り込みと retro 試行） |
 
 スレッド:
 
@@ -49,6 +53,25 @@ hatai の指示「#300, #266, #273, #301, #303 を処理して」を受けた一
 - `implement-issue` の「止まる条件」に、grill 試行のように本ラウンドの成果物が質問票である割り当てでは「PR を作らず質問票投稿＋報告で止まる」旨を足す（#219・#200 の実装者がそれぞれ指摘）
 - research スキルの背景調査の `delegate_task` で、子の exec が「Failed to create terminal」で失敗することがある（#214 で 2 回発生し実装者が代替）。発生条件の切り分けが未実施
 - `agent-gh-resign` の push の後、resign 済みコミットの loose object が壊れた空オブジェクトとして作業フォルダに残ることがある（#213 で発生。削除して origin から取り直せば回復）
+
+## 12:30 以降の経過（追記）
+
+- マージ（Kodiak 導入前の admin マージ）: PR #309（本 worklog。Devin CLI レビュー Approve → admin merge）、PR #310（#303。Codex レビュー Approve、Approve 後の追加コミットなし → update-branch → CI 緑 → admin merge）。#303 は PR の `Closes` で自動クローズ
+- PR #311（#300 Kodiak 導入）: Devin が実装、Codex レビュー Approve、main 取り込み後に CI 緑で admin merge。これにより Kodiak 運用の文書・設定が main に入った。#300 は GitHub App インストールとルールセット変更など hatai の操作が残るため needs-human にして agent:working を外した
+- #266: hatai の判断でクローズ（not planned、wontfix）。起票元の調査は本文が「-」のまま残していたもので、Workspace 上のどのセッションにも起票痕跡が無く hatai 名義だったこと、論点の元ネタが PR #250（#249）の Draft ライフサイクル議論にあることを Issue コメントに記録した
+- PR #314（#308）: Codex レビュー Approve 後に実装者メモだけのコミット（df7fb5c）が push されたため、command-team の決まりどおり再レビューを指示（effort を 1 段上げた round 2 で Approve: be98bfa）。タイトルの `\uXXXX` エスケープ表示は実装スレッドに修正させた
+- Kodiak 運用への切替: AGENTS.md の更新（マージは Kodiak、admin マージは切り戻し時のみ）を確認し、以降のマージは `automerge` ラベルで行う。PR #314・#317（#307）・#319（#315）に付与済み
+- **Kodiak がマージできない事象（未解決・hatai 待ち）**: PR #314 に automerge ラベルを付けたが Kodiak が静止。kodiakhq のチェックは出るがマージまで進まない。PR の reviewDecision が pelway-review の Approve 後も REVIEW_REQUIRED のままのため、従来のブランチ保護の「Code Owners レビュー必須」が残っている（#300 の計画した組み替えが未適用）と推定。rulesets API の「main」ルールセットには削除・非 fast-forward しかなく、レビュー要件は classic branch protection 側。hatai の操作待ち（#300 に紐づく）
+- PR #313（#301）: CodeQL チェック失敗。実装担当の実測で「抑制コメント（`// codeql[rust/hard-coded-cryptographic-value]`）が同一行にあっても 32 件消えない」ことが確認され、切り替え先（default setup の除外設定・advanced setup 移行・本番3件のみ dismiss）は GitHub 側の権限が要るため、選択肢と実測を Issue に記録して needs-human で停止（実装は完了・必須チェックは緑）
+- PR #319（#315）: Codex レビュー Approve、タイトルのエスケープ表示は指揮役が直接修正（運用操作）。automerge ラベル付与済み
+- #316: レビューループ進行中（Codex が must-fix 1 件: retro スキルのプロンプトインジェクション対策。Claude の判定待ち。割れた場合はエスカレーション規定に従う）
+- PR #317（#307）: Codex レビュー Approve・Draft 解除・automerge ラベル付与済み
+
+### 起きた事象の記録（改善点候補）
+
+- PR タイトルの `\uXXXX` エスケープ: #314・#319 で発生（#311 でも発生済み）。Devin の exec 引数に日本語を渡すと実行環境でエスケープされる。write-pull-request に「タイトルはファイル経由で設定する」旨を足す候補
+- Approve 後の実装者メモ push: #314 で再発（#251 と同種）。implement-issue の「Approve 後に push しない」が効いていない。改善ループで同種 2 回目のため正本側の欠陥として扱う候補
+- CodeQL の抑制コメント非効: Rust 抽出で行コメント抑制が効かない実測。#301 の Issue コメントに選択肢あり
 
 ## 改善点の表
 
