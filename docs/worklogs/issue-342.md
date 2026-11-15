@@ -11,3 +11,15 @@
 5. 改善案: `docs/agents/skill-helpers.md` の「テストの置き場と実行方法」に「glob 収集は `.agents/skills/` 配下の外部スキル固定ディレクトリも走査する。外部スキルが同梱テストを更新で持ち込んだときの扱い（実行するか無視するか）は未決なので、持ち込みが起きた時点で判断が必要」を足す
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）、improve-skills（`.agents/skills/improve-skills`。入口B: 手順 3「改善する」と 6「検証する」を適用）
+
+## 実装者メモ（round 2）
+
+対象 head: 54b4ee15f776261fef6319573730c97a26841b9b（この round の実装の実体を含むコミット。このメモを含むコミットの親）
+
+1. 詰まった箇所: PR #351 の CI（run 43704519836・head 4b05e5e）で selftest の「run.sh: partial run under ACCEPTANCE」1 ケースだけが失敗。同一のコードで走った 1 回目の CI（run 43702511912・head 0417e71）は同一ケースを含め全合格で、失敗時の出力には期待値（exit 1・PARTIAL RUN・ACCEPTANCE MODE の両マーク）がすべて揃い、ログに fork・OOM 等のエラーも無い。ローカルでは切り出し 300 回・実物 selftest 6 回のいずれでも再現せず。ケース内の `printf '%s\n' "${OUT}" | grep -q …`（`set -o pipefail` 下・マッチが先頭行付近で grep が早期 exit する形）が唯一非決定的になり得る要素のため、この形式を selftest 内の全 27 箇所（`grep -q` 26 箇所＋`grep -c` 1 箇所）で here-string（`grep -q … <<<"${OUT}"`）に置き換えてパイプ自体を消した
+2. 曖昧だった文: 「glob 収集で selftest が CI の script-test に入ったことで、CI 環境（`DEMO_CHECK_RUNTIME` 未設定）での失敗が表面化したと見られます」（指揮役の修正依頼・PR #351 のコメント）
+3. 仮定と解釈: 指揮役の見立て（glob 収集の入れ替えが原因）に対し、旧列挙にも selftest は最初から含まれており、かつ同一コードの 1 回目の CI が合格していたことから、収集の変更は失敗の原因ではなくまれな揺れの偶然の表面化と解釈した。修正は期待値の変更ではなくアサーション形式の堅牢化のみにとどめた（`DEMO_CHECK_RUNTIME` 未設定時の PENDING 挙動は仕様どおりで、テストもそれを期待しているため変えない）
+4. 足りなかった情報・検証手段: 失敗の正確なトリガーの直接観測（CI ログにはパイプ内 grep の終了コードが記録されず、再現もしなかったため類推。here-string 化でこのクラスは構造的に消えるが、再発した場合は別原因として調査し直す）
+5. 改善案: `docs/agents/skill-helpers.md` の「テストの置き場と実行方法」のテスト形式の箇所に「コマンド置換の結果の検査は `grep -q … <<<"$OUT"`（here-string）を使い、`printf | grep -q` パイプは `set -o pipefail` 下で grep の早期 exit と組み合わさると競合になり得るため使わない」を足す
+
+使ったスキル: implement-issue、improve-skills（入口B）、pr-watch（pr-digest による CI 状態の把握と失敗ログの取得）
