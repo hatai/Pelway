@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 指揮役の見張り: T3 スレッドの状態の変化と、agent/ ブランチの PR の変化を 1 行ずつ標準出力に出す。
-# 巡回のたびに、巡回状態の補助記録（対象ごとの誰待ちか・待ち始めた時刻・次の担当・最終更新時刻）を
+# 巡回のたびに、巡回状態の補助記録（対象ごとの誰待ちか・待ち始めた時刻・次の担当・次回確認時刻・最終更新時刻）を
 # $XDG_STATE_HOME/pelway/patrol-state.json に更新する。正本は GitHub Issues／Projects で、
 # 記録と GitHub の実状態が食い違うときは GitHub を正として記録を直す（runbook の「巡回状態の補助記録」）。
 # 状態は $XDG_STATE_HOME/pelway/conductor-watch/ に置く（セッションの一時フォルダに置かない）。
@@ -27,7 +27,8 @@ def title_ok(t): return any(r.search(t) for r in TITLE)
 try: prev = json.load(open(sp))
 except Exception: prev = None
 cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("since", {}),
-       "badtitle": [] if prev is None else prev.get("badtitle", [])}
+       "badtitle": [] if prev is None else prev.get("badtitle", []),
+       "due_warned": {} if prev is None else prev.get("due_warned", {})}
 try: threads = json.load(open(os.path.join(d, "threads.json")))
 except Exception: threads = []
 try: issues = json.load(open(os.path.join(d, "issues.json")))
@@ -74,8 +75,8 @@ if prev is not None and not threads: cur["threads"] = prev["threads"]
 if prev is not None and not prs: cur["prs"] = prev["prs"]
 json.dump(cur, open(sp, "w"))
 # 巡回状態の補助記録（patrol-state.json）。対象は Issue 番号ごと。正本は GitHub Issues と
-# Projects で、ここには GitHub に載らない情報（誰待ちか・待ち始めた時刻・次の担当）だけを置く。
-# 巡回のたびに必須項目（waiting_on・waiting_since・next_owner・updated_at）を GitHub の実状態
+# Projects で、ここには GitHub に載らない情報（誰待ちか・待ち始めた時刻・次の担当・次回確認時刻）だけを置く。
+# 巡回のたびに必須項目（waiting_on・waiting_since・next_owner・next_check_at・updated_at）を GitHub の実状態
 # （Issue のラベルと状態、PR の Draft・レビュー・CI の状態）で上書きし、食い違いは GitHub を
 # 正として直す。waiting_on が同じ対象だけ待ち始めた時刻を引き継ぐ。
 ps_path = sys.argv[2]
@@ -96,6 +97,14 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
                       or (p.get("state") == c.get("state") and p["number"] > c["number"]):
             pr_of[k] = p
     now_iso = datetime.fromtimestamp(now).isoformat(timespec="seconds")
+    # 次回確認時刻（フォローアップタイマー）の待ちの種類ごとの目安（時間）。runbook の
+    # 「次回確認時刻（フォローアップタイマー）」の表と同じ値。変えるときは両方を直す。
+    check_hours = {"human": 24, "implement": 6, "review": 24, "merge": 1, "conductor": 1}
+    def deadline_ts(s):  # ISO 8601 を epoch に読む。読めない値（無い・壊れている）は None
+        try:
+            return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return None
     new_subj = {}
     for iss in issues:
         n = str(iss.get("number"))
@@ -127,13 +136,28 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
         old = ps["subjects"].get(n) if isinstance(ps["subjects"].get(n), dict) else {}
         since = old.get("waiting_since") if old.get("waiting_on") == won and isinstance(old.get("waiting_since"), str) else ""
         if not since: since = now_iso
-        new_subj[n] = {"waiting_on": won, "waiting_since": since, "next_owner": owner, "updated_at": now_iso}
+        # 次回確認時刻: waiting_on が同じ間は前回値（指揮役が延長・短縮した値を含む）を引き継ぐ。
+        # 待ちが変わった、または値が無い・読めないときは、待ちの種類の目安で設定し直す
+        # （自己修復として扱い、特別な報告はしない）。
+        nca = old.get("next_check_at") if old.get("waiting_on") == won else None
+        if deadline_ts(nca) is None:
+            nca = datetime.fromtimestamp(now + check_hours[won] * 3600).isoformat(timespec="seconds")
+        new_subj[n] = {"waiting_on": won, "waiting_since": since, "next_owner": owner,
+                       "next_check_at": nca, "updated_at": now_iso}
         if old.get("waiting_on") != won:
             print(f"PATROL #{n} waiting_on={won} since={since} next={owner}", flush=True)
+        # 期限到来: 次回確認時刻を過ぎた待ちを due 行で知らせる（同じ期限の値につき 1 回）。
+        # 記録の値は更新されないまま残るため、巡回は記録側でも期限を過ぎた待ちを必ず確認対象に拾う。
+        if deadline_ts(nca) <= now and cur["due_warned"].get(n) != nca:
+            print(f"PATROL #{n} due next_check_at={nca} waiting_on={won} next={owner}", flush=True)
+            cur["due_warned"][n] = nca
     ps["subjects"] = new_subj
+    # 記録から消えた対象の期限通知の状態も消す
+    cur["due_warned"] = {k: v for k, v in cur["due_warned"].items() if k in new_subj}
     ps["updated_at"] = now_iso
     os.makedirs(os.path.dirname(ps_path) or ".", exist_ok=True)
     json.dump(ps, open(ps_path, "w"), ensure_ascii=False, indent=2, sort_keys=True)
+    json.dump(cur, open(sp, "w"))
 PY
   sleep 30
 done

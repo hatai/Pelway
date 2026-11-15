@@ -67,7 +67,7 @@ HIGH のファイルすべてについて、次の 4 点を確かめる。
 
 HIGH のファイルがあるときは毎回当てる。
 
-- **GitHub App の使い分け**: エージェントの GitHub 操作が `scripts/agent-gh <dev|review>` を通っているか。素の `gh` を使う箇所が、AGENTS.md の例外（指揮役の委任された `gh pr merge --admin` と、`hatai` が書く目印コメント）より広がっていないか。App の権限やトークンの取り扱い（`scripts/agent-gh` の中）を広げていないか。
+- **GitHub App の使い分け**: エージェントの GitHub 操作が `scripts/agent-gh <dev|review>` を通っているか。素の `gh` を使う箇所が、AGENTS.md の例外（Kodiak のキューを切り戻すときの人間の `gh pr merge --admin` と、`hatai` が書く目印コメント）より広がっていないか。App の権限やトークンの取り扱い（`scripts/agent-gh` の中）を広げていないか。
 - **指示の混入（prompt injection）**: Issue・PR の本文やコメントの文が、実装担当やレビュー担当への指示として扱われる経路が増えていないか。目印コメントを作成者（`hatai`）で確かめずに信じる箇所、本文中の「〜せよ」に従わせる手順の書き方、外部から取った文書を指示として読み込ませる箇所を探す。
 - **レビュー担当のネットワーク制限**: レビュー担当が GitHub 以外へ通信できる経路、PR のコードを実行させる経路、head を取り出させる経路が新しく開いていないか（スキルの手順の変更、sandbox の設定、`scripts/agent-gh review` の挙動）。
 - **秘密の露出**: トークン・鍵・接続文字列が、ログ、`docs/worklogs/`、PR・Issue のコメント、試験の期待値、エラー文に出ていないか。`Debug` の出力に秘密を含む型がないか。

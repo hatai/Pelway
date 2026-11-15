@@ -26,6 +26,8 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 
   実装の値は、opencode なら `model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>`、devin なら `model=swe-2-high effort=<medium|high|max>`（effort の値は `thought_level` に写す）にする。
 
+  スキル改訂の Issue（skill `improve-skills` の入口Aで起票されたもの）を割り当てるときは、1 行目を「Issue #<N> を実装する。skill implement-issue と skill improve-skills に従う。」にする。実装担当は implement-issue の手順に加えて、improve-skills の入口B以降の手順を読む（入口Bの指定は improve-skills の本文が担う）。
+
   ```
   PR #<M> をレビューする。skill review-pr に従う。
   Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort>
@@ -208,22 +210,23 @@ hatai の指摘の伝達:
 
 ### マージ
 
-有効な Approve（上の「hatai のレビューの扱い」）と、必須チェック（`mise run verify`、`pr-size`）の通過を確かめたら、指揮役が `gh pr merge --merge --admin --delete-branch` でマージする（`CODEOWNERS` の人間の Approve を、人間から委任された形で迂回する）。マージ以外の PR・Issue への操作（下の main の取り込みや base の変更、Draft の扱い、Issue のクローズ）は、先に「手当て・引き継ぎの前の確認」を通す。`--admin` は管理者の権限が要り App のトークンでは使えないので、このマージは人間の名義の `gh` で行う。目印付きのコメント（`<!-- pr-size-exception -->`、`<!-- split-plan -->`）も人間の名義の `gh issue comment` で書く。レビュー担当は作成者が `hatai` であることで、実装担当（`pelway-dev`）や第三者のコメントと区別する。それ以外の GitHub の操作（読み取り、ラベル、ふつうのコメント、`pr update-branch`）は `scripts/agent-gh dev` で行う。
+マージは Kodiak（ホスト版の GitHub App。正本は `docs/superpowers/specs/agent-team.md` の「マージキュー」）が行う。指揮役が行うのはキューへの投入だけ: 有効な Approve（上の「hatai のレビューの扱い」）と必須チェック（`mise run verify`、`pr-size`）の通過を確かめて、PR に `automerge` ラベルを付ける（`scripts/agent-gh dev pr edit <M> --add-label automerge`）。このラベルを付けることがマージの指示であり、付けるのは指揮役だけ。実装スレッドは自分の PR に付けない。ラベルが付くと、Kodiak がブランチの最新化とマージを直列に進める。指揮役はマージを確認してから Issue から `agent:working` を外し、人間に報告する。
 
-- pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。
-- 必須チェックの完了待ち（マージ前の CI 待ち、巡回での PR のベビーシット）には、ポーリングの代わりに skill `pr-watch` の `pr-digest --watch` をバックグラウンド実行して使う。ただし pr-watch の境界線のとおり、マージはこのスキルの外で人間の名義の `gh` で行う。
-- skill `pr-watch` の `VERDICT green` は、その SHA でチェックが完走して通過していることの確認要素の 1 つ。マージの条件（`pelway-review` の Approve、必須チェック、レビュー済み SHA 以降の追加コミットの確認、main の取り込み、mergeable）を置き換えない。
+- `automerge` ラベルを付ける前の確認は次の 3 つ: 有効な Approve、必須チェックの通過、Approve の後の push が main の取り込みだけであること（`git rev-list <レビューした sha>..<head> --no-merges ^origin/main` が 0 件。それ以外のコミットがあればレビューをやり直す。Kodiak がブランチ最新化で作る main 取り込みのマージコミットはこの条件を壊さない）。マージ以外の PR・Issue への操作（base の変更、Draft の扱い、Issue のクローズ）は、先に「手当て・引き継ぎの前の確認」を通す。目印付きのコメント（`<!-- pr-size-exception -->`、`<!-- split-plan -->`）は人間の名義の `gh issue comment` で書く。レビュー担当は作成者が `hatai` であることで、実装担当（`pelway-dev`）や第三者のコメントと区別する。それ以外の GitHub の操作（読み取り、ラベル、ふつうのコメント）は `scripts/agent-gh dev` で行う。
+- pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の admin マージに回す（キューの切り戻しと同じ扱い）。
+- 必須チェックの完了待ち（ラベルを付ける前の CI 待ち、巡回での PR のベビーシット）には、ポーリングの代わりに skill `pr-watch` の `pr-digest --watch` をバックグラウンド実行して使う。マージの実行は Kodiak が行うため、指揮役がマージコマンドを叩くことはない。
+- skill `pr-watch` の `VERDICT green` は、その SHA でチェックが完走して通過していることの確認要素の 1 つ。`automerge` ラベルを付ける条件（`pelway-review` の Approve、必須チェック、レビュー済み SHA 以降の追加コミットの確認、mergeable）を置き換えない。
 - Approve の後に PR に push があったら、新しいコミットが main の取り込みだけであることを確かめる（`git rev-list <レビューした sha>..<head> --no-merges ^origin/main` が 0 件）。それ以外のコミットがあればレビューをやり直す。
-- マージの直前に、PR が今の main を含んでいるかを確かめる（`git merge-base --is-ancestor origin/main origin/<PR のブランチ>`）。含んでいなければ、触るファイルが重ならなく見えても `scripts/agent-gh dev pr update-branch` で main を取り込み、CI が通ってからマージする（型や関数の変更は、ファイルが重ならなくてもビルドを壊す）。
-- 別の PR に積んだ PR は、土台の PR をマージする前に base を main に替える（`scripts/agent-gh dev pr edit <後の PR> --base main`）。マージは `--delete-branch` で土台のブランチを消すので、base のままだと GitHub が後の PR を閉じ、閉じた PR は base を替えられない。土台のマージ後に `scripts/agent-gh dev pr update-branch` で main を取り込んで CI を起こす。
-- 複数の PR を続けてマージするときは、`scripts/conductor-merge-queue.sh` に「PR 番号・ブランチ・レビューした sha」の組を並べて、1 本ずつ進める（main の取り込み、CI の待ち、レビュー後のコミットの確認、マージを順に行う）。このスクリプトを同時に 2 つ動かさない（同じリポジトリの `git fetch` がぶつかって両方止まる）。
-- PR ができたら mergeable を確かめる（`scripts/agent-gh dev pr view <M> --json mergeable`）。`CONFLICTING` の PR には GitHub が `pull_request` の workflow を動かさず、チェックが 1 つも付かない。実装担当に「main を取り込んで衝突を解消し、verify を通す」を送る。
-- マージしたら Issue から `agent:working` を外し、人間に報告する。
+- ブランチの最新化はルールセットが「マージ前にブランチを最新化すること」で必須とし、実行は Kodiak が行う。指揮役が `pr update-branch` で手動に取り込む操作は、手当スレッドでの衝突解消などの例外を除き原則しない。
+- 別の PR に積んだ PR は、土台の PR に `automerge` ラベルを付ける前に、後の PR の base を main に替える（`scripts/agent-gh dev pr edit <後の PR> --base main`）。base のままだと、リポジトリのブランチ自動削除で土台のブランチが消えたときに後の PR が閉じることがあり、閉じた PR は base を替えられない。
+- 複数の PR に `automerge` ラベルを付けてよい。Kodiak が直列に 1 本ずつマージする。ただしラベルを付ける時点で各 PR が上の条件を満たしていることを確かめる。
+- PR ができたら mergeable を確かめる（`scripts/agent-gh dev pr view <M> --json mergeable`）。`CONFLICTING` の PR には GitHub が `pull_request` の workflow を動かさず、チェックが 1 つも付かない。実装担当に「main を取り込んで衝突を解消し、verify を通す」を送る。`automerge` ラベルが付いた後に Kodiak がコンフリクト等でマージできないときは、Kodiak が PR にコメントして `automerge` ラベルを外す。巡回手順は runbook の「マージキュー待ちの PR」に従い、手当スレッドで衝突を解消してからラベルを付け直す。
+- マージしたら Issue から `agent:working` を外し、人間に報告する。マージの検知は notify-grokbot の `pull_request`（`merged: true`）の通知と巡回で行う。
 - マージが完了したら、ローカルの `main` を `origin/main` へ一致させる。`git fetch origin main` の後、ローカルの `main` が `origin/main` の先祖になっていることを確かめ（`git merge-base --is-ancestor main origin/main`）、`git merge --ff-only origin/main` を `main` で実行して fast-forward のみで行う。ローカルの `main` に origin に無いコミットがあって fast-forward できないときは、強制せず（rebase も reset もしない）そこで止めて、指揮役（代行の場合は hatai）へ報告する。
-- `scripts/conductor-merge-queue.sh` で複数の PR を続けてマージするときも、最後のマージが済んだ時点で上の最新化を行い、ローカルの `main` が `origin/main` と一致した状態で終える（1 本ごとではなく、最後の 1 回でよい）。
-- Dependabot が立てた依存更新の PR（`dependencies` ラベル、`build(deps):` で始まるコミット）のうち、minor と patch は、通常の PR と同じレビュー（skill `review-pr`）とマージの決まりで扱う。
+- キューの切り戻し（Kodiak が応答しない・詰まった場合の手動マージ）は hatai の admin マージだけが行う（切り戻し条件は運用しながら定める）。`scripts/conductor-merge-queue.sh` はそのときの補助として残す。
+- Dependabot が立てた依存更新の PR（`dependencies` ラベル、`build(deps):` で始まるコミット）のうち、minor と patch は、通常の PR と同じレビュー（skill `review-pr`）とマージの決まりで扱う。Dependabot の PR に `automerge` ラベルを付けるのも指揮役だけであり、Kodiak の `merge.automerge_dependencies`（レビューなしの自動マージ）は使わない。
 - Dependabot の major と 0.x の更新は直接処理しない。移行 Issue（更新の影響範囲と検証内容を書く。skill `write-issue`）を切って通常フロー（入口A）へ回し、Dependabot の PR 自体はクローズせず残す（クローズは人間の操作）。
-- Action の更新の PR（`ci(deps):` で始まるコミット）では、Dependabot は `.github/workflows/actions.lock` を作り直さないため、指揮役がマージ前にその PR のブランチを checkout して `gh actions-lock` を実行し、生成し直した `actions.lock` を同じブランチに push してから CI の通過を確かめる（`gh actions-lock` は人間の名義の `gh` 拡張で、App のトークンでは動かせない）。この操作は、Workflows 権限が必要なために人間の名義で行う例外の 1 つで、例外の正本は `docs/superpowers/specs/agent-team.md` の「制約」。
+- Action の更新の PR（`ci(deps):` で始まるコミット）では、Dependabot は `.github/workflows/actions.lock` を作り直さないため、指揮役が `automerge` ラベルを付ける前にその PR のブランチを checkout して `gh actions-lock` を実行し、生成し直した `actions.lock` を同じブランチに push してから CI の通過を確かめる（`gh actions-lock` は人間の名義の `gh` 拡張で、App のトークンでは動かせない）。この操作は、Workflows 権限が必要なために人間の名義で行う例外の 1 つで、例外の正本は `docs/superpowers/specs/agent-team.md` の「制約」。
 
 ### 分割を認めるとき
 
@@ -263,6 +266,7 @@ runbook 7 の手順に従う。人間に上げる前に、手順 2 の「effort 
 - 書き込み先は両方のツールが読む場所だけ: `AGENTS.md`、`.agents/skills/`、`docs/`。
 - `.claude/skills/<name>` は `.agents/skills/<name>` へのシンボリックリンクにする。変更したら `diff -r .claude/skills/<name> .agents/skills/<name>` の差分がゼロであることを確かめてから完了とする。
 - 変更は PR にして、レビュー担当のスレッドに回す。
+- スキル改訂の候補（自前スキルの改善・作成・最適化）は、skill `improve-skills` の入口A（候補の調査と起票）に渡す。共有層への反映のうち、スキル改訂の編集作業そのものは improve-skills の手順に従う。この手順 4 が担い続けるのは、材料の集め方・裏取り・効果測定・棚卸しの管理である。
 
 ### 効果を測る
 
@@ -274,6 +278,13 @@ runbook 7 の手順に従う。人間に上げる前に、手順 2 の「effort 
 
 - 改善のたびに、関係するスキル・文書の古い記述、矛盾する記述を探し、直すか消す。溜め込まない。
 - 作業ログの改善点の表で、反映済み・見送りになったものに印を付ける。
+
+### 定期キュレーション（worklog の走査）
+
+既存の改善ループはレビュー指摘を入口とする（同種の指摘が 2 回以上で正本の欠陥として扱う）。それだけでは、レビュー指摘に至る前の滞留・手戻りの型や、実装者メモ・巡回記録に書かれたまま拾われない正本とのずれが溜まる。そこで、週 1 回の定例で worklog 群を横断して走査する定期キュレーションを、レビュー指摘とは別の入口として改善ループに組み込む。実行手順（頻度・対象・観点・出力先）は runbook の「作業ログの定期キュレーション」に置く。
+
+- 役割分担: レビュー指摘を入口とする既存の流れは変えない。キュレーションは、繰り返しの型・正本と実態のずれ・長期間動いていない待ちを候補として拾い、既存の改善ループの材料にする
+- キュレーションは候補の提案までとし、正本（AGENTS.md、スキル、runbook）を直接編集しない。正本の変更が要る候補は Issue 化を人間に提案し、Issue の作成と `ready-for-agent` の判断は従来どおり人間の関与する流れに乗せる
 
 ## 5. 代行の開始と終了
 
@@ -361,7 +372,7 @@ grill 試行は、設計担当が上流 `grilling` の問い詰めの方法で f
 計画的圧縮の直前に、次のすべてを確認する。1 つでも残っていれば圧縮しない。
 
 1. 割り当てと次アクション: 巡回記録（割り当ての記録の表）が現状と一致し、各案件の次アクションが書かれている
-2. patrol-state の 3 項目（誰待ち・待ち始めた時刻・次の担当、Issue #255）が全対象で埋まっている
+2. patrol-state の 4 項目（誰待ち・待ち始めた時刻・次の担当・次回確認時刻、Issue #255・#307）が全対象で埋まっている
 3. 未記録の判断: セッションの文脈だけに置いている判断が無い。すべて巡回記録か Issue/PR のコメントに書かれている
 4. ボード Status の確認: 全カードの Status が導出値に補正済みであること。確認方法は、Issue #290 の正本化後は runbook の「ステータスの導出規則」を参照し、正本化前は agent-team.md の既存の決まりに基づく暫定確認に限る
 5. 識別子つきの「復元検証待ち」記録を巡回記録に事前に作る（圧縮前の状態の要点と、復元で照合すべき識別子を書く）
