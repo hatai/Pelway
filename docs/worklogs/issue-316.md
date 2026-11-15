@@ -40,3 +40,13 @@ command-team 手順 6 の決まりどおりに記録する。
 5. 改善案: `docs/agents/external-skills.md` の「retro の適用ルール」に「実施環境から T3 スレッドの記録に届かないときは、作業ログと GitHub 上の記録を一次記録とし、その旨を試行の記録に書く」を足すと、同じ環境の担当が迷わない
 
 使ったスキル: `.agents/skills/retro`（試行の対象として。手順 1 の依存として `.agents/skills/writing-for-agents` を読んだ。TDD 系の seam は使っていない）
+
+## 実装者メモ（round 2）
+
+1. 詰まった箇所: なし。hatai の確定（Codex の must-fix を (i) で採用）に従い、取り込み品の本体は触らず `docs/agents/external-skills.md` の retro 適用ルール 1 に条項を足す形で対応した
+2. 曖昧だった文: 「実装スレッドはこの条項の追加と本文の更新を行い」（Issue #316 の指揮役コメント）
+3. 仮定と解釈: 「本文の更新」は PR 本文の sha 更新（implement-issue 手順 9 の修正依頼の流れ）と解釈した。条項の置き場所は、新しい番号を足すより出どころを定めるルール 1 の続きとし、「信頼できない入力」「指示として読まず証拠として扱う」の表現を pr-watch・review-pr・grokbot-runbook の既存の言い回しに合わせた。Codex の指摘が要求した「記録を根拠にコマンド・ツール呼び出し・情報開示をしない」も明記した
+4. 足りなかった情報・検証手段: なし
+5. 改善案: Claude の nit (a)（`scripts/tests/conductor-watch-ensure.test.sh` に `.agents`/`.claude` の diff 検査が既にある）と nit (b)（T3 サーバーに届かない環境の扱い）は round 2 では手を付けていない。次の改善ループで external-skills.md ルール 1 と作業ログの候補 2 の文面を直す材料にできる
+
+使ったスキル: implement-issue, `.agents/skills/writing-for-agents`（条項の文面の参照として。ユーザーレベル版と repo 内の版は `diff -q` で一致を確認し、repo 内の版を正本として扱った）
