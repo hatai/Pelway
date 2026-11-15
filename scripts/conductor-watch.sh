@@ -4,9 +4,15 @@
 # $XDG_STATE_HOME/pelway/patrol-state.json に更新する。正本は GitHub Issues／Projects で、
 # 記録と GitHub の実状態が食い違うときは GitHub を正として記録を直す（runbook の「巡回状態の補助記録」）。
 # 状態は $XDG_STATE_HOME/pelway/conductor-watch/ に置く（セッションの一時フォルダに置かない）。
+# 巡回のたびに、ボード Status 更新の書き込みキュー（$PELWAY_BOARD_QUEUE_DIR、既定
+# /tmp/pelway-board-queue）の *.json を処理する。キューの形式と結果の見方は
+# runbook の「ボード Status 更新キュー」。実行するのは gh project の読み取り
+# （view・field-list・item-list）と item-edit だけで、人間名義の gh が使われる
+# （エージェント環境から人間名義 gh は使えないため、ホスト側のこの常駐で処理する）。
 # 使い方: scripts/conductor-watch-ensure.sh で起動する（冪等の起動入口。止めるまで 30 秒ごとに見る）
 D="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch"; mkdir -p "$D"
 P="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/patrol-state.json"
+Q="${PELWAY_BOARD_QUEUE_DIR:-/tmp/pelway-board-queue}"; mkdir -p "$Q"
 # 一覧の 1 回の取得上限。件数が上限に達した巡回は打ち切りの可能性があるため、
 # python 側で巡回状態を更新しない（窓外の対象を消したり誤判定したりしない）。
 IL=1000; PL=1000
@@ -158,6 +164,117 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
     os.makedirs(os.path.dirname(ps_path) or ".", exist_ok=True)
     json.dump(ps, open(ps_path, "w"), ensure_ascii=False, indent=2, sort_keys=True)
     json.dump(cur, open(sp, "w"))
+PY
+  # ボード Status 更新キュー: $Q の *.json を 1 件ずつ処理する。要求は
+  # {"issue": <番号> | "item_id": "<id>", "status": "<Status 名>"} だけを持つ JSON で、
+  # 値は gh の引数としてだけ渡す（シェルの文字列には組み込まない）。結果は同名の
+  # .done / .error（結果 JSON）を残して要求ファイルを消す。失敗は再試行しない。
+  python3 -I - "$Q" <<'PY' || true
+import glob, json, os, re, subprocess, sys
+from datetime import datetime
+qdir = sys.argv[1]
+# ボードの Status 選択肢（runbook「ボードと巡回」の先頭と同じ値。変えるときは両方を直す）。
+STATUS_NAMES = {"Backlog", "Todo", "Working", "In review", "Changes requested",
+                "Ready to merge", "Needs human", "Done"}
+OWNER, NUM = "hatai", "7"
+ITEM_RE = re.compile(r"[A-Za-z0-9_=-]{1,128}")
+reqs = sorted(glob.glob(os.path.join(qdir, "*.json")))
+if not reqs:
+    sys.exit(0)
+now_iso = datetime.now().isoformat(timespec="seconds")
+
+def record(path, ok, **detail):
+    out = path[:-len(".json")] + (".done" if ok else ".error")
+    body = {"request": os.path.basename(path), "at": now_iso, **detail}
+    tmp = out + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(body, f, ensure_ascii=False)
+    os.replace(tmp, out)
+    os.remove(path)
+    print(f"QUEUE {os.path.basename(path)} {'done' if ok else 'error: ' + str(detail.get('reason'))}", flush=True)
+
+def fail(path, reason, **kw):
+    record(path, False, reason=reason, **kw)
+
+# 第 1 段: ファイルとフィールドの検証（gh は呼ばない）
+pending = []
+for path in reqs:
+    try:
+        req = json.load(open(path))
+    except Exception:
+        fail(path, "bad-json"); continue
+    if not isinstance(req, dict) or not set(req) <= {"issue", "item_id", "status"}:
+        fail(path, "bad-shape"); continue
+    st = req.get("status")
+    if not isinstance(st, str) or st not in STATUS_NAMES:
+        fail(path, "bad-status"); continue
+    iss, iid = req.get("issue"), req.get("item_id")
+    iss_ok = isinstance(iss, int) and not isinstance(iss, bool) and iss > 0
+    iid_ok = isinstance(iid, str) and ITEM_RE.fullmatch(iid) is not None
+    if ("issue" in req) == ("item_id" in req) or (iss is not None and not iss_ok) \
+       or (iid is not None and not iid_ok):
+        fail(path, "bad-target"); continue
+    pending.append((path, req))
+if not pending:
+    sys.exit(0)
+
+# 第 2 段: プロジェクトの実態（選択肢・カード）を読み、item-edit で適用する
+def gh(*args):
+    try:
+        return subprocess.run(["gh", "project", *args], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True, timeout=60)
+    except Exception:
+        return None
+
+def gh_json(*args):
+    r = gh(*args)
+    if r is None or r.returncode != 0:
+        return None
+    try:
+        return json.loads(r.stdout)
+    except Exception:
+        return None
+
+view = gh_json("view", NUM, "--owner", OWNER, "--format", "json")
+fields = gh_json("field-list", NUM, "--owner", OWNER, "--format", "json")
+sf = next((f for f in (fields or {}).get("fields", []) if f.get("name") == "Status"), None)
+pid = (view or {}).get("id")
+if not pid or not sf:
+    for path, _ in pending:
+        fail(path, "gh-read")
+    sys.exit(0)
+opts = {o.get("name"): o.get("id") for o in sf.get("options", [])}
+
+item_of = {}
+if any("issue" in r for _, r in pending):
+    items = gh_json("item-list", NUM, "--owner", OWNER, "--format", "json", "--limit", "1000")
+    if isinstance(items, dict):
+        for it in items.get("items", []):
+            c = it.get("content") or {}
+            if c.get("type") == "Issue" and isinstance(c.get("number"), int):
+                item_of[c["number"]] = it.get("id")
+    else:
+        item_of = None
+
+for path, req in pending:
+    st = req["status"]
+    oid = opts.get(st)
+    if not oid:
+        fail(path, "no-option", status=st); continue
+    if "issue" in req:
+        if item_of is None:
+            fail(path, "item-list"); continue
+        iid = item_of.get(req["issue"])
+        if not iid:
+            fail(path, "item-not-found", issue=req["issue"]); continue
+    else:
+        iid = req["item_id"]
+    r = gh("item-edit", "--project-id", pid, "--id", iid,
+           "--field-id", sf["id"], "--single-select-option-id", oid)
+    if r is not None and r.returncode == 0:
+        record(path, True, status=st, item=iid)
+    else:
+        fail(path, "item-edit", rc=(r.returncode if r else -1))
 PY
   sleep 30
 done
