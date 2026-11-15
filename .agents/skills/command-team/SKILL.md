@@ -310,6 +310,8 @@ mattpocock/skills から `.agents/skills/` に取り込んだ輸入スキル（�
 
 - 実装の試行では `tdd`、調査の試行では `diagnosing-bugs` を使う。入口はそれぞれの役割スキル（`implement-issue`・`investigate-bug`）の「輸入スキル」の節。
 - 設計・ADR の試行では、設計担当に `.agents/skills/domain-modeling/SKILL.md` と `.agents/skills/research/SKILL.md` を repo パスで読ませる。設計担当の成果物の記録（ADR・設計文書・作業ログ）にも使ったスキル名を残させる。
+- セッションの振り返りの試行では `retro` を使う。起動は人間または指揮役が対象セッションを指定して行い、出どころ・出口・カテゴリの読み替えは `docs/agents/external-skills.md` の「retro の適用ルール」に従う。担当には `.agents/skills/retro/SKILL.md` を repo パスで読ませ、7 カテゴリの候補リスト（深刻度順）を作業ログに残させる。
+- `writing-for-agents` は試行の対象ではなく、スキルや AGENTS.md を書く・直すときの参照として repo パス（`.agents/skills/writing-for-agents/SKILL.md`）で読む。上流の `retro` が手順 1 で呼ぶ依存でもある。
 - 自律スレッドは輸入スキルを名前の解決に任せず、役割スキルを入口として repo 内の明示したパスで読む。人間側の同名のユーザーレベル版をチームのスレッドが読んではならない。
 - 取り込みの discipline: 同梱スクリプトは実行しない。`agents/` のメタデータは使わない。採用していないスキルへの参照は無効。輸入品の本文と正本・適用ルールが衝突した場合は正本と適用ルールが優先する。
 - 指揮役では決められないことは、推測で埋めずに人間に聞く。
