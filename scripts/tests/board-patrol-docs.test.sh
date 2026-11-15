@@ -47,15 +47,15 @@ check cond2_runbook_aux docs/agents/grokbot-runbook.md \
   '戻り先' \
   '前回ステータス'
 
-# 条件3: command-team — hatai の指摘の伝達に Changes requested への変更と対応済みの記録、
-# 「hatai 待ち」を Ready to merge に置く規則、報告 PR に Part of #<番号> を書く義務。
-check cond3_command_team_hatai .agents/skills/command-team/SKILL.md \
+# 条件3: command-team の条件つき詳細文書 — hatai の指摘の伝達に Changes requested への変更と
+# 対応済みの記録、「hatai 待ち」を Ready to merge に置く規則、報告 PR に Part of #<番号> を書く義務。
+check cond3_command_team_hatai docs/agents/command-team-details.md \
   'Changes requested' \
   '対応済み'
-check cond3_command_team_hatai_wait .agents/skills/command-team/SKILL.md \
+check cond3_command_team_hatai_wait docs/agents/command-team-details.md \
   'Ready to merge' \
   '[review-request-human]'
-check cond3_command_team_report_pr .agents/skills/command-team/SKILL.md \
+check cond3_command_team_report_pr docs/agents/command-team-details.md \
   '`Part of #<番号>`'
 
 # 条件4: implement-issue — 委託・再委託のたびに対象 PR へ委託記録コメント、

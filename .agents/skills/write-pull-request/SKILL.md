@@ -21,6 +21,7 @@ GitHub PR のタイトルと説明本文を書く・直す手順。
 - 使ってよいネット / `gh` は `gh pr list` / `gh pr view` / `gh pr create` / `gh pr edit` / `gh issue view` / `gh issue comment` / `gh issue edit` / `gh search repos` / `gh search code` だけ。これ以外のネット接続はしない。
 - AI 開発チームのエージェントは、`gh` を `scripts/agent-gh dev` 経由で実行する（例: `scripts/agent-gh dev pr create ...`）。素の `gh` で作った PR は作成者が hatai になり、hatai が Approve できないため、ブランチ保護を迂回しないとマージできない。
 - AI 開発チームのエージェントが作る PR は Draft にする（`--draft`）。
+- 日本語を含む文字列（PR タイトル・本文・コメント・Issue 本文等）は、exec のコマンド引数（`--title "..."` など）に書かず、必ずファイル経由（`--body-file`、`api --input` 等）で渡す。実装担当の sandbox では exec 引数の日本語が `\uXXXX` エスケープのまま実行環境に届き、エスケープ文字列がそのままタイトルや本文に載る障害が繰り返されているため（PR #311・#314・#319 で発生）。
 - 迷ったら質問で止まらず、作業ログ(`docs/worklogs/YYYY-MM-DD-<slug>.md`)に書いて進める。
 - PR 作成・更新中は、製品コード、他ブランチ、他 worktree、無関係な既存 PR を変えない。スキル本文も、このスキルを「使う」作業の目的外では直さない。
 
@@ -47,7 +48,7 @@ git diff <base>...HEAD
 scripts/agent-gh dev pr list --head <ブランチ名>
 ```
 
-- 既存がある → `scripts/agent-gh dev pr edit <番号>` でタイトル・本文を更新。重複 PR を作らない。
+- 既存がある → `scripts/agent-gh dev pr edit <番号> --body-file` で本文を更新し、タイトルは手順 3 の `api PATCH --input` で更新する。重複 PR を作らない。
 - 無い → `scripts/agent-gh dev pr create --draft`。
 
 ### 3. タイトルを書く
@@ -58,6 +59,16 @@ scripts/agent-gh dev pr list --head <ブランチ名>
   回次や ID は、どうしても必要なら題名の補助として末尾に置く。
 - 悪い例: 「QA-GDPR-02 r3: 参照列と本文 canary の修正」(工程名が主体)
 - 良い例: 「翻訳本文の canary 指定値を原文と一致させ、参照列の走査を symlink 対応に修正」
+- タイトルに日本語を使うとき、`--title` の引数には日本語を書かない。PR 作成時は英語の仮タイトル（例: `wip`）を `--title` に渡し、作成後に日本語タイトルをファイル経由で設定する:
+
+```
+cat > /tmp/opencode/pr-title.json <<'EOF'
+{"title": "<日本語タイトル>"}
+EOF
+scripts/agent-gh dev api PATCH /repos/hatai/Pelway/pulls/<PR 番号> --input /tmp/opencode/pr-title.json
+```
+
+- 既存 PR のタイトルを直すときも同じく `api PATCH --input` を使う。`pr edit --title` に日本語を渡さない。
 
 ### 4. 本文を書く
 
@@ -75,10 +86,10 @@ scripts/agent-gh dev pr list --head <ブランチ名>
 5. **対象外** — この PR で触れていないこと、後回しにしたこと。
 6. **対象** — ブランチ名と、手順 1 で取った現在の HEAD sha。
 
-本文は heredoc で渡す:
+本文は heredoc で渡す（`--body-file -` はファイル経由のため、日本語本文をこの形で渡してよい）。`--title` には日本語を書かず、手順 3 のとおり英語の仮タイトルを渡す:
 
 ```
-scripts/agent-gh dev pr create --draft --title "..." --body-file - <<'EOF'
+scripts/agent-gh dev pr create --draft --title "wip" --body-file - <<'EOF'
 ...本文...
 EOF
 ```

@@ -9,7 +9,7 @@
 | 人間（濱田さん） | — | `hatai` | 本人 |
 | 指揮 | Grok Bot（クラウド）。動かないときは人間が指名したエージェントが代行する（runbook の「代行」） | — | T3 Connect 経由の MCP |
 | 実装 | T3 スレッド・opencode `zai-coding-plan/glm-5.3`・Devin CLI（`acpRegistry_devin`、`swe-2-high`） | GitHub App `pelway-dev`（`pelway-dev[bot]`） | App のインストールトークン（呼び出しごとに発行） |
-| レビュー | 実装担当からのレビュー委託（`delegate_task` の子タスク）・Codex（`codex_review`）・Devin CLI（`devin_review`、通常の PR の Codex とのローテーションと高リスクの PR）と Claude（`claude_review`、高リスクの PR と抜き取り）。指揮役がレビュースレッドを立てるのは、指揮役自身の PR と外部投入（skill `command-team` の「外部からのレビュースレッド投入」）の分だけ | GitHub App `pelway-review`（`pelway-review[bot]`） | App のインストールトークン（呼び出しごとに発行） |
+| レビュー | 実装担当からのレビュー委託（`delegate_task` の子タスク）・Codex（`codex_review`）・Devin CLI（`devin_review`、通常の PR の Codex とのローテーションと高リスクの PR）と Claude（`claude_review`、高リスクの PR と抜き取り）。指揮役がレビュースレッドを立てるのは、指揮役自身の PR と外部投入（`docs/agents/command-team-details.md` の「外部からのレビュースレッド投入」）の分だけ | GitHub App `pelway-review`（`pelway-review[bot]`） | App のインストールトークン（呼び出しごとに発行） |
 
 App は 2 つに分ける。同じ名義では自分の PR を Approve できないため。App の秘密鍵と ID は `~/.config/pelway-agent/fnox.toml` に age で暗号化して置き、`scripts/agent-gh` が呼び出しごとにトークンを発行する。
 
@@ -51,14 +51,14 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 
 1. 指揮役は原因が未理解の報告を受けたら、調査スレッド（skill `investigate-bug`）を立てる。調査スレッドは GLM の枠に数える（下の「制約」）
 2. 調査スレッドは原因の調査と報告（skill `investigate-bug` の手順 5）までを担い、修正のコードは書かない。報告は `docs/worklogs/bugs/<slug>/report.md` に書き、そのファイルだけの Draft PR（ブランチ `agent/investigate-<slug>`）として残す
-3. 指揮役は報告の PR で報告を確認して起票可否を判断し、起票するときは skill `write-issue` で行う（判断の詳細は skill `command-team` の「調査の引き渡し」）。人間は `ready-for-agent` で承認し、入口A の流れに合流する。報告の PR は起票の可否にかかわらずレビューを経てマージされ、報告が main に残る。このレビューは指揮役がレビュースレッドを立てて行う（実装担当のレビュー委託の対象外。調査スレッドは調査に専念させる）
+3. 指揮役は報告の PR で報告を確認して起票可否を判断し、起票するときは skill `write-issue` で行う（判断の詳細は `docs/agents/command-team-details.md` の「調査（入口B）」）。人間は `ready-for-agent` で承認し、入口A の流れに合流する。報告の PR は起票の可否にかかわらずレビューを経てマージされ、報告が main に残る。このレビューは指揮役がレビュースレッドを立てて行う（実装担当のレビュー委託の対象外。調査スレッドは調査に専念させる）
 4. 実装は、調査を担ったスレッドへの役割の追加としては行わない。実装スレッドとして割り当て替える（「役割と GitHub 上の名義」の役割の変更の原則）
 
 ## 制約
 
 - `pelway-dev` には GitHub App の Workflows 権限を付けない。`.github/workflows/` の変更は人間が行う（push で動く workflow は承認前に secret を読めるため）。例外は Workflows 権限が必要なため人間の名義でしか行えない操作だけで、現在は `actions.lock` の再生成（`ci(deps):` の PR のマージ前。実施は skill `command-team` の「マージ」）の 1 つ
 - PR 1 本の差分は追加 800 行・削除 2000 行まで（`mise run pr-size` が追加行と削除行を分けて数える）。`.gitattributes` で `linguist-generated` を付けたファイルは数えない。指揮役が Issue のコメントで超過を認め `pr-size-exception` ラベルを付けた PR は、pr-size の失敗のままマージしてよい（レビュー担当はこのラベルがあれば pr-size の失敗を must-fix に数えない）
-- GLM の実装スレッドと調査スレッドは合算して同時に 3 本まで、Devin CLI の実装スレッドは同時に 6 本まで。枠の消費数は、open な Issue の `agent:working` の数から、作業状態の印が停止中・再開処理中・再開待ちのもの（runbook の「ボードと巡回」）を除いた数に、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）を加えたもの。GLM 枠と Devin CLI 枠の内訳は Issue の `agent:devin` ラベルの有無で判定する。実装の枠を超えた分は指揮役が順番待ちにする（満杯時の優先の判断は skill `command-team` の「調査の担当と effort」）
+- GLM の実装スレッドと調査スレッドは合算して同時に 3 本まで、Devin CLI の実装スレッドは同時に 6 本まで。枠の消費数は、open な Issue の `agent:working` の数から、作業状態の印が停止中・再開処理中・再開待ちのもの（runbook の「ボードと巡回」）を除いた数に、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）を加えたもの。GLM 枠と Devin CLI 枠の内訳は Issue の `agent:devin` ラベルの有無で判定する。実装の枠を超えた分は指揮役が順番待ちにする（満杯時の優先の判断は `docs/agents/command-team-details.md` の「調査（入口B）」）
 - GitHub Projects のボードの読み書きは人間の名義の `gh` で行う（読み取り `read:project`、書き込み `project` スコープ）。`scripts/agent-gh` は使わない（人間の名義で行う操作の既存の枠と同じ扱い）。スコープが無ければ巡回を止めて hatai に報告する
 - レビューの同時数（Codex 2 本、Devin CLI 2 本、Claude 1 本）は目安で、順番待ちの管理をしない。通常の PR のレビューは実装担当が委託するため全局管理はせず、実装担当は自分の PR のレビューを 1 件ずつ順に委託し、修正とレビューの繰り返しは直列に回す。指揮役が立てるレビュースレッド（指揮役自身の PR・外部投入）の同時数はこの目安内に収める。待ち時間や利用上限に実害が出たら、改善ループで見直す
 - GLM は終日使う。時間帯による使用制限はない。Devin CLI のセッションに時間帯・時間量の上限はない
