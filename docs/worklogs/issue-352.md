@@ -2,7 +2,7 @@
 
 ## 実装者メモ（round 1）
 
-対象 head: 01fd4aafe3205ee559e6aca1d179d3ccc9f1b4eb（この round の実装の実体を含むコミット。このメモを含むコミットの親）
+対象 head: daeb1bf34bd5eccdc6cb4ca5ec2ad3d4d39c2dca（この round の実装の実体を含むコミット。`scripts/agent-gh-resign` による署名付け替え後の SHA。このメモを含むコミットの親）
 
 1. 詰まった箇所: 環境: このスレッドの sandbox は `/home` を read-only マウントするため `mise run verify` が mbx（`~/.cache/mbx` 書込不可）と `scripts/tests/agent-sandbox.test.sh`（`$HOME` 直下への fixture 作成）で失敗。前者は `XDG_CACHE_HOME=/tmp/devin-xdgcache` へのリダイレクトで通した。後者は `HOME=/tmp/fakehome` でも試したが、sandbox-shell が実 HOME 前提のため同テストはこの環境では構造的に実行不可（差分とは無関係。それ以外の script-test 全件は個別実行で全パス、verify-lint・cargo test・verify-static も通過済み）
 2. 曖昧だった文: 「Status 名がそのプロジェクトの選択肢に無い、対象 item が解決できない等の不正要求は `gh` を呼ばず失敗記録に回す」（Issue #352 本文「受け入れ条件」）
