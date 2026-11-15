@@ -238,8 +238,8 @@ for name in reqs:
     iss, iid = req.get("issue"), req.get("item_id")
     iss_ok = isinstance(iss, int) and not isinstance(iss, bool) and iss > 0
     iid_ok = isinstance(iid, str) and ITEM_RE.fullmatch(iid) is not None
-    if ("issue" in req) == ("item_id" in req) or (iss is not None and not iss_ok) \
-       or (iid is not None and not iid_ok):
+    if ("issue" in req) == ("item_id" in req) or ("issue" in req and not iss_ok) \
+       or ("item_id" in req and not iid_ok):
         fail(name, "bad-target"); continue
     pending.append((name, req))
 if not pending:

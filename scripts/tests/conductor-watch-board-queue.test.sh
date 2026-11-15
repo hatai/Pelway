@@ -137,9 +137,13 @@ req inject-status.json "{\"issue\": 352, \"status\": \"Working; touch $ROOT/pwne
 req inject-id.json "{\"item_id\": \"x;touch $ROOT/pwned\", \"status\": \"Working\"}"
 req both-targets.json '{"issue": 352, "item_id": "PVTI_i352", "status": "Working"}'
 req extra-key.json '{"issue": 352, "status": "Working", "run": "touch /tmp/x"}'
+req null-issue.json '{"issue": null, "status": "Working"}'
+req null-itemid.json '{"item_id": null, "status": "Working"}'
+req null-both.json '{"issue": null, "item_id": null, "status": "Working"}'
+req empty-itemid.json '{"item_id": "", "status": "Working"}'
 printf 'not json at all' > "$QUEUE/malformed.json"
 run_cycles 1
-for f in bad-status inject-status inject-id both-targets extra-key malformed; do
+for f in bad-status inject-status inject-id both-targets extra-key null-issue null-itemid null-both empty-itemid malformed; do
   check "$f produces .error" test -f "$QUEUE/$f.error"
   check "$f request file consumed" test ! -e "$QUEUE/$f.json"
 done
