@@ -193,6 +193,32 @@ FAKE_PELWAY_DEV_GIT_EMAIL="" run missing_email_fails_closed dev git push
 [[ "$RC" == 3 ]] || failures+=("missing_email_fails_closed: exit $RC, want 3")
 [[ ! -e "$ROOT/missing_email_fails_closed.log" ]] || failures+=("missing_email_fails_closed: git was called")
 
+# \uXXXX のエスケープが残った引数は、fnox・gh・git のどれも呼ばず終了コード 5 で止める。
+# ハーネス層で非 ASCII が潰れた状態で届く引数をそのまま流すと壊れた文字列が確定するため。
+run unicode_guard_dev dev issue create --title 'x\u30b9y'
+[[ "$RC" == 5 ]] || failures+=("unicode_guard_dev: exit $RC, want 5")
+[[ "$OUT" == *'\uXXXX'* ]] || failures+=("unicode_guard_dev: no guidance")
+[[ ! -e "$ROOT/unicode_guard_dev.log" && ! -e "$ROOT/unicode_guard_dev.log.fnox-args" ]] ||
+  failures+=("unicode_guard_dev: fnox or gh was called")
+
+run unicode_guard_review review pr review 1 --approve --body 'ok\u1234'
+[[ "$RC" == 5 ]] || failures+=("unicode_guard_review: exit $RC, want 5")
+[[ ! -e "$ROOT/unicode_guard_review.log" && ! -e "$ROOT/unicode_guard_review.log.fnox-args" ]] ||
+  failures+=("unicode_guard_review: fnox or gh was called")
+
+run unicode_guard_git dev git commit -m 'msg \u3042'
+[[ "$RC" == 5 ]] || failures+=("unicode_guard_git: exit $RC, want 5")
+[[ ! -e "$ROOT/unicode_guard_git.log" ]] || failures+=("unicode_guard_git: git was called")
+
+# 16進が 4 桁未満・大文字 U は検出対象外（誤検知しない）
+run unicode_guard_short_hex dev pr list --search 'a\u12b'
+[[ "$RC" == 0 ]] || failures+=("unicode_guard_short_hex: exit $RC, want 0")
+expect_log unicode_guard_short_hex 'ARGS=pr list --search a\u12b'
+
+run unicode_guard_capital_u dev pr list --search 'a\U3042'
+[[ "$RC" == 0 ]] || failures+=("unicode_guard_capital_u: exit $RC, want 0")
+expect_log unicode_guard_capital_u 'ARGS=pr list --search a\U3042'
+
 if ((${#failures[@]})); then
   printf 'FAIL %s\n' "${failures[@]}"
   exit 1
