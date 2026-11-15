@@ -35,3 +35,15 @@
 5. 改善案: `docs/dev-environment.md` の「レビュー担当の Claude」に `effort` の有効値（low|medium|high|max 相当）を明記する
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（round 4）
+
+対象 head: 3f514a96c3d238cba7f722e8003234ede396c852
+
+1. 詰まった箇所: scripts/conductor-watch.sh:241: round 3 の静的レビュー（codex xhigh）で `{"issue":null}` / `{"item_id":null}` が検証を通り phase 2 の gh 呼び出しに進む指摘。値が null のとき `iss is not None` 条件で検証を素通りしていたため、キーの存在に基づく型検証（`"issue" in req and not iss_ok`）に直し、null・空文字・両方 null のケースを gh ゼロ回の assert つきでテスト追加
+2. 曖昧だった文: 「キーの存在に基づいて型を検証し（issue は有限の数値、item_id は空でない文字列、jq の型チェックで null を弾く）」（round 3 レビュー must-fix）
+3. 仮定と解釈: 「有限の数値」は正の整数（bool・float 不可）の既存検証で十分と解釈（JSON に inf/nan は来ない）。「jq の型チェック」は実装が Python のため isinstance 検証と読み替えた
+4. 足りなかった情報・検証手段: レビュー投稿が checks pending ルールで未投稿のため、GitHub 上のレビュー本文は未確認（指摘文は依頼者経由で入手）
+5. 改善案: なし（`is not None` で検証を素通りする穴は初版の検証ロジックにあったもの。null 系のテストを先に書いていれば防げた）
+
+使ったスキル: `.agents/skills/implement-issue`
