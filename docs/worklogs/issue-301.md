@@ -67,3 +67,15 @@ gdpr02_routes.rs・no_body_logs.rs は src 内だが `crates/pelway-http/src/lib
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「6. 検査してコミットし、行数を確かめてから push する」に「main の取り込み(マージコミット)も `scripts/agent-gh dev git commit` で作る(素の `git commit` は author が hatai 名義になる。マージなら `--amend --reset-author` で直せる)」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ(round 4)
+
+対象 head: 27d0fa1（main の取り込み(マージコミット)。このメモを含むコミットの親）
+
+1. 詰まった箇所: 素の `git merge` の自動コミットが hatai 名義になった(round 3 と同じ失敗)→`scripts/agent-gh dev git commit --amend --reset-author` で pelway-dev[bot] に修正。マージ自体は衝突なしで自動解消(Kodiak の衝突判定は #320 マージ直後の一時的なものと推定)。
+2. 曖昧だった文: 「main を取り込んで衝突を解消(両側の行を保持)」(修正依頼)— 実際にはテキスト衝突は発生せず、HEAD 側の `script-test` 行(`codeql-suppressions.test.sh` と `worklog-curation.test.sh` の両方を含む)がそのまま保持された。#320(#316 のスキル取り込み)は script-test 行を触っていなかった。
+3. 仮定と解釈: push により Codex・Claude 両担当の approve(head 5ea4fa9)は dismiss される(dismiss stale 有効は round 3 の実績)ため、取り込み後に両担当へ再レビューを依頼する。automerge ラベルの付け直しは指揮役が行う(修正依頼の指定どおり実装側では付けない)。
+4. 足りなかった情報・検証手段: Kodiak が「merge conflict」と判定した正確な理由(コメントに詳細が無く、取り込み時点では MERGEABLE だったため推定のまま)。
+5. 改善案: `scripts/agent-gh` に author/committer を App 名義にする `git merge` ラッパー(または implement-issue への明記)を足す(round 3 の改善案と同じ根: 素の git のマージコミットが hatai 名義になる)。
+
+使ったスキル: implement-issue
