@@ -99,10 +99,10 @@ expect_case() {
   if [ "${RC}" -ne "${want}" ]; then
     ng "${stage}: ${label} (exit ${RC}, want ${want})"; show "${OUT}"; return
   fi
-  if [ "${want}" -eq 1 ] && ! printf '%s\n' "${OUT}" | grep -qF "${rel}:"; then
+  if [ "${want}" -eq 1 ] && ! grep -qF "${rel}:" <<<"${OUT}"; then
     ng "${stage}: ${label} (no ${rel}:<line> in output)"; show "${OUT}"; return
   fi
-  if printf '%s\n' "${OUT}" | grep -q "SYNTHETIC"; then
+  if grep -q "SYNTHETIC" <<<"${OUT}"; then
     ng "${stage}: ${label} (secret-like value printed)"; return
   fi
   ok "${stage}: ${label}"
@@ -113,7 +113,7 @@ R=crates/x/src/v.rs
 # --- 合格するべきツリー（canary は走査対象ゼロで未検証になるため別ケース） ---
 for s in loopback leak-phrases external-refs; do expect_case "${s}" 0 "clean tree passes" "" ""; done
 run_stage "${tmp}/case" loopback
-if printf '%s\n' "${OUT}" | grep -q "runtime: PENDING"; then ok "loopback: runtime PENDING is reported"; else ng "loopback: runtime PENDING is reported"; fi
+if grep -q "runtime: PENDING" <<<"${OUT}"; then ok "loopback: runtime PENDING is reported"; else ng "loopback: runtime PENDING is reported"; fi
 
 # runtime 検査（DEMO_CHECK_RUNTIME=1）: ss をスタブに差し替えて列挙結果を固定する（方式B。Issue #269）
 mkdir -p "${tmp}/fakesbin"
@@ -124,7 +124,7 @@ printf 'LISTEN 0 511 0.0.0.0:22 0.0.0.0:*\nLISTEN 0 511 127.0.0.1:8080 0.0.0.0:*
 SS
 chmod +x "${tmp}/fakesbin/ss"
 run_stage "${r}" loopback PATH="${tmp}/fakesbin:${PATH}" DEMO_CHECK_RUNTIME=1
-if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -qF "0.0.0.0:22" && ! printf '%s\n' "${OUT}" | grep -q "runtime: PENDING"; then
+if [ "${RC}" -eq 1 ] && grep -qF "0.0.0.0:22" <<<"${OUT}" && ! grep -q "runtime: PENDING" <<<"${OUT}"; then
   ok "loopback: a non-loopback LISTEN socket is a runtime violation (exit 1)"
 else ng "loopback: runtime violation (exit ${RC})"; show "${OUT}"; fi
 
@@ -133,7 +133,7 @@ cat > "${tmp}/fakesbin/ss" <<'SS'
 printf 'LISTEN 0 511 127.0.0.1:8080 0.0.0.0:*\nLISTEN 0 511 [::1]:9000 [::]:*\n'
 SS
 run_stage "${r}" loopback PATH="${tmp}/fakesbin:${PATH}" DEMO_CHECK_RUNTIME=1
-if [ "${RC}" -eq 0 ] && printf '%s\n' "${OUT}" | grep -qF "runtime: checked 2 listening socket(s), 0 hit(s)"; then
+if [ "${RC}" -eq 0 ] && grep -qF "runtime: checked 2 listening socket(s), 0 hit(s)" <<<"${OUT}"; then
   ok "loopback: loopback-only LISTEN sockets pass the runtime check"
 else ng "loopback: runtime clean (exit ${RC})"; show "${OUT}"; fi
 
@@ -151,14 +151,14 @@ if [ "${RC}" -eq 2 ]; then
   ok "loopback: a failing ss makes the runtime check exit 2"
 else ng "loopback: ss failure (exit ${RC}, want 2)"; show "${OUT}"; fi
 run_stage "${tmp}/case" canary
-if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "no artifacts to scan" && printf '%s\n' "${OUT}" | grep -q "canary: scanned 0 file(s)" && ! printf '%s\n' "${OUT}" | grep -q "PASS"; then
+if [ "${RC}" -eq 1 ] && grep -q "no artifacts to scan" <<<"${OUT}" && grep -q "canary: scanned 0 file(s)" <<<"${OUT}" && ! grep -q "PASS" <<<"${OUT}"; then
   ok "canary: no artifacts to scan is a failure (exit 1, scanned 0)"
 else ng "canary: no artifacts to scan must fail with scanned 0 (exit ${RC})"; show "${OUT}"; fi
 
 # --- DEMO_CHECK_ACCEPTANCE=1（受入モード）。未設定時の挙動は変えない ---
 make_clean "${tmp}/case"
 run_stage "${tmp}/case" loopback DEMO_CHECK_ACCEPTANCE=1
-if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "ACCEPTANCE MODE"; then
+if [ "${RC}" -eq 1 ] && grep -q "ACCEPTANCE MODE" <<<"${OUT}"; then
   ok "loopback: runtime PENDING is a failure under ACCEPTANCE (exit 1)"
 else ng "loopback: ACCEPTANCE runtime PENDING (exit ${RC})"; show "${OUT}"; fi
 
@@ -167,7 +167,7 @@ else ng "loopback: ACCEPTANCE runtime PENDING (exit ${RC})"; show "${OUT}"; fi
 # 失敗はこの単独ケースで固定する（loopback には頼らない）。通常モードの0件ケースは上で別にある
 make_clean "${tmp}/case"
 run_stage "${tmp}/case" canary DEMO_CHECK_ACCEPTANCE=1
-if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "no artifacts to scan" && printf '%s\n' "${OUT}" | grep -q "canary: scanned 0 file(s)" && ! printf '%s\n' "${OUT}" | grep -q "PASS"; then
+if [ "${RC}" -eq 1 ] && grep -q "no artifacts to scan" <<<"${OUT}" && grep -q "canary: scanned 0 file(s)" <<<"${OUT}" && ! grep -q "PASS" <<<"${OUT}"; then
   ok "canary: no artifacts to scan is a failure under ACCEPTANCE alone (exit 1, scanned 0)"
 else ng "canary: ACCEPTANCE no artifacts must fail alone with scanned 0 (exit ${RC})"; show "${OUT}"; fi
 
@@ -186,7 +186,7 @@ make_clean "${tmp}/case"
 mkdir -p "${tmp}/case/logs"
 printf 'start\napi_key=PELWAY_CANARY_APIKEY_9c21\n' > "${tmp}/case/logs/app.log"
 run_stage "${tmp}/case" canary DEMO_CHECK_ACCEPTANCE=1
-if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -qF "logs/app.log:2: canary PELWAY_CANARY_APIKEY_9c21"; then
+if [ "${RC}" -eq 1 ] && grep -qF "logs/app.log:2: canary PELWAY_CANARY_APIKEY_9c21" <<<"${OUT}"; then
   ok "canary: a marker in artifacts is a failure under ACCEPTANCE alone (exit 1)"
 else ng "canary: ACCEPTANCE marker hit must fail alone (exit ${RC})"; show "${OUT}"; fi
 
@@ -196,19 +196,19 @@ else ng "canary: ACCEPTANCE marker hit must fail alone (exit ${RC})"; show "${OU
 # DEMO_CHECK_RUNTIME を外して固定する
 make_clean "${tmp}/case"
 OUT="$(env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" 2>&1)"; RC=$?
-if [ "${RC}" -eq 1 ] && ! printf '%s\n' "${OUT}" | grep -q "PARTIAL RUN" && printf '%s\n' "${OUT}" | grep -q "full run: all 4 stages" && printf '%s\n' "${OUT}" | grep -q "failed: canary"; then
+if [ "${RC}" -eq 1 ] && ! grep -q "PARTIAL RUN" <<<"${OUT}" && grep -q "full run: all 4 stages" <<<"${OUT}" && grep -q "failed: canary" <<<"${OUT}"; then
   ok "run.sh: full run on a clean tree fails only at canary and is not PARTIAL"
 else ng "run.sh: full run on a clean tree (exit ${RC})"; show "${OUT}"; fi
 
 mkdir -p "${tmp}/case/target/debug"
 printf 'clean artifact\n' > "${tmp}/case/target/debug/app"
 OUT="$(env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" 2>&1)"; RC=$?
-if [ "${RC}" -eq 0 ] && ! printf '%s\n' "${OUT}" | grep -q "PARTIAL RUN" && printf '%s\n' "${OUT}" | grep -q "full run: all 4 stages"; then
+if [ "${RC}" -eq 0 ] && ! grep -q "PARTIAL RUN" <<<"${OUT}" && grep -q "full run: all 4 stages" <<<"${OUT}"; then
   ok "run.sh: full run passes (exit 0) once canary has artifacts to scan"
 else ng "run.sh: full run with canary artifacts (exit ${RC})"; show "${OUT}"; fi
 
 OUT="$(env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" loopback 2>&1)"; RC=$?
-if [ "${RC}" -eq 0 ] && printf '%s\n' "${OUT}" | grep -q "PARTIAL RUN: not valid for acceptance" && printf '%s\n' "${OUT}" | grep -q "acceptance requires a full run"; then
+if [ "${RC}" -eq 0 ] && grep -q "PARTIAL RUN: not valid for acceptance" <<<"${OUT}" && grep -q "acceptance requires a full run" <<<"${OUT}"; then
   ok "run.sh: single stage prints PARTIAL RUN and the full-run requirement"
 else ng "run.sh: single stage PARTIAL RUN (exit ${RC})"; show "${OUT}"; fi
 
@@ -217,24 +217,24 @@ rel_evil="$(realpath --relative-to="${here}" "${tmp}/evil")"
 for arg in "${rel_evil}" "../../x/ok" "/tmp/x" "nosuch" "loopback.sh" ""; do
   rm -f "${tmp}/pwned"
   OUT="$(env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" "${arg}" 2>&1)"; RC=$?
-  if [ "${RC}" -eq 2 ] && [ ! -e "${tmp}/pwned" ] && ! printf '%s\n' "${OUT}" | grep -q "== demo-check:"; then
+  if [ "${RC}" -eq 2 ] && [ ! -e "${tmp}/pwned" ] && ! grep -q "== demo-check:" <<<"${OUT}"; then
     ok "run.sh: rejects argument '${arg}' with exit 2 and runs nothing"
   else ng "run.sh: argument '${arg}' (exit ${RC}, pwned=$([ -e "${tmp}/pwned" ] && echo yes || echo no))"; show "${OUT}"; fi
 done
 OUT="$(env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" bash "${here}/run.sh" loopback "${rel_evil}" 2>&1)"; RC=$?
-if [ "${RC}" -eq 2 ] && [ ! -e "${tmp}/pwned" ] && ! printf '%s\n' "${OUT}" | grep -q "== demo-check:"; then
+if [ "${RC}" -eq 2 ] && [ ! -e "${tmp}/pwned" ] && ! grep -q "== demo-check:" <<<"${OUT}"; then
   ok "run.sh: a valid stage mixed with a path is rejected before running anything"
 else ng "run.sh: valid+path mix (exit ${RC})"; show "${OUT}"; fi
 
 # --- run.sh: 受入モード（全段階・一部段階の両方） ---
 make_clean "${tmp}/case"
 OUT="$(env -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" DEMO_CHECK_ACCEPTANCE=1 bash "${here}/run.sh" 2>&1)"; RC=$?
-if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "ACCEPTANCE MODE" && printf '%s\n' "${OUT}" | grep -q "failed: loopback canary"; then
+if [ "${RC}" -eq 1 ] && grep -q "ACCEPTANCE MODE" <<<"${OUT}" && grep -q "failed: loopback canary" <<<"${OUT}"; then
   ok "run.sh: full run under ACCEPTANCE fails (loopback PENDING + canary no artifacts) and prints ACCEPTANCE MODE"
 else ng "run.sh: full run under ACCEPTANCE (exit ${RC})"; show "${OUT}"; fi
 
 OUT="$(env -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${tmp}/case" DEMO_CHECK_ACCEPTANCE=1 bash "${here}/run.sh" loopback 2>&1)"; RC=$?
-if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -q "PARTIAL RUN" && printf '%s\n' "${OUT}" | grep -q "ACCEPTANCE MODE"; then
+if [ "${RC}" -eq 1 ] && grep -q "PARTIAL RUN" <<<"${OUT}" && grep -q "ACCEPTANCE MODE" <<<"${OUT}"; then
   ok "run.sh: partial run under ACCEPTANCE still fails and prints both marks"
 else ng "run.sh: partial run under ACCEPTANCE (exit ${RC})"; show "${OUT}"; fi
 
@@ -318,7 +318,7 @@ expect_case loopback 1 "allowed bind then localhost bind on one line" "${R}" 'fn
 expect_case loopback 1 "localhost bind then allowed bind on one line" "${R}" 'fn m2() { let _ = std::net::TcpListener::bind("localhost:2").unwrap(); let _ = std::net::TcpListener::bind("[::1]:3").unwrap(); }\n'
 expect_case loopback 0 "two allowed binds on one line" "${R}" 'fn m3() { let _ = std::net::TcpListener::bind("127.0.0.1:1").unwrap(); let _ = std::net::TcpListener::bind("[::1]:2").unwrap(); }\n'
 # Codex r2 指摘1: 判定関数内の [[ =~ ]] が BASH_REMATCH を上書きしてもループ位置は壊れないこと
-bind_count() { printf '%s\n' "${OUT}" | grep -c 'bind argument is not' || true; }
+bind_count() { grep -c 'bind argument is not' <<<"${OUT}" || true; }
 r="${tmp}/case"; make_clean "${r}"
 printf 'fn a0() { let _ = std::net::TcpListener::bind("localhost"); }\n' > "${r}/crates/x/src/bind0.rs"
 OUT="$(timeout 5 env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${r}" DEMO_CHECK_LIST_DIR="${here}" bash "${here}/loopback.sh" 2>&1)"; RC=$?
@@ -361,7 +361,7 @@ printf 'x\x00PELWAY_CANARY_PII_4e8d\x00' > "${tmp}/device/store/db.bin"
 run_stage "${r}" canary DEMO_CHECK_EXTRA_PATHS="${tmp}/nothing-here:${tmp}/device"
 if [ "${RC}" -eq 2 ]; then ok "canary: missing DEMO_CHECK_EXTRA_PATHS entry is exit 2"; else ng "canary: missing extra path (exit ${RC})"; show "${OUT}"; fi
 run_stage "${r}" canary DEMO_CHECK_EXTRA_PATHS="${tmp}/device"
-if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -qF "${tmp}/device/store/db.bin:(binary)"; then ok "canary: hit in DEMO_CHECK_EXTRA_PATHS (device storage) fails"; else ng "canary: extra path hit (exit ${RC})"; show "${OUT}"; fi
+if [ "${RC}" -eq 1 ] && grep -qF "${tmp}/device/store/db.bin:(binary)" <<<"${OUT}"; then ok "canary: hit in DEMO_CHECK_EXTRA_PATHS (device storage) fails"; else ng "canary: extra path hit (exit ${RC})"; show "${OUT}"; fi
 
 # --- DC-03: 走査中のシンボリックリンクをたどらない（リンク先を走査ルートの外に置く） ---
 r="${tmp}/case"; make_clean "${r}"
@@ -382,7 +382,7 @@ printf 'clean line\n' > "${r}/logs/app.log"
 printf 'PELWAY_CANARY_BODY_7f3a\n' > "${tmp}/outside-canary.log"
 ln -s "${tmp}/outside-canary.log" "${r}/logs/link.log"
 run_stage "${r}" canary
-if [ "${RC}" -eq 0 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_BODY"; then ok "canary: a symlinked log is not followed"; else ng "canary: symlink not followed (exit ${RC})"; show "${OUT}"; fi
+if [ "${RC}" -eq 0 ] && ! grep -qF "PELWAY_CANARY_BODY" <<<"${OUT}"; then ok "canary: a symlinked log is not followed"; else ng "canary: symlink not followed (exit ${RC})"; show "${OUT}"; fi
 rm -f "${r}/crates/x/src/link.rs" "${r}/assets/link.svg" "${r}/logs/link.log"
 
 # 指摘2（slot5）: ルート自体が作業ツリーの外を指すリンクなら、外を読まずに exit 2。
@@ -393,7 +393,7 @@ mkdir -p "${tmp}/realtarget/debug"
 printf 'PELWAY_CANARY_APIKEY_9c21\n' > "${tmp}/realtarget/debug/app"
 ln -s "${tmp}/realtarget" "${r}/target"
 run_stage "${r}" canary
-if [ "${RC}" -eq 2 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_APIKEY"; then
+if [ "${RC}" -eq 2 ] && ! grep -qF "PELWAY_CANARY_APIKEY" <<<"${OUT}"; then
   ok "canary: target/ linking outside the work tree exits 2 without reading it"
 else ng "canary: outside root link (exit ${RC})"; show "${OUT}"; fi
 
@@ -402,7 +402,7 @@ mkdir -p "${tmp}/fakehome/.cache/mbx/targets/v1/proj/debug"
 printf 'PELWAY_CANARY_BODY_7f3a\n' > "${tmp}/fakehome/.cache/mbx/targets/v1/proj/debug/app"
 ln -s "${tmp}/fakehome/.cache/mbx/targets/v1/proj" "${r}/target"
 run_stage "${r}" canary HOME="${tmp}/fakehome"
-if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -qF "target/debug/app:"; then
+if [ "${RC}" -eq 1 ] && grep -qF "target/debug/app:" <<<"${OUT}"; then
   ok "canary: target/ linking into the mbx cache is still scanned"
 else ng "canary: mbx cache root link (exit ${RC})"; show "${OUT}"; fi
 
@@ -413,7 +413,7 @@ mkdir -p "${tmp}/xdgcache/mbx/targets/v1/proj/debug"
 printf 'PELWAY_CANARY_BODY_7f3a\n' > "${tmp}/xdgcache/mbx/targets/v1/proj/debug/app"
 ln -s "${tmp}/xdgcache/mbx/targets/v1/proj" "${r}/target"
 run_stage "${r}" canary HOME="${tmp}/fakehome" XDG_CACHE_HOME="${tmp}/xdgcache"
-if [ "${RC}" -eq 2 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_BODY"; then
+if [ "${RC}" -eq 2 ] && ! grep -qF "PELWAY_CANARY_BODY" <<<"${OUT}"; then
   ok "canary: XDG_CACHE_HOME does not widen the exception (only \$HOME/.cache/mbx/targets counts)"
 else ng "canary: XDG_CACHE_HOME target link (exit ${RC})"; show "${OUT}"; fi
 
@@ -422,7 +422,7 @@ mkdir -p "${tmp}/fakehome/.cache/mbx/targets/v1/logsroot"
 printf 'PELWAY_CANARY_PII_4e8d\n' > "${tmp}/fakehome/.cache/mbx/targets/v1/logsroot/app.log"
 ln -s "${tmp}/fakehome/.cache/mbx/targets/v1/logsroot" "${r}/logs"
 run_stage "${r}" canary HOME="${tmp}/fakehome"
-if [ "${RC}" -eq 2 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_PII"; then
+if [ "${RC}" -eq 2 ] && ! grep -qF "PELWAY_CANARY_PII" <<<"${OUT}"; then
   ok "canary: the mbx exception is only for target/ (a logs/ link into the cache exits 2)"
 else ng "canary: logs/ link into mbx cache (exit ${RC})"; show "${OUT}"; fi
 
@@ -433,7 +433,7 @@ mkdir -p "${tmp}/outside-deeper"
 printf 'PELWAY_CANARY_BODY_7f3a\n' > "${tmp}/outside-deeper/app"
 ln -s ../outside-deeper "${r}/target"
 run_stage "${r}" canary
-if [ "${RC}" -eq 2 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_BODY"; then
+if [ "${RC}" -eq 2 ] && ! grep -qF "PELWAY_CANARY_BODY" <<<"${OUT}"; then
   ok "canary: a ../ relative target link outside the tree exits 2 without reading it"
 else ng "canary: ../ relative target link (exit ${RC})"; show "${OUT}"; fi
 
@@ -441,7 +441,7 @@ r="${tmp}/case2"; make_clean "${r}"
 ln -s "${tmp}/outside-deeper" "${tmp}/hop-target"
 ln -s "${tmp}/hop-target" "${r}/target"
 run_stage "${r}" canary
-if [ "${RC}" -eq 2 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_BODY"; then
+if [ "${RC}" -eq 2 ] && ! grep -qF "PELWAY_CANARY_BODY" <<<"${OUT}"; then
   ok "canary: a two-hop target link outside the tree exits 2 without reading it"
 else ng "canary: two-hop target link (exit ${RC})"; show "${OUT}"; fi
 
@@ -450,7 +450,7 @@ mkdir -p "${tmp}/fakehome/.cache/mbx/targets-evil/proj"
 printf 'PELWAY_CANARY_BODY_7f3a\n' > "${tmp}/fakehome/.cache/mbx/targets-evil/proj/app"
 ln -s "${tmp}/fakehome/.cache/mbx/targets-evil/proj" "${r}/target"
 run_stage "${r}" canary HOME="${tmp}/fakehome"
-if [ "${RC}" -eq 2 ] && ! printf '%s\n' "${OUT}" | grep -qF "PELWAY_CANARY_BODY"; then
+if [ "${RC}" -eq 2 ] && ! grep -qF "PELWAY_CANARY_BODY" <<<"${OUT}"; then
   ok "canary: a targets-evil prefix link is outside the mbx exception (exit 2)"
 else ng "canary: targets-evil prefix link (exit ${RC})"; show "${OUT}"; fi
 
@@ -459,7 +459,7 @@ r="${tmp}/case"; make_clean "${r}"
 wname=$'we\nird.rs'
 printf 'pub const NL: &str = "GDPR準拠";\n' > "${r}/crates/x/src/${wname}"
 run_stage "${r}" leak-phrases
-if [ "${RC}" -eq 1 ] && printf '%s\n' "${OUT}" | grep -qF "ird.rs:1"; then
+if [ "${RC}" -eq 1 ] && grep -qF "ird.rs:1" <<<"${OUT}"; then
   ok "leak-phrases: a filename containing a newline is scanned and reported"
 else ng "leak-phrases: newline filename (exit ${RC})"; show "${OUT}"; fi
 
