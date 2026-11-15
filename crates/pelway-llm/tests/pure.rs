@@ -32,13 +32,15 @@ fn provider_config_examples() {
     assert_eq!(custom.name, "mock");
 }
 
-/// トークンは Debug 出力に出ない。
+/// トークンは Debug 出力に出ない。assert の失敗メッセージに `{debug}` を含めるが、
+/// SecretToken の Debug は "<redacted>" プレースホルダで秘密を含まない（行末の
+/// codeql 抑制はこの理由。Issue #301。`sk-...` も合成 canary で実在の秘密ではない）。
 #[test]
 fn secret_token_never_appears_in_debug() {
     let secret = SecretToken::new("sk-secret-do-not-print-1234");
     let debug = format!("{secret:?}");
-    assert!(debug.contains("redacted"), "{debug}");
-    assert!(!debug.contains("sk-secret-do-not-print-1234"), "{debug}");
+    assert!(debug.contains("redacted"), "{debug}"); // codeql[rust/cleartext-logging]
+    assert!(!debug.contains("sk-secret-do-not-print-1234"), "{debug}"); // codeql[rust/cleartext-logging]
     // タプルや構造体に入れても同じ（Debug の伝播）。
     let wrapped = format!("{:?}", (1, secret.clone()));
     assert!(

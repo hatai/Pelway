@@ -439,6 +439,10 @@ fn process_salt() -> std::io::Result<[u8; SALT_BYTES]> {
 mod tests {
     use super::*;
 
+    // mod 内の b"unit-salt" はテスト用の固定 salt で実在の秘密ではない（行末の
+    // codeql 抑制はこの理由。Issue #301）。期待値を同じ salt で計算するために
+    // 固定している。
+
     #[test]
     fn emit_writes_one_json_line_with_ts_and_flattened_event() {
         let sink = Arc::new(MemorySink::new());
@@ -458,7 +462,7 @@ mod tests {
         assert_eq!(v["method"], "post");
         assert_eq!(
             v["card"],
-            serde_json::json!(pseudonymize(b"unit-salt", "card-unit"))
+            serde_json::json!(pseudonymize(b"unit-salt", "card-unit")) // codeql[rust/hard-coded-cryptographic-value]
         );
     }
 

@@ -32,8 +32,9 @@ const CANARY_SECRET: &str = "PELWAY-CANARY-SECRET-4K8T1Z";
 /// `client_msg_id` 用の合成 canary（UUIDv4 の形の合成値）。
 const CANARY_MSG_ID: &str = "3f6c2a9e-8b1d-4c7a-9e2f-5a1b7c3d9e04";
 
-/// テストで使う固定 salt（salt の作り方自体は実装側の `process_salt` の単体テストで確認）。
-const SALT: &[u8] = b"no-body-logs-test-salt";
+/// テストで使う固定 salt（salt の作り方自体は実装側の `process_salt` の単体テストで
+/// 確認。QA 用の合成値で実在の秘密ではない）。
+const SALT: &[u8] = b"no-body-logs-test-salt"; // codeql[rust/hard-coded-cryptographic-value]
 
 /// テキスト中の canary の出現回数（3 種の合計）。
 fn canary_hits(text: &str) -> usize {

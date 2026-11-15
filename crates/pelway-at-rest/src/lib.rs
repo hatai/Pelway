@@ -116,8 +116,11 @@ fn payload_cipher(file_key: &[u8; FILE_KEY_LEN], salt: &[u8; SALT_LEN]) -> Aes25
 /// AES-GCM が暗号化を拒んだ場合（実用上は起きない）。
 pub fn seal(master: &MasterKey, plaintext: &[u8]) -> Result<Vec<u8>, SealError> {
     let mut file_key = Zeroizing::new([0u8; FILE_KEY_LEN]);
-    let mut wrap_nonce = [0u8; NONCE_LEN];
-    let mut payload_salt = [0u8; SALT_LEN];
+    // 誤検出(#27/#28、Issue #301): 0 埋めは未初期化メモリを読まないためだけの
+    // 初期化で、この値が使われることは無い。直後の os_fill が OS の乱数源から
+    // 上書きする（seal の doc コメント参照）。
+    let mut wrap_nonce = [0u8; NONCE_LEN]; // codeql[rust/hard-coded-cryptographic-value]
+    let mut payload_salt = [0u8; SALT_LEN]; // codeql[rust/hard-coded-cryptographic-value]
     os_fill(file_key.as_mut());
     os_fill(&mut wrap_nonce);
     os_fill(&mut payload_salt);
@@ -227,11 +230,14 @@ pub fn open(master: &MasterKey, data: &[u8]) -> Result<Zeroizing<Vec<u8>>, OpenE
 #[cfg(test)]
 mod tests {
     //! 内部の材料（ファイル鍵・salt）を固定して、チャンクの nonce と AAD を直接確かめる。
+    //! mod 内の固定値（FILE_KEY・SALT・[0x22; NONCE_LEN]・chunk_nonce の引数）は
+    //! すべてテスト専用の材料で実在の秘密ではない。行末の codeql 抑制
+    //! （Issue #301）はこの理由（固定値は閉じた検証の再現にだけ使う）。
     use super::*;
     use container::{HEADER_LEN, TAG_LEN};
 
     const FILE_KEY: [u8; FILE_KEY_LEN] = [0x33; FILE_KEY_LEN];
-    const SALT: [u8; SALT_LEN] = [0x44; SALT_LEN];
+    const SALT: [u8; SALT_LEN] = [0x44; SALT_LEN]; // codeql[rust/hard-coded-cryptographic-value]
 
     /// 保存形式の互換ベクトル（`b"pelway-at-rest format compatibility vector"` を
     /// [`fixed_seal`] と同じ材料で暗号化した 168 バイト）。aes-gcm 0.10.3 +
@@ -284,7 +290,7 @@ mod tests {
 
     fn fixed_seal(pt: &[u8]) -> Vec<u8> {
         let master = MasterKey::from_bytes([0xA1; KEY_ID_LEN], [0x11; 32]);
-        seal_with_material(&master, pt, &FILE_KEY, [0x22; NONCE_LEN], SALT).unwrap()
+        seal_with_material(&master, pt, &FILE_KEY, [0x22; NONCE_LEN], SALT).unwrap() // codeql[rust/hard-coded-cryptographic-value]
     }
 
     fn try_chunk(chunk: &[u8], nonce: [u8; NONCE_LEN], aad: &[u8]) -> bool {
@@ -297,12 +303,12 @@ mod tests {
     fn chunk_is_bound_to_header_aad() {
         let sealed = fixed_seal(b"synthetic");
         let (header, body) = sealed.split_at(HEADER_LEN);
-        assert!(try_chunk(body, chunk_nonce(0, true), header));
+        assert!(try_chunk(body, chunk_nonce(0, true), header)); // codeql[rust/hard-coded-cryptographic-value]
         // AAD 無し・ヘッダーを 1 バイト変えた AAD では通らない。
-        assert!(!try_chunk(body, chunk_nonce(0, true), &[]));
+        assert!(!try_chunk(body, chunk_nonce(0, true), &[])); // codeql[rust/hard-coded-cryptographic-value]
         let mut other = header.to_vec();
         other[HEADER_LEN - 1] ^= 0x01;
-        assert!(!try_chunk(body, chunk_nonce(0, true), &other));
+        assert!(!try_chunk(body, chunk_nonce(0, true), &other)); // codeql[rust/hard-coded-cryptographic-value]
     }
 
     #[test]
@@ -311,12 +317,12 @@ mod tests {
         let (header, body) = sealed.split_at(HEADER_LEN);
         let first = &body[..container::CHUNK_SIZE + TAG_LEN];
         let second = &body[container::CHUNK_SIZE + TAG_LEN..];
-        assert!(try_chunk(first, chunk_nonce(0, false), header));
-        assert!(try_chunk(second, chunk_nonce(1, true), header));
+        assert!(try_chunk(first, chunk_nonce(0, false), header)); // codeql[rust/hard-coded-cryptographic-value]
+        assert!(try_chunk(second, chunk_nonce(1, true), header)); // codeql[rust/hard-coded-cryptographic-value]
         // 最終フラグ・連番のどちらが違っても通らない。
-        assert!(!try_chunk(first, chunk_nonce(0, true), header));
-        assert!(!try_chunk(first, chunk_nonce(1, false), header));
-        assert!(!try_chunk(second, chunk_nonce(1, false), header));
-        assert!(!try_chunk(second, chunk_nonce(0, true), header));
+        assert!(!try_chunk(first, chunk_nonce(0, true), header)); // codeql[rust/hard-coded-cryptographic-value]
+        assert!(!try_chunk(first, chunk_nonce(1, false), header)); // codeql[rust/hard-coded-cryptographic-value]
+        assert!(!try_chunk(second, chunk_nonce(1, false), header)); // codeql[rust/hard-coded-cryptographic-value]
+        assert!(!try_chunk(second, chunk_nonce(0, true), header)); // codeql[rust/hard-coded-cryptographic-value]
     }
 }
