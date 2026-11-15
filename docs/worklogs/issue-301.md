@@ -55,3 +55,15 @@ gdpr02_routes.rs・no_body_logs.rs は src 内だが `crates/pelway-http/src/lib
 5. 改善案: `docs/dev-environment.md` の CI 周りに「Code Scanning はデフォルトセットアップで動く。Rust のインライン抑制は効かない(2026-11-15 実測)。アラートの解消は指揮役が hatai 名義で API dismiss する(理由は worklog の対応表)」を足す。
 
 使ったスキル: implement-issue、pr-watch(round 1 のチェック待ちと digest)
+
+## 実装者メモ(round 3)
+
+対象 head: b2dcdd8（main の取り込み(マージコミット)。このメモを含むコミットの親）
+
+1. 詰まった箇所: 2 点。mise.toml の衝突解消に使った mise shim の python3 が、衝突マーカー入り mise.toml のパースエラーで起動せず `/usr/bin/python3` で処理した。マージコミットを素の `git commit` で作ってしまい author が hatai になったため、`scripts/agent-gh dev git commit --amend --reset-author` で pelway-dev[bot] に修正した(round 2 のマージコミット ab489f9 は hatai 名義のまま。履歴書き換えはしない)。
+2. 曖昧だった文: 「.kodiak.toml は main 側を採用すること」(修正依頼)— ブランチ側に .kodiak.toml が存在しなかったため、main 側の追加をそのまま受け入れる形で自然に解消した(実際の衝突は mise.toml の script-test 行の 1 箇所のみ)。
+3. 仮定と解釈: 「抑制コメント削除後の crates/ は main と同一のはず」— 同一であることを前提にマージし、crates/ は自動解消(衝突なし)で main 側(pelway-gateway の削除等を含む)が入った。8 ファイルの抑制コメント不在は `scripts/tests/codeql-suppressions.test.sh` がマージ後も `ok` で確認。
+4. 足りなかった情報・検証手段: なし(修正依頼が手順を特定していた)。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「6. 検査してコミットし、行数を確かめてから push する」に「main の取り込み(マージコミット)も `scripts/agent-gh dev git commit` で作る(素の `git commit` は author が hatai 名義になる。マージなら `--amend --reset-author` で直せる)」を足す。
+
+使ったスキル: implement-issue
