@@ -140,20 +140,6 @@ pub struct DecideRequest {
     pub option_id: OptionId,
 }
 
-impl DecideRequest {
-    /// パスの `{decision_id}` と本文の `decision_id` が一致するか検査する。
-    ///
-    /// # Errors
-    /// 一致しなければ [`DecisionError::DecisionIdMismatch`]。
-    pub fn check_path(&self, path_decision_id: &DecisionId) -> Result<(), DecisionError> {
-        if &self.decision_id == path_decision_id {
-            Ok(())
-        } else {
-            Err(DecisionError::DecisionIdMismatch)
-        }
-    }
-}
-
 /// 判断待ち一覧の 1 項目。判断待ちのコピーではなく、表示用に組み立てた値。
 /// 本文は含めない（依頼メッセージへの参照から元のチャットで確認する）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -548,12 +534,7 @@ mod tests {
                 option_id: "c".into()
             })
         );
-        // 経路と本文の decision_id の不一致・存在しない判断待ち。
-        let req = decide_req(&decision_id, "a");
-        assert_eq!(
-            req.check_path(&"dec-99999999".into()),
-            Err(DecisionError::DecisionIdMismatch)
-        );
+        // 存在しない判断待ち（経路と本文の一致検査は HTTP 層の役割）。
         assert_eq!(
             ledger.decide(decide_req(&"dec-99999999".into(), "a"), &DECIDER.into(), T1),
             Err(DecisionError::DecisionNotFound)

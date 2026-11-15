@@ -85,7 +85,7 @@ use pelway_contract::decision::{
     CreateDecisionError, CreateDecisionRequest, DecideRequest, DecisionError,
 };
 use pelway_contract::handoff::{HandoffDecision, HandoffRequest};
-use pelway_contract::ids::{BasisId, DecisionId, MemberId, WorkspaceId};
+use pelway_contract::ids::{BasisId, MemberId, WorkspaceId};
 use pelway_contract::ledger::ApprovalLedger;
 use pelway_contract::member::MemberKind;
 use pelway_contract::store::{
@@ -1360,8 +1360,9 @@ fn handle_decide(
     let Ok(decide_req) = serde_json::from_slice::<DecideRequest>(&req.body) else {
         return bad_request();
     };
-    // 経路と本文の decision_id は契約の check_path に従う。
-    if let Err(e) = decide_req.check_path(&DecisionId::from(path_decision)) {
+    // 経路と本文の decision_id の一致は HTTP 層で確かめる（comments と同じ 422）。
+    if decide_req.decision_id.as_str() != path_decision {
+        let e = DecisionError::DecisionIdMismatch;
         return Response::error(e.http_status(), &e, decide_error_code(&e));
     }
 
