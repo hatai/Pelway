@@ -2,7 +2,7 @@
 
 ## 実装者メモ（round 1）
 
-対象 head: d2868c1f90643716e3fbba27564580c113ce7a4c（この round の実装の実体を含むコミット。このメモを含むコミットの親）
+対象 head: ac60bbafb6be2244ee52a14988bd74383b27a407（この round の実装の実体を含むコミット。`scripts/agent-gh-resign` による署名付け替え後の SHA。このメモを含むコミットの親）
 
 1. 詰まった箇所: 環境: `mise run verify` の cargo 系タスクが `mbx[error]: Read-only file system` で失敗。このスレッドの sandbox は `/home` を read-only マウントするため mbx のキャッシュ（`~/.cache/mbx`）に書けない。`XDG_CACHE_HOME=/tmp/opencode/xdgcache` へのリダイレクトで clippy・cargo test まで完走させた
 2. 曖昧だった文: 「grokbot-runbook §9 の patrol-state.json の定義に次回確認時刻の項目が加わり」（Issue #307 本文「受け入れ条件」）
