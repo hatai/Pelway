@@ -85,6 +85,7 @@ EOF
 start_watch() {
   MOCK="$MOCK" SLEEP_MAX="${SLEEP_MAX:-}" MOCK_ISSUE_FAIL="${MOCK_ISSUE_FAIL:-}" \
   MOCK_PR_FAIL="${MOCK_PR_FAIL:-}" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
+  T3_BIN="${T3_BIN:-$ROOT/bin/t3}" \
     bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
   WPID=$!
 }
@@ -275,6 +276,28 @@ check "waiting_on change resets next_check_at (implement=6h)" eq "$(nca_off 11)"
 set_nca 11 "not-a-date"
 run_cycles 2
 check "invalid next_check_at refilled with default" eq "$(nca_off 11)" "6"
+
+# --- T3_BIN の明示指定（PATH の t3 が ServerOwnsDatabaseError 相当で失敗するときの差し替え） ---
+
+cat > "$ROOT/bin/t3-server" <<'EOF'
+#!/usr/bin/env bash
+# モック: 実行中サーバーと同じ実行ファイルの代わり。thread list に server 側の JSON を返す
+[[ "$1 $2" == "thread list" ]] && cat "$MOCK/threads-server.json" && exit 0
+exit 9
+EOF
+chmod +x "$ROOT/bin/t3-server"
+cat > "$MOCK/threads-server.json" <<'EOF'
+[{"threadId":"srv-1","status":"completed","title":"[実装] #1 server-side","createdBy":"agent","archived":false,"itemCount":3}]
+EOF
+# PATH の t3 を常に失敗する版に替える（/usr/local/bin/t3 が DB 所有権で拒否される状況の再現）
+mv "$ROOT/bin/t3" "$ROOT/bin/t3-ok"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$ROOT/bin/t3"; chmod +x "$ROOT/bin/t3"
+mock_issues '[]'; mock_prs '[]'
+: > "$ROOT/out.log"
+T3_BIN="$ROOT/bin/t3-server" run_cycles 1
+mv "$ROOT/bin/t3-ok" "$ROOT/bin/t3"
+check "T3_BIN override: server binary output lands in threads.json" \
+  has "$ROOT/state/pelway/conductor-watch/threads.json" "srv-1"
 
 # --- runbook の記述 ---
 
