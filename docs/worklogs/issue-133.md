@@ -86,3 +86,12 @@
 - 足りなかった情報・検証手段: JSON-RPC frame 層へのデコード前サイズ制限は SDK が口を出さないため未実施（doc に記載）。ローカル `mise run verify` は sandbox の /home ro-bind による `file-tool` プラグイン試験失敗のみ（コード非起因、CI で確認）。
 - 改善の提案: launcher 実装時に `IsolatedTransport::bind` を呼ぶ唯一の本番経路を task container 起動コードとして確立し、`bind_for_test` を `cfg` で試験ビルド限定にする。
 - 対象 head: このメモを含むコミットの親（round 5 must-fix 適用の実装コミット）
+
+### round 11
+
+- 詰まったところ: Codex round 6 の must-fix 4 件への対応。(1) `bind_for_test` は doc(hidden) でも公開 API で任意 transport を包めた → `IsolatedTransport` を非 generic 化（SDK の `ByteStreams` 保持）し、本番経路 `pub(crate) bind`（launcher が tokio の read/write 半分を渡す）と、公開の `bind_in_process`（`DuplexStream` のみ受付 — in-memory で外部プロセス境界をまたがないため隔離偽造に使えない）に分離。(2) byte 上限はデコード後計量だった → 改行区切り JSON-RPC frame の長さを byte 層で数える `FrameLimitedRead`（4 MiB）を `IsolatedTransport::bind` 内で受信側に巻き、SDK デコード前に上限を強制。(3) byte 超過が待機中の `recv()` を起こさない → キュー項目を `QueuedUpdate` enum にして `Overflow` sentinel を流し待機解除。(4) 証跡は存在のみ検査だった → `ApprovalEvidence` をフィールド非公開＋検証済みのみ構築可の型に（`new` が非空・期限未到来の epoch ms を検査、失敗は `InvalidEvidence`）。`AllowOnce` は `Option<ApprovalEvidence>` の Some かつ `outcome_unknown == false` が必須のまま。
+- 曖昧だった表現: 「試験用構築経路を本番 API から分離」— `cfg(test)` は tests/ の外部ターゲットに効かず、別クレート化は二重の依存を要るため、公開経路が in-memory のみ受け付ける型制約で分離した（duplex 越しに外部 socket を中継する迂回は型では防げないが、意図的なブリッジであって API 上の誤用ではないと解釈）。
+- 仮定・解釈: 期限は `TsMs`（epoch ms）のリポジトリ慣習に合わせ RFC3339 文字列から u64 に変更（`_meta.pelway.expiresAt` も数値）。`MAX_UPDATE_BYTES` を 2 MiB に下げ `MAX_FRAME_BYTES`（4 MiB）より小さくし、frame を通過する単発通知でも滞留 byte で打ち切れるようにした（待機中単発超過の試験を決定的にするため）。`process` feature は adapter がプロセス起動しないため削除（nit）。
+- 足りなかった情報・検証手段: `cargo` の toolchain 解決が 1.94.1/1.75 に落ちる環境問題があり、`cargo +1.99.1` 明示で回避。mise run verify は file-tool プラグインの環境起因失敗のみ（同左）。
+- 改善の提案: launcher 実装時に `bind` を呼ぶ公開 API（例 `AcpLauncher::launch`）を設け、`bind_in_process` を `#[cfg(feature)]` か test-support 側に移して公開面を更に狭める。
+- 対象 head: このメモを含むコミットの親（round 6 must-fix 適用の実装コミット）

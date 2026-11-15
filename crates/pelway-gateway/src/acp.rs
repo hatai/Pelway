@@ -16,8 +16,11 @@
 //!   ない。宣言の無い操作は承認カードを作らず止める（fail closed、ADR 0004、
 //!   R1-Q5 案a）。
 //!
-//! ACP v2 の permission は advisory（仕様明記）のため、承認なしに外部 I/O を
-//! 試みない強制点はこの adapter（gateway 側）に残る。
+//! ACP v2 の permission は advisory（仕様明記）のため、この adapter
+//! （gateway 側）が担うのは「許可要求を承認カードへ届け、once 系だけを
+//! 選ぶ」関門と grant・証跡の不変条件まで。エージェント自身の外部
+//! アクセス（ファイルシステム・ネットワーク・環境変数）を止める強制点は
+//! 呼び出し元の task container 側の隔離で、この adapter には無い。
 //!
 //! この adapter はエージェント・プロセスを起動しない。起動と隔離（環境
 //! 変数・cwd・ファイルシステム・ネットワーク）は呼び出し元の task
@@ -38,10 +41,17 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use std::io;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use agent_client_protocol::schema::{MaybeUndefined, ProtocolVersion};
 use agent_client_protocol::v2::{ConnectionTo, Responder, schema};
-use agent_client_protocol::{Agent, Client, ConnectTo, Error};
+use agent_client_protocol::{Agent, ByteStreams, Client, Error};
+use futures::io::{AsyncRead as FAsyncRead, AsyncWrite as FAsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::sync::mpsc::{Receiver, channel};
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::tier::TierDeclarations;
 
@@ -49,7 +59,12 @@ use crate::tier::TierDeclarations;
 /// 失敗させる（無制限キューによるメモリ枯渇の防止）。
 const UPDATE_QUEUE_DEPTH: usize = 256;
 /// 通知キューに滞留できる合計バイト数の上限（通知の JSON 表現サイズの和）。
-const MAX_UPDATE_BYTES: usize = 4 * 1024 * 1024;
+/// [`MAX_FRAME_BYTES`] より小さく、frame を通過する大きい通知でも
+/// 滞留合計では打ち切れる。
+const MAX_UPDATE_BYTES: usize = 2 * 1024 * 1024;
+/// 受信する JSON-RPC frame（改行区切りの 1 message）の最大バイト数。
+/// SDK のデコード前に byte 層で強制する。
+const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
 
 /// 累積する agent テキストの上限（byte）。超過は資源枯渇として扱う。
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
@@ -66,13 +81,20 @@ pub enum AcpError {
         /// 操作。
         operation: String,
     },
-    /// エージェントが initialize で返した名が grant の連携と一致しなかった
+    /// transport に結び付けられた連携 ID が grant の連携と一致しなかった
     /// （別の連携宛の grant で別エージェントへ送る誤配送の防止）。
     IntegrationMismatch {
-        /// grant の連携（期待したエージェント名）。
+        /// grant の連携。
         expected: String,
-        /// エージェントが initialize で返した名。
+        /// launcher が transport に結び付けた連携 ID。
         actual: String,
+    },
+    /// 承認証跡の値が検証を通らなかった（空・期限切れ等）。
+    InvalidEvidence {
+        /// 検証に失敗した項目名。
+        field: &'static str,
+        /// 失敗の理由。
+        reason: String,
     },
     /// エージェントが v2 の session capability を申告しなかった。
     NoSessionCapability,
@@ -99,8 +121,11 @@ impl std::fmt::Display for AcpError {
             ),
             Self::IntegrationMismatch { expected, actual } => write!(
                 f,
-                "エージェントの名 {actual} が grant の連携 {expected} と一致しないため接続を拒否した"
+                "transport に結び付けられた連携 {actual} が grant の連携 {expected} と一致しないため接続を拒否した"
             ),
+            Self::InvalidEvidence { field, reason } => {
+                write!(f, "承認証跡の {field} が無効: {reason}")
+            }
             Self::NoSessionCapability => {
                 write!(
                     f,
@@ -133,8 +158,9 @@ impl From<Error> for AcpError {
 /// アカウント×操作の粒度。有効化は管理者が説明を読んで行う（ADR 0008 と同型）。
 /// フィールドは非公開で [`GrantRegistry::require`] でしか取得できないため、
 /// [`AcpClient::run_prompt`] の引数が「許可済み」を型で表す。`integration`
-/// は接続先エージェントが `initialize` で返す `info.name` と一致している
-/// 必要がある（一致しなければ session 開始前に拒否する）。
+/// は launcher が transport に結び付けた連携 ID と一致している必要が
+/// ある（一致しなければ接続自体を行わず拒否する。エージェントが
+/// `initialize` で返す `info.name` は自己申告で、照合には使わない）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentGrant {
     /// 連携（外部エージェント種別。例: `codex-acp`）。
@@ -249,19 +275,93 @@ pub enum PermissionAnswer {
 }
 
 /// Pelway の承認モデルの証跡。許可応答の `_meta.pelway` に載せて
-/// エージェント側の記録にも残す（決3・案ii）。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// エージェント側の記録にも残す（決3・案ii）。値は構築時に検証済み
+/// （各項目は非空、期限は未到来の epoch ms）で、検証を通った証跡しか
+/// 作れない（[`ApprovalEvidence::new`]）。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApprovalEvidence {
+    decider: String,
+    expires_at: u64,
+    snapshot_hash: String,
+    eligibility: String,
+    outcome_unknown: bool,
+}
+
+impl ApprovalEvidence {
+    /// 証跡を検証して作る。`decider`・`snapshot_hash`・`eligibility` は
+    /// 非空（前後空白を除く）、`expires_at` は現在より後の epoch ms。
+    /// `outcome_unknown` は「人の決定の結果が不明」で、許可には使え
+    /// ない（`answer_permission` が fail closed で止める）。
+    pub fn new(
+        decider: impl Into<String>,
+        expires_at: u64,
+        snapshot_hash: impl Into<String>,
+        eligibility: impl Into<String>,
+        outcome_unknown: bool,
+    ) -> Result<Self, AcpError> {
+        let decider = decider.into();
+        let snapshot_hash = snapshot_hash.into();
+        let eligibility = eligibility.into();
+        for (field, value) in [
+            ("decider", &decider),
+            ("snapshot_hash", &snapshot_hash),
+            ("eligibility", &eligibility),
+        ] {
+            if value.trim().is_empty() {
+                return Err(AcpError::InvalidEvidence {
+                    field,
+                    reason: "empty".to_owned(),
+                });
+            }
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or_default();
+        if expires_at <= now {
+            return Err(AcpError::InvalidEvidence {
+                field: "expires_at",
+                reason: "expired".to_owned(),
+            });
+        }
+        Ok(Self {
+            decider,
+            expires_at,
+            snapshot_hash,
+            eligibility,
+            outcome_unknown,
+        })
+    }
+
     /// 指名承認者（member id または役割の識別子）。
-    pub decider: Option<String>,
-    /// 承認の期限（RFC3339）。
-    pub expires_at: Option<String>,
+    #[must_use]
+    pub fn decider(&self) -> &str {
+        &self.decider
+    }
+
+    /// 承認の期限（epoch ms、未到来であることを構築時に検証済み）。
+    #[must_use]
+    pub fn expires_at(&self) -> u64 {
+        self.expires_at
+    }
+
     /// 承認対象 payload の snapshot hash（改訂ずれの検出用）。
-    pub snapshot_hash: Option<String>,
+    #[must_use]
+    pub fn snapshot_hash(&self) -> &str {
+        &self.snapshot_hash
+    }
+
     /// 開始資格（開始に必要な資格・条件の識別子）。
-    pub eligibility: Option<String>,
+    #[must_use]
+    pub fn eligibility(&self) -> &str {
+        &self.eligibility
+    }
+
     /// 人の決定の結果が不明（outcome unknown）なら `true`。
-    pub outcome_unknown: bool,
+    #[must_use]
+    pub fn outcome_unknown(&self) -> bool {
+        self.outcome_unknown
+    }
 }
 
 /// 承認カード側の決定と、その承認モデルの証跡（決3・案ii）。
@@ -269,17 +369,30 @@ pub struct ApprovalEvidence {
 pub struct PermissionDecision {
     /// 許可の結論。
     pub answer: PermissionAnswer,
-    /// 承認モデルの証跡。応答の `_meta.pelway` に載る。
-    pub evidence: ApprovalEvidence,
+    /// 承認モデルの証跡。応答の `_meta.pelway` に載る。`AllowOnce` には
+    /// 必須（無い、または `outcome_unknown` な証跡での許可は
+    /// `answer_permission` が fail closed で止める）。`RejectOnce`・
+    /// `Cancel` では任意。
+    pub evidence: Option<ApprovalEvidence>,
 }
 
 impl PermissionDecision {
-    /// 証跡の無い決定を作る。
+    /// 証跡の無い決定を作る（`RejectOnce`・`Cancel` 向け。`AllowOnce`
+    /// には [`Self::approved`] を使う）。
     #[must_use]
     pub fn answered(answer: PermissionAnswer) -> Self {
         Self {
             answer,
-            evidence: ApprovalEvidence::default(),
+            evidence: None,
+        }
+    }
+
+    /// 証跡付きの許可決定を作る。
+    #[must_use]
+    pub fn approved(evidence: ApprovalEvidence) -> Self {
+        Self {
+            answer: PermissionAnswer::AllowOnce,
+            evidence: Some(evidence),
         }
     }
 }
@@ -393,39 +506,98 @@ impl AcpAudit for Mutex<Vec<AcpAuditEvent>> {
     }
 }
 
+/// 改行区切りの JSON-RPC frame が [`MAX_FRAME_BYTES`] を超えたら I/O エラー
+/// にする受信側ラッパ。SDK が1行をデコードする前（byte 層）で上限を強制し、
+/// 巨大 frame の解析メモリを抑える。超過は接続失敗として扱われる
+/// （[`AcpError::Disconnected`] または [`AcpError::Protocol`]）。
+struct FrameLimitedRead<R> {
+    inner: R,
+    /// 直前の改行以降に読んだバイト数（現在の frame の累計長）。
+    frame_len: usize,
+}
+
+impl<R> FrameLimitedRead<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            frame_len: 0,
+        }
+    }
+}
+
+impl<R: AsyncRead + Unpin> AsyncRead for FrameLimitedRead<R> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let before = buf.filled().len();
+        match Pin::new(&mut self.inner).poll_read(cx, buf) {
+            Poll::Ready(Ok(())) => {
+                for &byte in &buf.filled()[before..] {
+                    self.frame_len = if byte == b'\n' { 0 } else { self.frame_len + 1 };
+                }
+                if self.frame_len > MAX_FRAME_BYTES {
+                    return Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "JSON-RPC frame exceeds size limit",
+                    )));
+                }
+                Poll::Ready(Ok(()))
+            }
+            other => other,
+        }
+    }
+}
+
 /// 呼び出し元の task container で隔離が強制されたエージェントへの
 /// transport。隔離を実施した信頼済み launcher だけが、接続先に結び付ける
 /// 連携 ID と一緒に構築する。連携 ID は launcher が保証する値で、
 /// エージェント自身の申告（`initialize` の name）とは独立に grant と
-/// 照合される。
-pub struct IsolatedTransport<T> {
-    transport: T,
+/// 照合される。受信側には [`FrameLimitedRead`] で frame サイズ上限が
+/// 掛けられている。
+pub struct IsolatedTransport {
+    transport: ByteStreams<Box<dyn FAsyncWrite + Send + Unpin>, Box<dyn FAsyncRead + Send + Unpin>>,
     /// launcher が transport に結び付けた連携 ID。grant の `integration`
     /// と照合し、別連携宛の grant を別エージェントへ誤配送しない。
     integration: String,
 }
 
-impl<T> IsolatedTransport<T> {
+impl IsolatedTransport {
     /// 隔離を実施した launcher 専用の構築子。task container が環境変数・
     /// cwd・ファイルシステム・ネットワークを制限した状態でエージェントを
-    /// 起動し、その stdio 相当の transport に連携 ID を結び付けて渡す。
-    /// 本 Issue の範囲では launcher はまだ実装されておらず、本番の構築
-    /// 経路はクレート内専用とする（後続 Issue で launcher 実装時に
-    /// 公開面を決める）。公開の構築経路は [`Self::bind_for_test`] のみ。
-    pub(crate) fn bind(transport: T, integration: impl Into<String>) -> Self {
+    /// 起動し、その read/write（子プロセスの stdio 半分）に連携 ID を
+    /// 結び付けて渡す。本 Issue の範囲では launcher はまだ実装されて
+    /// いないため本番の構築経路はクレート内専用（後続 Issue で launcher
+    /// 実装時に公開面を決める）。クレート外から構築できるのは
+    /// [`Self::bind_in_process`]（in-memory 専用）だけ。
+    pub(crate) fn bind<R, W>(read: R, write: W, integration: impl Into<String>) -> Self
+    where
+        R: AsyncRead + Send + Unpin + 'static,
+        W: AsyncWrite + Send + Unpin + 'static,
+    {
         Self {
-            transport,
+            transport: ByteStreams::new(
+                Box::new(write.compat_write()),
+                Box::new(FrameLimitedRead::new(read).compat()),
+            ),
             integration: integration.into(),
         }
     }
 
-    /// 試験用の構築経路。`bind` と同じく連携 ID を結び付けるが、隔離を
-    /// 実施しない transport（in-process double 等）を包める。
-    /// 本番コードからは呼ばないこと。
+    /// 試験用の in-process 構築経路。`DuplexStream` は同一プロセス内の
+    /// メモリチャネルであり外部エージェントのプロセス境界をまたがない
+    /// ため、この経路で本番の隔離境界を偽造することはできない（子
+    /// プロセスの stdio・socket・file は型で受け付けない）。連携 ID の
+    /// 結び付けは本番経路と同じ形で練習する。
     #[doc(hidden)]
     #[must_use]
-    pub fn bind_for_test(transport: T, integration: impl Into<String>) -> Self {
-        Self::bind(transport, integration)
+    pub fn bind_in_process(
+        stream: tokio::io::DuplexStream,
+        integration: impl Into<String>,
+    ) -> Self {
+        let (read, write) = tokio::io::split(stream);
+        Self::bind(read, write, integration)
     }
 }
 
@@ -477,7 +649,7 @@ impl AcpClient {
     pub async fn run_prompt(
         &self,
         grant: &AgentGrant,
-        transport: IsolatedTransport<impl ConnectTo<Client> + 'static>,
+        transport: IsolatedTransport,
         envelope: &ExportEnvelope,
         decider: Arc<dyn PermissionDecider>,
     ) -> Result<SessionReport, AcpError> {
@@ -541,10 +713,17 @@ impl AcpClient {
                             .unwrap_or(usize::MAX);
                         let pending = pending_bytes.fetch_add(size, Ordering::Relaxed) + size;
                         if pending > MAX_UPDATE_BYTES
-                            || update_tx.try_send((notification, size)).is_err()
+                            || update_tx
+                                .try_send(QueuedUpdate::Notification(Box::new(notification), size))
+                                .is_err()
                         {
                             pending_bytes.fetch_sub(size, Ordering::Relaxed);
                             overflow.store(true, Ordering::Relaxed);
+                            // 受信側が recv() で待機中でも起こせるよう
+                            // 上限超過そのものをキューへ流す（キュー満杯
+                            // で載らなくても、受信側の滞留分を処理する
+                            // 各 loop で overflow フラグを拾う）。
+                            let _ = update_tx.try_send(QueuedUpdate::Overflow);
                         }
                         Ok(())
                     }
@@ -597,7 +776,7 @@ impl AcpClient {
         &self,
         connection: &ConnectionTo<Agent>,
         envelope_body: &str,
-        update_rx: &mut Receiver<(schema::UpdateSessionNotification, usize)>,
+        update_rx: &mut Receiver<QueuedUpdate>,
         overflow: &AtomicBool,
         pending_bytes: &AtomicUsize,
     ) -> Result<SessionReport, AcpError> {
@@ -687,17 +866,17 @@ fn answer_permission(
         operation: operation.clone(),
         title: request.title.clone(),
     });
-    // 不変条件（決3・案ii）: 許可には完全な承認証跡（指名承認者・期限・
-    // snapshot hash・開始資格）が必須。証跡が欠ける、または
+    // 不変条件（決3・案ii）: 許可には検証済みの承認証跡（指名承認者・
+    // 期限・snapshot hash・開始資格）が必須。証跡が無い、または
     // `outcome_unknown`（人の決定結果が不明）なら許可を選ばず
-    // fail closed で止める。
+    // fail closed で止める。値の検証は `ApprovalEvidence::new` が構築時に
+    // 済ませている。
     if decision.answer == PermissionAnswer::AllowOnce {
-        let evidence = &decision.evidence;
-        let complete = evidence.decider.is_some()
-            && evidence.expires_at.is_some()
-            && evidence.snapshot_hash.is_some()
-            && evidence.eligibility.is_some();
-        if evidence.outcome_unknown || !complete {
+        let valid = matches!(
+            &decision.evidence,
+            Some(evidence) if !evidence.outcome_unknown()
+        );
+        if !valid {
             audit.record(AcpAuditEvent::PermissionDeniedIncompleteEvidence { operation });
             return reject_or_cancel(request, connection, audit);
         }
@@ -723,7 +902,7 @@ fn answer_permission(
             schema::RequestPermissionResponse::new(schema::RequestPermissionOutcome::Selected(
                 schema::SelectedPermissionOutcome::new(option.option_id.clone()),
             ))
-            .meta(approval_meta(&decision.evidence)),
+            .meta(approval_meta(decision.evidence.as_ref())),
         )
     } else {
         audit.record(AcpAuditEvent::PermissionResolved {
@@ -734,26 +913,16 @@ fn answer_permission(
 }
 
 /// 承認モデルの証跡を `_meta` の `pelway` オブジェクトにする。
-/// 証跡が空なら `_meta` 自体を付けない。
-fn approval_meta(evidence: &ApprovalEvidence) -> Option<schema::Meta> {
+/// 証跡が無ければ `_meta` 自体を付けない。
+fn approval_meta(evidence: Option<&ApprovalEvidence>) -> Option<schema::Meta> {
+    let evidence = evidence?;
     let mut pelway = serde_json::Map::new();
-    if let Some(decider) = &evidence.decider {
-        pelway.insert("decider".to_owned(), decider.clone().into());
-    }
-    if let Some(expires_at) = &evidence.expires_at {
-        pelway.insert("expiresAt".to_owned(), expires_at.clone().into());
-    }
-    if let Some(snapshot_hash) = &evidence.snapshot_hash {
-        pelway.insert("snapshotHash".to_owned(), snapshot_hash.clone().into());
-    }
-    if let Some(eligibility) = &evidence.eligibility {
-        pelway.insert("eligibility".to_owned(), eligibility.clone().into());
-    }
-    if evidence.outcome_unknown {
+    pelway.insert("decider".to_owned(), evidence.decider().into());
+    pelway.insert("expiresAt".to_owned(), evidence.expires_at().into());
+    pelway.insert("snapshotHash".to_owned(), evidence.snapshot_hash().into());
+    pelway.insert("eligibility".to_owned(), evidence.eligibility().into());
+    if evidence.outcome_unknown() {
         pelway.insert("outcomeUnknown".to_owned(), true.into());
-    }
-    if pelway.is_empty() {
-        return None;
     }
     let mut meta = serde_json::Map::new();
     meta.insert("pelway".to_owned(), pelway.into());
@@ -821,11 +990,21 @@ fn cancel(
     ))
 }
 
+/// 更新通知のキュー項目。`Overflow` は byte/件数の上限超過を受信側へ
+/// 届ける sentinel（`recv()` 待機中でも起こすため）。
+enum QueuedUpdate {
+    /// 通知とその JSON 表現サイズ（`pending_bytes` 計量の払い戻し用）。
+    /// Box は enum サイズを抑えるため。
+    Notification(Box<schema::UpdateSessionNotification>, usize),
+    /// 滞留上限を超えた（`AcpError::UpdateOverflow` で失敗させる）。
+    Overflow,
+}
+
 /// 同じ session の前景が idle に戻るまで `session/update` を読む。
 /// `running`/`requires_action`/未知の状態はすべて「作業中」として扱い、
 /// 未知の状態を idle と誤認しない（SDK の quickstart の注意どおり）。
 async fn wait_until_idle(
-    updates: &mut Receiver<(schema::UpdateSessionNotification, usize)>,
+    updates: &mut Receiver<QueuedUpdate>,
     session_id: &str,
     overflow: &AtomicBool,
     pending_bytes: &AtomicUsize,
@@ -837,7 +1016,11 @@ async fn wait_until_idle(
         if overflow.load(Ordering::Relaxed) {
             return Err(AcpError::UpdateOverflow);
         }
-        let (notification, size) = updates.recv().await.ok_or(AcpError::Disconnected)?;
+        let (notification, size) = match updates.recv().await {
+            Some(QueuedUpdate::Notification(notification, size)) => (notification, size),
+            Some(QueuedUpdate::Overflow) => return Err(AcpError::UpdateOverflow),
+            None => return Err(AcpError::Disconnected),
+        };
         pending_bytes.fetch_sub(size, Ordering::Relaxed);
         if notification.session_id.0.as_ref() != session_id {
             continue;

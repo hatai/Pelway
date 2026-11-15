@@ -9,7 +9,7 @@
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::v2::{ConnectionTo, Responder, schema};
-use agent_client_protocol::{Agent, ByteStreams, Client, ConnectTo, Result};
+use agent_client_protocol::{Agent, ByteStreams, Client, Result};
 use pelway_gateway::acp::{
     AcpAuditEvent, AcpClient, AcpError, ApprovalEvidence, ExportEnvelope, GrantRegistry,
     IsolatedTransport, PermissionAnswer, PermissionAsk, PermissionDecider, PermissionDecision,
@@ -29,9 +29,17 @@ struct DoubleSpec {
     agent_name: Option<&'static str>,
     /// prompt への応答の前にこの数の小さい update を連投する（キュー溢れの確認）。
     flood_updates: Option<usize>,
-    /// prompt への応答の前にこのバイト数の巨大 update を 1 本送る
-    /// （キューのバイト上限の確認）。
+    /// prompt への応答の前に、合計このバイト数になるまで中サイズの
+    /// update を連投する（キューのバイト上限の確認。各 frame は
+    /// frame 上限未満に割る）。
     flood_bytes: Option<usize>,
+    /// prompt への応答の前にこのバイト数の巨大 update を 1 本送る
+    /// （SDK デコード前の frame 上限の確認）。
+    giant_frame_bytes: Option<usize>,
+    /// prompt 応答後（クライアントが idle 待ちに入った後）にこのバイト数の
+    /// update を 1 本送る（frame 上限未満・滞留 byte 上限超過の単発通知で
+    /// 待機解除されることの確認）。
+    late_giant_bytes: Option<usize>,
     /// idle の前に 1 本の巨大テキストを送る（出力上限の確認）。
     huge_output: bool,
 }
@@ -99,12 +107,29 @@ impl Double {
         )?;
 
         if self.spec.huge_output {
+            // 各通知は frame・滞留 byte の上限未満に割り、累積テキストだけで
+            // 出力上限（1 MiB）を超える形にする（上限経路の切り分け）。
+            for i in 0..3 {
+                send_update(
+                    &connection,
+                    &session_id,
+                    schema::SessionUpdate::AgentMessage(
+                        schema::AgentMessage::new(schema::MessageId::new(format!("big-{i}")))
+                            .content(vec!["a".repeat(512 * 1024).into()]),
+                    ),
+                )?;
+            }
+        }
+
+        if let Some(bytes) = self.spec.late_giant_bytes {
+            // クライアントが idle 待ちに入った後に、frame 上限未満・滞留
+            // byte 上限超過の単発通知を送り、受信側の待機解除を確かめる。
             send_update(
                 &connection,
                 &session_id,
                 schema::SessionUpdate::AgentMessage(
-                    schema::AgentMessage::new(schema::MessageId::new("big-1"))
-                        .content(vec!["a".repeat(2 * 1024 * 1024).into()]),
+                    schema::AgentMessage::new(schema::MessageId::new("late-giant"))
+                        .content(vec!["x".repeat(bytes).into()]),
                 ),
             )?;
         }
@@ -192,14 +217,12 @@ impl Double {
 fn spawn_double(
     spec: DoubleSpec,
 ) -> (
-    impl ConnectTo<Client>,
+    tokio::io::DuplexStream,
     impl std::future::Future<Output = Result<()>>,
     Arc<Mutex<DoubleState>>,
 ) {
     let (client_io, agent_io) = tokio::io::duplex(8192);
-    let (client_read, client_write) = tokio::io::split(client_io);
     let (agent_read, agent_write) = tokio::io::split(agent_io);
-    let client_transport = ByteStreams::new(client_write.compat_write(), client_read.compat());
     let agent_transport = ByteStreams::new(agent_write.compat_write(), agent_read.compat());
 
     let double = Double {
@@ -279,11 +302,32 @@ fn spawn_double(
                         }
                     }
                     if let Some(bytes) = double.spec.flood_bytes {
+                        // 各通知の frame は上限未満に割り、滞留バイト数だけで
+                        // 上限を超える形にする（frame 上限との切り分け）。
+                        let mut sent = 0usize;
+                        let mut seq = 0u64;
+                        while sent < bytes {
+                            let chunk = (512 * 1024).min(bytes - sent);
+                            send_update(
+                                &connection,
+                                &request.session_id.to_string(),
+                                schema::SessionUpdate::AgentMessage(
+                                    schema::AgentMessage::new(schema::MessageId::new(format!(
+                                        "flood-bytes-{seq}"
+                                    )))
+                                    .content(vec!["x".repeat(chunk).into()]),
+                                ),
+                            )?;
+                            sent += chunk;
+                            seq += 1;
+                        }
+                    }
+                    if let Some(bytes) = double.spec.giant_frame_bytes {
                         send_update(
                             &connection,
                             &request.session_id.to_string(),
                             schema::SessionUpdate::AgentMessage(
-                                schema::AgentMessage::new(schema::MessageId::new("flood-big"))
+                                schema::AgentMessage::new(schema::MessageId::new("giant-frame"))
                                     .content(vec!["x".repeat(bytes).into()]),
                             ),
                         )?;
@@ -326,7 +370,7 @@ fn spawn_double(
         )
         .connect_to(agent_transport);
 
-    (client_transport, serve, state)
+    (client_io, serve, state)
 }
 
 /// 試験用の設定一式。`post_message` だけを External として宣言する。
@@ -356,22 +400,24 @@ struct RecordingDecider {
 
 /// 完全な承認証跡（許可を出せる試験用の値）。
 fn full_evidence() -> ApprovalEvidence {
-    ApprovalEvidence {
-        decider: Some("member:test-approver".to_owned()),
-        expires_at: Some("2030-01-01T00:00:00Z".to_owned()),
-        snapshot_hash: Some("sha256:test".to_owned()),
-        eligibility: Some("role:test".to_owned()),
-        outcome_unknown: false,
-    }
+    ApprovalEvidence::new(
+        "member:test-approver",
+        1_900_000_000_000, // 2030-03 頃の epoch ms（未到来）
+        "sha256:test",
+        "role:test",
+        false,
+    )
+    .expect("test evidence should validate")
 }
 
 impl RecordingDecider {
     /// 指定の応答を完全な証跡付きで返す decider。AllowOnce は証跡必須の
-    /// ため、証跡なしの許可を試したい場合は `decided` で空の証跡を渡す。
+    /// ため、証跡なしの許可を試したい場合は `decided` で
+    /// `PermissionDecision::answered`（証跡なし）を渡す。
     fn answered(answer: PermissionAnswer) -> Self {
         Self::decided(PermissionDecision {
             answer,
-            evidence: full_evidence(),
+            evidence: Some(full_evidence()),
         })
     }
 
@@ -421,7 +467,7 @@ async fn roundtrip_echo_session() {
     let report = client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
             &ExportEnvelope::new("レビューして"),
             Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
         )
@@ -466,7 +512,7 @@ async fn permission_allow_once_for_declared_tool() {
     let report = client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
             &ExportEnvelope::new("post it"),
             decider.clone(),
         )
@@ -512,7 +558,7 @@ async fn undeclared_operation_is_rejected_without_decider() {
     client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
             &ExportEnvelope::new("purge it"),
             decider.clone(),
         )
@@ -556,7 +602,7 @@ async fn always_options_are_never_selected() {
     client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
             &ExportEnvelope::new("post it"),
             decider,
         )
@@ -594,7 +640,7 @@ async fn cancel_decision_cancels_session() {
     let report = client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
             &ExportEnvelope::new("post it"),
             decider,
         )
@@ -623,7 +669,7 @@ async fn identity_mismatch_refuses_before_session() {
     let error = client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::bind_for_test(transport, "other-integration"),
+            IsolatedTransport::bind_in_process(transport, "other-integration"),
             &ExportEnvelope::new("レビューして"),
             Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
         )
@@ -655,7 +701,7 @@ async fn client_advertises_no_side_effect_channels() {
     client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
             &ExportEnvelope::new("レビューして"),
             Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
         )
@@ -694,7 +740,7 @@ async fn flooding_updates_fail_the_session() {
     let error = client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
             &ExportEnvelope::new("レビューして"),
             Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
         )
@@ -720,7 +766,7 @@ async fn oversized_output_fails_the_session() {
     let error = client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
             &ExportEnvelope::new("レビューして"),
             Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
         )
@@ -748,20 +794,20 @@ async fn approval_evidence_is_carried_in_response_meta() {
 
     let audit = Arc::new(Mutex::new(Vec::new()));
     let client = AcpClient::new(declarations(), audit.clone());
-    let decider = Arc::new(RecordingDecider::decided(PermissionDecision {
-        answer: PermissionAnswer::AllowOnce,
-        evidence: ApprovalEvidence {
-            decider: Some("member:hatai".to_owned()),
-            expires_at: Some("2026-11-16T00:00:00Z".to_owned()),
-            snapshot_hash: Some("sha256:abc123".to_owned()),
-            eligibility: Some("role:representative".to_owned()),
-            outcome_unknown: false,
-        },
-    }));
+    let decider = Arc::new(RecordingDecider::decided(PermissionDecision::approved(
+        ApprovalEvidence::new(
+            "member:hatai",
+            1_900_000_000_000,
+            "sha256:abc123",
+            "role:representative",
+            false,
+        )
+        .expect("test evidence should validate"),
+    )));
     client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
             &ExportEnvelope::new("レビューして"),
             decider,
         )
@@ -779,7 +825,7 @@ async fn approval_evidence_is_carried_in_response_meta() {
         .expect("permission response should carry meta");
     let pelway = &meta["pelway"];
     assert_eq!(pelway["decider"], "member:hatai");
-    assert_eq!(pelway["expiresAt"], "2026-11-16T00:00:00Z");
+    assert_eq!(pelway["expiresAt"], 1_900_000_000_000_u64);
     assert_eq!(pelway["snapshotHash"], "sha256:abc123");
     assert_eq!(pelway["eligibility"], "role:representative");
     drop(state);
@@ -806,12 +852,11 @@ async fn allow_without_evidence_fails_closed() {
     client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
             &ExportEnvelope::new("レビューして"),
-            Arc::new(RecordingDecider::decided(PermissionDecision {
-                answer: PermissionAnswer::AllowOnce,
-                evidence: ApprovalEvidence::default(),
-            })),
+            Arc::new(RecordingDecider::decided(PermissionDecision::answered(
+                PermissionAnswer::AllowOnce,
+            ))),
         )
         .await
         .expect("ACP session failed");
@@ -850,15 +895,18 @@ async fn outcome_unknown_never_allows() {
     client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
             &ExportEnvelope::new("レビューして"),
-            Arc::new(RecordingDecider::decided(PermissionDecision {
-                answer: PermissionAnswer::AllowOnce,
-                evidence: ApprovalEvidence {
-                    outcome_unknown: true,
-                    ..full_evidence()
-                },
-            })),
+            Arc::new(RecordingDecider::decided(PermissionDecision::approved(
+                ApprovalEvidence::new(
+                    "member:test-approver",
+                    1_900_000_000_000,
+                    "sha256:test",
+                    "role:test",
+                    true,
+                )
+                .expect("test evidence should validate"),
+            ))),
         )
         .await
         .expect("ACP session failed");
@@ -898,7 +946,7 @@ async fn empty_operation_name_fails_closed() {
     client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
             &ExportEnvelope::new("レビューして"),
             decider.clone(),
         )
@@ -939,7 +987,7 @@ async fn giant_updates_close_the_session() {
     let error = client
         .run_prompt(
             &grant(&grants()),
-            IsolatedTransport::bind_for_test(transport, "acp-double"),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
             &ExportEnvelope::new("レビューして"),
             Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
         )
@@ -953,5 +1001,60 @@ async fn giant_updates_close_the_session() {
         "cancel_sent が無い: {kinds:?}"
     );
     drop(state);
+    server.abort();
+}
+
+// 受け入れ条件: 滞留 byte 上限を超える単発の通知（frame 上限未満）が
+// 待機中に届いても、受信側は起こされて session を失敗させる。
+#[tokio::test]
+async fn late_giant_wakes_waiting_receiver() {
+    let (transport, serve, _state) = spawn_double(DoubleSpec {
+        late_giant_bytes: Some(3 * 1024 * 1024),
+        ..DoubleSpec::default()
+    });
+    let server = tokio::spawn(serve);
+
+    let audit = Arc::new(Mutex::new(Vec::new()));
+    let client = AcpClient::new(declarations(), audit.clone());
+    let error = client
+        .run_prompt(
+            &grant(&grants()),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
+            &ExportEnvelope::new("レビューして"),
+            Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
+        )
+        .await
+        .expect_err("待機中の巨大な通知を許した");
+
+    assert!(matches!(error, AcpError::UpdateOverflow), "{error:?}");
+    server.abort();
+}
+
+// 受け入れ条件: 1 frame（改行区切りの 1 message）が上限を超えたら SDK
+// のデコード前に接続自体が失敗する（解析メモリの枯渇防止）。
+#[tokio::test]
+async fn giant_frame_fails_before_decode() {
+    let (transport, serve, _state) = spawn_double(DoubleSpec {
+        giant_frame_bytes: Some(5 * 1024 * 1024),
+        ..DoubleSpec::default()
+    });
+    let server = tokio::spawn(serve);
+
+    let audit = Arc::new(Mutex::new(Vec::new()));
+    let client = AcpClient::new(declarations(), audit.clone());
+    let error = client
+        .run_prompt(
+            &grant(&grants()),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
+            &ExportEnvelope::new("レビューして"),
+            Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
+        )
+        .await
+        .expect_err("巨大な frame を許した");
+
+    assert!(
+        matches!(error, AcpError::Protocol(_) | AcpError::Disconnected),
+        "{error:?}"
+    );
     server.abort();
 }
