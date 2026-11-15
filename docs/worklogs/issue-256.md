@@ -87,3 +87,12 @@
 5. 改善案: なし
 
 使ったスキル: `implement-issue`、`command-team`（委託の形）、`write-issue`
+## 実装者メモ（round 13・重複スレッド agent/256-claude-review-start）
+
+経緯: このスレッドは round 2 の停止後、hatai による T3 更新と `~/.claude-review/settings.json` の調整を受けて 2026-11-15 朝に再開し、確認手順が全項目期待どおりになることを確かめた。ただし同じ業務は指揮役（代行）側の別スレッド（PR #287）で 2026-11-15 02:28 にマージ済みであったため、重複する PR #312 を作った（クローズ依頼済み）。本メモは重複スレッド側の記録として残す。
+
+1. 詰まった箇所: 再開時に Issue #256 の状態と PR 一覧を再確認せず、マージ済みの PR #287 と重複した PR #312 を作った。また手順 6（mise run verify）: 実装担当の sandbox で `/home` が読み取り専用になり、`~/.cache/mbx` への lock 取得が `Read-only file system (os error 30)` で失敗した（sandbox が渡す `MISE_RUST_MR_BOXINGTON=0` は、cargo コマンドラッパー生成済みの環境では実行時に効かない）。`XDG_CACHE_HOME` を `/tmp` 配下へ退避して通した。DNS（`/etc/resolv.conf` が `/mnt/wsl/resolv.conf` へのリンク切れ）は hatai がホスト側で静的実ファイル化して復旧した。
+2. 曖昧だった文: 「T3 のエージェントサンドボックスでは `$HOME` 全体が読み取り専用になり、`~/.cache` に置いたキャッシュが使えない」（PR #312 本文「確認方法/検証」。当スレッドの round 3 時点の記述）
+3. 仮定と解釈: 読み取り専用の `/home` が T3 0.1.10 への更新（11:14）と同時に現れたため T3 側の仕組みと解釈した。実際は main にマージされた実装担当の sandbox（agent-sandbox、Issue #151）であり、T3 サーバーの再起動を機にこの worktree のセッションへ適用されたと解釈した（リポジトリの `opencode.json` の ro-bind と `scripts/agent-sandbox/sandbox-shell` のマウント構成で裏取り）。
+4. 足りなかった情報・検証手段: 再開時の `scripts/agent-gh dev issue view 256` と `pr list`（重複の防止）。`scripts/agent-sandbox/sandbox-shell` の書き込み可能リスト（`~/.cache/mbx`・`~/.cache/hk` の不在と、`MISE_RUST_MR_BOXINGTON=0` を渡す設計は読めば分かった）。
+5. 改善案: `scripts/agent-sandbox/sandbox-shell` で `MISE_RUST_MR_BOXINGTON=0` が実行時に効く形にする（ラッパーの再生成を促す、または sandbox 側で `XDG_CACHE_HOME` を書き込み可能な場所へ設定する）。`/etc/resolv.conf` のリンク切れ（`/mnt/wsl` をマウントしない構成の副作用）も併せて扱う。sandbox は security 境界のため別 Issue が望ましい。
