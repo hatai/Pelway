@@ -110,6 +110,7 @@ scripts/agent-gh dev git push -u origin HEAD
 - 手順 5 の `docs/worklogs/issue-<N>.md` も同じコミットに入れる。
 - `mise run verify` が失敗したらコミットしない。直してからやり直す。
 - `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたら push せずに止まる。
+- 積み上げ PR（分割計画で親 PR のブランチに積む PR。GitHub 上の base が main ではない PR）では `bash scripts/pr-size.sh --base <親ブランチ>` で測る。`mise run pr-size` は base=origin/main が既定のため、そのまま使うと親 PR の差分まで数えてしまい、上限超過で誤って止まる・例外扱いになる。
 
 ### 7. Draft PR を作る（初回だけ）
 
