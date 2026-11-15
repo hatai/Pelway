@@ -1339,8 +1339,8 @@ mod tests {
     fn entry_uses_salt_read_from_file_for_log_pseudonyms() {
         use pelway_contract::pseudonym::pseudonymize;
 
-        // 決まった中身の salt（32 バイト。テスト用の合成値で実在の秘密ではない）。
-        const KNOWN_SALT: &[u8; crate::log::SALT_BYTES] = b"known-salt-for-entry-test-012345"; // codeql[rust/hard-coded-cryptographic-value]
+        // 決まった中身の salt（32 バイト）。
+        const KNOWN_SALT: &[u8; crate::log::SALT_BYTES] = b"known-salt-for-entry-test-012345";
         let salt_path = std::path::Path::new(crate::log::LOG_DIR).join("known-salt-entry-test");
         std::fs::create_dir_all(crate::log::LOG_DIR).expect("create target/demo-logs");
         std::fs::write(&salt_path, KNOWN_SALT).expect("write known salt file");

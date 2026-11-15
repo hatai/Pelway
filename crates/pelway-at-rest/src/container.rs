@@ -104,10 +104,7 @@ impl Header {
 /// u64 は 8 B なので 11 B の連番に必ず収まる（上位 3 B は 0）。
 #[must_use]
 pub fn chunk_nonce(counter: u64, last: bool) -> [u8; NONCE_LEN] {
-    // 誤検出（#26、Issue #301）: 0 埋めは未初期化メモリを読まないためだけの初期化。
-    // nonce はチャンク連番（counter）から一意に構成される設計で、ファイルごとの
-    // 乱数鍵の下で使われるため再利用は起きない（doc コメント参照）。
-    let mut nonce = [0u8; NONCE_LEN]; // codeql[rust/hard-coded-cryptographic-value]
+    let mut nonce = [0u8; NONCE_LEN];
     nonce[3..11].copy_from_slice(&counter.to_be_bytes());
     nonce[11] = u8::from(last);
     nonce

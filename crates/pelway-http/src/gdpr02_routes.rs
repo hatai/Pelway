@@ -31,9 +31,8 @@ use crate::{SharedDataStore, SharedLedger, serve_with_store_and_logger};
 const CANARY_BODY: &str = "PELWAY-CANARY-BODY-7Q2M9X";
 /// `client_msg_id` 用の合成 canary（UUIDv4 の形の合成値）。
 const CANARY_MSG_ID: &str = "3f6c2a9e-8b1d-4c7a-9e2f-5a1b7c3d9e04";
-/// テストで使う固定 salt（作り方自体は log.rs の単体テスト (s3)(s4) で確認済み。
-/// QA 用の合成値で実在の秘密ではない）。
-const SALT: &[u8] = b"gdpr02-routes-test-salt"; // codeql[rust/hard-coded-cryptographic-value]
+/// テストで使う固定 salt（作り方自体は log.rs の単体テスト (s3)(s4) で確認済み）。
+const SALT: &[u8] = b"gdpr02-routes-test-salt";
 
 const WS: &str = "ws-synthetic-gdpr02";
 const ACTOR: &str = "m-human-gdpr02";
