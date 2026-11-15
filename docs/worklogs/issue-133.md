@@ -76,4 +76,4 @@
 - 仮定・解釈: (a) 証跡は「人の承認」の内容なので `session/request_permission` への応答 `_meta.pelway` に載せると解釈し、`ApprovalEvidence`（decider・expires_at・snapshot_hash・eligibility・outcome_unknown）を `PermissionDecision` で decider から受け取り `RequestPermissionResponse._meta` に写した。(b) 「限定 MCP」は現行の「client が提供する MCP サーバー 0 件・追加ディレクトリ 0 件」が最も厳しい限定であり適合すると解釈した。
 - 足りなかった情報・検証手段: Issue 原文（案a・案ii の定義）と `mise run verify`・hk pre-commit・push が環境障害で不可。代替として toolchain 直実行で ACP 試験 11 件 pass・rustfmt・clippy -D warnings を確認。commit/push は復旧待ち。
 - 改善の提案: `docs/dev-environment.md` に「mise が rust 解決で network を要し、DNS 不通時は toolchain 直実行で `cargo test`/`rustfmt`/`clippy` が回せる（`~/.rustup/toolchains/<ver>/bin` を PATH 先頭に）」の退避手順を足す。
-- 対象 head: 2ad1f38（決3 反映の実装コミット。環境復旧後に MBX_DISABLE=1 で hk hook を通してコミット）
+- 対象 head: 43fcbbf（決3 反映の実装コミット。このメモを含むコミットの親。署名付け替え前は 2ad1f38）
