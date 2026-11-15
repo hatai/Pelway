@@ -169,8 +169,10 @@ PY
   # {"issue": <番号> | "item_id": "<id>", "status": "<Status 名>"} だけを持つ JSON で、
   # 値は gh の引数としてだけ渡す（シェルの文字列には組み込まない）。結果は同名の
   # .done / .error（結果 JSON）を残して要求ファイルを消す。失敗は再試行しない。
+  # キューの利用者（エージェント）がディレクトリに書けるため、symlink 差し替え・
+  # FIFO による巡回停止を防ぐ O_NOFOLLOW・dir_fd 指定の操作で処理する。
   python3 -I - "$Q" <<'PY' || true
-import glob, json, os, re, subprocess, sys
+import json, os, re, secrets, stat, subprocess, sys
 from datetime import datetime
 qdir = sys.argv[1]
 # ボードの Status 選択肢（runbook「ボードと巡回」の先頭と同じ値。変えるときは両方を直す）。
@@ -178,43 +180,68 @@ STATUS_NAMES = {"Backlog", "Todo", "Working", "In review", "Changes requested",
                 "Ready to merge", "Needs human", "Done"}
 OWNER, NUM = "hatai", "7"
 ITEM_RE = re.compile(r"[A-Za-z0-9_=-]{1,128}")
-reqs = sorted(glob.glob(os.path.join(qdir, "*.json")))
+# 要求ファイルの大きさの上限（数 KB の JSON を想定。これを超えるものは要求とみなさない）
+REQ_MAX = 16384
+
+# キューディレクトリ自体を検証する。symlink に差し替えられた先のファイルを
+# 読み・消してしまわないよう、O_NOFOLLOW で開いて所有者と種類を確かめ、
+# 以降の操作は開いた dir_fd 経由で行う。不成立ならこの巡回では処理しない。
+try:
+    dfd = os.open(qdir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    st = os.fstat(dfd)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
+        raise OSError("queue dir not usable")
+except OSError:
+    print("QUEUE queue-dir invalid", flush=True)
+    sys.exit(0)
+reqs = sorted(n for n in os.listdir(dfd) if n.endswith(".json"))
 if not reqs:
     sys.exit(0)
 now_iso = datetime.now().isoformat(timespec="seconds")
 
-def record(path, ok, **detail):
-    out = path[:-len(".json")] + (".done" if ok else ".error")
-    body = {"request": os.path.basename(path), "at": now_iso, **detail}
-    tmp = out + ".tmp"
-    with open(tmp, "w") as f:
+def record(name, ok, **detail):
+    out = name[:-len(".json")] + (".done" if ok else ".error")
+    body = {"request": name, "at": now_iso, **detail}
+    # 一時ファイルは予測不能な名前を O_EXCL|O_NOFOLLOW で作る
+    # （<名前>.done.tmp への symlink で外のファイルを上書きさせない）
+    tmp = f".q-{os.getpid()}-{secrets.token_hex(8)}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
+    with os.fdopen(fd, "w") as f:
         json.dump(body, f, ensure_ascii=False)
-    os.replace(tmp, out)
-    os.remove(path)
-    print(f"QUEUE {os.path.basename(path)} {'done' if ok else 'error: ' + str(detail.get('reason'))}", flush=True)
+    os.replace(tmp, out, src_dir_fd=dfd, dst_dir_fd=dfd)
+    os.unlink(name, dir_fd=dfd)
+    print(f"QUEUE {name} {'done' if ok else 'error: ' + str(detail.get('reason'))}", flush=True)
 
-def fail(path, reason, **kw):
-    record(path, False, reason=reason, **kw)
+def fail(name, reason, **kw):
+    record(name, False, reason=reason, **kw)
+
+def read_request(name):
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode) or st.st_size > REQ_MAX:
+            raise ValueError("not a regular request file")
+        return f.read()
 
 # 第 1 段: ファイルとフィールドの検証（gh は呼ばない）
 pending = []
-for path in reqs:
+for name in reqs:
     try:
-        req = json.load(open(path))
+        req = json.loads(read_request(name))
     except Exception:
-        fail(path, "bad-json"); continue
+        fail(name, "bad-json"); continue
     if not isinstance(req, dict) or not set(req) <= {"issue", "item_id", "status"}:
-        fail(path, "bad-shape"); continue
+        fail(name, "bad-shape"); continue
     st = req.get("status")
     if not isinstance(st, str) or st not in STATUS_NAMES:
-        fail(path, "bad-status"); continue
+        fail(name, "bad-status"); continue
     iss, iid = req.get("issue"), req.get("item_id")
     iss_ok = isinstance(iss, int) and not isinstance(iss, bool) and iss > 0
     iid_ok = isinstance(iid, str) and ITEM_RE.fullmatch(iid) is not None
     if ("issue" in req) == ("item_id" in req) or (iss is not None and not iss_ok) \
        or (iid is not None and not iid_ok):
-        fail(path, "bad-target"); continue
-    pending.append((path, req))
+        fail(name, "bad-target"); continue
+    pending.append((name, req))
 if not pending:
     sys.exit(0)
 
@@ -240,8 +267,8 @@ fields = gh_json("field-list", NUM, "--owner", OWNER, "--format", "json")
 sf = next((f for f in (fields or {}).get("fields", []) if f.get("name") == "Status"), None)
 pid = (view or {}).get("id")
 if not pid or not sf:
-    for path, _ in pending:
-        fail(path, "gh-read")
+    for name, _ in pending:
+        fail(name, "gh-read")
     sys.exit(0)
 opts = {o.get("name"): o.get("id") for o in sf.get("options", [])}
 
@@ -256,25 +283,25 @@ if any("issue" in r for _, r in pending):
     else:
         item_of = None
 
-for path, req in pending:
+for name, req in pending:
     st = req["status"]
     oid = opts.get(st)
     if not oid:
-        fail(path, "no-option", status=st); continue
+        fail(name, "no-option", status=st); continue
     if "issue" in req:
         if item_of is None:
-            fail(path, "item-list"); continue
+            fail(name, "item-list"); continue
         iid = item_of.get(req["issue"])
         if not iid:
-            fail(path, "item-not-found", issue=req["issue"]); continue
+            fail(name, "item-not-found", issue=req["issue"]); continue
     else:
         iid = req["item_id"]
     r = gh("item-edit", "--project-id", pid, "--id", iid,
            "--field-id", sf["id"], "--single-select-option-id", oid)
     if r is not None and r.returncode == 0:
-        record(path, True, status=st, item=iid)
+        record(name, True, status=st, item=iid)
     else:
-        fail(path, "item-edit", rc=(r.returncode if r else -1))
+        fail(name, "item-edit", rc=(r.returncode if r else -1))
 PY
   sleep 30
 done

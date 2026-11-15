@@ -107,6 +107,7 @@ check() {
 
 has() { grep -qF "$2" "$1"; }
 nhas() { ! grep -qF "$2" "$1"; }
+eq() { [[ "$1" == "$2" ]]; }
 
 # 1. Issue 番号で指定 → item が解決されて item-edit が呼ばれ .done が残る
 : > "$MOCK/gh-calls.log"
@@ -190,6 +191,49 @@ run_cycles 1
 check "half-written tmp file untouched" test -f "$QUEUE/half-written.json.tmp"
 check "no .error for tmp file" test ! -e "$QUEUE/half-written.error"
 check "after-tmp processed" test -f "$QUEUE/after-tmp.done"
+
+# 7. <名前>.error.tmp / .done.tmp への symlink で外のファイルを上書きさせない。
+# 一時ファイルは予測不能な名前で O_EXCL|O_NOFOLLOW に作られる
+printf 'SENTINEL-keep-me\n' > "$ROOT/victim"
+req esc-done.json '{"item_id": "PVTI_i352", "status": "Todo"}'
+req esc-err.json '{"issue": 352, "status": "Hacked"}'
+ln -s "$ROOT/victim" "$QUEUE/esc-done.done.tmp"
+ln -s "$ROOT/victim" "$QUEUE/esc-err.error.tmp"
+run_cycles 1
+check "victim file not overwritten via done.tmp" eq "$(cat "$ROOT/victim")" "SENTINEL-keep-me"
+check "done.tmp symlink not consumed" test -L "$QUEUE/esc-done.done.tmp"
+check "err.tmp symlink not consumed" test -L "$QUEUE/esc-err.error.tmp"
+check "esc-done still processed" test -f "$QUEUE/esc-done.done"
+check "esc-err still processed" test -f "$QUEUE/esc-err.error"
+
+# 8. キューディレクトリが symlink に差し替えられたら、その巡回では処理しない
+# （差し替え先の *.json を読み・消さない）
+rm -rf "$QUEUE.out" && mkdir -p "$QUEUE.out"
+printf '%s\n' '{"issue": 352, "status": "Hacked"}' > "$QUEUE.out/keep-safe.json"
+mv "$QUEUE" "$QUEUE.real" && ln -s "$QUEUE.out" "$QUEUE"
+run_cycles 1
+check "swapped-out request file still there" test -f "$QUEUE.out/keep-safe.json"
+check "no .error written into swapped dir" test ! -e "$QUEUE.out/keep-safe.error"
+check "queue-dir invalid line" has "$ROOT/out.log" "QUEUE queue-dir invalid"
+rm "$QUEUE" && mv "$QUEUE.real" "$QUEUE"
+
+# 9. 通常ファイルでない要求（FIFO）は巡回を止めず .error に回す
+mkfifo "$QUEUE/fifo.json"
+req fifo-guard.json '{"issue": 352, "status": "Hacked"}'
+run_cycles 1
+check "fifo request produces .error" test -f "$QUEUE/fifo.error"
+check "fifo file unlinked" test ! -e "$QUEUE/fifo.json"
+check "request after fifo also processed" test -f "$QUEUE/fifo-guard.error"
+
+# 10. 大きすぎる要求ファイル（上限超過）は gh を呼ばず .error
+python3 -I - > "$QUEUE/oversize.json.tmp" <<'EOF'
+print('{"issue": 352, "status": "Working", "pad": "' + "x" * 20000 + '"}')
+EOF
+mv "$QUEUE/oversize.json.tmp" "$QUEUE/oversize.json"
+: > "$MOCK/gh-calls.log"
+run_cycles 1
+check "oversize request produces .error" test -f "$QUEUE/oversize.error"
+check "oversize request never calls gh" test ! -s "$MOCK/gh-calls.log"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

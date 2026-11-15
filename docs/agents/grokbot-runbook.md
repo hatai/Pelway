@@ -106,8 +106,9 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 
 - 要求: `<任意の名前>.json` を置く。書き込み途中のファイルを拾わせないよう、`.json` 以外の名前（例: `<名前>.json.tmp`）に書いてから `mv` で置く。中身は `{"issue": <Issue 番号>, "status": "<Status 名>"}` または `{"item_id": "<project item id>", "status": "<Status 名>"}`。`issue` と `item_id` はどちらか 1 つだけ。Status 名はこの節の先頭の選択肢（Backlog・Todo・Working・In review・Changes requested・Ready to merge・Needs human・Done）のいずれか。それ以外のキー・値を持つ要求は失敗になる
 - 結果の確認: 処理された要求ファイルは消え、同名の `<名前>.done`（成功）または `<名前>.error`（失敗。中身は理由を持つ結果 JSON）が残る。巡回出力にも `QUEUE <名前> done|error` の行が出る
+- 失敗の種類と gh 呼び出しの関係は 2 段で決まる。第 1 段（JSON の形式・許可キー・Status 名・対象指定の検証）で落ちる要求は gh を一切呼ばない。第 2 段（Issue 番号→item id、Status 名→選択肢 id の解決）では `gh project` の `view`・`field-list`・`item-list` の読み取りを使い、解決できない要求は `item-edit` を呼ばず `.error` にする。書き込みは `item-edit` だけで、完全に解決できた要求にだけ実行する
 - 失敗は再試行しない。やり直すときは新しい `.json` を置く
-- 実行するのは `gh project` の `view`・`field-list`・`item-list`（読み取り）と `item-edit`（書き込み）だけ。要求の文字列がシェルのコマンドに組み込まれることはない
+- 要求の文字列がシェルのコマンドに組み込まれることはない
 
 ## 3. 同時数と順番待ち
 
