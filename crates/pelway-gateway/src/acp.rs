@@ -246,11 +246,47 @@ pub enum PermissionAnswer {
     Cancel,
 }
 
+/// Pelway の承認モデルの証跡。許可応答の `_meta.pelway` に載せて
+/// エージェント側の記録にも残す（決3・案ii）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ApprovalEvidence {
+    /// 指名承認者（member id または役割の識別子）。
+    pub decider: Option<String>,
+    /// 承認の期限（RFC3339）。
+    pub expires_at: Option<String>,
+    /// 承認対象 payload の snapshot hash（改訂ずれの検出用）。
+    pub snapshot_hash: Option<String>,
+    /// 開始資格（開始に必要な資格・条件の識別子）。
+    pub eligibility: Option<String>,
+    /// 人の決定の結果が不明（outcome unknown）なら `true`。
+    pub outcome_unknown: bool,
+}
+
+/// 承認カード側の決定と、その承認モデルの証跡（決3・案ii）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionDecision {
+    /// 許可の結論。
+    pub answer: PermissionAnswer,
+    /// 承認モデルの証跡。応答の `_meta.pelway` に載る。
+    pub evidence: ApprovalEvidence,
+}
+
+impl PermissionDecision {
+    /// 証跡の無い決定を作る。
+    #[must_use]
+    pub fn answered(answer: PermissionAnswer) -> Self {
+        Self {
+            answer,
+            evidence: ApprovalEvidence::default(),
+        }
+    }
+}
+
 /// 承認の決定を担う側。外部エージェントからの許可要求ごとに呼ばれる。
 /// 段階が宣言されていない操作には呼ばれない（先に fail closed で止まる）。
 pub trait PermissionDecider: Send + Sync {
     /// 要求1件への決定を返す。
-    fn decide(&self, ask: PermissionAsk) -> PermissionAnswer;
+    fn decide(&self, ask: PermissionAsk) -> PermissionDecision;
 }
 
 /// 監査に記録する adapter の出来事。actor・操作・結果は呼び出し元が相関 ID
@@ -582,13 +618,13 @@ fn answer_permission(
         return reject_or_cancel(request, connection, audit);
     }
 
-    let answer = decider.decide(PermissionAsk {
+    let decision = decider.decide(PermissionAsk {
         session_id: request.session_id.0.to_string(),
         tool_call_id,
         operation,
         title: request.title.clone(),
     });
-    let wanted = match answer {
+    let wanted = match decision.answer {
         PermissionAnswer::AllowOnce => schema::PermissionOptionKind::AllowOnce,
         PermissionAnswer::RejectOnce => schema::PermissionOptionKind::RejectOnce,
         PermissionAnswer::Cancel => {
@@ -604,17 +640,46 @@ fn answer_permission(
         audit.record(AcpAuditEvent::PermissionResolved {
             outcome: option.option_id.0.to_string(),
         });
-        Ok(schema::RequestPermissionResponse::new(
-            schema::RequestPermissionOutcome::Selected(schema::SelectedPermissionOutcome::new(
-                option.option_id.clone(),
-            )),
-        ))
+        // 決3・案ii: Pelway の承認モデルの証跡を `_meta.pelway` に載せる。
+        Ok(
+            schema::RequestPermissionResponse::new(schema::RequestPermissionOutcome::Selected(
+                schema::SelectedPermissionOutcome::new(option.option_id.clone()),
+            ))
+            .meta(approval_meta(&decision.evidence)),
+        )
     } else {
         audit.record(AcpAuditEvent::PermissionResolved {
             outcome: "cancelled".to_owned(),
         });
         cancel(request, connection, audit)
     }
+}
+
+/// 承認モデルの証跡を `_meta` の `pelway` オブジェクトにする。
+/// 証跡が空なら `_meta` 自体を付けない。
+fn approval_meta(evidence: &ApprovalEvidence) -> Option<schema::Meta> {
+    let mut pelway = serde_json::Map::new();
+    if let Some(decider) = &evidence.decider {
+        pelway.insert("decider".to_owned(), decider.clone().into());
+    }
+    if let Some(expires_at) = &evidence.expires_at {
+        pelway.insert("expiresAt".to_owned(), expires_at.clone().into());
+    }
+    if let Some(snapshot_hash) = &evidence.snapshot_hash {
+        pelway.insert("snapshotHash".to_owned(), snapshot_hash.clone().into());
+    }
+    if let Some(eligibility) = &evidence.eligibility {
+        pelway.insert("eligibility".to_owned(), eligibility.clone().into());
+    }
+    if evidence.outcome_unknown {
+        pelway.insert("outcomeUnknown".to_owned(), true.into());
+    }
+    if pelway.is_empty() {
+        return None;
+    }
+    let mut meta = serde_json::Map::new();
+    meta.insert("pelway".to_owned(), pelway.into());
+    Some(meta)
 }
 
 /// 許可要求から対象の操作名を取り出す。subject の tool_call.name を第一に、

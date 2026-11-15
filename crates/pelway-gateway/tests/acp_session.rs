@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 use agent_client_protocol::v2::{ConnectionTo, Responder, schema};
 use agent_client_protocol::{Agent, ByteStreams, Client, ConnectTo, Result};
 use pelway_gateway::acp::{
-    AcpAuditEvent, AcpClient, AcpError, ExportEnvelope, GrantRegistry, IsolatedTransport,
-    PermissionAnswer, PermissionAsk, PermissionDecider,
+    AcpAuditEvent, AcpClient, AcpError, ApprovalEvidence, ExportEnvelope, GrantRegistry,
+    IsolatedTransport, PermissionAnswer, PermissionAsk, PermissionDecider, PermissionDecision,
 };
 use pelway_gateway::tier::{ActionTier, TierDeclarations};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -47,6 +47,8 @@ struct DoubleState {
     cancelled: bool,
     /// クライアントが permission request に返した結果の記録（表示用の文字列）。
     permission_outcome: Option<String>,
+    /// クライアントが permission 応答に載せた `_meta`（承認モデル証跡の確認用）。
+    permission_meta: Option<serde_json::Value>,
     /// 受け取った initialize の client capabilities（零 capability の確認用）。
     client_capabilities: Option<schema::ClientCapabilities>,
     /// 受け取った session/new の `mcpServers` と `additionalDirectories` の件数。
@@ -143,10 +145,11 @@ impl Double {
                 schema::RequestPermissionOutcome::Cancelled(_) => "cancelled".to_owned(),
                 _ => "other".to_owned(),
             };
-            self.state
-                .lock()
-                .expect("double state poisoned")
-                .permission_outcome = Some(outcome.clone());
+            {
+                let mut state = self.state.lock().expect("double state poisoned");
+                state.permission_outcome = Some(outcome.clone());
+                state.permission_meta = response.meta.clone().map(serde_json::Value::Object);
+            }
             send_update(
                 &connection,
                 &session_id,
@@ -335,22 +338,26 @@ fn grant(registry: &GrantRegistry) -> pelway_gateway::acp::AgentGrant {
 /// 決定を記録しつつ返す PermissionDecider。
 struct RecordingDecider {
     asks: Mutex<Vec<PermissionAsk>>,
-    answer: PermissionAnswer,
+    decision: PermissionDecision,
 }
 
 impl RecordingDecider {
     fn answered(answer: PermissionAnswer) -> Self {
+        Self::decided(PermissionDecision::answered(answer))
+    }
+
+    fn decided(decision: PermissionDecision) -> Self {
         Self {
             asks: Mutex::new(Vec::new()),
-            answer,
+            decision,
         }
     }
 }
 
 impl PermissionDecider for RecordingDecider {
-    fn decide(&self, ask: PermissionAsk) -> PermissionAnswer {
+    fn decide(&self, ask: PermissionAsk) -> PermissionDecision {
         self.asks.lock().expect("decider poisoned").push(ask);
-        self.answer
+        self.decision.clone()
     }
 }
 
@@ -694,5 +701,61 @@ async fn oversized_output_fails_the_session() {
         .expect_err("巨大な出力を許した");
 
     assert!(matches!(error, AcpError::OutputTooLarge), "{error:?}");
+    server.abort();
+}
+
+// 受け入れ条件（決3・案ii）: decider が返した Pelway 承認モデルの証跡
+// （指名承認者・期限・snapshot hash・開始資格・outcome_unknown）は
+// permission 応答の meta.pelway に載ってエージェントへ届く。
+#[tokio::test]
+async fn approval_evidence_is_carried_in_response_meta() {
+    let (transport, serve, state) = spawn_double(DoubleSpec {
+        permission_tool: Some("post_message"),
+        option_kinds: vec![
+            schema::PermissionOptionKind::AllowOnce,
+            schema::PermissionOptionKind::RejectOnce,
+        ],
+        ..DoubleSpec::default()
+    });
+    let server = tokio::spawn(serve);
+
+    let audit = Arc::new(Mutex::new(Vec::new()));
+    let client = AcpClient::new(declarations(), audit.clone());
+    let decider = Arc::new(RecordingDecider::decided(PermissionDecision {
+        answer: PermissionAnswer::AllowOnce,
+        evidence: ApprovalEvidence {
+            decider: Some("member:hatai".to_owned()),
+            expires_at: Some("2026-11-16T00:00:00Z".to_owned()),
+            snapshot_hash: Some("sha256:abc123".to_owned()),
+            eligibility: Some("role:representative".to_owned()),
+            outcome_unknown: false,
+        },
+    }));
+    client
+        .run_prompt(
+            &grant(&grants()),
+            IsolatedTransport::assume_isolated(transport),
+            &ExportEnvelope::new("レビューして"),
+            decider,
+        )
+        .await
+        .expect("ACP session failed");
+
+    let state = state.lock().expect("double state poisoned");
+    assert_eq!(
+        state.permission_outcome.as_deref(),
+        Some("selected:allow_once")
+    );
+    let meta = state
+        .permission_meta
+        .as_ref()
+        .expect("permission response should carry meta");
+    let pelway = &meta["pelway"];
+    assert_eq!(pelway["decider"], "member:hatai");
+    assert_eq!(pelway["expiresAt"], "2026-11-16T00:00:00Z");
+    assert_eq!(pelway["snapshotHash"], "sha256:abc123");
+    assert_eq!(pelway["eligibility"], "role:representative");
+    drop(state);
+
     server.abort();
 }

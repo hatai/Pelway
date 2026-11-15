@@ -68,3 +68,12 @@
 - 足りなかった情報・検証手段: task container 側の隔離実装は本 Issue の範囲外であり、「隔離済み transport のみ」を API で強制する以上の実証はできない（doc と型名で責務を表す）。
 - 改善の提案: 隔離を作る側（task container / launcher）が実装された時点で `IsolatedTransport` のコンストラクタをそこだけが呼べる形に閉じる（sealed）と、assume_isolated の濫用余地が消える。
 - 対象 head: 58feab8
+
+### round 9
+
+- 詰まったところ: hatai の 3 決定（決1=A・決2=案a・決3=案ii）を反映。決3「_ 拡張で Pelway 承認モデルを載せる」の実装中に環境が劣化し（/home が ext4 エラーで remount-ro、DNS 不通）、mise・hk フック・agent-gh（トークン発行）・push が全て不可になった。
+- 曖昧だった表現: 「_ 拡張で … を載せる」— 載せる対象が permission 応答なのか要求なのか、また「限定 MCP」（決2）が空 mcpServers で十分か。Issue 原文は DNS 不通で確認できず、指揮役の転記を根拠にした。
+- 仮定・解釈: (a) 証跡は「人の承認」の内容なので `session/request_permission` への応答 `_meta.pelway` に載せると解釈し、`ApprovalEvidence`（decider・expires_at・snapshot_hash・eligibility・outcome_unknown）を `PermissionDecision` で decider から受け取り `RequestPermissionResponse._meta` に写した。(b) 「限定 MCP」は現行の「client が提供する MCP サーバー 0 件・追加ディレクトリ 0 件」が最も厳しい限定であり適合すると解釈した。
+- 足りなかった情報・検証手段: Issue 原文（案a・案ii の定義）と `mise run verify`・hk pre-commit・push が環境障害で不可。代替として toolchain 直実行で ACP 試験 11 件 pass・rustfmt・clippy -D warnings を確認。commit/push は復旧待ち。
+- 改善の提案: `docs/dev-environment.md` に「mise が rust 解決で network を要し、DNS 不通時は toolchain 直実行で `cargo test`/`rustfmt`/`clippy` が回せる（`~/.rustup/toolchains/<ver>/bin` を PATH 先頭に）」の退避手順を足す。
+- 対象 head: （未コミット。hk hook が mise→DNS 解決を要り、環境復旧後にコミット・署名付け替え・push を行う）
