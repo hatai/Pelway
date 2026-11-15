@@ -18,7 +18,7 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 | Issue・PR・レビュー・CI の結果を読む | GitHub |
 | スレッドのモデル・effort を変える | T3 Connect の MCP（`t3_thread_configure`） |
 | 終わったスレッドを settle する | T3 のスレッドの操作（`t3_thread_organize` の `action: settle`。Grok Bot は MCP 経由）。PR をスレッドに紐付けたものはマージで自動 settle |
-| `pelway-review` が Approve し必須チェックが通った PR をマージする | `gh pr merge --merge --admin --delete-branch`（人間から委任された迂回。条件は skill `command-team` の「マージ」）。`--admin` は App のトークンでは使えないため、このマージだけは人間の名義の `gh` で行い、ほかの操作は `scripts/agent-gh dev` で行う |
+| `pelway-review` が Approve し必須チェックが通った PR に `automerge` ラベルを付けて Kodiak のキューに入れ、マージを確認する | `scripts/agent-gh dev pr edit <M> --add-label automerge`（条件は skill `command-team` の「マージ」）。マージの実行は Kodiak（GitHub App）が行い、指揮役がマージコマンドを叩くことはない。キューの切り戻しは hatai の admin マージだけが行う |
 
 しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更（`actions.lock` の再生成は例外。正本は `docs/superpowers/specs/agent-team.md` の「制約」）、スレッドの取り消し。
 
@@ -72,6 +72,13 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 - `ready-for-agent` は入場の条件であり、着手後・Done の後も外さない。ラベルが外された場合: 着手前ならボードからも外し、その Issue の補助記録も削除する。人間が着手後に外したら不整合として巡回が検出し、`needs-human` で確認する
 - ラベルなしカードの由来はタイムラインで区別する: `ready-for-agent` の取り外しイベントがあるものは削除のルールを適用し、無いものは最初からラベルなし（サブ Issue の自動追加など）として保持する。サブ Issue は `ready-for-agent` が無い限り、Todo へ動かされても処理対象にならない
 - ラベルを動かした主体が、その手順の中でステータスも導出規則どおりに更新する。片方だけ成功した場合は巡回の整合チェックが検出して是正する
+
+### マージキュー待ちの PR
+
+`automerge` ラベルが付いた open な PR は、待ち先が Kodiak（マージキューの GitHub App。正本は `docs/superpowers/specs/agent-team.md` の「マージキュー」）である。補助記録では `waiting_on=merge` のままとし、巡回スクリプトの `next_owner` は `conductor (PR #<M>)` を出すが、実際の待ち先は Kodiak として扱う。
+
+- マージの確認は、notify-grokbot の `pull_request`（`closed`、`merged: true`）の通知と、巡回での PR の状態で行う。マージされれば従来どおり Issue から `agent:working`・`agent:devin` を外す
+- Kodiak がコンフリクト等でマージできないときは、Kodiak が PR にコメントして `automerge` ラベルを外す（`.kodiak.toml` の `merge.notify_on_conflict` の既定）。巡回で、Approve 済みなのに `automerge` ラベルが無い PR に Kodiak のマージ不可コメントがあるか、またはラベルが付いたまま長時間 open のままのものを検知する。前者は手当スレッドを立てて main の取り込みと衝突解消をさせ、終わったら指揮役が `automerge` ラベルを付け直す。後者（キューが詰まる・応答しない）は hatai の admin マージへの切り戻しの判断材料として人間に知らせる
 
 ### 割り当て・停止・再開
 
@@ -269,7 +276,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 | 項目 | 意味 | 値 |
 |---|---|---|
-| `waiting_on` | 誰待ちか | `human`（人間の判断待ち）/ `implement`（実装担当の作業待ち）/ `review`（レビュー待ち）/ `merge`（マージ待ち）/ `conductor`（指揮役の判断待ち・順番待ち） |
+| `waiting_on` | 誰待ちか | `human`（人間の判断待ち）/ `implement`（実装担当の作業待ち）/ `review`（レビュー待ち）/ `merge`（マージ待ち。`automerge` ラベルが付いていれば実際の待ち先は Kodiak）/ `conductor`（指揮役の判断待ち・順番待ち） |
 | `waiting_since` | 待ち始めた時刻（ISO 8601） | `waiting_on` が同じ対象では前回値を引き継ぐ。変わったらリセットする |
 | `next_owner` | 次の担当 | `hatai` / `implement thread (#<N>)` / `reviewer (PR #<M>)` / `conductor` |
 | `updated_at` | その対象の最終更新時刻（ISO 8601） | 巡回のたびに書き換わる |
