@@ -113,7 +113,7 @@ scripts/agent-gh dev git push -u origin HEAD
 
 ### 7. Draft PR を作る（初回だけ）
 
-`write-pull-request` skill に従って本文を書き、Draft で作る。本文の「概要」の最後に `Closes #<N>` を入れる。本文の「対象」の最後に、次の 1 行を必ず入れる。値は、指揮役の指示の 2 行目 `Assigned: role=implement agent=... model=... effort=...` から写す（`role=implement` を除いた残りを、順番も表記も変えずに書く）。指示に `Assigned:` の行が無いときは `model=unknown effort=unknown` と書く。
+`write-pull-request` skill に従って本文を書き、Draft で作る。日本語を含むタイトル・本文・コメントは exec のコマンド引数に書かずファイル経由で渡す決まり（write-pull-request の「定期ルール」）に従うこと。特にタイトルは `--title` に日本語を書かず、英語の仮タイトルで作成したあと `scripts/agent-gh dev api PATCH ... --input <JSON ファイル>` で日本語タイトルを設定する。本文の「概要」の最後に `Closes #<N>` を入れる。本文の「対象」の最後に、次の 1 行を必ず入れる。値は、指揮役の指示の 2 行目 `Assigned: role=implement agent=... model=... effort=...` から写す（`role=implement` を除いた残りを、順番も表記も変えずに書く）。指示に `Assigned:` の行が無いときは `model=unknown effort=unknown` と書く。
 
 ```
 Implementer: agent=<opencode|devin> model=<モデル名> effort=<effort>
@@ -122,10 +122,12 @@ Implementer: agent=<opencode|devin> model=<モデル名> effort=<effort>
 修正依頼で effort が変わったときは、「対象」の行を新しい値に書き換える。
 
 ```bash
-scripts/agent-gh dev pr create --draft --title "..." --body-file - <<'EOF'
+scripts/agent-gh dev pr create --draft --title "wip" --body-file - <<'EOF'
 ...
 EOF
 ```
+
+（作成後、PR のタイトルを `api PATCH --input` で日本語に設定する。手順の詳細は write-pull-request skill の手順 3 を参照）
 
 修正依頼の場合は PR を作り直さない。push したあと `scripts/agent-gh dev pr edit` で本文の「レビューと QA」と「対象」の sha を更新する。
 
