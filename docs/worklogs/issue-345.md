@@ -2,7 +2,7 @@
 
 ## 実装者メモ（round 1）
 
-対象 head: <このメモを含むコミットの親の SHA＝実装の実体を含むコミット b3d8ae6>
+対象 head: e0c391f68e8bfb232195a0de183b4032244adfdc（この round の実装の実体を含むコミット。agent-gh-resign による署名付け替え後の SHA）
 
 実施者: swe-2-high（T3 Code、hatai からの直接指示のセッション）。実施者・モデル・effort の記録は PR 本文の Implementer: 行にも記載。
 
