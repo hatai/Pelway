@@ -15,6 +15,7 @@ hatai の指示「#300, #266, #273, #301, #303 を処理して」を受けた一
 | 2026-11-15 12:40 | #308 | implement | devin | swe-2-high | high | 通常枠。GLM 側が埋まり気味のため分散（command-team 改善ループ＋runbook＋初回走査） |
 | 2026-11-15 12:52 | #315 | implement | devin | swe-2-high | high | 通常枠（草案全文つきの新スキル導入＋command-team 接続） |
 | 2026-11-15 12:56 | #316 | implement | devin | swe-2-high | high | 通常枠。#273 と同じ取り込み経路のため（retro＋writing-for-agents の取り込みと retro 試行） |
+| 2026-11-15 13:24 | PR #321（worklog 追記の PR） | review | devin | swe-2-high | default | 指揮役自身の PR。奇数→Devin CLI。最初 Codex を誤って立てたが投稿前に停止し、Devin に立て直した（レビュー未投稿のため影響なし） |
 
 スレッド:
 
