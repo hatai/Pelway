@@ -11,3 +11,13 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「worklog のような成果物の置き場は、既存の命名規則（`issue-<N>.md`・`<日付>-<slug>.md`）のどれに従うかを書く」を足す
 
 使ったスキル: implement-issue、write-pull-request（PR 本文は作成時に使用）
+
+## 実装者メモ（round 2）
+
+対象 head: df7fb5c2c42377afbbb1826c2c9ea338d2ef043d（このメモを含むコミットの親。実装の実体は round 1 の fdf5ecd5574d3540052b8b5087a99d5224a8bb25 で、round 2 は再レビューのみ）
+
+1. 詰まった箇所: round 1 の Approve（fdf5ecd）後に「対象 head」行の追記を含むメモのみのコミット（df7fb5c）を push し、command-team の「Approve 後に push があった PR はレビューをやり直す」規則により再レビューが必要になった（指揮役からの指摘）
+2. 曖昧だった文: なし（指揮役の指示どおりに再レビューへ進んだ）
+3. 仮定と解釈: round 2 は再レビューのみでコード・ドキュメントの変更はないが、レビュー round の番号として数え、メモも round 2 の節として書き足した
+4. 足りなかった情報・検証手段: なし
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 8（レビュー委託）または「対象 head」の書式の注記に、「対象 head の記入を含むメモのコミットはレビュー委託の前に行う。Approve 後の push（メモのみでも）はレビューのやり直しになる」を明記する（issue-290 の改善案の未反映分とも関係する）
