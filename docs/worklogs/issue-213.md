@@ -9,3 +9,12 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md`の「受け入れ条件の書き方」に「確認先として別 Issue の成果物（文書・表）を指す場合、その Issue が未実施なら確認先が存在しない旨を本文に書くか、代替の確認場所を併記する」を足す。
 
 使ったスキル: implement-issue、`.agents/skills/tdd/SKILL.md`（seam: `pelway_schedule::Schedule` の公開 API。`tests/schedule.rs` の結合試験で `parse`/`next_after` を固定。`from` を引数注入するため時刻のモックは不要と判断）、write-pull-request
+
+## 試行（Issue #273）の記録（補遺）
+
+実装スレッドの最初の報告（PR #288 のレビュー委託時の状態報告、2026-11-14）からの転記。指揮役（代行）が 2026-11-15 に追加。
+
+- 起動時のリポジトリの版: `220569ed96a69e6eb923ae1a0bb4f9258b6186ab`
+- 読んだ解決先のパス: `.agents/skills/tdd/SKILL.md`
+- 補助文書の可読性: 同梱の `tests.md`・`mocking.md` は読めた
+- インフラの注記: `agent-gh-resign` の push の後、resign 済みコミット（`9b76fb2`）の loose object が壊れた空オブジェクトとして作業フォルダに残り、レビュー委託の解決に失敗した。当該オブジェクトを削除して origin から取り直したところ回復した
