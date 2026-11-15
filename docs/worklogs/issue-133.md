@@ -95,3 +95,12 @@
 - 足りなかった情報・検証手段: `cargo` の toolchain 解決が 1.94.1/1.75 に落ちる環境問題があり、`cargo +1.99.1` 明示で回避。mise run verify は file-tool プラグインの環境起因失敗のみ（同左）。
 - 改善の提案: launcher 実装時に `bind` を呼ぶ公開 API（例 `AcpLauncher::launch`）を設け、`bind_in_process` を `#[cfg(feature)]` か test-support 側に移して公開面を更に狭める。
 - 対象 head: このメモを含むコミットの親（round 6 must-fix 適用の実装コミット）
+
+### round 12
+
+- 詰まったところ: Codex round 7 の must-fix 3 件への対応。(1) `tool_call_update` の toolCallId→名前相関表が無制限に増えて受信側メモリを枯渇させられた → `SeenTools` 型に集約し件数 512・合計 1 MiB を上限化、許可要求で引いた項目は `take` で消す（相関は単発）、溢れはキュー溢れと同じく `UpdateOverflow` で session 失敗。(2) `FrameLimitedRead` が read チャンク全走査後に上限を確認し、超過分と改行が同一チャンクに入ると改行リセットで超過 frame が SDK に渡った → 走査中に「改行処理より先に」超過検出して即時エラーに変更。(3) 証跡の期限は構築時のみ検査で、decider が保持・再利用すると失効済み承認が通った → `AllowOnce` を返す直前に `is_expired()`（`now_epoch_ms` ベース、時計逆転は全証跡失効扱いで fail closed）を再確認。
+- 曖昧だった表現: 「メモリ量も通知上限に含めて」— 通知キューと別カウンタのため、相関表独自に件数・合計バイトの上限を持たせ、溢れ時は同じ失敗経路（`UpdateOverflow` → `session/cancel` → close）に乗せる形で「含めた」と解釈した。
+- 仮定・解釈: 超過 frame + 同チャンク改行の再現は duplex 経路では read チャンク境界が制御不能なため、`WholeSlice`（1 回の poll_read で全量を返す read）を使う `#[cfg(test)]` ユニット試験で決定的に確認。失効の試験も同様にユニット試験＋統合試験（構築後 200ms 待って prompt）の両方を追加。相関表の有界性もユニット試験（件数・byte それぞれ）＋統合試験（600 件の tool_call_update 連投で session 失敗）で確認。
+- 足りなかった情報・検証手段: なし（直接 toolchain で ACP 関連試験 21 件 pass 含め全緑、rustfmt・clippy -D warnings クリーン）。mise run verify は環境起因（/home ro-bind）で file-tool プラグインのみ失敗の既知事項あり、CI に委ねる。
+- 改善の提案: 相関表は許可要求 1 回で消費する前提のため、許可を求めない tool_call_update が多い長時間 session では上限（512）到達で正当 session も失敗しうる — 必要なら「直近 N 件のリングバッファ」への変更を検討する（現行は fail closed 側で安全）。
+- 対象 head: このメモを含むコミットの親（round 7 must-fix 適用の実装コミット）

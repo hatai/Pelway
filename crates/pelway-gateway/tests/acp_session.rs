@@ -42,6 +42,9 @@ struct DoubleSpec {
     late_giant_bytes: Option<usize>,
     /// idle の前に 1 本の巨大テキストを送る（出力上限の確認）。
     huge_output: bool,
+    /// 異なる toolCallId の `tool_call_update` をこの数だけ連投する
+    /// （toolCallId 相関表の上限の確認）。
+    flood_tool_calls: Option<usize>,
 }
 
 /// 検証用の ACP Agent。v2 の baseline（initialize・session/new・prompt・cancel・
@@ -320,6 +323,20 @@ fn spawn_double(
                             )?;
                             sent += chunk;
                             seq += 1;
+                        }
+                    }
+                    if let Some(n) = double.spec.flood_tool_calls {
+                        for i in 0..n {
+                            send_update(
+                                &connection,
+                                &request.session_id.to_string(),
+                                schema::SessionUpdate::ToolCallUpdate(
+                                    schema::ToolCallUpdate::new(schema::ToolCallId::new(format!(
+                                        "call-{i}"
+                                    )))
+                                    .name(format!("tool-{i}")),
+                                ),
+                            )?;
                         }
                     }
                     if let Some(bytes) = double.spec.giant_frame_bytes {
@@ -923,6 +940,93 @@ async fn outcome_unknown_never_allows() {
         kinds.contains(&"permission_denied_incomplete_evidence".to_owned()),
         "permission_denied_incomplete_evidence が無い: {kinds:?}"
     );
+    server.abort();
+}
+
+// 不変条件（決3・案ii）: 構築時は有効だった証跡が許可時点で失効して
+// いれば `AllowOnce` を選ばず fail closed で止める（decider が証跡を
+// 保持・再利用するケース）。
+#[tokio::test]
+async fn expired_evidence_fails_closed() {
+    let (transport, serve, state) = spawn_double(DoubleSpec {
+        permission_tool: Some("post_message"),
+        option_kinds: vec![
+            schema::PermissionOptionKind::AllowOnce,
+            schema::PermissionOptionKind::RejectOnce,
+        ],
+        ..DoubleSpec::default()
+    });
+    let server = tokio::spawn(serve);
+
+    let expires_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock before epoch")
+        .as_millis() as u64
+        + 150;
+    let evidence = ApprovalEvidence::new(
+        "member:test-approver",
+        expires_at,
+        "sha256:test",
+        "role:test",
+        false,
+    )
+    .expect("test evidence should validate at construction");
+    // 許可時点には失効しているよう、期限が過ぎるのを待つ。
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    let audit = Arc::new(Mutex::new(Vec::new()));
+    let client = AcpClient::new(declarations(), audit.clone());
+    client
+        .run_prompt(
+            &grant(&grants()),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
+            &ExportEnvelope::new("レビューして"),
+            Arc::new(RecordingDecider::decided(PermissionDecision::approved(
+                evidence,
+            ))),
+        )
+        .await
+        .expect("ACP session failed");
+
+    let state = state.lock().expect("double state poisoned");
+    assert_eq!(
+        state.permission_outcome.as_deref(),
+        Some("selected:reject_once"),
+        "失効済みの証跡での許可を通した"
+    );
+    drop(state);
+    let kinds = audit_events(&audit);
+    assert!(
+        kinds.contains(&"permission_denied_incomplete_evidence".to_owned()),
+        "permission_denied_incomplete_evidence が無い: {kinds:?}"
+    );
+    server.abort();
+}
+
+// 受け入れ条件: 異なる toolCallId の更新を送り続ける agent に対し、
+// toolCallId → 操作名の相関表は有界で、溢れたら session は失敗する
+// （相関表の無制限蓄積によるメモリ枯渇の防止）。
+#[tokio::test]
+async fn flooding_tool_calls_fail_the_session() {
+    let (transport, serve, _state) = spawn_double(DoubleSpec {
+        flood_tool_calls: Some(600),
+        ..DoubleSpec::default()
+    });
+    let server = tokio::spawn(serve);
+
+    let audit = Arc::new(Mutex::new(Vec::new()));
+    let client = AcpClient::new(declarations(), audit.clone());
+    let error = client
+        .run_prompt(
+            &grant(&grants()),
+            IsolatedTransport::bind_in_process(transport, "acp-double"),
+            &ExportEnvelope::new("レビューして"),
+            Arc::new(RecordingDecider::answered(PermissionAnswer::RejectOnce)),
+        )
+        .await
+        .expect_err("相関表を溢れさせるエージェントを許した");
+
+    assert!(matches!(error, AcpError::UpdateOverflow), "{error:?}");
     server.abort();
 }
 

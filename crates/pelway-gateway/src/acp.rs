@@ -69,6 +69,21 @@ const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
 /// 累積する agent テキストの上限（byte）。超過は資源枯渇として扱う。
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 
+/// toolCallId → 操作名の相関表に保持する項目数・合計バイト数の上限。
+/// 悪意ある agent が異なる ID の更新を送り続けても map が無制限に
+/// 成長しないよう、超過はキュー溢れと同じく session 失敗とする。
+const MAX_SEEN_TOOLS_ENTRIES: usize = 512;
+const MAX_SEEN_TOOLS_BYTES: usize = 1024 * 1024;
+
+/// 現在時刻を epoch millisecond で返す。時計が UNIX_EPOCH より前なら
+/// `u64::MAX` を返して全ての証跡を失効扱いにする（fail closed）。
+fn now_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(u64::MAX)
+}
+
 /// ACP adapter の失敗。SDK の [`Error`] をそのまま外に漏らさないための詰め替え。
 #[derive(Debug)]
 pub enum AcpError {
@@ -314,11 +329,7 @@ impl ApprovalEvidence {
                 });
             }
         }
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or_default();
-        if expires_at <= now {
+        if expires_at <= now_epoch_ms() {
             return Err(AcpError::InvalidEvidence {
                 field: "expires_at",
                 reason: "expired".to_owned(),
@@ -331,6 +342,12 @@ impl ApprovalEvidence {
             eligibility,
             outcome_unknown,
         })
+    }
+
+    /// 証跡が既に失効しているか。decider は証跡を保持・再利用できるため、
+    /// 構築時の検証に加えて許可を返す時点でも確認する。
+    fn is_expired(&self) -> bool {
+        self.expires_at <= now_epoch_ms()
     }
 
     /// 指名承認者（member id または役割の識別子）。
@@ -535,13 +552,18 @@ impl<R: AsyncRead + Unpin> AsyncRead for FrameLimitedRead<R> {
         match Pin::new(&mut self.inner).poll_read(cx, buf) {
             Poll::Ready(Ok(())) => {
                 for &byte in &buf.filled()[before..] {
-                    self.frame_len = if byte == b'\n' { 0 } else { self.frame_len + 1 };
-                }
-                if self.frame_len > MAX_FRAME_BYTES {
-                    return Poll::Ready(Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "JSON-RPC frame exceeds size limit",
-                    )));
+                    // 上限超過は改行でのリセットより先に即時エラーにする
+                    // （超過分と改行が同じ read チャンクに入っても
+                    // frame は SDK に渡らない）。
+                    self.frame_len += 1;
+                    if byte == b'\n' {
+                        self.frame_len = 0;
+                    } else if self.frame_len > MAX_FRAME_BYTES {
+                        return Poll::Ready(Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "JSON-RPC frame exceeds size limit",
+                        )));
+                    }
                 }
                 Poll::Ready(Ok(()))
             }
@@ -683,7 +705,7 @@ impl AcpClient {
         // toolCallId → 操作名の相関表。許可要求の subject が名前を持たない
         // 場合に、先行する tool_call_update の `name` で引く（R1-Q5 案aの
         // 「toolCallId/名前は判定キーへの相関にだけ使う」）。
-        let seen_tools = Arc::new(Mutex::new(HashMap::<String, String>::new()));
+        let seen_tools = Arc::new(Mutex::new(SeenTools::default()));
         let declarations = self.declarations.clone();
         let audit = Arc::clone(&self.audit);
         let envelope_body = envelope.body().to_owned();
@@ -702,10 +724,16 @@ impl AcpClient {
                             &notification.update
                             && let MaybeUndefined::Value(name) = &tool_call.name
                         {
-                            seen_tools
+                            // 相関表が溢れたらキュー溢れと同じく session を
+                            // 失敗させる（無制限蓄積の DoS 防止）。
+                            if !seen_tools
                                 .lock()
                                 .expect("tool correlation poisoned")
-                                .insert(tool_call.tool_call_id.0.to_string(), name.clone());
+                                .insert(tool_call.tool_call_id.0.to_string(), name.clone())
+                            {
+                                overflow.store(true, Ordering::Relaxed);
+                                let _ = update_tx.try_send(QueuedUpdate::Overflow);
+                            }
                         }
                         // 通知の JSON 表現サイズでキュー滞留量を計量する。
                         let size = serde_json::to_vec(&notification)
@@ -840,7 +868,7 @@ impl AcpClient {
 fn answer_permission(
     request: &schema::RequestPermissionRequest,
     declarations: &TierDeclarations,
-    seen_tools: &Mutex<HashMap<String, String>>,
+    seen_tools: &Mutex<SeenTools>,
     decider: &dyn PermissionDecider,
     audit: &dyn AcpAudit,
     connection: &ConnectionTo<Agent>,
@@ -870,11 +898,12 @@ fn answer_permission(
     // 期限・snapshot hash・開始資格）が必須。証跡が無い、または
     // `outcome_unknown`（人の決定結果が不明）なら許可を選ばず
     // fail closed で止める。値の検証は `ApprovalEvidence::new` が構築時に
-    // 済ませている。
+    // 済ませているが、decider が証跡を保持・再利用できるため期限は
+    // 許可を返す時点でも再確認する。
     if decision.answer == PermissionAnswer::AllowOnce {
         let valid = matches!(
             &decision.evidence,
-            Some(evidence) if !evidence.outcome_unknown()
+            Some(evidence) if !evidence.outcome_unknown() && !evidence.is_expired()
         );
         if !valid {
             audit.record(AcpAuditEvent::PermissionDeniedIncompleteEvidence { operation });
@@ -929,13 +958,50 @@ fn approval_meta(evidence: Option<&ApprovalEvidence>) -> Option<schema::Meta> {
     Some(meta)
 }
 
+/// toolCallId → 操作名の有界な相関表。項目数と保持バイト数の合計に
+/// 上限を持ち、許可要求で引いた項目は消す（相関は単発）。
+#[derive(Default)]
+struct SeenTools {
+    map: HashMap<String, String>,
+    bytes: usize,
+}
+
+impl SeenTools {
+    /// 相関項目を登録する。件数・合計バイト数の上限を超えるなら登録せず
+    /// `false` を返す（呼び出し元は session を失敗させる）。同一 ID の
+    /// 上書きでは古い項目分を差し引いてから上限を評価する。
+    fn insert(&mut self, tool_call_id: String, name: String) -> bool {
+        let old_entry = self
+            .map
+            .get(&tool_call_id)
+            .map(|old| tool_call_id.len() + old.len())
+            .unwrap_or(0);
+        let bytes_after = self.bytes - old_entry + tool_call_id.len() + name.len();
+        if (old_entry == 0 && self.map.len() >= MAX_SEEN_TOOLS_ENTRIES)
+            || bytes_after > MAX_SEEN_TOOLS_BYTES
+        {
+            return false;
+        }
+        self.map.insert(tool_call_id, name);
+        self.bytes = bytes_after;
+        true
+    }
+
+    /// toolCallId の操作名を取り出して相関表から消す。
+    fn take(&mut self, tool_call_id: &str) -> Option<String> {
+        let name = self.map.remove(tool_call_id)?;
+        self.bytes -= tool_call_id.len() + name.len();
+        Some(name)
+    }
+}
+
 /// 許可要求から対象の操作名を取り出す。subject の tool_call.name を第一に、
-/// 無ければ先行の `tool_call_update` で見た名前を toolCallId で引く。
-/// subject が tool call でない（Command・Other・無し）場合は名前なしとして
-/// fail closed 側に流す。
+/// 無ければ先行の `tool_call_update` で見た名前を toolCallId で引く（引いた
+/// 項目は消す）。subject が tool call でない（Command・Other・無し）場合は
+/// 名前なしとして fail closed 側に流す。
 fn subject_operation(
     request: &schema::RequestPermissionRequest,
-    seen_tools: &Mutex<HashMap<String, String>>,
+    seen_tools: &Mutex<SeenTools>,
 ) -> (String, String) {
     let Some(schema::RequestPermissionSubject::ToolCall(subject)) = &request.subject else {
         return (String::new(), String::new());
@@ -946,8 +1012,7 @@ fn subject_operation(
         _ => seen_tools
             .lock()
             .expect("tool correlation poisoned")
-            .get(&tool_call_id)
-            .cloned(),
+            .take(&tool_call_id),
     };
     (tool_call_id, name.unwrap_or_default())
 }
@@ -1060,5 +1125,102 @@ async fn wait_until_idle(
         if text.len() > MAX_OUTPUT_BYTES {
             return Err(AcpError::OutputTooLarge);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 1 回の poll_read で受け取る内容を全部返す read。
+    struct WholeSlice<'a>(&'a [u8]);
+
+    impl AsyncRead for WholeSlice<'_> {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            buf.put_slice(self.0);
+            self.0 = &[];
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    /// 上限超過直後に改行が同じ read チャンクに入っても、改行処理より
+    /// 先に即時エラーにして超過 frame を SDK に渡さない。
+    #[test]
+    fn frame_limit_trips_before_trailing_newline() {
+        let mut frame = vec![b'x'; MAX_FRAME_BYTES + 1];
+        frame.push(b'\n');
+        let mut limited = FrameLimitedRead::new(WholeSlice(&frame));
+        let waker = std::task::Waker::noop();
+        let mut cx = Context::from_waker(waker);
+        let mut data = vec![0u8; frame.len() + 8];
+        let mut buf = ReadBuf::new(&mut data);
+        let result = Pin::new(&mut limited).poll_read(&mut cx, &mut buf);
+        assert!(
+            matches!(result, Poll::Ready(Err(_))),
+            "over-limit frame with trailing newline must fail before decode"
+        );
+    }
+
+    /// 改行で区切られた正当な frame はそのまま通す。
+    #[test]
+    fn frame_limit_allows_valid_frames() {
+        let frames = b"{\"a\":1}\n{\"b\":2}\n";
+        let mut limited = FrameLimitedRead::new(WholeSlice(frames));
+        let waker = std::task::Waker::noop();
+        let mut cx = Context::from_waker(waker);
+        let mut data = vec![0u8; 64];
+        let mut buf = ReadBuf::new(&mut data);
+        assert!(matches!(
+            Pin::new(&mut limited).poll_read(&mut cx, &mut buf),
+            Poll::Ready(Ok(()))
+        ));
+        assert_eq!(buf.filled(), frames);
+    }
+
+    /// 許可時点で失効した証跡は `AllowOnce` を fail closed にする
+    /// （decider が構築時は有効だった証跡を保持・再利用するケース）。
+    #[test]
+    fn expired_evidence_fails_closed_at_allow_time() {
+        let evidence = ApprovalEvidence::new(
+            "member:1".to_owned(),
+            now_epoch_ms() + 50,
+            "sha256:aaa".to_owned(),
+            "eligible".to_owned(),
+            false,
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert!(evidence.is_expired());
+    }
+
+    /// 相関表は件数で有界で、取り出した項目は消える。
+    #[test]
+    fn seen_tools_is_bounded() {
+        let mut tools = SeenTools::default();
+        for i in 0..MAX_SEEN_TOOLS_ENTRIES {
+            assert!(tools.insert(format!("id-{i}"), "tool".to_owned()));
+        }
+        assert!(!tools.insert("id-overflow".to_owned(), "tool".to_owned()));
+        // 取り出しは消す（再取り出しは None）→ 相関は単発。
+        assert_eq!(tools.take("id-0"), Some("tool".to_owned()));
+        assert!(tools.take("id-0").is_none());
+    }
+
+    /// 相関表は合計バイト数でも有界（件数上限より先に byte 上限へ
+    /// 達するサイズの項目で確認）。
+    #[test]
+    fn seen_tools_byte_bounded() {
+        let mut tools = SeenTools::default();
+        let big = "n".repeat(4 * 1024);
+        // ~1 MiB / ~4 KiB ≈ 255 項目で byte 上限に達する（件数上限 512 未満）。
+        let mut inserted = 0;
+        while tools.insert(format!("id-{inserted}"), big.clone()) {
+            inserted += 1;
+        }
+        assert!(inserted > 0 && inserted < MAX_SEEN_TOOLS_ENTRIES);
     }
 }
