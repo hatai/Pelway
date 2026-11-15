@@ -17,7 +17,7 @@
 
 - テストはヘルパーと同じディレクトリに `<ヘルパー名>.test.sh` として置く（pr-digest なら pr-digest.test.sh）。
 - テストの形式は `scripts/tests/*.test.sh` と同じ: `set -uo pipefail`、`mktemp -d` の一時ディレクトリの中で閉じて動く、外部コマンド（gh、agent-gh）はモックに差し替える、失敗を配列に溜めて最後に一括報告し、1 つでもあれば非 0 で終わる。
-- 実行は `mise run script-test`。ヘルパーを同梱したら mise.toml の `tasks.script-test` の列挙に test.sh を足す。`mise run verify`（verify-test）と CI で走る。
+- 実行は `mise run script-test`。`scripts/tests/*.test.sh` と `.agents/skills/<name>/*.test.sh` は script-test が自動収集する（収集の実体は `scripts/script-test.sh`）。ヘルパーを同梱したら test.sh をヘルパーと同じディレクトリに置くだけでよく、mise.toml の編集は不要。`mise run verify`（verify-test）と CI で走る。
 
 ## 両側ツリーでの同梱物の扱い
 
