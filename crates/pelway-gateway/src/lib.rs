@@ -20,6 +20,9 @@
 
 #![forbid(unsafe_code)]
 
+/// ACP v2 による外部エージェント接続（#133）。feature `acp` で有効。
+#[cfg(feature = "acp")]
+pub mod acp;
 pub mod annotations;
 pub mod gateway;
 pub mod mcp;
