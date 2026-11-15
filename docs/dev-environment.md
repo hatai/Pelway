@@ -228,6 +228,7 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 - `scripts/agent-gh review api /rate_limit` が成功する（GitHub にはつながる）
 - `curl -sS https://example.com` が失敗する（GitHub 以外にはつながらない）
 - `git switch` と、ファイルの書き込みが拒否される
+- 委託子（`delegate_task` の子）でも設定が効いていること: 子のセッション記録が `~/.claude-review/` 配下に落ちる（`~/.claude/projects/` に落ちたら `CLAUDE_CONFIG_DIR` が子に渡っていない。2026-11-14 の失敗はこれで検出した）
 
 ### 確認手順の結果（記録欄）
 
@@ -235,10 +236,10 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 
 | 項目 | 結果 | 実施日 |
 |---|---|---|
-| 実施日（hatai によるレビュー用 Claude へのログインと、T3 への `claude_review` の追加を含む） | 未実施 | — |
-| 使えるコマンドの制限の結果（読み取り系 `git` と `scripts/agent-gh review` に絞られているか。`git switch` とファイルの書き込みが拒否されたか） | 未実施 | — |
-| ネットワーク制限の結果（`api.github.com` と `github.com` だけにつながるか。`curl -sS https://example.com` が失敗したか） | 未実施 | — |
-| Codex 側（`codex_review`）との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 未記入 | — |
+| 実施日（hatai によるレビュー用 Claude へのログインと、T3 への `claude_review` の追加を含む） | 合格（`providerInstances.claude_review` に `CLAUDE_CONFIG_DIR` の宣言あり。2026-11-14 の初回実施は委託子に伝達されず失敗、2026-11-15 に T3 を 0.1.10-nightly.20261114.4709 へ更新し `~/.claude-review/settings.json` も調整した後に合格。経緯は Issue #256 のコメント） | 2026-11-15 |
+| 使えるコマンドの制限の結果（読み取り系 `git` と `scripts/agent-gh review` に絞られているか。`git switch` とファイルの書き込みが拒否されたか） | 合格（許可リスト内の `scripts/agent-gh review api /rate_limit` が承認なしで成功。`git switch -c sandbox-check` は `Permission to use Bash with command git switch -c sandbox-check has been denied.` で拒否。ファイルの書き込みは Write ツールがセッションに提供されず不可） | 2026-11-15 |
+| ネットワーク制限の結果（`api.github.com` と `github.com` だけにつながるか。`curl -sS https://example.com` が失敗したか） | 合格（`curl -sS https://example.com` が `Permission to use Bash with command curl -sS https://example.com has been denied.` で拒否。GitHub への接続は項目 1 のとおり成功） | 2026-11-15 |
+| Codex 側（`codex_review`）との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | あり。許可先（`api.github.com`・`github.com`）と効く条件（`auto-accept-edits`）は同じ。異なる点: Codex はファイルの読み取りを許し書き込みは `/tmp` だけ許可するが、Claude はコマンドを読み取り系 `git` と `scripts/agent-gh review` の読み取り系サブコマンドに絞り書き込みを全面拒否する。仕組みも Codex が `network_proxy`、Claude が sandbox と許可リスト（`~/.claude-review/settings.json`）で異なる | 2026-11-15 |
 
 ## レビュー担当の Devin CLI（acpRegistry_devin）
 
@@ -328,6 +329,7 @@ container run --rm alpine echo hello   # hello 程度の smoke
 - キャッシュは `~/.cache/mbx`（ローカルのみ、自動GCあり。予算は `mbx settings ls` で確認）。`target` は `~/.cache/mbx/targets/...` への symlink になる（`.gitignore` 済み）。
 - `mbx doctor` の setup 検査は「Cargo shim is not installed」と警告しうる。mise ネイティブ統合では shim を使わないためで、mbx 公式ドキュメント（Getting started）に説明がある。ラップの実態は上の確認方法で判断する。
 - mbx 自体にはリモートキャッシュを設定しない（S3 等の外部キャッシュサーバを使わない）。CI の `actions/cache` は mbx とは別の仕組みで、CI ジョブでは mbx を有効にしない（`MISE_RUST_MR_BOXINGTON=0`）。CI 側の説明は「CI（GitHub Actions）」節にある。
+- T3 のエージェントサンドボックスでは `$HOME` 全体が読み取り専用になり、`~/.cache` に置いたキャッシュが使えない（`~/.rustup`・`~/.cargo`・`~/.local/share/mise`・スレッドの worktree・`/tmp` は書き込み可能）。このとき `XDG_CACHE_HOME` を書き込み可能な場所（`/tmp` 配下など）に向けてコマンドを実行する（mbx と hk のキャッシュが両方退避先に移る。`mise run verify` だけでなく、git hook が cargo を呼ぶ commit・push でも同じ環境変数を付ける。実行時の `MISE_RUST_MR_BOXINGTON=0` 指定は、ラッパー生成済みの稼働環境では効かない）。
 
 ## pitchfork について
 
