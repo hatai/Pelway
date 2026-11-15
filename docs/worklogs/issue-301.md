@@ -43,3 +43,15 @@ gdpr02_routes.rs・no_body_logs.rs は src 内だが `crates/pelway-http/src/lib
 5. 改善案: `docs/dev-environment.md` の「実装スレッドの sandbox(Issue #151)」に「sandbox 内で DNS を使うコマンド(agent-gh 等)は /mnt/wsl/resolv.conf の用意が要る」旨と「agent-sandbox.test.sh のテスト12はネスト sandbox 内では環境起因で失敗する」旨を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ(round 2)
+
+対象 head: 8633f40（round 2 の実装の実体を含むコミット。このメモを含むコミットの親。履歴にマージコミットを含むため署名付け替え無し）
+
+1. 詰まった箇所: なし(修正依頼の内容が具体的だった)。round 1 の抑制コメントの削除は、8 ファイルの origin/main との差分がコメント追加のみであることを事前確認して `git checkout origin/main --` で戻した。
+2. 曖昧だった文: 「抑制コメントが残っていない → diff で確認」(Issue #301 指揮役コメント 2026-11-15 の受け入れ条件)— round 1 で足した理由コメント(本番 3 件の理由 3 行・mod doc 拡張・doc コメント拡張)も抑制コメントの付属物と解釈して全部削除し、crates/ を main と同一に戻した(選ばなかった解釈: 「実在の秘密ではない」等の doc 拡張だけは説明として残す)。
+3. 仮定と解釈: 検証テストは「8 ファイルに `codeql[` が無いこと」をファイル単位で検証する形に転換した(行単位の不在確認までは不要で、ファイル単位で十分条件を確かめると判断)。断片不改変の検査は round 1 と同じ形式で残した。
+4. 足りなかった情報・検証手段: 特になし(指揮役コメントが方式・受け入れ条件・dismiss の手順まで与えていた)。
+5. 改善案: `docs/dev-environment.md` の CI 周りに「Code Scanning はデフォルトセットアップで動く。Rust のインライン抑制は効かない(2026-11-15 実測)。アラートの解消は指揮役が hatai 名義で API dismiss する(理由は worklog の対応表)」を足す。
+
+使ったスキル: implement-issue、pr-watch(round 1 のチェック待ちと digest)
