@@ -90,12 +90,12 @@ description = "cargo check（--locked で Cargo.lock を強制）"
 run = "cargo check --workspace --all-targets --locked"
 
 [tasks.clippy]
-description = "clippy を -D warnings（警告即エラー）で実行する（--locked）"
-run = "cargo clippy --workspace --all-targets --locked -- -D warnings"
+description = "clippy を -D warnings（警告即エラー）で実行する（--locked）。pelway-gateway は feature `acp` 後ろのコード（#133）も検査する"
+run = "cargo clippy --workspace --all-targets --locked -- -D warnings && cargo clippy -p pelway-gateway --all-targets --all-features --locked -- -D warnings"
 
 [tasks.test]
-description = "全テストを実行する（--locked）"
-run = "cargo test --workspace --locked"
+description = "全テストを実行する（--locked）。pelway-gateway は feature `acp` 後ろの試験（#133）も実行する"
+run = "cargo test --workspace --locked && cargo test -p pelway-gateway --all-features --locked"
 
 # CI（.github/workflows/verify.yml の coverage ジョブ）とローカルで共通のカバレッジ計測。
 # cargo-llvm-cov 自身は設定ファイルを持たないため、集計対象の絞り込みはこのタスクの引数で宣言する
