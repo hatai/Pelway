@@ -245,11 +245,11 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 ```
 【まとめ 9:00】
-進行中: #80 実装中（round 2）、#81 レビュー待ち
-マージ待ち: #77（verify 成功、Approve 済み）
-人間の判断待ち: #83（needs-human: pr-size 超過）
-順番待ち: #84、#85
-完了（前回以降）: #79
+進行中: [#80](https://github.com/hatai/Pelway/issues/80) 実装中（round 2）、[#81](https://github.com/hatai/Pelway/issues/81) レビュー待ち
+マージ待ち: [PR #77](https://github.com/hatai/Pelway/pull/77)（verify 成功、Approve 済み）
+人間の判断待ち: [#83](https://github.com/hatai/Pelway/issues/83)（needs-human: pr-size 超過）
+順番待ち: [#84](https://github.com/hatai/Pelway/issues/84)、[#85](https://github.com/hatai/Pelway/issues/85)
+完了（前回以降）: [#79](https://github.com/hatai/Pelway/issues/79)
 ```
 
 行が空の項目は書かない。部屋で聞かれたときは、まとめの時刻を待たずに同じ書式で答える。
