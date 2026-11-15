@@ -1,0 +1,16 @@
+# Kodiak（ホスト版の GitHub App）のマージキュー設定。
+# 導入の経緯と運用の役割分担は docs/superpowers/specs/agent-team.md の「マージキュー」、
+# 指揮役の操作手順は skill command-team の「マージ」。
+# 設定項目の意味は https://kodiakhq.com/docs/config-reference
+version = 1
+
+[merge]
+# automerge ラベルが付いた PR だけがキューの対象になる。ラベルを付けるのは
+# 指揮役だけで、実装スレッドは自分の PR に付けない。
+automerge_label = "automerge"
+require_automerge_label = true
+# 現行のマージコミット方式（gh pr merge --merge）に合わせる。
+method = "merge"
+# 人間の判断待ちの PR は、automerge ラベルが付いていても Kodiak がマージしない。
+# （blacklist_labels は blocking_labels の別名。どちらも同じ動作）
+blacklist_labels = ["needs-human"]

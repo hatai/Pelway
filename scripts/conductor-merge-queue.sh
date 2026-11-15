@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# 指揮役のマージの順番待ち（skill command-team の「マージ」）。引数は "PR番号 ブランチ レビュー済みsha" の組を並べる。
+# 手動マージの補助。マージは Kodiak が行う（skill command-team の「マージ」、正本は
+# docs/superpowers/specs/agent-team.md の「マージキュー」）ため、通常は使わない。
+# キューの切り戻し（Kodiak が応答しない等）で hatai が admin マージを行うときの補助として残す。
+# 引数は "PR番号 ブランチ レビュー済みsha" の組を並べる。
 # 1 本ずつ、Ready for review を待ち、main を含まなければ取り込み、マージする head に対して次をすべて確かめてから
 # --admin でマージする: pelway-review がレビュー済み sha を Approve している / レビュー済み sha を含む / レビュー後に main 以外のコミットが無い / 今の main を含む /
 # 必須チェック（mise run verify・pr-size）が成功（pr-size の失敗は pr-size-exception ラベルと hatai の目印コメントがあるときだけ許す）。
