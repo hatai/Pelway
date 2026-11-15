@@ -307,7 +307,7 @@ bwrap が作る名前空間の要点:
 - 共有 git dir（worktree の commondir）はコミットのため書き込み可だが、`config`・`config.worktree`・`hooks/` には read-only を重ねてマウントする（url rewrite や hook の仕込みを防ぐ）
 - 秘匿パス（`~/.ssh`・`~/.gnupg`・`~/.docker`・`~/.config/gh`・`~/.config/opencode`・`~/.config/devin`・`~/.t3/userdata` 等）は tmpfs で隠すかマウントしない。no-new-privileges により `sudo`/`doas`/`pkexec` も実行できない
 - ネットワークは遮断しない（ホストの経路をそのまま使う）。Issue #151 で hatai が「厳しくしすぎると調査が難しくなるので現時点では許可リストにしない」と指示したため
-- シェル環境から `T3_ACP_MCP_*`・`T3CODE_*` を落とし、`MISE_RUST_MR_BOXINGTON=0`（mbx のハードリンクキャッシュ経由の書き換えを防ぐ。worktree の `target` symlink は実ディレクトリに戻される）と `GIT_CONFIG_COUNT` 系の `commit.gpgsign=false`（`~/.ssh` を隠すため SSH 署名は必ず失敗する。push 後に `scripts/agent-gh-resign` が署名を作り直すので問題ない）を渡す
+- シェル環境から `T3_ACP_MCP_*`・`T3CODE_*` を落とし、`MISE_RUST_MR_BOXINGTON=0`（mbx のハードリンクキャッシュ経由の書き換えを防ぐ。worktree の `target` symlink は実ディレクトリに戻される。ただし cargo コマンドラッパー生成済みの環境ではこの変数は実行時に効かず cargo が mbx を通る場合がある。回避は「mr boxington（mbx）について」節の `XDG_CACHE_HOME` 退避）と `GIT_CONFIG_COUNT` 系の `commit.gpgsign=false`（`~/.ssh` を隠すため SSH 署名は必ず失敗する。push 後に `scripts/agent-gh-resign` が署名を作り直すので問題ない）を渡す
 - bwrap は広い bind を後から重ねると子の ro-bind が実質無効化されるため、マウントは「広い→狭い」の順で組み立てる（`scripts/tests/agent-sandbox.test.sh` で検証）
 
 ### Devin 内蔵 sandbox を使わない理由
@@ -457,6 +457,7 @@ container run --rm alpine echo hello   # hello 程度の smoke
 - キャッシュは `~/.cache/mbx`（ローカルのみ、自動GCあり。予算は `mbx settings ls` で確認）。`target` は `~/.cache/mbx/targets/...` への symlink になる（`.gitignore` 済み）。
 - `mbx doctor` の setup 検査は「Cargo shim is not installed」と警告しうる。mise ネイティブ統合では shim を使わないためで、mbx 公式ドキュメント（Getting started）に説明がある。ラップの実態は上の確認方法で判断する。
 - mbx 自体にはリモートキャッシュを設定しない（S3 等の外部キャッシュサーバを使わない）。CI の `actions/cache` は mbx とは別の仕組みで、CI ジョブでは mbx を有効にしない（`MISE_RUST_MR_BOXINGTON=0`）。CI 側の説明は「CI（GitHub Actions）」節にある。
+- 実装担当の sandbox（「実装担当の sandbox（agent-sandbox）」参照）は `/home` を読み取り専用にし、書き込み可能なパスをツールキャッシュの列挙（`~/.cargo`・`~/.rustup`・`~/.cache/{mise,pkl,fnox}` など）に限る。`~/.cache/mbx` はハードリンクキャッシュ経由の書き換え経路として意図的に含めず、代わりに `MISE_RUST_MR_BOXINGTON=0` を渡す設計。ただし cargo コマンドラッパー生成済みの環境ではこの変数は実行時に効かず、cargo が mbx を通って `~/.cache/mbx` の lock 取得に失敗する（`Read-only file system (os error 30)`）。この場合は `XDG_CACHE_HOME` を書き込み可能な場所（`/tmp` 配下など）に向けて `mise run verify` や、git hook が cargo を呼ぶ commit・push を実行する（mbx と hk のキャッシュが退避先に移る）。
 
 ## pitchfork について
 
