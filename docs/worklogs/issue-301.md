@@ -28,7 +28,7 @@ gdpr02_routes.rs・no_body_logs.rs は src 内だが `crates/pelway-http/src/lib
 
 ## 実装者メモ(round 1)
 
-対象 head: (初回 push 後に PR 本文へ記載)
+対象 head: 45a3bd2（この round の実装の実体を含むコミット。このメモを含むコミットの親。署名付け替え後の SHA）
 
 1. 詰まった箇所: `scripts/agent-gh`: sandbox 内で `/etc/resolv.conf`(symlink → `/mnt/wsl/resolv.conf`)が解決できず DNS が全滅した。`/` が rw tmpfs なので、各コマンドで `mkdir -p /mnt/wsl && echo 'nameserver 192.168.1.1' > /mnt/wsl/resolv.conf` を前置して回避した。`mise run test`: mbx が read-only の `~/.cache` に書けず失敗 → `XDG_CACHE_HOME=/tmp/xdg-cache` で回避。`scripts/tests/agent-sandbox.test.sh` テスト12: `~/.t3/worktrees/` 下の mkdir が sandbox で拒否され失敗(本 Issue の変更前でも同じ失敗を確認 → 環境起因。CI の HOME は書き込み可のため通る)。
 2. 曖昧だった文: 「抑制コメントが CodeQL の Rust 抽出で実際に効くかは次回スキャンで検証する」(Issue #301 本文「採用する方式」)— マージ前には確かめられないため、Issue の方針どおり行末の `// codeql[rust/<rule>]` 形式を採用し、効くかの検証は次回スキャンに委ねた。
