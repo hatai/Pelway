@@ -8,8 +8,8 @@ rail-viewing-as = { $name }として表示
 rail-today = 今日
 rail-channels = チャンネル
 rail-dm-people = DM・人
-rail-dm-ai = DM・AI社員
-## AI 社員の在席状態（rail の表示）
+rail-dm-ai = DM・AI Bot
+## AI Botの在席状態（rail の表示）
 ai-presence-standby = 待機中
 ai-presence-working = 作業中
 ai-presence-waiting = 判断待ち
