@@ -73,9 +73,12 @@ shift
 
 # argv 経由で届いた非 ASCII はハーネス層で \uXXXX に潰れていることがある。
 # そのまま gh / git に流すと壊れた文字列が確定するので、トークン発行の前に止める。
+# 引数の値は出さない（秘密が混入した引数を拒否経路で複製露出しないため）。番号だけを示す。
+arg_i=0
 for arg in "$@"; do
+  arg_i=$((arg_i + 1))
   if [[ "$arg" == *\\u[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]* ]]; then
-    echo "agent-gh: 引数に \\uXXXX のエスケープが残っています（非 ASCII は argv 経由で渡せません）: $arg" >&2
+    echo "agent-gh: ${arg_i} 番目の引数に \\uXXXX のエスケープが残っています（非 ASCII は argv 経由で渡せません）" >&2
     echo "agent-gh: 文字列はファイル経由で渡してください（gh: --body-file / api --input、git: commit -F、タイトルは api -X PATCH --input）" >&2
     exit 5
   fi

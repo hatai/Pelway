@@ -198,6 +198,8 @@ FAKE_PELWAY_DEV_GIT_EMAIL="" run missing_email_fails_closed dev git push
 run unicode_guard_dev dev issue create --title 'x\u30b9y'
 [[ "$RC" == 5 ]] || failures+=("unicode_guard_dev: exit $RC, want 5")
 [[ "$OUT" == *'\uXXXX'* ]] || failures+=("unicode_guard_dev: no guidance")
+# 拒否経路は引数の値を複製しない（秘密が混入した引数を stderr へ露出させない）
+[[ "$OUT" != *'x\u30b9y'* ]] || failures+=("unicode_guard_dev: arg value echoed")
 [[ ! -e "$ROOT/unicode_guard_dev.log" && ! -e "$ROOT/unicode_guard_dev.log.fnox-args" ]] ||
   failures+=("unicode_guard_dev: fnox or gh was called")
 
