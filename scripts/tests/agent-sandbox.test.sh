@@ -19,6 +19,14 @@ if ! command -v bwrap >/dev/null 2>&1; then
   exit 0
 fi
 
+# agent-sandbox の内側では実行しない（ホスト専用）。フィクスチャを
+# ~/.t3/worktrees/ 直下と $HOME 直下に作る必要があり、sandbox 内では
+# どちらも read-only なため。検出は sandbox が渡す PELWAY_AGENT_SANDBOX で行う。
+if [[ -n "${PELWAY_AGENT_SANDBOX:-}" ]]; then
+  echo "SKIP: agent-sandbox の内側（ホスト専用テスト: ~/.t3/worktrees と \$HOME 直下へのフィクスチャ作成が必要）"
+  exit 0
+fi
+
 # テスト用の本体リポジトリ + linked worktree を作る
 base="$(mktemp -d)"
 trap 'chmod -R u+w "$base" 2>/dev/null; rm -rf "$base"' EXIT
@@ -58,8 +66,11 @@ check "etc write" "$out" "DENIED"
 # 4. 秘匿パスが隠れる（tmpfs マスクまたは /mnt 自体の不在）
 out="$(run 'ls -A "$HOME/.ssh" | head -1; echo ssh-done')"
 check "ssh masked" "$out" "ssh-done"
-out="$(run 'ls /mnt 2>&1 | head -1')"
-check "mnt absent" "$out" "ls: cannot access '/mnt': No such file or directory"
+# /etc/resolv.conf が symlink のとき（WSL では /mnt/wsl/resolv.conf）、実体が
+# 正本パスに ro-bind されるため /mnt/wsl が見える。見えてよいのはリンク先だけで、
+# /mnt/c 等の Windows 側は見えない。
+out="$(run 'ls /mnt/c 2>&1 | head -1')"
+check "mnt windows absent" "$out" "ls: cannot access '/mnt/c': No such file or directory"
 out="$(run 'ls -A "$HOME/.config/gh" 2>/dev/null | head -1; echo gh-done')"
 check "gh config masked" "$out" "gh-done"
 
@@ -84,9 +95,36 @@ check ".opencode ro" "$out" "DENIED"
 out="$(run 'echo x > .devin/config.json && echo BAD || echo DENIED' | tail -1)"
 check ".devin ro" "$out" "DENIED"
 
-# 8. 環境変数: T3 接続変数を落とし mbx を無効化
-out="$(run 'echo "auth=[${T3_ACP_MCP_AUTHORIZATION:-}] mbx=${MISE_RUST_MR_BOXINGTON:-}"')"
-check "env scrub" "$out" "auth=[] mbx=0"
+# 8. 環境変数: T3 接続変数を落とし、mbx 無効化フラグ・sandbox 検出用の目印・
+# sandbox 専用キャッシュ（XDG_CACHE_HOME）を渡す
+out="$(run 'echo "auth=[${T3_ACP_MCP_AUTHORIZATION:-}] mbx=${MISE_RUST_MR_BOXINGTON:-} sbx=${PELWAY_AGENT_SANDBOX:-} xdg=${XDG_CACHE_HOME:-}"')"
+check "env scrub" "$out" "auth=[] mbx=0 sbx=1 xdg=$HOME/.cache/agent-sandbox"
+
+# sandbox 専用キャッシュは書き込み可、ホストの ~/.cache/mbx は read-only のまま
+# （Issue #151: ハードリンクキャッシュ経由の書き換え経路は開けない）
+out="$(run 'touch "$XDG_CACHE_HOME/probe" && rm -f "$XDG_CACHE_HOME/probe" && echo XDG-WOK')"
+check "xdg cache writable" "$out" "XDG-WOK"
+out="$(run 'touch "$HOME/.cache/mbx/probe" 2>/dev/null && echo BAD || echo DENIED')"
+check "host mbx cache ro" "$out" "DENIED"
+out="$(run 'touch "$HOME/.cache/hk/probe" 2>/dev/null && echo BAD || echo DENIED')"
+check "host hk cache ro" "$out" "DENIED"
+
+# MISE_RUST_MR_BOXINGTON=0 を渡してもコマンドラッパー生成済みの cargo は mbx を
+# 通る。その mbx が XDG_CACHE_HOME 配下の書き込み可キャッシュで lock を取れる
+# ことを、依存を持たない新規プロジェクトの cargo check で確かめる（Issue #325）。
+out="$(run 'cd /tmp && rm -rf sbx-mbx-probe && cargo new sbx-mbx-probe -q 2>/dev/null && cd sbx-mbx-probe && cargo check -q 2>&1; rc=$?; cd /tmp && rm -rf sbx-mbx-probe; echo "cargorc=$rc"')"
+check "cargo via mbx" "$(tail -1 <<<"$out")" "cargorc=0"
+[[ "$out" == *"Read-only file system"* ]] && failures+=("cargo via mbx: mbx cache is read-only")
+
+# DNS: /etc/resolv.conf が symlink のとき実体が正本パスに bind され、sandbox 内で
+# 名前解決できる（Issue #325。実ファイルなら /etc の ro-bind で届く）
+out="$(run 'getent hosts api.github.com >/dev/null 2>&1 && echo DNS-OK || echo DNS-FAIL')"
+check "dns resolves" "$out" "DNS-OK"
+if [[ -L /etc/resolv.conf ]]; then
+  rtarget="$(readlink -f /etc/resolv.conf)"
+  out="$(run "test -r '$rtarget' && echo RESOLV-OK")"
+  check "resolv.conf symlink target reachable" "$out" "RESOLV-OK"
+fi
 
 # 9. /tmp は書き込み可
 out="$(run 'echo x > /tmp/sbx-test-tmp && cat /tmp/sbx-test-tmp && rm -f /tmp/sbx-test-tmp')"
