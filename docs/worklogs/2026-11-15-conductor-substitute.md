@@ -10,6 +10,7 @@ hatai の指示「#300, #266, #273, #301, #303 を処理して」を受けた一
 | 2026-11-15 11:35 | #301 | implement | opencode | zai-coding-plan/glm-5.3 | high | `crates/pelway-contract`・暗号境界（pelway-at-rest）を含むため高 effort（コメントのみの変更だが本番/テストの分類の正確さが効く） |
 | 2026-11-15 11:35 | #303 | implement | opencode | zai-coding-plan/glm-5.3 | low | 定型・小規模（command-team の文書改訂のみ） |
 | 2026-11-15 11:35 | #266 | triage | — | — | — | 本文が「-」のみのため needs-info に変更（判断の記録参照） |
+| 2026-11-15 11:45 | PR #309（本 worklog の PR） | review | devin | swe-2-high | default | 指揮役自身の PR。PR 番号が奇数のため Devin CLI（追加 67 行、高リスクなし） |
 
 スレッド:
 
