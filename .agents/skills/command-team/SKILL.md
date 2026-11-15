@@ -26,6 +26,8 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 
   実装の値は、opencode なら `model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>`、devin なら `model=swe-2-high effort=<medium|high|max>`（effort の値は `thought_level` に写す）にする。
 
+  スキル改訂の Issue（skill `improve-skills` の入口Aで起票されたもの）を割り当てるときは、1 行目を「Issue #<N> を実装する。skill implement-issue と skill improve-skills に従う。」にする。実装担当は implement-issue の手順に加えて、improve-skills の入口B以降の手順を読む（入口Bの指定は improve-skills の本文が担う）。
+
   ```
   PR #<M> をレビューする。skill review-pr に従う。
   Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort>
@@ -264,6 +266,7 @@ runbook 7 の手順に従う。人間に上げる前に、手順 2 の「effort 
 - 書き込み先は両方のツールが読む場所だけ: `AGENTS.md`、`.agents/skills/`、`docs/`。
 - `.claude/skills/<name>` は `.agents/skills/<name>` へのシンボリックリンクにする。変更したら `diff -r .claude/skills/<name> .agents/skills/<name>` の差分がゼロであることを確かめてから完了とする。
 - 変更は PR にして、レビュー担当のスレッドに回す。
+- スキル改訂の候補（自前スキルの改善・作成・最適化）は、skill `improve-skills` の入口A（候補の調査と起票）に渡す。共有層への反映のうち、スキル改訂の編集作業そのものは improve-skills の手順に従う。この手順 4 が担い続けるのは、材料の集め方・裏取り・効果測定・棚卸しの管理である。
 
 ### 効果を測る
 
