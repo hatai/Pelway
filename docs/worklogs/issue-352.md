@@ -23,3 +23,15 @@
 5. 改善案: `scripts/tests/agent-sandbox.test.sh` の ro マウント環境でのスキップガード（round 1 と同じ）
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（round 3）
+
+対象 head: 06d5e8228f9dbe9e4be120b87e7b8ab7db717cd7
+
+1. 詰まった箇所: 手順 6（push）後: PR #351 の main マージで `mise.toml` の script-test 定義が glob 収集（`scripts/script-test.sh`）に置き換わり、PR #355 が mergeState=DIRTY になった。`Merge branch 'main'` で取り込み、`mise.toml` は main 側を採用（我々のテストは `scripts/tests/*.test.sh` で自動収集されるため明示登録は不要になった）
+2. 曖昧だった文: 「解消後はラウンドを進めてレビューを再度委託してください（承認後 push は再レビュー対象）」（修正依頼）
+3. 仮定と解釈: 取り込み方法は rebase ではなく `Merge branch 'main'`（main の履歴に同形のマージコミットがある先例に合わせた）。マージコミットは agent-gh-resign で表現できないため署名なしのまま（#351 の `58720b3` と同じ状態）。effort は 3 回目のレビューのため codex は `xhigh`・claude は `max` に 1 段上げる（claude の一段上は文書に先例がないため、devin と同じ medium|high|max の段と読んで `max` とした）
+4. 足りなかった情報・検証手段: claude_review の effort 有効値の一覧（docs/dev-environment.md に値域の記載なし）
+5. 改善案: `docs/dev-environment.md` の「レビュー担当の Claude」に `effort` の有効値（low|medium|high|max 相当）を明記する
+
+使ったスキル: `.agents/skills/implement-issue`
