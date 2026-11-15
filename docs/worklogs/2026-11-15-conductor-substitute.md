@@ -23,6 +23,7 @@ hatai の指示「#300, #266, #273, #301, #303 を処理して」を受けた一
 | 2026-11-15 21:57 | #325 | implement | devin | swe-2-high | high | 通常枠（sandbox シェル・テスト・文書の小規模変更、方式は実装担当が選択）。GLM 満杯のため Devin。Todo 6 番目 |
 | 2026-11-15 22:02 | #326 | implement | devin | swe-2-high | high | 通常枠（pelway-http の DataStore 拡張、小〜中）。デモ実装でブロックなし。Todo 7 番目 |
 | 2026-11-15 22:05 | #328 | implement | devin | swe-2-high | max | 「決定」の contract と状態遷移（確定後変更拒否）を新規作成するため高 effort（コア部分の状態遷移に該当）。ブロックなし。Todo 8 番目。Devin 枠 6 本目で満杯 |
+| 2026-11-15 22:12 | PR #356（本 worklog の PR） | review | codex | gpt-6-luna | default | 指揮役自身の PR。PR 番号が偶数のため Codex（追加 9 行、高リスクなし） |
 
 スレッド:
 
