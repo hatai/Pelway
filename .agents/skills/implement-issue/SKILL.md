@@ -112,7 +112,7 @@ scripts/agent-gh dev git push -u origin HEAD
 - `mise run verify` が失敗したらコミットしない。直してからやり直す。
 - `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたら push せずに止まる。
 
-次に、実装コミットを push した後の PR の head の SHA を確かめ（`scripts/agent-gh dev pr view <PR 番号> --json headRefOid --jq .headRefOid`。push 後は `scripts/agent-gh-resign` による署名付け替えで SHA が変わるため、必ず push 後の値を取る）、それを手順 5 のメモの「対象 head」に記入して、メモだけを独立したコミットにして push する:
+次に、実装コミットを push した後の PR の head の SHA を確かめ（push 後は `scripts/agent-gh-resign` による署名付け替えで SHA が変わるため、必ず push 後の値を取る。2 round 目以降は `scripts/agent-gh dev pr view <PR 番号> --json headRefOid --jq .headRefOid`。初回は Draft PR の作成が手順 7 のため PR 番号がまだ無く、手順 7 の後に行うか、push 後の `scripts/agent-gh dev git rev-parse HEAD` で確かめる（`agent-gh-resign` が push の成功後にローカル ref を署名付きコミットに付け替えるため、remote の `headRefOid` と同じ値になる））、それを手順 5 のメモの「対象 head」に記入して、メモだけを独立したコミットにして push する:
 
 ```bash
 scripts/agent-gh dev git add docs/worklogs/issue-<N>.md
