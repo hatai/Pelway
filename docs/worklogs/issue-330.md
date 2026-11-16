@@ -21,3 +21,10 @@
    - `FnoxEnvTokenSource` が既定名 `PELWAY_LLM_API_KEY` を持つ一方で demo-check の `ident` 規則が同名を禁止しており、製品コードのリテラル参照を規則に合わせる整理（既定名の単一管理元とスキャン除外方針の明確化）が残課題。
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）
+
+## 実装者メモ（round 1 修正 / PR-1）
+
+対象 head: `7fe4d630c94b428bc4450f666e4b20105decdc10`（ブランチ `agent/330a-llm-config`。署名付替え前のローカルコミットは `2fc2154`）
+
+1. レビュー指摘への対応:
+   - Codex レビュー（round 1）の must-fix「fnox.toml から既存の `PELWAY_PENPOT_MCP_TOKEN` 宣言が削除されている」に対応。モノリス版 fnox.toml を全体置き換えで作った際、無関係な宣言を落としていた。PR-1 の宣言に戻して復元。
