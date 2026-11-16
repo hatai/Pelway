@@ -12,6 +12,7 @@ v0.7の技術選定を、既存のOSSと競合の構成と比べた調査です�
 | [Slint Royalty-free License 2.0 の利用条件](slint-royalty-free-license.md) | Slint を無償ライセンスで使う条件（製品種類・attribution・Embedded Systems・API 公開・notice）と Pelway クライアントの現状 |
 | [AI Botの実行基盤への標準プロトコル適用の評価と ACP v2 採用方針](agent-runtime-standard-protocols.md) | AG-UI・ACP＋MCP・独自wireプロトコル・プロトコル化しないの4案で、本体↔ランタイム境界の標準化を評価。要件（承認・段階宣言・監査・ADR 0003）の表現可否と、ACP v2 採用（製品判断）に必要な境界・移行・未決論点 |
 | [承認と資格の失効が再取り込みで復活しない世代管理の検討](revocation-generation-model.md) | Buzz の protectionClock を出発点に、承認・資格・ポリシー・AI の所属ごとの失効と再付与の意味論を整理し、世代（対象ごとの単調な版数）で失効を表す方式の採否と記録形式を推奨 |
+| [連携カタログ（Composio／Pipedream）の評価と採用可否の判断材料](integration-catalog-composio-pipedream.md) | 資格情報の保管方式・データの経由地域・段階宣言（ADR 0004）との適合・費用の比較と、ADR 0008（国内完結）と両立する使い方（BYOK 的扱い）の整理。推奨案（MVPは自前実装、カタログはBYOK型例外枠で将来検討） |
 
 測定報告（実機検証）:
 
