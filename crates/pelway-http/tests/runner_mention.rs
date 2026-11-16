@@ -7,6 +7,7 @@ use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use pelway_contract::decision::{decide_path, decisions_path};
 use pelway_contract::ids::{ChannelId, MemberId, WorkspaceId};
 use pelway_contract::ledger::ApprovalLedger;
 use pelway_contract::member::MemberKind;
@@ -30,14 +31,28 @@ fn now() -> u64 {
     .unwrap_or(u64::MAX)
 }
 
-/// 固定の A/B 応答を返すフェイクの gateway。
+/// 要求スキーマに合う固定の応答を返すフェイクの gateway（下書き要求には
+/// 下書き JSON、それ以外は A/B JSON）。
 struct FakeGateway;
 
+/// 下書きの応答スキーマか（required に `subject` を含むか）で応答を切り分ける。
+fn is_draft_schema(req: &ChatRequest) -> bool {
+    req.schema
+        .as_ref()
+        .and_then(|s| s.get("required"))
+        .and_then(|r| r.as_array())
+        .is_some_and(|a| a.iter().any(|v| v == "subject"))
+}
+
 impl LlmGateway for FakeGateway {
-    async fn chat(&self, _req: ChatRequest) -> Result<ChatReply, LlmError> {
+    async fn chat(&self, req: ChatRequest) -> Result<ChatReply, LlmError> {
+        let text = if is_draft_schema(&req) {
+            r#"{"to": "B社 ご担当者", "subject": "案件B 納期のご相談", "body": "お世話になっております。納期を2週間延ばす案で調整させていただけますでしょうか。"}"#
+        } else {
+            r#"{"option_a": "納期を2週間延ばす案", "option_b": "範囲を絞って納期を守る案"}"#
+        };
         Ok(ChatReply {
-            text: r#"{"option_a": "納期を2週間延ばす案", "option_b": "範囲を絞って納期を守る案"}"#
-                .to_owned(),
+            text: text.to_owned(),
             usage: Usage::default(),
         })
     }
@@ -146,17 +161,67 @@ fn posted_mention_to_bot_runs_task_to_pending_decision() {
                 && b.contains("案B: 範囲を絞って納期を守る案")),
         "A/B 案が投稿される: {bot_posts:?}"
     );
-    assert_eq!(
-        ledger
-            .lock()
-            .expect("ledger")
-            .pending_decisions(
-                &WorkspaceId::from(DEMO_WORKSPACE_ID),
-                &MemberId::from("m-yamamoto"),
-                now(),
-            )
-            .len(),
-        1,
-        "判断待ちが T3a の仕組みで作られる"
+    let pending = ledger.lock().expect("ledger").pending_decisions(
+        &WorkspaceId::from(DEMO_WORKSPACE_ID),
+        &MemberId::from("m-yamamoto"),
+        now(),
     );
+    assert_eq!(pending.len(), 1, "判断待ちが T3a の仕組みで作られる");
+
+    // 山本が案Aを決定すると（#330）、runner がメール下書きを生成して
+    // AwaitingSendApproval まで進む。
+    let item = &pending[0];
+    let status = http(
+        addr,
+        "POST",
+        &decide_path(&item.decision_id),
+        &[
+            ("x-pelway-member-id", "m-yamamoto"),
+            ("x-pelway-member-kind", "human"),
+        ],
+        json!({
+            "decision_id": item.decision_id.as_str(),
+            "version": item.version,
+            "option_id": "a"
+        })
+        .to_string()
+        .as_bytes(),
+    );
+    assert_eq!(status, 200, "決定の確定");
+    assert!(wait_until(|| {
+        runner
+            .task(&task_id)
+            .is_some_and(|t| t.state == TaskState::AwaitingSendApproval)
+    }));
+    let task = runner.task(&task_id).expect("task");
+    let draft = task.draft.as_ref().expect("下書きのデータ");
+    assert_eq!(draft.to, "B社 ご担当者");
+    assert!(draft.body.contains("納期を2週間延ばす案"));
+    let bot_posts: Vec<String> = store
+        .lock()
+        .expect("store")
+        .channel_messages(&ChannelId::from(DEMO_CHANNEL_ID))
+        .into_iter()
+        .filter(|m| m.member_kind == MemberKind::Bot)
+        .map(|m| m.body.clone())
+        .collect();
+    assert!(
+        bot_posts
+            .iter()
+            .any(|b| b.contains("メール下書き") && b.contains(&draft.subject)),
+        "下書きが投稿される: {bot_posts:?}"
+    );
+
+    // 決定の一覧経路も残っていること（経路の退行を見る）。
+    let status = http(
+        addr,
+        "GET",
+        &format!(
+            "{}?actor=m-yamamoto",
+            decisions_path(&WorkspaceId::from(DEMO_WORKSPACE_ID))
+        ),
+        &[],
+        &[],
+    );
+    assert_eq!(status, 200);
 }

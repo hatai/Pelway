@@ -866,7 +866,7 @@ fn route(
             card: None,
         });
         let resp = match req.method.as_str() {
-            "POST" => handle_decide(req, decision, ledger, logger),
+            "POST" => handle_decide(req, decision, ledger, logger, runner),
             _ => Response::error(
                 405,
                 &HttpError::MethodNotAllowed,
@@ -1450,6 +1450,7 @@ fn handle_decide(
     path_decision: &str,
     ledger: &SharedLedger,
     logger: &log::Logger,
+    runner: Option<&pelway_runner::Runner>,
 ) -> Response {
     // 認証は無い（デモ用）。合成ヘッダーで確定する人を受ける（approve と同じ受け取り）。
     let Some(member_id) = header(req, MEMBER_ID_HEADER).filter(|v| !v.is_empty()) else {
@@ -1479,11 +1480,14 @@ fn handle_decide(
     };
     // この要求で新しく確定したときだけ出来事を出す（冪等リプレイでは出さない。
     // approve の疑似送信と同じ考え方）。
-    let was_pending = ledger
-        .decision(&decide_req.decision_id)
-        .is_some_and(|c| c.outcome.is_none());
+    let card = ledger.decision(&decide_req.decision_id);
+    let was_pending = card.is_some_and(|c| c.outcome.is_none());
+    // runner への通知に渡す依頼メッセージ参照（ロックを離してから使う）。
+    let request_message_id = card.map(|c| c.request_message_id.clone());
     let operator = MemberId::from(member_id);
-    match ledger.decide(decide_req, &operator, now_ms()) {
+    let decided = ledger.decide(decide_req, &operator, now_ms());
+    drop(ledger);
+    match decided {
         Ok(outcome) => {
             if was_pending {
                 // 確定した: 判断待ち・決定者（仮名化）だけ。選んだ選択肢の中身は出さない。
@@ -1491,6 +1495,11 @@ fn handle_decide(
                     decision: logger.id(outcome.decision_id.as_str()),
                     decider: logger.id(outcome.decider.as_str()),
                 });
+                // 新しく確定した決定だけ runner に知らせ、メール下書きの生成を
+                // 進める（#330）。台帳のロックを離してから呼ぶ。
+                if let (Some(runner), Some(request_message_id)) = (runner, request_message_id) {
+                    runner.on_decision_made(&request_message_id, &outcome);
+                }
             }
             Response::json(200, &outcome)
         }

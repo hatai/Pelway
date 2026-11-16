@@ -178,11 +178,19 @@ pub struct ScriptGateway;
 /// 「台本の応答で進めます」の進捗行とともに投稿する）。
 pub(crate) const SCRIPT_AB: &str =
     r#"{"option_a": "納期を2週間延ばす案", "option_b": "範囲を絞って納期を守る案"}"#;
+/// 台本のメール下書き（合成）。実 LLM 失敗時のフォールバックにも使う。
+pub(crate) const SCRIPT_DRAFT: &str = r#"{"to": "B社 ご担当者", "subject": "案件B 納期のご相談", "body": "お世話になっております。案件Bの納期について、納期を2週間延ばす案で調整させていただけますでしょうか。"}"#;
 
 impl LlmGateway for ScriptGateway {
-    async fn chat(&self, _req: ChatRequest) -> Result<ChatReply, LlmError> {
+    async fn chat(&self, req: ChatRequest) -> Result<ChatReply, LlmError> {
+        // 要求スキーマで応答を選ぶ（下書き要求には下書きの台本を返す）。
+        let text = if req.schema.as_ref() == Some(&crate::draft_schema()) {
+            SCRIPT_DRAFT
+        } else {
+            SCRIPT_AB
+        };
         Ok(ChatReply {
-            text: SCRIPT_AB.to_owned(),
+            text: text.to_owned(),
             usage: Usage::default(),
         })
     }
