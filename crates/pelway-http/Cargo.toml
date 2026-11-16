@@ -9,7 +9,12 @@ description = "Draft minimal loopback-only HTTP/1.1 layer for the Pelway demo ba
 
 [dependencies]
 pelway-contract = { path = "../pelway-contract", version = "0.0.0" } # version は cargo-deny の wildcards 検査のため（path 依存の解決には影響しない）
+pelway-runner = { path = "../pelway-runner", version = "0.0.0" } # runner-lite（#329）。メンション発火のフック先
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
+
+[dev-dependencies]
+# runner 配線のテストでフェイクの LlmGateway を立てる。
+pelway-llm = { path = "../pelway-llm", version = "0.0.0" }

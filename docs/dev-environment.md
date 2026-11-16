@@ -465,7 +465,16 @@ container run --rm alpine echo hello   # hello 程度の smoke
 ## pitchfork について
 
 - ツールは mise で 2.33.1 に固定する。
-- `pitchfork.toml` には AI 開発チームの見張り役 `agent-watch`（`crates/pelway-agent-watch`）だけを定義する。T3 のスレッドの状態変化を Grok Bot の webhook に通知する常駐プロセスで、仕様は `docs/superpowers/specs/agent-team.md`「見張り役と通知」。
+- `pitchfork.toml` には AI 開発チームの見張り役 `agent-watch`（`crates/pelway-agent-watch`）と、worktree の片付け `agent-worktree-prune` を定義する。`agent-watch` は T3 のスレッドの状態変化を Grok Bot の webhook に通知する常駐プロセスで、仕様は `docs/superpowers/specs/agent-team.md`「見張り役と通知」。
+- `agent-worktree-prune` は cron（毎時 0 分）で `scripts/agent-worktree-prune --auto` を走らせる。消すのは `~/.t3/worktrees/Pelway` の下の、settle されたスレッドの（またはスレッドの無い）worktree のうち、main に取り込み済みか PR がマージ済み・クローズ済みのもの。未追跡のファイルは捨て、追跡ファイルに変更が残るものは残す。T3 に問い合わせられない回は何も消さない。消したあとに `git worktree prune`・`git fetch --prune origin`・`mbx gc` を走らせる。pitchfork の supervisor が動いていれば、`pitchfork start` しなくても cron で動く。supervisor は各 worktree の `pitchfork.toml` の cron も動かすが、`--auto` は main の checkout 以外では何もせずに終わり、同時に 2 つは走らない（`$XDG_STATE_HOME/pelway/agent-worktree-prune.lock`）。
+
+  | コマンド | 内容 |
+  |---|---|
+  | `pitchfork supervisor status` | supervisor が動いているかの確認（定期実行の前提） |
+  | `pitchfork status agent-worktree-prune` | 前回と次回の実行時刻 |
+  | `pitchfork logs agent-worktree-prune` | ログ（消した・残した worktree と理由） |
+  | `mise run agent-worktree-prune -- --auto` | 同じ処理をすぐ走らせる（main の checkout で実行する） |
+
 - 起動・停止・ログ（リポジトリの直下で実行する）:
 
   | コマンド | 内容 |

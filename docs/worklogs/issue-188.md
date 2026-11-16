@@ -11,3 +11,15 @@
 5. 改善案: `docs/dev-environment.md` に「HTTP プロキシ経由でしか外へ出られない環境での agent-gh・mise の実行方法（HTTPS_PROXY と XDG_CACHE_HOME の設定）」を追記する
 
 使ったスキル: `implement-issue`、`write-pull-request`
+
+## 実装者メモ（round 2）
+
+対象 head: なし（round 2 の実体はマージコミットのみ。メモをマージコミットに同梱したため、メモを含むコミットの親に当たる実装コミットは存在しない）
+
+1. 詰まった箇所: `docs/research/README.md`: main 側（#368 の `revocation-generation-model.md`）と本 PR の索引行が同じ位置に追加されて競合。両方の行を残し、main 側の行を先に置いて解消した
+2. 曖昧だった文: 「Approve の後は PR に push しない。実装者メモのみのコミットでも head が動き、command-team のマージ規則によりレビューのやり直しになる。」（`.agents/skills/implement-issue/SKILL.md` 手順 9）— 一方で指揮役の修正依頼（[PR #388 コメント](https://github.com/hatai/Pelway/pull/388#issuecomment-6923152042)）は main の取り込みと push を明示的に求め、「レビュー有効性は指揮役が head で確認します」と判断を指揮役側に予約している
+3. 仮定と解釈: 実装者メモ（round 2）をマージコミットそのものに同梱して push した。これによりレビュー済み SHA 4717dcc 以降の non-merge コミットは 0 件のまま（command-team のマージ規則 `git rev-list 4717dcc..<head> --no-merges ^origin/main` が 0 件の条件を保持）になり、有効な Approve 2 件が失効しない。メモだけの独立コミットは選ばなかった（head が動きレビューのやり直しを強制するため）。round 2 に実装の変更は無く、main の取り込みと索引の競合解消、本メモのみ
+4. 足りなかった情報・検証手段: `mise run verify` は round 1 と同じ環境変数（HTTPS_PROXY・XDG_CACHE_HOME）で実行。script-test の2失敗（`agent-sandbox.test.sh`・`conductor-watch-ensure.test.sh`）は引き続き本環境の読み取り専用 `/home`・DNS 不在に起因し、変更不相関
+5. 改善案: round 1 と同じ（`docs/dev-environment.md` へのプロキシ環境の実行方法の追記）
+
+使ったスキル: `implement-issue`
