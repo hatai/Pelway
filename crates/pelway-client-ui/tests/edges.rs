@@ -6,7 +6,9 @@ use pelway_client_core::approval::{CardView, KeySource};
 use pelway_client_core::contract::{CardId, TaskState};
 use pelway_client_core::input::{Focus, ImeState, Key, Modifiers};
 use pelway_client_ui::bridge::ShellBridge;
-use pelway_client_ui::state::{AiPresence, AvatarKind, TodaySectionKind, ai_presence_key};
+use pelway_client_ui::state::{
+    AiPresence, AvatarKind, TodaySectionKind, ai_presence_key, format_wait_ms,
+};
 use pelway_client_ui::testkit::{FixedClock, FixedKeySource};
 
 fn awaiting_card() -> CardView {
@@ -40,21 +42,29 @@ fn ai_presence_key_maps_each_state() {
     );
 }
 
-// 「今日」の区切りの見出しキーは 3 種それぞれ安定している。
+// 「今日・判断待ち」の区切りの見出しキーは inbox.rs の 2 区分それぞれ安定している。
 #[test]
 fn today_section_heading_key_maps_each_kind() {
     assert_eq!(
-        TodaySectionKind::Consultations.heading_key(),
-        "today-section-consultations"
+        TodaySectionKind::NeedsMyDecision.heading_key(),
+        "today-section-mine"
     );
     assert_eq!(
-        TodaySectionKind::Pending.heading_key(),
-        "today-section-pending"
+        TodaySectionKind::MyRequests.heading_key(),
+        "today-section-requests"
     );
-    assert_eq!(
-        TodaySectionKind::DecidedWhileAway.heading_key(),
-        "today-section-decided"
-    );
+}
+
+// 待ち時間の表示は分・時間・日で切り替わる（Issue 331）。
+#[test]
+fn format_wait_ms_scales_with_duration() {
+    assert_eq!(format_wait_ms(0, "ja"), "1分");
+    assert_eq!(format_wait_ms(25 * 60_000, "ja"), "25分");
+    assert_eq!(format_wait_ms(65 * 60_000, "ja"), "1時間5分");
+    assert_eq!(format_wait_ms(2 * 60 * 60_000, "ja"), "2時間");
+    assert_eq!(format_wait_ms(26 * 60 * 60_000, "ja"), "1日2時間");
+    assert_eq!(format_wait_ms(25 * 60_000, "en"), "25m");
+    assert_eq!(format_wait_ms(65 * 60_000, "en"), "1h5m");
 }
 
 // FixedKeySource の Default は new と同じく 1 から順に振る。

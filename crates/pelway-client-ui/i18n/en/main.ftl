@@ -17,13 +17,17 @@ ai-presence-waiting = Awaiting decision
 ## Top bar
 search-placeholder = ⌕ Search conversations and work logs
 search-shortcut = ⌘K
-## Today view
+## Today view (two buckets per inbox.rs: awaiting my decision / my requests)
 today-title = Today
-today-section-consultations = For you
-today-section-pending = Pending decisions
-today-section-decided = Decided while you were away
+today-section-mine = Awaiting my decision
+today-section-requests = My requests
 today-section-empty = None
 today-quiet = Nothing urgent
+pending-wait = waiting
+pending-open-chat = View in chat
+decision-card-label = Decision request
+decision-choose = Decide this
+decision-outcome = ◆ Decision
 ## Channel view
 unread-divider = New below here
 ai-badge = AI
