@@ -73,6 +73,21 @@ fn pending_screen_end_to_end() {
     // ---- 一覧の項目から対象のチャットへ戻れる ----
     window.invoke_open_decision_chat(decision_id.clone());
     assert!(!window.get_show_today(), "チャットの画面に戻ること");
+    assert_eq!(
+        window.get_data_channel_title().as_str(),
+        "# 案件B",
+        "移った先の題名"
+    );
+
+    // チャット内の判断カードは同じ判断待ちを指す（一覧の項目と同じ id・版・2 択）。
+    assert!(window.get_data_decision_visible(), "カードが見える");
+    assert!(
+        !window.get_data_decision_decided(),
+        "カードは判断待ちのまま"
+    );
+    assert_eq!(window.get_data_decision_id(), decision_id);
+    assert_eq!(window.get_data_decision_version(), 1);
+    assert_eq!(window.get_data_decision_options().row_count(), 2);
     window.set_show_today(true);
 
     // ---- 古い版での確定は拒まれ、一覧とカードは変わらない ----
@@ -88,8 +103,10 @@ fn pending_screen_end_to_end() {
         "要求の組み立ては起きる"
     );
 
-    // ---- 今日の画面から A/B を決める ----
-    window.invoke_decide_option(decision_id, "a".into(), 1);
+    // ---- チャット内の判断カードから A/B を決める（カードの id・版で送る） ----
+    let card_id = window.get_data_decision_id();
+    let card_version = window.get_data_decision_version();
+    window.invoke_decide_option(card_id, "a".into(), card_version);
 
     // 項目は一覧から消え、確定要求は「見ていた版」で組み立てられる。
     assert_eq!(

@@ -429,6 +429,16 @@ impl DecisionShell {
             .map(|id| self.channel_name(&id))
     }
 
+    /// 一覧の項目から元のチャットを開く。表示中のチャンネルはそのチャンネルに
+    /// なり、チャット内の判断カードはこの判断待ちを指す。戻り値は遷移先の
+    /// チャンネル名（画面の題名に使う）。知らない判断待ちは `None`（何も開かない）。
+    pub fn open_chat(&mut self, decision_id: &DecisionId) -> Option<String> {
+        let channel_id = self.board.channel_of(decision_id)?;
+        let name = self.channel_name(&channel_id);
+        self.channel_card = Some(decision_id.clone());
+        Some(name)
+    }
+
     /// 確定要求を組み立てた回数（テストと監視用）。
     #[must_use]
     pub fn decide_request_count(&self) -> u32 {
@@ -567,8 +577,11 @@ pub fn wire_decision_screen(window: &MainWindow, shell: Rc<RefCell<DecisionShell
         };
         let id = DecisionId::from(decision_id.as_str());
         // 知らない判断待ちでは画面を切り替えない（壊れた項目の導線を塞ぐ）。
-        if open_shell.borrow().channel_name_of(&id).is_some() {
+        let mut shell = open_shell.borrow_mut();
+        if let Some(title) = shell.open_chat(&id) {
+            window.set_data_channel_title(title.as_str().into());
             window.set_show_today(false);
+            apply_decision_screen(&window, &shell, now);
         }
     });
 }
