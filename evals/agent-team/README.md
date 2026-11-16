@@ -27,7 +27,7 @@ judge = "deterministic"       # verify.sh だけで合否が決まる。自然�
 tags = ["..."]                # 検索用の語（例: conductor, merge）
 ```
 
-判定に自然言語の評価が要るケースは `judge = "llm"` とし、採点の規則は LLM ジャッジの規則（別 Issue）に従う。その場合も verify.sh は「判定に必要な材料がログに揃っているか」の検査を担う。
+判定に自然言語の評価が要るケースは `judge = "llm"` とし、採点の規則は AGENTS.md の「LLM judges」節（LLM ジャッジの規則）に従う。その場合も verify.sh は「判定に必要な材料がログに揃っているか」の検査を担う。
 
 ## アクションログ
 

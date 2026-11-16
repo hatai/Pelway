@@ -37,6 +37,9 @@
 #     走査対象外（Issue #143 の移植時適応。除外の理由は lib.sh を参照）
 #   - bind("...") の検査は関連付け関数の形（::bind("..."）だけ。メソッド形式の
 #     .bind("...")（sqlx 等）はソケットの待受・接続先ではないため対象外（Issue #143）
+#   - bind 引数ループの前進は、引数にグロブ文字・バックスラッシュ・マルチバイトが混ざっても
+#     停滞せず各 bind をちょうど 1 回報告して 5 秒以内に終わる（Issue #264。「進まなければ
+#     exit 2」の安全弁自体は入力からは発火しないため、終了性と報告回数で固定する）
 # を確かめる。本物のリスト（forbidden-phrases.txt / allowed-hosts.txt / canaries.txt）を使う。
 # リポジトリには書き込まない。
 set -uo pipefail
@@ -339,6 +342,27 @@ OUT="$(timeout 5 env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_R
 if [ "${RC}" -eq 1 ] && [ "$(bind_count)" -eq 1 ]; then
   ok "loopback: an allowed and a bad bind on one line reports only the bad one"
 else ng "loopback: allowed+bad bind (exit ${RC}, reports $(bind_count))"; show "$(printf '%s\n' "${OUT}" | head -8)"; fi
+
+# Issue #264: bind 引数の前進（nxt）は、引数にグロブ文字・バックスラッシュ・マルチバイトが
+# 混ざっていても停滞せず、各 bind をちょうど 1 回だけ報告して 5 秒以内に終わること。
+# 安全弁（進まなければ exit 2）は入力からは発火しない: BASH_REMATCH[0] は常に rest の
+# リテラル部分文字列なので #*"${m}" は必ず進む（検討は docs/worklogs/issue-264.md）。
+# このケースが固定するのは終了性と報告回数（長さ基準の前進へのリグレッションで赤くなる）
+r="${tmp}/case"; make_clean "${r}"
+cat > "${r}/crates/x/src/bind9.rs" <<'RS'
+fn t1() { let _ = std::net::TcpListener::bind("löcalhost:1"); }
+fn t2() { let _ = std::net::TcpListener::bind("a*b?c[d]:2"); }
+fn t3() { let _ = std::net::TcpListener::bind("x\y:3"); }
+fn t4() { let _ = std::net::TcpListener::bind("127.0.0.1:4").unwrap(); let _ = std::net::TcpListener::bind("héllo:5").unwrap(); }
+RS
+OUT="$(timeout 5 env -u DEMO_CHECK_ACCEPTANCE -u DEMO_CHECK_RUNTIME DEMO_CHECK_ROOT="${r}" DEMO_CHECK_LIST_DIR="${here}" bash "${here}/loopback.sh" 2>&1)"; RC=$?
+tricky_ok=1
+for n in 1 2 3 4; do
+  [ "$(grep -cF "crates/x/src/bind9.rs:${n}: bind argument" <<<"${OUT}")" -eq 1 ] || tricky_ok=0
+done
+if [ "${RC}" -eq 1 ] && [ "$(bind_count)" -eq 4 ] && [ "${tricky_ok}" -eq 1 ] && ! grep -q "did not advance" <<<"${OUT}"; then
+  ok "loopback: glob/backslash/multibyte bind arguments each report exactly once and finish within 5s"
+else ng "loopback: tricky bind args (exit ${RC}, reports $(bind_count), per-line ${tricky_ok})"; show "$(printf '%s\n' "${OUT}" | head -8)"; fi
 
 # DC-06: ポートは 0〜65535（0 は自動割り当て）。65536〜99999 は違反
 expect_case loopback 1 "PELWAY_BIND_ADDR port 65536 is a violation" mise.toml '[env]\nPELWAY_BIND_ADDR = "127.0.0.1:65536"\n' replace
