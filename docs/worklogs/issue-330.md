@@ -28,3 +28,20 @@
 
 1. レビュー指摘への対応:
    - Codex レビュー（round 1）の must-fix「fnox.toml から既存の `PELWAY_PENPOT_MCP_TOKEN` 宣言が削除されている」に対応。モノリス版 fnox.toml を全体置き換えで作った際、無関係な宣言を落としていた。PR-1 の宣言に戻して復元。
+
+## 実装者メモ（round 3 / PR-1）
+
+対象 head: `b7f6653f96069430db4ad4457df81ff3b1f2989f`（ブランチ `agent/330a-llm-config`。QA 点検不合格への修正）
+
+1. 詰まった箇所:
+   - テストに `https://api.openai.com/v1/`・`https://llm.example.com/v1` のリテラルを書くと demo-check external-refs の新規ヒットになった（runner.rs は除外対象外）。拒否ケースは `https://127.0.0.1:9`（loopback は許可ホスト）で確かめ、末尾 `/` ケースは `format!` で定数から生成して新規ヒット 0 に戻した。
+2. 曖昧だった文: 「`config.rs` に URL が 2 つだけであることを確かめるテストは、この PR から除いて別の Issue に分ける」（Issue #330 コメント comment-6921443439）
+3. 仮定と解釈:
+   - 当該テストは PR-1 の差分にも元コミット（25030ea）にも存在しなかったため、取り除く対象は無し。依頼どおり別 Issue として起票し、その旨をメモに記録する。
+   - 「それ以外の接続先は別の環境変数で明示したときだけ許可」は `PELWAY_LLM_CUSTOM_BASE_URL` と解釈。設定時は `PELWAY_LLM_BASE_URL` より優先してその値が接続先になる（優先順位は docs に明記）。
+   - 「起動時に接続先をログに出す」は `build_gateway_with`（gateway 組み立て＝接続開始の入口）で stderr に出すと解釈。キー・要求本文は出さない。
+4. 足りなかった情報・検証手段:
+   - QA 点検の正本は Issue コメントの 3 項目のみで、「URL が 2 つだけ」のテストがどの指摘を指したかの参照は無かった（存在しないテストの取り除き依頼と判断し、起票側で対応）。
+5. 改善案: `scripts/demo-check/lib.sh` の除外コメントに「endpoint 宣言の数そのものを確かめる検査は別 Issue」と追記すると次の実装者が重複検査を置かずに済む。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）
