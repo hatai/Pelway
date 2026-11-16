@@ -23,3 +23,27 @@
 5. 改善案: `docs/dev-environment.md` の client-ui 向け節に「Slint の `if` 直下の `for` は不可・`tr-*` prop 名は ftl キーと同名にする・`#数字` は色値走査に誤検知される」を足す。
 
 使ったスキル: implement-issue。
+
+## 実装者メモ（PR-3 round 1）
+
+対象 head: 7177046f7300e19aa853c91e4bc11e76afdbd06b（PR-3 実装コミット、rebase・署名付け替え後）
+
+1. 詰まった箇所: i-slint-backend-testing / winit が 1 プロセスに複数 `MainWindow` を作れず（`EventLoop can't be recreated` / `No backends configured`）、窓を触る結合検査を `pending_screen_end_to_end` 1 テストに集約し、行の値だけの検査は窓なしのテストに分けた。`window.as_weak()` は `slint::ComponentHandle` の import が要る。
+2. 曖昧だった文: 「項目から対象のチャットへ戻れる」（Issue #331 本文「受け入れ条件」）— 画面遷移の厳密な動作（どの状態が切り替わるか）の定義が本文にない。
+3. 仮定と解釈: 「戻れる」は「Today 画面から判断待ちの対象チャンネルの表示へ切り替わる」ことと解釈し、`open-decision-chat` callback が `decision_id` → チャンネル解決 → 画面切り替えを行い、操作試験で `view` プロパティの遷移を検証。`DecisionShell` は一覧値を台帳から毎回組み立てるため、確定後の再適用で項目が復活しないことをそのまま検証対象にした。
+4. 足りなかった情報・検証手段: メンバー・チャンネルの ID → 表示名の正本が無いため、デモ用に `DecisionShell::sample` が合成データ（ユイ・濱田・リク・# 案件B）を持つ構成にした。本番の名前解決は将来の inbox 読み取り層の役割。
+5. 改善案: `GLOSSARY.md` に「判断待ちの一覧項目は台帳から毎回組み立て、確定後は一覧から消えてチャット内カードだけが残る」を足す。
+
+使ったスキル: implement-issue。
+
+## 実装者メモ（PR-3 round 2）
+
+対象 head: cb2a80eb1c86152dfd2a6dd498a8b23dfdab2584（must-fix 修正コミット、署名付け替え後）
+
+1. 詰まった箇所: レビュー判定が Codex approve / Claude request-changes に割れ、旧版の「割れたら停止」に従ってエスカレーションしたが、恒久指示（修正優先）で修正側を正として round 2 に入った。`open-decision-chat` の遷移で `channel_name_of` の結果を捨てていた欠陥は、`DecisionShell::open_chat`（遷移先の解決と `channel_card` の指し替えを一度に行う）に集約して直した。
+2. 曖昧だった文: 「項目から対象のチャットへ戻れる」（Issue #331 本文「受け入れ条件」）— 「対象の」は「その判断待ちの属するチャンネルへ、題名と中身が切り替わる」ことと読み替えた（レビュー指摘の直し方に合意）。
+3. 仮定と解釈: 「チャット内の判断カードでも同じ決定ができる」の検証は、callback が一覧・カード共通であっても、カードの props（`data-decision-id`/`data-decision-version`）を読んで送る形にしないと `apply_decision_screen` の値の間違いを拾えないと解釈し、テストをカード props 経由の決定に変えた。
+4. 足りなかった情報・検証手段: 「対象のチャット」に遷移先の題名が出ることを確かめる入口（`data-channel-title` の設定側）が初期実装で欠けていた。レビューが指摘するまで `set_show_today(false)` だけで足りると考えていた。
+5. 改善案: `.agents/skills/implement-issue` の手順 9「判定が割れたら停止」の後段に「恒久指示（2026-11-16）: 要修正と承認で割れたときは修正を優先する」を追記する。
+
+使ったスキル: implement-issue。

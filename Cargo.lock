@@ -5100,6 +5100,8 @@ name = "pelway-http"
 version = "0.0.0"
 dependencies = [
  "pelway-contract",
+ "pelway-llm",
+ "pelway-runner",
  "serde",
  "serde_json",
  "tracing",
@@ -5119,6 +5121,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+]
+
+[[package]]
+name = "pelway-runner"
+version = "0.0.0"
+dependencies = [
+ "pelway-contract",
+ "pelway-llm",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
