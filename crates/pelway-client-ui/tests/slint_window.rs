@@ -33,17 +33,17 @@ const TR_GETTERS: &[(&str, TrGetter)] = &[
     ("search-placeholder", |w| w.get_tr_search_placeholder()),
     ("search-shortcut", |w| w.get_tr_search_shortcut()),
     ("today-title", |w| w.get_tr_today_title()),
-    ("today-section-consultations", |w| {
-        w.get_tr_today_section_consultations()
-    }),
-    ("today-section-pending", |w| {
-        w.get_tr_today_section_pending()
-    }),
-    ("today-section-decided", |w| {
-        w.get_tr_today_section_decided()
+    ("today-section-mine", |w| w.get_tr_today_section_mine()),
+    ("today-section-requests", |w| {
+        w.get_tr_today_section_requests()
     }),
     ("today-section-empty", |w| w.get_tr_today_section_empty()),
     ("today-quiet", |w| w.get_tr_today_quiet()),
+    ("pending-wait", |w| w.get_tr_pending_wait()),
+    ("pending-open-chat", |w| w.get_tr_pending_open_chat()),
+    ("decision-card-label", |w| w.get_tr_decision_card_label()),
+    ("decision-choose", |w| w.get_tr_decision_choose()),
+    ("decision-outcome", |w| w.get_tr_decision_outcome()),
     ("unread-divider", |w| w.get_tr_unread_divider()),
     ("ai-badge", |w| w.get_tr_ai_badge()),
     ("decision-mark", |w| w.get_tr_decision_mark()),

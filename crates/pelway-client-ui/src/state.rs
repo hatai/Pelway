@@ -86,15 +86,13 @@ pub struct RailData {
     pub ai_staff: Vec<AiDm>,
 }
 
-/// 「今日」の画面の3つの区切り。
+/// 「今日」の画面の区切り（inbox.rs の 2 区分が正本。3 区分のモックは使わない）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TodaySectionKind {
-    /// あなたへの相談。
-    Consultations,
-    /// 判断待ち。
-    Pending,
-    /// 離れている間に決まったこと。
-    DecidedWhileAway,
+    /// 自分の判断待ち（操作できる。決定すると一覧から消える）。
+    NeedsMyDecision,
+    /// 自分の依頼（進み具合を見るだけ）。
+    MyRequests,
 }
 
 impl TodaySectionKind {
@@ -102,42 +100,121 @@ impl TodaySectionKind {
     #[must_use]
     pub fn heading_key(self) -> &'static str {
         match self {
-            Self::Consultations => "today-section-consultations",
-            Self::Pending => "today-section-pending",
-            Self::DecidedWhileAway => "today-section-decided",
+            Self::NeedsMyDecision => "today-section-mine",
+            Self::MyRequests => "today-section-requests",
         }
     }
 }
 
-/// 「今日」の区切りの1項目。
+/// 判断待ちの選択肢 1 つ（画面表示用）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TodayItem {
-    /// 相談・決定の相手（架空）。
-    pub who: String,
-    /// アバター。
+pub struct DecisionOptionView {
+    /// 選択肢 ID（確定要求に書く値）。
+    pub option_id: String,
+    /// 選択肢の本文（合成データ）。
+    pub body: String,
+}
+
+/// 「自分の判断待ち」の 1 項目（A/B 決定。判断待ちのコピーではなく、
+/// 元のチャットへのポインタと表示用に組み立てた値）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingDecisionItem {
+    /// 判断待ち ID（確定要求と戻り導線のキー）。
+    pub decision_id: String,
+    /// 画面で見ている版（確定要求に書く値）。
+    pub version: u64,
+    /// 依頼した人の表示名。
+    pub requester: String,
+    /// 依頼者のアバター（頭文字と AI かどうか）。
     pub avatar: AvatarKind,
-    /// 補足表示（例: 「# 案件B · 2:10」）。
-    pub meta: String,
-    /// 本文（合成データ）。
-    pub text: String,
-    /// 「離れている間に決まったこと」の ◆ の有無。
-    pub decided: bool,
+    /// 対象チャンネルの表示名（元のチャットへの導線）。
+    pub channel: String,
+    /// 論点（判断内容）。
+    pub question: String,
+    /// 待ち時間の表示（例: 「25分」）。
+    pub wait_text: String,
+    /// 選択肢（A/B。2 つ以上）。
+    pub options: Vec<DecisionOptionView>,
 }
 
-/// 「今日」の区切り1つ。
+/// 「自分の依頼」の 1 項目（依頼の進み具合を見るだけ。操作はしない）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TodaySection {
-    /// 区切りの種類。
-    pub kind: TodaySectionKind,
-    /// 項目。空なら「なし」の表示。
-    pub items: Vec<TodayItem>,
+pub struct MyRequestItem {
+    /// 宛先・経緯の補足表示（例: 「# 案件B · リク」）。
+    pub meta: String,
+    /// 依頼の内容（合成データ）。
+    pub text: String,
+    /// 進み具合の表示（例: 「作業中」）。
+    pub state_text: String,
 }
 
-/// 「今日」の画面。
+/// 確定した決定（画面表示用。確定内容・決定者・版）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecisionOutcomeView {
+    /// 選んだ選択肢の本文。
+    pub selected_body: String,
+    /// 決めた人の表示名。
+    pub decider: String,
+    /// 確定後の版。
+    pub version: u64,
+}
+
+/// チャット内の判断カード（判断待ち）。確定後は確定表示に変わる。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecisionCardState {
+    /// 判断待ち ID。
+    pub decision_id: String,
+    /// 画面で見ている版（確定要求に書く値。確定後は確定後の版）。
+    pub version: u64,
+    /// 依頼した人の表示名。
+    pub requester: String,
+    /// 依頼者のアバター（頭文字と AI かどうか）。
+    pub requester_avatar: AvatarKind,
+    /// 論点（判断内容）。
+    pub question: String,
+    /// 選択肢（A/B。2 つ以上）。
+    pub options: Vec<DecisionOptionView>,
+    /// 確定した決定（判断待ち中は `None`）。
+    pub outcome: Option<DecisionOutcomeView>,
+}
+
+/// 「今日」の画面（inbox.rs の 2 区分: 自分の判断待ち／自分の依頼）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TodayView {
-    /// 3つの区切り（あなたへの相談・判断待ち・離れている間に決まったこと）。
-    pub sections: [TodaySection; 3],
+    /// 自分の判断待ち（操作できる。決定すると一覧から消える）。
+    pub needs_decisions: Vec<PendingDecisionItem>,
+    /// 自分の依頼（進み具合を見るだけ）。
+    pub my_requests: Vec<MyRequestItem>,
+}
+
+/// 待ち時間（ミリ秒）の短い表示（ja: 「25分」「1時間5分」、en: 「25m」「1h5m」）。
+/// Fluent の変数には乗せない値の整形（一覧の項目ごとに変わるため）。
+#[must_use]
+pub fn format_wait_ms(wait_ms: u64, lang: &str) -> String {
+    let minutes = wait_ms.div_ceil(60_000).max(1);
+    let (m, h, d) = match lang {
+        "en" => ("m", "h", "d"),
+        _ => ("分", "時間", "日"),
+    };
+    if minutes >= 24 * 60 {
+        let days = minutes / (24 * 60);
+        let hours = minutes % (24 * 60) / 60;
+        return if hours == 0 {
+            format!("{days}{d}")
+        } else {
+            format!("{days}{d}{hours}{h}")
+        };
+    }
+    if minutes >= 60 {
+        let hours = minutes / 60;
+        let mins = minutes % 60;
+        return if mins == 0 {
+            format!("{hours}{h}")
+        } else {
+            format!("{hours}{h}{mins}{m}")
+        };
+    }
+    format!("{minutes}{m}")
 }
 
 /// チャンネル画面のスレッドの要約（メッセージ行の下の「返信 N 件」）。
@@ -260,6 +337,8 @@ pub struct ChannelView {
     pub members: String,
     /// 時系列。
     pub timeline: Vec<TimelineEntry>,
+    /// チャット内の判断カード（このチャンネルに判断待ちがあるとき）。
+    pub decision_card: Option<DecisionCardState>,
 }
 
 /// 右の枠（スレッドまたは AI の作業）。
@@ -352,51 +431,17 @@ pub fn sample() -> AppData {
             ],
         },
         today: TodayView {
-            sections: [
-                TodaySection {
-                    kind: TodaySectionKind::Consultations,
-                    items: vec![
-                        TodayItem {
-                            who: "田中".to_owned(),
-                            avatar: AvatarKind::Human("田".to_owned()),
-                            meta: "# 案件B · 18:42".to_owned(),
-                            text: "B社の仕様変更（CSV出力）、夕方に方針を相談させてください".to_owned(),
-                            decided: false,
-                        },
-                        TodayItem {
-                            who: "佐藤".to_owned(),
-                            avatar: AvatarKind::Human("佐".to_owned()),
-                            meta: "DM · 8:05".to_owned(),
-                            text: "検証環境の権限を1つ追加してほしい".to_owned(),
-                            decided: false,
-                        },
-                    ],
-                },
-                TodaySection {
-                    kind: TodaySectionKind::Pending,
-                    items: vec![TodayItem {
-                        who: "ユイ".to_owned(),
-                        avatar: AvatarKind::Ai("ユ".to_owned()),
-                        meta: "# 案件A · 7:50".to_owned(),
-                        text: "A社向けの週報を共有してよいか".to_owned(),
-                        decided: false,
-                    }],
-                },
-                TodaySection {
-                    kind: TodaySectionKind::DecidedWhileAway,
-                    items: vec![TodayItem {
-                        who: "田中".to_owned(),
-                        avatar: AvatarKind::Human("田".to_owned()),
-                        meta: "◆ # 案件A · 昨日 19:30".to_owned(),
-                        text: "リリースを11/12に1日延期".to_owned(),
-                        decided: true,
-                    }],
-                },
-            ],
+            needs_decisions: vec![sample_pending_decision()],
+            my_requests: vec![MyRequestItem {
+                meta: "# 案件B · リク".to_owned(),
+                text: "B社の注文一覧へのCSV出力の実装".to_owned(),
+                state_text: "作業中".to_owned(),
+            }],
         },
         channel: ChannelView {
             title: "# 案件B".to_owned(),
             members: "田中・佐藤・濱田・リク ほか".to_owned(),
+            decision_card: Some(sample_decision_card()),
             timeline: vec![
                 TimelineEntry::DayDivider {
                     label: "11月10日（火）".to_owned(),
@@ -492,5 +537,49 @@ pub fn sample() -> AppData {
             ],
             working: None,
         }),
+    }
+}
+
+/// デモの判断待ちの論点（合成データ。`bridge::DecisionShell::sample` と共用）。
+pub const SAMPLE_DECISION_QUESTION: &str = "B社への回答の出し方をどうするか";
+/// デモの判断待ちの案A（合成データ。同上）。
+pub const SAMPLE_DECISION_OPTION_A: &str = "範囲を絞って12/1で送る";
+/// デモの判断待ちの案B（合成データ。同上）。
+pub const SAMPLE_DECISION_OPTION_B: &str = "絞り込みも含め12/3を提案する";
+
+/// デモの判断待ち1件（「今日」の一覧と、台帳の仕込みで同じ中身を指す）。
+fn sample_pending_decision() -> PendingDecisionItem {
+    PendingDecisionItem {
+        decision_id: "dec-00000001".to_owned(),
+        version: 1,
+        requester: "ユイ".to_owned(),
+        avatar: AvatarKind::Ai("ユ".to_owned()),
+        channel: "# 案件B".to_owned(),
+        question: SAMPLE_DECISION_QUESTION.to_owned(),
+        wait_text: "25分".to_owned(),
+        options: vec![
+            DecisionOptionView {
+                option_id: "a".to_owned(),
+                body: SAMPLE_DECISION_OPTION_A.to_owned(),
+            },
+            DecisionOptionView {
+                option_id: "b".to_owned(),
+                body: SAMPLE_DECISION_OPTION_B.to_owned(),
+            },
+        ],
+    }
+}
+
+/// チャット内に置くデモの判断カード（判断待ち中）。
+fn sample_decision_card() -> DecisionCardState {
+    let item = sample_pending_decision();
+    DecisionCardState {
+        decision_id: item.decision_id,
+        version: item.version,
+        requester: item.requester,
+        requester_avatar: item.avatar,
+        question: item.question,
+        options: item.options,
+        outcome: None,
     }
 }
