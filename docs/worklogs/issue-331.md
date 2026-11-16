@@ -11,3 +11,15 @@
 5. 改善案: `docs/dev-environment.md` の「ローカル検証」に「pelway-sandbox では `MISE_DISABLE_TOOLS=rust` + rustup toolchain 直指定 + `MBX_CACHE_DIR` で verify を分割実行する」旨を足す。
 
 使ったスキル: implement-issue。TDD（seam: `pelway-client-core::decision::DecisionBoard`）。
+
+## 実装者メモ（PR-2 round 1）
+
+対象 head: 2d21f470ddab2a4bb7d2ad264c5b30d7c04cb8de（PR-2 実装コミット、署名付け替え後）
+
+1. 詰まった箇所: `main.slint` で `if` 直下に `for` を書けず（文法エラー）、選択肢の列は `root.data-decided ? [] : root.data-options` の三項で空配列に切り替えて回避。`i18n_keys` の `.slint` 走査が `tr-<key>` 形のプロパティ名を Fluent キーとみなすため、コンポーネント内 prop 名も ftl キーと同じフル名（`tr-decision-choose` 等）に揃えた。`no_color_values` の走査がコメント中の `#331` を色値と誤検知するため `Issue 331` 表記に統一。
+2. 曖昧だった文: 「読み取り側は既存の inbox.rs の定義（自分の判断待ち／自分の依頼の2区分）が正本」（Issue #331 本文「背景・前提」）— 3 区分モックを残したまま判断待ちだけ 2 区分にするか、TodayView 自体を 2 区分に作り替えるか。
+3. 仮定と解釈: `TodaySectionKind` の 3 区分を消して正本の 2 区分（`NeedsMyDecision`/`MyRequests`、キー `today-section-mine`/`today-section-requests`）に作り替える解釈を採用。待ち時間は `format_wait_ms`（ja: 1分/1時間5分/1日2時間、en: 1m/1h5m、0 は 1 分に切り上げ）で一覧表示用に整形し、確定後のカードは消さず確定内容・決定者・版に表示を切り替える。
+4. 足りなかった情報・検証手段: i-slint-backend-testing / winit は 1 プロセスに複数 `MainWindow` を作れず、窓を触る結合検査は PR-3 の 1 テストへの集約で対処（PR-2 は窓を作らない検査のみ）。
+5. 改善案: `docs/dev-environment.md` の client-ui 向け節に「Slint の `if` 直下の `for` は不可・`tr-*` prop 名は ftl キーと同名にする・`#数字` は色値走査に誤検知される」を足す。
+
+使ったスキル: implement-issue。
