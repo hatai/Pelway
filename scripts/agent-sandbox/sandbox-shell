@@ -108,9 +108,16 @@ fi
 # 向き先で、mbx・hk 等の ~/.cache 配下のキャッシュがここに移る（Issue #325）。
 # ネスト実行など $home/.cache が read-only で作れないときは /tmp 側に退避する。
 sbx_cache="$home/.cache/agent-sandbox"
-[[ -d "$sbx_cache" ]] || mkdir -p "$sbx_cache" 2>/dev/null \
-  || sbx_cache="/tmp/pelway-sbx-cache-${UID:-$(id -u)}"
-[[ -d "$sbx_cache" ]] || mkdir -p "$sbx_cache"
+[[ -d "$sbx_cache" && -w "$sbx_cache" ]] || mkdir -p "$sbx_cache" 2>/dev/null
+# 退避先も既存だと mkdir -p が通るだけで書けないままになりうるので、
+# 自分が所有・非 symlink・書込可を確かめてから使う（別ユーザーが先に
+# 作った dir や symlink 置き場にキャッシュを書かせない）。
+if [[ ! -d "$sbx_cache" || ! -w "$sbx_cache" ]]; then
+  sbx_cache="/tmp/pelway-sbx-cache-${UID:-$(id -u)}"
+  [[ -d "$sbx_cache" && -O "$sbx_cache" && ! -L "$sbx_cache" && -w "$sbx_cache" ]] \
+    || mkdir -p -m 700 "$sbx_cache" 2>/dev/null
+fi
+[[ -d "$sbx_cache" && -w "$sbx_cache" ]] || sbx_cache="$(mktemp -d /tmp/pelway-sbx-cache-XXXXXX)"
 tool_dirs=(
   "$home/.cargo" "$home/.rustup"
   "$home/.local/share/mise" "$home/.local/state/mise"
