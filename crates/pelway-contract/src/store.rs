@@ -784,6 +784,22 @@ impl DataStore {
             .collect()
     }
 
+    /// channel を 1 件読む。`channel_id` で探す（この実装では channel_id は
+    /// workspace をまたいで一意とみなす。重複登録があるときは先に登録されたもの）。
+    #[must_use]
+    pub fn channel(&self, channel_id: &ChannelId) -> Option<&Channel> {
+        self.channels.iter().find(|c| &c.channel_id == channel_id)
+    }
+
+    /// channel のメッセージ一覧（保存順 = seq の昇順。`seq` はチャンネル内の発言順）。
+    #[must_use]
+    pub fn channel_messages(&self, channel_id: &ChannelId) -> Vec<&StoredMessage> {
+        self.messages
+            .iter()
+            .filter(|m| &m.channel_id == channel_id)
+            .collect()
+    }
+
     /// メッセージを 1 件保存する。ID・seq・時刻はサーバー付け。
     /// 冪等の確認はしない（seed など内部の追加に使う。投稿経路は
     /// [`post_message`](Self::post_message)）。
