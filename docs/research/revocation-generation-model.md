@@ -3,7 +3,7 @@
 ## 結論（推奨）
 
 - 世代（対象ごとの単調な版数）で失効を表す方式を**採用する**ことを推奨する。
-- 記録形式は「対象（subject）の行が持つ単調な `generation` 列」と「参照側が作成時に刻む `(subject_id, generation)`」の組を推奨する。全社共有の時計（Buzz の `protectionClock` 相当）は採らず、世代は対象の識別子ごとに独立して進める。
+- 記録形式は「対象（subject）の行が持つ単調な `generation` 列」と「参照側が作成時に刻む `(workspace_id, subject_kind, subject_id, generation)`」の組を推奨する。全社共有の時計（Buzz の `protectionClock` 相当）は採らず、世代は対象の識別子ごとに独立して進める。
 - 再付与の形は subject_kind ごとに決める（記録形式の節の表）。いずれの形でも、失効済みの世代を参照する承認・資格・委任は復活しない。
 - 採否の最終判断は Issue #198 の未決事項として hatai が行う。この文書は検討と推奨であり、実装・既存 ADR の改訂は行わない。
 
@@ -78,9 +78,10 @@ Pelway には世代に相当する機構が対象ごとに点在する。名前�
 
 ## 記録形式の推奨
 
-- **世代の単位**：対象（subject）ごとの単調な版数 `generation`。対象の識別子は `(workspace_id, subject_kind, subject_id)`。subject_kind は approval・credential・grant・policy・membership 等。Buzz のような全店舗共有の時計は採らない。Pelway の照合は `(subject, generation)` 単位で閉じ、対象をまたぐ順序は監査の `prev_hash` 鎖と `stream_pos` が既に担う。
+- **世代の単位**：対象（subject）ごとの単調な版数 `generation`。対象の識別子は `(workspace_id, subject_kind, subject_id)`。subject_kind は approval・credential・grant・policy・membership 等。Buzz のような全店舗共有の時計は採らない。Pelway の照合は対象の識別子全体と世代の組、すなわち `(workspace_id, subject_kind, subject_id, generation)`（以下 `(subject, generation)` と略記）の単位で閉じ、対象をまたぐ順序は監査の `prev_hash` 鎖と `stream_pos` が既に担う。参照・照合を `subject_id` と世代の 2 項だけで行うと、別 workspace や別 subject_kind に同じ `subject_id` と世代を持つ行があったときに別対象の参照を一致と誤認するため、照合には必ず識別子の 3 項をすべて含める（`subject_id` を全 workspace・全 subject_kind で一意にする前提は置かない）。
 - **同一行内の変更は 1 系列**：同一対象行への有効化・内容変更・失効は `generation` を 1 進める。12 の `basis_version` と `epoch` の併記は「内容の版」と「有効性の世代」を別列にした例で、同じ関係を版の写し（世代 n のときの内容）で表すこともできる。内容の同定に版を残す現行の設計を維持するなら併記でよい。
 - **対象行**：`generation` を持つ。新規作成は 1 から、同一行への変更・失効は同じ transaction で `generation + 1`。
+- **`subject_id` の再利用禁止**：`subject_id` は `(workspace_id, subject_kind)` の中で、削除・tombstone の消去・DB の復旧をまたいで再利用しない（例: ランダムな UUID。DB の復旧で巻き戻る採番は使わない）。復旧で採番が巻き戻ると、消えた行の id が別の主体の新しい行に再発行され、DB の外に残った旧参照（セッション・broker token 等）が新しい行に一致する穴になる。
 - **再付与の形は subject_kind ごとに決める**：
 
   | subject_kind | 再付与の形 |
@@ -91,9 +92,9 @@ Pelway には世代に相当する機構が対象ごとに点在する。名前�
   | policy | 同一行で `generation + 1`（新版）。「元に戻す」は旧版の復活ではなく同一系列の新版とする（ポリシーの節） |
   | membership | 新行（新 member id）。同名・同役割の再招待・再作成は新しい所属とする（AI の所属の節） |
 
-- **照合は自然キーでなく識別子の組で**：参照は `(subject_id, generation)` の組で照合する。再付与が新行なら `subject_id` が異なり、旧世代を刻んだ参照は一致しない。公開鍵・型名・メンバー名などの自然キーでは照合しない。同じ公開鍵の再取り込みが旧行を復活させない根拠は、世代の値ではなく `subject_id` の違い（新行は 1 から始まるため世代の値が偶然一致することがあり、世代の値の比較だけでは復活を弾けない）。
+- **照合は自然キーでなく識別子の組で**：参照は `(workspace_id, subject_kind, subject_id, generation)` の組で照合する。再付与が新行なら `subject_id` が異なり、旧世代を刻んだ参照は一致しない。公開鍵・型名・メンバー名などの自然キーでは照合しない。同じ公開鍵の再取り込みが旧行を復活させない根拠は、世代の値ではなく `subject_id` の違い（新行は 1 から始まるため世代の値が偶然一致することがあり、世代の値の比較だけでは復活を弾けない）。
 - **新行で再付与する subject_kind の旧行**：`status` と最終 `generation` を残す tombstone とし、削除で消さない。
-- **参照側**：承認・`dispatch_attempts`・`context_authorizations`・委任・セッション・記憶参照は、参照する対象の `(subject_id, generation)` を作成時に刻む。検査点では現在の世代と比較し、不一致を既定拒否する。既存の「検査時epoch/version/fence/hash」（04 の `dispatch_attempts`）はこの形の先駆け。
+- **参照側**：承認・`dispatch_attempts`・`context_authorizations`・委任・セッション・記憶参照は、参照する対象の `(workspace_id, subject_kind, subject_id, generation)` を作成時に刻む。検査点では現在の世代と比較し、不一致を既定拒否する。既存の「検査時epoch/version/fence/hash」（04 の `dispatch_attempts`）はこの形の先駆け。
 - **単調性の保証**：同一 `(workspace_id, subject_kind, subject_id)` で `generation` を戻さない。更新は条件付き（`generation = expected` の compare-and-swap）にし、古い写しからの書き込みを競合として拒否する（Buzz の compare-and-swap と同じ）。
 - **失効台帳**：失効・制限の記録は対象行とは別に、追記型の失効台帳に残す。記録は `(workspace_id, subject_kind, subject_id, generation, status)` とし、同じ行で版を進める種別（policy）は最終版の内容への参照も持つ。台帳は対象行を含む DB の復旧範囲の外に独立して保管する（同じ DB 内の tombstone 行の集合では、バックアップ復旧で台帳ごと巻き戻るため保証にならない）。
 - **復旧・再開**：復旧時は認可と外部 dispatch を既定停止したまま、台帳の status を再適用する。復旧した行の世代が台帳より古い対象は、`generation` を台帳の値を超える新しい世代へ進める（台帳の値に揃えるのではなく超える。世代の値を揃えるだけでは、status が有効のまま戻ったり、復旧前に刻まれた参照が復旧した古い内容の行に偶然一致したりする穴になる）。照合できない対象は停止のままにする（12 の復旧手順「認可と外部 dispatch を既定停止・独立保全した削除・制限・撤回の記録を再適用・現 ACL と根拠を再確認」に対応。10 の「独立制限記録を復旧前に再適用」と 04 の dispatch 検査にも対応）。
