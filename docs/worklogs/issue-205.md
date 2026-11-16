@@ -23,3 +23,15 @@
 5. 改善案: docs/agents/dev-environment.md（存在すれば「sandbox の制約」節）に「/ への書き込みはコマンド実行ごとに消えるため、DNS 修復は同一コマンド内で行う」「git push の upstream 設定は .git/config が書けないため明示 refspec を使う」を足す
 
 使ったスキル: implement-issue（seam は round 1 と同じ「技術仕様の必須文言」に条件4を追加）
+
+## 実装者メモ（round 3）
+
+対象 head: b3c1b6c35867f9b82ae64d43cb78ec5eef03a08e
+
+1. 詰まった箇所: scripts/agent-gh dev git push: round 3 の実装コミットの push が一度表示上「[new branch]」で完了したが remote の branch 先頭が旧 head のまま変わっていなかった。同じ refspec で再 push したところ `bbfdd60..b3c1b6c` で正常に更新された（原因は特定できず。以後 push 後は branch API で反映を確かめる）
+2. 曖昧だった文: 「複数担当の判定が割れた」（skill implement-issue「止まる条件」）— round 2 の判定は approve 2・request-changes 1 で割れたが、request-changes の must-fix（:116 の「MVPでは本節のホスト側担保がそのまま効きます」が注記と矛盾）は提案者の Devin 自身が「この文を直すことは方式の書き換えには当たりません」、Claude も「前提を足すだけで足りる」と書いており、人間の判断の必要な対立ではなかった
+3. 仮定と解釈: 人間の判断 B の注記要素「runtime 前提は Linux Docker Engine」は :116 の文にも及ぶと解釈し、escalation ではなく must-fix 対応として「Linux Docker Engine の構成では」という前提と #389 への参照を :116 に足した（方式の書き換えではない。根拠はレビュー両担当の上記の記述）。判断の経緯は PR の round 3 サマリーにも記録
+4. 足りなかった情報・検証手段: #389 の受け入れ条件の本文（Claude の nit が「『MVP では本節のホスト側担保がそのまま効く』という記述が残っていない」と引用）は本スレッドでは未確認。本修正はその条件の方向とも整合する
+5. 改善案: .agents/skills/implement-issue/SKILL.md の「止まる条件」に「割れた must-fix が人間の既に出した判断の完遂と両担当が明記している場合は、その判断の適用とみなし、修正して round を続けてよい」
+
+使ったスキル: implement-issue（条件4に `Linux Docker Engine の構成では` を追加し red→green を確認）
