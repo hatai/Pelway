@@ -112,7 +112,8 @@ check "host hk cache ro" "$out" "DENIED"
 # MISE_RUST_MR_BOXINGTON=0 を渡してもコマンドラッパー生成済みの cargo は mbx を
 # 通る。その mbx が XDG_CACHE_HOME 配下の書き込み可キャッシュで lock を取れる
 # ことを、依存を持たない新規プロジェクトの cargo check で確かめる（Issue #325）。
-out="$(run 'cd /tmp && rm -rf sbx-mbx-probe && cargo new sbx-mbx-probe -q 2>/dev/null && cd sbx-mbx-probe && cargo check -q 2>&1; rc=$?; cd /tmp && rm -rf sbx-mbx-probe; echo "cargorc=$rc"')"
+# 固定名は使わず mktemp -d で専用ディレクトリを作り、自分の作成物だけを消す。
+out="$(run 'd="$(mktemp -d /tmp/sbx-mbx-probe.XXXXXX)" && trap "rm -rf \"$d\"" EXIT && cd "$d" && cargo new probe -q 2>/dev/null && cd probe && cargo check -q 2>&1; rc=$?; echo "cargorc=$rc"')"
 check "cargo via mbx" "$(tail -1 <<<"$out")" "cargorc=0"
 [[ "$out" == *"Read-only file system"* ]] && failures+=("cargo via mbx: mbx cache is read-only")
 

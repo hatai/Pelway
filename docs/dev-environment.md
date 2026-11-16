@@ -338,7 +338,7 @@ bwrap が作る名前空間の要点:
 
 | 項目 | 結果 | 実施日 |
 |---|---|---|
-| `sandbox-shell` の単体検査（`scripts/tests/agent-sandbox.test.sh`） | 合格。#325 で追加した検査を含む通し実行を指揮役がホストで実施し `PASS: agent-sandbox`・exit=0（Issue #325 コメント 6905353781 の記録）。なお CI の `test (cargo test)` ジョブでは bwrap 不在で `SKIP: bwrap not installed` になるため、CI の pass は当該検査の実行を意味しない（run 43743202520・job 132900858476 のログで確認） | 2026-11-16 |
+| `sandbox-shell` の単体検査（`scripts/tests/agent-sandbox.test.sh`） | 従来の検査は 2026-11-14 に合格。#325 で追加した検査はネスト起動した sandbox で個別に確認済み。ホストでの通し実行を指揮役が実施し `PASS: agent-sandbox`・exit=0（Issue #325 コメント 6905353781）だが、実行コミットが記録に無く「main 側のホスト環境」とあるため、main checkout（f025bc4。新規検査を含まない版）で実行した可能性がある。PR head での実行かどうかは確認中。CI の `test (cargo test)` ジョブでは bwrap 不在で `SKIP: bwrap not installed` になるため、CI の pass は当該検査の実行を意味しない（run 43743202520・job 132900858476 のログで確認） | 2026-11-16 |
 | opencode プラグインのフック検査（`ctx.location` が `~/.t3/worktrees` 配下でのみ shell 差し替え・ファイルツール拒否が発火することを node で直接検証） | 合格 | 2026-11-14 |
 | Devin wrap 方式の実セッション検査（`sandbox-shell --wrap -- devin --config <devin-impl> -p` 内で実施） | `curl https://example.com` 成功（200）、`scripts/agent-gh dev api /rate_limit` 成功、`touch $HOME/...` が `Read-only file system` で拒否、worktree 書込成功 | 2026-11-14 |
 | Devin 内蔵 sandbox の検査（比較のため） | `allowed_domains` 空・未指定で exec が github.com 系のみになり、crates.io・example.com タイムアウト（要件不適合のため不採用） | 2026-11-14 |
