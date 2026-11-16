@@ -32,7 +32,7 @@
 - `sandbox-shell -c 'cargo test -p pelway-agent-watch --test once unwritable'` → ok（chmod 非依存の環境でも権限が効くことを確認）
 - `bash -n` on `sandbox-shell` / `agent-sandbox.test.sh` → ok
 - `mise run pr-size` → +81 / -15（上限内）
-- sandbox 外での `mise run script-test` 通し実行: 指揮役がホストで `bash scripts/tests/agent-sandbox.test.sh` を実行し `PASS: agent-sandbox`・exit=0（Issue #325 コメント 6905353781）。ただし実行コミットの記載が無く「main 側のホスト環境」とあり、main checkout（f025bc4）の `agent-sandbox.test.sh` は #325 の新規検査を含まない版のため、PR head での実行かは確認中（round 3 レビュー指摘）。CI の `test (cargo test)` ジョブ（run 43743202520・job 132900858476）は bwrap 不在で `SKIP: bwrap not installed` になり、CI の pass は当該検査の実行を意味しない。テストの新規検査項目はネスト sandbox で個別に等価確認済み（XDG 書込可・DNS・skip）
+- sandbox 外での `mise run script-test` 通し実行: 指揮役がホストで PR head `d3f0bf6dbfe492ba3ce29efc89917ba26f37ce7a` の版を `bash scripts/tests/agent-sandbox.test.sh` で通し実行し `PASS: agent-sandbox`・exit=0（Issue #325 コメント 6907015476、受け入れ条件 2 の証跡）。ホストの `/etc/resolv.conf` は `/mnt/wsl/resolv.conf` への symlink のため symlink-target の検査も走った。なお CI の `test (cargo test)` ジョブ（run 43743202520・job 132900858476）は bwrap 不在で `SKIP: bwrap not installed` になり、CI の pass は当該検査の実行を意味しない。テストの新規検査項目はネスト sandbox でも個別に等価確認済み（XDG 書込可・DNS・skip）
 - ネストで通し実行を試した記録: `sandbox-shell -c` で `env -u PELWAY_AGENT_SANDBOX bash scripts/tests/agent-sandbox.test.sh` → プラグイン検査が `~/.t3/worktrees` 直下のフィクスチャ（`sbx-plug-test`・`sbx-plug-out`）を作れず失敗し、ホスト専用であることを確認。併せて `~/.cache/agent-sandbox` が存在するが read-only のとき退避しない不具合を見つけ `-w` 検査に直した
 
 ## 詰まった箇所・仮定
