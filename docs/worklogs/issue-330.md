@@ -43,3 +43,21 @@
    - `ScriptGateway` の応答選択が PR-1 時点で required=subject による下書き判定を残していた（PR-3 で下書き台本を戻す設計だが、PR-2 の単体では A/B 固定返しの方が分かりやすい）。PR-2 では A/B 固定に簡素化済み。
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）
+
+## 実装者メモ（round 3 / PR-3）
+
+対象 head: `b17e9beb893455a88f6f5d876c9a187b15632cc1`（ブランチ `agent/330c-mail-draft`。base は PR-2 の署名付き head `421688a`。署名付替え前のローカルコミットは `d2be91e`。実装はモノリス `25030ea` の下書き系部分をそのまま復元）
+
+1. 詰まった箇所:
+   - 特になし。PR-2 で draft 系だけを抜いて構築したため、PR-3 はモノリス版ファイルの復元で PR-2 との差分が下書き系のみになることを `git diff <PR-2 head>` の全削除行確認で検証した（非下書きの退行なし）。
+2. 曖昧だった文: 前記同様（Issue #330 本文「目的」）
+3. 仮定と解釈:
+   - 決定の確定通知は「この要求で新しく確定したときだけ」発火させ、`handle_decide` は台帳のロックを離してから `runner.on_decision_made` を呼ぶ（runner 側も `AwaitingDecision → Working` の遷移をロック内でアトミックに確かめ、冪等リプレイ・二重通知では下書き生成を走らせない）。
+   - 下書き生成の失敗も A/B と同じく台本へフォールバックし、`AwaitingSendApproval` まで進める（デモを止めない。送信承認のカード化は #332 で確認するため、ここではタスク保持の `MailDraft` と投稿のみ）。
+   - 下書きスキーマ `draft_schema` は `pub(crate)`（runner 内の解析と `ScriptGateway` の応答選択で共用）。
+4. 足りなかった情報・検証手段:
+   - 実 z.ai への接続確認はこの環境では未実施（PR-2 と同じ。`tests/real_llm.rs` は A/B のみ対象。下書きの実 LLM 確認は runner の同一経路 `call_chat` を通るため別枠とした）。
+5. 改善案:
+   - `ScriptGateway` の応答選択が「required に `subject` を含むか」という文字列判定に依存しており、要求スキーマ側を `draft_schema()` 定数の参照に揃えるか、要求の種類を ChatRequest に持たせる形にすると頑健になる。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）
