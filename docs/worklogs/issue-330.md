@@ -45,3 +45,18 @@
 5. 改善案: `scripts/demo-check/lib.sh` の除外コメントに「endpoint 宣言の数そのものを確かめる検査は別 Issue」と追記すると次の実装者が重複検査を置かずに済む。
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）
+
+## 実装者メモ（round 4 / PR-1）
+
+対象 head: `ad55a7c200f58ace7e3f7dcf24a83600a04ea405`（ブランチ `agent/330a-llm-config`。Codex レビュー round 3 の must-fix への対応）
+
+1. レビュー指摘への対応:
+   - must-fix「`PELWAY_LLM_CUSTOM_BASE_URL` が任意 URL を許し、http の外部接続先が Bearer キーの送出経路になりうる」に対応。宛先検証 `custom_base_url_allowed` を `pelway-llm/src/config.rs` に追加し、loopback（127.0.0.0/8・::1・localhost）は任意スキーム、それ以外は https のみ許可とした（レビュー提示の代替案のうち「非 loopback は HTTPS と宛先検証」側を採用）。
+   - `url` クレートは pelway-llm の dev-dependency だったため `[dependencies]` に移動。
+2. 詰まった箇所:
+   - 非 loopback URL のリテラルは外部 IP・TLD 付きホスト名のどちらでも demo-check external-refs の新規ヒットになるため、テストでは `127.0.0.1` のリテラルを `.invalid`（TLD 表・許可ホスト外）に `replace` して実行時生成にした。
+   - `mise run verify` が main 由来の `docs/worklogs/issue-220.md` の `BRE`（基本正規表現の意図的な略号）で落ちたため、typos.toml の `extend-words` に `bre` を追加（同ファイルの既存パターンに従う）。
+3. 足りなかった情報・検証手段: `custom_base_url_allowed` の unit test を pure.rs にも置くか迷ったが、runner.rs の `from_vars` 経由の検証で loopback/http/https/非URL の 4 分岐を覆えているため重複は置かなかった。
+4. 改善案: `typos.toml` の extend-words コメントに「略号か造語かを書く」ルールがあると次回の判断が速い。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）
