@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pelway_contract::store::PurposeId;
-use pelway_llm::config::ResponseFormatCapability;
+use pelway_llm::config::{OPENAI_BASE_URL, ResponseFormatCapability, ZAI_BASE_URL};
 use pelway_llm::{
     ChatReply, ChatRequest, EmbedReply, FnoxEnvTokenSource, GatewayOptions, LlmError, LlmGateway,
     OpenAiGateway, ProviderConfig, Usage,
@@ -30,8 +30,14 @@ pub const API_KEY_ENV: &str = FnoxEnvTokenSource::DEFAULT_VAR;
 const API_KEY_ENV_NAME: &str = "PELWAY_LLM_KEY_ENV";
 /// 提供元の表示名を受ける環境変数。
 pub const PROVIDER_ENV: &str = "PELWAY_LLM_PROVIDER";
-/// OpenAI 互換のベース URL を受ける環境変数。
+/// OpenAI 互換のベース URL を受ける環境変数。受ける値は
+/// [`ZAI_BASE_URL`]・[`OPENAI_BASE_URL`] の 2 つだけ（https 必須に加えて
+/// 接続先を既知の提供元に限る。QA 点検 2026-11-17）。許可リスト外の接続先は
+/// [`CUSTOM_BASE_URL_ENV`] で明示したときだけ使う。
 pub const BASE_URL_ENV: &str = "PELWAY_LLM_BASE_URL";
+/// 許可リスト外の接続先を受ける環境変数（ローカルのモック等の明示用。
+/// 設定すると [`BASE_URL_ENV`] より優先して値がそのまま接続先になる）。
+pub const CUSTOM_BASE_URL_ENV: &str = "PELWAY_LLM_CUSTOM_BASE_URL";
 /// チャット用モデル名を受ける環境変数。
 pub const CHAT_MODEL_ENV: &str = "PELWAY_LLM_CHAT_MODEL";
 /// 埋め込み用モデル名を受ける環境変数（デモの runner は埋め込みを呼ばない）。
@@ -107,10 +113,28 @@ impl DemoLlmConfig {
                 .ok_or_else(|| format!("{BASIS_ENV} には P01〜P08 を指定してください: {text}"))?,
             None => DEFAULT_BASIS,
         };
+        let base_url = match var(CUSTOM_BASE_URL_ENV) {
+            // 許可リスト外の接続先は別の環境変数で明示したときだけ使う。
+            Some(custom) => custom,
+            None => match var(BASE_URL_ENV) {
+                Some(url) => {
+                    let normalized = url.trim_end_matches('/');
+                    if normalized == ZAI_BASE_URL || normalized == OPENAI_BASE_URL {
+                        normalized.to_owned()
+                    } else {
+                        return Err(format!(
+                            "{BASE_URL_ENV} には Z.ai・OpenAI の endpoint だけを指定できます。\
+                             それ以外の接続先は {CUSTOM_BASE_URL_ENV} で明示してください"
+                        ));
+                    }
+                }
+                None => ZAI_BASE_URL.to_owned(),
+            },
+        };
         Ok(Self {
             provider: ProviderConfig::new(
                 var(PROVIDER_ENV).unwrap_or_else(|| DEFAULT_PROVIDER.to_owned()),
-                var(BASE_URL_ENV).unwrap_or_else(|| pelway_llm::config::ZAI_BASE_URL.to_owned()),
+                base_url,
                 var(CHAT_MODEL_ENV).unwrap_or_else(|| DEFAULT_CHAT_MODEL.to_owned()),
                 var(EMBED_MODEL_ENV).unwrap_or_else(|| DEFAULT_EMBED_MODEL.to_owned()),
                 response_format,
@@ -132,6 +156,11 @@ impl DemoLlmConfig {
         &self,
         get: impl Fn(&str) -> Option<String>,
     ) -> Arc<dyn DynChatGateway> {
+        // 起動時に接続先をログに出す（QA 点検 2026-11-17。キーや要求本文は出さない）。
+        eprintln!(
+            "pelway-runner: LLM endpoint: {} {}",
+            self.provider.name, self.provider.base_url
+        );
         if !key_is_usable(get(&self.api_key_env).as_deref()) {
             return Arc::new(ScriptGateway);
         }

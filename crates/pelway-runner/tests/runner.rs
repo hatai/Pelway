@@ -26,7 +26,8 @@ use pelway_contract::store::{
 use pelway_contract::task::TaskState;
 use pelway_llm::{ChatReply, ChatRequest, EmbedReply, LlmError, LlmGateway, Usage};
 use pelway_runner::demo::{
-    BASIS_ENV, CHAT_MODEL_ENV, DemoLlmConfig, RESPONSE_FORMAT_ENV, TIMEOUT_SECS_ENV,
+    BASIS_ENV, CHAT_MODEL_ENV, CUSTOM_BASE_URL_ENV, DemoLlmConfig, RESPONSE_FORMAT_ENV,
+    TIMEOUT_SECS_ENV,
 };
 use pelway_runner::{Runner, RunnerConfig, RunnerError, RunnerTaskId};
 
@@ -439,6 +440,42 @@ fn demo_llm_config_explicit_and_overridable() {
             "{name}={value}"
         );
     }
+}
+
+/// `PELWAY_LLM_BASE_URL` の接続先は Z.ai・OpenAI の 2 つの endpoint に限る
+/// （https だけでは足りない。QA 点検 2026-11-17）。許可リスト外は
+/// `PELWAY_LLM_CUSTOM_BASE_URL` で明示したときだけ使う。
+#[test]
+fn base_url_is_limited_to_known_providers() {
+    for url in [
+        pelway_llm::config::ZAI_BASE_URL,
+        pelway_llm::config::OPENAI_BASE_URL,
+    ] {
+        let config = DemoLlmConfig::from_vars(vars(&[("PELWAY_LLM_BASE_URL", url)]))
+            .expect("known provider");
+        assert_eq!(config.provider.base_url, url);
+    }
+    // 末尾の / は許容する。
+    let with_slash = format!("{}/", pelway_llm::config::OPENAI_BASE_URL);
+    let config = DemoLlmConfig::from_vars(|name| {
+        (name == "PELWAY_LLM_BASE_URL").then(|| with_slash.clone())
+    })
+    .expect("trailing slash");
+    assert_eq!(
+        config.provider.base_url,
+        pelway_llm::config::OPENAI_BASE_URL
+    );
+
+    // https であっても許可リスト外は設定エラー（loopback は external-refs の
+    // 許可ホストのため、リテラルでは https の loopback アドレスで確かめる）。
+    assert!(
+        DemoLlmConfig::from_vars(vars(&[("PELWAY_LLM_BASE_URL", "https://127.0.0.1:9")])).is_err()
+    );
+
+    // 別の環境変数で明示したときだけ許可リスト外を使う（ローカルのモック等）。
+    let custom = DemoLlmConfig::from_vars(vars(&[(CUSTOM_BASE_URL_ENV, "http://127.0.0.1:9/v1")]))
+        .expect("custom");
+    assert_eq!(custom.provider.base_url, "http://127.0.0.1:9/v1");
 }
 
 /// キーが無い・送信に使えない形のときは台本の gateway が返る（落ちない）。

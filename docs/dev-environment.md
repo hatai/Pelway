@@ -417,6 +417,7 @@ bwrap が作る名前空間の要点:
 - デモの runner（`pelway-runner`）は環境変数で LLM 接続を組み立てる（`DemoLlmConfig::from_env`。定数名は `crates/pelway-runner/src/demo.rs` の定数を参照）:
   - `PELWAY_LLM_API_KEY` — キー（fnox から注入。下記）。`PELWAY_LLM_KEY_ENV` で読む変数名だけ差し替えられる。
   - `PELWAY_LLM_PROVIDER` / `PELWAY_LLM_BASE_URL` / `PELWAY_LLM_CHAT_MODEL` / `PELWAY_LLM_EMBED_MODEL` / `PELWAY_LLM_RESPONSE_FORMAT` — 提供元の接続設定。既定は Z.ai 汎用エンドポイント + `glm-5.3-flash`（GLM-5.3 Flash。Z.ai 公式のモデルコード）。Coding Plan 向け endpoint（`/api/coding/paas/v4`）は自前アプリからの呼び出しが認められないため使わない。
+  - `PELWAY_LLM_BASE_URL` が受ける接続先は Z.ai・OpenAI の 2 つの endpoint に限る（https 必須に加えて既知の提供元に限る。QA 点検 2026-11-17）。それ以外の接続先（ローカルのモック等）は `PELWAY_LLM_CUSTOM_BASE_URL` で明示したときだけ使い、その値が `PELWAY_LLM_BASE_URL` より優先して接続先になる。gateway 組み立て時に接続先（提供元名と base URL。キーは出さない）を stderr に出す。
   - `PELWAY_LLM_TIMEOUT_SECS` — 1呼び出しのタイムアウト秒（既定 30）。
   - `PELWAY_LLM_BASIS` — LLM を呼ぶ根拠の目的 ID（P01〜P08。既定 `P06`。BYOK のため。hatai 決定 2026-11-16）。コードには固定しない。
 - 実キーでの実行: `mise exec -- fnox exec -- <デモ起動コマンド>`。キーが未設定・空白のみ・ヘッダーに載せられない文字を含むときは、落ちずに台本モード（固定の合成応答）で起動する。
