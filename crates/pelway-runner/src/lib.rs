@@ -1,13 +1,16 @@
 //! runner-lite（#329）。サーバー内プロセスの進行管理として、
 //! 「ハルへのメンション → タスク化 → 進捗投稿 → LLM で A/B 案 → 判断待ち」を
 //! メモリ上で回す。LLM は [`LlmGateway`] trait 越しに差し替えられる
-//! （テストはフェイク。実提供元への接続は T2b・対象外）。
+//! （テストはフェイク。実提供元への接続設定と台本モードは [`demo`]
+//! モジュール。Issue #330）。
 //!
 //! 固定段階: メンション → タスク登録（Working）と「受付」の進捗 1 行 → P03
 //! （LLM 利用の根拠）の検査（無ければ LLM を呼ばず停止投稿）→ LLM 呼び出し
 //! → 成功は A/B 案の投稿と判断待ち（#328）で AwaitingDecision、失敗は
 //! 「止まっていることと理由」の投稿で Stopped（[`Runner::provide_fallback`]
 //! で差し替えられる）。LLM 呼び出しの間はどのロックも持たない。
+
+pub mod demo;
 
 use std::collections::HashMap;
 use std::future::Future;

@@ -6,6 +6,8 @@
 //! - 条件 4: LLM の失敗時は「止まっていることと理由」が投稿され、フォールバック応答へ差し替えられる
 //! - 条件 5: LLM の呼び出しの間、ほかのリクエストが台帳のロックで止まらない
 //! - 条件 6: 根拠が確認できない場合は LLM を呼ばずに止まる
+//! - モデル名・接続先・環境変数名は設定として明示し、キーが無い・使えない形の
+//!   ときは台本モードで起動する（#330）
 
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -23,6 +25,9 @@ use pelway_contract::store::{
 };
 use pelway_contract::task::TaskState;
 use pelway_llm::{ChatReply, ChatRequest, EmbedReply, LlmError, LlmGateway, Usage};
+use pelway_runner::demo::{
+    BASIS_ENV, CHAT_MODEL_ENV, DemoLlmConfig, RESPONSE_FORMAT_ENV, TIMEOUT_SECS_ENV,
+};
 use pelway_runner::{Runner, RunnerConfig, RunnerError, RunnerTaskId};
 
 const WS: &str = DEMO_WORKSPACE_ID;
@@ -382,4 +387,76 @@ fn llm_call_does_not_hold_store_or_ledger_locks() {
 
     release.send(()).expect("release");
     assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
+}
+
+// ---- LLM 接続設定と台本モード（#330） ----
+
+/// 環境変数の写像を組み立てる（`from_vars` に渡す形）。
+fn vars(pairs: &[(&'static str, &str)]) -> impl Fn(&str) -> Option<String> {
+    let map: std::collections::HashMap<&'static str, String> =
+        pairs.iter().map(|(k, v)| (*k, (*v).to_owned())).collect();
+    move |name| map.get(name).cloned()
+}
+
+#[test]
+fn demo_llm_config_explicit_and_overridable() {
+    // モデル名・接続先・環境変数名が設定として明示される（既定: Z.ai + GLM-5.3
+    // Flash。キーの変数名・タイムアウト・根拠 P06）。
+    let config = DemoLlmConfig::from_vars(|_| None).expect("defaults");
+    assert_eq!(config.provider.name, "zai");
+    assert_eq!(config.provider.base_url, pelway_llm::config::ZAI_BASE_URL);
+    assert_eq!(config.provider.chat_model, "glm-5.3-flash");
+    assert_eq!(
+        config.api_key_env,
+        pelway_llm::FnoxEnvTokenSource::DEFAULT_VAR
+    );
+    assert_eq!(config.llm_basis, PurposeId::P06);
+    assert_eq!(config.timeout, Duration::from_secs(30));
+
+    // 予備の GPT Luna へは設定の差し替えで切り替える（自動切替ではない。ADR 0008）。
+    let backup = DemoLlmConfig::from_vars(vars(&[
+        ("PELWAY_LLM_PROVIDER", "openai"),
+        ("PELWAY_LLM_BASE_URL", pelway_llm::config::OPENAI_BASE_URL),
+        (CHAT_MODEL_ENV, "gpt-6-luna"),
+        (RESPONSE_FORMAT_ENV, "json_schema"),
+        (TIMEOUT_SECS_ENV, "15"),
+        (BASIS_ENV, "P03"),
+    ]))
+    .expect("backup");
+    assert_eq!(backup.provider.chat_model, "gpt-6-luna");
+    assert_eq!(backup.timeout, Duration::from_secs(15));
+    assert_eq!(backup.llm_basis, PurposeId::P03);
+
+    // 値の形が合わない設定は組み立て時に Err（落ちるのではなく設定エラー）。
+    for (name, value) in [
+        (BASIS_ENV, "P09"),
+        (TIMEOUT_SECS_ENV, "abc"),
+        (TIMEOUT_SECS_ENV, "0"),
+        (RESPONSE_FORMAT_ENV, "yaml"),
+    ] {
+        assert!(
+            DemoLlmConfig::from_vars(vars(&[(name, value)])).is_err(),
+            "{name}={value}"
+        );
+    }
+}
+
+/// キーが無い・送信に使えない形のときは台本の gateway が返る（落ちない）。
+#[test]
+fn missing_or_malformed_key_builds_script_gateway() {
+    let config = DemoLlmConfig::from_vars(|_| None).expect("config");
+    for key in [
+        None,
+        Some("".to_owned()),
+        Some("   ".to_owned()),
+        Some("a\nb".to_owned()),
+    ] {
+        let gateway = config.build_gateway_with(|_| key.clone());
+        let reply = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("rt")
+            .block_on(gateway.chat(ChatRequest::from_messages(vec![])));
+        assert!(reply.is_ok(), "{key:?}");
+    }
 }

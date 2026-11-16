@@ -22,9 +22,10 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // モデルの既定は提供元プリセットに載せず、このコマンドの既定として持つ。
     let mut config = match cli.provider.as_str() {
-        "zai" => ProviderConfig::zai_example(),
-        "openai" => ProviderConfig::openai_example(),
+        "zai" => ProviderConfig::zai("glm-5.3-flash", "embedding-3"),
+        "openai" => ProviderConfig::openai("gpt-6-luna", "text-embedding-3-small"),
         other => {
             eprintln!("llm-eval: --provider は zai か openai を指定してください（{other}）");
             return ExitCode::FAILURE;
