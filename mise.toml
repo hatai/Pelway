@@ -172,13 +172,15 @@ description = "fnox の定義一覧を確認（秘密値の取得・表示は行
 run = "fnox list"
 
 [tasks.pitchfork-check]
-description = "pitchfork のバージョン確認と、pitchfork.toml に見張り役 agent-watch が定義されていることの確認"
+description = "pitchfork のバージョン確認と、pitchfork.toml に見張り役 agent-watch と worktree の片付け agent-worktree-prune が定義されていることの確認"
 run = """
 pitchfork --version
-if ! grep -q '^\\[daemons.agent-watch\\]' pitchfork.toml 2>/dev/null; then
-  echo "pitchfork.toml に [daemons.agent-watch] がありません（docs/dev-environment.md 参照）" >&2
-  exit 1
-fi
+for d in agent-watch agent-worktree-prune; do
+  if ! grep -q "^\\[daemons.$d\\]" pitchfork.toml 2>/dev/null; then
+    echo "pitchfork.toml に [daemons.$d] がありません（docs/dev-environment.md 参照）" >&2
+    exit 1
+  fi
+done
 """
 
 [tasks.deny-check]
@@ -223,7 +225,7 @@ description = "demo-check の自己テスト（一時ディレクトリの合成
 run = "bash scripts/demo-check/selftest.sh"
 
 [tasks.agent-worktree-prune]
-description = "T3 が作った worktree のうち、PR がマージ済み・クローズ済みのものを確認してから消す（--dry-run で一覧だけ）"
+description = "T3 が作った worktree のうち、作業中のスレッドのものを除き、PR がマージ済み・クローズ済みのものを確認してから消す（--dry-run で一覧だけ、--auto で pitchfork の定期実行と同じ処理）"
 run = "bash scripts/agent-worktree-prune"
 
 [tasks.codex-review-check]

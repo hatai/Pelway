@@ -286,7 +286,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 - Grok Bot はスレッドと worktree を消さない
 - 終わったスレッドを settle する。PR をスレッドに紐付けたものはマージで自動 settle。それ以外（報告が読まれた調査スレッド、verdict を出し終えた指揮役のレビュースレッド、失敗打ち切りやマージされずに閉じた PR のスレッド）は `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドと、止まっている・迷走中のスレッドは settle しない
-- worktree は人間が `mise run agent-worktree-prune` で消す（マージ済み・クローズ済みの PR のものだけ。一覧を見せてから確認する）
+- worktree は pitchfork のデーモン `agent-worktree-prune` が毎時消す（settle されたスレッドの、main に取り込み済みかマージ済み・クローズ済みの PR のものだけ。未追跡のファイルは捨て、追跡ファイルに変更が残るものは残す）。settle しないと worktree は残るので、終わったスレッドは上のとおり settle する。残ったものは人間が `mise run agent-worktree-prune` で整理する
 - マージ後の Issue と PR はボードの組み込みワークフローが Done にする
 
 ## 10. 巡回状態の補助記録
