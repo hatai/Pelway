@@ -7,3 +7,11 @@
 [daemons.agent-watch]
 run = "$HOME/.local/bin/pelway-agent-watch"
 retry = 10
+
+# agent-worktree-prune: 終わった T3 worktree の片付け。毎時 0 分に scripts/agent-worktree-prune --auto を走らせる
+# （settle されていないスレッドの worktree と、追跡ファイルに変更が残っている worktree は残す）。
+# supervisor が動いていれば start しなくても cron で動く。supervisor は各 worktree のこの定義も動かすが、
+# --auto は main の checkout 以外では何もしない。手順は docs/dev-environment.md。
+[daemons.agent-worktree-prune]
+run = "mise exec -- bash scripts/agent-worktree-prune --auto"
+cron = { schedule = "0 0 * * * *", retrigger = "finish" }

@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 # T3 が作った worktree のうち、仕事が終わったものを消す。
 #
-# 使い方: scripts/agent-worktree-prune [--dry-run | --yes]
+# 使い方: scripts/agent-worktree-prune [--dry-run | --yes | --auto]
 #   既定は一覧を見せてから y/N で確認する。--dry-run は一覧だけ、--yes は確認せずに消す。
+#   --auto は pitchfork の定期実行（pitchfork.toml の agent-worktree-prune）用。確認せずに消し、
+#   未追跡のファイルしか残っていない worktree もファイルごと消し、最後に後片付け
+#   （git worktree prune・git fetch --prune origin・mbx gc）を走らせる。
 #
-# 対象は $PELWAY_T3_WORKTREES（既定 ~/.t3/worktrees/Pelway）の下の worktree だけ。消すのは次のどちらか。
+# 対象は $PELWAY_T3_WORKTREES（既定 ~/.t3/worktrees/Pelway）の下の worktree だけ。
+# settle されていない T3 スレッドの worktree（t3 thread show の worktreePath）は作業中として残す。
+# T3 に問い合わせられないときは何も消さずに失敗する。それ以外で消すのは次のどれか。
 #   - HEAD が origin/main に取り込まれている → worktree とブランチを消す
 #   - ブランチの PR がマージ済み → worktree とブランチを消す
 #   - ブランチの PR が閉じている（開いている PR が無い） → worktree だけ消し、ブランチは残す
 # 変更が残っている worktree は消さない（旧通知プラグイン .opencode/plugins/pelway-agent-notify.ts だけは変更と数えない）。
+# --auto では未追跡のファイルは変更と数えず、追跡ファイルの変更だけを数える。
 set -uo pipefail
 
 ROOT="${PELWAY_T3_WORKTREES:-$HOME/.t3/worktrees/Pelway}"
@@ -17,12 +23,52 @@ mode=ask
 case "${1:-}" in
   --dry-run) mode=dry ;;
   --yes) mode=yes ;;
+  --auto) mode=auto ;;
   "") ;;
-  *) echo "usage: agent-worktree-prune [--dry-run | --yes]" >&2; exit 2 ;;
+  *) echo "usage: agent-worktree-prune [--dry-run | --yes | --auto]" >&2; exit 2 ;;
 esac
+if [[ "$mode" == auto ]]; then
+  # pitchfork の supervisor は各 worktree の pitchfork.toml の cron も動かすので、
+  # main の checkout 以外（linked worktree）からの --auto は何もせずに終える。
+  if [[ "$(git rev-parse --path-format=absolute --git-dir)" != "$(git rev-parse --path-format=absolute --git-common-dir)" ]]; then
+    echo "agent-worktree-prune: --auto は main の checkout でだけ動く（ここは linked worktree）。何もしない"
+    exit 0
+  fi
+  # 同時に 2 つ走らせない
+  lock="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/agent-worktree-prune.lock"
+  mkdir -p "$(dirname "$lock")"
+  exec 9>"$lock"
+  flock -n 9 || { echo "agent-worktree-prune: 別の --auto が実行中。何もしない"; exit 0; }
+  # 裏に残りうる子（git の自動 gc・mbx など）にロックの fd を渡さない（下の 9>&-）
+  echo "== agent-worktree-prune --auto $(date -Iseconds)"
+fi
 
-git fetch --quiet origin main || { echo "agent-worktree-prune: git fetch に失敗した" >&2; exit 1; }
-prs="$(gh pr list --state all --limit 1000 --json headRefName,state)" || { echo "agent-worktree-prune: gh pr list に失敗した" >&2; exit 1; }
+# t3 CLI の解決は scripts/conductor-watch.sh と同じ（実行中の T3 サーバーと同じ実行ファイルを優先する）。
+# T3_BIN 環境変数で明示したときは解決しない（テストの差し替えに使う）。
+T3_BIN="${T3_BIN:-}"
+if [[ -z "$T3_BIN" ]]; then
+  T3_BIN="$(command -v t3 || true)"
+  for exe in /proc/[0-9]*/exe; do
+    link="$(readlink "$exe" 2>/dev/null || true)"
+    case "$link" in
+      */.t3/wsl-runtime/*/t3) T3_BIN="$link"; break ;;
+    esac
+  done
+fi
+[[ -n "$T3_BIN" ]] || { echo "agent-worktree-prune: t3 が見つからない。何も消さない" >&2; exit 1; }
+
+# settle されていないスレッドの worktree を集める（1 つでも読めなければ何も消さない）
+threads="$("$T3_BIN" thread list --json 9>&-)" || { echo "agent-worktree-prune: t3 thread list に失敗した。何も消さない" >&2; exit 1; }
+ids="$(jq -r '.[] | select(.settled != true) | .threadId' <<<"$threads")" || { echo "agent-worktree-prune: スレッド一覧を読めない。何も消さない" >&2; exit 1; }
+busy=""
+for id in $ids; do
+  show="$("$T3_BIN" thread show "$id" --json 9>&-)" || { echo "agent-worktree-prune: t3 thread show $id に失敗した。何も消さない" >&2; exit 1; }
+  wt="$(jq -r '.thread.worktreePath // empty' <<<"$show")" || { echo "agent-worktree-prune: スレッド $id を読めない。何も消さない" >&2; exit 1; }
+  [[ -n "$wt" ]] && busy+="$wt"$'\n'
+done
+
+git fetch --quiet origin main 9>&- || { echo "agent-worktree-prune: git fetch に失敗した" >&2; exit 1; }
+prs="$(gh pr list --state all --limit 1000 --json headRefName,state 9>&-)" || { echo "agent-worktree-prune: gh pr list に失敗した" >&2; exit 1; }
 
 pr_state() { # ブランチの PR の状態: OPEN が 1 つでもあれば OPEN、次に MERGED、次に CLOSED、無ければ空
   local b="$1" states
@@ -30,15 +76,19 @@ pr_state() { # ブランチの PR の状態: OPEN が 1 つでもあれば OPEN�
   for s in OPEN MERGED CLOSED; do grep -qx "$s" <<<"$states" && { echo "$s"; return; }; done
 }
 
-is_dirty() {
-  [[ -n "$(git -C "$1" status --porcelain --untracked-files=all | grep -v -F " $PLUGIN")" ]]
+changes() { # 変更と数える git status の行（--auto では未追跡を除く）
+  local lines
+  lines="$(git -C "$1" status --porcelain --untracked-files=all | grep -v -F " $PLUGIN")"
+  [[ "$mode" == auto ]] && lines="$(grep -v '^??' <<<"$lines")"
+  printf '%s' "$lines"
 }
 
 remove=() delete_branch=() keep=()
 while read -r path branch; do
   [[ "$path" == "$ROOT"/* ]] || continue
   branch="${branch#refs/heads/}"
-  if is_dirty "$path"; then keep+=("$path (変更が残っている)"); continue; fi
+  if grep -qxF "$path" <<<"$busy"; then keep+=("$path (settle されていないスレッドの worktree)"); continue; fi
+  if [[ -n "$(changes "$path")" ]]; then keep+=("$path (変更が残っている)"); continue; fi
   head="$(git -C "$path" rev-parse HEAD)"
   state=""
   [[ "$branch" != DETACHED ]] && state="$(pr_state "$branch")"
@@ -60,8 +110,8 @@ for b in "${delete_branch[@]}"; do printf '  %s\n' "$b"; done
 printf '残す worktree: %d\n' "${#keep[@]}"
 for p in "${keep[@]}"; do printf '  %s\n' "$p"; done
 
-[[ "$mode" == dry || ${#remove[@]} -eq 0 ]] && exit 0
-if [[ "$mode" == ask ]]; then
+[[ "$mode" == dry ]] && exit 0
+if [[ "$mode" == ask && ${#remove[@]} -gt 0 ]]; then
   read -r -p "消しますか？ [y/N] " ans
   [[ "$ans" == y || "$ans" == Y ]] || { echo "何もしなかった"; exit 0; }
 fi
@@ -69,9 +119,20 @@ fi
 status=0
 for p in "${remove[@]}"; do
   rm -f "$p/$PLUGIN"
-  git worktree remove "$p" || { echo "失敗: $p" >&2; status=1; }
+  if [[ "$mode" == auto ]]; then
+    git worktree remove --force "$p" 9>&- || { echo "失敗: $p" >&2; status=1; }
+  else
+    git worktree remove "$p" || { echo "失敗: $p" >&2; status=1; }
+  fi
 done
 for b in "${delete_branch[@]}"; do
   git branch -D "$b" >/dev/null || { echo "失敗: ブランチ $b" >&2; status=1; }
 done
+
+if [[ "$mode" == auto ]]; then
+  # 後片付け。1 つが失敗しても残りは続け、失敗は終了コードに反映する。
+  git worktree prune || { echo "失敗: git worktree prune" >&2; status=1; }
+  git fetch --quiet --prune origin 9>&- || { echo "失敗: git fetch --prune origin" >&2; status=1; }
+  mbx gc 9>&- || { echo "失敗: mbx gc" >&2; status=1; }
+fi
 exit "$status"
