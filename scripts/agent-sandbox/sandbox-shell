@@ -59,8 +59,22 @@ for d in /bin /sbin /lib /lib64 /lib32 /libx32 /opt /var /run /srv /boot; do
   fi
 done
 
-# mbx のハードリンクキャッシュ経由の書き換え事故を防ぐため、sandbox 内では
-# mbx を無効化し、worktree の target シンボリックリンクを実ディレクトリに戻す。
+# DNS: /etc/resolv.conf が symlink のとき（WSL では /mnt/wsl/resolv.conf）、
+# リンク先のある top-level はマウントしないためリンク切れで DNS が死ぬ。
+# 実体を正本パスに ro-bind してリンクを解決できるようにする。実ファイルなら
+# /etc の ro-bind に含まれるため手当ては要らない。
+if [[ -L /etc/resolv.conf ]]; then
+  resolv_real="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
+  # $home 配下は秘匿パスを隠す領域なので bind 対象から外す。
+  if [[ -n "$resolv_real" && -f "$resolv_real" && "$resolv_real" != "$home"/* ]]; then
+    args+=(--ro-bind "$resolv_real" "$resolv_real")
+  fi
+fi
+
+# mbx のハードリンクキャッシュ（~/.cache/mbx）経由の書き換え事故を防ぐため、
+# ホストのキャッシュは sandbox に見せず、worktree の target シンボリックリンクを
+# 実ディレクトリに戻す。cargo が通る mbx 自体は XDG_CACHE_HOME の向き先
+# （下の sandbox 専用キャッシュ）で動く。
 if [[ -L "$root/target" ]]; then
   rm -f "$root/target"
   mkdir -p "$root/target"
@@ -90,12 +104,25 @@ if common="$(git -C "$root" rev-parse --git-common-dir 2>/dev/null)"; then
   fi
 fi
 
-# 書き込み可: ツールキャッシュ
+# 書き込み可: ツールキャッシュ。sandbox 専用キャッシュは XDG_CACHE_HOME の
+# 向き先で、mbx・hk 等の ~/.cache 配下のキャッシュがここに移る（Issue #325）。
+# ネスト実行など $home/.cache が read-only で作れないときは /tmp 側に退避する。
+sbx_cache="$home/.cache/agent-sandbox"
+mkdir -p "$sbx_cache" 2>/dev/null || true
+# set -e のため mkdir の失敗は || true で吸収する。退避先も、使うかどうかの
+# 判定（所有・非 symlink・書込可）を通ったものだけを XDG_CACHE_HOME にする
+# （別ユーザーが先に作った dir や symlink 置き場にキャッシュを書かせない）。
+if [[ -L "$sbx_cache" || ! -d "$sbx_cache" || ! -w "$sbx_cache" ]]; then
+  sbx_cache="/tmp/pelway-sbx-cache-${UID:-$(id -u)}"
+  mkdir -p -m 700 "$sbx_cache" 2>/dev/null || true
+  [[ ! -L "$sbx_cache" && -d "$sbx_cache" && -O "$sbx_cache" && -w "$sbx_cache" ]] \
+    || sbx_cache="$(mktemp -d /tmp/pelway-sbx-cache-XXXXXX)"
+fi
 tool_dirs=(
   "$home/.cargo" "$home/.rustup"
   "$home/.local/share/mise" "$home/.local/state/mise"
   "$home/.cache/mise" "$home/.cache/pkl" "$home/.pkl"
-  "$home/.npm" "$home/.cache/fnox"
+  "$home/.npm" "$home/.cache/fnox" "$sbx_cache"
 )
 if [[ "$mode" == wrap ]]; then
   # devin-impl: devin 自身がログ・設定を書く。credentials.toml と --config
@@ -166,6 +193,12 @@ if [[ "$mode" == shell ]]; then
 fi
 env_args+=(
   MISE_RUST_MR_BOXINGTON=0
+  # sandbox 内であることを示す目印。ホスト専用のテスト（agent-sandbox.test.sh
+  # など）がこれを見て skip する（Issue #325）。
+  PELWAY_AGENT_SANDBOX=1
+  # mbx・hk 等の ~/.cache 配下のキャッシュの向き先。sandbox 専用なので
+  # ホストの ~/.cache/mbx（ハードリンクキャッシュ）は見せないままにできる。
+  XDG_CACHE_HOME="$sbx_cache"
   # .ssh を隠すため SSH 署名は必ず失敗する。push 後に agent-gh-resign が
   # 作り直すため sandbox 内では署名を無効化する。
   GIT_CONFIG_COUNT=2

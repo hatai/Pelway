@@ -9,4 +9,5 @@
 
 pub mod approval;
 pub mod contract;
+pub mod decision;
 pub mod input;
