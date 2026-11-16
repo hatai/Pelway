@@ -19,7 +19,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 
 1. タスク定義: Issue Form `agent-task` で Issue を書き、`ready-for-agent` を付ける（GitHub Projects のボードの Backlog に載る）
 2. 処理の合図: ボードで、処理してよい Issue のカードを Backlog から Todo へ動かす
-3. マージの委任: 指揮役が、`pelway-review` の Approve と必須チェックの通過を確かめた PR に `automerge` ラベルを付けて、Kodiak（マージキューの GitHub App。「マージキュー」参照）にマージを委任することを認める（判定が割れた PR、`needs-human` の PR は人間が判断する）
+3. マージの委任: 指揮役が、`pelway-review` の Approve と必須チェックの通過を確かめた PR に `automerge` ラベルを付けて、Kodiak（マージキューの GitHub App。「マージキュー」参照）にマージを委任することを認める（判定が割れた PR は修正側の指摘を優先して対応し、`needs-human` の PR は人間が判断する）
 
 ## タスクの入口と流れ
 
