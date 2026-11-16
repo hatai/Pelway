@@ -281,6 +281,7 @@ pub fn serve(addr: SocketAddr, ledger: SharedLedger) -> Result<Server, ServeErro
         Arc::new(Mutex::new(DataStore::new_demo_seeded(now_ms()))),
         CONNECTION_DEADLINE,
         Arc::new(log::Logger::disabled()),
+        None,
     )
 }
 
@@ -302,6 +303,7 @@ pub fn serve_with_connection_deadline(
         Arc::new(Mutex::new(DataStore::new_demo_seeded(now_ms()))),
         connection_deadline,
         Arc::new(log::Logger::disabled()),
+        None,
     )
 }
 
@@ -324,6 +326,7 @@ pub fn serve_with_logger(
         Arc::new(Mutex::new(DataStore::new_demo_seeded(now_ms()))),
         CONNECTION_DEADLINE,
         logger,
+        None,
     )
 }
 
@@ -362,6 +365,29 @@ pub fn serve_with_store(
         store,
         CONNECTION_DEADLINE,
         Arc::new(log::Logger::disabled()),
+        None,
+    )
+}
+
+/// [`serve_with_store`] に runner-lite（#329）を加えたもの。投稿された
+/// メッセージが bot 宛てのメンションなら runner がタスクを起こす。
+/// `None` の runner では投稿経路の動きは変わらない。
+///
+/// # Errors
+/// 127.0.0.1 以外のアドレス、またはソケットの失敗。
+pub fn serve_with_store_and_runner(
+    addr: SocketAddr,
+    ledger: SharedLedger,
+    store: SharedDataStore,
+    runner: Arc<pelway_runner::Runner>,
+) -> Result<Server, ServeError> {
+    serve_inner(
+        addr,
+        ledger,
+        store,
+        CONNECTION_DEADLINE,
+        Arc::new(log::Logger::disabled()),
+        Some(runner),
     )
 }
 
@@ -377,7 +403,7 @@ pub fn serve_with_store_and_logger(
     store: SharedDataStore,
     logger: Arc<log::Logger>,
 ) -> Result<Server, ServeError> {
-    serve_inner(addr, ledger, store, CONNECTION_DEADLINE, logger)
+    serve_inner(addr, ledger, store, CONNECTION_DEADLINE, logger, None)
 }
 
 /// [`serve_with_logger_urandom`] に QA-GDPR-02 の保存部を加えたもの（本番相当の
@@ -395,7 +421,7 @@ pub fn serve_with_store_and_logger_urandom(
 ) -> Result<Server, ServeError> {
     let salt = log::read_salt_from(Path::new(log::SALT_SOURCE)).map_err(ServeError::Io)?;
     let logger = Arc::new(log::Logger::with_sink(sink, salt.to_vec()));
-    serve_inner(addr, ledger, store, CONNECTION_DEADLINE, logger)
+    serve_inner(addr, ledger, store, CONNECTION_DEADLINE, logger, None)
 }
 
 /// [`serve_with_logger_urandom`] の実体。salt の採取元を `salt_path` で受ける。
@@ -422,6 +448,7 @@ pub(crate) fn serve_with_logger_salt_from(
         Arc::new(Mutex::new(DataStore::new_demo_seeded(now_ms()))),
         CONNECTION_DEADLINE,
         logger,
+        None,
     )
 }
 
@@ -431,6 +458,7 @@ fn serve_inner(
     store: SharedDataStore,
     connection_deadline: std::time::Duration,
     logger: Arc<log::Logger>,
+    runner: Option<Arc<pelway_runner::Runner>>,
 ) -> Result<Server, ServeError> {
     // 待ち受けは 127.0.0.1 だけ（QA 18:21、リード決定 2026-11-09 19:14）。
     // 127.0.0.2 など 127/8 のほか、`::1` を含む IPv6 も拒否する。
@@ -441,16 +469,24 @@ fn serve_inner(
     let addr = listener.local_addr().map_err(ServeError::Io)?;
     std::thread::spawn(move || {
         for stream in listener.incoming() {
-            let (Ok(mut stream), ledger, store, logger) = (
+            let (Ok(mut stream), ledger, store, logger, runner) = (
                 stream,
                 Arc::clone(&ledger),
                 Arc::clone(&store),
                 Arc::clone(&logger),
+                runner.clone(),
             ) else {
                 continue;
             };
             std::thread::spawn(move || {
-                handle_conn(&mut stream, &ledger, &store, connection_deadline, &logger);
+                handle_conn(
+                    &mut stream,
+                    &ledger,
+                    &store,
+                    connection_deadline,
+                    &logger,
+                    runner.as_deref(),
+                );
             });
         }
     });
@@ -488,6 +524,7 @@ fn handle_conn(
     store: &SharedDataStore,
     connection_deadline: std::time::Duration,
     logger: &log::Logger,
+    runner: Option<&pelway_runner::Runner>,
 ) {
     let started = std::time::Instant::now();
     // 全体期限（リード決定 2026-11-09 19:15、20:36 に本文の読み取りへ拡大）:
@@ -495,7 +532,7 @@ fn handle_conn(
     // 1 回の読み取りのタイムアウトは read_once / drain が読み取りのたびに設定する。
     let deadline = deadline_at(std::time::Instant::now(), connection_deadline);
     let (response, route) = match read_request(stream, deadline) {
-        Ok(req) => route(&req, ledger, store, logger),
+        Ok(req) => route(&req, ledger, store, logger, runner),
         Err(resp) => (resp, log::Route::Unknown),
     };
     let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -758,6 +795,7 @@ fn route(
     ledger: &SharedLedger,
     store: &SharedDataStore,
     logger: &log::Logger,
+    runner: Option<&pelway_runner::Runner>,
 ) -> (Response, log::Route) {
     let path = req.path.split('?').next().unwrap_or("");
     let segments: Vec<&str> = path.split('/').collect();
@@ -863,7 +901,7 @@ fn route(
             card: None,
         });
         let resp = match req.method.as_str() {
-            "POST" => handle_post_message(req, channel, store, logger),
+            "POST" => handle_post_message(req, channel, store, logger, runner),
             "GET" => handle_list_channel_messages(req, channel, store, logger),
             _ => Response::error(
                 405,
@@ -1549,6 +1587,7 @@ fn handle_post_message(
     path_channel: &str,
     store: &SharedDataStore,
     logger: &log::Logger,
+    runner: Option<&pelway_runner::Runner>,
 ) -> Response {
     let Some(member_id) = header(req, MEMBER_ID_HEADER).filter(|v| !v.is_empty()) else {
         return bad_request();
@@ -1566,42 +1605,53 @@ fn handle_post_message(
     };
     let channel_pid = logger.id(path_channel);
     let author_pid = logger.id(member_id);
-    let Ok(mut store) = store.lock() else {
-        return internal_error();
-    };
-    let Some((workspace_id, channel_id)) = store
-        .channel(&ChannelId::from(path_channel))
-        .map(|c| (c.workspace_id.clone(), c.channel_id.clone()))
-    else {
-        return Response::error(404, &HttpError::NotFound, log::Code::NotFound);
-    };
-    let input = NewMessage {
-        workspace_id,
-        channel_id,
-        author_id: MemberId::from(member_id),
-        member_kind,
-        purpose_id: PurposeId::P01,
-        body: post_req.body,
-        thread_root: post_req.thread_root,
-        client_msg_id: Some(post_req.client_msg_id),
-    };
-    match store.post_message(input, now_ms()) {
-        Ok(message) => {
-            // ログは仮名と種別だけ（本文・client_msg_id は出さない）。
-            logger.emit(log::Event::MessagePosted {
-                channel: channel_pid,
-                author: author_pid,
-                member_kind: member_kind.into(),
-            });
-            Response::json(200, &message)
+    let (response, posted) = {
+        let Ok(mut store) = store.lock() else {
+            return internal_error();
+        };
+        let Some((workspace_id, channel_id)) = store
+            .channel(&ChannelId::from(path_channel))
+            .map(|c| (c.workspace_id.clone(), c.channel_id.clone()))
+        else {
+            return Response::error(404, &HttpError::NotFound, log::Code::NotFound);
+        };
+        let input = NewMessage {
+            workspace_id,
+            channel_id,
+            author_id: MemberId::from(member_id),
+            member_kind,
+            purpose_id: PurposeId::P01,
+            body: post_req.body,
+            thread_root: post_req.thread_root,
+            client_msg_id: Some(post_req.client_msg_id),
+        };
+        match store.post_message(input, now_ms()) {
+            Ok(message) => {
+                // ログは仮名と種別だけ（本文・client_msg_id は出さない）。
+                logger.emit(log::Event::MessagePosted {
+                    channel: channel_pid,
+                    author: author_pid,
+                    member_kind: member_kind.into(),
+                });
+                (Response::json(200, &message), Some(message))
+            }
+            // 同じ client_msg_id の再投稿だが内容が違う（04 §2 の 409）。
+            Err(StoreError::Conflict) => (
+                Response::error(409, &HttpError::Conflict, log::Code::Conflict),
+                None,
+            ),
+            // post_message で NotFound・InvalidReference は起こらない（網羅のための安全側）。
+            Err(StoreError::NotFound | StoreError::InvalidReference { .. }) => {
+                (internal_error(), None)
+            }
         }
-        // 同じ client_msg_id の再投稿だが内容が違う（04 §2 の 409）。
-        Err(StoreError::Conflict) => {
-            Response::error(409, &HttpError::Conflict, log::Code::Conflict)
-        }
-        // post_message で NotFound・InvalidReference は起こらない（網羅のための安全側）。
-        Err(StoreError::NotFound | StoreError::InvalidReference { .. }) => internal_error(),
+    };
+    // runner-lite（#329）: 保存が済んでロックを離してからメンションを通知する。
+    // runner の LLM 呼び出しがこのロックを長く持つことはない。
+    if let (Some(runner), Some(message)) = (runner, posted) {
+        let _ = runner.on_message_posted(&message);
     }
+    response
 }
 
 /// メッセージ取得（#327）。`after_seq` より後・`before_seq` より前を seq の

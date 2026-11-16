@@ -1,0 +1,18 @@
+[package]
+# サーバー内プロセスの runner-lite（#329）。メンション → タスク化 → LLM で A/B 案 →
+# 判断待ち、の進行管理。状態はメモリ上のみ（DB キュー・再開位置は対象外）。
+name = "pelway-runner"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Draft in-process runner-lite for the Pelway demo: mention to task, LLM A/B proposals, pending decision. Not a fixed schema."
+
+[dependencies]
+# version は cargo-deny の wildcards 検査のため（path 依存の解決には影響しない）。
+pelway-contract = { path = "../pelway-contract", version = "0.0.0" }
+pelway-llm = { path = "../pelway-llm", version = "0.0.0" }
+# 応答 JSON（A/B スキーマ）の組み立てと解釈。
+serde_json = "1"
+# LlmGateway::chat が返す Future を、同期スレッドの runner から動かすための
+# current_thread ランタイム（実提供元の reqwest が動くよう net・time も有効化）。
+tokio = { version = "1", features = ["rt", "net", "time"] }

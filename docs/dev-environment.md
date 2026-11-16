@@ -165,6 +165,7 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 - `test` ジョブの PostgreSQL は `postgres:16-alpine` を digest 固定した service コンテナ（`PELWAY_DATABASE_URL` はスーパーユーザーの `postgres` ユーザー）。scratch database はテストごとに作られ、終了時に消える。
 - v0.7 の verify.py は、原本（`/workspace/pelway-technical-docs`）と凍結 ZIP が原本作成環境にだけ存在するため、それらを `not-run` として結果 JSON に記録し、リポジトリ内で確かめられる検査（コピーの hash・相対リンク・節対応・アンカー・UI 文言）だけで合否を判定する。
 - 通知は `notify-grokbot.yml` の `workflow_run`（`workflows` に `nightly` を登録）が担う。成功は `digest`、失敗は `immediate` で Grok Bot に届き、`run_url` から失敗ジョブを確認できる。
+- 負荷試験の実行と収集するメトリクスの方針は [負荷試験とメトリクス](load-testing.md) に置く。nightly への組み込みは基盤の実装時に判断する。
 
 ## GitHub 通知（Grok Bot webhook・notify-grokbot）
 
@@ -303,11 +304,12 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 bwrap が作る名前空間の要点:
 
 - `/usr`・`/etc`・`/home` 等は read-only。`/` 全体をミラーする `--ro-bind /` は使わない（WSL の `/mnt/c` 等の submount まで写し、Windows 側ファイルが見えてしまうため、必要な top-level だけを明示的にマウントする）
-- 書き込み可は、セッションの worktree・共有 git dir・`/tmp`・ツールキャッシュ（`~/.cargo`・`~/.rustup`・`~/.local/{share,state}/mise`・`~/.cache/{mise,pkl,fnox}`・`~/.pkl`・`~/.npm`）のみ
+- 書き込み可は、セッションの worktree・共有 git dir・`/tmp`・ツールキャッシュ（`~/.cargo`・`~/.rustup`・`~/.local/{share,state}/mise`・`~/.cache/{mise,pkl,fnox}`・`~/.pkl`・`~/.npm`・`~/.cache/agent-sandbox`）のみ
 - 共有 git dir（worktree の commondir）はコミットのため書き込み可だが、`config`・`config.worktree`・`hooks/` には read-only を重ねてマウントする（url rewrite や hook の仕込みを防ぐ）
 - 秘匿パス（`~/.ssh`・`~/.gnupg`・`~/.docker`・`~/.config/gh`・`~/.config/opencode`・`~/.config/devin`・`~/.t3/userdata` 等）は tmpfs で隠すかマウントしない。no-new-privileges により `sudo`/`doas`/`pkexec` も実行できない
 - ネットワークは遮断しない（ホストの経路をそのまま使う）。Issue #151 で hatai が「厳しくしすぎると調査が難しくなるので現時点では許可リストにしない」と指示したため
-- シェル環境から `T3_ACP_MCP_*`・`T3CODE_*` を落とし、`MISE_RUST_MR_BOXINGTON=0`（mbx のハードリンクキャッシュ経由の書き換えを防ぐ。worktree の `target` symlink は実ディレクトリに戻される。ただし cargo コマンドラッパー生成済みの環境ではこの変数は実行時に効かず cargo が mbx を通る場合がある。回避は「mr boxington（mbx）について」節の `XDG_CACHE_HOME` 退避）と `GIT_CONFIG_COUNT` 系の `commit.gpgsign=false`（`~/.ssh` を隠すため SSH 署名は必ず失敗する。push 後に `scripts/agent-gh-resign` が署名を作り直すので問題ない）を渡す
+- シェル環境から `T3_ACP_MCP_*`・`T3CODE_*` を落とし、次を渡す: `MISE_RUST_MR_BOXINGTON=0`（mbx 無効化の意図の宣言。cargo コマンドラッパー生成済みの環境では実行時に効かず cargo は mbx を通るが、そのキャッシュは下の `XDG_CACHE_HOME` により sandbox 専用の書き込み可ディレクトリに移る。worktree の `target` symlink は実ディレクトリに戻される）、`PELWAY_AGENT_SANDBOX=1`（sandbox 内であることを示す目印。ホスト専用のテストがこれを見て skip する）、`XDG_CACHE_HOME`（`~/.cache/agent-sandbox`。mbx・hk 等の `~/.cache` 配下のキャッシュの向き先。sandbox 専用なのでホストの `~/.cache/mbx` は見せないままにできる。`$HOME/.cache` が read-only で作れないネスト実行では `/tmp/pelway-sbx-cache-<uid>` に退避する）、`GIT_CONFIG_COUNT` 系の `commit.gpgsign=false`（`~/.ssh` を隠すため SSH 署名は必ず失敗する。push 後に `scripts/agent-gh-resign` が署名を作り直すので問題ない）
+- `/etc/resolv.conf` が symlink のとき（WSL では `/mnt/wsl/resolv.conf`）、実体を正本パスに read-only で重ねてマウントし、リンク切れによる DNS 不通を防ぐ。このとき `/mnt/wsl` が名前空間に見えるが、見えるのはリンク先のファイルだけで `/mnt/c` 等の Windows 側は見えない。実ファイルなら `/etc` の ro-bind に含まれるため手当ては要らない
 - bwrap は広い bind を後から重ねると子の ro-bind が実質無効化されるため、マウントは「広い→狭い」の順で組み立てる（`scripts/tests/agent-sandbox.test.sh` で検証）
 
 ### Devin 内蔵 sandbox を使わない理由
@@ -323,20 +325,21 @@ bwrap が作る名前空間の要点:
 
 ### 確認手順
 
-- `mise run script-test`（`scripts/tests/agent-sandbox.test.sh`）で wrapper の性質を検査する。worktree 内の書き込み・コミット成功、ホーム・`/etc` への書き込み拒否、秘匿パスの遮蔽、`sudo` 失敗、git の `config`/`hooks` の read-only、sandbox 無効化パスの read-only、環境変数の除去、`--wrap` モード、プラグインの実体パス検査（symlink 越しの拒否）を確認する
+- `mise run script-test`（`scripts/tests/agent-sandbox.test.sh`）で wrapper の性質を検査する。worktree 内の書き込み・コミット成功、ホーム・`/etc` への書き込み拒否、秘匿パスの遮蔽、`sudo` 失敗、git の `config`/`hooks` の read-only、sandbox 無効化パスの read-only、環境変数の除去、`--wrap` モード、プラグインの実体パス検査（symlink 越しの拒否）、`XDG_CACHE_HOME` の向き先と書き込み可、ホストの `~/.cache/mbx` の read-only、cargo が mbx を通っても lock 取得に失敗しないこと、sandbox 内の DNS 解決を確認する。sandbox 内の実装スレッドではこのテスト自体は実行できない（`PELWAY_AGENT_SANDBOX` を検出して理由を出して skip する）
 - 導入後の初回の実装スレッド（opencode と Devin それぞれ）で、スレッド内から次を実行して結果を記録する
   - `scripts/agent-gh dev api /rate_limit` が成功する（GitHub と fnox/age 鍵経路が通る）
   - `touch "$HOME/sbx-marker"` が失敗する（worktree 外への書き込み拒否）
   - `sudo -n true` が失敗する
   - `curl -sS https://example.com` が**成功する**（ネットワークは開放であることを確認。遮断が意図通り働いていないときの検知にもなる）
-  - `ls /mnt` が失敗する（`/mnt` はマウントされない）
+  - `getent hosts api.github.com` が成功する（DNS が通る。`/etc/resolv.conf` が symlink のホストでは実体の ro-bind で解決できる）
+  - `ls /mnt/c` が失敗する（`/mnt` 自体は resolv.conf のリンク先だけが見える。Windows 側は見えない）
 - Devin 側は `acpRegistry_devin` のスレッドで同様に確認する（`devin-impl` wrapper 経由で起動されているかは、スレッド内で `findmnt` や `touch $HOME/...` の拒否で確かめられる）
 
 ### 確認手順の結果（記録欄）
 
 | 項目 | 結果 | 実施日 |
 |---|---|---|
-| `sandbox-shell` の単体検査（`scripts/tests/agent-sandbox.test.sh`） | 合格（worktree 書込・コミット可、ホーム・`/etc`・git config/hooks・sandbox 設定面の書込拒否、秘匿パス遮蔽、`sudo` 失敗、`/mnt` 不在、wrap モード） | 2026-11-14 |
+| `sandbox-shell` の単体検査（`scripts/tests/agent-sandbox.test.sh`） | 合格。PR head `d3f0bf6dbfe492ba3ce29efc89917ba26f37ce7a` の版（#325 の新規検査を含む）を指揮役がホストで通し実行し `PASS: agent-sandbox`・exit=0（Issue #325 コメント 6907015476）。ホストの `/etc/resolv.conf` は `/mnt/wsl/resolv.conf` への symlink のため symlink-target の検査も走った。CI の `test (cargo test)` ジョブでは bwrap 不在で `SKIP: bwrap not installed` になるため、CI の pass は当該検査の実行を意味しない（run 43743202520・job 132900858476 のログで確認） | 2026-11-16 |
 | opencode プラグインのフック検査（`ctx.location` が `~/.t3/worktrees` 配下でのみ shell 差し替え・ファイルツール拒否が発火することを node で直接検証） | 合格 | 2026-11-14 |
 | Devin wrap 方式の実セッション検査（`sandbox-shell --wrap -- devin --config <devin-impl> -p` 内で実施） | `curl https://example.com` 成功（200）、`scripts/agent-gh dev api /rate_limit` 成功、`touch $HOME/...` が `Read-only file system` で拒否、worktree 書込成功 | 2026-11-14 |
 | Devin 内蔵 sandbox の検査（比較のため） | `allowed_domains` 空・未指定で exec が github.com 系のみになり、crates.io・example.com タイムアウト（要件不適合のため不採用） | 2026-11-14 |
@@ -457,7 +460,7 @@ container run --rm alpine echo hello   # hello 程度の smoke
 - キャッシュは `~/.cache/mbx`（ローカルのみ、自動GCあり。予算は `mbx settings ls` で確認）。`target` は `~/.cache/mbx/targets/...` への symlink になる（`.gitignore` 済み）。
 - `mbx doctor` の setup 検査は「Cargo shim is not installed」と警告しうる。mise ネイティブ統合では shim を使わないためで、mbx 公式ドキュメント（Getting started）に説明がある。ラップの実態は上の確認方法で判断する。
 - mbx 自体にはリモートキャッシュを設定しない（S3 等の外部キャッシュサーバを使わない）。CI の `actions/cache` は mbx とは別の仕組みで、CI ジョブでは mbx を有効にしない（`MISE_RUST_MR_BOXINGTON=0`）。CI 側の説明は「CI（GitHub Actions）」節にある。
-- 実装担当の sandbox（「実装担当の sandbox（agent-sandbox）」参照）は `/home` を読み取り専用にし、書き込み可能なパスをツールキャッシュの列挙（`~/.cargo`・`~/.rustup`・`~/.cache/{mise,pkl,fnox}` など）に限る。`~/.cache/mbx` はハードリンクキャッシュ経由の書き換え経路として意図的に含めず、代わりに `MISE_RUST_MR_BOXINGTON=0` を渡す設計。ただし cargo コマンドラッパー生成済みの環境ではこの変数は実行時に効かず、cargo が mbx を通って `~/.cache/mbx` の lock 取得に失敗する（`Read-only file system (os error 30)`）。この場合は `XDG_CACHE_HOME` を書き込み可能な場所（`/tmp` 配下など）に向けて `mise run verify` や、git hook が cargo を呼ぶ commit・push を実行する（mbx と hk のキャッシュが退避先に移る）。
+- 実装担当の sandbox（「実装担当の sandbox（agent-sandbox）」参照）は `/home` を読み取り専用にし、書き込み可能なパスをツールキャッシュの列挙（`~/.cargo`・`~/.rustup`・`~/.cache/{mise,pkl,fnox}`・`~/.cache/agent-sandbox` など）に限る。`~/.cache/mbx` はハードリンクキャッシュ経由の書き換え経路として意図的に含めない。cargo コマンドラッパー生成済みの環境では `MISE_RUST_MR_BOXINGTON=0` は実行時に効かず cargo は mbx を通るため、sandbox は代わりに `XDG_CACHE_HOME` を `~/.cache/agent-sandbox` に向ける。mbx・hk 等のキャッシュはこの sandbox 専用ディレクトリに移り、lock 取得とキャッシュ書き込みが通る（Issue #325）。
 
 ## pitchfork について
 
