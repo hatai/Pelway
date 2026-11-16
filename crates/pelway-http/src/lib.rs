@@ -17,6 +17,14 @@
 //!   （判断待ち一覧）。一覧用のデータは保存せず、台帳
 //!   （[`pelway_contract::ledger::ApprovalLedger`]）の承認カードを検索して
 //!   その場で組み立てる。
+//! - #328 で加えた **A/B 決定（判断待ち）の経路**（送信承認 API とは別。
+//!   経路は契約のテンプレート定数 `pelway_contract::decision::DECISIONS_PATH` /
+//!   `DECIDE_PATH` と照合）:
+//!   `POST /v1/workspaces/{workspace_id}/decisions`（作成）、
+//!   `GET /v1/workspaces/{workspace_id}/decisions?actor={member_id}`（自分が
+//!   決定者の未確定一覧。確定済みは出ない。待ち時間は `waiting_since` から）、
+//!   `POST /v1/decisions/{decision_id}/decide`（確定。操作者は合成ヘッダー。
+//!   確定後の変更は拒否、同じ選択の再送は冪等リプレイ）。
 //! - 認証は無い（デモ用）。comments/approve の要求者は合成ヘッダー
 //!   （`x-pelway-member-id`、`x-pelway-member-kind`。値は仕様 04 §2 の
 //!   `human|bot|external_agent|external_tool`）で受ける。
@@ -73,6 +81,9 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use pelway_contract::approval::{ApproveRequest, SaveCommentRequest};
+use pelway_contract::decision::{
+    CreateDecisionError, CreateDecisionRequest, DecideRequest, DecisionError,
+};
 use pelway_contract::handoff::{HandoffDecision, HandoffRequest};
 use pelway_contract::ids::{BasisId, MemberId, WorkspaceId};
 use pelway_contract::ledger::ApprovalLedger;
@@ -777,6 +788,44 @@ fn route(
         };
         return (resp, route_kind);
     }
+    // A/B 決定の判断待ち（#328）: `POST|GET /v1/workspaces/{workspace_id}/decisions`、
+    // `POST /v1/decisions/{decision_id}/decide`。経路は契約のテンプレート定数と
+    // 照合する（経路を書き写さない。Issue #91）。送信承認 API とは別の経路。
+    if let Some(params) = match_path(pelway_contract::decision::DECISIONS_PATH, &segments) {
+        let workspace = params[0];
+        logger.emit(log::Event::RequestReceived {
+            route: log::Route::Decisions,
+            method,
+            card: None,
+        });
+        let resp = match req.method.as_str() {
+            "POST" => handle_create_decision(req, workspace, ledger, logger),
+            "GET" => handle_list_decisions(req, workspace, ledger, logger),
+            _ => Response::error(
+                405,
+                &HttpError::MethodNotAllowed,
+                log::Code::MethodNotAllowed,
+            ),
+        };
+        return (resp, log::Route::Decisions);
+    }
+    if let Some(params) = match_path(pelway_contract::decision::DECIDE_PATH, &segments) {
+        let decision = params[0];
+        logger.emit(log::Event::RequestReceived {
+            route: log::Route::Decide,
+            method,
+            card: None,
+        });
+        let resp = match req.method.as_str() {
+            "POST" => handle_decide(req, decision, ledger, logger),
+            _ => Response::error(
+                405,
+                &HttpError::MethodNotAllowed,
+                log::Code::MethodNotAllowed,
+            ),
+        };
+        return (resp, log::Route::Decide);
+    }
     // 仮の経路（QA-GDPR-02）: /v1/workspaces/{workspace_id}/communication-basis-records
     // （POST 作成・GET 一覧）、.../{basis_id}/withdraw（POST 撤回 = 取得と同じ1操作）、
     // /v1/workspaces/{workspace_id}/communication-use-policies（POST 作成・GET 一覧）。
@@ -879,6 +928,28 @@ fn handoff_error_code(e: &pelway_contract::handoff::HandoffError) -> log::Code {
         E::CardIdMismatch => log::Code::CardIdMismatch,
         E::NotCurrentDecider { .. } => log::Code::NotCurrentDecider,
         E::SelfHandoff => log::Code::SelfHandoff,
+    }
+}
+
+/// 契約の判断待ち作成エラー → 拒否ログの結果コード（#328）。
+fn create_decision_error_code(e: &CreateDecisionError) -> log::Code {
+    match e {
+        CreateDecisionError::EmptyQuestion => log::Code::EmptyQuestion,
+        CreateDecisionError::TooFewOptions { .. } => log::Code::TooFewOptions,
+        CreateDecisionError::InvalidOptionId { .. } => log::Code::InvalidOptionId,
+        CreateDecisionError::EmptyOptionBody { .. } => log::Code::EmptyOptionBody,
+    }
+}
+
+/// 契約の決定確定エラー → 拒否ログの結果コード（#328）。
+fn decide_error_code(e: &DecisionError) -> log::Code {
+    match e {
+        DecisionError::DecisionNotFound => log::Code::DecisionNotFound,
+        DecisionError::DecisionIdMismatch => log::Code::DecisionIdMismatch,
+        DecisionError::NotDecider => log::Code::NotDecider,
+        DecisionError::VersionConflict { .. } => log::Code::VersionConflict,
+        DecisionError::UnknownOption { .. } => log::Code::UnknownOption,
+        DecisionError::AlreadyDecided => log::Code::AlreadyDecided,
     }
 }
 
@@ -1235,6 +1306,124 @@ fn handle_inbox(
         actor: actor_pid,
     });
     Response::json(200, &inbox)
+}
+
+/// A/B 決定の判断待ちの作成（#328）。`decision_id`・`version`・`waiting_since` は
+/// サーバーが付ける（要求に入れても `deny_unknown_fields` で 400）。workspace は
+/// 経路から取り、本文の値とは照合しない（本文には workspace 欄が無い）。
+/// 論点・選択肢の検査は台帳の [`ApprovalLedger::create_decision`] が行う。
+fn handle_create_decision(
+    req: &Request,
+    workspace: &str,
+    ledger: &SharedLedger,
+    logger: &log::Logger,
+) -> Response {
+    let Ok(input) = serde_json::from_slice::<CreateDecisionRequest>(&req.body) else {
+        return bad_request();
+    };
+    let workspace_pid = logger.id(workspace);
+    let Ok(mut ledger) = ledger.lock() else {
+        return internal_error();
+    };
+    match ledger.create_decision(WorkspaceId::from(workspace), input, now_ms()) {
+        Ok(card) => {
+            // 判断待ちを作った: workspace・判断待ち・決定者（仮名化）だけ。
+            // 論点・選択肢の本文はログに出さない。
+            logger.emit(log::Event::DecisionCreated {
+                workspace: workspace_pid,
+                decision: logger.id(card.decision_id.as_str()),
+                decider: logger.id(card.decider.as_str()),
+            });
+            Response::json(200, card)
+        }
+        Err(e) => Response::error(e.http_status(), &e, create_decision_error_code(&e)),
+    }
+}
+
+/// A/B 決定の確定（#328）。確定要求を出す人（操作者）は合成ヘッダーで受け、
+/// 台帳が判断待ちの決定者であることを確かめる（違えば 403 `not_decider`）。
+/// 版の検査・確定後の変更の拒否・同じ選択の冪等リプレイは台帳が行う。
+fn handle_decide(
+    req: &Request,
+    path_decision: &str,
+    ledger: &SharedLedger,
+    logger: &log::Logger,
+) -> Response {
+    // 認証は無い（デモ用）。合成ヘッダーで確定する人を受ける（approve と同じ受け取り）。
+    let Some(member_id) = header(req, MEMBER_ID_HEADER).filter(|v| !v.is_empty()) else {
+        return bad_request();
+    };
+    let Some(kind) = header(req, MEMBER_KIND_HEADER) else {
+        return bad_request();
+    };
+    // 種類は仕様 04 §2 の 4 値。身元の検査（決定者との一致）は member_id だけで行い、
+    // kind は形式だけ検証する。
+    if MemberKind::parse(kind).is_none() {
+        return bad_request();
+    }
+
+    let Ok(decide_req) = serde_json::from_slice::<DecideRequest>(&req.body) else {
+        return bad_request();
+    };
+    // 経路と本文の decision_id の一致は HTTP 層で確かめる（comments と同じ 422）。
+    if decide_req.decision_id.as_str() != path_decision {
+        let e = DecisionError::DecisionIdMismatch;
+        return Response::error(e.http_status(), &e, decide_error_code(&e));
+    }
+
+    // 検査・確定・決定記録の保存をロックを持ったまま 1 回で行う。
+    let Ok(mut ledger) = ledger.lock() else {
+        return internal_error();
+    };
+    // この要求で新しく確定したときだけ出来事を出す（冪等リプレイでは出さない。
+    // approve の疑似送信と同じ考え方）。
+    let was_pending = ledger
+        .decision(&decide_req.decision_id)
+        .is_some_and(|c| c.outcome.is_none());
+    let operator = MemberId::from(member_id);
+    match ledger.decide(decide_req, &operator, now_ms()) {
+        Ok(outcome) => {
+            if was_pending {
+                // 確定した: 判断待ち・決定者（仮名化）だけ。選んだ選択肢の中身は出さない。
+                logger.emit(log::Event::DecisionConfirmed {
+                    decision: logger.id(outcome.decision_id.as_str()),
+                    decider: logger.id(outcome.decider.as_str()),
+                });
+            }
+            Response::json(200, &outcome)
+        }
+        Err(e) => Response::error(e.http_status(), &e, decide_error_code(&e)),
+    }
+}
+
+/// A/B 決定の判断待ち一覧（#328）。一覧用のデータは保存せず、台帳の判断待ち
+/// （状態のテーブル）を検索してその場で組み立てる。表示対象のメンバーはクエリ
+/// `actor`（inbox と同じ受け取り）。確定済みは出ない。待ち時間は台帳が
+/// `waiting_since` から出す（期限ではない）。
+fn handle_list_decisions(
+    req: &Request,
+    workspace: &str,
+    ledger: &SharedLedger,
+    logger: &log::Logger,
+) -> Response {
+    let Some(actor) = query_param(&req.path, "actor").filter(|a| !a.is_empty()) else {
+        return bad_request();
+    };
+    let workspace_pid = logger.id(workspace);
+    let actor_pid = logger.id(&actor);
+    let Ok(ledger) = ledger.lock() else {
+        return internal_error();
+    };
+    let items = ledger.pending_decisions(
+        &WorkspaceId::from(workspace),
+        &MemberId::from(actor.as_str()),
+        now_ms(),
+    );
+    logger.emit(log::Event::DecisionsListed {
+        workspace: workspace_pid,
+        actor: actor_pid,
+    });
+    Response::json(200, &items)
 }
 
 fn reason_phrase(status: u16) -> &'static str {
