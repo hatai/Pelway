@@ -23,3 +23,15 @@
 5. 改善案: なし
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（round 3）
+
+対象 head: 4fd057f3d215b7ae49d8b483f581e1c80073290d（round 3 の実装の実体を含むコミット。push 後の署名付け替え後の SHA。このメモを含むコミットの親）
+
+1. 詰まった箇所: 手順 9: レビュー round 2（PR #368、claude effort=xhigh must-fix 1）の対応
+2. 曖昧だった文: 「復旧・再開の前に台帳の最終世代を対象へ再適用し、`generation` を台帳の値より小さくしない」（自分が round 2 で書いた記録形式の節の文）
+3. 仮定と解釈: 台帳が世代の最終値だけを持つ設計では、復旧で status が有効のまま戻った行に世代を揃えても失効が復活する（claude の筋書き: 復旧した credential が gen を揃えただけで新セッション発行を通す）。台帳の記録を `(workspace_id, subject_kind, subject_id, generation, status)` に拡げ、同一行で版を進める policy は内容版の参照も持つ形にし、復旧時は認可・dispatch を既定停止のまま status を再適用、台帳より古い対象は `generation` を台帳の値を超える新しい世代へ進める（揃えるだけでは復旧前に刻まれた参照が古い内容に偶然一致する）形に修正した
+4. 足りなかった情報・検証手段: なし
+5. 改善案: なし
+
+使ったスキル: `.agents/skills/implement-issue`
