@@ -82,6 +82,11 @@ sequenceDiagram
 
 アプリ側の送信先の規則（#182）は、ゲートウェイやツール中継というアプリ層の検査です。アプリに不具合があればすり抜けるため、同じ制限をホスト側のファイアウォールでも担保し、多層防御とします。出典は Rakazo の `infra/compose/restrict-computer-egress.sh` と同 `restrict-computer-egress.smoke.sh`（elie222/rakazo）で、ここではその設計を Pelway の構成（タスクごとのLinuxコンテナsandbox）へ翻案して採用します。
 
+**注記（v0.7 の既定拒否との関係。後続 #389 との分担）**:
+
+- 本節の方式の runtime 前提は Linux Docker Engine（iptables バックエンド）です。v0.7 の第一候補である rootless Podman（pasta / slirp4netns）では、パケットがホストの iptables に届かないため、この規則は適用されません。
+- v0.7 が定める sandbox の外向き通信の**既定拒否**（許可した出口だけを通す。rootless Podman でも効くこと）は、後続の #389 で実現します。#389 が入るまで、ホスト側の担保は本節のブロックリスト方式（非公開あて先のみを落とす）です。
+
 **方式（ブロックリストによるホスト側の担保）**:
 
 - 対象は、Linux Docker Engine（iptables バックエンド）の `DOCKER-USER` チェーンと `INPUT` チェーンです。サンドボックスのコンテナが繋がるブリッジに決定論的な接頭辞を持つ名前を割り当て、その接頭辞を鍵に規則を挿入します。Docker が動的に割り当てるサブネットには鍵付けないため、コンテナの増減・ネットワーク再作成・サブネットの再利用でファイアウォールを更新する必要がありません。

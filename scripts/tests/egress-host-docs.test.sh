@@ -45,6 +45,14 @@ check cond3_no_conflict docs/technical.md \
   '#182' \
   '多層'
 
+# 条件4: 後続 Issue #389 との分担の注記（人間の判断 B、2026-11-16）。
+# runtime 前提が Linux Docker Engine であること、#389 が入るまでホスト側はブロックリストであること、
+# v0.7 の既定拒否は #389 で扱うこと。
+check cond4_followup_389 docs/technical.md \
+  '#389' \
+  '既定拒否' \
+  'rootless Podman'
+
 # 出典の明記（採用する方式が Rakazo 由来であること）と、外部提供元の未決事項の記録。
 check source_rakazo docs/technical.md \
   'Rakazo'
