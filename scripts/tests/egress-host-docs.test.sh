@@ -51,7 +51,8 @@ check cond3_no_conflict docs/technical.md \
 check cond4_followup_389 docs/technical.md \
   '#389' \
   '既定拒否' \
-  'rootless Podman'
+  'rootless Podman' \
+  'Linux Docker Engine の構成では'
 
 # 出典の明記（採用する方式が Rakazo 由来であること）と、外部提供元の未決事項の記録。
 check source_rakazo docs/technical.md \
