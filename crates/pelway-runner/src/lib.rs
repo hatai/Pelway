@@ -7,8 +7,7 @@
 //! （LLM 利用の根拠）の検査（無ければ LLM を呼ばず停止投稿）→ LLM 呼び出し
 //! → 成功は A/B 案の投稿と判断待ち（#328）で AwaitingDecision、失敗は
 //! 「止まっていることと理由」の投稿で Stopped（[`Runner::provide_fallback`]
-//! で差し替えられる）。台帳・保存部のロックは読み書きの短い区間だけに
-//! 限り、LLM 呼び出しの間はどのロックも持たない。
+//! で差し替えられる）。LLM 呼び出しの間はどのロックも持たない。
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -31,8 +30,7 @@ const STOP_NO_BASIS: &str = "LLM を呼ぶ根拠（P03）が確認できませ�
 /// A/B 案の投稿の先頭行。
 const PROPOSALS_LEAD: &str = "案を作成しました。どちらにするか判断をお願いします。";
 
-/// runner が LLM を呼ぶ口。`LlmGateway` は `impl Future` を返すため `dyn` に
-/// できないので、`chat` だけを箱に入れて dyn 越しに呼べる形にする（実装には自動適用）。
+/// runner が LLM を呼ぶ口。`LlmGateway` は `dyn` にできないため `chat` を箱に入れる（実装には自動適用）。
 pub trait DynChatGateway: Send + Sync {
     fn chat<'a>(
         &'a self,
@@ -255,12 +253,8 @@ impl Runner {
                     self.stop(&task, &reason);
                 }
             }
-            Ok(Err(err)) => {
-                self.stop(&task, &format!("LLM の呼び出しに失敗しました（{err}）"));
-            }
-            Err(err) => {
-                self.stop(&task, &format!("LLM のランタイムを立てられません（{err}）"));
-            }
+            Ok(Err(err)) => self.stop(&task, &llm_reason(&err)),
+            Err(err) => self.stop(&task, &format!("ランタイムを立てられません（{err}）")),
         }
     }
 
@@ -296,7 +290,7 @@ impl Runner {
                 },
                 now_ms(),
             )
-            .map_err(|e| format!("判断待ちを作れませんでした（{e:?}）"))?;
+            .map_err(|_| "判断待ちを作れませんでした".to_owned())?;
         self.set_state(&task.task_id, TaskState::AwaitingDecision, None);
         Ok(())
     }
@@ -357,6 +351,16 @@ fn ab_request(request_body: &str) -> ChatRequest {
             },
             "additionalProperties": false
         })),
+    }
+}
+
+/// 外部へ投稿してよい LLM 失敗の理由。内部の文字列（提供元の応答本文など）は含めない。
+fn llm_reason(err: &LlmError) -> String {
+    match err {
+        LlmError::NotSent(_) => "LLM へ送信できませんでした".to_owned(),
+        LlmError::OutcomeUnknown(_) => "LLM の結果が不明です".to_owned(),
+        LlmError::Rejected { status, .. } => format!("提供元が拒否しました（status {status}）"),
+        LlmError::Invalid(_) => "LLM の応答を解釈できません".to_owned(),
     }
 }
 

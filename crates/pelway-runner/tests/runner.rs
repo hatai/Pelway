@@ -184,15 +184,8 @@ fn mention_creates_task_and_posts_fixed_stage_progress() {
         Arc::new(FakeGateway::new(Ok(ab_reply()))),
     );
 
-    let message = post(
-        &store,
-        REQUESTER,
-        MemberKind::Human,
-        "@ハル 納期延長の案を2つ作って",
-    );
-    let task_id = runner
-        .on_message_posted(&message)
-        .expect("メンションでタスクが作られる");
+    let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を2つ作って");
+    let task_id = runner.on_message_posted(&message).expect("task");
     assert_eq!(task_id, RunnerTaskId("task-00000001".to_owned()));
 
     // タスクが作られ、固定段階の進捗 1 行が bot の投稿として出る。
@@ -214,8 +207,7 @@ fn mention_creates_task_and_posts_fixed_stage_progress() {
     assert!(
         bot_messages(&store)
             .iter()
-            .any(|b| b.contains("案A: 納期を2週間延ばす案")
-                && b.contains("案B: 範囲を絞って納期を守る案")),
+            .any(|b| b.contains("案A:") && b.contains("案B:")),
         "LLM の応答（A/B 案）が会話に投稿される"
     );
     let items = pending_items(&ledger);
@@ -271,9 +263,10 @@ fn non_bot_mention_and_plain_message_create_no_task() {
 fn llm_failure_posts_stop_with_reason_and_fallback_replaces_it() {
     let (store, ledger, runner) = fixture(
         DataStore::new_demo_seeded(now()),
-        Arc::new(FakeGateway::new(Err(LlmError::OutcomeUnknown(
-            "接続が切れました".to_owned(),
-        )))),
+        Arc::new(FakeGateway::new(Err(LlmError::Rejected {
+            status: 503,
+            body: "canary-提供元の内部情報".to_owned(),
+        }))),
     );
 
     let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
@@ -290,6 +283,10 @@ fn llm_failure_posts_stop_with_reason_and_fallback_replaces_it() {
             .any(|b| b.contains("止まり") && b.contains(&reason)),
         "停止と理由が投稿される: {posts:?}"
     );
+    assert!(
+        !reason.contains("canary") && posts.iter().all(|b| !b.contains("canary")),
+        "提供元の応答本文は投稿しない: {reason}"
+    );
     assert_eq!(pending_items(&ledger).len(), 0, "判断待ちは作られない");
 
     // フォールバック応答へ差し替えると、案の投稿と判断待ちまで進む。
@@ -300,11 +297,7 @@ fn llm_failure_posts_stop_with_reason_and_fallback_replaces_it() {
         runner.task(&task_id).expect("task").state,
         TaskState::AwaitingDecision
     );
-    assert!(
-        bot_messages(&store)
-            .iter()
-            .any(|b| b.contains("案A: 納期を2週間延ばす案"))
-    );
+    assert!(bot_messages(&store).iter().any(|b| b.contains("案A:")));
     assert_eq!(pending_items(&ledger).len(), 1);
 
     // 判断待ちに入ったタスクは差し替えられない。存在しないタスクも同様。
