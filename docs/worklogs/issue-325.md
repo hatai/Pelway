@@ -65,3 +65,15 @@
 5. 改善案: `.github/workflows/verify.yml` の `test` ジョブか `docs/dev-environment.md` の CI 節に「GitHub-hosted runner には bwrap が無く agent-sandbox.test.sh は skip される」と明記する（次の読み手が CI の pass を検査の実行と誤読しないように）
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: bcd305b（ホスト実行記録の訂正コミット・署名付け替え後）
+
+1. 詰まった箇所: round 3 の must-fix (2)「ホスト実行の記録が実行コミットを特定していない」は、記録を書き直すだけでは充足しない。コメント 6905353781 の実行が main checkout（f025bc4、新規検査を含まない版）だった可能性があり、PR head での再実行が必要だった。指揮役に round 4 の継続を許可してもらい、PR head d3f0bf6 での再実行記録（コメント 6907015476、`/etc/resolv.conf` は symlink のため symlink-target の検査も走った）を得て転記した
+2. 曖昧だった文: 「4 ラウンド目に入る前に Approve が取れていなければ、止まる条件の形でエスカレーションする」（`.agents/skills/implement-issue/SKILL.md` 手順 9）— 指揮役がエスカレーション後に「再レビューを依頼して完了報告まで進める」と明示した場合、round 4 の委託が認められるかが曖昧
+3. 仮定と解釈: 指揮役の明示指示は止まる条件の解除として扱うと解釈（issue-133 の実装者メモと同じ解釈）。選ばなかった解釈: 止まったまま指揮役のレビュー委託を待つ
+4. 足りなかった情報・検証手段: ホスト実行時の `git rev-parse HEAD` と `/etc/resolv.conf` のファイル種別は実装側の手段では取れず、人間の実行記録が必要だった
+5. 改善案: `docs/dev-environment.md` の「確認手順の結果（記録欄）」の書き方として「ホスト実行の記録には実行コミットの SHA と `/etc/resolv.conf` の種別を必ず記す」を `docs/agents/` か skill のどこかに明文化する
+
+使ったスキル: implement-issue
