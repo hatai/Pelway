@@ -35,3 +35,15 @@
 5. 改善案: なし
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（round 4）
+
+対象 head: fcfb597203129accb2b395169e758c9179292fff（round 4 の実装の実体を含むコミット。push 後の署名付け替え後の SHA。このメモを含むコミットの親）
+
+1. 詰まった箇所: 手順 9: レビュー round 3（PR #368、codex・claude とも effort=max で must-fix 各 1）の対応
+2. 曖昧だった文: 「参照側が作成時に刻む `(subject_id, generation)`」（自分が書いた記録形式の節と結論の文）
+3. 仮定と解釈: 対象の識別子を `(workspace_id, subject_kind, subject_id)` と定義しながら参照・照合を `subject_id` と世代の 2 項で書いていた。codex は誤認照合（別 workspace・別種別の同 id 行）を、claude はさらに復旧で採番が巻き戻り id が別主体に再発行される穴を指摘した。照合キーを `(workspace_id, subject_kind, subject_id, generation)` に明確化し、`subject_id` は `(workspace_id, subject_kind)` の中で削除・tombstone 消去・DB 復旧をまたいで再利用しない（ランダムな UUID 等。復旧で巻き戻る採番は使わない）と記録形式に足した
+4. 足りなかった情報・検証手段: なし
+5. 改善案: なし
+
+使ったスキル: `.agents/skills/implement-issue`
