@@ -418,8 +418,8 @@ bwrap が作る名前空間の要点:
   - `PELWAY_LLM_API_KEY` — キー（fnox から注入。下記）。`PELWAY_LLM_KEY_ENV` で読む変数名だけ差し替えられる。
   - `PELWAY_LLM_PROVIDER` / `PELWAY_LLM_BASE_URL` / `PELWAY_LLM_CHAT_MODEL` / `PELWAY_LLM_EMBED_MODEL` / `PELWAY_LLM_RESPONSE_FORMAT` — 提供元の接続設定。既定は Z.ai 汎用エンドポイント + `glm-5.3-flash`（GLM-5.3 Flash。Z.ai 公式のモデルコード）。Coding Plan 向け endpoint（`/api/coding/paas/v4`）は自前アプリからの呼び出しが認められないため使わない。
   - `PELWAY_LLM_TIMEOUT_SECS` — 1呼び出しのタイムアウト秒（既定 30）。
-  - `PELWAY_LLM_BASIS` — LLM を呼ぶ根拠の目的 ID（P01〜P08。既定 `P06`。BYOK のため。hatai 決定 2026-11-16）。コードには固定しない。
-- 実キーでの実行: `mise exec -- fnox exec -- <デモ起動コマンド>`。キーが未設定・空白のみ・ヘッダーに載せられない文字を含むときは、落ちずに台本モード（固定の合成応答）で起動する。
+  - `PELWAY_LLM_BASIS` — LLM を呼ぶ根拠の目的 ID（P01〜P08。既定 `P06`。BYOK のため。hatai 決定 2026-11-16）。seed とゲートはこの値を受ける（コードには固定しない）。
+- 実キーでの実行: `mise exec -- fnox exec -- <デモ起動コマンド>`。キーが未設定・空白のみ・ヘッダーに載せられない文字を含むときは、落ちずに台本モード（固定の合成応答）で起動する。実提供元の呼び出しが失敗（タイムアウト・検証失敗の再試行尽き・拒否など）した呼び出しも「台本の応答で進めます」の進捗行を出して台本へ落ちる。
 - 予備の提供元（GPT Luna。自動切替ではなく設定の差し替え。ADR 0008）: `PELWAY_LLM_PROVIDER=openai PELWAY_LLM_BASE_URL=https://api.openai.com/v1 PELWAY_LLM_CHAT_MODEL=gpt-6-luna PELWAY_LLM_RESPONSE_FORMAT=json_schema`（キーは同じ `PELWAY_LLM_API_KEY`）。
 - `mise run demo-check` との関係: 許可接続先は 127.0.0.1 と ::1 のみで、実 LLM（z.ai）への接続は検査の対象外とする。提供元 endpoint の宣言は `crates/pelway-llm/src/config.rs` の1ファイルに集約し、そのファイルだけを external-refs 段階の除外とした（`scripts/demo-check/lib.sh` の除外コメント）。他の製品ソースに endpoint を書くと検査が落ちる。`DEMO_CHECK_ACCEPTANCE=1` の runtime loopback 検査は実 LLM 実行環境では成立しないため、実キーでの完走確認は demo-check の合格とは別に手動で記録する。
 
