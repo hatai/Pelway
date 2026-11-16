@@ -245,7 +245,10 @@ impl Server {
 }
 
 /// サーバーを起動する。接続ごとにスレッドを割り当てる。
-/// QA-GDPR-02 の保存部（根拠記録・利用方針の仮経路）は空のものを内部で用意する。
+/// QA-GDPR-02 の保存部（根拠記録・利用方針の仮経路）は
+/// [`DataStore::new_demo_seeded`] の最小 seed を持つものを内部で用意する。
+/// 空の保存部で起動したいとき（QA の仮経路テストなど）は
+/// [`serve_with_store`] に明示の store を渡す。
 ///
 /// # Errors
 /// 127.0.0.1 以外のアドレス、またはソケットの失敗。
@@ -253,7 +256,7 @@ pub fn serve(addr: SocketAddr, ledger: SharedLedger) -> Result<Server, ServeErro
     serve_inner(
         addr,
         ledger,
-        Arc::new(Mutex::new(DataStore::new())),
+        Arc::new(Mutex::new(DataStore::new_demo_seeded(now_ms()))),
         CONNECTION_DEADLINE,
         Arc::new(log::Logger::disabled()),
     )
@@ -274,7 +277,7 @@ pub fn serve_with_connection_deadline(
     serve_inner(
         addr,
         ledger,
-        Arc::new(Mutex::new(DataStore::new())),
+        Arc::new(Mutex::new(DataStore::new_demo_seeded(now_ms()))),
         connection_deadline,
         Arc::new(log::Logger::disabled()),
     )
@@ -296,7 +299,7 @@ pub fn serve_with_logger(
     serve_inner(
         addr,
         ledger,
-        Arc::new(Mutex::new(DataStore::new())),
+        Arc::new(Mutex::new(DataStore::new_demo_seeded(now_ms()))),
         CONNECTION_DEADLINE,
         logger,
     )
@@ -394,7 +397,7 @@ pub(crate) fn serve_with_logger_salt_from(
     serve_inner(
         addr,
         ledger,
-        Arc::new(Mutex::new(DataStore::new())),
+        Arc::new(Mutex::new(DataStore::new_demo_seeded(now_ms()))),
         CONNECTION_DEADLINE,
         logger,
     )
@@ -1066,8 +1069,8 @@ fn handle_create_basis_record(
         Ok(record) => record,
         // 参照形式以外の値(本文等の複製)は保存しない。列名は応答に出さない。
         Err(StoreError::InvalidReference { .. }) => return bad_request(),
-        // create で NotFound は起こらない(網羅のための安全側)。
-        Err(StoreError::NotFound) => return internal_error(),
+        // create で NotFound・Conflict は起こらない(網羅のための安全側)。
+        Err(StoreError::NotFound | StoreError::Conflict) => return internal_error(),
     };
     // 保存した: 仮名 ID・種別だけ。参照列（evidence_ref 等）の中身は出さない。
     logger.emit(log::Event::BasisRecordSaved {
@@ -1141,6 +1144,8 @@ fn handle_withdraw_basis_record(
         Err(StoreError::NotFound) => {
             Response::error(404, &HttpError::NotFound, log::Code::NotFound)
         }
+        // 撤回で Conflict は起こらない(網羅のための安全側)。
+        Err(StoreError::Conflict) => internal_error(),
     }
 }
 
@@ -1168,8 +1173,8 @@ fn handle_create_use_policy(
     ) {
         Ok(policy) => policy,
         Err(StoreError::InvalidReference { .. }) => return bad_request(),
-        // create で NotFound は起こらない(網羅のための安全側)。
-        Err(StoreError::NotFound) => return internal_error(),
+        // create で NotFound・Conflict は起こらない(網羅のための安全側)。
+        Err(StoreError::NotFound | StoreError::Conflict) => return internal_error(),
     };
     logger.emit(log::Event::UsePolicySaved {
         workspace: workspace_pid,
