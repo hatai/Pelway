@@ -25,6 +25,13 @@
 //!   決定者の未確定一覧。確定済みは出ない。待ち時間は `waiting_since` から）、
 //!   `POST /v1/decisions/{decision_id}/decide`（確定。操作者は合成ヘッダー。
 //!   確定後の変更は拒否、同じ選択の再送は冪等リプレイ）。
+//! - #327 で加えた **チャンネルとメッセージの経路**（04 §3。経路は契約の
+//!   テンプレート定数 `CHANNELS_PATH` / `CHANNEL_PATH` / `CHANNEL_MESSAGES_PATH`
+//!   と照合）: `GET /v1/workspaces/{w}/channels`（一覧）、
+//!   `GET /v1/channels/{c}`（情報）、`POST`・`GET /v1/channels/{c}/messages`
+//!   （投稿・取得。取得は `after_seq` で差分だけを取る）。GET 系は actor が
+//!   クエリで必須、投稿は合成ヘッダー・`purpose_id` は P01 固定・
+//!   `client_msg_id` 必須（再送は冪等、違う内容は 409）。
 //! - 認証は無い（デモ用）。comments/approve の要求者は合成ヘッダー
 //!   （`x-pelway-member-id`、`x-pelway-member-kind`。値は仕様 04 §2 の
 //!   `human|bot|external_agent|external_tool`）で受ける。
@@ -85,12 +92,13 @@ use pelway_contract::decision::{
     CreateDecisionError, CreateDecisionRequest, DecideRequest, DecisionError,
 };
 use pelway_contract::handoff::{HandoffDecision, HandoffRequest};
-use pelway_contract::ids::{BasisId, MemberId, WorkspaceId};
+use pelway_contract::ids::{BasisId, ChannelId, MemberId, WorkspaceId};
 use pelway_contract::ledger::ApprovalLedger;
 use pelway_contract::member::MemberKind;
+use pelway_contract::message::PostMessageRequest;
 use pelway_contract::store::{
-    CreateBasisRecordRequest, CreateUsePolicyRequest, DataStore, NewBasisRecord, NewUsePolicy,
-    StoreError, WithdrawBasisRecordRequest,
+    CreateBasisRecordRequest, CreateUsePolicyRequest, DataStore, NewBasisRecord, NewMessage,
+    NewUsePolicy, PurposeId, StoreError, WithdrawBasisRecordRequest,
 };
 use serde::Serialize;
 
@@ -168,6 +176,8 @@ pub enum HttpError {
     NotFound,
     /// 経路はあるがメソッドが POST 以外。
     MethodNotAllowed,
+    /// 同じ `client_msg_id` の再投稿だが内容が違う（04 §2 の 409）。
+    Conflict,
     /// 本文が [`MAX_BODY_BYTES`] を超えた。
     PayloadTooLarge,
     /// 読み取りが [`READ_TIMEOUT`] 秒を超えた、または接続全体が
@@ -188,6 +198,7 @@ impl HttpError {
             Self::CardIdMismatch => 422,
             Self::NotFound => 404,
             Self::MethodNotAllowed => 405,
+            Self::Conflict => 409,
             Self::PayloadTooLarge => 413,
             Self::RequestTimeout => 408,
             Self::HeadersTooLarge => 431,
@@ -826,6 +837,59 @@ fn route(
         };
         return (resp, log::Route::Decide);
     }
+    // チャンネルとメッセージ（#327。経路は契約の定数と照合。Issue #91）。
+    if let Some(params) = match_path(pelway_contract::message::CHANNELS_PATH, &segments) {
+        let workspace = params[0];
+        logger.emit(log::Event::RequestReceived {
+            route: log::Route::Channels,
+            method,
+            card: None,
+        });
+        let resp = match req.method.as_str() {
+            "GET" => handle_list_channels(req, workspace, store, logger),
+            _ => Response::error(
+                405,
+                &HttpError::MethodNotAllowed,
+                log::Code::MethodNotAllowed,
+            ),
+        };
+        return (resp, log::Route::Channels);
+    }
+    if let Some(params) = match_path(pelway_contract::message::CHANNEL_MESSAGES_PATH, &segments) {
+        let channel = params[0];
+        logger.emit(log::Event::RequestReceived {
+            route: log::Route::Messages,
+            method,
+            card: None,
+        });
+        let resp = match req.method.as_str() {
+            "POST" => handle_post_message(req, channel, store, logger),
+            "GET" => handle_list_channel_messages(req, channel, store, logger),
+            _ => Response::error(
+                405,
+                &HttpError::MethodNotAllowed,
+                log::Code::MethodNotAllowed,
+            ),
+        };
+        return (resp, log::Route::Messages);
+    }
+    if let Some(params) = match_path(pelway_contract::message::CHANNEL_PATH, &segments) {
+        let channel = params[0];
+        logger.emit(log::Event::RequestReceived {
+            route: log::Route::Channel,
+            method,
+            card: None,
+        });
+        let resp = match req.method.as_str() {
+            "GET" => handle_get_channel(req, channel, store, logger),
+            _ => Response::error(
+                405,
+                &HttpError::MethodNotAllowed,
+                log::Code::MethodNotAllowed,
+            ),
+        };
+        return (resp, log::Route::Channel);
+    }
     // 仮の経路（QA-GDPR-02）: /v1/workspaces/{workspace_id}/communication-basis-records
     // （POST 作成・GET 一覧）、.../{basis_id}/withdraw（POST 撤回 = 取得と同じ1操作）、
     // /v1/workspaces/{workspace_id}/communication-use-policies（POST 作成・GET 一覧）。
@@ -1424,6 +1488,169 @@ fn handle_list_decisions(
         actor: actor_pid,
     });
     Response::json(200, &items)
+}
+
+/// チャンネル一覧（#327）。`GET /v1/workspaces/{workspace_id}/channels`。
+/// actor はクエリ（ほかの GET 経路と同じ）。未知の workspace では空の一覧。
+fn handle_list_channels(
+    req: &Request,
+    workspace: &str,
+    store: &SharedDataStore,
+    logger: &log::Logger,
+) -> Response {
+    let Some(actor) = query_param(&req.path, "actor").filter(|a| !a.is_empty()) else {
+        return bad_request();
+    };
+    let workspace_pid = logger.id(workspace);
+    let actor_pid = logger.id(&actor);
+    let Ok(store) = store.lock() else {
+        return internal_error();
+    };
+    let channels = store.channels(&WorkspaceId::from(workspace));
+    logger.emit(log::Event::ChannelsListed {
+        workspace: workspace_pid,
+        actor: actor_pid,
+    });
+    Response::json(200, &channels)
+}
+
+/// チャンネル情報（#327）。`GET /v1/channels/{channel_id}`。無ければ 404。
+fn handle_get_channel(
+    req: &Request,
+    path_channel: &str,
+    store: &SharedDataStore,
+    logger: &log::Logger,
+) -> Response {
+    let Some(actor) = query_param(&req.path, "actor").filter(|a| !a.is_empty()) else {
+        return bad_request();
+    };
+    let channel_pid = logger.id(path_channel);
+    let actor_pid = logger.id(&actor);
+    let Ok(store) = store.lock() else {
+        return internal_error();
+    };
+    match store.channel(&ChannelId::from(path_channel)) {
+        Some(channel) => {
+            logger.emit(log::Event::ChannelRead {
+                channel: channel_pid,
+                actor: actor_pid,
+            });
+            Response::json(200, channel)
+        }
+        None => Response::error(404, &HttpError::NotFound, log::Code::NotFound),
+    }
+}
+
+/// メッセージ投稿（#327。04 §3 の `POST /v1/channels/{id}/messages`）。投稿者は
+/// 合成ヘッダー、`purpose_id` は P01（指定参加者への保存・配送）に固定。
+/// 無いチャンネルは 404。同じ `client_msg_id` の再送は冪等、違う内容は 409。
+fn handle_post_message(
+    req: &Request,
+    path_channel: &str,
+    store: &SharedDataStore,
+    logger: &log::Logger,
+) -> Response {
+    let Some(member_id) = header(req, MEMBER_ID_HEADER).filter(|v| !v.is_empty()) else {
+        return bad_request();
+    };
+    let Some(kind) = header(req, MEMBER_KIND_HEADER) else {
+        return bad_request();
+    };
+    // 種類は仕様 04 §2 の 4 値。ここでは形式だけでなく投稿者の member_kind として保存する。
+    let Some(member_kind) = MemberKind::parse(kind) else {
+        return bad_request();
+    };
+
+    let Ok(post_req) = serde_json::from_slice::<PostMessageRequest>(&req.body) else {
+        return bad_request();
+    };
+    let channel_pid = logger.id(path_channel);
+    let author_pid = logger.id(member_id);
+    let Ok(mut store) = store.lock() else {
+        return internal_error();
+    };
+    let Some((workspace_id, channel_id)) = store
+        .channel(&ChannelId::from(path_channel))
+        .map(|c| (c.workspace_id.clone(), c.channel_id.clone()))
+    else {
+        return Response::error(404, &HttpError::NotFound, log::Code::NotFound);
+    };
+    let input = NewMessage {
+        workspace_id,
+        channel_id,
+        author_id: MemberId::from(member_id),
+        member_kind,
+        purpose_id: PurposeId::P01,
+        body: post_req.body,
+        thread_root: post_req.thread_root,
+        client_msg_id: Some(post_req.client_msg_id),
+    };
+    match store.post_message(input, now_ms()) {
+        Ok(message) => {
+            // ログは仮名と種別だけ（本文・client_msg_id は出さない）。
+            logger.emit(log::Event::MessagePosted {
+                channel: channel_pid,
+                author: author_pid,
+                member_kind: member_kind.into(),
+            });
+            Response::json(200, &message)
+        }
+        // 同じ client_msg_id の再投稿だが内容が違う（04 §2 の 409）。
+        Err(StoreError::Conflict) => {
+            Response::error(409, &HttpError::Conflict, log::Code::Conflict)
+        }
+        // post_message で NotFound・InvalidReference は起こらない（網羅のための安全側）。
+        Err(StoreError::NotFound | StoreError::InvalidReference { .. }) => internal_error(),
+    }
+}
+
+/// メッセージ取得（#327）。`after_seq` より後・`before_seq` より前を seq の
+/// 昇順で最大 `limit` 件返す（ポーリングは `after_seq` で差分だけを取る）。
+/// 数値でないクエリは 400、無いチャンネルは 404。
+fn handle_list_channel_messages(
+    req: &Request,
+    path_channel: &str,
+    store: &SharedDataStore,
+    logger: &log::Logger,
+) -> Response {
+    let Some(actor) = query_param(&req.path, "actor").filter(|a| !a.is_empty()) else {
+        return bad_request();
+    };
+    let channel_pid = logger.id(path_channel);
+    let actor_pid = logger.id(&actor);
+    let mut after_seq = None;
+    let mut before_seq = None;
+    let mut limit = None;
+    for (key, slot) in [
+        ("after_seq", &mut after_seq),
+        ("before_seq", &mut before_seq),
+        ("limit", &mut limit),
+    ] {
+        if let Some(v) = query_param(&req.path, key) {
+            let Ok(n) = v.parse::<u64>() else {
+                return bad_request();
+            };
+            *slot = Some(n);
+        }
+    }
+    let Ok(store) = store.lock() else {
+        return internal_error();
+    };
+    let channel_id = ChannelId::from(path_channel);
+    if store.channel(&channel_id).is_none() {
+        return Response::error(404, &HttpError::NotFound, log::Code::NotFound);
+    }
+    let messages: Vec<_> = store
+        .channel_messages(&channel_id)
+        .into_iter()
+        .filter(|m| after_seq.is_none_or(|a| m.seq > a) && before_seq.is_none_or(|b| m.seq < b))
+        .take(limit.unwrap_or(u64::MAX) as usize)
+        .collect();
+    logger.emit(log::Event::MessagesListed {
+        channel: channel_pid,
+        actor: actor_pid,
+    });
+    Response::json(200, &messages)
 }
 
 fn reason_phrase(status: u16) -> &'static str {

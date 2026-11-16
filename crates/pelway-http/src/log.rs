@@ -175,6 +175,12 @@ pub enum Route {
     Decisions,
     /// A/B 決定の確定（#328。判断待ちの経路）。
     Decide,
+    /// チャンネル一覧（#327。workspace 経路）。
+    Channels,
+    /// チャンネル情報（#327。channel 経路）。
+    Channel,
+    /// メッセージの投稿・取得（#327。channel 経路）。
+    Messages,
     /// 経路が確定しない読み取りエラー・未知の経路。
     Unknown,
 }
@@ -250,6 +256,8 @@ pub enum Code {
     InvalidOptionId,
     /// A/B 決定 (#328): 選択肢の本文が空白だけ。
     EmptyOptionBody,
+    /// メッセージ投稿 (#327): 同じ client_msg_id の再投稿だが内容が違う（04 §2 の 409）。
+    Conflict,
     /// 応答は拒否だが対応する結果コードが不明（通常は出ない）。
     Unknown,
 }
@@ -371,6 +379,28 @@ pub enum Event {
     /// A/B 決定の判断待ち一覧を読み取った（#328。件数も項目も出さない）。
     DecisionsListed {
         workspace: Pseudonym,
+        actor: Pseudonym,
+    },
+    /// チャンネル一覧を読み取った（#327。件数も項目も出さない）。
+    ChannelsListed {
+        workspace: Pseudonym,
+        actor: Pseudonym,
+    },
+    /// チャンネル情報を読み取った（#327。channel・actor は仮名化）。
+    ChannelRead {
+        channel: Pseudonym,
+        actor: Pseudonym,
+    },
+    /// メッセージを保存した（#327。channel・author は仮名化、member_kind は
+    /// 種別。本文・`client_msg_id` は出さない）。
+    MessagePosted {
+        channel: Pseudonym,
+        author: Pseudonym,
+        member_kind: ActorKind,
+    },
+    /// メッセージ一覧を読み取った（#327。件数も項目も出さない）。
+    MessagesListed {
+        channel: Pseudonym,
         actor: Pseudonym,
     },
 }
