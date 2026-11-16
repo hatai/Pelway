@@ -11,9 +11,16 @@
 //!   参照列は `ref:` で始まる）の検証を通し、形式に合わない値＝本文や人物情報の
 //!   自由文の複製は [`StoreError::InvalidReference`] として **保存しない**
 //!   （12 §3.2「人物情報や本文の不要な複製を避ける」）。
-//! - `client_msg_id` はこの保存部に入れない。メッセージも既存の
-//!   [`crate::message::Message`] ではなく `client_msg_id` の無い [`StoredMessage`]
-//!   を使う。
+//! - `client_msg_id` は投稿に付いてきたときだけ保存する（冪等キー。Issue #326 の
+//!   デモ用）。メッセージは既存の [`crate::message::Message`] ではなく
+//!   [`StoredMessage`] を使う。同じ `client_msg_id` の再投稿は二重に記録せず、
+//!   要求の内容が違えば [`StoreError::Conflict`] を返す（04 §2 の 409 相当）。
+//!   ログに `client_msg_id` は出さない（07 の決まりは変わらない）。
+//! - 本文中の `@メンション` をチャンネルのメンバーに解決する検出
+//!   （[`DataStore::mentioned_members`]）と、デモ用の最小 seed
+//!   （[`DataStore::new_demo_seeded`]）を持つ。seed の P03 根拠記録だけは
+//!   例外的に [`BasisStatus::Active`] で作る（本番には Active な根拠を作る
+//!   経路が無いため、デモで `is_purpose_enabled` を満たす合成データ）。
 //! - 保存物には `purpose_id`（[`PurposeId`]、P01〜P08 のみ）が必須。未設定・不正値は
 //!   serde の脱直列化エラーとして拒否する。学習・広告・会社横断分析の経路は作らない。
 //! - 根拠記録の status は 12 §3.2/§3.3 に従い、`pending`・欠落・不明・期限切れ・
@@ -28,13 +35,21 @@
 use std::fmt;
 
 use crate::ids::{
-    BasisId, ChannelId, DeletionRestrictionId, MemberId, MemoryId, MessageId, WorkspaceId,
+    BasisId, ChannelId, ClientMsgId, DeletionRestrictionId, MemberId, MemoryId, MessageId,
+    WorkspaceId,
 };
-use crate::member::MemberKind;
+use crate::member::{ChannelMember, MemberKind};
 use crate::message::Channel;
 
 /// サーバーが付けた時刻（UNIX エポックからのミリ秒）。ログの `ts_ms` と同じ単位。
 pub type TsMs = u64;
+
+/// デモ seed の workspace ID（合成。[`DataStore::new_demo_seeded`]）。
+pub const DEMO_WORKSPACE_ID: &str = "ws-demo-01";
+/// デモ seed のチャンネル ID（#案件B。[`DataStore::new_demo_seeded`]）。
+pub const DEMO_CHANNEL_ID: &str = "ch-demo-anken-b";
+/// デモ seed の AI Bot ハルの member ID（[`DataStore::new_demo_seeded`]）。
+pub const DEMO_HAL_MEMBER_ID: &str = "m-hal";
 
 /// 目的 ID（P01〜P08 のみ。12 §3 の表）。
 /// どの根拠の種類がどの目的に当てはまるかは **この crate では決めない**（U03 未決）。
@@ -86,8 +101,9 @@ pub enum BasisType {
 pub enum BasisStatus {
     /// 未確定（作成直後）。同意根拠として使わない。
     Pending,
-    /// 有効な根拠が確認できた状態。**この実装はこの状態を作る経路を持たない**
+    /// 有効な根拠が確認できた状態。公開経路ではこの状態を作らない
     /// （法的な当てはめは U03 未決。同意を使う機能は初期オフのまま）。
+    /// デモ seed（[`DataStore::new_demo_seeded`]）だけが P03 根拠をこの状態で登録する。
     Active,
     /// 撤回済み（根拠失効）。
     Withdrawn,
@@ -102,8 +118,9 @@ pub struct StoredWorkspace {
     pub created_at: TsMs,
 }
 
-/// 保存部のメッセージ。既存の [`crate::message::Message`] と違い `client_msg_id` を
-/// 持たない（この保存部には `client_msg_id` を入れない）。
+/// 保存部のメッセージ。既存の [`crate::message::Message`] と違い、時刻は
+/// [`TsMs`]（サーバー付け）で `purpose_id` を持つ。`client_msg_id` は投稿に
+/// 付いてきたときだけ保持する冪等キーで、無い投稿の直列化にはキーも出ない。
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StoredMessage {
@@ -119,6 +136,9 @@ pub struct StoredMessage {
     pub purpose_id: PurposeId,
     pub body: String,
     pub thread_root: Option<MessageId>,
+    /// クライアントが付けた送信 ID（冪等キー）。無い投稿では `None`。
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub client_msg_id: Option<ClientMsgId>,
     /// サーバーが付けた保存時刻。
     pub created_at: TsMs,
 }
@@ -331,6 +351,9 @@ pub struct NewMessage {
     pub purpose_id: PurposeId,
     pub body: String,
     pub thread_root: Option<MessageId>,
+    /// クライアントが付けた送信 ID（冪等キー。投稿に付いてきたときだけ。
+    /// [`DataStore::post_message`] が重複の検出に使う）。
+    pub client_msg_id: Option<ClientMsgId>,
 }
 
 /// 明示メモリ保存の入力（ID・時刻はサーバー付け）。
@@ -491,6 +514,8 @@ pub enum StoreError {
         /// 検証に失敗した列の名前（ログ・デバッグ用。HTTP 応答には出さない）。
         column: &'static str,
     },
+    /// 同じ `client_msg_id` の再投稿だが要求の内容が違う（04 §2 の 409 相当）。
+    Conflict,
 }
 
 impl fmt::Display for StoreError {
@@ -500,6 +525,7 @@ impl fmt::Display for StoreError {
             Self::InvalidReference { column } => {
                 write!(f, "column {column} is not a synthetic reference form")
             }
+            Self::Conflict => f.write_str("conflicting repost for the same client_msg_id"),
         }
     }
 }
@@ -557,6 +583,38 @@ fn validate_scope(column: &'static str, value: &str) -> Result<(), StoreError> {
     }
 }
 
+/// 本文中の `@メンション` のトークン（`@` の直後の名前・ID 部分）を出現順に抜き出す。
+/// トークンは Unicode の英数字（かな・漢字を含む）と `-`・`_` の連続で、
+/// 空白・句読点・`@`・その他の記号で切れる。`@` の直後がトークン文字で
+/// なければその `@` はメンションではない。
+fn mention_tokens(body: &str) -> Vec<&str> {
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    while i < body.len() {
+        let Some(c) = body[i..].chars().next() else {
+            break;
+        };
+        if c != '@' {
+            i += c.len_utf8();
+            continue;
+        }
+        let start = i + c.len_utf8();
+        let mut end = start;
+        while let Some(t) = body[end..].chars().next() {
+            if t.is_alphanumeric() || t == '-' || t == '_' {
+                end += t.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if end > start {
+            tokens.push(&body[start..end]);
+        }
+        i = end;
+    }
+    tokens
+}
+
 /// 合成データ用のメモリ内保存部。ディスクには書かない。
 #[derive(Debug, Default)]
 pub struct DataStore {
@@ -596,6 +654,99 @@ impl DataStore {
         }
     }
 
+    /// デモ用の最小 seed 入りの保存部を作る（Issue #326。すべてメモリ上の
+    /// 合成データで、ディスクには書かない）。内容:
+    ///
+    /// - workspace（[`DEMO_WORKSPACE_ID`]）とチャンネル 1 つ（#案件B、
+    ///   [`DEMO_CHANNEL_ID`]）。メンバー4人（田中・山本・佐藤・AI Bot ハル。
+    ///   ハルは [`MemberKind::Bot`]）。
+    /// - 過去の会話数件（`client_msg_id` はクライアント投稿にだけ付くため無し）。
+    /// - LLM 利用の根拠（P03）の [`BasisStatus::Active`] な記録。本番には
+    ///   Active な根拠を作る経路が無いため、デモで
+    ///   [`is_purpose_enabled`](Self::is_purpose_enabled) を満たすためだけの
+    ///   seed 専用データ（根拠の種類の当てはめは U03 未決のまま）。
+    #[must_use]
+    pub fn new_demo_seeded(now: TsMs) -> Self {
+        let mut store = Self::new();
+        let workspace_id = WorkspaceId::from(DEMO_WORKSPACE_ID);
+        store.ensure_workspace(&workspace_id, now);
+        let channel_id = ChannelId::from(DEMO_CHANNEL_ID);
+        store.add_channel(Channel {
+            workspace_id: workspace_id.clone(),
+            channel_id: channel_id.clone(),
+            name: "案件B".to_owned(),
+            members: vec![
+                ChannelMember {
+                    member_id: MemberId::from("m-tanaka"),
+                    display_name: "田中".to_owned(),
+                    member_kind: MemberKind::Human,
+                },
+                ChannelMember {
+                    member_id: MemberId::from("m-yamamoto"),
+                    display_name: "山本".to_owned(),
+                    member_kind: MemberKind::Human,
+                },
+                ChannelMember {
+                    member_id: MemberId::from("m-sato"),
+                    display_name: "佐藤".to_owned(),
+                    member_kind: MemberKind::Human,
+                },
+                ChannelMember {
+                    member_id: MemberId::from(DEMO_HAL_MEMBER_ID),
+                    display_name: "ハル".to_owned(),
+                    member_kind: MemberKind::Bot,
+                },
+            ],
+        });
+        // 過去の会話（合成）。
+        let history = [
+            ("m-tanaka", "案件B、顧客から納期延長の相談が来ています"),
+            ("m-sato", "対応方針を次のミーティングで決めましょう"),
+            ("m-yamamoto", "了解です。資料を確認しておきます"),
+        ];
+        for (i, (author, body)) in history.iter().enumerate() {
+            store.add_message(
+                NewMessage {
+                    workspace_id: workspace_id.clone(),
+                    channel_id: channel_id.clone(),
+                    author_id: MemberId::from(*author),
+                    member_kind: MemberKind::Human,
+                    purpose_id: PurposeId::P01,
+                    body: (*body).to_owned(),
+                    thread_root: None,
+                    client_msg_id: None,
+                },
+                now.saturating_sub((history.len() - i) as TsMs),
+            );
+        }
+        // P03 の Active な根拠記録（デモの is_purpose_enabled を満たす seed 専用）。
+        // 参照形式の検証は既存の作成経路を通し、status・発効だけここで確定させる。
+        let created = store
+            .create_basis_record(
+                &workspace_id,
+                NewBasisRecord {
+                    basis_type: BasisType::SyntheticConsent,
+                    purpose_id: PurposeId::P03,
+                    scope: DEMO_CHANNEL_ID.to_owned(),
+                    party_coverage_ref: "ref:demo-party-coverage".to_owned(),
+                    grantor_ref: "ref:demo-grantor".to_owned(),
+                    representative_authority_ref: None,
+                    explanation_version: "expl-v1".to_owned(),
+                    evidence_ref: "ref:demo-evidence".to_owned(),
+                },
+                now,
+            )
+            .expect("seed の参照列は合成の参照形式");
+        let record = store
+            .basis_records
+            .iter_mut()
+            .find(|r| r.basis_id == created.basis_id)
+            .expect("さきほど作った記録");
+        record.status = BasisStatus::Active;
+        record.effective_at = Some(now);
+        store
+    }
+
     /// workspace を登録する（冪等。既にあれば何もしない）。時刻はサーバー付け。
     pub fn ensure_workspace(&mut self, workspace_id: &WorkspaceId, now: TsMs) -> StoredWorkspace {
         if let Some(w) = self
@@ -633,7 +784,9 @@ impl DataStore {
             .collect()
     }
 
-    /// メッセージを 1 件保存する（`client_msg_id` は持たない）。ID・seq・時刻はサーバー付け。
+    /// メッセージを 1 件保存する。ID・seq・時刻はサーバー付け。
+    /// 冪等の確認はしない（seed など内部の追加に使う。投稿経路は
+    /// [`post_message`](Self::post_message)）。
     pub fn add_message(&mut self, input: NewMessage, now: TsMs) -> StoredMessage {
         self.next_message += 1;
         let seq = u64::try_from(
@@ -656,10 +809,47 @@ impl DataStore {
             purpose_id: input.purpose_id,
             body: input.body,
             thread_root: input.thread_root,
+            client_msg_id: input.client_msg_id,
             created_at: now,
         };
         self.messages.push(message.clone());
         message
+    }
+
+    /// メッセージの投稿（冪等）。`client_msg_id` を持つ投稿は
+    /// （workspace × author × `client_msg_id`、04 §2 の unique）をキーに
+    /// 既存のメッセージを探し、要求の内容（チャンネル・目的・本文・スレッド）が
+    /// すべて同じなら既存のメッセージをそのまま返す（二重に記録しない）。
+    /// 内容が違う再投稿は [`StoreError::Conflict`] を返して記録しない。
+    /// `client_msg_id` が無い投稿は常に新規保存（[`add_message`](Self::add_message)
+    /// と同じ）。
+    ///
+    /// # Errors
+    /// 同じ `client_msg_id` で要求の内容が違うとき [`StoreError::Conflict`]。
+    pub fn post_message(
+        &mut self,
+        input: NewMessage,
+        now: TsMs,
+    ) -> Result<StoredMessage, StoreError> {
+        if let Some(client_msg_id) = &input.client_msg_id
+            && let Some(existing) = self.messages.iter().find(|m| {
+                m.workspace_id == input.workspace_id
+                    && m.author_id == input.author_id
+                    && m.client_msg_id.as_ref() == Some(client_msg_id)
+            })
+        {
+            let same_request = existing.channel_id == input.channel_id
+                && existing.member_kind == input.member_kind
+                && existing.purpose_id == input.purpose_id
+                && existing.body == input.body
+                && existing.thread_root == input.thread_root;
+            return if same_request {
+                Ok(existing.clone())
+            } else {
+                Err(StoreError::Conflict)
+            };
+        }
+        Ok(self.add_message(input, now))
     }
 
     /// workspace のメッセージ一覧。
@@ -669,6 +859,40 @@ impl DataStore {
             .iter()
             .filter(|m| &m.workspace_id == workspace_id)
             .collect()
+    }
+
+    /// 本文中の `@メンション` を検出し、チャンネルのメンバーに解決する。
+    /// `@` の直後のトークン（英数字・`-`・`_`・英数字以外の文字、かな・漢字等の
+    /// 連続）が、メンバーの `member_id` か `display_name` に **完全一致** した
+    /// ときだけメンションとみなす（`@ハルカ` は `@ハル` とは別トークンのため
+    /// 検出しない）。見つかったメンバー ID を本文の出現順で返す（重複は除く）。
+    /// チャンネルが無ければ空。
+    #[must_use]
+    pub fn mentioned_members(
+        &self,
+        workspace_id: &WorkspaceId,
+        channel_id: &ChannelId,
+        body: &str,
+    ) -> Vec<MemberId> {
+        let Some(channel) = self
+            .channels
+            .iter()
+            .find(|c| &c.workspace_id == workspace_id && &c.channel_id == channel_id)
+        else {
+            return Vec::new();
+        };
+        let mut found: Vec<MemberId> = Vec::new();
+        for token in mention_tokens(body) {
+            if let Some(member) = channel
+                .members
+                .iter()
+                .find(|m| m.member_id.as_str() == token || m.display_name == token)
+                && !found.contains(&member.member_id)
+            {
+                found.push(member.member_id.clone());
+            }
+        }
+        found
     }
 
     /// 明示メモリを 1 件保存する。ID・時刻はサーバー付け。
@@ -959,6 +1183,7 @@ mod tests {
             purpose_id: PurposeId::P01,
             body,
             thread_root: None,
+            client_msg_id: None,
         }
     }
 
@@ -1029,7 +1254,8 @@ mod tests {
         );
 
         // 保存部のメッセージ・明示メモリ自体は本文を持つ（これ自体は正しい）。
-        // ただし client_msg_id は保存しない（キーも値も出ない）。
+        // `client_msg_id` は投稿に付いてきたときだけ保存する（Issue #326）。
+        // ここのメッセージは `client_msg_id` 無しなので、直列化にキーも値も出ない。
         let msg_json = serde_json::to_string(&store.messages(&ws())[0]).expect("msg");
         let mem_json = serde_json::to_string(&store.explicit_memories(&ws())[0]).expect("memory");
         assert!(msg_json.contains(CANARY_BODY));
@@ -1416,6 +1642,195 @@ mod tests {
                 .iter()
                 .any(|l| l.name == "target/demo-logs" && l.medium == StorageMedium::File),
             "外部保存部が登録できない"
+        );
+    }
+
+    // ---- Issue #326: デモ用の会話保存・冪等・メンション検出・最小 seed ----
+
+    fn demo_ws() -> WorkspaceId {
+        WorkspaceId::from(DEMO_WORKSPACE_ID)
+    }
+
+    fn demo_channel() -> ChannelId {
+        ChannelId::from(DEMO_CHANNEL_ID)
+    }
+
+    // 受け入れ: メッセージ投稿時に client_msg_id が保存され、同じ client_msg_id の
+    // 再投稿が二重に記録されない。同じ client_msg_id で本文が違えば拒否（04 §2 の 409）。
+    #[test]
+    fn client_msg_id_is_stored_and_repost_is_idempotent() {
+        let mut store = DataStore::new();
+        store.ensure_workspace(&ws(), 1);
+        let mut input = new_message("納期延長の案をお願いします".to_owned());
+        input.client_msg_id = Some(ClientMsgId::from("cm-demo-0001"));
+
+        let first = store.post_message(input.clone(), 10).expect("post");
+        assert_eq!(
+            first.client_msg_id,
+            Some(ClientMsgId::from("cm-demo-0001")),
+            "client_msg_id が保存されていない"
+        );
+
+        // 同じ client_msg_id・同じ要求の再投稿は冪等（新しい記録を作らない）。
+        let again = store.post_message(input.clone(), 20).expect("idempotent");
+        assert_eq!(again.message_id, first.message_id);
+        assert_eq!(again.seq, first.seq);
+        assert_eq!(store.messages(&ws()).len(), 1, "二重に記録されている");
+
+        // 同じ client_msg_id で本文が違う再投稿は拒否し、記録を増やさない。
+        let mut changed = input.clone();
+        changed.body = "まったく別の本文".to_owned();
+        assert_eq!(store.post_message(changed, 30), Err(StoreError::Conflict));
+        assert_eq!(store.messages(&ws()).len(), 1);
+
+        // 別の author の同じ client_msg_id は別の投稿（04: unique は
+        // workspace × author × client_msg_id）。
+        let mut other = input;
+        other.author_id = MemberId::from("m-human-other");
+        assert!(
+            store.post_message(other, 40).is_ok(),
+            "別 author の同じ client_msg_id が誤って拒否された"
+        );
+        assert_eq!(store.messages(&ws()).len(), 2);
+
+        // client_msg_id が無い投稿は常に新規（従来の add_message と同じ）。
+        let bare = new_message("client_msg_id 無し".to_owned());
+        assert_eq!(store.post_message(bare.clone(), 50).expect("post").seq, 3);
+        assert_eq!(store.post_message(bare, 60).expect("post").seq, 4);
+    }
+
+    // 受け入れ: メッセージに seq がサーバーで採番され、順序が保持される。
+    #[test]
+    fn server_assigns_seq_per_channel_and_keeps_order() {
+        let mut store = DataStore::new();
+        store.ensure_workspace(&ws(), 1);
+        let bodies = ["1件目", "2件目", "3件目"];
+        for (i, body) in bodies.iter().enumerate() {
+            let m = store
+                .post_message(new_message((*body).to_owned()), (i + 1) as TsMs)
+                .expect("post");
+            assert_eq!(m.seq, (i + 1) as u64, "seq はチャンネル内の発言順");
+        }
+        let saved: Vec<(&str, u64)> = store
+            .messages(&ws())
+            .iter()
+            .map(|m| (m.body.as_str(), m.seq))
+            .collect();
+        assert_eq!(saved, [("1件目", 1), ("2件目", 2), ("3件目", 3)]);
+    }
+
+    // 受け入れ: 本文中の @メンション（ハル宛て）を検出できる。
+    #[test]
+    fn mentions_to_hal_are_detected_from_body() {
+        let store = DataStore::new_demo_seeded(1_000);
+        let got = store.mentioned_members(
+            &demo_ws(),
+            &demo_channel(),
+            "@ハル 納期延長の案を2つお願いします",
+        );
+        assert_eq!(got, [MemberId::from(DEMO_HAL_MEMBER_ID)]);
+
+        // 他のメンバーへのメンションも検出する（表示名・member_id の両方）。
+        assert_eq!(
+            store.mentioned_members(&demo_ws(), &demo_channel(), "@山本 確認をお願いします"),
+            [MemberId::from("m-yamamoto")]
+        );
+        assert_eq!(
+            store.mentioned_members(&demo_ws(), &demo_channel(), "@m-sato 資料を見て"),
+            [MemberId::from("m-sato")]
+        );
+
+        // 複数メンションは両方拾う（順序は本文の出現順）。
+        let both = store.mentioned_members(
+            &demo_ws(),
+            &demo_channel(),
+            "@ハル 案を。@田中 確認をお願いします",
+        );
+        assert_eq!(
+            both,
+            [
+                MemberId::from(DEMO_HAL_MEMBER_ID),
+                MemberId::from("m-tanaka")
+            ]
+        );
+
+        // @ が無い・メンバー以外の名前・名前の一部だけ一致では検出しない。
+        assert!(
+            store
+                .mentioned_members(&demo_ws(), &demo_channel(), "ハル お願いします")
+                .is_empty()
+        );
+        assert!(
+            store
+                .mentioned_members(&demo_ws(), &demo_channel(), "@未知 お願いします")
+                .is_empty()
+        );
+        assert!(
+            store
+                .mentioned_members(&demo_ws(), &demo_channel(), "@ハルカ お願いします")
+                .is_empty(),
+            "表示名の前方一致だけでは検出しない"
+        );
+    }
+
+    // 受け入れ: 起動時に最小 seed（チャンネル・メンバー・過去の会話・P03 根拠）が
+    // 用意される。保存はメモリ上のまま。
+    #[test]
+    fn demo_seed_provides_channel_members_history_and_p03_basis() {
+        let store = DataStore::new_demo_seeded(1_000);
+
+        // チャンネル（#案件B）1 つ。
+        let channels = store.channels(&demo_ws());
+        assert_eq!(channels.len(), 1, "seed のチャンネル: {channels:?}");
+        let ch = channels[0];
+        assert_eq!(ch.channel_id, demo_channel());
+        assert_eq!(ch.name, "案件B");
+
+        // メンバー4人（田中・山本・佐藤・AI Bot ハル）。
+        let members: Vec<(&str, MemberKind)> = ch
+            .members
+            .iter()
+            .map(|m| (m.display_name.as_str(), m.member_kind))
+            .collect();
+        assert_eq!(
+            members,
+            [
+                ("田中", MemberKind::Human),
+                ("山本", MemberKind::Human),
+                ("佐藤", MemberKind::Human),
+                ("ハル", MemberKind::Bot),
+            ]
+        );
+
+        // 過去の会話が数件あり、seq がサーバー採番で付いている。
+        let msgs = store.messages(&demo_ws());
+        assert!(msgs.len() >= 3, "過去の会話: {msgs:?}");
+        assert!(msgs.iter().all(|m| m.channel_id == ch.channel_id));
+        let seqs: Vec<u64> = msgs.iter().map(|m| m.seq).collect();
+        let mut sorted = seqs.clone();
+        sorted.sort_unstable();
+        assert_eq!(seqs, sorted, "会話は seq 順に保持される");
+
+        // LLM 利用の根拠（P03）が登録され、デモの時刻で有効。
+        assert!(
+            store.is_purpose_enabled(&demo_ws(), PurposeId::P03, 1_000),
+            "P03 の根拠が有効ではない"
+        );
+        assert!(
+            store
+                .basis_records(&demo_ws())
+                .iter()
+                .any(|r| r.purpose_id == PurposeId::P03 && r.status == BasisStatus::Active),
+            "Active な P03 根拠記録が無い"
+        );
+
+        // 保存はすべてメモリ上（ディスクに書かない）。
+        assert!(
+            store
+                .registered_locations()
+                .iter()
+                .all(|l| l.medium == StorageMedium::Memory),
+            "seed の保存部はすべてメモリ"
         );
     }
 }
