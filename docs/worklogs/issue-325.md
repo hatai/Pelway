@@ -53,3 +53,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 5・6 の間か止まり方の節に「記録欄・実績表には実行した事実だけを書く。未実施の検査を『合格』と書かない」という一文を足す（今回の round 1 で実際に踏んだ形）
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: 0f45db0（AC2 の合格記録の転記コミット・署名付け替え後）
+
+1. 詰まった箇所: round 2 の must-fix は「受け入れ条件 2 の合格記録が無い」。選択肢 (b)（CI ログでの実実行確認）を検証したところ GitHub-hosted runner は bwrap 不在で `SKIP: bwrap not installed` と判明し、CI の pass は検査の実行を意味しないことを確認。(a) のホスト実行を hatai（指揮役）が実施し `PASS: agent-sandbox`・exit=0 を記録してもらった（Issue コメント 6905353781）
+2. 曖昧だった文: 「該当の挙動を検査する `scripts/tests/agent-sandbox.test.sh` の検査項目が、sandbox 外の `mise run script-test` で合格」（Issue #325 受け入れ条件 2）— 「sandbox 外」に CI を含めるかが曖昧。CI では bwrap が無く検査が skip するため、実質ホスト実行が必要だった
+3. 仮定と解釈: CI が bwrap を持つとは限らないと仮定し、ジョブログで実際の実行/スキップを確認してから記録した。ネスト sandbox での個別確認は等価証跡として残し、ホスト通し実行の公式記録は人間の実施結果を一次記録として転記した
+4. 足りなかった情報・検証手段: GitHub-hosted runner に bwrap が無いこと（job 132900858476 のログで確認）。レビュー担当は blob ストレージに届かずジョブログを読めなかったが、実装スレッドからは `agent-gh dev api .../jobs/<id>/logs` で取得できた
+5. 改善案: `.github/workflows/verify.yml` の `test` ジョブか `docs/dev-environment.md` の CI 節に「GitHub-hosted runner には bwrap が無く agent-sandbox.test.sh は skip される」と明記する（次の読み手が CI の pass を検査の実行と誤読しないように）
+
+使ったスキル: implement-issue
