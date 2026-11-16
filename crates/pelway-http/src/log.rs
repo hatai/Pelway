@@ -171,6 +171,10 @@ pub enum Route {
     UsePolicies,
     /// 判断待ち一覧の読み取り（#88 の仮の経路。workspace ごと・actor はクエリ）。
     Inbox,
+    /// A/B 決定の判断待ちの作成・一覧（#328。workspace 経路）。
+    Decisions,
+    /// A/B 決定の確定（#328。判断待ちの経路）。
+    Decide,
     /// 経路が確定しない読み取りエラー・未知の経路。
     Unknown,
 }
@@ -230,6 +234,22 @@ pub enum Code {
     NotCurrentDecider,
     /// 受け渡し (#89): 依頼先が依頼元と同じ。
     SelfHandoff,
+    /// A/B 決定 (#328): 経路・本文の判断待ちが無い。
+    DecisionNotFound,
+    /// A/B 決定 (#328): 経路と本文の decision_id が食い違う。
+    DecisionIdMismatch,
+    /// A/B 決定 (#328): 選択肢に無い option_id。
+    UnknownOption,
+    /// A/B 決定 (#328): 確定済みの判断待ちを変えようとした。
+    AlreadyDecided,
+    /// A/B 決定 (#328): 論点が空白だけ。
+    EmptyQuestion,
+    /// A/B 決定 (#328): 選択肢が 2 つ未満。
+    TooFewOptions,
+    /// A/B 決定 (#328): option_id が空または重複。
+    InvalidOptionId,
+    /// A/B 決定 (#328): 選択肢の本文が空白だけ。
+    EmptyOptionBody,
     /// 応答は拒否だが対応する結果コードが不明（通常は出ない）。
     Unknown,
 }
@@ -332,6 +352,24 @@ pub enum Event {
     },
     /// 判断待ち一覧を読み取った（#88。件数も項目も出さない）。
     InboxListed {
+        workspace: Pseudonym,
+        actor: Pseudonym,
+    },
+    /// A/B 決定の判断待ちを作った（#328。workspace・判断待ち・決定者は仮名化。
+    /// 論点・選択肢の本文は出さない）。
+    DecisionCreated {
+        workspace: Pseudonym,
+        decision: Pseudonym,
+        decider: Pseudonym,
+    },
+    /// A/B 決定を確定した（#328。この要求で新しく確定したときだけ出す。
+    /// 冪等リプレイでは出さない。選んだ選択肢の中身は出さない）。
+    DecisionConfirmed {
+        decision: Pseudonym,
+        decider: Pseudonym,
+    },
+    /// A/B 決定の判断待ち一覧を読み取った（#328。件数も項目も出さない）。
+    DecisionsListed {
         workspace: Pseudonym,
         actor: Pseudonym,
     },
