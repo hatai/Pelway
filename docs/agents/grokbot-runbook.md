@@ -100,6 +100,24 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 - 手当スレッド: 未対応の差し戻しがある PR があり対応スレッドが走っていない場合だけ、その PR のブランチで起動する。レビュー待ち・Approve 済みには起動しない。`needs-human` 付きには起動しない（検知と伝達だけ）。未対応の PR が複数ある場合は主 PR を最初に扱い、残りは 1 本ずつ（順序は指揮役の裁量、理由を巡回記録に残す）。同一 Issue で同時に走るスレッドは 1 本だけとし、稼働中スレッドがある場合は新規起動せず指摘をそのスレッドへ伝達する。枠は Issue 単位で 1 つと数える
 - 前回ステータスが無い場合に `agent:working` 付きで Backlog にあるカードは、Working へ補正せず保留にする（ステータスを変えず、`needs-human` も付けず、確認待ちの印を立てて hatai に報告する）。前回ステータスは変更履歴からは復元せず、補助記録の控えや巡回記録に確定値が残っている場合だけ戻す。その場合も、変更履歴に人間の Backlog 変更イベントがあれば停止の検知を優先する
 
+### ボード Status 更新キュー
+
+エージェント実行環境では人間名義の `gh` が使えないため、Status の書き込みはホスト側の `conductor-watch.sh` が巡回ごとに処理するキューに渡す。キューディレクトリは `/tmp/pelway-board-queue/`（エージェント環境とホストで同一の `/tmp` を共有している前提）。
+
+- 要求: `<任意の名前>.json` を置く。書き込み途中のファイルを拾わせないよう、`.json` 以外の名前（例: `<名前>.json.tmp`）に書いてから `mv` で置く。中身は `{"issue": <Issue 番号>, "status": "<Status 名>"}` または `{"item_id": "<project item id>", "status": "<Status 名>"}`。`issue` と `item_id` はどちらか 1 つだけ。Status 名はこの節の先頭の選択肢（Backlog・Todo・Working・In review・Changes requested・Ready to merge・Needs human・Done）のいずれか。それ以外のキー・値を持つ要求は失敗になる
+- 結果の確認: 処理された要求ファイルは消え、同名の `<名前>.done`（成功）または `<名前>.error`（失敗。中身は理由を持つ結果 JSON）が残る。巡回出力にも `QUEUE <名前> done|error` の行が出る
+- 失敗の種類と gh 呼び出しの関係は 2 段で決まる。第 1 段（JSON の形式・許可キー・Status 名・対象指定の検証）で落ちる要求は gh を一切呼ばない。第 2 段（Issue 番号→item id、Status 名→選択肢 id の解決）では `gh project` の `view`・`field-list`・`item-list` の読み取りを使い、解決できない要求は `item-edit` を呼ばず `.error` にする。書き込みは `item-edit` だけで、完全に解決できた要求にだけ実行する
+- 失敗は再試行しない。やり直すときは新しい `.json` を置く
+- 要求の文字列がシェルのコマンドに組み込まれることはない
+
+### 指揮役の定期巡回（スケジュール起床）
+
+conductor-watch は検知（`watch.log` へのイベント出力）だけを行い、指揮役を起こさない。指揮役スレッドは T3 の scheduled task（interval 30 分）で起床し、`watch.log` の未読分を処理して「6. 報告行の扱い」以下の巡回処理を進める。
+
+- 未読の位置は `patrol-state.json` の `watch_log_offset`（`watch.log` の行番号）で管理する。巡回で読み込んだ分だけ位置を進めて書き戻す
+- scheduled task は指揮役スレッドに bind する（`bindToCurrentThread`）。指揮役が代わったら（代行の開始・交代）、新しい指揮役スレッドで `schedule_task` を作り直し、古いタスクは `delete_scheduled_task` で削除する。`patrol-state.json` の `scheduled_task_id` に現行のタスク ID を記録する
+- `watch.log` からスレッドへの転送スクリプト（`t3` CLI の `acp-mcp-call` 経由）は使わない。`t3` CLI は実行中の T3 サーバーと `~/.t3/userdata` の所有権が衝突して送信に失敗することがあり、送信先スレッド ID の固定も指揮役の交代で壊れるため
+
 ## 3. 同時数と順番待ち
 
 | スレッド | 同時に動かす上限 | 数え方 |

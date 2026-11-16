@@ -1,7 +1,8 @@
 //! テーマとデザイントークン。
 //!
 //! トークン名の正本は `tokens/pelway.tokens.json`（97fb70d の
-//! `docs/design-system/tokens/pelway.tokens.json` の写し）の `color.<theme>`。
+//! `docs/design-system/tokens/pelway.tokens.json` の写し。Issue 323 で AI の呼称の
+//! 説明文だけ書き換え、トークンの名前と値は変えていない）の `color.<theme>`。
 //! トークンの値（色）も同じ JSON から読む（`.rs`・`.slint`・`.ftl` に色の値は
 //! 書かない）。値は [`token_value`] が返し、[`apply_design_tokens`] が
 //! `ui/main.slint` の `DesignTokens` グローバルへ設定する。
@@ -59,7 +60,8 @@ impl Theme {
 /// デザイントークンの名前の一覧。
 ///
 /// 正本はこのクレートに入れた `tokens/pelway.tokens.json`（97fb70d の
-/// `docs/design-system/tokens/pelway.tokens.json` の写し）の `color.<theme>`。
+/// `docs/design-system/tokens/pelway.tokens.json` の写し。Issue 323 で AI の呼称の
+/// 説明文だけ書き換え、トークンの名前と値は変えていない）の `color.<theme>`。
 /// この一覧はそのトークン名と一致させる（`tests/theme_tokens.rs` が正本を
 /// 読んで照合する。正本で名前が増えた・消えた・変わったらテストが落ちる）。
 /// 値は [`token_value`] が同じ JSON から読む。`ui-pro-draft-v0.1` の
@@ -231,7 +233,8 @@ fn theme_brush(theme: Theme, token: &str) -> slint::Brush {
 // ない。docs/worklog/client.md に記録）。
 
 /// トークンの正本（97fb70d の `docs/design-system/tokens/pelway.tokens.json`
-/// のバイト単位の写し。`tests/theme_tokens.rs` が sha256 で一致を検査する）。
+/// のバイト単位の写し。Issue 323 で AI の呼称の説明文だけ書き換え。
+/// `tests/theme_tokens.rs` が sha256 で一致を検査する）。
 const TOKENS_JSON: &str = include_str!("../tokens/pelway.tokens.json");
 
 /// 読み取った色トークン（srgb の成分と alpha。すべて 0〜1）。

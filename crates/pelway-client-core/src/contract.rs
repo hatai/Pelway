@@ -16,7 +16,14 @@ pub use pelway_contract::approval::{
     ApproveError, ApproveOutcome, ApproveRequest, COMMENT_MAX_CHARS, CommentError, CommentSaved,
     SaveCommentRequest, approve_path, comment_len, comments_path, validate_comment,
 };
-pub use pelway_contract::ids::{
-    CardId, CommentId, IdempotencyKey, InvalidIdempotencyKey, SimulatedSendId,
+pub use pelway_contract::decision::{
+    CreateDecisionError, CreateDecisionRequest, DecideRequest, DecisionCard, DecisionError,
+    DecisionListItem, DecisionOption, DecisionOutcome,
 };
+pub use pelway_contract::ids::{
+    CardId, ChannelId, CommentId, DecisionId, IdempotencyKey, InvalidIdempotencyKey, MemberId,
+    MessageId, OptionId, SimulatedSendId, WorkspaceId,
+};
+pub use pelway_contract::ledger::ApprovalLedger;
+pub use pelway_contract::store::TsMs;
 pub use pelway_contract::task::TaskState;
