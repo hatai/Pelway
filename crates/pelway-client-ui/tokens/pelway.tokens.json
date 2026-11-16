@@ -5395,7 +5395,7 @@
             "ref": "acc",
             "fill": "acc-fill",
             "label": "作業中",
-            "use": "AI社員の作業中。文字は acc、ドットは acc-fill で点滅（pulse）"
+            "use": "AI Botの作業中。文字は acc、ドットは acc-fill で点滅（pulse）"
           },
           "waitingJudgment": {
             "ref": "ink",

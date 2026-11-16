@@ -40,6 +40,36 @@ fn every_used_key_formats_without_errors_in_both_languages() {
     }
 }
 
+/// Issue 323: AI の呼称は「AI Bot」（半角スペース、B は大文字）に統一する。
+/// ja の文言に旧称「AI社員」（スペースありを含む）と表記ゆれが出ないこと。
+#[test]
+fn ja_labels_call_the_ai_ai_bot() {
+    let vars = FluentVars::sample();
+    let ja = Messages::new("ja").expect("ja の bundle が作れること");
+    assert_eq!(
+        ja.message("rail-dm-ai", &vars).as_deref(),
+        Some("DM・AI Bot"),
+        "rail の AI グループの見出しが「DM・AI Bot」であること"
+    );
+    for key in USED_KEYS {
+        let text = ja
+            .message(key, &vars)
+            .unwrap_or_else(|| panic!("ja の {key} が引けない（キー不足か、変数代入の誤り）"));
+        assert!(
+            !text.contains("AI社員") && !text.contains("AI 社員"),
+            "旧称の「AI社員」が残っている: {key} = {text}"
+        );
+        assert!(
+            !text.contains("AIボット")
+                && !text.contains("AI ボット")
+                && !text.contains("AIbot")
+                && !text.contains("AIBot")
+                && !text.contains("AI bot"),
+            "表記ゆれ（AIボット・AIbot・AI bot 等）がある: {key} = {text}"
+        );
+    }
+}
+
 #[test]
 fn unknown_keys_return_none() {
     let vars = FluentVars::sample();

@@ -676,3 +676,96 @@ fn http_rejects_body_canary_in_scope_and_ref_columns() {
         "応答本文の検査が空振り: {resp}"
     );
 }
+
+// #327 のメッセージ投稿: canary を含む本文と client_msg_id の投稿が、
+// 07 のログに本文・client_msg_id を残さない（作成・読取・拒否のどの出来事にも）。
+// 応答本文には保存されたメッセージが載る（ログだけを見る決まり）。
+#[test]
+fn message_route_logs_have_no_body_or_client_msg_id_canary() {
+    use pelway_contract::ids::{ChannelId, MemberId};
+    use pelway_contract::member::{ChannelMember, MemberKind};
+    use pelway_contract::message::{Channel, channel_messages_path};
+
+    let sink = Arc::new(MemorySink::new());
+    let (addr, store) = spawn_logged(&sink);
+    let channel = "ch-synthetic-gdpr02";
+    {
+        let mut guard = store.lock().expect("store lock");
+        guard.add_channel(Channel {
+            workspace_id: WorkspaceId::from(WS),
+            channel_id: ChannelId::from(channel),
+            name: "合成チャンネル".to_owned(),
+            members: vec![ChannelMember {
+                member_id: MemberId::from(ACTOR),
+                display_name: "合成 一郎".to_owned(),
+                member_kind: MemberKind::Human,
+            }],
+        });
+    }
+
+    let path = channel_messages_path(&ChannelId::from(channel));
+    let post = |body: String| {
+        http(
+            addr,
+            "POST",
+            &path,
+            &[
+                ("x-pelway-member-id", ACTOR),
+                ("x-pelway-member-kind", "human"),
+            ],
+            body.as_bytes(),
+        )
+    };
+
+    // 投稿: 本文と client_msg_id に canary を仕込む。
+    let body = json!({
+        "client_msg_id": CANARY_MSG_ID,
+        "body": format!("依頼です {CANARY_BODY}"),
+    })
+    .to_string();
+    let (status, resp) = post(body);
+    assert_eq!(status, 200, "{resp}");
+
+    // 取得（一覧）と、同じ client_msg_id で内容が違う再投稿（409 の拒否）。
+    let (status, _) = http(addr, "GET", &format!("{path}?actor={ACTOR}"), &[], b"");
+    assert_eq!(status, 200);
+    let conflict = json!({
+        "client_msg_id": CANARY_MSG_ID,
+        "body": format!("内容が違う再投稿 {CANARY_BODY}"),
+    })
+    .to_string();
+    let (status, resp) = post(conflict);
+    assert_eq!(status, 409, "{resp}");
+    assert!(!resp.contains(CANARY_BODY), "409 応答に canary: {resp}");
+
+    // ログ: canary 0 件・出来事がある・生 ID が無く仮名がある。
+    let lines = sink.lines();
+    assert!(!lines.is_empty(), "ログが1件も出ていない");
+    let joined = lines.join("\n");
+    assert_eq!(
+        joined.matches(CANARY_BODY).count(),
+        0,
+        "ログに本文 canary: {joined}"
+    );
+    assert_eq!(
+        joined.matches(CANARY_MSG_ID).count(),
+        0,
+        "ログに client_msg_id canary: {joined}"
+    );
+    let ks = kinds(&lines);
+    for want in ["message_posted", "messages_listed", "rejected"] {
+        assert!(ks.iter().any(|k| k == want), "{want} がない: {ks:?}");
+    }
+    for raw in [channel, ACTOR] {
+        assert!(
+            !joined.contains(raw),
+            "生の ID {raw} がログにある: {joined}"
+        );
+    }
+    assert!(joined.contains(&pseudonymize(SALT, channel)));
+    assert!(joined.contains(&pseudonymize(SALT, ACTOR)));
+
+    // 陽性対照: canary を含む文字列は同じ検査で見つかる。
+    assert_eq!(format!("x {CANARY_BODY}").matches(CANARY_BODY).count(), 1);
+    assert!(format!("y {CANARY_MSG_ID}").contains(CANARY_MSG_ID));
+}

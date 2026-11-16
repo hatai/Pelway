@@ -17,8 +17,23 @@ Q="${PELWAY_BOARD_QUEUE_DIR:-/tmp/pelway-board-queue}"; mkdir -p "$Q"
 # python 側で巡回状態を更新しない（窓外の対象を消したり誤判定したりしない）。
 IL=1000; PL=1000
 cd "$(dirname "$0")/.." || exit 1
+# t3 CLI の解決: 実行中の T3 サーバー（~/.t3/wsl-runtime 配下のバイナリ）と同じ実行ファイルを
+# 優先する。PATH の t3（~/.local/bin/t3 など）は版番号が同じでも、サーバーが所有する
+# ~/.t3/userdata へのアクセスが ServerOwnsDatabaseError で拒否されることがある（ビルド差）。
+# T3_BIN 環境変数で明示指定したときは解決しない（テストのモック差し替えに使う）。
+# サーバーが見つからないときは PATH の t3 を使う。
+T3_BIN="${T3_BIN:-}"
+if [[ -z "$T3_BIN" ]]; then
+  T3_BIN="$(command -v t3 || true)"
+  for exe in /proc/[0-9]*/exe; do
+    link="$(readlink "$exe" 2>/dev/null || true)"
+    case "$link" in
+      */.t3/wsl-runtime/*/t3) T3_BIN="$link"; break ;;
+    esac
+  done
+fi
 while true; do
-  t3 thread list --json > "$D/threads.json" 2>/dev/null || true
+  "$T3_BIN" thread list --json > "$D/threads.json" 2>/dev/null || true
   # GitHub からの取得に失敗したらファイルを消す（空の実状態と区別する。python 側で取得失敗と扱い、
   # 巡回状態の記録を書き換えさせない）。
   scripts/agent-gh dev issue list --state all --limit "$IL" --json number,state,labels > "$D/issues.json" 2>/dev/null || rm -f "$D/issues.json"

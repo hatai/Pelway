@@ -442,11 +442,12 @@ pub enum AcpAuditEvent {
         /// エージェント名。
         agent: String,
     },
-    /// エージェントの申告名が grant の連携と一致せず接続を止めた。
+    /// transport に結び付けられた連携 ID が grant の連携と一致せず
+    /// 接続を止めた（接続前の照合で、`initialize` はまだ送っていない）。
     IdentityRejected {
-        /// grant の連携（期待したエージェント名）。
+        /// grant の連携。
         expected: String,
-        /// エージェントが initialize で返した名。
+        /// launcher が transport に結び付けた連携 ID。
         actual: String,
     },
     /// `session/new` の完了。
@@ -585,6 +586,29 @@ impl<R: AsyncRead + Unpin> AsyncRead for FrameLimitedRead<R> {
 /// エージェント自身の申告（`initialize` の name）とは独立に grant と
 /// 照合される。受信側には [`FrameLimitedRead`] で frame サイズ上限が
 /// 掛けられている。
+///
+/// # 構築経路の封印（Issue #322 の検証対象）
+///
+/// 本番の構築経路 `bind` は `pub(crate)`、試験経路 `bind_in_process` は
+/// `#[cfg(test)]` かつ `pub(crate)`、フィールドも非公開のため、クレート外の
+/// 通常ビルドからは構築方法が存在しない。任意の連携 ID を結び付けた
+/// transport を偽造する経路を、コンパイルが通らないことで固定する:
+///
+/// ```compile_fail
+/// // 本番経路は pub(crate) のためクレート外から呼べない。
+/// let (read, write) = tokio::io::duplex(1024);
+/// let transport = pelway_gateway::acp::IsolatedTransport::bind(
+///     read, write, "forged",
+/// );
+/// ```
+///
+/// ```compile_fail
+/// // 試験経路は #[cfg(test)] のため通常ビルドに存在しない。
+/// let (stream, _peer) = tokio::io::duplex(1024);
+/// let transport = pelway_gateway::acp::IsolatedTransport::bind_in_process(
+///     stream, "forged",
+/// );
+/// ```
 pub struct IsolatedTransport {
     transport: ByteStreams<Box<dyn FAsyncWrite + Send + Unpin>, Box<dyn FAsyncRead + Send + Unpin>>,
     /// launcher が transport に結び付けた連携 ID。grant の `integration`
@@ -1207,6 +1231,41 @@ mod tests {
         .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(60));
         assert!(evidence.is_expired());
+    }
+
+    /// 証跡の構築は値の意味まで検証する: 空・空白のみの項目と、現在か
+    /// 過去の期限は `InvalidEvidence` で作れない（存在のみの検査で
+    /// `Some("")` や期限切れを通さない）。
+    #[test]
+    fn evidence_new_rejects_empty_fields_and_past_expiry() {
+        let future = now_epoch_ms() + 60_000;
+        for (decider, snapshot_hash, eligibility) in [
+            ("", "sha256:x", "role:x"),
+            ("  \t", "sha256:x", "role:x"),
+            ("member:1", "", "role:x"),
+            ("member:1", "sha256:x", "\n"),
+        ] {
+            assert!(
+                matches!(
+                    ApprovalEvidence::new(decider, future, snapshot_hash, eligibility, false),
+                    Err(AcpError::InvalidEvidence { .. })
+                ),
+                "empty field accepted: {decider:?} / {snapshot_hash:?} / {eligibility:?}"
+            );
+        }
+        // 期限は現在より後の epoch ms でなければならない（境界値も失効扱い）。
+        let now = now_epoch_ms();
+        for expires_at in [0, now.saturating_sub(1), now] {
+            assert!(
+                matches!(
+                    ApprovalEvidence::new("member:1", expires_at, "sha256:x", "role:x", false),
+                    Err(AcpError::InvalidEvidence { .. })
+                ),
+                "past expiry accepted: {expires_at}"
+            );
+        }
+        // 非空かつ未到来なら検証を通る。
+        assert!(ApprovalEvidence::new("member:1", future, "sha256:x", "role:x", false).is_ok());
     }
 
     /// 相関表は件数で有界で、取り出した項目は消える。

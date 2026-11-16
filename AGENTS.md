@@ -18,6 +18,12 @@ When a repository's documentation and its existing code disagree, follow the con
 
 Skills and docs state facts only: rules, procedures, definitions, current state. Do not write chronological information — dates, event narratives, what-happened-when — in them. Chronological information lives in `git log` and in documents where the timeline itself is the point, such as worklogs under `docs/worklogs/`.
 
+## LLM judges
+
+Where an evaluation turns on the meaning of natural language or on factual claims, judge it with an LLM and an explicit, version-controlled rubric, calibrated on reviewed examples — never by scoring the text with keyword lists or regular expressions. Deterministic assertions are limited to observable effects and structured output contracts. Judge calls are reported with their cost stated separately, and a judge error counts as "cannot judge", never as a pass.
+
+- `evals/agent-team` cases follow this: `judge = "llm"` when natural-language evaluation is needed (see `evals/agent-team/README.md`).
+
 ## Agent workflow
 
 The AI dev team (the conductor, T3 Code, opencode, Codex, Claude) follows `docs/superpowers/specs/agent-team.md`.

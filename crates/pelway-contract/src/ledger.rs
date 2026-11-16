@@ -23,12 +23,17 @@ use crate::approval::{
     ApprovalCard, ApprovalPolicy, ApproveError, ApproveOutcome, ApproveRequest, CardComment,
     CommentError, CommentSaved, CreateCardError, Decider, SaveCommentRequest, validate_comment,
 };
+use crate::decision::{
+    CreateDecisionError, CreateDecisionRequest, DecideRequest, DecisionCard, DecisionError,
+    DecisionListItem, DecisionOutcome, build_pending_decisions, validate_new_decision,
+};
 use crate::handoff::{
     HandoffDecision, HandoffError, HandoffNotification, HandoffRecord, HandoffRefusal,
     HandoffRefusalReason, HandoffRequest, MAX_HANDOFF_DEPTH,
 };
 use crate::ids::{
-    CardId, ChannelId, CommentId, HandoffId, IdempotencyKey, MemberId, SimulatedSendId, WorkspaceId,
+    CardId, ChannelId, CommentId, DecisionId, HandoffId, IdempotencyKey, MemberId, SimulatedSendId,
+    WorkspaceId,
 };
 use crate::member::MemberKind;
 use crate::snapshot::{ActionPayload, compute_snapshot_hash};
@@ -125,6 +130,8 @@ pub struct ApprovalLedger {
     send_log: Vec<SimulatedSendRecord>,
     /// カードごとの受け渡し記録（#89）。古い順に並ぶ。
     handoff_log: HashMap<CardId, Vec<HandoffRecord>>,
+    /// 判断待ち（A/B 決定。決定の正本。メモリのみ）。
+    decisions: HashMap<DecisionId, DecisionCard>,
     /// ワークスペースごとの承認の設定（ADR 0002・#86）。承認者の解決と
     /// 「依頼者が承認者を兼ねてよいか」の検査に使う。**カード作成時だけ**参照し、
     /// 既存カードの承認者（作成時に固定）には影響しない。
@@ -133,6 +140,7 @@ pub struct ApprovalLedger {
     next_comment: u64,
     next_send: u64,
     next_handoff: u64,
+    next_decision: u64,
 }
 
 impl ApprovalLedger {
@@ -562,6 +570,120 @@ impl ApprovalLedger {
         chain.push(record.clone());
         card.decider = record.to.clone();
         Ok(HandoffDecision::Accepted { record })
+    }
+
+    /// 判断待ち（A/B 決定）を作る（#328）。ID・版（1）・待ち開始時刻は
+    /// サーバーが付ける。workspace は引数で受ける（要求本文には workspace 欄が
+    /// 無い。QA-GDPR-02 の保存部と同じ受け取り）。論点・選択肢（2 つ以上・
+    /// `option_id` 一意・本文あり）は [`crate::decision::validate_new_decision`]
+    /// と同じ検査をここでも行う。
+    ///
+    /// # Errors
+    /// [`CreateDecisionError`] のいずれか。エラーのときは台帳の状態を変えない。
+    pub fn create_decision(
+        &mut self,
+        workspace_id: WorkspaceId,
+        req: CreateDecisionRequest,
+        now: TsMs,
+    ) -> Result<&DecisionCard, CreateDecisionError> {
+        validate_new_decision(&req.question, &req.options)?;
+        self.next_decision += 1;
+        let decision_id = DecisionId(format!("dec-{:08}", self.next_decision));
+        let card = DecisionCard {
+            decision_id: decision_id.clone(),
+            workspace_id,
+            channel_id: req.channel_id,
+            request_message_id: req.request_message_id,
+            requester: req.requester,
+            decider: req.decider,
+            question: req.question,
+            options: req.options,
+            waiting_since: now,
+            version: 1,
+            outcome: None,
+        };
+        Ok(self.decisions.entry(decision_id).or_insert(card))
+    }
+
+    /// 判断待ち 1 件を読む。
+    #[must_use]
+    pub fn decision(&self, decision_id: &DecisionId) -> Option<&DecisionCard> {
+        self.decisions.get(decision_id)
+    }
+
+    /// 判断待ちを確定する（#328）。選択内容・決定者・時刻・版を固定し、
+    /// 判断待ちの `version` を 1 つ上げる。確定後の変更は拒否する
+    /// （同じ選択の再送は確定済みの結果を返す冪等リプレイ）。
+    ///
+    /// 検査順: 判断待ちの存在 → 操作者の身元（決定者か）→ 確定済みか
+    /// （同じ選択の再送はリプレイ、別の選択は [`DecisionError::AlreadyDecided`]）
+    /// → 版 → 選択肢。決定者でない人は [`DecisionError::NotDecider`]（403）で、
+    /// 確定済みの結果のリプレイ取得もできない。
+    ///
+    /// # Errors
+    /// [`DecisionError`] のいずれか。エラーのときは判断待ちを変えない。
+    pub fn decide(
+        &mut self,
+        req: DecideRequest,
+        operator: &MemberId,
+        now: TsMs,
+    ) -> Result<DecisionOutcome, DecisionError> {
+        let card = self
+            .decisions
+            .get_mut(&req.decision_id)
+            .ok_or(DecisionError::DecisionNotFound)?;
+        if operator != &card.decider {
+            return Err(DecisionError::NotDecider);
+        }
+        if let Some(outcome) = &card.outcome {
+            if outcome.selected.option_id == req.option_id {
+                return Ok(outcome.clone());
+            }
+            return Err(DecisionError::AlreadyDecided);
+        }
+        if req.version != card.version {
+            return Err(DecisionError::VersionConflict {
+                current_version: card.version,
+            });
+        }
+        let selected = card
+            .options
+            .iter()
+            .find(|o| o.option_id == req.option_id)
+            .cloned()
+            .ok_or_else(|| DecisionError::UnknownOption {
+                option_id: req.option_id.clone(),
+            })?;
+        card.version += 1;
+        let outcome = DecisionOutcome {
+            decision_id: card.decision_id.clone(),
+            version: card.version,
+            selected,
+            decider: operator.clone(),
+            decided_at: now,
+        };
+        card.outcome = Some(outcome.clone());
+        Ok(outcome)
+    }
+
+    /// workspace 内のメンバーの判断待ち一覧を作る（#328）。
+    /// 一覧用のデータは別に保存せず、この台帳の判断待ち（状態のテーブル）を
+    /// 検索してその場で組み立てる。決定済みは出さない。
+    /// `wait_ms` は `now` − `waiting_since`（期限ではなく待ち開始時刻から出す）。
+    #[must_use]
+    pub fn pending_decisions(
+        &self,
+        workspace_id: &WorkspaceId,
+        member: &MemberId,
+        now: TsMs,
+    ) -> Vec<DecisionListItem> {
+        build_pending_decisions(
+            member,
+            self.decisions
+                .values()
+                .filter(|d| &d.workspace_id == workspace_id),
+            now,
+        )
     }
 }
 
