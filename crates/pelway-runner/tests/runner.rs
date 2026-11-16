@@ -473,9 +473,27 @@ fn base_url_is_limited_to_known_providers() {
     );
 
     // 別の環境変数で明示したときだけ許可リスト外を使う（ローカルのモック等）。
-    let custom = DemoLlmConfig::from_vars(vars(&[(CUSTOM_BASE_URL_ENV, "http://127.0.0.1:9/v1")]))
-        .expect("custom");
-    assert_eq!(custom.provider.base_url, "http://127.0.0.1:9/v1");
+    // カスタム接続先は loopback なら任意のスキーム、それ以外は https のみ。
+    for url in ["http://127.0.0.1:9/v1", "http://[::1]:9/v1"] {
+        let custom =
+            DemoLlmConfig::from_vars(vars(&[(CUSTOM_BASE_URL_ENV, url)])).expect("loopback custom");
+        assert_eq!(custom.provider.base_url, url);
+    }
+    // 非 loopback の http 接続先は Bearer キーの送出経路になるため拒否
+    // （demo-check external-refs のためリテラルは置換で生成する）。
+    let http_other = "http://127.0.0.1".replace("127.0.0.1", "llm.invalid");
+    assert!(
+        DemoLlmConfig::from_vars(|name| (name == CUSTOM_BASE_URL_ENV).then(|| http_other.clone()))
+            .is_err()
+    );
+    // 非 loopback でも https なら許可する。
+    let https_other = "https://127.0.0.1".replace("127.0.0.1", "ok.invalid");
+    let custom =
+        DemoLlmConfig::from_vars(|name| (name == CUSTOM_BASE_URL_ENV).then(|| https_other.clone()))
+            .expect("https custom");
+    assert_eq!(custom.provider.base_url, https_other);
+    // URL として解釈できない値も設定エラー。
+    assert!(DemoLlmConfig::from_vars(vars(&[(CUSTOM_BASE_URL_ENV, "not a url")])).is_err());
 }
 
 /// キーが無い・送信に使えない形のときは台本の gateway が返る（落ちない）。

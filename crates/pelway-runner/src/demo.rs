@@ -36,7 +36,8 @@ pub const PROVIDER_ENV: &str = "PELWAY_LLM_PROVIDER";
 /// [`CUSTOM_BASE_URL_ENV`] で明示したときだけ使う。
 pub const BASE_URL_ENV: &str = "PELWAY_LLM_BASE_URL";
 /// 許可リスト外の接続先を受ける環境変数（ローカルのモック等の明示用。
-/// 設定すると [`BASE_URL_ENV`] より優先して値がそのまま接続先になる）。
+/// 設定すると [`BASE_URL_ENV`] より優先して値がそのまま接続先になる。
+/// 値は loopback または https の URL に限る（`pelway_llm::config::custom_base_url_allowed`）。
 pub const CUSTOM_BASE_URL_ENV: &str = "PELWAY_LLM_CUSTOM_BASE_URL";
 /// チャット用モデル名を受ける環境変数。
 pub const CHAT_MODEL_ENV: &str = "PELWAY_LLM_CHAT_MODEL";
@@ -115,7 +116,15 @@ impl DemoLlmConfig {
         };
         let base_url = match var(CUSTOM_BASE_URL_ENV) {
             // 許可リスト外の接続先は別の環境変数で明示したときだけ使う。
-            Some(custom) => custom,
+            // loopback なら任意のスキーム、それ以外は https のみ
+            // （http の外部接続先は Bearer キーの送出経路になりうるため拒否。
+            // QA 点検 2026-11-17）。
+            Some(custom) if pelway_llm::config::custom_base_url_allowed(&custom) => custom,
+            Some(_) => {
+                return Err(format!(
+                    "{CUSTOM_BASE_URL_ENV} には loopback の接続先、または https の接続先を指定してください"
+                ));
+            }
             None => match var(BASE_URL_ENV) {
                 Some(url) => {
                     let normalized = url.trim_end_matches('/');
