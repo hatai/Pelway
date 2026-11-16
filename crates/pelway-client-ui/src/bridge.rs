@@ -9,11 +9,26 @@
 //! - コメント欄の処理は中核にあるが、モックにコメント欄の見た目がないため
 //!   画面には置かない。`comment_editable()` は表示用の状態としてだけ持つ。
 
-use pelway_client_core::approval::{ApprovalMachine, CardView, Clock, Effect, KeySource};
-use pelway_client_core::contract::{ApproveError, ApproveOutcome};
-use pelway_client_core::input::{Action, Focus, ImeState, InputContext, Key, Modifiers, on_key};
+use std::cell::RefCell;
+use std::rc::Rc;
 
+use pelway_client_core::approval::{ApprovalMachine, CardView, Clock, Effect, KeySource};
+use pelway_client_core::contract::{
+    ApproveError, ApproveOutcome, ChannelId, CreateDecisionRequest, DecideRequest, DecisionError,
+    DecisionId, DecisionListItem, DecisionOption, DecisionOutcome, MemberId, MessageId, OptionId,
+    TsMs, WorkspaceId,
+};
+use pelway_client_core::decision::DecisionBoard;
+use pelway_client_core::input::{Action, Focus, ImeState, InputContext, Key, Modifiers, on_key};
+use slint::{ComponentHandle, ModelRc, VecModel};
+
+use crate::state::{
+    AvatarKind, DecisionCardState, DecisionOptionView, DecisionOutcomeView, MyRequestItem,
+    PendingDecisionItem, SAMPLE_DECISION_OPTION_A, SAMPLE_DECISION_OPTION_B,
+    SAMPLE_DECISION_QUESTION, format_wait_ms,
+};
 use crate::testkit::{FixedClock, FixedKeySource};
+use crate::{DecisionOptionItem, MainWindow, PendingItem, RequestItem};
 
 /// 承認カード 1 枚の表示用の状態と操作のつなぎ。
 ///
@@ -201,4 +216,372 @@ impl ShellBridge {
             }
         }
     }
+}
+
+// ---- 「今日・判断待ち」画面とチャット内の判断カード（Issue 331） ----
+
+/// メンバーの表示用の値（ID → 表示名とアバター）。
+#[derive(Debug, Clone)]
+pub struct MemberDisplay {
+    /// メンバー ID（`u-*`）。
+    pub id: MemberId,
+    /// 表示名（架空の名前）。
+    pub name: String,
+    /// アバター（頭文字と AI かどうか）。
+    pub avatar: AvatarKind,
+}
+
+/// チャンネルの表示用の値（ID → 表示名）。
+#[derive(Debug, Clone)]
+pub struct ChannelDisplay {
+    /// チャンネル ID（`ch-*`）。
+    pub id: ChannelId,
+    /// 表示名（例: 「# 案件B」）。
+    pub name: String,
+}
+
+/// 判断待ち画面とチャット内カードを束ねる橋。
+///
+/// 正本は [`DecisionBoard`]（メモリ上の台帳）。一覧の項目は台帳から毎回
+/// 組み立て、メンバー・チャンネルの表示名を載せる。項目はポインタ型で、
+/// 依頼メッセージの本文は一覧に乗せない（inbox.rs と同じ考え方）。
+#[derive(Debug)]
+pub struct DecisionShell {
+    board: DecisionBoard,
+    /// 待ち時間の表示の言語（`format_wait_ms` に渡す）。
+    lang: String,
+    members: Vec<MemberDisplay>,
+    channels: Vec<ChannelDisplay>,
+    requests: Vec<MyRequestItem>,
+    /// 表示中のチャンネルに出す判断カードの ID。
+    channel_card: Option<DecisionId>,
+}
+
+impl DecisionShell {
+    /// 橋を組み立てる。`channel_card` は表示中のチャンネルに出す判断待ち。
+    #[must_use]
+    pub fn new(
+        board: DecisionBoard,
+        lang: impl Into<String>,
+        members: Vec<MemberDisplay>,
+        channels: Vec<ChannelDisplay>,
+        requests: Vec<MyRequestItem>,
+        channel_card: Option<DecisionId>,
+    ) -> Self {
+        Self {
+            board,
+            lang: lang.into(),
+            members,
+            channels,
+            requests,
+            channel_card,
+        }
+    }
+
+    /// デモの合成データ一式（判断待ち1件・自分の依頼1件）。
+    ///
+    /// 判断待ち: AI Bot のユイが濱田（画面の向こうの人）に、B社への回答の
+    /// 出し方の A/B を聞く。`waiting_since` は 0（呼び出し側の `now` が
+    /// そのまま待ち時間になる）。
+    #[must_use]
+    pub fn sample(lang: &str) -> Self {
+        let mut board = DecisionBoard::new(WorkspaceId::from("w-demo"), MemberId::from("u-hamada"));
+        let card = board
+            .seed(
+                CreateDecisionRequest {
+                    channel_id: ChannelId::from("ch-b"),
+                    request_message_id: MessageId::from("m-decision"),
+                    requester: MemberId::from("u-yui"),
+                    decider: MemberId::from("u-hamada"),
+                    question: SAMPLE_DECISION_QUESTION.to_owned(),
+                    options: vec![
+                        DecisionOption {
+                            option_id: OptionId::from("a"),
+                            body: SAMPLE_DECISION_OPTION_A.to_owned(),
+                        },
+                        DecisionOption {
+                            option_id: OptionId::from("b"),
+                            body: SAMPLE_DECISION_OPTION_B.to_owned(),
+                        },
+                    ],
+                },
+                0,
+            )
+            .expect("合成データの判断待ちは検査に通る");
+        let channel_card = card.decision_id.clone();
+        Self::new(
+            board,
+            lang,
+            vec![
+                MemberDisplay {
+                    id: MemberId::from("u-yui"),
+                    name: "ユイ".to_owned(),
+                    avatar: AvatarKind::Ai("ユ".to_owned()),
+                },
+                MemberDisplay {
+                    id: MemberId::from("u-hamada"),
+                    name: "濱田".to_owned(),
+                    avatar: AvatarKind::Human("濱".to_owned()),
+                },
+                MemberDisplay {
+                    id: MemberId::from("u-riku"),
+                    name: "リク".to_owned(),
+                    avatar: AvatarKind::Ai("リ".to_owned()),
+                },
+            ],
+            vec![ChannelDisplay {
+                id: ChannelId::from("ch-b"),
+                name: "# 案件B".to_owned(),
+            }],
+            vec![MyRequestItem {
+                meta: "# 案件B · リク".to_owned(),
+                text: "B社の注文一覧へのCSV出力の実装".to_owned(),
+                state_text: "作業中".to_owned(),
+            }],
+            Some(channel_card),
+        )
+    }
+
+    /// 「自分の判断待ち」の一覧の行（待ち開始が早い順。台帳から毎回組み立てる）。
+    #[must_use]
+    pub fn pending_rows(&self, now: TsMs) -> Vec<PendingDecisionItem> {
+        self.board
+            .pending(now)
+            .iter()
+            .map(|item| self.pending_row(item))
+            .collect()
+    }
+
+    fn pending_row(&self, item: &DecisionListItem) -> PendingDecisionItem {
+        PendingDecisionItem {
+            decision_id: item.decision_id.as_str().to_owned(),
+            version: item.version,
+            requester: self.member_name(&item.requester),
+            avatar: self.member_avatar(&item.requester),
+            channel: self.channel_name(&item.channel_id),
+            question: item.question.clone(),
+            wait_text: format_wait_ms(item.wait_ms, &self.lang),
+            options: item
+                .options
+                .iter()
+                .map(|o| DecisionOptionView {
+                    option_id: o.option_id.as_str().to_owned(),
+                    body: o.body.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    /// 「自分の依頼」の一覧の行（進み具合を見るだけ）。
+    #[must_use]
+    pub fn request_rows(&self) -> Vec<MyRequestItem> {
+        self.requests.clone()
+    }
+
+    /// 選択肢 `option_id` で確定する。`version` は画面で見ていた版。
+    ///
+    /// # Errors
+    /// [`DecisionError`] のいずれか（決定者でない・版が違う・確定済み・選択肢が無い）。
+    /// 同じ選択の再送は確定済みの結果を返す冪等リプレイ（`Ok`）。
+    pub fn decide(
+        &mut self,
+        decision_id: &DecisionId,
+        option_id: &str,
+        version: u64,
+        now: TsMs,
+    ) -> Result<DecisionOutcome, DecisionError> {
+        self.board
+            .decide(decision_id, OptionId::from(option_id), version, now)
+    }
+
+    /// チャット内の判断カードの表示用の値（確定済みは `outcome` を持つ）。
+    #[must_use]
+    pub fn channel_card(&self) -> Option<DecisionCardState> {
+        let id = self.channel_card.as_ref()?;
+        let card = self.board.card(id)?;
+        Some(DecisionCardState {
+            decision_id: card.decision_id.as_str().to_owned(),
+            version: card.version,
+            requester: self.member_name(&card.requester),
+            requester_avatar: self.member_avatar(&card.requester),
+            question: card.question.clone(),
+            options: card
+                .options
+                .iter()
+                .map(|o| DecisionOptionView {
+                    option_id: o.option_id.as_str().to_owned(),
+                    body: o.body.clone(),
+                })
+                .collect(),
+            outcome: card.outcome.as_ref().map(|o| DecisionOutcomeView {
+                selected_body: o.selected.body.clone(),
+                decider: self.member_name(&o.decider),
+                version: o.version,
+            }),
+        })
+    }
+
+    /// 項目が指すチャンネルの表示名（一覧から元のチャットへ戻る導線）。
+    #[must_use]
+    pub fn channel_name_of(&self, decision_id: &DecisionId) -> Option<String> {
+        self.board
+            .channel_of(decision_id)
+            .map(|id| self.channel_name(&id))
+    }
+
+    /// 一覧の項目から元のチャットを開く。表示中のチャンネルはそのチャンネルに
+    /// なり、チャット内の判断カードはこの判断待ちを指す。戻り値は遷移先の
+    /// チャンネル名（画面の題名に使う）。知らない判断待ちは `None`（何も開かない）。
+    pub fn open_chat(&mut self, decision_id: &DecisionId) -> Option<String> {
+        let channel_id = self.board.channel_of(decision_id)?;
+        let name = self.channel_name(&channel_id);
+        self.channel_card = Some(decision_id.clone());
+        Some(name)
+    }
+
+    /// 確定要求を組み立てた回数（テストと監視用）。
+    #[must_use]
+    pub fn decide_request_count(&self) -> u32 {
+        self.board.decide_request_count()
+    }
+
+    /// 最後に組み立てた確定要求（HTTP 結線の段階で送るもの）。
+    #[must_use]
+    pub fn last_decide_request(&self) -> Option<&DecideRequest> {
+        self.board.last_decide_request()
+    }
+
+    /// 正本の盤への参照。
+    #[must_use]
+    pub fn board(&self) -> &DecisionBoard {
+        &self.board
+    }
+
+    fn member_name(&self, id: &MemberId) -> String {
+        self.members
+            .iter()
+            .find(|m| &m.id == id)
+            .map_or_else(|| id.as_str().to_owned(), |m| m.name.clone())
+    }
+
+    fn member_avatar(&self, id: &MemberId) -> AvatarKind {
+        self.members
+            .iter()
+            .find(|m| &m.id == id)
+            .map_or_else(|| AvatarKind::Human("?".to_owned()), |m| m.avatar.clone())
+    }
+
+    fn channel_name(&self, id: &ChannelId) -> String {
+        self.channels
+            .iter()
+            .find(|c| &c.id == id)
+            .map_or_else(|| id.as_str().to_owned(), |c| c.name.clone())
+    }
+}
+
+fn option_items(options: &[DecisionOptionView]) -> Vec<DecisionOptionItem> {
+    options
+        .iter()
+        .map(|o| DecisionOptionItem {
+            option_id: o.option_id.as_str().into(),
+            body: o.body.as_str().into(),
+        })
+        .collect()
+}
+
+/// 判断待ち画面（「今日」の一覧・自分の依頼）とチャット内の判断カードを
+/// `shell` の状態に合わせる。一覧は台帳から毎回組み立てるため、確定済みは
+/// 自然に一覧から消える。
+pub fn apply_decision_screen(window: &MainWindow, shell: &DecisionShell, now: TsMs) {
+    let rows: Vec<PendingItem> = shell
+        .pending_rows(now)
+        .into_iter()
+        .map(|r| PendingItem {
+            decision_id: r.decision_id.as_str().into(),
+            version: r.version as i32,
+            requester: r.requester.as_str().into(),
+            initial: r.avatar.initial().into(),
+            is_ai: r.avatar.is_ai(),
+            channel: r.channel.as_str().into(),
+            question: r.question.as_str().into(),
+            wait: r.wait_text.as_str().into(),
+            options: option_items(&r.options).as_slice().into(),
+        })
+        .collect();
+    window.set_pending_items(ModelRc::new(VecModel::from(rows)));
+
+    let requests: Vec<RequestItem> = shell
+        .request_rows()
+        .into_iter()
+        .map(|r| RequestItem {
+            meta: r.meta.as_str().into(),
+            text: r.text.as_str().into(),
+            progress: r.state_text.as_str().into(),
+        })
+        .collect();
+    window.set_request_items(ModelRc::new(VecModel::from(requests)));
+
+    match shell.channel_card() {
+        Some(card) => {
+            window.set_data_decision_visible(true);
+            window.set_data_decision_id(card.decision_id.as_str().into());
+            window.set_data_decision_version(card.version as i32);
+            window.set_data_decision_requester(card.requester.as_str().into());
+            window.set_data_decision_requester_is_ai(card.requester_avatar.is_ai());
+            window.set_data_decision_requester_initial(card.requester_avatar.initial().into());
+            window.set_data_decision_question(card.question.as_str().into());
+            window.set_data_decision_options(ModelRc::new(VecModel::from(option_items(
+                &card.options,
+            ))));
+            window.set_data_decision_decided(card.outcome.is_some());
+            match card.outcome {
+                Some(outcome) => {
+                    window.set_data_decision_selected(outcome.selected_body.as_str().into());
+                    window.set_data_decision_decider(outcome.decider.as_str().into());
+                }
+                None => {
+                    window.set_data_decision_selected("".into());
+                    window.set_data_decision_decider("".into());
+                }
+            }
+        }
+        None => window.set_data_decision_visible(false),
+    }
+}
+
+/// 画面の操作を `shell` に結線する（一覧とチャット内カードは同じ callback を
+/// 通る）。確定に成功したら画面を再適用して、項目を一覧から消し、カードを
+/// 確定表示に変える。`now` は骨組みの固定時刻（結線の段階で時計に置き換える）。
+pub fn wire_decision_screen(window: &MainWindow, shell: Rc<RefCell<DecisionShell>>, now: TsMs) {
+    apply_decision_screen(window, &shell.borrow(), now);
+
+    let weak = window.as_weak();
+    let decide_shell = Rc::clone(&shell);
+    window.on_decide_option(move |decision_id, option_id, version| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let mut shell = decide_shell.borrow_mut();
+        let id = DecisionId::from(decision_id.as_str());
+        // 失敗（版違い・確定済み・権限なし）は台帳を変えないため再適用もしない。
+        if shell.decide(&id, &option_id, version as u64, now).is_ok() {
+            apply_decision_screen(&window, &shell, now);
+        }
+    });
+
+    let weak = window.as_weak();
+    let open_shell = Rc::clone(&shell);
+    window.on_open_decision_chat(move |decision_id| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let id = DecisionId::from(decision_id.as_str());
+        // 知らない判断待ちでは画面を切り替えない（壊れた項目の導線を塞ぐ）。
+        let mut shell = open_shell.borrow_mut();
+        if let Some(title) = shell.open_chat(&id) {
+            window.set_data_channel_title(title.as_str().into());
+            window.set_show_today(false);
+            apply_decision_screen(&window, &shell, now);
+        }
+    });
 }
