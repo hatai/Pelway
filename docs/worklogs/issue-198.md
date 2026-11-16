@@ -11,3 +11,15 @@
 5. 改善案: なし
 
 使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/write-pull-request`
+
+## 実装者メモ（round 2）
+
+対象 head: 85e5972d8c197cb6a1ae96e20775fab9d068dfe0（round 2 の実装の実体を含むコミット。push 後の署名付け替え後の SHA。このメモを含むコミットの親）
+
+1. 詰まった箇所: 手順 9（レビュー結果の処理）: round 1 で codex approve と claude request-changes（must-fix 2）が割れ、旧スキル版の「複数担当の判定が割れた」で停止・Issue へエスカレーションした。指揮役（hatai の恒久指示 2026-11-16「要修正と承認でレビュー結果が割れたときは修正を優先して」）が request-changes 側を正として再開を指示し、must-fix 2 件を修正した
+2. 曖昧だった文: 「失効台帳（または tombstone 行の集合）にも残す」（自分が書いた `docs/research/revocation-generation-model.md` 記録形式の節）
+3. 仮定と解釈: tombstone を同じ DB に置く案を「または」で併記したが、claude の指摘どおり同じ DB 内 tombstone は backup 復旧で台帳ごと巻き戻り保証にならないため、台帳は復旧範囲の外に独立して保管し再開前に最終世代を再適用する形に限定した。再付与の形は「同じ行で generation+1」と「新行」が併存して読み違えられていたため、subject_kind ごとの表（approval・credential・grant・membership は新行、policy は同一行 generation+1）で明示し、照合の根拠を「世代の値ではなく `(subject_id, generation)` の組（新行は subject_id が異なる）」に直した
+4. 足りなかった情報・検証手段: なし。修正は文書の記述の一貫性に関わるもので、目視確認の受け入れ条件の範囲内
+5. 改善案: なし
+
+使ったスキル: `.agents/skills/implement-issue`
