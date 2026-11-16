@@ -30,7 +30,7 @@ pub const USED_KEYS: &[&str] = &[
     "rail-channels",
     "rail-dm-people",
     "rail-dm-ai",
-    // AI 社員の在席状態（rail の表示）
+    // AI Botの在席状態（rail の表示）
     "ai-presence-standby",
     "ai-presence-working",
     "ai-presence-waiting",

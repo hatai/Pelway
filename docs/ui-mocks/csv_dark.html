@@ -203,7 +203,7 @@ function rail(){
  <button class="it ${v==='case'?'on':'b'}" data-case="1"># 案件B</button>
  <div class="it"># 全体</div><button class="it ${v==='chat'?'on':'b'}" data-alt="chat"># 雑談</button>
  <div class="grp">DM・人</div>${people}
- <div class="grp">DM・AI社員</div>${ai('ユイ',['待機中',''])}${ai('リク',rik)}${ai('ハル',hal)}
+ <div class="grp">DM・AI Bot</div>${ai('ユイ',['待機中',''])}${ai('リク',rik)}${ai('ハル',hal)}
  <div class="ctl"><div class="sc">場面 ${st.s+1}/${S.length}・${sc().t}<b>${sc().ttl}</b></div>
  <div class="row"><button class="cb" id="pv" ${st.s?'':'disabled'}>前へ</button><button class="cb p" id="nx" ${st.s<S.length-1?'':'disabled'}>次へ</button></div>
  ${sc().nt?`<div class="note">${sc().nt}</div>`:''}<div class="note">台本の1本の流れだけを再現しています。検索・通知・送信は見た目だけで、実際には動きません。</div></div></div>`;
