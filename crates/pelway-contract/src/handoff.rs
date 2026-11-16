@@ -393,6 +393,7 @@ mod tests {
                 purpose_id: PurposeId::P01,
                 body: "@m-bot-2 このタスクをお願いします".to_owned(),
                 thread_root: None,
+                client_msg_id: None,
             },
             NOW,
         );

@@ -455,6 +455,19 @@ fn list_basis_records_without_actor_is_400() {
     assert_eq!(status, 400);
 }
 
+// 起動時の最小 seed（#326）: `serve` が内部で用意する保存部はデモ seed を持ち、
+// 起動後の状態として seed の P03 根拠（active）が既存の読み取り経路で見える。
+#[test]
+fn serve_starts_with_demo_seed() {
+    let server = serve("127.0.0.1:0".parse().unwrap(), ledger()).expect("serve");
+    let req = "GET /v1/workspaces/ws-demo-01/communication-basis-records?actor=m-hal HTTP/1.1\r\nContent-Length: 0\r\n\r\n";
+    let (status, body) = raw(addr_of(&server), req.as_bytes());
+    assert_eq!(status, 200);
+    assert!(body.contains("\"purpose_id\":\"p03\""), "{body}");
+    assert!(body.contains("\"status\":\"active\""), "{body}");
+    assert!(body.contains("\"scope\":\"ch-demo-anken-b\""), "{body}");
+}
+
 // 根拠記録の撤回: JSON が壊れていると 400。
 #[test]
 fn withdraw_basis_record_bad_json_is_400() {

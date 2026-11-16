@@ -73,6 +73,14 @@ string_id!(
     BasisId
 );
 string_id!(
+    /// 判断待ち（決定カード）ID（サーバー採番）。A/B 決定 1 件につき 1 つ（#328）。
+    DecisionId
+);
+string_id!(
+    /// 選択肢 ID。要求側が付ける安定 ID（例: `"a"`・`"b"`）。判断待ちの中で一意。
+    OptionId
+);
+string_id!(
     /// 明示メモリの ID（サーバー採番）。
     MemoryId
 );
