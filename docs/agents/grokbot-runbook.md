@@ -110,6 +110,14 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 - 失敗は再試行しない。やり直すときは新しい `.json` を置く
 - 要求の文字列がシェルのコマンドに組み込まれることはない
 
+### 指揮役の定期巡回（スケジュール起床）
+
+conductor-watch は検知（`watch.log` へのイベント出力）だけを行い、指揮役を起こさない。指揮役スレッドは T3 の scheduled task（interval 30 分）で起床し、`watch.log` の未読分を処理して「6. 報告行の扱い」以下の巡回処理を進める。
+
+- 未読の位置は `patrol-state.json` の `watch_log_offset`（`watch.log` の行番号）で管理する。巡回で読み込んだ分だけ位置を進めて書き戻す
+- scheduled task は指揮役スレッドに bind する（`bindToCurrentThread`）。指揮役が代わったら（代行の開始・交代）、新しい指揮役スレッドで `schedule_task` を作り直し、古いタスクは `delete_scheduled_task` で削除する。`patrol-state.json` の `scheduled_task_id` に現行のタスク ID を記録する
+- `watch.log` からスレッドへの転送スクリプト（`t3` CLI の `acp-mcp-call` 経由）は使わない。`t3` CLI は実行中の T3 サーバーと `~/.t3/userdata` の所有権が衝突して送信に失敗することがあり、送信先スレッド ID の固定も指揮役の交代で壊れるため
+
 ## 3. 同時数と順番待ち
 
 | スレッド | 同時に動かす上限 | 数え方 |
@@ -198,7 +206,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 | `verdict` | すること |
 |---|---|
-| `approve` | 指揮役自身の PR なら、Ready for review と必須チェックが通っていることを確かめて skill `command-team` の「マージ」に進む。外部投入なら「PR #<M> は Approve された。skill implement-issue の手順 10 に従う。」を実装スレッドに送る。複数のレビュー担当を付けた PR で判定が割れたらマージしない |
+| `approve` | 指揮役自身の PR なら、Ready for review と必須チェックが通っていることを確かめて skill `command-team` の「マージ」に進む。外部投入なら「PR #<M> は Approve された。skill implement-issue の手順 10 に従う。」を実装スレッドに送る。複数のレビュー担当を付けた PR で判定が割れたらマージせず、request-changes 側の指摘を優先して修正に進ませる（skill `command-team` の「レビュー担当と effort」） |
 | `request-changes` | 外部投入なら「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を実装スレッドに送る（回数の上限は skill `implement-issue` のとおり、実装スレッドが数える） |
 | `failed` | `error: checks pending` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 6 のエスカレーション |
 

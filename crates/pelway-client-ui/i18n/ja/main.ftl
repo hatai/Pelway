@@ -16,13 +16,17 @@ ai-presence-waiting = 判断待ち
 ## 上の帯
 search-placeholder = ⌕ 会話と作業記録を検索
 search-shortcut = ⌘K
-## 「今日」の画面
+## 「今日・判断待ち」の画面（区切りは inbox.rs の 2 区分）
 today-title = 今日
-today-section-consultations = あなたへの相談
-today-section-pending = 判断待ち
-today-section-decided = 離れている間に決まったこと
+today-section-mine = 自分の判断待ち
+today-section-requests = 自分の依頼
 today-section-empty = なし
 today-quiet = 急ぎはありません
+pending-wait = 待ち
+pending-open-chat = チャットで見る
+decision-card-label = 決定の依頼
+decision-choose = この案に決める
+decision-outcome = ◆ 決定
 ## チャンネルの画面
 unread-divider = ここから未読
 ai-badge = AI

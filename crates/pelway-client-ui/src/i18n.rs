@@ -37,13 +37,17 @@ pub const USED_KEYS: &[&str] = &[
     // 上の帯
     "search-placeholder",
     "search-shortcut",
-    // 「今日」の画面
+    // 「今日・判断待ち」の画面
     "today-title",
-    "today-section-consultations",
-    "today-section-pending",
-    "today-section-decided",
+    "today-section-mine",
+    "today-section-requests",
     "today-section-empty",
     "today-quiet",
+    "pending-wait",
+    "pending-open-chat",
+    "decision-card-label",
+    "decision-choose",
+    "decision-outcome",
     // チャンネルの画面
     "unread-divider",
     "ai-badge",
@@ -220,11 +224,15 @@ pub fn apply_translations(
     window.set_tr_search_placeholder(text("search-placeholder"));
     window.set_tr_search_shortcut(text("search-shortcut"));
     window.set_tr_today_title(text("today-title"));
-    window.set_tr_today_section_consultations(text("today-section-consultations"));
-    window.set_tr_today_section_pending(text("today-section-pending"));
-    window.set_tr_today_section_decided(text("today-section-decided"));
+    window.set_tr_today_section_mine(text("today-section-mine"));
+    window.set_tr_today_section_requests(text("today-section-requests"));
     window.set_tr_today_section_empty(text("today-section-empty"));
     window.set_tr_today_quiet(text("today-quiet"));
+    window.set_tr_pending_wait(text("pending-wait"));
+    window.set_tr_pending_open_chat(text("pending-open-chat"));
+    window.set_tr_decision_card_label(text("decision-card-label"));
+    window.set_tr_decision_choose(text("decision-choose"));
+    window.set_tr_decision_outcome(text("decision-outcome"));
     window.set_tr_unread_divider(text("unread-divider"));
     window.set_tr_ai_badge(text("ai-badge"));
     window.set_tr_decision_mark(text("decision-mark"));

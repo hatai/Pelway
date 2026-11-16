@@ -193,6 +193,39 @@ component LinkText inherits Text {
     // 注: Slint 1.18 の Text に underline のプロパティはないため下線は付かない
     // （第9枠に記録）。押されたことを外に伝える callback。
     callback touched();
+    // Text だけでは押せないため、当たり判定は TouchArea で作る（Issue 331 で追加）。
+    TouchArea {
+        clicked => { root.touched(); }
+    }
+}
+
+// ---- 判断待ち（Issue 331）のモデル ----
+
+// 選択肢 1 つ（案A・案B など）。確定要求は option-id で選択を指す。
+export struct DecisionOptionItem {
+    option-id: string,
+    body: string,
+}
+
+// 「自分の判断待ち」の 1 項目（依頼者・論点・待ち時間・対象チャネル・選択肢・
+// 見ている版。判断待ちのコピーではなく元のチャットへのポインタ）。
+export struct PendingItem {
+    decision-id: string,
+    version: int,
+    requester: string,
+    initial: string,
+    is-ai: bool,
+    channel: string,
+    question: string,
+    wait: string,
+    options: [DecisionOptionItem],
+}
+
+// 「自分の依頼」の 1 項目（依頼の内容と進み具合。操作はしない）。
+export struct RequestItem {
+    meta: string,
+    text: string,
+    progress: string,
 }
 
 // ---- 左の列（rail） ----
@@ -329,39 +362,151 @@ component TopBar inherits Rectangle {
     }
 }
 
-// ---- 「今日」の画面 ----
+// ---- 「今日・判断待ち」の画面 ----
 
-// 区切りの1項目。「判断待ち」では行の地と左帯を変える。
-component TodayItemRow inherits Rectangle {
-    in property <bool> data-is-ai: false;
-    in property <string> data-initial;
-    in property <string> data-meta;
-    in property <string> data-text;
-    in property <bool> data-pending: false;
-    height: 56px;
+// 区切りの見出し（題名＋件数）。
+component SectionHeading inherits HorizontalLayout {
+    in property <string> heading;
+    in property <int> count;
+    padding: 10px;
+    padding-bottom: 6px;
+    spacing: 8px;
+    Text {
+        text: root.heading;
+        color: DesignTokens.ink;
+        font-size: 14px;
+        font-weight: 500;
+        vertical-alignment: center;
+    }
+    // 件数。値のバッジ用のトークンがまだないため、数字だけを並記する
+    // （トークン確定後に見た目を整える）。
+    Text {
+        text: root.count;
+        color: root.count > 0 ? DesignTokens.ink : DesignTokens.mute;
+        font-size: 13px;
+        vertical-alignment: center;
+    }
+}
+
+// 「自分の判断待ち」の 1 項目。依頼者・論点・待ち時間を出し、A/B の各案に
+// 「この案に決める」を置く。「チャットで見る」で元のチャットへ戻る。
+component PendingDecisionRow inherits Rectangle {
+    in property <PendingItem> item;
+    in property <string> tr-pending-wait;
+    in property <string> tr-decision-choose;
+    in property <string> tr-pending-open-chat;
+    callback open-chat(string);
+    callback decide(string, string, int);
     border-radius: 14px;
-    background: root.data-pending ? DesignTokens.pending-bg : DesignTokens.tile;
+    background: DesignTokens.pending-bg;
     HorizontalLayout {
         padding: 10px;
         spacing: 12px;
         Rectangle {
             width: 3px;
-            visible: root.data-pending;
             background: DesignTokens.pending-bar;
         }
         AvatarView {
-            is-ai: root.data-is-ai;
-            initial: root.data-initial;
+            is-ai: root.item.is-ai;
+            initial: root.item.initial;
         }
         VerticalLayout {
-            spacing: 2px;
-            Text {
-                text: root.data-meta;
-                color: DesignTokens.mute;
-                font-size: 11px;
+            spacing: 6px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: root.item.requester;
+                    color: DesignTokens.ink;
+                    font-size: 13px;
+                    font-weight: 500;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.item.channel;
+                    color: DesignTokens.mute;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.tr-pending-wait + " " + root.item.wait;
+                    color: DesignTokens.acc;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                    horizontal-alignment: right;
+                }
             }
             Text {
-                text: root.data-text;
+                text: root.item.question;
+                color: DesignTokens.ink;
+                font-size: 14px;
+                wrap: word-wrap;
+            }
+            // A/B の各案。案の本文の横に「この案に決める」（決定は option-id で指す）。
+            for opt in root.item.options : HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    text: opt.body;
+                    color: DesignTokens.sub;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    width: 96px;
+                    height: 28px;
+                    border-radius: 14px;
+                    background: DesignTokens.primary-bg;
+                    Text {
+                        text: root.tr-decision-choose;
+                        color: DesignTokens.primary-fg;
+                        font-size: 12px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
+                    }
+                    ta := TouchArea {
+                        clicked => { root.decide(root.item.decision-id, opt.option-id, root.item.version); }
+                    }
+                }
+            }
+            // 元のチャットへ戻る導線。
+            LinkText {
+                text: root.tr-pending-open-chat;
+                touched => { root.open-chat(root.item.decision-id); }
+            }
+        }
+    }
+}
+
+// 「自分の依頼」の 1 項目（依頼の内容と進み具合。操作はしない）。
+component MyRequestRow inherits Rectangle {
+    in property <RequestItem> item;
+    height: 48px;
+    border-radius: 14px;
+    background: DesignTokens.tile;
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 12px;
+        VerticalLayout {
+            spacing: 2px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: root.item.meta;
+                    color: DesignTokens.mute;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.item.progress;
+                    color: DesignTokens.acc;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                    horizontal-alignment: right;
+                }
+            }
+            Text {
+                text: root.item.text;
                 color: DesignTokens.ink;
                 font-size: 14px;
                 overflow: elide;
@@ -370,149 +515,87 @@ component TodayItemRow inherits Rectangle {
     }
 }
 
-component TodaySectionView inherits Rectangle {
-    in property <string> heading;
-    in property <string> empty-label;
-    in property <int> count;
-    // 区切りの項目（骨組みでは代表 2 つまで）
-    in property <bool> has-item-1: true;
-    in property <bool> item-1-is-ai: false;
-    in property <string> item-1-initial;
-    in property <string> item-1-meta;
-    in property <string> item-1-text;
-    in property <bool> item-1-pending: false;
-    in property <bool> has-item-2: false;
-    in property <bool> item-2-is-ai: false;
-    in property <string> item-2-initial;
-    in property <string> item-2-meta;
-    in property <string> item-2-text;
-    in property <bool> item-2-pending: false;
-    background: DesignTokens.well;
-    border-radius: 20px;
-    VerticalLayout {
-        padding: 6px;
-        spacing: 2px;
-        HorizontalLayout {
-            padding: 10px;
-            padding-bottom: 6px;
-            spacing: 8px;
-            Text {
-                text: root.heading;
-                color: DesignTokens.ink;
-                font-size: 14px;
-                font-weight: 500;
-                vertical-alignment: center;
-            }
-            // 件数。値のバッジ用のトークンがまだないため、数字だけを並記する
-            // （トークン確定後に見た目を整える）。
-            Text {
-                text: root.count;
-                color: root.count > 0 ? DesignTokens.ink : DesignTokens.mute;
-                font-size: 13px;
-                vertical-alignment: center;
-            }
-        }
-        if root.count == 0 : Text {
-            text: root.empty-label;
-            color: DesignTokens.mute;
-            font-size: 13px;
-        }
-        if root.has-item-1 : TodayItemRow {
-            data-is-ai: root.item-1-is-ai;
-            data-initial: root.item-1-initial;
-            data-meta: root.item-1-meta;
-            data-text: root.item-1-text;
-            data-pending: root.item-1-pending;
-        }
-        if root.has-item-2 : TodayItemRow {
-            data-is-ai: root.item-2-is-ai;
-            data-initial: root.item-2-initial;
-            data-meta: root.item-2-meta;
-            data-text: root.item-2-text;
-            data-pending: root.item-2-pending;
-        }
-    }
-}
-
+// 「今日・判断待ち」の画面。区切りは inbox.rs の定義に合わせた 2 つ
+// （自分の判断待ち／自分の依頼。3 区分のモックは使わない）。
 component TodayView inherits Rectangle {
     in property <string> tr-today-title;
-    in property <string> tr-today-section-consultations;
-    in property <string> tr-today-section-pending;
-    in property <string> tr-today-section-decided;
+    in property <string> tr-today-section-mine;
+    in property <string> tr-today-section-requests;
     in property <string> tr-today-section-empty;
     in property <string> tr-today-quiet;
-    in property <int> data-consultations-count;
-    in property <int> data-pending-count;
-    in property <int> data-decided-count;
-    in property <bool> data-quiet: false;
-    in property <bool> data-c1-is-ai: false;
-    in property <string> data-c1-initial;
-    in property <string> data-c1-meta;
-    in property <string> data-c1-text;
-    in property <bool> data-c2-is-ai: false;
-    in property <string> data-c2-initial;
-    in property <string> data-c2-meta;
-    in property <string> data-c2-text;
-    in property <bool> data-p1-is-ai: false;
-    in property <string> data-p1-initial;
-    in property <string> data-p1-meta;
-    in property <string> data-p1-text;
-    in property <bool> data-d1-is-ai: false;
-    in property <string> data-d1-initial;
-    in property <string> data-d1-meta;
-    in property <string> data-d1-text;
+    in property <string> tr-pending-wait;
+    in property <string> tr-pending-open-chat;
+    in property <string> tr-decision-choose;
+    in property <[PendingItem]> pending-items;
+    in property <[RequestItem]> request-items;
+    callback open-chat(string);
+    callback decide(string, string, int);
     background: DesignTokens.tile;
-    VerticalLayout {
-        padding: 24px;
-        padding-top: 20px;
-        spacing: 18px;
-        Text {
-            text: root.tr-today-title;
-            color: DesignTokens.ink;
-            font-size: 22px;
-            font-weight: 500;
-        }
-        if root.data-quiet : Text {
-            text: root.tr-today-quiet;
-            color: DesignTokens.sub;
-            font-size: 14px;
-            horizontal-alignment: center;
-        }
-        TodaySectionView {
-            heading: root.tr-today-section-consultations;
-            empty-label: root.tr-today-section-empty;
-            count: root.data-consultations-count;
-            has-item-1: root.data-consultations-count > 0;
-            item-1-is-ai: root.data-c1-is-ai;
-            item-1-initial: root.data-c1-initial;
-            item-1-meta: root.data-c1-meta;
-            item-1-text: root.data-c1-text;
-            has-item-2: root.data-consultations-count > 1;
-            item-2-is-ai: root.data-c2-is-ai;
-            item-2-initial: root.data-c2-initial;
-            item-2-meta: root.data-c2-meta;
-            item-2-text: root.data-c2-text;
-        }
-        TodaySectionView {
-            heading: root.tr-today-section-pending;
-            empty-label: root.tr-today-section-empty;
-            count: root.data-pending-count;
-            has-item-1: root.data-pending-count > 0;
-            item-1-is-ai: root.data-p1-is-ai;
-            item-1-initial: root.data-p1-initial;
-            item-1-meta: root.data-p1-meta;
-            item-1-text: root.data-p1-text;
-            item-1-pending: true;
-        }
-        TodaySectionView {
-            heading: root.tr-today-section-decided;
-            empty-label: root.tr-today-section-empty;
-            count: root.data-decided-count;
-            has-item-1: root.data-decided-count > 0;
-            item-1-is-ai: root.data-d1-is-ai;
-            item-1-initial: root.data-d1-initial;
-            item-1-meta: root.data-d1-meta;
-            item-1-text: root.data-d1-text;
+    Flickable {
+        VerticalLayout {
+            padding: 24px;
+            padding-top: 20px;
+            spacing: 18px;
+            alignment: start;
+            Text {
+                text: root.tr-today-title;
+                color: DesignTokens.ink;
+                font-size: 22px;
+                font-weight: 500;
+            }
+            if root.pending-items.length == 0 && root.request-items.length == 0 : Text {
+                text: root.tr-today-quiet;
+                color: DesignTokens.sub;
+                font-size: 14px;
+                horizontal-alignment: center;
+            }
+            // 自分の判断待ち
+            Rectangle {
+                background: DesignTokens.well;
+                border-radius: 20px;
+                VerticalLayout {
+                    padding: 6px;
+                    spacing: 2px;
+                    SectionHeading {
+                        heading: root.tr-today-section-mine;
+                        count: root.pending-items.length;
+                    }
+                    if root.pending-items.length == 0 : Text {
+                        text: root.tr-today-section-empty;
+                        color: DesignTokens.mute;
+                        font-size: 13px;
+                    }
+                    for item in root.pending-items : PendingDecisionRow {
+                        item: item;
+                        tr-pending-wait: root.tr-pending-wait;
+                        tr-decision-choose: root.tr-decision-choose;
+                        tr-pending-open-chat: root.tr-pending-open-chat;
+                        open-chat(id) => { root.open-chat(id); }
+                        decide(id, option-id, version) => { root.decide(id, option-id, version); }
+                    }
+                }
+            }
+            // 自分の依頼
+            Rectangle {
+                background: DesignTokens.well;
+                border-radius: 20px;
+                VerticalLayout {
+                    padding: 6px;
+                    spacing: 2px;
+                    SectionHeading {
+                        heading: root.tr-today-section-requests;
+                        count: root.request-items.length;
+                    }
+                    if root.request-items.length == 0 : Text {
+                        text: root.tr-today-section-empty;
+                        color: DesignTokens.mute;
+                        font-size: 13px;
+                    }
+                    for item in root.request-items : MyRequestRow {
+                        item: item;
+                    }
+                }
+            }
         }
     }
 }
@@ -628,6 +711,108 @@ component DecisionMarkView inherits Rectangle {
             color: DesignTokens.ink;
             font-size: 12px;
             vertical-alignment: center;
+        }
+    }
+}
+
+// チャット内の判断カード（Issue 331）。判断待ち中は論点＋A/B の各案に「この案に
+// 決める」を出し、確定後は確定内容・決定者・版の表示に変わる。
+component DecisionCardView inherits Rectangle {
+    in property <string> tr-decision-card-label;
+    in property <string> tr-decision-choose;
+    in property <string> tr-decision-outcome;
+    in property <string> data-id;
+    in property <int> data-version;
+    in property <string> data-requester;
+    in property <bool> data-requester-is-ai: false;
+    in property <string> data-requester-initial;
+    in property <string> data-question;
+    in property <[DecisionOptionItem]> data-options;
+    in property <bool> data-decided: false;
+    in property <string> data-selected;
+    in property <string> data-decider;
+    callback decide(string, string, int);
+    background: DesignTokens.well;
+    border-radius: 14px;
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 10px;
+            Text {
+                text: root.tr-decision-card-label;
+                color: DesignTokens.mute;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                AvatarView {
+                    width: 22px;
+                    height: 22px;
+                    border-radius: root.data-requester-is-ai ? 6px : 11px;
+                    is-ai: root.data-requester-is-ai;
+                    initial: root.data-requester-initial;
+                }
+                Text {
+                    text: root.data-requester;
+                    color: DesignTokens.sub;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                    horizontal-alignment: right;
+                }
+            }
+        }
+        Text {
+            text: root.data-question;
+            color: DesignTokens.ink;
+            font-size: 14px;
+            font-weight: 500;
+            wrap: word-wrap;
+        }
+        // 判断待ち中: A/B の各案に「この案に決める」（確定後は列挙しない）。
+        for opt in root.data-decided ? [] : root.data-options : HorizontalLayout {
+            spacing: 10px;
+            Text {
+                text: opt.body;
+                color: DesignTokens.sub;
+                font-size: 13px;
+                wrap: word-wrap;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                width: 96px;
+                height: 28px;
+                border-radius: 14px;
+                background: DesignTokens.primary-bg;
+                Text {
+                    text: root.tr-decision-choose;
+                    color: DesignTokens.primary-fg;
+                    font-size: 12px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                ta := TouchArea {
+                    clicked => { root.decide(root.data-id, opt.option-id, root.data-version); }
+                }
+            }
+        }
+        // 確定後: 確定内容・決定者・版の表示。
+        if root.data-decided : VerticalLayout {
+            spacing: 4px;
+            Text {
+                text: root.data-selected;
+                color: DesignTokens.ink;
+                font-size: 13px;
+                font-weight: 600;
+                wrap: word-wrap;
+            }
+            Text {
+                text: root.tr-decision-outcome + " · " + root.data-decider + " · v" + root.data-version;
+                color: DesignTokens.sub;
+                font-size: 11px;
+            }
         }
     }
 }
@@ -908,8 +1093,23 @@ component ChannelView inherits Rectangle {
     in property <string> tr-ext-fix;
     in property <string> tr-ext-lock-note;
     in property <string> tr-ext-sent;
+    in property <string> tr-decision-card-label;
+    in property <string> tr-decision-choose;
+    in property <string> tr-decision-outcome;
     in property <string> tr-composer-placeholder;
     in property <string> data-day-label;
+    // チャット内の判断カード（Issue 331）
+    in property <bool> data-decision-visible: false;
+    in property <string> data-decision-id;
+    in property <int> data-decision-version;
+    in property <string> data-decision-requester;
+    in property <bool> data-decision-requester-is-ai: false;
+    in property <string> data-decision-requester-initial;
+    in property <string> data-decision-question;
+    in property <[DecisionOptionItem]> data-decision-options;
+    in property <bool> data-decision-decided: false;
+    in property <string> data-decision-selected;
+    in property <string> data-decision-decider;
     in property <string> data-msg1-sender;
     in property <bool> data-msg1-is-ai: false;
     in property <string> data-msg1-initial;
@@ -943,6 +1143,7 @@ component ChannelView inherits Rectangle {
     callback fix-pressed();
     callback acknowledge-pressed();
     callback view-work-pressed();
+    callback decide-option(string, string, int);
     background: DesignTokens.tile;
     VerticalLayout {
         // 時系列
@@ -1017,6 +1218,23 @@ component ChannelView inherits Rectangle {
                     data-option-a: root.data-handoff-option-a;
                     data-option-b: root.data-handoff-option-b;
                     acknowledge-pressed => { root.acknowledge-pressed(); }
+                }
+                // チャット内の判断カード（確定後は確定表示に変わる）
+                if root.data-decision-visible : DecisionCardView {
+                    tr-decision-card-label: root.tr-decision-card-label;
+                    tr-decision-choose: root.tr-decision-choose;
+                    tr-decision-outcome: root.tr-decision-outcome;
+                    data-id: root.data-decision-id;
+                    data-version: root.data-decision-version;
+                    data-requester: root.data-decision-requester;
+                    data-requester-is-ai: root.data-decision-requester-is-ai;
+                    data-requester-initial: root.data-decision-requester-initial;
+                    data-question: root.data-decision-question;
+                    data-options: root.data-decision-options;
+                    data-decided: root.data-decision-decided;
+                    data-selected: root.data-decision-selected;
+                    data-decider: root.data-decision-decider;
+                    decide(id, option-id, version) => { root.decide-option(id, option-id, version); }
                 }
                 MessageRow {
                     data-sender: root.data-msg3-sender;
@@ -1367,11 +1585,15 @@ export component MainWindow inherits Window {
     in property <string> tr-search-placeholder;
     in property <string> tr-search-shortcut;
     in property <string> tr-today-title;
-    in property <string> tr-today-section-consultations;
-    in property <string> tr-today-section-pending;
-    in property <string> tr-today-section-decided;
+    in property <string> tr-today-section-mine;
+    in property <string> tr-today-section-requests;
     in property <string> tr-today-section-empty;
     in property <string> tr-today-quiet;
+    in property <string> tr-pending-wait;
+    in property <string> tr-pending-open-chat;
+    in property <string> tr-decision-card-label;
+    in property <string> tr-decision-choose;
+    in property <string> tr-decision-outcome;
     in property <string> tr-unread-divider;
     in property <string> tr-ai-badge;
     in property <string> tr-decision-mark;
@@ -1437,25 +1659,21 @@ export component MainWindow inherits Window {
     in property <string> data-ai-3-presence;
     in property <string> data-channel-title;
     in property <string> data-channel-members;
-    in property <int> data-consultations-count;
-    in property <int> data-pending-count;
-    in property <int> data-decided-count;
-    in property <bool> data-c1-is-ai: false;
-    in property <string> data-c1-initial;
-    in property <string> data-c1-meta;
-    in property <string> data-c1-text;
-    in property <bool> data-c2-is-ai: false;
-    in property <string> data-c2-initial;
-    in property <string> data-c2-meta;
-    in property <string> data-c2-text;
-    in property <bool> data-p1-is-ai: false;
-    in property <string> data-p1-initial;
-    in property <string> data-p1-meta;
-    in property <string> data-p1-text;
-    in property <bool> data-d1-is-ai: false;
-    in property <string> data-d1-initial;
-    in property <string> data-d1-meta;
-    in property <string> data-d1-text;
+    // 「今日・判断待ち」の画面の一覧（inbox.rs の 2 区分）。
+    in property <[PendingItem]> pending-items;
+    in property <[RequestItem]> request-items;
+    // チャット内の判断カード（Issue 331）。
+    in property <bool> data-decision-visible: false;
+    in property <string> data-decision-id;
+    in property <int> data-decision-version;
+    in property <string> data-decision-requester;
+    in property <bool> data-decision-requester-is-ai: false;
+    in property <string> data-decision-requester-initial;
+    in property <string> data-decision-question;
+    in property <[DecisionOptionItem]> data-decision-options;
+    in property <bool> data-decision-decided: false;
+    in property <string> data-decision-selected;
+    in property <string> data-decision-decider;
     in property <string> data-day-label;
     in property <string> data-msg1-sender;
     in property <string> data-msg1-initial;
@@ -1511,6 +1729,11 @@ export component MainWindow inherits Window {
     callback close-pane-pressed();
     callback back-to-thread-pressed();
     callback view-work-pressed();
+    // 判断待ちの決定（decision-id, option-id, 見ていた版）。一覧の項目と
+    // チャット内のカードの両方が同じ callback を通る。
+    callback decide-option(string, string, int);
+    // 一覧の項目から対象のチャットへ戻る（decision-id）。
+    callback open-decision-chat(string);
 
     background: DesignTokens.bg;
     // トップレベルメニュー。About ダイアログへの到達経路（Issue 237）。Window の中に
@@ -1567,31 +1790,17 @@ export component MainWindow inherits Window {
                 }
                 if root.show-today : TodayView {
                     tr-today-title: root.tr-today-title;
-                    tr-today-section-consultations: root.tr-today-section-consultations;
-                    tr-today-section-pending: root.tr-today-section-pending;
-                    tr-today-section-decided: root.tr-today-section-decided;
+                    tr-today-section-mine: root.tr-today-section-mine;
+                    tr-today-section-requests: root.tr-today-section-requests;
                     tr-today-section-empty: root.tr-today-section-empty;
                     tr-today-quiet: root.tr-today-quiet;
-                    data-consultations-count: root.data-consultations-count;
-                    data-pending-count: root.data-pending-count;
-                    data-decided-count: root.data-decided-count;
-                    data-quiet: root.data-consultations-count + root.data-pending-count + root.data-decided-count == 0;
-                    data-c1-is-ai: root.data-c1-is-ai;
-                    data-c1-initial: root.data-c1-initial;
-                    data-c1-meta: root.data-c1-meta;
-                    data-c1-text: root.data-c1-text;
-                    data-c2-is-ai: root.data-c2-is-ai;
-                    data-c2-initial: root.data-c2-initial;
-                    data-c2-meta: root.data-c2-meta;
-                    data-c2-text: root.data-c2-text;
-                    data-p1-is-ai: root.data-p1-is-ai;
-                    data-p1-initial: root.data-p1-initial;
-                    data-p1-meta: root.data-p1-meta;
-                    data-p1-text: root.data-p1-text;
-                    data-d1-is-ai: root.data-d1-is-ai;
-                    data-d1-initial: root.data-d1-initial;
-                    data-d1-meta: root.data-d1-meta;
-                    data-d1-text: root.data-d1-text;
+                    tr-pending-wait: root.tr-pending-wait;
+                    tr-pending-open-chat: root.tr-pending-open-chat;
+                    tr-decision-choose: root.tr-decision-choose;
+                    pending-items: root.pending-items;
+                    request-items: root.request-items;
+                    open-chat(id) => { root.open-decision-chat(id); }
+                    decide(id, option-id, version) => { root.decide-option(id, option-id, version); }
                 }
                 if !root.show-today : ChannelView {
                     tr-unread-divider: root.tr-unread-divider;
@@ -1617,7 +1826,21 @@ export component MainWindow inherits Window {
                     tr-ext-fix: root.tr-ext-fix;
                     tr-ext-lock-note: root.tr-ext-lock-note;
                     tr-ext-sent: root.tr-ext-sent;
+                    tr-decision-card-label: root.tr-decision-card-label;
+                    tr-decision-choose: root.tr-decision-choose;
+                    tr-decision-outcome: root.tr-decision-outcome;
                     tr-composer-placeholder: root.tr-composer-placeholder;
+                    data-decision-visible: root.data-decision-visible;
+                    data-decision-id: root.data-decision-id;
+                    data-decision-version: root.data-decision-version;
+                    data-decision-requester: root.data-decision-requester;
+                    data-decision-requester-is-ai: root.data-decision-requester-is-ai;
+                    data-decision-requester-initial: root.data-decision-requester-initial;
+                    data-decision-question: root.data-decision-question;
+                    data-decision-options: root.data-decision-options;
+                    data-decision-decided: root.data-decision-decided;
+                    data-decision-selected: root.data-decision-selected;
+                    data-decision-decider: root.data-decision-decider;
                     data-day-label: root.data-day-label;
                     data-msg1-sender: root.data-msg1-sender;
                     data-msg1-initial: root.data-msg1-initial;
@@ -1651,6 +1874,7 @@ export component MainWindow inherits Window {
                     fix-pressed => { root.fix-pressed(); }
                     acknowledge-pressed => { root.acknowledge-pressed(); }
                     view-work-pressed => { root.view-work-pressed(); }
+                    decide-option(id, option-id, version) => { root.decide-option(id, option-id, version); }
                 }
             }
         }
