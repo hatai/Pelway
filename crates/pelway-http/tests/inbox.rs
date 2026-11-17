@@ -32,6 +32,8 @@ fn new_card(id: &str, decider: &str, requester: &str, deadline: Option<TsMs>) ->
             attachments: Vec::new(),
             account: "acct-cw-1".to_owned(),
             scope: Vec::new(),
+            reference_version: None,
+            integration_version: None,
         },
         requester: MemberId::from(requester),
         decider: Decider::Member(MemberId::from(decider)),
