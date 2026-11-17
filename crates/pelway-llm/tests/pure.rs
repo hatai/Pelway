@@ -155,6 +155,18 @@ fn redact_url_for_log_redacts_userinfo_and_secret_query_values() {
         assert_eq!(pelway_llm::config::redact_url_for_log(url), url);
     }
 
+    // fragment は丸ごと落とす（`#access_token=...` など OAuth implicit flow の
+    // 秘密の載せ場所。review round 1 の must-fix）。
+    let redacted =
+        pelway_llm::config::redact_url_for_log("https://example.com/v1#access_token=sk-xyz");
+    assert_eq!(redacted, "https://example.com/v1");
+    assert!(!redacted.contains("sk-xyz"), "{redacted}");
+    // ユーザーが確認用に付けた無害な fragment も落とす（中身を見て判断しない）。
+    assert_eq!(
+        pelway_llm::config::redact_url_for_log("http://127.0.0.1:9/v1#section"),
+        "http://127.0.0.1:9/v1"
+    );
+
     // URL として解釈できないものは中身を出さない。
     assert_eq!(pelway_llm::config::redact_url_for_log("not a url"), "***");
 }

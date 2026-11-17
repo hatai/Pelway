@@ -556,4 +556,15 @@ fn endpoint_log_line_redacts_url_secrets() {
             pelway_llm::config::ZAI_BASE_URL
         )
     );
+
+    // fragment に秘密が載っている場合も起動時ログに出ない
+    // （review round 1 の must-fix）。
+    let config = DemoLlmConfig::from_vars(vars(&[(
+        CUSTOM_BASE_URL_ENV,
+        "http://127.0.0.1:9/v1#access_token=sk-local",
+    )]))
+    .expect("config");
+    let line = config.endpoint_log_line();
+    assert!(!line.contains("sk-local"), "{line}");
+    assert!(!line.contains('#'), "{line}");
 }

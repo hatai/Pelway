@@ -60,8 +60,9 @@ pub fn custom_base_url_allowed(base_url: &str) -> bool {
 /// （`user:pass@`）は丸ごと `***` に、クエリの `key` / `token` / `api_key` /
 /// `access_token` など（キー名を小文字化して `_`・`-` を抜いた形が
 /// `key`・`token`・`secret`・`password` を含むもの）は値を `***` に伏せる
-/// （キー名は残す）。どちらも無い URL はそのまま返す。URL として解釈でき
-/// ないものは中身を出さず全体を `***` にする。
+/// （キー名は残す）。fragment（`#` 以降）は秘密の載せ場所になりうるため
+/// 中身を見ずに丸ごと落とす。どれも無い URL はそのまま返す。URL として
+/// 解釈できないものは中身を出さず全体を `***` にする。
 pub fn redact_url_for_log(base_url: &str) -> String {
     let Ok(mut parsed) = url::Url::parse(base_url) else {
         return "***".to_owned();
@@ -71,6 +72,9 @@ pub fn redact_url_for_log(base_url: &str) -> String {
         let _ = parsed.set_username("***");
         let _ = parsed.set_password(None);
     }
+    // fragment は丸ごと落とす（`#access_token=...` など OAuth implicit flow の
+    // 秘密の載せ場所。中身を見て判断しない）。
+    parsed.set_fragment(None);
     // クエリは値だけ伏せる。キー名の正規化（小文字化・`_`/`-` 除去）で
     // `api_key`・`api-key`・`apiKey` など同一視し、秘密を含みうる名前は
     // 過剰側（含む一致）で判定する。
