@@ -115,6 +115,50 @@ fn error_mapping_not_sent_for_pre_send_failures() {
     ));
 }
 
+/// 接続先 URL のログ向けの伏せ（Issue #404）。userinfo は丸ごと、クエリの
+/// `key` / `token` などの値は値だけ伏せ、どちらも無い URL はそのまま返る。
+#[test]
+fn redact_url_for_log_redacts_userinfo_and_secret_query_values() {
+    // userinfo あり: user も password も出ず、伏せの `***@` だけが残る。
+    let redacted = pelway_llm::config::redact_url_for_log("https://user:pass@example.com/v1");
+    assert_eq!(redacted, "https://***@example.com/v1");
+    // password だけの URL（`user:@` と同形）でも userinfo は残さない。
+    let redacted = pelway_llm::config::redact_url_for_log("https://:pass@example.com/v1");
+    assert_eq!(redacted, "https://***@example.com/v1");
+
+    // クエリに key/token あり: 値は伏せ、キー名は残す。秘密でない値は残る。
+    let redacted = pelway_llm::config::redact_url_for_log(
+        "https://example.com/v1?key=abc&token=def&api_key=ghi&access_token=jkl&other=1",
+    );
+    assert_eq!(
+        redacted,
+        "https://example.com/v1?key=***&token=***&api_key=***&access_token=***&other=1"
+    );
+    assert!(!redacted.contains("abc"), "{redacted}");
+    assert!(!redacted.contains("jkl"), "{redacted}");
+    // キー名の正規化（大文字・`-`・キャメルケース）でも秘密キーと判定する。
+    let redacted = pelway_llm::config::redact_url_for_log(
+        "https://example.com/v1?Access-Token=t&client-secret=s&apiKey=k",
+    );
+    assert_eq!(
+        redacted,
+        "https://example.com/v1?Access-Token=***&client-secret=***&apiKey=***"
+    );
+
+    // どちらもなし: 既知の接続先はそのまま返る（不要な伏せをしない）。
+    for url in [
+        pelway_llm::config::ZAI_BASE_URL,
+        pelway_llm::config::OPENAI_BASE_URL,
+        "http://127.0.0.1:9/v1",
+        "http://[::1]:9/v1",
+    ] {
+        assert_eq!(pelway_llm::config::redact_url_for_log(url), url);
+    }
+
+    // URL として解釈できないものは中身を出さない。
+    assert_eq!(pelway_llm::config::redact_url_for_log("not a url"), "***");
+}
+
 /// スキーマ検証（部分実装）の確認。
 #[test]
 fn schema_validation_subset() {
