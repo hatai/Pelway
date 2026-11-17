@@ -11,3 +11,15 @@
 5. 改善案: .agents/skills/implement-issue/SKILL.md の「決まり（毎回守る）」に「verify の失敗が自分の変更と無関係な既存テストの揺らぎ（main と同一ツリーでも失敗し、main の CI は成功する）のときは、その証拠を PR 本文に記録して PR の CI で確認し、進んでよい」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 2）
+
+対象 head: 5688c000b66f2a443dd9b3c50fbb755ca0b7ff63
+
+1. 詰まった箇所: `mise run verify`: round 1 と同じ `scripts/tests/conductor-watch-ensure.test.sh` の環境依存の揺らぎのみで失敗（他 27 系列は all passed。PR の CI では round 1 で通過済み）。
+2. 曖昧だった文: 「sandbox controller | 信頼するホスト/コンテナランタイム側の限定API」（docs/technical/v0.7/body/01-architecture.md「ホストとコンテナ」）。この「信頼側」の記述から controller を `sandbox` ネットワークのみに置く配置を書いたが、同章のフロー図 `RUN --> CTRL` と噛み合わず、レビューの must-fix になった。
+3. 仮定と解釈: must-fix の提示した修正（controller は `app` と `sandbox` の両方、task sandbox は `sandbox` のみ・`data` 非参加）を採った。選ばなかった解釈: dispatch 専用の別ネットワークを足す形（レビューが「別の形にするなら明記」と認めた代替）。v0.7 05 の `app`/`sandbox` 2網分離の枠内で収まり、図の辺をそのまま満たす前者が最小の変更のため。
+4. 足りなかった情報・検証手段: 配置表を書いた時点で正本の図の辺（`RUN --> CTRL`）を表の各行の到達性として突き合わせていなかった。修正時に 01 のフロー図の本体内部の辺（API→DB、RUN→CTRL、CTRL→SB 等）を表中の配置で確認し直した。
+5. 改善案: .agents/skills/implement-issue/SKILL.md の「よくある失敗」に「設計文書で構成要素の配置を書くとき、参照した正本の構成図の辺を 1 つずつ表中の配置で到達できるか突し合わせずに書く」を足す。
+
+使ったスキル: implement-issue
