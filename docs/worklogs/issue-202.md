@@ -1,0 +1,13 @@
+# Issue #202 の作業ログ
+
+## 実装者メモ（round 1）
+
+対象 head: aa33fcbcb98f16d278d960a59702067dcb93b3e4
+
+1. 詰まった箇所: 手順 6 の `mise run verify`: `scripts/tests/conductor-watch-ensure.test.sh` の "ensure restarts watch" がこの環境で失敗する。`git stash -u` で自分の変更を退避した main と同一のツリーでも同じ失敗になり、main の HEAD (b452cce) の CI は `mise run verify: success`。本 PR の変更（docs 2 ファイル＋テスト 1 追加）はこのテストの対象に触れないため環境依存の揺らぎと判断し、PR の CI で改めて確認する（PR 本文に証拠を記録）。
+2. 曖昧だった文: 「本番トポロジの構成要素…と配置が文書化されている → 技術仕様または運用文書の該当箇所を目視で確認」（Issue #202 本文の受け入れ条件）。「技術仕様または運用文書」のどちらへ書くかが決まっていない。
+3. 仮定と解釈: 決定の記録はこのリポジトリの流儀に従い ADR 0012 として書いた（ADR 0011 と同じ形: ADR＋構造テスト scripts/tests/production-topology-docs.test.sh）。技術仕様 v0.7 の body への新章追加（統合版で章構成が固定）と docs/ 直下への新規運用文書（ADR と二重管理になる）は選ばなかった。発見性のため docs/technical.md の「詳細と根拠」へ ADR 0012 への参照を 1 行足した。
+4. 足りなかった情報・検証手段: 関連情報の Rakazo の URL が infra/compose・infra/systemd のディレクトリを指すのみで、雛形として採る個々のファイルが分からない。`scripts/agent-gh dev api repos/elie222/rakazo/contents/...` で docker-compose.prod.yml・Caddyfile.prod・harden-host.sh・timer ユニットの中身を確認してから翻案した。
+5. 改善案: .agents/skills/implement-issue/SKILL.md の「決まり（毎回守る）」に「verify の失敗が自分の変更と無関係な既存テストの揺らぎ（main と同一ツリーでも失敗し、main の CI は成功する）のときは、その証拠を PR 本文に記録して PR の CI で確認し、進んでよい」を足す。
+
+使ったスキル: implement-issue
