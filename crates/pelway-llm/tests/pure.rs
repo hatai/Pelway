@@ -144,6 +144,22 @@ fn redact_url_for_log_redacts_userinfo_and_secret_query_values() {
         redacted,
         "https://example.com/v1?Access-Token=***&client-secret=***&apiKey=***"
     );
+    // 資格情報の名前（auth・credential。review round 2 の must-fix）も伏せる
+    // （`authorization`・`credentials` などの表記ゆれも含む一致でカバー）。
+    let redacted = pelway_llm::config::redact_url_for_log(
+        "https://example.com/v1?auth=Bearer%20xyz&credential=abc&other=1",
+    );
+    assert_eq!(
+        redacted,
+        "https://example.com/v1?auth=***&credential=***&other=1"
+    );
+    let redacted = pelway_llm::config::redact_url_for_log(
+        "https://example.com/v1?Authorization=Basic%20abc&client-credentials=cc",
+    );
+    assert_eq!(
+        redacted,
+        "https://example.com/v1?Authorization=***&client-credentials=***"
+    );
 
     // どちらもなし: 既知の接続先はそのまま返る（不要な伏せをしない）。
     for url in [

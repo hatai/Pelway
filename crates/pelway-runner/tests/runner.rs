@@ -567,4 +567,15 @@ fn endpoint_log_line_redacts_url_secrets() {
     let line = config.endpoint_log_line();
     assert!(!line.contains("sk-local"), "{line}");
     assert!(!line.contains('#'), "{line}");
+
+    // 資格情報の名前（auth）のクエリも起動時ログに出ない
+    // （review round 2 の must-fix）。
+    let config = DemoLlmConfig::from_vars(vars(&[(
+        CUSTOM_BASE_URL_ENV,
+        "http://127.0.0.1:9/v1?auth=Bearer%20local",
+    )]))
+    .expect("config");
+    let line = config.endpoint_log_line();
+    assert!(!line.contains("Bearer"), "{line}");
+    assert!(line.contains("auth=***"), "{line}");
 }
