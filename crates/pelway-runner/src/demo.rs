@@ -166,10 +166,7 @@ impl DemoLlmConfig {
         get: impl Fn(&str) -> Option<String>,
     ) -> Arc<dyn DynChatGateway> {
         // 起動時に接続先をログに出す（QA 点検 2026-11-17。キーや要求本文は出さない）。
-        eprintln!(
-            "pelway-runner: LLM endpoint: {} {}",
-            self.provider.name, self.provider.base_url
-        );
+        eprintln!("{}", self.endpoint_log_line());
         if !key_is_usable(get(&self.api_key_env).as_deref()) {
             return Arc::new(ScriptGateway);
         }
@@ -190,6 +187,17 @@ impl DemoLlmConfig {
             // 組み立てに失敗しても落ちずに台本モードで起動する。
             Err(_) => Arc::new(ScriptGateway),
         }
+    }
+
+    /// 起動時ログの 1 行（提供元名と接続先。Issue #404 で接続先 URL は
+    /// [`pelway_llm::config::redact_url_for_log`] の伏せを通す。キーや要求本文は
+    /// 出さない）。
+    pub fn endpoint_log_line(&self) -> String {
+        format!(
+            "pelway-runner: LLM endpoint: {} {}",
+            self.provider.name,
+            pelway_llm::config::redact_url_for_log(&self.provider.base_url)
+        )
     }
 }
 
