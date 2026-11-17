@@ -38,6 +38,10 @@ while true; do
   # 巡回状態の記録を書き換えさせない）。
   scripts/agent-gh dev issue list --state all --limit "$IL" --json number,state,labels > "$D/issues.json" 2>/dev/null || rm -f "$D/issues.json"
   scripts/agent-gh dev pr list --state all --limit "$PL" --json number,state,isDraft,headRefName,reviewDecision,statusCheckRollup > "$D/prs.json" 2>/dev/null || rm -f "$D/prs.json"
+  # ラベルイベント（issues/events は PR のラベルイベントも含む）。ラベル操作の主体検査
+  # （runbook の権限表）に使う。取得に失敗したらファイルを消す（python 側で取得失敗と
+  # 扱い、前回の処理済み ID を保つ）。
+  scripts/agent-gh dev api "/repos/hatai/Pelway/issues/events?per_page=100" > "$D/label-events.json" 2>/dev/null || rm -f "$D/label-events.json"
   python3 -I - "$D" "$P" "$IL" "$PL" <<'PY'
 import json, sys, time, os, re
 from datetime import datetime
@@ -49,7 +53,13 @@ try: prev = json.load(open(sp))
 except Exception: prev = None
 cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("since", {}),
        "badtitle": [] if prev is None else prev.get("badtitle", []),
+       "label_seen": [] if prev is None else prev.get("label_seen", []),
        "due_warned": {} if prev is None else prev.get("due_warned", {})}
+# ラベル操作の主体検査（runbook の「1. 役割と触ってよい範囲」の権限表）。
+# needs-human を外せるのは hatai のみ。automerge の付け外しは hatai と pelway-dev[bot]
+# に限る（許可リストは未決事項: Grok Bot の GitHub アカウントが確認できたら足す）。
+NEEDS_HUMAN_REMOVERS = {"hatai"}
+AUTOMERGE_ACTORS = {"hatai", "pelway-dev[bot]"}
 try: threads = json.load(open(os.path.join(d, "threads.json")))
 except Exception: threads = []
 try: issues = json.load(open(os.path.join(d, "issues.json")))
@@ -91,6 +101,33 @@ for pr in prs:
     n = str(pr["number"]); cur["prs"][n] = key
     if prev is not None and prev["prs"].get(n) != key and (n in prev["prs"] or pr["state"] == "OPEN"):
         print(f"PR #{n} {pr['headRefName']} {key}", flush=True)
+# ラベルイベントの主体検査。初回観測と label_seen を持たない旧状態からの更新は
+# 基準化だけ（過去のイベントを遡って報告しない）。取得失敗時は前回の処理済み ID を
+# 引き継ぎ、次の巡回で新しいイベントだけを報告する。
+try: levs = json.load(open(os.path.join(d, "label-events.json")))
+except Exception: levs = None
+if not isinstance(levs, list): levs = None
+if levs is not None and prev is not None and "label_seen" in prev:
+    seen = set(cur["label_seen"])
+    for e in levs:
+        if not isinstance(e, dict): continue
+        evid = e.get("id")
+        if evid is None or evid in seen: continue
+        kind, lab = e.get("event"), ((e.get("label") or {}).get("name") or "")
+        actor = ((e.get("actor") or {}).get("login") or "")
+        iss = e.get("issue") if isinstance(e.get("issue"), dict) else {}
+        num = iss.get("number")
+        what = f"PR #{num}" if iss.get("pull_request") else f"issue #{num}"
+        bad = None
+        if kind == "unlabeled" and lab == "needs-human" and actor not in NEEDS_HUMAN_REMOVERS:
+            bad = "needs-human"
+        elif kind in ("labeled", "unlabeled") and lab == "automerge" and actor not in AUTOMERGE_ACTORS:
+            bad = "automerge"
+        if bad:
+            print(f"LABEL bad-actor {kind} {bad} {what} by={actor}", flush=True)
+        seen.add(evid)
+if levs is not None:
+    cur["label_seen"] = [e.get("id") for e in levs if isinstance(e, dict)]
 # 読み取りに失敗して空になったときは、前回の状態を残す（全スレッドを「新規」と誤報しない）。
 if prev is not None and not threads: cur["threads"] = prev["threads"]
 if prev is not None and not prs: cur["prs"] = prev["prs"]

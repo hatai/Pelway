@@ -12,7 +12,7 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 | してよいこと | 方法 |
 |---|---|
 | スレッドを立てる・指示を送る・様子を見る | 指揮役が T3 のスレッドとして動いているときはネイティブの `t3_thread_launch`（作成）と `t3_thread_send`（指示）。Grok Bot（クラウド）のときは T3 Connect の MCP（`t3 thread start` / `send` / `show` / `list` と同じ操作） |
-| ラベルを付け外しする（`agent:working`、`agent:devin`、`needs-human`。`ready-for-agent` は外さない） | GitHub |
+| ラベルを付け外しする（`agent:working`、`agent:devin`、`needs-human` の付与。`ready-for-agent` は外さない。`needs-human` を外すのは hatai のみ。指揮役は Grok Bot 経由で解除を依頼する） | GitHub |
 | Issue にコメントする | GitHub |
 | Projects ボード `Pelway agent team`（https://github.com/users/hatai/projects/7）のカードを読み、Status を書き換える | 人間の名義の `gh`（読み取り `read:project`、書き込み `project` スコープ）。`scripts/agent-gh` は使わない |
 | Issue・PR・レビュー・CI の結果を読む | GitHub |
@@ -21,6 +21,8 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 | `pelway-review` が Approve し必須チェックが通った PR に `automerge` ラベルを付けて Kodiak のキューに入れ、マージを確認する | `scripts/agent-gh dev pr edit <M> --add-label automerge`（条件は skill `command-team` の「マージ」）。マージの実行は Kodiak（GitHub App）が行い、指揮役がマージコマンドを叩くことはない。キューの切り戻しは hatai の admin マージだけが行う |
 
 しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更（`actions.lock` の再生成は例外。正本は `docs/superpowers/specs/agent-team.md` の「制約」）、スレッドの取り消し。
+
+ラベル操作の主体制限: `needs-human` を hatai 以外の主体が外した場合と、`automerge` を `hatai`・`pelway-dev[bot]` 以外の主体が付け外した場合は、それ自体を手順違反として記録し、Grok Bot に知らせる。見張り（conductor-watch）がラベルイベントの主体を検査し、違反を `LABEL bad-actor` の行で watch.log に出す（「指揮役の定期巡回（スケジュール起床）」）。
 
 スレッドに送る指示は Issue 番号か PR 番号と、使う skill 名だけにする（スレッドを立てる指示には、2 行目に割り当ての行 `Assigned: ...` を入れる。書式は skill `command-team`）。作業ルールは AGENTS.md と skill に書いてあるので、手順書の中身をスレッドに書き写さない。
 
@@ -80,6 +82,7 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 
 - マージの確認は、notify-grokbot の `pull_request`（`closed`、`merged: true`）の通知と、巡回での PR の状態で行う。マージされれば従来どおり Issue から `agent:working`・`agent:devin` を外す
 - Kodiak がコンフリクト等でマージできないときは、Kodiak が PR にコメントして `automerge` ラベルを外す（`.kodiak.toml` の `merge.notify_on_conflict` の既定）。巡回で、Approve 済みなのに `automerge` ラベルが無い PR に Kodiak のマージ不可コメントがあるか、またはラベルが付いたまま長時間 open のままのものを検知する。前者は手当スレッドを立てて main の取り込みと衝突解消をさせ、終わったら指揮役が `automerge` ラベルを付け直す。後者（キューが詰まる・応答しない）は hatai の admin マージへの切り戻しの判断材料として人間に知らせる
+- `automerge` ラベルの付け外しは `hatai` と `pelway-dev[bot]` に限る。conductor-watch がラベルイベントの主体を検査し、許可リスト（`scripts/conductor-watch.sh` の定数。Grok Bot が使う GitHub アカウントが確認できたら足す）外の操作を `LABEL bad-actor` 行で watch.log に出す
 
 ### 割り当て・停止・再開
 
@@ -92,7 +95,7 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 - 停止処理: 作業状態の印を「停止処理中」にし、停止処理 ID を発行して、成功した段を印に残しながら、スレッドを止め、進捗コメント（定型の印「[stop-processing] <停止処理 ID>」を含む）を書き、`needs-human` を付けて Needs human に置き、人間に指示を仰ぐ（この人間待ちにも、巡回スクリプトが次回確認時刻を目安で設定する。「10. 巡回状態の補助記録」の「次回確認時刻（フォローアップタイマー）」）。再試行時は先にその ID のコメントがあるかを照合する。Needs human の戻り先は Backlog にはせず「人間の判断後に再開手順で処理する」とする。停止中は枠を消費しない
 - 再開手順（人間の判断後）:
   1. 印を「再開処理中」にする
-  2. `needs-human` を外す（戻り先は使わない）
+  2. hatai が `needs-human` を外すのを待つ（外すのは hatai のみ。指揮役は、判断が済んでいるのに外れていないときは Grok Bot 経由で hatai に解除を依頼する。戻り先は使わない）
   3. `agent:working`・`agent:devin` は付けたままにする
   4. ステータスを Todo に置き、印を「再開待ち」にする
   5. 次の巡回で、停止したスレッドは稼働中として扱わず、同じブランチ／PR で新しいスレッドを起動して引き継ぐ。起動が成功したら印を下ろし、枠の消費を再開し、その場で導出値に再計算して更新し、前回ステータスとして保存する。途中失敗は巻き戻さず、成功した段から前進復旧する。起動の段で枠が不足したら、印は「再開待ち」のまま Todo で待ち、次の巡回で再試行する。起動を試みた後は、照合が終わるまでその割り当てを枠に計上する
@@ -117,6 +120,7 @@ conductor-watch は検知（`watch.log` へのイベント出力）だけを行�
 - 未読の位置は `patrol-state.json` の `watch_log_offset`（`watch.log` の行番号）で管理する。巡回で読み込んだ分だけ位置を進めて書き戻す
 - scheduled task は指揮役スレッドに bind する（`bindToCurrentThread`）。指揮役が代わったら（代行の開始・交代）、新しい指揮役スレッドで `schedule_task` を作り直し、古いタスクは `delete_scheduled_task` で削除する。`patrol-state.json` の `scheduled_task_id` に現行のタスク ID を記録する
 - `watch.log` からスレッドへの転送スクリプト（`t3` CLI の `acp-mcp-call` 経由）は使わない。`t3` CLI は実行中の T3 サーバーと `~/.t3/userdata` の所有権が衝突して送信に失敗することがあり、送信先スレッド ID の固定も指揮役の交代で壊れるため
+- `LABEL bad-actor` の行は、許可されていない主体によるラベル操作（`needs-human` の解除、`automerge` の付け外し）の検知である。手順違反として該当の Issue・PR に記録し、Grok Bot と人間に知らせる（「1. 役割と触ってよい範囲」のラベル操作の主体制限）
 
 ## 3. 同時数と順番待ち
 
@@ -266,6 +270,15 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 `stall_reason` が `ci-failed-twice` のときは `thread_id` が空。`issue_number` から実装スレッドを探す。
 
 しきい値（45 分、`round` 4）を変えるときは、この手順書と仕様の両方を直す。
+
+### Claude 不能時の例外
+
+Claude（`claude_review`）が使えない間のレビュー運用の例外。Codex の承認だけ進めてよいのは、差分が文書だけの PR（コード・秘密・外部接続・権限に触れないもの）に限る。それらに触れる PR と、Claude か Devin のレビューが必須の PR は `needs-human` を付けたまま停止し、Claude の復旧を待つ（この例外は使えない）。
+
+文書だけの PR を Codex の承認だけで進めるときは、作業ログ（`docs/worklogs/`）に次を残す:
+
+- 障害が始まった時刻と、Claude のレビューの停滞の証拠（レビューが進まないままの状態の記録）
+- 抜き取りレビューは「未実施」と記録する。Claude の復旧後に行う
 
 ## 8. まとめ
 
