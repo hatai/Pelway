@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/write-pull-request/SKILL.md` の「手順 3」の `api PATCH /repos/...` の記載を `api --method PATCH /repos/...` に直す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: ccaaf26838f40e29691e3d1954bae142f9ae4753
+
+1. 詰まった箇所: crates/pelway-llm/tests/pure.rs: 期待値に `%20` を書いたら、`url` クレートの form-urlencoded 再シリアライズで `+` に置き換わり red の出力が `Bearer+xyz` になった（伏せ後は値ごと `***` になるので最終的な期待値には影響しない）。
+2. 曖昧だった文: 「少なくとも `auth` と `credential` を秘密キー名として伏せ、各形式のテストを追加してください」（PR #417 round 2 の Codex レビューの must-fix）
+3. 仮定と解釈: 「少なくとも」を「must-fix の最小対応は `auth`・`credential` の 2 目印の追加」と解釈した。Claude レビューの nit の勧め（クエリの値を名前によらずすべて `***` にする。目印列挙の廃止）は approve 側の提案で nit であるため採らなかった（Issue への対応コメントに経緯を記録）。`auth`・`credential` は既存と同じ含む一致で足し、`authorization`・`credentials` などの表記ゆれをカバーした。
+4. 足りなかった情報・検証手段: なし（must-fix に対象キー名まで指定があった）。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「やること」の書き方に「クエリなど名前の列挙で防ぐ類は、網羅方式（列挙 or 全件伏せ）の基準まで書く」を足す。
+
+使ったスキル: implement-issue
