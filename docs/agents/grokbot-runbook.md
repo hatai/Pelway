@@ -22,7 +22,7 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 
 しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更（`actions.lock` の再生成は例外。正本は `docs/superpowers/specs/agent-team.md` の「制約」）、スレッドの取り消し。
 
-ラベル操作の主体制限: `needs-human` を hatai 以外の主体が外した場合と、`automerge` を `hatai`・`pelway-dev[bot]` 以外の主体が付け外した場合は、それ自体を手順違反として記録し、Grok Bot に知らせる。見張り（conductor-watch）がラベルイベントの主体を検査し、違反を `LABEL bad-actor` の行で watch.log に出す（「指揮役の定期巡回（スケジュール起床）」）。
+ラベル操作の裏付け検査: `needs-human` の解除と `automerge` の付け外しは、actor だけでは判定しない（エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai になることがあるため）。見張り（conductor-watch）が付け外しの時刻を hatai 本人の指示の記録（同じ Issue・PR への hatai 本人のコメントで、付け外しの前 24 時間以内のもの）と突き合わせ、裏付けが取れない操作を「出どころ不明」として `LABEL unbacked` の行で watch.log に出す。`needs-human` を hatai の指示の記録なしに外した場合は、それ自体を手順違反として記録し、Grok Bot に知らせる（「指揮役の定期巡回（スケジュール起床）」）。
 
 スレッドに送る指示は Issue 番号か PR 番号と、使う skill 名だけにする（スレッドを立てる指示には、2 行目に割り当ての行 `Assigned: ...` を入れる。書式は skill `command-team`）。作業ルールは AGENTS.md と skill に書いてあるので、手順書の中身をスレッドに書き写さない。
 
@@ -82,7 +82,7 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 
 - マージの確認は、notify-grokbot の `pull_request`（`closed`、`merged: true`）の通知と、巡回での PR の状態で行う。マージされれば従来どおり Issue から `agent:working`・`agent:devin` を外す
 - Kodiak がコンフリクト等でマージできないときは、Kodiak が PR にコメントして `automerge` ラベルを外す（`.kodiak.toml` の `merge.notify_on_conflict` の既定）。巡回で、Approve 済みなのに `automerge` ラベルが無い PR に Kodiak のマージ不可コメントがあるか、またはラベルが付いたまま長時間 open のままのものを検知する。前者は手当スレッドを立てて main の取り込みと衝突解消をさせ、終わったら指揮役が `automerge` ラベルを付け直す。後者（キューが詰まる・応答しない）は hatai の admin マージへの切り戻しの判断材料として人間に知らせる
-- `automerge` ラベルの付け外しは `hatai` と `pelway-dev[bot]` に限る。conductor-watch がラベルイベントの主体を検査し、許可リスト（`scripts/conductor-watch.sh` の定数。Grok Bot が使う GitHub アカウントが確認できたら足す）外の操作を `LABEL bad-actor` 行で watch.log に出す
+- `automerge` ラベルの付け外しは、conductor-watch が付け外しの時刻を記録と突き合わせて検査する（actor だけでは判定しない）。裏付けが取れない操作は「出どころ不明」として `LABEL unbacked` 行で watch.log に出る。Kodiak がコンフリクトで外したものは、Kodiak のマージ不可コメントを指揮役が確認して正当として記録する
 
 ### 割り当て・停止・再開
 
@@ -120,7 +120,7 @@ conductor-watch は検知（`watch.log` へのイベント出力）だけを行�
 - 未読の位置は `patrol-state.json` の `watch_log_offset`（`watch.log` の行番号）で管理する。巡回で読み込んだ分だけ位置を進めて書き戻す
 - scheduled task は指揮役スレッドに bind する（`bindToCurrentThread`）。指揮役が代わったら（代行の開始・交代）、新しい指揮役スレッドで `schedule_task` を作り直し、古いタスクは `delete_scheduled_task` で削除する。`patrol-state.json` の `scheduled_task_id` に現行のタスク ID を記録する
 - `watch.log` からスレッドへの転送スクリプト（`t3` CLI の `acp-mcp-call` 経由）は使わない。`t3` CLI は実行中の T3 サーバーと `~/.t3/userdata` の所有権が衝突して送信に失敗することがあり、送信先スレッド ID の固定も指揮役の交代で壊れるため
-- `LABEL bad-actor` の行は、許可されていない主体によるラベル操作（`needs-human` の解除、`automerge` の付け外し）の検知である。手順違反として該当の Issue・PR に記録し、Grok Bot と人間に知らせる（「1. 役割と触ってよい範囲」のラベル操作の主体制限）
+- `LABEL unbacked` の行は、`needs-human` の解除・`automerge` の付け外しのうち、付け外しの時刻の前 24 時間以内に同じ Issue・PR への hatai 本人のコメント（指示の記録）が見つからなかった操作である。指揮役と T3 スレッドの操作記録と突き合わせて分類する: 指揮役の正当な操作（マージ条件を満たしての `automerge` 付与・Kodiak のコンフリクトによる解除など）は裏付けが見つかり次第正当として巡回記録に残す。Grok Bot が中継した了承も同じく裏付けになる。`needs-human` の解除は指揮役の操作記録では正当化できず、hatai の指示の記録だけが正当化する。どちらの記録でも裏付けられないものは「出どころ不明」の手順違反として該当の Issue・PR に記録し、Grok Bot と人間に知らせる（「1. 役割と触ってよい範囲」のラベル操作の裏付け検査）
 
 ## 3. 同時数と順番待ち
 
