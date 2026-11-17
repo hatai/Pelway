@@ -7,7 +7,8 @@
 //!
 //! QA-APR-01: コメント欄では、IME がどの状態でも Enter・Ctrl/Cmd+Enter・Space で
 //! 承認も送信もしない。確定後・無変換の Enter は改行 1 つ。変換中の Enter は
-//! IME の確定だけ（この層は何もしない）。承認は承認ボタンでの Enter/Space（修飾なし）だけ。
+//! IME の確定だけ（この層は何もしない）。承認は承認ボタンでの、決定は決定ボタンでの
+//! Enter/Space（修飾なし）だけ。
 //!
 //! QA-MEN-01: 候補一覧が開いている間の Enter は候補を 1 つ入れて一覧を閉じ、
 //! 送信しない（IME 変換中でも同じ）。Esc は入力文字を残して一覧だけを閉じる
@@ -20,6 +21,8 @@ pub enum Focus {
     CommentBox,
     /// 承認ボタン。
     ApproveButton,
+    /// 決定ボタン（判断待ちの選択肢を確定するボタン）。
+    DecisionButton,
     /// メッセージ入力欄。
     MessageInput,
 }
@@ -69,6 +72,8 @@ pub enum Action {
     InsertNewline,
     /// 承認を 1 回。実際の冪等キー管理は [`crate::approval`] が担う。
     Approve,
+    /// 決定を 1 回。どの選択肢を確定するかはフォーカス中のボタンが持つ。
+    Decide,
     /// メンション候補を 1 つ入れて一覧を閉じる。
     AcceptMention,
     /// メンション候補一覧を閉じるだけ。入力済みの文字は残す。
@@ -107,6 +112,10 @@ pub fn on_key(ctx: &InputContext, key: Key, mods: Modifiers) -> Action {
         },
         Focus::ApproveButton => match (key, plain) {
             (Key::Enter | Key::Space, true) => Action::Approve,
+            _ => Action::None,
+        },
+        Focus::DecisionButton => match (key, plain) {
+            (Key::Enter | Key::Space, true) => Action::Decide,
             _ => Action::None,
         },
         // ここへ来るとき候補一覧は閉じている（開いていれば上で返している）。

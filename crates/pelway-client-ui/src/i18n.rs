@@ -13,6 +13,7 @@
 //! どこにどう出すかは未決のまま。
 
 use fluent_bundle::{FluentArgs, FluentBundle, FluentResource};
+use slint::Global;
 use unic_langid::LanguageIdentifier;
 
 use crate::MainWindow;
@@ -91,6 +92,9 @@ pub const USED_KEYS: &[&str] = &[
     "menu-about",
     "about-title",
     "about-close",
+    // 読み上げ用の種別の呼び名（Issue 379）
+    "ai-bot-label",
+    "person-label",
 ];
 
 /// 用意している言語（`.ftl` がある言語だけ）。
@@ -270,5 +274,8 @@ pub fn apply_translations(
     window.set_tr_menu_about(text("menu-about"));
     window.set_tr_about_title(text("about-title"));
     window.set_tr_about_close(text("about-close"));
+    let a11y = crate::A11yStrings::get(window);
+    a11y.set_tr_ai_bot_label(text("ai-bot-label"));
+    a11y.set_tr_person_label(text("person-label"));
     missing
 }
