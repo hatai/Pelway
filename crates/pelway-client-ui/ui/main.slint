@@ -111,9 +111,12 @@ component AvatarView inherits Rectangle {
     }
 }
 
-// AI Botであることの印（「AI」）。
+// AI Botであることの印（「AI」）。見える文字は「AI」で、読み上げには
+// label-a11y（「AIメンバー」/ "AI member"）を出して二重読みを避ける
+// （S00 の画面契約。読み上げ全文の適用は Issue 379）。
 component AiBadgeView inherits Rectangle {
     in property <string> label;
+    in property <string> label-a11y;
     height: 14px;
     border-radius: 6px;
     background: DesignTokens.ai-badge-bg;
@@ -124,10 +127,51 @@ component AiBadgeView inherits Rectangle {
         padding-right: 4px;
         Text {
             text: root.label;
+            accessible-label: root.label-a11y;
             color: DesignTokens.ai-badge-fg;
             font-size: 10px;
             font-weight: 500;
             vertical-alignment: center;
+        }
+    }
+}
+
+// 常時表示の帯（S00。「デモ・模擬応答」の印と「AI」の印を全画面に出し続ける）。
+// 消す操作・隠す設定は作らない（entry-points の画面契約 README §C）。
+component DemoBannerView inherits Rectangle {
+    in property <string> tr-banner-demo-mock;
+    in property <string> tr-ai-badge;
+    in property <string> tr-label-ai-member-a11y;
+    HorizontalLayout {
+        spacing: 8px;
+        // 「デモ・模擬応答」の印（caution 系 pill）。狭い幅では最大 2 行に
+        // 折り返す。省略・三点リーダー・脱落はしない（省略用の overflow を
+        // 付けない）。
+        Rectangle {
+            border-radius: 8px;
+            background: DesignTokens.warning-bg;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                padding-top: 4px;
+                padding-bottom: 4px;
+                Text {
+                    text: root.tr-banner-demo-mock;
+                    color: DesignTokens.warning-fg;
+                    font-size: 11px;
+                    font-weight: 500;
+                    wrap: word-wrap;
+                    max-lines: 2;
+                    overflow: clip;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        // 「AIであることの表示」（見える文字は「AI」）。
+        AiBadgeView {
+            horizontal-stretch: 0;
+            label: root.tr-ai-badge;
+            label-a11y: root.tr-label-ai-member-a11y;
         }
     }
 }
@@ -153,10 +197,12 @@ component RailRow inherits Rectangle {
             vertical-alignment: center;
         }
     }
-}// 左の列の AI Botの行（名前＋在席状態）。
+}// 左の列の AI Botの行（名前＋「AI」の印＋在席状態）。
 component RailAiRow inherits Rectangle {
     in property <string> label;
     in property <string> presence;
+    in property <string> tr-ai-badge;
+    in property <string> tr-label-ai-member-a11y;
     height: 32px;
     border-radius: 12px;
     background: DesignTokens.tile;
@@ -169,6 +215,11 @@ component RailAiRow inherits Rectangle {
             color: DesignTokens.sub;
             font-size: 14px;
             vertical-alignment: center;
+        }
+        AiBadgeView {
+            horizontal-stretch: 0;
+            label: root.tr-ai-badge;
+            label-a11y: root.tr-label-ai-member-a11y;
         }
         Text {
             text: root.presence;
@@ -239,6 +290,8 @@ component RailView inherits Rectangle {
     in property <string> tr-rail-channels;
     in property <string> tr-rail-dm-people;
     in property <string> tr-rail-dm-ai;
+    in property <string> tr-ai-badge;
+    in property <string> tr-label-ai-member-a11y;
     // 合成データ
     in property <string> data-org-name;
     in property <string> data-channel-1;
@@ -292,14 +345,20 @@ component RailView inherits Rectangle {
         RailAiRow {
             label: root.data-ai-1;
             presence: root.data-ai-1-presence;
+            tr-ai-badge: root.tr-ai-badge;
+            tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
         }
         RailAiRow {
             label: root.data-ai-2;
             presence: root.data-ai-2-presence;
+            tr-ai-badge: root.tr-ai-badge;
+            tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
         }
         RailAiRow {
             label: root.data-ai-3;
             presence: root.data-ai-3-presence;
+            tr-ai-badge: root.tr-ai-badge;
+            tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
         }
     }
 }
@@ -395,6 +454,8 @@ component PendingDecisionRow inherits Rectangle {
     in property <string> tr-pending-wait;
     in property <string> tr-decision-choose;
     in property <string> tr-pending-open-chat;
+    in property <string> tr-ai-badge;
+    in property <string> tr-label-ai-member-a11y;
     callback open-chat(string);
     callback decide(string, string, int);
     border-radius: 14px;
@@ -420,6 +481,11 @@ component PendingDecisionRow inherits Rectangle {
                     font-size: 13px;
                     font-weight: 500;
                     vertical-alignment: center;
+                }
+                if root.item.is-ai : AiBadgeView {
+                    horizontal-stretch: 0;
+                    label: root.tr-ai-badge;
+                    label-a11y: root.tr-label-ai-member-a11y;
                 }
                 Text {
                     text: root.item.channel;
@@ -526,6 +592,8 @@ component TodayView inherits Rectangle {
     in property <string> tr-pending-wait;
     in property <string> tr-pending-open-chat;
     in property <string> tr-decision-choose;
+    in property <string> tr-ai-badge;
+    in property <string> tr-label-ai-member-a11y;
     in property <[PendingItem]> pending-items;
     in property <[RequestItem]> request-items;
     callback open-chat(string);
@@ -565,13 +633,17 @@ component TodayView inherits Rectangle {
                         color: DesignTokens.mute;
                         font-size: 13px;
                     }
-                    for item in root.pending-items : PendingDecisionRow {
-                        item: item;
-                        tr-pending-wait: root.tr-pending-wait;
-                        tr-decision-choose: root.tr-decision-choose;
-                        tr-pending-open-chat: root.tr-pending-open-chat;
-                        open-chat(id) => { root.open-chat(id); }
-                        decide(id, option-id, version) => { root.decide(id, option-id, version); }
+                    for item in root.pending-items : pending-row := Rectangle {
+                        PendingDecisionRow {
+                            item: item;
+                            tr-pending-wait: root.tr-pending-wait;
+                            tr-decision-choose: root.tr-decision-choose;
+                            tr-pending-open-chat: root.tr-pending-open-chat;
+                            tr-ai-badge: root.tr-ai-badge;
+                            tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
+                            open-chat(id) => { root.open-chat(id); }
+                            decide(id, option-id, version) => { root.decide(id, option-id, version); }
+                        }
                     }
                 }
             }
@@ -610,6 +682,7 @@ component MessageRow inherits Rectangle {
     in property <string> data-body;
     in property <string> data-time;
     in property <string> tr-ai-badge;
+    in property <string> tr-label-ai-member-a11y;
     in property <string> tr-mention-read-range;
     in property <bool> data-show-read-range: false;
     HorizontalLayout {
@@ -635,7 +708,9 @@ component MessageRow inherits Rectangle {
                     vertical-alignment: center;
                 }
                 if root.data-is-ai : AiBadgeView {
+                    horizontal-stretch: 0;
                     label: root.tr-ai-badge;
+                    label-a11y: root.tr-label-ai-member-a11y;
                 }
                 Text {
                     text: root.data-time;
@@ -721,6 +796,8 @@ component DecisionCardView inherits Rectangle {
     in property <string> tr-decision-card-label;
     in property <string> tr-decision-choose;
     in property <string> tr-decision-outcome;
+    in property <string> tr-ai-badge;
+    in property <string> tr-label-ai-member-a11y;
     in property <string> data-id;
     in property <int> data-version;
     in property <string> data-requester;
@@ -760,6 +837,11 @@ component DecisionCardView inherits Rectangle {
                     font-size: 11px;
                     vertical-alignment: center;
                     horizontal-alignment: right;
+                }
+                if root.data-requester-is-ai : AiBadgeView {
+                    horizontal-stretch: 0;
+                    label: root.tr-ai-badge;
+                    label-a11y: root.tr-label-ai-member-a11y;
                 }
             }
         }
@@ -904,6 +986,8 @@ component HandoffCardView inherits Rectangle {
 // 「あなただけに表示」の行。
 component PrivateNoteRow inherits Rectangle {
     in property <string> tr-message-private-note;
+    in property <string> tr-ai-badge;
+    in property <string> tr-label-ai-member-a11y;
     in property <string> data-sender;
     in property <bool> data-is-ai: false;
     in property <string> data-initial;
@@ -927,10 +1011,18 @@ component PrivateNoteRow inherits Rectangle {
             }
             VerticalLayout {
                 spacing: 2px;
-                Text {
-                    text: root.data-sender;
-                    color: DesignTokens.ink;
-                    font-size: 13px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: root.data-sender;
+                        color: DesignTokens.ink;
+                        font-size: 13px;
+                    }
+                    if root.data-is-ai : AiBadgeView {
+                        horizontal-stretch: 0;
+                        label: root.tr-ai-badge;
+                        label-a11y: root.tr-label-ai-member-a11y;
+                    }
                 }
                 Text {
                     text: root.data-body;
@@ -1072,6 +1164,7 @@ component ExternalSendCardView inherits Rectangle {
 component ChannelView inherits Rectangle {
     in property <string> tr-unread-divider;
     in property <string> tr-ai-badge;
+    in property <string> tr-label-ai-member-a11y;
     in property <string> tr-decision-mark;
     in property <string> tr-message-private-note;
     in property <string> tr-thread-replies;
@@ -1167,6 +1260,7 @@ component ChannelView inherits Rectangle {
                     data-time: root.data-msg1-time;
                     data-body: root.data-msg1-body;
                     tr-ai-badge: root.tr-ai-badge;
+                    tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                     tr-mention-read-range: root.tr-mention-read-range;
                 }
                 MessageRow {
@@ -1176,6 +1270,7 @@ component ChannelView inherits Rectangle {
                     data-time: root.data-msg2-time;
                     data-body: root.data-msg2-body;
                     tr-ai-badge: root.tr-ai-badge;
+                    tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                     tr-mention-read-range: root.tr-mention-read-range;
                     data-show-read-range: true;
                 }
@@ -1220,21 +1315,25 @@ component ChannelView inherits Rectangle {
                     acknowledge-pressed => { root.acknowledge-pressed(); }
                 }
                 // チャット内の判断カード（確定後は確定表示に変わる）
-                if root.data-decision-visible : DecisionCardView {
-                    tr-decision-card-label: root.tr-decision-card-label;
-                    tr-decision-choose: root.tr-decision-choose;
-                    tr-decision-outcome: root.tr-decision-outcome;
-                    data-id: root.data-decision-id;
-                    data-version: root.data-decision-version;
-                    data-requester: root.data-decision-requester;
-                    data-requester-is-ai: root.data-decision-requester-is-ai;
-                    data-requester-initial: root.data-decision-requester-initial;
-                    data-question: root.data-decision-question;
-                    data-options: root.data-decision-options;
-                    data-decided: root.data-decision-decided;
-                    data-selected: root.data-decision-selected;
-                    data-decider: root.data-decision-decider;
-                    decide(id, option-id, version) => { root.decide-option(id, option-id, version); }
+                if root.data-decision-visible : decision-card := Rectangle {
+                    DecisionCardView {
+                        tr-decision-card-label: root.tr-decision-card-label;
+                        tr-decision-choose: root.tr-decision-choose;
+                        tr-decision-outcome: root.tr-decision-outcome;
+                        tr-ai-badge: root.tr-ai-badge;
+                        tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
+                        data-id: root.data-decision-id;
+                        data-version: root.data-decision-version;
+                        data-requester: root.data-decision-requester;
+                        data-requester-is-ai: root.data-decision-requester-is-ai;
+                        data-requester-initial: root.data-decision-requester-initial;
+                        data-question: root.data-decision-question;
+                        data-options: root.data-decision-options;
+                        data-decided: root.data-decision-decided;
+                        data-selected: root.data-decision-selected;
+                        data-decider: root.data-decision-decider;
+                        decide(id, option-id, version) => { root.decide-option(id, option-id, version); }
+                    }
                 }
                 MessageRow {
                     data-sender: root.data-msg3-sender;
@@ -1243,17 +1342,24 @@ component ChannelView inherits Rectangle {
                     data-time: root.data-msg3-time;
                     data-body: root.data-msg3-body;
                     tr-ai-badge: root.tr-ai-badge;
+                    tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                     tr-mention-read-range: root.tr-mention-read-range;
                 }
                 DecisionMarkView {
                     tr-decision-mark: root.tr-decision-mark;
                 }
-                PrivateNoteRow {
-                    tr-message-private-note: root.tr-message-private-note;
-                    data-sender: root.data-note-sender;
-                    data-is-ai: root.data-note-is-ai;
-                    data-initial: root.data-note-initial;
-                    data-body: root.data-note-body;
+                // 1 回しか使わない部品は Slint が親にインラインして型名と id が
+                // 消えるため、テストから探せるよう Rectangle の枠に id を付ける。
+                private-note := Rectangle {
+                    PrivateNoteRow {
+                        tr-message-private-note: root.tr-message-private-note;
+                        tr-ai-badge: root.tr-ai-badge;
+                        tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
+                        data-sender: root.data-note-sender;
+                        data-is-ai: root.data-note-is-ai;
+                        data-initial: root.data-note-initial;
+                        data-body: root.data-note-body;
+                    }
                 }
                 ExternalSendCardView {
                     tr-ext-card-label: root.tr-ext-card-label;
@@ -1314,6 +1420,7 @@ component ThreadPaneView inherits Rectangle {
     in property <string> tr-thread-view-work;
     in property <string> tr-thread-input-placeholder;
     in property <string> tr-ai-badge;
+    in property <string> tr-label-ai-member-a11y;
     in property <string> tr-mention-read-range;
     in property <string> data-channel;
     in property <string> data-msg1-sender;
@@ -1367,6 +1474,7 @@ component ThreadPaneView inherits Rectangle {
                     data-time: root.data-msg1-time;
                     data-body: root.data-msg1-body;
                     tr-ai-badge: root.tr-ai-badge;
+                    tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                     tr-mention-read-range: root.tr-mention-read-range;
                 }
                 MessageRow {
@@ -1376,6 +1484,7 @@ component ThreadPaneView inherits Rectangle {
                     data-time: root.data-msg2-time;
                     data-body: root.data-msg2-body;
                     tr-ai-badge: root.tr-ai-badge;
+                    tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                     tr-mention-read-range: root.tr-mention-read-range;
                 }
             }
@@ -1425,6 +1534,8 @@ component AiWorkPaneView inherits Rectangle {
     in property <string> tr-pane-ai-from;
     in property <string> tr-pane-ai-read-range;
     in property <string> tr-pane-ai-note;
+    in property <string> tr-ai-badge;
+    in property <string> tr-label-ai-member-a11y;
     in property <string> data-ai-name;
     in property <string> data-ai-initial;
     in property <int> data-steps-done;
@@ -1446,6 +1557,11 @@ component AiWorkPaneView inherits Rectangle {
             AvatarView {
                 is-ai: true;
                 initial: root.data-ai-initial;
+            }
+            AiBadgeView {
+                horizontal-stretch: 0;
+                label: root.tr-ai-badge;
+                label-a11y: root.tr-label-ai-member-a11y;
             }
             Text {
                 text: root.tr-pane-ai-work-title;
@@ -1584,6 +1700,8 @@ export component MainWindow inherits Window {
     in property <string> tr-ai-presence-waiting;
     in property <string> tr-search-placeholder;
     in property <string> tr-search-shortcut;
+    in property <string> tr-banner-demo-mock;
+    in property <string> tr-label-ai-member-a11y;
     in property <string> tr-today-title;
     in property <string> tr-today-section-mine;
     in property <string> tr-today-section-requests;
@@ -1748,8 +1866,16 @@ export component MainWindow inherits Window {
             }
         }
     }
-    HorizontalLayout {
+    VerticalLayout {
         padding: 20px;
+        spacing: 16px;
+        // 常時表示の帯（S00）。今日・チャンネルのどちらでも出し続ける。
+        DemoBannerView {
+            tr-banner-demo-mock: root.tr-banner-demo-mock;
+            tr-ai-badge: root.tr-ai-badge;
+            tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
+        }
+        HorizontalLayout {
         spacing: 16px;
         // 左の列（rail）
         RailView {
@@ -1759,6 +1885,8 @@ export component MainWindow inherits Window {
             tr-rail-channels: root.tr-rail-channels;
             tr-rail-dm-people: root.tr-rail-dm-people;
             tr-rail-dm-ai: root.tr-rail-dm-ai;
+            tr-ai-badge: root.tr-ai-badge;
+            tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
             data-org-name: root.data-org-name;
             data-channel-1: root.data-channel-1;
             data-channel-2: root.data-channel-2;
@@ -1797,6 +1925,8 @@ export component MainWindow inherits Window {
                     tr-pending-wait: root.tr-pending-wait;
                     tr-pending-open-chat: root.tr-pending-open-chat;
                     tr-decision-choose: root.tr-decision-choose;
+                    tr-ai-badge: root.tr-ai-badge;
+                    tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                     pending-items: root.pending-items;
                     request-items: root.request-items;
                     open-chat(id) => { root.open-decision-chat(id); }
@@ -1805,6 +1935,7 @@ export component MainWindow inherits Window {
                 if !root.show-today : ChannelView {
                     tr-unread-divider: root.tr-unread-divider;
                     tr-ai-badge: root.tr-ai-badge;
+                    tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                     tr-decision-mark: root.tr-decision-mark;
                     tr-message-private-note: root.tr-message-private-note;
                     tr-thread-replies: root.tr-thread-replies;
@@ -1888,6 +2019,7 @@ export component MainWindow inherits Window {
             tr-thread-view-work: root.tr-thread-view-work;
             tr-thread-input-placeholder: root.tr-thread-input-placeholder;
             tr-ai-badge: root.tr-ai-badge;
+            tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
             tr-mention-read-range: root.tr-mention-read-range;
             data-channel: root.data-channel-title;
             data-msg1-sender: root.data-thread-msg1-sender;
@@ -1904,25 +2036,30 @@ export component MainWindow inherits Window {
             close-pressed => { root.close-pane-pressed(); }
             view-work-pressed => { root.view-work-pressed(); }
         }
-        if root.show-right-pane && root.right-pane-ai-work : AiWorkPaneView {
+        if root.show-right-pane && root.right-pane-ai-work : ai-work-pane := Rectangle {
             width: 400px;
-            tr-pane-back-to-thread: root.tr-pane-back-to-thread;
-            tr-pane-ai-work-title: root.tr-pane-ai-work-title;
-            tr-pane-ai-steps: root.tr-pane-ai-steps;
-            tr-pane-ai-from: root.tr-pane-ai-from;
-            tr-pane-ai-read-range: root.tr-pane-ai-read-range;
-            tr-pane-ai-note: root.tr-pane-ai-note;
-            data-ai-name: root.data-ai-work-name;
-            data-ai-initial: root.data-ai-work-initial;
-            data-steps-done: root.data-ai-work-steps-done;
-            data-steps-total: root.data-ai-work-steps-total;
-            data-source: root.data-ai-work-source;
-            data-read-range: root.data-ai-work-read-range;
-            data-log1-time: root.data-ai-work-log1-time;
-            data-log1-text: root.data-ai-work-log1-text;
-            data-log2-time: root.data-ai-work-log2-time;
-            data-log2-text: root.data-ai-work-log2-text;
-            back-pressed => { root.back-to-thread-pressed(); }
+            AiWorkPaneView {
+                tr-pane-back-to-thread: root.tr-pane-back-to-thread;
+                tr-pane-ai-work-title: root.tr-pane-ai-work-title;
+                tr-pane-ai-steps: root.tr-pane-ai-steps;
+                tr-pane-ai-from: root.tr-pane-ai-from;
+                tr-pane-ai-read-range: root.tr-pane-ai-read-range;
+                tr-pane-ai-note: root.tr-pane-ai-note;
+                tr-ai-badge: root.tr-ai-badge;
+                tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
+                data-ai-name: root.data-ai-work-name;
+                data-ai-initial: root.data-ai-work-initial;
+                data-steps-done: root.data-ai-work-steps-done;
+                data-steps-total: root.data-ai-work-steps-total;
+                data-source: root.data-ai-work-source;
+                data-read-range: root.data-ai-work-read-range;
+                data-log1-time: root.data-ai-work-log1-time;
+                data-log1-text: root.data-ai-work-log1-text;
+                data-log2-time: root.data-ai-work-log2-time;
+                data-log2-text: root.data-ai-work-log2-text;
+                back-pressed => { root.back-to-thread-pressed(); }
+            }
+        }
         }
     }
     // About のダイアログ（メニューの項目で開く）。内容の上に重ねる。

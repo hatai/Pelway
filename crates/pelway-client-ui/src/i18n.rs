@@ -37,6 +37,9 @@ pub const USED_KEYS: &[&str] = &[
     // 上の帯
     "search-placeholder",
     "search-shortcut",
+    // 常時表示（デモ・模擬応答と AI の識別）
+    "banner-demo-mock",
+    "label-ai-member-a11y",
     // 「今日・判断待ち」の画面
     "today-title",
     "today-section-mine",
@@ -223,6 +226,8 @@ pub fn apply_translations(
     window.set_tr_ai_presence_waiting(text("ai-presence-waiting"));
     window.set_tr_search_placeholder(text("search-placeholder"));
     window.set_tr_search_shortcut(text("search-shortcut"));
+    window.set_tr_banner_demo_mock(text("banner-demo-mock"));
+    window.set_tr_label_ai_member_a11y(text("label-ai-member-a11y"));
     window.set_tr_today_title(text("today-title"));
     window.set_tr_today_section_mine(text("today-section-mine"));
     window.set_tr_today_section_requests(text("today-section-requests"));
