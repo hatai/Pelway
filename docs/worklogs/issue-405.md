@@ -11,3 +11,15 @@
 5. 改善案: scripts/tests/conductor-watch-ensure.test.sh の「behavior-fallback」の間欠失敗（count の race）を別 Issue として調査すること。`docs/agents/grokbot-runbook.md` の「マージキュー待ちの PR」に「Kodiak（`kodiakhq[bot]`）が外した automerge は現状警告行に出る。許可リストに足すかは指揮役の判断」を、判断後に追記する
 
 使ったスキル: implement-issue（輸入スキル tdd は未使用の通常割り当てのため。テストは scripts/tests/conductor-watch-label-actor.test.sh として先に書き、レッド→グリーンを確認）
+
+## 実装者メモ（round 2）
+
+対象 head: 0ddffc6775b3f49579052a94b3a69d41cee1875e
+
+1. 詰まった箇所: scripts/tests/conductor-watch-label-actor.test.sh: 裏付けコメントのモックファイル（comments-<n>.json）を書き忘れたイベントは「comments 取得失敗 → 判定延期」の仕様どおり警告が出ず、レッドの原因がテスト側の設定漏れだった。ファイルを置いて解決
+2. 曖昧だった文: 「`needs-human` や automerge が外れた・付いた時刻を、次の 2 つの記録と突き合わせる」（Issue #405 のコメント「【チーム判断による要件変更】」）
+3. 仮定と解釈: needs-human は「外れた」だけ（付与はエスカレーションで日常的なため検査しない）、automerge は付け外し両方を検査すると解釈した。watch が機械判定できるのは記録 1（hatai 本人のコメント。イベントの前 24 時間以内、同じ Issue・PR）だけで、記録 2（指揮役と T3 スレッドの操作記録）は watch から読めないため巡回の仕事として runbook に書いた。コメントの窓を 24 時間にしたのは人間待ちのフォローアップタイマーの目安と揃えたため。選ばなかった解釈: actor ベースの許可リスト検査を併存させる（要件変更が「actor だけで判断せず」への置き換えのため、LABEL bad-actor は廃止して LABEL unbacked に統一）。#188 の実イベントの actor は pelway-dev[bot] だったが、決定を実装側の解釈で差し替えない
+4. 足りなかった情報・検証手段: Grok Bot が了承を中継するときの GitHub アカウント名（記録 1 の「Grok Bot が中継した了承」を watch が機械判定するには必要。未確認のため巡回の照合対象として runbook に書いた）。実稼働 conductor-watch での LABEL unbacked 行の確認（マージ後の実運用）
+5. 改善案: scripts/tests/conductor-watch-ensure.test.sh の間欠失敗（`watch is running`・`foreign watch present`。main でも発生、本 PR と無関係）を別 Issue で調査すること
+
+使ったスキル: implement-issue（テストは scripts/tests/conductor-watch-label-actor.test.sh を書き直してレッド→グリーンを確認）
