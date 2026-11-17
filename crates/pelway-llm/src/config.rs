@@ -38,6 +38,23 @@ pub const ZAI_BASE_URL: &str = "https://api.z.ai/api/paas/v4";
 /// 予備」。endpoint の宣言はこのファイルに限定する）。
 pub const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 
+/// 設定で受けるカスタム接続先の検証（#330 QA 点検 2026-11-17）。loopback
+/// （127.0.0.0/8・::1・localhost）への接続先は任意のスキームを許し（ローカルの
+/// モック用）、それ以外は https の URL に限る。http の外部接続先は Bearer キーの
+/// 送出経路になりうるため拒否する。
+pub fn custom_base_url_allowed(base_url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(base_url) else {
+        return false;
+    };
+    let loopback = match parsed.host() {
+        Some(url::Host::Domain(d)) => d == "localhost" || d.ends_with(".localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    };
+    loopback || parsed.scheme() == "https"
+}
+
 impl ProviderConfig {
     pub fn new(
         name: impl Into<String>,
