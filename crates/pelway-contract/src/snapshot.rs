@@ -1,9 +1,9 @@
 //! `snapshot_hash` の計算。
 //!
 //! 承認者が承認する対象は、正規化した操作の中身 [`ActionPayload`]（操作の種類・
-//! 宛先・本文・添付・使うアカウント・範囲。03 §5 の固定 payload）。カードの
-//! コメントは承認の対象外（#87）: コメントを保存しても `snapshot_hash` は
-//! 変わらず、保存済みの承認条件が無効にならない。
+//! 宛先・本文・添付・使うアカウント・範囲・参照版・integration 版。03 §5 の
+//! 固定 payload）。カードのコメントは承認の対象外（#87）: コメントを保存しても
+//! `snapshot_hash` は変わらず、保存済みの承認条件が無効にならない。
 //!
 //! 形式：`"sha256:" + 小文字 16 進 64 桁`。入力は曖昧さが出ないよう、各フィールドを
 //! 8 バイトのビッグエンディアン長さ付きで連結する。同じ意味の操作は
@@ -29,6 +29,8 @@ fn put(hasher: &mut Sha256, field: &[u8]) {
 /// - 本文（`body`）: 改行を LF に揃え、末尾の空白を落とす。
 /// - 添付（`attachments`）と範囲（`scope`）: 並べ替えて重複を除く（集合として扱う）。
 /// - 種類・宛先・アカウントはそのまま。表現が違えば別の操作として別の hash になる。
+/// - 参照版・integration 版（#411）: 版 ID はそのまま。空文字列は「指定なし」
+///   （`None`）と同じ意味に揃える。
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
@@ -45,6 +47,14 @@ pub struct ActionPayload {
     pub account: String,
     /// 許可する範囲（scope）。
     pub scope: Vec<String>,
+    /// 参照版（03 §5.1: 操作が参照する資料・成果物などの版 ID）。指定なしは
+    /// `None`。版が変われば別の操作として別の hash になる（#411）。
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub reference_version: Option<String>,
+    /// integration 版（03 §5.1: 操作が使う外部連携の版 ID）。指定なしは
+    /// `None`。連携側の設定が変われば別の hash になる（#411）。
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub integration_version: Option<String>,
 }
 
 impl ActionPayload {
@@ -53,6 +63,8 @@ impl ActionPayload {
     /// - 本文: 改行を LF に揃え、末尾の空白（改行を含む）を落とす。
     /// - 添付・scope: 辞書順に並べ替えて重複を除く（集合として扱う）。
     /// - 種類・宛先・アカウント: そのまま。
+    /// - 参照版・integration 版: 版 ID はそのまま（識別子。表現が違えば別の
+    ///   操作として別の hash）。空文字列は「指定なし」（`None`）に揃える。
     #[must_use]
     pub fn normalized(&self) -> Self {
         Self {
@@ -62,6 +74,8 @@ impl ActionPayload {
             attachments: normalize_set(&self.attachments),
             account: self.account.clone(),
             scope: normalize_set(&self.scope),
+            reference_version: normalize_version(&self.reference_version),
+            integration_version: normalize_version(&self.integration_version),
         }
     }
 }
@@ -80,6 +94,15 @@ fn normalize_set(items: &[String]) -> Vec<String> {
     sorted.sort();
     sorted.dedup();
     sorted
+}
+
+/// 版 ID の正規化: 空文字列は「指定なし」（`None`）に揃える。それ以外はそのまま
+/// （識別子。表現が違えば別の操作として別の hash）。
+fn normalize_version(v: &Option<String>) -> Option<String> {
+    match v.as_deref() {
+        Some(s) if !s.is_empty() => Some(s.to_owned()),
+        _ => None,
+    }
 }
 
 /// 正規化した操作の中身（[`ActionPayload`]）から `snapshot_hash` を計算する。
@@ -101,6 +124,23 @@ pub fn compute_snapshot_hash(payload: &ActionPayload) -> String {
     hasher.update((p.scope.len() as u64).to_be_bytes());
     for s in &p.scope {
         put(&mut hasher, s.as_bytes());
+    }
+    // 参照版・integration 版（03 §5.1 の正規化項目。#411）。両方「指定なし」の
+    // ときは何も足さない: 6 項目だけの payload は追加前（#411 の前）と同じ
+    // バイト列・同じ hash になる（versionless_payload_keeps_legacy_hash）。
+    // どちらかでも指定があれば、まず長さ 0 の区切りを 1 つ入れ（scope の末尾
+    // 要素と版の先頭が連結で曖昧にならないように）、その後に参照版・
+    // integration 版の順で必ず 2 つを長さ前置で並べる（「指定なし」は空）。
+    if p.reference_version.is_some() || p.integration_version.is_some() {
+        put(&mut hasher, b"");
+        put(
+            &mut hasher,
+            p.reference_version.as_deref().unwrap_or("").as_bytes(),
+        );
+        put(
+            &mut hasher,
+            p.integration_version.as_deref().unwrap_or("").as_bytes(),
+        );
     }
     finish(hasher)
 }
@@ -131,11 +171,41 @@ mod tests {
             attachments: vec!["sha256:att-1".to_owned(), "sha256:att-2".to_owned()],
             account: "acct-cw-1".to_owned(),
             scope: vec!["tickets:read".to_owned(), "tickets:write".to_owned()],
+            reference_version: None,
+            integration_version: None,
         }
     }
 
     fn owned(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|p| (*p).to_owned()).collect()
+    }
+
+    // #411 の受け入れ条件: 版を指定しない payload の hash は、フィールド追加前
+    // （6 項目）と同じ値になる（下位互換）。値は追加前の実装で計算した基準値。
+    #[test]
+    fn versionless_payload_keeps_legacy_hash() {
+        let mut empty_sets = payload();
+        empty_sets.attachments = vec![];
+        empty_sets.scope = vec![];
+        let mut empty_body = payload();
+        empty_body.body = "\r\n\r\n".to_owned();
+        let cases = [
+            (
+                &payload(),
+                "sha256:7828970a6a8c028f3d545e6e5fb663cf637137ed1c64e441a94aea4dd957dcd5",
+            ),
+            (
+                &empty_sets,
+                "sha256:e6f763a36b74035fb30219519bf79d5cb7e8d3e38a5de6dd0d5d4fb06d4800ed",
+            ),
+            (
+                &empty_body,
+                "sha256:6ae212e89bd9a2e2fb1680ce7ec293a09674b2e38f62b0fac01247c4b1e68ea9",
+            ),
+        ];
+        for (p, expected) in cases {
+            assert_eq!(compute_snapshot_hash(p), expected);
+        }
     }
 
     #[test]
@@ -223,6 +293,23 @@ mod tests {
                 scope: vec![],
                 ..payload()
             },
+            // #411: 参照版・integration 版も操作の中身。変われば別の hash。
+            ActionPayload {
+                reference_version: Some("ref-2026-11-17".to_owned()),
+                ..payload()
+            },
+            ActionPayload {
+                reference_version: Some("ref-2026-11-18".to_owned()),
+                ..payload()
+            },
+            ActionPayload {
+                integration_version: Some("integration-v3".to_owned()),
+                ..payload()
+            },
+            ActionPayload {
+                integration_version: Some("integration-v4".to_owned()),
+                ..payload()
+            },
         ];
         for (i, p) in variants.into_iter().enumerate() {
             assert_ne!(compute_snapshot_hash(&p), base, "variant #{i}");
@@ -239,6 +326,60 @@ mod tests {
         b.recipient = "customer@a".to_owned();
         b.body = "b.examplec".to_owned();
         assert_ne!(compute_snapshot_hash(&a), compute_snapshot_hash(&b));
+    }
+
+    // #411 の受け入れ条件: 版の正規化。空文字列の版 ID は「指定なし」と同じ意味。
+    #[test]
+    fn empty_version_normalizes_to_none() {
+        let mut p = payload();
+        p.reference_version = Some(String::new());
+        assert_eq!(p.normalized().reference_version, None);
+        assert_eq!(
+            compute_snapshot_hash(&p),
+            compute_snapshot_hash(&payload()),
+            "reference_version の空文字列は None と同じ hash"
+        );
+        let mut q = payload();
+        q.integration_version = Some(String::new());
+        assert_eq!(q.normalized().integration_version, None);
+        assert_eq!(
+            compute_snapshot_hash(&q),
+            compute_snapshot_hash(&payload()),
+            "integration_version の空文字列は None と同じ hash"
+        );
+    }
+
+    // #411: 版の追加で scope の末尾と版の先頭が曖昧にならないこと。マーカー無しで
+    // 版を末尾に足す実装だと、この 2 つ（意味が違う操作）が同じバイト列になる。
+    #[test]
+    fn version_fields_do_not_collide_with_scope_tail() {
+        let mut a = payload();
+        a.scope = vec![];
+        a.reference_version = Some("tickets:read".to_owned());
+        let mut b = payload();
+        b.scope = owned(&["tickets:read"]);
+        assert_ne!(compute_snapshot_hash(&a), compute_snapshot_hash(&b));
+    }
+
+    // #411: 旧形式（版フィールド無し）の JSON はそのまま読める。
+    #[cfg(feature = "serde")]
+    #[test]
+    fn legacy_json_without_versions_deserializes() {
+        let v = serde_json::json!({
+            "action_kind": "customer_send",
+            "recipient": "customer@example.invalid",
+            "body": "本文\n",
+            "attachments": [],
+            "account": "acct-cw-1",
+            "scope": []
+        });
+        let p: ActionPayload = serde_json::from_value(v).expect("deserialize");
+        assert_eq!(p.reference_version, None);
+        assert_eq!(p.integration_version, None);
+        // None は JSON に出ない（旧実装と同じ 6 項目の JSON になる）。
+        let out = serde_json::to_value(payload()).expect("serialize");
+        assert!(out.get("reference_version").is_none());
+        assert!(out.get("integration_version").is_none());
     }
 
     // 種類のタグ（as_str）は serde のワイヤ値と同じ 4 値であること。
