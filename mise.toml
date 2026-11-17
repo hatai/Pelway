@@ -102,8 +102,9 @@ run = "cargo test --workspace --locked && cargo test -p pelway-gateway --all-fea
 # （#157。ワークフローに引数をインラインで書くと、ローカル検証と CI で引数がずれる）。
 # --no-cfg-coverage: 既定の --cfg coverage ビルドは、cfg(coverage) で nightly 専用
 # #![feature] を有効にする依存があると stable の E0554 で失敗するため。
-# --exclude: dev 用 crate、開発見張り役 pelway-agent-watch、CI に PostgreSQL が無く
-# 恒常 0% の pelway-db をテスト・レポートの両方から外す。cargo の --exclude は
+# --exclude: dev 用 crate と開発見張り役 pelway-agent-watch をテスト・レポートの
+# 両方から外す。pelway-db は coverage ジョブの PostgreSQL サービスで RLS テストが
+# 走るため集計対象（#161 で #157 の暫定除外を解除）。cargo の --exclude は
 # パッケージ名（Cargo.toml の name）を受け取るため、ディレクトリ名の dev-client-probe
 # ではなく pelway-dev-client-probe と書く。
 # --ignore-filename-regex: build.rs の生成コード（out/ 配下）と統合テストの
@@ -116,7 +117,6 @@ cargo llvm-cov --workspace --locked --no-cfg-coverage \
   --exclude pelway-dev-queue-compare \
   --exclude pelway-dev-smoke \
   --exclude pelway-agent-watch \
-  --exclude pelway-db \
   --ignore-filename-regex '([/\\]out[/\\]|crates/[^/]+/tests/)' \
   --lcov --output-path lcov.info
 '''
