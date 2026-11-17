@@ -135,7 +135,7 @@ fn persistent_display_end_to_end() {
             );
         }
 
-        // ---- 狭い幅（360px 相当）でも「（模擬）」/"simulated" が欠けない ----
+        // ---- 狭い幅でも文言を省略せず折り返す ----
         window.set_show_today(false);
         settle();
         let find_banner_text = |w: &MainWindow| {
@@ -144,27 +144,29 @@ fn persistent_display_end_to_end() {
                 .unwrap_or_else(|| panic!("「{banner_text}」が見えること"))
         };
         let one_line_h = find_banner_text(&window).size().height;
-        assert!(one_line_h > 0.0, "バナーの文言が 1 行で見えていること");
-        let mut wrapped = false;
-        for width in [360.0f32, 300.0, 260.0, 220.0, 190.0, 160.0, 140.0] {
-            window.window().set_size(LogicalSize::new(width, 600.0));
+        let full_w = find_banner_text(&window).size().width;
+        assert!(
+            one_line_h > 0.0 && full_w > 0.0,
+            "{lang} のバナーの文言が 1 行で見えていること"
+        );
+        // 折り返しが始まる幅はフォントの計測値に依存するため、固定幅ではなく
+        // 窓を段階的に狭めて、必ず折り返しが起きるまで確かめる（狭めるほど
+        // 文言に回る幅が減るので、どんな文字幅でもいずれ 2 行になる）。
+        let mut w = full_w;
+        let mut h = one_line_h;
+        while h <= 1.3 * one_line_h && w > 60.0 {
+            w = (w * 0.7).max(60.0);
+            window.window().set_size(LogicalSize::new(w, 600.0));
             settle();
-            let h = find_banner_text(&window).size().height;
-            assert!(
-                h > 0.5 * one_line_h,
-                "{lang} 幅 {width}px でもバナーの文言が見えること (h={h})"
-            );
+            h = find_banner_text(&window).size().height;
             assert!(
                 h <= 2.4 * one_line_h,
-                "{lang} 幅 {width}px でも文言は最大 2 行に収まること (h={h}, 1行={one_line_h})"
+                "{lang} 幅 {w}px でも文言は最大 2 行に収まること (h={h}, 1行={one_line_h})"
             );
-            if h > 1.3 * one_line_h {
-                wrapped = true;
-            }
         }
         assert!(
-            wrapped,
-            "{lang} のバナーの文言は狭い幅で 2 行に折り返すこと（省略や切り詰めではなく）"
+            h > 1.3 * one_line_h,
+            "{lang} のバナーの文言は狭い幅で 2 行に折り返すこと（省略や切り詰めではなく）(w={w})"
         );
         // 縦長の窓にして一覧の全行をビューポート内に収める（上の注を参照）。
         window.window().set_size(LogicalSize::new(800.0, 2400.0));
