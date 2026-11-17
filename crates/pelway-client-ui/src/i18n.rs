@@ -86,6 +86,8 @@ pub const USED_KEYS: &[&str] = &[
     "thread-input-placeholder",
     // 下のメッセージ入力欄
     "composer-placeholder",
+    // 入力欄のメンション候補一覧
+    "mention-candidates-label",
     // トップレベルメニューと About ダイアログ（Slint の attribution、Issue 237）
     "menu-help",
     "menu-about",
@@ -266,6 +268,7 @@ pub fn apply_translations(
     window.set_tr_pane_ai_note(text("pane-ai-note"));
     window.set_tr_thread_input_placeholder(text("thread-input-placeholder"));
     window.set_tr_composer_placeholder(text("composer-placeholder"));
+    window.set_tr_mention_candidates_label(text("mention-candidates-label"));
     window.set_tr_menu_help(text("menu-help"));
     window.set_tr_menu_about(text("menu-about"));
     window.set_tr_about_title(text("about-title"));

@@ -228,6 +228,14 @@ export struct RequestItem {
     progress: string,
 }
 
+// ---- 入力欄（Issue 383） ----
+
+// 入力欄の識別（どちらの入力欄の操作かを橋が知るための値）。
+export enum ComposerKind {
+    channel,
+    thread,
+}
+
 // ---- 左の列（rail） ----
 
 component RailView inherits Rectangle {
@@ -1068,6 +1076,42 @@ component ExternalSendCardView inherits Rectangle {
     }
 }
 
+// メンション候補一覧（入力欄の上に重ねる小さな一覧。Issue 383）。
+// モックに無いため最小の形: 先頭の候補は Enter で入ることを選択色で示す。
+component MentionListView inherits Rectangle {
+    in property <string> label;
+    in property <[string]> items;
+    width: 200px;
+    height: list.preferred-height;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: DesignTokens.border-form;
+    background: DesignTokens.tile;
+    list := VerticalLayout {
+        padding: 6px;
+        spacing: 2px;
+        Text {
+            text: root.label;
+            color: DesignTokens.mute;
+            font-size: 11px;
+        }
+        for item[index] in root.items : Rectangle {
+            height: 24px;
+            border-radius: 4px;
+            background: index == 0 ? DesignTokens.selected-wash : transparent;
+            Text {
+                x: 8px;
+                width: parent.width - 16px;
+                height: parent.height;
+                text: "@" + item;
+                color: DesignTokens.ink;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
 // チャンネルの画面（時系列＋入力欄）。
 component ChannelView inherits Rectangle {
     in property <string> tr-unread-divider;
@@ -1097,6 +1141,14 @@ component ChannelView inherits Rectangle {
     in property <string> tr-decision-choose;
     in property <string> tr-decision-outcome;
     in property <string> tr-composer-placeholder;
+    in property <string> tr-mention-candidates-label;
+    // メッセージ入力欄とメンション候補一覧（Issue 383。本文は in-out:
+    // 候補の取り込みで橋が書き換えて戻すことがある）。
+    in-out property <string> composer-text;
+    in property <bool> composer-mention-list-open: false;
+    in property <[string]> mention-candidates;
+    // 橋が本文を書き換えた回数（候補の取り込み）。変わったらカーソルを末尾へ。
+    in property <int> composer-cursor-to-end: 0;
     in property <string> data-day-label;
     // チャット内の判断カード（Issue 331）
     in property <bool> data-decision-visible: false;
@@ -1144,6 +1196,16 @@ component ChannelView inherits Rectangle {
     callback acknowledge-pressed();
     callback view-work-pressed();
     callback decide-option(string, string, int);
+    // 入力欄の操作（どちらの入力欄かは ComposerKind で渡す。キー操作の
+    // 返り値は「消費するか」→ Slint の key-pressed が accept を返すかどうか）。
+    callback composer-edited(composer: ComposerKind, text: string);
+    callback composer-focused(composer: ComposerKind);
+    callback composer-key-pressed(composer: ComposerKind, key-text: string, ctrl-or-meta: bool, shift: bool, composing: bool) -> bool;
+    changed composer-cursor-to-end => {
+        // 橋が本文を書き換えた（候補の取り込み）→ カーソルを末尾へ。
+        // 大きいオフセットは末尾にクランプされる。
+        composer-input.set-selection-offsets(999999999, 999999999);
+    }
     background: DesignTokens.tile;
     VerticalLayout {
         // 時系列
@@ -1286,17 +1348,56 @@ component ChannelView inherits Rectangle {
                     border-radius: 16px;
                     background: DesignTokens.well;
                     border-width: 1px;
-                    border-color: composer-ta.has-focus ? DesignTokens.focus-ring : DesignTokens.border-form;
-                    HorizontalLayout {
-                        padding-left: 18px;
-                        Text {
+                    border-color: composer-input.has-focus ? DesignTokens.focus-ring : DesignTokens.border-form;
+                    // 入力部分（はみ出した本文は見せない。候補一覧は枠の外に重ねる）
+                    Rectangle {
+                        width: parent.width;
+                        height: parent.height;
+                        clip: true;
+                        composer-input := TextInput {
+                            x: 18px;
+                            width: parent.width - 36px;
+                            height: parent.height;
+                            single-line: false;
+                            wrap: no-wrap;
+                            vertical-alignment: center;
+                            font-size: 14px;
+                            color: DesignTokens.ink;
+                            selection-background-color: DesignTokens.acc-fill;
+                            selection-foreground-color: DesignTokens.on-acc;
+                            text <=> root.composer-text;
+                            // 送信・改行・候補のキーは橋（on_key）が決める。消費する
+                            // 操作なら accept にして組み込みの処理を止める。変換中か
+                            // どうかは preedit-text から見て橋に渡す。
+                            key-pressed(event) => {
+                                if (event.text == Key.Return || event.text == Key.Escape || event.text == Key.Space) {
+                                    root.composer-key-pressed(ComposerKind.channel, event.text,
+                                        event.modifiers.control || event.modifiers.meta,
+                                        event.modifiers.shift, self.preedit-text != "") ? accept : reject
+                                } else {
+                                    reject
+                                }
+                            }
+                            edited => { root.composer-edited(ComposerKind.channel, self.text); }
+                            changed has-focus => {
+                                if (self.has-focus) { root.composer-focused(ComposerKind.channel); }
+                            }
+                        }
+                        if composer-input.text.is-empty : Text {
+                            x: 18px;
+                            height: parent.height;
                             text: root.tr-composer-placeholder;
                             color: DesignTokens.mute;
                             font-size: 14px;
                             vertical-alignment: center;
                         }
                     }
-                    composer-ta := FocusScope {}
+                    // メンション候補一覧（入力欄の上に重ねる）
+                    if root.composer-mention-list-open : MentionListView {
+                        y: -self.height - 6px;
+                        label: root.tr-mention-candidates-label;
+                        items: root.mention-candidates;
+                    }
                 }
             }
         }
@@ -1313,8 +1414,16 @@ component ThreadPaneView inherits Rectangle {
     in property <string> tr-thread-done;
     in property <string> tr-thread-view-work;
     in property <string> tr-thread-input-placeholder;
+    in property <string> tr-mention-candidates-label;
     in property <string> tr-ai-badge;
     in property <string> tr-mention-read-range;
+    // 返信の入力欄とメンション候補一覧（Issue 383。本文は in-out:
+    // 候補の取り込みで橋が書き換えて戻すことがある）。
+    in-out property <string> reply-text;
+    in property <bool> reply-mention-list-open: false;
+    in property <[string]> mention-candidates;
+    // 橋が本文を書き換えた回数（候補の取り込み）。変わったらカーソルを末尾へ。
+    in property <int> reply-cursor-to-end: 0;
     in property <string> data-channel;
     in property <string> data-msg1-sender;
     in property <bool> data-msg1-is-ai: true;
@@ -1329,6 +1438,14 @@ component ThreadPaneView inherits Rectangle {
     in property <bool> data-done: true;
     callback close-pressed();
     callback view-work-pressed();
+    // 入力欄の操作（ChannelView と同じ約束。ComposerKind.thread で届く）。
+    callback composer-edited(composer: ComposerKind, text: string);
+    callback composer-focused(composer: ComposerKind);
+    callback composer-key-pressed(composer: ComposerKind, key-text: string, ctrl-or-meta: bool, shift: bool, composing: bool) -> bool;
+    changed reply-cursor-to-end => {
+        // 橋が本文を書き換えた（候補の取り込み）→ カーソルを末尾へ。
+        reply-input.set-selection-offsets(999999999, 999999999);
+    }
     background: DesignTokens.tile;
     border-radius: 24px;
     VerticalLayout {
@@ -1402,17 +1519,54 @@ component ThreadPaneView inherits Rectangle {
             border-radius: 14px;
             background: DesignTokens.well;
             border-width: 1px;
-            border-color: reply-ta.has-focus ? DesignTokens.focus-ring : DesignTokens.border-form;
-            HorizontalLayout {
-                padding-left: 14px;
-                Text {
+            border-color: reply-input.has-focus ? DesignTokens.focus-ring : DesignTokens.border-form;
+            // 入力部分（はみ出した本文は見せない。候補一覧は枠の外に重ねる）
+            Rectangle {
+                width: parent.width;
+                height: parent.height;
+                clip: true;
+                reply-input := TextInput {
+                    x: 14px;
+                    width: parent.width - 28px;
+                    height: parent.height;
+                    single-line: false;
+                    wrap: no-wrap;
+                    vertical-alignment: center;
+                    font-size: 14px;
+                    color: DesignTokens.ink;
+                    selection-background-color: DesignTokens.acc-fill;
+                    selection-foreground-color: DesignTokens.on-acc;
+                    text <=> root.reply-text;
+                    // キーの取り扱いは ChannelView の入力欄と同じ（橋が決める）。
+                    key-pressed(event) => {
+                        if (event.text == Key.Return || event.text == Key.Escape || event.text == Key.Space) {
+                            root.composer-key-pressed(ComposerKind.thread, event.text,
+                                event.modifiers.control || event.modifiers.meta,
+                                event.modifiers.shift, self.preedit-text != "") ? accept : reject
+                        } else {
+                            reject
+                        }
+                    }
+                    edited => { root.composer-edited(ComposerKind.thread, self.text); }
+                    changed has-focus => {
+                        if (self.has-focus) { root.composer-focused(ComposerKind.thread); }
+                    }
+                }
+                if reply-input.text.is-empty : Text {
+                    x: 14px;
+                    height: parent.height;
                     text: root.tr-thread-input-placeholder;
                     color: DesignTokens.mute;
                     font-size: 14px;
                     vertical-alignment: center;
                 }
             }
-            reply-ta := FocusScope {}
+            // メンション候補一覧（入力欄の上に重ねる）
+            if root.reply-mention-list-open : MentionListView {
+                y: -self.height - 6px;
+                label: root.tr-mention-candidates-label;
+                items: root.mention-candidates;
+            }
         }
     }
 }
@@ -1627,6 +1781,7 @@ export component MainWindow inherits Window {
     in property <string> tr-pane-ai-note;
     in property <string> tr-thread-input-placeholder;
     in property <string> tr-composer-placeholder;
+    in property <string> tr-mention-candidates-label;
     // トップレベルメニューと About ダイアログ（Slint の attribution、Issue 237）
     in property <string> tr-menu-help;
     in property <string> tr-menu-about;
@@ -1659,6 +1814,16 @@ export component MainWindow inherits Window {
     in property <string> data-ai-3-presence;
     in property <string> data-channel-title;
     in property <string> data-channel-members;
+    // 入力欄とメンション候補一覧（Issue 383。本文は in-out: 候補の取り込みで
+    // 橋が書き換えて戻すことがある。開閉・候補は橋から渡す）。
+    in-out property <string> composer-text;
+    in-out property <string> reply-text;
+    in property <bool> composer-mention-list-open: false;
+    in property <bool> reply-mention-list-open: false;
+    in property <[string]> mention-candidates;
+    // 橋が本文を書き換えた回数（候補の取り込み）。変わったらカーソルを末尾へ。
+    in property <int> composer-cursor-to-end: 0;
+    in property <int> reply-cursor-to-end: 0;
     // 「今日・判断待ち」の画面の一覧（inbox.rs の 2 区分）。
     in property <[PendingItem]> pending-items;
     in property <[RequestItem]> request-items;
@@ -1734,6 +1899,12 @@ export component MainWindow inherits Window {
     callback decide-option(string, string, int);
     // 一覧の項目から対象のチャットへ戻る（decision-id）。
     callback open-decision-chat(string);
+    // 入力欄の操作（Issue 383。どちらの入力欄かは ComposerKind で届く）。
+    // composer-key-pressed はキーの文字・Ctrl/Cmd・Shift・IME 変換中を渡し、
+    // 「消費するか」を返す（Slint の key-pressed が accept を返すかどうか）。
+    callback composer-edited(composer: ComposerKind, text: string);
+    callback composer-focused(composer: ComposerKind);
+    callback composer-key-pressed(composer: ComposerKind, key-text: string, ctrl-or-meta: bool, shift: bool, composing: bool) -> bool;
 
     background: DesignTokens.bg;
     // トップレベルメニュー。About ダイアログへの到達経路（Issue 237）。Window の中に
@@ -1830,6 +2001,11 @@ export component MainWindow inherits Window {
                     tr-decision-choose: root.tr-decision-choose;
                     tr-decision-outcome: root.tr-decision-outcome;
                     tr-composer-placeholder: root.tr-composer-placeholder;
+                    tr-mention-candidates-label: root.tr-mention-candidates-label;
+                    composer-text <=> root.composer-text;
+                    composer-mention-list-open: root.composer-mention-list-open;
+                    mention-candidates: root.mention-candidates;
+                    composer-cursor-to-end: root.composer-cursor-to-end;
                     data-decision-visible: root.data-decision-visible;
                     data-decision-id: root.data-decision-id;
                     data-decision-version: root.data-decision-version;
@@ -1875,6 +2051,11 @@ export component MainWindow inherits Window {
                     acknowledge-pressed => { root.acknowledge-pressed(); }
                     view-work-pressed => { root.view-work-pressed(); }
                     decide-option(id, option-id, version) => { root.decide-option(id, option-id, version); }
+                    composer-edited(composer, text) => { root.composer-edited(composer, text); }
+                    composer-focused(composer) => { root.composer-focused(composer); }
+                    composer-key-pressed(composer, key-text, ctrl-or-meta, shift, composing) => {
+                        root.composer-key-pressed(composer, key-text, ctrl-or-meta, shift, composing)
+                    }
                 }
             }
         }
@@ -1887,6 +2068,7 @@ export component MainWindow inherits Window {
             tr-thread-done: root.tr-thread-done;
             tr-thread-view-work: root.tr-thread-view-work;
             tr-thread-input-placeholder: root.tr-thread-input-placeholder;
+            tr-mention-candidates-label: root.tr-mention-candidates-label;
             tr-ai-badge: root.tr-ai-badge;
             tr-mention-read-range: root.tr-mention-read-range;
             data-channel: root.data-channel-title;
@@ -1901,8 +2083,17 @@ export component MainWindow inherits Window {
             data-msg2-time: root.data-thread-msg2-time;
             data-msg2-body: root.data-thread-msg2-body;
             data-done: root.data-msg2-thread-done;
+            reply-text <=> root.reply-text;
+            reply-mention-list-open: root.reply-mention-list-open;
+            mention-candidates: root.mention-candidates;
+            reply-cursor-to-end: root.reply-cursor-to-end;
             close-pressed => { root.close-pane-pressed(); }
             view-work-pressed => { root.view-work-pressed(); }
+            composer-edited(composer, text) => { root.composer-edited(composer, text); }
+            composer-focused(composer) => { root.composer-focused(composer); }
+            composer-key-pressed(composer, key-text, ctrl-or-meta, shift, composing) => {
+                root.composer-key-pressed(composer, key-text, ctrl-or-meta, shift, composing)
+            }
         }
         if root.show-right-pane && root.right-pane-ai-work : AiWorkPaneView {
             width: 400px;
