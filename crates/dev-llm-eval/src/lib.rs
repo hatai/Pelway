@@ -258,7 +258,7 @@ pub fn markdown(report: &EvalReport) -> String {
 /// コマンドライン引数。`llm-eval --provider zai --base-url ... --k 3`。
 #[derive(Clone, Debug, PartialEq)]
 pub struct CliOptions {
-    /// `zai` か `openai`。設定例（`ProviderConfig::zai_example` 等）を選ぶ。
+    /// `zai` か `openai`。提供元プリセット（`ProviderConfig::zai` 等）を選ぶ。
     pub provider: String,
     /// base_url の上書き（モックサーバー向け）。
     pub base_url: Option<String>,

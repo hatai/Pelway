@@ -23,6 +23,12 @@
 #   crates/pelway-http/tests/http.rs
 #                         … 非ループバックを拒否する陰性試験が意図的に違反アドレスを含む。
 #                           Issue #143 の移植で追加
+#   crates/pelway-llm/src/config.rs
+#                         … LLM 提供元の endpoint 宣言を集約した1ファイル（#330 の
+#                           意図的な外部接続。z.ai 本番・予備の OpenAI。endpoint は
+#                           ここ以外の製品ソースに書かず、ここを除いて
+#                           external-refs の網を維持する）。実 LLM（z.ai）を使う
+#                           場合の扱いは docs/worklogs/issue-330.md に記録
 #   .git/
 # シンボリックリンク: find に -L を付けず、走査の途中で出会ったリンクはたどらない
 #   （リンク先が走査ルートの外でも読まない。ルート自体がリンクのときは各段階が realpath で実体を走査する）
@@ -46,7 +52,7 @@ dc_is_excluded() {
   esac
   case "$1" in
     docs/* | scripts/demo-check/* | .git/* | */tests/fixtures/* | tests/fixtures/* | */testdata/* | testdata/*) return 0 ;;
-    crates/dev-*/* | crates/pelway-agent-watch/* | crates/pelway-client-ui/tokens/* | crates/pelway-http/tests/http.rs) return 0 ;;
+    crates/dev-*/* | crates/pelway-agent-watch/* | crates/pelway-client-ui/tokens/* | crates/pelway-http/tests/http.rs | crates/pelway-llm/src/config.rs) return 0 ;;
   esac
   return 1
 }

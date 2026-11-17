@@ -31,3 +31,5 @@ aks = "aks"
 canva = "canva"
 # pelway-client-ui のテストが "rgba(" を分割組み立てするための断片（no_color_values.rs）。
 ba = "ba"
+# POSIX の基本正規表現（Basic Regular Expressions）の略号（docs/worklogs/issue-220.md）。
+bre = "bre"

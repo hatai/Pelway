@@ -18,9 +18,10 @@
 //!   ログに `client_msg_id` は出さない（07 の決まりは変わらない）。
 //! - 本文中の `@メンション` をチャンネルのメンバーに解決する検出
 //!   （[`DataStore::mentioned_members`]）と、デモ用の最小 seed
-//!   （[`DataStore::new_demo_seeded`]）を持つ。seed の P03 根拠記録だけは
+//!   （[`DataStore::new_demo_seeded`]）を持つ。seed の根拠記録だけは
 //!   例外的に [`BasisStatus::Active`] で作る（本番には Active な根拠を作る
-//!   経路が無いため、デモで `is_purpose_enabled` を満たす合成データ）。
+//!   経路が無いため、デモで `is_purpose_enabled` を満たす合成データ。
+//!   根拠の目的 ID は [`DataStore::new_demo_seeded_with_basis`] が受け取る）。
 //! - 保存物には `purpose_id`（[`PurposeId`]、P01〜P08 のみ）が必須。未設定・不正値は
 //!   serde の脱直列化エラーとして拒否する。学習・広告・会社横断分析の経路は作らない。
 //! - 根拠記録の status は 12 §3.2/§3.3 に従い、`pending`・欠落・不明・期限切れ・
@@ -79,6 +80,38 @@ impl PurposeId {
         Self::P07,
         Self::P08,
     ];
+
+    /// 設定値からの解析（`P01`〜`P08`。大文字・小文字のどちらも受ける）。
+    /// それ以外は `None`（呼び出し側で設定エラーとして扱う）。
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.to_ascii_uppercase().as_str() {
+            "P01" => Some(Self::P01),
+            "P02" => Some(Self::P02),
+            "P03" => Some(Self::P03),
+            "P04" => Some(Self::P04),
+            "P05" => Some(Self::P05),
+            "P06" => Some(Self::P06),
+            "P07" => Some(Self::P07),
+            "P08" => Some(Self::P08),
+            _ => None,
+        }
+    }
+
+    /// 表示・メッセージ用の安定名（`P01`〜`P08`）。
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::P01 => "P01",
+            Self::P02 => "P02",
+            Self::P03 => "P03",
+            Self::P04 => "P04",
+            Self::P05 => "P05",
+            Self::P06 => "P06",
+            Self::P07 => "P07",
+            Self::P08 => "P08",
+        }
+    }
 }
 
 /// 根拠の種類（`basis_type` 列）。**合成の値** で、実際の根拠分類との対応は未決
@@ -103,7 +136,7 @@ pub enum BasisStatus {
     Pending,
     /// 有効な根拠が確認できた状態。公開経路ではこの状態を作らない
     /// （法的な当てはめは U03 未決。同意を使う機能は初期オフのまま）。
-    /// デモ seed（[`DataStore::new_demo_seeded`]）だけが P03 根拠をこの状態で登録する。
+    /// デモ seed（[`DataStore::new_demo_seeded`]）だけが根拠をこの状態で登録する。
     Active,
     /// 撤回済み（根拠失効）。
     Withdrawn,
@@ -661,12 +694,22 @@ impl DataStore {
     ///   [`DEMO_CHANNEL_ID`]）。メンバー4人（田中・山本・佐藤・AI Bot ハル。
     ///   ハルは [`MemberKind::Bot`]）。
     /// - 過去の会話数件（`client_msg_id` はクライアント投稿にだけ付くため無し）。
-    /// - LLM 利用の根拠（P03）の [`BasisStatus::Active`] な記録。本番には
+    /// - LLM 利用の根拠の [`BasisStatus::Active`] な記録。本番には
     ///   Active な根拠を作る経路が無いため、デモで
     ///   [`is_purpose_enabled`](Self::is_purpose_enabled) を満たすためだけの
     ///   seed 専用データ（根拠の種類の当てはめは U03 未決のまま）。
+    ///
+    /// 根拠の目的 ID は [`Self::new_demo_seeded_with_basis`] が受け取る
+    /// （コードに固定しない。Issue #330）。この関数は既存の既定 P03 を使う。
     #[must_use]
     pub fn new_demo_seeded(now: TsMs) -> Self {
+        Self::new_demo_seeded_with_basis(now, PurposeId::P03)
+    }
+
+    /// [`Self::new_demo_seeded`] の、LLM 利用の根拠として登録する目的 ID を
+    /// 指定する形（Issue #330。設定で受けた根拠を seed に登録するために使う）。
+    #[must_use]
+    pub fn new_demo_seeded_with_basis(now: TsMs, llm_basis: PurposeId) -> Self {
         let mut store = Self::new();
         let workspace_id = WorkspaceId::from(DEMO_WORKSPACE_ID);
         store.ensure_workspace(&workspace_id, now);
@@ -719,14 +762,15 @@ impl DataStore {
                 now.saturating_sub((history.len() - i) as TsMs),
             );
         }
-        // P03 の Active な根拠記録（デモの is_purpose_enabled を満たす seed 専用）。
-        // 参照形式の検証は既存の作成経路を通し、status・発効だけここで確定させる。
+        // 指定された根拠の Active な記録（デモの is_purpose_enabled を満たす
+        // seed 専用）。参照形式の検証は既存の作成経路を通し、status・発効だけ
+        // ここで確定させる。
         let created = store
             .create_basis_record(
                 &workspace_id,
                 NewBasisRecord {
                     basis_type: BasisType::SyntheticConsent,
-                    purpose_id: PurposeId::P03,
+                    purpose_id: llm_basis,
                     scope: DEMO_CHANNEL_ID.to_owned(),
                     party_coverage_ref: "ref:demo-party-coverage".to_owned(),
                     grantor_ref: "ref:demo-grantor".to_owned(),
@@ -1848,5 +1892,34 @@ mod tests {
                 .all(|l| l.medium == StorageMedium::Memory),
             "seed の保存部はすべてメモリ"
         );
+    }
+
+    // 根拠の目的 ID はコードに固定せず、設定で受けたものを登録できる（#330）。
+    #[test]
+    fn demo_seed_with_basis_registers_the_given_purpose() {
+        let store = DataStore::new_demo_seeded_with_basis(1_000, PurposeId::P04);
+        assert!(store.is_purpose_enabled(&demo_ws(), PurposeId::P04, 1_000));
+        assert!(!store.is_purpose_enabled(&demo_ws(), PurposeId::P03, 1_000));
+        assert!(
+            store
+                .basis_records(&demo_ws())
+                .iter()
+                .any(|r| r.purpose_id == PurposeId::P04 && r.status == BasisStatus::Active)
+        );
+    }
+
+    // PurposeId::parse / as_str（設定値の読み書き。#330）。
+    #[test]
+    fn purpose_id_parse_roundtrip() {
+        for purpose in PurposeId::ALL {
+            assert_eq!(PurposeId::parse(purpose.as_str()), Some(purpose));
+            assert_eq!(
+                PurposeId::parse(&purpose.as_str().to_lowercase()),
+                Some(purpose)
+            );
+        }
+        for bad in ["P00", "P09", "p1", "purpose-6", "", " P06", "P06 "] {
+            assert_eq!(PurposeId::parse(bad), None, "{bad}");
+        }
     }
 }

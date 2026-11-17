@@ -27,6 +27,34 @@ pub struct ProviderConfig {
     pub response_format: ResponseFormatCapability,
 }
 
+/// Z.ai の汎用 API エンドポイント（`https://api.z.ai/api/paas/v4`。
+/// Coding Plan 向けの `/api/coding/paas/v4` は自前アプリからの呼び出しが
+/// 認められていないため使わない。ADR 0008、Issue #330）。
+/// 提供元 endpoint の宣言はこのファイルに限定する（demo-check external-refs の
+/// 除外理由を scripts/demo-check/lib.sh に記録）。
+pub const ZAI_BASE_URL: &str = "https://api.z.ai/api/paas/v4";
+
+/// OpenAI の API エンドポイント（予備の提供元。ADR 0008 の「設定の差し替えによる
+/// 予備」。endpoint の宣言はこのファイルに限定する）。
+pub const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
+
+/// 設定で受けるカスタム接続先の検証（#330 QA 点検 2026-11-17）。loopback
+/// （127.0.0.0/8・::1・localhost）への接続先は任意のスキームを許し（ローカルの
+/// モック用）、それ以外は https の URL に限る。http の外部接続先は Bearer キーの
+/// 送出経路になりうるため拒否する。
+pub fn custom_base_url_allowed(base_url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(base_url) else {
+        return false;
+    };
+    let loopback = match parsed.host() {
+        Some(url::Host::Domain(d)) => d == "localhost" || d.ends_with(".localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    };
+    loopback || parsed.scheme() == "https"
+}
+
 impl ProviderConfig {
     pub fn new(
         name: impl Into<String>,
@@ -44,26 +72,26 @@ impl ProviderConfig {
         }
     }
 
-    /// Z.ai の設定例（ADR 0008。汎用エンドポイント。`response_format` は `json_object` まで）。
-    /// モデル名は測定の対象ごとに差し替える。
-    pub fn zai_example() -> Self {
+    /// Z.ai の汎用エンドポイントへの接続設定（`response_format` は
+    /// `json_object` まで。モデル名は呼び出し側の設定で決める）。
+    pub fn zai(chat_model: impl Into<String>, embed_model: impl Into<String>) -> Self {
         Self::new(
             "zai",
-            "https://api.z.ai/api/paas/v4",
-            "glm-4.6",
-            "embedding-3",
+            ZAI_BASE_URL,
+            chat_model,
+            embed_model,
             ResponseFormatCapability::JsonObject,
         )
     }
 
-    /// OpenAI の設定例（ADR 0008。`response_format` は `json_schema` 対応）。
-    /// モデル名は測定の対象ごとに差し替える。
-    pub fn openai_example() -> Self {
+    /// OpenAI の接続設定（`response_format` は `json_schema` 対応。
+    /// モデル名は呼び出し側の設定で決める）。
+    pub fn openai(chat_model: impl Into<String>, embed_model: impl Into<String>) -> Self {
         Self::new(
             "openai",
-            "https://api.openai.com/v1",
-            "gpt-4o-mini",
-            "text-embedding-3-small",
+            OPENAI_BASE_URL,
+            chat_model,
+            embed_model,
             ResponseFormatCapability::JsonSchema,
         )
     }

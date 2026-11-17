@@ -10,16 +10,17 @@ use pelway_llm::{LlmError, SecretToken as ReexportedSecretToken};
 use rig_core::error::ProviderError;
 use rig_core::{ProviderResponseError, http_client::StatusCode};
 
-/// 設定例（Z.ai・OpenAI）は必須項目を満たす。
+/// 提供元プリセット（Z.ai・OpenAI）は必須項目を満たし、モデル名は
+/// 呼び出し側の設定で決める（例の設定は残さない。Issue #330）。
 #[test]
-fn provider_config_examples() {
-    let zai = ProviderConfig::zai_example();
-    assert_eq!(zai.base_url, "https://api.z.ai/api/paas/v4");
+fn provider_config_presets() {
+    let zai = ProviderConfig::zai("glm-5.3-flash", "embedding-3");
+    assert_eq!(zai.base_url, pelway_llm::config::ZAI_BASE_URL);
     assert_eq!(zai.response_format, ResponseFormatCapability::JsonObject);
-    assert!(!zai.chat_model.is_empty());
-    assert!(!zai.embed_model.is_empty());
-    let openai = ProviderConfig::openai_example();
-    assert_eq!(openai.base_url, "https://api.openai.com/v1");
+    assert_eq!(zai.chat_model, "glm-5.3-flash");
+    assert_eq!(zai.embed_model, "embedding-3");
+    let openai = ProviderConfig::openai("gpt-6-luna", "text-embedding-3-small");
+    assert_eq!(openai.base_url, pelway_llm::config::OPENAI_BASE_URL);
     assert_eq!(openai.response_format, ResponseFormatCapability::JsonSchema);
     // カスタム提供元も同じ形で受け取れる。
     let custom = ProviderConfig::new(

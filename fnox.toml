@@ -20,5 +20,5 @@ PELWAY_DATABASE_URL = { default = "postgres://pelway@127.0.0.1:5432/pelway", des
 
 # --- 将来必要になる秘密の名前だけの宣言（値なし・当面未使用のため個別に ignore） ---
 
-PELWAY_LLM_API_KEY = { if_missing = "ignore", description = "LLMゲートウェイのAPI鍵。実装が進んだ時点で各自が設定する。現時点では未使用" }
+PELWAY_LLM_API_KEY = { if_missing = "ignore", description = "LLMゲートウェイのAPI鍵（#330）。未登録・送信に使えない形のときは runner が台本モードで起動するため ignore のまま" }
 PELWAY_PENPOT_MCP_TOKEN = { if_missing = "ignore", description = "Penpot 公式クラウド MCP（design.penpot.app/mcp/stream の URL クエリ ?token= ）の個人アクセストークン。OpenCode 設定には環境変数参照で埋める。値は fnox set で登録する（登録が済むまで ignore のまま）" }
