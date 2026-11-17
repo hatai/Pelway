@@ -23,3 +23,15 @@
 5. 改善案: scripts/tests/conductor-watch-ensure.test.sh の間欠失敗（`watch is running`・`foreign watch present`。main でも発生、本 PR と無関係）を別 Issue で調査すること
 
 使ったスキル: implement-issue（テストは scripts/tests/conductor-watch-label-actor.test.sh を書き直してレッド→グリーンを確認）
+
+## 実装者メモ（round 3）
+
+対象 head: 03f2e6a944704286c4e907e093040a87d7cea450
+
+1. 詰まった箇所: なし（must-fix 1 件の対応。`mise run verify` は conductor-watch-ensure.test.sh の既知の間欠失敗で 1 回だけ落ち、再実行で合格）
+2. 曖昧だった文: 「手順 3 を、書き直した旨のコメントを残した上で Grok Bot 経由で hatai に解除を依頼し、解除後に `ready-for-agent` を付け直す形に書き換える」（PR #407 のレビュー 2f56a7c の must-fix）
+3. 仮定と解釈: レビューの直し方をそのまま手順 3〜4 に割り当てた（コメントを残すのを手順 3、付け直しを手順 4）。`ready-for-agent` を付け直す主体は同スキル 24 行目の決まり（付けるのは人間。指揮役は人間に委任されたときだけ）をそのまま引用した。must-fix とされていない nit（テストファイル名、per_page=100 の 1 ページ限りの既知の限界の明記、hatai 本人の UI 操作の文言）は、指示が無いため直していない
+4. 足りなかった情報・検証手段: なし（must-fix の指摘は対象行と直し方が明示されていた）
+5. 改善案: scripts/tests/conductor-watch-ensure.test.sh の間欠失敗の調査（round 1・2 と同一。別 Issue にすべき）
+
+使ったスキル: implement-issue（round 3 はスキル本文 1 箇所の修正のため、テストの追加・変更は無し）
