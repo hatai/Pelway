@@ -22,12 +22,12 @@ Pelway の本番配置の雛形は、クラウド固有サービスに依存し�
 | API（server: axum） | コンテナ。`edge`/`app`/`data` | 認証と承認、状態・監査・outbox の操作 |
 | ワーカー（runner） | コンテナ。`app`/`data` | DB キュー（ADR 0006）のジョブ実行、lease と手順の再開 |
 | Postgres | コンテナ。`data` のみ | 状態・監査・outbox・DB キューの正本 |
-| サンドボックス管理（sandbox controller と task sandbox） | コンテナ。`sandbox` ネットワーク | タスクごとの Linux コンテナ sandbox（秘密なし・外部出口なし）の起動と管理 |
+| サンドボックス管理（sandbox controller と task sandbox） | controller は `app` と `sandbox`、task sandbox は `sandbox` のみ | タスクごとの Linux コンテナ sandbox（秘密なし・外部出口なし）の起動と管理。runner から controller への起動依頼は `app` 経由（[v0.7 01](../technical/v0.7/body/01-architecture.md) の `RUN --> CTRL`） |
 | 定期ジョブ（systemd タイマー） | ホスト側 | 国内 backup（13章 R15: 毎日 02:00 JST、snapshot は作成から14日）、ホストヘルスチェック、セキュリティ更新 |
 
 補足:
 
-- ネットワークは `edge`（リバースプロキシ↔API）、`app`（API・ワーカー・ゲートウェイ間）、`data`（API・ワーカー↔Postgres）、`sandbox`（controller↔task sandbox）に分ける。[05 ローカル環境](../technical/v0.7/body/05-local-dev.md)の「`app` と `sandbox` を分け、DB は sandbox から到達不能にする」を本番でも維持する。Postgres と sandbox に `ports` を持たせない（ホストに公開しない）。
+- ネットワークは `edge`（リバースプロキシ↔API）、`app`（API・ワーカー・ゲートウェイ間に加え、runner↔sandbox controller の制御面）、`data`（API・ワーカー↔Postgres）、`sandbox`（controller↔task sandbox）に分ける。[05 ローカル環境](../technical/v0.7/body/05-local-dev.md)の「`app` と `sandbox` を分け、DB は sandbox から到達不能にする」を本番でも維持する。このため sandbox controller は制御面の `app` と `sandbox` の両方に置き、task sandbox は `sandbox` のみに置いて `data` には参加させない（sandbox から Postgres への到達経路を作らない）。Postgres と sandbox に `ports` を持たせない（ホストに公開しない）。
 - マイグレーションはワンショットの migrate サービス（owner 接続はここだけ、適用したら終わる）で当てる。LLM ゲートウェイ・連携 gateway は `app` 側の別プロセス。添付・成果物・バックアップはホストのローカルボリュームに置く。
 - コンテナには公開入口のリバースプロキシも含めて `restart: unless-stopped`・`no-new-privileges:true`・`cap_drop: ALL`（必要なものだけ戻す）・リソース制限（pids・memory）・ログ上限を付け、Rakazo の本番 Compose と同じ守りを雛形にする。
 - プロダクト機能の定期実行（ルーティン）は DB キュー経由で server・runner が処理する（ADR 0010・0011）。この systemd タイマーはホスト運用の定期ジョブ専用であり、両者を混ぜない。
