@@ -61,3 +61,15 @@ mise.toml の demo-check タスク説明（「製品をビルドしたあとに�
 - 報告の論理パス表記（`target/…` として報告）は 0 hit のため本検証では直接観察できていない。
   この側面は selftest.sh の合成ケース（mbx キャッシュ例外で target リンク経由の走査と報告を
   固定）が既に担保している。実走査の証拠は走査ファイル数の一致（19276）。
+
+## 実装者メモ（round 1）
+
+対象 head: 61fac4a7b8a5bf46a8c07dc2b6c5ea1ab42f6c60
+
+1. 詰まった箇所: scripts/agent-sandbox/sandbox-shell:74-81: コマンド開始のたびに worktree の target symlink が実ディレクトリに戻されるため、ln -s で作った symlink が次コマンドで消えた（1 回目の mise run verify では、検証中に発行した自分の shell コマンドがこの戻しを誘発し cargo の出力先を壊して exit 101。2 回目は shell コマンドを発行せず完了）。ln -sfn がディレクトリを渡すとリンクを「その中に」作る罠にも一度ハマった
+2. 曖昧だった文: 「前提: ビルドを実施してよいかの確認（各スロットはビルド禁止で進めてきたため）。」（Issue #262 本文）— 誰が・いつ確認するかと、不確認のまま取れる代替手段が書かれていない
+3. 仮定と解釈: ホストの mbx キャッシュ（~/.cache/mbx/targets/v1/911a13c3…、19276 ファイルの実ビルド成果物）を実運用と同じ symlink 形状（docs/dev-environment.md「mr boxington（mbx）について」）で走査対象にすれば「実ビルド成果物に対する canary 走査」は満たせ、ビルド許可の判断は不要と解釈した。canary の目印は合成データ専用文字列で成果物のビルド元 commit に依存しないため。sandbox 内で cargo build する選択（sandbox キャッシュへの書き込みと時間）は採らなかった
+4. 足りなかった情報・検証手段: 検証対象キャッシュのビルド元 commit の同定手段（記録にはエントリの mtime 2026-11-16 22:59 と内容のバイナリ名のみ）。mise run verify の失敗が 1 件残る: scripts/tests/conductor-watch-ensure.test.sh（単独実行でも失敗・失敗ケースが実行ごとに変わる環境差分。docs/worklogs/issue-264.md round 1 と同一。verify-lint 0・verify-static 0・cargo test 0・script-test 27/28 は確認済み）
+5. 改善案: .agents/skills/write-issue/SKILL.md の「未決事項」に「前提として人の確認が要るものは、確認者と、未確認のまま進める代替手段を併記する」を足す
+
+使ったスキル: implement-issue（tdd は試行指定なしのため未使用。RED→GREEN は走査対象の有無の状態差で表現）
