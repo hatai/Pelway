@@ -2,7 +2,7 @@
 
 ## 実装者メモ（round 1）
 
-対象 head: 494b728423594d5d1be9ed79e511877065f9d452
+対象 head: 71c250e4f46a656e14c29ac9f69e9a78b3065354
 
 1. 詰まった箇所: `crates/pelway-client-ui/tests/accessibility.rs` の Tab 検査: Slint 1.18.1 の MenuBar の要素ツリーは `parent_node` を持たず、初期フォーカスが MenuBar の FocusScope に乗ると Tab の巡回がそのサブツリーに閉じて窓の部品へ進めない。窓の主ツリー内にフォーカスを与えてから回す形にした。
 2. 曖昧だった文: 「追加 800 行または削除 2000 行の上限を超える | 分割案」（`.agents/skills/implement-issue/SKILL.md` の「止まる条件」）: +976 行で一度超えたが、使われない `ShellBridge` 側の決定経路の除去と `decide-key`/`send-key` の 4 段転送を `KeyRouter` global 化する重複除去で +789 まで収まり、停止せず進めた。
