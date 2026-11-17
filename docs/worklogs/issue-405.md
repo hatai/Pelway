@@ -35,3 +35,15 @@
 5. 改善案: scripts/tests/conductor-watch-ensure.test.sh の間欠失敗の調査（round 1・2 と同一。別 Issue にすべき）
 
 使ったスキル: implement-issue（round 3 はスキル本文 1 箇所の修正のため、テストの追加・変更は無し）
+
+## 実装者メモ（round 4）
+
+対象 head: a4c1c0bf1b9caa548b34c7dc65536546e02ccb17
+
+1. 詰まった箇所: なし（must-fix 1 件の対応。runbook 権限表の 1 行の修正。`mise run verify` は一発合格）
+2. 曖昧だった文: 「字面どおりだと指揮役は `agent:working`・`agent:devin` を外せない（付与のみ可）と読める」（PR #407 のレビュー de469ad の must-fix）
+3. 仮定と解釈: レビューの直し方の例「`agent:working`・`agent:devin` の付け外しと `needs-human` の付与」をそのまま採用し、`needs-human` を外すのは hatai のみという既存の文はそのまま残した。テストの grep（`needs-human` を外すのは hatai のみ）も引き続き通る。nit（comments の 100 件限り、逐次取得の上限、裏付け判定が内容を見ない機械判定の限界）は指示が無いため直していない
+4. 足りなかった情報・検証手段: なし
+5. 改善案: レビュー nit の「裏付けありと判定された操作の抜き取り照合を巡回に残す」は、runbook の巡回記録に「LABEL unbacked 以外のラベル操作も抜き取りで照合する」を足す形で別 Issue にできる
+
+使ったスキル: implement-issue（round 4 も runbook 1 行の修正のため、テストの追加・変更は無し）
