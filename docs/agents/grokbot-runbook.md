@@ -12,7 +12,7 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 | してよいこと | 方法 |
 |---|---|
 | スレッドを立てる・指示を送る・様子を見る | 指揮役が T3 のスレッドとして動いているときはネイティブの `t3_thread_launch`（作成）と `t3_thread_send`（指示）。Grok Bot（クラウド）のときは T3 Connect の MCP（`t3 thread start` / `send` / `show` / `list` と同じ操作） |
-| ラベルを付け外しする（`agent:working`、`agent:devin`、`needs-human` の付与。`ready-for-agent` は外さない。`needs-human` を外すのは hatai のみ。指揮役は Grok Bot 経由で解除を依頼する） | GitHub |
+| ラベルを付け外しする（`agent:working`・`agent:devin` の付け外し、`needs-human` の付与。`ready-for-agent` は外さない。`needs-human` を外すのは hatai のみ。指揮役は Grok Bot 経由で解除を依頼する） | GitHub |
 | Issue にコメントする | GitHub |
 | Projects ボード `Pelway agent team`（https://github.com/users/hatai/projects/7）のカードを読み、Status を書き換える | 人間の名義の `gh`（読み取り `read:project`、書き込み `project` スコープ）。`scripts/agent-gh` は使わない |
 | Issue・PR・レビュー・CI の結果を読む | GitHub |
