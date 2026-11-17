@@ -27,8 +27,8 @@ Pelway の本番配置の雛形は、クラウド固有サービスに依存し�
 
 補足:
 
-- ネットワークは `edge`（リバースプロキシ↔API）、`app`（API・ワーカー・ゲートウェイ間に加え、runner↔sandbox controller の制御面）、`data`（API・ワーカー↔Postgres）、`sandbox`（controller↔task sandbox）に分ける。[05 ローカル環境](../technical/v0.7/body/05-local-dev.md)の「`app` と `sandbox` を分け、DB は sandbox から到達不能にする」を本番でも維持する。このため sandbox controller は制御面の `app` と `sandbox` の両方に置き、task sandbox は `sandbox` のみに置いて `data` には参加させない（sandbox から Postgres への到達経路を作らない）。Postgres と sandbox に `ports` を持たせない（ホストに公開しない）。
-- マイグレーションはワンショットの migrate サービス（owner 接続はここだけ、適用したら終わる）で当てる。LLM ゲートウェイ・連携 gateway は `app` 側の別プロセス。添付・成果物・バックアップはホストのローカルボリュームに置く。
+- ネットワークは `edge`（リバースプロキシ↔API）、`app`（API・ワーカー・ゲートウェイ間に加え、runner↔sandbox controller の制御面）、`data`（API・ワーカー↔Postgres）、`sandbox`（controller・連携 gateway↔task sandbox）に分ける。[05 ローカル環境](../technical/v0.7/body/05-local-dev.md)の「`app` と `sandbox` を分け、DB は sandbox から到達不能にする」を本番でも維持する。このため sandbox controller は制御面の `app` と `sandbox` の両方に置き、task sandbox は `sandbox` のみに置いて `data` には参加させない（sandbox から Postgres への到達経路を作らない）。Postgres と sandbox に `ports` を持たせない（ホストに公開しない）。
+- マイグレーションはワンショットの migrate サービス（owner 接続はここだけ、適用したら終わる）で当てる。LLM ゲートウェイは `app` 側の別プロセス。連携 gateway は `app` と `sandbox` の両方に置く: task sandbox からの操作要求（v0.7 01 の `SB --> GW`）は `sandbox` 経由で受け、承認と attempt 記録のための API との往復は `app` 経由で行う。task sandbox から見た `sandbox` 上の隣は controller と連携 gateway だけで、sandbox の外部出口は連携 gateway だけ（v0.7 01 の「外部出口はGWだけ」）のままにする。添付・成果物・バックアップはホストのローカルボリュームに置く。
 - コンテナには公開入口のリバースプロキシも含めて `restart: unless-stopped`・`no-new-privileges:true`・`cap_drop: ALL`（必要なものだけ戻す）・リソース制限（pids・memory）・ログ上限を付け、Rakazo の本番 Compose と同じ守りを雛形にする。
 - プロダクト機能の定期実行（ルーティン）は DB キュー経由で server・runner が処理する（ADR 0010・0011）。この systemd タイマーはホスト運用の定期ジョブ専用であり、両者を混ぜない。
 
@@ -36,7 +36,7 @@ Pelway の本番配置の雛形は、クラウド固有サービスに依存し�
 
 - 本番は国内のホスティング（国内 VPS または国内リージョン）に置く前提とする。ADR 0008 の国内完結の方針を本番配置にも適用する。ホスティング先の選定は未決（この ADR では VPS か国内リージョンかを決めない）。
 - マネージド DB・マネージドメッセージング・オブジェクトストレージ等のクラウド固有サービスには依存しない。構成要素はすべてホスト上のコンテナとローカルボリュームで成立させ、国内のホスティングへそのまま置ける移植性を保つ。
-- 国外への通信は、ADR 0008 の BYOK（契約者の責任による例外）でテナントが有効化した LLM 提供元への通信だけが LLM ゲートウェイ経由で出る。それ以外の構成要素に外向き通信を与えない。
+- 外向き通信は、ADR 0008 の BYOK（契約者の責任による例外）でテナントが有効化した LLM 提供元への通信（LLM ゲートウェイ経由）と、利用者が許可した連携 gateway の transport（v0.7 01 の「許可済みtransportだけ」。国外処理があり得る例外経路）の 2 つだけに限る。それ以外の構成要素に外向き通信を与えない。
 
 ## ホスト堅牢化はコードとして管理する
 
