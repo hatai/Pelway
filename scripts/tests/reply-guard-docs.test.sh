@@ -41,15 +41,32 @@ check cond1_runaway_patterns docs/technical.md \
 
 # 条件2: 検出時の扱い（投稿を止める、AI に汎用的に差し戻す、人へ知らせる）が決まっていて、
 # #192 の却下理由の規則（詳細は人間の画面と監査のみ、AI へは汎用の拒否のみ）と矛盾しない。
+# round 4（hatai の例外決定・2026-11-17）: 監査ログには元の文を残さず理由コードと
+# ハッシュだけを残す。
 check cond2_block docs/technical.md \
   '投稿を止める'
 check cond2_generic_bounce docs/technical.md \
   '汎用の差し戻し'
 check cond2_notify_human docs/technical.md \
-  '人間の画面' \
-  '監査ログ'
+  '人間の画面'
+check cond2_audit_log docs/technical.md \
+  '監査ログ' \
+  '理由コード' \
+  '元の文を残しません'
 check cond2_no_contradiction_with_192 docs/technical.md \
   '#192'
+
+# 条件1の round 4 追加分（hatai の例外決定）: 添付の中身も検査対象にする。
+# 取り出せない添付と大きすぎる添付は止める（fail-closed）。
+check cond1_attachments docs/technical.md \
+  '添付の内容' \
+  '大きすぎる添付'
+
+# round 4 の暗号化添付の規則: 人のアップロードだけ注記付きで通す。Bot の投稿は
+# 人のファイルを変えずに転送して hash が一致したときだけ通す。
+check cond4_encrypted docs/technical.md \
+  '暗号化された添付' \
+  'hashが一致'
 
 # 条件3: 正当な発言（コードやログを扱う仕事）を誤って止めないための扱い
 # （チャンネルや役割による適用範囲）が書かれている。
