@@ -730,6 +730,70 @@ fn missing_or_malformed_key_builds_script_gateway() {
     }
 }
 
+/// 起動時ログの接続先 URL は伏せる（Issue #404）。userinfo とクエリの
+/// key/token の値がログ行に出ないことの各ケース。
+#[test]
+fn endpoint_log_line_redacts_url_secrets() {
+    // userinfo あり（カスタム接続先は loopback なので http で通る）。
+    let config = DemoLlmConfig::from_vars(vars(&[(
+        CUSTOM_BASE_URL_ENV,
+        "http://alice:hunter2@127.0.0.1:9/v1",
+    )]))
+    .expect("config");
+    let line = config.endpoint_log_line();
+    assert!(!line.contains("alice"), "{line}");
+    assert!(!line.contains("hunter2"), "{line}");
+    assert!(line.contains("***@127.0.0.1:9/v1"), "{line}");
+
+    // クエリに key/token あり: 値は出ず、キー名と秘密でない値は残る。
+    let config = DemoLlmConfig::from_vars(vars(&[(
+        CUSTOM_BASE_URL_ENV,
+        "http://127.0.0.1:9/v1?key=abc123&token=def456&x=1",
+    )]))
+    .expect("config");
+    let line = config.endpoint_log_line();
+    assert!(!line.contains("abc123"), "{line}");
+    assert!(!line.contains("def456"), "{line}");
+    assert!(line.contains("key=***"), "{line}");
+    assert!(line.contains("token=***"), "{line}");
+    assert!(line.contains("x=1"), "{line}");
+
+    // どちらもなし: 既知の接続先はそのまま（不要な伏せをしない）。
+    let config = DemoLlmConfig::from_vars(|name| {
+        (name == "PELWAY_LLM_BASE_URL").then(|| pelway_llm::config::ZAI_BASE_URL.to_owned())
+    })
+    .expect("config");
+    assert_eq!(
+        config.endpoint_log_line(),
+        format!(
+            "pelway-runner: LLM endpoint: zai {}",
+            pelway_llm::config::ZAI_BASE_URL
+        )
+    );
+
+    // fragment に秘密が載っている場合も起動時ログに出ない
+    // （review round 1 の must-fix）。
+    let config = DemoLlmConfig::from_vars(vars(&[(
+        CUSTOM_BASE_URL_ENV,
+        "http://127.0.0.1:9/v1#access_token=sk-local",
+    )]))
+    .expect("config");
+    let line = config.endpoint_log_line();
+    assert!(!line.contains("sk-local"), "{line}");
+    assert!(!line.contains('#'), "{line}");
+
+    // 資格情報の名前（auth）のクエリも起動時ログに出ない
+    // （review round 2 の must-fix）。
+    let config = DemoLlmConfig::from_vars(vars(&[(
+        CUSTOM_BASE_URL_ENV,
+        "http://127.0.0.1:9/v1?auth=Bearer%20local",
+    )]))
+    .expect("config");
+    let line = config.endpoint_log_line();
+    assert!(!line.contains("Bearer"), "{line}");
+    assert!(line.contains("auth=***"), "{line}");
+}
+
 /// 設定の根拠を P03 に差し替えても、seed がその根拠を登録すれば LLM を呼ぶ
 /// （目的 ID はコードやゲートに固定されていない。#330）。
 #[test]

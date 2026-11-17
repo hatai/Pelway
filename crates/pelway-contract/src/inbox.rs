@@ -178,6 +178,8 @@ mod tests {
                 attachments: Vec::new(),
                 account: "acct-cw-1".to_owned(),
                 scope: Vec::new(),
+                reference_version: None,
+                integration_version: None,
             },
             snapshot_hash: "sha256:synthetic-snapshot-inbox".to_owned(),
             state,
