@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「やること」の書き方に「列挙に『など』を使うときは一致の規則（含む一致か完全一致か）まで書く」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 2）
+
+対象 head: b376d6231dba88bdb31d497d5d84e1a99bded15d
+
+1. 詰まった箇所: `scripts/agent-gh dev api PATCH`: skill write-pull-request の記載形 `api PATCH /repos/...` が現在の gh では `accepts 1 arg(s), received 2` で拒否され、`api --method PATCH` に読み替えた。
+2. 曖昧だった文: 「fragment は OAuth implicit flow の `access_token` など secret を載せる代表的な場所で、Issue #404 の『秘密がログに残る』という趣旨では userinfo・クエリと同じ伏せ対象」（PR #417 round 1 の Devin レビューの must-fix）
+3. 仮定と解釈: must-fix 本文の「`parsed.set_fragment(None)` を足し」を「fragment は中身を見ずに丸ごと落とす（無害な fragment も落とす）」と解釈した。値の部分だけ `***` に置き換える解釈は採らなかった（fragment の形式はクエリと限らず、見て判断する余地を残さないほうが漏れがないため。Claude レビューの nit も同案）。
+4. 足りなかった情報・検証手段: なし（must-fix に修正方針とテストの構造まで指定があった）。
+5. 改善案: `.agents/skills/write-pull-request/SKILL.md` の「手順 3」の `api PATCH /repos/...` の記載を `api --method PATCH /repos/...` に直す。
+
+使ったスキル: implement-issue
