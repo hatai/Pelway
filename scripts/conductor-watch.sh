@@ -38,9 +38,13 @@ while true; do
   # 巡回状態の記録を書き換えさせない）。
   scripts/agent-gh dev issue list --state all --limit "$IL" --json number,state,labels > "$D/issues.json" 2>/dev/null || rm -f "$D/issues.json"
   scripts/agent-gh dev pr list --state all --limit "$PL" --json number,state,isDraft,headRefName,reviewDecision,statusCheckRollup > "$D/prs.json" 2>/dev/null || rm -f "$D/prs.json"
+  # ラベルイベント（issues/events は PR のラベルイベントも含む）。付け外しの裏付け検査
+  # （runbook の「1. 役割と触ってよい範囲」）に使う。取得に失敗したらファイルを消す
+  # （python 側で取得失敗と扱い、前回の処理済み ID を保つ）。
+  scripts/agent-gh dev api "/repos/hatai/Pelway/issues/events?per_page=100" > "$D/label-events.json" 2>/dev/null || rm -f "$D/label-events.json"
   python3 -I - "$D" "$P" "$IL" "$PL" <<'PY'
-import json, sys, time, os, re
-from datetime import datetime
+import json, sys, time, os, re, subprocess
+from datetime import datetime, timedelta
 d = sys.argv[1]; sp = os.path.join(d, "state.json")
 # スレッド名の形式（skill command-team の「スレッド名」）。指揮役が作ったスレッドだけを見る。
 TITLE = [re.compile(r"^\[実装\] #\d+ \S"), re.compile(r"^\[レビュー\] PR #\d+ \S"), re.compile(r"^\[(?!実装\]|レビュー\])[^\]\s]+\] \S")]
@@ -49,7 +53,17 @@ try: prev = json.load(open(sp))
 except Exception: prev = None
 cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("since", {}),
        "badtitle": [] if prev is None else prev.get("badtitle", []),
+       "label_seen": [] if prev is None else prev.get("label_seen", []),
        "due_warned": {} if prev is None else prev.get("due_warned", {})}
+# ラベル操作の裏付け検査（Issue #405、2026-11-17 の要件変更）。actor だけでは判定しない
+# （エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai に
+# なることがあるため）。needs-human の解除と automerge の付け外しを、イベント時刻の前
+# LABEL_BACKUP_HOURS 時間以内の同じ Issue・PR への hatai 本人のコメント（指示の記録）と
+# 突き合わせ、裏付けが無ければ「出どころ不明」として LABEL unbacked 行を出す。
+# 指揮役と T3 スレッドの操作記録との突き合わせは巡回が行う
+# （runbook の「指揮役の定期巡回（スケジュール起床）」）。
+LABEL_BACKUP_HOURS = 24
+LABEL_BACKING_AUTHOR = "hatai"
 try: threads = json.load(open(os.path.join(d, "threads.json")))
 except Exception: threads = []
 try: issues = json.load(open(os.path.join(d, "issues.json")))
@@ -91,6 +105,63 @@ for pr in prs:
     n = str(pr["number"]); cur["prs"][n] = key
     if prev is not None and prev["prs"].get(n) != key and (n in prev["prs"] or pr["state"] == "OPEN"):
         print(f"PR #{n} {pr['headRefName']} {key}", flush=True)
+# ラベルイベントの裏付け検査。初回観測と label_seen を持たない旧状態からの更新は
+# 基準化だけ（過去のイベントを遡って報告しない）。events・comments の取得に失敗した
+# イベントは処理済みにせず、次の巡回で再試行する（誤報しない）。
+try: levs = json.load(open(os.path.join(d, "label-events.json")))
+except Exception: levs = None
+if not isinstance(levs, list): levs = None
+if levs is not None:
+    comments_cache = {}
+    def iso(s):
+        try: return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        except Exception: return None
+    def human_backed(num, t):
+        # num の Issue・PR のコメントを取得し、t の前 LABEL_BACKUP_HOURS 時間〜t の間の
+        # hatai 本人のコメント（指示の記録）を探す。取得失敗は None（判定の延期）
+        if num not in comments_cache:
+            try:
+                r = subprocess.run(["scripts/agent-gh", "dev", "api",
+                    f"/repos/hatai/Pelway/issues/{num}/comments?per_page=100&sort=created&direction=desc"],
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=60)
+                cs = json.loads(r.stdout) if r.returncode == 0 else None
+            except Exception:
+                cs = None
+            comments_cache[num] = cs if isinstance(cs, list) else None
+        cs = comments_cache[num]
+        if cs is None: return None
+        for c in cs:
+            if (c.get("user") or {}).get("login") != LABEL_BACKING_AUTHOR: continue
+            ct = iso(c.get("created_at"))
+            if ct is not None and t - timedelta(hours=LABEL_BACKUP_HOURS) <= ct <= t:
+                return True
+        return False
+    done = set(cur["label_seen"])
+    if prev is not None and "label_seen" in prev:
+        for e in levs:
+            if not isinstance(e, dict): continue
+            evid = e.get("id")
+            if evid is None or evid in done: continue
+            kind, lab = e.get("event"), ((e.get("label") or {}).get("name") or "")
+            # 検査対象: needs-human は解除のみ（付与はエスカレーションで日常的）、automerge は付け外し両方
+            target = (kind == "unlabeled" and lab == "needs-human") or \
+                     (kind in ("labeled", "unlabeled") and lab == "automerge")
+            if not target:
+                done.add(evid); continue
+            iss = e.get("issue") if isinstance(e.get("issue"), dict) else {}
+            num, t = iss.get("number"), iso(e.get("created_at"))
+            if num is None or t is None:
+                done.add(evid); continue
+            backed = human_backed(num, t)
+            if backed is None: continue  # comments 取得失敗: 次の巡回で再試行
+            if not backed:
+                actor = ((e.get("actor") or {}).get("login") or "")
+                what = f"PR #{num}" if iss.get("pull_request") else f"issue #{num}"
+                print(f"LABEL unbacked {kind} {lab} {what} at={e.get('created_at')} by={actor}", flush=True)
+            done.add(evid)
+    else:
+        done.update(e.get("id") for e in levs if isinstance(e, dict))
+    cur["label_seen"] = [e.get("id") for e in levs if isinstance(e, dict) and e.get("id") in done]
 # 読み取りに失敗して空になったときは、前回の状態を残す（全スレッドを「新規」と誤報しない）。
 if prev is not None and not threads: cur["threads"] = prev["threads"]
 if prev is not None and not prs: cur["prs"] = prev["prs"]
