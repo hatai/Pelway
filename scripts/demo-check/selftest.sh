@@ -40,6 +40,9 @@
 #   - bind 引数ループの前進は、引数にグロブ文字・バックスラッシュ・マルチバイトが混ざっても
 #     停滞せず各 bind をちょうど 1 回報告して 5 秒以内に終わる（Issue #264。「進まなければ
 #     exit 2」の安全弁自体は入力からは発火しないため、終了性と報告回数で固定する）
+#   - 本番相当の実コード形は違反報告しない（Issue #263 の実確認を固定）: 変数渡しの
+#     TcpListener::bind(addr)（pelway-http/src/lib.rs の serve 経路）と、同じ行に文字列
+#     リテラルを取らない ::bind(（doc コメント・複数行呼び出し。pelway-gateway の acp.rs）
 # を確かめる。本物のリスト（forbidden-phrases.txt / allowed-hosts.txt / canaries.txt）を使う。
 # リポジトリには書き込まない。
 set -uo pipefail
@@ -541,6 +544,16 @@ expect_case external-refs 0 "negative-test file is exempt from external-refs too
 # sqlx などのメソッド形式 .bind("...") はソケットの待受・接続先ではないため対象外。
 expect_case loopback 0 "method-style .bind(...) is not a socket bind" "${R}" 'fn q() { q.bind("v1").bind("state.changed"); }\n'
 expect_case loopback 1 "associated-function ::bind still flags a bad host" "${R}" 'fn b() { let _ = std::net::TcpListener::bind("192.168.10.4:9000"); }\n'
+
+# Issue #263: 本番相当の実コード形（main の実ツリーでの実確認で誤検知 0 だった形）を固定する。
+# いずれも現行実装で最初から緑の「確認用の固定」。ラベルの形は実コードから写した:
+# - crates/pelway-http/src/lib.rs の serve は TcpListener::bind(addr)（変数渡し）。引数は静かに
+#   見えないため検査対象外。値の正本は mise.toml の PELWAY_BIND_ADDR で、設定側の検査が担う。
+# - crates/pelway-gateway/src/acp.rs の IsolatedTransport::bind は doc コメントと
+#   Self::bind(read, write, ...) の形。同じ行に文字列リテラルを取らない ::bind( は報告しない
+#   （引数が次行以降の doc コメント含む。ソケットの bind でもない）。
+expect_case loopback 0 "variable-arg bind(addr) is not flagged (serve path shape)" "${R}" 'fn serve_path(addr: std::net::SocketAddr) { let _ = std::net::TcpListener::bind(addr); }\n'
+expect_case loopback 0 "doc-comment and non-literal ::bind( are not flagged (acp shape)" "${R}" '/// let t = pelway_gateway::acp::IsolatedTransport::bind(\n///     "/tmp/demo/agent-stdin",\npub fn wrap(r: u8, w: u8) { Self::bind(r, w, 1); }\n'
 
 echo "selftest: ${pass} passed, ${fail} failed"
 [ "${fail}" -eq 0 ]
