@@ -37,6 +37,8 @@ const STAGE_ACCEPTED: &str = "依頼を受け付けました。A/B 案を作成�
 const PROPOSALS_LEAD: &str = "案を作成しました。どちらにするか判断をお願いします。";
 /// 外部へ投稿してよい「応答を解釈できない」理由（内部の文字列は含めない）。
 const REASON_INVALID: &str = "LLM の応答を解釈できません";
+/// LLM 呼び出しが panic・キャンセルで中断したときの固定の理由（内部の値は出さない）。
+const REASON_ABORTED: &str = "LLM の呼び出しが中断しました";
 
 /// 根拠が確認できないときの停止理由（目的 ID は設定で受ける）。
 fn stop_no_basis(basis: PurposeId) -> String {
@@ -287,20 +289,27 @@ impl Runner {
     /// LLM を1回呼ぶ。検証に失敗した応答（提供元の検証失敗 [`LlmError::Invalid`]
     /// または `is_valid` を満たさない応答）は1回だけ再試行する。タイムアウト・
     /// その他の失敗は再試行せず、投稿してよい形の理由で `Err` を返す。
+    /// ランタイムはタスクごとに1つ作り、再試行でも使い回す。
     fn call_chat(
         &self,
         request: &ChatRequest,
         is_valid: impl Fn(&ChatReply) -> bool,
     ) -> Result<ChatReply, String> {
+        let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        else {
+            return Err("ランタイムを立てられません".to_owned());
+        };
         let mut retried = false;
-        loop {
-            match self.block_on_chat(request.clone()) {
+        let result = loop {
+            match self.block_on_chat(&rt, request.clone()) {
                 CallOutcome::Reply(reply) => {
                     if is_valid(&reply) {
-                        return Ok(reply);
+                        break Ok(reply);
                     }
                     if retried {
-                        return Err(REASON_INVALID.to_owned());
+                        break Err(REASON_INVALID.to_owned());
                     }
                     retried = true;
                 }
@@ -309,35 +318,39 @@ impl Runner {
                         retried = true;
                         continue;
                     }
-                    return Err(llm_reason(&err));
+                    break Err(llm_reason(&err));
                 }
                 CallOutcome::Timeout => {
-                    return Err("LLM が時間内に応答しませんでした".to_owned());
+                    break Err("LLM が時間内に応答しませんでした".to_owned());
                 }
-                CallOutcome::Runtime(reason) => return Err(reason),
+                CallOutcome::Aborted(reason) => break Err(reason),
             }
-        }
+        };
+        // タイムアウトで残った spawn 中の呼び出しを待たずに畳む（drop だと
+        // reqwest の名前解決など spawn_blocking の終了を無期限に待つ）。
+        rt.shutdown_background();
+        result
     }
 
-    /// `LlmGateway::chat` が返す Future を同期スレッドから動かす。実提供元の
-    /// reqwest が動くよう current_thread ランタイムで `block_on` し、設定の
-    /// タイムアウトを越えた呼び出しは [`CallOutcome::Timeout`] にする。
-    fn block_on_chat(&self, request: ChatRequest) -> CallOutcome {
+    /// `LlmGateway::chat` が返す Future を `rt` 上で動かす。呼び出しは別タスクに
+    /// 入れて `JoinError` として拾う（gateway の Future が panic しても
+    /// `block_on` を巻き戻ってタスクスレッドを終わらせず、台本へ落ちる理由に写す）。
+    /// 設定のタイムアウトを越えた呼び出しは [`CallOutcome::Timeout`] にする。
+    fn block_on_chat(&self, rt: &tokio::runtime::Runtime, request: ChatRequest) -> CallOutcome {
         let timeout = self.inner.config.llm_timeout;
         let gateway = Arc::clone(&self.inner.gateway);
         // `tokio::time::timeout` はタイマー要のため、ランタイム上の async ブロック内で
         // 組み立てる（外で作ると "no reactor running" で落ちる）。
-        let result = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map(|rt| {
-                rt.block_on(
-                    async move { tokio::time::timeout(timeout, gateway.chat(request)).await },
-                )
-            });
-        match result {
-            Err(err) => CallOutcome::Runtime(format!("ランタイムを立てられません（{err}）")),
-            Ok(Err(_elapsed)) => CallOutcome::Timeout,
+        match rt.block_on(async move {
+            tokio::time::timeout(
+                timeout,
+                tokio::spawn(async move { gateway.chat(request).await }),
+            )
+            .await
+        }) {
+            Err(_elapsed) => CallOutcome::Timeout,
+            // panic・キャンセルのどちらでも中身は出さず固定の理由に写す。
+            Ok(Err(_join)) => CallOutcome::Aborted(REASON_ABORTED.to_owned()),
             Ok(Ok(Err(err))) => CallOutcome::Err(err),
             Ok(Ok(Ok(reply))) => CallOutcome::Reply(reply),
         }
@@ -424,11 +437,11 @@ enum CallOutcome {
     Err(LlmError),
     /// 設定のタイムアウトを越えた（応答は捨てる）。
     Timeout,
-    /// ランタイムを立てられなかった。
-    Runtime(String),
+    /// 呼び出しタスクが panic・キャンセルで中断した。
+    Aborted(String),
 }
 
-/// A/B 案の応答スキーマ（要求と台本応答の切り分けに使う）。
+/// A/B 案の応答スキーマ（LLM への要求に使う）。
 fn ab_schema() -> Value {
     serde_json::json!({
         "type": "object",

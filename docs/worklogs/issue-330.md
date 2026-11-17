@@ -79,3 +79,20 @@
    - `ScriptGateway` の応答選択が PR-1 時点で required=subject による下書き判定を残していた（PR-3 で下書き台本を戻す設計だが、PR-2 の単体では A/B 固定返しの方が分かりやすい）。PR-2 では A/B 固定に簡素化済み。
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）
+
+## 実装者メモ（round 2 修正 / PR-2）
+
+対象 head: `7ee05f1`（ブランチ `agent/330b-ab-real-llm`。Claude レビュー round 1 の must-fix への対応。レビュー対象は `e0177bb`）
+
+1. レビュー指摘への対応:
+   - must-fix「再試行のテストが `is_valid` 側の経路しか通していない」に対応。`SeqGateway` で `Err(LlmError::Invalid)` を返す 2 テストを追加（`invalid_error_is_retried_once_then_succeeds` / `invalid_error_is_retried_once_then_falls_back`）。
+   - nit「gateway の Future の panic が `block_on` を巻き戻ってタスクを Working のまま残す」に対応。呼び出しを `tokio::spawn` に入れ、`JoinError`（panic・キャンセル）を固定の理由 `REASON_ABORTED` に写して台本へ落ちる形にした（`CallOutcome::Runtime` → `Aborted` に改称）。
+   - nit「タイムアウト後のランタイム drop が spawn_blocking（reqwest の名前解決）の終了を無期限に待つ」に対応。ランタイムをタスクごとに 1 つ作って再試行でも使い回し、終了時は `rt.shutdown_background()` で待たずに畳む。
+   - nit「拒否・タイムアウトで呼び出し 1 回（再試行しない）を確かめていない」に対応。`gateway.calls == 1` の検証を両テストに追加。
+   - nit「テスト冒頭の対応表に PR-3 範囲の行」「`ab_schema` の説明が古い」「`PELWAY_LLM_BASIS` の記述がコードと食い違う」に対応（runner.rs:6、lib.rs の `ab_schema` コメント、dev-environment.md）。
+   - tests/real_llm.rs への nit（`{value}` を assert 文に入れている件・`PELWAY_LLM_BASIS` 既定の期待値）は、チーム決定「real_llm.rs は誰も動かさない」により未対応とし、このメモに記録する。
+2. 詰まった箇所: `tokio::spawn` する Future は `'static` が要るため `Arc::clone(&self.inner.gateway)` を async ブロックにムーブし、ブロック内で `chat` を呼ぶ形にした。
+3. 仮定と解釈: panic は `JoinError` 経由で理由の固定文（`LLM の呼び出しが中断しました`）に写す（内部の panic メッセージは投稿しない方針に合わせた）。
+4. 検証: `cargo test -p pelway-runner` 14 件 pass、`mise run verify` 全通過（script-test 21/21）。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）

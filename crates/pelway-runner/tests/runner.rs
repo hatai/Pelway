@@ -3,7 +3,6 @@
 //!
 //! 受け入れ条件との対応:
 //! - メンション → タスク・進捗・A/B 案の投稿・判断待ち（#329）
-//! - 決定の確定 → メール下書きのデータ生成 → 送信承認待ち（#330）
 //! - 検証に失敗した応答は1回だけ再試行し、それでもだめなら台本へ落ちる（#330）
 //! - タイムアウトしたら台本へ落ちる（#330）
 //! - キーが無い・不正なときは台本モードで起動する（#330）
@@ -327,12 +326,13 @@ fn non_bot_mention_and_plain_message_create_no_task() {
 
 #[test]
 fn llm_failure_falls_back_to_script_reply() {
+    let gateway = Arc::new(FakeGateway::new(Err(LlmError::Rejected {
+        status: 503,
+        body: "canary-提供元の内部情報".to_owned(),
+    })));
     let (store, ledger, runner) = fixture(
         DataStore::new_demo_seeded(now()),
-        Arc::new(FakeGateway::new(Err(LlmError::Rejected {
-            status: 503,
-            body: "canary-提供元の内部情報".to_owned(),
-        }))),
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
     );
 
     let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
@@ -356,6 +356,12 @@ fn llm_failure_falls_back_to_script_reply() {
         "提供元の応答本文は投稿しない: {posts:?}"
     );
     assert_eq!(pending_items(&ledger).len(), 1, "判断待ちは作られる");
+    // 拒否（Rejected）は再送しない決まり（pelway-llm の error.rs）。呼び出しは1回。
+    assert_eq!(
+        gateway.calls.load(Ordering::SeqCst),
+        1,
+        "拒否は再試行しない"
+    );
 
     // 判断待ちに入ったタスクは差し替えられない。存在しないタスクも同様。
     assert_eq!(
@@ -431,6 +437,63 @@ fn invalid_then_valid_reply_succeeds_on_retry() {
     );
 }
 
+#[test]
+fn invalid_error_is_retried_once_then_succeeds() {
+    // 実提供元の検証失敗（LlmError::Invalid）側の経路: 再試行で回復する。
+    let gateway = Arc::new(SeqGateway::new(
+        vec![
+            Err(LlmError::Invalid("schema 違反".to_owned())),
+            Ok(ab_reply()),
+        ],
+        Duration::ZERO,
+    ));
+    let (store, _ledger, runner) = fixture(
+        DataStore::new_demo_seeded(now()),
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
+    );
+
+    let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
+    let task_id = runner.on_message_posted(&message).expect("task");
+    assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
+
+    assert_eq!(gateway.calls.load(Ordering::SeqCst), 2, "1回だけ再試行");
+    let posts = bot_messages(&store);
+    assert!(
+        posts.iter().all(|b| !b.contains(FALLBACK_MARK)),
+        "再試行で成功すれば台本へは落ちない: {posts:?}"
+    );
+    assert!(posts.iter().any(|b| b.contains("案A:")));
+}
+
+#[test]
+fn invalid_error_is_retried_once_then_falls_back() {
+    // 再試行でも同じ検証失敗なら台本へ落ちる。
+    let gateway = Arc::new(SeqGateway::new(
+        vec![Err(LlmError::Invalid("schema 違反".to_owned()))],
+        Duration::ZERO,
+    ));
+    let (store, _ledger, runner) = fixture(
+        DataStore::new_demo_seeded(now()),
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
+    );
+
+    let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
+    let task_id = runner.on_message_posted(&message).expect("task");
+    assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
+
+    assert_eq!(
+        gateway.calls.load(Ordering::SeqCst),
+        2,
+        "初回＋再試行の2回だけ"
+    );
+    let posts = bot_messages(&store);
+    assert!(
+        posts.iter().any(|b| b.contains(FALLBACK_MARK)),
+        "台本へ落ちる: {posts:?}"
+    );
+    assert!(posts.iter().any(|b| b.contains("案A:")));
+}
+
 // ---- タイムアウトしたら台本へ落ちる（#330） ----
 
 #[test]
@@ -458,6 +521,12 @@ fn timeout_falls_back_to_script_reply() {
         "タイムアウトを理由に台本へ落ちる: {posts:?}"
     );
     assert!(posts.iter().any(|b| b.contains("案A:")));
+    // タイムアウトは再送しない決まり（結果不明の可能性があるため）。呼び出しは1回。
+    assert_eq!(
+        gateway.calls.load(Ordering::SeqCst),
+        1,
+        "タイムアウトは再試行しない"
+    );
 }
 
 // ---- 根拠は設定で受けた目的 ID で検査する（#330） ----
