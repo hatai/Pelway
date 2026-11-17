@@ -2,7 +2,7 @@
 
 ## 実装者メモ（round 1）
 
-対象 head:（push 後の署名 head を追記）
+対象 head: 51f083f（実装コミット、署名付け替え後）
 
 1. 詰まった箇所: 3 点。(a) i-slint-backend-testing の `internal` feature は公開クレートに埋め込みフォント（NotoSans-\*.ttf 他 3 本）が無くビルド自体が失敗するため、内部のキー入力ヘルパは使えず、公開 API の `Window::dispatch_event(WindowEvent::KeyPressed/KeyReleased)` に切り替えた（modifier 状態は `state_update` が追跡するので Shift も届く）。(b) 候補の取り込みで橋が本文を書き換えると TextInput のカーソルが旧位置に残り、続けて入力すると中間に挿入されて末尾の `@` トークン判定が壊れた → 橋がカウンタを進め、Slint 側が `changed` で `set-selection-offsets(999999999, …)`（`safe_byte_offset` が末尾にクランプ）を呼ぶ形にした。(c) `changed` ハンドラは入れ子の要素スコープから外側のコンポーネントのプロパティを参照できずビルドエラーになるため、`composer-cursor-to-end` / `reply-cursor-to-end` のハンドラは ChannelView / ThreadPaneView のトップレベルに置いた。
 2. 曖昧だった文: 「変換中の Enter は送信しない」— `on_key` は変換中に `Action::None` を返すが、`None` を「消費しない（reject → TextInput の通常処理へ）」に写すと、実機で preedit 中に生の `KeyPressed('\n')` が届いたとき改行が挿入される（QA-APR-01 の「IME の確定だけ」と矛盾）。また「改行」操作は `Action::InsertNewline` だが、`on_key` がそれを返すのは `Focus::CommentBox` の Enter のみで、入力欄（MessageInput）の Shift+Enter は `None` を返す。
