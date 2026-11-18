@@ -23,3 +23,15 @@
 5. 改善案: .agents/skills/review-pr/SKILL.md の must-fix の書き方に、直し方の案のうち必須のものと任意のものを区別する 1 文を足す（「〜も止めたいなら」のような条件文は任意、列挙された形の検出は必須、等の基準を明示する）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: e73434acb40212aae42aef9825fe783d145c75c2
+
+1. 詰まった箇所: crates/pelway-contract/src/reply_guard.rs: round 2 の must-fix 4 件（Codex 1・Claude 3）の修正とテスト追加で差分が 800 行を超えた。docs の密度化・自明な variant とヘルパーの doc 削除・セクション見出しの削除で 762 行に収め、最終差分 +788 とした。Bearer の take 打ち切りは不要と判断して戻した（run が 20 以上なら即 return のため元から線形。2 乗は接頭辞側のみ）。
+2. 曖昧だった文: 「直し方の案: 長さは `boundary_ok` のときだけ数え、`.take(min_len)` で打ち切る」（PR #466 の Claude レビュー round 2 must-fix 2）。`len >= min_len` の判定を `== min_len` に替える意図が読み取れず、等価性（take で打ち切っても判定は同じ）を自分で確かめた。
+3. 仮定と解釈: Claude の must-fix 3 の直し方案（直後の引数が - か URL で始まるときもコマンド位置）を、URL の後に続く任意の場所の引数（`sudo curl を使って http://... を叩きます`）にも効く形で実装した。採らなかった解釈は「直後の引数だけ」（arg_like はコマンド位置の判定で、URL・--data・--header の条件は従来どおり引数全体に対するまま）。
+4. 足りなかった情報・検証手段: gateway の本文上限（crates/pelway-gateway/src/acp.rs:73 の 1MiB）はレビュー指摘の引用で知った。性能の回帰は 1MiB の "ask-" 繰り返しのテスト（0.02 秒で通過）で確かめた。
+5. 改善案: .agents/skills/write-issue/SKILL.md の「規模の見積もり」に、レビューの must-fix 修正で見積もりを超えそうなときの追記の仕方（本文の見込み行数を round ごとに更新する）を 1 文足す。
+
+使ったスキル: implement-issue
