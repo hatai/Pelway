@@ -244,6 +244,40 @@ fn persistent_display_end_to_end() {
                         .collect::<Vec<_>>()
                 })
                 .collect();
+            let layout_geo: Vec<String> = card
+                .iter()
+                .flat_map(|c| {
+                    c.query_descendants()
+                        .find_all()
+                        .iter()
+                        .filter(|e| {
+                            e.type_name()
+                                .map(|t| t.contains("Layout") || t.contains("Flickable"))
+                                .unwrap_or(false)
+                        })
+                        .map(|e| {
+                            let p = e.absolute_position();
+                            let s = e.size();
+                            format!(
+                                "{}@({},{}){}x{}",
+                                e.type_name().unwrap_or_default(),
+                                p.x,
+                                p.y,
+                                s.width,
+                                s.height
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            let flickables: Vec<String> =
+                ElementHandle::find_by_element_type_name(&window, "Flickable")
+                    .map(|f| {
+                        let p = f.absolute_position();
+                        let s = f.size();
+                        format!("({},{}){}x{}", p.x, p.y, s.width, s.height)
+                    })
+                    .collect();
             let badge_pos: Vec<String> = card_badges
                 .iter()
                 .map(|b| {
@@ -259,6 +293,7 @@ fn persistent_display_end_to_end() {
                 card.as_ref().map(|c| (c.absolute_position(), c.size())),
                 all.len()
             );
+            eprintln!("DIAG {lang}: flickables={flickables:?} layouts={layout_geo:?}");
         }
         assert_eq!(
             card_badges.len(),
