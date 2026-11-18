@@ -924,7 +924,12 @@ component DecisionCardView inherits Rectangle {
                     vertical-alignment: center;
                     horizontal-alignment: right;
                 }
-                if root.data-requester-is-ai : AiBadgeView {
+                // `if` だと条件の再評価が届かず子要素が実体化しない環境差がある
+                // （CI の en で消失。カード自体が `if data-decision-visible` の
+                // 中に実体化される入れ子の影響）。同じカード内のオプション行が
+                // `for` で問題なく出るため、0/1 要素の for で出し分ける。
+                // 人なら要素自体が無いので「隠す仕組み」にはならない。
+                for _ai in (root.data-requester-is-ai ? [true] : []) : AiBadgeView {
                     horizontal-stretch: 0;
                     label: root.tr-ai-badge;
                 }
