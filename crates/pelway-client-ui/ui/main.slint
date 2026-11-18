@@ -931,9 +931,7 @@ component DecisionCardView inherits Rectangle {
                     horizontal-alignment: right;
                 }
                 AiBadgeView {
-                    // `if` 内のサブツリーでは intrinsic の横幅が親に伝わらない
-                    // ことがある（slint#407）。明示幅でレイアウトの計算を固定する
-                    width: 26px;
+                    horizontal-stretch: 0;
                     label: root.tr-ai-badge;
                 }
             }
