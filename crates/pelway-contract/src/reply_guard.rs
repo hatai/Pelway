@@ -7,11 +7,11 @@
 //! # 守ること（このモジュールの不変条件）
 //!
 //! - 入力は本文とチャンネルの緩和設定だけ。I/O を持たず、出力は「通す」か「止める＋理由」だけ。単独でテストできる。
-//! - 漏洩系と暴走系はすべてのチャンネルで常時適用し、緩和設定の対象にしない（緩和が効くのは形式の異常系の大量貼り付けの観点だけ）。
-//! - 漏洩系のうち誤検出の少ないパターン（資格情報らしき文字列・実行スクリプト・内部制御用のセンチネル・タグ・ツール呼び出しの内部形式）は文中一致で検出する（先頭固定・「発言全体がその異常である」条件は漏洩系に当てはめない）。
+//! - 漏洩系と暴走系は全チャンネルで常時適用し、緩和設定の対象にしない（緩和が効くのは形式の異常系の大量貼り付けの観点だけ）。
+//! - 漏洩系のうち誤検出の少ないパターン（資格情報らしき文字列・実行スクリプト・内部センチネル・タグ・ツール呼び出し内部形式）は文中一致で検出する（先頭固定・「発言全体がその異常である」条件は漏洩系に当てはめない）。
 //! - 誤検出が起きやすい漏洩系（提供元のエコー）は保守条件でのみ検出する（最初の空行を除く行がその形）。
-//! - フェンス（``` か ~~~ の行）で囲んだ部分は大量貼り付けの検査からだけ外し、漏洩系と暴走系はフェンスの中も検査する（フェンスへの秘密の記述での迂回を排除）。
-//! - 理由コードは分類とパターンを表す固定値で、本文の一部を含まない（監査ログに元の文を残さない規則への接続。運用は #453）。判定は決め打ちの条件のみで、しきい値は [`thresholds`] に一括する。
+//! - フェンス（``` か ~~~）で囲んだ部分は大量貼り付けの検査からだけ外し、漏洩系と暴走系はフェンスの中も検査する（フェンスへの秘密の記述での迂回を排除）。
+//! - 理由コードは分類とパターンの固定値で本文の一部を含まない（監査ログに元の文を残さない規則への接続。運用は #453）。判定は決め打ちの条件のみで、しきい値は [`thresholds`] に一括する。
 //!
 //! # まだ決まらないこと（このモジュールでは扱わない）
 //!
@@ -50,9 +50,7 @@ pub struct ReplyGuardSettings {
 pub enum ReplyGuardClass {
     /// 漏洩系（外部に出してはいけない内容）。
     Leak,
-    /// 形式の異常系（発言として成立していない）。
     Format,
-    /// 暴走系。
     Runaway,
 }
 
@@ -120,17 +118,14 @@ pub struct ReplyGuardReason {
     pub pattern: ReplyGuardPattern,
 }
 
-/// 検査結果。通すか、止める＋理由か。
+/// 検査結果。通すか、止める（fail-closed。理由は分類とパターンだけ）か。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplyGuardVerdict {
-    /// 通す（異常を検出しなかった）。
     Allow,
-    /// 止める（fail-closed）。理由は分類とパターンだけを持つ。
     Block(ReplyGuardReason),
 }
 
-/// 本文を検査する（出口検査の本体。I/O 無し）。判定順は漏洩系 → 形式の異常系 →
-/// 暴走系で、最初に一致したパターンを返す。
+/// 本文を検査する（出口検査の本体。I/O 無し）。判定順は漏洩系 → 形式の異常系 → 暴走系、最初に一致したパターンを返す。
 #[must_use]
 pub fn check_reply_body(body: &str, settings: &ReplyGuardSettings) -> ReplyGuardVerdict {
     let pattern = leak_pattern(body)
@@ -187,7 +182,7 @@ fn has_bearer_token(body: &str) -> bool {
     false
 }
 
-/// 接頭辞付きの API 鍵・トークン。直前が英数字なら部分語（"task-" の "sk-"）として無視する。
+/// 接頭辞付きの API 鍵・トークン。直前が ASCII 英数字なら部分語（"task-" の "sk-"）として無視し、かな・漢字の直後に空白なしで続く鍵は資格情報とする。
 fn has_prefixed_key(body: &str) -> bool {
     for (prefix, min_len) in [
         ("sk-", thresholds::CREDENTIAL_TOKEN_MIN_CHARS),
@@ -201,13 +196,18 @@ fn has_prefixed_key(body: &str) -> bool {
             let boundary_ok = rest[..at]
                 .chars()
                 .next_back()
-                .is_none_or(|c| !c.is_alphanumeric());
+                .is_none_or(|c| !c.is_ascii_alphanumeric());
             let after = &rest[at + prefix.len()..];
-            let len = after
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
-                .count();
-            if boundary_ok && len >= min_len {
+            // 境界が不成立のときは数えない（繰り返し入力での走査が 2 乗になるのを防ぐ）。
+            // take(min_len) で打ち切っても len >= min_len の判定は変わらない。
+            if boundary_ok
+                && after
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+                    .take(min_len)
+                    .count()
+                    == min_len
+            {
                 return true;
             }
             rest = after;
@@ -222,7 +222,7 @@ fn has_private_key_header(body: &str) -> bool {
         .any(|line| line.contains("-----BEGIN") && line.contains("PRIVATE KEY"))
 }
 
-/// curl・wget の実行スクリプトの行。コマンド語がコマンド位置にあり、後に URL か長いフラグがある行を検出する（どちらも無ければ言及として通す）。
+/// curl・wget の実行スクリプトの行。コマンド位置にある語の後に URL か長いフラグがある行を検出する（無ければ言及として通す）。
 fn has_execution_script(body: &str) -> bool {
     body.lines().any(|line| {
         ["curl", "wget"].iter().any(|word| {
@@ -236,9 +236,8 @@ fn has_execution_script(body: &str) -> bool {
     })
 }
 
-/// 行の中でコマンド位置にある語 `word` から後ろの部分。無ければ None。コマンド位置は行頭か、直前（空白を除く）が英数字・かな・漢字でない位置（句読点・全角のコロン・箇条書き・引用・番号付きの記号の後ろ）。sudo 等の前置語の直後もコマンド位置とする。文中の言及（直前に英数字・かな・漢字が続く）は対象にしない。
+/// 行の中でコマンド位置にある語 `word` から後ろの部分。無ければ None。コマンド位置は行頭か、直前（空白を除く）が英数字・かな・漢字でない位置（句読点・全角コロン・箇条書き・引用・番号付きの後ろ）、sudo 等の前置語の直後、語の直後の引数が `-` か URL で始まるとき。文中の言及（直前に英数字・かな・漢字が続く）は対象にしない。
 fn command_word_at<'a>(line: &'a str, word: &str) -> Option<&'a str> {
-    /// コマンドの前置語。
     const PREFIX_WORDS: [&str; 4] = ["sudo", "env", "xargs", "nohup"];
     let trimmed = line.trim_start();
     let mut rest = trimmed;
@@ -256,8 +255,12 @@ fn command_word_at<'a>(line: &'a str, word: &str) -> Option<&'a str> {
                 })
             });
         let after = &rest[at + word.len()..];
+        // 直前の文字で判定できない形（Run curl・次に curl・まず wget）も、直後の引数が - か URL で始まればコマンド位置とみなす。
+        let arg = after.trim_start();
+        let arg_like =
+            arg.starts_with('-') || arg.starts_with("http://") || arg.starts_with("https://");
         let word_char = |c: char| c.is_alphanumeric() || c == '_';
-        if before_ok && after.chars().next().is_none_or(|c| !word_char(c)) {
+        if (before_ok || arg_like) && after.chars().next().is_none_or(|c| !word_char(c)) {
             return Some(&rest[at..]);
         }
         rest = after;
@@ -278,7 +281,7 @@ fn has_internal_sentinel(body: &str) -> bool {
     TAGS.iter().any(|tag| body.contains(tag))
 }
 
-/// ツール呼び出しの内部形式の漏出。引用符付きの `tool_use`・`actions` は JSON のキーにも値（`"type":"tool_use"`）にも現れ、空白の入れ方にもよらないため、出現自体を印にする（docs/technical.md「tool_use・actions 等の内部形式の漏出」）。
+/// ツール呼び出しの内部形式の漏出。引用符付きの `tool_use`・`actions` は JSON のキーにも値にも現れ、空白の入れ方にもよらないため、出現自体を印にする（仕様「tool_use・actions 等の内部形式の漏出」）。
 fn has_tool_call_json(body: &str) -> bool {
     const MARKS: [&str; 4] = [
         "\"tool_use\"",
@@ -367,13 +370,12 @@ fn is_fence_line(line: &str) -> bool {
     trimmed.starts_with("```") || trimmed.starts_with("~~~")
 }
 
-/// コード・差分・ログの行らしい形。
+/// コード・差分・ログの行らしい形（差分の行頭・ログレベル・宣言キーワード・記号）。
 fn looks_like_code_or_log(line: &str) -> bool {
     let t = line.trim();
     if t.is_empty() {
         return false;
     }
-    /// 差分（git diff・パッチ）の行頭の形。
     const DIFF: [&str; 4] = ["diff --git", "+++", "---", "@@"];
     if DIFF.iter().any(|m| t.starts_with(m)) {
         return true;
@@ -385,12 +387,10 @@ fn looks_like_code_or_log(line: &str) -> bool {
         // "- 項目" のような箇条書きはコード行に数えない。
         return !removed.is_empty() && !removed.starts_with([' ', '*', '#']);
     }
-    /// 括弧付きのログレベル。
     const LEVELS: [&str; 5] = ["[INFO", "[WARN", "[ERROR", "[DEBUG", "[TRACE"];
     if starts_with_date(t) || LEVELS.iter().any(|level| t.contains(level)) {
         return true;
     }
-    /// 宣言のキーワード（trim 後の行頭）。
     const KEYWORDS: [&str; 9] = [
         "import ", "def ", "class ", "fn ", "let ", "const ", "var ", "pub ", "use ",
     ];
@@ -400,7 +400,6 @@ fn looks_like_code_or_log(line: &str) -> bool {
     {
         return true;
     }
-    /// 文・式の記号。
     const SYMBOLS: [&str; 6] = [";", "{", "}", " => ", " == ", "://"];
     SYMBOLS.iter().any(|m| t.contains(m))
 }
@@ -456,7 +455,6 @@ mod tests {
         }
     }
 
-    /// 既定（緩和なし）の設定で止めたときのパターン。
     fn blocks(body: &str) -> ReplyGuardPattern {
         blocked_pattern(body, &strict())
     }
@@ -478,8 +476,6 @@ mod tests {
             .take(len)
             .collect()
     }
-
-    // ---- 漏洩系: 資格情報らしき文字列（文中一致） ----
 
     #[test]
     fn credential_shape_in_text_is_blocked_with_length_boundary() {
@@ -512,11 +508,23 @@ mod tests {
             );
             is_allowed(&format!("鍵: {prefix}{}", token_of(min - 1)), &strict());
         }
-        // 接頭辞の直前が英数字（部分語）なら資格情報としない。
+        // 接頭辞の直前が ASCII の英数字（部分語）なら資格情報としない。
         is_allowed(
             "作業: task-management-system-deployment-tool を進めます",
             &strict(),
         );
+        // かな・漢字の直後に空白なしで続く鍵は資格情報とする。
+        for (before, prefix, min) in [
+            ("APIキーは", "sk-", 20),
+            ("トークン", "ghp_", 20),
+            ("鍵", "AKIA", 16),
+        ] {
+            assert_eq!(
+                blocks(&format!("{before}{prefix}{}", token_of(min))),
+                ReplyGuardPattern::CredentialShape,
+                "{before}{prefix}"
+            );
+        }
         // PEM の秘密鍵ヘッダの行。秘密鍵でないヘッダだけの行は資格情報としない。
         let key = format!(
             "-----BEGIN {}\n(dummy body)\n-----END PRIVATE KEY-----",
@@ -525,8 +533,6 @@ mod tests {
         assert_eq!(blocks(&key), ReplyGuardPattern::CredentialShape);
         is_allowed("-----BEGIN CERTIFICATE----- の行だけです", &strict());
     }
-
-    // ---- 漏洩系: 実行スクリプト・内部タグ・ツール呼び出し（文中一致） ----
 
     #[test]
     fn curl_script_in_text_is_blocked_but_plain_mention_is_allowed() {
@@ -537,8 +543,7 @@ mod tests {
             "$ wget -q http://127.0.0.1:8080/pkg.tar で取得します",
             "curl --data '{\"q\":1}' を送ります",
             "curl --header 'x: 1' を送ります",
-            // 日本語の文末・全角のコロン・箇条書き・引用・番号付き・前置語の後ろも
-            // コマンド位置とする（レビュー指摘の各形）。
+            // 文末・全角コロン・箇条書き・引用・番号付き・前置語・動詞・助詞の後ろもコマンド位置。
             "確認しました。curl -s https://127.0.0.1:8080/v1/jobs を実行します",
             "実行：curl -s http://127.0.0.1:8080/v1/jobs",
             "- curl -s http://127.0.0.1:8080/v1/jobs",
@@ -546,6 +551,11 @@ mod tests {
             "> curl -s http://127.0.0.1:8080/v1/jobs",
             "1. curl -s http://127.0.0.1:8080/v1/jobs",
             "sudo curl -s http://127.0.0.1:8080/v1/jobs",
+            "Run curl -s https://127.0.0.1:8080/v1/jobs",
+            "次に curl -s -X POST https://127.0.0.1:8080/v1/jobs を叩きます",
+            "まず wget -q http://127.0.0.1:8080/pkg.tar で取得します",
+            "run curl https://127.0.0.1:8080/v1/jobs に変えて実行します",
+            "sudo curl を使って http://127.0.0.1:8080/x を叩きます",
         ] {
             assert_eq!(blocks(body), ReplyGuardPattern::ExecutionScript, "{body}");
         }
@@ -577,8 +587,6 @@ mod tests {
         }
     }
 
-    // ---- 漏洩系: 保守条件（最初の空行を除く行の形） ----
-
     #[test]
     fn provider_error_echo_is_blocked_but_error_mention_is_allowed() {
         for body in [
@@ -594,8 +602,6 @@ mod tests {
         is_allowed("HTTP/1.x 500 という形式の行でした", &strict());
         is_allowed("HTTP/1.1 50 という形式の行でした", &strict());
     }
-
-    // ---- フェンスと緩和設定 ----
 
     #[test]
     fn channel_relaxation_applies_to_paste_aspect_only() {
@@ -621,8 +627,6 @@ mod tests {
         );
     }
 
-    // ---- 形式の異常系 ----
-
     #[test]
     fn empty_and_whitespace_bodies_are_blocked() {
         for body in ["", "   \n\t\n", "\u{3000}"] {
@@ -630,7 +634,6 @@ mod tests {
         }
     }
 
-    /// コード・差分・ログの行の形（`looks_like_code_or_log` に一致する行）。
     fn shape_line(kind: &str, i: usize) -> String {
         match kind {
             "let" => format!("let value{i} = compute({i});"),
@@ -647,7 +650,6 @@ mod tests {
         }
     }
 
-    /// 形 `kind` の行を `code` 行と、説明の文の行を `prose` 行並べた本文。
     fn dump_of(kind: &str, code: usize, prose: usize) -> String {
         let mut lines: Vec<String> = (0..code).map(|i| shape_line(kind, i)).collect();
         lines.extend((0..prose).map(|i| format!("これは{i}番目の説明の行です。文章です。")));
@@ -686,6 +688,9 @@ mod tests {
             );
         }
         is_allowed(&dump_of("bullet", 30, 0), &strict());
+        // 繰り返し入力で走査が 2 乗にならないこと（gateway は 1MiB まで受ける）。
+        let adversarial = "ask-".repeat(262_144);
+        is_allowed(&adversarial, &strict());
         // 4 桁の数字で始まるだけの行は日付のログではない。
         let years = (0..30)
             .map(|i| format!("2026年の整理その{i}"))
@@ -715,20 +720,15 @@ mod tests {
         );
     }
 
-    // ---- 暴走系 ----
-
     #[test]
     fn repeated_lines_inside_fence_are_blocked_with_threshold() {
-        // フェンスの中でも暴走系は検査する。5 回で止め、4 回なら通す。空行をはさむと
-        // 連続と数えない。
+        // フェンスの中でも暴走系は検査する。5 回で止め、4 回なら通す。空行をはさむと連続と数えない。
         let five = format!("```\n{}\n```", "同じ行です\n".repeat(5));
         assert_eq!(blocks(&five), ReplyGuardPattern::Repetition);
         let four = format!("```\n{}\n```", "同じ行です\n".repeat(4));
         is_allowed(&four, &strict());
         is_allowed("同じ行\n\n同じ行\n\n同じ行\n\n同じ行\n\n同じ行", &strict());
     }
-
-    // ---- 理由コード ----
 
     #[test]
     fn reason_codes_are_fixed_and_contain_no_body_text() {
