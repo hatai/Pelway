@@ -211,6 +211,12 @@ fn persistent_display_end_to_end() {
         // 前に窓を「全部が見える高さ」まで伸ばす（フォント計測は環境差が大きい
         // ため固定値にしない）。
         apply_decision_screen(&window, &DecisionShell::sample(lang), NOW);
+        // 診断: カード内の if/for 条件のバインディングが再評価されるかを見るため
+        // is-ai を false → true に変化させる（変化通知が届けば子要素が出る）。
+        window.set_data_decision_requester_is_ai(false);
+        settle();
+        window.set_data_decision_requester_is_ai(true);
+        settle();
         let card_badges = find_growing(&window, 1, |w| {
             ElementHandle::find_by_element_id(w, "ChannelView::decision-card")
                 .next()
