@@ -11,3 +11,15 @@
 5. 改善案: `docs/research/slint-tauri-client-measurements.md` の仮想化の節に「行の絶対位置は推定値で、連続する実体化行同士の並びだけが実高さで保証される」を足す。
 
 使ったスキル: implement-issue, write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: 7f493aa（修正コミット 1b177fd の push 後・署名付け替え後の SHA）
+
+1. 詰まった箇所: `crates/pelway-client-ui/src/bridge.rs` の `on_open_decision_chat`: 判断待ち一覧からチャットへ戻る台帳駆動の流れ（Issue 331）では `timeline-items` を誰も設定しないため、`data-decision-visible` が true でも `decision-card` 行が無く判断カードが実体化しない退行があった（round 1 のレビュー指摘）。`ensure_decision_card_row` を足し、カード行が無ければ末尾に置く。
+2. 曖昧だった文: 「既存のカード（判断、引き継ぎ、社外送信、私信）がタイムライン上で同じ種類として出る」（Issue #385・受け入れ条件）: 「`apply_channel_view` で渡した時系列に限る」か「台帳駆動の既存の結線でも出る」かは本文に書かれていない。後者と解釈し、`pending_decisions.rs` に `DecisionCardView` の要素 API 検査を足した。
+3. 仮定と解釈: この骨組みの流れの時系列は空が自然（チャンネル内容は未結線）。`timeline-items` を持たない経路では末尾にカード行を置くフォールバックにした（`apply_channel_view` で時系列が渡る場合はその中の `decision-card` 行が使われ、フォールバックは発動しない）。
+4. 足りなかった情報・検証手段: 「チャット内の判断カードは `data-decision-*` だけで出る」という仮想化前の前提を壊していたのを、既存試験（プロパティの値だけを見る `pending_decisions.rs`）では検出できなかった。要素 API で実体化を見る検査が要る。
+5. 改善案: `crates/pelway-client-ui/tests/pending_decisions.rs` の doc コメントに「`data-*` の値だけでなく要素の実体化も確かめる」を足す。
+
+使ったスキル: implement-issue
