@@ -20,7 +20,7 @@ use pelway_client_core::contract::{
 };
 use pelway_client_core::decision::DecisionBoard;
 use pelway_client_core::input::{Action, Focus, ImeState, InputContext, Key, Modifiers, on_key};
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use crate::state::{
     AvatarKind, ChannelView as ChannelState, DecisionCardState, DecisionOptionView,
@@ -691,6 +691,34 @@ pub fn wire_decision_screen(window: &MainWindow, shell: Rc<RefCell<DecisionShell
             window.set_data_channel_title(title.as_str().into());
             window.set_show_today(false);
             apply_decision_screen(&window, &shell, now);
+            ensure_decision_card_row(&window);
         }
     });
+}
+
+/// チャット内の判断カードを出す `decision-card` 行が時系列になければ、末尾に
+/// 置く（Issue 385。`apply_channel_view` が時系列を渡す流れでは、判断カードの
+/// 行はすでに載っている想定。この骨組みの流れでは時系列が空のままなので、
+/// `data-decision-*` だけではカードが実体化しない）。
+fn ensure_decision_card_row(window: &MainWindow) {
+    if !window.get_data_decision_visible() {
+        return;
+    }
+    let model = window.get_timeline_items();
+    let has_card = (0..model.row_count()).any(|i| {
+        model
+            .row_data(i)
+            .is_some_and(|item| item.kind == TimelineRowKind::DecisionCard)
+    });
+    if has_card {
+        return;
+    }
+    let mut items: Vec<TimelineItem> = (0..model.row_count())
+        .filter_map(|i| model.row_data(i))
+        .collect();
+    items.push(TimelineItem {
+        kind: TimelineRowKind::DecisionCard,
+        ..TimelineItem::default()
+    });
+    window.set_timeline_items(ModelRc::new(VecModel::from(items)));
 }
