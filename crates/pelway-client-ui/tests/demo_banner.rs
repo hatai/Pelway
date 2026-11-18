@@ -60,6 +60,30 @@ fn settle() {
     i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(0));
 }
 
+/// `find` が `want` 個の要素を返すまで窓の高さを段階的に伸ばす。
+///
+/// テスト用 backend の要素探索は `ItemRc::is_visible()` を通るため、Flickable
+/// のビューポート外にクリップされた要素は見つからない。ビューポートに収まる
+/// 高さはフォント計測に依存するため（CI のフォントはローカルより大きい）、
+/// 固定の高さではなく可視になるまで伸ばす。上限に達したら見つかった分を返す
+/// （要素が本当に無い場合はそこで打ち切って assert 側で失敗させる）。
+fn find_growing(
+    window: &MainWindow,
+    want: usize,
+    find: impl Fn(&MainWindow) -> Vec<ElementHandle>,
+) -> Vec<ElementHandle> {
+    let mut h = 2400.0f32;
+    loop {
+        let found = find(window);
+        if found.len() >= want || h >= 8000.0 {
+            return found;
+        }
+        h += 800.0;
+        window.window().set_size(LogicalSize::new(800.0, h));
+        settle();
+    }
+}
+
 /// `.slint` から `component <name>` の定義ブロック（次の `component` /
 /// `export component` の手前まで）を切り出す。
 fn component_block<'a>(source: &'a str, name: &str) -> &'a str {
@@ -173,10 +197,6 @@ fn persistent_display_end_to_end() {
             h > 1.3 * one_line_h,
             "{lang} のバナーの文言は狭い幅で行を増やして折り返すこと（省略や切り詰めではなく）(w={w})"
         );
-        // 縦長の窓にして一覧の全行をビューポート内に収める（上の注を参照）。
-        window.window().set_size(LogicalSize::new(800.0, 2400.0));
-        settle();
-
         // ---- AI の行には「AI」バッジ、人の行には無い ----
         // 送信者名の先頭で AI 行と人の行を区別できる合成データを入れる
         // （バッジの読み上げ文言とは衝突しない前置詞にする）。
@@ -186,14 +206,34 @@ fn persistent_display_end_to_end() {
         window.set_data_note_sender("AI_丁".into());
         window.set_data_thread_msg1_sender("AI_戊".into());
         window.set_data_thread_msg2_sender("H_己".into());
-        settle();
+        // チャット内の判断カード（依頼者が AI）も先に出しておく。カード分だけ
+        // 内容が伸びて Flickable のビューポートから溢れるため、以降の行検査の
+        // 前に窓を「全部が見える高さ」まで伸ばす（フォント計測は環境差が大きい
+        // ため固定値にしない）。
+        apply_decision_screen(&window, &DecisionShell::sample(lang), NOW);
+        let card_badges = find_growing(&window, 1, |w| {
+            ElementHandle::find_by_element_id(w, "ChannelView::decision-card")
+                .next()
+                .map(|card| {
+                    card.query_descendants()
+                        .match_type_name("AiBadgeView")
+                        .find_all()
+                })
+                .unwrap_or_default()
+        });
+        assert_eq!(
+            card_badges.len(),
+            1,
+            "{lang} の判断カードの AI 依頼者に「{badge_text}」バッジが出ること"
+        );
 
         // メッセージの行（チャンネル 3 件＋スレッドの枠 2 件）は型名で探せる
         // （複数回使う部品は型名が残る）。「あなただけに表示」の行は 1 回しか
         // 使わないため Slint が親にインラインし、型名では探せないので、宣言した
         // 要素 id で探す。
-        let rows =
-            ElementHandle::find_by_element_type_name(&window, "MessageRow").collect::<Vec<_>>();
+        let rows = find_growing(&window, 5, |w| {
+            ElementHandle::find_by_element_type_name(w, "MessageRow").collect()
+        });
         assert_eq!(
             rows.len(),
             5,
@@ -213,11 +253,17 @@ fn persistent_display_end_to_end() {
                 "{lang} の MessageRow（{labels:?}）は AI の行だけ「{badge_text}」バッジが出ること"
             );
         }
-        let note = ElementHandle::find_by_element_id(&window, "ChannelView::private-note")
-            .next()
-            .expect("「あなただけに表示」の行があること");
+        let notes = find_growing(&window, 1, |w| {
+            ElementHandle::find_by_element_id(w, "ChannelView::private-note").collect()
+        });
         assert_eq!(
-            note.query_descendants()
+            notes.len(),
+            1,
+            "{lang} の「あなただけに表示」の行があること"
+        );
+        assert_eq!(
+            notes[0]
+                .query_descendants()
                 .match_type_name("AiBadgeView")
                 .find_all()
                 .len(),
@@ -226,8 +272,9 @@ fn persistent_display_end_to_end() {
         );
 
         // レールの AI 一覧の各行にもバッジが出る（AI メンバーの名前一覧）。
-        let rail_rows =
-            ElementHandle::find_by_element_type_name(&window, "RailAiRow").collect::<Vec<_>>();
+        let rail_rows = find_growing(&window, 3, |w| {
+            ElementHandle::find_by_element_type_name(w, "RailAiRow").collect()
+        });
         assert_eq!(
             rail_rows.len(),
             3,
@@ -244,26 +291,12 @@ fn persistent_display_end_to_end() {
             );
         }
 
-        // チャット内の判断カード（依頼者が AI）にもバッジが出る。
-        apply_decision_screen(&window, &DecisionShell::sample(lang), NOW);
-        settle();
-        let card = ElementHandle::find_by_element_id(&window, "ChannelView::decision-card")
-            .next()
-            .expect("チャット内の判断カードが見えること");
-        assert_eq!(
-            card.query_descendants()
-                .match_type_name("AiBadgeView")
-                .find_all()
-                .len(),
-            1,
-            "{lang} の判断カードの AI 依頼者に「{badge_text}」バッジが出ること"
-        );
-
         // 今日画面の「自分の判断待ち」の行（依頼者が AI）にもバッジが出る。
         window.set_show_today(true);
         settle();
-        let pending = ElementHandle::find_by_element_id(&window, "TodayView::pending-row")
-            .collect::<Vec<_>>();
+        let pending = find_growing(&window, 1, |w| {
+            ElementHandle::find_by_element_id(w, "TodayView::pending-row").collect()
+        });
         assert_eq!(
             pending.len(),
             1,
@@ -283,14 +316,18 @@ fn persistent_display_end_to_end() {
         window.set_show_today(false);
         window.set_right_pane_ai_work(true);
         settle();
-        let pane = ElementHandle::find_by_element_id(&window, "MainWindow::ai-work-pane")
-            .next()
-            .expect("AI の作業の枠が見えること");
+        let pane_badges = find_growing(&window, 1, |w| {
+            ElementHandle::find_by_element_id(w, "MainWindow::ai-work-pane")
+                .next()
+                .map(|pane| {
+                    pane.query_descendants()
+                        .match_type_name("AiBadgeView")
+                        .find_all()
+                })
+                .unwrap_or_default()
+        });
         assert_eq!(
-            pane.query_descendants()
-                .match_type_name("AiBadgeView")
-                .find_all()
-                .len(),
+            pane_badges.len(),
             1,
             "{lang} の AI の作業の枠に「{badge_text}」バッジが出ること"
         );
@@ -300,8 +337,9 @@ fn persistent_display_end_to_end() {
         // ---- バッジの読み上げ: 見える「AI」を二重に読ませない ----
         // バッジの内側の文字は読み上げに名を出さない（Issue 379。accessible-role:
         // none + 空のラベル）。AI であることは行側のラベルの「AI Bot」が言う。
-        let badges =
-            ElementHandle::find_by_element_type_name(&window, "AiBadgeView").collect::<Vec<_>>();
+        let badges = find_growing(&window, 4, |w| {
+            ElementHandle::find_by_element_type_name(w, "AiBadgeView").collect()
+        });
         assert!(
             badges.len() >= 4,
             "{lang} の画面に「{badge_text}」バッジが複数出ていること: {}",
