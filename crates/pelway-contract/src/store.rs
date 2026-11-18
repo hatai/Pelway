@@ -700,10 +700,11 @@ impl DataStore {
     ///   seed 専用データ（根拠の種類の当てはめは U03 未決のまま）。
     ///
     /// 根拠の目的 ID は [`Self::new_demo_seeded_with_basis`] が受け取る
-    /// （コードに固定しない。Issue #330）。この関数は既存の既定 P03 を使う。
+    /// （コードに固定しない。Issue #330）。この関数はデモの既定である
+    /// P06（BYOK。hatai 決定 2026-11-16）を使う。
     #[must_use]
     pub fn new_demo_seeded(now: TsMs) -> Self {
-        Self::new_demo_seeded_with_basis(now, PurposeId::P03)
+        Self::new_demo_seeded_with_basis(now, PurposeId::P06)
     }
 
     /// [`Self::new_demo_seeded`] の、LLM 利用の根拠として登録する目的 ID を
@@ -1833,10 +1834,10 @@ mod tests {
         );
     }
 
-    // 受け入れ: 起動時に最小 seed（チャンネル・メンバー・過去の会話・P03 根拠）が
-    // 用意される。保存はメモリ上のまま。
+    // 受け入れ: 起動時に最小 seed（チャンネル・メンバー・過去の会話・根拠）が
+    // 用意される。保存はメモリ上のまま。デモの根拠の既定は P06（#330）。
     #[test]
-    fn demo_seed_provides_channel_members_history_and_p03_basis() {
+    fn demo_seed_provides_channel_members_history_and_basis() {
         let store = DataStore::new_demo_seeded(1_000);
 
         // チャンネル（#案件B）1 つ。
@@ -1871,17 +1872,17 @@ mod tests {
         sorted.sort_unstable();
         assert_eq!(seqs, sorted, "会話は seq 順に保持される");
 
-        // LLM 利用の根拠（P03）が登録され、デモの時刻で有効。
+        // LLM 利用の根拠（既定 P06）が登録され、デモの時刻で有効。
         assert!(
-            store.is_purpose_enabled(&demo_ws(), PurposeId::P03, 1_000),
-            "P03 の根拠が有効ではない"
+            store.is_purpose_enabled(&demo_ws(), PurposeId::P06, 1_000),
+            "P06 の根拠が有効ではない"
         );
         assert!(
             store
                 .basis_records(&demo_ws())
                 .iter()
-                .any(|r| r.purpose_id == PurposeId::P03 && r.status == BasisStatus::Active),
-            "Active な P03 根拠記録が無い"
+                .any(|r| r.purpose_id == PurposeId::P06 && r.status == BasisStatus::Active),
+            "Active な P06 根拠記録が無い"
         );
 
         // 保存はすべてメモリ上（ディスクに書かない）。
@@ -1899,7 +1900,7 @@ mod tests {
     fn demo_seed_with_basis_registers_the_given_purpose() {
         let store = DataStore::new_demo_seeded_with_basis(1_000, PurposeId::P04);
         assert!(store.is_purpose_enabled(&demo_ws(), PurposeId::P04, 1_000));
-        assert!(!store.is_purpose_enabled(&demo_ws(), PurposeId::P03, 1_000));
+        assert!(!store.is_purpose_enabled(&demo_ws(), PurposeId::P06, 1_000));
         assert!(
             store
                 .basis_records(&demo_ws())
