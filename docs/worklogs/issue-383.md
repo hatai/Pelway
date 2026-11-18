@@ -11,3 +11,15 @@
 5. 改善案: `docs/dev-environment.md`（または client-ui 向けの注意書き）に「i-slint-backend-testing の `internal` feature は埋め込みフォント欠落で使えない・キー入力は `Window::dispatch_event` で送る・`changed` ハンドラはコンポーネントのトップレベルに置く」を足す。
 
 使ったスキル: implement-issue、TDD（seam: `pelway-client-core::input::on_key` / `ShellBridge`）。
+
+## 実装者メモ（round 2・main 取り込み）
+
+対象 head: 0468f47（main マージコミット。API で表現できないため署名なし）
+
+1. 詰まった箇所: main 前進（#448・#445・#397）で CONFLICTING になり Kodiak が automerge を外したため取り込み。衝突は `bridge.rs` 2 点のみ — import（main が `Global`、こちらが `SharedString` を追加）と、`key_from_text` の二重定義（main の Issue 379 のボタン系キー結線と同名関数が来ていた）。
+2. 曖昧だった文: なし（指揮役の指示「main を取り込んで衝突を解消し、verify を通す」は明確）。
+3. 仮定と解釈: `key_from_text` は統合せず分けた。main 側は Enter/Space のみを写し、写ったキーは on_key の結果に関わらず消費する（ボタンのキーを画面の他部品に漏らさない）。こちらは Escape も写す必要がある（候補一覧を閉じる操作）が、main 側に Escape を写させるとボタン上の Esc が消費されて伝播を止めてしまうため、入力欄用を `composer_key_from_text` に改名して両方残した。マージコミットは createCommitOnBranch で表現できず署名なしのまま（AGENTS.md の規定どおり）。
+4. 足りなかった情報・検証手段: `mise run verify` の script-test `conductor-watch-ensure.test.sh` はマージ後も同じ `fallback: watch is running` で失敗（round 1 と同じ環境起因の既存失敗）。それ以外は全通過。
+5. 改善案: 特になし。
+
+使ったスキル: implement-issue、fix-merge-conflicts。
