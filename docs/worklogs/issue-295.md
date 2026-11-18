@@ -23,3 +23,15 @@
 5. 改善案: `docs/dev-environment.md`「レビュー担当の Claude」の設定表の読み取り系 `git` の列挙に `blame` を足す（review-pr が `git blame` を使うが、表の列挙には無い。round 1 の claude レビュー nit でも指摘された齟齬）。
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（round 3）
+
+対象 head: 901869ad4fcc2c70c21ac37a34af5c2aefe91a2c
+
+1. 詰まった箇所: `review_api_args_allowed` を拒否リストから許可リストに作り替える必要があった。pflag は短いオプションのクラスタを 1 文字ずつ読み、`-i`（値を取らない）の後ろに続く `X`・`f`・`F` が別のフラグとして効くため、`-iX PATCH`・`-iftitle=x` の形を拾うにはフラグ単位ではなく文字単位の解析が要った。git 側は許可したサブコマンドの引数検査に加えて、トークンを発行しない・`env -i` でページャ・外部 diff・設定注入（`GIT_CONFIG_*`・`GIT_DIR` 等）・ユーザー/システム設定を持たない実行時境界を置く形で塞いだ（引数検査だけでは省略形・束ね書きで外れやすいという #306 の知見に応える二層）。
+2. 曖昧だった文: 「承認済みサブコマンドの引数検査を追加してこれらを拒否するか、安全な実行時境界で塞いでください」（PR #463 の codex round 2 must-fix）と「引数の検査を許可リストにするか、`-` で始まる引数を pflag と同じく 1 文字ずつ読んで検査する」（claude round 2 must-fix）
+3. 仮定と解釈: api は claude が挙げた許可集合（`-i`/`--include`・`--paginate`・`--slurp`・`--silent`・`--verbose`、値を取る `-H`/`--header`・`-q`/`--jq`・`-t`/`--template`・`--cache`・`--hostname`、`-X`/`--method` の GET 形、`-` で始まらない endpoint）をそのまま採用し、列挙外の長・短オプションはすべて拒否とした。`X-HTTP-Method-Override` ヘッダは GitHub が受理するか未確認だが、拒否のコストが低いため検査に入れた。git 側は「引数検査か実行時境界か」の二者択一を両方で応え、review の git は呼び出し側が `git` 以外に渡す正当な用途（認証・URL 書き換え・署名設定）が無いため、トークン・credential helper・url rewrite をすべて持たない `env -i` の git とした。選ばなかった解釈: gh 経由の git にトークンを残す案（`git grep -O` が実行経路に残る間は子プロセスの環境にトークンが乗る）。
+4. 足りなかった情報・検証手段: 実機の `gh`/`git` でのクラスタ・省略形の受理確認はレビュー側の規則上こちらでは試せないため、pflag の読み方（claude のレビューが引用）と git の一意な省略形の仕様に照らした静的な判定に留め、テストは偽 gh/git が受け取る argv で確認する形になった。`conductor-watch-ensure.test.sh` の環境依存フレークは引き続き未解決（round 1 と同じ）。
+5. 改善案: `env -i` で落ちる `CALL_LOG` のような観測用環境変数を、テストが「子プロセスに渡したくない値」を検査するための記録先として扱う慣行（偽コマンド側にフォールバックの記録先を持たせる形）を、他の境界テストにも適用すると良い。
+
+使ったスキル: `.agents/skills/implement-issue`
