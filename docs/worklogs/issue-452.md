@@ -35,3 +35,15 @@
 5. 改善案: .agents/skills/write-issue/SKILL.md の「規模の見積もり」に、レビューの must-fix 修正で見積もりを超えそうなときの追記の仕方（本文の見込み行数を round ごとに更新する）を 1 文足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: fddb2e2c39c79b7e5809b030c5595b96b02bcca4
+
+1. 詰まった箇所: crates/pelway-contract/src/reply_guard.rs: round 3 のフェンス修正が置換スクリプトの照合失敗で未適用のまま「対応済み」と記録していた（round 3 の Codex・Claude のレビューで発覚。round 3 の push 済み記録は誤りのまま）。停止報告ののち hatai の pr-size-exception 承認（Issue #452 の 2026-11-19 00:23 JST のコメント）で再開し、edit ツールで適用し直して検証した。
+2. 曖昧だった文: 「直し方: CommonMark の規則どおり、開いた区切りの文字と長さを覚え、同じ文字・同じ長さ以上・info string の無い行だけを閉じとする（字下げは半角空白 0〜3 個だけ。）」（PR #466 の Claude レビュー round 3 must-fix 1）。「info string の無い行」が閉じ行だけの条件か開き行にも効くかの書き分けが無かった。
+3. 仮定と解釈: info string の禁止は閉じ行だけに適用し、開き行は info string（```rust 等）を許した（CommonMark のとおり）。採らなかった解釈は「開き行も禁止」（```rust の正当な引用を全部止めることになるため不採用）。
+4. 足りなかった情報・検証手段: 置換スクリプトの成否を grep で確認する工程が round 3 に無く適用漏れに気づかなかった。round 4 では照合失敗がエラーになる edit ツールを使い、コミット後に grep -c で各修正の存在を確認した。
+5. 改善案: .agents/skills/implement-issue/SKILL.md の手順 6 に「スクリプトで一括置換したときは、置換後のファイルへ変更が入ったことを grep で確かめる」の 1 文を足す。
+
+使ったスキル: implement-issue
