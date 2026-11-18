@@ -793,7 +793,8 @@ pub fn apply_decision_screen(window: &MainWindow, shell: &DecisionShell, now: Ts
 fn apply_decision_card_props(window: &MainWindow, card: Option<&DecisionCardState>) {
     match card {
         Some(card) => {
-            window.set_data_decision_visible(true);
+            // データを先に全部入れてから最後に visible を立てる。`if` 条件付き
+            // の要素（依頼者の AI バッジなど）が初期値で確定評価されることを防ぐ
             window.set_data_decision_id(card.decision_id.as_str().into());
             window.set_data_decision_version(card.version as i32);
             window.set_data_decision_requester(card.requester.as_str().into());
@@ -814,6 +815,7 @@ fn apply_decision_card_props(window: &MainWindow, card: Option<&DecisionCardStat
                     window.set_data_decision_decider("".into());
                 }
             }
+            window.set_data_decision_visible(true);
         }
         None => window.set_data_decision_visible(false),
     }

@@ -32,6 +32,7 @@ const TR_GETTERS: &[(&str, TrGetter)] = &[
     ("ai-presence-waiting", |w| w.get_tr_ai_presence_waiting()),
     ("search-placeholder", |w| w.get_tr_search_placeholder()),
     ("search-shortcut", |w| w.get_tr_search_shortcut()),
+    ("banner-demo-mock", |w| w.get_tr_banner_demo_mock()),
     ("today-title", |w| w.get_tr_today_title()),
     ("today-section-mine", |w| w.get_tr_today_section_mine()),
     ("today-section-requests", |w| {
