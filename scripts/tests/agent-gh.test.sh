@@ -46,10 +46,15 @@ fi
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
 EOF
 
-# 偽の git: GH_TOKEN と引数を追記する（push 後の agent-gh-resign からの呼び出しも残すため追記）。
-cat >"$BIN/git" <<'EOF'
+# 偽の git: GH_TOKEN と引数を追記し、環境変数を <log>.env に記録する
+# （push 後の agent-gh-resign からの呼び出しも残すため追記）。
+# `agent-gh review git` は CALL_LOG を持たない最小環境で実行されるので、
+# CALL_LOG 未設定時は $ROOT/git-last.log に記録する。
+cat >"$BIN/git" <<EOF
 #!/usr/bin/env bash
-{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
+log="\${CALL_LOG:-$ROOT/git-last.log}"
+{ printf 'GH_TOKEN=%s\n' "\${GH_TOKEN:-}"; printf 'ARGS=%s\n' "\$*"; } >>"\$log"
+env | sort >"\$log.env"
 EOF
 chmod +x "$BIN"/*
 
@@ -68,7 +73,7 @@ run() {
   local name="$1"
   shift
   export CALL_LOG="$ROOT/$name.log"
-  rm -f "$CALL_LOG" "$CALL_LOG.fnox-args"
+  rm -f "$CALL_LOG" "$CALL_LOG.fnox-args" "$CALL_LOG.env" "$ROOT/git-last.log" "$ROOT/git-last.log.env"
   OUT="$(bash "$SCRIPT" "$@" 2>&1)"
   RC=$?
 }
@@ -76,6 +81,12 @@ run() {
 expect_log() {
   local name="$1" pattern="$2"
   grep -qF -- "$pattern" "$ROOT/$name.log" 2>/dev/null || failures+=("$name: log lacks '$pattern'")
+}
+
+# expect_git_log <name> <pattern>: CALL_LOG を持たない review git の記録（git-last.log）を調べる
+expect_git_log() {
+  local name="$1" pattern="$2"
+  grep -qF -- "$pattern" "$ROOT/git-last.log" 2>/dev/null || failures+=("$name: log lacks '$pattern'")
 }
 
 run dev_mints_token dev pr list
@@ -152,11 +163,11 @@ run_help() {
   RC=$?
 }
 
-# expect_no_calls <name>: fnox・gh・git のどれも呼ばれていない（呼ぶと CALL_LOG 系ができる）
+# expect_no_calls <name>: fnox・gh・git のどれも呼ばれていない（呼ぶと CALL_LOG 系か git-last.log ができる）
 expect_no_calls() {
   local name="$1"
   local log="$ROOT/$name.log"
-  [[ ! -e "$log" && ! -e "$log.fnox-args" && ! -e "$log.token-args" ]] ||
+  [[ ! -e "$log" && ! -e "$log.fnox-args" && ! -e "$log.token-args" && ! -e "$ROOT/git-last.log" ]] ||
     failures+=("$name: fnox or gh was called")
 }
 
@@ -226,9 +237,25 @@ expect_log unicode_guard_capital_u 'ARGS=pr list --search a\U3042'
 # fnox（トークン発行）・gh・git のどれも呼ばれない。
 for sub in show diff log grep blame; do
   run "review_git_allow_$sub" review git "$sub" HEAD
-  expect_log "review_git_allow_$sub" "GH_TOKEN=review-token"
-  expect_log "review_git_allow_$sub" "$sub HEAD"
+  expect_git_log "review_git_allow_$sub" "ARGS=$sub HEAD"
+  # review の git はローカルの読み取りだけに使うため、トークンを発行せず最小環境で実行する
+  [[ ! -e "$ROOT/review_git_allow_$sub.log.fnox-args" ]] || failures+=("review_git_allow_$sub: fnox was called")
+  [[ "$(head -n1 "$ROOT/git-last.log" 2>/dev/null)" == "GH_TOKEN=" ]] || failures+=("review_git_allow_$sub: GH_TOKEN in git env")
+  grep -qxF 'GIT_CONFIG_GLOBAL=/dev/null' "$ROOT/git-last.log.env" 2>/dev/null ||
+    failures+=("review_git_allow_$sub: env boundary missing")
 done
+
+# git の引数検査: 書き込み（--output）・実行（-O・ページャ・外部 diff・textconv）の形を拒否
+run review_git_allow_args review git log --oneline -p -S foo
+expect_git_log review_git_allow_args "ARGS=log --oneline -p -S foo"
+
+# -e の直後の引数はパターンの値で、`-O` の形でもフラグにはならない
+run review_git_allow_expr_dash review git grep -e -O foo
+expect_git_log review_git_allow_expr_dash "ARGS=grep -e -O foo"
+
+# `--` 以降は pathspec で、`-` で始まる形でもフラグにはならない
+run review_git_allow_ddash review git log -- -O
+expect_git_log review_git_allow_ddash "ARGS=log -- -O"
 
 run review_gh_api review api /rate_limit
 expect_log review_gh_api "GH_TOKEN=review-token"
@@ -241,8 +268,18 @@ expect_log review_gh_api_get "ARGS=api -X GET /rate_limit"
 run review_gh_api_method_get review api --method get /rate_limit
 expect_log review_gh_api_method_get "ARGS=api --method get /rate_limit"
 
-run review_gh_api_readflags review api --paginate -H 'Accept: x' -q '.a' /rate_limit
-expect_log review_gh_api_readflags "ARGS=api --paginate -H Accept: x -q .a /rate_limit"
+# 束ね書きのクラスタ内で -X が明示する GET も許す
+run review_gh_api_cluster_get review api -iX GET /rate_limit
+expect_log review_gh_api_cluster_get "ARGS=api -iX GET /rate_limit"
+
+run review_gh_api_xget review api -XGET /rate_limit
+expect_log review_gh_api_xget "ARGS=api -XGET /rate_limit"
+
+run review_gh_api_readflags review api --paginate --slurp -H 'Accept: x' -q '.a' /rate_limit
+expect_log review_gh_api_readflags "ARGS=api --paginate --slurp -H Accept: x -q .a /rate_limit"
+
+run review_gh_api_bool_cluster review api -i /rate_limit
+expect_log review_gh_api_bool_cluster "ARGS=api -i /rate_limit"
 
 run review_gh_issue_view review issue view 1 --json body
 expect_log review_gh_issue_view "ARGS=issue view 1 --json body"
@@ -288,6 +325,25 @@ review_deny review_auth auth status
 review_deny review_gist gist list
 review_deny review_release release list
 review_deny review_no_args
+# git の承認済みサブコマンドでも、書き込み（--output）・実行（grep の -O、ページャ、
+# 外部 diff、textconv）につながる引数形は拒否する（PR #463 round 2 の must-fix）。
+# 長いオプションは一意な省略形も、短いオプションは束ね書きも拾う
+review_deny review_git_show_output git show --output=/tmp/x HEAD
+review_deny review_git_log_output git log --output /tmp/x
+review_deny review_git_log_out_abbrev git log --out /tmp/x
+review_deny review_git_grep_pager git grep -Oevil foo
+review_deny review_git_grep_open git grep --open-files-in-pager=evil foo
+review_deny review_git_grep_open_abbrev git grep --open=evil foo
+review_deny review_git_grep_cluster_O git grep -aO evil foo
+review_deny review_git_log_paginate git log --paginate
+review_deny review_git_log_pag_abbrev git log --pag
+review_deny review_git_log_P git log -P
+review_deny review_git_show_cluster_P git show -pP
+review_deny review_git_diff_extdiff git diff --ext-diff
+review_deny review_git_show_ext_abbrev git show --ext
+review_deny review_git_show_textconv git show --textconv
+review_deny review_git_blame_output git blame --output=x HEAD
+
 # api の変更系メソッド・POST を意味する引数形は拒否（GH_TOKEN を持つ review トークンでの書き込みを止める）
 review_deny review_api_patch api -X PATCH /repos/hatai/Pelway/pulls/1
 review_deny review_api_delete api -X DELETE /repos/hatai/Pelway/pulls/1
@@ -296,11 +352,24 @@ review_deny review_api_method_put api --method PUT /x
 review_deny review_api_method_eq api --method=POST /x
 review_deny review_api_short_inline api -XDELETE /x
 review_deny review_api_method_missing api -X
-review_deny review_api_field api -f query='{ viewer }' graphql
-review_deny review_api_raw_field api -F 'key=@/etc/passwd' /x
+review_deny review_api_raw_field api -f query='{ viewer }' graphql
+review_deny review_api_field api -F 'key=@/etc/passwd' /x
 review_deny review_api_raw_field_long api --raw-field 'x=1' /x
 review_deny review_api_field_long api --field 'x=1' /x
 review_deny review_api_input api --input /tmp/body.json /x
+# 値を取らない短いオプションを先頭に束ねたクラスタ内の X/f/F も拒否する
+# （pflag はクラスタを 1 文字ずつ読み、-i は値を取らないので続く文字が次のフラグになる）
+review_deny review_api_cluster_x api -iX PATCH /x
+review_deny review_api_cluster_xval api -iXDELETE /x
+review_deny review_api_cluster_xeq api -iX=POST /x
+review_deny review_api_cluster_f api -iftitle=x /x
+review_deny review_api_cluster_F api -iF 'key=@/etc/passwd' /x
+# 許可リストに無い長いオプション・短いオプションは拒否
+review_deny review_api_unknown_long api --nonexistent /x
+review_deny review_api_unknown_short api -z /x
+# メソッド上書きを試みるヘッダは拒否
+review_deny review_api_method_override api -H 'X-HTTP-Method-Override: PATCH' /x
+review_deny review_api_method_override_long api --header 'x-http-method-override: DELETE' /x
 
 # dev 名義はこれまでどおり制限されない
 run dev_git_unrestricted dev git switch -c probe

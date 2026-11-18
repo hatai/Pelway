@@ -222,11 +222,15 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 | 場所 | 設定 |
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.claude_review` | `driver: claudeAgent`、`config` の `homePath` に `/home/hatai/.claude-review`（UI のフィールド名は「CLAUDE_CONFIG_DIR path」。子プロセスの環境変数 `CLAUDE_CONFIG_DIR` になる。`config.environment` は claudeAgent の config スキーマに無いキーで無視される） |
-| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` が引数を `git`/`gh` にそのまま渡すため、ワイルドカードは `auth token`・`repo clone`・`git` 全般などあらゆる形を許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`） |
+| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。ラッパーが `review` 名義で絞るのはサブコマンドと `api`・`git` の引数で、`pr review` など許可したサブコマンドの引数はそのまま通るため、権限設定側でも使用する形をサブコマンド単位で列挙し deny で二重に止める）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`） |
 | socat | Claude Code の sandbox（Linux）が使う。`mise.toml` の `conda:socat` で `mise install`（`mise bootstrap`）が入れる。apt と sudo は要らない |
 | ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
 
-`scripts/agent-gh` 自身も `review` 名義の実行をサブコマンド単位で制限する（権限設定側の境界とは別層で、許可集合は設定表と同一ではない: ラッパー経由の `git` は `blame` も許可する）: 実行できるのは gh の `api`（GET のみ。`-X`/`--method` で GET 以外を指定する形と `-f`/`--field`・`-F`/`--raw-field`・`--input` のような body を付けて POST になる形は拒否）・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review` と git の `show`・`diff`・`log`・`grep`・`blame`。それ以外はトークンを発行せず終了コード 6 で拒否する。読み取り系 `git` の `--output`・`-O` による書き込み・実行は別 Issue（#306）で追う。
+`scripts/agent-gh` 自身も `review` 名義の実行を絞る（権限設定側の境界とは別層で、許可集合は設定表と同一ではない: ラッパー経由の `git` は `blame` も許可する）。実行できるのは gh の `api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review` と git の `show`・`diff`・`log`・`grep`・`blame` で、それ以外はトークンを発行せず終了コード 6 で拒否する。
+
+`api` は GET のみで、引数検査は許可リスト方式: 許すのは値を取らない `-i`/`--include`・`--paginate`・`--slurp`・`--silent`・`--verbose`、値を取る `-H`/`--header`・`-q`/`--jq`・`-t`/`--template`・`--cache`・`--hostname`（`X-HTTP-Method-Override` ヘッダは拒否）、`--method`/`-X` の GET 形、`-` で始まらない endpoint だけ。短いオプションは束ね書きのクラスタを 1 文字ずつ読んで検査するので、`-iX PATCH` や `-iftitle=x` の形も拒否される（body を付けて POST になる `-f`/`--raw-field`・`-F`/`--field`・`--input` は許可リストに入らない）。
+
+git の許可したサブコマンドも引数を検査し、`--output`（ファイル書き込み）・grep の `-O`/`--open-files-in-pager`・`--paginate`/`-P`・`--ext-diff`・`--textconv` の形（一意な省略形と短いオプションの束ね書きを含む）を拒否し、トークンを発行せず `env -i` の最小環境（ユーザー・システムの git 設定を読まず `PAGER=cat`）で実行する。`pr review` の引数（`--body-file` など）は絞らず、sandbox の書き込み先の制限は別 Issue（#305・#306）で追う。
 
 運用に入る前に、`auto-accept-edits` のスレッドで次を確かめる。確かめるまでは `claude_review` を使わない。
 
@@ -249,8 +253,8 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 
 残っている既知の経路は hatai の決裁で別 Issue で追う（PR #287 の round 4 で両レビュー担当が request-changes として指摘し、hatai が残リスクを受容）:
 
-- `api -F <key>=@<file>`・`pr review --body-file <file>` で読み取り可能なローカルファイルを GitHub へ送信できる（#305。`agent-gh review` の `api` が GET 限定になったため `-F`/`--raw-field`/`--input` の形は wrapper が拒否する。残る経路は `pr review --body-file` と、読んだ内容をレビュー本文へ直接書く形）
-- 読み取り系 `git` の `--output=<path>` での書き込みと `git grep -O<cmd>` での実行が、sandbox が worktree・共有 `.git` への書き込みを許すことと重なって残る（#306）
+- `api -F <key>=@<file>`・`pr review --body-file <file>` で読み取り可能なローカルファイルを GitHub へ送信できる（#305。`agent-gh review` の `api` は GET 限定で `-f`/`--raw-field`・`-F`/`--field`・`--input` の形は wrapper が拒否する。残る経路は `pr review --body-file` と、読んだ内容をレビュー本文へ直接書く形）
+- 読み取り系 `git` の `--output=<path>` での書き込みと `git grep -O<cmd>` での実行が、sandbox が worktree・共有 `.git` への書き込みを許すことと重なって残る（#306。`agent-gh review git` は引数検査でこれらの形を拒否し最小環境で実行するが、sandbox が直接の `git` 呼び出しに許す書き込み先の制限は未解決）
 
 ## レビュー担当の Devin CLI（devin_review）
 

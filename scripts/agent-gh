@@ -36,31 +36,128 @@ help() {
   exit 0
 }
 
-# review_api_args_allowed <args...>: `gh api` の引数が GET だけに留まるかを判定する。
-# `-X`/`--method` で GET 以外を指定した場合と、body を付ける形
-# （-f/--field・-F/--raw-field・--input。これらを付けると gh api は POST になる）を拒否する。
-# pflag の短いオプションの束ね書き（`-XDELETE`・`-fkey=...`）も拾う。
+# review_api_args_allowed <args...>: `gh api` の引数が GET の読み取りに留まるかを
+# 判定する。検査は拒否リストではなく許可リストで、許可するのは次の形だけ:
+#   - 値を取らないフラグ: -i/--include・--paginate・--slurp・--silent・--verbose
+#   - 値を取る無害なフラグ: -H/--header・-q/--jq・-t/--template・--cache・--hostname
+#     （値は次の引数か --name=value・短オプションの残り。X-HTTP-Method-Override
+#     ヘッダは拒否する）
+#   - -X GET・-XGET・-X=GET・--method GET・--method=GET（GET 以外のメソッド指定は拒否）
+#   - `-` で始まらない位置引数（endpoint）
+# 短いオプションは pflag と同じくクラスタを 1 文字ずつ読む（-i は値を取らず次の
+# 文字が別のフラグになるので、-iX PATCH・-iftitle=x も拾える）。X・f・F・q・H・t は
+# 残りのクラスタか次の引数を値として飲む。許可していないフラグは -f/--raw-field・
+# -F/--field・--input のような body を付ける形も含めてすべて拒否する。
 review_api_args_allowed() {
-  local m
+  local arg cluster ch val
   while (($#)); do
-    case "$1" in
-      -f*|-F*|--field|--field=*|--raw-field|--raw-field=*|--input|--input=*)
-        return 1
+    arg="$1"
+    shift
+    case "$arg" in
+      --)
+        # 以降は位置引数（endpoint）。検査を終える
+        break
         ;;
-      -X|--method)
-        (($# >= 2)) || return 1
-        m="$2"
-        [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || return 1
+      --include|--paginate|--slurp|--silent|--verbose)
+        ;;
+      --header|--jq|--template|--cache|--hostname)
+        (($# >= 1)) || return 1
+        val="$1"
+        shift
+        [[ "$arg" != "--header" || "${val,,}" != *x-http-method-override:* ]] || return 1
+        ;;
+      --header=*)
+        [[ "${arg,,}" != *x-http-method-override:* ]] || return 1
+        ;;
+      --jq=*|--template=*|--cache=*|--hostname=*)
+        ;;
+      --method)
+        (($# >= 1)) || return 1
+        [[ "$1" =~ ^[Gg][Ee][Tt]$ ]] || return 1
         shift
         ;;
-      -X?*)
-        m="${1#-X}"
-        m="${m#=}"
-        [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || return 1
+      --method=[Gg][Ee][Tt])
         ;;
-      --method=*)
-        m="${1#--method=}"
-        [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || return 1
+      --*)
+        # 許可リストに無い長いオプションは拒否（--field・--raw-field・--input など
+        # body を付ける形、未知のフラグも含む）
+        return 1
+        ;;
+      -*)
+        # 短いオプションのクラスタを pflag と同じく 1 文字ずつ読む
+        cluster="${arg#-}"
+        while [[ -n "$cluster" ]]; do
+          ch="${cluster:0:1}"
+          cluster="${cluster:1}"
+          case "$ch" in
+            i)
+              ;;
+            X)
+              # X の値は残りのクラスタか次の引数。GET だけを許す
+              if [[ -z "$cluster" ]]; then
+                (($# >= 1)) || return 1
+                cluster="$1"
+                shift
+              fi
+              cluster="${cluster#=}"
+              [[ "$cluster" =~ ^[Gg][Ee][Tt]$ ]] || return 1
+              cluster=""
+              ;;
+            f|F)
+              # raw-field/field（body を付ける形）は拒否
+              return 1
+              ;;
+            q|H|t)
+              # 値を取る無害な短オプション。値は残りのクラスタか次の引数
+              if [[ -z "$cluster" ]]; then
+                (($# >= 1)) || return 1
+                val="$1"
+                shift
+              else
+                val="${cluster#=}"
+              fi
+              [[ "$ch" != "H" || "${val,,}" != *x-http-method-override:* ]] || return 1
+              cluster=""
+              ;;
+            *)
+              # 許可リストに無い短いオプションは拒否
+              return 1
+              ;;
+          esac
+        done
+        ;;
+      *)
+        # `-` で始まらない位置引数（endpoint）は許す
+        ;;
+    esac
+  done
+  return 0
+}
+
+# review_git_args_allowed <args...>: 許可した読み取り系 git サブコマンドの引数に、
+# 書き込み（--output）や任意実行（grep の -O/--open-files-in-pager、ページャ、外部 diff、
+# textconv）の経路になるオプション形が無いかを確かめる。長いオプションは git が一意な
+# 省略形を受理するので prefix の判定で拾い、短いオプションの束ね書き（-aO・-pP など）も
+# `-*[OP]*` で拾う。値を取るオプションの次の引数と `--` 以降の pathspec は検査しない。
+review_git_args_allowed() {
+  while (($#)); do
+    case "$1" in
+      --)
+        break
+        ;;
+      --out*|--pag*|--open*|--textc*|--ext|--ext-*)
+        return 1
+        ;;
+      -e|-f|-G|-S|-L|-A|-B|-U|--format|--pretty|--grep|--author|--committer|--since|--after|--until|--before|--max-count|--skip|--unified|--context|--function-context|--diff-filter|--date|--encoding|--threads|--exclude|--glob|--find-object|--anchored|--inter-hunk-context|--max-depth)
+        # 値を取るオプション: 次の引数は値で、`-O` の形でもフラグにはならない
+        (($# >= 2)) && shift
+        ;;
+      -[eSGLABU]*)
+        # 値を取る短オプションのインライン形（-Gpat・-Upat など）: 残りはその値
+        ;;
+      -*[OP]*)
+        # grep の -O（pager 起動）・-P（--paginate）とその束ね書きを拒否
+        return 1
         ;;
     esac
     shift
@@ -71,8 +168,10 @@ review_api_args_allowed() {
 # review_subcommand_allowed <args...>: review 名義で許可するサブコマンドかを判定する。
 # review-pr が実際に使う読み取り系（＋レビュー投稿の pr review）に絞る。判定はサブコマンド
 # 単位で、第 1 引数が許可リストの語そのものであることを要求する（`git -c 'alias.x=!<cmd>' x`
-# のような先頭オプション注入は第 1 引数が一致しないため拒否される）。api は GET のみ。
-# 読み取り系 git の --output・-O による書き込み・実行の穴は #306 の範囲で、ここでは扱わない。
+# のような先頭オプション注入は第 1 引数が一致しないため拒否される）。api は許可リスト化した
+# 引数検査で GET の読み取りに留め、git は許可したサブコマンドの引数も検査して、書き込み
+# （--output）・実行（grep の -O、ページャ、外部 diff、textconv）につながる形を拒否する。
+# sandbox 側の書き込み先の制限は #306 の範囲で、ここでは扱わない。
 review_subcommand_allowed() {
   case "${1:-}" in
     api)
@@ -89,7 +188,7 @@ review_subcommand_allowed() {
       ;;
     git)
       case "${2:-}" in
-        show|diff|log|grep|blame) return 0 ;;
+        show|diff|log|grep|blame) review_git_args_allowed "${@:3}" ;;
         *) return 1 ;;
       esac
       ;;
@@ -160,6 +259,17 @@ case "$role" in
     if ! review_subcommand_allowed "$@"; then
       echo "agent-gh: review 名義で実行できるのは gh の api（GET のみ）・issue view・pr view|diff|checks|review と git の show|diff|log|grep|blame だけです" >&2
       exit 6
+    fi
+    if [[ "${1:-}" == "git" ]]; then
+      shift
+      # review の git はローカルの読み取りだけに使う。トークンを発行せず、
+      # ページャ・外部 diff・環境変数による設定注入（GIT_CONFIG_*・GIT_DIR など）・
+      # ユーザー/システムの git 設定をすべて持たない最小環境で実行する。
+      # 引数検査をすり抜けた形が実行・書き込みに届かないための実行時境界。
+      exec env -i PATH="$PATH" \
+        GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+        GIT_PAGER=cat PAGER=cat \
+        git "$@"
     fi
     token="$(app_token PELWAY_REVIEW)"
     ;;
