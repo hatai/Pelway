@@ -221,6 +221,34 @@ fn persistent_display_end_to_end() {
                 })
                 .unwrap_or_default()
         });
+        if card_badges.is_empty() {
+            let card =
+                ElementHandle::find_by_element_id(&window, "ChannelView::decision-card").next();
+            let all: Vec<_> =
+                ElementHandle::find_by_element_type_name(&window, "AiBadgeView").collect();
+            let descendants: Vec<String> = card
+                .iter()
+                .flat_map(|c| {
+                    c.query_descendants()
+                        .find_all()
+                        .iter()
+                        .map(|e| {
+                            format!(
+                                "{}@({},{})",
+                                e.type_name().unwrap_or_default(),
+                                e.absolute_position().x,
+                                e.absolute_position().y
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            eprintln!(
+                "DIAG {lang}: card={:?} all_badges={} descendants={descendants:?}",
+                card.as_ref().map(|c| (c.absolute_position(), c.size())),
+                all.len()
+            );
+        }
         assert_eq!(
             card_badges.len(),
             1,
