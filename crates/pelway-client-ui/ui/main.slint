@@ -933,8 +933,12 @@ component DecisionCardView inherits Rectangle {
                     horizontal-stretch: 0;
                     label: root.tr-ai-badge;
                 }
+                // DIAG-A: 定数条件 —— これが出れば条件評価、出なければ配置/実体化が問題
+                if true : AiBadgeView { label: root.tr-ai-badge; }
             }
         }
+        // DIAG-B: 同じ条件を内側レイアウトの外に置く —— 出ればレイアウト内配置の問題
+        if root.data-requester-is-ai : AiBadgeView { label: root.tr-ai-badge; }
         Text {
             text: root.data-question;
             color: DesignTokens.ink;
