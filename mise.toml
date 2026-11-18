@@ -52,6 +52,11 @@ jactionlint = "2.5.0"
 # （octocov・cargo-llvm-cov と同じ経路。mise.lock が URL と checksum で取得物を固定する）。
 # 出典: https://github.com/EmbarkStudios/cargo-deny/releases/tag/0.20.2
 "aqua:EmbarkStudios/cargo-deny" = "0.20.2"
+# demo-check 一式（scripts/demo-check/*.sh）の静的検査（shellcheck）。shellcheck タスク
+# （verify-static・CI の static ジョブ）から実行する。severity は既定のまま。指摘の個別
+# 抑制は disable コメントに理由を添えたものだけ許す。担当が公式リリースを確認の上でピン。
+# 出典: https://github.com/koalaman/shellcheck/releases/tag/v0.11.0
+"aqua:koalaman/shellcheck" = "0.11.0"
 
 # コンテナ実行環境（非 Docker・要件は docs/dev-environment.md）。
 # rootless Podman 一式を apt から導入する宣言。適用は明示的な bootstrap 実行時だけ
@@ -208,6 +213,17 @@ printf '%s\\n' "$warn_out" | bash scripts/deny-warn-extract.sh >&2
 description = "PR の差分行数を数え、800 行を超えたら失敗する（linguist-generated とバイナリは除く）"
 run = "bash scripts/pr-size.sh"
 
+# demo-check 一式の shellcheck 検査（Issue #265）。CI のログに実行と成功を出すため、
+# 合格時に 1 行出す（shellcheck 自体は指摘 0 件だと何も出さない）。
+[tasks.shellcheck]
+description = "shellcheck で demo-check 一式を検査する（指摘 0 件で通る。verify-static に含まれる）"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+shellcheck scripts/demo-check/*.sh
+echo "shellcheck: scripts/demo-check/*.sh clean (0 findings)"
+"""
+
 [tasks.script-test]
 # テストは scripts/script-test.sh が収集する（scripts/tests/*.test.sh、
 # .agents/skills/<name>/*.test.sh、scripts/demo-check/selftest.sh）。
@@ -269,10 +285,11 @@ description = "テストとスクリプトのテスト"
 depends = ["test", "script-test"]
 
 # cargo のコンパイルを伴わない検査（コンパイルは verify-lint / verify-test が担当する。
-# cargo-deny は cargo metadata と Cargo.lock を読むだけでコンパイルしない）。
+# cargo-deny は cargo metadata と Cargo.lock を読むだけでコンパイルしない。
+# shellcheck もシェルスクリプトの静的解析のためコンパイルを伴わない）。
 [tasks.verify-static]
-description = "cargo をコンパイルに使わない検査（hk / fnox / pitchfork / cargo-deny）"
-depends = ["hk-check", "fnox-check", "pitchfork-check", "deny-check"]
+description = "cargo をコンパイルに使わない検査（hk / fnox / pitchfork / cargo-deny / shellcheck）"
+depends = ["hk-check", "fnox-check", "pitchfork-check", "deny-check", "shellcheck"]
 
 # `mise bootstrap` は packages（apt:podman・sudo）→ tools（mise install 相当）→ このタスクの順で実行する。
 # これにより mise trust 後の mise bootstrap 1回で環境構築が完了する。
