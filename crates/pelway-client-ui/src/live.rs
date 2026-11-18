@@ -126,10 +126,6 @@ pub struct LiveSession {
     channel: Option<Channel>,
     /// 表示中のチャンネルのメッセージ（seq 昇順）。
     messages: Vec<StoredMessage>,
-    /// ポーリングのカーソル。サーバーが「一覧」として返した末尾 seq でだけ進める
-    /// （投稿の応答では進めない: 投稿の直前に他ユーザーの分が着ていても、
-    /// 次のポーリングで取りこぼさず拾うため）。
-    last_seq: u64,
     /// 直近の要求が成功しているか。失敗したら「つながっていません」。
     connected: bool,
 }
@@ -147,7 +143,6 @@ impl LiveSession {
             channels: Vec::new(),
             channel: None,
             messages: Vec::new(),
-            last_seq: 0,
             connected: false,
         }
     }
@@ -175,7 +170,6 @@ impl LiveSession {
             self.channels = channels;
             self.channel = None;
             self.messages.clear();
-            self.last_seq = 0;
             return Ok(());
         };
         let channel: Channel = self.get_json(&format!(
@@ -201,17 +195,18 @@ impl LiveSession {
             channel_messages_path(&channel_id),
             self.actor.as_str()
         ))?;
-        self.last_seq = messages.iter().map(|m| m.seq).max().unwrap_or(0);
         self.channels = channels;
         self.channel = Some(channel);
         self.messages = messages;
         Ok(())
     }
 
-    /// 差分ポーリング: `after_seq` で新しい分だけ取る。失敗したら `connected = false`、
-    /// 成功したら `true`（復帰すると通常表示に戻る）。断線からの復帰・チャンネル
-    /// 未選択では差分でなく `bootstrap` で取り直す（サーバー再起動で seq や
-    /// message_id が振り直されていても、古い履歴の上に新しい分を追わない）。
+    /// ポーリング: 表示中チャンネルのメッセージを全件取り直して置き換える
+    /// （デモの履歴は小さいため差分 `after_seq` は使わない。一覧をサーバーの
+    /// 正とすることで、再起動で seq や message_id が振り直された・投稿応答で
+    /// カーソルが飛んだ、といった局所状態とサーバーの食い違いを構造で排除する）。
+    /// 失敗したら `connected = false`、成功したら `true`（復帰すると通常表示に戻る）。
+    /// 断線からの復帰・チャンネル未選択では `bootstrap` で取り直す。
     ///
     /// # Errors
     /// 要求の失敗。
@@ -222,29 +217,27 @@ impl LiveSession {
         let Some(channel_id) = self.channel.as_ref().map(|c| c.channel_id.clone()) else {
             return self.bootstrap();
         };
-        let new: Vec<StoredMessage> = self.get_json(&format!(
-            "{}?actor={}&after_seq={}",
+        let all: Vec<StoredMessage> = self.get_json(&format!(
+            "{}?actor={}",
             channel_messages_path(&channel_id),
-            self.actor.as_str(),
-            self.last_seq,
+            self.actor.as_str()
         ))?;
         self.connected = true;
-        if let Some(tail) = new.iter().map(|m| m.seq).max() {
-            self.last_seq = tail;
-        }
-        self.append_new(new);
+        self.messages = all;
         Ok(())
     }
 
     /// 表示ユーザーとして `body` を投稿する。成功したら保存済みメッセージを返し、
-    /// 一覧にも足す。ポーリングのカーソルはここでは進めない（投稿の直前に他
-    /// ユーザーの分が着ていた場合に取りこぼさないよう、次のポーリングで
-    /// `message_id` の重複除去に任せて再取得する）。
+    /// 一覧にも足す。断線中は先に `bootstrap` で取り直してから投稿する
+    /// （サーバー再起動で履歴が入れ替わっていても、古い一覧の上に追記しない）。
     ///
     /// # Errors
     /// チャンネル未選択・要求の失敗。
     pub fn post(&mut self, body: &str) -> Result<StoredMessage, LiveError> {
-        let Some(channel) = &self.channel else {
+        if !self.connected {
+            self.bootstrap()?;
+        }
+        let Some(channel_id) = self.channel.as_ref().map(|c| c.channel_id.clone()) else {
             return Err(LiveError::NoChannel);
         };
         let request = PostMessageRequest {
@@ -253,7 +246,7 @@ impl LiveSession {
             thread_root: None,
         };
         let json = serde_json::to_vec(&request).map_err(LiveError::Json)?;
-        let path = channel_messages_path(&channel.channel_id);
+        let path = channel_messages_path(&channel_id);
         let member_id = self.actor.as_str().to_owned();
         let member_kind = self.actor_kind.as_str();
         let stored: StoredMessage = self.post_json(

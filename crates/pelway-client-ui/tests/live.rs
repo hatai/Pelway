@@ -108,24 +108,9 @@ fn post_reaches_server_and_poll_picks_up_others_messages() {
     let mut session = LiveSession::new(addr, "ws-demo-01".into());
     session.bootstrap().expect("bootstrap succeeds");
 
-    // 投稿: 表示ユーザー（既定は先頭の人＝田中）として送る。
-    session.post("CSV出力の件、案をお願いします").expect("post");
-    {
-        let store = store.lock().expect("store lock");
-        let messages = store.channel_messages(&"ch-demo-anken-b".into());
-        let last = messages.last().expect("posted message stored");
-        assert_eq!(last.author_id.as_str(), "m-tanaka");
-        assert_eq!(last.member_kind, MemberKind::Human);
-        assert_eq!(last.body, "CSV出力の件、案をお願いします");
-        assert!(last.client_msg_id.is_some(), "冪等キー付きで保存");
-    }
-    // 自分の投稿はセッション側にも反映される。
-    assert_eq!(
-        session.messages().last().map(|m| m.body.as_str()),
-        Some("CSV出力の件、案をお願いします")
-    );
-
-    // ほかのユーザーの変更（別クライアントの投稿相当）を保存部に直接足す。
+    // ほかのユーザーの変更（別クライアントの投稿相当）を、自分の投稿の直前に
+    // 保存部へ足す。投稿応答の seq が他ユーザーの分を追い越す配置で、
+    // 「投稿でポーリング位置が進み割り込み分を取りこぼす」退化を塞ぐ。
     {
         let mut store = store.lock().expect("store lock");
         store
@@ -144,11 +129,38 @@ fn post_reaches_server_and_poll_picks_up_others_messages() {
             )
             .expect("other user's message");
     }
+
+    // 投稿: 表示ユーザー（既定は先頭の人＝田中）として送る。
+    session.post("CSV出力の件、案をお願いします").expect("post");
+    {
+        let store = store.lock().expect("store lock");
+        let messages = store.channel_messages(&"ch-demo-anken-b".into());
+        let last = messages.last().expect("posted message stored");
+        assert_eq!(last.author_id.as_str(), "m-tanaka");
+        assert_eq!(last.member_kind, MemberKind::Human);
+        assert_eq!(last.body, "CSV出力の件、案をお願いします");
+        assert!(last.client_msg_id.is_some(), "冪等キー付きで保存");
+    }
+    // 自分の投稿はセッション側にも反映される。
+    assert_eq!(
+        session.messages().last().map(|m| m.body.as_str()),
+        Some("CSV出力の件、案をお願いします")
+    );
+
+    // ポーリングで他ユーザーの分（自分の投稿より前の seq）も取りこぼさず拾い、
+    // seq 昇順のまま一覧になる。
     session.poll().expect("poll succeeds");
-    let last = session.messages().last().expect("polled message");
-    assert_eq!(last.body, "案Aと案Bを用意しました");
-    assert_eq!(last.author_id.as_str(), "m-hal");
-    assert_eq!(last.member_kind, MemberKind::Bot);
+    let messages = session.messages();
+    assert_eq!(messages.len(), 5, "seed 3 + 他ユーザー 1 + 自分 1");
+    assert!(
+        messages.windows(2).all(|w| w[0].seq < w[1].seq),
+        "seq 昇順を保つ"
+    );
+    let other = &messages[3];
+    assert_eq!(other.body, "案Aと案Bを用意しました");
+    assert_eq!(other.author_id.as_str(), "m-hal");
+    assert_eq!(other.member_kind, MemberKind::Bot);
+    assert_eq!(messages[4].author_id.as_str(), "m-tanaka");
 }
 
 // 受け入れ条件3: 表示ユーザーを田中／山本／佐藤で切り替えられる。
@@ -207,22 +219,55 @@ fn get_after_switch_sends_new_actor_query() {
 // 復帰（= 断線からのフル再取得）で通常の状態に戻る。
 #[test]
 fn status_and_json_errors_mark_offline_and_recover() {
-    let (addr, _store) = spawn_demo_server();
+    let (addr, store) = spawn_demo_server();
     let mut session = LiveSession::new(addr, "ws-demo-01".into());
     session.bootstrap().expect("bootstrap succeeds");
 
-    for (status, body) in [("500 Internal Server Error", "{}"), ("200 OK", "not json")] {
-        let (stub, _captured) = stub_once(status, body);
-        session.set_addr(stub);
-        assert!(session.poll().is_err(), "{status} / {body} は失敗する");
-        assert!(!session.connected(), "失敗したら非接続状態へ");
+    // 5xx は Status の失敗として非接続になる。
+    let (stub, _captured) = stub_once("500 Internal Server Error", "{}");
+    session.set_addr(stub);
+    let err = session.poll().expect_err("5xx は失敗する");
+    assert!(matches!(err, live::LiveError::Status(500)), "{err:?}");
+    assert!(!session.connected(), "失敗したら非接続状態へ");
 
-        // 復帰: 接続先が戻ると poll は断線からのフル再取得で立て直す。
-        session.set_addr(addr);
-        session.poll().expect("poll after recovery");
-        assert!(session.connected(), "復帰したら接続状態へ");
-        assert_eq!(session.messages().len(), 3, "履歴は seed の 3 件に立て直る");
+    // 落ちている間に他ユーザーの分が積まれた想定。復帰のフル再取得で拾う。
+    {
+        let mut store = store.lock().expect("store lock");
+        store
+            .post_message(
+                NewMessage {
+                    workspace_id: "ws-demo-01".into(),
+                    channel_id: "ch-demo-anken-b".into(),
+                    author_id: "m-sato".into(),
+                    member_kind: MemberKind::Human,
+                    purpose_id: PurposeId::P01,
+                    body: "停電中に進めておきました".to_owned(),
+                    thread_root: None,
+                    client_msg_id: None,
+                },
+                3_000_000,
+            )
+            .expect("queued during outage");
     }
+    session.set_addr(addr);
+    session.poll().expect("poll after recovery");
+    assert!(session.connected(), "復帰したら接続状態へ");
+    assert_eq!(
+        session.messages().last().map(|m| m.body.as_str()),
+        Some("停電中に進めておきました"),
+        "復帰の再取得で履歴ごと新しい分を拾う"
+    );
+
+    // 200 でも JSON が読めなければ Json の失敗として非接続になる。
+    let (stub, _captured) = stub_once("200 OK", "not json");
+    session.set_addr(stub);
+    let err = session.poll().expect_err("壊れた JSON は失敗する");
+    assert!(matches!(err, live::LiveError::Json(_)), "{err:?}");
+    assert!(!session.connected());
+    session.set_addr(addr);
+    session.poll().expect("poll after recovery");
+    assert!(session.connected());
+    assert_eq!(session.messages().len(), 4, "seed 3 + 停電中の 1 件");
 }
 
 // チーム点検の追加条件: サーバーが落ちた・ポーリングが失敗したとき
