@@ -31,7 +31,7 @@ help() {
     "呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。" \
     "git push の成功後は scripts/agent-gh-resign がコミットを GitHub API の署名付きに付け替える（止めるときは PELWAY_AGENT_SKIP_RESIGN=1）。" \
     "非 ASCII の文字列は argv 経由で渡せません（\\uXXXX に潰れます）。--body-file / api --input / git commit -F などファイル経由で渡してください。" \
-    "review 名義で実行できるサブコマンドは読み取り系に絞られています（gh: api（GET のみ）・issue view・pr view|diff|checks|review、git: show|diff|log|grep|blame）。" \
+    "review 名義で実行できるサブコマンドは読み取り系に絞られています（gh の api（GET のみ）・issue view・pr view|diff|checks|review。git は実行できません）。" \
     "終了コード: 2 = 役割の誤り、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、6 = review 名義で許可されていないサブコマンド、それ以外は gh / git の終了コード"
   exit 0
 }
@@ -134,44 +134,15 @@ review_api_args_allowed() {
   return 0
 }
 
-# review_git_args_allowed <args...>: 許可した読み取り系 git サブコマンドの引数に、
-# 書き込み（--output）や任意実行（grep の -O/--open-files-in-pager、ページャ、外部 diff、
-# textconv）の経路になるオプション形が無いかを確かめる。長いオプションは git が一意な
-# 省略形を受理するので prefix の判定で拾い、短いオプションの束ね書き（-aO・-pP など）も
-# `-*[OP]*` で拾う。値を取るオプションの次の引数と `--` 以降の pathspec は検査しない。
-review_git_args_allowed() {
-  while (($#)); do
-    case "$1" in
-      --)
-        break
-        ;;
-      --out*|--pag*|--open*|--textc*|--ext|--ext-*)
-        return 1
-        ;;
-      -e|-f|-G|-S|-L|-A|-B|-U|--format|--pretty|--grep|--author|--committer|--since|--after|--until|--before|--max-count|--skip|--unified|--context|--function-context|--diff-filter|--date|--encoding|--threads|--exclude|--glob|--find-object|--anchored|--inter-hunk-context|--max-depth)
-        # 値を取るオプション: 次の引数は値で、`-O` の形でもフラグにはならない
-        (($# >= 2)) && shift
-        ;;
-      -[eSGLABU]*)
-        # 値を取る短オプションのインライン形（-Gpat・-Upat など）: 残りはその値
-        ;;
-      -*[OP]*)
-        # grep の -O（pager 起動）・-P（--paginate）とその束ね書きを拒否
-        return 1
-        ;;
-    esac
-    shift
-  done
-  return 0
-}
-
 # review_subcommand_allowed <args...>: review 名義で許可するサブコマンドかを判定する。
 # review-pr が実際に使う読み取り系（＋レビュー投稿の pr review）に絞る。判定はサブコマンド
 # 単位で、第 1 引数が許可リストの語そのものであることを要求する（`git -c 'alias.x=!<cmd>' x`
 # のような先頭オプション注入は第 1 引数が一致しないため拒否される）。api は許可リスト化した
-# 引数検査で GET の読み取りに留め、git は許可したサブコマンドの引数も検査して、書き込み
-# （--output）・実行（grep の -O、ページャ、外部 diff、textconv）につながる形を拒否する。
-# sandbox 側の書き込み先の制限は #306 の範囲で、ここでは扱わない。
+# 引数検査で GET の読み取りに留める。git は review 名義ではすべて拒否する: レビュースレッドは
+# main の git を直接読めばよく、`agent-gh review git` の呼び出し元はリポジトリに無い。
+# 読み取り系に見える引数でも書き込み・任意実行・リポジトリ外の読み取りに届く形
+# （--output・-O・--no-index、省略形と束ね書きを含む）を網羅するのは
+# 引数検査では困難なため、サブコマンドごと止める。
 review_subcommand_allowed() {
   case "${1:-}" in
     api)
@@ -183,12 +154,6 @@ review_subcommand_allowed() {
     pr)
       case "${2:-}" in
         view|diff|checks|review) return 0 ;;
-        *) return 1 ;;
-      esac
-      ;;
-    git)
-      case "${2:-}" in
-        show|diff|log|grep|blame) review_git_args_allowed "${@:3}" ;;
         *) return 1 ;;
       esac
       ;;
@@ -257,19 +222,8 @@ case "$role" in
     ;;
   review)
     if ! review_subcommand_allowed "$@"; then
-      echo "agent-gh: review 名義で実行できるのは gh の api（GET のみ）・issue view・pr view|diff|checks|review と git の show|diff|log|grep|blame だけです" >&2
+      echo "agent-gh: review 名義で実行できるのは gh の api（GET のみ）・issue view・pr view|diff|checks|review だけです" >&2
       exit 6
-    fi
-    if [[ "${1:-}" == "git" ]]; then
-      shift
-      # review の git はローカルの読み取りだけに使う。トークンを発行せず、
-      # ページャ・外部 diff・環境変数による設定注入（GIT_CONFIG_*・GIT_DIR など）・
-      # ユーザー/システムの git 設定をすべて持たない最小環境で実行する。
-      # 引数検査をすり抜けた形が実行・書き込みに届かないための実行時境界。
-      exec env -i PATH="$PATH" \
-        GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-        GIT_PAGER=cat PAGER=cat \
-        git "$@"
     fi
     token="$(app_token PELWAY_REVIEW)"
     ;;
@@ -303,6 +257,22 @@ if [[ "${1:-}" == "git" ]]; then
     exit "$rc"
   fi
   GH_TOKEN="$token" exec git "${git_cfg[@]}" "$@"
+fi
+
+if [[ "$role" == "review" ]]; then
+  # review 名義ではトークンを子プロセスの環境変数に置かない。
+  # gh は --jq '$ENV.GH_TOKEN' で自分の環境を読めるため、GH_TOKEN で渡すと
+  # 許可したサブコマンドの出力経由でトークンが漏れる。代わりに 0600 の一時
+  # GH_CONFIG_DIR/hosts.yml で認証させ、gh の終了後に消す。
+  cfgdir="$(mktemp -d)" || {
+    echo "agent-gh: 一時ディレクトリを作れません" >&2
+    exit 3
+  }
+  trap 'rm -f "$cfgdir/hosts.yml"; rmdir "$cfgdir" 2>/dev/null' EXIT
+  (umask 077; printf 'github.com:\n    oauth_token: %s\n    git_protocol: https\n' "$token" >"$cfgdir/hosts.yml")
+  rc=0
+  GH_CONFIG_DIR="$cfgdir" gh "$@" || rc=$?
+  exit "$rc"
 fi
 
 GH_TOKEN="$token" exec gh "$@"

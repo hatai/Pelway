@@ -44,6 +44,9 @@ if [[ "$1 $2" == "token generate" ]]; then
   exit 0
 fi
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
+env | sort >"$CALL_LOG.env"
+# review 名義は GH_CONFIG_DIR/hosts.yml でトークンを受け取る（環境には載せない）
+[ -z "${GH_CONFIG_DIR:-}" ] || cat "$GH_CONFIG_DIR/hosts.yml" >"$CALL_LOG.hosts" 2>/dev/null
 EOF
 
 # 偽の git: GH_TOKEN と引数を追記し、環境変数を <log>.env に記録する
@@ -83,10 +86,14 @@ expect_log() {
   grep -qF -- "$pattern" "$ROOT/$name.log" 2>/dev/null || failures+=("$name: log lacks '$pattern'")
 }
 
-# expect_git_log <name> <pattern>: CALL_LOG を持たない review git の記録（git-last.log）を調べる
-expect_git_log() {
-  local name="$1" pattern="$2"
-  grep -qF -- "$pattern" "$ROOT/git-last.log" 2>/dev/null || failures+=("$name: log lacks '$pattern'")
+# expect_review_auth <name>: review 名義の gh が、トークンを GH_TOKEN ではなく 0600 の
+# 一時 GH_CONFIG_DIR/hosts.yml で受け取り、終了後に消したことを確かめる。
+expect_review_auth() {
+  local name="$1" log="$ROOT/$1.log" cfgdir
+  [[ "$(head -n1 "$log" 2>/dev/null)" == "GH_TOKEN=" ]] || failures+=("$name: GH_TOKEN in gh env")
+  grep -qF 'oauth_token: review-token' "$log.hosts" 2>/dev/null || failures+=("$name: hosts.yml lacks review token")
+  cfgdir="$(sed -n 's/^GH_CONFIG_DIR=//p' "$log.env" 2>/dev/null | head -1)"
+  [[ -n "$cfgdir" && ! -e "$cfgdir" ]] || failures+=("$name: GH_CONFIG_DIR left behind")
 }
 
 run dev_mints_token dev pr list
@@ -103,7 +110,7 @@ run token_not_leaked dev pr list
 [[ "$OUT" != *dev-token* ]] || failures+=("token_not_leaked: token printed")
 
 run review_mints_token review pr review 1 --approve
-expect_log review_mints_token "GH_TOKEN=review-token"
+expect_review_auth review_mints_token
 expect_log review_mints_token "ARGS=pr review 1 --approve"
 grep -qF -- "--app-id 111 --installation-id 222" "$ROOT/review_mints_token.log.token-args" 2>/dev/null ||
   failures+=("review_mints_token: token generate args wrong")
@@ -232,33 +239,12 @@ run unicode_guard_capital_u dev pr list --search 'a\U3042'
 [[ "$RC" == 0 ]] || failures+=("unicode_guard_capital_u: exit $RC, want 0")
 expect_log unicode_guard_capital_u 'ARGS=pr list --search a\U3042'
 
-# Issue #295: review 名義の git/gh サブコマンドは読み取り系（＋レビュー投稿の pr review）に絞る。
-# 許可される形はトークンが発行されて gh/git に渡る。許可されない形は終了コード 6 で、
-# fnox（トークン発行）・gh・git のどれも呼ばれない。
-for sub in show diff log grep blame; do
-  run "review_git_allow_$sub" review git "$sub" HEAD
-  expect_git_log "review_git_allow_$sub" "ARGS=$sub HEAD"
-  # review の git はローカルの読み取りだけに使うため、トークンを発行せず最小環境で実行する
-  [[ ! -e "$ROOT/review_git_allow_$sub.log.fnox-args" ]] || failures+=("review_git_allow_$sub: fnox was called")
-  [[ "$(head -n1 "$ROOT/git-last.log" 2>/dev/null)" == "GH_TOKEN=" ]] || failures+=("review_git_allow_$sub: GH_TOKEN in git env")
-  grep -qxF 'GIT_CONFIG_GLOBAL=/dev/null' "$ROOT/git-last.log.env" 2>/dev/null ||
-    failures+=("review_git_allow_$sub: env boundary missing")
-done
-
-# git の引数検査: 書き込み（--output）・実行（-O・ページャ・外部 diff・textconv）の形を拒否
-run review_git_allow_args review git log --oneline -p -S foo
-expect_git_log review_git_allow_args "ARGS=log --oneline -p -S foo"
-
-# -e の直後の引数はパターンの値で、`-O` の形でもフラグにはならない
-run review_git_allow_expr_dash review git grep -e -O foo
-expect_git_log review_git_allow_expr_dash "ARGS=grep -e -O foo"
-
-# `--` 以降は pathspec で、`-` で始まる形でもフラグにはならない
-run review_git_allow_ddash review git log -- -O
-expect_git_log review_git_allow_ddash "ARGS=log -- -O"
-
+# Issue #295: review 名義で実行できるのは gh の読み取り系（＋レビュー投稿の pr review）
+# だけで、git は実行できない。許可される形はトークンを発行し、GH_CONFIG_DIR の
+# hosts.yml で gh に渡す。許可されない形は終了コード 6 で、fnox（トークン発行）・
+# gh・git のどれも呼ばれない。
 run review_gh_api review api /rate_limit
-expect_log review_gh_api "GH_TOKEN=review-token"
+expect_review_auth review_gh_api
 expect_log review_gh_api "ARGS=api /rate_limit"
 
 # api は GET のみ許可（PR #463 round 1 の must-fix）。明示の GET・読み取り系フラグは通す
@@ -281,19 +267,39 @@ expect_log review_gh_api_readflags "ARGS=api --paginate --slurp -H Accept: x -q 
 run review_gh_api_bool_cluster review api -i /rate_limit
 expect_log review_gh_api_bool_cluster "ARGS=api -i /rate_limit"
 
+# --jq の値が環境変数を読んでも漏れない（GH_TOKEN は子プロセスの環境に載せない。
+# round 4 の must-fix: `--jq '$ENV.GH_TOKEN'` で review トークンが出力に出た）
+# shellcheck disable=SC2016
+run review_gh_api_jq_env review api /rate_limit --jq '$ENV.GH_TOKEN'
+expect_review_auth review_gh_api_jq_env
+# shellcheck disable=SC2016
+expect_log review_gh_api_jq_env 'ARGS=api /rate_limit --jq $ENV.GH_TOKEN'
+
 run review_gh_issue_view review issue view 1 --json body
+expect_review_auth review_gh_issue_view
 expect_log review_gh_issue_view "ARGS=issue view 1 --json body"
 
 run review_gh_pr_view review pr view 1 --json title
+expect_review_auth review_gh_pr_view
 expect_log review_gh_pr_view "ARGS=pr view 1 --json title"
 
+# pr view の --jq でも環境にトークンが無い
+# shellcheck disable=SC2016
+run review_gh_pr_view_jq_env review pr view 1 --json title --jq '$ENV'
+expect_review_auth review_gh_pr_view_jq_env
+# shellcheck disable=SC2016
+expect_log review_gh_pr_view_jq_env 'ARGS=pr view 1 --json title --jq $ENV'
+
 run review_gh_pr_diff review pr diff 1
+expect_review_auth review_gh_pr_diff
 expect_log review_gh_pr_diff "ARGS=pr diff 1"
 
 run review_gh_pr_checks review pr checks 1 --required
+expect_review_auth review_gh_pr_checks
 expect_log review_gh_pr_checks "ARGS=pr checks 1 --required"
 
 run review_gh_pr_review review pr review 1 --approve --body-file -
+expect_review_auth review_gh_pr_review
 expect_log review_gh_pr_review "ARGS=pr review 1 --approve --body-file -"
 
 # review_deny <name> <args...>: `agent-gh review <args...>` が終了コード 6 で拒否され、
@@ -307,6 +313,17 @@ review_deny() {
   expect_no_calls "$name"
 }
 
+# git は review 名義ではサブコマンドを問わずすべて拒否（round 4。レビュースレッドは
+# main の git を直接読む。読み取り形の引数でも --output・-O・--no-index のような
+# 書き込み・実行・リポジトリ外の読み取りに届く形を引数検査で網羅できないため、
+# サブコマンドごと止める）
+review_deny review_git_show git show HEAD
+review_deny review_git_log git log --oneline
+review_deny review_git_diff git diff HEAD~1
+review_deny review_git_grep git grep -e foo
+review_deny review_git_blame git blame file
+review_deny review_git_grep_noindex git grep --no-index . /path/to/secret
+review_deny review_git_grep_open_abbrev git grep --op=evil foo
 # deny 済みの git 操作や任意実行がラッパー経由で通らない（#256 の実測指摘の形）
 review_deny review_git_switch git switch -c probe
 review_deny review_git_c_alias git -c 'alias.x=!id' x
@@ -325,24 +342,14 @@ review_deny review_auth auth status
 review_deny review_gist gist list
 review_deny review_release release list
 review_deny review_no_args
-# git の承認済みサブコマンドでも、書き込み（--output）・実行（grep の -O、ページャ、
-# 外部 diff、textconv）につながる引数形は拒否する（PR #463 round 2 の must-fix）。
-# 長いオプションは一意な省略形も、短いオプションは束ね書きも拾う
+# 読み取り形に見える引数（書き込み・実行の経路を持つ形）も、git 全拒否で止まる
 review_deny review_git_show_output git show --output=/tmp/x HEAD
 review_deny review_git_log_output git log --output /tmp/x
-review_deny review_git_log_out_abbrev git log --out /tmp/x
 review_deny review_git_grep_pager git grep -Oevil foo
 review_deny review_git_grep_open git grep --open-files-in-pager=evil foo
-review_deny review_git_grep_open_abbrev git grep --open=evil foo
-review_deny review_git_grep_cluster_O git grep -aO evil foo
-review_deny review_git_log_paginate git log --paginate
-review_deny review_git_log_pag_abbrev git log --pag
 review_deny review_git_log_P git log -P
-review_deny review_git_show_cluster_P git show -pP
 review_deny review_git_diff_extdiff git diff --ext-diff
-review_deny review_git_show_ext_abbrev git show --ext
 review_deny review_git_show_textconv git show --textconv
-review_deny review_git_blame_output git blame --output=x HEAD
 
 # api の変更系メソッド・POST を意味する引数形は拒否（GH_TOKEN を持つ review トークンでの書き込みを止める）
 review_deny review_api_patch api -X PATCH /repos/hatai/Pelway/pulls/1
