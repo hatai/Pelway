@@ -20,10 +20,10 @@ use pelway_client_core::input::ImeState;
 use pelway_client_ui::bridge::{DecisionShell, wire_decision_screen, wire_key_actions};
 use pelway_client_ui::i18n::{FluentVars, Messages, apply_translations};
 use pelway_client_ui::theme::{Theme, apply_design_tokens};
-use pelway_client_ui::{KeyRouter, MainWindow};
+use pelway_client_ui::{KeyRouter, MainWindow, TimelineItem, TimelineRowKind};
 use slint::language::PointerEventButton;
 use slint::platform::WindowEvent;
-use slint::{ComponentHandle, Global, Model};
+use slint::{ComponentHandle, Global, Model, ModelRc, VecModel};
 
 /// デモの判断待ちが待ち始めてから 25 分後の時刻（pending_decisions.rs と同じ）。
 const NOW: u64 = 25 * 60 * 1000;
@@ -182,17 +182,44 @@ fn accessibility_roles_labels_focus_and_keys() {
     window.set_data_ai_2_presence("待機中".into());
     window.set_data_ai_3_name("ハル".into());
     window.set_data_ai_3_presence("判断待ち".into());
-    window.set_data_msg1_sender("田中".into());
-    window.set_data_msg1_initial("田".into());
-    window.set_data_msg2_sender("リク".into());
-    window.set_data_msg2_initial("リ".into());
-    window.set_data_msg3_sender("佐藤".into());
-    window.set_data_msg3_initial("佐".into());
-    window.set_data_note_sender("リク".into());
-    window.set_data_note_initial("リ".into());
-    window.set_data_handoff_from_to("ユイ → ハル".into());
-    window.set_data_handoff_title("B社の回答の出し方".into());
-    window.set_data_handoff_acknowledged(false);
+    // 時系列の行（Issue 385 で個別の data-* プロパティは timeline-items
+    // モデルに一本化した）。
+    let base = |kind| TimelineItem {
+        kind,
+        ..TimelineItem::default()
+    };
+    let msg = |sender: &str, is_ai: bool, initial: &str| TimelineItem {
+        sender: sender.into(),
+        is_ai,
+        initial: initial.into(),
+        ..base(TimelineRowKind::Message)
+    };
+    let timeline = Rc::new(VecModel::from(vec![
+        msg("田中", false, "田"),
+        TimelineItem {
+            show_read_range: true,
+            ..msg("リク", true, "リ")
+        },
+        TimelineItem {
+            thread_done: true,
+            ..base(TimelineRowKind::ThreadLead)
+        },
+        base(TimelineRowKind::UnreadMarker),
+        TimelineItem {
+            handoff_from_to: "ユイ → ハル".into(),
+            handoff_title: "B社の回答の出し方".into(),
+            ..base(TimelineRowKind::Handoff)
+        },
+        base(TimelineRowKind::DecisionCard),
+        msg("佐藤", false, "佐"),
+        base(TimelineRowKind::DecisionMark),
+        TimelineItem {
+            kind: TimelineRowKind::PrivateNote,
+            ..msg("リク", true, "リ")
+        },
+        base(TimelineRowKind::ExternalSend),
+    ]));
+    window.set_timeline_items(ModelRc::from(Rc::clone(&timeline)));
     window.set_data_ai_work_name("リク".into());
     window.set_data_ai_work_initial("リ".into());
     // スレッド枠（既定で開いている）の行にも送信者を入れる。
@@ -325,7 +352,20 @@ fn accessibility_roles_labels_focus_and_keys() {
     // 「作業中」: スレッドのまとめ（完了→作業中に切り替え）。
     // 注: Fluent は埋め込み値を双方向分離文字（U+2068/2069）で囲むので、
     // 変数を含む文言は部分一致で確かめる。
+    // 行の状態は timeline-items モデルの行を更新して変える。
+    let update_row = |kind: TimelineRowKind, update: &dyn Fn(&mut TimelineItem)| {
+        let i = (0..timeline.row_count())
+            .find(|&i| timeline.row_data(i).is_some_and(|item| item.kind == kind))
+            .expect("その行種の行があること");
+        let mut item = timeline.row_data(i).expect("行があること");
+        update(&mut item);
+        timeline.set_row_data(i, item);
+    };
     window.set_data_msg2_thread_done(false);
+    update_row(TimelineRowKind::ThreadLead, &|item| {
+        item.thread_done = false;
+        item.thread_working = true;
+    });
     settle();
     assert!(
         any_label(&window, |l| l.contains("作業中") && l.contains("濱田")),
@@ -336,7 +376,7 @@ fn accessibility_roles_labels_focus_and_keys() {
         "完了→作業中の切り替えで「完了」表示が（可視のまま）残らないこと"
     );
     // 「送信済み」: 社外送信カードの送信後の表示。
-    window.set_data_ext_sent(true);
+    update_row(TimelineRowKind::ExternalSend, &|item| item.ext_sent = true);
     settle();
     assert!(
         any_label(&window, |l| l.contains("送信")
@@ -344,14 +384,18 @@ fn accessibility_roles_labels_focus_and_keys() {
         "送信済みの表示が画面のテキストとして存在すること"
     );
     // 受領済みに切り替える（「受領 · {名前} {時刻}」の表示）。
-    window.set_data_handoff_acknowledged(true);
+    update_row(TimelineRowKind::Handoff, &|item| {
+        item.handoff_acknowledged = true
+    });
     settle();
     assert!(
         any_label(&window, |l| l.starts_with("受領 ·")),
         "受領済みの表示が画面のテキストとして存在すること"
     );
-    window.set_data_ext_sent(false);
-    window.set_data_handoff_acknowledged(false);
+    update_row(TimelineRowKind::ExternalSend, &|item| item.ext_sent = false);
+    update_row(TimelineRowKind::Handoff, &|item| {
+        item.handoff_acknowledged = false
+    });
     settle();
 
     // ---- 支援技術の既定操作（activate）で部品が動く ----
