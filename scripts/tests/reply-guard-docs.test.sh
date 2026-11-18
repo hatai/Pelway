@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 技術仕様の出口検査節（Issue #196）の必須文言を固定するテスト（wording pin）。
+# 技術仕様の出口検査節（Issue #196。#440 で round 4 レビューの must-fix を反映）の
+# 必須文言を固定するテスト（wording pin）。
 # 位置づけ: このスクリプトは「必須文言が docs/technical.md に存在する」という観測可能な
 # 事実だけを確かめる決定的な検査であり、受け入れ条件の意味や仕様の整合性は評価しない
 # （AGENTS.md「LLM judges」: 自然言語の意味の評価は rubric 付きの LLM judge が担い、
@@ -21,6 +22,14 @@ check() {
       failures+=("$name: $file に無い: $p")
     fi
   done
+}
+
+# check_absent <name> <file> <pattern> — pattern が file に無ければ合格。
+check_absent() {
+  local name="$1" file="$2" pattern="$3"
+  if grep -qF "$pattern" "$ROOT/$file"; then
+    failures+=("$name: $file に残っている: $pattern")
+  fi
 }
 
 # 条件1: 出口検査の対象パターン（漏洩系・形式の異常系・暴走系）の一覧が仕様に明記されている。
@@ -79,6 +88,28 @@ check cond3_relief docs/technical.md \
 # 出典の明記（採用する方式が CircleChat 由来であること）。
 check source_circlechat docs/technical.md \
   'CircleChat'
+
+# #440（PR #414 round 4 レビューの must-fix 反映）: 漏洩系のうち誤検出の少ないパターンは
+# 発言の文中一致でも検出する（先頭固定・発言全体の条件は漏洩系には適用しない。
+# 添付の内容も同じ規則）。
+check cond440_leak_midtext docs/technical.md \
+  '発言の文中一致でも検出します' \
+  '漏洩系には適用しません' \
+  '同じ規則です'
+# #440: フェンス囲みの短いコード片・ログの引用の除外は、形式の異常系の大量貼り付けの
+# 検査に限定（漏洩系・暴走系の検査は免除しない）。
+check cond440_fence_scope docs/technical.md \
+  '大量貼り付けの検査から外します' \
+  '漏洩系・暴走系の検査は免除しません'
+# #440: 監査ログの記録項目は理由コードと本文・添付の内容hashだけに縮小
+# （時刻・対象チャンネル・Bot は記録しない）。
+check cond440_audit_minimal docs/technical.md \
+  '本文と添付の内容hashだけ'
+check_absent cond440_audit_no_ops_metadata docs/technical.md \
+  '・時刻・対象チャンネル・Botだけ'
+# #440: 暗号化添付の hash の比較対象を未決事項に足す。
+check cond440_hash_compare_target docs/technical.md \
+  '暗号化添付の「hashが一致」の比較対象'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
