@@ -194,6 +194,12 @@ component DemoBannerView inherits Rectangle {
             horizontal-stretch: 0;
             label: root.tr-ai-badge;
         }
+        // 余りを受ける要素を 1 つ置く。行の全要素が stretch 0 のとき
+        // Slint は余りを等分に配るため、受け手が無いとバッジが帯状に
+        // 伸びて名前の直後に来なくなる（Issue 381 レビュー指摘）。
+        Rectangle {
+            horizontal-stretch: 1;
+        }
     }
 }
 
@@ -294,6 +300,8 @@ component RailAiRow inherits Rectangle {
             font-size: 10px;
             vertical-alignment: center;
             horizontal-alignment: right;
+            // 行の余りは右寄せの在席表示が受け、バッジは名前の直後に留まる。
+            horizontal-stretch: 1;
         }
     }
 }
@@ -579,6 +587,8 @@ component PendingDecisionRow inherits Rectangle {
                     font-size: 11px;
                     vertical-alignment: center;
                     horizontal-alignment: right;
+                    // 行の余りは右寄せの待ち時間が受け、バッジは名前の直後に留まる。
+                    horizontal-stretch: 1;
                 }
             }
             Text {
@@ -801,6 +811,8 @@ component MessageRow inherits Rectangle {
                     color: DesignTokens.mute;
                     font-size: 11px;
                     vertical-alignment: center;
+                    // 行の余りは時刻が受け、バッジは名前の直後に留まる。
+                    horizontal-stretch: 1;
                 }
             }
             Text {
@@ -934,6 +946,11 @@ component DecisionCardView inherits Rectangle {
                     horizontal-stretch: 0;
                     label: root.tr-ai-badge;
                 }
+                // 行の余りは空の要素が受け、バッジは名前の直後に留まる
+                // （全要素が stretch 0 の行では余りが等分に配られるため）。
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
             }
         }
         if !root.data-requester-is-ai : HorizontalLayout {
@@ -960,6 +977,10 @@ component DecisionCardView inherits Rectangle {
                     font-size: 11px;
                     vertical-alignment: center;
                     horizontal-alignment: right;
+                }
+                // 同上: 人の行でも余りを受ける要素を 1 つ置く。
+                Rectangle {
+                    horizontal-stretch: 1;
                 }
             }
         }
@@ -1140,6 +1161,10 @@ component PrivateNoteRow inherits Rectangle {
                     if root.data-is-ai : AiBadgeView {
                         horizontal-stretch: 0;
                         label: root.tr-ai-badge;
+                    }
+                    // 同上: 行の余りは空の要素が受ける。
+                    Rectangle {
+                        horizontal-stretch: 1;
                     }
                 }
                 Text {
@@ -1683,6 +1708,8 @@ component AiWorkPaneView inherits Rectangle {
                 text: root.tr-pane-back-to-thread;
                 vertical-alignment: center;
                 horizontal-alignment: right;
+                // 行の余りは右寄せの戻る導線が受け、バッジは名前の直後に留まる。
+                horizontal-stretch: 1;
                 touched => { root.back-pressed(); }
             }
         }

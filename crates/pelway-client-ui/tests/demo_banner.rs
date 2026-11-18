@@ -113,6 +113,47 @@ fn descendant_labels(el: &ElementHandle) -> Vec<String> {
         .collect()
 }
 
+/// `row` の中の `badge` が、直前の要素（名前など）の `spacing` 分だけ右に、
+/// 中身相当の幅で出ていることを確かめる。Slint のレイアウトは一行の
+/// 全要素が stretch 0 のとき余りを等分に配るため、余りを受ける要素が
+/// 無い行ではバッジが帯状に伸びて名前の直後から外れる（Issue 381 レビュー）。
+fn assert_badge_packed(row: &ElementHandle, badge: &ElementHandle, spacing: f32, lang: &str) {
+    let size = badge.size();
+    assert!(
+        size.width > 4.0 && size.width < 40.0,
+        "{lang} のバッジは中身相当の幅で出ること（行の余りを分け取らない）: w={}",
+        size.width
+    );
+    let badge_pos = badge.absolute_position();
+    let badge_left = badge_pos.x;
+    // バッジと同じ行（縦に重なる）の要素だけを直前の候補にする。行の上・下の
+    // 要素も `row` の子孫に含まれるため、縦の重なりで絞らないと別の行の
+    // 要素の右端を「直前」と取り違える。
+    let badge_top = badge_pos.y;
+    let badge_bottom = badge_pos.y + size.height;
+    let prev_right = row
+        .query_descendants()
+        .find_all()
+        .iter()
+        .filter(|e| {
+            let p = e.absolute_position();
+            let s = e.size();
+            p.y < badge_bottom && p.y + s.height > badge_top
+        })
+        .map(|e| e.absolute_position().x + e.size().width)
+        .filter(|right| *right <= badge_left + 0.5)
+        .fold(f32::MIN, f32::max);
+    assert!(
+        prev_right.is_finite(),
+        "{lang} のバッジの左に直前の要素があること"
+    );
+    let gap = badge_left - prev_right;
+    assert!(
+        (gap - spacing).abs() <= 2.0,
+        "{lang} のバッジは直前の要素（名前など）の spacing 分だけ右に出ること: gap={gap} spacing={spacing}"
+    );
+}
+
 /// 常時バナー・AI バッジの検査（窓はこのテストでだけ作る。ja/en・今日/チャンネル・
 /// 判断カード・AI の作業の枠・狭い幅を順に確かめる）。
 #[test]
@@ -161,6 +202,13 @@ fn persistent_display_end_to_end() {
                     .is_none(),
                 "{lang} の常時バナーに閉じる・消す操作が無いこと"
             );
+            // バナーのバッジも pill の直後に中身相当の幅で出る（spacing: 8px）。
+            let badge = banner
+                .query_descendants()
+                .match_type_name("AiBadgeView")
+                .find_first()
+                .unwrap_or_else(|| panic!("{lang} のバナーに「{badge_text}」バッジが見えること"));
+            assert_badge_packed(banner, &badge, 8.0, lang);
         }
 
         // ---- 幅 360px 相当でも文言を省略せず、最大 2 行で全体が見える ----
@@ -230,6 +278,11 @@ fn persistent_display_end_to_end() {
             1,
             "{lang} の判断カードの AI 依頼者に「{badge_text}」バッジが出ること"
         );
+        // 依頼者名の直後に中身相当の幅で出る（依頼者行の spacing: 6px）。
+        let card = ElementHandle::find_by_element_id(&window, "ChannelView::decision-card")
+            .next()
+            .expect("判断カードが見えること");
+        assert_badge_packed(&card, &card_badges[0], 6.0, lang);
 
         // メッセージの行（チャンネル 3 件＋スレッドの枠 2 件）は型名で探せる
         // （複数回使う部品は型名が残る）。「あなただけに表示」の行は 1 回しか
@@ -249,13 +302,16 @@ fn persistent_display_end_to_end() {
             let badges = row
                 .query_descendants()
                 .match_type_name("AiBadgeView")
-                .find_all()
-                .len();
+                .find_all();
             assert_eq!(
-                badges,
+                badges.len(),
                 if is_ai_row { 1 } else { 0 },
                 "{lang} の MessageRow（{labels:?}）は AI の行だけ「{badge_text}」バッジが出ること"
             );
+            if is_ai_row {
+                // 送信者名の直後に中身相当の幅で出る（行の spacing: 6px）。
+                assert_badge_packed(row, &badges[0], 6.0, lang);
+            }
         }
         let notes = find_growing(&window, 1, |w| {
             ElementHandle::find_by_element_id(w, "ChannelView::private-note").collect()
@@ -265,15 +321,17 @@ fn persistent_display_end_to_end() {
             1,
             "{lang} の「あなただけに表示」の行があること"
         );
+        let note_badges = notes[0]
+            .query_descendants()
+            .match_type_name("AiBadgeView")
+            .find_all();
         assert_eq!(
-            notes[0]
-                .query_descendants()
-                .match_type_name("AiBadgeView")
-                .find_all()
-                .len(),
+            note_badges.len(),
             1,
             "{lang} の「あなただけに表示」の AI の行に「{badge_text}」バッジが出ること"
         );
+        // 送信者名の直後に中身相当の幅で出る（行の spacing: 6px）。
+        assert_badge_packed(&notes[0], &note_badges[0], 6.0, lang);
 
         // レールの AI 一覧の各行にもバッジが出る（AI メンバーの名前一覧）。
         let rail_rows = find_growing(&window, 3, |w| {
@@ -285,14 +343,17 @@ fn persistent_display_end_to_end() {
             "{lang} のレールに AI の行が 3 件あること"
         );
         for row in &rail_rows {
+            let badges = row
+                .query_descendants()
+                .match_type_name("AiBadgeView")
+                .find_all();
             assert_eq!(
-                row.query_descendants()
-                    .match_type_name("AiBadgeView")
-                    .find_all()
-                    .len(),
+                badges.len(),
                 1,
                 "{lang} のレールの AI の行に「{badge_text}」バッジが出ること"
             );
+            // 名前の直後に中身相当の幅で出る（行の spacing: 10px）。
+            assert_badge_packed(row, &badges[0], 10.0, lang);
         }
 
         // 今日画面の「自分の判断待ち」の行（依頼者が AI）にもバッジが出る。
@@ -306,15 +367,17 @@ fn persistent_display_end_to_end() {
             1,
             "{lang} の今日画面に判断待ちの行が 1 件あること"
         );
+        let pending_badges = pending[0]
+            .query_descendants()
+            .match_type_name("AiBadgeView")
+            .find_all();
         assert_eq!(
-            pending[0]
-                .query_descendants()
-                .match_type_name("AiBadgeView")
-                .find_all()
-                .len(),
+            pending_badges.len(),
             1,
             "{lang} の判断待ちの AI 依頼者に「{badge_text}」バッジが出ること"
         );
+        // 依頼者名の直後に中身相当の幅で出る（行の spacing: 8px）。
+        assert_badge_packed(&pending[0], &pending_badges[0], 8.0, lang);
 
         // AI の作業の枠にもバッジが出る。
         window.set_show_today(false);
@@ -335,6 +398,11 @@ fn persistent_display_end_to_end() {
             1,
             "{lang} の AI の作業の枠に「{badge_text}」バッジが出ること"
         );
+        // アバターの直後に中身相当の幅で出る（枠の見出し行の spacing: 10px）。
+        let pane = ElementHandle::find_by_element_id(&window, "MainWindow::ai-work-pane")
+            .next()
+            .expect("AI の作業の枠が見えること");
+        assert_badge_packed(&pane, &pane_badges[0], 10.0, lang);
         window.set_right_pane_ai_work(false);
         settle();
 
@@ -358,6 +426,13 @@ fn persistent_display_end_to_end() {
             assert!(
                 labels.iter().all(|l| !l.contains(&badge_text)),
                 "{lang} のバッジは見える文字の「{badge_text}」を読み上げ名にしないこと: {labels:?}"
+            );
+            // どのバッジも中身相当の幅で出る（行の余りを分け取って帯状に
+            // 伸びることがない）。
+            assert!(
+                badge.size().width > 4.0 && badge.size().width < 40.0,
+                "{lang} のバッジは中身相当の幅で出ること: w={}",
+                badge.size().width
             );
         }
     }
