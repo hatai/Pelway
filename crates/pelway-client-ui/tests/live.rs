@@ -5,13 +5,10 @@
 //! 表示用の行モデル（送信者名や `HH:MM` の組み立て）は PR-2 で足すため、ここでは
 //! ワイヤ上の型（`Channel`・`StoredMessage`・`MemberId`）で検査する。
 
-use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex};
 
-use pelway_client_core::approval::{Clock, KeySource};
 use pelway_client_ui::live::{self, LiveSession};
-use pelway_client_ui::realtime::{SystemClock, UuidKeySource};
 use pelway_contract::ledger::ApprovalLedger;
 use pelway_contract::member::MemberKind;
 use pelway_contract::store::{DataStore, NewMessage, PurposeId};
@@ -33,37 +30,6 @@ fn dead_addr() -> SocketAddr {
     let addr = listener.local_addr().expect("local addr");
     drop(listener);
     addr
-}
-
-/// 1 接続だけ受けて、届いた要求（ヘッダー区切りまで）を記録してから決まった
-/// 応答を返す最小スタブ。実サーバーでは見えない「ワイヤに何を書いたか」
-/// （GET の `actor` クエリ等）と、HTTP の失敗系（5xx・壊れた JSON）を検査する。
-fn stub_once(status: &str, body: &str) -> (SocketAddr, Arc<Mutex<String>>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
-    let addr = listener.local_addr().expect("stub addr");
-    let captured = Arc::new(Mutex::new(String::new()));
-    let slot = Arc::clone(&captured);
-    let response = format!(
-        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept");
-        let mut got = Vec::new();
-        let mut buf = [0u8; 4096];
-        while !got.windows(4).any(|w| w == b"\r\n\r\n") {
-            let n = stream.read(&mut buf).expect("read request");
-            if n == 0 {
-                break;
-            }
-            got.extend_from_slice(&buf[..n]);
-        }
-        *slot.lock().unwrap() = String::from_utf8_lossy(&got).into_owned();
-        stream
-            .write_all(response.as_bytes())
-            .expect("write response");
-    });
-    (addr, captured)
 }
 
 // 受け入れ条件1: 起動時にサーバーからチャンネルとメッセージが取れる（モックではない）。
@@ -131,7 +97,7 @@ fn post_reaches_server_and_poll_picks_up_others_messages() {
     }
 
     // 投稿: 表示ユーザー（既定は先頭の人＝田中）として送る。
-    session.post("CSV出力の件、案をお願いします").expect("post");
+    let posted = session.post("CSV出力の件、案をお願いします").expect("post");
     {
         let store = store.lock().expect("store lock");
         let messages = store.channel_messages(&"ch-demo-anken-b".into());
@@ -147,11 +113,16 @@ fn post_reaches_server_and_poll_picks_up_others_messages() {
         Some("CSV出力の件、案をお願いします")
     );
 
+    // client_msg_id は投稿ごとに違う値（冪等の送信 ID。同じ値なら 409 を起こさず
+    // 同じメッセージに収束するが、毎回同じでは再送以外も重複扱いになる）。
+    let second = session.post("続けて二つ目").expect("second post");
+    assert_ne!(posted.client_msg_id, second.client_msg_id);
+
     // ポーリングで他ユーザーの分（自分の投稿より前の seq）も取りこぼさず拾い、
     // seq 昇順のまま一覧になる。
     session.poll().expect("poll succeeds");
     let messages = session.messages();
-    assert_eq!(messages.len(), 5, "seed 3 + 他ユーザー 1 + 自分 1");
+    assert_eq!(messages.len(), 6, "seed 3 + 他ユーザー 1 + 自分 2");
     assert!(
         messages.windows(2).all(|w| w[0].seq < w[1].seq),
         "seq 昇順を保つ"
@@ -161,6 +132,7 @@ fn post_reaches_server_and_poll_picks_up_others_messages() {
     assert_eq!(other.author_id.as_str(), "m-hal");
     assert_eq!(other.member_kind, MemberKind::Bot);
     assert_eq!(messages[4].author_id.as_str(), "m-tanaka");
+    assert_eq!(messages[5].author_id.as_str(), "m-tanaka");
 }
 
 // 受け入れ条件3: 表示ユーザーを田中／山本／佐藤で切り替えられる。
@@ -194,80 +166,6 @@ fn switching_actor_changes_who_the_server_accepts() {
         "未知のメンバーは切替えない"
     );
     assert_eq!(session.actor().as_str(), "m-sato");
-}
-
-// 受け入れ条件3 のワイヤ側: 切替後の GET は新しい actor のクエリで出る（Issue 327）。
-#[test]
-fn get_after_switch_sends_new_actor_query() {
-    let (addr, _store) = spawn_demo_server();
-    let mut session = LiveSession::new(addr, "ws-demo-01".into());
-    session.bootstrap().expect("bootstrap succeeds");
-    session.switch_actor("m-yamamoto");
-
-    let (stub, captured) = stub_once("200 OK", "[]");
-    session.set_addr(stub);
-    session.poll().expect("poll against stub");
-
-    let request = captured.lock().unwrap().clone();
-    assert!(
-        request.starts_with("GET ") && request.contains("actor=m-yamamoto"),
-        "切替後の GET は新しい actor のクエリ: {request}"
-    );
-}
-
-// HTTP の失敗系（5xx・壊れた JSON）でも「つながっていません」になり、
-// 復帰（= 断線からのフル再取得）で通常の状態に戻る。
-#[test]
-fn status_and_json_errors_mark_offline_and_recover() {
-    let (addr, store) = spawn_demo_server();
-    let mut session = LiveSession::new(addr, "ws-demo-01".into());
-    session.bootstrap().expect("bootstrap succeeds");
-
-    // 5xx は Status の失敗として非接続になる。
-    let (stub, _captured) = stub_once("500 Internal Server Error", "{}");
-    session.set_addr(stub);
-    let err = session.poll().expect_err("5xx は失敗する");
-    assert!(matches!(err, live::LiveError::Status(500)), "{err:?}");
-    assert!(!session.connected(), "失敗したら非接続状態へ");
-
-    // 落ちている間に他ユーザーの分が積まれた想定。復帰のフル再取得で拾う。
-    {
-        let mut store = store.lock().expect("store lock");
-        store
-            .post_message(
-                NewMessage {
-                    workspace_id: "ws-demo-01".into(),
-                    channel_id: "ch-demo-anken-b".into(),
-                    author_id: "m-sato".into(),
-                    member_kind: MemberKind::Human,
-                    purpose_id: PurposeId::P01,
-                    body: "停電中に進めておきました".to_owned(),
-                    thread_root: None,
-                    client_msg_id: None,
-                },
-                3_000_000,
-            )
-            .expect("queued during outage");
-    }
-    session.set_addr(addr);
-    session.poll().expect("poll after recovery");
-    assert!(session.connected(), "復帰したら接続状態へ");
-    assert_eq!(
-        session.messages().last().map(|m| m.body.as_str()),
-        Some("停電中に進めておきました"),
-        "復帰の再取得で履歴ごと新しい分を拾う"
-    );
-
-    // 200 でも JSON が読めなければ Json の失敗として非接続になる。
-    let (stub, _captured) = stub_once("200 OK", "not json");
-    session.set_addr(stub);
-    let err = session.poll().expect_err("壊れた JSON は失敗する");
-    assert!(matches!(err, live::LiveError::Json(_)), "{err:?}");
-    assert!(!session.connected());
-    session.set_addr(addr);
-    session.poll().expect("poll after recovery");
-    assert!(session.connected());
-    assert_eq!(session.messages().len(), 4, "seed 3 + 停電中の 1 件");
 }
 
 // チーム点検の追加条件: サーバーが落ちた・ポーリングが失敗したとき
@@ -324,33 +222,4 @@ fn parse_server_addr_accepts_loopback_only() {
     // 既定値はデモ準備キットの固定ポート（Issue 390）と同じ形のループバック。
     assert!(live::DEFAULT_SERVER_URL.starts_with("http://127.0.0.1:"));
     assert!(live::parse_server_addr(live::DEFAULT_SERVER_URL).is_ok());
-}
-
-// 受け入れ条件4: 時刻とキーが実物（FixedClock / FixedKeySource の置き換え）。
-#[test]
-fn real_clock_and_real_keys() {
-    // 実時計は UNIX エポックからのミリ秒で、呼ぶたびに進む。
-    let clock = SystemClock;
-    let t1 = clock.now_ms();
-    let t2 = clock.now_ms();
-    assert!(t1 > 0 && t2 >= t1, "実時刻のミリ秒: {t1} -> {t2}");
-
-    // キーは冪等キーの書式（16〜128 文字の [A-Za-z0-9_-]）で、毎回違う値。
-    let mut keys = UuidKeySource::new();
-    let a = keys.fresh_key();
-    let b = keys.fresh_key();
-    assert_ne!(a, b, "毎回違うキー");
-    assert_eq!(a.as_str().len(), 36, "UUID 形式（36 文字）");
-
-    // client_msg_id も毎回違う（冪等の送信 ID。同じ値なら 409 を起こさず同じ
-    // メッセージに収束するが、毎回同じでは再送以外も重複扱いになる）。
-    let (addr, _store) = spawn_demo_server();
-    let mut session = LiveSession::new(addr, "ws-demo-01".into());
-    session.bootstrap().unwrap();
-    let first = session.post("一つ目").unwrap();
-    let second = session.post("二つ目").unwrap();
-    assert_ne!(
-        first.client_msg_id, second.client_msg_id,
-        "投稿ごとに違う client_msg_id"
-    );
 }

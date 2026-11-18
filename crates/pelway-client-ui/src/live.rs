@@ -24,7 +24,6 @@ use pelway_contract::message::{
 use pelway_contract::store::StoredMessage;
 
 use crate::net::{Client, NetError};
-use crate::realtime::fresh_client_msg_id;
 
 /// 接続先を読む環境変数（Issue 390 の準備キットが export する値と同じ形）。
 pub const SERVER_URL_ENV: &str = "PELWAY_SERVER_URL";
@@ -120,8 +119,6 @@ pub struct LiveSession {
     /// 表示ユーザー（GET の `actor`・POST の `x-pelway-member-id`）。
     actor: MemberId,
     actor_kind: MemberKind,
-    /// 直近の一覧に出たチャンネル（レールの表示用）。
-    channels: Vec<Channel>,
     /// 表示中のチャンネル（最初に見つかったものを選ぶ）。
     channel: Option<Channel>,
     /// 表示中のチャンネルのメッセージ（seq 昇順）。
@@ -140,7 +137,6 @@ impl LiveSession {
             workspace_id,
             actor: MemberId::from(DEFAULT_ACTOR),
             actor_kind: MemberKind::Human,
-            channels: Vec::new(),
             channel: None,
             messages: Vec::new(),
             connected: false,
@@ -167,7 +163,6 @@ impl LiveSession {
         let Some(channel_id) = channels.first().map(|c| c.channel_id.clone()) else {
             // 再取得でチャンネルが無くなっていたら選択を捨てる
             // （古い channel/messages を残すと投稿・ポーリングが幽霊チャンネルを指す）。
-            self.channels = channels;
             self.channel = None;
             self.messages.clear();
             return Ok(());
@@ -195,7 +190,6 @@ impl LiveSession {
             channel_messages_path(&channel_id),
             self.actor.as_str()
         ))?;
-        self.channels = channels;
         self.channel = Some(channel);
         self.messages = messages;
         Ok(())
@@ -241,7 +235,7 @@ impl LiveSession {
             return Err(LiveError::NoChannel);
         };
         let request = PostMessageRequest {
-            client_msg_id: ClientMsgId::from(fresh_client_msg_id().as_str()),
+            client_msg_id: ClientMsgId::from(uuid::Uuid::new_v4().to_string().as_str()),
             body: body.to_owned(),
             thread_root: None,
         };
@@ -287,13 +281,6 @@ impl LiveSession {
     #[must_use]
     pub fn connected(&self) -> bool {
         self.connected
-    }
-
-    /// チャンネルが選ばれているか（`bootstrap` がまだ成功していないなら `false`。
-    /// 起動時にサーバーへつながらなかった場合の再取得の判定に使う）。
-    #[must_use]
-    pub fn has_channel(&self) -> bool {
-        self.channel.is_some()
     }
 
     /// 表示中のチャンネル（`bootstrap` がまだ成功していないなら `None`）。

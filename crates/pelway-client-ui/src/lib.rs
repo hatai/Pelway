@@ -25,7 +25,6 @@ pub mod bridge;
 pub mod i18n;
 pub mod live;
 pub mod net;
-pub mod realtime;
 pub mod state;
 pub mod testkit;
 pub mod theme;
