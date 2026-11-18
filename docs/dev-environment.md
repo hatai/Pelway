@@ -226,7 +226,7 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 | socat | Claude Code の sandbox（Linux）が使う。`mise.toml` の `conda:socat` で `mise install`（`mise bootstrap`）が入れる。apt と sudo は要らない |
 | ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
 
-`scripts/agent-gh` 自身も `review` 名義で同じ境界を持つ: 実行できるサブコマンドは gh が `api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`、git が `show`・`diff`・`log`・`grep`・`blame` に限られ、それ以外はトークンを発行せず終了コード 6 で拒否される。判定はサブコマンド単位で、`api` の `-F`・`--body-file` によるファイル送信や `git` の `--output`・`-O` による書き込み・実行は別 Issue（#305・#306）で追う。
+`scripts/agent-gh` 自身も `review` 名義の実行をサブコマンド単位で制限する（権限設定側の境界とは別層で、許可集合は設定表と同一ではない: ラッパー経由の `git` は `blame` も許可する）: 実行できるのは gh の `api`（GET のみ。`-X`/`--method` で GET 以外を指定する形と `-f`/`--field`・`-F`/`--raw-field`・`--input` のような body を付けて POST になる形は拒否）・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review` と git の `show`・`diff`・`log`・`grep`・`blame`。それ以外はトークンを発行せず終了コード 6 で拒否する。読み取り系 `git` の `--output`・`-O` による書き込み・実行は別 Issue（#306）で追う。
 
 運用に入る前に、`auto-accept-edits` のスレッドで次を確かめる。確かめるまでは `claude_review` を使わない。
 
@@ -249,7 +249,7 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 
 残っている既知の経路は hatai の決裁で別 Issue で追う（PR #287 の round 4 で両レビュー担当が request-changes として指摘し、hatai が残リスクを受容）:
 
-- `api -F <key>=@<file>`・`pr review --body-file <file>` で読み取り可能なローカルファイルを GitHub へ送信できる（#305）
+- `api -F <key>=@<file>`・`pr review --body-file <file>` で読み取り可能なローカルファイルを GitHub へ送信できる（#305。`agent-gh review` の `api` が GET 限定になったため `-F`/`--raw-field`/`--input` の形は wrapper が拒否する。残る経路は `pr review --body-file` と、読んだ内容をレビュー本文へ直接書く形）
 - 読み取り系 `git` の `--output=<path>` での書き込みと `git grep -O<cmd>` での実行が、sandbox が worktree・共有 `.git` への書き込みを許すことと重なって残る（#306）
 
 ## レビュー担当の Devin CLI（devin_review）

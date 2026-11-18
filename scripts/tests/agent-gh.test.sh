@@ -234,6 +234,16 @@ run review_gh_api review api /rate_limit
 expect_log review_gh_api "GH_TOKEN=review-token"
 expect_log review_gh_api "ARGS=api /rate_limit"
 
+# api は GET のみ許可（PR #463 round 1 の must-fix）。明示の GET・読み取り系フラグは通す
+run review_gh_api_get review api -X GET /rate_limit
+expect_log review_gh_api_get "ARGS=api -X GET /rate_limit"
+
+run review_gh_api_method_get review api --method get /rate_limit
+expect_log review_gh_api_method_get "ARGS=api --method get /rate_limit"
+
+run review_gh_api_readflags review api --paginate -H 'Accept: x' -q '.a' /rate_limit
+expect_log review_gh_api_readflags "ARGS=api --paginate -H Accept: x -q .a /rate_limit"
+
 run review_gh_issue_view review issue view 1 --json body
 expect_log review_gh_issue_view "ARGS=issue view 1 --json body"
 
@@ -278,6 +288,19 @@ review_deny review_auth auth status
 review_deny review_gist gist list
 review_deny review_release release list
 review_deny review_no_args
+# api の変更系メソッド・POST を意味する引数形は拒否（GH_TOKEN を持つ review トークンでの書き込みを止める）
+review_deny review_api_patch api -X PATCH /repos/hatai/Pelway/pulls/1
+review_deny review_api_delete api -X DELETE /repos/hatai/Pelway/pulls/1
+review_deny review_api_post api -X POST /repos/hatai/Pelway/issues
+review_deny review_api_method_put api --method PUT /x
+review_deny review_api_method_eq api --method=POST /x
+review_deny review_api_short_inline api -XDELETE /x
+review_deny review_api_method_missing api -X
+review_deny review_api_field api -f query='{ viewer }' graphql
+review_deny review_api_raw_field api -F 'key=@/etc/passwd' /x
+review_deny review_api_raw_field_long api --raw-field 'x=1' /x
+review_deny review_api_field_long api --field 'x=1' /x
+review_deny review_api_input api --input /tmp/body.json /x
 
 # dev 名義はこれまでどおり制限されない
 run dev_git_unrestricted dev git switch -c probe
