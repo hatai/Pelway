@@ -164,11 +164,13 @@ fn timeline_materializes_only_visible_rows_and_stacks_them_at_their_heights() {
     let (window, log) = window_with_log();
     window.set_timeline_items(ModelRc::new(VecModel::from(synthetic_items(10_000))));
 
-    // 測定の直前に記録を空にして軽くスクロールし直すと、記録には
-    // いま実体化している行の行番号だけが残る。
+    // 測定の直前に記録を空にしてからスクロールし直すと、記録には
+    // いま実体化している行の行番号だけが残る。小さなスクロールでは
+    // 行が入れ替わらず記録が増えない境界があり得るため（CI で再現）、
+    // 画面ぶん以上めくって実体化する行をまるごと入れ替える。
     scroll(&window, -300.0);
     log.rows.lock().expect("記録のロック").clear();
-    scroll(&window, -40.0);
+    scroll(&window, -900.0);
     let rows = materialized_rows(&window);
     let recorded = recorded_rows(&log);
 
