@@ -71,3 +71,6 @@ menu-help = Help
 menu-about = About This App
 about-title = About This App
 about-close = Close
+## Role names for screen readers (Issue 379, used in accessible-label)
+ai-bot-label = AI staff
+person-label = person

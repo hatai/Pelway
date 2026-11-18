@@ -58,5 +58,41 @@
    - `mise run verify` が main 由来の `docs/worklogs/issue-220.md` の `BRE`（基本正規表現の意図的な略号）で落ちたため、typos.toml の `extend-words` に `bre` を追加（同ファイルの既存パターンに従う）。
 3. 足りなかった情報・検証手段: `custom_base_url_allowed` の unit test を pure.rs にも置くか迷ったが、runner.rs の `from_vars` 経由の検証で loopback/http/https/非URL の 4 分岐を覆えているため重複は置かなかった。
 4. 改善案: `typos.toml` の extend-words コメントに「略号か造語かを書く」ルールがあると次回の判断が速い。
+## 実装者メモ（round 2 / PR-2）
+
+対象 head: `4a2c9989dc47d50ea840dcb41cadb12d506ab85a`（ブランチ `agent/330b-ab-real-llm`。base は PR-1 の署名付き head `fec2c5b`。署名付替え前のローカルコミットは `3e1c1d7`。実装はモノリス `25030ea` の分解から抽出）
+
+1. 詰まった箇所:
+   - モノリス版からの抽出で `runner.rs`/`lib.rs` の削除範囲を行番号で消した際、`stop_reason` フィールドと構造体の閉じ括弧まで消してしまいコンパイルエラーになった（PR-3 の下書き系と PR-2 の残存部分が隣接しているため）。以後は範囲削除後に grep で残存参照を確認してから `cargo check` する手順にした。
+   - `RunnerConfig` に `llm_basis`/`llm_timeout` を加えたため、main 由来の構築箇所（`pelway-http/tests/runner_mention.rs`）が初期化子不足で落ちた。デモ既定の P06・30 秒を明示して追従。
+   - `mise run verify` の `scripts/tests/conductor-watch-ensure.test.sh` が環境依存で不安定（実行ごとに別のアサーションが落ちる。クレートの変更とは無関係の watch プロセス管理テスト）。変更クレートの check/clippy/test は全緑。
+2. 曖昧だった文: 前記同様「実 LLM（GLM）に接続し…実物で動かす」（Issue #330 本文「目的」）
+3. 仮定と解釈:
+   - 失敗の分類は「検証失敗（`LlmError::Invalid`・スキーマ不適合）のみ1回再試行。その他（送信不可・拒否・タイムアウト・結果不明）は再試行せず即フォールバック」とした（Issue の「Invalid 応答は1回だけ再試行」に合わせた）。
+   - タイムアウトは `RunnerConfig.llm_timeout` で runner 側が `tokio::time::timeout` する（呼び出しスレッド内で current-thread ランタイムを都度立てる。runner は同期 API のため）。実提供元側の HTTP タイムアウト（`DemoLlmConfig.timeout`）とは別枠。
+   - フォールバックは Stopped を経由せず「台本の応答で進めます」の進捗行 → 台本 A/B で判断待ち作成、にした（デモを止めない Issue の意図。停止が必要なら判断待ちの決定者側で制御できる）。
+4. 足りなかった情報・検証手段:
+   - 実 z.ai への接続確認はこの環境（GitHub 到達のみ）では未実施。`tests/real_llm.rs`（既定 ignored）を `mise exec -- fnox exec -- cargo test -p pelway-runner --test real_llm -- --ignored` で手動確認する手順を dev-environment.md に記載済み。
+   - `mise run verify` 全体は conductor-watch-ensure の既存不安定で赤になることがある（本変更の追加失敗なし）。
+5. 改善案:
+   - `conductor-watch-ensure.test.sh` の不安定ケース（extra leader present / foreign watch present / ensure restarts watch）を待ち合わせで安定化するか、verify から外して別枠で定期実行する。
+   - `ScriptGateway` の応答選択が PR-1 時点で required=subject による下書き判定を残していた（PR-3 で下書き台本を戻す設計だが、PR-2 の単体では A/B 固定返しの方が分かりやすい）。PR-2 では A/B 固定に簡素化済み。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）
+
+## 実装者メモ（round 2 修正 / PR-2）
+
+対象 head: `7ee05f1`（ブランチ `agent/330b-ab-real-llm`。Claude レビュー round 1 の must-fix への対応。レビュー対象は `e0177bb`）
+
+1. レビュー指摘への対応:
+   - must-fix「再試行のテストが `is_valid` 側の経路しか通していない」に対応。`SeqGateway` で `Err(LlmError::Invalid)` を返す 2 テストを追加（`invalid_error_is_retried_once_then_succeeds` / `invalid_error_is_retried_once_then_falls_back`）。
+   - nit「gateway の Future の panic が `block_on` を巻き戻ってタスクを Working のまま残す」に対応。呼び出しを `tokio::spawn` に入れ、`JoinError`（panic・キャンセル）を固定の理由 `REASON_ABORTED` に写して台本へ落ちる形にした（`CallOutcome::Runtime` → `Aborted` に改称）。
+   - nit「タイムアウト後のランタイム drop が spawn_blocking（reqwest の名前解決）の終了を無期限に待つ」に対応。ランタイムをタスクごとに 1 つ作って再試行でも使い回し、終了時は `rt.shutdown_background()` で待たずに畳む。
+   - nit「拒否・タイムアウトで呼び出し 1 回（再試行しない）を確かめていない」に対応。`gateway.calls == 1` の検証を両テストに追加。
+   - nit「テスト冒頭の対応表に PR-3 範囲の行」「`ab_schema` の説明が古い」「`PELWAY_LLM_BASIS` の記述がコードと食い違う」に対応（runner.rs:6、lib.rs の `ab_schema` コメント、dev-environment.md）。
+   - tests/real_llm.rs への nit（`{value}` を assert 文に入れている件・`PELWAY_LLM_BASIS` 既定の期待値）は、チーム決定「real_llm.rs は誰も動かさない」により未対応とし、このメモに記録する。
+2. 詰まった箇所: `tokio::spawn` する Future は `'static` が要るため `Arc::clone(&self.inner.gateway)` を async ブロックにムーブし、ブロック内で `chat` を呼ぶ形にした。
+3. 仮定と解釈: panic は `JoinError` 経由で理由の固定文（`LLM の呼び出しが中断しました`）に写す（内部の panic メッセージは投稿しない方針に合わせた）。
+4. 検証: `cargo test -p pelway-runner` 14 件 pass、`mise run verify` 全通過（script-test 21/21）。
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）

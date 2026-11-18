@@ -70,3 +70,6 @@ menu-help = ヘルプ
 menu-about = このアプリについて
 about-title = このアプリについて
 about-close = 閉じる
+## 読み上げ用の種別の呼び名（Issue 379。accessible-label で使う）
+ai-bot-label = AI Bot
+person-label = 人
