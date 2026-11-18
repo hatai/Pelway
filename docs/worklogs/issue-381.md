@@ -44,3 +44,15 @@ round 2 追記への補足2（CI 失敗の根本原因・確定）: en の判断
 2. Flickable の水平クリップ: テストの探索は `ItemRc::is_visible()` を通るためクリップ外は見えない。窓 800px ではチャンネル列の `Flickable` が 340px しかなく（右端 x=596）、en ではタイトル `Decision request` が長い分だけ依頼者行が右に寄り、バッジが右端クリップを超えて不可視になっていた（静止要素の消失＝クリップで確定）。`find_growing` の窓幅を 1600px にして解消。
 
 bridge.rs もデータ確定後に `data-decision-visible` を立てる順に変えた（実体化時に `if` が初期値で評価される余地を減らす防御）。診断用の `DIAG` 出力・`Text "X"`・`Rectangle` ラップ・lang 順反転は撤去済み。
+
+## 実装者メモ（round 3）
+
+対象 head: a9be43edf40b038c20c9bee88b8ab724795ed726
+
+1. 詰まった箇所: Claude の must-fix で「`AiBadgeView` の `horizontal-stretch: 0` では横に伸びるのを止められない」と指摘された。Slint 1.18.1 の `adjust_items` は行の全要素が stretch 0 のとき全員を stretch 1 とみなして余りを等分するため、バッジが帯状に伸びて「名前の直後」から外れる。レビュー担当は実行しない決まりで i-slint-core のソースから導いた指摘で、ローカルで要素の実ジオメトリ（レール行のダンプ）を取って確認した。
+2. 曖昧だった文: 「余りを受ける要素を 1 つ決めて `horizontal-stretch: 1` を付ける（右寄せの在席・待ち時間・時刻の Text、枠の LinkText など）。末尾に受け手が無いバナーと PrivateNoteRow は、空の `Rectangle { horizontal-stretch: 1; }` を足すか、`alignment: start` にする」。どの要素が受け手になるかは候補が挙がっていたので、指摘どおり右寄せ要素に `horizontal-stretch: 1`、受け手が無い行は空の Rectangle を足す形にした。
+3. 仮定と解釈: 「バッジの左端が『名前の右端＋spacing』にあること」は、行内でバッジと縦に重なる要素のうち右端が最もバッジに近いものとの差分が spacing になることと読んだ。最初は縦の重なりを見ずに「行内で最も右にある要素」としていたら、別の行の要素の右端を直前と取り違えて失敗した（`assert_badge_packed` で縦の重なりフィルタを足して直した）。判断カードの人バリアント行（バッジ無し）にも同じ等分配の欠陥があるため同じ形で受け手を置いた。
+4. 足りなかった情報・検証手段: Slint のレイアウトで「全員 stretch 0 → 等分配」になる挙動は crate の `layout.rs` を読まないと分からず、ドキュメントにも無かった。`ElementHandle` には `text()` が無いため、テキストの位置確認は `accessible_label`（Text の場合は text と一致）か位置の突き合わせになる。
+5. 改善案: 「よくある失敗」に「Slint の HorizontalLayout で stretch の受け手が 1 つも無いと余りが等分に配られ、stretch 0 の要素も帯状に伸びる。行の末尾に右寄せ要素か空の `Rectangle { horizontal-stretch: 1 }` を置く」を足す。
+
+使ったスキル: implement-issue
