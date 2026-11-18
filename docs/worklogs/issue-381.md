@@ -56,3 +56,7 @@ bridge.rs もデータ確定後に `data-decision-visible` を立てる順に変
 5. 改善案: 「よくある失敗」に「Slint の HorizontalLayout で stretch の受け手が 1 つも無いと余りが等分に配られ、stretch 0 の要素も帯状に伸びる。行の末尾に右寄せ要素か空の `Rectangle { horizontal-stretch: 1 }` を置く」を足す。
 
 使ったスキル: implement-issue
+
+round 3 追記（main の時系列仮想化との統合と CI フレーク）: main に PR #446（Issue #385。時系列を `timeline-items` モデル駆動の ListView 仮想化）が入り `main.slint` と衝突。main の `for item[i] in root.timeline-items` 構造を採用し、ループ内の `DecisionCardView`・`PrivateNoteRow` に `tr-ai-badge` の束縛とテスト用 id（`decision-card`・`private-note` の Rectangle 枠）を戻した。`demo_banner.rs` は消えた `set_data_msg*/note_*` プロパティを `TimelineItem` モデル構築に置き換え（`accessibility.rs` と同型）。
+
+統合後の CI で `timeline_virtualization`（Issue #385 側のテスト）だけが失敗: 実体化行は 6 行あるのに記録行番号が 0 件。`record-timeline-row` の結線とスクロール機構は同じ CI 実行内の他テスト（32 回スクロールして全行記録を要求する `every_row_kind` など）で動いていたため、「2 回目の小さいスクロール（-40px）が changed を 1 件も起こさない」境界条件と判断した。小スクロールで保持行が必ず再配置されて再記録されるという仮定はテストに不要なので、画面ぶん以上（-900px）めくって実体化セットをまるごと入れ替える形に直した（新規実体化・再利用のどちらでも全行が記録される）。
