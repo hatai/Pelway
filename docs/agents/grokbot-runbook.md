@@ -12,7 +12,7 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 | してよいこと | 方法 |
 |---|---|
 | スレッドを立てる・指示を送る・様子を見る | 指揮役が T3 のスレッドとして動いているときはネイティブの `t3_thread_launch`（作成）と `t3_thread_send`（指示）。Grok Bot（クラウド）のときは T3 Connect の MCP（`t3 thread start` / `send` / `show` / `list` と同じ操作） |
-| ラベルを付け外しする（`agent:working`、`agent:devin`、`needs-human`。`ready-for-agent` は外さない） | GitHub |
+| ラベルを付け外しする（`agent:working`・`agent:devin` の付け外し、`needs-human` の付与。`ready-for-agent` は外さない。`needs-human` を外すのは hatai のみ。指揮役は Grok Bot 経由で解除を依頼する） | GitHub |
 | Issue にコメントする | GitHub |
 | Projects ボード `Pelway agent team`（https://github.com/users/hatai/projects/7）のカードを読み、Status を書き換える | 人間の名義の `gh`（読み取り `read:project`、書き込み `project` スコープ）。`scripts/agent-gh` は使わない |
 | Issue・PR・レビュー・CI の結果を読む | GitHub |
@@ -21,6 +21,8 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 | `pelway-review` が Approve し必須チェックが通った PR に `automerge` ラベルを付けて Kodiak のキューに入れ、マージを確認する | `scripts/agent-gh dev pr edit <M> --add-label automerge`（条件は skill `command-team` の「マージ」）。マージの実行は Kodiak（GitHub App）が行い、指揮役がマージコマンドを叩くことはない。キューの切り戻しは hatai の admin マージだけが行う |
 
 しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更（`actions.lock` の再生成は例外。正本は `docs/superpowers/specs/agent-team.md` の「制約」）、スレッドの取り消し。
+
+ラベル操作の裏付け検査: `needs-human` の解除と `automerge` の付け外しは、actor だけでは判定しない（エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai になることがあるため）。見張り（conductor-watch）が付け外しの時刻を hatai 本人の指示の記録（同じ Issue・PR への hatai 本人のコメントで、付け外しの前 24 時間以内のもの）と突き合わせ、裏付けが取れない操作を「出どころ不明」として `LABEL unbacked` の行で watch.log に出す。`needs-human` を hatai の指示の記録なしに外した場合は、それ自体を手順違反として記録し、Grok Bot に知らせる（「指揮役の定期巡回（スケジュール起床）」）。
 
 スレッドに送る指示は Issue 番号か PR 番号と、使う skill 名だけにする（スレッドを立てる指示には、2 行目に割り当ての行 `Assigned: ...` を入れる。書式は skill `command-team`）。作業ルールは AGENTS.md と skill に書いてあるので、手順書の中身をスレッドに書き写さない。
 
@@ -80,19 +82,28 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 
 - マージの確認は、notify-grokbot の `pull_request`（`closed`、`merged: true`）の通知と、巡回での PR の状態で行う。マージされれば従来どおり Issue から `agent:working`・`agent:devin` を外す
 - Kodiak がコンフリクト等でマージできないときは、Kodiak が PR にコメントして `automerge` ラベルを外す（`.kodiak.toml` の `merge.notify_on_conflict` の既定）。巡回で、Approve 済みなのに `automerge` ラベルが無い PR に Kodiak のマージ不可コメントがあるか、またはラベルが付いたまま長時間 open のままのものを検知する。前者は手当スレッドを立てて main の取り込みと衝突解消をさせ、終わったら指揮役が `automerge` ラベルを付け直す。後者（キューが詰まる・応答しない）は hatai の admin マージへの切り戻しの判断材料として人間に知らせる
+- `automerge` ラベルの付け外しは、conductor-watch が付け外しの時刻を記録と突き合わせて検査する（actor だけでは判定しない）。裏付けが取れない操作は「出どころ不明」として `LABEL unbacked` 行で watch.log に出る。Kodiak がコンフリクトで外したものは、Kodiak のマージ不可コメントを指揮役が確認して正当として記録する
 
 ### 割り当て・停止・再開
 
 - 枠の数え方: open な Issue の `agent:working` の数から、作業状態の印が停止中・再開処理中・再開待ちのものを除き、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）を加えたものが、担当ごとの上限（正本の「制約」）以下であること。内訳は `agent:devin` の有無で判定する。通常完了時の `agent:working` の解除は既存のマージ後処理のとおり
+- blocker の確認（割り当ての前段。新規・手当・再開の共通。巡回の最初に確かめて使い回さず、割り当てる直前に行う。その間に依存が追加されることがあるため）:
+  1. 割り当て可否は `issue_dependencies_summary.blocked_by` だけで判定する（`GET /repos/hatai/Pelway/issues/<N>` を `scripts/agent-gh dev api` で読む。開いている blocker の数。0 なら着手可能）。`total_blocked_by` は閉じた blocker も数えるため、判定に使わない。hatai 名義の gh は使わない
+  2. 本文に書かれた「Blocked by #N」も確かめる。依存関係の情報と食い違ったら、割り当てを止める
+  3. 依存関係の情報が取れなかったとき（API の失敗・権限不足・空の結果）は、0 件と同じ扱いにしない。割り当てを止めて `needs-human` を付けて hatai に確認する。読めなかった理由のコード（例: `deps-read`）を巡回記録に残す
+  4. 割り当てる直前に、blocker の番号・状態・取得した時刻を Issue のコメントに残す。blocker の一覧の取得には `GET /repos/hatai/Pelway/issues/<N>/dependencies/blocked_by`（`--paginate` を付ける）を使う
 - 割り当て手順（順序付き・冪等。新規・手当・再開の共通前段）:
   1. 変更前に、変更前のステータスとラベルの集合を補助記録に書く（巻き戻し中の印。変更が 1 つも行われなかった試行の印は次回巡回で破棄する）
   2. `agent:working` が付いていること（無ければ付ける。Devin CLI では `agent:devin` も）
   3. 枠の確認: 新規と再開は「対象を除いた現在の使用枠数＋1 が上限以下」。不足なら変更をすべて巻き戻して割り当てない。手当は対象が計上済みであることを確認する
   4. 起動を巡回記録と補助記録に残す。分岐: 稼働中スレッドがあれば何もしない。稼働中スレッドが無く open な主 PR があれば手当として扱う。どちらも無ければ新規に割り当てる。ステータスは手順では決めず、ラベル付与後に導出値へ補正する。起動が成功したら巻き戻し中の印をその場で解除し、導出値で再計算したステータスを前回ステータスとして保存する。起動結果が不明な場合は巻き戻さず、割り当て ID を残したまま枠に計上して保持し、次回巡回で割り当て ID（クライアント要求 ID）とスレッド履歴を照合する: その ID のスレッドが存在すれば（終了・失敗を含む）起動済みとして再起動しない。存在しなければ再起動する。巻き戻しは新規と手当だけに適用し、再開には適用しない
+- 順番を変えるとき（Todo の並び順と違う順で割り当てるとき）は、割り当てる前に開発リードを通して hatai に確認する。割り当てコメントには了承の根拠（hatai 本人のコメントか、開発リードが中継した了承）のリンクを貼る
+- 割り当てたあとで blocker が開き直したら、その Issue の割り当てを止めて hatai に確認する
+- 見張り（conductor-watch）に blocker の確認を組み込むときは、合成のデータで 4 通りの試験を用意する: 開いた blocker があるときは拒否・全部閉じていれば許可・取得に失敗したら拒否・本文にだけ書かれているときは拒否。本物の Issue を割り当てて試すことはしない
 - 停止処理: 作業状態の印を「停止処理中」にし、停止処理 ID を発行して、成功した段を印に残しながら、スレッドを止め、進捗コメント（定型の印「[stop-processing] <停止処理 ID>」を含む）を書き、`needs-human` を付けて Needs human に置き、人間に指示を仰ぐ（この人間待ちにも、巡回スクリプトが次回確認時刻を目安で設定する。「10. 巡回状態の補助記録」の「次回確認時刻（フォローアップタイマー）」）。再試行時は先にその ID のコメントがあるかを照合する。Needs human の戻り先は Backlog にはせず「人間の判断後に再開手順で処理する」とする。停止中は枠を消費しない
 - 再開手順（人間の判断後）:
   1. 印を「再開処理中」にする
-  2. `needs-human` を外す（戻り先は使わない）
+  2. hatai が `needs-human` を外すのを待つ（外すのは hatai のみ。指揮役は、判断が済んでいるのに外れていないときは Grok Bot 経由で hatai に解除を依頼する。戻り先は使わない）
   3. `agent:working`・`agent:devin` は付けたままにする
   4. ステータスを Todo に置き、印を「再開待ち」にする
   5. 次の巡回で、停止したスレッドは稼働中として扱わず、同じブランチ／PR で新しいスレッドを起動して引き継ぐ。起動が成功したら印を下ろし、枠の消費を再開し、その場で導出値に再計算して更新し、前回ステータスとして保存する。途中失敗は巻き戻さず、成功した段から前進復旧する。起動の段で枠が不足したら、印は「再開待ち」のまま Todo で待ち、次の巡回で再試行する。起動を試みた後は、照合が終わるまでその割り当てを枠に計上する
@@ -117,6 +128,7 @@ conductor-watch は検知（`watch.log` へのイベント出力）だけを行�
 - 未読の位置は `patrol-state.json` の `watch_log_offset`（`watch.log` の行番号）で管理する。巡回で読み込んだ分だけ位置を進めて書き戻す
 - scheduled task は指揮役スレッドに bind する（`bindToCurrentThread`）。指揮役が代わったら（代行の開始・交代）、新しい指揮役スレッドで `schedule_task` を作り直し、古いタスクは `delete_scheduled_task` で削除する。`patrol-state.json` の `scheduled_task_id` に現行のタスク ID を記録する
 - `watch.log` からスレッドへの転送スクリプト（`t3` CLI の `acp-mcp-call` 経由）は使わない。`t3` CLI は実行中の T3 サーバーと `~/.t3/userdata` の所有権が衝突して送信に失敗することがあり、送信先スレッド ID の固定も指揮役の交代で壊れるため
+- `LABEL unbacked` の行は、`needs-human` の解除・`automerge` の付け外しのうち、付け外しの時刻の前 24 時間以内に同じ Issue・PR への hatai 本人のコメント（指示の記録）が見つからなかった操作である。指揮役と T3 スレッドの操作記録と突き合わせて分類する: 指揮役の正当な操作（マージ条件を満たしての `automerge` 付与・Kodiak のコンフリクトによる解除など）は裏付けが見つかり次第正当として巡回記録に残す。Grok Bot が中継した了承も同じく裏付けになる。`needs-human` の解除は指揮役の操作記録では正当化できず、hatai の指示の記録だけが正当化する。どちらの記録でも裏付けられないものは「出どころ不明」の手順違反として該当の Issue・PR に記録し、Grok Bot と人間に知らせる（「1. 役割と触ってよい範囲」のラベル操作の裏付け検査）
 
 ## 3. 同時数と順番待ち
 
@@ -267,6 +279,15 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 しきい値（45 分、`round` 4）を変えるときは、この手順書と仕様の両方を直す。
 
+### Claude 不能時の例外
+
+Claude（`claude_review`）が使えない間のレビュー運用の例外。Codex の承認だけ進めてよいのは、差分が文書だけの PR（コード・秘密・外部接続・権限に触れないもの）に限る。それらに触れる PR と、Claude か Devin のレビューが必須の PR は `needs-human` を付けたまま停止し、Claude の復旧を待つ（この例外は使えない）。
+
+文書だけの PR を Codex の承認だけで進めるときは、作業ログ（`docs/worklogs/`）に次を残す:
+
+- 障害が始まった時刻と、Claude のレビューの停滞の証拠（レビューが進まないままの状態の記録）
+- 抜き取りレビューは「未実施」と記録する。Claude の復旧後に行う
+
 ## 8. まとめ
 
 毎日 9:00 と 18:00（日本時間）に部屋へ送る。前回のまとめ以降の出来事と、いまの状態を書く。
@@ -285,7 +306,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 ## 9. 片付け
 
 - Grok Bot はスレッドと worktree を消さない
-- 終わったスレッドを settle する。PR をスレッドに紐付けたものはマージで自動 settle。それ以外（報告が読まれた調査スレッド、verdict を出し終えた指揮役のレビュースレッド、失敗打ち切りやマージされずに閉じた PR のスレッド）は `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドと、止まっている・迷走中のスレッドは settle しない
+- 終わったスレッドを settle する。PR をスレッドに紐付けたものはマージで自動 settle。それ以外（報告が読まれた調査スレッド、verdict を出し終えた指揮役のレビュースレッド、次のラウンドに置き換わった前ラウンドのレビュースレッド、失敗打ち切りやマージされずに閉じた PR のスレッド）は `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドと、止まっている・迷走中のスレッドは settle しない
 - worktree は pitchfork のデーモン `agent-worktree-prune` が毎時消す（settle されたスレッドの、main に取り込み済みかマージ済み・クローズ済みの PR のものだけ。未追跡のファイルは捨て、追跡ファイルに変更が残るものは残す）。settle しないと worktree は残るので、終わったスレッドは上のとおり settle する。残ったものは人間が `mise run agent-worktree-prune` で整理する
 - マージ後の Issue と PR はボードの組み込みワークフローが Done にする
 

@@ -18,7 +18,9 @@
 # 目印検索の前に、対象ファイルがすべて読めることを確認する。読めなければ exit 2（slot5 指摘4）。
 # exit 0 合格 / 1 目印あり or 走査対象ゼロ（未検証） / 2 検査異常（リスト欠落・走査失敗を含む）
 set -uo pipefail
-# shellcheck source=lib.sh
+# SC1091（source を追えない）は抑止: lib.sh は一括入力（shellcheck scripts/demo-check/*.sh）に
+# 常に含まれるが、動的パス $(dirname …) を shellcheck は解決できない（-x を付けると source= で追える）。
+# shellcheck source=lib.sh disable=SC1091
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 list="${DC_LIST_DIR}/canaries.txt"

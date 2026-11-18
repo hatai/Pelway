@@ -254,6 +254,10 @@ jobs:
   #   - 計測ビルド（-C instrument-coverage）とゲートビルドの target / キャッシュを分離する
   #   - カバレッジツールの故障で品質ゲートがブロックされないようにする
   # （ジョブは並列なので PR の待ち時間は増えない）
+  #
+  # pelway-db の RLS テストは #157 で集計から外していたが、#161 で PostgreSQL サービスを
+  # 添えて計測対象に戻す。RLS テストの失敗はこのジョブに閉じ、品質ゲート（static / lint /
+  # test）の必須チェックには影響しない（verify 集約ジョブの needs に coverage は無い）。
   coverage:
     name: octocov (coverage diff)
     runs-on: ubuntu-24.04
@@ -267,6 +271,23 @@ jobs:
       # レポート artifact を削除する掃除に必要（octocov-action の公式例が actions: write
       # を付与）。
       actions: write
+    # pelway-db の RLS テスト（PELWAY_DATABASE_URL が必要）のための PostgreSQL。
+    # nightly.yml の test ジョブと同じ 16 系（digest 固定）。ロール（pelway_app・
+    # pelway_admin・pelway_audit）はマイグレーション（0001_roles.sql・0004_admin_audit.sql）
+    # が advisory lock 付きで作るため、ここでの作成ステップは不要（スーパーユーザーの
+    # postgres ユーザーで接続し、scratch database ごとにマイグレーションが走る）。
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:f377d590e5474681d4d7838635031a2b50647923b7abfa803ce9b5ff35d5c663
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -340,7 +361,12 @@ jobs:
       # cargo-llvm-cov は mise の [tools] で 0.6.17 をピンし、mise.lock が URL と
       # checksum で取得物を固定する（ソースからのビルドに 45 秒かかるため、
       # 事前ビルド済みのバイナリを使う）。
+      # PELWAY_DATABASE_URL を与えると（nightly.yml の test ジョブと同じ接続先）、
+      # pelway-db の tests/common/mod.rs が scratch database を作り、RLS テストが
+      # スキップされずに計測に含まれる（#161。#157 の除外解除）。
       - name: Generate LCOV (cargo llvm-cov)
+        env:
+          PELWAY_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
         run: mise run coverage
 
       # octocov で PR コメント（増減表示）を作る。レポートの保存・比較は

@@ -10,16 +10,17 @@ use pelway_llm::{LlmError, SecretToken as ReexportedSecretToken};
 use rig_core::error::ProviderError;
 use rig_core::{ProviderResponseError, http_client::StatusCode};
 
-/// 設定例（Z.ai・OpenAI）は必須項目を満たす。
+/// 提供元プリセット（Z.ai・OpenAI）は必須項目を満たし、モデル名は
+/// 呼び出し側の設定で決める（例の設定は残さない。Issue #330）。
 #[test]
-fn provider_config_examples() {
-    let zai = ProviderConfig::zai_example();
-    assert_eq!(zai.base_url, "https://api.z.ai/api/paas/v4");
+fn provider_config_presets() {
+    let zai = ProviderConfig::zai("glm-5.3-flash", "embedding-3");
+    assert_eq!(zai.base_url, pelway_llm::config::ZAI_BASE_URL);
     assert_eq!(zai.response_format, ResponseFormatCapability::JsonObject);
-    assert!(!zai.chat_model.is_empty());
-    assert!(!zai.embed_model.is_empty());
-    let openai = ProviderConfig::openai_example();
-    assert_eq!(openai.base_url, "https://api.openai.com/v1");
+    assert_eq!(zai.chat_model, "glm-5.3-flash");
+    assert_eq!(zai.embed_model, "embedding-3");
+    let openai = ProviderConfig::openai("gpt-6-luna", "text-embedding-3-small");
+    assert_eq!(openai.base_url, pelway_llm::config::OPENAI_BASE_URL);
     assert_eq!(openai.response_format, ResponseFormatCapability::JsonSchema);
     // カスタム提供元も同じ形で受け取れる。
     let custom = ProviderConfig::new(
@@ -112,6 +113,78 @@ fn error_mapping_not_sent_for_pre_send_failures() {
         LlmError::from(ProviderError::Url(url_error)),
         LlmError::NotSent(_)
     ));
+}
+
+/// 接続先 URL のログ向けの伏せ（Issue #404）。userinfo は丸ごと、クエリの
+/// `key` / `token` などの値は値だけ伏せ、どちらも無い URL はそのまま返る。
+#[test]
+fn redact_url_for_log_redacts_userinfo_and_secret_query_values() {
+    // userinfo あり: user も password も出ず、伏せの `***@` だけが残る。
+    let redacted = pelway_llm::config::redact_url_for_log("https://user:pass@example.com/v1");
+    assert_eq!(redacted, "https://***@example.com/v1");
+    // password だけの URL（`user:@` と同形）でも userinfo は残さない。
+    let redacted = pelway_llm::config::redact_url_for_log("https://:pass@example.com/v1");
+    assert_eq!(redacted, "https://***@example.com/v1");
+
+    // クエリに key/token あり: 値は伏せ、キー名は残す。秘密でない値は残る。
+    let redacted = pelway_llm::config::redact_url_for_log(
+        "https://example.com/v1?key=abc&token=def&api_key=ghi&access_token=jkl&other=1",
+    );
+    assert_eq!(
+        redacted,
+        "https://example.com/v1?key=***&token=***&api_key=***&access_token=***&other=1"
+    );
+    assert!(!redacted.contains("abc"), "{redacted}");
+    assert!(!redacted.contains("jkl"), "{redacted}");
+    // キー名の正規化（大文字・`-`・キャメルケース）でも秘密キーと判定する。
+    let redacted = pelway_llm::config::redact_url_for_log(
+        "https://example.com/v1?Access-Token=t&client-secret=s&apiKey=k",
+    );
+    assert_eq!(
+        redacted,
+        "https://example.com/v1?Access-Token=***&client-secret=***&apiKey=***"
+    );
+    // 資格情報の名前（auth・credential。review round 2 の must-fix）も伏せる
+    // （`authorization`・`credentials` などの表記ゆれも含む一致でカバー）。
+    let redacted = pelway_llm::config::redact_url_for_log(
+        "https://example.com/v1?auth=Bearer%20xyz&credential=abc&other=1",
+    );
+    assert_eq!(
+        redacted,
+        "https://example.com/v1?auth=***&credential=***&other=1"
+    );
+    let redacted = pelway_llm::config::redact_url_for_log(
+        "https://example.com/v1?Authorization=Basic%20abc&client-credentials=cc",
+    );
+    assert_eq!(
+        redacted,
+        "https://example.com/v1?Authorization=***&client-credentials=***"
+    );
+
+    // どちらもなし: 既知の接続先はそのまま返る（不要な伏せをしない）。
+    for url in [
+        pelway_llm::config::ZAI_BASE_URL,
+        pelway_llm::config::OPENAI_BASE_URL,
+        "http://127.0.0.1:9/v1",
+        "http://[::1]:9/v1",
+    ] {
+        assert_eq!(pelway_llm::config::redact_url_for_log(url), url);
+    }
+
+    // fragment は丸ごと落とす（`#access_token=...` など OAuth implicit flow の
+    // 秘密の載せ場所。review round 1 の must-fix）。
+    let redacted =
+        pelway_llm::config::redact_url_for_log("https://example.com/v1#access_token=sk-xyz");
+    assert_eq!(redacted, "https://example.com/v1");
+    assert!(!redacted.contains("sk-xyz"), "{redacted}");
+    // ユーザーが確認用に付けた無害な fragment も落とす（中身を見て判断しない）。
+    assert_eq!(
+        pelway_llm::config::redact_url_for_log("http://127.0.0.1:9/v1#section"),
+        "http://127.0.0.1:9/v1"
+    );
+
+    // URL として解釈できないものは中身を出さない。
+    assert_eq!(pelway_llm::config::redact_url_for_log("not a url"), "***");
 }
 
 /// スキーマ検証（部分実装）の確認。

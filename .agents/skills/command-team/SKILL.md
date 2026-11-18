@@ -98,6 +98,19 @@ PR や Issue に手を付けるときは、最初に対象 Issue の受け入れ
 
 材料は既にあるものだけを使う: pr-size の行数（追加と削除）、変更パス、ラベル、修正の回数（`round`）。下の値は現在の値で、改善ループ（手順 4）で調整する。値を変えたら、この表を直す。
 
+### 割り当ての可否（blocker の確認）
+
+Issue を割り当てる前に、依存する blocker が全部閉じていることを、割り当てる直前に確かめる。巡回の最初に確かめて使い回さない（その間に依存が追加されることがあるため）。手順上の位置づけは runbook の「割り当て・停止・再開」の blocker の確認。
+
+- 割り当ててよいのは `issue_dependencies_summary.blocked_by == 0` のときだけ（開いている blocker の数。0 なら着手可能）。`total_blocked_by` は閉じた blocker も数えるため、使わない
+- 本文に書かれた「Blocked by #N」も確かめる。依存関係の情報と食い違ったら、割り当てを止める
+- 依存関係の情報が取れなかったとき（API の失敗・権限不足・空の結果）は、0 件と同じ扱いにしない。割り当てを止めて needs-human に回す
+- 割り当てる直前に、blocker の番号・状態・取得した時刻を Issue のコメントに残す
+- 依存情報の読み取りには `scripts/agent-gh dev api`（App のトークン）を使い、hatai 名義の gh は使わない。読めなかったときは理由のコード（例: `deps-read`）を巡回記録に残す。API の使い分け: 割り当て可否の条件は `GET /repos/hatai/Pelway/issues/<N>` の `issue_dependencies_summary.blocked_by`、割り当てコメントに書く blocker の一覧は `GET /repos/hatai/Pelway/issues/<N>/dependencies/blocked_by`（`--paginate` を付ける）
+- 順番を変えるときは、割り当てる前に開発リードを通して hatai に確認する。割り当てコメントには了承の根拠（hatai 本人のコメントか、開発リードが中継した了承）のリンクを貼る
+- 割り当てたあとで blocker が開き直したら、止めて hatai に確認する
+- 見張り（conductor-watch）に blocker の確認を組み込むときは、合成のデータで 4 通りの試験を用意する: 開いた blocker があるときは拒否・全部閉じていれば許可・取得に失敗したら拒否・本文にだけ書かれているときは拒否。本物の Issue を割り当てて試すことはしない
+
 ### 実装のモデルと effort
 
 | 条件 | モデル・effort |
@@ -128,6 +141,15 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 - 抜き取りの実施が 10 件に達するか、抜き取りの開始から 4 週間が経つか、どちらか早い方になったら、`docs/agents/command-team-details.md` の「レビュー担当の段階移行」に従って見落とし率を集計し、高リスク PR の複数レビュー体制の有効化を判断する。
 - effort は、追加行が 200 以下で高リスクでなければ既定、それ以外は `high`。同じ PR の 2 回目以降のレビューは 1 段上げる。
 - 複数のレビュー担当を付けた PR で判定が割れたら（approve と request-changes が混ざったら）、マージせず、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正をそのまま進める（人間へのエスカレーションは不要）。実装担当が委託した複数レビューで割れたときも同じで、実装担当が修正に進む（skill `implement-issue` の手順 9）。
+
+### レビュースレッドの settle
+
+レビューが終わったレビュースレッドを未 settle のまま残さない（runbook 9 の「片付け」と同じ決まり。settle しないと worktree も残る）。settle は `t3_thread_organize`（`action: settle`）で行う。
+
+- verdict を読んだら、指揮役が自分で立てたレビュースレッド（指揮役自身の PR・外部投入）を settle する
+- 次のラウンドのレビュースレッドを立てたら、置き換わった前ラウンドのレビュースレッドを settle する
+- 実装担当の PR のレビュー（実装スレッドが `delegate_task` で立てた子タスク）は実装スレッドの内側で settle される（skill `implement-issue` の手順 8）。指揮役は settle しない
+- `needs-human` 中のスレッドと、止まっている・迷走中のスレッドは settle しない
 
 ### レビュー待ちの滞留
 

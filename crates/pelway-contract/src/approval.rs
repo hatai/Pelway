@@ -183,7 +183,8 @@ pub struct ApprovalCard {
     pub channel_id: ChannelId,
     pub card_id: CardId,
     pub card_version: u64,
-    /// 正規化した操作の中身（操作の種類・宛先・本文・添付・使うアカウント・範囲）。
+    /// 正規化した操作の中身（操作の種類・宛先・本文・添付・使うアカウント・範囲・
+    /// 参照版・integration 版）。
     pub payload: ActionPayload,
     /// 承認者が承認する hash。`payload` から
     /// [`crate::snapshot::compute_snapshot_hash`] で計算する。コメントは対象外。
