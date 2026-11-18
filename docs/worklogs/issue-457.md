@@ -11,3 +11,16 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の受け入れ条件の書き方に、「docs の既存ファイルへ節を足す Issue では節の挿入位置（どの節の後か・見出しの階層）を本文に書く」の 1 文を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: afce5a66186dcd9aee4ca3c076d078fc68ad5c0b
+
+1. 詰まった箇所: docs/technical.md の「hash の比較」: must-fix 2 の条件を箇条書きに足した際、既存の文（「一致し、かつ…確認できたときだけ」）と新しい条件群（同一 workspace・Bot の現権限・範囲を広げない）の前提の重複を整理するのに手間取った。条件を「次の条件がすべて成り立つときだけ」の下に 5 項目として列挙する形にした。
+2. 曖昧だった文: 「Bot の添付の `encryption` も申告を信じずサーバーの判定で決める（または「申告の encrypted は hash 一致の転送以外を止める」と書く）」（PR #464 の Claude レビュー本文 must-fix 1 の直し方）— 2 つの直し方のどちらを採るかがレビュー本文では選択されていなかった。
+3. 仮定と解釈: 前者（サーバー判定）を表の `encryption` の定義に採り、後者（申告の encrypted は hash 一致の転送以外を止める）は既に reply-guard の節の規則として成立しているため「Bot の発言の添付では、この判定だけで検査が免除されることはありません」と両立を明示する形に書いた。申告ベースの救済（前者のみ）だと人の経路での暗号化添付の注記付き通過の規則と衝突するため選ばなかった。
+4. 足りなかった情報・検証手段: `member_kind` が外部主体（ExternalAgent・ExternalTool）の発言の添付をどの出口検査に掛けるか（Human 以外は Bot 同様に検査するか）。節では「`member_kind` が人なら人の扱い、Bot なら検査」と書き、ExternalAgent/ExternalTool は「Bot なら」の側（Human 以外）に含むと解釈したが、レビューでは確認されていない。
+5. 改善案: `.agents/skills/review-pr/SKILL.md` のレビュー本文の書き方に、直し方を複数案挙げるときは推奨案を 1 つ選ぶよう求める 1 文を足す（実装側の判断の余地を減らすため）。
+
+使ったスキル: implement-issue
+
