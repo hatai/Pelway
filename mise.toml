@@ -52,6 +52,7 @@ jactionlint = "2.5.0"
 # （octocov・cargo-llvm-cov と同じ経路。mise.lock が URL と checksum で取得物を固定する）。
 # 出典: https://github.com/EmbarkStudios/cargo-deny/releases/tag/0.20.2
 "aqua:EmbarkStudios/cargo-deny" = "0.20.2"
+age = "latest"
 
 # コンテナ実行環境（非 Docker・要件は docs/dev-environment.md）。
 # rootless Podman 一式を apt から導入する宣言。適用は明示的な bootstrap 実行時だけ
