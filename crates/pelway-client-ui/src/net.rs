@@ -29,8 +29,12 @@ pub struct Response {
 pub enum NetError {
     /// 接続・読み書きの失敗（接続拒否・タイムアウトを含む）。
     Io(std::io::Error),
-    /// 応答が HTTP/1.1 として読めない（status 行やヘッダー区切りが無い）。
+    /// 応答が HTTP/1.1 として読めない（status 行やヘッダー区切りが無い）、
+    /// または要求ターゲット・ヘッダー値が送れない形。
     Malformed,
+    /// 接続先がループバックでない（`live::parse_server_addr` を通らない
+    /// 経路からの流入をここでも防ぐ）。
+    NonLoopback,
 }
 
 impl fmt::Display for NetError {
@@ -38,6 +42,7 @@ impl fmt::Display for NetError {
         match self {
             Self::Io(e) => write!(f, "connection or I/O failed: {e}"),
             Self::Malformed => f.write_str("malformed HTTP response"),
+            Self::NonLoopback => f.write_str("non-loopback target"),
         }
     }
 }
@@ -67,8 +72,10 @@ impl Client {
     /// `read_request` が全要求で確認する）ため `Content-Length: 0` を付ける。
     ///
     /// # Errors
-    /// 接続・読み書きの失敗、または応答が読めない形なら [`NetError`]。
+    /// 接続・読み書きの失敗、応答が読めない形、または `path` が送れない形
+    /// （空白・制御文字を含む）なら [`NetError`]。
     pub fn get(&self, path: &str) -> Result<Response, NetError> {
+        check_target(path)?;
         let head = format!(
             "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
             host = self.addr
@@ -88,6 +95,7 @@ impl Client {
         headers: &[(&str, &str)],
         body: &[u8],
     ) -> Result<Response, NetError> {
+        check_target(path)?;
         let mut head = format!(
             "POST {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nContent-Type: application/json\r\n",
             host = self.addr
@@ -105,6 +113,11 @@ impl Client {
     }
 
     fn exchange(&self, request: Vec<u8>) -> Result<Response, NetError> {
+        // 接続先はループバックだけ。パーサを通さず `Client::new` に
+        // 直接アドレスが渡された経路でも、TCP を張る直前にここで止める。
+        if !self.addr.ip().is_loopback() {
+            return Err(NetError::NonLoopback);
+        }
         let mut stream = TcpStream::connect_timeout(&self.addr, IO_TIMEOUT)?;
         stream.set_read_timeout(Some(IO_TIMEOUT))?;
         stream.set_write_timeout(Some(IO_TIMEOUT))?;
@@ -116,15 +129,52 @@ impl Client {
             .windows(4)
             .position(|w| w == b"\r\n\r\n")
             .ok_or(NetError::Malformed)?;
-        let head = String::from_utf8_lossy(&raw[..split]);
-        let status = head
-            .split_whitespace()
-            .nth(1)
+        let head = std::str::from_utf8(&raw[..split]).map_err(|_| NetError::Malformed)?;
+        let mut lines = head.split("\r\n");
+        let status = lines
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
             .and_then(|s| s.parse::<u16>().ok())
             .ok_or(NetError::Malformed)?;
+        // サーバーは `Content-Length` で長さを返す（受け側と同じ形）。無い・
+        // 重複・`Transfer-Encoding` あり・宣言と本文の長さ不一致は、途中切れや
+        // 読み残しとみなして受け付けない（残った分が JSON として読めても使わない）。
+        let mut content_length = None;
+        for line in lines {
+            let Some((name, value)) = line.split_once(':') else {
+                continue;
+            };
+            if name.trim().eq_ignore_ascii_case("transfer-encoding") {
+                return Err(NetError::Malformed);
+            }
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                let n = value
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|_| NetError::Malformed)?;
+                if content_length.replace(n).is_some() {
+                    return Err(NetError::Malformed);
+                }
+            }
+        }
+        let need = content_length.ok_or(NetError::Malformed)?;
+        let body = &raw[split + 4..];
+        if body.len() != need {
+            return Err(NetError::Malformed);
+        }
         Ok(Response {
             status,
-            body: raw[split + 4..].to_vec(),
+            body: body.to_vec(),
         })
     }
+}
+
+/// 要求ターゲットは `/` 始まりで空白・制御文字を含まない。`path` にはサーバー
+/// 応答 JSON から取ったチャンネル ID 等が展開されるため、CR/LF をそのまま
+/// リクエスト行へ書くとヘッダー注入になる（送信前にここで止める）。
+fn check_target(path: &str) -> Result<(), NetError> {
+    if !path.starts_with('/') || path.bytes().any(|b| b <= b' ' || b == 0x7f) {
+        return Err(NetError::Malformed);
+    }
+    Ok(())
 }

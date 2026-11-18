@@ -72,13 +72,17 @@ pub fn parse_server_addr(text: &str) -> Result<SocketAddr, AddrError> {
 /// 環境変数 `PELWAY_SERVER_URL`（未設定なら [`DEFAULT_SERVER_URL`]）から接続先を作る。
 ///
 /// # Errors
-/// 値が [`parse_server_addr`] で読めない形なら [`AddrError`]。
+/// 変数が設定されているのに値が [`parse_server_addr`] で読めない形（空・空白・
+/// 非 Unicode を含む）なら [`AddrError`]。既定値に戻すのは「未設定」のときだけ
+/// （設定ミスをデフォルト接続で取りこぼさない）。
 pub fn server_addr() -> Result<SocketAddr, AddrError> {
-    let value = std::env::var(SERVER_URL_ENV)
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
-    parse_server_addr(&value)
+    match std::env::var(SERVER_URL_ENV) {
+        Ok(value) => parse_server_addr(&value),
+        Err(std::env::VarError::NotPresent) => parse_server_addr(DEFAULT_SERVER_URL),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            Err(AddrError(format!("{SERVER_URL_ENV} is not Unicode")))
+        }
+    }
 }
 
 /// 通信と応答の失敗。画面では「つながっていません」の 1 状態に畳む。
@@ -122,6 +126,10 @@ pub struct LiveSession {
     channel: Option<Channel>,
     /// 表示中のチャンネルのメッセージ（seq 昇順）。
     messages: Vec<StoredMessage>,
+    /// ポーリングのカーソル。サーバーが「一覧」として返した末尾 seq でだけ進める
+    /// （投稿の応答では進めない: 投稿の直前に他ユーザーの分が着ていても、
+    /// 次のポーリングで取りこぼさず拾うため）。
+    last_seq: u64,
     /// 直近の要求が成功しているか。失敗したら「つながっていません」。
     connected: bool,
 }
@@ -139,6 +147,7 @@ impl LiveSession {
             channels: Vec::new(),
             channel: None,
             messages: Vec::new(),
+            last_seq: 0,
             connected: false,
         }
     }
@@ -161,7 +170,12 @@ impl LiveSession {
         ))?;
         self.connected = true;
         let Some(channel_id) = channels.first().map(|c| c.channel_id.clone()) else {
+            // 再取得でチャンネルが無くなっていたら選択を捨てる
+            // （古い channel/messages を残すと投稿・ポーリングが幽霊チャンネルを指す）。
             self.channels = channels;
+            self.channel = None;
+            self.messages.clear();
+            self.last_seq = 0;
             return Ok(());
         };
         let channel: Channel = self.get_json(&format!(
@@ -187,6 +201,7 @@ impl LiveSession {
             channel_messages_path(&channel_id),
             self.actor.as_str()
         ))?;
+        self.last_seq = messages.iter().map(|m| m.seq).max().unwrap_or(0);
         self.channels = channels;
         self.channel = Some(channel);
         self.messages = messages;
@@ -194,27 +209,37 @@ impl LiveSession {
     }
 
     /// 差分ポーリング: `after_seq` で新しい分だけ取る。失敗したら `connected = false`、
-    /// 成功したら `true`（復帰すると通常表示に戻る）。
+    /// 成功したら `true`（復帰すると通常表示に戻る）。断線からの復帰・チャンネル
+    /// 未選択では差分でなく `bootstrap` で取り直す（サーバー再起動で seq や
+    /// message_id が振り直されていても、古い履歴の上に新しい分を追わない）。
     ///
     /// # Errors
     /// 要求の失敗。
     pub fn poll(&mut self) -> Result<(), LiveError> {
-        let Some(channel) = &self.channel else {
-            return Err(LiveError::NoChannel);
+        if !self.connected {
+            return self.bootstrap();
+        }
+        let Some(channel_id) = self.channel.as_ref().map(|c| c.channel_id.clone()) else {
+            return self.bootstrap();
         };
-        let after_seq = self.messages.iter().map(|m| m.seq).max().unwrap_or(0);
         let new: Vec<StoredMessage> = self.get_json(&format!(
-            "{}?actor={}&after_seq={after_seq}",
-            channel_messages_path(&channel.channel_id),
-            self.actor.as_str()
+            "{}?actor={}&after_seq={}",
+            channel_messages_path(&channel_id),
+            self.actor.as_str(),
+            self.last_seq,
         ))?;
         self.connected = true;
+        if let Some(tail) = new.iter().map(|m| m.seq).max() {
+            self.last_seq = tail;
+        }
         self.append_new(new);
         Ok(())
     }
 
     /// 表示ユーザーとして `body` を投稿する。成功したら保存済みメッセージを返し、
-    /// 一覧にも足す（次のポーリングの `after_seq` で重複して取らない）。
+    /// 一覧にも足す。ポーリングのカーソルはここでは進めない（投稿の直前に他
+    /// ユーザーの分が着ていた場合に取りこぼさないよう、次のポーリングで
+    /// `message_id` の重複除去に任せて再取得する）。
     ///
     /// # Errors
     /// チャンネル未選択・要求の失敗。
@@ -297,13 +322,16 @@ impl LiveSession {
         &self.actor
     }
 
-    /// 新着分を seq 昇順のまま末尾に足す（`message_id` の重複は足さない。
-    /// 投稿の応答とポーリングで同じものを二度取ることがある）。
+    /// 新着分を seq 昇順を保つ位置に挿入する（`message_id` の重複は足さない。
+    /// 投稿応答を先に足しているとポーリングでそれより小さい seq が届き得るため、
+    /// 末尾への追加だけだと順序が崩れる）。
     fn append_new(&mut self, new: Vec<StoredMessage>) {
         for m in new {
-            if !self.messages.iter().any(|e| e.message_id == m.message_id) {
-                self.messages.push(m);
+            if self.messages.iter().any(|e| e.message_id == m.message_id) {
+                continue;
             }
+            let pos = self.messages.partition_point(|e| e.seq <= m.seq);
+            self.messages.insert(pos, m);
         }
     }
 

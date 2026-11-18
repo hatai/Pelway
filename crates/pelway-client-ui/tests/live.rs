@@ -5,6 +5,7 @@
 //! 表示用の行モデル（送信者名や `HH:MM` の組み立て）は PR-2 で足すため、ここでは
 //! ワイヤ上の型（`Channel`・`StoredMessage`・`MemberId`）で検査する。
 
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex};
 
@@ -32,6 +33,37 @@ fn dead_addr() -> SocketAddr {
     let addr = listener.local_addr().expect("local addr");
     drop(listener);
     addr
+}
+
+/// 1 接続だけ受けて、届いた要求（ヘッダー区切りまで）を記録してから決まった
+/// 応答を返す最小スタブ。実サーバーでは見えない「ワイヤに何を書いたか」
+/// （GET の `actor` クエリ等）と、HTTP の失敗系（5xx・壊れた JSON）を検査する。
+fn stub_once(status: &str, body: &str) -> (SocketAddr, Arc<Mutex<String>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
+    let addr = listener.local_addr().expect("stub addr");
+    let captured = Arc::new(Mutex::new(String::new()));
+    let slot = Arc::clone(&captured);
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut got = Vec::new();
+        let mut buf = [0u8; 4096];
+        while !got.windows(4).any(|w| w == b"\r\n\r\n") {
+            let n = stream.read(&mut buf).expect("read request");
+            if n == 0 {
+                break;
+            }
+            got.extend_from_slice(&buf[..n]);
+        }
+        *slot.lock().unwrap() = String::from_utf8_lossy(&got).into_owned();
+        stream
+            .write_all(response.as_bytes())
+            .expect("write response");
+    });
+    (addr, captured)
 }
 
 // 受け入れ条件1: 起動時にサーバーからチャンネルとメッセージが取れる（モックではない）。
@@ -150,6 +182,47 @@ fn switching_actor_changes_who_the_server_accepts() {
         "未知のメンバーは切替えない"
     );
     assert_eq!(session.actor().as_str(), "m-sato");
+}
+
+// 受け入れ条件3 のワイヤ側: 切替後の GET は新しい actor のクエリで出る（Issue 327）。
+#[test]
+fn get_after_switch_sends_new_actor_query() {
+    let (addr, _store) = spawn_demo_server();
+    let mut session = LiveSession::new(addr, "ws-demo-01".into());
+    session.bootstrap().expect("bootstrap succeeds");
+    session.switch_actor("m-yamamoto");
+
+    let (stub, captured) = stub_once("200 OK", "[]");
+    session.set_addr(stub);
+    session.poll().expect("poll against stub");
+
+    let request = captured.lock().unwrap().clone();
+    assert!(
+        request.starts_with("GET ") && request.contains("actor=m-yamamoto"),
+        "切替後の GET は新しい actor のクエリ: {request}"
+    );
+}
+
+// HTTP の失敗系（5xx・壊れた JSON）でも「つながっていません」になり、
+// 復帰（= 断線からのフル再取得）で通常の状態に戻る。
+#[test]
+fn status_and_json_errors_mark_offline_and_recover() {
+    let (addr, _store) = spawn_demo_server();
+    let mut session = LiveSession::new(addr, "ws-demo-01".into());
+    session.bootstrap().expect("bootstrap succeeds");
+
+    for (status, body) in [("500 Internal Server Error", "{}"), ("200 OK", "not json")] {
+        let (stub, _captured) = stub_once(status, body);
+        session.set_addr(stub);
+        assert!(session.poll().is_err(), "{status} / {body} は失敗する");
+        assert!(!session.connected(), "失敗したら非接続状態へ");
+
+        // 復帰: 接続先が戻ると poll は断線からのフル再取得で立て直す。
+        session.set_addr(addr);
+        session.poll().expect("poll after recovery");
+        assert!(session.connected(), "復帰したら接続状態へ");
+        assert_eq!(session.messages().len(), 3, "履歴は seed の 3 件に立て直る");
+    }
 }
 
 // チーム点検の追加条件: サーバーが落ちた・ポーリングが失敗したとき
