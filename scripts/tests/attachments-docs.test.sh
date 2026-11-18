@@ -79,6 +79,13 @@ check cond8_retention docs/technical.md \
   '365日' \
   'ベストエフォート'
 
+# 条件8（round 2 must-fix 対応）: 転送された添付の期限と削除の連動（13 §2 の期限の
+# 洗い替え禁止・source 参照）。
+check cond8_forward_retention docs/technical.md \
+  '早いほう' \
+  '洗い替え' \
+  '転送先の添付も先に利用停止'
+
 # 条件9: 外部との境界（接続だけでは添付を送らない、外へ出すときは ActionSnapshot
 # に hash を固定）。
 check cond9_boundary docs/technical.md \
