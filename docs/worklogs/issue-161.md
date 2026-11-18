@@ -13,3 +13,15 @@
 7. 改善案: `AGENTS.md` の「Agent workflow」に「`.github/workflows/` を含む変更は pelway-dev で push できない。hatai の事前許可（Issue コメント）があるときは hatai によるホスト側からの push（または request_secret での一時トークン提供）を本スレッドで依頼し、PR は `scripts/agent-gh dev pr create` で作る（作成者を pelway-dev[bot] に保つ）」を追記する
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 2）
+
+対象 head: b9b788f32ea89fdaa89794f4c1e4bd722195e6b8
+
+1. 詰まった箇所: scripts/tests/coverage-postgres.test.sh:69（Claude レビューの must-fix）: 検査 6 の `grep -A1 '^  verify:'` は `name:` 行（61 行目）しか拾えず `needs:`（62 行目）に届かないため、検査が常に通り何も確かめていなかった。既存の `job_block` を使う `job_block verify | grep -m1 '^    needs:'` に置き換え、needs 行が取れないときも FAIL にして検査の無効化を防いだ
+2. 曖昧だった文: 「直したら、needs に coverage を足した一時コピーで FAIL になること（red）を確かめた記録を実装者メモに残す」（PR #465 の pelway-review レビュー本文・must-fix）
+3. 仮定と解釈: 「一時コピー」の代わりに worktree の verify.yml を一時的に編集し（sed で needs に coverage を追加）、実行後に原状復帰させる方法で同等とみなした。red: `FAIL verify.yml: verify 集約ジョブの needs に coverage が含まれている（独立性の喪失）` exit 1。green: `ok` exit 0。復帰後の verify.yml は差分ゼロ
+4. 足りなかった情報・検証手段: `mise run verify` は `conductor-watch-ensure.test.sh` の環境負荷による flaky で 3 回連続で落ちた（standalone でも落ち、本変更の経路とは無関係、自テストは green）。4 回目で全 green（28 tests ok）
+5. 改善案: `scripts/tests/conductor-watch-ensure.test.sh` の待ち合わせ（waitn の固定窓 15×0.2 秒）を負荷に強い形（PID ファイル待ち・窓の延長）にする別 Issue を立てる
+
+使ったスキル: implement-issue
