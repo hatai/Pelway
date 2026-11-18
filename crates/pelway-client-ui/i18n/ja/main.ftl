@@ -45,7 +45,7 @@ handoff-acknowledge = 受けました
 handoff-decision-owner = 納期の決定：{ $name }（代表）
 ## 社外への送信の確認カード
 ext-card-label = 社外への送信 · { $name }さんの確認待ち
-ext-card-question = { $to }にメールを送りますか
+ext-card-question = { $address }にメールを送りますか
 ext-address-label = 宛先：
 ext-subject-label = 件名：
 ext-basis-label = 根拠：
