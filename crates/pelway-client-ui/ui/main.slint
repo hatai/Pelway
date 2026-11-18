@@ -16,9 +16,10 @@
 //   （仕様が Fluent のため）。
 // - テーマ名（light / dark / light-high-contrast / dark-high-contrast）の定義元は
 //   Rust の Theme enum（src/theme.rs）。ThemeState.current-name は Rust から渡される。
-// - accessible-role / accessible-label による読み上げは段階Bで付ける（この回では未実装）。
-//   AccessKit を組み込んだだけで読み上げが合格したとは言わない。NVDA・VoiceOver・Orca
-//   での確認は未検証。
+// - 読み上げ・キーボード操作は AccessKit 経由の accessible-role / accessible-label
+//   と、押せる部品の FocusScope で付ける（Issue 379）。読み上げ枠は足さない。
+//   承認・決定のボタンの Enter/Space は callback で中核の input::on_key に渡し、
+//   キーの意味づけを UI 側で書き直さない。NVDA・VoiceOver・Orca での確認は未検証。
 
 // Slint の attribution widget（About ダイアログの中で使う。Issue 237）。
 import { AboutSlint } from "std-widgets.slint";
@@ -93,30 +94,50 @@ export global ThemeState {
     in-out property <string> current-name;
 }
 
+// 読み上げ用の種別の呼び名（Issue 379）。文言は Rust が Fluent から引いて
+// tr-* と同じ約束で渡す。どの部品からも読めるよう global に置く。
+export global A11yStrings {
+    in-out property <string> tr-ai-bot-label;
+    in-out property <string> tr-person-label;
+}
+
+// 決定・承認ボタンのキー操作（Issue 379）。生のキー（KeyEvent.text・Ctrl/Cmd・
+// Shift）を受け取り、Rust 側が中核の input::on_key に渡して「決定・承認に
+// なるか」を決める（意味づけを .slint 側で書き直さない。戻り値はキーを
+// 消費したか）。階層の転送を避けるため global に置く。
+export global KeyRouter {
+    callback decide-key(string, string, int, string, bool, bool) -> bool;
+    callback send-key(string, bool, bool) -> bool;
+}
+
 // ---- 小さい部品 ----
 
 // アバター。人は円、AI は四角（AI であることはバッジでも示す）。
+// a11y-label は呼び出し側が「表示名＋種別（AI Bot・人）」を組み立てて渡す（Issue 379）。
 component AvatarView inherits Rectangle {
     in property <bool> is-ai: false;
     in property <string> initial;
+    in property <string> a11y-label;
     width: 34px;
     height: 34px;
     border-radius: self.is-ai ? 10px : 17px;
     background: self.is-ai ? DesignTokens.avatar-ai-bg : DesignTokens.avatar-human-bg;
+    accessible-role: image;
+    accessible-label: root.a11y-label;
     Text {
         text: root.initial;
         color: root.is-ai ? DesignTokens.avatar-ai-fg : DesignTokens.avatar-human-fg;
         font-size: 13px;
         font-weight: 600;
+        // 頭文字は読み上げに出さない（種別付きの名前はアバターのラベルが担う）。
+        accessible-role: none;
+        accessible-label: "";
     }
 }
 
-// AI Botであることの印（「AI」）。見える文字は「AI」で、読み上げには
-// label-a11y（「AIメンバー」/ "AI member"）を出して二重読みを避ける
-// （S00 の画面契約。読み上げ全文の適用は Issue 379）。
+// AI Botであることの印（「AI」）。
 component AiBadgeView inherits Rectangle {
     in property <string> label;
-    in property <string> label-a11y;
     height: 14px;
     border-radius: 6px;
     background: DesignTokens.ai-badge-bg;
@@ -127,11 +148,14 @@ component AiBadgeView inherits Rectangle {
         padding-right: 4px;
         Text {
             text: root.label;
-            accessible-label: root.label-a11y;
             color: DesignTokens.ai-badge-fg;
             font-size: 10px;
             font-weight: 500;
             vertical-alignment: center;
+            // 「AI」の文字だけが名前として二度読まれないよう読み上げから外す
+            // （Issue 379。種別の呼び名は行・アバターのラベルが「AI Bot」と言う）。
+            accessible-role: none;
+            accessible-label: "";
         }
     }
 }
@@ -141,7 +165,6 @@ component AiBadgeView inherits Rectangle {
 component DemoBannerView inherits Rectangle {
     in property <string> tr-banner-demo-mock;
     in property <string> tr-ai-badge;
-    in property <string> tr-label-ai-member-a11y;
     HorizontalLayout {
         spacing: 8px;
         // 「デモ・模擬応答」の印（caution 系 pill）。狭い幅では行を増やして
@@ -165,26 +188,72 @@ component DemoBannerView inherits Rectangle {
                 }
             }
         }
-        // 「AIであることの表示」（見える文字は「AI」）。
+        // 「AIであることの表示」（見える文字は「AI」。読み上げには載せない
+        // —AiBadgeView の内側の文字は accessible-role: none）。
         AiBadgeView {
             horizontal-stretch: 0;
             label: root.tr-ai-badge;
-            label-a11y: root.tr-label-ai-member-a11y;
         }
     }
 }
 
-// 左の列の1行（今日・チャンネル・DM）。
-component RailRow inherits Rectangle {
+// フォーカスが当たった部品の周りの枠。色は DesignTokens.focus-ring を参照する
+// だけ（Issue 379。色の値は書かない）。
+component FocusRing inherits Rectangle {
+    border-width: 2px;
+    border-color: DesignTokens.focus-ring;
+    border-radius: 4px;
+}
+
+// 押せる部品（ボタン・行・リンク）。タップ/クリック・キーボード
+// （Enter/Space）・支援技術の既定操作の 3 経路で activated を呼ぶ（Issue 379）。
+// 承認・決定のボタンでは key-hit に中核の input::on_key を通る callback を
+// 結び、Enter/Space の意味づけを UI 側で書き直さない。
+component Pressable inherits Rectangle {
+    // 読み上げの名前（呼び出し側が Fluent の文言を渡す）。
+    in property <string> a11y-label;
+    // マウス・タッチ・支援技術の既定操作。key-hit を結ばない部品では
+    // キーボードの Enter/Space もここに来る。
+    callback activated();
+    // キー操作の横取り（KeyEvent.text・Ctrl/Cmd・Shift → 消費したか）。
+    // 未結線なら既定の false が返り、下の汎用の Enter/Space 起動が動く。
+    callback key-hit(string, bool, bool) -> bool;
+    forward-focus: fs;
+    accessible-role: button;
+    accessible-label: root.a11y-label;
+    accessible-action-default => { root.activated(); }
+    @children
+    ta := TouchArea {
+        clicked => { root.activated(); }
+    }
+    fs := FocusScope {
+        width: 0px;
+        key-pressed(event) => {
+            if root.key-hit(event.text, event.modifiers.control || event.modifiers.meta, event.modifiers.shift) {
+                return accept;
+            }
+            if (event.text == Key.Space || event.text == Key.Return) {
+                root.activated();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    if fs.has-focus : FocusRing {
+        border-radius: root.border-radius;
+    }
+}
+
+// 左の列の1行（今日・チャンネル・DM）。押せるため Pressable（Issue 379）。
+component RailRow inherits Pressable {
     in property <string> label;
     in property <bool> selected: false;
     callback pressed();
     height: 32px;
     border-radius: 12px;
+    a11y-label: root.label;
     background: root.selected ? DesignTokens.selected-wash : DesignTokens.tile;
-    ta := TouchArea {
-        clicked => { root.pressed(); }
-    }
+    activated => { root.pressed(); }
     HorizontalLayout {
         padding-left: 10px;
         padding-right: 10px;
@@ -195,15 +264,16 @@ component RailRow inherits Rectangle {
             vertical-alignment: center;
         }
     }
-}// 左の列の AI Botの行（名前＋「AI」の印＋在席状態）。
+}// 左の列の AI Botの行（名前＋在席状態。押せない一覧の項目として読み上げる）。
 component RailAiRow inherits Rectangle {
     in property <string> label;
     in property <string> presence;
     in property <string> tr-ai-badge;
-    in property <string> tr-label-ai-member-a11y;
     height: 32px;
     border-radius: 12px;
     background: DesignTokens.tile;
+    accessible-role: list-item;
+    accessible-label: root.label + " " + A11yStrings.tr-ai-bot-label + " " + root.presence;
     HorizontalLayout {
         padding-left: 10px;
         padding-right: 10px;
@@ -217,7 +287,6 @@ component RailAiRow inherits Rectangle {
         AiBadgeView {
             horizontal-stretch: 0;
             label: root.tr-ai-badge;
-            label-a11y: root.tr-label-ai-member-a11y;
         }
         Text {
             text: root.presence;
@@ -243,9 +312,25 @@ component LinkText inherits Text {
     // （第9枠に記録）。押されたことを外に伝える callback。
     callback touched();
     // Text だけでは押せないため、当たり判定は TouchArea で作る（Issue 331 で追加）。
+    // 押せる部品として読み上げる（Issue 379。ラベルは text そのもの）。
+    forward-focus: fs;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.touched(); }
     TouchArea {
         clicked => { root.touched(); }
     }
+    fs := FocusScope {
+        width: 0px;
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) {
+                root.touched();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    if fs.has-focus : FocusRing {}
 }
 
 // ---- 判断待ち（Issue 331）のモデル ----
@@ -289,7 +374,6 @@ component RailView inherits Rectangle {
     in property <string> tr-rail-dm-people;
     in property <string> tr-rail-dm-ai;
     in property <string> tr-ai-badge;
-    in property <string> tr-label-ai-member-a11y;
     // 合成データ
     in property <string> data-org-name;
     in property <string> data-channel-1;
@@ -344,19 +428,16 @@ component RailView inherits Rectangle {
             label: root.data-ai-1;
             presence: root.data-ai-1-presence;
             tr-ai-badge: root.tr-ai-badge;
-            tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
         }
         RailAiRow {
             label: root.data-ai-2;
             presence: root.data-ai-2-presence;
             tr-ai-badge: root.tr-ai-badge;
-            tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
         }
         RailAiRow {
             label: root.data-ai-3;
             presence: root.data-ai-3-presence;
             tr-ai-badge: root.tr-ai-badge;
-            tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
         }
     }
 }
@@ -453,11 +534,12 @@ component PendingDecisionRow inherits Rectangle {
     in property <string> tr-decision-choose;
     in property <string> tr-pending-open-chat;
     in property <string> tr-ai-badge;
-    in property <string> tr-label-ai-member-a11y;
     callback open-chat(string);
     callback decide(string, string, int);
     border-radius: 14px;
     background: DesignTokens.pending-bg;
+    accessible-role: list-item;
+    accessible-label: root.item.question;
     HorizontalLayout {
         padding: 10px;
         spacing: 12px;
@@ -468,6 +550,7 @@ component PendingDecisionRow inherits Rectangle {
         AvatarView {
             is-ai: root.item.is-ai;
             initial: root.item.initial;
+            a11y-label: root.item.requester + " " + (root.item.is-ai ? A11yStrings.tr-ai-bot-label : A11yStrings.tr-person-label);
         }
         VerticalLayout {
             spacing: 6px;
@@ -483,7 +566,6 @@ component PendingDecisionRow inherits Rectangle {
                 if root.item.is-ai : AiBadgeView {
                     horizontal-stretch: 0;
                     label: root.tr-ai-badge;
-                    label-a11y: root.tr-label-ai-member-a11y;
                 }
                 Text {
                     text: root.item.channel;
@@ -515,11 +597,16 @@ component PendingDecisionRow inherits Rectangle {
                     wrap: word-wrap;
                     vertical-alignment: center;
                 }
-                Rectangle {
+                Pressable {
                     width: 96px;
                     height: 28px;
                     border-radius: 14px;
+                    a11y-label: root.tr-decision-choose;
                     background: DesignTokens.primary-bg;
+                    activated => { root.decide(root.item.decision-id, opt.option-id, root.item.version); }
+                    key-hit(key, ctrl, shift) => {
+                        return KeyRouter.decide-key(root.item.decision-id, opt.option-id, root.item.version, key, ctrl, shift);
+                    }
                     Text {
                         text: root.tr-decision-choose;
                         color: DesignTokens.primary-fg;
@@ -527,9 +614,6 @@ component PendingDecisionRow inherits Rectangle {
                         font-weight: 600;
                         vertical-alignment: center;
                         horizontal-alignment: center;
-                    }
-                    ta := TouchArea {
-                        clicked => { root.decide(root.item.decision-id, opt.option-id, root.item.version); }
                     }
                 }
             }
@@ -548,6 +632,8 @@ component MyRequestRow inherits Rectangle {
     height: 48px;
     border-radius: 14px;
     background: DesignTokens.tile;
+    accessible-role: list-item;
+    accessible-label: root.item.text;
     HorizontalLayout {
         padding: 10px;
         spacing: 12px;
@@ -591,7 +677,6 @@ component TodayView inherits Rectangle {
     in property <string> tr-pending-open-chat;
     in property <string> tr-decision-choose;
     in property <string> tr-ai-badge;
-    in property <string> tr-label-ai-member-a11y;
     in property <[PendingItem]> pending-items;
     in property <[RequestItem]> request-items;
     callback open-chat(string);
@@ -638,7 +723,6 @@ component TodayView inherits Rectangle {
                             tr-decision-choose: root.tr-decision-choose;
                             tr-pending-open-chat: root.tr-pending-open-chat;
                             tr-ai-badge: root.tr-ai-badge;
-                            tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                             open-chat(id) => { root.open-chat(id); }
                             decide(id, option-id, version) => { root.decide(id, option-id, version); }
                         }
@@ -680,15 +764,18 @@ component MessageRow inherits Rectangle {
     in property <string> data-body;
     in property <string> data-time;
     in property <string> tr-ai-badge;
-    in property <string> tr-label-ai-member-a11y;
     in property <string> tr-mention-read-range;
     in property <bool> data-show-read-range: false;
+    // 行とアバターの両方の読み上げに「表示名＋種別」を載せる（Issue 379）。
+    accessible-role: list-item;
+    accessible-label: root.data-sender + " " + (root.data-is-ai ? A11yStrings.tr-ai-bot-label : A11yStrings.tr-person-label);
     HorizontalLayout {
         padding: 6px;
         spacing: 12px;
         AvatarView {
             is-ai: root.data-is-ai;
             initial: root.data-initial;
+            a11y-label: root.data-sender + " " + (root.data-is-ai ? A11yStrings.tr-ai-bot-label : A11yStrings.tr-person-label);
         }
         VerticalLayout {
             spacing: 2px;
@@ -708,7 +795,6 @@ component MessageRow inherits Rectangle {
                 if root.data-is-ai : AiBadgeView {
                     horizontal-stretch: 0;
                     label: root.tr-ai-badge;
-                    label-a11y: root.tr-label-ai-member-a11y;
                 }
                 Text {
                     text: root.data-time;
@@ -795,7 +881,6 @@ component DecisionCardView inherits Rectangle {
     in property <string> tr-decision-choose;
     in property <string> tr-decision-outcome;
     in property <string> tr-ai-badge;
-    in property <string> tr-label-ai-member-a11y;
     in property <string> data-id;
     in property <int> data-version;
     in property <string> data-requester;
@@ -809,6 +894,8 @@ component DecisionCardView inherits Rectangle {
     callback decide(string, string, int);
     background: DesignTokens.well;
     border-radius: 14px;
+    accessible-role: groupbox;
+    accessible-label: root.tr-decision-card-label;
     VerticalLayout {
         padding: 12px;
         spacing: 8px;
@@ -828,6 +915,7 @@ component DecisionCardView inherits Rectangle {
                     border-radius: root.data-requester-is-ai ? 6px : 11px;
                     is-ai: root.data-requester-is-ai;
                     initial: root.data-requester-initial;
+                    a11y-label: root.data-requester + " " + (root.data-requester-is-ai ? A11yStrings.tr-ai-bot-label : A11yStrings.tr-person-label);
                 }
                 Text {
                     text: root.data-requester;
@@ -839,7 +927,6 @@ component DecisionCardView inherits Rectangle {
                 if root.data-requester-is-ai : AiBadgeView {
                     horizontal-stretch: 0;
                     label: root.tr-ai-badge;
-                    label-a11y: root.tr-label-ai-member-a11y;
                 }
             }
         }
@@ -860,11 +947,16 @@ component DecisionCardView inherits Rectangle {
                 wrap: word-wrap;
                 vertical-alignment: center;
             }
-            Rectangle {
+            Pressable {
                 width: 96px;
                 height: 28px;
                 border-radius: 14px;
+                a11y-label: root.tr-decision-choose;
                 background: DesignTokens.primary-bg;
+                activated => { root.decide(root.data-id, opt.option-id, root.data-version); }
+                key-hit(key, ctrl, shift) => {
+                    return KeyRouter.decide-key(root.data-id, opt.option-id, root.data-version, key, ctrl, shift);
+                }
                 Text {
                     text: root.tr-decision-choose;
                     color: DesignTokens.primary-fg;
@@ -872,9 +964,6 @@ component DecisionCardView inherits Rectangle {
                     font-weight: 600;
                     vertical-alignment: center;
                     horizontal-alignment: center;
-                }
-                ta := TouchArea {
-                    clicked => { root.decide(root.data-id, opt.option-id, root.data-version); }
                 }
             }
         }
@@ -943,10 +1032,12 @@ component HandoffCardView inherits Rectangle {
                 font-size: 11px;
                 vertical-alignment: center;
             }
-            if !root.data-acknowledged : Rectangle {
+            if !root.data-acknowledged : Pressable {
                 height: 28px;
                 border-radius: 14px;
+                a11y-label: root.tr-handoff-acknowledge;
                 background: DesignTokens.ink;
+                activated => { root.acknowledge-pressed(); }
                 HorizontalLayout {
                     padding-left: 12px;
                     padding-right: 12px;
@@ -956,9 +1047,6 @@ component HandoffCardView inherits Rectangle {
                         font-size: 12px;
                         font-weight: 600;
                         vertical-alignment: center;
-                    }
-                    ta := TouchArea {
-                        clicked => { root.acknowledge-pressed(); }
                     }
                 }
             }
@@ -985,7 +1073,6 @@ component HandoffCardView inherits Rectangle {
 component PrivateNoteRow inherits Rectangle {
     in property <string> tr-message-private-note;
     in property <string> tr-ai-badge;
-    in property <string> tr-label-ai-member-a11y;
     in property <string> data-sender;
     in property <bool> data-is-ai: false;
     in property <string> data-initial;
@@ -1006,6 +1093,7 @@ component PrivateNoteRow inherits Rectangle {
             AvatarView {
                 is-ai: root.data-is-ai;
                 initial: root.data-initial;
+                a11y-label: root.data-sender + " " + (root.data-is-ai ? A11yStrings.tr-ai-bot-label : A11yStrings.tr-person-label);
             }
             VerticalLayout {
                 spacing: 2px;
@@ -1019,7 +1107,6 @@ component PrivateNoteRow inherits Rectangle {
                     if root.data-is-ai : AiBadgeView {
                         horizontal-stretch: 0;
                         label: root.tr-ai-badge;
-                        label-a11y: root.tr-label-ai-member-a11y;
                     }
                 }
                 Text {
@@ -1108,10 +1195,15 @@ component ExternalSendCardView inherits Rectangle {
             spacing: 10px;
             height: 36px;
             // 「送る」（主操作）。押せるかは Rust 側（ApprovalCardBridge）が決める。
-            Rectangle {
+            Pressable {
                 width: 96px;
                 border-radius: 18px;
+                a11y-label: root.tr-ext-send;
                 background: DesignTokens.ext-go-bg;
+                activated => { root.send-pressed(); }
+                key-hit(key, ctrl, shift) => {
+                    return KeyRouter.send-key(key, ctrl, shift);
+                }
                 Text {
                     text: root.tr-ext-send;
                     color: DesignTokens.ext-go-fg;
@@ -1120,25 +1212,21 @@ component ExternalSendCardView inherits Rectangle {
                     vertical-alignment: center;
                     horizontal-alignment: center;
                 }
-                ta := TouchArea {
-                    clicked => { root.send-pressed(); }
-                }
             }
             // 「直す」。
-            Rectangle {
+            Pressable {
                 width: 80px;
                 border-radius: 18px;
                 border-width: 1px;
                 border-color: DesignTokens.ext-fx-line;
+                a11y-label: root.tr-ext-fix;
+                activated => { root.fix-pressed(); }
                 Text {
                     text: root.tr-ext-fix;
                     color: DesignTokens.ext-fx-fg;
                     font-size: 14px;
                     vertical-alignment: center;
                     horizontal-alignment: center;
-                }
-                ta2 := TouchArea {
-                    clicked => { root.fix-pressed(); }
                 }
             }
             Text {
@@ -1162,7 +1250,6 @@ component ExternalSendCardView inherits Rectangle {
 component ChannelView inherits Rectangle {
     in property <string> tr-unread-divider;
     in property <string> tr-ai-badge;
-    in property <string> tr-label-ai-member-a11y;
     in property <string> tr-decision-mark;
     in property <string> tr-message-private-note;
     in property <string> tr-thread-replies;
@@ -1258,7 +1345,6 @@ component ChannelView inherits Rectangle {
                     data-time: root.data-msg1-time;
                     data-body: root.data-msg1-body;
                     tr-ai-badge: root.tr-ai-badge;
-                    tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                     tr-mention-read-range: root.tr-mention-read-range;
                 }
                 MessageRow {
@@ -1268,7 +1354,6 @@ component ChannelView inherits Rectangle {
                     data-time: root.data-msg2-time;
                     data-body: root.data-msg2-body;
                     tr-ai-badge: root.tr-ai-badge;
-                    tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                     tr-mention-read-range: root.tr-mention-read-range;
                     data-show-read-range: true;
                 }
@@ -1319,7 +1404,6 @@ component ChannelView inherits Rectangle {
                         tr-decision-choose: root.tr-decision-choose;
                         tr-decision-outcome: root.tr-decision-outcome;
                         tr-ai-badge: root.tr-ai-badge;
-                        tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                         data-id: root.data-decision-id;
                         data-version: root.data-decision-version;
                         data-requester: root.data-decision-requester;
@@ -1340,7 +1424,6 @@ component ChannelView inherits Rectangle {
                     data-time: root.data-msg3-time;
                     data-body: root.data-msg3-body;
                     tr-ai-badge: root.tr-ai-badge;
-                    tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                     tr-mention-read-range: root.tr-mention-read-range;
                 }
                 DecisionMarkView {
@@ -1352,7 +1435,6 @@ component ChannelView inherits Rectangle {
                     PrivateNoteRow {
                         tr-message-private-note: root.tr-message-private-note;
                         tr-ai-badge: root.tr-ai-badge;
-                        tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                         data-sender: root.data-note-sender;
                         data-is-ai: root.data-note-is-ai;
                         data-initial: root.data-note-initial;
@@ -1418,7 +1500,6 @@ component ThreadPaneView inherits Rectangle {
     in property <string> tr-thread-view-work;
     in property <string> tr-thread-input-placeholder;
     in property <string> tr-ai-badge;
-    in property <string> tr-label-ai-member-a11y;
     in property <string> tr-mention-read-range;
     in property <string> data-channel;
     in property <string> data-msg1-sender;
@@ -1472,7 +1553,6 @@ component ThreadPaneView inherits Rectangle {
                     data-time: root.data-msg1-time;
                     data-body: root.data-msg1-body;
                     tr-ai-badge: root.tr-ai-badge;
-                    tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                     tr-mention-read-range: root.tr-mention-read-range;
                 }
                 MessageRow {
@@ -1482,7 +1562,6 @@ component ThreadPaneView inherits Rectangle {
                     data-time: root.data-msg2-time;
                     data-body: root.data-msg2-body;
                     tr-ai-badge: root.tr-ai-badge;
-                    tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                     tr-mention-read-range: root.tr-mention-read-range;
                 }
             }
@@ -1533,7 +1612,6 @@ component AiWorkPaneView inherits Rectangle {
     in property <string> tr-pane-ai-read-range;
     in property <string> tr-pane-ai-note;
     in property <string> tr-ai-badge;
-    in property <string> tr-label-ai-member-a11y;
     in property <string> data-ai-name;
     in property <string> data-ai-initial;
     in property <int> data-steps-done;
@@ -1555,11 +1633,11 @@ component AiWorkPaneView inherits Rectangle {
             AvatarView {
                 is-ai: true;
                 initial: root.data-ai-initial;
+                a11y-label: root.data-ai-name + " " + A11yStrings.tr-ai-bot-label;
             }
             AiBadgeView {
                 horizontal-stretch: 0;
                 label: root.tr-ai-badge;
-                label-a11y: root.tr-label-ai-member-a11y;
             }
             Text {
                 text: root.tr-pane-ai-work-title;
@@ -1658,11 +1736,13 @@ component AboutDialogView inherits Rectangle {
                     }
                     // Slint の attribution widget（"Made with Slint" の badge と版・URL）。
                     AboutSlint {}
-                    // 閉じる（主操作）。既存の主ボタンと同じ重ね方で TouchArea を置く。
-                    Rectangle {
+                    // 閉じる（主操作）。既存の主ボタンと同じ重ね方の押せる部品にする。
+                    Pressable {
                         height: 36px;
                         border-radius: 18px;
+                        a11y-label: root.tr-about-close;
                         background: DesignTokens.primary-bg;
+                        activated => { root.close-pressed(); }
                         HorizontalLayout {
                             padding-left: 16px;
                             padding-right: 16px;
@@ -1674,9 +1754,6 @@ component AboutDialogView inherits Rectangle {
                                 vertical-alignment: center;
                                 horizontal-alignment: center;
                             }
-                        }
-                        ta := TouchArea {
-                            clicked => { root.close-pressed(); }
                         }
                     }
                 }
@@ -1699,7 +1776,6 @@ export component MainWindow inherits Window {
     in property <string> tr-search-placeholder;
     in property <string> tr-search-shortcut;
     in property <string> tr-banner-demo-mock;
-    in property <string> tr-label-ai-member-a11y;
     in property <string> tr-today-title;
     in property <string> tr-today-section-mine;
     in property <string> tr-today-section-requests;
@@ -1858,6 +1934,8 @@ export component MainWindow inherits Window {
     MenuBar {
         Menu {
             title: root.tr-menu-help;
+            // Menu/MenuItem は専用要素で accessible-* を持てない（読み上げ名は
+            // title が使われる。Issue 379）。
             MenuItem {
                 title: root.tr-menu-about;
                 activated => { root.show-about = true; }
@@ -1871,7 +1949,6 @@ export component MainWindow inherits Window {
         DemoBannerView {
             tr-banner-demo-mock: root.tr-banner-demo-mock;
             tr-ai-badge: root.tr-ai-badge;
-            tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
         }
         HorizontalLayout {
         spacing: 16px;
@@ -1884,7 +1961,6 @@ export component MainWindow inherits Window {
             tr-rail-dm-people: root.tr-rail-dm-people;
             tr-rail-dm-ai: root.tr-rail-dm-ai;
             tr-ai-badge: root.tr-ai-badge;
-            tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
             data-org-name: root.data-org-name;
             data-channel-1: root.data-channel-1;
             data-channel-2: root.data-channel-2;
@@ -1924,7 +2000,6 @@ export component MainWindow inherits Window {
                     tr-pending-open-chat: root.tr-pending-open-chat;
                     tr-decision-choose: root.tr-decision-choose;
                     tr-ai-badge: root.tr-ai-badge;
-                    tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                     pending-items: root.pending-items;
                     request-items: root.request-items;
                     open-chat(id) => { root.open-decision-chat(id); }
@@ -1933,7 +2008,6 @@ export component MainWindow inherits Window {
                 if !root.show-today : ChannelView {
                     tr-unread-divider: root.tr-unread-divider;
                     tr-ai-badge: root.tr-ai-badge;
-                    tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                     tr-decision-mark: root.tr-decision-mark;
                     tr-message-private-note: root.tr-message-private-note;
                     tr-thread-replies: root.tr-thread-replies;
@@ -2017,7 +2091,6 @@ export component MainWindow inherits Window {
             tr-thread-view-work: root.tr-thread-view-work;
             tr-thread-input-placeholder: root.tr-thread-input-placeholder;
             tr-ai-badge: root.tr-ai-badge;
-            tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
             tr-mention-read-range: root.tr-mention-read-range;
             data-channel: root.data-channel-title;
             data-msg1-sender: root.data-thread-msg1-sender;
@@ -2044,7 +2117,6 @@ export component MainWindow inherits Window {
                 tr-pane-ai-read-range: root.tr-pane-ai-read-range;
                 tr-pane-ai-note: root.tr-pane-ai-note;
                 tr-ai-badge: root.tr-ai-badge;
-                tr-label-ai-member-a11y: root.tr-label-ai-member-a11y;
                 data-ai-name: root.data-ai-work-name;
                 data-ai-initial: root.data-ai-work-initial;
                 data-steps-done: root.data-ai-work-steps-done;

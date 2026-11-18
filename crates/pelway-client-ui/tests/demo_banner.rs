@@ -10,8 +10,9 @@
 //! - AI の行には見える「AI」バッジがあり、人の行には無いこと
 //!   （メッセージ・あなただけに表示・判断待ち・判断カード・レールの AI 一覧・
 //!   AI の作業の枠）。
-//! - バッジの読み上げは「AIメンバー」/"AI member" で、見える「AI」を
-//!   読み上げで二重に読ませないこと。バッジを隠す仕組みが無いこと。
+//! - バッジの内側の文字は読み上げに名を出さないこと（見える「AI」を二重に
+//!   読ませない。AI の呼称「AI Bot」は行側のラベルが言う——Issue 379 の契約、
+//!   tests/accessibility.rs で検査）。バッジを隠す仕組みが無いこと。
 //!
 //! 窓を作る検査は 1 テストにまとめる（tests/slint_attribution.rs と同じ理由で、
 //! テスト用 backend のモック時計はスレッドをまたぐと単調性の検査に落ちる）。
@@ -96,7 +97,6 @@ fn persistent_display_end_to_end() {
         let window = window_with_texts(lang);
         let banner_text = fluent(lang, "banner-demo-mock");
         let badge_text = fluent(lang, "ai-badge");
-        let badge_a11y = fluent(lang, "label-ai-member-a11y");
         // 注: テスト用 backend の要素探索は ItemRc::is_visible() を通るため、
         // Flickable のビューポート外にクリップされた行は見つからない。
         // 行の検査の前に窓を縦長にして、一覧の全行を可視にしておく。
@@ -298,8 +298,8 @@ fn persistent_display_end_to_end() {
         settle();
 
         // ---- バッジの読み上げ: 見える「AI」を二重に読ませない ----
-        // バッジの内側で読み上げに出る文字は「AIメンバー」/"AI member" だけ
-        // （見える文字の「AI」をそのまま読み上げ名にしない）。
+        // バッジの内側の文字は読み上げに名を出さない（Issue 379。accessible-role:
+        // none + 空のラベル）。AI であることは行側のラベルの「AI Bot」が言う。
         let badges =
             ElementHandle::find_by_element_type_name(&window, "AiBadgeView").collect::<Vec<_>>();
         assert!(
@@ -308,10 +308,14 @@ fn persistent_display_end_to_end() {
             badges.len()
         );
         for badge in &badges {
-            assert_eq!(
-                descendant_labels(badge),
-                vec![badge_a11y.clone()],
-                "{lang} のバッジの読み上げは「{badge_a11y}」だけであること（「AI」を二重に読ませない）"
+            let labels = descendant_labels(badge);
+            assert!(
+                labels.iter().all(|l| l.trim().is_empty()),
+                "{lang} のバッジの内側は読み上げ名を出さないこと（「AI」の二重読み防止）: {labels:?}"
+            );
+            assert!(
+                labels.iter().all(|l| !l.contains(&badge_text)),
+                "{lang} のバッジは見える文字の「{badge_text}」を読み上げ名にしないこと: {labels:?}"
             );
         }
     }
@@ -331,15 +335,16 @@ fn banner_text_is_never_dropped() {
     );
 }
 
-/// `.slint` 上の契約: AI バッジの読み上げ名を出すこと・隠す仕組みを作らないこと。
+/// `.slint` 上の契約: AI バッジの内側の文字は読み上げに載せないこと・
+/// バッジを隠す仕組みを作らないこと。
 #[test]
 fn ai_badge_has_no_hide_mechanism() {
     let block = component_block(SLINT, "AiBadgeView");
-    // 読み上げ名を出す（見える「AI」をそのまま二重に読ませない）。読み上げの
-    // 全文の適用は Issue 379、ここではバッジの読み上げ名だけを契約にする。
+    // 見える「AI」は読み上げに載せない（Issue 381「二重に載せない」+ Issue 379
+    // の着地点。呼称「AI Bot」は行側の accessible-label が言う）。
     assert!(
-        block.contains("accessible-label"),
-        "AiBadgeView の読み上げ名（accessible-label）を出すこと"
+        block.contains("accessible-role: none"),
+        "AiBadgeView の内側の文字は読み上げに載せない（「AI」の二重読み防止）"
     );
     assert!(
         !block.contains("in property <bool>"),

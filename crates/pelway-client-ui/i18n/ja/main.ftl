@@ -18,7 +18,6 @@ search-placeholder = ⌕ 会話と作業記録を検索
 search-shortcut = ⌘K
 ## 常時表示（デモ・模擬応答と AI の識別。S00 の画面契約）
 banner-demo-mock = デモ・模擬応答
-label-ai-member-a11y = AIメンバー
 ## 「今日・判断待ち」の画面（区切りは inbox.rs の 2 区分）
 today-title = 今日
 today-section-mine = 自分の判断待ち
@@ -48,7 +47,7 @@ handoff-acknowledge = 受けました
 handoff-decision-owner = 納期の決定：{ $name }（代表）
 ## 社外への送信の確認カード
 ext-card-label = 社外への送信 · { $name }さんの確認待ち
-ext-card-question = { $to }にメールを送りますか
+ext-card-question = { $address }にメールを送りますか
 ext-address-label = 宛先：
 ext-subject-label = 件名：
 ext-basis-label = 根拠：
@@ -73,3 +72,6 @@ menu-help = ヘルプ
 menu-about = このアプリについて
 about-title = このアプリについて
 about-close = 閉じる
+## 読み上げ用の種別の呼び名（Issue 379。accessible-label で使う）
+ai-bot-label = AI Bot
+person-label = 人

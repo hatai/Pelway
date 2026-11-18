@@ -19,7 +19,6 @@ search-placeholder = ⌕ Search conversations and work logs
 search-shortcut = ⌘K
 ## Always-on display (demo/simulated label and AI identification, S00)
 banner-demo-mock = Demo · simulated responses
-label-ai-member-a11y = AI member
 ## Today view (two buckets per inbox.rs: awaiting my decision / my requests)
 today-title = Today
 today-section-mine = Awaiting my decision
@@ -49,7 +48,7 @@ handoff-acknowledge = Got it
 handoff-decision-owner = Deadline decided by: { $name } (lead)
 ## External send confirmation card
 ext-card-label = External send · awaiting { $name }'s confirmation
-ext-card-question = Send an email to { $to }?
+ext-card-question = Send an email to { $address }?
 ext-address-label = To:
 ext-subject-label = Subject:
 ext-basis-label = Basis:
@@ -74,3 +73,6 @@ menu-help = Help
 menu-about = About This App
 about-title = About This App
 about-close = Close
+## Role names for screen readers (Issue 379, used in accessible-label)
+ai-bot-label = AI staff
+person-label = person
