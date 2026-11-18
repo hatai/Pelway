@@ -200,25 +200,30 @@ finish() {
 
 # AI 開発チーム（docs/superpowers/specs/agent-team.md）の GitHub 名義をそろえる手順書。
 # 実装担当の GitHub App pelway-dev と、レビュー担当の GitHub App pelway-review を作り、
-# 認証情報を ~/.config/pelway-agent/fnox.toml（age で暗号化）に置き、ブランチ保護と Projects ボードを設定する。
-# scripts/agent-gh はこの設定から認証情報を読む。
+# 認証情報を age で暗号化して置き、ブランチ保護と Projects ボードを設定する。
+# dev の秘密は ~/.config/pelway-agent/fnox.toml（age 鍵は ~/.config/fnox/age.txt）に、
+# review の秘密は ~/.config/pelway-agent-review/fnox.toml（review 専用の age 鍵は同ディレクトリの age.txt）に置く（#449 の鍵分割）。
+# scripts/agent-gh はこれらの設定から認証情報を読む。
 
 REPO="hatai/Pelway"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CFG="${PELWAY_AGENT_FNOX_CONFIG:-$HOME/.config/pelway-agent/fnox.toml}"
+# レビュー担当の秘密は dev と別の設定・別の age 鍵に置く（#449）。scripts/agent-gh review はこちらを読む。
+REVIEW_CFG="${PELWAY_AGENT_FNOX_CONFIG_REVIEW:-$HOME/.config/pelway-agent-review/fnox.toml}"
+REVIEW_AGE_KEY="$HOME/.config/pelway-agent-review/age.txt"
 NOTIFY_CFG="$HOME/.config/pelway-agent-notify/fnox.toml"
 ENV_FILE="/nonexistent/pelway-agent-accounts.env" # 値は .env ではなく fnox に置く
 
-# fnox_set NAME：標準入力の値を CFG に age で暗号化して保存する（値は argv に載せない）。
+# fnox_set <config> <provider> NAME：標準入力の値を <config> に age で暗号化して保存する（値は argv に載せない）。
 fnox_set() {
-  fnox -c "$CFG" set --provider age "$1" >/dev/null
-  printf '  %s✓ saved%s %s → %s\n' "$GREEN" "$RESET" "$1" "$CFG"
+  fnox -c "$1" set --provider "$2" "$3" >/dev/null
+  printf '  %s✓ saved%s %s → %s\n' "$GREEN" "$RESET" "$3" "$1"
 }
 
 # App の作成・秘密鍵の保存・インストールを 3 段階で案内する。
-# app_stages <名前> <fnox の接頭辞> <役割の説明> <権限の説明>
+# app_stages <名前> <fnox の接頭辞> <役割の説明> <権限の説明> <保存先の fnox 設定> <provider 名>
 app_stages() {
-  local name="$1" prefix="$2" role="$3" perms="$4" slug_var="$2_SLUG" id_var="$2_ID_INPUT" inst_var="$2_INSTALLATION_INPUT" key_var="$2_KEY_PATH" slug
+  local name="$1" prefix="$2" role="$3" perms="$4" cfg="$5" provider="$6" slug_var="$2_SLUG" id_var="$2_ID_INPUT" inst_var="$2_INSTALLATION_INPUT" key_var="$2_KEY_PATH" slug
 
   stage "GitHub App $name を作る"
   say "$role の名義。hatai でログインしたブラウザで作業する。"
@@ -232,7 +237,7 @@ app_stages() {
   step "作成後の General ページに出る App ID と、URL の /settings/apps/<slug> の slug を控える。"
   ask "$id_var" "App ID:"
   ask "$slug_var" "slug（URL の apps/ の後ろ）:"
-  printf '%s' "${!id_var}" | fnox_set "${prefix}_APP_ID"
+  printf '%s' "${!id_var}" | fnox_set "$cfg" "$provider" "${prefix}_APP_ID"
   pause
 
   slug="${!slug_var}"
@@ -242,7 +247,7 @@ app_stages() {
   note "WSL からは /mnt/c/Users/<Windows のユーザー名>/Downloads/... で見える。"
   ask "$key_var" "ダウンロードした .pem のパス:"
   [[ -f "${!key_var}" ]] || { warn "${!key_var} が見つからない"; exit 1; }
-  fnox_set "${prefix}_APP_KEY" <"${!key_var}"
+  fnox_set "$cfg" "$provider" "${prefix}_APP_KEY" <"${!key_var}"
   if confirm "保存したので、ダウンロードした ${!key_var} を削除する？"; then
     rm -f -- "${!key_var}"
     printf '  %s✓ removed%s %s\n' "$GREEN" "$RESET" "${!key_var}"
@@ -256,13 +261,13 @@ app_stages() {
   step "Only select repositories → $REPO を選ぶ → Install"
   step "インストール後の URL https://github.com/settings/installations/<数字> の数字を控える。"
   ask "$inst_var" "Installation ID（URL の数字）:"
-  printf '%s' "${!inst_var}" | fnox_set "${prefix}_APP_INSTALLATION_ID"
+  printf '%s' "${!inst_var}" | fnox_set "$cfg" "$provider" "${prefix}_APP_INSTALLATION_ID"
   pause
 }
 
 run_wizard() {
 
-TOTAL_STAGES=11
+TOTAL_STAGES=13
 
 banner "Pelway AI 開発チームの GitHub 名義とブランチ保護"
 
@@ -308,14 +313,59 @@ fi
 pause
 
 app_stages "pelway-dev" "PELWAY_DEV" "実装担当のエージェントが push と PR 作成に使う" \
-  "Contents = Read and write / Pull requests = Read and write / Issues = Read and write（Workflows は付けない。付けると .github/workflows に push で動く workflow を置き、承認前に secret を読めてしまう）"
+  "Contents = Read and write / Pull requests = Read and write / Issues = Read and write（Workflows は付けない。付けると .github/workflows に push で動く workflow を置き、承認前に secret を読めてしまう）" \
+  "$CFG" "age"
 
 # コミットの作成者に使うメールアドレス（<bot ユーザーの ID>+<slug>[bot]@users.noreply.github.com）
 dev_bot_id="$(gh api "/users/${PELWAY_DEV_SLUG}%5Bbot%5D" --jq .id)"
-printf '%s' "$dev_bot_id+${PELWAY_DEV_SLUG}[bot]@users.noreply.github.com" | fnox_set PELWAY_DEV_GIT_EMAIL
+printf '%s' "$dev_bot_id+${PELWAY_DEV_SLUG}[bot]@users.noreply.github.com" | fnox_set "$CFG" age PELWAY_DEV_GIT_EMAIL
+
+stage "review 用の fnox 設定と age 鍵を作る"
+say "レビュー担当の秘密は dev と別の設定・別の age 鍵に置く（#449）。鍵の値は画面に出さない。"
+if [[ -f "$REVIEW_CFG" ]]; then
+  note "$REVIEW_CFG は作成済み"
+else
+  mkdir -p "$(dirname "$REVIEW_CFG")"
+  if [[ -f "$REVIEW_AGE_KEY" ]]; then
+    note "age 鍵は作成済み"
+  else
+    (umask 077 && age-keygen -o "$REVIEW_AGE_KEY")
+    printf '  %s✓ created%s %s（秘密鍵。値は表示しない）\n' "$GREEN" "$RESET" "$REVIEW_AGE_KEY"
+  fi
+  review_recipient="$(age-keygen -y "$REVIEW_AGE_KEY")"
+  (umask 077 && cat >"$REVIEW_CFG" <<EOF
+# レビュー担当の GitHub 名義（scripts/agent-gh review が読む）。値は review 専用の age 鍵で暗号化されている。
+# 作成と更新: scripts/setup/agent-accounts.sh
+[providers.review_age]
+type = "age"
+key_file = "$REVIEW_AGE_KEY"
+recipients = ["$review_recipient"]
+
+[secrets]
+EOF
+  )
+  printf '  %s✓ created%s %s\n' "$GREEN" "$RESET" "$REVIEW_CFG"
+fi
+pause
 
 app_stages "pelway-review" "PELWAY_REVIEW" "レビュー担当のエージェントがレビューを投稿するのに使う" \
-  "Contents = Read-only / Pull requests = Read and write / Issues = Read-only"
+  "Contents = Read-only / Pull requests = Read and write / Issues = Read-only" \
+  "$REVIEW_CFG" "review_age"
+
+stage "旧設定に残った review 秘密を移す（既存環境だけ）"
+say "旧設定 ($CFG) に PELWAY_REVIEW_* があるときだけ、値を表示せずに $REVIEW_CFG へ移す。"
+if fnox -c "$CFG" get PELWAY_REVIEW_APP_ID >/dev/null 2>&1; then
+  for secret_name in PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW_APP_KEY; do
+    fnox -c "$CFG" get "$secret_name" | fnox_set "$REVIEW_CFG" review_age "$secret_name"
+  done
+  for secret_name in PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW_APP_KEY; do
+    fnox -c "$CFG" remove "$secret_name" >/dev/null
+    printf '  %s✓ removed%s %s ← %s\n' "$GREEN" "$RESET" "$secret_name" "$CFG"
+  done
+else
+  note "旧設定に PELWAY_REVIEW_APP_ID は無い（新規セットアップなので移行は不要）"
+fi
+pause
 
 stage "名義を確かめる"
 say "scripts/agent-gh で、それぞれの名義が GitHub に通るか確かめる。"
