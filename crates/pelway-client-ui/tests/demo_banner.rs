@@ -117,7 +117,7 @@ fn persistent_display_end_to_end() {
     // チャット内の DecisionCardView の両方に出る。
     const NOW: u64 = 25 * 60 * 1000;
 
-    for lang in ["ja", "en"] {
+    for lang in ["en", "ja"] {
         let window = window_with_texts(lang);
         let banner_text = fluent(lang, "banner-demo-mock");
         let badge_text = fluent(lang, "ai-badge");
