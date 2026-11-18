@@ -144,9 +144,9 @@ component DemoBannerView inherits Rectangle {
     in property <string> tr-label-ai-member-a11y;
     HorizontalLayout {
         spacing: 8px;
-        // 「デモ・模擬応答」の印（caution 系 pill）。狭い幅では最大 2 行に
-        // 折り返す。省略・三点リーダー・脱落はしない（省略用の overflow を
-        // 付けない）。
+        // 「デモ・模擬応答」の印（caution 系 pill）。狭い幅では行を増やして
+        // 折り返す。省略・三点リーダー・行の脱落はしない（行数の上限や
+        // 省略用の overflow を付けず、文言は必ず全部出る）。
         Rectangle {
             border-radius: 8px;
             background: DesignTokens.warning-bg;
@@ -161,8 +161,6 @@ component DemoBannerView inherits Rectangle {
                     font-size: 11px;
                     font-weight: 500;
                     wrap: word-wrap;
-                    max-lines: 2;
-                    overflow: clip;
                     vertical-alignment: center;
                 }
             }

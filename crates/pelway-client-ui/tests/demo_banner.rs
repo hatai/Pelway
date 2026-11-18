@@ -135,7 +135,7 @@ fn persistent_display_end_to_end() {
             );
         }
 
-        // ---- 狭い幅でも文言を省略せず折り返す ----
+        // ---- 幅 360px 相当でも文言を省略せず、最大 2 行で全体が見える ----
         window.set_show_today(false);
         settle();
         let find_banner_text = |w: &MainWindow| {
@@ -144,29 +144,34 @@ fn persistent_display_end_to_end() {
                 .unwrap_or_else(|| panic!("「{banner_text}」が見えること"))
         };
         let one_line_h = find_banner_text(&window).size().height;
-        let full_w = find_banner_text(&window).size().width;
         assert!(
-            one_line_h > 0.0 && full_w > 0.0,
+            one_line_h > 0.0,
             "{lang} のバナーの文言が 1 行で見えていること"
         );
-        // 折り返しが始まる幅はフォントの計測値に依存するため、固定幅ではなく
-        // 窓を段階的に狭めて、必ず折り返しが起きるまで確かめる（狭めるほど
-        // 文言に回る幅が減るので、どんな文字幅でもいずれ 2 行になる）。
-        let mut w = full_w;
-        let mut h = one_line_h;
+        // 受け入れ条件の幅（360px 相当）で、文言が最大 2 行に収まって全体が
+        // 見えること。実装は文言を落とす仕組み（max-lines・省略）を付けて
+        // いないので、要素の高さは実際の行数をそのまま反映する。
+        window.window().set_size(LogicalSize::new(360.0, 600.0));
+        settle();
+        let h360 = find_banner_text(&window).size().height;
+        assert!(
+            h360 > 0.5 * one_line_h && h360 <= 2.4 * one_line_h,
+            "{lang} 幅 360px で文言が最大 2 行に収まって全体が見えること (h={h360}, 1行={one_line_h})"
+        );
+        // 折り返しが始まる幅はフォントの計測値に依存するため、さらに窓を
+        // 段階的に狭めて、必ず折り返し（行が増える）まで確かめる。文言は
+        // 落ちないので、行が増えた分だけ高さが伸びる。
+        let mut w = 360.0f32;
+        let mut h = h360;
         while h <= 1.3 * one_line_h && w > 60.0 {
             w = (w * 0.7).max(60.0);
             window.window().set_size(LogicalSize::new(w, 600.0));
             settle();
             h = find_banner_text(&window).size().height;
-            assert!(
-                h <= 2.4 * one_line_h,
-                "{lang} 幅 {w}px でも文言は最大 2 行に収まること (h={h}, 1行={one_line_h})"
-            );
         }
         assert!(
             h > 1.3 * one_line_h,
-            "{lang} のバナーの文言は狭い幅で 2 行に折り返すこと（省略や切り詰めではなく）(w={w})"
+            "{lang} のバナーの文言は狭い幅で行を増やして折り返すこと（省略や切り詰めではなく）(w={w})"
         );
         // 縦長の窓にして一覧の全行をビューポート内に収める（上の注を参照）。
         window.window().set_size(LogicalSize::new(800.0, 2400.0));
@@ -312,13 +317,17 @@ fn persistent_display_end_to_end() {
     }
 }
 
-/// `.slint` 上の契約: 常時バナーの文言は三点リーダーで省略しないこと。
+/// `.slint` 上の契約: 常時バナーの文言は省略も行の脱落もしないこと。
 #[test]
-fn banner_text_is_never_elided() {
+fn banner_text_is_never_dropped() {
     let block = component_block(SLINT, "DemoBannerView");
     assert!(
         !block.contains("elide"),
         "常時バナーの文言に overflow: elide を付けない（省略禁止。折り返しのみ）"
+    );
+    assert!(
+        !block.contains("max-lines"),
+        "常時バナーの文言に max-lines を付けない（行の脱落を起こす max-lines + clip 組み合わせを作らない）"
     );
 }
 
