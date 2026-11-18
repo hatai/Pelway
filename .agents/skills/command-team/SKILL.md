@@ -142,6 +142,15 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 - effort は、追加行が 200 以下で高リスクでなければ既定、それ以外は `high`。同じ PR の 2 回目以降のレビューは 1 段上げる。
 - 複数のレビュー担当を付けた PR で判定が割れたら（approve と request-changes が混ざったら）、マージせず、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正をそのまま進める（人間へのエスカレーションは不要）。実装担当が委託した複数レビューで割れたときも同じで、実装担当が修正に進む（skill `implement-issue` の手順 9）。
 
+### レビュースレッドの settle
+
+レビューが終わったレビュースレッドを未 settle のまま残さない（runbook 9 の「片付け」と同じ決まり。settle しないと worktree も残る）。settle は `t3_thread_organize`（`action: settle`）で行う。
+
+- verdict を読んだら、指揮役が自分で立てたレビュースレッド（指揮役自身の PR・外部投入）を settle する
+- 次のラウンドのレビュースレッドを立てたら、置き換わった前ラウンドのレビュースレッドを settle する
+- 実装担当の PR のレビュー（実装スレッドが `delegate_task` で立てた子タスク）は実装スレッドの内側で settle される（skill `implement-issue` の手順 8）。指揮役は settle しない
+- `needs-human` 中のスレッドと、止まっている・迷走中のスレッドは settle しない
+
 ### レビュー待ちの滞留
 
 レビュー待ちの滞留は、PR ごとに skill `pr-watch` の `pr-digest` を出し、`review-wait` 行（レビュー待ちの経過時間と起点の時刻）で機械的に検出する。起点は PR が最初にレビュー可能になった時刻で一意に決まり、レビュー担当の再割当では戻らない（形式は skill `pr-watch`）。
