@@ -37,7 +37,7 @@ pub mod thresholds {
     pub const CREDENTIAL_TOKEN_MIN_CHARS: usize = 20;
     /// `AKIA`（AWS アクセスキー ID）の接頭辞より後の最小文字数（鍵 ID は 16 桁）。
     pub const AWS_KEY_ID_MIN_CHARS: usize = 16;
-    /// 同一の空でない行の連続がこの回数以上なら暴走系（2〜4 回は正当にあり得るため）。
+    /// 同一の空でない行の連続がこの回数以上なら暴走系（例示・箇条書きの 2〜4 回は正当）。
     pub const REPETITION_RUN_MIN: usize = 5;
     /// 大量貼り付けとみなす最小行数（フェンスの外の空行を除く行数。正当な引用は
     /// フェンスか緩和設定で守られるため 30）。
