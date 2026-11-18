@@ -545,6 +545,10 @@ pub fn sample() -> AppData {
     }
 }
 
+/// メンション候補一覧の表示名（合成データ。表示中のチャンネルの参加者と同じ
+/// 並び）。実メンバー結線の段階で差し替える。
+pub const SAMPLE_MENTION_NAMES: &[&str] = &["田中", "佐藤", "濱田", "リク"];
+
 /// デモの判断待ちの論点（合成データ。`bridge::DecisionShell::sample` と共用）。
 pub const SAMPLE_DECISION_QUESTION: &str = "B社への回答の出し方をどうするか";
 /// デモの判断待ちの案A（合成データ。同上）。

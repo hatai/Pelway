@@ -20,17 +20,18 @@ use pelway_client_core::contract::{
 };
 use pelway_client_core::decision::DecisionBoard;
 use pelway_client_core::input::{Action, Focus, ImeState, InputContext, Key, Modifiers, on_key};
-use slint::{ComponentHandle, Global, Model, ModelRc, VecModel};
+use slint::{ComponentHandle, Global, Model, ModelRc, SharedString, VecModel};
 
 use crate::state::{
     AvatarKind, ChannelView as ChannelState, DecisionCardState, DecisionOptionView,
     DecisionOutcomeView, ExternalSendState, HandoffOption, MyRequestItem, PendingDecisionItem,
-    SAMPLE_DECISION_OPTION_A, SAMPLE_DECISION_OPTION_B, SAMPLE_DECISION_QUESTION, TimelineEntry,
-    format_wait_ms,
+    SAMPLE_DECISION_OPTION_A, SAMPLE_DECISION_OPTION_B, SAMPLE_DECISION_QUESTION,
+    SAMPLE_MENTION_NAMES, TimelineEntry, format_wait_ms,
 };
 use crate::testkit::{FixedClock, FixedKeySource};
 use crate::{
-    DecisionOptionItem, MainWindow, PendingItem, RequestItem, TimelineItem, TimelineRowKind,
+    ComposerKind, DecisionOptionItem, MainWindow, PendingItem, RequestItem, TimelineItem,
+    TimelineRowKind,
 };
 
 /// 承認カード 1 枚の表示用の状態と操作のつなぎ。
@@ -113,18 +114,34 @@ impl<K: KeySource, C: Clock> ApprovalCardBridge<K, C> {
     }
 }
 
+/// 入力欄 1 つの表示用の状態（本文と候補一覧の開閉）。
+///
+/// 本文はこちらが正本: 候補の取り込み（`AcceptMention`）で橋が書き換える
+/// ことがあるため、画面（Slint の TextInput）には都度書き戻す。
+#[derive(Debug, Default)]
+struct ComposerState {
+    text: String,
+    mention_list_open: bool,
+}
+
 /// 画面全体のキー操作のつなぎ。
 ///
 /// フォーカス・IME・候補一覧の開閉を持ち、キー操作をすべて `on_key` に渡す。
 /// 返ってきた [`Action`] だけで画面の状態を変える:
-/// - `AcceptMention` / `DismissMentionList`: 候補一覧を閉じる。
+/// - `AcceptMention`: 先頭の候補を末尾の @… トークンと入れ替えて入れ、一覧を閉じる。
+/// - `DismissMentionList`: 候補一覧を閉じる。入力済みの文字は残す。
 /// - `InsertNewline`: 入力欄に改行を 1 つ入れる。
 /// - `Send`: メッセージの送信として 1 回だけ数える（通信は書かない）。
 /// - `Approve`: 承認カードの「送る」押下に結びつく（押せるかはカードが決める）。
 pub struct ShellBridge {
     focus: Focus,
     ime: ImeState,
-    mention_list_open: bool,
+    /// 最後にフォーカスのあった入力欄（`handle_key` の候補一覧の参照先）。
+    active_composer: ComposerKind,
+    channel_composer: ComposerState,
+    thread_composer: ComposerState,
+    /// 候補一覧の項目（表示名。Enter は先頭の候補を入れる）。
+    mention_candidates: Vec<String>,
     approval: ApprovalCardBridge<FixedKeySource, FixedClock>,
     composer_newlines: u32,
     sent_messages: u32,
@@ -132,12 +149,19 @@ pub struct ShellBridge {
 
 impl ShellBridge {
     /// 承認カードを 1 枚持って始める。キー生成・時計はテスト用の固定実装。
+    /// 候補一覧の項目は合成データ（実メンバー結線の段階で差し替える）。
     #[must_use]
     pub fn new(card: CardView) -> Self {
         Self {
             focus: Focus::MessageInput,
             ime: ImeState::NotComposing,
-            mention_list_open: false,
+            active_composer: ComposerKind::Channel,
+            channel_composer: ComposerState::default(),
+            thread_composer: ComposerState::default(),
+            mention_candidates: SAMPLE_MENTION_NAMES
+                .iter()
+                .map(|s| (*s).to_owned())
+                .collect(),
             approval: ApprovalCardBridge::new(card, FixedKeySource::new(), FixedClock::new(0)),
             composer_newlines: 0,
             sent_messages: 0,
@@ -160,26 +184,108 @@ impl ShellBridge {
         self.ime = ime;
     }
 
-    /// メンション候補一覧の開閉を変える。
-    pub fn set_mention_list_open(&mut self, open: bool) {
-        self.mention_list_open = open;
+    /// キー操作の宛先にする入力欄を変える（フォーカスの移り変わりに合わせる）。
+    pub fn set_active_composer(&mut self, composer: ComposerKind) {
+        self.active_composer = composer;
     }
 
-    /// メンション候補一覧が開いているか。
+    /// 現在キー操作の宛先になっている入力欄。
+    #[must_use]
+    pub fn active_composer(&self) -> ComposerKind {
+        self.active_composer
+    }
+
+    fn composer(&self, composer: ComposerKind) -> &ComposerState {
+        match composer {
+            ComposerKind::Channel => &self.channel_composer,
+            ComposerKind::Thread => &self.thread_composer,
+        }
+    }
+
+    fn composer_mut(&mut self, composer: ComposerKind) -> &mut ComposerState {
+        match composer {
+            ComposerKind::Channel => &mut self.channel_composer,
+            ComposerKind::Thread => &mut self.thread_composer,
+        }
+    }
+
+    /// メンション候補一覧の開閉を変える（宛先は `active_composer` の入力欄）。
+    pub fn set_mention_list_open(&mut self, open: bool) {
+        self.composer_mut(self.active_composer).mention_list_open = open;
+    }
+
+    /// メンション候補一覧が開いているか（`active_composer` の入力欄）。
     #[must_use]
     pub fn mention_list_open(&self) -> bool {
-        self.mention_list_open
+        self.composer(self.active_composer).mention_list_open
+    }
+
+    /// 入力欄ごとの候補一覧の開閉。
+    #[must_use]
+    pub fn mention_list_open_for(&self, composer: ComposerKind) -> bool {
+        self.composer(composer).mention_list_open
+    }
+
+    /// 入力欄の本文（候補の取り込みで橋が書き換えるため、橋が正本）。
+    #[must_use]
+    pub fn composer_text(&self, composer: ComposerKind) -> &str {
+        &self.composer(composer).text
+    }
+
+    /// 入力欄の本文が変わった（文字入力・貼り付け・IME の確定）。
+    /// 末尾が「@から始まる未完のトークン」の間だけ候補一覧を開く。
+    pub fn note_composer_text(&mut self, composer: ComposerKind, text: &str) {
+        let open = has_open_mention_token(text);
+        let state = self.composer_mut(composer);
+        state.text = text.to_owned();
+        state.mention_list_open = open;
+    }
+
+    /// 候補一覧の項目（表示名。Enter は先頭の候補を入れる）。
+    #[must_use]
+    pub fn mention_candidates(&self) -> &[String] {
+        &self.mention_candidates
+    }
+
+    /// 候補一覧の項目を差し替える（実メンバー結線の段階の窓。今は合成データ）。
+    pub fn set_mention_candidates(&mut self, candidates: Vec<String>) {
+        self.mention_candidates = candidates;
     }
 
     /// キー操作を中核の `on_key` に渡し、返ってきた `Action` だけで状態を変える。
+    /// （フォーカス・IME は `set_focus` / `set_ime` で受け取る経路。入力欄からの
+    /// 直接の経路は [`Self::handle_composer_key`]）。
     pub fn handle_key(&mut self, key: Key, mods: Modifiers) -> Action {
         let ctx = InputContext {
             focus: self.focus,
             ime: self.ime,
-            mention_list_open: self.mention_list_open,
+            mention_list_open: self.mention_list_open(),
         };
         let action = on_key(&ctx, key, mods);
         self.apply(action);
+        action
+    }
+
+    /// 入力欄 `composer` が受けたキー操作を `on_key` に渡す。
+    ///
+    /// フォーカスはその入力欄（`Focus::MessageInput`）、候補一覧の開閉はその
+    /// 入力欄の状態で見る。`ime` は入力欄が持つ変換状態（Slint では TextInput の
+    /// `preedit-text` があるかどうか）を呼び出し側が渡す。返した `Action` は
+    /// ここでも適用する（一覧を閉じる・候補を本文に入れる・送信を数える）。
+    pub fn handle_composer_key(
+        &mut self,
+        composer: ComposerKind,
+        key: Key,
+        mods: Modifiers,
+        ime: ImeState,
+    ) -> Action {
+        let ctx = InputContext {
+            focus: Focus::MessageInput,
+            ime,
+            mention_list_open: self.composer(composer).mention_list_open,
+        };
+        let action = on_key(&ctx, key, mods);
+        self.apply_for(composer, action);
         action
     }
 
@@ -207,11 +313,27 @@ impl ShellBridge {
     }
 
     fn apply(&mut self, action: Action) {
+        self.apply_for(self.active_composer, action);
+    }
+
+    fn apply_for(&mut self, composer: ComposerKind, action: Action) {
         match action {
             Action::None => {}
             Action::InsertNewline => self.composer_newlines += 1,
-            Action::AcceptMention | Action::DismissMentionList => {
-                self.mention_list_open = false;
+            Action::AcceptMention => {
+                // 先頭の候補を、末尾の @… トークンと入れ替えて入れる。
+                let name = self.mention_candidates.first().cloned().unwrap_or_default();
+                let state = self.composer_mut(composer);
+                state.mention_list_open = false;
+                if let Some(at) = state.text.rfind('@') {
+                    state.text.truncate(at);
+                }
+                state.text.push('@');
+                state.text.push_str(&name);
+                state.text.push(' ');
+            }
+            Action::DismissMentionList => {
+                self.composer_mut(composer).mention_list_open = false;
             }
             Action::Send => self.sent_messages += 1,
             Action::Approve => {
@@ -222,6 +344,141 @@ impl ShellBridge {
             Action::Decide => {}
         }
     }
+}
+
+/// 本文の末尾が「@から始まる未完のトークン」か（候補一覧を開く印）。
+///
+/// @ は行頭または空白の直後にあるものだけを見る（アドレス等の文中の @ は
+/// 開かない）。@ のあとに空白が入ればトークンは終わっている。
+fn has_open_mention_token(text: &str) -> bool {
+    let Some(at) = text.rfind('@') else {
+        return false;
+    };
+    let head_ok = text[..at]
+        .chars()
+        .next_back()
+        .is_none_or(char::is_whitespace);
+    head_ok && !text[at + 1..].contains(char::is_whitespace)
+}
+
+/// `Action` がキーイベントを消費するか（Slint の `key-pressed` が accept を
+/// 返すかどうか）。`None`・`InsertNewline` は消費しない: 何もしないと
+/// TextInput が文字入力・改行として処理する（改行の入れ方は TextInput に任せる）。
+#[must_use]
+pub fn consumes_key(action: Action) -> bool {
+    matches!(
+        action,
+        Action::Send | Action::AcceptMention | Action::DismissMentionList | Action::Approve
+    )
+}
+
+/// Slint の `KeyEvent.text`（キーの文字）を中核の `Key` に写す。
+/// 対象外のキー（通常の文字・修飾キー・矢印など）は `None`（橋には渡さない）。
+/// 入力欄では Escape も橋に渡す（候補一覧を閉じる操作のため）。ボタン系は
+/// `key_from_text`（Enter・Space だけ）を使う。
+fn composer_key_from_text(text: &str) -> Option<Key> {
+    match text {
+        "\n" | "\r" => Some(Key::Enter),
+        "\u{1b}" => Some(Key::Escape),
+        " " => Some(Key::Space),
+        _ => None,
+    }
+}
+
+/// 入力欄 1 つ分の画面の状態を橋に合わせる（本文と候補一覧の開閉）。
+fn apply_composer(window: &MainWindow, shell: &ShellBridge, composer: ComposerKind) {
+    match composer {
+        ComposerKind::Channel => {
+            window.set_composer_text(shell.composer_text(composer).into());
+            window.set_composer_mention_list_open(shell.mention_list_open_for(composer));
+        }
+        ComposerKind::Thread => {
+            window.set_reply_text(shell.composer_text(composer).into());
+            window.set_reply_mention_list_open(shell.mention_list_open_for(composer));
+        }
+    }
+}
+
+/// 入力欄（チャンネルの下欄・スレッドの返信欄）とメンション候補一覧を
+/// `shell` に結線する（Issue 383）。
+///
+/// - 本文の変更（`edited`）は橋に渡し、橋が持つ本文と候補一覧の開閉を画面へ
+///   書き戻す（候補の取り込みで橋が本文を書き換えるため）。
+/// - Enter・Esc・Space は `key-pressed` の時点で橋に渡し、`on_key` の指示が
+///   消費するものなら Slint 側でも消費する（送信・候補確定・一覧を閉じる）。
+///   それ以外のキーは TextInput の通常処理に任せる（文字入力・改行）。
+/// - IME が変換中かどうかは Slint 側が `preedit-text` から見て callback の
+///   引数で渡す。変換中の転送対象キーは消費する: IME が持つキーを `reject` で
+///   TextInput に戻すと改行・空白が挿入されてしまうため（`on_key` は変換中に
+///   `Action::None` を返すが、それは「この層は何もしない」であって編集部品に
+///   渡してよい意味ではない）。
+pub fn wire_composers(window: &MainWindow, shell: Rc<RefCell<ShellBridge>>) {
+    // 初期状態（橋の本文・一覧の開閉・候補の項目）を画面へ。
+    {
+        let shell = shell.borrow();
+        apply_composer(window, &shell, ComposerKind::Channel);
+        apply_composer(window, &shell, ComposerKind::Thread);
+        let candidates: Vec<SharedString> = shell
+            .mention_candidates()
+            .iter()
+            .map(|name| name.as_str().into())
+            .collect();
+        window.set_mention_candidates(ModelRc::new(VecModel::from(candidates)));
+    }
+
+    let weak = window.as_weak();
+    let edited_shell = Rc::clone(&shell);
+    window.on_composer_edited(move |composer, text| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let mut shell = edited_shell.borrow_mut();
+        shell.set_active_composer(composer);
+        shell.note_composer_text(composer, text.as_str());
+        apply_composer(&window, &shell, composer);
+    });
+
+    let focused_shell = Rc::clone(&shell);
+    window.on_composer_focused(move |composer| {
+        let mut shell = focused_shell.borrow_mut();
+        shell.set_active_composer(composer);
+        shell.set_focus(Focus::MessageInput);
+    });
+
+    let weak = window.as_weak();
+    let key_shell = Rc::clone(&shell);
+    window.on_composer_key_pressed(move |composer, key_text, ctrl_or_cmd, shift, composing| {
+        let Some(window) = weak.upgrade() else {
+            return false;
+        };
+        let Some(key) = composer_key_from_text(key_text.as_str()) else {
+            return false;
+        };
+        let ime = if composing {
+            ImeState::Composing
+        } else {
+            ImeState::NotComposing
+        };
+        let mut shell = key_shell.borrow_mut();
+        shell.set_active_composer(composer);
+        let action =
+            shell.handle_composer_key(composer, key, Modifiers { ctrl_or_cmd, shift }, ime);
+        apply_composer(&window, &shell, composer);
+        // 候補の取り込みで本文が書き換わった → カーソルを末尾へ（Slint 側が
+        // この値の変化を見て set-selection-offsets を呼ぶ）。
+        if action == Action::AcceptMention {
+            match composer {
+                ComposerKind::Channel => {
+                    window.set_composer_cursor_to_end(window.get_composer_cursor_to_end() + 1)
+                }
+                ComposerKind::Thread => {
+                    window.set_reply_cursor_to_end(window.get_reply_cursor_to_end() + 1)
+                }
+            }
+        }
+        // 変換中は IME が持つキーなので消費する（TextInput に戻さない）。
+        composing || consumes_key(action)
+    });
 }
 
 // ---- 「今日・判断待ち」画面とチャット内の判断カード（Issue 331） ----

@@ -41,6 +41,9 @@ export LC_ALL=C.UTF-8
 
 DC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DC_ROOT="${DEMO_CHECK_ROOT:-$(cd "${DC_DIR}/../.." && pwd)}"
+# SC2034（このファイルで未使用）は抑止: DC_LIST_DIR は source した各段階スクリプトが
+# リストファイル（forbidden-phrases.txt 等）の置き場所として使う。
+# shellcheck disable=SC2034
 DC_LIST_DIR="${DEMO_CHECK_LIST_DIR:-${DC_DIR}}"
 
 DC_SOURCE_DIRS=(crates assets ui web static locales i18n dist docs/public)
