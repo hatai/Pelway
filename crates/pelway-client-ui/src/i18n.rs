@@ -6,6 +6,10 @@
 //! 実行形式に取り込むため、実行時にファイルを読まない。
 //! Slint の `@tr()`（gettext）は仕様が Fluent のため使わない。
 //!
+//! 起動時は [`initial_lang`] で OS の言語から初期言語を決め、[`apply_lang`] で
+//! 適用する。起動後の切替も [`apply_lang`] をもう一度呼ぶだけ（再起動なし。
+//! 設定画面は別 Issue）。
+//!
 //! 英語の文言は意味の分かる仮の訳。
 //!
 //! Slint の attribution（Royalty-free License 2.0 §2 (a)）は About ダイアログの
@@ -13,6 +17,7 @@
 //! どこにどう出すかは未決のまま。
 
 use fluent_bundle::{FluentArgs, FluentBundle, FluentResource};
+use slint::Global;
 use unic_langid::LanguageIdentifier;
 
 use crate::MainWindow;
@@ -93,19 +98,36 @@ pub const USED_KEYS: &[&str] = &[
     "menu-about",
     "about-title",
     "about-close",
+    // 読み上げ用の種別の呼び名（Issue 379）
+    "ai-bot-label",
+    "person-label",
 ];
 
 /// 用意している言語（`.ftl` がある言語だけ）。
 pub const LANGS: &[&str] = &["ja", "en"];
+
+/// OS の言語設定（BCP-47 相当のタグ）から初期言語を決める。
+///
+/// 日本語（`ja`・`ja-JP` など）は `ja`、それ以外（未知・空を含む）は `en`。
+/// 返り値は常に [`LANGS`] のどれかなので、翻訳の無い言語で起動して翻訳キーの
+/// 生文字列を画面へ出す経路は無い。OS からの実際の取得は呼び出し側が行い、
+/// この関数は文字列を受け取るだけにする（OS 依存をこの crate に入れない）。
+#[must_use]
+pub fn initial_lang(os_lang: &str) -> &'static str {
+    // 言語タグの先頭（"ja-JP" → "ja"）だけを見る。区切りは - と _ の両方を受け付ける。
+    let primary = os_lang
+        .split(['-', '_'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if primary == "ja" { "ja" } else { "en" }
+}
 
 /// 文言の変数（Fluent の `{ $name }` など）に代入する値。
 ///
 /// 画面のデータ（誰の・いつ・何件）はまだ結合していないため、骨組みでは
 /// 合成データ（[`crate::state::sample`] と同じ架空の値）を代入して表示だけを
 /// 通す。実際の値は結合の段階で各部品から渡す。
-/// 注: `.ftl` の `$to` は「読んだ範囲の終わり（時刻）」と「社外送信の宛先（人）」で
-/// 使い分けられているため、1 組の仮の値では両方の意味は同時に満たせない
-/// （結合の段階で直す。docs/worklog/client.md に記録）。
 #[derive(Debug, Clone)]
 pub struct FluentVars {
     /// 人の名前（{ $name }）。
@@ -116,8 +138,10 @@ pub struct FluentVars {
     pub n: String,
     /// 範囲の始まり（{ $from }）。
     pub from: String,
-    /// 範囲の終わり・宛先（{ $to }）。
+    /// 読んだ範囲の終わり・時刻（{ $to }）。
     pub to: String,
+    /// 社外送信の宛先（{ $address }）。
+    pub address: String,
     /// 済ませた手順数（{ $done }）。
     pub done: String,
     /// 手順の総数（{ $total }）。
@@ -136,6 +160,7 @@ impl FluentVars {
             n: "5".to_owned(),
             from: "昨日18:40".to_owned(),
             to: "今日9:30".to_owned(),
+            address: "csv-support@b-sha.example".to_owned(),
             done: "2".to_owned(),
             total: "4".to_owned(),
             channel: "# 案件B".to_owned(),
@@ -181,6 +206,7 @@ impl Messages {
         args.set("n", vars.n.as_str());
         args.set("from", vars.from.as_str());
         args.set("to", vars.to.as_str());
+        args.set("address", vars.address.as_str());
         args.set("done", vars.done.as_str());
         args.set("total", vars.total.as_str());
         args.set("channel", vars.channel.as_str());
@@ -273,5 +299,20 @@ pub fn apply_translations(
     window.set_tr_menu_about(text("menu-about"));
     window.set_tr_about_title(text("about-title"));
     window.set_tr_about_close(text("about-close"));
+    let a11y = crate::A11yStrings::get(window);
+    a11y.set_tr_ai_bot_label(text("ai-bot-label"));
+    a11y.set_tr_person_label(text("person-label"));
     missing
+}
+
+/// 窓の文言を `lang`（`ja` / `en`）の言語に切り替える（再起動なし）。
+///
+/// [`Messages::new`] で作り直した bundle で [`apply_translations`] を呼び直す
+/// 経路。起動時の初期適用にも使い、起動後の切替にもう一度呼べる。用意して
+/// いない言語では `None` を返し、`tr-*` を変えない（翻訳の無いキーを画面へ
+/// 出さない）。適用できたときの返り値は [`apply_translations`] と同じ
+/// （渡せなかったキーの一覧。空ならすべて渡せた）。
+pub fn apply_lang(window: &MainWindow, lang: &str, vars: &FluentVars) -> Option<Vec<String>> {
+    let messages = Messages::new(lang)?;
+    Some(apply_translations(window, &messages, vars))
 }

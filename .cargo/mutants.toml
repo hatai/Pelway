@@ -1,0 +1,26 @@
+#:schema https://json.schemastore.org/cargo-mutants-config.json
+# ミューテーションテスト（cargo-mutants）の設定。Issue #437。
+# 実行: mise run mutants（全体）/ mise run mutants:diff（差分）
+# キーの一覧: https://mutants.rs/config-file.html
+
+# テストは nextest で回す（#437）。
+test_tool = "nextest"
+
+# 変異の対象を pelway-contract と承認ポリシーに絞る（#437）。承認ポリシーは
+# pelway-client-core の承認カード状態機械（src/approval.rs。冪等キー・確認の
+# 再試行・409/403 で自動再送しない等の規則を実装する）。DB・ネットワーク・
+# 画面のコードは対象外。glob はツリーのルートからの相対パスにマッチする。
+examine_globs = [
+  "crates/pelway-contract/**/*.rs",
+  "crates/pelway-client-core/src/approval.rs",
+]
+
+# cargo の呼び出し（build・test・nextest run のすべて）に --offline を付け、
+# ネットワークに出ない（#437 安全条件）。cargo-mutants 自体に --offline フラグは
+# 無いため、cargo への引数として渡す。
+additional_cargo_args = ["--offline"]
+
+# 一時ディレクトリへのツリーコピーで .gitignore 済みのファイル（.env・
+# fnox.local.toml など秘密を含みうるファイル）を除く（#437 安全条件）。
+# 実際に除外されるかは初回実行時に実測して確かめる。
+gitignore = true

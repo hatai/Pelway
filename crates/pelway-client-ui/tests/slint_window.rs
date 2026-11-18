@@ -8,7 +8,7 @@
 
 use pelway_client_ui::i18n::{FluentVars, Messages, USED_KEYS, apply_translations};
 use pelway_client_ui::theme::{Theme, apply_design_tokens, token_value};
-use pelway_client_ui::{DesignTokens, MainWindow, ThemeState};
+use pelway_client_ui::{A11yStrings, DesignTokens, MainWindow, ThemeState};
 use slint::{Brush, Global, SharedString};
 
 /// `MainWindow` の `tr-*` プロパティの getter の型。
@@ -91,6 +91,13 @@ const TR_GETTERS: &[(&str, TrGetter)] = &[
     ("menu-about", |w| w.get_tr_menu_about()),
     ("about-title", |w| w.get_tr_about_title()),
     ("about-close", |w| w.get_tr_about_close()),
+    // 種別の呼び名は A11yStrings global 経由で読む（Issue 379）。
+    ("ai-bot-label", |w| {
+        A11yStrings::get(w).get_tr_ai_bot_label()
+    }),
+    ("person-label", |w| {
+        A11yStrings::get(w).get_tr_person_label()
+    }),
 ];
 
 /// テスト用 backend の初期化をプロセスで 1 回だけ行う。

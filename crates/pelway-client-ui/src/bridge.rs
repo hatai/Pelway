@@ -9,7 +9,7 @@
 //! - コメント欄の処理は中核にあるが、モックにコメント欄の見た目がないため
 //!   画面には置かない。`comment_editable()` は表示用の状態としてだけ持つ。
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use pelway_client_core::approval::{ApprovalMachine, CardView, Clock, Effect, KeySource};
@@ -20,7 +20,7 @@ use pelway_client_core::contract::{
 };
 use pelway_client_core::decision::DecisionBoard;
 use pelway_client_core::input::{Action, Focus, ImeState, InputContext, Key, Modifiers, on_key};
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Global, ModelRc, SharedString, VecModel};
 
 use crate::state::{
     AvatarKind, DecisionCardState, DecisionOptionView, DecisionOutcomeView, MyRequestItem,
@@ -335,6 +335,9 @@ impl ShellBridge {
             Action::Approve => {
                 self.approval.press_send_button();
             }
+            // Decide の適用はボタンが対象を持って渡す `on_decide_key` 側
+            // （`wire_key_actions`）。ここにはフォーカス中の対象が無い。
+            Action::Decide => {}
         }
     }
 }
@@ -367,11 +370,13 @@ pub fn consumes_key(action: Action) -> bool {
 
 /// Slint の `KeyEvent.text`（キーの文字）を中核の `Key` に写す。
 /// 対象外のキー（通常の文字・修飾キー・矢印など）は `None`（橋には渡さない）。
-fn key_from_text(text: &str) -> Option<Key> {
-    match text.chars().next()? {
-        '\n' | '\r' => Some(Key::Enter),
-        '\u{1b}' => Some(Key::Escape),
-        ' ' => Some(Key::Space),
+/// 入力欄では Escape も橋に渡す（候補一覧を閉じる操作のため）。ボタン系は
+/// `key_from_text`（Enter・Space だけ）を使う。
+fn composer_key_from_text(text: &str) -> Option<Key> {
+    match text {
+        "\n" | "\r" => Some(Key::Enter),
+        "\u{1b}" => Some(Key::Escape),
+        " " => Some(Key::Space),
         _ => None,
     }
 }
@@ -442,7 +447,7 @@ pub fn wire_composers(window: &MainWindow, shell: Rc<RefCell<ShellBridge>>) {
         let Some(window) = weak.upgrade() else {
             return false;
         };
-        let Some(key) = key_from_text(key_text.as_str()) else {
+        let Some(key) = composer_key_from_text(key_text.as_str()) else {
             return false;
         };
         let ime = if composing {
@@ -837,5 +842,88 @@ pub fn wire_decision_screen(window: &MainWindow, shell: Rc<RefCell<DecisionShell
             window.set_show_today(false);
             apply_decision_screen(&window, &shell, now);
         }
+    });
+}
+
+// ---- 決定・承認ボタンのキー操作（Issue 379） ----
+
+/// `.slint` の `KeyEvent.text` から中核の [`Key`] へ。対象外のキーは `None`
+/// （イベントを消費せず伝播させる側に回る）。
+fn key_from_text(text: &str) -> Option<Key> {
+    match text {
+        "\n" | "\r" => Some(Key::Enter),
+        " " => Some(Key::Space),
+        _ => None,
+    }
+}
+
+/// 決定・承認ボタンのキー操作を中核の `on_key` に結線する（Issue 379）。
+///
+/// `.slint` の FocusScope は生のキー（`KeyEvent.text`・Ctrl/Cmd・Shift）を
+/// `KeyRouter` global の `decide-key`・`send-key` callback に渡す。ここで
+/// `on_key` が「決定・承認になるか」を決め、返ってきた [`Action`] だけで動く:
+/// - `Decide`: 台帳を確定し、成功したら画面を再適用する。
+/// - `Approve`: 「送る」ボタンの押下経路（`send-pressed` callback）に乗せる。
+///
+/// Enter・Space は `on_key` の結果が `None`（修飾付き・IME 変換中）でも消費
+/// する（ボタンのキーが画面の他の部品へ漏れない）。それ以外のキーは
+/// `false` を返し、通常のキー処理（Tab 移動など）へ伝播させる。
+///
+/// `ime` は画面の IME 状態を持つセル（骨組みでは既定 `NotComposing`。結線の
+/// 段階で IME の実装が更新する）。
+pub fn wire_key_actions(
+    window: &MainWindow,
+    shell: Rc<RefCell<DecisionShell>>,
+    ime: Rc<Cell<ImeState>>,
+    now: TsMs,
+) {
+    let router = crate::KeyRouter::get(window);
+    let weak = window.as_weak();
+    let decide_ime = Rc::clone(&ime);
+    router.on_decide_key(
+        move |decision_id, option_id, version, key_text, ctrl_or_cmd, shift| {
+            let Some(window) = weak.upgrade() else {
+                return false;
+            };
+            let Some(key) = key_from_text(key_text.as_str()) else {
+                return false;
+            };
+            let ctx = InputContext {
+                focus: Focus::DecisionButton,
+                ime: decide_ime.get(),
+                mention_list_open: false,
+            };
+            let mods = Modifiers { ctrl_or_cmd, shift };
+            if on_key(&ctx, key, mods) == Action::Decide {
+                let mut shell = shell.borrow_mut();
+                let id = DecisionId::from(decision_id.as_str());
+                // 失敗（版違い・確定済み・権限なし）は台帳を変えないため再適用もしない。
+                if shell.decide(&id, &option_id, version as u64, now).is_ok() {
+                    apply_decision_screen(&window, &shell, now);
+                }
+            }
+            true
+        },
+    );
+
+    let weak = window.as_weak();
+    router.on_send_key(move |key_text, ctrl_or_cmd, shift| {
+        let Some(window) = weak.upgrade() else {
+            return false;
+        };
+        let Some(key) = key_from_text(key_text.as_str()) else {
+            return false;
+        };
+        let ctx = InputContext {
+            focus: Focus::ApproveButton,
+            ime: ime.get(),
+            mention_list_open: false,
+        };
+        let mods = Modifiers { ctrl_or_cmd, shift };
+        if on_key(&ctx, key, mods) == Action::Approve {
+            // 承認は「送る」の押下経路に乗せる（押せるかどうかは経路の先が決める）。
+            window.invoke_send_pressed();
+        }
+        true
     });
 }
