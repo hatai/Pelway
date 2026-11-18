@@ -213,10 +213,11 @@ fn persistent_display_end_to_end() {
         apply_decision_screen(&window, &DecisionShell::sample(lang), NOW);
         // `if data-decision-visible` の実体化時点で `if data-requester-is-ai`
         // が初期値（false）のまま確定評価される環境差がある（転送バインディング
-        // の評価が実体化に間に合わない）。データ確定を待ってから visible を
-        // 切り替え直してカードを再実体化し、内側の if を正しい値で評価させる。
-        settle();
+        // の評価が実体化に間に合わない）。プロパティ変更は遅延評価なので、
+        // 間に settle を挟まない切り替えは差分ゼロで if に届かない。settle を
+        // 挟んで実際に再実体化させる（2 回目は転送値が確定済みで評価される）。
         window.set_data_decision_visible(false);
+        settle();
         window.set_data_decision_visible(true);
         settle();
         let card_badges = find_growing(&window, 1, |w| {
