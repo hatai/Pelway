@@ -67,6 +67,8 @@ pane-ai-note = 作業の途中経過は会話には出しません。
 thread-input-placeholder = スレッドに返信
 ## 下のメッセージ入力欄
 composer-placeholder = { $channel } にメッセージ
+## 入力欄のメンション候補一覧
+mention-candidates-label = メンション候補
 ## トップレベルメニューと About ダイアログ（Slint の attribution、Issue 237）
 menu-help = ヘルプ
 menu-about = このアプリについて

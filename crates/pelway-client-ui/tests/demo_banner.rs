@@ -18,11 +18,12 @@
 //! テスト用 backend のモック時計はスレッドをまたぐと単調性の検査に落ちる）。
 
 use i_slint_backend_testing::ElementHandle;
-use pelway_client_ui::MainWindow;
 use pelway_client_ui::bridge::{DecisionShell, apply_decision_screen};
 use pelway_client_ui::i18n::{FluentVars, Messages, apply_translations};
 use pelway_client_ui::theme::{Theme, apply_design_tokens};
-use slint::{ComponentHandle, LogicalSize};
+use pelway_client_ui::{MainWindow, TimelineItem, TimelineRowKind};
+use slint::{ComponentHandle, LogicalSize, ModelRc, VecModel};
+use std::rc::Rc;
 
 const SLINT: &str = include_str!("../ui/main.slint");
 
@@ -250,12 +251,28 @@ fn persistent_display_end_to_end() {
             "{lang} のバナーの文言は狭い幅で行を増やして折り返すこと（省略や切り詰めではなく）(w={w})"
         );
         // ---- AI の行には「AI」バッジ、人の行には無い ----
-        // 送信者名の先頭で AI 行と人の行を区別できる合成データを入れる
+        // 時系列の行（Issue 385 で個別の data-* プロパティは timeline-items
+        // モデルに一本化した）。送信者名の先頭で AI 行と人の行を区別する
         // （バッジの読み上げ文言とは衝突しない前置詞にする）。
-        window.set_data_msg1_sender("H_甲".into());
-        window.set_data_msg2_sender("AI_乙".into());
-        window.set_data_msg3_sender("H_丙".into());
-        window.set_data_note_sender("AI_丁".into());
+        let base = |kind| TimelineItem {
+            kind,
+            ..TimelineItem::default()
+        };
+        let msg = |sender: &str, is_ai: bool| TimelineItem {
+            sender: sender.into(),
+            is_ai,
+            ..base(TimelineRowKind::Message)
+        };
+        window.set_timeline_items(ModelRc::from(Rc::new(VecModel::from(vec![
+            msg("H_甲", false),
+            msg("AI_乙", true),
+            base(TimelineRowKind::DecisionCard),
+            msg("H_丙", false),
+            TimelineItem {
+                kind: TimelineRowKind::PrivateNote,
+                ..msg("AI_丁", true)
+            },
+        ]))));
         window.set_data_thread_msg1_sender("AI_戊".into());
         window.set_data_thread_msg2_sender("H_己".into());
         // チャット内の判断カード（依頼者が AI）も先に出しておく。カード分だけ

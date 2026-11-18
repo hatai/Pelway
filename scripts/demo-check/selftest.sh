@@ -293,6 +293,9 @@ expect_case external-refs 0 "http://127.0.0.1 and http://[::1] and ws://127.0.0.
 expect_case external-refs 1 "quoted //host in a JS string (assignment)" web/app.js 'const ep = "//api.example.com/v1";\n'
 expect_case external-refs 1 "quoted //host inside fetch()" web/app2.js 'fetch("//static.example.io/x")\n'
 expect_case external-refs 1 "quoted //host in a Rust string literal" "${R}" 'pub const PR: &str = "//cdn.example.com/a.js";\n'
+# SC2016（単引用符は展開しない）は抑止: テストデータのバッククォート（JS のテンプレート
+# リテラル）は展開されずそのまま渡したい。
+# shellcheck disable=SC2016
 expect_case external-refs 1 "backtick template //host in JS" web/app3.js 'const t = `//cdn.example.dev/a`;\n'
 expect_case external-refs 0 "a // comment naming a host is not a reference" web/guard.js '// api.example.com には依存しない（コメント行）\nlet q = a / b / c;\n'
 expect_case external-refs 0 "path//inside/a string is not a reference" web/guard2.js 'const p = "path//to/file";\n'
