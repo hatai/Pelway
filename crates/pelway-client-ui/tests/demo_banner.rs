@@ -227,7 +227,7 @@ fn persistent_display_end_to_end() {
                 })
                 .unwrap_or_default()
         });
-        if card_badges.is_empty() {
+        if true {
             let card =
                 ElementHandle::find_by_element_id(&window, "ChannelView::decision-card").next();
             let all: Vec<_> =
@@ -250,8 +250,16 @@ fn persistent_display_end_to_end() {
                         .collect::<Vec<_>>()
                 })
                 .collect();
+            let badge_pos: Vec<String> = card_badges
+                .iter()
+                .map(|b| {
+                    let p = b.absolute_position();
+                    let s = b.size();
+                    format!("({},{}){}x{}", p.x, p.y, s.width, s.height)
+                })
+                .collect();
             eprintln!(
-                "DIAG {lang}: is-ai={} requester={:?} card={:?} all_badges={} descendants={descendants:?}",
+                "DIAG {lang}: is-ai={} requester={:?} card={:?} badges={badge_pos:?} all_badges={} descendants={descendants:?}",
                 window.get_data_decision_requester_is_ai(),
                 window.get_data_decision_requester().to_string(),
                 card.as_ref().map(|c| (c.absolute_position(), c.size())),
