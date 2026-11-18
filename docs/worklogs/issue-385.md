@@ -35,3 +35,15 @@
 5. 改善案: `docs/research/slint-tauri-client-measurements.md` の仮想化の節に「行の `y` は `content-y` 引きの画面内位置で、時系列中の位置は `y + content-y`。文字列中の `{i}` は補間されない（`{0}` 等の番号のみ）」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: 158d2db（main 取り込みのマージコミット。マージは App 側で署名に付け替えられないため署名なしのまま、SHA 不変）
+
+1. 詰まった箇所: main が Issue 383（入力欄のキー操作・メンション候補）と Issue 196 を取り込んで進み、`bridge.rs`（import の追加位置）と `main.slint`（struct/enum 宣言・callback 宣言・ChannelView インスタンス化の 5 か所）でコンフリクト。すべて両側残しで解消したが、main 側は `data-day-label` を ChannelView に残していた（こちらは行種 day-divider のモデル欄に一本化済み）。宣言だけ取り込むと未使用プロパティになるため、マージでは落とした。
+2. 曖昧だった文: 「PR #446 を修正する」という指示だけで、直すべき対象の明示は無い。直近のレビューは両者 approve・nit のみで、PR は CONFLICTING になっていたため、「main とのコンフリクトの解消（マージ可能状態への復帰）」を修正対象と解釈した。nit はレビューの決まり（must-fix のみ対応）に従い未対応のまま。
+3. 仮定と解釈: round 3 の approve は head `91b1b3b` に対するもの。マージで head が動くためレビューのやり直し（round 4 の委託）が要ると解釈した（command-team のマージ規則）。
+4. 足りなかった情報・検証手段: なし（コンフリクト解消は機械的。`cargo check`・`cargo test -p pelway-client-ui`・`mise run verify` で確かめた）。
+5. 改善案: なし。
+
+使ったスキル: implement-issue
