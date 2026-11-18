@@ -222,9 +222,11 @@ fn has_private_key_header(body: &str) -> bool {
         .any(|line| line.contains("-----BEGIN") && line.contains("PRIVATE KEY"))
 }
 
-/// curl・wget の実行スクリプトの行。コマンド位置にある語の後に URL か長いフラグがある行を検出する（無ければ言及として通す）。
+/// curl・wget の実行スクリプトの行。コマンド位置にある語の後に URL か長いフラグ
+/// がある行を検出する（無ければ言及として通す）。行末の `\` による行継続は
+/// 次の行とつないだ論理行で判定する（貼り付けのふつうの形）。
 fn has_execution_script(body: &str) -> bool {
-    body.lines().any(|line| {
+    logical_lines(body).iter().any(|line| {
         ["curl", "wget"].iter().any(|word| {
             command_word_at(line, word).is_some_and(|args| {
                 args.contains("http://")
@@ -234,6 +236,25 @@ fn has_execution_script(body: &str) -> bool {
             })
         })
     })
+}
+
+/// 行末の `\` を次の行との連結とした論理行の一覧。
+fn logical_lines(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut pending = String::new();
+    for line in body.lines() {
+        if let Some(joined) = line.strip_suffix('\\') {
+            pending.push_str(joined);
+            pending.push(' ');
+        } else {
+            pending.push_str(line);
+            out.push(std::mem::take(&mut pending));
+        }
+    }
+    if !pending.is_empty() {
+        out.push(pending);
+    }
+    out
 }
 
 /// 行の中でコマンド位置にある語 `word` から後ろの部分。無ければ None。コマンド位置は行頭か、直前（空白を除く）が英数字・かな・漢字でない位置（句読点・全角コロン・箇条書き・引用・番号付きの後ろ）、sudo 等の前置語の直後、語の直後の引数が `-` か URL で始まるとき。文中の言及（直前に英数字・かな・漢字が続く）は対象にしない。
@@ -347,27 +368,50 @@ fn is_code_paste_dump(body: &str) -> bool {
     code_like * 100 >= non_empty * thresholds::CODE_PASTE_RATIO_PERCENT
 }
 
-/// フェンス（``` か ~~~ で始まる行）の外の行。閉じていないフェンスは末尾まで中とみなす。
+/// フェンスの外の行。閉じは開いたのと同じ文字・同じ長さ以上・info string の無い行
+/// でのみ有効（~~~ は ``` のフェンスを閉じない。CommonMark と同じ）。閉じていない
+/// フェンスは末尾まで中とみなす。
 fn unfenced_lines(body: &str) -> Vec<&str> {
     let mut out = Vec::new();
-    let mut in_fence = false;
+    let mut open: Option<(char, usize)> = None;
     for line in body.lines() {
-        if is_fence_line(line) {
-            in_fence = !in_fence;
-        } else if !in_fence {
-            out.push(line);
+        if let Some((ch, len)) = open {
+            // 閉じの行はマーカーの後に内容（info string）を持てない。
+            if let Some(((c2, l2), rest)) = fence_marker(line)
+                && c2 == ch
+                && l2 >= len
+                && rest.trim().is_empty()
+            {
+                open = None;
+            }
+        } else {
+            match fence_marker(line) {
+                Some((marker, _)) => open = Some(marker),
+                None => out.push(line),
+            }
         }
     }
     out
 }
 
-/// フェンスの開閉行（行頭の空白 3 文字まで + ``` か ~~~。4 文字以上の字下げは CommonMark と同じくコードブロック）。
-fn is_fence_line(line: &str) -> bool {
-    let trimmed = line.trim_start();
+/// フェンスの開閉行のマーカー（文字と長さ）と、マーカーの後ろの余り（info string）。
+/// 字下げは半角空白 0〜3 個だけ（タブ・全角空白は字下げに数えない）。
+fn fence_marker(line: &str) -> Option<((char, usize), &str)> {
+    let trimmed = line.trim_start_matches(' ');
     if line.len() - trimmed.len() > 3 {
-        return false;
+        return None;
     }
-    trimmed.starts_with("```") || trimmed.starts_with("~~~")
+    let mut chars = trimmed.chars();
+    let first = chars.next()?;
+    if !matches!(first, '`' | '~') {
+        return None;
+    }
+    let mut len = 1;
+    while chars.next() == Some(first) {
+        len += 1;
+    }
+    // マーカーは ASCII なので、バイト長で余りを切ってよい。
+    (len >= 3).then_some(((first, len), &trimmed[len..]))
 }
 
 /// コード・差分・ログの行らしい形（差分の行頭・ログレベル・宣言キーワード・記号）。
@@ -411,11 +455,13 @@ fn starts_with_date(t: &str) -> bool {
 }
 
 /// 暴走系: 同じ空でない行が連続で並ぶ（フェンスの中も対象。空行は連続を切る）。
+/// 比較は行末の空白だけを除き、字下げの違いは別の行と数える（入れ子のコードの
+/// 閉じの `}`・`end`・`</div>` が字下げを変えて並ぶのを暴走と誤らない）。
 fn runaway_pattern(body: &str) -> Option<ReplyGuardPattern> {
     let mut current: Option<&str> = None;
     let mut run = 0;
     for line in body.lines() {
-        let trimmed = line.trim();
+        let trimmed = line.trim_end();
         if trimmed.is_empty() {
             current = None;
             continue;
@@ -556,6 +602,8 @@ mod tests {
             "まず wget -q http://127.0.0.1:8080/pkg.tar で取得します",
             "run curl https://127.0.0.1:8080/v1/jobs に変えて実行します",
             "sudo curl を使って http://127.0.0.1:8080/x を叩きます",
+            "curl -X POST \\\n  -d '{\"q\":1}' \\\n  http://127.0.0.1:8080/v1/jobs",
+            "次を実行します curl -s \\\n  http://127.0.0.1:8080/v1/jobs \\",
         ] {
             assert_eq!(blocks(body), ReplyGuardPattern::ExecutionScript, "{body}");
         }
@@ -714,6 +762,16 @@ mod tests {
             "```rust\nfn main() {\n    println!(\"hi\");\n}\n```",
             &strict(),
         );
+        // 開いたのと違う区切り文字（~~~）では閉じない。閉じた後のダンプは止める。
+        let mismatched = format!(
+            "```\n~~~\n{}\n```\n{}",
+            dump_of("let", 5, 0),
+            dump_of("let", 30, 0)
+        );
+        assert_eq!(blocks(&mismatched), ReplyGuardPattern::CodePasteDump);
+        // 長いフェンス（4 連）の中の短いフェンスは内容。全体がフェンスの中なら通す。
+        let nested = format!("````md\n```bash\n{}\n```\n````", dump_of("let", 40, 0));
+        is_allowed(&nested, &strict());
         is_allowed(
             "該当部分は次のとおりです:\n```rust\nlet answer = 42;\n```\n以上です。",
             &strict(),
@@ -727,6 +785,9 @@ mod tests {
         assert_eq!(blocks(&five), ReplyGuardPattern::Repetition);
         let four = format!("```\n{}\n```", "同じ行です\n".repeat(4));
         is_allowed(&four, &strict());
+        // 字下げだけが違う閉じの行（入れ子のコード）は同一の行と数えない。
+        let nested_go = "```go\nfunc f() {\n\tfor {\n\t\tif a {\n\t\t\tif b {\n\t\t\t\tif c {\n\t\t\t\t\tg()\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n```";
+        is_allowed(nested_go, &strict());
         is_allowed("同じ行\n\n同じ行\n\n同じ行\n\n同じ行\n\n同じ行", &strict());
     }
 
