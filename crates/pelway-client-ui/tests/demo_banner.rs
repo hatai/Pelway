@@ -67,6 +67,10 @@ fn settle() {
 /// 高さはフォント計測に依存するため（CI のフォントはローカルより大きい）、
 /// 固定の高さではなく可視になるまで伸ばす。上限に達したら見つかった分を返す
 /// （要素が本当に無い場合はそこで打ち切って assert 側で失敗させる）。
+///
+/// 幅は 1600px にする。800px ではチャンネル列の Flickable が 340px しか取れず、
+/// 判断カード（幅 413px）がはみ出してカード右端のバッジが水平方向にも
+/// クリップされる（en ではタイトルが長く依頼者行が右に寄るため CI で顕在化）。
 fn find_growing(
     window: &MainWindow,
     want: usize,
@@ -79,7 +83,7 @@ fn find_growing(
             return found;
         }
         h += 800.0;
-        window.window().set_size(LogicalSize::new(800.0, h));
+        window.window().set_size(LogicalSize::new(1600.0, h));
         settle();
     }
 }
