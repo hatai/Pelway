@@ -6,29 +6,18 @@
 //!
 //! # 守ること（このモジュールの不変条件）
 //!
-//! - 入力は本文とチャンネルの緩和設定だけ。I/O を持たず、出力は「通す」か「止める
-//!   ＋理由」だけ。単独でテストできる。
-//! - 漏洩系と暴走系はすべてのチャンネルで常時適用し、緩和設定の対象にしない
-//!   （緩和が効くのは形式の異常系の大量貼り付けの観点だけ）。
-//! - 漏洩系のうち誤検出の少ないパターン（資格情報らしき文字列・実行スクリプト・
-//!   内部制御用のセンチネル・タグ・ツール呼び出しの内部形式）は文中一致で検出
-//!   する（先頭固定・「発言全体がその異常である」条件は漏洩系に当てはめない）。
-//!   誤検出が起きやすい漏洩系（提供元のエコー）は保守条件でのみ検出する
-//!   （最初の空行を除く行がその形）。
-//! - フェンス（``` か ~~~ の行）で囲んだ部分は大量貼り付けの検査からだけ外し、
-//!   漏洩系と暴走系はフェンスの中も検査する（フェンスへの秘密の記述での迂回を排除）。
-//! - 理由コードは分類とパターンを表す固定値で、本文の一部を含まない（監査ログに
-//!   元の文を残さない規則への接続。運用は #453）。判定は決め打ちの条件のみで、
-//!   しきい値は [`thresholds`] に一括する。
+//! - 入力は本文とチャンネルの緩和設定だけ。I/O を持たず、出力は「通す」か「止める＋理由」だけ。単独でテストできる。
+//! - 漏洩系と暴走系はすべてのチャンネルで常時適用し、緩和設定の対象にしない（緩和が効くのは形式の異常系の大量貼り付けの観点だけ）。
+//! - 漏洩系のうち誤検出の少ないパターン（資格情報らしき文字列・実行スクリプト・内部制御用のセンチネル・タグ・ツール呼び出しの内部形式）は文中一致で検出する（先頭固定・「発言全体がその異常である」条件は漏洩系に当てはめない）。
+//! - 誤検出が起きやすい漏洩系（提供元のエコー）は保守条件でのみ検出する（最初の空行を除く行がその形）。
+//! - フェンス（``` か ~~~ の行）で囲んだ部分は大量貼り付けの検査からだけ外し、漏洩系と暴走系はフェンスの中も検査する（フェンスへの秘密の記述での迂回を排除）。
+//! - 理由コードは分類とパターンを表す固定値で、本文の一部を含まない（監査ログに元の文を残さない規則への接続。運用は #453）。判定は決め打ちの条件のみで、しきい値は [`thresholds`] に一括する。
 //!
 //! # まだ決まらないこと（このモジュールでは扱わない）
 //!
 //! - 発言パイプラインへの組み込み・監査ログ・人への通知・AI への差し戻し（#453）。
 //!   添付の検査（#454）。短時間での連続投稿（#453）。
-//! - 仕様の対象パターンのうち、資格情報を人に要求する文・文字化け・スタック
-//!   トレース・内部向けのメタ発言・裏付けのない成果の主張: 決め打ちの条件では
-//!   正当な発言との区別ができず誤検出を避けられないため検出しない。組み込みの
-//!   Issue で条件を決める（スタックトレースは処理系ごとの形式の辞書を整える）。
+//! - 仕様の対象パターンのうち、資格情報を人に要求する文・文字化け・スタックトレース・内部向けのメタ発言・裏付けのない成果の主張: 決め打ちの条件では正当な発言との区別ができず誤検出を避けられないため検出しない。組み込みの Issue で条件を決める（スタックトレースは処理系ごとの形式の辞書を整える）。
 
 /// しきい値と固定の下限の一式（Issue #452 の未決事項で実装側で決める分。
 /// 値の理由は PR 本文に記録する。値を変えるときはこの一式だけを編集する）。
@@ -47,14 +36,12 @@ pub mod thresholds {
     pub const CODE_PASTE_RATIO_PERCENT: usize = 80;
 }
 
-/// チャンネルごとの緩和設定。人がチャンネルの管理者として設定する（Bot・AI 側から
-/// は変更できない）。
+/// チャンネルごとの緩和設定。人がチャンネルの管理者として設定する（Bot・AI 側からは変更できない）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct ReplyGuardSettings {
-    /// 形式の異常系のうちコード・差分・ログの大量貼り付けの観点を緩和するか。
-    /// 漏洩系・暴走系・それ以外の形式の異常系には効かない。既定は緩和しない。
+    /// 形式の異常系のうちコード・差分・ログの大量貼り付けの観点を緩和するか。漏洩系・暴走系・それ以外の形式の異常系には効かない。既定は緩和しない。
     pub relax_code_paste: bool,
 }
 
@@ -81,8 +68,7 @@ impl ReplyGuardClass {
     }
 }
 
-/// 検出したパターン。どの条件に一致したかをこの粒度で判別できる
-/// （Issue #452 コメントの未決事項「どの条件に当てはまったかが分からない」への対応）。
+/// 検出したパターン。どの条件に一致したかをこの粒度で判別できる（Issue #452 コメントの未決事項への対応）。
 /// 各変形は理由コード（[`ReplyGuardPattern::code`]）のパターン部分に対応する。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplyGuardPattern {
@@ -236,8 +222,7 @@ fn has_private_key_header(body: &str) -> bool {
         .any(|line| line.contains("-----BEGIN") && line.contains("PRIVATE KEY"))
 }
 
-/// curl・wget の実行スクリプトの行。コマンド語がシェルのコマンド位置にあり、後に
-/// URL か長いフラグがある行を検出する（どちらも無ければ言及として通す）。
+/// curl・wget の実行スクリプトの行。コマンド語がコマンド位置にあり、後に URL か長いフラグがある行を検出する（どちらも無ければ言及として通す）。
 fn has_execution_script(body: &str) -> bool {
     body.lines().any(|line| {
         ["curl", "wget"].iter().any(|word| {
@@ -251,18 +236,25 @@ fn has_execution_script(body: &str) -> bool {
     })
 }
 
-/// 行の中でシェルのコマンド位置（行頭か $ ・# ・; ・& ・| ・: ・` ・( の直後）にある
-/// 語 `word` から後ろの部分。文中の言及（前に普通の文字が続く）は対象にしない。
+/// 行の中でコマンド位置にある語 `word` から後ろの部分。無ければ None。コマンド位置は行頭か、直前（空白を除く）が英数字・かな・漢字でない位置（句読点・全角のコロン・箇条書き・引用・番号付きの記号の後ろ）。sudo 等の前置語の直後もコマンド位置とする。文中の言及（直前に英数字・かな・漢字が続く）は対象にしない。
 fn command_word_at<'a>(line: &'a str, word: &str) -> Option<&'a str> {
+    /// コマンドの前置語。
+    const PREFIX_WORDS: [&str; 4] = ["sudo", "env", "xargs", "nohup"];
     let trimmed = line.trim_start();
     let mut rest = trimmed;
     while let Some(at) = rest.find(word) {
         let before = rest[..at].trim_end();
-        let before_ok = before.is_empty()
-            || matches!(
-                before.chars().next_back(),
-                Some('$' | '#' | ';' | '&' | '|' | ':' | '`' | '(')
-            );
+        let before_ok = before
+            .chars()
+            .next_back()
+            .is_none_or(|c| !c.is_alphanumeric())
+            || PREFIX_WORDS.iter().any(|w| {
+                before.strip_suffix(w).is_some_and(|head| {
+                    head.chars()
+                        .next_back()
+                        .is_none_or(|c| !c.is_alphanumeric())
+                })
+            });
         let after = &rest[at + word.len()..];
         let word_char = |c: char| c.is_alphanumeric() || c == '_';
         if before_ok && after.chars().next().is_none_or(|c| !word_char(c)) {
@@ -286,20 +278,18 @@ fn has_internal_sentinel(body: &str) -> bool {
     TAGS.iter().any(|tag| body.contains(tag))
 }
 
-/// ツール呼び出しの内部形式（JSON のキー・内部タグ）の漏出。
+/// ツール呼び出しの内部形式の漏出。引用符付きの `tool_use`・`actions` は JSON のキーにも値（`"type":"tool_use"`）にも現れ、空白の入れ方にもよらないため、出現自体を印にする（docs/technical.md「tool_use・actions 等の内部形式の漏出」）。
 fn has_tool_call_json(body: &str) -> bool {
-    const MARKS: [&str; 5] = [
-        "{\"tool_use\"",
-        "\"tool_use\":",
-        "{\"actions\"",
+    const MARKS: [&str; 4] = [
+        "\"tool_use\"",
+        "\"actions\"",
         "<tool_use>",
         "<function_call>",
     ];
     MARKS.iter().any(|mark| body.contains(mark))
 }
 
-/// 提供元・ゲートウェイのエラー文のエコー。保守条件: 空行を除く最初の行が HTTP
-/// ステータス行の形か、本文全体が `{"error"` で始まるエラー応答本体。
+/// 提供元・ゲートウェイのエラー文のエコー。保守条件: 空行を除く最初の行が HTTP ステータス行の形か、本文全体が `{"error"` で始まるエラー応答本体。
 fn is_provider_error_echo(body: &str) -> bool {
     let trimmed = body.trim();
     let Some(first) = trimmed.lines().next() else {
@@ -368,8 +358,7 @@ fn unfenced_lines(body: &str) -> Vec<&str> {
     out
 }
 
-/// フェンスの開閉行（行頭の空白 3 文字まで + ``` か ~~~。4 文字以上の字下げは
-/// CommonMark と同じくコードブロック）。
+/// フェンスの開閉行（行頭の空白 3 文字まで + ``` か ~~~。4 文字以上の字下げは CommonMark と同じくコードブロック）。
 fn is_fence_line(line: &str) -> bool {
     let trimmed = line.trim_start();
     if line.len() - trimmed.len() > 3 {
@@ -467,6 +456,11 @@ mod tests {
         }
     }
 
+    /// 既定（緩和なし）の設定で止めたときのパターン。
+    fn blocks(body: &str) -> ReplyGuardPattern {
+        blocked_pattern(body, &strict())
+    }
+
     fn is_allowed(body: &str, settings: &ReplyGuardSettings) {
         assert_eq!(
             check_reply_body(body, settings),
@@ -492,11 +486,11 @@ mod tests {
         // 文中の Bearer トークン（合成のダミー値）は止める。ちょうどしきい値（20 文字）
         // も止め、1 文字足りない（19 文字）は通す。
         assert_eq!(
-            blocked_pattern(&format!("参考値: Bearer {} です", token_of(34)), &strict()),
+            blocks(&format!("参考値: Bearer {} です", token_of(34))),
             ReplyGuardPattern::CredentialShape
         );
         assert_eq!(
-            blocked_pattern(&format!("参考値: Bearer {} です", token_of(20)), &strict()),
+            blocks(&format!("参考値: Bearer {} です", token_of(20))),
             ReplyGuardPattern::CredentialShape
         );
         is_allowed(&format!("参考値: Bearer {} です", token_of(19)), &strict());
@@ -512,7 +506,7 @@ mod tests {
             ("AKIA", 16),
         ] {
             assert_eq!(
-                blocked_pattern(&format!("鍵: {prefix}{}", token_of(min)), &strict()),
+                blocks(&format!("鍵: {prefix}{}", token_of(min))),
                 ReplyGuardPattern::CredentialShape,
                 "prefix {prefix} at min length"
             );
@@ -528,10 +522,7 @@ mod tests {
             "-----BEGIN {}\n(dummy body)\n-----END PRIVATE KEY-----",
             "EC PRIVATE KEY-----"
         );
-        assert_eq!(
-            blocked_pattern(&key, &strict()),
-            ReplyGuardPattern::CredentialShape
-        );
+        assert_eq!(blocks(&key), ReplyGuardPattern::CredentialShape);
         is_allowed("-----BEGIN CERTIFICATE----- の行だけです", &strict());
     }
 
@@ -546,18 +537,24 @@ mod tests {
             "$ wget -q http://127.0.0.1:8080/pkg.tar で取得します",
             "curl --data '{\"q\":1}' を送ります",
             "curl --header 'x: 1' を送ります",
+            // 日本語の文末・全角のコロン・箇条書き・引用・番号付き・前置語の後ろも
+            // コマンド位置とする（レビュー指摘の各形）。
+            "確認しました。curl -s https://127.0.0.1:8080/v1/jobs を実行します",
+            "実行：curl -s http://127.0.0.1:8080/v1/jobs",
+            "- curl -s http://127.0.0.1:8080/v1/jobs",
+            "* curl -s http://127.0.0.1:8080/v1/jobs",
+            "> curl -s http://127.0.0.1:8080/v1/jobs",
+            "1. curl -s http://127.0.0.1:8080/v1/jobs",
+            "sudo curl -s http://127.0.0.1:8080/v1/jobs",
         ] {
-            assert_eq!(
-                blocked_pattern(body, &strict()),
-                ReplyGuardPattern::ExecutionScript,
-                "{body}"
-            );
+            assert_eq!(blocks(body), ReplyGuardPattern::ExecutionScript, "{body}");
         }
         // URL があっても、コマンド位置に無い言及・語の一部は通す。
         for body in [
             "curl の -H フラグの意味を説明します",
             "curling の資料 http://127.0.0.1:8080/docs を参照",
             "この curl のあとの http://127.0.0.1:8080/x は例です",
+            "visudo curl という連続の語の例 http://127.0.0.1:8080/x です",
         ] {
             is_allowed(body, &strict());
         }
@@ -566,16 +563,18 @@ mod tests {
     #[test]
     fn internal_sentinel_and_tool_call_json_are_blocked() {
         assert_eq!(
-            blocked_pattern("進捗: <think>ここまで検討しました</think> です", &strict()),
+            blocks("進捗: <think>ここまで検討しました</think> です"),
             ReplyGuardPattern::InternalSentinel
         );
-        assert_eq!(
-            blocked_pattern(
-                "応答: {\"tool_use\": {\"name\": \"search\"}} が返ってきました",
-                &strict()
-            ),
-            ReplyGuardPattern::ToolCallJson
-        );
+        // ツール呼び出しの内容ブロック: キー形式・値形式・空白入り形式のどれも止める。
+        for body in [
+            "応答: {\"tool_use\": {\"name\": \"search\"}} が返ってきました",
+            "応答: {\"type\":\"tool_use\",\"id\":\"toolu_01\",\"name\":\"search\"} でした",
+            "応答: { \"tool_use\" : {\"name\": \"search\"} } という形でした",
+            "応答: { \"actions\": [{\"a\": 1}] } という形でした",
+        ] {
+            assert_eq!(blocks(body), ReplyGuardPattern::ToolCallJson, "{body}");
+        }
     }
 
     // ---- 漏洩系: 保守条件（最初の空行を除く行の形） ----
@@ -587,11 +586,7 @@ mod tests {
             "HTTP/2 429\n再試行します",
             "{\"error\":{\"message\":\"synthetic\",\"type\":\"synthetic\"}}",
         ] {
-            assert_eq!(
-                blocked_pattern(body, &strict()),
-                ReplyGuardPattern::ProviderErrorEcho,
-                "{body}"
-            );
+            assert_eq!(blocks(body), ReplyGuardPattern::ProviderErrorEcho, "{body}");
         }
         // エラーへの言及・形が壊れたステータス行は通す。
         is_allowed("デプロイが HTTP 500 で失敗したので再試行します", &strict());
@@ -603,22 +598,13 @@ mod tests {
     // ---- フェンスと緩和設定 ----
 
     #[test]
-    fn credential_inside_code_fence_is_blocked() {
-        let body = format!("```rust\nlet token = \"Bearer {}\";\n```", token_of(30));
-        assert_eq!(
-            blocked_pattern(&body, &strict()),
-            ReplyGuardPattern::CredentialShape
-        );
-    }
-
-    #[test]
     fn channel_relaxation_applies_to_paste_aspect_only() {
+        // フェンスで囲んでも資格情報は止める。
+        let fenced = format!("```rust\nlet token = \"Bearer {}\";\n```", token_of(30));
+        assert_eq!(blocks(&fenced), ReplyGuardPattern::CredentialShape);
         let dump = dump_of("let", 40, 0);
         // 既定（strict は default と同じ）では大量貼り付けを止める。
-        assert_eq!(
-            blocked_pattern(&dump, &strict()),
-            ReplyGuardPattern::CodePasteDump
-        );
+        assert_eq!(blocks(&dump), ReplyGuardPattern::CodePasteDump);
         // 緩和を設定すると大量貼り付けの観点は通る。
         is_allowed(&dump, &relaxed());
         // 漏洩系は緩和設定の影響を受けず止める。
@@ -640,11 +626,7 @@ mod tests {
     #[test]
     fn empty_and_whitespace_bodies_are_blocked() {
         for body in ["", "   \n\t\n", "\u{3000}"] {
-            assert_eq!(
-                blocked_pattern(body, &strict()),
-                ReplyGuardPattern::EmptyBody,
-                "{body:?}"
-            );
+            assert_eq!(blocks(body), ReplyGuardPattern::EmptyBody, "{body:?}");
         }
     }
 
@@ -677,12 +659,12 @@ mod tests {
         // 行数の下限: 30 行で止め、29 行なら通す。
         // 割合の下限: 30 行のうち 24 行（80%）で止め、23 行なら通す。
         assert_eq!(
-            blocked_pattern(&dump_of("let", 30, 0), &strict()),
+            blocks(&dump_of("let", 30, 0)),
             ReplyGuardPattern::CodePasteDump
         );
         is_allowed(&dump_of("let", 29, 0), &strict());
         assert_eq!(
-            blocked_pattern(&dump_of("let", 24, 6), &strict()),
+            blocks(&dump_of("let", 24, 6)),
             ReplyGuardPattern::CodePasteDump
         );
         is_allowed(&dump_of("let", 23, 7), &strict());
@@ -698,7 +680,7 @@ mod tests {
             "semicolon",
         ] {
             assert_eq!(
-                blocked_pattern(&dump_of(kind, 24, 6), &strict()),
+                blocks(&dump_of(kind, 24, 6)),
                 ReplyGuardPattern::CodePasteDump,
                 "shape {kind}"
             );
@@ -721,10 +703,7 @@ mod tests {
         let indented = format!("   ```\n{}\n   ```", dump_of("let", 40, 0));
         is_allowed(&indented, &strict());
         let deep = format!("    ```\n{}\n    ```", dump_of("let", 40, 0));
-        assert_eq!(
-            blocked_pattern(&deep, &strict()),
-            ReplyGuardPattern::CodePasteDump
-        );
+        assert_eq!(blocks(&deep), ReplyGuardPattern::CodePasteDump);
         // 短いコード片の引用だけの正当な本文は通す。
         is_allowed(
             "```rust\nfn main() {\n    println!(\"hi\");\n}\n```",
@@ -743,10 +722,7 @@ mod tests {
         // フェンスの中でも暴走系は検査する。5 回で止め、4 回なら通す。空行をはさむと
         // 連続と数えない。
         let five = format!("```\n{}\n```", "同じ行です\n".repeat(5));
-        assert_eq!(
-            blocked_pattern(&five, &strict()),
-            ReplyGuardPattern::Repetition
-        );
+        assert_eq!(blocks(&five), ReplyGuardPattern::Repetition);
         let four = format!("```\n{}\n```", "同じ行です\n".repeat(4));
         is_allowed(&four, &strict());
         is_allowed("同じ行\n\n同じ行\n\n同じ行\n\n同じ行\n\n同じ行", &strict());
