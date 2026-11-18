@@ -376,9 +376,7 @@ fn accessibility_roles_labels_focus_and_keys() {
         "完了→作業中の切り替えで「完了」表示が（可視のまま）残らないこと"
     );
     // 「送信済み」: 社外送信カードの送信後の表示。
-    update_row(TimelineRowKind::ExternalSend, &|item| {
-        item.ext_sent = true;
-    });
+    update_row(TimelineRowKind::ExternalSend, &|item| item.ext_sent = true);
     settle();
     assert!(
         any_label(&window, |l| l.contains("送信")
@@ -387,18 +385,16 @@ fn accessibility_roles_labels_focus_and_keys() {
     );
     // 受領済みに切り替える（「受領 · {名前} {時刻}」の表示）。
     update_row(TimelineRowKind::Handoff, &|item| {
-        item.handoff_acknowledged = true;
+        item.handoff_acknowledged = true
     });
     settle();
     assert!(
         any_label(&window, |l| l.starts_with("受領 ·")),
         "受領済みの表示が画面のテキストとして存在すること"
     );
-    update_row(TimelineRowKind::ExternalSend, &|item| {
-        item.ext_sent = false;
-    });
+    update_row(TimelineRowKind::ExternalSend, &|item| item.ext_sent = false);
     update_row(TimelineRowKind::Handoff, &|item| {
-        item.handoff_acknowledged = false;
+        item.handoff_acknowledged = false
     });
     settle();
 

@@ -1,21 +1,14 @@
 //! チャンネルの時系列の仮想化の検査（Issue 385。テスト用 backend。窓は開かない）。
 //!
 //! `crates/dev-client-probe/tests/virtualization.rs` と同型: ListView 内部の
-//! flickable にスクロールイベントを送って、実体化した行を数えて位置を確かめる
-//! （外側から `content-y` を差し込まない）。行の実体化と位置は
-//! `timeline-row` の id を持つ要素を要素 API で数えて読む。行番号と行の位置は
-//! `record-timeline-row` コールバックが流す（行が動くたびに自分の行番号と、
-//! `y + content-y`＝時系列の先頭からの実位置と高さを流す）。probe は
-//! `setup(10_000, true)` の可変高で動かしており、生成行の行番号が連続
-//! していることを確かめる検査がある。このテストも記録した行番号が連続
-//! していることと、行番号で隣り合う行が実位置でも隙間なく並ぶことを
-//! 確かめる。
+//! flickable にスクロールイベントを送って、実体化した行を数えて位置を確かめる。
+//! 行の実体化と位置は `timeline-row` の id を持つ要素を要素 API で読み、
+//! 行番号と行の位置は `record-timeline-row` コールバックが流す。記録した
+//! 行番号が連続していることと、行番号で隣り合う行が実位置でも隙間なく
+//! 並ぶことを確かめる。
 //!
-//! 注意: ListView の行の `y` は内部 flickable の `content-y` が差し引かれた
-//! 値（画面の中での位置）なので、時系列の中での位置は `y + content-y` で
-//! 読む。測定の直前に記録を空にして軽くスクロールし直すと、いま実体化
-//! している行の行番号だけが記録に残る（レイアウトの途中で作られて消えた
-//! 行の記録を追い越せる）。
+//! 測定の直前に記録を空にして軽くスクロールし直すと、いま実体化している
+//! 行の行番号だけが記録に残る。
 //!
 //! テスト用 backend（窓を開かない）はテストごとに 1 回だけ入れる。Slint の
 //! platform はスレッドローカルなのでテストごとに初期化する（プロセス全体の
@@ -29,6 +22,14 @@ use pelway_client_ui::bridge::apply_channel_view;
 use pelway_client_ui::state::sample;
 use pelway_client_ui::{MainWindow, TimelineItem, TimelineRowKind};
 use slint::{ComponentHandle, LogicalSize, Model, ModelRc, VecModel, WindowSize};
+
+/// カードの部品名（実体化の確認に使う）。
+const CARD_TYPES: [&str; 4] = [
+    "DecisionCardView",
+    "HandoffCardView",
+    "ExternalSendCardView",
+    "PrivateNoteRow",
+];
 
 /// 行の記録（実体化した行が自分の行番号と位置・高さを流してきたもの。
 /// 行番号が連続しているか、遠くへ飛んだあとの行番号を確かめるのに使う）。
@@ -163,10 +164,8 @@ fn timeline_materializes_only_visible_rows_and_stacks_them_at_their_heights() {
     let (window, log) = window_with_log();
     window.set_timeline_items(ModelRc::new(VecModel::from(synthetic_items(10_000))));
 
-    // 測定の直前に記録を空にして、もう一度少しスクロールする。行の位置が
-    // 動くと行が自分の行番号を記録し直すので、記録 = いま実体化している
-    // 行の行番号になる（レイアウトの途中で作られて消えた行の番号は、
-    // 最初のスクロールの記録を空にしたあとには残らない）。
+    // 測定の直前に記録を空にして軽くスクロールし直すと、記録には
+    // いま実体化している行の行番号だけが残る。
     scroll(&window, -300.0);
     log.rows.lock().expect("記録のロック").clear();
     scroll(&window, -40.0);
@@ -206,9 +205,7 @@ fn timeline_materializes_only_visible_rows_and_stacks_them_at_their_heights() {
         "生成された行の高さがすべて同じ（可変高の前提が成立していない）"
     );
     // 行番号の順に並んだ隣り合う行は、隙間なく重なりなく並ぶ（下の行の
-    // 時系列中の位置が、上の行の底辺と一致する）。記録する位置は
-    // `y + content-y`（時系列の先頭からの位置）なので、スクロール量に
-    // 依らず同じ値になる。
+    // 時系列中の位置が、上の行の底辺と一致する）。
     for pair in indices.windows(2) {
         let &(top_y, top_h) = &recorded[&pair[0]];
         let &(next_y, _) = &recorded[&pair[1]];
@@ -275,17 +272,11 @@ fn every_row_kind_appears_on_the_list() {
     let count = model.row_count();
     assert!(count > 0, "時系列に行がある");
     // 実体化するのは見える範囲だけなので、端まで順にスクロールして全行の
-    // 実体化を集める（判断カード・引き継ぎ・社外送信・私信を含む）。カードの
-    // 部品の実体化も、画面を過ぎると行が消えるため、各段でその場で確かめる。
+    // 実体化を集める。カードの部品は画面を過ぎると消えるので各段で確かめる。
     let mut seen_types = BTreeSet::new();
     for _ in 0..32 {
         scroll(&window, -300.0);
-        for name in [
-            "DecisionCardView",
-            "HandoffCardView",
-            "ExternalSendCardView",
-            "PrivateNoteRow",
-        ] {
+        for name in CARD_TYPES {
             if window
                 .root_element()
                 .query_descendants()
@@ -307,14 +298,15 @@ fn every_row_kind_appears_on_the_list() {
         "全行が一度は実体化されない（実体化した行番号: {indices:?}）"
     );
     // 記録された行番号から種類を引き、既存のカードの種類が揃うことを確かめる。
-    let mut kinds = BTreeSet::new();
-    for index in &indices {
-        let kind = model
-            .row_data(*index as usize)
-            .expect("記録された行は一覧にある")
-            .kind;
-        kinds.insert(kind as i32);
-    }
+    let kinds: BTreeSet<i32> = indices
+        .iter()
+        .map(|i| {
+            model
+                .row_data(*i as usize)
+                .expect("記録された行は一覧にある")
+                .kind as i32
+        })
+        .collect();
     for (kind, name) in [
         (TimelineRowKind::DecisionCard, "判断カード"),
         (TimelineRowKind::Handoff, "引き継ぎカード"),
@@ -327,12 +319,7 @@ fn every_row_kind_appears_on_the_list() {
         );
     }
     // カードの種類ごとの部品が実際に載ったこと（同じ種類のまま出る）。
-    for name in [
-        "DecisionCardView",
-        "HandoffCardView",
-        "ExternalSendCardView",
-        "PrivateNoteRow",
-    ] {
+    for name in CARD_TYPES {
         assert!(
             seen_types.contains(name),
             "{name} が時系列に実体化されなかった"
