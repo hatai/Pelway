@@ -35,13 +35,14 @@ pub const DEFAULT_SERVER_URL: &str = "http://127.0.0.1:8787";
 /// チャンネルの最初の人に切り替える（[`LiveSession::bootstrap`] 内）。
 const DEFAULT_ACTOR: &str = "m-tanaka";
 
-/// サーバー URL 文字列のパース失敗。
+/// サーバー URL 文字列のパース失敗。文言に入力値は含めない
+/// （接続先として拒否した文字列をエラー出力へ持ち出さない）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AddrError(String);
+pub struct AddrError(&'static str);
 
 impl fmt::Display for AddrError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid server URL: {}", self.0)
+        write!(f, "invalid server URL ({})", self.0)
     }
 }
 
@@ -59,11 +60,9 @@ pub fn parse_server_addr(text: &str) -> Result<SocketAddr, AddrError> {
         .strip_prefix("http://")
         .unwrap_or(trimmed)
         .trim_end_matches('/');
-    let addr: SocketAddr = hostport
-        .parse()
-        .map_err(|_| AddrError(trimmed.to_owned()))?;
+    let addr: SocketAddr = hostport.parse().map_err(|_| AddrError("malformed"))?;
     if !addr.ip().is_loopback() {
-        return Err(AddrError(trimmed.to_owned()));
+        return Err(AddrError("not loopback"));
     }
     Ok(addr)
 }
@@ -78,9 +77,7 @@ pub fn server_addr() -> Result<SocketAddr, AddrError> {
     match std::env::var(SERVER_URL_ENV) {
         Ok(value) => parse_server_addr(&value),
         Err(std::env::VarError::NotPresent) => parse_server_addr(DEFAULT_SERVER_URL),
-        Err(std::env::VarError::NotUnicode(_)) => {
-            Err(AddrError(format!("{SERVER_URL_ENV} is not Unicode")))
-        }
+        Err(std::env::VarError::NotUnicode(_)) => Err(AddrError("not Unicode")),
     }
 }
 
@@ -148,17 +145,31 @@ impl LiveSession {
         self.client = Client::new(addr);
     }
 
+    /// `path` に表示ユーザーの `actor` クエリを付けた要求ターゲット。
+    /// 値はパーセントエンコードする（unreserved: `[A-Za-z0-9-._~]` 以外は %XX。
+    /// member_id 以外の文字が混入してもクエリやリクエスト行を壊さない）。
+    fn actor_path(&self, path: &str) -> String {
+        let mut out = String::with_capacity(path.len() + self.actor.as_str().len() + 7);
+        out.push_str(path);
+        out.push_str("?actor=");
+        for b in self.actor.as_str().bytes() {
+            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+                out.push(b as char);
+            } else {
+                out.push_str(&format!("%{b:02X}"));
+            }
+        }
+        out
+    }
+
     /// 起動時の取得: チャンネル一覧 → 最初のチャンネルの情報とメッセージ。
     /// 成功したら `connected = true`。
     ///
     /// # Errors
     /// どれかの要求が失敗したら [`LiveError`]（`connected = false`）。
     pub fn bootstrap(&mut self) -> Result<(), LiveError> {
-        let channels: Vec<Channel> = self.get_json(&format!(
-            "{}?actor={}",
-            channels_path(&self.workspace_id),
-            self.actor.as_str()
-        ))?;
+        let channels: Vec<Channel> =
+            self.get_json(&self.actor_path(&channels_path(&self.workspace_id)))?;
         self.connected = true;
         let Some(channel_id) = channels.first().map(|c| c.channel_id.clone()) else {
             // 再取得でチャンネルが無くなっていたら選択を捨てる
@@ -167,11 +178,7 @@ impl LiveSession {
             self.messages.clear();
             return Ok(());
         };
-        let channel: Channel = self.get_json(&format!(
-            "{}?actor={}",
-            channel_path(&channel_id),
-            self.actor.as_str()
-        ))?;
+        let channel: Channel = self.get_json(&self.actor_path(&channel_path(&channel_id)))?;
         // 表示ユーザーがチャンネルの人のメンバーに居なければ先頭の人に直す。
         if !channel
             .members
@@ -185,11 +192,8 @@ impl LiveSession {
             self.actor = first_human.member_id.clone();
             self.actor_kind = MemberKind::Human;
         }
-        let messages: Vec<StoredMessage> = self.get_json(&format!(
-            "{}?actor={}",
-            channel_messages_path(&channel_id),
-            self.actor.as_str()
-        ))?;
+        let messages: Vec<StoredMessage> =
+            self.get_json(&self.actor_path(&channel_messages_path(&channel_id)))?;
         self.channel = Some(channel);
         self.messages = messages;
         Ok(())
@@ -211,11 +215,8 @@ impl LiveSession {
         let Some(channel_id) = self.channel.as_ref().map(|c| c.channel_id.clone()) else {
             return self.bootstrap();
         };
-        let all: Vec<StoredMessage> = self.get_json(&format!(
-            "{}?actor={}",
-            channel_messages_path(&channel_id),
-            self.actor.as_str()
-        ))?;
+        let all: Vec<StoredMessage> =
+            self.get_json(&self.actor_path(&channel_messages_path(&channel_id)))?;
         self.connected = true;
         self.messages = all;
         Ok(())
@@ -351,5 +352,17 @@ impl LiveSession {
             self.connected = false;
             LiveError::Json(e)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn actor_path_percent_encodes_query_value() {
+        let mut s = LiveSession::new("127.0.0.1:1".parse().unwrap(), "w".into());
+        s.actor = MemberId::from("m a?&=b");
+        assert_eq!(s.actor_path("/p"), "/p?actor=m%20a%3F%26%3Db");
     }
 }
