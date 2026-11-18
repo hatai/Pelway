@@ -45,7 +45,7 @@ handoff-acknowledge = 受けました
 handoff-decision-owner = 納期の決定：{ $name }（代表）
 ## 社外への送信の確認カード
 ext-card-label = 社外への送信 · { $name }さんの確認待ち
-ext-card-question = { $to }にメールを送りますか
+ext-card-question = { $address }にメールを送りますか
 ext-address-label = 宛先：
 ext-subject-label = 件名：
 ext-basis-label = 根拠：
@@ -70,3 +70,6 @@ menu-help = ヘルプ
 menu-about = このアプリについて
 about-title = このアプリについて
 about-close = 閉じる
+## 読み上げ用の種別の呼び名（Issue 379。accessible-label で使う）
+ai-bot-label = AI Bot
+person-label = 人

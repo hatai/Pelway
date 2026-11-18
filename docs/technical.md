@@ -24,6 +24,7 @@
 詳細と根拠:
 
 - 正本: [技術仕様 統合版 v0.7](technical/v0.7/README.md)（本文は `docs/technical/v0.7/body/` の01〜13）
+- 本番配置の雛形（Compose＋リバースプロキシ＋systemdタイマーの単一ホスト、国内ホスティング前提）: [ADR 0012](adr/0012-production-topology-single-host.md)
 - 図解: [技術アーキテクチャ図（v0.7準拠）](architecture-v0.7.md)
 - 原価の計算（§9）は、モデル単価と使用量の仮定を入れ替えればv0.7構成でも使える形で残しています
 
