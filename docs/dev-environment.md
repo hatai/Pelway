@@ -323,9 +323,22 @@ deny_read = [
 ]
 ```
 
+### 適用の順序（番号付き・橋渡し付き）
+
+PR #462 のマージ前は、main 起点のレビュースレッドは**旧 `scripts/agent-gh`**（review ロールが `PELWAY_AGENT_FNOX_CONFIG`＝既定 `~/.config/pelway-agent/fnox.toml` を読む）を実行する。鍵の分割と deny を順序を誤って適用すると、旧 agent-gh は (a) 旧設定から `PELWAY_REVIEW_*` を削除した時点、(b) deny で `~/.config/pelway-agent` が読めなくなった時点のどちらでも exit 3（fail-closed）で止まる。そこで**橋渡し**（旧 agent-gh の `PELWAY_AGENT_FNOX_CONFIG` を review 用設定に向ける環境変数）を挟み、旧設定からの削除は最後に行う:
+
+1. **鍵の分割（登録まで）**: 下の「鍵の分割」のコマンドのうち `fnox remove` のループ**以外**を実行する（review 用の鍵ペアと設定を作り、`PELWAY_REVIEW_*` を review 用設定へ登録する）。この時点で旧設定にも review 用設定にも `PELWAY_REVIEW_*` がある
+2. **橋渡し**: レビュー用 CLI の起動時に `PELWAY_AGENT_FNOX_CONFIG=$HOME/.config/pelway-agent-review/fnox.toml` を渡す（`devin_review` は起動ラッパー `/home/hatai/.local/bin/devin-review` の `env` に足す。`claude_review`・`codex_review` は T3 側の起動設定かラッパーで同じ環境変数を渡す）。旧 agent-gh の review ロールが review 用設定を読むようになり、main 起点のレビュースレッドが動き続ける
+3. **deny の追加**: 上の 3 担当の変更（devin・claude・`/etc/codex/requirements.toml`）を適用する。レビューの sandbox から `~/.config/pelway-agent` が読めなくなっても、橋渡しにより旧 agent-gh は review 用設定を読む
+4. **実測と記録**: 3 担当のレビュー委託スレッドで 4 パスの `test -r`（すべて非 0）と `scripts/agent-gh review api /rate_limit`、review 用設定の `fnox list`（下の確かめ方）を実施し、下の記録欄に記録する
+5. **PR #462 のマージ**: マージ後の `scripts/agent-gh` の review ロールは `PELWAY_AGENT_FNOX_CONFIG_REVIEW`（既定 `~/.config/pelway-agent-review/fnox.toml`）を直接読む
+6. **旧設定からの削除と橋渡しの解除**: 下の「鍵の分割」の `fnox remove` のループを実行して旧設定から `PELWAY_REVIEW_*` を削除し、橋渡しの `PELWAY_AGENT_FNOX_CONFIG` を元に戻す
+
+橋渡しを採って deny・削除の後倒しを採らない理由: 記録欄の実測（ステップ 4）は deny 適用の後・マージの前に行う必要がある（Issue #449 の受け入れ条件が「記録欄への記録と PR のマージまで」の順を要求するため）。deny をマージまで後倒しすると実測がマージ前に済ませられない。
+
 ### 鍵の分割（review 用の fnox 設定と age 鍵）
 
-review 用の秘密（`PELWAY_REVIEW_*`）を dev とは別の fnox 設定・別の age 鍵ペアに移す。以降 `scripts/agent-gh review` は `PELWAY_AGENT_FNOX_CONFIG_REVIEW`（既定 `~/.config/pelway-agent-review/fnox.toml`）だけを読む。値は一切表示しない（`fnox get` の出力はパイプで次の `fnox set` に渡す）:
+review 用の秘密（`PELWAY_REVIEW_*`）を dev とは別の fnox 設定・別の age 鍵ペアに移す。以降 `scripts/agent-gh review` は `PELWAY_AGENT_FNOX_CONFIG_REVIEW`（既定 `~/.config/pelway-agent-review/fnox.toml`）だけを読む。値は一切表示しない（`fnox get` の出力はパイプで次の `fnox set` に渡す）。**適用の順序（上の番号付き）のステップ 1 として、まず登録のループだけを実行する**:
 
 ```bash
 mkdir -p ~/.config/pelway-agent-review
@@ -345,6 +358,11 @@ for name in PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW
   fnox -c ~/.config/pelway-agent/fnox.toml get "$name" |
     fnox -c ~/.config/pelway-agent-review/fnox.toml set --provider review_age "$name" >/dev/null
 done
+```
+
+旧設定からの削除は**ステップ 6（マージ後）**に実行する:
+
+```bash
 for name in PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW_APP_KEY; do
   fnox -c ~/.config/pelway-agent/fnox.toml remove "$name" >/dev/null
 done
@@ -360,7 +378,7 @@ fnox -c ~/.config/pelway-agent/fnox.toml list           # PELWAY_DEV_* と PELWA
 scripts/agent-gh review api /rate_limit                 # review 用の設定だけでトークンが発行できる
 ```
 
-**戻し方**: review 用の設定から旧設定へ同じ形で移し戻してから、review 用の設定と鍵を消す:
+**戻し方**: 橋渡しの `PELWAY_AGENT_FNOX_CONFIG` を元に戻し、review 用の設定から旧設定へ同じ形で移し戻してから、review 用の設定と鍵を消す:
 
 ```bash
 for name in PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW_APP_KEY; do
@@ -370,7 +388,7 @@ done
 rm -f ~/.config/pelway-agent-review/fnox.toml ~/.config/pelway-agent-review/age.txt
 ```
 
-（`scripts/setup/agent-accounts.sh` の新規セットアップは 2026-11-18 以降この分割構成で作る。上の手順は既存環境からの移行用。）
+（`scripts/setup/agent-accounts.sh` の新規セットアップは 2026-11-18 以降この分割構成で作る。ウィザードの「旧設定に残った review 秘密を移す」stage は登録と削除をまとめて行うため、PR #462 のマージ前に既存環境を移行するときは上の番号付きの手順（削除はステップ 6）を使う。）
 
 ### 確認手順の結果（記録欄）
 

@@ -348,12 +348,11 @@ EOF
 fi
 pause
 
-app_stages "pelway-review" "PELWAY_REVIEW" "レビュー担当のエージェントがレビューを投稿するのに使う" \
-  "Contents = Read-only / Pull requests = Read and write / Issues = Read-only" \
-  "$REVIEW_CFG" "review_age"
-
+# 旧設定に PELWAY_REVIEW_* が残っているときは app_stages の前に移す。
+# 逆順にすると、app_stages で新しく入力して保存した値を、後から移す旧設定の値で上書きしてしまう。
+review_ready=no
 stage "旧設定に残った review 秘密を移す（既存環境だけ）"
-say "旧設定 ($CFG) に PELWAY_REVIEW_* があるときだけ、値を表示せずに $REVIEW_CFG へ移す。"
+say "旧設定 ($CFG) に PELWAY_REVIEW_* があるときだけ、値を表示せずに $REVIEW_CFG へ移す（登録と削除をまとめて行う）。"
 if fnox -c "$CFG" get PELWAY_REVIEW_APP_ID >/dev/null 2>&1; then
   for secret_name in PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW_APP_KEY; do
     fnox -c "$CFG" get "$secret_name" | fnox_set "$REVIEW_CFG" review_age "$secret_name"
@@ -362,10 +361,26 @@ if fnox -c "$CFG" get PELWAY_REVIEW_APP_ID >/dev/null 2>&1; then
     fnox -c "$CFG" remove "$secret_name" >/dev/null
     printf '  %s✓ removed%s %s ← %s\n' "$GREEN" "$RESET" "$secret_name" "$CFG"
   done
+  note "PR #462 のマージ前に既存環境を移行するときは、docs/dev-environment.md の番号付きの手順を使う（旧設定からの削除はマージ後）"
+  review_ready=yes
+elif fnox -c "$REVIEW_CFG" get PELWAY_REVIEW_APP_ID >/dev/null 2>&1; then
+  note "旧設定に PELWAY_REVIEW_APP_ID は無く、$REVIEW_CFG に既にある（移行済みか新規作成済み）"
+  review_ready=yes
 else
-  note "旧設定に PELWAY_REVIEW_APP_ID は無い（新規セットアップなので移行は不要）"
+  note "旧設定にも $REVIEW_CFG にも PELWAY_REVIEW_APP_ID は無い（新規セットアップ）"
 fi
 pause
+
+# 移行済み・作成済みなら pelway-review の App 情報の再入力（app_stages）は行わない。
+if [[ "$review_ready" == yes ]]; then
+  stage "pelway-review の App 情報の再入力は不要"
+  say "$REVIEW_CFG に PELWAY_REVIEW_* が揃っているため、GitHub App の作成・秘密鍵・インストールの各段階は行わない。"
+  pause
+else
+  app_stages "pelway-review" "PELWAY_REVIEW" "レビュー担当のエージェントがレビューを投稿するのに使う" \
+    "Contents = Read-only / Pull requests = Read and write / Issues = Read-only" \
+    "$REVIEW_CFG" "review_age"
+fi
 
 stage "名義を確かめる"
 say "scripts/agent-gh で、それぞれの名義が GitHub に通るか確かめる。"
