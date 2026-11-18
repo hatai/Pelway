@@ -190,6 +190,62 @@ fn approve_button_escape_does_nothing() {
     );
 }
 
+// ---- 決定ボタン ----
+
+/// 決定は決定ボタンでの Enter・Space（修飾なし）だけ。どちらも決定を 1 回返す。
+#[test]
+fn decision_button_enter_and_space_decide_once() {
+    assert_eq!(
+        on_key(
+            &ctx(Focus::DecisionButton, ImeState::NotComposing, false),
+            Key::Enter,
+            NO_MODS
+        ),
+        Action::Decide
+    );
+    assert_eq!(
+        on_key(
+            &ctx(Focus::DecisionButton, ImeState::NotComposing, false),
+            Key::Space,
+            NO_MODS
+        ),
+        Action::Decide
+    );
+}
+
+/// 決定ボタンにフォーカスがあっても、修飾付きキーと変換中のキーでは決定しない。
+#[test]
+fn decision_button_ignores_modified_and_composing_keys() {
+    for key in [Key::Enter, Key::Space] {
+        for mods in [CTRL_OR_CMD, SHIFT] {
+            assert_eq!(
+                on_key(
+                    &ctx(Focus::DecisionButton, ImeState::NotComposing, false),
+                    key,
+                    mods
+                ),
+                Action::None
+            );
+        }
+        assert_eq!(
+            on_key(
+                &ctx(Focus::DecisionButton, ImeState::Composing, false),
+                key,
+                NO_MODS
+            ),
+            Action::None
+        );
+    }
+    assert_eq!(
+        on_key(
+            &ctx(Focus::DecisionButton, ImeState::NotComposing, false),
+            Key::Escape,
+            NO_MODS
+        ),
+        Action::None
+    );
+}
+
 // ---- QA-MEN-01: メッセージ入力欄とメンション候補一覧 ----
 
 /// 候補一覧が開いている間の Enter は、候補を 1 つ入れて一覧を閉じ、送信しない。
