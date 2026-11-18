@@ -57,6 +57,17 @@ jactionlint = "2.5.0"
 # 抑制は disable コメントに理由を添えたものだけ許す。担当が公式リリースを確認の上でピン。
 # 出典: https://github.com/koalaman/shellcheck/releases/tag/v0.11.0
 "aqua:koalaman/shellcheck" = "0.11.0"
+# ミューテーションテスト（Issue #437）。テストが振る舞いの変化を検出できるかを、
+# ソースへの自動変異とテスト実行で測る。aqua レジストリに登録が無いため github
+# バックエンドで公式リリースのバイナリを導入する（mise.lock が URL と checksum で
+# 取得物を固定する）。リポジトリは旧 sourcegraph org から sourcefrog org へ移管済み。
+# 出典: https://github.com/sourcefrog/cargo-mutants/releases/tag/v27.1.0
+"github:sourcefrog/cargo-mutants" = "27.1.0"
+# mutants がテスト実行に使う nextest（.cargo/mutants.toml の test_tool = "nextest"）。
+# aqua レジストリに登録が無いため github バックエンドで導入する。nextest のタグは
+# cargo-nextest-<版> の形（nextest-runner 等の別タグと混ざるため接頭辞ごと固定する）。
+# 出典: https://github.com/nextest-rs/nextest/releases/tag/cargo-nextest-0.9.152
+"github:nextest-rs/nextest" = "cargo-nextest-0.9.152"
 
 # コンテナ実行環境（非 Docker・要件は docs/dev-environment.md）。
 # rootless Podman 一式を apt から導入する宣言。適用は明示的な bootstrap 実行時だけ
@@ -101,6 +112,32 @@ run = "cargo clippy --workspace --all-targets --locked -- -D warnings && cargo c
 [tasks.test]
 description = "全テストを実行する（--locked）。pelway-gateway は feature `acp` 後ろの試験（#133）も実行する"
 run = "cargo test --workspace --locked && cargo test -p pelway-gateway --all-features --locked"
+
+# ミューテーションテスト（Issue #437）。対象・offline・gitignore などの設定は
+# .cargo/mutants.toml 1 か所にまとめ、ここでは実行の仕方だけを書く。
+# 安全条件（#437）: env -u で PELWAY_LLM_API_KEY を実行環境から除く
+# （#[ignore] 試験・real_llm 系のテストが鍵を拾わないようにする）。
+# --jobs はマシンに応じて調整（cargo-mutants の設定ファイルに jobs キーは
+# 無いためタスク側に書く。既定は直列の 1）。
+[tasks.mutants]
+description = "ミューテーションテスト全体（#437）。対象は .cargo/mutants.toml の examine_globs（pelway-contract と承認ポリシー）"
+run = "env -u PELWAY_LLM_API_KEY cargo mutants --jobs 4"
+
+[tasks."mutants:diff"]
+description = "差分に重なるミュータントだけを試す（#437）。origin/main との merge-base からの diff を --in-diff に渡す"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+base="$(git merge-base HEAD origin/main)"
+diff_file="$(mktemp)"
+trap 'rm -f "$diff_file"' EXIT
+git diff "$base" > "$diff_file"
+if [ ! -s "$diff_file" ]; then
+  echo "origin/main との差分が無いため、試すミュータントも無い"
+  exit 0
+fi
+env -u PELWAY_LLM_API_KEY cargo mutants --in-diff "$diff_file" --jobs 4
+'''
 
 # CI（.github/workflows/verify.yml の coverage ジョブ）とローカルで共通のカバレッジ計測。
 # cargo-llvm-cov 自身は設定ファイルを持たないため、集計対象の絞り込みはこのタスクの引数で宣言する
