@@ -8,6 +8,13 @@
       "skillPath": "skills/engineering/ask-matt/SKILL.md",
       "computedHash": "7ff2383b40fe9d8f3e753d267d964fb2b44d120a948fd2a57c3b26ddfc318370"
     },
+    "axum": {
+      "source": "bobmatnyc/claude-mpm-skills",
+      "commit": "718070a7d622921b01687799a1f9613f36c6f615",
+      "sourceType": "github",
+      "skillPath": "toolchains/rust/frameworks/axum/SKILL.md",
+      "computedHash": "0b28c1dfafc001526c573fb7fd9b74047df3e28ba59657f47582b17c24467845"
+    },
     "code-review": {
       "source": "mattpocock/skills",
       "commit": "5863806dd4e15c63174bee4e7515a4256792ecfa",
@@ -119,6 +126,20 @@
       "skillPath": "skills/domain-web/SKILL.md",
       "computedHash": "c42407a385f5f3252ec917337b40cba1bf9802ddd38505dbafea8ab3641ecea2",
       "commit": "5c40d3ad785193231b7d0dbfb8e1eb447e5edd94"
+    },
+    "fnox": {
+      "source": "jdx/fnox",
+      "commit": "5f07cbe8fc99b7b258afd5639cb808992f8d578a",
+      "sourceType": "github",
+      "skillPath": "skills/fnox/SKILL.md",
+      "computedHash": "45672395c41190b4e3524db75803dcecc4bf16a02dab96d7d16530fd7cff92ba"
+    },
+    "github-actions-templates": {
+      "source": "wshobson/agents",
+      "commit": "42203085cfc5736204bf0f6d436dff7e1da0bf3f",
+      "sourceType": "github",
+      "skillPath": "plugins/cicd-automation/skills/github-actions-templates/SKILL.md",
+      "computedHash": "4cfaaba2a265ae01444e6d0b4f629ef6ce190c6ca336c83c99b8a9afec70f702"
     },
     "grill-me": {
       "source": "mattpocock/skills",
@@ -267,12 +288,26 @@
       "computedHash": "cca1e6bdaa93e83822a52347f77a2b17a28b2b45d71ddad7a485cc1c4bc5abc5",
       "commit": "5c40d3ad785193231b7d0dbfb8e1eb447e5edd94"
     },
+    "mbx": {
+      "source": "jdx/mr-boxington",
+      "commit": "4cc2d8854beebabe56beb78b1308c4133be3fe7e",
+      "sourceType": "github",
+      "skillPath": "skills/mbx/SKILL.md",
+      "computedHash": "8202a3bc661e229b81a99295883f80ddae2bd6aeda192a56d1716f5f77186c7d"
+    },
     "meta-cognition-parallel": {
       "source": "actionbook/rust-skills",
       "sourceType": "github",
       "skillPath": "skills/meta-cognition-parallel/SKILL.md",
       "computedHash": "5e07e0e9845142a3d58aed756b9e08771a40561bea08f75987338ca317a1aa86",
       "commit": "5c40d3ad785193231b7d0dbfb8e1eb447e5edd94"
+    },
+    "mutation-testing": {
+      "source": "trailofbits/skills",
+      "commit": "149d7b21f4067765b82e67029730b42d228ef4b4",
+      "sourceType": "github",
+      "skillPath": "plugins/mutation-testing/skills/mutation-testing/SKILL.md",
+      "computedHash": "e1d35d62f37194bf39f256bc3f9e35567506e5b2fae042c36e0bf2264658bd09"
     },
     "penpot-anti-slop": {
       "source": "penpot/penpot-ai-kit",
@@ -365,6 +400,13 @@
       "computedHash": "a06d1342e50d64936aba4ec2c1588fdefbbe3c3f3563e1008e572e9815419af6",
       "commit": "fe4f99e51c7149512d50cd75f0d55204c2458664"
     },
+    "podman": {
+      "source": "BagelHole/DevOps-Security-Agent-Skills",
+      "commit": "0365f57a079b1332f95cf26e31dd2d5332a8399f",
+      "sourceType": "github",
+      "skillPath": "devops/containers/podman/SKILL.md",
+      "computedHash": "7495b1893fde4bdf8116a95f13b71fc556bce7c6082c947e6e61f13cb4cd540f"
+    },
     "pr": {
       "source": "mattpocock/skills",
       "commit": "5863806dd4e15c63174bee4e7515a4256792ecfa",
@@ -428,6 +470,13 @@
       "computedHash": "ee848925d5faa52857e7e9ca3429d5937cf4814285940b0802cea27758ef1144",
       "commit": "5c40d3ad785193231b7d0dbfb8e1eb447e5edd94"
     },
+    "rust-mcp-server-generator": {
+      "source": "github/awesome-copilot",
+      "commit": "a255a193d1318e5a9ca3e9e575897f9a7845c099",
+      "sourceType": "github",
+      "skillPath": "skills/rust-mcp-server-generator/SKILL.md",
+      "computedHash": "6d340ffc7cbcb60447003d217b15c32c0dfacaacfaec7e0be057bb1aafc17984"
+    },
     "rust-refactor-helper": {
       "source": "actionbook/rust-skills",
       "sourceType": "github",
@@ -442,6 +491,13 @@
       "computedHash": "07a2d91775024525160057f9065a8fc0ec26453f0f3be06f38963cc374c9d8d4",
       "commit": "5c40d3ad785193231b7d0dbfb8e1eb447e5edd94"
     },
+    "rust-security": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "commit": "d0d0a13d4e3caec7afb2d647a1fffdb7cb1ee058",
+      "sourceType": "github",
+      "skillPath": "skills/rust/rust-security/SKILL.md",
+      "computedHash": "327bfd02b584b86e18b04b12b7de9804b40664c394f21cccd453aef1dc3f9258"
+    },
     "rust-skill-creator": {
       "source": "actionbook/rust-skills",
       "sourceType": "github",
@@ -449,12 +505,26 @@
       "computedHash": "c0c60c7210d0f9d4335227624cd8ba406dd0ba2891ac2db7fe0bd2ca62b03219",
       "commit": "5c40d3ad785193231b7d0dbfb8e1eb447e5edd94"
     },
+    "rust-supply-chain": {
+      "source": "rewrite-rs/skills",
+      "commit": "ae0fd62485d071437ae5e6c4036c986b0dd122a0",
+      "sourceType": "github",
+      "skillPath": "skills/misc/rust-supply-chain/SKILL.md",
+      "computedHash": "c4827317ad5b611ce766f20213b4ba18d1480c4456182e7dc035b2ad83c0534b"
+    },
     "rust-symbol-analyzer": {
       "source": "actionbook/rust-skills",
       "sourceType": "github",
       "skillPath": "skills/rust-symbol-analyzer/SKILL.md",
       "computedHash": "7d14f09bb5a8d0e6465e99472f4e344d1fd0c326b50153a27ec82cacd2c80fd3",
       "commit": "5c40d3ad785193231b7d0dbfb8e1eb447e5edd94"
+    },
+    "rust-testing": {
+      "source": "full-stack-skills/rust-skills",
+      "commit": "b8a6af74af28ee86b8cbbbc3075cde0b31a5155e",
+      "sourceType": "github",
+      "skillPath": "skills/rust-testing/SKILL.md",
+      "computedHash": "798f624ddfbccdc495eb6d2ec24d406ba66bfe7f34290af0d6206b123f6829bd"
     },
     "rust-trait-explorer": {
       "source": "actionbook/rust-skills",
@@ -469,6 +539,34 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/setup-matt-pocock-skills/SKILL.md",
       "computedHash": "9659e7025d4cf1c0a0b40ddff32ed4b8debb87a4b20d7a52ff89c506a638df69"
+    },
+    "shellcheck-configuration": {
+      "source": "wshobson/agents",
+      "commit": "42203085cfc5736204bf0f6d436dff7e1da0bf3f",
+      "sourceType": "github",
+      "skillPath": "plugins/shell-scripting/skills/shellcheck-configuration/SKILL.md",
+      "computedHash": "e4a65482cd932438bf6d98cc404814ad3cb8e21b13ad3589215489db1bd9df63"
+    },
+    "slint": {
+      "source": "slint-ui/ai-plugins",
+      "commit": "f5f9c336ede67cfbfd5b23b1facf8594c4db08e4",
+      "sourceType": "github",
+      "skillPath": "skills/slint/SKILL.md",
+      "computedHash": "8440bea4403b7738a3e04ac76aaab9208ad43c322f5a18207360bc496730cbfc"
+    },
+    "sqlx-postgres": {
+      "source": "Daiki48/dotfiles",
+      "commit": "5c793a7dde7c2fb3892124fc34d7ada39e366a37",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/sqlx-postgres/SKILL.md",
+      "computedHash": "913899308222004f3624ed95c19a428b7b2a4ca0bffa245dd6c238e30bae81ac"
+    },
+    "supabase-postgres-best-practices": {
+      "source": "supabase/agent-skills",
+      "commit": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "sourceType": "github",
+      "skillPath": "skills/supabase-postgres-best-practices/SKILL.md",
+      "computedHash": "3eb972c2d7c818e544e35cc33ea8d7147d4d78ae08142ef40037b0fbac7a2505"
     },
     "tdd": {
       "source": "mattpocock/skills",
