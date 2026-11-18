@@ -182,73 +182,42 @@ fn accessibility_roles_labels_focus_and_keys() {
     window.set_data_ai_2_presence("待機中".into());
     window.set_data_ai_3_name("ハル".into());
     window.set_data_ai_3_presence("判断待ち".into());
-    // 時系列の行（Issue 385 で data-msg*・data-note*・data-handoff*・data-ext*
-    // の個別プロパティは timeline-items モデルに一本化した。並びは
-    // state::sample と同じ）。
+    // 時系列の行（Issue 385 で個別の data-* プロパティは timeline-items
+    // モデルに一本化した）。
+    let base = |kind| TimelineItem {
+        kind,
+        ..TimelineItem::default()
+    };
+    let msg = |sender: &str, is_ai: bool, initial: &str| TimelineItem {
+        sender: sender.into(),
+        is_ai,
+        initial: initial.into(),
+        ..base(TimelineRowKind::Message)
+    };
     let timeline = Rc::new(VecModel::from(vec![
+        msg("田中", false, "田"),
         TimelineItem {
-            kind: TimelineRowKind::DayDivider,
-            day_label: "11月10日（火）".into(),
-            ..TimelineItem::default()
-        },
-        TimelineItem {
-            kind: TimelineRowKind::Message,
-            sender: "田中".into(),
-            initial: "田".into(),
-            ..TimelineItem::default()
-        },
-        TimelineItem {
-            kind: TimelineRowKind::Message,
-            sender: "リク".into(),
-            is_ai: true,
-            initial: "リ".into(),
             show_read_range: true,
-            ..TimelineItem::default()
+            ..msg("リク", true, "リ")
         },
         TimelineItem {
-            kind: TimelineRowKind::ThreadLead,
             thread_done: true,
-            ..TimelineItem::default()
+            ..base(TimelineRowKind::ThreadLead)
         },
+        base(TimelineRowKind::UnreadMarker),
         TimelineItem {
-            kind: TimelineRowKind::UnreadMarker,
-            ..TimelineItem::default()
-        },
-        TimelineItem {
-            kind: TimelineRowKind::Handoff,
             handoff_from_to: "ユイ → ハル".into(),
             handoff_title: "B社の回答の出し方".into(),
-            handoff_option_a: "A　範囲を絞って12/1".into(),
-            handoff_option_b: "B　12/3に延ばす".into(),
-            ..TimelineItem::default()
+            ..base(TimelineRowKind::Handoff)
         },
-        TimelineItem {
-            kind: TimelineRowKind::DecisionCard,
-            ..TimelineItem::default()
-        },
-        TimelineItem {
-            kind: TimelineRowKind::Message,
-            sender: "佐藤".into(),
-            initial: "佐".into(),
-            ..TimelineItem::default()
-        },
-        TimelineItem {
-            kind: TimelineRowKind::DecisionMark,
-            ..TimelineItem::default()
-        },
+        base(TimelineRowKind::DecisionCard),
+        msg("佐藤", false, "佐"),
+        base(TimelineRowKind::DecisionMark),
         TimelineItem {
             kind: TimelineRowKind::PrivateNote,
-            sender: "リク".into(),
-            is_ai: true,
-            initial: "リ".into(),
-            ..TimelineItem::default()
+            ..msg("リク", true, "リ")
         },
-        TimelineItem {
-            kind: TimelineRowKind::ExternalSend,
-            ext_address: "csv-support@b-sha.example".into(),
-            ext_subject: "CSV出力の対応方針について".into(),
-            ..TimelineItem::default()
-        },
+        base(TimelineRowKind::ExternalSend),
     ]));
     window.set_timeline_items(ModelRc::from(Rc::clone(&timeline)));
     window.set_data_ai_work_name("リク".into());
