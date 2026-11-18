@@ -1173,14 +1173,21 @@ component ChannelView inherits Rectangle {
         // ListView 内部の flickable に任せ、外側から content-y を差し込まない）
         ListView {
             for item[i] in root.timeline-items : timeline-row := Rectangle {
-                // 行の y・高さを Rust 側の記録に流す（どちらかが変わるたび）。
+                // 行番号を Rust 側の記録に流す。実体化した行は生成時と位置が
+                // 変わるたびに自分の行番号を記録する（仮想化の検査用。
+                // 実体化している行の番号が連続していることを確かめる）。
+                // 行の位置・高さを Rust 側の記録に流す（どちらかが変わるたび）。
+                // 発火は `y` の変化（スクロールでも動くので、スクロールのたびに
+                // 実体化している全部の行が記録し直す）。記録する値は
+                // `y + content-y`（時系列の先頭からの位置）で、スクロール量に
+                // 依らず同じ値になる。
                 property <length> note-y: self.y;
                 property <length> note-h: self.height;
                 changed note-y => {
-                    root.record-timeline-row(i, self.note-y, self.note-h);
+                    root.record-timeline-row(i, self.note-y + parent.content-y, self.note-h);
                 }
                 changed note-h => {
-                    root.record-timeline-row(i, self.note-y, self.note-h);
+                    root.record-timeline-row(i, self.note-y + parent.content-y, self.note-h);
                 }
                 height: rows.preferred-height;
                 rows := VerticalLayout {
