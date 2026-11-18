@@ -98,6 +98,22 @@ check cond7_forward_recheck docs/technical.md \
   '元の添付と元の発言も' \
   'そのときの権限で読めるときだけ'
 
+# 条件7（ラウンド数え直し・hatai 決定 (a) 対応）: 利用者向けの参照と内部の列の型分離。
+check cond7_type_split docs/technical.md \
+  '利用者向けの参照' \
+  'シリアライズできない' \
+  'pelway-contract'
+
+# 条件7（ラウンド数え直し・hatai 決定 (a) 対応）: すべての経路で同じ規則。
+check cond7_all_paths docs/technical.md \
+  '監査ログ' \
+  'エクスポート' \
+  '編集履歴' \
+  '`name`・`mime`・`size`・`content_hash` も出しません'
+
+# 条件7（ラウンド数え直し・hatai 決定 (a) 対応）: 旧文言（全項目を返す）が残っていない。
+check_absent cond7_no_full_return docs/technical.md '表の全項目を返します'
+
 # 条件9: 外部との境界（接続だけでは添付を送らない、外へ出すときは ActionSnapshot
 # に hash を固定）。
 check cond9_boundary docs/technical.md \
