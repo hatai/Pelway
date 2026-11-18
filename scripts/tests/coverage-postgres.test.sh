@@ -64,9 +64,12 @@ if [[ -n "$mise_coverage" ]]; then
     failures+=("mise.toml: coverage タスクに --exclude pelway-db が残っている（#157 の除外の解除漏れ）")
 fi
 
-# 6. coverage ジョブは品質ゲートから独立している（RLS テストの失敗が他ジョブに波及しない）
-verify_needs="$(grep -A1 '^  verify:' "$WORKFLOW" | grep 'needs:')"
-if grep -q 'coverage' <<<"$verify_needs"; then
+# 6. coverage ジョブは品質ゲートから独立している（RLS テストの失敗が他ジョブに波及しない）。
+#    needs 行が取れないときも検査が無効にならないよう、行の存在も確かめる。
+verify_needs="$(job_block verify | grep -m1 '^    needs:')"
+if [[ -z "$verify_needs" ]]; then
+  failures+=("verify.yml: verify 集約ジョブの needs 行が見つからない（検査が無効）")
+elif grep -q 'coverage' <<<"$verify_needs"; then
   failures+=("verify.yml: verify 集約ジョブの needs に coverage が含まれている（独立性の喪失）")
 fi
 
