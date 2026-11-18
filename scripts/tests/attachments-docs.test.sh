@@ -114,6 +114,19 @@ check cond7_all_paths docs/technical.md \
 # 条件7（ラウンド数え直し・hatai 決定 (a) 対応）: 旧文言（全項目を返す）が残っていない。
 check_absent cond7_no_full_return docs/technical.md '表の全項目を返します'
 
+# 数え直し round 2 の must-fix 対応: C04 の予約・内部の行の置き場所・member_kind の
+# 出所・否定テストの要件。
+check cond_rec2_c04 docs/technical.md \
+  'C04（1 workspace 合計 2GiB）' \
+  '書き込みを始める前に拒否'
+check cond_rec2_row_location docs/technical.md \
+  'サーバー側の保存・検査だけが依存する crate'
+check cond_rec2_member_kind docs/technical.md \
+  '認証済みの投稿者の記録'
+check cond_rec2_negative_test docs/technical.md \
+  '否定のテスト' \
+  'キーが 1 つも無いこと'
+
 # 条件9: 外部との境界（接続だけでは添付を送らない、外へ出すときは ActionSnapshot
 # に hash を固定）。
 check cond9_boundary docs/technical.md \
