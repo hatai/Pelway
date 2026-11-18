@@ -5016,9 +5016,14 @@ dependencies = [
  "fluent-bundle",
  "i-slint-backend-testing",
  "pelway-client-core",
+ "pelway-contract",
+ "pelway-http",
+ "serde",
+ "serde_json",
  "slint",
  "slint-build",
  "unic-langid",
+ "uuid",
 ]
 
 [[package]]
