@@ -234,17 +234,20 @@ fn persistent_display_end_to_end() {
                         .iter()
                         .map(|e| {
                             format!(
-                                "{}@({},{})",
+                                "{}@({},{})[{}]",
                                 e.type_name().unwrap_or_default(),
                                 e.absolute_position().x,
-                                e.absolute_position().y
+                                e.absolute_position().y,
+                                e.accessible_label().unwrap_or_default()
                             )
                         })
                         .collect::<Vec<_>>()
                 })
                 .collect();
             eprintln!(
-                "DIAG {lang}: card={:?} all_badges={} descendants={descendants:?}",
+                "DIAG {lang}: is-ai={} requester={:?} card={:?} all_badges={} descendants={descendants:?}",
+                window.get_data_decision_requester_is_ai(),
+                window.get_data_decision_requester().to_string(),
                 card.as_ref().map(|c| (c.absolute_position(), c.size())),
                 all.len()
             );
