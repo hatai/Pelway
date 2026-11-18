@@ -226,6 +226,8 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 | socat | Claude Code の sandbox（Linux）が使う。`mise.toml` の `conda:socat` で `mise install`（`mise bootstrap`）が入れる。apt と sudo は要らない |
 | ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
 
+`scripts/agent-gh` 自身も `review` 名義で同じ境界を持つ: 実行できるサブコマンドは gh が `api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`、git が `show`・`diff`・`log`・`grep`・`blame` に限られ、それ以外はトークンを発行せず終了コード 6 で拒否される。判定はサブコマンド単位で、`api` の `-F`・`--body-file` によるファイル送信や `git` の `--output`・`-O` による書き込み・実行は別 Issue（#305・#306）で追う。
+
 運用に入る前に、`auto-accept-edits` のスレッドで次を確かめる。確かめるまでは `claude_review` を使わない。
 
 - `scripts/agent-gh review api /rate_limit` が成功する（GitHub にはつながる）

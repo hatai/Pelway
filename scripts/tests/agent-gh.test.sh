@@ -221,6 +221,72 @@ run unicode_guard_capital_u dev pr list --search 'a\U3042'
 [[ "$RC" == 0 ]] || failures+=("unicode_guard_capital_u: exit $RC, want 0")
 expect_log unicode_guard_capital_u 'ARGS=pr list --search a\U3042'
 
+# Issue #295: review 名義の git/gh サブコマンドは読み取り系（＋レビュー投稿の pr review）に絞る。
+# 許可される形はトークンが発行されて gh/git に渡る。許可されない形は終了コード 6 で、
+# fnox（トークン発行）・gh・git のどれも呼ばれない。
+for sub in show diff log grep blame; do
+  run "review_git_allow_$sub" review git "$sub" HEAD
+  expect_log "review_git_allow_$sub" "GH_TOKEN=review-token"
+  expect_log "review_git_allow_$sub" "$sub HEAD"
+done
+
+run review_gh_api review api /rate_limit
+expect_log review_gh_api "GH_TOKEN=review-token"
+expect_log review_gh_api "ARGS=api /rate_limit"
+
+run review_gh_issue_view review issue view 1 --json body
+expect_log review_gh_issue_view "ARGS=issue view 1 --json body"
+
+run review_gh_pr_view review pr view 1 --json title
+expect_log review_gh_pr_view "ARGS=pr view 1 --json title"
+
+run review_gh_pr_diff review pr diff 1
+expect_log review_gh_pr_diff "ARGS=pr diff 1"
+
+run review_gh_pr_checks review pr checks 1 --required
+expect_log review_gh_pr_checks "ARGS=pr checks 1 --required"
+
+run review_gh_pr_review review pr review 1 --approve --body-file -
+expect_log review_gh_pr_review "ARGS=pr review 1 --approve --body-file -"
+
+# review_deny <name> <args...>: `agent-gh review <args...>` が終了コード 6 で拒否され、
+# トークン発行（fnox）も gh/git も呼ばれないことを確かめる。
+review_deny() {
+  local name="$1"
+  shift
+  run "$name" review "$@"
+  [[ "$RC" == 6 ]] || failures+=("$name: exit $RC, want 6")
+  [[ "$OUT" == *'review 名義'* ]] || failures+=("$name: no guidance on stderr")
+  expect_no_calls "$name"
+}
+
+# deny 済みの git 操作や任意実行がラッパー経由で通らない（#256 の実測指摘の形）
+review_deny review_git_switch git switch -c probe
+review_deny review_git_c_alias git -c 'alias.x=!id' x
+review_deny review_git_push git push -u origin HEAD
+review_deny review_git_fetch git fetch origin
+review_deny review_git_lsremote git ls-remote https://example.com/
+review_deny review_git_no_sub git
+# 列挙外の gh サブコマンドはすべて拒否
+review_deny review_pr_checkout pr checkout 1
+review_deny review_pr_ready pr ready 1
+review_deny review_pr_list pr list
+review_deny review_issue_list issue list
+review_deny review_repo_clone repo clone hatai/Pelway dst
+review_deny review_alias alias list
+review_deny review_auth auth status
+review_deny review_gist gist list
+review_deny review_release release list
+review_deny review_no_args
+
+# dev 名義はこれまでどおり制限されない
+run dev_git_unrestricted dev git switch -c probe
+expect_log dev_git_unrestricted "GH_TOKEN=dev-token"
+expect_log dev_git_unrestricted "switch -c probe"
+
+run dev_gh_unrestricted dev repo list
+expect_log dev_gh_unrestricted "ARGS=repo list"
+
 if ((${#failures[@]})); then
   printf 'FAIL %s\n' "${failures[@]}"
   exit 1

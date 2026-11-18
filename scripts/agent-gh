@@ -5,7 +5,8 @@
 #   scripts/agent-gh <dev|review> git <git の引数...>   その名義の認証で git を実行する
 #   scripts/agent-gh -h | --help               使い方を標準出力に出して終了コード 0（fnox も gh も呼ばない）
 # 呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。
-# 終了コード: 2 = 役割の誤り、3 = トークンを取れない、5 = 引数に \uXXXX エスケープ混入、それ以外は gh / git の終了コード（--help / -h は 0）
+# review 名義で実行できるサブコマンドは読み取り系に絞る（下の review_subcommand_allowed）。
+# 終了コード: 2 = 役割の誤り、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \uXXXX エスケープ混入、6 = review 名義で許可されていないサブコマンド、それ以外は gh / git の終了コード（--help / -h は 0）
 set -euo pipefail
 # コマンド置換 $(...) の中でも set -e を効かせる（app_token 内の secret の失敗で止めるため）。
 shopt -s inherit_errexit
@@ -30,8 +31,41 @@ help() {
     "呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。" \
     "git push の成功後は scripts/agent-gh-resign がコミットを GitHub API の署名付きに付け替える（止めるときは PELWAY_AGENT_SKIP_RESIGN=1）。" \
     "非 ASCII の文字列は argv 経由で渡せません（\\uXXXX に潰れます）。--body-file / api --input / git commit -F などファイル経由で渡してください。" \
-    "終了コード: 2 = 役割の誤り、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、それ以外は gh / git の終了コード"
+    "review 名義で実行できるサブコマンドは読み取り系に絞られています（gh: api・issue view・pr view|diff|checks|review、git: show|diff|log|grep|blame）。" \
+    "終了コード: 2 = 役割の誤り、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、6 = review 名義で許可されていないサブコマンド、それ以外は gh / git の終了コード"
   exit 0
+}
+
+# review_subcommand_allowed <args...>: review 名義で許可するサブコマンドかを判定する。
+# review-pr が実際に使う読み取り系（＋レビュー投稿の pr review）に絞る。判定はサブコマンド
+# 単位で、第 1 引数が許可リストの語そのものであることを要求する（`git -c 'alias.x=!<cmd>' x`
+# のような先頭オプション注入は第 1 引数が一致しないため拒否される）。
+# api の -F・--body-file によるファイル送信や、読み取り系 git の --output・-O による
+# 書き込み・実行といった引数形の穴は #305・#306 の範囲で、ここでは扱わない。
+review_subcommand_allowed() {
+  case "${1:-}" in
+    api)
+      return 0
+      ;;
+    issue)
+      [[ "${2:-}" == "view" ]]
+      ;;
+    pr)
+      case "${2:-}" in
+        view|diff|checks|review) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+    git)
+      case "${2:-}" in
+        show|diff|log|grep|blame) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 secret() {
@@ -92,6 +126,10 @@ case "$role" in
     git_identity=(-c "user.name=pelway-dev[bot]" -c "user.email=$email")
     ;;
   review)
+    if ! review_subcommand_allowed "$@"; then
+      echo "agent-gh: review 名義で実行できるのは gh の api・issue view・pr view|diff|checks|review と git の show|diff|log|grep|blame だけです" >&2
+      exit 6
+    fi
     token="$(app_token PELWAY_REVIEW)"
     ;;
   -h|--help)
