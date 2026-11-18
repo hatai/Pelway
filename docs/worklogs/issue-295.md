@@ -35,3 +35,15 @@
 5. 改善案: `env -i` で落ちる `CALL_LOG` のような観測用環境変数を、テストが「子プロセスに渡したくない値」を検査するための記録先として扱う慣行（偽コマンド側にフォールバックの記録先を持たせる形）を、他の境界テストにも適用すると良い。
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（round 4）
+
+対象 head: 5bad351547590f5160514567b3ed6e6a43c62df3
+
+1. 詰まった箇所: テストの `expect_log` 行にある jq 式リテラル（`'... $ENV.GH_TOKEN'`）が ShellCheck の SC2016（単一引用符内の `$` は展開されない、という警告）に引っかかった。意図した記述なので該当行に `# shellcheck disable=SC2016` を各行へ付けて解消した（`run` 行の直前に付けても後続の `expect_log` 行には効かない）。また `mise exec` が全ツールの解決を行い GitHub API のレート制限（未認証 60/h）で 403 になる環境障害に当たり、インストール済みツールをそのまま使う `MISE_AUTO_INSTALL=0` で verify・フックを通した。
+2. 曖昧だった文: 「git の引数の検査を厳密にするか、review での git の提供自体をやめる」（claude round 3 must-fix の選択肢）と「`git grep --no-index` のような引数を拒否するか実行時境界で塞ぐ」（codex round 3 must-fix）
+3. 仮定と解釈: git 側は「提供自体をやめる」を選んだ。`agent-gh review git` の呼び出し元はリポジトリ内に無く（review-pr・security-review は main の plain `git` を使う）、拒否リスト方式の引数検査では省略形（`--op`）・値を取るフラグの誤認（`-G -O`・`-B --output`）・`--no-index` のリポジトリ外読み取りを網羅できないため、サブコマンドごと終了コード 6 で拒否する方が安全で安い。トークン漏洩（`--jq '$ENV.GH_TOKEN'`）は、claude が挙げた代替のうち「トークンを環境変数で渡さない」を採り、0600 の一時 `GH_CONFIG_DIR/hosts.yml` で `gh` を認証させる方式にした（選ばなかった案: jq 値の `$ENV` 参照を字句検査する方式。`$ENV`・`env`・`@base64` 等の表記ゆれを検査側が網羅する必要があり、環境に置かない方が確実）。
+4. 足りなかった情報・検証手段: `gh` が `hosts.yml` の `oauth_token` をどう解釈するかの公式仕様確認は行えず、`gh auth setup-git` が書く形式に倣った。実機の `gh` での受理確認はレビュー側の実測に委ねる。`conductor-watch-ensure.test.sh` の環境依存フレークは引き続き未解決（round 1 と同じ。今回の verify では失敗。`MISE_AUTO_INSTALL=0` 下で残り 29 テストは合格）。
+5. 改善案: `mise exec` が不要なツール解決で GitHub レート制限に当たる問題は、`mise.toml` のツールを backend ごとに遅延解決させるか、CI/ローカルで `GITHUB_TOKEN` を供給する運用メモを `docs/dev-environment.md` に書くと再発を避けやすい。
+
+使ったスキル: `.agents/skills/implement-issue`
