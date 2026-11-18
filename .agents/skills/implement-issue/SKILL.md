@@ -152,7 +152,7 @@ scripts/agent-gh dev pr view <PR 番号> --json number,isDraft,author --jq '{num
 
 `author` が `app/pelway-dev` でなければ、止まる条件と同じ扱いにする。
 
-PR を作ったら、T3 のスレッドに PR を紐付ける（`link_pull_request`。マージでスレッドが自動的に settle される）。
+PR を作るたびに、T3 のスレッドにそのスレッドの PR を全部紐付ける（`link_pull_requests`。最後の 1 つだけでなく、そのスレッドが作った PR 全部を紐付ける。マージでスレッドが自動的に settle される）。
 
 ### 8. レビューを委託する
 
@@ -176,6 +176,8 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 | devin | `devin_review` | `swe-2-high` | `mode` のみ受け付ける（省略してよい。`thought_level` は渡せず、effort の引き上げはできない） |
 
 これに `role: "review"`、`runtimeMode: "auto-accept-edits"`、`isolation: "worktree"` を付ける。委託したら返答を終えて完了の通知を待つ（ポーリングしない）。高リスクで複数担当にしたときは、全員の結果がそろうまで次に進まない。
+
+次のラウンドのレビューを委託したら、前ラウンドのレビュースレッド（子タスク）を settle する（`t3_thread_organize` の `action: settle`。runbook 9 の「片付け」と同じ決まりで、前ラウンドが `needs-human` 中・止まっている・迷走中のときは settle しない）。
 
 委託・再委託のたびに、対象 PR に委託記録コメントを残す（巡回がレビューの証跡として使う）。コメントの行頭がこの形であること（引用やコードブロック内の出現は証跡にならない）。`<SHA>` は委託時点の PR の head、`to:` はレビュー担当。
 

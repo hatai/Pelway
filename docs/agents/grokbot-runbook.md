@@ -306,7 +306,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 ## 9. 片付け
 
 - Grok Bot はスレッドと worktree を消さない
-- 終わったスレッドを settle する。PR をスレッドに紐付けたものはマージで自動 settle。それ以外（報告が読まれた調査スレッド、verdict を出し終えた指揮役のレビュースレッド、失敗打ち切りやマージされずに閉じた PR のスレッド）は `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドと、止まっている・迷走中のスレッドは settle しない
+- 終わったスレッドを settle する。PR をスレッドに紐付けたものはマージで自動 settle。それ以外（報告が読まれた調査スレッド、verdict を出し終えた指揮役のレビュースレッド、次のラウンドに置き換わった前ラウンドのレビュースレッド、失敗打ち切りやマージされずに閉じた PR のスレッド）は `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドと、止まっている・迷走中のスレッドは settle しない
 - worktree は pitchfork のデーモン `agent-worktree-prune` が毎時消す（settle されたスレッドの、main に取り込み済みかマージ済み・クローズ済みの PR のものだけ。未追跡のファイルは捨て、追跡ファイルに変更が残るものは残す）。settle しないと worktree は残るので、終わったスレッドは上のとおり settle する。残ったものは人間が `mise run agent-worktree-prune` で整理する
 - マージ後の Issue と PR はボードの組み込みワークフローが Done にする
 
