@@ -45,7 +45,7 @@ handoff-acknowledge = 受けました
 handoff-decision-owner = 納期の決定：{ $name }（代表）
 ## 社外への送信の確認カード
 ext-card-label = 社外への送信 · { $name }さんの確認待ち
-ext-card-question = { $to }にメールを送りますか
+ext-card-question = { $address }にメールを送りますか
 ext-address-label = 宛先：
 ext-subject-label = 件名：
 ext-basis-label = 根拠：
@@ -65,8 +65,13 @@ pane-ai-note = 作業の途中経過は会話には出しません。
 thread-input-placeholder = スレッドに返信
 ## 下のメッセージ入力欄
 composer-placeholder = { $channel } にメッセージ
+## 入力欄のメンション候補一覧
+mention-candidates-label = メンション候補
 ## トップレベルメニューと About ダイアログ（Slint の attribution、Issue 237）
 menu-help = ヘルプ
 menu-about = このアプリについて
 about-title = このアプリについて
 about-close = 閉じる
+## 読み上げ用の種別の呼び名（Issue 379。accessible-label で使う）
+ai-bot-label = AI Bot
+person-label = 人

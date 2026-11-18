@@ -11,7 +11,9 @@ use pelway_contract::ids::{ChannelId, MemberId, WorkspaceId};
 use pelway_contract::ledger::ApprovalLedger;
 use pelway_contract::member::MemberKind;
 use pelway_contract::message::channel_messages_path;
-use pelway_contract::store::{DEMO_CHANNEL_ID, DEMO_HAL_MEMBER_ID, DEMO_WORKSPACE_ID, DataStore};
+use pelway_contract::store::{
+    DEMO_CHANNEL_ID, DEMO_HAL_MEMBER_ID, DEMO_WORKSPACE_ID, DataStore, PurposeId,
+};
 use pelway_contract::task::TaskState;
 use pelway_http::{SharedDataStore, SharedLedger, serve_with_store_and_runner};
 use pelway_llm::{ChatReply, ChatRequest, EmbedReply, LlmError, LlmGateway, Usage};
@@ -84,6 +86,8 @@ fn posted_mention_to_bot_runs_task_to_pending_decision() {
         RunnerConfig {
             bot_member_id: MemberId::from(DEMO_HAL_MEMBER_ID),
             decider: MemberId::from("m-yamamoto"),
+            llm_basis: PurposeId::P06,
+            llm_timeout: Duration::from_secs(30),
         },
         Arc::clone(&store),
         Arc::clone(&ledger),

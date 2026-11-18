@@ -9,6 +9,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use i_slint_backend_testing::ElementRoot;
 use pelway_client_ui::MainWindow;
 use pelway_client_ui::bridge::{DecisionShell, apply_decision_screen, wire_decision_screen};
 use slint::Model;
@@ -81,6 +82,18 @@ fn pending_screen_end_to_end() {
 
     // チャット内の判断カードは同じ判断待ちを指す（一覧の項目と同じ id・版・2 択）。
     assert!(window.get_data_decision_visible(), "カードが見える");
+    // カードが時系列の行として実体化されること（Issue 385。時系列は ListView
+    // なので、decision-card の行が無いと `data-decision-*` が入っていても
+    // カードは描かれない）。
+    assert!(
+        window
+            .root_element()
+            .query_descendants()
+            .match_type_name("DecisionCardView")
+            .find_first()
+            .is_some(),
+        "チャットに戻ったとき、判断カードが時系列に実体化される"
+    );
     assert!(
         !window.get_data_decision_decided(),
         "カードは判断待ちのまま"

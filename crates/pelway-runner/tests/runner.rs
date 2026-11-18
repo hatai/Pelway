@@ -1,14 +1,14 @@
-//! runner-lite（#329）のフェイク gateway テスト。実 LLM には接続しない。
+//! runner-lite（#329）＋実 LLM 接続（#330）のフェイク gateway テスト。
+//! 実 LLM には接続しない。
 //!
 //! 受け入れ条件との対応:
-//! - 条件 2: ハル宛てのメンションでタスクが作られ、進捗の1行（固定段階）が出る
-//! - 条件 3: LLM の応答（A/B 案）が会話に投稿され、判断待ちが T3a の仕組みで作られる
-//! - 条件 4: LLM の失敗時は「止まっていることと理由」が投稿され、フォールバック応答へ差し替えられる
-//! - 条件 5: LLM の呼び出しの間、ほかのリクエストが台帳のロックで止まらない
-//! - 条件 6: 根拠が確認できない場合は LLM を呼ばずに止まる
-//! - モデル名・接続先・環境変数名は設定として明示し、キーが無い・使えない形の
-//!   ときは台本モードで起動する（#330）
+//! - メンション → タスク・進捗・A/B 案の投稿・判断待ち（#329）
+//! - 検証に失敗した応答は1回だけ再試行し、それでもだめなら台本へ落ちる（#330）
+//! - タイムアウトしたら台本へ落ちる（#330）
+//! - キーが無い・不正なときは台本モードで起動する（#330）
+//! - 根拠は設定で受けた目的 ID（P06）で検査する（#330）
 
+use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -38,6 +38,10 @@ const REQUESTER: &str = "m-tanaka";
 const DECIDER: &str = "m-yamamoto";
 /// 「受付」の進捗 1 行（固定段階。runner 側の定数と同じ文）。
 const STAGE_ACCEPTED: &str = "依頼を受け付けました。A/B 案を作成しています。";
+/// 台本へ落ちるときの進捗行に含まれる句。
+const FALLBACK_MARK: &str = "台本の応答で進めます";
+/// runner の既定のタイムアウト（テストは 30 秒。タイムアウト検証は短く上書きする）。
+const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn now() -> u64 {
     let ms = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock");
@@ -52,7 +56,6 @@ fn ab_reply() -> ChatReply {
         usage: Usage::default(),
     }
 }
-
 /// フェイクの gateway。`LlmGateway` trait 越しの差し替えを確かめる実装。
 /// `reply` を即返すか、`release` を受け取るまで呼び出し中で止まるかのどちらか。
 struct FakeGateway {
@@ -105,17 +108,73 @@ impl LlmGateway for FakeGateway {
     }
 }
 
+/// 呼び出しごとにキューの先頭の応答を返すフェイク（再試行・タイムアウトの
+/// 検証用）。キューが尽きたら最後の応答を繰り返す。`delay` は応答までの
+/// 待ち（非同期に待つため runner のタイムアウトが途中で切れる）。
+struct SeqGateway {
+    calls: AtomicUsize,
+    replies: Mutex<VecDeque<Result<ChatReply, LlmError>>>,
+    delay: Duration,
+}
+
+impl SeqGateway {
+    fn new(replies: Vec<Result<ChatReply, LlmError>>, delay: Duration) -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+            replies: Mutex::new(replies.into()),
+            delay,
+        }
+    }
+}
+
+impl LlmGateway for SeqGateway {
+    async fn chat(&self, _req: ChatRequest) -> Result<ChatReply, LlmError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if !self.delay.is_zero() {
+            tokio::time::sleep(self.delay).await;
+        }
+        let mut replies = self.replies.lock().expect("replies");
+        match replies.len() {
+            0 => panic!("応答のキューが空"),
+            1 => replies[0].clone(),
+            _ => replies.pop_front().expect("front"),
+        }
+    }
+
+    async fn embed(&self, _texts: Vec<String>) -> Result<EmbedReply, LlmError> {
+        Err(LlmError::NotSent("embed は runner では使わない".to_owned()))
+    }
+}
+
+fn runner_config(timeout: Duration) -> RunnerConfig {
+    RunnerConfig {
+        bot_member_id: MemberId::from(HAL),
+        decider: MemberId::from(DECIDER),
+        llm_basis: PurposeId::P06,
+        llm_timeout: timeout,
+    }
+}
+
 fn fixture(
     store: DataStore,
-    gateway: Arc<FakeGateway>,
+    gateway: Arc<dyn pelway_runner::DynChatGateway>,
+) -> (Arc<Mutex<DataStore>>, Arc<Mutex<ApprovalLedger>>, Runner) {
+    fixture_at(store, gateway, TEST_TIMEOUT)
+}
+
+fn fixture_at(
+    store: DataStore,
+    gateway: Arc<dyn pelway_runner::DynChatGateway>,
+    timeout: Duration,
 ) -> (Arc<Mutex<DataStore>>, Arc<Mutex<ApprovalLedger>>, Runner) {
     let store = Arc::new(Mutex::new(store));
     let ledger = Arc::new(Mutex::new(ApprovalLedger::new()));
-    let config = RunnerConfig {
-        bot_member_id: MemberId::from(HAL),
-        decider: MemberId::from(DECIDER),
-    };
-    let runner = Runner::new(config, Arc::clone(&store), Arc::clone(&ledger), gateway);
+    let runner = Runner::new(
+        runner_config(timeout),
+        Arc::clone(&store),
+        Arc::clone(&ledger),
+        gateway,
+    );
     (store, ledger, runner)
 }
 
@@ -263,48 +322,46 @@ fn non_bot_mention_and_plain_message_create_no_task() {
     assert!(bot_messages(&store).iter().all(|b| b == "@ハル 自分宛て"));
 }
 
-// ---- 条件 4: 失敗時は停止と理由を投稿し、フォールバック応答へ差し替えられる ----
+// ---- 失敗時は台本の応答で進める（フォールバック。#330） ----
 
 #[test]
-fn llm_failure_posts_stop_with_reason_and_fallback_replaces_it() {
+fn llm_failure_falls_back_to_script_reply() {
+    let gateway = Arc::new(FakeGateway::new(Err(LlmError::Rejected {
+        status: 503,
+        body: "canary-提供元の内部情報".to_owned(),
+    })));
     let (store, ledger, runner) = fixture(
         DataStore::new_demo_seeded(now()),
-        Arc::new(FakeGateway::new(Err(LlmError::Rejected {
-            status: 503,
-            body: "canary-提供元の内部情報".to_owned(),
-        }))),
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
     );
 
     let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
     let task_id = runner.on_message_posted(&message).expect("task");
-    assert!(wait_state(&runner, &task_id, TaskState::Stopped));
 
-    // 「止まっていることと理由」が投稿される。
-    let task = runner.task(&task_id).expect("task");
-    let reason = task.stop_reason.clone().expect("reason");
+    // 失敗すると台本の応答で案の投稿と判断待ちまで進む（Stopped を経由しない）。
+    assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
     let posts = bot_messages(&store);
+    assert!(
+        posts.iter().any(|b| b.contains(FALLBACK_MARK)),
+        "台本へ落ちた進捗行が出る: {posts:?}"
+    );
     assert!(
         posts
             .iter()
-            .any(|b| b.contains("止まり") && b.contains(&reason)),
-        "停止と理由が投稿される: {posts:?}"
+            .any(|b| b.contains("案A:") && b.contains("案B:")),
+        "台本の A/B 案が投稿される: {posts:?}"
     );
     assert!(
-        !reason.contains("canary") && posts.iter().all(|b| !b.contains("canary")),
-        "提供元の応答本文は投稿しない: {reason}"
+        posts.iter().all(|b| !b.contains("canary")),
+        "提供元の応答本文は投稿しない: {posts:?}"
     );
-    assert_eq!(pending_items(&ledger).len(), 0, "判断待ちは作られない");
-
-    // フォールバック応答へ差し替えると、案の投稿と判断待ちまで進む。
-    runner
-        .provide_fallback(&task_id, ab_reply())
-        .expect("fallback");
+    assert_eq!(pending_items(&ledger).len(), 1, "判断待ちは作られる");
+    // 拒否（Rejected）は再送しない決まり（pelway-llm の error.rs）。呼び出しは1回。
     assert_eq!(
-        runner.task(&task_id).expect("task").state,
-        TaskState::AwaitingDecision
+        gateway.calls.load(Ordering::SeqCst),
+        1,
+        "拒否は再試行しない"
     );
-    assert!(bot_messages(&store).iter().any(|b| b.contains("案A:")));
-    assert_eq!(pending_items(&ledger).len(), 1);
 
     // 判断待ちに入ったタスクは差し替えられない。存在しないタスクも同様。
     assert_eq!(
@@ -318,11 +375,165 @@ fn llm_failure_posts_stop_with_reason_and_fallback_replaces_it() {
     );
 }
 
-// ---- 条件 6: 根拠が確認できない場合は LLM を呼ばずに止まる ----
+// ---- 検証に失敗した応答は1回だけ再試行する（#330） ----
 
 #[test]
-fn without_p03_basis_stops_before_calling_llm() {
-    // P03 の Active な根拠を持たない保存部（new_demo_seeded だけが持つ）。
+fn invalid_reply_is_retried_once_then_falls_back() {
+    // 応答が A/B の形を満たさないもの（再試行しても同じ）。
+    let invalid = ChatReply {
+        text: "{\"unexpected\": true}".to_owned(),
+        usage: Usage::default(),
+    };
+    let gateway = Arc::new(FakeGateway::new(Ok(invalid)));
+    let (store, _ledger, runner) = fixture(
+        DataStore::new_demo_seeded(now()),
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
+    );
+
+    let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
+    let task_id = runner.on_message_posted(&message).expect("task");
+    assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
+
+    // 初回＋再試行の2回だけ呼び、それでもだめなら台本へ落ちる。
+    assert_eq!(gateway.calls.load(Ordering::SeqCst), 2);
+    let posts = bot_messages(&store);
+    assert!(
+        posts.iter().any(|b| b.contains(FALLBACK_MARK)),
+        "台本へ落ちる: {posts:?}"
+    );
+    assert!(posts.iter().any(|b| b.contains("案A:")));
+}
+
+#[test]
+fn invalid_then_valid_reply_succeeds_on_retry() {
+    let gateway = Arc::new(SeqGateway::new(
+        vec![
+            Ok(ChatReply {
+                text: "not json".to_owned(),
+                usage: Usage::default(),
+            }),
+            Ok(ab_reply()),
+        ],
+        Duration::ZERO,
+    ));
+    let (store, _ledger, runner) = fixture(
+        DataStore::new_demo_seeded(now()),
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
+    );
+
+    let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
+    let task_id = runner.on_message_posted(&message).expect("task");
+    assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
+
+    assert_eq!(gateway.calls.load(Ordering::SeqCst), 2, "1回だけ再試行");
+    let posts = bot_messages(&store);
+    assert!(
+        posts.iter().all(|b| !b.contains(FALLBACK_MARK)),
+        "再試行で成功すれば台本へは落ちない: {posts:?}"
+    );
+    assert!(
+        posts.iter().any(|b| b.contains("案A: 納期を2週間延ばす案")),
+        "再試行の応答が使われる: {posts:?}"
+    );
+}
+
+#[test]
+fn invalid_error_is_retried_once_then_succeeds() {
+    // 実提供元の検証失敗（LlmError::Invalid）側の経路: 再試行で回復する。
+    let gateway = Arc::new(SeqGateway::new(
+        vec![
+            Err(LlmError::Invalid("schema 違反".to_owned())),
+            Ok(ab_reply()),
+        ],
+        Duration::ZERO,
+    ));
+    let (store, _ledger, runner) = fixture(
+        DataStore::new_demo_seeded(now()),
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
+    );
+
+    let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
+    let task_id = runner.on_message_posted(&message).expect("task");
+    assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
+
+    assert_eq!(gateway.calls.load(Ordering::SeqCst), 2, "1回だけ再試行");
+    let posts = bot_messages(&store);
+    assert!(
+        posts.iter().all(|b| !b.contains(FALLBACK_MARK)),
+        "再試行で成功すれば台本へは落ちない: {posts:?}"
+    );
+    assert!(posts.iter().any(|b| b.contains("案A:")));
+}
+
+#[test]
+fn invalid_error_is_retried_once_then_falls_back() {
+    // 再試行でも同じ検証失敗なら台本へ落ちる。
+    let gateway = Arc::new(SeqGateway::new(
+        vec![Err(LlmError::Invalid("schema 違反".to_owned()))],
+        Duration::ZERO,
+    ));
+    let (store, _ledger, runner) = fixture(
+        DataStore::new_demo_seeded(now()),
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
+    );
+
+    let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
+    let task_id = runner.on_message_posted(&message).expect("task");
+    assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
+
+    assert_eq!(
+        gateway.calls.load(Ordering::SeqCst),
+        2,
+        "初回＋再試行の2回だけ"
+    );
+    let posts = bot_messages(&store);
+    assert!(
+        posts.iter().any(|b| b.contains(FALLBACK_MARK)),
+        "台本へ落ちる: {posts:?}"
+    );
+    assert!(posts.iter().any(|b| b.contains("案A:")));
+}
+
+// ---- タイムアウトしたら台本へ落ちる（#330） ----
+
+#[test]
+fn timeout_falls_back_to_script_reply() {
+    // chat が戻るのが設定のタイムアウトよりずっと遅い → runner が途中で切る。
+    let gateway = Arc::new(SeqGateway::new(
+        vec![Ok(ab_reply())],
+        Duration::from_secs(60),
+    ));
+    let (store, _ledger, runner) = fixture_at(
+        DataStore::new_demo_seeded(now()),
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
+        Duration::from_millis(50),
+    );
+
+    let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
+    let task_id = runner.on_message_posted(&message).expect("task");
+    assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
+
+    let posts = bot_messages(&store);
+    assert!(
+        posts
+            .iter()
+            .any(|b| b.contains(FALLBACK_MARK) && b.contains("時間内")),
+        "タイムアウトを理由に台本へ落ちる: {posts:?}"
+    );
+    assert!(posts.iter().any(|b| b.contains("案A:")));
+    // タイムアウトは再送しない決まり（結果不明の可能性があるため）。呼び出しは1回。
+    assert_eq!(
+        gateway.calls.load(Ordering::SeqCst),
+        1,
+        "タイムアウトは再試行しない"
+    );
+}
+
+// ---- 根拠は設定で受けた目的 ID で検査する（#330） ----
+
+#[test]
+fn without_configured_basis_stops_before_calling_llm() {
+    // 設定の根拠（P06）の Active な記録を持たない保存部。
     let mut store = DataStore::new();
     store.ensure_workspace(&WorkspaceId::from(WS), now());
     store.add_channel(Channel {
@@ -335,25 +546,28 @@ fn without_p03_basis_stops_before_calling_llm() {
         ],
     });
     let gateway = Arc::new(FakeGateway::new(Ok(ab_reply())));
-    let (store, _ledger, runner) = fixture(store, Arc::clone(&gateway));
+    let (store, _ledger, runner) = fixture(
+        store,
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
+    );
 
     let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
     let task_id = runner.on_message_posted(&message).expect("task");
 
-    // LLM は呼ばれず、根拠が無い旨の理由で止まる。
+    // LLM は呼ばれず、根拠が無い旨の理由で止まる（理由には設定の目的 ID が出る）。
     let task = runner.task(&task_id).expect("task");
     assert_eq!(task.state, TaskState::Stopped);
     assert!(
         task.stop_reason
             .as_deref()
-            .is_some_and(|r| r.contains("P03")),
-        "理由に根拠（P03）が出る: {:?}",
+            .is_some_and(|r| r.contains("P06")),
+        "理由に設定の根拠（P06）が出る: {:?}",
         task.stop_reason
     );
     assert!(
         bot_messages(&store)
             .iter()
-            .any(|b| b.contains("止まり") && b.contains("P03"))
+            .any(|b| b.contains("止まり") && b.contains("P06"))
     );
     assert_eq!(
         gateway.calls.load(Ordering::SeqCst),
@@ -514,4 +728,92 @@ fn missing_or_malformed_key_builds_script_gateway() {
             .block_on(gateway.chat(ChatRequest::from_messages(vec![])));
         assert!(reply.is_ok(), "{key:?}");
     }
+}
+
+/// 起動時ログの接続先 URL は伏せる（Issue #404）。userinfo とクエリの
+/// key/token の値がログ行に出ないことの各ケース。
+#[test]
+fn endpoint_log_line_redacts_url_secrets() {
+    // userinfo あり（カスタム接続先は loopback なので http で通る）。
+    let config = DemoLlmConfig::from_vars(vars(&[(
+        CUSTOM_BASE_URL_ENV,
+        "http://alice:hunter2@127.0.0.1:9/v1",
+    )]))
+    .expect("config");
+    let line = config.endpoint_log_line();
+    assert!(!line.contains("alice"), "{line}");
+    assert!(!line.contains("hunter2"), "{line}");
+    assert!(line.contains("***@127.0.0.1:9/v1"), "{line}");
+
+    // クエリに key/token あり: 値は出ず、キー名と秘密でない値は残る。
+    let config = DemoLlmConfig::from_vars(vars(&[(
+        CUSTOM_BASE_URL_ENV,
+        "http://127.0.0.1:9/v1?key=abc123&token=def456&x=1",
+    )]))
+    .expect("config");
+    let line = config.endpoint_log_line();
+    assert!(!line.contains("abc123"), "{line}");
+    assert!(!line.contains("def456"), "{line}");
+    assert!(line.contains("key=***"), "{line}");
+    assert!(line.contains("token=***"), "{line}");
+    assert!(line.contains("x=1"), "{line}");
+
+    // どちらもなし: 既知の接続先はそのまま（不要な伏せをしない）。
+    let config = DemoLlmConfig::from_vars(|name| {
+        (name == "PELWAY_LLM_BASE_URL").then(|| pelway_llm::config::ZAI_BASE_URL.to_owned())
+    })
+    .expect("config");
+    assert_eq!(
+        config.endpoint_log_line(),
+        format!(
+            "pelway-runner: LLM endpoint: zai {}",
+            pelway_llm::config::ZAI_BASE_URL
+        )
+    );
+
+    // fragment に秘密が載っている場合も起動時ログに出ない
+    // （review round 1 の must-fix）。
+    let config = DemoLlmConfig::from_vars(vars(&[(
+        CUSTOM_BASE_URL_ENV,
+        "http://127.0.0.1:9/v1#access_token=sk-local",
+    )]))
+    .expect("config");
+    let line = config.endpoint_log_line();
+    assert!(!line.contains("sk-local"), "{line}");
+    assert!(!line.contains('#'), "{line}");
+
+    // 資格情報の名前（auth）のクエリも起動時ログに出ない
+    // （review round 2 の must-fix）。
+    let config = DemoLlmConfig::from_vars(vars(&[(
+        CUSTOM_BASE_URL_ENV,
+        "http://127.0.0.1:9/v1?auth=Bearer%20local",
+    )]))
+    .expect("config");
+    let line = config.endpoint_log_line();
+    assert!(!line.contains("Bearer"), "{line}");
+    assert!(line.contains("auth=***"), "{line}");
+}
+
+/// 設定の根拠を P03 に差し替えても、seed がその根拠を登録すれば LLM を呼ぶ
+/// （目的 ID はコードやゲートに固定されていない。#330）。
+#[test]
+fn configured_basis_p03_also_gates_the_llm_call() {
+    let store = Arc::new(Mutex::new(DataStore::new_demo_seeded_with_basis(
+        now(),
+        PurposeId::P03,
+    )));
+    let ledger = Arc::new(Mutex::new(ApprovalLedger::new()));
+    let runner = Runner::new(
+        RunnerConfig {
+            llm_basis: PurposeId::P03,
+            ..runner_config(TEST_TIMEOUT)
+        },
+        Arc::clone(&store),
+        ledger,
+        Arc::new(FakeGateway::new(Ok(ab_reply()))),
+    );
+
+    let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
+    let task_id = runner.on_message_posted(&message).expect("task");
+    assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
 }

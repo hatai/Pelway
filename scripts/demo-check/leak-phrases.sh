@@ -4,12 +4,17 @@
 # 適用範囲: all / secret / ident = すべてのテキスト、copy = 利用者向けの文言と外向け文書だけ（リストの冒頭に記載）。
 # 違反は「ファイル:行: 規則」で出し、行の中身は出さない。exit 0 合格 / 1 違反 / 2 検査異常（走査失敗を含む）。
 set -uo pipefail
-# shellcheck source=lib.sh
+# SC1091（source を追えない）は抑止: lib.sh は一括入力（shellcheck scripts/demo-check/*.sh）に
+# 常に含まれるが、動的パス $(dirname …) を shellcheck は解決できない（-x を付けると source= で追える）。
+# shellcheck source=lib.sh disable=SC1091
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 list="${DC_LIST_DIR}/forbidden-phrases.txt"
 rules="$(dc_list_lines "${list}")" || exit 2
 [ -n "${rules}" ] || { echo "leak-phrases: no rules in ${list}" >&2; exit 2; }
+# files は dc_load_files（lib.sh）が mapfile の間接引数で埋める。ここでの初期化は
+# その契約の明示（shellcheck には間接代入が見えないため）。
+files=()
 dc_load_files files
 
 hits=0

@@ -9,7 +9,7 @@
 //! - コメント欄の処理は中核にあるが、モックにコメント欄の見た目がないため
 //!   画面には置かない。`comment_editable()` は表示用の状態としてだけ持つ。
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use pelway_client_core::approval::{ApprovalMachine, CardView, Clock, Effect, KeySource};
@@ -20,15 +20,19 @@ use pelway_client_core::contract::{
 };
 use pelway_client_core::decision::DecisionBoard;
 use pelway_client_core::input::{Action, Focus, ImeState, InputContext, Key, Modifiers, on_key};
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::{ComponentHandle, Global, Model, ModelRc, SharedString, VecModel};
 
 use crate::state::{
-    AvatarKind, DecisionCardState, DecisionOptionView, DecisionOutcomeView, MyRequestItem,
-    PendingDecisionItem, SAMPLE_DECISION_OPTION_A, SAMPLE_DECISION_OPTION_B,
-    SAMPLE_DECISION_QUESTION, format_wait_ms,
+    AvatarKind, ChannelView as ChannelState, DecisionCardState, DecisionOptionView,
+    DecisionOutcomeView, ExternalSendState, HandoffOption, MyRequestItem, PendingDecisionItem,
+    SAMPLE_DECISION_OPTION_A, SAMPLE_DECISION_OPTION_B, SAMPLE_DECISION_QUESTION,
+    SAMPLE_MENTION_NAMES, TimelineEntry, format_wait_ms,
 };
 use crate::testkit::{FixedClock, FixedKeySource};
-use crate::{DecisionOptionItem, MainWindow, PendingItem, RequestItem};
+use crate::{
+    ComposerKind, DecisionOptionItem, MainWindow, PendingItem, RequestItem, TimelineItem,
+    TimelineRowKind,
+};
 
 /// 承認カード 1 枚の表示用の状態と操作のつなぎ。
 ///
@@ -110,18 +114,34 @@ impl<K: KeySource, C: Clock> ApprovalCardBridge<K, C> {
     }
 }
 
+/// 入力欄 1 つの表示用の状態（本文と候補一覧の開閉）。
+///
+/// 本文はこちらが正本: 候補の取り込み（`AcceptMention`）で橋が書き換える
+/// ことがあるため、画面（Slint の TextInput）には都度書き戻す。
+#[derive(Debug, Default)]
+struct ComposerState {
+    text: String,
+    mention_list_open: bool,
+}
+
 /// 画面全体のキー操作のつなぎ。
 ///
 /// フォーカス・IME・候補一覧の開閉を持ち、キー操作をすべて `on_key` に渡す。
 /// 返ってきた [`Action`] だけで画面の状態を変える:
-/// - `AcceptMention` / `DismissMentionList`: 候補一覧を閉じる。
+/// - `AcceptMention`: 先頭の候補を末尾の @… トークンと入れ替えて入れ、一覧を閉じる。
+/// - `DismissMentionList`: 候補一覧を閉じる。入力済みの文字は残す。
 /// - `InsertNewline`: 入力欄に改行を 1 つ入れる。
 /// - `Send`: メッセージの送信として 1 回だけ数える（通信は書かない）。
 /// - `Approve`: 承認カードの「送る」押下に結びつく（押せるかはカードが決める）。
 pub struct ShellBridge {
     focus: Focus,
     ime: ImeState,
-    mention_list_open: bool,
+    /// 最後にフォーカスのあった入力欄（`handle_key` の候補一覧の参照先）。
+    active_composer: ComposerKind,
+    channel_composer: ComposerState,
+    thread_composer: ComposerState,
+    /// 候補一覧の項目（表示名。Enter は先頭の候補を入れる）。
+    mention_candidates: Vec<String>,
     approval: ApprovalCardBridge<FixedKeySource, FixedClock>,
     composer_newlines: u32,
     sent_messages: u32,
@@ -129,12 +149,19 @@ pub struct ShellBridge {
 
 impl ShellBridge {
     /// 承認カードを 1 枚持って始める。キー生成・時計はテスト用の固定実装。
+    /// 候補一覧の項目は合成データ（実メンバー結線の段階で差し替える）。
     #[must_use]
     pub fn new(card: CardView) -> Self {
         Self {
             focus: Focus::MessageInput,
             ime: ImeState::NotComposing,
-            mention_list_open: false,
+            active_composer: ComposerKind::Channel,
+            channel_composer: ComposerState::default(),
+            thread_composer: ComposerState::default(),
+            mention_candidates: SAMPLE_MENTION_NAMES
+                .iter()
+                .map(|s| (*s).to_owned())
+                .collect(),
             approval: ApprovalCardBridge::new(card, FixedKeySource::new(), FixedClock::new(0)),
             composer_newlines: 0,
             sent_messages: 0,
@@ -157,26 +184,108 @@ impl ShellBridge {
         self.ime = ime;
     }
 
-    /// メンション候補一覧の開閉を変える。
-    pub fn set_mention_list_open(&mut self, open: bool) {
-        self.mention_list_open = open;
+    /// キー操作の宛先にする入力欄を変える（フォーカスの移り変わりに合わせる）。
+    pub fn set_active_composer(&mut self, composer: ComposerKind) {
+        self.active_composer = composer;
     }
 
-    /// メンション候補一覧が開いているか。
+    /// 現在キー操作の宛先になっている入力欄。
+    #[must_use]
+    pub fn active_composer(&self) -> ComposerKind {
+        self.active_composer
+    }
+
+    fn composer(&self, composer: ComposerKind) -> &ComposerState {
+        match composer {
+            ComposerKind::Channel => &self.channel_composer,
+            ComposerKind::Thread => &self.thread_composer,
+        }
+    }
+
+    fn composer_mut(&mut self, composer: ComposerKind) -> &mut ComposerState {
+        match composer {
+            ComposerKind::Channel => &mut self.channel_composer,
+            ComposerKind::Thread => &mut self.thread_composer,
+        }
+    }
+
+    /// メンション候補一覧の開閉を変える（宛先は `active_composer` の入力欄）。
+    pub fn set_mention_list_open(&mut self, open: bool) {
+        self.composer_mut(self.active_composer).mention_list_open = open;
+    }
+
+    /// メンション候補一覧が開いているか（`active_composer` の入力欄）。
     #[must_use]
     pub fn mention_list_open(&self) -> bool {
-        self.mention_list_open
+        self.composer(self.active_composer).mention_list_open
+    }
+
+    /// 入力欄ごとの候補一覧の開閉。
+    #[must_use]
+    pub fn mention_list_open_for(&self, composer: ComposerKind) -> bool {
+        self.composer(composer).mention_list_open
+    }
+
+    /// 入力欄の本文（候補の取り込みで橋が書き換えるため、橋が正本）。
+    #[must_use]
+    pub fn composer_text(&self, composer: ComposerKind) -> &str {
+        &self.composer(composer).text
+    }
+
+    /// 入力欄の本文が変わった（文字入力・貼り付け・IME の確定）。
+    /// 末尾が「@から始まる未完のトークン」の間だけ候補一覧を開く。
+    pub fn note_composer_text(&mut self, composer: ComposerKind, text: &str) {
+        let open = has_open_mention_token(text);
+        let state = self.composer_mut(composer);
+        state.text = text.to_owned();
+        state.mention_list_open = open;
+    }
+
+    /// 候補一覧の項目（表示名。Enter は先頭の候補を入れる）。
+    #[must_use]
+    pub fn mention_candidates(&self) -> &[String] {
+        &self.mention_candidates
+    }
+
+    /// 候補一覧の項目を差し替える（実メンバー結線の段階の窓。今は合成データ）。
+    pub fn set_mention_candidates(&mut self, candidates: Vec<String>) {
+        self.mention_candidates = candidates;
     }
 
     /// キー操作を中核の `on_key` に渡し、返ってきた `Action` だけで状態を変える。
+    /// （フォーカス・IME は `set_focus` / `set_ime` で受け取る経路。入力欄からの
+    /// 直接の経路は [`Self::handle_composer_key`]）。
     pub fn handle_key(&mut self, key: Key, mods: Modifiers) -> Action {
         let ctx = InputContext {
             focus: self.focus,
             ime: self.ime,
-            mention_list_open: self.mention_list_open,
+            mention_list_open: self.mention_list_open(),
         };
         let action = on_key(&ctx, key, mods);
         self.apply(action);
+        action
+    }
+
+    /// 入力欄 `composer` が受けたキー操作を `on_key` に渡す。
+    ///
+    /// フォーカスはその入力欄（`Focus::MessageInput`）、候補一覧の開閉はその
+    /// 入力欄の状態で見る。`ime` は入力欄が持つ変換状態（Slint では TextInput の
+    /// `preedit-text` があるかどうか）を呼び出し側が渡す。返した `Action` は
+    /// ここでも適用する（一覧を閉じる・候補を本文に入れる・送信を数える）。
+    pub fn handle_composer_key(
+        &mut self,
+        composer: ComposerKind,
+        key: Key,
+        mods: Modifiers,
+        ime: ImeState,
+    ) -> Action {
+        let ctx = InputContext {
+            focus: Focus::MessageInput,
+            ime,
+            mention_list_open: self.composer(composer).mention_list_open,
+        };
+        let action = on_key(&ctx, key, mods);
+        self.apply_for(composer, action);
         action
     }
 
@@ -204,18 +313,172 @@ impl ShellBridge {
     }
 
     fn apply(&mut self, action: Action) {
+        self.apply_for(self.active_composer, action);
+    }
+
+    fn apply_for(&mut self, composer: ComposerKind, action: Action) {
         match action {
             Action::None => {}
             Action::InsertNewline => self.composer_newlines += 1,
-            Action::AcceptMention | Action::DismissMentionList => {
-                self.mention_list_open = false;
+            Action::AcceptMention => {
+                // 先頭の候補を、末尾の @… トークンと入れ替えて入れる。
+                let name = self.mention_candidates.first().cloned().unwrap_or_default();
+                let state = self.composer_mut(composer);
+                state.mention_list_open = false;
+                if let Some(at) = state.text.rfind('@') {
+                    state.text.truncate(at);
+                }
+                state.text.push('@');
+                state.text.push_str(&name);
+                state.text.push(' ');
+            }
+            Action::DismissMentionList => {
+                self.composer_mut(composer).mention_list_open = false;
             }
             Action::Send => self.sent_messages += 1,
             Action::Approve => {
                 self.approval.press_send_button();
             }
+            // Decide の適用はボタンが対象を持って渡す `on_decide_key` 側
+            // （`wire_key_actions`）。ここにはフォーカス中の対象が無い。
+            Action::Decide => {}
         }
     }
+}
+
+/// 本文の末尾が「@から始まる未完のトークン」か（候補一覧を開く印）。
+///
+/// @ は行頭または空白の直後にあるものだけを見る（アドレス等の文中の @ は
+/// 開かない）。@ のあとに空白が入ればトークンは終わっている。
+fn has_open_mention_token(text: &str) -> bool {
+    let Some(at) = text.rfind('@') else {
+        return false;
+    };
+    let head_ok = text[..at]
+        .chars()
+        .next_back()
+        .is_none_or(char::is_whitespace);
+    head_ok && !text[at + 1..].contains(char::is_whitespace)
+}
+
+/// `Action` がキーイベントを消費するか（Slint の `key-pressed` が accept を
+/// 返すかどうか）。`None`・`InsertNewline` は消費しない: 何もしないと
+/// TextInput が文字入力・改行として処理する（改行の入れ方は TextInput に任せる）。
+#[must_use]
+pub fn consumes_key(action: Action) -> bool {
+    matches!(
+        action,
+        Action::Send | Action::AcceptMention | Action::DismissMentionList | Action::Approve
+    )
+}
+
+/// Slint の `KeyEvent.text`（キーの文字）を中核の `Key` に写す。
+/// 対象外のキー（通常の文字・修飾キー・矢印など）は `None`（橋には渡さない）。
+/// 入力欄では Escape も橋に渡す（候補一覧を閉じる操作のため）。ボタン系は
+/// `key_from_text`（Enter・Space だけ）を使う。
+fn composer_key_from_text(text: &str) -> Option<Key> {
+    match text {
+        "\n" | "\r" => Some(Key::Enter),
+        "\u{1b}" => Some(Key::Escape),
+        " " => Some(Key::Space),
+        _ => None,
+    }
+}
+
+/// 入力欄 1 つ分の画面の状態を橋に合わせる（本文と候補一覧の開閉）。
+fn apply_composer(window: &MainWindow, shell: &ShellBridge, composer: ComposerKind) {
+    match composer {
+        ComposerKind::Channel => {
+            window.set_composer_text(shell.composer_text(composer).into());
+            window.set_composer_mention_list_open(shell.mention_list_open_for(composer));
+        }
+        ComposerKind::Thread => {
+            window.set_reply_text(shell.composer_text(composer).into());
+            window.set_reply_mention_list_open(shell.mention_list_open_for(composer));
+        }
+    }
+}
+
+/// 入力欄（チャンネルの下欄・スレッドの返信欄）とメンション候補一覧を
+/// `shell` に結線する（Issue 383）。
+///
+/// - 本文の変更（`edited`）は橋に渡し、橋が持つ本文と候補一覧の開閉を画面へ
+///   書き戻す（候補の取り込みで橋が本文を書き換えるため）。
+/// - Enter・Esc・Space は `key-pressed` の時点で橋に渡し、`on_key` の指示が
+///   消費するものなら Slint 側でも消費する（送信・候補確定・一覧を閉じる）。
+///   それ以外のキーは TextInput の通常処理に任せる（文字入力・改行）。
+/// - IME が変換中かどうかは Slint 側が `preedit-text` から見て callback の
+///   引数で渡す。変換中の転送対象キーは消費する: IME が持つキーを `reject` で
+///   TextInput に戻すと改行・空白が挿入されてしまうため（`on_key` は変換中に
+///   `Action::None` を返すが、それは「この層は何もしない」であって編集部品に
+///   渡してよい意味ではない）。
+pub fn wire_composers(window: &MainWindow, shell: Rc<RefCell<ShellBridge>>) {
+    // 初期状態（橋の本文・一覧の開閉・候補の項目）を画面へ。
+    {
+        let shell = shell.borrow();
+        apply_composer(window, &shell, ComposerKind::Channel);
+        apply_composer(window, &shell, ComposerKind::Thread);
+        let candidates: Vec<SharedString> = shell
+            .mention_candidates()
+            .iter()
+            .map(|name| name.as_str().into())
+            .collect();
+        window.set_mention_candidates(ModelRc::new(VecModel::from(candidates)));
+    }
+
+    let weak = window.as_weak();
+    let edited_shell = Rc::clone(&shell);
+    window.on_composer_edited(move |composer, text| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let mut shell = edited_shell.borrow_mut();
+        shell.set_active_composer(composer);
+        shell.note_composer_text(composer, text.as_str());
+        apply_composer(&window, &shell, composer);
+    });
+
+    let focused_shell = Rc::clone(&shell);
+    window.on_composer_focused(move |composer| {
+        let mut shell = focused_shell.borrow_mut();
+        shell.set_active_composer(composer);
+        shell.set_focus(Focus::MessageInput);
+    });
+
+    let weak = window.as_weak();
+    let key_shell = Rc::clone(&shell);
+    window.on_composer_key_pressed(move |composer, key_text, ctrl_or_cmd, shift, composing| {
+        let Some(window) = weak.upgrade() else {
+            return false;
+        };
+        let Some(key) = composer_key_from_text(key_text.as_str()) else {
+            return false;
+        };
+        let ime = if composing {
+            ImeState::Composing
+        } else {
+            ImeState::NotComposing
+        };
+        let mut shell = key_shell.borrow_mut();
+        shell.set_active_composer(composer);
+        let action =
+            shell.handle_composer_key(composer, key, Modifiers { ctrl_or_cmd, shift }, ime);
+        apply_composer(&window, &shell, composer);
+        // 候補の取り込みで本文が書き換わった → カーソルを末尾へ（Slint 側が
+        // この値の変化を見て set-selection-offsets を呼ぶ）。
+        if action == Action::AcceptMention {
+            match composer {
+                ComposerKind::Channel => {
+                    window.set_composer_cursor_to_end(window.get_composer_cursor_to_end() + 1)
+                }
+                ComposerKind::Thread => {
+                    window.set_reply_cursor_to_end(window.get_reply_cursor_to_end() + 1)
+                }
+            }
+        }
+        // 変換中は IME が持つキーなので消費する（TextInput に戻さない）。
+        composing || consumes_key(action)
+    });
 }
 
 // ---- 「今日・判断待ち」画面とチャット内の判断カード（Issue 331） ----
@@ -521,7 +784,14 @@ pub fn apply_decision_screen(window: &MainWindow, shell: &DecisionShell, now: Ts
         .collect();
     window.set_request_items(ModelRc::new(VecModel::from(requests)));
 
-    match shell.channel_card() {
+    apply_decision_card_props(window, shell.channel_card().as_ref());
+}
+
+/// チャット内の判断カードのプロパティ（`data-decision-*`）を `card` に合わせる。
+/// `None` ならカードを出さない（`data-decision-visible` を false にするだけで
+/// ほかの欄は残す。次にカードが出たとき上書きされる）。
+fn apply_decision_card_props(window: &MainWindow, card: Option<&DecisionCardState>) {
+    match card {
         Some(card) => {
             window.set_data_decision_visible(true);
             window.set_data_decision_id(card.decision_id.as_str().into());
@@ -534,7 +804,7 @@ pub fn apply_decision_screen(window: &MainWindow, shell: &DecisionShell, now: Ts
                 &card.options,
             ))));
             window.set_data_decision_decided(card.outcome.is_some());
-            match card.outcome {
+            match &card.outcome {
                 Some(outcome) => {
                     window.set_data_decision_selected(outcome.selected_body.as_str().into());
                     window.set_data_decision_decider(outcome.decider.as_str().into());
@@ -547,6 +817,105 @@ pub fn apply_decision_screen(window: &MainWindow, shell: &DecisionShell, now: Ts
         }
         None => window.set_data_decision_visible(false),
     }
+}
+
+// ---- チャンネル画面の時系列（Issue 385。ListView への適用） ----
+
+/// `state` の時系列の項目 1 つを、画面の行一覧（`TimelineItem`）に展開する。
+///
+/// スレッドの要約が付くメッセージは、メッセージ行とスレッド導線の 2 行になる
+/// （仮想化前の並びと同じ）。`MessageEntry` に時刻の欄は無いため `time` は
+/// 空のまま。`TimelineEntry::DecisionCard` は位置だけの印で、中身は
+/// `data-decision-*` プロパティ（台帳が正本）を行が読む。
+fn timeline_row_items(entry: &TimelineEntry) -> Vec<TimelineItem> {
+    let base = |kind| TimelineItem {
+        kind,
+        ..TimelineItem::default()
+    };
+    match entry {
+        TimelineEntry::DayDivider { label } => vec![TimelineItem {
+            day_label: label.as_str().into(),
+            ..base(TimelineRowKind::DayDivider)
+        }],
+        TimelineEntry::UnreadMarker => vec![base(TimelineRowKind::UnreadMarker)],
+        TimelineEntry::Message(message) => {
+            let mut rows = vec![TimelineItem {
+                sender: message.sender.as_str().into(),
+                is_ai: message.avatar.is_ai(),
+                initial: message.avatar.initial().into(),
+                body: message.body.as_str().into(),
+                // 「{from}〜{to}を読みました」の表示は、仮想化前はスレッドの
+                // 要約が付くメッセージに出ていた（同じ条件で出す）。
+                show_read_range: message.thread.is_some(),
+                ..base(TimelineRowKind::Message)
+            }];
+            if let Some(thread) = &message.thread {
+                rows.push(TimelineItem {
+                    thread_working: thread.working,
+                    thread_done: thread.done_at.is_some(),
+                    ..base(TimelineRowKind::ThreadLead)
+                });
+            }
+            rows
+        }
+        // 決定の印の文言（誰・時刻を含む）は tr-decision-mark が持つ（行には
+        // 乗せない。仮想化前と同じ表示）。
+        TimelineEntry::Decision { .. } => vec![base(TimelineRowKind::DecisionMark)],
+        TimelineEntry::DecisionCard => vec![base(TimelineRowKind::DecisionCard)],
+        TimelineEntry::Handoff(handoff) => vec![TimelineItem {
+            handoff_from_to: format!("{} → {}", handoff.from, handoff.to).into(),
+            handoff_title: handoff.title.as_str().into(),
+            handoff_acknowledged: handoff.acknowledged.is_some(),
+            handoff_option_a: handoff_option_text(handoff.options.first()),
+            handoff_option_b: handoff_option_text(handoff.options.get(1)),
+            ..base(TimelineRowKind::Handoff)
+        }],
+        TimelineEntry::PrivateNote {
+            sender,
+            avatar,
+            body,
+        } => vec![TimelineItem {
+            sender: sender.as_str().into(),
+            is_ai: avatar.is_ai(),
+            initial: avatar.initial().into(),
+            body: body.as_str().into(),
+            ..base(TimelineRowKind::PrivateNote)
+        }],
+        TimelineEntry::ExternalSend(card) => vec![TimelineItem {
+            ext_address: card.address.as_str().into(),
+            ext_subject: card.subject.as_str().into(),
+            ext_basis: card.basis.as_str().into(),
+            ext_body: card.body.as_str().into(),
+            ext_sent: matches!(card.state, ExternalSendState::Sent { .. }),
+            ..base(TimelineRowKind::ExternalSend)
+        }],
+    }
+}
+
+/// 引き継ぎカードの選択肢 1 行の表示（「A　範囲を絞って…」。モックに合わせて
+/// ラベルと本文の間は全角空白）。選択肢がなければ空文字。
+fn handoff_option_text(option: Option<&HandoffOption>) -> slint::SharedString {
+    option.map_or_else(slint::SharedString::default, |o| {
+        format!("{}　{}", o.label, o.text).into()
+    })
+}
+
+/// `state` のチャンネル画面の表示データを窓に渡す。
+///
+/// 題名・参加者に加え、時系列は ListView の行一覧（`timeline-items`）として
+/// 渡し、判断カードは `decision_card` の内容を `data-decision-*` に載せる。
+/// 台帳駆動の流れ（`apply_decision_screen`）が後から同じプロパティを
+/// 上書きするため、確定などの操作後の値は台帳側が正本になる。
+pub fn apply_channel_view(window: &MainWindow, channel: &ChannelState) {
+    window.set_data_channel_title(channel.title.as_str().into());
+    window.set_data_channel_members(channel.members.as_str().into());
+    let items: Vec<TimelineItem> = channel
+        .timeline
+        .iter()
+        .flat_map(timeline_row_items)
+        .collect();
+    window.set_timeline_items(ModelRc::new(VecModel::from(items)));
+    apply_decision_card_props(window, channel.decision_card.as_ref());
 }
 
 /// 画面の操作を `shell` に結線する（一覧とチャット内カードは同じ callback を
@@ -582,6 +951,117 @@ pub fn wire_decision_screen(window: &MainWindow, shell: Rc<RefCell<DecisionShell
             window.set_data_channel_title(title.as_str().into());
             window.set_show_today(false);
             apply_decision_screen(&window, &shell, now);
+            ensure_decision_card_row(&window);
         }
+    });
+}
+
+/// チャット内の判断カードを出す `decision-card` 行が時系列になければ、末尾に
+/// 置く（Issue 385。`apply_channel_view` が時系列を渡す流れでは、判断カードの
+/// 行はすでに載っている想定。この骨組みの流れでは時系列が空のままなので、
+/// `data-decision-*` だけではカードが実体化しない）。
+fn ensure_decision_card_row(window: &MainWindow) {
+    if !window.get_data_decision_visible() {
+        return;
+    }
+    let model = window.get_timeline_items();
+    let has_card = (0..model.row_count()).any(|i| {
+        model
+            .row_data(i)
+            .is_some_and(|item| item.kind == TimelineRowKind::DecisionCard)
+    });
+    if has_card {
+        return;
+    }
+    let mut items: Vec<TimelineItem> = (0..model.row_count())
+        .filter_map(|i| model.row_data(i))
+        .collect();
+    items.push(TimelineItem {
+        kind: TimelineRowKind::DecisionCard,
+        ..TimelineItem::default()
+    });
+    window.set_timeline_items(ModelRc::new(VecModel::from(items)));
+}
+
+// ---- 決定・承認ボタンのキー操作（Issue 379） ----
+
+/// `.slint` の `KeyEvent.text` から中核の [`Key`] へ。対象外のキーは `None`
+/// （イベントを消費せず伝播させる側に回る）。
+fn key_from_text(text: &str) -> Option<Key> {
+    match text {
+        "\n" | "\r" => Some(Key::Enter),
+        " " => Some(Key::Space),
+        _ => None,
+    }
+}
+
+/// 決定・承認ボタンのキー操作を中核の `on_key` に結線する（Issue 379）。
+///
+/// `.slint` の FocusScope は生のキー（`KeyEvent.text`・Ctrl/Cmd・Shift）を
+/// `KeyRouter` global の `decide-key`・`send-key` callback に渡す。ここで
+/// `on_key` が「決定・承認になるか」を決め、返ってきた [`Action`] だけで動く:
+/// - `Decide`: 台帳を確定し、成功したら画面を再適用する。
+/// - `Approve`: 「送る」ボタンの押下経路（`send-pressed` callback）に乗せる。
+///
+/// Enter・Space は `on_key` の結果が `None`（修飾付き・IME 変換中）でも消費
+/// する（ボタンのキーが画面の他の部品へ漏れない）。それ以外のキーは
+/// `false` を返し、通常のキー処理（Tab 移動など）へ伝播させる。
+///
+/// `ime` は画面の IME 状態を持つセル（骨組みでは既定 `NotComposing`。結線の
+/// 段階で IME の実装が更新する）。
+pub fn wire_key_actions(
+    window: &MainWindow,
+    shell: Rc<RefCell<DecisionShell>>,
+    ime: Rc<Cell<ImeState>>,
+    now: TsMs,
+) {
+    let router = crate::KeyRouter::get(window);
+    let weak = window.as_weak();
+    let decide_ime = Rc::clone(&ime);
+    router.on_decide_key(
+        move |decision_id, option_id, version, key_text, ctrl_or_cmd, shift| {
+            let Some(window) = weak.upgrade() else {
+                return false;
+            };
+            let Some(key) = key_from_text(key_text.as_str()) else {
+                return false;
+            };
+            let ctx = InputContext {
+                focus: Focus::DecisionButton,
+                ime: decide_ime.get(),
+                mention_list_open: false,
+            };
+            let mods = Modifiers { ctrl_or_cmd, shift };
+            if on_key(&ctx, key, mods) == Action::Decide {
+                let mut shell = shell.borrow_mut();
+                let id = DecisionId::from(decision_id.as_str());
+                // 失敗（版違い・確定済み・権限なし）は台帳を変えないため再適用もしない。
+                if shell.decide(&id, &option_id, version as u64, now).is_ok() {
+                    apply_decision_screen(&window, &shell, now);
+                }
+            }
+            true
+        },
+    );
+
+    let weak = window.as_weak();
+    router.on_send_key(move |key_text, ctrl_or_cmd, shift| {
+        let Some(window) = weak.upgrade() else {
+            return false;
+        };
+        let Some(key) = key_from_text(key_text.as_str()) else {
+            return false;
+        };
+        let ctx = InputContext {
+            focus: Focus::ApproveButton,
+            ime: ime.get(),
+            mention_list_open: false,
+        };
+        let mods = Modifiers { ctrl_or_cmd, shift };
+        if on_key(&ctx, key, mods) == Action::Approve {
+            // 承認は「送る」の押下経路に乗せる（押せるかどうかは経路の先が決める）。
+            window.invoke_send_pressed();
+        }
+        true
     });
 }
