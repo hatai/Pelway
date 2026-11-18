@@ -37,3 +37,10 @@
 使ったスキル: implement-issue、fix-merge-conflicts
 
 round 2 追記への補足（CI 失敗の修正）: `demo_banner.rs` の行・バッジ検査は窓を 800x2400 に固定していたが、CI のフォント計測では内容がビューポートに収まらず、en の判断カードのバッジが Flickable のクリップで探索から落ちた（`test`・`octocov`・`mise run verify` すべて同じ assert で失敗）。可視になるまで窓を段階的に伸ばす `find_growing` に全検査を揃え、フォント環境差に依存しない形にした。
+
+round 2 追記への補足2（CI 失敗の根本原因・確定）: en の判断カードのバッジ消失は 2 つの独立した環境差が重なったものだった。
+
+1. 条件付き要素の実体化: `if data-decision-visible` の中に実体化されるカードで、内側 `HorizontalLayout` の直接の子にある `if`/`for`（条件が転送バインディング `data-requester-is-ai` を読む）は CI の en で子要素を作らなかった。`if true`（定数条件）は同じ位置で出る、同じ条件でもカード直下の `VerticalLayout` の子なら出ることを `DIAG` 要素で突き止め、依頼者行を AI/人の 2 バリアントに分けてバッジをレイアウト内の非条件要素にした。
+2. Flickable の水平クリップ: テストの探索は `ItemRc::is_visible()` を通るためクリップ外は見えない。窓 800px ではチャンネル列の `Flickable` が 340px しかなく（右端 x=596）、en ではタイトル `Decision request` が長い分だけ依頼者行が右に寄り、バッジが右端クリップを超えて不可視になっていた（静止要素の消失＝クリップで確定）。`find_growing` の窓幅を 1600px にして解消。
+
+bridge.rs もデータ確定後に `data-decision-visible` を立てる順に変えた（実体化時に `if` が初期値で評価される余地を減らす防御）。診断用の `DIAG` 出力・`Text "X"`・`Rectangle` ラップ・lang 順反転は撤去済み。

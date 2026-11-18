@@ -121,7 +121,7 @@ fn persistent_display_end_to_end() {
     // チャット内の DecisionCardView の両方に出る。
     const NOW: u64 = 25 * 60 * 1000;
 
-    for lang in ["en", "ja"] {
+    for lang in ["ja", "en"] {
         let window = window_with_texts(lang);
         let banner_text = fluent(lang, "banner-demo-mock");
         let badge_text = fluent(lang, "ai-badge");
@@ -225,80 +225,6 @@ fn persistent_display_end_to_end() {
                 })
                 .unwrap_or_default()
         });
-        if true {
-            let card =
-                ElementHandle::find_by_element_id(&window, "ChannelView::decision-card").next();
-            let all: Vec<_> =
-                ElementHandle::find_by_element_type_name(&window, "AiBadgeView").collect();
-            let descendants: Vec<String> = card
-                .iter()
-                .flat_map(|c| {
-                    c.query_descendants()
-                        .find_all()
-                        .iter()
-                        .map(|e| {
-                            format!(
-                                "{}@({},{})[{}]",
-                                e.type_name().unwrap_or_default(),
-                                e.absolute_position().x,
-                                e.absolute_position().y,
-                                e.accessible_label().unwrap_or_default()
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .collect();
-            let layout_geo: Vec<String> = card
-                .iter()
-                .flat_map(|c| {
-                    c.query_descendants()
-                        .find_all()
-                        .iter()
-                        .filter(|e| {
-                            e.type_name()
-                                .map(|t| t.contains("Layout") || t.contains("Flickable"))
-                                .unwrap_or(false)
-                        })
-                        .map(|e| {
-                            let p = e.absolute_position();
-                            let s = e.size();
-                            format!(
-                                "{}@({},{}){}x{}",
-                                e.type_name().unwrap_or_default(),
-                                p.x,
-                                p.y,
-                                s.width,
-                                s.height
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .collect();
-            let flickables: Vec<String> =
-                ElementHandle::find_by_element_type_name(&window, "Flickable")
-                    .map(|f| {
-                        let p = f.absolute_position();
-                        let s = f.size();
-                        format!("({},{}){}x{}", p.x, p.y, s.width, s.height)
-                    })
-                    .collect();
-            let badge_pos: Vec<String> = card_badges
-                .iter()
-                .map(|b| {
-                    let p = b.absolute_position();
-                    let s = b.size();
-                    format!("({},{}){}x{}", p.x, p.y, s.width, s.height)
-                })
-                .collect();
-            eprintln!(
-                "DIAG {lang}: is-ai={} requester={:?} card={:?} badges={badge_pos:?} all_badges={} descendants={descendants:?}",
-                window.get_data_decision_requester_is_ai(),
-                window.get_data_decision_requester().to_string(),
-                card.as_ref().map(|c| (c.absolute_position(), c.size())),
-                all.len()
-            );
-            eprintln!("DIAG {lang}: flickables={flickables:?} layouts={layout_geo:?}");
-        }
         assert_eq!(
             card_badges.len(),
             1,
