@@ -318,6 +318,9 @@ pub enum TimelineEntry {
     Decision { who: String, time: String },
     /// 引き継ぎカード。
     Handoff(HandoffData),
+    /// チャット内の判断カードを出す位置。中身は [`ChannelView::decision_card`]
+    /// と画面の判断カード用プロパティが持つ（台帳が正本。Issue 331・385）。
+    DecisionCard,
     /// 「あなただけに表示」の行。
     PrivateNote {
         sender: String,
@@ -489,6 +492,8 @@ pub fn sample() -> AppData {
                         },
                     ],
                 }),
+                // チャット内の判断カードの位置（仮想化前の並びと同じく、引き継ぎの直後）。
+                TimelineEntry::DecisionCard,
                 TimelineEntry::Message(MessageEntry {
                     sender: "濱田".to_owned(),
                     avatar: AvatarKind::Human("濱".to_owned()),
