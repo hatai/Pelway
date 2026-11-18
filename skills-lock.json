@@ -92,6 +92,13 @@
       "skillPath": "skills/domain-web/SKILL.md",
       "computedHash": "c42407a385f5f3252ec917337b40cba1bf9802ddd38505dbafea8ab3641ecea2"
     },
+    "fnox": {
+      "source": "jdx/fnox",
+      "commit": "5f07cbe8fc99b7b258afd5639cb808992f8d578a",
+      "sourceType": "github",
+      "skillPath": "skills/fnox/SKILL.md",
+      "computedHash": "45672395c41190b4e3524db75803dcecc4bf16a02dab96d7d16530fd7cff92ba"
+    },
     "github-actions-templates": {
       "source": "wshobson/agents",
       "commit": "42203085cfc5736204bf0f6d436dff7e1da0bf3f",
@@ -194,6 +201,13 @@
       "sourceType": "github",
       "skillPath": "skills/m15-anti-pattern/SKILL.md",
       "computedHash": "cca1e6bdaa93e83822a52347f77a2b17a28b2b45d71ddad7a485cc1c4bc5abc5"
+    },
+    "mbx": {
+      "source": "jdx/mr-boxington",
+      "commit": "4cc2d8854beebabe56beb78b1308c4133be3fe7e",
+      "sourceType": "github",
+      "skillPath": "skills/mbx/SKILL.md",
+      "computedHash": "8202a3bc661e229b81a99295883f80ddae2bd6aeda192a56d1716f5f77186c7d"
     },
     "meta-cognition-parallel": {
       "source": "actionbook/rust-skills",
