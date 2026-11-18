@@ -86,6 +86,18 @@ check cond8_forward_retention docs/technical.md \
   '洗い替え' \
   '転送先の添付も先に利用停止'
 
+# 条件6/10（round 4・hatai 決定対応）: 受信中の打ち切り・書き込み前の quota 予約・
+# クライアント側の事前確認。
+check cond6_receive_limit docs/technical.md \
+  '受け取りをやめて' \
+  'quota' \
+  'アップロードを始める前に'
+
+# 条件7（round 4・hatai 決定対応）: 転送添付の取得時の元の権限検査。
+check cond7_forward_recheck docs/technical.md \
+  '元の添付と元の発言も' \
+  'そのときの権限で読めるときだけ'
+
 # 条件9: 外部との境界（接続だけでは添付を送らない、外へ出すときは ActionSnapshot
 # に hash を固定）。
 check cond9_boundary docs/technical.md \
