@@ -74,7 +74,7 @@ scripts/agent-gh dev issue view <N> --json title,body,labels,comments
 2. テストを実行し、失敗することを確かめる。失敗の出力を PR 本文の「確認方法/検証」に貼る
 3. 実装してテストを通す
 
-テストが最初から通ったら、そのテストは条件を確かめていない。書き直す。
+テストが最初から通ったら、そのテストは条件を確かめていない。書き直す。テストが red にならない、または実行ごとに red が揺らぐときは、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 1〜2 で切り分けてから書き直す。
 
 確かめ方が確認の手順の条件（文書に、ある決まりや手順が書かれていること。skill `write-issue` の「受け入れ条件の書き方」）は、テストを書かずに次のとおり扱う。
 
@@ -118,7 +118,8 @@ mise run pr-size
 scripts/agent-gh dev git push -u origin HEAD
 ```
 
-- `mise run verify` が失敗したらコミットしない。直してからやり直す。
+- `mise run verify` が失敗したらコミットしない。直してからやり直す。失敗が自分の変更と無関係に見えるとき（実行ごとに失敗箇所が変わる・ツールチェーンの再インストールを伴うなど）は、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 2（再現と最小化）で切り分ける。変更を退避した同じツリーで再現する失敗は環境起因として、verify の内訳と再現確認を PR 本文の「確認方法/検証」に書いて先へ進めてよい。退避で解消する失敗は自分の変更によるもので、直す。
+- 差分がミューテーションテスト対象の crate（`.cargo/mutants.toml` の examine_globs）のロジックに触れるときは、`mise run mutants:diff` も回し、結果（生き残りと対応）を実装者メモに書く。生き残りの分析は輸入スキル `mutation-testing`（下の「輸入スキル」の節）。
 - `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたら push せずに止まる。
 - 積み上げ PR（分割計画で親 PR のブランチに積む PR。GitHub 上の base が main ではない PR）では `bash scripts/pr-size.sh --base <親ブランチ>` で測る。`mise run pr-size` は base=origin/main が既定のため、そのまま使うと親 PR の差分まで数えてしまい、上限超過で誤って止まる・例外扱いになる。
 
@@ -252,7 +253,9 @@ memo: docs/worklogs/issue-<N>.md（round <R>）
 
 止まった場合は `pr:` の代わりに `stopped: <止まる条件の表の 1 列目>` を書く。
 
-## 輸入スキル（mattpocock/skills）
+## 輸入スキル
+
+外部スキルの採用の全体表は `docs/agents/external-skills.md` が正本。この節には実装担当が使うものの適用ルールを置く。
 
 指揮役が試行として明示した割り当てでは、手順 4 の方法の詳細として輸入スキル `tdd`（`.agents/skills/tdd/SKILL.md`。`tests.md` と `mocking.md` を伴う）を読んで使う。試行と明示されていない割り当てでは使わない（通常運用への移行は hatai が別に判断する）。
 
@@ -260,6 +263,18 @@ memo: docs/worklogs/issue-<N>.md（round <R>）
 
 - `tdd` の seam は受け入れ条件から決め、選んだ seam を実装者メモの「使ったスキル」の行に書く（上流の「ユーザーに確認する」は、自律スレッドでは受け入れ条件が確認済みの seam と読み替える）。
 - `tdd` の本文が参照する `codebase-design` と `code-review` は未採用のため、参照は無効とする。
+
+`diagnosing-bugs`（`.agents/skills/diagnosing-bugs/SKILL.md`）は通常運用で、割り当ての指示に関係なく使う。skill `investigate-bug` 側の参照（証拠集めと根本原因の方法）とは別に、実装担当では次に使う:
+
+- 手順 4: テストが red にならない・実行ごとに red が揺らうとき、Phase 1（赤になるフィードバックループの構築）と Phase 2（再現と最小化）でテストを切り分ける。
+- 手順 6: verify の失敗が自分の変更と無関係に見えるとき、Phase 2 の最小化（変更を退避した同じツリーでの再現確認）で切り分ける。
+- 本文が対話（ユーザーへの報告・質問）を前提とする部分は、自律スレッドでは PR 本文と実装者メモへの記録に読み替える（`tdd` の読み替えと同じ）。
+
+`mutation-testing`（`.agents/skills/mutation-testing/SKILL.md`）は通常運用で、差分がミューテーションテスト対象の crate のロジックに触れる round で使う:
+
+- 本リポジトリの道具は cargo-mutants（`mise run mutants`・`mise run mutants:diff`）であり、本文の mewt / muton 固有のコマンドと設定は適用しない。使うのは結果の解釈の節（What Results Mean・Interpreting Mutation Types: 生き残りの意味・重大度とリスクの区別・テストギャップか同等ミュータントかの切り分け）。
+- 生き残ったミュータントは、振る舞いを確かめるテストで倒す。実装の中身をそのまま確かめるテストで倒すのは不可。
+- 生き残りを同等ミュータント（テストで倒せない正当な変異）と判断したときは、理由を実装者メモに書く。
 
 取り込みの discipline（輸入スキル全般）:
 
