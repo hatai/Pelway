@@ -35,10 +35,11 @@ if [[ "$1 $2" == "token generate" ]]; then
     fi
     prev="$a"
   done
-  # App ID ごとに別のトークンを返す（333 = 実装担当 pelway-dev、111 = レビュー担当 pelway-review）
+  # App ID ごとに別のトークンを返す（333 = 実装担当 pelway-dev、111 = レビュー担当 pelway-review、555 = QA 担当 pelway-qa）
   case "$*" in
     *"--app-id 333 "*) printf '{"token":"dev-token","expires_at":"x"}\n' ;;
     *"--app-id 111 "*) printf '{"token":"review-token","expires_at":"x"}\n' ;;
+    *"--app-id 555 "*) printf '{"token":"qa-token","expires_at":"x"}\n' ;;
     *) exit 1 ;;
   esac
   exit 0
@@ -62,6 +63,9 @@ export FAKE_PELWAY_DEV_GIT_EMAIL="9+pelway-dev[bot]@users.noreply.github.com"
 export FAKE_PELWAY_REVIEW_APP_ID=111
 export FAKE_PELWAY_REVIEW_APP_INSTALLATION_ID=222
 export FAKE_PELWAY_REVIEW_APP_KEY=pem-body
+export FAKE_PELWAY_QA_APP_ID=555
+export FAKE_PELWAY_QA_INSTALLATION_ID=666
+export FAKE_PELWAY_QA_PRIVATE_KEY=qa-pem-body
 
 # run <name> <args...>: CALL_LOG を新しくして agent-gh を実行し、出力を OUT、終了コードを RC に入れる。
 run() {
@@ -220,6 +224,71 @@ expect_log unicode_guard_short_hex 'ARGS=pr list --search a\u12b'
 run unicode_guard_capital_u dev pr list --search 'a\U3042'
 [[ "$RC" == 0 ]] || failures+=("unicode_guard_capital_u: exit $RC, want 0")
 expect_log unicode_guard_capital_u 'ARGS=pr list --search a\U3042'
+
+# qa ロール: `qa comment <番号> --body-file <path|->` の 1 形だけ許可する（許可リスト方式）。
+# それ以外の呼び出しは、fnox（秘密の読み出し）と gh / git（ネットワーク）のどちらも呼ばずに拒否する。
+printf 'qa body\n' >"$ROOT/qa-body.md"
+
+run qa_comment_posts qa comment 42 --body-file "$ROOT/qa-body.md"
+[[ "$RC" == 0 ]] || failures+=("qa_comment_posts: exit $RC, want 0 ($OUT)")
+expect_log qa_comment_posts "GH_TOKEN=qa-token"
+expect_log qa_comment_posts "issue comment 42"
+expect_log qa_comment_posts "--repo hatai/Pelway"
+expect_log qa_comment_posts "--body-file $ROOT/qa-body.md"
+grep -qF -- "--app-id 555 --installation-id 666" "$ROOT/qa_comment_posts.log.token-args" 2>/dev/null ||
+  failures+=("qa_comment_posts: token generate args wrong")
+# dev / review と秘密の名前が違う（PELWAY_QA_INSTALLATION_ID・PELWAY_QA_PRIVATE_KEY）ことを確かめる
+grep -qF -- "-c $ROOT/agent-fnox.toml get PELWAY_QA_PRIVATE_KEY" "$ROOT/qa_comment_posts.log.fnox-args" 2>/dev/null ||
+  failures+=("qa_comment_posts: fnox not called with PELWAY_QA_PRIVATE_KEY")
+[[ "$OUT" != *qa-pem-body* && "$OUT" != *qa-token* ]] || failures+=("qa_comment_posts: secret printed")
+
+# --body-file - は標準入力をそのまま gh に渡す
+export CALL_LOG="$ROOT/qa_comment_stdin.log"
+rm -f "$CALL_LOG" "$CALL_LOG.fnox-args" "$CALL_LOG.token-args"
+OUT="$(printf 'from stdin\n' | bash "$SCRIPT" qa comment 7 --body-file - 2>&1)"
+RC=$?
+[[ "$RC" == 0 ]] || failures+=("qa_comment_stdin: exit $RC, want 0 ($OUT)")
+expect_log qa_comment_stdin "GH_TOKEN=qa-token"
+expect_log qa_comment_stdin "issue comment 7"
+expect_log qa_comment_stdin "--body-file -"
+
+# qa_reject <name> <args...>: `qa` の後に続く引数が許可の形でなければ、終了コード 2 で何も呼ばずに拒否する
+qa_reject() {
+  local name="$1"
+  shift
+  run "$name" qa "$@"
+  [[ "$RC" == 2 ]] || failures+=("$name: exit $RC, want 2")
+  expect_no_calls "$name"
+}
+qa_reject qa_rejects_no_args
+qa_reject qa_rejects_help --help
+qa_reject qa_rejects_pr_list pr list
+qa_reject qa_rejects_api api "repos/hatai/Pelway/issues/1/comments" -X POST
+qa_reject qa_rejects_git git push
+qa_reject qa_rejects_label pr edit 1 --add-label automerge
+qa_reject qa_rejects_approve pr review 1 --approve
+qa_reject qa_rejects_issue_edit issue edit 1 --title x
+qa_reject qa_rejects_pr_merge pr merge 1
+qa_reject qa_rejects_issue_comment issue comment 1 --body-file "$ROOT/qa-body.md"
+qa_reject qa_rejects_bad_number comment abc --body-file "$ROOT/qa-body.md"
+qa_reject qa_rejects_bad_flag comment 1 --body "$ROOT/qa-body.md"
+qa_reject qa_rejects_no_body_file comment 1 --body-file
+qa_reject qa_rejects_extra_arg comment 1 --body-file "$ROOT/qa-body.md" --silent
+qa_reject qa_rejects_body_file_missing comment 1 --body-file "$ROOT/nonexistent.md"
+
+# PELWAY_AGENT_FNOX_CONFIG 未設定の qa は、既定値（dev/review 用の設定）に落ちず終了コード 3 で拒否する
+export CALL_LOG="$ROOT/qa_missing_config.log"
+rm -f "$CALL_LOG" "$CALL_LOG.fnox-args" "$CALL_LOG.token-args"
+OUT="$(env -u PELWAY_AGENT_FNOX_CONFIG bash "$SCRIPT" qa comment 1 --body-file "$ROOT/qa-body.md" 2>&1)"
+RC=$?
+[[ "$RC" == 3 ]] || failures+=("qa_missing_config: exit $RC, want 3")
+expect_no_calls qa_missing_config
+[[ "$OUT" == *PELWAY_AGENT_FNOX_CONFIG* ]] || failures+=("qa_missing_config: no guidance")
+
+# qa の引数にも \uXXXX ガードが効く（終了コード 5。ガードは役割の判定より前に走る）
+run unicode_guard_qa qa comment 1 --body-file 'x\u3042'
+[[ "$RC" == 5 ]] || failures+=("unicode_guard_qa: exit $RC, want 5")
+expect_no_calls unicode_guard_qa
 
 if ((${#failures[@]})); then
   printf 'FAIL %s\n' "${failures[@]}"

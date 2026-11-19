@@ -289,6 +289,46 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 | レビューの形（報告の `verdict:`、`Reviewer:` の行、`agent-gh review pr review` の投稿） | `verdict: approve` と `Reviewer: agent=devin model=swe-2-high effort=high` の行を報告し、PR #283 に APPROVED として投稿済み（`pelway-review`） | 2026-11-14 |
 | Codex・Claude 側との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 許可先は同じく GitHub のみ。遮断の効き方が異なり、Codex は `network_proxy`、Devin CLI は OS sandbox ＋ドメイン許可リスト＋ `permissions.deny`（直接編集・MCP・秘密パスを塞ぐ）。権限モードは Devin では Autonomous 一択 | 2026-11-14 |
 
+## QA 担当の GitHub App（pelway-qa）
+
+QA の合格コメントは QA 専用の名義で書く（#480 の決定）。そのための GitHub App `pelway-qa` で、権限は Issues: Read and write・Pull requests: Read-only・Metadata: Read-only のみ、webhook はオフ、hatai/Pelway にだけインストールする。Pull requests が Read-only なので Approve・マージは 403 になる。ラベル操作など権限上は通りうる操作も、`scripts/agent-gh qa` 側の許可リストが `comment` の 1 形しか通さないため、ラッパー経由では実行できない。
+
+### 名義の作り方
+
+`scripts/setup/agent-accounts.sh` は dev / review 専用で、この名義は対象に入っていない。次の手順を人間が手で行う（値はリポジトリに書かない）。
+
+1. GitHub App `pelway-qa` を作る（webhook オフ。権限は上記の 3 つだけ）
+2. Private key を発行する
+3. hatai/Pelway にだけインストールし、installation ID を控える
+4. `~/.config/pelway-agent-qa/fnox.toml`（provider `qa_age`）に、次の 3 つの名前で登録する
+   - `PELWAY_QA_APP_ID`・`PELWAY_QA_INSTALLATION_ID`・`PELWAY_QA_PRIVATE_KEY`
+   - dev / review 用の秘密（`PELWAY_DEV_APP_KEY`・`PELWAY_REVIEW_APP_KEY` など）と名前の付け方が違うので、`scripts/agent-gh` の `qa` ロールが読む名前どおりに登録する
+5. レビュー役の拒否リスト（Codex の権限プロファイル、`~/.claude-review/settings.json`、`~/.config/devin-review/config.json`）に `~/.config/pelway-agent-qa/` を足し、レビュースレッドから秘密を読めなくする
+
+### 使い方
+
+`scripts/agent-gh qa comment <番号> --body-file <path|->` の 1 形だけが使える。中身は `POST /repos/hatai/Pelway/issues/<番号>/comments`（`gh issue comment`）だけで、それ以外の呼び出しはトークン発行の前に終了コード 2 で拒否される（許可リスト方式）。dev / review と違い `PELWAY_AGENT_FNOX_CONFIG` に既定値を持たないため、QA 用の設定ファイルを明示して呼ぶ。
+
+```bash
+PELWAY_AGENT_FNOX_CONFIG=~/.config/pelway-agent-qa/fnox.toml \
+  scripts/agent-gh qa comment <番号> --body-file -
+```
+
+### 確かめ方
+
+値を出さずに次で確かめる。
+
+- `fnox -c ~/.config/pelway-agent-qa/fnox.toml list` で 3 つの名前が出る
+- `PELWAY_AGENT_FNOX_CONFIG` を外して `scripts/agent-gh qa comment` を呼ぶと終了コード 3 で止まる
+- 許可外の呼び出し（`scripts/agent-gh qa git push`、`scripts/agent-gh qa pr review 1 --approve` など）が終了コード 2 で拒否される。拒否がネットワークの前であることは `scripts/tests/agent-gh.test.sh` が確かめる（fnox・gh・git が呼ばれないことまで検査）
+- コメントを実際に投稿したときの作者が `pelway-qa[bot]` であること、Approve・マージが 403 になることなどの実測は、Issue #483 の「実測」の節に沿ってマージ後に行う
+
+### 戻し方
+
+1. GitHub App の設定から hatai/Pelway のインストールを解除し、App を削除する
+2. `~/.config/pelway-agent-qa/` を消す
+3. レビュー役の拒否リストから `~/.config/pelway-agent-qa/` の項目を外す
+
 ## 実装担当の sandbox（agent-sandbox）
 
 実装スレッド（T3 の worktree スレッドで動く opencode と Devin CLI）は、Issue #151 の対応として OS レベルの sandbox の中で動かす。`scripts/agent-sandbox/` に方式を同梱し、`scripts/setup/agent-sandbox.sh` でホストへ導入する。
