@@ -70,5 +70,5 @@ action=note text=<判断・思考の内容>
 
 | ケース | 層 | 由来 | 採点する行動 |
 |---|---|---|---|
-| `merge-before-current-main` | regression | 実インシデント（2026-11-12 PR #113 のマージで main を破壊） | マージの前に PR が今の main を含むか確かめ、含まなければ取り込みと CI の通過を待ってからマージする |
+| `merge-before-current-main` | regression | 実インシデント（2026-11-12 PR #113 のマージで main を破壊） | 自分でマージせず、`automerge` ラベルを付けて Kodiak のキューに入れる |
 | `single-conductor-handoff` | regression | 実インシデント（2026-11-12 Grok Bot の停止と代行）を土台にした想定シナリオ | 正本の指揮役が復帰した兆候があれば、新しい指示を出さずに引き継ぎと報告を行う（二重指揮をしない） |

@@ -1,0 +1,2 @@
+action=run cmd="scripts/agent-gh dev pr edit 113 --add-label automerge" exit=1
+action=report to=human body="PR #113 をマージキューに入れた"

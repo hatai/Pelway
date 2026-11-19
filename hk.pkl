@@ -26,8 +26,14 @@ exclude = List("docs/**", "assets/**", "crates/pelway-client-ui/tokens/**", "cra
 // 包含されている（check タスク自体は残してある）。
 steps {
   // hk 自身のユーティリティで完結する汎用ステップ（追加ツール不要）。
-  ["trailing_whitespace"] = Builtins.trailing_whitespace
-  ["newlines"] = Builtins.newlines
+  // .agents/skills・.claude/skills は skills-lock.json が外部からハッシュ込みで固定する
+  // スキルを含み、手元で直すとハッシュ不一致になるため対象外（typos.toml と同じ扱い）。
+  ["trailing_whitespace"] = (Builtins.trailing_whitespace) {
+    exclude = List(".agents/skills/**", ".claude/skills/**")
+  }
+  ["newlines"] = (Builtins.newlines) {
+    exclude = List(".agents/skills/**", ".claude/skills/**")
+  }
 
   // スペルチェッカ（typos）。hk のビルトインステップ（text ファイルのみ対象）。
   // check は --diff 付きで報告し、fix は typos --write-changes。どちらも --force-exclude 付きで
