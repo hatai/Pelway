@@ -113,7 +113,7 @@ Reviewed: <headRefOid>
 ## nit
 - <file>:<line> <提案>
 
-（security-review を行ったときだけ、ここに skill security-review の「5. 投稿に書く」の `## security-review` 節をその形のまま入れる）
+（security-review を行ったときだけ、ここに skill security-review の「投稿に書く」の手順の `## security-review` 節をその形のまま入れる）
 
 ## 検査（PR のチェック）
 - mise run verify: pass | fail
