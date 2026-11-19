@@ -150,13 +150,24 @@ jobs:
             exit 0
           fi
           duplicate=false
-          while IFS= read -r run_id; do
+          # 再実行（rerun）は同じ run id の新しい attempt で走る。status=completed の
+          # 一覧には実行中の自分は載らず id でも除いているため、自分だけ別に
+          # filter=all（全 attempt の job）で調べる。過去 attempt の Send notification
+          # が成功していれば送信済み。現在 attempt の Send step は未実行なので
+          # conclusion が null で数えられない。
+          sent_own="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=all&per_page=100" 2>/dev/null \
+            | jq '[.jobs[].steps[] | select(.name == "Send notification" and .conclusion == "success")] | length')" || sent_own=0
+          if [ "${sent_own:-0}" -gt 0 ]; then
+            duplicate=true
+          fi
+          while IFS= read -r run_id && [ "$duplicate" = false ]; do
             [ -n "$run_id" ] || continue
-            sent="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" 2>/dev/null \
+            # 候補 run も filter=all にする。再実行済みの run では最新 attempt が
+            # dedup で send を skip していても、過去 attempt の送信で判定するため。
+            sent="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?filter=all&per_page=100" 2>/dev/null \
               | jq '[.jobs[].steps[] | select(.name == "Send notification" and .conclusion == "success")] | length')" || sent=0
             if [ "${sent:-0}" -gt 0 ]; then
               duplicate=true
-              break
             fi
           done <<<"$runs"
           echo "duplicate=$duplicate" >> "$GITHUB_OUTPUT"
