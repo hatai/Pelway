@@ -49,13 +49,17 @@ scripts/agent-gh review pr view <N> --json files --jq '.files[].path'
 
 PR で変わっていないファイルは worktree（main）の版を読めばよい。
 
+指摘は head の版のファイルについて書く。指摘を書く前に、引く文言と挙動が `headRefOid` の版の該当行に今あることを、その版の本文で確かめる。差分の `-` 行は消えた記述であり、head には残っていない（消したこと自体が問題のときは、消えたことを指摘する。書き方は手順 4）。シェルやコマンドの挙動を根拠に must-fix にするときは、入力の形（複数行か、どの行に何が来るか）まで当てはめて、本当にその結果になるかを確かめる。確かめた結果、指摘の前提が成り立たなければ、その指摘は書かない。この確認の対象は、読めば確かめられる事実（文言があるか、コードやコマンドがどう動くか）であり、起こりうる攻撃や運用の前提に立つ指摘は、確認しきれないことを理由に格下げしない。
+
+検証・実測の報告（実測の記録や調査報告などで、結論を出している文書）を含む PR では、結論が実測した範囲に収まっているかを読む。実測した条件（環境、データの形、前提にした運用）を外れた場合まで「満たす」「保証する」と断定しているときは、確かめた事実と未検証の仮説を分けるよう求める。受け入れ条件の結論を左右する断定なら must-fix、左右しない書きぶりの問題なら nit とする。
+
 PR のチェックの結果を読む。待たない（Grok Bot はチェックが終わってからレビューを頼む）。
 
 ```bash
-scripts/agent-gh review pr checks <N> --required --json name,bucket
+scripts/agent-gh review pr checks <N> --json name,bucket
 ```
 
-`mise run verify` と `pr-size` の `bucket` が `pass` なら pass、`fail` なら fail。pr-size が fail のときは、PR のラベルを読む（`scripts/agent-gh review pr view <N> --json labels --jq '.labels[].name'`）。`pr-size-exception` があり、かつ PR が閉じる Issue のコメントに、行頭が `<!-- pr-size-exception -->` で始まり、作成者（`author.login`）が `hatai` のコメントがある（`scripts/agent-gh review issue view <Issue 番号> --json comments --jq '.comments[].body'`）ときだけ、must-fix に数えず、本文の検査の欄に `pr-size: fail（pr-size-exception）` と書く。どちらかが欠けていれば、通常どおり must-fix に数える。どちらかが `pending` か、見つからないときは、レビューを投稿せずに `verdict: failed`、`error: checks pending` で報告する。
+`--required` は付けない。必須チェックがまだ 1 つも報告されていない head では、`--required` は一覧を返さず `no required checks reported` で失敗するため。返った一覧から、名前が `mise run verify` と `pr-size` の行だけを使う。同じ名前の行が複数あるときは、すべてが `pass` のときだけ pass とし、どれかが `fail` なら fail、どれかが `pending` なら pending とする。`mise run verify` と `pr-size` の `bucket` が `pass` なら pass、`fail` なら fail。pr-size が fail のときは、PR のラベルを読む（`scripts/agent-gh review pr view <N> --json labels --jq '.labels[].name'`）。`pr-size-exception` があり、かつ PR が閉じる Issue のコメントに、行頭が `<!-- pr-size-exception -->` で始まり、作成者（`author.login`）が `hatai` のコメントがある（`scripts/agent-gh review issue view <Issue 番号> --json comments --jq '.comments[].body'`）ときだけ、must-fix に数えず、本文の検査の欄に `pr-size: fail（pr-size-exception）` と書く。どちらかが欠けていれば、通常どおり must-fix に数える。どちらかが `pending` か、見つからないときは、レビューを投稿せずに `verdict: failed`、`error: checks pending` で報告する。
 
 実装者メモ・調査報告などの成果物に「使ったスキル」の記録があれば、記録されたスキル（輸入スキル `tdd`・`diagnosing-bugs` など）が作業内容に反映されているかを抜き取りで確かめる。記録と実態が明らかに食い違うときは must-fix、判断が分かれるものは nit とする。輸入スキルの取り込み discipline（同梱スクリプトは実行しない、`agents/` のメタデータは使わない、採用していないスキルへの参照は無効、輸入品の本文より正本と適用ルールが優先）は役割スキルと `docs/agents/external-skills.md` に定める。
 
@@ -66,11 +70,12 @@ scripts/agent-gh review pr checks <N> --required --json name,bucket
 - 認証・認可、トークン・鍵・暗号、sandbox・egress・gateway、テナント分離、監査に触れている
 - 指示の `Assigned:` の行に `security=yes` がある（指揮役のスレッド指示でも、実装担当のレビュー委託（`delegate_task`）の指示でも）
 
+
 ### 3. 指摘を 2 種類に分ける
 
 | 種類 | 当てはまるもの |
 |---|---|
-| must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / verify が失敗 / pr-size が失敗（PR に `pr-size-exception` ラベルが付いていれば数えない） / 正しさ・セキュリティの欠陥 / ブランチが `agent/` で始まるのに PR の作成者（`author.login`）が `app/pelway-dev` でない |
+| must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / 検証・実測の報告の結論が、実測した範囲を超えて受け入れ条件を満たすと断定している / verify が失敗 / pr-size が失敗（PR に `pr-size-exception` ラベルが付いていれば数えない） / 正しさ・セキュリティの欠陥 / ブランチが `agent/` で始まるのに PR の作成者（`author.login`）が `app/pelway-dev` でない |
 | nit | 上に当てはまらない改善案 |
 
 ### 4. 投稿する
@@ -97,6 +102,8 @@ Reviewer: agent=<codex|claude|devin> model=<モデル名> effort=<effort>
 ```
 
 must-fix がなければ「なし」と書く。
+
+must-fix と nit の各行は `<file>:<line>` で始める。`<line>` は `headRefOid` の版の行番号で、差分の表示上の位置ではない。委託者は複数のレビュー担当の指摘をこの位置で突き合わせるため、同じ問題は同じ位置を指す。同じ問題が複数の行にあるときは 1 行にまとめ、最初の位置を先頭に書き、ほかの位置は本文に挙げる。特定の行を持たない指摘（verify・pr-size の失敗、PR の作成者の食い違い、受け入れ条件に対応する変更がどこにも無いもの）は、行番号を作らず、`<file>:<line>` の代わりに `(PR)` か、対象のファイルだけ（`<file>`）を書く。消したこと自体が問題の指摘（検査・制限・手順を消した）は、head の版で消えた箇所のすぐ前後に残っている行を `<file>:<line>` に書き、本文で何が消えたかを差分の `-` 行から引く。ファイルごと消えたときは `<file>` だけを書く。
 
 最後の `Reviewer:` の行は必ず書く。値は、指示の 2 行目 `Assigned: role=review agent=... model=... effort=...` から写す（`role=review` を除いた残りを、順番も表記も変えずに書く）。指示は、指揮役のスレッド指示（指揮役自身の PR・外部投入）か、実装担当のレビュー委託（`delegate_task`）の指示のどちらかである。指示に `Assigned:` の行が無いときは、`Reviewer: agent=<codex|claude|devin> model=unknown effort=unknown` と書く。改善ループが集計するので、自由文にしない。
 
