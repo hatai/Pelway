@@ -59,3 +59,15 @@
 5. 改善案: `.agents/skills/review-pr/SKILL.md` に他の信頼できるコメント（目印コメント・委託記録）と同じ「作成者の確認」の共通規則を 1 つにまとめる節を足す（重複記述の削減。別 Issue が適切）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 6）
+
+対象 head: 144316e04d5500650fe2d83be86006f670d85457
+
+1. 詰まった箇所: `.agents/skills/review-pr/SKILL.md` の手順 3: round 5 で「作成者が PR の作成者と一致する」と書いたが、GitHub API の応答では PR の `author.login` が `app/pelway-dev`、コメントの `author.login` が `pelway-dev` と表記が揺れ、完全一致が成立しなかった（レビュー指摘のとおり）。
+2. 曖昧だった文: 「実装担当 App のコメントを識別できる条件に直し、第三者コメントは引き続き除外してください。」（round 5 レビューの must-fix の指示文）
+3. 仮定と解釈: 「識別できる条件」を、実装担当 App の login の3 表記（`pelway-dev`・`pelway-dev[bot]`・`app/pelway-dev`）の列挙による一致とした。選ばなかった解釈: 接頭辞 `app/` を除いた比較や `[bot]` 接尾辞の正規化を指示に書く方法（レビュー担当が毎回正規化を計算することになり、列挙の方が判定が単純で第三者の除外も明確なため）。列挙が「実装担当 App の表記」であることを文内で宣言し、将来 表記が増えた場合はこの列挙を直す運用とした。
+4. 足りなかった情報・検証手段: GitHub API の bot の login 表記の網羅（GraphQL と REST で異なる場合がある）。この PR での実測（PR=`app/pelway-dev`、コメント=`pelway-dev`）に `pelway-dev[bot]`（REST の標準形）を足した 3 表記で受け入れる形にしたが、網羅性の保証は GitHub の仕様変更まで追えない。
+5. 改善案: `docs/agents/notify-payloads.md` など GitHub の webhook/API の表記の実際を記録する場所に bot の login 表記の一覧を残す（別 Issue が適切）。
+
+使ったスキル: implement-issue
