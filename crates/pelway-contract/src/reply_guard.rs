@@ -162,19 +162,23 @@ fn leak_pattern(body: &str) -> Option<ReplyGuardPattern> {
     None
 }
 
-/// `Bearer` + 空白 + 長いトークン文字の並び。
+/// `Bearer` + 空白 1 個以上 + 長いトークン文字の並び（空白が無い識別子の一部
+/// （JwtBearerDefaults 等）は資格情報としない）。
 fn has_bearer_token(body: &str) -> bool {
     let mut rest = body;
     while let Some(at) = rest.find("Bearer") {
         let after = &rest[at + "Bearer".len()..];
-        let token = after.trim_start_matches([' ', '\t']);
-        let len = token
-            .chars()
-            .take_while(|c| {
-                c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '~' | '+' | '/' | '-')
-            })
-            .count();
-        if len >= thresholds::CREDENTIAL_TOKEN_MIN_CHARS {
+        let token = after
+            .strip_prefix([' ', '\t'])
+            .map(|t| t.trim_start_matches([' ', '\t']));
+        if token.is_some_and(|t| {
+            t.chars()
+                .take_while(|c| {
+                    c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '~' | '+' | '/' | '-')
+                })
+                .count()
+                >= thresholds::CREDENTIAL_TOKEN_MIN_CHARS
+        }) {
             return true;
         }
         rest = after;
@@ -224,9 +228,9 @@ fn has_private_key_header(body: &str) -> bool {
 
 /// curl・wget の実行スクリプトの行。コマンド位置にある語の後に URL か長いフラグ
 /// がある行を検出する（無ければ言及として通す）。行末の `\` による行継続は
-/// 次の行とつないだ論理行で判定する（貼り付けのふつうの形）。
+/// 次の行とつないだ論理行でも判定する（物理行のコマンド位置を失わない）。
 fn has_execution_script(body: &str) -> bool {
-    logical_lines(body).iter().any(|line| {
+    let line_has_script = |line: &str| {
         ["curl", "wget"].iter().any(|word| {
             command_word_at(line, word).is_some_and(|args| {
                 args.contains("http://")
@@ -235,7 +239,8 @@ fn has_execution_script(body: &str) -> bool {
                     || args.contains("--header")
             })
         })
-    })
+    };
+    body.lines().any(&line_has_script) || logical_lines(body).iter().any(|l| line_has_script(l))
 }
 
 /// 行末の `\` を次の行との連結とした論理行の一覧。
@@ -536,6 +541,14 @@ mod tests {
             ReplyGuardPattern::CredentialShape
         );
         is_allowed(&format!("参考値: Bearer {} です", token_of(19)), &strict());
+        // Bearer の直後に空白が無い識別子は資格情報としない（空白 1 個以上を必須にする）。
+        for body in [
+            "JwtBearerDefaults.AuthenticationScheme を設定しました",
+            "BearerTokenAuthenticationFilter を登録しました",
+            "BearerTokenCredentialPolicy です",
+        ] {
+            is_allowed(body, &strict());
+        }
     }
 
     #[test]
@@ -604,6 +617,7 @@ mod tests {
             "sudo curl を使って http://127.0.0.1:8080/x を叩きます",
             "curl -X POST \\\n  -d '{\"q\":1}' \\\n  http://127.0.0.1:8080/v1/jobs",
             "次を実行します curl -s \\\n  http://127.0.0.1:8080/v1/jobs \\",
+            "DEBUG=1 \\\ncurl \"http://127.0.0.1:8080/v1/jobs\"",
         ] {
             assert_eq!(blocks(body), ReplyGuardPattern::ExecutionScript, "{body}");
         }
