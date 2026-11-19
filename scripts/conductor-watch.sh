@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # 指揮役の見張り: T3 スレッドの状態の変化と、agent/ ブランチの PR の変化を 1 行ずつ標準出力に出す。
 # 巡回のたびに、巡回状態の補助記録（対象ごとの誰待ちか・待ち始めた時刻・次の担当・次回確認時刻・最終更新時刻）を
-# $XDG_STATE_HOME/pelway/patrol-state.json に更新する。正本は GitHub Issues／Projects で、
+# 共有 git dir（--git-common-dir）内の pelway/patrol-state.json に更新する。正本は GitHub Issues／Projects で、
 # 記録と GitHub の実状態が食い違うときは GitHub を正として記録を直す（runbook の「巡回状態の補助記録」）。
-# 状態は $XDG_STATE_HOME/pelway/conductor-watch/ に置く（セッションの一時フォルダに置かない）。
+# 見張り自身の状態は $XDG_STATE_HOME/pelway/conductor-watch/ に置く（セッションの一時フォルダに置かない）。
 # 巡回のたびに、ボード Status 更新の書き込みキュー（$PELWAY_BOARD_QUEUE_DIR、既定
 # /tmp/pelway-board-queue）の *.json を処理する。キューの形式と結果の見方は
 # runbook の「ボード Status 更新キュー」。実行するのは gh project の読み取り
@@ -11,12 +11,30 @@
 # （エージェント環境から人間名義 gh は使えないため、ホスト側のこの常駐で処理する）。
 # 使い方: scripts/conductor-watch-ensure.sh で起動する（冪等の起動入口。止めるまで 30 秒ごとに見る）
 D="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch"; mkdir -p "$D"
-P="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/patrol-state.json"
 Q="${PELWAY_BOARD_QUEUE_DIR:-/tmp/pelway-board-queue}"; mkdir -p "$Q"
 # 一覧の 1 回の取得上限。件数が上限に達した巡回は打ち切りの可能性があるため、
 # python 側で巡回状態を更新しない（窓外の対象を消したり誤判定したりしない）。
 IL=1000; PL=1000
 cd "$(dirname "$0")/.." || exit 1
+# 巡回状態の補助記録（patrol-state.json）の置き場は、リポジトリの共有 git dir
+# （git rev-parse --git-common-dir）内の pelway/。worktree の sandbox 内の指揮役は
+# 共有 git dir には書き込めるが ~/.local/state には書けないため（Issue #477）、
+# git の管理対象外のこの場所を主 checkout・worktree・指揮役で共有する。
+# PELWAY_PATROL_STATE で差し替えられる（テスト用）。
+P="${PELWAY_PATROL_STATE:-}"
+if [[ -z "$P" ]]; then
+  common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    || { echo "conductor-watch.sh: git common dir を解決できません" >&2; exit 1; }
+  P="$common/pelway/patrol-state.json"
+fi
+mkdir -p "$(dirname "$P")"
+# 旧置き場（$XDG_STATE_HOME/pelway/patrol-state.json）が残っていて新置き場が無いときは、
+# 中身をそのまま引き継ぐ（1 回きりの移行。sandbox 内の指揮役は旧置き場に書けない）。
+P_OLD="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/patrol-state.json"
+if [[ "$P" != "$P_OLD" && ! -f "$P" && -f "$P_OLD" ]]; then
+  cp "$P_OLD" "$P" || { echo "conductor-watch.sh: patrol-state の移行に失敗しました" >&2; exit 1; }
+  echo "PATROL-STATE migrated $P_OLD -> $P" >&2
+fi
 # t3 CLI の解決: 実行中の T3 サーバー（~/.t3/wsl-runtime 配下のバイナリ）と同じ実行ファイルを
 # 優先する。PATH の t3（~/.local/bin/t3 など）は版番号が同じでも、サーバーが所有する
 # ~/.t3/userdata へのアクセスが ServerOwnsDatabaseError で拒否されることがある（ビルド差）。
