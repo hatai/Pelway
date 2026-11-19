@@ -11,9 +11,14 @@ name: notify-grokbot
 
 on:
   # Grok Bot が動く必要のあるイベントだけ（docs/superpowers/specs/agent-team.md「GitHub からの通知」）。
-  # エージェントのスレッドの状態は見張り役 agent-watch が別に送るので、PR の作成や push はここでは送らない。
+  # エージェントのスレッドの状態は見張り役 agent-watch が別に送る。
   pull_request:
+    # PR の作成（opened / ready_for_review）と push（synchronize）は、
+    # 見張りを平日 12 時・18 時に減らした分を通知で補うため送る（#481）。
     types:
+      - opened
+      - ready_for_review
+      - synchronize
       - closed
   pull_request_review:
     types:
