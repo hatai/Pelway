@@ -47,3 +47,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の止まり方に「停止で終わった round もラウンドサマリーを投稿して終える」を 1 行足す（別 Issue として起票するのが適切）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: 0ec3667de36f7219c7fa29b5b3f21207d46d2eb9
+
+1. 詰まった箇所: `.agents/skills/review-pr/SKILL.md` の手順 3: round 4 でラウンドサマリーを正としたが、投稿者の検証が無く、第三者が大きな `<R>` を投稿するとラウンドを水増しできた（レビュー指摘・security-review HIGH のとおり）。round 4 の must-fix 残存で停止後、hatai の例外許可（2026-11-19 18:54 JST・PR コメント記録）で round 5 としてこの修正を行った。
+2. 曖昧だった文: 「ラウンドサマリーの投稿者を許可された実装担当に限定して検証する手順を加えてください。」（round 4 レビューの must-fix の指示文）
+3. 仮定と解釈: 「許可された実装担当」を PR の作成者（実装担当の App `pelway-dev`）と同一の `author.login` と定義した。ラウンドサマリーは skill implement-issue の手順 9 に従い実装担当が投稿するものであり、PR 作成者と一致することが正しい投稿者の機械的な判定条件になるため。第三者のコメントは無視する旨と、その理由（ラウンド水増しからの must-fix 回避の入り口を塞ぐ）を併記した。
+4. 足りなかった情報・検証手段: PR の作成者とコメントの作成者の `author.login` の表記ゆれ（`app/pelway-dev`・`pelway-dev[bot]` 等）を SKU 内の記述で吸収できるか。実際の API 応答では comments は `pelway-dev`、PR の author は `app/pelway-dev` と返るため、「PR の作成者と一致する」という比較基準の書き方にした（特定の表記をLiteral に書かない）。
+5. 改善案: `.agents/skills/review-pr/SKILL.md` に他の信頼できるコメント（目印コメント・委託記録）と同じ「作成者の確認」の共通規則を 1 つにまとめる節を足す（重複記述の削減。別 Issue が適切）。
+
+使ったスキル: implement-issue
