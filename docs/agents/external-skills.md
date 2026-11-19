@@ -9,7 +9,7 @@
   - `skills@1.8.x` は `skills-lock.json` を `version: 2` に書き換え、既存全エントリの `computedHash` を再計算する。version 1 の形式を保つため `1.7.6` を使う。
 - `skills-lock.json` のハッシュは取り込んだ内容の記録であり、取得元を固定する仕組みではない。版の指定がある取り込みでは、取り込み後に取得内容を指定された版（上流コミット）と突き合わせ、差分があれば止めて再照合する。
 - 取り込んだ後は `diff -r .agents/skills .claude/skills` が空であることを確かめる。
-- `actionbook/rust-skills`（38 スキル）と `penpot/penpot-ai-kit`（13 スキル）の取り込みの記録は `skills-lock.json` のみにある。上流コミットや適用ルールの記録はこの文書の対象外。
+- `actionbook/rust-skills`（38 スキル）と `penpot/penpot-ai-kit`（13 スキル）の取り込みの記録は `skills-lock.json` のみにある。上流コミットの記録はこの文書の対象外。役割スキルから参照するものの適用ルールの置き場所は「役割スキルから参照する外部スキル」に書く。
 
 ## 取り込みの discipline
 
@@ -19,6 +19,19 @@
 - 輸入品の本文と正本（AGENTS.md・docs/・役割スキル）・適用ルールが衝突した場合は、正本と適用ルールが優先する。
 - 自律スレッドは輸入スキルを名前の解決に任せず、役割スキルを入口として repo 内の明示したパスで読む。人間側の同名のユーザーレベル版はチームのスレッドでは読まない。
 - 輸入品のファイル自体は書き換えない（`skills-lock.json` が管理するスキルには同梱ヘルパーも足せない。docs/agents/skill-helpers.md）。適用ルールはローカル管理の役割スキルに置く。
+
+## 役割スキルから参照する外部スキル
+
+役割スキルが本文から参照するスキルのうち、mattpocock/skills 以外のもの（取り込み品と、ほかの役割スキルから一部を借りるローカル管理のスキル）。適用ルール（読む部分、読む条件、取り込みの discipline への上乗せ）は役割スキル側に置き、ここには置き場所だけを書く。
+
+| スキル | 取得元（`skills-lock.json` の source） | 適用ルールの置き場所 |
+|---|---|---|
+| `security-review` | ローカル管理 | `.agents/skills/investigate-bug/SKILL.md` の手順 4（脆弱性の疑いの見分けに使う部分） |
+| `rust-testing` | `full-stack-skills/rust-skills` | `.agents/skills/investigate-bug/SKILL.md` の手順 3 と「外部スキルの使い方」 |
+| `slint` | `slint-ui/ai-plugins` | 同上 |
+| `m07-concurrency` | `actionbook/rust-skills` | 同上 |
+| `supabase-postgres-best-practices` | `supabase/agent-skills` | 同上 |
+| `sqlx-postgres` | `Daiki48/dotfiles` | 同上 |
 
 ## mattpocock/skills（MIT）
 
