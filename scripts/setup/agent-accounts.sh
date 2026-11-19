@@ -220,6 +220,15 @@ fnox_set() {
   printf '  %s✓ saved%s %s → %s\n' "$GREEN" "$RESET" "$3" "$1"
 }
 
+# PELWAY_REVIEW_* の 3 項目（APP_ID・APP_INSTALLATION_ID・APP_KEY）が <config> にすべて揃っていれば 0 を返す。
+# 中断→再実行で一部だけ保存された状態を完了扱いにしない（揃わないと agent-gh review がトークンを発行できないため）。
+review_secrets_complete() {
+  local name
+  for name in PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW_APP_KEY; do
+    fnox -c "$1" get "$name" >/dev/null 2>&1 || return 1
+  done
+}
+
 # App の作成・秘密鍵の保存・インストールを 3 段階で案内する。
 # app_stages <名前> <fnox の接頭辞> <役割の説明> <権限の説明> <保存先の fnox 設定> <provider 名>
 app_stages() {
@@ -352,29 +361,29 @@ pause
 # 逆順にすると、app_stages で新しく入力して保存した値を、後から移す旧設定の値で上書きしてしまう。
 review_ready=no
 stage "旧設定に残った review 秘密を移す（既存環境だけ）"
-say "旧設定 ($CFG) に PELWAY_REVIEW_* があるときだけ、値を表示せずに $REVIEW_CFG へ移す（登録と削除をまとめて行う）。"
-if fnox -c "$CFG" get PELWAY_REVIEW_APP_ID >/dev/null 2>&1; then
-  for secret_name in PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW_APP_KEY; do
-    fnox -c "$CFG" get "$secret_name" | fnox_set "$REVIEW_CFG" review_age "$secret_name"
-  done
-  for secret_name in PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW_APP_KEY; do
-    fnox -c "$CFG" remove "$secret_name" >/dev/null
-    printf '  %s✓ removed%s %s ← %s\n' "$GREEN" "$RESET" "$secret_name" "$CFG"
-  done
-  note "PR #462 のマージ前に既存環境を移行するときは、docs/dev-environment.md の番号付きの手順を使う（旧設定からの削除はマージ後）"
+say "旧設定 ($CFG) に PELWAY_REVIEW_* のいずれかがあるとき、値を表示せずに $REVIEW_CFG へ移す（登録と削除をまとめて行う）。"
+moved=no
+for secret_name in PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW_APP_KEY; do
+  fnox -c "$CFG" get "$secret_name" >/dev/null 2>&1 || continue
+  fnox -c "$CFG" get "$secret_name" | fnox_set "$REVIEW_CFG" review_age "$secret_name"
+  fnox -c "$CFG" remove "$secret_name" >/dev/null
+  printf '  %s✓ moved%s %s: %s → %s\n' "$GREEN" "$RESET" "$secret_name" "$CFG" "$REVIEW_CFG"
+  moved=yes
+done
+[[ "$moved" == yes ]] && note "PR #462 のマージ前に既存環境を移行するときは、docs/dev-environment.md の番号付きの手順を使う（旧設定からの削除はマージ後）"
+# 完了判定は 3 項目すべてが $REVIEW_CFG に揃ったときだけ。一部だけ揃った状態は次の段階で再入力する。
+if review_secrets_complete "$REVIEW_CFG"; then
   review_ready=yes
-elif fnox -c "$REVIEW_CFG" get PELWAY_REVIEW_APP_ID >/dev/null 2>&1; then
-  note "旧設定に PELWAY_REVIEW_APP_ID は無く、$REVIEW_CFG に既にある（移行済みか新規作成済み）"
-  review_ready=yes
+  note "$REVIEW_CFG に PELWAY_REVIEW_* の 3 項目が揃っている"
 else
-  note "旧設定にも $REVIEW_CFG にも PELWAY_REVIEW_APP_ID は無い（新規セットアップ）"
+  note "$REVIEW_CFG に PELWAY_REVIEW_* の一部（または全部）が無い。次の段階で入力する"
 fi
 pause
 
-# 移行済み・作成済みなら pelway-review の App 情報の再入力（app_stages）は行わない。
+# 3 項目揃っているときだけ pelway-review の App 情報の再入力（app_stages）を飛ばす。
 if [[ "$review_ready" == yes ]]; then
   stage "pelway-review の App 情報の再入力は不要"
-  say "$REVIEW_CFG に PELWAY_REVIEW_* が揃っているため、GitHub App の作成・秘密鍵・インストールの各段階は行わない。"
+  say "$REVIEW_CFG に PELWAY_REVIEW_* の 3 項目（APP_ID・APP_KEY・APP_INSTALLATION_ID）が揃っているため、GitHub App の作成・秘密鍵・インストールの各段階は行わない。"
   pause
 else
   app_stages "pelway-review" "PELWAY_REVIEW" "レビュー担当のエージェントがレビューを投稿するのに使う" \
