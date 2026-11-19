@@ -396,11 +396,11 @@ rm -f ~/.config/pelway-agent-review/fnox.toml ~/.config/pelway-agent-review/age.
 
 | 項目 | 結果 | 実施日 |
 |---|---|---|
-| devin_review: 4 パスの `test -r`（すべて非 0 か） | 未実施 — `devin_review` は hatai 決定（2026-11-18）により #449 の実測が済むまで使用停止中のため、実測を委託するスレッドを立てられない | — |
-| claude_review: 4 パスの `test -r`（すべて非 0 か） | 未実施 — T3 の起動設定への env の橋渡し（`PELWAY_AGENT_FNOX_CONFIG`）が未投入のため、review 用の fnox 設定を読めずスレッドが動かせない（2026-11-19 の指揮役巡回も、PR #473 の Claude レビューを同じ理由で実施不可と記録） | — |
+| devin_review: 4 パスの `test -r`（すべて非 0 か） | 未実測 — devin_review は停止中のまま（hatai 決定 2026-11-18・#449 の実測が済むまで使用停止。実測を委託するスレッドを立てられない）。未実測のまま残すことは hatai の決定（2026-11-19 12:58 JST・例外）。実測は #479 で追う | — |
+| claude_review: 4 パスの `test -r`（すべて非 0 か） | 未実測 — claude_review は env の橋渡し（`PELWAY_AGENT_FNOX_CONFIG`）が未導入のため実測できない（review 用の fnox 設定を読めずスレッドが動かない。PR #473 の Claude レビューも同じ理由で実施不可）。実測は #479 で追う | — |
 | codex_review: 4 パスの `test -r`（すべて非 0 か） | 未実施 — 2026-11-19 10:33 JST の codex_review での実測（下記）は環境変数・`fnox list`・`gh extension list`・`/rate_limit`・`codex features list` の 5 項目で、4 パスの `test -r` は含んでいない | — |
-| devin_review: `scripts/agent-gh review api /rate_limit` 成功 | 未実施（上記の停止中と同じ理由） | — |
-| claude_review: `scripts/agent-gh review api /rate_limit` 成功 | 未実施（上記の橋渡し未投入と同じ理由） | — |
+| devin_review: `scripts/agent-gh review api /rate_limit` 成功 | 未実測（上記の devin_review 停止中と同じ理由。実測は #479 で追う） | — |
+| claude_review: `scripts/agent-gh review api /rate_limit` 成功 | 未実測（上記の env の橋渡し未導入と同じ理由。実測は #479 で追う） | — |
 | codex_review: `scripts/agent-gh review api /rate_limit` 成功 | 合格 — exit 0。起動引数変更後の codex_review スレッド（環境変数 `PELWAY_AGENT_FNOX_CONFIG`=set・`FNOX_CONFIG_DIR`=/nonexistent・`GH_CONFIG_DIR`=set）での実測。同じスレッドで `gh extension list` が exit 4・「To get started with GitHub CLI…」の認証なし応答（sandbox にログイン状態が残留しない形）も確認 | 2026-11-19 |
 | review 用設定の `fnox list`（`PELWAY_REVIEW_*` だけか。`PELWAY_DEV_*`・`PELWAY_LLM_API_KEY` が載らないか） | 合格 — `fnox -c "$PELWAY_AGENT_FNOX_CONFIG" list` が exit 0 で、review 用設定には `PELWAY_REVIEW_APP_ID`・`PELWAY_REVIEW_APP_INSTALLATION_ID`・`PELWAY_REVIEW_APP_KEY` の 3 名だけが載る（sandbox 側は `FNOX_CONFIG_DIR`=/nonexistent でグローバル設定も載らない。ホスト側の list には fnox グローバル設定由来の `PELWAY_PENPOT_MCP_TOKEN` が追加で現れるが、review 用設定のファイルには含まれない）。旧設定 `~/.config/pelway-agent/fnox.toml` から `PELWAY_REVIEW_*` は削除済み（`PELWAY_DEV_*`・`PELWAY_DEV_GIT_EMAIL` のみ）で、`PELWAY_DEV_*`・`PELWAY_LLM_API_KEY` は review 用設定に載らない | 2026-11-19 |
 | dev 用と review 用の age 鍵のパス（値は書かない）と、review の sandbox から dev 用の鍵が `test -r` 非 0 | 鍵のパス: dev=`~/.config/fnox/age.txt`・review=`~/.config/pelway-agent-review/age.txt`（別ファイル・両方作成済み）。review の sandbox から dev 用の鍵の `test -r` は未実測（今回の実測 5 項目に含まない） | — |
