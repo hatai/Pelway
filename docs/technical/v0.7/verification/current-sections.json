@@ -88,28 +88,33 @@
       "anchor": "ch06-s02"
     },
     {
-      "heading": "## 配布前の試験条件",
+      "heading": "## 表示名の文字規則",
       "line": 21,
+      "anchor": "ch06-display-name"
+    },
+    {
+      "heading": "## 配布前の試験条件",
+      "line": 38,
       "anchor": "ch06-s03"
     },
     {
       "heading": "## 状態の理由と責任分界の翻訳",
-      "line": 28,
+      "line": 45,
       "anchor": "ch06-s04"
     },
     {
       "heading": "## 取消・削除・サポートの表示契約",
-      "line": 37,
+      "line": 54,
       "anchor": "ch06-s05"
     },
     {
       "heading": "## 状況文言の安定ID案",
-      "line": 46,
+      "line": 63,
       "anchor": "ch06-notices"
     },
     {
       "heading": "## 情報取扱いの追加表示キー",
-      "line": 60,
+      "line": 77,
       "anchor": "ch06-s06"
     }
   ],
