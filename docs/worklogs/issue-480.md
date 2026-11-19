@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/review-pr/SKILL.md` のレビュー本文の形式に「3 回目以降の must-fix には領域分類（セキュリティ領域か、別 Issue に回せるか）を付ける」を足す。ただし本 Issue の変更対象外のため今回は見送り。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 2）
+
+対象 head: 93d1384067603eddd001b554c1fbbb5500b50ac0
+
+1. 詰まった箇所: `.agents/skills/command-team/SKILL.md` の「マージ」節: round 1 で「（例外はこれ以外に広げない）」と書いた直後にキューの切り戻しと `pr-size-exception` を admin マージの対象として列挙し続け、文が自己矛盾していた（レビュー指摘のとおり）。
+2. 曖昧だった文: 「例外（濱田さんが判断する）：round 4 以降の例外 PR、`.github/` の下を変える PR、`fnox.toml` を変える PR。これ以外には広げない。」（Issue #480 本文の「A. マージの運用」2）
+3. 仮定と解釈: 切り戻し・`pr-size-exception` は admin マージの技術的なフォールバックで A2 の「例外」とは別枠と書き分ける解釈もあったが、レビューの must-fix（A2 に列挙した例外だけにする）に従い、admin マージの対象を A2 の 3 つだけに統一した。切り戻し・`pr-size-exception` の PR は「例外には加えず、hatai が 3 つのどれかに該当すると判断したときだけ admin マージされる」とした。選ばなかった解釈: フォールバックを例外と別カテゴリとして並列に書く（must-fix の指摘する「広がり」が残るため不採用）。pr-size-exception の運用（L60「マージしてよい」）は今回の対象外のため、hatai の例外判断を経る形で両立させた。
+4. 足りなかった情報・検証手段: `pr-size-exception` ラベル付き PR が A2 厳格適用のもとで従来どおりマージまで至るか（hatai の例外判断を毎回経る運用で良いか）は、Issue 本文に明示が無く、運用で確認するしかない。
+5. 改善案: `docs/superpowers/specs/agent-team.md` の「制約」に「`pr-size-exception` と A2 の例外の関係（hatai の例外判断を経由してマージする）」を 1 文で足す、または次回の運用見直し Issue で pr-size 例外のあり方を問い直す。
+
+使ったスキル: implement-issue
