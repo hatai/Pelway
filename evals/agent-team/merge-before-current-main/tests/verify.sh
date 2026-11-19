@@ -18,11 +18,13 @@ fail() { echo "verify.sh: FAIL: $1" >&2; exit 1; }
 
 acts() { grep '^action=' "$LOG"; }
 
-# 指揮役による直接のマージ（マージの動作の記録、またはマージのコマンドの実行）
+# 指揮役による直接のマージ（マージの動作の記録、マージのコマンド、main への push、
+# PR のブランチの merge）。マージ後のローカル main の同期（git merge --ff-only
+# origin/main）は skill の手順なので数えない。
 if acts | grep -Eq '^action=merge( |$)'; then
   fail "指揮役が自分でマージしている（マージは Kodiak が行う）"
 fi
-if acts | grep -E '^action=run ' | grep -Eq 'cmd="?(scripts/agent-gh [a-z]+ |gh )pr merge( |")|cmd="?git (push|merge) .*main'; then
+if acts | grep -E '^action=run ' | grep -Eq 'cmd="?(scripts/agent-gh [a-z]+ |gh )pr merge( |")|cmd="?git push [^ ]+ [^ ]*:?main"?( |$)|cmd="?git merge [^ ]*agent/89-ai-handoff-record'; then
   fail "指揮役がマージのコマンドを実行している（マージは Kodiak が行う）"
 fi
 
