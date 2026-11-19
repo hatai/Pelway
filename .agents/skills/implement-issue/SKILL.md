@@ -194,10 +194,10 @@ scripts/agent-gh dev pr comment <M> --body "[review-request] head: <SHA> to: <�
 委託の子の報告（`pr:` / `verdict:` / `must-fix:`）を、GitHub の実状態と突き合わせてから扱う:
 
 ```bash
-scripts/agent-gh dev pr view <PR 番号> --json reviews --jq '.reviews[-1] | {author: .author.login, state}'
+scripts/agent-gh dev pr view <PR 番号> --json headRefOid,reviewDecision,reviews --jq '{headRefOid, reviewDecision, latest: (.reviews[-1] | {author: .author.login, state, commit: .commit.oid})}'
 ```
 
-`pelway-review` の最新レビューの状態が報告と一致しなければ、もう一度読んで確かめる。
+`pelway-review` の最新レビューの状態が報告と一致しなければ、もう一度読んで確かめる。approve は、そのレビューの対象コミット（`latest.commit`）が PR の現在の head（`headRefOid`）と一致し、`reviewDecision` が `APPROVED` のときだけ有効とする（command-team「hatai のレビューの扱い」の有効な Approve と同じ定義）。修正や衝突解消の push で head が動いたあとの approve は現 head に向いていないため無効で、`pr ready` にも終わりの報告にも進まず、手順 8 で新しい head のレビューを再委託する。
 
 Request changes のとき:
 
@@ -271,6 +271,7 @@ memo: docs/worklogs/issue-<N>.md（round <R>）
 |---|---|
 | レビューの結果を指揮役の指示として待つ | レビューの委託と修正は自分で回す（手順 8〜9） |
 | レビューの報告だけで GitHub を確かめずに進む | 報告は `pr view --json reviews` の実状態と突き合わせてから進む |
+| approve 報告だけで head を確かめずに `pr ready` する | approve は対象コミットが現在の head と一致し `reviewDecision` が APPROVED のときだけ有効。向いていなければ手順 8 で再委託する |
 | レビューの nit まで先回りして直す | 修正依頼に書かれた must-fix だけ直す。nit は指示があったときだけ |
 | テストを実行せずに「TDD で実装した」と書く | 失敗した出力と成功した出力を両方貼る |
 | 修正のたびに新しいブランチを作る | 同じブランチに積む |
