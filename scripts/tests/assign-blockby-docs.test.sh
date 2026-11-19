@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 割り当ての前の blocker（blocked_by）確認の決まり（Issue #408）が正本 2 箇所
-# （runbook の「割り当て・停止・再開」と skill command-team の「2. 振り分け」）に
-# 落ちているかのテスト。対象は prose の差分なので、各受け入れ条件を grep したときの
+# 割り当ての前の blocker（blocked_by）確認の決まり（Issue #408）が正本
+# （runbook の「割り当て・停止・再開」）に落ちていて、skill command-team の
+# 「2. 振り分け」がそこを参照しているかのテスト。対象は prose の差分なので、各受け入れ条件を grep したときの
 # 必須文言で確かめる。文言を変えるときはこのテストと同じ PR で直す。
 set -uo pipefail
 
@@ -33,7 +33,7 @@ check() {
 RUNBOOK="$(section docs/agents/grokbot-runbook.md '^### 割り当て・停止・再開$' '^### ')"
 SKILL="$(section .agents/skills/command-team/SKILL.md '^## 2[.] 振り分け$' '^## [0-9]')"
 
-# 共通の必須文言（チーム判断の 10 項目。両方の正本に載る）
+# 必須文言（チーム判断の 10 項目。正本の runbook に載る）
 COMMON=(
   'issue_dependencies_summary.blocked_by'
   'total_blocked_by'
@@ -56,7 +56,9 @@ COMMON=(
 )
 
 check runbook_blockby "$RUNBOOK" "${COMMON[@]}"
-check skill_blockby "$SKILL" "${COMMON[@]}"
+check skill_blockby_pointer "$SKILL" \
+  '### 割り当ての可否（blocker の確認）' \
+  'runbook の「割り当て・停止・再開」の blocker の確認'
 
 # 節の抽出自体の失敗（見出しの改名で空になった）も検出する
 if [[ -z "$RUNBOOK" ]]; then
