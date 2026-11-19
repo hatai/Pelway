@@ -59,6 +59,8 @@
 
 ## SQL とテナント分離
 
+migration（`crates/*/migrations/`）が変わるときは、`review-pr` の「観点として読むスキル」で読む `supabase-postgres-best-practices` のうち `references/security-privileges.md` と `references/security-rls-basics.md` を repo のパスで読み、最小権限・`SECURITY DEFINER`・RLS の有効化の観点を当てる。どちらも Supabase 向けに書かれているので、`auth.uid()` や `authenticated` ロールの例は、Pelway の書き方（`set_config` で渡すテナント、`pelway_app` などのロール）に読み替える。
+
 - SQL を `format!` や文字列の連結で組んでいないか。値はバインド変数で渡す。識別子を組むなら、定数か許可リストからだけにする。
 - テナントの指定（`set_config('app.workspace_id', ...)` など）が、トランザクションの中でだけ効く形（`is_local = true`）か。接続プールで次の要求に持ち越されないか。
 - テナントの ID を、要求の値ではなく認証済みの文脈から取っているか。
@@ -73,6 +75,8 @@
 - ロックの毒（poison）を `unwrap` して、1 件の panic を全要求の停止に広げていないか。
 
 ## unsafe と FFI
+
+`review-pr` の「観点として読むスキル」で読む `unsafe-checker` のうち、`checklists/review-unsafe.md` を repo のパスで読み、その項目（ポインタの有効性、別名、初期化、Send・Sync、FFI の境界）を `unsafe` のブロックごとに当てる。個々の規則の詳しい説明が要るときは同じスキルの `rules/` の該当ファイルを読む。
 
 - `unsafe` のブロックごとに `// SAFETY:` の説明があり、その前提を呼び出し元が本当に満たしているか。安全な関数の引数だけで前提を破れるなら、その関数は健全でない（所見）。
 - `set_len`・`MaybeUninit`・`from_raw_parts` で、初期化していない値や範囲外を読まないか。長さと容量の計算が外から決められないか。

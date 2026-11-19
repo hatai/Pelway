@@ -23,8 +23,8 @@ PR の変更ファイルを 1 つずつ、次の表で HIGH / MEDIUM / LOW に�
 
 | 危険度 | 当てはまるもの |
 |---|---|
-| HIGH | 認証・認可、トークン・鍵・暗号、`unsafe`、sandbox・egress・gateway、テナント分離（RLS）、監査、外部入力を受ける経路（HTTP の経路・ハンドラ、ファイルパス、SQL、プロセス起動）、検査器・フィルタ・許可リストそのもの、`.github/workflows/`、`scripts/agent-gh`、エージェントへの指示（`AGENTS.md`、`.agents/skills/`、`docs/agents/`）、検査の削除 |
-| MEDIUM | 状態の変更、新しい公開API、外部への送信、設定の既定値 |
+| HIGH | 認証・認可、トークン・鍵・暗号、`unsafe`、sandbox・egress・gateway、テナント分離（RLS）、監査、外部入力を受ける経路（HTTP の経路・ハンドラ、ファイルパス、SQL、プロセス起動）、検査器・フィルタ・許可リストそのもの、`.github/workflows/`、`scripts/agent-gh`、エージェントへの指示（`AGENTS.md`、`.agents/skills/`、`docs/agents/`）、検査の削除（`deny.toml` の許可・例外の追加を含む） |
+| MEDIUM | 状態の変更、新しい公開API、外部への送信、設定の既定値、依存の追加・更新（`Cargo.toml`・`Cargo.lock`） |
 | LOW | コメント、テスト、表示、ログの文言 |
 
 完了の基準: 変更ファイルが 1 つ残らずどれかに分かれている。
@@ -78,6 +78,14 @@ HIGH のファイルすべてについて、次の 4 点を確かめる。
 - 取り消しや失効のあとに、取り消し前に始めた手続き（ログインの途中、保留中の要求）で新しいセッションが作れないか。
 - start と finish に分かれた手続きで、start の時点の確認を finish でやり直しているか（名前の重複、資格情報の存在）。
 - OAuth・OIDC の `state` や nonce が、開始したブラウザに結び付いているか。
+
+#### 依存
+
+`Cargo.toml`・`Cargo.lock`・`deny.toml` が変わったときに当てる。RustSec の照合は CI の static ジョブ（`verify-static` タスクの `cargo deny check`）が行うので、レビュー担当は道具が判断できないところを見る。`review-pr` の「観点として読むスキル」で読む `rust-supply-chain` のうち、ここで使うのは「Reading an advisory properly」と「Unmaintained is a finding」の考え方。`cargo tree --invert` の代わりに、`Cargo.lock` でその crate に依存する package をたどる。同じファイルの `docs/agents/rust.md` と `/setup-rust-ci` への参照は、このリポジトリに無いので無効とする。
+
+- 新しい依存が、外部入力を受ける経路（HTTP、parse、暗号、認証）で使われるか。使われるなら、その crate の既知の advisory と保守の状態を `deny.toml` の例外・CI の結果と合わせて見る。
+- `deny.toml` に、advisory の無視、許可するライセンス・取得元（git・別の registry）の追加、ban の解除が足されていないか。足されていれば、理由と期限が書かれているか。理由の無い緩和は所見。
+- 取得元が crates.io 以外（`git =`、`path =`、`[patch]`）になる依存が増えていないか。
 
 #### AI エージェントを動かす GitHub Actions
 
