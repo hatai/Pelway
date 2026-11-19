@@ -11,7 +11,10 @@ set -euo pipefail
 shopt -s inherit_errexit
 
 # 値はリポジトリの fnox.toml ではなく、マシンごとの設定に age で暗号化して置く（scripts/setup/agent-accounts.sh が作る）。
+# dev と review で設定ファイルと age 鍵を分離する（#449）。review 用の設定には PELWAY_REVIEW_* だけが載り、
+# review の sandbox からは dev 用の設定・age 鍵が読めない前提の構成。
 fnox_config="${PELWAY_AGENT_FNOX_CONFIG:-$HOME/.config/pelway-agent/fnox.toml}"
+review_fnox_config="${PELWAY_AGENT_FNOX_CONFIG_REVIEW:-$HOME/.config/pelway-agent-review/fnox.toml}"
 
 usage() { echo "usage: $0 <dev|review> [git] <args...>" >&2; exit 2; }
 
@@ -92,6 +95,7 @@ case "$role" in
     git_identity=(-c "user.name=pelway-dev[bot]" -c "user.email=$email")
     ;;
   review)
+    fnox_config="$review_fnox_config"
     token="$(app_token PELWAY_REVIEW)"
     ;;
   -h|--help)
