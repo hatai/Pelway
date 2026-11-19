@@ -725,6 +725,8 @@ mod tests {
             attachments: vec!["sha256:att-1".to_owned()],
             account: "acct-cw-1".to_owned(),
             scope: vec!["tickets:write".to_owned()],
+            reference_version: None,
+            integration_version: None,
         }
     }
 

@@ -59,6 +59,8 @@ fn new_card(id: &str) -> NewCard {
             attachments: Vec::new(),
             account: "acct-cw-1".to_owned(),
             scope: Vec::new(),
+            reference_version: None,
+            integration_version: None,
         },
         requester: "m-human-gdpr07".into(),
         decider: Decider::Member("m-human-gdpr07".into()),

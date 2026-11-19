@@ -318,6 +318,9 @@ pub enum TimelineEntry {
     Decision { who: String, time: String },
     /// 引き継ぎカード。
     Handoff(HandoffData),
+    /// チャット内の判断カードを出す位置。中身は [`ChannelView::decision_card`]
+    /// と画面の判断カード用プロパティが持つ（台帳が正本。Issue 331・385）。
+    DecisionCard,
     /// 「あなただけに表示」の行。
     PrivateNote {
         sender: String,
@@ -489,6 +492,8 @@ pub fn sample() -> AppData {
                         },
                     ],
                 }),
+                // チャット内の判断カードの位置（仮想化前の並びと同じく、引き継ぎの直後）。
+                TimelineEntry::DecisionCard,
                 TimelineEntry::Message(MessageEntry {
                     sender: "濱田".to_owned(),
                     avatar: AvatarKind::Human("濱".to_owned()),
@@ -539,6 +544,10 @@ pub fn sample() -> AppData {
         }),
     }
 }
+
+/// メンション候補一覧の表示名（合成データ。表示中のチャンネルの参加者と同じ
+/// 並び）。実メンバー結線の段階で差し替える。
+pub const SAMPLE_MENTION_NAMES: &[&str] = &["田中", "佐藤", "濱田", "リク"];
 
 /// デモの判断待ちの論点（合成データ。`bridge::DecisionShell::sample` と共用）。
 pub const SAMPLE_DECISION_QUESTION: &str = "B社への回答の出し方をどうするか";

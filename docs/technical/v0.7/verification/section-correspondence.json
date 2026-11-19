@@ -1438,5 +1438,14 @@
     "target": "body/03-ai-bot-runtime.md#ch03-s13",
     "disposition": "追加",
     "reason": "採用した追補を本文へ実装契約として統合。担当入力/今回相談の具体的採否はreviews/disposition-v0.7.md"
+  },
+  {
+    "source": "https://github.com/hatai/Pelway/issues/489",
+    "source_line": 1,
+    "source_heading": "受け入れ条件: 表示名の文字規則（空・最大文字数・改行/制御文字・見えない文字・拒否理由の表示・バッジ紛らわしい語・識別子併記・主体種別・NFKC/confusables・ZWJ・人への適用）",
+    "archive": null,
+    "target": "body/06-i18n.md#ch06-display-name",
+    "disposition": "追加",
+    "reason": "Issue #489 に基づく新設。Switch の設計思想のみ参照しコードは移植しない。紛らわしい語の拒否範囲は未決 U08"
   }
 ]

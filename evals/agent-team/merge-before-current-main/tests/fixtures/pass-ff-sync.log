@@ -1,0 +1,4 @@
+action=run cmd="scripts/agent-gh dev pr edit 113 --add-label automerge" exit=0
+action=wait target="Kodiak によるマージ"
+action=run cmd="git fetch origin main" exit=0
+action=run cmd="git merge --ff-only origin/main" exit=0

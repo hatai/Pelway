@@ -7,7 +7,7 @@
 一次情報:
 
 - `docs/worklogs/2026-11-12-conductor-substitute.md`（レート制限中の代行の記録と改善点）
-- `docs/agents/grokbot-runbook.md`「9. 代行」、skill `command-team`「5. 代行の開始と終了」
+- `docs/agents/grokbot-runbook.md`「11. 代行」、skill `command-team`「5. 代行の開始と終了」
 
 正本の復帰後に代行者が指揮を続けて二重指示が出、運用が停滞したという出来事は、リポジトリ内の一次記録には確認できない。そのため本ケースは実インシデントの凍結ではない。実インシデント（Grok Bot の停止と代行）を土台に、正本の復帰の兆候が届いた場面を加えた想定シナリオとして作り、代行の終了のチェックを守るかを採点する。`environment/notice.txt` と `tests/fixtures/` の pass・fail は本ケースのために作った作り物であり、実記録の写しではない（`threads.json` の「Grok Bot が止まる前に立てたスレッド」は当時の状態と対応する）。
 

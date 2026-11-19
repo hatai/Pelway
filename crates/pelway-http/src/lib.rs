@@ -762,6 +762,50 @@ fn query_param(path: &str, key: &str) -> Option<String> {
     })
 }
 
+/// `query_param` に加えて値の `%XX` をデコードする——POST の `x-pelway-member-id`
+/// （素の値）と GET の `actor` が同じ人を指すため。member_id だけに使う。
+/// 最初の一致の値だけを見る（後続の同名パラメータで decode 失敗を回避させない）。
+/// 値が UTF-8 として無効なら `None` で、呼び出し側は 400 を返す。
+/// デコード後の前後の空白は削る——POST のヘッダー値解析が OWS を `trim` するため、
+/// 削らないと前後に空白を含む member_id で GET と POST が別人になる。
+fn query_param_decoded(path: &str, key: &str) -> Option<String> {
+    let (_, query) = path.split_once('?')?;
+    let v = query.split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        (k == key).then_some(v)
+    })?;
+    pct_decode(v).map(|s| s.trim().to_owned())
+}
+
+/// `%XX` をデコードする（`+` はクライアントが `%20` を送る前提で扱わない）。
+/// `%` の後に 2 桁の hex が続かない場合は `%` をそのまま残す。デコード結果が
+/// UTF-8 でない場合は `None`（lossy 変換すると別の ID と衝突するため）。
+fn pct_decode(v: &str) -> Option<String> {
+    let mut out = Vec::with_capacity(v.len());
+    let b = v.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        let n = (i + 2 < b.len() && b[i] == b'%')
+            .then(|| {
+                (b[i + 1] as char)
+                    .to_digit(16)
+                    .zip((b[i + 2] as char).to_digit(16))
+            })
+            .flatten();
+        match n {
+            Some((h, l)) => {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+            }
+            None => {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
 /// サーバーが付ける現在時刻（UNIX エポックからのミリ秒）。保存部の正本の時刻は
 /// すべてこの値（要求の値は正本にしない）。
 fn now_ms() -> u64 {
@@ -1262,7 +1306,7 @@ fn handle_list_basis_records(
     store: &SharedDataStore,
     logger: &log::Logger,
 ) -> Response {
-    let Some(actor) = query_param(&req.path, "actor").filter(|a| !a.is_empty()) else {
+    let Some(actor) = query_param_decoded(&req.path, "actor").filter(|a| !a.is_empty()) else {
         return bad_request();
     };
     let workspace_pid = logger.id(workspace);
@@ -1365,7 +1409,7 @@ fn handle_list_use_policies(
     store: &SharedDataStore,
     logger: &log::Logger,
 ) -> Response {
-    let Some(actor) = query_param(&req.path, "actor").filter(|a| !a.is_empty()) else {
+    let Some(actor) = query_param_decoded(&req.path, "actor").filter(|a| !a.is_empty()) else {
         return bad_request();
     };
     let workspace_pid = logger.id(workspace);
@@ -1391,7 +1435,7 @@ fn handle_inbox(
     ledger: &SharedLedger,
     logger: &log::Logger,
 ) -> Response {
-    let Some(actor) = query_param(&req.path, "actor").filter(|a| !a.is_empty()) else {
+    let Some(actor) = query_param_decoded(&req.path, "actor").filter(|a| !a.is_empty()) else {
         return bad_request();
     };
     let workspace_pid = logger.id(workspace);
@@ -1517,7 +1561,7 @@ fn handle_list_decisions(
     ledger: &SharedLedger,
     logger: &log::Logger,
 ) -> Response {
-    let Some(actor) = query_param(&req.path, "actor").filter(|a| !a.is_empty()) else {
+    let Some(actor) = query_param_decoded(&req.path, "actor").filter(|a| !a.is_empty()) else {
         return bad_request();
     };
     let workspace_pid = logger.id(workspace);
@@ -1545,7 +1589,7 @@ fn handle_list_channels(
     store: &SharedDataStore,
     logger: &log::Logger,
 ) -> Response {
-    let Some(actor) = query_param(&req.path, "actor").filter(|a| !a.is_empty()) else {
+    let Some(actor) = query_param_decoded(&req.path, "actor").filter(|a| !a.is_empty()) else {
         return bad_request();
     };
     let workspace_pid = logger.id(workspace);
@@ -1568,7 +1612,7 @@ fn handle_get_channel(
     store: &SharedDataStore,
     logger: &log::Logger,
 ) -> Response {
-    let Some(actor) = query_param(&req.path, "actor").filter(|a| !a.is_empty()) else {
+    let Some(actor) = query_param_decoded(&req.path, "actor").filter(|a| !a.is_empty()) else {
         return bad_request();
     };
     let channel_pid = logger.id(path_channel);
@@ -1672,7 +1716,7 @@ fn handle_list_channel_messages(
     store: &SharedDataStore,
     logger: &log::Logger,
 ) -> Response {
-    let Some(actor) = query_param(&req.path, "actor").filter(|a| !a.is_empty()) else {
+    let Some(actor) = query_param_decoded(&req.path, "actor").filter(|a| !a.is_empty()) else {
         return bad_request();
     };
     let channel_pid = logger.id(path_channel);
@@ -1777,6 +1821,37 @@ mod tests {
             other => panic!("salt 由来の Io エラーではない: {other:?}"),
         }
         assert!(sink.lines().is_empty());
+    }
+
+    // GET の `actor` クエリは %XX をデコードしてから member_id と照合する
+    // （POST の x-pelway-member-id（素の値）と同じ人を指す。#333 PR-1 点検）。
+    #[test]
+    fn query_param_decodes_percent_encoding() {
+        assert_eq!(
+            super::query_param_decoded("/p?actor=m%2Bops", "actor").as_deref(),
+            Some("m+ops")
+        );
+        assert_eq!(
+            super::query_param_decoded("/p?actor=%2", "actor").as_deref(),
+            Some("%2")
+        );
+        // %FF は UTF-8 として無効 → None（lossy なら U+FFFD になり別 ID と衝突する）
+        assert_eq!(super::query_param_decoded("/p?actor=m%FF", "actor"), None);
+        // 最初の一致が decode 失敗なら後続の同名パラメータで回避できない
+        assert_eq!(
+            super::query_param_decoded("/p?actor=m%FF&actor=m%2Bops", "actor"),
+            None
+        );
+        // デコード後の前後の空白は削る（POST ヘッダーの OWS trim と同じ結果にする）
+        assert_eq!(
+            super::query_param_decoded("/p?actor=%20m%2Bops%20", "actor").as_deref(),
+            Some("m+ops")
+        );
+        // member_id 以外のパラメータは decode しない（素の `query_param` のまま）
+        assert_eq!(
+            super::query_param("/p?limit=%FF", "limit").as_deref(),
+            Some("%FF")
+        );
     }
 
     /// 生の HTTP/1.1 POST を 1 回送り、(状態コード, 本文) を返す。接続先はループバックだけ。

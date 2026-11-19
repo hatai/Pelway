@@ -37,6 +37,8 @@ fn new_card_with_decider(id: &str, decider: &str) -> NewCard {
             attachments: Vec::new(),
             account: "acct-cw-1".to_owned(),
             scope: Vec::new(),
+            reference_version: None,
+            integration_version: None,
         },
         requester: "m-human-http".into(),
         decider: Decider::Member(decider.into()),

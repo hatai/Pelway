@@ -44,6 +44,8 @@ fn new_card(id: &str) -> NewCard {
             attachments: Vec::new(),
             account: "acct-e-1".to_owned(),
             scope: Vec::new(),
+            reference_version: None,
+            integration_version: None,
         },
         requester: "m-edge-requester".into(),
         decider: Decider::Member("m-edge-decider".into()),

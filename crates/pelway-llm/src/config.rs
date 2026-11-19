@@ -38,6 +38,73 @@ pub const ZAI_BASE_URL: &str = "https://api.z.ai/api/paas/v4";
 /// 予備」。endpoint の宣言はこのファイルに限定する）。
 pub const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 
+/// 設定で受けるカスタム接続先の検証（#330 QA 点検 2026-11-17）。loopback
+/// （127.0.0.0/8・::1・localhost）への接続先は任意のスキームを許し（ローカルの
+/// モック用）、それ以外は https の URL に限る。http の外部接続先は Bearer キーの
+/// 送出経路になりうるため拒否する。
+pub fn custom_base_url_allowed(base_url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(base_url) else {
+        return false;
+    };
+    let loopback = match parsed.host() {
+        Some(url::Host::Domain(d)) => d == "localhost" || d.ends_with(".localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    };
+    loopback || parsed.scheme() == "https"
+}
+
+/// 接続先 URL のログ向けの伏せ（Issue #404）。URL に秘密が入りうるのは
+/// `PELWAY_LLM_CUSTOM_BASE_URL` で明示したカスタム接続先のみで、userinfo
+/// （`user:pass@`）は丸ごと `***` に、クエリの `key` / `token` / `api_key` /
+/// `access_token` / `auth` / `credential` など（キー名を小文字化して `_`・`-`
+/// を抜いた形が `key`・`token`・`secret`・`password`・`auth`・`credential` を
+/// 含むもの）は値を `***` に伏せる（キー名は残す）。fragment（`#` 以降）は
+/// 秘密の載せ場所になりうるため中身を見ずに丸ごと落とす。どれも無い URL は
+/// そのまま返す。URL として解釈できないものは中身を出さず全体を `***` にする。
+pub fn redact_url_for_log(base_url: &str) -> String {
+    let Ok(mut parsed) = url::Url::parse(base_url) else {
+        return "***".to_owned();
+    };
+    // userinfo は丸ごと伏せる（user 名も password も出さない。`***@` だけ残る）。
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        let _ = parsed.set_username("***");
+        let _ = parsed.set_password(None);
+    }
+    // fragment は丸ごと落とす（`#access_token=...` など OAuth implicit flow の
+    // 秘密の載せ場所。中身を見て判断しない）。
+    parsed.set_fragment(None);
+    // クエリは値だけ伏せる。キー名の正規化（小文字化・`_`/`-` 除去）で
+    // `api_key`・`api-key`・`apiKey` など同一視し、秘密を含みうる名前は
+    // 過剰側（含む一致）で判定する（`auth`・`credential` は
+    // `authorization`・`credentials` などの表記ゆれも含む一致でカバー）。
+    if parsed.query().is_some() {
+        let redacted: Vec<(String, String)> = parsed
+            .query_pairs()
+            .map(|(k, v)| {
+                let normalized = k.to_lowercase().replace(['_', '-'], "");
+                let secret_key = ["key", "token", "secret", "password", "auth", "credential"]
+                    .iter()
+                    .any(|marker| normalized.contains(marker));
+                (
+                    k.into_owned(),
+                    if secret_key {
+                        "***".to_owned()
+                    } else {
+                        v.into_owned()
+                    },
+                )
+            })
+            .collect();
+        parsed
+            .query_pairs_mut()
+            .clear()
+            .extend_pairs(redacted.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    }
+    parsed.to_string()
+}
+
 impl ProviderConfig {
     pub fn new(
         name: impl Into<String>,

@@ -3,7 +3,6 @@
 //!
 //! 受け入れ条件との対応:
 //! - メンション → タスク・進捗・A/B 案の投稿・判断待ち（#329）
-//! - 決定の確定 → メール下書きのデータ生成 → 送信承認待ち（#330）
 //! - 検証に失敗した応答は1回だけ再試行し、それでもだめなら台本へ落ちる（#330）
 //! - タイムアウトしたら台本へ落ちる（#330）
 //! - キーが無い・不正なときは台本モードで起動する（#330）
@@ -27,7 +26,8 @@ use pelway_contract::store::{
 use pelway_contract::task::TaskState;
 use pelway_llm::{ChatReply, ChatRequest, EmbedReply, LlmError, LlmGateway, Usage};
 use pelway_runner::demo::{
-    BASIS_ENV, CHAT_MODEL_ENV, DemoLlmConfig, RESPONSE_FORMAT_ENV, TIMEOUT_SECS_ENV,
+    BASIS_ENV, CHAT_MODEL_ENV, CUSTOM_BASE_URL_ENV, DemoLlmConfig, RESPONSE_FORMAT_ENV,
+    TIMEOUT_SECS_ENV,
 };
 use pelway_runner::{Runner, RunnerConfig, RunnerError, RunnerTaskId};
 
@@ -365,12 +365,13 @@ fn non_bot_mention_and_plain_message_create_no_task() {
 
 #[test]
 fn llm_failure_falls_back_to_script_reply() {
+    let gateway = Arc::new(FakeGateway::new(Err(LlmError::Rejected {
+        status: 503,
+        body: "canary-提供元の内部情報".to_owned(),
+    })));
     let (store, ledger, runner) = fixture(
         DataStore::new_demo_seeded(now()),
-        Arc::new(FakeGateway::new(Err(LlmError::Rejected {
-            status: 503,
-            body: "canary-提供元の内部情報".to_owned(),
-        }))),
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
     );
 
     let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
@@ -394,6 +395,12 @@ fn llm_failure_falls_back_to_script_reply() {
         "提供元の応答本文は投稿しない: {posts:?}"
     );
     assert_eq!(pending_items(&ledger).len(), 1, "判断待ちは作られる");
+    // 拒否（Rejected）は再送しない決まり（pelway-llm の error.rs）。呼び出しは1回。
+    assert_eq!(
+        gateway.calls.load(Ordering::SeqCst),
+        1,
+        "拒否は再試行しない"
+    );
 
     // 判断待ちに入ったタスクは差し替えられない。存在しないタスクも同様。
     assert_eq!(
@@ -469,6 +476,63 @@ fn invalid_then_valid_reply_succeeds_on_retry() {
     );
 }
 
+#[test]
+fn invalid_error_is_retried_once_then_succeeds() {
+    // 実提供元の検証失敗（LlmError::Invalid）側の経路: 再試行で回復する。
+    let gateway = Arc::new(SeqGateway::new(
+        vec![
+            Err(LlmError::Invalid("schema 違反".to_owned())),
+            Ok(ab_reply()),
+        ],
+        Duration::ZERO,
+    ));
+    let (store, _ledger, runner) = fixture(
+        DataStore::new_demo_seeded(now()),
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
+    );
+
+    let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
+    let task_id = runner.on_message_posted(&message).expect("task");
+    assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
+
+    assert_eq!(gateway.calls.load(Ordering::SeqCst), 2, "1回だけ再試行");
+    let posts = bot_messages(&store);
+    assert!(
+        posts.iter().all(|b| !b.contains(FALLBACK_MARK)),
+        "再試行で成功すれば台本へは落ちない: {posts:?}"
+    );
+    assert!(posts.iter().any(|b| b.contains("案A:")));
+}
+
+#[test]
+fn invalid_error_is_retried_once_then_falls_back() {
+    // 再試行でも同じ検証失敗なら台本へ落ちる。
+    let gateway = Arc::new(SeqGateway::new(
+        vec![Err(LlmError::Invalid("schema 違反".to_owned()))],
+        Duration::ZERO,
+    ));
+    let (store, _ledger, runner) = fixture(
+        DataStore::new_demo_seeded(now()),
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
+    );
+
+    let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
+    let task_id = runner.on_message_posted(&message).expect("task");
+    assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
+
+    assert_eq!(
+        gateway.calls.load(Ordering::SeqCst),
+        2,
+        "初回＋再試行の2回だけ"
+    );
+    let posts = bot_messages(&store);
+    assert!(
+        posts.iter().any(|b| b.contains(FALLBACK_MARK)),
+        "台本へ落ちる: {posts:?}"
+    );
+    assert!(posts.iter().any(|b| b.contains("案A:")));
+}
+
 // ---- タイムアウトしたら台本へ落ちる（#330） ----
 
 #[test]
@@ -496,6 +560,12 @@ fn timeout_falls_back_to_script_reply() {
         "タイムアウトを理由に台本へ落ちる: {posts:?}"
     );
     assert!(posts.iter().any(|b| b.contains("案A:")));
+    // タイムアウトは再送しない決まり（結果不明の可能性があるため）。呼び出しは1回。
+    assert_eq!(
+        gateway.calls.load(Ordering::SeqCst),
+        1,
+        "タイムアウトは再試行しない"
+    );
 }
 
 // ---- 決定の確定 → メール下書きの生成（#330） ----
@@ -694,6 +764,60 @@ fn demo_llm_config_explicit_and_overridable() {
     }
 }
 
+/// `PELWAY_LLM_BASE_URL` の接続先は Z.ai・OpenAI の 2 つの endpoint に限る
+/// （https だけでは足りない。QA 点検 2026-11-17）。許可リスト外は
+/// `PELWAY_LLM_CUSTOM_BASE_URL` で明示したときだけ使う。
+#[test]
+fn base_url_is_limited_to_known_providers() {
+    for url in [
+        pelway_llm::config::ZAI_BASE_URL,
+        pelway_llm::config::OPENAI_BASE_URL,
+    ] {
+        let config = DemoLlmConfig::from_vars(vars(&[("PELWAY_LLM_BASE_URL", url)]))
+            .expect("known provider");
+        assert_eq!(config.provider.base_url, url);
+    }
+    // 末尾の / は許容する。
+    let with_slash = format!("{}/", pelway_llm::config::OPENAI_BASE_URL);
+    let config = DemoLlmConfig::from_vars(|name| {
+        (name == "PELWAY_LLM_BASE_URL").then(|| with_slash.clone())
+    })
+    .expect("trailing slash");
+    assert_eq!(
+        config.provider.base_url,
+        pelway_llm::config::OPENAI_BASE_URL
+    );
+
+    // https であっても許可リスト外は設定エラー（loopback は external-refs の
+    // 許可ホストのため、リテラルでは https の loopback アドレスで確かめる）。
+    assert!(
+        DemoLlmConfig::from_vars(vars(&[("PELWAY_LLM_BASE_URL", "https://127.0.0.1:9")])).is_err()
+    );
+
+    // 別の環境変数で明示したときだけ許可リスト外を使う（ローカルのモック等）。
+    // カスタム接続先は loopback なら任意のスキーム、それ以外は https のみ。
+    for url in ["http://127.0.0.1:9/v1", "http://[::1]:9/v1"] {
+        let custom =
+            DemoLlmConfig::from_vars(vars(&[(CUSTOM_BASE_URL_ENV, url)])).expect("loopback custom");
+        assert_eq!(custom.provider.base_url, url);
+    }
+    // 非 loopback の http 接続先は Bearer キーの送出経路になるため拒否
+    // （demo-check external-refs のためリテラルは置換で生成する）。
+    let http_other = "http://127.0.0.1".replace("127.0.0.1", "llm.invalid");
+    assert!(
+        DemoLlmConfig::from_vars(|name| (name == CUSTOM_BASE_URL_ENV).then(|| http_other.clone()))
+            .is_err()
+    );
+    // 非 loopback でも https なら許可する。
+    let https_other = "https://127.0.0.1".replace("127.0.0.1", "ok.invalid");
+    let custom =
+        DemoLlmConfig::from_vars(|name| (name == CUSTOM_BASE_URL_ENV).then(|| https_other.clone()))
+            .expect("https custom");
+    assert_eq!(custom.provider.base_url, https_other);
+    // URL として解釈できない値も設定エラー。
+    assert!(DemoLlmConfig::from_vars(vars(&[(CUSTOM_BASE_URL_ENV, "not a url")])).is_err());
+}
+
 /// キーが無い・送信に使えない形のときは台本の gateway が返る（落ちない）。
 #[test]
 fn missing_or_malformed_key_builds_script_gateway() {
@@ -712,6 +836,70 @@ fn missing_or_malformed_key_builds_script_gateway() {
             .block_on(gateway.chat(ChatRequest::from_messages(vec![])));
         assert!(reply.is_ok(), "{key:?}");
     }
+}
+
+/// 起動時ログの接続先 URL は伏せる（Issue #404）。userinfo とクエリの
+/// key/token の値がログ行に出ないことの各ケース。
+#[test]
+fn endpoint_log_line_redacts_url_secrets() {
+    // userinfo あり（カスタム接続先は loopback なので http で通る）。
+    let config = DemoLlmConfig::from_vars(vars(&[(
+        CUSTOM_BASE_URL_ENV,
+        "http://alice:hunter2@127.0.0.1:9/v1",
+    )]))
+    .expect("config");
+    let line = config.endpoint_log_line();
+    assert!(!line.contains("alice"), "{line}");
+    assert!(!line.contains("hunter2"), "{line}");
+    assert!(line.contains("***@127.0.0.1:9/v1"), "{line}");
+
+    // クエリに key/token あり: 値は出ず、キー名と秘密でない値は残る。
+    let config = DemoLlmConfig::from_vars(vars(&[(
+        CUSTOM_BASE_URL_ENV,
+        "http://127.0.0.1:9/v1?key=abc123&token=def456&x=1",
+    )]))
+    .expect("config");
+    let line = config.endpoint_log_line();
+    assert!(!line.contains("abc123"), "{line}");
+    assert!(!line.contains("def456"), "{line}");
+    assert!(line.contains("key=***"), "{line}");
+    assert!(line.contains("token=***"), "{line}");
+    assert!(line.contains("x=1"), "{line}");
+
+    // どちらもなし: 既知の接続先はそのまま（不要な伏せをしない）。
+    let config = DemoLlmConfig::from_vars(|name| {
+        (name == "PELWAY_LLM_BASE_URL").then(|| pelway_llm::config::ZAI_BASE_URL.to_owned())
+    })
+    .expect("config");
+    assert_eq!(
+        config.endpoint_log_line(),
+        format!(
+            "pelway-runner: LLM endpoint: zai {}",
+            pelway_llm::config::ZAI_BASE_URL
+        )
+    );
+
+    // fragment に秘密が載っている場合も起動時ログに出ない
+    // （review round 1 の must-fix）。
+    let config = DemoLlmConfig::from_vars(vars(&[(
+        CUSTOM_BASE_URL_ENV,
+        "http://127.0.0.1:9/v1#access_token=sk-local",
+    )]))
+    .expect("config");
+    let line = config.endpoint_log_line();
+    assert!(!line.contains("sk-local"), "{line}");
+    assert!(!line.contains('#'), "{line}");
+
+    // 資格情報の名前（auth）のクエリも起動時ログに出ない
+    // （review round 2 の must-fix）。
+    let config = DemoLlmConfig::from_vars(vars(&[(
+        CUSTOM_BASE_URL_ENV,
+        "http://127.0.0.1:9/v1?auth=Bearer%20local",
+    )]))
+    .expect("config");
+    let line = config.endpoint_log_line();
+    assert!(!line.contains("Bearer"), "{line}");
+    assert!(line.contains("auth=***"), "{line}");
 }
 
 /// 台本モード（キー無し）の runner がデモの流れを最後まで回せる。

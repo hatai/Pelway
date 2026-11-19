@@ -13,6 +13,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 - GitHub への操作はすべて `scripts/agent-gh dev ...`、git の commit と push は `scripts/agent-gh dev git ...` で行う。素の `gh` と素の `git push` は使わない。素の `gh` で作った PR は作成者が hatai になり、hatai が Approve できないため、ブランチ保護を迂回しないとマージできない。素の `git push` は hatai の SSH 鍵で push される。
 - ネットワークは `scripts/agent-gh dev` 経由の GitHub だけ使う。`gh search repos` / `gh search code` もここに含まれる。
 - worktree の外に書き込まない。`rm -rf` はしない。main に push しない。PR をマージしない。
+- sandbox に止められたら、`systemd-run`・`nohup`・別のシェル・ラッパースクリプトなど sandbox の外へ出る抜け道を使わず、止まって報告する（下の「止まる条件」の行）。作業ログに残る同種の前例は許可にならない（Issue #477）。
 - コマンドの終了コードを確かめる。失敗したコマンドの結果を成功と報告しない。
 - 迷っても質問で止まらない。判断とその理由は PR 本文か Issue のコメントに書いて進める。
 - 止まってよいのは下の「止まる条件」に当てはまるときだけ。止まるときは必ず Issue にコメントし、`needs-human` ラベルを付ける。
@@ -30,7 +31,8 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | Issue の未決事項に挙がっておらず、避けて進めることもできず、受け入れ条件の成否に関わる判断が必要 | 必要な判断の内容と、避けられない理由。判断を仰ぐ相手（起票者か人間） |
 | `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
-| レビューの委託が 4 ラウンド目に入る（修正 3 回でも Approve が取れない）、委託が 2 回連続で `failed`（`checks pending` は数えない） | どれが起きたかと、試したこと（ラウンド数・担当・effort） |
+| sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
+| 3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）、委託が 2 回連続で `failed`（`checks pending` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort） |
 
 止まり方（止まった時点で、どの手順の途中でも手順 5 の形で実装者メモを書き、Issue のコメントに続けて貼る。push しないので `docs/worklogs/` には書かなくてよい）:
 
@@ -152,11 +154,11 @@ scripts/agent-gh dev pr view <PR 番号> --json number,isDraft,author --jq '{num
 
 `author` が `app/pelway-dev` でなければ、止まる条件と同じ扱いにする。
 
-PR を作ったら、T3 のスレッドに PR を紐付ける（`link_pull_request`。マージでスレッドが自動的に settle される）。
+PR を作るたびに、T3 のスレッドにそのスレッドの PR を全部紐付ける（`link_pull_requests`。最後の 1 つだけでなく、そのスレッドが作った PR 全部を紐付ける。マージでスレッドが自動的に settle される）。
 
 ### 8. レビューを委託する
 
-PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。チェックがまだ動いていれば、完了を待ってから委託する（待つ間は skill `pr-watch` の `pr-digest --watch` をバックグラウンドで使う。委託した子が `error: checks pending` を報告したときも、同じラウンドとして数えずに完了を待って再委託する）。
+PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。チェックがまだ動いていれば、完了を待ってから委託する（待ち方は skill `pr-watch` の「待ち方」に従う。必須チェックの通過は `pr-digest` の `required` 行で確かめる。委託した子が `error: checks pending` を報告したときも、同じラウンドとして数えずに完了を待って再委託する）。
 
 担当と effort は skill `command-team` の「レビュー担当と effort」の表で決める（通常は PR 番号の偶奇、高リスクは使える担当全て、抜き取りは PR 番号を 4 で割った余りが 0 のとき Claude を追加。自分が Devin CLI で実装した PR には Devin CLI を付けない）。差分が `unsafe` を足している、`.github/workflows/`・`scripts/agent-gh`・`AGENTS.md`・`.agents/skills/`・`docs/agents/` のどれかが変わっている、認証・認可・トークン・鍵・暗号・sandbox・egress・gateway・テナント分離・監査に触れている、のどれかに当たるときは Assigned 行に `security=yes` を付ける。
 
@@ -177,6 +179,8 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 
 これに `role: "review"`、`runtimeMode: "auto-accept-edits"`、`isolation: "worktree"` を付ける。委託したら返答を終えて完了の通知を待つ（ポーリングしない）。高リスクで複数担当にしたときは、全員の結果がそろうまで次に進まない。
 
+次のラウンドのレビューを委託したら、前ラウンドのレビュースレッド（子タスク）を settle する（`t3_thread_organize` の `action: settle`。runbook 9 の「片付け」と同じ決まりで、前ラウンドが `needs-human` 中・止まっている・迷走中のときは settle しない）。
+
 委託・再委託のたびに、対象 PR に委託記録コメントを残す（巡回がレビューの証跡として使う）。コメントの行頭がこの形であること（引用やコードブロック内の出現は証跡にならない）。`<SHA>` は委託時点の PR の head、`to:` はレビュー担当。
 
 ```bash
@@ -190,17 +194,17 @@ scripts/agent-gh dev pr comment <M> --body "[review-request] head: <SHA> to: <�
 委託の子の報告（`pr:` / `verdict:` / `must-fix:`）を、GitHub の実状態と突き合わせてから扱う:
 
 ```bash
-scripts/agent-gh dev pr view <PR 番号> --json reviews --jq '.reviews[-1] | {author: .author.login, state}'
+scripts/agent-gh dev pr view <PR 番号> --json headRefOid,reviewDecision,reviews --jq '{headRefOid, reviewDecision, latest: (.reviews[-1] | {author: .author.login, state, commit: .commit.oid})}'
 ```
 
-`pelway-review` の最新レビューの状態が報告と一致しなければ、もう一度読んで確かめる。
+`pelway-review` の最新レビューの状態が報告と一致しなければ、もう一度読んで確かめる。approve は、そのレビューの対象コミット（`latest.commit`）が PR の現在の head（`headRefOid`）と一致し、`reviewDecision` が `APPROVED` のときだけ有効とする（command-team「hatai のレビューの扱い」の有効な Approve と同じ定義）。修正や衝突解消の push で head が動いたあとの approve は現 head に向いていないため無効で、`pr ready` にも終わりの報告にも進まず、手順 8 で新しい head のレビューを再委託する。
 
 Request changes のとき:
 
 1. must-fix を直す（nit は直さない）。直す前に Issue のコメントを末尾から読み直し、着手後に記録された hatai（人間・指揮役）作の決定・判断（修正の方向、範囲の変更、受け入れ条件の拡大など）を反映する。決定を実装側の解釈で差し替えない
 2. 手順 5（実装者メモ）と手順 6（verify・コミット・push）をやり直す。PR は作り直さず、本文の sha を更新する
 3. ラウンドサマリーを PR にコメントする（下の形）
-4. 手順 8 でレビューを再委託する。3 ラウンド目の委託では effort を 1 段上げる。4 ラウンド目に入る前に Approve が取れていなければ、止まる条件の形でエスカレーションする
+4. 手順 8 でレビューを再委託する。3 回目のレビューの委託では effort を 1 段上げる。3 回目のレビュー結果に must-fix が残っていたら、4 回目の修正には入らず、止まる条件の形でエスカレーションする
 
 Approve のとき:
 
@@ -267,6 +271,7 @@ memo: docs/worklogs/issue-<N>.md（round <R>）
 |---|---|
 | レビューの結果を指揮役の指示として待つ | レビューの委託と修正は自分で回す（手順 8〜9） |
 | レビューの報告だけで GitHub を確かめずに進む | 報告は `pr view --json reviews` の実状態と突き合わせてから進む |
+| approve 報告だけで head を確かめずに `pr ready` する | approve は対象コミットが現在の head と一致し `reviewDecision` が APPROVED のときだけ有効。向いていなければ手順 8 で再委託する |
 | レビューの nit まで先回りして直す | 修正依頼に書かれた must-fix だけ直す。nit は指示があったときだけ |
 | テストを実行せずに「TDD で実装した」と書く | 失敗した出力と成功した出力を両方貼る |
 | 修正のたびに新しいブランチを作る | 同じブランチに積む |

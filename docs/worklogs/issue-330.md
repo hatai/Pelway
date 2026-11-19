@@ -22,6 +22,42 @@
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）
 
+## 実装者メモ（round 1 修正 / PR-1）
+
+対象 head: `7fe4d630c94b428bc4450f666e4b20105decdc10`（ブランチ `agent/330a-llm-config`。署名付替え前のローカルコミットは `2fc2154`）
+
+1. レビュー指摘への対応:
+   - Codex レビュー（round 1）の must-fix「fnox.toml から既存の `PELWAY_PENPOT_MCP_TOKEN` 宣言が削除されている」に対応。モノリス版 fnox.toml を全体置き換えで作った際、無関係な宣言を落としていた。PR-1 の宣言に戻して復元。
+
+## 実装者メモ（round 3 / PR-1）
+
+対象 head: `b7f6653f96069430db4ad4457df81ff3b1f2989f`（ブランチ `agent/330a-llm-config`。QA 点検不合格への修正）
+
+1. 詰まった箇所:
+   - テストに `https://api.openai.com/v1/`・`https://llm.example.com/v1` のリテラルを書くと demo-check external-refs の新規ヒットになった（runner.rs は除外対象外）。拒否ケースは `https://127.0.0.1:9`（loopback は許可ホスト）で確かめ、末尾 `/` ケースは `format!` で定数から生成して新規ヒット 0 に戻した。
+2. 曖昧だった文: 「`config.rs` に URL が 2 つだけであることを確かめるテストは、この PR から除いて別の Issue に分ける」（Issue #330 コメント comment-6921443439）
+3. 仮定と解釈:
+   - 当該テストは PR-1 の差分にも元コミット（25030ea）にも存在しなかったため、取り除く対象は無し。依頼どおり別 Issue として起票し、その旨をメモに記録する。
+   - 「それ以外の接続先は別の環境変数で明示したときだけ許可」は `PELWAY_LLM_CUSTOM_BASE_URL` と解釈。設定時は `PELWAY_LLM_BASE_URL` より優先してその値が接続先になる（優先順位は docs に明記）。
+   - 「起動時に接続先をログに出す」は `build_gateway_with`（gateway 組み立て＝接続開始の入口）で stderr に出すと解釈。キー・要求本文は出さない。
+4. 足りなかった情報・検証手段:
+   - QA 点検の正本は Issue コメントの 3 項目のみで、「URL が 2 つだけ」のテストがどの指摘を指したかの参照は無かった（存在しないテストの取り除き依頼と判断し、起票側で対応）。
+5. 改善案: `scripts/demo-check/lib.sh` の除外コメントに「endpoint 宣言の数そのものを確かめる検査は別 Issue」と追記すると次の実装者が重複検査を置かずに済む。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）
+
+## 実装者メモ（round 4 / PR-1）
+
+対象 head: `ad55a7c200f58ace7e3f7dcf24a83600a04ea405`（ブランチ `agent/330a-llm-config`。Codex レビュー round 3 の must-fix への対応）
+
+1. レビュー指摘への対応:
+   - must-fix「`PELWAY_LLM_CUSTOM_BASE_URL` が任意 URL を許し、http の外部接続先が Bearer キーの送出経路になりうる」に対応。宛先検証 `custom_base_url_allowed` を `pelway-llm/src/config.rs` に追加し、loopback（127.0.0.0/8・::1・localhost）は任意スキーム、それ以外は https のみ許可とした（レビュー提示の代替案のうち「非 loopback は HTTPS と宛先検証」側を採用）。
+   - `url` クレートは pelway-llm の dev-dependency だったため `[dependencies]` に移動。
+2. 詰まった箇所:
+   - 非 loopback URL のリテラルは外部 IP・TLD 付きホスト名のどちらでも demo-check external-refs の新規ヒットになるため、テストでは `127.0.0.1` のリテラルを `.invalid`（TLD 表・許可ホスト外）に `replace` して実行時生成にした。
+   - `mise run verify` が main 由来の `docs/worklogs/issue-220.md` の `BRE`（基本正規表現の意図的な略号）で落ちたため、typos.toml の `extend-words` に `bre` を追加（同ファイルの既存パターンに従う）。
+3. 足りなかった情報・検証手段: `custom_base_url_allowed` の unit test を pure.rs にも置くか迷ったが、runner.rs の `from_vars` 経由の検証で loopback/http/https/非URL の 4 分岐を覆えているため重複は置かなかった。
+4. 改善案: `typos.toml` の extend-words コメントに「略号か造語かを書く」ルールがあると次回の判断が速い。
 ## 実装者メモ（round 2 / PR-2）
 
 対象 head: `4a2c9989dc47d50ea840dcb41cadb12d506ab85a`（ブランチ `agent/330b-ab-real-llm`。base は PR-1 の署名付き head `fec2c5b`。署名付替え前のローカルコミットは `3e1c1d7`。実装はモノリス `25030ea` の分解から抽出）
@@ -44,6 +80,20 @@
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）
 
+## 実装者メモ（round 2 修正 / PR-2）
+
+対象 head: `7ee05f1`（ブランチ `agent/330b-ab-real-llm`。Claude レビュー round 1 の must-fix への対応。レビュー対象は `e0177bb`）
+
+1. レビュー指摘への対応:
+   - must-fix「再試行のテストが `is_valid` 側の経路しか通していない」に対応。`SeqGateway` で `Err(LlmError::Invalid)` を返す 2 テストを追加（`invalid_error_is_retried_once_then_succeeds` / `invalid_error_is_retried_once_then_falls_back`）。
+   - nit「gateway の Future の panic が `block_on` を巻き戻ってタスクを Working のまま残す」に対応。呼び出しを `tokio::spawn` に入れ、`JoinError`（panic・キャンセル）を固定の理由 `REASON_ABORTED` に写して台本へ落ちる形にした（`CallOutcome::Runtime` → `Aborted` に改称）。
+   - nit「タイムアウト後のランタイム drop が spawn_blocking（reqwest の名前解決）の終了を無期限に待つ」に対応。ランタイムをタスクごとに 1 つ作って再試行でも使い回し、終了時は `rt.shutdown_background()` で待たずに畳む。
+   - nit「拒否・タイムアウトで呼び出し 1 回（再試行しない）を確かめていない」に対応。`gateway.calls == 1` の検証を両テストに追加。
+   - nit「テスト冒頭の対応表に PR-3 範囲の行」「`ab_schema` の説明が古い」「`PELWAY_LLM_BASIS` の記述がコードと食い違う」に対応（runner.rs:6、lib.rs の `ab_schema` コメント、dev-environment.md）。
+   - tests/real_llm.rs への nit（`{value}` を assert 文に入れている件・`PELWAY_LLM_BASIS` 既定の期待値）は、チーム決定「real_llm.rs は誰も動かさない」により未対応とし、このメモに記録する。
+2. 詰まった箇所: `tokio::spawn` する Future は `'static` が要るため `Arc::clone(&self.inner.gateway)` を async ブロックにムーブし、ブロック内で `chat` を呼ぶ形にした。
+3. 仮定と解釈: panic は `JoinError` 経由で理由の固定文（`LLM の呼び出しが中断しました`）に写す（内部の panic メッセージは投稿しない方針に合わせた）。
+4. 検証: `cargo test -p pelway-runner` 14 件 pass、`mise run verify` 全通過（script-test 21/21）。
 ## 実装者メモ（round 3 / PR-3）
 
 対象 head: `b17e9beb893455a88f6f5d876c9a187b15632cc1`（ブランチ `agent/330c-mail-draft`。base は PR-2 の署名付き head `421688a`。署名付替え前のローカルコミットは `d2be91e`。実装はモノリス `25030ea` の下書き系部分をそのまま復元）

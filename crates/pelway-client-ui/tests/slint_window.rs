@@ -8,7 +8,7 @@
 
 use pelway_client_ui::i18n::{FluentVars, Messages, USED_KEYS, apply_translations};
 use pelway_client_ui::theme::{Theme, apply_design_tokens, token_value};
-use pelway_client_ui::{DesignTokens, MainWindow, ThemeState};
+use pelway_client_ui::{A11yStrings, DesignTokens, MainWindow, ThemeState};
 use slint::{Brush, Global, SharedString};
 
 /// `MainWindow` の `tr-*` プロパティの getter の型。
@@ -32,6 +32,7 @@ const TR_GETTERS: &[(&str, TrGetter)] = &[
     ("ai-presence-waiting", |w| w.get_tr_ai_presence_waiting()),
     ("search-placeholder", |w| w.get_tr_search_placeholder()),
     ("search-shortcut", |w| w.get_tr_search_shortcut()),
+    ("banner-demo-mock", |w| w.get_tr_banner_demo_mock()),
     ("today-title", |w| w.get_tr_today_title()),
     ("today-section-mine", |w| w.get_tr_today_section_mine()),
     ("today-section-requests", |w| {
@@ -83,11 +84,21 @@ const TR_GETTERS: &[(&str, TrGetter)] = &[
         w.get_tr_thread_input_placeholder()
     }),
     ("composer-placeholder", |w| w.get_tr_composer_placeholder()),
+    ("mention-candidates-label", |w| {
+        w.get_tr_mention_candidates_label()
+    }),
     // トップレベルメニューと About ダイアログ（Slint の attribution、Issue 237）
     ("menu-help", |w| w.get_tr_menu_help()),
     ("menu-about", |w| w.get_tr_menu_about()),
     ("about-title", |w| w.get_tr_about_title()),
     ("about-close", |w| w.get_tr_about_close()),
+    // 種別の呼び名は A11yStrings global 経由で読む（Issue 379）。
+    ("ai-bot-label", |w| {
+        A11yStrings::get(w).get_tr_ai_bot_label()
+    }),
+    ("person-label", |w| {
+        A11yStrings::get(w).get_tr_person_label()
+    }),
 ];
 
 /// テスト用 backend の初期化をプロセスで 1 回だけ行う。

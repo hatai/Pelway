@@ -43,3 +43,9 @@ scripts/pgbackrest-verify/work/
 # カバレッジ計測（cargo llvm-cov --lcov）のローカル検証生成物（#157。
 # .github/workflows/verify.yml の coverage ジョブと同じ引数で出力する）
 lcov.info
+
+# cargo-mutants の結果出力（mise run mutants / mutants:diff が生成。Issue #437）
+mutants.out/
+
+# eval 実行ワークスペース（skill-creator の被訳実行・採点結果。コミットしない）
+.eval-workspace/

@@ -25,7 +25,9 @@
 # exit 0 = 合格（static のみ、または static + runtime。ACCEPTANCE 未設定時）/ 1 = static 違反 or runtime 違反 or ACCEPTANCE で runtime PENDING /
 # 2 = 検査異常（リスト欠落・設定やソースの走査失敗・bind 走査の停滞・ss の失敗）
 set -uo pipefail
-# shellcheck source=lib.sh
+# SC1091（source を追えない）は抑止: lib.sh は一括入力（shellcheck scripts/demo-check/*.sh）に
+# 常に含まれるが、動的パス $(dirname …) を shellcheck は解決できない（-x を付けると source= で追える）。
+# shellcheck source=lib.sh disable=SC1091
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 hits=0
@@ -79,6 +81,9 @@ done
 any_re='(^|[^0-9.])0\.0\.0\.0([^0-9.]|$)|"::"|\[::\]|Ipv4Addr::UNSPECIFIED|Ipv6Addr::UNSPECIFIED|INADDR_ANY|in6addr_any'
 bind_scan_re='::[[:space:]]*bind[[:space:]]*\([[:space:]]*"'
 bind_cap_re='::[[:space:]]*bind[[:space:]]*\([[:space:]]*"([^"]*)"'
+# files は dc_load_files（lib.sh）が mapfile の間接引数で埋める。ここでの初期化は
+# その契約の明示（shellcheck には間接代入が見えないため）。
+files=()
 dc_load_files files
 for f in "${files[@]}"; do
   dc_is_wasm "${f}" && continue
