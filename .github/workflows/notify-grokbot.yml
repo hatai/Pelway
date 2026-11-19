@@ -131,16 +131,20 @@ jobs:
         if: github.event.action == 'synchronize' && steps.gate.outputs.should_send == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          DEDUP_PR: ${{ github.event.pull_request.number }}
           DEDUP_BRANCH: ${{ github.event.pull_request.head.ref }}
           DEDUP_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -eu
           # shellcheck disable=SC2016 # jq の --arg/--argjson 変数はシングルクォート内で参照するのが正しい
-          # 同じ head branch・同じ head sha の pull_request run（自分自身を除く）
+          # 同じ head branch・同じ head sha の pull_request run（自分自身を除く）。
+          # pull_requests が埋まっている run では PR 番号でも照合する（同じ
+          # ブランチを別の PR に再利用したとき旧 PR の送信記録で抑止しないため）。
+          # 空の run が多いため、空のときは branch+sha だけで照合する。
           if ! runs="$(gh api \
             "repos/$GITHUB_REPOSITORY/actions/workflows/notify-grokbot.yml/runs?event=pull_request&status=completed&per_page=100" \
-            --jq --arg branch "$DEDUP_BRANCH" --arg sha "$DEDUP_SHA" --argjson self "$GITHUB_RUN_ID" \
-            '[.workflow_runs[] | select(.id != $self and .head_branch == $branch and .head_sha == $sha) | .id] | .[]' 2>/dev/null)"; then
+            --jq --arg branch "$DEDUP_BRANCH" --arg sha "$DEDUP_SHA" --arg pr "$DEDUP_PR" --argjson self "$GITHUB_RUN_ID" \
+            '[.workflow_runs[] | select(.id != $self and .head_branch == $branch and .head_sha == $sha and ((.pull_requests | length) == 0 or any(.pull_requests[]; .number == ($pr | tonumber)))) | .id] | .[]' 2>/dev/null)"; then
             echo "::warning::dedup check failed (could not list workflow runs); sending notification anyway."
             echo "duplicate=false" >> "$GITHUB_OUTPUT"
             exit 0
