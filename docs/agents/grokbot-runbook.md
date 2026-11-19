@@ -229,7 +229,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 実装スレッドは `branch` の `agent/<N>-` から Issue 番号を、`thread_id` から送り先を取る。レビュースレッドから実装スレッドを探すときは、PR のブランチ名と同じ `branch` を持つスレッドを `t3 thread list` から選ぶ。
 
-調査スレッド（ブランチが `agent/investigate-` で始まる）も `opencode` なので、上の表の実装スレッドの列で扱う。ただし `finished` の `pr:` は調査の報告の Draft PR なので、レビューを始める前に `docs/agents/command-team-details.md` の「調査（入口B）」で起票可否を判断する。判断のあともレビューを経てマージするため、Approve 後の Draft 解除も実装スレッドと同じ扱いで調査スレッドに行わせる。調査が脆弱性の疑いで止まったとき（skill `investigate-bug` の手順 4）は、報告の対象の Issue に `needs-human` が付く。7 の「実装担当が止まった」と同じ扱いで人間に知らせる。
+調査スレッド（ブランチが `agent/investigate-` で始まる）も `opencode` なので、上の表の実装スレッドの列で扱う。ただし `finished` の `pr:` は調査の報告の Draft PR なので、レビューを始める前に `docs/agents/command-team-details.md` の「調査（入口B）」で起票可否を判断する。判断のあともレビューを経てマージするため、Approve 後の Draft 解除も実装スレッドと同じ扱いで調査スレッドに行わせる。調査が脆弱性の疑いで止まったとき（skill `investigate-bug` の手順 4）は、報告の対象が Issue ならその Issue に `needs-human` が付く。Issue の無い報告（部屋のメッセージなど）ではラベルは付かず、スレッドの返答に概要だけが書かれる。7 の「実装担当が止まった」と同じ扱いで人間に知らせる。
 
 ### `pelway.github-notify/v2`
 
