@@ -36,6 +36,23 @@ esac
         write_exec(&root.join("bin/gh"), "#!/usr/bin/env bash\necho '[]'\n");
         // 偽の fnox: 秘密は取れない（本物の webhook に送らないため。送信は「送れなかった」扱いになる）
         write_exec(&root.join("bin/fnox"), "#!/usr/bin/env bash\nexit 1\n");
+        // 偽の git: rev-parse の --git-dir / --git-common-dir は fake/git-dir・fake/git-common-dir の
+        // 中身を返す。無ければ両方 ".git"（本体 checkout）。worktree は中身を変えて模す。
+        write_exec(
+            &root.join("bin/git"),
+            r#"#!/usr/bin/env bash
+F="$FAKE_DIR"
+if [ "$1" != "rev-parse" ]; then exit 2; fi
+shift
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --git-dir) cat "$F/git-dir" 2>/dev/null || echo ".git" ;;
+    --git-common-dir) cat "$F/git-common-dir" 2>/dev/null || echo ".git" ;;
+  esac
+  shift
+done
+"#,
+        );
         Sandbox { root }
     }
 
@@ -45,6 +62,10 @@ esac
 
     fn state_file(&self) -> PathBuf {
         self.root.join("state/pelway/agent-watch.json")
+    }
+
+    fn lock_file(&self) -> PathBuf {
+        self.root.join("state/pelway/agent-watch.lock")
     }
 
     fn run(&self) -> Output {
@@ -196,6 +217,8 @@ fn unwritable_state_does_not_repeat_events() {
     sb.fake("list.json", LIST_DONE);
     sb.fake("show-mcp_a.json", SHOW_A_DONE);
     fs::write(sb.state_file(), STATE_A_RUNNING).unwrap();
+    // lock ファイルは起動時に作られるので、書き込めないディレクトリの中に先に置いておく
+    fs::write(sb.lock_file(), "").unwrap();
     let dir = sb.state_file().parent().unwrap().to_path_buf();
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
     let out = sb.run_with(&["--cycles", "3"]);
@@ -225,5 +248,92 @@ fn state_file_is_owner_only() {
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success());
     let mode = fs::metadata(sb.state_file()).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "mode {mode:o}");
+}
+
+#[test]
+fn worktree_checkout_is_refused() {
+    // --git-dir と --git-common-dir が違う（linked worktree）ところからは起動しない
+    let sb = Sandbox::new("worktree");
+    sb.fake("list.json", LIST_DONE);
+    sb.fake("git-dir", "/repo/.git/worktrees/wt\n");
+    sb.fake("git-common-dir", "/repo/.git\n");
+    let out = sb.run();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("main checkout"), "stderr: {stderr}");
+    assert!(
+        out.stdout.is_empty(),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(!sb.state_file().exists(), "state file was written");
+}
+
+#[test]
+fn second_instance_is_refused() {
+    // 状態ディレクトリの lock を先に取っていると、2 つ目は起動しない
+    let sb = Sandbox::new("lock");
+    sb.fake("list.json", LIST_DONE);
+    let mut hold = Command::new("flock")
+        .arg("-n")
+        .arg(sb.lock_file())
+        .args(["sleep", "30"])
+        .spawn()
+        .unwrap();
+    // lock が取られるまで待つ（lock が空いていれば flock -n ... true は成功する）
+    let mut held = false;
+    for _ in 0..100 {
+        let free = Command::new("flock")
+            .arg("-n")
+            .arg(sb.lock_file())
+            .arg("true")
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !free {
+            held = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(held, "flock was never taken: {}", sb.lock_file().display());
+    let out = sb.run();
+    let _ = hold.kill();
+    let _ = hold.wait();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("lock"), "stderr: {stderr}");
+    assert!(
+        out.stdout.is_empty(),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(!sb.state_file().exists(), "state file was written");
+}
+
+#[test]
+fn main_checkout_starts_and_lock_is_owner_only() {
+    // 本体 checkout では普通に起動し、lock ファイルは所有者だけが読み書きできる
+    let sb = Sandbox::new("main");
+    sb.fake("list.json", LIST_DONE);
+    let out = sb.run_with(&["--once"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("refusing"), "stderr: {stderr}");
+    assert!(sb.state_file().exists(), "state file was not written");
+    let mode = fs::metadata(sb.lock_file()).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600, "mode {mode:o}");
 }
