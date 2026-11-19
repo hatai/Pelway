@@ -12,10 +12,13 @@ failures=()
 
 MOCK="$ROOT/mock"
 mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$MOCK" "$ROOT/state/pelway"
-STATE="$ROOT/state/pelway/patrol-state.json"
 
-# 本物の conductor-watch.sh をコピーした偽リポジトリ（scripts/agent-gh をモックに差し替える）
+# 本物の conductor-watch.sh をコピーした偽リポジトリ（scripts/agent-gh をモックに差し替える）。
+# patrol-state.json の既定の置き場は共有 git dir（--git-common-dir）内の pelway/ のため、
+# 偽リポジトリも git init して実際の解決を通す（Issue #477）。
 cp "$REPO/scripts/conductor-watch.sh" "$ROOT/repo/scripts/"
+git init -q "$ROOT/repo"
+STATE="$ROOT/repo/.git/pelway/patrol-state.json"
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env bash
 # モック: issue list / pr list に $MOCK の JSON を返す。pr list の呼び出し回数を $MOCK/cycle に数える。
@@ -133,6 +136,11 @@ try: print(round((datetime.datetime.fromisoformat(s.replace("Z", "+00:00")).time
 except Exception: print("")' "$STATE" "$1"
 }
 
+pget() { # pget <top-level key> — patrol-state.json のトップレベル項目を読む
+  python3 -I -c 'import json,sys
+print(json.dumps(json.load(open(sys.argv[1])).get(sys.argv[2], ""), ensure_ascii=False))' "$STATE" "$1"
+}
+
 check() {
   local name="$1"; shift
   if "$@"; then printf 'ok   %s\n' "$name"; else printf 'FAIL %s\n' "$name"; failures+=("$name"); fi
@@ -146,6 +154,15 @@ has_all() { local f="$1"; shift; local w; for w in "$@"; do grep -q "$w" "$f" ||
 
 OLD_SINCE="2020-01-01T00:00:00+09:00"
 
+# --- 旧置き場（$XDG_STATE_HOME/pelway/）からの移行（Issue #477）---
+# 新置き場（共有 git dir 内の pelway/）が無い初回の起動で中身を引き継ぐ。
+# 巡回スクリプトが上書きする subjects・updated_at 以外の項目が残ることを確かめる。
+cat > "$ROOT/state/pelway/patrol-state.json" <<'EOF'
+{"subjects": {}, "items": {"99": {"main_pr": 123}},
+ "scheduled_task_id": "sched-migration", "watch_log_offset": 7,
+ "conductor_handover": {"note": "migration-check"}}
+EOF
+
 # --- ここから巡回の動作（Issue 11 と PR 101 を追う） ---
 
 # 0. agent:working で PR がまだ無い → 実装担当の作業待ち
@@ -155,6 +172,12 @@ mock_prs "[]"
 run_cycles 2
 check "no-pr issue is waiting_on=implement" eq "$(sget 11 waiting_on)" "implement"
 check "no-pr issue has next_owner" has <(sget 11 next_owner) "implement thread (#11)"
+check "patrol-state written inside git common dir" eq "$STATE" "$ROOT/repo/.git/pelway/patrol-state.json"
+check "migration: scheduled_task_id carried over" eq "$(pget scheduled_task_id)" '"sched-migration"'
+check "migration: items carried over" has <(pget items) '"99"'
+check "migration: watch_log_offset carried over" eq "$(pget watch_log_offset)" '7'
+check "migration: conductor_handover carried over" has <(pget conductor_handover) 'migration-check'
+check "migration: old path left untouched" has "$ROOT/state/pelway/patrol-state.json" 'sched-migration'
 
 # 1. 必須項目がすべて埋まっている（巡回のたびに更新される）
 check "waiting_since filled" has <(sget 11 waiting_since) "20"

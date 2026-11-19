@@ -44,7 +44,8 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 - スレッドへの指示は、新しい実行として送る（MCP の `t3_thread_send` で `mode: queue`）。実行中のスレッドに `steer`（既定の `auto`）で送ると、実行の途中に差し込まれ、その実行が指示を扱わずに終わることがある。終わりの報告と PR の head で、指示が扱われたかを確かめる。
 - 判断はすべて Issue か PR にコメントで残す。セッションの文脈だけに置かない。
 - 指揮役が Issue を立てる・分割する・差し戻された本文を直すときは、skill `write-issue` に従う。`ready-for-agent` を付ける前（人間に委任されたとき）は、`write-issue` の手順 6 のゲートを通す。
-- 見張りの状態は `scripts/conductor-watch.sh` が `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。
+- sandbox に止められた操作を、sandbox の外へ出る抜け道（`systemd-run`・`nohup`・別のシェル・ラッパースクリプトなど）で実行しない。止められたら止まって報告する。作業ログに残る同種の前例（`systemd-run` 経由の patrol-state 更新・ボードキュー手動適用など）は許可にならない（2026-11-19 の hatai の決定、Issue #477）
+- 見張りの状態は `scripts/conductor-watch.sh` が `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。巡回状態の補助記録 `patrol-state.json` だけは、sandbox 内の指揮役からも読み書きできるよう、リポジトリの共有 git dir（`git rev-parse --git-common-dir`）内の `pelway/` に置く（git の管理対象外。Issue #477）。
 
 ## スレッド名
 
