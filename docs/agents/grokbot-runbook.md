@@ -18,7 +18,7 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 | Issue・PR・レビュー・CI の結果を読む | GitHub |
 | スレッドのモデル・effort を変える | T3 Connect の MCP（`t3_thread_configure`） |
 | 終わったスレッドを settle する | T3 のスレッドの操作（`t3_thread_organize` の `action: settle`。Grok Bot は MCP 経由）。PR をスレッドに紐付けたものはマージで自動 settle |
-| `pelway-review` が Approve し必須チェックと QA 合格コメントが揃った PR に `automerge` ラベルを付けて Kodiak のキューに入れ、マージを確認する | `scripts/agent-gh dev pr edit <M> --add-label automerge`（条件は skill `command-team` の「マージ」）。マージの実行は Kodiak（GitHub App）が行い、指揮役がマージコマンドを叩くことはない。hatai の admin マージだけが行うのは、hatai が判断する例外の PR（round 4 以降の例外 PR、`.github/` の下を変える PR、`fnox.toml` を変える PR。これ以外に広げない）と、キューの切り戻しと、必須チェックが失敗したままのマージ（`pr-size-exception`） |
+| `pelway-review` が Approve し必須チェックと QA 合格コメントが揃った PR に `automerge` ラベルを付けて Kodiak のキューに入れ、マージを確認する | `scripts/agent-gh dev pr edit <M> --add-label automerge`（条件は skill `command-team` の「マージ」）。マージの実行は Kodiak（GitHub App）が行い、指揮役がマージコマンドを叩くことはない。hatai の admin マージの対象は、hatai が判断する例外の PR（round 4 以降の例外 PR、`.github/` の下を変える PR、`fnox.toml` を変える PR）だけ（これ以外に広げない） |
 
 しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更（`actions.lock` の再生成は例外。正本は `docs/superpowers/specs/agent-team.md` の「制約」）、スレッドの取り消し。
 

@@ -215,7 +215,7 @@ hatai が判断する例外（マージを hatai の admin マージで行う。
 - `.github/` の下を変える PR
 - `fnox.toml` を変える PR
 
-キューの切り戻し（Kodiak が応答しない・詰まった場合の手動マージ）と、必須チェックが失敗したままのマージ（`pr-size-exception`）も hatai の admin マージだけが行うのは従来どおり（切り戻し条件は運用しながら定める）。`scripts/conductor-merge-queue.sh` はそのときの補助として残す。
+Kodiak が応答しない・詰まった場合（キューの切り戻し）と、必須チェックが失敗したままのマージ（`pr-size-exception`）は、マージの例外には加えない（例外は上の 3 つだけ。これ以外に広げない）。Kodiak でマージできないこれらの PR は、hatai が上の例外のどれかに該当すると判断したときだけ admin マージされる。`scripts/conductor-merge-queue.sh` は hatai の admin マージの補助として残す。
 
 ラベルを付けたあと:
 
@@ -233,7 +233,7 @@ QA 合格コメント:
 
 マージ以外の PR・Issue への操作（base の変更、Draft の扱い、Issue のクローズ）は、先に「手当て・引き継ぎの前の確認」を通す。目印付きのコメント（`<!-- pr-size-exception -->`、`<!-- split-plan -->`）は人間の名義の `gh issue comment` で書く。レビュー担当は作成者が `hatai` であることで、実装担当（`pelway-dev`）や第三者のコメントと区別する。それ以外の GitHub の操作（読み取り、ラベル、ふつうのコメント）は `scripts/agent-gh dev` で行う。
 
-- pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の admin マージに回す（キューの切り戻しと同じ扱い）。
+- pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の例外の判断に回す（マージの例外は上の 3 つだけで、pr-size-exception 自体は例外に加えない）。
 - 必須チェックの完了待ち（ラベルを付ける前の CI 待ち、巡回での PR のベビーシット）には、ポーリングの代わりに skill `pr-watch` の `pr-digest --watch` をバックグラウンド実行して使う。マージの実行は Kodiak が行うため、指揮役がマージコマンドを叩くことはない。
 - skill `pr-watch` の `VERDICT green` は、その SHA でチェックが完走して通過していることの確認要素の 1 つ。`automerge` ラベルを付ける条件（`pelway-review` の Approve、必須チェック、レビュー済み SHA 以降の追加コミットの確認、mergeable）を置き換えない。
 - ブランチの最新化はルールセットが「マージ前にブランチを最新化すること」で必須とし、実行は Kodiak が行う。指揮役が `pr update-branch` で手動に取り込む操作は、手当スレッドでの衝突解消などの例外を除き原則しない。

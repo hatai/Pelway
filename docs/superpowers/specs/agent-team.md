@@ -73,7 +73,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - 指揮役が T3 のスレッドとして動いているとき、作業をさせるスレッド（実装・調査・レビュー）の作成はネイティブの `t3_thread_launch` で行う（T3 Connect の MCP や CLI のサブプロセスを経由しない）。指揮役が Grok Bot（クラウド）のときは T3 Connect の MCP の同じ操作を使う。実行中のスレッドへの指示送信（`t3_thread_send`）はこの限りではない
 - 終わったスレッドの片付け（settle）: PR を作ったスレッドはその PR をスレッドに紐付け（T3 の PR リンク）、マージで自動的に settle される。PR を持たないスレッド（調査・試験・失敗打ち切り・マージされずに閉じた PR のスレッド）は、指揮役が結果を消費した後に `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドは settle しない（人間が再開しうるため）
 - main はルールセットで守る。必須チェックは `mise run verify` と `pr-size` の成功、承認は 1 件必須（Code Owners レビューの必須は外し、`pelway-review` の Approve で満たせる形）、新しいコミットで古い Approve を外す、「マージ前にブランチを最新化すること」を必須とする（Kodiak の直列キューと合わせて、チェックが通ったツリーとマージされるツリーを一致させる）。ルールセットの変更前後の値は「マージキュー」の表に転記する
-- エージェントの PR・指揮役が作った PR・hatai 自身が作った PR のいずれも、`pelway-review` の Approve と必須チェックと QA 合格コメントの後、指揮役が `automerge` ラベルを付けて Kodiak がマージする。hatai の admin マージ（hatai の判断）だけが行うのは、round 4 以降の例外 PR（ラウンドの上限は skill `command-team` の「レビューのラウンド」）、`.github/` の下を変える PR、`fnox.toml` を変える PR のマージ（例外はこれ以外に広げない）、Kodiak が応答しない等のキューの切り戻し、必須チェックが失敗したままのマージ（`pr-size-exception`）である（`enforce_admins: false` を維持する）
+- エージェントの PR・指揮役が作った PR・hatai 自身が作った PR のいずれも、`pelway-review` の Approve と必須チェックと QA 合格コメントの後、指揮役が `automerge` ラベルを付けて Kodiak がマージする。hatai の admin マージの対象は、round 4 以降の例外 PR（ラウンドの上限は skill `command-team` の「レビューのラウンド」）、`.github/` の下を変える PR、`fnox.toml` を変える PR の 3 つだけである（マージの例外はこれ以外に広げない。Kodiak が応答しない等のキューの切り戻しや、必須チェックが失敗したままの `pr-size-exception` は例外には加えず、hatai がこの 3 つのどれかに該当すると判断した PR だけが admin マージされる。`enforce_admins: false` を維持するのはこの例外のためである）
 
 ## マージキュー
 
@@ -82,7 +82,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - 設定ファイル `.kodiak.toml`（リポジトリルート）: `version = 1`、`merge.automerge_label = "automerge"` と `merge.require_automerge_label = true`（ラベルが付いた PR だけがキューの対象）、`merge.method = "merge"`（マージコミット方式）、`merge.blacklist_labels = ["needs-human"]`（人間の判断待ちはラベルが付いていてもマージしない）。Dependabot のレビューなし自動マージ（`merge.automerge_dependencies`）は設定しない。設定項目の意味は https://kodiakhq.com/docs/config-reference
 - `automerge` ラベルは「マージの指示」を表す PR ラベル。付けるのは指揮役だけで、実装スレッドは自分の PR に付けない（付け手と手順は skill `command-team` の「マージ」）
 - ルールセットの要点: 必須チェック（`mise run verify`・`pr-size`）の維持、承認 1 件必須・Code Owners レビュー必須の解除（`pelway-review` の Approve で満たせる形）、「マージ前にブランチを最新化すること」の必須化。Kodiak はブランチ保護を満たした PR だけをマージするため、この組み替えが導入の前提になる
-- 役割分担: レビュー担当は従来どおり Approve・Request changes を投稿する。指揮役は Approve と必須チェックの通過と QA 合格コメント（同じ head の sha の `QA-PASS` コメント）を確かめて `automerge` ラベルを付け、Kodiak のマージを確認してから `agent:working` を外して人間に報告する。Kodiak はブランチの最新化とマージを直列に実行し、コンフリクト等でマージできないときは PR にコメントして `automerge` ラベルを外す（巡回での検知と手当は runbook の「マージキュー待ちの PR」）。Kodiak の自動更新が取り込んだあとは、指揮役が取り込みのコミットに main 以外の差分がないことを確かめる。キューの切り戻しは hatai の admin マージだけが行う
+- 役割分担: レビュー担当は従来どおり Approve・Request changes を投稿する。指揮役は Approve と必須チェックの通過と QA 合格コメント（同じ head の sha の `QA-PASS` コメント）を確かめて `automerge` ラベルを付け、Kodiak のマージを確認してから `agent:working` を外して人間に報告する。Kodiak はブランチの最新化とマージを直列に実行し、コンフリクト等でマージできないときは PR にコメントして `automerge` ラベルを外す（巡回での検知と手当は runbook の「マージキュー待ちの PR」）。Kodiak の自動更新が取り込んだあとは、指揮役が取り込みのコミットに main 以外の差分がないことを確かめる。キューの切り戻し（Kodiak が応答しない等）も、hatai が例外と判断した PR の admin マージによる（例外は上の 3 つだけ）
 
 ルールセットの変更前後の値（変更は hatai の GitHub 設定操作。「変更前」はこの文書の従来の記述からの転記で、pelway-dev のトークンではクラシックブランチ保護の読み取りができないため API の実測値ではない）:
 
@@ -92,7 +92,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 | 承認 | Code Owners（`* @hatai`）のレビューが必須 | 1 件必須（Code Owners レビュー必須は解除） |
 | マージ前のブランチ最新化 | 必須でない | 必須 |
 | stale な承認の取り消し（新しい push で承認を無効化） | — | 有効化する（新しいコミットで古い Approve を外す。2026-11-19 の hatai の決定、Issue #480。手順書は入っている前提で書く） |
-| `enforce_admins` | `false`（hatai の admin マージによる迂回が可能） | `false`（切り戻しの admin マージを残す） |
+| `enforce_admins` | `false`（hatai の admin マージによる迂回が可能） | `false`（例外 PR の admin マージを残す） |
 | リポジトリのルールセット `main`（id 26958258） | `deletion`・`non_fast_forward` のみ | 同じ（ブランチ保護の必須チェック・承認・最新化とは別に維持） |
 
 ## 状態の表し方
