@@ -73,7 +73,7 @@ scripts/agent-gh review pr checks <N> --required --json name,bucket
 | must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / verify が失敗 / pr-size が失敗（PR に `pr-size-exception` ラベルが付いていれば数えない） / 正しさ・セキュリティの欠陥 / ブランチが `agent/` で始まるのに PR の作成者（`author.login`）が `app/pelway-dev` でない |
 | nit | 上に当てはまらない改善案 |
 
-3 回目以降のレビューでは、must-fix をさらに領域で分類する。このレビューが round 3 以降かは、PR のコメントのラウンドサマリー（`### review round <R>`）と `pelway-review` のこれまでのレビュー件数（`scripts/agent-gh review pr view <N> --json reviews --jq '.reviews | length'`）から確かめる（ラウンドの数え方は skill `command-team` の「レビューのラウンド」。同じ head は 1 ラウンド）。
+3 回目以降のレビューでは、must-fix をさらに領域で分類する。このレビューが第何ラウンドかは、PR のコメントのラウンドサマリー（`### review round <R>`。skill `implement-issue` の手順 9 が各ラウンドの結果への対応のたびに投稿する）で決める。最も大きい `<R>` が直近に対応が終わったラウンドなので、このレビューはその `<R>` + 1 ラウンド目として扱う。ラウンドサマリーが 1 つも無い PR は round 1 として扱う。ラウンドの判定に `pelway-review` のレビュー件数は使わない（複数のレビュー担当を同じ head に付けたときや、同じラウンドのまま head が変わった再レビューのときは 1 ラウンドに複数のレビューが投稿されて件数がラウンド数と食い違い、正を決められないため。ラウンドの数え方の正本は skill `command-team` の「レビューのラウンド」。同じ head は 1 ラウンド）。
 
 - 次の領域に当たる指摘は、何回目でも must-fix に残す（skill `command-team` の「レビューのラウンド」と同じリスト）:
   - 認可・読める人の規則・取り消し
