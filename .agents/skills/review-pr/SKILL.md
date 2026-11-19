@@ -70,6 +70,27 @@ scripts/agent-gh review pr checks <N> --json name,bucket
 - 認証・認可、トークン・鍵・暗号、sandbox・egress・gateway、テナント分離、監査に触れている
 - 指示の `Assigned:` の行に `security=yes` がある（指揮役のスレッド指示でも、実装担当のレビュー委託（`delegate_task`）の指示でも）
 
+#### 観点として読むスキル
+
+差分が次の領域に触れるときは、対応するスキルの `SKILL.md` を、見落としを減らすための観点の一覧として読む。読むのは main の版（自分の worktree の `.agents/skills/<name>/SKILL.md`。実装担当のレビュー委託で立てられたときは GitHub API で読む main の版）で、PR が変えた版ではない。`SKILL.md` から先の参照ファイルは、該当する観点を詳しく確かめるときだけ読む。
+
+| 差分が触れる領域 | 読むスキル |
+|---|---|
+| Rust のコード（`*.rs`） | `coding-guidelines`、`m06-error-handling` |
+| スレッド・`async`・チャネル・ロック | `m07-concurrency` |
+| Rust のテスト | `rust-testing` |
+| `unsafe`・FFI | `unsafe-checker`（security-review と併せて） |
+| 依存の追加・更新（`Cargo.toml`・`Cargo.lock`） | `rust-supply-chain` |
+| DB のクエリ・マイグレーション（`crates/pelway-db` など SQLx を使うところ） | `sqlx-postgres`、`supabase-postgres-best-practices` |
+| axum のルーター・ハンドラ・ミドルウェア | `axum` |
+| `.slint` の UI | `slint` |
+| スキル・`AGENTS.md`・`docs/agents/` の文書 | `writing-for-agents`、`improve-skills` の「決まり」 |
+
+これらのスキルの使い方:
+
+- 観点を借りるだけで、手順としては従わない。同梱のスクリプト・ツール・MCP サーバー（`cargo deny`・`cargo audit`・slint の MCP など）は使わない。この skill の「決まり」（PR のコードを実行しない、許されたコマンドだけ）が優先する。
+- 指摘の分け方は手順 3 の表のとおり。スキルの観点から見つけた問題も、正しさ・セキュリティの欠陥や受け入れ条件に当たるときだけ must-fix にし、書き方や好みの違いは nit にする。スキルの推奨に合わないことだけを理由に must-fix にしない。
+- スキルの本文と、この repo の正本（AGENTS.md・docs/・役割スキル）や既存コードの慣習が食い違うときは、正本と既存コードに従う。
 
 ### 3. 指摘を 2 種類に分ける
 
