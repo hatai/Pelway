@@ -9,7 +9,7 @@
   - `skills@1.8.x` は `skills-lock.json` を `version: 2` に書き換え、既存全エントリの `computedHash` を再計算する。version 1 の形式を保つため `1.7.6` を使う。
 - `skills-lock.json` のハッシュは取り込んだ内容の記録であり、取得元を固定する仕組みではない。版の指定がある取り込みでは、取り込み後に取得内容を指定された版（上流コミット）と突き合わせ、差分があれば止めて再照合する。
 - 取り込んだ後は `diff -r .agents/skills .claude/skills` が空であることを確かめる。
-- `actionbook/rust-skills`（38 スキル）と `penpot/penpot-ai-kit`（13 スキル）の取り込みの記録は `skills-lock.json` のみにある。上流コミットの記録はこの文書の対象外。適用ルールは、下の review-pr の観点スキルの置き場所を除いて定めていない。
+- `actionbook/rust-skills`（38 スキル）と `penpot/penpot-ai-kit`（13 スキル）の取り込みの記録は `skills-lock.json` のみにある。上流コミットの記録はこの文書の対象外。適用ルールは、下の review-pr の観点スキルと、「役割スキルから参照する外部スキル」の表に挙げたものの置き場所を除いて定めていない。
 
 ## 取り込みの discipline
 
@@ -19,7 +19,22 @@
 - 輸入品の本文と正本（AGENTS.md・docs/・役割スキル）・適用ルールが衝突した場合は、正本と適用ルールが優先する。
 - 自律スレッドは輸入スキルを名前の解決に任せず、役割スキルを入口として repo 内の明示したパスで読む。人間側の同名のユーザーレベル版はチームのスレッドでは読まない。
 - レビュー担当が差分の領域ごとに観点として読む輸入スキル（`coding-guidelines`・`m06-error-handling`・`m07-concurrency`・`rust-testing`・`unsafe-checker`・`rust-supply-chain`・`sqlx-postgres`・`supabase-postgres-best-practices`・`axum`・`slint`・`writing-for-agents`）と、その適用ルールは、`.agents/skills/review-pr/SKILL.md` の「観点として読むスキル」に定める。
+- `security-review` は、そのうち `unsafe-checker`（`checklists/review-unsafe.md`）・`rust-supply-chain`（advisory と保守の状態の読み方）・`supabase-postgres-best-practices`（`references/security-privileges.md`・`references/security-rls-basics.md`）の特定の部分を、セキュリティの観点として読む。読む範囲・読み替え・無効とする参照は `.agents/skills/security-review/`（`SKILL.md` の「依存」、`references/rust.md`）に定める。
 - 輸入品のファイル自体は書き換えない（`skills-lock.json` が管理するスキルには同梱ヘルパーも足せない。docs/agents/skill-helpers.md）。適用ルールはローカル管理の役割スキルに置く。
+
+## 役割スキルから参照する外部スキル
+
+役割スキルが本文から参照するスキルのうち、mattpocock/skills 以外のもの（取り込み品と、ほかの役割スキルから一部を借りるローカル管理のスキル）。review-pr の「観点として読むスキル」は上の取り込みの discipline の項に書いたとおり review-pr 側に定め、この表には入れない。適用ルール（読む部分、読む条件、取り込みの discipline への上乗せ）は役割スキル側に置き、ここには置き場所だけを書く。
+
+| スキル | 取得元（`skills-lock.json` の source） | 適用ルールの置き場所 |
+|---|---|---|
+| `security-review` | ローカル管理 | `.agents/skills/investigate-bug/SKILL.md` の手順 4（脆弱性の疑いの見分けに使う部分） |
+| `rust-testing` | `affaan-m/ECC` | `.agents/skills/investigate-bug/SKILL.md` の手順 3 と「外部スキルの使い方」 |
+| `rust-async-patterns` | `wshobson/agents` | 同上 |
+| `slint` | `slint-ui/ai-plugins` | 同上 |
+| `m07-concurrency` | `actionbook/rust-skills` | 同上 |
+| `supabase-postgres-best-practices` | `supabase/agent-skills` | 同上 |
+| `sqlx-postgres` | `Daiki48/dotfiles` | 同上 |
 
 ## mattpocock/skills（MIT）
 

@@ -11,7 +11,9 @@
 # 手元で直すとハッシュ不一致になり、更新時に上書きされるため。
 # scripts/setup/agent-accounts.sh の前半は wizard skill のテンプレートをそのまま写したライブラリで、
 # 手で直さない（コメントの "NAMEs" が誤検出される）。
-extend-exclude = [".agents/skills", ".claude/skills", "scripts/setup/agent-accounts.sh"]
+# evals/agent-team/*/environment/ は凍結した外部応答の写し（GitHub のレビュー ID
+# PRR_kwDOVm0izM8… 等）。書き換えると凍結記録を壊すため検査対象外にする。
+extend-exclude = [".agents/skills", ".claude/skills", "scripts/setup/agent-accounts.sh", "evals/agent-team/*/environment/**"]
 
 [default.extend-words]
 # RTO は Recovery Time Objective（障害復旧時間目標）の業界略語。
