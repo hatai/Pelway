@@ -55,6 +55,7 @@ chmod +x "$BIN"/*
 
 export PATH="$BIN:$PATH"
 export PELWAY_AGENT_FNOX_CONFIG="$ROOT/agent-fnox.toml"
+export PELWAY_AGENT_FNOX_CONFIG_REVIEW="$ROOT/agent-fnox-review.toml"
 export FAKE_PELWAY_DEV_APP_ID=333
 export FAKE_PELWAY_DEV_APP_INSTALLATION_ID=444
 export FAKE_PELWAY_DEV_APP_KEY=dev-pem-body
@@ -103,6 +104,25 @@ L="$ROOT/review_mints_token.log"
 [[ "$(cat "$L.key-content" 2>/dev/null)" == "pem-body" ]] || failures+=("review_key_file: --key file lacks key")
 [[ "$(cat "$L.key-mode" 2>/dev/null)" == "600" ]] || failures+=("review_key_file: mode not 600")
 [[ -n "$(cat "$L.key-path" 2>/dev/null)" && ! -e "$(cat "$L.key-path" 2>/dev/null)" ]] || failures+=("review_key_file: key file not removed")
+
+# review ロールは review 専用の fnox 設定（PELWAY_AGENT_FNOX_CONFIG_REVIEW）だけを読む（#449 の鍵分割）。
+# dev 用の設定からは 1 項目も読まない（PELWAY_DEV_* が review 側から復号できない構成にするため）。
+grep -qF -- "-c $ROOT/agent-fnox-review.toml get PELWAY_REVIEW_APP_ID" "$ROOT/review_mints_token.log.fnox-args" 2>/dev/null ||
+  failures+=("review_uses_review_config: fnox not called with PELWAY_AGENT_FNOX_CONFIG_REVIEW")
+! grep -qF -- "-c $ROOT/agent-fnox.toml get" "$ROOT/review_mints_token.log.fnox-args" 2>/dev/null ||
+  failures+=("review_uses_review_config: review role read the dev config")
+
+# dev ロールは dev 用の設定のまま（review 用設定を読まない）
+run dev_uses_dev_config dev pr list
+grep -qF -- "-c $ROOT/agent-fnox.toml get PELWAY_DEV_APP_ID" "$ROOT/dev_uses_dev_config.log.fnox-args" 2>/dev/null ||
+  failures+=("dev_uses_dev_config: fnox not called with PELWAY_AGENT_FNOX_CONFIG")
+! grep -qF -- "-c $ROOT/agent-fnox-review.toml get" "$ROOT/dev_uses_dev_config.log.fnox-args" 2>/dev/null ||
+  failures+=("dev_uses_dev_config: dev role read the review config")
+
+# review 用の設定に秘密が無ければ fail-closed（exit 3）。gh も呼ばない
+FAKE_PELWAY_REVIEW_APP_KEY="" run review_missing_secret_fails_closed review pr list
+[[ "$RC" == 3 ]] || failures+=("review_missing_secret_fails_closed: exit $RC, want 3")
+[[ ! -e "$ROOT/review_missing_secret_fails_closed.log" ]] || failures+=("review_missing_secret_fails_closed: gh was called")
 
 run dev_git_identity dev git commit -m x
 expect_log dev_git_identity "GH_TOKEN=dev-token"

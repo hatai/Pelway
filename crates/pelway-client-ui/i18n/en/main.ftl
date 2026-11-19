@@ -17,6 +17,8 @@ ai-presence-waiting = Awaiting decision
 ## Top bar
 search-placeholder = ⌕ Search conversations and work logs
 search-shortcut = ⌘K
+## Always-on display (demo/simulated label and AI identification, S00)
+banner-demo-mock = Demo · simulated responses
 ## Today view (two buckets per inbox.rs: awaiting my decision / my requests)
 today-title = Today
 today-section-mine = Awaiting my decision

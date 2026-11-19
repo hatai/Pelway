@@ -16,6 +16,7 @@ AI 開発チームのレビュー担当が、PR 1 本をレビューして GitHu
 - 実行してよいコマンドは `git` の読み取り系（`git show`・`git diff`・`git log`・`git blame`・`git grep`。worktree の main を読むため）と `scripts/agent-gh review ...` だけ。PR の側のファイルは GitHub API で読む。
 - GitHub との通信は `scripts/agent-gh review ...` だけで行う。レビュースレッドの sandbox はネットワークを GitHub だけに絞り、`.git` を読み取り専用にしているため、`git fetch` は通らない。
 - 自分の worktree の外でコマンドを実行しない。PR の head を取ってこられないときは、他の worktree で代わりに検査せず、`verdict: failed` で報告する。
+- sandbox に止められたら、`systemd-run`・`nohup`・別のシェル・ラッパースクリプトなど sandbox の外へ出る抜け道を使わず、止まって `verdict: failed` で報告する。
 - `pr ready` は実行しない（レビュー担当の App には権限がない。Ready for review への切り替えは実装担当の App が行う）。
 - 投稿系のコマンドは `&&` でつながず 1 つずつ実行し、終了コードを確かめる。失敗したら `verdict: failed` で報告する。成功していない投稿を成功と報告しない。
 - GitHub への投稿は必ず `scripts/agent-gh review ...` で行う。投稿者が `pelway-review[bot]` になる。

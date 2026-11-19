@@ -86,6 +86,7 @@ EOF
 start_watch() {
   MOCK="$MOCK" SLEEP_MAX="${SLEEP_MAX:-}" MOCK_EDIT_FAIL="${MOCK_EDIT_FAIL:-}" \
   PELWAY_BOARD_QUEUE_DIR="$QUEUE" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
+  PELWAY_PATROL_STATE="$ROOT/state/pelway/patrol-state.json" \
     bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
   WPID=$!
 }

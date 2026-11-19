@@ -22,6 +22,8 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 
 しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更（`actions.lock` の再生成は例外。正本は `docs/superpowers/specs/agent-team.md` の「制約」）、スレッドの取り消し。
 
+sandbox に止められた操作（書き込み・実行・ネットワークなど）は、sandbox の外へ出る抜け道（`systemd-run`・`nohup`・別のシェル・ラッパースクリプトなど）で実行しない。止められたら、その操作を行わず止まって報告する。作業ログなどに残る同種の前例は許可にならない（2026-11-19 の hatai の決定、Issue #477）。
+
 ラベル操作の裏付け検査: `needs-human` の解除と `automerge` の付け外しは、actor だけでは判定しない（エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai になることがあるため）。見張り（conductor-watch）が付け外しの時刻を hatai 本人の指示の記録（同じ Issue・PR への hatai 本人のコメントで、付け外しの前 24 時間以内のもの）と突き合わせ、裏付けが取れない操作を「出どころ不明」として `LABEL unbacked` の行で watch.log に出す。`needs-human` を hatai の指示の記録なしに外した場合は、それ自体を手順違反として記録し、Grok Bot に知らせる（「指揮役の定期巡回（スケジュール起床）」）。
 
 スレッドに送る指示は Issue 番号か PR 番号と、使う skill 名だけにする（スレッドを立てる指示には、2 行目に割り当ての行 `Assigned: ...` を入れる。書式は skill `command-team`）。作業ルールは AGENTS.md と skill に書いてあるので、手順書の中身をスレッドに書き写さない。
@@ -312,7 +314,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 
 ## 10. 巡回状態の補助記録
 
-状態の正本は GitHub Issues と Projects ボードである。`~/.local/state/pelway/patrol-state.json` は正本を増やさないための補助記録で、GitHub に対応する置き場が無い情報（誰待ちか・待ち始めた時刻・次の担当）だけを持つ。
+状態の正本は GitHub Issues と Projects ボードである。`patrol-state.json` は正本を増やさないための補助記録で、GitHub に対応する置き場が無い情報（誰待ちか・待ち始めた時刻・次の担当）だけを持つ。置き場はリポジトリの共有 git dir（`git rev-parse --path-format=absolute --git-common-dir` が指す `.git`）内の `pelway/patrol-state.json` — 主 checkout と全 worktree で共有される git の管理対象外の場所で、sandbox 内の指揮役からも読み書きできる（Issue #477。旧置き場 `~/.local/state/pelway/patrol-state.json` の中身は conductor-watch.sh が初回起動時に引き継ぐ）。
 
 対象（キーは Issue 番号）ごとの必須項目:
 
@@ -391,7 +393,7 @@ Grok Bot が動かない（レート制限、障害）とき、人間が別の�
 順序:
 
 1. GitHub の実状態を確認する（`agent:working`・`needs-human` の Issue、Draft・レビュー待ち・マージ待ちの PR、Issue のコメントに残った判断）
-2. `~/.local/state/pelway/patrol-state.json` を読み、`subjects` の対象ごとの「誰待ちか・待ち始めた時刻・次の担当・次回確認時刻」と、`items` の作業状態（主 PR、作業状態の印、前回ステータスなど）を把握する
+2. `patrol-state.json`（共有 git dir 内の `pelway/`。`git rev-parse --path-format=absolute --git-common-dir` で場所を解決する）を読み、`subjects` の対象ごとの「誰待ちか・待ち始めた時刻・次の担当・次回確認時刻」と、`items` の作業状態（主 PR、作業状態の印、前回ステータスなど）を把握する
 3. 記録と GitHub の実状態を突き合わせ、食い違う項目を GitHub を正として直す（巡回スクリプトの次の巡回でも直る）
 4. `waiting_on` が `conductor` の対象（前指揮役の判断待ち）を引き継ぎ、判断を進めるか人間に確認する
 
