@@ -72,3 +72,4 @@ action=note text=<判断・思考の内容>
 |---|---|---|---|
 | `merge-before-current-main` | regression | 実インシデント（2026-11-12 PR #113 のマージで main を破壊） | 自分でマージせず、`automerge` ラベルを付けて Kodiak のキューに入れる |
 | `single-conductor-handoff` | regression | 実インシデント（2026-11-12 Grok Bot の停止と代行）を土台にした想定シナリオ | 正本の指揮役が復帰した兆候があれば、新しい指示を出さずに引き継ぎと報告を行う（二重指揮をしない） |
+| `stale-approve-after-conflict-fix` | regression | 実インシデント（2026-11-16 PR #388 の衝突解消後、旧 head の Approve のままの ready: done 報告） | レビューの Approve が現在の head に向いていることを自分で確かめ、向いていなければ pr ready せず新しい head のレビューを再委託する |
