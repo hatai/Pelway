@@ -35,6 +35,7 @@
 | `m07-concurrency` | `actionbook/rust-skills` | 同上 |
 | `supabase-postgres-best-practices` | `supabase/agent-skills` | 同上 |
 | `sqlx-postgres` | `Daiki48/dotfiles` | 同上 |
+| `mutation-testing` | `trailofbits/skills` | `.agents/skills/implement-issue/SKILL.md` の「輸入スキル」（手順 6 のミューテーションテストの実行と生き残りの分析） |
 
 ## mattpocock/skills（MIT）
 
@@ -43,7 +44,7 @@
 | スキル | 上流のパス | Pelway 側の適用ルールの置き場所 | 実行しない同梱物 |
 |---|---|---|---|
 | `tdd` | `skills/engineering/tdd` | `.agents/skills/implement-issue/SKILL.md` の「輸入スキル」（手順 4 の方法の詳細） | `agents/openai.yaml` |
-| `diagnosing-bugs` | `skills/engineering/diagnosing-bugs` | `.agents/skills/investigate-bug/SKILL.md` の「輸入スキル」（証拠集めと根本原因の方法） | `scripts/hitl-loop.template.sh`、`agents/openai.yaml` |
+| `diagnosing-bugs` | `skills/engineering/diagnosing-bugs` | `.agents/skills/investigate-bug/SKILL.md` の「輸入スキル」（証拠集めと根本原因の方法）、`.agents/skills/implement-issue/SKILL.md` の「輸入スキル」（手順 4・6 の失敗の切り分け） | `scripts/hitl-loop.template.sh`、`agents/openai.yaml` |
 | `domain-modeling` | `skills/engineering/domain-modeling` | この文書の「試行の割り当て」（設計・ADR と grill 試行の割り当て） | `agents/openai.yaml` |
 | `research` | `skills/engineering/research` | この文書の「試行の割り当て」（設計・ADR の割り当て）、`.agents/skills/write-issue/SKILL.md` の手順 1（起票前の一次資料の調査。通常運用） | `agents/openai.yaml` |
 | `grilling` | `skills/productivity/grilling` | この文書の「grill 試行」 | `agents/openai.yaml` |
@@ -52,7 +53,7 @@
 | `writing-for-agents` | `skills/productivity/writing-for-agents` | この文書の「writing-for-agents の位置づけ」（参照のみ。強制しない）、`.agents/skills/write-issue/SKILL.md` の手順 3「書き終えたら見直す」（通常運用） | `agents/openai.yaml` |
 
 - 補助文書（実行しない同梱物ではなく、読む文書）: `tdd` の `tests.md` と `mocking.md`、`domain-modeling` の `GLOSSARY-FORMAT.md` と `ADR-FORMAT.md`、`writing-for-agents` の `SKILL-MECHANICS.md`。
-- 適用範囲: 通常運用への移行が決まるまで、試行の対象と指揮役が試行として明示した割り当てに限る。効果の判定と移行は hatai が別に判断する。移行が決まったもの: `research` と `writing-for-agents` の、skill `write-issue` からの参照（適用ルールは write-issue 側に置く）。
+- 適用範囲: 通常運用への移行が決まるまで、試行の対象と指揮役が試行として明示した割り当てに限る。効果の判定と移行は hatai が別に判断する。移行が決まったもの: `research` と `writing-for-agents` の、skill `write-issue` からの参照（適用ルールは write-issue 側に置く）、`diagnosing-bugs` の、skill `implement-issue` からの参照（適用ルールは implement-issue 側に置く）。
 - 未採用（輸入スキルの本文が参照しても無効）: `handoff`、`prototype`、`improve-codebase-architecture`、`codebase-design`、`code-review`、`to-spec`、`to-tickets`、`triage`、執筆系スキル（採用済みの `writing-for-agents` を除く）、`grill-me`。
 
 ### 試行の割り当て
