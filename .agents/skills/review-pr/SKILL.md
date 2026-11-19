@@ -73,6 +73,19 @@ scripts/agent-gh review pr checks <N> --required --json name,bucket
 | must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / verify が失敗 / pr-size が失敗（PR に `pr-size-exception` ラベルが付いていれば数えない） / 正しさ・セキュリティの欠陥 / ブランチが `agent/` で始まるのに PR の作成者（`author.login`）が `app/pelway-dev` でない |
 | nit | 上に当てはまらない改善案 |
 
+3 回目以降のレビューでは、must-fix をさらに領域で分類する。このレビューが round 3 以降かは、PR のコメントのラウンドサマリー（`### review round <R>`）と `pelway-review` のこれまでのレビュー件数（`scripts/agent-gh review pr view <N> --json reviews --jq '.reviews | length'`）から確かめる（ラウンドの数え方は skill `command-team` の「レビューのラウンド」。同じ head は 1 ラウンド）。
+
+- 次の領域に当たる指摘は、何回目でも must-fix に残す（skill `command-team` の「レビューのラウンド」と同じリスト）:
+  - 認可・読める人の規則・取り消し
+  - 秘密と認証情報
+  - データの境界（コアの処理と保存は国内だけ、接続しただけでは送らない）
+  - 外への通信
+  - 入力の上限とリソース枯渇
+  - データの消失と整合性
+  - CI やフックなどの守りを外すこと
+- この領域の外側の指摘は、別 Issue に回すと分類したものをレビュー本文の「## 別 Issue」の節に書く（下の形式）。別 Issue に分類した指摘は、この PR の must-fix には数えない（Verdict の判定対象外）。迷うものは must-fix に残す。分類はレビュー役が決め、実装役は分け直せない
+- セキュリティ以外の must-fix には、具体的な失敗の筋道（どういう入力・操作・状態でどう問題になるか）を書く
+
 ### 4. 投稿する
 
 本文は次の形にする。
@@ -83,6 +96,9 @@ Reviewed: <headRefOid>
 
 ## must-fix
 - <file>:<line> <何がどう問題か。直し方>
+
+## 別 Issue
+- <file>:<line> <指摘と別 Issue に回す理由 1 行。round 3 以降のレビューで、領域の外側の指摘を別 Issue に回すと分類したときだけ書く。実装側がラウンドサマリーで別 Issue を作り、PR と元の Issue の閉じる条件にリンクする>
 
 ## nit
 - <file>:<line> <提案>
