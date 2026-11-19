@@ -9,7 +9,7 @@
   - `skills@1.8.x` は `skills-lock.json` を `version: 2` に書き換え、既存全エントリの `computedHash` を再計算する。version 1 の形式を保つため `1.7.6` を使う。
 - `skills-lock.json` のハッシュは取り込んだ内容の記録であり、取得元を固定する仕組みではない。版の指定がある取り込みでは、取り込み後に取得内容を指定された版（上流コミット）と突き合わせ、差分があれば止めて再照合する。
 - 取り込んだ後は `diff -r .agents/skills .claude/skills` が空であることを確かめる。
-- `actionbook/rust-skills`（38 スキル）と `penpot/penpot-ai-kit`（13 スキル）の取り込みの記録は `skills-lock.json` のみにある。上流コミットや適用ルールの記録はこの文書の対象外。
+- `actionbook/rust-skills`（38 スキル）と `penpot/penpot-ai-kit`（13 スキル）の取り込みの記録は `skills-lock.json` のみにある。上流コミットの記録はこの文書の対象外。適用ルールは、下の review-pr の観点スキルの置き場所を除いて定めていない。
 
 ## 取り込みの discipline
 
@@ -18,6 +18,7 @@
 - 採用していないスキルへの参照は無効とする。
 - 輸入品の本文と正本（AGENTS.md・docs/・役割スキル）・適用ルールが衝突した場合は、正本と適用ルールが優先する。
 - 自律スレッドは輸入スキルを名前の解決に任せず、役割スキルを入口として repo 内の明示したパスで読む。人間側の同名のユーザーレベル版はチームのスレッドでは読まない。
+- レビュー担当が差分の領域ごとに観点として読む輸入スキル（`coding-guidelines`・`m06-error-handling`・`m07-concurrency`・`rust-testing`・`unsafe-checker`・`rust-supply-chain`・`sqlx-postgres`・`supabase-postgres-best-practices`・`axum`・`slint`・`writing-for-agents`）と、その適用ルールは、`.agents/skills/review-pr/SKILL.md` の「観点として読むスキル」に定める。
 - 輸入品のファイル自体は書き換えない（`skills-lock.json` が管理するスキルには同梱ヘルパーも足せない。docs/agents/skill-helpers.md）。適用ルールはローカル管理の役割スキルに置く。
 
 ## mattpocock/skills（MIT）
@@ -76,7 +77,7 @@ grill 試行は、設計担当が上流 `grilling` の問い詰めの方法で f
 
 ### writing-for-agents の位置づけ
 
-スキルや AGENTS.md を書く・直すときの参照として使う（強制ではなく参照）。Issue 本文を書くときは、skill `write-issue` の手順 3「書き終えたら見直す」が、見直しに使う 3 つの観点（完了の基準・否定より到達状態・写さない）に絞って読ませる。上流の `retro` の手順 1 が書き方の参照として呼ぶ依存でもあり、improve-skills（Issue #315）の改訂作業でも同じ参照として使える。
+スキルや AGENTS.md を書く・直すときの参照として使う（強制ではなく参照）。レビュー担当も、スキルや AGENTS.md を変える PR を見るときの観点として読む（skill `review-pr` の「観点として読むスキル」）。Issue 本文を書くときは、skill `write-issue` の手順 3「書き終えたら見直す」が、見直しに使う 3 つの観点（完了の基準・否定より到達状態・写さない）に絞って読ませる。上流の `retro` の手順 1 が書き方の参照として呼ぶ依存でもあり、improve-skills（Issue #315）の改訂作業でも同じ参照として使える。
 
 ## 上流 LICENSE（mattpocock/skills）
 
