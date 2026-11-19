@@ -19,6 +19,7 @@
 - 輸入品の本文と正本（AGENTS.md・docs/・役割スキル）・適用ルールが衝突した場合は、正本と適用ルールが優先する。
 - 自律スレッドは輸入スキルを名前の解決に任せず、役割スキルを入口として repo 内の明示したパスで読む。人間側の同名のユーザーレベル版はチームのスレッドでは読まない。
 - レビュー担当が差分の領域ごとに観点として読む輸入スキル（`coding-guidelines`・`m06-error-handling`・`m07-concurrency`・`rust-testing`・`unsafe-checker`・`rust-supply-chain`・`sqlx-postgres`・`supabase-postgres-best-practices`・`axum`・`slint`・`writing-for-agents`）と、その適用ルールは、`.agents/skills/review-pr/SKILL.md` の「観点として読むスキル」に定める。
+- `security-review` は、そのうち `unsafe-checker`（`checklists/review-unsafe.md`）・`rust-supply-chain`（advisory と保守の状態の読み方）・`supabase-postgres-best-practices`（`references/security-privileges.md`・`references/security-rls-basics.md`）の特定の部分を、セキュリティの観点として読む。読む範囲・読み替え・無効とする参照は `.agents/skills/security-review/`（`SKILL.md` の「依存」、`references/rust.md`）に定める。
 - 輸入品のファイル自体は書き換えない（`skills-lock.json` が管理するスキルには同梱ヘルパーも足せない。docs/agents/skill-helpers.md）。適用ルールはローカル管理の役割スキルに置く。
 
 ## 役割スキルから参照する外部スキル
