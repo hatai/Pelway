@@ -5,13 +5,15 @@
 # このディレクトリの見本 payload（github.event 相当・架空値）ごとに、workflow と
 # 同じ判定・同じ env 名・同じ jq の組み立てを実行し、次を確かめる:
 #   1. ゲート判定: 送るべきイベントは "send"、送らないイベント（fork 由来）は
-#      "skip" になること
+#      "skip" になること。synchronize で同じ head sha の送信済み run がある
+#      （dedup.duplicate=true 相当）ときも "skip" になること
 #   2. 送るイベントの JSON: キーが指示の 14 個だけであること
 #   3. タイトル・本文等のテキスト（*-MUST-NOT-APPEAR マーカー）が混入していないこと
 #   4. イベントごとの期待値（urgency・null の扱い、run_url の切り替え等）が合っていること
 #   5. workflow 自体が issue_comment trigger を持たず、concurrency が実行ごとの
 #      別グループ（cancel-in-progress: false）であり、pull_request の types が
-#      opened / ready_for_review / synchronize / closed であること
+#      opened / ready_for_review / synchronize / closed であり、Send step が
+#      dedup 条件（steps.dedup.outputs.duplicate == 'true'）を参照すること
 #
 # 使い方: bash docs/worklogs/gh-notify-samples/check.sh
 set -euo pipefail
@@ -28,10 +30,12 @@ expected_keys="action,actor,conclusion,event,head_branch,head_sha,merged,occurre
 
 # --- workflow "Send notification" step の urgency 判定と jq 部分の逐語コピー（ここから） ---
 build_payload() {
-  # digest（まとめにだけ反映）: verify の成功と Approve のレビュー。それ以外は immediate。
+  # digest（まとめにだけ反映）: verify の成功・Approve のレビュー・
+  # PR への push（synchronize）。それ以外は immediate。
   urgency="immediate"
   if { [ "$EVENT" = workflow_run ] && [ "${CONCLUSION:-}" = success ]; } \
-    || { [ "$EVENT" = pull_request_review ] && [ "${REVIEW_STATE:-}" = approved ]; }; then
+    || { [ "$EVENT" = pull_request_review ] && [ "${REVIEW_STATE:-}" = approved ]; } \
+    || { [ "$EVENT" = pull_request ] && [ "${ACTION:-}" = synchronize ]; }; then
     urgency="digest"
   fi
 
@@ -79,10 +83,16 @@ build_payload() {
 #                      投稿者の author_association が OWNER / MEMBER /
 #                      COLLABORATOR のいずれかのときだけ送る
 #                      （ボット例外なし）
+#   3. dedup（Check duplicate notification step + Send step if）:
+#                      synchronize で、同じ PR・同じ head sha を送った過去
+#                      run があるときは送らない（第3引数 dup=true で再現）。
+#                      dedup は過去 run の送信を step 名 "Send notification" で
+#                      照合するため、workflow の Send step 名を変えるときは
+#                      dedup step の照合文字列も合わせること
 gate_decision() {
-  local ev="$1" event_name="$2"
-  local head_repo assoc
-  local should_send=true comment_allowed=true
+  local ev="$1" event_name="$2" dup="${3:-false}"
+  local head_repo assoc action
+  local should_send=true comment_allowed=true dedup_ok=true
 
   # gate step の fork 判定（HEAD_REPO != GITHUB_REPOSITORY）
   head_repo="$(jq -r '.pull_request.head.repo.full_name // .workflow_run.head_repository.full_name // empty' <<<"$ev")"
@@ -106,7 +116,16 @@ gate_decision() {
       ;;
   esac
 
-  if [ "$should_send" = true ] && [ "$comment_allowed" = true ]; then
+  # Send step の dedup 条件（Check duplicate notification step の出力に相当）:
+  #   synchronize で、同じ PR・同じ head sha を送った過去 run がある
+  #   （dup=true に相当）は送らない。synchronize 以外の action は dedup を
+  #   参照しない（workflow は dedup step を synchronize でだけ動かす）
+  action="$(jq -r '.action // empty' <<<"$ev")"
+  if [ "$action" = synchronize ] && [ "$dup" = true ]; then
+    dedup_ok=false
+  fi
+
+  if [ "$should_send" = true ] && [ "$comment_allowed" = true ] && [ "$dedup_ok" = true ]; then
     echo send
   else
     echo skip
@@ -114,8 +133,8 @@ gate_decision() {
 }
 
 check_gate() {
-  local file="$1" event_name="$2" want="$3" got
-  got="$(gate_decision "$(cat "$samples_dir/$file")" "$event_name")"
+  local file="$1" event_name="$2" want="$3" dup="${4:-false}" got
+  got="$(gate_decision "$(cat "$samples_dir/$file")" "$event_name" "$dup")"
   if [ "$got" != "$want" ]; then
     echo "FAIL $file: gate decision is $got, want $want"
     return 1
@@ -205,6 +224,7 @@ main() {
 
   # --- workflow 自体の検査: issue_comment trigger を持たないこと、
   #     concurrency が実行ごとの別グループ（cancel しない）であること、
+  #     Send step が dedup 条件を参照すること、
   #     pull_request の types が #481 の 4 種であること ---
   # shellcheck disable=SC2016 # ${{ }} は workflow 内のリテラル文字列を grep -F で探すため意図的に単一引用符
   if grep -n 'issue_comment' "$workflow_file"; then
@@ -216,8 +236,11 @@ main() {
   elif ! grep -qF 'cancel-in-progress: false' "$workflow_file"; then
     echo "FAIL notify-grokbot.yml: cancel-in-progress is not false"
     failures=$((failures + 1))
+  elif ! grep -qF "steps.dedup.outputs.duplicate == 'true'" "$workflow_file"; then
+    echo "FAIL notify-grokbot.yml: Send step does not reference the dedup gate (steps.dedup.outputs.duplicate)"
+    failures=$((failures + 1))
   else
-    echo "PASS notify-grokbot.yml (no issue_comment / per-run concurrency without cancel)"
+    echo "PASS notify-grokbot.yml (no issue_comment / per-run concurrency without cancel / dedup gate wired)"
   fi
 
   # pull_request の types 一覧（`  pull_request:` ブロック内の `- <type>` 行だけ
@@ -240,10 +263,15 @@ main() {
     echo "PASS notify-grokbot.yml (pull_request types: opened/ready_for_review/synchronize/closed)"
   fi
 
-  # --- ゲート判定: 全9サンプル。7件は送る、2件（fork×2）は送らない ---
+  # --- ゲート判定: 11件。8件は送る、3件（fork×2・dedup した synchronize）は
+  #     送らない ---
   check_gate pull_request.opened.json pull_request send || failures=$((failures + 1))
   check_gate pull_request.ready_for_review.json pull_request send || failures=$((failures + 1))
   check_gate pull_request.synchronize.json pull_request send || failures=$((failures + 1))
+  # 同じ head sha を送った過去 run がある（dup=true 相当）synchronize は送らない。
+  # opened は dedup を参照しないため、dup=true でも送る。
+  check_gate pull_request.synchronize.json pull_request skip true || failures=$((failures + 1))
+  check_gate pull_request.opened.json pull_request send true || failures=$((failures + 1))
   check_gate pull_request.closed-merged.json pull_request send || failures=$((failures + 1))
   check_gate pull_request_review.submitted.json pull_request_review send || failures=$((failures + 1))
   check_gate workflow_run.completed.json workflow_run send || failures=$((failures + 1))
@@ -266,7 +294,7 @@ main() {
     'merged=false' 'conclusion=null' 'workflow_name=null' \
     "run_url=$own_run_url" 'actor=example-user' || failures=$((failures + 1))
   run_sample pull_request.synchronize.json pull_request \
-    'event=pull_request' 'action=synchronize' 'urgency=immediate' 'pr_number=42' \
+    'event=pull_request' 'action=synchronize' 'urgency=digest' 'pr_number=42' \
     'head_branch=feature/demo' \
     'head_sha=8888888888888888888888888888888888888888' \
     'merged=false' 'conclusion=null' 'workflow_name=null' \
@@ -300,7 +328,7 @@ main() {
     echo "$failures check(s) FAILED"
     exit 1
   fi
-  echo "all checks passed (workflow static + 9 gate decisions + 7 payload assemblies)"
+  echo "all checks passed (workflow static + 11 gate decisions + 7 payload assemblies)"
 }
 
 main "$@"

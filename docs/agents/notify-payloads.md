@@ -81,7 +81,7 @@ must-fix: 0
 | キー | 意味 |
 |---|---|
 | `schema` | `"pelway.github-notify/v2"` |
-| `urgency` | `digest`: workflow_run の成功（verify・nightly）、Approve のレビュー。それ以外は `immediate`。PR の作成・push・クローズは `immediate`（見張りを平日 12 時・18 時に減らした分を通知で補うため、PR の動きは起きた時点で知る） |
+| `urgency` | `digest`: workflow_run の成功（verify・nightly）、Approve のレビュー、PR への push（`synchronize`）。それ以外は `immediate`。PR の作成（`opened`・`ready_for_review`）とクローズは `immediate`（見張りを平日 12 時・18 時に減らした分を通知で補うため、PR の動きは起きた時点で知る） |
 | `repo` | `hatai/Pelway` |
 | `event` | `pull_request` / `pull_request_review` / `workflow_run` / `test`（手動実行） |
 | `action` | `opened` / `ready_for_review` / `synchronize` / `closed`（`pull_request`）、`submitted`（`pull_request_review`）、`completed`（`workflow_run`） |
@@ -96,5 +96,7 @@ must-fix: 0
 | `occurred_at` | 送信時刻（UTC） |
 
 `opened`（作成）と `ready_for_review`（Draft 解除）は PR の作成、`synchronize` は PR への push を表す。`pull_request` の他の type（`edited`・`reopened`・`assigned`・`labeled` など）は送らない。
+
+`synchronize` は同じ PR・同じ head sha では 1 回だけ送る。workflow がこの workflow の過去の run を調べ（同じ head ブランチ・同じ head sha で `Send notification` step が成功した run）、あれば送らない。調べられなかったとき（API 失敗）は送る側に倒す。`opened`・`ready_for_review`・`closed` は状態の変化そのものを知らせるため、この dedup の対象外（たとえば Draft で開いたあと push せず ready にしたとき、同じ head sha でも `ready_for_review` は届く）。
 
 送られないもの: PR のタイトル・本文・ラベル（ペイロードにこれらのキーはない）、エージェントのスレッドの状態（`agent-watch` が `pelway.agent-watch/v1` で送る）、レビューコメント・Issue コメント、OWNER / MEMBER / COLLABORATOR 以外（ボットを含む）のレビュー、fork からのイベント。fork 由来（PR は head リポジトリ、workflow_run は head_repository がこのリポジトリと違う）と `GROKBOT_WEBHOOK_URL` / `GROKBOT_WEBHOOK_AUTH` の Secret が未設定のときは、通知せずジョブを成功で終える（失敗にしない）。
