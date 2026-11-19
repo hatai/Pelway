@@ -23,6 +23,7 @@ Skills and docs state facts only: rules, procedures, definitions, current state.
 Where an evaluation turns on the meaning of natural language or on factual claims, judge it with an LLM and an explicit, version-controlled rubric, calibrated on reviewed examples — never by scoring the text with keyword lists or regular expressions. Deterministic assertions are limited to observable effects and structured output contracts. Judge calls are reported with their cost stated separately, and a judge error counts as "cannot judge", never as a pass.
 
 - `evals/agent-team` cases follow this: `judge = "llm"` when natural-language evaluation is needed (see `evals/agent-team/README.md`).
+- A wording pin (a test that greps a document for fixed wording, such as `scripts/tests/*-docs.test.sh`) is a deterministic check of an observable effect: the wording is present. It never shows that a document meets a requirement, since contradictory text still passes. Name and describe a wording pin as a presence check; the meaning is judged by the LLM judge or, until one runs for that document, by the reviewer reading the quoted passage.
 
 ## Agent workflow
 
