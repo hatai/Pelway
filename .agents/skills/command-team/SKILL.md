@@ -122,9 +122,9 @@ Issue を割り当てる前に、依存する blocker が全部閉じている�
 | 「Devin CLI のハーネスごと任せる」チケット（人間が Issue で明示するか、指揮役が「実装スレッドの枠組みでは進めにくい自律作業」と判断したもの。例: 環境構築を伴う検証、複数リポジトリにまたがる調査） | Devin CLI（`acpRegistry_devin`、`swe-2-high`）。Issue に `agent:devin` を付ける |
 | コア部分（`crates/pelway-contract`、承認・状態遷移・権限）、`unsafe` を含む・含みうる変更 | GLM なら variant `high`、Devin CLI なら `thought_level=max` |
 | 同じ Issue の修正の指示が 2 回を超えた（3 回目の修正に入る）。数えるのは、レビューの本物の must-fix に基づく指示だけ（分割計画が無い時期の誤判定や、再起動による自動の再開は数えない） | `t3_thread_configure` で variant または `thought_level` を 1 段上げる（GLM: `low`→通常→`high`→`max`。Devin CLI: `medium`→`high`→`max`）。`max` でも直らなければ Devin CLI の `swe-2-high`（`thought_level=max`）に替える。Issue に理由をコメントする |
-| 同じ Issue の修正の指示が 3 回を超えた（4 回目の修正に入る）。数え方は上の行と同じ | 修正を出さずにエスカレーション（runbook 7） |
+| 同じ Issue の修正の指示が 3 回を超えた（4 回目の修正に入る）。数え方は上の行と同じ | 修正を出さずにエスカレーション（runbook 7）。round 4 に入るのは hatai が例外と判断した PR だけ（例外は下の「マージ」。これ以外に広げない）。エスカレーションでは、残った must-fix の一覧と止まった head の sha を Issue に書かせ、止まっている間は指揮役も修正を中継しない（#462 の再発防止。「レビューのラウンド」の止まり方と同じ） |
 
-runbook と仕様の `round`（スレッドの実行回数）は、誤判定や再起動による再開でも増える。指揮役は `round` を目安にとどめ、effort の引き上げとエスカレーションは上の表の「修正の指示の回数」で判断する。
+runbook と仕様の `round`（スレッドの実行回数）は、誤判定や再起動による再開でも増える。指揮役は `round` を目安にとどめ、effort の引き上げとエスカレーションは上の表の「修正の指示の回数」で判断する。ここで数える「修正の指示の回数」と、実装側がレビューの委託回数で数えるレビューのラウンド（下の「レビューのラウンド」）は別の数え方である。
 
 ### レビュー担当と effort
 
@@ -140,8 +140,33 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 - Devin CLI のレビュースレッド（`devin_review`）では、モデルオプションは `mode` だけを受け付ける（`thought_level`・`speed` は渡せず、effort の引き上げは行えない）。sandbox のため権限モードは Autonomous 一択で、`mode` は省略してよい。設定は `docs/dev-environment.md` の「レビュー担当の Devin CLI」。
 - Claude のレビュー担当は確認済み。確認記録は `docs/dev-environment.md`「レビュー担当の Claude」の「確認手順の結果（記録欄）」。記録が消えた場合は、記録が戻るまで Claude を使わず Codex だけで回し、高リスクの PR は人間に知らせる。
 - 抜き取りの実施が 10 件に達するか、抜き取りの開始から 4 週間が経つか、どちらか早い方になったら、`docs/agents/command-team-details.md` の「レビュー担当の段階移行」に従って見落とし率を集計し、高リスク PR の複数レビュー体制の有効化を判断する。
-- effort は、追加行が 200 以下で高リスクでなければ既定、それ以外は `high`。同じ PR の 2 回目以降のレビューは 1 段上げる。
-- 複数のレビュー担当を付けた PR で判定が割れたら（approve と request-changes が混ざったら）、マージせず、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正をそのまま進める（人間へのエスカレーションは不要）。実装担当が委託した複数レビューで割れたときも同じで、実装担当が修正に進む（skill `implement-issue` の手順 9）。
+- effort は、追加行が 200 以下で高リスク（セキュリティの境界）・仕様（正本 `docs/superpowers/specs/` と ADR `docs/adr/` を変える）の PR でなければ既定、それ以外は `high`。セキュリティと仕様の PR では 1 回目から effort を上げておく。同じ PR の 2 回目以降のレビューは 1 段上げる。3 回目のレビューで改めて effort を上げる運用はやめる（skill `implement-issue` の手順 9 も同じ）。
+- 複数のレビュー担当を付けた PR で判定が割れたら（approve と request-changes が混ざったら）、マージせず、修正側（request-changes）の指摘を優先して対応する。セキュリティの指摘は特に修正側を優先する（「レビューのラウンド」）。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正をそのまま進める（人間へのエスカレーションは不要）。実装担当が委託した複数レビューで割れたときも同じで、実装担当が修正に進む（skill `implement-issue` の手順 9）。
+
+### レビューのラウンド
+
+レビューのラウンドの数え方と上限。実装側の処理（修正・再委託・ラウンドサマリー・止まり方）の正本は skill `implement-issue` の手順 8〜9。上限と例外の判断に関わる指揮役側の対応は「実装のモデルと effort」の表のとおり。
+
+- 同じ head は 1 ラウンドに数える。コンフリクトの解消を含まない main の取り込みだけで head が変わっても、新しいラウンドにしない。
+- 3 回目以降の must-fix は領域で決める。次に当たる指摘は、何回目でも must-fix に残す:
+  - 認可・読める人の規則・取り消し
+  - 秘密と認証情報
+  - データの境界（コアの処理と保存は国内だけ、接続しただけでは送らない）
+  - 外への通信
+  - 入力の上限とリソース枯渇
+  - データの消失と整合性
+  - CI やフックなどの守りを外すこと
+- それ以外（この領域の外側）を別 Issue に回すかは、レビュー役が分類する。実装役は分け直せない。迷うものは must-fix に残す。
+- 別 Issue に回すときは、ラウンドサマリーに理由を 1 行書き、別 Issue を PR と元の Issue の閉じる条件にリンクする。
+- セキュリティ領域が誤って回されていたら、マージを止める。
+- セキュリティ以外の must-fix には、具体的な失敗の筋道を書く。
+- 仕様の穴（拒否リストや検知の規則から抜け道が出続けるもの）は仕様に戻し、ラウンドを 1 から数え直す。hatai の OK なしの数え直しは 1 回まで。
+- 人の作業待ちの項目は、その間は合格ではなく未検証として扱い、担当・期限・sha を記録する。ラウンドには数えない。
+- ラウンドの上限は 4 回。上限まで来ても must-fix が残ったままマージしない。4 回目にセキュリティの must-fix が出たら止めて、hatai の判断に戻す。
+- round 3 の must-fix が、別 Issue に回せる側を除いて残り、4 回目に入る条件（hatai の例外の判断。「マージ」の例外）を満たさないときは、修正もコミットも push もせずに止まる（skill `implement-issue` の止まる条件）。must-fix の一覧と止まった head の sha を Issue に書く。手元にすでに修正があれば、worktree に置いたまま push も削除もしない。止まっている間は、指揮役も修正を中継しない（#462 の再発防止）。すでに push された修正はそのまま残してよい。ただし、それで round 4 に進むかは hatai の例外の判断で、修正の差分も含めてレビューする。
+- 判定が割れたときは「レビュー担当と effort」のとおり修正側（request-changes）を優先する。セキュリティの指摘は特に修正側を優先する。
+- `--no-verify` は使わない（commit のフックを止めない）。
+- 見張り（conductor-watch）は、別 Issue に回した件数を数える。QA があとで抜き出して確かめる。
 
 ### レビュースレッドの settle
 
@@ -173,9 +198,41 @@ hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終�
 
 ### マージ
 
-マージは Kodiak（ホスト版の GitHub App。正本は `docs/superpowers/specs/agent-team.md` の「マージキュー」）が行う。指揮役が行うのはキューへの投入だけ: 有効な Approve（上の「hatai のレビューの扱い」）と必須チェック（`mise run verify`、`pr-size`）の通過を確かめて、PR に `automerge` ラベルを付ける（`scripts/agent-gh dev pr edit <M> --add-label automerge`）。このラベルを付けることがマージの指示であり、付けるのは指揮役だけ。実装スレッドは自分の PR に付けない。ラベルが付くと、Kodiak がブランチの最新化とマージを直列に進める。指揮役はマージを確認してから Issue から `agent:working` を外し、人間に報告する。
+マージは Kodiak（ホスト版の GitHub App。正本は `docs/superpowers/specs/agent-team.md` の「マージキュー」）が行う。原則は、条件を満たしたら指揮役が `automerge` ラベルを付けて Kodiak がマージする、である。指揮役が行うのはキューへの投入だけ: 下の条件を確かめて、PR に `automerge` ラベルを付ける（`scripts/agent-gh dev pr edit <M> --add-label automerge`）。このラベルを付けることがマージの指示であり、付けるのは指揮役だけ。実装スレッドは自分の PR に付けない。ラベルが付くと、Kodiak がブランチの最新化とマージを直列に進める。指揮役はマージを確認してから Issue から `agent:working` を外し、人間に報告する。
 
-- `automerge` ラベルを付ける前の確認は次の 3 つ: 有効な Approve、必須チェックの通過、Approve の後の push が main の取り込みだけであること（`git rev-list <レビューした sha>..<head> --no-merges ^origin/main` が 0 件。それ以外のコミットがあればレビューをやり直す。Kodiak がブランチ最新化で作る main 取り込みのマージコミットはこの条件を壊さない）。マージ以外の PR・Issue への操作（base の変更、Draft の扱い、Issue のクローズ）は、先に「手当て・引き継ぎの前の確認」を通す。目印付きのコメント（`<!-- pr-size-exception -->`、`<!-- split-plan -->`）は人間の名義の `gh issue comment` で書く。レビュー担当は作成者が `hatai` であることで、実装担当（`pelway-dev`）や第三者のコメントと区別する。それ以外の GitHub の操作（読み取り、ラベル、ふつうのコメント）は `scripts/agent-gh dev` で行う。
+`automerge` ラベルを付ける条件（すべて確かめてから付ける）:
+
+- 有効な Approve（上の「hatai のレビューの扱い」）がある
+- 必須チェック（`mise run verify` と `pr-size`）が通っている
+- Draft ではなく、タイトルに `WIP:` がない
+- QA が同じ head の sha で合格の PR コメントを残している（QA 合格コメントの形式はこの節の末尾）
+- Approve と QA 合格のあとに許すのは、コンフリクトの解消を含まない main の取り込みだけ。指揮役は、取り込みのコミットに main 以外の差分がないことを確かめてからラベルを付ける（`git rev-list <Approve した sha>..<head> --no-merges ^origin/main` が 0 件。それ以外のコミットがあればレビューと QA をやり直す。Kodiak がブランチ最新化で作る main 取り込みのマージコミットはこの条件を壊さない）
+- コンフリクトを解消したときは変更として扱い、新しい head でレビューと QA をやり直す
+
+hatai が判断する例外（マージを hatai の admin マージで行う。これ以外には広げない）:
+
+- round 4 以降の例外 PR（ラウンドの上限は「レビューのラウンド」。round 4 に進むかは hatai が判断する）
+- `.github/` の下を変える PR
+- `fnox.toml` を変える PR
+
+キューの切り戻し（Kodiak が応答しない・詰まった場合の手動マージ）と、必須チェックが失敗したままのマージ（`pr-size-exception`）も hatai の admin マージだけが行うのは従来どおり（切り戻し条件は運用しながら定める）。`scripts/conductor-merge-queue.sh` はそのときの補助として残す。
+
+ラベルを付けたあと:
+
+- 新しい push や Draft への戻しがあったら、指揮役がラベルを外す。条件が再び揃ったら（Approve のやり直しを含む）付け直す
+- Kodiak の自動更新（main への追いつき）が取り込みを行ったあとも、指揮役は取り込みのコミットに main 以外の差分がないことを確かめる。Kodiak はコンフリクトを解消しないため、その取り込みは「コンフリクトの解消を含まない main の取り込み」に当たる（2026-11-19 の hatai の決定、Issue #480）。検知と手当は runbook の「マージキュー待ちの PR」
+
+部屋や指揮役の報告と GitHub が食い違ったら GitHub を正とし、報告の値では動かない。指揮役は報告を GitHub の CI 結果・sha・PR の状態と突き合わせてから動く（runbook の「報告行の扱い」と同じ原則）。
+
+QA 合格コメント:
+
+- QA の合格は PR コメントで残す。PR 本文だけの「合格」は無効
+- 1 行目を `QA-PASS pr=<番号> sha=<40桁> run=<CI の run id> verify=pass pr-size=pass` に固定する。sha は短縮しない
+- 2 行目以降に「未検証：<項目 または なし>」と判定を書く
+- 指揮役は、コメントの sha が PR の現在の head と一致することを確かめてからラベルを付ける（head が変わったら QA のやり直しを依頼する）
+
+マージ以外の PR・Issue への操作（base の変更、Draft の扱い、Issue のクローズ）は、先に「手当て・引き継ぎの前の確認」を通す。目印付きのコメント（`<!-- pr-size-exception -->`、`<!-- split-plan -->`）は人間の名義の `gh issue comment` で書く。レビュー担当は作成者が `hatai` であることで、実装担当（`pelway-dev`）や第三者のコメントと区別する。それ以外の GitHub の操作（読み取り、ラベル、ふつうのコメント）は `scripts/agent-gh dev` で行う。
+
 - pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の admin マージに回す（キューの切り戻しと同じ扱い）。
 - 必須チェックの完了待ち（ラベルを付ける前の CI 待ち、巡回での PR のベビーシット）には、ポーリングの代わりに skill `pr-watch` の `pr-digest --watch` をバックグラウンド実行して使う。マージの実行は Kodiak が行うため、指揮役がマージコマンドを叩くことはない。
 - skill `pr-watch` の `VERDICT green` は、その SHA でチェックが完走して通過していることの確認要素の 1 つ。`automerge` ラベルを付ける条件（`pelway-review` の Approve、必須チェック、レビュー済み SHA 以降の追加コミットの確認、mergeable）を置き換えない。
@@ -185,7 +242,6 @@ hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終�
 - PR ができたら mergeable を確かめる（`scripts/agent-gh dev pr view <M> --json mergeable`）。`CONFLICTING` の PR には GitHub が `pull_request` の workflow を動かさず、チェックが 1 つも付かない。実装担当に「main を取り込んで衝突を解消し、verify を通す」を送る。`automerge` ラベルが付いた後に Kodiak がコンフリクト等でマージできないときは、Kodiak が PR にコメントして `automerge` ラベルを外す。巡回手順は runbook の「マージキュー待ちの PR」に従い、手当スレッドで衝突を解消してからラベルを付け直す。
 - マージしたら Issue から `agent:working` を外し、人間に報告する。マージの検知は notify-grokbot の `pull_request`（`merged: true`）の通知と巡回で行う。
 - マージが完了したら、ローカルの `main` を `origin/main` へ一致させる。`git fetch origin main` の後、ローカルの `main` が `origin/main` の先祖になっていることを確かめ（`git merge-base --is-ancestor main origin/main`）、`git merge --ff-only origin/main` を `main` で実行して fast-forward のみで行う。ローカルの `main` に origin に無いコミットがあって fast-forward できないときは、強制せず（rebase も reset もしない）そこで止めて、指揮役（代行の場合は hatai）へ報告する。
-- キューの切り戻し（Kodiak が応答しない・詰まった場合の手動マージ）は hatai の admin マージだけが行う（切り戻し条件は運用しながら定める）。`scripts/conductor-merge-queue.sh` はそのときの補助として残す。
 - Dependabot の PR の扱い（minor・patch の通常扱い、major・0.x の移行 Issue 化、Action の更新の `actions.lock` の再生成）は `docs/agents/command-team-details.md` の「Dependabot の PR の扱い」に従う。
 
 ### 分割を認めるとき

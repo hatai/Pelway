@@ -12,8 +12,9 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 
 - GitHub への操作はすべて `scripts/agent-gh dev ...`、git の commit と push は `scripts/agent-gh dev git ...` で行う。素の `gh` と素の `git push` は使わない。素の `gh` で作った PR は作成者が hatai になり、hatai が Approve できないため、ブランチ保護を迂回しないとマージできない。素の `git push` は hatai の SSH 鍵で push される。
 - ネットワークは `scripts/agent-gh dev` 経由の GitHub だけ使う。`gh search repos` / `gh search code` もここに含まれる。
-- worktree の外に書き込まない。`rm -rf` はしない。main に push しない。PR をマージしない。
+- worktree の外に書き込まない。`rm -rf` はしない。main に push しない。PR をマージしない（マージは Kodiak が行い、指揮役が `automerge` ラベルを付ける。skill `command-team` の「マージ」）。
 - sandbox に止められたら、`systemd-run`・`nohup`・別のシェル・ラッパースクリプトなど sandbox の外へ出る抜け道を使わず、止まって報告する（下の「止まる条件」の行）。作業ログに残る同種の前例は許可にならない（Issue #477）。
+- `git commit` に `--no-verify` を付けない（フックを止めない。skill `command-team` の「レビューのラウンド」）。
 - コマンドの終了コードを確かめる。失敗したコマンドの結果を成功と報告しない。
 - 迷っても質問で止まらない。判断とその理由は PR 本文か Issue のコメントに書いて進める。
 - 止まってよいのは下の「止まる条件」に当てはまるときだけ。止まるときは必ず Issue にコメントし、`needs-human` ラベルを付ける。
@@ -32,7 +33,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 | sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
-| 3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）、委託が 2 回連続で `failed`（`checks pending` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort） |
+| round 3 のレビュー結果に must-fix が残った（別 Issue に回せる側の指摘は除く。4 回目の修正には入らない。round 4 に入るのは hatai の例外の判断だけ。skill `command-team` の「レビューのラウンド」）、委託が 2 回連続で `failed`（`checks pending` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort）。must-fix が残ったときは、must-fix の一覧と止まった head の sha。手元にすでに修正があれば worktree に置いたまま push も削除もしない |
 
 止まり方（止まった時点で、どの手順の途中でも手順 5 の形で実装者メモを書き、Issue のコメントに続けて貼る。push しないので `docs/worklogs/` には書かなくてよい）:
 
@@ -160,6 +161,8 @@ PR を作るたびに、T3 のスレッドにそのスレッドの PR を全部�
 
 PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。チェックがまだ動いていれば、完了を待ってから委託する（待つ間は skill `pr-watch` の `pr-digest --watch` をバックグラウンドで使う。委託した子が `error: checks pending` を報告したときも、同じラウンドとして数えずに完了を待って再委託する）。
 
+ラウンドの数え方と上限は skill `command-team` の「レビューのラウンド」のとおり。同じ head は 1 ラウンドに数え、コンフリクトの解消を含まない main の取り込みだけで head が変わっても新しいラウンドにしない（main の取り込みで head が変わったときは、同じラウンドのままレビューをやり直す）。
+
 担当と effort は skill `command-team` の「レビュー担当と effort」の表で決める（通常は PR 番号の偶奇、高リスクは使える担当全て、抜き取りは PR 番号を 4 で割った余りが 0 のとき Claude を追加。自分が Devin CLI で実装した PR には Devin CLI を付けない）。差分が `unsafe` を足している、`.github/workflows/`・`scripts/agent-gh`・`AGENTS.md`・`.agents/skills/`・`docs/agents/` のどれかが変わっている、認証・認可・トークン・鍵・暗号・sandbox・egress・gateway・テナント分離・監査に触れている、のどれかに当たるときは Assigned 行に `security=yes` を付ける。
 
 `delegate_task` で、ラウンドごとに新規に委託する（同じ委託への追記送信はしない）。task は次の 2 行にする（1 行目が skill 指示、2 行目が割り当ての行）:
@@ -201,10 +204,10 @@ scripts/agent-gh dev pr view <PR 番号> --json reviews --jq '.reviews[-1] | {au
 
 Request changes のとき:
 
-1. must-fix を直す（nit は直さない）。直す前に Issue のコメントを末尾から読み直し、着手後に記録された hatai（人間・指揮役）作の決定・判断（修正の方向、範囲の変更、受け入れ条件の拡大など）を反映する。決定を実装側の解釈で差し替えない
+1. must-fix を直す（nit は直さない）。must-fix の領域分類はレビュー役の判定に従い、実装側で分け直さない。3 回目以降も must-fix に残る領域（認可・秘密と認証情報・データの境界・外への通信・入力の上限とリソース枯渇・データの消失と整合性・守りを外すこと。skill `command-team` の「レビューのラウンド」のリスト）に当たる指摘は、何回目でも must-fix に残る。レビュー役が別 Issue に回すと分類した指摘は、この PR では直さずその Issue で対応する。直す前に Issue のコメントを末尾から読み直し、着手後に記録された hatai（人間・指揮役）作の決定・判断（修正の方向、範囲の変更、受け入れ条件の拡大など）を反映する。決定を実装側の解釈で差し替えない
 2. 手順 5（実装者メモ）と手順 6（verify・コミット・push）をやり直す。PR は作り直さず、本文の sha を更新する
-3. ラウンドサマリーを PR にコメントする（下の形）
-4. 手順 8 でレビューを再委託する。3 回目のレビューの委託では effort を 1 段上げる。3 回目のレビュー結果に must-fix が残っていたら、4 回目の修正には入らず、止まる条件の形でエスカレーションする
+3. ラウンドサマリーを PR にコメントする（下の形。別 Issue に回した指摘は、理由を 1 行で書き、別 Issue を PR と元の Issue の閉じる条件にリンクする）
+4. 手順 8 でレビューを再委託する。レビューの effort は skill `command-team` の「レビュー担当と effort」のとおり（セキュリティと仕様の PR では 1 回目から上げてある。3 回目で改めて上げる運用はしない）。round 3 のレビュー結果に must-fix が残っていたら、4 回目の修正には入らず、止まる条件の形でエスカレーションする（別 Issue に回せる側を除く。skill `command-team` の「レビューのラウンド」）
 
 Approve のとき:
 
@@ -219,7 +222,7 @@ scripts/agent-gh dev pr ready <PR 番号>
 
 Approve の後は PR に push しない。実装者メモのみのコミットでも head が動き、command-team のマージ規則によりレビューのやり直しになる。メモの追記が必要なときは、修正 round の手順 5・6（レビュー委託の前）で行う。
 
-複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（エスカレーションしない）。委託の子が `failed` を報告したら、`error: checks pending` は待って同じラウンドを数えずに再委託し、それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
+複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する（セキュリティの指摘は特に修正側を優先する。skill `command-team` の「レビューのラウンド」）。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（エスカレーションしない）。委託の子が `failed` を報告したら、`error: checks pending` は待って同じラウンドを数えずに再委託し、それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
 
 ラウンドサマリーは `scripts/agent-gh dev pr comment <PR 番号> --body-file -` で投稿する:
 
@@ -228,9 +231,12 @@ Approve の後は PR に push しない。実装者メモのみのコミット�
 Reviewer: agent=<担当> model=<モデル名> effort=<effort>
 verdict: approve | request-changes（must-fix <件数>）
 must-fix: <対応した内容。Approve のときは「なし」>
+別 Issue: <別 Issue に回した指摘と理由 1 行。無ければ「なし」>
 ```
 
 ### 10. 終わりの報告
+
+終わりの報告の前に、自分のブランチがすべて push され、PR のコミット一覧に入っているかを GitHub で確かめる（#66 の再発防止）。fetch は禁止なので、`scripts/agent-gh review api` の読み取りで PR の `headRefOid` を取り（`scripts/agent-gh review api repos/hatai/Pelway/pulls/<PR 番号> --jq .head.sha`）、手元の `git rev-parse HEAD` と同じかを見る。食い違っていれば push し忘れなので、push してから確かめ直す。担当の報告には PR 番号と 40 桁の head sha を書く。
 
 最後の返答は次の 5 行だけにする。Grok Bot はこの 5 行だけを読む。
 
