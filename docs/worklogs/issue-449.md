@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/review-pr/SKILL.md` の報告形式に「must-fix に対応する対象ファイル・行」を必ず付ける（Codex 1 件と Claude 3 件の指摘の同じ内容を指揮役が突き合わせて分類していたのを、報告側で最初から揃えられる）
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: f17129576a33cefd6468ab7704c0b6e11449a3a7
+
+1. 詰まった箇所: docs/worklogs/2026-11-19-conductor-substitute.md — origin/main に無く（fetch しても "not on main"）、本体チェックアウト /home/hatai/repos/hatai/Pelway/docs/worklogs/ から直接読んで事実を引用した（コミット前の状態と思われる）
+2. 曖昧だった文: 「3 担当の実測結果と鍵の分離結果を表に記録してください」（PR #462 の round 3 レビュー・must-fix 1）。実測が存在するのは codex_review 分（かつ 4 パスの `test -r` を含まない 5 項目）だけで、「実測結果を記録する」が「実測したものだけ記録し未実測は理由を明記する」のか「全行を埋める」のか書かれていない
+3. 仮定と解釈: 実測した事実のみを記録し、未実測の行は理由（devin_review は停止中・claude_review は env の橋渡し未投入・`test -r` は 2026-11-19 の指示 5 項目に含まない）を付けて未実施のまま残した（修正依頼の「捏造しない」の指示と同じ解釈）。must-fix 2 は「3 項目すべて揃ったときだけ ready」+ 不足時は `app_stages` で全 3 項目を再入力する形にした（不足分だけ再入力する形は選ばない。app_stages が 3 段階まとめて再入力する構造のため）
+4. 足りなかった情報・検証手段: 3 担当での 4 パスの `test -r` と review の sandbox から dev 用 age 鍵の `test -r`（実施手段はあるが今回の実測項目に含まず、未実測として記録欄に明記）。ウィザードの中断再実行の回帰テストの置き場（対話ウィザードのため scripts/tests に既存の検査が無い）
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「レビュー結果を処理する」に「記録欄への記録を求められたとき、実測が無い項目は理由を付けて未実施のまま残す（捏造しない）」を 1 行足す
+
+使ったスキル: implement-issue
