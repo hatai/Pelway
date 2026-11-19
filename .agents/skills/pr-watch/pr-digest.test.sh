@@ -49,16 +49,24 @@ nth() { # nth <ベース名>: N 回目のファイル。無ければ番号の近
 
 case "$all" in
   "repo view"*) printf 'hatai/Pelway\n'; exit 0 ;;
+  "api graphql"*isRequired*)
+    # 必須チェックの問い合わせ。required.json が無ければ失敗を返す（読めない環境の再現）。
+    [ -f "$fix/required.json" ] || { echo "mock: graphql forbidden" >&2; exit 1; }
+    emit "$fix/required.json"; exit 0 ;;
   "api graphql"*)
     printf '{"data":{"viewer":{"login":"pelway-dev[bot]"}}}\n' >"$fix/.viewer.json"
     emit "$fix/.viewer.json"; exit 0 ;;
 esac
 
 if [[ "$all" == "pr view"* ]]; then
+  # 新しい gh は pr view のたびに標準エラーへ hint を出す。digest に混ざらないことを確かめる。
+  echo "hint: if you need to wait for this pull request, use gh event listen" >&2
   if [[ "$all" == *"--json number"* ]]; then printf '217\n'; exit 0; fi
   emit "$(nth pr-view)"; exit 0
 fi
 if [[ "$all" == "run view"* ]]; then
+  printf '%s\n' "${XDG_CACHE_HOME:-}" >"$fix/.log-cache"
+  if [ -f "$fix/log-error.txt" ]; then cat "$fix/log-error.txt" >&2; exit 1; fi
   cat "$fix/log.txt" 2>/dev/null || exit 1
   exit 0
 fi
@@ -263,7 +271,7 @@ EOF
 run_digest "$fix"
 expect_rc open_review_summary 11
 expect_has open_review_summary "REVIEW changes requested"
-expect_has open_review_summary "(review CHANGES_REQUESTED)"
+expect_has open_review_summary "(review CHANGES_REQUESTED · 同じ担当の次のレビューまで開いたまま)"
 expect_has open_review_summary "must-fix が 2 件ある"
 expect_has open_review_summary "VERDICT open-comments"
 
@@ -410,6 +418,167 @@ run_digest "$fix"
 unset PR_DIGEST_NOW
 expect_rc review_wait_minutes 0
 expect_has review_wait_minutes "review-wait 30m (since 2026-01-02T23:30:00Z)"
+
+required_ctx() { # required_ctx <name> <status> <conclusion> <isRequired>
+  printf '{"__typename":"CheckRun","name":"%s","status":"%s","conclusion":%s,"isRequired":%s}\n' \
+    "$1" "$2" "$3" "$4"
+}
+required_json() { # 標準入力の context 群を GraphQL の応答の形に包む
+  jq -s '{data:{repository:{pullRequest:{commits:{nodes:[{commit:{statusCheckRollup:{contexts:{nodes:.}}}}]}}}}}'
+}
+
+# ---- 20. header_head: 見出し行に head の SHA を出す ----------------------------
+
+fix="$(new_fixture header_head)"
+{ check_run "mise run verify" completed success 10; } | jq -s '{check_runs: .}' >"$fix/check-runs.json"
+echo '{"statuses":[]}' >"$fix/status.json"
+run_digest "$fix"
+expect_rc header_head 0
+expect_has header_head "PR 217 · agent/217-example · head abc123de · OPEN"
+
+# ---- 21. octocov_noise: octocov のレポートは返信待ちに数えず件数だけ出す --------
+
+fix="$(new_fixture octocov_noise)"
+{ check_run "mise run verify" completed success 10; } | jq -s '{check_runs: .}' >"$fix/check-runs.json"
+echo '{"statuses":[]}' >"$fix/status.json"
+cat >"$fix/conversation.json" <<'EOF'
+[{"id":71,"user":{"login":"github-actions[bot]","type":"Bot"},"created_at":"2026-01-02T00:00:00Z","updated_at":"2026-01-02T00:05:00Z","html_url":"https://github.com/hatai/Pelway/pull/217#issuecomment-71","body":"## Code Metrics Report\n| main (e6ca15f) | #217 (25dd814) |\nReported by [octocov](https://github.com/k1LoW/octocov)\n<!-- octocov -->"}]
+EOF
+run_digest "$fix"
+expect_rc octocov_noise 0
+expect_has octocov_noise "1 conversation (1 noise)"
+expect_has octocov_noise "0 が返信待ち"
+expect_lacks octocov_noise "25dd814"
+
+# ---- 22. bot_not_noise: 目印の無い bot のコメントは指摘として残る ---------------
+
+fix="$(new_fixture bot_not_noise)"
+{ check_run "mise run verify" completed success 10; } | jq -s '{check_runs: .}' >"$fix/check-runs.json"
+echo '{"statuses":[]}' >"$fix/status.json"
+cat >"$fix/conversation.json" <<'EOF'
+[{"id":72,"user":{"login":"kodiakhq[bot]","type":"Bot"},"created_at":"2026-01-02T00:00:00Z","updated_at":"2026-01-02T00:00:00Z","html_url":"https://github.com/hatai/Pelway/pull/217#issuecomment-72","body":"This PR currently has a merge conflict. <!-- octocov -->"}]
+EOF
+run_digest "$fix"
+expect_rc bot_not_noise 11
+expect_has bot_not_noise "1 conversation (0 noise)"
+expect_has bot_not_noise "merge conflict"
+
+# ---- 23. required_pending: 必須が通り任意が走行中なら内訳に出す（VERDICT は pending）
+
+fix="$(new_fixture required_pending)"
+{ check_run "mise run verify" completed success 10
+  check_run "Analyze (rust)" in_progress "" 11 | jq -c '.conclusion = null'
+} | jq -s '{check_runs: .}' >"$fix/check-runs.json"
+echo '{"statuses":[]}' >"$fix/status.json"
+{ required_ctx "mise run verify" COMPLETED '"SUCCESS"' true
+  required_ctx "Analyze (rust)" IN_PROGRESS null false
+  printf '{"__typename":"StatusContext","context":"pr-size","state":"SUCCESS","isRequired":true}\n'
+} | required_json >"$fix/required.json"
+run_digest "$fix"
+expect_rc required_pending 12
+expect_has required_pending "required 2/2 pass · optional 1 pending"
+
+# ---- 24. required_failing: 必須の失敗と走行中を名指しする ------------------------
+
+fix="$(new_fixture required_failing)"
+{ check_run "mise run verify" completed failure 10; } | jq -s '{check_runs: .}' >"$fix/check-runs.json"
+echo '{"statuses":[]}' >"$fix/status.json"
+echo '{"steps":[]}' >"$fix/jobs.json"
+{ required_ctx "mise run verify" COMPLETED '"FAILURE"' true
+  printf '{"__typename":"StatusContext","context":"pr-size","state":"PENDING","isRequired":true}\n'
+} | required_json >"$fix/required.json"
+run_digest "$fix"
+expect_rc required_failing 10
+expect_has required_failing "required 0/2 pass · fail: mise run verify · pending: pr-size"
+
+# ---- 25. required_unknown: 必須の問い合わせが失敗しても digest は止めない ----------
+
+fix="$(new_fixture required_unknown)"
+{ check_run "mise run verify" completed success 10; } | jq -s '{check_runs: .}' >"$fix/check-runs.json"
+echo '{"statuses":[]}' >"$fix/status.json"
+run_digest "$fix"
+expect_rc required_unknown 0
+expect_has required_unknown "required unknown"
+expect_has required_unknown "VERDICT green"
+
+# ---- 26. logs_error: ログ取得の失敗は gh のエラーを添えて止まる -----------------
+
+fix="$(new_fixture logs_error)"
+echo 'failed to create cache dir: read-only file system' >"$fix/log-error.txt"
+run_digest "$fix" --logs 123
+expect_rc logs_error 1
+expect_has logs_error "read-only file system"
+
+# ---- 27. logs_cache: 既定のキャッシュに書けないときは書ける場所に替える ----------
+
+fix="$(new_fixture logs_cache)"
+printf 'job\tstep\t2026-01-02T00:00:00.0000000Z error: boom\n' >"$fix/log.txt"
+mkdir -p "$fix/home/.cache"; chmod a-w "$fix/home/.cache"
+HOME="$fix/home" XDG_CACHE_HOME="" run_digest "$fix" --logs 123
+chmod u+w "$fix/home/.cache"
+expect_rc logs_cache 0
+expect_has logs_cache "error: boom"
+grep -q "/gh-cache$" "$fix/.log-cache" 2>/dev/null ||
+  failures+=("logs_cache: XDG_CACHE_HOME was not redirected ($(cat "$fix/.log-cache" 2>/dev/null))")
+
+# ---- 28. no_gh_hint: gh の hint を digest に混ぜない ------------------------------
+
+fix="$(new_fixture no_gh_hint)"
+{ check_run "mise run verify" completed success 10; } | jq -s '{check_runs: .}' >"$fix/check-runs.json"
+echo '{"statuses":[]}' >"$fix/status.json"
+run_digest "$fix"
+expect_rc no_gh_hint 0
+expect_lacks no_gh_hint "hint:"
+
+# ---- 29. checks_mixed_pending: 完了と走行中が混ざっても走行中を数える ------------
+
+fix="$(new_fixture checks_mixed_pending)"
+{ check_run "mise run verify" completed success 10
+  check_run "Analyze (rust)" in_progress "" 11 | jq -c '.conclusion = null'
+  check_run "octocov (coverage diff)" in_progress "" 12 | jq -c '.conclusion = null'
+} | jq -s '{check_runs: .}' >"$fix/check-runs.json"
+echo '{"statuses":[]}' >"$fix/status.json"
+run_digest "$fix"
+expect_rc checks_mixed_pending 12
+expect_has checks_mixed_pending "checks 2 pending · 1 success"
+
+# ---- 30. required_unregistered: まだ登録されていない必須チェックを pending と数える
+
+fix="$(new_fixture required_unregistered)"
+{ check_run "static (hk / fnox / pitchfork)" completed success 10
+  check_run "test (cargo test)" in_progress "" 11 | jq -c '.conclusion = null'
+} | jq -s '{check_runs: .}' >"$fix/check-runs.json"
+echo '{"statuses":[]}' >"$fix/status.json"
+{ printf '{"__typename":"StatusContext","context":"pr-size","state":"SUCCESS","isRequired":true}\n'
+  required_ctx "test (cargo test)" IN_PROGRESS null false
+} | required_json >"$fix/required.json"
+run_digest "$fix"
+expect_rc required_unregistered 12
+expect_has required_unregistered "required 1/2 pass · pending: mise run verify (not registered) · optional 1 pending"
+
+# ---- 31. logs_mise_prefixed: 実際の gh のログの形（時刻は空白区切り）と、mise の
+#          [タスク名] 接頭辞・色付きの行からエラー行を残す -----------------------------
+
+fix="$(new_fixture logs_mise_prefixed)"
+E=$'\e'
+{ printf 'static\tVerify (mise run verify-static)\t2026-01-02T00:00:01.0000000Z %s[32m%s[2m[deny-check]%s[0m error[vulnerability]: Use-after-free in foo\n' "$E" "$E" "$E"
+  printf 'static\tVerify (mise run verify-static)\t2026-01-02T00:00:02.0000000Z %s[36m[shellcheck]%s[0m In scripts/x.sh line 3:\n' "$E" "$E"
+  printf 'static\tVerify (mise run verify-static)\t2026-01-02T00:00:03.0000000Z %s[36m[shellcheck]%s[0m      ^-- SC2086 (info): Double quote to prevent globbing\n' "$E" "$E"
+  printf 'static\tVerify (mise run verify-static)\t2026-01-02T00:00:04.0000000Z %s[36m[ok]%s[0m Finished in 3.1ms\n' "$E" "$E"
+  printf 'static\tVerify (mise run verify-static)\t2026-01-02T00:00:05.0000000Z %s[32m[deny-check]%s[0m %s[31mERROR%s[0m task failed\n' "$E" "$E" "$E" "$E"
+  printf 'lint\tVerify (mise run verify-lint)\t2026-01-02T00:00:06.0000000Z [clippy] error[E0382]: borrow of moved value: `cfg`\n'
+  printf 'static\tVerify (mise run verify-static)\t2026-01-02T00:00:07.0000000Z ##[error]Process completed with exit code 1.\n'
+} >"$fix/log.txt"
+run_digest "$fix" --logs 123
+expect_rc logs_mise_prefixed 0
+expect_has logs_mise_prefixed "[deny-check] error[vulnerability]: Use-after-free in foo"
+expect_has logs_mise_prefixed "[shellcheck] In scripts/x.sh line 3:"
+expect_has logs_mise_prefixed "SC2086"
+expect_has logs_mise_prefixed "[deny-check] ERROR task failed"
+expect_has logs_mise_prefixed "[clippy] error[E0382]: borrow of moved value"
+expect_lacks logs_mise_prefixed "Finished in"
+expect_lacks logs_mise_prefixed "2026-01-02T00"
+expect_lacks logs_mise_prefixed "${E}["
 
 # ---- 結果 -------------------------------------------------------------------
 
