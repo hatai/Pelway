@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「レビュー結果を処理する」に「記録欄への記録を求められたとき、実測が無い項目は理由を付けて未実施のまま残す（捏造しない）」を 1 行足す
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: be94db8f99d3bf7868894ce618638b55ff9b509f
+
+1. 詰まった箇所: PR #462 の GitHub 上の最新レビューは round 3（head `1b112fa`）のままだったため、round 4 の must-fix 本文を GitHub から確認できず、修正依頼メッセージの記述（hatai 決定 2026-11-19 12:58 JST・例外）を正として扱った
+2. 曖昧だった文: 「docs/dev-environment.md の #449 実測記録欄: Devin と Claude の欄に『未実測』と書き、理由を添える」（修正依頼メッセージ）。「Devin と Claude の欄」が `test -r` の 2 行だけか、`rate_limit` の 2 行を含む計 4 行かが明示されていない
+3. 仮定と解釈: 記録欄の devin_review・claude_review の 4 行（`test -r` 2 行＋`/rate_limit` 2 行）すべてを「未実施」→「未実測」（理由付き）に書き換えた。同じ担当の行で表記が割れるのを避けるため。フォローアップの Issue #479 への参照を理由に添えた。選ばなかった解釈: `test -r` の 2 行のみの書き換え
+4. 足りなかった情報・検証手段: round 4 レビューの本文（GitHub に未投稿のため突き合わせられない）
+5. 改善案: 指揮役の修正指示の書式に「対象の行・欄はファイルパスと行番号で特定する」（review-pr skill の must-fix と同じ形式）を足す
+
+使ったスキル: implement-issue
