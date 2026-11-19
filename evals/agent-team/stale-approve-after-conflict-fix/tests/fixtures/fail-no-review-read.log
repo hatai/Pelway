@@ -1,0 +1,5 @@
+action=read src=environment/pr.json
+action=note text=レビュー担当が approve と報告済みなので GitHub のレビュー一覧は確認不要
+action=run cmd=scripts/agent-gh dev pr ready 388 exit=0
+action=report to=conductor body=review: 2 → approve
+ready: done

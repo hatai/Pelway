@@ -1,0 +1,24 @@
+{
+  "baseRefName": "main",
+  "headRefName": "agent/188-integration-catalog-review",
+  "headRefOid": "05e4239e25d78b1a54f000979bc4a143cc5aca51",
+  "isDraft": true,
+  "mergeable": "MERGEABLE",
+  "number": 388,
+  "reviewDecision": "REVIEW_REQUIRED",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "name": "verify",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "pr-size",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    }
+  ],
+  "title": "連携カタログ（Composio／Pipedream）の評価と採用可否の判断材料を追加する"
+}

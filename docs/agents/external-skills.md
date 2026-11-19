@@ -9,7 +9,7 @@
   - `skills@1.8.x` は `skills-lock.json` を `version: 2` に書き換え、既存全エントリの `computedHash` を再計算する。version 1 の形式を保つため `1.7.6` を使う。
 - `skills-lock.json` のハッシュは取り込んだ内容の記録であり、取得元を固定する仕組みではない。版の指定がある取り込みでは、取り込み後に取得内容を指定された版（上流コミット）と突き合わせ、差分があれば止めて再照合する。
 - 取り込んだ後は `diff -r .agents/skills .claude/skills` が空であることを確かめる。
-- `actionbook/rust-skills`（38 スキル）と `penpot/penpot-ai-kit`（13 スキル）の取り込みの記録は `skills-lock.json` のみにある。上流コミットの記録はこの文書の対象外。適用ルールは、下の review-pr の観点スキルの置き場所を除いて定めていない。
+- `actionbook/rust-skills`（38 スキル）と `penpot/penpot-ai-kit`（13 スキル）の取り込みの記録は `skills-lock.json` のみにある。上流コミットの記録はこの文書の対象外。適用ルールは、下の review-pr の観点スキルと、「役割スキルから参照する外部スキル」の表に挙げたものの置き場所を除いて定めていない。
 
 ## 取り込みの discipline
 
@@ -22,6 +22,20 @@
 - `security-review` は、そのうち `unsafe-checker`（`checklists/review-unsafe.md`）・`rust-supply-chain`（advisory と保守の状態の読み方）・`supabase-postgres-best-practices`（`references/security-privileges.md`・`references/security-rls-basics.md`）の特定の部分を、セキュリティの観点として読む。読む範囲・読み替え・無効とする参照は `.agents/skills/security-review/`（`SKILL.md` の「依存」、`references/rust.md`）に定める。
 - 輸入品のファイル自体は書き換えない（`skills-lock.json` が管理するスキルには同梱ヘルパーも足せない。docs/agents/skill-helpers.md）。適用ルールはローカル管理の役割スキルに置く。
 
+## 役割スキルから参照する外部スキル
+
+役割スキルが本文から参照するスキルのうち、mattpocock/skills 以外のもの（取り込み品と、ほかの役割スキルから一部を借りるローカル管理のスキル）。review-pr の「観点として読むスキル」は上の取り込みの discipline の項に書いたとおり review-pr 側に定め、この表には入れない。適用ルール（読む部分、読む条件、取り込みの discipline への上乗せ）は役割スキル側に置き、ここには置き場所だけを書く。
+
+| スキル | 取得元（`skills-lock.json` の source） | 適用ルールの置き場所 |
+|---|---|---|
+| `security-review` | ローカル管理 | `.agents/skills/investigate-bug/SKILL.md` の手順 4（脆弱性の疑いの見分けに使う部分） |
+| `rust-testing` | `affaan-m/ECC` | `.agents/skills/investigate-bug/SKILL.md` の手順 3 と「外部スキルの使い方」 |
+| `rust-async-patterns` | `wshobson/agents` | 同上 |
+| `slint` | `slint-ui/ai-plugins` | 同上 |
+| `m07-concurrency` | `actionbook/rust-skills` | 同上 |
+| `supabase-postgres-best-practices` | `supabase/agent-skills` | 同上 |
+| `sqlx-postgres` | `Daiki48/dotfiles` | 同上 |
+
 ## mattpocock/skills（MIT）
 
 上流: <https://github.com/mattpocock/skills>。取り込み時点の上流コミット: `5863806dd4e15c63174bee4e7515a4256792ecfa`（main の head として取得）。
@@ -31,14 +45,14 @@
 | `tdd` | `skills/engineering/tdd` | `.agents/skills/implement-issue/SKILL.md` の「輸入スキル」（手順 4 の方法の詳細） | `agents/openai.yaml` |
 | `diagnosing-bugs` | `skills/engineering/diagnosing-bugs` | `.agents/skills/investigate-bug/SKILL.md` の「輸入スキル」（証拠集めと根本原因の方法） | `scripts/hitl-loop.template.sh`、`agents/openai.yaml` |
 | `domain-modeling` | `skills/engineering/domain-modeling` | この文書の「試行の割り当て」（設計・ADR と grill 試行の割り当て） | `agents/openai.yaml` |
-| `research` | `skills/engineering/research` | この文書の「試行の割り当て」（設計・ADR の割り当て） | `agents/openai.yaml` |
+| `research` | `skills/engineering/research` | この文書の「試行の割り当て」（設計・ADR の割り当て）、`.agents/skills/write-issue/SKILL.md` の手順 1（起票前の一次資料の調査。通常運用） | `agents/openai.yaml` |
 | `grilling` | `skills/productivity/grilling` | この文書の「grill 試行」 | `agents/openai.yaml` |
 | `grill-with-docs` | `skills/engineering/grill-with-docs` | なし（`disable-model-invocation: true` の人間側セッション用の入口。チームのスレッドでは `grilling` と `domain-modeling` を直接読む） | `agents/openai.yaml` |
 | `retro` | `skills/engineering/retro` | この文書の「retro の適用ルール」（command-team 手順 6 から参照する） | `agents/openai.yaml` |
-| `writing-for-agents` | `skills/productivity/writing-for-agents` | この文書の「writing-for-agents の位置づけ」（参照のみ。強制しない） | `agents/openai.yaml` |
+| `writing-for-agents` | `skills/productivity/writing-for-agents` | この文書の「writing-for-agents の位置づけ」（参照のみ。強制しない）、`.agents/skills/write-issue/SKILL.md` の手順 3「書き終えたら見直す」（通常運用） | `agents/openai.yaml` |
 
 - 補助文書（実行しない同梱物ではなく、読む文書）: `tdd` の `tests.md` と `mocking.md`、`domain-modeling` の `GLOSSARY-FORMAT.md` と `ADR-FORMAT.md`、`writing-for-agents` の `SKILL-MECHANICS.md`。
-- 適用範囲: 通常運用への移行が決まるまで、試行の対象と指揮役が試行として明示した割り当てに限る。効果の判定と移行は hatai が別に判断する。
+- 適用範囲: 通常運用への移行が決まるまで、試行の対象と指揮役が試行として明示した割り当てに限る。効果の判定と移行は hatai が別に判断する。移行が決まったもの: `research` と `writing-for-agents` の、skill `write-issue` からの参照（適用ルールは write-issue 側に置く）。
 - 未採用（輸入スキルの本文が参照しても無効）: `handoff`、`prototype`、`improve-codebase-architecture`、`codebase-design`、`code-review`、`to-spec`、`to-tickets`、`triage`、執筆系スキル（採用済みの `writing-for-agents` を除く）、`grill-me`。
 
 ### 試行の割り当て
@@ -78,7 +92,7 @@ grill 試行は、設計担当が上流 `grilling` の問い詰めの方法で f
 
 ### writing-for-agents の位置づけ
 
-スキルや AGENTS.md を書く・直すときの参照として使う（強制ではなく参照）。レビュー担当も、スキルや AGENTS.md を変える PR を見るときの観点として読む（skill `review-pr` の「観点として読むスキル」）。上流の `retro` の手順 1 が書き方の参照として呼ぶ依存でもあり、improve-skills（Issue #315）の改訂作業でも同じ参照として使える。
+スキルや AGENTS.md を書く・直すときの参照として使う（強制ではなく参照）。レビュー担当も、スキルや AGENTS.md を変える PR を見るときの観点として読む（skill `review-pr` の「観点として読むスキル」）。Issue 本文を書くときは、skill `write-issue` の手順 3「書き終えたら見直す」が、見直しに使う 3 つの観点（完了の基準・否定より到達状態・写さない）に絞って読ませる。上流の `retro` の手順 1 が書き方の参照として呼ぶ依存でもあり、improve-skills（Issue #315）の改訂作業でも同じ参照として使える。
 
 ## 上流 LICENSE（mattpocock/skills）
 
