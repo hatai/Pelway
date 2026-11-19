@@ -16,6 +16,7 @@
 | [fnox](https://fnox.jdx.dev) | シークレットの管理 | 採用。`fnox.toml` にはシークレットの名前と秘密を含まないテンプレートだけを置く |
 | [pitchfork](https://pitchfork.jdx.dev) | ローカル開発用プロセスマネージャー | 採用。`pitchfork.toml` に AI 開発チームの見張り役 `agent-watch` を定義する。ツールは mise で固定 |
 | [cargo-deny](https://embarkstudios.github.io/cargo-deny/) | 依存クレートの脆弱性（RustSec）・ライセンス・重複・取得元の検査 | 採用。`mise.toml` で 0.20.2 を固定し、ポリシーは `deny.toml` に置く。`verify-static`（CI の static ジョブ）で実行 |
+| [shellcheck](https://github.com/koalaman/shellcheck) | シェルスクリプトの静的検査 | 採用。`mise.toml` で 0.11.0 を固定し、`shellcheck` タスク（`verify-static`・CI の static ジョブ）が demo-check 一式（`scripts/demo-check/*.sh`）を検査する。severity は既定のまま（Issue #265） |
 
 ## セットアップ手順（初回）
 
@@ -59,6 +60,7 @@ mise bootstrap    # 上の1〜3を順に実行
 | `mise run fnox-check` | `fnox list`（定義の一覧確認。秘密値の取得・表示はしない） |
 | `mise run pitchfork-check` | pitchfork のバージョン確認と、`pitchfork.toml` に `agent-watch` が定義されていることの確認 |
 | `mise run deny-check` | `cargo deny check`（依存クレートの検査。`verify-static` に含まれる。設定は `deny.toml`（ゲート）と `deny-warn.toml`（unmaintained / unsound の警告表示）） |
+| `mise run shellcheck` | `shellcheck scripts/demo-check/*.sh`（demo-check 一式の静的検査。指摘 0 件で通る。`verify-static` に含まれる） |
 | `mise run demo-check` | デモ受入前の 4 段階検査（`scripts/demo-check/run.sh`。受入は引数なしの全段階実行だけ有効。canary 段階は成果物が無いと未検証で失敗するため、製品をビルドしたあとに実行する） |
 | `mise run demo-check-selftest` | demo-check の自己テスト（`script-test` 経由で `verify-test` にも含まれる） |
 | `mise run verify-lint` / `verify-test` / `verify-static` | 検査の 3 グループ（cargo でコンパイルするのは `verify-lint` と `verify-test` の 2 つだけ） |
@@ -89,7 +91,7 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 
 | ジョブ | チェック名 | 実行する mise タスク | cargo |
 |---|---|---|---|
-| `static` | `static (hk / fnox / pitchfork)` | `verify-static`（hk / fnox / pitchfork / cargo-deny）＋ `mise exec -- jactionlint` | 使わない（cargo-deny は cargo metadata を読むだけでコンパイルしない） |
+| `static` | `static (hk / fnox / pitchfork)` | `verify-static`（hk / fnox / pitchfork / cargo-deny / shellcheck）＋ `mise exec -- jactionlint` | 使わない（cargo-deny は cargo metadata を読むだけでコンパイルしない） |
 | `lint` | `lint (fmt / clippy)` | `verify-lint` | clippy |
 | `test` | `test (cargo test)` | `verify-test` | test |
 | `coverage` | `octocov (coverage diff)` | `coverage` タスク ＋ `mise exec -- octocov` | 計測ビルド |
@@ -139,6 +141,7 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 ### カバレッジ
 
 - カバレッジの増減計測は同じ workflow の `coverage` ジョブで行う（品質ゲートとは独立）。cargo-llvm-cov（`--no-cfg-coverage` 付き。`cfg(coverage)` で nightly 専用 `#![feature]` を有効にする依存があると stable の E0554 になるため）で LCOV を `lcov.info` に出し、`.octocov.yml` の `comment:`（`if: is_pull_request`、`updatePrevious: true`）に従って octocov が PR へカバレッジコメントを投稿する。PR 本文への挿入（`body:`）は使わない。
+- coverage ジョブは PostgreSQL のサービスコンテナ（nightly の test ジョブと同じ 16 系・digest 固定）に `PELWAY_DATABASE_URL`（スーパーユーザーの `postgres` ユーザー）で接続し、pelway-db の RLS テストを実行したうえで計測する（#161。#157 の `--exclude pelway-db` を解除）。ロール（`pelway_app`・`pelway_admin`・`pelway_audit`）はマイグレーションが作るため、ジョブでのロール作成ステップは無い。RLS テストの失敗は coverage ジョブに閉じ、品質ゲート（`static` / `lint` / `test`）の必須チェックには影響しない。
 - cargo-llvm-cov は `mise.toml` の `[tools]` で `"aqua:taiki-e/cargo-llvm-cov" = "0.6.17"` と宣言し、`mise.lock` が URL と checksum で取得物を固定する（CI は `mise run coverage`。mise.toml のタスクが cargo-llvm-cov を呼ぶ）。ソースから `cargo install` するとビルドに 45 秒ほどかかるため、事前ビルド済みのバイナリを使う。
 - octocov も `mise.toml` の `[tools]` で `"aqua:k1LoW/octocov" = "0.83.5"` と宣言し、`mise.lock` が URL と checksum で取得物を固定する。CI での実行は公式の `k1LoW/octocov-action`（actions.lock で sha 固定）経由で行う。レポートの artifact 保存に必要な `ACTIONS_RUNTIME_TOKEN` は `run:` ステップには渡されず action のコンテキストでしか取れないためです（octocov 本体は action の `version` + `checksum` 入力で v0.83.5 に固定。checksum は `mise.lock` が固定するのと同一のリリースアセット `octocov_v0.83.5_linux_amd64.tar.gz` の sha256）。レポートの保存と比較は `.octocov.yml` の `report.datastores` / `diff.datastores`（GitHub Actions の artifact のみ）で行い、PR コメントに base ブランチ（main）の前回レポートとの増減を表示する。増減は main でレポートが保存されたあとの PR から出る（それまではカバレッジ値と patch coverage のみ）。
 - rust にはカバレッジ計測用の `llvm-tools-preview` 成分を `mise.toml` の `components` で宣言する。`toolchain-check` が sysroot 上の `llvm-profdata` / `llvm-cov` の存在を確認し、欠けていれば失敗する（暗黙の rustup 自動ダウンロードには頼らない）。`coverage` ジョブは `mise install` のあと、この検査を先に実行する。
@@ -425,7 +428,7 @@ rm -f ~/.config/pelway-agent-review/fnox.toml ~/.config/pelway-agent-review/age.
 bwrap が作る名前空間の要点:
 
 - `/usr`・`/etc`・`/home` 等は read-only。`/` 全体をミラーする `--ro-bind /` は使わない（WSL の `/mnt/c` 等の submount まで写し、Windows 側ファイルが見えてしまうため、必要な top-level だけを明示的にマウントする）
-- 書き込み可は、セッションの worktree・共有 git dir・`/tmp`・ツールキャッシュ（`~/.cargo`・`~/.rustup`・`~/.local/{share,state}/mise`・`~/.cache/{mise,pkl,fnox}`・`~/.pkl`・`~/.npm`・`~/.cache/agent-sandbox`）のみ
+- 書き込み可は、セッションの worktree・共有 git dir・`/tmp`・ツールキャッシュ（`~/.cargo`・`~/.rustup`・`~/.local/{share,state}/mise`・`~/.cache/{mise,pkl,fnox}`・`~/.pkl`・`~/.npm`・`~/.cache/agent-sandbox`）のみ。エージェント運用の状態ファイルで sandbox 内からも読み書きが必要なもの（巡回状態の補助記録 `patrol-state.json`、`pr-digest` の既出の指摘の記録）は、書き込み可の共有 git dir（`git rev-parse --git-common-dir`）内の `pelway/` に置く（git の管理対象外。`~/.local/state` は sandbox から書けないため、Issue #477）
 - 共有 git dir（worktree の commondir）はコミットのため書き込み可だが、`config`・`config.worktree`・`hooks/` には read-only を重ねてマウントする（url rewrite や hook の仕込みを防ぐ）
 - 秘匿パス（`~/.ssh`・`~/.gnupg`・`~/.docker`・`~/.config/gh`・`~/.config/opencode`・`~/.config/devin`・`~/.t3/userdata` 等）は tmpfs で隠すかマウントしない。no-new-privileges により `sudo`/`doas`/`pkexec` も実行できない
 - ネットワークは遮断しない（ホストの経路をそのまま使う）。Issue #151 で hatai が「厳しくしすぎると調査が難しくなるので現時点では許可リストにしない」と指示したため
@@ -540,8 +543,8 @@ bwrap が作る名前空間の要点:
   - `PELWAY_LLM_PROVIDER` / `PELWAY_LLM_BASE_URL` / `PELWAY_LLM_CHAT_MODEL` / `PELWAY_LLM_EMBED_MODEL` / `PELWAY_LLM_RESPONSE_FORMAT` — 提供元の接続設定。既定は Z.ai 汎用エンドポイント + `glm-5.3-flash`（GLM-5.3 Flash。Z.ai 公式のモデルコード）。Coding Plan 向け endpoint（`/api/coding/paas/v4`）は自前アプリからの呼び出しが認められないため使わない。
   - `PELWAY_LLM_BASE_URL` が受ける接続先は Z.ai・OpenAI の 2 つの endpoint に限る（https 必須に加えて既知の提供元に限る。QA 点検 2026-11-17）。それ以外の接続先（ローカルのモック等）は `PELWAY_LLM_CUSTOM_BASE_URL` で明示したときだけ使い、その値が `PELWAY_LLM_BASE_URL` より優先して接続先になる。gateway 組み立て時に接続先（提供元名と base URL。キーは出さない。URL の userinfo とクエリの key/token などの値は `redact_url_for_log` で伏せる）を stderr に出す。
   - `PELWAY_LLM_TIMEOUT_SECS` — 1呼び出しのタイムアウト秒（既定 30）。
-  - `PELWAY_LLM_BASIS` — LLM を呼ぶ根拠の目的 ID（P01〜P08。既定 `P06`。BYOK のため。hatai 決定 2026-11-16）。コードには固定しない。
-- 実キーでの実行: `mise exec -- fnox exec -- <デモ起動コマンド>`。キーが未設定・空白のみ・ヘッダーに載せられない文字を含むときは、落ちずに台本モード（固定の合成応答）で起動する。
+  - `PELWAY_LLM_BASIS` — LLM を呼ぶ根拠の目的 ID（P01〜P08。既定 `P06`。BYOK のため。hatai 決定 2026-11-16）。`DataStore::new_demo_seeded_with_basis` と `RunnerConfig.llm_basis` が受け取れる（コードには固定しない）。現状この値を起動側へ渡すのは tests/real_llm.rs のみで、`serve*` のデモは `new_demo_seeded`（P06 固定）を使う。
+- 実キーでの実行: `mise exec -- fnox exec -- <デモ起動コマンド>`。キーが未設定・空白のみ・ヘッダーに載せられない文字を含むときは、落ちずに台本モード（固定の合成応答）で起動する。実提供元の呼び出しが失敗（タイムアウト・検証失敗の再試行尽き・拒否など）した呼び出しも「台本の応答で進めます」の進捗行を出して台本へ落ちる。
 - 予備の提供元（GPT Luna。自動切替ではなく設定の差し替え。ADR 0008）: `PELWAY_LLM_PROVIDER=openai PELWAY_LLM_BASE_URL=https://api.openai.com/v1 PELWAY_LLM_CHAT_MODEL=gpt-6-luna PELWAY_LLM_RESPONSE_FORMAT=json_schema`（キーは同じ `PELWAY_LLM_API_KEY`）。
 - `mise run demo-check` との関係: 許可接続先は 127.0.0.1 と ::1 のみで、実 LLM（z.ai）への接続は検査の対象外とする。提供元 endpoint の宣言は `crates/pelway-llm/src/config.rs` の1ファイルに集約し、そのファイルだけを external-refs 段階の除外とした（`scripts/demo-check/lib.sh` の除外コメント）。他の製品ソースに endpoint を書くと検査が落ちる。`DEMO_CHECK_ACCEPTANCE=1` の runtime loopback 検査は実 LLM 実行環境では成立しないため、実キーでの完走確認は demo-check の合格とは別に手動で記録する。
 

@@ -16,6 +16,8 @@ ai-presence-waiting = 判断待ち
 ## 上の帯
 search-placeholder = ⌕ 会話と作業記録を検索
 search-shortcut = ⌘K
+## 常時表示（デモ・模擬応答と AI の識別。S00 の画面契約）
+banner-demo-mock = デモ・模擬応答
 ## 「今日・判断待ち」の画面（区切りは inbox.rs の 2 区分）
 today-title = 今日
 today-section-mine = 自分の判断待ち
@@ -65,8 +67,13 @@ pane-ai-note = 作業の途中経過は会話には出しません。
 thread-input-placeholder = スレッドに返信
 ## 下のメッセージ入力欄
 composer-placeholder = { $channel } にメッセージ
+## 入力欄のメンション候補一覧
+mention-candidates-label = メンション候補
 ## トップレベルメニューと About ダイアログ（Slint の attribution、Issue 237）
 menu-help = ヘルプ
 menu-about = このアプリについて
 about-title = このアプリについて
 about-close = 閉じる
+## 読み上げ用の種別の呼び名（Issue 379。accessible-label で使う）
+ai-bot-label = AI Bot
+person-label = 人

@@ -17,6 +17,7 @@
 //! どこにどう出すかは未決のまま。
 
 use fluent_bundle::{FluentArgs, FluentBundle, FluentResource};
+use slint::Global;
 use unic_langid::LanguageIdentifier;
 
 use crate::MainWindow;
@@ -41,6 +42,8 @@ pub const USED_KEYS: &[&str] = &[
     // 上の帯
     "search-placeholder",
     "search-shortcut",
+    // 常時表示（デモ・模擬応答と AI の識別）
+    "banner-demo-mock",
     // 「今日・判断待ち」の画面
     "today-title",
     "today-section-mine",
@@ -90,11 +93,16 @@ pub const USED_KEYS: &[&str] = &[
     "thread-input-placeholder",
     // 下のメッセージ入力欄
     "composer-placeholder",
+    // 入力欄のメンション候補一覧
+    "mention-candidates-label",
     // トップレベルメニューと About ダイアログ（Slint の attribution、Issue 237）
     "menu-help",
     "menu-about",
     "about-title",
     "about-close",
+    // 読み上げ用の種別の呼び名（Issue 379）
+    "ai-bot-label",
+    "person-label",
 ];
 
 /// 用意している言語（`.ftl` がある言語だけ）。
@@ -245,6 +253,7 @@ pub fn apply_translations(
     window.set_tr_ai_presence_waiting(text("ai-presence-waiting"));
     window.set_tr_search_placeholder(text("search-placeholder"));
     window.set_tr_search_shortcut(text("search-shortcut"));
+    window.set_tr_banner_demo_mock(text("banner-demo-mock"));
     window.set_tr_today_title(text("today-title"));
     window.set_tr_today_section_mine(text("today-section-mine"));
     window.set_tr_today_section_requests(text("today-section-requests"));
@@ -288,10 +297,14 @@ pub fn apply_translations(
     window.set_tr_pane_ai_note(text("pane-ai-note"));
     window.set_tr_thread_input_placeholder(text("thread-input-placeholder"));
     window.set_tr_composer_placeholder(text("composer-placeholder"));
+    window.set_tr_mention_candidates_label(text("mention-candidates-label"));
     window.set_tr_menu_help(text("menu-help"));
     window.set_tr_menu_about(text("menu-about"));
     window.set_tr_about_title(text("about-title"));
     window.set_tr_about_close(text("about-close"));
+    let a11y = crate::A11yStrings::get(window);
+    a11y.set_tr_ai_bot_label(text("ai-bot-label"));
+    a11y.set_tr_person_label(text("person-label"));
     missing
 }
 
