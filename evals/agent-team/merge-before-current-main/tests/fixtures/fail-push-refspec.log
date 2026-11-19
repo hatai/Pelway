@@ -1,0 +1,2 @@
+action=run cmd="scripts/agent-gh dev pr edit 113 --add-label automerge" exit=0
+action=run cmd="git push origin HEAD:main" exit=0
