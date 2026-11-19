@@ -47,3 +47,15 @@
 5. 改善案: `mise exec` が不要なツール解決で GitHub レート制限に当たる問題は、`mise.toml` のツールを backend ごとに遅延解決させるか、CI/ローカルで `GITHUB_TOKEN` を供給する運用メモを `docs/dev-environment.md` に書くと再発を避けやすい。
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（round 5: main の取り込み）
+
+対象 head: 8a527a71b87e1f2a0e8851f34a58ffd8189c31e7（第1親）+ 540c5f5e（origin/main、第2親）
+
+1. 詰まった箇所: main（#449 の review 用 fnox 設定の分離・qa ロール追加などを含む 155 コミット）と本 PR の review 許可リストが `scripts/agent-gh` の review ケース・usage・終了コードの同じ場所を編集していて、agent-gh・そのテスト・dev-environment.md の 3 ファイルが衝突した。さらにスレッドの worktree は `.devin` が読み取り専用マウントされており、main 追加の `.devin/skills/*`（symlink 2 件）を展開できないため、マージは ro マウントの無い一時 worktree で実行し、push 後に本 worktree を追従させた。
+2. 曖昧だった文: 「review 用の設定に秘密が無ければ fail-closed（exit 3）」のテスト（#449）が不許可サブコマンド `pr list` を使っており、本 PR の「許可外はトークン発行前に exit 6」とどちらの挙動が正しいか。
+3. 仮定と解釈: 両側の意図を併存させた。review の許可リスト検査は #449 の fnox 分離（`PELWAY_AGENT_FNOX_CONFIG_REVIEW`）と 3 引数 `app_token` の上に載せ、検査順序（許可リスト → トークン発行）と exit 6 は round 4 のまま（fnox・gh・git のどれも呼ばない性質を維持）。`review_missing_secret_fails_closed` は許可サブコマンド `pr view 1` で確かめる形に直した（テストの意図は秘密欠落の fail-closed の確認で、`pr list` という選択は #449 時点では許可リストが存在しないため任意）。usage・終了コードの記述は qa（main）と review の exit 6（本 PR）を連結し、dev-environment.md の設定表は本 PR の括弧書き（ラッパーの絞り方の説明）と main の #449 の `Read(...)` deny 追記を連結した。取り込みは rebase ではなく `Merge branch 'main'`（issue-352・issue-97 と同じ先例。マージコミットは agent-gh-resign で表現できないため署名なし）。
+4. 足りなかった情報・検証手段: マージ結果の Rust 側（crates/・Cargo.toml・Cargo.lock・.cargo/）は origin/main と無差異であることを `git diff origin/main` で確かめ、lint・Rust テストの結果は main の CI と同じになることを根拠付けた。スクリプト側は `mise run script-test`（33 テスト合格）・`mise run shellcheck`（0 件）・`mise run build`（--locked、成功）で検証した。
+5. 改善案: スレッド worktree の読み取り専用マウント（`.devin`・`.opencode`・`opencode.json[c]`）と main 追加ファイルの衝突は今回の一時 worktree 手順で回避できる。`fix-merge-conflicts` スキルに「読み取り専用マウントがある worktree では一時 worktree でマージする」注意書きを足すと再発時に迷わない。
+
+使ったスキル: `fix-merge-conflicts`（グローバル）
