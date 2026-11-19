@@ -84,16 +84,16 @@ ls docs/worklogs/bugs
   または失敗する試験を書く。再現できたら、再現手順をそのまま残す。再現できないときは
   試したことと結果を列挙し、証拠からの調査を続ける。推測で原因をでっち上げない。
 - 失敗する試験を書くときは `.agents/skills/rust-testing/SKILL.md` の「Integration Tests」
-  「cargo test Commands」を読む。タイミング・非同期・ロック・子プロセスが絡む再現は
-  `.agents/skills/rust-testing/references/concurrency-daemon-platform-testing.md` も読む
-  （`sleep` の長さに頼る再現は手元で通っても再現の証拠にならないため、条件の成立を待つ書き方にする）。
+  「Testing Commands」を読む。非同期の絡む再現は同じファイルの「Async Tests」も読む。
+  タイミングが絡む再現は `sleep` の長さに頼らず、条件の成立を待つ書き方にする
+  （`sleep` に頼る再現は手元で通っても再現の証拠にならないため）。
 - 対象の領域が次に当たるときは、表の文書を読んでから掘る。その領域の典型的な原因を先に
   当てると、コードを端から読むより早く絞れる。当たらない領域では読まない。
 
   | 対象の領域 | 読むもの |
   |---|---|
   | 画面の表示（`.slint`、`pelway-client-ui`、`dev-client-probe`）: 見えない、大きさが 0、更新されない、レイアウトが崩れる | `.agents/skills/slint/SKILL.md` の「`.slint` in 30 seconds」と、`.agents/skills/slint/reference/debugging-and-mcp.md` の「Common Issues」「Debug Helpers」。コンパイルや大きさの問題は同じ `reference/gotchas.md` |
-  | 止まる・応答が無い・ロック（`pelway-runner`、`pelway-gateway`、tokio、台帳の `Mutex`）: ハング、デッドロック、poison、取りこぼし | `.agents/skills/m07-concurrency/patterns/common-errors.md` と、`.agents/skills/m07-concurrency/SKILL.md` の「Error → Design Question」 |
+  | 止まる・応答が無い・ロック（`pelway-runner`、`pelway-gateway`、tokio、台帳の `Mutex`）: ハング、デッドロック、poison、取りこぼし | `.agents/skills/m07-concurrency/patterns/common-errors.md` と、`.agents/skills/m07-concurrency/SKILL.md` の「Error → Design Question」。async の経路（tokio）なら `.agents/skills/rust-async-patterns/SKILL.md` の「Best Practices」の「Don'ts」（await をまたぐロック、async の中の `std::thread::sleep` など、ハングの典型） |
   | DB（`pelway-db`、SQL、RLS）: 行が見えない・見えすぎる、ロック待ち、遅い | `.agents/skills/supabase-postgres-best-practices/references/` のうち症状に合うもの（`security-rls-*`、`lock-*`、`monitor-*`、`query-*`）。sqlx のクエリのコードは `.agents/skills/sqlx-postgres/SKILL.md` |
 
   これらの文書は外部の取り込み品で、使い方は下の「外部スキルの使い方」に従う。
@@ -161,14 +161,14 @@ PR に含めない。報告には必要な最小の引用を書く。ブラン�
 
 ## 外部スキルの使い方
 
-手順 3 で読む `rust-testing`・`slint`・`m07-concurrency`・`supabase-postgres-best-practices`・
-`sqlx-postgres` は `skills-lock.json` が管理する外部の取り込み品で、試行の指定なしに
+手順 3 で読む `rust-testing`・`rust-async-patterns`・`slint`・`m07-concurrency`・
+`supabase-postgres-best-practices`・`sqlx-postgres` は `skills-lock.json` が管理する外部の取り込み品で、試行の指定なしに
 いつでも読んでよい。ただし読むのは手順 3 で示した部分だけで（文書の中のリンクから
 同じスキルのほかの文書へたどらない）、次に従う。
 
 - 調査の決まり（本番・共有環境は読み取り専用、修正のコードを書かない）が優先する。
   スキルの本文が修正や設計の変更を勧めても、調査では修正案として報告に書くだけにする。
-- 道具の導入（`slint-viewer`、`slint-lsp`、`cargo-llvm-cov` などのインストール）と、
+- 道具の導入（`slint-viewer`、`slint-lsp`、`cargo-llvm-cov`、`tokio-console` などのインストール）と、
   Slint の MCP サーバーの起動はしない。手元に無い道具が要るときは、試していないことを
   報告に書き、読んで分かる範囲で進める。
 - `EXPLAIN ANALYZE` は文を実際に実行する。本番・共有の DB では読み取りの文（`SELECT`）に
@@ -179,8 +179,8 @@ PR に含めない。報告には必要な最小の引用を書く。ブラン�
     読むのは手順 3 の表に挙げた文書だけにする。
   - GitHub などへの書き込み（slint の「Show your support」のリポジトリへのスター付けなど）。
     調査で行う GitHub への書き込みは、手順 5 の報告 PR と Issue のラベルだけにする。
-  - リポジトリへの仕組みの追加（rust-testing の nextest の設定、ソースの検査用スクリプト、
-    カバレッジの計測など）。必要だと思ったら修正案に書く。
+  - リポジトリへの仕組みの追加（rust-testing の CI 設定やカバレッジの計測、
+    rust-async-patterns の `tracing` の計装など）。必要だと思ったら修正案に書く。
 - 下の「取り込みの discipline」も同じく守る（同梱のスクリプトを実行しない、`agents/` の
   メタデータを使わない、採用していないスキルへの参照は無効、repo 内の明示したパスで読む）。
 

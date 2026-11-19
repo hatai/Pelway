@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         見出しと書き方の正本は skill `write-issue`（`.agents/skills/write-issue/SKILL.md`）。このフォームはその写しで、見出しを変えるときは両方を同じ PR で直す。
-        1 Issue = 1 PR。PR の差分は追加 800 行・削除 2000 行まで（`mise run pr-size` で数える。lockfile と生成物は除く）。
+        1 Issue = 1 PR。PR の差分は追加 800 行・削除 2000 行まで（`mise run pr-size` で数える。base 側の `.gitattributes` で `linguist-generated` を付けたファイルとバイナリは除く）。
         書き終えたら skill `write-issue` の手順 6 のゲートで確かめる。`ready-for-agent` を付けると GitHub Projects のボードの Backlog に載り、人間がカードを Todo へ動かすと着手の合図になる。
   - type: textarea
     id: goal
@@ -19,7 +19,7 @@ body:
     id: background
     attributes:
       label: 背景・前提
-      description: この Issue が要る理由と、前提になる決定（ADR、Issue の番号）。決定の中身はリンクで足りる
+      description: この Issue が要る理由と、前提になる決定（ADR、Issue の番号）。並行して進む作業は Issue と PR の番号。決定の中身はリンクで足りる
     validations:
       required: true
   - type: textarea
@@ -42,7 +42,7 @@ body:
     id: references
     attributes:
       label: 関連情報
-      description: 起票前に調べた ADR・調査・仕様・コード・Issue・PR へのリンク
+      description: 起票前に調べ、今のリポジトリで実在を確かめた ADR・調査・仕様・コード・Issue・PR へのリンク。リポジトリ外の成果物は URL か判断に足る抜粋
     validations:
       required: true
   - type: textarea

@@ -65,6 +65,7 @@
 3. 仮定と解釈: 許可の列挙は review-pr の実使用形に基づくため `pr comment` は含めなかった（レビュー担当の投稿は `pr review`）。選ばなかった解釈: `pr comment` も許可に入れる（レビュー担当は `pr review` で投稿するため不要）
 4. 足りなかった情報・検証手段: 委託の round 数え方の境界（`checks pending` での失敗は数えないが、must-fix による修正→再委託は数える）。`pr checks --required` がこの repo で空を返すため委託子が誤判定することがある
 5. 改善案: `.agents/skills/review-pr/SKILL.md` に「`gh pr checks --required` は branch protection の必須チェックを返すため、この repo では空になる。通常の `pr checks` を使う」を足す（round 3 で両委託子が同じ誤判定をした）
+   - 注記（2026-11-19）: 必須チェックが報告済みの head では、`--required` も `mise run verify` と `pr-size` を返す（#498・#499 で確認）。一覧を返さず `no required checks reported` で失敗するのは、必須チェックがまだ 1 つも報告されていない head（#497 で確認）。review-pr は `--required` を外し、2 つのチェックを名前で拾う形に直した。
 
 使ったスキル: `implement-issue`、`command-team`（委託の形）
 
