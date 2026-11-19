@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# 割り当ての前の blocker（blocked_by）確認の決まり（Issue #408）が正本 2 箇所
-# （runbook の「割り当て・停止・再開」と skill command-team の「2. 振り分け」）に
-# 落ちているかのテスト。対象は prose の差分なので、各受け入れ条件を grep したときの
-# 必須文言で確かめる。文言を変えるときはこのテストと同じ PR で直す。
+# 割り当ての前の blocker（blocked_by）確認の決まり（Issue #408）の正本 2 箇所
+# （runbook の「割り当て・停止・再開」と skill command-team の「2. 振り分け」）の
+# 必須文言を固定するテスト。
+# 位置づけ: このスクリプトは「必須文言が正本 2 箇所に存在する」という観測可能な
+# 事実だけを確かめる決定的な検査（wording pin）であり、受け入れ条件の意味や仕様の整合性は評価しない
+# （AGENTS.md「LLM judges」: 自然言語の意味の評価は rubric 付きの LLM judge が担い、
+# 決定的な検査は観測可能な効果に限る。語句が残っていれば矛盾した記述でも通るため、
+# 意味の確認は PR 本文での引用と skill review-pr のレビューで行う）。
+# 文言を変えるときはこのテストと同じ PR で直す。
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
