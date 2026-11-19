@@ -21,8 +21,14 @@ GH=${PR_DIGEST_GH:-"$ROOT/scripts/agent-gh dev"}
 POLL=${PR_DIGEST_POLL:-30}
 DEADLINE=${PR_DIGEST_DEADLINE:-7200}
 BODY_CHARS=${PR_DIGEST_BODY_CHARS:-600}
-# 既出の指摘の記録先。command-team の決まりに合わせて ~/.local/state/pelway/ 以下に置く。
-SEEN_DIR=${PR_DIGEST_SEEN_DIR:-"${XDG_STATE_HOME:-$HOME/.local/state}/pelway/pr-digest"}
+# 既出の指摘の記録先。リポジトリの共有 git dir（worktree と主 checkout で共有される
+# git の管理対象外の場所）内の pelway/ に置く。sandbox 内のエージェントは
+# ~/.local/state に書けないため（Issue #477）。PR_DIGEST_SEEN_DIR で差し替え可能。
+if [ -z "${PR_DIGEST_SEEN_DIR:-}" ]; then
+  SEEN_DIR="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/pelway/pr-digest"
+else
+  SEEN_DIR=$PR_DIGEST_SEEN_DIR
+fi
 # チェックが 1 つも登録されていない PR を「チェックが無い」と認めるまでの空ポーリング回数。
 EMPTY_POLLS=${PR_DIGEST_EMPTY_POLLS:-3}
 SHOW_ALL=0

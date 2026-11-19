@@ -97,6 +97,9 @@ EOF
 set -u
 MODE="$1"
 export HOME="$ROOT/home" XDG_STATE_HOME="$ROOT/state" XDG_CONFIG_HOME="$ROOT/config" MOCK="$ROOT/mock"
+# fake repo は git 管理でなく最小 PATH に git も無いため、patrol-state の置き場は
+# 環境変数で明示する（他の conductor-watch テストと同じやり方）。
+export PELWAY_PATROL_STATE="$ROOT/state/pelway/patrol-state.json"
 if [[ "$MODE" == systemd ]]; then
   export PATH="$ROOT/bin:$ROOT/systemd-bin:$ROOT/sysbin"
 else
@@ -122,55 +125,55 @@ if [[ "$MODE" == systemd ]]; then
   t "systemd: unit has Restart=always"   has "$UNIT" "^Restart=always"
   t "systemd: unit ExecStart is watch"   has "$UNIT" "^ExecStart=$ROOT/repo/scripts/conductor-watch.sh\$"
   t "systemd: systemctl start called"    has "$MOCK/systemctl.log" "start pelway-conductor-watch.service"
-  t "systemd: watch is running"          eq "$(count)" "1"
+  t "systemd: watch is running"          waitn 1
   p1="$(pids)"
   bash "$ENS" >>"$MOCK/out.log" 2>&1
-  t "systemd: second ensure keeps 1"     eq "$(count)" "1"
+  t "systemd: second ensure keeps 1"     waitn 1
   # unit 外で動く見張りは、kill しても復旧しない形のため unit に置き換える
   setsid -f bash "$ROOT/repo/scripts/conductor-watch.sh" >/dev/null 2>&1
   waitn 2
   foreign="$(pgrep -f 'conductor-watch\.sh' | grep -vx "$p1" | head -1)"
-  t "systemd: foreign watch present"     eq "$(count)" "2"
+  t "systemd: foreign watch present"     waitn 2
   bash "$ENS" >>"$MOCK/out.log" 2>&1
   t "systemd: foreign watch killed"      eq "$(kill -0 "$foreign" 2>/dev/null; echo $?)" "1"
   t "systemd: unit watch kept"           eq "$(kill -0 "$p1" 2>/dev/null; echo $?)" "0"
-  t "systemd: count back to 1"           eq "$(count)" "1"
+  t "systemd: count back to 1"           waitn 1
   kill "$p1" 2>/dev/null; wait0
   bash "$ENS" >>"$MOCK/out.log" 2>&1
+  t "systemd: ensure restarts watch"     waitn 1
   p2="$(pids)"
-  t "systemd: ensure restarts watch"     eq "$(count)" "1"
   t "systemd: restarted pid differs"     neq "$p2" "$p1"
 else
   t "fallback: no systemctl on PATH"     eq "$(command -v systemctl || echo none)" "none"
   bash "$ENS" >"$MOCK/out.log" 2>&1
   t "fallback: ensure exits 0"           eq "$?" "0"
-  t "fallback: watch is running"         eq "$(count)" "1"
+  t "fallback: watch is running"         waitn 1
   p1="$(pids)"
   bash "$ENS" >>"$MOCK/out.log" 2>&1
-  t "fallback: second ensure keeps 1"    eq "$(count)" "1"
+  t "fallback: second ensure keeps 1"    waitn 1
   bash "$ENS" >>"$MOCK/out.log" 2>&1
-  t "fallback: third ensure keeps 1"     eq "$(count)" "1"
+  t "fallback: third ensure keeps 1"     waitn 1
   # セッションを切り離していない見張り（nohup & 相当）は切り離した形に置き換える
   bash "$ROOT/repo/scripts/conductor-watch.sh" >/dev/null 2>&1 &
   fragile=$!
   waitn 2
-  t "fallback: fragile watch present"    eq "$(count)" "2"
+  t "fallback: fragile watch present"    waitn 2
   bash "$ENS" >>"$MOCK/out.log" 2>&1
   wait "$fragile" 2>/dev/null
   t "fallback: fragile watch replaced"   eq "$(kill -0 "$fragile" 2>/dev/null; echo $?)" "1"
   t "fallback: leader watch kept"        eq "$(kill -0 "$p1" 2>/dev/null; echo $?)" "0"
-  t "fallback: count back to 1"          eq "$(count)" "1"
+  t "fallback: count back to 1"          waitn 1
   # 切り離して起きた見張りが 2 つあるときは後からのものを落として 1 つにする
   setsid -f bash "$ROOT/repo/scripts/conductor-watch.sh" >/dev/null 2>&1
   waitn 2
-  t "fallback: extra leader present"     eq "$(count)" "2"
+  t "fallback: extra leader present"     waitn 2
   bash "$ENS" >>"$MOCK/out.log" 2>&1
-  t "fallback: extra leader killed"      eq "$(count)" "1"
+  t "fallback: extra leader killed"      waitn 1
   t "fallback: original leader kept"     eq "$(kill -0 "$p1" 2>/dev/null; echo $?)" "0"
   kill "$p1" 2>/dev/null; wait0
   bash "$ENS" >>"$MOCK/out.log" 2>&1
+  t "fallback: ensure restarts watch"    waitn 1
   p2="$(pids)"
-  t "fallback: ensure restarts watch"    eq "$(count)" "1"
   t "fallback: restarted pid differs"    neq "$p2" "$p1"
   t "fallback: watch has own session"    eq "$(ps -o sid= -p "$p2" | tr -d ' ')" "$p2"
   t "fallback: log file exists"          test -f "$LOGD/watch.log"
