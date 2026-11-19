@@ -1,6 +1,6 @@
 # 指揮役 運用手順書
 
-AI 開発チームの指揮役が従うイベント対応の手順。指揮役の正本は Grok Bot で、Grok Bot が動かないときは「10. 代行」の手順で別のエージェントが代行する。この手順書の「Grok Bot」は、代行中は代行者と読み替える。
+AI 開発チームの指揮役が従うイベント対応の手順。指揮役の正本は Grok Bot で、Grok Bot が動かないときは「11. 代行」の手順で別のエージェントが代行する。この手順書の「Grok Bot」は、代行中は代行者と読み替える。
 
 - 体制と上限の正本は `docs/superpowers/specs/agent-team.md`、受け取る通知の形は `docs/agents/notify-payloads.md`
 - 毎サイクルの判断（振り分け、モデル・effort、エスカレーション、改善ループ、代行の開始・終了）は skill `command-team` に従う
@@ -22,7 +22,7 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 
 しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更（`actions.lock` の再生成は例外。正本は `docs/superpowers/specs/agent-team.md` の「制約」）、スレッドの取り消し。
 
-sandbox に止められた操作（書き込み・実行・ネットワークなど）は、sandbox の外へ出る抜け道（`systemd-run`・`nohup`・別のシェル・ラッパースクリプトなど）で実行しない。止められたら、その操作を行わず止まって報告する。作業ログなどに残る同種の前例は許可にならない（2026-11-19 の hatai の決定、Issue #477）。
+sandbox に止められた操作（書き込み・実行・ネットワークなど）は、sandbox の外へ出る抜け道（`systemd-run`・`nohup`・別のシェル・ラッパースクリプトなど）で実行しない。止められたら、その操作を行わず止まって報告する。作業ログなどに残る同種の前例は許可にならない（Issue #477）。
 
 ラベル操作の裏付け検査: `needs-human` の解除と `automerge` の付け外しは、actor だけでは判定しない（エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai になることがあるため）。見張り（conductor-watch）が付け外しの時刻を hatai 本人の指示の記録（同じ Issue・PR への hatai 本人のコメントで、付け外しの前 24 時間以内のもの）と突き合わせ、裏付けが取れない操作を「出どころ不明」として `LABEL unbacked` の行で watch.log に出す。`needs-human` を hatai の指示の記録なしに外した場合は、それ自体を手順違反として記録し、Grok Bot に知らせる（「指揮役の定期巡回（スケジュール起床）」）。
 
@@ -223,13 +223,13 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 |---|---|
 | `approve` | 指揮役自身の PR なら、Ready for review と必須チェックが通っていることを確かめて skill `command-team` の「マージ」に進む。外部投入なら「PR #<M> は Approve された。skill implement-issue の手順 10 に従う。」を実装スレッドに送る。複数のレビュー担当を付けた PR で判定が割れたらマージせず、request-changes 側の指摘を優先して修正に進ませる（skill `command-team` の「レビュー担当と effort」） |
 | `request-changes` | 外部投入なら「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を実装スレッドに送る（回数の上限は skill `implement-issue` のとおり、実装スレッドが数える） |
-| `failed` | `error: checks pending` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 6 のエスカレーション |
+| `failed` | `error: checks pending` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 7 のエスカレーション |
 
 通常の PR のレビューの verdict（approve / request-changes / failed）は実装スレッドが処理する（skill `implement-issue` の手順 9）。指揮役は、実装スレッドの終わりの報告（`review:` と `ready:` の行）と GitHub の PR の状態（`pelway-review` の最新レビューとチェック）で進み具合を見る。
 
 実装スレッドは `branch` の `agent/<N>-` から Issue 番号を、`thread_id` から送り先を取る。レビュースレッドから実装スレッドを探すときは、PR のブランチ名と同じ `branch` を持つスレッドを `t3 thread list` から選ぶ。
 
-調査スレッド（ブランチが `agent/investigate-` で始まる）も `opencode` なので、上の表の実装スレッドの列で扱う。ただし `finished` の `pr:` は調査の報告の Draft PR なので、レビューを始める前に `docs/agents/command-team-details.md` の「調査（入口B）」で起票可否を判断する。判断のあともレビューを経てマージするため、Approve 後の Draft 解除も実装スレッドと同じ扱いで調査スレッドに行わせる。調査が脆弱性の疑いで止まったとき（skill `investigate-bug` の手順 4）は、報告の対象の Issue に `needs-human` が付く。7 の「実装担当が止まった」と同じ扱いで人間に知らせる。
+調査スレッド（ブランチが `agent/investigate-` で始まる）も `opencode` なので、上の表の実装スレッドの列で扱う。ただし `finished` の `pr:` は調査の報告の Draft PR なので、レビューを始める前に `docs/agents/command-team-details.md` の「調査（入口B）」で起票可否を判断する。判断のあともレビューを経てマージするため、Approve 後の Draft 解除も実装スレッドと同じ扱いで調査スレッドに行わせる。調査が脆弱性の疑いで止まったとき（skill `investigate-bug` の手順 4）は、報告の対象が Issue ならその Issue に `needs-human` が付く。Issue の無い報告（部屋のメッセージなど）ではラベルは付かず、スレッドの返答に概要だけが書かれる。7 の「実装担当が止まった」と同じ扱いで人間に知らせる。
 
 ### `pelway.github-notify/v2`
 
