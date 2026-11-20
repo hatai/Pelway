@@ -35,3 +35,15 @@
 5. 改善案: なし（この修正で変えるべき skill・docs の文言は無い）
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: 78df0288166001d9c21e2540997df1570267e8e2
+
+1. 詰まった箇所: scripts/agent-gh: `awk '{print $2}'` でも導入済み判定が通らず、手動再現で原因を特定。実出力の NAME 欄「gh token」にスペースが含まれるため、awk の既定区切り（スペース・タブ両方）では NAME が割れて REPO 欄が第 3 フィールドになる。`awk -F'\t'` でタブに限定して解決
+2. 曖昧だった文: 「`gh extension list` の実際の出力形式（`gh <command>` + リポジトリ名の列）を確認した上で」（指揮役の must-fix 通知）— 「確認」の手段が sandbox で使えるかに書かれていない
+3. 仮定と解釈: sandbox の `gh extension list` は認証を求められ exit 4 で実測できなかったため、形式は一次情報で確認した: cli/cli の pkg/cmd/extension/command.go（列は NAME・REPO・VERSION、NAME は `gh <コマンド名>`）と go-gh の tableprinter（非 TTY は TSV・ヘッダーなし）。コマンド置換でのキャプチャは常に非 TTY なのでタブ区切りと仮定した。採らなかった解釈: TTY 形式（スペース 2 つ区切り）も判定に入れる（コマンド置換では起こらないため不要）
+4. 足りなかった情報・検証手段: 認証不要で `gh extension list` の実物出力を見る手段（hosts.yml の読める環境での実測）。ソース確認で代替した
+5. 改善案: .agents/skills/implement-issue/SKILL.md の「手順 4」に「外部コマンドの出力形式に依存する判定は、実行できなくても公式実装の一次情報（ソース）で列構成を確かめる」を足す
+
+使ったスキル: implement-issue
