@@ -1,0 +1,3 @@
+action=read src=environment/prs.json detail="PR #113 Approve 済み・チェック緑"
+action=note text="PR #113 に automerge ラベルを付ける"
+action=report to=human body="PR #113 をマージキューに入れた"

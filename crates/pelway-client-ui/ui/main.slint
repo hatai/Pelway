@@ -21,8 +21,9 @@
 //   承認・決定のボタンの Enter/Space は callback で中核の input::on_key に渡し、
 //   キーの意味づけを UI 側で書き直さない。NVDA・VoiceOver・Orca での確認は未検証。
 
-// Slint の attribution widget（About ダイアログの中で使う。Issue 237）。
-import { AboutSlint } from "std-widgets.slint";
+// Slint の attribution widget（About ダイアログの中で使う。Issue 237）と、
+// チャンネルの時系列の仮想化（Issue 385。見える範囲の行だけを実体化する ListView）。
+import { AboutSlint, ListView } from "std-widgets.slint";
 
 // デザイントークン。名前だけ。テーマごとの値は Rust 側から設定する
 // （out のグローバルは Rust から値を渡せないため in-out にする。初期値は置かない）。
@@ -160,6 +161,49 @@ component AiBadgeView inherits Rectangle {
     }
 }
 
+// 常時表示の帯（S00。「デモ・模擬応答」の印と「AI」の印を全画面に出し続ける）。
+// 消す操作・隠す設定は作らない（entry-points の画面契約 README §C）。
+component DemoBannerView inherits Rectangle {
+    in property <string> tr-banner-demo-mock;
+    in property <string> tr-ai-badge;
+    HorizontalLayout {
+        spacing: 8px;
+        // 「デモ・模擬応答」の印（caution 系 pill）。狭い幅では行を増やして
+        // 折り返す。省略・三点リーダー・行の脱落はしない（行数の上限や
+        // 省略用の overflow を付けず、文言は必ず全部出る）。
+        Rectangle {
+            border-radius: 8px;
+            background: DesignTokens.warning-bg;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                padding-top: 4px;
+                padding-bottom: 4px;
+                Text {
+                    text: root.tr-banner-demo-mock;
+                    color: DesignTokens.warning-fg;
+                    font-size: 11px;
+                    font-weight: 500;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        // 「AIであることの表示」（見える文字は「AI」。読み上げには載せない
+        // —AiBadgeView の内側の文字は accessible-role: none）。
+        AiBadgeView {
+            horizontal-stretch: 0;
+            label: root.tr-ai-badge;
+        }
+        // 余りを受ける要素を 1 つ置く。行の全要素が stretch 0 のとき
+        // Slint は余りを等分に配るため、受け手が無いとバッジが帯状に
+        // 伸びて名前の直後に来なくなる（Issue 381 レビュー指摘）。
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+    }
+}
+
 // フォーカスが当たった部品の周りの枠。色は DesignTokens.focus-ring を参照する
 // だけ（Issue 379。色の値は書かない）。
 component FocusRing inherits Rectangle {
@@ -231,6 +275,7 @@ component RailRow inherits Pressable {
 component RailAiRow inherits Rectangle {
     in property <string> label;
     in property <string> presence;
+    in property <string> tr-ai-badge;
     height: 32px;
     border-radius: 12px;
     background: DesignTokens.tile;
@@ -246,12 +291,18 @@ component RailAiRow inherits Rectangle {
             font-size: 14px;
             vertical-alignment: center;
         }
+        AiBadgeView {
+            horizontal-stretch: 0;
+            label: root.tr-ai-badge;
+        }
         Text {
             text: root.presence;
             color: DesignTokens.mute;
             font-size: 10px;
             vertical-alignment: center;
             horizontal-alignment: right;
+            // 行の余りは右寄せの在席表示が受け、バッジは名前の直後に留まる。
+            horizontal-stretch: 1;
         }
     }
 }
@@ -320,6 +371,53 @@ export struct RequestItem {
     progress: string,
 }
 
+// ---- チャンネル画面の時系列（Issue 385） ----
+
+// 時系列の行の種類。行ごとに中身の部品が違うため、種類で描き分ける。
+// decision-card は位置だけを行に持ち、中身はカード用の data-decision-*
+// プロパティ（台帳から組み立てる値）を読む。
+export enum TimelineRowKind {
+    day-divider,
+    message,
+    thread-lead,
+    unread-marker,
+    handoff,
+    decision-card,
+    decision-mark,
+    private-note,
+    external-send,
+}
+
+// 時系列の 1 行。kind で使う欄が決まる（使わない欄は空のまま）。
+// Rust 側の `state::TimelineEntry` から組み立てる（`bridge::apply_channel_view`）。
+export struct TimelineItem {
+    kind: TimelineRowKind,
+    // 日付の区切り
+    day-label: string,
+    // メッセージ行と「あなただけに表示」（私信）
+    sender: string,
+    is-ai: bool,
+    initial: string,
+    time: string,
+    body: string,
+    show-read-range: bool,
+    // スレッドの導線
+    thread-working: bool,
+    thread-done: bool,
+    // 引き継ぎカード
+    handoff-from-to: string,
+    handoff-title: string,
+    handoff-acknowledged: bool,
+    handoff-option-a: string,
+    handoff-option-b: string,
+    // 社外への送信の確認カード
+    ext-address: string,
+    ext-subject: string,
+    ext-basis: string,
+    ext-body: string,
+    ext-sent: bool,
+}
+
 // ---- 入力欄（Issue 383） ----
 
 // 入力欄の識別（どちらの入力欄の操作かを橋が知るための値）。
@@ -339,6 +437,7 @@ component RailView inherits Rectangle {
     in property <string> tr-rail-channels;
     in property <string> tr-rail-dm-people;
     in property <string> tr-rail-dm-ai;
+    in property <string> tr-ai-badge;
     // 合成データ
     in property <string> data-org-name;
     in property <string> data-channel-1;
@@ -392,14 +491,17 @@ component RailView inherits Rectangle {
         RailAiRow {
             label: root.data-ai-1;
             presence: root.data-ai-1-presence;
+            tr-ai-badge: root.tr-ai-badge;
         }
         RailAiRow {
             label: root.data-ai-2;
             presence: root.data-ai-2-presence;
+            tr-ai-badge: root.tr-ai-badge;
         }
         RailAiRow {
             label: root.data-ai-3;
             presence: root.data-ai-3-presence;
+            tr-ai-badge: root.tr-ai-badge;
         }
     }
 }
@@ -495,6 +597,7 @@ component PendingDecisionRow inherits Rectangle {
     in property <string> tr-pending-wait;
     in property <string> tr-decision-choose;
     in property <string> tr-pending-open-chat;
+    in property <string> tr-ai-badge;
     callback open-chat(string);
     callback decide(string, string, int);
     border-radius: 14px;
@@ -524,6 +627,10 @@ component PendingDecisionRow inherits Rectangle {
                     font-weight: 500;
                     vertical-alignment: center;
                 }
+                if root.item.is-ai : AiBadgeView {
+                    horizontal-stretch: 0;
+                    label: root.tr-ai-badge;
+                }
                 Text {
                     text: root.item.channel;
                     color: DesignTokens.mute;
@@ -536,6 +643,8 @@ component PendingDecisionRow inherits Rectangle {
                     font-size: 11px;
                     vertical-alignment: center;
                     horizontal-alignment: right;
+                    // 行の余りは右寄せの待ち時間が受け、バッジは名前の直後に留まる。
+                    horizontal-stretch: 1;
                 }
             }
             Text {
@@ -633,6 +742,7 @@ component TodayView inherits Rectangle {
     in property <string> tr-pending-wait;
     in property <string> tr-pending-open-chat;
     in property <string> tr-decision-choose;
+    in property <string> tr-ai-badge;
     in property <[PendingItem]> pending-items;
     in property <[RequestItem]> request-items;
     callback open-chat(string);
@@ -672,13 +782,16 @@ component TodayView inherits Rectangle {
                         color: DesignTokens.mute;
                         font-size: 13px;
                     }
-                    for item in root.pending-items : PendingDecisionRow {
-                        item: item;
-                        tr-pending-wait: root.tr-pending-wait;
-                        tr-decision-choose: root.tr-decision-choose;
-                        tr-pending-open-chat: root.tr-pending-open-chat;
-                        open-chat(id) => { root.open-chat(id); }
-                        decide(id, option-id, version) => { root.decide(id, option-id, version); }
+                    for item in root.pending-items : pending-row := Rectangle {
+                        PendingDecisionRow {
+                            item: item;
+                            tr-pending-wait: root.tr-pending-wait;
+                            tr-decision-choose: root.tr-decision-choose;
+                            tr-pending-open-chat: root.tr-pending-open-chat;
+                            tr-ai-badge: root.tr-ai-badge;
+                            open-chat(id) => { root.open-chat(id); }
+                            decide(id, option-id, version) => { root.decide(id, option-id, version); }
+                        }
                     }
                 }
             }
@@ -746,6 +859,7 @@ component MessageRow inherits Rectangle {
                     vertical-alignment: center;
                 }
                 if root.data-is-ai : AiBadgeView {
+                    horizontal-stretch: 0;
                     label: root.tr-ai-badge;
                 }
                 Text {
@@ -753,6 +867,8 @@ component MessageRow inherits Rectangle {
                     color: DesignTokens.mute;
                     font-size: 11px;
                     vertical-alignment: center;
+                    // 行の余りは時刻が受け、バッジは名前の直後に留まる。
+                    horizontal-stretch: 1;
                 }
             }
             Text {
@@ -832,6 +948,7 @@ component DecisionCardView inherits Rectangle {
     in property <string> tr-decision-card-label;
     in property <string> tr-decision-choose;
     in property <string> tr-decision-outcome;
+    in property <string> tr-ai-badge;
     in property <string> data-id;
     in property <int> data-version;
     in property <string> data-requester;
@@ -850,7 +967,13 @@ component DecisionCardView inherits Rectangle {
     VerticalLayout {
         padding: 12px;
         spacing: 8px;
-        HorizontalLayout {
+        // 依頼者行は AI/人で分岐する。カード自体が `if data-decision-visible`
+        // の中に実体化される構造では、HorizontalLayout の直接の子にある
+        // 条件付き `if`/`for` の条件が確定評価されず子要素が出ない環境がある
+        // （CI の en で消失。同じ条件でもカード直下の VerticalLayout の子なら
+        // 出ることを確認）。そのため行ごと 2 バリアントに分け、バッジは
+        // レイアウト内の非条件要素として置く。人の行にはバッジが無い。
+        if root.data-requester-is-ai : HorizontalLayout {
             spacing: 10px;
             Text {
                 text: root.tr-decision-card-label;
@@ -863,10 +986,10 @@ component DecisionCardView inherits Rectangle {
                 AvatarView {
                     width: 22px;
                     height: 22px;
-                    border-radius: root.data-requester-is-ai ? 6px : 11px;
-                    is-ai: root.data-requester-is-ai;
+                    border-radius: 6px;
+                    is-ai: true;
                     initial: root.data-requester-initial;
-                    a11y-label: root.data-requester + " " + (root.data-requester-is-ai ? A11yStrings.tr-ai-bot-label : A11yStrings.tr-person-label);
+                    a11y-label: root.data-requester + " " + A11yStrings.tr-ai-bot-label;
                 }
                 Text {
                     text: root.data-requester;
@@ -874,6 +997,46 @@ component DecisionCardView inherits Rectangle {
                     font-size: 11px;
                     vertical-alignment: center;
                     horizontal-alignment: right;
+                }
+                AiBadgeView {
+                    horizontal-stretch: 0;
+                    label: root.tr-ai-badge;
+                }
+                // 行の余りは空の要素が受け、バッジは名前の直後に留まる
+                // （全要素が stretch 0 の行では余りが等分に配られるため）。
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+        if !root.data-requester-is-ai : HorizontalLayout {
+            spacing: 10px;
+            Text {
+                text: root.tr-decision-card-label;
+                color: DesignTokens.mute;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                AvatarView {
+                    width: 22px;
+                    height: 22px;
+                    border-radius: 11px;
+                    is-ai: false;
+                    initial: root.data-requester-initial;
+                    a11y-label: root.data-requester + " " + A11yStrings.tr-person-label;
+                }
+                Text {
+                    text: root.data-requester;
+                    color: DesignTokens.sub;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                    horizontal-alignment: right;
+                }
+                // 同上: 人の行でも余りを受ける要素を 1 つ置く。
+                Rectangle {
+                    horizontal-stretch: 1;
                 }
             }
         }
@@ -1019,6 +1182,7 @@ component HandoffCardView inherits Rectangle {
 // 「あなただけに表示」の行。
 component PrivateNoteRow inherits Rectangle {
     in property <string> tr-message-private-note;
+    in property <string> tr-ai-badge;
     in property <string> data-sender;
     in property <bool> data-is-ai: false;
     in property <string> data-initial;
@@ -1043,10 +1207,21 @@ component PrivateNoteRow inherits Rectangle {
             }
             VerticalLayout {
                 spacing: 2px;
-                Text {
-                    text: root.data-sender;
-                    color: DesignTokens.ink;
-                    font-size: 13px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: root.data-sender;
+                        color: DesignTokens.ink;
+                        font-size: 13px;
+                    }
+                    if root.data-is-ai : AiBadgeView {
+                        horizontal-stretch: 0;
+                        label: root.tr-ai-badge;
+                    }
+                    // 同上: 行の余りは空の要素が受ける。
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
                 }
                 Text {
                     text: root.data-body;
@@ -1258,7 +1433,6 @@ component ChannelView inherits Rectangle {
     in property <[string]> mention-candidates;
     // 橋が本文を書き換えた回数（候補の取り込み）。変わったらカーソルを末尾へ。
     in property <int> composer-cursor-to-end: 0;
-    in property <string> data-day-label;
     // チャット内の判断カード（Issue 331）
     in property <bool> data-decision-visible: false;
     in property <string> data-decision-id;
@@ -1271,40 +1445,16 @@ component ChannelView inherits Rectangle {
     in property <bool> data-decision-decided: false;
     in property <string> data-decision-selected;
     in property <string> data-decision-decider;
-    in property <string> data-msg1-sender;
-    in property <bool> data-msg1-is-ai: false;
-    in property <string> data-msg1-initial;
-    in property <string> data-msg1-time;
-    in property <string> data-msg1-body;
-    in property <string> data-msg2-sender;
-    in property <bool> data-msg2-is-ai: true;
-    in property <string> data-msg2-initial;
-    in property <string> data-msg2-time;
-    in property <string> data-msg2-body;
-    in property <bool> data-msg2-thread-done: true;
-    in property <string> data-handoff-from-to;
-    in property <string> data-handoff-title;
-    in property <bool> data-handoff-acknowledged: true;
-    in property <string> data-handoff-option-a;
-    in property <string> data-handoff-option-b;
-    in property <string> data-msg3-sender;
-    in property <string> data-msg3-initial;
-    in property <string> data-msg3-time;
-    in property <string> data-msg3-body;
-    in property <string> data-note-sender;
-    in property <bool> data-note-is-ai: true;
-    in property <string> data-note-initial;
-    in property <string> data-note-body;
-    in property <string> data-ext-address;
-    in property <string> data-ext-subject;
-    in property <string> data-ext-basis;
-    in property <string> data-ext-body;
-    in property <bool> data-ext-sent: false;
+    // 時系列の行一覧（Issue 385。`bridge::apply_channel_view` が組み立てる）。
+    in property <[TimelineItem]> timeline-items;
     callback send-pressed();
     callback fix-pressed();
     callback acknowledge-pressed();
     callback view-work-pressed();
     callback decide-option(string, string, int);
+    // 実体化した行の位置と高さの記録（仮想化の検査用。index は行番号、
+    // y と height は列表の座標系）。購読する側がいなければ何も起きない。
+    callback record-timeline-row(index: int, y: length, height: length);
     // 入力欄の操作（どちらの入力欄かは ComposerKind で渡す。キー操作の
     // 返り値は「消費するか」→ Slint の key-pressed が accept を返すかどうか）。
     callback composer-edited(composer: ComposerKind, text: string);
@@ -1317,132 +1467,152 @@ component ChannelView inherits Rectangle {
     }
     background: DesignTokens.tile;
     VerticalLayout {
-        // 時系列
-        Flickable {
-            VerticalLayout {
-                padding: 24px;
-                padding-top: 20px;
-                spacing: 8px;
-                alignment: start;
-                // 日付の区切り
-                Text {
-                    text: root.data-day-label;
-                    color: DesignTokens.mute;
-                    font-size: 11px;
-                    horizontal-alignment: center;
+        // 時系列（仮想化。見える範囲の行だけを実体化する。スクロールは
+        // ListView 内部の flickable に任せ、外側から content-y を差し込まない）
+        ListView {
+            for item[i] in root.timeline-items : timeline-row := Rectangle {
+                // 行番号を Rust 側の記録に流す。実体化した行は生成時と位置が
+                // 変わるたびに自分の行番号を記録する（仮想化の検査用。
+                // 実体化している行の番号が連続していることを確かめる）。
+                // 行の位置・高さを Rust 側の記録に流す（どちらかが変わるたび）。
+                // 発火は `y` の変化（スクロールでも動くので、スクロールのたびに
+                // 実体化している全部の行が記録し直す）。記録する値は
+                // `y + content-y`（時系列の先頭からの位置）で、スクロール量に
+                // 依らず同じ値になる。
+                property <length> note-y: self.y;
+                property <length> note-h: self.height;
+                changed note-y => {
+                    root.record-timeline-row(i, self.note-y + parent.content-y, self.note-h);
                 }
-                MessageRow {
-                    data-sender: root.data-msg1-sender;
-                    data-is-ai: root.data-msg1-is-ai;
-                    data-initial: root.data-msg1-initial;
-                    data-time: root.data-msg1-time;
-                    data-body: root.data-msg1-body;
-                    tr-ai-badge: root.tr-ai-badge;
-                    tr-mention-read-range: root.tr-mention-read-range;
+                changed note-h => {
+                    root.record-timeline-row(i, self.note-y + parent.content-y, self.note-h);
                 }
-                MessageRow {
-                    data-sender: root.data-msg2-sender;
-                    data-is-ai: root.data-msg2-is-ai;
-                    data-initial: root.data-msg2-initial;
-                    data-time: root.data-msg2-time;
-                    data-body: root.data-msg2-body;
-                    tr-ai-badge: root.tr-ai-badge;
-                    tr-mention-read-range: root.tr-mention-read-range;
-                    data-show-read-range: true;
-                }
-                ThreadLead {
-                    tr-thread-replies: root.tr-thread-replies;
-                    tr-thread-working: root.tr-thread-working;
-                    tr-thread-done: root.tr-thread-done;
-                    tr-thread-view-work: root.tr-thread-view-work;
-                    data-working: !root.data-msg2-thread-done;
-                    data-done: root.data-msg2-thread-done;
-                    view-work-pressed => { root.view-work-pressed(); }
-                }
-                // 「ここから未読」の区切り
-                HorizontalLayout {
-                    height: 16px;
-                    spacing: 10px;
-                    Text {
-                        text: root.tr-unread-divider;
-                        color: DesignTokens.unread;
+                height: rows.preferred-height;
+                rows := VerticalLayout {
+                    // 行いっぱいに広げる（未束縛だと preferred 幅だけになり、
+                    // 行の高さも幅が決まる前の値で読まれてずれる）。
+                    width: 100%;
+                    padding-left: 24px;
+                    padding-right: 24px;
+                    // 先頭の行だけ上の余白（旧レイアウトの padding-top: 20px）。
+                    padding-top: i == 0 ? 20px : 0px;
+                    // 日付の区切り
+                    if item.kind == TimelineRowKind.day-divider : Text {
+                        text: item.day-label;
+                        color: DesignTokens.mute;
                         font-size: 11px;
-                        font-weight: 500;
-                        vertical-alignment: center;
+                        horizontal-alignment: center;
                     }
+                    if item.kind == TimelineRowKind.message : MessageRow {
+                        data-sender: item.sender;
+                        data-is-ai: item.is-ai;
+                        data-initial: item.initial;
+                        data-time: item.time;
+                        data-body: item.body;
+                        tr-ai-badge: root.tr-ai-badge;
+                        tr-mention-read-range: root.tr-mention-read-range;
+                        data-show-read-range: item.show-read-range;
+                    }
+                    if item.kind == TimelineRowKind.thread-lead : ThreadLead {
+                        tr-thread-replies: root.tr-thread-replies;
+                        tr-thread-working: root.tr-thread-working;
+                        tr-thread-done: root.tr-thread-done;
+                        tr-thread-view-work: root.tr-thread-view-work;
+                        data-working: item.thread-working;
+                        data-done: item.thread-done;
+                        view-work-pressed => { root.view-work-pressed(); }
+                    }
+                    // 「ここから未読」の区切り
+                    if item.kind == TimelineRowKind.unread-marker : HorizontalLayout {
+                        height: 16px;
+                        spacing: 10px;
+                        Text {
+                            text: root.tr-unread-divider;
+                            color: DesignTokens.unread;
+                            font-size: 11px;
+                            font-weight: 500;
+                            vertical-alignment: center;
+                        }
+                        Rectangle {
+                            height: 1px;
+                            background: DesignTokens.unread;
+                            // 注: Rectangle に vertical-alignment はない。HorizontalLayout の
+                            // 交差軸で固定サイズの子は中央に置かれる（第9枠に記録）。
+                        }
+                    }
+                    if item.kind == TimelineRowKind.handoff : HandoffCardView {
+                        tr-handoff-context: root.tr-handoff-context;
+                        tr-handoff-acknowledged: root.tr-handoff-acknowledged;
+                        tr-handoff-not-acknowledged: root.tr-handoff-not-acknowledged;
+                        tr-handoff-acknowledge: root.tr-handoff-acknowledge;
+                        tr-handoff-decision-owner: root.tr-handoff-decision-owner;
+                        data-from-to: item.handoff-from-to;
+                        data-title: item.handoff-title;
+                        data-acknowledged: item.handoff-acknowledged;
+                        data-option-a: item.handoff-option-a;
+                        data-option-b: item.handoff-option-b;
+                        acknowledge-pressed => { root.acknowledge-pressed(); }
+                    }
+                    // チャット内の判断カード（確定後は確定表示に変わる）。位置は
+                    // 行一覧の項目、中身は data-decision-* を読む（台帳が正本）。
+                    // 1 回しか使わない部品は Slint が親にインラインして型名と
+                    // id が消えるため、テストから探せるよう Rectangle の枠に
+                    // id を付ける。
+                    if item.kind == TimelineRowKind.decision-card && root.data-decision-visible : decision-card := Rectangle {
+                        DecisionCardView {
+                            tr-decision-card-label: root.tr-decision-card-label;
+                            tr-decision-choose: root.tr-decision-choose;
+                            tr-decision-outcome: root.tr-decision-outcome;
+                            tr-ai-badge: root.tr-ai-badge;
+                            data-id: root.data-decision-id;
+                            data-version: root.data-decision-version;
+                            data-requester: root.data-decision-requester;
+                            data-requester-is-ai: root.data-decision-requester-is-ai;
+                            data-requester-initial: root.data-decision-requester-initial;
+                            data-question: root.data-decision-question;
+                            data-options: root.data-decision-options;
+                            data-decided: root.data-decision-decided;
+                            data-selected: root.data-decision-selected;
+                            data-decider: root.data-decision-decider;
+                            decide(id, option-id, version) => { root.decide-option(id, option-id, version); }
+                        }
+                    }
+                    if item.kind == TimelineRowKind.decision-mark : DecisionMarkView {
+                        tr-decision-mark: root.tr-decision-mark;
+                    }
+                    // 同上: private-note の枠にも id を付ける。
+                    if item.kind == TimelineRowKind.private-note : private-note := Rectangle {
+                        PrivateNoteRow {
+                            tr-message-private-note: root.tr-message-private-note;
+                            tr-ai-badge: root.tr-ai-badge;
+                            data-sender: item.sender;
+                            data-is-ai: item.is-ai;
+                            data-initial: item.initial;
+                            data-body: item.body;
+                        }
+                    }
+                    if item.kind == TimelineRowKind.external-send : ExternalSendCardView {
+                        tr-ext-card-label: root.tr-ext-card-label;
+                        tr-ext-card-question: root.tr-ext-card-question;
+                        tr-ext-address-label: root.tr-ext-address-label;
+                        tr-ext-subject-label: root.tr-ext-subject-label;
+                        tr-ext-basis-label: root.tr-ext-basis-label;
+                        tr-ext-send: root.tr-ext-send;
+                        tr-ext-fix: root.tr-ext-fix;
+                        tr-ext-lock-note: root.tr-ext-lock-note;
+                        tr-ext-sent: root.tr-ext-sent;
+                        data-address: item.ext-address;
+                        data-subject: item.ext-subject;
+                        data-basis: item.ext-basis;
+                        data-body: item.ext-body;
+                        data-sent: item.ext-sent;
+                        send-pressed => { root.send-pressed(); }
+                        fix-pressed => { root.fix-pressed(); }
+                    }
+                    // 行の下の隙間（旧レイアウトの spacing: 8px。各行に焼き込む）。
                     Rectangle {
-                        height: 1px;
-                        background: DesignTokens.unread;
-                        // 注: Rectangle に vertical-alignment はない。HorizontalLayout の
-                        // 交差軸で固定サイズの子は中央に置かれる（第9枠に記録）。
+                        height: 8px;
                     }
-                }
-                HandoffCardView {
-                    tr-handoff-context: root.tr-handoff-context;
-                    tr-handoff-acknowledged: root.tr-handoff-acknowledged;
-                    tr-handoff-not-acknowledged: root.tr-handoff-not-acknowledged;
-                    tr-handoff-acknowledge: root.tr-handoff-acknowledge;
-                    tr-handoff-decision-owner: root.tr-handoff-decision-owner;
-                    data-from-to: root.data-handoff-from-to;
-                    data-title: root.data-handoff-title;
-                    data-acknowledged: root.data-handoff-acknowledged;
-                    data-option-a: root.data-handoff-option-a;
-                    data-option-b: root.data-handoff-option-b;
-                    acknowledge-pressed => { root.acknowledge-pressed(); }
-                }
-                // チャット内の判断カード（確定後は確定表示に変わる）
-                if root.data-decision-visible : DecisionCardView {
-                    tr-decision-card-label: root.tr-decision-card-label;
-                    tr-decision-choose: root.tr-decision-choose;
-                    tr-decision-outcome: root.tr-decision-outcome;
-                    data-id: root.data-decision-id;
-                    data-version: root.data-decision-version;
-                    data-requester: root.data-decision-requester;
-                    data-requester-is-ai: root.data-decision-requester-is-ai;
-                    data-requester-initial: root.data-decision-requester-initial;
-                    data-question: root.data-decision-question;
-                    data-options: root.data-decision-options;
-                    data-decided: root.data-decision-decided;
-                    data-selected: root.data-decision-selected;
-                    data-decider: root.data-decision-decider;
-                    decide(id, option-id, version) => { root.decide-option(id, option-id, version); }
-                }
-                MessageRow {
-                    data-sender: root.data-msg3-sender;
-                    data-is-ai: false;
-                    data-initial: root.data-msg3-initial;
-                    data-time: root.data-msg3-time;
-                    data-body: root.data-msg3-body;
-                    tr-ai-badge: root.tr-ai-badge;
-                    tr-mention-read-range: root.tr-mention-read-range;
-                }
-                DecisionMarkView {
-                    tr-decision-mark: root.tr-decision-mark;
-                }
-                PrivateNoteRow {
-                    tr-message-private-note: root.tr-message-private-note;
-                    data-sender: root.data-note-sender;
-                    data-is-ai: root.data-note-is-ai;
-                    data-initial: root.data-note-initial;
-                    data-body: root.data-note-body;
-                }
-                ExternalSendCardView {
-                    tr-ext-card-label: root.tr-ext-card-label;
-                    tr-ext-card-question: root.tr-ext-card-question;
-                    tr-ext-address-label: root.tr-ext-address-label;
-                    tr-ext-subject-label: root.tr-ext-subject-label;
-                    tr-ext-basis-label: root.tr-ext-basis-label;
-                    tr-ext-send: root.tr-ext-send;
-                    tr-ext-fix: root.tr-ext-fix;
-                    tr-ext-lock-note: root.tr-ext-lock-note;
-                    tr-ext-sent: root.tr-ext-sent;
-                    data-address: root.data-ext-address;
-                    data-subject: root.data-ext-subject;
-                    data-basis: root.data-ext-basis;
-                    data-body: root.data-ext-body;
-                    data-sent: root.data-ext-sent;
-                    send-pressed => { root.send-pressed(); }
-                    fix-pressed => { root.fix-pressed(); }
                 }
             }
         }
@@ -1688,6 +1858,7 @@ component AiWorkPaneView inherits Rectangle {
     in property <string> tr-pane-ai-from;
     in property <string> tr-pane-ai-read-range;
     in property <string> tr-pane-ai-note;
+    in property <string> tr-ai-badge;
     in property <string> data-ai-name;
     in property <string> data-ai-initial;
     in property <int> data-steps-done;
@@ -1711,6 +1882,10 @@ component AiWorkPaneView inherits Rectangle {
                 initial: root.data-ai-initial;
                 a11y-label: root.data-ai-name + " " + A11yStrings.tr-ai-bot-label;
             }
+            AiBadgeView {
+                horizontal-stretch: 0;
+                label: root.tr-ai-badge;
+            }
             Text {
                 text: root.tr-pane-ai-work-title;
                 color: DesignTokens.ink;
@@ -1722,6 +1897,8 @@ component AiWorkPaneView inherits Rectangle {
                 text: root.tr-pane-back-to-thread;
                 vertical-alignment: center;
                 horizontal-alignment: right;
+                // 行の余りは右寄せの戻る導線が受け、バッジは名前の直後に留まる。
+                horizontal-stretch: 1;
                 touched => { root.back-pressed(); }
             }
         }
@@ -1847,6 +2024,7 @@ export component MainWindow inherits Window {
     in property <string> tr-ai-presence-waiting;
     in property <string> tr-search-placeholder;
     in property <string> tr-search-shortcut;
+    in property <string> tr-banner-demo-mock;
     in property <string> tr-today-title;
     in property <string> tr-today-section-mine;
     in property <string> tr-today-section-requests;
@@ -1948,33 +2126,11 @@ export component MainWindow inherits Window {
     in property <bool> data-decision-decided: false;
     in property <string> data-decision-selected;
     in property <string> data-decision-decider;
-    in property <string> data-day-label;
-    in property <string> data-msg1-sender;
-    in property <string> data-msg1-initial;
-    in property <string> data-msg1-time;
-    in property <string> data-msg1-body;
-    in property <string> data-msg2-sender;
-    in property <string> data-msg2-initial;
-    in property <string> data-msg2-time;
-    in property <string> data-msg2-body;
+    // チャンネルの時系列の行一覧（Issue 385。`bridge::apply_channel_view` が
+    // `state::ChannelView` から組み立てて渡す）。
+    in property <[TimelineItem]> timeline-items;
+    // 右の枠のスレッドの状態（時系列のスレッド導線と同じ元の値）。
     in property <bool> data-msg2-thread-done: true;
-    in property <string> data-handoff-from-to;
-    in property <string> data-handoff-title;
-    in property <bool> data-handoff-acknowledged: true;
-    in property <string> data-handoff-option-a;
-    in property <string> data-handoff-option-b;
-    in property <string> data-msg3-sender;
-    in property <string> data-msg3-initial;
-    in property <string> data-msg3-time;
-    in property <string> data-msg3-body;
-    in property <string> data-note-sender;
-    in property <string> data-note-initial;
-    in property <string> data-note-body;
-    in property <string> data-ext-address;
-    in property <string> data-ext-subject;
-    in property <string> data-ext-basis;
-    in property <string> data-ext-body;
-    in property <bool> data-ext-sent: false;
     in property <string> data-thread-msg1-sender;
     in property <string> data-thread-msg1-initial;
     in property <bool> data-thread-msg1-is-ai: true;
@@ -2008,6 +2164,9 @@ export component MainWindow inherits Window {
     callback decide-option(string, string, int);
     // 一覧の項目から対象のチャットへ戻る（decision-id）。
     callback open-decision-chat(string);
+    // 時系列で実体化した行の記録（仮想化の検査用。index は行番号、
+    // y と height は列表の座標系）。
+    callback record-timeline-row(index: int, y: length, height: length);
     // 入力欄の操作（Issue 383。どちらの入力欄かは ComposerKind で届く）。
     // composer-key-pressed はキーの文字・Ctrl/Cmd・Shift・IME 変換中を渡し、
     // 「消費するか」を返す（Slint の key-pressed が accept を返すかどうか）。
@@ -2030,8 +2189,15 @@ export component MainWindow inherits Window {
             }
         }
     }
-    HorizontalLayout {
+    VerticalLayout {
         padding: 20px;
+        spacing: 16px;
+        // 常時表示の帯（S00）。今日・チャンネルのどちらでも出し続ける。
+        DemoBannerView {
+            tr-banner-demo-mock: root.tr-banner-demo-mock;
+            tr-ai-badge: root.tr-ai-badge;
+        }
+        HorizontalLayout {
         spacing: 16px;
         // 左の列（rail）
         RailView {
@@ -2041,6 +2207,7 @@ export component MainWindow inherits Window {
             tr-rail-channels: root.tr-rail-channels;
             tr-rail-dm-people: root.tr-rail-dm-people;
             tr-rail-dm-ai: root.tr-rail-dm-ai;
+            tr-ai-badge: root.tr-ai-badge;
             data-org-name: root.data-org-name;
             data-channel-1: root.data-channel-1;
             data-channel-2: root.data-channel-2;
@@ -2079,6 +2246,7 @@ export component MainWindow inherits Window {
                     tr-pending-wait: root.tr-pending-wait;
                     tr-pending-open-chat: root.tr-pending-open-chat;
                     tr-decision-choose: root.tr-decision-choose;
+                    tr-ai-badge: root.tr-ai-badge;
                     pending-items: root.pending-items;
                     request-items: root.request-items;
                     open-chat(id) => { root.open-decision-chat(id); }
@@ -2128,40 +2296,13 @@ export component MainWindow inherits Window {
                     data-decision-decided: root.data-decision-decided;
                     data-decision-selected: root.data-decision-selected;
                     data-decision-decider: root.data-decision-decider;
-                    data-day-label: root.data-day-label;
-                    data-msg1-sender: root.data-msg1-sender;
-                    data-msg1-initial: root.data-msg1-initial;
-                    data-msg1-time: root.data-msg1-time;
-                    data-msg1-body: root.data-msg1-body;
-                    data-msg2-sender: root.data-msg2-sender;
-                    data-msg2-is-ai: true;
-                    data-msg2-initial: root.data-msg2-initial;
-                    data-msg2-time: root.data-msg2-time;
-                    data-msg2-body: root.data-msg2-body;
-                    data-msg2-thread-done: root.data-msg2-thread-done;
-                    data-handoff-from-to: root.data-handoff-from-to;
-                    data-handoff-title: root.data-handoff-title;
-                    data-handoff-acknowledged: root.data-handoff-acknowledged;
-                    data-handoff-option-a: root.data-handoff-option-a;
-                    data-handoff-option-b: root.data-handoff-option-b;
-                    data-msg3-sender: root.data-msg3-sender;
-                    data-msg3-initial: root.data-msg3-initial;
-                    data-msg3-time: root.data-msg3-time;
-                    data-msg3-body: root.data-msg3-body;
-                    data-note-sender: root.data-note-sender;
-                    data-note-is-ai: true;
-                    data-note-initial: root.data-note-initial;
-                    data-note-body: root.data-note-body;
-                    data-ext-address: root.data-ext-address;
-                    data-ext-subject: root.data-ext-subject;
-                    data-ext-basis: root.data-ext-basis;
-                    data-ext-body: root.data-ext-body;
-                    data-ext-sent: root.data-ext-sent;
+                    timeline-items: root.timeline-items;
                     send-pressed => { root.send-pressed(); }
                     fix-pressed => { root.fix-pressed(); }
                     acknowledge-pressed => { root.acknowledge-pressed(); }
                     view-work-pressed => { root.view-work-pressed(); }
                     decide-option(id, option-id, version) => { root.decide-option(id, option-id, version); }
+                    record-timeline-row(i, y, h) => { root.record-timeline-row(i, y, h); }
                     composer-edited(composer, text) => { root.composer-edited(composer, text); }
                     composer-focused(composer) => { root.composer-focused(composer); }
                     composer-key-pressed(composer, key-text, ctrl-or-meta, shift, composing) => {
@@ -2206,25 +2347,29 @@ export component MainWindow inherits Window {
                 root.composer-key-pressed(composer, key-text, ctrl-or-meta, shift, composing)
             }
         }
-        if root.show-right-pane && root.right-pane-ai-work : AiWorkPaneView {
+        if root.show-right-pane && root.right-pane-ai-work : ai-work-pane := Rectangle {
             width: 400px;
-            tr-pane-back-to-thread: root.tr-pane-back-to-thread;
-            tr-pane-ai-work-title: root.tr-pane-ai-work-title;
-            tr-pane-ai-steps: root.tr-pane-ai-steps;
-            tr-pane-ai-from: root.tr-pane-ai-from;
-            tr-pane-ai-read-range: root.tr-pane-ai-read-range;
-            tr-pane-ai-note: root.tr-pane-ai-note;
-            data-ai-name: root.data-ai-work-name;
-            data-ai-initial: root.data-ai-work-initial;
-            data-steps-done: root.data-ai-work-steps-done;
-            data-steps-total: root.data-ai-work-steps-total;
-            data-source: root.data-ai-work-source;
-            data-read-range: root.data-ai-work-read-range;
-            data-log1-time: root.data-ai-work-log1-time;
-            data-log1-text: root.data-ai-work-log1-text;
-            data-log2-time: root.data-ai-work-log2-time;
-            data-log2-text: root.data-ai-work-log2-text;
-            back-pressed => { root.back-to-thread-pressed(); }
+            AiWorkPaneView {
+                tr-pane-back-to-thread: root.tr-pane-back-to-thread;
+                tr-pane-ai-work-title: root.tr-pane-ai-work-title;
+                tr-pane-ai-steps: root.tr-pane-ai-steps;
+                tr-pane-ai-from: root.tr-pane-ai-from;
+                tr-pane-ai-read-range: root.tr-pane-ai-read-range;
+                tr-pane-ai-note: root.tr-pane-ai-note;
+                tr-ai-badge: root.tr-ai-badge;
+                data-ai-name: root.data-ai-work-name;
+                data-ai-initial: root.data-ai-work-initial;
+                data-steps-done: root.data-ai-work-steps-done;
+                data-steps-total: root.data-ai-work-steps-total;
+                data-source: root.data-ai-work-source;
+                data-read-range: root.data-ai-work-read-range;
+                data-log1-time: root.data-ai-work-log1-time;
+                data-log1-text: root.data-ai-work-log1-text;
+                data-log2-time: root.data-ai-work-log2-time;
+                data-log2-text: root.data-ai-work-log2-text;
+                back-pressed => { root.back-to-thread-pressed(); }
+            }
+        }
         }
     }
     // About のダイアログ（メニューの項目で開く）。内容の上に重ねる。

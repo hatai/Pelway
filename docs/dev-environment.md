@@ -141,6 +141,7 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 ### カバレッジ
 
 - カバレッジの増減計測は同じ workflow の `coverage` ジョブで行う（品質ゲートとは独立）。cargo-llvm-cov（`--no-cfg-coverage` 付き。`cfg(coverage)` で nightly 専用 `#![feature]` を有効にする依存があると stable の E0554 になるため）で LCOV を `lcov.info` に出し、`.octocov.yml` の `comment:`（`if: is_pull_request`、`updatePrevious: true`）に従って octocov が PR へカバレッジコメントを投稿する。PR 本文への挿入（`body:`）は使わない。
+- coverage ジョブは PostgreSQL のサービスコンテナ（nightly の test ジョブと同じ 16 系・digest 固定）に `PELWAY_DATABASE_URL`（スーパーユーザーの `postgres` ユーザー）で接続し、pelway-db の RLS テストを実行したうえで計測する（#161。#157 の `--exclude pelway-db` を解除）。ロール（`pelway_app`・`pelway_admin`・`pelway_audit`）はマイグレーションが作るため、ジョブでのロール作成ステップは無い。RLS テストの失敗は coverage ジョブに閉じ、品質ゲート（`static` / `lint` / `test`）の必須チェックには影響しない。
 - cargo-llvm-cov は `mise.toml` の `[tools]` で `"aqua:taiki-e/cargo-llvm-cov" = "0.6.17"` と宣言し、`mise.lock` が URL と checksum で取得物を固定する（CI は `mise run coverage`。mise.toml のタスクが cargo-llvm-cov を呼ぶ）。ソースから `cargo install` するとビルドに 45 秒ほどかかるため、事前ビルド済みのバイナリを使う。
 - octocov も `mise.toml` の `[tools]` で `"aqua:k1LoW/octocov" = "0.83.5"` と宣言し、`mise.lock` が URL と checksum で取得物を固定する。CI での実行は公式の `k1LoW/octocov-action`（actions.lock で sha 固定）経由で行う。レポートの artifact 保存に必要な `ACTIONS_RUNTIME_TOKEN` は `run:` ステップには渡されず action のコンテキストでしか取れないためです（octocov 本体は action の `version` + `checksum` 入力で v0.83.5 に固定。checksum は `mise.lock` が固定するのと同一のリリースアセット `octocov_v0.83.5_linux_amd64.tar.gz` の sha256）。レポートの保存と比較は `.octocov.yml` の `report.datastores` / `diff.datastores`（GitHub Actions の artifact のみ）で行い、PR コメントに base ブランチ（main）の前回レポートとの増減を表示する。増減は main でレポートが保存されたあとの PR から出る（それまではカバレッジ値と patch coverage のみ）。
 - rust にはカバレッジ計測用の `llvm-tools-preview` 成分を `mise.toml` の `components` で宣言する。`toolchain-check` が sysroot 上の `llvm-profdata` / `llvm-cov` の存在を確認し、欠けていれば失敗する（暗黙の rustup 自動ダウンロードには頼らない）。`coverage` ジョブは `mise install` のあと、この検査を先に実行する。
@@ -192,6 +193,9 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.codex_review` | `driver: codex`、`config.launchArgs: --enable network_proxy -c default_permissions=review` |
 | `~/.codex/config.toml` の `[permissions.review]` | ファイルは読み取り（`/tmp` だけ書ける）、ネットワークは `api.github.com` と `github.com` だけ（SOCKS は使わない） |
+| `/etc/codex/requirements.toml`（#449 で追加。hatai が root で作る） | `[permissions.filesystem]` の `deny_read` に秘密パス 4 件（`~/.config/fnox`・`~/.config/pelway-agent`・`~/.ssh`・`~/.config/gh`）を列挙する。requirements 層の設定で、ユーザーの `config.toml` に書いても効かない。このマシン（単一ユーザー）の全 codex セッションに適用される |
+
+`deny_read` は sandbox ポリシー（FileSystemSandboxPolicy）に Deny エントリとして渡り、sandboxed なコマンドから当該パスが読めなくなる（codex 0.169.0 の `codex-rs/config/src/filesystem_constraints.rs` と `requirements_layers/permissions.rs` による。パスは絶対パスで書く）。
 
 ネットワークの制限が効くのは、スレッドの権限が `auto-accept-edits` のとき（コマンドが sandbox の中で動くとき）だけ。`full-access` のスレッドでは効かない。
 
@@ -222,7 +226,7 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 | 場所 | 設定 |
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.claude_review` | `driver: claudeAgent`、`config` の `homePath` に `/home/hatai/.claude-review`（UI のフィールド名は「CLAUDE_CONFIG_DIR path」。子プロセスの環境変数 `CLAUDE_CONFIG_DIR` になる。`config.environment` は claudeAgent の config スキーマに無いキーで無視される） |
-| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` が引数を `git`/`gh` にそのまま渡すため、ワイルドカードは `auth token`・`repo clone`・`git` 全般などあらゆる形を許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`） |
+| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` が引数を `git`/`gh` にそのまま渡すため、ワイルドカードは `auth token`・`repo clone`・`git` 全般などあらゆる形を許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す |
 | socat | Claude Code の sandbox（Linux）が使う。`mise.toml` の `conda:socat` で `mise install`（`mise bootstrap`）が入れる。apt と sudo は要らない |
 | ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
 
@@ -260,7 +264,7 @@ Codex・Claude のレビュー担当と違い、Devin CLI にはネットワー�
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.devin_review` | `driver: acpRegistry`、`agentId: devin`、`config.commandPath: /home/hatai/.local/bin/devin-review`。acpRegistry は `<commandPath> acp` の形で起動し、registry の起動引数はそのまま渡る |
 | `/home/hatai/.local/bin/devin-review` | `env DEVIN_SANDBOX=true devin --config /home/hatai/.config/devin-review/config.json "$@"` を exec する起動ラッパー。`devin acp` は `--sandbox` フラグを受け付けず、ACP サーバは `DEVIN_SANDBOX` 環境変数で sandbox を有効化する |
-| `/home/hatai/.config/devin-review/config.json` | `devin_review` 専用のユーザー設定（`devin --config` で差し替え）。`sandbox.allowed_domains: ["**.github.com"]` で github.com とそのサブドメインだけを許可。`permissions.deny` に `edit`・`write`・`mcp__*`・`Exec(sudo)`・`Exec(rm)`・秘密パスの `Read(...)` を、`Fetch` は GitHub 以外を `ask` にして重ね防御する |
+| `/home/hatai/.config/devin-review/config.json` | `devin_review` 専用のユーザー設定（`devin --config` で差し替え）。`sandbox.allowed_domains: ["**.github.com"]` で github.com とそのサブドメインだけを許可。`permissions.deny` に `edit`・`write`・`mcp__*`・`Exec(sudo)`・`Exec(rm)`・秘密パスの `Read(...)` を、`Fetch` は GitHub 以外を `ask` にして重ね防御する。#449 では `Read(...)` の列挙に `~/.config/fnox/**` と `~/.config/pelway-agent/**` を足す（`~/.ssh/**`・`~/.config/gh/**` は当初からあり）。deny に入れたパスは bwrap がコマンドから隠すため `test -r` も非 0 になる |
 
 sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbrew/bin/bwrap`）と `socat`（`mise.toml` の `conda:socat`）で、どちらか欠けるとセッションは起動を拒否する（fail-closed）。sandbox 配下では exec が許可リスト経由の組み込みプロキシを通り、ワークスペース以外のファイルシステムは読み取り専用になり、`Read(...)` deny のパスはコマンドから隠される。
 
@@ -288,6 +292,164 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 | レビューの形（報告の `verdict:`、`Reviewer:` の行、`agent-gh review pr review` の投稿） | `verdict: approve` と `Reviewer: agent=devin model=swe-2-high effort=high` の行を報告し、PR #283 に APPROVED として投稿済み（`pelway-review`） | 2026-11-14 |
 | Codex・Claude 側との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 許可先は同じく GitHub のみ。遮断の効き方が異なり、Codex は `network_proxy`、Devin CLI は OS sandbox ＋ドメイン許可リスト＋ `permissions.deny`（直接編集・MCP・秘密パスを塞ぐ）。権限モードは Devin では Autonomous 一択 | 2026-11-14 |
 
+## レビュー担当の秘密ファイルの遮断と鍵の分割（#449）
+
+レビュー担当（`devin_review`・`claude_review`・`codex_review`）の sandbox から、秘密の置き場を読めないようにする。対象は 4 パス: `~/.config/fnox`（age 秘密鍵 `age.txt` と fnox のグローバル設定）・`~/.config/pelway-agent`（dev 用の fnox 設定。`PELWAY_DEV_*` と `PELWAY_LLM_API_KEY` が同じ age 鍵で暗号化されて同居していた）・`~/.ssh`・`~/.config/gh`。これらはすべて実体のあるディレクトリでなければならない（symlink だと devin の bwrap が exec を全滅させる）。
+
+### hatai が手で適用する変更（リポジトリ外の設定。反映は hatai が行う）
+
+**1. `~/.config/devin-review/config.json`** — `permissions.deny` の `Read(...)` に 2 件を追加（`~/.ssh/**`・`~/.config/gh/**` は既存）:
+
+```json
+"Read(~/.config/fnox/**)",
+"Read(~/.config/pelway-agent/**)",
+```
+
+**2. `~/.claude-review/settings.json`** — `permissions.deny` に 4 件を追加（`Read(...)` deny は `sandbox.filesystem.denyRead` にマージされ、sandboxed なコマンドにはファイルシステム層でも隠される。`allowUnsandboxedCommands: false` が既に効いているため全 Bash コマンドが対象）:
+
+```json
+"Read(~/.config/fnox/**)",
+"Read(~/.config/pelway-agent/**)",
+"Read(~/.ssh/**)",
+"Read(~/.config/gh/**)",
+```
+
+**3. `/etc/codex/requirements.toml`**（新規作成。root 権限が必要）— `deny_read` は requirements 層の設定で、ユーザーの `~/.codex/config.toml` に書いても効かない。このマシンの全 codex セッション（hatai の対話利用を含む）に適用される:
+
+```toml
+[permissions.filesystem]
+deny_read = [
+  "/home/hatai/.config/fnox",
+  "/home/hatai/.config/pelway-agent",
+  "/home/hatai/.ssh",
+  "/home/hatai/.config/gh",
+]
+```
+
+### 適用の順序（番号付き・橋渡し付き）
+
+PR #462 のマージ前は、main 起点のレビュースレッドは**旧 `scripts/agent-gh`**（review ロールが `PELWAY_AGENT_FNOX_CONFIG`＝既定 `~/.config/pelway-agent/fnox.toml` を読む）を実行する。鍵の分割と deny を順序を誤って適用すると、旧 agent-gh は (a) 旧設定から `PELWAY_REVIEW_*` を削除した時点、(b) deny で `~/.config/pelway-agent` が読めなくなった時点のどちらでも exit 3（fail-closed）で止まる。そこで**橋渡し**（旧 agent-gh の `PELWAY_AGENT_FNOX_CONFIG` を review 用設定に向ける環境変数）を挟み、旧設定からの削除は最後に行う:
+
+1. **鍵の分割（登録まで）**: 下の「鍵の分割」のコマンドのうち `fnox remove` のループ**以外**を実行する（review 用の鍵ペアと設定を作り、`PELWAY_REVIEW_*` を review 用設定へ登録する）。この時点で旧設定にも review 用設定にも `PELWAY_REVIEW_*` がある
+2. **橋渡し**: レビュー用 CLI の起動時に `PELWAY_AGENT_FNOX_CONFIG=$HOME/.config/pelway-agent-review/fnox.toml` を渡す（`devin_review` は起動ラッパー `/home/hatai/.local/bin/devin-review` の `env` に足す。`claude_review`・`codex_review` は T3 側の起動設定かラッパーで同じ環境変数を渡す）。旧 agent-gh の review ロールが review 用設定を読むようになり、main 起点のレビュースレッドが動き続ける
+3. **deny の追加**: 上の 3 担当の変更（devin・claude・`/etc/codex/requirements.toml`）を適用する。レビューの sandbox から `~/.config/pelway-agent` が読めなくなっても、橋渡しにより旧 agent-gh は review 用設定を読む
+4. **実測と記録**: 3 担当のレビュー委託スレッドで 4 パスの `test -r`（すべて非 0）と `scripts/agent-gh review api /rate_limit`、review 用設定の `fnox list`（下の確かめ方）を実施し、下の記録欄に記録する
+5. **PR #462 のマージ**: マージ後の `scripts/agent-gh` の review ロールは `PELWAY_AGENT_FNOX_CONFIG_REVIEW`（既定 `~/.config/pelway-agent-review/fnox.toml`）を直接読む
+6. **旧設定からの削除と橋渡しの解除**: 下の「鍵の分割」の `fnox remove` のループを実行して旧設定から `PELWAY_REVIEW_*` を削除し、橋渡しの `PELWAY_AGENT_FNOX_CONFIG` を元に戻す
+
+橋渡しを採って deny・削除の後倒しを採らない理由: 記録欄の実測（ステップ 4）は deny 適用の後・マージの前に行う必要がある（Issue #449 の受け入れ条件が「記録欄への記録と PR のマージまで」の順を要求するため）。deny をマージまで後倒しすると実測がマージ前に済ませられない。
+
+### 鍵の分割（review 用の fnox 設定と age 鍵）
+
+review 用の秘密（`PELWAY_REVIEW_*`）を dev とは別の fnox 設定・別の age 鍵ペアに移す。以降 `scripts/agent-gh review` は `PELWAY_AGENT_FNOX_CONFIG_REVIEW`（既定 `~/.config/pelway-agent-review/fnox.toml`）だけを読む。値は一切表示しない（`fnox get` の出力はパイプで次の `fnox set` に渡す）。**適用の順序（上の番号付き）のステップ 1 として、まず登録のループだけを実行する**:
+
+```bash
+mkdir -p ~/.config/pelway-agent-review
+(umask 077 && age-keygen -o ~/.config/pelway-agent-review/age.txt)   # review 専用の鍵ペア（秘密鍵は表示しない）
+review_recipient="$(age-keygen -y ~/.config/pelway-agent-review/age.txt)"
+(umask 077 && cat >~/.config/pelway-agent-review/fnox.toml <<EOF
+# レビュー担当の GitHub 名義（scripts/agent-gh review が読む）。値は review 専用の age 鍵で暗号化されている。
+[providers.review_age]
+type = "age"
+key_file = "/home/hatai/.config/pelway-agent-review/age.txt"
+recipients = ["$review_recipient"]
+
+[secrets]
+EOF
+)
+for name in PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW_APP_KEY; do
+  fnox -c ~/.config/pelway-agent/fnox.toml get "$name" |
+    fnox -c ~/.config/pelway-agent-review/fnox.toml set --provider review_age "$name" >/dev/null
+done
+```
+
+旧設定からの削除は**ステップ 6（マージ後）**に実行する:
+
+```bash
+for name in PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW_APP_KEY; do
+  fnox -c ~/.config/pelway-agent/fnox.toml remove "$name" >/dev/null
+done
+```
+
+provider を `age` ではなく `review_age` という名前にするのは、fnox のグローバル設定（`~/.config/fnox/config.toml`）の `[providers.age]`（鍵ファイルの指定が無い）とのマージで鍵の指定が曖昧にならないため。`key_file` を明示するので、review の sandbox で `~/.config/fnox` が読めなくても復号できる。
+
+**確かめ方（名前とパスだけ出す。値は出さない）**:
+
+```bash
+fnox -c ~/.config/pelway-agent-review/fnox.toml list   # PELWAY_REVIEW_* の 3 名だけが載る
+fnox -c ~/.config/pelway-agent/fnox.toml list           # PELWAY_DEV_* と PELWAY_DEV_GIT_EMAIL だけが載る
+scripts/agent-gh review api /rate_limit                 # review 用の設定だけでトークンが発行できる
+```
+
+**戻し方**: 橋渡しの `PELWAY_AGENT_FNOX_CONFIG` を元に戻し、review 用の設定から旧設定へ同じ形で移し戻してから、review 用の設定と鍵を消す:
+
+```bash
+for name in PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW_APP_KEY; do
+  fnox -c ~/.config/pelway-agent-review/fnox.toml get "$name" |
+    fnox -c ~/.config/pelway-agent/fnox.toml set --provider age "$name" >/dev/null
+done
+rm -f ~/.config/pelway-agent-review/fnox.toml ~/.config/pelway-agent-review/age.txt
+```
+
+（`scripts/setup/agent-accounts.sh` の新規セットアップは 2026-11-18 以降この分割構成で作る。ウィザードの「旧設定に残った review 秘密を移す」stage は登録と削除をまとめて行うため、PR #462 のマージ前に既存環境を移行するときは上の番号付きの手順（削除はステップ 6）を使う。）
+
+### 確認手順の結果（記録欄）
+
+3 担当それぞれのレビュー委託スレッドで、4 パスに `test -r <パス>; echo $?` を実行しすべて非 0 になったことと、塞いだ後も `scripts/agent-gh review api /rate_limit` が成功することを記録する。未実施の行が残る担当については、その担当の遮断を「反映済み・未実証」として扱う（`devin_review` は #449 の実測記録までレビュー担当に使わない hatai 決定のまま）。
+
+| 項目 | 結果 | 実施日 |
+|---|---|---|
+| devin_review: 4 パスの `test -r`（すべて非 0 か） | 未実測 — devin_review は停止中のまま（hatai 決定 2026-11-18・#449 の実測が済むまで使用停止。実測を委託するスレッドを立てられない）。未実測のまま残すことは hatai の決定（2026-11-19 12:58 JST・例外）。実測は #479 で追う | — |
+| claude_review: 4 パスの `test -r`（すべて非 0 か） | 未実測 — claude_review は env の橋渡し（`PELWAY_AGENT_FNOX_CONFIG`）が未導入のため実測できない（review 用の fnox 設定を読めずスレッドが動かない。PR #473 の Claude レビューも同じ理由で実施不可）。実測は #479 で追う | — |
+| codex_review: 4 パスの `test -r`（すべて非 0 か） | 未実施 — 2026-11-19 10:33 JST の codex_review での実測（下記）は環境変数・`fnox list`・`gh extension list`・`/rate_limit`・`codex features list` の 5 項目で、4 パスの `test -r` は含んでいない | — |
+| devin_review: `scripts/agent-gh review api /rate_limit` 成功 | 未実測（上記の devin_review 停止中と同じ理由。実測は #479 で追う） | — |
+| claude_review: `scripts/agent-gh review api /rate_limit` 成功 | 未実測（上記の env の橋渡し未導入と同じ理由。実測は #479 で追う） | — |
+| codex_review: `scripts/agent-gh review api /rate_limit` 成功 | 合格 — exit 0。起動引数変更後の codex_review スレッド（環境変数 `PELWAY_AGENT_FNOX_CONFIG`=set・`FNOX_CONFIG_DIR`=/nonexistent・`GH_CONFIG_DIR`=set）での実測。同じスレッドで `gh extension list` が exit 4・「To get started with GitHub CLI…」の認証なし応答（sandbox にログイン状態が残留しない形）も確認 | 2026-11-19 |
+| review 用設定の `fnox list`（`PELWAY_REVIEW_*` だけか。`PELWAY_DEV_*`・`PELWAY_LLM_API_KEY` が載らないか） | 合格 — `fnox -c "$PELWAY_AGENT_FNOX_CONFIG" list` が exit 0 で、review 用設定には `PELWAY_REVIEW_APP_ID`・`PELWAY_REVIEW_APP_INSTALLATION_ID`・`PELWAY_REVIEW_APP_KEY` の 3 名だけが載る（sandbox 側は `FNOX_CONFIG_DIR`=/nonexistent でグローバル設定も載らない。ホスト側の list には fnox グローバル設定由来の `PELWAY_PENPOT_MCP_TOKEN` が追加で現れるが、review 用設定のファイルには含まれない）。旧設定 `~/.config/pelway-agent/fnox.toml` から `PELWAY_REVIEW_*` は削除済み（`PELWAY_DEV_*`・`PELWAY_DEV_GIT_EMAIL` のみ）で、`PELWAY_DEV_*`・`PELWAY_LLM_API_KEY` は review 用設定に載らない | 2026-11-19 |
+| dev 用と review 用の age 鍵のパス（値は書かない）と、review の sandbox から dev 用の鍵が `test -r` 非 0 | 鍵のパス: dev=`~/.config/fnox/age.txt`・review=`~/.config/pelway-agent-review/age.txt`（別ファイル・両方作成済み）。review の sandbox から dev 用の鍵の `test -r` は未実測（今回の実測 5 項目に含まない） | — |
+
+出典: codex_review での実測は指揮役の作業ログ `docs/worklogs/2026-11-19-conductor-substitute.md`（2026-11-19 10:33 JST・codex_review スレッド 1 run・読み取りのみ・値は測定スレッド側が伏せ済み）。PR #462 の round 3 の Codex レビュー（head `1b112fa`）が code-mode-host のエラーなしに 1 run で完走したことも同ログに記録済み（`agent-gh review` によるトークン発行からレビュー投稿まで通ることの追加の傍証）。旧設定の `fnox list` は 2026-11-19 に実装担当の worktree でも確認（名前のみ・値は出していない）。
+
+## QA 担当の GitHub App（pelway-qa）
+
+QA の合格コメントは QA 専用の名義で書く（#480 の決定）。そのための GitHub App `pelway-qa` で、権限は Issues: Read and write・Pull requests: Read-only・Metadata: Read-only のみ、webhook はオフ、hatai/Pelway にだけインストールする。Pull requests が Read-only なので Approve・マージは 403 になる。ラベル操作など権限上は通りうる操作も、`scripts/agent-gh qa` 側の許可リストが `comment` の 1 形しか通さないため、ラッパー経由では実行できない。
+
+### 名義の作り方
+
+`scripts/setup/agent-accounts.sh` は dev / review 専用で、この名義は対象に入っていない。次の手順を人間が手で行う（値はリポジトリに書かない）。
+
+1. GitHub App `pelway-qa` を作る（webhook オフ。権限は上記の 3 つだけ）
+2. Private key を発行する
+3. hatai/Pelway にだけインストールし、installation ID を控える
+4. `~/.config/pelway-agent-qa/fnox.toml`（provider `qa_age`）に、次の 3 つの名前で登録する
+   - `PELWAY_QA_APP_ID`・`PELWAY_QA_INSTALLATION_ID`・`PELWAY_QA_PRIVATE_KEY`
+   - dev / review 用の秘密（`PELWAY_DEV_APP_KEY`・`PELWAY_REVIEW_APP_KEY` など）と名前の付け方が違うので、`scripts/agent-gh` の `qa` ロールが読む名前どおりに登録する
+5. レビュー役の拒否リスト（Codex の権限プロファイル、`~/.claude-review/settings.json`、`~/.config/devin-review/config.json`）に `~/.config/pelway-agent-qa/` を足し、レビュースレッドから秘密を読めなくする
+
+### 使い方
+
+`scripts/agent-gh qa comment <番号> --body-file <path|->` の 1 形だけが使える。中身は `POST /repos/hatai/Pelway/issues/<番号>/comments`（`gh issue comment`）だけで、それ以外の呼び出しはトークン発行の前に終了コード 2 で拒否される（許可リスト方式）。dev / review と違い `PELWAY_AGENT_FNOX_CONFIG` に既定値を持たないため、QA 用の設定ファイルを明示して呼ぶ。
+
+```bash
+PELWAY_AGENT_FNOX_CONFIG=~/.config/pelway-agent-qa/fnox.toml \
+  scripts/agent-gh qa comment <番号> --body-file -
+```
+
+### 確かめ方
+
+値を出さずに次で確かめる。
+
+- `fnox -c ~/.config/pelway-agent-qa/fnox.toml list` で 3 つの名前が出る
+- `PELWAY_AGENT_FNOX_CONFIG` を外して `scripts/agent-gh qa comment` を呼ぶと終了コード 3 で止まる
+- 許可外の呼び出し（`scripts/agent-gh qa git push`、`scripts/agent-gh qa pr review 1 --approve` など）が終了コード 2 で拒否される。拒否がネットワークの前であることは `scripts/tests/agent-gh.test.sh` が確かめる（fnox・gh・git が呼ばれないことまで検査）
+- コメントを実際に投稿したときの作者が `pelway-qa[bot]` であること、Approve・マージが 403 になることなどの実測は、Issue #483 の「実測」の節に沿ってマージ後に行う
+
+### 戻し方
+
+1. GitHub App の設定から hatai/Pelway のインストールを解除し、App を削除する
+2. `~/.config/pelway-agent-qa/` を消す
+3. レビュー役の拒否リストから `~/.config/pelway-agent-qa/` の項目を外す
+
 ## 実装担当の sandbox（agent-sandbox）
 
 実装スレッド（T3 の worktree スレッドで動く opencode と Devin CLI）は、Issue #151 の対応として OS レベルの sandbox の中で動かす。`scripts/agent-sandbox/` に方式を同梱し、`scripts/setup/agent-sandbox.sh` でホストへ導入する。
@@ -306,7 +468,7 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 bwrap が作る名前空間の要点:
 
 - `/usr`・`/etc`・`/home` 等は read-only。`/` 全体をミラーする `--ro-bind /` は使わない（WSL の `/mnt/c` 等の submount まで写し、Windows 側ファイルが見えてしまうため、必要な top-level だけを明示的にマウントする）
-- 書き込み可は、セッションの worktree・共有 git dir・`/tmp`・ツールキャッシュ（`~/.cargo`・`~/.rustup`・`~/.local/{share,state}/mise`・`~/.cache/{mise,pkl,fnox}`・`~/.pkl`・`~/.npm`・`~/.cache/agent-sandbox`）のみ
+- 書き込み可は、セッションの worktree・共有 git dir・`/tmp`・ツールキャッシュ（`~/.cargo`・`~/.rustup`・`~/.local/{share,state}/mise`・`~/.cache/{mise,pkl,fnox}`・`~/.pkl`・`~/.npm`・`~/.cache/agent-sandbox`）のみ。エージェント運用の状態ファイルで sandbox 内からも読み書きが必要なもの（巡回状態の補助記録 `patrol-state.json`、`pr-digest` の既出の指摘の記録）は、書き込み可の共有 git dir（`git rev-parse --git-common-dir`）内の `pelway/` に置く（git の管理対象外。`~/.local/state` は sandbox から書けないため、Issue #477）
 - 共有 git dir（worktree の commondir）はコミットのため書き込み可だが、`config`・`config.worktree`・`hooks/` には read-only を重ねてマウントする（url rewrite や hook の仕込みを防ぐ）
 - 秘匿パス（`~/.ssh`・`~/.gnupg`・`~/.docker`・`~/.config/gh`・`~/.config/opencode`・`~/.config/devin`・`~/.t3/userdata` 等）は tmpfs で隠すかマウントしない。no-new-privileges により `sudo`/`doas`/`pkexec` も実行できない
 - ネットワークは遮断しない（ホストの経路をそのまま使う）。Issue #151 で hatai が「厳しくしすぎると調査が難しくなるので現時点では許可リストにしない」と指示したため

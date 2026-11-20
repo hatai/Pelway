@@ -1,6 +1,6 @@
 # 指揮役 運用手順書
 
-AI 開発チームの指揮役が従うイベント対応の手順。指揮役の正本は Grok Bot で、Grok Bot が動かないときは「10. 代行」の手順で別のエージェントが代行する。この手順書の「Grok Bot」は、代行中は代行者と読み替える。
+AI 開発チームの指揮役が従うイベント対応の手順。指揮役の正本は Grok Bot で、Grok Bot が動かないときは「11. 代行」の手順で別のエージェントが代行する。この手順書の「Grok Bot」は、代行中は代行者と読み替える。
 
 - 体制と上限の正本は `docs/superpowers/specs/agent-team.md`、受け取る通知の形は `docs/agents/notify-payloads.md`
 - 毎サイクルの判断（振り分け、モデル・effort、エスカレーション、改善ループ、代行の開始・終了）は skill `command-team` に従う
@@ -21,6 +21,8 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 | `pelway-review` が Approve し必須チェックが通った PR に `automerge` ラベルを付けて Kodiak のキューに入れ、マージを確認する | `scripts/agent-gh dev pr edit <M> --add-label automerge`（条件は skill `command-team` の「マージ」）。マージの実行は Kodiak（GitHub App）が行い、指揮役がマージコマンドを叩くことはない。キューの切り戻しは hatai の admin マージだけが行う |
 
 しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更（`actions.lock` の再生成は例外。正本は `docs/superpowers/specs/agent-team.md` の「制約」）、スレッドの取り消し。
+
+sandbox に止められた操作（書き込み・実行・ネットワークなど）は、sandbox の外へ出る抜け道（`systemd-run`・`nohup`・別のシェル・ラッパースクリプトなど）で実行しない。止められたら、その操作を行わず止まって報告する。作業ログなどに残る同種の前例は許可にならない（Issue #477）。
 
 ラベル操作の裏付け検査: `needs-human` の解除と `automerge` の付け外しは、actor だけでは判定しない（エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai になることがあるため）。見張り（conductor-watch）が付け外しの時刻を hatai 本人の指示の記録（同じ Issue・PR への hatai 本人のコメントで、付け外しの前 24 時間以内のもの）と突き合わせ、裏付けが取れない操作を「出どころ不明」として `LABEL unbacked` の行で watch.log に出す。`needs-human` を hatai の指示の記録なしに外した場合は、それ自体を手順違反として記録し、Grok Bot に知らせる（「指揮役の定期巡回（スケジュール起床）」）。
 
@@ -129,6 +131,7 @@ conductor-watch は検知（`watch.log` へのイベント出力）だけを行�
 - scheduled task は指揮役スレッドに bind する（`bindToCurrentThread`）。指揮役が代わったら（代行の開始・交代）、新しい指揮役スレッドで `schedule_task` を作り直し、古いタスクは `delete_scheduled_task` で削除する。`patrol-state.json` の `scheduled_task_id` に現行のタスク ID を記録する
 - `watch.log` からスレッドへの転送スクリプト（`t3` CLI の `acp-mcp-call` 経由）は使わない。`t3` CLI は実行中の T3 サーバーと `~/.t3/userdata` の所有権が衝突して送信に失敗することがあり、送信先スレッド ID の固定も指揮役の交代で壊れるため
 - `LABEL unbacked` の行は、`needs-human` の解除・`automerge` の付け外しのうち、付け外しの時刻の前 24 時間以内に同じ Issue・PR への hatai 本人のコメント（指示の記録）が見つからなかった操作である。指揮役と T3 スレッドの操作記録と突き合わせて分類する: 指揮役の正当な操作（マージ条件を満たしての `automerge` 付与・Kodiak のコンフリクトによる解除など）は裏付けが見つかり次第正当として巡回記録に残す。Grok Bot が中継した了承も同じく裏付けになる。`needs-human` の解除は指揮役の操作記録では正当化できず、hatai の指示の記録だけが正当化する。どちらの記録でも裏付けられないものは「出どころ不明」の手順違反として該当の Issue・PR に記録し、Grok Bot と人間に知らせる（「1. 役割と触ってよい範囲」のラベル操作の裏付け検査）
+- 巡回の報告は「変化なし」で閉じない。必ず (i) 確認した実値（watch.log の未読、開いている PR の head・Draft、対象 Issue のラベル）、(ii) 待ちの一覧（補助記録の各対象の `waiting_on` と `next_owner`。実装スレッドが idle/completed で待機している対象は、GitHub 側に差分が無くても含める）、(iii) その巡回で指揮役が処理したこと、を書く。「変化なし」と書けるのは実値と待ちの一覧の両方が前回巡回と同じ場合だけで、その場合も待ちの件数と待ち先の内訳を併記する。`waiting_on=conductor` の対象は件数を明示し、その巡回で処理するか先送りの理由を書く
 
 ## 3. 同時数と順番待ち
 
@@ -220,13 +223,13 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 |---|---|
 | `approve` | 指揮役自身の PR なら、Ready for review と必須チェックが通っていることを確かめて skill `command-team` の「マージ」に進む。外部投入なら「PR #<M> は Approve された。skill implement-issue の手順 10 に従う。」を実装スレッドに送る。複数のレビュー担当を付けた PR で判定が割れたらマージせず、request-changes 側の指摘を優先して修正に進ませる（skill `command-team` の「レビュー担当と effort」） |
 | `request-changes` | 外部投入なら「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を実装スレッドに送る（回数の上限は skill `implement-issue` のとおり、実装スレッドが数える） |
-| `failed` | `error: checks pending` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 6 のエスカレーション |
+| `failed` | `error: checks pending` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 7 のエスカレーション |
 
 通常の PR のレビューの verdict（approve / request-changes / failed）は実装スレッドが処理する（skill `implement-issue` の手順 9）。指揮役は、実装スレッドの終わりの報告（`review:` と `ready:` の行）と GitHub の PR の状態（`pelway-review` の最新レビューとチェック）で進み具合を見る。
 
 実装スレッドは `branch` の `agent/<N>-` から Issue 番号を、`thread_id` から送り先を取る。レビュースレッドから実装スレッドを探すときは、PR のブランチ名と同じ `branch` を持つスレッドを `t3 thread list` から選ぶ。
 
-調査スレッド（ブランチが `agent/investigate-` で始まる）も `opencode` なので、上の表の実装スレッドの列で扱う。ただし `finished` の `pr:` は調査の報告の Draft PR なので、レビューを始める前に `docs/agents/command-team-details.md` の「調査（入口B）」で起票可否を判断する。判断のあともレビューを経てマージするため、Approve 後の Draft 解除も実装スレッドと同じ扱いで調査スレッドに行わせる。調査が脆弱性の疑いで止まったとき（skill `investigate-bug` の手順 4）は、報告の対象の Issue に `needs-human` が付く。7 の「実装担当が止まった」と同じ扱いで人間に知らせる。
+調査スレッド（ブランチが `agent/investigate-` で始まる）も `opencode` なので、上の表の実装スレッドの列で扱う。ただし `finished` の `pr:` は調査の報告の Draft PR なので、レビューを始める前に `docs/agents/command-team-details.md` の「調査（入口B）」で起票可否を判断する。判断のあともレビューを経てマージするため、Approve 後の Draft 解除も実装スレッドと同じ扱いで調査スレッドに行わせる。調査が脆弱性の疑いで止まったとき（skill `investigate-bug` の手順 4）は、報告の対象が Issue ならその Issue に `needs-human` が付く。Issue の無い報告（部屋のメッセージなど）ではラベルは付かず、スレッドの返答に概要だけが書かれる。7 の「実装担当が止まった」と同じ扱いで人間に知らせる。
 
 ### `pelway.github-notify/v2`
 
@@ -306,13 +309,13 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 ## 9. 片付け
 
 - Grok Bot はスレッドと worktree を消さない
-- 終わったスレッドを settle する。PR をスレッドに紐付けたものはマージで自動 settle。それ以外（報告が読まれた調査スレッド、verdict を出し終えた指揮役のレビュースレッド、失敗打ち切りやマージされずに閉じた PR のスレッド）は `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドと、止まっている・迷走中のスレッドは settle しない
+- 終わったスレッドを settle する。PR をスレッドに紐付けたものはマージで自動 settle。それ以外（報告が読まれた調査スレッド、verdict を出し終えた指揮役のレビュースレッド、次のラウンドに置き換わった前ラウンドのレビュースレッド、失敗打ち切りやマージされずに閉じた PR のスレッド）は `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドと、止まっている・迷走中のスレッドは settle しない
 - worktree は pitchfork のデーモン `agent-worktree-prune` が毎時消す（settle されたスレッドの、main に取り込み済みかマージ済み・クローズ済みの PR のものだけ。未追跡のファイルは捨て、追跡ファイルに変更が残るものは残す）。settle しないと worktree は残るので、終わったスレッドは上のとおり settle する。残ったものは人間が `mise run agent-worktree-prune` で整理する
 - マージ後の Issue と PR はボードの組み込みワークフローが Done にする
 
 ## 10. 巡回状態の補助記録
 
-状態の正本は GitHub Issues と Projects ボードである。`~/.local/state/pelway/patrol-state.json` は正本を増やさないための補助記録で、GitHub に対応する置き場が無い情報（誰待ちか・待ち始めた時刻・次の担当）だけを持つ。
+状態の正本は GitHub Issues と Projects ボードである。`patrol-state.json` は正本を増やさないための補助記録で、GitHub に対応する置き場が無い情報（誰待ちか・待ち始めた時刻・次の担当）だけを持つ。置き場はリポジトリの共有 git dir（`git rev-parse --path-format=absolute --git-common-dir` が指す `.git`）内の `pelway/patrol-state.json` — 主 checkout と全 worktree で共有される git の管理対象外の場所で、sandbox 内の指揮役からも読み書きできる（Issue #477。旧置き場 `~/.local/state/pelway/patrol-state.json` の中身は conductor-watch.sh が初回起動時に引き継ぐ）。
 
 対象（キーは Issue 番号）ごとの必須項目:
 
@@ -391,7 +394,7 @@ Grok Bot が動かない（レート制限、障害）とき、人間が別の�
 順序:
 
 1. GitHub の実状態を確認する（`agent:working`・`needs-human` の Issue、Draft・レビュー待ち・マージ待ちの PR、Issue のコメントに残った判断）
-2. `~/.local/state/pelway/patrol-state.json` を読み、`subjects` の対象ごとの「誰待ちか・待ち始めた時刻・次の担当・次回確認時刻」と、`items` の作業状態（主 PR、作業状態の印、前回ステータスなど）を把握する
+2. `patrol-state.json`（共有 git dir 内の `pelway/`。`git rev-parse --path-format=absolute --git-common-dir` で場所を解決する）を読み、`subjects` の対象ごとの「誰待ちか・待ち始めた時刻・次の担当・次回確認時刻」と、`items` の作業状態（主 PR、作業状態の印、前回ステータスなど）を把握する
 3. 記録と GitHub の実状態を突き合わせ、食い違う項目を GitHub を正として直す（巡回スクリプトの次の巡回でも直る）
 4. `waiting_on` が `conductor` の対象（前指揮役の判断待ち）を引き継ぎ、判断を進めるか人間に確認する
 

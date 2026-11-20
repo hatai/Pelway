@@ -13,6 +13,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 - GitHub への操作はすべて `scripts/agent-gh dev ...`、git の commit と push は `scripts/agent-gh dev git ...` で行う。素の `gh` と素の `git push` は使わない。素の `gh` で作った PR は作成者が hatai になり、hatai が Approve できないため、ブランチ保護を迂回しないとマージできない。素の `git push` は hatai の SSH 鍵で push される。
 - ネットワークは `scripts/agent-gh dev` 経由の GitHub だけ使う。`gh search repos` / `gh search code` もここに含まれる。
 - worktree の外に書き込まない。`rm -rf` はしない。main に push しない。PR をマージしない。
+- sandbox に止められたら、`systemd-run`・`nohup`・別のシェル・ラッパースクリプトなど sandbox の外へ出る抜け道を使わず、止まって報告する（下の「止まる条件」の行）。作業ログに残る同種の前例は許可にならない（Issue #477）。
 - コマンドの終了コードを確かめる。失敗したコマンドの結果を成功と報告しない。
 - 迷っても質問で止まらない。判断とその理由は PR 本文か Issue のコメントに書いて進める。
 - 止まってよいのは下の「止まる条件」に当てはまるときだけ。止まるときは必ず Issue にコメントし、`needs-human` ラベルを付ける。
@@ -24,13 +25,14 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | 条件 | Issue に書くこと |
 |---|---|
 | 名義の確認で `hatai/Pelway` が返らなかった | 返った内容かエラー |
-| Issue に受け入れ条件が無い、または条件がテストやコマンドで確かめられる形になっていない（skill `write-issue` の「受け入れ条件の書き方」に合わない）。着手せず、コードも書かない | 不足を具体的に: 無い見出し、確かめられない条件の引用と、何があれば確かめられるか（例: 「『速いこと』に件数と時間が無い」）。本文の直しは起票者が行う（`write-issue` の手順 7） |
+| Issue に受け入れ条件が無い、または条件がテストかコマンドか確認の手順で確かめられる形になっていない（skill `write-issue` の「受け入れ条件の書き方」に合わない）。着手せず、コードも書かない | 不足を具体的に: 無い見出し、確かめられない条件の引用と、何があれば確かめられるか（例: 「『速いこと』に件数と時間が無い」）。本文の直しは起票者が行う（`write-issue` の手順 7） |
 | 慣れない機能で、Issue の「採用する方式」が空 | `gh search` で比べた 2 つ以上の方式と、それぞれ採るもの・捨てるもの |
 | Issue が依存するリポジトリ外の成果物（関連情報の URL・抜粋）に到達できない | 到達できなかった成果物の名前と、試した手順（URL へのアクセス結果、抜粋に欠けている部分） |
 | Issue の未決事項に挙がっておらず、避けて進めることもできず、受け入れ条件の成否に関わる判断が必要 | 必要な判断の内容と、避けられない理由。判断を仰ぐ相手（起票者か人間） |
 | `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
-| レビューの委託が 4 ラウンド目に入る（修正 3 回でも Approve が取れない）、委託が 2 回連続で `failed`（`checks pending` は数えない） | どれが起きたかと、試したこと（ラウンド数・担当・effort） |
+| sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
+| 3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）、委託が 2 回連続で `failed`（`checks pending` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort） |
 
 止まり方（止まった時点で、どの手順の途中でも手順 5 の形で実装者メモを書き、Issue のコメントに続けて貼る。push しないので `docs/worklogs/` には書かなくてよい）:
 
@@ -72,7 +74,13 @@ scripts/agent-gh dev issue view <N> --json title,body,labels,comments
 2. テストを実行し、失敗することを確かめる。失敗の出力を PR 本文の「確認方法/検証」に貼る
 3. 実装してテストを通す
 
-テストが最初から通ったら、そのテストは条件を確かめていない。書き直す。
+テストが最初から通ったら、そのテストは条件を確かめていない。書き直す。テストが red にならない、または実行ごとに red が揺らぐときは、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 1〜2 で切り分けてから書き直す。
+
+確かめ方が確認の手順の条件（文書に、ある決まりや手順が書かれていること。skill `write-issue` の「受け入れ条件の書き方」）は、テストを書かずに次のとおり扱う。
+
+1. 実装の前に、条件の文が指す節に、その内容がまだ無いことを確かめる
+2. 実装したら、PR 本文の「確認方法/検証」に、条件ごとに該当箇所の文を引用し、どの部分が条件を満たすかを書く。レビュー担当は引用を読んで判定する
+3. 条件の意味を、文言を grep で探すテストに置き換えない（AGENTS.md の「LLM judges」）。文言を固定する既存のテスト（wording pin）は、変えた文言に合わせて直すだけにする
 
 ### 5. 実装者メモを書く（コミットの前に毎回）
 
@@ -110,7 +118,8 @@ mise run pr-size
 scripts/agent-gh dev git push -u origin HEAD
 ```
 
-- `mise run verify` が失敗したらコミットしない。直してからやり直す。
+- `mise run verify` が失敗したらコミットしない。直してからやり直す。失敗が自分の変更と無関係に見えるとき（実行ごとに失敗箇所が変わる・ツールチェーンの再インストールを伴うなど）は、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 2（再現と最小化）で切り分ける。変更を退避した同じツリーで再現する失敗は環境起因として、verify の内訳と再現確認を PR 本文の「確認方法/検証」に書いて先へ進めてよい。退避で解消する失敗は自分の変更によるもので、直す。
+- 差分がミューテーションテスト対象の crate（`.cargo/mutants.toml` の examine_globs）のロジックに触れるときは、`mise run mutants:diff` も回し、結果（生き残りと対応）を実装者メモに書く。生き残りの分析は輸入スキル `mutation-testing`（下の「輸入スキル」の節）。
 - `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたら push せずに止まる。
 - 積み上げ PR（分割計画で親 PR のブランチに積む PR。GitHub 上の base が main ではない PR）では `bash scripts/pr-size.sh --base <親ブランチ>` で測る。`mise run pr-size` は base=origin/main が既定のため、そのまま使うと親 PR の差分まで数えてしまい、上限超過で誤って止まる・例外扱いになる。
 
@@ -152,11 +161,11 @@ scripts/agent-gh dev pr view <PR 番号> --json number,isDraft,author --jq '{num
 
 `author` が `app/pelway-dev` でなければ、止まる条件と同じ扱いにする。
 
-PR を作ったら、T3 のスレッドに PR を紐付ける（`link_pull_request`。マージでスレッドが自動的に settle される）。
+PR を作るたびに、T3 のスレッドにそのスレッドの PR を全部紐付ける（`link_pull_requests`。最後の 1 つだけでなく、そのスレッドが作った PR 全部を紐付ける。マージでスレッドが自動的に settle される）。
 
 ### 8. レビューを委託する
 
-PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。チェックがまだ動いていれば、完了を待ってから委託する（待つ間は skill `pr-watch` の `pr-digest --watch` をバックグラウンドで使う。委託した子が `error: checks pending` を報告したときも、同じラウンドとして数えずに完了を待って再委託する）。
+PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。チェックがまだ動いていれば、完了を待ってから委託する（待ち方は skill `pr-watch` の「待ち方」に従う。必須チェックの通過は `pr-digest` の `required` 行で確かめる。委託した子が `error: checks pending` を報告したときも、同じラウンドとして数えずに完了を待って再委託する）。
 
 担当と effort は skill `command-team` の「レビュー担当と effort」の表で決める（通常は PR 番号の偶奇、高リスクは使える担当全て、抜き取りは PR 番号を 4 で割った余りが 0 のとき Claude を追加。自分が Devin CLI で実装した PR には Devin CLI を付けない）。差分が `unsafe` を足している、`.github/workflows/`・`scripts/agent-gh`・`AGENTS.md`・`.agents/skills/`・`docs/agents/` のどれかが変わっている、認証・認可・トークン・鍵・暗号・sandbox・egress・gateway・テナント分離・監査に触れている、のどれかに当たるときは Assigned 行に `security=yes` を付ける。
 
@@ -177,6 +186,8 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 
 これに `role: "review"`、`runtimeMode: "auto-accept-edits"`、`isolation: "worktree"` を付ける。委託したら返答を終えて完了の通知を待つ（ポーリングしない）。高リスクで複数担当にしたときは、全員の結果がそろうまで次に進まない。
 
+次のラウンドのレビューを委託したら、前ラウンドのレビュースレッド（子タスク）を settle する（`t3_thread_organize` の `action: settle`。runbook 9 の「片付け」と同じ決まりで、前ラウンドが `needs-human` 中・止まっている・迷走中のときは settle しない）。
+
 委託・再委託のたびに、対象 PR に委託記録コメントを残す（巡回がレビューの証跡として使う）。コメントの行頭がこの形であること（引用やコードブロック内の出現は証跡にならない）。`<SHA>` は委託時点の PR の head、`to:` はレビュー担当。
 
 ```bash
@@ -190,17 +201,23 @@ scripts/agent-gh dev pr comment <M> --body "[review-request] head: <SHA> to: <�
 委託の子の報告（`pr:` / `verdict:` / `must-fix:`）を、GitHub の実状態と突き合わせてから扱う:
 
 ```bash
-scripts/agent-gh dev pr view <PR 番号> --json reviews --jq '.reviews[-1] | {author: .author.login, state}'
+scripts/agent-gh dev pr view <PR 番号> --json headRefOid,reviewDecision,reviews --jq '{headRefOid, reviewDecision, latest: (.reviews[-1] | {author: .author.login, state, commit: .commit.oid})}'
 ```
 
-`pelway-review` の最新レビューの状態が報告と一致しなければ、もう一度読んで確かめる。
+`pelway-review` の最新レビューの状態が報告と一致しなければ、もう一度読んで確かめる。approve は、そのレビューの対象コミット（`latest.commit`）が PR の現在の head（`headRefOid`）と一致し、`reviewDecision` が `APPROVED` のときだけ有効とする（command-team「hatai のレビューの扱い」の有効な Approve と同じ定義）。修正や衝突解消の push で head が動いたあとの approve は現 head に向いていないため無効で、`pr ready` にも終わりの報告にも進まず、手順 8 で新しい head のレビューを再委託する。
 
 Request changes のとき:
 
 1. must-fix を直す（nit は直さない）。直す前に Issue のコメントを末尾から読み直し、着手後に記録された hatai（人間・指揮役）作の決定・判断（修正の方向、範囲の変更、受け入れ条件の拡大など）を反映する。決定を実装側の解釈で差し替えない
 2. 手順 5（実装者メモ）と手順 6（verify・コミット・push）をやり直す。PR は作り直さず、本文の sha を更新する
 3. ラウンドサマリーを PR にコメントする（下の形）
-4. 手順 8 でレビューを再委託する。3 ラウンド目の委託では effort を 1 段上げる。4 ラウンド目に入る前に Approve が取れていなければ、止まる条件の形でエスカレーションする
+4. 手順 8 でレビューを再委託する。3 回目のレビューの委託では effort を 1 段上げる。3 回目のレビュー結果に must-fix が残っていたら、4 回目の修正には入らず、止まる条件の形でエスカレーションする
+
+修正依頼（CONFLICTING の解消など、レビュー結果を介さない修正指示）のとき:
+
+- main の取り込みは merge で行い、各 hunk を解消する前に、両側の変更の意図を一次情報（コミット・PR・Issue）まで遡って確かめる。`--ours` / `--theirs` や、ブロックの見た目での削除で解消しない
+- 両立する変更は両側残す。片方を採るときは、落とした側と理由を round サマリーに書く
+- 解消後は Request changes と同じ流れで進める（手順 5・6 のやり直し・本文の sha 更新・ラウンドサマリー・手順 8 の再委託）
 
 Approve のとき:
 
@@ -242,7 +259,9 @@ memo: docs/worklogs/issue-<N>.md（round <R>）
 
 止まった場合は `pr:` の代わりに `stopped: <止まる条件の表の 1 列目>` を書く。
 
-## 輸入スキル（mattpocock/skills）
+## 輸入スキル
+
+外部スキルの採用の全体表は `docs/agents/external-skills.md` が正本。この節には実装担当が使うものの適用ルールを置く。
 
 指揮役が試行として明示した割り当てでは、手順 4 の方法の詳細として輸入スキル `tdd`（`.agents/skills/tdd/SKILL.md`。`tests.md` と `mocking.md` を伴う）を読んで使う。試行と明示されていない割り当てでは使わない（通常運用への移行は hatai が別に判断する）。
 
@@ -250,6 +269,18 @@ memo: docs/worklogs/issue-<N>.md（round <R>）
 
 - `tdd` の seam は受け入れ条件から決め、選んだ seam を実装者メモの「使ったスキル」の行に書く（上流の「ユーザーに確認する」は、自律スレッドでは受け入れ条件が確認済みの seam と読み替える）。
 - `tdd` の本文が参照する `codebase-design` と `code-review` は未採用のため、参照は無効とする。
+
+`diagnosing-bugs`（`.agents/skills/diagnosing-bugs/SKILL.md`）は通常運用で、割り当ての指示に関係なく使う。skill `investigate-bug` 側の参照（証拠集めと根本原因の方法）とは別に、実装担当では次に使う:
+
+- 手順 4: テストが red にならない・実行ごとに red が揺らうとき、Phase 1（赤になるフィードバックループの構築）と Phase 2（再現と最小化）でテストを切り分ける。
+- 手順 6: verify の失敗が自分の変更と無関係に見えるとき、Phase 2 の最小化（変更を退避した同じツリーでの再現確認）で切り分ける。
+- 本文が対話（ユーザーへの報告・質問）を前提とする部分は、自律スレッドでは PR 本文と実装者メモへの記録に読み替える（`tdd` の読み替えと同じ）。
+
+`mutation-testing`（`.agents/skills/mutation-testing/SKILL.md`）は通常運用で、差分がミューテーションテスト対象の crate のロジックに触れる round で使う:
+
+- 本リポジトリの道具は cargo-mutants（`mise run mutants`・`mise run mutants:diff`）であり、本文の mewt / muton 固有のコマンドと設定は適用しない。使うのは結果の解釈の節（What Results Mean・Interpreting Mutation Types: 生き残りの意味・重大度とリスクの区別・テストギャップか同等ミュータントかの切り分け）。
+- 生き残ったミュータントは、振る舞いを確かめるテストで倒す。実装の中身をそのまま確かめるテストで倒すのは不可。
+- 生き残りを同等ミュータント（テストで倒せない正当な変異）と判断したときは、理由を実装者メモに書く。
 
 取り込みの discipline（輸入スキル全般）:
 
@@ -267,6 +298,7 @@ memo: docs/worklogs/issue-<N>.md（round <R>）
 |---|---|
 | レビューの結果を指揮役の指示として待つ | レビューの委託と修正は自分で回す（手順 8〜9） |
 | レビューの報告だけで GitHub を確かめずに進む | 報告は `pr view --json reviews` の実状態と突き合わせてから進む |
+| approve 報告だけで head を確かめずに `pr ready` する | approve は対象コミットが現在の head と一致し `reviewDecision` が APPROVED のときだけ有効。向いていなければ手順 8 で再委託する |
 | レビューの nit まで先回りして直す | 修正依頼に書かれた must-fix だけ直す。nit は指示があったときだけ |
 | テストを実行せずに「TDD で実装した」と書く | 失敗した出力と成功した出力を両方貼る |
 | 修正のたびに新しいブランチを作る | 同じブランチに積む |

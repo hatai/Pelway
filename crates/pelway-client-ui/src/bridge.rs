@@ -20,15 +20,19 @@ use pelway_client_core::contract::{
 };
 use pelway_client_core::decision::DecisionBoard;
 use pelway_client_core::input::{Action, Focus, ImeState, InputContext, Key, Modifiers, on_key};
-use slint::{ComponentHandle, Global, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Global, Model, ModelRc, SharedString, VecModel};
 
 use crate::state::{
-    AvatarKind, DecisionCardState, DecisionOptionView, DecisionOutcomeView, MyRequestItem,
-    PendingDecisionItem, SAMPLE_DECISION_OPTION_A, SAMPLE_DECISION_OPTION_B,
-    SAMPLE_DECISION_QUESTION, SAMPLE_MENTION_NAMES, format_wait_ms,
+    AvatarKind, ChannelView as ChannelState, DecisionCardState, DecisionOptionView,
+    DecisionOutcomeView, ExternalSendState, HandoffOption, MyRequestItem, PendingDecisionItem,
+    SAMPLE_DECISION_OPTION_A, SAMPLE_DECISION_OPTION_B, SAMPLE_DECISION_QUESTION,
+    SAMPLE_MENTION_NAMES, TimelineEntry, format_wait_ms,
 };
 use crate::testkit::{FixedClock, FixedKeySource};
-use crate::{ComposerKind, DecisionOptionItem, MainWindow, PendingItem, RequestItem};
+use crate::{
+    ComposerKind, DecisionOptionItem, MainWindow, PendingItem, RequestItem, TimelineItem,
+    TimelineRowKind,
+};
 
 /// 承認カード 1 枚の表示用の状態と操作のつなぎ。
 ///
@@ -780,9 +784,17 @@ pub fn apply_decision_screen(window: &MainWindow, shell: &DecisionShell, now: Ts
         .collect();
     window.set_request_items(ModelRc::new(VecModel::from(requests)));
 
-    match shell.channel_card() {
+    apply_decision_card_props(window, shell.channel_card().as_ref());
+}
+
+/// チャット内の判断カードのプロパティ（`data-decision-*`）を `card` に合わせる。
+/// `None` ならカードを出さない（`data-decision-visible` を false にするだけで
+/// ほかの欄は残す。次にカードが出たとき上書きされる）。
+fn apply_decision_card_props(window: &MainWindow, card: Option<&DecisionCardState>) {
+    match card {
         Some(card) => {
-            window.set_data_decision_visible(true);
+            // データを先に全部入れてから最後に visible を立てる。`if` 条件付き
+            // の要素（依頼者の AI バッジなど）が初期値で確定評価されることを防ぐ
             window.set_data_decision_id(card.decision_id.as_str().into());
             window.set_data_decision_version(card.version as i32);
             window.set_data_decision_requester(card.requester.as_str().into());
@@ -793,7 +805,7 @@ pub fn apply_decision_screen(window: &MainWindow, shell: &DecisionShell, now: Ts
                 &card.options,
             ))));
             window.set_data_decision_decided(card.outcome.is_some());
-            match card.outcome {
+            match &card.outcome {
                 Some(outcome) => {
                     window.set_data_decision_selected(outcome.selected_body.as_str().into());
                     window.set_data_decision_decider(outcome.decider.as_str().into());
@@ -803,9 +815,109 @@ pub fn apply_decision_screen(window: &MainWindow, shell: &DecisionShell, now: Ts
                     window.set_data_decision_decider("".into());
                 }
             }
+            window.set_data_decision_visible(true);
         }
         None => window.set_data_decision_visible(false),
     }
+}
+
+// ---- チャンネル画面の時系列（Issue 385。ListView への適用） ----
+
+/// `state` の時系列の項目 1 つを、画面の行一覧（`TimelineItem`）に展開する。
+///
+/// スレッドの要約が付くメッセージは、メッセージ行とスレッド導線の 2 行になる
+/// （仮想化前の並びと同じ）。`MessageEntry` に時刻の欄は無いため `time` は
+/// 空のまま。`TimelineEntry::DecisionCard` は位置だけの印で、中身は
+/// `data-decision-*` プロパティ（台帳が正本）を行が読む。
+fn timeline_row_items(entry: &TimelineEntry) -> Vec<TimelineItem> {
+    let base = |kind| TimelineItem {
+        kind,
+        ..TimelineItem::default()
+    };
+    match entry {
+        TimelineEntry::DayDivider { label } => vec![TimelineItem {
+            day_label: label.as_str().into(),
+            ..base(TimelineRowKind::DayDivider)
+        }],
+        TimelineEntry::UnreadMarker => vec![base(TimelineRowKind::UnreadMarker)],
+        TimelineEntry::Message(message) => {
+            let mut rows = vec![TimelineItem {
+                sender: message.sender.as_str().into(),
+                is_ai: message.avatar.is_ai(),
+                initial: message.avatar.initial().into(),
+                body: message.body.as_str().into(),
+                // 「{from}〜{to}を読みました」の表示は、仮想化前はスレッドの
+                // 要約が付くメッセージに出ていた（同じ条件で出す）。
+                show_read_range: message.thread.is_some(),
+                ..base(TimelineRowKind::Message)
+            }];
+            if let Some(thread) = &message.thread {
+                rows.push(TimelineItem {
+                    thread_working: thread.working,
+                    thread_done: thread.done_at.is_some(),
+                    ..base(TimelineRowKind::ThreadLead)
+                });
+            }
+            rows
+        }
+        // 決定の印の文言（誰・時刻を含む）は tr-decision-mark が持つ（行には
+        // 乗せない。仮想化前と同じ表示）。
+        TimelineEntry::Decision { .. } => vec![base(TimelineRowKind::DecisionMark)],
+        TimelineEntry::DecisionCard => vec![base(TimelineRowKind::DecisionCard)],
+        TimelineEntry::Handoff(handoff) => vec![TimelineItem {
+            handoff_from_to: format!("{} → {}", handoff.from, handoff.to).into(),
+            handoff_title: handoff.title.as_str().into(),
+            handoff_acknowledged: handoff.acknowledged.is_some(),
+            handoff_option_a: handoff_option_text(handoff.options.first()),
+            handoff_option_b: handoff_option_text(handoff.options.get(1)),
+            ..base(TimelineRowKind::Handoff)
+        }],
+        TimelineEntry::PrivateNote {
+            sender,
+            avatar,
+            body,
+        } => vec![TimelineItem {
+            sender: sender.as_str().into(),
+            is_ai: avatar.is_ai(),
+            initial: avatar.initial().into(),
+            body: body.as_str().into(),
+            ..base(TimelineRowKind::PrivateNote)
+        }],
+        TimelineEntry::ExternalSend(card) => vec![TimelineItem {
+            ext_address: card.address.as_str().into(),
+            ext_subject: card.subject.as_str().into(),
+            ext_basis: card.basis.as_str().into(),
+            ext_body: card.body.as_str().into(),
+            ext_sent: matches!(card.state, ExternalSendState::Sent { .. }),
+            ..base(TimelineRowKind::ExternalSend)
+        }],
+    }
+}
+
+/// 引き継ぎカードの選択肢 1 行の表示（「A　範囲を絞って…」。モックに合わせて
+/// ラベルと本文の間は全角空白）。選択肢がなければ空文字。
+fn handoff_option_text(option: Option<&HandoffOption>) -> slint::SharedString {
+    option.map_or_else(slint::SharedString::default, |o| {
+        format!("{}　{}", o.label, o.text).into()
+    })
+}
+
+/// `state` のチャンネル画面の表示データを窓に渡す。
+///
+/// 題名・参加者に加え、時系列は ListView の行一覧（`timeline-items`）として
+/// 渡し、判断カードは `decision_card` の内容を `data-decision-*` に載せる。
+/// 台帳駆動の流れ（`apply_decision_screen`）が後から同じプロパティを
+/// 上書きするため、確定などの操作後の値は台帳側が正本になる。
+pub fn apply_channel_view(window: &MainWindow, channel: &ChannelState) {
+    window.set_data_channel_title(channel.title.as_str().into());
+    window.set_data_channel_members(channel.members.as_str().into());
+    let items: Vec<TimelineItem> = channel
+        .timeline
+        .iter()
+        .flat_map(timeline_row_items)
+        .collect();
+    window.set_timeline_items(ModelRc::new(VecModel::from(items)));
+    apply_decision_card_props(window, channel.decision_card.as_ref());
 }
 
 /// 画面の操作を `shell` に結線する（一覧とチャット内カードは同じ callback を
@@ -841,8 +953,36 @@ pub fn wire_decision_screen(window: &MainWindow, shell: Rc<RefCell<DecisionShell
             window.set_data_channel_title(title.as_str().into());
             window.set_show_today(false);
             apply_decision_screen(&window, &shell, now);
+            ensure_decision_card_row(&window);
         }
     });
+}
+
+/// チャット内の判断カードを出す `decision-card` 行が時系列になければ、末尾に
+/// 置く（Issue 385。`apply_channel_view` が時系列を渡す流れでは、判断カードの
+/// 行はすでに載っている想定。この骨組みの流れでは時系列が空のままなので、
+/// `data-decision-*` だけではカードが実体化しない）。
+fn ensure_decision_card_row(window: &MainWindow) {
+    if !window.get_data_decision_visible() {
+        return;
+    }
+    let model = window.get_timeline_items();
+    let has_card = (0..model.row_count()).any(|i| {
+        model
+            .row_data(i)
+            .is_some_and(|item| item.kind == TimelineRowKind::DecisionCard)
+    });
+    if has_card {
+        return;
+    }
+    let mut items: Vec<TimelineItem> = (0..model.row_count())
+        .filter_map(|i| model.row_data(i))
+        .collect();
+    items.push(TimelineItem {
+        kind: TimelineRowKind::DecisionCard,
+        ..TimelineItem::default()
+    });
+    window.set_timeline_items(ModelRc::new(VecModel::from(items)));
 }
 
 // ---- 決定・承認ボタンのキー操作（Issue 379） ----

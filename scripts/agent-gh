@@ -2,35 +2,85 @@
 # エージェントの名義で gh / git を実行する。
 #   scripts/agent-gh dev <gh の引数...>        実装担当 GitHub App pelway-dev
 #   scripts/agent-gh review <gh の引数...>     レビュー担当 GitHub App pelway-review
+#   scripts/agent-gh qa comment <番号> --body-file <path|->   QA 担当 GitHub App pelway-qa（この形だけ許可）
 #   scripts/agent-gh <dev|review> git <git の引数...>   その名義の認証で git を実行する
 #   scripts/agent-gh -h | --help               使い方を標準出力に出して終了コード 0（fnox も gh も呼ばない）
 # 呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。
-# 終了コード: 2 = 役割の誤り、3 = トークンを取れない、5 = 引数に \uXXXX エスケープ混入、それ以外は gh / git の終了コード（--help / -h は 0）
+# gh は毎回空の一時 GH_CONFIG_DIR で呼ぶ。~/.config/gh や呼び出し元の GH_CONFIG_DIR（外部の hosts.yml）は
+# 参照もフォールバックもさせない（#522。レビュー sandbox が ~/.config/gh を読めないのと、人間のトークンへの
+# 黙ったフォールバックを防ぐため）。一時ディレクトリは終了時に消す。
+# qa は許可リスト方式で、上の 1 形以外の呼び出し（ラベル・Approve・マージ・編集・削除など）はトークン発行前に終了コード 2 で拒否する。
+# qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持たない（~/.config/pelway-agent-qa/fnox.toml を指す。未設定は終了コード 3）。
+# 終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない（qa の PELWAY_AGENT_FNOX_CONFIG 未設定を含む）、5 = 引数に \uXXXX エスケープ混入、それ以外は gh / git の終了コード（--help / -h は 0）
 set -euo pipefail
 # コマンド置換 $(...) の中でも set -e を効かせる（app_token 内の secret の失敗で止めるため）。
 shopt -s inherit_errexit
 
 # 値はリポジトリの fnox.toml ではなく、マシンごとの設定に age で暗号化して置く（scripts/setup/agent-accounts.sh が作る）。
+# dev と review で設定ファイルと age 鍵を分離する（#449）。review 用の設定には PELWAY_REVIEW_* だけが載り、
+# review の sandbox からは dev 用の設定・age 鍵が読めない前提の構成。
 fnox_config="${PELWAY_AGENT_FNOX_CONFIG:-$HOME/.config/pelway-agent/fnox.toml}"
+review_fnox_config="${PELWAY_AGENT_FNOX_CONFIG_REVIEW:-$HOME/.config/pelway-agent-review/fnox.toml}"
 
-usage() { echo "usage: $0 <dev|review> [git] <args...>" >&2; exit 2; }
+usage() { echo "usage: $0 <dev|review> [git] <args...> | $0 qa comment <番号> --body-file <path|->" >&2; exit 2; }
+
+# 終了時に消すパス（gh 隔離用の一時ディレクトリ）。呼び出しはすべて subshell の外で行う。
+# app_token の秘密鍵一時ファイルはここに入れない: app_token は token="$(app_token ...)" の
+# コマンド置換 subshell の中で動き、subshell では親の EXIT trap も cleanup_paths への追加も
+# 親に届かないため、app_token 内で subshell 自身の trap を設定して消す（下を参照）。
+cleanup_paths=()
+cleanup() {
+  local p
+  for p in ${cleanup_paths[@]+"${cleanup_paths[@]}"}; do
+    rm -rf -- "$p"
+  done
+}
+trap cleanup EXIT
+
+# gh を呼ぶ実行（dev / review / qa）では、gh に既定の ~/.config/gh や呼び出し元の GH_CONFIG_DIR
+# （外部の hosts.yml）を絶対に参照させない（#522）。毎回空の一時ディレクトリで GH_CONFIG_DIR を
+# 上書きし、終了時に cleanup で消す。GH_NO_UPDATE_NOTIFIER=1 も出す（gh が更新確認で設定
+# ディレクトリとネットワークを使わないように）。exec で gh に置き換えると EXIT trap が走らない
+# ため、gh / git の呼び出しは exec せず終了コードを渡す形にする（下の各呼び出しで exit）。
+gh_isolated_config() {
+  GH_CONFIG_DIR="$(mktemp -d)"
+  GH_NO_UPDATE_NOTIFIER=1
+  export GH_CONFIG_DIR GH_NO_UPDATE_NOTIFIER
+  cleanup_paths+=("$GH_CONFIG_DIR")
+}
+
+# qa の引数が `comment <番号> --body-file <path|->` の 1 形であることを確かめる。
+# 許可リスト方式（#305 の案bと同じ考え方）で、それ以外の呼び出しはトークン発行前に終了コード 2 で拒否する。
+qa_check_args() {
+  if [[ "${1:-}" != "comment" || $# -ne 4 || "$3" != "--body-file" || ! "$2" =~ ^[0-9]+$ ]]; then
+    echo "usage: $0 qa comment <番号> --body-file <path|->" >&2
+    exit 2
+  fi
+  if [[ "$4" != "-" && ! -r "$4" ]]; then
+    echo "agent-gh: --body-file のファイルを読めません" >&2
+    exit 2
+  fi
+}
 
 # --help / -h の本体。使い方を標準出力に出して終了コード 0 で返る。
 # builtin しか使わず fnox も gh も呼ばないので、PATH や認証情報が無い環境でも動く。
 help() {
   printf '%s\n' \
     "usage: $0 <dev|review> [git] <args...>" \
+    "       $0 qa comment <番号> --body-file <path|->" \
     "" \
     "エージェントの名義で gh / git を実行する。" \
     "  $0 dev <gh の引数...>               実装担当 GitHub App pelway-dev" \
     "  $0 review <gh の引数...>            レビュー担当 GitHub App pelway-review" \
     "  $0 <dev|review> git <git の引数...>  その名義の認証で git を実行する" \
+    "  $0 qa comment <番号> --body-file <path|->   QA 担当 GitHub App pelway-qa（この形だけ許可）" \
     "  $0 -h | --help                      この使い方を標準出力に出して終了する" \
     "" \
     "呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。" \
     "git push の成功後は scripts/agent-gh-resign がコミットを GitHub API の署名付きに付け替える（止めるときは PELWAY_AGENT_SKIP_RESIGN=1）。" \
+    "qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持ちません（~/.config/pelway-agent-qa/fnox.toml を指してください）。" \
     "非 ASCII の文字列は argv 経由で渡せません（\\uXXXX に潰れます）。--body-file / api --input / git commit -F などファイル経由で渡してください。" \
-    "終了コード: 2 = 役割の誤り、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、それ以外は gh / git の終了コード"
+    "終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、それ以外は gh / git の終了コード"
   exit 0
 }
 
@@ -43,14 +93,24 @@ secret() {
   printf '%s' "$value"
 }
 
-# app_token <PREFIX>: fnox の <PREFIX>_APP_ID / _APP_INSTALLATION_ID / _APP_KEY から
-# GitHub App のインストールトークンを発行して出力する。
+# app_token <APP ID の名前> <INSTALLATION ID の名前> <秘密鍵の名前>:
+# fnox の 3 つの名前から GitHub App のインストールトークンを発行して出力する。
+# 名前は役割ごとに違う（dev / review: PELWAY_*_APP_ID・_APP_INSTALLATION_ID・_APP_KEY、
+# qa: PELWAY_QA_APP_ID・PELWAY_QA_INSTALLATION_ID・PELWAY_QA_PRIVATE_KEY）。
 app_token() {
-  local app_id installation_id key key_file response token
-  app_id="$(secret "$1_APP_ID")"
-  installation_id="$(secret "$1_APP_INSTALLATION_ID")"
-  key="$(secret "$1_APP_KEY")"
+  # key_file は local にしない: EXIT trap の実行時には local 変数のスコープが既に
+  # 終わっており ${key_file:-} が空に展開されるため、消すべきパスが trap に届かない。
+  # グローバルなら subshell 内の trap から見える。
+  local app_id installation_id key response token
+  app_id="$(secret "$1")"
+  installation_id="$(secret "$2")"
+  key="$(secret "$3")"
   # 秘密鍵は argv（ps で見える）に載せず、所有者だけが読める一時ファイルで渡し、使ったらすぐ消す。
+  # app_token は token="$(app_token ...)" のコマンド置換 subshell の中で動くため、親の
+  # EXIT trap（cleanup）も cleanup_paths への追加もこの中では効かない（subshell の変更は
+  # 親に届かない）。そこで subshell 自身の EXIT trap で消し、chmod・printf の失敗や割り込みで
+  # 途中終了したときも鍵ファイルが残らないようにする。trap は subshell 内の設定なので
+  # 親の cleanup と衝突しない。
   key_file="$(mktemp)"
   trap 'rm -f "${key_file:-}"' EXIT
   chmod 600 "$key_file"
@@ -84,15 +144,37 @@ for arg in "$@"; do
   fi
 done
 
+# gh / git を呼ぶロールでは、gh の設定を空の一時ディレクトリに隔離する（#522）。
+# -h / --help と役割の誤り（usage の exit 2）では何も作らない。
+case "$role" in
+  dev|review|qa) gh_isolated_config ;;
+esac
+
 git_identity=()
 case "$role" in
   dev)
-    token="$(app_token PELWAY_DEV)"
+    token="$(app_token PELWAY_DEV_APP_ID PELWAY_DEV_APP_INSTALLATION_ID PELWAY_DEV_APP_KEY)"
     email="$(secret PELWAY_DEV_GIT_EMAIL)"
     git_identity=(-c "user.name=pelway-dev[bot]" -c "user.email=$email")
     ;;
   review)
-    token="$(app_token PELWAY_REVIEW)"
+    fnox_config="$review_fnox_config"
+    token="$(app_token PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW_APP_KEY)"
+    ;;
+  qa)
+    # 許可外の呼び出しは、fnox（秘密の読み出し）と gh（ネットワーク）のどちらよりも前に拒否する。
+    qa_check_args "$@"
+    # dev / review と違い既定値を持たない。未設定なら ~/.config/pelway-agent/fnox.toml
+    # （dev 用の秘密）を読みに行かずに止める。
+    if [[ -z "${PELWAY_AGENT_FNOX_CONFIG:-}" ]]; then
+      echo "agent-gh: qa ロールは PELWAY_AGENT_FNOX_CONFIG が必要です（~/.config/pelway-agent-qa/fnox.toml を指してください）" >&2
+      exit 3
+    fi
+    token="$(app_token PELWAY_QA_APP_ID PELWAY_QA_INSTALLATION_ID PELWAY_QA_PRIVATE_KEY)"
+    # 送るのは POST /repos/hatai/Pelway/issues/<番号>/comments の 1 つだけ。
+    # exec しない（EXIT trap で一時 GH_CONFIG_DIR を消すため）。終了コードは gh のものを返す。
+    GH_TOKEN="$token" gh issue comment "$2" --repo hatai/Pelway --body-file "$4"
+    exit $?
     ;;
   -h|--help)
     help
@@ -123,7 +205,11 @@ if [[ "${1:-}" == "git" ]]; then
     fi
     exit "$rc"
   fi
-  GH_TOKEN="$token" exec git "${git_cfg[@]}" "$@"
+  # exec しない（EXIT trap で一時 GH_CONFIG_DIR を消すため）。終了コードは git のものを返す。
+  GH_TOKEN="$token" git "${git_cfg[@]}" "$@"
+  exit $?
 fi
 
-GH_TOKEN="$token" exec gh "$@"
+# exec しない（EXIT trap で一時 GH_CONFIG_DIR を消すため）。終了コードは gh のものを返す。
+GH_TOKEN="$token" gh "$@"
+exit $?

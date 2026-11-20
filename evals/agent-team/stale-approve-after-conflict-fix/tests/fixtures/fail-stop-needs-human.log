@@ -1,0 +1,5 @@
+action=read src=environment/pr.json
+action=read src=environment/pr-reviews.json
+action=note text=レビュー担当の報告は approve だが GitHub の最新レビューは DISMISSED で食い違う。判断を仰ぐ
+action=run cmd=scripts/agent-gh dev issue comment 188 --body "レビュー報告（approve）と GitHub の最新レビュー（DISMISSED・reviewDecision REVIEW_REQUIRED）が食い違う。対応を判断してほしい" exit=0
+action=run cmd=scripts/agent-gh dev issue edit 188 --add-label needs-human exit=0
