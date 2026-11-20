@@ -42,4 +42,14 @@
 4. 足りなかった情報・検証手段: なし。
 5. 改善案: なし（nit は round 3 レビューのまま未対応: `File::try_lock` 化・SAFETY コメント・`file.set_permissions`・`/proc/locks` の dev 照合・dry-run 文書の整合）。
 
+## 実装者メモ（round 5）
+
+対象 head: c9e5b170f48a0f13bafff406f8e831990415c1a5
+
+1. 詰まった箇所: Codex レビュー（環境修復後、head 12b0a4bd に投稿）が request-changes（must-fix 1 件）: 起動元の判定が `opts.project`（監視対象）を見ており、worktree の cwd から `--project <本体 checkout>` で起動するとガードをすり抜ける。`git_dirs` の検査先を `std::env::current_dir()`（起動元）に変更し、`startup_guards` は引数を取らない形に。回帰テスト `worktree_launch_dir_is_refused_for_main_project`（worktree cwd ＋ `--project` 本体 で拒否を確認）を追加し、旧実装への変異で落ちることを確認済み。偽 git は `$PWD/git-dir` マーカー優先・`$FAKE_DIR` フォールバックに拡張。
+2. 曖昧だった文: Issue の「起動時に `git rev-parse --git-dir` と `--git-common-dir` を比べる」は実行先ディレクトリを指定していない。`--project` の解釈（起動元か監視対象か）が分かれ得た。起動元（起動コンテキスト）と解釈したのは reviewer 指摘が趣旨（worktree での二重起動防止）に合うため。
+3. 仮定と解釈: pitchfork は `pitchfork.toml` のある checkout ルートを cwd にして daemon を起動する前提（`agent-worktree-prune` の cwd 判定と同じ運用）。`--project` は t3/gh 呼び出しの対象を指すまま。
+4. 足りなかった情報・検証手段: なし。
+5. 改善案: ガードが「どのディレクトリの git 状態」を見るかは Issue の受け入れ条件に明記するとよい（今回はレビューで指摘されるまで起動元と監視対象の区別が表面化しなかった）。
+
 使ったスキル: implement-issue・review-pr（結果の照合手順として）。輸入スキルはなし。
