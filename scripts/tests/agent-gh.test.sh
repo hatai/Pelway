@@ -211,6 +211,13 @@ GH_EXTENSION_LIST=$'gh-stack  v0.2.0  vi/weird' \
 [[ "$RC" == 3 ]] || failures+=("token_fail_install_hint_when_absent: exit $RC, want 3")
 grep -qF 'gh extension install Link-/gh-token' <<<"$OUT" || failures+=("token_fail_install_hint_when_absent: install hint missing")
 
+# extension 名は行の第 1 フィールドとの完全一致で判定する（gh-token-extra は別の extension）
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_EXTENSION_LIST=$'gh-token-extra  v0.1.0  someone/gh-token-extra' \
+  run token_fail_install_hint_for_lookalike_name dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_install_hint_for_lookalike_name: exit $RC, want 3")
+grep -qF 'gh extension install Link-/gh-token' <<<"$OUT" || failures+=("token_fail_install_hint_for_lookalike_name: install hint missing for lookalike extension")
+
 # gh extension list 自体が失敗したら有無は分からないので「拡張が必要」は出さない
 GH_TOKEN_GENERATE_FAIL=1 \
 GH_EXTENSION_LIST_FAIL=1 \

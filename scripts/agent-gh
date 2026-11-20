@@ -144,8 +144,10 @@ app_token() {
     fi
     # 「拡張が必要」の文は gh extension list が成功して gh-token が無いときだけ出す。
     # list 自体が失敗したら有無は分からないので出さない（#520）。
+    # extension 名は各行の第 1 フィールドとの完全一致で判定する（部分一致は
+    # gh-token-extra のような別の extension 名に誤ヒットして案内を抑止するため）。
     if ext_list="$(gh extension list 2>/dev/null)"; then
-      grep -q 'gh-token' <<<"$ext_list" || echo "agent-gh: gh extension install Link-/gh-token が必要です" >&2
+      awk '{print $1}' <<<"$ext_list" | grep -qx 'gh-token' || echo "agent-gh: gh extension install Link-/gh-token が必要です" >&2
     fi
     exit 3
   fi
