@@ -21,10 +21,12 @@ printf '%s\n' "${!var}"
 EOF
 
 # 偽の gh: `gh token generate` は JSON を返す。それ以外は GH_TOKEN と引数を記録する。
+# どちらの経路でも GH_CONFIG_DIR / GH_NO_UPDATE_NOTIFIER も記録する（#522 の隔離の確認用）。
 cat >"$BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1 $2" == "token generate" ]]; then
   printf '%s\n' "$*" >"$CALL_LOG.token-args"
+  printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}" >"$CALL_LOG.token-env"
   # --key <file> の中身と権限を記録する（秘密鍵が argv に載らないことの確認用）
   prev=""
   for a in "$@"; do
@@ -44,13 +46,14 @@ if [[ "$1 $2" == "token generate" ]]; then
   esac
   exit 0
 fi
-{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
+{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_NO_UPDATE_NOTIFIER=%s\n' "${GH_NO_UPDATE_NOTIFIER:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
 EOF
 
 # 偽の git: GH_TOKEN と引数を追記する（push 後の agent-gh-resign からの呼び出しも残すため追記）。
+# GH_CONFIG_DIR も記録する（credential helper として呼ばれる gh への隔離の伝搬確認用）。
 cat >"$BIN/git" <<'EOF'
 #!/usr/bin/env bash
-{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
+{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
 EOF
 chmod +x "$BIN"/*
 
@@ -309,6 +312,63 @@ expect_no_calls qa_missing_config
 run unicode_guard_qa qa comment 1 --body-file 'x\u3042'
 [[ "$RC" == 5 ]] || failures+=("unicode_guard_qa: exit $RC, want 5")
 expect_no_calls unicode_guard_qa
+
+# --- #522: gh は毎回空の一時 GH_CONFIG_DIR で呼ばれ、~/.config/gh や外部の hosts.yml を読ませない ---
+# 呼び出し元の GH_CONFIG_DIR に偽の hosts.yml（人間のトークンの代わりのマーカー）を置いても、
+# gh に渡るのは毎回新しく作った空の一時ディレクトリで、agent-gh の終了後には残っていない。
+fake_gh_dir="$ROOT/fake-gh-config"
+mkdir -p "$fake_gh_dir"
+printf 'github.com:\n    oauth_token: hosts-yml-token\n' >"$fake_gh_dir/hosts.yml"
+
+# used_gh_config <name>: 偽 gh / 偽 git が記録した GH_CONFIG_DIR の値
+used_gh_config() { sed -n 's/^GH_CONFIG_DIR=//p' "$ROOT/$1.log"; }
+
+# dev ロール: 呼び出し元の GH_CONFIG_DIR（偽 hosts.yml 置き場）は上書きされる
+GH_CONFIG_DIR="$fake_gh_dir" run gh_config_isolated dev pr list
+[[ "$RC" == 0 ]] || failures+=("gh_config_isolated: exit $RC, want 0 ($OUT)")
+used="$(used_gh_config gh_config_isolated)"
+[[ -n "$used" && "$used" != "$fake_gh_dir" ]] || failures+=("gh_config_isolated: caller GH_CONFIG_DIR not overridden")
+[[ ! -e "$used/hosts.yml" ]] || failures+=("gh_config_isolated: gh saw a hosts.yml in its config dir")
+[[ ! -e "$used" ]] || failures+=("gh_config_isolated: temp GH_CONFIG_DIR left behind")
+grep -qF 'GH_NO_UPDATE_NOTIFIER=1' "$ROOT/gh_config_isolated.log" || failures+=("gh_config_isolated: GH_NO_UPDATE_NOTIFIER not set")
+# トークン発行（gh token generate）も隔離された空ディレクトリで呼ばれ、終了後に消える
+tok="$(sed -n 's/^GH_CONFIG_DIR=//p' "$ROOT/gh_config_isolated.log.token-env")"
+[[ -n "$tok" && "$tok" != "$fake_gh_dir" ]] || failures+=("gh_config_isolated: token generate saw caller GH_CONFIG_DIR")
+[[ ! -e "$tok" ]] || failures+=("gh_config_isolated: token generate config dir left behind")
+# 読まれなかった偽 hosts.yml はそのまま残る
+[[ -e "$fake_gh_dir/hosts.yml" ]] || failures+=("gh_config_isolated: fake hosts.yml disturbed")
+
+# review ロール（~/.config/gh が読めないレビュー sandbox が発端）でも同じ隔離
+GH_CONFIG_DIR="$fake_gh_dir" run gh_config_isolated_review review pr list
+[[ "$RC" == 0 ]] || failures+=("gh_config_isolated_review: exit $RC, want 0 ($OUT)")
+used="$(used_gh_config gh_config_isolated_review)"
+[[ -n "$used" && "$used" != "$fake_gh_dir" && ! -e "$used" ]] || failures+=("gh_config_isolated_review: GH_CONFIG_DIR not isolated/removed")
+
+# qa ロールでも同じ隔離
+GH_CONFIG_DIR="$fake_gh_dir" run gh_config_isolated_qa qa comment 1 --body-file "$ROOT/qa-body.md"
+[[ "$RC" == 0 ]] || failures+=("gh_config_isolated_qa: exit $RC, want 0 ($OUT)")
+used="$(used_gh_config gh_config_isolated_qa)"
+[[ -n "$used" && "$used" != "$fake_gh_dir" && ! -e "$used" ]] || failures+=("gh_config_isolated_qa: GH_CONFIG_DIR not isolated/removed")
+
+# git サブコマンド（credential helper として gh が呼ばれる経路）にも同じ環境が渡る
+GH_CONFIG_DIR="$fake_gh_dir" run gh_config_isolated_git dev git status
+[[ "$RC" == 0 ]] || failures+=("gh_config_isolated_git: exit $RC, want 0 ($OUT)")
+used="$(used_gh_config gh_config_isolated_git)"
+[[ -n "$used" && "$used" != "$fake_gh_dir" && ! -e "$used" ]] || failures+=("gh_config_isolated_git: GH_CONFIG_DIR not isolated/removed")
+
+# トークンが取れない（fnox が秘密を返さない）ときは hosts.yml へフォールバックせず fail-closed。
+# gh は一切呼ばれない
+GH_CONFIG_DIR="$fake_gh_dir" FAKE_PELWAY_DEV_APP_KEY="" run no_fallback_missing_secret dev pr list
+[[ "$RC" == 3 ]] || failures+=("no_fallback_missing_secret: exit $RC, want 3")
+[[ ! -e "$ROOT/no_fallback_missing_secret.log" ]] || failures+=("no_fallback_missing_secret: gh was called")
+
+# トークン発行そのものが失敗しても、本体の gh は呼ばず exit 3（hosts.yml のトークンで続けない）。
+# 発行の試行も隔離された空ディレクトリでだけ行われる
+GH_CONFIG_DIR="$fake_gh_dir" FAKE_PELWAY_DEV_APP_ID=999 run no_fallback_generate_fails dev pr list
+[[ "$RC" == 3 ]] || failures+=("no_fallback_generate_fails: exit $RC, want 3")
+[[ ! -e "$ROOT/no_fallback_generate_fails.log" ]] || failures+=("no_fallback_generate_fails: gh was called")
+tok="$(sed -n 's/^GH_CONFIG_DIR=//p' "$ROOT/no_fallback_generate_fails.log.token-env")"
+[[ -n "$tok" && "$tok" != "$fake_gh_dir" ]] || failures+=("no_fallback_generate_fails: token generate saw caller GH_CONFIG_DIR")
 
 if ((${#failures[@]})); then
   printf 'FAIL %s\n' "${failures[@]}"
