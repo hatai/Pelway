@@ -42,10 +42,15 @@ trap cleanup EXIT
 # 上書きし、終了時に cleanup で消す。GH_NO_UPDATE_NOTIFIER=1 も出す（gh が更新確認で設定
 # ディレクトリとネットワークを使わないように）。exec で gh に置き換えると EXIT trap が走らない
 # ため、gh / git の呼び出しは exec せず終了コードを渡す形にする（下の各呼び出しで exit）。
+# gh のテレメトリ（cafe.github.com への送信）も GH_TELEMETRY=false と DO_NOT_TRACK=1 で止める（#527）。
+# 空の GH_CONFIG_DIR では `gh config set telemetry disabled` が効かず、レビューの sandbox は
+# cafe.github.com への通信を拒否して gh の実行ごと失敗させるため。
 gh_isolated_config() {
   GH_CONFIG_DIR="$(mktemp -d)"
   GH_NO_UPDATE_NOTIFIER=1
-  export GH_CONFIG_DIR GH_NO_UPDATE_NOTIFIER
+  GH_TELEMETRY=false
+  DO_NOT_TRACK=1
+  export GH_CONFIG_DIR GH_NO_UPDATE_NOTIFIER GH_TELEMETRY DO_NOT_TRACK
   cleanup_paths+=("$GH_CONFIG_DIR")
 }
 

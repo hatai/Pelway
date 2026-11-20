@@ -4,9 +4,14 @@
 # （docs/superpowers/specs/agent-team.md「見張り役と通知」）。異常終了したら再起動する。
 # 動かすのは mise run agent-watch-install でインストールしたビルド済みのバイナリ。
 # 作業中のブランチのコードをその場でビルドしないので、ブランチを切り替えても止まらない。
+# boot_start: supervisor が起動時（pitchfork boot enable で登録した login 時の起動）に自動で起動する。
+# 起動時の supervisor がこの定義を読むには、本体 checkout をユーザーの設定に namespace として
+# 登録しておく必要がある（docs/dev-environment.md「pitchfork について」）。worktree の同じ定義も
+# 起動を試みられるが、agent-watch 自身が worktree からの起動を終了コード 0 で拒否する。
 [daemons.agent-watch]
 run = "$HOME/.local/bin/pelway-agent-watch"
 retry = 10
+boot_start = true
 
 # agent-worktree-prune: 終わった T3 worktree の片付け。毎時 0 分に scripts/agent-worktree-prune --auto を走らせる
 # （settle されていないスレッドの worktree と、追跡ファイルに変更が残っている worktree は残す）。
