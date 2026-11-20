@@ -52,4 +52,14 @@
 4. 足りなかった情報・検証手段: なし。
 5. 改善案: ガードが「どのディレクトリの git 状態」を見るかは Issue の受け入れ条件に明記するとよい（今回はレビューで指摘されるまで起動元と監視対象の区別が表面化しなかった）。
 
+## 実装者メモ（round 6）
+
+対象 head: b792a9941956a47eb9a84289db6ca4899bcc6651
+
+1. 詰まった箇所: 指揮役（代行）の確定仕様に従い round 5 の must-fix を完成。`git rev-parse` を起動元 cwd で 1 回だけ実行し `--git-dir`・`--git-common-dir`・`--show-toplevel` を取得。前二者が違えば worktree として拒否し、さらに正規化した `--project`（相対なら cwd 起点、canonicalize で照合）が toplevel と一致しなければ「`--project` is not the launch checkout」で拒否。拒否ログはパスの種類のみ（lock 拒否行からもパス出力を除去）。テスト (a) worktree 起動拒否・(b) worktree cwd+`--project` 本体・(c) 本体 cwd+`--project` worktree・(d) 本体の正しい起動を網羅。偽 git は `$PWD`/fake 両対応のマーカー方式に `--show-toplevel`（既定 `pwd -P`）を追加。
+2. 曖昧だった文: なし（確定仕様の明示どおり実装）。
+3. 仮定と解釈: `--project` 不一致は「拒否」（exit 0）とし、canonicalize・rev-parse の失敗は「確認できない」で exit 1（fail-closed）。canonicalize が失敗する `--project`（存在しないパス）は誤設定として 1。
+4. 足りなかった情報・検証手段: なし。
+5. 改善案: なし。
+
 使ったスキル: implement-issue・review-pr（結果の照合手順として）。輸入スキルはなし。
