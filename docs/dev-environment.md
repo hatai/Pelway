@@ -201,6 +201,8 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 
 `network_proxy` は Codex の試験的な機能で、`--enable network_proxy` が無いと権限プロファイルのネットワーク制限が効かない。Codex を更新したら `mise run codex-review-check` で、GitHub にはつながり、それ以外にはつながらないことを確かめる。
 
+gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有効で、実行のごく一部で `cafe.github.com` へ送信する。許可先に無いため sandbox が通信を止め、gh の実行ごと失敗する。`scripts/agent-gh` は空の `GH_CONFIG_DIR` で gh を動かすので `gh config set telemetry disabled` は効かず、代わりにどのロールでも `GH_TELEMETRY=false` と `DO_NOT_TRACK=1` を渡して送信を止める（#527。許可先は増やさない）。
+
 ### レビュー委託（delegate_task）での確認
 
 通常の PR のレビューは、実装担当のスレッドが `delegate_task` で `codex_review` の子タスクとして委託する（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。委託の子がスレッドと同じ制限（権限プロファイル `review`、ネットワークは `api.github.com` と `github.com` だけ）を継承するかを、実 PR での初回委託により確かめる。初回の委託の指示には、次の確認を報告に含めるよう足す。記録されるまでは、2 回目以降の委託によるレビューを行わない。
