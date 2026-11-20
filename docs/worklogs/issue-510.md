@@ -22,4 +22,14 @@
 4. 足りなかった情報・検証手段: `codex_review` の子環境に `gh extension install Link-/gh-token` が無いことは委託先の報告でのみ分かり、こちらからは観測・修復できない。事前に子環境を確かめる手段が無い。
 5. 改善案: `docs/dev-environment.md`「レビュー担当の Codex（codex_review）」の「レビュー委託（delegate_task）での確認」に「`scripts/agent-gh review` がトークンを発行できる（`gh-token` 拡張が委託先の環境で使える）」の確認行を足す。11-14 の確認合格後に環境が回帰しても、今回のように委託 2 回の失敗でしか気付けないため。
 
+## 実装者メモ（round 3）
+
+対象 head: 60b0b803631e77a18511ba1cfedfc589f4e3fdd3
+
+1. 詰まった箇所: `be9be0c` で CI の `test (cargo test)` が落ちた（`externally_held_lock_is_refused` の `wait_locked` が "lock was never taken" で panic）。原因はテスト側の競合: `wait_locked` の検知が `flock -n <lock> true` ポーリングで、観測自体が一瞬 lock を取る。ホルダーの `flock -n <lock> sleep 30` の 1 回きりの試行と重なるとホルダーが終了する。`/proc/locks` を読むだけの検知（lock を取らない観測）に変更し、保持側が早期終了したときは `try_wait` で即検出する形にした。`second_instance_is_refused`（本物バイナリがホルダー）も同じ競合窓があるため同じ修正。
+2. 曖昧だった文: なし（skill の「Approve の後は PR に push しない」に round 2 で抵触して head を動かし APPROVED を無効化してしまったのは、こちらの手順ミス。レビュー委託前の修正 round としては正しい流れ）
+3. 仮定と解釈: `wait_locked` の呼び出し側は保持側の `Child` を渡す形に変え、保持側の死を即検出する。inode は `/proc/locks` の `MAJ:MIN:INO` フィールドの末尾と照合。
+4. 足りなかった情報・検証手段: CI 上でのみ再現した競合。ローカル再現は困難（タイミング依存）。
+5. 改善案: ロック取得系のテストで「取られているか」を調べるときは、`flock` で触らず `/proc/locks` を読む。これを rust-testing 系スキルに書く価値があるかは次回の教訓化で検討。
+
 使ったスキル: implement-issue・review-pr（結果の照合手順として）。輸入スキルはなし。
