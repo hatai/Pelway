@@ -3,6 +3,8 @@
 //! 使い方: `pelway-agent-watch [--once | --cycles <n>] [--dry-run] [--project <path>]`
 //! - 既定は 30 秒ごとのループ（`PELWAY_AGENT_WATCH_POLL_SECS` で変えられる）。`--once` は 1 周、`--cycles <n>` は n 周で終わる
 //! - `--dry-run` は送らずに新しいイベントの payload を 1 行ずつ標準出力に出す。状態ファイルは読むだけで書き換えない
+//! - 起動してよいのは本体 checkout からだけ。worktree では理由を 1 行ログに出して終わる
+//! - 同時に動かせるのは 1 つだけ。状態ディレクトリの lock ファイルを flock で取り、取れなければ終わる
 //! - 状態は起動時に 1 回だけ読み、以降はメモリに持つ。保存に失敗しても同じイベントを繰り返し作らない
 //! - 送れなかった payload は状態の送信待ちの列に残し、次の周回で送り直す
 //! - ログは標準エラーに 1 行ずつ。秘密と返答の本文は出さない
@@ -58,6 +60,69 @@ fn parse_args() -> Result<Options, String> {
     Ok(opts)
 }
 
+/// 起動してよいかの確認。本体 checkout からの起動だけを許し（worktree は見張りが二重になる）、
+/// 状態ディレクトリの lock で同時実行を 1 つに絞る。拒否は意図した終了なので終了コード 0
+/// （pitchfork の再起動を呼ばない。agent-worktree-prune と同じ決まり）。確認自体に失敗したときは 1。
+/// worktree の判定は見張り対象（`--project`）ではなく起動元（実プロセスの cwd）で行う:
+/// worktree から `--project` に本体 checkout を渡して起動する抜け道をふさぐため。
+/// さらに `--project` が起動元の checkout の toplevel と一致することも確認する:
+/// 本体から別の checkout を見張る起動は本体の見張りとの重複・すり替わりになるため。
+/// 拒否のログにはパスの種類だけを書き、中身や環境変数は出さない。
+fn startup_guards(opts: &Options) -> std::fs::File {
+    let cwd = match std::env::current_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("agent-watch: cannot check the launch directory: {e}");
+            std::process::exit(1);
+        }
+    };
+    let (dir, common, toplevel) = match io::git_dirs(&cwd) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("agent-watch: cannot check the checkout: {e}");
+            std::process::exit(1);
+        }
+    };
+    if dir != common {
+        eprintln!("agent-watch: refusing to start: linked worktree is not the main checkout");
+        std::process::exit(0);
+    }
+    let project = if opts.project.is_absolute() {
+        opts.project.clone()
+    } else {
+        cwd.join(&opts.project)
+    };
+    match (
+        std::fs::canonicalize(&project),
+        std::fs::canonicalize(PathBuf::from(toplevel.trim())),
+    ) {
+        (Ok(p), Ok(t)) if p == t => {}
+        (Ok(_), Ok(_)) => {
+            eprintln!("agent-watch: refusing to start: --project is not the launch checkout");
+            std::process::exit(0);
+        }
+        _ => {
+            eprintln!("agent-watch: cannot check the watched checkout");
+            std::process::exit(1);
+        }
+    }
+    let lock_path = io::lock_path();
+    match io::try_lock(&lock_path) {
+        Ok(Some(file)) => file,
+        Ok(None) => {
+            eprintln!("agent-watch: refusing to start: another instance holds the lock");
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!(
+                "agent-watch: cannot take the lock {}: {e}",
+                lock_path.display()
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
 fn now_epoch() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -89,6 +154,7 @@ fn main() {
             std::process::exit(2);
         }
     };
+    let _lock = startup_guards(&opts);
     let state_path = io::state_path();
     let state = io::load_state(&state_path);
     let mut w = Watcher {
