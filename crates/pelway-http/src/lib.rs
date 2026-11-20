@@ -766,13 +766,15 @@ fn query_param(path: &str, key: &str) -> Option<String> {
 /// （素の値）と GET の `actor` が同じ人を指すため。member_id だけに使う。
 /// 最初の一致の値だけを見る（後続の同名パラメータで decode 失敗を回避させない）。
 /// 値が UTF-8 として無効なら `None` で、呼び出し側は 400 を返す。
+/// デコード後の前後の空白は削る——POST のヘッダー値解析が OWS を `trim` するため、
+/// 削らないと前後に空白を含む member_id で GET と POST が別人になる。
 fn query_param_decoded(path: &str, key: &str) -> Option<String> {
     let (_, query) = path.split_once('?')?;
     let v = query.split('&').find_map(|pair| {
         let (k, v) = pair.split_once('=')?;
         (k == key).then_some(v)
     })?;
-    pct_decode(v)
+    pct_decode(v).map(|s| s.trim().to_owned())
 }
 
 /// `%XX` をデコードする（`+` はクライアントが `%20` を送る前提で扱わない）。
@@ -1830,6 +1832,11 @@ mod tests {
         assert_eq!(
             super::query_param_decoded("/p?actor=m%FF&actor=m%2Bops", "actor"),
             None
+        );
+        // デコード後の前後の空白は削る（POST ヘッダーの OWS trim と同じ結果にする）
+        assert_eq!(
+            super::query_param_decoded("/p?actor=%20m%2Bops%20", "actor").as_deref(),
+            Some("m+ops")
         );
         // member_id 以外のパラメータは decode しない（素の `query_param` のまま）
         assert_eq!(

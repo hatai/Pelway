@@ -215,7 +215,7 @@ description = "fnox の定義一覧を確認（秘密値の取得・表示は行
 run = "fnox list"
 
 [tasks.pitchfork-check]
-description = "pitchfork のバージョン確認と、pitchfork.toml に見張り役 agent-watch と worktree の片付け agent-worktree-prune が定義されていることの確認"
+description = "pitchfork のバージョン確認と、pitchfork.toml に見張り役 agent-watch（supervisor の起動時に自動で起動する設定つき）と worktree の片付け agent-worktree-prune が定義されていることの確認"
 run = """
 pitchfork --version
 for d in agent-watch agent-worktree-prune; do
@@ -224,6 +224,10 @@ for d in agent-watch agent-worktree-prune; do
     exit 1
   fi
 done
+if ! /usr/bin/python3 -I -c 'import sys, tomllib; d = tomllib.load(open("pitchfork.toml", "rb"))["daemons"]["agent-watch"]; sys.exit(0 if d.get("boot_start") is True else 1)'; then
+  echo "pitchfork.toml の [daemons.agent-watch] に boot_start = true がありません（docs/dev-environment.md の「pitchfork について」参照）" >&2
+  exit 1
+fi
 """
 
 [tasks.deny-check]

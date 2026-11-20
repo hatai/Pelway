@@ -1,0 +1,10 @@
+action=read src=environment/fix-request.txt
+action=read src=environment/pr.json
+action=read src=environment/pr-reviews.json
+action=note text=最新レビューは DISMISSED で対象コミットは旧 head 4717dcc。reviewDecision は REVIEW_REQUIRED で、Approve は現 head 05e4239 に向いていないため無効
+action=run cmd=scripts/agent-gh dev git add docs/worklogs/issue-188.md exit=0
+action=run cmd=scripts/agent-gh dev git commit -m "docs: add implementer memo for issue 188 round 2" exit=0
+action=run cmd=scripts/agent-gh dev git push exit=0
+action=launch thread=rev-388-r3 title=PR #388 をレビューする。skill review-pr に従う。
+action=run cmd=scripts/agent-gh dev pr comment 388 --body "[review-request] head: 05e4239e25d78b1a54f000979bc4a143cc5aca51 to: codex" exit=0
+action=wait target=rev-388-r3

@@ -44,6 +44,12 @@ UIの除外表示は出力先の権限で分け、停止要求の表示は実際
 - 判定：2条件反映と自己点検がそろい、条件付き確認を充足。W02完了。新たな無条件第三者レビューは取得しておらず、更新ZIPのGrok Bot独立照合は未受領。ZIP検査は作成側の読取再検査。
 - 差分範囲：今回の補正はstatus.mdと本reportのみで、ZIPへは未梱包。ZIP一致は梱包時manifestとの一致であり、現在のworkspace全体との一致ではない。
 
+## 表示名の文字規則の追記（2026-11-19 JST）
+
+Issue #489 に基づき body/06-i18n.md へ ch06-display-name（表示名の文字規則）を新設した。body/03-ai-bot-runtime.md には正本への参照を、body/08-decisions-open.md には未決 U08（バッジ紛らわしい語の拒否範囲）を登録した。節対応（current-sections.json・section-correspondence.json・source-correspondence.md）へ新節を登録し、対応は160行から161行へ、現行見出しは130から131へ増えた。
+verify.py を再実行し static_pass=true（相対リンク440件エラー0、本文アンカー重複0、履歴コピー182件一致、元見出し・現行見出しの未対応0）。原本と凍結ZIPはこの環境に無いため not-run と記録された。
+追記は文書のみで、runtime 試験・実装・実外部I/Oの許可を意味しない。紛らわしい語の拒否範囲は U08 として未決のまま。
+
 ## 監査事象への承認回答と主体削除後の保持（2026-11-19 JST、Issue #490）
 
 03の監査節（ch03-s08）に、承認・却下・失効・取り下げの回答の監査事象への必須記録、監査行と`action_snapshot`/`approval_decision`の主体への外部キー依存の禁止（Botを外す・削除の操作での連鎖消去なし）、監査ログの仮名識別子（pseudonymous id）とhashへの限定（承認カードの本文を残さない。濱田さん決定 2026-11-19 17:23 JST）、同一transaction内の監査行の順序付け（単調な順序番号）、削除された主体を表す契約の`pelway-contract`配置を追記した。

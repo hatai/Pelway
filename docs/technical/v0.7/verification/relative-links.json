@@ -21,6 +21,50 @@
   },
   {
     "from": "body/02-stack-comparison.md",
+    "to": "../../../research/japanese-full-text-search.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../../../adr/0008-llm-provider-and-byok.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../../../research/README.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../../../competitors.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../../../adr/0006-db-queue-choice.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../../../adr/0006-db-queue-choice.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../../../adr/0005-postgres-row-level-security.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../../../adr/0008-llm-provider-and-byok.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../../../adr/0004-declared-action-tiers.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../../../adr/0007-signed-audit-checkpoints.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../../../adr/0008-llm-provider-and-byok.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
     "to": "09-sources.md"
   },
   {
@@ -33,6 +77,10 @@
   },
   {
     "from": "body/03-ai-bot-runtime.md",
+    "to": "06-i18n.md#ch06-display-name"
+  },
+  {
+    "from": "body/03-ai-bot-runtime.md",
     "to": "../sources/v0.6/fixed/pelway-technical-docs/reviews/product-v0.2.md"
   },
   {
@@ -41,11 +89,19 @@
   },
   {
     "from": "body/03-ai-bot-runtime.md",
-    "to": "08-decisions-open.md#u06"
+    "to": "../../../adr/0002-designated-approver-and-expiry.md"
+  },
+  {
+    "from": "body/03-ai-bot-runtime.md",
+    "to": "../../../adr/0009-hybrid-approval-with-preapproved-types.md"
   },
   {
     "from": "body/03-ai-bot-runtime.md",
     "to": "13-operational-defaults.md"
+  },
+  {
+    "from": "body/03-ai-bot-runtime.md",
+    "to": "../../../adr/0008-llm-provider-and-byok.md"
   },
   {
     "from": "body/03-ai-bot-runtime.md",
@@ -73,7 +129,31 @@
   },
   {
     "from": "body/06-i18n.md",
+    "to": "08-decisions-open.md#u08"
+  },
+  {
+    "from": "body/06-i18n.md",
     "to": "13-operational-defaults.md"
+  },
+  {
+    "from": "body/08-decisions-open.md",
+    "to": "../../../adr/0002-designated-approver-and-expiry.md"
+  },
+  {
+    "from": "body/08-decisions-open.md",
+    "to": "../../../adr/0009-hybrid-approval-with-preapproved-types.md"
+  },
+  {
+    "from": "body/08-decisions-open.md",
+    "to": "06-i18n.md#ch06-display-name"
+  },
+  {
+    "from": "body/08-decisions-open.md",
+    "to": "../../../research/slint-royalty-free-license.md"
+  },
+  {
+    "from": "body/08-decisions-open.md",
+    "to": "../../../adr/0008-llm-provider-and-byok.md"
   },
   {
     "from": "body/08-decisions-open.md",
@@ -141,6 +221,10 @@
   },
   {
     "from": "body/10-domestic-only.md",
+    "to": "../../../adr/0008-llm-provider-and-byok.md"
+  },
+  {
+    "from": "body/10-domestic-only.md",
     "to": "08-decisions-open.md"
   },
   {
@@ -148,8 +232,16 @@
     "to": "12-communication-secrecy.md"
   },
   {
+    "from": "body/10-domestic-only.md",
+    "to": "../../../adr/0009-hybrid-approval-with-preapproved-types.md"
+  },
+  {
     "from": "body/11-integrations.md",
     "to": "../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md"
+  },
+  {
+    "from": "body/11-integrations.md",
+    "to": "../../../adr/0009-hybrid-approval-with-preapproved-types.md"
   },
   {
     "from": "body/11-integrations.md",
@@ -1594,6 +1686,10 @@
   {
     "from": "source-correspondence.md",
     "to": "body/03-ai-bot-runtime.md#ch03-s13"
+  },
+  {
+    "from": "source-correspondence.md",
+    "to": "body/06-i18n.md#ch06-display-name"
   },
   {
     "from": "status.md",
