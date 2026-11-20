@@ -58,6 +58,9 @@ pub struct State {
     /// 送れなかった payload。次の周回で送り直す。
     #[serde(default)]
     pub outbox: Vec<serde_json::Value>,
+    /// 前回指揮役を起こしたときの受信箱の行数。指揮役の既読がここまで進むまで、重ねて起こさない。
+    #[serde(default)]
+    pub last_wake_inbox_lines: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

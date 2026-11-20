@@ -18,6 +18,9 @@ impl Sandbox {
         fs::create_dir_all(root.join("bin")).unwrap();
         fs::create_dir_all(root.join("fake")).unwrap();
         fs::create_dir_all(root.join("state/pelway")).unwrap();
+        // 共有の git dir の代わり。偽の git は既定で git-dir と git-common-dir にここを返す
+        // （本体 checkout 扱い。受信箱と補助記録は gitcommon/pelway/ の下に置かれる）
+        fs::create_dir_all(root.join("gitcommon")).unwrap();
         // 偽の t3: list は fake/list.json、show は fake/show-<id の : を _ にしたもの>.json を返す。
         // fake/t3-fail があれば終了コード 1。
         write_exec(
@@ -29,6 +32,10 @@ echo "t3 $*" >> "$F/t3-calls"
 case "$1 $2" in
   "thread list") cat "$F/list.json" ;;
   "thread show") cat "$F/show-${3//:/_}.json" ;;
+  "thread send")
+    [ -e "$F/t3-send-fail" ] && exit 1
+    echo "$3 $4" >> "$F/t3-send-args"
+    cat >> "$F/t3-send-stdin" ;;
   *) exit 2 ;;
 esac
 "#,
@@ -52,8 +59,8 @@ GD="$F/git-dir"; GC="$F/git-common-dir"; TL="$F/toplevel"
 [ -f "$PWD/toplevel" ] && TL="$PWD/toplevel"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --git-dir) cat "$GD" 2>/dev/null || echo ".git" ;;
-    --git-common-dir) cat "$GC" 2>/dev/null || echo ".git" ;;
+    --git-dir) cat "$GD" 2>/dev/null || echo "$F/../gitcommon" ;;
+    --git-common-dir) cat "$GC" 2>/dev/null || echo "$F/../gitcommon" ;;
     --show-toplevel) cat "$TL" 2>/dev/null || pwd -P ;;
   esac
   shift
@@ -65,6 +72,23 @@ done
 
     fn fake(&self, name: &str, body: &str) {
         fs::write(self.root.join("fake").join(name), body).unwrap();
+    }
+
+    fn pelway_dir(&self) -> PathBuf {
+        self.root.join("gitcommon/pelway")
+    }
+
+    fn inbox(&self) -> PathBuf {
+        self.pelway_dir().join("conductor-inbox.jsonl")
+    }
+
+    fn patrol_state(&self, body: &str) {
+        fs::create_dir_all(self.pelway_dir()).unwrap();
+        fs::write(self.pelway_dir().join("patrol-state.json"), body).unwrap();
+    }
+
+    fn read_fake(&self, name: &str) -> String {
+        fs::read_to_string(self.root.join("fake").join(name)).unwrap_or_default()
     }
 
     fn state_file(&self) -> PathBuf {
@@ -93,6 +117,8 @@ done
             .env("PELWAY_AGENT_WATCH_POLL_SECS", "0")
             .env("PATH", path)
             .env("FAKE_DIR", self.root.join("fake"))
+            // 起こしに使う t3 は偽物に向ける（この PC で動いている本物の T3 サーバーを呼ばない）
+            .env("T3_BIN", self.root.join("bin/t3"))
             .env("XDG_STATE_HOME", self.root.join("state"));
         cmd
     }
@@ -480,4 +506,263 @@ fn main_checkout_starts_and_lock_is_owner_only() {
     assert!(sb.state_file().exists(), "state file was not written");
     let mode = fs::metadata(sb.lock_file()).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600, "mode {mode:o}");
+}
+
+// ---- 指揮役の受信箱と起こし（Issue #555） ----
+
+/// 5 種の知らせ（finished・failed・cancelled・waiting・stalled）がそろう一覧と詳細。
+/// d は承認待ち（waiting）で、更新が古いので stalled も出る。e は更新が古いまま実行中（stalled）。
+const LIST_FIVE: &str = r#"[{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"},
+  {"threadId":"mcp:b","status":"failed","updatedAt":"2026-11-10T16:10:00Z"},
+  {"threadId":"mcp:c","status":"cancelled","updatedAt":"2026-11-10T16:10:00Z"},
+  {"threadId":"mcp:d","status":"running","updatedAt":"2026-11-10T16:10:00Z"},
+  {"threadId":"mcp:e","status":"running","updatedAt":"2026-11-10T16:00:00Z"}]"#;
+
+const STATE_FIVE_RUNNING: &str = r#"{"initialized":true,"threads":{
+  "mcp:a":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:b":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:c":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:d":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:e":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null}},
+  "ci_notified":{}}"#;
+
+fn show(id: &str, status: &str, updated: &str, pending: u32) -> String {
+    format!(
+        r#"{{"thread":{{"threadId":"{id}","status":"{status}","updatedAt":"{updated}","branch":"agent/80-x",
+  "providerInstanceId":"opencode","model":"m","runCount":1,"pendingRequestCount":{pending},"link":"l"}},
+  "messages":[{{"role":"assistant","text":"state: working\nhead: none\nnext: 手順 4"}}]}}"#
+    )
+}
+
+/// 5 種の知らせがそろう状況を作る。
+fn five_events(sb: &Sandbox) {
+    sb.fake("list.json", LIST_FIVE);
+    sb.fake(
+        "show-mcp_a.json",
+        &show("mcp:a", "completed", "2026-11-10T16:10:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "failed", "2026-11-10T16:10:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_c.json",
+        &show("mcp:c", "cancelled", "2026-11-10T16:10:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_d.json",
+        &show("mcp:d", "running", "2026-11-10T16:10:00Z", 1),
+    );
+    sb.fake(
+        "show-mcp_e.json",
+        &show("mcp:e", "running", "2026-11-10T16:00:00Z", 0),
+    );
+    fs::write(sb.state_file(), STATE_FIVE_RUNNING).unwrap();
+}
+
+/// 1 件の知らせ（a の finished）が出る状況を作る。
+fn one_event(sb: &Sandbox) {
+    sb.fake("list.json", LIST_DONE);
+    sb.fake("show-mcp_a.json", SHOW_A_DONE);
+    fs::write(sb.state_file(), STATE_A_RUNNING).unwrap();
+}
+
+fn inbox_events(sb: &Sandbox) -> Vec<serde_json::Value> {
+    fs::read_to_string(sb.inbox())
+        .unwrap_or_default()
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("each inbox line is one JSON value"))
+        .collect()
+}
+
+fn stderr(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).to_string()
+}
+
+#[test]
+fn inbox_appends_every_event() {
+    let sb = Sandbox::new("inbox-every");
+    five_events(&sb);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let events = inbox_events(&sb);
+    let kinds: std::collections::BTreeSet<String> = events
+        .iter()
+        .map(|e| e["event"].as_str().unwrap().to_string())
+        .collect();
+    for k in ["finished", "failed", "cancelled", "waiting", "stalled"] {
+        assert!(kinds.contains(k), "{k} is missing: {kinds:?}");
+    }
+    // webhook と同じ形（schema と report を含む）
+    assert!(
+        events
+            .iter()
+            .all(|e| e["schema"] == "pelway.agent-watch/v1")
+    );
+    let mode = fs::metadata(sb.inbox()).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+}
+
+#[test]
+fn inbox_written_when_webhook_fails() {
+    // 偽の fnox は秘密を返さないので、webhook には送れない（送信待ちの列に残る）
+    let sb = Sandbox::new("inbox-webhook-fails");
+    one_event(&sb);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(stderr(&out).contains("mode=not-sent"));
+    let events = inbox_events(&sb);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["event"], "finished");
+    assert!(events[0]["report"].as_str().unwrap().contains("issue: #80"));
+}
+
+#[test]
+fn inbox_failure_does_not_stop_watch() {
+    // pelway の位置に通常のファイルを置いて、受信箱を作れなくする（権限ではなく構造で失敗させる）
+    let sb = Sandbox::new("inbox-fails");
+    one_event(&sb);
+    fs::write(sb.pelway_dir(), "not a directory").unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let err = stderr(&out);
+    assert_eq!(err.matches("inbox append failed").count(), 1, "{err}");
+    // webhook の処理（送信待ちの列）と状態の保存は続く
+    assert!(err.contains("mode=not-sent"), "{err}");
+    let state = fs::read_to_string(sb.state_file()).unwrap();
+    assert!(state.contains("\"outbox\":[{"), "{state}");
+}
+
+#[test]
+fn wake_sent_to_registered_conductor() {
+    let sb = Sandbox::new("wake-sent");
+    one_event(&sb);
+    sb.patrol_state(r#"{"conductor_thread_id":"mcp:conductor-1","inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(sb.read_fake("t3-send-args").trim(), "mcp:conductor-1 -");
+    assert_eq!(
+        sb.read_fake("t3-send-stdin"),
+        pelway_agent_watch::inbox::WAKE_MESSAGE
+    );
+    // 起こしの文に知らせの中身（report）を含めない
+    assert!(!sb.read_fake("t3-send-stdin").contains("issue: #80"));
+    assert!(stderr(&out).contains("WAKE sent"));
+}
+
+#[test]
+fn no_wake_without_conductor() {
+    let sb = Sandbox::new("wake-none");
+    one_event(&sb);
+    sb.patrol_state(r#"{"conductor_thread_id":"","inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 1);
+    assert!(sb.read_fake("t3-send-args").is_empty());
+
+    // 項目そのものが無いときも起こさない
+    let sb = Sandbox::new("wake-none-missing");
+    one_event(&sb);
+    sb.patrol_state(r#"{"subjects":{}}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(sb.read_fake("t3-send-args").is_empty());
+}
+
+#[test]
+fn no_repeat_wake_until_read() {
+    let sb = Sandbox::new("wake-repeat");
+    one_event(&sb);
+    sb.patrol_state(r#"{"conductor_thread_id":"mcp:conductor-1","inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(sb.read_fake("t3-send-args").lines().count(), 1);
+
+    // 次の知らせ（b の finished）。指揮役はまだ受信箱を読んでいない（inbox_offset は 0 のまま）
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"},
+  {"threadId":"mcp:b","status":"completed","updatedAt":"2026-11-10T16:20:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "completed", "2026-11-10T16:20:00Z", 0),
+    );
+    let mut state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
+    state["threads"]["mcp:b"]["status"] = "running".into();
+    fs::write(sb.state_file(), state.to_string()).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 2);
+    assert_eq!(sb.read_fake("t3-send-args").lines().count(), 1);
+
+    // 指揮役が 1 行目まで読んだ（前回の起こしの時点まで既読が進んだ）あとの知らせでは、また起こす
+    sb.patrol_state(r#"{"conductor_thread_id":"mcp:conductor-1","inbox_offset":1}"#);
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"},
+  {"threadId":"mcp:b","status":"failed","updatedAt":"2026-11-10T16:30:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    let mut state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
+    state["threads"]["mcp:b"]["status"] = "running".into();
+    fs::write(sb.state_file(), state.to_string()).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(sb.read_fake("t3-send-args").lines().count(), 2);
+}
+
+#[test]
+fn unreadable_patrol_state_skips_wake() {
+    let sb = Sandbox::new("wake-unreadable");
+    one_event(&sb);
+    // 書きかけで途中までしかない補助記録
+    sb.patrol_state(r#"{"conductor_thread_id":"mcp:conductor-1","inbox_off"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 1);
+    assert!(stderr(&out).contains("mode=not-sent"));
+    assert!(sb.read_fake("t3-send-args").is_empty());
+}
+
+#[test]
+fn wake_failure_is_logged_once() {
+    let sb = Sandbox::new("wake-fails");
+    one_event(&sb);
+    sb.patrol_state(r#"{"conductor_thread_id":"mcp:conductor-1","inbox_offset":0}"#);
+    sb.fake("t3-send-fail", "");
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let err = stderr(&out);
+    assert_eq!(err.matches("WAKE failed").count(), 1, "{err}");
+    // 失敗した起こしは記録しない（次の新しい知らせで改めて試みる）
+    let state = fs::read_to_string(sb.state_file()).unwrap();
+    assert!(state.contains("\"last_wake_inbox_lines\":null"), "{state}");
+}
+
+#[test]
+fn invalid_conductor_thread_id_is_not_used() {
+    let sb = Sandbox::new("wake-invalid-id");
+    one_event(&sb);
+    sb.patrol_state(r#"{"conductor_thread_id":"--help","inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    assert!(stderr(&out).contains("WAKE skipped reason=invalid-thread-id"));
+}
+
+#[test]
+fn dry_run_writes_no_inbox_and_no_wake() {
+    let sb = Sandbox::new("inbox-dry-run");
+    one_event(&sb);
+    sb.patrol_state(r#"{"conductor_thread_id":"mcp:conductor-1","inbox_offset":0}"#);
+    let out = sb.run();
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(!sb.inbox().exists());
+    assert!(sb.read_fake("t3-send-args").is_empty());
 }

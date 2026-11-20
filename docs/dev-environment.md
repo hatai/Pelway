@@ -641,7 +641,7 @@ container run --rm alpine echo hello   # hello 程度の smoke
 ## pitchfork について
 
 - ツールは mise で 2.33.1 に固定する。
-- `pitchfork.toml` には AI 開発チームの見張り役 `agent-watch`（`crates/pelway-agent-watch`）と、worktree の片付け `agent-worktree-prune` を定義する。`agent-watch` は T3 のスレッドの状態変化を Grok Bot の webhook に通知する常駐プロセスで、仕様は `docs/superpowers/specs/agent-team.md`「見張り役と通知」。
+- `pitchfork.toml` には AI 開発チームの見張り役 `agent-watch`（`crates/pelway-agent-watch`）と、worktree の片付け `agent-worktree-prune` を定義する。`agent-watch` は T3 のスレッドの状態変化を Grok Bot の webhook に通知し、同じ知らせを指揮役の受信箱に書いて、いまの指揮役のスレッドを起こす常駐プロセスで、仕様は `docs/superpowers/specs/agent-team.md`「見張り役と通知」。
 - `agent-worktree-prune` は cron（毎時 0 分）で `scripts/agent-worktree-prune --auto` を走らせる。消すのは `~/.t3/worktrees/Pelway` の下の、settle されたスレッドの（またはスレッドの無い）worktree のうち、main に取り込み済みか PR がマージ済み・クローズ済みのもの。未追跡のファイルは捨て、追跡ファイルに変更が残るものは残す。T3 に問い合わせられない回は何も消さない。消したあとに `git worktree prune`・`git fetch --prune origin`・`mbx gc` を走らせる。pitchfork の supervisor が動いていれば、`pitchfork start` しなくても cron で動く。supervisor は各 worktree の `pitchfork.toml` の cron も動かすが、`--auto` は main の checkout 以外では何もせずに終わり、同時に 2 つは走らない（`$XDG_STATE_HOME/pelway/agent-worktree-prune.lock`）。
 
   | コマンド | 内容 |
@@ -663,7 +663,13 @@ container run --rm alpine echo hello   # hello 程度の smoke
 
 - 状態は `$XDG_STATE_HOME/pelway/agent-watch.json`（未設定なら `~/.local/state/pelway/agent-watch.json`）に置く。初めて起動したときは既存のスレッドを記録するだけで、通知しない。送れなかった通知は状態の送信待ちの列に残り、次の周回で送り直す。
 - 起動してよいのは本体 checkout だけ。worktree にも同じ `pitchfork.toml` の定義があるが、worktree から起動されたときは起動元（実行時のカレントディレクトリ）の `git rev-parse --git-dir` と `--git-common-dir` の差で検出して理由を 1 行ログに出して終わる。見張り対象の `--project` が起動元の checkout の toplevel と一致しないときも、本体から別の checkout を見張る起動になるため同じく理由を 1 行出して終わる。同時に動かせるのは 1 つだけで、状態ディレクトリの `agent-watch.lock`（0600）を flock で取り、取れなければ理由を 1 行出して終わる（いずれも終了コード 0。agent-worktree-prune と同じ決まり。拒否のログにはパスの種類だけを書き、中身や環境変数は出さない）。
-- 送らずに試すには `cargo run -p pelway-agent-watch -- --once --dry-run`（新しいイベントの payload を標準出力に出す。状態ファイルは読むだけで書き換えない）。
+- 指揮役の受信箱と起こし（Issue #555）: 知らせを出すたびに、webhook と同じ JSON を共有の git dir の `pelway/conductor-inbox.jsonl` に 1 行ずつ追記する（形は `docs/agents/notify-payloads.md` の「指揮役の受信箱」）。受信箱に書けなくても webhook の送信と見張りは続け、ログに 1 行残す。追記のあと、次の順で指揮役を起こす。
+  - 宛先は、同じ `pelway/` の `patrol-state.json` の `conductor_thread_id`（代行の指揮役が開始のときに書き、終了のときに空にする）を毎回読み直す。ファイルが無い・項目が空なら起こさない。読めない（書きかけ・壊れている）ときはその回は起こさず、`WAKE skipped reason=patrol-state-unreadable` を 1 行残す。値の先頭が `-`、または英数字と `:`・`_`・`-`・`.`・`%` 以外を含む、または 256 文字を超えるときは使わない（`WAKE skipped reason=invalid-thread-id`）。
+  - 前回起こしたときの受信箱の行数を状態ファイル（`last_wake_inbox_lines`）に持ち、指揮役の既読（`patrol-state.json` の `inbox_offset`）がそこまで進んでいなければ重ねて起こさない（`WAKE skipped reason=not-yet-read`）。
+  - 送るのは決まった文だけで（`t3 thread send <スレッド> -`、本文は標準入力。知らせの中身は含めない）、実行中のスレッドには次のターンとして届く。使う `t3` は、`T3_BIN` が指定されていればそれ、無ければ動いている T3 サーバー（`~/.t3/wsl-runtime/` の下）と同じ実行ファイル、それも無ければ PATH の `t3`（`scripts/conductor-watch.sh` と同じ規則。PATH の `t3` は `ServerOwnsDatabaseError` で拒まれることがあるため）。
+  - 送れなかったら `WAKE failed exit=<終了コード>` を 1 行残すだけで送り直さず、次の新しい知らせで改めて試みる。知らせは受信箱に残り、指揮役の巡回が読む。
+  - `patrol-state.json` は sandbox の中の指揮役が書けるので、`inbox_offset` を書き換えれば重ねての起こしの抑止は外れる。その場合も送られるのは、決まった文を登録された 1 つのスレッドへ、知らせ 1 件につき最大 1 回だけである。
+- 送らずに試すには `cargo run -p pelway-agent-watch -- --once --dry-run`（新しいイベントの payload を標準出力に出す。状態ファイルは読むだけで書き換えず、受信箱にも書かず、起こしも送らない）。
 - 再起動のあとの自動起動: `pitchfork.toml` の `agent-watch` には `boot_start = true` を付けてあり、login 時に起動する pitchfork の supervisor（`pitchfork supervisor run --boot`）が agent-watch を起動する。起動時の supervisor は作業ディレクトリを持たず、読むのはユーザーの設定（`~/.config/pitchfork/config.toml`）と、その `[namespaces]` に登録されたプロジェクト（とその全 worktree）の `pitchfork.toml` だけなので、次の 2 つを PC 側で入れておく。どちらもリポジトリの外の設定で、hatai が OK のうえで手で行う。
   1. supervisor の login 時の起動を登録する: `pitchfork boot enable`（sudo なし。`~/.config/systemd/user/pitchfork.service` ができる）。`pitchfork boot status` が `Boot start is enabled` になれば済み。
   2. 本体 checkout を namespace として登録する: `~/.config/pitchfork/config.toml` に次を書く（`dir` は本体 checkout の絶対パス。`git worktree list` の 1 行目）。

@@ -324,3 +324,85 @@ fn send_once(payload: &Value, project: &Path) -> SendResult {
         Err(e) => SendResult::Failed(format!("curl: {e}")),
     }
 }
+
+/// 受信箱に、1 件 1 行で追記する（ファイルは 0600。1 行を 1 回の書き込みで書く）。
+/// 書いたあとの受信箱の行数を返す。
+pub fn append_inbox(path: &Path, lines: &[String]) -> Result<u64, String> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| e.to_string())?;
+    for line in lines {
+        let mut buf = line.clone();
+        buf.push('\n');
+        file.write_all(buf.as_bytes()).map_err(|e| e.to_string())?;
+    }
+    let text = fs::read(path).map_err(|e| e.to_string())?;
+    Ok(text.iter().filter(|&&b| b == b'\n').count() as u64)
+}
+
+/// 指揮役の補助記録（`patrol-state.json`）を読む。
+pub fn read_text(path: &Path) -> Result<String, String> {
+    fs::read_to_string(path).map_err(|e| e.to_string())
+}
+
+/// 起こしに使う `t3` の実行ファイル。`T3_BIN` が指定されていればそれ、無ければ動いている
+/// T3 サーバー（`~/.t3/wsl-runtime/` の下）と同じ実行ファイル、それも無ければ PATH の `t3`。
+/// PATH の `t3` は版が同じでも、サーバーが持つ `~/.t3/userdata` を `ServerOwnsDatabaseError` で
+/// 拒まれることがあるため（`scripts/conductor-watch.sh` の `T3_BIN` の解決と同じ規則）。
+pub fn wake_t3_bin() -> PathBuf {
+    if let Some(bin) = std::env::var_os("T3_BIN").filter(|v| !v.is_empty()) {
+        return PathBuf::from(bin);
+    }
+    if let Ok(entries) = fs::read_dir("/proc") {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if !name.to_string_lossy().bytes().all(|b| b.is_ascii_digit()) {
+                continue;
+            }
+            if let Ok(link) = fs::read_link(entry.path().join("exe")) {
+                let s = link.to_string_lossy();
+                if s.contains("/.t3/wsl-runtime/") && s.ends_with("/t3") {
+                    return link;
+                }
+            }
+        }
+    }
+    PathBuf::from("t3")
+}
+
+/// 指揮役のスレッドへ決まった文を送る（`t3 thread send <thread> -`。本文は標準入力）。
+/// 実行中のスレッドには次のターンとして届き、割り込まない。ログに出すのは終了コードだけ。
+pub fn wake(bin: &Path, thread_id: &str, message: &str) -> Result<(), String> {
+    let child = Command::new("timeout")
+        .arg(COMMAND_TIMEOUT_SECS)
+        .arg(bin)
+        .args(["thread", "send", thread_id, "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("spawn: {}", e.kind()))?;
+    let mut child = child;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(message.as_bytes())
+            .map_err(|e| format!("stdin: {}", e.kind()))?;
+    }
+    let status = child.wait().map_err(|e| format!("wait: {}", e.kind()))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "exit={}",
+            status
+                .code()
+                .map_or_else(|| "signal".to_string(), |c| c.to_string())
+        ))
+    }
+}

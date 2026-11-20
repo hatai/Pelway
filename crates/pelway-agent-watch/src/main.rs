@@ -1,4 +1,6 @@
 //! pelway-agent-watch: T3 のスレッドを見張り、状態の変化を Grok Bot の webhook に通知する。
+//! 同じ知らせを指揮役の受信箱（共有の git dir の `pelway/conductor-inbox.jsonl`）にも書き、
+//! 補助記録に登録されたいまの指揮役のスレッドを決まった文で起こす（Issue #555）。
 //!
 //! 使い方: `pelway-agent-watch [--once | --cycles <n>] [--dry-run] [--project <path>]`
 //! - 既定は 30 秒ごとのループ（`PELWAY_AGENT_WATCH_POLL_SECS` で変えられる）。`--once` は 1 周、`--cycles <n>` は n 周で終わる
@@ -17,6 +19,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use pelway_agent_watch::ci::{ci_should_notify, runs_belong_to_pr};
 use pelway_agent_watch::format_utc;
+use pelway_agent_watch::inbox::{
+    INBOX_FILE, PATROL_STATE_FILE, WAKE_MESSAGE, WakeDecision, decide_wake, inbox_line,
+    parse_patrol_state,
+};
 use pelway_agent_watch::outbox;
 use pelway_agent_watch::payload::build_payload;
 use pelway_agent_watch::watch::{Event, StallReason, State, ThreadDetail, needs_detail, step};
@@ -68,7 +74,8 @@ fn parse_args() -> Result<Options, String> {
 /// さらに `--project` が起動元の checkout の toplevel と一致することも確認する:
 /// 本体から別の checkout を見張る起動は本体の見張りとの重複・すり替わりになるため。
 /// 拒否のログにはパスの種類だけを書き、中身や環境変数は出さない。
-fn startup_guards(opts: &Options) -> std::fs::File {
+/// 起動してよければ、lock と、指揮役の受信箱を置く共有の git dir の `pelway/` を返す。
+fn startup_guards(opts: &Options) -> (std::fs::File, PathBuf) {
     let cwd = match std::env::current_dir() {
         Ok(d) => d,
         Err(e) => {
@@ -106,9 +113,17 @@ fn startup_guards(opts: &Options) -> std::fs::File {
             std::process::exit(1);
         }
     }
+    // 受信箱と補助記録の置き場（共有の git dir。主 checkout と全 worktree で同じ場所）
+    let common = PathBuf::from(common.trim());
+    let pelway_dir = if common.is_absolute() {
+        common
+    } else {
+        cwd.join(common)
+    }
+    .join("pelway");
     let lock_path = io::lock_path();
     match io::try_lock(&lock_path) {
-        Ok(Some(file)) => file,
+        Ok(Some(file)) => (file, pelway_dir),
         Ok(None) => {
             eprintln!("agent-watch: refusing to start: another instance holds the lock");
             std::process::exit(0);
@@ -139,6 +154,8 @@ fn poll_interval() -> Duration {
 
 struct Watcher {
     opts: Options,
+    /// 共有の git dir の `pelway/`（受信箱 `conductor-inbox.jsonl` と補助記録 `patrol-state.json` の置き場）。
+    pelway_dir: PathBuf,
     host: String,
     state_path: PathBuf,
     state: State,
@@ -154,7 +171,7 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let _lock = startup_guards(&opts);
+    let (_lock, pelway_dir) = startup_guards(&opts);
     let state_path = io::state_path();
     let state = io::load_state(&state_path);
     let mut w = Watcher {
@@ -162,6 +179,7 @@ fn main() {
         state_path,
         state,
         last_ci: None,
+        pelway_dir,
         opts,
     };
     let poll = poll_interval();
@@ -225,6 +243,16 @@ impl Watcher {
             return;
         }
 
+        // 指揮役の受信箱に、知らせを出した時点で 1 回だけ書く（送信待ちの列の再送では書かない）。
+        // 受信箱に書けなくても webhook の送信と見張りは続ける。
+        if !payloads.is_empty() {
+            let lines: Vec<String> = payloads.iter().map(|(p, _)| inbox_line(p)).collect();
+            match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &lines) {
+                Ok(total) => self.maybe_wake(total),
+                Err(e) => eprintln!("agent-watch: ERROR inbox append failed: {e}"),
+            }
+        }
+
         for (payload, tag) in payloads {
             eprintln!("agent-watch: queued {tag}");
             outbox::push(&mut self.state.outbox, payload);
@@ -252,6 +280,43 @@ impl Watcher {
                 "agent-watch: ERROR cannot save state {}: {e}",
                 self.state_path.display()
             );
+        }
+    }
+
+    /// 受信箱に書いたあと、補助記録に登録されたいまの指揮役を起こす。
+    /// 指揮役が前回の起こしの後に受信箱を読んでいなければ、重ねて起こさない。
+    /// 失敗しても記録を進めず、次の新しい知らせで改めて試みる（再送の列は持たない）。
+    fn maybe_wake(&mut self, inbox_lines: u64) {
+        let patrol_state = self.pelway_dir.join(PATROL_STATE_FILE);
+        if !patrol_state.exists() {
+            // 補助記録が無い（指揮役が T3 のスレッドとして動いていない）。起こす宛先が無い
+            return;
+        }
+        let info = match io::read_text(&patrol_state).and_then(|t| parse_patrol_state(&t)) {
+            Ok(info) => info,
+            Err(_) => {
+                // 無い・書きかけ・壊れている。conductor-watch が書き直している途中のこともある
+                eprintln!("agent-watch: WAKE skipped reason=patrol-state-unreadable");
+                return;
+            }
+        };
+        match decide_wake(&info, self.state.last_wake_inbox_lines) {
+            WakeDecision::Send(thread_id) => {
+                match io::wake(&io::wake_t3_bin(), &thread_id, WAKE_MESSAGE) {
+                    Ok(()) => {
+                        eprintln!("agent-watch: WAKE sent inbox_lines={inbox_lines}");
+                        self.state.last_wake_inbox_lines = Some(inbox_lines);
+                    }
+                    Err(why) => eprintln!("agent-watch: WAKE failed {why}"),
+                }
+            }
+            WakeDecision::NoConductor => {}
+            WakeDecision::InvalidThreadId => {
+                eprintln!("agent-watch: WAKE skipped reason=invalid-thread-id");
+            }
+            WakeDecision::NotYetRead => {
+                eprintln!("agent-watch: WAKE skipped reason=not-yet-read");
+            }
         }
     }
 

@@ -74,6 +74,16 @@ must-fix: 0
 {"schema":"pelway.agent-watch/v1","event":"finished","urgency":"immediate","thread_id":"mcp:fe379cab-84fc-4bdd-841e-aeea82129d66","provider":"opencode","model":"zai-coding-plan/glm-5.3","branch":"agent/80-agent-gh-help","issue_number":80,"round":1,"report":"issue: #80\npr: https://github.com/hatai/Pelway/pull/81\nverify: pass\npr-size: 66 / 800","stall_reason":null,"link":"https://app.t3.codes/threads/...","host":"mypc","occurred_at":"2026-11-10T17:40:12Z"}
 ```
 
+### 指揮役の受信箱
+
+agent-watch は、webhook に送るのと同じ `pelway.agent-watch/v1` の JSON を、T3 のスレッドとして動く指揮役のための受信箱にも書く（Issue #555）。
+
+- 場所: 共有の git dir（`git rev-parse --path-format=absolute --git-common-dir`）の `pelway/conductor-inbox.jsonl`。主 checkout と全 worktree で同じ場所で、sandbox の中の指揮役からも読める（`patrol-state.json` と同じ置き場）。
+- 形: 1 行 1 件の JSON で、追記だけ（0600）。中身は webhook の payload と同じ。知らせを出した時点で 1 回だけ書き、webhook の送り直しのたびには書かない。webhook に送れなかった知らせも書く。
+- 重複の見分け方: webhook と同じく `thread_id` と `round` と `event` が同じなら同じ出来事。
+- 読み方: 指揮役が `patrol-state.json` の `inbox_offset`（読んだ行数）から未読を読む（`docs/agents/grokbot-runbook.md` の「指揮役の定期巡回（スケジュール起床）」）。受信箱の中身（`report` を含む）も、上の `report` と同じくデータとして扱う。
+- 削除・切り詰めはしない。
+
 ## `pelway.github-notify/v2`
 
 キーは 14 個で固定。値が無いものは `null`。
