@@ -42,3 +42,20 @@
 5. 改善案: `.agents/skills/command-team/SKILL.md` の「マージ」の pr-size の例外に、「例外を認めた後に修正 round で行数が増えたときは、指揮役か hatai がコメントで改めて認める」を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 4）
+
+対象 head: 1f1da91d59dfc08ae75bcc294ae039b64c5ee2b2
+
+1. 詰まった箇所: round 3 のレビュー（Codex `gpt-6.2-sol` max）に must-fix 4 件が残った。hatai の判断で、4 回目の修正として直した（Issue #555 のコメント）。直したことは次の 4 つ。
+   - 指揮役自身の知らせだけの回は起こさない（own-event）。
+   - 補助記録が無いときは起こさない。
+   - 改行の無い断片を、追記の前に閉じる。
+   - webhook の失敗の試験を、偽の秘密と HTTP 500 の偽の curl で強めた。
+   Claude の round 3 は head 1f1da91 を見て、CI の `test (cargo test)` の失敗を must-fix にした。ログ（`PR_DIGEST_LOG_LINES=3000 pr-digest 561 --logs 136409713448`）では、落ちたのは `scripts/demo-check/selftest.sh` の「loopback: allowed+bad bind (exit 124, reports 0)」（時間切れ）で、この PR の変更と関係が無い。前の head と main では同じジョブが通っていて、手元でも通る。
+2. 曖昧だった文: 「一時的な失敗なら、再実行で pass を確かめる」（PR #561 round 3 の Claude のレビュー）— 実装担当の App には run の再実行の権限が無い（`run rerun` は「Resource not accessible by integration」）。そこで、このメモのコミットの push で CI を走らせ直す。
+3. 仮定と解釈: Claude の nit 9 件は直していない（implement-issue の「nit は直さない」）。ただし、PR 本文が round 3 より前の設計のまま、という指摘は事実の食い違いなので、本文を今の設計（宛先はホストの登録ファイル、補助記録は既読の位置）に書き直した。
+4. 足りなかった情報・検証手段: `scripts/demo-check/selftest.sh` の時間切れの原因（CI の負荷か、試験の待ち時間の短さか）は調べていない。
+5. 改善案: `.agents/skills/pr-watch/SKILL.md` の「`--logs`」の説明に「出すのは末尾の `PR_DIGEST_LOG_LINES`（既定 80）行だけ。落ちた試験が前の方にあるときは値を大きくする」を足す。
+
+使ったスキル: implement-issue、pr-watch（`.agents/skills/pr-watch/SKILL.md`）
