@@ -23,3 +23,10 @@
 5. 改善案: `docs/worklogs/gh-notify-samples/check.sh` の gate_decision 節に、workflow の `Send notification` step 名を変えたら dedup の照合（step 名を文字列で参照）も壊れる旨を 1 行足す（step 名依存は暗黙の結合点のため）。
 
 使ったスキル: `implement-issue`（`.agents/skills/implement-issue`）。輸入スキル `tdd` は試行の指定がないため未使用。
+
+## 実装者メモ（round 2 の QA 送り返し対応）
+
+指揮役（代行）からの修正指示への対応。push しない前提は変わらない。
+
+- must-fix（job concurrency）: `notify-<PR>-<sha>` のグループは pull_request_review など全イベントに効き、同一グループで待てるのは 1 run だけのため続く run の保留中が取り消され通知が落ちていた。QA の案どおり `github.event.action == 'synchronize'` のときだけ `notify-<PR>-<sha>` グループにし、他イベントは `github.run_id` 単位に変更。コメントも「同じ sha の synchronize が重なったとき待っていた古い run が取り消されるのは dedup 対象同士なので許容」に合わせて修正。nit として照合が `per_page=100` の 1 ページまでしか見ないことをコメントに明記。
+- `git merge origin/main`: この worktree は exec sandbox で `/home` が ro マウント（`/home/hatai/repos/hatai/Pelway` のみ rw bind）のため通常の merge checkout が EROFS で失敗した。代わりに `git merge-tree --write-tree`（コンフリクトなし）+ `commit-tree` + `update-ref` で merge コミットを作り、`reset --mixed` で index を新 HEAD に合わせた。worktree のファイルは read-only のため pre-merge の内容のまま残っており、`git status` は main で変更されたファイルを未反映の差分として表示する（コミット上の内容は正しい。人間の環境なら `git status` どおりに書き戻せる）。`git diff origin/main...HEAD --name-only` で差分が実装対象の 9 ファイルだけであることを確認済み。
