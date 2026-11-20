@@ -3,7 +3,7 @@
 
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -109,6 +109,61 @@ pub fn state_path() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| home().join(".local/state"));
     base.join("pelway/agent-watch.json")
+}
+
+/// `--git-dir`・`--git-common-dir`・`--show-toplevel`（絶対パス）。
+/// 前二者が等しければ本体 checkout、違えば linked worktree（agent-worktree-prune と同じ判定）。
+/// toplevel は `--project` が起動元の checkout を指すかの照合に使う。
+pub fn git_dirs(project: &Path) -> Result<(String, String, String), String> {
+    let out = run(
+        "git",
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-dir",
+            "--git-common-dir",
+            "--show-toplevel",
+        ],
+        project,
+    )?;
+    let mut lines = out.lines();
+    let (Some(dir), Some(common), Some(toplevel)) = (lines.next(), lines.next(), lines.next())
+    else {
+        return Err("git rev-parse: unexpected output".to_string());
+    };
+    Ok((dir.to_string(), common.to_string(), toplevel.to_string()))
+}
+
+/// 状態ディレクトリの lock ファイル。二重起動の判定に使う。
+pub fn lock_path() -> PathBuf {
+    state_path().with_file_name("agent-watch.lock")
+}
+
+/// lock ファイル（0600）を flock（LOCK_EX | LOCK_NB）で取る。
+/// 取れたら File を返す（持っている間ロックが効く）。別プロセスが持っていれば Ok(None)。
+pub fn try_lock(path: &Path) -> Result<Option<fs::File>, String> {
+    use std::os::unix::io::AsRawFd;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| e.to_string())?;
+    // create(true) では既存ファイルの権限が変わらないので、0600 に揃え直す
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if rc == 0 {
+        return Ok(Some(file));
+    }
+    let err = std::io::Error::last_os_error();
+    if err.raw_os_error() == Some(libc::EWOULDBLOCK) {
+        return Ok(None);
+    }
+    Err(err.to_string())
 }
 
 /// 状態ファイルを読む。無ければ初回扱い、壊れていればログに残して初回扱いにする。
