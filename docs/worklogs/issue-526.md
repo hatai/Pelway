@@ -2,7 +2,7 @@
 
 ## 実装者メモ（round 1）
 
-対象 head: e8eb80fe7ba8feaddf849413cb1138e7ad779095
+対象 head: 31f00125f9075da615349ee15429668503c72d44（#555 の起こしと runbook の「転送スクリプトは使わない」の項の食い違いを直す追記を含む）
 
 1. 詰まった箇所: `mise run verify` の script-test: `scripts/tests/settle-procedure-docs.test.sh` の条件 4 が、置き換えた runbook の文「次のラウンドに置き換わった前ラウンドのレビュースレッド」を固定していて落ちた。新しい settle の条件 3 の文を確かめる形に向け直した。`scripts/tests/conductor-compaction-docs.test.sh` の「巡回 20 回以上」も同じく 75 回に直した。
 2. 曖昧だった文: 「#548 が未マージの間は、この Issue に着手しない」（Issue #526 の背景・前提）— hatai の「次の Issue に着手して」を新しい指示として扱い、#548 の PR #558 のブランチに積む PR にした（状態の行の語彙を参照するため、#548 の内容の上に書く）。
