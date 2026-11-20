@@ -116,7 +116,7 @@ app_token() {
   # key_file・err_file は local にしない: EXIT trap の実行時には local 変数のスコープが既に
   # 終わっており ${key_file:-} が空に展開されるため、消すべきパスが trap に届かない。
   # グローバルなら subshell 内の trap から見える。
-  local app_id installation_id key response token rc err_first ext_list key_lines key_frags kl
+  local app_id installation_id key response token rc err_first ext_rc key_lines key_frags kl
   app_id="$(secret "$1")"
   installation_id="$(secret "$2")"
   key="$(secret "$3")"
@@ -151,16 +151,20 @@ app_token() {
     else
       echo "agent-gh: GitHub App のトークンを発行できません（gh token generate が失敗、stderr なし・終了コード $rc）" >&2
     fi
-    # 「拡張が必要」の文は gh extension list が成功して Link-/gh-token が無いときだけ出す。
-    # list 自体が失敗したら有無は分からないので出さない（#520）。
-    # 実出力（コマンド置換 = 非 TTY なのでタブ区切り・ヘッダーなし）は
-    #   NAME \t REPO \t VERSION
-    # の順。NAME は「gh <コマンド名>」（gh-token 拡張では "gh token"）でスペースを含むため、
-    # 区切りはタブに限定し（awk の既定区切りだと NAME のスペースでも割れる）、拡張の有無は
-    # REPO 欄（タブ区切りの第 2 フィールド）とリポジトリ名の完全一致で判定する
-    # （cli/cli pkg/cmd/extension/command.go・go-gh tableprinter の非 TTY = TSV 出力による）。
-    if ext_list="$(gh extension list 2>/dev/null)"; then
-      awk -F'\t' '{print $2}' <<<"$ext_list" | grep -qx 'Link-/gh-token' || echo "agent-gh: gh extension install Link-/gh-token が必要です" >&2
+    # 「拡張が必要」の文は、gh token --help が成功する（= gh-token 拡張が gh token
+    # コマンドを提供している）ときは出さない。gh extension list は空の GH_CONFIG_DIR
+    # （gh_isolated_config）では認証チェックに引っかかって常に失敗するため使えない
+    # （cli/cli root.go の CheckAuth。実測: 空 GH_CONFIG_DIR で exit 4）。
+    # gh token --help はヘルプ表示のため認証の門を通らない（実測 2026-11-20:
+    # 拡張あり exit 0 / 拡張なし unknown command で exit 1 / gh 無し exit 127）。
+    # 126/127 は bash 標準の「コマンドを起動できなかった」終了コードなので、
+    # 「拡張が無い」とは別の案内を出す（誤った install 案内を防ぐ）。
+    ext_rc=0
+    gh token --help >/dev/null 2>&1 || ext_rc=$?
+    if ((ext_rc == 126 || ext_rc == 127)); then
+      echo "agent-gh: gh が起動できません（PATH を確認してください）" >&2
+    elif ((ext_rc != 0)); then
+      echo "agent-gh: gh extension install Link-/gh-token が必要です" >&2
     fi
     exit 3
   fi
