@@ -14,7 +14,10 @@ default_branch = "main"
 // （sha256 固定）のため、末尾改行の付加も許さない。同じ理由で対象外とする。
 // crates/dev-typegen-probe/bindings/ は型生成の結果（生成物）で、生成元の
 // 出力そのままを置いて差分を検査する。書き換えると生成結果と一致しなくなる。
-exclude = List("docs/**", "assets/**", "crates/pelway-client-ui/tokens/**", "crates/dev-client-probe/bindings/**")
+// .eval-workspace/ は eval 実行の成果物（benchmark・採点結果・凍結データの写し）で
+// gitignore 済み・コミットしない。凍結データ由来の誤検出と自動修正の書き換えを
+// 避けるため対象外とする。
+exclude = List("docs/**", "assets/**", "crates/pelway-client-ui/tokens/**", "crates/dev-client-probe/bindings/**", ".eval-workspace/**")
 
 // cargo 系ステップはメンバークレート単位ではなくワークスペース全体を検査する。
 // glob に Cargo.toml / Cargo.lock を含め、Rust ファイル以外の変更でも検査を起動する。

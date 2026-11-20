@@ -201,6 +201,8 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 
 `network_proxy` は Codex の試験的な機能で、`--enable network_proxy` が無いと権限プロファイルのネットワーク制限が効かない。Codex を更新したら `mise run codex-review-check` で、GitHub にはつながり、それ以外にはつながらないことを確かめる。
 
+gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有効で、実行のごく一部で `cafe.github.com` へ送信する。許可先に無いため sandbox が通信を止め、gh の実行ごと失敗する。`scripts/agent-gh` は空の `GH_CONFIG_DIR` で gh を動かすので `gh config set telemetry disabled` は効かず、代わりにどのロールでも `GH_TELEMETRY=false` と `DO_NOT_TRACK=1` を渡して送信を止める（#527。許可先は増やさない）。
+
 ### レビュー委託（delegate_task）での確認
 
 通常の PR のレビューは、実装担当のスレッドが `delegate_task` で `codex_review` の子タスクとして委託する（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。委託の子がスレッドと同じ制限（権限プロファイル `review`、ネットワークは `api.github.com` と `github.com` だけ）を継承するかを、実 PR での初回委託により確かめる。初回の委託の指示には、次の確認を報告に含めるよう足す。記録されるまでは、2 回目以降の委託によるレビューを行わない。
@@ -226,7 +228,7 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 | 場所 | 設定 |
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.claude_review` | `driver: claudeAgent`、`config` の `homePath` に `/home/hatai/.claude-review`（UI のフィールド名は「CLAUDE_CONFIG_DIR path」。子プロセスの環境変数 `CLAUDE_CONFIG_DIR` になる。`config.environment` は claudeAgent の config スキーマに無いキーで無視される） |
-| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。ラッパーが `review` 名義で絞るのはサブコマンドと `api`・`git` の引数で、`pr review` など許可したサブコマンドの引数はそのまま通るため、権限設定側でも使用する形をサブコマンド単位で列挙し deny で二重に止める）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す |
+| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。ラッパーが `review` 名義で絞るのはサブコマンドと `api` の引数で、`pr review` など許可したサブコマンドの引数はそのまま通るため、権限設定側でも使用する形をサブコマンド単位で列挙し deny で二重に止める）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す |
 | socat | Claude Code の sandbox（Linux）が使う。`mise.toml` の `conda:socat` で `mise install`（`mise bootstrap`）が入れる。apt と sudo は要らない |
 | ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
 
@@ -668,7 +670,22 @@ container run --rm alpine echo hello   # hello 程度の smoke
   | `pitchfork logs agent-watch` | ログ（送ったイベントと HTTP ステータス。秘密と返答の本文は出さない） |
 
 - 状態は `$XDG_STATE_HOME/pelway/agent-watch.json`（未設定なら `~/.local/state/pelway/agent-watch.json`）に置く。初めて起動したときは既存のスレッドを記録するだけで、通知しない。送れなかった通知は状態の送信待ちの列に残り、次の周回で送り直す。
+- 起動してよいのは本体 checkout だけ。worktree にも同じ `pitchfork.toml` の定義があるが、worktree から起動されたときは起動元（実行時のカレントディレクトリ）の `git rev-parse --git-dir` と `--git-common-dir` の差で検出して理由を 1 行ログに出して終わる。見張り対象の `--project` が起動元の checkout の toplevel と一致しないときも、本体から別の checkout を見張る起動になるため同じく理由を 1 行出して終わる。同時に動かせるのは 1 つだけで、状態ディレクトリの `agent-watch.lock`（0600）を flock で取り、取れなければ理由を 1 行出して終わる（いずれも終了コード 0。agent-worktree-prune と同じ決まり。拒否のログにはパスの種類だけを書き、中身や環境変数は出さない）。
 - 送らずに試すには `cargo run -p pelway-agent-watch -- --once --dry-run`（新しいイベントの payload を標準出力に出す。状態ファイルは読むだけで書き換えない）。
+- 再起動のあとの自動起動: `pitchfork.toml` の `agent-watch` には `boot_start = true` を付けてあり、login 時に起動する pitchfork の supervisor（`pitchfork supervisor run --boot`）が agent-watch を起動する。起動時の supervisor は作業ディレクトリを持たず、読むのはユーザーの設定（`~/.config/pitchfork/config.toml`）と、その `[namespaces]` に登録されたプロジェクト（とその全 worktree）の `pitchfork.toml` だけなので、次の 2 つを PC 側で入れておく。どちらもリポジトリの外の設定で、hatai が OK のうえで手で行う。
+  1. supervisor の login 時の起動を登録する: `pitchfork boot enable`（sudo なし。`~/.config/systemd/user/pitchfork.service` ができる）。`pitchfork boot status` が `Boot start is enabled` になれば済み。
+  2. 本体 checkout を namespace として登録する: `~/.config/pitchfork/config.toml` に次を書く（`dir` は本体 checkout の絶対パス。`git worktree list` の 1 行目）。
+
+     ```toml
+     [namespaces.pelway]
+     dir = "/home/<ユーザー>/repos/hatai/Pelway"
+     ```
+
+  - 起動時に読まれるのは、本体 checkout にいまチェックアウトされているブランチの `pitchfork.toml` なので、本体 checkout は `boot_start = true` の入った main に置いておく。
+  - 起動時の supervisor は各 worktree の同じ定義からも agent-watch の起動を試みるが、上の決まりで worktree からの起動は理由を 1 行出して終了コード 0 で終わる（pitchfork の再起動は起きない）。動き続けるのは本体 checkout の 1 つだけ。
+  - 入ったかの確かめ方（WSL の再起動のあと、手を触れずに、本体 checkout の直下で実行する）: `pitchfork supervisor status` で supervisor が動いている、`pitchfork status agent-watch` が running、`pitchfork logs agent-watch` に周回のログが出ている。worktree 側の起動の拒否が 1 行ずつ出て終わっていることも、同じくログで確かめる。
+  - 自動起動だけを止める: 本体 checkout の直下で `pitchfork disable agent-watch`（disabled の daemon は起動時にも起動されない。戻すときは `pitchfork enable agent-watch`）。supervisor ごと止めるときは `pitchfork boot disable`。
+  - 止まっていたときの戻し方: 状態ファイル（`~/.local/state/pelway/agent-watch.json`）は消さず、`agent-watch.json.bak-<日付>` に名前を変えてから、本体 checkout で `pitchfork start agent-watch` する（状態が無い初回の起動は既存のスレッドを記録するだけで、止まっていた間の古い完了をまとめて送らない）。状態ファイルを動かすのは hatai の OK があるときだけ。
 - v0.7 の05章が想定する起動単位（postgres・server・runner など）は、実装された時点で loopback 限定の定義を `pitchfork.toml` に足す。
 
 ## 既知の事項・未解決
