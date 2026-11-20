@@ -32,8 +32,10 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 
   ```
   PR #<M> をレビューする。skill review-pr に従う。
-  Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort>
+  Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes
   ```
+
+  `security=yes` は、差分が skill `implement-issue` の手順 8 で `security=yes` を付ける条件に当たるときだけ付け、当たらなければ書かない。付いているとレビュー担当は skill `security-review` も行う（skill `review-pr` の手順 2）。指揮役自身の PR は運用文書・スキルの変更が多く、たいてい当たる。
 
   このレビュー指示を使うのは、指揮役が自らレビュースレッドを立てるとき（指揮役自身の PR・外部投入）だけ。通常の実装担当の PR には使わない（実装担当が `delegate_task` で自分で委託する。skill `implement-issue` の手順 8）。調査スレッドを立てる指示の形は `docs/agents/command-team-details.md` の「調査（入口B）」。
 
@@ -44,7 +46,7 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 - スレッドへの指示は、新しい実行として送る（MCP の `t3_thread_send` で `mode: queue`）。実行中のスレッドに `steer`（既定の `auto`）で送ると、実行の途中に差し込まれ、その実行が指示を扱わずに終わることがある。終わりの報告と PR の head で、指示が扱われたかを確かめる。
 - 判断はすべて Issue か PR にコメントで残す。セッションの文脈だけに置かない。
 - 指揮役が Issue を立てる・分割する・差し戻された本文を直すときは、skill `write-issue` に従う。`ready-for-agent` を付ける前（人間に委任されたとき）は、`write-issue` の手順 6 のゲートを通す。
-- sandbox に止められた操作を、sandbox の外へ出る抜け道（`systemd-run`・`nohup`・別のシェル・ラッパースクリプトなど）で実行しない。止められたら止まって報告する。作業ログに残る同種の前例（`systemd-run` 経由の patrol-state 更新・ボードキュー手動適用など）は許可にならない（2026-11-19 の hatai の決定、Issue #477）
+- sandbox に止められた操作を、sandbox の外へ出る抜け道（`systemd-run`・`nohup`・別のシェル・ラッパースクリプトなど）で実行しない。止められたら止まって報告する。作業ログに残る同種の前例（`systemd-run` 経由の patrol-state 更新・ボードキュー手動適用など）は許可にならない（Issue #477）。
 - 見張りの状態は `scripts/conductor-watch.sh` が `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。巡回状態の補助記録 `patrol-state.json` だけは、sandbox 内の指揮役からも読み書きできるよう、リポジトリの共有 git dir（`git rev-parse --git-common-dir`）内の `pelway/` に置く（git の管理対象外。Issue #477）。
 
 ## スレッド名
@@ -101,16 +103,7 @@ PR や Issue に手を付けるときは、最初に対象 Issue の受け入れ
 
 ### 割り当ての可否（blocker の確認）
 
-Issue を割り当てる前に、依存する blocker が全部閉じていることを、割り当てる直前に確かめる。巡回の最初に確かめて使い回さない（その間に依存が追加されることがあるため）。手順上の位置づけは runbook の「割り当て・停止・再開」の blocker の確認。
-
-- 割り当ててよいのは `issue_dependencies_summary.blocked_by == 0` のときだけ（開いている blocker の数。0 なら着手可能）。`total_blocked_by` は閉じた blocker も数えるため、使わない
-- 本文に書かれた「Blocked by #N」も確かめる。依存関係の情報と食い違ったら、割り当てを止める
-- 依存関係の情報が取れなかったとき（API の失敗・権限不足・空の結果）は、0 件と同じ扱いにしない。割り当てを止めて needs-human に回す
-- 割り当てる直前に、blocker の番号・状態・取得した時刻を Issue のコメントに残す
-- 依存情報の読み取りには `scripts/agent-gh dev api`（App のトークン）を使い、hatai 名義の gh は使わない。読めなかったときは理由のコード（例: `deps-read`）を巡回記録に残す。API の使い分け: 割り当て可否の条件は `GET /repos/hatai/Pelway/issues/<N>` の `issue_dependencies_summary.blocked_by`、割り当てコメントに書く blocker の一覧は `GET /repos/hatai/Pelway/issues/<N>/dependencies/blocked_by`（`--paginate` を付ける）
-- 順番を変えるときは、割り当てる前に開発リードを通して hatai に確認する。割り当てコメントには了承の根拠（hatai 本人のコメントか、開発リードが中継した了承）のリンクを貼る
-- 割り当てたあとで blocker が開き直したら、止めて hatai に確認する
-- 見張り（conductor-watch）に blocker の確認を組み込むときは、合成のデータで 4 通りの試験を用意する: 開いた blocker があるときは拒否・全部閉じていれば許可・取得に失敗したら拒否・本文にだけ書かれているときは拒否。本物の Issue を割り当てて試すことはしない
+Issue を割り当てる直前に、runbook の「割り当て・停止・再開」の blocker の確認を通す。割り当てを止める条件、Issue に残すコメント、順番を変えるとき、割り当てた後に blocker が開き直したとき、見張りに確認を組み込むときの決まりも、同じ節が正本。
 
 ### 実装のモデルと effort
 
@@ -234,13 +227,13 @@ QA 合格コメント:
 マージ以外の PR・Issue への操作（base の変更、Draft の扱い、Issue のクローズ）は、先に「手当て・引き継ぎの前の確認」を通す。目印付きのコメント（`<!-- pr-size-exception -->`、`<!-- split-plan -->`）は人間の名義の `gh issue comment` で書く。レビュー担当は作成者が `hatai` であることで、実装担当（`pelway-dev`）や第三者のコメントと区別する。それ以外の GitHub の操作（読み取り、ラベル、ふつうのコメント）は `scripts/agent-gh dev` で行う。
 
 - pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の例外の判断に回す（マージの例外は上の 3 つだけで、pr-size-exception 自体は例外に加えない）。
-- 必須チェックの完了待ち（ラベルを付ける前の CI 待ち、巡回での PR のベビーシット）には、ポーリングの代わりに skill `pr-watch` の `pr-digest --watch` をバックグラウンド実行して使う。マージの実行は Kodiak が行うため、指揮役がマージコマンドを叩くことはない。
+- 必須チェックの完了待ち（ラベルを付ける前の CI 待ち、巡回での PR のベビーシット）は、ポーリングせず skill `pr-watch` の「待ち方」に従う（T3 のスレッドでは `watch_pull_request`）。マージの実行は Kodiak が行うため、指揮役がマージコマンドを叩くことはない。
 - skill `pr-watch` の `VERDICT green` は、その SHA でチェックが完走して通過していることの確認要素の 1 つ。`automerge` ラベルを付ける条件（`pelway-review` の Approve、必須チェック、レビュー済み SHA 以降の追加コミットの確認、mergeable）を置き換えない。
 - ブランチの最新化はルールセットが「マージ前にブランチを最新化すること」で必須とし、実行は Kodiak が行う。指揮役が `pr update-branch` で手動に取り込む操作は、手当スレッドでの衝突解消などの例外を除き原則しない。
 - 別の PR に積んだ PR は、土台の PR に `automerge` ラベルを付ける前に、後の PR の base を main に替える（`scripts/agent-gh dev pr edit <後の PR> --base main`）。base のままだと、リポジトリのブランチ自動削除で土台のブランチが消えたときに後の PR が閉じることがあり、閉じた PR は base を替えられない。
 - 複数の PR に `automerge` ラベルを付けてよい。Kodiak が直列に 1 本ずつマージする。ただしラベルを付ける時点で各 PR が上の条件を満たしていることを確かめる。
-- PR ができたら mergeable を確かめる（`scripts/agent-gh dev pr view <M> --json mergeable`）。`CONFLICTING` の PR には GitHub が `pull_request` の workflow を動かさず、チェックが 1 つも付かない。実装担当に「main を取り込んで衝突を解消し、verify を通す」を送る。`automerge` ラベルが付いた後に Kodiak がコンフリクト等でマージできないときは、Kodiak が PR にコメントして `automerge` ラベルを外す。巡回手順は runbook の「マージキュー待ちの PR」に従い、手当スレッドで衝突を解消してからラベルを付け直す。
-- マージしたら Issue から `agent:working` を外し、人間に報告する。マージの検知は notify-grokbot の `pull_request`（`merged: true`）の通知と巡回で行う。
+- PR ができたら mergeable を確かめる（`scripts/agent-gh dev pr view <M> --json mergeable`）。`CONFLICTING` の PR には GitHub が `pull_request` の workflow を動かさず、チェックが 1 つも付かない。実装担当に「main を取り込んで衝突を解消し、verify を通す」を送る。`automerge` ラベルを付けた後に Kodiak がマージできなかったときは、runbook の「マージキュー待ちの PR」に従う。
+- マージしたら Issue から `agent:working` と `agent:devin` を外し、人間に報告する。マージの検知は notify-grokbot の `pull_request`（`merged: true`）の通知と巡回で行う。
 - マージが完了したら、ローカルの `main` を `origin/main` へ一致させる。`git fetch origin main` の後、ローカルの `main` が `origin/main` の先祖になっていることを確かめ（`git merge-base --is-ancestor main origin/main`）、`git merge --ff-only origin/main` を `main` で実行して fast-forward のみで行う。ローカルの `main` に origin に無いコミットがあって fast-forward できないときは、強制せず（rebase も reset もしない）そこで止めて、指揮役（代行の場合は hatai）へ報告する。
 - Dependabot の PR の扱い（minor・patch の通常扱い、major・0.x の移行 Issue 化、Action の更新の `actions.lock` の再生成）は `docs/agents/command-team-details.md` の「Dependabot の PR の扱い」に従う。
 
@@ -297,7 +290,7 @@ runbook 7 の手順に従う。人間に上げる前に、手順 2 の「effort 
 
 ### 定期キュレーション（worklog の走査）
 
-既存の改善ループはレビュー指摘を入口とする（同種の指摘が 2 回以上で正本の欠陥として扱う）。それだけでは、レビュー指摘に至る前の滞留・手戻りの型や、実装者メモ・巡回記録に書かれたまま拾われない正本とのずれが溜まる。そこで、週 1 回の定例で worklog 群を横断して走査する定期キュレーションを、レビュー指摘とは別の入口として改善ループに組み込む。実行手順（頻度・対象・観点・出力先）は runbook の「作業ログの定期キュレーション」に置く。
+週 1 回、worklog 群を横断して走査し、レビュー指摘とは別の入口から改善ループの材料を拾う。狙いは、レビュー指摘に至る前の滞留・手戻りの型と、実装者メモ・巡回記録に書かれたまま拾われていない正本とのずれである。実行手順（頻度・対象・観点・出力先）は runbook の「作業ログの定期キュレーション」。
 
 - 役割分担: レビュー指摘を入口とする既存の流れは変えない。キュレーションは、繰り返しの型・正本と実態のずれ・長期間動いていない待ちを候補として拾い、既存の改善ループの材料にする
 - キュレーションは候補の提案までとし、正本（AGENTS.md、スキル、runbook）を直接編集しない。正本の変更が要る候補は Issue 化を人間に提案し、Issue の作成と `ready-for-agent` の判断は従来どおり人間の関与する流れに乗せる

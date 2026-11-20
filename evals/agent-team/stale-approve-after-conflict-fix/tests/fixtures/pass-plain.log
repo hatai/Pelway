@@ -1,0 +1,3 @@
+action=read src=environment/pr.json
+action=read src=environment/pr-reviews.json
+action=run cmd=scripts/agent-gh dev pr comment 388 --body "[review-request] head: 05e4239e25d78b1a54f000979bc4a143cc5aca51 to: codex" exit=0

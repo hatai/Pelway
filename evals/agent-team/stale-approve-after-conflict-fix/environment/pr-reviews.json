@@ -1,0 +1,34 @@
+{
+  "reviews": [
+    {
+      "id": "PRR_kwDOVm0izM8AAAABYMJ1-g",
+      "author": {
+        "login": "pelway-review"
+      },
+      "authorAssociation": "NONE",
+      "body": "Verdict: approve\nReviewed: 4717dcc376d2b399cce53fee1a121316191c8f56\n\n## must-fix\nなし\n\n## nit\nなし\n\n## 検査（PR のチェック）\n- mise run verify: pass\n- pr-size: pass\n\nReviewer: agent=codex model=gpt-6-luna effort=medium\n",
+      "submittedAt": "2026-11-16T10:16:01Z",
+      "includesCreatedEdit": false,
+      "reactionGroups": [],
+      "state": "APPROVED",
+      "commit": {
+        "oid": "4717dcc376d2b399cce53fee1a121316191c8f56"
+      }
+    },
+    {
+      "id": "PRR_kwDOVm0izM8AAAABYMVM9A",
+      "author": {
+        "login": "pelway-review"
+      },
+      "authorAssociation": "NONE",
+      "body": "Verdict: approve\nReviewed: 4717dcc376d2b399cce53fee1a121316191c8f56\n\n## must-fix\nなし\n\n受け入れ条件 3 条を確認した。\n- 比較表: Composio／Pipedream（Connect）／自前実装の 3 列 × 資格情報の保管方式・データの経由地域・段階宣言（ADR 0004）との適合・費用の 4 軸がある。\n- ADR 0008 と両立する使い方: Issue が例示した 2 案（(a) BYOK 的扱い、(b) 国内完結の連携のみ）の両方と (c) セルフホスト系を、成立／不成立の結論付きで整理している。\n- 推奨案: 1 つに絞り（MVP は自前実装、カタログは BYOK 型の例外枠で将来検討）、根拠を 5 点挙げている。\n\nリポジトリ内の参照も main で照合した。10 章の P 方針の文、`integration_grant`、D4／D9／D11、ADR 0008 の表示文、ADR 0004 の fail closed、technical.md §7 の段階 3 の 3〜4 週、roadmap と technical.md の引用、competitors/rakazo.md のカタログの記述は、いずれも原文と一致する。相対リンクの先はすべて存在する。対象外（契約・実装）にも踏み込んでいない。\n\n## nit\n- docs/research/integration-catalog-composio-pipedream.md:73 根拠 2 の「両カタログとも操作の段階メタデータを持たない（未確認）」は、文書の前提（「未確認」は機能がないという意味ではない）と書き方が食い違う。「段階メタデータの提供は確認できない」とするほうが一貫する。あわせて、ADR 0004 は MCP の annotations（`readOnlyHint` など）があっても手がかりの表示に留め、段階は管理者が確定する。そのため、仮にメタデータがあってもツール数ぶんの確定作業が要るという結論は変わらない。この点を一文足すと、根拠が未確認事項に左右されないことがはっきりする。\n- docs/research/integration-catalog-composio-pipedream.md:26 費用の行の「[技術文書§7](../technical.md)」は、`../technical.md#7-mvpの開発期間の目安仮定` のように節アンカーを付けると読み手が辿りやすい。\n\n## 検査（PR のチェック）\n- mise run verify: pass\n- pr-size: pass\n\nReviewer: agent=claude model=claude-opus-5-5 effort=medium\n",
+      "submittedAt": "2026-11-16T10:30:50Z",
+      "includesCreatedEdit": false,
+      "reactionGroups": [],
+      "state": "DISMISSED",
+      "commit": {
+        "oid": "4717dcc376d2b399cce53fee1a121316191c8f56"
+      }
+    }
+  ]
+}

@@ -114,7 +114,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
   - `stalled`: 次のどれか。理由を `stall_reason` に入れる
     - `no-activity`: 実行中のまま 45 分更新がない
     - `ci-failed-twice`: `agent/` ブランチで verify が 2 回続けて失敗した（5 分ごとに `gh run list` で確かめる）
-- payload は `pelway.agent-watch/v1`。スレッド ID、ブランチ、`issue_number`（`agent/<番号>-` から取る）、`round`（スレッドの実行回数）、`report`（最後の返答が `キー: 値` 形式 5 行以内のときだけ、その本文）を含む
+- payload は `pelway.agent-watch/v1`。スレッド ID、ブランチ、`issue_number`（`agent/<番号>-` から取る）、`round`（スレッドの実行回数）、`report`（最後の返答が `キー: 値` 形式 8 行以内のときだけ、その本文）を含む
 - 同じ出来事からイベントを作るのは 1 回だけ。送れなかったものは送信待ちの列に残して送り直す（受け手には重複して届きうる）。状態は `~/.local/state/pelway/agent-watch.json` に置く
 - 修正が何回目かは、実装スレッドがレビューの委託回数で数える（skill `implement-issue`）。同じ head は 1 ラウンドに数え、コンフリクトの解消を含まない main の取り込みだけで head が変わっても新しいラウンドにしない。ラウンドの上限は 4 回で、round 3 の must-fix が残れば round 4 には入らず止まる（別 Issue に回せる領域の指摘は除く。分類はレビュー役が行う）。round 4 に入るのは hatai が例外と判断した PR だけ。レビューの effort は、セキュリティと仕様の PR では 1 回目から上げておく（3 回目で改めて上げる運用はやめる）。人間のレビューによる修正（指揮役が `t3 thread send` で伝える）の回数も同じ上限に数える
 

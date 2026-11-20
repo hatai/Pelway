@@ -190,6 +190,13 @@
       "skillPath": "skills/engineering/improve-codebase-architecture/SKILL.md",
       "computedHash": "f0820b18426a7d9a6c823a890988ba0ac70bf0fd596d30d7ef07c88558728c23"
     },
+    "llm-evaluation": {
+      "source": "wshobson/agents",
+      "commit": "42203085cfc5736204bf0f6d436dff7e1da0bf3f",
+      "sourceType": "github",
+      "skillPath": "plugins/llm-application-dev/skills/llm-evaluation/SKILL.md",
+      "computedHash": "3986d5cdb5f5e240b16555d5d94c7759f741432b3c0595c0833a3c4ba31613dc"
+    },
     "m01-ownership": {
       "source": "actionbook/rust-skills",
       "sourceType": "github",
@@ -435,6 +442,13 @@
       "skillPath": "skills/engineering/retro/SKILL.md",
       "computedHash": "e260aefb7b75b3548a3ee9883afbf8808e521f2e86feec92399617894f83b7c2"
     },
+    "rust-async-patterns": {
+      "source": "wshobson/agents",
+      "commit": "42203085cfc5736204bf0f6d436dff7e1da0bf3f",
+      "sourceType": "github",
+      "skillPath": "plugins/systems-programming/skills/rust-async-patterns/SKILL.md",
+      "computedHash": "286b73077a434af5844dd480e5b98026bea5b31fcfafce3c04405a7392331601"
+    },
     "rust-call-graph": {
       "source": "actionbook/rust-skills",
       "sourceType": "github",
@@ -520,11 +534,11 @@
       "commit": "5c40d3ad785193231b7d0dbfb8e1eb447e5edd94"
     },
     "rust-testing": {
-      "source": "full-stack-skills/rust-skills",
-      "commit": "b8a6af74af28ee86b8cbbbc3075cde0b31a5155e",
+      "source": "affaan-m/ECC",
+      "commit": "3f14a103a8694e51c1df9a806217a6d0b5f7a6f7",
       "sourceType": "github",
       "skillPath": "skills/rust-testing/SKILL.md",
-      "computedHash": "798f624ddfbccdc495eb6d2ec24d406ba66bfe7f34290af0d6206b123f6829bd"
+      "computedHash": "4a16853504a8d9ee1af3abb29e4db9b506ddc46f5ef6bafff45193a1a1a1e520"
     },
     "rust-trait-explorer": {
       "source": "actionbook/rust-skills",
@@ -532,6 +546,13 @@
       "skillPath": "skills/rust-trait-explorer/SKILL.md",
       "computedHash": "3a5f06e1aa2bfd9b21469996720fa202ca7ed5e675704be21c7a234630bb143e",
       "commit": "5c40d3ad785193231b7d0dbfb8e1eb447e5edd94"
+    },
+    "security-threat-model": {
+      "source": "openai/skills",
+      "commit": "49f948faa9258a0c61caceaf225e179651397431",
+      "sourceType": "github",
+      "skillPath": "skills/.curated/security-threat-model/SKILL.md",
+      "computedHash": "6d66f27a8e4353f49264547acf4e541efd835f2e3a2d91f5a43e2104be5bd65e"
     },
     "setup-matt-pocock-skills": {
       "source": "mattpocock/skills",
@@ -630,6 +651,13 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/wayfinder/SKILL.md",
       "computedHash": "bd82983c105881f6cb0c15e5d029c0d5fca756939b69eebe94e49003069a276f"
+    },
+    "websocket-engineer": {
+      "source": "Jeffallan/claude-skills",
+      "commit": "67c1961b180dc92cf08983344627109e983e8f51",
+      "sourceType": "github",
+      "skillPath": "skills/websocket-engineer/SKILL.md",
+      "computedHash": "822b5db15af4796c93a0458c8c84090732f9e7b07de041add148128c5368bc77"
     },
     "wizard": {
       "source": "mattpocock/skills",

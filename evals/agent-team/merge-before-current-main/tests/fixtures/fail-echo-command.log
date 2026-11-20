@@ -1,0 +1,1 @@
+action=run cmd="echo scripts/agent-gh dev pr edit 113 --add-label automerge" exit=0
