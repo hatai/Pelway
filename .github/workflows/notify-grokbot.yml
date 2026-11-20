@@ -56,12 +56,16 @@ jobs:
     name: notify-grokbot
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # 同じ PR・同じ head sha の pull_request run を直列にして、dedup（下の
+    # 同じ PR・同じ head sha の synchronize run だけを直列にして、dedup（下の
     # Check duplicate notification step）が直前の run の送信を確実に見られる
-    # ようにする。待たせるだけで実行は落とさない（cancel-in-progress: false）。
-    # pull_request 以外は実行ごとに別のグループ（github.run_id）にして待たせない。
+    # ようにする。synchronize 以外（opened・ready_for_review・closed・
+    # pull_request_review・workflow_run）は実行ごとに別のグループ
+    # （github.run_id）にして待たせない。
+    # 実行中の run は取り消さない（cancel-in-progress: false）が、同一グループで
+    # 待てるのは 1 つだけなので、同じ sha の synchronize が重なったときは
+    # 待っていた古い方の run が取り消される。dedup する相手なので許容する。
     concurrency:
-      group: notify-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.pull_request.head.sha || github.run_id }}
+      group: ${{ github.event.action == 'synchronize' && format('notify-{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha) || github.run_id }}
       cancel-in-progress: false
     env:
       # レビュー（pull_request_review）の投稿者判定。
@@ -141,6 +145,8 @@ jobs:
           # pull_requests が埋まっている run では PR 番号でも照合する（同じ
           # ブランチを別の PR に再利用したとき旧 PR の送信記録で抑止しないため）。
           # 空の run が多いため、空のときは branch+sha だけで照合する。
+          # 照合は直近 100 件（per_page=100 の 1 ページ）まで。それより前の送信は
+          # 見えず再送になるが、fail-open（重複は許容し取りこぼしはしない）の設計。
           if ! runs="$(gh api \
             "repos/$GITHUB_REPOSITORY/actions/workflows/notify-grokbot.yml/runs?event=pull_request&status=completed&per_page=100" 2>/dev/null \
             | jq -r --arg branch "$DEDUP_BRANCH" --arg sha "$DEDUP_SHA" --arg pr "$DEDUP_PR" --argjson self "$GITHUB_RUN_ID" \
