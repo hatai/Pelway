@@ -219,7 +219,7 @@ Assigned: role=implement agent=devin model=swe-2-high effort=<medium|high|max>"
 レビュースレッドを次の内容で立てる（`t3 thread start` の形で書くが、権限を指定するため実際は MCP または `t3_thread_launch` で立てる）。
 
 ```
-t3 thread start --provider codex_review --model gpt-6-luna --worktree main --branch review/<M>-<k> --title "[レビュー] PR #<M> <要約>" <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。"
+t3 thread start --provider codex_review --model <skill command-team の「Codex のモデル」で選んだモデル> --worktree main --branch review/<M>-<k> --title "[レビュー] PR #<M> <要約>" <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。"
 ```
 
 T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-accept-edits` にする。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP で立てる。
