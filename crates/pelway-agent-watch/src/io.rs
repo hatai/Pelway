@@ -111,9 +111,10 @@ pub fn state_path() -> PathBuf {
     base.join("pelway/agent-watch.json")
 }
 
-/// `--git-dir` と `--git-common-dir`（絶対パス）。等しければ本体 checkout、
-/// 違えば linked worktree（agent-worktree-prune と同じ判定）。
-pub fn git_dirs(project: &Path) -> Result<(String, String), String> {
+/// `--git-dir`・`--git-common-dir`・`--show-toplevel`（絶対パス）。
+/// 前二者が等しければ本体 checkout、違えば linked worktree（agent-worktree-prune と同じ判定）。
+/// toplevel は `--project` が起動元の checkout を指すかの照合に使う。
+pub fn git_dirs(project: &Path) -> Result<(String, String, String), String> {
     let out = run(
         "git",
         &[
@@ -121,14 +122,16 @@ pub fn git_dirs(project: &Path) -> Result<(String, String), String> {
             "--path-format=absolute",
             "--git-dir",
             "--git-common-dir",
+            "--show-toplevel",
         ],
         project,
     )?;
     let mut lines = out.lines();
-    let (Some(dir), Some(common)) = (lines.next(), lines.next()) else {
+    let (Some(dir), Some(common), Some(toplevel)) = (lines.next(), lines.next(), lines.next())
+    else {
         return Err("git rev-parse: unexpected output".to_string());
     };
-    Ok((dir.to_string(), common.to_string()))
+    Ok((dir.to_string(), common.to_string(), toplevel.to_string()))
 }
 
 /// 状態ディレクトリの lock ファイル。二重起動の判定に使う。

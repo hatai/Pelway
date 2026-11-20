@@ -37,22 +37,24 @@ esac
         write_exec(&root.join("bin/gh"), "#!/usr/bin/env bash\necho '[]'\n");
         // 偽の fnox: 秘密は取れない（本物の webhook に送らないため。送信は「送れなかった」扱いになる）
         write_exec(&root.join("bin/fnox"), "#!/usr/bin/env bash\nexit 1\n");
-        // 偽の git: rev-parse の --git-dir / --git-common-dir は、rev-parse の実行先（$PWD）
-        // に git-dir / git-common-dir ファイルがあればその中身、無ければ fake/ の同名ファイル、
-        // それも無ければ両方 ".git"（本体 checkout）を返す。worktree は中身を変えて模す。
+        // 偽の git: rev-parse の --git-dir / --git-common-dir / --show-toplevel は、
+        // rev-parse の実行先（$PWD）に同名ファイルがあればその中身、無ければ fake/ の同名
+        // ファイル、それも無ければ ".git"・".git"・`pwd -P`（本体 checkout）を返す。
         write_exec(
             &root.join("bin/git"),
             r#"#!/usr/bin/env bash
 F="$FAKE_DIR"
 if [ "$1" != "rev-parse" ]; then exit 2; fi
 shift
-GD="$F/git-dir"; GC="$F/git-common-dir"
+GD="$F/git-dir"; GC="$F/git-common-dir"; TL="$F/toplevel"
 [ -f "$PWD/git-dir" ] && GD="$PWD/git-dir"
 [ -f "$PWD/git-common-dir" ] && GC="$PWD/git-common-dir"
+[ -f "$PWD/toplevel" ] && TL="$PWD/toplevel"
 while [ $# -gt 0 ]; do
   case "$1" in
     --git-dir) cat "$GD" 2>/dev/null || echo ".git" ;;
     --git-common-dir) cat "$GC" 2>/dev/null || echo ".git" ;;
+    --show-toplevel) cat "$TL" 2>/dev/null || pwd -P ;;
   esac
   shift
 done
@@ -359,6 +361,39 @@ fn worktree_launch_dir_is_refused_for_main_project() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("main checkout"), "stderr: {stderr}");
+    assert!(
+        out.stdout.is_empty(),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(!sb.state_file().exists(), "state file was written");
+    assert!(!sb.t3_calls().exists(), "fake t3 was called");
+}
+
+#[test]
+fn main_launch_with_worktree_project_is_refused() {
+    // 本体 checkout から起動しても、--project が起動元の toplevel と違うなら拒否する。
+    // 本体から別の checkout を見張る起動は本体の見張りとの重複・すり替わりになるため
+    let sb = Sandbox::new("wtproj");
+    sb.fake("list.json", LIST_DONE);
+    let main_dir = sb.root.join("main-checkout");
+    let wt = sb.root.join("wt-checkout");
+    fs::create_dir_all(&main_dir).unwrap();
+    fs::create_dir_all(&wt).unwrap();
+    // main-checkout は本体（同じ値を返す）。toplevel マーカーは置かず pwd -P に任せる
+    fs::write(main_dir.join("git-dir"), "/repo/.git\n").unwrap();
+    fs::write(main_dir.join("git-common-dir"), "/repo/.git\n").unwrap();
+    let mut cmd = sb.command(&["--once"]);
+    cmd.current_dir(&main_dir)
+        .args(["--project", wt.to_str().unwrap()]);
+    let out = cmd.output().unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("--project"), "stderr: {stderr}");
     assert!(
         out.stdout.is_empty(),
         "stdout: {}",

@@ -65,7 +65,10 @@ fn parse_args() -> Result<Options, String> {
 /// （pitchfork の再起動を呼ばない。agent-worktree-prune と同じ決まり）。確認自体に失敗したときは 1。
 /// worktree の判定は見張り対象（`--project`）ではなく起動元（実プロセスの cwd）で行う:
 /// worktree から `--project` に本体 checkout を渡して起動する抜け道をふさぐため。
-fn startup_guards() -> std::fs::File {
+/// さらに `--project` が起動元の checkout の toplevel と一致することも確認する:
+/// 本体から別の checkout を見張る起動は本体の見張りとの重複・すり替わりになるため。
+/// 拒否のログにはパスの種類だけを書き、中身や環境変数は出さない。
+fn startup_guards(opts: &Options) -> std::fs::File {
     let cwd = match std::env::current_dir() {
         Ok(d) => d,
         Err(e) => {
@@ -73,14 +76,33 @@ fn startup_guards() -> std::fs::File {
             std::process::exit(1);
         }
     };
-    match io::git_dirs(&cwd) {
-        Ok((dir, common)) if dir == common => {}
-        Ok(_) => {
-            eprintln!("agent-watch: refusing to start: linked worktree is not the main checkout");
-            std::process::exit(0);
-        }
+    let (dir, common, toplevel) = match io::git_dirs(&cwd) {
+        Ok(v) => v,
         Err(e) => {
             eprintln!("agent-watch: cannot check the checkout: {e}");
+            std::process::exit(1);
+        }
+    };
+    if dir != common {
+        eprintln!("agent-watch: refusing to start: linked worktree is not the main checkout");
+        std::process::exit(0);
+    }
+    let project = if opts.project.is_absolute() {
+        opts.project.clone()
+    } else {
+        cwd.join(&opts.project)
+    };
+    match (
+        std::fs::canonicalize(&project),
+        std::fs::canonicalize(PathBuf::from(toplevel.trim())),
+    ) {
+        (Ok(p), Ok(t)) if p == t => {}
+        (Ok(_), Ok(_)) => {
+            eprintln!("agent-watch: refusing to start: --project is not the launch checkout");
+            std::process::exit(0);
+        }
+        _ => {
+            eprintln!("agent-watch: cannot check the watched checkout");
             std::process::exit(1);
         }
     }
@@ -88,10 +110,7 @@ fn startup_guards() -> std::fs::File {
     match io::try_lock(&lock_path) {
         Ok(Some(file)) => file,
         Ok(None) => {
-            eprintln!(
-                "agent-watch: refusing to start: another instance holds the lock {}",
-                lock_path.display()
-            );
+            eprintln!("agent-watch: refusing to start: another instance holds the lock");
             std::process::exit(0);
         }
         Err(e) => {
@@ -135,7 +154,7 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let _lock = startup_guards();
+    let _lock = startup_guards(&opts);
     let state_path = io::state_path();
     let state = io::load_state(&state_path);
     let mut w = Watcher {
