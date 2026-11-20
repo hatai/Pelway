@@ -33,6 +33,7 @@ pub mod ledger;
 pub mod member;
 pub mod message;
 pub mod pseudonym;
+pub mod reply_guard;
 pub mod snapshot;
 pub mod store;
 pub mod task;
