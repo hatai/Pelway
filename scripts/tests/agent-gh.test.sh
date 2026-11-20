@@ -26,6 +26,8 @@ EOF
 
 # 偽の gh: `gh token generate` は JSON を返す。それ以外は GH_TOKEN と引数を記録する。
 # どちらの経路でも GH_CONFIG_DIR / GH_NO_UPDATE_NOTIFIER も記録する（#522 の隔離の確認用）。
+# GH_TOKEN_GENERATE_FAIL があれば generate は stderr 2 行を出して失敗する（#520 の失敗経路）。
+# GH_EXTENSION_LIST / GH_EXTENSION_LIST_FAIL で `gh extension list` の応答を切り替える。
 cat >"$BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1 $2" == "token generate" ]]; then
@@ -41,6 +43,12 @@ if [[ "$1 $2" == "token generate" ]]; then
     fi
     prev="$a"
   done
+  # 失敗の演出: GH_TOKEN_GENERATE_FAIL があれば stderr 2 行（1 行目だけ出るべき）を出して終了 1
+  if [[ -n "${GH_TOKEN_GENERATE_FAIL:-}" ]]; then
+    printf '%s\n' "${GH_TOKEN_GENERATE_STDERR_1:-}" >&2
+    printf '%s\n' "${GH_TOKEN_GENERATE_STDERR_2:-second line must not appear}" >&2
+    exit 1
+  fi
   # App ID ごとに別のトークンを返す（333 = 実装担当 pelway-dev、111 = レビュー担当 pelway-review、555 = QA 担当 pelway-qa）
   case "$*" in
     *"--app-id 333 "*) printf '{"token":"dev-token","expires_at":"x"}\n' ;;
@@ -49,6 +57,15 @@ if [[ "$1 $2" == "token generate" ]]; then
     *) exit 1 ;;
   esac
   exit 0
+fi
+if [[ "$1 $2" == "token --help" ]]; then
+  # 拡張の有無の判定に使う（#520）。GH_TOKEN_HELP_MODE で応答を切り替える:
+  # ok（既定・拡張あり exit 0）/ absent（拡張なし・unknown command の exit 1）/ missing（gh 無し・exit 127）
+  case "${GH_TOKEN_HELP_MODE:-ok}" in
+    absent) printf 'unknown command "token" for "gh"\n' >&2; exit 1 ;;
+    missing) exit 127 ;;
+    ok) printf 'gh-token 2.0.10 help\n'; exit 0 ;;
+  esac
 fi
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_NO_UPDATE_NOTIFIER=%s\n' "${GH_NO_UPDATE_NOTIFIER:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
 EOF
@@ -152,6 +169,68 @@ grep -qF -- "-c $ROOT/agent-fnox.toml get PELWAY_DEV_APP_ID" "$ROOT/dev_uses_dev
 FAKE_PELWAY_REVIEW_APP_KEY="" run review_missing_secret_fails_closed review pr list
 [[ "$RC" == 3 ]] || failures+=("review_missing_secret_fails_closed: exit $RC, want 3")
 [[ ! -e "$ROOT/review_missing_secret_fails_closed.log" ]] || failures+=("review_missing_secret_fails_closed: gh was called")
+
+# --- gh token generate の失敗（#520）: 本当の原因が分かるようにする ---
+# 使う値はすべて合成のダミー（FAKE_* の 333 / 444 / dev-pem-body もダミー）。外のネットワークにも本物の秘密にも触れない。
+
+# stderr の 1 行目を、トークンの形を伏せて出す。2 行目は出さない。終了コードは 3 のまま。
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_TOKEN_GENERATE_STDERR_1='gh: read /home/x/.config/gh/config.yml: permission denied (token ghp_abcdefghijklmnopqrstuvwxyz0123456789)' \
+GH_TOKEN_GENERATE_STDERR_2='second line must not appear' \
+  run token_fail_shows_first_stderr_line dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_shows_first_stderr_line: exit $RC, want 3")
+grep -qF 'permission denied' <<<"$OUT" || failures+=("token_fail_shows_first_stderr_line: first stderr line not shown")
+grep -qF 'gh?_' <<<"$OUT" || failures+=("token_fail_shows_first_stderr_line: token not masked")
+[[ "$OUT" != *ghp_abcdefghijklmnopqrstuvwxyz0123456789* ]] || failures+=("token_fail_shows_first_stderr_line: token value leaked")
+[[ "$OUT" != *'second line must not appear'* ]] || failures+=("token_fail_shows_first_stderr_line: second stderr line shown")
+
+# 出す行に鍵・トークン・APP ID・INSTALLATION ID の値が入らない（ダミー値で確かめる）
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_TOKEN_GENERATE_STDERR_1='sign failed app=333 installation=444 key=dev-pem-body value=ghs_0123456789abcdefghijklmn' \
+  run token_fail_masks_secret_values dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_masks_secret_values: exit $RC, want 3")
+[[ "$OUT" != *333* ]] || failures+=("token_fail_masks_secret_values: app id value leaked")
+[[ "$OUT" != *444* ]] || failures+=("token_fail_masks_secret_values: installation id value leaked")
+[[ "$OUT" != *dev-pem-body* ]] || failures+=("token_fail_masks_secret_values: key value leaked")
+[[ "$OUT" != *ghs_0123456789abcdefghijklmn* ]] || failures+=("token_fail_masks_secret_values: token value leaked")
+
+# 鍵は複数行の PEM。stderr の 1 行目に鍵本体の 1 行（base64 行）が混ざっても伏せる
+# （鍵全体が 1 行に現れることは無いため、行ごとの伏せが必要）
+FAKE_PELWAY_DEV_APP_KEY=$'-----BEGIN PRIVATE KEY-----\nMIIBfakeKEYbodyLINEone1234\nMIIBfakeKEYbodyLINEtwo5678\n-----END PRIVATE KEY-----' \
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_TOKEN_GENERATE_STDERR_1='jwt sign error at MIIBfakeKEYbodyLINEone1234 (app 333)' \
+  run token_fail_masks_multiline_key_fragment dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_masks_multiline_key_fragment: exit $RC, want 3")
+[[ "$OUT" != *MIIBfakeKEYbodyLINEone1234* ]] || failures+=("token_fail_masks_multiline_key_fragment: key body line leaked")
+[[ "$OUT" != *MIIBfakeKEYbodyLINEtwo5678* ]] || failures+=("token_fail_masks_multiline_key_fragment: other key body line leaked")
+[[ "$OUT" != *333* ]] || failures+=("token_fail_masks_multiline_key_fragment: app id value leaked")
+
+# stderr が空のときは 1 行目を出せないので、終了コードで原因の種別だけ示す
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_TOKEN_GENERATE_STDERR_1='' \
+  run token_fail_empty_stderr dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_empty_stderr: exit $RC, want 3")
+grep -qF '終了コード' <<<"$OUT" || failures+=("token_fail_empty_stderr: exit code not shown")
+
+# 「拡張が必要」の文は gh token --help（隔離された空の GH_CONFIG_DIR の中）が成功する
+# （= gh-token 拡張が gh token コマンドを提供している）ときは出さない
+GH_TOKEN_GENERATE_FAIL=1 GH_TOKEN_HELP_MODE=ok \
+  run token_fail_no_install_hint_when_present dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_no_install_hint_when_present: exit $RC, want 3")
+[[ "$OUT" != *'gh extension install'* ]] || failures+=("token_fail_no_install_hint_when_present: install hint shown despite extension present")
+
+# gh token --help が unknown command（exit 1）= 拡張が無いときだけ「拡張が必要」を出す
+GH_TOKEN_GENERATE_FAIL=1 GH_TOKEN_HELP_MODE=absent \
+  run token_fail_install_hint_when_absent dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_install_hint_when_absent: exit $RC, want 3")
+grep -qF 'gh extension install Link-/gh-token' <<<"$OUT" || failures+=("token_fail_install_hint_when_absent: install hint missing")
+
+# gh が起動できない（exit 127）は「拡張が無い」と区別する（install 案内を出さない）
+GH_TOKEN_GENERATE_FAIL=1 GH_TOKEN_HELP_MODE=missing \
+  run token_fail_gh_missing_hint dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_gh_missing_hint: exit $RC, want 3")
+[[ "$OUT" == *'gh が起動できません'* ]] || failures+=("token_fail_gh_missing_hint: gh-missing hint missing")
+[[ "$OUT" != *'gh extension install'* ]] || failures+=("token_fail_gh_missing_hint: install hint shown despite gh itself missing")
 
 run dev_git_identity dev git commit -m x
 expect_log dev_git_identity "GH_TOKEN=dev-token"

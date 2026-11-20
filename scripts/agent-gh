@@ -93,15 +93,30 @@ secret() {
   printf '%s' "$value"
 }
 
+# mask_secret_line <行> <伏せる値...>: 行内の秘密らしいものを伏せて出す（#520）。
+# - 引数で渡された値そのもの（APP ID・INSTALLATION ID・秘密鍵の各行）
+# - gh のトークンの形（ghp_ / gho_ / ghs_ など gh<英字 1 文字>_ の後ろに英数字が続く形）
+# 秘密鍵は複数行の PEM で、 stderr の 1 行目に現れるのはその一部（1 行）のため、
+# 呼び出し側で行ごとに分けて渡す（鍵全体を渡しても 1 行の中に一致しない）。
+mask_secret_line() {
+  local line="$1" v
+  shift
+  for v in "$@"; do
+    [[ -n "$v" ]] || continue
+    line="${line//"$v"/<秘密>}"
+  done
+  printf '%s' "$line" | sed -e 's/gh[a-zA-Z]_[A-Za-z0-9_]\{8,\}/gh?_<秘密>/g'
+}
+
 # app_token <APP ID の名前> <INSTALLATION ID の名前> <秘密鍵の名前>:
 # fnox の 3 つの名前から GitHub App のインストールトークンを発行して出力する。
 # 名前は役割ごとに違う（dev / review: PELWAY_*_APP_ID・_APP_INSTALLATION_ID・_APP_KEY、
 # qa: PELWAY_QA_APP_ID・PELWAY_QA_INSTALLATION_ID・PELWAY_QA_PRIVATE_KEY）。
 app_token() {
-  # key_file は local にしない: EXIT trap の実行時には local 変数のスコープが既に
+  # key_file・err_file は local にしない: EXIT trap の実行時には local 変数のスコープが既に
   # 終わっており ${key_file:-} が空に展開されるため、消すべきパスが trap に届かない。
   # グローバルなら subshell 内の trap から見える。
-  local app_id installation_id key response token
+  local app_id installation_id key response token rc err_first ext_rc key_lines key_frags kl
   app_id="$(secret "$1")"
   installation_id="$(secret "$2")"
   key="$(secret "$3")"
@@ -110,18 +125,50 @@ app_token() {
   # EXIT trap（cleanup）も cleanup_paths への追加もこの中では効かない（subshell の変更は
   # 親に届かない）。そこで subshell 自身の EXIT trap で消し、chmod・printf の失敗や割り込みで
   # 途中終了したときも鍵ファイルが残らないようにする。trap は subshell 内の設定なので
-  # 親の cleanup と衝突しない。
+  # 親の cleanup と衝突しない。err_file（gh の stderr の取り込み用 #520）も同じ trap で消す。
   key_file="$(mktemp)"
-  trap 'rm -f "${key_file:-}"' EXIT
+  err_file="$(mktemp)"
+  trap 'rm -f "${key_file:-}" "${err_file:-}"' EXIT
   chmod 600 "$key_file"
   printf '%s\n' "$key" >"$key_file"
   # gh 拡張 Link-/gh-token。出力は JSON（{"token": "...", ...}）。
-  if ! response="$(gh token generate --app-id "$app_id" --installation-id "$installation_id" --key "$key_file" 2>/dev/null)"; then
+  # 失敗のときは stderr を捨てず、1 行目を秘密を伏せて出す（#520）。
+  rc=0
+  response="$(gh token generate --app-id "$app_id" --installation-id "$installation_id" --key "$key_file" 2>"$err_file")" || rc=$?
+  if ((rc != 0)); then
     rm -f "$key_file"
-    echo "agent-gh: GitHub App のトークンを発行できません（gh extension install Link-/gh-token が必要）" >&2
+    err_first="$(head -n 1 "$err_file")"
+    rm -f "$err_file"
+    if [[ -n "$err_first" ]]; then
+      # 秘密鍵（複数行の PEM）は行ごとに分けて伏せる値に渡す。BEGIN/END 行と空行は
+      # それ自体秘密ではないため外す（stderr の 1 行に現れるのは鍵の一部の行）。
+      mapfile -t key_lines <<<"$key"
+      key_frags=()
+      for kl in "${key_lines[@]}"; do
+        [[ -z "$kl" || "$kl" == -----BEGIN* || "$kl" == -----END* ]] || key_frags+=("$kl")
+      done
+      echo "agent-gh: GitHub App のトークンを発行できません（gh token generate が失敗: $(mask_secret_line "$err_first" "$app_id" "$installation_id" "${key_frags[@]}")）" >&2
+    else
+      echo "agent-gh: GitHub App のトークンを発行できません（gh token generate が失敗、stderr なし・終了コード $rc）" >&2
+    fi
+    # 「拡張が必要」の文は、gh token --help が成功する（= gh-token 拡張が gh token
+    # コマンドを提供している）ときは出さない。gh extension list は空の GH_CONFIG_DIR
+    # （gh_isolated_config）では認証チェックに引っかかって常に失敗するため使えない
+    # （cli/cli root.go の CheckAuth。実測: 空 GH_CONFIG_DIR で exit 4）。
+    # gh token --help はヘルプ表示のため認証の門を通らない（実測 2026-11-20:
+    # 拡張あり exit 0 / 拡張なし unknown command で exit 1 / gh 無し exit 127）。
+    # 126/127 は bash 標準の「コマンドを起動できなかった」終了コードなので、
+    # 「拡張が無い」とは別の案内を出す（誤った install 案内を防ぐ）。
+    ext_rc=0
+    gh token --help >/dev/null 2>&1 || ext_rc=$?
+    if ((ext_rc == 126 || ext_rc == 127)); then
+      echo "agent-gh: gh が起動できません（PATH を確認してください）" >&2
+    elif ((ext_rc != 0)); then
+      echo "agent-gh: gh extension install Link-/gh-token が必要です" >&2
+    fi
     exit 3
   fi
-  rm -f "$key_file"
+  rm -f "$key_file" "$err_file"
   token="$(sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' <<<"$response")"
   [[ -n "$token" ]] || { echo "agent-gh: トークン発行の応答に token がありません" >&2; exit 3; }
   printf '%s' "$token"
