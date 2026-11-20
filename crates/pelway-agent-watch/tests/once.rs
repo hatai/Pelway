@@ -43,7 +43,23 @@ esac
         // 偽の gh: 開いている PR はない。
         write_exec(&root.join("bin/gh"), "#!/usr/bin/env bash\necho '[]'\n");
         // 偽の fnox: 秘密は取れない（本物の webhook に送らないため。送信は「送れなかった」扱いになる）
-        write_exec(&root.join("bin/fnox"), "#!/usr/bin/env bash\nexit 1\n");
+        // fake/fnox-ok があるときだけ偽の値を返す（送信が失敗する場合の試験に使う）
+        write_exec(
+            &root.join("bin/fnox"),
+            "#!/usr/bin/env bash\n[ -e \"$FAKE_DIR/fnox-ok\" ] && { echo fake-secret; exit 0; }\nexit 1\n",
+        );
+        // 偽の curl: 本文（--data-binary @<file>）を fake/curl-body に写し、HTTP 500 を返す
+        write_exec(
+            &root.join("bin/curl"),
+            r#"#!/usr/bin/env bash
+cat > /dev/null
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--data-binary" ]; then cp "${2#@}" "$FAKE_DIR/curl-body"; fi
+  shift
+done
+printf 500
+"#,
+        );
         // 偽の git: rev-parse の --git-dir / --git-common-dir / --show-toplevel は、
         // rev-parse の実行先（$PWD）に同名ファイルがあればその中身、無ければ fake/ の同名
         // ファイル、それも無ければ ".git"・".git"・`pwd -P`（本体 checkout）を返す。
@@ -614,16 +630,23 @@ fn inbox_appends_every_event() {
 
 #[test]
 fn inbox_written_when_webhook_fails() {
-    // 偽の fnox は秘密を返さないので、webhook には送れない（送信待ちの列に残る）
+    // 偽の秘密を返し、偽の curl が HTTP 500 を返す: 送信処理は呼ばれて失敗する
     let sb = Sandbox::new("inbox-webhook-fails");
     one_event(&sb);
+    sb.fake("fnox-ok", "");
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
-    assert!(stderr(&out).contains("mode=not-sent"));
+    assert!(
+        stderr(&out).contains("mode=send-failed"),
+        "{}",
+        stderr(&out)
+    );
     let events = inbox_events(&sb);
     assert_eq!(events.len(), 1);
     assert_eq!(events[0]["event"], "finished");
-    assert!(events[0]["report"].as_str().unwrap().contains("issue: #80"));
+    // 送信処理に渡した JSON と、受信箱の 1 行が同じ
+    let sent: serde_json::Value = serde_json::from_str(&sb.read_fake("curl-body")).unwrap();
+    assert_eq!(sent, events[0]);
 }
 
 #[test]
@@ -904,4 +927,62 @@ fn huge_sparse_inbox_does_not_stall_the_watch() {
     assert!(err.contains("mode=not-sent"), "{err}");
     assert!(sb.read_fake("t3-send-args").is_empty());
     assert_eq!(fs::metadata(sb.inbox()).unwrap().len(), 1 << 40);
+}
+
+#[test]
+fn own_event_does_not_wake_the_conductor() {
+    // 知らせの元が登録された指揮役自身（巡回の終わり）だけの回は起こさない
+    let sb = Sandbox::new("wake-own");
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:conductor-1","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "completed", "2026-11-10T16:10:00Z", 0),
+    );
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{"mcp:conductor-1":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null}},"ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 1);
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    assert!(stderr(&out).contains("WAKE skipped reason=own-event"));
+}
+
+#[test]
+fn missing_patrol_state_skips_wake() {
+    let sb = Sandbox::new("wake-no-patrol");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 1);
+    assert!(stderr(&out).contains("mode=not-sent"));
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    assert!(stderr(&out).contains("WAKE skipped reason=patrol-state-unreadable"));
+}
+
+#[test]
+fn partial_line_is_closed_before_appending() {
+    // 前回の追記が途中で失敗して、改行の無い断片が残っている
+    let sb = Sandbox::new("inbox-partial");
+    one_event(&sb);
+    fs::create_dir_all(sb.pelway_dir()).unwrap();
+    fs::write(sb.inbox(), "{\"event\":\"finis").unwrap();
+    fs::set_permissions(sb.inbox(), fs::Permissions::from_mode(0o600)).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let text = fs::read_to_string(sb.inbox()).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 2, "{text}");
+    assert_eq!(lines[0], "{\"event\":\"finis");
+    let ev: serde_json::Value =
+        serde_json::from_str(lines[1]).expect("the new event is its own line");
+    assert_eq!(ev["event"], "finished");
 }

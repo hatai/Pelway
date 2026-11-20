@@ -422,6 +422,17 @@ pub fn append_inbox(path: &Path, lines: &[String]) -> Result<u64, String> {
     if len > INBOX_MAX_BYTES {
         return Err("inbox is too large".to_string());
     }
+    // 前回の追記が途中で失敗して改行の無い断片が残っていれば、先に改行で閉じる
+    // （次の知らせを独立した 1 行として読めるようにする）
+    if len > 0 {
+        use std::os::unix::fs::FileExt;
+        let mut last = [0u8; 1];
+        file.read_exact_at(&mut last, len - 1)
+            .map_err(|e| e.to_string())?;
+        if last[0] != b'\n' {
+            file.write_all(b"\n").map_err(|e| e.to_string())?;
+        }
+    }
     for line in lines {
         let mut buf = line.clone();
         buf.push('\n');

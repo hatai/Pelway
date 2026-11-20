@@ -247,8 +247,13 @@ impl Watcher {
         // 受信箱に書けなくても webhook の送信と見張りは続ける。
         if !payloads.is_empty() {
             let lines: Vec<String> = payloads.iter().map(|(p, _)| inbox_line(p)).collect();
+            let sources: Vec<String> = payloads
+                .iter()
+                .filter_map(|(p, _)| p.get("thread_id").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect();
             match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &lines) {
-                Ok(total) => self.maybe_wake(total),
+                Ok(total) => self.maybe_wake(total, &sources),
                 Err(e) => eprintln!("agent-watch: ERROR inbox append failed: {e}"),
             }
         }
@@ -286,7 +291,7 @@ impl Watcher {
     /// 受信箱に書いたあと、補助記録に登録されたいまの指揮役を起こす。
     /// 指揮役が前回の起こしの後に受信箱を読んでいなければ、重ねて起こさない。
     /// 失敗しても記録を進めず、次の新しい知らせで改めて試みる（再送の列は持たない）。
-    fn maybe_wake(&mut self, inbox_lines: u64) {
+    fn maybe_wake(&mut self, inbox_lines: u64, sources: &[String]) {
         // 宛先はホスト側の登録ファイルからだけ読む（sandbox から書ける補助記録の値は使わない）
         let registered = match io::read_conductor_file(&io::conductor_file()) {
             Ok(Some(text)) => parse_conductor_file(&text),
@@ -296,19 +301,23 @@ impl Watcher {
                 return;
             }
         };
+        // 知らせの元が登録された指揮役自身だけの回（指揮役の巡回の終わりなど）は起こさない。
+        // 起こすと、巡回の終わり → 知らせ → 起こし → 巡回、を繰り返すため。
+        if !sources.is_empty() && sources.iter().all(|s| Some(s) == registered.as_ref()) {
+            eprintln!("agent-watch: WAKE skipped reason=own-event");
+            return;
+        }
+        // 既読の位置は補助記録から読む。無い・書きかけ・壊れているときは、その回は起こさない
+        // （conductor-watch が書き直している途中のこともある）
         let patrol_state = self.pelway_dir.join(PATROL_STATE_FILE);
-        let inbox_offset = if std::fs::symlink_metadata(&patrol_state).is_err() {
-            0 // 指揮役がまだ受信箱を読んでいない
-        } else {
+        let inbox_offset =
             match io::read_patrol_state(&patrol_state).and_then(|t| parse_patrol_state(&t)) {
                 Ok(info) => info.inbox_offset,
                 Err(_) => {
-                    // 書きかけ・壊れている。conductor-watch が書き直している途中のこともある
                     eprintln!("agent-watch: WAKE skipped reason=patrol-state-unreadable");
                     return;
                 }
-            }
-        };
+            };
         let info = PatrolInfo {
             conductor_thread_id: registered,
             inbox_offset,
