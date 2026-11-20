@@ -23,3 +23,15 @@
 5. 改善案: .agents/skills/implement-issue/SKILL.md の「手順 9 修正依頼」に「merge 後は main 側が追加した同じファイルのテストとの相互作用も通過確認する」を足す
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: 356b38aee8d48fa85ad69e691eb186db22df0c04
+
+1. 詰まった箇所: なし。レビュー指摘の `grep -q 'gh-token'` の部分一致（scripts/agent-gh）は、修正前にテスト `token_fail_install_hint_for_lookalike_name` を足して red（案内が出ない）で再現してから直した
+2. 曖昧だった文: 「extension 名を行単位で正確に（完全一致で）判定し」（指揮役の must-fix 通知）— 「行単位」の判定対象が行全体か名前フィールドか書かれていない
+3. 仮定と解釈: `gh extension list` の出力は「名前 バージョン リポジトリ」で名前は必ず第 1 フィールドと仮定し、`awk '{print $1}'` で名前を抽出して `grep -qx 'gh-token'`（行全体の完全一致）で判定した。採らなかった解釈: 行全体との完全一致（バージョン・リポジトリが常に並ぶ保証が無い）、`^gh-token([[:space:]]|$)` 系のアンカー（文字列先頭一致は今回の見落としと同種の穴を開けやすい）
+4. 足りなかった情報・検証手段: 実在する gh-token 似の名前（gh-token-extra 等）の extension が実際に存在するかは未確認（テストは合成のリスト出力で書いた）
+5. 改善案: なし（この修正で変えるべき skill・docs の文言は無い）
+
+使ったスキル: implement-issue
