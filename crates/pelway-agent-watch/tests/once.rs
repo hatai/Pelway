@@ -24,6 +24,7 @@ impl Sandbox {
             &root.join("bin/t3"),
             r#"#!/usr/bin/env bash
 F="$FAKE_DIR"
+echo "t3 $*" >> "$F/t3-calls"
 [ -e "$F/t3-fail" ] && exit 1
 case "$1 $2" in
   "thread list") cat "$F/list.json" ;;
@@ -66,6 +67,12 @@ done
 
     fn lock_file(&self) -> PathBuf {
         self.root.join("state/pelway/agent-watch.lock")
+    }
+
+    /// 偽 t3 の呼び出し記録。見張りが動けば必ず `t3 thread list` が呼ばれるので、
+    /// 記録が無いことは「見張りが動かなかった」ことの確認になる。
+    fn t3_calls(&self) -> PathBuf {
+        self.root.join("fake/t3-calls")
     }
 
     fn command(&self, args: &[&str]) -> Command {
@@ -299,12 +306,15 @@ fn state_file_is_owner_only() {
 
 #[test]
 fn worktree_checkout_is_refused() {
-    // --git-dir と --git-common-dir が違う（linked worktree）ところからは起動しない
+    // --git-dir と --git-common-dir が違う（linked worktree）ところからは起動しない。
+    // 拒否される側は --once（dry-run なし）で起動する: 拒否されずに動けば初回の周回で
+    // 状態ファイルが作られ、偽 t3 が呼ばれる（--dry-run だと動いても両方とも起きず、
+    // 「拒否された」を確かめられない）
     let sb = Sandbox::new("worktree");
     sb.fake("list.json", LIST_DONE);
     sb.fake("git-dir", "/repo/.git/worktrees/wt\n");
     sb.fake("git-common-dir", "/repo/.git\n");
-    let out = sb.run();
+    let out = sb.run_with(&["--once"]);
     assert!(
         out.status.success(),
         "stderr: {}",
@@ -318,6 +328,7 @@ fn worktree_checkout_is_refused() {
         String::from_utf8_lossy(&out.stdout)
     );
     assert!(!sb.state_file().exists(), "state file was written");
+    assert!(!sb.t3_calls().exists(), "fake t3 was called");
 }
 
 #[test]
@@ -332,7 +343,9 @@ fn second_instance_is_refused() {
         .stderr(Stdio::null());
     let mut first = KillOnDrop(cmd.spawn().unwrap());
     wait_locked(&sb.lock_file(), &mut first.0);
-    let out = sb.run();
+    // 2 つ目は --once（dry-run なし）で起動する。拒否されずに動けば状態ファイルが
+    // 作られる（1 つ目は --dry-run なので作らず、判定を汚さない）
+    let out = sb.run_with(&["--once"]);
     assert!(
         out.status.success(),
         "stderr: {}",
@@ -362,7 +375,7 @@ fn externally_held_lock_is_refused() {
             .unwrap(),
     );
     wait_locked(&sb.lock_file(), &mut hold.0);
-    let out = sb.run();
+    let out = sb.run_with(&["--once"]);
     assert!(
         out.status.success(),
         "stderr: {}",
@@ -376,6 +389,7 @@ fn externally_held_lock_is_refused() {
         String::from_utf8_lossy(&out.stdout)
     );
     assert!(!sb.state_file().exists(), "state file was written");
+    assert!(!sb.t3_calls().exists(), "fake t3 was called");
 }
 
 #[test]
