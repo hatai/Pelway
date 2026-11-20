@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# 指揮役の立て直し（恒久交代。docs/agents/conductor-context.md の「恒久交代」）を始める。
+# hatai がホストの端末で実行する。
+#
+#   scripts/conductor-rebuild --from <旧指揮役のスレッド ID> [--provider <id> --model <slug>] [--effort <値>]
+#
+# 1. 旧指揮役に決まった停止の文を送り、終わるまで待つ（t3 thread send --wait）
+# 2. 新しい指揮役を本体 checkout で立てる（t3 thread start。--worktree は付けない）
+# 3. 起こしの宛先を新しい指揮役に替える（scripts/conductor-register）
+# 旧指揮役の settle と巡回の scheduled task の作り直しは、新しい指揮役が引き継ぎの確認の後に行う
+# （t3 CLI には settle が無い。権限は確認の完了で移る）。
+# provider・model を省略したときは旧指揮役と同じものを使う（t3 thread show で読む）。
+# effort は t3 thread show から読めないので、--effort を指定したときだけ渡す。
+set -euo pipefail
+
+usage() { sed -n '5p' "$0" | sed 's/^# *//' >&2; exit 2; }
+valid_id() { [[ "$1" != -* && "$1" =~ ^[A-Za-z0-9:_.%-]{1,256}$ ]]; }
+
+from="" provider="" model="" effort=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --from) from="${2-}"; shift 2 || usage ;;
+    --provider) provider="${2-}"; shift 2 || usage ;;
+    --model) model="${2-}"; shift 2 || usage ;;
+    --effort) effort="${2-}"; shift 2 || usage ;;
+    *) usage ;;
+  esac
+done
+[[ -n "$from" ]] || usage
+if ! valid_id "$from"; then
+  echo "conductor-rebuild: --from is not a thread id" >&2; exit 1
+fi
+for v in "$provider" "$model" "$effort"; do
+  if [[ -n "$v" && ! "$v" =~ ^[A-Za-z0-9._-]{1,64}$ ]]; then
+    echo "conductor-rebuild: --provider/--model/--effort must be plain identifiers" >&2; exit 1
+  fi
+done
+
+# 動いている T3 サーバーと同じ実行ファイルを使う（PATH の t3 は ServerOwnsDatabaseError で拒まれることがある）。
+# 受け入れるのは $HOME/.t3/wsl-runtime/ の下の t3 だけ。T3_BIN で差し替えられる（テスト用）。
+T3="${T3_BIN:-}"
+if [[ -z "$T3" ]]; then
+  T3="$(command -v t3 || true)"
+  for exe in /proc/[0-9]*/exe; do
+    link="$(readlink "$exe" 2>/dev/null || true)"
+    case "$link" in
+      "$HOME"/.t3/wsl-runtime/*/t3) T3="$link"; break ;;
+    esac
+  done
+fi
+[[ -n "$T3" ]] || { echo "conductor-rebuild: t3 not found" >&2; exit 1; }
+
+# 本体 checkout（共有の git dir の親）。新しい指揮役はここで動く。
+common="$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)"
+project="$(dirname "$common")"
+
+show="$("$T3" thread show "$from" --json)"
+if [[ -z "$provider" || -z "$model" ]]; then
+  read -r old_provider old_model < <(printf '%s' "$show" | /usr/bin/python3 -I -c '
+import json, sys
+t = json.load(sys.stdin); t = t.get("thread", t)
+print(t.get("providerInstanceId") or "", t.get("model") or "")')
+  provider="${provider:-$old_provider}"; model="${model:-$old_model}"
+fi
+[[ -n "$provider" && -n "$model" ]] || { echo "conductor-rebuild: cannot determine provider/model" >&2; exit 1; }
+
+STOP="恒久交代を始める（docs/agents/conductor-context.md の「恒久交代」）。案件を進める操作（スレッドの起動・指示、マージ、ラベル、コメント、ステータス変更）を止め、引き継ぎの記録を指揮役の作業ログと patrol-state.json に書き出して、このターンを終える。以後は操作しない。"
+printf '%s' "$STOP" | "$T3" thread send --wait "$from" - >/dev/null \
+  || { echo "conductor-rebuild: failed to stop the old conductor; nothing changed" >&2; exit 1; }
+
+START="あなたは新しい指揮役。skill command-team と docs/agents/conductor-context.md の「恒久交代」に従い、旧指揮役（スレッド $from）から引き継ぐ。引き継ぎ確認（GitHub の実状態、patrol-state、巡回記録、実行中スレッドの照合）を済ませて操作権限を受け取ったら、旧指揮役のスレッドを t3_thread_organize で settle し、巡回の scheduled task を作り直す（runbook の「指揮役の定期巡回（スケジュール起床）」）。確認が完了しない場合は権限を受け取らず、hatai に知らせる。"
+args=(thread start --provider "$provider" --model "$model")
+[[ -n "$effort" ]] && args+=(--option "effort=$effort")
+args+=(--title "[指揮役] 恒久交代で引き継ぐ" "$project" -)
+new="$(printf '%s' "$START" | "$T3" "${args[@]}" | awk 'NF{l=$0} END{print l}' | tr -d '[:space:]')" \
+  || { echo "conductor-rebuild: failed to start the new conductor; registration unchanged" >&2; exit 1; }
+if ! valid_id "$new"; then
+  echo "conductor-rebuild: failed to start the new conductor; registration unchanged" >&2; exit 1
+fi
+
+bash "$(dirname "$0")/conductor-register" "$new"
+echo "conductor-rebuild: new conductor $new (the old conductor is settled by the new one after the handover check)"
