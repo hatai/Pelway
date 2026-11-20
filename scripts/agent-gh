@@ -94,8 +94,10 @@ secret() {
 }
 
 # mask_secret_line <行> <伏せる値...>: 行内の秘密らしいものを伏せて出す（#520）。
-# - 引数で渡された値そのもの（APP ID・INSTALLATION ID・秘密鍵）
+# - 引数で渡された値そのもの（APP ID・INSTALLATION ID・秘密鍵の各行）
 # - gh のトークンの形（ghp_ / gho_ / ghs_ など gh<英字 1 文字>_ の後ろに英数字が続く形）
+# 秘密鍵は複数行の PEM で、 stderr の 1 行目に現れるのはその一部（1 行）のため、
+# 呼び出し側で行ごとに分けて渡す（鍵全体を渡しても 1 行の中に一致しない）。
 mask_secret_line() {
   local line="$1" v
   shift
@@ -114,7 +116,7 @@ app_token() {
   # key_file・err_file は local にしない: EXIT trap の実行時には local 変数のスコープが既に
   # 終わっており ${key_file:-} が空に展開されるため、消すべきパスが trap に届かない。
   # グローバルなら subshell 内の trap から見える。
-  local app_id installation_id key response token rc err_first ext_list
+  local app_id installation_id key response token rc err_first ext_list key_lines key_frags kl
   app_id="$(secret "$1")"
   installation_id="$(secret "$2")"
   key="$(secret "$3")"
@@ -138,7 +140,14 @@ app_token() {
     err_first="$(head -n 1 "$err_file")"
     rm -f "$err_file"
     if [[ -n "$err_first" ]]; then
-      echo "agent-gh: GitHub App のトークンを発行できません（gh token generate が失敗: $(mask_secret_line "$err_first" "$app_id" "$installation_id" "$key")）" >&2
+      # 秘密鍵（複数行の PEM）は行ごとに分けて伏せる値に渡す。BEGIN/END 行と空行は
+      # それ自体秘密ではないため外す（stderr の 1 行に現れるのは鍵の一部の行）。
+      mapfile -t key_lines <<<"$key"
+      key_frags=()
+      for kl in "${key_lines[@]}"; do
+        [[ -z "$kl" || "$kl" == -----BEGIN* || "$kl" == -----END* ]] || key_frags+=("$kl")
+      done
+      echo "agent-gh: GitHub App のトークンを発行できません（gh token generate が失敗: $(mask_secret_line "$err_first" "$app_id" "$installation_id" "${key_frags[@]}")）" >&2
     else
       echo "agent-gh: GitHub App のトークンを発行できません（gh token generate が失敗、stderr なし・終了コード $rc）" >&2
     fi

@@ -196,6 +196,17 @@ GH_TOKEN_GENERATE_STDERR_1='sign failed app=333 installation=444 key=dev-pem-bod
 [[ "$OUT" != *dev-pem-body* ]] || failures+=("token_fail_masks_secret_values: key value leaked")
 [[ "$OUT" != *ghs_0123456789abcdefghijklmn* ]] || failures+=("token_fail_masks_secret_values: token value leaked")
 
+# 鍵は複数行の PEM。stderr の 1 行目に鍵本体の 1 行（base64 行）が混ざっても伏せる
+# （鍵全体が 1 行に現れることは無いため、行ごとの伏せが必要）
+FAKE_PELWAY_DEV_APP_KEY=$'-----BEGIN PRIVATE KEY-----\nMIIBfakeKEYbodyLINEone1234\nMIIBfakeKEYbodyLINEtwo5678\n-----END PRIVATE KEY-----' \
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_TOKEN_GENERATE_STDERR_1='jwt sign error at MIIBfakeKEYbodyLINEone1234 (app 333)' \
+  run token_fail_masks_multiline_key_fragment dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_masks_multiline_key_fragment: exit $RC, want 3")
+[[ "$OUT" != *MIIBfakeKEYbodyLINEone1234* ]] || failures+=("token_fail_masks_multiline_key_fragment: key body line leaked")
+[[ "$OUT" != *MIIBfakeKEYbodyLINEtwo5678* ]] || failures+=("token_fail_masks_multiline_key_fragment: other key body line leaked")
+[[ "$OUT" != *333* ]] || failures+=("token_fail_masks_multiline_key_fragment: app id value leaked")
+
 # stderr が空のときは 1 行目を出せないので、終了コードで原因の種別だけ示す
 GH_TOKEN_GENERATE_FAIL=1 \
 GH_TOKEN_GENERATE_STDERR_1='' \
