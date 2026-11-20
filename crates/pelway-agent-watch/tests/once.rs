@@ -37,18 +37,22 @@ esac
         write_exec(&root.join("bin/gh"), "#!/usr/bin/env bash\necho '[]'\n");
         // 偽の fnox: 秘密は取れない（本物の webhook に送らないため。送信は「送れなかった」扱いになる）
         write_exec(&root.join("bin/fnox"), "#!/usr/bin/env bash\nexit 1\n");
-        // 偽の git: rev-parse の --git-dir / --git-common-dir は fake/git-dir・fake/git-common-dir の
-        // 中身を返す。無ければ両方 ".git"（本体 checkout）。worktree は中身を変えて模す。
+        // 偽の git: rev-parse の --git-dir / --git-common-dir は、rev-parse の実行先（$PWD）
+        // に git-dir / git-common-dir ファイルがあればその中身、無ければ fake/ の同名ファイル、
+        // それも無ければ両方 ".git"（本体 checkout）を返す。worktree は中身を変えて模す。
         write_exec(
             &root.join("bin/git"),
             r#"#!/usr/bin/env bash
 F="$FAKE_DIR"
 if [ "$1" != "rev-parse" ]; then exit 2; fi
 shift
+GD="$F/git-dir"; GC="$F/git-common-dir"
+[ -f "$PWD/git-dir" ] && GD="$PWD/git-dir"
+[ -f "$PWD/git-common-dir" ] && GC="$PWD/git-common-dir"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --git-dir) cat "$F/git-dir" 2>/dev/null || echo ".git" ;;
-    --git-common-dir) cat "$F/git-common-dir" 2>/dev/null || echo ".git" ;;
+    --git-dir) cat "$GD" 2>/dev/null || echo ".git" ;;
+    --git-common-dir) cat "$GC" 2>/dev/null || echo ".git" ;;
   esac
   shift
 done
@@ -315,6 +319,39 @@ fn worktree_checkout_is_refused() {
     sb.fake("git-dir", "/repo/.git/worktrees/wt\n");
     sb.fake("git-common-dir", "/repo/.git\n");
     let out = sb.run_with(&["--once"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("main checkout"), "stderr: {stderr}");
+    assert!(
+        out.stdout.is_empty(),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(!sb.state_file().exists(), "state file was written");
+    assert!(!sb.t3_calls().exists(), "fake t3 was called");
+}
+
+#[test]
+fn worktree_launch_dir_is_refused_for_main_project() {
+    // 起動元（cwd）が linked worktree なら、--project に本体 checkout を指しても起動しない。
+    // ガードが見張り対象ではなく起動元を見ることの確認
+    let sb = Sandbox::new("wtlaunch");
+    sb.fake("list.json", LIST_DONE);
+    let wt = sb.root.join("wt-checkout");
+    let main_dir = sb.root.join("main-checkout");
+    fs::create_dir_all(&wt).unwrap();
+    fs::create_dir_all(&main_dir).unwrap();
+    // wt-checkout は worktree（rev-parse が違う値を返す）。main-checkout はマーカー無しで本体
+    fs::write(wt.join("git-dir"), "/repo/.git/worktrees/wt\n").unwrap();
+    fs::write(wt.join("git-common-dir"), "/repo/.git\n").unwrap();
+    let mut cmd = sb.command(&["--once"]);
+    cmd.current_dir(&wt)
+        .args(["--project", main_dir.to_str().unwrap()]);
+    let out = cmd.output().unwrap();
     assert!(
         out.status.success(),
         "stderr: {}",

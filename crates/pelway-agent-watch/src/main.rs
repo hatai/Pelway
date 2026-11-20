@@ -63,8 +63,17 @@ fn parse_args() -> Result<Options, String> {
 /// 起動してよいかの確認。本体 checkout からの起動だけを許し（worktree は見張りが二重になる）、
 /// 状態ディレクトリの lock で同時実行を 1 つに絞る。拒否は意図した終了なので終了コード 0
 /// （pitchfork の再起動を呼ばない。agent-worktree-prune と同じ決まり）。確認自体に失敗したときは 1。
-fn startup_guards(opts: &Options) -> std::fs::File {
-    match io::git_dirs(&opts.project) {
+/// worktree の判定は見張り対象（`--project`）ではなく起動元（実プロセスの cwd）で行う:
+/// worktree から `--project` に本体 checkout を渡して起動する抜け道をふさぐため。
+fn startup_guards() -> std::fs::File {
+    let cwd = match std::env::current_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("agent-watch: cannot check the launch directory: {e}");
+            std::process::exit(1);
+        }
+    };
+    match io::git_dirs(&cwd) {
         Ok((dir, common)) if dir == common => {}
         Ok(_) => {
             eprintln!("agent-watch: refusing to start: linked worktree is not the main checkout");
@@ -126,7 +135,7 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let _lock = startup_guards(&opts);
+    let _lock = startup_guards();
     let state_path = io::state_path();
     let state = io::load_state(&state_path);
     let mut w = Watcher {
