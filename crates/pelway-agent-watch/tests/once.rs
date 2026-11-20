@@ -87,6 +87,13 @@ done
         fs::write(self.pelway_dir().join("patrol-state.json"), body).unwrap();
     }
 
+    /// ホスト側の登録ファイルに、いまの指揮役のスレッド ID を書く（scripts/conductor-register の代わり）。
+    fn conductor(&self, id: &str) {
+        let dir = self.root.join("home/.config/pelway-agent-notify");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("conductor-thread-id"), format!("{id}\n")).unwrap();
+    }
+
     fn read_fake(&self, name: &str) -> String {
         fs::read_to_string(self.root.join("fake").join(name)).unwrap_or_default()
     }
@@ -119,6 +126,8 @@ done
             .env("FAKE_DIR", self.root.join("fake"))
             // 起こしに使う t3 は偽物に向ける（この PC で動いている本物の T3 サーバーを呼ばない）
             .env("T3_BIN", self.root.join("bin/t3"))
+            // 指揮役の登録ファイル（~/.config/pelway-agent-notify/conductor-thread-id）の置き場
+            .env("HOME", self.root.join("home"))
             .env("XDG_STATE_HOME", self.root.join("state"));
         cmd
     }
@@ -637,7 +646,8 @@ fn inbox_failure_does_not_stop_watch() {
 fn wake_sent_to_registered_conductor() {
     let sb = Sandbox::new("wake-sent");
     one_event(&sb);
-    sb.patrol_state(r#"{"conductor_thread_id":"mcp:conductor-1","inbox_offset":0}"#);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     assert_eq!(sb.read_fake("t3-send-args").trim(), "mcp:conductor-1 -");
@@ -654,16 +664,17 @@ fn wake_sent_to_registered_conductor() {
 fn no_wake_without_conductor() {
     let sb = Sandbox::new("wake-none");
     one_event(&sb);
-    sb.patrol_state(r#"{"conductor_thread_id":"","inbox_offset":0}"#);
+    // 登録ファイルが無い
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     assert_eq!(inbox_events(&sb).len(), 1);
     assert!(sb.read_fake("t3-send-args").is_empty());
 
-    // 項目そのものが無いときも起こさない
+    // sandbox から書ける補助記録に宛先を書いても使わない（宛先はホスト側の登録ファイルからだけ読む）
     let sb = Sandbox::new("wake-none-missing");
     one_event(&sb);
-    sb.patrol_state(r#"{"subjects":{}}"#);
+    sb.patrol_state(r#"{"conductor_thread_id":"mcp:planted","inbox_offset":0}"#);
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     assert!(sb.read_fake("t3-send-args").is_empty());
@@ -673,7 +684,8 @@ fn no_wake_without_conductor() {
 fn no_repeat_wake_until_read() {
     let sb = Sandbox::new("wake-repeat");
     one_event(&sb);
-    sb.patrol_state(r#"{"conductor_thread_id":"mcp:conductor-1","inbox_offset":0}"#);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     assert_eq!(sb.read_fake("t3-send-args").lines().count(), 1);
@@ -698,7 +710,8 @@ fn no_repeat_wake_until_read() {
     assert_eq!(sb.read_fake("t3-send-args").lines().count(), 1);
 
     // 指揮役が 1 行目まで読んだ（前回の起こしの時点まで既読が進んだ）あとの知らせでは、また起こす
-    sb.patrol_state(r#"{"conductor_thread_id":"mcp:conductor-1","inbox_offset":1}"#);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
     sb.fake(
         "list.json",
         r#"[{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"},
@@ -722,7 +735,8 @@ fn unreadable_patrol_state_skips_wake() {
     let sb = Sandbox::new("wake-unreadable");
     one_event(&sb);
     // 書きかけで途中までしかない補助記録
-    sb.patrol_state(r#"{"conductor_thread_id":"mcp:conductor-1","inbox_off"#);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_off"#);
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     assert_eq!(inbox_events(&sb).len(), 1);
@@ -734,7 +748,8 @@ fn unreadable_patrol_state_skips_wake() {
 fn wake_failure_is_logged_once() {
     let sb = Sandbox::new("wake-fails");
     one_event(&sb);
-    sb.patrol_state(r#"{"conductor_thread_id":"mcp:conductor-1","inbox_offset":0}"#);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
     sb.fake("t3-send-fail", "");
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
@@ -749,7 +764,8 @@ fn wake_failure_is_logged_once() {
 fn invalid_conductor_thread_id_is_not_used() {
     let sb = Sandbox::new("wake-invalid-id");
     one_event(&sb);
-    sb.patrol_state(r#"{"conductor_thread_id":"--help","inbox_offset":0}"#);
+    sb.conductor("--help");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     assert!(sb.read_fake("t3-send-args").is_empty());
@@ -760,7 +776,8 @@ fn invalid_conductor_thread_id_is_not_used() {
 fn dry_run_writes_no_inbox_and_no_wake() {
     let sb = Sandbox::new("inbox-dry-run");
     one_event(&sb);
-    sb.patrol_state(r#"{"conductor_thread_id":"mcp:conductor-1","inbox_offset":0}"#);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
     let out = sb.run();
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     assert!(!sb.inbox().exists());
@@ -850,6 +867,7 @@ fn pelway_dir_symlink_is_not_used() {
 fn patrol_state_fifo_does_not_block() {
     let sb = Sandbox::new("patrol-fifo");
     one_event(&sb);
+    sb.conductor("mcp:conductor-1");
     fs::create_dir_all(sb.pelway_dir()).unwrap();
     mkfifo(&sb.pelway_dir().join("patrol-state.json"));
     let out = run_bounded(&sb);
@@ -857,4 +875,33 @@ fn patrol_state_fifo_does_not_block() {
     assert_eq!(inbox_events(&sb).len(), 1);
     assert!(sb.read_fake("t3-send-args").is_empty());
     assert!(stderr(&out).contains("WAKE skipped reason=patrol-state-unreadable"));
+}
+
+#[test]
+fn huge_sparse_inbox_does_not_stall_the_watch() {
+    // sandbox の中から置ける巨大な sparse ファイル。数えずに、その回は書かず、webhook の処理まで進む
+    let sb = Sandbox::new("inbox-huge");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    fs::create_dir_all(sb.pelway_dir()).unwrap();
+    let f = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(sb.inbox())
+        .unwrap();
+    fs::set_permissions(sb.inbox(), fs::Permissions::from_mode(0o600)).unwrap();
+    f.set_len(1 << 40).unwrap();
+    drop(f);
+    let out = run_bounded(&sb);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let err = stderr(&out);
+    assert!(
+        err.contains("inbox append failed: inbox is too large"),
+        "{err}"
+    );
+    assert!(err.contains("mode=not-sent"), "{err}");
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    assert_eq!(fs::metadata(sb.inbox()).unwrap().len(), 1 << 40);
 }

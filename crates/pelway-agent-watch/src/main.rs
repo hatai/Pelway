@@ -20,8 +20,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use pelway_agent_watch::ci::{ci_should_notify, runs_belong_to_pr};
 use pelway_agent_watch::format_utc;
 use pelway_agent_watch::inbox::{
-    INBOX_FILE, PATROL_STATE_FILE, WAKE_MESSAGE, WakeDecision, decide_wake, inbox_line,
-    parse_patrol_state,
+    INBOX_FILE, PATROL_STATE_FILE, PatrolInfo, WAKE_MESSAGE, WakeDecision, decide_wake, inbox_line,
+    parse_conductor_file, parse_patrol_state,
 };
 use pelway_agent_watch::outbox;
 use pelway_agent_watch::payload::build_payload;
@@ -287,18 +287,31 @@ impl Watcher {
     /// 指揮役が前回の起こしの後に受信箱を読んでいなければ、重ねて起こさない。
     /// 失敗しても記録を進めず、次の新しい知らせで改めて試みる（再送の列は持たない）。
     fn maybe_wake(&mut self, inbox_lines: u64) {
-        let patrol_state = self.pelway_dir.join(PATROL_STATE_FILE);
-        if std::fs::symlink_metadata(&patrol_state).is_err() {
-            // 補助記録が無い（指揮役が T3 のスレッドとして動いていない）。起こす宛先が無い
-            return;
-        }
-        let info = match io::read_patrol_state(&patrol_state).and_then(|t| parse_patrol_state(&t)) {
-            Ok(info) => info,
+        // 宛先はホスト側の登録ファイルからだけ読む（sandbox から書ける補助記録の値は使わない）
+        let registered = match io::read_conductor_file(&io::conductor_file()) {
+            Ok(Some(text)) => parse_conductor_file(&text),
+            Ok(None) => return, // 登録が無い（指揮役が T3 のスレッドとして動いていない）
             Err(_) => {
-                // 無い・書きかけ・壊れている。conductor-watch が書き直している途中のこともある
-                eprintln!("agent-watch: WAKE skipped reason=patrol-state-unreadable");
+                eprintln!("agent-watch: WAKE skipped reason=conductor-file-unreadable");
                 return;
             }
+        };
+        let patrol_state = self.pelway_dir.join(PATROL_STATE_FILE);
+        let inbox_offset = if std::fs::symlink_metadata(&patrol_state).is_err() {
+            0 // 指揮役がまだ受信箱を読んでいない
+        } else {
+            match io::read_patrol_state(&patrol_state).and_then(|t| parse_patrol_state(&t)) {
+                Ok(info) => info.inbox_offset,
+                Err(_) => {
+                    // 書きかけ・壊れている。conductor-watch が書き直している途中のこともある
+                    eprintln!("agent-watch: WAKE skipped reason=patrol-state-unreadable");
+                    return;
+                }
+            }
+        };
+        let info = PatrolInfo {
+            conductor_thread_id: registered,
+            inbox_offset,
         };
         match decide_wake(&info, self.state.last_wake_inbox_lines) {
             WakeDecision::Send(thread_id) => {

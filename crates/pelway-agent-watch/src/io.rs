@@ -407,6 +407,10 @@ fn split_pelway_path(path: &Path) -> Result<(&Path, &str), String> {
     Ok((dir, name))
 }
 
+/// 受信箱の大きさの上限。切り詰めない設計でも数年分は収まる大きさ（1 件は数百バイト）。
+/// 超えたもの（sandbox の中から置かれた巨大な sparse ファイルなど）には書かず、数えない。
+const INBOX_MAX_BYTES: u64 = 256 * 1024 * 1024;
+
 /// 受信箱に、1 件 1 行で追記する（ファイルは 0600。1 行を 1 回の書き込みで書く）。
 /// 書いたあとの受信箱の行数を、同じ fd で数えて返す（path を開き直さない）。
 pub fn append_inbox(path: &Path, lines: &[String]) -> Result<u64, String> {
@@ -414,12 +418,18 @@ pub fn append_inbox(path: &Path, lines: &[String]) -> Result<u64, String> {
     let (dir, name) = split_pelway_path(path)?;
     let dirf = open_pelway_dir(dir, true)?;
     let mut file = open_in_pelway(&dirf, name, libc::O_RDWR | libc::O_APPEND | libc::O_CREAT)?;
+    let len = file.metadata().map_err(|e| e.to_string())?.len();
+    if len > INBOX_MAX_BYTES {
+        return Err("inbox is too large".to_string());
+    }
     for line in lines {
         let mut buf = line.clone();
         buf.push('\n');
         file.write_all(buf.as_bytes()).map_err(|e| e.to_string())?;
     }
     file.rewind().map_err(|e| e.to_string())?;
+    // 書いたあとの大きさまでしか読まない（書いている間に伸ばされても、上限の内で止める）
+    let mut file = file.take(INBOX_MAX_BYTES + 1024 * 1024);
     let mut count = 0u64;
     let mut chunk = [0u8; 8192];
     loop {
@@ -450,6 +460,28 @@ pub fn read_patrol_state(path: &Path) -> Result<String, String> {
         .read_to_string(&mut text)
         .map_err(|e| e.to_string())?;
     Ok(text)
+}
+
+/// いまの指揮役のスレッド ID を登録するホスト側のファイル。sandbox の中からは書けない場所
+/// （webhook の秘密の設定と同じ `~/.config/pelway-agent-notify/`）。代行の開始で hatai が書き、終了で消す。
+pub fn conductor_file() -> PathBuf {
+    home().join(".config/pelway-agent-notify/conductor-thread-id")
+}
+
+/// 登録ファイルを読む。無ければ Ok(None)（指揮役が T3 のスレッドとして動いていない）。
+pub fn read_conductor_file(path: &Path) -> Result<Option<String>, String> {
+    use std::io::Read;
+    match fs::File::open(path) {
+        Ok(f) => {
+            let mut text = String::new();
+            f.take(4096)
+                .read_to_string(&mut text)
+                .map_err(|e| e.to_string())?;
+            Ok(Some(text))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// 起こしに使う `t3` の実行ファイル。`T3_BIN` が指定されていればそれ、無ければ動いている

@@ -21,30 +21,35 @@ pub fn inbox_line(payload: &Value) -> String {
     payload.to_string()
 }
 
-/// 補助記録から読む、起こしに要る値。
+/// 起こしに要る値。宛先はホスト側の登録ファイル（sandbox から書けない）から、
+/// 既読の位置は補助記録（sandbox の中の指揮役が書く）から読む。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PatrolInfo {
-    /// いまの指揮役の T3 スレッド ID。空なら起こさない。
+    /// いまの指揮役の T3 スレッド ID（ホスト側の登録ファイルの値）。空なら起こさない。
     pub conductor_thread_id: Option<String>,
     /// 指揮役が読んだ受信箱の行数。
     pub inbox_offset: u64,
 }
 
-/// `patrol-state.json` の中身から、起こしに要る値を読む。JSON として読めなければ Err。
+/// ホスト側の登録ファイルの中身から、指揮役のスレッド ID を読む（最初の行。空なら None）。
+pub fn parse_conductor_file(text: &str) -> Option<String> {
+    text.lines()
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// `patrol-state.json` の中身から、既読の位置（`inbox_offset`）を読む。JSON として読めなければ Err。
+/// 補助記録は sandbox の中のエージェントも書けるので、宛先（`conductor_thread_id`）はここから読まない。
 pub fn parse_patrol_state(text: &str) -> Result<PatrolInfo, String> {
     let v: Value = serde_json::from_str(text).map_err(|e| format!("patrol-state: {e}"))?;
     let obj = v
         .as_object()
         .ok_or_else(|| "patrol-state: not an object".to_string())?;
-    let conductor_thread_id = obj
-        .get("conductor_thread_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string);
     let inbox_offset = obj.get("inbox_offset").and_then(Value::as_u64).unwrap_or(0);
     Ok(PatrolInfo {
-        conductor_thread_id,
+        conductor_thread_id: None,
         inbox_offset,
     })
 }
@@ -110,18 +115,22 @@ mod tests {
     }
 
     #[test]
-    fn patrol_state_reads_id_and_offset() {
+    fn patrol_state_reads_offset_and_ignores_thread_id() {
         let got = parse_patrol_state(
             r#"{"conductor_thread_id":"mcp:abc","inbox_offset":7,"subjects":{}}"#,
         )
         .unwrap();
-        assert_eq!(got, info(Some("mcp:abc"), 7));
+        assert_eq!(got, info(None, 7));
     }
 
     #[test]
-    fn patrol_state_empty_id_is_none() {
-        let got = parse_patrol_state(r#"{"conductor_thread_id":"  "}"#).unwrap();
-        assert_eq!(got, info(None, 0));
+    fn conductor_file_first_line() {
+        assert_eq!(
+            parse_conductor_file("mcp:abc\n"),
+            Some("mcp:abc".to_string())
+        );
+        assert_eq!(parse_conductor_file("  \n"), None);
+        assert_eq!(parse_conductor_file(""), None);
     }
 
     #[test]
