@@ -32,4 +32,14 @@
 4. 足りなかった情報・検証手段: CI 上でのみ再現した競合。ローカル再現は困難（タイミング依存）。
 5. 改善案: ロック取得系のテストで「取られているか」を調べるときは、`flock` で触らず `/proc/locks` を読む。これを rust-testing 系スキルに書く価値があるかは次回の教訓化で検討。
 
+## 実装者メモ（round 4）
+
+対象 head: c0601a8d2d34cf44f99ff2b3be49457b3c5d78bb
+
+1. 詰まった箇所: round 3 の Claude レビューが request-changes（must-fix 1 件）: 拒否のテスト 3 件が `--once --dry-run` で動かしているため、初回周回はイベントを出さず dry-run は状態を書かず、「stdout 空」「状態ファイル非作成」が空振りの assert（worktree 分岐の `exit(0)` を消しても通る）。拒否される側を `--once`（dry-run なし）に変更し、拒否されずに動けば状態ファイルが作られる形にした。あわせて偽 `t3` が呼び出しを `fake/t3-calls` に記録するようにし、他インスタンスが無い 2 件で「偽 t3 が呼ばれていない」も確認。変異チェックで worktree 分岐の `exit(0)` を消して `worktree_checkout_is_refused` が落ちることを確認済み。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: `second_instance_is_refused` は 1 つ目が `--dry-run` で状態を書かないため、2 つ目の `--once` に対して同じ判定が使える。t3-calls は 1 つ目が呼ぶためこのテストでは見ない。
+4. 足りなかった情報・検証手段: なし。
+5. 改善案: なし（nit は round 3 レビューのまま未対応: `File::try_lock` 化・SAFETY コメント・`file.set_permissions`・`/proc/locks` の dev 照合・dry-run 文書の整合）。
+
 使ったスキル: implement-issue・review-pr（結果の照合手順として）。輸入スキルはなし。
