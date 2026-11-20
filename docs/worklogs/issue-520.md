@@ -59,3 +59,19 @@
 5. 改善案: .agents/skills/write-issue/SKILL.md の「受け入れ条件の書き方」に「秘密を出す条件は、秘密の実際の形（複数行 PEM 等）で確かめるよう指定する」を足す
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 6、停止 — Issue #520 コメントに貼付・worklog 未登録）
+
+※ round 6（r4 claude must-fix のエスカレーション）は push しなかったため、skill の規定により docs/worklogs には書かず Issue コメントにのみ貼った（https://github.com/hatai/Pelway/issues/520#issuecomment-7031300729）。
+
+## 実装者メモ（round 7、濱田さん決定の例外 1 回）
+
+対象 head: 8ca445f8e9e8700644213f83c3cdded8505e1933
+
+1. 詰まった箇所: なし。`gh extension list` の呼び出しをやめ、`gh token --help` の終了コードのみで判定する方式（A 案）に切り替えた。修正前にテストを新方式に書き換えて red 3 件（present・gh_missing×2 に加え、main 側 #522 の no_fallback_generate_fails も旧実装の extension list 呼び出しが偽 gh の記録部に落ちるため失敗）で再現してから直した
+2. 曖昧だった文: 「実物の gh で拡張あり・なしの両方を実測」（指揮役の指示）— sandbox 内で「拡張なし」の状態をどう作るかが書かれていない
+3. 仮定と解釈: 実測（2026-11-20・実物 gh）: ① 拡張あり（空 GH_CONFIG_DIR だけ切替）は `gh token --help` exit 0（gh-token 2.0.10 のヘルプ）。② 拡張なしは空 GH_CONFIG_DIR + 空 XDG_DATA_HOME + PATH を gh のディレクトリのみに絞って再現し、`unknown command "token" for "gh"` の exit 1。③ gh 無し（PATH 空）は exit 127。④ 参考: `gh extension list` は空 GH_CONFIG_DIR で認証エラー exit 4（r4 レビューのとおり sandbox 限定でない）。GH_DATA_DIR の切替だけでは拡張が解決された（~/.local/share/gh/extensions と PATH の両方を見るため）ため ② の形で再現した。126（not executable）は実測していないが、bash 標準の起動失敗コードとして 127 と同じ「gh が起動できません」に振った（拡張なし扱いにすると gh が起動できない状況で誤った install 案内になるため）
+4. 足りなかった情報・検証手段: 本物の agent-gh 経由で「拡張なし」を起こす手段（この環境は fnox の秘密が取れるため token 発行が成功し失敗経路に入らない）。判定コマンド単体の 3 状態の実測で代替した
+5. 改善案: .agents/skills/implement-issue/SKILL.md の「手順 4」に「本番の呼び出しコンテキスト（環境変数・設定の前提）を偽バイナリのテストでも再現する（認証や設定の前提が実物と同じか）」を足す
+
+使ったスキル: implement-issue
