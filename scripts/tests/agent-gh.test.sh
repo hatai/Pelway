@@ -21,6 +21,8 @@ printf '%s\n' "${!var}"
 EOF
 
 # 偽の gh: `gh token generate` は JSON を返す。それ以外は GH_TOKEN と引数を記録する。
+# GH_TOKEN_GENERATE_FAIL があれば generate は stderr 2 行を出して失敗する（#520 の失敗経路）。
+# GH_EXTENSION_LIST / GH_EXTENSION_LIST_FAIL で `gh extension list` の応答を切り替える。
 cat >"$BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1 $2" == "token generate" ]]; then
@@ -35,6 +37,12 @@ if [[ "$1 $2" == "token generate" ]]; then
     fi
     prev="$a"
   done
+  # 失敗の演出: GH_TOKEN_GENERATE_FAIL があれば stderr 2 行（1 行目だけ出るべき）を出して終了 1
+  if [[ -n "${GH_TOKEN_GENERATE_FAIL:-}" ]]; then
+    printf '%s\n' "${GH_TOKEN_GENERATE_STDERR_1:-}" >&2
+    printf '%s\n' "${GH_TOKEN_GENERATE_STDERR_2:-second line must not appear}" >&2
+    exit 1
+  fi
   # App ID ごとに別のトークンを返す（333 = 実装担当 pelway-dev、111 = レビュー担当 pelway-review、555 = QA 担当 pelway-qa）
   case "$*" in
     *"--app-id 333 "*) printf '{"token":"dev-token","expires_at":"x"}\n' ;;
@@ -42,6 +50,11 @@ if [[ "$1 $2" == "token generate" ]]; then
     *"--app-id 555 "*) printf '{"token":"qa-token","expires_at":"x"}\n' ;;
     *) exit 1 ;;
   esac
+  exit 0
+fi
+if [[ "$1 $2" == "extension list" ]]; then
+  if [[ -n "${GH_EXTENSION_LIST_FAIL:-}" ]]; then exit 1; fi
+  printf '%s\n' "${GH_EXTENSION_LIST:-gh-token  v2.0.10  Link-/gh-token}"
   exit 0
 fi
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
@@ -127,6 +140,58 @@ grep -qF -- "-c $ROOT/agent-fnox.toml get PELWAY_DEV_APP_ID" "$ROOT/dev_uses_dev
 FAKE_PELWAY_REVIEW_APP_KEY="" run review_missing_secret_fails_closed review pr list
 [[ "$RC" == 3 ]] || failures+=("review_missing_secret_fails_closed: exit $RC, want 3")
 [[ ! -e "$ROOT/review_missing_secret_fails_closed.log" ]] || failures+=("review_missing_secret_fails_closed: gh was called")
+
+# --- gh token generate の失敗（#520）: 本当の原因が分かるようにする ---
+# 使う値はすべて合成のダミー（FAKE_* の 333 / 444 / dev-pem-body もダミー）。外のネットワークにも本物の秘密にも触れない。
+
+# stderr の 1 行目を、トークンの形を伏せて出す。2 行目は出さない。終了コードは 3 のまま。
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_TOKEN_GENERATE_STDERR_1='gh: read /home/x/.config/gh/config.yml: permission denied (token ghp_abcdefghijklmnopqrstuvwxyz0123456789)' \
+GH_TOKEN_GENERATE_STDERR_2='second line must not appear' \
+  run token_fail_shows_first_stderr_line dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_shows_first_stderr_line: exit $RC, want 3")
+grep -qF 'permission denied' <<<"$OUT" || failures+=("token_fail_shows_first_stderr_line: first stderr line not shown")
+grep -qF 'gh?_' <<<"$OUT" || failures+=("token_fail_shows_first_stderr_line: token not masked")
+[[ "$OUT" != *ghp_abcdefghijklmnopqrstuvwxyz0123456789* ]] || failures+=("token_fail_shows_first_stderr_line: token value leaked")
+[[ "$OUT" != *'second line must not appear'* ]] || failures+=("token_fail_shows_first_stderr_line: second stderr line shown")
+
+# 出す行に鍵・トークン・APP ID・INSTALLATION ID の値が入らない（ダミー値で確かめる）
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_TOKEN_GENERATE_STDERR_1='sign failed app=333 installation=444 key=dev-pem-body value=ghs_0123456789abcdefghijklmn' \
+  run token_fail_masks_secret_values dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_masks_secret_values: exit $RC, want 3")
+[[ "$OUT" != *333* ]] || failures+=("token_fail_masks_secret_values: app id value leaked")
+[[ "$OUT" != *444* ]] || failures+=("token_fail_masks_secret_values: installation id value leaked")
+[[ "$OUT" != *dev-pem-body* ]] || failures+=("token_fail_masks_secret_values: key value leaked")
+[[ "$OUT" != *ghs_0123456789abcdefghijklmn* ]] || failures+=("token_fail_masks_secret_values: token value leaked")
+
+# stderr が空のときは 1 行目を出せないので、終了コードで原因の種別だけ示す
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_TOKEN_GENERATE_STDERR_1='' \
+  run token_fail_empty_stderr dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_empty_stderr: exit $RC, want 3")
+grep -qF '終了コード' <<<"$OUT" || failures+=("token_fail_empty_stderr: exit code not shown")
+
+# 「拡張が必要」の文は gh extension list に gh-token があるときは出さない
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_EXTENSION_LIST=$'gh-token  v2.0.10  Link-/gh-token\ngh-stack  v0.2.0  vi/weird' \
+  run token_fail_no_install_hint_when_present dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_no_install_hint_when_present: exit $RC, want 3")
+[[ "$OUT" != *'gh extension install'* ]] || failures+=("token_fail_no_install_hint_when_present: install hint shown despite extension present")
+
+# gh extension list に gh-token が無いときだけ「拡張が必要」を出す
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_EXTENSION_LIST=$'gh-stack  v0.2.0  vi/weird' \
+  run token_fail_install_hint_when_absent dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_install_hint_when_absent: exit $RC, want 3")
+grep -qF 'gh extension install Link-/gh-token' <<<"$OUT" || failures+=("token_fail_install_hint_when_absent: install hint missing")
+
+# gh extension list 自体が失敗したら有無は分からないので「拡張が必要」は出さない
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_EXTENSION_LIST_FAIL=1 \
+  run token_fail_no_install_hint_when_list_fails dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_no_install_hint_when_list_fails: exit $RC, want 3")
+[[ "$OUT" != *'gh extension install'* ]] || failures+=("token_fail_no_install_hint_when_list_fails: install hint shown despite unknown extension state")
 
 run dev_git_identity dev git commit -m x
 expect_log dev_git_identity "GH_TOKEN=dev-token"

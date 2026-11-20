@@ -65,27 +65,55 @@ secret() {
   printf '%s' "$value"
 }
 
+# mask_secret_line <行> <伏せる値...>: 行内の秘密らしいものを伏せて出す（#520）。
+# - 引数で渡された値そのもの（APP ID・INSTALLATION ID・秘密鍵）
+# - gh のトークンの形（ghp_ / gho_ / ghs_ など gh<英字 1 文字>_ の後ろに英数字が続く形）
+mask_secret_line() {
+  local line="$1" v
+  shift
+  for v in "$@"; do
+    [[ -n "$v" ]] || continue
+    line="${line//"$v"/<秘密>}"
+  done
+  printf '%s' "$line" | sed -e 's/gh[a-zA-Z]_[A-Za-z0-9_]\{8,\}/gh?_<秘密>/g'
+}
+
 # app_token <APP ID の名前> <INSTALLATION ID の名前> <秘密鍵の名前>:
 # fnox の 3 つの名前から GitHub App のインストールトークンを発行して出力する。
 # 名前は役割ごとに違う（dev / review: PELWAY_*_APP_ID・_APP_INSTALLATION_ID・_APP_KEY、
 # qa: PELWAY_QA_APP_ID・PELWAY_QA_INSTALLATION_ID・PELWAY_QA_PRIVATE_KEY）。
 app_token() {
-  local app_id installation_id key key_file response token
+  local app_id installation_id key key_file err_file response token rc err_first ext_list
   app_id="$(secret "$1")"
   installation_id="$(secret "$2")"
   key="$(secret "$3")"
   # 秘密鍵は argv（ps で見える）に載せず、所有者だけが読める一時ファイルで渡し、使ったらすぐ消す。
   key_file="$(mktemp)"
-  trap 'rm -f "${key_file:-}"' EXIT
+  err_file="$(mktemp)"
+  trap 'rm -f "${key_file:-}" "${err_file:-}"' EXIT
   chmod 600 "$key_file"
   printf '%s\n' "$key" >"$key_file"
   # gh 拡張 Link-/gh-token。出力は JSON（{"token": "...", ...}）。
-  if ! response="$(gh token generate --app-id "$app_id" --installation-id "$installation_id" --key "$key_file" 2>/dev/null)"; then
+  # 失敗のときは stderr を捨てず、1 行目を秘密を伏せて出す（#520）。
+  rc=0
+  response="$(gh token generate --app-id "$app_id" --installation-id "$installation_id" --key "$key_file" 2>"$err_file")" || rc=$?
+  if ((rc != 0)); then
     rm -f "$key_file"
-    echo "agent-gh: GitHub App のトークンを発行できません（gh extension install Link-/gh-token が必要）" >&2
+    err_first="$(head -n 1 "$err_file")"
+    rm -f "$err_file"
+    if [[ -n "$err_first" ]]; then
+      echo "agent-gh: GitHub App のトークンを発行できません（gh token generate が失敗: $(mask_secret_line "$err_first" "$app_id" "$installation_id" "$key")）" >&2
+    else
+      echo "agent-gh: GitHub App のトークンを発行できません（gh token generate が失敗、stderr なし・終了コード $rc）" >&2
+    fi
+    # 「拡張が必要」の文は gh extension list が成功して gh-token が無いときだけ出す。
+    # list 自体が失敗したら有無は分からないので出さない（#520）。
+    if ext_list="$(gh extension list 2>/dev/null)"; then
+      grep -q 'gh-token' <<<"$ext_list" || echo "agent-gh: gh extension install Link-/gh-token が必要です" >&2
+    fi
     exit 3
   fi
-  rm -f "$key_file"
+  rm -f "$key_file" "$err_file"
   token="$(sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' <<<"$response")"
   [[ -n "$token" ]] || { echo "agent-gh: トークン発行の応答に token がありません" >&2; exit 3; }
   printf '%s' "$token"
