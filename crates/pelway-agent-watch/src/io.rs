@@ -327,34 +327,64 @@ fn send_once(payload: &Value, project: &Path) -> SendResult {
 
 /// 共有の git dir の `pelway/` は sandbox の中のエージェントも書ける場所なので、
 /// agent-watch（ホストの権限で動く）は、置かれたものの種類を確かめてから使う。
-/// ディレクトリ自体が symlink・自分の所有でない・ディレクトリでないときは使わない。
-fn checked_pelway_dir(dir: &Path) -> Result<(), String> {
+/// `pelway/` を `O_DIRECTORY | O_NOFOLLOW` で 1 回開き、その fd で種類と所有者を確かめ、
+/// 中のファイルはその fd からの `openat` で開く。パスで確かめてからパスで開くと、
+/// その間に `pelway/` を別のディレクトリへの symlink に差し替えられるため。
+fn open_pelway_dir(dir: &Path, create: bool) -> Result<fs::File, String> {
+    use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::{DirBuilderExt, MetadataExt};
-    if fs::symlink_metadata(dir).is_err() {
+    use std::os::unix::io::FromRawFd;
+    if create && fs::symlink_metadata(dir).is_err() {
         fs::DirBuilder::new()
             .mode(0o700)
             .create(dir)
             .map_err(|e| e.to_string())?;
     }
-    let meta = fs::symlink_metadata(dir).map_err(|e| e.to_string())?;
+    let c = std::ffi::CString::new(dir.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
+    let fd = unsafe {
+        libc::open(
+            c.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err(format!(
+            "pelway dir: {}",
+            std::io::Error::last_os_error().kind()
+        ));
+    }
+    // SAFETY: fd は直前の open が返した、ほかに持ち主の無い有効な fd
+    let dirf = unsafe { fs::File::from_raw_fd(fd) };
+    let meta = dirf.metadata().map_err(|e| e.to_string())?;
     if !meta.file_type().is_dir() {
         return Err("pelway dir is not a plain directory".to_string());
     }
     if meta.uid() != unsafe { libc::geteuid() } {
         return Err("pelway dir is not owned by this user".to_string());
     }
-    Ok(())
+    Ok(dirf)
 }
 
-/// 置き場の中のファイルを、symlink をたどらず（`O_NOFOLLOW`）、FIFO で止まらず（`O_NONBLOCK`）に開き、
+/// `pelway/` の fd から、symlink をたどらず（`O_NOFOLLOW`）、FIFO で止まらず（`O_NONBLOCK`）に開き、
 /// 開いた fd で、通常ファイル・自分の所有・ハードリンクが 1 本だけ、を確かめる
 /// （`scripts/conductor-watch.sh` のボード Status 更新キューと同じ型）。
-fn open_checked(path: &Path, opts: &mut fs::OpenOptions) -> Result<fs::File, String> {
+fn open_in_pelway(dirf: &fs::File, name: &str, flags: libc::c_int) -> Result<fs::File, String> {
     use std::os::unix::fs::MetadataExt;
-    let file = opts
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-        .map_err(|e| e.to_string())?;
+    use std::os::unix::io::{AsRawFd, FromRawFd};
+    let c = std::ffi::CString::new(name).map_err(|e| e.to_string())?;
+    let fd = unsafe {
+        libc::openat(
+            dirf.as_raw_fd(),
+            c.as_ptr(),
+            flags | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+            0o600 as libc::c_uint,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    // SAFETY: fd は直前の openat が返した、ほかに持ち主の無い有効な fd
+    let file = unsafe { fs::File::from_raw_fd(fd) };
     let meta = file.metadata().map_err(|e| e.to_string())?;
     if !meta.file_type().is_file() {
         return Err("not a regular file".to_string());
@@ -368,21 +398,22 @@ fn open_checked(path: &Path, opts: &mut fs::OpenOptions) -> Result<fs::File, Str
     Ok(file)
 }
 
+fn split_pelway_path(path: &Path) -> Result<(&Path, &str), String> {
+    let dir = path.parent().ok_or("no parent dir")?;
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("bad file name")?;
+    Ok((dir, name))
+}
+
 /// 受信箱に、1 件 1 行で追記する（ファイルは 0600。1 行を 1 回の書き込みで書く）。
 /// 書いたあとの受信箱の行数を、同じ fd で数えて返す（path を開き直さない）。
 pub fn append_inbox(path: &Path, lines: &[String]) -> Result<u64, String> {
     use std::io::{Read, Seek};
-    if let Some(dir) = path.parent() {
-        checked_pelway_dir(dir)?;
-    }
-    let mut file = open_checked(
-        path,
-        fs::OpenOptions::new()
-            .read(true)
-            .append(true)
-            .create(true)
-            .mode(0o600),
-    )?;
+    let (dir, name) = split_pelway_path(path)?;
+    let dirf = open_pelway_dir(dir, true)?;
+    let mut file = open_in_pelway(&dirf, name, libc::O_RDWR | libc::O_APPEND | libc::O_CREAT)?;
     for line in lines {
         let mut buf = line.clone();
         buf.push('\n');
@@ -407,13 +438,9 @@ const PATROL_STATE_MAX_BYTES: u64 = 256 * 1024;
 /// 指揮役の補助記録（`patrol-state.json`）を、種類と大きさを確かめてから読む。
 pub fn read_patrol_state(path: &Path) -> Result<String, String> {
     use std::io::Read;
-    if let Some(dir) = path.parent() {
-        let meta = fs::symlink_metadata(dir).map_err(|e| e.to_string())?;
-        if !meta.file_type().is_dir() {
-            return Err("pelway dir is not a plain directory".to_string());
-        }
-    }
-    let file = open_checked(path, fs::OpenOptions::new().read(true))?;
+    let (dir, name) = split_pelway_path(path)?;
+    let dirf = open_pelway_dir(dir, false)?;
+    let file = open_in_pelway(&dirf, name, libc::O_RDONLY)?;
     let size = file.metadata().map_err(|e| e.to_string())?.len();
     if size > PATROL_STATE_MAX_BYTES {
         return Err("patrol-state is too large".to_string());
