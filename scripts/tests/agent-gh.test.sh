@@ -7,6 +7,10 @@ ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 failures=()
 
+# 偽の mktemp / chmod は本物に委譲する。この時点（PATH 変更前）に本物のパスを取っておく
+REAL_MKTEMP="$(command -v mktemp)"
+REAL_CHMOD="$(command -v chmod)"
+
 BIN="$ROOT/bin"
 mkdir -p "$BIN"
 
@@ -21,10 +25,14 @@ printf '%s\n' "${!var}"
 EOF
 
 # 偽の gh: `gh token generate` は JSON を返す。それ以外は GH_TOKEN と引数を記録する。
+# どちらの経路でも GH_CONFIG_DIR / GH_NO_UPDATE_NOTIFIER も記録する（#522 の隔離の確認用）。
+# GH_TOKEN_GENERATE_FAIL があれば generate は stderr 2 行を出して失敗する（#520 の失敗経路）。
+# GH_EXTENSION_LIST / GH_EXTENSION_LIST_FAIL で `gh extension list` の応答を切り替える。
 cat >"$BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1 $2" == "token generate" ]]; then
   printf '%s\n' "$*" >"$CALL_LOG.token-args"
+  printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}" >"$CALL_LOG.token-env"
   # --key <file> の中身と権限を記録する（秘密鍵が argv に載らないことの確認用）
   prev=""
   for a in "$@"; do
@@ -35,6 +43,12 @@ if [[ "$1 $2" == "token generate" ]]; then
     fi
     prev="$a"
   done
+  # 失敗の演出: GH_TOKEN_GENERATE_FAIL があれば stderr 2 行（1 行目だけ出るべき）を出して終了 1
+  if [[ -n "${GH_TOKEN_GENERATE_FAIL:-}" ]]; then
+    printf '%s\n' "${GH_TOKEN_GENERATE_STDERR_1:-}" >&2
+    printf '%s\n' "${GH_TOKEN_GENERATE_STDERR_2:-second line must not appear}" >&2
+    exit 1
+  fi
   # App ID ごとに別のトークンを返す（333 = 実装担当 pelway-dev、111 = レビュー担当 pelway-review、555 = QA 担当 pelway-qa）
   case "$*" in
     *"--app-id 333 "*) printf '{"token":"dev-token","expires_at":"x"}\n' ;;
@@ -44,13 +58,41 @@ if [[ "$1 $2" == "token generate" ]]; then
   esac
   exit 0
 fi
-{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
+if [[ "$1 $2" == "token --help" ]]; then
+  # 拡張の有無の判定に使う（#520）。GH_TOKEN_HELP_MODE で応答を切り替える:
+  # ok（既定・拡張あり exit 0）/ absent（拡張なし・unknown command の exit 1）/ missing（gh 無し・exit 127）
+  case "${GH_TOKEN_HELP_MODE:-ok}" in
+    absent) printf 'unknown command "token" for "gh"\n' >&2; exit 1 ;;
+    missing) exit 127 ;;
+    ok) printf 'gh-token 2.0.10 help\n'; exit 0 ;;
+  esac
+fi
+{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_NO_UPDATE_NOTIFIER=%s\n' "${GH_NO_UPDATE_NOTIFIER:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
 EOF
 
 # 偽の git: GH_TOKEN と引数を追記する（push 後の agent-gh-resign からの呼び出しも残すため追記）。
+# GH_CONFIG_DIR も記録する（credential helper として呼ばれる gh への隔離の伝搬確認用）。
 cat >"$BIN/git" <<'EOF'
 #!/usr/bin/env bash
-{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
+{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
+EOF
+
+# 偽の mktemp: 本物に委譤し、作成したパスを種別（f=ファイル、d=ディレクトリ）とともに記録する
+# （一時ファイルの残存確認用。引数をそのまま記録すると、引数なしの呼び出しが read の
+#  IFS ホワイトスペースの詰めで読み取れないため種別を付ける）。
+cat >"$BIN/mktemp" <<EOF
+#!/usr/bin/env bash
+p="\$($REAL_MKTEMP "\$@")"
+if ((\$# == 0)); then kind=f; else kind="\${1#-}"; fi
+printf '%s\t%s\n' "\$kind" "\$p" >>"\${MKTEMP_LOG:-/dev/null}"
+printf '%s\n' "\$p"
+EOF
+
+# 偽の chmod: FAKE_CHMOD_FAIL=1 のときだけ失敗する（app_token の subshell 途中終了の再現用）。
+cat >"$BIN/chmod" <<EOF
+#!/usr/bin/env bash
+[[ -z "\${FAKE_CHMOD_FAIL:-}" ]] || exit 1
+exec '$REAL_CHMOD' "\$@"
 EOF
 chmod +x "$BIN"/*
 
@@ -127,6 +169,68 @@ grep -qF -- "-c $ROOT/agent-fnox.toml get PELWAY_DEV_APP_ID" "$ROOT/dev_uses_dev
 FAKE_PELWAY_REVIEW_APP_KEY="" run review_missing_secret_fails_closed review pr list
 [[ "$RC" == 3 ]] || failures+=("review_missing_secret_fails_closed: exit $RC, want 3")
 [[ ! -e "$ROOT/review_missing_secret_fails_closed.log" ]] || failures+=("review_missing_secret_fails_closed: gh was called")
+
+# --- gh token generate の失敗（#520）: 本当の原因が分かるようにする ---
+# 使う値はすべて合成のダミー（FAKE_* の 333 / 444 / dev-pem-body もダミー）。外のネットワークにも本物の秘密にも触れない。
+
+# stderr の 1 行目を、トークンの形を伏せて出す。2 行目は出さない。終了コードは 3 のまま。
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_TOKEN_GENERATE_STDERR_1='gh: read /home/x/.config/gh/config.yml: permission denied (token ghp_abcdefghijklmnopqrstuvwxyz0123456789)' \
+GH_TOKEN_GENERATE_STDERR_2='second line must not appear' \
+  run token_fail_shows_first_stderr_line dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_shows_first_stderr_line: exit $RC, want 3")
+grep -qF 'permission denied' <<<"$OUT" || failures+=("token_fail_shows_first_stderr_line: first stderr line not shown")
+grep -qF 'gh?_' <<<"$OUT" || failures+=("token_fail_shows_first_stderr_line: token not masked")
+[[ "$OUT" != *ghp_abcdefghijklmnopqrstuvwxyz0123456789* ]] || failures+=("token_fail_shows_first_stderr_line: token value leaked")
+[[ "$OUT" != *'second line must not appear'* ]] || failures+=("token_fail_shows_first_stderr_line: second stderr line shown")
+
+# 出す行に鍵・トークン・APP ID・INSTALLATION ID の値が入らない（ダミー値で確かめる）
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_TOKEN_GENERATE_STDERR_1='sign failed app=333 installation=444 key=dev-pem-body value=ghs_0123456789abcdefghijklmn' \
+  run token_fail_masks_secret_values dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_masks_secret_values: exit $RC, want 3")
+[[ "$OUT" != *333* ]] || failures+=("token_fail_masks_secret_values: app id value leaked")
+[[ "$OUT" != *444* ]] || failures+=("token_fail_masks_secret_values: installation id value leaked")
+[[ "$OUT" != *dev-pem-body* ]] || failures+=("token_fail_masks_secret_values: key value leaked")
+[[ "$OUT" != *ghs_0123456789abcdefghijklmn* ]] || failures+=("token_fail_masks_secret_values: token value leaked")
+
+# 鍵は複数行の PEM。stderr の 1 行目に鍵本体の 1 行（base64 行）が混ざっても伏せる
+# （鍵全体が 1 行に現れることは無いため、行ごとの伏せが必要）
+FAKE_PELWAY_DEV_APP_KEY=$'-----BEGIN PRIVATE KEY-----\nMIIBfakeKEYbodyLINEone1234\nMIIBfakeKEYbodyLINEtwo5678\n-----END PRIVATE KEY-----' \
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_TOKEN_GENERATE_STDERR_1='jwt sign error at MIIBfakeKEYbodyLINEone1234 (app 333)' \
+  run token_fail_masks_multiline_key_fragment dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_masks_multiline_key_fragment: exit $RC, want 3")
+[[ "$OUT" != *MIIBfakeKEYbodyLINEone1234* ]] || failures+=("token_fail_masks_multiline_key_fragment: key body line leaked")
+[[ "$OUT" != *MIIBfakeKEYbodyLINEtwo5678* ]] || failures+=("token_fail_masks_multiline_key_fragment: other key body line leaked")
+[[ "$OUT" != *333* ]] || failures+=("token_fail_masks_multiline_key_fragment: app id value leaked")
+
+# stderr が空のときは 1 行目を出せないので、終了コードで原因の種別だけ示す
+GH_TOKEN_GENERATE_FAIL=1 \
+GH_TOKEN_GENERATE_STDERR_1='' \
+  run token_fail_empty_stderr dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_empty_stderr: exit $RC, want 3")
+grep -qF '終了コード' <<<"$OUT" || failures+=("token_fail_empty_stderr: exit code not shown")
+
+# 「拡張が必要」の文は gh token --help（隔離された空の GH_CONFIG_DIR の中）が成功する
+# （= gh-token 拡張が gh token コマンドを提供している）ときは出さない
+GH_TOKEN_GENERATE_FAIL=1 GH_TOKEN_HELP_MODE=ok \
+  run token_fail_no_install_hint_when_present dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_no_install_hint_when_present: exit $RC, want 3")
+[[ "$OUT" != *'gh extension install'* ]] || failures+=("token_fail_no_install_hint_when_present: install hint shown despite extension present")
+
+# gh token --help が unknown command（exit 1）= 拡張が無いときだけ「拡張が必要」を出す
+GH_TOKEN_GENERATE_FAIL=1 GH_TOKEN_HELP_MODE=absent \
+  run token_fail_install_hint_when_absent dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_install_hint_when_absent: exit $RC, want 3")
+grep -qF 'gh extension install Link-/gh-token' <<<"$OUT" || failures+=("token_fail_install_hint_when_absent: install hint missing")
+
+# gh が起動できない（exit 127）は「拡張が無い」と区別する（install 案内を出さない）
+GH_TOKEN_GENERATE_FAIL=1 GH_TOKEN_HELP_MODE=missing \
+  run token_fail_gh_missing_hint dev pr list
+[[ "$RC" == 3 ]] || failures+=("token_fail_gh_missing_hint: exit $RC, want 3")
+[[ "$OUT" == *'gh が起動できません'* ]] || failures+=("token_fail_gh_missing_hint: gh-missing hint missing")
+[[ "$OUT" != *'gh extension install'* ]] || failures+=("token_fail_gh_missing_hint: install hint shown despite gh itself missing")
 
 run dev_git_identity dev git commit -m x
 expect_log dev_git_identity "GH_TOKEN=dev-token"
@@ -309,6 +413,89 @@ expect_no_calls qa_missing_config
 run unicode_guard_qa qa comment 1 --body-file 'x\u3042'
 [[ "$RC" == 5 ]] || failures+=("unicode_guard_qa: exit $RC, want 5")
 expect_no_calls unicode_guard_qa
+
+# --- #522: gh は毎回空の一時 GH_CONFIG_DIR で呼ばれ、~/.config/gh や外部の hosts.yml を読ませない ---
+# 呼び出し元の GH_CONFIG_DIR に偽の hosts.yml（人間のトークンの代わりのマーカー）を置いても、
+# gh に渡るのは毎回新しく作った空の一時ディレクトリで、agent-gh の終了後には残っていない。
+fake_gh_dir="$ROOT/fake-gh-config"
+mkdir -p "$fake_gh_dir"
+printf 'github.com:\n    oauth_token: hosts-yml-token\n' >"$fake_gh_dir/hosts.yml"
+
+# used_gh_config <name>: 偽 gh / 偽 git が記録した GH_CONFIG_DIR の値
+used_gh_config() { sed -n 's/^GH_CONFIG_DIR=//p' "$ROOT/$1.log"; }
+
+# dev ロール: 呼び出し元の GH_CONFIG_DIR（偽 hosts.yml 置き場）は上書きされる
+GH_CONFIG_DIR="$fake_gh_dir" run gh_config_isolated dev pr list
+[[ "$RC" == 0 ]] || failures+=("gh_config_isolated: exit $RC, want 0 ($OUT)")
+used="$(used_gh_config gh_config_isolated)"
+[[ -n "$used" && "$used" != "$fake_gh_dir" ]] || failures+=("gh_config_isolated: caller GH_CONFIG_DIR not overridden")
+[[ ! -e "$used/hosts.yml" ]] || failures+=("gh_config_isolated: gh saw a hosts.yml in its config dir")
+[[ ! -e "$used" ]] || failures+=("gh_config_isolated: temp GH_CONFIG_DIR left behind")
+grep -qF 'GH_NO_UPDATE_NOTIFIER=1' "$ROOT/gh_config_isolated.log" || failures+=("gh_config_isolated: GH_NO_UPDATE_NOTIFIER not set")
+# トークン発行（gh token generate）も隔離された空ディレクトリで呼ばれ、終了後に消える
+tok="$(sed -n 's/^GH_CONFIG_DIR=//p' "$ROOT/gh_config_isolated.log.token-env")"
+[[ -n "$tok" && "$tok" != "$fake_gh_dir" ]] || failures+=("gh_config_isolated: token generate saw caller GH_CONFIG_DIR")
+[[ ! -e "$tok" ]] || failures+=("gh_config_isolated: token generate config dir left behind")
+# 読まれなかった偽 hosts.yml はそのまま残る
+[[ -e "$fake_gh_dir/hosts.yml" ]] || failures+=("gh_config_isolated: fake hosts.yml disturbed")
+
+# review ロール（~/.config/gh が読めないレビュー sandbox が発端）でも同じ隔離
+GH_CONFIG_DIR="$fake_gh_dir" run gh_config_isolated_review review pr list
+[[ "$RC" == 0 ]] || failures+=("gh_config_isolated_review: exit $RC, want 0 ($OUT)")
+used="$(used_gh_config gh_config_isolated_review)"
+[[ -n "$used" && "$used" != "$fake_gh_dir" && ! -e "$used" ]] || failures+=("gh_config_isolated_review: GH_CONFIG_DIR not isolated/removed")
+
+# qa ロールでも同じ隔離
+GH_CONFIG_DIR="$fake_gh_dir" run gh_config_isolated_qa qa comment 1 --body-file "$ROOT/qa-body.md"
+[[ "$RC" == 0 ]] || failures+=("gh_config_isolated_qa: exit $RC, want 0 ($OUT)")
+used="$(used_gh_config gh_config_isolated_qa)"
+[[ -n "$used" && "$used" != "$fake_gh_dir" && ! -e "$used" ]] || failures+=("gh_config_isolated_qa: GH_CONFIG_DIR not isolated/removed")
+
+# git サブコマンド（credential helper として gh が呼ばれる経路）にも同じ環境が渡る
+GH_CONFIG_DIR="$fake_gh_dir" run gh_config_isolated_git dev git status
+[[ "$RC" == 0 ]] || failures+=("gh_config_isolated_git: exit $RC, want 0 ($OUT)")
+used="$(used_gh_config gh_config_isolated_git)"
+[[ -n "$used" && "$used" != "$fake_gh_dir" && ! -e "$used" ]] || failures+=("gh_config_isolated_git: GH_CONFIG_DIR not isolated/removed")
+
+# トークンが取れない（fnox が秘密を返さない）ときは hosts.yml へフォールバックせず fail-closed。
+# gh は一切呼ばれない
+GH_CONFIG_DIR="$fake_gh_dir" FAKE_PELWAY_DEV_APP_KEY="" run no_fallback_missing_secret dev pr list
+[[ "$RC" == 3 ]] || failures+=("no_fallback_missing_secret: exit $RC, want 3")
+[[ ! -e "$ROOT/no_fallback_missing_secret.log" ]] || failures+=("no_fallback_missing_secret: gh was called")
+
+# トークン発行そのものが失敗しても、本体の gh は呼ばず exit 3（hosts.yml のトークンで続けない）。
+# 発行の試行も隔離された空ディレクトリでだけ行われる
+GH_CONFIG_DIR="$fake_gh_dir" FAKE_PELWAY_DEV_APP_ID=999 run no_fallback_generate_fails dev pr list
+[[ "$RC" == 3 ]] || failures+=("no_fallback_generate_fails: exit $RC, want 3")
+[[ ! -e "$ROOT/no_fallback_generate_fails.log" ]] || failures+=("no_fallback_generate_fails: gh was called")
+tok="$(sed -n 's/^GH_CONFIG_DIR=//p' "$ROOT/no_fallback_generate_fails.log.token-env")"
+[[ -n "$tok" && "$tok" != "$fake_gh_dir" ]] || failures+=("no_fallback_generate_fails: token generate saw caller GH_CONFIG_DIR")
+
+# --- review round 1 の must-fix: app_token の subshell 途中終了でも秘密鍵の一時ファイルが残らない ---
+# app_token は token="$(app_token ...)" のコマンド置換 subshell の中で動く。subshell では親の
+# EXIT trap は走らないため、subshell 内で trap を設定して mktemp から消し忘れを防いでいる。
+
+# トークン発行の失敗経路: --key の一時ファイルは発行に失敗しても残らない（明示的な rm の経路）
+GH_CONFIG_DIR="$fake_gh_dir" FAKE_PELWAY_DEV_APP_ID=999 run key_removed_on_generate_fail dev pr list
+[[ "$RC" == 3 ]] || failures+=("key_removed_on_generate_fail: exit $RC, want 3")
+kp="$(cat "$ROOT/key_removed_on_generate_fail.log.key-path" 2>/dev/null)"
+[[ -n "$kp" ]] || failures+=("key_removed_on_generate_fail: key path not recorded")
+[[ ! -e "$kp" ]] || failures+=("key_removed_on_generate_fail: key file left behind")
+
+# subshell の途中終了（chmod 600 の失敗で set -e が即座に subshell を止める）でも、
+# 鍵ファイル（引数なし mktemp）と隔離ディレクトリ（mktemp -d）はどちらも残らない
+export MKTEMP_LOG="$ROOT/mktemp-chmod-fail.log"
+: >"$MKTEMP_LOG"
+GH_CONFIG_DIR="$fake_gh_dir" FAKE_CHMOD_FAIL=1 run keyfile_chmod_fail dev pr list
+[[ "$RC" != 0 ]] || failures+=("keyfile_chmod_fail: unexpectedly succeeded")
+[[ -s "$MKTEMP_LOG" ]] || failures+=("keyfile_chmod_fail: mktemp calls not recorded")
+while IFS=$'\t' read -r kind mp; do
+  if [[ "$kind" == "f" ]]; then
+    [[ ! -e "$mp" ]] || failures+=("keyfile_chmod_fail: key file left behind ($mp)")
+  elif [[ "$kind" == "d" ]]; then
+    [[ ! -e "$mp" ]] || failures+=("keyfile_chmod_fail: isolated GH_CONFIG_DIR left behind ($mp)")
+  fi
+done <"$MKTEMP_LOG"
 
 if ((${#failures[@]})); then
   printf 'FAIL %s\n' "${failures[@]}"

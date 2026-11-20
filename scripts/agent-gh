@@ -6,6 +6,9 @@
 #   scripts/agent-gh <dev|review> git <git の引数...>   その名義の認証で git を実行する
 #   scripts/agent-gh -h | --help               使い方を標準出力に出して終了コード 0（fnox も gh も呼ばない）
 # 呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。
+# gh は毎回空の一時 GH_CONFIG_DIR で呼ぶ。~/.config/gh や呼び出し元の GH_CONFIG_DIR（外部の hosts.yml）は
+# 参照もフォールバックもさせない（#522。レビュー sandbox が ~/.config/gh を読めないのと、人間のトークンへの
+# 黙ったフォールバックを防ぐため）。一時ディレクトリは終了時に消す。
 # qa は許可リスト方式で、上の 1 形以外の呼び出し（ラベル・Approve・マージ・編集・削除など）はトークン発行前に終了コード 2 で拒否する。
 # qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持たない（~/.config/pelway-agent-qa/fnox.toml を指す。未設定は終了コード 3）。
 # 終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない（qa の PELWAY_AGENT_FNOX_CONFIG 未設定を含む）、5 = 引数に \uXXXX エスケープ混入、それ以外は gh / git の終了コード（--help / -h は 0）
@@ -20,6 +23,31 @@ fnox_config="${PELWAY_AGENT_FNOX_CONFIG:-$HOME/.config/pelway-agent/fnox.toml}"
 review_fnox_config="${PELWAY_AGENT_FNOX_CONFIG_REVIEW:-$HOME/.config/pelway-agent-review/fnox.toml}"
 
 usage() { echo "usage: $0 <dev|review> [git] <args...> | $0 qa comment <番号> --body-file <path|->" >&2; exit 2; }
+
+# 終了時に消すパス（gh 隔離用の一時ディレクトリ）。呼び出しはすべて subshell の外で行う。
+# app_token の秘密鍵一時ファイルはここに入れない: app_token は token="$(app_token ...)" の
+# コマンド置換 subshell の中で動き、subshell では親の EXIT trap も cleanup_paths への追加も
+# 親に届かないため、app_token 内で subshell 自身の trap を設定して消す（下を参照）。
+cleanup_paths=()
+cleanup() {
+  local p
+  for p in ${cleanup_paths[@]+"${cleanup_paths[@]}"}; do
+    rm -rf -- "$p"
+  done
+}
+trap cleanup EXIT
+
+# gh を呼ぶ実行（dev / review / qa）では、gh に既定の ~/.config/gh や呼び出し元の GH_CONFIG_DIR
+# （外部の hosts.yml）を絶対に参照させない（#522）。毎回空の一時ディレクトリで GH_CONFIG_DIR を
+# 上書きし、終了時に cleanup で消す。GH_NO_UPDATE_NOTIFIER=1 も出す（gh が更新確認で設定
+# ディレクトリとネットワークを使わないように）。exec で gh に置き換えると EXIT trap が走らない
+# ため、gh / git の呼び出しは exec せず終了コードを渡す形にする（下の各呼び出しで exit）。
+gh_isolated_config() {
+  GH_CONFIG_DIR="$(mktemp -d)"
+  GH_NO_UPDATE_NOTIFIER=1
+  export GH_CONFIG_DIR GH_NO_UPDATE_NOTIFIER
+  cleanup_paths+=("$GH_CONFIG_DIR")
+}
 
 # qa の引数が `comment <番号> --body-file <path|->` の 1 形であることを確かめる。
 # 許可リスト方式（#305 の案bと同じ考え方）で、それ以外の呼び出しはトークン発行前に終了コード 2 で拒否する。
@@ -65,27 +93,82 @@ secret() {
   printf '%s' "$value"
 }
 
+# mask_secret_line <行> <伏せる値...>: 行内の秘密らしいものを伏せて出す（#520）。
+# - 引数で渡された値そのもの（APP ID・INSTALLATION ID・秘密鍵の各行）
+# - gh のトークンの形（ghp_ / gho_ / ghs_ など gh<英字 1 文字>_ の後ろに英数字が続く形）
+# 秘密鍵は複数行の PEM で、 stderr の 1 行目に現れるのはその一部（1 行）のため、
+# 呼び出し側で行ごとに分けて渡す（鍵全体を渡しても 1 行の中に一致しない）。
+mask_secret_line() {
+  local line="$1" v
+  shift
+  for v in "$@"; do
+    [[ -n "$v" ]] || continue
+    line="${line//"$v"/<秘密>}"
+  done
+  printf '%s' "$line" | sed -e 's/gh[a-zA-Z]_[A-Za-z0-9_]\{8,\}/gh?_<秘密>/g'
+}
+
 # app_token <APP ID の名前> <INSTALLATION ID の名前> <秘密鍵の名前>:
 # fnox の 3 つの名前から GitHub App のインストールトークンを発行して出力する。
 # 名前は役割ごとに違う（dev / review: PELWAY_*_APP_ID・_APP_INSTALLATION_ID・_APP_KEY、
 # qa: PELWAY_QA_APP_ID・PELWAY_QA_INSTALLATION_ID・PELWAY_QA_PRIVATE_KEY）。
 app_token() {
-  local app_id installation_id key key_file response token
+  # key_file・err_file は local にしない: EXIT trap の実行時には local 変数のスコープが既に
+  # 終わっており ${key_file:-} が空に展開されるため、消すべきパスが trap に届かない。
+  # グローバルなら subshell 内の trap から見える。
+  local app_id installation_id key response token rc err_first ext_rc key_lines key_frags kl
   app_id="$(secret "$1")"
   installation_id="$(secret "$2")"
   key="$(secret "$3")"
   # 秘密鍵は argv（ps で見える）に載せず、所有者だけが読める一時ファイルで渡し、使ったらすぐ消す。
+  # app_token は token="$(app_token ...)" のコマンド置換 subshell の中で動くため、親の
+  # EXIT trap（cleanup）も cleanup_paths への追加もこの中では効かない（subshell の変更は
+  # 親に届かない）。そこで subshell 自身の EXIT trap で消し、chmod・printf の失敗や割り込みで
+  # 途中終了したときも鍵ファイルが残らないようにする。trap は subshell 内の設定なので
+  # 親の cleanup と衝突しない。err_file（gh の stderr の取り込み用 #520）も同じ trap で消す。
   key_file="$(mktemp)"
-  trap 'rm -f "${key_file:-}"' EXIT
+  err_file="$(mktemp)"
+  trap 'rm -f "${key_file:-}" "${err_file:-}"' EXIT
   chmod 600 "$key_file"
   printf '%s\n' "$key" >"$key_file"
   # gh 拡張 Link-/gh-token。出力は JSON（{"token": "...", ...}）。
-  if ! response="$(gh token generate --app-id "$app_id" --installation-id "$installation_id" --key "$key_file" 2>/dev/null)"; then
+  # 失敗のときは stderr を捨てず、1 行目を秘密を伏せて出す（#520）。
+  rc=0
+  response="$(gh token generate --app-id "$app_id" --installation-id "$installation_id" --key "$key_file" 2>"$err_file")" || rc=$?
+  if ((rc != 0)); then
     rm -f "$key_file"
-    echo "agent-gh: GitHub App のトークンを発行できません（gh extension install Link-/gh-token が必要）" >&2
+    err_first="$(head -n 1 "$err_file")"
+    rm -f "$err_file"
+    if [[ -n "$err_first" ]]; then
+      # 秘密鍵（複数行の PEM）は行ごとに分けて伏せる値に渡す。BEGIN/END 行と空行は
+      # それ自体秘密ではないため外す（stderr の 1 行に現れるのは鍵の一部の行）。
+      mapfile -t key_lines <<<"$key"
+      key_frags=()
+      for kl in "${key_lines[@]}"; do
+        [[ -z "$kl" || "$kl" == -----BEGIN* || "$kl" == -----END* ]] || key_frags+=("$kl")
+      done
+      echo "agent-gh: GitHub App のトークンを発行できません（gh token generate が失敗: $(mask_secret_line "$err_first" "$app_id" "$installation_id" "${key_frags[@]}")）" >&2
+    else
+      echo "agent-gh: GitHub App のトークンを発行できません（gh token generate が失敗、stderr なし・終了コード $rc）" >&2
+    fi
+    # 「拡張が必要」の文は、gh token --help が成功する（= gh-token 拡張が gh token
+    # コマンドを提供している）ときは出さない。gh extension list は空の GH_CONFIG_DIR
+    # （gh_isolated_config）では認証チェックに引っかかって常に失敗するため使えない
+    # （cli/cli root.go の CheckAuth。実測: 空 GH_CONFIG_DIR で exit 4）。
+    # gh token --help はヘルプ表示のため認証の門を通らない（実測 2026-11-20:
+    # 拡張あり exit 0 / 拡張なし unknown command で exit 1 / gh 無し exit 127）。
+    # 126/127 は bash 標準の「コマンドを起動できなかった」終了コードなので、
+    # 「拡張が無い」とは別の案内を出す（誤った install 案内を防ぐ）。
+    ext_rc=0
+    gh token --help >/dev/null 2>&1 || ext_rc=$?
+    if ((ext_rc == 126 || ext_rc == 127)); then
+      echo "agent-gh: gh が起動できません（PATH を確認してください）" >&2
+    elif ((ext_rc != 0)); then
+      echo "agent-gh: gh extension install Link-/gh-token が必要です" >&2
+    fi
     exit 3
   fi
-  rm -f "$key_file"
+  rm -f "$key_file" "$err_file"
   token="$(sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' <<<"$response")"
   [[ -n "$token" ]] || { echo "agent-gh: トークン発行の応答に token がありません" >&2; exit 3; }
   printf '%s' "$token"
@@ -107,6 +190,12 @@ for arg in "$@"; do
     exit 5
   fi
 done
+
+# gh / git を呼ぶロールでは、gh の設定を空の一時ディレクトリに隔離する（#522）。
+# -h / --help と役割の誤り（usage の exit 2）では何も作らない。
+case "$role" in
+  dev|review|qa) gh_isolated_config ;;
+esac
 
 git_identity=()
 case "$role" in
@@ -130,7 +219,9 @@ case "$role" in
     fi
     token="$(app_token PELWAY_QA_APP_ID PELWAY_QA_INSTALLATION_ID PELWAY_QA_PRIVATE_KEY)"
     # 送るのは POST /repos/hatai/Pelway/issues/<番号>/comments の 1 つだけ。
-    GH_TOKEN="$token" exec gh issue comment "$2" --repo hatai/Pelway --body-file "$4"
+    # exec しない（EXIT trap で一時 GH_CONFIG_DIR を消すため）。終了コードは gh のものを返す。
+    GH_TOKEN="$token" gh issue comment "$2" --repo hatai/Pelway --body-file "$4"
+    exit $?
     ;;
   -h|--help)
     help
@@ -161,7 +252,11 @@ if [[ "${1:-}" == "git" ]]; then
     fi
     exit "$rc"
   fi
-  GH_TOKEN="$token" exec git "${git_cfg[@]}" "$@"
+  # exec しない（EXIT trap で一時 GH_CONFIG_DIR を消すため）。終了コードは git のものを返す。
+  GH_TOKEN="$token" git "${git_cfg[@]}" "$@"
+  exit $?
 fi
 
-GH_TOKEN="$token" exec gh "$@"
+# exec しない（EXIT trap で一時 GH_CONFIG_DIR を消すため）。終了コードは gh のものを返す。
+GH_TOKEN="$token" gh "$@"
+exit $?
