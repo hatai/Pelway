@@ -15,3 +15,18 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の「指揮役の定期巡回（スケジュール起床）」の「`watch.log` からスレッドへの転送スクリプト（…）は使わない」の項に、#555 の起こし（サーバーと同じ `t3`、毎回読み直す宛先、決まった文）は別扱いであることを足す（#526 の PR #559 で直す）。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: b2637cc0bb9256f5d359b5a349e9e89497612a99
+
+1. 詰まった箇所: `crates/pelway-agent-watch/src/io.rs`: round 1 は、共有の git dir の `pelway/`（sandbox から書ける）のファイルと、sandbox から書ける場所の実行ファイルを、ホストの権限で確かめずに使っていた（Claude の must-fix 2 件）。直し方は次のとおり。
+   - `pelway/` を `O_DIRECTORY | O_NOFOLLOW` で開き、fd で種類・所有者を確かめる。
+   - 中のファイルを `openat` と `O_NOFOLLOW | O_NONBLOCK` で開き、通常ファイル・所有者・リンク数 1・大きさの上限を確かめる。
+   - `t3` は `$HOME/.t3/wsl-runtime/` の下の自分の所有のものだけを受け入れる。
+2. 曖昧だった文: 「`mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。」（`.agents/skills/implement-issue/SKILL.md` 手順 6）— 文は明確で、修正の round で守らずに push した（+880 で上限超過）。hatai が「PR サイズは無視しておｋ」と判断したので分割せず、`pr-size-exception` の付与は hatai に頼む。
+3. 仮定と解釈: パスで確かめてからパスで開く間の差し替え（自動のセキュリティレビューの指摘）は、決まった順で起こす試験が作れないため、作り（dirfd と `openat`）で塞ぎ、`pelway/` が symlink のときに外へ書かないことは既存の試験で確かめる形にした。nit 3 件（ゾンビ、受信箱の全体の読み直し、残る範囲の書き方）は直していない。
+4. 足りなかった情報・検証手段: bubblewrap の中の常駐プロセスの `/proc/<pid>/exe` がホストからどう見えるかは、未確認。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9「Request changes のとき」の 2 に「手順 6 の `mise run pr-size` を push の前に必ず実行する（修正の round でも省かない）」を足す。
+
+使ったスキル: implement-issue、write-pull-request
