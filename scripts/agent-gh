@@ -142,12 +142,16 @@ app_token() {
     else
       echo "agent-gh: GitHub App のトークンを発行できません（gh token generate が失敗、stderr なし・終了コード $rc）" >&2
     fi
-    # 「拡張が必要」の文は gh extension list が成功して gh-token が無いときだけ出す。
+    # 「拡張が必要」の文は gh extension list が成功して Link-/gh-token が無いときだけ出す。
     # list 自体が失敗したら有無は分からないので出さない（#520）。
-    # extension 名は各行の第 1 フィールドとの完全一致で判定する（部分一致は
-    # gh-token-extra のような別の extension 名に誤ヒットして案内を抑止するため）。
+    # 実出力（コマンド置換 = 非 TTY なのでタブ区切り・ヘッダーなし）は
+    #   NAME \t REPO \t VERSION
+    # の順。NAME は「gh <コマンド名>」（gh-token 拡張では "gh token"）でスペースを含むため、
+    # 区切りはタブに限定し（awk の既定区切りだと NAME のスペースでも割れる）、拡張の有無は
+    # REPO 欄（タブ区切りの第 2 フィールド）とリポジトリ名の完全一致で判定する
+    # （cli/cli pkg/cmd/extension/command.go・go-gh tableprinter の非 TTY = TSV 出力による）。
     if ext_list="$(gh extension list 2>/dev/null)"; then
-      awk '{print $1}' <<<"$ext_list" | grep -qx 'gh-token' || echo "agent-gh: gh extension install Link-/gh-token が必要です" >&2
+      awk -F'\t' '{print $2}' <<<"$ext_list" | grep -qx 'Link-/gh-token' || echo "agent-gh: gh extension install Link-/gh-token が必要です" >&2
     fi
     exit 3
   fi

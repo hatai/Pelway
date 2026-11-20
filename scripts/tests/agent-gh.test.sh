@@ -60,7 +60,13 @@ if [[ "$1 $2" == "token generate" ]]; then
 fi
 if [[ "$1 $2" == "extension list" ]]; then
   if [[ -n "${GH_EXTENSION_LIST_FAIL:-}" ]]; then exit 1; fi
-  printf '%s\n' "${GH_EXTENSION_LIST:-gh-token  v2.0.10  Link-/gh-token}"
+  # 実出力（非 TTY の gh extension list）はタブ区切り: NAME（gh <コマンド名>）\tREPO\tVERSION。
+  # cli/cli の pkg/cmd/extension/command.go と go-gh の tableprinter（非 TTY は TSV・ヘッダーなし）による。
+  if [[ -n "${GH_EXTENSION_LIST:-}" ]]; then
+    printf '%s\n' "$GH_EXTENSION_LIST"
+  else
+    printf 'gh token\tLink-/gh-token\tv2.0.10\n'
+  fi
   exit 0
 fi
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_NO_UPDATE_NOTIFIER=%s\n' "${GH_NO_UPDATE_NOTIFIER:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
@@ -197,23 +203,24 @@ GH_TOKEN_GENERATE_STDERR_1='' \
 [[ "$RC" == 3 ]] || failures+=("token_fail_empty_stderr: exit $RC, want 3")
 grep -qF '終了コード' <<<"$OUT" || failures+=("token_fail_empty_stderr: exit code not shown")
 
-# 「拡張が必要」の文は gh extension list に gh-token があるときは出さない
+# 「拡張が必要」の文は gh extension list に Link-/gh-token があるときは出さない。
+# 応答は実出力形式（タブ区切り: NAME（gh <コマンド名>）\tREPO\tVERSION）
 GH_TOKEN_GENERATE_FAIL=1 \
-GH_EXTENSION_LIST=$'gh-token  v2.0.10  Link-/gh-token\ngh-stack  v0.2.0  vi/weird' \
+GH_EXTENSION_LIST=$'gh token\tLink-/gh-token\tv2.0.10\ngh stack\tvi/weird-stack\tv0.2.0' \
   run token_fail_no_install_hint_when_present dev pr list
 [[ "$RC" == 3 ]] || failures+=("token_fail_no_install_hint_when_present: exit $RC, want 3")
 [[ "$OUT" != *'gh extension install'* ]] || failures+=("token_fail_no_install_hint_when_present: install hint shown despite extension present")
 
-# gh extension list に gh-token が無いときだけ「拡張が必要」を出す
+# gh extension list に Link-/gh-token が無いときだけ「拡張が必要」を出す
 GH_TOKEN_GENERATE_FAIL=1 \
-GH_EXTENSION_LIST=$'gh-stack  v0.2.0  vi/weird' \
+GH_EXTENSION_LIST=$'gh stack\tvi/weird-stack\tv0.2.0' \
   run token_fail_install_hint_when_absent dev pr list
 [[ "$RC" == 3 ]] || failures+=("token_fail_install_hint_when_absent: exit $RC, want 3")
 grep -qF 'gh extension install Link-/gh-token' <<<"$OUT" || failures+=("token_fail_install_hint_when_absent: install hint missing")
 
-# extension 名は行の第 1 フィールドとの完全一致で判定する（gh-token-extra は別の extension）
+# リポジトリ欄は完全一致で判定する（someone/gh-token-extra は別の extension）
 GH_TOKEN_GENERATE_FAIL=1 \
-GH_EXTENSION_LIST=$'gh-token-extra  v0.1.0  someone/gh-token-extra' \
+GH_EXTENSION_LIST=$'gh token extra\tsomeone/gh-token-extra\tv0.1.0' \
   run token_fail_install_hint_for_lookalike_name dev pr list
 [[ "$RC" == 3 ]] || failures+=("token_fail_install_hint_for_lookalike_name: exit $RC, want 3")
 grep -qF 'gh extension install Link-/gh-token' <<<"$OUT" || failures+=("token_fail_install_hint_for_lookalike_name: install hint missing for lookalike extension")
