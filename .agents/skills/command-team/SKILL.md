@@ -123,7 +123,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 | 条件 | レビュー担当 |
 |---|---|
-| 通常 | PR 番号が偶数は Codex（`codex_review`、`gpt-6-luna`）、奇数は Devin CLI（`devin_review`、`swe-2-high`）。使えない担当（下の確認ゲート）の番では Codex に回す |
+| 通常 | PR 番号が偶数は Codex（`codex_review`。モデルは下の「Codex のモデル」）、奇数は Devin CLI（`devin_review`、`swe-2-high`）。使えない担当（下の確認ゲート）の番では Codex に回す |
 | 高リスク: `unsafe`、セキュリティの境界（認証・権限・承認・秘密情報・ネットワーク）、`.github/workflows/` の変更、pr-size の追加行が 400 を超える | Codex・Claude（`claude_review`）・Devin CLI の使えるもの全て（3 人） |
 | 抜き取り | PR 番号を 4 で割った余りが 0 の通常の PR には Claude も付ける（Codex・Devin CLI の見落とし率の測定のため） |
 
@@ -134,6 +134,17 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 - Claude のレビュー担当は確認済み。確認記録は `docs/dev-environment.md`「レビュー担当の Claude」の「確認手順の結果（記録欄）」。記録が消えた場合は、記録が戻るまで Claude を使わず Codex だけで回し、高リスクの PR は人間に知らせる。
 - 抜き取りの実施が 10 件に達するか、抜き取りの開始から 4 週間が経つか、どちらか早い方になったら、`docs/agents/command-team-details.md` の「レビュー担当の段階移行」に従って見落とし率を集計し、高リスク PR の複数レビュー体制の有効化を判断する。
 - effort は、追加行が 200 以下で高リスクでなければ既定、それ以外は `high`。同じ PR の 2 回目以降のレビューは 1 段上げる。
+- Codex のモデル（選び方の正本。ほかの文書はここを参照する）: 委託のたびに、上と同じ材料（追加行数、高リスクかどうか、レビューの回数）で次の表から 1 つ選び、Assigned 行と `target.model` に写す。上から順に見て、最初に当たった行のモデルを使う。
+
+  | 条件 | モデル |
+  |---|---|
+  | 追加行が 200 を超える、高リスク（上の表の高リスクの条件）、または同じ PR の 3 回目以降のレビュー | `gpt-6.2-sol` |
+  | 文書だけの PR | `gpt-6-luna` |
+  | それ以外（追加行が 200 以下で、高リスクでないコードの PR） | `gpt-6.1-terra` |
+
+  - 文書だけの PR は、変更したファイルがすべて Markdown（`*.md`）の PR とする。確かめ方は `scripts/agent-gh dev pr diff <M> --name-only` の全行が `.md` で終わること。試験・スクリプト・設定ファイルが 1 つでも含まれれば、文書だけではない。
+  - `gpt-6.2-astra` は使わない。コストが `gpt-6.2-sol` の 4 倍で、セキュリティの評価（SEC-Bench Pro）は `gpt-6.2-sol` の方が高いため（出典は Issue #563）。
+  - 根拠: OpenAI の公式の資料で、`gpt-6.2-sol` は PR のレビューに勧められている。`gpt-6.1-terra` は速く効率的だがコードの評価が `gpt-6.2-sol` より低い。`gpt-6-luna` は最も安く、量の多い作業向け（出典は Issue #563）。
 - 複数のレビュー担当を付けた PR で判定が割れたら（approve と request-changes が混ざったら）、マージせず、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正をそのまま進める（人間へのエスカレーションは不要）。実装担当が委託した複数レビューで割れたときも同じで、実装担当が修正に進む（skill `implement-issue` の手順 9）。
 
 ### レビュースレッドの settle
