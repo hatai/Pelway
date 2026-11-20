@@ -47,3 +47,15 @@
 5. 改善案: .agents/skills/implement-issue/SKILL.md の「手順 4」に「外部コマンドの出力形式に依存する判定は、実行できなくても公式実装の一次情報（ソース）で列構成を確かめる」を足す
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: 8883ad511d69f9ea90143e3c6835ae96622be1b5
+
+1. 詰まった箇所: なし。レビュー指摘のとおり `${line//"$v"/<秘密>}` に複数行 PEM 全体を渡す構造では 1 行の stderr に鍵の一部行が現れたとき伏せられず、複数行ダミー鍵のテスト（token_fail_masks_multiline_key_fragment）を先に足して red で再現してから直した
+2. 曖昧だった文: 「空行と `-----BEGIN/END ...-----` 以外の各行を伏せる値として `mask_secret_line` に渡す」（指揮役の must-fix 通知）— BEGIN/END 行自体を伏せない根拠（行の内容は鍵の種別を示すだけで秘密ではない）は通知に書かれていない
+3. 仮定と解釈: 指示のとおり BEGIN/END 行と空行は伏せ対象から外した。種別の開示が問題になる運用は本 Issue の対象外（発行者・APP ID は行の別の場所で伏せている）。nit（github_pat_ / JWT の伏せパターン追加）は「対応は任意」との明記により対応しない（implement-issue の決まり: nit は指示があったときだけ）
+4. 足りなかった情報・検証手段: fnox に登録された実際の鍵の PEM 形式（PKCS#1 か PKCS#8 か等）の確認手段。BEGIN 行の接頭辞匹配（-----BEGIN*）で両方を cover するため影響なしと判断した
+5. 改善案: .agents/skills/write-issue/SKILL.md の「受け入れ条件の書き方」に「秘密を出す条件は、秘密の実際の形（複数行 PEM 等）で確かめるよう指定する」を足す
+
+使ったスキル: implement-issue
