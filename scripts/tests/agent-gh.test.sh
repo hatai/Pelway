@@ -7,6 +7,10 @@ ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 failures=()
 
+# 偽の mktemp / chmod は本物に委譲する。この時点（PATH 変更前）に本物のパスを取っておく
+REAL_MKTEMP="$(command -v mktemp)"
+REAL_CHMOD="$(command -v chmod)"
+
 BIN="$ROOT/bin"
 mkdir -p "$BIN"
 
@@ -54,6 +58,24 @@ EOF
 cat >"$BIN/git" <<'EOF'
 #!/usr/bin/env bash
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
+EOF
+
+# 偽の mktemp: 本物に委譤し、作成したパスを種別（f=ファイル、d=ディレクトリ）とともに記録する
+# （一時ファイルの残存確認用。引数をそのまま記録すると、引数なしの呼び出しが read の
+#  IFS ホワイトスペースの詰めで読み取れないため種別を付ける）。
+cat >"$BIN/mktemp" <<EOF
+#!/usr/bin/env bash
+p="\$($REAL_MKTEMP "\$@")"
+if ((\$# == 0)); then kind=f; else kind="\${1#-}"; fi
+printf '%s\t%s\n' "\$kind" "\$p" >>"\${MKTEMP_LOG:-/dev/null}"
+printf '%s\n' "\$p"
+EOF
+
+# 偽の chmod: FAKE_CHMOD_FAIL=1 のときだけ失敗する（app_token の subshell 途中終了の再現用）。
+cat >"$BIN/chmod" <<EOF
+#!/usr/bin/env bash
+[[ -z "\${FAKE_CHMOD_FAIL:-}" ]] || exit 1
+exec '$REAL_CHMOD' "\$@"
 EOF
 chmod +x "$BIN"/*
 
@@ -369,6 +391,32 @@ GH_CONFIG_DIR="$fake_gh_dir" FAKE_PELWAY_DEV_APP_ID=999 run no_fallback_generate
 [[ ! -e "$ROOT/no_fallback_generate_fails.log" ]] || failures+=("no_fallback_generate_fails: gh was called")
 tok="$(sed -n 's/^GH_CONFIG_DIR=//p' "$ROOT/no_fallback_generate_fails.log.token-env")"
 [[ -n "$tok" && "$tok" != "$fake_gh_dir" ]] || failures+=("no_fallback_generate_fails: token generate saw caller GH_CONFIG_DIR")
+
+# --- review round 1 の must-fix: app_token の subshell 途中終了でも秘密鍵の一時ファイルが残らない ---
+# app_token は token="$(app_token ...)" のコマンド置換 subshell の中で動く。subshell では親の
+# EXIT trap は走らないため、subshell 内で trap を設定して mktemp から消し忘れを防いでいる。
+
+# トークン発行の失敗経路: --key の一時ファイルは発行に失敗しても残らない（明示的な rm の経路）
+GH_CONFIG_DIR="$fake_gh_dir" FAKE_PELWAY_DEV_APP_ID=999 run key_removed_on_generate_fail dev pr list
+[[ "$RC" == 3 ]] || failures+=("key_removed_on_generate_fail: exit $RC, want 3")
+kp="$(cat "$ROOT/key_removed_on_generate_fail.log.key-path" 2>/dev/null)"
+[[ -n "$kp" ]] || failures+=("key_removed_on_generate_fail: key path not recorded")
+[[ ! -e "$kp" ]] || failures+=("key_removed_on_generate_fail: key file left behind")
+
+# subshell の途中終了（chmod 600 の失敗で set -e が即座に subshell を止める）でも、
+# 鍵ファイル（引数なし mktemp）と隔離ディレクトリ（mktemp -d）はどちらも残らない
+export MKTEMP_LOG="$ROOT/mktemp-chmod-fail.log"
+: >"$MKTEMP_LOG"
+GH_CONFIG_DIR="$fake_gh_dir" FAKE_CHMOD_FAIL=1 run keyfile_chmod_fail dev pr list
+[[ "$RC" != 0 ]] || failures+=("keyfile_chmod_fail: unexpectedly succeeded")
+[[ -s "$MKTEMP_LOG" ]] || failures+=("keyfile_chmod_fail: mktemp calls not recorded")
+while IFS=$'\t' read -r kind mp; do
+  if [[ "$kind" == "f" ]]; then
+    [[ ! -e "$mp" ]] || failures+=("keyfile_chmod_fail: key file left behind ($mp)")
+  elif [[ "$kind" == "d" ]]; then
+    [[ ! -e "$mp" ]] || failures+=("keyfile_chmod_fail: isolated GH_CONFIG_DIR left behind ($mp)")
+  fi
+done <"$MKTEMP_LOG"
 
 if ((${#failures[@]})); then
   printf 'FAIL %s\n' "${failures[@]}"

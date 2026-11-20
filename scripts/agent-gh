@@ -24,8 +24,10 @@ review_fnox_config="${PELWAY_AGENT_FNOX_CONFIG_REVIEW:-$HOME/.config/pelway-agen
 
 usage() { echo "usage: $0 <dev|review> [git] <args...> | $0 qa comment <番号> --body-file <path|->" >&2; exit 2; }
 
-# 終了時に消すパス（gh 隔離用の一時ディレクトリ、app_token の秘密鍵一時ファイル）。
-# EXIT trap は 1 つしか設定できないため、鍵ファイルも含めてこの 1 つのハンドラで消す。
+# 終了時に消すパス（gh 隔離用の一時ディレクトリ）。呼び出しはすべて subshell の外で行う。
+# app_token の秘密鍵一時ファイルはここに入れない: app_token は token="$(app_token ...)" の
+# コマンド置換 subshell の中で動き、subshell では親の EXIT trap も cleanup_paths への追加も
+# 親に届かないため、app_token 内で subshell 自身の trap を設定して消す（下を参照）。
 cleanup_paths=()
 cleanup() {
   local p
@@ -96,14 +98,21 @@ secret() {
 # 名前は役割ごとに違う（dev / review: PELWAY_*_APP_ID・_APP_INSTALLATION_ID・_APP_KEY、
 # qa: PELWAY_QA_APP_ID・PELWAY_QA_INSTALLATION_ID・PELWAY_QA_PRIVATE_KEY）。
 app_token() {
-  local app_id installation_id key key_file response token
+  # key_file は local にしない: EXIT trap の実行時には local 変数のスコープが既に
+  # 終わっており ${key_file:-} が空に展開されるため、消すべきパスが trap に届かない。
+  # グローバルなら subshell 内の trap から見える。
+  local app_id installation_id key response token
   app_id="$(secret "$1")"
   installation_id="$(secret "$2")"
   key="$(secret "$3")"
   # 秘密鍵は argv（ps で見える）に載せず、所有者だけが読める一時ファイルで渡し、使ったらすぐ消す。
-  # 消し忘れの保険は共通の cleanup（EXIT trap）が持つ。
+  # app_token は token="$(app_token ...)" のコマンド置換 subshell の中で動くため、親の
+  # EXIT trap（cleanup）も cleanup_paths への追加もこの中では効かない（subshell の変更は
+  # 親に届かない）。そこで subshell 自身の EXIT trap で消し、chmod・printf の失敗や割り込みで
+  # 途中終了したときも鍵ファイルが残らないようにする。trap は subshell 内の設定なので
+  # 親の cleanup と衝突しない。
   key_file="$(mktemp)"
-  cleanup_paths+=("$key_file")
+  trap 'rm -f "${key_file:-}"' EXIT
   chmod 600 "$key_file"
   printf '%s\n' "$key" >"$key_file"
   # gh 拡張 Link-/gh-token。出力は JSON（{"token": "...", ...}）。
