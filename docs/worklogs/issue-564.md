@@ -2,7 +2,7 @@
 
 ## 実装者メモ（round 1）
 
-対象 head: 41304c98cc750fbd8ddc95b28b2e02b61934a538
+対象 head: 168adf884976dda71a4dc071beb38747749e3de7（hatai の依頼で足した mise のタスク `conductor-register`・`conductor-rebuild` を含む）
 
 1. 詰まった箇所: `scripts/tests/conductor-rebuild.test.sh`: 試験で HOME を一時ディレクトリに向けると、PATH の `python3`（mise の shim）が mise の設定を読めずに失敗した。`scripts/conductor-rebuild` では、`pitchfork-check` と同じく `/usr/bin/python3` を使った。
 2. 曖昧だった文: 「`--provider`・`--model`・`--effort` を省略したとき、旧指揮役の `t3 thread show --json` の provider・model・effort が新しい指揮役に渡る」（Issue #564 の受け入れ条件）— `t3 thread show --json` には effort が無かった（`providerInstanceId`・`model` だけ）。そこで、effort は `--effort` を指定したときだけ渡す形にした（PR 本文に書く）。
