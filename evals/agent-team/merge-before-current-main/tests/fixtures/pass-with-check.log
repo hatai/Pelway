@@ -1,0 +1,3 @@
+action=read src=environment/branch-113.txt detail="PR #113 のブランチは今の main を含まない"
+action=note text="ブランチの最新化は Kodiak がマージの前に行う"
+action=run cmd="scripts/agent-gh dev pr edit 113 --add-label automerge" exit=0
