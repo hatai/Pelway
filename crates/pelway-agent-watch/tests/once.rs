@@ -4,7 +4,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 struct Sandbox {
     root: PathBuf,
@@ -68,25 +68,28 @@ done
         self.root.join("state/pelway/agent-watch.lock")
     }
 
-    fn run(&self) -> Output {
-        self.run_with(&["--once", "--dry-run"])
-    }
-
-    fn run_with(&self, args: &[&str]) -> Output {
+    fn command(&self, args: &[&str]) -> Command {
         let path = format!(
             "{}:{}",
             self.root.join("bin").display(),
             std::env::var("PATH").unwrap()
         );
-        Command::new(env!("CARGO_BIN_EXE_pelway-agent-watch"))
-            .args(args)
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_pelway-agent-watch"));
+        cmd.args(args)
             .args(["--project", "."])
             .env("PELWAY_AGENT_WATCH_POLL_SECS", "0")
             .env("PATH", path)
             .env("FAKE_DIR", self.root.join("fake"))
-            .env("XDG_STATE_HOME", self.root.join("state"))
-            .output()
-            .unwrap()
+            .env("XDG_STATE_HOME", self.root.join("state"));
+        cmd
+    }
+
+    fn run(&self) -> Output {
+        self.run_with(&["--once", "--dry-run"])
+    }
+
+    fn run_with(&self, args: &[&str]) -> Output {
+        self.command(args).output().unwrap()
     }
 }
 
@@ -99,6 +102,34 @@ impl Drop for Sandbox {
 fn write_exec(path: &Path, body: &str) {
     fs::write(path, body).unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// 子プロセスを drop 時に必ず止める（テストが panic しても残らないように）。
+struct KillOnDrop(std::process::Child);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// lock ファイルが誰かに取られるまで待つ（`flock -n <path> true` が失敗したら取られている）。
+fn wait_locked(path: &Path) {
+    for _ in 0..100 {
+        let free = Command::new("flock")
+            .arg("-n")
+            .arg(path)
+            .arg("true")
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !free {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("lock was never taken: {}", path.display());
 }
 
 const LIST_DONE: &str = r#"[{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"},
@@ -276,35 +307,47 @@ fn worktree_checkout_is_refused() {
 
 #[test]
 fn second_instance_is_refused() {
-    // 状態ディレクトリの lock を先に取っていると、2 つ目は起動しない
+    // 起動中の agent-watch が lock を持ち続けているあいだ、2 つ目は起動しない。
+    // 1 つ目は本物のバイナリをループで動かす（lock はプロセスが生きているあいだ有効）
     let sb = Sandbox::new("lock");
     sb.fake("list.json", LIST_DONE);
-    let mut hold = Command::new("flock")
-        .arg("-n")
-        .arg(sb.lock_file())
-        .args(["sleep", "30"])
-        .spawn()
-        .unwrap();
-    // lock が取られるまで待つ（lock が空いていれば flock -n ... true は成功する）
-    let mut held = false;
-    for _ in 0..100 {
-        let free = Command::new("flock")
+    let mut cmd = sb.command(&["--dry-run", "--cycles", "1000"]);
+    cmd.env("PELWAY_AGENT_WATCH_POLL_SECS", "30")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _first = KillOnDrop(cmd.spawn().unwrap());
+    wait_locked(&sb.lock_file());
+    let out = sb.run();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("lock"), "stderr: {stderr}");
+    assert!(
+        out.stdout.is_empty(),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(!sb.state_file().exists(), "state file was written");
+}
+
+#[test]
+fn externally_held_lock_is_refused() {
+    // 状態ディレクトリの lock を別プロセスが取っているだけでも起動しない
+    let sb = Sandbox::new("flock");
+    sb.fake("list.json", LIST_DONE);
+    let _hold = KillOnDrop(
+        Command::new("flock")
             .arg("-n")
             .arg(sb.lock_file())
-            .arg("true")
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !free {
-            held = true;
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    assert!(held, "flock was never taken: {}", sb.lock_file().display());
+            .args(["sleep", "30"])
+            .spawn()
+            .unwrap(),
+    );
+    wait_locked(&sb.lock_file());
     let out = sb.run();
-    let _ = hold.kill();
-    let _ = hold.wait();
     assert!(
         out.status.success(),
         "stderr: {}",
