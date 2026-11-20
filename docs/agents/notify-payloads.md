@@ -24,7 +24,7 @@ Grok Bot の webhook には 2 種類の JSON が届く。`schema` で見分け�
 | `branch` | string / null | スレッドの worktree のブランチ |
 | `issue_number` | number / null | `branch` が `agent/<番号>-...` のときの番号 |
 | `round` | number | スレッドの実行回数（最初の指示が 1、`t3 thread send` のたびに 1 増える） |
-| `report` | string / null | `event` が `finished` で、スレッドの最後のメッセージが `キー: 値` の行だけで 5 行以内の返答のとき、その本文。形だけで判定するので、値の中身は検査しない |
+| `report` | string / null | `event` が `finished` で、スレッドの最後のメッセージが `キー: 値` の行だけで 8 行以内の返答のとき、その本文。形だけで判定するので、値の中身は検査しない |
 | `stall_reason` | string / null | `event` が `stalled` のとき `no-activity`（実行中のまま 45 分更新なし）か `ci-failed-twice`（`agent/` ブランチで verify が 2 回続けて失敗） |
 | `link` | string | T3 の画面でスレッドを開く URL |
 | `host` | string | 見張り役が動いているマシン名 |
