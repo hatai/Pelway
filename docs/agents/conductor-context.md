@@ -99,7 +99,7 @@ GitHub 内部で食い違いがあれば既存規則（runbook の整合チェ�
 4. 引き継ぎ確認の完了時点で操作権限が移る。確認が完了しない場合は権限を移さず、旧側の復旧または人間確認に進む
 5. 旧・新の同時稼働の禁止: 権限移行後、旧指揮役はいかなる操作も行わない（見張り `conductor-watch` の停止を含め、停止の操作は引き継ぎ確認の中で新旧どちらか一方だけが行う）
 
-始め方: hatai がホストの端末で `scripts/conductor-rebuild --from <旧指揮役のスレッド ID>` を実行する（provider・model・effort を替えるときは `--provider`・`--model`・`--effort`。省略すると provider と model は旧指揮役と同じで、effort は渡さない）。スクリプトは、1 の停止の文を旧指揮役に送って終わるまで待ち、2 の新指揮役を本体 checkout（worktree ではない）で立て、agent-watch の起こしの宛先を `scripts/conductor-register` で新指揮役に替える。送信か起動に失敗したら、宛先を変えずに止まる。
+始め方: hatai がホストの端末で `scripts/conductor-rebuild --from <旧指揮役のスレッド ID>`（または `mise run conductor-rebuild -- --from <旧指揮役のスレッド ID>`）を実行する（provider・model・effort を替えるときは `--provider`・`--model`・`--effort`。省略すると provider と model は旧指揮役と同じで、effort は渡さない）。スクリプトは、1 の停止の文を旧指揮役に送って終わるまで待ち、2 の新指揮役を本体 checkout（worktree ではない）で立て、agent-watch の起こしの宛先を `scripts/conductor-register` で新指揮役に替える。送信か起動に失敗したら、宛先を変えずに止まる。
 
 新指揮役は、4 の権限の移行の後に、旧指揮役のスレッドを `t3_thread_organize`（`action: settle`）で settle し、巡回の scheduled task を作り直す（runbook の「指揮役の定期巡回（スケジュール起床）」。`t3` CLI には settle が無いため、スクリプトでは行わない）。
 

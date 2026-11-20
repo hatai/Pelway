@@ -74,6 +74,13 @@ run "" --from 'a;rm'; rc=$?
 check "rejects odd characters" [ "$rc" -ne 0 ]
 check "rejected ids make no t3 calls" [ ! -s "$LOG" ]
 
+# mise のタスクから同じスクリプトを呼べる（引数は -- の後ろがそのまま渡る）
+task_runs() { /usr/bin/python3 -I -c 'import sys, tomllib
+t = tomllib.load(open(sys.argv[1], "rb"))["tasks"][sys.argv[2]]
+sys.exit(0 if t.get("run") == sys.argv[3] else 1)' "$REPO/mise.toml" "$1" "$2"; }
+check "mise task conductor-rebuild runs the script" task_runs conductor-rebuild "bash scripts/conductor-rebuild"
+check "mise task conductor-register runs the script" task_runs conductor-register "bash scripts/conductor-register"
+
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
   exit 1

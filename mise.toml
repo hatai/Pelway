@@ -286,6 +286,14 @@ run = "bash scripts/demo-check/selftest.sh"
 description = "T3 が作った worktree のうち、作業中のスレッドのものを除き、PR がマージ済み・クローズ済みのものを確認してから消す（--dry-run で一覧だけ、--auto で pitchfork の定期実行と同じ処理）"
 run = "bash scripts/agent-worktree-prune"
 
+[tasks.conductor-register]
+description = "agent-watch の起こしの宛先（いまの指揮役のスレッド ID）を登録・消去・表示する（hatai がホストで実行する。mise run conductor-register -- <thread-id> | --clear | --show）"
+run = "bash scripts/conductor-register"
+
+[tasks.conductor-rebuild]
+description = "指揮役を立て直す（旧指揮役を止め、新しい指揮役を本体 checkout で立てて宛先を替える。hatai がホストで実行する。mise run conductor-rebuild -- --from <旧指揮役のスレッド ID> [--provider <id> --model <slug>] [--effort <値>]）"
+run = "bash scripts/conductor-rebuild"
+
 [tasks.codex-review-check]
 description = "レビュー担当の Codex（codex_review）のネットワークが GitHub だけに絞られているかを確かめる（Codex を更新したら実行する）"
 run = """
