@@ -766,3 +766,95 @@ fn dry_run_writes_no_inbox_and_no_wake() {
     assert!(!sb.inbox().exists());
     assert!(sb.read_fake("t3-send-args").is_empty());
 }
+
+// ---- 受信箱・補助記録の置き場は sandbox の中から書けるので、種類を確かめて開く（PR #561 round 1） ----
+
+/// 10 秒以内に終わらなければ止めて失敗にする（FIFO で止まらないことを確かめるため）。
+fn run_bounded(sb: &Sandbox) -> Output {
+    let child = sb
+        .command(&["--once"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut child = KillOnDrop(child);
+    for _ in 0..1000 {
+        if let Ok(Some(_)) = child.0.try_wait() {
+            let child = std::mem::replace(&mut child.0, Command::new("true").spawn().unwrap());
+            return child.wait_with_output().unwrap();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("agent-watch did not finish within 10 seconds");
+}
+
+fn mkfifo(path: &Path) {
+    let st = Command::new("mkfifo").arg(path).status().unwrap();
+    assert!(st.success());
+}
+
+#[test]
+fn inbox_symlink_is_not_followed() {
+    let sb = Sandbox::new("inbox-symlink");
+    one_event(&sb);
+    let target = sb.root.join("target.txt");
+    fs::write(&target, "").unwrap();
+    fs::create_dir_all(sb.pelway_dir()).unwrap();
+    std::os::unix::fs::symlink(&target, sb.inbox()).unwrap();
+    let out = run_bounded(&sb);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(fs::read_to_string(&target).unwrap(), "");
+    assert!(stderr(&out).contains("inbox append failed"));
+}
+
+#[test]
+fn inbox_hard_link_is_not_written() {
+    let sb = Sandbox::new("inbox-hardlink");
+    one_event(&sb);
+    let target = sb.root.join("target.txt");
+    fs::write(&target, "").unwrap();
+    fs::create_dir_all(sb.pelway_dir()).unwrap();
+    fs::hard_link(&target, sb.inbox()).unwrap();
+    let out = run_bounded(&sb);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(fs::read_to_string(&target).unwrap(), "");
+    assert!(stderr(&out).contains("inbox append failed"));
+}
+
+#[test]
+fn inbox_fifo_does_not_block() {
+    let sb = Sandbox::new("inbox-fifo");
+    one_event(&sb);
+    fs::create_dir_all(sb.pelway_dir()).unwrap();
+    mkfifo(&sb.inbox());
+    let out = run_bounded(&sb);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(stderr(&out).contains("inbox append failed"));
+    assert!(stderr(&out).contains("mode=not-sent"));
+}
+
+#[test]
+fn pelway_dir_symlink_is_not_used() {
+    let sb = Sandbox::new("pelway-symlink");
+    one_event(&sb);
+    let elsewhere = sb.root.join("elsewhere");
+    fs::create_dir_all(&elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, sb.pelway_dir()).unwrap();
+    let out = run_bounded(&sb);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(fs::read_dir(&elsewhere).unwrap().count(), 0);
+    assert!(stderr(&out).contains("inbox append failed"));
+}
+
+#[test]
+fn patrol_state_fifo_does_not_block() {
+    let sb = Sandbox::new("patrol-fifo");
+    one_event(&sb);
+    fs::create_dir_all(sb.pelway_dir()).unwrap();
+    mkfifo(&sb.pelway_dir().join("patrol-state.json"));
+    let out = run_bounded(&sb);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 1);
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    assert!(stderr(&out).contains("WAKE skipped reason=patrol-state-unreadable"));
+}

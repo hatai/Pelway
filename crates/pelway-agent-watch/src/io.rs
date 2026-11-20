@@ -325,55 +325,154 @@ fn send_once(payload: &Value, project: &Path) -> SendResult {
     }
 }
 
-/// 受信箱に、1 件 1 行で追記する（ファイルは 0600。1 行を 1 回の書き込みで書く）。
-/// 書いたあとの受信箱の行数を返す。
-pub fn append_inbox(path: &Path, lines: &[String]) -> Result<u64, String> {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+/// 共有の git dir の `pelway/` は sandbox の中のエージェントも書ける場所なので、
+/// agent-watch（ホストの権限で動く）は、置かれたものの種類を確かめてから使う。
+/// ディレクトリ自体が symlink・自分の所有でない・ディレクトリでないときは使わない。
+fn checked_pelway_dir(dir: &Path) -> Result<(), String> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    if fs::symlink_metadata(dir).is_err() {
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(dir)
+            .map_err(|e| e.to_string())?;
     }
-    let mut file = fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .mode(0o600)
+    let meta = fs::symlink_metadata(dir).map_err(|e| e.to_string())?;
+    if !meta.file_type().is_dir() {
+        return Err("pelway dir is not a plain directory".to_string());
+    }
+    if meta.uid() != unsafe { libc::geteuid() } {
+        return Err("pelway dir is not owned by this user".to_string());
+    }
+    Ok(())
+}
+
+/// 置き場の中のファイルを、symlink をたどらず（`O_NOFOLLOW`）、FIFO で止まらず（`O_NONBLOCK`）に開き、
+/// 開いた fd で、通常ファイル・自分の所有・ハードリンクが 1 本だけ、を確かめる
+/// （`scripts/conductor-watch.sh` のボード Status 更新キューと同じ型）。
+fn open_checked(path: &Path, opts: &mut fs::OpenOptions) -> Result<fs::File, String> {
+    use std::os::unix::fs::MetadataExt;
+    let file = opts
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)
         .map_err(|e| e.to_string())?;
+    let meta = file.metadata().map_err(|e| e.to_string())?;
+    if !meta.file_type().is_file() {
+        return Err("not a regular file".to_string());
+    }
+    if meta.uid() != unsafe { libc::geteuid() } {
+        return Err("not owned by this user".to_string());
+    }
+    if meta.nlink() != 1 {
+        return Err("has other hard links".to_string());
+    }
+    Ok(file)
+}
+
+/// 受信箱に、1 件 1 行で追記する（ファイルは 0600。1 行を 1 回の書き込みで書く）。
+/// 書いたあとの受信箱の行数を、同じ fd で数えて返す（path を開き直さない）。
+pub fn append_inbox(path: &Path, lines: &[String]) -> Result<u64, String> {
+    use std::io::{Read, Seek};
+    if let Some(dir) = path.parent() {
+        checked_pelway_dir(dir)?;
+    }
+    let mut file = open_checked(
+        path,
+        fs::OpenOptions::new()
+            .read(true)
+            .append(true)
+            .create(true)
+            .mode(0o600),
+    )?;
     for line in lines {
         let mut buf = line.clone();
         buf.push('\n');
         file.write_all(buf.as_bytes()).map_err(|e| e.to_string())?;
     }
-    let text = fs::read(path).map_err(|e| e.to_string())?;
-    Ok(text.iter().filter(|&&b| b == b'\n').count() as u64)
+    file.rewind().map_err(|e| e.to_string())?;
+    let mut count = 0u64;
+    let mut chunk = [0u8; 8192];
+    loop {
+        let n = file.read(&mut chunk).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        count += chunk[..n].iter().filter(|&&b| b == b'\n').count() as u64;
+    }
+    Ok(count)
 }
 
-/// 指揮役の補助記録（`patrol-state.json`）を読む。
-pub fn read_text(path: &Path) -> Result<String, String> {
-    fs::read_to_string(path).map_err(|e| e.to_string())
+/// 補助記録（`patrol-state.json`）の大きさの上限。これを超えるものは読まない。
+const PATROL_STATE_MAX_BYTES: u64 = 256 * 1024;
+
+/// 指揮役の補助記録（`patrol-state.json`）を、種類と大きさを確かめてから読む。
+pub fn read_patrol_state(path: &Path) -> Result<String, String> {
+    use std::io::Read;
+    if let Some(dir) = path.parent() {
+        let meta = fs::symlink_metadata(dir).map_err(|e| e.to_string())?;
+        if !meta.file_type().is_dir() {
+            return Err("pelway dir is not a plain directory".to_string());
+        }
+    }
+    let file = open_checked(path, fs::OpenOptions::new().read(true))?;
+    let size = file.metadata().map_err(|e| e.to_string())?.len();
+    if size > PATROL_STATE_MAX_BYTES {
+        return Err("patrol-state is too large".to_string());
+    }
+    let mut text = String::new();
+    file.take(PATROL_STATE_MAX_BYTES)
+        .read_to_string(&mut text)
+        .map_err(|e| e.to_string())?;
+    Ok(text)
 }
 
 /// 起こしに使う `t3` の実行ファイル。`T3_BIN` が指定されていればそれ、無ければ動いている
-/// T3 サーバー（`~/.t3/wsl-runtime/` の下）と同じ実行ファイル、それも無ければ PATH の `t3`。
+/// T3 サーバーと同じ実行ファイル、それも無ければ PATH の `t3`。
 /// PATH の `t3` は版が同じでも、サーバーが持つ `~/.t3/userdata` を `ServerOwnsDatabaseError` で
-/// 拒まれることがあるため（`scripts/conductor-watch.sh` の `T3_BIN` の解決と同じ規則）。
+/// 拒まれることがあるため（`scripts/conductor-watch.sh` の `T3_BIN` の解決と同じ考え方）。
 pub fn wake_t3_bin() -> PathBuf {
     if let Some(bin) = std::env::var_os("T3_BIN").filter(|v| !v.is_empty()) {
         return PathBuf::from(bin);
     }
-    if let Ok(entries) = fs::read_dir("/proc") {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            if !name.to_string_lossy().bytes().all(|b| b.is_ascii_digit()) {
-                continue;
-            }
-            if let Ok(link) = fs::read_link(entry.path().join("exe")) {
-                let s = link.to_string_lossy();
-                if s.contains("/.t3/wsl-runtime/") && s.ends_with("/t3") {
-                    return link;
-                }
-            }
+    find_server_t3(Path::new("/proc"), &home()).unwrap_or_else(|| PathBuf::from("t3"))
+}
+
+/// 動いている T3 サーバーの実行ファイルを `<proc>/<pid>/exe` から探す。
+/// agent-watch はホストの権限で実行するので、受け入れるのは `<home>/.t3/wsl-runtime/` の下の
+/// `t3` で、自分の所有の通常ファイルだけ（sandbox の中から書ける場所に置かれた偽物を選ばない）。
+fn find_server_t3(proc: &Path, home: &Path) -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    let runtime = home.join(".t3/wsl-runtime");
+    let me = unsafe { libc::geteuid() };
+    let entries = fs::read_dir(proc).ok()?;
+    for entry in entries.flatten() {
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .bytes()
+            .all(|b| b.is_ascii_digit())
+        {
+            continue;
+        }
+        let Ok(link) = fs::read_link(entry.path().join("exe")) else {
+            continue;
+        };
+        if !link.starts_with(&runtime) || link.file_name().is_none_or(|n| n != "t3") {
+            continue;
+        }
+        if link
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            continue;
+        }
+        let Ok(meta) = fs::symlink_metadata(&link) else {
+            continue;
+        };
+        if meta.file_type().is_file() && meta.uid() == me {
+            return Some(link);
         }
     }
-    PathBuf::from("t3")
+    None
 }
 
 /// 指揮役のスレッドへ決まった文を送る（`t3 thread send <thread> -`。本文は標準入力）。
@@ -404,5 +503,39 @@ pub fn wake(bin: &Path, thread_id: &str, message: &str) -> Result<(), String> {
                 .code()
                 .map_or_else(|| "signal".to_string(), |c| c.to_string())
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    /// 偽の /proc と HOME を作り、`<pid>/exe` の向き先ごとに選ばれるかを確かめる。
+    #[test]
+    fn server_t3_only_under_home_runtime() {
+        let root = std::env::temp_dir().join(format!("agent-watch-t3bin-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let home = root.join("home");
+        let proc_dir = root.join("proc");
+        // sandbox の中から書ける場所に置いた偽物（パスに /.t3/wsl-runtime/ を含むが HOME の下ではない）
+        let fake = root.join("tmp/.t3/wsl-runtime/a/t3");
+        // worktree の中に置いた偽物（HOME の下だが ~/.t3/wsl-runtime/ ではない）
+        let wt_fake = home.join(".t3/worktrees/Pelway/x/.t3/wsl-runtime/a/t3");
+        let real = home.join(".t3/wsl-runtime/b/t3");
+        for f in [&fake, &wt_fake, &real] {
+            fs::create_dir_all(f.parent().unwrap()).unwrap();
+            fs::write(f, "").unwrap();
+        }
+        for (pid, target) in [("1", &fake), ("2", &wt_fake), ("3", &real)] {
+            fs::create_dir_all(proc_dir.join(pid)).unwrap();
+            symlink(target, proc_dir.join(pid).join("exe")).unwrap();
+        }
+        assert_eq!(find_server_t3(&proc_dir, &home), Some(real.clone()));
+
+        // 本物が無ければ、偽物は選ばず None（PATH の t3 に落ちる）
+        fs::remove_file(proc_dir.join("3/exe")).unwrap();
+        assert_eq!(find_server_t3(&proc_dir, &home), None);
+        let _ = fs::remove_dir_all(&root);
     }
 }

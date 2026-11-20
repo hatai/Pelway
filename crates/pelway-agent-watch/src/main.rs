@@ -288,11 +288,11 @@ impl Watcher {
     /// 失敗しても記録を進めず、次の新しい知らせで改めて試みる（再送の列は持たない）。
     fn maybe_wake(&mut self, inbox_lines: u64) {
         let patrol_state = self.pelway_dir.join(PATROL_STATE_FILE);
-        if !patrol_state.exists() {
+        if std::fs::symlink_metadata(&patrol_state).is_err() {
             // 補助記録が無い（指揮役が T3 のスレッドとして動いていない）。起こす宛先が無い
             return;
         }
-        let info = match io::read_text(&patrol_state).and_then(|t| parse_patrol_state(&t)) {
+        let info = match io::read_patrol_state(&patrol_state).and_then(|t| parse_patrol_state(&t)) {
             Ok(info) => info,
             Err(_) => {
                 // 無い・書きかけ・壊れている。conductor-watch が書き直している途中のこともある
