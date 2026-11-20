@@ -11,3 +11,15 @@
 5. 改善案: .agents/skills/implement-issue/SKILL.md の「よくある失敗」に「『値が洩れないこと』を確かめる条件は実装前 red にならない性質がある（出す実装と同じ round で初めて意味を持つ）」を足す
 
 使ったスキル: implement-issue、.agents/skills/diagnosing-bugs/SKILL.md（verify 失敗の切り分けに Phase 2 の再現と最小化）
+
+## 実装者メモ（round 2）
+
+対象 head: 53ab69e93a4076c072771eab935377e204a7ed4c
+
+1. 詰まった箇所: scripts/agent-gh: main（PR #524）と #520 が同じ `app_token` を変えていた。main は key_file を local 宣言から外した（subshell の EXIT trap から見えるように）が、私は err_file を local に置いたままだった
+2. 曖昧だった文: 「トークン発行そのものが失敗しても、本体の gh は呼ばず exit 3」（scripts/tests/agent-gh.test.sh の main 側テスト no_fallback_generate_fails のコメント）— #520 で追加した診断用の `gh extension list` 呼び出しが「gh を呼ぶ」に当たるか書かれていない
+3. 仮定と解釈: 「本体の gh」とは元のコマンド（`gh pr list` 等）の実行のことと解釈した。`gh extension list` は #524 の隔離された空の GH_CONFIG_DIR の中だけで動き hosts.yml を読まないため fail-closed の意図（人間のトークンで続けない）と矛盾せず、診断として残した。merge 後に #520・#522 両側のテストが全て通ることを実測で確認した
+4. 足りなかった情報・検証手段: merge コミットが署名付け替え（agent-gh-resign）できないことを示す表示の意味。AGENTS.md の「API で表現できない変更（…マージ…）を含む push は署名なしのままになる」で既定の挙動と確認した
+5. 改善案: .agents/skills/implement-issue/SKILL.md の「手順 9 修正依頼」に「merge 後は main 側が追加した同じファイルのテストとの相互作用も通過確認する」を足す
+
+使ったスキル: implement-issue
