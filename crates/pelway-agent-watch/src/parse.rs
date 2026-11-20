@@ -3,7 +3,7 @@
 /// 報告行の 1 行の上限（文字数）。
 const MAX_REPORT_LINE_CHARS: usize = 200;
 /// 報告行の行数の上限。
-const MAX_REPORT_LINES: usize = 5;
+const MAX_REPORT_LINES: usize = 8;
 
 /// `2026-11-10T16:57:09.187Z` / `2026-11-10T16:57:09Z` を UNIX 秒にする。
 /// UTC（末尾 `Z`）以外の形式は `None`。
@@ -84,7 +84,7 @@ pub fn issue_number(branch: &str) -> Option<u64> {
     digits.parse().ok()
 }
 
-/// 最後の返答が `キー: 値` の行だけで 5 行以内なら、前後の空白を除いた本文を返す。
+/// 最後の返答が `キー: 値` の行だけで 8 行以内なら、前後の空白を除いた本文を返す。
 /// キーは英小文字・数字・`_`・`-`、1 行は 200 文字まで。
 pub fn extract_report(text: &str) -> Option<String> {
     let text = text.trim();
@@ -160,8 +160,14 @@ mod tests {
     }
 
     #[test]
-    fn report_rejects_six_lines() {
-        let text = ["a: 1"; 6].join("\n");
+    fn report_eight_lines() {
+        let text = "issue: #80\npr: https://github.com/hatai/Pelway/pull/81\nreview: 1 → approve\nready: done\nmemo: docs/worklogs/issue-80.md（round 1）\nstate: done\nhead: 0123abc\nnext: なし";
+        assert_eq!(extract_report(text), Some(text.to_string()));
+    }
+
+    #[test]
+    fn report_rejects_nine_lines() {
+        let text = ["a: 1"; 9].join("\n");
         assert_eq!(extract_report(&text), None);
     }
 
