@@ -11,3 +11,15 @@
 5. 改善案: scripts/tests/agent-gh.test.sh の「run()」に「rm -f "$CALL_LOG.token-env"」を足す（他の CALL_LOG 系の消し方に揃える。現在は偽 gh が上書き書き込みするため実害なし）
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 2）
+
+対象 head: f346b530b96d2f548f10c734511e8580f331022e
+
+1. 詰まった箇所: scripts/agent-gh の app_token: レビューの must-fix が指す subshell の問題（親の EXIT trap が届かない・cleanup_paths が親に届かない）は実機で再現・確認できたが、指摘の「直し方」（`trap 'rm -f "${key_file:-}"' EXIT` を subshell 内に残す）だけでは鍵ファイルがまだ残った。EXIT trap の実行時には local 変数のスコープが既に終わっており `${key_file:-}` が空展開されるため（bash で検証）。key_file を local から外して subshell 内の trap からパスが見えるようにした。
+2. 曖昧だった文: 「main の版は `trap 'rm -f "${key_file:-}"' EXIT` を subshell の中で設定していたので、この経路でも消えていた（5be66782 で導入）」（指揮役中継のレビュー結果・must-fix）
+3. 仮定と解釈: 「この経路でも消えていた」は検証結果と合わない（local 変数は EXIT trap から空展開になり rm が空振り）ため、trap の形は指摘どおりに復しつつ local を外す修正を追加した。なお nit 2 件（シグナル転送の注記、worklog の対象 head と PR head のずれ）は対応していない。対象 head は implement-issue の定義どおりメモコミットの親を指し、PR の head とは異なる値になる。
+4. 足りなかった情報・検証手段: レビュー担当が「消えていた」と判断した検証手段。こちらは bash の最小再現（local 変数を trap から参照する実験）で空展開を確認した。
+5. 改善案: .agents/skills/implement-issue/SKILL.md の「実装者メモを書く」の「対象 head」の説明に「（メモコミットの親であり、PR の head = メモを含むコミットとは異なる SHA になる）」を足す（レビューの nit 2 件目のような誤読を防ぐ）
+
+使ったスキル: implement-issue（must-fix の検証に diagnosing-bugs 相当の切り分けは自力で実施、スキル本文は未読）
