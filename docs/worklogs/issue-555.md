@@ -30,3 +30,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9「Request changes のとき」の 2 に「手順 6 の `mise run pr-size` を push の前に必ず実行する（修正の round でも省かない）」を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 3）
+
+対象 head: 939b7b5901ec7627518e9591d6603244a5554ef1
+
+1. 詰まった箇所: round 2 のレビュー（Codex・Claude）の must-fix 3 件のうち 2 件は同じ指摘で、受信箱の全体の読み直しに上限が無いことだった。巨大な sparse ファイルを置かれると、webhook の送信の前で止まる。256 MiB の上限で直し、1 TiB の sparse ファイルの試験を足した。残る 1 件は、sandbox から書ける `patrol-state.json` の `conductor_thread_id` で宛先を付け替えられることだった（Codex）。
+2. 曖昧だった文: 「Authenticate the registration or read it from a location sandboxed agents cannot modify.」（PR #561 round 2 の Codex のレビュー）— 指揮役のスレッドは `createdBy: agent` で立っていることもあり、スレッドの属性では認証できない。そこで hatai に選んでもらい、後者（sandbox から書けない場所から読む）にした。
+3. 仮定と解釈: 登録ファイルは `~/.config/pelway-agent-notify/conductor-thread-id` にし、hatai がホストで `scripts/conductor-register` を実行して書く（hatai の判断）。`patrol-state.json` には既読の位置だけを残す。マージ済みの #526 の手順（指揮役が `patrol-state.json` に書く）は、この PR で直した。
+4. 足りなかった情報・検証手段: pr-size は +1109 になり、hatai が Issue のコメントで認めた +922 を超えた。
+5. 改善案: `.agents/skills/command-team/SKILL.md` の「マージ」の pr-size の例外に、「例外を認めた後に修正 round で行数が増えたときは、指揮役か hatai がコメントで改めて認める」を足す。
+
+使ったスキル: implement-issue、write-pull-request
