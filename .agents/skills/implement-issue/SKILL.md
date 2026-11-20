@@ -76,6 +76,8 @@ scripts/agent-gh dev issue view <N> --json title,body,labels,comments
 
 テストが最初から通ったら、そのテストは条件を確かめていない。書き直す。テストが red にならない、または実行ごとに red が揺らぐときは、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 1〜2 で切り分けてから書き直す。
 
+差分が `crates/pelway-client-ui/` に触れる round では、テストを書く前に `docs/client-ui-testing.md`（Slint のテスト用 backend の探索・レイアウトの stretch・文字の計測・ListView の仮想化の挙動と、その出典）を読む。そこに無い Slint の挙動を前提にするときは、crate のソースで確かめてから書く。
+
 確かめ方が確認の手順の条件（文書に、ある決まりや手順が書かれていること。skill `write-issue` の「受け入れ条件の書き方」）は、テストを書かずに次のとおり扱う。
 
 1. 実装の前に、条件の文が指す節に、その内容がまだ無いことを確かめる
