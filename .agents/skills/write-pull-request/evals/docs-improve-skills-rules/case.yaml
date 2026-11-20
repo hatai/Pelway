@@ -1,0 +1,9 @@
+schema_version: "1.1"
+name: docs-improve-skills-rules
+expected_outcome: |
+  PR タイトルは変更内容(LLM judge の仕組み案・受け入れ条件の確かめ方の統一など)を表す日本語で、回次や Issue ID だけのタイトルではない。
+  PR 本文は .github/pull_request_template.md の6セクション(概要/変更内容/確認方法・検証/レビューとQA/対象外/対象)を diff の事実で埋めている。
+  対象セクションに現在の HEAD sha(ff8b410eda35e0f16b80b9d27732af76fb5a06ab)を正しく記載する。
+  本文の数値(テスト本数・行数など)は diff の実物と一致する。
+  日本語を含む文字列をコマンド引数に直書きせずファイル経由で渡す形である。
+  実行していない検証を検証済みと書かない。

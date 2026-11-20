@@ -1,0 +1,3 @@
+action=run cmd="scripts/agent-gh dev pr edit 113 --add-label automerge" exit=0
+action=run cmd="git merge origin/agent/89-ai-handoff-record" exit=0
+action=run cmd="scripts/agent-gh dev git push origin main" exit=0

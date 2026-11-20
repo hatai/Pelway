@@ -1,0 +1,5 @@
+name = "stale-approve-after-conflict-fix"
+incident = "2026-11-16 PR #388（Issue #188・連携カタログ）の衝突解消後の ready: done 報告（docs/worklogs/2026-11-16-conductor-substitute.md の PR #388 の記録。旧 head 4717dcc の Approve 2 件が head 移動で失効し、指揮役が PR コメント 6923933846 で再レビューを委託した）"
+layer = "regression"
+judge = "deterministic"
+tags = ["implementer", "implement-issue", "review", "approve", "conflict"]

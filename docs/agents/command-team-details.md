@@ -61,9 +61,9 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 - 直す必要があるときは、指揮役が skill `write-issue` で起票する（実装の指示は出さない）。人間は `ready-for-agent` で承認し、入口A の流れに合流する。Issue 本文の「関連情報」には、報告のパス（`docs/worklogs/bugs/<slug>/report.md`）と調査スレッドのリンクを書く
 - 直す必要がないとき（仕様どおり、誤報告など）は Issue を立てない
 - 起票の可否にかかわらず、報告の PR はレビューに回してマージする（報告が main に残る）。レビューの割り当ては通常の PR と同じ「レビュー担当と effort」で行い、Draft の解除は調査スレッドにさせる（実装スレッドと同じ流れ）
-- 調査で報告に不足があって `needs-info` を付けたときは、情報が届いたら原則として同じ調査スレッドを再開する（`t3_thread_send` で「続きを調査する。skill investigate-bug に従う。」）。新しい調査スレッドは立てない
+- 調査で報告に不足があって `needs-info` を付けたとき（Issue の無い報告では、スレッドの返答に質問が書かれ、報告の PR はまだ無い。質問を報告者に取り次ぐ）は、情報が届いたら原則として同じ調査スレッドを再開する（`t3_thread_send` で「続きを調査する。skill investigate-bug に従う。」）。新しい調査スレッドは立てない
 - 実装は、調査を担ったスレッドへの役割の追加としては行わない。起票した Issue の実装スレッドとして割り当て替える（正本の「役割と GitHub 上の名義」の役割の変更の原則）
-- 調査スレッドは脆弱性の疑いで止まることがある（skill `investigate-bug` の手順 4）。このとき報告の PR は無いので、`needs-human` の判断を待つ
+- 調査スレッドは脆弱性の疑いで止まることがある（skill `investigate-bug` の手順 4）。このとき報告の PR は無いので、`needs-human`（Issue の無い報告ではスレッドの返答）への人間の判断を待つ
 
 ## hatai のレビューの扱い
 
