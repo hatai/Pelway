@@ -2,7 +2,7 @@
 //! 偽の `t3` / `gh` を一時ディレクトリに置いて PATH の先頭にし、状態ファイルは XDG_STATE_HOME で一時ディレクトリに向ける。
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
@@ -114,20 +114,35 @@ impl Drop for KillOnDrop {
     }
 }
 
-/// lock ファイルが誰かに取られるまで待つ（`flock -n <path> true` が失敗したら取られている）。
-fn wait_locked(path: &Path) {
-    for _ in 0..100 {
-        let free = Command::new("flock")
-            .arg("-n")
-            .arg(path)
-            .arg("true")
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !free {
+/// `/proc/locks` に `path` の lock が載っているか調べる（lock 自体は取らない）。
+/// `flock -n <path> true` で観測すると一瞬 lock を取ってしまい、観測対象の 1 回きりの
+/// `flock -n` 試行と衝突して相手を失敗させ得る（CI で発生）ので、読むだけにする。
+fn lock_is_held(path: &Path) -> bool {
+    let ino = fs::metadata(path).map(|m| m.ino()).unwrap_or(0);
+    if ino == 0 {
+        return false;
+    }
+    let Ok(locks) = fs::read_to_string("/proc/locks") else {
+        return false;
+    };
+    let ino = ino.to_string();
+    locks.lines().any(|line| {
+        line.split_whitespace()
+            .nth(5)
+            .is_some_and(|id| id.rsplit(':').next() == Some(ino.as_str()))
+    })
+}
+
+/// lock ファイルが誰かに取られるまで待つ。保持側が lock を取る前に死んだら即座に失敗させる。
+fn wait_locked(path: &Path, holder: &mut std::process::Child) {
+    for _ in 0..1000 {
+        if lock_is_held(path) {
             return;
         }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        if let Ok(Some(status)) = holder.try_wait() {
+            panic!("lock holder exited with {status}: {}", path.display());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
     panic!("lock was never taken: {}", path.display());
 }
@@ -315,8 +330,8 @@ fn second_instance_is_refused() {
     cmd.env("PELWAY_AGENT_WATCH_POLL_SECS", "30")
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    let _first = KillOnDrop(cmd.spawn().unwrap());
-    wait_locked(&sb.lock_file());
+    let mut first = KillOnDrop(cmd.spawn().unwrap());
+    wait_locked(&sb.lock_file(), &mut first.0);
     let out = sb.run();
     assert!(
         out.status.success(),
@@ -338,7 +353,7 @@ fn externally_held_lock_is_refused() {
     // 状態ディレクトリの lock を別プロセスが取っているだけでも起動しない
     let sb = Sandbox::new("flock");
     sb.fake("list.json", LIST_DONE);
-    let _hold = KillOnDrop(
+    let mut hold = KillOnDrop(
         Command::new("flock")
             .arg("-n")
             .arg(sb.lock_file())
@@ -346,7 +361,7 @@ fn externally_held_lock_is_refused() {
             .spawn()
             .unwrap(),
     );
-    wait_locked(&sb.lock_file());
+    wait_locked(&sb.lock_file(), &mut hold.0);
     let out = sb.run();
     assert!(
         out.status.success(),
