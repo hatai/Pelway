@@ -98,3 +98,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 - PR #612 に新 head ea887b8d（#611 後継が r5 競合対策を push）。PR #572 に新 head 906da20f（#568 後継が push）。
 - 巡回 25（02:50 JST）: #586 r12 Devin レビューが approve・must-fix 0 で投稿完了（066d2fa2）。統制後継が #586/#587 に割り当て訂正コメントを投稿。#587 r9 Devin レビュー（103efc9e、46a13fdf 対象）実行中。
 - 巡回 24 同刻: 統制後継への send が断続のため、Devin レビュー実体を #586/#587 コメント（7066398245/7066398731）で共有。
+
+## 巡回 68（03:06 JST・実値）
+- PR #586 に `automerge` 付与。条件: r12 approve（pelway-review・39b76eb5・must-fix/nit 0）・必須チェック全通過・pelway-qa[bot] 同一 SHA pass（run 44925963291）・非 Draft。Kodiak キュー待ち。
+- #587: r11 approve（c92910dc）・QA delegate 起動済み。[文書のずれ] nit の残存が automerge ブロッカーである点を私の判断 (b) で取りこぼし、訂正して nit 修正→r11 の順に切り替えた経緯あり。
+- nit 2 件は Issue #638（M8・needs-triage）、資格情報 deny 欠落は Issue #637（M8・needs-triage）として起票済み。
