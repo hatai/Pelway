@@ -37,6 +37,29 @@ cat >"$BIN/mbx" <<EOF
 echo "\$*" >"$ROOT/mbx-called"
 EOF
 chmod +x "$BIN/mbx"
+# 偽の find: FIND_LATE_PROC_DIR が指定されているとき、そのパスへの 2 回目の呼び出しで、
+# そのディレクトリをカレントにする sleeper を起動してから本物の find を実行する
+# （削除直前の更新時刻の走査の間にプロセスが始まる場面を確実に再現する）。
+# それ以外では本物の find にそのまま渡す
+cat >"$BIN/find" <<EOF
+#!/usr/bin/env bash
+dir="\${FIND_LATE_PROC_DIR:-}"
+if [[ -n "\$dir" && "\$1" == "\$dir" ]]; then
+  n=\$(( \$(cat "$ROOT/find-count" 2>/dev/null || echo 0) + 1 ))
+  echo "\$n" >"$ROOT/find-count"
+  if ((n == 2)); then
+    (cd "\$dir" && exec sleep 300) </dev/null >/dev/null 2>&1 &
+    pid=\$!
+    echo "\$pid" >"$ROOT/find-late-pid"
+    for _ in \$(seq 300); do
+      [[ "\$(readlink "/proc/\$pid/cwd" 2>/dev/null)" == "\$dir" ]] && break
+      sleep 0.1
+    done
+  fi
+fi
+exec /usr/bin/find "\$@"
+EOF
+chmod +x "$BIN/find"
 
 g() { git -c user.name=t -c user.email=t@example.com "$@"; }
 
@@ -341,6 +364,18 @@ g -C "$ROOT/main" push -q origin main
 age
 run --auto >/dev/null 2>&1
 check "merged worktree with tracked files removed" gone z-tracked
+
+# 26. 消す直前の更新時刻の走査（find）の間に始まったプロセスも、消す直前の再確認で見つけてブランチごと残す
+setup
+add_merged za-scan
+age
+rm -f "$ROOT/find-count" "$ROOT/find-late-pid"
+out="$(FIND_LATE_PROC_DIR="$ROOT/wt/za-scan" run --auto 2>&1)"
+sleeper="$(cat "$ROOT/find-late-pid")"
+check "worktree with process started during rescan kept" kept za-scan
+check "branch of worktree with process started during rescan kept" branch_kept za-scan
+check "process during rescan reported" grep -q "za-scan (プロセスが動いている: pid $sleeper sleep)" <<<"$out"
+kill "$sleeper"; wait "$sleeper" 2>/dev/null; sleeper=""
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
