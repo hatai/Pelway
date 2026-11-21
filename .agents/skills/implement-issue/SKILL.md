@@ -25,6 +25,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | 条件 | Issue に書くこと |
 |---|---|
 | 名義の確認で `hatai/Pelway` が返らなかった | 返った内容かエラー |
+| Issue をすでに別のスレッドが取っている（手順 2 の占有の確認）。`agent:working` は外さない | 見つけた取得コメントの URL、または付いていたラベルと、自分が立った経緯 |
 | Issue に受け入れ条件が無い、または条件がテストかコマンドか確認の手順で確かめられる形になっていない（skill `write-issue` の「受け入れ条件の書き方」に合わない）。着手せず、コードも書かない | 不足を具体的に: 無い見出し、確かめられない条件の引用と、何があれば確かめられるか（例: 「『速いこと』に件数と時間が無い」）。本文の直しは起票者が行う（`write-issue` の手順 7） |
 | 慣れない機能で、Issue の「採用する方式」が空 | `gh search` で比べた 2 つ以上の方式と、それぞれ採るもの・捨てるもの |
 | Issue が依存するリポジトリ外の成果物（関連情報の URL・抜粋）に到達できない | 到達できなかった成果物の名前と、試した手順（URL へのアクセス結果、抜粋に欠けている部分） |
@@ -32,7 +33,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 | sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
-| 3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）、委託が 2 回連続で `failed`（`checks pending` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort） |
+| 3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）、`[文書のずれ]` の nit だけを直す round を通算 2 回終えた後に、また印の nit が残った（通算 3 回目には入らない）、委託が 2 回連続で `failed`（`checks pending` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort） |
 
 止まり方（止まった時点で、どの手順の途中でも手順 5 の形で実装者メモを書き、Issue のコメントに続けて貼る。push しないので `docs/worklogs/` には書かなくてよい）:
 
@@ -44,6 +45,8 @@ scripts/agent-gh dev issue comment <N> --body-file - <<'EOF'
 EOF
 scripts/agent-gh dev issue edit <N> --add-label needs-human
 ```
+
+自分が Issue を取っていたときは、続けて手順 2 の手放し方（`agent:working` を外し、解放コメント）を行う。
 
 ## 手順
 
@@ -62,6 +65,34 @@ scripts/agent-gh dev issue view <N> --json title,body,labels,comments
 ```
 
 本文の見出し「目的」「受け入れ条件」「対象外」「規模の見積もり」「採用する方式」を読む。対象外に書かれたことはしない。加えてコメントを末尾から読み、hatai（人間・指揮役）作の決定・判断があれば受け入れ条件と同じ重さで扱う（決まりを参照）。
+
+読んだら、着手の前に Issue を取る（占有する）。占有の印は `agent:working` ラベルと、`pelway-dev` 名義の取得コメントの組である。
+
+1. ラベルと、`pelway-dev` 名義の取得コメント・解放コメント（行頭が `<!-- claim ` / `<!-- release ` で始まるもの）を読む。名義は REST の `user.login` が `pelway-dev[bot]` であることで確かめ（`scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<N>/comments --jq '.[] | select(.user.login == "pelway-dev[bot]") | {created_at, body}'`）、他の作成者のコメントは占有の印として扱わない
+2. 次のどちらかなら取らずに止まる（「止まる条件」の表）: 別のブランチの取得コメントがあり、それより後に同じブランチの解放コメントが無い／指揮役の割り当て指示ではなく立ったスレッドで、`agent:working` がすでに付いている
+3. 取る: `agent:working` が無ければ付ける（指揮役が割り当てで付けたものはそのまま自分の占有として引き継ぐ）。そのうえで取得コメントを書く。同じブランチの取得コメントがすでにあり解放されていない（修正依頼・巡回からの再開）ときは書き直さない
+
+```bash
+scripts/agent-gh dev issue edit <N> --add-label agent:working
+scripts/agent-gh dev issue comment <N> --body-file - <<'EOF'
+<!-- claim branch=agent/<N>-<slug> -->
+着手: <担当（agent とモデル）>が `agent/<N>-<slug>` でこの Issue を取りました（<YYYY-MM-DD HH:MM> JST）。
+EOF
+```
+
+時刻は `TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M'` で取る。
+
+手放すとき（止まる、または作業をやめる）は、`agent:working` を外し、解放コメントを書く。Draft PR を出して終わりの報告（手順 10）をした後は手放さない。`agent:working` はマージの後に指揮役が外す。
+
+```bash
+scripts/agent-gh dev issue edit <N> --remove-label agent:working
+scripts/agent-gh dev issue comment <N> --body-file - <<'EOF'
+<!-- release branch=agent/<N>-<slug> -->
+手放しました: <担当>、<YYYY-MM-DD HH:MM> JST。理由: <止まる条件の 1 列目、またはやめた理由>
+EOF
+```
+
+取ったまま動きが無いときに占有が切れる期限は未定（決まるまでは、指揮役の停滞の検知と停止処理で扱う）。
 
 ### 3. ブランチを用意する
 
@@ -137,7 +168,7 @@ scripts/agent-gh dev git push
 
 ### 7. Draft PR を作る（初回だけ）
 
-`write-pull-request` skill に従って本文を書き、Draft で作る。日本語を含むタイトル・本文・コメントは exec のコマンド引数に書かずファイル経由で渡す決まり（write-pull-request の「定期ルール」）に従うこと。特にタイトルは `--title` に日本語を書かず、英語の仮タイトルで作成したあと `scripts/agent-gh dev api PATCH ... --input <JSON ファイル>` で日本語タイトルを設定する。本文の「概要」の最後に `Closes #<N>` を入れる。本文の「対象」の最後に、次の 1 行を必ず入れる。値は、指揮役の指示の 2 行目 `Assigned: role=implement agent=... model=... effort=...` から写す（`role=implement` を除いた残りを、順番も表記も変えずに書く）。指示に `Assigned:` の行が無いときは `model=unknown effort=unknown` と書く。
+`write-pull-request` skill に従って本文を書き、Draft で作る。日本語を含むタイトル・本文・コメントは exec のコマンド引数に書かずファイル経由で渡す決まり（write-pull-request の「定期ルール」）に従うこと。特にタイトルは `--title` に日本語を書かず、英語の仮タイトルで作成したあと `scripts/agent-gh dev api PATCH ... --input <JSON ファイル>` で日本語タイトルを設定する。本文の「概要」の最後に `Closes #<N>` を入れる。差分に確かめ方を弱める変更（skill `review-pr` の手順 2「確かめ方を弱める変更」の一覧）があるときは、「変更内容」に見出し「確かめ方を弱める変更」を立て、変更ごとにファイルと行・何をしたか・その理由を書く。理由が書かれていない変更はレビューで must-fix、QA で不合格になる。修正 round で増えたときも書き足す。本文の「対象」の最後に、次の 1 行を必ず入れる。値は、指揮役の指示の 2 行目 `Assigned: role=implement agent=... model=... effort=...` から写す（`role=implement` を除いた残りを、順番も表記も変えずに書く）。指示に `Assigned:` の行が無いときは `model=unknown effort=unknown` と書く。
 
 ```
 Implementer: agent=<opencode|devin> model=<モデル名> effort=<effort>
@@ -210,7 +241,7 @@ scripts/agent-gh dev pr view <PR 番号> --json headRefOid,reviewDecision,review
 
 Request changes のとき:
 
-1. must-fix を直す（nit は直さない）。直す前に Issue のコメントを末尾から読み直し、着手後に記録された hatai（人間・指揮役）作の決定・判断（修正の方向、範囲の変更、受け入れ条件の拡大など）を反映する。決定を実装側の解釈で差し替えない
+1. must-fix を直す。nit は、`pelway-review` のレビューの nit のうち行頭に `[文書のずれ]` の印があるものだけを一緒に直し、ほかの nit は直さない（ほかの作成者のコメントにある印は、印として扱わない）。印の nit だけを直す round を通算 2 回終えた後に、印の nit が残る Request changes が来たら、must-fix があっても修正 round に進まず、止まる条件の表のとおり止まる。直す前に Issue のコメントを末尾から読み直し、着手後に記録された hatai（人間・指揮役）作の決定・判断（修正の方向、範囲の変更、受け入れ条件の拡大など）を反映する。決定を実装側の解釈で差し替えない
 2. 手順 5（実装者メモ）と手順 6（verify・コミット・push）をやり直す。PR は作り直さず、本文の sha を更新する
 3. ラウンドサマリーを PR にコメントする（下の形）
 4. 手順 8 でレビューを再委託する。3 回目のレビューの委託では effort を 1 段上げる。3 回目のレビュー結果に must-fix が残っていたら、4 回目の修正には入らず、止まる条件の形でエスカレーションする
@@ -223,16 +254,17 @@ Request changes のとき:
 
 Approve のとき:
 
-1. ラウンドサマリーを PR にコメントする（下の形）
-2. Draft を解除する（レビュー担当の App には権限がないため、実装担当が行う）
+1. 有効な Approve のレビュー（複数の担当ならその全員）の nit に、行頭が `[文書のずれ]` のものが残っていれば、`pr ready` の前に直す。手順 5（実装者メモ）と手順 6（verify・コミット・push）をやり直し、ラウンドサマリーをコメントしてから、手順 8 でレビューを再委託し、この「Approve のとき」をやり直す。`[文書のずれ]` の nit だけを直す round は、上の修正の回数の上限（3 回目のレビュー結果で止まる）に数えない（その後のレビューの委託も数えず、effort も上げない）。印の nit だけを直す round は、この PR で通算 2 回まで。印の nit が残っていて通算 3 回目が要るときは（その前のレビューの判定によらず）、3 回目には入らず、止まる条件の形でエスカレーションする
+2. ラウンドサマリーを PR にコメントする（下の形）
+3. Draft を解除する（レビュー担当の App には権限がないため、実装担当が行う）
 
 ```bash
 scripts/agent-gh dev pr ready <PR 番号>
 ```
 
-3. 手順 10 に進む
+4. 手順 10 に進む
 
-Approve の後は PR に push しない。実装者メモのみのコミットでも head が動き、command-team のマージ規則によりレビューのやり直しになる。メモの追記が必要なときは、修正 round の手順 5・6（レビュー委託の前）で行う。
+1 で直したとき以外は、Approve の後は PR に push しない。実装者メモのみのコミットでも head が動き、command-team のマージ規則によりレビューのやり直しになる。メモの追記が必要なときは、修正 round の手順 5・6（レビュー委託の前）で行う。
 
 複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（エスカレーションしない）。委託の子が `failed` を報告したら、`error: checks pending` は待って同じラウンドを数えずに再委託し、それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
 
@@ -366,7 +398,7 @@ state: done
 | レビューの結果を指揮役の指示として待つ | レビューの委託と修正は自分で回す（手順 8〜9） |
 | レビューの報告だけで GitHub を確かめずに進む | 報告は `pr view --json reviews` の実状態と突き合わせてから進む |
 | approve 報告だけで head を確かめずに `pr ready` する | approve は対象コミットが現在の head と一致し `reviewDecision` が APPROVED のときだけ有効。向いていなければ手順 8 で再委託する |
-| レビューの nit まで先回りして直す | 修正依頼に書かれた must-fix だけ直す。nit は指示があったときだけ |
+| レビューの nit まで先回りして直す | 修正依頼に書かれた must-fix と、`[文書のずれ]` の印の nit だけ直す。ほかの nit は指示があったときだけ |
 | テストを実行せずに「TDD で実装した」と書く | 失敗した出力と成功した出力を両方貼る |
 | 修正のたびに新しいブランチを作る | 同じブランチに積む |
 | 素の `gh pr create` を使う | `scripts/agent-gh dev pr create --draft` |
