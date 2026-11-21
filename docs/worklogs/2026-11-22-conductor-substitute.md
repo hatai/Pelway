@@ -66,3 +66,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 ## 巡回記録（patrol 3・03:15 JST）
 
 - 未読なし（受信箱 152・watch 3379）。#619 の QA 委託は実行中。#560 の impl スレッドは completed のまま（t3_thread_send 継続不可・決定記録は Issue 7065852656 に投稿済み）
+
+## 巡回記録（patrol 4・03:25 JST）
+
+- 受信箱 153–154: #568・#611 impl の failed（T3 障害・自動再試行に任せる）。watch 3380–3409: 自スレッド遷移のみ
+- #619 QA は Devin 委託で実行中（Claude 上限振替）。#560 impl 未起床・send 継続不可（Issue 記録済み）
