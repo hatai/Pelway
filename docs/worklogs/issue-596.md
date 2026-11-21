@@ -1,0 +1,13 @@
+# Issue #596 の作業ログ
+
+## 実装者メモ（round 1）
+
+対象 head: 516f0599ed55bf6212f7ad151047e20e089dd268
+
+1. 詰まった箇所: `hk.pkl`: `mise lock` の一覧は hk.pkl の中ではなく、`.git/config` の `hook.hk-pre-commit.command`（`mise x -- hk run pre-commit`、リポジトリ外）が出していた。`MISE_DEBUG=1 mise x -- true` で、`llvm-tools-preview` を rustup の一覧（`llvm-tools`）に見つけられず毎回 rust を入れ直すのが元と分かり、`mise.toml` の成分名を直した。
+2. 曖昧だった文: 「効かなければ、agent-gh は案内の行を出力から外し、hk は mise の呼び出しに引数を足す」（Issue #596「未決事項」）。hk には mise の呼び出しが無く、引数を足す先がリポジトリ内に無かった。
+3. 仮定と解釈: 「mise の警告とエラーは残る」は、絞り込まずに出力の元（再導入）を断てば満たすと解釈した。`MISE_QUIET`・`MISE_LOG_LEVEL=warn` でも一覧は消えるが、警告の残り方を別に示す必要があり、また `.git/config` を変える導入手順の変更になるため選ばなかった。gh の案内はエージェント検出（`AI_AGENT`・`CLAUDECODE`）で出ると実測したが、その一覧は gh の版で変わりうるため環境変数の除去ではなく stderr の絞り込みを選んだ。
+4. 足りなかった情報・検証手段: rustup が `llvm-tools` で CI の新しいツールチェーンに成分を入れられるかは、手元（導入済み）では確かめられず、CI の coverage ジョブで確かめる。`.github/workflows/verify.yml` の注釈と step 名に `llvm-tools-preview` が残る（pelway-dev は workflow を push できない）。
+5. 改善案: `docs/dev-environment.md` の「bootstrap」の行に「`mise x -- true` が何も出さないこと（出すなら成分名・lock のずれ）を確かめる」を足す。
+
+使ったスキル: implement-issue、write-pull-request
