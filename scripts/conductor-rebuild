@@ -5,7 +5,8 @@
 #
 #   scripts/conductor-rebuild --from <旧指揮役のスレッド ID> [--to <新指揮役のスレッド ID>] [--provider <id> --model <slug>] [--effort <値>]
 #
-# 1. 新しい指揮役を本体 checkout で立てる（t3 thread start。--worktree は付けない）。最初の文は、何もせずに
+# 1. 新しい指揮役を、main から作った専用の worktree で立てる（t3 thread start --worktree main。本体 checkout は
+#    sandbox から書けないままにする）。最初の文は、何もせずに
 #    待たせる決まった文。--to を渡したときは立てずに、そのスレッドを使う
 # 2. 新しい指揮役の権限（runtimeMode）が旧指揮役と同じで、full-access でないことを確かめる。合わなければ、
 #    旧指揮役には何も送らず、登録も変えずに止まる（t3 CLI には権限のフラグが無いので、hatai が T3 の画面で
@@ -45,7 +46,7 @@ for v in "$provider" "$model" "$effort"; do
   valid_ident "$v" || die "--provider/--model/--effort must be plain identifiers"
 done
 
-# 本体 checkout（共有の git dir の親）。新しい指揮役はここで動く。
+# 本体 checkout（共有の git dir の親）。新しい指揮役は、ここから main の worktree を作って動く。
 common="$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)"
 gitdir="$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-dir)"
 project="$(dirname "$common")"
@@ -75,9 +76,6 @@ if [[ -z "$T3" ]]; then
 fi
 [[ -n "$T3" ]] || die "t3 not found"
 
-# opencode は本体 checkout では sandbox が掛からない（プラグインは ~/.t3/worktrees/ の下だけ）ので、指揮役にしない
-reject_provider() { [[ "$1" != *opencode* ]] || die "provider $1 is not allowed: opencode has no sandbox in the main checkout"; }
-
 # show <id> — provider・model・runtimeMode・worktree の有無（yes/no）を 1 行で返す
 show() {
   "$T3" thread show "$1" --json | /usr/bin/python3 -I -c '
@@ -89,7 +87,6 @@ print(t.get("providerInstanceId") or "-", t.get("model") or "-", t.get("runtimeM
 
 read -r old_provider old_model old_mode _ < <(show "$from") || die "cannot read the old conductor"
 provider="${provider:-$old_provider}"; model="${model:-$old_model}"
-reject_provider "$provider"
 [[ "$provider" != - && "$model" != - ]] || die "cannot determine provider/model"
 # 旧指揮役から引き継いだ値にも、引数と同じ確かめをかける
 if ! valid_ident "$provider" || ! valid_ident "$model"; then die "provider/model from the old conductor are not plain identifiers"; fi
@@ -103,7 +100,7 @@ if [[ -z "$to" ]]; then
   HOLD="恒久交代の新しい指揮役として立てた。権限の確かめと引き継ぎの指示が届くまで、何もせずにこのターンを終える。"
   args=(thread start --provider "$provider" --model "$model")
   [[ -n "$effort" ]] && args+=(--option "effort=$effort")
-  args+=(--title "[指揮役] 恒久交代で引き継ぐ" "$project" -)
+  args+=(--worktree main --branch "conductor/rebuild-$(date +%Y%m%d%H%M%S)" --title "[指揮役] 恒久交代で引き継ぐ" "$project" -)
   out="$(printf '%s' "$HOLD" | "$T3" "${args[@]}" 2>"$errf")" || {
     printf '%s\n' "$out" >&2; cat "$errf" >&2
     die "t3 thread start failed; the new conductor may have been created. Check it in T3. Nothing was sent to the old conductor"
@@ -116,10 +113,9 @@ if [[ -z "$to" ]]; then
 fi
 
 # 2. 権限を確かめる
-read -r new_provider _ new_mode new_wt < <(show "$to") \
+read -r _ _ new_mode new_wt < <(show "$to") \
   || die "cannot read the new conductor $to (it may have been created; check it in T3). Nothing was sent to the old conductor"
-reject_provider "$new_provider"
-[[ "$new_wt" == no ]] || die "the new conductor $to runs in a worktree; it must run in the main checkout. Nothing was sent to the old conductor"
+[[ "$new_wt" == yes ]] || die "the new conductor $to runs in the main checkout; it must run in its own worktree. Nothing was sent to the old conductor"
 if [[ "$new_mode" != "$old_mode" || "$new_mode" == full-access ]]; then
   echo "conductor-rebuild: the new conductor $to runs in '$new_mode', but the old one runs in '$old_mode'." >&2
   echo "conductor-rebuild: nothing was sent to the old conductor and the registration is unchanged." >&2

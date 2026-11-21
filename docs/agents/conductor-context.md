@@ -100,16 +100,13 @@ GitHub 内部で食い違いがあれば既存規則（runbook の整合チェ�
 5. 旧・新の同時稼働の禁止: 権限移行後、旧指揮役はいかなる操作も行わない（見張り `conductor-watch` の停止を含め、停止の操作は引き継ぎ確認の中で新旧どちらか一方だけが行う）
 
 始め方: hatai がホストの端末で、必ず本体 checkout の `scripts/conductor-rebuild --from '<旧指揮役のスレッド ID>'`（または本体 checkout で `mise run conductor-rebuild -- --from '<旧指揮役のスレッド ID>'`）を実行する。worktree の版は sandbox の中から書き換えられるので実行しない（スクリプトは worktree から起動されると止まるが、これは書き換えられていない版を誤って起動したときの止め具で、書き換えへの守りにはならない）。旧指揮役のスレッド ID は、hatai がホスト側の T3 の画面か `t3 thread list --json` の `threadId` で確かめ、単一引用符で囲んで渡す。provider・model・effort を替えるときは `--provider`・`--model`・`--effort`（省略すると provider と model は旧指揮役と同じで、effort は渡さず、渡さないことを表示する）。スクリプトは次の順で進め、どこかで失敗したら、その先は行わずに止まる。
-1. 新指揮役を本体 checkout（worktree ではない）で立て、何もせずに待たせる決まった文を送る（`--to '<新指揮役のスレッド ID>'` を渡したときは立てずに、そのスレッドを使う）
+1. 新指揮役を、main から作った専用の worktree（`t3 thread start --worktree main`）で立て、何もせずに待たせる決まった文を送る（`--to '<新指揮役のスレッド ID>'` を渡したときは立てずに、そのスレッドを使う）
 2. 新指揮役の権限（`runtimeMode`）が旧指揮役と同じで、`full-access` でないことを `t3 thread show` で確かめる。`t3 thread start` には権限のフラグが無く、本体のプロジェクトの既定は `full-access` のことがあるため。合わなければ、旧指揮役には何も送らず、宛先も変えずに止まる。hatai が T3 の画面で新指揮役の権限を旧指揮役と同じに直し、表示された `--to` 付きのコマンドで実行し直す
 3. 決まった停止の文を旧指揮役に送り、終わるまで待つ
 4. 新指揮役に引き継ぎの指示を送る
 5. agent-watch の起こしの宛先を、インストールした `~/.local/bin/pelway-agent-watch --register` で新指揮役に替える（入っていなければ、最初に何もせずに止まる）
 
-本体 checkout で立てる危険（hatai の判断。Issue #564 のコメント）: Claude Code・Codex・Devin の指揮役を本体 checkout で立てると、そのスレッドの sandbox の書き込み範囲は本体 checkout（作業ツリーと、共有 git dir の `index`・`refs/` など）になる。opencode は本体 checkout では sandbox が掛からない（プラグインは `~/.t3/worktrees/` の下のセッションにだけ掛かる）ので、スクリプトは opencode を拒む。指示が混入した指揮役が本体 checkout のファイルを書き換えると、次の 3 つの経路で sandbox の外でコードが動きうる。hatai はこの危険を認めている。
-- hatai がホストで実行するとき（`conductor-rebuild`・`mise run agent-watch-install`・pitchfork の起動）。実行する前に、実行するファイルの `git hash-object --no-filters <path>` を、GitHub の main のその path の blob の sha（GitHub の画面か `gh api repos/hatai/Pelway/contents/<path>?ref=main --jq .sha`）と比べ、一致したものだけを、mise を通さずに直接実行する（`bash scripts/conductor-rebuild …`）。`git status`・`git diff` は、指揮役が index や refs を書き換えると何も出さなくなるので、確かめに使わない。手順はこの文書の GitHub 上の版で読む
-- pitchfork の supervisor が毎時、本体 checkout の `scripts/agent-worktree-prune` をホストで動かすとき（`pitchfork.toml`）。hatai の確かめを通らない。調査は #570
-- 次の交代で立てる新指揮役が、権限を確かめる前の最初の 1 ターンを既定の権限（`full-access` のことがある）で動き、本体 checkout の `AGENTS.md` などを指示として読むとき。最初の文は何もせずに待たせる決まった文だが、読む指示は書き換えられうる
+新指揮役を worktree で立てる理由（hatai の判断。Issue #564 のコメント）: 本体 checkout で立てると、そのスレッドの sandbox の書き込み範囲が本体 checkout（作業ツリーと共有 git dir の `index`・`refs/`）になり、hatai がホストで実行するスクリプト・`mise.toml`・cargo の入力・pitchfork の定義を指揮役が書き換えられる。worktree で立てれば、本体 checkout は sandbox から書けないままになる。今の指揮役が本体 checkout で動いているときは、そのスレッドが本体 checkout を書けるので、交代の前に hatai が本体 checkout に変更が無いことを確かめる。
 
 新指揮役は、恒久交代の手順 4（引き継ぎ確認の完了で操作権限が移る）の後に、旧指揮役のスレッドを `t3_thread_organize`（`action: settle`）で settle し、巡回の scheduled task を作り直す（runbook の「指揮役の定期巡回（スケジュール起床）」。`t3` CLI には settle が無いため、スクリプトでは行わない）。
 

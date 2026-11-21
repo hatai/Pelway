@@ -27,7 +27,7 @@ case "$1 $2" in
   "thread show")
     mode=auto-accept-edits
     [[ "$3" == *new* ]] && mode="${NEW_MODE:-auto-accept-edits}"
-    wt=""; [[ "$3" == *new* ]] && wt="${NEW_WT:-}"
+    wt=""; [[ "$3" == *new* ]] && wt="${NEW_WT-/home/u/.t3/worktrees/Pelway/conductor}"
     echo '{"thread":{"threadId":"'"$3"'","providerInstanceId":"acpRegistry_devin","model":"swe-2-high","runtimeMode":"'"$mode"'","worktreePath":"'"$wt"'"}}' ;;
   "thread send")
     if [[ "$3" == --wait ]]; then id="$4"; else id="$3"; fi
@@ -69,7 +69,7 @@ check "succeeds" [ "$rc" -eq 0 ]
 check "1st call reads the old conductor" [ "$(line 1)" = "thread show $OLD --json" ]
 check "2nd call starts the new conductor" grep -q "^thread start " <(line 2)
 no_arg() { ! grep -q -- "$1" <(line 2); }
-check "new conductor is not in a worktree" no_arg "--worktree"
+check "new conductor runs in its own worktree from main" grep -q -- "--worktree main --branch conductor/rebuild-" <(line 2)
 check "new conductor inherits provider and model" grep -q -- "--provider acpRegistry_devin --model swe-2-high" <(line 2)
 check "no effort option unless given" no_arg "--option"
 check "missing --effort is reported" grep -q -- "--effort not given" "$ROOT/out"
@@ -109,22 +109,17 @@ run "" --from "$OLD" --provider codex; rc=$?
 check "provider without model is rejected" [ "$rc" -eq 2 ]
 check "provider without model makes no t3 calls" [ ! -s "$LOG" ]
 
-# opencode は指揮役にしない
-run "" --from "$OLD" --provider opencode --model glm; rc=$?
-check "opencode provider is rejected" [ "$rc" -ne 0 ]
-check "opencode provider starts nothing" no_line "^thread start"
-
 # --to が --from と同じなら止まる
 run "" --from "$OLD" --to "$OLD"; rc=$?
 check "--to equal to --from is rejected" [ "$rc" -ne 0 ]
 check "--to equal to --from makes no t3 calls" [ ! -s "$LOG" ]
 
-# 新しい指揮役が worktree で動いていたら、旧指揮役に何も送らずに止まる
+# 新しい指揮役が本体 checkout で動いていたら（worktree でなければ）、旧指揮役に何も送らずに止まる
 printf 'mcp:launch:kept\n' > "$FILE"
-NEW_WT=/tmp/wt run "" --from "$OLD" --to "$NEW"; rc=$?
-check "worktree new conductor is rejected" [ "$rc" -ne 0 ]
-check "worktree new conductor: nothing sent to the old conductor" no_line "thread send --wait $OLD"
-check "worktree new conductor: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+NEW_WT="" run "" --from "$OLD" --to "$NEW"; rc=$?
+check "main-checkout new conductor is rejected" [ "$rc" -ne 0 ]
+check "main-checkout new conductor: nothing sent to the old conductor" no_line "thread send --wait $OLD"
+check "main-checkout new conductor: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
 
 # 失敗したら登録を変えずに止まる
 printf 'mcp:launch:kept\n' > "$FILE"
