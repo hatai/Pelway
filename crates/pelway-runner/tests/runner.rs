@@ -31,7 +31,7 @@ use pelway_runner::demo::{
     BASIS_ENV, CHAT_MODEL_ENV, CUSTOM_BASE_URL_ENV, DemoLlmConfig, RESPONSE_FORMAT_ENV,
     TIMEOUT_SECS_ENV,
 };
-use pelway_runner::{MailDraft, Runner, RunnerConfig, RunnerError, RunnerTaskId};
+use pelway_runner::{MailDraft, Runner, RunnerConfig, RunnerError, RunnerTaskId, TEMPLATE_MARK};
 
 const WS: &str = DEMO_WORKSPACE_ID;
 const CH: &str = DEMO_CHANNEL_ID;
@@ -585,10 +585,7 @@ fn timeout_falls_back_to_script_reply() {
 #[test]
 fn decision_generates_mail_draft() {
     let gateway = Arc::new(SchemaGateway::default());
-    let (store, ledger, runner) = fixture(
-        DataStore::new_demo_seeded(now()),
-        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
-    );
+    let (store, ledger, runner) = fixture(DataStore::new_demo_seeded(now()), gateway.clone());
 
     let (message, task_id) = mention_to_decision(&store, &runner);
 
@@ -677,10 +674,7 @@ fn decide_to_draft(
 #[test]
 fn decision_for_another_card_does_not_advance_task() {
     let gateway = Arc::new(SchemaGateway::default());
-    let (store, ledger, runner) = fixture(
-        DataStore::new_demo_seeded(now()),
-        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
-    );
+    let (store, ledger, runner) = fixture(DataStore::new_demo_seeded(now()), gateway.clone());
     let (message, task_id) = mention_to_decision(&store, &runner);
     let calls_before = gateway.calls.load(Ordering::SeqCst);
 
@@ -741,14 +735,12 @@ fn draft_fallback_follows_chosen_option() {
     let gateway = Arc::new(FakeGateway::new(Err(LlmError::NotSent(
         "接続できない".to_owned(),
     ))));
-    let (store, ledger, runner) = fixture(
-        DataStore::new_demo_seeded(now()),
-        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
-    );
+    let (store, ledger, runner) = fixture(DataStore::new_demo_seeded(now()), gateway.clone());
     let (_, task_id) = mention_to_decision(&store, &runner);
     let (outcome, draft) = decide_to_draft(&ledger, &runner, &task_id, "b");
     assert!(draft.body.contains(&outcome.selected.body), "{draft:?}");
     assert!(!draft.body.contains("2週間"), "{draft:?}");
+    assert!(draft.template, "フォールバックの下書きは定型の印付き");
 }
 
 /// `tests/fixtures/draft_replies.txt` の `=== <名前>` で区切った応答本文（合成）。
@@ -766,48 +758,45 @@ fn draft_fixtures() -> Vec<(String, String)> {
         .collect()
 }
 
-/// GLM 風の壊れた下書き応答は fail closed: 1回だけ再試行したあと台本の下書きに
-/// 落ち、壊れた応答の中身（CANARY）は下書きにも投稿にも出ない。正しい形は採る。
+/// GLM 風の壊れた下書き応答は、1回だけ再試行したあと決定された案に沿う定型の
+/// 下書きに落ちる。(1) 定型の印が付く (2) 壊れた応答の中身（CANARY）が下書き・
+/// 投稿・タスクの記録に出ない (3) 送信側の状態へ進まない。正しい形は印なしで採る。
 #[test]
 fn draft_fixtures_fail_closed_on_broken_replies() {
     let fixtures = draft_fixtures();
     assert_eq!(fixtures.len(), 11, "fixture の数");
     for (name, text) in fixtures {
-        let gateway = Arc::new(SchemaGateway {
+        let ok = name.starts_with("ok_");
+        let gw = Arc::new(SchemaGateway {
             draft_text: Some(text),
-            ..SchemaGateway::default()
+            ..Default::default()
         });
-        let (store, ledger, runner) = fixture(
-            DataStore::new_demo_seeded(now()),
-            Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
-        );
+        let (store, ledger, runner) = fixture(DataStore::new_demo_seeded(now()), gw.clone());
         let (_, task_id) = mention_to_decision(&store, &runner);
         let (outcome, draft) = decide_to_draft(&ledger, &runner, &task_id, "b");
+        std::thread::sleep(Duration::from_millis(50));
+        let task = runner.task(&task_id).expect("task");
         let posts = bot_messages(&store);
-        if name.starts_with("ok_") {
-            assert_eq!(draft.to, "C社 ご担当者", "{name}");
-            assert_eq!(gateway.draft_calls.load(Ordering::SeqCst), 1, "{name}");
-            continue;
-        }
-        assert_eq!(
-            gateway.draft_calls.load(Ordering::SeqCst),
-            2,
-            "{name}: 再試行は1回"
-        );
-        assert!(
-            draft.body.contains(&outcome.selected.body),
-            "{name}: {draft:?}"
-        );
-        assert!(
-            !format!("{draft:?}{posts:?}").contains("CANARY"),
-            "{name}: {posts:?}"
-        );
-        assert!(
-            posts
-                .iter()
-                .any(|p| p.contains("LLM の応答を解釈できません")),
-            "{name}"
-        );
+        let last = posts.last().expect("最後の投稿");
+        let calls = gw.draft_calls.load(Ordering::SeqCst);
+        let ctx = format!("{name}: {task:?} {posts:?}");
+        // (3) 送信経路なし: 下書きの投稿で止まり、送信側の状態へ進まない。
+        assert_eq!(task.state, TaskState::AwaitingSendApproval, "{ctx}");
+        assert!(last.contains(&draft.subject), "{ctx}");
+        // (1) 定型の印は壊れた応答のときだけ、下書きのデータと投稿の両方に付く。
+        let marks = (draft.template, last.contains(TEMPLATE_MARK));
+        assert_eq!(marks, (!ok, !ok), "{ctx}");
+        // 再試行は壊れた応答のときだけ1回。正しい形はそのまま採る。
+        assert_eq!(calls, if ok { 1 } else { 2 }, "{ctx}");
+        assert!(!ok || draft.to == "C社 ご担当者", "{ctx}");
+        // 壊れた応答は決定された案に沿う定型へ落ち、その理由が投稿される。
+        assert!(ok || draft.body.contains(&outcome.selected.body), "{ctx}");
+        let reason = posts
+            .iter()
+            .any(|p| p.contains("LLM の応答を解釈できません"));
+        assert_eq!(reason, !ok, "{ctx}");
+        // (2) 壊れた応答の中身が下書き・投稿・タスクの記録に出ない。
+        assert!(!ctx.contains("CANARY"), "{ctx}");
     }
 }
 
@@ -1133,10 +1122,7 @@ fn configured_basis_p03_also_gates_the_llm_call() {
 fn decision_right_after_creation_is_not_lost() {
     for _ in 0..200 {
         let gateway = Arc::new(SchemaGateway::default());
-        let (store, ledger, runner) = fixture(
-            DataStore::new_demo_seeded(now()),
-            Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
-        );
+        let (store, ledger, runner) = fixture(DataStore::new_demo_seeded(now()), gateway.clone());
         let message = post(
             &store,
             REQUESTER,

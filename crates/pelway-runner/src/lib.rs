@@ -41,6 +41,8 @@ const STAGE_DRAFTING: &str = "決定を受け付けました。メール下書�
 const PROPOSALS_LEAD: &str = "案を作成しました。どちらにするか判断をお願いします。";
 /// メール下書きの投稿の先頭行。
 const DRAFT_LEAD: &str = "メール下書きを作成しました。送信してよいか確認をお願いします。";
+/// 定型の下書き（[`MailDraft::template`]）の投稿に付ける印の行。
+pub const TEMPLATE_MARK: &str = "【定型】この下書きは AI 生成ではなく、定型の文面です。";
 /// 外部へ投稿してよい「応答を解釈できない」理由（内部の文字列は含めない）。
 const REASON_INVALID: &str = "LLM の応答を解釈できません";
 /// LLM 呼び出しが panic・キャンセルで中断したときの固定の理由（内部の値は出さない）。
@@ -128,6 +130,8 @@ pub struct MailDraft {
     pub subject: String,
     /// 本文。
     pub body: String,
+    /// AI 生成ではない定型の下書きか（LLM の応答が使えず台本に落ちたとき）。
+    pub template: bool,
 }
 
 /// runner の操作の失敗。
@@ -366,8 +370,15 @@ impl Runner {
         let _ = self.post_stage(
             task,
             &format!(
-                "{DRAFT_LEAD}\n\n宛先: {}\n件名: {}\n\n{}",
-                draft.to, draft.subject, draft.body
+                "{DRAFT_LEAD}{}\n\n宛先: {}\n件名: {}\n\n{}",
+                if draft.template {
+                    format!("\n{TEMPLATE_MARK}")
+                } else {
+                    String::new()
+                },
+                draft.to,
+                draft.subject,
+                draft.body
             ),
         );
         self.set_state(&task.task_id, TaskState::AwaitingSendApproval, None);
@@ -643,6 +654,7 @@ pub(crate) fn script_draft(chosen_body: &str) -> MailDraft {
             "お世話になっております。案件Bの納期について、{chosen_body}で\
              調整させていただけますでしょうか。"
         ),
+        template: true,
     }
 }
 
@@ -694,6 +706,7 @@ fn parse_draft(text: &str) -> Result<MailDraft, String> {
         to: pick("to")?,
         subject: pick("subject")?,
         body: pick("body")?,
+        template: false,
     })
 }
 
