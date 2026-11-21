@@ -37,3 +37,15 @@
 5. 改善案: `scripts/conductor-watch.sh` の「ボード Status 更新キュー」の第 1 段に「名前が `[A-Za-z0-9._-]+\.json` に合わない要求ファイルは、名前を行に出さずに `bad-name` で退ける」を足す（エージェントが決められるファイル名で `watch.log` に行を作り込めないようにする。PR #610 の round 2 の codex の security-review の指摘）。
 
 使ったスキル: `implement-issue`、`write-pull-request`、pstack の `poteto-mode`（principle-make-operations-idempotent・principle-laziness-protocol・principle-model-the-domain）
+
+## 実装者メモ（round 4）
+
+対象 head: f2bddb26dbecdc20f5de4c8f52a7717d9bd04043
+
+1. 詰まった箇所: `scripts/conductor-watch.sh` の `escalate`: Issue と events は別々の読み取りなので、どちらを先に読んでも、後の読み取りの間の変化は先の読み取りに出ない。must-fix 2 に合わせて events → Issue の順にし、events の最後の `needs-decision` の付け外しで付与が続いているかも確かめた。この順では Issue の読み取りの間の付け直しが見えないので、場面 21 の前半の差し込みを events の取得に移した（PR 本文の「確かめ方を弱める変更」）。`mise run verify` の `typos` が変数名 `nd` を `and` の誤字と判定して落ちた（名前を変えた）。
+2. 曖昧だった文: 「追加の出どころを確認できない場合は、指揮役が確認できる形で保留を記録してください。」（PR #610 の round 3 の codex のレビューの must-fix 3）。付いた `needs-human` がラベル履歴にまだ出ていない場合を「確認できない」に入れるかが書かれていない。
+3. 仮定と解釈: 試行の起点を時刻でなく events の ID（`seen`）にした。GitHub の Issue ごとの events は古い順に ID が増え、App のラベル操作の `actor.login` は `pelway-dev[bot]` だった（#602・#571・#488 の events）。時刻は 1 秒の刻みで、試行の直前の解除と自分の付与が同じ秒になると取り違える。`held` は、`seen` より後にほかの名義のイベントだけがあるときと、通知の後で付ける前にほかの誰かの `needs-human` があったときだけにし、イベントがまだ無いときは次の周に回す。選ばなかった解釈は「イベントが無ければ held」で、ラベル履歴の遅れだけで格上げが止まる。試行の後に人間が外した `needs-human` は付け直さず、`needs-decision` だけを外して終える（場面 26 と同じ扱い。選ばなかった解釈は「held にして何もしない」）。
+4. 足りなかった情報・検証手段: 応答が失われる・events がラベルより遅れる・保存の前に止まる、はモックでしか確かめていない。同じ App の名義の別のスレッドが試行の後に付けた `needs-human` は、見張りの付与と区別できない。`needs-decision` を外した応答が失われると、GitHub は正しい状態になるが `DECISION escalated` の行は出ない（次の周には Issue が一覧から外れる）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の表の 3 回目のレビューの行に「hatai が上限を外したときは、その指示を hatai の名義で Issue にコメントしてもらってから修正 round に入る」を足す（この PR では上限を外した指示が `pelway-dev[bot]` のコメントにしか残っていない）。
+
+使ったスキル: `implement-issue`、`write-pull-request`、pstack の `poteto-mode`（principle-make-operations-idempotent・principle-model-the-domain・principle-separate-before-serializing-shared-state）
