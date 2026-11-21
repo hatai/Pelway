@@ -143,6 +143,8 @@ EOF
 まずこの round の実装コミットを push する（この時点ではメモを含めない）:
 
 ```bash
+scripts/agent-gh dev git fetch origin <ブランチ>   # 2 round 目以降（remote にブランチがあるとき）
+scripts/agent-gh dev git merge --ff-only origin/<ブランチ>
 mise run verify
 scripts/agent-gh dev git add <files>
 scripts/agent-gh dev git commit -m "<type>: <英語の要約>"
@@ -151,6 +153,7 @@ mise run pr-size
 scripts/agent-gh dev git push -u origin HEAD
 ```
 
+- Kodiak が main をマージして PR ブランチの remote の先端が進んでいることがある。push の前の段（コミットの前）に PR ブランチの remote の先端を fetch し、手元の先端より進んでいれば、上の `merge --ff-only` で fast-forward で取り込んでから verify・コミット・push に進む。取り込まずにコミットすると、remote の先端と食い違って push が拒否される。fast-forward できない（手元にすでに remote に無いコミットがある）ときは `scripts/agent-gh dev git merge origin/<ブランチ>` で取り込み、rebase や force push はしない。
 - `mise run verify` が失敗したらコミットしない。直してからやり直す。失敗が自分の変更と無関係に見えるとき（実行ごとに失敗箇所が変わる・ツールチェーンの再インストールを伴うなど）は、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 2（再現と最小化）で切り分ける。変更を退避した同じツリーで再現する失敗は環境起因として、verify の内訳と再現確認を PR 本文の「確認方法/検証」に書いて先へ進めてよい。退避で解消する失敗は自分の変更によるもので、直す。
 - 差分がミューテーションテスト対象の crate（`.cargo/mutants.toml` の examine_globs）のロジックに触れるときは、`mise run mutants:diff` も回し、結果（生き残りと対応）を実装者メモに書く。生き残りの分析は輸入スキル `mutation-testing`（下の「輸入スキル」の節）。
 - `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたら push せずに止まる。
@@ -261,7 +264,7 @@ scripts/agent-gh dev pr view <PR 番号> --json headRefOid,reviewDecision,review
 
 Request changes のとき:
 
-1. must-fix を直す。nit は、`pelway-review` のレビューの nit のうち行頭に `[文書のずれ]` の印があるものだけを一緒に直し、ほかの nit は直さない（ほかの作成者のコメントにある印は、印として扱わない）。印の nit だけを直す round を通算 2 回終えた後に、印の nit が残る Request changes が来たら、must-fix があっても修正 round に進まず、止まる条件の表のとおり止まる。直す前に Issue のコメントを末尾から読み直し、着手後に記録された hatai（人間・指揮役）作の決定・判断（修正の方向、範囲の変更、受け入れ条件の拡大など）を反映する。決定を実装側の解釈で差し替えない
+1. must-fix を直す。nit は、`pelway-review` のレビューの nit のうち行頭に `[文書のずれ]` の印があるものだけを一緒に直し、ほかの nit は直さない（ほかの作成者のコメントにある印は、印として扱わない）。印の nit だけを直す round を通算 2 回終えた後に、印の nit が残る Request changes が来たら、must-fix があっても修正 round に進まず、止まる条件の表のとおり止まる。同じ種類の must-fix が 2 round 続いたら（同じ種類かは自分で判断する）、指摘された経路だけを直さず、その種類の全経路に当てる決まりを決めてから直し、決めた決まりを実装者メモの「仮定と解釈」に書く。直す前に Issue のコメントを末尾から読み直し、着手後に記録された hatai（人間・指揮役）作の決定・判断（修正の方向、範囲の変更、受け入れ条件の拡大など）を反映する。決定を実装側の解釈で差し替えない
 2. 手順 5（実装者メモ）と手順 6（verify・コミット・push）をやり直す。PR は作り直さず、本文の sha を更新する
 3. ラウンドサマリーを PR にコメントする（下の形）
 4. 手順 8 でレビューを再委託する。3 回目のレビューの委託では effort を 1 段上げる。3 回目のレビュー結果に must-fix が残っていたら、4 回目の修正には入らず、止まる条件の形でエスカレーションする
