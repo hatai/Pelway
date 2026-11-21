@@ -62,6 +62,9 @@ pub struct State {
     /// 既読の位置がここから進むまで、重ねて起こさない。
     #[serde(default)]
     pub last_wake_inbox_offset: Option<u64>,
+    /// 前回起こした指揮役のスレッド ID。登録が替わったら、`last_wake_inbox_offset` は使わない。
+    #[serde(default)]
+    pub last_wake_thread_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -360,15 +360,27 @@ impl Watcher {
                     return;
                 }
             };
+        // 既読の位置は受信箱の行数を超えられない。超える値（書き損じ・sandbox からの書き換え）は
+        // 使わず保存もしない（保存すると、補助記録を直しても以後の起こしが止まり続けるため）
+        if inbox_offset > inbox_lines {
+            eprintln!("agent-watch: WAKE skipped reason=offset-out-of-range");
+            return;
+        }
+        // 前回の起こしの基準は、そのときの宛先にだけ使う（指揮役が替わったら一度も起こしていない扱い）
+        let last_wake = self
+            .state
+            .last_wake_inbox_offset
+            .filter(|_| self.state.last_wake_thread_id == registered);
         let info = PatrolInfo {
             conductor_thread_id: registered,
             inbox_offset,
         };
-        match decide_wake(&info, self.state.last_wake_inbox_offset) {
+        match decide_wake(&info, last_wake) {
             WakeDecision::Send(thread_id) => match io::wake(t3, &thread_id, WAKE_MESSAGE) {
                 Ok(()) => {
                     eprintln!("agent-watch: WAKE sent inbox_lines={inbox_lines}");
                     self.state.last_wake_inbox_offset = Some(inbox_offset);
+                    self.state.last_wake_thread_id = Some(thread_id);
                 }
                 Err(why) => eprintln!("agent-watch: WAKE failed {why}"),
             },

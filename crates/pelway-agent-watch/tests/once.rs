@@ -1247,3 +1247,76 @@ fn registration_symlink_or_fifo_is_not_followed_by_the_watch() {
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     assert!(sb.read_fake("t3-send-args").is_empty());
 }
+
+// ---- PR #561 round 6 のレビューへの対応 ----
+
+#[test]
+fn out_of_range_offset_is_not_kept() {
+    // 受信箱の行数を超える既読の位置では起こさず、基準にも残さない。正しい値に戻せば起こす
+    let sb = Sandbox::new("wake-offset-range");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":18446744073709551615}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(stderr(&out).contains("WAKE skipped reason=offset-out-of-range"));
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    let state = fs::read_to_string(sb.state_file()).unwrap();
+    assert!(state.contains("\"last_wake_inbox_offset\":null"), "{state}");
+
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:a","status":"failed","updatedAt":"2026-11-10T16:30:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_a.json",
+        &show("mcp:a", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    let mut state: serde_json::Value = serde_json::from_str(&state).unwrap();
+    state["threads"]["mcp:a"]["status"] = "running".into();
+    fs::write(sb.state_file(), state.to_string()).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(
+        sb.read_fake("t3-send-args").lines().count(),
+        1,
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn new_conductor_is_woken_without_waiting_for_the_old_baseline() {
+    // 前の指揮役を起こしたときの基準は、登録が替わったら使わない
+    let sb = Sandbox::new("wake-new-conductor");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(sb.read_fake("t3-send-args").trim(), "mcp:conductor-1 -");
+
+    sb.conductor("mcp:conductor-2");
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:a","status":"failed","updatedAt":"2026-11-10T16:30:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_a.json",
+        &show("mcp:a", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    let mut state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
+    state["threads"]["mcp:a"]["status"] = "running".into();
+    fs::write(sb.state_file(), state.to_string()).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let sends = sb.read_fake("t3-send-args");
+    assert_eq!(
+        sends.lines().last(),
+        Some("mcp:conductor-2 -"),
+        "{}",
+        stderr(&out)
+    );
+}
