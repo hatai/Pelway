@@ -282,7 +282,7 @@ impl LiveSession {
         let mut response_bytes: usize = 0;
         loop {
             if Instant::now() >= deadline {
-                return Err(LiveError::Protocol("message fetch deadline"));
+                return Err(self.protocol_err("message fetch deadline"));
             }
             let mut path = self.actor_path(&base);
             path.push_str(&format!("&limit={page_limit}"));
@@ -298,18 +298,18 @@ impl LiveSession {
             };
             response_bytes += resp.body.len();
             if response_bytes > MAX_FETCH_BYTES {
-                return Err(LiveError::Protocol("message history exceeds fetch limit"));
+                return Err(self.protocol_err("message history exceeds fetch limit"));
             }
             let page: Vec<StoredMessage> = self.parse_json(&resp.body)?;
             if page.len() > page_limit as usize {
-                return Err(LiveError::Protocol("message page exceeds requested limit"));
+                return Err(self.protocol_err("message page exceeds requested limit"));
             }
             let full = page.len() >= page_limit as usize;
             let last_seq = page.last().map(|m| m.seq);
             out.extend(page);
             match (full, last_seq) {
                 (true, Some(s)) if after.is_none_or(|a| s > a) => after = Some(s),
-                (true, _) => return Err(LiveError::Protocol("message page did not advance")),
+                (true, _) => return Err(self.protocol_err("message page did not advance")),
                 _ => return Ok(out),
             }
         }
@@ -326,21 +326,23 @@ impl LiveSession {
     /// チャンネル未選択・宛先の食い違い・要求の失敗。
     pub fn post(&mut self, body: &str) -> Result<StoredMessage, LiveError> {
         // 受け付け時点の宛先（チャンネル）と名義（表示ユーザー）を保持する。
-        let want = self
+        // 宛先が未選択ならここで止める——通信を始めて `bootstrap` が選び直した
+        // チャンネルへ（表示ユーザーが見ていない先へ）送ることはしない。
+        let Some((want_channel, want_actor)) = self
             .channel
             .as_ref()
-            .map(|c| (c.channel_id.clone(), self.actor.clone()));
+            .map(|c| (c.channel_id.clone(), self.actor.clone()))
+        else {
+            return Err(LiveError::NoChannel);
+        };
         if !self.connected {
             self.bootstrap()?;
         }
-        let Some(channel_id) = self.channel.as_ref().map(|c| c.channel_id.clone()) else {
-            return Err(LiveError::NoChannel);
-        };
-        if let Some((want_channel, want_actor)) = want
-            && (channel_id != want_channel || self.actor != want_actor)
-        {
+        let after = self.channel.as_ref().map(|c| c.channel_id.clone());
+        if after.as_ref() != Some(&want_channel) || self.actor != want_actor {
             return Err(LiveError::StaleTarget);
         }
+        let channel_id = want_channel;
         let request = PostMessageRequest {
             client_msg_id: ClientMsgId::from(uuid::Uuid::new_v4().to_string().as_str()),
             body: body.to_owned(),
@@ -454,6 +456,16 @@ impl LiveSession {
             return Err(LiveError::Status(resp.status));
         }
         Ok(resp)
+    }
+
+    /// [`LiveError::Protocol`] を返す前に接続状態を下げる。`decode`/`parse_json`
+    /// を通らない取得条件の失敗（取得全体の期限・蓄積上限・ページ形状の
+    /// 不整合）でも、操作の最終結果として `connected = false` に揃える
+    /// ——通信自体は正常でも、取得が打ち切られたなら「つながっていません」
+    /// 側に倒す。
+    fn protocol_err(&mut self, msg: &'static str) -> LiveError {
+        self.connected = false;
+        LiveError::Protocol(msg)
     }
 
     /// 応答 body を JSON に読む。形式の失敗は `connected = false` にしてから

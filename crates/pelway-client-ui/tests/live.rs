@@ -365,6 +365,23 @@ fn poll_aborts_on_accumulated_response_bytes_even_with_empty_bodies() {
         ),
         "生の応答長の蓄積上限で取得を打ち切る"
     );
+    assert!(
+        !session.connected(),
+        "通信は正常でも取得条件の失敗は接続状態を下げる"
+    );
+}
+
+// 宛先の確定: チャンネルを選んでいない（`bootstrap` 未成功）セッションで
+// `post` すると、通信を始める前に `NoChannel` を返す。`bootstrap` が
+// 選び直したチャンネルへ、利用者が見ていない宛先・名義で届くことを防ぐ。
+#[test]
+fn post_without_selected_channel_returns_no_channel() {
+    let (addr, _store) = spawn_demo_server();
+    let mut session = LiveSession::new(addr, "ws-demo-01".into());
+    assert!(
+        matches!(session.post("hello"), Err(LiveError::NoChannel)),
+        "宛先が未選択なら投稿せず NoChannel"
+    );
 }
 
 // ページング: 1 ページの上限（MESSAGE_PAGE_LIMIT）を超える履歴でも、
