@@ -116,6 +116,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
     - `ci-failed-twice`: `agent/` ブランチで verify が 2 回続けて失敗した（5 分ごとに `gh run list` で確かめる）
 - payload は `pelway.agent-watch/v1`。スレッド ID、ブランチ、`issue_number`（`agent/<番号>-` から取る）、`round`（スレッドの実行回数）、`report`（最後の返答が `キー: 値` 形式 8 行以内のときだけ、その本文）を含む
 - 同じ出来事からイベントを作るのは 1 回だけ。送れなかったものは送信待ちの列に残して送り直す（受け手には重複して届きうる）。状態は `~/.local/state/pelway/agent-watch.json` に置く
+- 同じ知らせを、T3 のスレッドとして動く指揮役のための受信箱（共有の git dir の `pelway/conductor-inbox.jsonl`）にも 1 行ずつ書き、ホストの登録ファイルに登録された指揮役のスレッドへ決まった文を送って起こす（Issue #555。形は `docs/agents/notify-payloads.md`「指揮役の受信箱」、動き方は `docs/dev-environment.md`「pitchfork について」）
 - 修正が何回目かは、実装スレッドがレビューの委託回数で数える（skill `implement-issue`）。3 回目の修正では先にレビューの effort を 1 段上げ、修正を出す前に 4 回目に入るなら（最初の実装 + 修正 3 回）、修正を出さずにエスカレーションする。人間のレビューによる修正（指揮役が `t3 thread send` で伝える）の回数も同じ上限に数える。レビューの `[文書のずれ]` の nit だけを直す round（skill `review-pr`・`implement-issue`）は、この回数に数えない（その後のレビューの委託も数えない）。印の nit だけを直す round は、この PR で通算 2 回まで。印の nit が残っていて通算 3 回目が要るときは（その前のレビューの判定によらず）、3 回目には入らず、止まる条件としてエスカレーションする
 
 ## 停止・迷走への対処
