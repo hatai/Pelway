@@ -24,3 +24,16 @@
 
 使ったスキル: implement-issue、write-pull-request、pr-watch
 
+## 実装者メモ（round 3）
+
+対象 head: 398812a5611bd6350198910454b89527a5ee8835
+
+1. 詰まった箇所: 手順 6（push）: リモートブランチに main 取り込みのマージコミット（fc6c60c0・mergeStateStatus BEHIND の解消）が積まれており、fast-forward できず `origin/agent/488-acp-adapter-decls` を merge してから push し直した。
+2. 曖昧だった文: 「レビューの nit まで先回りして直す」（skill implement-issue の「よくある失敗」表）— 修正の指示があったときだけ直すの「指示」を、人間のこの依頼（「nit のドキュメントの修正だけやって。レビューは回さなくてよい」）として受けた。
+3. 仮定と解釈: 修正対象は Claude round 1 の nit 2 件（19 行目の「不行使」→「非対応」、27 行目の秘密の拒否範囲の出所を fnox.toml に登録された名前から導く形へ一元化）。Codex round 2 の nit は「なし」、置き場所の指摘は hatai の決定（comment 7060418790）で解決済みのため対象外とした。レビュー委託は指示により行わない（Approve 後の push で head が動き Claude の Approve@20e38048 は失効するが、再委託しない指示なのでマージ可否の判断は指揮役に委ねる）。
+4. 足りなかった情報・検証手段: なし（grep と mise run verify で確認可能）。
+5. 改善案: なし。
+
+使ったスキル: implement-issue、write-pull-request、pr-watch
+
+
