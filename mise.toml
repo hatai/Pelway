@@ -15,10 +15,13 @@ lockfile = true
 # rust は mise 経由で rustup のツールチェーンを固定する。
 # mr_boxington = true で cargo を mbx（Cargo ビルド共有キャッシュ）経由にする。
 # components で rustfmt・clippy に加え CI のカバレッジ計測（cargo-llvm-cov）が
-# 必要とする llvm-tools-preview を明示し、最小構成のツールチェーンでも
+# 必要とする llvm-tools を明示し、最小構成のツールチェーンでも
 # fmt・lint・coverage が再現されるようにする（toolchain-check タスクが存在検査する）。
+# 成分名は rustup が一覧に出す名前（llvm-tools）で書く。別名の llvm-tools-preview で書くと、
+# mise は導入済みの成分の一覧に見つけられず、mise exec のたびに rust を入れ直して
+# mise lock の一覧を出す（#596。git hook の出力が毎回約 80 行増える）。
 # 1.99.1 は rig-core 0.46 の MSRV（1.97.1）を満たす版（ADR 0008、#95）。
-rust = { version = "1.99.1", mr_boxington = true, components = ["rustfmt", "clippy", "llvm-tools-preview"] }
+rust = { version = "1.99.1", mr_boxington = true, components = ["rustfmt", "clippy", "llvm-tools"] }
 mr-boxington = "1.29.2"
 hk = "2.11.1"
 fnox = "1.47.0"
@@ -177,7 +180,7 @@ description = "LLMゲートウェイの測定（#95）。合成データでス�
 run = "cargo run --quiet -p pelway-dev-llm-eval --locked"
 
 [tasks.toolchain-check]
-description = "rustfmt・cargo-clippy・llvm-tools-preview 成分の存在確認（欠けていれば失敗し、暗黙の自動ダウンロードには頼らない）"
+description = "rustfmt・cargo-clippy・llvm-tools 成分の存在確認（欠けていれば失敗し、暗黙の自動ダウンロードには頼らない）"
 run = """
 rustc --version
 cargo --version
@@ -188,7 +191,7 @@ host=$(rustc -vV | awk '/^host:/{print $2}')
 profdata="$sysroot/lib/rustlib/$host/bin/llvm-profdata"
 cov="$sysroot/lib/rustlib/$host/bin/llvm-cov"
 if [ ! -x "$profdata" ] || [ ! -x "$cov" ]; then
-  echo "llvm-tools-preview is missing from the project toolchain (expected $profdata and $cov). Declare it in mise.toml rust.components and run mise install --locked. Do not rely on implicit rustup auto-download." >&2
+  echo "llvm-tools is missing from the project toolchain (expected $profdata and $cov). Declare it in mise.toml rust.components and run mise install --locked. Do not rely on implicit rustup auto-download." >&2
   exit 1
 fi
 "$profdata" --version
