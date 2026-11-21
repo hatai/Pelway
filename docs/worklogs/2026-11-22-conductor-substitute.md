@@ -107,3 +107,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 ## 巡回 68b（03:08 JST・実値）
 - PR #587 に `automerge` 付与。条件: r11 approve（pelway-review・c92910dc・must-fix/nit 0）・pelway-qa[bot] 同一 SHA pass（run 44932713585）・必須チェック pass（古い cancelled run の failure は dedupe で無害）・非 Draft。Kodiak キュー待ち。
 - PR #586 も automerge 済みで Kodiak が head を 95299b89 に rebase 中。
+
+## 巡回 70（03:11 JST・実値）
+- PR #586 が Kodiak でマージ完了（merged_at 2026-11-21T18:11:38Z、head 95299b89）。レビュー担当の sandbox 堅牢化（#338 系）の前進。
+- PR #587 は automerge 付きでキュー待ち継続。
