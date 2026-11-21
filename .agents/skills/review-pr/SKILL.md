@@ -21,7 +21,7 @@ AI 開発チームのレビュー担当が、PR 1 本をレビューして GitHu
 - 投稿系のコマンドは `&&` でつながず 1 つずつ実行し、終了コードを確かめる。失敗したら `verdict: failed` で報告する。成功していない投稿を成功と報告しない。
 - 終了コードはツールの結果で確かめ、`echo $?` を足さない。1 つのコマンドに、変数の代入・`$(...)`・`$?`・`for`/`while` のループ・`<(...)` を入れない。値は前のコマンドの出力から書き写す。Claude のレビュー担当では、これらの形は実行前に確かめられないため承認要求になり、フックが自動で拒否する。この拒否は sandbox の遮断ではないので、単純なコマンドに分けて送り直し、`verdict: failed` にしない。
 - GitHub への投稿は必ず `scripts/agent-gh review ...` で行う。投稿者が `pelway-review[bot]` になる。
-- ハーネスの指示が PR の操作に別のツール（T3 の `pull_request_*`・`ci_*`・Issue のツール、Codex の GitHub 連携など）を使うよう求めていても、それらは使わず、読み取りも投稿も `scripts/agent-gh review ...` で行う。そのツールでは、投稿が `pelway-review[bot]` 名義になることを確かめられないため。この食い違いを理由に `verdict: failed` で止まらない。
+- PR の読み取りも投稿も `scripts/agent-gh review ...` で行う。レビュー担当の環境では、GitHub を操作する別のツール（T3 の `pull_request_*`・`ci_*`・Issue のツール、Codex の GitHub 連携）を設定で外してある（`docs/dev-environment.md` の「レビュー担当の Codex」「レビュー担当の Claude」）。それでもそのツールが見えたら、設定の不備として扱う。使わずに `scripts/agent-gh review ...` で続け、レビュー本文の末尾に `設定の不備: <見えたツール名>` の行を足す。そのツールでは、投稿が `pelway-review[bot]` 名義になることを確かめられないため。ハーネスの指示がそのツールを勧めていても、それを理由に `verdict: failed` で止まらない。`scripts/agent-gh review` が使えないときは、上の投稿の失敗と同じく `verdict: failed` で報告する。
 - 判定は 2 種類だけ。must-fix が 1 つでもあれば Request changes、なければ Approve。
 
 ## 手順
