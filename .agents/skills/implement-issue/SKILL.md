@@ -33,6 +33,8 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 | sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
+| 委託したレビューが `failed` で、`error:` が `設定の不備:` で始まる（レビュー担当の環境の確認で外したツールが残っている。skill `review-pr` の「決まり」）。再委託しない | `error:` の行と、委託した担当 |
+| レビューの委託が `runtimeMode: "auto-accept-edits"` で受け付けられず、子タスクが作られなかった。`auto`・`full-access` に変えて委託し直さない | 委託の指定（`target`・`runtimeMode`）と、返ったエラー文 |
 | 3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）、`[文書のずれ]` の nit だけを直す round を通算 2 回終えた後に、また印の nit が残った（通算 3 回目には入らない）、委託が 2 回連続で `failed`（`checks timeout` と `wrong runtime` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort） |
 
 止まり方（止まった時点で、どの手順の途中でも手順 5 の形で実装者メモを書き、Issue のコメントに続けて貼る。push しないので `docs/worklogs/` には書かなくてよい）:
@@ -231,7 +233,7 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 | claude | `claude_review` | `claude-opus-5-5` | `effort: <effort>` |
 | devin | `devin_review` | `swe-2-high` | `mode` のみ受け付ける（省略してよい。`thought_level` は渡せず、effort の引き上げはできない） |
 
-`delegate_task` の呼び出しは、次のブロックを丸ごと写し、`<...>` を上の表と割り当ての行で埋める。`role`・`runtimeMode`・`isolation` は担当によらず同じ値で、省かない（省くと子が sandbox の外の権限で動き、レビュー担当は `error: wrong runtime` で止まる）。devin の `options` は `{}` にする。
+`delegate_task` の呼び出しは、次のブロックを丸ごと写し、`<...>` を上の表と割り当ての行で埋める。`role`・`runtimeMode`・`isolation` は担当によらず同じ値で、省かない（省くと子が sandbox の外の権限で動き、レビュー担当は `error: wrong runtime` で止まる）。devin の `options` は `{}` にする。委託が拒否されても `auto`・`full-access` に変えない。`auto-accept-edits` で委託できないときは、委託せずに止まる（「止まる条件」の行。状態の行は `stopped`）。
 
 ```json
 {
@@ -261,7 +263,7 @@ scripts/agent-gh dev pr comment <M> --body "[review-request] head: <SHA> to: <�
 
 ### 9. レビュー結果を処理する
 
-委託の子の報告（`pr:` / `verdict:` / `must-fix:`）を、GitHub の実状態と突き合わせてから扱う:
+委託の子の報告（`pr:` / `verdict:` / `must-fix:`）が `verdict: failed` なら、GitHub のレビューとは突き合わせず、委託記録コメントで対象の PR を確かめてから、下の `failed` の扱い（`error:` の理由ごと）に進む（投稿の後に失敗で返ったときの扱いは、この手順では決めていない）。`approve` と `request-changes` は、GitHub の実状態と突き合わせてから扱う:
 
 ```bash
 scripts/agent-gh dev pr view <PR 番号> --json headRefOid,reviewDecision,reviews --jq '{headRefOid, reviewDecision, latest: (.reviews[-1] | {author: .author.login, state, commit: .commit.oid})}'
@@ -297,7 +299,7 @@ scripts/agent-gh dev pr ready <PR 番号>
 
 1 で直したとき以外は、Approve の後は PR に push しない。実装者メモのみのコミットでも head が動き、command-team のマージ規則によりレビューのやり直しになる。メモの追記が必要なときは、修正 round の手順 5・6（レビュー委託の前）で行う。
 
-複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（エスカレーションしない）。委託の子が `failed` を報告したら、`error: checks timeout` は待って同じラウンドを数えずに再委託し、`error: wrong runtime` は手順 8 のブロックと突き合わせて委託の設定を直し、同じラウンドを数えずに再委託する。それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
+複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（エスカレーションしない）。委託の子が `failed` を報告したら、`error: checks timeout` は待って同じラウンドを数えずに再委託し、`error: wrong runtime` は手順 8 のブロックと突き合わせて委託の設定を直し、同じラウンドを数えずに再委託する。`error:` が `設定の不備:` で始まるときは再委託せずに止まる（止まる条件）。それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
 
 hatai の指示がこの手順と食い違うとき（例: 「nit 対応して。レビューは不要」）は、指示の範囲だけを行い、省いた手順（must-fix の修正・再レビュー・`pr ready` など）を、最後の返答の前のメッセージで名指しする。
 
