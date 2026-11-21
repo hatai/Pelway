@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「時間の上限を条件にするときは、上限を超えうる経路（成功や直らない失敗が続く場合を含む）を挙げ、試験はその経路で上限を超える入力を使う」を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: 9c9ba30c6636692edd8f13deb52cf543503ff41b
+
+1. 詰まった箇所: `crates/pelway-agent-watch/tests/once.rs` の `send_deadline_covers_secrets_and_curl`: 送信の期限（40 秒）を本番の定数のまま確かめるので、この試験 1 本に 40 秒かかり、`tests/once.rs` 全体が 8 秒から 40 秒になった。期限を環境変数で縮める口は、本番に要らない設定になるので作らなかった。
+2. 曖昧だった文: 「秘密の取得、curl、再試行の待ちを一つの期限に収め、期限までに送れなかった通知は列に残してください。」（PR #609 の codex のレビューの must-fix 1）。期限で打ち切った送信を、間隔を空ける失敗にするか、列も間隔も変えない時間切れにするかが無い。間隔を空ける失敗（`reason=deadline`）にした。打ち切りが続くのは fnox か受け手が遅いときで、間隔を空けるべきなため。最初の間隔 30 秒は周回の間隔と同じなので、1 回だけの打ち切りでは次の周回の送信は遅れない。
+3. 仮定と解釈: 受信箱に書けなかった知らせは、送信待ちの列とは別の `State::inbox_pending`（上限 100 件）に置き、受信箱が直るまで周回ごとに書き直す形にした。選ばなかった解釈は「受信箱に書けていない知らせは webhook が外しても列に残す」で、列の先頭に残せば後続を止め、後ろに回せば毎周 400 を受け直すため。追記が途中で失敗した回は同じ行が 2 回書かれうる（`docs/agents/notify-payloads.md` に書いた）。fnox の止め方は、30 秒で SIGTERM・5 秒後に SIGKILL から、期限と 30 秒の早い方で SIGKILL に変えた（期限を猶予なしで守るため）。秘密は 1 件につき 1 回だけ読む。
+4. 足りなかった情報・検証手段: 本物の fnox（1Password）と Grok Bot の webhook での所要時間は確かめていない（試験は偽の fnox・curl に sleep を入れた）。`timeout -s KILL` が孫まで止めることは、coreutils 9.4 で `timeout -s KILL 0.5 bash -c 'sleep 7.77 & sleep 7.77'` の後に sleep が残らないことで確かめた。差分は `.cargo/mutants.toml` の `examine_globs` の外なので、`mise run mutants:diff` は回していない。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「時間の上限を条件にするときは、上限の内に入れる処理（外部コマンド・待ち・送り直し）を列挙し、そのどれかが残り時間を超える入力の試験を条件に入れる」を足す。
+
+使ったスキル: implement-issue
