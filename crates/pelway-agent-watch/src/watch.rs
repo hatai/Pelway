@@ -55,9 +55,16 @@ pub struct State {
     pub threads: BTreeMap<String, ThreadMemo>,
     /// ブランチごとに、`ci-failed-twice` を送った（または初回に記録した）ときの最新の head sha。
     pub ci_notified: BTreeMap<String, String>,
-    /// 送れなかった payload。次の周回で送り直す。
+    /// webhook に送れなかった payload（古い順）。`outbox::flush` が送り直す。
     #[serde(default)]
     pub outbox: Vec<serde_json::Value>,
+    /// 送り直せる失敗が続いている間の、送信待ちの列の送り直しの間隔。送れたら `None` に戻る。
+    #[serde(default)]
+    pub outbox_backoff: Option<crate::outbox::Backoff>,
+    /// 指揮役の受信箱に書けなかった payload（古い順）。次の周回で、新しい知らせより先に書き直す。
+    /// `None` はこの項目の無い更新前の版の状態で、送信待ちの列の知らせを受信箱に書けたかが分からない。
+    #[serde(default)]
+    pub inbox_pending: Option<Vec<serde_json::Value>>,
     /// 前回指揮役を起こしたときの、指揮役の既読の位置（補助記録の `inbox_offset`）。
     /// 既読の位置がここから進むまで、重ねて起こさない。
     #[serde(default)]
@@ -497,5 +504,22 @@ mod tests {
         );
         assert!(out.is_empty());
         assert_eq!(state.threads["n"].status, "running");
+    }
+
+    #[test]
+    fn old_state_without_backoff_loads() {
+        let old =
+            r#"{"initialized":true,"threads":{},"ci_notified":{},"outbox":[{"event":"finished"}]}"#;
+        let mut state: State = serde_json::from_str(old).unwrap();
+        assert_eq!(state.outbox.len(), 1);
+        assert_eq!(state.outbox_backoff, None);
+        // 間隔と次に送る時刻は状態ファイルに書かれ、読み直しても同じ値になる
+        state.outbox_backoff = Some(crate::outbox::Backoff {
+            interval_secs: 60,
+            next_send_at: 1_000,
+        });
+        let saved = serde_json::to_string(&state).unwrap();
+        assert!(saved.contains(r#""next_send_at":1000"#), "{saved}");
+        assert_eq!(serde_json::from_str::<State>(&saved).unwrap(), state);
     }
 }
