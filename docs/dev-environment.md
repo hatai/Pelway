@@ -36,6 +36,7 @@ mise trust        # 初回のみ。プロジェクト設定の信頼確認（グ
 mise bootstrap    # 上の1〜3を順に実行
 ```
 
+- `hk install --mise` は `.git/config` に `hook.hk-pre-commit.command`（`test "${HK:-1}" = "0" || mise x -- hk run pre-commit --from-hook`）を書く。pre-commit の実体はこの行で、`mise x` が `hk.pkl` を読む前に動く。コミット時の `mise lock` の一覧や rust の入れ直しの出力は `hk.pkl` ではなく、この `mise x` から出る（`git config --get hook.hk-pre-commit.command` で確かめられる）。
 - 導入済みのものはスキップされる（宣言と現在の差分だけを適用）。このため `mise bootstrap` は何度実行してもよく、podman 導入済みの環境では packages 部分で sudo の入力を求められない。
 - 各段階は上表のとおり単独のコマンドでも実行できる。
 - `mise bootstrap` の tools 部分は `[tools]` に加えてグローバル設定のツールも確認対象にする（mise の通常動作）。
@@ -55,7 +56,7 @@ mise bootstrap    # 上の1〜3を順に実行
 | `mise run test` | `cargo test --workspace --locked` |
 | `mise run build` | `cargo build --workspace --locked` |
 | `mise run fetch` | 依存クレートの取得（`cargo fetch --locked`）。ビルド前に取得を済ませる |
-| `mise run toolchain-check` | rustc / cargo / rustfmt / clippy の存在とバージョン確認（rustfmt・clippy を含まない最小構成だと失敗する） |
+| `mise run toolchain-check` | rustc / cargo / rustfmt / clippy / llvm-tools の存在とバージョン確認（rustfmt・clippy を含まない最小構成だと失敗する）。加えて `mise.toml` の rust の `components` の名前が `rustup component list --installed` の名前（`-<target>` を除く）と一致するかを照合し、ずれた名前を出して失敗する |
 | `mise run hk-validate` / `hk-check` | `hk.pkl` の検証 / リポジトリ全体の読み取り専用検査（cargo を伴わないステップだけ。cargo を伴う検査は `fmt-check` / `clippy` が担当する） |
 | `mise run fnox-check` | `fnox list`（定義の一覧確認。秘密値の取得・表示はしない） |
 | `mise run pitchfork-check` | pitchfork のバージョン確認と、`pitchfork.toml` に `agent-watch` が定義されていることの確認 |
