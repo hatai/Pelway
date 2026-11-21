@@ -73,3 +73,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「6. 検査してコミットし、行数を確かめてから push する」の pr-size の項に「実装者メモのコミットも数えられる。実装コミットの後の値に、この round のメモの行数を足しても上限内かを確かめてから push する」を足す。
 
 使ったスキル: `implement-issue`、pstack の `poteto-mode`（principle-laziness-protocol・principle-minimize-reader-load）
+
+## 実装者メモ（round 7）
+
+対象 head: 0eaebb166fa0eefb684bc321745917f623b658d9
+
+1. 詰まった箇所: 「Issue の読み取りと最後の events の取得の間の付与・開閉を確かめ直す」を、events の最後の付け外しだけで決めると、モックの `issue_with` が `labeled_at` より前に必ず仕込む `unlabeled` の `needs-human` が最後のイベントになり、「ラベルは付いているのにイベントがまだ出ていない」場面（場面 13・25・33・34）を人間待ちと取り違えた。`needs-human` は「Issue のラベルにある、または最後の events の `needs-human` の付け外しが `labeled`」のどちらかで見る形に直した。一覧外の記録を残す範囲を `held`・`removed` 両方にすると、場面 6 の「`needs-decision` が外れたら記録を消す」が壊れたので、残すのは `held` だけにした。
+2. 曖昧だった文: 「付与が続いている間は通知済み記録を保持してください」（PR #610 の round 6 の codex のレビューの must-fix 2）。一覧外の Issue は「付与が続いているか」を読まずに判断する必要があり、読めない場合に残すか消すかが書かれていない。
+3. 仮定と解釈: Issue の読み取りとの間の変更は events の方が新しいと解釈し、開いているかは最後の `closed`/`reopened` イベント、`needs-human` の付与はラベルか最後の `needs-human` の付け外しで見る（ラベルがあって `unlabeled` が後から返る場合は保守的に人間待ちとして次の周に回す）。一覧外の `held` は、同じ `labeled_at` の付与がまだ有効か確かめられなくても残す（付与が終わっていたとしても、新しい付与には新しい `labeled_at` が付くので残した記録は使われない）。前の `labeled_at` の `added` 記録は、新しい付与の `labeled` が見えた時点で前の付与の解除は確定とみなし、完了を 1 回報告してから消す。
+4. 足りなかった情報・検証手段: Issue の読み取りと最後の events の取得の間に起きた付与を厳密に区別する手段は無い（イベントの `created_at` と読み取りの時刻は比較できない）。`closed`/`reopened` イベントの無い環境（モック含む）では Issue の `state` に頼るしかなく、両方がある環境での取り違えはモックでしか確かめていない。
+5. 改善案: `scripts/tests/conductor-watch-decision.test.sh` の `issue_with` は `labeled_at` より前の `needs-human` の `unlabeled` を必ず仕込むので、events だけを根拠にした実装は全員が付いていないと誤認する。差し込みの `ev` に actor を付けられるようにすると、「自分の名義の付与か」の分岐もそのまま試せる。
+
+使ったスキル: `implement-issue`
