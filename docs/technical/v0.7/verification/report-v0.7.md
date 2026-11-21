@@ -57,3 +57,5 @@ verify.py を再実行し static_pass=true（相対リンク440件エラー0、�
 実測（自己点検）：検証時刻 2026-11-19T17:34:54 JST、verify.py再実行 static_pass=true、相対リンク436件エラー0、節対応の未対応0、本文アンカー重複0、UI限定回帰エラー0。追記は03の既存節内で、見出しと対応表（section-correspondence）の変更なし。13のR11（記録から365日・本文を複写しない）・D01〜05と、#415の「残すもの」（監査ログは追記だけ、外す操作も監査に残す）との整合は目視で確認した。監査表の実装・移行、監査の外部搬出（#204）、署名付きチェックポイント（ADR 0007）は対象外のまま。
 
 round 2（レビュー指摘への対応）: 監査行の保存項目を「節冒頭の定義（actor、承認snapshot、policy版、操作、結果、時刻、correlation ID）＋事象の種類」の一つの出力へ統合し、actor・承認者・依頼者は仮名識別子（pseudonymous id）、承認snapshotは版と内容hash、操作はlogical operation IDで保存する形を明示した。verify.py再実行 static_pass=true、相対リンク436件エラー0、アンカー重複0（検証時刻 2026-11-19T19:52:58 JST）。
+
+round 3（レビュー指摘への対応・2026-11-21）: 監査行の保存項目の正本を04の`audit_events`の定義（actor、subject、操作、結果、snapshot hash、policy版、日時、prev_hash）とADR 0007の輸出項目（workspace_id、event ID、`hash`・`prev_hash`）へ明示的に参照させ、節冒頭のcorrelation IDと事象の種類（承認・却下・失効・取り下げの回答）をこの節の追加とした。既存項目への適用として、主体の識別子（actor・subject・承認者・依頼者）を仮名識別子（pseudonymous id）で保存し、承認snapshotは版と内容hashで、操作はlogical operation IDで参照させ、承認カードの本文・添付の中身は監査行へ複写しない（R11とADR 0007の記録しない項目の境界のまま）。verify.py再実行 static_pass=true、相対リンク442件エラー0（04・ADR 0007への参照を追加）、アンカー重複0（検証時刻 2026-11-21T11:16:46 JST）。
