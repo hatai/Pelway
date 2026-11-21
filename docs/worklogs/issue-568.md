@@ -42,3 +42,15 @@
 6. 改善案: `docs/dev-environment.md` の「デモの LLM 接続（#330）」に、`mise exec` の PATH では rustc が `/usr/bin` の版に解決されることがある、を書き足す（`mise WARN missing: rust@1.99.1` の再同期と重なったとき）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: 7823fc8587dc740f9aca3c0d3a54bfd27ddcd96b
+
+1. 詰まった箇所: `.agents/skills/verify-pelway/verify-run` の `start_sampler`: 0.1 秒ごとに `ss` を取るサブシェルが、子の標準入力のパイプ（coproc の書き手）を引き継ぐと、run が SIGKILL されたときに子が EOF を受けず残る。サブシェルの最初でその fd を閉じ、親が死んだら止まる形にした。SIGKILL の試しで子が終わることを確かめた。
+2. 曖昧だった文: 「段 7 は「bot の投稿が 1 件以上あれば合格」になっていて…下書きの中身で判定する」（バックエンド担当の事前レビュー 5）。中身の判定を「選んだ案A の本文を含む決定後の bot 投稿」とし、さらに保存先から取り直す経路が main に無いので、投稿があっても段 10 は FAIL（未検証）にした。
+3. 仮定と解釈: 事前レビュー 4 の「選択 a が保存されたことを HTTP で読み直す」は、確定した決定を 1 件読む GET が無いため、同じ選択の再送（冪等リプレイ）の応答で保存された選択と案A の本文を読み直すと読んだ。
+4. 足りなかった情報・検証手段: 確定した決定を読む GET の経路（`pelway-contract` の `DECISIONS_PATH` は未確定の一覧だけ）。
+5. 改善案: `.agents/skills/verify-pelway/features/decision.md` の「Gotchas」の「確定した決定を 1 件取る経路は無い」を、経路が足されたら「`GET` で確定した決定を読み直す」に直す。
+
+使ったスキル: implement-issue
