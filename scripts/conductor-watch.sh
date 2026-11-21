@@ -262,9 +262,10 @@ def escalate(n, lt, reason):
     # 格上げを 3 段（通知のコメント → needs-human を付ける → needs-decision を外す）で進める。付ける方が先なので、
     # 途中で失敗してもどちらのラベルも無い状態にならない。済んだ段は見張りだけが書く記録（state.json の escalation。
     # Issue 番号 → labeled_at と段階）に残し、次の周は記録の段の次から進める。各段の直前に Issue と events を読み直し、
-    # Issue が開いていて needs-decision があり、最新の labeled_at が lt のままのときだけ書く。コメントと needs-human は、
-    # needs-human が無く、lt より後に needs-human が外されていない（人間が手を入れていない）ときだけ書く。
-    # needs-decision を外すのは、自分が needs-human を付けた（段階が added）ときだけ。読み取りに失敗した周は書かない
+    # Issue が開いていて needs-decision があり、最新の labeled_at が lt のままのときだけ書く。コメントと needs-human は
+    # needs-human が無いときだけ書き、前の周に通知を書いた格上げでは、lt より後に needs-human が外されていれば
+    # （付けた応答が失われた後に人間が外した）付け直さない。needs-decision を外すのは、自分が needs-human を付けた
+    # （段階が added）ときだけ。読み取りに失敗した周は書かない
     rec = cur["escalation"].get(n) or {}
     stage = rec.get("stage") if rec.get("labeled_at") == lt else None
     body = (f"{ESCALATION_MARK}\n@hatai `needs-decision` が付いた時刻 {lt} から 15 分決まらず、"
@@ -275,6 +276,7 @@ def escalate(n, lt, reason):
         # 通知の重複を防ぐだけの確かめ: 自分の名義で定型の本文と完全に一致するコメント（実装担当も同じ名義で書くため）
         if any((c.get("user") or {}).get("login") == ESCALATION_AUTHOR and c.get("body") == body for c in cs):
             stage = "commented"
+    resumed = stage == "commented"  # 前の周に通知を書いた（記録か、定型のコメントで分かる）
     steps = {None: ("commented", "comment", ["issue", "comment", n, "--body-file", "-"]),
              "commented": ("added", "label", ["issue", "edit", n, "--add-label", "needs-human"]),
              "added": ("removed", "label", ["issue", "edit", n, "--remove-label", "needs-decision"])}
@@ -284,8 +286,8 @@ def escalate(n, lt, reason):
         if not isinstance(iss, dict) or evs is None: return
         labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
         if iss.get("state") != "open" or "needs-decision" not in labs or latest_labeled(evs) != lt: return
-        if stage != "added" and ("needs-human" in labs
-                                 or any(iso(t) > iso(lt) for t in label_times(evs, "unlabeled", "needs-human"))): return
+        if stage != "added" and ("needs-human" in labs or resumed
+                                 and any(iso(t) > iso(lt) for t in label_times(evs, "unlabeled", "needs-human"))): return
         if agent_gh(*args, stdin=body if stage is None else None) is None:
             print(f"DECISION escalate-failed #{n} step={step}", flush=True); return
         stage = nxt; cur["escalation"][n] = {"labeled_at": lt, "stage": stage}

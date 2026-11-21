@@ -401,11 +401,18 @@ gh_edit 'i = st[args[0]]; i["labels"] = ["needs-decision"]; i["events"][-1].appe
 run_cycles 1
 check "26: human removed needs-human -> only needs-decision is removed" eq "$(calls)" "issue edit 729 --remove-label needs-decision"
 check "26: human removed needs-human -> neither label stays" eq "$(labels_of 729)" ""
-# 27. labeled_at より後に needs-human が外されていたら（人間が手を入れた）、通知も needs-human も書かない
-reset; issue_with 730 "$T20" needs-decision
+# 27. 前の周に通知を書いた格上げでは、labeled_at より後に needs-human が付いて外されていたら（付けた応答が失われた後に
+# 人間が外した）、付け直さない。まだ通知を書いていない格上げは、受け入れ条件どおり進める
+reset; issue_with 730 "$T20" needs-decision; touch "$MOCK/fail-edit-add"
+run_cycles 1
+rm "$MOCK/fail-edit-add"; : > "$MOCK/calls"
 gh_edit 'st[args[0]]["events"][-1] += [ev("labeled", "needs-human", args[1]), ev("unlabeled", "needs-human", args[2])]' 730 "$T16" "$T5"
 run_cycles 1
-check "27: needs-human removed after labeled_at -> no writes" eq "$(calls)" ""
+check "27: resumed escalation, needs-human removed after labeled_at -> not added again" eq "$(calls)" ""
+reset; issue_with 734 "$T20" needs-decision
+gh_edit 'st[args[0]]["events"][-1] += [ev("labeled", "needs-human", args[1]), ev("unlabeled", "needs-human", args[2])]' 734 "$T16" "$T5"
+run_cycles 1
+check "27: fresh escalation, needs-human removed after labeled_at -> escalated as usual" eq "$(calls)" "$(escalation_calls 734)"
 # 28. 記録は同じ labeled_at のものだけを使う。外し損ねの記録の後に外して付け直されたら、新しい labeled_at の格上げを初めからする
 reset; issue_with 732 "$T40" needs-decision; touch "$MOCK/fail-edit-remove"
 run_cycles 1
