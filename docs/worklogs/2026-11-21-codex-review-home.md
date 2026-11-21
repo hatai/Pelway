@@ -52,3 +52,17 @@
 
 - `codex_review`：`main` のコミットから委託した確認用の子タスクで、秘密の置き場 5 パス（`~/.config/fnox`・`~/.config/pelway-agent`・`~/.config/pelway-agent-qa`・`~/.ssh`・`~/.config/gh`）の `test -r` がすべて 1 だった（中身は読んでいない）。同じ 5 パスは、ホストで `codex sandbox -P review` を通して試すとすべて 0（読める）だった。`codex sandbox` は `/etc/codex/requirements.toml` の `deny_read` を使わないので、この項目は T3 のスレッドの中で確かめる。
 - `claude_review`：`env` に `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` を足した後、`main` のコミットから委託した子タスクで、`mcp__` で始まるツールは 0 個、システムの通知に出る MCP サーバーも 0 個（`plugin:` で始まるものも無い）だった。`scripts/agent-gh review api /rate_limit --jq .rate.limit` は `5000`。
+
+## 5 回目のレビューの後の確認
+
+確かめたときの版: `codex-cli 0.171.0`、Claude Code `2.1.330`、T3 `0.1.10-nightly.20261115.4736`（`~/.t3/runtime/service-state.json` の `activeVersion`）。
+
+`~/.claude-review/settings.json` の `permissions.deny` に `DesignSync`・`PublishPlugin` を足した後、`main` のコミットから委託した `claude_review` の子タスクで、一覧だけを見て確かめた。
+
+| 項目 | 結果 |
+|---|---|
+| すぐ使える組み込みのツール | `Agent`・`AskUserQuestion`・`Bash`・`ListAgents`・`Read`・`ReportFindings`・`ScheduleWakeup`・`Skill`・`ToolSearch`・`Workflow` |
+| 遅延読み込みの組み込みのツール | `CronCreate`・`CronDelete`・`CronList`・`EnterPlanMode`・`EnterWorktree`・`ExitPlanMode`・`ExitWorktree`・`Monitor`・`TaskStop` |
+| `DesignSync`・`PublishPlugin`・`SendMessage`・`RemoteTrigger`・`Artifact`・`ShareOnboardingGuide`・`PushNotification`・`WebFetch`・`WebSearch` | どれも一覧に無い |
+| `mcp__` で始まるツールと、MCP サーバーの通知 | どちらも無い |
+| `scripts/agent-gh review api /rate_limit --jq .rate.limit` | 合格（`5000`） |
