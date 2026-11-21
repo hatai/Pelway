@@ -150,7 +150,7 @@ conductor-watch は検知（`watch.log` へのイベント出力）だけを行�
 指示待ちのスレッドは、次の 3 つを全部満たすものとする: ターンが終わっていて動いている作業が無い（実行中でなく、待っている先も終わっている）／紐づいた PR か Issue がまだ開いている／マージまで進んでいない。経過時間のしきい値は置かず、見つけたらその巡回のうちに次の指示を出す。
 
 - 指示は定型の 3 つ（「続きをやり直す」「レビューの再委託」「衝突の解消」）から選ぶ。実装スレッドの受け取り方は skill `implement-issue` の「巡回から定型の指示を受けたとき」
-- 現在の head に有効な Approve があり、必須チェックが緑で、Draft でない PR には、指揮役が `automerge` を付けて Kodiak のマージに渡す（skill `command-team` の「マージ」）
+- 現在の head に有効な Approve があり、そのレビューに `[文書のずれ]` の nit が残っておらず、必須チェックが緑で、Draft でない PR には、指揮役が `automerge` を付けて Kodiak のマージに渡す（条件の正本は skill `command-team` の「マージ」）
 - `needs-human` の付いた Issue・PR と、複数のレビュー担当の判定が割れた PR には、指示も `automerge` も出さず、判断待ちに回す
 
 ### 巡回の報告の形
@@ -262,7 +262,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 | `verdict` | すること |
 |---|---|
-| `approve` | 指揮役自身の PR なら、Ready for review と必須チェックが通っていることを確かめて skill `command-team` の「マージ」に進む。外部投入なら「PR #<M> は Approve された。skill implement-issue の手順 10 に従う。」を実装スレッドに送る。複数のレビュー担当を付けた PR で判定が割れたらマージせず、request-changes 側の指摘を優先して修正に進ませる（skill `command-team` の「レビュー担当と effort」） |
+| `approve` | 指揮役自身の PR なら、Ready for review と必須チェックが通っていることを確かめて skill `command-team` の「マージ」に進む。外部投入なら「PR #<M> は Approve された。skill implement-issue の手順 9 の『Approve のとき』から進める（`[文書のずれ]` の nit が残っていれば先に直す）。」を実装スレッドに送る。複数のレビュー担当を付けた PR で判定が割れたらマージせず、request-changes 側の指摘を優先して修正に進ませる（skill `command-team` の「レビュー担当と effort」） |
 | `request-changes` | 外部投入なら「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を実装スレッドに送る（回数の上限は skill `implement-issue` のとおり、実装スレッドが数える） |
 | `failed` | `error: checks pending` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 7 のエスカレーション |
 
