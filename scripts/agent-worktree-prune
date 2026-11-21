@@ -11,8 +11,9 @@
 # 次の worktree は作業中として残す。
 #   - settle されていない T3 スレッドの worktree（t3 thread show の worktreePath）
 #   - 生きているプロセスのカレントディレクトリ（/proc/<pid>/cwd）が中にある worktree
-#     （t3 thread list に出ない delegate_task の子スレッドの worktree を守る。消す直前にもう一度確かめる）
+#     （t3 thread list に出ない delegate_task の子スレッドの worktree を守る）
 #   - 最後の変更（作業ツリーと、git dir の HEAD・index の更新時刻のうち新しいもの）から 6 時間以内の worktree
+#   プロセスと更新時刻の 2 つは、一覧を作るときと消す直前の両方で確かめる。
 # T3 に問い合わせられないとき、/proc を読めないときは何も消さずに失敗する。それ以外で消すのは次のどれか。
 #   - HEAD が origin/main に取り込まれている → worktree とブランチを消す
 #   - ブランチの PR がマージ済み → worktree とブランチを消す
@@ -109,7 +110,8 @@ pr_state() { # ブランチの PR の状態: OPEN が 1 つでもあれば OPEN�
 
 changes() { # 変更と数える git status の行（--auto では未追跡を除く）
   local lines
-  lines="$(git -C "$1" status --porcelain --untracked-files=all | grep -v -F " $PLUGIN")"
+  # --no-optional-locks: index を書き換えず、recently_updated が見る index の更新時刻を変えない
+  lines="$(git --no-optional-locks -C "$1" status --porcelain --untracked-files=all | grep -v -F " $PLUGIN")"
   [[ "$mode" == auto ]] && lines="$(grep -v '^??' <<<"$lines")"
   printf '%s' "$lines"
 }
@@ -155,10 +157,11 @@ fi
 
 status=0
 for p in "${remove[@]}"; do
-  # 一覧を作った後（確認の質問の間など）に始まったプロセスを、消す直前に見直す
+  # 一覧を作った後（確認の質問の間など）に始まったプロセスや更新を、消す直前に見直す
   collect_cwds
   proc="$(live_process "$p")"
   if [[ -n "$proc" ]]; then echo "残した: $p (プロセスが動いている: $proc)"; continue; fi
+  if recently_updated "$p"; then echo "残した: $p (6 時間以内に更新された)"; continue; fi
   rm -f "$p/$PLUGIN"
   if [[ "$mode" == auto ]]; then
     git worktree remove --force "$p" 9>&- || { echo "失敗: $p" >&2; status=1; continue; }

@@ -310,6 +310,38 @@ check "branch of worktree with late process kept" branch_kept x-late
 check "late process reason reported" grep -q "x-late (プロセスが動いている: pid $sleeper sleep)" "$ROOT/late.out"
 kill "$sleeper"; wait "$sleeper" 2>/dev/null; sleeper=""
 
+# 24. 一覧を作った後、消す前に無視対象のファイルだけが更新された worktree はブランチごと残す（確認の質問の間に更新する）
+setup
+add_merged y-touched
+echo '*.log' >>"$ROOT/main/.git/info/exclude"
+echo x >"$ROOT/wt/y-touched/build.log"
+age
+rm -f "$ROOT/answer"; mkfifo "$ROOT/answer"
+run <"$ROOT/answer" >"$ROOT/touched.out" 2>&1 &
+runner=$!
+exec 7>"$ROOT/answer"
+for _ in $(seq 600); do grep -q '残す worktree' "$ROOT/touched.out" && break; sleep 0.1; done
+check "ignored-only worktree listed for removal" grep -qx "  $ROOT/wt/y-touched" "$ROOT/touched.out"
+touch "$ROOT/wt/y-touched/build.log"
+echo y >&7
+exec 7>&-
+wait "$runner"
+check "worktree updated after listing kept" kept y-touched
+check "branch of worktree updated after listing kept" branch_kept y-touched
+check "late update reason reported" grep -q "y-touched (6 時間以内に更新された)" "$ROOT/touched.out"
+
+# 25. 追跡ファイルのある取り込み済みの worktree は、一覧を作るときの git status で index が書き換わらず、消える
+setup
+g -C "$ROOT/main" worktree add -q -b z-tracked "$ROOT/wt/z-tracked" main
+echo x >"$ROOT/wt/z-tracked/tracked.txt"
+g -C "$ROOT/wt/z-tracked" add tracked.txt
+g -C "$ROOT/wt/z-tracked" commit -q -m "work z-tracked"
+g -C "$ROOT/main" merge -q --no-ff -m "merge z-tracked" z-tracked
+g -C "$ROOT/main" push -q origin main
+age
+run --auto >/dev/null 2>&1
+check "merged worktree with tracked files removed" gone z-tracked
+
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
   exit 1
