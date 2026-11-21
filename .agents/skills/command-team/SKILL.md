@@ -131,7 +131,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 - Devin CLI が実装した PR には Devin CLI のレビューを付けない。通常の番が奇数でも Codex に回し、高リスクの PR でも Devin CLI の枠は外す。
 - Devin CLI のレビュー担当は確認済み。確認記録は `docs/dev-environment.md`「レビュー担当の Devin CLI」の「確認手順の結果（記録欄）」。記録が消えた場合は、記録が戻るまで Devin CLI を使わず、通常は Codex、高リスクは Codex と Claude で回す。
 - Devin CLI のレビュースレッド（`devin_review`）では、モデルオプションは `mode` だけを受け付ける（`thought_level`・`speed` は渡せず、effort の引き上げは行えない）。sandbox のため権限モードは Autonomous 一択で、`mode` は省略してよい。設定は `docs/dev-environment.md` の「レビュー担当の Devin CLI」。
-- Codex のレビュー担当（`codex_review`）は、Codex・T3・`~/.codex-review` のどれかを更新したら、`docs/dev-environment.md` の「専用 home での確認」が済むまで使わない。更新に気づいた者（人間か指揮役）が確認を行う。保留の間は、Codex の番と Codex への回し先を Claude に回し、Claude も使えなければ人間に知らせる。Claude のレビュー担当（`claude_review`）も、T3・Claude Code を更新したら、`docs/dev-environment.md` の「レビュー担当の Claude」の MCP のツールの確認が済むまで使わない（T3 の更新では両方が同時に保留になりうる）。
+- Codex のレビュー担当（`codex_review`）は、Codex・T3・`~/.codex-review` のどれかを更新したら、`docs/dev-environment.md` の「専用 home での確認」が済むまで使わない。更新に気づいた者（人間か指揮役）が確認を行う。保留の間は、Codex の番と Codex への回し先を Claude に回し、Claude も使えなければ人間に知らせる。`claude_review` も、T3・Claude Code を更新したら、`docs/dev-environment.md` の「レビュー担当の Claude」の MCP のツールの確認を終えてから割り当てる（T3 の更新では両方が同時に保留になりうる）。
 - Claude のレビュー担当は確認済み。確認記録は `docs/dev-environment.md`「レビュー担当の Claude」の「確認手順の結果（記録欄）」。記録が消えた場合は、記録が戻るまで Claude を使わず Codex だけで回し、高リスクの PR は人間に知らせる。
 - 抜き取りの実施が 10 件に達するか、抜き取りの開始から 4 週間が経つか、どちらか早い方になったら、`docs/agents/command-team-details.md` の「レビュー担当の段階移行」に従って見落とし率を集計し、高リスク PR の複数レビュー体制の有効化を判断する。
 - effort は、追加行が 200 以下で高リスクでなければ既定、それ以外は `high`。同じ PR の 2 回目以降のレビューは 1 段上げる。
