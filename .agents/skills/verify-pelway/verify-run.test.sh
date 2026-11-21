@@ -192,14 +192,14 @@ expect_eq "fd_targets_ok: empty fd dir" "$(fdr "${tmp}/empty-fds" "${odd}" "${tm
 
 # stop_sampler: 意図した停止は、送った TERM に trap で応えた終了（4）だけ。先に終わっていた場合は
 # どんな終わり方でも、応え方が違っても、観察が切れていたので OBS_FAILED にする。
-# shellcheck disable=SC2034  # SAMPLER は source した verify-run の stop_sampler が読む
-ss_rc() { OBS_FAILED=0; ( eval "$1" ) & SAMPLER=$!; sleep "${2:-0}"; stop_sampler; echo "${OBS_FAILED}"; }
+# shellcheck disable=SC2034  # SAMPLER・SAMPLER_STOP は source した verify-run の stop_sampler が読む
+ss_rc() { OBS_FAILED=0; SAMPLER_STOP="${tmp}/sampler-stop"; rm -f "${SAMPLER_STOP}"; ( eval "$1" ) & SAMPLER=$!; sleep "${2:-0}"; stop_sampler; echo "${OBS_FAILED}"; }
 expect_eq "stop_sampler: intended stop (trap answers TERM with 4)" "$(ss_rc 'trap "exit 4" TERM; while :; do sleep 0.05; done' 0.3)" 0
 expect_eq "stop_sampler: sampler already failed" "$(ss_rc 'exit 3' 0.3)" 1
 expect_eq "stop_sampler: wrong answer to the stop request" "$(ss_rc 'trap "exit 3" TERM; while :; do sleep 0.05; done' 0.3)" 1
 expect_eq "stop_sampler: exits on its own before the stop request" "$(ss_rc 'exit 0' 0.3)" 1
 # 停止の要求より前に、ほかのシグナル（TERM を含む）で消えた場合も、観察が切れていたので失敗にする。
-ss_sig() { OBS_FAILED=0; ( eval "$1" ) & SAMPLER=$!; sleep "${2:-0.2}"; kill -"${3:-KILL}" "${SAMPLER}" 2> /dev/null; sleep 0.2; stop_sampler; echo "${OBS_FAILED}"; }
+ss_sig() { OBS_FAILED=0; SAMPLER_STOP="${tmp}/sampler-stop"; rm -f "${SAMPLER_STOP}"; ( eval "$1" ) & SAMPLER=$!; sleep "${2:-0.2}"; kill -"${3:-KILL}" "${SAMPLER}" 2> /dev/null; sleep 0.2; stop_sampler; echo "${OBS_FAILED}"; }
 expect_eq "stop_sampler: killed by SIGKILL before the stop request" "$(ss_sig 'while :; do sleep 0.05; done')" 1
 expect_eq "stop_sampler: killed by SIGTERM before the stop request" "$(ss_sig 'while :; do sleep 0.05; done' 0.2 TERM)" 1
 expect_eq "stop_sampler: answered TERM before the request" "$(ss_sig 'trap "exit 4" TERM; while :; do sleep 0.05; done' 0.2 TERM)" 1
@@ -208,8 +208,26 @@ expect_eq "stop_sampler: stopped without the trap (no answer)" "$(ss_rc 'while :
 # DS_IN に使い捨ての fd を入れる。停止の要求に trap の 4 で応える組なら OBS_FAILED は立たない
 # （偽物のサンプラの試験は、片方の番号だけが変わっても気づけない）。
 expect_eq "start_sampler/stop_sampler: real pair stops with answer 4" "$(
-  OBS_FAILED=0; observe_sockets() { :; }; exec 9< /dev/null; DS_IN=9
+  OBS_FAILED=0; EV="${tmp}"; observe_sockets() { :; }; exec 9< /dev/null; DS_IN=9
   start_sampler; sleep 0.2; stop_sampler; exec 9>&-; echo "${OBS_FAILED}")" 0
+# 生存の確認の後・停止の要求が届く前に終わる競合: TERM の送信が失敗（届いていない）と報告されたら、
+# 終了コードが 4 でも失敗に寄せる（kill がシグナルを送ってから失敗を返す偽物で確かめる）。
+expect_eq "stop_sampler: send failure counts even when the answer is 4" "$(
+  OBS_FAILED=0; SAMPLER_STOP="${tmp}/sampler-stop"; rm -f "${SAMPLER_STOP}"
+  ( trap 'exit 4' TERM; while :; do sleep 0.05; done ) & SAMPLER=$!
+  sleep 0.2
+  kill() { builtin kill "$@"; return 1; }
+  stop_sampler; rc="${OBS_FAILED}"; unset -f kill; echo "${rc}")" 1
+# 実物のサンプラに印の無い TERM が届くと 5 で応える（この run の要求と区別できる）。
+expect_eq "real sampler answers a foreign TERM with 5" "$(
+  OBS_FAILED=0; EV="${tmp}"; observe_sockets() { :; }; exec 9< /dev/null; DS_IN=9
+  start_sampler; sleep 0.2; kill -TERM "${SAMPLER}" 2>/dev/null; wait "${SAMPLER}"; rc=$?
+  SAMPLER=""; exec 9>&-; echo "${rc}")" 5
+# 印の無い TERM で先に終わった実物のサンプラは、停止の要求に応えていないので失敗に寄せる。
+expect_eq "start_sampler/stop_sampler: real pair after a foreign TERM fails" "$(
+  OBS_FAILED=0; EV="${tmp}"; observe_sockets() { :; }; exec 9< /dev/null; DS_IN=9
+  start_sampler; sleep 0.2; kill -TERM "${SAMPLER}" 2>/dev/null; sleep 0.3
+  stop_sampler; exec 9>&-; echo "${OBS_FAILED}")" 1
 
 # try_lock: ビルド先を鍵にしたロックはビルドの前から run の終わりまで持つ（同じビルド先を共有する別の
 # 作業ツリーの run が、検証中の run の実行ファイルをビルドで置き換えるのを防ぐ）。
@@ -230,6 +248,16 @@ mkdir -p "${tmp}/g3/pelway/locks"; chmod 777 "${tmp}/g3/pelway/locks"
 expect_eq "locks_dir_ready: world-writable locks" "$(locks_dir_ready "${tmp}/g3" && echo 0 || echo 1)" 1
 mkdir -p "${tmp}/g4/pelway"; chmod 777 "${tmp}/g4/pelway"
 expect_eq "locks_dir_ready: world-writable pelway" "$(locks_dir_ready "${tmp}/g4" && echo 0 || echo 1)" 1
+# 途中の段がリンクでも、その先には作らない（検査は書き込みの前）。
+mkdir -p "${tmp}/g5-target"; ln -s "${tmp}/g5-target" "${tmp}/g5-pelway"
+expect_eq "locks_dir_ready: pelway is a symlink and nothing is created at the target" "$(
+  mkdir -p "${tmp}/g5"; mv "${tmp}/g5-pelway" "${tmp}/g5/pelway"
+  locks_dir_ready "${tmp}/g5" 2>/dev/null; rc=$?
+  [ -e "${tmp}/g5-target/locks" ] && echo "${rc}-created" || echo "${rc}-untouched")" "1-untouched"
+ln -s "${tmp}/g5-target/locks" "${tmp}/g6-pelway-link" 2>/dev/null; mkdir -p "${tmp}/g6/pelway"; rm -f "${tmp}/g6-pelway-link"
+ln -s "${tmp}/missing-target" "${tmp}/g6/pelway/locks"
+expect_eq "locks_dir_ready: dangling locks symlink" "$(locks_dir_ready "${tmp}/g6" && echo 0 || echo 1)" 1
+expect_eq "locks_dir_ready: second call on existing dirs" "$(locks_dir_ready "${tmp}/g1" && echo 0 || echo 1)" 0
 
 # lock_owner: 持ち主の表示は、pid がリンクでない通常ファイルで数字だけのときだけ。
 mkdir -p "${tmp}/l1"; echo 1234 > "${tmp}/l1/pid"
@@ -240,6 +268,8 @@ mkdir -p "${tmp}/l3"; echo "hello" > "${tmp}/l3/pid"
 expect_eq "lock_owner: non-numeric" "$(lock_owner "${tmp}/l3")" ""
 mkdir -p "${tmp}/l4"
 expect_eq "lock_owner: no pid file" "$(lock_owner "${tmp}/l4")" ""
+mkdir -p "${tmp}/l5"; printf '123\n456\n' > "${tmp}/l5/pid"
+expect_eq "lock_owner: extra lines after the pid" "$(lock_owner "${tmp}/l5")" ""
 
 # cargo_target_dir: ビルド先はビルドと同じ mise exec の下で cargo 自身に聞く（環境変数だけを
 # 解くと .cargo/config.toml・CARGO_BUILD_TARGET_DIR・mise の [env] で別の出力先になる run と

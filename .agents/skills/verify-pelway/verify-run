@@ -367,8 +367,11 @@ observe_sockets() {
 start_sampler() {
   # 子の標準入力のパイプは持たない（持つと run が SIGKILL されたときに子が終わらない）。親が死んだら止まる。
   # 取得・記録に失敗したら終了コード 3 で抜ける。停止の要求（TERM）には trap で終了コード 4 を返す
-  # （要求に応えて終わったことと、途中で消えたことを分ける）。
-  ( exec {DS_IN}>&-; trap 'exit 4' TERM; while kill -0 "$$" 2> /dev/null; do observe_sockets || exit 3; sleep 0.1; done ) &
+  # （要求に応えて終わったことと、途中で消えたことを分ける）。停止の要求は、この run が置く印
+  # （SAMPLER_STOP のファイル）があるときだけ 4 で応える。印の無い TERM には 5 で応えるので、
+  # ほかからの TERM で終わったのと区別できる。
+  SAMPLER_STOP="${EV}/.sampler-stop"; rm -f -- "${SAMPLER_STOP}"
+  ( exec {DS_IN}>&-; trap '[ -f "${SAMPLER_STOP}" ] && exit 4 || exit 5' TERM; while kill -0 "$$" 2> /dev/null; do observe_sockets || exit 3; sleep 0.1; done ) &
   SAMPLER=$!
 }
 stop_sampler() {
@@ -381,10 +384,14 @@ stop_sampler() {
     wait "${SAMPLER}" 2>/dev/null
     OBS_FAILED=1
   else
-    kill "${SAMPLER}" 2>/dev/null
+    # この run からの要求だと分かる印を置いてから TERM を送る。印が置けない・TERM が送れない
+    # （確認の後・送信の前に消えた）ときは、要求が届いていないか区別できないので終了コードに
+    # 関わらず失敗に寄せる。意図した停止は、この run の印を見て trap が応えた終了（4）だけ。
+    local ok=1
+    : > "${SAMPLER_STOP}" 2>/dev/null || ok=0
+    kill "${SAMPLER}" 2>/dev/null || ok=0
     wait "${SAMPLER}" 2>/dev/null || rc=$?
-    # 意図した停止は、この run が送った TERM に trap で応えた終了（4）だけ。
-    [ "${rc}" != 4 ] && OBS_FAILED=1
+    [ "${ok}" = 1 ] && [ "${rc}" = 4 ] || OBS_FAILED=1
   fi
   SAMPLER=""
 }
@@ -411,7 +418,8 @@ network_check() {
   seen="$(grep -vc '^#' "${out}" 2>/dev/null)"; seen="${seen:-0}"
   nonlo="$(count_nonloopback <(grep -v '^#' "${out}"))"
   local db; db="$(grep -v '^#' "${out}" | grep -c ':5432 ')"
-  echo "# ss -tuan の観察（TCP・UDP、要求ごと＋0.1 秒ごと）${seen} 行、取得の失敗 ${errs} 回、loopback 以外との接続 ${nonlo} 件、DB（:5432）宛て ${db} 件" >> "${out}"
+  # 集計行が書けなければ、照合が通った証拠に集計行が欠けるので失敗に寄せる。
+  echo "# ss -tuan の観察（TCP・UDP、要求ごと＋0.1 秒ごと）${seen} 行、取得の失敗 ${errs} 回、loopback 以外との接続 ${nonlo} 件、DB（:5432）宛て ${db} 件" >> "${out}" || OBS_FAILED=1
   [ "${OBS_FAILED:-0}" = 0 ] || echo "# 観察の取得・記録に失敗した回がある（観察は未完了）" >> "${out}"
   [ "${OBS_FAILED:-0}" = 0 ] && [ "${errs}" = 0 ] && [ "${seen}" -ge 1 ] && [ "${nonlo}" = 0 ] && [ "${db}" = 0 ]
 }
@@ -420,15 +428,25 @@ network_check() {
 gone_within() { local _; for _ in $(seq 50); do [ -e "/proc/$1" ] || return 0; sleep 0.1; done; return 1; }
 
 # 共有のロックの階層を作り、ほかの利用者が差し替えられないことを確かめる（証拠の置き場と同じ規則）。0 = 使える。
+# 作る前に既存の段を検査し、足りない段は一段ずつ作る（mkdir -p はリンクをたどってその先に作るので
+# 使わない）。作った後にもう一度確かめる。
 locks_dir_ready() {
-  mkdir -p -- "$1/pelway/locks" 2>/dev/null || return 1
-  dir_chain_safe "$1/pelway" "$1/pelway/locks"
+  local base="$1/pelway" want="$1/pelway/locks"
+  dir_chain_safe "${base}" "${want}" || return 1
+  local d="${want}" missing=()
+  while [ ! -e "${d}" ]; do
+    [ -L "${d}" ] && return 1
+    missing=("${d}" "${missing[@]}")
+    d="$(dirname -- "${d}")"
+  done
+  for d in "${missing[@]}"; do mkdir -- "${d}" 2>/dev/null || return 1; done
+  dir_chain_safe "${base}" "${want}"
 }
 
 # ロックの持ち主の PID を、pid がリンクでない通常ファイルで中身が数字だけのときだけ返す（読めない・数字以外は空）。
 lock_owner() {
   local p
-  [ -f "$1/pid" ] && [ ! -L "$1/pid" ] && p="$(head -n 1 -- "$1/pid" 2>/dev/null)" && [[ "${p}" =~ ^[0-9]+$ ]] && printf '%s' "${p}"
+  [ -f "$1/pid" ] && [ ! -L "$1/pid" ] && p="$(cat -- "$1/pid" 2>/dev/null)" && [[ "${p}" =~ ^[0-9]+$ ]] && printf '%s' "${p}"
 }
 
 # locks/ の下のロックのディレクトリを mkdir で原子的に取る。取れたらこの run の pid を持ち主として書く。

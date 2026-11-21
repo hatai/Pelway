@@ -96,7 +96,7 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
   - 後片付けの後に、run のログ・証拠の写しに対して `scripts/demo-check/canary.sh` と `leak-phrases.sh` を流し、どちらも exit 0（本文の canary と禁止語が証拠に出ていない）。渡すのは `DEMO_CHECK_ROOT`（写しの置き場）と PATH・HOME だけで、呼び出し元の `DEMO_CHECK_*`（規則の置き場・追加の走査パス・受入モード）は引き継がない（リポジトリの規則と今回の証拠だけを見る）。
 - 報告には `summary.txt` の全行と、最後に出る `evidence=<パス>`・`evidence_sha256=<SHA256SUMS の sha256>` を貼る。PR・Issue など公開する場所に貼るときは、絶対パスのうち共有 git dir を `<git-common-dir>`、ホームのディレクトリを `~` に置き換える（利用者名などを出さない）。`env-check.txt`・`tools.txt` を貼るときも同じ。
 
-失敗: `summary.txt` に `FAIL` 行がある。要求の `.req`・`.resp` に欠けか書き込みの失敗がある。`ss` の取得か `network.txt` への記録に失敗した回がある（要求ごと・定期観察のどちらでも）、または定期観察が意図しない終了をした（この run が送った SIGTERM による停止以外）。loopback 以外との接続か DB 宛ての接続が 1 件でもある、または観察が 0 行。`proc-fd.txt` に、この run の標準出力・標準エラーのファイル、`/dev/null`、パイプ、`anon_inode:*`、TCP・UDP と確かめられたソケット以外のものがある、または fd の一覧（`/proc/<pid>/fd`）を取れない・空・リンク先を読めない（子が先に終わった場合を含む）。demo-check の canary か leak-phrases が exit 0 以外。
+失敗: `summary.txt` に `FAIL` 行がある。要求の `.req`・`.resp` に欠けか書き込みの失敗がある。`ss` の取得か `network.txt` への記録に失敗した回がある（要求ごと・定期観察のどちらでも。最後の集計行が書けなかった場合も含む）、または定期観察が意図しない終了をした。定期観察は、証拠の中の印ファイル（`.sampler-stop`）が置かれた後に届いた SIGTERM にだけ終了コード 4 で応える（印の無い SIGTERM には 5）。印を置けなかった・停止の要求を送れなかった（確認の後・送信の前に消えた場合を含む）ときも FAIL。loopback 以外との接続か DB 宛ての接続が 1 件でもある、または観察が 0 行。`proc-fd.txt` に、この run の標準出力・標準エラーのファイル、`/dev/null`、パイプ、`anon_inode:*`、TCP・UDP と確かめられたソケット以外のものがある、または fd の一覧（`/proc/<pid>/fd`）を取れない・空・リンク先を読めない（子が先に終わった場合を含む）。demo-check の canary か leak-phrases が exit 0 以外。
 
 ## 5. 後片付け
 
