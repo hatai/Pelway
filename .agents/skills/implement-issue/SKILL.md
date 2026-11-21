@@ -33,7 +33,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 | sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
-| 委託したレビューが `failed` で、`error:` が `設定の不備:` で始まる（レビュー担当の環境に、GitHub を操作する別のツールが残っている）。再委託しない | `error:` の行と、委託した担当 |
+| 委託したレビューが `failed` で、`error:` が `設定の不備:` で始まる（レビュー担当の環境の確認で外したツールが残っている。skill `review-pr` の「決まり」）。再委託しない | `error:` の行と、委託した担当 |
 | レビューの委託が `runtimeMode: "auto-accept-edits"` で受け付けられず、子タスクが作られなかった。`auto`・`full-access` に変えて委託し直さない | 委託の指定（`target`・`runtimeMode`）と、返ったエラー文 |
 | 3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）、`[文書のずれ]` の nit だけを直す round を通算 2 回終えた後に、また印の nit が残った（通算 3 回目には入らない）、委託が 2 回連続で `failed`（`checks pending` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort） |
 
@@ -219,7 +219,7 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 | claude | `claude_review` | `claude-opus-5-5` | `effort: <effort>` |
 | devin | `devin_review` | `swe-2-high` | `mode` のみ受け付ける（省略してよい。`thought_level` は渡せず、effort の引き上げはできない） |
 
-これに `role: "review"`、`runtimeMode: "auto-accept-edits"`、`isolation: "worktree"` を付ける（`devin` は `runtimeMode` を付けない。`devin_review` は sandbox のため Autonomous で動く。`docs/dev-environment.md` の「レビュー担当の Devin CLI」）。codex と claude では `runtimeMode` を省略せず、委託が拒否されても `auto`・`full-access` に変えない（省略すると委託者の権限を継承し、full-access のスレッドからの委託では拒否されるため）。`auto-accept-edits` で委託できないときは、委託せずに止まる（「止まる条件」の行。状態の行は `stopped`）。委託したら返答を終えて完了の通知を待つ（ポーリングしない）。このときの最後の返答は、下の「ターンの終わりの状態の行」の `waiting-review` にする。チェックの完了を待って返答を終えるときは `waiting-checks` にする。高リスクで複数担当にしたときは、全員の結果がそろうまで次に進まない。
+これに `role: "review"`、`runtimeMode: "auto-accept-edits"`、`isolation: "worktree"` を付ける。`runtimeMode` は省略せず、委託が拒否されても `auto`・`full-access` に変えない（省略すると委託者の権限を継承し、full-access のスレッドからの委託では拒否されるため）。`auto-accept-edits` で委託できないときは、委託せずに止まる（「止まる条件」の行。状態の行は `stopped`）。委託したら返答を終えて完了の通知を待つ（ポーリングしない）。このときの最後の返答は、下の「ターンの終わりの状態の行」の `waiting-review` にする。チェックの完了を待って返答を終えるときは `waiting-checks` にする。高リスクで複数担当にしたときは、全員の結果がそろうまで次に進まない。
 
 次のラウンドのレビューを委託したら、前ラウンドのレビュースレッド（子タスク）を settle する（`t3_thread_organize` の `action: settle`。runbook 9 の「片付け」と同じ決まりで、前ラウンドが `needs-human` 中・止まっている・迷走中のときは settle しない）。
 
