@@ -246,7 +246,7 @@ EOF
 
 戻すときは `hooks.PermissionRequest` を消す。
 
-`scripts/agent-gh` 自身も `review` 名義の実行を絞る（権限設定側の境界とは別層で、許可集合は設定表と同一ではない）。実行できるのは gh の `api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review` だけで、`git` を含むそれ以外はトークンを発行せず終了コード 6 で拒否する。git がラッパー経由で一切動かないのは意図した境界で、レビュースレッドは main の git を直接読む（`agent-gh review git` の呼び出し元はリポジトリに無い）。読み取り系に見える引数でも `--output`・`-O`・`--no-index` のように書き込み・任意実行・リポジトリ外の読み取りに届く形を省略形と束ね書きまで網羅するのは引数検査では困難なため、サブコマンドごと止める。
+`scripts/agent-gh` 自身も `review` 名義の実行を絞る（権限設定側の境界とは別層で、許可集合は設定表と同一ではない）。実行できるのは gh の `api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view` だけで、`git` を含むそれ以外はトークンを発行せず終了コード 6 で拒否する。git がラッパー経由で一切動かないのは意図した境界で、レビュースレッドは main の git を直接読む（`agent-gh review git` の呼び出し元はリポジトリに無い）。読み取り系に見える引数でも `--output`・`-O`・`--no-index` のように書き込み・任意実行・リポジトリ外の読み取りに届く形を省略形と束ね書きまで網羅するのは引数検査では困難なため、サブコマンドごと止める。
 
 `api` は GET のみで、引数検査は許可リスト方式: 許すのは値を取らない `-i`/`--include`・`--paginate`・`--slurp`・`--silent`・`--verbose`、値を取る `-H`/`--header`・`-q`/`--jq`・`-t`/`--template`・`--cache`・`--hostname`（`X-HTTP-Method-Override` ヘッダは拒否）、`--method`/`-X` の GET 形、`-` で始まらない endpoint だけ。短いオプションは束ね書きのクラスタを 1 文字ずつ読んで検査するので、`-iX PATCH` や `-iftitle=x` の形も拒否される（body を付けて POST になる `-f`/`--raw-field`・`-F`/`--field`・`--input` は許可リストに入らない）。
 

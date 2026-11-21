@@ -88,7 +88,7 @@ help() {
     "git push の成功後は scripts/agent-gh-resign がコミットを GitHub API の署名付きに付け替える（止めるときは PELWAY_AGENT_SKIP_RESIGN=1）。" \
     "qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持ちません（~/.config/pelway-agent-qa/fnox.toml を指してください）。" \
     "非 ASCII の文字列は argv 経由で渡せません（\\uXXXX に潰れます）。--body-file / api --input / git commit -F などファイル経由で渡してください。" \
-    "review 名義で実行できるサブコマンドは読み取り系に絞られています（gh の api（GET のみ）・issue view・pr view|diff|checks|review。git は実行できません）。" \
+    "review 名義で実行できるサブコマンドは読み取り系に絞られています（gh の api（GET のみ）・issue view・pr view|diff|checks|review・run list|view。git は実行できません）。" \
     "終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、6 = review 名義で許可されていないサブコマンド、それ以外は gh / git の終了コード"
   exit 0
 }
@@ -211,6 +211,13 @@ review_subcommand_allowed() {
     pr)
       case "${2:-}" in
         view|diff|checks|review) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+    run)
+      # CI の結果と失敗ログの読み取り。download（ファイルの書き出し）・rerun・cancel などは拒否
+      case "${2:-}" in
+        list|view) return 0 ;;
         *) return 1 ;;
       esac
       ;;

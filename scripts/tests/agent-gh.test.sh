@@ -449,6 +449,16 @@ run review_gh_pr_review review pr review 1 --approve --body-file -
 expect_review_auth review_gh_pr_review
 expect_log review_gh_pr_review "ARGS=pr review 1 --approve --body-file -"
 
+# run list・run view は読み取り系で、レビュー担当が CI の結果と失敗ログを読むのに使う
+# （#582 で claude_review の許可リストに足された形）
+run review_gh_run_list review run list --branch agent/x --json headSha,status
+expect_review_auth review_gh_run_list
+expect_log review_gh_run_list "ARGS=run list --branch agent/x --json headSha,status"
+
+run review_gh_run_view review run view 1 --log-failed
+expect_review_auth review_gh_run_view
+expect_log review_gh_run_view "ARGS=run view 1 --log-failed"
+
 # review_deny <name> <args...>: `agent-gh review <args...>` が終了コード 6 で拒否され、
 # トークン発行（fnox）も gh/git も呼ばれないことを確かめる。
 review_deny() {
@@ -488,6 +498,13 @@ review_deny review_alias alias list
 review_deny review_auth auth status
 review_deny review_gist gist list
 review_deny review_release release list
+# run は list・view だけ。成果物の書き出し（download）や実行の操作は拒否
+review_deny review_run_download run download 1 --dir /tmp/x
+review_deny review_run_rerun run rerun 1
+review_deny review_run_cancel run cancel 1
+review_deny review_run_delete run delete 1
+review_deny review_run_watch run watch 1
+review_deny review_run_no_sub run
 review_deny review_no_args
 # 読み取り形に見える引数（書き込み・実行の経路を持つ形）も、git 全拒否で止まる
 review_deny review_git_show_output git show --output=/tmp/x HEAD
