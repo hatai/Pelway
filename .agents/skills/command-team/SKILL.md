@@ -210,7 +210,7 @@ hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終�
 - その Approve のレビューの nit に行頭が `[文書のずれ]` のものが残っていないこと（残っていれば実装担当に直させる。skill `implement-issue` の手順 9「Approve のとき」）
 - 必須チェック（`mise run verify` と `pr-size`）が通っている
 - Draft ではなく、タイトルに `WIP:` がない
-- QA が `pelway-qa` の名義で、同じ head の sha で合格の PR コメントを残している（QA 合格コメントの形式と作成者の確かめ方はこの節の末尾）
+- 現在の head と同じ SHA の QA の合格コメントがある（QA 合格コメントの形と数え方は `docs/agents/qa-checklist.md` の「合格として数えるもの」が正本。この節の末尾も見る）。SHA が head と違う合格・`pelway-qa` 名義でない合格・編集された合格・`run:` の無い合格は数えない。QA が確かめるまでは合格として扱わない
 - Approve と QA 合格のあとに許すのは、コンフリクトの解消を含まない main の取り込みだけ。指揮役は、取り込みのコミットに main 以外の差分がないことを確かめてからラベルを付ける（`git rev-list <Approve した sha>..<head> --no-merges ^origin/main` が 0 件。それ以外のコミットがあればレビューと QA をやり直す。Kodiak がブランチ最新化で作る main 取り込みのマージコミットはこの条件を壊さない）
 - コンフリクトを解消したときは変更として扱い、新しい head でレビューと QA をやり直す
 
@@ -231,18 +231,17 @@ Kodiak が応答しない・詰まった場合（キューの切り戻し）と�
 
 QA 合格コメント:
 
-- QA の合格は PR コメントで残す。PR 本文だけの「合格」は無効
-- QA の合格に数えるのは、QA 専用の GitHub App `pelway-qa` の名義で投稿され、投稿の後に編集されていないコメントだけ（`scripts/agent-gh qa comment` で投稿する。`docs/dev-environment.md` の「QA 担当の GitHub App（pelway-qa）」）。REST の応答で、作成者の `user.login` が `pelway-qa[bot]`、`user.type` が `Bot`、`created_at` と `updated_at` が同じであることを、`scripts/agent-gh dev api repos/hatai/Pelway/issues/<M>/comments --paginate --jq '.[] | select(.user.login == "pelway-qa[bot]" and .user.type == "Bot" and .created_at == .updated_at) | {id, body}'` で確かめ、この出力に出たコメントだけを数える。作成者の login だけでは足りない。実装担当の App（`pelway-dev`）など Issues・PR の書き込み権限を持つ名義は、ほかの名義のコメントを編集できるため、古い合格コメントの sha を新しい head に書き換えると、作成者・1 行目・sha の一致がすべて通ってしまう。編集されたコメントは、作成者が `pelway-qa[bot]` でも数えない。ほかの作成者のコメントは、本文の形式と sha が合っていても QA の合格に数えない。hatai の名義のコメントも QA の合格に数えず、`pelway-qa` の名義のコメントは hatai 本人の裏付けに数えない（Issue #480 の決定）
+- QA の合格は PR コメントで残す。PR 本文だけの「合格」は無効。形と、合格として数える条件（`pelway-qa[bot]` の Bot であること・投稿の後に編集されていないこと・1 行目・`sha:`・`run:`）と確かめ方のコマンドは、`docs/agents/qa-checklist.md` の「合格として数えるもの」に従う
+- 作成者の login だけでは足りない。実装担当の App（`pelway-dev`）など Issues・PR の書き込み権限を持つ名義は、ほかの名義のコメントを編集できるため、古い合格コメントの `sha:` を新しい head に書き換えると、作成者・1 行目・SHA の一致がすべて通ってしまう。編集されたコメントは、作成者が `pelway-qa[bot]` でも数えない
+- ほかの作成者のコメントは、本文の形と SHA が合っていても QA の合格に数えない。hatai の名義のコメントも QA の合格に数えず、`pelway-qa` の名義のコメントは hatai 本人の裏付けに数えない（Issue #480 の決定）
 - `pelway-qa` の名義で合格コメントを投稿できないあいだ（App のトークンが使えないなど）は、QA の合格をもとに `automerge` を付けない。ラベルを付けずに止め、hatai に報告する（admin マージの例外には加えない。例外は上の 3 つだけ）
-- 1 行目を `QA-PASS pr=<番号> sha=<40桁> run=<CI の run id> verify=pass pr-size=pass` に固定する。sha は短縮しない
-- 2 行目以降に「未検証：<項目 または なし>」と判定を書く
-- 指揮役は、コメントの sha が PR の現在の head と一致することを確かめてからラベルを付ける（head が変わったら QA のやり直しを依頼する）
+- 指揮役は、コメントの `sha:` が PR の現在の head と一致することを確かめてからラベルを付ける（head が変わったら QA のやり直しを依頼する）
 
 マージ以外の PR・Issue への操作（base の変更、Draft の扱い、Issue のクローズ）は、先に「手当て・引き継ぎの前の確認」を通す。目印付きのコメント（`<!-- pr-size-exception -->`、`<!-- split-plan -->`）は人間の名義の `gh issue comment` で書く。レビュー担当は作成者が `hatai` であることで、実装担当（`pelway-dev`）や第三者のコメントと区別する。それ以外の GitHub の操作（読み取り、ラベル、ふつうのコメント）は `scripts/agent-gh dev` で行う。
 
 - pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の例外の判断に回す（マージの例外は上の 3 つだけで、pr-size-exception 自体は例外に加えない）。
 - 必須チェックの完了待ち（ラベルを付ける前の CI 待ち、巡回での PR のベビーシット）は、ポーリングせず skill `pr-watch` の「待ち方」に従う（T3 のスレッドでは `watch_pull_request`）。マージの実行は Kodiak が行うため、指揮役がマージコマンドを叩くことはない。
-- skill `pr-watch` の `VERDICT green` は、その SHA でチェックが完走して通過していることの確認要素の 1 つ。`automerge` ラベルを付ける条件（`pelway-review` の Approve、`[文書のずれ]` の nit が残っていないこと、必須チェック、レビュー済み SHA 以降の追加コミットの確認、mergeable）を置き換えない。
+- skill `pr-watch` の `VERDICT green` は、その SHA でチェックが完走して通過していることの確認要素の 1 つ。`automerge` ラベルを付ける条件（`pelway-review` の Approve、`[文書のずれ]` の nit が残っていないこと、必須チェック、レビュー済み SHA 以降の追加コミットの確認、同じ SHA の QA の合格、mergeable）を置き換えない。
 - ブランチの最新化はルールセットが「マージ前にブランチを最新化すること」で必須とし、実行は Kodiak が行う。指揮役が `pr update-branch` で手動に取り込む操作は、手当スレッドでの衝突解消などの例外を除き原則しない。
 - 別の PR に積んだ PR は、土台の PR に `automerge` ラベルを付ける前に、後の PR の base を main に替える（`scripts/agent-gh dev pr edit <後の PR> --base main`）。base のままだと、リポジトリのブランチ自動削除で土台のブランチが消えたときに後の PR が閉じることがあり、閉じた PR は base を替えられない。
 - 複数の PR に `automerge` ラベルを付けてよい。Kodiak が直列に 1 本ずつマージする。ただしラベルを付ける時点で各 PR が上の条件を満たしていることを確かめる。

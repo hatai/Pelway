@@ -26,6 +26,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | 条件 | Issue に書くこと |
 |---|---|
 | 名義の確認で `hatai/Pelway` が返らなかった | 返った内容かエラー |
+| Issue をすでに別のスレッドが取っている（手順 2 の占有の確認）。`agent:working` は外さない | 見つけた取得コメントの URL、または付いていたラベルと、自分が立った経緯 |
 | Issue に受け入れ条件が無い、または条件がテストかコマンドか確認の手順で確かめられる形になっていない（skill `write-issue` の「受け入れ条件の書き方」に合わない）。着手せず、コードも書かない | 不足を具体的に: 無い見出し、確かめられない条件の引用と、何があれば確かめられるか（例: 「『速いこと』に件数と時間が無い」）。本文の直しは起票者が行う（`write-issue` の手順 7） |
 | 慣れない機能で、Issue の「採用する方式」が空 | `gh search` で比べた 2 つ以上の方式と、それぞれ採るもの・捨てるもの |
 | Issue が依存するリポジトリ外の成果物（関連情報の URL・抜粋）に到達できない | 到達できなかった成果物の名前と、試した手順（URL へのアクセス結果、抜粋に欠けている部分） |
@@ -46,6 +47,8 @@ EOF
 scripts/agent-gh dev issue edit <N> --add-label needs-human
 ```
 
+自分が Issue を取っていたときは、続けて手順 2 の手放し方（`agent:working` を外し、解放コメント）を行う。
+
 ## 手順
 
 ### 1. 名義を確かめる
@@ -63,6 +66,34 @@ scripts/agent-gh dev issue view <N> --json title,body,labels,comments
 ```
 
 本文の見出し「目的」「受け入れ条件」「対象外」「規模の見積もり」「採用する方式」を読む。対象外に書かれたことはしない。加えてコメントを末尾から読み、hatai（人間・指揮役）作の決定・判断があれば受け入れ条件と同じ重さで扱う（決まりを参照）。
+
+読んだら、着手の前に Issue を取る（占有する）。占有の印は `agent:working` ラベルと、`pelway-dev` 名義の取得コメントの組である。
+
+1. ラベルと、`pelway-dev` 名義の取得コメント・解放コメント（行頭が `<!-- claim ` / `<!-- release ` で始まるもの）を読む。名義は REST の `user.login` が `pelway-dev[bot]` であることで確かめ（`scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<N>/comments --jq '.[] | select(.user.login == "pelway-dev[bot]") | {created_at, body}'`）、他の作成者のコメントは占有の印として扱わない
+2. 次のどちらかなら取らずに止まる（「止まる条件」の表）: 別のブランチの取得コメントがあり、それより後に同じブランチの解放コメントが無い／指揮役の割り当て指示ではなく立ったスレッドで、`agent:working` がすでに付いている
+3. 取る: `agent:working` が無ければ付ける（指揮役が割り当てで付けたものはそのまま自分の占有として引き継ぐ）。そのうえで取得コメントを書く。同じブランチの取得コメントがすでにあり解放されていない（修正依頼・巡回からの再開）ときは書き直さない
+
+```bash
+scripts/agent-gh dev issue edit <N> --add-label agent:working
+scripts/agent-gh dev issue comment <N> --body-file - <<'EOF'
+<!-- claim branch=agent/<N>-<slug> -->
+着手: <担当（agent とモデル）>が `agent/<N>-<slug>` でこの Issue を取りました（<YYYY-MM-DD HH:MM> JST）。
+EOF
+```
+
+時刻は `TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M'` で取る。
+
+手放すとき（止まる、または作業をやめる）は、`agent:working` を外し、解放コメントを書く。Draft PR を出して終わりの報告（手順 10）をした後は手放さない。`agent:working` はマージの後に指揮役が外す。
+
+```bash
+scripts/agent-gh dev issue edit <N> --remove-label agent:working
+scripts/agent-gh dev issue comment <N> --body-file - <<'EOF'
+<!-- release branch=agent/<N>-<slug> -->
+手放しました: <担当>、<YYYY-MM-DD HH:MM> JST。理由: <止まる条件の 1 列目、またはやめた理由>
+EOF
+```
+
+取ったまま動きが無いときに占有が切れる期限は未定（決まるまでは、指揮役の停滞の検知と停止処理で扱う）。
 
 ### 3. ブランチを用意する
 
@@ -138,7 +169,7 @@ scripts/agent-gh dev git push
 
 ### 7. Draft PR を作る（初回だけ）
 
-`write-pull-request` skill に従って本文を書き、Draft で作る。日本語を含むタイトル・本文・コメントは exec のコマンド引数に書かずファイル経由で渡す決まり（write-pull-request の「定期ルール」）に従うこと。特にタイトルは `--title` に日本語を書かず、英語の仮タイトルで作成したあと `scripts/agent-gh dev api PATCH ... --input <JSON ファイル>` で日本語タイトルを設定する。本文の「概要」の最後に `Closes #<N>` を入れる。本文の「対象」の最後に、次の 1 行を必ず入れる。値は、指揮役の指示の 2 行目 `Assigned: role=implement agent=... model=... effort=...` から写す（`role=implement` を除いた残りを、順番も表記も変えずに書く）。指示に `Assigned:` の行が無いときは `model=unknown effort=unknown` と書く。
+`write-pull-request` skill に従って本文を書き、Draft で作る。日本語を含むタイトル・本文・コメントは exec のコマンド引数に書かずファイル経由で渡す決まり（write-pull-request の「定期ルール」）に従うこと。特にタイトルは `--title` に日本語を書かず、英語の仮タイトルで作成したあと `scripts/agent-gh dev api PATCH ... --input <JSON ファイル>` で日本語タイトルを設定する。本文の「概要」の最後に `Closes #<N>` を入れる。差分に確かめ方を弱める変更（skill `review-pr` の手順 2「確かめ方を弱める変更」の一覧）があるときは、「変更内容」に見出し「確かめ方を弱める変更」を立て、変更ごとにファイルと行・何をしたか・その理由を書く。理由が書かれていない変更はレビューで must-fix、QA で不合格になる。修正 round で増えたときも書き足す。本文の「対象」の最後に、次の 1 行を必ず入れる。値は、指揮役の指示の 2 行目 `Assigned: role=implement agent=... model=... effort=...` から写す（`role=implement` を除いた残りを、順番も表記も変えずに書く）。指示に `Assigned:` の行が無いときは `model=unknown effort=unknown` と書く。
 
 ```
 Implementer: agent=<opencode|devin> model=<モデル名> effort=<effort>

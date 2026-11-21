@@ -18,7 +18,7 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 | Issue・PR・レビュー・CI の結果を読む | GitHub |
 | スレッドのモデル・effort を変える | T3 Connect の MCP（`t3_thread_configure`） |
 | 終わったスレッドを settle する | T3 のスレッドの操作（`t3_thread_organize` の `action: settle`。Grok Bot は MCP 経由）。PR をスレッドに紐付けたものはマージで自動 settle |
-| `pelway-review` が Approve し必須チェックと QA 合格コメントが揃った PR に `automerge` ラベルを付けて Kodiak のキューに入れ、マージを確認する | `scripts/agent-gh dev pr edit <M> --add-label automerge`（条件は skill `command-team` の「マージ」）。マージの実行は Kodiak（GitHub App）が行い、指揮役がマージコマンドを叩くことはない。hatai の admin マージの対象は、hatai が判断する例外の PR（round 4 以降の例外 PR、`.github/` の下を変える PR、`fnox.toml` を変える PR）だけ（これ以外に広げない） |
+| `pelway-review` が Approve し、必須チェックが通り、現在の head と同じ SHA の QA の合格コメント（SHA と run を書いたもの。`docs/agents/qa-checklist.md`）がある PR に `automerge` ラベルを付けて Kodiak のキューに入れ、マージを確認する | `scripts/agent-gh dev pr edit <M> --add-label automerge`（条件は skill `command-team` の「マージ」）。マージの実行は Kodiak（GitHub App）が行い、指揮役がマージコマンドを叩くことはない。hatai の admin マージの対象は、hatai が判断する例外の PR（round 4 以降の例外 PR、`.github/` の下を変える PR、`fnox.toml` を変える PR）だけ（これ以外に広げない） |
 
 しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更（`actions.lock` の再生成は例外。正本は `docs/superpowers/specs/agent-team.md` の「制約」）、スレッドの取り消し。
 
@@ -78,6 +78,18 @@ sandbox に止められた操作（書き込み・実行・ネットワークな
 - ラベルなしカードの由来はタイムラインで区別する: `ready-for-agent` の取り外しイベントがあるものは削除のルールを適用し、無いものは最初からラベルなし（サブ Issue の自動追加など）として保持する。サブ Issue は `ready-for-agent` が無い限り、Todo へ動かされても処理対象にならない
 - ラベルを動かした主体が、その手順の中でステータスも導出規則どおりに更新する。片方だけ成功した場合は巡回の整合チェックが検出して是正する
 
+### マージの条件
+
+PR に `automerge` ラベルを付けてよいのは、次の 5 つがすべてそろったときだけ（確かめ方の正本は skill `command-team` の「マージ」）。
+
+1. 現在の head に有効な Approve がある（`pelway-review`）
+2. その Approve のレビューに `[文書のずれ]` の nit が残っていない
+3. 必須チェック（`mise run verify`・`pr-size`）が通っている
+4. Approve の後の push が main の取り込みだけである
+5. 現在の head と同じ SHA の QA の合格コメントがある。合格コメントは `pelway-qa` 名義で、確かめた SHA と run を書いたもの（形と数え方は `docs/agents/qa-checklist.md`）。QA が同じ SHA で確かめるまでは合格として扱わない。head が動いたら前の合格は数えない
+
+1〜4 がそろって 5 だけが無い PR は QA 待ちである。`automerge` を付けず、QA に確認を頼む。巡回スクリプトはこの PR にも `waiting_on=merge` を出すが、実際の待ち先は QA として扱う。
+
 ### マージキュー待ちの PR
 
 `automerge` ラベルが付いた open な PR は、待ち先が Kodiak（マージキューの GitHub App。正本は `docs/superpowers/specs/agent-team.md` の「マージキュー」）である。補助記録では `waiting_on=merge` のままとし、巡回スクリプトの `next_owner` は `conductor (PR #<M>)` を出すが、実際の待ち先は Kodiak として扱う。
@@ -85,7 +97,7 @@ sandbox に止められた操作（書き込み・実行・ネットワークな
 - マージの確認は、notify-grokbot の `pull_request`（`closed`、`merged: true`）の通知と、巡回での PR の状態で行う。マージされれば従来どおり Issue から `agent:working`・`agent:devin` を外す
 - `automerge` ラベルを付けたあとに新しい push や Draft への戻しがあったら、指揮役がラベルを外す。条件が再び揃ったら（Approve のやり直しを含む）付け直す
 - Kodiak の自動更新（main への追いつき）が取り込みを行ったあとも、指揮役は取り込みのコミットに main 以外の差分がないことを確かめる。Kodiak はコンフリクトを解消しないため、その取り込みは「コンフリクトの解消を含まない main の取り込み」に当たる（2026-11-19 の hatai の決定、Issue #480）。main 以外の差分があれば変更として扱い、ラベルを外してレビューと QA をやり直させる
-- QA の合格コメントの確認: QA の合格は PR コメントで残す（形式は skill `command-team` の「マージ」）。1 行目が `QA-PASS pr=<番号> sha=<40桁> run=<CI の run id> verify=pass pr-size=pass` であることと、sha が PR の現在の head と一致することと、コメントが QA 専用の App `pelway-qa` の名義で投稿され、投稿の後に編集されていないこと（REST の応答で `user.login` が `pelway-qa[bot]`、`user.type` が `Bot`、`created_at` と `updated_at` が同じ）を確かめる。確かめ方のコマンドは skill `command-team` の「マージ」の QA 合格コメントと同じものを使う。ほかの作成者（hatai を含む）のコメントと、編集されたコメントは、形式と sha が合っていても QA の合格に数えない（書き込み権限を持つ名義は、ほかの名義のコメントの sha を書き換えられるため）。PR 本文だけの「合格」は無効で、sha が一致しない合格コメントはその head では使えない（head が変わったら QA のやり直しを依頼する）
+- QA の合格コメントの確認: 形と数え方は `docs/agents/qa-checklist.md` の「合格として数えるもの」に従う（`pelway-qa[bot]` の Bot であること・投稿の後に編集されていないこと・1 行目・`sha:` が PR の現在の head と一致すること・`run:`）。ほかの作成者（hatai を含む）のコメントと、編集されたコメントは、形と SHA が合っていても QA の合格に数えない（書き込み権限を持つ名義は、ほかの名義のコメントの `sha:` を書き換えられるため。skill `command-team` の「マージ」）。PR 本文だけの「合格」は無効で、SHA が一致しない合格コメントはその head では使えない（head が変わったら QA のやり直しを依頼する）
 - Kodiak がコンフリクト等でマージできないときは、Kodiak が PR にコメントして `automerge` ラベルを外す（`.kodiak.toml` の `merge.notify_on_conflict` の既定）。巡回で、Approve 済みなのに `automerge` ラベルが無い PR に Kodiak のマージ不可コメントがあるか、またはラベルが付いたまま長時間 open のままのものを検知する。前者は手当スレッドを立てて main の取り込みと衝突解消をさせ、終わったら指揮役が `automerge` ラベルを付け直す。後者（キューが詰まる・応答しない）は hatai の admin マージへの切り戻しの判断材料として人間に知らせる
 - `automerge` ラベルの付け外しは、conductor-watch が付け外しの時刻を記録と突き合わせて検査する（actor だけでは判定しない）。裏付けが取れない操作は「出どころ不明」として `LABEL unbacked` 行で watch.log に出る。Kodiak がコンフリクトで外したものは、Kodiak のマージ不可コメントを指揮役が確認して正当として記録する
 
@@ -153,7 +165,7 @@ conductor-watch は検知（`watch.log` へのイベント出力）だけを行�
 指示待ちのスレッドは、次の 3 つを全部満たすものとする: ターンが終わっていて動いている作業が無い（実行中でなく、待っている先も終わっている）／紐づいた PR か Issue がまだ開いている／マージまで進んでいない。経過時間のしきい値は置かず、見つけたらその巡回のうちに次の指示を出す。
 
 - 指示は定型の 3 つ（「続きをやり直す」「レビューの再委託」「衝突の解消」）から選ぶ。実装スレッドの受け取り方は skill `implement-issue` の「巡回から定型の指示を受けたとき」
-- 現在の head に有効な Approve があり、そのレビューに `[文書のずれ]` の nit が残っておらず、必須チェックが緑で、Draft でない PR には、指揮役が `automerge` を付けて Kodiak のマージに渡す（条件の正本は skill `command-team` の「マージ」）
+- 現在の head に有効な Approve があり、そのレビューに `[文書のずれ]` の nit が残っておらず、必須チェックが緑で、現在の head と同じ SHA の QA の合格コメントがあり、Draft でない PR には、指揮役が `automerge` を付けて Kodiak のマージに渡す（条件の正本は skill `command-team` の「マージ」）
 - `needs-human` の付いた Issue・PR と、複数のレビュー担当の判定が割れた PR には、指示も `automerge` も出さず、判断待ちに回す
 
 ### 巡回の報告の形
@@ -199,7 +211,7 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 
 ボードの Todo に `ready-for-agent` の付いたカードがあり、実装の枠が空いているとき（割り当ての共通前段は「2. ボードと巡回」の「割り当て・停止・再開」）。
 
-1. Issue に `agent:working` を付ける（`ready-for-agent` は外さない）。Devin CLI に割り当てるときは `agent:devin` も付ける
+1. Issue のラベルを読み直し、`agent:working` がすでに付いていれば割り当てない（別のスレッドが取っている。手当・再開で自分が割り当てたものは除く）。付いていなければ `agent:working` を付ける（`ready-for-agent` は外さない）。Devin CLI に割り当てるときは `agent:devin` も付ける。実装スレッドは着手時にこの `agent:working` を自分の占有として引き継ぎ、取得コメント（誰が・何時（JST）に取ったか）を書く（skill `implement-issue` の手順 2）
 2. 実装スレッドを立てる
 
 ```
@@ -316,7 +328,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 ### 実装担当が止まった（`stopped:`）
 
-実装担当は止まる前に Issue にコメントし、`needs-human` を付けている。Grok Bot は `agent:working` を外し、部屋で人間に知らせる。
+実装担当は止まる前に Issue にコメントし、`needs-human` を付け、`agent:working` を外して解放コメントを書いている（skill `implement-issue` の手順 2）。Grok Bot は `agent:working` が残っていれば外し、部屋で人間に知らせる。
 
 ### 停滞（`stalled`）
 
@@ -404,7 +416,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 | `grokbot` | 24 時間 | Grok Bot の承認・判断が出たか |
 | `implement` | 6 時間 | 実装スレッドが動いているか（停滞は 45 分検知にもある。レビュー委託の子の完了待ちを含む） |
 | `review` | 24 時間 | レビュー担当が動いているか（滞留 24 時間の対応と同じ目安。skill `command-team` の「レビュー待ちの滞留」） |
-| `merge` | 1 時間 | マージの条件（有効な Approve、必須チェック、QA 合格コメント）が揃っているのに未マージのままではないか |
+| `merge` | 1 時間 | マージの条件（「2. ボードと巡回」の「マージの条件」）が揃っているのに未マージのままではないか。QA の合格だけが無ければ QA 待ちとして扱う |
 | `conductor` | 1 時間 | 指揮役の判断・割り当てが先送りになっていないか |
 
 目安は運用実績で見直す。巡回スクリプトが既定値として同じ値を持つため、変えるときはこの表とスクリプトの両方を直す。

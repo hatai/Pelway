@@ -19,7 +19,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 
 1. タスク定義: Issue Form `agent-task` で Issue を書き、`ready-for-agent` を付ける（GitHub Projects のボードの Backlog に載る）
 2. 処理の合図: ボードで、処理してよい Issue のカードを Backlog から Todo へ動かす
-3. マージの委任: 指揮役が、`pelway-review` の Approve と必須チェックの通過と QA 合格コメント（同じ head の sha の `QA-PASS` コメント。形式は skill `command-team` の「マージ」）を確かめた PR に `automerge` ラベルを付けて、Kodiak（マージキューの GitHub App。「マージキュー」参照）にマージを委任することを認める（判定が割れた PR は修正側の指摘を優先して対応し、`needs-human` の PR は人間が判断する）
+3. マージの委任: 指揮役が、`pelway-review` の Approve と必須チェックの通過と 現在の head と同じ SHA の QA の合格コメント（`pelway-qa` 名義。形と数え方は `docs/agents/qa-checklist.md`）を確かめた PR に `automerge` ラベルを付けて、Kodiak（マージキューの GitHub App。「マージキュー」参照）にマージを委任することを認める（判定が割れた PR は修正側の指摘を優先して対応し、`needs-human` の PR は人間が判断する）
 
 ## タスクの入口と流れ
 
@@ -44,7 +44,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 4. 実装スレッドは、Draft PR の必須チェックが通り次第、自分でレビューを委託する（`delegate_task`。手順は skill `implement-issue`）。レビュー委託の子は skill `review-pr` に従い、PR に Approve か Request changes を投稿する
 5. Request changes なら、実装スレッドが must-fix を直して push し、レビューを再委託する（修正とレビューの繰り返しは実装スレッドの内側で回し、指揮役を経由しない）。修正は 3 回まで（round 4 に入るのは hatai の例外の判断だけ。ラウンドの数え方と上限は skill `command-team` の「レビューのラウンド」）。回数と打ち切りの判断は skill `implement-issue`
 6. Approve されたら、実装担当が自分で `pr ready` で Draft を解除する。Approve のレビューに `[文書のずれ]` の nit が残っていれば、先に直してレビューを再委託する（skill `implement-issue` の手順 9）（レビュー担当の App には Draft を解除する権限がない）し、終わりの報告をする。人間（hatai）のレビューの指摘は、指揮役が `t3 thread send` で実装スレッドに伝える
-7. Approve と必須チェックと QA 合格コメントがそろったら、指揮役が `automerge` ラベルを付けて Kodiak のマージキューに入れる（skill `command-team` の「マージ」）
+7. Approve と必須チェックがそろったら、QA が同じ SHA で独立に確かめ、SHA と run を書いた合格コメントを PR に残す（`docs/agents/qa-checklist.md`）。Approve・必須チェック・同じ SHA の QA の合格がそろったら、指揮役が `automerge` ラベルを付けて Kodiak のマージキューに入れる（skill `command-team` の「マージ」）。QA が確かめるまでは合格として扱わない
 8. 終わった worktree は pitchfork のデーモン `agent-worktree-prune` が毎時消す（settle されていないスレッドの worktree と、追跡ファイルに変更が残っている worktree は残す。残ったものは人間が `mise run agent-worktree-prune` で整理する）
 
 ### 入口B（バグ・インシデント）の調査と起票
@@ -82,7 +82,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - 設定ファイル `.kodiak.toml`（リポジトリルート）: `version = 1`、`merge.automerge_label = "automerge"` と `merge.require_automerge_label = true`（ラベルが付いた PR だけがキューの対象）、`merge.method = "merge"`（マージコミット方式）、`merge.blacklist_labels = ["needs-human"]`（人間の判断待ちはラベルが付いていてもマージしない）。Dependabot のレビューなし自動マージ（`merge.automerge_dependencies`）は設定しない。設定項目の意味は https://kodiakhq.com/docs/config-reference
 - `automerge` ラベルは「マージの指示」を表す PR ラベル。付けるのは指揮役だけで、実装スレッドは自分の PR に付けない（付け手と手順は skill `command-team` の「マージ」）
 - ルールセットの要点: 必須チェック（`mise run verify`・`pr-size`）の維持、承認 1 件必須・Code Owners レビュー必須の解除（`pelway-review` の Approve で満たせる形）、「マージ前にブランチを最新化すること」の必須化。Kodiak はブランチ保護を満たした PR だけをマージするため、この組み替えが導入の前提になる
-- 役割分担: レビュー担当は従来どおり Approve・Request changes を投稿する。指揮役は Approve と必須チェックの通過と QA 合格コメント（同じ head の sha の `QA-PASS` コメント）を確かめて（条件の正本は skill `command-team` の「マージ」。`[文書のずれ]` の nit が残っていないことも含む）`automerge` ラベルを付け、Kodiak のマージを確認してから `agent:working` を外して人間に報告する。Kodiak はブランチの最新化とマージを直列に実行し、コンフリクト等でマージできないときは PR にコメントして `automerge` ラベルを外す（巡回での検知と手当は runbook の「マージキュー待ちの PR」）。Kodiak の自動更新が取り込んだあとは、指揮役が取り込みのコミットに main 以外の差分がないことを確かめる。キューの切り戻し（Kodiak が応答しない等）も、hatai が例外と判断した PR の admin マージによる（例外は上の 3 つだけ）
+- 役割分担: レビュー担当は従来どおり Approve・Request changes を投稿する。指揮役は Approve と必須チェックの通過と、現在の head と同じ SHA の QA の合格コメントを確かめて（条件の正本は skill `command-team` の「マージ」。`[文書のずれ]` の nit が残っていないことも含む）`automerge` ラベルを付け、Kodiak のマージを確認してから `agent:working` を外して人間に報告する。Kodiak はブランチの最新化とマージを直列に実行し、コンフリクト等でマージできないときは PR にコメントして `automerge` ラベルを外す（巡回での検知と手当は runbook の「マージキュー待ちの PR」）。Kodiak の自動更新が取り込んだあとは、指揮役が取り込みのコミットに main 以外の差分がないことを確かめる。キューの切り戻し（Kodiak が応答しない等）も、hatai が例外と判断した PR の admin マージによる（例外は上の 3 つだけ）
 
 ルールセットの変更前後の値（変更は hatai の GitHub 設定操作。「変更前」はこの文書の従来の記述からの転記で、pelway-dev のトークンではクラシックブランチ保護の読み取りができないため API の実測値ではない）:
 
@@ -100,7 +100,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - 正本は GitHub Issues と GitHub Projects のボード（`users/hatai/projects/7`「Pelway agent team」）
 - 指揮役スレッドのコンテキスト圧縮は、状態の正本が GitHub と巡回記録にあるため、外部化と復元検証を伴う手順として仕組み化できる。詳細は skill `command-team` の「コンテキスト管理」
 - ボードの Status（Backlog・Todo・Working・In review・Changes requested・Ready to merge・Needs human・Done）が Issue の処理状態を表す。Status は巡回が導出規則（runbook の「ボードと巡回」）で補正した後の確定状態が正
-- ラベルは `ready-for-agent`（人間が付ける入場の条件。ボードへの自動追加の合図で、着手後も外さない）、`agent:working`（割り当て中。指揮役が付ける）、`agent:devin`（Devin CLI に割り当てたときに指揮役が付ける）、`needs-human`（人間の判断待ち）の 4 つ。このほか PR には `automerge`（マージの指示。指揮役が付ける。Kodiak のキューの合図。「マージキュー」参照）がある
+- ラベルは `ready-for-agent`（人間が付ける入場の条件。ボードへの自動追加の合図で、着手後も外さない）、`agent:working`（割り当て中。指揮役が割り当てで付け、実装スレッドが着手時に自分の占有として引き継いで、誰が・何時（JST）に取ったかを Issue にコメントする。付いていなければ実装スレッドが付ける。すでに付いている Issue は取らない。手放すときは実装スレッドが外してコメントする。放置時の期限は未定。手順は skill `implement-issue` の手順 2）、`agent:devin`（Devin CLI に割り当てたときに指揮役が付ける）、`needs-human`（人間の判断待ち）の 4 つ。このほか PR には `automerge`（マージの指示。指揮役が付ける。Kodiak のキューの合図。「マージキュー」参照）がある
 - 「レビュー待ち」「修正待ち」「マージ待ち」は PR の Draft 状態・レビュー状態・CI 結果と委託記録から、巡回が Status に反映する
 
 ## 見張り役と通知
