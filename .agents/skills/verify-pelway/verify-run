@@ -81,8 +81,9 @@ forbidden_env_present() {
 # pitchfork のデーモンの一覧（読み取りだけ。記録用で、合否は PID の比較で決める）。
 pitchfork_list() { (cd "${TOP}" && mise exec -- pitchfork list 2>&1) || echo "pitchfork list: 失敗"; }
 
-# 生き残りを比べる対象の PID（1 行 1 つ）。
-survivor_pids() { ps -eo pid=,comm= | awk -v re="${SURVIVOR_COMM}" '$2 ~ re {print $1}' | sort -n; }
+# 生き残りを比べる対象の PID（1 行 1 つ）。5 分以上動いている常駐のものだけ（pitchfork の定期ジョブのように
+# run の途中で自然に終わる短命なプロセスを、巻き込んで止めたと取り違えないため）。comm と同じ文字列順に並べる。
+survivor_pids() { ps -eo pid=,comm=,etimes= | awk -v re="${SURVIVOR_COMM}" '$2 ~ re && $3 >= 300 {print $1}' | LC_ALL=C sort; }
 
 # 結果の 1 行を summary に書く。FAIL があれば VERDICT を FAIL にする。
 record() {
@@ -218,7 +219,7 @@ cleanup() {
   if [ -s "${EV}/survivors-before.txt" ]; then
     survivor_pids > "${EV}/survivors-after.txt"
     pitchfork_list > "${EV}/pitchfork-after.txt"
-    local lost; lost="$(comm -23 "${EV}/survivors-before.txt" "${EV}/survivors-after.txt" | tr '\n' ' ')"
+    local lost; lost="$(LC_ALL=C comm -23 "${EV}/survivors-before.txt" "${EV}/survivors-after.txt" | tr '\n' ' ')"
     if [ -z "${lost}" ]; then record PASS "後片付け: ほかのプロセスが生き残っている" "survivors-*.txt"
     else record FAIL "後片付け: ほかのプロセスが生き残っている" "消えた pid ${lost}"; fi
   fi
