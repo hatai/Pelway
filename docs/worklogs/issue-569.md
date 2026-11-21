@@ -10,4 +10,4 @@
 4. 足りなかった情報・検証手段: Issue の「採用する方式」が「なし」だが、背景に PR #561 head 57cc371 の叩き台があり、それを方式として扱った。CI の runner で `sudo -n` が使えるかは、push 後の verify のログ（`info 14:` の行）でしか確かめられない。
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「時間の上限で上限処理を確かめる条件は、今のコードでその時間を超えるかを先に測り、超えないときは観測できる効果（読まれない行など）を条件に足す」を足す。
 
-使ったスキル: implement-issue、test-driven-development
+使ったスキル: implement-issue、write-pull-request、pr-watch（輸入スキルは使っていない。手順 4 の red→green は implement-issue の本文どおりに行い、`.agents/skills/tdd` は試行の割り当てでないため読んでいない）
