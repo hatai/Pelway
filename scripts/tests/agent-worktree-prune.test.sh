@@ -42,7 +42,7 @@ g() { git -c user.name=t -c user.email=t@example.com "$@"; }
 
 # 毎回まっさらな origin・本体・worktree を作る
 setup() {
-  rm -rf "$ROOT/origin.git" "$ROOT/main" "$ROOT/wt" "$ROOT/other" "$ROOT/mbx-called"
+  rm -rf "$ROOT/origin.git" "$ROOT/main" "$ROOT/wt" "$ROOT/other" "$ROOT/mbx-called" "$ROOT/answer"
   git init -q --bare -b main "$ROOT/origin.git"
   g clone -q "$ROOT/origin.git" "$ROOT/main" 2>/dev/null
   g -C "$ROOT/main" commit -q --allow-empty -m init
@@ -241,7 +241,7 @@ add_merged s-proc
 mkdir -p "$ROOT/wt/s-proc/sub"
 (cd "$ROOT/wt/s-proc/sub" && exec sleep 300) &
 sleeper=$!
-for _ in $(seq 50); do [[ "$(readlink "/proc/$sleeper/cwd" 2>/dev/null)" == "$ROOT/wt/s-proc/sub" ]] && break; sleep 0.1; done
+for _ in $(seq 300); do [[ "$(readlink "/proc/$sleeper/cwd" 2>/dev/null)" == "$ROOT/wt/s-proc/sub" ]] && break; sleep 0.1; done
 age
 out="$(run --auto 2>&1)"
 check "worktree with live process kept" kept s-proc
@@ -279,6 +279,36 @@ age
 touch "$ROOT/main/.git/worktrees/v-head/HEAD"
 run --auto >/dev/null 2>&1
 check "worktree with recent HEAD kept" kept v-head
+
+# 22. 作業ツリーの中の深い場所のファイルだけが 6 時間以内でも残す
+setup
+add_merged w-tree
+mkdir -p "$ROOT/wt/w-tree/sub/deep"
+echo x >"$ROOT/wt/w-tree/sub/deep/f"
+age
+touch "$ROOT/wt/w-tree/sub/deep/f"
+run --auto >/dev/null 2>&1
+check "worktree with recent file deep in tree kept" kept w-tree
+
+# 23. 一覧を作った後、消す前にプロセスが始まった worktree はブランチごと残す（確認の質問の間に起動する）
+setup
+add_merged x-late
+age
+mkfifo "$ROOT/answer"
+run <"$ROOT/answer" >"$ROOT/late.out" 2>&1 &
+runner=$!
+exec 7>"$ROOT/answer"
+for _ in $(seq 600); do grep -q '残す worktree' "$ROOT/late.out" && break; sleep 0.1; done
+(cd "$ROOT/wt/x-late" && exec sleep 300) &
+sleeper=$!
+for _ in $(seq 300); do [[ "$(readlink "/proc/$sleeper/cwd" 2>/dev/null)" == "$ROOT/wt/x-late" ]] && break; sleep 0.1; done
+echo y >&7
+exec 7>&-
+wait "$runner"
+check "worktree with process started after listing kept" kept x-late
+check "branch of worktree with late process kept" branch_kept x-late
+check "late process reason reported" grep -q "x-late (プロセスが動いている: pid $sleeper sleep)" "$ROOT/late.out"
+kill "$sleeper"; wait "$sleeper" 2>/dev/null; sleeper=""
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

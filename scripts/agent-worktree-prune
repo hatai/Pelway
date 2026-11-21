@@ -11,7 +11,7 @@
 # 次の worktree は作業中として残す。
 #   - settle されていない T3 スレッドの worktree（t3 thread show の worktreePath）
 #   - 生きているプロセスのカレントディレクトリ（/proc/<pid>/cwd）が中にある worktree
-#     （t3 thread list に出ない delegate_task の子スレッドの worktree を守る）
+#     （t3 thread list に出ない delegate_task の子スレッドの worktree を守る。消す直前にもう一度確かめる）
 #   - 最後の変更（作業ツリーと、git dir の HEAD・index の更新時刻のうち新しいもの）から 6 時間以内の worktree
 # T3 に問い合わせられないとき、/proc を読めないときは何も消さずに失敗する。それ以外で消すのは次のどれか。
 #   - HEAD が origin/main に取り込まれている → worktree とブランチを消す
@@ -73,12 +73,16 @@ done
 
 # プロセスのカレントディレクトリを集める（「pid<TAB>コマンド名<TAB>cwd」の行。他人のプロセスは読めないので飛ばす）
 readlink /proc/self/cwd >/dev/null 2>&1 || { echo "agent-worktree-prune: /proc を読めない。何も消さない" >&2; exit 1; }
-cwds=""
-for d in /proc/[0-9]*; do
-  cwd="$(readlink "$d/cwd" 2>/dev/null)" || continue
-  comm="$(<"$d/comm")" 2>/dev/null || continue
-  cwds+="${d#/proc/}"$'\t'"$comm"$'\t'"$cwd"$'\n'
-done
+collect_cwds() {
+  cwds=""
+  local d cwd comm
+  for d in /proc/[0-9]*; do
+    cwd="$(readlink "$d/cwd" 2>/dev/null)" || continue
+    comm="$(<"$d/comm")" 2>/dev/null || continue
+    cwds+="${d#/proc/}"$'\t'"$comm"$'\t'"$cwd"$'\n'
+  done
+}
+collect_cwds
 recent_since="$(date -d '6 hours ago' +%s)"
 
 live_process() { # worktree の中にカレントディレクトリがあるプロセスの「pid N コマンド名」。無ければ空
@@ -111,6 +115,7 @@ changes() { # 変更と数える git status の行（--auto では未追跡を�
 }
 
 remove=() delete_branch=() keep=()
+declare -A branch_of
 while read -r path branch; do
   [[ "$path" == "$ROOT"/* ]] || continue
   branch="${branch#refs/heads/}"
@@ -126,7 +131,8 @@ while read -r path branch; do
   if [[ "$state" == OPEN ]]; then
     keep+=("$path (開いている PR がある)")
   elif git merge-base --is-ancestor "$head" origin/main || [[ "$state" == MERGED ]]; then
-    remove+=("$path"); [[ "$branch" != DETACHED ]] && delete_branch+=("$branch")
+    remove+=("$path")
+    [[ "$branch" != DETACHED ]] && { delete_branch+=("$branch"); branch_of[$path]="$branch"; }
   elif [[ "$state" == CLOSED ]]; then
     remove+=("$path")
   else
@@ -149,15 +155,18 @@ fi
 
 status=0
 for p in "${remove[@]}"; do
+  # 一覧を作った後（確認の質問の間など）に始まったプロセスを、消す直前に見直す
+  collect_cwds
+  proc="$(live_process "$p")"
+  if [[ -n "$proc" ]]; then echo "残した: $p (プロセスが動いている: $proc)"; continue; fi
   rm -f "$p/$PLUGIN"
   if [[ "$mode" == auto ]]; then
-    git worktree remove --force "$p" 9>&- || { echo "失敗: $p" >&2; status=1; }
+    git worktree remove --force "$p" 9>&- || { echo "失敗: $p" >&2; status=1; continue; }
   else
-    git worktree remove "$p" || { echo "失敗: $p" >&2; status=1; }
+    git worktree remove "$p" || { echo "失敗: $p" >&2; status=1; continue; }
   fi
-done
-for b in "${delete_branch[@]}"; do
-  git branch -D "$b" >/dev/null || { echo "失敗: ブランチ $b" >&2; status=1; }
+  b="${branch_of[$p]:-}"
+  [[ -n "$b" ]] && { git branch -D "$b" >/dev/null || { echo "失敗: ブランチ $b" >&2; status=1; }; }
 done
 
 if [[ "$mode" == auto ]]; then
