@@ -1517,6 +1517,20 @@ fn send_time_per_cycle_is_bounded() {
 }
 
 #[test]
+fn next_notice_is_sent_while_the_deadline_remains() {
+    let sb = Sandbox::new("send-after-12s");
+    queue(&sb, &["mcp:a", "mcp:b"]);
+    sb.fake("fnox-ok", "");
+    sb.fake("fnox-sleep", "6");
+    sb.fake("curl-code-by-thread", "mcp:a 400\nmcp:b 200\n");
+    let err = stderr(&sb.run_with(&["--once"]));
+    // 1 件目の 400 は秘密の取得（6 秒 × 2）の後、送信の開始から約 12 秒で返る。
+    // 期限（40 秒）までの時間が残っているので、同じ周回で 2 件目を送る
+    assert_eq!(sent_threads(&sb), ["mcp:a", "mcp:b"], "{err}");
+    assert!(outbox_threads(&sb).is_empty(), "{err}");
+}
+
+#[test]
 fn backoff_is_kept_across_restart() {
     let sb = Sandbox::new("backoff-restart");
     queue(&sb, &["mcp:a"]);

@@ -34,10 +34,8 @@ use serde_json::Value;
 
 const DEFAULT_POLL_SECS: u64 = 30;
 const CI_INTERVAL: Duration = Duration::from_secs(5 * 60);
-/// 1 周の中で webhook に新しく送り始めてよい時間（始めた送信に、期限までの時間を残すため）。
-const SEND_START_WINDOW: Duration = Duration::from_secs(10);
-/// 1 周の webhook の送信の期限。秘密を読む fnox・curl・送り直しの待ちは期限で止める（`io::send`）ので、
-/// 1 周の送信は列の長さによらず 45 秒以内に収まる。期限までに送れなかった知らせは列に残る。
+/// 1 周の webhook の送信の期限。期限が残る間は次の知らせを送り始め、秘密を読む fnox・curl・送り直しの待ちは
+/// 期限で止める（`io::send`）ので、1 周の送信は列の長さによらず 45 秒以内に収まる。期限までに送れなかった知らせは列に残る。
 const SEND_DEADLINE: Duration = Duration::from_secs(40);
 const USAGE: &str =
     "usage: pelway-agent-watch [--once | --cycles <n>] [--dry-run] [--project <path>]
@@ -316,14 +314,13 @@ impl Watcher {
             outbox::push(&mut self.state.outbox, payload);
         }
         let project = self.opts.project.clone();
-        let send_started = Instant::now();
-        let deadline = send_started + SEND_DEADLINE;
+        let deadline = Instant::now() + SEND_DEADLINE;
         let backoff_before = self.state.outbox_backoff;
         outbox::flush(
             &mut self.state.outbox,
             &mut self.state.outbox_backoff,
             now_epoch,
-            || send_started.elapsed() < SEND_START_WINDOW,
+            || io::has_time(deadline),
             |payload| {
                 let tag = tag(payload);
                 match io::send(payload, &project, deadline) {

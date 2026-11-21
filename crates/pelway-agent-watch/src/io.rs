@@ -30,11 +30,14 @@ fn timed(cmd: &std::ffi::OsStr) -> Command {
     c
 }
 
+/// timeout に渡せる最短の制限。秒の小数 3 桁で `0.000` になると、timeout は制限なしで実行するため。
+const MIN_LIMIT: Duration = Duration::from_millis(1);
+
 /// `limit` を過ぎたら子と孫ごと SIGKILL で止めるコマンド。webhook の送信の期限を守るため、
-/// `timed` の SIGTERM の後の猶予は置かない。`limit` が 1 ミリ秒より短ければ起動しない
-/// （秒の小数 3 桁で `0.000` になると、timeout は制限なしで実行するため）。
+/// `timed` の SIGTERM の後の猶予は置かない。`limit` が `MIN_LIMIT` より短ければ起動しない。
+/// 期限からの残り時間は、起動の直前に測って渡す。
 fn killed_after(cmd: &str, limit: Duration) -> Option<Command> {
-    if limit < Duration::from_millis(1) {
+    if limit < MIN_LIMIT {
         return None;
     }
     let mut c = Command::new("timeout");
@@ -45,6 +48,11 @@ fn killed_after(cmd: &str, limit: Duration) -> Option<Command> {
 
 fn left(deadline: Instant) -> Duration {
     deadline.saturating_duration_since(Instant::now())
+}
+
+/// `deadline` までに、外部コマンドを起動できる時間（`MIN_LIMIT` 以上）が残っているか。
+pub fn has_time(deadline: Instant) -> bool {
+    left(deadline) >= MIN_LIMIT
 }
 
 fn run(cmd: &str, args: &[&str], cwd: &Path) -> Result<String, String> {
@@ -285,10 +293,10 @@ fn curl_quote(s: &str) -> String {
 /// payload を webhook に送る。URL と鍵は curl の設定として標準入力から渡す（引数・プロセス一覧に出さない）。
 /// 本文は所有者だけが読める一時ファイルに置き、送ったら消す。
 /// 秘密の読み取り・curl・送り直しの待ちは `deadline` までに終える（子は残り時間で止める）。
-/// 期限を過ぎて終わった送り直せる失敗は、理由を `deadline` にする。
+/// 期限を過ぎて（残りが `MIN_LIMIT` 未満で）終わった送り直せる失敗は、理由を `deadline` にする。
 pub fn send(payload: &Value, project: &Path, deadline: Instant) -> SendResult {
     match send_until(payload, project, deadline) {
-        SendResult::Failed(_) | SendResult::DryRunNoSecret if left(deadline).is_zero() => {
+        SendResult::Failed(_) | SendResult::DryRunNoSecret if !has_time(deadline) => {
             SendResult::Failed("deadline".to_string())
         }
         result => result,
@@ -309,22 +317,25 @@ fn send_until(payload: &Value, project: &Path, deadline: Instant) -> SendResult 
     };
     // 受け手が一時的に応答しないことがあるので、送り直せる失敗なら 2 秒おいて最大 2 回まで送り直す
     // （curl は 1 回 --max-time 10 秒。待ちの後に期限が残らないときは送り直さない）
-    let mut result = send_once(payload, &url, &key, deadline);
+    let mut result = send_once(payload, &url, &key, deadline, private_body_path);
     for _ in 0..2 {
         if !matches!(result, SendResult::Failed(_)) || left(deadline) <= Duration::from_secs(2) {
             break;
         }
         std::thread::sleep(Duration::from_secs(2));
-        result = send_once(payload, &url, &key, deadline);
+        result = send_once(payload, &url, &key, deadline, private_body_path);
     }
     result
 }
 
-fn send_once(payload: &Value, url: &str, key: &str, deadline: Instant) -> SendResult {
-    let Some(mut curl) = killed_after("curl", left(deadline)) else {
-        return SendResult::Failed("deadline".to_string());
-    };
-    let body_path = match private_body_path() {
+fn send_once(
+    payload: &Value,
+    url: &str,
+    key: &str,
+    deadline: Instant,
+    tmp_path: impl FnOnce() -> std::io::Result<PathBuf>,
+) -> SendResult {
+    let body_path = match tmp_path() {
         Ok(p) => p,
         Err(e) => return SendResult::Failed(format!("tmpfile: {e}")),
     };
@@ -345,6 +356,11 @@ fn send_once(payload: &Value, url: &str, key: &str, deadline: Instant) -> SendRe
         curl_quote(key)
     );
     let data = format!("@{}", body_path.display());
+    // 残り時間は本文の用意の後、起動の直前に測る（用意にかかった分だけ curl が期限を越えないように）
+    let Some(mut curl) = killed_after("curl", left(deadline)) else {
+        let _ = fs::remove_file(&body_path);
+        return SendResult::Failed("deadline".to_string());
+    };
     let result = curl
         .args([
             "-s",
@@ -732,15 +748,31 @@ mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
 
-    /// 偽の /proc と HOME を作り、`<pid>/exe` の向き先ごとに選ばれるかを確かめる。
     #[test]
     fn killed_after_never_runs_without_a_limit() {
+        assert!(killed_after("true", Duration::from_micros(300)).is_none());
         assert!(killed_after("true", Duration::from_micros(400)).is_none());
         let c = killed_after("true", Duration::from_millis(1)).unwrap();
         let args: Vec<_> = c.get_args().collect();
         assert_eq!(args, ["-s", "KILL", "0.001", "true"]);
     }
 
+    #[test]
+    fn curl_is_not_started_when_the_deadline_passes_while_preparing() {
+        let body = std::env::temp_dir().join(format!("agent-watch-body-{}", std::process::id()));
+        let _ = fs::remove_file(&body);
+        let deadline = Instant::now() + Duration::from_millis(20);
+        // 本文の一時ファイルの用意に、期限までの残りより長い 30 ミリ秒かかった
+        let tmp_path = || {
+            std::thread::sleep(Duration::from_millis(30));
+            Ok(body.clone())
+        };
+        let result = send_once(&Value::Null, "http://127.0.0.1:9/", "k", deadline, tmp_path);
+        assert!(matches!(result, SendResult::Failed(why) if why == "deadline"));
+        assert!(!body.exists());
+    }
+
+    /// 偽の /proc と HOME を作り、`<pid>/exe` の向き先ごとに選ばれるかを確かめる。
     #[test]
     fn server_t3_only_under_home_runtime() {
         let root = std::env::temp_dir().join(format!("agent-watch-t3bin-{}", std::process::id()));
