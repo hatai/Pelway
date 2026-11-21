@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+# verify-run: Pelway のデモのバックエンドを 1 回の run で
+#   起動 → 環境チェック → 機能の操作 → 証拠 → 後片付け
+# まで通す（skill verify-pelway）。止めるのはこの run が起動した PID だけ。
+#
+# 使い方:
+#   verify-run [--feature decision|mail-draft] [--evidence-root DIR] [--allow-dirty]
+#   verify-run --help
+# 証拠は <evidence-root>/<sha12>/<run-id>/ に置き、後片付けでも消さない。
+# evidence-root の既定は ${XDG_STATE_HOME:-$HOME/.local/state}/pelway-verify（リポジトリの外に限る）。
+# 終了コード: 0 = 全段 PASS、1 = どこかが FAIL（summary.txt に理由）、2 = 引数の誤り。
+set -uo pipefail
+
+WS=ws-demo-01
+CH=ch-demo-anken-b
+BOT=m-hal
+REQUESTER=m-tanaka
+DECIDER=m-yamamoto
+POLL_SECS=10
+
+die_usage() { echo "verify-run: $*" >&2; exit 2; }
+
+# HTTP 応答（生のバイト列のファイル）から状態コードを返す。
+resp_status() { head -n 1 "$1" | tr -d '\r' | awk '{print $2}'; }
+# HTTP 応答から本文（最初の空行より後）を返す。
+resp_body() { awk 'b {print} /^\r?$/ && !b {b=1}' "$1"; }
+
+# evidence-root がリポジトリ（top）の外なら 0。
+outside_repo() {
+  local root="$1" top="$2"
+  case "${root%/}/" in "${top%/}/"*) return 1 ;; *) return 0 ;; esac
+}
+
+# 結果の 1 行を summary に書く。FAIL があれば VERDICT を FAIL にする。
+record() {
+  local result="$1" step="$2" detail="${3:-}"
+  printf '%-4s %s%s\n' "${result}" "${step}" "${detail:+ (${detail})}" | tee -a "${EV}/summary.txt"
+  [ "${result}" = PASS ] || VERDICT=FAIL
+}
+
+# 1 要求を /dev/tcp で送る。$1=名前 $2=メソッド $3=経路 $4=操作者（空なら無し）$5=本文。
+# 要求と応答を steps/ に残し、状態コードを STATUS、本文を BODY に入れる。
+http() {
+  local name="$1" method="$2" path="$3" member="$4" body="${5:-}" n
+  n="$(printf '%02d' "${STEP}")"; STEP=$((STEP + 1))
+  local req="${EV}/steps/${n}-${name}.req" raw="${EV}/steps/${n}-${name}.resp"
+  {
+    printf '%s %s HTTP/1.1\r\nHost: demo.local\r\nConnection: close\r\n' "${method}" "${path}"
+    [ -n "${member}" ] && printf 'x-pelway-member-id: %s\r\nx-pelway-member-kind: human\r\n' "${member}"
+    printf 'Content-Length: %s\r\n\r\n%s' "$(printf '%s' "${body}" | wc -c)" "${body}"
+  } > "${req}"
+  STATUS=000; BODY=""
+  if exec 3<>"/dev/tcp/${HOST}/${PORT}"; then
+    cat "${req}" >&3
+    timeout 10 cat <&3 > "${raw}"
+    exec 3<&- 3>&-
+    STATUS="$(resp_status "${raw}")"; BODY="$(resp_body "${raw}")"
+    ss -Htanp 2>/dev/null | grep "pid=${PID}," >> "${EV}/network.txt" || true
+  else
+    echo "connect failed" > "${raw}"
+  fi
+}
+
+# 読み取りだけで「このインスタンスを動かしてよいか」を答える。0 = よい。
+env_check() {
+  local out="${EV}/env-check.txt" ok=0 exe listen
+  {
+    echo "pid=${PID} expected_bin=${BIN}"
+    exe="$(readlink "/proc/${PID}/exe" 2>/dev/null || true)"
+    echo "proc_exe=${exe}"
+    [ "${exe}" = "${BIN}" ] || { echo "NG: プロセスの実行ファイルがこの run のビルドではない"; ok=1; }
+    echo "bin_sha256=${BIN_SHA}"
+    [ "$(sha256sum "/proc/${PID}/exe" 2>/dev/null | cut -d' ' -f1)" = "${BIN_SHA}" ] \
+      || { echo "NG: 実行中のバイナリのハッシュが起動前と違う"; ok=1; }
+    echo "repo_head=$(git -C "${TOP}" rev-parse HEAD) run_sha=${SHA} dirty=${DIRTY}"
+    [ "$(git -C "${TOP}" rev-parse HEAD)" = "${SHA}" ] || { echo "NG: HEAD が run の開始時と違う"; ok=1; }
+    listen="$(ss -Htlnp 2>/dev/null | grep "pid=${PID}," | awk '{print $4}' | sort -u | tr '\n' ' ')"
+    echo "listen=${listen}"
+    [ "${listen}" = "${ADDR} " ] || { echo "NG: 待ち受けが ready 行の addr=${ADDR} だけではない"; ok=1; }
+    if tr '\0' '\n' < "/proc/${PID}/environ" 2>/dev/null | grep -q '^PELWAY_LLM_API_KEY='; then
+      echo "NG: プロセスの環境に PELWAY_LLM_API_KEY がある（値は記録しない）"; ok=1
+    else
+      echo "llm_key_env=absent"
+    fi
+    echo "auth=none（デモは認証なし。操作者は合成ヘッダー x-pelway-member-id）"
+  } > "${out}"
+  cat "${out}"
+  return "${ok}"
+}
+
+# 外に出ていないことの観察: 要求のたびに取ったこの PID のソケット（network.txt）が
+# すべて 127.0.0.1 同士で、開いているファイルが標準入出力とソケットだけか。
+network_check() {
+  local out="${EV}/network.txt"
+  ss -Htanp 2>/dev/null | grep "pid=${PID}," >> "${out}" || true
+  ls -l "/proc/${PID}/fd" > "${EV}/proc-fd.txt" 2>&1 || return 1
+  [ -s "${out}" ] || return 1
+  ! awk '{print $4; print $5}' "${out}" | grep -vqE '^(127\.0\.0\.1:[0-9]+|0\.0\.0\.0:\*|\*:\*)$' || return 1
+  ! awk 'NR > 1 {print $NF}' "${EV}/proc-fd.txt" | grep -vqE "^(/dev/null|${EV}/server\.std(out|err)|socket:\[[0-9]+\]|anon_inode:.*|pipe:\[[0-9]+\])$"
+}
+
+cleanup() {
+  if [ -n "${PID:-}" ] && [ "$(readlink "/proc/${PID}/exe" 2>/dev/null)" = "${BIN}" ]; then
+    kill -TERM "${PID}" 2>/dev/null; wait "${PID}" 2>/dev/null
+  fi
+  if [ -n "${PID:-}" ] && [ -e "/proc/${PID}" ]; then
+    echo "NG: pid ${PID} が残っている" > "${EV}/cleanup.txt"; VERDICT=FAIL
+  elif [ -n "${PID:-}" ]; then
+    echo "stopped pid=${PID}（この run が起動したものだけ）" > "${EV}/cleanup.txt"
+  fi
+  echo "verdict=${VERDICT}" | tee -a "${EV}/summary.txt"
+  local sums; sums="$(cd "${EV}" && find . -type f -print0 | sort -z | xargs -0 sha256sum)"
+  printf '%s\n' "${sums}" > "${EV}/SHA256SUMS"
+  echo "evidence=${EV}"
+  echo "evidence_sha256=$(sha256sum "${EV}/SHA256SUMS" | cut -d' ' -f1)"
+  [ "${VERDICT}" = PASS ] || exit 1
+}
+
+# 判断待ちができるまで待ち、decision_id と version を DEC_ID・DEC_VER に入れる。
+wait_decision() {
+  local deadline=$((SECONDS + POLL_SECS))
+  DEC_ID=""
+  while [ "${SECONDS}" -le "${deadline}" ]; do
+    http decisions-pending GET "/v1/workspaces/${WS}/decisions?actor=${DECIDER}" ""
+    DEC_ID="$(jq -r --arg m "${MSG_ID}" '.[]? | select(.request_message_id == $m) | .decision_id' <<< "${BODY}" 2>/dev/null)"
+    [ -n "${DEC_ID}" ] && break
+    sleep 1
+  done
+  DEC_VER="$(jq -r --arg d "${DEC_ID}" '.[]? | select(.decision_id == $d) | .version' <<< "${BODY}" 2>/dev/null)"
+}
+
+operate() {
+  http channels GET "/v1/workspaces/${WS}/channels?actor=${REQUESTER}" ""
+  if [ "${STATUS}" = 200 ] && jq -e --arg c "${CH}" --arg b "${BOT}" \
+      '.[] | select(.channel_id == $c) | .members[] | select(.member_id == $b)' <<< "${BODY}" > /dev/null 2>&1; then
+    record PASS "seed: #案件B にハルがいる"
+  else
+    record FAIL "seed: #案件B にハルがいる" "テスト用データが無い status=${STATUS}"; return
+  fi
+
+  local cm="cm-verify-${RUN_ID}"
+  http mention POST "/v1/channels/${CH}/messages" "${REQUESTER}" \
+    "{\"client_msg_id\":\"${cm}\",\"body\":\"@ハル 納期延長の案を2つ作って\",\"thread_root\":null}"
+  MSG_ID="$(jq -r '.message_id // empty' <<< "${BODY}" 2>/dev/null)"; MSG_SEQ="$(jq -r '.seq // empty' <<< "${BODY}" 2>/dev/null)"
+  if [ "${STATUS}" = 200 ] && [ -n "${MSG_ID}" ]; then record PASS "投稿: ハル宛てのメンション" "${MSG_ID}"
+  else record FAIL "投稿: ハル宛てのメンション" "status=${STATUS}"; return; fi
+
+  wait_decision
+  if [ -n "${DEC_ID}" ]; then record PASS "判断待ち: 山本に A/B の決定が来る" "${DEC_ID}"
+  else record FAIL "判断待ち: 山本に A/B の決定が来る" "${POLL_SECS} 秒で現れない"; return; fi
+
+  http messages-after-mention GET "/v1/channels/${CH}/messages?actor=${REQUESTER}&after_seq=${MSG_SEQ}" ""
+  local bots last; bots="$(jq --arg b "${BOT}" '[.[]? | select(.author_id == $b)] | length' <<< "${BODY}" 2>/dev/null)"
+  last="$(jq '[.[]?.seq] | max // empty' <<< "${BODY}" 2>/dev/null)"; last="${last:-${MSG_SEQ}}"
+  if [ "${STATUS}" = 200 ] && [ "${bots:-0}" -ge 2 ]; then record PASS "チャンネル: ハルの進捗と案の投稿" "${bots} 件"
+  else record FAIL "チャンネル: ハルの進捗と案の投稿" "bot 投稿 ${bots:-0} 件"; fi
+
+  http decide POST "/v1/decisions/${DEC_ID}/decide" "${DECIDER}" \
+    "{\"decision_id\":\"${DEC_ID}\",\"version\":${DEC_VER:-0},\"option_id\":\"a\"}"
+  if [ "${STATUS}" = 200 ] && [ "$(jq -r '.selected.option_id' <<< "${BODY}" 2>/dev/null)" = a ]; then
+    record PASS "決定: 山本が案A を選ぶ"
+  else record FAIL "決定: 山本が案A を選ぶ" "status=${STATUS}"; return; fi
+
+  http decisions-after GET "/v1/workspaces/${WS}/decisions?actor=${DECIDER}" ""
+  if [ "${STATUS}" = 200 ] && ! jq -e --arg d "${DEC_ID}" '.[]? | select(.decision_id == $d)' <<< "${BODY}" > /dev/null 2>&1; then
+    record PASS "副作用: 確定した決定が判断待ちから消える"
+  else record FAIL "副作用: 確定した決定が判断待ちから消える" "status=${STATUS}"; fi
+
+  [ "${FEATURE}" = mail-draft ] || return 0
+  sleep "${POLL_SECS}"
+  http messages-after-decide GET "/v1/channels/${CH}/messages?actor=${REQUESTER}&after_seq=${last}" ""
+  if [ "${STATUS}" = 200 ] && [ "$(jq --arg b "${BOT}" '[.[]? | select(.author_id == $b)] | length' <<< "${BODY}")" -ge 1 ]; then
+    record PASS "メール下書き: 決定後にハルが下書きを投稿する"
+  else
+    record FAIL "メール下書き: 決定後にハルが下書きを投稿する" "${POLL_SECS} 秒待っても決定後の bot 投稿が無い"
+  fi
+}
+
+main() {
+  FEATURE=decision; ROOT="${XDG_STATE_HOME:-${HOME}/.local/state}/pelway-verify"; ALLOW_DIRTY=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --feature) FEATURE="${2:-}"; shift 2 || die_usage "--feature needs a value" ;;
+      --evidence-root) ROOT="${2:-}"; shift 2 || die_usage "--evidence-root needs a value" ;;
+      --allow-dirty) ALLOW_DIRTY=1; shift ;;
+      --help|-h) sed -n '2,11p' "$0"; exit 0 ;;
+      *) die_usage "unknown argument: $1" ;;
+    esac
+  done
+  case "${FEATURE}" in decision|mail-draft) ;; *) die_usage "unknown feature: ${FEATURE}" ;; esac
+  TOP="$(git rev-parse --show-toplevel)" || die_usage "not inside the Pelway repository"
+  [ -n "${ROOT}" ] && [ "${ROOT#/}" != "${ROOT}" ] || die_usage "--evidence-root must be an absolute path"
+  outside_repo "${ROOT}" "${TOP}" || die_usage "--evidence-root must be outside the repository (${TOP})"
+
+  SHA="$(git -C "${TOP}" rev-parse HEAD)"
+  DIRTY=no; [ -z "$(git -C "${TOP}" status --porcelain)" ] || DIRTY=yes
+  RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-${FEATURE}-$$"
+  EV="${ROOT}/${SHA:0:12}/${RUN_ID}"
+  mkdir -p "${EV}/steps" || die_usage "cannot create ${EV}"
+  VERDICT=PASS; STEP=1; PID=""
+  BIN="${CARGO_TARGET_DIR:-${TOP}/target}/debug/examples/demo-serve"
+  trap cleanup EXIT
+  printf 'run_id=%s\nsha=%s\ndirty=%s\nfeature=%s\n' "${RUN_ID}" "${SHA}" "${DIRTY}" "${FEATURE}" | tee "${EV}/summary.txt"
+  if [ "${DIRTY}" = yes ] && [ "${ALLOW_DIRTY}" = 0 ]; then
+    record FAIL "前提: 作業ツリーがコミット済み" "未コミットの変更がある。--allow-dirty は証拠にならない"; return 1
+  fi
+
+  # 起動
+  (cd "${TOP}" && cargo build --offline --locked -p pelway-http --example demo-serve) > "${EV}/build.log" 2>&1 \
+    || { record FAIL "起動: ビルド" "build.log を見る"; return 1; }
+  BIN="$(realpath "${BIN}")"; BIN_SHA="$(sha256sum "${BIN}" | cut -d' ' -f1)"
+  local other p
+  for p in $(pgrep -x demo-serve || true); do
+    [ "$(readlink "/proc/${p}/exe" 2>/dev/null)" = "${BIN}" ] && other="${other:-} ${p}"
+  done
+  if [ -n "${other:-}" ]; then
+    record FAIL "起動: 二重起動の確認" "別の run の demo-serve が動いている pid=${other# }。触らずに止まる"; return 1
+  fi
+  env -u PELWAY_LLM_API_KEY "${BIN}" > "${EV}/server.stdout" 2> "${EV}/server.stderr" &
+  PID=$!
+
+  for _ in $(seq 50); do grep -q '^demo-serve ready ' "${EV}/server.stdout" && break; sleep 0.1; done
+  ADDR="$(sed -n 's/^demo-serve ready addr=\([^ ]*\) pid=\([0-9]*\) .*/\1/p' "${EV}/server.stdout")"
+  if [ -z "${ADDR}" ] || ! grep -q "^demo-serve ready addr=${ADDR} pid=${PID} llm=script$" "${EV}/server.stdout"; then
+    record FAIL "起動: ready 行" "5 秒以内にこの PID の ready 行が出ない"; return 1
+  fi
+  HOST="${ADDR%:*}"; PORT="${ADDR##*:}"
+  record PASS "起動: ready 行" "addr=${ADDR} pid=${PID}"
+
+  # 環境チェック
+  if env_check > /dev/null; then record PASS "環境チェック" "env-check.txt"
+  else record FAIL "環境チェック" "env-check.txt の NG 行"; return 1; fi
+
+  # 操作
+  operate
+
+  # 外に出ていないことの観察
+  if network_check; then record PASS "ネットワーク・ファイル: 127.0.0.1 のソケットと標準入出力だけ" "network.txt proc-fd.txt"
+  else record FAIL "ネットワーク・ファイル: 127.0.0.1 のソケットと標準入出力だけ" "network.txt proc-fd.txt"; fi
+  [ "${VERDICT}" = PASS ]
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi
