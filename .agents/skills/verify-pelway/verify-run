@@ -372,12 +372,13 @@ start_sampler() {
 }
 stop_sampler() {
   [ -n "${SAMPLER:-}" ] || return 0
-  # 停止を求めたかどうかにかかわらず、終了の理由を見る。3 は取得・記録の失敗（観察は未完了）、
-  # SIGTERM による停止（143）は意図した停止。止める前に失敗で抜けていた場合も 3 が返る。
+  # 停止を求めたかどうかにかかわらず、終了の理由を見る。意図した停止はこの run が送った SIGTERM（143）
+  # だけ。それ以外の終了は、止める前の取得・記録の失敗（3）、ほかのシグナルによる途中終了（137 など）、
+  # 自分で抜けた（0）のどれでも、観察が切れていた時間帯がありうるので失敗にする。
   kill "${SAMPLER}" 2> /dev/null
   local rc=0
   wait "${SAMPLER}" 2> /dev/null || rc=$?
-  [ "${rc}" = 3 ] && OBS_FAILED=1
+  [ "${rc}" != 143 ] && OBS_FAILED=1
   SAMPLER=""
 }
 
@@ -410,6 +411,9 @@ network_check() {
 
 # pid が 5 秒以内に終われば 0。
 gone_within() { local _; for _ in $(seq 50); do [ -e "/proc/$1" ] || return 0; sleep 0.1; done; return 1; }
+
+# locks/ の下のロックのディレクトリを mkdir で原子的に取る。取れたらこの run の pid を持ち主として書く。
+try_lock() { mkdir "$1" 2> /dev/null && echo "$$" > "$1/pid"; }
 
 # この run が起動した PID だけを止める: 標準入力を閉じる → SIGTERM → SIGKILL。送る前に毎回 exe を照合する。
 stop_child() {
@@ -644,14 +648,21 @@ main() {
   # 二重起動の確認（ビルドの前）: 先にロックを mkdir で原子的に取り（同時に始めた run を拒む）、
   # そのあと同じ target の demo-serve が動いていないかを見る（手で起動したものなどを拒む。触らない）。
   # 動いているほうの exe はビルドし直すと " (deleted)" が付くので、外して比べる。
-  local target_real p e other="" lock
+  local target_real p e other="" lock lock2
   target_real="$(realpath -m "${CARGO_TARGET_DIR:-${TOP}/target}")"
   # ロックは証拠の置き場によらず共有 git dir の下に置き、鍵は作業ツリーの実体のパス（ビルドで変わらない）。
   lock="${COMMON}/pelway/locks/$(printf '%s' "${TOP}" | sha256sum | cut -c1-12)"
-  if mkdir "${lock}" 2> /dev/null; then
-    LOCK="${lock}"; echo "$$" > "${LOCK}/pid"
+  if try_lock "${lock}"; then LOCK="${lock}"
   else
     record FAIL "起動: 二重起動の確認" "別の run がロックを持っている（pid=$(cat "${lock}/pid" 2>/dev/null)、${lock}）。動かさない"; return 1
+  fi
+  # ビルドの前から持つ 2 つめのロック: 同じビルド先（${CARGO_TARGET_DIR} か既定の target の実体）を共有する
+  # 別の作業ツリーの run が、この run の検証中にビルドして実行ファイルを置き換えるのを防ぐ。置き換わると、
+  # 動かしたバイナリと証拠に残すコミットの対応が崩れる。run の終わりまで持つ。
+  lock2="${COMMON}/pelway/locks/bin-$(printf '%s' "${target_real}" | sha256sum | cut -c1-12)"
+  if try_lock "${lock2}"; then LOCK2="${lock2}"
+  else
+    record FAIL "起動: 二重起動の確認" "同じビルド先を使う別の run がロックを持っている（pid=$(cat "${lock2}/pid" 2>/dev/null)、${lock2}）。動かさない"; return 1
   fi
   for p in $(pgrep -x demo-serve || true); do
     e="$(exe_of "${p}" || true)"
@@ -692,14 +703,6 @@ main() {
   if [ -z "${BIN}" ]; then record FAIL "起動: ビルド" "cargo が demo-serve の実行ファイルを報告しない"; return 1; fi
   BIN="$(realpath "${BIN}")"
   BIN_SHA="$(sha256sum "${BIN}" | cut -d' ' -f1)"
-  # ビルド先を共有する別の作業ツリーの run とも排他にする: ビルドで決まった実行ファイルの置き場を鍵にした 2 つめのロック。
-  local lock2
-  lock2="${COMMON}/pelway/locks/bin-$(printf '%s' "$(dirname -- "${BIN}")" | sha256sum | cut -c1-12)"
-  if mkdir "${lock2}" 2> /dev/null; then
-    LOCK2="${lock2}"; echo "$$" > "${LOCK2}/pid"
-  else
-    record FAIL "起動: 二重起動の確認（ビルドの後）" "同じビルド先を使う別の run がロックを持っている（pid=$(cat "${lock2}/pid" 2>/dev/null)、${lock2}）。動かさない"; return 1
-  fi
   # 起動の前に作業ツリーと HEAD を見直す（開始の後に編集してからビルドした変更を、元のコミットの証拠にしない）。
   local state_now
   if ! state_now="$(tree_state "${TOP}")" || [ "$(git -C "${TOP}" rev-parse HEAD)" != "${SHA}" ] \

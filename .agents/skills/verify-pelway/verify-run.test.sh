@@ -190,12 +190,22 @@ expect_eq "fd_targets_ok: fd dir does not exist (child gone)" "$(fdr "${tmp}/no-
 mkdir -p "${tmp}/empty-fds"
 expect_eq "fd_targets_ok: empty fd dir" "$(fdr "${tmp}/empty-fds" "${odd}" "${tmp}/fd.out")" 2
 
-# stop_sampler: 停止を求めたかどうかにかかわらず、観察の失敗（終了コード 3）を OBS_FAILED にする。
+# stop_sampler: 停止を求めたかどうかにかかわらず、意図した停止（SIGTERM の 143）以外の終了を OBS_FAILED にする。
 # shellcheck disable=SC2034  # SAMPLER は source した verify-run の stop_sampler が読む
 ss_rc() { OBS_FAILED=0; ( eval "$1" ) & SAMPLER=$!; sleep "${2:-0}"; stop_sampler; echo "${OBS_FAILED}"; }
 expect_eq "stop_sampler: sampler already failed" "$(ss_rc 'exit 3' 0.3)" 1
 expect_eq "stop_sampler: sampler fails while being stopped" "$(ss_rc 'trap "exit 3" TERM; while :; do sleep 0.05; done' 0.3)" 1
 expect_eq "stop_sampler: intended stop is not a failure" "$(ss_rc 'while :; do sleep 0.05; done' 0.3)" 0
+# 停止の要求より前に、ほかのシグナルで消えた場合・自分で抜けた場合も、観察が切れていたので失敗にする。
+ss_sig() { OBS_FAILED=0; ( eval "$1" ) & SAMPLER=$!; sleep "${2:-0.2}"; kill -"${3:-KILL}" "${SAMPLER}" 2> /dev/null; sleep 0.2; stop_sampler; echo "${OBS_FAILED}"; }
+expect_eq "stop_sampler: killed by a signal before the stop request" "$(ss_sig 'while :; do sleep 0.05; done')" 1
+expect_eq "stop_sampler: exits on its own before the stop request" "$(ss_rc 'exit 0' 0.3)" 1
+
+# try_lock: ビルド先を鍵にしたロックはビルドの前から run の終わりまで持つ（同じビルド先を共有する別の
+# 作業ツリーの run が、検証中の run の実行ファイルをビルドで置き換えるのを防ぐ）。
+expect_eq "try_lock: second holder is refused" "$(d="${tmp}/lock-a"; try_lock "${d}"; a=$?; try_lock "${d}" 2> /dev/null; echo "${a}-$?")" "0-1"
+expect_eq "try_lock: released dir can be retaken" "$(d="${tmp}/lock-b"; try_lock "${d}" && rm -f "${d}/pid" && rmdir "${d}" && try_lock "${d}"; echo $?)" 0
+expect_eq "bin lock is taken before the build" "$(awk '/bin-\$\(printf/{a=NR} /cargo build/{b=NR} END{print (a>0 && b>0 && a<b)?"yes":"no"}' "${tool}")" "yes"
 
 # tree_state: コミット済み・変更あり・git の確認の失敗を区別する。
 git init -q "${tmp}/ts"; git -C "${tmp}/ts" -c user.email=t@e -c user.name=t commit -q --allow-empty -m init
