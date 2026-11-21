@@ -29,6 +29,12 @@ check cond1_responses_are_event_kinds "$DOC03" \
   '承認・却下・失効・取り下げ'
 check cond1_each_response_recorded "$DOC03" \
   '独立の監査事象'
+# 条件1（round 4 の指摘への固定文言・2026-11-21 の再開指示）: 判断待ちの確定は判断の ID と版を参照し、
+# 期限切れの失効はサーバーを記録主体にする。
+check cond1_decision_reference "$DOC03" \
+  'decision_idと確定後の版'
+check cond1_expiry_recorded_by_server "$DOC03" \
+  'serverを記録主体'
 
 # 条件2: 監査の行は主体（利用者・Bot）に外部キーで結ばず、主体を消しても残ることが書かれている。
 check cond2_no_fk_to_subjects "$DOC03" \
