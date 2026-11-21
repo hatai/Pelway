@@ -222,7 +222,7 @@ Assigned: role=implement agent=devin model=swe-2-high effort=<medium|high|max>"
 t3 thread start --provider codex_review --model <skill command-team の「Codex のモデル」で選んだモデル> --worktree main --branch review/<M>-<k> --title "[レビュー] PR #<M> <要約>" <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。"
 ```
 
-T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-accept-edits` にする。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`auto-accept-edits` で立てられないときも `auto`・`full-access` に変えず、立てずに `needs-human` で報告する。指揮役のレビュースレッドは `delegate_task` で委託しない（子タスクの worktree は委託元のコミットから作られ、下の `main` 起点の決まりを満たせないため。`delegate_task` での委託は実装担当の手順で、skill `implement-issue` の手順 8）。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP で立てる。
+T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-accept-edits` にする。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`auto-accept-edits` で立てられないときも `auto`・`full-access` に変えず、立てずに 7 のエスカレーションにする（指揮役自身の PR のように Issue が無いときは、`needs-human` を PR に付け、コメントも PR に書く）。指揮役のレビュースレッドは `delegate_task` で委託しない（子タスクの worktree は委託元のコミットから作られ、下の `main` 起点の決まりを満たせないため。`delegate_task` での委託は実装担当の手順で、skill `implement-issue` の手順 8）。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP で立てる。
 
 `codex_review` はネットワークを GitHub だけに絞った Codex（`docs/dev-environment.md` の「レビュー担当の Codex」）。`<k>` はその PR のレビュースレッドの通し番号（1 から）。worktree は必ず `main` から作る（レビュー担当は worktree の `scripts/agent-gh` を使うため、PR やほかのブランチの版を使わない）。
 
