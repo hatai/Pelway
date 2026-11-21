@@ -327,7 +327,7 @@ main() {
     echo "verify-run: 未対応（理由: /proc と ss（iproute2）が要る。この OS は $(uname -s)）" >&2; exit 1
   fi
   local t missing=""
-  for t in git mise jq ss pgrep ps sha256sum realpath readlink comm timeout; do command -v "${t}" > /dev/null || missing+=" ${t}"; done
+  for t in git mise rustup jq ss pgrep ps sha256sum realpath readlink comm timeout; do command -v "${t}" > /dev/null || missing+=" ${t}"; done
   [ -d /proc/self ] || missing+=" /proc"
   if [ -n "${missing}" ]; then echo "verify-run: 失敗（道具が無い:${missing}）。入れずに止まる" >&2; exit 1; fi
   if [ -n "$(forbidden_env_present /proc/$$/environ)" ]; then
@@ -372,11 +372,15 @@ main() {
   record PASS "起動: 二重起動の確認" "同じ target の demo-serve なし、ロック取得"
   survivor_pids > "${EV}/survivors-before.txt"
   pitchfork_list > "${EV}/pitchfork-before.txt"
+  TOOLCHAIN="$(cd "${TOP}" && mise current rust 2>/dev/null)"
+  RUSTC_BIN="$(rustup which --toolchain "${TOOLCHAIN}" rustc 2>/dev/null)"
+  if [ -z "${TOOLCHAIN}" ] || [ ! -x "${RUSTC_BIN}" ]; then
+    record FAIL "起動: ツールチェーン" "mise.toml の rust（${TOOLCHAIN:-不明}）の rustc が無い。mise install --locked を先に行う"; return 1
+  fi
   {
     echo "mise: $(mise --version 2>/dev/null | head -n 1)"
-    # rustc は PATH の並びで別の版（/usr/bin など）が出ることがあるので、rustup のツールチェーンの実体を記録する。
-    echo "rustc: $(cd "${TOP}" && "$(mise exec -- rustup which rustc 2>/dev/null)" --version 2>/dev/null)"
-    echo "rustc_on_path: $(cd "${TOP}" && mise exec -- rustc --version 2>/dev/null)"
+    echo "rust_toolchain: ${TOOLCHAIN}（mise current rust）"
+    echo "rustc: $("${RUSTC_BIN}" --version)（${RUSTC_BIN}）"
     echo "cargo: $(cd "${TOP}" && mise exec -- cargo --version 2>/dev/null)"
     echo "ss: $(ss -V 2>&1 | head -n 1)"; echo "pgrep: $(pgrep -V 2>&1 | head -n 1)"
     echo "sha256sum: $(sha256sum --version | head -n 1)"; echo "jq: $(jq --version)"
@@ -385,7 +389,9 @@ main() {
 
   # 起動: ビルドし、cargo が報告した実行ファイルを、PATH と HOME だけの環境で子として起動する。
   # 子の標準入力はこの run が持つパイプ。run が終われば（SIGKILL でも）閉じて、子は終わる。
-  if ! (cd "${TOP}" && mise exec -- cargo build --offline --locked -p pelway-http --example demo-serve \
+  # mise exec の PATH では、ほかの mise 呼び出しと重なると rustc が /usr/bin の別の版に解決されることがある。
+  # mise.toml が固定したツールチェーンの rustc を RUSTC で明示して、PATH の並びに頼らない。
+  if ! (cd "${TOP}" && RUSTC="${RUSTC_BIN}" mise exec -- cargo build --offline --locked -p pelway-http --example demo-serve \
       --message-format=json-render-diagnostics) > "${EV}/build.json" 2> "${EV}/build.log"; then
     record FAIL "起動: ビルド" "build.log を見る"; return 1
   fi
