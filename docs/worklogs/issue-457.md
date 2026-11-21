@@ -91,7 +91,7 @@ hatai の判断 (a)（2026-11-18 20:34 JST）で、仕様を直してラウン�
 
 ## 実装者メモ（round 3・数え直し）
 
-対象 head: 2e750a84bc369a0fa672789a149cbe45d4e85f51
+対象 head: e307101457bd161b4484ce8cb6970523c254d283（2e750a84 の後、Claude の指摘にあった :445 の「添付のバイト列そのものは発言に載せません」が 2 段階に読める点も直した。`NewMessage` はバイト列を同じ要求で運び、`StoredMessage` は参照だけを持つ）
 
 hatai の決定（2026-11-19）どおり、数え直し round 2 のやり直しを head 1639397 で Codex・Claude に委託した。Codex は approve（must-fix 0）、Claude は request-changes（must-fix 1）だったので、request-changes 側に合わせて直した。main の取り込み（e7625cda、コンフリクトなし）もこの round で行った。
 
