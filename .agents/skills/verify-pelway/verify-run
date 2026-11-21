@@ -54,6 +54,10 @@ redact() {
     || echo "<redacted non-json len=${#text}>"
 }
 
+# 最後の verdict を返す。main が最後まで戻っていない run（Ctrl-C・SIGTERM・時間切れで中断）は、
+# 記録した段が全部 PASS でも FAIL にする（飛ばした段がある証拠を PASS にしない）。
+final_verdict() { if [ "$2" = 1 ]; then echo "$1"; else echo FAIL; fi; }
+
 # path が dir の中（dir 自身を含む）なら 0。
 under() { case "${1%/}/" in "${2%/}/"*) return 0 ;; *) return 1 ;; esac; }
 
@@ -241,6 +245,9 @@ cleanup() {
     if [ "${rc}" = 0 ]; then record PASS "demo-check ${st}: run のログ・証拠" "demo-check.txt"
     else record FAIL "demo-check ${st}: run のログ・証拠" "exit ${rc}、demo-check.txt"; fi
   done; fi
+  if [ "$(final_verdict "${VERDICT}" "${DONE:-0}")" != "${VERDICT}" ]; then
+    record FAIL "run が最後まで進まなかった（中断）" "記録の無い段は走っていない"
+  fi
   echo "verdict=${VERDICT}" | tee -a "${EV}/summary.txt"
   local sums
   if ! sums="$(cd "${EV}" && find . -type f -print0 | sort -z | xargs -0 sha256sum)" \
@@ -494,5 +501,10 @@ main() {
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  DONE=0
   main "$@"
+  rc=$?
+  # main が戻ったときだけ印を立てる。シグナルで中断されたときはここに来ず、cleanup が FAIL にする。
+  DONE=1
+  exit "${rc}"
 fi

@@ -103,4 +103,6 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 - 一時状態はサーバーのメモリだけ（本文を伏せる前の応答も、`verify-run` のメモリだけで扱いファイルに書かない）。証拠は消さない。
 - 後片付けの後に、証拠が残っていることを確かめる: `(cd <evidence> && sha256sum -c SHA256SUMS)` がすべて `OK`。
 
-失敗: `cleanup.txt` が `NG:`（PID が残っている、exe が違うので送らなかった）。前にあったほかのプロセスが消えている。`sha256sum -c` に `OK` 以外がある。
+- 中断（Ctrl-C・SIGTERM・コマンドの時間切れ）でも後片付けは動く。run が最後まで進まなかったときは、記録した段が全部 PASS でも `FAIL run が最後まで進まなかった（中断）` を書き、verdict は FAIL になる。
+
+失敗: run が最後まで進まなかった（中断）。`cleanup.txt` が `NG:`（PID が残っている、exe が違うので送らなかった）。前にあったほかのプロセスが消えている。`sha256sum -c` に `OK` 以外がある。

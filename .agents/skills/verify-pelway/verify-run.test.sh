@@ -65,6 +65,11 @@ expect_eq "redact: body and question" "$(redact <<< '{"body":"secret text","ques
   '{"body":"<redacted len=11>","question":"<redacted len=1>","n":{"body":"<redacted len=1>"},"seq":4}'
 expect_eq "redact: non-json" "$(redact <<< 'plain words')" '<redacted non-json len=11>'
 
+expect_eq "final_verdict: finished PASS" "$(final_verdict PASS 1)" PASS
+expect_eq "final_verdict: finished FAIL" "$(final_verdict FAIL 1)" FAIL
+expect_eq "final_verdict: interrupted PASS" "$(final_verdict PASS 0)" FAIL
+expect_eq "final_verdict: unset mark" "$(final_verdict PASS '')" FAIL
+
 repo="${tmp}/repo"
 git init -q "${repo}"
 run_args() { (cd "${repo}" && bash "${tool}" "$@" > /dev/null 2>&1); echo $?; }
