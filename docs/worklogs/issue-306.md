@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/review-pr/SKILL.md` の投稿の手順に「T3 の pull_request_* ツールは使わず、`scripts/agent-gh review pr review` で投稿する」と明記する
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: 3a221c7dd4e53784b1d7357377979b921e65f426
+
+1. 詰まった箇所: 手順 9 の修正依頼: origin/main の取り込みで `docs/dev-environment.md` が衝突した。main 側は hatai の 16ef748f・3b23e704（承認要求を拒否に変える `hooks.PermissionRequest` と、許可リストの拡大）。両方を残した。マージをコミットする前の `mise run verify` で `conductor-rebuild.test.sh` の 2 件が失敗した。この試験は `git worktree add HEAD` でコミット済みの版を試すため、未コミットのマージでは古い版を取り出していた。コミットした後に単体で再実行して `all passed` を確かめた
+2. 曖昧だった文: 「agent/306-denywrite-real に origin/main を取り込んで DIRTY（CONFLICTING・docs/dev-environment.md）を解消して push」（指揮役 Devin 8 の指示）→ そのブランチはリモートに無い。PR #567 の head ブランチ `agent/306-denywrite-doc-2` で行った
+3. 仮定と解釈: 11:35Z の pelway-review の must-fix（受け入れ条件 3 が未達）は、対策の後の実測か hatai の決定が無いと解消しない。claude_review への依頼は禁止の指示のため、実測はしていない。フック導入の前後関係（`release list` の実測はフック導入前）と、main の記述との食い違いを記録欄に書き足すところまでにした
+4. 足りなかった情報・検証手段: フック導入後に `scripts/agent-gh review release list` が止まるかの実測（claude_review への委託が要る）
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9「修正依頼」に「マージの解消後の verify は、`git worktree add HEAD` を使う試験があるため、マージをコミットしてから回す」と足す
+
+使ったスキル: implement-issue
