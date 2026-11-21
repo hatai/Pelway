@@ -83,3 +83,15 @@
 5. 改善案: なし。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 8）
+
+対象 head: 7cfd633b（実装のコミット）
+
+1. 詰まった箇所: round 7 は Claude が Approve。nit 3 件はどれも文書どうしの食い違い（implement-issue の Request changes のときに上限の扱いが無い、runbook の approve のときの指示が「手順 10」のまま、仕様の流れの 6 が印の nit に触れない）。印の nit だけの round はこの PR で通算 2 回（round 4・5）終えているので、この PR 自身の決まりで止めて hatai に判断を仰ぎ、「直してそのままマージ」の指示で直した。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: 通算 2 回の後に must-fix と印の nit を含む Request changes が来たときは、止まる条件の表のとおり止まる（修正 round に進まない）にそろえた。この head はレビューを経ていない（hatai の指示）。
+4. 足りなかった情報・検証手段: なし。
+5. 改善案: なし。
+
+使ったスキル: implement-issue
