@@ -219,7 +219,7 @@ Assigned: role=implement agent=devin model=swe-2-high effort=<medium|high|max>"
 レビュースレッドを次の内容で立てる（`t3 thread start` の形で書くが、権限を指定するため実際は MCP または `t3_thread_launch` で立てる）。
 
 ```
-t3 thread start --provider codex_review --model gpt-6-luna --worktree main --branch review/<M>-<k> --title "[レビュー] PR #<M> <要約>" <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。"
+t3 thread start --provider codex_review --model <skill command-team の「Codex のモデル」で選んだモデル> --worktree main --branch review/<M>-<k> --title "[レビュー] PR #<M> <要約>" <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。"
 ```
 
 T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-accept-edits` にする。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP で立てる。
@@ -381,8 +381,9 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 | `next_owner` | 次の担当 | `hatai` / `implement thread (#<N>)` / `reviewer (PR #<M>)` / `conductor` |
 | `next_check_at` | 次に確認し直す時刻（ISO 8601。フォローアップタイマー） | `waiting_on` が同じ対象では前回値を引き継ぐ（指揮役が延長・短縮した値を含む）。変わったら、新しい待ちの種類の目安で設定し直す |
 | `updated_at` | その対象の最終更新時刻（ISO 8601） | 巡回のたびに書き換わる |
+| `labels` | その巡回で見た Issue のラベル | 巡回のたびに書き換わる。指揮役が書いた `grokbot` は、ラベルがこの値から変わらない限り巡回スクリプトに保たれる |
 
-巡回スクリプト `scripts/conductor-watch.sh` が巡回のたびに必須項目を更新する。記録と GitHub の実状態（Issue の状態とラベル、PR の Draft・レビュー・CI の状態）が食い違う場合は GitHub を正として記録を直す: Issue が閉じたら対象を記録から消し、ラベルと PR の状態から決まる `waiting_on` を毎巡回上書きし、`waiting_on` が変わった対象に `PATROL` 行を出力する。GitHub からの取得に失敗した巡回と、一覧の取得上限に達して打ち切られた巡回では記録を書き換えず、前回の記録を保持する。指揮役が GitHub に載せない判断の途中（例: レビューを始めるか迷っている）は、`waiting_on` が `conductor` の対象として記録の側にだけ残る。次の巡回で GitHub の状態が変われば、スクリプトが GitHub 側の値で上書きする。
+巡回スクリプト `scripts/conductor-watch.sh` が巡回のたびに必須項目を更新する。実装スレッド（題名「[実装] #<N> …」）が completed・failed・interrupted・cancelled で止まっていて、受信箱にある最新の知らせの状態の行（skill `implement-issue` の「ターンの終わりの状態の行」）が `working` か無いときは、`implement`・`review` を `conductor` に書き換え、元の値と時刻を `PATROL #<N> waiting_on=conductor from=… reason=stopped-thread` の 1 行に残す。同じ止まりにつき 1 回だけ `STALL #<N>` の行も出す。状態の行が `waiting-review`・`waiting-checks` なら `waiting_on` は変えず、次回確認時刻を約 8 分後まで早める。`needs-human` の対象は書き換えない。見張りが動いていることは、10 分ごとの `HEARTBEAT` の行で分かる。記録と GitHub の実状態（Issue の状態とラベル、PR の Draft・レビュー・CI の状態）が食い違う場合は GitHub を正として記録を直す: Issue が閉じたら対象を記録から消し、ラベルと PR の状態から決まる `waiting_on` を毎巡回上書きし、`waiting_on` が変わった対象に `PATROL` 行を出力する。GitHub からの取得に失敗した巡回と、一覧の取得上限に達して打ち切られた巡回では記録を書き換えず、前回の記録を保持する。指揮役が GitHub に載せない判断の途中（例: レビューを始めるか迷っている）は、`waiting_on` が `conductor` の対象として記録の側にだけ残る。次の巡回で GitHub の状態が変われば、スクリプトが GitHub 側の値で上書きする。
 
 ### 次回確認時刻（フォローアップタイマー）
 
@@ -397,6 +398,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 | `waiting_on` | 目安 | 期限到来時に確認すること |
 |---|---|---|
 | `human` | 24 時間 | 人間の判断が出たか（`needs-human` が外れたか）。まとめ（1 日 2 回）でも拾う |
+| `grokbot` | 24 時間 | Grok Bot の承認・判断が出たか |
 | `implement` | 6 時間 | 実装スレッドが動いているか（停滞は 45 分検知にもある。レビュー委託の子の完了待ちを含む） |
 | `review` | 24 時間 | レビュー担当が動いているか（滞留 24 時間の対応と同じ目安。skill `command-team` の「レビュー待ちの滞留」） |
 | `merge` | 1 時間 | マージの条件（有効な Approve と必須チェック）が揃っているのに未マージのままではないか |
