@@ -611,20 +611,29 @@ fn inbox_appends_every_event() {
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let events = inbox_events(&sb);
-    // 同じ知らせを重ねて書かない（スレッド・種類・止まりの理由の組が 1 行ずつ）。
+    // 出るはずの知らせが、過不足なく 1 行ずつある（スレッド・種類・止まりの理由の組で比べる）。
     // 試験の時刻は古いので、実行中の d は waiting に加えて no-activity の stalled も出る
-    let keys: std::collections::BTreeSet<String> = events
+    let mut got: Vec<String> = events
         .iter()
-        .map(|e| format!("{} {} {}", e["thread_id"], e["event"], e["stall_reason"]))
+        .map(|e| {
+            format!(
+                "{} {} {}",
+                e["thread_id"].as_str().unwrap_or(""),
+                e["event"].as_str().unwrap_or(""),
+                e["stall_reason"].as_str().unwrap_or("-")
+            )
+        })
         .collect();
-    assert_eq!(keys.len(), events.len(), "{events:?}");
-    let kinds: std::collections::BTreeSet<String> = events
-        .iter()
-        .map(|e| e["event"].as_str().unwrap().to_string())
-        .collect();
-    for k in ["finished", "failed", "cancelled", "waiting", "stalled"] {
-        assert!(kinds.contains(k), "{k} is missing: {kinds:?}");
-    }
+    got.sort();
+    let want = [
+        "mcp:a finished -",
+        "mcp:b failed -",
+        "mcp:c cancelled -",
+        "mcp:d stalled no-activity",
+        "mcp:d waiting -",
+        "mcp:e stalled no-activity",
+    ];
+    assert_eq!(got, want);
     // webhook と同じ形（schema と report を含む）
     assert!(
         events
