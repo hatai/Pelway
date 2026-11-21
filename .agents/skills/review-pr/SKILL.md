@@ -19,6 +19,7 @@ AI 開発チームのレビュー担当が、PR 1 本をレビューして GitHu
 - sandbox に止められたら、`systemd-run`・`nohup`・別のシェル・ラッパースクリプトなど sandbox の外へ出る抜け道を使わず、止まって `verdict: failed` で報告する。
 - `pr ready` は実行しない（レビュー担当の App には権限がない。Ready for review への切り替えは実装担当の App が行う）。
 - 投稿系のコマンドは `&&` でつながず 1 つずつ実行し、終了コードを確かめる。失敗したら `verdict: failed` で報告する。成功していない投稿を成功と報告しない。
+- 終了コードはツールの結果で確かめ、`echo $?` を足さない。1 つのコマンドに、変数の代入・`$(...)`・`$?`・`for`/`while` のループ・`<(...)` を入れない。値は前のコマンドの出力から書き写す。Claude のレビュー担当では、これらの形は実行前に確かめられないため承認要求になり、フックが自動で拒否する。この拒否は sandbox の遮断ではないので、単純なコマンドに分けて送り直し、`verdict: failed` にしない。
 - GitHub への投稿は必ず `scripts/agent-gh review ...` で行う。投稿者が `pelway-review[bot]` になる。
 - 判定は 2 種類だけ。must-fix が 1 つでもあれば Request changes、なければ Approve。
 
