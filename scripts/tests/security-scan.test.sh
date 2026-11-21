@@ -29,7 +29,6 @@ done
 if [[ -n "$out" && -n "${STUB_JSON:-}" ]]; then printf '%s' "$STUB_JSON" >"$out"; fi
 if [[ -n "$out" && -n "${STUB_JSON_FILE:-}" ]]; then cp "$STUB_JSON_FILE" "$out"; fi
 if [[ -n "${STUB_ARGS:-}" ]]; then printf '%s\n' "$@" >"$STUB_ARGS"; fi
-echo "stub $(basename "$0") $*" >&2
 if [[ -n "${STUB_STDERR:-}" ]]; then printf '%s\n' "$STUB_STDERR" >&2; fi
 # STUB_INFO は osv-scanner の進捗ログ（info）の代わり。--verbosity error のときは出さない。
 if [[ -n "${STUB_INFO:-}" && " $* " != *" --verbosity error "* ]]; then printf '%s\n' "$STUB_INFO" >&2; fi
@@ -80,6 +79,16 @@ want_contains gitleaks-hit "$REPLY_SUMMARY" "0123456789ab"
 want_absent gitleaks-hit "$REPLY_SUMMARY" "$secret_value"
 want_absent gitleaks-hit "$REPLY_LOG" "$secret_value"
 run_case gitleaks-error gitleaks 1 "" 1
+# gitleaks 8.30.1 は git log の失敗を ERR のログに出すだけで、終了コードは 0（検出ありなら 2）に
+# なる。--log-level error で、標準エラーに 1 行でもあれば失敗にする。診断の中身（.gitleaksignore の
+# 誤った行など、秘密を含みうる）はログに出さない。
+gitleaks_diag="ERR [git] fatal: ambiguous argument 'FAKEGITLEAKSSECRET': unknown revision"
+STUB_STDERR="$gitleaks_diag" run_case gitleaks-clean-stderr gitleaks 0 "[]" 3
+want_contains gitleaks-clean-stderr "$REPLY_LOG" "::error::"
+want_absent gitleaks-clean-stderr "$REPLY_LOG" "FAKEGITLEAKSSECRET"
+STUB_STDERR="$gitleaks_diag" run_case gitleaks-hit-stderr gitleaks 2 "$gitleaks_hit" 3
+want_absent gitleaks-hit-stderr "$REPLY_LOG" "FAKEGITLEAKSSECRET"
+want_contains gitleaks-log-level "$(cat "$work/args-gitleaks-clean")" $'--log-level\nerror'
 # 件数は JSON の検出の数から数える。ファイル名に改行や | があっても件数は増えず、表の列も崩れない。
 gitleaks_odd='[{"RuleID":"r","File":"a\nb|c.txt","StartLine":1,"Commit":"3333333333333333"}]'
 run_case gitleaks-odd-path gitleaks 2 "$gitleaks_odd" 0
@@ -120,10 +129,13 @@ want_contains semgrep-hit "$REPLY_SUMMARY" '` rust.lang.security.unsafe-usage `'
 want_contains semgrep-hit "$REPLY_SUMMARY" '` crates/x/src/lib.rs:7 `'
 want_contains semgrep-hit "$REPLY_SUMMARY" '` .github/workflows/a.yml:3 `'
 run_case semgrep-error semgrep 2 "" 2
+# semgrep の標準エラー（進捗など）は失敗の判定に使わず（解析エラーは JSON で見る）、ログにも出さない。
+STUB_STDERR="semgrep progress FAKESEMGREPDIAG" run_case semgrep-clean-stderr semgrep 0 '{"results":[],"errors":[]}' 0
+want_absent semgrep-clean-stderr "$REPLY_LOG" "FAKESEMGREPDIAG"
 # 検出（終了コード 1）があっても、level が error の解析エラーはツールの失敗として扱う
 # （semgrep は検出の終了コードをエラーより優先するため、終了コードだけでは見分けられない）。
 semgrep_fatal='{"results":[{"check_id":"x","path":"a.rs","start":{"line":1},"extra":{"severity":"INFO"}}],"errors":[{"level":"error","type":"Fatal error","code":2}]}'
-run_case semgrep-hit-fatal semgrep 1 "$semgrep_fatal" 2
+run_case semgrep-hit-fatal semgrep 1 "$semgrep_fatal" 3
 want_contains semgrep-hit-fatal "$REPLY_LOG" "::error::"
 # level が warn の解析エラー（構文を解析できなかったファイル）は報告だけにする。
 semgrep_warn='{"results":[{"check_id":"x","path":"a.rs","start":{"line":1},"extra":{"severity":"INFO"}}],"errors":[{"level":"warn","type":"Syntax error","code":3}]}'
@@ -138,6 +150,9 @@ want_absent osv-clean "$REPLY_LOG" "::warning"
 want_contains osv-no-call-analysis "$(cat "$work/args-osv-clean")" "--no-call-analysis=all"
 # マニフェストの推移的な依存の解決は、PR の作者が指定できるレジストリへ取りに行くため、使わない。
 want_contains osv-no-resolve "$(cat "$work/args-osv-clean")" "--no-resolve"
+# 既定の抽出器（同梱のソースのパスとハッシュを OSV.dev に送る directory など）を使わず、
+# ロックファイルの抽出器だけにする。
+want_contains osv-plugins "$(cat "$work/args-osv-clean")" $'--x-no-default-plugins\n--x-plugins\nlockfile'
 run_case osv-hit osv-scanner 1 "$osv_hit" 0
 want_contains osv-hit "$REPLY_LOG" "1 件"
 want_contains osv-hit "$REPLY_SUMMARY" '` rsa 0.9.8 `'
@@ -147,12 +162,11 @@ run_case osv-error osv-scanner 127 "" 127
 # 検出（終了コード 1）があっても、ロックファイルの抽出に失敗していれば失敗にする
 # （osv-scanner 2.7.1 は抽出の失敗を標準エラーに出すだけで、検出があれば 1 を返す）。
 osv_diag="Error during extraction: (extracting as javascript/packagelockjson) bad/package-lock.json: fetch https://user:FAKEPASSWORD@registry.invalid/x failed"
-STUB_STDERR="$osv_diag" run_case osv-hit-partial osv-scanner 1 "$osv_hit" 127
+STUB_STDERR="$osv_diag" run_case osv-hit-partial osv-scanner 1 "$osv_hit" 3
 want_contains osv-hit-partial "$REPLY_LOG" "::error::"
-want_contains osv-hit-partial "$REPLY_LOG" "抽出エラーの診断 1 件"
+want_contains osv-hit-partial "$REPLY_LOG" "1 行"
 # osv-scanner の標準エラー（取得先の URL などを含みうる）は公開のジョブログに出さない。
 want_absent osv-hit-partial "$REPLY_LOG" "FAKEPASSWORD"
-want_absent osv-hit-partial "$REPLY_LOG" "stub osv-scanner"
 # 進捗ログは読めたファイルのパスをそのまま書く。パスに改行があると「Error during extraction:」で
 # 始まる行を作れるため、進捗ログを出させず（--verbosity error）、正常な抽出を失敗と取り違えない。
 STUB_INFO=$'Scanned /w/a\nError during extraction: x/Cargo.lock file and found 1 packages' \

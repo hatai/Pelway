@@ -3,19 +3,27 @@
 # 呼び出しは `bash scripts/security-scan.sh <gitleaks|semgrep|osv-scanner>`。ツールは PATH 上のものを使う。
 #
 # 当面は報告のみ: 検出があっても終了コード 0 で終わり、::warning:: とジョブサマリー
-# （$GITHUB_STEP_SUMMARY。無ければ標準出力）に件数と一覧を出す。ツール自体の失敗は、
-# ツールの終了コードのまま失敗させる（検出と取り違えない）。各ツールの終了コードの意味:
+# （$GITHUB_STEP_SUMMARY。無ければ標準出力）に件数と一覧を出す。ツール自体の失敗は
+# ジョブを失敗させる（検出と取り違えない）。各ツールの終了コードの意味:
 #   gitleaks    0 = 検出なし、2 = 検出あり（--exit-code 2 で指定）、それ以外 = 失敗
 #   semgrep     0 = 検出なし、1 = 検出あり（--error）、それ以外 = 失敗
-#   osv-scanner 0 = 検出なし、1 = 検出あり、128 = ロックファイルが無い、それ以外 = 失敗。
-#               ただし 2.7.1 はロックファイルの抽出の失敗を標準エラーの
-#               「Error during extraction:」の行に出すだけで、検出があれば 1 を返すため、
-#               その行があれば検出があっても失敗にする
+#   osv-scanner 0 = 検出なし、1 = 検出あり、128 = ロックファイルが無い、それ以外 = 失敗
+#
+# ツールの診断（標準エラー）の決まり。3 つのツールとも、診断には PR の作者が決められる値
+# （設定の行・パス・取得先の URL など）が入りうり、失敗が終了コードに出ないことがある:
+#   - 標準エラーは公開のジョブログに出さず、$out_dir/<tool>.stderr にだけ書く。ログには
+#     失敗の種類と行数だけを出す（中身は手元で同じコマンドを実行して確かめる）
+#   - gitleaks と osv-scanner はログの水準を error に絞り、標準エラーに 1 行でもあれば、
+#     終了コードが検出なし・検出ありでも失敗にする（gitleaks 8.30.1 は git log の失敗を、
+#     osv-scanner 2.7.1 は抽出の失敗を、ログに出すだけで終了コードに出さない）
+#   - semgrep は解析エラーを JSON の errors に書くため、level が error のものがあれば失敗にする
+#     （semgrep は検出の終了コード 1 をエラーより優先して返す）
 #
 # 秘密の値は出さない: gitleaks は --redact で値を伏せ、サマリーにも規則・場所・コミットだけを書く
 # （レポートの Secret / Match は読まない）。
 # 結果の JSON は $SECURITY_SCAN_OUT（既定: リポジトリ外の一時ディレクトリ）に置く。
-# 終了コード: 0 = 検出なし・検出あり（報告のみ）、2 = 引数の誤り、それ以外 = ツールの失敗
+# 終了コード: 0 = 検出なし・検出あり（報告のみ）、2 = 引数の誤り、3 = 終了コードに出ない
+# ツールの失敗（標準エラーの診断・semgrep の解析エラー）、それ以外 = ツール自身の終了コード
 set -euo pipefail
 
 tool="${1:-}"
@@ -30,7 +38,9 @@ esac
 out_dir="${SECURITY_SCAN_OUT:-$(mktemp -d)}"
 mkdir -p "$out_dir"
 report="$out_dir/$tool.json"
+errfile="$out_dir/$tool.stderr"
 summary="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+local_hint="中身はログに出さない。手元で同じコマンドを実行して確かめる"
 
 # Semgrep のルールセット（Semgrep Registry から取得。ログイン・トークンは使わない）。
 # p/rust: Rust、p/github-actions: CI 設定、r/bash: シェル（p/bash は Registry に無い）。
@@ -42,53 +52,44 @@ case "$tool" in
     # HEAD から辿れる履歴だけを走査する（checkout の他ブランチやローカルの ref は対象外）。
     # -m: git log は既定でマージコミットの差分を出さないため、競合解消で足した行が漏れる。
     # 各親との差分を出させて走査する（同じ値が複数のコミットで重ねて出る）。
-    gitleaks git --redact --no-banner --exit-code 2 --log-opts="-m HEAD" \
-      --report-format json --report-path "$report" . || rc=$?
+    gitleaks git --redact --no-banner --log-level error --exit-code 2 --log-opts="-m HEAD" \
+      --report-format json --report-path "$report" . 2>"$errfile" || rc=$?
     found_rc=2
     ;;
   semgrep)
     semgrep scan --metrics=off --error "${semgrep_configs[@]}" \
-      --json --output "$report" . || rc=$?
+      --json --output "$report" . 2>"$errfile" || rc=$?
     found_rc=1
     ;;
   osv-scanner)
-    # 標準エラーは公開のジョブログに出さず、ファイルにだけ書く（取得先の URL などを含みうるため）。
-    # 抽出の失敗は、osv-scanner が終わってからこのファイルで見分ける。
-    # --verbosity error: 既定（info）の進捗ログは読めたファイルのパスをそのまま書き、パスに改行が
-    # あると「Error during extraction:」で始まる行を作れるため、エラーの行だけにする。
-    # --no-call-analysis=all: 呼び出し解析（Go は既定で有効）は失敗を標準エラーに出すだけで、
-    # 検出があれば 1 を返して見分けられないため、使わない（依存のバージョンの照合だけにする）。
-    # --no-resolve: マニフェスト（pom.xml など）の推移的な依存の解決は、PR の作者が指定できる
-    # レジストリへランナーから取りに行くため、使わない（ロックファイルの照合だけにする）。
-    osv-scanner scan source --verbosity error --no-call-analysis=all --no-resolve --recursive --format json --output-file "$report" . \
-      2>"$out_dir/osv-scanner.stderr" || rc=$?
+    # --verbosity error: 既定（info）の進捗ログは読めたファイルのパスを書くため、エラーだけにする。
+    # --no-call-analysis=all: 呼び出し解析（Go は既定で有効）は使わない。
+    # --no-resolve: マニフェスト（pom.xml など）の推移的な依存を、PR の作者が指定できる
+    # レジストリへ取りに行かない。
+    # --x-no-default-plugins --x-plugins lockfile: 既定の抽出器（同梱の C/C++ ソースのパスと
+    # ハッシュを OSV.dev に送る directory など）を使わず、ロックファイルの抽出器だけにする。
+    osv-scanner scan source --verbosity error --no-call-analysis=all --no-resolve \
+      --x-no-default-plugins --x-plugins lockfile \
+      --recursive --format json --output-file "$report" . 2>"$errfile" || rc=$?
     found_rc=1
     ;;
 esac
 
 if [[ "$rc" != 0 && "$rc" != "$found_rc" ]]; then
-  echo "::error::$tool が失敗しました（終了コード $rc）"
-  if [[ "$tool" == osv-scanner ]]; then
-    echo "osv-scanner の標準エラーはログに出さず、$out_dir/osv-scanner.stderr に書いた。手元で同じコマンドを実行して確かめる。"
-  fi
+  echo "::error::$tool が失敗しました（終了コード $rc。標準エラーの${local_hint}）"
   exit "$rc"
 fi
 
-if [[ "$tool" == osv-scanner ]]; then
-  extraction_errors="$(grep -c '^Error during extraction:' "$out_dir/osv-scanner.stderr" || true)"
-  if [[ "$extraction_errors" != 0 ]]; then
-    echo "::error::osv-scanner がロックファイルの抽出に失敗しました（抽出エラーの診断 ${extraction_errors} 件。中身はログに出さず、$out_dir/osv-scanner.stderr に書いた）"
-    exit 127
-  fi
+if [[ "$tool" != semgrep && -s "$errfile" ]]; then
+  echo "::error::$tool が標準エラーにエラーを出しました（$(wc -l <"$errfile") 行。終了コード $rc でも失敗として扱う。${local_hint}）"
+  exit 3
 fi
 
-# semgrep は検出の終了コード（1）を解析エンジンのエラーより優先して返すため、
-# level が error のエラーが JSON にあれば、検出があってもツールの失敗として扱う。
 if [[ "$tool" == semgrep ]]; then
   fatal="$(jq '[.errors[]? | select(.level == "error")] | length' "$report")"
   if [[ "$fatal" != 0 ]]; then
-    echo "::error::semgrep が失敗しました（level が error の解析エラー ${fatal} 件。詳細は $report）"
-    exit 2
+    echo "::error::semgrep が失敗しました（level が error の解析エラー ${fatal} 件。${local_hint}）"
+    exit 3
   fi
 fi
 
@@ -149,12 +150,12 @@ if [[ -n "$rows" ]]; then shown="$(printf '%s\n' "$rows" | wc -l)"; fi
     if ((shown > 0)); then printf '%s\n' "$rows"; fi
     if ((count > shown)); then
       echo
-      echo "一覧は先頭 ${shown} 件だけ載せた（残り $((count - shown)) 件は、ジョブサマリーの大きさの上限のため省略。全件は $report）。"
+      echo "一覧は先頭 ${shown} 件だけ載せた（残り $((count - shown)) 件は、ジョブサマリーの大きさの上限のため省略。全件は手元で同じコマンドを実行して確かめる）。"
     fi
   fi
   if [[ "${errors:-0}" != 0 ]]; then
     echo
-    echo "semgrep の解析エラー ${errors} 件（構文を解析できなかったファイルなど。詳細は $report）。"
+    echo "semgrep の解析エラー ${errors} 件（構文を解析できなかったファイルなど。詳細は手元で同じコマンドを実行して確かめる）。"
   fi
 } >>"$summary"
 
