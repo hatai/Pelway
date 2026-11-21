@@ -42,9 +42,13 @@ check conductor_merge_check .agents/skills/command-team/SKILL.md \
 
 # 2 回続いたら止まる。仕様にも上限の例外がある。
 check implementer_stop_after_two .agents/skills/implement-issue/SKILL.md \
-  'その round が 2 回続いたら（直した後のレビューにまた印の nit が出たら）'
+  '2 回目の round の後のレビューにまた印の nit が出たら、3 回目には入らず' \
+  '`[文書のずれ]` の nit だけを直す 2 回目の round の後のレビューに、また印の nit が出た（3 回目には入らない）'
 check spec_round_exception docs/superpowers/specs/agent-team.md \
-  '`[文書のずれ]` の nit だけを直す round（skill `review-pr`・`implement-issue`）は、この回数に数えない'
+  '`[文書のずれ]` の nit だけを直す round（skill `review-pr`・`implement-issue`）は、この回数に数えない' \
+  '2 回目の round の後のレビューにまた印の nit が出たら、3 回目には入らず'
+check runbook_patrol_merge docs/agents/grokbot-runbook.md \
+  'そのレビューに `[文書のずれ]` の nit が残っておらず'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
