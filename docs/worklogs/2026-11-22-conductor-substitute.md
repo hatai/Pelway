@@ -87,3 +87,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 - #586/#587 レビュー統制 → mcp:launch:4c9a883a（t3/codex-review-home・#586 39b76eb5 push 済み・#587 apply_patch 判断の指揮役エスカレーションを引き継ぎ）
 - #586 r11 レビュー → mcp:launch:14a715f6（auto-accept-edits）
 - #587 r8 レビュー → mcp:launch:70852e4b（auto-accept-edits）
+
+## エスカレーション（02:15 JST）
+
+- レビュー統制後継（mcp:launch:4c9a883a）から、#587 Codex r8 must-fix 2 件目（apply_patch の承認要求未確認・codex_review の運用 a/b/c）の判断を仰ぐ連絡。新規 codex_review 起動は返答まで自粛。開発リード経由で濱田さんへ回した
+- 巡回時刻の基準を実時刻（TZ=Asia/Tokyo date）に修正（リード指摘）
