@@ -234,6 +234,8 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 
 ### 専用 home での確認
 
+確かめ終わるまでの間は、この見出しのすぐ下に `保留中: <更新したもの>` の行を置き、確かめ終わったら消す。指揮役と実装担当（レビューの委託の担当を決めるとき）は、この行の有無で `codex_review` を使えるかを判断する。
+
 `codex_review` を初めて設定したときと、Codex・T3・`codex_review` の home のどれかを更新したときは、`codex_review` に委託した確認用の子タスク（`runtimeMode: "auto-accept-edits"`）で次を確かめる。確かめ終わるまで、`codex_review` をレビューに使わない。確認用の子タスクは、`main` のコミットで動くスレッドから委託する（`delegate_task` の子は委託元のコミットを checkout するので、PR のブランチから委託すると、PR が変えた `scripts/agent-gh` や `mise.toml` のタスクを実行しうる）。`config.toml` の層の `enabled = false` が T3 の設定に上書きされないことは Codex の設定の重ね方に、サーバー名 `t3-code`・`t3-code-direct` は T3 に依存するため、どちらを更新しても確かめ直す。結果は `docs/worklogs/` に日付付きの作業ログとして残す（初回は `2026-11-21-codex-review-home.md`）。
 
 - モデルに渡るツールを全部挙げさせ（直接呼べるツール、`exec` から呼べるツール、遅延読み込みのツールのすべて）、T3（`t3-code`・`t3-code-direct`）・`codex_apps`・GitHub の MCP サーバーのツールと、ウェブ検索（`web_search`・`web.run`）が無い。`ALL_TOOLS` の一覧だけでは足りない（T3 の `t3-code-direct` とサーバー側のウェブ検索はその一覧に載らない）
@@ -296,9 +298,10 @@ EOF
 | 承認要求を拒否に変えるフック（`hooks.PermissionRequest`）の結果 | `delegate_task`（target `claude_review`、`auto-accept-edits`、worktree）で確認。`H=$(git rev-parse HEAD); …; echo rc=$?` と `for f in …; do wc -l "$f"; done` は承認待ちにならずフックの拒否が返り、モデルは単純なコマンドに分けて送り直して結果を得た。`scripts/agent-gh review api /rate_limit` はそのまま通り、`curl -sS https://example.com` は permissions の deny で拒否のまま。スレッドに承認待ち（`pendingApproval`）は出なかった | 2026-11-21 |
 | フック導入後の実レビューの観察 | 導入後 1 時間の `claude_review` の実レビュー 9 セッションで、フックの拒否は 26 件。拒否を理由に `verdict: failed` になったレビューは無かった（`failed` の 1 件は PR のチェックの未報告による）。拒否のうち `git ls-tree`・`git -C`・`agent-gh review run list` は単純な形でも承認要求になっていたため、`git ls-tree`・`git cat-file`・`run list`・`run view` を許可に足した（`claude -p` で通ることと、`run download` は拒否のままであることを確認）。拒否されたのと同じコマンドを 1 回そのまま送り直す例が多かったため、フックのメッセージに 1 文足した | 2026-11-21 |
 
+未確認の経路: `Agent` ツールの `isolation: "remote"`（クラウドの環境でエージェントを動かす）が、アカウントの設定で使えるかを確かめていない。使えると、指示文を sandbox の外へ渡せる。扱いは hatai が決める。
+
 残っている既知の経路は hatai の決裁で別 Issue で追う（PR #287 の round 4 で両レビュー担当が request-changes として指摘し、hatai が残リスクを受容）:
 
-- `Agent` ツールの `isolation: "remote"`（クラウドの環境でエージェントを動かす）が、アカウントの設定で使えるかを確かめていない。使えると、指示文を sandbox の外へ渡せる（PR #587 の 4 回目の Claude のレビューで指摘。扱いは hatai が決める）
 - `api -F <key>=@<file>`・`pr review --body-file <file>` で読み取り可能なローカルファイルを GitHub へ送信できる（#305）
 - 読み取り系 `git` の `--output=<path>` での書き込みと `git grep -O<cmd>` での実行が、sandbox が worktree・共有 `.git` への書き込みを許すことと重なって残る（#306）
 
