@@ -23,3 +23,15 @@
 5. 改善案: docs/dev-environment.md の「レビュー担当の Claude」に「レビュースレッドの sandbox が ~/.config/pelway-agent と ~/.config/fnox を読めること」の確認項目を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: bd5fc991967a06f58ddfc38c1640f4567c91c92a
+
+1. 詰まった箇所: docs/technical/v0.7/body/03-ai-bot-runtime.md:124: codex レビュー（round 3）の must-fix。round 2 の修正で保存項目を「節冒頭の定義＋事象の種類」に統合したが、04 の `audit_events`（actor、subject、操作、結果、snapshot hash、policy版、日時、prev_hash）と ADR 0007 の輸出項目（workspace_id、event ID、`hash`・`prev_hash`）が含まれず、正本との参照関係が切れていた。保存項目の正本を 04 と ADR 0007 へ明示参照させ、correlation ID と事象の種類をこの節の追加、仮名化・最小化を既存項目への適用として定義し直した。
+2. 曖昧だった文: 「監査はDBの専用書込権限による追記型とし、actor、承認snapshot、policy版、操作、結果、時刻、correlation IDを保存する。」（docs/technical/v0.7/body/03-ai-bot-runtime.md ch03-s08 の既存文）— 03 の節冒頭の列挙だけを保存項目の定義に使うと 04・ADR 0007 の正本（subject・hash・prev_hash 等）と食い違う構造になっていた。
+3. 仮定と解釈: レビューの実効回数は round 2・round 3 の 2 回（round 1 の devin は指揮役により無効）のため「3 回目のレビュー結果に must-fix が残った」の停止条件には該当せず、開発リードの「修正→再レビュー→QA へ」の明示指示により round 4 の委託まで進めると解釈した。effort は round 3 と同じ max、モデルは main #563 の新規則（command-team「Codex のモデル」）で高リスクの gpt-6.2-sol とした。
+4. 足りなかった情報・検証手段: #563 導入前に読んだ implement-issue 手順 8 の担当地表には codex_review のモデルが gpt-6-luna 固定で書かれていたため、main 取り込み後に command-team 側の新規則（追加行・高リスク・回数によるモデル選択）を読み直す必要があった。
+5. 改善案: .agents/skills/implement-issue/SKILL.md の「手順 8」の担当地表に「codex のモデルは command-team『Codex のモデル』の表から選ぶ」の参照を足す。
+
+使ったスキル: implement-issue
