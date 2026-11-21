@@ -63,6 +63,14 @@ scripts/agent-gh review pr checks <N> --json name,bucket
 
 `--required` は付けない。必須チェックがまだ 1 つも報告されていない head では、`--required` は一覧を返さず `no required checks reported` で失敗するため。返った一覧から、名前が `mise run verify` と `pr-size` の行だけを使う。同じ名前の行が複数あるときは、すべてが `pass` のときだけ pass とし、どれかが `fail` なら fail、どれかが `pending` なら pending とする。`mise run verify` と `pr-size` の `bucket` が `pass` なら pass、`fail` なら fail。pr-size が fail のときは、PR のラベルを読む（`scripts/agent-gh review pr view <N> --json labels --jq '.labels[].name'`）。`pr-size-exception` があり、かつ PR が閉じる Issue のコメントに、行頭が `<!-- pr-size-exception -->` で始まり、作成者（`author.login`）が `hatai` のコメントがある（`scripts/agent-gh review issue view <Issue 番号> --json comments --jq '.comments[] | {author: .author.login, body}'`）ときだけ、must-fix に数えず、本文の検査の欄に `pr-size: fail（pr-size-exception）` と書く。どちらかが欠けていれば、通常どおり must-fix に数える。どちらかが `pending` か、見つからないときは、レビューを投稿せずに `verdict: failed`、`error: checks pending` で報告する。
 
+差分に確かめ方を弱める変更があるかを、差分の `-` 行と `+` 行で確かめる。確かめ方を弱める変更は次のどれか:
+
+- テストを消した（テストのファイル、`#[test]`・`#[tokio::test]` などのテスト関数、テストケース、`evals/` のケース）
+- テストを実行させなくした（`#[ignore]`、`.skip`・`it.skip`・`test.skip`・`describe.skip`、`xit(` を足した）
+- アサーションを減らした、または緩めた（`assert!`・`assert_eq!`・`expect(` などを消した、期待値を広げた、厳密な比較を部分一致や存在の確認に替えた、`#[should_panic]` の条件を消した）
+
+当たる変更があれば、PR 本文の「変更内容」の見出し「確かめ方を弱める変更」に、その変更の理由が書かれているかを読む（書き方は skill `implement-issue` の手順 7）。理由が無い変更は 1 件ずつ must-fix にする。理由があっても、その理由で受け入れ条件を確かめるテストが失われるなら must-fix にする。当たる変更が無ければ、投稿の「検査」に `確かめ方を弱める変更: なし` と書く。
+
 実装者メモ・調査報告などの成果物に「使ったスキル」の記録があれば、記録されたスキル（輸入スキル `tdd`・`diagnosing-bugs` など）が作業内容に反映されているかを抜き取りで確かめる。記録と実態が明らかに食い違うときは must-fix、判断が分かれるものは nit とする。輸入スキルの取り込み discipline（同梱スクリプトは実行しない、`agents/` のメタデータは使わない、採用していないスキルへの参照は無効、輸入品の本文より正本と適用ルールが優先）は役割スキルと `docs/agents/external-skills.md` に定める。
 
 次のどれかに当てはまるときは、skill `security-review` も行い、その結果を同じ投稿に入れる。
@@ -98,7 +106,7 @@ scripts/agent-gh review pr checks <N> --json name,bucket
 
 | 種類 | 当てはまるもの |
 |---|---|
-| must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / 検証・実測の報告の結論が、実測した範囲を超えて受け入れ条件を満たすと断定している / verify が失敗 / pr-size が失敗（`pr-size-exception` のラベルと、作成者が `hatai` の目印コメントの両方があるときだけ数えない。手順 2） / 正しさ・セキュリティの欠陥 / ブランチが `agent/` で始まるのに PR の作成者（`author.login`）が `app/pelway-dev` でない |
+| must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / 確かめ方を弱める変更に PR 本文で理由が書かれていない（手順 2） / 検証・実測の報告の結論が、実測した範囲を超えて受け入れ条件を満たすと断定している / verify が失敗 / pr-size が失敗（`pr-size-exception` のラベルと、作成者が `hatai` の目印コメントの両方があるときだけ数えない。手順 2） / 正しさ・セキュリティの欠陥 / ブランチが `agent/` で始まるのに PR の作成者（`author.login`）が `app/pelway-dev` でない |
 | nit | 上に当てはまらない改善案 |
 
 nit のうち、文書（`docs/`・スキル・コードのコメント・PR 本文）と、コード・仕様・ほかの文書との食い違いを指すものは、行頭（`<file>:<line>` の前）に `[文書のずれ]` を付ける（例: `- [文書のずれ] docs/dev-environment.md:668 判定の順がコードと違う。…`）。実装担当は、この印の nit を Approve のときも直してから Ready にする（skill `implement-issue` の手順 9）。書き方や好みの違いには付けない。
@@ -123,6 +131,7 @@ Reviewed: <headRefOid>
 ## 検査（PR のチェック）
 - mise run verify: pass | fail
 - pr-size: pass | fail
+- 確かめ方を弱める変更: なし | あり（理由あり <件数> / 理由なし <件数>）
 
 Reviewer: agent=<codex|claude|devin> model=<モデル名> effort=<effort>
 ```
