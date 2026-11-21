@@ -196,7 +196,7 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 scripts/agent-gh dev pr comment <M> --body "[review-request] head: <SHA> to: <担当>"
 ```
 
-差分が `scripts/agent-gh` を変えるとき、または `.claude/`・`.mcp.json`・`.codex/`・`.agents/skills/review-pr/`・`.agents/skills/security-review/` を足す・変えるときはレビューを委託しない（後者はレビュー担当のツールの設定や従う手順を、委託の子が読む PR の版で差し替えうるため）。終わりの報告で `ready:` の行を書かずに止まり、指揮役が main から立てるレビュースレッドに回るのを待つ（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
+差分が `scripts/agent-gh` を変えるとき、または `.claude/`・`.mcp.json`・`.codex/`・`.agents/skills/review-pr/`・`.agents/skills/security-review/`・どのディレクトリの `AGENTS.md`・`AGENTS.override.md`・`CLAUDE.md` を足す・変えるときはレビューを委託しない（後者はレビュー担当のツールの設定や従う手順を、委託の子が読む PR の版で差し替えうるため）。終わりの報告で `ready:` の行を書かずに止まり、指揮役が main から立てるレビュースレッドに回るのを待つ（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
 
 ### 9. レビュー結果を処理する
 
