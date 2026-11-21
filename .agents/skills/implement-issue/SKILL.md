@@ -333,7 +333,7 @@ state: done
 | `stopped` | 「止まる条件」に当たり、Issue へのコメントと `needs-human` を済ませた | 手順 10 の止まった形（`pr:` の代わりに `stopped:`）と `state: stopped` |
 | `waiting-review` | 手順 8 でレビューを委託し、完了の通知を待つ | `state:`・`head:`・`next:` の 3 行 |
 | `waiting-checks` | PR の必須チェックの完了を待つ | `state:`・`head:`・`next:` の 3 行 |
-| `waiting-conductor` | 手順 8 で `scripts/agent-gh` を変える PR のためレビューを委託せず、指揮役のレビュースレッドを待つ | `state:`・`head:`・`next:` の 3 行 |
+| `waiting-conductor` | 手順 8 でレビューを委託しない条件に当たる PR のためレビューを委託せず、指揮役のレビュースレッドを待つ | `state:`・`head:`・`next:` の 3 行 |
 | `working` | 上のどれにも当たらず、作業が残ったままターンを終える | `state:`・`head:`・`next:` の 3 行 |
 
 - `head:` は、その時点の PR の head の SHA（`scripts/agent-gh dev pr view <PR 番号> --json headRefOid --jq .headRefOid`）。PR がまだ無ければ `none`。
