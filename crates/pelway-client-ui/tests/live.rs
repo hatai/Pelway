@@ -188,10 +188,54 @@ fn connection_failure_marks_offline_and_recovery_restores() {
     assert!(session.connected(), "復帰したら接続状態へ");
 }
 
-// サーバー URL は環境変数から読む値（Issue 390 の固定ポートと同じ値を渡す前提）。
-// パースはループバックだけを受け付ける（デモの接続先は 127.0.0.1）。
+// ページング: 1 ページの上限（MESSAGE_PAGE_LIMIT）を超える履歴でも、
+// after_seq で続きを取って全件取得できる（応答上限超過での恒久的な
+// 取得失敗を防ぐ回帰テスト）。
 #[test]
-fn parse_server_addr_accepts_loopback_only() {
+fn poll_pages_through_history_over_the_limit() {
+    let (addr, store) = spawn_demo_server();
+    let mut session = LiveSession::new(addr, "ws-demo-01".into());
+    session.bootstrap().expect("bootstrap succeeds");
+    let base = session.messages().len();
+
+    // 1 ページ分を超える履歴を保存部に足す（サーバーは limit 件までを返す
+    // ため、クライアントが after_seq で続きを取らないと全件に届かない）。
+    let extra = live::MESSAGE_PAGE_LIMIT as usize + 5;
+    {
+        let mut store = store.lock().expect("store lock");
+        for i in 0..extra {
+            store
+                .post_message(
+                    NewMessage {
+                        workspace_id: "ws-demo-01".into(),
+                        channel_id: "ch-demo-anken-b".into(),
+                        author_id: "m-hal".into(),
+                        member_kind: MemberKind::Bot,
+                        purpose_id: PurposeId::P01,
+                        body: format!("補足 {i}"),
+                        thread_root: None,
+                        client_msg_id: None,
+                    },
+                    3_000_000 + i as u64,
+                )
+                .expect("seed history message");
+        }
+    }
+
+    session.poll().expect("poll succeeds over the limit");
+    let messages = session.messages();
+    assert_eq!(messages.len(), base + extra, "上限を超える履歴も全件取れる");
+    assert!(
+        messages.windows(2).all(|w| w[0].seq < w[1].seq),
+        "seq 昇順を保つ"
+    );
+}
+
+// サーバー URL は環境変数から読む値（Issue 390 の固定ポートと同じ値を渡す前提）。
+// パースは IPv4 の 127.0.0.1 だけを受け付ける（サーバーの serve_inner と同じ
+// 判定。`::1` や `127.0.0.2` も拒否）。
+#[test]
+fn parse_server_addr_accepts_ipv4_loopback_only() {
     let port_8787: SocketAddr = "127.0.0.1:8787".parse().unwrap();
     assert_eq!(
         live::parse_server_addr("http://127.0.0.1:8787").unwrap(),
@@ -201,13 +245,12 @@ fn parse_server_addr_accepts_loopback_only() {
         live::parse_server_addr("127.0.0.1:8787").unwrap(),
         port_8787
     );
-    assert_eq!(
-        live::parse_server_addr("http://[::1]:8787").unwrap(),
-        "[::1]:8787".parse().unwrap()
-    );
 
-    // ループバック以外・不正な形は拒否（localhost の名前解決もしない）。
+    // 127.0.0.1 以外（127/8 の他・IPv6 を含む）・不正な形は拒否
+    // （localhost の名前解決もしない）。
     for bad in [
+        "http://127.0.0.2:8787",
+        "http://[::1]:8787",
         "http://192.168.0.10:8787",
         "http://localhost:8787",
         "http://example.com",
@@ -219,7 +262,7 @@ fn parse_server_addr_accepts_loopback_only() {
             "{bad} は拒否すること"
         );
     }
-    // 既定値はデモ準備キットの固定ポート（Issue 390）と同じ形のループバック。
+    // 既定値はデモ用の暫定値（Issue 390 の固定ポートが確定したら揃える）。
     assert!(live::DEFAULT_SERVER_URL.starts_with("http://127.0.0.1:"));
     assert!(live::parse_server_addr(live::DEFAULT_SERVER_URL).is_ok());
 }

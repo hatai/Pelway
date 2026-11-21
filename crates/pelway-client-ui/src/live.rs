@@ -1,22 +1,25 @@
 //! 実サーバーにつながる通信層（Issue 333・PR-1。`state::sample()` の置き換えの土台）。
 //!
 //! Slint 非依存の層: `pelway-http` のサーバー（Issue 327 の契約）と HTTP で会話して、
-//! 起動時の取得・1〜2 秒ごとのポーリング・投稿・表示ユーザーの切り替え・
+//! 起動時の取得・ポーリング・投稿・表示ユーザーの切り替え・
 //! 「つながっていません」への遷移と復帰をこの層に閉じ込める（UI スレッドとは
 //! 別のワーカースレッドで回す前提。Slint のウィジェットは触らない）。
+//! `poll()` は呼び出しごとに 1 回だけ取り直す。呼び出す間隔（想定は
+//! 1〜2 秒ごと）はこの層の外が決める。
 //! 画面に出す行モデル（送信者名・時刻の組み立て）は PR-2 でこの層の上に足す。
 //!
 //! 通信の約束（Issue 327）:
 //! - GET は必ずクエリ `actor`（表示ユーザーの member_id。空は 400）。
 //! - POST は合成ヘッダー `x-pelway-member-id` と `x-pelway-member-kind`
 //!   （`human`/`bot`/`external_agent`/`external_tool` の 4 値）で投稿者を名乗る。
+//! - 応答の成功条件: GET は 200 のみ、POST は 2xx すべて。
 //! - 接続先は環境変数 `PELWAY_SERVER_URL`（`http://127.0.0.1:{port}` の形。
 //!   ポートはデモ準備キット Issue 390 の固定ポートと同じ値を渡す前提）。
 
 use std::fmt;
 use std::net::SocketAddr;
 
-use pelway_contract::ids::{ClientMsgId, MemberId, WorkspaceId};
+use pelway_contract::ids::{ChannelId, ClientMsgId, MemberId, WorkspaceId};
 use pelway_contract::member::MemberKind;
 use pelway_contract::message::{
     Channel, PostMessageRequest, channel_messages_path, channel_path, channels_path,
@@ -28,12 +31,19 @@ use crate::net::{Client, NetError};
 /// 接続先を読む環境変数（Issue 390 の準備キットが export する値と同じ形）。
 pub const SERVER_URL_ENV: &str = "PELWAY_SERVER_URL";
 
-/// 環境変数が無いときの既定値。デモ準備キットの固定ポート（Issue 390）に合わせる。
+/// 環境変数が無いときの既定値。デモ用の暫定値——Issue 390 の起動スクリプトの
+/// 固定ポートは未確定のため、確定したら同じ値に揃える。
 pub const DEFAULT_SERVER_URL: &str = "http://127.0.0.1:8787";
 
 /// 起動直後の表示ユーザー。デモ seed（Issue 326）の先頭の人（田中）。seed に居なければ
 /// チャンネルの最初の人に切り替える（[`LiveSession::bootstrap`] 内）。
 const DEFAULT_ACTOR: &str = "m-tanaka";
+
+/// メッセージ取得 1 ページの件数。サーバーは `limit` 件までを seq 昇順で返す
+/// （`limit` 未指定なら全件）。1 ページが応答上限（`net` の 1 MiB）に収まる
+/// 件数に抑え、これを超える履歴は `after_seq` で続きを取る——全件要求だと
+/// 履歴が上限を超えたとき取得が恒久的に失敗するため。
+pub const MESSAGE_PAGE_LIMIT: u32 = 200;
 
 /// サーバー URL 文字列のパース失敗。文言に入力値は含めない
 /// （接続先として拒否した文字列をエラー出力へ持ち出さない）。
@@ -49,11 +59,12 @@ impl fmt::Display for AddrError {
 impl std::error::Error for AddrError {}
 
 /// `PELWAY_SERVER_URL` の値をアドレスに読み替える。`http://` 接頭辞と
-/// `host:port` 素の形の両方を受け、接続先はループバックだけを許す
-/// （デモのサーバーは 127.0.0.1 にだけ bind する。`localhost` の名前解決はしない）。
+/// `host:port` 素の形の両方を受け、接続先は `127.0.0.1` だけを許す
+/// （デモのサーバーは 127.0.0.1 にだけ bind する——サーバーの `serve_inner` と
+/// 同じ判定で、`::1` や `127.0.0.2` も拒否。`localhost` の名前解決はしない）。
 ///
 /// # Errors
-/// 形が不正・ホストがループバックでない場合は [`AddrError`]。
+/// 形が不正・ホストが `127.0.0.1` でない場合は [`AddrError`]。
 pub fn parse_server_addr(text: &str) -> Result<SocketAddr, AddrError> {
     let trimmed = text.trim();
     let hostport = trimmed
@@ -61,8 +72,8 @@ pub fn parse_server_addr(text: &str) -> Result<SocketAddr, AddrError> {
         .unwrap_or(trimmed)
         .trim_end_matches('/');
     let addr: SocketAddr = hostport.parse().map_err(|_| AddrError("malformed"))?;
-    if !addr.ip().is_loopback() {
-        return Err(AddrError("not loopback"));
+    if addr.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
+        return Err(AddrError("not 127.0.0.1"));
     }
     Ok(addr)
 }
@@ -86,12 +97,17 @@ pub fn server_addr() -> Result<SocketAddr, AddrError> {
 pub enum LiveError {
     /// TCP 接続・読み書き・応答形式の失敗。
     Net(NetError),
-    /// サーバーが 2xx 以外を返した（400・404 等も含む）。
+    /// サーバーが成功条件を返さなかった（GET は 200 のみ・POST は 2xx すべて。
+    /// 400・404 等も含む）。
     Status(u16),
     /// 応答 JSON が契約の形でない。
     Json(serde_json::Error),
     /// チャンネルがまだ選ばれていない（`bootstrap` 前に投稿した等）。
     NoChannel,
+    /// 断線からの再接続で `bootstrap` がチャンネルや表示ユーザーを選び直し、
+    /// 投稿を受け付けた時点の宛先・名義と食い違った（別チャンネル・別人名義に
+    /// 送らないため投稿を止めた）。
+    StaleTarget,
 }
 
 impl fmt::Display for LiveError {
@@ -101,6 +117,7 @@ impl fmt::Display for LiveError {
             Self::Status(code) => write!(f, "server returned status {code}"),
             Self::Json(e) => write!(f, "unexpected response JSON: {e}"),
             Self::NoChannel => f.write_str("no channel selected"),
+            Self::StaleTarget => f.write_str("post target changed while reconnecting"),
         }
     }
 }
@@ -192,17 +209,16 @@ impl LiveSession {
             self.actor = first_human.member_id.clone();
             self.actor_kind = MemberKind::Human;
         }
-        let messages: Vec<StoredMessage> =
-            self.get_json(&self.actor_path(&channel_messages_path(&channel_id)))?;
+        let messages = self.fetch_messages(&channel_id)?;
         self.channel = Some(channel);
         self.messages = messages;
         Ok(())
     }
 
-    /// ポーリング: 表示中チャンネルのメッセージを全件取り直して置き換える
-    /// （デモの履歴は小さいため差分 `after_seq` は使わない。一覧をサーバーの
-    /// 正とすることで、再起動で seq や message_id が振り直された・投稿応答で
-    /// カーソルが飛んだ、といった局所状態とサーバーの食い違いを構造で排除する）。
+    /// ポーリング: 表示中チャンネルのメッセージをページングで全件取り直して
+    /// 置き換える（差分取得はせず、一覧をサーバーの正とすることで、再起動で
+    /// seq や message_id が振り直された・投稿応答でカーソルが飛んだ、といった
+    /// 局所状態とサーバーの食い違いを構造で排除する）。
     /// 失敗したら `connected = false`、成功したら `true`（復帰すると通常表示に戻る）。
     /// 断線からの復帰・チャンネル未選択では `bootstrap` で取り直す。
     ///
@@ -215,26 +231,63 @@ impl LiveSession {
         let Some(channel_id) = self.channel.as_ref().map(|c| c.channel_id.clone()) else {
             return self.bootstrap();
         };
-        let all: Vec<StoredMessage> =
-            self.get_json(&self.actor_path(&channel_messages_path(&channel_id)))?;
+        let all = self.fetch_messages(&channel_id)?;
         self.connected = true;
         self.messages = all;
         Ok(())
     }
 
+    /// メッセージ一覧を `limit` + `after_seq` のページングで全件取る。
+    /// 満杯のページが返ったら最後の seq の続きを要求し、短いページで終わる
+    /// （サーバーが `after_seq` を見ず起点が進まない場合も、無限に取り直さず
+    /// そこで打ち切る）。
+    fn fetch_messages(&mut self, channel_id: &ChannelId) -> Result<Vec<StoredMessage>, LiveError> {
+        let base = channel_messages_path(channel_id);
+        let mut out = Vec::new();
+        let mut after: Option<u64> = None;
+        loop {
+            let mut path = self.actor_path(&base);
+            path.push_str(&format!("&limit={MESSAGE_PAGE_LIMIT}"));
+            if let Some(s) = after {
+                path.push_str(&format!("&after_seq={s}"));
+            }
+            let page: Vec<StoredMessage> = self.get_json(&path)?;
+            let full = page.len() >= MESSAGE_PAGE_LIMIT as usize;
+            let last_seq = page.last().map(|m| m.seq);
+            out.extend(page);
+            match (full, last_seq) {
+                (true, Some(s)) if after.is_none_or(|a| s > a) => after = Some(s),
+                _ => return Ok(out),
+            }
+        }
+    }
+
     /// 表示ユーザーとして `body` を投稿する。成功したら保存済みメッセージを返し、
     /// 一覧にも足す。断線中は先に `bootstrap` で取り直してから投稿する
     /// （サーバー再起動で履歴が入れ替わっていても、古い一覧の上に追記しない）。
+    /// 再接続で `bootstrap` がチャンネルの並びやメンバーを取り直し、受け付け
+    /// 時点の宛先・名義と食い違ったら [`LiveError::StaleTarget`] で止める
+    /// （同じ操作が別のチャンネル・別人名義に届くのを構造で防ぐ）。
     ///
     /// # Errors
-    /// チャンネル未選択・要求の失敗。
+    /// チャンネル未選択・宛先の食い違い・要求の失敗。
     pub fn post(&mut self, body: &str) -> Result<StoredMessage, LiveError> {
+        // 受け付け時点の宛先（チャンネル）と名義（表示ユーザー）を保持する。
+        let want = self
+            .channel
+            .as_ref()
+            .map(|c| (c.channel_id.clone(), self.actor.clone()));
         if !self.connected {
             self.bootstrap()?;
         }
         let Some(channel_id) = self.channel.as_ref().map(|c| c.channel_id.clone()) else {
             return Err(LiveError::NoChannel);
         };
+        if let Some((want_channel, want_actor)) = want
+            && (channel_id != want_channel || self.actor != want_actor)
+        {
+            return Err(LiveError::StaleTarget);
+        }
         let request = PostMessageRequest {
             client_msg_id: ClientMsgId::from(uuid::Uuid::new_v4().to_string().as_str()),
             body: body.to_owned(),
