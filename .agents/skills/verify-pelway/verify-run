@@ -1,0 +1,798 @@
+#!/usr/bin/env bash
+# verify-run: Pelway のデモのバックエンドを 1 回の run で
+#   起動 → 環境チェック → 機能の操作 → 証拠 → 後片付け
+# まで通す（skill verify-pelway）。止めるのはこの run が起動した PID だけ。
+#
+# 使い方:
+#   verify-run [--feature decision|mail-draft] [--label NAME] [--evidence-root DIR] [--allow-dirty]
+#   verify-run --help
+# 証拠は <evidence-root>/<label>-<sha>/<run-id>/ に置き、後片付けでも消さない。
+# evidence-root の既定は <共有 git dir>/pelway/evidence（git rev-parse --git-common-dir）。label の既定は adhoc。
+# 終了コード: 0 = 全段 PASS、1 = どこかが FAIL か未対応・道具が無い、2 = 引数の誤り。
+set -uo pipefail
+
+WS=ws-demo-01
+CH=ch-demo-anken-b
+BOT=m-hal
+REQUESTER=m-tanaka
+DECIDER=m-yamamoto
+# デモ seed（DataStore::new_demo_seeded）の #案件B のメンバー（ID の昇順）。
+SEED_MEMBERS="m-hal,m-sato,m-tanaka,m-yamamoto"
+POLL_SECS=10
+# 子の環境に入れてはいけない変数（fnox の秘密 3 つと、LLM の接続先 2 つ）。証拠には名前を書かずラベルだけ書く。
+FORBIDDEN_ENV="llm_key:PELWAY_LLM_API_KEY penpot_mcp_token:PELWAY_PENPOT_MCP_TOKEN database_url:PELWAY_DATABASE_URL llm_custom_base_url:PELWAY_LLM_CUSTOM_BASE_URL llm_base_url:PELWAY_LLM_BASE_URL"
+# 後片付けの前後で生き残りを比べるプロセス（comm の完全一致の正規表現）。T3 本体は comm が node-MainThread
+# などになるので、実行ファイル名が t3 で親が t3 ではないもの（scripts/agent-worktree-prune が T3 サーバーとして探す名前）も比べる。
+SURVIVOR_COMM='^(demo-serve|pitchfork|pelway-agent-wa|t3-.*)$'
+# 依頼の本文に埋める demo-check の目印（scripts/demo-check/canaries.txt の 1 行目）。
+# 証拠の本文は伏せるので、run のログ・証拠に現れたら伏せ漏れとして FAIL になる。
+CANARY=PELWAY_CANARY_BODY_7f3a
+# 台本モード（ScriptGateway）の合成応答の 2 案（crates/pelway-runner/src/demo.rs の SCRIPT_AB）。
+SCRIPT_A="納期を2週間延ばす案"
+SCRIPT_B="範囲を絞って納期を守る案"
+# 実提供元の呼び出しに失敗して台本に落ちたときに runner が投稿する進捗行の一部（fallback_line）。
+FALLBACK_MARK="台本の応答で進めます"
+
+die_usage() { echo "verify-run: $*" >&2; exit 2; }
+
+# HTTP 応答（標準入力）から状態コードを返す。
+resp_status() { head -n 1 | tr -d '\r' | awk '{print $2}'; }
+# HTTP 応答（標準入力）から本文（最初の空行より後）を返す。
+resp_body() { awk 'b {print} /^\r?$/ && !b {b=1}'; }
+
+# 送受信が両方とも成功したときだけ応答の状態コードを返す。送信の失敗・受信の時間切れ（timeout の 124 など）は 000。
+transport_status() {
+  local send_rc="$1" recv_rc="$2" raw="$3"
+  if [ "${send_rc}" = 0 ] && [ "${recv_rc}" = 0 ]; then resp_status <<< "${raw}"; else echo 000; fi
+}
+
+# 判断待ちの一覧の応答から、依頼の投稿（message_id）の決定 ID を返す。200 で配列として読めたときだけ。
+pending_decision_id() {
+  [ "$1" = 200 ] || return 0
+  jq -r --arg m "$3" 'if type == "array" then (.[] | select(.request_message_id == $m) | .decision_id) else empty end' <<< "$2" 2>/dev/null
+}
+
+# 判断待ちの一覧（JSON）が配列として読めて、id が入っていなければ 0。空・壊れた JSON・配列以外は 1。
+decision_absent() { jq -e --arg d "$2" 'type == "array" and (map(.decision_id) | index($d) | not)' <<< "$1" > /dev/null 2>&1; }
+
+# ready 行の形: 127.0.0.1 の 1〜65535 のポートと pid と llm=script だけ。0 = 形が合う。
+ready_line_ok() {
+  [[ "$1" =~ ^demo-serve\ ready\ addr=127\.0\.0\.1:([0-9]{1,5})\ pid=([0-9]+)\ llm=script$ ]] || return 1
+  [ "${BASH_REMATCH[1]}" -ge 1 ] && [ "${BASH_REMATCH[1]}" -le 65535 ] && [ "${BASH_REMATCH[2]}" = "$2" ]
+}
+
+# JSON の本文・質問（body・question の文字列）を長さだけ残して伏せる。JSON でなければ全体を伏せる。
+redact() {
+  local text; text="$(cat)"
+  [ -n "${text}" ] || return 0
+  jq -c 'walk(if type == "object" then with_entries(if (.key == "body" or .key == "question") and (.value | type) == "string" then .value = "<redacted len=\(.value | length)>" else . end) else . end)' <<< "${text}" 2>/dev/null \
+    || echo "<redacted non-json len=${#text}>"
+}
+
+# demo-check の 1 段を、この run の写し（scan）とリポジトリの規則だけで流す。呼び出し元の環境の
+# DEMO_CHECK_*（規則の置き場・追加の走査パス・受入モードなど）は引き継がない。
+run_demo_check_stage() {
+  local top="$1" scan="$2" stage="$3"
+  env -i PATH="${PATH}" HOME="${HOME}" LC_ALL=C.UTF-8 DEMO_CHECK_ROOT="${scan}" bash "${top}/scripts/demo-check/${stage}.sh"
+}
+
+# 最後の verdict を summary に書き、証拠全体のハッシュを作って照合できたときだけ標準出力に出す。
+# ハッシュを作れない・照合できないときは、summary の verdict を FAIL に書き換え（できる範囲で）、
+# 不完全な SHA256SUMS を消して FAIL を出し、1 を返す。最後の PASS が証拠や出力に残らない。
+publish_verdict() {
+  local ev="$1" verdict="$2" sums hasher="${SHA256SUM:-sha256sum}"
+  printf 'verdict=%s\n' "${verdict}" >> "${ev}/summary.txt" || verdict=FAIL
+  if sums="$(cd "${ev}" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 "${hasher}")" \
+      && [ -n "${sums}" ] && printf '%s\n' "${sums}" > "${ev}/SHA256SUMS" \
+      && (cd "${ev}" && "${hasher}" --quiet -c SHA256SUMS); then
+    local digest
+    # 報告に貼る SHA256SUMS 自体のハッシュも取れたときだけ公開する。
+    if digest="$("${hasher}" "${ev}/SHA256SUMS")" && digest="${digest%% *}" && [[ "${digest}" =~ ^[0-9a-f]{64}$ ]]; then
+      echo "verdict=${verdict}"
+      echo "evidence=${ev}"
+      echo "evidence_sha256=${digest}"
+      [ "${verdict}" = PASS ]; return
+    fi
+  fi
+  sed -i 's/^verdict=.*/verdict=FAIL（証拠のハッシュを作れない・確かめられない）/' "${ev}/summary.txt" 2> /dev/null
+  rm -f "${ev}/SHA256SUMS"
+  echo "verdict=FAIL（証拠のハッシュを作れない・確かめられない）"
+  echo "verify-run: 失敗（証拠のハッシュを作れない・確かめられない。${ev}）" >&2
+  return 1
+}
+
+# 最後の verdict を返す。main が最後まで戻っていない run（Ctrl-C・SIGTERM・時間切れで中断）は、
+# 記録した段が全部 PASS でも FAIL にする（飛ばした段がある証拠を PASS にしない）。
+final_verdict() { if [ "$2" = 1 ]; then echo "$1"; else echo FAIL; fi; }
+
+# 証拠の置き場の階層が、ほかの利用者に差し替えられないこと。0 = 安全。
+# 置き場から下（run のディレクトリまで）は自分の持ち物で、グループ・ほかの利用者が書けないこと。
+# 置き場より上の既存のディレクトリは、自分か root の持ち物で、グループ・ほかが書けるなら sticky（/tmp など）であること。
+dir_chain_safe() {
+  local root="$1" path="$2" d me mode owner
+  me="$(id -u)"
+  d="${path%/}"
+  while :; do
+    if [ -e "${d}" ]; then
+      [ -d "${d}" ] && [ ! -L "${d}" ] || return 1
+      owner="$(stat -c '%u' -- "${d}")" && mode="$(stat -c '%a' -- "${d}")" || return 1
+      if under "${d}" "${root}"; then
+        [ "${owner}" = "${me}" ] && [ $((8#${mode} & 8#022)) = 0 ] || return 1
+      else
+        { [ "${owner}" = "${me}" ] || [ "${owner}" = 0 ]; } || return 1
+        [ $((8#${mode} & 8#022)) = 0 ] || [ $((8#${mode} & 8#1000)) != 0 ] || return 1
+      fi
+    fi
+    [ "${d}" = / ] || [ -z "${d}" ] && break
+    d="$(dirname -- "${d}")"
+  done
+  return 0
+}
+
+# run ごとの証拠のディレクトリを作る。$1=証拠の置き場（実体のパス）$2=置き場からの相対パス。
+# 親までは作ってよいが、最後のディレクトリは新しく作り（既にあれば失敗）、所有者だけの権限にする。
+# 途中にシンボリックリンクがあって実体が置き場の外に出たら失敗する。成功したら作ったパスを返す。
+make_run_dir() {
+  local root="$1" rel="$2" want parent
+  want="${root%/}/${rel}"; parent="$(dirname -- "${want}")"
+  dir_chain_safe "${root}" "${parent}" || return 1
+  mkdir -p -- "${parent}" || return 1
+  dir_chain_safe "${root}" "${parent}" || return 1
+  [ "$(realpath -- "${parent}")" = "${parent}" ] || return 1
+  mkdir -m 700 -- "${want}" || return 1
+  [ "$(realpath -- "${want}")" = "${want}" ] || return 1
+  chmod 700 -- "${want}" && mkdir -m 700 -- "${want}/steps" && dir_chain_safe "${root}" "${want}/steps" && printf '%s\n' "${want}"
+}
+
+# steps/ に、送った n 件の要求それぞれの .req と .resp がそろっていれば 0。
+steps_complete() {
+  local dir="$1" n="$2" i k
+  for ((i = 1; i <= n; i++)); do
+    k="$(printf '%02d' "${i}")"
+    compgen -G "${dir}/${k}-*.req" > /dev/null && compgen -G "${dir}/${k}-*.resp" > /dev/null || return 1
+  done
+  [ "$(find "${dir}" -maxdepth 1 -type f -name '*.req' | grep -c .)" = "${n}" ] \
+    && [ "$(find "${dir}" -maxdepth 1 -type f -name '*.resp' | grep -c .)" = "${n}" ]
+}
+
+# 開いているファイル（fd のディレクトリ）が許可したものだけか。リンク先は readlink で取り、固定の文字列で比べる。
+# $1=fd のディレクトリ $2=証拠のディレクトリ $3=記録先。0 = 許可外なし、1 = 許可外あり、2 = 読み取りの失敗。
+fd_targets_ok() {
+  local dir="$1" ev="$2" out="$3" fd target bad=0 n=0
+  : > "${out}" || return 2
+  # 一覧を取れない（子が終わって /proc/<pid> が無い・読めない）ときは「許可外なし」ではなく読み取りの失敗。
+  [ -d "${dir}" ] && [ -r "${dir}" ] && [ -x "${dir}" ] || return 2
+  for fd in "${dir}"/*; do
+    [ -e "${fd}" ] || [ -L "${fd}" ] || continue
+    n=$((n + 1))
+    target="$(readlink -- "${fd}")" || return 2
+    printf '%s -> %s\n' "${fd##*/}" "${target}" >> "${out}" || return 2
+    case "${target}" in
+      /dev/null | "${ev}/server.stdout" | "${ev}/server.stderr") ;;
+      pipe:\[*\] | socket:\[*\] | anon_inode:*) ;;
+      *) bad=1 ;;
+    esac
+  done
+  # 動いている子なら標準入出力が必ずある。1 つも無ければ一覧を取れていない。
+  [ "${n}" -ge 1 ] || return 2
+  return "${bad}"
+}
+
+# network.txt のうち、ss の取得に失敗した印の行の数を返す。
+observation_errors() { grep -c '^# ss の取得に失敗' "$1" 2>/dev/null; }
+
+# 作業ツリーの状態を返す（no = コミット済み、yes = 未コミットの変更あり）。git の確認に失敗したら 1。
+tree_state() {
+  local st
+  st="$(git -C "$1" status --porcelain)" || return 1
+  if [ -z "${st}" ]; then echo no; else echo yes; fi
+}
+
+# path が dir の中（dir 自身を含む）なら 0。
+under() { case "${1%/}/" in "${2%/}/"*) return 0 ;; *) return 1 ;; esac; }
+
+# evidence-root に使えるなら 0: 共有 git dir（common）の中か、作業ツリー（top）の外。
+# 3 つとも実体のパス（.. を畳み、シンボリックリンクをたどる）にそろえてから比べる。
+evidence_root_ok() {
+  local root top common
+  root="$(realpath -m -- "$1")" && top="$(realpath -m -- "$2")" && common="$(realpath -m -- "$3")" || return 1
+  under "${root}" "${common}" && return 0
+  ! under "${root}" "${top}"
+}
+
+# 実行ファイルのパスから、ビルドし直したときに付く " (deleted)" を外す。
+exe_of() { local e; e="$(readlink "/proc/$1/exe" 2>/dev/null)" || return 1; printf '%s\n' "${e% (deleted)}"; }
+
+# 呼び出し元から引き継いだ fd（端末の /dev/ptmx など）を閉じる。子の起動の直前に使い、
+# 開いているファイルの検査（proc-fd.txt）に、子が自分で開いたものだけが残るようにする。
+# env -i は環境変数だけで fd は継承するため、fd は別に閉じる。
+close_fds_above_stderr() {
+  local fd_path fd
+  for fd_path in /proc/self/fd/*; do
+    fd="${fd_path##*/}"
+    [ "${fd}" -gt 2 ] 2>/dev/null || continue
+    eval "exec ${fd}>&-" 2>/dev/null || true
+  done
+}
+
+# environ（NUL 区切り）のファイルから、forbidden のラベルのうち名前がある（=値は見ない）ものを返す。
+# 読めなかったときは何も返さず 2 で終わる（「禁止の変数なし」と取り違えない）。
+forbidden_env_present() {
+  local pair names
+  names="$(tr '\0' '\n' < "$1" 2>/dev/null | cut -d= -f1)" && [ -r "$1" ] || return 2
+  for pair in ${FORBIDDEN_ENV}; do
+    grep -qx "${pair#*:}" <<< "${names}" && echo "${pair%%:*}"
+  done
+  return 0
+}
+
+# pitchfork のデーモンの一覧（読み取りだけ。記録用で、合否は PID の比較で決める）。
+# `pitchfork list` は supervisor が止まっていると起動してしまう（自動起動）。起動しない `supervisor status` で
+# 動いていると確かめられたときだけ `list` を呼び、どちらも自動起動を止める設定で呼ぶ。
+pitchfork_list() {
+  if ! (cd "${TOP}" && PITCHFORK_SUPERVISOR_AUTO_START=false mise exec -- pitchfork supervisor status > /dev/null 2>&1); then
+    echo "pitchfork: supervisor status が失敗した（動いていない、または照会に失敗）。起動しないよう list は呼ばない"; return 0
+  fi
+  (cd "${TOP}" && PITCHFORK_SUPERVISOR_AUTO_START=false mise exec -- pitchfork list 2>&1) || echo "pitchfork list: 失敗"
+}
+
+# 生き残りを比べる対象の PID（1 行 1 つ）。5 分以上動いている常駐のものだけ（pitchfork の定期ジョブのように
+# run の途中で自然に終わる短命なプロセスを、巻き込んで止めたと取り違えないため）。comm と同じ文字列順に並べる。
+survivor_pids() {
+  local list pid ppid comm age exe pexe
+  list="$(ps -eo pid=,ppid=,comm=,etimes=)" || return 1
+  while read -r pid ppid comm age; do
+    [ "${age:-0}" -ge 300 ] 2> /dev/null || continue
+    exe="$(readlink "/proc/${pid}/exe" 2> /dev/null || true)"
+    pexe="$(readlink "/proc/${ppid}/exe" 2> /dev/null || true)"
+    # T3 本体は、実行ファイル名が t3 で親が t3 ではないもの。T3 がスレッドごとに起こして終える子
+    # （t3 acp-mcp-bridge など。親が t3 本体）は、run の途中で自然に終わるので比べない。
+    if [[ "${comm}" =~ ${SURVIVOR_COMM} ]] || { [ "${exe##*/}" = t3 ] && [ "${pexe##*/}" != t3 ]; }; then echo "${pid}"; fi
+  done <<< "${list}" | LC_ALL=C sort
+}
+
+# 結果の 1 行を summary に書く。FAIL があれば VERDICT を FAIL にする。
+record() {
+  local result="$1" step="$2" detail="${3:-}"
+  local line; line="$(printf '%-4s %s%s' "${result}" "${step}" "${detail:+ (${detail})}")"
+  printf '%s\n' "${line}"
+  # summary に書けなければ、その段の結果が証拠に残らないので FAIL にする。
+  printf '%s\n' "${line}" >> "${EV}/summary.txt" || VERDICT=FAIL
+  [ "${result}" = PASS ] || VERDICT=FAIL
+}
+
+# 合否を変えない注記の 1 行を summary に書く（確かめられなかったことを証拠に残す）。
+note() {
+  printf 'NOTE %s\n' "$1"
+  printf 'NOTE %s\n' "$1" >> "${EV}/summary.txt" || VERDICT=FAIL
+}
+
+# 1 要求を /dev/tcp で送る。$1=名前 $2=メソッド $3=経路 $4=操作者（空なら無し）$5=本文。
+# 要求と応答を steps/ に残し、状態コードを STATUS、本文を BODY に入れる。
+http() {
+  local name="$1" method="$2" path="$3" member="$4" body="${5:-}" n
+  n="$(printf '%02d' "${STEP}")"; STEP=$((STEP + 1))
+  local req="${EV}/steps/${n}-${name}.req" resp="${EV}/steps/${n}-${name}.resp" head raw=""
+  head="$(printf '%s %s HTTP/1.1\r\nHost: demo.local\r\nConnection: close\r\n' "${method}" "${path}"
+    [ -n "${member}" ] && printf 'x-pelway-member-id: %s\r\nx-pelway-member-kind: human\r\n' "${member}"
+    printf 'Content-Length: %s\r\n' "$(printf '%s' "${body}" | wc -c)")"
+  # 証拠には本文を伏せた形だけを書く（生の本文はメモリにだけ置く）。
+  { printf '%s\n\n' "${head//$'\r'/}"; redact <<< "${body}"; } > "${req}" || EVIDENCE_WRITE_FAILED=1
+  STATUS=000; BODY=""
+  if exec 3<>"/dev/tcp/${HOST}/${PORT}"; then
+    local send_rc=0 recv_rc=0
+    printf '%s\n\r\n%s' "${head}" "${body}" >&3 || send_rc=$?
+    # 実行中の接続を観察する（ss -tuanp。この PID の行と、待ち受けのアドレスを含む行）。
+    observe_sockets || OBS_FAILED=1
+    # 生の応答はファイルに書かず、メモリだけで扱う。サーバーが閉じるまで読み切れなければ（時間切れ）失敗。
+    raw="$(timeout 10 cat <&3)" || recv_rc=$?
+    exec 3<&- 3>&-
+    STATUS="$(transport_status "${send_rc}" "${recv_rc}" "${raw}")"; BODY="$(resp_body <<< "${raw}")"
+    [ "${STATUS}" != 000 ] || BODY=""
+    { head -n 1 <<< "${raw}" | tr -d '\r'; echo; redact <<< "${BODY}"; } > "${resp}" || EVIDENCE_WRITE_FAILED=1
+  else
+    echo "connect failed" > "${resp}" || EVIDENCE_WRITE_FAILED=1
+  fi
+}
+
+# 読み取りだけで「このインスタンスを動かしてよいか」を答える。0 = よい。
+env_check() {
+  local out="${EV}/env-check.txt" ok=0 exe listen
+  {
+    echo "pid=${PID} expected_bin=${BIN}"
+    exe="$(exe_of "${PID}" || true)"
+    echo "proc_exe=${exe}"
+    [ "${exe}" = "${BIN}" ] || { echo "NG: プロセスの実行ファイルがこの run のビルドではない"; ok=1; }
+    echo "bin_sha256=${BIN_SHA}"
+    [ "$(sha256sum "/proc/${PID}/exe" 2>/dev/null | cut -d' ' -f1)" = "${BIN_SHA}" ] \
+      || { echo "NG: 実行中のバイナリのハッシュが起動前と違う"; ok=1; }
+    echo "repo_head=$(git -C "${TOP}" rev-parse HEAD) run_sha=${SHA} dirty=${DIRTY}"
+    [ "$(git -C "${TOP}" rev-parse HEAD)" = "${SHA}" ] || { echo "NG: HEAD が run の開始時と違う"; ok=1; }
+    listen="$(ss -Htlnp 2>/dev/null | grep "pid=${PID}," | awk '{print $4}' | sort -u | tr '\n' ' ')"
+    echo "listen=${listen}"
+    [ "${listen}" = "${ADDR} " ] || { echo "NG: 待ち受けが ready 行の addr=${ADDR} だけではない"; ok=1; }
+    local udp snap
+    # -a で未接続（UNCONN）も接続済み（ESTAB）も含めて、この PID の UDP のソケットを全部数える。
+    if snap="$(ss -Huanp 2>/dev/null)"; then
+      udp="$(grep -c "pid=${PID}," <<< "${snap}")"
+      echo "udp_sockets=${udp}"
+      [ "${udp}" = 0 ] || { echo "NG: UDP のソケットがある"; ok=1; }
+    else echo "NG: UDP のソケットを取得できない（ss の失敗）"; ok=1; fi
+    # 環境は名前の数だけ数え、値は書かない。禁止の変数は名前も書かずラベルだけ書く（名前は leak-phrases の禁止語）。
+    # 子は env -i で PATH と HOME だけを渡すので、名前はちょうど 2 つのはず。読めなければ NG。
+    local names count bad
+    if names="$(tr '\0' '\n' < "/proc/${PID}/environ" 2>/dev/null | cut -d= -f1)" && [ -r "/proc/${PID}/environ" ]; then
+      count="$(grep -c . <<< "${names}")"
+      echo "env_name_count=${count}"
+      [ "${count}" = 2 ] || { echo "NG: 子の環境の名前が 2 つ（PATH・HOME）ではない"; ok=1; }
+    else echo "NG: 子の環境を読めない"; ok=1; fi
+    if bad="$(forbidden_env_present "/proc/${PID}/environ")"; then
+      bad="$(tr '\n' ' ' <<< "${bad}")"; bad="${bad% }"
+      if [ -n "${bad}" ]; then echo "NG: 子の環境に禁止の変数がある: ${bad}"; ok=1
+      else echo "forbidden_env=none（$(for p in ${FORBIDDEN_ENV}; do printf '%s ' "${p%%:*}"; done)）"; fi
+    else echo "NG: 子の環境を読めず、禁止の変数を確かめられない"; ok=1; fi
+    if grep -q '^pelway-runner: LLM endpoint: ' "${EV}/server.stderr" && grep -q ' llm=script$' "${EV}/server.stdout"; then
+      echo "llm_mode=script（接続先の行: $(grep -m1 '^pelway-runner: LLM endpoint: ' "${EV}/server.stderr")）"
+    else
+      echo "NG: 接続先を知らせる行（pelway-runner: LLM endpoint:）か ready 行の llm=script が無い"; ok=1
+    fi
+    echo "auth=none（デモは認証なし。操作者は合成ヘッダー x-pelway-member-id）"
+    echo "bind=127.0.0.1:0（demo-serve は mise の PELWAY_BIND_ADDR を読まず、この値を直接使う）"
+  } > "${out}" || return 1
+  [ -s "${out}" ] || return 1
+  cat "${out}"
+  return "${ok}"
+}
+
+# ss -Htuan の行（ファイル。1 列目が tcp/udp）のうち、loopback 以外のアドレスを含む端の数を返す。
+# 待ち受け（LISTEN）と未接続の UDP（UNCONN）の相手欄（0.0.0.0:* など）は数えない。
+count_nonloopback() {
+  awk '{print $5; if ($2 != "LISTEN" && $2 != "UNCONN") print $6}' "$1" 2>/dev/null | grep -cvE '^127\.0\.0\.1:[0-9]+$'
+}
+
+# この PID のソケットと、待ち受けのアドレス（addr）に関わる接続を network.txt に足す。
+# ss の取得そのものが失敗したときは、該当なしと区別して印の行を書く（network_check がこれを見て FAIL にする）。
+# 取得の失敗と記録の失敗は 1 を返す（該当なしは 0）。呼び出し側が OBS_FAILED にして最終判定まで伝える。
+observe_sockets() {
+  local snap lines rc=0
+  if ! snap="$(ss -Htuanp 2>/dev/null)"; then
+    echo "# ss の取得に失敗 $(date -u +%H:%M:%S.%N)" >> "${EV}/network.txt"; return 1
+  fi
+  lines="$(grep -F -e "pid=${PID}," -e " ${ADDR} " <<< "${snap}")" || rc=$?
+  [ "${rc}" -le 1 ] || return 1
+  [ -z "${lines}" ] || printf '%s\n' "${lines}" >> "${EV}/network.txt" || return 1
+}
+
+# 操作の間、0.1 秒ごとに ss を取り続ける（要求ごとの観察の間を埋める。それでも 0.1 秒より短い接続は取りこぼしうる）。
+start_sampler() {
+  # 子の標準入力のパイプは持たない（持つと run が SIGKILL されたときに子が終わらない）。親が死んだら止まる。
+  # 取得・記録に失敗したら終了コード 3 で抜ける。停止の要求（TERM）には trap で終了コード 4 を返す
+  # （要求に応えて終わったことと、途中で消えたことを分ける）。
+  ( exec {DS_IN}>&-; trap 'exit 4' TERM; while kill -0 "$$" 2> /dev/null; do observe_sockets || exit 3; sleep 0.1; done ) &
+  SAMPLER=$!
+}
+stop_sampler() {
+  [ -n "${SAMPLER:-}" ] || return 0
+  # 停止を求める前に、観察プロセスがまだ動いているか見る。先に終わっていた（ゾンビ・消えている）場合は、
+  # どんな終わり方でもその時点から観察が切れていたので失敗にする。
+  local st rc=0
+  st="$(ps -o stat= -p "${SAMPLER}" 2>/dev/null | tr -d '[:space:]')"
+  if [ -z "${st}" ] || [[ "${st}" == *Z* ]]; then
+    wait "${SAMPLER}" 2>/dev/null
+    OBS_FAILED=1
+  else
+    kill "${SAMPLER}" 2>/dev/null
+    wait "${SAMPLER}" 2>/dev/null || rc=$?
+    # 意図した停止は、この run が送った TERM に trap で応えた終了（4）だけ。
+    [ "${rc}" != 4 ] && OBS_FAILED=1
+  fi
+  SAMPLER=""
+}
+
+# 外に出ていないことの観察: 取った TCP・UDP の行（network.txt）がすべて 127.0.0.1 同士で、
+# 開いているファイルが、この run の標準出力・標準エラーのファイル、/dev/null、パイプ、anon_inode と、
+# ss で TCP・UDP と確かめられたソケットだけか。
+network_check() {
+  local out="${EV}/network.txt"
+  local seen nonlo ino
+  local fdrc=0
+  fd_targets_ok "/proc/${PID}/fd" "${EV}" "${EV}/proc-fd.txt" || fdrc=$?
+  [ "${fdrc}" = 0 ] || { echo "# 開いているファイルの検査: $([ "${fdrc}" = 1 ] && echo 許可外のファイルがある || echo 読み取りに失敗)" >> "${out}"; return 1; }
+  # /proc の socket:[N] を、ss -e の ino:N（この PID の TCP・UDP）と突き合わせる。見つからないソケットは種類も宛先も確かめられない。
+  local known snap
+  snap="$(ss -Htuanpe 2>/dev/null)" || { echo "# ss の取得に失敗（ino の突き合わせ）" >> "${out}"; return 1; }
+  known="$(grep -F "pid=${PID}," <<< "${snap}" | grep -oE 'ino:[0-9]+' | cut -d: -f2)"
+  for ino in $(grep -oE 'socket:\[[0-9]+\]' "${EV}/proc-fd.txt" | tr -dc '0-9\n'); do
+    grep -qx "${ino}" <<< "${known}" || { echo "# 種類を確かめられないソケット: inode ${ino}" >> "${out}"; return 1; }
+  done
+  observe_sockets || OBS_FAILED=1
+  # 印の行（# で始まる）は観察ではないので、数えるのは ss の行だけ。取得に失敗した回が 1 回でもあれば観察は未完了。
+  local errs; errs="$(observation_errors "${out}")"; errs="${errs:-0}"
+  seen="$(grep -vc '^#' "${out}" 2>/dev/null)"; seen="${seen:-0}"
+  nonlo="$(count_nonloopback <(grep -v '^#' "${out}"))"
+  local db; db="$(grep -v '^#' "${out}" | grep -c ':5432 ')"
+  echo "# ss -tuan の観察（TCP・UDP、要求ごと＋0.1 秒ごと）${seen} 行、取得の失敗 ${errs} 回、loopback 以外との接続 ${nonlo} 件、DB（:5432）宛て ${db} 件" >> "${out}"
+  [ "${OBS_FAILED:-0}" = 0 ] || echo "# 観察の取得・記録に失敗した回がある（観察は未完了）" >> "${out}"
+  [ "${OBS_FAILED:-0}" = 0 ] && [ "${errs}" = 0 ] && [ "${seen}" -ge 1 ] && [ "${nonlo}" = 0 ] && [ "${db}" = 0 ]
+}
+
+# pid が 5 秒以内に終われば 0。
+gone_within() { local _; for _ in $(seq 50); do [ -e "/proc/$1" ] || return 0; sleep 0.1; done; return 1; }
+
+# 共有のロックの階層を作り、ほかの利用者が差し替えられないことを確かめる（証拠の置き場と同じ規則）。0 = 使える。
+locks_dir_ready() {
+  mkdir -p -- "$1/pelway/locks" 2>/dev/null || return 1
+  dir_chain_safe "$1/pelway" "$1/pelway/locks"
+}
+
+# ロックの持ち主の PID を、pid がリンクでない通常ファイルで中身が数字だけのときだけ返す（読めない・数字以外は空）。
+lock_owner() {
+  local p
+  [ -f "$1/pid" ] && [ ! -L "$1/pid" ] && p="$(head -n 1 -- "$1/pid" 2>/dev/null)" && [[ "${p}" =~ ^[0-9]+$ ]] && printf '%s' "${p}"
+}
+
+# locks/ の下のロックのディレクトリを mkdir で原子的に取る。取れたらこの run の pid を持ち主として書く。
+try_lock() {
+  mkdir "$1" 2> /dev/null || return 1
+  echo "$$" > "$1/pid" 2> /dev/null && return 0
+  # pid を書けなかったら取ったロックを外してから失敗を返す（外さないと次の run から止まる）。
+  rm -f "$1/pid"; rmdir "$1" 2> /dev/null; return 1
+}
+
+# Cargo がビルドに使う出力先。CARGO_TARGET_DIR だけではなく CARGO_BUILD_TARGET_DIR・
+# .cargo/config.toml（作業ツリーの親のものも）の build.target-dir・mise の [env] も含めて、
+# ビルドと同じ mise exec の下で cargo 自身に聞く（自分で環境変数だけを解くと、これらで別の
+# 出力先を使う run と別の鍵を取り、同じ場所にビルドしてしまう）。
+cargo_target_dir() {
+  (cd "$1" && mise exec -- cargo metadata --no-deps --format-version 1 --offline 2>/dev/null) \
+    | jq -r '.target_directory // empty'
+}
+
+# この run が起動した PID だけを止める: 標準入力を閉じる → SIGTERM → SIGKILL。送る前に毎回 exe を照合する。
+stop_child() {
+  local out="${EV}/cleanup.txt"
+  [ -n "${PID:-}" ] || return 0
+  [ -n "${DS_IN:-}" ] && exec {DS_IN}>&- && echo "closed stdin of pid=${PID}" >> "${out}"
+  if gone_within "${PID}"; then echo "stopped pid=${PID}（標準入力を閉じて終了。この run が起動したものだけ）" >> "${out}"; return 0; fi
+  local sig
+  for sig in TERM KILL; do
+    if [ "$(exe_of "${PID}")" != "${BIN}" ]; then echo "NG: pid=${PID} の exe がこの run のバイナリではない。送らない" >> "${out}"; VERDICT=FAIL; return; fi
+    kill "-${sig}" "${PID}" 2>/dev/null
+    if gone_within "${PID}"; then echo "stopped pid=${PID}（SIG${sig}。この run が起動したものだけ）" >> "${out}"; return 0; fi
+  done
+  echo "NG: pid ${PID} が残っている" >> "${out}"; VERDICT=FAIL
+}
+
+cleanup() {
+  stop_sampler
+  stop_child
+  wait 2>/dev/null
+  local l
+  for l in "${LOCK2:-}" "${LOCK:-}"; do
+    [ -n "${l}" ] || continue
+    rm -f "${l}/pid"; rmdir "${l}" 2>/dev/null; echo "released lock ${l##*/}" >> "${EV}/cleanup.txt"
+  done
+  if [ -e "${EV}/survivors-before.txt" ]; then
+    pitchfork_list > "${EV}/pitchfork-after.txt"
+    if ! survivor_pids > "${EV}/survivors-after.txt"; then
+      record FAIL "後片付け: ほかのプロセスが生き残っている" "後のプロセスの一覧を取れない"
+    elif [ ! -s "${EV}/survivors-before.txt" ]; then
+      # 比べる常駐プロセスが起動の前に 1 つも無かった。確かめていないことを証拠に残す（合否は変えない）。
+      note "後片付け: 比べる常駐プロセス（demo-serve・pitchfork・agent-watch・t3）が起動の前に無く、生き残りを比べていない"
+    else
+      local lost; lost="$(LC_ALL=C comm -23 "${EV}/survivors-before.txt" "${EV}/survivors-after.txt" | tr '\n' ' ')"
+      if [ -z "${lost}" ]; then record PASS "後片付け: ほかのプロセスが生き残っている" "survivors-*.txt"
+      else record FAIL "後片付け: ほかのプロセスが生き残っている" "消えた pid ${lost}"; fi
+    fi
+  fi
+  # demo-check の canary と leak-phrases を、この run のログ・証拠の写しに対して流す。
+  local scan="${EV}/demo-check-input" st x copied=1 want got
+  mkdir -p "${scan}/target/demo" || copied=0
+  for x in "${EV}"/* "${EV}"/.[!.]*; do
+    [ -e "${x}" ] && [ "${x}" != "${scan}" ] || continue
+    cp -r "${x}" "${scan}/target/demo/" || copied=0
+  done
+  want="$(find "${EV}" -path "${scan}" -prune -o -type f -print | grep -c .)"
+  got="$(find "${scan}/target/demo" -type f | grep -c .)"
+  if [ "${copied}" = 0 ] || [ "${want}" != "${got}" ]; then
+    record FAIL "demo-check: 証拠の写しを作る" "写しが不完全（${got}/${want} ファイル）。canary・leak-phrases を流さない"
+  else for st in canary leak-phrases; do
+    run_demo_check_stage "${TOP}" "${scan}" "${st}" >> "${EV}/demo-check.txt" 2>&1
+    rc=$?
+    echo "-- ${st}: exit ${rc}" >> "${EV}/demo-check.txt"
+    if [ "${rc}" = 0 ]; then record PASS "demo-check ${st}: run のログ・証拠" "demo-check.txt"
+    else record FAIL "demo-check ${st}: run のログ・証拠" "exit ${rc}、demo-check.txt"; fi
+  done; fi
+  if [ "$(final_verdict "${VERDICT}" "${DONE:-0}")" != "${VERDICT}" ]; then
+    record FAIL "run が最後まで進まなかった（中断）" "記録の無い段は走っていない"
+  fi
+  publish_verdict "${EV}" "${VERDICT}" || exit 1
+  [ "${VERDICT}" = PASS ] || exit 1
+}
+
+# 判断待ちができるまで待ち、decision_id と version を DEC_ID・DEC_VER に入れる。
+wait_decision() {
+  local deadline=$((SECONDS + POLL_SECS))
+  DEC_ID=""
+  while [ "${SECONDS}" -le "${deadline}" ]; do
+    http decisions-pending GET "/v1/workspaces/${WS}/decisions?actor=${DECIDER}" ""
+    DEC_ID="$(pending_decision_id "${STATUS}" "${BODY}" "${MSG_ID}")"
+    [ -n "${DEC_ID}" ] && break
+    sleep 1
+  done
+  DEC_VER="$(jq -r --arg d "${DEC_ID}" '.[]? | select(.decision_id == $d) | .version' <<< "${BODY}" 2>/dev/null)"
+}
+
+# 使える合図の後半: seed を HTTP で読み、チャンネル・メンバーの ID と件数、過去の発言の件数を確かめる。0 = 使える。
+seed_ready() {
+  http seed-channels GET "/v1/workspaces/${WS}/channels?actor=${REQUESTER}" ""
+  [ "${STATUS}" = 200 ] || return 1
+  local members
+  members="$(jq -r --arg c "${CH}" '[.[] | select(.channel_id == $c) | .members[].member_id] | sort | join(",")' <<< "${BODY}" 2>/dev/null)"
+  SEED_DETAIL="channels=$(jq 'length' <<< "${BODY}") members=${members}"
+  [ "$(jq 'length' <<< "${BODY}")" = 1 ] && [ "${members}" = "${SEED_MEMBERS}" ] || return 1
+  http seed-messages GET "/v1/channels/${CH}/messages?actor=${REQUESTER}&after_seq=0" ""
+  local n; n="$(jq 'length' <<< "${BODY}" 2>/dev/null)"
+  SEED_DETAIL+=" messages=${n:-?}"
+  [ "${STATUS}" = 200 ] && [ "${n}" = 3 ]
+}
+
+operate() {
+
+  local cm="cm-verify-${RUN_ID}"
+  local mention="{\"client_msg_id\":\"${cm}\",\"body\":\"@ハル 納期延長の案を2つ作って ${CANARY}\",\"thread_root\":null}"
+  http mention POST "/v1/channels/${CH}/messages" "${REQUESTER}" "${mention}"
+  MSG_ID="$(jq -r '.message_id // empty' <<< "${BODY}" 2>/dev/null)"; MSG_SEQ="$(jq -r '.seq // empty' <<< "${BODY}" 2>/dev/null)"
+  if [ "${STATUS}" = 200 ] && [ -n "${MSG_ID}" ] && [ -n "${MSG_SEQ}" ]; then record PASS "投稿: ハル宛てのメンション" "${MSG_ID}"
+  else record FAIL "投稿: ハル宛てのメンション" "status=${STATUS}"; return; fi
+
+  http mention-resend POST "/v1/channels/${CH}/messages" "${REQUESTER}" "${mention}"
+  if [ "${STATUS}" = 200 ] && [ "$(jq -r '.message_id' <<< "${BODY}" 2>/dev/null)" = "${MSG_ID}" ]; then
+    record PASS "冪等: 同じ client_msg_id の再送は同じ message_id"
+  else record FAIL "冪等: 同じ client_msg_id の再送は同じ message_id" "status=${STATUS}"; fi
+
+  wait_decision
+  if [ -n "${DEC_ID}" ]; then record PASS "判断待ち: 山本に A/B の決定が来る" "${DEC_ID}"
+  else record FAIL "判断待ち: 山本に A/B の決定が来る" "${POLL_SECS} 秒で現れない"; return; fi
+  local pending="${BODY}" opt_a opt_b
+  opt_a="$(jq -r --arg d "${DEC_ID}" '.[] | select(.decision_id == $d) | .options[] | select(.option_id == "a") | .body' <<< "${pending}")"
+  opt_b="$(jq -r --arg d "${DEC_ID}" '.[] | select(.decision_id == $d) | .options[] | select(.option_id == "b") | .body' <<< "${pending}")"
+  if [ "${opt_a}" = "${SCRIPT_A}" ] && [ "${opt_b}" = "${SCRIPT_B}" ]; then record PASS "台本モード: 案A・案B が台本の合成応答"
+  else record FAIL "台本モード: 案A・案B が台本の合成応答" "案の本文が台本と違う"; fi
+  if [ "$(jq --arg m "${MSG_ID}" '[.[] | select(.request_message_id == $m)] | length' <<< "${pending}")" = 1 ]; then
+    record PASS "冪等: 再送で判断待ちが増えない" "1 件"
+  else record FAIL "冪等: 再送で判断待ちが増えない"; fi
+
+  http messages-after-mention GET "/v1/channels/${CH}/messages?actor=${REQUESTER}&after_seq=$((MSG_SEQ - 1))" ""
+  local last
+  last="$(jq '[.[]?.seq] | max // empty' <<< "${BODY}" 2>/dev/null)"; last="${last:-${MSG_SEQ}}"
+  if [ "${STATUS}" = 200 ] && [ "$(jq --arg c "${cm}" '[.[] | select(.client_msg_id == $c)] | length' <<< "${BODY}" 2>/dev/null)" = 1 ]; then
+    record PASS "冪等: 再送で投稿が重複しない" "1 件"
+  else record FAIL "冪等: 再送で投稿が重複しない" "status=${STATUS}"; fi
+  if jq -e --arg b "${BOT}" --arg a "案A: ${opt_a}" --arg o "案B: ${opt_b}" \
+      '[.[] | select(.author_id == $b and (.body | contains($a)) and (.body | contains($o)))] | length >= 1' <<< "${BODY}" > /dev/null 2>&1; then
+    record PASS "after_seq: ハルの投稿に案A と案B がある"
+  else record FAIL "after_seq: ハルの投稿に案A と案B がある"; fi
+  # 台本の 2 案は、実提供元の呼び出しに失敗したときのフォールバックにも使われる。runner はそのとき
+  # 「台本の応答で進めます」の進捗行（crates/pelway-runner/src/lib.rs の fallback_line）を投稿するので、それが無いこと。
+  if [ "$(jq --arg b "${BOT}" --arg f "${FALLBACK_MARK}" '[.[]? | select(.author_id == $b and (.body | contains($f)))] | length' <<< "${BODY}" 2>/dev/null)" = 0 ]; then
+    record PASS "台本モード: 実提供元からのフォールバックの進捗行が無い"
+  else record FAIL "台本モード: 実提供元からのフォールバックの進捗行が無い" "フォールバックの進捗行がある"; fi
+
+  http decide POST "/v1/decisions/${DEC_ID}/decide" "${DECIDER}" \
+    "{\"decision_id\":\"${DEC_ID}\",\"version\":${DEC_VER:-0},\"option_id\":\"a\"}"
+  local outcome="${BODY}" new_ver
+  new_ver="$(jq -r '.version // empty' <<< "${outcome}" 2>/dev/null)"
+  if [ "${STATUS}" = 200 ] && [ "$(jq -r '.selected.option_id' <<< "${outcome}" 2>/dev/null)" = a ] \
+      && [ "$(jq -r '.selected.body' <<< "${outcome}" 2>/dev/null)" = "${SCRIPT_A}" ] && [ -n "${new_ver}" ]; then
+    record PASS "決定: 山本が案A（台本の案A の本文）を選ぶ" "version ${new_ver}"
+  else record FAIL "決定: 山本が案A を選ぶ" "status=${STATUS}"; return; fi
+
+  # 応答を受け取れなかった利用者と同じく、段 6 の要求（確定前の版）をそのまま送り直す。
+  http decide-replay POST "/v1/decisions/${DEC_ID}/decide" "${DECIDER}" \
+    "{\"decision_id\":\"${DEC_ID}\",\"version\":${DEC_VER:-0},\"option_id\":\"a\"}"
+  if [ "${STATUS}" = 200 ] && [ "$(jq -cS . <<< "${BODY}" 2>/dev/null)" = "$(jq -cS . <<< "${outcome}")" ]; then
+    record PASS "冪等: 同じ選択の再決定は同じ結果（保存された選択 a と案A の本文を読み直した）"
+  else record FAIL "冪等: 同じ選択の再決定は同じ結果" "status=${STATUS}"; fi
+
+  http decide-change POST "/v1/decisions/${DEC_ID}/decide" "${DECIDER}" \
+    "{\"decision_id\":\"${DEC_ID}\",\"version\":${new_ver},\"option_id\":\"b\"}"
+  if [ "${STATUS}" = 409 ] && [ "$(jq -r '.code' <<< "${BODY}" 2>/dev/null)" = already_decided ]; then
+    record PASS "決定後に案B へ変える要求は拒否" "409 already_decided"
+  else record FAIL "決定後に案B へ変える要求は拒否" "status=${STATUS}"; fi
+
+  http final-decisions GET "/v1/workspaces/${WS}/decisions?actor=${DECIDER}" ""
+  if [ "${STATUS}" = 200 ] && decision_absent "${BODY}" "${DEC_ID}"; then
+    record PASS "決定後の状態: 確定した決定が判断待ちに無い"
+  else record FAIL "決定後の状態: 確定した決定が判断待ちに無い" "status=${STATUS}"; fi
+  http final-messages GET "/v1/channels/${CH}/messages?actor=${REQUESTER}&after_seq=0" ""
+  if [ "${STATUS}" = 200 ] && [ "$(jq --arg c "${cm}" '[.[] | select(.client_msg_id == $c)] | length' <<< "${BODY}" 2>/dev/null)" = 1 ]; then
+    record PASS "決定後の状態: 依頼の投稿が 1 件だけ保存されている"
+  else record FAIL "決定後の状態: 依頼の投稿が 1 件だけ保存されている" "status=${STATUS}"; fi
+
+  [ "${FEATURE}" = mail-draft ] || return 0
+  sleep "${POLL_SECS}"
+  http messages-after-decide GET "/v1/channels/${CH}/messages?actor=${REQUESTER}&after_seq=${last}" ""
+  # 中身で判定する: 決定後のハルの投稿に、選んだ案A の本文があること。さらに、下書きを保存先から
+  # 取り直す経路が要る。main にはその経路が無いので、投稿があっても合格にしない。
+  local drafts
+  drafts="$(jq --arg b "${BOT}" --arg a "${SCRIPT_A}" '[.[]? | select(.author_id == $b and (.body | contains($a)))] | length' <<< "${BODY}" 2>/dev/null)"
+  if [ "${STATUS}" != 200 ] || [ "${drafts:-0}" = 0 ]; then
+    record FAIL "メール下書き: 決定した案A で下書きが作られ、保存先から取り直せる" "機能なし。${POLL_SECS} 秒待っても、案A の本文を含む決定後の bot 投稿が無い"
+  else
+    record FAIL "メール下書き: 決定した案A で下書きが作られ、保存先から取り直せる" "案A を含む bot 投稿は ${drafts} 件あるが、下書きを保存先から取り直す経路が無い（未検証）"
+  fi
+}
+
+main() {
+  FEATURE=decision; ROOT=""; LABEL=adhoc; ALLOW_DIRTY=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --feature) FEATURE="${2:-}"; shift 2 || die_usage "--feature needs a value" ;;
+      --label) LABEL="${2:-}"; shift 2 || die_usage "--label needs a value" ;;
+      --evidence-root) ROOT="${2:-}"; shift 2 || die_usage "--evidence-root needs a value" ;;
+      --allow-dirty) ALLOW_DIRTY=1; shift ;;
+      --help|-h) sed -n '2,11p' "$0"; exit 0 ;;
+      *) die_usage "unknown argument: $1" ;;
+    esac
+  done
+  case "${FEATURE}" in decision|mail-draft) ;; *) die_usage "unknown feature: ${FEATURE}" ;; esac
+  [[ "${LABEL}" =~ ^[A-Za-z0-9_-]+$ ]] || die_usage "--label must be [A-Za-z0-9_-]+"
+  if [ "$(uname -s)" != Linux ]; then
+    echo "verify-run: 未対応（理由: /proc と ss（iproute2）が要る。この OS は $(uname -s)）" >&2; exit 1
+  fi
+  local t missing=""
+  for t in git mise rustup jq ss pgrep ps sha256sum realpath readlink comm timeout; do command -v "${t}" > /dev/null || missing+=" ${t}"; done
+  [ -d /proc/self ] || missing+=" /proc"
+  if [ -n "${missing}" ]; then echo "verify-run: 失敗（道具が無い:${missing}）。入れずに止まる" >&2; exit 1; fi
+  local own
+  if ! own="$(forbidden_env_present /proc/$$/environ)"; then
+    echo "verify-run: 失敗（自分の環境を読めず、秘密の変数が無いことを確かめられない）" >&2; exit 1
+  fi
+  if [ -n "${own}" ]; then
+    echo "verify-run: 失敗（秘密の変数がある環境で動いている。fnox exec の下で動かさない: $(tr '\n' ' ' <<< "${own}")）" >&2; exit 1
+  fi
+  TOP="$(git rev-parse --show-toplevel)" || die_usage "not inside the Pelway repository"
+  COMMON="$(git rev-parse --path-format=absolute --git-common-dir)" || die_usage "cannot find the git common dir"
+  TOP="$(realpath -- "${TOP}")"; COMMON="$(realpath -- "${COMMON}")"
+  ROOT="${ROOT:-${COMMON}/pelway/evidence}"
+  [ "${ROOT#/}" != "${ROOT}" ] || die_usage "--evidence-root must be an absolute path"
+  evidence_root_ok "${ROOT}" "${TOP}" "${COMMON}" || die_usage "--evidence-root must be outside the work tree (${TOP}) or inside the git common dir"
+  ROOT="$(realpath -m -- "${ROOT}")"
+  # 証拠もロックも所有者だけが読める形で作る。
+  umask 077
+
+  SHA="$(git -C "${TOP}" rev-parse HEAD)"
+  DIRTY="$(tree_state "${TOP}")" || die_usage "cannot read the git status of ${TOP}"
+  RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-${FEATURE}-$$"
+  # 置き場の下にシンボリックリンクがあっても外へ出ないよう、run のディレクトリは新しく作って実体を確かめる。
+  EV="$(make_run_dir "${ROOT}" "${LABEL}-${SHA}/${RUN_ID}")" \
+    || die_usage "cannot create a new run directory under ${ROOT} (it must be new and must not resolve elsewhere)"
+  evidence_root_ok "${EV}" "${TOP}" "${COMMON}" || die_usage "the run directory resolves into the work tree"
+  locks_dir_ready "${COMMON}" || die_usage "the locks directory ${COMMON}/pelway/locks is not safe (it must be a real directory in a chain that only this user or root can modify)"
+  EVIDENCE_WRITE_FAILED=0; OBS_FAILED=0
+  VERDICT=PASS; STEP=1; PID=""; LOCK=""; LOCK2=""; BIN=""
+  trap cleanup EXIT
+  printf 'run_id=%s\nsha=%s\ndirty=%s\nallow_dirty=%s\nfeature=%s\n' "${RUN_ID}" "${SHA}" "${DIRTY}" "${ALLOW_DIRTY}" "${FEATURE}" | tee "${EV}/summary.txt"
+  if [ "${DIRTY}" = yes ] && [ "${ALLOW_DIRTY}" = 0 ]; then
+    record FAIL "前提: 作業ツリーがコミット済み" "未コミットの変更がある。--allow-dirty は証拠にならない"; return 1
+  fi
+
+  # 二重起動の確認（ビルドの前）: 先にロックを mkdir で原子的に取り（同時に始めた run を拒む）、
+  # そのあと同じ target の demo-serve が動いていないかを見る（手で起動したものなどを拒む。触らない）。
+  # 動いているほうの exe はビルドし直すと " (deleted)" が付くので、外して比べる。
+  local p e other="" lock lock2 target_real
+  # ロックは証拠の置き場によらず共有 git dir の下に置き、鍵は作業ツリーの実体のパス（ビルドで変わらない）。
+  lock="${COMMON}/pelway/locks/$(printf '%s' "${TOP}" | sha256sum | cut -c1-12)"
+  if try_lock "${lock}"; then LOCK="${lock}"
+  else
+    record FAIL "起動: 二重起動の確認" "別の run がロックを持っている（pid=$(lock_owner "${lock}" || echo 不明)、${lock}）。動かさない"; return 1
+  fi
+  # ツールチェーンを先に確かめる（ビルド先を cargo に聞くのもビルドも、同じツールチェーンの cargo を使う）。
+  TOOLCHAIN="$(cd "${TOP}" && mise current rust 2>/dev/null)"
+  RUSTC_BIN="$(rustup which --toolchain "${TOOLCHAIN}" rustc 2>/dev/null)"
+  if [ -z "${TOOLCHAIN}" ] || [ ! -x "${RUSTC_BIN}" ]; then
+    record FAIL "起動: ツールチェーン" "mise.toml の rust（${TOOLCHAIN:-不明}）の rustc が無い。mise install --locked を先に行う"; return 1
+  fi
+  # ビルドの前から持つ 2 つめのロック: 同じビルド先（cargo が報告する出力先の実体）を共有する
+  # 別の作業ツリーの run が、この run の検証中にビルドして実行ファイルを置き換えるのを防ぐ。置き換わると、
+  # 動かしたバイナリと証拠に残すコミットの対応が崩れる。run の終わりまで持つ。
+  target_real="$(cargo_target_dir "${TOP}")"
+  if [ -z "${target_real}" ]; then
+    record FAIL "起動: ビルド先の確認" "cargo metadata がビルド先を報告しない"; return 1
+  fi
+  target_real="$(realpath -m "${target_real}")"
+  lock2="${COMMON}/pelway/locks/bin-$(printf '%s' "${target_real}" | sha256sum | cut -c1-12)"
+  if try_lock "${lock2}"; then LOCK2="${lock2}"
+  else
+    record FAIL "起動: 二重起動の確認" "同じビルド先を使う別の run がロックを持っている（pid=$(lock_owner "${lock2}" || echo 不明)、${lock2}）。動かさない"; return 1
+  fi
+  for p in $(pgrep -x demo-serve || true); do
+    e="$(exe_of "${p}" || true)"
+    under "${e}" "${target_real}" && other+=" ${p}"
+  done
+  if [ -n "${other}" ]; then
+    record FAIL "起動: 二重起動の確認" "同じ target の demo-serve が動いている pid=${other# }。動かさない（止めるかは人が決める）"; return 1
+  fi
+  record PASS "起動: 二重起動の確認" "同じ target の demo-serve なし、ロック取得"
+  # 起動の前に、この run 自身の環境に禁止の変数（LLM のキー・接続先、fnox の秘密）が無いことを記録する（名前の有無だけ）。
+  record PASS "起動前: run の環境に禁止の変数が無い" "$(for x in ${FORBIDDEN_ENV}; do printf '%s ' "${x%%:*}"; done)"
+  survivor_pids > "${EV}/survivors-before.txt" || { record FAIL "起動: 生き残りの比較の準備" "プロセスの一覧を取れない"; return 1; }
+  pitchfork_list > "${EV}/pitchfork-before.txt"
+  {
+    echo "mise: $(mise --version 2>/dev/null | head -n 1)"
+    echo "rust_toolchain: ${TOOLCHAIN}（mise current rust）"
+    echo "rustc: $("${RUSTC_BIN}" --version)（${RUSTC_BIN}）"
+    echo "cargo: $(cd "${TOP}" && mise exec -- cargo --version 2>/dev/null)"
+    echo "ss: $(ss -V 2>&1 | head -n 1)"; echo "pgrep: $(pgrep -V 2>&1 | head -n 1)"
+    echo "sha256sum: $(sha256sum --version | head -n 1)"; echo "jq: $(jq --version)"
+    echo "bash: ${BASH_VERSION}"; echo "kernel: $(uname -r)"
+  } > "${EV}/tools.txt"
+
+  # 起動: ビルドし、cargo が報告した実行ファイルを、PATH と HOME だけの環境で子として起動する。
+  # 子の標準入力はこの run が持つパイプ。run が終われば（SIGKILL でも）閉じて、子は終わる。
+  # mise exec の PATH では、ほかの mise 呼び出しと重なると rustc が /usr/bin の別の版に解決されることがある。
+  # mise.toml が固定したツールチェーンの rustc を RUSTC で明示して、PATH の並びに頼らない。
+  if ! (cd "${TOP}" && RUSTC="${RUSTC_BIN}" mise exec -- cargo build --offline --locked -p pelway-http --example demo-serve \
+      --message-format=json-render-diagnostics) > "${EV}/build.json" 2> "${EV}/build.log"; then
+    record FAIL "起動: ビルド" "build.log を見る"; return 1
+  fi
+  BIN="$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "demo-serve") | .executable // empty' "${EV}/build.json" | tail -n 1)"
+  if [ -z "${BIN}" ]; then record FAIL "起動: ビルド" "cargo が demo-serve の実行ファイルを報告しない"; return 1; fi
+  BIN="$(realpath "${BIN}")"
+  BIN_SHA="$(sha256sum "${BIN}" | cut -d' ' -f1)"
+  # 起動の前に作業ツリーと HEAD を見直す（開始の後に編集してからビルドした変更を、元のコミットの証拠にしない）。
+  local state_now
+  if ! state_now="$(tree_state "${TOP}")" || [ "$(git -C "${TOP}" rev-parse HEAD)" != "${SHA}" ] \
+      || { [ "${state_now}" != "${DIRTY}" ] && [ "${ALLOW_DIRTY}" = 0 ]; } || { [ "${state_now}" = yes ] && [ "${ALLOW_DIRTY}" = 0 ]; }; then
+    record FAIL "起動: 作業ツリーと HEAD が run の開始時のまま" "git の確認に失敗したか、開始の後に変わった"; return 1
+  fi
+  # ビルドの後にもう一度: 同じ実行ファイル（mbx がビルドで target をリンクにした後の実体）の demo-serve が動いていないか。
+  other=""
+  for p in $(pgrep -x demo-serve || true); do [ "$(exe_of "${p}" || true)" = "${BIN}" ] && other+=" ${p}"; done
+  if [ -n "${other}" ]; then
+    record FAIL "起動: 二重起動の確認（ビルドの後）" "同じ実行ファイルの demo-serve が動いている pid=${other# }。動かさない"; return 1
+  fi
+  coproc DS { close_fds_above_stderr; exec env -i PATH="/usr/bin:/bin" HOME="${HOME}" "${BIN}" > "${EV}/server.stdout" 2> "${EV}/server.stderr"; }
+  PID="${DS_PID}"; DS_IN="${DS[1]}"
+  for _ in $(seq 50); do [ -s "${EV}/server.stdout" ] && break; sleep 0.1; done
+  local line; line="$(cat "${EV}/server.stdout")"
+  # ready 行は 1 行だけで、127.0.0.1 のポートとこの子の PID を持つこと。HTTP はこの後の環境チェックを通ってから送る。
+  if ! ready_line_ok "${line}" "${PID}"; then
+    record FAIL "起動: ready 行" "5 秒以内に、127.0.0.1 のポートとこの PID を持つ ready 行が 1 行だけ出ない"; return 1
+  fi
+  ADDR="${line#*addr=}"; ADDR="${ADDR%% *}"; HOST="${ADDR%:*}"; PORT="${ADDR##*:}"
+  record PASS "起動: ready 行" "addr=${ADDR} pid=${PID}"
+
+  # 環境チェック（PID・バイナリ・待ち受けを照合してから HTTP を送る）
+  if env_check > /dev/null; then record PASS "環境チェック" "env-check.txt tools.txt"
+  else record FAIL "環境チェック" "env-check.txt の NG 行"; return 1; fi
+  if seed_ready; then record PASS "起動: seed を HTTP で読める" "${SEED_DETAIL}"
+  else record FAIL "起動: seed を HTTP で読める" "テスト用データが無いか違う ${SEED_DETAIL:-status=${STATUS}}"; return 1; fi
+
+  # 操作（その間、ss を取り続ける）
+  start_sampler
+  operate
+  stop_sampler
+
+  # 証拠の書き込み: 送った要求それぞれの .req と .resp がそろい、書き込みの失敗が無いこと。
+  local sent=$((STEP - 1))
+  if [ "${EVIDENCE_WRITE_FAILED}" = 0 ] && steps_complete "${EV}/steps" "${sent}"; then
+    record PASS "証拠: 要求ごとの .req と .resp がそろっている" "${sent} 件"
+  else record FAIL "証拠: 要求ごとの .req と .resp がそろっている" "書き込みの失敗か欠けがある（${sent} 件送った）"; fi
+
+  # 外に出ていないことの観察
+  local net="ネットワーク・ファイル: 観察した範囲で TCP・UDP は 127.0.0.1 だけ、開いているのは標準入出力・/dev/null・パイプ・anon_inode と TCP・UDP のソケットだけ"
+  if network_check; then record PASS "${net}" "network.txt proc-fd.txt。スナップショットの間の通信、定期観察の外の通信、TCP・UDP 以外の通信路は未検証"
+  else record FAIL "${net}" "network.txt proc-fd.txt"; fi
+  [ "${VERDICT}" = PASS ]
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  DONE=0
+  main "$@"
+  rc=$?
+  # main が戻ったときだけ印を立てる。シグナルで中断されたときはここに来ず、cleanup が FAIL にする。
+  DONE=1
+  exit "${rc}"
+fi
