@@ -243,17 +243,17 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 
 次のラウンドのレビューを委託したら、前ラウンドのレビュースレッド（子タスク）を settle する（`t3_thread_organize` の `action: settle`。runbook 9 の「片付け」と同じ決まりで、前ラウンドが `needs-human` 中・止まっている・迷走中のときは settle しない）。
 
-委託・再委託のたびに、対象 PR に委託記録コメントを残す（巡回がレビューの証跡として使う）。コメントの行頭がこの形であること（引用やコードブロック内の出現は証跡にならない）。`<SHA>` は委託時点の PR の head、`to:` はレビュー担当。
+委託・再委託のたびに、`delegate_task` を呼ぶ前に、対象 PR に委託記録コメントを残す（巡回がレビューの証跡として使う。`failed` の報告を受けたときの照合の起点にもなる）。コメントの行頭がこの形であること（引用やコードブロック内の出現は証跡にならない）。`<SHA>` は委託時点の PR の head、`to:` はレビュー担当、`before:` はその時点の PR の最新のレビューの ID（`pr view --json reviews --jq '.reviews[-1].id'`。無ければ `none`）。
 
 ```bash
-scripts/agent-gh dev pr comment <M> --body "[review-request] head: <SHA> to: <担当>"
+scripts/agent-gh dev pr comment <M> --body "[review-request] head: <SHA> to: <担当> before: <レビュー ID|none>"
 ```
 
 差分が `scripts/agent-gh` を変えるときはレビューを委託しない。終わりの報告で `ready:` の行を書かずに止まり、指揮役が main から立てるレビュースレッドに回るのを待つ（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
 
 ### 9. レビュー結果を処理する
 
-委託の子の報告（`pr:` / `verdict:` / `must-fix:`）が `verdict: failed` でも、投稿が受け付けられた後に失敗で返ったことがありうる。`pr view --json reviews` で、委託記録コメント（手順 8）より後に現在の head へ付いた `pelway-review` のレビューを全部読み、報告した担当のレビュー（本文の `Reviewer:` の行で見分ける）があれば、再委託せずにそのレビューの判定として扱う。無ければ、下の `failed` の扱い（`error:` の理由ごと）に進む。`approve` と `request-changes` は、GitHub の実状態と突き合わせてから扱う:
+委託の子の報告（`pr:` / `verdict:` / `must-fix:`）が `verdict: failed` でも、投稿が受け付けられた後に失敗で返ったことがありうる。`pr view --json reviews` で、委託記録コメントの `before:` より後に付いた `pelway-review` のレビューのうち、状態が `APPROVED` か `CHANGES_REQUESTED` で、対象が委託記録の `head:` で、報告した担当のもの（本文の `Reviewer:` の行で見分ける）を探す（`DISMISSED` などは数えない）。`error:` が `設定の不備:` で始まるときは、見つかっても止まる（止まる条件。見つかったレビューの判定は Issue のコメントに添える）。それ以外で見つかれば、再委託せずにそのレビューの判定として扱う。見つからなければ、下の `failed` の扱い（`error:` の理由ごと）に進む。`approve` と `request-changes` は、GitHub の実状態と突き合わせてから扱う:
 
 ```bash
 scripts/agent-gh dev pr view <PR 番号> --json headRefOid,reviewDecision,reviews --jq '{headRefOid, reviewDecision, latest: (.reviews[-1] | {author: .author.login, state, commit: .commit.oid})}'

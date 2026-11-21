@@ -128,7 +128,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 | 抜き取り | PR 番号を 4 で割った余りが 0 の通常の PR には Claude も付ける（Codex・Devin CLI の見落とし率の測定のため） |
 
 - この表の適用は指揮役だけでなく実装担当も行う。実装担当はこの表でレビュー委託（`delegate_task`）の担当と effort を決め、Assigned 行に写す（skill `implement-issue` の手順 8）。通常と抜き取りの判定は PR 番号だけで決まり、割り当ての記録への記入は不要（実装担当の分は省く。指揮役が立てた分だけ記録する）
-- レビューを `delegate_task` で委託するとき（実装担当の手順 8、指揮役が代行で委託するとき）は、呼び出しを次のブロックから丸ごと写し、`<...>` を埋める。`target.model` と `options` の値は skill `implement-issue` の手順 8 の表（codex は `reasoningEffort`、claude は `effort`、devin は `{}`）。`role`・`runtimeMode`・`isolation` は省かない。
+- レビューを `delegate_task` で委託するとき（実装担当の手順 8、指揮役が実装担当の代わりに委託するとき。指揮役は委託元の worktree が `main` のコミットにあることを確かめる。指揮役自身の PR・外部投入のレビュースレッドは委託せず、runbook の「レビューを始める」で立てる）は、呼び出しを次のブロックから丸ごと写し、`<...>` を埋める。`target.model` と `options` の値は skill `implement-issue` の手順 8 の表（codex は `reasoningEffort`、claude は `effort`、devin は `{}`）。`role`・`runtimeMode`・`isolation` は省かない。
 
   ```json
   {
