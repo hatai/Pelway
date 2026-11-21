@@ -100,3 +100,15 @@
 5. 改善案: `.agents/skills/review-pr/SKILL.md` に「投稿は `scripts/agent-gh review` で行い、T3 の `pull_request_review` は使わない」を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 8）
+
+対象 head: b60027ae（実装のコミット）
+
+1. 詰まった箇所: round 7 は Claude（`claude-opus-5-5` max）が Approve、Codex（`gpt-6.2-sol` max）が must-fix 1。`inbox_offset` が文字列・負数のとき 0 として扱い、初めて起こす回は送っていた。項目が無いときは 0、あるのに 0 以上の整数でないときは読めない扱い（その回は起こさない）に直した。Codex は round 6・7 とも GitHub に投稿できず（`auto` の実行モードで `scripts/agent-gh review` が使えない）、指摘はスレッドから転記した。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: Codex の文書の指摘（既読の位置を先へ書き換えたときの影響）も `docs/dev-environment.md` に足した。
+4. 足りなかった情報・検証手段: Codex のレビューを GitHub に投稿させる設定（実行モード・権限）は hatai に確かめてもらう。
+5. 改善案: `.agents/skills/command-team/SKILL.md` の Codex のレビューの委託に、投稿できる実行モードを書く（今は `full-access` が方針で拒まれ、`auto` では投稿できない）。
+
+使ったスキル: implement-issue
