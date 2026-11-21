@@ -45,7 +45,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 5. Request changes なら、実装スレッドが must-fix を直して push し、レビューを再委託する（修正とレビューの繰り返しは実装スレッドの内側で回し、指揮役を経由しない）。修正は 3 回まで。回数と打ち切りの判断は skill `implement-issue`
 6. Approve されたら、実装担当が自分で `pr ready` で Draft を解除する。Approve のレビューに `[文書のずれ]` の nit が残っていれば、先に直してレビューを再委託する（skill `implement-issue` の手順 9）（レビュー担当の App には Draft を解除する権限がない）し、終わりの報告をする。人間（hatai）のレビューの指摘は、指揮役が `t3 thread send` で実装スレッドに伝える
 7. Approve と必須チェックがそろったら、QA が同じ SHA で独立に確かめ、SHA と run を書いた合格コメントを PR に残す（`docs/agents/qa-checklist.md`）。Approve・必須チェック・同じ SHA の QA の合格がそろったら、指揮役が `automerge` ラベルを付けて Kodiak のマージキューに入れる（skill `command-team` の「マージ」）。QA が確かめるまでは合格として扱わない
-8. 終わった worktree は pitchfork のデーモン `agent-worktree-prune` が毎時消す（settle されていないスレッドの worktree と、追跡ファイルに変更が残っている worktree は残す。残ったものは人間が `mise run agent-worktree-prune` で整理する）
+8. 終わった worktree は pitchfork のデーモン `agent-worktree-prune` が毎時消す（settle されていないスレッドの worktree、生きているプロセスのカレントディレクトリが中にある worktree、最後の変更から 6 時間以内の worktree、追跡ファイルに変更が残っている worktree は残す。残ったものは人間が `mise run agent-worktree-prune` で整理する）
 
 ### 入口B（バグ・インシデント）の調査と起票
 
