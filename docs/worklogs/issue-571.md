@@ -47,3 +47,15 @@
 5. 改善案: `docs/dev-environment.md` の「セキュリティスキャン（security-scan）」に、ツールの標準エラーを公開ログに出さない方針を、ツールごとではなく共通の決まりとして書く。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: a56128681793cccb7c90fee6566fc6bd82e1d7e1
+
+1. 詰まった箇所: 手順 9: round 4 の Codex のレビューで must-fix 1 件（OSV-Scanner の進捗ログを抽出エラーと取り違えうる）が残った。hatai の「なおして」の指示で直した。
+2. 曖昧だった文: 「OSV-Scanner は抽出の失敗を標準エラーの `Error during extraction:` の行に出す」（`docs/dev-environment.md`「セキュリティスキャン（security-scan）」）
+3. 仮定と解釈: 標準エラーには抽出の失敗の行だけでなく、読めたファイルのパスを書く進捗ログも混ざると解釈した。`--verbosity error` で進捗ログを出させず、抽出の失敗の行は残ることを手元の壊れた `package-lock.json` で確かめた。行の形を厳しく照合する案は、パスの改行で同じ形を作れるため採らなかった。
+4. 足りなかった情報・検証手段: OSV-Scanner の README は、JSON 出力のときに進捗ログが標準エラーへ出ることを書いていない。手元で標準エラーを見比べて確かめた。
+5. 改善案: `docs/dev-environment.md` の「セキュリティスキャン（security-scan）」に、ツールの標準エラーで判定するときは、判定に使う行だけが出るログの水準にする、を共通の決まりとして書く。
+
+使ったスキル: implement-issue
