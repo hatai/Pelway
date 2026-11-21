@@ -390,7 +390,7 @@ gh_edit 'i = st[args[0]]; i["labels"] = ["needs-decision"]; i["events"][-1].appe
 run_cycles 1
 check "26: human removed needs-human -> only needs-decision is removed" eq "$(calls)" "issue edit 729 --remove-label needs-decision"
 check "26: human removed needs-human -> neither label stays" eq "$(labels_of 729)" ""
-# 27. 前の周に通知を書いた格上げは、labeled_at の後に needs-human が付いて外されていたら付け直さない。通知前なら通常どおり進める
+# 27. 付与の試行（`adding` の記録）のあとにほかの名義の needs-human の付け外しがあれば、出どころを確かめられないので `held` にして付け直さない。通知前なら、試行前の付け外しは試行の照合に入らないので通常どおり進める
 fail_first edit-add 730; heal
 gh_edit 'st[args[0]]["events"][-1] += [ev("labeled", "needs-human", args[1]), ev("unlabeled", "needs-human", args[2])]' 730 "$T16" "$T5"
 run_cycles 1
