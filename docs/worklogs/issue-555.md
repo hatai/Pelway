@@ -148,3 +148,15 @@
 5. 改善案: なし。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 12）
+
+対象 head: 627f60e1（実装のコミット）
+
+1. 詰まった箇所: round 11 は Claude が Approve。nit 5 件のうち 3 件は文書のずれ（PR 本文の引用 (2) が古い、補助記録の確かめ方の書き方、`append_inbox` のコメント）で直した。残る 2 件も直した。受信箱の行を ASCII だけにした（非 ASCII をすべて `\uXXXX` にする）。今の読み手（#569 の前）が文字の途中で切れた断片で受信箱を読めなくなる問題を、書き手の側で起こらなくするため。補助記録の上限超えは `WAKE skipped reason=patrol-state-too-large` と別の理由で出す。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: 非 ASCII は JSON の文字列の中にしか現れないので、文字ごとの置き換えで JSON の値は変わらない、という前提（`inbox_line_is_ascii_only` で値の一致を確かめる）。
+4. 足りなかった情報・検証手段: `inbox_line_is_ascii_only` は単体試験で、置き換えの前の実装では `is_ascii` の確かめで落ちる（日本語の `report` がそのまま出るため）。結合試験の `oversized_patrol_state_has_its_own_reason` の red は確かめた。
+5. 改善案: なし。
+
+使ったスキル: implement-issue
