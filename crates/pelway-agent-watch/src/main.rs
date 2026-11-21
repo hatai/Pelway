@@ -11,7 +11,8 @@
 //! - 起動してよいのは本体 checkout からだけ。worktree では理由を 1 行ログに出して終わる
 //! - 同時に動かせるのは 1 つだけ。状態ディレクトリの lock ファイルを flock で取り、取れなければ終わる
 //! - 状態は起動時に 1 回だけ読み、以降はメモリに持つ。保存に失敗しても同じイベントを繰り返し作らない
-//! - 送れなかった payload は状態の送信待ちの列に残し、次の周回で送り直す
+//! - webhook に送れなかった payload は状態の送信待ちの列に残し、古い順に送り直す。直らない失敗
+//!   （HTTP 400・404・413）は列から外し、送り直せる失敗が続く間は間隔を空ける（`outbox::flush`）
 //! - ログは標準エラーに 1 行ずつ。秘密と返答の本文は出さない
 
 mod io;
@@ -26,13 +27,17 @@ use pelway_agent_watch::inbox::{
     INBOX_FILE, PATROL_STATE_FILE, PatrolInfo, WAKE_MESSAGE, WakeDecision, decide_wake, inbox_line,
     parse_conductor_file, parse_patrol_state,
 };
-use pelway_agent_watch::outbox;
+use pelway_agent_watch::outbox::{self, Outcome};
 use pelway_agent_watch::payload::build_payload;
 use pelway_agent_watch::watch::{Event, StallReason, State, ThreadDetail, needs_detail, step};
 use serde_json::Value;
 
 const DEFAULT_POLL_SECS: u64 = 30;
 const CI_INTERVAL: Duration = Duration::from_secs(5 * 60);
+/// 1 周の中で webhook に新しく送り始めてよい時間。1 件の送信は curl の制限時間と送り直しの待ちで
+/// 最大 34 秒（`io::send`。秘密を読む fnox の時間は含まない）なので、1 周の webhook の送信は
+/// 列の長さによらず 10 + 34 = 44 秒以内に収まる。
+const SEND_START_WINDOW: Duration = Duration::from_secs(10);
 const USAGE: &str =
     "usage: pelway-agent-watch [--once | --cycles <n>] [--dry-run] [--project <path>]
        pelway-agent-watch --register <thread-id> | --unregister | --show-registration";
@@ -302,23 +307,50 @@ impl Watcher {
             outbox::push(&mut self.state.outbox, payload);
         }
         let project = self.opts.project.clone();
-        outbox::flush(&mut self.state.outbox, |payload| {
-            let tag = tag(payload);
-            match io::send(payload, &project) {
-                io::SendResult::Sent(code) => {
-                    eprintln!("agent-watch: {tag} mode=send http={code}");
-                    true
+        let send_started = Instant::now();
+        let backoff_before = self.state.outbox_backoff;
+        outbox::flush(
+            &mut self.state.outbox,
+            &mut self.state.outbox_backoff,
+            now_epoch(),
+            || send_started.elapsed() < SEND_START_WINDOW,
+            |payload| {
+                let tag = tag(payload);
+                match io::send(payload, &project) {
+                    io::SendResult::Sent(code) => {
+                        eprintln!("agent-watch: {tag} mode=send http={code}");
+                        Outcome::Sent
+                    }
+                    io::SendResult::Rejected(code) => {
+                        eprintln!("agent-watch: {tag} mode=send-dropped http={code}");
+                        Outcome::Rejected
+                    }
+                    io::SendResult::Failed(why) => {
+                        eprintln!(
+                            "agent-watch: {tag} mode=send-failed reason={why} (kept for retry)"
+                        );
+                        Outcome::Retry
+                    }
+                    io::SendResult::DryRunNoSecret => {
+                        eprintln!(
+                            "agent-watch: {tag} mode=not-sent reason=no-secret (kept for retry)"
+                        );
+                        Outcome::Retry
+                    }
                 }
-                io::SendResult::Failed(why) => {
-                    eprintln!("agent-watch: {tag} mode=send-failed reason={why} (kept for retry)");
-                    false
-                }
-                io::SendResult::DryRunNoSecret => {
-                    eprintln!("agent-watch: {tag} mode=not-sent reason=no-secret (kept for retry)");
-                    false
-                }
-            }
-        });
+            },
+        );
+        if let Some(b) = self
+            .state
+            .outbox_backoff
+            .filter(|b| Some(*b) != backoff_before)
+        {
+            eprintln!(
+                "agent-watch: outbox retry_after={}s queued={}",
+                b.interval_secs,
+                self.state.outbox.len()
+            );
+        }
         if let Err(e) = io::save_state(&self.state_path, &self.state) {
             eprintln!(
                 "agent-watch: ERROR cannot save state {}: {e}",

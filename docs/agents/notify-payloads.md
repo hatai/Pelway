@@ -7,7 +7,7 @@ Grok Bot の webhook には 2 種類の JSON が届く。`schema` で見分け�
 | `pelway.agent-watch/v1` | 見張り役 `agent-watch`（`crates/pelway-agent-watch`、pitchfork で常駐） | T3 のエージェントのスレッドの状態変化 |
 | `pelway.github-notify/v2` | `.github/workflows/notify-grokbot.yml` | GitHub の PR・レビュー・CI の出来事 |
 
-送れなかった通知は送り直すので、同じ通知が 2 回届くことがある。送り直しでは payload 全体（`occurred_at` を含む）が同じなので、重複かどうかは payload 全体の一致で見る。`thread_id` と `round` と `event` は照合の手がかりで、これが同じでも `occurred_at` や本文が違えば別の出来事のことがある（同じ実行回でも、承認の待ちが 0 件から増えるたびに `waiting` が、活動が再開した後に再び止まれば `stalled` が出る。CI の連続失敗の `stalled` は `thread_id` が空文字・`round` が 0 で、ブランチごとに出る）。逆に、見張りが知らせを作ってから状態を保存するまでの間に止まると（再起動など）、次の起動で同じ出来事が `occurred_at` を変えて出直すことがある。どちらも `urgency` を持つ。`immediate` はすぐ対応し、`digest` は朝と夕方のまとめにだけ反映する。
+送れなかった通知は送り直すので、同じ通知が 2 回届くことがある。ただし、受け手が直らない失敗（HTTP 400・404・413）を返した通知は送り直さないので、webhook には届かないまま、指揮役の受信箱（下の「指揮役の受信箱」）にだけ残る。送り直しでは payload 全体（`occurred_at` を含む）が同じなので、重複かどうかは payload 全体の一致で見る。`thread_id` と `round` と `event` は照合の手がかりで、これが同じでも `occurred_at` や本文が違えば別の出来事のことがある（同じ実行回でも、承認の待ちが 0 件から増えるたびに `waiting` が、活動が再開した後に再び止まれば `stalled` が出る。CI の連続失敗の `stalled` は `thread_id` が空文字・`round` が 0 で、ブランチごとに出る）。逆に、見張りが知らせを作ってから状態を保存するまでの間に止まると（再起動など）、次の起動で同じ出来事が `occurred_at` を変えて出直すことがある。どちらも `urgency` を持つ。`immediate` はすぐ対応し、`digest` は朝と夕方のまとめにだけ反映する。
 
 ## `pelway.agent-watch/v1`
 

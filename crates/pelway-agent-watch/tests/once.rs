@@ -48,16 +48,26 @@ esac
             &root.join("bin/fnox"),
             "#!/usr/bin/env bash\n[ -e \"$FAKE_DIR/fnox-ok\" ] && { echo fake-secret; exit 0; }\nexit 1\n",
         );
-        // 偽の curl: 本文（--data-binary @<file>）を fake/curl-body に写し、HTTP 500 を返す
+        // 偽の curl: 本文（--data-binary @<file>）を fake/curl-body に写し、fake/curl-bodies に 1 行ずつ足す。
+        // 返す HTTP ステータスは fake/curl-code（無ければ 500）。fake/curl-code-by-thread の
+        // `<thread_id> <コード>` の行に本文の thread_id が当たれば、そのコード。000 は接続の失敗（終了コード 7）
         write_exec(
             &root.join("bin/curl"),
             r#"#!/usr/bin/env bash
 cat > /dev/null
 while [ $# -gt 0 ]; do
-  if [ "$1" = "--data-binary" ]; then cp "${2#@}" "$FAKE_DIR/curl-body"; fi
+  if [ "$1" = "--data-binary" ]; then body="${2#@}"; fi
   shift
 done
-printf 500
+cp "$body" "$FAKE_DIR/curl-body"
+{ cat "$body"; echo; } >> "$FAKE_DIR/curl-bodies"
+code=$(cat "$FAKE_DIR/curl-code" 2>/dev/null || echo 500)
+while read -r tid c; do
+  grep -qF "\"thread_id\":\"$tid\"" "$body" && code=$c
+done < <(cat "$FAKE_DIR/curl-code-by-thread" 2>/dev/null)
+printf %s "$code"
+[ "$code" = 000 ] && exit 7
+exit 0
 "#,
         );
         // 偽の git: rev-parse の --git-dir / --git-common-dir / --show-toplevel は、
@@ -1370,4 +1380,224 @@ fn oversized_patrol_state_has_its_own_reason() {
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     assert!(sb.read_fake("t3-send-args").is_empty());
     assert!(stderr(&out).contains("WAKE skipped reason=patrol-state-too-large"));
+}
+
+// ---- webhook の送信の失敗と送信待ちの列（Issue #513） ----
+
+/// 送信待ちの列に置く payload。ログに出してよいのは event・thread・branch だけで、report は出さない。
+fn queued_payload(thread: &str) -> serde_json::Value {
+    serde_json::json!({
+        "schema": "pelway.agent-watch/v1", "event": "finished", "urgency": "immediate",
+        "thread_id": thread, "provider": "opencode", "model": "m", "branch": "agent/80-x",
+        "issue_number": 80, "round": 1, "report": "issue: #80\nverify: pass", "stall_reason": null,
+        "link": "l", "host": "h", "occurred_at": "2026-11-10T16:10:00Z"
+    })
+}
+
+/// 新しい知らせが出ない状態で、送信待ちの列に `threads` の payload を古い順に置く。
+fn queue(sb: &Sandbox, threads: &[&str]) {
+    sb.fake("list.json", "[]");
+    let outbox: Vec<_> = threads.iter().map(|t| queued_payload(t)).collect();
+    let state = serde_json::json!({"initialized": true, "threads": {}, "ci_notified": {}, "outbox": outbox});
+    fs::write(sb.state_file(), state.to_string()).unwrap();
+}
+
+fn thread_ids<'a>(payloads: impl Iterator<Item = &'a serde_json::Value>) -> Vec<String> {
+    payloads
+        .map(|p| p["thread_id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// 送信待ちの列に残っている payload の thread_id（古い順）。
+fn outbox_threads(sb: &Sandbox) -> Vec<String> {
+    let state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
+    thread_ids(state["outbox"].as_array().unwrap().iter())
+}
+
+/// webhook（偽の curl）に渡った payload の thread_id（送った順。送り直しも 1 回と数える）。
+fn sent_threads(sb: &Sandbox) -> Vec<String> {
+    let sent: Vec<serde_json::Value> = sb
+        .read_fake("curl-bodies")
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    thread_ids(sent.iter())
+}
+
+#[test]
+fn permanent_failure_is_dropped_and_next_is_sent() {
+    let sb = Sandbox::new("send-dropped");
+    queue(&sb, &["mcp:a", "mcp:b"]);
+    sb.fake("fnox-ok", "");
+    sb.fake("curl-code-by-thread", "mcp:a 400\nmcp:b 200\n");
+    let out = sb.run_with(&["--once"]);
+    let err = stderr(&out);
+    assert!(out.status.success(), "{err}");
+    // 400 を返された 1 件目は送り直さずに列から外し、同じ周回で 2 件目を送る
+    assert_eq!(sent_threads(&sb), ["mcp:a", "mcp:b"], "{err}");
+    assert!(outbox_threads(&sb).is_empty(), "{err}");
+    let dropped: Vec<&str> = err
+        .lines()
+        .filter(|l| l.contains("mode=send-dropped"))
+        .collect();
+    assert_eq!(
+        dropped,
+        ["agent-watch: event=finished thread=mcp:a branch=agent/80-x mode=send-dropped http=400"],
+        "{err}"
+    );
+    // 秘密（偽の fnox が URL と鍵に返す値）と payload の本文はログに出ない
+    assert!(
+        !err.contains("fake-secret") && !err.contains("issue: #80"),
+        "{err}"
+    );
+}
+
+#[test]
+fn retryable_failure_is_kept() {
+    // 1 件ごとに送り直しの待ち（2 秒 × 2）があるので、別々の sandbox で並べて走らせる
+    let cases = ["401", "403", "429", "500", "503", "000", "no-secret"];
+    let runs: Vec<_> = cases
+        .iter()
+        .map(|&case| {
+            std::thread::spawn(move || {
+                let sb = Sandbox::new(&format!("retryable-{case}"));
+                queue(&sb, &["mcp:a"]);
+                if case != "no-secret" {
+                    sb.fake("fnox-ok", "");
+                    sb.fake("curl-code", case);
+                }
+                let out = sb.run_with(&["--once"]);
+                (
+                    case,
+                    out.status.success(),
+                    stderr(&out),
+                    outbox_threads(&sb),
+                )
+            })
+        })
+        .collect();
+    for run in runs {
+        let (case, ok, err, kept) = run.join().unwrap();
+        assert!(ok, "{case}: {err}");
+        assert_eq!(kept, ["mcp:a"], "{case}: {err}");
+        let logged = if case == "no-secret" {
+            "mode=not-sent reason=no-secret".to_string()
+        } else {
+            format!("mode=send-failed reason=http={case}")
+        };
+        assert!(err.contains(&logged), "{case}: {err}");
+        assert!(!err.contains("mode=send-dropped"), "{case}: {err}");
+    }
+}
+
+#[test]
+fn send_time_per_cycle_is_bounded() {
+    let sb = Sandbox::new("send-bounded");
+    let threads: Vec<String> = (0..10).map(|i| format!("mcp:q{i}")).collect();
+    let refs: Vec<&str> = threads.iter().map(String::as_str).collect();
+    queue(&sb, &refs);
+    sb.fake("fnox-ok", "");
+    let started = std::time::Instant::now();
+    let out = sb.run_with(&["--once"]);
+    let took = started.elapsed();
+    let err = stderr(&out);
+    assert!(out.status.success(), "{err}");
+    assert!(took < std::time::Duration::from_secs(45), "{took:?} {err}");
+    // 送り直せる失敗（500）が出たら、その周は後ろの知らせを送らず、10 件とも列に残る
+    let sent = sent_threads(&sb);
+    assert!(
+        !sent.is_empty() && sent.iter().all(|t| t == "mcp:q0"),
+        "{sent:?}"
+    );
+    assert_eq!(outbox_threads(&sb), threads);
+}
+
+#[test]
+fn backoff_is_kept_across_restart() {
+    let sb = Sandbox::new("backoff-restart");
+    queue(&sb, &["mcp:a"]);
+    sb.fake("fnox-ok", "");
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(
+        stderr(&out).contains("outbox retry_after=30s queued=1"),
+        "{}",
+        stderr(&out)
+    );
+    let tried = sent_threads(&sb).len();
+    assert!(tried > 0);
+    // 次に送る時刻（30 秒後）より前に起動し直した周回では、webhook に送らない
+    let out = sb.run_with(&["--once"]);
+    let err = stderr(&out);
+    assert!(out.status.success(), "{err}");
+    assert_eq!(sent_threads(&sb).len(), tried, "{err}");
+    assert!(!err.contains("mode=send"), "{err}");
+    assert_eq!(outbox_threads(&sb), ["mcp:a"]);
+}
+
+/// 次の周回に、b の実行が終わった新しい知らせを出す（a は前の周回の知らせのまま）。
+fn b_finishes(sb: &Sandbox) {
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"},
+  {"threadId":"mcp:b","status":"completed","updatedAt":"2026-11-10T16:20:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "completed", "2026-11-10T16:20:00Z", 0),
+    );
+    let mut state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
+    state["threads"]["mcp:b"]["status"] = "running".into();
+    fs::write(sb.state_file(), state.to_string()).unwrap();
+}
+
+/// 指揮役を登録し、2 周続けて新しい知らせを出す（2 周目の前に、指揮役は 1 周目の 1 行を読んでいる）。
+/// 周ごとに、受信箱の行数・起こしの回数・webhook に渡った回数（累計）・標準エラーを返す。
+fn two_cycles_with_conductor(sb: &Sandbox) -> Vec<(usize, usize, usize, String)> {
+    one_event(sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let mut cycles = Vec::new();
+    for cycle in 0..2 {
+        if cycle == 1 {
+            sb.patrol_state(r#"{"inbox_offset":1}"#);
+            b_finishes(sb);
+        }
+        let out = sb.run_with(&["--once"]);
+        assert!(out.status.success(), "stderr: {}", stderr(&out));
+        cycles.push((
+            inbox_events(sb).len(),
+            sb.read_fake("t3-send-args").lines().count(),
+            sent_threads(sb).len(),
+            stderr(&out),
+        ));
+    }
+    cycles
+}
+
+#[test]
+fn wake_sent_when_webhook_rejects_permanently() {
+    let sb = Sandbox::new("wake-webhook-400");
+    sb.fake("fnox-ok", "");
+    sb.fake("curl-code", "400");
+    let mut sent_before = 0;
+    for (i, (inbox, wakes, sent, err)) in two_cycles_with_conductor(&sb).into_iter().enumerate() {
+        assert_eq!((inbox, wakes), (i + 1, i + 1), "cycle {i}: {err}");
+        // その周回でも webhook に送って 400 を返されている
+        assert!(sent > sent_before, "cycle {i}: {err}");
+        assert!(err.contains("http=400"), "cycle {i}: {err}");
+        sent_before = sent;
+    }
+}
+
+#[test]
+fn wake_sent_without_webhook_secret() {
+    let sb = Sandbox::new("wake-no-secret");
+    for (i, (inbox, wakes, sent, err)) in two_cycles_with_conductor(&sb).into_iter().enumerate() {
+        assert_eq!((inbox, wakes), (i + 1, i + 1), "cycle {i}: {err}");
+        assert_eq!(sent, 0, "cycle {i}: {err}");
+    }
+    assert_eq!(outbox_threads(&sb), ["mcp:a", "mcp:b"]);
 }

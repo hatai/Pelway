@@ -216,9 +216,15 @@ pub fn save_state(path: &Path, state: &State) -> Result<(), String> {
     fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
+/// 送り直しても届かない HTTP ステータス。ほかの 4xx（408 など）を加えるかは Issue #513 の未決事項で、
+/// 決まるまでは送り直せる失敗として扱う。
+const PERMANENT_HTTP: [&str; 3] = ["400", "404", "413"];
+
 /// 送信の結果。ログに書くのは HTTP ステータスだけ。
 pub enum SendResult {
     Sent(String),
+    /// 受け手が `PERMANENT_HTTP` のどれかを返した。送り直さない。
+    Rejected(String),
     Failed(String),
     DryRunNoSecret,
 }
@@ -255,7 +261,8 @@ fn curl_quote(s: &str) -> String {
 /// payload を webhook に送る。URL と鍵は curl の設定として標準入力から渡す（引数・プロセス一覧に出さない）。
 /// 本文は所有者だけが読める一時ファイルに置き、送ったら消す。
 pub fn send(payload: &Value, project: &Path) -> SendResult {
-    // 受け手が一時的に応答しないことがあるので、失敗したら 2 秒おいて最大 2 回まで送り直す
+    // 受け手が一時的に応答しないことがあるので、送り直せる失敗なら 2 秒おいて最大 2 回まで送り直す
+    // （1 件あたり最大 34 秒: curl の --max-time 10 秒 × 3 回と、間の 2 秒 × 2 回）
     let mut result = send_once(payload, project);
     for _ in 0..2 {
         if !matches!(result, SendResult::Failed(_)) {
@@ -328,6 +335,8 @@ fn send_once(payload: &Value, project: &Path) -> SendResult {
             let code = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if code.len() == 3 && code.starts_with('2') {
                 SendResult::Sent(code)
+            } else if PERMANENT_HTTP.contains(&code.as_str()) {
+                SendResult::Rejected(code)
             } else {
                 // curl の終了コードだけを残す（エラー文には URL のホスト名が入りうるので出さない）
                 let exit = out
