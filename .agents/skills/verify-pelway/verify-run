@@ -204,7 +204,7 @@ evidence_root_ok() {
 exe_of() { local e; e="$(readlink "/proc/$1/exe" 2>/dev/null)" || return 1; printf '%s\n' "${e% (deleted)}"; }
 
 # 呼び出し元から引き継いだ fd（端末の /dev/ptmx など）を閉じる。子の起動の直前に使い、
-# 環境チェックの「開いているファイル」に、子が自分で開いたものだけが残るようにする。
+# 開いているファイルの検査（proc-fd.txt）に、子が自分で開いたものだけが残るようにする。
 # env -i は環境変数だけで fd は継承するため、fd は別に閉じる。
 close_fds_above_stderr() {
   local fd_path fd
@@ -432,15 +432,20 @@ lock_owner() {
 }
 
 # locks/ の下のロックのディレクトリを mkdir で原子的に取る。取れたらこの run の pid を持ち主として書く。
-try_lock() { mkdir "$1" 2> /dev/null && echo "$$" > "$1/pid"; }
+try_lock() {
+  mkdir "$1" 2> /dev/null || return 1
+  echo "$$" > "$1/pid" 2> /dev/null && return 0
+  # pid を書けなかったら取ったロックを外してから失敗を返す（外さないと次の run から止まる）。
+  rm -f "$1/pid"; rmdir "$1" 2> /dev/null; return 1
+}
 
-# Cargo がビルドに使う出力先。相対の CARGO_TARGET_DIR は Cargo と同じく作業ツリーのルートから解決する。
-target_dir_of() {
-  case "${CARGO_TARGET_DIR:-}" in
-    "") printf '%s\n' "$1/target" ;;
-    /*) printf '%s\n' "${CARGO_TARGET_DIR}" ;;
-    *) printf '%s\n' "$1/${CARGO_TARGET_DIR}" ;;
-  esac
+# Cargo がビルドに使う出力先。CARGO_TARGET_DIR だけではなく CARGO_BUILD_TARGET_DIR・
+# .cargo/config.toml（作業ツリーの親のものも）の build.target-dir・mise の [env] も含めて、
+# ビルドと同じ mise exec の下で cargo 自身に聞く（自分で環境変数だけを解くと、これらで別の
+# 出力先を使う run と別の鍵を取り、同じ場所にビルドしてしまう）。
+cargo_target_dir() {
+  (cd "$1" && mise exec -- cargo metadata --no-deps --format-version 1 --offline 2>/dev/null) \
+    | jq -r '.target_directory // empty'
 }
 
 # この run が起動した PID だけを止める: 標準入力を閉じる → SIGTERM → SIGKILL。送る前に毎回 exe を照合する。
@@ -676,17 +681,27 @@ main() {
   # 二重起動の確認（ビルドの前）: 先にロックを mkdir で原子的に取り（同時に始めた run を拒む）、
   # そのあと同じ target の demo-serve が動いていないかを見る（手で起動したものなどを拒む。触らない）。
   # 動いているほうの exe はビルドし直すと " (deleted)" が付くので、外して比べる。
-  local target_real p e other="" lock lock2
-  target_real="$(realpath -m "$(target_dir_of "${TOP}")")"
+  local p e other="" lock lock2 target_real
   # ロックは証拠の置き場によらず共有 git dir の下に置き、鍵は作業ツリーの実体のパス（ビルドで変わらない）。
   lock="${COMMON}/pelway/locks/$(printf '%s' "${TOP}" | sha256sum | cut -c1-12)"
   if try_lock "${lock}"; then LOCK="${lock}"
   else
     record FAIL "起動: 二重起動の確認" "別の run がロックを持っている（pid=$(lock_owner "${lock}" || echo 不明)、${lock}）。動かさない"; return 1
   fi
-  # ビルドの前から持つ 2 つめのロック: 同じビルド先（${CARGO_TARGET_DIR} か既定の target の実体）を共有する
+  # ツールチェーンを先に確かめる（ビルド先を cargo に聞くのもビルドも、同じツールチェーンの cargo を使う）。
+  TOOLCHAIN="$(cd "${TOP}" && mise current rust 2>/dev/null)"
+  RUSTC_BIN="$(rustup which --toolchain "${TOOLCHAIN}" rustc 2>/dev/null)"
+  if [ -z "${TOOLCHAIN}" ] || [ ! -x "${RUSTC_BIN}" ]; then
+    record FAIL "起動: ツールチェーン" "mise.toml の rust（${TOOLCHAIN:-不明}）の rustc が無い。mise install --locked を先に行う"; return 1
+  fi
+  # ビルドの前から持つ 2 つめのロック: 同じビルド先（cargo が報告する出力先の実体）を共有する
   # 別の作業ツリーの run が、この run の検証中にビルドして実行ファイルを置き換えるのを防ぐ。置き換わると、
   # 動かしたバイナリと証拠に残すコミットの対応が崩れる。run の終わりまで持つ。
+  target_real="$(cargo_target_dir "${TOP}")"
+  if [ -z "${target_real}" ]; then
+    record FAIL "起動: ビルド先の確認" "cargo metadata がビルド先を報告しない"; return 1
+  fi
+  target_real="$(realpath -m "${target_real}")"
   lock2="${COMMON}/pelway/locks/bin-$(printf '%s' "${target_real}" | sha256sum | cut -c1-12)"
   if try_lock "${lock2}"; then LOCK2="${lock2}"
   else
@@ -704,11 +719,6 @@ main() {
   record PASS "起動前: run の環境に禁止の変数が無い" "$(for x in ${FORBIDDEN_ENV}; do printf '%s ' "${x%%:*}"; done)"
   survivor_pids > "${EV}/survivors-before.txt" || { record FAIL "起動: 生き残りの比較の準備" "プロセスの一覧を取れない"; return 1; }
   pitchfork_list > "${EV}/pitchfork-before.txt"
-  TOOLCHAIN="$(cd "${TOP}" && mise current rust 2>/dev/null)"
-  RUSTC_BIN="$(rustup which --toolchain "${TOOLCHAIN}" rustc 2>/dev/null)"
-  if [ -z "${TOOLCHAIN}" ] || [ ! -x "${RUSTC_BIN}" ]; then
-    record FAIL "起動: ツールチェーン" "mise.toml の rust（${TOOLCHAIN:-不明}）の rustc が無い。mise install --locked を先に行う"; return 1
-  fi
   {
     echo "mise: $(mise --version 2>/dev/null | head -n 1)"
     echo "rust_toolchain: ${TOOLCHAIN}（mise current rust）"

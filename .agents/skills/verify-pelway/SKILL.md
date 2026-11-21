@@ -14,7 +14,7 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 
 - `--feature` は `features/README.md` の表の `verify-run --feature` の列の値（`decision`・`mail-draft`）。機能のファイル名（`channel-messages` など）は受け付けない（終了コード 2）。省略すると `decision`。
 - 証拠の置き場は、共有 git dir（`git rev-parse --path-format=absolute --git-common-dir`）の `pelway/evidence/<label>-<sha>/<run-id>/`。実装役も QA もここに揃える（Issue #568 なら `--label 568` で `pelway/evidence/568-<sha>/`）。`~/.local/state` と `/tmp` は使わない。共有 git dir の `pelway/` は、作業ツリーの外に書かない決まり（skill `implement-issue`）の例外として、`docs/superpowers/specs/agent-team.md` が巡回の状態（patrol-state.json）の置き場に認めた場所と同じ扱いで使う（ロックも `pelway/locks/`）。`--evidence-root` で変えられるが、作業ツリーの中（共有 git dir を除く）は拒否する（終了コード 2）。
-- 終了コード: 0 = 全段 PASS、1 = どこかが FAIL か、未対応・道具が無い（`summary.txt` か標準エラーに理由）、2 = 引数の誤り。
+- 終了コード: 0 = 全段 PASS、1 = どこかが FAIL か、未対応・道具が無い（`summary.txt` か標準エラーに理由）、2 = 引数の誤りか、run を始められない（証拠・ロックの置き場、git の確認。証拠のディレクトリを作る前の失敗では `summary.txt` は残らない）。
 - run は前景の 1 コマンドで終わる。サーバーを run の外で動かし続けない（`nohup`・`setsid`・`systemd-run` を使わない。pitchfork にも登録しない）。
 
 前提（run の前に 1 回。WSL（Ubuntu）で通す。コンテナは使わない）:
@@ -23,6 +23,7 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 2. 道具（`docs/agents/skill-helpers.md` はヘルパーの依存を bash・POSIX の標準コマンド・git・jq・agent-gh に限るが、`verify-run` はアプリを起動して観察するヘルパーで、Issue #568 の開発基盤の点検観点 2 が指定した道具を使うため、その範囲を超える）: `git`・`mise`・`rustup`・`jq`・`ss`（iproute2）・`pgrep`/`ps`（procps）・`sha256sum`・`realpath`・`readlink`・`comm`・`timeout`・`/proc`・bash の `/dev/tcp`。欠けていれば `verify-run` は「失敗（道具が無い）」で止まる。勝手に入れない。使った版は `tools.txt` に残る。
 3. `fnox exec` の下で動かさない。`verify-run` は自分の環境に fnox の秘密の変数があると止まる。
 4. Linux 以外（macOS など）では `verify-run` は「未対応（理由）」で終了コード 1 になる（`/proc`・`ss` が無い）。Mac での手順は未検証で、置き換え先は `lsof -p`・`lsof -iTCP -a -p <pid>`・`shasum -a 256`。
+5. 共有 git dir の `pelway/` の上の階層が自分か root の持ち物に見えること。証拠とロックの置き場の検査（`dir_chain_safe`）が同じ規則を要求するので、見えない環境では run はロックの階層の検査で終了コード 2 で止まる（ロックの置き場は変えられないので、`--evidence-root` では避けられない）。検査は緩めず、その環境では証拠になる run は取れないと報告する。名前空間（bwrap など）で見え方を変えた環境での run は、検査が見せられた見え方を確かめただけになることを明記する。
 
 守ること:
 
@@ -35,8 +36,8 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 ## 1. 起動
 
 - 依存の取得: `mise run fetch`（初回だけ。`verify-run` は `--offline --locked` でビルドする）。
-- 二重起動の確認（ビルドの前、run の最初）: ロックの階層 `<共有 git dir>/pelway/locks` は、証拠の置き場と同じ規則（実在のディレクトリで、自分か root だけが書き替えられる階層）で確かめてから使う。持ち主の PID の表示は、pid ファイルがリンクでない通常ファイルで中身が数字だけのときだけ（読めない・数字以外なら「不明」）。まず `<共有 git dir>/pelway/locks/<作業ツリーの実体のパスの sha256 の先頭 12 桁>` を `mkdir` で原子的に取り、取れなければ（同じ作業ツリーの別の run が実行中）FAIL で止まる。ロックの場所と鍵は `--evidence-root` やビルド（mbx が `target` をリンクにする）で変わらない。続けて、ビルド先（`${CARGO_TARGET_DIR:-<top>/target}` の実体）を鍵にした 2 つめのロック（`<共有 git dir>/pelway/locks/bin-<sha256 の先頭 12 桁>`）を取る。ビルドの前から run の終わりまで持ち、同じビルド先を共有する別の作業ツリーの run（`CARGO_TARGET_DIR` を同じにした run など）が、検証中の run の実行ファイルをビルドで置き換えるのを防ぐ（置き換わると、動かしたバイナリと証拠に残すコミットの対応が崩れる）。続けて、同じ target の下の `demo-serve` が動いていれば（手で起動したものなど）、触らずに FAIL で止まる（止めるかは人が決める）。ビルドの後にも、同じ実行ファイルの `demo-serve` が動いていないかをもう一度見る（新しい worktree の最初の run では、ビルドの前に `target` の実体が決まっていないため）。動いているほうの exe はビルドし直すと ` (deleted)` が付くので、外して比べる。ロックは後片付けで外す。
-- ビルドと起動: `verify-run` が `RUSTC=<mise.toml の rust のツールチェーンの rustc> mise exec -- cargo build --offline --locked -p pelway-http --example demo-serve --message-format=json-render-diagnostics` を実行し（rustc は `mise current rust` と `rustup which --toolchain` で決める。`mise exec` の PATH では、ほかの mise 呼び出しと重なると rustc が `/usr/bin` の別の版に解決されることがあるため）、cargo が報告した実行ファイル（mr_boxington のときは `~/.cache/mbx/targets/...` の下）を `env -i PATH=/usr/bin:/bin HOME=$HOME` の子として起動する（`env -i` は環境変数だけを清めるので、呼び出し元から引き継いだ標準入出力以外の fd は起動の直前に閉じる。端末の `/dev/ptmx` などが残ると、環境チェックの「開いているファイル」で許可外になる）。子の標準入力は run が持つパイプで、run が終われば（SIGKILL でも）閉じる。起動口 `crates/pelway-http/examples/demo-serve.rs` は標準入力の EOF で終わる。`127.0.0.1:0` で待ち受け（mise の `PELWAY_BIND_ADDR` は読まない）、LLM の設定を「どの変数も無い」写像で組み立てる（環境変数を参照しない）ので、台本モード（`ScriptGateway`）になる。
+- 二重起動の確認（ビルドの前、run の最初）: ロックの階層 `<共有 git dir>/pelway/locks` は、証拠の置き場と同じ規則（実在のディレクトリで、自分か root だけが書き替えられる階層）で確かめてから使う。持ち主の PID の表示は、pid ファイルがリンクでない通常ファイルで中身が数字だけのときだけ（読めない・数字以外なら「不明」）。まず `<共有 git dir>/pelway/locks/<作業ツリーの実体のパスの sha256 の先頭 12 桁>` を `mkdir` で原子的に取り、取れなければ（同じ作業ツリーの別の run が実行中）FAIL で止まる。ロックの場所と鍵は `--evidence-root` やビルド（mbx が `target` をリンクにする）で変わらない。続けて、ビルド先を鍵にした 2 つめのロック（`<共有 git dir>/pelway/locks/bin-<sha256 の先頭 12 桁>`）を取る。ビルド先は、ビルドと同じ `mise exec` の下で `cargo metadata --no-deps --offline` が報告する出力先の実体（`CARGO_TARGET_DIR`・`CARGO_BUILD_TARGET_DIR`・`.cargo/config.toml` の `build.target-dir`・mise の `[env]` など、cargo が認めるどの経路で変えても同じ鍵になる）。ビルドの前から run の終わりまで持ち、同じビルド先を共有する別の作業ツリーの run が、検証中の run の実行ファイルをビルドで置き換えるのを防ぐ（置き換わると、動かしたバイナリと証拠に残すコミットの対応が崩れる）。続けて、同じ target の下の `demo-serve` が動いていれば（手で起動したものなど）、触らずに FAIL で止まる（止めるかは人が決める）。ビルドの後にも、同じ実行ファイルの `demo-serve` が動いていないかをもう一度見る（新しい worktree の最初の run では、ビルドの前に `target` の実体が決まっていないため）。動いているほうの exe はビルドし直すと ` (deleted)` が付くので、外して比べる。ロックは後片付けで外す。
+- ビルドと起動: `verify-run` が `RUSTC=<mise.toml の rust のツールチェーンの rustc> mise exec -- cargo build --offline --locked -p pelway-http --example demo-serve --message-format=json-render-diagnostics` を実行し（rustc は `mise current rust` と `rustup which --toolchain` で決める。`mise exec` の PATH では、ほかの mise 呼び出しと重なると rustc が `/usr/bin` の別の版に解決されることがあるため）、cargo が報告した実行ファイル（mr_boxington のときは `~/.cache/mbx/targets/...` の下）を `env -i PATH=/usr/bin:/bin HOME=$HOME` の子として起動する（`env -i` は環境変数だけを清めるので、呼び出し元から引き継いだ標準入出力以外の fd は起動の直前に閉じる。端末の `/dev/ptmx` などが残ると、4 章の開いているファイルの検査（`proc-fd.txt`）で許可外になる）。子の標準入力は run が持つパイプで、run が終われば（SIGKILL でも）閉じる。起動口 `crates/pelway-http/examples/demo-serve.rs` は標準入力の EOF で終わる。`127.0.0.1:0` で待ち受け（mise の `PELWAY_BIND_ADDR` は読まない）、LLM の設定を「どの変数も無い」写像で組み立てる（環境変数を参照しない）ので、台本モード（`ScriptGateway`）になる。
 - 空のデータから使える状態まで: マイグレーションは無い（保存はメモリだけ）。テスト用データは起動時のデモ seed（ワークスペース `ws-demo-01`、チャンネル `ch-demo-anken-b`「案件B」、田中 `m-tanaka`・山本 `m-yamamoto`・佐藤 `m-sato`・ハル `m-hal`（bot）、過去の発言 3 件）。
 - 使える合図: 実際に待ち受けたポートを書いた標準出力（証拠の `server.stdout`）が 1 行だけで `demo-serve ready addr=127.0.0.1:<1〜65535> pid=<pid> llm=script` の形（`pid` が起動した子の PID と一致すること）、2 章の環境チェック（PID・バイナリ・待ち受けの照合）を通ったこと、そのあと seed を HTTP で読めること（`GET /v1/workspaces/ws-demo-01/channels?actor=m-tanaka` がチャンネル 1 件でメンバーの ID が `m-hal,m-sato,m-tanaka,m-yamamoto`、`GET /v1/channels/ch-demo-anken-b/messages?actor=m-tanaka&after_seq=0` が 3 件）。ポートが開いただけでは合図にしない。
 
@@ -54,14 +55,14 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 `verify-run` の `env_check` が、読み取りだけで「このインスタンスを動かしてよいか」に答え、`env-check.txt` に残す。
 
 - プロセス: `/proc/<pid>/exe` がこの run でビルドした `demo-serve` で、その sha256 が起動前に測った値と同じ。使った道具の版は `tools.txt`（`mise`・ツールチェーンの `rustc`・`cargo`・`ss`・`pgrep` など）。
-- ビルドと sha: `git rev-parse HEAD` が run の開始時と同じ。作業ツリーに未コミットの変更があれば起動前に FAIL（`--allow-dirty` は手元の試しだけに使い、その run は証拠にしない）。 git の確認（`git status --porcelain`）に失敗したら止まる（終了コード 2）。子を起動する直前にも作業ツリーと HEAD を見直す。git の確認に失敗したか、HEAD が開始の後に変わっていれば FAIL。作業ツリーの変化も FAIL（開始の後に編集してからビルドした変更を、元のコミットの証拠にしない）。ただし `--allow-dirty` のときは作業ツリーの変化を許し、その代わり `summary.txt` に `allow_dirty=yes` が残る（その run は証拠にしない）。
+- ビルドと sha: `git rev-parse HEAD` が run の開始時と同じ。作業ツリーに未コミットの変更があれば起動前に FAIL（`--allow-dirty` は手元の試しだけに使い、その run は証拠にしない）。 git の確認（`git status --porcelain`）に失敗したら止まる（終了コード 2）。子を起動する直前にも作業ツリーと HEAD を見直す。git の確認に失敗したか、HEAD が開始の後に変わっていれば FAIL。作業ツリーの変化も FAIL（開始の後に編集してからビルドした変更を、元のコミットの証拠にしない）。ただし `--allow-dirty` のときは作業ツリーの変化を許し、その代わり `summary.txt` に `allow_dirty=1` が残る（その run は証拠にしない）。
 - ポート: `ss -tlnp` で、この PID の TCP の待ち受けが ready 行の `addr` だけ。`ss -uanp`（未接続も接続済みも含む全状態）で、この PID の UDP のソケットが 0 個（`udp_sockets=0`）。この照合を通るまで HTTP は送らない。
 - 環境: 子の環境の変数の名前の数（`env_name_count`）と、fnox の秘密 3 つ（LLM のキー・Penpot MCP のトークン・DB の URL）と LLM の接続先 2 つ（独自の接続先・既知の接続先）が無いこと（`forbidden_env=none`）。名前の有無だけを見て、値は残さない。証拠には変数名も書かずラベルだけ書く（変数名は leak-phrases の禁止語）。
 - 台本モード: 根拠は、`demo-serve` が LLM の設定を「どの変数も無い」写像で組み立てる（`crates/pelway-http/examples/demo-serve.rs`。キーが無いので必ず `ScriptGateway`）ことと、`network.txt` に外への接続が無いこと。標準エラーの接続先の行 `pelway-runner: LLM endpoint: ...` と ready 行の `llm=script` は記録として残すが、どちらもモードを区別しない（接続先の行はキーの有無を見る前に必ず出る。`llm=script` は固定の文字列）。台本の 2 案は実提供元の失敗時のフォールバックにも使われるので、3 章の段 5 で、ハルの投稿にフォールバックの進捗行（「台本の応答で進めます」）が無いことも確かめる。
 - 認証: デモは認証なし。操作者は合成ヘッダー `x-pelway-member-id`・`x-pelway-member-kind` で名乗る。
 - 二重起動・共有インスタンス: 起動前に、同じ target の下の `demo-serve` が動いていれば FAIL にして止まり、そのプロセスには触らない（1 章）。接続先は自分の ready 行の `addr` だけで、ほかのポートのインスタンスには要求を送らない。
 
-失敗: 上のどれか 1 つでも合わない（`env-check.txt` の `NG:` 行）。別のインスタンスだった場合も同じ。
+失敗: 上のどれか 1 つでも合わない。環境の中身の照合は `env-check.txt` の `NG:` 行で、git の確認や起動の前の見直しなど run を始められない失敗は終了コード 2（証拠のディレクトリを作る前なら `summary.txt` も残らない）か `summary.txt` の FAIL 行で出る。別のインスタンスだった場合も同じ。
 
 ## 3. 操作
 
@@ -85,7 +86,7 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 ## 4. 証拠
 
 - 置き場: `<共有 git dir>/pelway/evidence/<label>-<HEAD の sha>/<UTC 時刻>-<feature>-<run の PID>/`。作業ツリーの外で、run ごと・sha ごとに分かれる。run のディレクトリは毎回新しく所有者だけの権限（700）で作り、既にあるとき・置き場の下のシンボリックリンクをたどって実体が置き場の外に出るとき・階層がほかの利用者に差し替えられるとき（置き場から下が自分の持ち物でない、またはグループ・ほかが書ける。置き場より上が自分か root の持ち物でない、または sticky でないのにグループ・ほかが書ける）は作らずに止まる（終了コード 2）。
-- 中身: `summary.txt`（run_id・sha・dirty・feature・段ごとの `PASS`/`FAIL`・verdict）、`steps/NN-<名前>.req` と `.resp`（送った要求と受け取った応答。NN は送った順で、判断待ちを待つ間は `decisions-pending` が複数並ぶ。`body`・`question` は `<redacted len=N>` に伏せる）、`env-check.txt`、`tools.txt`、`build.json`（cargo の報告）、`survivors-before.txt`・`survivors-after.txt`、`network.txt`（要求ごとと 0.1 秒ごとに `ss -tuanp` で取った、この PID と待ち受けのアドレスに関わる TCP・UDP の行と、最後の集計行）、`proc-fd.txt`（開いているファイル）、`server.stdout`・`server.stderr`、`build.log`、`cleanup.txt`、`demo-check.txt` と `demo-check-input/`（demo-check に渡した写し）、`SHA256SUMS`。
+- 中身: `summary.txt`（run_id・sha・dirty・allow_dirty・feature・段ごとの `PASS`/`FAIL`・verdict）、`steps/NN-<名前>.req` と `.resp`（送った要求と受け取った応答。NN は送った順で、判断待ちを待つ間は `decisions-pending` が複数並ぶ。`body`・`question` は `<redacted len=N>` に伏せる）、`env-check.txt`、`tools.txt`、`build.json`（cargo の報告）、`survivors-before.txt`・`survivors-after.txt`、`network.txt`（要求ごとと 0.1 秒ごとに `ss -tuanp` で取った、この PID と待ち受けのアドレスに関わる TCP・UDP の行と、最後の集計行）、`proc-fd.txt`（開いているファイル）、`server.stdout`・`server.stderr`、`build.log`、`cleanup.txt`、`demo-check.txt` と `demo-check-input/`（demo-check に渡した写し）、`SHA256SUMS`。
 - 成功の基準:
   - 利用者の道筋（公開の HTTP 経路と合成ヘッダー）だけで動かす。テスト専用の setter・内部の状態を直接読む経路は使わない。
   - 操作（`.req`）と結果の状態（`.resp`）の両方を残す。送った要求それぞれに `.req` と `.resp` がそろい、書き込みの失敗が無いことを `証拠: 要求ごとの .req と .resp がそろっている` の段で確かめる。

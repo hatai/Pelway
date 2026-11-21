@@ -204,11 +204,21 @@ expect_eq "stop_sampler: killed by SIGKILL before the stop request" "$(ss_sig 'w
 expect_eq "stop_sampler: killed by SIGTERM before the stop request" "$(ss_sig 'while :; do sleep 0.05; done' 0.2 TERM)" 1
 expect_eq "stop_sampler: answered TERM before the request" "$(ss_sig 'trap "exit 4" TERM; while :; do sleep 0.05; done' 0.2 TERM)" 1
 expect_eq "stop_sampler: stopped without the trap (no answer)" "$(ss_rc 'while :; do sleep 0.05; done' 0.3)" 1
+# 実物の start_sampler と stop_sampler の組: observe_sockets を何もしないものに差し替え、
+# DS_IN に使い捨ての fd を入れる。停止の要求に trap の 4 で応える組なら OBS_FAILED は立たない
+# （偽物のサンプラの試験は、片方の番号だけが変わっても気づけない）。
+expect_eq "start_sampler/stop_sampler: real pair stops with answer 4" "$(
+  OBS_FAILED=0; observe_sockets() { :; }; exec 9< /dev/null; DS_IN=9
+  start_sampler; sleep 0.2; stop_sampler; exec 9>&-; echo "${OBS_FAILED}")" 0
 
 # try_lock: ビルド先を鍵にしたロックはビルドの前から run の終わりまで持つ（同じビルド先を共有する別の
 # 作業ツリーの run が、検証中の run の実行ファイルをビルドで置き換えるのを防ぐ）。
 expect_eq "try_lock: second holder is refused" "$(d="${tmp}/lock-a"; try_lock "${d}"; a=$?; try_lock "${d}" 2> /dev/null; echo "${a}-$?")" "0-1"
 expect_eq "try_lock: released dir can be retaken" "$(d="${tmp}/lock-b"; try_lock "${d}" && rm -f "${d}/pid" && rmdir "${d}" && try_lock "${d}"; echo $?)" 0
+# pid を書けなかったときは取ったロックを外す（外さないと次の run から止まる）。
+expect_eq "try_lock: pid write failure releases the dir" "$(
+  echo() { return 1; }; try_lock "${tmp}/lock-f" 2> /dev/null; rc=$?; unset -f echo
+  [ -d "${tmp}/lock-f" ] && echo "${rc}-left" || echo "${rc}-gone")" "1-gone"
 expect_eq "bin lock is taken before the build" "$(awk '/bin-\$\(printf/{a=NR} /cargo build/{b=NR} END{print (a>0 && b>0 && a<b)?"yes":"no"}' "${tool}")" "yes"
 
 # locks_dir_ready: 共有 git dir の pelway/locks を作り、証拠と同じ規則でほかの利用者が差し替えられない
@@ -231,11 +241,23 @@ expect_eq "lock_owner: non-numeric" "$(lock_owner "${tmp}/l3")" ""
 mkdir -p "${tmp}/l4"
 expect_eq "lock_owner: no pid file" "$(lock_owner "${tmp}/l4")" ""
 
-# target_dir_of: 相対の CARGO_TARGET_DIR は作業ツリーのルートから解決する（Cargo と同じ）。
-expect_eq "target_dir_of: unset" "$(unset CARGO_TARGET_DIR; target_dir_of /wt)" "/wt/target"
-expect_eq "target_dir_of: absolute" "$(CARGO_TARGET_DIR=/abs/td target_dir_of /wt)" "/abs/td"
-expect_eq "target_dir_of: relative resolves from the work tree" "$(CARGO_TARGET_DIR=target target_dir_of /wt)" "/wt/target"
-expect_eq "target_dir_of: relative and absolute share the output" "$(CARGO_TARGET_DIR=target target_dir_of /wt)" "$(CARGO_TARGET_DIR=/wt/target target_dir_of /other)"
+# cargo_target_dir: ビルド先はビルドと同じ mise exec の下で cargo 自身に聞く（環境変数だけを
+# 解くと .cargo/config.toml・CARGO_BUILD_TARGET_DIR・mise の [env] で別の出力先になる run と
+# 別の鍵を取る）。ここでは mise exec を素通りにする偽物で、本物の cargo metadata に聞く。
+# shellcheck disable=SC2329  # cargo_target_dir の中から呼ばれる
+mise() { if [ "${1:-}" = exec ]; then shift; [ "${1:-}" = "--" ] && shift; "$@"; else command mise "$@"; fi; }
+mk_crate() { mkdir -p "$1/src"; printf '[package]\nname = "t"\nversion = "0.0.0"\nedition = "2021"\n' > "$1/Cargo.toml"; : > "$1/src/lib.rs"; }
+mk_crate "${tmp}/crate"
+expect_eq "cargo_target_dir: default" "$(cargo_target_dir "${tmp}/crate")" "${tmp}/crate/target"
+expect_eq "cargo_target_dir: CARGO_TARGET_DIR env" "$(CARGO_TARGET_DIR="${tmp}/abs-td" cargo_target_dir "${tmp}/crate")" "${tmp}/abs-td"
+expect_eq "cargo_target_dir: relative env resolves from the crate root" "$(CARGO_TARGET_DIR=rel-td cargo_target_dir "${tmp}/crate")" "${tmp}/crate/rel-td"
+expect_eq "cargo_target_dir: relative and absolute share the output" "$(CARGO_TARGET_DIR=rel-td cargo_target_dir "${tmp}/crate")" "$(CARGO_TARGET_DIR="${tmp}/crate/rel-td" cargo_target_dir "${tmp}/crate")"
+expect_eq "cargo_target_dir: CARGO_BUILD_TARGET_DIR env" "$(CARGO_BUILD_TARGET_DIR="${tmp}/btd" cargo_target_dir "${tmp}/crate")" "${tmp}/btd"
+mk_crate "${tmp}/crate2"; mkdir -p "${tmp}/crate2/.cargo"; printf '[build]\ntarget-dir = "out"\n' > "${tmp}/crate2/.cargo/config.toml"
+expect_eq "cargo_target_dir: config.toml build.target-dir" "$(cargo_target_dir "${tmp}/crate2")" "$(cd "${tmp}/crate2" && cargo metadata --no-deps --format-version 1 --offline | jq -r .target_directory)"
+mkdir -p "${tmp}/empty-dir"
+expect_eq "cargo_target_dir: no manifest reports nothing" "$(cargo_target_dir "${tmp}/empty-dir")" ""
+unset -f mise
 
 # tree_state: コミット済み・変更あり・git の確認の失敗を区別する。
 git init -q "${tmp}/ts"; git -C "${tmp}/ts" -c user.email=t@e -c user.name=t commit -q --allow-empty -m init

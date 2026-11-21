@@ -135,11 +135,11 @@
 
 対象 head: 9aef851ba27dc1f05037f95df3990c5f70993b2b
 
-1. 詰まった箇所: この実行環境（Devin の sandbox）のマウント名前空間: `/tmp` と `/home` が nobody 所有のため、`dir_chain_safe` の「置き場より上は自分か root」にどの一時領域も合わず、`make_run_dir` の試験が落ちる（HEAD 版でも再現＝環境起因。`TMPDIR=/dev/shm/<dir>` では全通過）。実 run は `--evidence-root` を `/dev/shm` に向け、run ディレクトリを標準の置き場に写して `sha256sum -c` で照合した。前任の環境では合っていた。
-2. 詰まった箇所: 自分の run で 2 件見つけて直した: ac0621f6 の mail-draft run が「消えた pid 544960」（T3 本体の子 `t3 acp-mcp-bridge`。親が t3 で run の途中に自然終了）で FAIL→ T3 本体を「実行ファイル名が t3 で親が t3 ではないもの」に絞る（59791cb7）。私の run で demo-serve に端末の `/dev/ptmx` が継承され「開いているファイル」FAIL → `env -i` は fd を清めないので、起動の直前に標準入出力以外の fd を閉じる（9aef851b）。
-3. 曖昧だった文: 「生き残りの確認: …と T3 本体（実行ファイル名が `t3`。プロセス名は `node-MainThread` などになる）の PID を取り」（`.agents/skills/verify-pelway/SKILL.md` の「5. 後片付け」）。実行ファイル名だけでは T3 の子も拾う。「親が t3 ではないもの」と絞った。
-4. 仮定と解釈: T3 の子は 5 分以上動いていても比べないと読んだ（短命の常駐に近い子を網羅する comm の一覧は作れず、親が t3 かどうかで機械に分けられる）。comm の一覧に `t3-acp-mcp-bridge` を足す読み方は選ばなかった。
-5. 足りなかった情報・検証手段: この sandbox のマウント構成の仕様（/dev/sdd の分割マウントと exec ごとの /dev/shm）。改善案: `.agents/skills/verify-pelway/SKILL.md` の前提に「証拠置き場の祖先が自分か root の持ち物でない環境（一部の sandbox）では run と試験は止まる」を足す。
+1. 詰まった箇所: この実行環境（Devin の sandbox）のマウント名前空間: `/tmp` と `/home` が nobody 所有のため、`dir_chain_safe` の「置き場より上は自分か root」にどの一時領域も合わず、`make_run_dir` の試験が落ちる（HEAD 版でも再現＝環境起因。`TMPDIR=/dev/shm/<dir>` では全通過）。実 run は `--evidence-root` を `/dev/shm` に向け、run ディレクトリを標準の置き場に写して `sha256sum -c` で照合した。前任の環境では合っていた。あわせて自分の run で 2 件見つけて直した: ac0621f6 の mail-draft run が「消えた pid 544960」（T3 本体の子 `t3 acp-mcp-bridge`。親が t3 で run の途中に自然終了）で FAIL→ T3 本体を「実行ファイル名が t3 で親が t3 ではないもの」に絞る（59791cb7）。私の run で demo-serve に端末の `/dev/ptmx` が継承され「開いているファイル」FAIL → `env -i` は fd を清めないので、起動の直前に標準入出力以外の fd を閉じる（9aef851b）。
+2. 曖昧だった文: 「生き残りの確認: …と T3 本体（実行ファイル名が `t3`。プロセス名は `node-MainThread` などになる）の PID を取り」（`.agents/skills/verify-pelway/SKILL.md` の「5. 後片付け」）。実行ファイル名だけでは T3 の子も拾う。「親が t3 ではないもの」と絞った。
+3. 仮定と解釈: T3 の子は 5 分以上動いていても比べないと読んだ（短命の常駐に近い子を網羅する comm の一覧は作れず、親が t3 かどうかで機械に分けられる）。comm の一覧に `t3-acp-mcp-bridge` を足す読み方は選ばなかった。
+4. 足りなかった情報・検証手段: この sandbox のマウント構成の仕様（/dev/sdd の分割マウントと exec ごとの /dev/shm）。
+5. 改善案: `.agents/skills/verify-pelway/SKILL.md` の前提に「証拠置き場の祖先が自分か root の持ち物でない環境（一部の sandbox）では run と試験は止まる」を足す。
 
 使ったスキル: implement-issue、verify-pelway
 
@@ -147,11 +147,11 @@
 
 対象 head: 5309e9580c8fdda6b5204fad5ef963a0dea5da58
 
-1. 詰まった箇所: round 8 の委託が両担当ともプロバイダの使用量制限で起動に失敗した（Claude は解除後に自動再開して approve、Codex も自動再開で request-changes）。Codex の must-fix 2 件: 同じビルド先を共有する別の作業ツリーの run 同士では、ビルドの後に取っていた 2 つめのロックでは、先の run がハッシュを取る前に後の run が実行ファイルを置き換えうる → ビルド先の実体のパスを鍵にしたロックをビルドの前から run の終わりまで持つ（`try_lock`、ロックは cleanup で外す。鍵は `target_real`）。定期観察（サンプラ）が停止の要求より前にほかのシグナルで消えても `wait` の 137 を失敗にしていなかった → 意図した停止（143）以外の終了は全部 OBS_FAILED。
-2. 詰まった箇所: 追加した試験: 停止の要求より前にシグナルで終わったサンプラ・自分で抜けたサンプラが失敗になること、`try_lock` の排他と再取得、bin ロックが `cargo build` より前に取られること（ソースの並びの機械検査）。
-3. 曖昧だった文: Codex の指摘文は行番号が差し替え後のもの（:687・:694・:697・:307・:705・:380・:379）。ソースと照合して「ビルド後の bin ロック取得」「stop_sampler が 3 だけを失敗にする」を指すと読んだ。
-4. 仮定と解釈: ロックの鍵は「実行ファイルの置き場」ではなく「ビルド先の実体（`realpath -m`）」に広げた（ビルドの前には実行ファイルの置き場がまだ分からず、target がリンクになる前でも同じ鍵を引ける）。印の無い nit 2 件（`compgen -G` の glob、偽 hasher の `-c` 探し）はこの round では直さなかった。
-5. 足りなかった情報・検証手段: 本当に別のコミットから同じビルド先で並行ビルドする結合試験（ロックの試験と並びの検査で代えた）。
+1. 詰まった箇所: round 8 の委託が両担当ともプロバイダの使用量制限で起動に失敗した（Claude は解除後に自動再開して approve、Codex も自動再開で request-changes）。Codex の must-fix 2 件: 同じビルド先を共有する別の作業ツリーの run 同士では、ビルドの後に取っていた 2 つめのロックでは、先の run がハッシュを取る前に後の run が実行ファイルを置き換えうる → ビルド先の実体のパスを鍵にしたロックをビルドの前から run の終わりまで持つ（`try_lock`、ロックは cleanup で外す。鍵は `target_real`）。定期観察（サンプラ）が停止の要求より前にほかのシグナルで消えても `wait` の 137 を失敗にしていなかった → 意図した停止（143）以外の終了は全部 OBS_FAILED。あわせて試験を足した: 停止の要求より前にシグナルで終わったサンプラ・自分で抜けたサンプラが失敗になること、`try_lock` の排他と再取得、bin ロックが `cargo build` より前に取られること（ソースの並びの機械検査）。
+2. 曖昧だった文: Codex の指摘文は行番号が差し替え後のもの（:687・:694・:697・:307・:705・:380・:379）。ソースと照合して「ビルド後の bin ロック取得」「stop_sampler が 3 だけを失敗にする」を指すと読んだ。
+3. 仮定と解釈: ロックの鍵は「実行ファイルの置き場」ではなく「ビルド先の実体（`realpath -m`）」に広げた（ビルドの前には実行ファイルの置き場がまだ分からず、target がリンクになる前でも同じ鍵を引ける）。印の無い nit 2 件（`compgen -G` の glob、偽 hasher の `-c` 探し）はこの round では直さなかった。
+4. 足りなかった情報・検証手段: 本当に別のコミットから同じビルド先で並行ビルドする結合試験（ロックの試験と並びの検査で代えた）。
+5. 改善案: `.agents/skills/verify-pelway/verify-run.test.sh` に、偽物のサンプラではなく実物の `start_sampler` と `stop_sampler` の組で「停止の要求に終了コード 4 で応える」ことを確かめる試験を足す（trap の番号と判定がずれても気づけない構造だった）。
 
 使ったスキル: implement-issue、verify-pelway
 
@@ -159,10 +159,10 @@
 
 対象 head: bdc760c2c028c44d722e176c28fd454e5023c226
 
-1. 詰まった箇所: Codex の round 9（must-fix 3・印の nit 1）の直し: (a) 停止の要求より前にほかの SIGTERM で終わったサンプラを、終了コード 143 だけではこの run が止めたものと区別できない → サンプラは TERM を trap して終了コード 4 で応答し、stop_sampler は「要求の前に消えている（ゾンビ含む）」と「応答が 4 ではない」の両方を OBS_FAILED にする。(b) `--evidence-root` の有無によらず `<git-common-dir>/pelway/locks` は共有の置き場なのに、置き場の鎖の検査が証拠側だけだった → `locks_dir_ready` で `pelway` と `pelway/locks` の鎖を `dir_chain_safe` で検査し、pid の表示は `lock_owner` で「通常ファイル・リンクではない・数字だけ」のものに限る。(c) 相対の `CARGO_TARGET_DIR` を呼び出し側の cwd から解決していたため、作業ツリーのサブディレクトリからの run と絶対パスの run が同じビルド先で別のロックを引きうる → `target_dir_of` で `TOP` から解決する（`cd "${TOP}"` してから Cargo を呼ぶのと同じ基準）。
-2. 詰まった箇所: この sandbox では `/home` が nobody 所有に見えるため、(b) の検査を加えた版では実 run が `locks_dir_ready` で止まる。検査を緩めず、bwrap で `/home` 以下の必要な範囲だけを自分所有に見せた名前空間で run した。bwrap 内は DNS が切れる（`/etc/resolv.conf` が `/mnt/wsl/resolv.conf` へのリンクで、リンク先を bind していなかった）と `~/.rustup` の bind だけでは mise の shim が channel の同期に落ちるため、`/mnt/wsl` を bind し、PATH の先に `~/.cargo/bin`（本物の rustup、`which` はローカル解決）を置いた。
-3. 曖昧だった文: 印の nit「`SKILL.md` は未コミットの変更で常に失敗とあるが `--allow-dirty` で許される」→ ローカルの試し用であること、`allow_dirty=yes` が記録されること、その run は証拠にならないことを SKILL.md に明記した。
-4. 仮定と解釈: サンプラが TERM で 4 を返す設計は、trap しない限り bash の TERM 既定動作（143）と衝突しない、と読んだ。`wait` が返す他の終了コード（0・3・137・143）は全部失敗に寄せた。
-5. 足りなかった情報・検証手段: bwrap の内側で mise/rustup の shim が辿るパスの一覧（試行錯誤で `.rustup`・`.cargo`・`.local/share|state|cache/mise`・`.cache/mbx`・`/mnt/wsl` の bind が必要と判明）。
+1. 詰まった箇所: Codex の round 9（must-fix 3・印の nit 1）の直し: (a) 停止の要求より前にほかの SIGTERM で終わったサンプラを、終了コード 143 だけではこの run が止めたものと区別できない → サンプラは TERM を trap して終了コード 4 で応答し、stop_sampler は「要求の前に消えている（ゾンビ含む）」と「応答が 4 ではない」の両方を OBS_FAILED にする。(b) `--evidence-root` の有無によらず `<git-common-dir>/pelway/locks` は共有の置き場なのに、置き場の鎖の検査が証拠側だけだった → `locks_dir_ready` で `pelway` と `pelway/locks` の鎖を `dir_chain_safe` で検査し、pid の表示は `lock_owner` で「通常ファイル・リンクではない・数字だけ」のものに限る。(c) 相対の `CARGO_TARGET_DIR` を呼び出し側の cwd から解決していたため、作業ツリーのサブディレクトリからの run と絶対パスの run が同じビルド先で別のロックを引きうる → `target_dir_of` で `TOP` から解決する（`cd "${TOP}"` してから Cargo を呼ぶのと同じ基準）。あわせて、この sandbox では `/home` が nobody 所有に見えるため (b) の検査を加えた版では実 run が `locks_dir_ready` で止まる → 検査を緩めず、bwrap で `/home` 以下の必要な範囲だけを自分所有に見せた名前空間で run した。bwrap 内は DNS が切れる（`/etc/resolv.conf` が `/mnt/wsl/resolv.conf` へのリンクで、リンク先を bind していなかった）と `~/.rustup` の bind だけでは mise の shim が channel の同期に落ちるため、`/mnt/wsl` を bind し、PATH の先に `~/.cargo/bin`（本物の rustup、`which` はローカル解決）を置いた。
+2. 曖昧だった文: 「作業ツリーに未コミットの変更があれば起動前に FAIL」（`.agents/skills/verify-pelway/SKILL.md` の 2 章「ビルドと sha」）。印の nit（`--allow-dirty` の例外が文書に無い）のとおり、ローカルの試し用であること・`allow_dirty` が記録されること・その run は証拠にならないことを明記した。
+3. 仮定と解釈: サンプラが TERM で 4 を返す設計は、trap しない限り bash の TERM 既定動作（143）と衝突しない、と読んだ。`wait` が返す他の終了コード（0・3・137・143）は全部失敗に寄せた。
+4. 足りなかった情報・検証手段: bwrap の内側で mise/rustup の shim が辿るパスの一覧（試行錯誤で `.rustup`・`.cargo`・`.local/share|state|cache/mise`・`.cache/mbx`・`/mnt/wsl` の bind が必要と判明）。
+5. 改善案: `.agents/skills/verify-pelway/SKILL.md` の前提に「共有 git dir の `pelway/` の上の階層が自分か root の持ち物に見えること（見えない環境ではロックの検査で終了コード 2。検査を緩めず、その環境では証拠になる run は取れない）」を足す。
 
 使ったスキル: implement-issue、verify-pelway
