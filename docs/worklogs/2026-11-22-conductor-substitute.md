@@ -71,3 +71,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 
 - 受信箱 153–154: #568・#611 impl の failed（T3 障害・自動再試行に任せる）。watch 3380–3409: 自スレッド遷移のみ
 - #619 QA は Devin 委託で実行中（Claude 上限振替）。#560 impl 未起床・send 継続不可（Issue 記録済み）
+
+## 巡回記録（patrol 5〜7・03:55 JST）
+
+- patrol 5・6: 実値変化なし。#568・#611・a2e1fc7f は T3 障害で failed→再試行。#560 impl 未起床・send 不可
+- patrol 7: PR #619 の QA 委託（Devin・振替）が完了。pelway-qa[bot] 名義「QA: pass sha:9afb58b2… run:44923610876」を投稿（comment 7066088136）。pelway-review APPROVED・必須チェック全 success・QA pass の 3 条件を確認し automerge 付与（Kodiak キュー待ち）
+- QA 投稿の補足: agent-gh qa は PELWAY_AGENT_FNOX_CONFIG の明示が必要（patrol-state に記録）
