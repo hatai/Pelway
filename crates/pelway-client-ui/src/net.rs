@@ -2,7 +2,8 @@
 //!
 //! 外部の HTTP クレートは足さない——サーバーと同じく `TcpStream` の直書きで、
 //! 接続先は `127.0.0.1` だけ、接続ごとに `Connection: close` で 1 要求ずつ送る。
-//! 応答の body は `Content-Length` で決まる長さを読む（サーバーも同じ形で返す）。
+//! 応答は送信側が接続を閉じるまで読み、宣言された `Content-Length` と実際の
+//! 本文長を照合する（サーバーは応答の終わりを接続の close で示す）。
 //! 要求・応答の本文はログに出さない・ファイルに書かない（合成データの方針どおり）。
 
 use std::fmt;
@@ -32,8 +33,11 @@ pub enum NetError {
     /// 接続・読み書きの失敗（接続拒否・タイムアウトを含む）。
     Io(std::io::Error),
     /// 応答が HTTP/1.1 として読めない（status 行やヘッダー区切りが無い）、
-    /// または要求ターゲット・ヘッダー値が送れない形・応答が上限を超える形。
+    /// または要求ターゲット・ヘッダー値が送れない形。
     Malformed,
+    /// 応答が [`MAX_RESPONSE_BYTES`] を超えた（読み取りの途中で打ち切る。
+    /// 呼び出し側がページ件数を絞り直す判断に使う）。
+    TooLarge,
     /// 接続先が `127.0.0.1` でない（`live::parse_server_addr` を通らない
     /// 経路からの流入をここでも防ぐ。`::1` や `127.0.0.2` も拒否）。
     NonLoopback,
@@ -44,6 +48,7 @@ impl fmt::Display for NetError {
         match self {
             Self::Io(e) => write!(f, "connection or I/O failed: {e}"),
             Self::Malformed => f.write_str("malformed HTTP response"),
+            Self::TooLarge => f.write_str("response exceeds size limit"),
             Self::NonLoopback => f.write_str("non-loopback target"),
         }
     }
@@ -143,7 +148,7 @@ impl Client {
                 Ok(n) => {
                     raw.extend_from_slice(&buf[..n]);
                     if raw.len() as u64 > MAX_RESPONSE_BYTES {
-                        return Err(NetError::Malformed);
+                        return Err(NetError::TooLarge);
                     }
                 }
                 Err(e) => return Err(NetError::Io(e)),

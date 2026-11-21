@@ -18,6 +18,7 @@
 
 use std::fmt;
 use std::net::SocketAddr;
+use std::time::{Duration, Instant};
 
 use pelway_contract::ids::{ChannelId, ClientMsgId, MemberId, WorkspaceId};
 use pelway_contract::member::MemberKind;
@@ -39,11 +40,21 @@ pub const DEFAULT_SERVER_URL: &str = "http://127.0.0.1:8787";
 /// チャンネルの最初の人に切り替える（[`LiveSession::bootstrap`] 内）。
 const DEFAULT_ACTOR: &str = "m-tanaka";
 
-/// メッセージ取得 1 ページの件数。サーバーは `limit` 件までを seq 昇順で返す
-/// （`limit` 未指定なら全件）。1 ページが応答上限（`net` の 1 MiB）に収まる
-/// 件数に抑え、これを超える履歴は `after_seq` で続きを取る——全件要求だと
-/// 履歴が上限を超えたとき取得が恒久的に失敗するため。
+/// メッセージ取得 1 ページの初期件数。サーバーは `limit` 件までを seq 昇順で
+/// 返す（`limit` 未指定なら全件）。応答が `net` の上限（1 MiB）を超えたときは
+/// 同じカーソルから件数を半減して再試行する（件数だけでは応答バイト数を
+/// 抑えられないため——本文 1 件が最大 64 KiB の要求をサーバーは受け付ける）。
 pub const MESSAGE_PAGE_LIMIT: u32 = 200;
+
+/// メッセージ取得 1 回（`bootstrap`/`poll` の中の `fetch_messages`）全体の期限。
+/// 各ページの通信は別途 `net` の期限が掛かるが、ページを繰り返すループ全体が
+/// ワーカーを占有し続けないよう、ここにも上限を持たせる。
+const FETCH_DEADLINE: Duration = Duration::from_secs(60);
+
+/// メッセージ取得 1 回で蓄積する本文バイト数の上限。ページを足し続けると
+/// メモリを際限なく占有するため、本文の合計サイズで打ち切る
+/// （対象デモの履歴はこの値を大きく下回る）。
+const MAX_FETCH_BODY_BYTES: usize = 32 << 20;
 
 /// サーバー URL 文字列のパース失敗。文言に入力値は含めない
 /// （接続先として拒否した文字列をエラー出力へ持ち出さない）。
@@ -108,6 +119,9 @@ pub enum LiveError {
     /// 投稿を受け付けた時点の宛先・名義と食い違った（別チャンネル・別人名義に
     /// 送らないため投稿を止めた）。
     StaleTarget,
+    /// サーバーの応答が取得の前提を満たさない（ページが進まない・履歴が
+    /// クライアント側の蓄積上限や期限を超える）。文言に応答内容は含めない。
+    Protocol(&'static str),
 }
 
 impl fmt::Display for LiveError {
@@ -118,6 +132,7 @@ impl fmt::Display for LiveError {
             Self::Json(e) => write!(f, "unexpected response JSON: {e}"),
             Self::NoChannel => f.write_str("no channel selected"),
             Self::StaleTarget => f.write_str("post target changed while reconnecting"),
+            Self::Protocol(msg) => write!(f, "unexpected server response: {msg}"),
         }
     }
 }
@@ -197,21 +212,28 @@ impl LiveSession {
         };
         let channel: Channel = self.get_json(&self.actor_path(&channel_path(&channel_id)))?;
         // 表示ユーザーがチャンネルの人のメンバーに居なければ先頭の人に直す。
+        // ここでは次の名義を計算するだけで、メッセージの取得が成功するまで
+        // セッションには反映しない（途中の失敗でチャンネルと名義の
+        // 組み合わせが壊れたまま残らないよう、全件そろってから一緒に更新する）。
+        let mut actor = self.actor.clone();
+        let mut actor_kind = self.actor_kind;
         if !channel
             .members
             .iter()
-            .any(|m| m.member_id == self.actor && m.member_kind == MemberKind::Human)
+            .any(|m| m.member_id == actor && m.member_kind == MemberKind::Human)
             && let Some(first_human) = channel
                 .members
                 .iter()
                 .find(|m| m.member_kind == MemberKind::Human)
         {
-            self.actor = first_human.member_id.clone();
-            self.actor_kind = MemberKind::Human;
+            actor = first_human.member_id.clone();
+            actor_kind = MemberKind::Human;
         }
         let messages = self.fetch_messages(&channel_id)?;
         self.channel = Some(channel);
         self.messages = messages;
+        self.actor = actor;
+        self.actor_kind = actor_kind;
         Ok(())
     }
 
@@ -238,25 +260,46 @@ impl LiveSession {
     }
 
     /// メッセージ一覧を `limit` + `after_seq` のページングで全件取る。
-    /// 満杯のページが返ったら最後の seq の続きを要求し、短いページで終わる
-    /// （サーバーが `after_seq` を見ず起点が進まない場合も、無限に取り直さず
-    /// そこで打ち切る）。
+    /// 満杯のページが返ったら最後の seq の続きを要求し、短いページで終わる。
+    /// 件数は応答のバイト数を抑えられないため、応答が上限超過
+    /// （[`crate::net::NetError::TooLarge`]）なら同じカーソルから件数を半減して
+    /// 再試行する（1 件でも超える場合だけエラー）。1 回の取得全体には
+    /// [`FETCH_DEADLINE`] と蓄積 [`MAX_FETCH_BODY_BYTES`] の上限を掛け、
+    /// 満杯なのにカーソルが進まない応答（サーバーが `after_seq` を見ない等）は
+    /// 部分結果を成功とせず [`LiveError::Protocol`] にする。
     fn fetch_messages(&mut self, channel_id: &ChannelId) -> Result<Vec<StoredMessage>, LiveError> {
+        let deadline = Instant::now() + FETCH_DEADLINE;
         let base = channel_messages_path(channel_id);
         let mut out = Vec::new();
         let mut after: Option<u64> = None;
+        let mut page_limit = MESSAGE_PAGE_LIMIT;
+        let mut body_bytes: usize = 0;
         loop {
+            if Instant::now() >= deadline {
+                return Err(LiveError::Protocol("message fetch deadline"));
+            }
             let mut path = self.actor_path(&base);
-            path.push_str(&format!("&limit={MESSAGE_PAGE_LIMIT}"));
+            path.push_str(&format!("&limit={page_limit}"));
             if let Some(s) = after {
                 path.push_str(&format!("&after_seq={s}"));
             }
-            let page: Vec<StoredMessage> = self.get_json(&path)?;
-            let full = page.len() >= MESSAGE_PAGE_LIMIT as usize;
+            let page: Vec<StoredMessage> = match self.get_json(&path) {
+                Err(LiveError::Net(NetError::TooLarge)) if page_limit > 1 => {
+                    page_limit = (page_limit / 2).max(1);
+                    continue;
+                }
+                result => result?,
+            };
+            body_bytes += page.iter().map(|m| m.body.len()).sum::<usize>();
+            if body_bytes > MAX_FETCH_BODY_BYTES {
+                return Err(LiveError::Protocol("message history exceeds fetch limit"));
+            }
+            let full = page.len() >= page_limit as usize;
             let last_seq = page.last().map(|m| m.seq);
             out.extend(page);
             match (full, last_seq) {
                 (true, Some(s)) if after.is_none_or(|a| s > a) => after = Some(s),
+                (true, _) => return Err(LiveError::Protocol("message page did not advance")),
                 _ => return Ok(out),
             }
         }
@@ -356,7 +399,8 @@ impl LiveSession {
         &self.actor
     }
 
-    /// 新着分を seq 昇順を保つ位置に挿入する（`message_id` の重複は足さない。
+    /// 投稿応答の保存済みメッセージを seq 昇順を保つ位置に挿入する
+    /// （`message_id` の重複は足さない。`poll` は一覧の取り直しでここを通らない。
     /// 投稿応答を先に足しているとポーリングでそれより小さい seq が届き得るため、
     /// 末尾への追加だけだと順序が崩れる）。
     fn append_new(&mut self, new: Vec<StoredMessage>) {
