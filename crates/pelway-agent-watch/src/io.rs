@@ -646,7 +646,7 @@ fn find_server_t3(proc: &Path, home: &Path) -> Option<PathBuf> {
 }
 
 /// 指揮役のスレッドへ決まった文を送る（`t3 thread send <thread> -`。本文は標準入力）。
-/// 実行中のスレッドには次のターンとして届き、割り込まない。ログに出すのは終了コードだけ。
+/// 実行中のスレッドには次のターンとして届き、割り込まない。ログに出すのは終了コードとエラーの種類だけ（宛先と本文は出さない）。
 pub fn wake(bin: &Path, thread_id: &str, message: &str) -> Result<(), String> {
     let mut child = timed(bin.as_os_str())
         .args(["thread", "send", thread_id, "-"])

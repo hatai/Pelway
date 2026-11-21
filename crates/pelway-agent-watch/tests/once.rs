@@ -634,7 +634,7 @@ fn inbox_appends_every_event() {
         "mcp:e stalled no-activity",
     ];
     assert_eq!(got, want);
-    // webhook と同じ形（schema と report を含む）
+    // webhook と同じ形（schema が pelway.agent-watch/v1。payload 全体の一致は inbox_written_when_webhook_fails で確かめる）
     assert!(
         events
             .iter()
