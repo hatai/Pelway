@@ -74,3 +74,15 @@
 5. 改善案: なし。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 7）
+
+対象 head: 974f01b8（実装のコミット）
+
+1. 詰まった箇所: round 5 のレビュー（Claude max）の must-fix 3。(1) worktree のスレッドの sandbox からも共有 git dir の `index`・`refs/` は書けるので、共有の `main` を書き換えたコミットへ向けられる。round 3 で hatai が決めた blob の sha の比較を、今の指揮役の場所によらず毎回行う段として戻した。(2) ホストの権限で動くスクリプトが共有の `/tmp` に一時ファイルを作り、sandbox から symlink に差し替えられた。一時ファイルをやめ、t3 の標準エラーは端末にそのまま出す。(3) `valid_ident` が `/` を拒み、opencode の model（`zai-coding-plan/glm-5.3`）が通らなかった。`/` を許し、先頭の `-` は拒む。opencode の値を引き継ぐ・渡す試験を足した。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: round 6 で sha の比較を外したのは、本体 checkout の作業ツリーが書けなくなれば要らない、と考えたため。共有 git dir の refs が書けることを見落としていた。
+4. 足りなかった情報・検証手段: なし。
+5. 改善案: sandbox の書き込み範囲を前提にする文を書くときは、`docs/dev-environment.md` の「実装担当の sandbox」の書き込み可の一覧（共有 git dir を含む）と突き合わせる。
+
+使ったスキル: implement-issue
