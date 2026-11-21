@@ -128,6 +128,21 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 | 抜き取り | PR 番号を 4 で割った余りが 0 の通常の PR には Claude も付ける（Codex・Devin CLI の見落とし率の測定のため） |
 
 - この表の適用は指揮役だけでなく実装担当も行う。実装担当はこの表でレビュー委託（`delegate_task`）の担当と effort を決め、Assigned 行に写す（skill `implement-issue` の手順 8）。通常と抜き取りの判定は PR 番号だけで決まり、割り当ての記録への記入は不要（実装担当の分は省く。指揮役が立てた分だけ記録する）
+- レビューを `delegate_task` で委託するとき（実装担当の手順 8、指揮役が代行で委託するとき）は、呼び出しを次のブロックから丸ごと写し、`<...>` を埋める。`target.model` と `options` の値は skill `implement-issue` の手順 8 の表（codex は `reasoningEffort`、claude は `effort`、devin は `{}`）。`role`・`runtimeMode`・`isolation` は省かない。
+
+  ```json
+  {
+    "target": {
+      "providerInstanceId": "<codex_review|claude_review|devin_review>",
+      "model": "<モデル名>",
+      "options": {"<reasoningEffort|effort>": "<effort>"}
+    },
+    "role": "review",
+    "runtimeMode": "auto-accept-edits",
+    "isolation": "worktree",
+    "task": "PR #<M> をレビューする。skill review-pr に従う。\nAssigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes"
+  }
+  ```
 - Devin CLI が実装した PR には Devin CLI のレビューを付けない。通常の番が奇数でも Codex に回し、高リスクの PR でも Devin CLI の枠は外す。
 - Devin CLI のレビュー担当は確認済み。確認記録は `docs/dev-environment.md`「レビュー担当の Devin CLI」の「確認手順の結果（記録欄）」。記録が消えた場合は、記録が戻るまで Devin CLI を使わず、通常は Codex、高リスクは Codex と Claude で回す。
 - Devin CLI のレビュースレッド（`devin_review`）では、モデルオプションは `mode` だけを受け付ける（`thought_level`・`speed` は渡せず、effort の引き上げは行えない）。sandbox のため権限モードは Autonomous 一択で、`mode` は省略してよい。設定は `docs/dev-environment.md` の「レビュー担当の Devin CLI」。

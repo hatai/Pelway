@@ -28,10 +28,11 @@ PRD="$(git rev-parse --show-toplevel)/.agents/skills/pr-watch/pr-digest"
 | 環境 | 待ち方 |
 | --- | --- |
 | T3 のトップレベルのスレッド（`watch_pull_request` がある） | `watch_pull_request` を 1 回呼んでターンを終える。T3 がチェックの失敗・必須チェックの通過・新しいコメントやレビュー・衝突でスレッドを**起こす**。見張りは起床のたびに続くので、呼び直さない。 |
-| 委託された子（`delegate_task` の子） | 見張らない。`"$PRD"` を 1 回読み、その状態をそのまま親に報告して終える。 |
+| 委託された子（`delegate_task` の子。レビュー担当を除く） | 見張らない。`"$PRD"` を 1 回読み、その状態をそのまま親に報告して終える。 |
+| レビュー担当（skill `review-pr`。委託の子もトップレベルのスレッドも） | `scripts/agent-gh review pr checks <N> --watch --interval 30` を前面で 1 回実行し、戻ったら `review-pr` の手順 2 の `--json name,bucket` で読み直す。必須チェックがまだ終わっていなければ（ツールの時間切れで戻った、チェックがまだ 1 つも報告されていないなど）、同じコマンドをもう一度実行する。待ち始めから 60 分で打ち切る（`review-pr` の `error: checks timeout`）。`"$PRD"` は `agent-gh dev` を呼ぶので使わない。 |
 | `watch_pull_request` が無い環境（T3 の外の OpenCode・Codex 等） | `"$PRD" --watch` をバックグラウンドで 1 回起動し、終了の通知を**起床**として扱う。 |
 
-- 前面（フォアグラウンド）の `--watch`、`sleep` のループ、`gh pr checks --watch`、`Monitor`、`t3_background_wait` での待機は使わない。実行ツールのタイムアウトや即時の戻りを「見張りが死んだ」と取り違え、再起動と手動の確認の往復になる。
+- 前面（フォアグラウンド）の `--watch`、`sleep` のループ、`gh pr checks --watch`、`Monitor`、`t3_background_wait` での待機は使わない（上の表のレビュー担当の行を除く）。実行ツールのタイムアウトや即時の戻りを「見張りが死んだ」と取り違え、再起動と手動の確認の往復になる。
 - 終わるとき（緑の報告、上限での停止、引き渡し）は、`watch_pull_request` で見張っていた PR を `unwatch_pull_request` で外してから報告する。
 
 ## サイクル
