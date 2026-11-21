@@ -53,7 +53,13 @@ pub fn parse_patrol_state(text: &str) -> Result<PatrolInfo, String> {
     let obj = v
         .as_object()
         .ok_or_else(|| "patrol-state: not an object".to_string())?;
-    let inbox_offset = obj.get("inbox_offset").and_then(Value::as_u64).unwrap_or(0);
+    // 項目が無ければ 0（受信箱を一度も読んでいない）。あるのに 0 以上の整数でなければ読めない扱い
+    let inbox_offset = match obj.get("inbox_offset") {
+        None => 0,
+        Some(v) => v.as_u64().ok_or_else(|| {
+            "patrol-state: inbox_offset is not a non-negative integer".to_string()
+        })?,
+    };
     Ok(PatrolInfo {
         conductor_thread_id: None,
         inbox_offset,
@@ -150,6 +156,24 @@ mod tests {
         );
         assert_eq!(parse_conductor_file("  \n"), None);
         assert_eq!(parse_conductor_file(""), None);
+    }
+
+    #[test]
+    fn patrol_state_offset_missing_is_zero_and_odd_is_error() {
+        assert_eq!(
+            parse_patrol_state(r#"{"subjects":{}}"#)
+                .unwrap()
+                .inbox_offset,
+            0
+        );
+        for bad in [
+            r#"{"inbox_offset":"3"}"#,
+            r#"{"inbox_offset":-1}"#,
+            r#"{"inbox_offset":1.5}"#,
+            r#"{"inbox_offset":null}"#,
+        ] {
+            assert!(parse_patrol_state(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

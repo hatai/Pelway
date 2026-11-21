@@ -1320,3 +1320,23 @@ fn new_conductor_is_woken_without_waiting_for_the_old_baseline() {
         stderr(&out)
     );
 }
+
+// ---- PR #561 round 7 のレビューへの対応 ----
+
+#[test]
+fn odd_inbox_offset_skips_wake() {
+    // 既読の位置が 0 以上の整数でないときは、その回は起こさず、追記と webhook は続ける
+    for (i, bad) in [r#""3""#, "-1"].iter().enumerate() {
+        let sb = Sandbox::new(&format!("wake-odd-offset-{i}"));
+        one_event(&sb);
+        sb.fake("fnox-ok", "");
+        sb.conductor("mcp:conductor-1");
+        sb.patrol_state(&format!(r#"{{"inbox_offset":{bad}}}"#));
+        let out = sb.run_with(&["--once"]);
+        assert!(out.status.success(), "stderr: {}", stderr(&out));
+        assert_eq!(inbox_events(&sb).len(), 1);
+        assert!(sb.read_fake("t3-send-args").is_empty(), "{bad}");
+        assert!(stderr(&out).contains("WAKE skipped reason=patrol-state-unreadable"));
+        assert!(!sb.read_fake("curl-body").is_empty());
+    }
+}
