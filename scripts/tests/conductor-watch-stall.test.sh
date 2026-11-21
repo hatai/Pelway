@@ -168,6 +168,16 @@ check "7: STALL is printed once for the same stop" eq "$(count "$ROOT/out.log" '
 check "8: HEARTBEAT line is printed" has "$ROOT/out.log" "HEARTBEAT"
 check "1-8: no writes to GitHub or threads" no_writes
 
+# 試験 9: waiting-conductor（scripts/agent-gh を変える PR で指揮役のレビュースレッドを待つ。
+# Issue #622）は conductor にし、STALL の行は出さない。
+reset
+issues "$(iss 49 '{"name":"agent:working"}')"; prs "$(draft_pr 49)"; threads "$(impl 49 completed)"
+inbox 49 $'state: waiting-conductor\nhead: abc\nnext: 指揮役のレビュースレッドの結果で手順 9 に進む'
+run_cycles 2
+check "9: waiting-conductor becomes conductor" eq "$(sget 49 waiting_on)" "conductor"
+check "9: no STALL for waiting-conductor" eq "$(count "$ROOT/out.log" 'STALL #49')" "0"
+check "9: no writes to GitHub or threads" no_writes
+
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
   exit 1
