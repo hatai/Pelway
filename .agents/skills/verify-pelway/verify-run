@@ -65,6 +65,9 @@ forbidden_env_present() {
   return 0
 }
 
+# pitchfork のデーモンの一覧（読み取りだけ。記録用で、合否は PID の比較で決める）。
+pitchfork_list() { (cd "${TOP}" && mise exec -- pitchfork list 2>&1) || echo "pitchfork list: 失敗"; }
+
 # 生き残りを比べる対象の PID（1 行 1 つ）。
 survivor_pids() { ps -eo pid=,comm= | awk -v re="${SURVIVOR_COMM}" '$2 ~ re {print $1}' | sort -n; }
 
@@ -185,6 +188,7 @@ cleanup() {
   if [ -n "${LOCK:-}" ]; then rm -f "${LOCK}/pid"; rmdir "${LOCK}" 2>/dev/null; echo "released lock ${LOCK##*/}" >> "${EV}/cleanup.txt"; fi
   if [ -s "${EV}/survivors-before.txt" ]; then
     survivor_pids > "${EV}/survivors-after.txt"
+    pitchfork_list > "${EV}/pitchfork-after.txt"
     local lost; lost="$(comm -23 "${EV}/survivors-before.txt" "${EV}/survivors-after.txt" | tr '\n' ' ')"
     if [ -z "${lost}" ]; then record PASS "後片付け: ほかのプロセスが生き残っている" "survivors-*.txt"
     else record FAIL "後片付け: ほかのプロセスが生き残っている" "消えた pid ${lost}"; fi
@@ -377,6 +381,7 @@ main() {
   fi
   record PASS "起動: 二重起動の確認" "同じ target の demo-serve なし、ロック取得"
   survivor_pids > "${EV}/survivors-before.txt"
+  pitchfork_list > "${EV}/pitchfork-before.txt"
 
   # 起動: ビルドし、cargo が報告した実行ファイルを、PATH と HOME だけの環境で子として起動する。
   # 子の標準入力はこの run が持つパイプ。run が終われば（SIGKILL でも）閉じて、子は終わる。
