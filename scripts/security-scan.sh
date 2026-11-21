@@ -37,7 +37,9 @@ rc=0
 case "$tool" in
   gitleaks)
     # HEAD から辿れる履歴だけを走査する（checkout の他ブランチやローカルの ref は対象外）。
-    gitleaks git --redact --no-banner --exit-code 2 --log-opts=HEAD \
+    # -m: git log は既定でマージコミットの差分を出さないため、競合解消で足した行が漏れる。
+    # 各親との差分を出させて走査する（同じ値が複数のコミットで重ねて出る）。
+    gitleaks git --redact --no-banner --exit-code 2 --log-opts="-m HEAD" \
       --report-format json --report-path "$report" . || rc=$?
     found_rc=2
     ;;
@@ -57,11 +59,22 @@ if [[ "$rc" != 0 && "$rc" != "$found_rc" ]]; then
   exit "$rc"
 fi
 
+# semgrep は検出の終了コード（1）を解析エンジンのエラーより優先して返すため、
+# level が error のエラーが JSON にあれば、検出があってもツールの失敗として扱う。
+if [[ "$tool" == semgrep ]]; then
+  fatal="$(jq '[.errors[]? | select(.level == "error")] | length' "$report")"
+  if [[ "$fatal" != 0 ]]; then
+    echo "::error::semgrep が失敗しました（level が error の解析エラー ${fatal} 件。詳細は $report）"
+    exit 2
+  fi
+fi
+
 # 検出の一覧（1 行 1 件、タブ区切りではなく Markdown の表の行）を作る。
 case "$tool" in
   gitleaks)
     header='| 規則 | 場所 | コミット |'
     rows="$(jq -r '.[] | "| \(.RuleID) | \(.File):\(.StartLine) | \(.Commit[0:12]) |"' "$report")"
+    places="$(jq '[.[] | "\(.RuleID) \(.File):\(.StartLine)"] | unique | length' "$report")"
     ;;
   semgrep)
     header='| 規則 | 場所 | 重大度 |'
@@ -84,6 +97,10 @@ count=0
     echo "検出なし。"
   else
     echo "検出 $count 件（報告のみ。ジョブは失敗させない）。"
+    if [[ -n "${places:-}" ]]; then
+      echo
+      echo "規則と場所の重複を除くと ${places} か所（マージコミットの差分も走査するため、同じ値が複数のコミットで出る）。"
+    fi
     echo
     echo "$header"
     echo "|---|---|---|"

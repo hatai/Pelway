@@ -25,6 +25,7 @@ for a in "$@"; do
   prev="$a"
 done
 if [[ -n "$out" && -n "${STUB_JSON:-}" ]]; then printf '%s' "$STUB_JSON" >"$out"; fi
+if [[ -n "${STUB_ARGS:-}" ]]; then printf '%s\n' "$@" >"$STUB_ARGS"; fi
 echo "stub $(basename "$0") $*" >&2
 exit "${STUB_RC:-0}"
 EOF
@@ -38,7 +39,7 @@ run_case() {
   local summary="$work/summary-$name.md" rc
   : >"$summary"
   REPLY_LOG="$(cd "$work" && PATH="$work/bin:$PATH" STUB_RC="$stub_rc" STUB_JSON="$stub_json" \
-    GITHUB_STEP_SUMMARY="$summary" SECURITY_SCAN_OUT="$work/out-$name" \
+    GITHUB_STEP_SUMMARY="$summary" SECURITY_SCAN_OUT="$work/out-$name" STUB_ARGS="$work/args-$name" \
     bash "$SCRIPT" "$tool" 2>&1)"
   rc=$?
   REPLY_SUMMARY="$(cat "$summary")"
@@ -72,6 +73,13 @@ want_contains gitleaks-hit "$REPLY_SUMMARY" "0123456789ab"
 want_absent gitleaks-hit "$REPLY_SUMMARY" "$secret_value"
 want_absent gitleaks-hit "$REPLY_LOG" "$secret_value"
 run_case gitleaks-error gitleaks 1 "" 1
+# マージコミットの差分（競合解消で足した行）も走査するため、git log に -m を渡す。
+want_contains gitleaks-merge-diff "$(cat "$work/args-gitleaks-clean")" "--log-opts=-m HEAD"
+# -m では同じ場所の値が複数のコミットで重ねて出るため、場所の重複を除いた数もサマリーに出す。
+gitleaks_dup='[{"RuleID":"r","File":"a.txt","StartLine":3,"Commit":"1111111111111111"},{"RuleID":"r","File":"a.txt","StartLine":3,"Commit":"2222222222222222"}]'
+run_case gitleaks-dup gitleaks 2 "$gitleaks_dup" 0
+want_contains gitleaks-dup "$REPLY_LOG" "2 件"
+want_contains gitleaks-dup "$REPLY_SUMMARY" "1 か所"
 
 # ---- semgrep
 semgrep_hit='{"results":[{"check_id":"rust.lang.security.unsafe-usage","path":"crates/x/src/lib.rs","start":{"line":7},"extra":{"severity":"WARNING"}},{"check_id":"yaml.github-actions.security.run-shell-injection","path":".github/workflows/a.yml","start":{"line":3},"extra":{"severity":"ERROR"}}],"errors":[]}'
@@ -83,6 +91,15 @@ want_contains semgrep-hit "$REPLY_SUMMARY" "rust.lang.security.unsafe-usage"
 want_contains semgrep-hit "$REPLY_SUMMARY" "crates/x/src/lib.rs:7"
 want_contains semgrep-hit "$REPLY_SUMMARY" ".github/workflows/a.yml:3"
 run_case semgrep-error semgrep 2 "" 2
+# 検出（終了コード 1）があっても、level が error の解析エラーはツールの失敗として扱う
+# （semgrep は検出の終了コードをエラーより優先するため、終了コードだけでは見分けられない）。
+semgrep_fatal='{"results":[{"check_id":"x","path":"a.rs","start":{"line":1},"extra":{"severity":"INFO"}}],"errors":[{"level":"error","type":"Fatal error","code":2}]}'
+run_case semgrep-hit-fatal semgrep 1 "$semgrep_fatal" 2
+want_contains semgrep-hit-fatal "$REPLY_LOG" "::error::"
+# level が warn の解析エラー（構文を解析できなかったファイル）は報告だけにする。
+semgrep_warn='{"results":[{"check_id":"x","path":"a.rs","start":{"line":1},"extra":{"severity":"INFO"}}],"errors":[{"level":"warn","type":"Syntax error","code":3}]}'
+run_case semgrep-hit-warn semgrep 1 "$semgrep_warn" 0
+want_contains semgrep-hit-warn "$REPLY_SUMMARY" "解析エラー 1 件"
 
 # ---- osv-scanner
 osv_hit='{"results":[{"source":{"path":"/w/Cargo.lock","type":"lockfile"},"packages":[{"package":{"name":"rsa","version":"0.9.8","ecosystem":"crates.io"},"vulnerabilities":[{"id":"RUSTSEC-2023-0071"},{"id":"GHSA-c38w-74pg-36hr"}]}]}]}'
