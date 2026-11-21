@@ -225,3 +225,49 @@ fn posted_mention_to_bot_runs_task_to_pending_decision() {
     );
     assert_eq!(status, 200);
 }
+
+/// LLM に届く runner 付きの入口も、待ち受けは 127.0.0.1 だけ。0.0.0.0 などの
+/// 設定では起動せず（`NotLoopback`）、runner の LLM 経路は外から届かない。
+#[test]
+fn runner_entry_refuses_non_loopback_listen() {
+    let store: SharedDataStore = Arc::new(Mutex::new(DataStore::new_demo_seeded(now())));
+    let ledger: SharedLedger = Arc::new(Mutex::new(ApprovalLedger::new()));
+    let config = RunnerConfig {
+        bot_member_id: MemberId::from(DEMO_HAL_MEMBER_ID),
+        decider: MemberId::from("m-yamamoto"),
+        llm_basis: PurposeId::P06,
+        llm_timeout: Duration::from_secs(30),
+    };
+    let runner = Arc::new(Runner::new(
+        config,
+        Arc::clone(&store),
+        Arc::clone(&ledger),
+        Arc::new(FakeGateway),
+    ));
+    let serve = |addr: &str| {
+        let addr: SocketAddr = addr.parse().unwrap();
+        serve_with_store_and_runner(
+            addr,
+            Arc::clone(&ledger),
+            Arc::clone(&store),
+            Arc::clone(&runner),
+        )
+    };
+    for bad in [
+        "0.0.0.0:0",
+        "[::]:0",
+        "[::1]:0",
+        "127.0.0.2:0",
+        "192.168.0.1:0",
+    ] {
+        let err = serve(bad)
+            .err()
+            .unwrap_or_else(|| panic!("{bad} で起動してしまう"));
+        assert!(
+            matches!(err, pelway_http::ServeError::NotLoopback(_)),
+            "{bad}: {err}"
+        );
+    }
+    let server = serve("127.0.0.1:0").expect("loopback では起動する");
+    assert_eq!(server.local_addr().ip().to_string(), "127.0.0.1");
+}
