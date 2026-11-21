@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 に「利用上限の `failed` は T3 が上限の解除後に自動で再開することがあるので、止まる前に `task_status` で子が終わったかを確かめる」と足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: f62b2717cd876e191848b4b8e1970054d62acd4b
+
+1. 詰まった箇所: `scripts/agent-worktree-prune` の削除の直前の見直し: round 3 で、プロセスと同じ時間差が 6 時間の条件にもあると指摘された。削除の直前に `recently_updated` も見直すようにした。ところが一覧を作るときの `git status` が index を書き直すと、見直しでどの worktree も「新しい」と判定される。そのため `git --no-optional-locks status` にした。
+2. 曖昧だった文: 「3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）」（`.agents/skills/implement-issue/SKILL.md` の「止まる条件」）。人間が続行を指示したときの扱いが書かれていない。hatai の「マージ可能になるまで続けて」を、4 回目の修正を許す例外の指示と解釈した。
+3. 仮定と解釈: `--no-optional-locks` の要否は、追跡ファイルのある worktree の場面 25 で確かめた（外すと red）。nit のうち `[文書のずれ]` の 3 件（runbook の範囲、PR 本文の引用と所要時間、`pitchfork.toml` のコメント）を直した。印の無い nit（`/proc` を消すたびに読み直す負荷、`comm` のタブ、PID 名前空間）は直していない。
+4. 足りなかった情報・検証手段: 手動実行の確認待ちの間に起きうる変化（プロセスの開始・ファイルの更新）を再現する手段が無かったので、fifo で確認の答えを遅らせる場面（23・24）を作った。
+5. 改善案: `scripts/agent-worktree-prune` の冒頭のコメントにある「プロセスと更新時刻の 2 つは、一覧を作るときと消す直前の両方で確かめる」を、残す条件を足すときの決まりとして `docs/dev-environment.md` の「pitchfork について」にも書く。
+
+使ったスキル: implement-issue
