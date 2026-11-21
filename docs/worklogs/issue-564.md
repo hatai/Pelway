@@ -62,3 +62,15 @@
 5. 改善案: 本体 checkout で動くエージェントがある間の、ホストで実行するファイルの確かめを、sandbox から書けない場所に置いた道具で行えるようにする（#570 の結果を見て決める）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 6）
+
+対象 head: b8e20778（実装のコミット）
+
+1. 詰まった箇所: round 4 のレビュー（Claude max）の must-fix 2 は、どちらも本体 checkout の書き換えへの確かめをすり抜ける経路（`mise run` の `mise.local.toml`、`cargo install` が読む `.cargo/config.toml`・`build.rs`・`Cargo.lock`）だった。確かめを足しても塞ぎきれないので、hatai の判断（Issue #564 のコメント）で、新指揮役を main から作った専用の worktree（`t3 thread start --worktree main --branch conductor/rebuild-<日時>`）で立てる形に変えた。本体 checkout は sandbox から書けないままになる。blob の sha の確かめと opencode の拒否は要らなくなったので外した（worktree の opencode にはプラグインの sandbox が掛かる）。`--to` のスレッドは worktree で動いていることを確かめる。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: 今の指揮役が本体 checkout で動いている場合は、交代の前に hatai が本体 checkout に変更が無いことを確かめる、と書いた（最初の交代だけの問題）。
+4. 足りなかった情報・検証手段: 本物の `t3 thread start --worktree main --branch …` で立てた指揮役の `runtimeMode` と `worktreePath` は確かめていない。
+5. 改善案: なし。
+
+使ったスキル: implement-issue
