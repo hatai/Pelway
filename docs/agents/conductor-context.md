@@ -99,7 +99,12 @@ GitHub 内部で食い違いがあれば既存規則（runbook の整合チェ�
 4. 引き継ぎ確認の完了時点で操作権限が移る。確認が完了しない場合は権限を移さず、旧側の復旧または人間確認に進む
 5. 旧・新の同時稼働の禁止: 権限移行後、旧指揮役はいかなる操作も行わない（見張り `conductor-watch` の停止を含め、停止の操作は引き継ぎ確認の中で新旧どちらか一方だけが行う）
 
-始め方: hatai がホストの端末で、本体 checkout の `scripts/conductor-rebuild --from <旧指揮役のスレッド ID>`（または本体 checkout で `mise run conductor-rebuild -- --from <旧指揮役のスレッド ID>`）を実行する（worktree の版は sandbox の中から書き換えられるので、worktree から起動すると止まる。旧指揮役のスレッド ID は、hatai がホスト側の T3 の画面か `t3 thread list --json` の `threadId` で確かめ、単一引用符で囲んで渡す）（provider・model・effort を替えるときは `--provider`・`--model`・`--effort`。省略すると provider と model は旧指揮役と同じで、effort は渡さない）。スクリプトは、1 の停止の文を旧指揮役に送って終わるまで待ち、2 の新指揮役を本体 checkout（worktree ではない）で立て、agent-watch の起こしの宛先を、インストールした `~/.local/bin/pelway-agent-watch --register` で新指揮役に替える（入っていなければ、何も送らずに止まる）。送信か起動に失敗したら、宛先を変えずに止まる。
+始め方: hatai がホストの端末で、必ず本体 checkout の `scripts/conductor-rebuild --from '<旧指揮役のスレッド ID>'`（または本体 checkout で `mise run conductor-rebuild -- --from '<旧指揮役のスレッド ID>'`）を実行する。worktree の版は sandbox の中から書き換えられるので実行しない（スクリプトは worktree から起動されると止まるが、これは書き換えられていない版を誤って起動したときの止め具で、書き換えへの守りにはならない）。旧指揮役のスレッド ID は、hatai がホスト側の T3 の画面か `t3 thread list --json` の `threadId` で確かめ、単一引用符で囲んで渡す。provider・model・effort を替えるときは `--provider`・`--model`・`--effort`（省略すると provider と model は旧指揮役と同じで、effort は渡さず、渡さないことを表示する）。スクリプトは次の順で進め、どこかで失敗したら、その先は行わずに止まる。
+1. 新指揮役を本体 checkout（worktree ではない）で立て、何もせずに待たせる決まった文を送る（`--to '<新指揮役のスレッド ID>'` を渡したときは立てずに、そのスレッドを使う）
+2. 新指揮役の権限（`runtimeMode`）が旧指揮役と同じで、`full-access` でないことを `t3 thread show` で確かめる。`t3 thread start` には権限のフラグが無く、本体のプロジェクトの既定は `full-access` のことがあるため。合わなければ、旧指揮役には何も送らず、宛先も変えずに止まる。hatai が T3 の画面で新指揮役の権限を旧指揮役と同じに直し、表示された `--to` 付きのコマンドで実行し直す
+3. 決まった停止の文を旧指揮役に送り、終わるまで待つ
+4. 新指揮役に引き継ぎの指示を送る
+5. agent-watch の起こしの宛先を、インストールした `~/.local/bin/pelway-agent-watch --register` で新指揮役に替える（入っていなければ、最初に何もせずに止まる）
 
 新指揮役は、4 の権限の移行の後に、旧指揮役のスレッドを `t3_thread_organize`（`action: settle`）で settle し、巡回の scheduled task を作り直す（runbook の「指揮役の定期巡回（スケジュール起床）」。`t3` CLI には settle が無いため、スクリプトでは行わない）。
 
