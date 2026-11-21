@@ -73,3 +73,18 @@
 5. 改善案: `.agents/skills/command-team/SKILL.md` の代行の節に「ホストで hatai に実行を頼むものは、インストールしたバイナリか本体 checkout の版に限る（worktree の版は sandbox の中から書き換えられる）」を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 6）
+
+対象 head: b6f4819e（実装のコミット）
+
+1. 詰まった箇所: round 5 のレビューで、Codex（`gpt-6.2-sol` max）が must-fix 6、Claude（`claude-opus-5-5` max）が must-fix 1 を出した。うち 3 件は `scripts/conductor-watch.sh` の読み手への指摘（Codex）で、Claude はその読み手の変更自体を Issue #555 の対象外とした。hatai の判断で、読み手の変更はこの PR から外し、#569 に分けた。この PR で直したのは次の 3 つ。
+   - 所有者以外の権限があった受信箱には書かない（`fchmod` は、すでに開かれた fd の読み取りを取り消さないため）。
+   - 起こしたときの指揮役の既読の位置を持ち、そこから 1 行でも進めば次の知らせで起こす。
+   - 受信箱への追記が失敗する試験で、知らせの JSON が `curl` まで渡ることを確かめる。
+2. 曖昧だった文: 「前回の起こしの後に `inbox_offset` が進んでいるとき（または一度も起こしていないとき）」（Issue #555 の受け入れ条件）— round 4 までは「前回起こしたときの受信箱の行数に届くまで」と読んでいた。Codex の指摘のとおり、文は「進んだか」なので、起こした時点の既読の位置と比べる形に直した。
+3. 仮定と解釈: 読み手を外したので、壊れた UTF-8 の断片が残ったときに今の `conductor-watch.sh` が受信箱を読めなくなる問題は、#569 がマージされるまで残る。PR 本文の「対象外」に依存を書いた。
+4. 足りなかった情報・検証手段: Claude が PR 外として挙げた sandbox からホストでコードが動く経路の可能性（pitchfork の worktree の定義、sandbox から書ける `~/.cargo` などの置き場）は、調査の Issue #570 にした。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「Request changes のとき」に「レビューの指摘が Issue の対象外のファイルに及ぶときは、直す前に指揮役か hatai に、含めるか別の Issue にするかを聞く」を足す。
+
+使ったスキル: implement-issue、write-issue、write-pull-request
