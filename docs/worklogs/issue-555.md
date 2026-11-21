@@ -112,3 +112,15 @@
 5. 改善案: `.agents/skills/command-team/SKILL.md` の Codex のレビューの委託に、投稿できる実行モードを書く（今は `full-access` が方針で拒まれ、`auto` では投稿できない）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 10）
+
+対象 head: 461de79c（実装のコミット）
+
+1. 詰まった箇所: round 9（hatai の指示で nit を直した round）の Codex（`gpt-6.2-sol` max）が must-fix 2 を出した。`thread_id`・`round`・`event` が同じでも別の `waiting`・`stalled` が出うるのに、文書はこの 3 項目の一致で重複と見ていた。送り直しは payload 全体が同じなので、payload 全体の一致で見ると書き直した。受信箱の試験は、出るはずの知らせの組をそのまま比べる形にした。
+2. 曖昧だった文: 「重複の見分け方（`thread_id`・`round`・`event`）」（Issue #555 の受け入れ条件）— 3 項目は照合の手がかりとして残し、同じ出来事かは payload 全体で見る、と書いた。
+3. 仮定と解釈: なし。
+4. 足りなかった情報・検証手段: なし。
+5. 改善案: なし（文書のずれの nit の扱いは #579・PR #580）。
+
+使ったスキル: implement-issue
