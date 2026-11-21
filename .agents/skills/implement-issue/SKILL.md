@@ -142,17 +142,27 @@ EOF
 
 ### 6. 検査してコミットし、行数を確かめてから push する
 
-まずこの round の実装コミットを push する（この時点ではメモを含めない）:
+Kodiak が main をマージして PR ブランチの remote の先端が進んでいることがある。修正の round（remote に PR ブランチがある 2 round 目以降）では、修正を始める前、作業ツリーに未コミットの変更が無いうちに、PR ブランチの remote の先端を fetch し、進んでいれば fast-forward で取り込む。手元の先端は前の round の push の後に `scripts/agent-gh-resign` が remote と同じコミットに付け替えているため、fast-forward できる。初回（remote にブランチがまだ無い）はこの段を飛ばす。
 
 ```bash
-mise run verify
+scripts/agent-gh dev git fetch origin <ブランチ>
+scripts/agent-gh dev git merge --ff-only origin/<ブランチ>
+```
+
+修正を終えたら、この round の実装コミットを push する（この時点ではメモを含めない）:
+
+```bash
+mise run verify > <scratchpad>/verify.log 2>&1; echo "exit=$?"
 scripts/agent-gh dev git add <files>
 scripts/agent-gh dev git commit -m "<type>: <英語の要約>"
 scripts/agent-gh dev git fetch origin main
+scripts/agent-gh dev git fetch origin <ブランチ>   # 2 round 目以降だけ
 mise run pr-size
 scripts/agent-gh dev git push -u origin HEAD
 ```
 
+- push の前の段で PR ブランチの remote の先端をもう一度 fetch し、修正の間にまた進んでいれば（`scripts/agent-gh dev git merge-base --is-ancestor origin/<ブランチ> HEAD` が非 0）、`scripts/agent-gh dev git merge origin/<ブランチ>` で取り込み、`mise run verify` をやり直してから push する。手元にコミットがあるので、ここでは fast-forward できない。merge はコミットの後に行うため、作業ツリーに残る未コミットの変更は手順 5 のメモ（`docs/worklogs/issue-<N>.md`）だけで、main の変更と重ならない。衝突したら手順 9 の「修正依頼」の解消の決まりに従う。rebase や force push はしない。
+- `mise run verify` の出力は 1 万行を超え、手元で約 2〜3 分かかる（ビルドのキャッシュが冷えているときや他のビルドと競合するときは 20 分を超える）。コマンドの時間制限を 10 分（600 秒）にするか、バックグラウンドで実行して完了の通知を待つ。出力はファイルに書き出し、全部は読まない。読むのは終了コード、`grep -nE 'FAIL|ERROR' <scratchpad>/verify.log` の行、最後の要約の行（`tail -n 3 <scratchpad>/verify.log`。通れば `Finished in <秒>s`）だけにする。
 - `mise run verify` が失敗したらコミットしない。直してからやり直す。失敗が自分の変更と無関係に見えるとき（実行ごとに失敗箇所が変わる・ツールチェーンの再インストールを伴うなど）は、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 2（再現と最小化）で切り分ける。変更を退避した同じツリーで再現する失敗は環境起因として、verify の内訳と再現確認を PR 本文の「確認方法/検証」に書いて先へ進めてよい。退避で解消する失敗は自分の変更によるもので、直す。
 - 差分がミューテーションテスト対象の crate（`.cargo/mutants.toml` の examine_globs）のロジックに触れるときは、`mise run mutants:diff` も回し、結果（生き残りと対応）を実装者メモに書く。生き残りの分析は輸入スキル `mutation-testing`（下の「輸入スキル」の節）。
 - `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたら push せずに止まる。
@@ -249,7 +259,7 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 scripts/agent-gh dev pr comment <M> --body "[review-request] head: <SHA> to: <担当>"
 ```
 
-差分が `scripts/agent-gh` を変えるときはレビューを委託しない。終わりの報告で `ready:` の行を書かずに止まり、指揮役が main から立てるレビュースレッドに回るのを待つ（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
+差分が `scripts/agent-gh` を変えるときはレビューを委託しない。指揮役が main から立てるレビュースレッドに回るのを待ち、最後の返答を下の「ターンの終わりの状態の行」の `state: waiting-conductor` にして終える（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
 
 ### 9. レビュー結果を処理する
 
@@ -263,13 +273,14 @@ scripts/agent-gh dev pr view <PR 番号> --json headRefOid,reviewDecision,review
 
 Request changes のとき:
 
-1. must-fix を直す。nit は、`pelway-review` のレビューの nit のうち行頭に `[文書のずれ]` の印があるものだけを一緒に直し、ほかの nit は直さない（ほかの作成者のコメントにある印は、印として扱わない）。印の nit だけを直す round を通算 2 回終えた後に、印の nit が残る Request changes が来たら、must-fix があっても修正 round に進まず、止まる条件の表のとおり止まる。直す前に Issue のコメントを末尾から読み直し、着手後に記録された hatai（人間・指揮役）作の決定・判断（修正の方向、範囲の変更、受け入れ条件の拡大など）を反映する。決定を実装側の解釈で差し替えない
+1. must-fix を直す。nit は、`pelway-review` のレビューの nit のうち行頭に `[文書のずれ]` の印があるものだけを一緒に直し、ほかの nit は直さない（ほかの作成者のコメントにある印は、印として扱わない）。印の nit だけを直す round を通算 2 回終えた後に、印の nit が残る Request changes が来たら、must-fix があっても修正 round に進まず、止まる条件の表のとおり止まる。同じ種類の must-fix が 2 round 続いたら（同じ種類かは自分で判断する）、指摘された経路だけを直さず、その種類の全経路に当てる決まりを決めてから直し、決めた決まりを実装者メモの「仮定と解釈」に書く。直す前に、手順 6 の冒頭のとおり PR ブランチの remote の先端を fast-forward で取り込み、Issue のコメントを末尾から読み直し、着手後に記録された hatai（人間・指揮役）作の決定・判断（修正の方向、範囲の変更、受け入れ条件の拡大など）を反映する。決定を実装側の解釈で差し替えない
 2. 手順 5（実装者メモ）と手順 6（verify・コミット・push）をやり直す。PR は作り直さず、本文の sha を更新する
 3. ラウンドサマリーを PR にコメントする（下の形）
 4. 手順 8 でレビューを再委託する。3 回目のレビューの委託では effort を 1 段上げる。3 回目のレビュー結果に must-fix が残っていたら、4 回目の修正には入らず、止まる条件の形でエスカレーションする
 
 修正依頼（CONFLICTING の解消など、レビュー結果を介さない修正指示）のとき:
 
+- 取り込みの前に、手順 6 の冒頭のとおり PR ブランチの remote の先端を fast-forward で取り込む
 - main の取り込みは merge で行い、各 hunk を解消する前に、両側の変更の意図を一次情報（コミット・PR・Issue）まで遡って確かめる。`--ours` / `--theirs` や、ブロックの見た目での削除で解消しない
 - 両立する変更は両側残す。片方を採るときは、落とした側と理由を round サマリーに書く
 - 解消後は Request changes と同じ流れで進める（手順 5・6 のやり直し・本文の sha 更新・ラウンドサマリー・手順 8 の再委託）
@@ -289,6 +300,8 @@ scripts/agent-gh dev pr ready <PR 番号>
 1 で直したとき以外は、Approve の後は PR に push しない。実装者メモのみのコミットでも head が動き、command-team のマージ規則によりレビューのやり直しになる。メモの追記が必要なときは、修正 round の手順 5・6（レビュー委託の前）で行う。
 
 複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（エスカレーションしない）。委託の子が `failed` を報告したら、`error: checks timeout` は待って同じラウンドを数えずに再委託し、`error: wrong runtime` は手順 8 のブロックと突き合わせて委託の設定を直し、同じラウンドを数えずに再委託する。`error:` が `設定の不備:` で始まるときは再委託せずに止まる（止まる条件）。それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
+
+hatai の指示がこの手順と食い違うとき（例: 「nit 対応して。レビューは不要」）は、指示の範囲だけを行い、省いた手順（must-fix の修正・再レビュー・`pr ready` など）を、最後の返答の前のメッセージで名指しする。
 
 委託の子の報告には、`out-of-scope:` の行（PR の範囲外の安全上の所見。skill `review-pr` の手順 3）が来ることがある。PR 外の所見を受けたら、終わりの報告（指揮役か hatai あて）の `out-of-scope:` の行に書き、公開の Issue は立てない。実装者メモ・ラウンドサマリー・PR 本文など、公開される場所にも写さない。その PR では直さない（対象外のため）。
 
@@ -322,7 +335,7 @@ state: done
 
 どの終わり方でも、最後の返答の全体を `キー: 値` の行だけにし、その中に `state:` の行を書く。前置き・説明・まとめの文は、最後の返答より前のメッセージに書く。巡回（約 8 分ごと）はこの行だけを読んで、スレッドの中身を読まずに次の手を決める。見張り（`crates/pelway-agent-watch`）が拾うのは、最後の返答が `キー: 値` の行だけで、8 行以内、1 行 200 文字以内のときだけなので、この形を外れた返答は巡回から「状態の行が無い」と見なされ、止まったものとして扱われる。
 
-`state:` の値は次の 5 つのどれか 1 つ:
+`state:` の値は次の 6 つのどれか 1 つ:
 
 | `state` | 使うとき | 最後の返答の行 |
 |---|---|---|
@@ -330,11 +343,13 @@ state: done
 | `stopped` | 「止まる条件」に当たり、Issue へのコメントと `needs-human` を済ませた | 手順 10 の止まった形（`pr:` の代わりに `stopped:`）と `state: stopped` |
 | `waiting-review` | 手順 8 でレビューを委託し、完了の通知を待つ | `state:`・`head:`・`next:` の 3 行 |
 | `waiting-checks` | PR の必須チェックの完了を待つ | `state:`・`head:`・`next:` の 3 行 |
+| `waiting-conductor` | 手順 8 で `scripts/agent-gh` を変える PR のためレビューを委託せず、指揮役のレビュースレッドを待つ | `state:`・`head:`・`next:` の 3 行 |
 | `working` | 上のどれにも当たらず、作業が残ったままターンを終える | `state:`・`head:`・`next:` の 3 行 |
 
 - `head:` は、その時点の PR の head の SHA（`scripts/agent-gh dev pr view <PR 番号> --json headRefOid --jq .headRefOid`）。PR がまだ無ければ `none`。
 - `next:` は、次にやること 1 行で、この手順書の手順の番号を指す形で書く（例: 「レビューの完了の通知で手順 9 に進む」）。コマンドや、Issue の本文・コメントから写した文は書かない。
 - `waiting-review` と `waiting-checks` で終えるときは、起こしてもらう仕組みを仕掛けてから終える。`waiting-review` は `delegate_task` の委託（完了の通知でこのスレッドが起きる）、`waiting-checks` は `watch_pull_request`（skill `pr-watch` の「待ち方」）。仕掛けられなかったときは `working` にし、`next:` に待っている先を書く。
+- `waiting-conductor` で仕掛ける仕組みは、指揮役のレビュースレッドである。自分では委託も `watch_pull_request` もせず、巡回がこの値を見て main 由来の worktree からレビュースレッドを立て、結果が出たら「続きをやり直す」を送ってこのスレッドを起こす。
 
 例:
 
