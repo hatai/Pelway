@@ -10,6 +10,8 @@ failures=()
 # 偽の mktemp / chmod は本物に委譲する。この時点（PATH 変更前）に本物のパスを取っておく
 REAL_MKTEMP="$(command -v mktemp)"
 REAL_CHMOD="$(command -v chmod)"
+# push の名義の確認（#613）の試験は本物の git とローカルの bare remote で行う
+REAL_GIT="$(command -v git)"
 
 BIN="$ROOT/bin"
 mkdir -p "$BIN"
@@ -539,6 +541,116 @@ while IFS=$'\t' read -r kind mp; do
     [[ ! -e "$mp" ]] || failures+=("keyfile_chmod_fail: isolated GH_CONFIG_DIR left behind ($mp)")
   fi
 done <"$MKTEMP_LOG"
+
+# --- push するコミットの名義の確認（#613）---
+# 本物の git とローカルの bare remote で、pre-push フックによる名義の確認を確かめる。
+# 利用者の git 設定（署名・フック）に左右されないよう、この節では global / system の設定を読ませない。
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+RGBIN="$ROOT/realgit-bin"
+mkdir -p "$RGBIN"
+ln -s "$REAL_GIT" "$RGBIN/git"
+DEV_EMAIL="$FAKE_PELWAY_DEV_GIT_EMAIL"
+# as <name> <git の引数...>: author・committer を <name> にして本物の git を実行する
+as() {
+  local who="$1"
+  shift
+  GIT_AUTHOR_NAME="$who" GIT_AUTHOR_EMAIL="$who@example.com" GIT_COMMITTER_NAME="$who" GIT_COMMITTER_EMAIL="$who@example.com" \
+    "$REAL_GIT" -c commit.gpgsign=false "$@"
+}
+# setup_push_repo <name>: remote.git（bare）と、それを clone した work を作る。
+# main には hatai のコミットと、kodiakhq[bot]（committer は GitHub）のマージコミットを置く。
+# work では agent/<name> ブランチを main から切る。PUSH_DIR に置き場所を入れる。
+setup_push_repo() {
+  PUSH_DIR="$ROOT/push-$1"
+  mkdir -p "$PUSH_DIR"
+  "$REAL_GIT" init -q --bare -b main "$PUSH_DIR/remote.git"
+  "$REAL_GIT" init -q -b main "$PUSH_DIR/seed"
+  (
+    cd "$PUSH_DIR/seed" || exit 1
+    as hatai commit -q --allow-empty -m init
+    as hatai switch -q -c feature
+    as hatai commit -q --allow-empty -m feature
+    as hatai switch -q main
+    GIT_AUTHOR_NAME='kodiakhq[bot]' GIT_AUTHOR_EMAIL=k@example.com GIT_COMMITTER_NAME=GitHub GIT_COMMITTER_EMAIL=noreply@github.com \
+      "$REAL_GIT" -c commit.gpgsign=false merge -q --no-ff -m 'Merge feature' feature
+    "$REAL_GIT" push -q "$PUSH_DIR/remote.git" main
+  )
+  "$REAL_GIT" clone -q "$PUSH_DIR/remote.git" "$PUSH_DIR/work"
+  "$REAL_GIT" -C "$PUSH_DIR/work" switch -q -c "agent/$1"
+}
+# push_run <name> <agent-gh の引数...>: work の中で agent-gh を本物の git で実行する
+push_run() {
+  local name="$1"
+  shift
+  export CALL_LOG="$ROOT/$name.log"
+  OUT="$(cd "$PUSH_DIR/work" && PATH="$RGBIN:$PATH" bash "$SCRIPT" "$@" 2>&1)"
+  RC=$?
+}
+remote_ref() { "$REAL_GIT" --git-dir="$PUSH_DIR/remote.git" rev-parse -q --verify "refs/heads/$1"; }
+work_git() { "$REAL_GIT" -C "$PUSH_DIR/work" "$@"; }
+
+# 1. 範囲は「push する ref から辿れて origin の追跡 ref から辿れないコミット」。main から取り込んだ
+#    hatai のコミットと、remote に既にある kodiakhq[bot] のマージコミットがあっても push は通る。
+setup_push_repo author_range
+(cd "$PUSH_DIR/work" && as 'pelway-dev[bot]' commit -q --allow-empty -m a1)
+(cd "$PUSH_DIR/seed" && as hatai commit -q --allow-empty -m main2 && "$REAL_GIT" push -q "$PUSH_DIR/remote.git" main)
+work_git fetch -q origin
+(cd "$PUSH_DIR/work" && as 'pelway-dev[bot]' merge -q --no-ff -m 'Merge main' origin/main)
+PELWAY_AGENT_SKIP_RESIGN=1 push_run author_range dev git push -u origin HEAD
+[[ "$RC" == 0 ]] || failures+=("author_range: exit $RC, want 0: $OUT")
+[[ "$(remote_ref agent/author_range)" == "$(work_git rev-parse HEAD)" ]] || failures+=("author_range: remote ref not updated")
+
+# 2・3. hatai 名義のコミット（author と committer の両方、または committer だけ）を含む push は止まる。
+#       remote の ref は変わらず、標準エラーに短い sha・名義・作り直しの案内が出る。
+setup_push_repo author_block
+(cd "$PUSH_DIR/work" && as 'pelway-dev[bot]' commit -q --allow-empty -m ok)
+PELWAY_AGENT_SKIP_RESIGN=1 push_run author_block_setup dev git push -u origin HEAD
+before="$(remote_ref agent/author_block)"
+[[ -n "$before" ]] || failures+=("author_block: setup push failed: $OUT")
+(cd "$PUSH_DIR/work" && as hatai commit -q --allow-empty -m bad)
+bad_sha="$(work_git rev-parse --short HEAD)"
+push_run author_block dev git push
+[[ "$RC" != 0 ]] || failures+=("author_block: exit 0, want non-zero")
+[[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("author_block: remote ref changed")
+[[ "$OUT" == *"$bad_sha"* ]] || failures+=("author_block: stderr lacks short sha $bad_sha: $OUT")
+[[ "$OUT" == *"author=hatai"* && "$OUT" == *"committer=hatai"* ]] || failures+=("author_block: stderr lacks identity: $OUT")
+[[ "$OUT" == *"scripts/agent-gh dev git commit"* ]] || failures+=("author_block: stderr lacks rebuild guidance: $OUT")
+
+work_git reset -q --hard "$before"
+(cd "$PUSH_DIR/work" && GIT_AUTHOR_NAME='pelway-dev[bot]' GIT_AUTHOR_EMAIL="$DEV_EMAIL" GIT_COMMITTER_NAME=hatai GIT_COMMITTER_EMAIL=h@example.com \
+  "$REAL_GIT" -c commit.gpgsign=false commit -q --allow-empty -m committer-only)
+bad_sha="$(work_git rev-parse --short HEAD)"
+push_run committer_block dev git push
+[[ "$RC" != 0 ]] || failures+=("committer_block: exit 0, want non-zero")
+[[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("committer_block: remote ref changed")
+[[ "$OUT" == *"$bad_sha"* && "$OUT" == *"committer=hatai"* ]] || failures+=("committer_block: stderr lacks sha/committer: $OUT")
+
+# 5. 確認を外す環境変数・引数は無い: PELWAY_AGENT_SKIP_RESIGN=1・--no-verify（その省略形）・
+#    core.hooksPath の上書きのどれでも push されない。
+PELWAY_AGENT_SKIP_RESIGN=1 push_run skip_resign_still_checks dev git push
+[[ "$RC" != 0 ]] || failures+=("skip_resign_still_checks: exit 0, want non-zero")
+[[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("skip_resign_still_checks: remote ref changed")
+[[ "$OUT" == *"$bad_sha"* ]] || failures+=("skip_resign_still_checks: stderr lacks short sha: $OUT")
+for bypass in "push --no-verify" "push --no-verif origin HEAD" "-c core.hooksPath=/dev/null push" "-c core.hookspath=/dev/null push" "--config-env=core.hooksPath=HOME push"; do
+  read -ra bypass_args <<<"$bypass"
+  push_run no_bypass dev git "${bypass_args[@]}"
+  [[ "$RC" != 0 ]] || failures+=("no_bypass ($bypass): exit 0, want non-zero")
+  [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("no_bypass ($bypass): remote ref changed")
+done
+
+# 6. review の push も同じ確認を通る。正しい名義は pelway-review[bot]。
+setup_push_repo review_push
+(cd "$PUSH_DIR/work" && as 'pelway-review[bot]' commit -q --allow-empty -m r1)
+PELWAY_AGENT_SKIP_RESIGN=1 push_run review_push review git push -u origin HEAD
+[[ "$RC" == 0 ]] || failures+=("review_push: exit $RC, want 0: $OUT")
+before="$(remote_ref agent/review_push)"
+[[ "$before" == "$(work_git rev-parse HEAD)" ]] || failures+=("review_push: remote ref not updated")
+(cd "$PUSH_DIR/work" && as 'pelway-dev[bot]' commit -q --allow-empty -m r2)
+PELWAY_AGENT_SKIP_RESIGN=1 push_run review_push_block review git push
+[[ "$RC" != 0 ]] || failures+=("review_push_block: exit 0, want non-zero")
+[[ "$(remote_ref agent/review_push)" == "$before" ]] || failures+=("review_push_block: remote ref changed")
+[[ "$OUT" == *"pelway-review[bot]"* && "$OUT" == *"author=pelway-dev[bot]"* ]] || failures+=("review_push_block: stderr lacks identity: $OUT")
+unset GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
 
 # --- gh の `gh event listen` の案内（#596）: agent-gh の出力に残さない。警告・エラー・stdout・終了コードは残す ---
 for sub in pr api; do

@@ -5,6 +5,7 @@
 #   scripts/agent-gh qa comment <番号> --body-file <path|->   QA 担当 GitHub App pelway-qa（この形だけ許可）
 #   scripts/agent-gh <dev|review> git <git の引数...>   その名義の認証で git を実行する
 #   scripts/agent-gh -h | --help               使い方を標準出力に出して終了コード 0（fnox も gh も呼ばない）
+# git push は、push するコミットの名義が pelway-<dev|review>[bot] でなければ止める（#613。一時ディレクトリの pre-push フック）。
 # 呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。
 # gh は毎回空の一時 GH_CONFIG_DIR で呼ぶ。~/.config/gh や呼び出し元の GH_CONFIG_DIR（外部の hosts.yml）は
 # 参照もフォールバックもさせない（#522。レビュー sandbox が ~/.config/gh を読めないのと、人間のトークンへの
@@ -110,6 +111,7 @@ help() {
     "" \
     "呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。" \
     "git push の成功後は scripts/agent-gh-resign がコミットを GitHub API の署名付きに付け替える（止めるときは PELWAY_AGENT_SKIP_RESIGN=1）。" \
+    "git push は、push するコミット（origin の追跡 ref から辿れないもの）の author と committer がその役割の App（pelway-<dev|review>[bot]）でなければ止める。確認を外す方法は無い（--no-verify・core.hooksPath の上書きは拒否）。" \
     "qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持ちません（~/.config/pelway-agent-qa/fnox.toml を指してください）。" \
     "非 ASCII の文字列は argv 経由で渡せません（\\uXXXX に潰れます）。--body-file / api --input / git commit -F などファイル経由で渡してください。" \
     "終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、それ以外は gh / git の終了コード"
@@ -274,7 +276,77 @@ if [[ "${1:-}" == "git" ]]; then
   done
   git_cfg+=(-c credential.helper= -c 'credential.helper=!gh auth git-credential')
 
-  if [[ "${1:-}" == "push" && -z "${PELWAY_AGENT_SKIP_RESIGN:-}" ]]; then
+  # push するコミットの名義を確かめる（#613）。git_sub はグローバルオプションの後の最初の引数（サブコマンド）。
+  git_sub=""
+  git_args=("$@")
+  for ((i = 0; i < ${#git_args[@]}; i++)); do
+    a="${git_args[i]}"
+    case "$a" in
+      -c | --config-env | --config-env=*)
+        # フックの場所の上書き（確認を外す引数になる）は拒否する。
+        v="${git_args[i + 1]:-}"
+        if [[ "$a" != -c || "${v,,}" == core.hookspath* ]]; then
+          echo "agent-gh: core.hooksPath の上書き・--config-env は使えません（push の名義の確認を外せないため）" >&2
+          exit 2
+        fi
+        i=$((i + 1))
+        ;;
+      -C | --git-dir | --work-tree | --namespace) i=$((i + 1)) ;;
+      -*) ;;
+      *) git_sub="$a"; break ;;
+    esac
+  done
+  if [[ "$git_sub" == push ]]; then
+    for a in "${git_args[@]:i+1}"; do
+      # --no-verify と、git が受け付けるその省略形（--no-veri 以上）は pre-push フックを飛ばすため拒否する。
+      if ((${#a} >= 9)) && [[ "--no-verify" == "$a"* ]]; then
+        echo "agent-gh: push の --no-verify は使えません（push の名義の確認を外せないため）" >&2
+        exit 2
+      fi
+    done
+    # 範囲は push する ref から辿れて origin の追跡 ref から辿れないコミット。author か committer の名前が
+    # 役割の App の名義でなければ push しない。フックは実行時に一時ディレクトリへ作る（リポジトリに
+    # 実行ファイルを置くと agent-gh-resign で署名できないため）。元のフックの場所に pre-push があれば続けて呼ぶ。
+    push_name="pelway-${role}[bot]"
+    hooks_dir="$(mktemp -d)"
+    cleanup_paths+=("$hooks_dir")
+    cat >"$hooks_dir/pre-push" <<'HOOK'
+#!/usr/bin/env bash
+set -euo pipefail
+input="$(cat)"
+bad=()
+while read -r _lref loid _rref _roid; do
+  [[ -n "${loid:-}" && ! "$loid" =~ ^0+$ ]] || continue # 削除（全ゼロ）は確かめるコミットが無い
+  # 代入の形で呼び、git log の失敗で止める（プロセス置換だと失敗が通ってしまう）
+  log="$(git log --format='%h%x09%an%x09%cn' "$loid" --not --remotes=origin)"
+  while IFS=$'\t' read -r h an cn; do
+    [[ -n "$h" ]] || continue
+    [[ "$an" == "$PELWAY_AGENT_PUSH_NAME" && "$cn" == "$PELWAY_AGENT_PUSH_NAME" ]] || bad+=("$h author=$an committer=$cn")
+  done <<<"$log"
+done <<<"$input"
+if ((${#bad[@]})); then
+  echo "agent-gh: push を止めました。$PELWAY_AGENT_PUSH_NAME 以外の名義のコミットが含まれています:" >&2
+  printf '  %s\n' "${bad[@]}" >&2
+  echo "agent-gh: $PELWAY_AGENT_PUSH_GUIDE" >&2
+  exit 1
+fi
+orig="$(git config --show-scope --get-all core.hooksPath 2>/dev/null | awk -F'\t' '$1 != "command" {v = $2} END {print v}')"
+orig="${orig:-$(git rev-parse --git-common-dir)/hooks}"
+if [[ -x "$orig/pre-push" ]]; then
+  "$orig/pre-push" "$@" <<<"$input"
+fi
+HOOK
+    chmod 700 "$hooks_dir/pre-push"
+    if [[ "$role" == dev ]]; then
+      PELWAY_AGENT_PUSH_GUIDE="該当コミットを scripts/agent-gh dev git commit で作り直してから push してください"
+    else
+      PELWAY_AGENT_PUSH_GUIDE="該当コミットを $push_name の名義で作り直してから push してください"
+    fi
+    export PELWAY_AGENT_PUSH_NAME="$push_name" PELWAY_AGENT_PUSH_GUIDE
+    git_cfg+=(-c "core.hooksPath=$hooks_dir")
+  fi
+
+  if [[ "$git_sub" == "push" && -z "${PELWAY_AGENT_SKIP_RESIGN:-}" ]]; then
     rc=0
     GH_TOKEN="$token" git "${git_cfg[@]}" "$@" || rc=$?
     if ((rc == 0)); then
