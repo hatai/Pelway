@@ -58,6 +58,13 @@ pub struct State {
     /// 送れなかった payload。次の周回で送り直す。
     #[serde(default)]
     pub outbox: Vec<serde_json::Value>,
+    /// 前回指揮役を起こしたときの、指揮役の既読の位置（補助記録の `inbox_offset`）。
+    /// 既読の位置がここから進むまで、重ねて起こさない。
+    #[serde(default)]
+    pub last_wake_inbox_offset: Option<u64>,
+    /// 前回起こした指揮役のスレッド ID。登録が替わったら、`last_wake_inbox_offset` は使わない。
+    #[serde(default)]
+    pub last_wake_thread_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

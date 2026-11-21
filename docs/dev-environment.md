@@ -59,6 +59,7 @@ mise bootstrap    # 上の1〜3を順に実行
 | `mise run hk-validate` / `hk-check` | `hk.pkl` の検証 / リポジトリ全体の読み取り専用検査（cargo を伴わないステップだけ。cargo を伴う検査は `fmt-check` / `clippy` が担当する） |
 | `mise run fnox-check` | `fnox list`（定義の一覧確認。秘密値の取得・表示はしない） |
 | `mise run pitchfork-check` | pitchfork のバージョン確認と、`pitchfork.toml` に `agent-watch` が定義されていることの確認 |
+| `mise run conductor-rebuild -- --from <旧指揮役のスレッド ID>` | 指揮役を立て直す（`docs/agents/conductor-context.md` の「恒久交代」）。hatai がホストの本体 checkout で実行する（worktree からは止まる） |
 | `mise run deny-check` | `cargo deny check`（依存クレートの検査。`verify-static` に含まれる。設定は `deny.toml`（ゲート）と `deny-warn.toml`（unmaintained / unsound の警告表示）） |
 | `mise run shellcheck` | `shellcheck scripts/demo-check/*.sh`（demo-check 一式の静的検査。指摘 0 件で通る。`verify-static` に含まれる） |
 | `mise run demo-check` | デモ受入前の 4 段階検査（`scripts/demo-check/run.sh`。受入は引数なしの全段階実行だけ有効。canary 段階は成果物が無いと未検証で失敗するため、製品をビルドしたあとに実行する） |
@@ -228,9 +229,22 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 | 場所 | 設定 |
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.claude_review` | `driver: claudeAgent`、`config` の `homePath` に `/home/hatai/.claude-review`（UI のフィールド名は「CLAUDE_CONFIG_DIR path」。子プロセスの環境変数 `CLAUDE_CONFIG_DIR` になる。`config.environment` は claudeAgent の config スキーマに無いキーで無視される） |
-| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` が引数を `git`/`gh` にそのまま渡すため、ワイルドカードは `auth token`・`repo clone`・`git` 全般などあらゆる形を許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す |
+| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`・`git ls-tree`・`git cat-file`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` が引数を `git`/`gh` にそのまま渡すため、ワイルドカードは `auth token`・`repo clone`・`git` 全般などあらゆる形を許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す |
 | socat | Claude Code の sandbox（Linux）が使う。`mise.toml` の `conda:socat` で `mise install`（`mise bootstrap`）が入れる。apt と sudo は要らない |
 | ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
+| `~/.claude-review/settings.json` の `hooks.PermissionRequest` | matcher `*` で `/home/hatai/.claude-review/hooks/deny-permission-request.sh` を呼ぶ。承認要求になる場面ごとに、人間に聞かずに拒否を返す。拒否のメッセージは、sandbox の遮断ではないこと、Bash なら単純なコマンドに分けて送り直すことをモデルに伝える。フックは worktree の外に絶対パスで置く（委託のレビューは PR の作者のコミットの checkout で動くため、リポジトリの中に置くと PR が差し替えられる） |
+
+T3 は `--permission-mode=acceptEdits` を渡すので、`defaultMode: dontAsk` は効かない。許可リストに無いコマンドのうち、Claude Code が読み取り専用と判定できる単純なもの（`echo`・`grep`・`wc`・`git log`・`git rev-parse`・`git merge-base` など）は承認なしで通る。判定できないもの（`git -C <パス>`、許可リストに無いスクリプトやサブコマンド）と、変数の代入・`$(...)`・`$?`・ループ・`<(...)` を含むコマンドは承認要求になる。レビューでよく使う読み取り専用のコマンド（`git ls-tree`・`git cat-file`・`agent-gh review run list`/`run view`）は許可リストに入れて、拒否されないようにしてある。フックはこの承認要求を拒否に変える。許可の範囲は広げない（`allow` を返さない）。フックの中身は次のとおり。
+
+```sh
+#!/bin/sh
+cat > /dev/null
+cat <<'EOF'
+{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"レビュー担当では承認要求を出さず、自動で拒否した。sandbox による遮断ではないので、これだけを理由に verdict: failed にしない。Bash なら、変数の代入・$(...)・$?・for/while のループ・<(...) を使わない単純なコマンドに分けて 1 つずつ送り直す（終了コードはツールの結果に出るので echo $? は要らない）。拒否されたのと同じコマンドをそのまま送り直しても、また拒否される。それ以外のツールや、分けても通らない操作は、手順にない操作として行わずに進める。"}}}
+EOF
+```
+
+戻すときは `hooks.PermissionRequest` を消す。
 
 運用に入る前に、`auto-accept-edits` のスレッドで次を確かめる。確かめるまでは `claude_review` を使わない。
 
@@ -250,6 +264,8 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 | 使えるコマンドの制限の結果（読み取り系 `git` と `scripts/agent-gh review` に絞られているか。`git switch` とファイルの書き込みが拒否されたか） | `scripts/agent-gh review api /rate_limit`・`pr view`・`issue view` は承認なしで成功（許可は使用する gh サブコマンド単位に列挙）。`git switch -c perm-check-256` は permissions の deny で拒否。Write ツールは deny によりセッションで無効化され（`No such tool available`）、ファイルは作られなかった。ラッパー経由の形（`scripts/agent-gh review git switch -c <probe>`・`git -c 'alias.x=!<コマンド>' x`・`pr checkout <N>`・`repo clone <リポジトリ> <dir>`・`auth status`）は許可の列挙に入らず、deny（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）でも拒否される | 2026-11-14 |
 | ネットワーク制限の結果（`api.github.com` と `github.com` だけにつながるか。`curl -sS https://example.com` が失敗したか） | `curl -sS https://example.com` は permissions の deny で拒否（実行自体されない）。GitHub API には到達した。egress の実測: 許可経路の `scripts/agent-gh review api --hostname example.com /` は実行されるが sandbox のプロキシで遮断（`host is not on the allow list`）。`scripts/agent-gh review git ls-remote https://example.com/` は deny で拒否 | 2026-11-14 |
 | Codex 側（`codex_review`）との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 許可先は同じく GitHub のみ。遮断の仕組みが異なり、Codex は `network_proxy`＋権限プロファイル、Claude は `~/.claude-review/settings.json` の permissions（allow/deny）＋ sandbox。ファイルの書き込みは Write/Edit ツール自体が無効化される。許可・拒否のどちらにも載っていないコマンドは、T3 が `--permission-mode=acceptEdits` を渡すため承認要求になる（`defaultMode: dontAsk` より acceptEdits が優先される）。書き込みの遮断も異なり、Codex の権限プロファイルは `/tmp` 以外を読み取り専用にするが、Claude の OS sandbox は worktree と共有 `.git` への書き込みを許すため、permissions の deny が漏れる形（許可リスト経由）では書き込みが止まらない | 2026-11-14 |
+| 承認要求を拒否に変えるフック（`hooks.PermissionRequest`）の結果 | `delegate_task`（target `claude_review`、`auto-accept-edits`、worktree）で確認。`H=$(git rev-parse HEAD); …; echo rc=$?` と `for f in …; do wc -l "$f"; done` は承認待ちにならずフックの拒否が返り、モデルは単純なコマンドに分けて送り直して結果を得た。`scripts/agent-gh review api /rate_limit` はそのまま通り、`curl -sS https://example.com` は permissions の deny で拒否のまま。スレッドに承認待ち（`pendingApproval`）は出なかった | 2026-11-21 |
+| フック導入後の実レビューの観察 | 導入後 1 時間の `claude_review` の実レビュー 9 セッションで、フックの拒否は 26 件。拒否を理由に `verdict: failed` になったレビューは無かった（`failed` の 1 件は PR のチェックの未報告による）。拒否のうち `git ls-tree`・`git -C`・`agent-gh review run list` は単純な形でも承認要求になっていたため、`git ls-tree`・`git cat-file`・`run list`・`run view` を許可に足した（`claude -p` で通ることと、`run download` は拒否のままであることを確認）。拒否されたのと同じコマンドを 1 回そのまま送り直す例が多かったため、フックのメッセージに 1 文足した | 2026-11-21 |
 
 残っている既知の経路は hatai の決裁で別 Issue で追う（PR #287 の round 4 で両レビュー担当が request-changes として指摘し、hatai が残リスクを受容）:
 
@@ -539,7 +555,7 @@ bwrap が作る名前空間の要点:
 | コンテキスト使用率 | 取得できる。T3 からの `/context` 送信に `72.0k/262.0k tokens (27.5%)` の形（System prompt・Tools・Messages・Free の内訳付き）で応答が返る。`~/.local/share/devin/cli/sessions.db` の `message_nodes.metadata`（`num_tokens_preceding`）からもトークン数の絶対値は読める | 2026-11-14 |
 | 自動圧縮の有無と検知 | 自動圧縮は有効（起動フラグ `enable-devin-cli-cloud-compaction-schedule=true`、設定 `agent.compaction_threshold_tokens` で閾値を調整可）。エージェントの会話内では検知できない（changelog に「Automatic context compaction is no longer surfaced in the scrollback or the ACP conversation view」と明記）。環境側では検知できる: ライフサイクルフック `PreCompact` / `PostCompact` / `PostCompaction`（manual/auto を区別、`PostCompaction` は summary を受け取る）、OTel イベント `compaction`、sessions.db の `summarized_from`、`~/.local/share/devin/cli/logs/` | 2026-11-14 |
 
-### Codex（codex_review、gpt-6-luna）
+### Codex（codex_review。検証時のモデルは gpt-6-luna）
 
 | 項目 | 結果 | 実施日 |
 |---|---|---|
@@ -643,7 +659,7 @@ container run --rm alpine echo hello   # hello 程度の smoke
 ## pitchfork について
 
 - ツールは mise で 2.33.1 に固定する。
-- `pitchfork.toml` には AI 開発チームの見張り役 `agent-watch`（`crates/pelway-agent-watch`）と、worktree の片付け `agent-worktree-prune` を定義する。`agent-watch` は T3 のスレッドの状態変化を Grok Bot の webhook に通知する常駐プロセスで、仕様は `docs/superpowers/specs/agent-team.md`「見張り役と通知」。
+- `pitchfork.toml` には AI 開発チームの見張り役 `agent-watch`（`crates/pelway-agent-watch`）と、worktree の片付け `agent-worktree-prune` を定義する。`agent-watch` は T3 のスレッドの状態変化を Grok Bot の webhook に通知し、同じ知らせを指揮役の受信箱に書いて、いまの指揮役のスレッドを起こす常駐プロセスで、仕様は `docs/superpowers/specs/agent-team.md`「見張り役と通知」。
 - `agent-worktree-prune` は cron（毎時 0 分）で `scripts/agent-worktree-prune --auto` を走らせる。消すのは `~/.t3/worktrees/Pelway` の下の、settle されたスレッドの（またはスレッドの無い）worktree のうち、main に取り込み済みか PR がマージ済み・クローズ済みのもの。未追跡のファイルは捨て、追跡ファイルに変更が残るものは残す。T3 に問い合わせられない回は何も消さない。消したあとに `git worktree prune`・`git fetch --prune origin`・`mbx gc` を走らせる。pitchfork の supervisor が動いていれば、`pitchfork start` しなくても cron で動く。supervisor は各 worktree の `pitchfork.toml` の cron も動かすが、`--auto` は main の checkout 以外では何もせずに終わり、同時に 2 つは走らない（`$XDG_STATE_HOME/pelway/agent-worktree-prune.lock`）。
 
   | コマンド | 内容 |
@@ -665,7 +681,14 @@ container run --rm alpine echo hello   # hello 程度の smoke
 
 - 状態は `$XDG_STATE_HOME/pelway/agent-watch.json`（未設定なら `~/.local/state/pelway/agent-watch.json`）に置く。初めて起動したときは既存のスレッドを記録するだけで、通知しない。送れなかった通知は状態の送信待ちの列に残り、次の周回で送り直す。
 - 起動してよいのは本体 checkout だけ。worktree にも同じ `pitchfork.toml` の定義があるが、worktree から起動されたときは起動元（実行時のカレントディレクトリ）の `git rev-parse --git-dir` と `--git-common-dir` の差で検出して理由を 1 行ログに出して終わる。見張り対象の `--project` が起動元の checkout の toplevel と一致しないときも、本体から別の checkout を見張る起動になるため同じく理由を 1 行出して終わる。同時に動かせるのは 1 つだけで、状態ディレクトリの `agent-watch.lock`（0600）を flock で取り、取れなければ理由を 1 行出して終わる（いずれも終了コード 0。agent-worktree-prune と同じ決まり。拒否のログにはパスの種類だけを書き、中身や環境変数は出さない）。
-- 送らずに試すには `cargo run -p pelway-agent-watch -- --once --dry-run`（新しいイベントの payload を標準出力に出す。状態ファイルは読むだけで書き換えない）。
+- 指揮役の受信箱と起こし（Issue #555）: 知らせを出すたびに、webhook と同じ JSON を共有の git dir の `pelway/conductor-inbox.jsonl` に 1 行ずつ追記する（形は `docs/agents/notify-payloads.md` の「指揮役の受信箱」）。受信箱に書けなくても webhook の送信と見張りは続け、ログに 1 行残す。`pelway/` は sandbox の中のエージェントも書ける場所で、agent-watch はホストの権限で動くので、`pelway/` が symlink・自分の所有でないディレクトリのとき、受信箱が symlink・FIFO などの通常ファイルでないもの・自分の所有でないもの・ハードリンクが 2 本以上あるもののときは書かない（`O_NOFOLLOW`・`O_NONBLOCK` で開き、開いた fd で種類・所有者・リンク数を確かめる。前からある受信箱に所有者以外の権限があれば書かない（0600 に直しても、すでに他人が開いている fd からは読めるため。webhook の送信は続ける）。`scripts/conductor-watch.sh` のボード Status 更新キューと同じ型）。前回の追記が途中で失敗して改行の無い断片が残っていれば、追記の前に改行で閉じ、次の知らせを独立した 1 行にする（行の形・断片の行・UTF-8・読み手の扱いは `docs/agents/notify-payloads.md` の「指揮役の受信箱」）。受信箱が 256 MiB を超えているときは、書かず、行数も数えず、その回は起こさない（`inbox append failed: inbox is too large` を 1 行残す。webhook の送信は続ける）。`patrol-state.json` は、symlink・FIFO などの種類・所有者・リンク数を同じく確かめ（権限は見ない。conductor-watch が既定の umask で書くため）、256 KiB を超えるものは読まない（`WAKE skipped reason=patrol-state-too-large`）。追記のあと、次の決まりで指揮役を起こす（判定の順は、登録ファイル → own-event → 補助記録 → 既読の位置の範囲 → スレッド ID の形 → 既読が進んだか。ログに出るのは最初に当たった理由だけ）。
+  - 宛先は、ホスト側の登録ファイル `~/.config/pelway-agent-notify/conductor-thread-id`（webhook の秘密の設定と同じ置き場で、sandbox の中からは書けない）を毎回読み直す。登録は hatai がホストの端末で、インストールした見張り役で行う: 代行の指揮役を始めるときに `~/.local/bin/pelway-agent-watch --register '<スレッド ID>'`（スレッド ID は、指揮役が伝えた値をそのまま貼らず、hatai がホスト側の T3 の画面か `t3 thread list --json` の `threadId` で確かめ、値が ASCII の英数字と `:`・`_`・`-`・`.`・`%` だけで、先頭が `-` でないことを見てから、単一引用符で囲んで渡す。`--register` の文字の検査は、シェルが行を解釈した後にしか働かないため）、終えるときに `--unregister`、確かめるときに `--show-registration`（見張りは始めない）。worktree の中のスクリプトや `cargo run` は sandbox の中のエージェントが書き換えられるので、ホストでは実行しない（インストールは本体 checkout で `mise run agent-watch-install`。指揮役は本体 checkout の作業ツリーを書けない専用の worktree で立てるが、共有 git dir の `index`・`refs/` は worktree のスレッドからも書けるので、ホストで実行する前の確かめは `docs/agents/conductor-context.md` の「恒久交代」に従う）。登録する値は、受信箱の `thread_id` と同じ文字列（`t3 thread list --json` の `threadId`）にする。`--register` は文字の種類だけを確かめ、表記は確かめない。違う表記を登録すると、知らせの元が指揮役自身かの判定が一致せず、`t3 thread send` がその表記を受け付けるなら、指揮役の巡回の終わりの知らせでも起こすので「起こし → 巡回 → 起こし」が続く（受け付けなければ、起こしは毎回 `WAKE failed` になる）。そうなったら `--unregister` で止め、正しい表記で登録し直す。登録ファイルの位置がディレクトリなら登録は失敗し、それ以外（symlink・FIFO など）はたどらずに置き換える。読むときも symlink をたどらず、FIFO で止まらず、通常ファイル・自分の所有でなければ使わない（`WAKE skipped reason=conductor-file-unreadable`）。ファイルが無いときは起こさない。`patrol-state.json` に `conductor_thread_id` が書かれていても使わない。値の先頭が `-`、または英数字と `:`・`_`・`-`・`.`・`%` 以外を含む、または 256 文字を超えるときは使わない（`WAKE skipped reason=invalid-thread-id`。`--register` も同じ規則で登録を拒む）。`patrol-state.json` は既読の位置（`inbox_offset`）だけに使い、無い・読めない（書きかけ・壊れている・`inbox_offset` が 0 以上の整数でない。項目が無いときは 0 として扱う）ときはその回は起こさず `WAKE skipped reason=patrol-state-unreadable` を 1 行残す。その回の知らせの元がすべて登録された指揮役自身のスレッド（payload の `thread_id` と登録値の完全一致で見る）（指揮役の巡回の終わりなど）のときも起こさない（`WAKE skipped reason=own-event`。起こすと、巡回の終わりと起こしを繰り返すため）。
+  - 前回起こしたときの指揮役の既読の位置（`patrol-state.json` の `inbox_offset`）を状態ファイル（`last_wake_inbox_offset`）に持ち、既読の位置がそこから進んでいなければ重ねて起こさない（`WAKE skipped reason=not-yet-read`）。1 行でも読み進めていれば、次の知らせで起こす。基準は起こした宛先と組で持ち、登録が替わったら一度も起こしていない扱いにする。既読の位置が受信箱の行数を超えているとき（書き損じ・書き換え）は、その回は起こさず基準にも残さない（`WAKE skipped reason=offset-out-of-range`）。
+  - 送るのは決まった文だけで（`t3 thread send <スレッド> -`、本文は標準入力。知らせの中身は含めない）、実行中のスレッドには次のターンとして届く。一覧・詳細・起こしに使う `t3` は同じもので、`T3_BIN` が指定されていればそれ、無ければ動いている T3 サーバーと同じ実行ファイル、それも無ければ PATH の `t3`（PATH の `t3` は版がサーバーと食い違うと失敗し、`ServerOwnsDatabaseError` で拒まれることもあるため）。サーバーの実行ファイルとして受け入れるのは、`/proc/<pid>/exe` の向き先が `$HOME/.t3/wsl-runtime/` の下の `t3` で、自分の所有の通常ファイルのものだけ（`scripts/conductor-watch.sh` の部分一致の規則より狭い。agent-watch はホストの権限で実行するので、sandbox から書ける場所に置かれた偽物を選ばないため）。
+  - `run`・`wake` を通る外部コマンド（`t3`・`gh`・`git`・`fnox`・`hostname`）は `timeout -k 5 30` で包む（webhook の `curl` は `--connect-timeout 2 --max-time 10` で区切る）（30 秒で SIGTERM、さらに 5 秒で SIGKILL。終了処理で固まった子で見張りが止まらないため）。
+  - 送れなかったら `WAKE failed <理由>`（理由は `exit=<終了コード>`・`exit=signal`・`spawn:`・`stdin:`・`wait:` のどれか）を 1 行残すだけで送り直さず、次の新しい知らせで改めて試みる。知らせは受信箱に残り、指揮役の巡回が読む。
+  - `patrol-state.json` は sandbox の中のエージェントが書けるので、`inbox_offset` を書き換えれば重ねての起こしの抑止は外れる。逆に、受信箱の行数以内で実際より先の値に書き換えると、起こしたときにその値が基準に残り、補助記録を正しい値に戻しても、既読の位置がその値を超えるまで起こしは送られない（知らせは受信箱に残り、定期巡回が読む）。その場合も送られるのは、決まった文を、hatai が登録した 1 つのスレッドへ、知らせ 1 件につき最大 1 回だけである。
+- 送らずに試すには `cargo run -p pelway-agent-watch -- --once --dry-run`（新しいイベントの payload を標準出力に出す。状態ファイルは読むだけで書き換えず、受信箱にも書かず、起こしも送らない）。
 - 再起動のあとの自動起動: `pitchfork.toml` の `agent-watch` には `boot_start = true` を付けてあり、login 時に起動する pitchfork の supervisor（`pitchfork supervisor run --boot`）が agent-watch を起動する。起動時の supervisor は作業ディレクトリを持たず、読むのはユーザーの設定（`~/.config/pitchfork/config.toml`）と、その `[namespaces]` に登録されたプロジェクト（とその全 worktree）の `pitchfork.toml` だけなので、次の 2 つを PC 側で入れておく。どちらもリポジトリの外の設定で、hatai が OK のうえで手で行う。
   1. supervisor の login 時の起動を登録する: `pitchfork boot enable`（sudo なし。`~/.config/systemd/user/pitchfork.service` ができる）。`pitchfork boot status` が `Boot start is enabled` になれば済み。
   2. 本体 checkout を namespace として登録する: `~/.config/pitchfork/config.toml` に次を書く（`dir` は本体 checkout の絶対パス。`git worktree list` の 1 行目）。
