@@ -8,8 +8,12 @@
 #   （git worktree prune・git fetch --prune origin・mbx gc）を走らせる。
 #
 # 対象は $PELWAY_T3_WORKTREES（既定 ~/.t3/worktrees/Pelway）の下の worktree だけ。
-# settle されていない T3 スレッドの worktree（t3 thread show の worktreePath）は作業中として残す。
-# T3 に問い合わせられないときは何も消さずに失敗する。それ以外で消すのは次のどれか。
+# 次の worktree は作業中として残す。
+#   - settle されていない T3 スレッドの worktree（t3 thread show の worktreePath）
+#   - 生きているプロセスのカレントディレクトリ（/proc/<pid>/cwd）が中にある worktree
+#     （t3 thread list に出ない delegate_task の子スレッドの worktree を守る）
+#   - 最後の変更（作業ツリーと、git dir の HEAD・index の更新時刻のうち新しいもの）から 6 時間以内の worktree
+# T3 に問い合わせられないとき、/proc を読めないときは何も消さずに失敗する。それ以外で消すのは次のどれか。
 #   - HEAD が origin/main に取り込まれている → worktree とブランチを消す
 #   - ブランチの PR がマージ済み → worktree とブランチを消す
 #   - ブランチの PR が閉じている（開いている PR が無い） → worktree だけ消し、ブランチは残す
@@ -67,6 +71,29 @@ for id in $ids; do
   [[ -n "$wt" ]] && busy+="$wt"$'\n'
 done
 
+# プロセスのカレントディレクトリを集める（「pid<TAB>コマンド名<TAB>cwd」の行。他人のプロセスは読めないので飛ばす）
+readlink /proc/self/cwd >/dev/null 2>&1 || { echo "agent-worktree-prune: /proc を読めない。何も消さない" >&2; exit 1; }
+cwds=""
+for d in /proc/[0-9]*; do
+  cwd="$(readlink "$d/cwd" 2>/dev/null)" || continue
+  comm="$(<"$d/comm")" 2>/dev/null || continue
+  cwds+="${d#/proc/}"$'\t'"$comm"$'\t'"$cwd"$'\n'
+done
+recent_since="$(date -d '6 hours ago' +%s)"
+
+live_process() { # worktree の中にカレントディレクトリがあるプロセスの「pid N コマンド名」。無ければ空
+  awk -F '\t' -v p="$1" '$3 == p || index($3, p "/") == 1 { print "pid " $1 " " $2; exit }' <<<"$cwds"
+}
+
+recently_updated() { # 作業ツリー（.git を除く）か git dir の HEAD・index が 6 時間以内に変わったか
+  local gitdir f
+  gitdir="$(git -C "$1" rev-parse --absolute-git-dir)" || return 0
+  for f in "$gitdir/HEAD" "$gitdir/index"; do
+    [[ -e "$f" ]] && (($(stat -c %Y "$f") >= recent_since)) && return 0
+  done
+  [[ -n "$(find "$1" -xdev -path "$1/.git" -prune -o -newermt "@$recent_since" -print -quit)" ]]
+}
+
 git fetch --quiet origin main 9>&- || { echo "agent-worktree-prune: git fetch に失敗した" >&2; exit 1; }
 prs="$(gh pr list --state all --limit 1000 --json headRefName,state 9>&-)" || { echo "agent-worktree-prune: gh pr list に失敗した" >&2; exit 1; }
 
@@ -88,6 +115,10 @@ while read -r path branch; do
   [[ "$path" == "$ROOT"/* ]] || continue
   branch="${branch#refs/heads/}"
   if grep -qxF "$path" <<<"$busy"; then keep+=("$path (settle されていないスレッドの worktree)"); continue; fi
+  proc="$(live_process "$path")"
+  if [[ -n "$proc" ]]; then keep+=("$path (プロセスが動いている: $proc)"); continue; fi
+  # changes の git status が index を書き換えうるので、更新時刻はその前に測る
+  if recently_updated "$path"; then keep+=("$path (6 時間以内に更新された)"); continue; fi
   if [[ -n "$(changes "$path")" ]]; then keep+=("$path (変更が残っている)"); continue; fi
   head="$(git -C "$path" rev-parse HEAD)"
   state=""

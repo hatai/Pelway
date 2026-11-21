@@ -369,7 +369,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
   4. 調査スレッドで、報告の PR がマージ済みのもの
 - `needs-human` の付いたもの、止まっているもの、迷走中のものは、上に当たっても settle せず、巡回の報告の「判断待ち」に回す
 - 棚卸しでするのは settle だけ。スレッド・worktree・ブランチの削除、アーカイブ、中断、再開はしない
-- worktree は pitchfork のデーモン `agent-worktree-prune` が毎時消す（settle されたスレッドの、main に取り込み済みかマージ済み・クローズ済みの PR のものだけ。未追跡のファイルは捨て、追跡ファイルに変更が残るものは残す）。settle しないと worktree は残るので、終わったスレッドは上のとおり settle する。残ったものは人間が `mise run agent-worktree-prune` で整理する
+- worktree は pitchfork のデーモン `agent-worktree-prune` が毎時消す（settle されたスレッドの、main に取り込み済みかマージ済み・クローズ済みの PR のものだけ。未追跡のファイルは捨て、追跡ファイルに変更が残るもの、生きているプロセスのカレントディレクトリが中にあるもの、最後の変更から 6 時間以内のものは残す）。settle しないと worktree は残るので、終わったスレッドは上のとおり settle する。残ったものは人間が `mise run agent-worktree-prune` で整理する
 - マージ後の Issue と PR はボードの組み込みワークフローが Done にする
 
 ## 10. 巡回状態の補助記録
