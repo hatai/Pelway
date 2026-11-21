@@ -173,12 +173,12 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 ### セキュリティスキャン（security-scan）
 
 - `.github/workflows/security-scan.yml` が、main 向け Pull Request・main への push・手動実行で、秘密情報・危ないコードのパターン・脆弱な依存関係を検出する（Issue #571）。すべて無料の OSS で、有料サービス・アカウント登録・トークンは使わない。
-- 報告のみ: 検出があってもジョブは成功し、件数を `::warning::` に、一覧（場所と種類）をジョブサマリーに出す。ツール自体の失敗（ネットワーク断・設定の誤りなど）はジョブを失敗させる。Semgrep は検出の終了コードを解析エンジンのエラーより優先して返すため、JSON に level が error のエラーがあれば、検出があっても失敗として扱う（level が warn の構文エラーなどは件数だけをサマリーに出す）。OSV-Scanner も、ロックファイルの抽出に失敗すると標準エラーの `Error during extraction:` の行に出すだけで、検出があれば終了コード 1 を返す。そのため、その行があれば失敗として扱う。OSV-Scanner の標準エラーは取得先の URL などを含みうるため、公開のジョブログには出さずランナー上の一時ファイルにだけ書き、ログには失敗の種類と件数だけを出す（中身は手元で同じコマンドを実行して確かめる）。件数は各ツールの JSON の検出の数から数え、サマリーの表のセルでは改行を空白に、`|` を `\|` に置き換える。必須チェックにはしていない（必須チェックにするかは hatai が決める）。本体は `scripts/security-scan.sh`、テストは `scripts/tests/security-scan.test.sh`。
+- 報告のみ: 検出があってもジョブは成功し、件数を `::warning::` に、一覧（場所と種類）をジョブサマリーに出す。ツール自体の失敗（ネットワーク断・設定の誤りなど）はジョブを失敗させる。Semgrep は検出の終了コードを解析エンジンのエラーより優先して返すため、JSON に level が error のエラーがあれば、検出があっても失敗として扱う（level が warn の構文エラーなどは件数だけをサマリーに出す）。OSV-Scanner も、ロックファイルの抽出に失敗すると標準エラーの `Error during extraction:` の行に出すだけで、検出があれば終了コード 1 を返す。そのため、その行があれば失敗として扱う。OSV-Scanner の標準エラーは取得先の URL などを含みうるため、公開のジョブログには出さずランナー上の一時ファイルにだけ書き、ログには失敗の種類と件数だけを出す。進捗ログ（読めたファイルのパスを書く）は `--verbosity error` で出させず、抽出の失敗の判定に混ぜない（中身は手元で同じコマンドを実行して確かめる）。件数は各ツールの JSON の検出の数から数え、サマリーの表のセルでは改行を空白に、`|` を `\|` に置き換える。必須チェックにはしていない（必須チェックにするかは hatai が決める）。本体は `scripts/security-scan.sh`、テストは `scripts/tests/security-scan.test.sh`。
 
 | ジョブ | ツールと版 | 対象 | 導入 |
 |---|---|---|---|
 | `gitleaks (secrets)` | Gitleaks 8.30.1（MIT） | HEAD から辿れる git 履歴全体。マージコミットの差分（競合解消で足した行）も含める（`--log-opts="-m HEAD"`、checkout は `fetch-depth: 0`） | `mise.security.toml`（`MISE_ENV=security`）と `mise.security.lock` |
-| `semgrep (code patterns)` | Semgrep CE 1.186.0（LGPL-2.1） | 作業ツリーのファイル（`tests/` の下を含む。リポジトリ直下の `.semgrepignore` が Semgrep の組み込みの既定の除外パターンを置き換え、今はパターンでは何も除外しない。ファイルの大きさやバイナリかどうかによる Semgrep の選別は残る）。ルールセットは `p/rust`・`p/github-actions`・`r/bash` | 公式イメージ `semgrep/semgrep` を digest 固定した job コンテナ |
+| `semgrep (code patterns)` | Semgrep CE 1.186.0（LGPL-2.1） | 作業ツリーのファイル（`tests/` の下を含む。リポジトリ直下の `.semgrepignore` が Semgrep の組み込みの既定の除外パターンを置き換え、今はここでは何も除外しない。ファイルの大きさやバイナリかどうか、未追跡のファイルへの `.gitignore` による Semgrep の選別は残る）。ルールセットは `p/rust`・`p/github-actions`・`r/bash` | 公式イメージ `semgrep/semgrep` を digest 固定した job コンテナ |
 | `osv-scanner (dependencies)` | OSV-Scanner 2.7.1（Apache-2.0） | 作業ツリーのロックファイル（今は `Cargo.lock`） | `mise.security.toml` と `mise.security.lock` |
 
 - 秘密の値は出さない: Gitleaks は `--redact` で値を伏せ、サマリーには規則・場所・コミットだけを書く。`-m` で同じ値が複数のマージコミットに重ねて出るため、サマリーには規則と場所の重複を除いた数も書く。

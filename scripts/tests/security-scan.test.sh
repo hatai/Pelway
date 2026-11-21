@@ -28,6 +28,8 @@ if [[ -n "$out" && -n "${STUB_JSON:-}" ]]; then printf '%s' "$STUB_JSON" >"$out"
 if [[ -n "${STUB_ARGS:-}" ]]; then printf '%s\n' "$@" >"$STUB_ARGS"; fi
 echo "stub $(basename "$0") $*" >&2
 if [[ -n "${STUB_STDERR:-}" ]]; then printf '%s\n' "$STUB_STDERR" >&2; fi
+# STUB_INFO は osv-scanner の進捗ログ（info）の代わり。--verbosity error のときは出さない。
+if [[ -n "${STUB_INFO:-}" && " $* " != *" --verbosity error "* ]]; then printf '%s\n' "$STUB_INFO" >&2; fi
 exit "${STUB_RC:-0}"
 EOF
   chmod +x "$work/bin/$tool"
@@ -123,10 +125,15 @@ run_case osv-error osv-scanner 127 "" 127
 osv_diag="Error during extraction: (extracting as javascript/packagelockjson) bad/package-lock.json: fetch https://user:FAKEPASSWORD@registry.invalid/x failed"
 STUB_STDERR="$osv_diag" run_case osv-hit-partial osv-scanner 1 "$osv_hit" 127
 want_contains osv-hit-partial "$REPLY_LOG" "::error::"
-want_contains osv-hit-partial "$REPLY_LOG" "1 件"
+want_contains osv-hit-partial "$REPLY_LOG" "抽出エラーの診断 1 件"
 # osv-scanner の標準エラー（取得先の URL などを含みうる）は公開のジョブログに出さない。
 want_absent osv-hit-partial "$REPLY_LOG" "FAKEPASSWORD"
 want_absent osv-hit-partial "$REPLY_LOG" "stub osv-scanner"
+# 進捗ログは読めたファイルのパスをそのまま書く。パスに改行があると「Error during extraction:」で
+# 始まる行を作れるため、進捗ログを出させず（--verbosity error）、正常な抽出を失敗と取り違えない。
+STUB_INFO=$'Scanned /w/a\nError during extraction: x/Cargo.lock file and found 1 packages' \
+  run_case osv-hit-odd-path osv-scanner 1 "$osv_hit" 0
+want_contains osv-hit-odd-path "$REPLY_LOG" "::warning::"
 STUB_STDERR="$osv_diag" run_case osv-error-quiet osv-scanner 127 "" 127
 want_absent osv-error-quiet "$REPLY_LOG" "FAKEPASSWORD"
 # ロックファイルが 1 つも見つからない（128）は設定の誤りとして失敗させる。

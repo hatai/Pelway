@@ -54,7 +54,9 @@ case "$tool" in
   osv-scanner)
     # 標準エラーは公開のジョブログに出さず、ファイルにだけ書く（取得先の URL などを含みうるため）。
     # 抽出の失敗は、osv-scanner が終わってからこのファイルで見分ける。
-    osv-scanner scan source --recursive --format json --output-file "$report" . \
+    # --verbosity error: 既定（info）の進捗ログは読めたファイルのパスをそのまま書き、パスに改行が
+    # あると「Error during extraction:」で始まる行を作れるため、エラーの行だけにする。
+    osv-scanner scan source --verbosity error --recursive --format json --output-file "$report" . \
       2>"$out_dir/osv-scanner.stderr" || rc=$?
     found_rc=1
     ;;
@@ -71,7 +73,7 @@ fi
 if [[ "$tool" == osv-scanner ]]; then
   extraction_errors="$(grep -c '^Error during extraction:' "$out_dir/osv-scanner.stderr" || true)"
   if [[ "$extraction_errors" != 0 ]]; then
-    echo "::error::osv-scanner がロックファイルの抽出に失敗しました（${extraction_errors} 件。中身はログに出さず、$out_dir/osv-scanner.stderr に書いた）"
+    echo "::error::osv-scanner がロックファイルの抽出に失敗しました（抽出エラーの診断 ${extraction_errors} 件。中身はログに出さず、$out_dir/osv-scanner.stderr に書いた）"
     exit 127
   fi
 fi
