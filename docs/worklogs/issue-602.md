@@ -27,11 +27,12 @@
 
 ## 実装者メモ（round 3）
 
-対象 head: b21544d373d5fd82ca35d436eb86062ddc674ab2
+対象 head: 693e27801afca34980b8c039cb8109519215e9f5
 
 1. 詰まった箇所: `scripts/conductor-watch.sh` の登録ファイルの読み取り: round 2 の `os.fdopen` は、登録ファイルの場所がディレクトリだと `IsADirectoryError`（CPython の FileIO はディレクトリを拒む）で python ごと落ちる形だった。fd のまま `os.fstat` と `os.read` で読み、ディレクトリは「通常のファイルでない」として扱うようにした（`registered_thread`、場面 9 の確認を足した）。
 2. 曖昧だった文: 「Issue #602 が不在と定める条件を確認できた場合だけ格上げしてください。」（PR #610 の round 2 の codex のレビューの must-fix 1）。自分の所有でない通常ファイルが、Issue の「通常のファイルでない」に入るかが書かれていない。
-3. 仮定と解釈: 自分の所有でない通常ファイルは不在の 5 つに当たらないとして保留にした（`crates/pelway-agent-watch` の `read_conductor_file` も Err を返し、agent-watch は起こしを見送る）。選ばなかった解釈は round 2 までの「不在」。`labeled_at` より後に `needs-human` が外されていれば、記録が無くても通知と `needs-human` を書かない（受け入れ条件の格上げの前提を 1 つ足す）。見張りが `needs-human` を付けた後に人間が外したときは、`needs-decision` だけを外して見張りの操作を終える。選ばなかった解釈は「何もせず指揮役に残す」。
+   「あれば人間が外したので、付け直さない。」（PR #610 の round 2 の claude のレビューの nit 2）。この判定を、見張りの格上げが途中の Issue だけに当てるか、記録の無い Issue にも当てるかが書かれていない。
+3. 仮定と解釈: 自分の所有でない通常ファイルは不在の 5 つに当たらないとして保留にした（`crates/pelway-agent-watch` の `read_conductor_file` も Err を返し、agent-watch は起こしを見送る）。選ばなかった解釈は round 2 までの「不在」。付け直さない判定は、前の周に通知を書いた格上げにだけ当てた（`resumed`）。選ばなかった解釈は「記録が無くても書かない」で、受け入れ条件（`needs-human` が無ければ格上げする）から外れ、その Issue を誰も格上げしないまま毎周読み続けるため採らなかった。見張りが `needs-human` を付けた後に人間が外したときは、`needs-decision` だけを外して見張りの操作を終える。選ばなかった解釈は「何もせず指揮役に残す」。
 4. 足りなかった情報・検証手段: 自分の所有でない登録ファイルの試験は、別の uid が要るため書いていない。権限の無い登録ファイルの場面 23 は root で流すと確かめにならない（root は読めて、生きている ID を読むので書かない）。CI（`ubuntu-24.04` の `runner`）とローカル（uid 1000）は root でない。events がラベルの変化より遅れて届くときの挙動はモックでしか確かめていない。
 5. 改善案: `scripts/conductor-watch.sh` の「ボード Status 更新キュー」の第 1 段に「名前が `[A-Za-z0-9._-]+\.json` に合わない要求ファイルは、名前を行に出さずに `bad-name` で退ける」を足す（エージェントが決められるファイル名で `watch.log` に行を作り込めないようにする。PR #610 の round 2 の codex の security-review の指摘）。
 
