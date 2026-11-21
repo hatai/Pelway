@@ -33,7 +33,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 | sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
-| 3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）、`[文書のずれ]` の nit だけを直す round を通算 2 回終えた後に、また印の nit が残った（通算 3 回目には入らない）、委託が 2 回連続で `failed`（`checks pending` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort） |
+| 3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）、`[文書のずれ]` の nit だけを直す round を通算 2 回終えた後に、また印の nit が残った（通算 3 回目には入らない）、委託が 2 回連続で `failed`（`checks timeout` と `wrong runtime` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort） |
 
 止まり方（止まった時点で、どの手順の途中でも手順 5 の形で実装者メモを書き、Issue のコメントに続けて貼る。push しないので `docs/worklogs/` には書かなくてよい）:
 
@@ -102,7 +102,7 @@ EOF
 ### 4. 受け入れ条件ごとにテストを先に書く
 
 1. 受け入れ条件 1 つにつき、それを確かめるテストを書く
-2. テストを実行し、失敗することを確かめる。失敗の出力を PR 本文の「確認方法/検証」に貼る
+2. テストを実行し、失敗することを確かめる。失敗の出力を PR 本文の「確認方法/検証」に貼る。実装が作業ツリーやコミットに既にある（修正 round、実装を先に書いた）ときは、実装を手で戻さずに `scripts/red-check <前の実装の ref> --keep <新しいテストのパス>... -- <テストのコマンド>` で前の実装に当て、その出力と終了コードを貼る。`red-check` は `<ref>` の一時 worktree に `--keep` のファイルだけを作業ツリーから重ねてコマンドを走らせ、その終了コードで終わり、一時 worktree を消す。重ねるファイルは自動で選ばないので、新しいテストのファイル（テストが使う新しい補助ファイルも）を漏れなく `--keep` に挙げる
 3. 実装してテストを通す
 
 テストが最初から通ったら、そのテストは条件を確かめていない。書き直す。テストが red にならない、または実行ごとに red が揺らぐときは、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 1〜2 で切り分けてから書き直す。
@@ -186,6 +186,10 @@ EOF
 
 修正依頼の場合は PR を作り直さない。push したあと `scripts/agent-gh dev pr edit` で本文の「レビューと QA」と「対象」の sha を更新する。
 
+PR 本文の「レビューと QA」には round の履歴を書かず、実装者メモ（`docs/worklogs/issue-<N>.md`）を指す 1 行と、最後に検証した sha だけを書く。round の履歴の正本は実装者メモとする（round サマリーのコメント（手順 9）は別に残す）。
+
+修正の round では、PR 本文の「確認方法/検証」の表を、その head の試験の出力から写した最後の round の結果だけに置き換える。前の round の結果は本文に残さない。
+
 PR を作ったら、実在することを確かめる。
 
 ```bash
@@ -198,7 +202,7 @@ PR を作るたびに、T3 のスレッドにそのスレッドの PR を全部�
 
 ### 8. レビューを委託する
 
-PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。チェックがまだ動いていれば、完了を待ってから委託する（待ち方は skill `pr-watch` の「待ち方」に従う。必須チェックの通過は `pr-digest` の `required` 行で確かめる。委託した子が `error: checks pending` を報告したときも、同じラウンドとして数えずに完了を待って再委託する）。
+PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。チェックがまだ動いていれば、完了を待ってから委託する（待ち方は skill `pr-watch` の「待ち方」に従う。必須チェックの通過は `pr-digest` の `required` 行で確かめる。レビュー担当もチェックが終わるまで待ってからレビューする。委託した子が `error: checks timeout` を報告したときも、同じラウンドとして数えずに完了を待って再委託する）。
 
 担当と effort は skill `command-team` の「レビュー担当と effort」の表で決める（通常は PR 番号の偶奇、高リスクは使える担当全て、抜き取りは PR 番号を 4 で割った余りが 0 のとき Claude を追加。自分が Devin CLI で実装した PR には Devin CLI を付けない）。差分が `unsafe` を足している、`.github/workflows/`・`scripts/agent-gh`・`AGENTS.md`・`.agents/skills/`・`docs/agents/` のどれかが変わっている、認証・認可・トークン・鍵・暗号・sandbox・egress・gateway・テナント分離・監査に触れている、のどれかに当たるときは Assigned 行に `security=yes` を付ける。
 
@@ -209,7 +213,7 @@ PR #<M> をレビューする。skill review-pr に従う。
 Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes
 ```
 
-`security=yes` が不要なときは書かない。target・mode は担当に応じる:
+`security=yes` が不要なときは書かない。target・options は担当に応じる:
 
 | 担当 | `target.providerInstanceId` | `target.model` | `target.options` |
 |---|---|---|---|
@@ -217,7 +221,23 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 | claude | `claude_review` | `claude-opus-5-5` | `effort: <effort>` |
 | devin | `devin_review` | `swe-2-high` | `mode` のみ受け付ける（省略してよい。`thought_level` は渡せず、effort の引き上げはできない） |
 
-これに `role: "review"`、`runtimeMode: "auto-accept-edits"`、`isolation: "worktree"` を付ける。委託したら返答を終えて完了の通知を待つ（ポーリングしない）。このときの最後の返答は、下の「ターンの終わりの状態の行」の `waiting-review` にする。チェックの完了を待って返答を終えるときは `waiting-checks` にする。高リスクで複数担当にしたときは、全員の結果がそろうまで次に進まない。
+`delegate_task` の呼び出しは、次のブロックを丸ごと写し、`<...>` を上の表と割り当ての行で埋める。`role`・`runtimeMode`・`isolation` は担当によらず同じ値で、省かない（省くと子が sandbox の外の権限で動き、レビュー担当は `error: wrong runtime` で止まる）。devin の `options` は `{}` にする。
+
+```json
+{
+  "target": {
+    "providerInstanceId": "<codex_review|claude_review|devin_review>",
+    "model": "<上の表の target.model>",
+    "options": {"<reasoningEffort|effort>": "<effort>"}
+  },
+  "role": "review",
+  "runtimeMode": "auto-accept-edits",
+  "isolation": "worktree",
+  "task": "PR #<M> をレビューする。skill review-pr に従う。\nAssigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes"
+}
+```
+
+委託したら返答を終えて完了の通知を待つ（ポーリングしない）。このときの最後の返答は、下の「ターンの終わりの状態の行」の `waiting-review` にする。チェックの完了を待って返答を終えるときは `waiting-checks` にする。高リスクで複数担当にしたときは、全員の結果がそろうまで次に進まない。
 
 次のラウンドのレビューを委託したら、前ラウンドのレビュースレッド（子タスク）を settle する（`t3_thread_organize` の `action: settle`。runbook 9 の「片付け」と同じ決まりで、前ラウンドが `needs-human` 中・止まっている・迷走中のときは settle しない）。
 
@@ -266,7 +286,9 @@ scripts/agent-gh dev pr ready <PR 番号>
 
 1 で直したとき以外は、Approve の後は PR に push しない。実装者メモのみのコミットでも head が動き、command-team のマージ規則によりレビューのやり直しになる。メモの追記が必要なときは、修正 round の手順 5・6（レビュー委託の前）で行う。
 
-複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（エスカレーションしない）。委託の子が `failed` を報告したら、`error: checks pending` は待って同じラウンドを数えずに再委託し、それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
+複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（エスカレーションしない）。委託の子が `failed` を報告したら、`error: checks timeout` は待って同じラウンドを数えずに再委託し、`error: wrong runtime` は手順 8 のブロックと突き合わせて委託の設定を直し、同じラウンドを数えずに再委託する。それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
+
+委託の子の報告には、`out-of-scope:` の行（PR の範囲外の安全上の所見。skill `review-pr` の手順 3）が来ることがある。PR 外の所見を受けたら、終わりの報告（指揮役か hatai あて）の `out-of-scope:` の行に書き、公開の Issue は立てない。実装者メモ・ラウンドサマリー・PR 本文など、公開される場所にも写さない。その PR では直さない（対象外のため）。
 
 ラウンドサマリーは `scripts/agent-gh dev pr comment <PR 番号> --body-file -` で投稿する:
 
@@ -279,7 +301,7 @@ must-fix: <対応した内容。Approve のときは「なし」>
 
 ### 10. 終わりの報告
 
-最後の返答は次の 6 行だけにする（下の「ターンの終わりの状態の行」の `done`）。Grok Bot と巡回はこの 6 行だけを読む。
+最後の返答は次の 6 行だけにする（下の「ターンの終わりの状態の行」の `done`）。Grok Bot と巡回はこの 6 行だけを読む。手順 9 で PR 外の所見を受けていたら、`state:` の行の前に `out-of-scope: <所見の要約 1 行。200 文字以内>` を足して 7 行にする（止まった形でも同じ）。
 
 ```
 issue: #<N>
