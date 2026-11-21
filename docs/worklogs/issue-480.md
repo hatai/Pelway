@@ -83,3 +83,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9「修正依頼のとき」に「レビューを経ない修正では `### review round` の見出しを付けずに解消内容をコメントする」を足す（別 Issue が適切）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 7・例外: 認可の 1 件だけ）
+
+対象 head: e7ab9bd4b2b6b7b6ddc6f19951ec0631c2ec7e67
+
+1. 詰まった箇所: `.agents/skills/command-team/SKILL.md` の「マージ」の QA 合格コメント: 最初の修正（`c238ef0b`）で作成者を `author.login` だけで確かめていた。Claude の例外レビューの指摘のとおり、書き込み権限を持つ `pelway-dev` がほかの名義のコメントを編集でき、古い合格コメントの sha を書き換えるとすり抜けられた。REST の `user.login == "pelway-qa[bot]"`・`user.type == "Bot"`・`created_at == updated_at` の 3 条件に直し、runbook 88 行も同じ形にした。main（`e109a2b1`）を取り込んだときは 5 ファイルが衝突し、`[文書のずれ]` の nit の変更と両立させた。
+2. 曖昧だった文: 「push 条件: Claude レビュー合格・同一 sha QA 合格・push 前点検の 3 つ。」（Issue #480 の 2026-11-21T05:34 の再開指示、作成者 `pelway-dev`）
+3. 仮定と解釈: 再開指示の作成者は hatai ではなく `pelway-dev` だが、指揮役の T3 の指示で同じ内容を受けたため決定として扱った。push は、指揮役の次の指示（例外レビュー 1 回で済み、QA は新しい head で点検する）を受けてから行った。nit は指示された 2 件（日付の削除、admin マージの例外に読めない書き方）だけを直した。
+4. 足りなかった情報・検証手段: `pelway-qa` の実際の投稿の `user.login`・`user.type` は、Issue #483 の実測がまだで確かめていない（`docs/dev-environment.md` に「作者が `pelway-qa[bot]` であることの実測はマージ後」とある）。push は、merge コミットを含むため `agent-gh-resign` の署名付けが行われず、署名なしのままになった。
+5. 改善案: レビュー対象外の nit（`pelway-qa` の表記が同名の人のアカウントと一致しうる件。review-pr のラウンドサマリーと `conductor-merge-queue` にも同じ形がある）、`docs/superpowers/specs/agent-team.md` の 22 行と 85 行に作成者の条件が無い件、7〜14 行の名義の表に `pelway-qa` の行が無い件は、別 Issue で `.agents/skills/review-pr/SKILL.md` と `docs/superpowers/specs/agent-team.md` の名義の確かめ方を「REST の `user.type == "Bot"` と `[bot]` 付きの login」に揃える。
+
+使ったスキル: implement-issue
