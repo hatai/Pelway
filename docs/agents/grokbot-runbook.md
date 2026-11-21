@@ -293,6 +293,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 | 人間のレビュー（Request changes・Comment・インラインコメント・通常の PR コメント。Approve は除く） | `immediate` | 「2. ボードと巡回」の「hatai のレビューに関する連動」に従い、紐づく Issue を Changes requested にし実装スレッドへ伝達する。通知は補助で、検知は巡回を正とする（`needs-human` 付きでは伝達と対応済みの記録だけを行い、ステータスは Needs human のまま） |
 | verify が失敗 | `immediate` | 何もしない（2 回続いたら見張り役が `ci-failed-twice` を送る） |
 | verify が成功、レビューが Approve | `digest` | まとめにだけ反映する |
+| PR への push（`pull_request` `synchronize`。同じ PR・同じ head sha では 1 回だけ届く） | `digest` | まとめにだけ反映する |
 | nightly（main の総点検）が失敗 | `immediate` | `run_url` で失敗したジョブを確かめ、main の劣化として Issue を起票するか部屋で人間に知らせる |
 | nightly が成功 | `digest` | まとめにだけ反映する |
 | `test` | — | 何もしない |
