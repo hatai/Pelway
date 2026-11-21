@@ -730,7 +730,7 @@ container run --rm alpine echo hello   # hello 程度の smoke
   - 起動時の supervisor は各 worktree の同じ定義からも agent-watch の起動を試みるが、上の決まりで worktree からの起動は理由を 1 行出して終了コード 0 で終わる（pitchfork の再起動は起きない）。動き続けるのは本体 checkout の 1 つだけ。
   - 入ったかの確かめ方（WSL の再起動のあと、手を触れずに、本体 checkout の直下で実行する）: `pitchfork supervisor status` で supervisor が動いている、`pitchfork status agent-watch` が running、`pitchfork logs agent-watch` に周回のログが出ている。worktree 側の起動の拒否が 1 行ずつ出て終わっていることも、同じくログで確かめる。
   - 自動起動だけを止める: 本体 checkout の直下で `pitchfork disable agent-watch`（disabled の daemon は起動時にも起動されない。戻すときは `pitchfork enable agent-watch`）。supervisor ごと止めるときは `pitchfork boot disable`。
-  - 止まっていたときの戻し方: 状態ファイル（`~/.local/state/pelway/agent-watch.json`）は消さず、`agent-watch.json.bak-<日付>` に名前を変えてから、本体 checkout で `pitchfork start agent-watch` する（状態が無い初回の起動は既存のスレッドを記録するだけで、止まっていた間の古い完了をまとめて送らない）。状態ファイルを動かすのは hatai の OK があるときだけ。
+  - 止まっていたときの戻し方: 状態ファイル（`$XDG_STATE_HOME/pelway/agent-watch.json`、未設定なら `~/.local/state/pelway/agent-watch.json`）は消さず、`agent-watch.json.bak-<日付>` に名前を変えてから、本体 checkout で `pitchfork start agent-watch` する（状態が無い初回の起動は既存のスレッドを記録するだけで、止まっていた間の古い完了をまとめて送らない）。状態ファイルを動かすのは hatai の OK があるときだけ。
 - v0.7 の05章が想定する起動単位（postgres・server・runner など）は、実装された時点で loopback 限定の定義を `pitchfork.toml` に足す。
 
 ## 既知の事項・未解決
