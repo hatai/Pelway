@@ -81,9 +81,7 @@ EOF
 lc() {
   python3 -I - "$@" <<'EOF'
 import json, sys
-c = {"user": {"login": sys.argv[1]}, "created_at": sys.argv[2]}
-if len(sys.argv) > 3: c["body"] = sys.argv[3]
-print(json.dumps(c))
+print(json.dumps({"user": {"login": sys.argv[1]}, "created_at": sys.argv[2], **({"body": sys.argv[3]} if len(sys.argv) > 3 else {})}))
 EOF
 }
 
@@ -210,9 +208,8 @@ MOCK_EVENTS_FAIL=1 run_cycles 2
 check "failed events fetch emits no warning" nhas "$ROOT/out.log" "#196"
 check "no traceback on events fetch failure" nhas "$ROOT/out.log" "Traceback"
 
-# 10. Grok Bot は hatai の名義でコメントを書くので、needs-human の解除では Grok Bot 自身の決定の
-# コメント（<!-- grokbot-decision -->）を裏付けに数えない。人間の判断の記録
-# （<!-- grokbot-human-decision -->）と目印の無い hatai のコメントは数える。automerge は目印を見ない。
+# 10. needs-human の解除では、hatai の名義でも Grok Bot 自身の決定のコメント（<!-- grokbot-decision -->）を裏付けに数えない。
+# 人間の判断の記録（<!-- grokbot-human-decision -->）と目印の無い hatai のコメントは数える。automerge は目印を見ない。
 DEC=$'<!-- grokbot-decision -->\n決定: 範囲を縮めて続ける'
 HUM=$'<!-- grokbot-human-decision -->\nhatai「続けてよい」（09:50 JST）'
 mock_comments 501 "$(jarr "$(lc hatai "$T1H" "$DEC")" "$(lc hatai "$T1H" "$DEC")")"
