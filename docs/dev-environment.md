@@ -245,7 +245,7 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 - GitHub 以外への通信（`scripts/agent-gh review api --hostname example.com /`、`curl https://example.com`）が遮断される
 - 秘密の置き場 5 パス（`/etc/codex/requirements.toml` の `deny_read`）が読めない（`test -r` が 1）。`codex sandbox -P review` は `deny_read` を使わないので、この項目は確認用の子タスクの中で確かめる
 - 確認のあとの `~/.codex-review/config.toml` に、`[projects.` で始まる表が無い（T3 と Codex の app-server は sandbox の外でこのファイルに書けるため。信頼設定が入ると worktree の `.codex/` が読まれる）
-- `~/.codex-review` に書き込めない（`touch ~/.codex-review/config.toml` と、新しいファイルの `touch` が拒否される）。止める設定がこのファイルに集まっているため、書き込めると次のセッションで設定を戻せる
+- `~/.codex-review` に書き込めない（`touch ~/.codex-review/config.toml` と、新しいファイルの `touch` が拒否される）。止める設定がこのファイルに集まっているため、書き込めると次のセッションで設定を戻せる。ファイルを書くツール `apply_patch` での書き込みも、同じく `~/.codex-review` と worktree の外に新しいファイルを作らせて確かめる（モデルが試すのを断ったときは未確認として記録する）
 - `mise run codex-review-check` が ok
 
 どれかが通らなければ `codex_review` をレビューに使わない。T3 のツールや Codex の GitHub 連携が残っていたら `~/.codex-review/config.toml` を直し（`homePath` を変えたときは T3 を再起動し）、全部を確かめ直してから使う。
