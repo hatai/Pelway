@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 の `failed` の扱いに「`failed` の報告に must-fix が書かれているときは、Request changes と同じに修正 round へ進み、次の round で再委託する」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: b4fd7a743a159137bae180daa487c58b7c068029
+
+1. 詰まった箇所: 手順 9: round 2 で Codex が再び `pelway-review[bot]` 名義で投稿できず、`failed` が 2 回続いた（止まる条件）。must-fix（Codex 2 件、Claude 1 件）はこの round で直し、round 3 のレビューは委託せずに止まる。
+2. 曖昧だった文: 「委託が 2 回連続で `failed`（`checks pending` は数えない）」（`.agents/skills/implement-issue/SKILL.md`「止まる条件」）
+3. 仮定と解釈: レビューの中身はあるが投稿だけが失敗した `failed` も、この条件に数えると解釈した。数えずに round 3 を委託する解釈は採らなかった。`.semgrepignore` は空にして、既定の除外を外した（既定を残して理由を書く案は採らなかった）。
+4. 足りなかった情報・検証手段: `codex_review` から `pelway-review[bot]` 名義で投稿できない原因が分からない（Claude の `claude_review` は投稿できている）。1 回目の `mise run verify` が rustc 1.75 で clippy に失敗し、2 回目は通った。原因は調べていない。
+5. 改善案: `docs/dev-environment.md` の「レビュー担当の Codex（codex_review）」に、`pelway-review[bot]` 名義で投稿できないときの確かめ方を足す。
+
+使ったスキル: implement-issue
