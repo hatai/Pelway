@@ -61,3 +61,15 @@
 5. 改善案: `scripts/tests/conductor-watch-decision.test.sh` のモックに `fail-comment-lost`（コメントは書けるが応答が失われる）を足す。今の `fail-comment` は書けない場合だけで、コメントの重複抑止の再試行（書いたが応答が無い → 次の周で照合して書き直さない）は試せていない。
 
 使ったスキル: `implement-issue`
+
+## 実装者メモ（round 6）
+
+対象 head: d742f09c613292b0bb70ca1d7f3e7d7acb54af8d
+
+1. 詰まった箇所: `mise run pr-size`: be1edd20 で +881（上限 800）。試験の繰り返し（1 周目を失敗させて戻す、期待する行の組み立て、モックの差し込みの重複）を `fail_first`・`heal`・`overdue`・`escalated`・`label_calls`・`hook` にまとめ、スクリプトは runbook の格上げの項と重なるコメントを縮めた。
+2. 曖昧だった文: 「`mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。」（`.agents/skills/implement-issue/SKILL.md` の「6. 検査してコミットし、行数を確かめてから push する」）。この後に足すメモのコミットも必須チェックで数えられるので、実装コミットの後の値にメモの行（約 12 行）を足しても上限内に収まるように削った。
+3. 仮定と解釈: 「振る舞いを変えない」を、スクリプトに埋め込んだ python 2 つの AST と、コメント以外の bash の行が be1edd20 と同じであることと解釈した。試験は、ok の確認名 117 件（label-actor は 34 件）の並びが前と同じで、round 4 の 9 件の変異のそれぞれで FAIL になる確認の並びが be1edd20 の試験と同じであることで確かめた。
+4. 足りなかった情報・検証手段: round 4 の変異は PR 本文の文でしか残っておらず、パッチの形では見つからなかった。今のコードに合わせて 9 件を作り直したので、round 4 と同じ変異かは文との対応でしか確かめていない。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「6. 検査してコミットし、行数を確かめてから push する」の pr-size の項に「実装者メモのコミットも数えられる。実装コミットの後の値に、この round のメモの行数を足しても上限内かを確かめてから push する」を足す。
+
+使ったスキル: `implement-issue`、pstack の `poteto-mode`（principle-laziness-protocol・principle-minimize-reader-load）
