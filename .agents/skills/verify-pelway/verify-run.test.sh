@@ -180,6 +180,25 @@ rm -f "${tmp}/fds/6"; : > "${tmp}/fds/7"
 expect_eq "fd_targets_ok: a target that cannot be read" "$(fdr "${tmp}/fds" "${odd}" "${tmp}/fd.out")" 2
 rm -f "${tmp}/fds/7"
 
+expect_eq "fd_targets_ok: fd dir does not exist (child gone)" "$(fdr "${tmp}/no-such-fd-dir" "${odd}" "${tmp}/fd.out")" 2
+mkdir -p "${tmp}/empty-fds"
+expect_eq "fd_targets_ok: empty fd dir" "$(fdr "${tmp}/empty-fds" "${odd}" "${tmp}/fd.out")" 2
+
+# stop_sampler: 停止を求めたかどうかにかかわらず、観察の失敗（終了コード 3）を OBS_FAILED にする。
+# shellcheck disable=SC2034  # SAMPLER は source した verify-run の stop_sampler が読む
+ss_rc() { OBS_FAILED=0; ( eval "$1" ) & SAMPLER=$!; sleep "${2:-0}"; stop_sampler; echo "${OBS_FAILED}"; }
+expect_eq "stop_sampler: sampler already failed" "$(ss_rc 'exit 3' 0.3)" 1
+expect_eq "stop_sampler: sampler fails while being stopped" "$(ss_rc 'trap "exit 3" TERM; while :; do sleep 0.05; done' 0.3)" 1
+expect_eq "stop_sampler: intended stop is not a failure" "$(ss_rc 'while :; do sleep 0.05; done' 0.3)" 0
+
+# tree_state: コミット済み・変更あり・git の確認の失敗を区別する。
+git init -q "${tmp}/ts"; git -C "${tmp}/ts" -c user.email=t@e -c user.name=t commit -q --allow-empty -m init
+expect_eq "tree_state: clean" "$(tree_state "${tmp}/ts")" no
+: > "${tmp}/ts/new-file"
+expect_eq "tree_state: dirty" "$(tree_state "${tmp}/ts")" yes
+mkdir -p "${tmp}/not-git"
+expect_eq "tree_state: git fails" "$(GIT_CEILING_DIRECTORIES="${tmp}" tree_state "${tmp}/not-git" > /dev/null 2>&1; echo $?)" 1
+
 # observe_sockets: 取得の失敗と記録の失敗は 1、該当なしは 0。
 mkdir -p "${tmp}/ssbin" "${tmp}/obs-ev"
 cat > "${tmp}/ssbin/ss" <<'FAKE'

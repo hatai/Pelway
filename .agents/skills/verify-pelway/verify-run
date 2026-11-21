@@ -158,10 +158,13 @@ steps_complete() {
 # 開いているファイル（fd のディレクトリ）が許可したものだけか。リンク先は readlink で取り、固定の文字列で比べる。
 # $1=fd のディレクトリ $2=証拠のディレクトリ $3=記録先。0 = 許可外なし、1 = 許可外あり、2 = 読み取りの失敗。
 fd_targets_ok() {
-  local dir="$1" ev="$2" out="$3" fd target bad=0
+  local dir="$1" ev="$2" out="$3" fd target bad=0 n=0
   : > "${out}" || return 2
+  # 一覧を取れない（子が終わって /proc/<pid> が無い・読めない）ときは「許可外なし」ではなく読み取りの失敗。
+  [ -d "${dir}" ] && [ -r "${dir}" ] && [ -x "${dir}" ] || return 2
   for fd in "${dir}"/*; do
     [ -e "${fd}" ] || [ -L "${fd}" ] || continue
+    n=$((n + 1))
     target="$(readlink -- "${fd}")" || return 2
     printf '%s -> %s\n' "${fd##*/}" "${target}" >> "${out}" || return 2
     case "${target}" in
@@ -170,11 +173,20 @@ fd_targets_ok() {
       *) bad=1 ;;
     esac
   done
+  # 動いている子なら標準入出力が必ずある。1 つも無ければ一覧を取れていない。
+  [ "${n}" -ge 1 ] || return 2
   return "${bad}"
 }
 
 # network.txt のうち、ss の取得に失敗した印の行の数を返す。
 observation_errors() { grep -c '^# ss の取得に失敗' "$1" 2>/dev/null; }
+
+# 作業ツリーの状態を返す（no = コミット済み、yes = 未コミットの変更あり）。git の確認に失敗したら 1。
+tree_state() {
+  local st
+  st="$(git -C "$1" status --porcelain)" || return 1
+  if [ -z "${st}" ]; then echo no; else echo yes; fi
+}
 
 # path が dir の中（dir 自身を含む）なら 0。
 under() { case "${1%/}/" in "${2%/}/"*) return 0 ;; *) return 1 ;; esac; }
@@ -345,17 +357,18 @@ start_sampler() {
 }
 stop_sampler() {
   [ -n "${SAMPLER:-}" ] || return 0
-  if kill -0 "${SAMPLER}" 2> /dev/null; then
-    kill "${SAMPLER}" 2> /dev/null; wait "${SAMPLER}" 2> /dev/null
-  else
-    # 先に抜けていた: 取得・記録の失敗（3）なら観察は未完了。
-    wait "${SAMPLER}" 2> /dev/null; [ "$?" = 3 ] && OBS_FAILED=1
-  fi
+  # 停止を求めたかどうかにかかわらず、終了の理由を見る。3 は取得・記録の失敗（観察は未完了）、
+  # SIGTERM による停止（143）は意図した停止。止める前に失敗で抜けていた場合も 3 が返る。
+  kill "${SAMPLER}" 2> /dev/null
+  local rc=0
+  wait "${SAMPLER}" 2> /dev/null || rc=$?
+  [ "${rc}" = 3 ] && OBS_FAILED=1
   SAMPLER=""
 }
 
 # 外に出ていないことの観察: 取った TCP・UDP の行（network.txt）がすべて 127.0.0.1 同士で、
-# 開いているファイルが標準入出力と、ss で TCP・UDP と確かめられたソケットだけか。
+# 開いているファイルが、この run の標準出力・標準エラーのファイル、/dev/null、パイプ、anon_inode と、
+# ss で TCP・UDP と確かめられたソケットだけか。
 network_check() {
   local out="${EV}/network.txt"
   local seen nonlo ino
@@ -402,7 +415,11 @@ cleanup() {
   stop_sampler
   stop_child
   wait 2>/dev/null
-  if [ -n "${LOCK:-}" ]; then rm -f "${LOCK}/pid"; rmdir "${LOCK}" 2>/dev/null; echo "released lock ${LOCK##*/}" >> "${EV}/cleanup.txt"; fi
+  local l
+  for l in "${LOCK2:-}" "${LOCK:-}"; do
+    [ -n "${l}" ] || continue
+    rm -f "${l}/pid"; rmdir "${l}" 2>/dev/null; echo "released lock ${l##*/}" >> "${EV}/cleanup.txt"
+  done
   if [ -e "${EV}/survivors-before.txt" ]; then
     pitchfork_list > "${EV}/pitchfork-after.txt"
     if ! survivor_pids > "${EV}/survivors-after.txt"; then
@@ -594,7 +611,7 @@ main() {
   umask 077
 
   SHA="$(git -C "${TOP}" rev-parse HEAD)"
-  DIRTY=no; [ -z "$(git -C "${TOP}" status --porcelain)" ] || DIRTY=yes
+  DIRTY="$(tree_state "${TOP}")" || die_usage "cannot read the git status of ${TOP}"
   RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-${FEATURE}-$$"
   # 置き場の下にシンボリックリンクがあっても外へ出ないよう、run のディレクトリは新しく作って実体を確かめる。
   EV="$(make_run_dir "${ROOT}" "${LABEL}-${SHA}/${RUN_ID}")" \
@@ -602,7 +619,7 @@ main() {
   evidence_root_ok "${EV}" "${TOP}" "${COMMON}" || die_usage "the run directory resolves into the work tree"
   mkdir -p "${COMMON}/pelway/locks" || die_usage "cannot create ${COMMON}/pelway/locks"
   EVIDENCE_WRITE_FAILED=0; OBS_FAILED=0
-  VERDICT=PASS; STEP=1; PID=""; LOCK=""; BIN=""
+  VERDICT=PASS; STEP=1; PID=""; LOCK=""; LOCK2=""; BIN=""
   trap cleanup EXIT
   printf 'run_id=%s\nsha=%s\ndirty=%s\nfeature=%s\n' "${RUN_ID}" "${SHA}" "${DIRTY}" "${FEATURE}" | tee "${EV}/summary.txt"
   if [ "${DIRTY}" = yes ] && [ "${ALLOW_DIRTY}" = 0 ]; then
@@ -660,6 +677,20 @@ main() {
   if [ -z "${BIN}" ]; then record FAIL "起動: ビルド" "cargo が demo-serve の実行ファイルを報告しない"; return 1; fi
   BIN="$(realpath "${BIN}")"
   BIN_SHA="$(sha256sum "${BIN}" | cut -d' ' -f1)"
+  # ビルド先を共有する別の作業ツリーの run とも排他にする: ビルドで決まった実行ファイルの置き場を鍵にした 2 つめのロック。
+  local lock2
+  lock2="${COMMON}/pelway/locks/bin-$(printf '%s' "$(dirname -- "${BIN}")" | sha256sum | cut -c1-12)"
+  if mkdir "${lock2}" 2> /dev/null; then
+    LOCK2="${lock2}"; echo "$$" > "${LOCK2}/pid"
+  else
+    record FAIL "起動: 二重起動の確認（ビルドの後）" "同じビルド先を使う別の run がロックを持っている（pid=$(cat "${lock2}/pid" 2>/dev/null)、${lock2}）。動かさない"; return 1
+  fi
+  # 起動の前に作業ツリーと HEAD を見直す（開始の後に編集してからビルドした変更を、元のコミットの証拠にしない）。
+  local state_now
+  if ! state_now="$(tree_state "${TOP}")" || [ "$(git -C "${TOP}" rev-parse HEAD)" != "${SHA}" ] \
+      || { [ "${state_now}" != "${DIRTY}" ] && [ "${ALLOW_DIRTY}" = 0 ]; } || { [ "${state_now}" = yes ] && [ "${ALLOW_DIRTY}" = 0 ]; }; then
+    record FAIL "起動: 作業ツリーと HEAD が run の開始時のまま" "git の確認に失敗したか、開始の後に変わった"; return 1
+  fi
   # ビルドの後にもう一度: 同じ実行ファイル（mbx がビルドで target をリンクにした後の実体）の demo-serve が動いていないか。
   other=""
   for p in $(pgrep -x demo-serve || true); do [ "$(exe_of "${p}" || true)" = "${BIN}" ] && other+=" ${p}"; done
