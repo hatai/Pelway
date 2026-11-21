@@ -35,3 +35,12 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 ## 判断の記録
 
 - 01:45 JST: 引き継ぎ確認を完了と判定し操作権限を受領（上記「恒久交代の記録」）
+
+## 巡回記録（patrol 1・02:00 JST）
+
+- 受信箱未読 3 件を処理: #611 の `state: stopped`（r3 Codex must-fix 残）は hatai「マージ可能になるまで続けて」で既に再着手済み（16:29Z 再 claim・running）。`needs-human` の自行解除は記録済み hatai 指示に基づくため裏付けありと分類（厳密形の Issue コメントは無し・patrol-state の unbacked_label_ops に注記付きで記録）
+- watch.log 未読 27 行: スレッド遷移のみ（#568 impl・a2e1fc7f・daa0e2cb の running/waiting 往復、旧指揮役終了）
+- Devin 8 の残留委託の結果を受領: PR #560 の QA 点検子が `pelway-qa[bot]` 名義で「QA: pass sha:6b284862 run:44907124348」を投稿成功（route D「pelway-qa は PR へ投稿不能」診断と矛盾する初観測。`route_d_observation` に記録）。Claude r3 は request-changes（must-fix 3: live.rs:232 系 2 件＋pr-size 目印コメント欠落 1 件）
+- PR #618 のチェック「9 失敗」は旧 head の CANCELLED run の残りで誤検出・現 head は全 pass/pending（automerge 維持・Kodiak 待ち）
+- 判断待ち: #333 は hatai の `<!-- pr-size-exception -->` 目印コメント投稿待ち（needs-human 継続・指示は出さない）
+- patrol-state: inbox_offset=133・watch_offset=3335・watch_log_offset=3335（旧キーも揃えた）
