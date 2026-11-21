@@ -232,8 +232,8 @@ Kodiak が応答しない・詰まった場合（キューの切り戻し）と�
 QA 合格コメント:
 
 - QA の合格は PR コメントで残す。PR 本文だけの「合格」は無効
-- QA の合格に数えるのは、QA 専用の GitHub App `pelway-qa` の名義のコメントだけ（`scripts/agent-gh qa comment` で投稿する。`docs/dev-environment.md` の「QA 担当の GitHub App（pelway-qa）」）。コメントの作成者（`author.login`）が `pelway-qa`・`pelway-qa[bot]`・`app/pelway-qa` のいずれかと一致することを、`scripts/agent-gh dev pr view <M> --json comments --jq '.comments[] | {author: .author.login, body}'` で確かめる（いずれも QA の App を指す表記。API の応答によって表記が揺れる）。それ以外の作成者のコメントは、本文の形式と sha が合っていても QA の合格に数えない。hatai の名義のコメントも QA の合格に数えず、`pelway-qa` の名義のコメントは hatai 本人の裏付けに数えない（2026-11-19 の hatai の決定、Issue #480）
-- `pelway-qa` の名義で合格コメントを投稿できないあいだ（App のトークンが使えないなど）は、QA の合格をもとに `automerge` を付けない。マージは hatai が判断する
+- QA の合格に数えるのは、QA 専用の GitHub App `pelway-qa` の名義で投稿され、投稿の後に編集されていないコメントだけ（`scripts/agent-gh qa comment` で投稿する。`docs/dev-environment.md` の「QA 担当の GitHub App（pelway-qa）」）。REST の応答で、作成者の `user.login` が `pelway-qa[bot]`、`user.type` が `Bot`、`created_at` と `updated_at` が同じであることを、`scripts/agent-gh dev api repos/hatai/Pelway/issues/<M>/comments --paginate --jq '.[] | select(.user.login == "pelway-qa[bot]" and .user.type == "Bot" and .created_at == .updated_at) | {id, body}'` で確かめ、この出力に出たコメントだけを数える。作成者の login だけでは足りない。実装担当の App（`pelway-dev`）など Issues・PR の書き込み権限を持つ名義は、ほかの名義のコメントを編集できるため、古い合格コメントの sha を新しい head に書き換えると、作成者・1 行目・sha の一致がすべて通ってしまう。編集されたコメントは、作成者が `pelway-qa[bot]` でも数えない。ほかの作成者のコメントは、本文の形式と sha が合っていても QA の合格に数えない。hatai の名義のコメントも QA の合格に数えず、`pelway-qa` の名義のコメントは hatai 本人の裏付けに数えない（Issue #480 の決定）
+- `pelway-qa` の名義で合格コメントを投稿できないあいだ（App のトークンが使えないなど）は、QA の合格をもとに `automerge` を付けない。ラベルを付けずに止め、hatai に報告する（admin マージの例外には加えない。例外は上の 3 つだけ）
 - 1 行目を `QA-PASS pr=<番号> sha=<40桁> run=<CI の run id> verify=pass pr-size=pass` に固定する。sha は短縮しない
 - 2 行目以降に「未検証：<項目 または なし>」と判定を書く
 - 指揮役は、コメントの sha が PR の現在の head と一致することを確かめてからラベルを付ける（head が変わったら QA のやり直しを依頼する）
