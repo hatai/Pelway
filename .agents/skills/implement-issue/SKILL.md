@@ -155,6 +155,10 @@ EOF
 
 修正依頼の場合は PR を作り直さない。push したあと `scripts/agent-gh dev pr edit` で本文の「レビューと QA」と「対象」の sha を更新する。
 
+PR 本文の「レビューと QA」には round の履歴を書かず、実装者メモ（`docs/worklogs/issue-<N>.md`）を指す 1 行と、最後に検証した sha だけを書く。round の履歴の正本は実装者メモとする（round サマリーのコメント（手順 9）は別に残す）。
+
+修正の round では、PR 本文の「確認方法/検証」の表を、その head の試験の出力から写した最後の round の結果だけに置き換える。前の round の結果は本文に残さない。
+
 PR を作ったら、実在することを確かめる。
 
 ```bash
