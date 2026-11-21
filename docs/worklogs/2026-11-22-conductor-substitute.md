@@ -132,3 +132,11 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 - ただし approve 内に `[文書のずれ]` nit 5 件（SKILL.md:57・:17・:39・PR 本文完了条件 2・issue-568.md:139）→ automerge ゲート抵触。実装担当の修正→push→r9→QA の順を issuecomment-7067982887 で指示。
 - 残 nit 3 件（--untracked-files・試験不足・前提追記）+ out-of-scope（委託レビュー worktree が PR の CLAUDE.md/hooks を読むリスク・#637/#638 関連）は非ブロッキングだが修正ラウンドで併せ検討と伝達。
 - patrol-state: #572 r8 pending 解除・マージ済み #586/#587 の旧再送要求 3 件を整理。
+
+## 巡回 91–105（04:22–05:08 JST・実値）
+- リード指示: #572 の codex_review は代替不可のマージ条件。使用量制限解除（5:01 JST）後に再委託、codex 承認+QA pass まで automerge 禁止。patrol-state に pending 登録。
+- 5:01 経過後も MCP 不通のため、実装側へ codex 再委託を投稿（issuecomment-7068472616）。
+- **#612 automerge 付与**（05:08 JST）: claude r5・codex r5 の approve が Reviewed: ea887b8d で現 head 一致（19:05 の approve は Reviewed: bb45b4e で不カウント）。`[文書のずれ]` nit 3 件はすべて PR 本文側で修正済み（head 不変）+ r4 由来のコードコメント nit は :128 で解消済み。必須チェック pass・pelway-qa[bot] pass@ea887b8d（run 44929510672・受け入れ条件全 pass）。非 draft・mergeable=behind → Kodiak rebase 待ち。
+- #572: nit 修正を `5309e958` で push（verify-pelway の build-dir lock・sampler 異常終了）。新 head のため r9 レビュー + codex 枠が必要。
+- #609: head `09094518`（docs 明確化・nit-round 2）。#610: head `eb806a6a`。
+- 旧通知の処理: review/587-c9・4649721f・daa0e2cb（引き継ぎ済み・対応不要）。
