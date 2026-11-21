@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# 新しい試験が前の実装で落ちること（red）を、作業ツリーを触らずに確かめる。
+#   scripts/red-check <ref> [--keep <パス>...] -- <コマンド...>
+# <ref> の一時 worktree（detached）を作り、--keep に挙げたファイル・ディレクトリだけを今の作業ツリーから
+# 同じ相対パスに写して重ね、worktree の最上位で <コマンド> を走らせる。終わったら一時 worktree を消す。
+# 重ねるものは --keep で明示したものだけで、自動では選ばない（未追跡のファイルも挙げれば写す）。
+# --keep のパスは今いるディレクトリからの相対パスか絶対パスで、リポジトリの中を指す。
+# 終了コード: <コマンド> の終了コード。2 = 引数の誤り（-- が無い・コマンドが無い・--keep のパスが
+# 作業ツリーに無いかリポジトリの外）、3 = 一時 worktree を作れない（<ref> が無いなど）。
+set -euo pipefail
+
+usage() {
+  echo "usage: $0 <ref> [--keep <パス>...] -- <コマンド...>" >&2
+  exit 2
+}
+
+case "${1:-}" in
+  -h|--help)
+    printf '%s\n' \
+      "usage: $0 <ref> [--keep <パス>...] -- <コマンド...>" \
+      "" \
+      "<ref> の一時 worktree に --keep のファイルを今の作業ツリーから重ね、<コマンド> を worktree の最上位で走らせる。" \
+      "終了コードは <コマンド> のもの。走らせた後に一時 worktree を消す。重ねるファイルは自動で選ばない。" \
+      "例: $0 origin/main --keep scripts/tests/foo.test.sh -- bash scripts/tests/foo.test.sh"
+    exit 0
+    ;;
+  ""|--*) usage ;;
+esac
+ref="$1"
+shift
+
+keeps=()
+while (($#)) && [[ "$1" != "--" ]]; do
+  if [[ "$1" == "--keep" ]]; then
+    shift
+    while (($#)) && [[ "$1" != "--" && "$1" != "--keep" ]]; do
+      keeps+=("$1")
+      shift
+    done
+  else
+    usage
+  fi
+done
+[[ "${1:-}" == "--" ]] || usage
+shift
+(($#)) || usage
+
+top="$(git rev-parse --show-toplevel)" || exit 2
+
+# --keep のパスをリポジトリの最上位からの相対パスにする。作業ツリーに無いものは走らせる前に止める。
+rels=()
+for k in ${keeps[@]+"${keeps[@]}"}; do
+  if [[ ! -e "$k" ]]; then
+    echo "red-check: --keep のパスが作業ツリーにありません: $k" >&2
+    exit 2
+  fi
+  abs="$(cd "$(dirname "$k")" && pwd -P)/$(basename "$k")"
+  case "$abs" in
+    "$(cd "$top" && pwd -P)"/*) rels+=("${abs#"$(cd "$top" && pwd -P)"/}") ;;
+    *) echo "red-check: --keep のパスがリポジトリの外です: $k" >&2; exit 2 ;;
+  esac
+done
+
+wt="$(mktemp -d)"
+cleanup() {
+  git -C "$top" worktree remove --force "$wt" >/dev/null 2>&1 || true
+  rm -rf -- "$wt"
+  git -C "$top" worktree prune >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+if ! git -C "$top" worktree add --quiet --detach "$wt" "$ref" >&2; then
+  echo "red-check: $ref の一時 worktree を作れません" >&2
+  exit 3
+fi
+
+for r in ${rels[@]+"${rels[@]}"}; do
+  rm -rf -- "${wt:?}/$r"
+  mkdir -p "$(dirname "$wt/$r")"
+  cp -a -- "$top/$r" "$wt/$r"
+done
+
+echo "red-check: $ref ($(git -C "$wt" rev-parse --short HEAD)) に ${#rels[@]} 個を重ねて実行: $*" >&2
+rc=0
+(cd "$wt" && "$@") || rc=$?
+exit "$rc"
