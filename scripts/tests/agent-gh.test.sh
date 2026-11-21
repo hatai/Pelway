@@ -70,6 +70,12 @@ if [[ "$1 $2" == "token --help" ]]; then
 fi
 # FAKE_GH_HINT があれば、gh 2.105 の `gh event listen` の案内（実物の形）を警告・エラーの行と混ぜて
 # stderr に出し、stdout に本来の出力を出して FAKE_GH_EXIT で終わる（#596 の案内の除去の確認用）。
+# FAKE_GH_LOOKALIKE があれば、案内と同じ書式の先頭行で、続きが `gh event listen` でない別の診断を出す。
+if [[ -n "${FAKE_GH_LOOKALIKE:-}" ]]; then
+  printf '%s\n' 'hint: to see other fields, use this instead of polling:' '  - gh pr view --json' >&2
+  printf 'hint: trailing lookalike instead of polling:\n' >&2
+  exit 0
+fi
 if [[ -n "${FAKE_GH_HINT:-}" ]]; then
   printf 'STDOUT-BODY\n'
   printf 'warning: before the hint\n' >&2
@@ -546,6 +552,12 @@ for sub in pr api; do
     grep -qxF -- "$want" <<<"$OUT" || failures+=("$name: '$want' missing from output")
   done
 done
+# 案内と同じ書式の先頭行でも、続く行が `gh event listen` でなければ別の診断として残す（最後の行で終わる場合も）。
+FAKE_GH_LOOKALIKE=1 run hint_lookalike_kept dev pr view 1
+for want in 'hint: to see other fields, use this instead of polling:' '  - gh pr view --json' 'hint: trailing lookalike instead of polling:'; do
+  grep -qxF -- "$want" <<<"$OUT" || failures+=("hint_lookalike_kept: '$want' missing from output")
+done
+
 # stdout と stderr は別のまま（案内の除去で stderr が stdout に混ざらない）
 export CALL_LOG="$ROOT/hint_streams.log"
 hint_stdout="$(FAKE_GH_HINT=1 bash "$SCRIPT" dev pr view 1 2>/dev/null)"

@@ -84,6 +84,38 @@ run keep_missing_path old --keep tests/nope.txt -- sh -c 'echo ran'
 n="$(git -C "$REPO" worktree list --porcelain | grep -c '^worktree ')"
 [[ "$n" == 1 ]] || failures+=("$CASE: $n worktrees registered, want 1")
 
+# 一時 worktree の mise.toml を mise に信頼させる（後に状態を残さない環境変数で、コマンドにだけ渡す）。
+MISE_TRUSTED_CONFIG_PATHS=/already/trusted run mise_trusts_worktree old -- \
+  sh -c 'pwd >"$1"; printf "%s\n" "$MISE_TRUSTED_CONFIG_PATHS"' _ "$ROOT/mise_trusts_worktree.wt"
+[[ "$RC" == 0 ]] || failures+=("$CASE: exit $RC, want 0 ($(cat "$ROOT/$CASE.err"))")
+wtdir="$(cat "$ROOT/$CASE.wt" 2>/dev/null)"
+[[ -n "$wtdir" && "$(cat "$OUT")" == "$wtdir:/already/trusted" ]] ||
+  failures+=("$CASE: MISE_TRUSTED_CONFIG_PATHS is '$(cat "$OUT")', want the worktree prepended to the caller's value")
+expect_no_worktree
+
+# --keep の最後の要素が . や .. のパスは 2 で拒み、コマンドを走らせない（重ねる先が一時 worktree の最上位やその外になるため）。
+for bad in . tests/..; do
+  run "keep_dot_${bad//[^a-z]/_}" old --keep "$bad" -- sh -c 'echo ran'
+  [[ "$RC" == 2 ]] || failures+=("$CASE: --keep $bad exit $RC, want 2")
+  ! grep -qxF ran "$OUT" || failures+=("$CASE: command ran despite --keep $bad")
+done
+
+# 重ねる処理が失敗したら 3 で終わり、コマンドを走らせず、一時 worktree を消す
+# （コマンドの失敗＝red と、準備の失敗を終了コードで見分けるため）。
+# ref ではファイルの src/impl.txt の下に重ねようとして、親のディレクトリを作れない形にする。
+git -C "$REPO" rm -q --cached src/impl.txt
+mv "$REPO/src/impl.txt" "$ROOT/impl.txt.bak"
+mkdir -p "$REPO/src/impl.txt"
+printf 'x\n' >"$REPO/src/impl.txt/child.txt"
+run overlay_failure_exits_3 old --keep src/impl.txt/child.txt -- sh -c 'pwd >"$1"; echo ran' _ "$ROOT/overlay_failure_exits_3.wt"
+[[ "$RC" == 3 ]] || failures+=("$CASE: exit $RC, want 3")
+! grep -qxF ran "$OUT" || failures+=("$CASE: command ran despite the overlay failure")
+n="$(git -C "$REPO" worktree list --porcelain | grep -c '^worktree ')"
+[[ "$n" == 1 ]] || failures+=("$CASE: $n worktrees registered after run, want 1")
+rm -rf "$REPO/src/impl.txt"
+mv "$ROOT/impl.txt.bak" "$REPO/src/impl.txt"
+git -C "$REPO" add src/impl.txt
+
 if ((${#failures[@]})); then
   printf 'FAIL %s\n' "${failures[@]}"
   exit 1
