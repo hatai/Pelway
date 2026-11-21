@@ -127,6 +127,12 @@ check cond_rec2_negative_test docs/technical.md \
   '否定のテスト' \
   'キーが 1 つも無いこと'
 
+# 数え直し round 2（やり直し）の must-fix 対応: 添付は発言と同じ 1 つの要求で受け取り、
+# 発言に付いていないアップロードの状態を作らない。
+check cond_rec2b_single_request docs/technical.md \
+  '発言と同じ 1 つの要求' \
+  '発言に付いていない添付'
+
 # 条件9: 外部との境界（接続だけでは添付を送らない、外へ出すときは ActionSnapshot
 # に hash を固定）。
 check cond9_boundary docs/technical.md \
