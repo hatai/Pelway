@@ -6,6 +6,7 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use pelway_agent_watch::ci::{AgentPr, RunInfo, parse_agent_prs};
 use pelway_agent_watch::t3::{parse_list, parse_show};
@@ -27,6 +28,22 @@ fn timed(cmd: &std::ffi::OsStr) -> Command {
     c.args(["-k", COMMAND_KILL_AFTER_SECS, COMMAND_TIMEOUT_SECS])
         .arg(cmd);
     c
+}
+
+/// `limit` を過ぎたら子と孫ごと SIGKILL で止めるコマンド。webhook の送信の期限を守るため、
+/// `timed` の SIGTERM の後の猶予は置かない。`limit` が 0 なら起動しない。
+fn killed_after(cmd: &str, limit: Duration) -> Option<Command> {
+    if limit.is_zero() {
+        return None;
+    }
+    let mut c = Command::new("timeout");
+    c.args(["-s", "KILL", &format!("{:.3}", limit.as_secs_f64())])
+        .arg(cmd);
+    Some(c)
+}
+
+fn left(deadline: Instant) -> Duration {
+    deadline.saturating_duration_since(Instant::now())
 }
 
 fn run(cmd: &str, args: &[&str], cwd: &Path) -> Result<String, String> {
@@ -229,13 +246,19 @@ pub enum SendResult {
     DryRunNoSecret,
 }
 
-fn fnox_get(name: &str, project: &Path) -> Option<String> {
-    let cfg = home().join(NOTIFY_FNOX);
-    let cfg = cfg.to_string_lossy();
-    run("fnox", &["-c", &cfg, "get", name], project)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+/// 秘密を 1 つ読む。外部コマンドの制限時間（30 秒）と送信の期限の、早い方で止める。
+fn fnox_get(name: &str, project: &Path, deadline: Instant) -> Option<String> {
+    let limit = left(deadline).min(Duration::from_secs(30));
+    let out = killed_after("fnox", limit)?
+        .arg("-c")
+        .arg(home().join(NOTIFY_FNOX))
+        .args(["get", name])
+        .current_dir(project)
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    let value = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    (out.status.success() && !value.is_empty()).then_some(value)
 }
 
 /// 送信本文の一時ファイルの置き場所。状態ディレクトリの下の、所有者だけが入れる（0700）ディレクトリ。
@@ -260,26 +283,45 @@ fn curl_quote(s: &str) -> String {
 
 /// payload を webhook に送る。URL と鍵は curl の設定として標準入力から渡す（引数・プロセス一覧に出さない）。
 /// 本文は所有者だけが読める一時ファイルに置き、送ったら消す。
-pub fn send(payload: &Value, project: &Path) -> SendResult {
+/// 秘密の読み取り・curl・送り直しの待ちは `deadline` までに終える（子は残り時間で止める）。
+/// 期限を過ぎて終わった送り直せる失敗は、理由を `deadline` にする。
+pub fn send(payload: &Value, project: &Path, deadline: Instant) -> SendResult {
+    match send_until(payload, project, deadline) {
+        SendResult::Failed(_) | SendResult::DryRunNoSecret if left(deadline).is_zero() => {
+            SendResult::Failed("deadline".to_string())
+        }
+        result => result,
+    }
+}
+
+fn send_until(payload: &Value, project: &Path, deadline: Instant) -> SendResult {
+    // 秘密は 1 件につき 1 回だけ読む（送り直しのたびには読まない）
+    let Some((url, key)) =
+        fnox_get("PELWAY_NOTIFY_WEBHOOK_URL", project, deadline).and_then(|url| {
+            Some((
+                url,
+                fnox_get("PELWAY_NOTIFY_WEBHOOK_KEY", project, deadline)?,
+            ))
+        })
+    else {
+        return SendResult::DryRunNoSecret;
+    };
     // 受け手が一時的に応答しないことがあるので、送り直せる失敗なら 2 秒おいて最大 2 回まで送り直す
-    // （1 件あたり最大 34 秒: curl の --max-time 10 秒 × 3 回と、間の 2 秒 × 2 回）
-    let mut result = send_once(payload, project);
+    // （curl は 1 回 --max-time 10 秒。待ちの後に期限が残らないときは送り直さない）
+    let mut result = send_once(payload, &url, &key, deadline);
     for _ in 0..2 {
-        if !matches!(result, SendResult::Failed(_)) {
+        if !matches!(result, SendResult::Failed(_)) || left(deadline) <= Duration::from_secs(2) {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        result = send_once(payload, project);
+        std::thread::sleep(Duration::from_secs(2));
+        result = send_once(payload, &url, &key, deadline);
     }
     result
 }
 
-fn send_once(payload: &Value, project: &Path) -> SendResult {
-    let (Some(url), Some(key)) = (
-        fnox_get("PELWAY_NOTIFY_WEBHOOK_URL", project),
-        fnox_get("PELWAY_NOTIFY_WEBHOOK_KEY", project),
-    ) else {
-        return SendResult::DryRunNoSecret;
+fn send_once(payload: &Value, url: &str, key: &str, deadline: Instant) -> SendResult {
+    let Some(mut curl) = killed_after("curl", left(deadline)) else {
+        return SendResult::Failed("deadline".to_string());
     };
     let body_path = match private_body_path() {
         Ok(p) => p,
@@ -298,11 +340,11 @@ fn send_once(payload: &Value, project: &Path) -> SendResult {
     }
     let config = format!(
         "url = \"{}\"\nheader = \"Authorization: Bearer {}\"\n",
-        curl_quote(&url),
-        curl_quote(&key)
+        curl_quote(url),
+        curl_quote(key)
     );
     let data = format!("@{}", body_path.display());
-    let result = Command::new("curl")
+    let result = curl
         .args([
             "-s",
             "--connect-timeout",

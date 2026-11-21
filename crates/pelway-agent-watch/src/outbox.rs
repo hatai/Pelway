@@ -40,16 +40,16 @@ pub fn push(outbox: &mut Vec<Value>, payload: Value) {
     }
 }
 
-/// 古い順に送る。`backoff` の次に送る時刻（`now` は UNIX 秒）より前なら何も送らない。
+/// 古い順に送る。`backoff` の次に送る時刻（`now` が返す UNIX 秒）より前なら何も送らない。
 /// 1 件送る前に毎回 `has_time` を呼び、偽ならその周回の送信をやめる（列も間隔もそのまま）。
 pub fn flush(
     outbox: &mut Vec<Value>,
     backoff: &mut Option<Backoff>,
-    now: i64,
+    mut now: impl FnMut() -> i64,
     mut has_time: impl FnMut() -> bool,
     mut send: impl FnMut(&Value) -> Outcome,
 ) {
-    if backoff.is_some_and(|b| now < b.next_send_at) {
+    if backoff.is_some_and(|b| now() < b.next_send_at) {
         return;
     }
     while let Some(head) = outbox.first() {
@@ -68,9 +68,10 @@ pub fn flush(
                 let interval_secs = backoff.map_or(BACKOFF_INITIAL_SECS, |b| {
                     (b.interval_secs * 2).min(BACKOFF_MAX_SECS)
                 });
+                // 送信に時間がかかっても間隔が短くならないよう、失敗が分かった時刻から数える
                 *backoff = Some(Backoff {
                     interval_secs,
-                    next_send_at: now + interval_secs,
+                    next_send_at: now() + interval_secs,
                 });
                 return;
             }
@@ -96,7 +97,7 @@ mod tests {
     #[test]
     fn flush_removes_sent() {
         let mut o = vec![json!(1), json!(2)];
-        flush(&mut o, &mut None, 0, || true, |_| Outcome::Sent);
+        flush(&mut o, &mut None, || 0, || true, |_| Outcome::Sent);
         assert!(o.is_empty());
     }
 
@@ -106,7 +107,7 @@ mod tests {
         flush(
             &mut o,
             &mut None,
-            0,
+            || 0,
             || true,
             |v| {
                 if *v == json!(1) {
@@ -126,7 +127,7 @@ mod tests {
         flush(
             &mut o,
             &mut b,
-            0,
+            || 0,
             || true,
             |v| match v.as_i64() {
                 Some(1) => Outcome::Rejected,
@@ -147,7 +148,7 @@ mod tests {
             starts += 1;
             starts == 1
         };
-        flush(&mut o, &mut b, 0, has_time, |_| Outcome::Sent);
+        flush(&mut o, &mut b, || 0, has_time, |_| Outcome::Sent);
         // 時間が尽きたら次を送り始めず、列に残す。失敗ではないので間隔は空けない
         assert_eq!(o, vec![json!(2)]);
         assert_eq!(b, None);
@@ -160,7 +161,7 @@ mod tests {
         let mut now = 1_000;
         let mut intervals = Vec::new();
         for _ in 0..7 {
-            flush(&mut o, &mut b, now, || true, |_| Outcome::Retry);
+            flush(&mut o, &mut b, || now, || true, |_| Outcome::Retry);
             let set = b.expect("a retryable failure sets the backoff");
             assert_eq!(set.next_send_at, now + set.interval_secs);
             intervals.push(set.interval_secs);
@@ -169,7 +170,7 @@ mod tests {
             flush(
                 &mut o,
                 &mut b,
-                set.next_send_at - 1,
+                || set.next_send_at - 1,
                 || true,
                 |_| {
                     tried = true;
@@ -185,17 +186,43 @@ mod tests {
     }
 
     #[test]
+    fn backoff_counts_from_the_failure() {
+        let mut o = vec![json!(1)];
+        let mut b = None;
+        let clock = std::cell::Cell::new(1_000);
+        // 1 件の送信に、最初の間隔より長い 34 秒かかって失敗した
+        let send = |_: &Value| {
+            clock.set(1_034);
+            Outcome::Retry
+        };
+        flush(&mut o, &mut b, || clock.get(), || true, send);
+        assert_eq!(
+            b.map(|b| b.next_send_at),
+            Some(1_034 + BACKOFF_INITIAL_SECS)
+        );
+        // 失敗の直後に起動し直した周回では送らない
+        let mut tried = false;
+        let send = |_: &Value| {
+            tried = true;
+            Outcome::Sent
+        };
+        flush(&mut o, &mut b, || 1_035, || true, send);
+        assert!(!tried);
+        assert_eq!(o, vec![json!(1)]);
+    }
+
+    #[test]
     fn backoff_resets_after_success() {
         let mut o = vec![json!(1), json!(2)];
         let mut b = None;
-        flush(&mut o, &mut b, 0, || true, |_| Outcome::Retry);
-        flush(&mut o, &mut b, 30, || true, |_| Outcome::Retry);
+        flush(&mut o, &mut b, || 0, || true, |_| Outcome::Retry);
+        flush(&mut o, &mut b, || 30, || true, |_| Outcome::Retry);
         assert_eq!(b.map(|b| b.interval_secs), Some(60));
         // 1 件目が届いた後、2 件目で送り直せる失敗が出ると、空ける間隔は初期値から数え直す
         flush(
             &mut o,
             &mut b,
-            90,
+            || 90,
             || true,
             |v| {
                 if *v == json!(1) {
@@ -211,7 +238,7 @@ mod tests {
             next_send_at: 90 + BACKOFF_INITIAL_SECS,
         };
         assert_eq!(b, Some(initial));
-        flush(&mut o, &mut b, 120, || true, |_| Outcome::Sent);
+        flush(&mut o, &mut b, || 120, || true, |_| Outcome::Sent);
         assert!(o.is_empty());
         assert_eq!(b, None);
     }
@@ -220,14 +247,14 @@ mod tests {
     fn queued_order_is_kept_during_backoff() {
         let mut o = vec![json!(1)];
         let mut b = None;
-        flush(&mut o, &mut b, 0, || true, |_| Outcome::Retry);
+        flush(&mut o, &mut b, || 0, || true, |_| Outcome::Retry);
         // 間隔を空けている間に増えた知らせは後ろに並び、まだ送らない
         let mut sent = Vec::new();
         push(&mut o, json!(2));
         flush(
             &mut o,
             &mut b,
-            10,
+            || 10,
             || true,
             |v| {
                 sent.push(v.clone());
@@ -241,7 +268,7 @@ mod tests {
         flush(
             &mut o,
             &mut b,
-            30,
+            || 30,
             || true,
             |v| {
                 sent.push(v.clone());

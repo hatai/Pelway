@@ -34,10 +34,11 @@ use serde_json::Value;
 
 const DEFAULT_POLL_SECS: u64 = 30;
 const CI_INTERVAL: Duration = Duration::from_secs(5 * 60);
-/// 1 周の中で webhook に新しく送り始めてよい時間。1 件の送信は curl の制限時間と送り直しの待ちで
-/// 最大 34 秒（`io::send`。秘密を読む fnox の時間は含まない）なので、1 周の webhook の送信は
-/// 列の長さによらず 10 + 34 = 44 秒以内に収まる。
+/// 1 周の中で webhook に新しく送り始めてよい時間（始めた送信に、期限までの時間を残すため）。
 const SEND_START_WINDOW: Duration = Duration::from_secs(10);
+/// 1 周の webhook の送信の期限。秘密を読む fnox・curl・送り直しの待ちは期限で止める（`io::send`）ので、
+/// 1 周の送信は列の長さによらず 45 秒以内に収まる。期限までに送れなかった知らせは列に残る。
+const SEND_DEADLINE: Duration = Duration::from_secs(40);
 const USAGE: &str =
     "usage: pelway-agent-watch [--once | --cycles <n>] [--dry-run] [--project <path>]
        pelway-agent-watch --register <thread-id> | --unregister | --show-registration";
@@ -287,18 +288,26 @@ impl Watcher {
             return;
         }
 
-        // 指揮役の受信箱に、知らせを出した時点で 1 回だけ書く（送信待ちの列の再送では書かない）。
-        // 受信箱に書けなくても webhook の送信と見張りは続ける。
-        if !payloads.is_empty() {
-            let lines: Vec<String> = payloads.iter().map(|(p, _)| inbox_line(p)).collect();
-            let sources: Vec<String> = payloads
+        // 指揮役の受信箱に、知らせを出した時点で書く（送信待ちの列の再送では書かない）。
+        // 書けなかった知らせは状態に残し、受信箱が直るまで周回ごとに古い順に書き直す
+        // （webhook が外した知らせも、上限 100 件の内なら後で届く）。受信箱に書けなくても webhook の送信と見張りは続ける。
+        let mut to_inbox = std::mem::take(&mut self.state.inbox_pending);
+        to_inbox.extend(payloads.iter().map(|(p, _)| p.clone()));
+        if !to_inbox.is_empty() {
+            let lines: Vec<String> = to_inbox.iter().map(inbox_line).collect();
+            let sources: Vec<String> = to_inbox
                 .iter()
-                .filter_map(|(p, _)| p.get("thread_id").and_then(Value::as_str))
+                .filter_map(|p| p.get("thread_id").and_then(Value::as_str))
                 .map(str::to_string)
                 .collect();
             match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &lines) {
                 Ok(total) => self.maybe_wake(&t3, total, &sources),
-                Err(e) => eprintln!("agent-watch: ERROR inbox append failed: {e}"),
+                Err(e) => {
+                    eprintln!("agent-watch: ERROR inbox append failed: {e}");
+                    for p in to_inbox {
+                        outbox::push(&mut self.state.inbox_pending, p);
+                    }
+                }
             }
         }
 
@@ -308,15 +317,16 @@ impl Watcher {
         }
         let project = self.opts.project.clone();
         let send_started = Instant::now();
+        let deadline = send_started + SEND_DEADLINE;
         let backoff_before = self.state.outbox_backoff;
         outbox::flush(
             &mut self.state.outbox,
             &mut self.state.outbox_backoff,
-            now_epoch(),
+            now_epoch,
             || send_started.elapsed() < SEND_START_WINDOW,
             |payload| {
                 let tag = tag(payload);
-                match io::send(payload, &project) {
+                match io::send(payload, &project, deadline) {
                     io::SendResult::Sent(code) => {
                         eprintln!("agent-watch: {tag} mode=send http={code}");
                         Outcome::Sent
