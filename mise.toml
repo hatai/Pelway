@@ -291,7 +291,7 @@ description = "レビュー担当の Codex（codex_review）のネットワー�
 run = """
 #!/usr/bin/env bash
 set -uo pipefail
-probe() { codex sandbox --enable network_proxy -P review -- curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$@" 2>/dev/null; }
+probe() { CODEX_HOME="$HOME/.codex-review" codex sandbox --enable network_proxy -P review -- curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$@" 2>/dev/null; }
 ok=1
 for u in https://api.github.com https://github.com; do
   code="$(probe "$u")"; echo "$u -> $code"; [[ "$code" == 200 ]] || ok=0
@@ -300,7 +300,7 @@ for u in https://example.com; do
   code="$(probe "$u")"; echo "$u -> ${code:-000}"; [[ "$code" == 000 || -z "$code" ]] || ok=0
   code="$(probe --noproxy '*' "$u")"; echo "$u (noproxy) -> ${code:-000}"; [[ "$code" == 000 || -z "$code" ]] || ok=0
 done
-((ok)) && echo "codex-review-check: ok" || { echo "codex-review-check: NG（~/.codex/config.toml の [permissions.review] と features を確かめる）"; exit 1; }
+((ok)) && echo "codex-review-check: ok" || { echo "codex-review-check: NG（~/.codex-review/config.toml の [permissions.review] と features を確かめる）"; exit 1; }
 """
 
 [tasks.agent-watch-install]
