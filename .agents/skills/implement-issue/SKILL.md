@@ -185,7 +185,7 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 
 | 担当 | `target.providerInstanceId` | `target.model` | `target.options` |
 |---|---|---|---|
-| codex | `codex_review` | `gpt-6-luna` | `reasoningEffort: <effort>` |
+| codex | `codex_review` | skill `command-team` の「Codex のモデル」の表で選ぶ | `reasoningEffort: <effort>` |
 | claude | `claude_review` | `claude-opus-5-5` | `effort: <effort>` |
 | devin | `devin_review` | `swe-2-high` | `mode` のみ受け付ける（省略してよい。`thought_level` は渡せず、effort の引き上げはできない） |
 
