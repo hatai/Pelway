@@ -32,10 +32,19 @@ SCRIPT_B="範囲を絞って納期を守る案"
 
 die_usage() { echo "verify-run: $*" >&2; exit 2; }
 
-# HTTP 応答（生のバイト列のファイル）から状態コードを返す。
-resp_status() { head -n 1 "$1" | tr -d '\r' | awk '{print $2}'; }
-# HTTP 応答から本文（最初の空行より後）を返す。
-resp_body() { awk 'b {print} /^\r?$/ && !b {b=1}' "$1"; }
+# HTTP 応答（標準入力）から状態コードを返す。
+resp_status() { head -n 1 | tr -d '\r' | awk '{print $2}'; }
+# HTTP 応答（標準入力）から本文（最初の空行より後）を返す。
+resp_body() { awk 'b {print} /^\r?$/ && !b {b=1}'; }
+
+# 判断待ちの一覧（JSON）が配列として読めて、id が入っていなければ 0。空・壊れた JSON・配列以外は 1。
+decision_absent() { jq -e --arg d "$2" 'type == "array" and (map(.decision_id) | index($d) | not)' <<< "$1" > /dev/null 2>&1; }
+
+# ready 行の形: 127.0.0.1 の 1〜65535 のポートと pid と llm=script だけ。0 = 形が合う。
+ready_line_ok() {
+  [[ "$1" =~ ^demo-serve\ ready\ addr=127\.0\.0\.1:([0-9]{1,5})\ pid=([0-9]+)\ llm=script$ ]] || return 1
+  [ "${BASH_REMATCH[1]}" -ge 1 ] && [ "${BASH_REMATCH[1]}" -le 65535 ] && [ "${BASH_REMATCH[2]}" = "$2" ]
+}
 
 # JSON の本文・質問（body・question の文字列）を長さだけ残して伏せる。JSON でなければ全体を伏せる。
 redact() {
@@ -49,8 +58,10 @@ redact() {
 under() { case "${1%/}/" in "${2%/}/"*) return 0 ;; *) return 1 ;; esac; }
 
 # evidence-root に使えるなら 0: 共有 git dir（common）の中か、作業ツリー（top）の外。
+# 3 つとも実体のパス（.. を畳み、シンボリックリンクをたどる）にそろえてから比べる。
 evidence_root_ok() {
-  local root="$1" top="$2" common="$3"
+  local root top common
+  root="$(realpath -m -- "$1")" && top="$(realpath -m -- "$2")" && common="$(realpath -m -- "$3")" || return 1
   under "${root}" "${common}" && return 0
   ! under "${root}" "${top}"
 }
@@ -85,26 +96,25 @@ record() {
 http() {
   local name="$1" method="$2" path="$3" member="$4" body="${5:-}" n
   n="$(printf '%02d' "${STEP}")"; STEP=$((STEP + 1))
-  local req="${EV}/steps/${n}-${name}.req" resp="${EV}/steps/${n}-${name}.resp" head raw
+  local req="${EV}/steps/${n}-${name}.req" resp="${EV}/steps/${n}-${name}.resp" head raw=""
   head="$(printf '%s %s HTTP/1.1\r\nHost: demo.local\r\nConnection: close\r\n' "${method}" "${path}"
     [ -n "${member}" ] && printf 'x-pelway-member-id: %s\r\nx-pelway-member-kind: human\r\n' "${member}"
     printf 'Content-Length: %s\r\n' "$(printf '%s' "${body}" | wc -c)")"
   # 証拠には本文を伏せた形だけを書く（生の本文はメモリにだけ置く）。
   { printf '%s\n\n' "${head//$'\r'/}"; redact <<< "${body}"; } > "${req}"
   STATUS=000; BODY=""
-  raw="${EV}/.raw-${n}"
   if exec 3<>"/dev/tcp/${HOST}/${PORT}"; then
     printf '%s\n\r\n%s' "${head}" "${body}" >&3
     # 実行中の接続を観察する（ss -tanp。この PID の行と、待ち受けのアドレスを含む行）。
     observe_sockets
-    timeout 10 cat <&3 > "${raw}"
+    # 生の応答はファイルに書かず、メモリだけで扱う。
+    raw="$(timeout 10 cat <&3)"
     exec 3<&- 3>&-
-    STATUS="$(resp_status "${raw}")"; BODY="$(resp_body "${raw}")"
-    { head -n 1 "${raw}" | tr -d '\r'; echo; redact <<< "${BODY}"; } > "${resp}"
+    STATUS="$(resp_status <<< "${raw}")"; BODY="$(resp_body <<< "${raw}")"
+    { head -n 1 <<< "${raw}" | tr -d '\r'; echo; redact <<< "${BODY}"; } > "${resp}"
   else
     echo "connect failed" > "${resp}"
   fi
-  rm -f "${raw}"
 }
 
 # 読み取りだけで「このインスタンスを動かしてよいか」を答える。0 = よい。
@@ -123,6 +133,9 @@ env_check() {
     listen="$(ss -Htlnp 2>/dev/null | grep "pid=${PID}," | awk '{print $4}' | sort -u | tr '\n' ' ')"
     echo "listen=${listen}"
     [ "${listen}" = "${ADDR} " ] || { echo "NG: 待ち受けが ready 行の addr=${ADDR} だけではない"; ok=1; }
+    local udp; udp="$(ss -Hulnp 2>/dev/null | grep -c "pid=${PID},")"
+    echo "udp_sockets=${udp}"
+    [ "${udp}" = 0 ] || { echo "NG: UDP のソケットがある"; ok=1; }
     # 環境は名前の数だけ数え、値は書かない。禁止の変数は名前も書かずラベルだけ書く（名前は leak-phrases の禁止語）。
     echo "env_name_count=$(tr '\0' '\n' < "/proc/${PID}/environ" 2>/dev/null | cut -d= -f1 | grep -c .)"
     local bad; bad="$(forbidden_env_present "/proc/${PID}/environ" | tr '\n' ' ')"
@@ -140,15 +153,15 @@ env_check() {
   return "${ok}"
 }
 
-# ss -tan の行（ファイル）のうち、loopback 以外のアドレスを含む端の数を返す。
-# 待ち受け（LISTEN）の相手欄 0.0.0.0:* は数えない。
+# ss -Htuan の行（ファイル。1 列目が tcp/udp）のうち、loopback 以外のアドレスを含む端の数を返す。
+# 待ち受け（LISTEN）と未接続の UDP（UNCONN）の相手欄（0.0.0.0:* など）は数えない。
 count_nonloopback() {
-  awk '{print $4; if ($1 != "LISTEN") print $5}' "$1" 2>/dev/null | grep -cvE '^127\.0\.0\.1:[0-9]+$'
+  awk '{print $5; if ($2 != "LISTEN" && $2 != "UNCONN") print $6}' "$1" 2>/dev/null | grep -cvE '^127\.0\.0\.1:[0-9]+$'
 }
 
 # この PID のソケットと、待ち受けのアドレス（addr）に関わる接続を network.txt に足す。
 observe_sockets() {
-  ss -Htanp 2>/dev/null | grep -F -e "pid=${PID}," -e " ${ADDR} " >> "${EV}/network.txt" || true
+  ss -Htuanp 2>/dev/null | grep -F -e "pid=${PID}," -e " ${ADDR} " >> "${EV}/network.txt" || true
 }
 
 # 操作の間、0.1 秒ごとに ss を取り続ける（要求ごとの観察の間を埋める。それでも 0.1 秒より短い接続は取りこぼしうる）。
@@ -159,17 +172,22 @@ start_sampler() {
 }
 stop_sampler() { [ -n "${SAMPLER:-}" ] && kill "${SAMPLER}" 2>/dev/null && wait "${SAMPLER}" 2>/dev/null; SAMPLER=""; }
 
-# 外に出ていないことの観察: 要求のたびに取ったこの PID のソケット（network.txt）が
-# すべて 127.0.0.1 同士で、開いているファイルが標準入出力とソケットだけか。
+# 外に出ていないことの観察: 取った TCP・UDP の行（network.txt）がすべて 127.0.0.1 同士で、
+# 開いているファイルが標準入出力と、ss で TCP・UDP と確かめられたソケットだけか。
 network_check() {
   local out="${EV}/network.txt"
-  local seen nonlo
+  local seen nonlo ino
   ls -l "/proc/${PID}/fd" > "${EV}/proc-fd.txt" 2>&1 || return 1
+  # /proc の socket:[N] を、ss -e の ino:N（この PID の TCP・UDP）と突き合わせる。見つからないソケットは種類も宛先も確かめられない。
+  local known; known="$(ss -Htuanpe 2>/dev/null | grep -F "pid=${PID}," | grep -oE 'ino:[0-9]+' | cut -d: -f2)"
+  for ino in $(grep -oE 'socket:\[[0-9]+\]' "${EV}/proc-fd.txt" | tr -dc '0-9\n'); do
+    grep -qx "${ino}" <<< "${known}" || { echo "# 種類を確かめられないソケット: inode ${ino}" >> "${out}"; return 1; }
+  done
   observe_sockets
   seen="$(grep -c . "${out}" 2>/dev/null)"; seen="${seen:-0}"
   nonlo="$(count_nonloopback "${out}")"
   local db; db="$(grep -c ':5432 ' "${out}")"
-  echo "# ss -tan の観察（要求ごと＋0.1 秒ごと）${seen} 行、loopback 以外との接続 ${nonlo} 件、DB（:5432）宛て ${db} 件" >> "${out}"
+  echo "# ss -tuan の観察（TCP・UDP、要求ごと＋0.1 秒ごと）${seen} 行、loopback 以外との接続 ${nonlo} 件、DB（:5432）宛て ${db} 件" >> "${out}"
   [ "${seen}" -ge 1 ] && [ "${nonlo}" = 0 ] && [ "${db}" = 0 ] || return 1
   ! awk 'NR > 1 {print $NF}' "${EV}/proc-fd.txt" | grep -vqE "^(/dev/null|${EV}/server\.std(out|err)|socket:\[[0-9]+\]|anon_inode:.*|pipe:\[[0-9]+\])$"
 }
@@ -205,20 +223,30 @@ cleanup() {
     else record FAIL "後片付け: ほかのプロセスが生き残っている" "消えた pid ${lost}"; fi
   fi
   # demo-check の canary と leak-phrases を、この run のログ・証拠の写しに対して流す。
-  local scan="${EV}/demo-check-input" st
-  mkdir -p "${scan}/target/demo"
-  local x
-  for x in "${EV}"/*; do [ "${x}" = "${scan}" ] || cp -r "${x}" "${scan}/target/demo/"; done
-  for st in canary leak-phrases; do
+  local scan="${EV}/demo-check-input" st x copied=1 want got
+  mkdir -p "${scan}/target/demo" || copied=0
+  for x in "${EV}"/* "${EV}"/.[!.]*; do
+    [ -e "${x}" ] && [ "${x}" != "${scan}" ] || continue
+    cp -r "${x}" "${scan}/target/demo/" || copied=0
+  done
+  want="$(find "${EV}" -path "${scan}" -prune -o -type f -print | grep -c .)"
+  got="$(find "${scan}/target/demo" -type f | grep -c .)"
+  if [ "${copied}" = 0 ] || [ "${want}" != "${got}" ]; then
+    record FAIL "demo-check: 証拠の写しを作る" "写しが不完全（${got}/${want} ファイル）。canary・leak-phrases を流さない"
+  else for st in canary leak-phrases; do
     DEMO_CHECK_ROOT="${scan}" bash "${TOP}/scripts/demo-check/${st}.sh" >> "${EV}/demo-check.txt" 2>&1
     rc=$?
     echo "-- ${st}: exit ${rc}" >> "${EV}/demo-check.txt"
     if [ "${rc}" = 0 ]; then record PASS "demo-check ${st}: run のログ・証拠" "demo-check.txt"
     else record FAIL "demo-check ${st}: run のログ・証拠" "exit ${rc}、demo-check.txt"; fi
-  done
+  done; fi
   echo "verdict=${VERDICT}" | tee -a "${EV}/summary.txt"
-  local sums; sums="$(cd "${EV}" && find . -type f -print0 | sort -z | xargs -0 sha256sum)"
-  printf '%s\n' "${sums}" > "${EV}/SHA256SUMS"
+  local sums
+  if ! sums="$(cd "${EV}" && find . -type f -print0 | sort -z | xargs -0 sha256sum)" \
+      || ! printf '%s\n' "${sums}" > "${EV}/SHA256SUMS" \
+      || ! (cd "${EV}" && sha256sum --quiet -c SHA256SUMS); then
+    echo "verify-run: 失敗（証拠のハッシュを作れない・確かめられない。${EV}）" >&2; exit 1
+  fi
   echo "evidence=${EV}"
   echo "evidence_sha256=$(sha256sum "${EV}/SHA256SUMS" | cut -d' ' -f1)"
   [ "${VERDICT}" = PASS ] || exit 1
@@ -310,7 +338,7 @@ operate() {
   else record FAIL "決定後に案B へ変える要求は拒否" "status=${STATUS}"; fi
 
   http final-decisions GET "/v1/workspaces/${WS}/decisions?actor=${DECIDER}" ""
-  if [ "${STATUS}" = 200 ] && ! jq -e --arg d "${DEC_ID}" '.[]? | select(.decision_id == $d)' <<< "${BODY}" > /dev/null 2>&1; then
+  if [ "${STATUS}" = 200 ] && decision_absent "${BODY}" "${DEC_ID}"; then
     record PASS "決定後の状態: 確定した決定が判断待ちに無い"
   else record FAIL "決定後の状態: 確定した決定が判断待ちに無い" "status=${STATUS}"; fi
   http final-messages GET "/v1/channels/${CH}/messages?actor=${REQUESTER}&after_seq=0" ""
@@ -358,15 +386,19 @@ main() {
   fi
   TOP="$(git rev-parse --show-toplevel)" || die_usage "not inside the Pelway repository"
   COMMON="$(git rev-parse --path-format=absolute --git-common-dir)" || die_usage "cannot find the git common dir"
+  TOP="$(realpath -- "${TOP}")"; COMMON="$(realpath -- "${COMMON}")"
   ROOT="${ROOT:-${COMMON}/pelway/evidence}"
   [ "${ROOT#/}" != "${ROOT}" ] || die_usage "--evidence-root must be an absolute path"
   evidence_root_ok "${ROOT}" "${TOP}" "${COMMON}" || die_usage "--evidence-root must be outside the work tree (${TOP}) or inside the git common dir"
+  ROOT="$(realpath -m -- "${ROOT}")"
+  # 証拠もロックも所有者だけが読める形で作る。
+  umask 077
 
   SHA="$(git -C "${TOP}" rev-parse HEAD)"
   DIRTY=no; [ -z "$(git -C "${TOP}" status --porcelain)" ] || DIRTY=yes
   RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-${FEATURE}-$$"
   EV="${ROOT}/${LABEL}-${SHA}/${RUN_ID}"
-  mkdir -p "${EV}/steps" "${ROOT}/locks" || die_usage "cannot create ${EV}"
+  mkdir -p "${EV}/steps" "${COMMON}/pelway/locks" || die_usage "cannot create ${EV}"
   VERDICT=PASS; STEP=1; PID=""; LOCK=""; BIN=""
   trap cleanup EXIT
   printf 'run_id=%s\nsha=%s\ndirty=%s\nfeature=%s\n' "${RUN_ID}" "${SHA}" "${DIRTY}" "${FEATURE}" | tee "${EV}/summary.txt"
@@ -379,7 +411,8 @@ main() {
   # 動いているほうの exe はビルドし直すと " (deleted)" が付くので、外して比べる。
   local target_real p e other="" lock
   target_real="$(realpath -m "${CARGO_TARGET_DIR:-${TOP}/target}")"
-  lock="${ROOT}/locks/$(printf '%s' "${target_real}" | sha256sum | cut -c1-12)"
+  # ロックは証拠の置き場によらず共有 git dir の下に置き、鍵は作業ツリーの実体のパス（ビルドで変わらない）。
+  lock="${COMMON}/pelway/locks/$(printf '%s' "${TOP}" | sha256sum | cut -c1-12)"
   if mkdir "${lock}" 2> /dev/null; then
     LOCK="${lock}"; echo "$$" > "${LOCK}/pid"
   else
@@ -424,21 +457,28 @@ main() {
   if [ -z "${BIN}" ]; then record FAIL "起動: ビルド" "cargo が demo-serve の実行ファイルを報告しない"; return 1; fi
   BIN="$(realpath "${BIN}")"
   BIN_SHA="$(sha256sum "${BIN}" | cut -d' ' -f1)"
+  # ビルドの後にもう一度: 同じ実行ファイル（mbx がビルドで target をリンクにした後の実体）の demo-serve が動いていないか。
+  other=""
+  for p in $(pgrep -x demo-serve || true); do [ "$(exe_of "${p}" || true)" = "${BIN}" ] && other+=" ${p}"; done
+  if [ -n "${other}" ]; then
+    record FAIL "起動: 二重起動の確認（ビルドの後）" "同じ実行ファイルの demo-serve が動いている pid=${other# }。動かさない"; return 1
+  fi
   coproc DS { exec env -i PATH="/usr/bin:/bin" HOME="${HOME}" "${BIN}" > "${EV}/server.stdout" 2> "${EV}/server.stderr"; }
   PID="${DS_PID}"; DS_IN="${DS[1]}"
-  for _ in $(seq 50); do grep -q '^demo-serve ready ' "${EV}/server.stdout" && break; sleep 0.1; done
-  ADDR="$(sed -n 's/^demo-serve ready addr=\([^ ]*\) pid=\([0-9]*\) .*/\1/p' "${EV}/server.stdout")"
-  if [ -z "${ADDR}" ] || ! grep -q "^demo-serve ready addr=${ADDR} pid=${PID} llm=script$" "${EV}/server.stdout"; then
-    record FAIL "起動: ready 行" "5 秒以内にこの PID の ready 行が出ない"; return 1
+  for _ in $(seq 50); do [ -s "${EV}/server.stdout" ] && break; sleep 0.1; done
+  local line; line="$(cat "${EV}/server.stdout")"
+  # ready 行は 1 行だけで、127.0.0.1 のポートとこの子の PID を持つこと。HTTP はこの後の環境チェックを通ってから送る。
+  if ! ready_line_ok "${line}" "${PID}"; then
+    record FAIL "起動: ready 行" "5 秒以内に、127.0.0.1 のポートとこの PID を持つ ready 行が 1 行だけ出ない"; return 1
   fi
-  HOST="${ADDR%:*}"; PORT="${ADDR##*:}"
+  ADDR="${line#*addr=}"; ADDR="${ADDR%% *}"; HOST="${ADDR%:*}"; PORT="${ADDR##*:}"
   record PASS "起動: ready 行" "addr=${ADDR} pid=${PID}"
-  if seed_ready; then record PASS "起動: seed を HTTP で読める" "${SEED_DETAIL}"
-  else record FAIL "起動: seed を HTTP で読める" "テスト用データが無いか違う ${SEED_DETAIL:-status=${STATUS}}"; return 1; fi
 
-  # 環境チェック
+  # 環境チェック（PID・バイナリ・待ち受けを照合してから HTTP を送る）
   if env_check > /dev/null; then record PASS "環境チェック" "env-check.txt tools.txt"
   else record FAIL "環境チェック" "env-check.txt の NG 行"; return 1; fi
+  if seed_ready; then record PASS "起動: seed を HTTP で読める" "${SEED_DETAIL}"
+  else record FAIL "起動: seed を HTTP で読める" "テスト用データが無いか違う ${SEED_DETAIL:-status=${STATUS}}"; return 1; fi
 
   # 操作（その間、ss を取り続ける）
   start_sampler
@@ -446,8 +486,9 @@ main() {
   stop_sampler
 
   # 外に出ていないことの観察
-  if network_check; then record PASS "ネットワーク・ファイル: 観察した範囲で 127.0.0.1 のソケットと標準入出力だけ" "network.txt proc-fd.txt。0.1 秒より短い接続は未検証"
-  else record FAIL "ネットワーク・ファイル: 観察した範囲で 127.0.0.1 のソケットと標準入出力だけ" "network.txt proc-fd.txt"; fi
+  local net="ネットワーク・ファイル: 観察した範囲で TCP・UDP は 127.0.0.1 だけ、開いているのは標準入出力と TCP・UDP のソケットだけ"
+  if network_check; then record PASS "${net}" "network.txt proc-fd.txt。0.1 秒より短い接続と、TCP・UDP 以外の通信路は未検証"
+  else record FAIL "${net}" "network.txt proc-fd.txt"; fi
   [ "${VERDICT}" = PASS ]
 }
 

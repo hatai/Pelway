@@ -35,10 +35,10 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 ## 1. 起動
 
 - 依存の取得: `mise run fetch`（初回だけ。`verify-run` は `--offline --locked` でビルドする）。
-- 二重起動の確認（ビルドの前、run の最初）: まず `<evidence-root>/locks/<target の sha256 の先頭 12 桁>` を `mkdir` で原子的に取り、取れなければ（別の run が実行中）FAIL で止まる。続けて、同じ target（`${CARGO_TARGET_DIR:-<top>/target}` の実体）の `demo-serve` が動いていれば（手で起動したものなど）、触らずに FAIL で止まる（止めるかは人が決める）。動いているほうの exe はビルドし直すと ` (deleted)` が付くので、外して比べる。ロックは後片付けで外す。
+- 二重起動の確認（ビルドの前、run の最初）: まず `<共有 git dir>/pelway/locks/<作業ツリーの実体のパスの sha256 の先頭 12 桁>` を `mkdir` で原子的に取り、取れなければ（同じ作業ツリーの別の run が実行中）FAIL で止まる。ロックの場所と鍵は `--evidence-root` やビルド（mbx が `target` をリンクにする）で変わらない。続けて、同じ target（`${CARGO_TARGET_DIR:-<top>/target}` の実体）の下の `demo-serve` が動いていれば（手で起動したものなど）、触らずに FAIL で止まる（止めるかは人が決める）。ビルドの後にも、同じ実行ファイルの `demo-serve` が動いていないかをもう一度見る（新しい worktree の最初の run では、ビルドの前に `target` の実体が決まっていないため）。動いているほうの exe はビルドし直すと ` (deleted)` が付くので、外して比べる。ロックは後片付けで外す。
 - ビルドと起動: `verify-run` が `RUSTC=<mise.toml の rust のツールチェーンの rustc> mise exec -- cargo build --offline --locked -p pelway-http --example demo-serve --message-format=json-render-diagnostics` を実行し（rustc は `mise current rust` と `rustup which --toolchain` で決める。`mise exec` の PATH では、ほかの mise 呼び出しと重なると rustc が `/usr/bin` の別の版に解決されることがあるため）、cargo が報告した実行ファイル（mr_boxington のときは `~/.cache/mbx/targets/...` の下）を `env -i PATH=/usr/bin:/bin HOME=$HOME` の子として起動する。子の標準入力は run が持つパイプで、run が終われば（SIGKILL でも）閉じる。起動口 `crates/pelway-http/examples/demo-serve.rs` は標準入力の EOF で終わる。`127.0.0.1:0` で待ち受け（mise の `PELWAY_BIND_ADDR` は読まない）、LLM の設定を「どの変数も無い」写像で組み立てる（環境変数を参照しない）ので、台本モード（`ScriptGateway`）になる。
 - 空のデータから使える状態まで: マイグレーションは無い（保存はメモリだけ）。テスト用データは起動時のデモ seed（ワークスペース `ws-demo-01`、チャンネル `ch-demo-anken-b`「案件B」、田中 `m-tanaka`・山本 `m-yamamoto`・佐藤 `m-sato`・ハル `m-hal`（bot）、過去の発言 3 件）。
-- 使える合図: 実際に待ち受けたポートを書いた標準出力（証拠の `server.stdout`）の 1 行 `demo-serve ready addr=127.0.0.1:<port> pid=<pid> llm=script`（`pid` が起動した子の PID と一致すること）と、seed を HTTP で読めること（`GET /v1/workspaces/ws-demo-01/channels?actor=m-tanaka` がチャンネル 1 件でメンバーの ID が `m-hal,m-sato,m-tanaka,m-yamamoto`、`GET /v1/channels/ch-demo-anken-b/messages?actor=m-tanaka&after_seq=0` が 3 件）。ポートが開いただけでは合図にしない。
+- 使える合図: 実際に待ち受けたポートを書いた標準出力（証拠の `server.stdout`）が 1 行だけで `demo-serve ready addr=127.0.0.1:<1〜65535> pid=<pid> llm=script` の形（`pid` が起動した子の PID と一致すること）、2 章の環境チェック（PID・バイナリ・待ち受けの照合）を通ったこと、そのあと seed を HTTP で読めること（`GET /v1/workspaces/ws-demo-01/channels?actor=m-tanaka` がチャンネル 1 件でメンバーの ID が `m-hal,m-sato,m-tanaka,m-yamamoto`、`GET /v1/channels/ch-demo-anken-b/messages?actor=m-tanaka&after_seq=0` が 3 件）。ポートが開いただけでは合図にしない。
 
 失敗: 道具が無い。同じ target の `demo-serve` が動いている、またはロックが取れない。ビルドが通らない（`build.log`）。5 秒以内に ready 行が出ない、または ready 行の `pid` が起動した子と違う。seed のチャンネル・メンバーの ID・件数が違う（テスト用データが無い）。
 
@@ -53,11 +53,11 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 
 - プロセス: `/proc/<pid>/exe` がこの run でビルドした `demo-serve` で、その sha256 が起動前に測った値と同じ。使った道具の版は `tools.txt`（`mise`・ツールチェーンの `rustc`・`cargo`・`ss`・`pgrep` など）。
 - ビルドと sha: `git rev-parse HEAD` が run の開始時と同じ。作業ツリーに未コミットの変更があれば起動前に FAIL（`--allow-dirty` は手元の試しだけに使い、その run は証拠にしない）。
-- ポート: `ss -tlnp` で、この PID の待ち受けが ready 行の `addr` だけ。
+- ポート: `ss -tlnp` で、この PID の TCP の待ち受けが ready 行の `addr` だけ。`ss -ulnp` で、この PID の UDP のソケットが 0 個。この照合を通るまで HTTP は送らない。
 - 環境: 子の環境の変数の名前の数（`env_name_count`）と、fnox の秘密 3 つ（LLM のキー・Penpot MCP のトークン・DB の URL）と LLM の接続先 2 つ（独自の接続先・既知の接続先）が無いこと（`forbidden_env=none`）。名前の有無だけを見て、値は残さない。証拠には変数名も書かずラベルだけ書く（変数名は leak-phrases の禁止語）。
 - 台本モード: 標準エラー（`server.stderr`）に接続先を知らせる行 `pelway-runner: LLM endpoint: ...` があり、ready 行が `llm=script`。台本の合成応答が出たことは 3 章の段 4 で確かめる。
 - 認証: デモは認証なし。操作者は合成ヘッダー `x-pelway-member-id`・`x-pelway-member-kind` で名乗る。
-- 二重起動・共有インスタンス: 起動前に、同じ `demo-serve` バイナリのプロセスが動いていれば FAIL にして止まり、そのプロセスには触らない。接続先は自分の ready 行の `addr` だけで、ほかのポートのインスタンスには要求を送らない。
+- 二重起動・共有インスタンス: 起動前に、同じ target の下の `demo-serve` が動いていれば FAIL にして止まり、そのプロセスには触らない（1 章）。接続先は自分の ready 行の `addr` だけで、ほかのポートのインスタンスには要求を送らない。
 
 失敗: 上のどれか 1 つでも合わない（`env-check.txt` の `NG:` 行）。別のインスタンスだった場合も同じ。
 
@@ -83,12 +83,13 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 ## 4. 証拠
 
 - 置き場: `<共有 git dir>/pelway/evidence/<label>-<HEAD の sha>/<UTC 時刻>-<feature>-<run の PID>/`。作業ツリーの外で、run ごと・sha ごとに分かれる。
-- 中身: `summary.txt`（run_id・sha・dirty・feature・段ごとの `PASS`/`FAIL`・verdict）、`steps/NN-<名前>.req` と `.resp`（送った要求と受け取った応答。NN は送った順で、判断待ちを待つ間は `decisions-pending` が複数並ぶ。`body`・`question` は `<redacted len=N>` に伏せる）、`env-check.txt`、`tools.txt`、`build.json`（cargo の報告）、`survivors-before.txt`・`survivors-after.txt`、`network.txt`（要求のたびに `ss -tanp` で取った、この PID と待ち受けのアドレスに関わる接続と、最後の集計行）、`proc-fd.txt`（開いているファイル）、`server.stdout`・`server.stderr`、`build.log`、`cleanup.txt`、`demo-check.txt` と `demo-check-input/`（demo-check に渡した写し）、`SHA256SUMS`。
+- 中身: `summary.txt`（run_id・sha・dirty・feature・段ごとの `PASS`/`FAIL`・verdict）、`steps/NN-<名前>.req` と `.resp`（送った要求と受け取った応答。NN は送った順で、判断待ちを待つ間は `decisions-pending` が複数並ぶ。`body`・`question` は `<redacted len=N>` に伏せる）、`env-check.txt`、`tools.txt`、`build.json`（cargo の報告）、`survivors-before.txt`・`survivors-after.txt`、`network.txt`（要求ごとと 0.1 秒ごとに `ss -tuanp` で取った、この PID と待ち受けのアドレスに関わる TCP・UDP の行と、最後の集計行）、`proc-fd.txt`（開いているファイル）、`server.stdout`・`server.stderr`、`build.log`、`cleanup.txt`、`demo-check.txt` と `demo-check-input/`（demo-check に渡した写し）、`SHA256SUMS`。
 - 成功の基準:
   - 利用者の道筋（公開の HTTP 経路と合成ヘッダー）だけで動かす。テスト専用の setter・内部の状態を直接読む経路は使わない。
   - 操作（`.req`）と結果の状態（`.resp`）の両方を残す。
   - 副作用を API で読み直す: 投稿が 1 件だけ保存されたこと、決定が確定して判断待ちから消えたこと、下書きが作られたこと（段 10）。保存はメモリだけなので、決定後の状態は HTTP で取り直したもの（段 9）を証拠にする。
-  - 外に出ていないことを観察で確かめる: 操作の間、要求ごとと 0.1 秒ごとに `ss -tanp` を取り（この PID と待ち受けのアドレスに関わる行）、`network.txt` の集計行が「loopback 以外との接続 0 件、DB（:5432）宛て 0 件」で観察が 1 行以上、`proc-fd.txt` が標準入出力・ソケットだけ。`mise run demo-check` の合格だけでは足りない。観察はスナップショットなので、0.1 秒より短い接続は未検証（観察の限界。合格の行にもそう書く）。
+  - 外に出ていないことを観察で確かめる: 操作の間、要求ごとと 0.1 秒ごとに `ss -tuanp` を取り（TCP と UDP。この PID と待ち受けのアドレスに関わる行）、`network.txt` の集計行が「loopback 以外との接続 0 件、DB（:5432）宛て 0 件」で観察が 1 行以上。`proc-fd.txt` は標準入出力と、`ss -tuanpe` の `ino:` で TCP・UDP と確かめられたソケットだけ（確かめられないソケットがあれば FAIL）。`mise run demo-check` の合格だけでは足りない。観察はスナップショットなので、0.1 秒より短い接続と、TCP・UDP 以外の通信路は未検証（観察の限界。合格の行にもそう書く）。
+  - 証拠のディレクトリとファイルは所有者だけが読める（`umask 077`）。証拠の写しが全部そろったときだけ demo-check を流し、`SHA256SUMS` は作ったあとに `sha256sum -c` で確かめる。どちらかに失敗したら FAIL か終了コード 1。
   - 後片付けの後に、run のログ・証拠の写しに対して `scripts/demo-check/canary.sh` と `leak-phrases.sh` を `DEMO_CHECK_ROOT` で流し、どちらも exit 0（本文の canary と禁止語が証拠に出ていない）。
 - 報告には `summary.txt` の全行と、最後に出る `evidence=<パス>`・`evidence_sha256=<SHA256SUMS の sha256>` を貼る。
 
@@ -97,9 +98,9 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 ## 5. 後片付け
 
 - `verify-run` の終了時（成功・失敗・中断のどれでも）に、この run が起動した PID だけを止める。まず子の標準入力を閉じ（子は EOF で終わる）、5 秒で終わらなければ SIGTERM、さらに 5 秒で終わらなければ SIGKILL。シグナルを送る前に毎回 `/proc/<pid>/exe` がこの run のバイナリであることを確かめる。プロセス名では kill しない。経過は `cleanup.txt`。
-- `verify-run` 自身が SIGKILL されたときは後片付けが動かないが、子の標準入力のパイプが閉じるので子も終わる。ロック（`locks/` の下）は残るので、次の run は「ロックが取れない」で止まる。持ち主の pid（`locks/<id>/pid`）が無いことを人が確かめてから外す。
+- `verify-run` 自身が SIGKILL されたときは後片付けが動かないが、子の標準入力のパイプが閉じるので子も終わる。ロック（`<共有 git dir>/pelway/locks/` の下）は残るので、次の run は「ロックが取れない」で止まる。持ち主の pid（`locks/<id>/pid`）が無いことを人が確かめてから外す。
 - 生き残りの確認: 起動の前と後片付けの後に、`demo-serve`・`pitchfork`・`pelway-agent-watch`・`t3-*` の PID を取り（`survivors-before.txt`・`survivors-after.txt`）、前にあったものが後にもあることを確かめる。`pitchfork list`（読み取りだけ）も前後で `pitchfork-before.txt`・`pitchfork-after.txt` に残す。
-- 一時状態はサーバーのメモリと、応答を受ける一時ファイル（証拠のディレクトリ内の `.raw-NN`。本文を伏せる前の応答で、要求ごとに消す）だけ。証拠は消さない。
+- 一時状態はサーバーのメモリだけ（本文を伏せる前の応答も、`verify-run` のメモリだけで扱いファイルに書かない）。証拠は消さない。
 - 後片付けの後に、証拠が残っていることを確かめる: `(cd <evidence> && sha256sum -c SHA256SUMS)` がすべて `OK`。
 
 失敗: `cleanup.txt` が `NG:`（PID が残っている、exe が違うので送らなかった）。前にあったほかのプロセスが消えている。`sha256sum -c` に `OK` 以外がある。
