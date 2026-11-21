@@ -118,3 +118,15 @@
 5. 改善案: `.github/workflows/nightly.yml` の冒頭のコメント「script-test を走らせない」を、`verify-test` が script-test を含む事実に合わせる（workflow の変更は人間が行う）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 12）
+
+対象 head: 6191167e3bcad2d2db4ed3c49dcd2ea3afaf4c33
+
+1. 詰まった箇所: 手順 6: `mise run verify` の終了コードを確かめる前に、コミットと push を同じコマンドで続けてしまい、exit 101 の verify のまま 6191167e を push した。落ちたのは `crates/pelway-llm/tests/gateway.rs` の `timeout_after_send_is_outcome_unknown_without_resend`（単独で 3 回回すと 3 回とも通る）。2 回目の verify は cargo が rustc を `/usr/bin` の 1.75.0 に取り違えて失敗（mise の rust の再同期と重なる環境の問題）。3 回目は通った（`script-test: 37 tests ok`）。この round の差分はスキルの 4 ファイルだけで、Rust のコードには触れていない。CI の必須チェックは 6191167e で 2 つとも通った。
+2. 曖昧だった文: 「PR 本文の「レビューと QA」には round の履歴を書かず、実装者メモ（`docs/worklogs/issue-<N>.md`）を指す 1 行と、最後に検証した sha だけを書く」（main の `.agents/skills/implement-issue/SKILL.md`）。このブランチの版には無く、round 11 では見落とした。main の版に従い、PR 本文から round の履歴と前の round の結果を外した（履歴はこのメモが正本）。
+3. 仮定と解釈: 生き残りの確認の T3 本体を、プロセス名ではなく実行ファイル名 `t3`（`scripts/agent-worktree-prune` が T3 サーバーとして探す名前）で拾うと読んだ。プロセス名は `node-MainThread` で、名前の一覧に足す読み方は選ばなかった（ほかの node のプロセスも拾うため）。
+4. 足りなかった情報・検証手段: `pelway-llm` の時間に左右されるテストが、重い並列の verify の中で落ちる頻度。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 のコード例を、`mise run verify` が失敗したらそこで止まる形（`mise run verify && scripts/agent-gh dev git add ...`）にする。
+
+使ったスキル: implement-issue
