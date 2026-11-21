@@ -313,8 +313,8 @@ if issues is not None:
         if not human and cur["decision_warned"].get(n) != lt: print(f"DECISION overdue #{n} labeled_at={lt}", flush=True); cur["decision_warned"][n] = lt
         if reason: escalate(n, lt, reason)
     cur["decision_warned"] = {k: v for k, v in cur["decision_warned"].items() if k in labeled}
-    # 処理対象から外れた Issue に途中の記録があれば Issue ごとの状態で照合する。解除が済んでいれば完了を報告して記録を消し、
-    # 閉じているだけ・一覧の窓外なら記録を残す（再オープン・再出現の後に再開する）
+    # 処理対象から外れた Issue に途中の記録があれば Issue ごとの状態で照合する（読むだけで書き込みはしない）。needs-decision が
+    # 外れていれば消す（完了の行は added のときだけ出す）。残っていれば閉じている・一覧の窓外でも残す。held・removed は読まずに消す
     keep = set(labeled)
     for n, r in esc.items():
         if n in keep or r.get("stage") not in ("commented", "adding", "added"): continue

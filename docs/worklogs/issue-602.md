@@ -64,7 +64,7 @@
 
 ## 実装者メモ（round 6）
 
-対象 head: d742f09c613292b0bb70ca1d7f3e7d7acb54af8d
+対象 head: 0d493031
 
 1. 詰まった箇所: `mise run pr-size`: be1edd20 で +881（上限 800）。試験の繰り返し（1 周目を失敗させて戻す、期待する行の組み立て、モックの差し込みの重複）を `fail_first`・`heal`・`overdue`・`escalated`・`label_calls`・`hook` にまとめ、スクリプトは runbook の格上げの項と重なるコメントを縮めた。
 2. 曖昧だった文: 「`mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。」（`.agents/skills/implement-issue/SKILL.md` の「6. 検査してコミットし、行数を確かめてから push する」）。この後に足すメモのコミットも必須チェックで数えられるので、実装コミットの後の値にメモの行（約 12 行）を足しても上限内に収まるように削った。
