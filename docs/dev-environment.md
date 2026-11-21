@@ -170,6 +170,27 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 - 通知は `notify-grokbot.yml` の `workflow_run`（`workflows` に `nightly` を登録）が担う。成功は `digest`、失敗は `immediate` で Grok Bot に届き、`run_url` から失敗ジョブを確認できる。
 - 負荷試験の実行と収集するメトリクスの方針は [負荷試験とメトリクス](load-testing.md) に置く。nightly への組み込みは基盤の実装時に判断する。
 
+### セキュリティスキャン（security-scan）
+
+- `.github/workflows/security-scan.yml` が、main 向け Pull Request・main への push・手動実行で、秘密情報・危ないコードのパターン・脆弱な依存関係を検出する（Issue #571）。すべて無料の OSS で、有料サービス・アカウント登録・トークンは使わない。
+- 報告のみ: 検出があってもジョブは成功し、件数を `::warning::` に、一覧（場所と種類）をジョブサマリーに出す。ツール自体の失敗（ネットワーク断・設定の誤りなど）はジョブを失敗させる。必須チェックにはしていない（必須チェックにするかは hatai が決める）。本体は `scripts/security-scan.sh`、テストは `scripts/tests/security-scan.test.sh`。
+
+| ジョブ | ツールと版 | 対象 | 導入 |
+|---|---|---|---|
+| `gitleaks (secrets)` | Gitleaks 8.30.1（MIT） | HEAD から辿れる git 履歴全体（`--log-opts=HEAD`、checkout は `fetch-depth: 0`） | `mise.security.toml`（`MISE_ENV=security`）と `mise.security.lock` |
+| `semgrep (code patterns)` | Semgrep CE 1.186.0（LGPL-2.1） | 作業ツリー。ルールセットは `p/rust`・`p/github-actions`・`r/bash` | 公式イメージ `semgrep/semgrep` を digest 固定した job コンテナ |
+| `osv-scanner (dependencies)` | OSV-Scanner 2.7.1（Apache-2.0） | 作業ツリーのロックファイル（今は `Cargo.lock`） | `mise.security.toml` と `mise.security.lock` |
+
+- 秘密の値は出さない: Gitleaks は `--redact` で値を伏せ、サマリーには規則・場所・コミットだけを書く。
+- Gitleaks は CLI を直接実行し、`gitleaks-action` は使わない。Action は v2 以降、独自の EULA（改変の禁止、Organization のリポジトリではライセンスキーが必要）で配布されている。CLI 本体は MIT で、版の固定も mise の checksum で揃えられる。
+- Semgrep は Registry のルールをログインなしで取得し、`--metrics=off` で利用状況の送信を止める。Registry のルールは Semgrep Rules License v1.0 で配布されている。利用は「自社の内部の業務目的」に限られ、ルールの再配布とサービスとしての提供は禁じられている（出典: https://semgrep.dev/legal/rules-license ）。このリポジトリでは、自分のコードを CI で検査するために使うだけで、ルールを複製してリポジトリに置かない。秘密情報向けのルールセットは入れない（秘密の検出は Gitleaks が担い、Semgrep は一致した行をそのまま出すため）。
+- Semgrep を mise で入れない理由: PyPI 配布で、mise の pypi バックエンドが作る依存の固定（uv.lock）が 1800 行を超えるため。イメージの digest は依存を含む中身全体を固定する。
+- OSV-Scanner と cargo-deny（`deny-check`）は、どちらも `Cargo.lock` を RustSec の勧告と照合する点で重なる。違いは次のとおり。
+  - OSV-Scanner は、OSV データベースの他の出所（GHSA など）と、Cargo 以外のロックファイルも見る。
+  - cargo-deny は `deny.toml` の ignore と警告の扱いを持ち、必須チェックの一部である。
+  - OSV-Scanner には `deny.toml` の ignore が効かないため、cargo-deny が無視した勧告も報告に出る。
+- 除外（`.gitleaksignore`・`.semgrepignore`・`osv-scanner.toml`）は、1 件ずつ理由を書いて足す。既存の検出を理由に、ルールの無効化や除外の範囲を広げない。
+
 ## GitHub 通知（Grok Bot webhook・notify-grokbot）
 
 `.github/workflows/notify-grokbot.yml` が、Grok Bot が動く必要のあるイベント（PR のクローズ（マージを含む）、レビューの投稿、verify・nightly workflow の完了（`workflow_run`））と手動実行（`workflow_dispatch`）を Grok Bot の webhook に POST する。エージェントのスレッドの状態は見張り役 `agent-watch` が別に送る（「pitchfork について」参照）。送るのはメタデータのみで、PR タイトル・本文、コメント本文、レビュー本文、ラベル、メールアドレス等は送らない。
