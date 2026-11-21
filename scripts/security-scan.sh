@@ -56,7 +56,9 @@ case "$tool" in
     # 抽出の失敗は、osv-scanner が終わってからこのファイルで見分ける。
     # --verbosity error: 既定（info）の進捗ログは読めたファイルのパスをそのまま書き、パスに改行が
     # あると「Error during extraction:」で始まる行を作れるため、エラーの行だけにする。
-    osv-scanner scan source --verbosity error --recursive --format json --output-file "$report" . \
+    # --no-call-analysis=all: 呼び出し解析（Go は既定で有効）は失敗を標準エラーに出すだけで、
+    # 検出があれば 1 を返して見分けられないため、使わない（依存のバージョンの照合だけにする）。
+    osv-scanner scan source --verbosity error --no-call-analysis=all --recursive --format json --output-file "$report" . \
       2>"$out_dir/osv-scanner.stderr" || rc=$?
     found_rc=1
     ;;
@@ -89,27 +91,30 @@ if [[ "$tool" == semgrep ]]; then
 fi
 
 # 検出の一覧（Markdown の表の行）と件数を作る。件数は JSON の検出の数から数える
-# （ファイル名などに改行があっても件数が増えないように）。表のセルでは改行を空白に、
-# | を \| に置き換えて、列が崩れないようにする。
-cell='def cell: tostring | gsub("[\\r\\n]"; " ") | gsub("\\|"; "\\|");'
+# （ファイル名などに改行があっても件数が増えないように）。表のセルでは改行を空白にし、
+# ASCII の記号をすべて \ でエスケープする。パスなどは PR の作者が決められるため、リンク・
+# 装飾・HTML として解釈させず、元の文字のまま表示する（| のエスケープで列も崩れない）。
+cell='def cell: tostring | gsub("[\\r\\n]"; " ") | gsub("(?<c>[!-/:-@\\[-`{-~])"; "\\\(.c)");'
+# ジョブサマリーは 1 ステップ 1 MiB を超えると載らないため、一覧は先頭の max_rows 行までにする。
+max_rows=500
 case "$tool" in
   gitleaks)
     header='| 規則 | 場所 | コミット |'
     count="$(jq 'length' "$report")"
-    rows="$(jq -r "$cell"' .[] | "| \(.RuleID | cell) | \("\(.File):\(.StartLine)" | cell) | \(.Commit[0:12] | cell) |"' "$report")"
+    rows="$(jq -r --argjson n "$max_rows" "$cell"' .[:$n][] | "| \(.RuleID | cell) | \("\(.File):\(.StartLine)" | cell) | \(.Commit[0:12] | cell) |"' "$report")"
     places="$(jq '[.[] | "\(.RuleID) \(.File):\(.StartLine)"] | unique | length' "$report")"
     ;;
   semgrep)
     header='| 規則 | 場所 | 重大度 |'
     count="$(jq '.results | length' "$report")"
-    rows="$(jq -r "$cell"' .results[] | "| \(.check_id | cell) | \("\(.path):\(.start.line)" | cell) | \(.extra.severity | cell) |"' "$report")"
+    rows="$(jq -r --argjson n "$max_rows" "$cell"' .results[:$n][] | "| \(.check_id | cell) | \("\(.path):\(.start.line)" | cell) | \(.extra.severity | cell) |"' "$report")"
     errors="$(jq '.errors | length' "$report")"
     ;;
   osv-scanner)
     header='| パッケージ | 勧告 | ロックファイル |'
     count="$(jq '[.results[]?.packages[]?] | length' "$report")"
-    rows="$(jq -r "$cell"' .results[]? | .source.path as $p | .packages[]
-      | "| \("\(.package.name) \(.package.version)" | cell) | \([.vulnerabilities[].id] | join(", ") | cell) | \($p | cell) |"' "$report")"
+    rows="$(jq -r --argjson n "$max_rows" "$cell"' [.results[]? | .source.path as $p | .packages[]
+      | "| \("\(.package.name) \(.package.version)" | cell) | \([.vulnerabilities[].id] | join(", ") | cell) | \($p | cell) |"][:$n][]' "$report")"
     ;;
 esac
 
@@ -128,6 +133,10 @@ esac
     echo "$header"
     echo "|---|---|---|"
     printf '%s\n' "$rows"
+    if ((count > max_rows)); then
+      echo
+      echo "一覧は先頭 ${max_rows} 件だけ載せた（残り $((count - max_rows)) 件は省略。全件は $report）。"
+    fi
   fi
   if [[ "${errors:-0}" != 0 ]]; then
     echo
