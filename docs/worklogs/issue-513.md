@@ -1,0 +1,62 @@
+# Issue #513 の作業ログ
+
+## 実装者メモ（round 1）
+
+対象 head: 52a3e3acf82bc0c7a7425194cd4040452a9c7765
+
+1. 詰まった箇所: `crates/pelway-agent-watch/tests/once.rs` の偽の curl: 呼び出しの順でステータスを返す形にすると、今のコードでも `io::send` の内部の送り直しで 1 件目が 2 回目に 200 を受け取って「送れた」扱いになり、先頭が詰まる不具合が red にならない。本文の `thread_id` でステータスを決める形（`fake/curl-code-by-thread`）にした。
+2. 曖昧だった文: 「1 周の中の webhook の送信に使う時間は、列の長さによらず 45 秒以内に収まる（間隔を空けている間は送信を試みず、送り直せる失敗が出たらその周の送信をやめる）」（Issue #513 の受け入れ条件）。括弧の 2 つの仕組みだけでは、遅い 2xx や 400 が続くと列の長さに比例して延びる。1 周の送信の開始から 10 秒を過ぎたら新しく送り始めない区切り（`SEND_START_WINDOW`）を足し、10 + 34 = 44 秒とした。指定の試験（毎回 500）は今のコードでも通るので、webhook に渡るのが先頭の 1 件だけであることも試験で確かめた。
+3. 仮定と解釈: 間隔の初期値は Issue に無く、周回の間隔と同じ 30 秒にした（最初の送り直しは次の周回）。秘密が無いときも送り直せる失敗として間隔を空ける（受け入れ条件 3 の並びに従った）。直らない失敗では間隔を初期値に戻さず、戻すのは送れたときだけにした。400・404・413 は `io::send` の中でも送り直さない。
+4. 足りなかった情報・検証手段: 本物の Grok Bot の webhook が 400・404・413 を返す場面は、この環境では確かめていない（試験は偽の curl）。秘密を読む `fnox` が固まったときの待ち（`timeout -k 5 30`、1 件で最大 6 回）は 45 秒の計算に入れていない。差分は `.cargo/mutants.toml` の `examine_globs` の外なので、`mise run mutants:diff` は回していない。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「時間の上限を条件にするときは、上限を超えうる経路（成功や直らない失敗が続く場合を含む）を挙げ、試験はその経路で上限を超える入力を使う」を足す。
+
+使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: 4f23354aa9acb4c4581e243ca9ace42bf59a1c3d
+
+1. 詰まった箇所: `crates/pelway-agent-watch/tests/once.rs` の `send_deadline_covers_secrets_and_curl`: 送信の期限（40 秒）を本番の定数のまま確かめるので、この試験 1 本に 40 秒かかり、`tests/once.rs` 全体が 8 秒から 40 秒になった。期限を環境変数で縮める口は、本番に要らない設定になるので作らなかった。
+1. 詰まった箇所: `crates/pelway-agent-watch/src/io.rs` の `killed_after`: GNU timeout は `0.000` を制限なしとして扱う（`timeout -s KILL 0.000 sleep 2` が 2 秒待って終了コード 0）。残りが 0.5 ミリ秒未満のとき fnox が制限なしで動く穴を最初のコミットに残し、1 ミリ秒未満では起動しない形に直した（`killed_after_never_runs_without_a_limit`）。
+2. 曖昧だった文: 「秘密の取得、curl、再試行の待ちを一つの期限に収め、期限までに送れなかった通知は列に残してください。」（PR #609 の codex のレビューの must-fix 1）。期限で打ち切った送信を、間隔を空ける失敗にするか、列も間隔も変えない時間切れにするかが無い。間隔を空ける失敗（`reason=deadline`）にした。打ち切りが続くのは fnox か受け手が遅いときで、間隔を空けるべきなため。最初の間隔 30 秒は周回の間隔と同じなので、1 回だけの打ち切りでは次の周回の送信は遅れない。
+3. 仮定と解釈: 受信箱に書けなかった知らせは、送信待ちの列とは別の `State::inbox_pending`（上限 100 件）に置き、受信箱が直るまで周回ごとに書き直す形にした。選ばなかった解釈は「受信箱に書けていない知らせは webhook が外しても列に残す」で、列の先頭に残せば後続を止め、後ろに回せば毎周 400 を受け直すため。追記が途中で失敗した回は同じ行が 2 回書かれうる（`docs/agents/notify-payloads.md` に書いた）。fnox の止め方は、30 秒で SIGTERM・5 秒後に SIGKILL から、期限と 30 秒の早い方で SIGKILL に変えた（期限を猶予なしで守るため）。秘密は 1 件につき 1 回だけ読む。
+4. 足りなかった情報・検証手段: 本物の fnox（1Password）と Grok Bot の webhook での所要時間は確かめていない（試験は偽の fnox・curl に sleep を入れた）。`timeout -s KILL` が孫まで止めることは、coreutils 9.4 で `timeout -s KILL 0.5 bash -c 'sleep 7.77 & sleep 7.77'` の後に sleep が残らないことで確かめた。差分は `.cargo/mutants.toml` の `examine_globs` の外なので、`mise run mutants:diff` は回していない。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「時間の上限を条件にするときは、上限の内に入れる処理（外部コマンド・待ち・送り直し）を列挙し、そのどれかが残り時間を超える入力の試験を条件に入れる」を足す。
+
+使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: 2df23d550baf6f2cea41c333d58316a2c9667ac6
+
+1. 詰まった箇所: `crates/pelway-agent-watch/src/io.rs` の `send_once`: 「準備中に期限が切れる場合」を試験にするには一時ファイルの用意を外から遅らせる口が要り、`send_once` が一時ファイルのパスを返す関数（本番は `private_body_path`）を受け取る形にした（`curl_is_not_started_when_the_deadline_passes_while_preparing`）。
+2. 曖昧だった文: 「共通の送信期限に残っている時間で次の通知を試み、期限で処理を終えられなかった通知を列に残してください。」（PR #609 の round 2 の codex のレビューの must-fix 2）。期限の直前に送り始めて打ち切られた通知を、間隔を空ける失敗にするか、間隔を変えない時間切れにするかが無い。
+3. 仮定と解釈: round 2 の決め方（期限での打ち切りは送り直せる失敗として間隔を空ける）をそのまま使った。最初の間隔 30 秒は周回の間隔と同じなので、打ち切りが 1 回なら次の周回の送信は遅れない。選ばなかった解釈は「前の通知に時間を使った後の打ち切りだけは間隔を変えない」で、`Outcome` に値を 1 つ足す設計の変更になり、2 人のレビュー担当が round 2 で受け入れた決め方を最後の round で変えることになるため。
+4. 足りなかった情報・検証手段: 期限の直前（残り 1 ミリ秒前後）に fnox が値を返す場面は、偽の fnox の sleep では狙って起こせない。起動しないことは単体試験（`killed_after` に 300・400 マイクロ秒）で確かめた。差分は `.cargo/mutants.toml` の `examine_globs` の外なので、`mise run mutants:diff` は回していない。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「6. 検査してコミットし、行数を確かめてから push する」に「修正 round の追加行の残りが 100 行を切ったら、直し方を選ぶ前に、実装者メモ（約 12 行）と must-fix ごとの試験の行数を見積もる」を足す。
+
+使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 4）
+
+対象 head: 4aab36c2459a6aa3fbe5d7a181a2cd6d16faacda
+
+1. 詰まった箇所: `mise run pr-size`: round 3 の head で +797 / -71 から始まり、修正・試験・メモを足す行が無かった。`crates/pelway-agent-watch/src/outbox.rs` の単体試験を補助関数 `flush_at` にまとめて 61 行減らし（アサーションは 25 → 28）、`flush` を 3 通りに壊すとどれも試験が失敗することを確かめてから進めた。
+2. 曖昧だった文: 「旧形式で受信箱への記録を確認できない通知も、webhook の列から外した後に受信箱へ届けられるようにしてください。」（PR #609 の round 3 の codex のレビューの must-fix）。更新前の版の状態は、列のどの知らせを受信箱に書けたかを持たないので、全部を書き直すのか、列から外すときだけ書くのかが無い。
+3. 仮定と解釈: 更新前の版の状態（`inbox_pending` が無い。`Option` の `None` で表す）を読んだら、最初の周回で列の写しを全部受信箱に書き直すと解釈した。書けていた知らせは受信箱に 2 行になるが、受信箱の重複は payload 全体の一致で見分ける決まり（`docs/agents/notify-payloads.md` の「重複の見分け方」）に入る。選ばなかった解釈は「列から外すときだけ受信箱に書く」で、知らせごとに更新前の版かの印が要り、200 で送れた知らせは受信箱に届かないまま残るため。
+4. 足りなかった情報・検証手段: 更新前の版（main）の見張りが書いた本物の状態ファイルから更新する場面は確かめていない（試験は `tests/once.rs` の `queue` が書く同じ形の状態）。差分は `.cargo/mutants.toml` の `examine_globs` の外なので、`mise run mutants:diff` は回していない。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方（このスキルの核）」に「状態ファイルに項目を足す Issue では、『古い状態ファイルが読める』に加えて、項目の無い古いファイルから始めたときにも、その項目が守る性質（例: 受信箱への到達）が保たれることを条件にする」を足す。
+
+使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 5）
+
+対象 head: b107cd0e30133e2d279320a145eafb4b2ea5ab50
+
+1. 詰まった箇所: 印付きの nit だけの round（`docs/superpowers/specs/agent-team.md` の状態ファイルの場所）。`mise run verify` の前に、`/home` が読み取り専用に再マウントされていて worktree で commit できなくなったため、同じ head に同じ diff を当てた `/tmp` の clone で commit・verify・push した。
+2. 曖昧だった文: 「実装は `XDG_STATE_HOME` を優先するので、既定の場所と環境変数で変わることを書いてください」（PR #609 の round 4 の codex のレビューの nit、印 `[文書のずれ]`）。`XDG_STATE_HOME` の解決の確かな記述は `docs/dev-environment.md` の「pitchfork について」にあり、spec にもその参照を求めているのか、文を spec に写すのかが無い。
+3. 仮定と解釈: 既定の場所（`~/.local/state/pelway/agent-watch.json`）をそのまま示し、`XDG_STATE_HOME` を設定したときの場所は `docs/dev-environment.md`「pitchfork について」を参照する形にした。選ばなかった解釈は「`$XDG_STATE_HOME/pelway/agent-watch.json` と spec に書く」で、環境変数の解決の記述が 2 か所に分かれてずれやすくなる。
+4. 足りなかった情報・検証手段: 読み取り専用への再マウントのため、検証は `/tmp` の clone で `mise run verify` を全パスさせたもので、worktree 上での実行はできていない。
+5. 改善案: なし（nit だけの round）。
+
+使ったスキル: implement-issue
