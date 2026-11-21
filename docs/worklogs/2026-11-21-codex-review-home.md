@@ -47,3 +47,8 @@
 | `scripts/agent-gh review api /rate_limit --jq .rate.limit` | 合格（`5000`） |
 
 `[projects.` の表は、`~/.codex-review/config.toml` に無い（ホストで `grep -c '^\[projects\.'` が 0）。
+
+## 4 回目のレビューの後の確認
+
+- `codex_review`：`main` のコミットから委託した確認用の子タスクで、秘密の置き場 5 パス（`~/.config/fnox`・`~/.config/pelway-agent`・`~/.config/pelway-agent-qa`・`~/.ssh`・`~/.config/gh`）の `test -r` がすべて 1 だった（中身は読んでいない）。同じ 5 パスは、ホストで `codex sandbox -P review` を通して試すとすべて 0（読める）だった。`codex sandbox` は `/etc/codex/requirements.toml` の `deny_read` を使わないので、この項目は T3 のスレッドの中で確かめる。
+- `claude_review`：`env` に `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` を足した後、`main` のコミットから委託した子タスクで、`mcp__` で始まるツールは 0 個、システムの通知に出る MCP サーバーも 0 個（`plugin:` で始まるものも無い）だった。`scripts/agent-gh review api /rate_limit --jq .rate.limit` は `5000`。

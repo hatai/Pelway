@@ -241,7 +241,7 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 - `CODEX_HOME` が `/home/hatai/.codex-review` になっている
 - `scripts/agent-gh review api /rate_limit` が成功する
 - GitHub 以外への通信（`scripts/agent-gh review api --hostname example.com /`、`curl https://example.com`）が遮断される
-- 秘密の置き場 5 パス（`/etc/codex/requirements.toml` の `deny_read`）が読めない（`test -r` が 1）
+- 秘密の置き場 5 パス（`/etc/codex/requirements.toml` の `deny_read`）が読めない（`test -r` が 1）。`codex sandbox -P review` は `deny_read` を使わないので、この項目は確認用の子タスクの中で確かめる
 - 確認のあとの `~/.codex-review/config.toml` に、`[projects.` で始まる表が無い（T3 と Codex の app-server は sandbox の外でこのファイルに書けるため。信頼設定が入ると worktree の `.codex/` が読まれる）
 - `~/.codex-review` に書き込めない（`touch ~/.codex-review/config.toml` と、新しいファイルの `touch` が拒否される）。止める設定がこのファイルに集まっているため、書き込めると次のセッションで設定を戻せる
 - `mise run codex-review-check` が ok
@@ -257,7 +257,7 @@ worktree への書き込みは、今は通る（権限プロファイル `review
 | 場所 | 設定 |
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.claude_review` | `driver: claudeAgent`、`config` の `homePath` に `/home/hatai/.claude-review`（UI のフィールド名は「CLAUDE_CONFIG_DIR path」。子プロセスの環境変数 `CLAUDE_CONFIG_DIR` になる。`config.environment` は claudeAgent の config スキーマに無いキーで無視される） |
-| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`・`git ls-tree`・`git cat-file`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` が引数を `git`/`gh` にそのまま渡すため、ワイルドカードは `auth token`・`repo clone`・`git` 全般などあらゆる形を許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す。T3 が渡す MCP サーバーのツールは、`permissions.deny` に `mcp__t3-code` と `mcp__t3-code-direct`（サーバー名だけで、そのサーバーの全ツール）を書いて使えなくする（理由は「レビュー担当の Codex」と同じ）。claude.ai のコネクタ（外部のサービスへ送信できるツールを含む）は、`env` の `ENABLE_CLAUDEAI_MCP_SERVERS=false` で止める。組み込みのツールのうち、ほかのセッションや claude.ai へ送れるもの（`SendMessage`・`RemoteTrigger`・`Artifact`・`ShareOnboardingGuide`・`PushNotification`）は `permissions.deny` に書く（`WebFetch`・`WebSearch` は前から deny にあり、サブエージェントにも効く）。アカウントから同期されるプラグインの MCP サーバーは設定に残る。ツールが出ない状態（接続に失敗するか、認証が要る）であることを確かめて使う。下の `hooks.PermissionRequest` は承認要求を拒否するが、これに頼ってプラグインのツールを残さない |
+| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`・`git ls-tree`・`git cat-file`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` が引数を `git`/`gh` にそのまま渡すため、ワイルドカードは `auth token`・`repo clone`・`git` 全般などあらゆる形を許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す。T3 が渡す MCP サーバーのツールは、`permissions.deny` に `mcp__t3-code` と `mcp__t3-code-direct`（サーバー名だけで、そのサーバーの全ツール）を書いて使えなくする（理由は「レビュー担当の Codex」と同じ）。claude.ai のコネクタ（外部のサービスへ送信できるツールを含む）は、`env` の `ENABLE_CLAUDEAI_MCP_SERVERS=false` で止める。組み込みのツールのうち、ほかのセッションや claude.ai へ送れるもの（`SendMessage`・`RemoteTrigger`・`Artifact`・`ShareOnboardingGuide`・`PushNotification`）は `permissions.deny` に書く（`WebFetch`・`WebSearch` は前から deny にあり、サブエージェントにも効く）。アカウントから同期されるプラグインの MCP サーバーは、`env` の `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` で読み込ませない（接続に失敗しているだけの状態は、セッションの途中で接続が戻りうるので、止めたことにならない）。下の `hooks.PermissionRequest` は承認要求を拒否するが、これに頼ってプラグインのツールを残さない |
 | socat | Claude Code の sandbox（Linux）が使う。`mise.toml` の `conda:socat` で `mise install`（`mise bootstrap`）が入れる。apt と sudo は要らない |
 | ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
 | `~/.claude-review/settings.json` の `hooks.PermissionRequest` | matcher `*` で `/home/hatai/.claude-review/hooks/deny-permission-request.sh` を呼ぶ。承認要求になる場面ごとに、人間に聞かずに拒否を返す。拒否のメッセージは、sandbox の遮断ではないこと、Bash なら単純なコマンドに分けて送り直すことをモデルに伝える。フックは worktree の外に絶対パスで置く（委託のレビューは PR の作者のコミットの checkout で動くため、リポジトリの中に置くと PR が差し替えられる） |
@@ -281,7 +281,7 @@ EOF
 - `git switch` と、ファイルの書き込みが拒否される
 - `agent-gh review` を経由する他の gh サブコマンドが拒否される: `scripts/agent-gh review git switch -c <probe>`・`scripts/agent-gh review repo clone <リポジトリ> <dir>`・`scripts/agent-gh review auth status` が permissions の deny で拒否される（許可は使用するサブコマンド単位に絞ってあり、deny もラッパー経由の形で二重に張ってある）
 - 許可経路からの egress が遮断される: `scripts/agent-gh review api --hostname example.com /` が失敗する（sandbox のネットワーク許可先の実測。許可リスト内で GitHub 以外へ出られるコマンド形で試す）
-- 新しい `claude_review` のセッションのツールの一覧に、`mcp__` で始まるツールが無い（T3 の `mcp__t3-code`・`mcp__t3-code-direct`、claude.ai のコネクタ、プラグインの MCP サーバー）。どれか 1 つでも残っていれば、呼んで確かめずに `claude_review` をレビューに使わない（確かめるための呼び出しが、承認の設定に不備があればそのまま外部のサービスに届くため）。設定でそのツールを止めてから確かめ直す（プラグインなら `~/.claude-review/settings.json` の `enabledPlugins` で `false` にする）。deny はサーバー名に依存するので、T3 か Claude Code を更新したらこの項目を確かめ直す
+- 新しい `claude_review` のセッションのツールの一覧に、`mcp__` で始まるツールが無い（T3 の `mcp__t3-code`・`mcp__t3-code-direct`、claude.ai のコネクタ、プラグインの MCP サーバー）。どれか 1 つでも残っていれば、呼んで確かめずに `claude_review` をレビューに使わない（確かめるための呼び出しが、承認の設定に不備があればそのまま外部のサービスに届くため）。設定でそのツールを止めてから確かめ直す（プラグインなら `env` の `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` を確かめる）。システムの通知に `plugin:` で始まる MCP サーバーが出ていても、同じく使わない。deny はサーバー名に依存するので、T3 か Claude Code を更新したらこの項目を確かめ直す
 
 ### 確認手順の結果（記録欄）
 
@@ -368,6 +368,7 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 deny_read = [
   "/home/hatai/.config/fnox",
   "/home/hatai/.config/pelway-agent",
+  "/home/hatai/.config/pelway-agent-qa",
   "/home/hatai/.ssh",
   "/home/hatai/.config/gh",
 ]
