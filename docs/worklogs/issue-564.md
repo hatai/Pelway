@@ -50,3 +50,15 @@
 5. 改善案: 検証の表は、試験名を書く前に、その head の試験の出力から写す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: ebca7842（実装のコミット）
+
+1. 詰まった箇所: round 3 のレビュー（Claude max）に must-fix 1 が残り、止まる条件でエスカレーションした。hatai の「続ける」の指示で 4 回目の修正に入った。must-fix は、ホストで実行する前の `git status`・`git diff` の確かめが、本体 checkout の index と refs を書ける指揮役に破られ、毎時の pitchfork と次の交代の最初の 1 ターンには効かないこと。確かめを `git hash-object` と GitHub の main の blob の sha の比較に替え、mise を通さず直接実行する形にし、3 つの経路を文書に書いた（hatai の判断は Issue #564 のコメント）。nit（opencode を拒む、停止した旧指揮役が起こされても巡回しない、mise の説明、provider と model の組、PR 本文、effort の受け入れの記録、settle の段の引用）も直した。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: opencode は provider の名前に `opencode` を含むかで見分ける（`opencode`・`acpRegistry_opencode` など）前提。
+4. 足りなかった情報・検証手段: GitHub の blob の sha との比較は、hatai が手で行う手順で、試験は無い。
+5. 改善案: 本体 checkout で動くエージェントがある間の、ホストで実行するファイルの確かめを、sandbox から書けない場所に置いた道具で行えるようにする（#570 の結果を見て決める）。
+
+使ったスキル: implement-issue
