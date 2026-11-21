@@ -156,9 +156,10 @@ check "worktree outside root untouched" test -d "$ROOT/other/i-outside"
 # 10. --dry-run は一覧を出すだけ
 setup
 add_merged j-dry
+age
 out="$(run --dry-run 2>&1)"
 check "dry-run removes nothing" kept j-dry
-check "dry-run lists candidate" grep -q "j-dry" <<<"$out"
+check "dry-run lists candidate" grep -qx "  $ROOT/wt/j-dry" <<<"$out"
 
 # 11. settle されていないスレッドの worktree は、取り込み済みでも残す（作りたてで main と同じものを含む）
 setup
