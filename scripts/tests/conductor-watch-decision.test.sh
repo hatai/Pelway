@@ -42,6 +42,11 @@ if a[:1] == ["api"]:
         i = st[m.group(1)]
         if m.group(2) is None and m.group(3) is None and len(a) == 2:
             if failing("reread"): sys.exit(9)
+            rp = os.path.join(mock, "relabel-on-reread-" + m.group(1))
+            if os.path.exists(rp):  # 読み直しの間に外して付け直された（新しい labeled が増える）
+                i["events"][-1].append({"event": "labeled", "label": {"name": "needs-decision"},
+                                        "created_at": open(rp).read().strip()})
+                save(); os.remove(rp)
             out({"number": int(m.group(1)), "state": i["state"], "labels": labels(i["labels"])})
         if m.group(3) and a[2:] == ["--paginate", "--slurp"]:
             if m.group(2) == "/events":
@@ -116,6 +121,8 @@ relabel() { gh_edit 'st[args[0]]["events"][-1].append(ev("labeled", "needs-decis
 set_labels() { gh_edit 'st[args[0]]["labels"] = args[1:]; st[args[0]].pop("list_labels", None)' "$@"; }
 # GitHub の実際のラベルだけを変え、一覧（issue list）は前のまま見せる（読み直しの確認用）
 set_actual_labels() { gh_edit 'i = st[args[0]]; i.setdefault("list_labels", i["labels"]); i["labels"] = args[1:]' "$@"; }
+relabel_on_reread() { printf '%s\n' "$2" > "$MOCK/relabel-on-reread-$1"; }
+labels_of() { python3 -I -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1]))[sys.argv[2]]["labels"]))' "$MOCK/gh.json" "$1"; }
 add_comment() { gh_edit 'st[args[0]]["comments"].append({"user": {"login": args[1]}, "body": args[2]})' "$@"; }
 
 threads() { printf '%s\n' "$1" > "$MOCK/threads.json"; }
@@ -211,6 +218,7 @@ run_cycles 1
 check "5: both labels -> waiting_on human" eq "$(sget 705 waiting_on)" "human"
 check "5: both labels -> no DECISION line" eq "$(decision_lines)" ""
 check "5: both labels -> no writes" eq "$(calls)" ""
+check "5: both labels -> next_check_at is not labeled_at + 15 min" eval '[[ "$(nca_after 705 "$T20")" != 900 ]]'
 
 # --- 指揮役が動いていないときの格上げ ---
 
@@ -285,14 +293,30 @@ check "15: no second comment for the same labeled_at" eq "$(calls)" \
   "$(lines "issue edit 716 --add-label needs-human" "issue edit 716 --remove-label needs-decision")"
 check "15: escalated after retry" eq "$(decision_lines | tail -n 1)" "DECISION escalated #716 labeled_at=$T20 reason=no-registration"
 
-# 16. needs-human を付けた後に外すのが失敗しても、どちらのラベルも無い状態にはならない
+# 16. needs-human を付けた後に外すのが失敗したら両方のラベルが残る。次の周で、同じ labeled_at の自分の定型
+# コメントで自分が始めた格上げと確かめ、needs-decision だけを外し直す（通知のコメントは繰り返さない）
 reset; issue_with 717 "$T20" needs-decision; touch "$MOCK/fail-edit-remove"
 run_cycles 1
 check "16: failed removal -> step=label" eq "$(decision_lines | tail -n 1)" "DECISION escalate-failed #717 step=label"
+check "16: failed removal leaves both labels" eq "$(labels_of 717)" "needs-decision needs-human"
+: > "$MOCK/calls"
+run_cycles 1
+check "16: retried removal fails again -> only the removal is retried" eq "$(calls)" "issue edit 717 --remove-label needs-decision"
+check "16: retried removal fails again -> step=label (exact)" eq "$(decision_lines)" \
+  "$(lines "DECISION overdue #717 labeled_at=$T20" "DECISION escalate-failed #717 step=label" "DECISION escalate-failed #717 step=label")"
 rm "$MOCK/fail-edit-remove"; : > "$MOCK/calls"
 run_cycles 1
-check "16: needs-human is kept, nothing more is written" eq "$(calls)" ""
+check "16: next cycle removes needs-decision only" eq "$(calls)" "issue edit 717 --remove-label needs-decision"
+check "16: escalated after retry" eq "$(decision_lines | tail -n 1)" "DECISION escalated #717 labeled_at=$T20 reason=no-registration"
+check "16: the notice is written once" eq "$(find "$MOCK" -name 'body-717-*' | wc -l)" "1"
+check "16: labels end as needs-human" eq "$(labels_of 717)" "needs-human"
 check "16: issue waits on human" eq "$(sget 717 waiting_on)" "human"
+# 外すのに失敗した後に指揮役が動き始めたら、見張りは外し直さない（ラベルを替えるのは指揮役がいない周だけ）
+reset; issue_with 717 "$T20" needs-decision; touch "$MOCK/fail-edit-remove"
+run_cycles 1
+rm "$MOCK/fail-edit-remove"; : > "$MOCK/calls"; reg "$CONDUCTOR"
+run_cycles 1
+check "16: conductor running -> the leftover removal is not retried" eq "$(calls)" ""
 
 # 17. 同じ目印・同じ本文でも、pelway-dev[bot] 以外のコメントは書いた印にしない
 reset; issue_with 718 "$T20" needs-decision; add_comment 718 stranger "$(body_for "$T20")"
@@ -306,6 +330,26 @@ check "18: a comment for an older labeled_at does not suppress the notice" eq "$
 reset; issue_with 720 "$T20" needs-decision; printf '%s\nsecond line\n' "$CONDUCTOR" > "$REG"
 run_cycles 1
 check "19: only the first line of the registration is the thread id" eq "$(calls)" ""
+
+# 20. 期限切れと判定した後、書く前に外して付け直されていたら（最新の labeled_at が変わっていたら）、何も書かない
+reset; issue_with 721 "$T20" needs-decision; relabel_on_reread 721 "$T5"
+run_cycles 2
+check "20: re-labeled between reads -> no writes" eq "$(calls)" ""
+check "20: re-labeled between reads -> overdue for the old labeled_at only" eq "$(decision_lines)" "DECISION overdue #721 labeled_at=$T20"
+# 21. 外し直しの前にも同じ確認をする。自分の定型コメントが前の labeled_at のものなら外さない
+reset; issue_with 722 "$T20" needs-decision; touch "$MOCK/fail-edit-remove"
+run_cycles 1
+rm "$MOCK/fail-edit-remove"; : > "$MOCK/calls"; relabel_on_reread 722 "$T5"
+run_cycles 1
+check "21: re-labeled before the retried removal -> no writes" eq "$(calls)" ""
+reset; issue_with 723 "$T40" needs-decision needs-human; add_comment 723 'pelway-dev[bot]' "$(body_for "$T40")"; relabel 723 "$T20"
+run_cycles 1
+check "21: own notice for an older labeled_at -> needs-decision is not removed" eq "$(calls)" ""
+# 22. 同じ pelway-dev[bot] の名義でも、定型の本文と完全には一致しないコメントは書いた印にしない
+reset; issue_with 724 "$T20" needs-decision
+add_comment 724 'pelway-dev[bot]' "$(printf '%s\n%s' '<!-- conductor-watch-escalation -->' "needs-decision の時刻 $T20 から 15 分たちました。")"
+run_cycles 1
+check "22: a same-App comment that is not the template does not suppress the notice" eq "$(calls)" "$(escalation_calls 724)"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

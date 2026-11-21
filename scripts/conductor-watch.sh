@@ -58,8 +58,9 @@ if [[ -z "$T3_BIN" ]]; then
   done
 fi
 while true; do
-  # 一覧と GitHub からの取得に失敗したらファイルを消す（空の実状態と区別する。python 側で取得失敗と
-  # 扱い、巡回状態の記録を書き換えさせず、needs-decision の格上げの判定もその周は行わない）。
+  # 一覧と GitHub からの取得に失敗したらファイルを消す（空の実状態と区別する）。python 側では、T3 の一覧の
+  # 失敗ではスレッドの状態を前回のまま保ち、その周は needs-decision の格上げを判定しない。Issue・PR の一覧の
+  # 失敗では巡回状態の記録（patrol-state.json）を書き換えない（Issue の一覧の失敗では DECISION の検知もしない）。
   "$T3_BIN" thread list --json > "$D/threads.json" 2>/dev/null || rm -f "$D/threads.json"
   scripts/agent-gh dev issue list --state all --limit "$IL" --json number,state,labels > "$D/issues.json" 2>/dev/null || rm -f "$D/issues.json"
   scripts/agent-gh dev pr list --state all --limit "$PL" --json number,state,isDraft,headRefName,reviewDecision,statusCheckRollup > "$D/prs.json" 2>/dev/null || rm -f "$D/prs.json"
@@ -235,45 +236,55 @@ def conductor_absence():
     th = next((t for t in threads if isinstance(t, dict) and t.get("threadId") == tid), None)
     if th is None: return "thread-missing"
     return "thread-archived" if th.get("archived") else None
+def latest_labeled(n):
+    # Issue n の最新の needs-decision の labeled の時刻。取得失敗・見つからないときは None
+    evs = all_pages(f"/repos/hatai/Pelway/issues/{n}/events?per_page=100")
+    ats = [e.get("created_at") for e in (evs or []) if e.get("event") == "labeled"
+           and (e.get("label") or {}).get("name") == "needs-decision" and iso(e.get("created_at"))]
+    return max(ats, key=iso) if ats else None
 def escalate(n, lt, reason):
-    # ラベルを読み直し、needs-decision がまだ付いていて needs-human が無ければ、目印のコメントを書いて
-    # から needs-human を付け、needs-decision を外す（付ける方が先なので、途中で失敗してもどちらの
-    # ラベルも無い状態にならない）。読み取りに失敗した周は何も書かず、次の周で読み直す。
+    # ラベルを読み直し、needs-decision がまだ付いていれば、目印のコメントを書いてから needs-human を付け、
+    # needs-decision を外す（付ける方が先なので、途中で失敗してもどちらのラベルも無い状態にならない）。
+    # needs-human がもう付いていれば、自分が始めて needs-decision を外し損ねた格上げ（同じ labeled_at の
+    # 定型コメントが自分の名義である）のときだけ、外し直す。書く直前に最新の labeled_at を取り直し、
+    # 期限切れと判定したものと違えば（その間に外して付け直された）書かない。
+    # 読み取りに失敗した周は何も書かず、次の周で読み直す。
     iss = gh_json("api", f"/repos/hatai/Pelway/issues/{n}")
     if not isinstance(iss, dict): return
     labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
-    if iss.get("state") != "open" or "needs-decision" not in labs or "needs-human" in labs: return
+    if iss.get("state") != "open" or "needs-decision" not in labs: return
     cs = all_pages(f"/repos/hatai/Pelway/issues/{n}/comments?per_page=100")
     if cs is None: return
-    written = any((c.get("user") or {}).get("login") == ESCALATION_AUTHOR
-                  and ESCALATION_MARK in (c.get("body") or "") and lt in (c.get("body") or "") for c in cs)
     body = (f"{ESCALATION_MARK}\n@hatai `needs-decision` が付いた時刻 {lt} から 15 分決まらず、"
             "指揮役が動いていないため `needs-human` に替えました。")
+    # 書いた印は定型の本文との完全一致だけ（実装担当も同じ pelway-dev[bot] の名義で書くため）
+    written = any((c.get("user") or {}).get("login") == ESCALATION_AUTHOR and c.get("body") == body for c in cs)
+    if ("needs-human" in labs and not written) or latest_labeled(n) != lt: return
     if not written and agent_gh("issue", "comment", n, "--body-file", "-", stdin=body) is None:
         print(f"DECISION escalate-failed #{n} step=comment", flush=True); return
-    if agent_gh("issue", "edit", n, "--add-label", "needs-human") is None \
+    if ("needs-human" not in labs and agent_gh("issue", "edit", n, "--add-label", "needs-human") is None) \
        or agent_gh("issue", "edit", n, "--remove-label", "needs-decision") is None:
         print(f"DECISION escalate-failed #{n} step=label", flush=True); return
     print(f"DECISION escalated #{n} labeled_at={lt} reason={reason}", flush=True)
 decision_at = {}  # Issue 番号 → 最新の needs-decision の labeled_at（補助記録の next_check_at に使う）
 if issues is not None:
     labeled = set()
+    reason = conductor_absence() if threads_ok else None  # 一覧の取得に失敗した周は判定しない
     for iss in issues:
         labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
         if iss.get("state") != "OPEN" or "needs-decision" not in labs: continue
         n = str(iss.get("number")); labeled.add(n)
-        if "needs-human" in labs: continue
-        evs = all_pages(f"/repos/hatai/Pelway/issues/{n}/events?per_page=100")
-        ats = [e.get("created_at") for e in (evs or []) if e.get("event") == "labeled"
-               and (e.get("label") or {}).get("name") == "needs-decision" and iso(e.get("created_at"))]
-        if not ats: continue  # 取得失敗・イベントが見つからない: 遅れとは扱わず、次の周で取り直す
-        lt = max(ats, key=iso)
-        decision_at[n] = lt
+        # needs-human も付いていれば人間待ちで、DECISION overdue も補助記録の起点も出さない。格上げで
+        # needs-decision を外し損ねたものがありうるので、指揮役がいない周だけ escalate で確かめて外し直す。
+        human = "needs-human" in labs
+        if human and not reason: continue
+        lt = latest_labeled(n)
+        if lt is None: continue  # 取得失敗・イベントが見つからない: 遅れとは扱わず、次の周で取り直す
+        if not human: decision_at[n] = lt
         if now - iso(lt).timestamp() < DECISION_SECS: continue
-        if cur["decision_warned"].get(n) != lt:
+        if not human and cur["decision_warned"].get(n) != lt:
             print(f"DECISION overdue #{n} labeled_at={lt}", flush=True)
             cur["decision_warned"][n] = lt
-        reason = conductor_absence() if threads_ok else None  # 一覧の取得に失敗した周は判定しない
         if reason: escalate(n, lt, reason)
     cur["decision_warned"] = {k: v for k, v in cur["decision_warned"].items() if k in labeled}
 # 読み取りに失敗して空になったときは、前回の状態を残す（全スレッドを「新規」と誤報しない）。
