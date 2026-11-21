@@ -107,3 +107,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の冒頭に「コミットを作る操作（commit・cherry-pick・rebase・amend）はすべて `scripts/agent-gh dev git ...` で行う。素の git で作ると hatai 名義・hatai の署名になる」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 10）
+
+対象 head: 3e6cbb73
+
+1. 詰まった箇所: 手順 9: round 9 の nit の修正。hatai が「残りの nit も直して。レビューは回さなくてよい」と指示した。docs の 2 件（版の更新手順の `mise upgrade --bump` にツール名を付ける、カバレッジ表の `mise exec -- octocov` を `k1LoW/octocov-action` に直す）はこのブランチに入れた。workflow の 2 件（security-scan workflow の `Assert mise version` の段、`verify.yml`・`nightly.yml` の checkout のコメントの `（v4.2.2）` を `（v7.0.1）` に直す）は、エージェントが workflow を変えるブランチを push しない決まりのため、パッチにして hatai に渡した。パッチを当てた状態で `mise exec -- jactionlint` が通ることは確かめた。
+2. 曖昧だった文: 「残りの nit も直して」（hatai の指示）
+3. 仮定と解釈: workflow の nit も対象と解釈したが、push の禁止は解けていないため、コミットせずパッチにした。PR 本文の検出一覧は、このブランチの最新の security-scan の run の件数で取り直した。
+4. 足りなかった情報・検証手段: なし。
+5. 改善案: なし。
+
+使ったスキル: implement-issue

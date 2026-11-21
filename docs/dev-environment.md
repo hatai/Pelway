@@ -94,7 +94,7 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 | `static` | `static (hk / fnox / pitchfork)` | `verify-static`（hk / fnox / pitchfork / cargo-deny / shellcheck）＋ `mise exec -- jactionlint` | 使わない（cargo-deny は cargo metadata を読むだけでコンパイルしない） |
 | `lint` | `lint (fmt / clippy)` | `verify-lint` | clippy |
 | `test` | `test (cargo test)` | `verify-test` | test |
-| `coverage` | `octocov (coverage diff)` | `coverage` タスク ＋ `mise exec -- octocov` | 計測ビルド |
+| `coverage` | `octocov (coverage diff)` | `coverage` タスク ＋ `k1LoW/octocov-action`（octocov 本体は v0.83.5 に固定） | 計測ビルド |
 | `pr-size` | `pr-size` | `scripts/pr-size.sh`（mise を使わない） | 使わない |
 | `verify` | `mise run verify` | 上の 3 ジョブの集約 | — |
 
@@ -191,7 +191,7 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 - Gitleaks は CLI を直接実行し、`gitleaks-action` は使わない。Action は v2 以降、独自の EULA（改変の禁止、Organization のリポジトリではライセンスキーが必要）で配布されている。CLI 本体は MIT で、版の固定も mise の checksum で揃えられる。
 - Semgrep は Registry のルールをログインなしで取得し、`--metrics=off` で利用状況の送信を止める。Registry のルールセットは実行のたびに最新を取り、版は固定されない（イメージの digest が固定するのはエンジンと依存だけ）。同じコミットでも、日によって検出が変わりうる。Registry のルールは Semgrep Rules License v1.0 で配布されている。利用は「自社の内部の業務目的」に限られ、ルールの再配布とサービスとしての提供は禁じられている（出典: https://semgrep.dev/legal/rules-license ）。このリポジトリでは、自分のコードを CI で検査するために使うだけで、ルールを複製してリポジトリに置かない。秘密情報向けのルールセットは入れない（秘密の検出は Gitleaks が担い、Semgrep は一致した行をそのまま出すため）。
 - Semgrep を mise で入れない理由: PyPI 配布で、mise の pypi バックエンドが作る依存の固定（uv.lock）が 1800 行を超えるため。イメージの digest は依存を含む中身全体を固定する。
-- 版の更新: 週次の `mise-bump.yml` は `MISE_ENV` を付けずに実行するため、`mise.security.toml` の Gitleaks・OSV-Scanner の版は上がらない。Semgrep のイメージの digest も同じ。Gitleaks の検出ルールは本体に入っているため、古い版のままだと新しい種類の秘密を見落とす。今は手で上げる: `MISE_ENV=security mise upgrade --bump` のあと `MISE_ENV=security mise lock` で `mise.security.lock` を作り直し、Semgrep は新しいタグの digest に `security-scan.yml` を書き換える（workflow の変更は hatai が push する）。
+- 版の更新: 週次の `mise-bump.yml` は `MISE_ENV` を付けずに実行するため、`mise.security.toml` の Gitleaks・OSV-Scanner の版は上がらない。Semgrep のイメージの digest も同じ。Gitleaks の検出ルールは本体に入っているため、古い版のままだと新しい種類の秘密を見落とす。今は手で上げる: `MISE_ENV=security mise upgrade --bump aqua:gitleaks/gitleaks aqua:google/osv-scanner`（ツール名を付けないと `mise.toml` の共通のツールも上がる）のあと `MISE_ENV=security mise lock` で `mise.security.lock` を作り直し、Semgrep は新しいタグの digest に `security-scan.yml` を書き換える（workflow の変更は hatai が push する）。
 - OSV-Scanner と cargo-deny（`deny-check`）は、どちらも `Cargo.lock` を RustSec の勧告と照合する点で重なる。違いは次のとおり。
   - OSV-Scanner は、OSV データベースの他の出所（GHSA など）も見る（今は `Cargo.lock` だけを照合する）。
   - cargo-deny は `deny.toml` の ignore と警告の扱いを持ち、必須チェックの一部である。
