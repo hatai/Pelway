@@ -11,3 +11,15 @@
 5. 改善案: なし。
 
 使ったスキル: write-issue、implement-issue、write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: 3c723488（実装のコミット）
+
+1. 詰まった箇所: Codex（`gpt-6.1-terra` high）の must-fix 1。review-pr の「must-fix と nit の各行は `<file>:<line>` で始める」が、印を行頭に置く決まりと食い違っていた。印の nit だけは印の後に `<file>:<line>` を書く、と例外を足した。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: なし。
+4. 足りなかった情報・検証手段: なし。
+5. 改善案: なし。
+
+使ったスキル: implement-issue
