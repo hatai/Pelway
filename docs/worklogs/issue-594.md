@@ -11,3 +11,15 @@
 5. 改善案: `docs/dev-environment.md` の「レビュー委託（delegate_task）での確認」の確認項目に「`scripts/agent-gh review pr checks <N> --watch` が sandbox の中で完走する」を足す。
 
 使ったスキル: なし
+
+## 実装者メモ（round 2）
+
+対象 head: 694a82e74c6047072f458df412cc66274db4bb6f
+
+1. 詰まった箇所: `.agents/skills/pr-watch/SKILL.md` の「待ち方」のレビュー担当の行: round 1 の `pr checks --watch` は任意のチェックの完了まで待つため、必須 2 件が通っても戻らないと Codex の must-fix で指摘された。`--required` を付けて必須チェックだけを待つ形にした。
+2. 曖昧だった文: 「`--required` は付けない。必須チェックがまだ 1 つも報告されていない head では、`--required` は一覧を返さず `no required checks reported` で失敗するため。」（`.agents/skills/review-pr/SKILL.md` 手順 2）。読むコマンドの決まりで、待つコマンドに付けるかは書かれていなかった。
+3. 仮定と解釈: `--required --watch` は、必須チェックがまだ 1 つも無いとすぐ戻ると仮定し、戻ったら同じコマンドを実行し直す（60 分まで）と書いた。読むコマンドには付けない決まりを残し、待つコマンドにだけ付けると明記した。
+4. 足りなかった情報・検証手段: `gh pr checks --required --watch` の、必須チェックが未登録のときの実際の戻り方は確かめていない（`gh pr checks --help` で `--required` と `--watch` があることだけ確かめた）。
+5. 改善案: `docs/dev-environment.md` の「レビュー委託（delegate_task）での確認」に「`scripts/agent-gh review pr checks <N> --required --watch --interval 30` が sandbox の中で完走する」を足す。
+
+使ったスキル: なし
