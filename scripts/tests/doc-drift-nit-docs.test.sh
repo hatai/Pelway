@@ -37,7 +37,14 @@ check implementer_dont_table .agents/skills/implement-issue/SKILL.md \
 
 # 指揮役: automerge の前に印の nit が残っていないことを確かめる。
 check conductor_merge_check .agents/skills/command-team/SKILL.md \
-  'その Approve のレビューの nit に行頭が `[文書のずれ]` のものが残っていないこと'
+  'その Approve のレビューの nit に行頭が `[文書のずれ]` のものが残っていないこと' \
+  '`pelway-review` の Approve、`[文書のずれ]` の nit が残っていないこと、必須チェック'
+
+# 2 回続いたら止まる。仕様にも上限の例外がある。
+check implementer_stop_after_two .agents/skills/implement-issue/SKILL.md \
+  'その round が 2 回続いたら（直した後のレビューにまた印の nit が出たら）'
+check spec_round_exception docs/superpowers/specs/agent-team.md \
+  '`[文書のずれ]` の nit だけを直す round（skill `review-pr`・`implement-issue`）は、この回数に数えない'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
