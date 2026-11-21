@@ -18,7 +18,7 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 | Issue・PR・レビュー・CI の結果を読む | GitHub |
 | スレッドのモデル・effort を変える | T3 Connect の MCP（`t3_thread_configure`） |
 | 終わったスレッドを settle する | T3 のスレッドの操作（`t3_thread_organize` の `action: settle`。Grok Bot は MCP 経由）。PR をスレッドに紐付けたものはマージで自動 settle |
-| `pelway-review` が Approve し必須チェックが通った PR に `automerge` ラベルを付けて Kodiak のキューに入れ、マージを確認する | `scripts/agent-gh dev pr edit <M> --add-label automerge`（条件は skill `command-team` の「マージ」）。マージの実行は Kodiak（GitHub App）が行い、指揮役がマージコマンドを叩くことはない。キューの切り戻しは hatai の admin マージだけが行う |
+| `pelway-review` が Approve し、必須チェックが通り、現在の head と同じ SHA の QA の合格コメント（SHA と run を書いたもの。`docs/agents/qa-checklist.md`）がある PR に `automerge` ラベルを付けて Kodiak のキューに入れ、マージを確認する | `scripts/agent-gh dev pr edit <M> --add-label automerge`（条件は skill `command-team` の「マージ」）。マージの実行は Kodiak（GitHub App）が行い、指揮役がマージコマンドを叩くことはない。キューの切り戻しは hatai の admin マージだけが行う |
 
 しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更（`actions.lock` の再生成は例外。正本は `docs/superpowers/specs/agent-team.md` の「制約」）、スレッドの取り消し。
 
@@ -77,6 +77,17 @@ sandbox に止められた操作（書き込み・実行・ネットワークな
 - `ready-for-agent` は入場の条件であり、着手後・Done の後も外さない。ラベルが外された場合: 着手前ならボードからも外し、その Issue の補助記録も削除する。人間が着手後に外したら不整合として巡回が検出し、`needs-human` で確認する
 - ラベルなしカードの由来はタイムラインで区別する: `ready-for-agent` の取り外しイベントがあるものは削除のルールを適用し、無いものは最初からラベルなし（サブ Issue の自動追加など）として保持する。サブ Issue は `ready-for-agent` が無い限り、Todo へ動かされても処理対象にならない
 - ラベルを動かした主体が、その手順の中でステータスも導出規則どおりに更新する。片方だけ成功した場合は巡回の整合チェックが検出して是正する
+
+### マージの条件
+
+PR に `automerge` ラベルを付けてよいのは、次の 4 つがすべてそろったときだけ（確かめ方の正本は skill `command-team` の「マージ」）。
+
+1. 現在の head に有効な Approve がある（`pelway-review`）
+2. 必須チェック（`mise run verify`・`pr-size`）が通っている
+3. Approve の後の push が main の取り込みだけである
+4. 現在の head と同じ SHA の QA の合格コメントがある。合格コメントは `pelway-qa` 名義で、確かめた SHA と run を書いたもの（形と数え方は `docs/agents/qa-checklist.md`）。QA が同じ SHA で確かめるまでは合格として扱わない。head が動いたら前の合格は数えない
+
+1〜3 がそろって 4 だけが無い PR は QA 待ちである。`automerge` を付けず、QA に確認を頼む。巡回スクリプトはこの PR にも `waiting_on=merge` を出すが、実際の待ち先は QA として扱う。
 
 ### マージキュー待ちの PR
 
@@ -150,7 +161,7 @@ conductor-watch は検知（`watch.log` へのイベント出力）だけを行�
 指示待ちのスレッドは、次の 3 つを全部満たすものとする: ターンが終わっていて動いている作業が無い（実行中でなく、待っている先も終わっている）／紐づいた PR か Issue がまだ開いている／マージまで進んでいない。経過時間のしきい値は置かず、見つけたらその巡回のうちに次の指示を出す。
 
 - 指示は定型の 3 つ（「続きをやり直す」「レビューの再委託」「衝突の解消」）から選ぶ。実装スレッドの受け取り方は skill `implement-issue` の「巡回から定型の指示を受けたとき」
-- 現在の head に有効な Approve があり、必須チェックが緑で、Draft でない PR には、指揮役が `automerge` を付けて Kodiak のマージに渡す（skill `command-team` の「マージ」）
+- 現在の head に有効な Approve があり、必須チェックが緑で、現在の head と同じ SHA の QA の合格コメントがあり、Draft でない PR には、指揮役が `automerge` を付けて Kodiak のマージに渡す（skill `command-team` の「マージ」）
 - `needs-human` の付いた Issue・PR と、複数のレビュー担当の判定が割れた PR には、指示も `automerge` も出さず、判断待ちに回す
 
 ### 巡回の報告の形
@@ -196,7 +207,7 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 
 ボードの Todo に `ready-for-agent` の付いたカードがあり、実装の枠が空いているとき（割り当ての共通前段は「2. ボードと巡回」の「割り当て・停止・再開」）。
 
-1. Issue に `agent:working` を付ける（`ready-for-agent` は外さない）。Devin CLI に割り当てるときは `agent:devin` も付ける
+1. Issue のラベルを読み直し、`agent:working` がすでに付いていれば割り当てない（別のスレッドが取っている。手当・再開で自分が割り当てたものは除く）。付いていなければ `agent:working` を付ける（`ready-for-agent` は外さない）。Devin CLI に割り当てるときは `agent:devin` も付ける。実装スレッドは着手時にこの `agent:working` を自分の占有として引き継ぎ、取得コメント（誰が・何時（JST）に取ったか）を書く（skill `implement-issue` の手順 2）
 2. 実装スレッドを立てる
 
 ```
@@ -313,7 +324,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 ### 実装担当が止まった（`stopped:`）
 
-実装担当は止まる前に Issue にコメントし、`needs-human` を付けている。Grok Bot は `agent:working` を外し、部屋で人間に知らせる。
+実装担当は止まる前に Issue にコメントし、`needs-human` を付け、`agent:working` を外して解放コメントを書いている（skill `implement-issue` の手順 2）。Grok Bot は `agent:working` が残っていれば外し、部屋で人間に知らせる。
 
 ### 停滞（`stalled`）
 
@@ -402,7 +413,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 | `grokbot` | 24 時間 | Grok Bot の承認・判断が出たか |
 | `implement` | 6 時間 | 実装スレッドが動いているか（停滞は 45 分検知にもある。レビュー委託の子の完了待ちを含む） |
 | `review` | 24 時間 | レビュー担当が動いているか（滞留 24 時間の対応と同じ目安。skill `command-team` の「レビュー待ちの滞留」） |
-| `merge` | 1 時間 | マージの条件（有効な Approve と必須チェック）が揃っているのに未マージのままではないか |
+| `merge` | 1 時間 | マージの条件（「2. ボードと巡回」の「マージの条件」）が揃っているのに未マージのままではないか。QA の合格だけが無ければ QA 待ちとして扱う |
 | `conductor` | 1 時間 | 指揮役の判断・割り当てが先送りになっていないか |
 
 目安は運用実績で見直す。巡回スクリプトが既定値として同じ値を持つため、変えるときはこの表とスクリプトの両方を直す。
