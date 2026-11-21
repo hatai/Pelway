@@ -47,3 +47,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9「修正依頼」に「マージの解消後の verify は、`git worktree add HEAD` を使う試験があるため、マージをコミットしてから回す」と足す
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: 885c2dae596132bb4ce52d131d971ac9e51f034c
+
+1. 詰まった箇所: `docs/dev-environment.md` の残存経路の一覧: round 1 で #306 の項目を丸ごと消したが、塞がったのは書き込みだけだった。`git grep -O<コマンド>` による起動は残っている（pelway-review の 14:15Z の must-fix）。その経路を「#306 で追っている経路」に戻した
+2. 曖昧だった文: 「確かめるまでは `claude_review` を使わない」（`docs/dev-environment.md`「レビュー担当の Claude」）→ 未確認の項目があるまま、hatai の決定で運用を続けている今の状態と食い違う（[文書のずれ] の nit）。保留の扱いと、保留を解く条件を書き足した
+3. 仮定と解釈: 指揮役が #306 に代理で記録した (B) の決定と、受け入れ条件 3 の測定（複合形での拒否）を、今の状態として文書に反映した。印の無い nit（設定表の「書けるのは `$TMPDIR` だけ」の言い切り）は、手順 9 に従って直していない
+4. 足りなかった情報・検証手段: `git grep -O` で起動したプロセスから `scripts/agent-gh review` の資格情報を使えるかは、実行しないと確かめられない（未確認のまま記載）
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 4 の確認の手順の条件に、「残存リスクの一覧から項目を消すときは、項目に含まれる経路がすべて塞がったことを、引用で示す」と足す
+
+使ったスキル: implement-issue
