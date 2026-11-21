@@ -54,3 +54,11 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 - 重要な帰結: `1f6d1d6` の push（11/20 23:05 JST・指揮役実施）は偽の QA 合格記録を根拠に実施されていた
 - 代理転載の QA 結果（pelway-qa 名義でないため形式上無効・内容は実点検のもの）: #482/7059419928（既に hatai ルールで無効）・#463/7058583712（PR 本文が引用中・要リード判断）・#572/7058672305・#306/7063954310+7063968048
 - pelway-qa[bot] の「QA: pass sha:6b284862」（run 44907124348・実在）は正規形式。リードの無効宣告の射程に含むか確認事項
+
+## 巡回記録（patrol 2・03:05 JST）
+
+- 受信箱 134–152: 旧指揮役の settle 後の完了通知、#614 実装完了、#586/#587 レビュー完了、T3 障害で複数スレッド failed→自動再試行
+- PR #619（#614）: Codex r2 approve・必須チェック全 pass・pelway-review APPROVED → pelway-qa 合格のみ残。**QA 委託を起動**（delegate_task・claudeAgent・taskId qa-619-9afb58b2-20261122）
+- PR #586: Codex r11 request-changes @65f6ed35（Claude approve 後）。#587: Codex r8 request-changes @ebb1648c。両レビューループ継続（指揮役の委託ではない・a2e1fc7f 系の一本化対象）
+- #568 実装スレッド: T3 障害で failed→running 往復中（infra 側）
+- #560: 例外条件の Issue 記録は完了（7065852656）・実装スレッドへの t3_thread_send は接続断続で未達 → pending_thread_sends に記録・次回再送
