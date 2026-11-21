@@ -39,6 +39,8 @@ done
 valid_id "$from" || die "--from is not a thread id"
 [[ -z "$to" ]] || valid_id "$to" || die "--to is not a thread id"
 [[ "$to" != "$from" ]] || die "--to must differ from --from"
+# provider と model は組で指定する（片方だけだと、もう片方を旧指揮役から引き継いで組み合わなくなる）
+if [[ -n "$provider" && -z "$model" ]] || [[ -z "$provider" && -n "$model" ]]; then usage; fi
 for v in "$provider" "$model" "$effort"; do
   valid_ident "$v" || die "--provider/--model/--effort must be plain identifiers"
 done
@@ -73,6 +75,9 @@ if [[ -z "$T3" ]]; then
 fi
 [[ -n "$T3" ]] || die "t3 not found"
 
+# opencode は本体 checkout では sandbox が掛からない（プラグインは ~/.t3/worktrees/ の下だけ）ので、指揮役にしない
+reject_provider() { [[ "$1" != *opencode* ]] || die "provider $1 is not allowed: opencode has no sandbox in the main checkout"; }
+
 # show <id> — provider・model・runtimeMode・worktree の有無（yes/no）を 1 行で返す
 show() {
   "$T3" thread show "$1" --json | /usr/bin/python3 -I -c '
@@ -84,6 +89,7 @@ print(t.get("providerInstanceId") or "-", t.get("model") or "-", t.get("runtimeM
 
 read -r old_provider old_model old_mode _ < <(show "$from") || die "cannot read the old conductor"
 provider="${provider:-$old_provider}"; model="${model:-$old_model}"
+reject_provider "$provider"
 [[ "$provider" != - && "$model" != - ]] || die "cannot determine provider/model"
 # 旧指揮役から引き継いだ値にも、引数と同じ確かめをかける
 if ! valid_ident "$provider" || ! valid_ident "$model"; then die "provider/model from the old conductor are not plain identifiers"; fi
@@ -110,8 +116,9 @@ if [[ -z "$to" ]]; then
 fi
 
 # 2. 権限を確かめる
-read -r _ _ new_mode new_wt < <(show "$to") \
+read -r new_provider _ new_mode new_wt < <(show "$to") \
   || die "cannot read the new conductor $to (it may have been created; check it in T3). Nothing was sent to the old conductor"
+reject_provider "$new_provider"
 [[ "$new_wt" == no ]] || die "the new conductor $to runs in a worktree; it must run in the main checkout. Nothing was sent to the old conductor"
 if [[ "$new_mode" != "$old_mode" || "$new_mode" == full-access ]]; then
   echo "conductor-rebuild: the new conductor $to runs in '$new_mode', but the old one runs in '$old_mode'." >&2
@@ -121,7 +128,7 @@ if [[ "$new_mode" != "$old_mode" || "$new_mode" == full-access ]]; then
 fi
 
 # 3. 旧指揮役を止める
-STOP="恒久交代を始める（docs/agents/conductor-context.md の「恒久交代」）。案件を進める操作（スレッドの起動・指示、マージ、ラベル、コメント、ステータス変更）を止め、引き継ぎの記録を指揮役の作業ログと patrol-state.json に書き出して、このターンを終える。以後は操作しない。"
+STOP="恒久交代を始める（docs/agents/conductor-context.md の「恒久交代」）。案件を進める操作（スレッドの起動・指示、マージ、ラベル、コメント、ステータス変更）を止め、引き継ぎの記録を指揮役の作業ログと patrol-state.json に書き出して、このターンを終える。以後は操作しない。scheduled task や起こしで起きても、巡回も patrol-state.json の書き込みもせずにターンを終える。"
 printf '%s' "$STOP" | "$T3" thread send --wait "$from" - >/dev/null \
   || die "failed to stop the old conductor; the new conductor $to is waiting and the registration is unchanged"
 

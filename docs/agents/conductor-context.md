@@ -106,7 +106,10 @@ GitHub 内部で食い違いがあれば既存規則（runbook の整合チェ�
 4. 新指揮役に引き継ぎの指示を送る
 5. agent-watch の起こしの宛先を、インストールした `~/.local/bin/pelway-agent-watch --register` で新指揮役に替える（入っていなければ、最初に何もせずに止まる）
 
-本体 checkout で立てる危険（hatai の判断。Issue #564 のコメント）: 新指揮役を本体 checkout で立てると、そのスレッドの sandbox の書き込み範囲は本体 checkout になる。指示が混入した指揮役が本体 checkout の `scripts/`・`mise.toml`・`pitchfork.toml`・`crates/pelway-agent-watch/` を書き換えると、hatai がそれらをホストで実行するとき（`mise run conductor-rebuild`・`mise run agent-watch-install`・pitchfork の起動）に sandbox の外でコードが動きうる。この危険は認めたうえで、hatai は本体 checkout の版をホストで実行する前に、`git -C <本体 checkout> status --short` と `git -C <本体 checkout> diff origin/main --stat` で、コミットされていない変更や main と違う変更が無いことを確かめる。
+本体 checkout で立てる危険（hatai の判断。Issue #564 のコメント）: Claude Code・Codex・Devin の指揮役を本体 checkout で立てると、そのスレッドの sandbox の書き込み範囲は本体 checkout（作業ツリーと、共有 git dir の `index`・`refs/` など）になる。opencode は本体 checkout では sandbox が掛からない（プラグインは `~/.t3/worktrees/` の下のセッションにだけ掛かる）ので、スクリプトは opencode を拒む。指示が混入した指揮役が本体 checkout のファイルを書き換えると、次の 3 つの経路で sandbox の外でコードが動きうる。hatai はこの危険を認めている。
+- hatai がホストで実行するとき（`conductor-rebuild`・`mise run agent-watch-install`・pitchfork の起動）。実行する前に、実行するファイルの `git hash-object --no-filters <path>` を、GitHub の main のその path の blob の sha（GitHub の画面か `gh api repos/hatai/Pelway/contents/<path>?ref=main --jq .sha`）と比べ、一致したものだけを、mise を通さずに直接実行する（`bash scripts/conductor-rebuild …`）。`git status`・`git diff` は、指揮役が index や refs を書き換えると何も出さなくなるので、確かめに使わない。手順はこの文書の GitHub 上の版で読む
+- pitchfork の supervisor が毎時、本体 checkout の `scripts/agent-worktree-prune` をホストで動かすとき（`pitchfork.toml`）。hatai の確かめを通らない。調査は #570
+- 次の交代で立てる新指揮役が、権限を確かめる前の最初の 1 ターンを既定の権限（`full-access` のことがある）で動き、本体 checkout の `AGENTS.md` などを指示として読むとき。最初の文は何もせずに待たせる決まった文だが、読む指示は書き換えられうる
 
 新指揮役は、恒久交代の手順 4（引き継ぎ確認の完了で操作権限が移る）の後に、旧指揮役のスレッドを `t3_thread_organize`（`action: settle`）で settle し、巡回の scheduled task を作り直す（runbook の「指揮役の定期巡回（スケジュール起床）」。`t3` CLI には settle が無いため、スクリプトでは行わない）。
 

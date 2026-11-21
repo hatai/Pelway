@@ -15,7 +15,7 @@ NEW="mcp:launch:new-conductor"
 
 # 期待する本文（スクリプトの決まった文と完全一致で比べる）
 HOLD_WANT="恒久交代の新しい指揮役として立てた。権限の確かめと引き継ぎの指示が届くまで、何もせずにこのターンを終える。"
-STOP_WANT="恒久交代を始める（docs/agents/conductor-context.md の「恒久交代」）。案件を進める操作（スレッドの起動・指示、マージ、ラベル、コメント、ステータス変更）を止め、引き継ぎの記録を指揮役の作業ログと patrol-state.json に書き出して、このターンを終える。以後は操作しない。"
+STOP_WANT="恒久交代を始める（docs/agents/conductor-context.md の「恒久交代」）。案件を進める操作（スレッドの起動・指示、マージ、ラベル、コメント、ステータス変更）を止め、引き継ぎの記録を指揮役の作業ログと patrol-state.json に書き出して、このターンを終える。以後は操作しない。scheduled task や起こしで起きても、巡回も patrol-state.json の書き込みもせずにターンを終える。"
 START_WANT="あなたは新しい指揮役。skill command-team と docs/agents/conductor-context.md の「恒久交代」に従い、旧指揮役（スレッド $OLD）から引き継ぐ。引き継ぎ確認（GitHub の実状態、patrol-state、巡回記録、実行中スレッドの照合）を済ませて操作権限を受け取ったら、旧指揮役のスレッドを t3_thread_organize で settle し、巡回の scheduled task を作り直す（runbook の「指揮役の定期巡回（スケジュール起床）」）。確認が完了しない場合は権限を受け取らず、hatai に知らせる。"
 
 # 偽の t3。呼び出しを 1 行ずつ記録し、標準入力の本文は宛先ごとのファイルに残す。
@@ -103,6 +103,16 @@ check "--to succeeds" [ "$rc" -eq 0 ]
 check "--to does not start a thread" no_line "^thread start"
 check "--to sends the handover" same "$LOG.send-stdin.new-conductor" "$START_WANT"
 check "--to registers the given thread" [ "$(cat "$FILE")" = "$NEW" ]
+
+# provider と model は組で指定する
+run "" --from "$OLD" --provider codex; rc=$?
+check "provider without model is rejected" [ "$rc" -eq 2 ]
+check "provider without model makes no t3 calls" [ ! -s "$LOG" ]
+
+# opencode は指揮役にしない
+run "" --from "$OLD" --provider opencode --model glm; rc=$?
+check "opencode provider is rejected" [ "$rc" -ne 0 ]
+check "opencode provider starts nothing" no_line "^thread start"
 
 # --to が --from と同じなら止まる
 run "" --from "$OLD" --to "$OLD"; rc=$?
