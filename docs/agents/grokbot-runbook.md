@@ -157,6 +157,7 @@ conductor-watch は検知（`watch.log` へのイベント出力）だけを行�
 | `state: done` | マージの判断（skill `command-team` の「マージ」） |
 | `state: stopped` | 判断待ち（下の報告の「判断待ち」の節に出す。「7. エスカレーションと停滞」の `stopped:` の扱い） |
 | `state: waiting-review`・`state: waiting-checks` | 待っている先を自分で確かめる（レビューの子タスクの状態、`pr-digest` の `required` 行）。終わっていれば「続きをやり直す」を送る。まだ動いていれば待つ |
+| `state: waiting-conductor` | 現在の head に有効なレビューが無ければ、main 由来の worktree からレビュースレッドを立てる。結果が出たら実装スレッドに「続きをやり直す」を送る |
 | `state: working`、または状態の行が無い | その巡回のうちに「続きをやり直す」を送る |
 
 指示待ちのスレッドは、次の 3 つを全部満たすものとする: ターンが終わっていて動いている作業が無い（実行中でなく、待っている先も終わっている）／紐づいた PR か Issue がまだ開いている／マージまで進んでいない。経過時間のしきい値は置かず、見つけたらその巡回のうちに次の指示を出す。
@@ -276,7 +277,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 |---|---|
 | `approve` | 指揮役自身の PR なら、Ready for review と必須チェックが通っていることを確かめて skill `command-team` の「マージ」に進む。外部投入なら「PR #<M> は Approve された。skill implement-issue の手順 9 の『Approve のとき』から進める（`[文書のずれ]` の nit が残っていれば先に直す）。」を実装スレッドに送る。複数のレビュー担当を付けた PR で判定が割れたらマージせず、request-changes 側の指摘を優先して修正に進ませる（skill `command-team` の「レビュー担当と effort」） |
 | `request-changes` | 外部投入なら「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を実装スレッドに送る（回数の上限は skill `implement-issue` のとおり、実装スレッドが数える） |
-| `failed` | `error: checks pending` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 7 のエスカレーション |
+| `failed` | `error: checks timeout` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。`error: wrong runtime` なら、権限を `auto-accept-edits`・worktree にして立て直す（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 7 のエスカレーション |
 
 通常の PR のレビューの verdict（approve / request-changes / failed）は実装スレッドが処理する（skill `implement-issue` の手順 9）。指揮役は、実装スレッドの終わりの報告（`review:` と `ready:` の行）と GitHub の PR の状態（`pelway-review` の最新レビューとチェック）で進み具合を見る。
 
