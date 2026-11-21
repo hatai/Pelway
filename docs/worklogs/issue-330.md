@@ -135,3 +135,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」に「レビューの must-fix が、実装担当の環境では満たせない確認（実接続での手動確認など）を求めるとき」の行を足し、Issue に書くことを「必要な確認と、行う人・手順」とする。
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）
+
+## 実装者メモ（round 6 / PR-3）
+
+対象 head: `ec4169c2`（濱田さんの判断（開発リード経由）で再開。#399 は自動テストで受け入れ、実接続確認は #433、decide の認証＋レート制限は #583 に切り出し）
+
+1. 詰まった箇所: 手順 6: テスト追加で pr-size が +852 になり、PR 内のテストの重複（メンション→判断待ち、確定→下書き待ち、gateway 2 つ）を helper にまとめて +775 にした。テストは削っていない。ローカルの枝名が PR の枝と違うため、push は `HEAD:agent/330c-mail-draft` で行い、resign は動かず未署名（round 4 と同じ）。
+2. 曖昧だった文: 「GLM の壊れた応答は fail closed で失敗させること」（開発リードからの指示）。
+3. 仮定と解釈: fail closed を「壊れた応答の中身が下書き・投稿に出ず、1 回の再試行の後に台本の下書きへ落ちる」と読んだ（#330 の受け入れ条件「台本へ落ちる」を変えない）。タスク自体を停止させる読みは採らなかった。fixture は合成で、実 GLM からの採取ではない。loopback は設定項目が無いため、runner 付きの入口 `serve_with_store_and_runner` に 0.0.0.0 等を渡すテストとした。
+4. 足りなかった情報・検証手段: 方針は開発リード経由で、Issue・PR に hatai 作の記録が無い（#330 に記録を依頼した）。新テストは現行で green のため、`parse_draft` を `{`〜`}` の抜き出しに緩める変異と loopback ガードを外す変異で red を確かめ、戻した。`mise run verify` exit 0。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 4 に「既存の挙動の回帰テストを足すときは、実装を一時的に変異させて red を示し、変異の内容を PR 本文に書く」を足す。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）、write-issue（`.agents/skills/write-issue`）
