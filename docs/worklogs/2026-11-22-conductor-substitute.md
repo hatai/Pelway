@@ -140,3 +140,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 - #572: nit 修正を `5309e958` で push（verify-pelway の build-dir lock・sampler 異常終了）。新 head のため r9 レビュー + codex 枠が必要。
 - #609: head `09094518`（docs 明確化・nit-round 2）。#610: head `eb806a6a`。
 - 旧通知の処理: review/587-c9・4649721f・daa0e2cb（引き継ぎ済み・対応不要）。
+
+## 巡回 106–118（05:10–06:09 JST・実値）
+- **#612 マージ完了**（20:14:54Z・head 2b43c317）— agent-worktree-prune の live-process/6h 保持強化。
+- **#609 マージ完了**（21:05:04Z・head 0cf086ec）— agent-watch outbox の永続/一時失敗分離・バックオフ。QA は実値で検証済み（pelway-qa[bot]・sha 09094518・run 44944545672）。QA 委託は私の MCP 不通のため issuecomment-7069031781 で統制/実装側に依頼し実行された。
+- **#572**: r8 codex request-changes@906da20f（must-fix 2）→ 修正 5309e958 → r9 codex request-changes@2eaec2db（must-fix 3）→ 修正 bdc760c2 → r9 claude request-changes@12d2bf29（must-fix 4 + 文書ずれ nit 4）→ 実装側が継続修正中（4623e180）。レビューループは実装側が正常に回している。
+- #610: head b7efc229（draft）。#611/612 系の agent/611 スレッド通知は引き継ぎ済み扱い。
