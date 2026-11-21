@@ -61,7 +61,7 @@ pub fn parse_patrol_state(text: &str) -> Result<PatrolInfo, String> {
 }
 
 /// 起こしの宛先に使ってよいスレッド ID か。
-/// 補助記録は sandbox の中の指揮役が書けるファイルで、値はホスト側のコマンドの引数になるため、
+/// 値（ホストの登録ファイルの 1 行目、`--register` の引数）は `t3 thread send` の引数になるため、
 /// 先頭の `-`（オプションに読まれる）を拒み、使える文字と長さを絞る。
 pub fn valid_thread_id(id: &str) -> bool {
     !id.is_empty()
@@ -81,20 +81,21 @@ pub enum WakeDecision {
     NoConductor,
     /// 登録された値がスレッド ID の形をしていない。
     InvalidThreadId,
-    /// 前回の起こしの後に、指揮役がまだ受信箱を読んでいない。
+    /// 前回の起こしの後に、指揮役の既読の位置が進んでいない。
     NotYetRead,
 }
 
-/// 起こすかを決める。`last_wake_lines` は前回起こしたときの受信箱の行数（一度も起こしていなければ None）。
-/// 指揮役の既読（`inbox_offset`）が前回の起こしの時点まで進んでいなければ、重ねて起こさない。
-pub fn decide_wake(info: &PatrolInfo, last_wake_lines: Option<u64>) -> WakeDecision {
+/// 起こすかを決める。`last_wake_offset` は前回起こしたときの指揮役の既読の位置（`inbox_offset`。
+/// 一度も起こしていなければ None）。既読の位置がそこから進んでいなければ、重ねて起こさない
+/// （前回の起こしの後に 1 行でも読めば、次の知らせで起こす）。
+pub fn decide_wake(info: &PatrolInfo, last_wake_offset: Option<u64>) -> WakeDecision {
     let Some(id) = &info.conductor_thread_id else {
         return WakeDecision::NoConductor;
     };
     if !valid_thread_id(id) {
         return WakeDecision::InvalidThreadId;
     }
-    if last_wake_lines.is_some_and(|lines| info.inbox_offset < lines) {
+    if last_wake_offset.is_some_and(|at| info.inbox_offset <= at) {
         return WakeDecision::NotYetRead;
     }
     WakeDecision::Send(id.clone())
@@ -194,12 +195,14 @@ mod tests {
 
     #[test]
     fn wake_waits_until_read() {
+        // 前回の起こしのときの既読は 3。まだ進んでいない
         assert_eq!(
-            decide_wake(&info(Some("mcp:a"), 3), Some(5)),
+            decide_wake(&info(Some("mcp:a"), 3), Some(3)),
             WakeDecision::NotYetRead
         );
+        // 前回の起こしの時点の未読（たとえば 2 件）のうち 1 件だけ読んだ: 進んだので次の知らせで起こす
         assert_eq!(
-            decide_wake(&info(Some("mcp:a"), 5), Some(5)),
+            decide_wake(&info(Some("mcp:a"), 4), Some(3)),
             WakeDecision::Send("mcp:a".to_string())
         );
     }

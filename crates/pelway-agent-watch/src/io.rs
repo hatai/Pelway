@@ -424,14 +424,14 @@ fn open_in_pelway(dirf: &fs::File, name: &str, flags: libc::c_int) -> Result<fs:
     Ok(file)
 }
 
-/// 開いたファイルを所有者だけが読み書きできる 0600 にする（fd に対する fchmod。パスを開き直さない）。
-/// `O_CREAT` のモードは新しく作るときにしか効かず、前からあるファイルは他人に読める権限のこともあるため。
-fn restrict_to_owner(file: &fs::File) -> Result<(), String> {
+/// 開いたファイルが所有者だけのもの（グループ・他人の権限が無い）かを確かめる。
+/// `O_CREAT` のモードは新しく作るときにしか効かず、前からあるファイルは他人に読める権限のこともある。
+/// その場合は 0600 に直しても、すでに他人が開いている fd からは読めるので、書かない。
+fn owner_only(file: &fs::File) -> Result<(), String> {
     use std::os::unix::fs::MetadataExt;
     let mode = file.metadata().map_err(|e| e.to_string())?.mode();
     if mode & 0o077 != 0 {
-        file.set_permissions(fs::Permissions::from_mode(0o600))
-            .map_err(|e| format!("cannot restrict to the owner: {}", e.kind()))?;
+        return Err("accessible by others (not 0600)".to_string());
     }
     Ok(())
 }
@@ -456,8 +456,8 @@ pub fn append_inbox(path: &Path, lines: &[String]) -> Result<u64, String> {
     let (dir, name) = split_pelway_path(path)?;
     let dirf = open_pelway_dir(dir, true)?;
     let mut file = open_in_pelway(&dirf, name, libc::O_RDWR | libc::O_APPEND | libc::O_CREAT)?;
-    // 報告の本文を書くので、所有者以外が読める状態のままでは書かない
-    restrict_to_owner(&file)?;
+    // 報告の本文を書くので、所有者以外にも権限があった受信箱には書かない
+    owner_only(&file)?;
     let len = file.metadata().map_err(|e| e.to_string())?.len();
     if len > INBOX_MAX_BYTES {
         return Err("inbox is too large".to_string());
@@ -551,8 +551,8 @@ pub fn read_conductor_file(path: &Path) -> Result<Option<String>, String> {
 
 /// 登録ファイルにスレッド ID を書く（置き換え）。ID は起こしと同じ規則で確かめる。
 /// 置き場は 0700、ファイルは 0600。同じ置き場の一時ファイルに書いてから rename で置き換える
-/// （登録ファイルの位置に symlink があれば、たどらずに symlink 自体を置き換える。
-/// ディレクトリなど別の種類のものがあれば rename が失敗して、登録しない）。
+/// （登録ファイルの位置がディレクトリなら rename が失敗して、登録しない。
+/// それ以外（symlink・FIFO など）は、たどらずにそれ自体を置き換える）。
 pub fn register_conductor(path: &Path, id: &str) -> Result<(), String> {
     use std::os::unix::fs::DirBuilderExt;
     if !pelway_agent_watch::inbox::valid_thread_id(id) {

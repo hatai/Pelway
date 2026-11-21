@@ -654,13 +654,18 @@ fn inbox_failure_does_not_stop_watch() {
     // pelway の位置に通常のファイルを置いて、受信箱を作れなくする（権限ではなく構造で失敗させる）
     let sb = Sandbox::new("inbox-fails");
     one_event(&sb);
+    // 偽の秘密と、本文を写して HTTP 500 を返す偽の curl で、送信処理まで進むことを確かめる
+    sb.fake("fnox-ok", "");
     fs::write(sb.pelway_dir(), "not a directory").unwrap();
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let err = stderr(&out);
     assert_eq!(err.matches("inbox append failed").count(), 1, "{err}");
-    // webhook の処理（送信待ちの列）と状態の保存は続く
-    assert!(err.contains("mode=not-sent"), "{err}");
+    // webhook の送信（curl に知らせの JSON が渡る）と状態の保存は続く
+    let sent: serde_json::Value = serde_json::from_str(&sb.read_fake("curl-body")).unwrap();
+    assert_eq!(sent["event"], "finished");
+    assert_eq!(sent["thread_id"], "mcp:a");
+    assert!(err.contains("mode=send-failed"), "{err}");
     let state = fs::read_to_string(sb.state_file()).unwrap();
     assert!(state.contains("\"outbox\":[{"), "{state}");
 }
@@ -790,7 +795,7 @@ fn wake_failure_is_logged_once() {
     );
     // 失敗した起こしは記録しない（次の新しい知らせで改めて試みる）
     let state = fs::read_to_string(sb.state_file()).unwrap();
-    assert!(state.contains("\"last_wake_inbox_lines\":null"), "{state}");
+    assert!(state.contains("\"last_wake_inbox_offset\":null"), "{state}");
 }
 
 #[test]
@@ -1026,19 +1031,76 @@ fn list_and_wake_use_the_same_t3_as_the_server() {
 }
 
 #[test]
-fn existing_inbox_readable_by_others_is_restricted_before_writing() {
+fn existing_inbox_readable_by_others_is_not_written() {
+    // 前からある受信箱に他人の権限があれば、すでに開かれているかもしれないので書かない（webhook は続ける）
     let sb = Sandbox::new("inbox-mode");
     one_event(&sb);
+    sb.fake("fnox-ok", "");
     fs::create_dir_all(sb.pelway_dir()).unwrap();
     fs::write(sb.inbox(), "").unwrap();
     fs::set_permissions(sb.inbox(), fs::Permissions::from_mode(0o644)).unwrap();
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
-    assert_eq!(
-        fs::metadata(sb.inbox()).unwrap().permissions().mode() & 0o777,
-        0o600
+    assert_eq!(fs::read_to_string(sb.inbox()).unwrap(), "");
+    assert!(stderr(&out).contains("inbox append failed"));
+    let sent: serde_json::Value = serde_json::from_str(&sb.read_fake("curl-body")).unwrap();
+    assert_eq!(sent["event"], "finished");
+}
+
+#[test]
+fn wake_again_after_partly_reading() {
+    // 2 件の知らせで起こした後、指揮役が 1 行だけ読んだ。次の知らせでは起こす
+    let sb = Sandbox::new("wake-partly-read");
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"},
+  {"threadId":"mcp:b","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}]"#,
     );
-    assert_eq!(inbox_events(&sb).len(), 1);
+    sb.fake(
+        "show-mcp_a.json",
+        &show("mcp:a", "completed", "2026-11-10T16:10:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "completed", "2026-11-10T16:10:00Z", 0),
+    );
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{
+  "mcp:a":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:b":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null}},"ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 2);
+    assert_eq!(sb.read_fake("t3-send-args").lines().count(), 1);
+
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:a","status":"failed","updatedAt":"2026-11-10T16:30:00Z"},
+  {"threadId":"mcp:b","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_a.json",
+        &show("mcp:a", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    let mut state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
+    state["threads"]["mcp:a"]["status"] = "running".into();
+    fs::write(sb.state_file(), state.to_string()).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 3);
+    assert_eq!(
+        sb.read_fake("t3-send-args").lines().count(),
+        2,
+        "{}",
+        stderr(&out)
+    );
 }
 
 #[test]

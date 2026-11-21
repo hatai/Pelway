@@ -328,12 +328,15 @@ impl Watcher {
     }
 
     /// 受信箱に書いたあと、ホストの登録ファイルに登録されたいまの指揮役を起こす。
-    /// 指揮役が前回の起こしの後に受信箱を読んでいなければ（補助記録の既読の位置で見る）、重ねて起こさない。
+    /// 前回の起こしの後に指揮役の既読の位置（補助記録の `inbox_offset`）が進んでいなければ、重ねて起こさない。
     /// 失敗しても記録を進めず、次の新しい知らせで改めて試みる（再送の列は持たない）。
     fn maybe_wake(&mut self, t3: &std::path::Path, inbox_lines: u64, sources: &[String]) {
         // 宛先はホスト側の登録ファイルからだけ読む（sandbox から書ける補助記録の値は使わない）
         let registered = match io::read_conductor_file(&io::conductor_file()) {
-            Ok(Some(text)) => parse_conductor_file(&text),
+            Ok(Some(text)) => match parse_conductor_file(&text) {
+                Some(id) => Some(id),
+                None => return, // 登録が空（登録が無いのと同じ）
+            },
             Ok(None) => return, // 登録が無い（指揮役が T3 のスレッドとして動いていない）
             Err(_) => {
                 eprintln!("agent-watch: WAKE skipped reason=conductor-file-unreadable");
@@ -361,11 +364,11 @@ impl Watcher {
             conductor_thread_id: registered,
             inbox_offset,
         };
-        match decide_wake(&info, self.state.last_wake_inbox_lines) {
+        match decide_wake(&info, self.state.last_wake_inbox_offset) {
             WakeDecision::Send(thread_id) => match io::wake(t3, &thread_id, WAKE_MESSAGE) {
                 Ok(()) => {
                     eprintln!("agent-watch: WAKE sent inbox_lines={inbox_lines}");
-                    self.state.last_wake_inbox_lines = Some(inbox_lines);
+                    self.state.last_wake_inbox_offset = Some(inbox_offset);
                 }
                 Err(why) => eprintln!("agent-watch: WAKE failed {why}"),
             },

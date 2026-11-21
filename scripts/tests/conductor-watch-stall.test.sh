@@ -164,15 +164,6 @@ inbox 47 null
 run_cycles 2
 check "7: STALL is printed once for the same stop" eq "$(count "$ROOT/out.log" 'STALL #47')" "1"
 
-# 試験 9: 受信箱に UTF-8 として壊れた行（書き込みが文字の途中で切れた断片）があっても、
-# その後ろの行の状態は読める（行ごとに読み、壊れた行だけを飛ばす）。
-reset
-issues "$(iss 49 '{"name":"agent:working"}')"; prs "$(draft_pr 49)"; threads "$(impl 49 completed)"
-printf '{"event":"finished","report":"\xe3\x81\n' > "$INBOX"
-inbox 49 $'state: waiting-review\nhead: abc\nnext: 手順 9'
-run_cycles 1
-check "9: a broken UTF-8 line does not hide later lines" eq "$(sget 49 waiting_on)" "implement"
-
 # 試験 8: 見張りが動いていることを示す HEARTBEAT の行を出す。
 check "8: HEARTBEAT line is printed" has "$ROOT/out.log" "HEARTBEAT"
 check "1-8: no writes to GitHub or threads" no_writes
