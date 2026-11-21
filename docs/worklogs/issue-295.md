@@ -59,3 +59,15 @@
 5. 改善案: スレッド worktree の読み取り専用マウント（`.devin`・`.opencode`・`opencode.json[c]`）と main 追加ファイルの衝突は今回の一時 worktree 手順で回避できる。`fix-merge-conflicts` スキルに「読み取り専用マウントがある worktree では一時 worktree でマージする」注意書きを足すと再発時に迷わない。
 
 使ったスキル: `fix-merge-conflicts`（グローバル）
+
+## 実装者メモ（round 6）
+
+対象 head: 3ca43d7fe8b6380b021529b6b8f3706eb2c5a3fb
+
+1. 詰まった箇所: `scripts/agent-gh` の review の gh 呼び出し: round 4 の 2 担当が別々の変数名（Codex は継承した export 属性の残る `token`、Claude は gh が hosts.yml より優先する `GH_TOKEN`・`GITHUB_TOKEN`）で同じ穴を指摘した。変数名ごとの対処を避けるため、偽 gh に `env` 全体を記録させ、`expect_review_auth` で「review トークンの値がどの変数名でも gh の環境に無い」と認証の 4 変数（GH/GITHUB の TOKEN と ENTERPRISE_TOKEN）が無いことを、review の全テストで確かめる形にした。
+2. 曖昧だった文: 「round 4 でまた must-fix が出たら、直さずに止まって報告する。」（Issue #295 の hatai コメント、2026-11-18）と、指揮役スレッドの指示「cdbad162 から追加コミットで再開（force push なし）」。
+3. 仮定と解釈: 再開の決定は Issue 上では hatai 作のコメントで確かめられず（再開を記録したのは pelway-dev のコメントと指揮役スレッドの指示）、割り当て経路の指示として従った。round 4 の must-fix 2 件だけを直し、round 4 の Claude の nit 4 件（help・ヘッダの `<dev|review> git` 表記、`-q`/`--jq` の「無害」記述、hosts.yml の 0600 未検査、テストの不要な退避）は skill の「nit は直さない」に従い未対応のまま残した。gh の環境変数のうち対象を認証に効く 4 つと `token` に限り、`GH_HOST`・`GH_PAGER` などは対象外とした（トークンの値や名義を変えないため）。「fail-closed のツール一覧チェック」はラッパーのコードではなくレビュー手順の確認条件と解釈した（ラッパーからはレビュー担当に渡されたツール一覧が見えない）。
+4. 足りなかった情報・検証手段: 実機の gh 2.104 で hosts.yml だけで認証できるか、継承 `GITHUB_TOKEN` が実際に優先されるかは本 round でも実測していない（偽 gh のテストと、round 4 の Claude レビューが示した go-gh のソースの読みが根拠）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の表の 3 回目のレビューの行に「人間の判断で再開したときは、再開の決定を hatai 名義の Issue コメントとして残してから着手する」を足す（今回は再開の決定が pelway-dev 名義のコメントにしか無く、決まりの「hatai 作のコメントだけを決定として扱う」と食い違った）。
+
+使ったスキル: `.agents/skills/implement-issue`
