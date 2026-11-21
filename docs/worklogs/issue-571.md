@@ -95,3 +95,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の修正 round に「同じ系統の must-fix が 2 round 続いたら、指摘された 1 経路ではなく、その系統全体に当てる決まりを決めてから直す」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 9）
+
+対象 head: ddbd4a1a
+
+1. 詰まった箇所: 手順 9: round 8 で Codex（OSV-Scanner の `lockfile` プリセットにマニフェストの抽出器が含まれる）と Claude（round 4〜8 のコミットを素の `git commit` で作り、hatai 名義・hatai の署名になった）の must-fix が残った。指揮役から、ラウンド上限の撤廃と、hatai の許可を受けた指揮役による 11 コミットの作り直し（force push 1 回、新 head `4de9ea12`）が伝えられた。手元のコミットを新しい head に載せ直すとき、`git cherry-pick` で committer が hatai になったため、`scripts/agent-gh dev git commit` で作り直した。
+2. 曖昧だった文: 「git の commit と push は `scripts/agent-gh dev git ...` で行う」（`.agents/skills/implement-issue/SKILL.md`）
+3. 仮定と解釈: commit だけでなく、cherry-pick・rebase などコミットを作るすべての操作がこの決まりに当たると解釈した。OSV-Scanner は、照合の対象を `--x-plugins rust/cargolock` で `Cargo.lock` だけにした。ロックファイルの抽出器を全部並べる案は、どれがマニフェストかを上流の更新のたびに確かめる必要があるため採らなかった。`pom.xml` と `Cargo.lock` を置いた一時ディレクトリで、`lockfile` プリセットは `pom.xml` も照合し、`rust/cargolock` は `Cargo.lock` だけを照合することを本物の 2.7.1 で確かめた。
+4. 足りなかった情報・検証手段: 会話の要約のあと、commit を `scripts/agent-gh dev git commit` で作る決まりを落とした。要約にこの決まりが残っていなかった。`mise run verify` の `agent-sandbox.test.sh` が、worktree の外へのシンボリックリンクの作成を拒否されて失敗した（今回の変更とは関係しない。前の round では通っていた）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の冒頭に「コミットを作る操作（commit・cherry-pick・rebase・amend）はすべて `scripts/agent-gh dev git ...` で行う。素の git で作ると hatai 名義・hatai の署名になる」を足す。
+
+使ったスキル: implement-issue
