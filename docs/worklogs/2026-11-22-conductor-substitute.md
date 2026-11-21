@@ -155,3 +155,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 - 非 draft 化 → QA 委託（統制側 delegate、sandbox が pelway-agent-qa 設定を読めず統制セッションから投稿 — #637 の実例）→ pelway-qa[bot] pass@ade842f1・run 44954540983。
 - **#572 に automerge 付与（07:25 JST）** — 全ゲート実値確認済み。Kodiak rebase 待ち。
 - #610: head b7efc229 のまま（draft・応答なし）。
+
+## 巡回 136–138（07:26–07:34 JST・実値）
+- **#572 マージ完了**（22:31:13Z・head 56f7f389）— verify-pelway スキルが main 入り。r8〜r15 の長いレビューループ（codex/claude の must-fix 延べ 10+・文書ずれ nit 多数）が着地。
+- 残 open: #610 のみ（head b7efc229・draft・応答なし）。
