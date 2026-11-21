@@ -1,6 +1,6 @@
 ---
 name: verify-pelway
-description: "Pelway のデモのバックエンド（pelway-http の HTTP API と runner-lite。チャンネル #案件B、ハルへのメンション、A/B 案、判断待ち、決定、決定後のメール下書き）を実際に起動して利用者と同じ道筋で動かし、証拠を残して合否を出す。Use when asked to verify Pelway by running it, check the demo flow end to end, or collect run evidence for a PR or QA. Keywords: verify-pelway, 実際に動かして確かめる, デモの流れ, 端から端まで, run の証拠, QA 確認"
+description: "Pelway のデモのバックエンド（pelway-http の HTTP API と runner-lite。チャンネル #案件B、ハルへのメンション、A/B 案、判断待ち、決定、決定後のメール下書き）を実際に起動して利用者と同じ道筋で動かし、証拠を残して合否を出す。レビュー担当（review-pr）は使わない（作業ツリーのコードをビルドして動かすため）。Use when asked to verify Pelway by running it, check the demo flow end to end, or collect run evidence for a PR or QA. Do not use during review (review-pr). Keywords: verify-pelway, 実際に動かして確かめる, デモの流れ, 端から端まで, run の証拠, QA 確認"
 ---
 
 # Pelway を実際に動かして確かめる
@@ -13,7 +13,7 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 ```
 
 - `--feature` は `features/README.md` の表の `verify-run --feature` の列の値（`decision`・`mail-draft`）。機能のファイル名（`channel-messages` など）は受け付けない（終了コード 2）。省略すると `decision`。
-- 証拠の置き場は、共有 git dir（`git rev-parse --path-format=absolute --git-common-dir`）の `pelway/evidence/<label>-<sha>/<run-id>/`。実装役も QA もここに揃える（Issue #568 なら `--label 568` で `pelway/evidence/568-<sha>/`）。`~/.local/state` と `/tmp` は使わない。共有 git dir の `pelway/` は、作業ツリーの外に書かない決まり（skill `implement-issue`）の例外として、`docs/superpowers/specs/agent-team.md` が巡回の状態（patrol-state.json）の置き場に認めた場所と同じ扱いで使う。`--evidence-root` で変えられるが、作業ツリーの中（共有 git dir を除く）は拒否する（終了コード 2）。作業ツリーのロックも `pelway/locks/` に置く（ビルド先のロックは、clone 間で共有されるビルド先そのものの中に置く。1 章）。
+- 証拠の置き場は、共有 git dir（`git rev-parse --path-format=absolute --git-common-dir`）の `pelway/evidence/<label>-<sha>/<run-id>/`。実装役も QA もここに揃える（Issue #568 なら `--label 568` で `pelway/evidence/568-<sha>/`）。`~/.local/state` と `/tmp` は使わない。共有 git dir の `pelway/` は、作業ツリーの外に書かない決まり（skill `implement-issue`）の例外としてこの機能が使う置き場（Issue #568 で証拠とロックの置き場として決めた。`docs/superpowers/specs/agent-team.md` が巡回の状態 patrol-state.json の置き場に認めているのと同じ階層。agent-team.md がこの置き場を認める文は無い）。ビルド先のロック（`<ビルド先>/.verify-pelway.lock`）も作業ツリーの外に書きうる同じ例外（mbx の managed target や `CARGO_TARGET_DIR` の下）。`--evidence-root` で変えられるが、作業ツリーの中（共有 git dir を除く）は拒否する（終了コード 2）。作業ツリーのロックも `pelway/locks/` に置く（ビルド先のロックは、clone 間で共有されるビルド先そのものの中に置く。1 章）。
 - 終了コード: 0 = 全段 PASS、1 = どこかが FAIL か、未対応・道具が無い（`summary.txt` か標準エラーに理由）、2 = 引数の誤りか、run を始められない（証拠・ロックの置き場、git の確認。証拠のディレクトリを作る前の失敗では `summary.txt` は残らない）。
 - run は前景の 1 コマンドで終わる。サーバーを run の外で動かし続けない（`nohup`・`setsid`・`systemd-run` を使わない。pitchfork にも登録しない）。
 
@@ -23,7 +23,7 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 2. 道具（`docs/agents/skill-helpers.md` はヘルパーの依存を bash・POSIX の標準コマンド・git・jq・agent-gh に限るが、`verify-run` はアプリを起動して観察するヘルパーで、Issue #568 の開発基盤の点検観点 2 が指定した道具を使うため、その範囲を超える）: `git`・`mise`・`rustup`・`jq`・`ss`（iproute2）・`pgrep`/`ps`（procps）・`sha256sum`・`realpath`・`readlink`・`comm`・`timeout`・`/proc`・bash の `/dev/tcp`。欠けていれば `verify-run` は「失敗（道具が無い）」で止まる。勝手に入れない。使った版は `tools.txt` に残る。
 3. `fnox exec` の下で動かさない。`verify-run` は自分の環境に fnox の秘密の変数があると止まる。
 4. Linux 以外（macOS など）では `verify-run` は「未対応（理由）」で終了コード 1 になる（`/proc`・`ss` が無い）。Mac での手順は未検証で、置き換え先は `lsof -p`・`lsof -iTCP -a -p <pid>`・`shasum -a 256`。
-5. 共有 git dir の `pelway/` の上の階層が自分か root の持ち物に見えること。証拠とロックの置き場の検査（`dir_chain_safe`）が同じ規則を要求するので、見えない環境では run はロックの階層の検査で終了コード 2 で止まる（ロックの置き場は変えられないので、`--evidence-root` では避けられない）。検査は緩めず、その環境では証拠になる run は取れないと報告する。名前空間（bwrap など）で見え方を変えた環境での run は、検査が見せられた見え方を確かめただけになることを明記する。その run は、名前空間の中で完結する検査（プロセス・環境・開いているファイル・HTTP の道筋・ロックの競合）は証拠に数え、外側の実ファイルシステムの所有権・共有者の有無についての検査は証拠に数えない（未検証として明記する）。
+5. 共有 git dir の `pelway/` の上の階層が自分か root の持ち物で、グループ・ほかが書けないこと（`dir_chain_safe` の検査が要求する。ビルド先そのものにも同じ検査を掛ける。umask 002 などでグループが書ける `target` や clone した共有 git dir では run が止まる）。証拠とロックの置き場の検査（`dir_chain_safe`）が同じ規則を要求するので、見えない環境では run はロックの階層の検査で終了コード 2 で止まる（ロックの置き場は変えられないので、`--evidence-root` では避けられない）。検査は緩めず、その環境では証拠になる run は取れないと報告する。名前空間（bwrap など）で見え方を変えた環境での run は、検査が見せられた見え方を確かめただけになることを明記する。その run は、名前空間の中で完結する検査（プロセス・環境・開いているファイル・HTTP の道筋・ロックの競合）は証拠に数え、外側の実ファイルシステムの所有権・共有者の有無についての検査は証拠に数えない（未検証として明記する）。
 
 守ること:
 
@@ -101,11 +101,11 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 ## 5. 後片付け
 
 - `verify-run` の終了時（成功・失敗・中断のどれでも）に、この run が起動した PID だけを止める。まず子の標準入力を閉じ（子は EOF で終わる）、5 秒で終わらなければ SIGTERM、さらに 5 秒で終わらなければ SIGKILL。シグナルを送る前に毎回 `/proc/<pid>/exe` がこの run のバイナリであることを確かめる。プロセス名では kill しない。経過は `cleanup.txt`。
-- `verify-run` 自身が SIGKILL されたときは後片付けが動かないが、子の標準入力のパイプが閉じるので子も終わる。ロック（`<共有 git dir>/pelway/locks/` の下）は残るので、次の run は「ロックが取れない」で止まる。持ち主の pid（`locks/<id>/pid`）が無いことを人が確かめてから外す。
+- `verify-run` 自身が SIGKILL されたときは後片付けが動かないが、子の標準入力のパイプが閉じるので子も終わる。ロックは 2 か所に残りうる（作業ツリーのロックは `<共有 git dir>/pelway/locks/<id>`、ビルド先のロックは `<ビルド先>/.verify-pelway.lock`）。残ったロックは次の run（ビルド先のものは、そのビルド先を共有するすべての clone の run）を「ロックが取れない」で止める。持ち主の pid（`<ロック>/pid`）が無いことを人が確かめてから外す。
 - 生き残りの確認: 起動の前と後片付けの後に、5 分以上動いている `demo-serve`・`pitchfork`・`pelway-agent-watch`・`t3-*`（プロセス名）と T3 本体（実行ファイル名が `t3` で、親が `t3` ではないもの。プロセス名は `node-MainThread` などになる。T3 本体がスレッドごとに起こして終える子の `t3 acp-mcp-bridge` などは比べない）の PID を取り（`survivors-before.txt`・`survivors-after.txt`）、前にあったものが後にもあることを確かめる。pitchfork の定期ジョブのように run の途中で自然に終わる短命なプロセスは比べない。一覧を取れなければ FAIL。起動の前に比べる対象が 1 つも無いときは、比べていないことを `NOTE` の行で `summary.txt` に残す（合否は変えない）。`pitchfork list` は前後とも `pitchfork-before.txt`・`pitchfork-after.txt` に必ず残す。`pitchfork list` は supervisor が止まっていると起動してしまうので、起動しない `pitchfork supervisor status` が成功したときだけ、自動起動を止めて（`PITCHFORK_SUPERVISOR_AUTO_START=false`）呼ぶ。`status` が失敗したとき（supervisor が動いていない、または照会に失敗した）は、その旨だけを書き、起動しない。
 - 一時状態はサーバーのメモリだけ（本文を伏せる前の応答も、`verify-run` のメモリだけで扱いファイルに書かない）。証拠は消さない。
 - 後片付けの後に、証拠が残っていることを確かめる: `(cd <evidence> && sha256sum -c SHA256SUMS)` がすべて `OK`。
 
 - 中断（Ctrl-C・SIGTERM・コマンドの時間切れ）でも後片付けは動く。run が最後まで進まなかったときは、記録した段が全部 PASS でも `FAIL run が最後まで進まなかった（中断）` を書き、verdict は FAIL になる。
 
-失敗: run が最後まで進まなかった（中断）。`cleanup.txt` が `NG:`（PID が残っている、exe が違うので送らなかった）。前にあったほかのプロセスが消えている。`sha256sum -c` に `OK` 以外がある。
+失敗: run が最後まで進まなかった（中断）。`cleanup.txt` が `NG:`（PID が残っている、exe が違うので送らなかった、ロック `<path>` を外せない）。前にあったほかのプロセスが消えている。`sha256sum -c` に `OK` 以外がある。

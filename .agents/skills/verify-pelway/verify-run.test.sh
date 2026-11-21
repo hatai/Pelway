@@ -2,6 +2,7 @@
 # verify-run の機械な部分（応答の分解・本文の伏せ字・loopback 以外の数え方・証拠の置き場の検査・引数の検査）のテスト。
 # サーバーは起動しない（端から端までの run は SKILL.md の手順で行う）。
 set -uo pipefail
+umask 022
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tool="${here}/verify-run"
@@ -281,17 +282,19 @@ expect_eq "lock_owner: extra lines after the pid" "$(lock_owner "${tmp}/l5")" ""
 # shellcheck disable=SC2329  # cargo_target_dir の中から呼ばれる
 mise() { if [ "${1:-}" = exec ]; then shift; [ "${1:-}" = "--" ] && shift; "$@"; else command mise "$@"; fi; }
 mk_crate() { mkdir -p "$1/src"; printf '[package]\nname = "t"\nversion = "0.0.0"\nedition = "2021"\n' > "$1/Cargo.toml"; : > "$1/src/lib.rs"; }
-# 呼び出し側の環境（CI が CARGO_TARGET_DIR を持つ）に左右されないよう、各ケースで変数を決める。
+# 呼び出し側の環境（CI が CARGO_TARGET_DIR を持つ）や利用者の cargo の設定
+# （~/.cargo/config.toml）に左右されないよう、各ケースで変数を決め CARGO_HOME を空にする。
+mkdir -p "${tmp}/cargo-home"
 mk_crate "${tmp}/crate"
-expect_eq "cargo_target_dir: default" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; cargo_target_dir "${tmp}/crate")" "${tmp}/crate/target"
-expect_eq "cargo_target_dir: CARGO_TARGET_DIR env" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; CARGO_TARGET_DIR="${tmp}/abs-td" cargo_target_dir "${tmp}/crate")" "${tmp}/abs-td"
-expect_eq "cargo_target_dir: relative env resolves from the crate root" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; CARGO_TARGET_DIR=rel-td cargo_target_dir "${tmp}/crate")" "${tmp}/crate/rel-td"
-expect_eq "cargo_target_dir: relative and absolute share the output" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; CARGO_TARGET_DIR=rel-td cargo_target_dir "${tmp}/crate")" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; CARGO_TARGET_DIR="${tmp}/crate/rel-td" cargo_target_dir "${tmp}/crate")"
-expect_eq "cargo_target_dir: CARGO_BUILD_TARGET_DIR env" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; CARGO_BUILD_TARGET_DIR="${tmp}/btd" cargo_target_dir "${tmp}/crate")" "${tmp}/btd"
+expect_eq "cargo_target_dir: default" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; export CARGO_HOME="${tmp}/cargo-home"; cargo_target_dir "${tmp}/crate")" "${tmp}/crate/target"
+expect_eq "cargo_target_dir: CARGO_TARGET_DIR env" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; export CARGO_HOME="${tmp}/cargo-home"; CARGO_TARGET_DIR="${tmp}/abs-td" cargo_target_dir "${tmp}/crate")" "${tmp}/abs-td"
+expect_eq "cargo_target_dir: relative env resolves from the crate root" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; export CARGO_HOME="${tmp}/cargo-home"; CARGO_TARGET_DIR=rel-td cargo_target_dir "${tmp}/crate")" "${tmp}/crate/rel-td"
+expect_eq "cargo_target_dir: relative and absolute share the output" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; export CARGO_HOME="${tmp}/cargo-home"; CARGO_TARGET_DIR=rel-td cargo_target_dir "${tmp}/crate")" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; export CARGO_HOME="${tmp}/cargo-home"; CARGO_TARGET_DIR="${tmp}/crate/rel-td" cargo_target_dir "${tmp}/crate")"
+expect_eq "cargo_target_dir: CARGO_BUILD_TARGET_DIR env" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; export CARGO_HOME="${tmp}/cargo-home"; CARGO_BUILD_TARGET_DIR="${tmp}/btd" cargo_target_dir "${tmp}/crate")" "${tmp}/btd"
 mk_crate "${tmp}/crate2"; mkdir -p "${tmp}/crate2/.cargo"; printf '[build]\ntarget-dir = "out"\n' > "${tmp}/crate2/.cargo/config.toml"
-expect_eq "cargo_target_dir: config.toml build.target-dir" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; cargo_target_dir "${tmp}/crate2")" "${tmp}/crate2/out"
+expect_eq "cargo_target_dir: config.toml build.target-dir" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; export CARGO_HOME="${tmp}/cargo-home"; cargo_target_dir "${tmp}/crate2")" "${tmp}/crate2/out"
 mkdir -p "${tmp}/empty-dir"
-expect_eq "cargo_target_dir: no manifest reports nothing" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; cargo_target_dir "${tmp}/empty-dir")" ""
+expect_eq "cargo_target_dir: no manifest reports nothing" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; export CARGO_HOME="${tmp}/cargo-home"; cargo_target_dir "${tmp}/empty-dir")" ""
 unset -f mise
 
 # tree_state: コミット済み・変更あり・git の確認の失敗を区別する。

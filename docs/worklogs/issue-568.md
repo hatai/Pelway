@@ -190,7 +190,7 @@
 使ったスキル: implement-issue、verify-pelway
 ## 実装者メモ（round 18）
 
-対象 head: b4ec435c3987670663f92134e708b7a7f84118a1
+対象 head: 4623e1809b043ea6b5fc49663a5159a21422099c
 
 1. 詰まった箇所: round 11（対象 head 12d2bf29、レビューの間に 3 コミット進んだ）の残り指摘の直し: (a) Codex の新 must-fix: 別の clone は共有 git dir が別なので、同じ Cargo 出力先を共有する run が別々のロックを取って実行ファイルを置き換えうる → ビルド先のロックを共有 git dir から、ビルド先そのものの中（`<target>/.verify-pelway.lock`）へ移した（git dir が違っても同じ出力先なら必ず同じロック）。あわせてビルド先の階層を `ensure_safe_dir` で「検査 → 一段ずつ作成 → 再検査」し、ビルド先自身が自分の持ち物でグループ・ほかが書けないことを要求する。(b) 両レビュアーの must-fix: `cargo_target_dir` の試験が呼び出し元の環境（CI の `CARGO_TARGET_DIR=target-ci`）を拾って落ちた → 各ケースで変数を明示的に unset・設定する（5441fd4e で先行対応済み、今回の head でも確認）。(c) nit: 冒頭の終了コードの説明を SKILL.md と同じ定義に、`lock_owner` はファイル全体が数字だけのときだけ、`network.txt` 集計行の書き込み失敗を合否に反映、ロックを外せたときだけ `released lock` を記録（外せなければ NG で FAIL）、demo-check に渡す環境の一覧に `LC_ALL` を追記、判断待ちの「最大 10 秒」を「10 秒の期限まで 1 秒ごと（期限の判定は要求の合間）」に、実装者メモ round 14・16 の引用を実在の文に、round 16 の 5 を提案の形に。
 2. 曖昧だった文: 「同じビルド先を共有する別の作業ツリーの run が…置き換えるのを防ぐ」（`.agents/skills/verify-pelway/SKILL.md` の 1 章「二重起動の確認」）──「同じビルド先を共有する別の run」の範囲が「共有 git dir が同じ作業ツリー」までなのか「別の clone」まで含むのか曖昧で、共有 git dir を置き場にする実装を生んだ。いまは「ビルド先の中にロックを置く（clone ごとに別の git dir でも同じロック）」と明記した。
