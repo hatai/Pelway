@@ -40,7 +40,7 @@ check review_waits_checks .agents/skills/review-pr/SKILL.md \
   'error: checks timeout'
 check pr_watch_reviewer_row .agents/skills/pr-watch/SKILL.md \
   'レビュー担当（skill `review-pr`。委託の子もトップレベルのスレッドも）' \
-  'scripts/agent-gh review pr checks <N> --watch --interval 30'
+  'scripts/agent-gh review pr checks <N> --required --watch --interval 30'
 check implementer_checks_timeout .agents/skills/implement-issue/SKILL.md \
   '委託した子が `error: checks timeout` を報告したときも、同じラウンドとして数えずに完了を待って再委託する'
 check runbook_checks_timeout docs/agents/grokbot-runbook.md \

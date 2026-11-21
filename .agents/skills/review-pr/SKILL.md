@@ -64,13 +64,13 @@ PR で変わっていないファイルは worktree（main）の版を読めば�
 
 検証・実測の報告（実測の記録や調査報告などで、結論を出している文書）を含む PR では、結論が実測した範囲に収まっているかを読む。実測した条件（環境、データの形、前提にした運用）を外れた場合まで「満たす」「保証する」と断定しているときは、確かめた事実と未検証の仮説を分けるよう求める。受け入れ条件の結論を左右する断定なら must-fix、左右しない書きぶりの問題なら nit とする。
 
-PR のチェックの結果を読む。ほかの検査より先に行う。必須チェック（`mise run verify` と `pr-size`）が終わっていないときは、`checks pending` で失敗を返さず、skill `pr-watch` の「待ち方」で待ってからレビューする（レビュー担当の行: `scripts/agent-gh review pr checks <N> --watch --interval 30` を前面で実行する）。
+PR のチェックの結果を読む。ほかの検査より先に行う。必須チェック（`mise run verify` と `pr-size`）が終わっていないときは、`checks pending` で失敗を返さず、skill `pr-watch` の「待ち方」で待ってからレビューする（レビュー担当の行: `scripts/agent-gh review pr checks <N> --required --watch --interval 30` を前面で実行する）。
 
 ```bash
 scripts/agent-gh review pr checks <N> --json name,bucket
 ```
 
-`--required` は付けない。必須チェックがまだ 1 つも報告されていない head では、`--required` は一覧を返さず `no required checks reported` で失敗するため。返った一覧から、名前が `mise run verify` と `pr-size` の行だけを使う。同じ名前の行が複数あるときは、すべてが `pass` のときだけ pass とし、どれかが `fail` なら fail、どれかが `pending` なら pending とする。`mise run verify` と `pr-size` の `bucket` が `pass` なら pass、`fail` なら fail。pr-size が fail のときは、PR のラベルを読む（`scripts/agent-gh review pr view <N> --json labels --jq '.labels[].name'`）。`pr-size-exception` があり、かつ PR が閉じる Issue のコメントに、行頭が `<!-- pr-size-exception -->` で始まり、作成者（`author.login`）が `hatai` のコメントがある（`scripts/agent-gh review issue view <Issue 番号> --json comments --jq '.comments[] | {author: .author.login, body}'`）ときだけ、must-fix に数えず、本文の検査の欄に `pr-size: fail（pr-size-exception）` と書く。どちらかが欠けていれば、通常どおり must-fix に数える。どちらかが `pending` か、見つからないときは、上の待ち方で待ち、終わってから読み直す。待ち始めから 60 分たっても終わらないときは、レビューを投稿せずに `verdict: failed`、`error: checks timeout` で報告する。
+この読むコマンドには `--required` を付けない（待つコマンドには付ける）。必須チェックがまだ 1 つも報告されていない head では、`--required` は一覧を返さず `no required checks reported` で失敗するため。返った一覧から、名前が `mise run verify` と `pr-size` の行だけを使う。同じ名前の行が複数あるときは、すべてが `pass` のときだけ pass とし、どれかが `fail` なら fail、どれかが `pending` なら pending とする。`mise run verify` と `pr-size` の `bucket` が `pass` なら pass、`fail` なら fail。pr-size が fail のときは、PR のラベルを読む（`scripts/agent-gh review pr view <N> --json labels --jq '.labels[].name'`）。`pr-size-exception` があり、かつ PR が閉じる Issue のコメントに、行頭が `<!-- pr-size-exception -->` で始まり、作成者（`author.login`）が `hatai` のコメントがある（`scripts/agent-gh review issue view <Issue 番号> --json comments --jq '.comments[] | {author: .author.login, body}'`）ときだけ、must-fix に数えず、本文の検査の欄に `pr-size: fail（pr-size-exception）` と書く。どちらかが欠けていれば、通常どおり must-fix に数える。どちらかが `pending` か、見つからないときは、上の待ち方で待ち、終わってから読み直す。待ち始めから 60 分たっても終わらないときは、レビューを投稿せずに `verdict: failed`、`error: checks timeout` で報告する。
 
 実装者メモ・調査報告などの成果物に「使ったスキル」の記録があれば、記録されたスキル（輸入スキル `tdd`・`diagnosing-bugs` など）が作業内容に反映されているかを抜き取りで確かめる。記録と実態が明らかに食い違うときは must-fix、判断が分かれるものは nit とする。輸入スキルの取り込み discipline（同梱スクリプトは実行しない、`agents/` のメタデータは使わない、採用していないスキルへの参照は無効、輸入品の本文より正本と適用ルールが優先）は役割スキルと `docs/agents/external-skills.md` に定める。
 
