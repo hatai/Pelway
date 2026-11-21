@@ -49,3 +49,6 @@ mutants.out/
 
 # eval 実行ワークスペース（skill-creator の被訳実行・採点結果。コミットしない）
 .eval-workspace/
+
+# Claude Code の個人用プロジェクト指示（CLAUDE.md を読み込む先。コミットしない）
+CLAUDE.local.md
