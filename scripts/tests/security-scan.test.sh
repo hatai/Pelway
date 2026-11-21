@@ -112,6 +112,8 @@ summary_bytes="$(wc -c <"$work/summary-gitleaks-many.md")"
 ((summary_bytes <= 1048576)) || failures+=("gitleaks-many: summary is $summary_bytes bytes, want <= 1048576")
 ((summary_bytes >= 800000)) || failures+=("gitleaks-many: summary is $summary_bytes bytes, want rows up to the budget")
 # マージコミットの差分（競合解消で足した行）も走査するため、git log に -m を渡す。
+# gitleaks の値を伏せる --redact と、semgrep の利用状況の送信を止める --metrics=off を外さない。
+want_contains gitleaks-redact "$(cat "$work/args-gitleaks-clean")" "--redact"
 want_contains gitleaks-merge-diff "$(cat "$work/args-gitleaks-clean")" "--log-opts=-m HEAD"
 # -m では同じ場所の値が複数のコミットで重ねて出るため、場所の重複を除いた数もサマリーに出す。
 gitleaks_dup='[{"RuleID":"r","File":"a.txt","StartLine":3,"Commit":"1111111111111111"},{"RuleID":"r","File":"a.txt","StartLine":3,"Commit":"2222222222222222"}]'
@@ -123,6 +125,7 @@ want_contains gitleaks-dup "$REPLY_SUMMARY" "1 か所"
 semgrep_hit='{"results":[{"check_id":"rust.lang.security.unsafe-usage","path":"crates/x/src/lib.rs","start":{"line":7},"extra":{"severity":"WARNING"}},{"check_id":"yaml.github-actions.security.run-shell-injection","path":".github/workflows/a.yml","start":{"line":3},"extra":{"severity":"ERROR"}}],"errors":[]}'
 run_case semgrep-clean semgrep 0 '{"results":[],"errors":[]}' 0
 want_absent semgrep-clean "$REPLY_LOG" "::warning"
+want_contains semgrep-metrics-off "$(cat "$work/args-semgrep-clean")" "--metrics=off"
 run_case semgrep-hit semgrep 1 "$semgrep_hit" 0
 want_contains semgrep-hit "$REPLY_LOG" "2 件"
 want_contains semgrep-hit "$REPLY_SUMMARY" '` rust.lang.security.unsafe-usage `'
@@ -150,9 +153,9 @@ want_absent osv-clean "$REPLY_LOG" "::warning"
 want_contains osv-no-call-analysis "$(cat "$work/args-osv-clean")" "--no-call-analysis=all"
 # マニフェストの推移的な依存の解決は、PR の作者が指定できるレジストリへ取りに行くため、使わない。
 want_contains osv-no-resolve "$(cat "$work/args-osv-clean")" "--no-resolve"
-# 既定の抽出器（同梱のソースのパスとハッシュを OSV.dev に送る directory など）を使わず、
-# ロックファイルの抽出器だけにする。
-want_contains osv-plugins "$(cat "$work/args-osv-clean")" $'--x-no-default-plugins\n--x-plugins\nlockfile'
+# 既定の抽出器（同梱のソースのパスとハッシュを OSV.dev に送る directory など）も、マニフェストの
+# 抽出器を含む lockfile プリセットも使わず、Cargo.lock の抽出器だけにする。
+want_contains osv-plugins "$(cat "$work/args-osv-clean")" $'--x-no-default-plugins\n--x-plugins\nrust/cargolock'
 run_case osv-hit osv-scanner 1 "$osv_hit" 0
 want_contains osv-hit "$REPLY_LOG" "1 件"
 want_contains osv-hit "$REPLY_SUMMARY" '` rsa 0.9.8 `'

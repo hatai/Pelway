@@ -22,8 +22,9 @@
 # 秘密の値は出さない: gitleaks は --redact で値を伏せ、サマリーにも規則・場所・コミットだけを書く
 # （レポートの Secret / Match は読まない）。
 # 結果の JSON は $SECURITY_SCAN_OUT（既定: リポジトリ外の一時ディレクトリ）に置く。
-# 終了コード: 0 = 検出なし・検出あり（報告のみ）、2 = 引数の誤り、3 = 終了コードに出ない
-# ツールの失敗（標準エラーの診断・semgrep の解析エラー）、それ以外 = ツール自身の終了コード
+# 終了コード: 0 = 検出なし・検出あり（報告のみ）、それ以外 = 失敗。2 = 引数の誤り、3 = 終了コードに
+# 出ないツールの失敗（標準エラーの診断・semgrep の解析エラー）、それ以外はツール自身の終了コードを
+# そのまま返す（ツールの終了コードが 2・3 と重なることがあるため、どの失敗かはログの ::error:: で見る）
 set -euo pipefail
 
 tool="${1:-}"
@@ -40,7 +41,7 @@ mkdir -p "$out_dir"
 report="$out_dir/$tool.json"
 errfile="$out_dir/$tool.stderr"
 summary="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
-local_hint="中身はログに出さない。手元で同じコマンドを実行して確かめる"
+local_hint="中身はログに出さない。手元で SECURITY_SCAN_OUT=<dir> bash scripts/security-scan.sh $tool を実行し、<dir>/$tool.stderr を読む"
 
 # Semgrep のルールセット（Semgrep Registry から取得。ログイン・トークンは使わない）。
 # p/rust: Rust、p/github-actions: CI 設定、r/bash: シェル（p/bash は Registry に無い）。
@@ -66,10 +67,13 @@ case "$tool" in
     # --no-call-analysis=all: 呼び出し解析（Go は既定で有効）は使わない。
     # --no-resolve: マニフェスト（pom.xml など）の推移的な依存を、PR の作者が指定できる
     # レジストリへ取りに行かない。
-    # --x-no-default-plugins --x-plugins lockfile: 既定の抽出器（同梱の C/C++ ソースのパスと
-    # ハッシュを OSV.dev に送る directory など）を使わず、ロックファイルの抽出器だけにする。
+    # --x-no-default-plugins --x-plugins rust/cargolock: 抽出器は Cargo.lock 用だけにする。既定の
+    # 抽出器（同梱の C/C++ ソースのパスとハッシュを OSV.dev に送る directory など）も、lockfile
+    # プリセット（pom.xml・go.mod などのマニフェストの抽出器を含む）も使わない。PR の作者が足した
+    # マニフェストの依存を OSV.dev に照会しないため。別のエコシステムのロックファイルを入れるときは、
+    # その抽出器の名前をここに足す。
     osv-scanner scan source --verbosity error --no-call-analysis=all --no-resolve \
-      --x-no-default-plugins --x-plugins lockfile \
+      --x-no-default-plugins --x-plugins rust/cargolock \
       --recursive --format json --output-file "$report" . 2>"$errfile" || rc=$?
     found_rc=1
     ;;
