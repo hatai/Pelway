@@ -3,12 +3,16 @@
 # モックの t3・agent-gh で、実装スレッドの状態と GitHub の状態を返し、指揮役の受信箱
 # （conductor-inbox.jsonl。Issue #555）に実装担当の状態の行（skill implement-issue の
 # 「ターンの終わりの状態の行」）を置いて、補助記録の waiting_on と watch.log の行を確かめる。
+# 試験 9 以降は受信箱の読み手（Issue #569）: 壊れた行・型の違う行を飛ばすこと、状態の行を
+# 実装スレッドの threadId で選ぶこと、symlink・FIFO・自分の所有でないファイルを読まないこと、
+# 4 MiB を超えるファイルは末尾だけを読むこと。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ROOT="$(mktemp -d)"
 WPID=""
-trap '[[ -n "${WPID:-}" ]] && kill "$WPID" 2>/dev/null; rm -rf "$ROOT"' EXIT
+# 巡回は setsid で自分のプロセスグループに入れて動かし、止めるときは python の子ごと止める
+trap '[[ -n "${WPID:-}" ]] && kill -KILL -- -"$WPID" 2>/dev/null; rm -rf "$ROOT"' EXIT
 failures=()
 
 MOCK="$ROOT/mock"
@@ -70,18 +74,26 @@ reset() {
   mkdir -p "$PELWAY"; : > "$ROOT/out.log"
 }
 
+# run_cycles <回数> — 巡回を回す。10 秒以内に終わらなければ、プロセスグループごと止めて
+# RUN_RC=1 にする（終わったら 0）。WRAP（配列）があれば、巡回のコマンドの前に付ける。
+WRAP=()
 run_cycles() {
+  local i
   echo 0 > "$MOCK/sleeps"
   MOCK="$MOCK" SLEEP_MAX="$1" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
     T3_BIN="$ROOT/bin/t3" PELWAY_BOARD_QUEUE_DIR="$ROOT/queue" \
-    bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
+    setsid "${WRAP[@]}" bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
   WPID=$!
+  for ((i = 0; i < 100; i++)); do kill -0 "$WPID" 2>/dev/null || break; /bin/sleep 0.1; done
+  RUN_RC=0
+  if kill -0 "$WPID" 2>/dev/null; then kill -KILL -- -"$WPID" 2>/dev/null; RUN_RC=1; fi
   wait "$WPID" 2>/dev/null; WPID=""
 }
 
 sget() {
   python3 -I -c 'import json,sys
-print(json.load(open(sys.argv[1]))["subjects"].get(sys.argv[2], {}).get(sys.argv[3], ""))' "$STATE" "$1" "$2"
+try: print(json.load(open(sys.argv[1]))["subjects"].get(sys.argv[2], {}).get(sys.argv[3], ""))
+except OSError: print("")' "$STATE" "$1" "$2"
 }
 sset() { # sset <issue> <field> <json value>
   python3 -I -c 'import json,sys
@@ -104,6 +116,7 @@ has() { grep -q -- "$2" "$1"; }
 count() { grep -c -- "$2" "$1"; }
 le() { (( $1 <= $2 )); }
 no_writes() { [[ ! -s "$MOCK/other-calls" ]]; }
+in_time() { [[ "$RUN_RC" == 0 ]]; }
 
 # 試験 1: 実装スレッドが completed で、最後の状態の行が working → 次の計算で conductor。
 # 元の値と時刻が watch.log の 1 行に残る。
@@ -167,6 +180,99 @@ check "7: STALL is printed once for the same stop" eq "$(count "$ROOT/out.log" '
 # 試験 8: 見張りが動いていることを示す HEARTBEAT の行を出す。
 check "8: HEARTBEAT line is printed" has "$ROOT/out.log" "HEARTBEAT"
 check "1-8: no writes to GitHub or threads" no_writes
+
+# 受信箱の行を直接書く。ev <issue> <thread_id の JSON> <report の JSON> <occurred_at の JSON>
+ev() {
+  printf '{"schema":"pelway.agent-watch/v1","event":"finished","thread_id":%s,"issue_number":%s,"round":1,"report":%s,"occurred_at":%s}\n' \
+    "$2" "$1" "$3" "$4" >> "$INBOX"
+}
+WR='"state: waiting-review\nhead: abc\nnext: 手順 9"'
+WC='"state: waiting-checks\nhead: abc\nnext: 手順 8"'
+# 読まれれば waiting_on が implement のまま、読まれなければ conductor になる材料（止まった実装スレッド）
+stopped() { issues "$(iss "$1" '{"name":"agent:working"}')"; prs "$(draft_pr "$1")"; threads "$(impl "$1" completed)"; }
+
+# 試験 9: UTF-8 として読めない行があっても、後ろの行の状態を読む。
+reset; stopped 51
+printf '\xff\xfe{"issue_number":51,"report":"state: working\n' >> "$INBOX"
+ev 51 '"mcp:impl-51"' "$WR" '"2026-11-20T10:01:00Z"'
+run_cycles 1
+check "9: a line after a non-UTF-8 line is read" eq "$(sget 51 waiting_on)" "implement"
+check "9: its waiting-review brings next_check_at forward" le "$(nca_minutes 51 2>/dev/null || echo 999)" 8
+
+# 試験 10: 型の違う行（report が文字列でも null でもない、occurred_at が文字列でない、
+# issue_number が真偽値、thread_id が文字列でない）は飛ばし、後ろの正しい行で更新する。
+reset; stopped 52
+ev 52 '"mcp:impl-52"' '5' '"2026-11-20T10:09:00Z"'
+ev 52 '"mcp:impl-52"' '["state: working"]' '"2026-11-20T10:09:00Z"'
+ev 52 '"mcp:impl-52"' '"state: working"' '123'
+ev true '"mcp:impl-52"' '"state: working"' '"2026-11-20T10:09:00Z"'
+ev 52 '52' '"state: working"' '"2026-11-20T10:09:00Z"'
+ev 52 '"mcp:impl-52"' "$WC" '"2026-11-20T10:01:00Z"'
+run_cycles 1
+check "10: lines of the wrong types are skipped and the valid line is used" eq "$(sget 52 waiting_on)" "implement"
+
+# 試験 11: 状態の行は最新の実装スレッドの threadId と thread_id が一致する知らせから選ぶ。
+# 後から来た CI の stalled（thread_id が空文字）と、前の実装スレッドの知らせは使わない。
+reset; stopped 53
+ev 53 '"mcp:impl-53"' "$WC" '"2026-11-20T10:01:00Z"'
+printf '%s\n' '{"schema":"pelway.agent-watch/v1","event":"stalled","thread_id":"","issue_number":53,"round":0,"report":null,"stall_reason":"ci-failed-twice","occurred_at":"2026-11-20T10:05:00Z"}' >> "$INBOX"
+ev 53 '"mcp:old-53"' '"state: working"' '"2026-11-20T10:06:00Z"'
+run_cycles 1
+check "11: CI stalled and an older thread do not override the implementer's state" eq "$(sget 53 waiting_on)" "implement"
+check "11: no stopped-thread rewrite" eq "$(count "$ROOT/out.log" 'PATROL #53 waiting_on=conductor')" "0"
+
+# 試験 12: 受信箱が symlink なら、指す先が正しい受信箱でも読まない。
+reset; stopped 54
+INBOX="$ROOT/real-inbox.jsonl"; rm -f "$INBOX"; ev 54 '"mcp:impl-54"' "$WR" '"2026-11-20T10:01:00Z"'
+INBOX="$PELWAY/conductor-inbox.jsonl"; ln -s "$ROOT/real-inbox.jsonl" "$INBOX"
+run_cycles 1
+check "12: a symlinked inbox is not read" eq "$(sget 54 waiting_on)" "conductor"
+check "12: the cycle finishes within 10 seconds" in_time
+
+# 試験 13: 受信箱が FIFO なら、開いて止まらず、10 秒以内にその回を終える。
+reset; stopped 55
+mkfifo "$INBOX"
+run_cycles 1
+check "13: a FIFO inbox does not block the cycle (10 seconds)" in_time
+check "13: the patrol state is still updated" eq "$(sget 55 waiting_on)" "conductor"
+
+# 試験 14: 受信箱が自分の所有でないファイルなら読まない。所有者を変えるのに sudo -n（CI）か
+# unshare --map-auto（ユーザー名前空間。巡回もその中で動かす）を使う。どちらも使えなければ skip と出す。
+reset; stopped 56
+ev 56 '"mcp:impl-56"' "$WR" '"2026-11-20T10:01:00Z"'; chmod 0644 "$INBOX"
+if sudo -n chown 0:0 "$INBOX" 2>/dev/null; then
+  echo "info 14: the inbox is chowned to root with sudo -n"
+  run_cycles 1
+elif unshare --map-auto -r true 2>/dev/null; then
+  echo "info 14: the inbox is chowned to uid 1 in a user namespace (unshare --map-auto)"
+  WRAP=(unshare --map-auto -r sh -c 'chown 1:1 "$0" && exec "$@"' "$INBOX")
+  run_cycles 1; WRAP=()
+else
+  RUN_RC=skip
+fi
+if [[ "$RUN_RC" == skip ]]; then
+  printf 'skip 14: no sudo -n and no unshare --map-auto to make a file owned by another user\n'
+else
+  check "14: an inbox owned by another user is not read" eq "$(sget 56 waiting_on)" "conductor"
+  check "14: the cycle finishes within 10 seconds" in_time
+fi
+
+# 試験 15: 4 MiB を超える受信箱は末尾の 4 MiB だけを読む。改行の無い 64 MiB の前に置いた行は読まれず、
+# 巡回は 10 秒以内に終わる。
+reset; stopped 57
+ev 57 '"mcp:impl-57"' "$WR" '"2026-11-20T10:01:00Z"'
+head -c $((64 << 20)) /dev/zero | tr '\0' x >> "$INBOX"
+run_cycles 1
+check "15: a line before the last 4 MiB is not read" eq "$(sget 57 waiting_on)" "conductor"
+check "15: a 64 MiB inbox without LF finishes within 10 seconds" in_time
+
+# 試験 16: 末尾の 4 MiB の中の、読み始めの断片の後ろにある正しい行は読む。
+reset; stopped 58
+head -c $((5 << 20)) /dev/zero | tr '\0' x >> "$INBOX"; printf '\n' >> "$INBOX"
+ev 58 '"mcp:impl-58"' "$WR" '"2026-11-20T10:01:00Z"'
+run_cycles 1
+check "16: a valid line in the last 4 MiB is read" eq "$(sget 58 waiting_on)" "implement"
+check "9-16: no writes to GitHub or threads" no_writes
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
