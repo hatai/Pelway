@@ -450,11 +450,22 @@ impl Runner {
             task,
             &format!("{PROPOSALS_LEAD}\n\n案A: {option_a}\n\n案B: {option_b}"),
         )?;
-        let decision_id = self
+        // 判断待ちの作成とタスクへの `decision_id`・状態の保存を、book → 台帳の順に
+        // 両方のロックを持ったまま行う。作成直後に確定されても、`on_decision_made`
+        // は book のロックを待つので、保存済みの ID と AwaitingDecision を見る
+        // （HTTP の decide は台帳のロックを離してから runner を呼ぶので、逆順の
+        // 取得は無い）。
+        let mut book = self
+            .inner
+            .book
+            .lock()
+            .map_err(|_| "タスク台帳のロックに失敗しました".to_owned())?;
+        let mut ledger = self
             .inner
             .ledger
             .lock()
-            .map_err(|_| "台帳のロックに失敗しました".to_owned())?
+            .map_err(|_| "台帳のロックに失敗しました".to_owned())?;
+        let decision_id = ledger
             .create_decision(
                 task.workspace_id.clone(),
                 CreateDecisionRequest {
@@ -479,13 +490,13 @@ impl Runner {
             .map_err(|_| "判断待ちを作れませんでした".to_owned())?
             .decision_id
             .clone();
-        if let Ok(mut book) = self.inner.book.lock()
-            && let Some(task) = book.tasks.get_mut(&task.task_id)
-        {
+        if let Some(task) = book.tasks.get_mut(&task.task_id) {
             task.decision_id = Some(decision_id);
             task.state = TaskState::AwaitingDecision;
             task.stop_reason = None;
         }
+        drop(ledger);
+        drop(book);
         Ok(())
     }
 

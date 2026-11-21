@@ -1106,3 +1106,41 @@ fn configured_basis_p03_also_gates_the_llm_call() {
     let task_id = runner.on_message_posted(&message).expect("task");
     assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
 }
+
+/// 判断待ちが作られた直後に確定されても、通知を取りこぼさず下書きに進む
+/// （判断待ちの作成とタスクへの ID・状態の保存の間に隙間が無い）。
+#[test]
+fn decision_right_after_creation_is_not_lost() {
+    for _ in 0..200 {
+        let gateway = Arc::new(SchemaGateway {
+            calls: AtomicUsize::new(0),
+        });
+        let (store, ledger, runner) = fixture(
+            DataStore::new_demo_seeded(now()),
+            Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
+        );
+        let message = post(
+            &store,
+            REQUESTER,
+            MemberKind::Human,
+            "@ハル 納期の案を作って",
+        );
+        let task_id = runner.on_message_posted(&message).expect("task");
+        // 判断待ちが見えた瞬間に確定して通知する（HTTP の decide と同じ手順）。
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let item = loop {
+            if let Some(item) = pending_items(&ledger).into_iter().next() {
+                break item;
+            }
+            assert!(Instant::now() < deadline, "判断待ちが作られない");
+            std::hint::spin_loop();
+        };
+        let outcome = decide_item(&ledger, &item, "a", DECIDER);
+        runner.on_decision_made(&item.request_message_id, &outcome);
+        assert!(
+            wait_state(&runner, &task_id, TaskState::AwaitingSendApproval),
+            "作成直後の確定で下書きに進まない: {:?}",
+            runner.task(&task_id).map(|t| t.state)
+        );
+    }
+}
