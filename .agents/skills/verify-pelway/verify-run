@@ -16,9 +16,11 @@ CH=ch-demo-anken-b
 BOT=m-hal
 REQUESTER=m-tanaka
 DECIDER=m-yamamoto
+# デモ seed（DataStore::new_demo_seeded）の #案件B のメンバー（ID の昇順）。
+SEED_MEMBERS="m-hal,m-sato,m-tanaka,m-yamamoto"
 POLL_SECS=10
-# 子の環境に入れてはいけない変数（fnox の秘密 3 つと、LLM の独自の接続先）。証拠には名前を書かずラベルだけ書く。
-FORBIDDEN_ENV="llm_key:PELWAY_LLM_API_KEY penpot_mcp_token:PELWAY_PENPOT_MCP_TOKEN database_url:PELWAY_DATABASE_URL llm_custom_base_url:PELWAY_LLM_CUSTOM_BASE_URL"
+# 子の環境に入れてはいけない変数（fnox の秘密 3 つと、LLM の接続先 2 つ）。証拠には名前を書かずラベルだけ書く。
+FORBIDDEN_ENV="llm_key:PELWAY_LLM_API_KEY penpot_mcp_token:PELWAY_PENPOT_MCP_TOKEN database_url:PELWAY_DATABASE_URL llm_custom_base_url:PELWAY_LLM_CUSTOM_BASE_URL llm_base_url:PELWAY_LLM_BASE_URL"
 # 後片付けの前後で生き残りを比べるプロセス（comm の完全一致の正規表現）。
 SURVIVOR_COMM='^(demo-serve|pitchfork|pelway-agent-wa|t3-.*)$'
 # 依頼の本文に埋める demo-check の目印（scripts/demo-check/canaries.txt の 1 行目）。
@@ -149,6 +151,14 @@ observe_sockets() {
   ss -Htanp 2>/dev/null | grep -F -e "pid=${PID}," -e " ${ADDR} " >> "${EV}/network.txt" || true
 }
 
+# 操作の間、0.1 秒ごとに ss を取り続ける（要求ごとの観察の間を埋める。それでも 0.1 秒より短い接続は取りこぼしうる）。
+start_sampler() {
+  # 子の標準入力のパイプは持たない（持つと run が SIGKILL されたときに子が終わらない）。親が死んだら止まる。
+  ( exec {DS_IN}>&-; while kill -0 "$$" 2> /dev/null; do observe_sockets; sleep 0.1; done ) &
+  SAMPLER=$!
+}
+stop_sampler() { [ -n "${SAMPLER:-}" ] && kill "${SAMPLER}" 2>/dev/null && wait "${SAMPLER}" 2>/dev/null; SAMPLER=""; }
+
 # 外に出ていないことの観察: 要求のたびに取ったこの PID のソケット（network.txt）が
 # すべて 127.0.0.1 同士で、開いているファイルが標準入出力とソケットだけか。
 network_check() {
@@ -159,7 +169,7 @@ network_check() {
   seen="$(grep -c . "${out}" 2>/dev/null)"; seen="${seen:-0}"
   nonlo="$(count_nonloopback "${out}")"
   local db; db="$(grep -c ':5432 ' "${out}")"
-  echo "# ss -tn の観察 ${seen} 行、loopback 以外との接続 ${nonlo} 件、DB（:5432）宛て ${db} 件" >> "${out}"
+  echo "# ss -tan の観察（要求ごと＋0.1 秒ごと）${seen} 行、loopback 以外との接続 ${nonlo} 件、DB（:5432）宛て ${db} 件" >> "${out}"
   [ "${seen}" -ge 1 ] && [ "${nonlo}" = 0 ] && [ "${db}" = 0 ] || return 1
   ! awk 'NR > 1 {print $NF}' "${EV}/proc-fd.txt" | grep -vqE "^(/dev/null|${EV}/server\.std(out|err)|socket:\[[0-9]+\]|anon_inode:.*|pipe:\[[0-9]+\])$"
 }
@@ -183,6 +193,7 @@ stop_child() {
 }
 
 cleanup() {
+  stop_sampler
   stop_child
   wait 2>/dev/null
   if [ -n "${LOCK:-}" ]; then rm -f "${LOCK}/pid"; rmdir "${LOCK}" 2>/dev/null; echo "released lock ${LOCK##*/}" >> "${EV}/cleanup.txt"; fi
@@ -226,14 +237,21 @@ wait_decision() {
   DEC_VER="$(jq -r --arg d "${DEC_ID}" '.[]? | select(.decision_id == $d) | .version' <<< "${BODY}" 2>/dev/null)"
 }
 
+# 使える合図の後半: seed を HTTP で読み、チャンネル・メンバーの ID と件数、過去の発言の件数を確かめる。0 = 使える。
+seed_ready() {
+  http seed-channels GET "/v1/workspaces/${WS}/channels?actor=${REQUESTER}" ""
+  [ "${STATUS}" = 200 ] || return 1
+  local members
+  members="$(jq -r --arg c "${CH}" '[.[] | select(.channel_id == $c) | .members[].member_id] | sort | join(",")' <<< "${BODY}" 2>/dev/null)"
+  SEED_DETAIL="channels=$(jq 'length' <<< "${BODY}") members=${members}"
+  [ "$(jq 'length' <<< "${BODY}")" = 1 ] && [ "${members}" = "${SEED_MEMBERS}" ] || return 1
+  http seed-messages GET "/v1/channels/${CH}/messages?actor=${REQUESTER}&after_seq=0" ""
+  local n; n="$(jq 'length' <<< "${BODY}" 2>/dev/null)"
+  SEED_DETAIL+=" messages=${n:-?}"
+  [ "${STATUS}" = 200 ] && [ "${n}" = 3 ]
+}
+
 operate() {
-  http channels GET "/v1/workspaces/${WS}/channels?actor=${REQUESTER}" ""
-  if [ "${STATUS}" = 200 ] && jq -e --arg c "${CH}" --arg b "${BOT}" \
-      '.[] | select(.channel_id == $c) | .members[] | select(.member_id == $b)' <<< "${BODY}" > /dev/null 2>&1; then
-    record PASS "seed: #案件B にハルがいる"
-  else
-    record FAIL "seed: #案件B にハルがいる" "テスト用データが無い status=${STATUS}"; return
-  fi
 
   local cm="cm-verify-${RUN_ID}"
   local mention="{\"client_msg_id\":\"${cm}\",\"body\":\"@ハル 納期延長の案を2つ作って ${CANARY}\",\"thread_root\":null}"
@@ -274,14 +292,15 @@ operate() {
     "{\"decision_id\":\"${DEC_ID}\",\"version\":${DEC_VER:-0},\"option_id\":\"a\"}"
   local outcome="${BODY}" new_ver
   new_ver="$(jq -r '.version // empty' <<< "${outcome}" 2>/dev/null)"
-  if [ "${STATUS}" = 200 ] && [ "$(jq -r '.selected.option_id' <<< "${outcome}" 2>/dev/null)" = a ] && [ -n "${new_ver}" ]; then
-    record PASS "決定: 山本が案A を選ぶ" "version ${new_ver}"
+  if [ "${STATUS}" = 200 ] && [ "$(jq -r '.selected.option_id' <<< "${outcome}" 2>/dev/null)" = a ] \
+      && [ "$(jq -r '.selected.body' <<< "${outcome}" 2>/dev/null)" = "${SCRIPT_A}" ] && [ -n "${new_ver}" ]; then
+    record PASS "決定: 山本が案A（台本の案A の本文）を選ぶ" "version ${new_ver}"
   else record FAIL "決定: 山本が案A を選ぶ" "status=${STATUS}"; return; fi
 
   http decide-replay POST "/v1/decisions/${DEC_ID}/decide" "${DECIDER}" \
     "{\"decision_id\":\"${DEC_ID}\",\"version\":${new_ver},\"option_id\":\"a\"}"
   if [ "${STATUS}" = 200 ] && [ "$(jq -cS . <<< "${BODY}" 2>/dev/null)" = "$(jq -cS . <<< "${outcome}")" ]; then
-    record PASS "冪等: 同じ選択の再決定は同じ結果"
+    record PASS "冪等: 同じ選択の再決定は同じ結果（保存された選択 a と案A の本文を読み直した）"
   else record FAIL "冪等: 同じ選択の再決定は同じ結果" "status=${STATUS}"; fi
 
   http decide-change POST "/v1/decisions/${DEC_ID}/decide" "${DECIDER}" \
@@ -302,10 +321,14 @@ operate() {
   [ "${FEATURE}" = mail-draft ] || return 0
   sleep "${POLL_SECS}"
   http messages-after-decide GET "/v1/channels/${CH}/messages?actor=${REQUESTER}&after_seq=${last}" ""
-  if [ "${STATUS}" = 200 ] && [ "$(jq --arg b "${BOT}" '[.[]? | select(.author_id == $b)] | length' <<< "${BODY}")" -ge 1 ]; then
-    record PASS "メール下書き: 決定後にハルが下書きを投稿する"
+  # 中身で判定する: 決定後のハルの投稿に、選んだ案A の本文があること。さらに、下書きを保存先から
+  # 取り直す経路が要る。main にはその経路が無いので、投稿があっても合格にしない。
+  local drafts
+  drafts="$(jq --arg b "${BOT}" --arg a "${SCRIPT_A}" '[.[]? | select(.author_id == $b and (.body | contains($a)))] | length' <<< "${BODY}" 2>/dev/null)"
+  if [ "${STATUS}" != 200 ] || [ "${drafts:-0}" = 0 ]; then
+    record FAIL "メール下書き: 決定した案A で下書きが作られ、保存先から取り直せる" "機能なし。${POLL_SECS} 秒待っても、案A の本文を含む決定後の bot 投稿が無い"
   else
-    record FAIL "メール下書き: 決定後にハルが下書きを投稿する" "機能なし。${POLL_SECS} 秒待っても決定後の bot 投稿が無い"
+    record FAIL "メール下書き: 決定した案A で下書きが作られ、保存先から取り直せる" "案A を含む bot 投稿は ${drafts} 件あるが、下書きを保存先から取り直す経路が無い（未検証）"
   fi
 }
 
@@ -370,6 +393,8 @@ main() {
     record FAIL "起動: 二重起動の確認" "同じ target の demo-serve が動いている pid=${other# }。動かさない（止めるかは人が決める）"; return 1
   fi
   record PASS "起動: 二重起動の確認" "同じ target の demo-serve なし、ロック取得"
+  # 起動の前に、この run 自身の環境に禁止の変数（LLM のキー・接続先、fnox の秘密）が無いことを記録する（名前の有無だけ）。
+  record PASS "起動前: run の環境に禁止の変数が無い" "$(for x in ${FORBIDDEN_ENV}; do printf '%s ' "${x%%:*}"; done)"
   survivor_pids > "${EV}/survivors-before.txt"
   pitchfork_list > "${EV}/pitchfork-before.txt"
   TOOLCHAIN="$(cd "${TOP}" && mise current rust 2>/dev/null)"
@@ -408,17 +433,21 @@ main() {
   fi
   HOST="${ADDR%:*}"; PORT="${ADDR##*:}"
   record PASS "起動: ready 行" "addr=${ADDR} pid=${PID}"
+  if seed_ready; then record PASS "起動: seed を HTTP で読める" "${SEED_DETAIL}"
+  else record FAIL "起動: seed を HTTP で読める" "テスト用データが無いか違う ${SEED_DETAIL:-status=${STATUS}}"; return 1; fi
 
   # 環境チェック
   if env_check > /dev/null; then record PASS "環境チェック" "env-check.txt tools.txt"
   else record FAIL "環境チェック" "env-check.txt の NG 行"; return 1; fi
 
-  # 操作
+  # 操作（その間、ss を取り続ける）
+  start_sampler
   operate
+  stop_sampler
 
   # 外に出ていないことの観察
-  if network_check; then record PASS "ネットワーク・ファイル: 127.0.0.1 のソケットと標準入出力だけ" "network.txt proc-fd.txt"
-  else record FAIL "ネットワーク・ファイル: 127.0.0.1 のソケットと標準入出力だけ" "network.txt proc-fd.txt"; fi
+  if network_check; then record PASS "ネットワーク・ファイル: 観察した範囲で 127.0.0.1 のソケットと標準入出力だけ" "network.txt proc-fd.txt。0.1 秒より短い接続は未検証"
+  else record FAIL "ネットワーク・ファイル: 観察した範囲で 127.0.0.1 のソケットと標準入出力だけ" "network.txt proc-fd.txt"; fi
   [ "${VERDICT}" = PASS ]
 }
 

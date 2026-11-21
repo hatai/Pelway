@@ -13,7 +13,7 @@
 
 ## Driving it with verify-run
 
-`verify-run --feature mail-draft`。`decision` と同じ段 1〜9 のあと、段 10 で 10 秒待ち、決定の前の最後の `seq` より後にハルの投稿があるかを `GET .../messages?after_seq=<seq>` で読む。応答は `steps/NN-messages-after-decide.resp`。
+`verify-run --feature mail-draft`。`decision` と同じ段 2〜9 のあと、段 10 で 10 秒待ち、決定の前の最後の `seq` より後のハルの投稿を `GET .../messages?after_seq=<seq>` で読み、選んだ案A の本文を含む投稿があるかを見る。bot の投稿があるだけでは合格にしない。案A を含む投稿があっても、下書きを保存先から取り直す経路が main に無いので、段 10 は FAIL（未検証）にする。応答は `steps/NN-messages-after-decide.resp`。
 
 ## Gotchas
 

@@ -4,7 +4,7 @@
 
 | 機能 | ファイル | `verify-run --feature` | 状態 |
 |---|---|---|---|
-| チャンネルの投稿と取得 | `channel-messages.md` | `decision`（段 1〜3・5・9） | 動く |
+| チャンネルの投稿と取得 | `channel-messages.md` | `decision`（起動の合図・段 2・3・5・9） | 動く |
 | ハルへのメンションから A/B 案 | `mention-proposal.md` | `decision`（段 2・4・5） | 動く（LLM は台本モード） |
 | 判断待ちと決定 | `decision.md` | `decision`（段 4・6〜9） | 動く |
 | 決定後のメール下書き | `mail-draft.md` | `mail-draft`（段 10） | 失敗（機能なし） |

@@ -12,7 +12,7 @@
 
 ## Driving it with verify-run
 
-`verify-run --feature decision` の段 1（一覧で seed を確かめる）、段 2（投稿）、段 3（同じ `client_msg_id` の再送が同じ `message_id`）、段 5（`after_seq` で読み戻し、依頼が 1 件だけ）、段 9（決定後に `after_seq=0` で取り直す）。応答は `steps/NN-channels.resp`・`steps/NN-mention.resp`・`steps/NN-mention-resend.resp`・`steps/NN-messages-after-mention.resp`・`steps/NN-final-messages.resp`。テストは `cargo test -p pelway-http --test channels`。
+`verify-run --feature decision` の起動の合図（一覧と `after_seq=0` で seed を確かめる）、段 2（投稿）、段 3（同じ `client_msg_id` の再送が同じ `message_id`）、段 5（`after_seq` で読み戻し、依頼が 1 件だけ）、段 9（決定後に `after_seq=0` で取り直す）。応答は `steps/NN-seed-channels.resp`・`steps/NN-seed-messages.resp`・`steps/NN-mention.resp`・`steps/NN-mention-resend.resp`・`steps/NN-messages-after-mention.resp`・`steps/NN-final-messages.resp`。テストは `cargo test -p pelway-http --test channels`。
 
 ## Gotchas
 
