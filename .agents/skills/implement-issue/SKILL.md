@@ -203,11 +203,13 @@ PR を作るたびに、T3 のスレッドにそのスレッドの PR を全部�
 
 ### 8. レビューを委託する
 
-差分が `scripts/agent-gh` を変えるとき、または `.claude/`・`.mcp.json`・`.codex/`・`.agents/skills/review-pr/`・`.agents/skills/security-review/`・どのディレクトリの `AGENTS.md`・`AGENTS.override.md`・`CLAUDE.md` を足す・変えるときはレビューを委託しない（後者はレビュー担当のツールの設定や従う手順を、委託の子が読む PR の版で差し替えうるため）。指揮役が main から立てるレビュースレッドに回るのを待ち、最後の返答を下の「ターンの終わりの状態の行」の `state: waiting-conductor` にして終える（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
+差分が `scripts/agent-gh` を変えるとき、または `.claude/`・`.mcp.json`・`.codex/`・`.devin/`・`.cursor/`・`.cursorrules`・`.windsurf/`・`.windsurfrules`・`.agents/skills/review-pr/`・`.agents/skills/security-review/`・`.agents/skills/pr-watch/`・どのディレクトリの `AGENT.md`・`AGENTS.md`・`AGENTS.local.md`・`AGENTS.override.md`・`CLAUDE.md` を足す・変えるときはレビューを委託しない（後者はレビュー担当のツールの設定や従う手順を、委託の子が読む PR の版で差し替えうるため。`.devin/` は Devin CLI がプロジェクト層として読む config・hooks・rules・skills、`.windsurf/`・`.windsurfrules`・`AGENT.md`・`AGENTS.local.md`・`.cursor/`・`.cursorrules` は互換で読まれる経路、`.agents/skills/pr-watch/` は `review-pr` が待ち方の手順として従わせるスキル）。指揮役が main から立てるレビュースレッドに回るのを待ち、最後の返答を下の「ターンの終わりの状態の行」の `state: waiting-conductor` にして終える（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
 
 PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。チェックがまだ動いていれば、完了を待ってから委託する（待ち方は skill `pr-watch` の「待ち方」に従う。必須チェックの通過は `pr-digest` の `required` 行で確かめる。レビュー担当もチェックが終わるまで待ってからレビューする。委託した子が `error: checks timeout` を報告したときも、同じラウンドとして数えずに完了を待って再委託する）。
 
 担当と effort は skill `command-team` の「レビュー担当と effort」の表で決める（通常は PR 番号の偶奇、高リスクは使える担当全て、抜き取りは PR 番号を 4 で割った余りが 0 のとき Claude を追加。自分が Devin CLI で実装した PR には Devin CLI を付けない）。差分が `unsafe` を足している、`.github/workflows/`・`scripts/agent-gh`・`AGENTS.md`・`.agents/skills/`・`docs/agents/` のどれかが変わっている、認証・認可・トークン・鍵・暗号・sandbox・egress・gateway・テナント分離・監査に触れている、のどれかに当たるときは Assigned 行に `security=yes` を付ける。
+
+委託の直前に、main の最新の `docs/dev-environment.md` で、割り当てる担当と回し先の両方の節（「専用 home での確認」と「レビュー担当の Claude」）の `保留中:` の行の有無を確かめる。保留の間は、使えない担当の番をもう片方の担当に回し（Codex の保留なら Claude、Claude の保留なら Codex）、両方使えなければ人間に知らせる。
 
 `delegate_task` で、ラウンドごとに新規に委託する（同じ委託への追記送信はしない）。task は次の 2 行にする（1 行目が skill 指示、2 行目が割り当ての行）:
 
