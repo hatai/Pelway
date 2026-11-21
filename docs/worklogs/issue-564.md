@@ -14,3 +14,15 @@
 5. 改善案: `t3 thread show --json` に model の options（effort）が出るようになれば、省略時に旧指揮役の effort も引き継ぐ（このスクリプトの `--effort` の扱いを直す）。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: 206e6aad（実装のコミット）
+
+1. 詰まった箇所: 土台の PR #561 が、`scripts/conductor-register` を消してインストールした `pelway-agent-watch --register` に替えてマージされた（worktree の版は sandbox の中から書き換えられるため）。main を取り込み、`scripts/conductor-rebuild` の宛先の登録を `~/.local/bin/pelway-agent-watch --register` に替え、入っていなければ何も送らずに止まるようにした。同じ理由で、`scripts/conductor-rebuild` は worktree から起動されたら止まる。`mise run conductor-register` のタスクは消した。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: 試験は worktree の中でも動くよう、`PELWAY_REBUILD_ALLOW_WORKTREE=1` で worktree の確かめを外す（環境変数はホストで hatai だけが設定する前提）。worktree から止まることは、`git worktree add` で作った別の worktree の版を起動して確かめる。
+4. 足りなかった情報・検証手段: 試験を変える前の `scripts/conductor-rebuild` に当てると 7 件落ちる（登録・見張り役の欠落・worktree の確かめ・タスクの削除）。
+5. 改善案: なし。
+
+使ったスキル: implement-issue
