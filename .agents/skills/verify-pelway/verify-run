@@ -8,7 +8,8 @@
 #   verify-run --help
 # 証拠は <evidence-root>/<label>-<sha>/<run-id>/ に置き、後片付けでも消さない。
 # evidence-root の既定は <共有 git dir>/pelway/evidence（git rev-parse --git-common-dir）。label の既定は adhoc。
-# 終了コード: 0 = 全段 PASS、1 = どこかが FAIL か未対応・道具が無い、2 = 引数の誤り。
+# 終了コード: 0 = 全段 PASS、1 = どこかが FAIL か未対応・道具が無い、2 = 引数の誤りか、
+#   run を始められない（証拠・ロックの置き場、git の確認）。
 set -uo pipefail
 
 WS=ws-demo-01
@@ -427,20 +428,24 @@ network_check() {
 # pid が 5 秒以内に終われば 0。
 gone_within() { local _; for _ in $(seq 50); do [ -e "/proc/$1" ] || return 0; sleep 0.1; done; return 1; }
 
-# 共有のロックの階層を作り、ほかの利用者が差し替えられないことを確かめる（証拠の置き場と同じ規則）。0 = 使える。
-# 作る前に既存の段を検査し、足りない段は一段ずつ作る（mkdir -p はリンクをたどってその先に作るので
-# 使わない）。作った後にもう一度確かめる。
-locks_dir_ready() {
-  local base="$1/pelway" want="$1/pelway/locks"
-  dir_chain_safe "${base}" "${want}" || return 1
-  local d="${want}" missing=()
+# ディレクトリを、ほかの利用者が差し替えられないことを確かめながら作る（証拠の置き場と同じ規則）。
+# 0 = 使える。作る前に既存の段を検査し、足りない段は一段ずつ作る（mkdir -p はリンクをたどって
+# その先に作るので使わない）。作った後にもう一度確かめる。
+ensure_safe_dir() {
+  dir_chain_safe "$1" "$1" || return 1
+  local d="$1" missing=()
   while [ ! -e "${d}" ]; do
     [ -L "${d}" ] && return 1
     missing=("${d}" "${missing[@]}")
     d="$(dirname -- "${d}")"
   done
   for d in "${missing[@]}"; do mkdir -- "${d}" 2>/dev/null || return 1; done
-  dir_chain_safe "${base}" "${want}"
+  dir_chain_safe "$1" "$1"
+}
+
+# 共有のロックの階層を作り、ほかの利用者が差し替えられないことを確かめる。0 = 使える。
+locks_dir_ready() {
+  ensure_safe_dir "$1/pelway" && ensure_safe_dir "$1/pelway/locks"
 }
 
 # ロックの持ち主の PID を、pid がリンクでない通常ファイルで中身が数字だけのときだけ返す（読めない・数字以外は空）。
@@ -488,7 +493,9 @@ cleanup() {
   local l
   for l in "${LOCK2:-}" "${LOCK:-}"; do
     [ -n "${l}" ] || continue
-    rm -f "${l}/pid"; rmdir "${l}" 2>/dev/null; echo "released lock ${l##*/}" >> "${EV}/cleanup.txt"
+    rm -f "${l}/pid" 2>/dev/null
+    if rmdir "${l}" 2>/dev/null; then echo "released lock ${l##*/}" >> "${EV}/cleanup.txt"
+    else echo "NG: lock ${l##*/}（${l}）を外せない。残っている" >> "${EV}/cleanup.txt"; VERDICT=FAIL; fi
   done
   if [ -e "${EV}/survivors-before.txt" ]; then
     pitchfork_list > "${EV}/pitchfork-after.txt"
@@ -713,14 +720,20 @@ main() {
     record FAIL "起動: ツールチェーン" "mise.toml の rust（${TOOLCHAIN:-不明}）の rustc が無い。mise install --locked を先に行う"; return 1
   fi
   # ビルドの前から持つ 2 つめのロック: 同じビルド先（cargo が報告する出力先の実体）を共有する
-  # 別の作業ツリーの run が、この run の検証中にビルドして実行ファイルを置き換えるのを防ぐ。置き換わると、
-  # 動かしたバイナリと証拠に残すコミットの対応が崩れる。run の終わりまで持つ。
+  # 別の作業ツリー・別の clone の run が、この run の検証中にビルドして実行ファイルを置き換えるのを防ぐ。
+  # 置き換わると、動かしたバイナリと証拠に残すコミットの対応が崩れる。ロックはビルド先の中に置く
+  # （共有 git dir は clone ごとに別なので、同じ出力先を使う run が必ず同じロックを取るには、
+  # 共有するビルド先そのものを置き場にする）。ビルド先の階層は、検査の前に書き込まない手順で作る。
+  # run の終わりまで持つ。
   target_real="$(cargo_target_dir "${TOP}")"
   if [ -z "${target_real}" ]; then
     record FAIL "起動: ビルド先の確認" "cargo metadata がビルド先を報告しない"; return 1
   fi
   target_real="$(realpath -m "${target_real}")"
-  lock2="${COMMON}/pelway/locks/bin-$(printf '%s' "${target_real}" | sha256sum | cut -c1-12)"
+  if ! ensure_safe_dir "${target_real}"; then
+    record FAIL "起動: ビルド先の確認" "ビルド先の階層（${target_real}）が自分の持ち物でない、リンクがある、またはほかが書ける"; return 1
+  fi
+  lock2="${target_real}/.verify-pelway.lock"
   if try_lock "${lock2}"; then LOCK2="${lock2}"
   else
     record FAIL "起動: 二重起動の確認" "同じビルド先を使う別の run がロックを持っている（pid=$(lock_owner "${lock2}" || echo 不明)、${lock2}）。動かさない"; return 1

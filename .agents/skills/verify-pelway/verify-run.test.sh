@@ -237,7 +237,11 @@ expect_eq "try_lock: released dir can be retaken" "$(d="${tmp}/lock-b"; try_lock
 expect_eq "try_lock: pid write failure releases the dir" "$(
   echo() { return 1; }; try_lock "${tmp}/lock-f" 2> /dev/null; rc=$?; unset -f echo
   [ -d "${tmp}/lock-f" ] && echo "${rc}-left" || echo "${rc}-gone")" "1-gone"
-expect_eq "bin lock is taken before the build" "$(awk '/bin-\$\(printf/{a=NR} /cargo build/{b=NR} END{print (a>0 && b>0 && a<b)?"yes":"no"}' "${tool}")" "yes"
+expect_eq "bin lock is taken before the build" "$(awk '/try_lock "\$\{lock2\}"/{a=NR} /cargo build/{b=NR} END{print (a>0 && b>0 && a<b)?"yes":"no"}' "${tool}")" "yes"
+# ビルド先のロックはビルド先の中に置く（共有 git dir は clone ごとに別なので、別の clone が同じ
+# 出力先を共有しても同じロックを取るには、共有するビルド先そのものを置き場にする必要がある）。
+expect_eq "bin lock lives inside the build dir (no common-dir key)" "$(
+  grep -q 'lock2="${target_real}/.verify-pelway.lock"' "${tool}" && ! grep -q 'pelway/locks/bin-' "${tool}" && echo yes || echo no)" "yes"
 
 # locks_dir_ready: 共有 git dir の pelway/locks を作り、証拠と同じ規則でほかの利用者が差し替えられない
 # 階層だけを通す（安全な証拠の置き場でも、ロックの階層が安全でなければ止まる）。
