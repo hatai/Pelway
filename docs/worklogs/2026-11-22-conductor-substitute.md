@@ -92,3 +92,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 
 - レビュー統制後継（mcp:launch:4c9a883a）から、#587 Codex r8 must-fix 2 件目（apply_patch の承認要求未確認・codex_review の運用 a/b/c）の判断を仰ぐ連絡。新規 codex_review 起動は返答まで自粛。開発リード経由で濱田さんへ回した
 - 巡回時刻の基準を実時刻（TZ=Asia/Tokyo date）に修正（リード指摘）
+
+## 巡回 26（02:55 JST）
+- PR #619 が Kodiak でマージ完了を実値確認（merged_at 2026-11-21T17:12:01Z、マージ後 head e81438b3）。Issue #614 完了。
+- PR #612 に新 head ea887b8d（#611 後継が r5 競合対策を push）。PR #572 に新 head 906da20f（#568 後継が push）。
+- 巡回 25（02:50 JST）: #586 r12 Devin レビューが approve・must-fix 0 で投稿完了（066d2fa2）。統制後継が #586/#587 に割り当て訂正コメントを投稿。#587 r9 Devin レビュー（103efc9e、46a13fdf 対象）実行中。
+- 巡回 24 同刻: 統制後継への send が断続のため、Devin レビュー実体を #586/#587 コメント（7066398245/7066398731）で共有。
