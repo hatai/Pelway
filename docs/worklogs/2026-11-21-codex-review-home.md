@@ -18,6 +18,8 @@
 | `~/.codex-review` への書き込み（確認用の子タスク、`touch ~/.codex-review/config.toml` と新しいファイル） | 合格（どちらも `Read-only file system` で拒否。同じ子タスクで worktree と `/tmp` には書けた） |
 | `codex sandbox -P review` での書き込み（`CODEX_HOME=~/.codex-review`、cwd は worktree） | `~/.codex-review/config.toml` と `~/.codex-review` の新しいファイル、worktree はどれも `Read-only file system` で拒否。`/tmp` は書けた |
 
+`web_search` を確かめる項目に足した後、`main` のコミットから委託した確認用の子タスクで、渡るツールに `t3`・`codex_apps`・`github`・`web_search` を含む名前が無く、ウェブ検索が使えないことを確かめた。MCP サーバーのツールも無かった。
+
 ## claude_review
 
 `~/.claude-review/settings.json` の `permissions.deny` に `mcp__t3-code` と `mcp__t3-code-direct` を足した後、`claude_review` の子タスクで確かめた。
@@ -26,3 +28,11 @@
 |---|---|
 | ツールの一覧に `t3` を含むツールが無いか | 合格（該当なし） |
 | `scripts/agent-gh review api /rate_limit` | 合格（exit 0） |
+
+`env` に `ENABLE_CLAUDEAI_MCP_SERVERS=false` を足した後、`main` のコミットから委託した `claude_review` の子タスクで確かめた。
+
+| 項目 | 結果 |
+|---|---|
+| `mcp__` で始まるツール（遅延読み込みの一覧を含む） | 0 個。claude.ai のコネクタのツールは出なかった |
+| 設定に残る MCP サーバー | アカウントから同期されたプラグインの MCP サーバー（GitHub・1Password ほか）。どれも接続に失敗したか、認証が要る状態で、ツールは 0 個 |
+| `scripts/agent-gh review api /rate_limit --jq .rate.limit` | 合格（`5000`） |
