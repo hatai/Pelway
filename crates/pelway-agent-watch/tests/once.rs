@@ -103,7 +103,7 @@ done
         fs::write(self.pelway_dir().join("patrol-state.json"), body).unwrap();
     }
 
-    /// ホスト側の登録ファイルに、いまの指揮役のスレッド ID を書く（scripts/conductor-register の代わり）。
+    /// ホスト側の登録ファイルに、いまの指揮役のスレッド ID を書く（`pelway-agent-watch --register` の代わり）。
     fn conductor(&self, id: &str) {
         let dir = self.root.join("home/.config/pelway-agent-notify");
         fs::create_dir_all(&dir).unwrap();
@@ -778,6 +778,16 @@ fn wake_failure_is_logged_once() {
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let err = stderr(&out);
     assert_eq!(err.matches("WAKE failed").count(), 1, "{err}");
+    // 内部で送り直さない: 失敗した呼び出しも記録する t3-calls で、thread send がちょうど 1 回
+    let calls = fs::read_to_string(sb.t3_calls()).unwrap_or_default();
+    assert_eq!(
+        calls
+            .lines()
+            .filter(|l| l.starts_with("t3 thread send"))
+            .count(),
+        1,
+        "{calls}"
+    );
     // 失敗した起こしは記録しない（次の新しい知らせで改めて試みる）
     let state = fs::read_to_string(sb.state_file()).unwrap();
     assert!(state.contains("\"last_wake_inbox_lines\":null"), "{state}");
@@ -985,4 +995,193 @@ fn partial_line_is_closed_before_appending() {
     let ev: serde_json::Value =
         serde_json::from_str(lines[1]).expect("the new event is its own line");
     assert_eq!(ev["event"], "finished");
+}
+
+// ---- PR #561 round 4 のレビューへの対応 ----
+
+#[test]
+fn list_and_wake_use_the_same_t3_as_the_server() {
+    // PATH の t3 はサーバーと食い違って失敗する。T3_BIN（サーバーと同じ実行ファイル）で一覧から起こしまで進む
+    let sb = Sandbox::new("t3-bin");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let server = sb.root.join("server");
+    fs::create_dir_all(&server).unwrap();
+    fs::copy(sb.root.join("bin/t3"), server.join("t3")).unwrap();
+    write_exec(
+        &sb.root.join("bin/t3"),
+        "#!/usr/bin/env bash\necho \"path-t3 $*\" >> \"$FAKE_DIR/path-t3-calls\"\nexit 1\n",
+    );
+    let out = sb
+        .command(&["--once"])
+        .env("T3_BIN", server.join("t3"))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 1, "{}", stderr(&out));
+    assert_eq!(sb.read_fake("t3-send-args").trim(), "mcp:conductor-1 -");
+    assert!(stderr(&out).contains("mode=not-sent"));
+    assert_eq!(sb.read_fake("path-t3-calls"), "");
+}
+
+#[test]
+fn existing_inbox_readable_by_others_is_restricted_before_writing() {
+    let sb = Sandbox::new("inbox-mode");
+    one_event(&sb);
+    fs::create_dir_all(sb.pelway_dir()).unwrap();
+    fs::write(sb.inbox(), "").unwrap();
+    fs::set_permissions(sb.inbox(), fs::Permissions::from_mode(0o644)).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(
+        fs::metadata(sb.inbox()).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(inbox_events(&sb).len(), 1);
+}
+
+#[test]
+fn conductor_and_another_thread_in_one_cycle_wake_once() {
+    // 指揮役自身の知らせと別のスレッドの知らせが同じ回に出たら、起こす（own-event にしない）
+    let sb = Sandbox::new("wake-own-and-other");
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:conductor-1","status":"completed","updatedAt":"2026-11-10T16:10:00Z"},
+  {"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "completed", "2026-11-10T16:10:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_a.json",
+        &show("mcp:a", "completed", "2026-11-10T16:10:00Z", 0),
+    );
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{
+  "mcp:conductor-1":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:a":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null}},"ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 2);
+    assert_eq!(sb.read_fake("t3-send-args").lines().count(), 1);
+}
+
+#[test]
+fn empty_registration_does_not_wake() {
+    let sb = Sandbox::new("wake-empty-reg");
+    one_event(&sb);
+    sb.conductor("");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 1);
+    assert!(sb.read_fake("t3-send-args").is_empty());
+}
+
+fn reg_file(sb: &Sandbox) -> PathBuf {
+    sb.root
+        .join("home/.config/pelway-agent-notify/conductor-thread-id")
+}
+
+fn reg(sb: &Sandbox, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_pelway-agent-watch"))
+        .args(args)
+        .env("HOME", sb.root.join("home"))
+        .env("PATH", sb.root.join("bin"))
+        .env("FAKE_DIR", sb.root.join("fake"))
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn register_show_and_unregister() {
+    let sb = Sandbox::new("register");
+    let out = reg(&sb, &["--show-registration"]);
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "(none)");
+
+    let out = reg(&sb, &["--register", "mcp:conductor-1"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(
+        fs::read_to_string(reg_file(&sb)).unwrap(),
+        "mcp:conductor-1\n"
+    );
+    let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&reg_file(&sb)), 0o600);
+    assert_eq!(mode(reg_file(&sb).parent().unwrap()), 0o700);
+    let out = reg(&sb, &["--show-registration"]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "mcp:conductor-1"
+    );
+    // 登録は見張りを始めない（t3 を呼ばない）
+    assert!(!sb.t3_calls().exists());
+
+    let out = reg(&sb, &["--unregister"]);
+    assert!(out.status.success());
+    assert!(!reg_file(&sb).exists());
+    let out = reg(&sb, &["--unregister"]);
+    assert!(out.status.success());
+}
+
+#[test]
+fn register_rejects_bad_ids_and_targets() {
+    let sb = Sandbox::new("register-bad");
+    for bad in ["--help", "-x", "a b", "a;rm", ""] {
+        let out = reg(&sb, &["--register", bad]);
+        assert_eq!(out.status.code(), Some(1), "{bad}");
+        assert!(!reg_file(&sb).exists(), "{bad}");
+    }
+    let out = reg(&sb, &["--register"]);
+    assert!(!out.status.success());
+
+    // 登録ファイルの位置がディレクトリなら、中に置かずに失敗する
+    fs::create_dir_all(reg_file(&sb)).unwrap();
+    let out = reg(&sb, &["--register", "mcp:conductor-1"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(fs::read_dir(reg_file(&sb)).unwrap().count(), 0);
+    fs::remove_dir(reg_file(&sb)).unwrap();
+
+    // symlink があれば、たどらずに symlink 自体を置き換える
+    let target = sb.root.join("target.txt");
+    fs::write(&target, "keep").unwrap();
+    std::os::unix::fs::symlink(&target, reg_file(&sb)).unwrap();
+    let out = reg(&sb, &["--register", "mcp:conductor-1"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(fs::read_to_string(&target).unwrap(), "keep");
+    assert!(
+        !fs::symlink_metadata(reg_file(&sb))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+}
+
+#[test]
+fn registration_symlink_or_fifo_is_not_followed_by_the_watch() {
+    let sb = Sandbox::new("reg-fifo");
+    one_event(&sb);
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    fs::create_dir_all(reg_file(&sb).parent().unwrap()).unwrap();
+    mkfifo(&reg_file(&sb));
+    let out = run_bounded(&sb);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    assert!(stderr(&out).contains("WAKE skipped reason=conductor-file-unreadable"));
+
+    fs::remove_file(reg_file(&sb)).unwrap();
+    let elsewhere = sb.root.join("elsewhere");
+    fs::write(&elsewhere, "mcp:planted\n").unwrap();
+    std::os::unix::fs::symlink(&elsewhere, reg_file(&sb)).unwrap();
+    one_event(&sb);
+    let out = run_bounded(&sb);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(sb.read_fake("t3-send-args").is_empty());
 }

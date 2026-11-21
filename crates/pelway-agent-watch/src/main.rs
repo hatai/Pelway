@@ -1,8 +1,11 @@
 //! pelway-agent-watch: T3 のスレッドを見張り、状態の変化を Grok Bot の webhook に通知する。
 //! 同じ知らせを指揮役の受信箱（共有の git dir の `pelway/conductor-inbox.jsonl`）にも書き、
-//! 補助記録に登録されたいまの指揮役のスレッドを決まった文で起こす（Issue #555）。
+//! ホストの登録ファイル（`~/.config/pelway-agent-notify/conductor-thread-id`）に登録された
+//! いまの指揮役のスレッドを決まった文で起こす（Issue #555）。既読の位置は補助記録から読む。
 //!
 //! 使い方: `pelway-agent-watch [--once | --cycles <n>] [--dry-run] [--project <path>]`
+//! 登録: `pelway-agent-watch --register <thread-id> | --unregister | --show-registration`
+//! （hatai がホストで、インストールした版を実行する。見張りは始めない）
 //! - 既定は 30 秒ごとのループ（`PELWAY_AGENT_WATCH_POLL_SECS` で変えられる）。`--once` は 1 周、`--cycles <n>` は n 周で終わる
 //! - `--dry-run` は送らずに新しいイベントの payload を 1 行ずつ標準出力に出す。状態ファイルは読むだけで書き換えない
 //! - 起動してよいのは本体 checkout からだけ。worktree では理由を 1 行ログに出して終わる
@@ -31,7 +34,8 @@ use serde_json::Value;
 const DEFAULT_POLL_SECS: u64 = 30;
 const CI_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const USAGE: &str =
-    "usage: pelway-agent-watch [--once | --cycles <n>] [--dry-run] [--project <path>]";
+    "usage: pelway-agent-watch [--once | --cycles <n>] [--dry-run] [--project <path>]
+       pelway-agent-watch --register <thread-id> | --unregister | --show-registration";
 
 struct Options {
     cycles: Option<u64>,
@@ -162,7 +166,40 @@ struct Watcher {
     last_ci: Option<Instant>,
 }
 
+/// 登録の操作（`--register` など）なら実行して終わる。見張りの引数なら何もしない。
+/// 登録はホスト側の登録ファイルだけを触り、checkout の確認と lock は要らない。
+fn registration_command() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let path = io::conductor_file();
+    let result = match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        ["--register", id] => io::register_conductor(&path, id).map(|()| "registered".to_string()),
+        ["--unregister"] => io::unregister_conductor(&path).map(|()| "unregistered".to_string()),
+        ["--show-registration"] => io::read_conductor_file(&path).map(|t| {
+            t.and_then(|t| parse_conductor_file(&t))
+                .unwrap_or_else(|| "(none)".to_string())
+        }),
+        ["--register", ..] => Err("--register needs one thread id".to_string()),
+        _ => return,
+    };
+    match result {
+        Ok(msg) => {
+            println!("{msg}");
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("agent-watch: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 fn main() {
+    registration_command();
     let opts = match parse_args() {
         Ok(o) => o,
         Err(e) => {
@@ -197,7 +234,9 @@ fn main() {
 impl Watcher {
     /// 1 周: 一覧 → 変わったものだけ詳細 → 判定 → CI 確認 → 送信待ちの列に積む → 送る → 保存。
     fn cycle(&mut self) {
-        let listed = match io::t3_list(&self.opts.project) {
+        // 一覧・詳細・起こしで同じ t3 を使う（PATH の t3 がサーバーと食い違っても止まらない）
+        let t3 = io::t3_bin();
+        let listed = match io::t3_list(&t3, &self.opts.project) {
             Ok(l) => l,
             Err(e) => {
                 // 一時的な失敗で「全スレッドが消えた」と誤解しないよう、この周は何もしない
@@ -209,7 +248,7 @@ impl Watcher {
             .iter()
             .filter(|l| needs_detail(&self.state, l))
             .filter_map(|l| {
-                io::t3_show(&l.id)
+                io::t3_show(&t3, &l.id)
                     .map_err(|e| eprintln!("agent-watch: {e}"))
                     .ok()
             })
@@ -253,7 +292,7 @@ impl Watcher {
                 .map(str::to_string)
                 .collect();
             match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &lines) {
-                Ok(total) => self.maybe_wake(total, &sources),
+                Ok(total) => self.maybe_wake(&t3, total, &sources),
                 Err(e) => eprintln!("agent-watch: ERROR inbox append failed: {e}"),
             }
         }
@@ -288,10 +327,10 @@ impl Watcher {
         }
     }
 
-    /// 受信箱に書いたあと、補助記録に登録されたいまの指揮役を起こす。
-    /// 指揮役が前回の起こしの後に受信箱を読んでいなければ、重ねて起こさない。
+    /// 受信箱に書いたあと、ホストの登録ファイルに登録されたいまの指揮役を起こす。
+    /// 指揮役が前回の起こしの後に受信箱を読んでいなければ（補助記録の既読の位置で見る）、重ねて起こさない。
     /// 失敗しても記録を進めず、次の新しい知らせで改めて試みる（再送の列は持たない）。
-    fn maybe_wake(&mut self, inbox_lines: u64, sources: &[String]) {
+    fn maybe_wake(&mut self, t3: &std::path::Path, inbox_lines: u64, sources: &[String]) {
         // 宛先はホスト側の登録ファイルからだけ読む（sandbox から書ける補助記録の値は使わない）
         let registered = match io::read_conductor_file(&io::conductor_file()) {
             Ok(Some(text)) => parse_conductor_file(&text),
@@ -323,15 +362,13 @@ impl Watcher {
             inbox_offset,
         };
         match decide_wake(&info, self.state.last_wake_inbox_lines) {
-            WakeDecision::Send(thread_id) => {
-                match io::wake(&io::wake_t3_bin(), &thread_id, WAKE_MESSAGE) {
-                    Ok(()) => {
-                        eprintln!("agent-watch: WAKE sent inbox_lines={inbox_lines}");
-                        self.state.last_wake_inbox_lines = Some(inbox_lines);
-                    }
-                    Err(why) => eprintln!("agent-watch: WAKE failed {why}"),
+            WakeDecision::Send(thread_id) => match io::wake(t3, &thread_id, WAKE_MESSAGE) {
+                Ok(()) => {
+                    eprintln!("agent-watch: WAKE sent inbox_lines={inbox_lines}");
+                    self.state.last_wake_inbox_lines = Some(inbox_lines);
                 }
-            }
+                Err(why) => eprintln!("agent-watch: WAKE failed {why}"),
+            },
             WakeDecision::NoConductor => {}
             WakeDecision::InvalidThreadId => {
                 eprintln!("agent-watch: WAKE skipped reason=invalid-thread-id");

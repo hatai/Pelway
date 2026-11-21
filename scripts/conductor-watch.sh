@@ -61,7 +61,7 @@ while true; do
   # （python 側で取得失敗と扱い、前回の処理済み ID を保つ）。
   scripts/agent-gh dev api "/repos/hatai/Pelway/issues/events?per_page=100" > "$D/label-events.json" 2>/dev/null || rm -f "$D/label-events.json"
   python3 -I - "$D" "$P" "$IL" "$PL" <<'PY'
-import json, sys, time, os, re, subprocess
+import json, sys, time, os, re, stat, subprocess
 from datetime import datetime, timedelta
 d = sys.argv[1]; sp = os.path.join(d, "state.json")
 # スレッド名の形式（skill command-team の「スレッド名」）。指揮役が作ったスレッドだけを見る。
@@ -231,10 +231,25 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
         if k not in impl_thread or (t.get("updatedAt") or "") > (impl_thread[k].get("updatedAt") or ""):
             impl_thread[k] = t
     inbox_state = {}
-    try: inbox_lines = open(os.path.join(os.path.dirname(ps_path), "conductor-inbox.jsonl")).read().splitlines()
-    except Exception: inbox_lines = []
-    for line in inbox_lines:
-        try: ev = json.loads(line)
+    # 受信箱は sandbox の中からも書ける場所にあるので、symlink をたどらず・FIFO で止まらずに開き、
+    # 通常ファイル・自分の所有を確かめ、末尾の INBOX_TAIL バイトだけを読む。
+    # 行は LF だけで分け、1 行ずつ UTF-8 と JSON として読む（壊れた行は飛ばし、後ろの行は読む）
+    INBOX_TAIL = 4 * 1024 * 1024
+    inbox_lines = []
+    try:
+        ifd = os.open(os.path.join(os.path.dirname(ps_path), "conductor-inbox.jsonl"),
+                      os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(ifd, "rb") as f:
+            inbox_st = os.fstat(f.fileno())
+            if stat.S_ISREG(inbox_st.st_mode) and inbox_st.st_uid == os.geteuid():
+                if inbox_st.st_size > INBOX_TAIL:
+                    f.seek(inbox_st.st_size - INBOX_TAIL)
+                    f.readline()  # 途中から読み始めた最初の行は捨てる
+                inbox_lines = f.read(INBOX_TAIL).split(b"\n")
+    except OSError:
+        inbox_lines = []
+    for raw in inbox_lines:
+        try: ev = json.loads(raw.decode("utf-8"))
         except Exception: continue
         if not isinstance(ev, dict) or not isinstance(ev.get("issue_number"), int): continue
         k = str(ev["issue_number"]); at = ev.get("occurred_at") or ""

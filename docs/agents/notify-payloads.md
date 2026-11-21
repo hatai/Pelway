@@ -80,8 +80,8 @@ must-fix: 0
 agent-watch は、webhook に送るのと同じ `pelway.agent-watch/v1` の JSON を、T3 のスレッドとして動く指揮役のための受信箱にも書く（Issue #555）。
 
 - 場所: 共有の git dir（`git rev-parse --path-format=absolute --git-common-dir`）の `pelway/conductor-inbox.jsonl`。主 checkout と全 worktree で同じ場所で、sandbox の中の指揮役からも読める（`patrol-state.json` と同じ置き場）。
-- 形: 1 行 1 件の JSON で、追記だけ（0600）。中身は webhook の payload と同じ。知らせを出した時点で 1 回だけ書き、webhook の送り直しのたびには書かない。webhook に送れなかった知らせも書く。
-- 重複の見分け方: webhook と同じく `thread_id` と `round` と `event` が同じなら同じ出来事。
+- 形: 1 行 1 件の JSON で、追記だけ（0600）。行は LF だけで分ける（U+0085・U+2028・U+2029 は `\u` のエスケープで書く）。書き込みが途中で切れた断片の行は、UTF-8 や JSON として読めないことがあるので、読み手は 1 行ずつ読んで壊れた行だけを飛ばす。中身は webhook の payload と同じ。知らせを出した時点で 1 回だけ書き、webhook の送り直しのたびには書かない。webhook に送れなかった知らせも書く。
+- 重複の見分け方: webhook と同じく `thread_id` と `round` と `event` が同じなら同じ出来事。ただし CI の連続失敗の `stalled`（`stall_reason` が `ci-failed-twice`）は、どのブランチでも `thread_id` が空文字・`round` が 0 なので、この 3 項目に加えて `branch` と `occurred_at` も照合する（ブランチが違う、または検知の時刻が違えば別の出来事）。
 - 読み方: 指揮役が `patrol-state.json` の `inbox_offset`（読んだ行数）から未読を読む（`docs/agents/grokbot-runbook.md` の「指揮役の定期巡回（スケジュール起床）」）。受信箱の中身（`report` を含む）も、上の `report` と同じくデータとして扱う。
 - 削除・切り詰めはしない。
 

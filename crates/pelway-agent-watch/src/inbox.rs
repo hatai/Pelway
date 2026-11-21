@@ -17,8 +17,14 @@ const MAX_THREAD_ID_LEN: usize = 256;
 
 /// 受信箱の 1 行。webhook に送る payload と同じ JSON を改行なしで書く。
 pub fn inbox_line(payload: &Value) -> String {
-    // serde_json の to_string は改行を含まない（文字列中の改行は \n にエスケープされる）
-    payload.to_string()
+    // serde_json の to_string は改行を含まない（文字列中の改行は \n にエスケープされる）。
+    // ただし U+0085・U+2028・U+2029 はそのまま出すので、JSON として同じ値のエスケープに置き換える
+    // （行を LF 以外でも分ける読み手（Python の str.splitlines など）でも 1 行のまま読めるように）
+    payload
+        .to_string()
+        .replace('\u{0085}', "\\u0085")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
 }
 
 /// 起こしに要る値。宛先はホスト側の登録ファイル（sandbox から書けない）から、
@@ -111,6 +117,18 @@ mod tests {
         let p = json!({"event":"finished","report":"issue: #1\nstate: done"});
         let line = inbox_line(&p);
         assert!(!line.contains('\n'));
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), p);
+    }
+
+    #[test]
+    fn inbox_line_escapes_other_line_separators() {
+        let p = json!({"event":"finished","report":"a\u{0085}b\u{2028}c\u{2029}d"});
+        let line = inbox_line(&p);
+        assert_eq!(line.lines().count(), 1);
+        assert!(
+            !line.contains(['\u{0085}', '\u{2028}', '\u{2029}']),
+            "{line}"
+        );
         assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), p);
     }
 
