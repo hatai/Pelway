@@ -95,3 +95,15 @@
 5. 改善案: レビュー対象外の nit（`pelway-qa` の表記が同名の人のアカウントと一致しうる件。review-pr のラウンドサマリーと `conductor-merge-queue` にも同じ形がある）、`docs/superpowers/specs/agent-team.md` の 22 行と 85 行に作成者の条件が無い件、7〜14 行の名義の表に `pelway-qa` の行が無い件は、別 Issue で `.agents/skills/review-pr/SKILL.md` と `docs/superpowers/specs/agent-team.md` の名義の確かめ方を「REST の `user.type == "Bot"` と `[bot]` 付きの login」に揃える。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 8・main 取り込みの衝突解消）
+
+対象 head: aaa3830b54ddfbbf4afefedb1701730f23854676
+
+1. 詰まった箇所: main（`3afed983`。#577・#585 の QA の書き方を含む）を取り込んだときに 3 ファイルが衝突した: `.agents/skills/command-team/SKILL.md`「マージ」、`docs/agents/grokbot-runbook.md` の 21 行・`merge` の巡回の行、`docs/superpowers/specs/agent-team.md` の手順 7 と役割分担の行。指揮役の指示（main に同じ内容があれば main を採り、ブランチ固有の決まりは残す）に沿って解いた。この PR の `QA-PASS pr=... sha=...` の形は落とし、main の `docs/agents/qa-checklist.md`「合格として数えるもの」（`QA: pass`・`sha:`・`run:`・`pelway-qa[bot]` の Bot）を正本として参照する形にした。ブランチ固有の決まりは残した: 編集されていないこと（`created_at == updated_at`）、hatai の名義と `pelway-qa` の名義を区別すること、投稿できないあいだは `automerge` を付けないこと、admin マージの例外は 3 つだけ。編集の確かめは qa-checklist の条件とコマンドにも足した。
+2. 曖昧だった文: 「ブランチ固有の決まりを残しつつ、main 側の新しい表現に揃える形で解消してください（main に既に取り込まれた同一内容は main を採用）。」（指揮役の T3 の指示）
+3. 仮定と解釈: 「同一内容」は、QA の合格コメントの形と作成者の確かめ方（main の qa-checklist）と読んだ。編集の検査はブランチ固有の認可の修正なので、正本の qa-checklist に足した。選ばなかった解釈: command-team の側だけに編集の検査を残し、qa-checklist は変えない（正本とずれ、指揮役が qa-checklist だけを見ると編集のすり抜けが残るため不採用）。
+4. 足りなかった情報・検証手段: verify の 1〜2 回目は、`[test]` が `rustc 1.75.0` で動いて落ちた。`mise exec -- rustc --version` が `mise WARN missing: rust@1.99.1` と出て、1.99.1 と 1.75.0 の間で揺れていた。取り込みの前の `ea1dfd53` を detach で checkout しても同じ WARN が再現したため、環境の問題として扱った。3 回目は exit 0（36 tests ok）。`mise run pr-size` は +143 / -20。
+5. 改善案: `docs/dev-environment.md` に「`mise WARN missing: rust@<版>` が出て `/usr/bin/rustc` に落ちるときの切り分け」を足す（別 Issue が適切）。
+
+使ったスキル: implement-issue
