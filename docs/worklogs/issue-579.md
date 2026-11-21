@@ -59,3 +59,15 @@
 5. 改善案: なし。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 6）
+
+対象 head: 67a5051a（実装のコミット）
+
+1. 詰まった箇所: round 5 は Claude が Request changes（must-fix 1）。pr-watch の文は印の出どころを限っておらず、public なリポジトリの会話コメントに第三者が印付きの行を書くと、直す対象に入った。pr-watch と implement-issue の Request changes のときの文を、`pelway-review` のレビューの nit に限り、ほかの作成者の印は印として扱わない、と直した。nit（止まる条件が判定によるか、試験のコメント、仕様の役割分担、PR 本文）も直した。
+2. 曖昧だった文: 「その round の後のレビューに、また印の nit が出た」— Request changes のときも止まるかが、表と本文で食い違っていた。判定によらず止まる、にそろえた。
+3. 仮定と解釈: must-fix のあるこの round は、印の nit だけを直す round ではないので、通算の数えには入らない（修正の回数の上限には数える）という前提。
+4. 足りなかった情報・検証手段: なし。
+5. 改善案: 目印や印を新しく足すときは、作成者を確かめる文を同じ箇所に書く（`<!-- pr-size-exception -->` と同じ型）。
+
+使ったスキル: implement-issue
