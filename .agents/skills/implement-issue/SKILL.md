@@ -233,7 +233,7 @@ scripts/agent-gh dev pr comment <M> --body "[review-request] head: <SHA> to: <�
 
 ### 9. レビュー結果を処理する
 
-委託の子の報告（`pr:` / `verdict:` / `must-fix:`）を、GitHub の実状態と突き合わせてから扱う:
+委託の子の報告（`pr:` / `verdict:` / `must-fix:`）が `verdict: failed` なら、GitHub に投稿が無いので突き合わせず、委託記録コメント（手順 8）で対象の PR と head を確かめてから、下の `failed` の扱い（`error:` の理由ごと）に進む。`approve` と `request-changes` は、GitHub の実状態と突き合わせてから扱う:
 
 ```bash
 scripts/agent-gh dev pr view <PR 番号> --json headRefOid,reviewDecision,reviews --jq '{headRefOid, reviewDecision, latest: (.reviews[-1] | {author: .author.login, state, commit: .commit.oid})}'
