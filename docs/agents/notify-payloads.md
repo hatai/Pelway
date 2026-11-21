@@ -7,7 +7,7 @@ Grok Bot の webhook には 2 種類の JSON が届く。`schema` で見分け�
 | `pelway.agent-watch/v1` | 見張り役 `agent-watch`（`crates/pelway-agent-watch`、pitchfork で常駐） | T3 のエージェントのスレッドの状態変化 |
 | `pelway.github-notify/v2` | `.github/workflows/notify-grokbot.yml` | GitHub の PR・レビュー・CI の出来事 |
 
-送れなかった通知は送り直すので、同じ通知が 2 回届くことがある（`thread_id` と `round` と `event` が同じなら同じ出来事）。どちらも `urgency` を持つ。`immediate` はすぐ対応し、`digest` は朝と夕方のまとめにだけ反映する。
+送れなかった通知は送り直すので、同じ通知が 2 回届くことがある（`thread_id` と `round` と `event` が同じなら同じ出来事。ただし CI の連続失敗の `stalled` は `thread_id` が空文字・`round` が 0 なので、`branch` と `occurred_at` も照合する）。どちらも `urgency` を持つ。`immediate` はすぐ対応し、`digest` は朝と夕方のまとめにだけ反映する。
 
 ## `pelway.agent-watch/v1`
 

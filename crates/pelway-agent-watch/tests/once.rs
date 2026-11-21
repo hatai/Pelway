@@ -611,6 +611,13 @@ fn inbox_appends_every_event() {
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let events = inbox_events(&sb);
+    // 同じ知らせを重ねて書かない（スレッド・種類・止まりの理由の組が 1 行ずつ）。
+    // 試験の時刻は古いので、実行中の d は waiting に加えて no-activity の stalled も出る
+    let keys: std::collections::BTreeSet<String> = events
+        .iter()
+        .map(|e| format!("{} {} {}", e["thread_id"], e["event"], e["stall_reason"]))
+        .collect();
+    assert_eq!(keys.len(), events.len(), "{events:?}");
     let kinds: std::collections::BTreeSet<String> = events
         .iter()
         .map(|e| e["event"].as_str().unwrap().to_string())
@@ -822,7 +829,7 @@ fn dry_run_writes_no_inbox_and_no_wake() {
     assert!(sb.read_fake("t3-send-args").is_empty());
 }
 
-// ---- 受信箱・補助記録の置き場は sandbox の中から書けるので、種類を確かめて開く（PR #561 round 1） ----
+// ---- 受信箱・補助記録の置き場は sandbox の中から書けるので、種類を確かめて開く ----
 
 /// 10 秒以内に終わらなければ止めて失敗にする（FIFO で止まらないことを確かめるため）。
 fn run_bounded(sb: &Sandbox) -> Output {
@@ -1002,7 +1009,7 @@ fn partial_line_is_closed_before_appending() {
     assert_eq!(ev["event"], "finished");
 }
 
-// ---- PR #561 round 4 のレビューへの対応 ----
+// ---- t3 の解決、受信箱の権限、own-event の混在、空の登録、登録の操作 ----
 
 #[test]
 fn list_and_wake_use_the_same_t3_as_the_server() {
@@ -1248,7 +1255,7 @@ fn registration_symlink_or_fifo_is_not_followed_by_the_watch() {
     assert!(sb.read_fake("t3-send-args").is_empty());
 }
 
-// ---- PR #561 round 6 のレビューへの対応 ----
+// ---- 既読の位置の範囲、宛先の切り替え ----
 
 #[test]
 fn out_of_range_offset_is_not_kept() {
@@ -1321,7 +1328,7 @@ fn new_conductor_is_woken_without_waiting_for_the_old_baseline() {
     );
 }
 
-// ---- PR #561 round 7 のレビューへの対応 ----
+// ---- 既読の位置の型 ----
 
 #[test]
 fn odd_inbox_offset_skips_wake() {
