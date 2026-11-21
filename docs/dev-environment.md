@@ -256,6 +256,8 @@ EOF
 - 許可された形で worktree と共有 `.git` に書けない: `git log -1 --format=%H --output=<worktree のファイル>` と `--output=<共有 .git のファイル>` が `Read-only file system` で失敗する。`git grep -O"bash -c 'echo x > <ファイル>'" -e <パターン>` で起動したコマンドも worktree・`/tmp` 直下に書けず、`git grep -O` で起動した `curl` は GitHub 以外へ接続できない。`mktemp` は `$TMPDIR` に作れる。書式は `%` を含むもの（`%H`）にする（git 2.56 は `--format=x` のような `%` の無い書式を `fatal: invalid --pretty format` で拒否し、`--output` まで届かない）
 - 許可にも deny にも無い読み取り系でない形（例: `scripts/agent-gh review release list`）が止まる（承認要求になる、または拒否される）
 
+今の保留の扱い: 上の最後の項目（`release list` が止まる）と、下の「#306 で追っている経路」「確かめ終えていない項目」は確かめ終えていないが、`claude_review` は hatai の決定で運用を続けている。保留を解く条件は、#306 の実測と QA の照合が済むこと。
+
 ### 確認手順の結果（記録欄）
 
 確認手順を実施したら、結果を次の表に記録する。記録されるまで `claude_review` は使わない（command-team の保留）。記録は Issue #256 の受け入れ条件の確認にも使う。
@@ -269,7 +271,7 @@ EOF
 | 承認要求を拒否に変えるフック（`hooks.PermissionRequest`）の結果 | `delegate_task`（target `claude_review`、`auto-accept-edits`、worktree）で確認。`H=$(git rev-parse HEAD); …; echo rc=$?` と `for f in …; do wc -l "$f"; done` は承認待ちにならずフックの拒否が返り、モデルは単純なコマンドに分けて送り直して結果を得た。`scripts/agent-gh review api /rate_limit` はそのまま通り、`curl -sS https://example.com` は permissions の deny で拒否のまま。スレッドに承認待ち（`pendingApproval`）は出なかった | 2026-11-21 |
 | フック導入後の実レビューの観察 | 導入後 1 時間の `claude_review` の実レビュー 9 セッションで、フックの拒否は 26 件。拒否を理由に `verdict: failed` になったレビューは無かった（`failed` の 1 件は PR のチェックの未報告による）。拒否のうち `git ls-tree`・`git -C`・`agent-gh review run list` は単純な形でも承認要求になっていたため、`git ls-tree`・`git cat-file`・`run list`・`run view` を許可に足した（`claude -p` で通ることと、`run download` は拒否のままであることを確認）。拒否されたのと同じコマンドを 1 回そのまま送り直す例が多かったため、フックのメッセージに 1 文足した | 2026-11-21 |
 | 書き込み先の制限の結果（#306。許可された形で worktree と共有 `.git` に書けないか） | `denyWrite: ["~/"]` の適用後、`delegate_task`（target `claude_review`、`auto-accept-edits`、worktree）で実測。`git log -1 --format=%H --output=t306-probe-wt.tmp`（worktree）と `--output=/home/hatai/repos/hatai/Pelway/.git/t306-probe-gitdir.tmp`（共有 `.git`）はどちらも exit 128・`Read-only file system`。`git grep -O"bash -c 'echo x > t306-probe-grep.tmp'" -e mise`（worktree）と同じ形の `/tmp/t306-probe-tmp.tmp`（`/tmp` 直下）は、コマンドは起動するが書き込みが `Read-only file system` で失敗。`git grep -O"bash -c 'mktemp'" -e mise` は `/tmp/claude-1000/tmp.*` を作れた。`git grep -O"bash -c 'curl -sS -m 10 https://example.com -o /dev/null'" -e mise` は sandbox のプロキシで遮断（`CONNECT tunnel failed, response 403`、`host is not on the allow list`）。実測の後、親スレッドから 4 つの書き込み先にファイルが無いことを `ls` で確かめた。別の実測スレッドでは `touch` の結果が worktree・`$HOME`・`$HOME/.config` で拒否、`$TMPDIR` で成功だった | 2026-11-20・2026-11-21 |
-| 許可にも deny にも無い読み取り系でない形の結果（#306。`scripts/agent-gh review release list` が止まるか） | 止まらなかった。承認要求にならずに実行され、exit 0・出力なし（リポジトリにリリースが無いため。セッションの記録 `~/.claude-review/projects/<作業パス>/<SESSION_ID>.jsonl` でも、承認を挟まずに `Bash completed with no output` で終わっている）。セッションの `permissionMode` は `acceptEdits`、設定は `defaultMode: dontAsk`。`sandbox.autoAllowBashIfSandboxed` は設定に無い。この項目の既定は false（実測時の Claude Code 2.1.329 の本体に同梱された設定の説明に「Default: false」「still defaults to false」とある。2.1.330 も同じ）ため、この項目は原因ではない。止まらなかった原因（T3 の `auto-accept-edits` が承認要求に自動で許可を返しているのか、Claude Code の permissions の評価なのか）は特定していない。この実測は、承認要求を拒否に変えるフック（`hooks.PermissionRequest`）を入れる前のもの。上の「T3 は `--permission-mode=acceptEdits` を渡すので」の段落は、許可リストに無いスクリプトやサブコマンドは承認要求になる（フックで拒否される）としており、フック導入後の観察では `agent-gh review run list` が承認要求になって拒否された。この記述と、`release list` がフック導入前に承認なしで通った実測は食い違う。フック導入後に `release list` が止まるかは実測していない | 2026-11-21 |
+| 許可にも deny にも無い読み取り系でない形の結果（#306。`scripts/agent-gh review release list` が止まるか） | 止まらなかった。承認要求にならずに実行され、exit 0・出力なし（リポジトリにリリースが無いため。セッションの記録 `~/.claude-review/projects/<作業パス>/<SESSION_ID>.jsonl` でも、承認を挟まずに `Bash completed with no output` で終わっている）。セッションの `permissionMode` は `acceptEdits`、設定は `defaultMode: dontAsk`。`sandbox.autoAllowBashIfSandboxed` は設定に無い。この項目の既定は false（実測時の Claude Code 2.1.329 の本体に同梱された設定の説明に「Default: false」「still defaults to false」とある。2.1.330 も同じ）ため、この項目は原因ではない。止まらなかった原因（T3 の `auto-accept-edits` が承認要求に自動で許可を返しているのか、Claude Code の permissions の評価なのか）は特定していない。この実測は、承認要求を拒否に変えるフック（`hooks.PermissionRequest`）を入れる前のもの。上の「T3 は `--permission-mode=acceptEdits` を渡すので」の段落は、許可リストに無いスクリプトやサブコマンドは承認要求になる（フックで拒否される）としており、フック導入後の観察では `agent-gh review run list` が承認要求になって拒否された。この記述と、`release list` がフック導入前に承認なしで通った実測は食い違う。フック導入後の測定では拒否された（承認要求は出ず、実行されなかった）が、`cd <repo> && …` の複合形で行ったため、拒否の対象が `release list` 自体かは切り分けられていない。単一形での再測と QA の照合は #306 で待っている | 2026-11-21 |
 | 秘密の置き場の読み取り（#306 の決定で、`denyWrite` の適用後に記録する項目。1 = 拒否、0 = 成功） | `test -r` の結果は `~/.config/fnox` 0・`~/.config/pelway-agent` 0・`~/.config/pelway-agent-qa` 0・`~/.config/gh/hosts.yml` 1。期待した「1 のまま」になっていない。`test -r` は access(2) で権限ビットを見るだけのため、denyRead で中身が隠されたディレクトリでも 0 になりうる。中身を読む実測（`wc -c` など）はエージェントには行わせない | 2026-11-20 |
 
 `denyWrite` の差分と戻し方（`~/.claude-review/settings.json`。設定は hatai が手で変える）:
@@ -289,16 +291,16 @@ EOF
 
 - `api -F <key>=@<file>`・`pr review --body-file <file>` で読み取り可能なローカルファイルを GitHub へ送信できる（#305）
 
-#306 の実測で見つかった経路は、hatai の判断を待っている（受け入れはされていない。追跡は #306。フォロー Issue の起票案は #306 のコメントにある）:
+#306 で追っている経路（#306 は開いたまま。受け入れ条件は変えず、実測と QA の照合が済んだら閉じる）:
 
-- 許可にも deny にも無いコマンド（変数展開を含まない形。例: `scripts/agent-gh review release list`）が、承認要求にならずに実行される（記録欄の「許可にも deny にも無い読み取り系でない形の結果」の行。実測はフックの導入前で、導入後に止まるかは実測していない）
+- 許可した `git grep *` の `-O<コマンド>`（`--open-files-in-pager`）で、任意のコマンドを起動できる。起動するのは git で、シェル経由で起動するため、内側のコマンドは permissions の deny（`curl *`・`git *`・`auth *`・`gist *` など）とも、承認要求を拒否に変えるフックとも照らし合わされない。`denyWrite` の適用後は、内側のコマンドも sandbox の中で動く。書ける先は `$TMPDIR` だけになり（ホームの下と `/tmp` 直下は拒否）、外への接続は GitHub だけになる（記録欄の「書き込み先の制限の結果」の行）。起動したコマンドから何を読めるか、`scripts/agent-gh review` の資格情報を使えるかは確かめていない
+- 許可にも deny にも無いコマンド（例: `scripts/agent-gh review release list`）が止まること（受け入れ条件 3）は、今の設定ではまだ確かめ終えていない。フックの導入前の実測では、承認要求にならずに実行された（記録欄の「許可にも deny にも無い読み取り系でない形の結果」の行）。フックの導入後の測定では拒否されたが、`cd <repo> && …` の複合形で行ったため、拒否の対象が `release list` 自体かは切り分けられていない。単一形での再測と QA の照合を #306 で待っている
 
-`denyWrite` の適用後の確認で、未達または未確認のまま残っている項目（#306。どれも hatai の判断を待っている。運用を続けるか、確かめ終えるまで止めるかも hatai が決める）:
+`denyWrite` の適用後の確認で、確かめ終えていない、または満たしていない項目（#306）:
 
-- 未達: 許可にも deny にも無いコマンドが止まること（上の経路）
-- 未達: 書ける一時フォルダがレビュー専用であること。`$TMPDIR` の実体の `/tmp/claude-1000` は uid ごとに 1 つで、同じユーザーのほかのプロセスと共有される
-- 未確認: 秘密の置き場の読み取りが拒否されること。`test -r` は権限ビットしか見ないため拒否を測れず、中身を読む実測はエージェントには行わせない。人が sandbox の下で、中身を読むコマンドで確かめる
-- 未確認: `denyWrite` の下で、実際の PR レビュー（`scripts/agent-gh review pr review` による投稿まで）が最後まで終わること。実測のセッションは完了して記録も保存されたが、PR レビューの完走は確かめていない
+- 満たしていない: 書ける一時フォルダがレビュー専用であること。`$TMPDIR` の実体の `/tmp/claude-1000` は uid ごとに 1 つで、同じユーザーのほかのプロセスと共有される
+- 確かめていない: 秘密の置き場の読み取りが拒否されること。`test -r` は権限ビットしか見ないため拒否を測れず、中身を読む実測はエージェントには行わせない。人が sandbox の下で、中身を読むコマンドで確かめる
+- 確かめていない: `denyWrite` の下で、実際の PR レビュー（`scripts/agent-gh review pr review` による投稿まで）が最後まで終わること
 
 ## レビュー担当の Devin CLI（devin_review）
 
