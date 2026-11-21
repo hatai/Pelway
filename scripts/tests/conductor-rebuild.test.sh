@@ -24,10 +24,21 @@ esac
 T3
 chmod +x "$ROOT/t3"
 
+# 偽の見張り役（インストールした pelway-agent-watch の代わり）。--register <id> で登録ファイルに書く
+mkdir -p "$ROOT/home/.local/bin"
+cat > "$ROOT/home/.local/bin/pelway-agent-watch" <<'W'
+#!/usr/bin/env bash
+[[ "$1" == --register ]] || exit 9
+mkdir -p "$HOME/.config/pelway-agent-notify"
+printf '%s\n' "$2" > "$HOME/.config/pelway-agent-notify/conductor-thread-id"
+W
+chmod +x "$ROOT/home/.local/bin/pelway-agent-watch"
+
 run() {
   rm -f "$LOG" "$LOG".*; [[ -n "${1:-}" ]] && touch "$LOG.$1"
   shift || true
-  HOME="$ROOT/home" T3_BIN="$ROOT/t3" LOG="$LOG" bash "$REPO/scripts/conductor-rebuild" "$@" >"$ROOT/out" 2>&1
+  HOME="$ROOT/home" T3_BIN="$ROOT/t3" LOG="$LOG" PELWAY_REBUILD_ALLOW_WORKTREE=1 \
+    bash "$REPO/scripts/conductor-rebuild" "$@" >"$ROOT/out" 2>&1
 }
 check() {
   local name="$1"; shift
@@ -79,7 +90,27 @@ task_runs() { /usr/bin/python3 -I -c 'import sys, tomllib
 t = tomllib.load(open(sys.argv[1], "rb"))["tasks"][sys.argv[2]]
 sys.exit(0 if t.get("run") == sys.argv[3] else 1)' "$REPO/mise.toml" "$1" "$2"; }
 check "mise task conductor-rebuild runs the script" task_runs conductor-rebuild "bash scripts/conductor-rebuild"
-check "mise task conductor-register runs the script" task_runs conductor-register "bash scripts/conductor-register"
+no_task() { /usr/bin/python3 -I -c 'import sys, tomllib
+sys.exit(1 if sys.argv[2] in tomllib.load(open(sys.argv[1], "rb"))["tasks"] else 0)' "$REPO/mise.toml" "$1"; }
+check "no mise task for the removed conductor-register" no_task conductor-register
+
+# 見張り役が入っていなければ、何も送らずに止まる
+mv "$ROOT/home/.local/bin/pelway-agent-watch" "$ROOT/watch.bak"
+run "" --from "$OLD"; rc=$?
+check "missing pelway-agent-watch exits non-zero" [ "$rc" -ne 0 ]
+check "missing pelway-agent-watch makes no t3 calls" [ ! -s "$LOG" ]
+mv "$ROOT/watch.bak" "$ROOT/home/.local/bin/pelway-agent-watch"
+
+# worktree からの起動は止まる（PELWAY_REBUILD_ALLOW_WORKTREE を付けない）
+wt="$ROOT/wt"
+git -C "$REPO" worktree add -q --detach "$wt" HEAD 2>/dev/null
+if [[ -d "$wt" ]]; then
+  rm -f "$LOG"
+  HOME="$ROOT/home" T3_BIN="$ROOT/t3" LOG="$LOG" bash "$wt/scripts/conductor-rebuild" --from "$OLD" >"$ROOT/out" 2>&1; rc=$?
+  git -C "$REPO" worktree remove --force "$wt"
+  check "refuses to run from a worktree" [ "$rc" -ne 0 ]
+  check "worktree refusal makes no t3 calls" [ ! -s "$LOG" ]
+fi
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # 指揮役の立て直し（恒久交代。docs/agents/conductor-context.md の「恒久交代」）を始める。
-# hatai がホストの端末で実行する。
+# hatai がホストの端末で、本体 checkout の版を実行する（worktree の版は sandbox の中から書き換えられるので、
+# worktree から起動されたら止まる）。
 #
 #   scripts/conductor-rebuild --from <旧指揮役のスレッド ID> [--provider <id> --model <slug>] [--effort <値>]
 #
 # 1. 旧指揮役に決まった停止の文を送り、終わるまで待つ（t3 thread send --wait）
 # 2. 新しい指揮役を本体 checkout で立てる（t3 thread start。--worktree は付けない）
-# 3. 起こしの宛先を新しい指揮役に替える（scripts/conductor-register）
+# 3. 起こしの宛先を新しい指揮役に替える（インストールした ~/.local/bin/pelway-agent-watch --register）
 # 旧指揮役の settle と巡回の scheduled task の作り直しは、新しい指揮役が引き継ぎの確認の後に行う
 # （t3 CLI には settle が無い。権限は確認の完了で移る）。
 # provider・model を省略したときは旧指揮役と同じものを使う（t3 thread show で読む）。
@@ -52,7 +53,16 @@ fi
 
 # 本体 checkout（共有の git dir の親）。新しい指揮役はここで動く。
 common="$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)"
+gitdir="$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-dir)"
 project="$(dirname "$common")"
+# worktree の版（sandbox の中から書き換えられる）からは動かない。試験だけ PELWAY_REBUILD_ALLOW_WORKTREE=1 で外す
+if [[ "$gitdir" != "$common" && "${PELWAY_REBUILD_ALLOW_WORKTREE:-}" != 1 ]]; then
+  echo "conductor-rebuild: run it from the main checkout ($project), not from a worktree" >&2; exit 1
+fi
+
+# 宛先の登録に使う、インストールした見張り役（mise run agent-watch-install で入れる）
+WATCH="${PELWAY_AGENT_WATCH_BIN:-$HOME/.local/bin/pelway-agent-watch}"
+[[ -x "$WATCH" ]] || { echo "conductor-rebuild: $WATCH not found (run mise run agent-watch-install)" >&2; exit 1; }
 
 show="$("$T3" thread show "$from" --json)"
 if [[ -z "$provider" || -z "$model" ]]; then
@@ -78,5 +88,5 @@ if ! valid_id "$new"; then
   echo "conductor-rebuild: failed to start the new conductor; registration unchanged" >&2; exit 1
 fi
 
-bash "$(dirname "$0")/conductor-register" "$new"
+"$WATCH" --register "$new"
 echo "conductor-rebuild: new conductor $new (the old conductor is settled by the new one after the handover check)"
