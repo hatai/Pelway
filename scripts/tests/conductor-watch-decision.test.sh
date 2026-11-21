@@ -379,6 +379,13 @@ check "24: needs-human added after the first read -> no writes" eq "$(calls)" ""
 reset; issue_with 731 "$T20" needs-decision; on_read comments 731 "i['state'] = 'closed'"
 run_cycles 1
 check "24: issue closed after the first read -> no writes" eq "$(calls)" ""
+# 付与・開閉は Issue の読み取りと最後の events の取得の間にも確かめ直す（events の方が新しい）
+reset; issue_with 755 "$T20" needs-decision; on_read issue 755 "i['events'][-1].append(ev('labeled', 'needs-human', '$T5'))"
+run_cycles 1
+check "24: needs-human event between the issue read and the last events fetch -> no writes" eq "$(calls)" ""
+reset; issue_with 756 "$T20" needs-decision; on_read issue 756 "i['events'][-1].append(ev('closed', '', '$T5'))"
+run_cycles 1
+check "24: closed event between the issue read and the last events fetch -> no writes" eq "$(calls)" ""
 # 25. 見張りのコメントの後に needs-human を付けるのに失敗し、ほかの誰かが needs-human を付けたら、needs-decision を外さない
 fail_first edit-add 728; heal; set_labels 728 needs-decision needs-human
 run_cycles 1
@@ -459,12 +466,12 @@ check "33: added but not yet in events -> no writes, the attempt kept" eq "$(cal
 gh_edit 'st[args[0]]["events"][-1].append(json.load(open(args[1])))' 742 "$MOCK/lagged"
 run_cycles 1
 check "33: once in events -> needs-decision removed" eq "$(calls)" "issue edit 742 --remove-label needs-decision"
-# 34. 通知を書いた後、付ける前にほかの誰かの needs-human が付いたら（試行の記録が無い）、held を残して止まる
+# 34. 付与が Issue の読み取りと最後の events の取得の間に起きたら、通知の前なら何も書かない。通知の後なら通知だけ書いて held になる
 reset; issue_with 743 "$T20" needs-decision
 on_read events 743 "i['labels'].append('needs-human'); i['events'][-1].append(ev('labeled', 'needs-human', '$T5'))" 2
 run_cycles 1
-check "34: someone else's needs-human after the notice -> held, needs-decision kept" eq "$(calls)|$(last_line)" \
-  "issue comment 743 --body-file -|DECISION held #743 labeled_at=$T20"
+check "34: someone else's needs-human before the notice -> no writes" eq "$(calls)" ""
+check "34: someone else's needs-human before the notice -> no record" eq "$(record_of 743)" ""
 # 定型コメントだけで見張りの記録が無い（ほかの担当が書いた）ときは、別の担当の needs-human で held にせず、外れたら格上げを続ける
 reset; issue_with 744 "$T20" needs-decision; add_comment 744 'pelway-dev[bot]' "$(body_for "$T20")"
 on_read issue 744 "i['labels'].append('needs-human')"
@@ -475,6 +482,18 @@ set_labels 744 needs-decision; : > "$MOCK/calls"
 run_cycles 1
 check "34: after the other's needs-human is removed -> the notice is not reposted" eq "$(calls)" "$(label_calls 744)"
 check "34: after the other's needs-human is removed -> escalated" eq "$(last_line)" "$(escalated 744)"
+# 通知の前後で、Issue の読み取りと最後の events の取得の間に付与が出るとき（ラベル一覧はまだ古い）:
+# 通知前なら何も書かず、通知後なら通知だけ書いて held になる
+reset; issue_with 757 "$T20" needs-decision
+on_read issue 757 "i['events'][-1].append(ev('labeled', 'needs-human', '$T5'))"
+run_cycles 1
+check "34: needs-human between the issue read and the last events fetch before the notice -> no writes" eq "$(calls)" ""
+reset; issue_with 758 "$T20" needs-decision
+on_read issue 758 "i['events'][-1].append(ev('labeled', 'needs-human', '$T5'))" 1
+run_cycles 1
+check "34: needs-human after the notice, before the add step -> notice once, no label edit"   eq "$(calls)" "$(lines "issue comment 758 --body-file -")"
+check "34: needs-human after the notice, before the add step -> held (exact)"   eq "$(last_line)" "DECISION held #758 labeled_at=$T20"
+check "34: needs-human after the notice, before the add step -> needs-decision kept"   eq "$(labels_of 758)" "needs-decision"
 # 35. needs-human の付与が変更なしで成功しても（直前にほかの担当が付けた）added にせず、試行と付与イベントの照合で held にする
 reset; issue_with 746 "$T20" needs-decision
 on_read edit 746 "i['labels'].append('needs-human'); i['events'][-1].append(ev('labeled', 'needs-human', '$T5'))"
@@ -493,6 +512,14 @@ run_cycles 1
 check "36: removal confirmed -> escalated reported (exact)" eq "$(last_line)" "$(escalated 747)"
 check "36: removal confirmed -> record cleaned" eq "$(record_of 747)" ""
 check "36: removal confirmed -> no writes" eq "$(calls)" ""
+# 外した応答が失われたあと次の周までに新しい needs-decision が付いたら、前の付与の完了を 1 回報告してから新しい付与を別の期限で進める
+fail_first edit-remove-lost 759 "$T40"; heal
+relabel 759 "$T5"; set_labels 759 needs-decision needs-human
+run_cycles 1
+check "36: relabeled after a lost removal -> old escalation completed once" \
+  eq "$(decision_lines | grep -c "escalated #759 labeled_at=$T40")" "1"
+check "36: relabeled after a lost removal -> no writes for the new labeling" eq "$(calls)" ""
+check "36: relabeled after a lost removal -> old record replaced" eq "$(record_of 759)" ""
 # 37. 途中で Issue が閉じたら記録を残し、再オープン後に解除の再試行を再開する
 fail_first edit-remove 748
 check "37: mid-flight record is added" eq "$(record_of 748)" "$T20 added"
@@ -505,6 +532,28 @@ run_cycles 1
 check "37: reopened -> removal retried" eq "$(calls)" "issue edit 748 --remove-label needs-decision"
 check "37: reopened -> escalated" eq "$(last_line)" "$(escalated 748)"
 check "37: reopened -> labels end as needs-human" eq "$(labels_of 748)" "needs-human"
+# 38. 同じ付与が続いている間は通知済みの記録を残す: needs-decision の付いたまま閉じて再オープンしても通知は繰り返さない
+reset; issue_with 760 "$T40" needs-decision; reg "$CONDUCTOR"
+run_cycles 1  # 指揮役がいるので知らせるだけ（overdue 1 回）
+gh_edit 'st[args[0]]["state"] = "closed"' 760
+run_cycles 1
+gh_edit 'st[args[0]]["state"] = "open"' 760
+run_cycles 1
+check "38: same labeling close+reopen -> overdue is not repeated" \
+  eq "$(decision_lines | grep -c 'overdue #760')" "1"
+check "38: same labeling close+reopen -> no writes" eq "$(calls)" ""
+# `held` の記録も同じ付与が続く間は残す: 再オープン後に格上げを再開しない
+fail_first edit-add 761; heal
+gh_edit 'i = st[args[0]]; i["labels"].append("needs-human"); i["events"][-1].append(ev("labeled", "needs-human", args[1]))' 761 "$T5"
+run_cycles 1  # 試行の後のほかの誰かの付与 -> held
+gh_edit 'i = st[args[0]]; i["state"] = "closed"; i["labels"].remove("needs-human")' 761
+run_cycles 1
+gh_edit 'st[args[0]]["state"] = "open"' 761
+run_cycles 1
+check "38: held record survives close+reopen -> still held" eq "$(record_of 761)" "$T20 held"
+check "38: held record survives close+reopen -> no re-escalation" eq "$(calls)" ""
+check "38: held record survives close+reopen -> overdue once (exact)" \
+  eq "$(decision_lines | grep -c 'overdue #761')" "1"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

@@ -274,8 +274,12 @@ def escalate(n, lt, reason):
         evs = events(n)  # Issue の読み直しの間に外して付け直された付与を、古い付与のまま扱わない
         if evs is None: return
         labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
-        if iss.get("state") != "open" or "needs-decision" not in labs or open_labeling(evs) != lt: return
-        human = "needs-human" in labs
+        # Issue の読み取りとの間の付け外し・開閉は最後の events の方が新しい: events の最後のイベントで確かめ直す
+        st = [e for e in evs if e.get("event") in ("closed", "reopened")]
+        open_ = st[-1]["event"] == "reopened" if st else iss.get("state") == "open"
+        if not open_ or "needs-decision" not in labs or open_labeling(evs) != lt: return
+        nh = label_events(evs, "needs-human")
+        human = "needs-human" in labs or bool(nh and nh[-1]["event"] == "labeled")
         if stage == "adding":
             new = [e for e in label_events(evs, "needs-human") if isinstance(e.get("id"), int) and e["id"] > rec.get("seen", 0)]
             if any(e["event"] == "labeled" and (e.get("actor") or {}).get("login") == ESCALATION_AUTHOR for e in new):
@@ -308,16 +312,25 @@ if issues is not None:
         if human and not (reason and (esc.get(n) or {}).get("stage") in ("commented", "adding", "added")): continue
         lt = open_labeling(events(n))
         if lt is None: continue  # 取得失敗・イベントが見つからない: 遅れとは扱わず、次の周で取り直す
+        old = esc.get(n)
+        if old and old.get("labeled_at") != lt:
+            # 前の labeled_at の途中の記録: 新しい付与が開いているので前の付与の解除は確定。
+            # 見張りの格上げ（added）なら完了を 1 回報告してから、新しい付与の記録に替える
+            if old.get("stage") == "added":
+                print(f"DECISION escalated #{n} labeled_at={old.get('labeled_at')} reason={old.get('reason') or reason or 'resumed'}", flush=True)
+            del esc[n]; store()
         if not human: decision_at[n] = lt
         if now - iso(lt).timestamp() < DECISION_SECS: continue
         if not human and cur["decision_warned"].get(n) != lt: print(f"DECISION overdue #{n} labeled_at={lt}", flush=True); cur["decision_warned"][n] = lt
         if reason: escalate(n, lt, reason)
-    cur["decision_warned"] = {k: v for k, v in cur["decision_warned"].items() if k in labeled}
+    # 一覧から外れた Issue（閉じた・一覧の窓外）の通知済み時刻も残す。同じ labeled_at で再出現しても重複して知らせない
     # 処理対象から外れた Issue に途中の記録があれば Issue ごとの状態で照合する（読むだけで書き込みはしない）。needs-decision が
-    # 外れていれば消す（完了の行は added のときだけ出す）。残っていれば閉じている・一覧の窓外でも残す。held・removed は読まずに消す
+    # 外れていれば消す（完了の行は added のときだけ出す）。残っていれば閉じている・一覧の窓外でも残す。held の記録は読まずに残し、removed は消す
     keep = set(labeled)
     for n, r in esc.items():
-        if n in keep or r.get("stage") not in ("commented", "adding", "added"): continue
+        if n in keep: continue
+        if r.get("stage") == "held": keep.add(n); continue  # 同じ labeled_at の保留は残す
+        if r.get("stage") not in ("commented", "adding", "added"): continue
         iss = gh_json("api", f"/repos/hatai/Pelway/issues/{n}")
         if not isinstance(iss, dict): keep.add(n); continue  # 読めなければ次の周に照合する
         labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
