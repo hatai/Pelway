@@ -62,3 +62,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 - PR #586: Codex r11 request-changes @65f6ed35（Claude approve 後）。#587: Codex r8 request-changes @ebb1648c。両レビューループ継続（指揮役の委託ではない・a2e1fc7f 系の一本化対象）
 - #568 実装スレッド: T3 障害で failed→running 往復中（infra 側）
 - #560: 例外条件の Issue 記録は完了（7065852656）・実装スレッドへの t3_thread_send は接続断続で未達 → pending_thread_sends に記録・次回再送
+
+## 巡回記録（patrol 3・03:15 JST）
+
+- 未読なし（受信箱 152・watch 3379）。#619 の QA 委託は実行中。#560 の impl スレッドは completed のまま（t3_thread_send 継続不可・決定記録は Issue 7065852656 に投稿済み）
