@@ -66,7 +66,8 @@ agent-watch の最後のログ（`pitchfork logs Pelway/agent-watch`）。この
 
 ## 未解決の問い
 
-- 再起動の前の 12:52 時点でも、webhook は `http=200` を返していた。#505 は Grok 側の受け口 pelway-2 が 11/12 から止まっているとしている。200 を返したのが pelway-2 か、受けたあと Grok Bot が動いたかは、このリポジトリからは確かめられない。
+- 開発リードによると、Grok 側の受け口 pelway-2 は有効で、2026-11-21 12:52 JST までは通知を受け取れていた。12:52 以降は 1 件も届いていない。これは agent-watch の最後の送信（12:52:26、`http=200`）と、12:55 の再起動で起動されなかったことと合う。#505 の「11/12 から止まっている」は、今の状態とは違う。
+- 送る側のフック: エージェントごとのフック（Claude の Stop hook など）は使わない決まり（`docs/superpowers/specs/agent-team.md:108`）で、リポジトリにもない（`.claude/` は `skills` だけ）。webhook に送るのは agent-watch と `.github/workflows/notify-grokbot.yml` だけ。
 - ログには `skip cycle: t3 thread: exit 1` が多い（12:00〜12:35 だけで 6 回）。T3 の CLI がときどき失敗している。今回の停止とは別の問題で、調べていない。
 
 ## 使ったスキル
