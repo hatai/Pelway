@@ -14,7 +14,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use pelway_contract::decision::{DecideRequest, DecisionListItem};
+use pelway_contract::decision::{
+    CreateDecisionRequest, DecideRequest, DecisionListItem, DecisionOption, DecisionOutcome,
+};
 use pelway_contract::ids::{ChannelId, MemberId, OptionId, WorkspaceId};
 use pelway_contract::ledger::ApprovalLedger;
 use pelway_contract::member::{ChannelMember, MemberKind};
@@ -637,6 +639,139 @@ fn decision_generates_mail_draft() {
     );
 }
 
+/// `item` の判断待ちを `option` で確定する（決定者は `decider`）。
+fn decide_item(
+    ledger: &Mutex<ApprovalLedger>,
+    item: &DecisionListItem,
+    option: &str,
+    decider: &str,
+) -> DecisionOutcome {
+    ledger
+        .lock()
+        .expect("ledger")
+        .decide(
+            DecideRequest {
+                decision_id: item.decision_id.clone(),
+                version: item.version,
+                option_id: OptionId::from(option),
+            },
+            &MemberId::from(decider),
+            now(),
+        )
+        .expect("decide")
+}
+
+/// 同じ依頼メッセージを指す別の判断待ちを確定しても、runner のタスクは進まない
+/// （runner が作った判断待ちの確定だけで下書き生成に入る）。
+#[test]
+fn decision_for_another_card_does_not_advance_task() {
+    let gateway = Arc::new(SchemaGateway {
+        calls: AtomicUsize::new(0),
+    });
+    let (store, ledger, runner) = fixture(
+        DataStore::new_demo_seeded(now()),
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
+    );
+    let message = post(
+        &store,
+        REQUESTER,
+        MemberKind::Human,
+        "@ハル 納期の案を作って",
+    );
+    let task_id = runner.on_message_posted(&message).expect("task");
+    assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
+    let calls_before = gateway.calls.load(Ordering::SeqCst);
+
+    // 別の利用者が同じ依頼メッセージを指す判断待ちを作り、自分で確定する。
+    const OTHER: &str = "m-intruder";
+    let other = ledger
+        .lock()
+        .expect("ledger")
+        .create_decision(
+            WorkspaceId::from(WS),
+            CreateDecisionRequest {
+                channel_id: ChannelId::from(CH),
+                request_message_id: message.message_id.clone(),
+                requester: MemberId::from(OTHER),
+                decider: MemberId::from(OTHER),
+                question: "別の論点".to_owned(),
+                options: vec![
+                    DecisionOption {
+                        option_id: OptionId::from("a"),
+                        body: "別カードの案".to_owned(),
+                    },
+                    DecisionOption {
+                        option_id: OptionId::from("b"),
+                        body: "別カードの案2".to_owned(),
+                    },
+                ],
+            },
+            now(),
+        )
+        .expect("create")
+        .clone();
+    let other_item = ledger
+        .lock()
+        .expect("ledger")
+        .pending_decisions(&WorkspaceId::from(WS), &MemberId::from(OTHER), now())
+        .into_iter()
+        .find(|i| i.decision_id == other.decision_id)
+        .expect("other item");
+    let outcome = decide_item(&ledger, &other_item, "a", OTHER);
+    runner.on_decision_made(&message.message_id, &outcome);
+    std::thread::sleep(Duration::from_millis(100));
+    let task = runner.task(&task_id).expect("task");
+    assert_eq!(
+        task.state,
+        TaskState::AwaitingDecision,
+        "別カードでは進まない"
+    );
+    assert!(task.draft.is_none());
+    assert_eq!(gateway.calls.load(Ordering::SeqCst), calls_before);
+
+    // runner の判断待ちを確定すれば、下書き生成に進む。
+    let items = pending_items(&ledger);
+    assert_eq!(items.len(), 1);
+    let outcome = decide_item(&ledger, &items[0], "a", DECIDER);
+    runner.on_decision_made(&items[0].request_message_id, &outcome);
+    assert!(wait_state(
+        &runner,
+        &task_id,
+        TaskState::AwaitingSendApproval
+    ));
+}
+
+/// 下書き生成が失敗して台本へ落ちても、下書きは決定された案（案B）に沿う。
+#[test]
+fn draft_fallback_follows_chosen_option() {
+    let gateway = Arc::new(FakeGateway::new(Err(LlmError::NotSent(
+        "接続できない".to_owned(),
+    ))));
+    let (store, ledger, runner) = fixture(
+        DataStore::new_demo_seeded(now()),
+        Arc::clone(&gateway) as Arc<dyn pelway_runner::DynChatGateway>,
+    );
+    let message = post(
+        &store,
+        REQUESTER,
+        MemberKind::Human,
+        "@ハル 納期の案を作って",
+    );
+    let task_id = runner.on_message_posted(&message).expect("task");
+    assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
+    let items = pending_items(&ledger);
+    let outcome = decide_item(&ledger, &items[0], "b", DECIDER);
+    runner.on_decision_made(&items[0].request_message_id, &outcome);
+    assert!(wait_state(
+        &runner,
+        &task_id,
+        TaskState::AwaitingSendApproval
+    ));
+    let draft = runner.task(&task_id).and_then(|t| t.draft).expect("draft");
+    assert!(draft.body.contains(&outcome.selected.body), "{draft:?}");
+    assert!(!draft.body.contains("2週間"), "{draft:?}");
+}
+
 // ---- 根拠は設定で受けた目的 ID で検査する（#330） ----
 
 #[test]
@@ -932,29 +1067,20 @@ fn script_mode_runs_mention_to_draft() {
     assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
 
     let items = pending_items(&ledger);
-    let outcome = ledger
-        .lock()
-        .expect("ledger")
-        .decide(
-            DecideRequest {
-                decision_id: items[0].decision_id.clone(),
-                version: items[0].version,
-                option_id: OptionId::from("a"),
-            },
-            &MemberId::from(DECIDER),
-            now(),
-        )
-        .expect("decide");
+    // 案Bを選ぶ（台本の下書きも決定された案に沿うことを確かめる）。
+    let outcome = decide_item(&ledger, &items[0], "b", DECIDER);
     runner.on_decision_made(&items[0].request_message_id, &outcome);
     assert!(wait_state(
         &runner,
         &task_id,
         TaskState::AwaitingSendApproval
     ));
-    assert!(
-        runner.task(&task_id).and_then(|t| t.draft).is_some(),
-        "台本の下書きが生成される"
-    );
+    let draft = runner
+        .task(&task_id)
+        .and_then(|t| t.draft)
+        .expect("台本の下書きが生成される");
+    assert!(draft.body.contains(&outcome.selected.body), "{draft:?}");
+    assert!(!draft.body.contains("2週間"), "{draft:?}");
 }
 
 /// 設定の根拠を P03 に差し替えても、seed がその根拠を登録すれば LLM を呼ぶ

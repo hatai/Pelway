@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pelway_contract::decision::{CreateDecisionRequest, DecisionOption, DecisionOutcome};
-use pelway_contract::ids::{ChannelId, MemberId, MessageId, OptionId, WorkspaceId};
+use pelway_contract::ids::{ChannelId, DecisionId, MemberId, MessageId, OptionId, WorkspaceId};
 use pelway_contract::ledger::ApprovalLedger;
 use pelway_contract::member::MemberKind;
 use pelway_contract::store::{DataStore, NewMessage, PurposeId, StoredMessage};
@@ -31,7 +31,7 @@ use pelway_contract::task::TaskState;
 use pelway_llm::{ChatMessage, ChatReply, ChatRequest, LlmError, LlmGateway, Usage};
 use serde_json::Value;
 
-use demo::{SCRIPT_AB, SCRIPT_DRAFT};
+use demo::SCRIPT_AB;
 
 /// 「受付」の進捗 1 行（固定段階）。
 const STAGE_ACCEPTED: &str = "依頼を受け付けました。A/B 案を作成しています。";
@@ -110,6 +110,10 @@ pub struct RunnerTask {
     pub state: TaskState,
     /// Stopped のときの理由（停止メッセージに出したものと同じ）。
     pub stop_reason: Option<String>,
+    /// runner が作った判断待ちの ID（作る前は `None`）。決定の確定通知は
+    /// この ID と一致するときだけ受ける（同じ依頼メッセージを指す別の判断待ちの
+    /// 確定ではタスクを進めない）。
+    pub decision_id: Option<DecisionId>,
     /// 決定後に生成したメール下書きのデータ（#330。承認カード化は #332）。
     /// 生成前は `None`。
     pub draft: Option<MailDraft>,
@@ -157,6 +161,7 @@ impl TaskBook {
             request_body: message.body.clone(),
             state: TaskState::Working,
             stop_reason: None,
+            decision_id: None,
             draft: None,
         };
         self.by_request
@@ -289,9 +294,10 @@ impl Runner {
     }
 
     /// 決定が確定したときに HTTP 層から呼ばれるフック（#330）。依頼メッセージに
-    /// 対応するタスクが判断待ちなら、決定された案を入力に LLM でメール下書きを
-    /// 作るスレッドを立てる（判断待ちでない・対応するタスクが無い呼び出しは
-    /// 何もしない。冪等リプレイ・二重通知では走らない）。
+    /// 対応するタスクが判断待ちで、確定したのがそのタスク用に runner が作った
+    /// 判断待ち（`outcome.decision_id` が一致）なら、決定された案を入力に LLM で
+    /// メール下書きを作るスレッドを立てる（判断待ちでない・対応するタスクが無い・
+    /// 別の判断待ちの確定の呼び出しは何もしない。冪等リプレイ・二重通知では走らない）。
     pub fn on_decision_made(&self, request_message_id: &MessageId, outcome: &DecisionOutcome) {
         let task = self.inner.book.lock().ok().and_then(|book| {
             book.by_request
@@ -299,6 +305,9 @@ impl Runner {
                 .and_then(|id| book.tasks.get(id).cloned())
         });
         let Some(task) = task else { return };
+        if task.decision_id.as_ref() != Some(&outcome.decision_id) {
+            return;
+        }
         // 判断待ち → 下書き生成中（Working）の遷移をアトミックに確かめる。
         if !self.transition(
             &task.task_id,
@@ -341,11 +350,8 @@ impl Runner {
         let Ok(reply) = reply.inspect_err(|reason| {
             let _ = self.post_stage(&task, &fallback_line(reason));
         }) else {
-            // 台本の下書きへ落ちる（台本は必ず解釈できる）。
-            match parse_draft(SCRIPT_DRAFT) {
-                Ok(draft) => self.complete_draft(&task, draft),
-                Err(reason) => self.stop(&task, &reason),
-            }
+            // 決定された案を差し込んだ台本の下書きへ落ちる。
+            self.complete_draft(&task, script_draft(&chosen_body));
             return;
         };
         match parse_draft(&reply.text) {
@@ -444,7 +450,8 @@ impl Runner {
             task,
             &format!("{PROPOSALS_LEAD}\n\n案A: {option_a}\n\n案B: {option_b}"),
         )?;
-        self.inner
+        let decision_id = self
+            .inner
             .ledger
             .lock()
             .map_err(|_| "台帳のロックに失敗しました".to_owned())?
@@ -469,8 +476,16 @@ impl Runner {
                 },
                 now_ms(),
             )
-            .map_err(|_| "判断待ちを作れませんでした".to_owned())?;
-        self.set_state(&task.task_id, TaskState::AwaitingDecision, None);
+            .map_err(|_| "判断待ちを作れませんでした".to_owned())?
+            .decision_id
+            .clone();
+        if let Ok(mut book) = self.inner.book.lock()
+            && let Some(task) = book.tasks.get_mut(&task.task_id)
+        {
+            task.decision_id = Some(decision_id);
+            task.state = TaskState::AwaitingDecision;
+            task.stop_reason = None;
+        }
         Ok(())
     }
 
@@ -596,11 +611,37 @@ fn draft_request(request_body: &str, chosen_body: &str) -> ChatRequest {
                  取引先の B社宛てのメール下書き（宛先・件名・本文）を作ってください。",
             ),
             ChatMessage::user(format!(
-                "依頼: {request_body}\n\n決定された案: {chosen_body}"
+                "依頼: {request_body}\n\n{CHOSEN_LABEL}{chosen_body}"
             )),
         ],
         schema: Some(draft_schema()),
     }
+}
+
+/// 下書き要求の user メッセージで、決定された案の直前に置く見出し
+/// （台本モードの gateway が決定された案を取り出すのにも使う）。
+const CHOSEN_LABEL: &str = "決定された案: ";
+
+/// 台本のメール下書き（合成）。件名・宛先は固定で、本文に決定された案を差し込む
+/// （実 LLM 失敗時のフォールバックと台本モードの両方で使う）。
+pub(crate) fn script_draft(chosen_body: &str) -> MailDraft {
+    MailDraft {
+        to: "B社 ご担当者".to_owned(),
+        subject: "案件B 納期のご相談".to_owned(),
+        body: format!(
+            "お世話になっております。案件Bの納期について、{chosen_body}で\
+             調整させていただけますでしょうか。"
+        ),
+    }
+}
+
+/// 下書き要求から決定された案を取り出す（台本モード用。見つからなければ空）。
+pub(crate) fn chosen_from_draft_request(req: &ChatRequest) -> &str {
+    req.messages
+        .iter()
+        .rev()
+        .find_map(|m| m.content.split_once(CHOSEN_LABEL).map(|(_, chosen)| chosen))
+        .unwrap_or_default()
 }
 
 /// 台本の応答（フォールバック用。`usage` は 0 のまま）。
