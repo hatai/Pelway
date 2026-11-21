@@ -100,6 +100,8 @@ scripts/agent-gh review pr checks <N> --json name,bucket
 | must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / 検証・実測の報告の結論が、実測した範囲を超えて受け入れ条件を満たすと断定している / verify が失敗 / pr-size が失敗（`pr-size-exception` のラベルと、作成者が `hatai` の目印コメントの両方があるときだけ数えない。手順 2） / 正しさ・セキュリティの欠陥 / ブランチが `agent/` で始まるのに PR の作成者（`author.login`）が `app/pelway-dev` でない |
 | nit | 上に当てはまらない改善案 |
 
+nit のうち、文書（`docs/`・スキル・コードのコメント・PR 本文）と、コード・仕様・ほかの文書との食い違いを指すものは、行頭（`<file>:<line>` の前）に `[文書のずれ]` を付ける（例: `- [文書のずれ] docs/dev-environment.md:668 判定の順がコードと違う。…`）。実装担当は、この印の nit を Approve のときも直してから Ready にする（skill `implement-issue` の手順 9）。書き方や好みの違いには付けない。
+
 ### 4. 投稿する
 
 本文は次の形にする。
@@ -113,6 +115,7 @@ Reviewed: <headRefOid>
 
 ## nit
 - <file>:<line> <提案>
+- [文書のずれ] <file>:<line> <何と何が食い違うか。直し方>
 
 （security-review を行ったときだけ、ここに skill security-review の「投稿に書く」の手順の `## security-review` 節をその形のまま入れる）
 
