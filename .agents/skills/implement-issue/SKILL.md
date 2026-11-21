@@ -32,6 +32,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 | sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
+| 委託したレビューが `failed` で、`error:` が `設定の不備:` で始まる（レビュー担当の環境に、GitHub を操作する別のツールが残っている）。再委託しない | `error:` の行と、委託した担当 |
 | レビューの委託が `runtimeMode: "auto-accept-edits"` で受け付けられず、子タスクが作られなかった。`auto`・`full-access` に変えて委託し直さない | 委託の指定（`target`・`runtimeMode`）と、返ったエラー文 |
 | 3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）、`[文書のずれ]` の nit だけを直す round を通算 2 回終えた後に、また印の nit が残った（通算 3 回目には入らない）、委託が 2 回連続で `failed`（`checks pending` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort） |
 
@@ -236,7 +237,7 @@ scripts/agent-gh dev pr ready <PR 番号>
 
 1 で直したとき以外は、Approve の後は PR に push しない。実装者メモのみのコミットでも head が動き、command-team のマージ規則によりレビューのやり直しになる。メモの追記が必要なときは、修正 round の手順 5・6（レビュー委託の前）で行う。
 
-複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（エスカレーションしない）。委託の子が `failed` を報告したら、`error: checks pending` は待って同じラウンドを数えずに再委託し、それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
+複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（エスカレーションしない）。委託の子が `failed` を報告したら、`error: checks pending` は待って同じラウンドを数えずに再委託し、`error:` が `設定の不備:` で始まるときは再委託せずに止まる（止まる条件）。それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
 
 ラウンドサマリーは `scripts/agent-gh dev pr comment <PR 番号> --body-file -` で投稿する:
 

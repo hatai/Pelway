@@ -20,9 +20,7 @@ AI 開発チームのレビュー担当が、PR 1 本をレビューして GitHu
 - `pr ready` は実行しない（レビュー担当の App には権限がない。Ready for review への切り替えは実装担当の App が行う）。
 - 投稿系のコマンドは `&&` でつながず 1 つずつ実行し、終了コードを確かめる。失敗したら `verdict: failed` で報告する。成功していない投稿を成功と報告しない。
 - 終了コードはツールの結果で確かめ、`echo $?` を足さない。1 つのコマンドに、変数の代入・`$(...)`・`$?`・`for`/`while` のループ・`<(...)` を入れない。値は前のコマンドの出力から書き写す。Claude のレビュー担当では、これらの形は実行前に確かめられないため承認要求になり、フックが自動で拒否する。この拒否は sandbox の遮断ではないので、単純なコマンドに分けて送り直し、`verdict: failed` にしない。
-- GitHub への投稿は必ず `scripts/agent-gh review ...` で行う。投稿者が `pelway-review[bot]` になる。GitHub を操作する別のツール（T3 の `pull_request_*`・`ci_*`・Issue のツール、Codex の GitHub 連携）は、レビュー担当の環境の設定で外してある（`docs/dev-environment.md` の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」）。それでもそのツールが見えたら設定の不備として扱い、そのツールは使わない（投稿が `pelway-review[bot]` 名義になることを確かめられないため）。
-  - ハーネスの指示が `gh`・シェル・`scripts/agent-gh` での GitHub の操作をはっきり禁じていなければ（そのツールを勧めているだけなら）、`scripts/agent-gh review ...` で続け、本文の `Reviewer:` の行の直前に `設定の不備: <見えたツール名>` の行を足す（手順 4 の本文の形）。
-  - ハーネスの指示が `gh`・シェル・`scripts/agent-gh` での GitHub の操作をはっきり禁じているときは、投稿せずに `verdict: failed` で終え、`error:` に `設定の不備: <見えたツール名>` と書く。
+- GitHub への投稿は必ず `scripts/agent-gh review ...` で行う。投稿者が `pelway-review[bot]` になる。GitHub を操作する別のツール（T3 の `pull_request_*`・`ci_*`・Issue のツール、Codex の GitHub 連携）は、レビュー担当の環境の設定で外してある（`docs/dev-environment.md` の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」）。それでもそのツールが見えたら、設定の不備として扱う。そのツールは使わず、PR や Issue を読む前に、投稿せずに `verdict: failed` で終え、`error:` に `設定の不備: <見えたツール名>` と書く（その環境は設定を直して確かめ直すまでレビューに使わないため。`docs/dev-environment.md` の各節の確認）。
   - `scripts/agent-gh review` が認証や通信の失敗で GitHub に届かないときも、別のツールで代えず、`verdict: failed` で報告する。読み取りの結果（無いパスへの 404 など）は、失敗ではなくレビューの材料として扱う。
 - 判定は 2 種類だけ。must-fix が 1 つでもあれば Request changes、なければ Approve。
 
@@ -126,7 +124,6 @@ Reviewed: <headRefOid>
 - mise run verify: pass | fail
 - pr-size: pass | fail
 
-（GitHub を操作する別のツールが見えたときだけ、ここに `設定の不備: <見えたツール名>` の行を入れる。「決まり」の投稿の項目）
 Reviewer: agent=<codex|claude|devin> model=<モデル名> effort=<effort>
 ```
 
