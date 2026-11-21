@@ -62,8 +62,9 @@ pub struct State {
     #[serde(default)]
     pub outbox_backoff: Option<crate::outbox::Backoff>,
     /// 指揮役の受信箱に書けなかった payload（古い順）。次の周回で、新しい知らせより先に書き直す。
+    /// `None` はこの項目の無い更新前の版の状態で、送信待ちの列の知らせを受信箱に書けたかが分からない。
     #[serde(default)]
-    pub inbox_pending: Vec<serde_json::Value>,
+    pub inbox_pending: Option<Vec<serde_json::Value>>,
     /// 前回指揮役を起こしたときの、指揮役の既読の位置（補助記録の `inbox_offset`）。
     /// 既読の位置がここから進むまで、重ねて起こさない。
     #[serde(default)]

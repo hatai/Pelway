@@ -289,7 +289,9 @@ impl Watcher {
         // 指揮役の受信箱に、知らせを出した時点で書く（送信待ちの列の再送では書かない）。
         // 書けなかった知らせは状態に残し、受信箱が直るまで周回ごとに古い順に書き直す
         // （webhook が外した知らせも、上限 100 件の内なら後で届く）。受信箱に書けなくても webhook の送信と見張りは続ける。
-        let mut to_inbox = std::mem::take(&mut self.state.inbox_pending);
+        // 更新前の版の状態では、列の知らせを書けたかが分からないので、最初の周回で列の写しを書き直す（重複しうる）
+        let pending = self.state.inbox_pending.replace(Vec::new());
+        let mut to_inbox = pending.unwrap_or_else(|| self.state.outbox.clone());
         to_inbox.extend(payloads.iter().map(|(p, _)| p.clone()));
         if !to_inbox.is_empty() {
             let lines: Vec<String> = to_inbox.iter().map(inbox_line).collect();
@@ -302,8 +304,9 @@ impl Watcher {
                 Ok(total) => self.maybe_wake(&t3, total, &sources),
                 Err(e) => {
                     eprintln!("agent-watch: ERROR inbox append failed: {e}");
+                    let pending = self.state.inbox_pending.get_or_insert_default();
                     for p in to_inbox {
-                        outbox::push(&mut self.state.inbox_pending, p);
+                        outbox::push(pending, p);
                     }
                 }
             }

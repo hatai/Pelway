@@ -1397,6 +1397,7 @@ fn queued_payload(thread: &str) -> serde_json::Value {
 }
 
 /// 新しい知らせが出ない状態で、送信待ちの列に `threads` の payload を古い順に置く。
+/// 状態は更新前の版の形（`inbox_pending` が無い）で、受信箱にはまだ何も書かれていない。
 fn queue(sb: &Sandbox, threads: &[&str]) {
     sb.fake("list.json", "[]");
     let outbox: Vec<_> = threads.iter().map(|t| queued_payload(t)).collect();
@@ -1440,6 +1441,9 @@ fn permanent_failure_is_dropped_and_next_is_sent() {
         // 直らない失敗を返された 1 件目は送り直さずに列から外し、同じ周回で 2 件目を送る
         assert_eq!(sent_threads(&sb), ["mcp:a", "mcp:b"], "{code}: {err}");
         assert!(outbox_threads(&sb).is_empty(), "{code}: {err}");
+        // 更新前の版の列は受信箱に書けたかが分からないので書き直す。列から外した 1 件目も受信箱には届く
+        let inbox = thread_ids(inbox_events(&sb).iter());
+        assert_eq!(inbox, ["mcp:a", "mcp:b"], "{code}: {err}");
         let dropped: Vec<&str> = err
             .lines()
             .filter(|l| l.contains("mode=send-dropped"))
@@ -1536,12 +1540,9 @@ fn backoff_is_kept_across_restart() {
     queue(&sb, &["mcp:a"]);
     sb.fake("fnox-ok", "");
     let out = sb.run_with(&["--once"]);
-    assert!(out.status.success(), "stderr: {}", stderr(&out));
-    assert!(
-        stderr(&out).contains("outbox retry_after=30s queued=1"),
-        "{}",
-        stderr(&out)
-    );
+    let err = stderr(&out);
+    assert!(out.status.success(), "{err}");
+    assert!(err.contains("outbox retry_after=30s queued=1"), "{err}");
     let tried = sent_threads(&sb).len();
     assert!(tried > 0);
     // 次に送る時刻（30 秒後）より前に起動し直した周回では、webhook に送らない
@@ -1551,6 +1552,8 @@ fn backoff_is_kept_across_restart() {
     assert_eq!(sent_threads(&sb).len(), tried, "{err}");
     assert!(!err.contains("mode=send"), "{err}");
     assert_eq!(outbox_threads(&sb), ["mcp:a"]);
+    // 更新前の版の列を受信箱に書き直すのは、最初の周回の 1 回だけ
+    assert_eq!(thread_ids(inbox_events(&sb).iter()), ["mcp:a"]);
 }
 
 /// 次の周回に、b の実行が終わった新しい知らせを出す（a は前の周回の知らせのまま）。
