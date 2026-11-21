@@ -108,6 +108,49 @@ expect_eq "observation_errors: none" "$(observation_errors "${tmp}/obs.txt")" 0
 printf '# ss の取得に失敗 01:02:03\n' >> "${tmp}/obs.txt"
 expect_eq "observation_errors: one failed snapshot" "$(observation_errors "${tmp}/obs.txt")" 1
 
+# dir_chain_safe / make_run_dir: ほかの利用者が書ける既存の親を拒む。
+mkdir -p "${tmp}/wide-root/shared"; chmod 777 "${tmp}/wide-root/shared"
+expect_eq "make_run_dir: refuses a group/other-writable parent" "$(make_run_dir "${tmp}/wide-root" "shared/run1" > /dev/null 2>&1 && echo 0 || echo 1)" 1
+expect_eq "make_run_dir: nothing created under the writable parent" "$(find "${tmp}/wide-root/shared" -mindepth 1 | grep -c .)" 0
+chmod 755 "${tmp}/wide-root/shared"
+expect_eq "make_run_dir: accepts the parent once it is not writable by others" "$(make_run_dir "${tmp}/wide-root" "shared/run1" > /dev/null 2>&1 && echo 0 || echo 1)" 0
+mkdir -p "${tmp}/wide2"; chmod 777 "${tmp}/wide2"
+expect_eq "make_run_dir: refuses an other-writable evidence root" "$(make_run_dir "${tmp}/wide2" "a/run1" > /dev/null 2>&1 && echo 0 || echo 1)" 1
+chmod 755 "${tmp}/wide2"
+
+# transport_status: 送受信の失敗は、成功の形の応答があっても 000。
+expect_eq "transport_status: ok" "$(transport_status 0 0 $'HTTP/1.1 200 OK\r\n\r\n[]')" 200
+expect_eq "transport_status: receive timed out" "$(transport_status 0 124 $'HTTP/1.1 200 OK\r\n\r\n[]')" 000
+expect_eq "transport_status: send failed" "$(transport_status 1 0 $'HTTP/1.1 200 OK\r\n\r\n[]')" 000
+
+# pending_decision_id: 200 で配列のときだけ id を返す。
+pend='[{"decision_id":"dec-1","request_message_id":"msg-4"}]'
+expect_eq "pending_decision_id: 200 array" "$(pending_decision_id 200 "${pend}" msg-4)" dec-1
+expect_eq "pending_decision_id: non-200 with a success-shaped body" "$(pending_decision_id 500 "${pend}" msg-4)" ""
+expect_eq "pending_decision_id: not an array" "$(pending_decision_id 200 '{"decision_id":"dec-1","request_message_id":"msg-4"}' msg-4)" ""
+
+# forbidden_env_present: 読めない environ は「無し」ではなく失敗。
+expect_eq "forbidden_env_present: unreadable environ fails" "$(forbidden_env_present "${tmp}/no-such-environ" > /dev/null 2>&1; echo $?)" 2
+
+# run_demo_check_stage: 呼び出し元の DEMO_CHECK_* を引き継がない。
+mkdir -p "${tmp}/dc-top/scripts/demo-check"
+printf '#!/usr/bin/env bash\nenv | grep "^DEMO_CHECK_" | sort\n' > "${tmp}/dc-top/scripts/demo-check/canary.sh"
+expect_eq "run_demo_check_stage: only DEMO_CHECK_ROOT is passed" \
+  "$(DEMO_CHECK_LIST_DIR=/x DEMO_CHECK_EXTRA_PATHS=/y DEMO_CHECK_ACCEPTANCE=1 run_demo_check_stage "${tmp}/dc-top" /scan canary)" "DEMO_CHECK_ROOT=/scan"
+
+# publish_verdict: ハッシュを作れないときは最後の PASS を残さない。
+mkdir -p "${tmp}/pub-ok" "${tmp}/pub-ng"
+printf 'run_id=x\n' > "${tmp}/pub-ok/summary.txt"; printf 'run_id=x\n' > "${tmp}/pub-ng/summary.txt"
+out_ok="$(publish_verdict "${tmp}/pub-ok" PASS)"; rc_ok=$?
+expect_eq "publish_verdict: ok exit" "${rc_ok}" 0
+expect_eq "publish_verdict: ok prints PASS" "$(head -n 1 <<< "${out_ok}")" "verdict=PASS"
+expect_eq "publish_verdict: ok sums verify" "$(cd "${tmp}/pub-ok" && sha256sum --quiet -c SHA256SUMS && echo ok)" ok
+out_ng="$(SHA256SUM=false publish_verdict "${tmp}/pub-ng" PASS 2> /dev/null)"; rc_ng=$?
+expect_eq "publish_verdict: hash failure exits 1" "${rc_ng}" 1
+expect_eq "publish_verdict: hash failure prints no PASS" "$(grep -c 'verdict=PASS' <<< "${out_ng}")" 0
+expect_eq "publish_verdict: hash failure leaves no PASS in summary" "$(grep -c '^verdict=PASS' "${tmp}/pub-ng/summary.txt")" 0
+expect_eq "publish_verdict: hash failure leaves no SHA256SUMS" "$([ -e "${tmp}/pub-ng/SHA256SUMS" ] && echo yes || echo no)" no
+
 repo="${tmp}/repo"
 git init -q "${repo}"
 run_args() { (cd "${repo}" && bash "${tool}" "$@" > /dev/null 2>&1); echo $?; }

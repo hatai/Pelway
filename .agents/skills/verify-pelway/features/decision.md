@@ -12,10 +12,10 @@
 
 ## Driving it with verify-run
 
-`verify-run --feature decision` の段 4（判断待ちが 1 件だけ現れる）、段 6（案A で決定）、段 7（同じ選択の再送が同じ結果）、段 8（案B への変更が 409）、段 9（判断待ちから消えたことを取り直す）。応答は `steps/NN-decisions-pending.resp`・`steps/NN-decide.resp`・`steps/NN-decide-replay.resp`・`steps/NN-decide-change.resp`・`steps/NN-final-decisions.resp`。テストは `cargo test -p pelway-http --test decisions`。
+`verify-run --feature decision` の段 4（判断待ちが 1 件だけ現れる）、段 6（案A で決定）、段 7（段 6 の要求をそのまま再送しても同じ結果）、段 8（案B への変更が 409）、段 9（判断待ちから消えたことを取り直す）。応答は `steps/NN-decisions-pending.resp`・`steps/NN-decide.resp`・`steps/NN-decide-replay.resp`・`steps/NN-decide-change.resp`・`steps/NN-final-decisions.resp`。テストは `mise exec -- cargo test -p pelway-http --locked --offline --test decisions`。
 
 ## Gotchas
 
 - 決定者は `demo-serve` が `m-yamamoto` に固定している。ほかの人で決定すると 403 `not_decider`。
-- `version` は一覧の値をそのまま送る。違う値は 409 `version_conflict`。確定すると `version` が 1 つ上がる。再送と変更の要求は確定後の `version` で送る。
+- `version` は一覧の値をそのまま送る。違う値は 409 `version_conflict`。確定すると `version` が 1 つ上がる。段 7 は段 6 と同じ要求（確定前の `version`）を送り直す（応答を受け取れなかった利用者と同じ）。main の台帳は確定済みの同じ選択を版の確認より先に扱うので 200 になる。段 8 の変更の要求は確定後の `version` で送る。
 - 確定した決定を 1 件取る経路は無い。決定後の状態は、判断待ちの一覧に無いことと、決定の応答（`steps/NN-decide.resp`）で示す。

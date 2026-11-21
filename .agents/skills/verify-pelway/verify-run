@@ -29,6 +29,8 @@ CANARY=PELWAY_CANARY_BODY_7f3a
 # 台本モード（ScriptGateway）の合成応答の 2 案（crates/pelway-runner/src/demo.rs の SCRIPT_AB）。
 SCRIPT_A="納期を2週間延ばす案"
 SCRIPT_B="範囲を絞って納期を守る案"
+# 実提供元の呼び出しに失敗して台本に落ちたときに runner が投稿する進捗行の一部（fallback_line）。
+FALLBACK_MARK="台本の応答で進めます"
 
 die_usage() { echo "verify-run: $*" >&2; exit 2; }
 
@@ -36,6 +38,18 @@ die_usage() { echo "verify-run: $*" >&2; exit 2; }
 resp_status() { head -n 1 | tr -d '\r' | awk '{print $2}'; }
 # HTTP 応答（標準入力）から本文（最初の空行より後）を返す。
 resp_body() { awk 'b {print} /^\r?$/ && !b {b=1}'; }
+
+# 送受信が両方とも成功したときだけ応答の状態コードを返す。送信の失敗・受信の時間切れ（timeout の 124 など）は 000。
+transport_status() {
+  local send_rc="$1" recv_rc="$2" raw="$3"
+  if [ "${send_rc}" = 0 ] && [ "${recv_rc}" = 0 ]; then resp_status <<< "${raw}"; else echo 000; fi
+}
+
+# 判断待ちの一覧の応答から、依頼の投稿（message_id）の決定 ID を返す。200 で配列として読めたときだけ。
+pending_decision_id() {
+  [ "$1" = 200 ] || return 0
+  jq -r --arg m "$3" 'if type == "array" then (.[] | select(.request_message_id == $m) | .decision_id) else empty end' <<< "$2" 2>/dev/null
+}
 
 # 判断待ちの一覧（JSON）が配列として読めて、id が入っていなければ 0。空・壊れた JSON・配列以外は 1。
 decision_absent() { jq -e --arg d "$2" 'type == "array" and (map(.decision_id) | index($d) | not)' <<< "$1" > /dev/null 2>&1; }
@@ -54,9 +68,61 @@ redact() {
     || echo "<redacted non-json len=${#text}>"
 }
 
+# demo-check の 1 段を、この run の写し（scan）とリポジトリの規則だけで流す。呼び出し元の環境の
+# DEMO_CHECK_*（規則の置き場・追加の走査パス・受入モードなど）は引き継がない。
+run_demo_check_stage() {
+  local top="$1" scan="$2" stage="$3"
+  env -i PATH="${PATH}" HOME="${HOME}" LC_ALL=C.UTF-8 DEMO_CHECK_ROOT="${scan}" bash "${top}/scripts/demo-check/${stage}.sh"
+}
+
+# 最後の verdict を summary に書き、証拠全体のハッシュを作って照合できたときだけ標準出力に出す。
+# ハッシュを作れない・照合できないときは、summary の verdict を FAIL に書き換え（できる範囲で）、
+# 不完全な SHA256SUMS を消して FAIL を出し、1 を返す。最後の PASS が証拠や出力に残らない。
+publish_verdict() {
+  local ev="$1" verdict="$2" sums hasher="${SHA256SUM:-sha256sum}"
+  printf 'verdict=%s\n' "${verdict}" >> "${ev}/summary.txt" || verdict=FAIL
+  if sums="$(cd "${ev}" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 "${hasher}")" \
+      && [ -n "${sums}" ] && printf '%s\n' "${sums}" > "${ev}/SHA256SUMS" \
+      && (cd "${ev}" && "${hasher}" --quiet -c SHA256SUMS); then
+    echo "verdict=${verdict}"
+    echo "evidence=${ev}"
+    echo "evidence_sha256=$("${hasher}" "${ev}/SHA256SUMS" | cut -d' ' -f1)"
+    [ "${verdict}" = PASS ]; return
+  fi
+  sed -i 's/^verdict=.*/verdict=FAIL（証拠のハッシュを作れない・確かめられない）/' "${ev}/summary.txt" 2> /dev/null
+  rm -f "${ev}/SHA256SUMS"
+  echo "verdict=FAIL（証拠のハッシュを作れない・確かめられない）"
+  echo "verify-run: 失敗（証拠のハッシュを作れない・確かめられない。${ev}）" >&2
+  return 1
+}
+
 # 最後の verdict を返す。main が最後まで戻っていない run（Ctrl-C・SIGTERM・時間切れで中断）は、
 # 記録した段が全部 PASS でも FAIL にする（飛ばした段がある証拠を PASS にしない）。
 final_verdict() { if [ "$2" = 1 ]; then echo "$1"; else echo FAIL; fi; }
+
+# 証拠の置き場の階層が、ほかの利用者に差し替えられないこと。0 = 安全。
+# 置き場から下（run のディレクトリまで）は自分の持ち物で、グループ・ほかの利用者が書けないこと。
+# 置き場より上の既存のディレクトリは、自分か root の持ち物で、グループ・ほかが書けるなら sticky（/tmp など）であること。
+dir_chain_safe() {
+  local root="$1" path="$2" d me mode owner
+  me="$(id -u)"
+  d="${path%/}"
+  while :; do
+    if [ -e "${d}" ]; then
+      [ -d "${d}" ] && [ ! -L "${d}" ] || return 1
+      owner="$(stat -c '%u' -- "${d}")" && mode="$(stat -c '%a' -- "${d}")" || return 1
+      if under "${d}" "${root}"; then
+        [ "${owner}" = "${me}" ] && [ $((8#${mode} & 8#022)) = 0 ] || return 1
+      else
+        { [ "${owner}" = "${me}" ] || [ "${owner}" = 0 ]; } || return 1
+        [ $((8#${mode} & 8#022)) = 0 ] || [ $((8#${mode} & 8#1000)) != 0 ] || return 1
+      fi
+    fi
+    [ "${d}" = / ] || [ -z "${d}" ] && break
+    d="$(dirname -- "${d}")"
+  done
+  return 0
+}
 
 # run ごとの証拠のディレクトリを作る。$1=証拠の置き場（実体のパス）$2=置き場からの相対パス。
 # 親までは作ってよいが、最後のディレクトリは新しく作り（既にあれば失敗）、所有者だけの権限にする。
@@ -64,11 +130,13 @@ final_verdict() { if [ "$2" = 1 ]; then echo "$1"; else echo FAIL; fi; }
 make_run_dir() {
   local root="$1" rel="$2" want parent
   want="${root%/}/${rel}"; parent="$(dirname -- "${want}")"
+  dir_chain_safe "${root}" "${parent}" || return 1
   mkdir -p -- "${parent}" || return 1
+  dir_chain_safe "${root}" "${parent}" || return 1
   [ "$(realpath -- "${parent}")" = "${parent}" ] || return 1
   mkdir -m 700 -- "${want}" || return 1
   [ "$(realpath -- "${want}")" = "${want}" ] || return 1
-  chmod 700 -- "${want}" && mkdir -m 700 -- "${want}/steps" && printf '%s\n' "${want}"
+  chmod 700 -- "${want}" && mkdir -m 700 -- "${want}/steps" && dir_chain_safe "${root}" "${want}/steps" && printf '%s\n' "${want}"
 }
 
 # steps/ に、送った n 件の要求それぞれの .req と .resp がそろっていれば 0。
@@ -101,10 +169,12 @@ evidence_root_ok() {
 exe_of() { local e; e="$(readlink "/proc/$1/exe" 2>/dev/null)" || return 1; printf '%s\n' "${e% (deleted)}"; }
 
 # environ（NUL 区切り）のファイルから、forbidden のラベルのうち名前がある（=値は見ない）ものを返す。
+# 読めなかったときは何も返さず 2 で終わる（「禁止の変数なし」と取り違えない）。
 forbidden_env_present() {
-  local pair
+  local pair names
+  names="$(tr '\0' '\n' < "$1" 2>/dev/null | cut -d= -f1)" && [ -r "$1" ] || return 2
   for pair in ${FORBIDDEN_ENV}; do
-    tr '\0' '\n' < "$1" 2>/dev/null | grep -q "^${pair#*:}=" && echo "${pair%%:*}"
+    grep -qx "${pair#*:}" <<< "${names}" && echo "${pair%%:*}"
   done
   return 0
 }
@@ -126,7 +196,10 @@ survivor_pids() { ps -eo pid=,comm=,etimes= | awk -v re="${SURVIVOR_COMM}" '$2 ~
 # 結果の 1 行を summary に書く。FAIL があれば VERDICT を FAIL にする。
 record() {
   local result="$1" step="$2" detail="${3:-}"
-  printf '%-4s %s%s\n' "${result}" "${step}" "${detail:+ (${detail})}" | tee -a "${EV}/summary.txt"
+  local line; line="$(printf '%-4s %s%s' "${result}" "${step}" "${detail:+ (${detail})}")"
+  printf '%s\n' "${line}"
+  # summary に書けなければ、その段の結果が証拠に残らないので FAIL にする。
+  printf '%s\n' "${line}" >> "${EV}/summary.txt" || VERDICT=FAIL
   [ "${result}" = PASS ] || VERDICT=FAIL
 }
 
@@ -143,13 +216,15 @@ http() {
   { printf '%s\n\n' "${head//$'\r'/}"; redact <<< "${body}"; } > "${req}" || EVIDENCE_WRITE_FAILED=1
   STATUS=000; BODY=""
   if exec 3<>"/dev/tcp/${HOST}/${PORT}"; then
-    printf '%s\n\r\n%s' "${head}" "${body}" >&3
-    # 実行中の接続を観察する（ss -tanp。この PID の行と、待ち受けのアドレスを含む行）。
+    local send_rc=0 recv_rc=0
+    printf '%s\n\r\n%s' "${head}" "${body}" >&3 || send_rc=$?
+    # 実行中の接続を観察する（ss -tuanp。この PID の行と、待ち受けのアドレスを含む行）。
     observe_sockets
-    # 生の応答はファイルに書かず、メモリだけで扱う。
-    raw="$(timeout 10 cat <&3)"
+    # 生の応答はファイルに書かず、メモリだけで扱う。サーバーが閉じるまで読み切れなければ（時間切れ）失敗。
+    raw="$(timeout 10 cat <&3)" || recv_rc=$?
     exec 3<&- 3>&-
-    STATUS="$(resp_status <<< "${raw}")"; BODY="$(resp_body <<< "${raw}")"
+    STATUS="$(transport_status "${send_rc}" "${recv_rc}" "${raw}")"; BODY="$(resp_body <<< "${raw}")"
+    [ "${STATUS}" != 000 ] || BODY=""
     { head -n 1 <<< "${raw}" | tr -d '\r'; echo; redact <<< "${BODY}"; } > "${resp}" || EVIDENCE_WRITE_FAILED=1
   else
     echo "connect failed" > "${resp}" || EVIDENCE_WRITE_FAILED=1
@@ -172,14 +247,25 @@ env_check() {
     listen="$(ss -Htlnp 2>/dev/null | grep "pid=${PID}," | awk '{print $4}' | sort -u | tr '\n' ' ')"
     echo "listen=${listen}"
     [ "${listen}" = "${ADDR} " ] || { echo "NG: 待ち受けが ready 行の addr=${ADDR} だけではない"; ok=1; }
-    local udp; udp="$(ss -Hulnp 2>/dev/null | grep -c "pid=${PID},")"
-    echo "udp_sockets=${udp}"
-    [ "${udp}" = 0 ] || { echo "NG: UDP のソケットがある"; ok=1; }
+    local udp snap
+    if snap="$(ss -Hulnp 2>/dev/null)"; then
+      udp="$(grep -c "pid=${PID}," <<< "${snap}")"
+      echo "udp_sockets=${udp}"
+      [ "${udp}" = 0 ] || { echo "NG: UDP のソケットがある"; ok=1; }
+    else echo "NG: UDP のソケットを取得できない（ss の失敗）"; ok=1; fi
     # 環境は名前の数だけ数え、値は書かない。禁止の変数は名前も書かずラベルだけ書く（名前は leak-phrases の禁止語）。
-    echo "env_name_count=$(tr '\0' '\n' < "/proc/${PID}/environ" 2>/dev/null | cut -d= -f1 | grep -c .)"
-    local bad; bad="$(forbidden_env_present "/proc/${PID}/environ" | tr '\n' ' ')"
-    if [ -n "${bad}" ]; then echo "NG: 子の環境に禁止の変数がある: ${bad}"; ok=1
-    else echo "forbidden_env=none（$(for p in ${FORBIDDEN_ENV}; do printf '%s ' "${p%%:*}"; done)）"; fi
+    # 子は env -i で PATH と HOME だけを渡すので、名前はちょうど 2 つのはず。読めなければ NG。
+    local names count bad
+    if names="$(tr '\0' '\n' < "/proc/${PID}/environ" 2>/dev/null | cut -d= -f1)" && [ -r "/proc/${PID}/environ" ]; then
+      count="$(grep -c . <<< "${names}")"
+      echo "env_name_count=${count}"
+      [ "${count}" = 2 ] || { echo "NG: 子の環境の名前が 2 つ（PATH・HOME）ではない"; ok=1; }
+    else echo "NG: 子の環境を読めない"; ok=1; fi
+    if bad="$(forbidden_env_present "/proc/${PID}/environ")"; then
+      bad="$(tr '\n' ' ' <<< "${bad}")"; bad="${bad% }"
+      if [ -n "${bad}" ]; then echo "NG: 子の環境に禁止の変数がある: ${bad}"; ok=1
+      else echo "forbidden_env=none（$(for p in ${FORBIDDEN_ENV}; do printf '%s ' "${p%%:*}"; done)）"; fi
+    else echo "NG: 子の環境を読めず、禁止の変数を確かめられない"; ok=1; fi
     if grep -q '^pelway-runner: LLM endpoint: ' "${EV}/server.stderr" && grep -q ' llm=script$' "${EV}/server.stdout"; then
       echo "llm_mode=script（接続先の行: $(grep -m1 '^pelway-runner: LLM endpoint: ' "${EV}/server.stderr")）"
     else
@@ -187,7 +273,8 @@ env_check() {
     fi
     echo "auth=none（デモは認証なし。操作者は合成ヘッダー x-pelway-member-id）"
     echo "bind=127.0.0.1:0（demo-serve は mise の PELWAY_BIND_ADDR を読まず、この値を直接使う）"
-  } > "${out}"
+  } > "${out}" || return 1
+  [ -s "${out}" ] || return 1
   cat "${out}"
   return "${ok}"
 }
@@ -282,7 +369,7 @@ cleanup() {
   if [ "${copied}" = 0 ] || [ "${want}" != "${got}" ]; then
     record FAIL "demo-check: 証拠の写しを作る" "写しが不完全（${got}/${want} ファイル）。canary・leak-phrases を流さない"
   else for st in canary leak-phrases; do
-    DEMO_CHECK_ROOT="${scan}" bash "${TOP}/scripts/demo-check/${st}.sh" >> "${EV}/demo-check.txt" 2>&1
+    run_demo_check_stage "${TOP}" "${scan}" "${st}" >> "${EV}/demo-check.txt" 2>&1
     rc=$?
     echo "-- ${st}: exit ${rc}" >> "${EV}/demo-check.txt"
     if [ "${rc}" = 0 ]; then record PASS "demo-check ${st}: run のログ・証拠" "demo-check.txt"
@@ -291,15 +378,7 @@ cleanup() {
   if [ "$(final_verdict "${VERDICT}" "${DONE:-0}")" != "${VERDICT}" ]; then
     record FAIL "run が最後まで進まなかった（中断）" "記録の無い段は走っていない"
   fi
-  echo "verdict=${VERDICT}" | tee -a "${EV}/summary.txt"
-  local sums
-  if ! sums="$(cd "${EV}" && find . -type f -print0 | sort -z | xargs -0 sha256sum)" \
-      || ! printf '%s\n' "${sums}" > "${EV}/SHA256SUMS" \
-      || ! (cd "${EV}" && sha256sum --quiet -c SHA256SUMS); then
-    echo "verify-run: 失敗（証拠のハッシュを作れない・確かめられない。${EV}）" >&2; exit 1
-  fi
-  echo "evidence=${EV}"
-  echo "evidence_sha256=$(sha256sum "${EV}/SHA256SUMS" | cut -d' ' -f1)"
+  publish_verdict "${EV}" "${VERDICT}" || exit 1
   [ "${VERDICT}" = PASS ] || exit 1
 }
 
@@ -309,7 +388,7 @@ wait_decision() {
   DEC_ID=""
   while [ "${SECONDS}" -le "${deadline}" ]; do
     http decisions-pending GET "/v1/workspaces/${WS}/decisions?actor=${DECIDER}" ""
-    DEC_ID="$(jq -r --arg m "${MSG_ID}" '.[]? | select(.request_message_id == $m) | .decision_id' <<< "${BODY}" 2>/dev/null)"
+    DEC_ID="$(pending_decision_id "${STATUS}" "${BODY}" "${MSG_ID}")"
     [ -n "${DEC_ID}" ] && break
     sleep 1
   done
@@ -366,6 +445,11 @@ operate() {
       '[.[] | select(.author_id == $b and (.body | contains($a)) and (.body | contains($o)))] | length >= 1' <<< "${BODY}" > /dev/null 2>&1; then
     record PASS "after_seq: ハルの投稿に案A と案B がある"
   else record FAIL "after_seq: ハルの投稿に案A と案B がある"; fi
+  # 台本の 2 案は、実提供元の呼び出しに失敗したときのフォールバックにも使われる。runner はそのとき
+  # 「台本の応答で進めます」の進捗行（crates/pelway-runner/src/lib.rs の fallback_line）を投稿するので、それが無いこと。
+  if [ "$(jq --arg b "${BOT}" --arg f "${FALLBACK_MARK}" '[.[]? | select(.author_id == $b and (.body | contains($f)))] | length' <<< "${BODY}" 2>/dev/null)" = 0 ]; then
+    record PASS "台本モード: 実提供元からのフォールバックの進捗行が無い"
+  else record FAIL "台本モード: 実提供元からのフォールバックの進捗行が無い" "フォールバックの進捗行がある"; fi
 
   http decide POST "/v1/decisions/${DEC_ID}/decide" "${DECIDER}" \
     "{\"decision_id\":\"${DEC_ID}\",\"version\":${DEC_VER:-0},\"option_id\":\"a\"}"
@@ -376,8 +460,9 @@ operate() {
     record PASS "決定: 山本が案A（台本の案A の本文）を選ぶ" "version ${new_ver}"
   else record FAIL "決定: 山本が案A を選ぶ" "status=${STATUS}"; return; fi
 
+  # 応答を受け取れなかった利用者と同じく、段 6 の要求（確定前の版）をそのまま送り直す。
   http decide-replay POST "/v1/decisions/${DEC_ID}/decide" "${DECIDER}" \
-    "{\"decision_id\":\"${DEC_ID}\",\"version\":${new_ver},\"option_id\":\"a\"}"
+    "{\"decision_id\":\"${DEC_ID}\",\"version\":${DEC_VER:-0},\"option_id\":\"a\"}"
   if [ "${STATUS}" = 200 ] && [ "$(jq -cS . <<< "${BODY}" 2>/dev/null)" = "$(jq -cS . <<< "${outcome}")" ]; then
     record PASS "冪等: 同じ選択の再決定は同じ結果（保存された選択 a と案A の本文を読み直した）"
   else record FAIL "冪等: 同じ選択の再決定は同じ結果" "status=${STATUS}"; fi
@@ -432,8 +517,12 @@ main() {
   for t in git mise rustup jq ss pgrep ps sha256sum realpath readlink comm timeout; do command -v "${t}" > /dev/null || missing+=" ${t}"; done
   [ -d /proc/self ] || missing+=" /proc"
   if [ -n "${missing}" ]; then echo "verify-run: 失敗（道具が無い:${missing}）。入れずに止まる" >&2; exit 1; fi
-  if [ -n "$(forbidden_env_present /proc/$$/environ)" ]; then
-    echo "verify-run: 失敗（秘密の変数がある環境で動いている。fnox exec の下で動かさない: $(forbidden_env_present /proc/$$/environ | tr '\n' ' ')）" >&2; exit 1
+  local own
+  if ! own="$(forbidden_env_present /proc/$$/environ)"; then
+    echo "verify-run: 失敗（自分の環境を読めず、秘密の変数が無いことを確かめられない）" >&2; exit 1
+  fi
+  if [ -n "${own}" ]; then
+    echo "verify-run: 失敗（秘密の変数がある環境で動いている。fnox exec の下で動かさない: $(tr '\n' ' ' <<< "${own}")）" >&2; exit 1
   fi
   TOP="$(git rev-parse --show-toplevel)" || die_usage "not inside the Pelway repository"
   COMMON="$(git rev-parse --path-format=absolute --git-common-dir)" || die_usage "cannot find the git common dir"
@@ -547,8 +636,8 @@ main() {
   else record FAIL "証拠: 要求ごとの .req と .resp がそろっている" "書き込みの失敗か欠けがある（${sent} 件送った）"; fi
 
   # 外に出ていないことの観察
-  local net="ネットワーク・ファイル: 観察した範囲で TCP・UDP は 127.0.0.1 だけ、開いているのは標準入出力と TCP・UDP のソケットだけ"
-  if network_check; then record PASS "${net}" "network.txt proc-fd.txt。0.1 秒より短い接続と、TCP・UDP 以外の通信路は未検証"
+  local net="ネットワーク・ファイル: 観察した範囲で TCP・UDP は 127.0.0.1 だけ、開いているのは標準入出力・/dev/null・パイプ・anon_inode と TCP・UDP のソケットだけ"
+  if network_check; then record PASS "${net}" "network.txt proc-fd.txt。スナップショットの間の通信、定期観察の外の通信、TCP・UDP 以外の通信路は未検証"
   else record FAIL "${net}" "network.txt proc-fd.txt"; fi
   [ "${VERDICT}" = PASS ]
 }
