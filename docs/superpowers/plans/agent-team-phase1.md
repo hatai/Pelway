@@ -350,9 +350,9 @@ skill に入れる決まりは次のとおり。
 1. 入力は PR 番号。`gh pr diff <N>` と、リンクされた Issue の受け入れ条件を読む
 2. ファイルは書き換えない。実行してよいのは `mise run verify` と `mise run pr-size` だけ
 3. 指摘は「must-fix」と「nit」に分ける。must-fix が 1 つでもあれば Request changes にする
-4. 投稿は `scripts/agent-gh review pr review <N> --approve|--request-changes --body-file -` で行う。行単位の指摘は `scripts/agent-gh review api repos/{owner}/{repo}/pulls/<N>/reviews` の `comments` で付ける
+4. 投稿は `scripts/agent-gh review pr review <N> --approve|--request-changes --body-file -` で行う。行単位の指摘は `scripts/agent-gh review api repos/{owner}/{repo}/pulls/<N>/reviews` の `comments` で付ける（この api 形は POST のため、現行の `agent-gh review` の GET 限定では実行できない。review-pr の現行手順は行単位の指摘を review 本文に書く形）
 5. 本文の先頭は `Verdict: approve` か `Verdict: request-changes`。その後に must-fix と nit を箇条書きにする
-6. PR が Draft のまま Approve したら、`scripts/agent-gh review pr ready <N>` で Ready for review にする
+6. PR が Draft のまま Approve したら、`scripts/agent-gh review pr ready <N>` で Ready for review にする（`pr ready` は現行の `agent-gh review` の許可集合に無い。review-pr の現行手順は Ready への変更を行わない）
 
 - [ ] **Step 3: `write-pull-request` を直す**
 

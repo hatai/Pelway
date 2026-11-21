@@ -69,6 +69,12 @@ if [[ "$1 $2" == "token --help" ]]; then
   esac
 fi
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_NO_UPDATE_NOTIFIER=%s\n' "${GH_NO_UPDATE_NOTIFIER:-}"; printf 'GH_TELEMETRY=%s\n' "${GH_TELEMETRY:-}"; printf 'DO_NOT_TRACK=%s\n' "${DO_NOT_TRACK:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
+# review 名義は GH_CONFIG_DIR/hosts.yml でトークンを受け取る（環境には載せない）。
+# hosts.yml が無い役割（dev / qa）でも失敗を終了コードにしない（cat の失敗が偽 gh の
+# 終了コードに伝わるのを防ぐ）
+[ -z "${GH_CONFIG_DIR:-}" ] || cat "$GH_CONFIG_DIR/hosts.yml" >"$CALL_LOG.hosts" 2>/dev/null || :
+# 環境の全体も残す（review のトークンがどの変数名でも gh の環境に乗らないことの確認用）
+env >"$CALL_LOG.env"
 EOF
 
 # 偽の git: GH_TOKEN と引数を追記する（push 後の agent-gh-resign からの呼び出しも残すため追記）。
@@ -116,7 +122,7 @@ run() {
   local name="$1"
   shift
   export CALL_LOG="$ROOT/$name.log"
-  rm -f "$CALL_LOG" "$CALL_LOG.fnox-args"
+  rm -f "$CALL_LOG" "$CALL_LOG.fnox-args" "$CALL_LOG.env" "$CALL_LOG.hosts"
   OUT="$(bash "$SCRIPT" "$@" 2>&1)"
   RC=$?
 }
@@ -124,6 +130,23 @@ run() {
 expect_log() {
   local name="$1" pattern="$2"
   grep -qF -- "$pattern" "$ROOT/$name.log" 2>/dev/null || failures+=("$name: log lacks '$pattern'")
+}
+
+# expect_review_auth <name>: review 名義の gh が、トークンを環境変数ではなく一時
+# GH_CONFIG_DIR/hosts.yml で受け取り、終了後に消したことを確かめる。gh の環境には、
+# review トークンの値がどの変数名でも無く、gh が hosts.yml より優先する認証の変数
+# （GH_TOKEN・GITHUB_TOKEN・GH_ENTERPRISE_TOKEN・GITHUB_ENTERPRISE_TOKEN）も無いこと。
+expect_review_auth() {
+  local name="$1" log="$ROOT/$1.log" cfgdir v
+  [[ "$(head -n1 "$log" 2>/dev/null)" == "GH_TOKEN=" ]] || failures+=("$name: GH_TOKEN in gh env")
+  [[ -s "$log.env" ]] || failures+=("$name: gh env not recorded")
+  ! grep -qF -- 'review-token' "$log.env" 2>/dev/null || failures+=("$name: review token in gh env")
+  for v in GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN; do
+    ! grep -q "^$v=" "$log.env" 2>/dev/null || failures+=("$name: inherited $v reaches gh")
+  done
+  grep -qF 'oauth_token: review-token' "$log.hosts" 2>/dev/null || failures+=("$name: hosts.yml lacks review token")
+  cfgdir="$(sed -n 's/^GH_CONFIG_DIR=//p' "$log" 2>/dev/null | head -1)"
+  [[ -n "$cfgdir" && ! -e "$cfgdir" ]] || failures+=("$name: GH_CONFIG_DIR left behind")
 }
 
 run dev_mints_token dev pr list
@@ -140,7 +163,7 @@ run token_not_leaked dev pr list
 [[ "$OUT" != *dev-token* ]] || failures+=("token_not_leaked: token printed")
 
 run review_mints_token review pr review 1 --approve
-expect_log review_mints_token "GH_TOKEN=review-token"
+expect_review_auth review_mints_token
 expect_log review_mints_token "ARGS=pr review 1 --approve"
 grep -qF -- "--app-id 111 --installation-id 222" "$ROOT/review_mints_token.log.token-args" 2>/dev/null ||
   failures+=("review_mints_token: token generate args wrong")
@@ -166,8 +189,10 @@ grep -qF -- "-c $ROOT/agent-fnox.toml get PELWAY_DEV_APP_ID" "$ROOT/dev_uses_dev
 ! grep -qF -- "-c $ROOT/agent-fnox-review.toml get" "$ROOT/dev_uses_dev_config.log.fnox-args" 2>/dev/null ||
   failures+=("dev_uses_dev_config: dev role read the review config")
 
-# review 用の設定に秘密が無ければ fail-closed（exit 3）。gh も呼ばない
-FAKE_PELWAY_REVIEW_APP_KEY="" run review_missing_secret_fails_closed review pr list
+# review 用の設定に秘密が無ければ fail-closed（exit 3）。gh も呼ばない。
+# 許可サブコマンド（pr view）で確かめる: 許可外の形（pr list など）は #295 により
+# 秘密の読み出しより前の終了コード 6 で拒否され、ここで確かめたい経路に届かない。
+FAKE_PELWAY_REVIEW_APP_KEY="" run review_missing_secret_fails_closed review pr view 1
 [[ "$RC" == 3 ]] || failures+=("review_missing_secret_fails_closed: exit $RC, want 3")
 [[ ! -e "$ROOT/review_missing_secret_fails_closed.log" ]] || failures+=("review_missing_secret_fails_closed: gh was called")
 
@@ -350,6 +375,180 @@ run unicode_guard_capital_u dev pr list --search 'a\U3042'
 [[ "$RC" == 0 ]] || failures+=("unicode_guard_capital_u: exit $RC, want 0")
 expect_log unicode_guard_capital_u 'ARGS=pr list --search a\U3042'
 
+# Issue #295: review 名義で実行できるのは gh の読み取り系（＋レビュー投稿の pr review）
+# だけで、git は実行できない。許可される形はトークンを発行し、GH_CONFIG_DIR の
+# hosts.yml で gh に渡す。許可されない形は終了コード 6 で、fnox（トークン発行）・
+# gh・git のどれも呼ばれない。
+run review_gh_api review api /rate_limit
+expect_review_auth review_gh_api
+expect_log review_gh_api "ARGS=api /rate_limit"
+
+# api は GET のみ許可（PR #463 round 1 の must-fix）。明示の GET・読み取り系フラグは通す
+run review_gh_api_get review api -X GET /rate_limit
+expect_log review_gh_api_get "ARGS=api -X GET /rate_limit"
+
+run review_gh_api_method_get review api --method get /rate_limit
+expect_log review_gh_api_method_get "ARGS=api --method get /rate_limit"
+
+# 束ね書きのクラスタ内で -X が明示する GET も許す
+run review_gh_api_cluster_get review api -iX GET /rate_limit
+expect_log review_gh_api_cluster_get "ARGS=api -iX GET /rate_limit"
+
+run review_gh_api_xget review api -XGET /rate_limit
+expect_log review_gh_api_xget "ARGS=api -XGET /rate_limit"
+
+run review_gh_api_readflags review api --paginate --slurp -H 'Accept: x' -q '.a' /rate_limit
+expect_log review_gh_api_readflags "ARGS=api --paginate --slurp -H Accept: x -q .a /rate_limit"
+
+run review_gh_api_bool_cluster review api -i /rate_limit
+expect_log review_gh_api_bool_cluster "ARGS=api -i /rate_limit"
+
+# --jq の値が環境変数を読んでも漏れない（GH_TOKEN は子プロセスの環境に載せない。
+# round 4 の must-fix: `--jq '$ENV.GH_TOKEN'` で review トークンが出力に出た）
+# shellcheck disable=SC2016
+run review_gh_api_jq_env review api /rate_limit --jq '$ENV.GH_TOKEN'
+expect_review_auth review_gh_api_jq_env
+# shellcheck disable=SC2016
+expect_log review_gh_api_jq_env 'ARGS=api /rate_limit --jq $ENV.GH_TOKEN'
+
+# 呼び出し元から継承した変数が review の gh に届かない（round 4 の must-fix 2 件）:
+# - `token` を export した環境から起動すると、スクリプト内の token="$(app_token ...)" の代入が
+#   export 属性を引き継ぎ、review トークンが `token` という名前で gh の環境に乗っていた
+# - 継承した GH_TOKEN・GITHUB_TOKEN（と enterprise 版）は gh が hosts.yml より優先するため、
+#   review の操作（Approve を含む）がそのトークンの持ち主の名義で通っていた
+token=inherited GH_TOKEN=human-pat GITHUB_TOKEN=human-pat2 GH_ENTERPRISE_TOKEN=ent-pat GITHUB_ENTERPRISE_TOKEN=ent-pat2 \
+  run review_inherited_env review pr review 1 --approve --body-file -
+expect_review_auth review_inherited_env
+! grep -q '^token=' "$ROOT/review_inherited_env.log.env" 2>/dev/null || failures+=("review_inherited_env: token variable reaches gh")
+expect_log review_inherited_env "ARGS=pr review 1 --approve --body-file -"
+
+run review_gh_issue_view review issue view 1 --json body
+expect_review_auth review_gh_issue_view
+expect_log review_gh_issue_view "ARGS=issue view 1 --json body"
+
+run review_gh_pr_view review pr view 1 --json title
+expect_review_auth review_gh_pr_view
+expect_log review_gh_pr_view "ARGS=pr view 1 --json title"
+
+# pr view の --jq でも環境にトークンが無い
+# shellcheck disable=SC2016
+run review_gh_pr_view_jq_env review pr view 1 --json title --jq '$ENV'
+expect_review_auth review_gh_pr_view_jq_env
+# shellcheck disable=SC2016
+expect_log review_gh_pr_view_jq_env 'ARGS=pr view 1 --json title --jq $ENV'
+
+run review_gh_pr_diff review pr diff 1
+expect_review_auth review_gh_pr_diff
+expect_log review_gh_pr_diff "ARGS=pr diff 1"
+
+run review_gh_pr_checks review pr checks 1 --required
+expect_review_auth review_gh_pr_checks
+expect_log review_gh_pr_checks "ARGS=pr checks 1 --required"
+
+run review_gh_pr_review review pr review 1 --approve --body-file -
+expect_review_auth review_gh_pr_review
+expect_log review_gh_pr_review "ARGS=pr review 1 --approve --body-file -"
+
+# run list・run view は読み取り系で、レビュー担当が CI の結果と失敗ログを読むのに使う
+# （#582 で claude_review の許可リストに足された形）
+run review_gh_run_list review run list --branch agent/x --json headSha,status
+expect_review_auth review_gh_run_list
+expect_log review_gh_run_list "ARGS=run list --branch agent/x --json headSha,status"
+
+run review_gh_run_view review run view 1 --log-failed
+expect_review_auth review_gh_run_view
+expect_log review_gh_run_view "ARGS=run view 1 --log-failed"
+
+# review_deny <name> <args...>: `agent-gh review <args...>` が終了コード 6 で拒否され、
+# トークン発行（fnox）も gh/git も呼ばれないことを確かめる。
+review_deny() {
+  local name="$1"
+  shift
+  run "$name" review "$@"
+  [[ "$RC" == 6 ]] || failures+=("$name: exit $RC, want 6")
+  [[ "$OUT" == *'review 名義'* ]] || failures+=("$name: no guidance on stderr")
+  expect_no_calls "$name"
+}
+
+# git は review 名義ではサブコマンドを問わずすべて拒否（round 4。レビュースレッドは
+# main の git を直接読む。読み取り形の引数でも --output・-O・--no-index のような
+# 書き込み・実行・リポジトリ外の読み取りに届く形を引数検査で網羅できないため、
+# サブコマンドごと止める）
+review_deny review_git_show git show HEAD
+review_deny review_git_log git log --oneline
+review_deny review_git_diff git diff HEAD~1
+review_deny review_git_grep git grep -e foo
+review_deny review_git_blame git blame file
+review_deny review_git_grep_noindex git grep --no-index . /path/to/secret
+review_deny review_git_grep_open_abbrev git grep --op=evil foo
+# deny 済みの git 操作や任意実行がラッパー経由で通らない（#256 の実測指摘の形）
+review_deny review_git_switch git switch -c probe
+review_deny review_git_c_alias git -c 'alias.x=!id' x
+review_deny review_git_push git push -u origin HEAD
+review_deny review_git_fetch git fetch origin
+review_deny review_git_lsremote git ls-remote https://example.com/
+review_deny review_git_no_sub git
+# 列挙外の gh サブコマンドはすべて拒否
+review_deny review_pr_checkout pr checkout 1
+review_deny review_pr_ready pr ready 1
+review_deny review_pr_list pr list
+review_deny review_issue_list issue list
+review_deny review_repo_clone repo clone hatai/Pelway dst
+review_deny review_alias alias list
+review_deny review_auth auth status
+review_deny review_gist gist list
+review_deny review_release release list
+# run は list・view だけ。成果物の書き出し（download）や実行の操作は拒否
+review_deny review_run_download run download 1 --dir /tmp/x
+review_deny review_run_rerun run rerun 1
+review_deny review_run_cancel run cancel 1
+review_deny review_run_delete run delete 1
+review_deny review_run_watch run watch 1
+review_deny review_run_no_sub run
+review_deny review_no_args
+# 読み取り形に見える引数（書き込み・実行の経路を持つ形）も、git 全拒否で止まる
+review_deny review_git_show_output git show --output=/tmp/x HEAD
+review_deny review_git_log_output git log --output /tmp/x
+review_deny review_git_grep_pager git grep -Oevil foo
+review_deny review_git_grep_open git grep --open-files-in-pager=evil foo
+review_deny review_git_log_P git log -P
+review_deny review_git_diff_extdiff git diff --ext-diff
+review_deny review_git_show_textconv git show --textconv
+
+# api の変更系メソッド・POST を意味する引数形は拒否（GH_TOKEN を持つ review トークンでの書き込みを止める）
+review_deny review_api_patch api -X PATCH /repos/hatai/Pelway/pulls/1
+review_deny review_api_delete api -X DELETE /repos/hatai/Pelway/pulls/1
+review_deny review_api_post api -X POST /repos/hatai/Pelway/issues
+review_deny review_api_method_put api --method PUT /x
+review_deny review_api_method_eq api --method=POST /x
+review_deny review_api_short_inline api -XDELETE /x
+review_deny review_api_method_missing api -X
+review_deny review_api_raw_field api -f query='{ viewer }' graphql
+review_deny review_api_field api -F 'key=@/etc/passwd' /x
+review_deny review_api_raw_field_long api --raw-field 'x=1' /x
+review_deny review_api_field_long api --field 'x=1' /x
+review_deny review_api_input api --input /tmp/body.json /x
+# 値を取らない短いオプションを先頭に束ねたクラスタ内の X/f/F も拒否する
+# （pflag はクラスタを 1 文字ずつ読み、-i は値を取らないので続く文字が次のフラグになる）
+review_deny review_api_cluster_x api -iX PATCH /x
+review_deny review_api_cluster_xval api -iXDELETE /x
+review_deny review_api_cluster_xeq api -iX=POST /x
+review_deny review_api_cluster_f api -iftitle=x /x
+review_deny review_api_cluster_F api -iF 'key=@/etc/passwd' /x
+# 許可リストに無い長いオプション・短いオプションは拒否
+review_deny review_api_unknown_long api --nonexistent /x
+review_deny review_api_unknown_short api -z /x
+# メソッド上書きを試みるヘッダは拒否
+review_deny review_api_method_override api -H 'X-HTTP-Method-Override: PATCH' /x
+review_deny review_api_method_override_long api --header 'x-http-method-override: DELETE' /x
+
+# dev 名義はこれまでどおり制限されない
+run dev_git_unrestricted dev git switch -c probe
+expect_log dev_git_unrestricted "GH_TOKEN=dev-token"
+expect_log dev_git_unrestricted "switch -c probe"
+
+run dev_gh_unrestricted dev repo list
+expect_log dev_gh_unrestricted "ARGS=repo list"
 # qa ロール: `qa comment <番号> --body-file <path|->` の 1 形だけ許可する（許可リスト方式）。
 # それ以外の呼び出しは、fnox（秘密の読み出し）と gh / git（ネットワーク）のどちらも呼ばずに拒否する。
 printf 'qa body\n' >"$ROOT/qa-body.md"
@@ -441,7 +640,7 @@ tok="$(sed -n 's/^GH_CONFIG_DIR=//p' "$ROOT/gh_config_isolated.log.token-env")"
 [[ -e "$fake_gh_dir/hosts.yml" ]] || failures+=("gh_config_isolated: fake hosts.yml disturbed")
 
 # review ロール（~/.config/gh が読めないレビュー sandbox が発端）でも同じ隔離
-GH_CONFIG_DIR="$fake_gh_dir" run gh_config_isolated_review review pr list
+GH_CONFIG_DIR="$fake_gh_dir" run gh_config_isolated_review review pr view 1
 [[ "$RC" == 0 ]] || failures+=("gh_config_isolated_review: exit $RC, want 0 ($OUT)")
 used="$(used_gh_config gh_config_isolated_review)"
 [[ -n "$used" && "$used" != "$fake_gh_dir" && ! -e "$used" ]] || failures+=("gh_config_isolated_review: GH_CONFIG_DIR not isolated/removed")
@@ -466,7 +665,7 @@ expect_no_telemetry() {
   grep -qx 'GH_TELEMETRY=false' "$2" || failures+=("$1: GH_TELEMETRY=false not set ($(basename "$2"))")
   grep -qx 'DO_NOT_TRACK=1' "$2" || failures+=("$1: DO_NOT_TRACK=1 not set ($(basename "$2"))")
 }
-for t in "telemetry_dev:dev pr list" "telemetry_review:review pr list" "telemetry_git:dev git status" \
+for t in "telemetry_dev:dev pr list" "telemetry_review:review pr view 1" "telemetry_git:dev git status" \
   "telemetry_qa:qa comment 1 --body-file $ROOT/qa-body.md"; do
   name="${t%%:*}"
   read -r -a targs <<<"${t#*:}"

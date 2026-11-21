@@ -229,7 +229,7 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 | 場所 | 設定 |
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.claude_review` | `driver: claudeAgent`、`config` の `homePath` に `/home/hatai/.claude-review`（UI のフィールド名は「CLAUDE_CONFIG_DIR path」。子プロセスの環境変数 `CLAUDE_CONFIG_DIR` になる。`config.environment` は claudeAgent の config スキーマに無いキーで無視される） |
-| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`・`git ls-tree`・`git cat-file`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` が引数を `git`/`gh` にそのまま渡すため、ワイルドカードは `auth token`・`repo clone`・`git` 全般などあらゆる形を許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す |
+| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`・`git ls-tree`・`git cat-file`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。ラッパーが `review` 名義で絞るのはサブコマンドと `api` の引数で、`pr review` など許可したサブコマンドの引数はそのまま通るため、権限設定側でも使用する形をサブコマンド単位で列挙し deny で二重に止める）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す |
 | socat | Claude Code の sandbox（Linux）が使う。`mise.toml` の `conda:socat` で `mise install`（`mise bootstrap`）が入れる。apt と sudo は要らない |
 | ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
 | `~/.claude-review/settings.json` の `hooks.PermissionRequest` | matcher `*` で `/home/hatai/.claude-review/hooks/deny-permission-request.sh` を呼ぶ。承認要求になる場面ごとに、人間に聞かずに拒否を返す。拒否のメッセージは、sandbox の遮断ではないこと、Bash なら単純なコマンドに分けて送り直すことをモデルに伝える。フックは worktree の外に絶対パスで置く（委託のレビューは PR の作者のコミットの checkout で動くため、リポジトリの中に置くと PR が差し替えられる） |
@@ -245,6 +245,12 @@ EOF
 ```
 
 戻すときは `hooks.PermissionRequest` を消す。
+
+`scripts/agent-gh` 自身も `review` 名義の実行を絞る（権限設定側の境界とは別層で、許可集合は設定表と同一ではない）。実行できるのは gh の `api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view` だけで、`git` を含むそれ以外はトークンを発行せず終了コード 6 で拒否する。git がラッパー経由で一切動かないのは意図した境界で、レビュースレッドは main の git を直接読む（`agent-gh review git` の呼び出し元はリポジトリに無い）。読み取り系に見える引数でも `--output`・`-O`・`--no-index` のように書き込み・任意実行・リポジトリ外の読み取りに届く形を省略形と束ね書きまで網羅するのは引数検査では困難なため、サブコマンドごと止める。
+
+`api` は GET のみで、引数検査は許可リスト方式: 許すのは値を取らない `-i`/`--include`・`--paginate`・`--slurp`・`--silent`・`--verbose`、値を取る `-H`/`--header`・`-q`/`--jq`・`-t`/`--template`・`--cache`・`--hostname`（`X-HTTP-Method-Override` ヘッダは拒否）、`--method`/`-X` の GET 形、`-` で始まらない endpoint だけ。短いオプションは束ね書きのクラスタを 1 文字ずつ読んで検査するので、`-iX PATCH` や `-iftitle=x` の形も拒否される（body を付けて POST になる `-f`/`--raw-field`・`-F`/`--field`・`--input` は許可リストに入らない）。
+
+review 名義で発行したトークンは子プロセスの環境変数に置かない。`gh` は `--jq '$ENV.GH_TOKEN'` で自分の環境を読めるため、0600 の一時 `GH_CONFIG_DIR/hosts.yml` で認証させ、gh の終了後に消す。hosts.yml に書いた後、gh を呼ぶ前に、呼び出し元から継承した `token`・`GH_TOKEN`・`GITHUB_TOKEN`・`GH_ENTERPRISE_TOKEN`・`GITHUB_ENTERPRISE_TOKEN` を外す。`token` は継承した export 属性がスクリプト内の代入に残ると review トークンをその名前で gh に渡し、残りの 4 つは gh が hosts.yml より優先するため、残すと review の操作（Approve を含む）がそのトークンの持ち主の名義で通る。`pr review` の引数（`--body-file` など）は絞らず、sandbox の書き込み先の制限は別 Issue（#305・#306）で追う。
 
 運用に入る前に、`auto-accept-edits` のスレッドで次を確かめる。確かめるまでは `claude_review` を使わない。
 
@@ -269,8 +275,8 @@ EOF
 
 残っている既知の経路は hatai の決裁で別 Issue で追う（PR #287 の round 4 で両レビュー担当が request-changes として指摘し、hatai が残リスクを受容）:
 
-- `api -F <key>=@<file>`・`pr review --body-file <file>` で読み取り可能なローカルファイルを GitHub へ送信できる（#305）
-- 読み取り系 `git` の `--output=<path>` での書き込みと `git grep -O<cmd>` での実行が、sandbox が worktree・共有 `.git` への書き込みを許すことと重なって残る（#306）
+- `api -F <key>=@<file>`・`pr review --body-file <file>` で読み取り可能なローカルファイルを GitHub へ送信できる（#305。`agent-gh review` の `api` は GET 限定で `-f`/`--raw-field`・`-F`/`--field`・`--input` の形は wrapper が拒否する。残る経路は `pr review --body-file` と、読んだ内容をレビュー本文へ直接書く形）
+- 読み取り系 `git` の `--output=<path>` での書き込みと `git grep -O<cmd>` での実行が、sandbox が worktree・共有 `.git` への書き込みを許すことと重なって残る（#306。`agent-gh review` は `git` をすべて拒否するが、sandbox が直接の `git` 呼び出しに許す書き込み先の制限は未解決）
 
 ## レビュー担当の Devin CLI（devin_review）
 

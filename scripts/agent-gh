@@ -5,13 +5,16 @@
 #   scripts/agent-gh qa comment <番号> --body-file <path|->   QA 担当 GitHub App pelway-qa（この形だけ許可）
 #   scripts/agent-gh <dev|review> git <git の引数...>   その名義の認証で git を実行する
 #   scripts/agent-gh -h | --help               使い方を標準出力に出して終了コード 0（fnox も gh も呼ばない）
-# 呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。
-# gh は毎回空の一時 GH_CONFIG_DIR で呼ぶ。~/.config/gh や呼び出し元の GH_CONFIG_DIR（外部の hosts.yml）は
+# 呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、子プロセスにだけ渡す。画面には出さない。
+# dev / qa は GH_TOKEN で、review は一時 GH_CONFIG_DIR の hosts.yml で渡す（許可した gh の --jq '$ENV' で環境を読まれるのを防ぐため）。
+# review 名義で実行できるサブコマンドは読み取り系に絞る（下の review_subcommand_allowed）。
+# gh は毎回一時の GH_CONFIG_DIR で呼ぶ。~/.config/gh や呼び出し元の GH_CONFIG_DIR（外部の hosts.yml）は
 # 参照もフォールバックもさせない（#522。レビュー sandbox が ~/.config/gh を読めないのと、人間のトークンへの
-# 黙ったフォールバックを防ぐため）。一時ディレクトリは終了時に消す。
+# 黙ったフォールバックを防ぐため）。一時ディレクトリは終了時に消す。review 名義だけはトークンを
+# 環境変数に載せないため、このディレクトリの hosts.yml で認証させる（下の gh 呼び出しを参照）。
 # qa は許可リスト方式で、上の 1 形以外の呼び出し（ラベル・Approve・マージ・編集・削除など）はトークン発行前に終了コード 2 で拒否する。
 # qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持たない（~/.config/pelway-agent-qa/fnox.toml を指す。未設定は終了コード 3）。
-# 終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない（qa の PELWAY_AGENT_FNOX_CONFIG 未設定を含む）、5 = 引数に \uXXXX エスケープ混入、それ以外は gh / git の終了コード（--help / -h は 0）
+# 終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない（qa の PELWAY_AGENT_FNOX_CONFIG 未設定を含む）、4 = 署名の付け替えに失敗、5 = 引数に \uXXXX エスケープ混入、6 = review 名義で許可されていないサブコマンド、それ以外は gh / git の終了コード（--help / -h は 0）
 set -euo pipefail
 # コマンド置換 $(...) の中でも set -e を効かせる（app_token 内の secret の失敗で止めるため）。
 shopt -s inherit_errexit
@@ -81,12 +84,147 @@ help() {
     "  $0 qa comment <番号> --body-file <path|->   QA 担当 GitHub App pelway-qa（この形だけ許可）" \
     "  $0 -h | --help                      この使い方を標準出力に出して終了する" \
     "" \
-    "呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。" \
+    "呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、子プロセスにだけ渡す（dev / qa は GH_TOKEN、review は一時 GH_CONFIG_DIR の hosts.yml）。画面には出さない。" \
     "git push の成功後は scripts/agent-gh-resign がコミットを GitHub API の署名付きに付け替える（止めるときは PELWAY_AGENT_SKIP_RESIGN=1）。" \
     "qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持ちません（~/.config/pelway-agent-qa/fnox.toml を指してください）。" \
     "非 ASCII の文字列は argv 経由で渡せません（\\uXXXX に潰れます）。--body-file / api --input / git commit -F などファイル経由で渡してください。" \
-    "終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、それ以外は gh / git の終了コード"
+    "review 名義で実行できるサブコマンドは読み取り系に絞られています（gh の api（GET のみ）・issue view・pr view|diff|checks|review・run list|view。git は実行できません）。" \
+    "終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、6 = review 名義で許可されていないサブコマンド、それ以外は gh / git の終了コード"
   exit 0
+}
+
+# review_api_args_allowed <args...>: `gh api` の引数が GET の読み取りに留まるかを
+# 判定する。検査は拒否リストではなく許可リストで、許可するのは次の形だけ:
+#   - 値を取らないフラグ: -i/--include・--paginate・--slurp・--silent・--verbose
+#   - 値を取る無害なフラグ: -H/--header・-q/--jq・-t/--template・--cache・--hostname
+#     （値は次の引数か --name=value・短オプションの残り。X-HTTP-Method-Override
+#     ヘッダは拒否する）
+#   - -X GET・-XGET・-X=GET・--method GET・--method=GET（GET 以外のメソッド指定は拒否）
+#   - `-` で始まらない位置引数（endpoint）
+# 短いオプションは pflag と同じくクラスタを 1 文字ずつ読む（-i は値を取らず次の
+# 文字が別のフラグになるので、-iX PATCH・-iftitle=x も拾える）。X・f・F・q・H・t は
+# 残りのクラスタか次の引数を値として飲む。許可していないフラグは -f/--raw-field・
+# -F/--field・--input のような body を付ける形も含めてすべて拒否する。
+review_api_args_allowed() {
+  local arg cluster ch val
+  while (($#)); do
+    arg="$1"
+    shift
+    case "$arg" in
+      --)
+        # 以降は位置引数（endpoint）。検査を終える
+        break
+        ;;
+      --include|--paginate|--slurp|--silent|--verbose)
+        ;;
+      --header|--jq|--template|--cache|--hostname)
+        (($# >= 1)) || return 1
+        val="$1"
+        shift
+        [[ "$arg" != "--header" || "${val,,}" != *x-http-method-override:* ]] || return 1
+        ;;
+      --header=*)
+        [[ "${arg,,}" != *x-http-method-override:* ]] || return 1
+        ;;
+      --jq=*|--template=*|--cache=*|--hostname=*)
+        ;;
+      --method)
+        (($# >= 1)) || return 1
+        [[ "$1" =~ ^[Gg][Ee][Tt]$ ]] || return 1
+        shift
+        ;;
+      --method=[Gg][Ee][Tt])
+        ;;
+      --*)
+        # 許可リストに無い長いオプションは拒否（--field・--raw-field・--input など
+        # body を付ける形、未知のフラグも含む）
+        return 1
+        ;;
+      -*)
+        # 短いオプションのクラスタを pflag と同じく 1 文字ずつ読む
+        cluster="${arg#-}"
+        while [[ -n "$cluster" ]]; do
+          ch="${cluster:0:1}"
+          cluster="${cluster:1}"
+          case "$ch" in
+            i)
+              ;;
+            X)
+              # X の値は残りのクラスタか次の引数。GET だけを許す
+              if [[ -z "$cluster" ]]; then
+                (($# >= 1)) || return 1
+                cluster="$1"
+                shift
+              fi
+              cluster="${cluster#=}"
+              [[ "$cluster" =~ ^[Gg][Ee][Tt]$ ]] || return 1
+              cluster=""
+              ;;
+            f|F)
+              # raw-field/field（body を付ける形）は拒否
+              return 1
+              ;;
+            q|H|t)
+              # 値を取る無害な短オプション。値は残りのクラスタか次の引数
+              if [[ -z "$cluster" ]]; then
+                (($# >= 1)) || return 1
+                val="$1"
+                shift
+              else
+                val="${cluster#=}"
+              fi
+              [[ "$ch" != "H" || "${val,,}" != *x-http-method-override:* ]] || return 1
+              cluster=""
+              ;;
+            *)
+              # 許可リストに無い短いオプションは拒否
+              return 1
+              ;;
+          esac
+        done
+        ;;
+      *)
+        # `-` で始まらない位置引数（endpoint）は許す
+        ;;
+    esac
+  done
+  return 0
+}
+
+# review_subcommand_allowed <args...>: review 名義で許可するサブコマンドかを判定する。
+# review-pr が実際に使う読み取り系（＋レビュー投稿の pr review）に絞る。判定はサブコマンド
+# 単位で、第 1 引数が許可リストの語そのものであることを要求する（`git -c 'alias.x=!<cmd>' x`
+# のような先頭オプション注入は第 1 引数が一致しないため拒否される）。api は許可リスト化した
+# 引数検査で GET の読み取りに留める。git は review 名義ではすべて拒否する: レビュースレッドは
+# main の git を直接読めばよく、`agent-gh review git` の呼び出し元はリポジトリに無い。
+# 読み取り系に見える引数でも書き込み・任意実行・リポジトリ外の読み取りに届く形
+# （--output・-O・--no-index、省略形と束ね書きを含む）を網羅するのは
+# 引数検査では困難なため、サブコマンドごと止める。
+review_subcommand_allowed() {
+  case "${1:-}" in
+    api)
+      review_api_args_allowed "${@:2}"
+      ;;
+    issue)
+      [[ "${2:-}" == "view" ]]
+      ;;
+    pr)
+      case "${2:-}" in
+        view|diff|checks|review) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+    run)
+      # CI の結果と失敗ログの読み取り。download（ファイルの書き出し）・rerun・cancel などは拒否
+      case "${2:-}" in
+        list|view) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 secret() {
@@ -210,6 +348,11 @@ case "$role" in
     git_identity=(-c "user.name=pelway-dev[bot]" -c "user.email=$email")
     ;;
   review)
+    # 許可外のサブコマンドは、fnox（秘密の読み出し）と gh（ネットワーク）のどちらよりも前に拒否する。
+    if ! review_subcommand_allowed "$@"; then
+      echo "agent-gh: review 名義で実行できるのは gh の api（GET のみ）・issue view・pr view|diff|checks|review だけです" >&2
+      exit 6
+    fi
     fnox_config="$review_fnox_config"
     token="$(app_token PELWAY_REVIEW_APP_ID PELWAY_REVIEW_APP_INSTALLATION_ID PELWAY_REVIEW_APP_KEY)"
     ;;
@@ -260,6 +403,25 @@ if [[ "${1:-}" == "git" ]]; then
   # exec しない（EXIT trap で一時 GH_CONFIG_DIR を消すため）。終了コードは git のものを返す。
   GH_TOKEN="$token" git "${git_cfg[@]}" "$@"
   exit $?
+fi
+
+if [[ "$role" == "review" ]]; then
+  # review 名義ではトークンを子プロセスの環境変数に置かない。
+  # gh は --jq '$ENV.GH_TOKEN' で自分の環境を読めるため、GH_TOKEN で渡すと
+  # 許可したサブコマンドの出力経由でトークンが漏れる。代わりに隔離済みの
+  # GH_CONFIG_DIR（gh_isolated_config が作った一時ディレクトリ）に 0600 の
+  # hosts.yml を書いて認証させる。ディレクトリの削除は共通の EXIT trap（cleanup）が行う。
+  (umask 077; printf 'github.com:\n    oauth_token: %s\n    git_protocol: https\n' "$token" >"$GH_CONFIG_DIR/hosts.yml")
+  # hosts.yml に書いたら、gh の環境にトークンが乗る経路を変数名によらず断つ:
+  # - token: 呼び出し元が `token` を export していると、上の token="$(app_token ...)" の代入が
+  #   export 属性を引き継ぎ、review トークンが `token` という名前で gh に渡る
+  # - GH_TOKEN・GITHUB_TOKEN・GH_ENTERPRISE_TOKEN・GITHUB_ENTERPRISE_TOKEN: gh はこれらを
+  #   hosts.yml より優先するため、継承したままだと review の操作（Approve を含む）が
+  #   pelway-review ではなく、そのトークンの持ち主の名義で通る
+  unset token GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN
+  rc=0
+  gh "$@" || rc=$?
+  exit "$rc"
 fi
 
 # exec しない（EXIT trap で一時 GH_CONFIG_DIR を消すため）。終了コードは gh のものを返す。
