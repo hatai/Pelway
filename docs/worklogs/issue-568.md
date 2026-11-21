@@ -66,3 +66,15 @@
 5. 改善案: `.agents/skills/verify-pelway/SKILL.md` の「5. 後片付け」の生き残りの確認に、T3 の常駐プロセスの comm の一覧（今は `t3-*` だけ）を、T3 の運用文書（`docs/superpowers/specs/agent-team.md`）から参照する形にする。
 
 使ったスキル: implement-issue、review-pr の結果の処理（手順 9）
+
+## 実装者メモ（round 7）
+
+対象 head: f3e26e5aaf67d5fbbb085beac21f556c099eaa75
+
+1. 詰まった箇所: レビュー round 2 の委託: Codex（codex_review）が利用上限で failed。すぐ再委託すると同じ理由で 2 回連続の failed（止まる条件）になるため、上限が解ける時刻の後に 1 回だけ再委託する予約を入れた。
+2. 曖昧だった文: 「高リスクで複数担当にしたときは、全員の結果がそろうまで次に進まない」（`.agents/skills/implement-issue/SKILL.md` の手順 8）。Codex が利用上限で結果を出せないあいだに、Claude の must-fix を先に直すかで迷った。直した head を Codex と Claude にそろえて出し直せば両方が同じ head を見るので、先に直した。
+3. 仮定と解釈: Claude の round 2 の must-fix（中断した run が PASS になる）を、main が戻ったときだけ完了の印を立て、印が無ければ FAIL にする、で直した。SIGTERM で中断した run で FAIL になることを確かめた。
+4. 足りなかった情報・検証手段: Codex の利用上限が解ける時刻（失敗の文言の「2:00 PM」だけが手がかり）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 の「委託の子が `failed` を報告したら」に、「提供元の利用上限による failed は、上限が解ける時刻の後に再委託し、連続の数に入れない」を足す。
+
+使ったスキル: implement-issue
