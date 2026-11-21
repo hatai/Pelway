@@ -11,3 +11,15 @@
 5. 改善案: `docs/dev-environment.md` の「pitchfork について」に「T3 の worktree の判定を変えたら、`docs/superpowers/specs/agent-team.md` の「8.」と `docs/agents/grokbot-runbook.md` の worktree の行も合わせて直す」と書く（同じ説明が 3 か所にある）。
 
 使ったスキル: grilling（hatai との設計の確認）、implement-issue
+
+## 実装者メモ（round 2）
+
+対象 head: 5b8ab0e5d1081b36e46992af553130664d8680bf
+
+1. 詰まった箇所: `scripts/tests/agent-worktree-prune.test.sh` の場面 10: round 1 で `age` を各場面に入れたとき、`out="$(run --dry-run …)"` の形の行を拾えず、この場面だけ漏れた。作りたての `j-dry` は「6 時間以内に更新された」で残り、`dry-run removes nothing` と `grep -q "j-dry"` が dry-run の分岐と無関係に通っていた（Claude のレビューの must-fix）。
+2. 曖昧だった文: 「テストが最初から通ったら、そのテストは条件を確かめていない。書き直す。」（`.agents/skills/implement-issue/SKILL.md` の手順 4）。新しい条件を足したときに、既存のテストが別の理由で通るようになる場合を、この文が対象に含むかが読み取れなかった。
+3. 仮定と解釈: 場面 10 の確認を `grep -qx "  $ROOT/wt/j-dry"` に強め、「消す worktree」の側に出ることを確かめる形にした。`age` を外すと red（`FAIL dry-run lists candidate`）、足すと green になることを確かめた。nit の `find` の stderr は `[文書のずれ]` の印が無いので直していない。
+4. 足りなかった情報・検証手段: Codex のレビュー委託は Codex 側の利用上限で `failed` になった（上限は 11 月 22 日 0:00 に戻る）。再委託は 0:00 の後に行う。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 4 に「新しい条件が既存のテストの前提（作りたての状態など）を変えるときは、既存のテストの各アサーションが、本来確かめていた分岐を通ってだけ通ることを確かめる」と足す。
+
+使ったスキル: implement-issue
