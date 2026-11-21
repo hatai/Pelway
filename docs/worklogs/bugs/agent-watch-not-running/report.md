@@ -19,11 +19,13 @@
 
 ## 根本原因
 
-再起動のあと、agent-watch を起動するものが無かった。原因は次の 3 つで、どれも PC 側の状態であり、リポジトリのコードの欠陥ではない。
+再起動のあと、agent-watch を起動するものが無かった。原因は次の 4 つで、どれも PC 側の状態であり、リポジトリのコードの欠陥ではない。
 
 1. **namespace が登録されていない。** 起動時の supervisor が読むのは `~/.config/pitchfork/config.toml` の `[namespaces]` に登録したプロジェクトだけ（`docs/dev-environment.md:692-701`）。このファイルが無い。
 2. **本体 checkout が古いブランチにある。** 本体 checkout `/home/hatai/repos/hatai/Pelway` は `agent/510-agent-watch-start-guard`（`e91c3f96`）をチェックアウトしていて、`origin/main` より 126 コミット遅れている。そこの `pitchfork.toml` の `[daemons.agent-watch]` には `boot_start = true` が無い。`docs/dev-environment.md:701` は「本体 checkout は `boot_start = true` の入った main に置いておく」としている。
 3. **インストール済みのバイナリが古い。** `~/.local/bin/pelway-agent-watch` は 2026-11-11 20:15 のビルドで、#555 の受信箱と起こし、#510 の起動の拒否を含まない。仮に起動しても、受信箱は作られず、指揮役も起こされない。指揮役の登録ファイル `~/.config/pelway-agent-notify/conductor-thread-id` も無い。
+
+4. **supervisor の PATH に git が無い。** 1〜3 を直して 18:59 に起動した新しい版は、`cannot check the checkout: git rev-parse: exit 127` を出して止まった（`errored exit code 1`）。login 時に起動する supervisor（`~/.config/systemd/user/pitchfork.service`）の PATH は `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin` だけで、`git`・`gh`（`/home/linuxbrew/.linuxbrew/bin`）と `t3`（`~/.local/bin`）が入っていない。同じ理由で `agent-worktree-prune` も `git: command not found` で失敗していた。`docs/dev-environment.md:692-701` の自動起動の手順には、この PATH の設定が無い。再起動の前の agent-watch は手で起動したもので、対話シェルの PATH を引き継いでいたと考えられる（想定）。
 
 トリガーは 12:52〜12:55 の PC（WSL）の再起動で、それまでは手で起動した agent-watch が動いていた。
 
@@ -61,6 +63,12 @@ agent-watch の最後のログ（`pitchfork logs Pelway/agent-watch`）。この
 3. 本体 checkout で `mise run agent-watch-install` を実行してバイナリを入れ直す
 4. 本体 checkout で `pitchfork start agent-watch` を実行する
 5. 代行の指揮役が動いているなら、ホストの端末で `~/.local/bin/pelway-agent-watch --register '<スレッド ID>'` で登録する（`docs/dev-environment.md:685` の手順）
+
+6. supervisor の PATH を足す: `~/.config/systemd/user/pitchfork.service.d/path.conf` に `Environment=PATH=/home/hatai/.local/bin:/home/hatai/.local/share/mise/shims:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin` を書き、`systemctl --user daemon-reload` と `systemctl --user restart pitchfork.service` を行う
+
+1〜4 と 6 は 2026-11-21 の 19:06 JST までに hatai が行い、`pitchfork list` で `Pelway/agent-watch running`、状態ファイル `~/.local/state/pelway/agent-watch.json` の更新（19:07:50）を確かめた。
+
+文書の修正: `docs/dev-environment.md` の自動起動の手順に、supervisor の PATH の設定（6）を足す。
 
 再発の防止: 見張りが止まったことに誰も気づけなかった。止まりの検知は #512（heartbeat）で扱う。Grok Bot との連携の Issue でも、heartbeat を webhook に送ることを入れる。
 
