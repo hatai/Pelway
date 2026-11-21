@@ -83,6 +83,7 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
        "due_warned": {} if prev is None else prev.get("due_warned", {}),
        "stall_notified": {} if prev is None else prev.get("stall_notified", {}),
        "decision_warned": {} if prev is None else prev.get("decision_warned", {}),
+       "escalation": {} if prev is None else prev.get("escalation", {}),
        "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0)}
 # ラベル操作の裏付け検査（Issue #405、2026-11-17 の要件変更）。actor だけでは判定しない
 # （エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai に
@@ -220,52 +221,75 @@ def all_pages(path):
     data = gh_json("api", path, "--paginate", "--slurp")
     if not isinstance(data, list) or not all(isinstance(p, list) for p in data): return None
     return [x for p in data for x in p if isinstance(x, dict)]
-def conductor_absence():
-    # 指揮役が T3 のスレッドとして動いていなければ理由の語を、動いていれば None を返す。
-    # 登録ファイルは symlink をたどらず FIFO で止まらずに開き、自分の所有の通常ファイルの 1 行目だけを読む
-    # （crates/pelway-agent-watch の read_conductor_file・parse_conductor_file と同じ決まり）。
+def registered_thread():
+    # 登録ファイルの 1 行目（スレッド ID）。無い・空・通常のファイルでない（symlink・FIFO など。たどらない）ときは ""、
+    # それ以外の理由で読めないとき（権限が無い・自分の所有でないなど）は None（判定を保留する）。symlink をたどらず
+    # FIFO で止まらずに開く（crates/pelway-agent-watch の read_conductor_file・parse_conductor_file と同じ決まり）
+    p = sys.argv[5]
     try:
-        fd = os.open(sys.argv[5], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return ""
     except OSError:
-        return "no-registration"
-    with os.fdopen(fd, "rb") as f:
-        st = os.fstat(f.fileno())
-        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid(): return "no-registration"
-        tid = f.read(4096).decode("utf-8", "replace").split("\n", 1)[0].strip()
+        try: return None if stat.S_ISREG(os.lstat(p).st_mode) else ""
+        except OSError: return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode): return ""
+        if st.st_uid != os.geteuid(): return None
+        return os.read(fd, 4096).decode("utf-8", "replace").split("\n", 1)[0].strip()
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+def conductor_absence():
+    # 指揮役が T3 のスレッドとして動いていないと確かめられたときだけ理由の語を返す（動いている・確かめられないときは None）
+    tid = registered_thread()
+    if tid is None: return None
     if not tid: return "no-registration"
     th = next((t for t in threads if isinstance(t, dict) and t.get("threadId") == tid), None)
     if th is None: return "thread-missing"
     return "thread-archived" if th.get("archived") else None
-def latest_labeled(n):
-    # Issue n の最新の needs-decision の labeled の時刻。取得失敗・見つからないときは None
-    evs = all_pages(f"/repos/hatai/Pelway/issues/{n}/events?per_page=100")
-    ats = [e.get("created_at") for e in (evs or []) if e.get("event") == "labeled"
-           and (e.get("label") or {}).get("name") == "needs-decision" and iso(e.get("created_at"))]
+def events(n):  # Issue n の events（全ページ）。取得失敗は None
+    return all_pages(f"/repos/hatai/Pelway/issues/{n}/events?per_page=100")
+def label_times(evs, kind, label):  # evs のうち label の kind（labeled・unlabeled）のイベントの時刻（読めるものだけ）
+    return [e.get("created_at") for e in evs or [] if e.get("event") == kind
+            and (e.get("label") or {}).get("name") == label and iso(e.get("created_at"))]
+def latest_labeled(evs):  # 最新の needs-decision の labeled の時刻。取得失敗・見つからないときは None
+    ats = label_times(evs, "labeled", "needs-decision")
     return max(ats, key=iso) if ats else None
 def escalate(n, lt, reason):
-    # ラベルを読み直し、needs-decision がまだ付いていれば、目印のコメントを書いてから needs-human を付け、
-    # needs-decision を外す（付ける方が先なので、途中で失敗してもどちらのラベルも無い状態にならない）。
-    # needs-human がもう付いていれば、自分が始めて needs-decision を外し損ねた格上げ（同じ labeled_at の
-    # 定型コメントが自分の名義である）のときだけ、外し直す。書く直前に最新の labeled_at を取り直し、
-    # 期限切れと判定したものと違えば（その間に外して付け直された）書かない。
-    # 読み取りに失敗した周は何も書かず、次の周で読み直す。
-    iss = gh_json("api", f"/repos/hatai/Pelway/issues/{n}")
-    if not isinstance(iss, dict): return
-    labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
-    if iss.get("state") != "open" or "needs-decision" not in labs: return
-    cs = all_pages(f"/repos/hatai/Pelway/issues/{n}/comments?per_page=100")
-    if cs is None: return
+    # 格上げを 3 段（通知のコメント → needs-human を付ける → needs-decision を外す）で進める。付ける方が先なので、
+    # 途中で失敗してもどちらのラベルも無い状態にならない。済んだ段は見張りだけが書く記録（state.json の escalation。
+    # Issue 番号 → labeled_at と段階）に残し、次の周は記録の段の次から進める。各段の直前に Issue と events を読み直し、
+    # Issue が開いていて needs-decision があり、最新の labeled_at が lt のままのときだけ書く。コメントと needs-human は、
+    # needs-human が無く、lt より後に needs-human が外されていない（人間が手を入れていない）ときだけ書く。
+    # needs-decision を外すのは、自分が needs-human を付けた（段階が added）ときだけ。読み取りに失敗した周は書かない
+    rec = cur["escalation"].get(n) or {}
+    stage = rec.get("stage") if rec.get("labeled_at") == lt else None
     body = (f"{ESCALATION_MARK}\n@hatai `needs-decision` が付いた時刻 {lt} から 15 分決まらず、"
             "指揮役が動いていないため `needs-human` に替えました。")
-    # 書いた印は定型の本文との完全一致だけ（実装担当も同じ pelway-dev[bot] の名義で書くため）
-    written = any((c.get("user") or {}).get("login") == ESCALATION_AUTHOR and c.get("body") == body for c in cs)
-    if ("needs-human" in labs and not written) or latest_labeled(n) != lt: return
-    if not written and agent_gh("issue", "comment", n, "--body-file", "-", stdin=body) is None:
-        print(f"DECISION escalate-failed #{n} step=comment", flush=True); return
-    if ("needs-human" not in labs and agent_gh("issue", "edit", n, "--add-label", "needs-human") is None) \
-       or agent_gh("issue", "edit", n, "--remove-label", "needs-decision") is None:
-        print(f"DECISION escalate-failed #{n} step=label", flush=True); return
-    print(f"DECISION escalated #{n} labeled_at={lt} reason={reason}", flush=True)
+    if stage is None:
+        cs = all_pages(f"/repos/hatai/Pelway/issues/{n}/comments?per_page=100")
+        if cs is None: return
+        # 通知の重複を防ぐだけの確かめ: 自分の名義で定型の本文と完全に一致するコメント（実装担当も同じ名義で書くため）
+        if any((c.get("user") or {}).get("login") == ESCALATION_AUTHOR and c.get("body") == body for c in cs):
+            stage = "commented"
+    steps = {None: ("commented", "comment", ["issue", "comment", n, "--body-file", "-"]),
+             "commented": ("added", "label", ["issue", "edit", n, "--add-label", "needs-human"]),
+             "added": ("removed", "label", ["issue", "edit", n, "--remove-label", "needs-decision"])}
+    while stage in steps:
+        nxt, step, args = steps[stage]
+        iss, evs = gh_json("api", f"/repos/hatai/Pelway/issues/{n}"), events(n)
+        if not isinstance(iss, dict) or evs is None: return
+        labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
+        if iss.get("state") != "open" or "needs-decision" not in labs or latest_labeled(evs) != lt: return
+        if stage != "added" and ("needs-human" in labs
+                                 or any(iso(t) > iso(lt) for t in label_times(evs, "unlabeled", "needs-human"))): return
+        if agent_gh(*args, stdin=body if stage is None else None) is None:
+            print(f"DECISION escalate-failed #{n} step={step}", flush=True); return
+        stage = nxt; cur["escalation"][n] = {"labeled_at": lt, "stage": stage}
+        if stage == "removed": print(f"DECISION escalated #{n} labeled_at={lt} reason={reason}", flush=True)
 decision_at = {}  # Issue 番号 → 最新の needs-decision の labeled_at（補助記録の next_check_at に使う）
 if issues is not None:
     labeled = set()
@@ -274,11 +298,11 @@ if issues is not None:
         labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
         if iss.get("state") != "OPEN" or "needs-decision" not in labs: continue
         n = str(iss.get("number")); labeled.add(n)
-        # needs-human も付いていれば人間待ちで、DECISION overdue も補助記録の起点も出さない。格上げで
-        # needs-decision を外し損ねたものがありうるので、指揮役がいない周だけ escalate で確かめて外し直す。
+        # needs-human も付いていれば人間待ちで、DECISION overdue も補助記録の起点も出さない。見張りが needs-human を
+        # 付けて needs-decision を外し損ねた Issue（記録の段階が added）だけ、指揮役がいない周に外し直す（ほかは読まない）
         human = "needs-human" in labs
-        if human and not reason: continue
-        lt = latest_labeled(n)
+        if human and not (reason and (cur["escalation"].get(n) or {}).get("stage") == "added"): continue
+        lt = latest_labeled(events(n))
         if lt is None: continue  # 取得失敗・イベントが見つからない: 遅れとは扱わず、次の周で取り直す
         if not human: decision_at[n] = lt
         if now - iso(lt).timestamp() < DECISION_SECS: continue
@@ -287,6 +311,7 @@ if issues is not None:
             cur["decision_warned"][n] = lt
         if reason: escalate(n, lt, reason)
     cur["decision_warned"] = {k: v for k, v in cur["decision_warned"].items() if k in labeled}
+    cur["escalation"] = {k: v for k, v in cur["escalation"].items() if k in labeled}
 # 読み取りに失敗して空になったときは、前回の状態を残す（全スレッドを「新規」と誤報しない）。
 if prev is not None and not threads: cur["threads"] = prev["threads"]
 if prev is not None and not prs: cur["prs"] = prev["prs"]
