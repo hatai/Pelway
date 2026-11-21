@@ -44,3 +44,13 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 - PR #618 のチェック「9 失敗」は旧 head の CANCELLED run の残りで誤検出・現 head は全 pass/pending（automerge 維持・Kodiak 待ち）
 - 判断待ち: #333 は hatai の `<!-- pr-size-exception -->` 目印コメント投稿待ち（needs-human 継続・指示は出さない）
 - patrol-state: inbox_offset=133・watch_offset=3335・watch_log_offset=3335（旧キーも揃えた）
+
+## QA 合格記録の訂正（02:35 JST・開発リード指示）
+
+- #333 issuecomment-7041527125「QA push 前点検 合格（1f6d1d6）」→ 訂正追記（QA はどの sha も点検していない・指揮役の代理記録だった）
+- #560 issuecomment-7042124538「QA push 後点検 合格（1f6d1d6）」→ 同訂正
+- #333 issuecomment-6969837796「QA push 前点検 合格（9f689c8）」→ 同訂正
+- PR #560 本文: push 前点検行を「QA 未点検」に修正・`9f689c8`（QA 合格済み）の修飾も除去
+- 重要な帰結: `1f6d1d6` の push（11/20 23:05 JST・指揮役実施）は偽の QA 合格記録を根拠に実施されていた
+- 代理転載の QA 結果（pelway-qa 名義でないため形式上無効・内容は実点検のもの）: #482/7059419928（既に hatai ルールで無効）・#463/7058583712（PR 本文が引用中・要リード判断）・#572/7058672305・#306/7063954310+7063968048
+- pelway-qa[bot] の「QA: pass sha:6b284862」（run 44907124348・実在）は正規形式。リードの無効宣告の射程に含むか確認事項
