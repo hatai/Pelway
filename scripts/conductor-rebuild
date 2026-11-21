@@ -38,6 +38,7 @@ done
 [[ -n "$from" ]] || usage
 valid_id "$from" || die "--from is not a thread id"
 [[ -z "$to" ]] || valid_id "$to" || die "--to is not a thread id"
+[[ "$to" != "$from" ]] || die "--to must differ from --from"
 for v in "$provider" "$model" "$effort"; do
   valid_ident "$v" || die "--provider/--model/--effort must be plain identifiers"
 done
@@ -52,7 +53,7 @@ if [[ "$gitdir" != "$common" && "${PELWAY_REBUILD_ALLOW_WORKTREE:-}" != 1 ]]; th
 fi
 
 # 宛先の登録に使う、インストールした見張り役（mise run agent-watch-install で入れる）
-WATCH="${PELWAY_AGENT_WATCH_BIN:-$HOME/.local/bin/pelway-agent-watch}"
+WATCH="$HOME/.local/bin/pelway-agent-watch"
 [[ -x "$WATCH" ]] || die "$WATCH not found (run mise run agent-watch-install)"
 
 # 動いている T3 サーバーと同じ実行ファイルを使う（PATH の t3 は ServerOwnsDatabaseError で拒まれることがある）。
@@ -72,15 +73,16 @@ if [[ -z "$T3" ]]; then
 fi
 [[ -n "$T3" ]] || die "t3 not found"
 
-# show <id> — provider・model・runtimeMode を 1 行で返す
+# show <id> — provider・model・runtimeMode・worktree の有無（yes/no）を 1 行で返す
 show() {
   "$T3" thread show "$1" --json | /usr/bin/python3 -I -c '
 import json, sys
 t = json.load(sys.stdin); t = t.get("thread", t)
-print(t.get("providerInstanceId") or "-", t.get("model") or "-", t.get("runtimeMode") or "-")'
+print(t.get("providerInstanceId") or "-", t.get("model") or "-", t.get("runtimeMode") or "-",
+      "yes" if t.get("worktreePath") else "no")'
 }
 
-read -r old_provider old_model old_mode < <(show "$from") || die "cannot read the old conductor"
+read -r old_provider old_model old_mode _ < <(show "$from") || die "cannot read the old conductor"
 provider="${provider:-$old_provider}"; model="${model:-$old_model}"
 [[ "$provider" != - && "$model" != - ]] || die "cannot determine provider/model"
 # 旧指揮役から引き継いだ値にも、引数と同じ確かめをかける
@@ -90,24 +92,27 @@ if ! valid_ident "$provider" || ! valid_ident "$model"; then die "provider/model
 
 # 1. 新しい指揮役を立てる（何もせずに待たせる）
 if [[ -z "$to" ]]; then
+  errf="$(mktemp)"; trap 'rm -f "$errf"' EXIT
   [[ -n "$effort" ]] || echo "conductor-rebuild: --effort not given; the new conductor uses the provider's default effort" >&2
   HOLD="恒久交代の新しい指揮役として立てた。権限の確かめと引き継ぎの指示が届くまで、何もせずにこのターンを終える。"
   args=(thread start --provider "$provider" --model "$model")
   [[ -n "$effort" ]] && args+=(--option "effort=$effort")
   args+=(--title "[指揮役] 恒久交代で引き継ぐ" "$project" -)
-  out="$(printf '%s' "$HOLD" | "$T3" "${args[@]}" 2>&1)" || {
-    printf '%s\n' "$out" >&2
+  out="$(printf '%s' "$HOLD" | "$T3" "${args[@]}" 2>"$errf")" || {
+    printf '%s\n' "$out" >&2; cat "$errf" >&2
     die "t3 thread start failed; the new conductor may have been created. Check it in T3. Nothing was sent to the old conductor"
   }
   to="$(printf '%s\n' "$out" | awk 'NF{l=$0} END{print l}' | tr -d '[:space:]')"
   if ! valid_id "$to"; then
-    printf '%s\n' "$out" >&2
+    printf '%s\n' "$out" >&2; cat "$errf" >&2
     die "could not read the new conductor's id; it may have been created. Check it in T3. Nothing was sent to the old conductor"
   fi
 fi
 
 # 2. 権限を確かめる
-read -r _ _ new_mode < <(show "$to") || die "cannot read the new conductor $to"
+read -r _ _ new_mode new_wt < <(show "$to") \
+  || die "cannot read the new conductor $to (it may have been created; check it in T3). Nothing was sent to the old conductor"
+[[ "$new_wt" == no ]] || die "the new conductor $to runs in a worktree; it must run in the main checkout. Nothing was sent to the old conductor"
 if [[ "$new_mode" != "$old_mode" || "$new_mode" == full-access ]]; then
   echo "conductor-rebuild: the new conductor $to runs in '$new_mode', but the old one runs in '$old_mode'." >&2
   echo "conductor-rebuild: nothing was sent to the old conductor and the registration is unchanged." >&2

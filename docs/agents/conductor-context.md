@@ -94,7 +94,7 @@ GitHub 内部で食い違いがあれば既存規則（runbook の整合チェ�
 圧縮で改善しない場合（再圧縮を重ねても使用率が下がらない、圧縮操作の失敗が続く）の手段として、新指揮役スレッドへの恒久交代がある。手順 5（代行）は一時代行（正本の指揮役へ戻す前提）であり、恒久交代には操作権限の移譲点・確認失敗時の不移転・同時稼働の禁止の明示が不足するため、この節が恒久交代の正本。
 
 1. 旧指揮役は、案件を進行させる操作を止める（スレッドの起動・指示、マージ、ラベル、コメント、ステータス変更のすべて）
-2. 新指揮役スレッドを立てる（skill `command-team` の手順 5（代行）の開始のチェックと同じ条件）
+2. 新指揮役スレッドを立てる（skill `command-team` の手順 5（代行）の開始のチェックと同じ条件）。1 より先に立てて待たせてよい（操作権限は 4 で移る。下の「始め方」はこの順）
 3. 新指揮役が引き継ぎ確認を行う（GitHub の実状態、patrol-state、巡回記録、実行中スレッドの照合。runbook の「引き継ぎの発動条件と順序」と同じ順序）
 4. 引き継ぎ確認の完了時点で操作権限が移る。確認が完了しない場合は権限を移さず、旧側の復旧または人間確認に進む
 5. 旧・新の同時稼働の禁止: 権限移行後、旧指揮役はいかなる操作も行わない（見張り `conductor-watch` の停止を含め、停止の操作は引き継ぎ確認の中で新旧どちらか一方だけが行う）
@@ -106,7 +106,9 @@ GitHub 内部で食い違いがあれば既存規則（runbook の整合チェ�
 4. 新指揮役に引き継ぎの指示を送る
 5. agent-watch の起こしの宛先を、インストールした `~/.local/bin/pelway-agent-watch --register` で新指揮役に替える（入っていなければ、最初に何もせずに止まる）
 
-新指揮役は、4 の権限の移行の後に、旧指揮役のスレッドを `t3_thread_organize`（`action: settle`）で settle し、巡回の scheduled task を作り直す（runbook の「指揮役の定期巡回（スケジュール起床）」。`t3` CLI には settle が無いため、スクリプトでは行わない）。
+本体 checkout で立てる危険（hatai の判断。Issue #564 のコメント）: 新指揮役を本体 checkout で立てると、そのスレッドの sandbox の書き込み範囲は本体 checkout になる。指示が混入した指揮役が本体 checkout の `scripts/`・`mise.toml`・`pitchfork.toml`・`crates/pelway-agent-watch/` を書き換えると、hatai がそれらをホストで実行するとき（`mise run conductor-rebuild`・`mise run agent-watch-install`・pitchfork の起動）に sandbox の外でコードが動きうる。この危険は認めたうえで、hatai は本体 checkout の版をホストで実行する前に、`git -C <本体 checkout> status --short` と `git -C <本体 checkout> diff origin/main --stat` で、コミットされていない変更や main と違う変更が無いことを確かめる。
+
+新指揮役は、恒久交代の手順 4（引き継ぎ確認の完了で操作権限が移る）の後に、旧指揮役のスレッドを `t3_thread_organize`（`action: settle`）で settle し、巡回の scheduled task を作り直す（runbook の「指揮役の定期巡回（スケジュール起床）」。`t3` CLI には settle が無いため、スクリプトでは行わない）。
 
 交代も含め、その環境で検証済みの手段だけを使う（段階導入）。
 

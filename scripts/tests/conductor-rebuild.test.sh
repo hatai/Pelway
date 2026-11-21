@@ -27,7 +27,8 @@ case "$1 $2" in
   "thread show")
     mode=auto-accept-edits
     [[ "$3" == *new* ]] && mode="${NEW_MODE:-auto-accept-edits}"
-    echo '{"thread":{"threadId":"'"$3"'","providerInstanceId":"acpRegistry_devin","model":"swe-2-high","runtimeMode":"'"$mode"'"}}' ;;
+    wt=""; [[ "$3" == *new* ]] && wt="${NEW_WT:-}"
+    echo '{"thread":{"threadId":"'"$3"'","providerInstanceId":"acpRegistry_devin","model":"swe-2-high","runtimeMode":"'"$mode"'","worktreePath":"'"$wt"'"}}' ;;
   "thread send")
     if [[ "$3" == --wait ]]; then id="$4"; else id="$3"; fi
     cat > "$LOG.send-stdin.${id##*:}"; [[ -e "$LOG.send-fail" ]] && exit 1; echo "ok" ;;
@@ -102,6 +103,18 @@ check "--to succeeds" [ "$rc" -eq 0 ]
 check "--to does not start a thread" no_line "^thread start"
 check "--to sends the handover" same "$LOG.send-stdin.new-conductor" "$START_WANT"
 check "--to registers the given thread" [ "$(cat "$FILE")" = "$NEW" ]
+
+# --to が --from と同じなら止まる
+run "" --from "$OLD" --to "$OLD"; rc=$?
+check "--to equal to --from is rejected" [ "$rc" -ne 0 ]
+check "--to equal to --from makes no t3 calls" [ ! -s "$LOG" ]
+
+# 新しい指揮役が worktree で動いていたら、旧指揮役に何も送らずに止まる
+printf 'mcp:launch:kept\n' > "$FILE"
+NEW_WT=/tmp/wt run "" --from "$OLD" --to "$NEW"; rc=$?
+check "worktree new conductor is rejected" [ "$rc" -ne 0 ]
+check "worktree new conductor: nothing sent to the old conductor" no_line "thread send --wait $OLD"
+check "worktree new conductor: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
 
 # 失敗したら登録を変えずに止まる
 printf 'mcp:launch:kept\n' > "$FILE"
