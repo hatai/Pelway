@@ -151,6 +151,51 @@ expect_eq "publish_verdict: hash failure prints no PASS" "$(grep -c 'verdict=PAS
 expect_eq "publish_verdict: hash failure leaves no PASS in summary" "$(grep -c '^verdict=PASS' "${tmp}/pub-ng/summary.txt")" 0
 expect_eq "publish_verdict: hash failure leaves no SHA256SUMS" "$([ -e "${tmp}/pub-ng/SHA256SUMS" ] && echo yes || echo no)" no
 
+# publish_verdict: 照合までは通っても、報告用の SHA256SUMS 自体のハッシュが取れなければ PASS を出さない。
+cat > "${tmp}/half-hasher" <<'FAKE'
+#!/usr/bin/env bash
+case "$*" in *--quiet*|*-c*) exec sha256sum "$@" ;; esac
+for a in "$@"; do case "${a}" in */SHA256SUMS) exit 1 ;; esac; done
+exec sha256sum "$@"
+FAKE
+chmod +x "${tmp}/half-hasher"
+mkdir -p "${tmp}/pub-half"; printf 'run_id=x\n' > "${tmp}/pub-half/summary.txt"
+out_half="$(SHA256SUM="${tmp}/half-hasher" publish_verdict "${tmp}/pub-half" PASS 2> /dev/null)"; rc_half=$?
+expect_eq "publish_verdict: report digest failure exits 1" "${rc_half}" 1
+expect_eq "publish_verdict: report digest failure prints no PASS" "$(grep -c 'verdict=PASS' <<< "${out_half}")" 0
+expect_eq "publish_verdict: report digest failure leaves no PASS in summary" "$(grep -c '^verdict=PASS' "${tmp}/pub-half/summary.txt")" 0
+
+# fd_targets_ok: リンク先を固定の文字列で比べる。正規表現の記号や空白を含む証拠のパスでも正しく判定する。
+odd="${tmp}/ev (1 [x"; mkdir -p "${odd}" "${tmp}/fds"
+ln -s /dev/null "${tmp}/fds/0"; ln -s "${odd}/server.stdout" "${tmp}/fds/1"; ln -s "${odd}/server.stderr" "${tmp}/fds/2"
+ln -s 'socket:[123]' "${tmp}/fds/3"; ln -s 'pipe:[9]' "${tmp}/fds/4"; ln -s 'anon_inode:[eventpoll]' "${tmp}/fds/5"
+fdr() { fd_targets_ok "$@" > /dev/null 2>&1; echo $?; }
+expect_eq "fd_targets_ok: allowed targets with an odd evidence path" "$(fdr "${tmp}/fds" "${odd}" "${tmp}/fd.out")" 0
+expect_eq "fd_targets_ok: records each fd" "$(grep -c ' -> ' "${tmp}/fd.out")" 6
+ln -s /etc/passwd "${tmp}/fds/6"
+expect_eq "fd_targets_ok: a disallowed file" "$(fdr "${tmp}/fds" "${odd}" "${tmp}/fd.out")" 1
+rm -f "${tmp}/fds/6"; ln -s "${tmp}/ev (2/server.stdout" "${tmp}/fds/6"
+expect_eq "fd_targets_ok: another run's stdout is not allowed" "$(fdr "${tmp}/fds" "${odd}" "${tmp}/fd.out")" 1
+rm -f "${tmp}/fds/6"; : > "${tmp}/fds/7"
+expect_eq "fd_targets_ok: a target that cannot be read" "$(fdr "${tmp}/fds" "${odd}" "${tmp}/fd.out")" 2
+rm -f "${tmp}/fds/7"
+
+# observe_sockets: 取得の失敗と記録の失敗は 1、該当なしは 0。
+mkdir -p "${tmp}/ssbin" "${tmp}/obs-ev"
+cat > "${tmp}/ssbin/ss" <<'FAKE'
+#!/usr/bin/env bash
+[ -n "${FAKE_SS_FAIL:-}" ] && exit 1
+echo 'tcp ESTAB 0 0 127.0.0.1:1 127.0.0.1:2 users:(("x",pid=42,fd=3))'
+FAKE
+chmod +x "${tmp}/ssbin/ss"
+obs() { (PATH="${tmp}/ssbin:${PATH}" EV="$1" PID="$2" ADDR=127.0.0.1:9 observe_sockets > /dev/null 2>&1); echo $?; }
+expect_eq "observe_sockets: matching line recorded" "$(obs "${tmp}/obs-ev" 42)" 0
+expect_eq "observe_sockets: line written" "$(grep -c 'pid=42,' "${tmp}/obs-ev/network.txt")" 1
+expect_eq "observe_sockets: no match is not a failure" "$(obs "${tmp}/obs-ev" 99)" 0
+expect_eq "observe_sockets: ss failure" "$(FAKE_SS_FAIL=1 obs "${tmp}/obs-ev" 42)" 1
+expect_eq "observe_sockets: ss failure leaves a mark" "$(observation_errors "${tmp}/obs-ev/network.txt")" 1
+expect_eq "observe_sockets: write failure" "$(obs "${tmp}/no-such-dir" 42)" 1
+
 repo="${tmp}/repo"
 git init -q "${repo}"
 # 引数の検査まで必ず届くよう、呼び出し元の環境と道具の有無に依存させない: 禁止の 5 つの名前を外し、

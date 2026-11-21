@@ -21,7 +21,8 @@ SEED_MEMBERS="m-hal,m-sato,m-tanaka,m-yamamoto"
 POLL_SECS=10
 # 子の環境に入れてはいけない変数（fnox の秘密 3 つと、LLM の接続先 2 つ）。証拠には名前を書かずラベルだけ書く。
 FORBIDDEN_ENV="llm_key:PELWAY_LLM_API_KEY penpot_mcp_token:PELWAY_PENPOT_MCP_TOKEN database_url:PELWAY_DATABASE_URL llm_custom_base_url:PELWAY_LLM_CUSTOM_BASE_URL llm_base_url:PELWAY_LLM_BASE_URL"
-# 後片付けの前後で生き残りを比べるプロセス（comm の完全一致の正規表現）。
+# 後片付けの前後で生き残りを比べるプロセス（comm の完全一致の正規表現）。T3 本体は comm が node-MainThread
+# などになるので、実行ファイル名が t3 のもの（scripts/agent-worktree-prune が T3 サーバーとして探す名前）も比べる。
 SURVIVOR_COMM='^(demo-serve|pitchfork|pelway-agent-wa|t3-.*)$'
 # 依頼の本文に埋める demo-check の目印（scripts/demo-check/canaries.txt の 1 行目）。
 # 証拠の本文は伏せるので、run のログ・証拠に現れたら伏せ漏れとして FAIL になる。
@@ -84,10 +85,14 @@ publish_verdict() {
   if sums="$(cd "${ev}" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 "${hasher}")" \
       && [ -n "${sums}" ] && printf '%s\n' "${sums}" > "${ev}/SHA256SUMS" \
       && (cd "${ev}" && "${hasher}" --quiet -c SHA256SUMS); then
-    echo "verdict=${verdict}"
-    echo "evidence=${ev}"
-    echo "evidence_sha256=$("${hasher}" "${ev}/SHA256SUMS" | cut -d' ' -f1)"
-    [ "${verdict}" = PASS ]; return
+    local digest
+    # 報告に貼る SHA256SUMS 自体のハッシュも取れたときだけ公開する。
+    if digest="$("${hasher}" "${ev}/SHA256SUMS")" && digest="${digest%% *}" && [[ "${digest}" =~ ^[0-9a-f]{64}$ ]]; then
+      echo "verdict=${verdict}"
+      echo "evidence=${ev}"
+      echo "evidence_sha256=${digest}"
+      [ "${verdict}" = PASS ]; return
+    fi
   fi
   sed -i 's/^verdict=.*/verdict=FAIL（証拠のハッシュを作れない・確かめられない）/' "${ev}/summary.txt" 2> /dev/null
   rm -f "${ev}/SHA256SUMS"
@@ -150,6 +155,24 @@ steps_complete() {
     && [ "$(find "${dir}" -maxdepth 1 -type f -name '*.resp' | grep -c .)" = "${n}" ]
 }
 
+# 開いているファイル（fd のディレクトリ）が許可したものだけか。リンク先は readlink で取り、固定の文字列で比べる。
+# $1=fd のディレクトリ $2=証拠のディレクトリ $3=記録先。0 = 許可外なし、1 = 許可外あり、2 = 読み取りの失敗。
+fd_targets_ok() {
+  local dir="$1" ev="$2" out="$3" fd target bad=0
+  : > "${out}" || return 2
+  for fd in "${dir}"/*; do
+    [ -e "${fd}" ] || [ -L "${fd}" ] || continue
+    target="$(readlink -- "${fd}")" || return 2
+    printf '%s -> %s\n' "${fd##*/}" "${target}" >> "${out}" || return 2
+    case "${target}" in
+      /dev/null | "${ev}/server.stdout" | "${ev}/server.stderr") ;;
+      pipe:\[*\] | socket:\[*\] | anon_inode:*) ;;
+      *) bad=1 ;;
+    esac
+  done
+  return "${bad}"
+}
+
 # network.txt のうち、ss の取得に失敗した印の行の数を返す。
 observation_errors() { grep -c '^# ss の取得に失敗' "$1" 2>/dev/null; }
 
@@ -184,14 +207,22 @@ forbidden_env_present() {
 # 動いていると確かめられたときだけ `list` を呼び、どちらも自動起動を止める設定で呼ぶ。
 pitchfork_list() {
   if ! (cd "${TOP}" && PITCHFORK_SUPERVISOR_AUTO_START=false mise exec -- pitchfork supervisor status > /dev/null 2>&1); then
-    echo "pitchfork: supervisor が動いていない（起動しないよう list は呼ばない）"; return 0
+    echo "pitchfork: supervisor status が失敗した（動いていない、または照会に失敗）。起動しないよう list は呼ばない"; return 0
   fi
   (cd "${TOP}" && PITCHFORK_SUPERVISOR_AUTO_START=false mise exec -- pitchfork list 2>&1) || echo "pitchfork list: 失敗"
 }
 
 # 生き残りを比べる対象の PID（1 行 1 つ）。5 分以上動いている常駐のものだけ（pitchfork の定期ジョブのように
 # run の途中で自然に終わる短命なプロセスを、巻き込んで止めたと取り違えないため）。comm と同じ文字列順に並べる。
-survivor_pids() { ps -eo pid=,comm=,etimes= | awk -v re="${SURVIVOR_COMM}" '$2 ~ re && $3 >= 300 {print $1}' | LC_ALL=C sort; }
+survivor_pids() {
+  local list pid comm age exe
+  list="$(ps -eo pid=,comm=,etimes=)" || return 1
+  while read -r pid comm age; do
+    [ "${age:-0}" -ge 300 ] 2> /dev/null || continue
+    exe="$(readlink "/proc/${pid}/exe" 2> /dev/null || true)"
+    if [[ "${comm}" =~ ${SURVIVOR_COMM} ]] || [ "${exe##*/}" = t3 ]; then echo "${pid}"; fi
+  done <<< "${list}" | LC_ALL=C sort
+}
 
 # 結果の 1 行を summary に書く。FAIL があれば VERDICT を FAIL にする。
 record() {
@@ -201,6 +232,12 @@ record() {
   # summary に書けなければ、その段の結果が証拠に残らないので FAIL にする。
   printf '%s\n' "${line}" >> "${EV}/summary.txt" || VERDICT=FAIL
   [ "${result}" = PASS ] || VERDICT=FAIL
+}
+
+# 合否を変えない注記の 1 行を summary に書く（確かめられなかったことを証拠に残す）。
+note() {
+  printf 'NOTE %s\n' "$1"
+  printf 'NOTE %s\n' "$1" >> "${EV}/summary.txt" || VERDICT=FAIL
 }
 
 # 1 要求を /dev/tcp で送る。$1=名前 $2=メソッド $3=経路 $4=操作者（空なら無し）$5=本文。
@@ -219,7 +256,7 @@ http() {
     local send_rc=0 recv_rc=0
     printf '%s\n\r\n%s' "${head}" "${body}" >&3 || send_rc=$?
     # 実行中の接続を観察する（ss -tuanp。この PID の行と、待ち受けのアドレスを含む行）。
-    observe_sockets
+    observe_sockets || OBS_FAILED=1
     # 生の応答はファイルに書かず、メモリだけで扱う。サーバーが閉じるまで読み切れなければ（時間切れ）失敗。
     raw="$(timeout 10 cat <&3)" || recv_rc=$?
     exec 3<&- 3>&-
@@ -288,28 +325,43 @@ count_nonloopback() {
 
 # この PID のソケットと、待ち受けのアドレス（addr）に関わる接続を network.txt に足す。
 # ss の取得そのものが失敗したときは、該当なしと区別して印の行を書く（network_check がこれを見て FAIL にする）。
+# 取得の失敗と記録の失敗は 1 を返す（該当なしは 0）。呼び出し側が OBS_FAILED にして最終判定まで伝える。
 observe_sockets() {
-  local snap
+  local snap lines rc=0
   if ! snap="$(ss -Htuanp 2>/dev/null)"; then
-    echo "# ss の取得に失敗 $(date -u +%H:%M:%S.%N)" >> "${EV}/network.txt"; return 0
+    echo "# ss の取得に失敗 $(date -u +%H:%M:%S.%N)" >> "${EV}/network.txt"; return 1
   fi
-  grep -F -e "pid=${PID}," -e " ${ADDR} " <<< "${snap}" >> "${EV}/network.txt" || true
+  lines="$(grep -F -e "pid=${PID}," -e " ${ADDR} " <<< "${snap}")" || rc=$?
+  [ "${rc}" -le 1 ] || return 1
+  [ -z "${lines}" ] || printf '%s\n' "${lines}" >> "${EV}/network.txt" || return 1
 }
 
 # 操作の間、0.1 秒ごとに ss を取り続ける（要求ごとの観察の間を埋める。それでも 0.1 秒より短い接続は取りこぼしうる）。
 start_sampler() {
   # 子の標準入力のパイプは持たない（持つと run が SIGKILL されたときに子が終わらない）。親が死んだら止まる。
-  ( exec {DS_IN}>&-; while kill -0 "$$" 2> /dev/null; do observe_sockets; sleep 0.1; done ) &
+  # 取得・記録に失敗したら終了コード 3 で抜ける（stop_sampler が OBS_FAILED にする）。
+  ( exec {DS_IN}>&-; while kill -0 "$$" 2> /dev/null; do observe_sockets || exit 3; sleep 0.1; done ) &
   SAMPLER=$!
 }
-stop_sampler() { [ -n "${SAMPLER:-}" ] && kill "${SAMPLER}" 2>/dev/null && wait "${SAMPLER}" 2>/dev/null; SAMPLER=""; }
+stop_sampler() {
+  [ -n "${SAMPLER:-}" ] || return 0
+  if kill -0 "${SAMPLER}" 2> /dev/null; then
+    kill "${SAMPLER}" 2> /dev/null; wait "${SAMPLER}" 2> /dev/null
+  else
+    # 先に抜けていた: 取得・記録の失敗（3）なら観察は未完了。
+    wait "${SAMPLER}" 2> /dev/null; [ "$?" = 3 ] && OBS_FAILED=1
+  fi
+  SAMPLER=""
+}
 
 # 外に出ていないことの観察: 取った TCP・UDP の行（network.txt）がすべて 127.0.0.1 同士で、
 # 開いているファイルが標準入出力と、ss で TCP・UDP と確かめられたソケットだけか。
 network_check() {
   local out="${EV}/network.txt"
   local seen nonlo ino
-  ls -l "/proc/${PID}/fd" > "${EV}/proc-fd.txt" 2>&1 || return 1
+  local fdrc=0
+  fd_targets_ok "/proc/${PID}/fd" "${EV}" "${EV}/proc-fd.txt" || fdrc=$?
+  [ "${fdrc}" = 0 ] || { echo "# 開いているファイルの検査: $([ "${fdrc}" = 1 ] && echo 許可外のファイルがある || echo 読み取りに失敗)" >> "${out}"; return 1; }
   # /proc の socket:[N] を、ss -e の ino:N（この PID の TCP・UDP）と突き合わせる。見つからないソケットは種類も宛先も確かめられない。
   local known snap
   snap="$(ss -Htuanpe 2>/dev/null)" || { echo "# ss の取得に失敗（ino の突き合わせ）" >> "${out}"; return 1; }
@@ -317,15 +369,15 @@ network_check() {
   for ino in $(grep -oE 'socket:\[[0-9]+\]' "${EV}/proc-fd.txt" | tr -dc '0-9\n'); do
     grep -qx "${ino}" <<< "${known}" || { echo "# 種類を確かめられないソケット: inode ${ino}" >> "${out}"; return 1; }
   done
-  observe_sockets
+  observe_sockets || OBS_FAILED=1
   # 印の行（# で始まる）は観察ではないので、数えるのは ss の行だけ。取得に失敗した回が 1 回でもあれば観察は未完了。
   local errs; errs="$(observation_errors "${out}")"; errs="${errs:-0}"
   seen="$(grep -vc '^#' "${out}" 2>/dev/null)"; seen="${seen:-0}"
   nonlo="$(count_nonloopback <(grep -v '^#' "${out}"))"
   local db; db="$(grep -v '^#' "${out}" | grep -c ':5432 ')"
   echo "# ss -tuan の観察（TCP・UDP、要求ごと＋0.1 秒ごと）${seen} 行、取得の失敗 ${errs} 回、loopback 以外との接続 ${nonlo} 件、DB（:5432）宛て ${db} 件" >> "${out}"
-  [ "${errs}" = 0 ] && [ "${seen}" -ge 1 ] && [ "${nonlo}" = 0 ] && [ "${db}" = 0 ] || return 1
-  ! awk 'NR > 1 {print $NF}' "${EV}/proc-fd.txt" | grep -vqE "^(/dev/null|${EV}/server\.std(out|err)|socket:\[[0-9]+\]|anon_inode:.*|pipe:\[[0-9]+\])$"
+  [ "${OBS_FAILED:-0}" = 0 ] || echo "# 観察の取得・記録に失敗した回がある（観察は未完了）" >> "${out}"
+  [ "${OBS_FAILED:-0}" = 0 ] && [ "${errs}" = 0 ] && [ "${seen}" -ge 1 ] && [ "${nonlo}" = 0 ] && [ "${db}" = 0 ]
 }
 
 # pid が 5 秒以内に終われば 0。
@@ -351,12 +403,18 @@ cleanup() {
   stop_child
   wait 2>/dev/null
   if [ -n "${LOCK:-}" ]; then rm -f "${LOCK}/pid"; rmdir "${LOCK}" 2>/dev/null; echo "released lock ${LOCK##*/}" >> "${EV}/cleanup.txt"; fi
-  if [ -s "${EV}/survivors-before.txt" ]; then
-    survivor_pids > "${EV}/survivors-after.txt"
+  if [ -e "${EV}/survivors-before.txt" ]; then
     pitchfork_list > "${EV}/pitchfork-after.txt"
-    local lost; lost="$(LC_ALL=C comm -23 "${EV}/survivors-before.txt" "${EV}/survivors-after.txt" | tr '\n' ' ')"
-    if [ -z "${lost}" ]; then record PASS "後片付け: ほかのプロセスが生き残っている" "survivors-*.txt"
-    else record FAIL "後片付け: ほかのプロセスが生き残っている" "消えた pid ${lost}"; fi
+    if ! survivor_pids > "${EV}/survivors-after.txt"; then
+      record FAIL "後片付け: ほかのプロセスが生き残っている" "後のプロセスの一覧を取れない"
+    elif [ ! -s "${EV}/survivors-before.txt" ]; then
+      # 比べる常駐プロセスが起動の前に 1 つも無かった。確かめていないことを証拠に残す（合否は変えない）。
+      note "後片付け: 比べる常駐プロセス（demo-serve・pitchfork・agent-watch・t3）が起動の前に無く、生き残りを比べていない"
+    else
+      local lost; lost="$(LC_ALL=C comm -23 "${EV}/survivors-before.txt" "${EV}/survivors-after.txt" | tr '\n' ' ')"
+      if [ -z "${lost}" ]; then record PASS "後片付け: ほかのプロセスが生き残っている" "survivors-*.txt"
+      else record FAIL "後片付け: ほかのプロセスが生き残っている" "消えた pid ${lost}"; fi
+    fi
   fi
   # demo-check の canary と leak-phrases を、この run のログ・証拠の写しに対して流す。
   local scan="${EV}/demo-check-input" st x copied=1 want got
@@ -543,7 +601,7 @@ main() {
     || die_usage "cannot create a new run directory under ${ROOT} (it must be new and must not resolve elsewhere)"
   evidence_root_ok "${EV}" "${TOP}" "${COMMON}" || die_usage "the run directory resolves into the work tree"
   mkdir -p "${COMMON}/pelway/locks" || die_usage "cannot create ${COMMON}/pelway/locks"
-  EVIDENCE_WRITE_FAILED=0
+  EVIDENCE_WRITE_FAILED=0; OBS_FAILED=0
   VERDICT=PASS; STEP=1; PID=""; LOCK=""; BIN=""
   trap cleanup EXIT
   printf 'run_id=%s\nsha=%s\ndirty=%s\nfeature=%s\n' "${RUN_ID}" "${SHA}" "${DIRTY}" "${FEATURE}" | tee "${EV}/summary.txt"
@@ -573,7 +631,7 @@ main() {
   record PASS "起動: 二重起動の確認" "同じ target の demo-serve なし、ロック取得"
   # 起動の前に、この run 自身の環境に禁止の変数（LLM のキー・接続先、fnox の秘密）が無いことを記録する（名前の有無だけ）。
   record PASS "起動前: run の環境に禁止の変数が無い" "$(for x in ${FORBIDDEN_ENV}; do printf '%s ' "${x%%:*}"; done)"
-  survivor_pids > "${EV}/survivors-before.txt"
+  survivor_pids > "${EV}/survivors-before.txt" || { record FAIL "起動: 生き残りの比較の準備" "プロセスの一覧を取れない"; return 1; }
   pitchfork_list > "${EV}/pitchfork-before.txt"
   TOOLCHAIN="$(cd "${TOP}" && mise current rust 2>/dev/null)"
   RUSTC_BIN="$(rustup which --toolchain "${TOOLCHAIN}" rustc 2>/dev/null)"
