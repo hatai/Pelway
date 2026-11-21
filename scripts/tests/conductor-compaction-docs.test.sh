@@ -160,7 +160,7 @@ check cond16_verification "$DE" \
   '自動圧縮の有無と検知' \
   '### opencode（GLM、zai-coding-plan/glm-5.3、OpenCode server 2.3.0）' \
   '### Devin CLI（acpRegistry_devin、swe-2-high' \
-  '### Codex（codex_review、gpt-6-luna）' \
+  '### Codex（codex_review。検証時のモデルは gpt-6-luna）' \
   '### Claude（claude_review、claude-opus-5-5'
 
 # 条件17（hatai の指示による拡張）: プロバイダごとの差分が command-team の該当節に

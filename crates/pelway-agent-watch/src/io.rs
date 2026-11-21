@@ -17,39 +17,58 @@ const NOTIFY_FNOX: &str = ".config/pelway-agent-notify/fnox.toml";
 
 /// 外部コマンド 1 回あたりの制限時間（秒）。固まったコマンドで見張り役ごと止まらないため。
 const COMMAND_TIMEOUT_SECS: &str = "30";
+/// 制限時間で SIGTERM を送っても終わらないときに、SIGKILL を送るまでの猶予（`timeout -k`）。
+/// 終了処理で固まった子を待ち続けて、見張り役ごと止まらないため。
+const COMMAND_KILL_AFTER_SECS: &str = "5";
+
+/// coreutils の timeout で包んだコマンド。制限を超えたら終了コード 124（SIGKILL なら 137）で失敗扱いになる。
+fn timed(cmd: &std::ffi::OsStr) -> Command {
+    let mut c = Command::new("timeout");
+    c.args(["-k", COMMAND_KILL_AFTER_SECS, COMMAND_TIMEOUT_SECS])
+        .arg(cmd);
+    c
+}
 
 fn run(cmd: &str, args: &[&str], cwd: &Path) -> Result<String, String> {
-    // coreutils の timeout で包む。制限を超えたら終了コード 124 で失敗扱いになる
-    let out = Command::new("timeout")
-        .arg(COMMAND_TIMEOUT_SECS)
-        .arg(cmd)
+    run_os(std::ffi::OsStr::new(cmd), args, cwd)
+}
+
+/// `cmd` を実行して標準出力を返す。エラーの文には実行ファイルの名前だけを出す（パスは出さない）。
+fn run_os(cmd: &std::ffi::OsStr, args: &[&str], cwd: &Path) -> Result<String, String> {
+    let name = Path::new(cmd)
+        .file_name()
+        .unwrap_or(cmd)
+        .to_string_lossy()
+        .to_string();
+    let out = timed(cmd)
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .output()
-        .map_err(|e| format!("{cmd}: {e}"))?;
+        .map_err(|e| format!("{name}: {e}"))?;
     if !out.status.success() {
         return Err(format!(
-            "{cmd} {}: exit {}",
+            "{name} {}: exit {}",
             args.first().unwrap_or(&""),
             out.status.code().unwrap_or(-1)
         ));
     }
-    String::from_utf8(out.stdout).map_err(|e| format!("{cmd}: {e}"))
+    String::from_utf8(out.stdout).map_err(|e| format!("{name}: {e}"))
 }
 
-pub fn t3_list(project: &Path) -> Result<Vec<ListedThread>, String> {
+/// `bin` は [`t3_bin`] で選んだ実行ファイル（一覧・詳細・起こしで同じものを使う）。
+pub fn t3_list(bin: &Path, project: &Path) -> Result<Vec<ListedThread>, String> {
     let project = project.to_string_lossy();
-    parse_list(&run(
-        "t3",
+    parse_list(&run_os(
+        bin.as_os_str(),
         &["thread", "list", "--project", &project, "--json"],
         Path::new("."),
     )?)
 }
 
-pub fn t3_show(id: &str) -> Result<ThreadDetail, String> {
-    parse_show(&run(
-        "t3",
+pub fn t3_show(bin: &Path, id: &str) -> Result<ThreadDetail, String> {
+    parse_show(&run_os(
+        bin.as_os_str(),
         &["thread", "show", id, "--json"],
         Path::new("."),
     )?)
@@ -341,6 +360,8 @@ fn open_pelway_dir(dir: &Path, create: bool) -> Result<fs::File, String> {
             .map_err(|e| e.to_string())?;
     }
     let c = std::ffi::CString::new(dir.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
+    // SAFETY: c は NUL 終端の C 文字列で、呼び出しの間生きている。open は fd を返すだけで、
+    // 返った fd の持ち主は直後の from_raw_fd だけ
     let fd = unsafe {
         libc::open(
             c.as_ptr(),
@@ -359,6 +380,7 @@ fn open_pelway_dir(dir: &Path, create: bool) -> Result<fs::File, String> {
     if !meta.file_type().is_dir() {
         return Err("pelway dir is not a plain directory".to_string());
     }
+    // SAFETY: geteuid は引数を取らず、失敗しない
     if meta.uid() != unsafe { libc::geteuid() } {
         return Err("pelway dir is not owned by this user".to_string());
     }
@@ -372,6 +394,9 @@ fn open_in_pelway(dirf: &fs::File, name: &str, flags: libc::c_int) -> Result<fs:
     use std::os::unix::fs::MetadataExt;
     use std::os::unix::io::{AsRawFd, FromRawFd};
     let c = std::ffi::CString::new(name).map_err(|e| e.to_string())?;
+    // SAFETY: dirf は呼び出しの間開いている（借用している）ディレクトリの fd、c は呼び出しの間
+    // 生きている NUL 終端の C 文字列。mode は可変長引数として c_uint で渡す。返った fd の持ち主は
+    // 直後の from_raw_fd だけ
     let fd = unsafe {
         libc::openat(
             dirf.as_raw_fd(),
@@ -389,6 +414,7 @@ fn open_in_pelway(dirf: &fs::File, name: &str, flags: libc::c_int) -> Result<fs:
     if !meta.file_type().is_file() {
         return Err("not a regular file".to_string());
     }
+    // SAFETY: geteuid は引数を取らず、失敗しない
     if meta.uid() != unsafe { libc::geteuid() } {
         return Err("not owned by this user".to_string());
     }
@@ -396,6 +422,18 @@ fn open_in_pelway(dirf: &fs::File, name: &str, flags: libc::c_int) -> Result<fs:
         return Err("has other hard links".to_string());
     }
     Ok(file)
+}
+
+/// 開いたファイルが所有者だけのもの（グループ・他人の権限が無い）かを確かめる。
+/// `O_CREAT` のモードは新しく作るときにしか効かず、前からあるファイルは他人に読める権限のこともある。
+/// その場合は 0600 に直しても、すでに他人が開いている fd からは読めるので、書かない。
+fn owner_only(file: &fs::File) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt;
+    let mode = file.metadata().map_err(|e| e.to_string())?.mode();
+    if mode & 0o077 != 0 {
+        return Err("accessible by others (not 0600)".to_string());
+    }
+    Ok(())
 }
 
 fn split_pelway_path(path: &Path) -> Result<(&Path, &str), String> {
@@ -418,9 +456,22 @@ pub fn append_inbox(path: &Path, lines: &[String]) -> Result<u64, String> {
     let (dir, name) = split_pelway_path(path)?;
     let dirf = open_pelway_dir(dir, true)?;
     let mut file = open_in_pelway(&dirf, name, libc::O_RDWR | libc::O_APPEND | libc::O_CREAT)?;
+    // 報告の本文を書くので、所有者以外にも権限があった受信箱には書かない
+    owner_only(&file)?;
     let len = file.metadata().map_err(|e| e.to_string())?.len();
     if len > INBOX_MAX_BYTES {
         return Err("inbox is too large".to_string());
+    }
+    // 前回の追記が途中で失敗して改行の無い断片が残っていれば、先に改行で閉じる
+    // （次の知らせを独立した 1 行として読めるようにする）
+    if len > 0 {
+        use std::os::unix::fs::FileExt;
+        let mut last = [0u8; 1];
+        file.read_exact_at(&mut last, len - 1)
+            .map_err(|e| e.to_string())?;
+        if last[0] != b'\n' {
+            file.write_all(b"\n").map_err(|e| e.to_string())?;
+        }
     }
     for line in lines {
         let mut buf = line.clone();
@@ -428,7 +479,7 @@ pub fn append_inbox(path: &Path, lines: &[String]) -> Result<u64, String> {
         file.write_all(buf.as_bytes()).map_err(|e| e.to_string())?;
     }
     file.rewind().map_err(|e| e.to_string())?;
-    // 書いたあとの大きさまでしか読まない（書いている間に伸ばされても、上限の内で止める）
+    // EOF まで、固定の上限（`INBOX_MAX_BYTES` + 1 MiB）の内で読む（書いた後に足された行も数えに入る）
     let mut file = file.take(INBOX_MAX_BYTES + 1024 * 1024);
     let mut count = 0u64;
     let mut chunk = [0u8; 8192];
@@ -468,27 +519,86 @@ pub fn conductor_file() -> PathBuf {
     home().join(".config/pelway-agent-notify/conductor-thread-id")
 }
 
+/// 登録ファイルの大きさの上限（スレッド ID 1 行）。
+const CONDUCTOR_FILE_MAX_BYTES: u64 = 4096;
+
 /// 登録ファイルを読む。無ければ Ok(None)（指揮役が T3 のスレッドとして動いていない）。
+/// 置き場は sandbox の中から書けないが、多層防御として symlink をたどらず（`O_NOFOLLOW`）、
+/// FIFO で止まらず（`O_NONBLOCK`）に開き、開いた fd で通常ファイル・自分の所有を確かめる。
 pub fn read_conductor_file(path: &Path) -> Result<Option<String>, String> {
     use std::io::Read;
-    match fs::File::open(path) {
-        Ok(f) => {
-            let mut text = String::new();
-            f.take(4096)
-                .read_to_string(&mut text)
-                .map_err(|e| e.to_string())?;
-            Ok(Some(text))
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+    use std::os::unix::fs::MetadataExt;
+    let file = match fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+    {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.kind().to_string()),
+    };
+    let meta = file.metadata().map_err(|e| e.to_string())?;
+    // SAFETY: geteuid は引数を取らず、失敗しない
+    if !meta.file_type().is_file() || meta.uid() != unsafe { libc::geteuid() } {
+        return Err("not a regular file owned by this user".to_string());
+    }
+    let mut text = String::new();
+    file.take(CONDUCTOR_FILE_MAX_BYTES)
+        .read_to_string(&mut text)
+        .map_err(|e| e.to_string())?;
+    Ok(Some(text))
+}
+
+/// 登録ファイルにスレッド ID を書く（置き換え）。ID は起こしと同じ規則で確かめる。
+/// 置き場は 0700、ファイルは 0600。同じ置き場の一時ファイルに書いてから rename で置き換える
+/// （登録ファイルの位置がディレクトリなら rename が失敗して、登録しない。
+/// それ以外（symlink・FIFO など）は、たどらずにそれ自体を置き換える）。
+pub fn register_conductor(path: &Path, id: &str) -> Result<(), String> {
+    use std::os::unix::fs::DirBuilderExt;
+    if !pelway_agent_watch::inbox::valid_thread_id(id) {
+        return Err(
+            "not a thread id (letters, digits, ':', '_', '-', '.', '%'; up to 256; not starting with '-')"
+                .to_string(),
+        );
+    }
+    let dir = path.parent().ok_or("no parent dir")?;
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+        .map_err(|e| e.to_string())?;
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    let tmp = dir.join(format!(".conductor-thread-id.{}.tmp", std::process::id()));
+    let _ = fs::remove_file(&tmp);
+    let written = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&tmp)
+        .and_then(|mut f| f.write_all(format!("{id}\n").as_bytes()))
+        .and_then(|()| fs::rename(&tmp, path));
+    if let Err(e) = written {
+        let _ = fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    Ok(())
+}
+
+/// 登録を消す（代行の終了）。無ければ何もしない。
+pub fn unregister_conductor(path: &Path) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e.to_string()),
     }
 }
 
-/// 起こしに使う `t3` の実行ファイル。`T3_BIN` が指定されていればそれ、無ければ動いている
+/// 一覧・詳細・起こしに使う `t3` の実行ファイル。`T3_BIN` が指定されていればそれ、無ければ動いている
 /// T3 サーバーと同じ実行ファイル、それも無ければ PATH の `t3`。
-/// PATH の `t3` は版が同じでも、サーバーが持つ `~/.t3/userdata` を `ServerOwnsDatabaseError` で
-/// 拒まれることがあるため（`scripts/conductor-watch.sh` の `T3_BIN` の解決と同じ考え方）。
-pub fn wake_t3_bin() -> PathBuf {
+/// PATH の `t3` は版がサーバーと食い違うと失敗し、版が同じでも、サーバーが持つ `~/.t3/userdata` を
+/// `ServerOwnsDatabaseError` で拒まれることがあるため（`scripts/conductor-watch.sh` の `T3_BIN` の解決と同じ考え方）。
+pub fn t3_bin() -> PathBuf {
     if let Some(bin) = std::env::var_os("T3_BIN").filter(|v| !v.is_empty()) {
         return PathBuf::from(bin);
     }
@@ -501,6 +611,7 @@ pub fn wake_t3_bin() -> PathBuf {
 fn find_server_t3(proc: &Path, home: &Path) -> Option<PathBuf> {
     use std::os::unix::fs::MetadataExt;
     let runtime = home.join(".t3/wsl-runtime");
+    // SAFETY: geteuid は引数を取らず、失敗しない
     let me = unsafe { libc::geteuid() };
     let entries = fs::read_dir(proc).ok()?;
     for entry in entries.flatten() {
@@ -535,24 +646,23 @@ fn find_server_t3(proc: &Path, home: &Path) -> Option<PathBuf> {
 }
 
 /// 指揮役のスレッドへ決まった文を送る（`t3 thread send <thread> -`。本文は標準入力）。
-/// 実行中のスレッドには次のターンとして届き、割り込まない。ログに出すのは終了コードだけ。
+/// 実行中のスレッドには次のターンとして届き、割り込まない。ログに出すのは終了コードとエラーの種類だけ（宛先と本文は出さない）。
 pub fn wake(bin: &Path, thread_id: &str, message: &str) -> Result<(), String> {
-    let child = Command::new("timeout")
-        .arg(COMMAND_TIMEOUT_SECS)
-        .arg(bin)
+    let mut child = timed(bin.as_os_str())
         .args(["thread", "send", thread_id, "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| format!("spawn: {}", e.kind()))?;
-    let mut child = child;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(message.as_bytes())
-            .map_err(|e| format!("stdin: {}", e.kind()))?;
-    }
+    // 標準入力に書けなくても、子の終了を待って回収してから失敗を返す（ゾンビを残さない）。
+    // 待つ時間は timeout -k で区切られている
+    let written = child
+        .stdin
+        .take()
+        .map_or(Ok(()), |mut stdin| stdin.write_all(message.as_bytes()));
     let status = child.wait().map_err(|e| format!("wait: {}", e.kind()))?;
+    written.map_err(|e| format!("stdin: {}", e.kind()))?;
     if status.success() {
         Ok(())
     } else {

@@ -43,7 +43,23 @@ esac
         // 偽の gh: 開いている PR はない。
         write_exec(&root.join("bin/gh"), "#!/usr/bin/env bash\necho '[]'\n");
         // 偽の fnox: 秘密は取れない（本物の webhook に送らないため。送信は「送れなかった」扱いになる）
-        write_exec(&root.join("bin/fnox"), "#!/usr/bin/env bash\nexit 1\n");
+        // fake/fnox-ok があるときだけ偽の値を返す（送信が失敗する場合の試験に使う）
+        write_exec(
+            &root.join("bin/fnox"),
+            "#!/usr/bin/env bash\n[ -e \"$FAKE_DIR/fnox-ok\" ] && { echo fake-secret; exit 0; }\nexit 1\n",
+        );
+        // 偽の curl: 本文（--data-binary @<file>）を fake/curl-body に写し、HTTP 500 を返す
+        write_exec(
+            &root.join("bin/curl"),
+            r#"#!/usr/bin/env bash
+cat > /dev/null
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--data-binary" ]; then cp "${2#@}" "$FAKE_DIR/curl-body"; fi
+  shift
+done
+printf 500
+"#,
+        );
         // 偽の git: rev-parse の --git-dir / --git-common-dir / --show-toplevel は、
         // rev-parse の実行先（$PWD）に同名ファイルがあればその中身、無ければ fake/ の同名
         // ファイル、それも無ければ ".git"・".git"・`pwd -P`（本体 checkout）を返す。
@@ -87,7 +103,7 @@ done
         fs::write(self.pelway_dir().join("patrol-state.json"), body).unwrap();
     }
 
-    /// ホスト側の登録ファイルに、いまの指揮役のスレッド ID を書く（scripts/conductor-register の代わり）。
+    /// ホスト側の登録ファイルに、いまの指揮役のスレッド ID を書く（`pelway-agent-watch --register` の代わり）。
     fn conductor(&self, id: &str) {
         let dir = self.root.join("home/.config/pelway-agent-notify");
         fs::create_dir_all(&dir).unwrap();
@@ -595,14 +611,30 @@ fn inbox_appends_every_event() {
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let events = inbox_events(&sb);
-    let kinds: std::collections::BTreeSet<String> = events
+    // 出るはずの知らせが、過不足なく 1 行ずつある（スレッド・種類・止まりの理由の組で比べる）。
+    // 試験の時刻は古いので、実行中の d は waiting に加えて no-activity の stalled も出る
+    let mut got: Vec<String> = events
         .iter()
-        .map(|e| e["event"].as_str().unwrap().to_string())
+        .map(|e| {
+            format!(
+                "{} {} {}",
+                e["thread_id"].as_str().unwrap_or(""),
+                e["event"].as_str().unwrap_or(""),
+                e["stall_reason"].as_str().unwrap_or("-")
+            )
+        })
         .collect();
-    for k in ["finished", "failed", "cancelled", "waiting", "stalled"] {
-        assert!(kinds.contains(k), "{k} is missing: {kinds:?}");
-    }
-    // webhook と同じ形（schema と report を含む）
+    got.sort();
+    let want = [
+        "mcp:a finished -",
+        "mcp:b failed -",
+        "mcp:c cancelled -",
+        "mcp:d stalled no-activity",
+        "mcp:d waiting -",
+        "mcp:e stalled no-activity",
+    ];
+    assert_eq!(got, want);
+    // webhook と同じ形（schema が pelway.agent-watch/v1。payload 全体の一致は inbox_written_when_webhook_fails で確かめる）
     assert!(
         events
             .iter()
@@ -614,16 +646,23 @@ fn inbox_appends_every_event() {
 
 #[test]
 fn inbox_written_when_webhook_fails() {
-    // 偽の fnox は秘密を返さないので、webhook には送れない（送信待ちの列に残る）
+    // 偽の秘密を返し、偽の curl が HTTP 500 を返す: 送信処理は呼ばれて失敗する
     let sb = Sandbox::new("inbox-webhook-fails");
     one_event(&sb);
+    sb.fake("fnox-ok", "");
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
-    assert!(stderr(&out).contains("mode=not-sent"));
+    assert!(
+        stderr(&out).contains("mode=send-failed"),
+        "{}",
+        stderr(&out)
+    );
     let events = inbox_events(&sb);
     assert_eq!(events.len(), 1);
     assert_eq!(events[0]["event"], "finished");
-    assert!(events[0]["report"].as_str().unwrap().contains("issue: #80"));
+    // 送信処理に渡した JSON と、受信箱の 1 行が同じ
+    let sent: serde_json::Value = serde_json::from_str(&sb.read_fake("curl-body")).unwrap();
+    assert_eq!(sent, events[0]);
 }
 
 #[test]
@@ -631,13 +670,18 @@ fn inbox_failure_does_not_stop_watch() {
     // pelway の位置に通常のファイルを置いて、受信箱を作れなくする（権限ではなく構造で失敗させる）
     let sb = Sandbox::new("inbox-fails");
     one_event(&sb);
+    // 偽の秘密と、本文を写して HTTP 500 を返す偽の curl で、送信処理まで進むことを確かめる
+    sb.fake("fnox-ok", "");
     fs::write(sb.pelway_dir(), "not a directory").unwrap();
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let err = stderr(&out);
     assert_eq!(err.matches("inbox append failed").count(), 1, "{err}");
-    // webhook の処理（送信待ちの列）と状態の保存は続く
-    assert!(err.contains("mode=not-sent"), "{err}");
+    // webhook の送信（curl に知らせの JSON が渡る）と状態の保存は続く
+    let sent: serde_json::Value = serde_json::from_str(&sb.read_fake("curl-body")).unwrap();
+    assert_eq!(sent["event"], "finished");
+    assert_eq!(sent["thread_id"], "mcp:a");
+    assert!(err.contains("mode=send-failed"), "{err}");
     let state = fs::read_to_string(sb.state_file()).unwrap();
     assert!(state.contains("\"outbox\":[{"), "{state}");
 }
@@ -755,9 +799,19 @@ fn wake_failure_is_logged_once() {
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let err = stderr(&out);
     assert_eq!(err.matches("WAKE failed").count(), 1, "{err}");
+    // 内部で送り直さない: 失敗した呼び出しも記録する t3-calls で、thread send がちょうど 1 回
+    let calls = fs::read_to_string(sb.t3_calls()).unwrap_or_default();
+    assert_eq!(
+        calls
+            .lines()
+            .filter(|l| l.starts_with("t3 thread send"))
+            .count(),
+        1,
+        "{calls}"
+    );
     // 失敗した起こしは記録しない（次の新しい知らせで改めて試みる）
     let state = fs::read_to_string(sb.state_file()).unwrap();
-    assert!(state.contains("\"last_wake_inbox_lines\":null"), "{state}");
+    assert!(state.contains("\"last_wake_inbox_offset\":null"), "{state}");
 }
 
 #[test]
@@ -784,7 +838,7 @@ fn dry_run_writes_no_inbox_and_no_wake() {
     assert!(sb.read_fake("t3-send-args").is_empty());
 }
 
-// ---- 受信箱・補助記録の置き場は sandbox の中から書けるので、種類を確かめて開く（PR #561 round 1） ----
+// ---- 受信箱・補助記録の置き場は sandbox の中から書けるので、種類を確かめて開く ----
 
 /// 10 秒以内に終わらなければ止めて失敗にする（FIFO で止まらないことを確かめるため）。
 fn run_bounded(sb: &Sandbox) -> Output {
@@ -904,4 +958,416 @@ fn huge_sparse_inbox_does_not_stall_the_watch() {
     assert!(err.contains("mode=not-sent"), "{err}");
     assert!(sb.read_fake("t3-send-args").is_empty());
     assert_eq!(fs::metadata(sb.inbox()).unwrap().len(), 1 << 40);
+}
+
+#[test]
+fn own_event_does_not_wake_the_conductor() {
+    // 知らせの元が登録された指揮役自身（巡回の終わり）だけの回は起こさない
+    let sb = Sandbox::new("wake-own");
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:conductor-1","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "completed", "2026-11-10T16:10:00Z", 0),
+    );
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{"mcp:conductor-1":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null}},"ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 1);
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    assert!(stderr(&out).contains("WAKE skipped reason=own-event"));
+}
+
+#[test]
+fn missing_patrol_state_skips_wake() {
+    let sb = Sandbox::new("wake-no-patrol");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 1);
+    assert!(stderr(&out).contains("mode=not-sent"));
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    assert!(stderr(&out).contains("WAKE skipped reason=patrol-state-unreadable"));
+}
+
+#[test]
+fn partial_line_is_closed_before_appending() {
+    // 前回の追記が途中で失敗して、改行の無い断片が残っている
+    let sb = Sandbox::new("inbox-partial");
+    one_event(&sb);
+    fs::create_dir_all(sb.pelway_dir()).unwrap();
+    fs::write(sb.inbox(), "{\"event\":\"finis").unwrap();
+    fs::set_permissions(sb.inbox(), fs::Permissions::from_mode(0o600)).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let text = fs::read_to_string(sb.inbox()).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 2, "{text}");
+    assert_eq!(lines[0], "{\"event\":\"finis");
+    let ev: serde_json::Value =
+        serde_json::from_str(lines[1]).expect("the new event is its own line");
+    assert_eq!(ev["event"], "finished");
+}
+
+// ---- t3 の解決、受信箱の権限、own-event の混在、空の登録、登録の操作 ----
+
+#[test]
+fn list_and_wake_use_the_same_t3_as_the_server() {
+    // PATH の t3 はサーバーと食い違って失敗する。T3_BIN（サーバーと同じ実行ファイル）で一覧から起こしまで進む
+    let sb = Sandbox::new("t3-bin");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let server = sb.root.join("server");
+    fs::create_dir_all(&server).unwrap();
+    fs::copy(sb.root.join("bin/t3"), server.join("t3")).unwrap();
+    write_exec(
+        &sb.root.join("bin/t3"),
+        "#!/usr/bin/env bash\necho \"path-t3 $*\" >> \"$FAKE_DIR/path-t3-calls\"\nexit 1\n",
+    );
+    let out = sb
+        .command(&["--once"])
+        .env("T3_BIN", server.join("t3"))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 1, "{}", stderr(&out));
+    assert_eq!(sb.read_fake("t3-send-args").trim(), "mcp:conductor-1 -");
+    assert!(stderr(&out).contains("mode=not-sent"));
+    assert_eq!(sb.read_fake("path-t3-calls"), "");
+}
+
+#[test]
+fn existing_inbox_readable_by_others_is_not_written() {
+    // 前からある受信箱に他人の権限があれば、すでに開かれているかもしれないので書かない（webhook は続ける）
+    let sb = Sandbox::new("inbox-mode");
+    one_event(&sb);
+    sb.fake("fnox-ok", "");
+    fs::create_dir_all(sb.pelway_dir()).unwrap();
+    fs::write(sb.inbox(), "").unwrap();
+    fs::set_permissions(sb.inbox(), fs::Permissions::from_mode(0o644)).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(fs::read_to_string(sb.inbox()).unwrap(), "");
+    assert!(stderr(&out).contains("inbox append failed"));
+    let sent: serde_json::Value = serde_json::from_str(&sb.read_fake("curl-body")).unwrap();
+    assert_eq!(sent["event"], "finished");
+}
+
+#[test]
+fn wake_again_after_partly_reading() {
+    // 2 件の知らせで起こした後、指揮役が 1 行だけ読んだ。次の知らせでは起こす
+    let sb = Sandbox::new("wake-partly-read");
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"},
+  {"threadId":"mcp:b","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_a.json",
+        &show("mcp:a", "completed", "2026-11-10T16:10:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "completed", "2026-11-10T16:10:00Z", 0),
+    );
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{
+  "mcp:a":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:b":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null}},"ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 2);
+    assert_eq!(sb.read_fake("t3-send-args").lines().count(), 1);
+
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:a","status":"failed","updatedAt":"2026-11-10T16:30:00Z"},
+  {"threadId":"mcp:b","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_a.json",
+        &show("mcp:a", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    let mut state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
+    state["threads"]["mcp:a"]["status"] = "running".into();
+    fs::write(sb.state_file(), state.to_string()).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 3);
+    assert_eq!(
+        sb.read_fake("t3-send-args").lines().count(),
+        2,
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn conductor_and_another_thread_in_one_cycle_wake_once() {
+    // 指揮役自身の知らせと別のスレッドの知らせが同じ回に出たら、起こす（own-event にしない）
+    let sb = Sandbox::new("wake-own-and-other");
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:conductor-1","status":"completed","updatedAt":"2026-11-10T16:10:00Z"},
+  {"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "completed", "2026-11-10T16:10:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_a.json",
+        &show("mcp:a", "completed", "2026-11-10T16:10:00Z", 0),
+    );
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{
+  "mcp:conductor-1":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:a":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null}},"ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 2);
+    assert_eq!(sb.read_fake("t3-send-args").lines().count(), 1);
+}
+
+#[test]
+fn empty_registration_does_not_wake() {
+    let sb = Sandbox::new("wake-empty-reg");
+    one_event(&sb);
+    sb.conductor("");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 1);
+    assert!(sb.read_fake("t3-send-args").is_empty());
+}
+
+fn reg_file(sb: &Sandbox) -> PathBuf {
+    sb.root
+        .join("home/.config/pelway-agent-notify/conductor-thread-id")
+}
+
+fn reg(sb: &Sandbox, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_pelway-agent-watch"))
+        .args(args)
+        .env("HOME", sb.root.join("home"))
+        .env("PATH", sb.root.join("bin"))
+        .env("FAKE_DIR", sb.root.join("fake"))
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn register_show_and_unregister() {
+    let sb = Sandbox::new("register");
+    let out = reg(&sb, &["--show-registration"]);
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "(none)");
+
+    let out = reg(&sb, &["--register", "mcp:conductor-1"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(
+        fs::read_to_string(reg_file(&sb)).unwrap(),
+        "mcp:conductor-1\n"
+    );
+    let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&reg_file(&sb)), 0o600);
+    assert_eq!(mode(reg_file(&sb).parent().unwrap()), 0o700);
+    let out = reg(&sb, &["--show-registration"]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "mcp:conductor-1"
+    );
+    // 登録は見張りを始めない（t3 を呼ばない）
+    assert!(!sb.t3_calls().exists());
+
+    let out = reg(&sb, &["--unregister"]);
+    assert!(out.status.success());
+    assert!(!reg_file(&sb).exists());
+    let out = reg(&sb, &["--unregister"]);
+    assert!(out.status.success());
+}
+
+#[test]
+fn register_rejects_bad_ids_and_targets() {
+    let sb = Sandbox::new("register-bad");
+    for bad in ["--help", "-x", "a b", "a;rm", ""] {
+        let out = reg(&sb, &["--register", bad]);
+        assert_eq!(out.status.code(), Some(1), "{bad}");
+        assert!(!reg_file(&sb).exists(), "{bad}");
+    }
+    let out = reg(&sb, &["--register"]);
+    assert!(!out.status.success());
+
+    // 登録ファイルの位置がディレクトリなら、中に置かずに失敗する
+    fs::create_dir_all(reg_file(&sb)).unwrap();
+    let out = reg(&sb, &["--register", "mcp:conductor-1"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(fs::read_dir(reg_file(&sb)).unwrap().count(), 0);
+    fs::remove_dir(reg_file(&sb)).unwrap();
+
+    // symlink があれば、たどらずに symlink 自体を置き換える
+    let target = sb.root.join("target.txt");
+    fs::write(&target, "keep").unwrap();
+    std::os::unix::fs::symlink(&target, reg_file(&sb)).unwrap();
+    let out = reg(&sb, &["--register", "mcp:conductor-1"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(fs::read_to_string(&target).unwrap(), "keep");
+    assert!(
+        !fs::symlink_metadata(reg_file(&sb))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+}
+
+#[test]
+fn registration_symlink_or_fifo_is_not_followed_by_the_watch() {
+    let sb = Sandbox::new("reg-fifo");
+    one_event(&sb);
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    fs::create_dir_all(reg_file(&sb).parent().unwrap()).unwrap();
+    mkfifo(&reg_file(&sb));
+    let out = run_bounded(&sb);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    assert!(stderr(&out).contains("WAKE skipped reason=conductor-file-unreadable"));
+
+    fs::remove_file(reg_file(&sb)).unwrap();
+    let elsewhere = sb.root.join("elsewhere");
+    fs::write(&elsewhere, "mcp:planted\n").unwrap();
+    std::os::unix::fs::symlink(&elsewhere, reg_file(&sb)).unwrap();
+    one_event(&sb);
+    let out = run_bounded(&sb);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(sb.read_fake("t3-send-args").is_empty());
+}
+
+// ---- 既読の位置の範囲、宛先の切り替え ----
+
+#[test]
+fn out_of_range_offset_is_not_kept() {
+    // 受信箱の行数を超える既読の位置では起こさず、基準にも残さない。正しい値に戻せば起こす
+    let sb = Sandbox::new("wake-offset-range");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":18446744073709551615}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(stderr(&out).contains("WAKE skipped reason=offset-out-of-range"));
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    let state = fs::read_to_string(sb.state_file()).unwrap();
+    assert!(state.contains("\"last_wake_inbox_offset\":null"), "{state}");
+
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:a","status":"failed","updatedAt":"2026-11-10T16:30:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_a.json",
+        &show("mcp:a", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    let mut state: serde_json::Value = serde_json::from_str(&state).unwrap();
+    state["threads"]["mcp:a"]["status"] = "running".into();
+    fs::write(sb.state_file(), state.to_string()).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(
+        sb.read_fake("t3-send-args").lines().count(),
+        1,
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn new_conductor_is_woken_without_waiting_for_the_old_baseline() {
+    // 前の指揮役を起こしたときの基準は、登録が替わったら使わない
+    let sb = Sandbox::new("wake-new-conductor");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(sb.read_fake("t3-send-args").trim(), "mcp:conductor-1 -");
+
+    sb.conductor("mcp:conductor-2");
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:a","status":"failed","updatedAt":"2026-11-10T16:30:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_a.json",
+        &show("mcp:a", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    let mut state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
+    state["threads"]["mcp:a"]["status"] = "running".into();
+    fs::write(sb.state_file(), state.to_string()).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let sends = sb.read_fake("t3-send-args");
+    assert_eq!(
+        sends.lines().last(),
+        Some("mcp:conductor-2 -"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+// ---- 既読の位置の型 ----
+
+#[test]
+fn odd_inbox_offset_skips_wake() {
+    // 既読の位置が 0 以上の整数でないときは、その回は起こさず、追記と webhook は続ける
+    for (i, bad) in [r#""3""#, "-1"].iter().enumerate() {
+        let sb = Sandbox::new(&format!("wake-odd-offset-{i}"));
+        one_event(&sb);
+        sb.fake("fnox-ok", "");
+        sb.conductor("mcp:conductor-1");
+        sb.patrol_state(&format!(r#"{{"inbox_offset":{bad}}}"#));
+        let out = sb.run_with(&["--once"]);
+        assert!(out.status.success(), "stderr: {}", stderr(&out));
+        assert_eq!(inbox_events(&sb).len(), 1);
+        assert!(sb.read_fake("t3-send-args").is_empty(), "{bad}");
+        assert!(stderr(&out).contains("WAKE skipped reason=patrol-state-unreadable"));
+        assert!(!sb.read_fake("curl-body").is_empty());
+    }
+}
+
+#[test]
+fn oversized_patrol_state_has_its_own_reason() {
+    let sb = Sandbox::new("wake-patrol-too-large");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(&format!(
+        r#"{{"inbox_offset":0,"pad":"{}"}}"#,
+        "x".repeat(300 * 1024)
+    ));
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    assert!(stderr(&out).contains("WAKE skipped reason=patrol-state-too-large"));
 }

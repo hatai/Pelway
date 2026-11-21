@@ -17,8 +17,23 @@ const MAX_THREAD_ID_LEN: usize = 256;
 
 /// 受信箱の 1 行。webhook に送る payload と同じ JSON を改行なしで書く。
 pub fn inbox_line(payload: &Value) -> String {
-    // serde_json の to_string は改行を含まない（文字列中の改行は \n にエスケープされる）
-    payload.to_string()
+    // serde_json の to_string は改行を含まない（文字列中の改行は \n にエスケープされる）。
+    // 非 ASCII の文字は、JSON として同じ値の `\uXXXX`（U+FFFF を超えるものはサロゲートの組）に
+    // 置き換え、行を ASCII だけにする。追記が文字の途中で切れた断片が残っても UTF-8 として
+    // 壊れた行にならず、U+0085・U+2028・U+2029 で行を分ける読み手（Python の str.splitlines など）
+    // でも 1 行のまま読める。非 ASCII は JSON の文字列の中にしか現れない（構造の記号は ASCII）
+    let mut out = String::new();
+    for c in payload.to_string().chars() {
+        if c.is_ascii() {
+            out.push(c);
+        } else {
+            let mut units = [0u16; 2];
+            for u in c.encode_utf16(&mut units) {
+                out.push_str(&format!("\\u{u:04x}"));
+            }
+        }
+    }
+    out
 }
 
 /// 起こしに要る値。宛先はホスト側の登録ファイル（sandbox から書けない）から、
@@ -47,7 +62,13 @@ pub fn parse_patrol_state(text: &str) -> Result<PatrolInfo, String> {
     let obj = v
         .as_object()
         .ok_or_else(|| "patrol-state: not an object".to_string())?;
-    let inbox_offset = obj.get("inbox_offset").and_then(Value::as_u64).unwrap_or(0);
+    // 項目が無ければ 0（受信箱を一度も読んでいない）。あるのに 0 以上の整数でなければ読めない扱い
+    let inbox_offset = match obj.get("inbox_offset") {
+        None => 0,
+        Some(v) => v.as_u64().ok_or_else(|| {
+            "patrol-state: inbox_offset is not a non-negative integer".to_string()
+        })?,
+    };
     Ok(PatrolInfo {
         conductor_thread_id: None,
         inbox_offset,
@@ -55,7 +76,7 @@ pub fn parse_patrol_state(text: &str) -> Result<PatrolInfo, String> {
 }
 
 /// 起こしの宛先に使ってよいスレッド ID か。
-/// 補助記録は sandbox の中の指揮役が書けるファイルで、値はホスト側のコマンドの引数になるため、
+/// 値（ホストの登録ファイルの 1 行目、`--register` の引数）は `t3 thread send` の引数になるため、
 /// 先頭の `-`（オプションに読まれる）を拒み、使える文字と長さを絞る。
 pub fn valid_thread_id(id: &str) -> bool {
     !id.is_empty()
@@ -75,20 +96,21 @@ pub enum WakeDecision {
     NoConductor,
     /// 登録された値がスレッド ID の形をしていない。
     InvalidThreadId,
-    /// 前回の起こしの後に、指揮役がまだ受信箱を読んでいない。
+    /// 前回の起こしの後に、指揮役の既読の位置が進んでいない。
     NotYetRead,
 }
 
-/// 起こすかを決める。`last_wake_lines` は前回起こしたときの受信箱の行数（一度も起こしていなければ None）。
-/// 指揮役の既読（`inbox_offset`）が前回の起こしの時点まで進んでいなければ、重ねて起こさない。
-pub fn decide_wake(info: &PatrolInfo, last_wake_lines: Option<u64>) -> WakeDecision {
+/// 起こすかを決める。`last_wake_offset` は前回起こしたときの指揮役の既読の位置（`inbox_offset`。
+/// 一度も起こしていなければ None）。既読の位置がそこから進んでいなければ、重ねて起こさない
+/// （前回の起こしの後に 1 行でも読めば、次の知らせで起こす）。
+pub fn decide_wake(info: &PatrolInfo, last_wake_offset: Option<u64>) -> WakeDecision {
     let Some(id) = &info.conductor_thread_id else {
         return WakeDecision::NoConductor;
     };
     if !valid_thread_id(id) {
         return WakeDecision::InvalidThreadId;
     }
-    if last_wake_lines.is_some_and(|lines| info.inbox_offset < lines) {
+    if last_wake_offset.is_some_and(|at| info.inbox_offset <= at) {
         return WakeDecision::NotYetRead;
     }
     WakeDecision::Send(id.clone())
@@ -115,6 +137,28 @@ mod tests {
     }
 
     #[test]
+    fn inbox_line_escapes_other_line_separators() {
+        let p = json!({"event":"finished","report":"a\u{0085}b\u{2028}c\u{2029}d"});
+        let line = inbox_line(&p);
+        assert_eq!(line.lines().count(), 1);
+        assert!(
+            !line.contains(['\u{0085}', '\u{2028}', '\u{2029}']),
+            "{line}"
+        );
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), p);
+    }
+
+    #[test]
+    fn inbox_line_is_ascii_only() {
+        let p = json!({"event":"finished","report":"state: 実装中\nnote: 😀"});
+        let line = inbox_line(&p);
+        assert!(line.is_ascii(), "{line}");
+        assert!(line.contains("\\u5b9f"), "{line}");
+        assert!(line.contains("\\ud83d\\ude00"), "{line}");
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), p);
+    }
+
+    #[test]
     fn patrol_state_reads_offset_and_ignores_thread_id() {
         let got = parse_patrol_state(
             r#"{"conductor_thread_id":"mcp:abc","inbox_offset":7,"subjects":{}}"#,
@@ -131,6 +175,24 @@ mod tests {
         );
         assert_eq!(parse_conductor_file("  \n"), None);
         assert_eq!(parse_conductor_file(""), None);
+    }
+
+    #[test]
+    fn patrol_state_offset_missing_is_zero_and_odd_is_error() {
+        assert_eq!(
+            parse_patrol_state(r#"{"subjects":{}}"#)
+                .unwrap()
+                .inbox_offset,
+            0
+        );
+        for bad in [
+            r#"{"inbox_offset":"3"}"#,
+            r#"{"inbox_offset":-1}"#,
+            r#"{"inbox_offset":1.5}"#,
+            r#"{"inbox_offset":null}"#,
+        ] {
+            assert!(parse_patrol_state(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]
@@ -176,12 +238,14 @@ mod tests {
 
     #[test]
     fn wake_waits_until_read() {
+        // 前回の起こしのときの既読は 3。まだ進んでいない
         assert_eq!(
-            decide_wake(&info(Some("mcp:a"), 3), Some(5)),
+            decide_wake(&info(Some("mcp:a"), 3), Some(3)),
             WakeDecision::NotYetRead
         );
+        // 前回の起こしの時点の未読（たとえば 2 件）のうち 1 件だけ読んだ: 進んだので次の知らせで起こす
         assert_eq!(
-            decide_wake(&info(Some("mcp:a"), 5), Some(5)),
+            decide_wake(&info(Some("mcp:a"), 4), Some(3)),
             WakeDecision::Send("mcp:a".to_string())
         );
     }
