@@ -34,7 +34,11 @@ check cond1_each_response_recorded "$DOC03" \
 check cond1_decision_reference "$DOC03" \
   'decision_idと確定後の版'
 check cond1_expiry_recorded_by_server "$DOC03" \
-  'serverを記録主体'
+  'actorを失効を確定したserverとし'
+# 条件1（Claude 例外レビューの must-fix・2026-11-21）: 期限切れの失効は、失効した承認の snapshot版・
+# 承認decision版を結び付け、actor を server とする。
+check cond1_expiry_reference "$DOC03" \
+  '失効した承認のsnapshot版・承認decision版を結び付け'
 
 # 条件2: 監査の行は主体（利用者・Bot）に外部キーで結ばず、主体を消しても残ることが書かれている。
 check cond2_no_fk_to_subjects "$DOC03" \
