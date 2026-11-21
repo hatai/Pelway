@@ -3,6 +3,7 @@
 # 動いていないときの needs-human への格上げ（Issue #602）のテスト。モックの agent-gh が GitHub の
 # 状態（Issue のラベル・Issue ごとのイベント・コメント）を $MOCK/gh.json に持ち、書き込み
 # （issue comment・issue edit）の引数を $MOCK/calls に、Issue ごとの読み取りの path を $MOCK/reads に順に記録する。
+# ラベルの変更は GitHub と同じく pelway-dev[bot] の名義のイベントにも残し、イベントには古い順に増える ID を付けて返す。
 # 読み取りの間のほかの誰かの変更は on_read で差し込む。モックの t3 がスレッドの一覧を返す。
 set -uo pipefail
 
@@ -22,6 +23,7 @@ REG="$ROOT/conductor-thread-id"
 CONDUCTOR="conductor-thread-7f3a"
 
 # モックの agent-gh。$MOCK/fail-<events|reread|comment|edit-add|edit-remove> があると、その呼び出しは失敗する。
+# fail-edit-add-lost はラベルを付けてから失敗を返し（応答が失われた）、fail-edit-add-crash は付けた直後に見張りを止める。
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env python3
 import json, os, re, sys, time
@@ -42,11 +44,13 @@ if a[:1] == ["api"]:
     if m and m.group(1) in st:
         i = st[m.group(1)]
         open(os.path.join(mock, "reads"), "a").write(a[1] + "\n")
-        def hook(what):  # この読み取りの間に、ほかの誰かが Issue を変えた（$MOCK/on-<issue|comments>-<番号> の python の文）
+        def hook(what):  # この読み取りの間に、ほかの誰かが Issue を変えた（$MOCK/on-<what>-<番号>: 1 行目の回数だけ見送り、残りの python の文を実行）
             hp = os.path.join(mock, f"on-{what}-{m.group(1)}")
-            if os.path.exists(hp):
-                exec(open(hp).read(), {"i": i, "ev": lambda k, l, at: {"event": k, "label": {"name": l}, "created_at": at}})
-                save(); os.remove(hp)
+            if not os.path.exists(hp): return
+            skip, code = open(hp).read().split("\n", 1)
+            if int(skip): open(hp, "w").write(f"{int(skip) - 1}\n{code}"); return
+            exec(code, {"i": i, "ev": lambda k, l, at: {"event": k, "label": {"name": l}, "created_at": at}})
+            save(); os.remove(hp)
         if m.group(2) is None and m.group(3) is None and len(a) == 2:
             if failing("reread"): sys.exit(9)
             hook("issue")
@@ -54,7 +58,8 @@ if a[:1] == ["api"]:
         if m.group(3) and a[2:] == ["--paginate", "--slurp"]:
             if m.group(2) == "/events":
                 if failing("events"): sys.exit(9)
-                out(i["events"])
+                hook("events"); k = iter(range(1, 1 << 30))
+                out([[dict(e, id=next(k)) for e in p] for p in i["events"]])
             hook("comments")
             cs = i.get("comments", [])
             out([cs[k:k + 2] for k in range(0, len(cs), 2)] or [[]])
@@ -66,12 +71,16 @@ if a[:2] == ["issue", "comment"] and a[3:] == ["--body-file", "-"] and a[2] in s
     if failing("comment"): sys.exit(9)
     st[a[2]].setdefault("comments", []).append({"user": {"login": "pelway-dev[bot]"}, "body": body})
     save(); sys.exit(0)
-if a[:2] == ["issue", "edit"] and len(a) == 5 and a[2] in st:
-    i = st[a[2]]; i.pop("list_labels", None)
-    if a[3] == "--add-label" and not failing("edit-add"):
-        i["labels"] = sorted(set(i["labels"]) | {a[4]}); save(); sys.exit(0)
-    if a[3] == "--remove-label" and not failing("edit-remove"):
-        i["labels"] = [l for l in i["labels"] if l != a[4]]; save(); sys.exit(0)
+if a[:2] == ["issue", "edit"] and len(a) == 5 and a[2] in st and a[3] in ("--add-label", "--remove-label"):
+    i, add = st[a[2]], a[3] == "--add-label"; i.pop("list_labels", None)
+    if failing("edit-add" if add else "edit-remove"): sys.exit(9)
+    i["labels"] = sorted(set(i["labels"]) | {a[4]}) if add else [l for l in i["labels"] if l != a[4]]
+    i["events"][-1].append({"event": "labeled" if add else "unlabeled", "label": {"name": a[4]},
+                            "actor": {"login": "pelway-dev[bot]"}, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+    save()
+    if add and failing("edit-add-lost"): sys.exit(9)
+    if add and failing("edit-add-crash"): os.kill(os.getppid(), 9)
+    sys.exit(0)
 sys.exit(9)
 EOF
 chmod +x "$ROOT/repo/scripts/agent-gh"
@@ -126,7 +135,7 @@ relabel() { gh_edit 'st[args[0]]["events"][-1].append(ev("labeled", "needs-decis
 set_labels() { gh_edit 'st[args[0]]["labels"] = args[1:]; st[args[0]].pop("list_labels", None)' "$@"; }
 # GitHub の実際のラベルだけを変え、一覧（issue list）は前のまま見せる（読み直しの確認用）
 set_actual_labels() { gh_edit 'i = st[args[0]]; i.setdefault("list_labels", i["labels"]); i["labels"] = args[1:]' "$@"; }
-on_read() { printf '%s\n' "$3" > "$MOCK/on-$1-$2"; }  # on_read <issue|comments> <番号> <python の文> — その読み取りの間に Issue（i）を変える
+on_read() { printf '%s\n%s\n' "${4:-0}" "$3" > "$MOCK/on-$1-$2"; }  # on_read <issue|comments|events> <番号> <python の文> [見送る回数] — その読み取りの間に Issue（i）を変える
 labels_of() { python3 -I -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1]))[sys.argv[2]]["labels"]))' "$MOCK/gh.json" "$1"; }
 add_comment() { gh_edit 'st[args[0]]["comments"].append({"user": {"login": args[1]}, "body": args[2]})' "$@"; }
 
@@ -157,10 +166,10 @@ s = json.load(open(sys.argv[1]))["subjects"][sys.argv[2]]["next_check_at"]
 base = datetime.datetime.fromisoformat(sys.argv[3].replace("Z", "+00:00"))
 print(round(datetime.datetime.fromisoformat(s).timestamp() - base.timestamp()))' "$STATE" "$1" "$2"
 }
-record_of() { # record_of <番号> — 見張りの状態ファイル（state.json）にある格上げの記録の labeled_at と段階
+record_of() { # record_of <番号> — 見張りの格上げの記録（escalation.json）の labeled_at と段階
   python3 -I -c 'import json,sys
-r = json.load(open(sys.argv[1])).get("escalation", {}).get(sys.argv[2], {})
-print((r.get("labeled_at", "") + " " + r.get("stage", "")).strip())' "$ROOT/state/pelway/conductor-watch/state.json" "$1"
+r = json.load(open(sys.argv[1])).get(sys.argv[2], {})
+print((r.get("labeled_at", "") + " " + r.get("stage", "")).strip())' "$ROOT/state/pelway/conductor-watch/escalation.json" "$1"
 }
 decision_lines() { grep '^DECISION ' "$ROOT/out.log"; }
 calls() { cat "$MOCK/calls" 2>/dev/null; }
@@ -358,7 +367,7 @@ check "20: re-labeled between reads -> overdue for the old labeled_at only" eq "
 # 記録が無ければ外さず、その Issue を読みもしない
 reset; issue_with 722 "$T20" needs-decision; touch "$MOCK/fail-edit-remove"
 run_cycles 1
-rm "$MOCK/fail-edit-remove"; : > "$MOCK/calls"; on_read issue 722 "i['events'][-1].append(ev('labeled', 'needs-decision', '$T5'))"
+rm "$MOCK/fail-edit-remove"; : > "$MOCK/calls"; on_read events 722 "i['events'][-1].append(ev('labeled', 'needs-decision', '$T5'))" 1
 run_cycles 1
 check "21: re-labeled before the retried removal -> no writes" eq "$(calls)" ""
 reset; issue_with 723 "$T20" needs-decision needs-human; add_comment 723 'pelway-dev[bot]' "$(body_for "$T20")"
@@ -421,6 +430,77 @@ gh_edit 'i = st[args[0]]; i["labels"] = ["needs-decision"]
 i["events"][-1] += [ev("unlabeled", "needs-human", args[1]), ev("unlabeled", "needs-decision", args[1]), ev("labeled", "needs-decision", args[2])]' 732 "$(ago 30)" "$T20"
 run_cycles 1
 check "28: a record for an older labeled_at is not reused" eq "$(calls)" "$(escalation_calls 732)"
+
+# --- 試行の記録と GitHub のラベル履歴での照合（記録は段ごとにその場で保存する） ---
+
+# 29. 試行の前に needs-human が付け外しされていても、一時的に付けられなかったら次の周に付け直す
+reset; issue_with 735 "$T20" needs-decision; touch "$MOCK/fail-edit-add"
+gh_edit 'st[args[0]]["events"][-1] += [ev("labeled", "needs-human", args[1]), ev("unlabeled", "needs-human", args[2])]' 735 "$T16" "$T5"
+run_cycles 1
+rm "$MOCK/fail-edit-add"; : > "$MOCK/calls"
+run_cycles 1
+check "29: removed before the attempt, transient failure -> added again, then needs-decision removed" eq "$(calls)" \
+  "$(lines "issue edit 735 --add-label needs-human" "issue edit 735 --remove-label needs-decision")"
+# 30. 付いたのに応答が失われたら、記録の試行の後の自分の名義の labeled で付けたと確かめ、needs-decision だけを外す。
+# その間に人間が needs-human を外していても付け直さない。付けた直後に保存の前で止まっても同じ
+reset; issue_with 736 "$T20" needs-decision; touch "$MOCK/fail-edit-add-lost"
+run_cycles 1
+check "30: add applied but the response lost -> step=label (exact)" eq "$(decision_lines | tail -n 1)" "DECISION escalate-failed #736 step=label"
+check "30: the attempt is recorded before the call" eq "$(record_of 736)" "$T20 adding"
+rm "$MOCK/fail-edit-add-lost"; : > "$MOCK/calls"
+run_cycles 1
+check "30: lost response -> next cycle removes needs-decision only" eq "$(calls)" "issue edit 736 --remove-label needs-decision"
+check "30: lost response -> escalated (exact)" eq "$(decision_lines | tail -n 1)" "DECISION escalated #736 labeled_at=$T20 reason=no-registration"
+check "30: lost response -> labels end as needs-human" eq "$(labels_of 736)" "needs-human"
+reset; issue_with 737 "$T20" needs-decision; touch "$MOCK/fail-edit-add-lost"
+run_cycles 1
+rm "$MOCK/fail-edit-add-lost"; : > "$MOCK/calls"
+gh_edit 'i = st[args[0]]; i["labels"].remove("needs-human"); i["events"][-1].append(ev("unlabeled", "needs-human", args[1]))' 737 "$T5"
+run_cycles 1
+check "30: removed by a human after the attempt -> not added again, needs-decision removed" eq "$(calls)" "issue edit 737 --remove-label needs-decision"
+reset; issue_with 738 "$T20" needs-decision; touch "$MOCK/fail-edit-add-crash"
+run_cycles 1
+rm "$MOCK/fail-edit-add-crash"; : > "$MOCK/calls"
+run_cycles 1
+check "30: stopped before saving -> next cycle removes needs-decision only" eq "$(calls)" "issue edit 738 --remove-label needs-decision"
+check "30: stopped before saving -> labels end as needs-human" eq "$(labels_of 738)" "needs-human"
+# 31. 試行の後にほかの誰かが needs-human を付けたら（自分の名義の labeled が無い）、held を残して DECISION held を 1 回出し、
+# needs-decision は外さない。以後その Issue は読まない
+reset; issue_with 739 "$T20" needs-decision; touch "$MOCK/fail-edit-add"
+run_cycles 1
+rm "$MOCK/fail-edit-add"; : > "$MOCK/calls"
+gh_edit 'i = st[args[0]]; i["labels"].append("needs-human"); i["events"][-1].append(ev("labeled", "needs-human", args[1]))' 739 "$T5"
+run_cycles 1
+check "31: someone else's needs-human after the attempt -> no writes" eq "$(calls)" ""
+check "31: someone else's needs-human after the attempt -> held (exact)" eq "$(decision_lines | tail -n 1)" "DECISION held #739 labeled_at=$T20"
+: > "$MOCK/reads"
+run_cycles 1
+check "31: held -> the issue is not read again" eq "$(reads_of 739)" ""
+# 32. 書く直前の events の取得の間に needs-decision が外されたら書かない。返った events に unlabeled があれば、その後の
+# Issue の読み取りで付き直っていても（新しい付与）書かず、unlabeled がまだ無ければ events の後に読む Issue で分かる
+reset; issue_with 740 "$T20" needs-decision
+on_read events 740 "i['labels'].remove('needs-decision'); i['events'][-1].append(ev('unlabeled', 'needs-decision', '$T5'))" 1
+on_read issue 740 "i['labels'] += [] if 'needs-decision' in i['labels'] else ['needs-decision']"
+run_cycles 1
+check "32: removed during the events fetch (unlabeled returned), back on the issue read -> no writes" eq "$(calls)" ""
+reset; issue_with 741 "$T20" needs-decision; on_read events 741 "i['labels'].remove('needs-decision')" 1
+run_cycles 1
+check "32: removed during the events fetch (not yet in events) -> no writes" eq "$(calls)" ""
+# 33. 付いたのに応答が失われ、その labeled が events にまだ出ていないうちは、held にせず次の周に回す
+reset; issue_with 742 "$T20" needs-decision; touch "$MOCK/fail-edit-add-lost"
+run_cycles 1
+rm "$MOCK/fail-edit-add-lost"; : > "$MOCK/calls"; gh_edit 'json.dump(st[args[0]]["events"][-1].pop(), open(args[1], "w"))' 742 "$MOCK/lagged"
+run_cycles 1
+check "33: added but not yet in events -> no writes, the attempt kept" eq "$(calls)|$(record_of 742)" "|$T20 adding"
+gh_edit 'st[args[0]]["events"][-1].append(json.load(open(args[1])))' 742 "$MOCK/lagged"
+run_cycles 1
+check "33: once in events -> needs-decision removed" eq "$(calls)" "issue edit 742 --remove-label needs-decision"
+# 34. 通知を書いた後、付ける前にほかの誰かの needs-human が付いたら（試行の記録が無い）、held を残して止まる
+reset; issue_with 743 "$T20" needs-decision
+on_read events 743 "i['labels'].append('needs-human'); i['events'][-1].append(ev('labeled', 'needs-human', '$T5'))" 2
+run_cycles 1
+check "34: someone else's needs-human after the notice -> held, needs-decision kept" eq "$(calls)|$(decision_lines | tail -n 1)" \
+  "issue comment 743 --body-file -|DECISION held #743 labeled_at=$T20"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
