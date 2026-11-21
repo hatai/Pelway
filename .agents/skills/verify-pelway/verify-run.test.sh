@@ -289,9 +289,9 @@ expect_eq "cargo_target_dir: relative env resolves from the crate root" "$(unset
 expect_eq "cargo_target_dir: relative and absolute share the output" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; CARGO_TARGET_DIR=rel-td cargo_target_dir "${tmp}/crate")" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; CARGO_TARGET_DIR="${tmp}/crate/rel-td" cargo_target_dir "${tmp}/crate")"
 expect_eq "cargo_target_dir: CARGO_BUILD_TARGET_DIR env" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; CARGO_BUILD_TARGET_DIR="${tmp}/btd" cargo_target_dir "${tmp}/crate")" "${tmp}/btd"
 mk_crate "${tmp}/crate2"; mkdir -p "${tmp}/crate2/.cargo"; printf '[build]\ntarget-dir = "out"\n' > "${tmp}/crate2/.cargo/config.toml"
-expect_eq "cargo_target_dir: config.toml build.target-dir" "$(cargo_target_dir "${tmp}/crate2")" "$(cd "${tmp}/crate2" && cargo metadata --no-deps --format-version 1 --offline | jq -r .target_directory)"
+expect_eq "cargo_target_dir: config.toml build.target-dir" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; cargo_target_dir "${tmp}/crate2")" "${tmp}/crate2/out"
 mkdir -p "${tmp}/empty-dir"
-expect_eq "cargo_target_dir: no manifest reports nothing" "$(cargo_target_dir "${tmp}/empty-dir")" ""
+expect_eq "cargo_target_dir: no manifest reports nothing" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; cargo_target_dir "${tmp}/empty-dir")" ""
 unset -f mise
 
 # tree_state: コミット済み・変更あり・git の確認の失敗を区別する。
