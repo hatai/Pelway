@@ -102,7 +102,7 @@ EOF
 ### 4. 受け入れ条件ごとにテストを先に書く
 
 1. 受け入れ条件 1 つにつき、それを確かめるテストを書く
-2. テストを実行し、失敗することを確かめる。失敗の出力を PR 本文の「確認方法/検証」に貼る
+2. テストを実行し、失敗することを確かめる。失敗の出力を PR 本文の「確認方法/検証」に貼る。実装が作業ツリーやコミットに既にある（修正 round、実装を先に書いた）ときは、実装を手で戻さずに `scripts/red-check <前の実装の ref> --keep <新しいテストのパス>... -- <テストのコマンド>` で前の実装に当て、その出力と終了コードを貼る。`red-check` は `<ref>` の一時 worktree に `--keep` のファイルだけを作業ツリーから重ねてコマンドを走らせ、その終了コードで終わり、一時 worktree を消す。重ねるファイルは自動で選ばないので、新しいテストのファイル（テストが使う新しい補助ファイルも）を漏れなく `--keep` に挙げる
 3. 実装してテストを通す
 
 テストが最初から通ったら、そのテストは条件を確かめていない。書き直す。テストが red にならない、または実行ごとに red が揺らぐときは、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 1〜2 で切り分けてから書き直す。
@@ -150,7 +150,7 @@ scripts/agent-gh dev git merge --ff-only origin/<ブランチ>
 修正を終えたら、この round の実装コミットを push する（この時点ではメモを含めない）:
 
 ```bash
-mise run verify
+mise run verify > <scratchpad>/verify.log 2>&1; echo "exit=$?"
 scripts/agent-gh dev git add <files>
 scripts/agent-gh dev git commit -m "<type>: <英語の要約>"
 scripts/agent-gh dev git fetch origin main
@@ -160,6 +160,7 @@ scripts/agent-gh dev git push -u origin HEAD
 ```
 
 - push の前の段で PR ブランチの remote の先端をもう一度 fetch し、修正の間にまた進んでいれば（`scripts/agent-gh dev git merge-base --is-ancestor origin/<ブランチ> HEAD` が非 0）、`scripts/agent-gh dev git merge origin/<ブランチ>` で取り込み、`mise run verify` をやり直してから push する。手元にコミットがあるので、ここでは fast-forward できない。merge はコミットの後に行うため、作業ツリーに残る未コミットの変更は手順 5 のメモ（`docs/worklogs/issue-<N>.md`）だけで、main の変更と重ならない。衝突したら手順 9 の「修正依頼」の解消の決まりに従う。rebase や force push はしない。
+- `mise run verify` の出力は 1 万行を超え、手元で約 2〜3 分かかる（ビルドのキャッシュが冷えているときや他のビルドと競合するときは 20 分を超える）。コマンドの時間制限を 10 分（600 秒）にするか、バックグラウンドで実行して完了の通知を待つ。出力はファイルに書き出し、全部は読まない。読むのは終了コード、`grep -nE 'FAIL|ERROR' <scratchpad>/verify.log` の行、最後の要約の行（`tail -n 3 <scratchpad>/verify.log`。通れば `Finished in <秒>s`）だけにする。
 - `mise run verify` が失敗したらコミットしない。直してからやり直す。失敗が自分の変更と無関係に見えるとき（実行ごとに失敗箇所が変わる・ツールチェーンの再インストールを伴うなど）は、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 2（再現と最小化）で切り分ける。変更を退避した同じツリーで再現する失敗は環境起因として、verify の内訳と再現確認を PR 本文の「確認方法/検証」に書いて先へ進めてよい。退避で解消する失敗は自分の変更によるもので、直す。
 - 差分がミューテーションテスト対象の crate（`.cargo/mutants.toml` の examine_globs）のロジックに触れるときは、`mise run mutants:diff` も回し、結果（生き残りと対応）を実装者メモに書く。生き残りの分析は輸入スキル `mutation-testing`（下の「輸入スキル」の節）。
 - `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたら push せずに止まる。
