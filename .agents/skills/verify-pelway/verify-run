@@ -4,11 +4,11 @@
 # まで通す（skill verify-pelway）。止めるのはこの run が起動した PID だけ。
 #
 # 使い方:
-#   verify-run [--feature decision|mail-draft] [--evidence-root DIR] [--allow-dirty]
+#   verify-run [--feature decision|mail-draft] [--label NAME] [--evidence-root DIR] [--allow-dirty]
 #   verify-run --help
-# 証拠は <evidence-root>/<sha12>/<run-id>/ に置き、後片付けでも消さない。
-# evidence-root の既定は ${XDG_STATE_HOME:-$HOME/.local/state}/pelway-verify（リポジトリの外に限る）。
-# 終了コード: 0 = 全段 PASS、1 = どこかが FAIL（summary.txt に理由）、2 = 引数の誤り。
+# 証拠は <evidence-root>/<label>-<sha>/<run-id>/ に置き、後片付けでも消さない。
+# evidence-root の既定は <共有 git dir>/pelway/evidence（git rev-parse --git-common-dir）。label の既定は adhoc。
+# 終了コード: 0 = 全段 PASS、1 = どこかが FAIL か未対応・道具が無い、2 = 引数の誤り。
 set -uo pipefail
 
 WS=ws-demo-01
@@ -17,6 +17,10 @@ BOT=m-hal
 REQUESTER=m-tanaka
 DECIDER=m-yamamoto
 POLL_SECS=10
+# 子の環境に入れてはいけない変数（fnox の秘密 3 つと、LLM の独自の接続先）。証拠には名前を書かずラベルだけ書く。
+FORBIDDEN_ENV="llm_key:PELWAY_LLM_API_KEY penpot_mcp_token:PELWAY_PENPOT_MCP_TOKEN database_url:PELWAY_DATABASE_URL llm_custom_base_url:PELWAY_LLM_CUSTOM_BASE_URL"
+# 後片付けの前後で生き残りを比べるプロセス（comm の完全一致の正規表現）。
+SURVIVOR_COMM='^(demo-serve|pitchfork|pelway-agent-wa|t3-.*)$'
 # 依頼の本文に埋める demo-check の目印（scripts/demo-check/canaries.txt の 1 行目）。
 # 証拠の本文は伏せるので、run のログ・証拠に現れたら伏せ漏れとして FAIL になる。
 CANARY=PELWAY_CANARY_BODY_7f3a
@@ -39,11 +43,30 @@ redact() {
     || echo "<redacted non-json len=${#text}>"
 }
 
-# evidence-root がリポジトリ（top）の外なら 0。
-outside_repo() {
-  local root="$1" top="$2"
-  case "${root%/}/" in "${top%/}/"*) return 1 ;; *) return 0 ;; esac
+# path が dir の中（dir 自身を含む）なら 0。
+under() { case "${1%/}/" in "${2%/}/"*) return 0 ;; *) return 1 ;; esac; }
+
+# evidence-root に使えるなら 0: 共有 git dir（common）の中か、作業ツリー（top）の外。
+evidence_root_ok() {
+  local root="$1" top="$2" common="$3"
+  under "${root}" "${common}" && return 0
+  ! under "${root}" "${top}"
 }
+
+# 実行ファイルのパスから、ビルドし直したときに付く " (deleted)" を外す。
+exe_of() { local e; e="$(readlink "/proc/$1/exe" 2>/dev/null)" || return 1; printf '%s\n' "${e% (deleted)}"; }
+
+# environ（NUL 区切り）のファイルから、forbidden のラベルのうち名前がある（=値は見ない）ものを返す。
+forbidden_env_present() {
+  local pair
+  for pair in ${FORBIDDEN_ENV}; do
+    tr '\0' '\n' < "$1" 2>/dev/null | grep -q "^${pair#*:}=" && echo "${pair%%:*}"
+  done
+  return 0
+}
+
+# 生き残りを比べる対象の PID（1 行 1 つ）。
+survivor_pids() { ps -eo pid=,comm= | awk -v re="${SURVIVOR_COMM}" '$2 ~ re {print $1}' | sort -n; }
 
 # 結果の 1 行を summary に書く。FAIL があれば VERDICT を FAIL にする。
 record() {
@@ -84,7 +107,7 @@ env_check() {
   local out="${EV}/env-check.txt" ok=0 exe listen
   {
     echo "pid=${PID} expected_bin=${BIN}"
-    exe="$(readlink "/proc/${PID}/exe" 2>/dev/null || true)"
+    exe="$(exe_of "${PID}" || true)"
     echo "proc_exe=${exe}"
     [ "${exe}" = "${BIN}" ] || { echo "NG: プロセスの実行ファイルがこの run のビルドではない"; ok=1; }
     echo "bin_sha256=${BIN_SHA}"
@@ -95,21 +118,18 @@ env_check() {
     listen="$(ss -Htlnp 2>/dev/null | grep "pid=${PID}," | awk '{print $4}' | sort -u | tr '\n' ' ')"
     echo "listen=${listen}"
     [ "${listen}" = "${ADDR} " ] || { echo "NG: 待ち受けが ready 行の addr=${ADDR} だけではない"; ok=1; }
-    # 証拠には変数名も値も書かない（変数名は leak-phrases の禁止語）。ラベルだけを書く。
-    local pair
-    for pair in llm_key:PELWAY_LLM_API_KEY llm_custom_base_url:PELWAY_LLM_CUSTOM_BASE_URL; do
-      if tr '\0' '\n' < "/proc/${PID}/environ" 2>/dev/null | grep -q "^${pair#*:}="; then
-        echo "NG: プロセスの環境に ${pair%%:*} の変数がある"; ok=1
-      else
-        echo "env_${pair%%:*}=absent"
-      fi
-    done
+    # 環境は名前の数だけ数え、値は書かない。禁止の変数は名前も書かずラベルだけ書く（名前は leak-phrases の禁止語）。
+    echo "env_name_count=$(tr '\0' '\n' < "/proc/${PID}/environ" 2>/dev/null | cut -d= -f1 | grep -c .)"
+    local bad; bad="$(forbidden_env_present "/proc/${PID}/environ" | tr '\n' ' ')"
+    if [ -n "${bad}" ]; then echo "NG: 子の環境に禁止の変数がある: ${bad}"; ok=1
+    else echo "forbidden_env=none（$(for p in ${FORBIDDEN_ENV}; do printf '%s ' "${p%%:*}"; done)）"; fi
     if grep -q '^pelway-runner: LLM endpoint: ' "${EV}/server.stderr" && grep -q ' llm=script$' "${EV}/server.stdout"; then
       echo "llm_mode=script（接続先の行: $(grep -m1 '^pelway-runner: LLM endpoint: ' "${EV}/server.stderr")）"
     else
       echo "NG: 接続先を知らせる行（pelway-runner: LLM endpoint:）か ready 行の llm=script が無い"; ok=1
     fi
     echo "auth=none（デモは認証なし。操作者は合成ヘッダー x-pelway-member-id）"
+    echo "bind=127.0.0.1:0（demo-serve は mise の PELWAY_BIND_ADDR を読まず、この値を直接使う）"
   } > "${out}"
   cat "${out}"
   return "${ok}"
@@ -135,19 +155,39 @@ network_check() {
   observe_sockets
   seen="$(grep -c . "${out}" 2>/dev/null)"; seen="${seen:-0}"
   nonlo="$(count_nonloopback "${out}")"
-  echo "# ss -tn の観察 ${seen} 行、loopback 以外との接続 ${nonlo} 件" >> "${out}"
-  [ "${seen}" -ge 1 ] && [ "${nonlo}" = 0 ] || return 1
+  local db; db="$(grep -c ':5432 ' "${out}")"
+  echo "# ss -tn の観察 ${seen} 行、loopback 以外との接続 ${nonlo} 件、DB（:5432）宛て ${db} 件" >> "${out}"
+  [ "${seen}" -ge 1 ] && [ "${nonlo}" = 0 ] && [ "${db}" = 0 ] || return 1
   ! awk 'NR > 1 {print $NF}' "${EV}/proc-fd.txt" | grep -vqE "^(/dev/null|${EV}/server\.std(out|err)|socket:\[[0-9]+\]|anon_inode:.*|pipe:\[[0-9]+\])$"
 }
 
+# pid が 5 秒以内に終われば 0。
+gone_within() { local _; for _ in $(seq 50); do [ -e "/proc/$1" ] || return 0; sleep 0.1; done; return 1; }
+
+# この run が起動した PID だけを止める: 標準入力を閉じる → SIGTERM → SIGKILL。送る前に毎回 exe を照合する。
+stop_child() {
+  local out="${EV}/cleanup.txt"
+  [ -n "${PID:-}" ] || return 0
+  [ -n "${DS_IN:-}" ] && exec {DS_IN}>&- && echo "closed stdin of pid=${PID}" >> "${out}"
+  if gone_within "${PID}"; then echo "stopped pid=${PID}（標準入力を閉じて終了。この run が起動したものだけ）" >> "${out}"; return 0; fi
+  local sig
+  for sig in TERM KILL; do
+    if [ "$(exe_of "${PID}")" != "${BIN}" ]; then echo "NG: pid=${PID} の exe がこの run のバイナリではない。送らない" >> "${out}"; VERDICT=FAIL; return; fi
+    kill "-${sig}" "${PID}" 2>/dev/null
+    if gone_within "${PID}"; then echo "stopped pid=${PID}（SIG${sig}。この run が起動したものだけ）" >> "${out}"; return 0; fi
+  done
+  echo "NG: pid ${PID} が残っている" >> "${out}"; VERDICT=FAIL
+}
+
 cleanup() {
-  if [ -n "${PID:-}" ] && [ "$(readlink "/proc/${PID}/exe" 2>/dev/null)" = "${BIN}" ]; then
-    kill -TERM "${PID}" 2>/dev/null; wait "${PID}" 2>/dev/null
-  fi
-  if [ -n "${PID:-}" ] && [ -e "/proc/${PID}" ]; then
-    echo "NG: pid ${PID} が残っている" > "${EV}/cleanup.txt"; VERDICT=FAIL
-  elif [ -n "${PID:-}" ]; then
-    echo "stopped pid=${PID}（この run が起動したものだけ）" > "${EV}/cleanup.txt"
+  stop_child
+  wait 2>/dev/null
+  if [ -n "${LOCK:-}" ]; then rm -f "${LOCK}/pid"; rmdir "${LOCK}" 2>/dev/null; echo "released lock ${LOCK##*/}" >> "${EV}/cleanup.txt"; fi
+  if [ -s "${EV}/survivors-before.txt" ]; then
+    survivor_pids > "${EV}/survivors-after.txt"
+    local lost; lost="$(comm -23 "${EV}/survivors-before.txt" "${EV}/survivors-after.txt" | tr '\n' ' ')"
+    if [ -z "${lost}" ]; then record PASS "後片付け: ほかのプロセスが生き残っている" "survivors-*.txt"
+    else record FAIL "後片付け: ほかのプロセスが生き残っている" "消えた pid ${lost}"; fi
   fi
   # demo-check の canary と leak-phrases を、この run のログ・証拠の写しに対して流す。
   local scan="${EV}/demo-check-input" st
@@ -266,10 +306,11 @@ operate() {
 }
 
 main() {
-  FEATURE=decision; ROOT="${XDG_STATE_HOME:-${HOME}/.local/state}/pelway-verify"; ALLOW_DIRTY=0
+  FEATURE=decision; ROOT=""; LABEL=adhoc; ALLOW_DIRTY=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --feature) FEATURE="${2:-}"; shift 2 || die_usage "--feature needs a value" ;;
+      --label) LABEL="${2:-}"; shift 2 || die_usage "--label needs a value" ;;
       --evidence-root) ROOT="${2:-}"; shift 2 || die_usage "--evidence-root needs a value" ;;
       --allow-dirty) ALLOW_DIRTY=1; shift ;;
       --help|-h) sed -n '2,11p' "$0"; exit 0 ;;
@@ -277,37 +318,78 @@ main() {
     esac
   done
   case "${FEATURE}" in decision|mail-draft) ;; *) die_usage "unknown feature: ${FEATURE}" ;; esac
+  [[ "${LABEL}" =~ ^[A-Za-z0-9_-]+$ ]] || die_usage "--label must be [A-Za-z0-9_-]+"
+  if [ "$(uname -s)" != Linux ]; then
+    echo "verify-run: 未対応（理由: /proc と ss（iproute2）が要る。この OS は $(uname -s)）" >&2; exit 1
+  fi
+  local t missing=""
+  for t in git mise jq ss pgrep ps sha256sum realpath readlink comm timeout; do command -v "${t}" > /dev/null || missing+=" ${t}"; done
+  [ -d /proc/self ] || missing+=" /proc"
+  if [ -n "${missing}" ]; then echo "verify-run: 失敗（道具が無い:${missing}）。入れずに止まる" >&2; exit 1; fi
+  if [ -n "$(forbidden_env_present /proc/$$/environ)" ]; then
+    echo "verify-run: 失敗（秘密の変数がある環境で動いている。fnox exec の下で動かさない: $(forbidden_env_present /proc/$$/environ | tr '\n' ' ')）" >&2; exit 1
+  fi
   TOP="$(git rev-parse --show-toplevel)" || die_usage "not inside the Pelway repository"
-  [ -n "${ROOT}" ] && [ "${ROOT#/}" != "${ROOT}" ] || die_usage "--evidence-root must be an absolute path"
-  outside_repo "${ROOT}" "${TOP}" || die_usage "--evidence-root must be outside the repository (${TOP})"
+  COMMON="$(git rev-parse --path-format=absolute --git-common-dir)" || die_usage "cannot find the git common dir"
+  ROOT="${ROOT:-${COMMON}/pelway/evidence}"
+  [ "${ROOT#/}" != "${ROOT}" ] || die_usage "--evidence-root must be an absolute path"
+  evidence_root_ok "${ROOT}" "${TOP}" "${COMMON}" || die_usage "--evidence-root must be outside the work tree (${TOP}) or inside the git common dir"
 
   SHA="$(git -C "${TOP}" rev-parse HEAD)"
   DIRTY=no; [ -z "$(git -C "${TOP}" status --porcelain)" ] || DIRTY=yes
   RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-${FEATURE}-$$"
-  EV="${ROOT}/${SHA:0:12}/${RUN_ID}"
-  mkdir -p "${EV}/steps" || die_usage "cannot create ${EV}"
-  VERDICT=PASS; STEP=1; PID=""
-  BIN="${CARGO_TARGET_DIR:-${TOP}/target}/debug/examples/demo-serve"
+  EV="${ROOT}/${LABEL}-${SHA}/${RUN_ID}"
+  mkdir -p "${EV}/steps" "${ROOT}/locks" || die_usage "cannot create ${EV}"
+  VERDICT=PASS; STEP=1; PID=""; LOCK=""; BIN=""
   trap cleanup EXIT
   printf 'run_id=%s\nsha=%s\ndirty=%s\nfeature=%s\n' "${RUN_ID}" "${SHA}" "${DIRTY}" "${FEATURE}" | tee "${EV}/summary.txt"
+  {
+    echo "mise: $(mise --version 2>/dev/null | head -n 1)"
+    # rustc は PATH の並びで別の版（/usr/bin など）が出ることがあるので、rustup のツールチェーンの実体を記録する。
+    echo "rustc: $(cd "${TOP}" && "$(mise exec -- rustup which rustc 2>/dev/null)" --version 2>/dev/null)"
+    echo "rustc_on_path: $(cd "${TOP}" && mise exec -- rustc --version 2>/dev/null)"
+    echo "cargo: $(cd "${TOP}" && mise exec -- cargo --version 2>/dev/null)"
+    echo "ss: $(ss -V 2>&1 | head -n 1)"; echo "pgrep: $(pgrep -V 2>&1 | head -n 1)"
+    echo "sha256sum: $(sha256sum --version | head -n 1)"; echo "jq: $(jq --version)"
+    echo "bash: ${BASH_VERSION}"; echo "kernel: $(uname -r)"
+  } > "${EV}/tools.txt"
   if [ "${DIRTY}" = yes ] && [ "${ALLOW_DIRTY}" = 0 ]; then
     record FAIL "前提: 作業ツリーがコミット済み" "未コミットの変更がある。--allow-dirty は証拠にならない"; return 1
   fi
 
-  # 起動
-  (cd "${TOP}" && cargo build --offline --locked -p pelway-http --example demo-serve) > "${EV}/build.log" 2>&1 \
-    || { record FAIL "起動: ビルド" "build.log を見る"; return 1; }
-  BIN="$(realpath "${BIN}")"; BIN_SHA="$(sha256sum "${BIN}" | cut -d' ' -f1)"
-  local other p
+  # 二重起動の確認（ビルドの前）: 同じ target の demo-serve が動いていれば触らずに止まる。
+  # 動いているほうの exe はビルドし直すと " (deleted)" が付くので、外して比べる。
+  local target_real p e other=""
+  target_real="$(realpath -m "${CARGO_TARGET_DIR:-${TOP}/target}")"
   for p in $(pgrep -x demo-serve || true); do
-    [ "$(readlink "/proc/${p}/exe" 2>/dev/null)" = "${BIN}" ] && other="${other:-} ${p}"
+    e="$(exe_of "${p}" || true)"
+    under "${e}" "${target_real}" && other+=" ${p}"
   done
-  if [ -n "${other:-}" ]; then
-    record FAIL "起動: 二重起動の確認" "別の run の demo-serve が動いている pid=${other# }。触らずに止まる"; return 1
+  if [ -n "${other}" ]; then
+    record FAIL "起動: 二重起動の確認" "同じ target の demo-serve が動いている pid=${other# }。動かさない（止めるかは人が決める）"; return 1
   fi
-  env -u PELWAY_LLM_API_KEY -u PELWAY_LLM_CUSTOM_BASE_URL "${BIN}" > "${EV}/server.stdout" 2> "${EV}/server.stderr" &
-  PID=$!
+  local lock
+  lock="${ROOT}/locks/$(printf '%s' "${target_real}" | sha256sum | cut -c1-12)"
+  if mkdir "${lock}" 2> /dev/null; then
+    LOCK="${lock}"; echo "$$" > "${LOCK}/pid"
+  else
+    record FAIL "起動: 二重起動の確認" "別の run がロックを持っている（pid=$(cat "${lock}/pid" 2>/dev/null)、${lock}）。動かさない"; return 1
+  fi
+  record PASS "起動: 二重起動の確認" "同じ target の demo-serve なし、ロック取得"
+  survivor_pids > "${EV}/survivors-before.txt"
 
+  # 起動: ビルドし、cargo が報告した実行ファイルを、PATH と HOME だけの環境で子として起動する。
+  # 子の標準入力はこの run が持つパイプ。run が終われば（SIGKILL でも）閉じて、子は終わる。
+  if ! (cd "${TOP}" && mise exec -- cargo build --offline --locked -p pelway-http --example demo-serve \
+      --message-format=json-render-diagnostics) > "${EV}/build.json" 2> "${EV}/build.log"; then
+    record FAIL "起動: ビルド" "build.log を見る"; return 1
+  fi
+  BIN="$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "demo-serve") | .executable // empty' "${EV}/build.json" | tail -n 1)"
+  if [ -z "${BIN}" ]; then record FAIL "起動: ビルド" "cargo が demo-serve の実行ファイルを報告しない"; return 1; fi
+  BIN="$(realpath "${BIN}")"
+  BIN_SHA="$(sha256sum "${BIN}" | cut -d' ' -f1)"
+  coproc DS { exec env -i PATH="/usr/bin:/bin" HOME="${HOME}" "${BIN}" > "${EV}/server.stdout" 2> "${EV}/server.stderr"; }
+  PID="${DS_PID}"; DS_IN="${DS[1]}"
   for _ in $(seq 50); do grep -q '^demo-serve ready ' "${EV}/server.stdout" && break; sleep 0.1; done
   ADDR="$(sed -n 's/^demo-serve ready addr=\([^ ]*\) pid=\([0-9]*\) .*/\1/p' "${EV}/server.stdout")"
   if [ -z "${ADDR}" ] || ! grep -q "^demo-serve ready addr=${ADDR} pid=${PID} llm=script$" "${EV}/server.stdout"; then
@@ -317,7 +399,7 @@ main() {
   record PASS "起動: ready 行" "addr=${ADDR} pid=${PID}"
 
   # 環境チェック
-  if env_check > /dev/null; then record PASS "環境チェック" "env-check.txt"
+  if env_check > /dev/null; then record PASS "環境チェック" "env-check.txt tools.txt"
   else record FAIL "環境チェック" "env-check.txt の NG 行"; return 1; fi
 
   # 操作

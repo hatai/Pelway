@@ -23,14 +23,18 @@ printf 'HTTP/1.1 400 Bad Request\r\n\r\n{"code":"bad_request"}' > "${tmp}/bad.re
 expect_eq "resp_status 400" "$(resp_status "${tmp}/bad.resp")" "400"
 expect_eq "resp_body without trailing newline" "$(resp_body "${tmp}/bad.resp")" '{"code":"bad_request"}'
 
-outside_repo /srv/ev /home/u/Pelway && r=0 || r=1
-expect_eq "outside_repo: sibling path" "${r}" 0
-outside_repo /home/u/Pelway/target/ev /home/u/Pelway && r=0 || r=1
-expect_eq "outside_repo: inside repo" "${r}" 1
-outside_repo /home/u/Pelway /home/u/Pelway && r=0 || r=1
-expect_eq "outside_repo: repo itself" "${r}" 1
-outside_repo /home/u/Pelway-evidence /home/u/Pelway && r=0 || r=1
-expect_eq "outside_repo: prefix-sharing sibling" "${r}" 0
+ok_root() { evidence_root_ok "$@" && echo 0 || echo 1; }
+expect_eq "evidence_root_ok: sibling path" "$(ok_root /srv/ev /home/u/Pelway /home/u/Pelway/.git)" 0
+expect_eq "evidence_root_ok: inside work tree" "$(ok_root /home/u/Pelway/target/ev /home/u/Pelway /home/u/Pelway/.git)" 1
+expect_eq "evidence_root_ok: work tree itself" "$(ok_root /home/u/Pelway /home/u/Pelway /home/u/Pelway/.git)" 1
+expect_eq "evidence_root_ok: prefix-sharing sibling" "$(ok_root /home/u/Pelway-ev /home/u/Pelway /home/u/Pelway/.git)" 0
+expect_eq "evidence_root_ok: git common dir inside main checkout" "$(ok_root /home/u/Pelway/.git/pelway/evidence /home/u/Pelway /home/u/Pelway/.git)" 0
+expect_eq "evidence_root_ok: shared git dir from a worktree" "$(ok_root /r/Pelway/.git/pelway/evidence /wt/568 /r/Pelway/.git)" 0
+
+printf 'PATH=/usr/bin\0PELWAY_PENPOT_MCP_TOKEN=x\0PELWAY_LLM_API_KEY_OTHER=y\0HOME=/h\0' > "${tmp}/environ"
+expect_eq "forbidden_env_present: name match only" "$(forbidden_env_present "${tmp}/environ" | tr '\n' ' ')" "penpot_mcp_token "
+printf 'PATH=/usr/bin\0HOME=/h\0' > "${tmp}/environ-clean"
+expect_eq "forbidden_env_present: clean" "$(forbidden_env_present "${tmp}/environ-clean")" ""
 
 printf 'LISTEN 0 128 127.0.0.1:4000 0.0.0.0:*\nESTAB 0 0 127.0.0.1:4000 127.0.0.1:5000\n' > "${tmp}/lo.ss"
 expect_eq "count_nonloopback: loopback only" "$(count_nonloopback "${tmp}/lo.ss")" 0

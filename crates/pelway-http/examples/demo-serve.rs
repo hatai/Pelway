@@ -17,9 +17,11 @@
 //!   （`pelway-runner: LLM endpoint: ...`）が標準エラーに出る。
 //! - 待ち受けを始めたら標準出力に 1 行だけ出す:
 //!   `demo-serve ready addr=127.0.0.1:<port> pid=<pid> llm=script`
-//! - 停止 API は無い。止めるときは起動した側が PID を指定して SIGTERM を送る。
+//! - 標準入力が閉じたら（EOF）終わる。起動した側が死んで（SIGKILL でも）パイプの
+//!   書き手が消えれば残らない。手で動かすときは端末で Ctrl-D、または起動した側が
+//!   PID を指定して SIGTERM を送る。標準入力を `/dev/null` にするとすぐ終わる。
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -74,7 +76,9 @@ fn main() {
     .expect("write ready line");
     out.flush().expect("flush ready line");
     drop(out);
-    loop {
-        std::thread::park();
-    }
+    // 標準入力の EOF で終わる（読んだ中身は使わない）。
+    let mut stdin = std::io::stdin().lock();
+    let mut buf = [0_u8; 256];
+    while matches!(stdin.read(&mut buf), Ok(n) if n > 0) {}
+    std::process::exit(0);
 }
