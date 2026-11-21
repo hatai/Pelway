@@ -41,7 +41,7 @@ mise bootstrap    # 上の1〜3を順に実行
 - `mise bootstrap` の tools 部分は `[tools]` に加えてグローバル設定のツールも確認対象にする（mise の通常動作）。
 
 - `mise install` と `mise.lock` の生成は `mise.toml` の `[settings] lockfile = true` でこのプロジェクト自身が指定する（ユーザーのグローバル設定に依存しない）。`mise.lock` と `Cargo.lock` はコミット対象。
-- rust のツール定義には `components = ["rustfmt", "clippy", "llvm-tools-preview"]` を明示する（`llvm-tools-preview` は CI のカバレッジ計測が必要とする）。成分の存在は `mise run toolchain-check` で検査する。
+- rust のツール定義には `components = ["rustfmt", "clippy", "llvm-tools"]` を明示する（`llvm-tools` は CI のカバレッジ計測が必要とする）。成分名は rustup が `rustup component list --installed` に出す名前で書く。別名（`llvm-tools-preview`）で書くと、mise が導入済みと判定できず、`mise exec` のたびに rust を入れ直して `mise lock` の一覧を出す。成分の存在は `mise run toolchain-check` で検査する。
 - エディタ等の非対話プロセスからは `mise exec -- cargo build` の形で実行する（mise の shim またはラッパー経由で cargo が解決される）。
 
 ## 日常のタスク（mise tasks）
@@ -145,7 +145,7 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 - coverage ジョブは PostgreSQL のサービスコンテナ（nightly の test ジョブと同じ 16 系・digest 固定）に `PELWAY_DATABASE_URL`（スーパーユーザーの `postgres` ユーザー）で接続し、pelway-db の RLS テストを実行したうえで計測する（#161。#157 の `--exclude pelway-db` を解除）。ロール（`pelway_app`・`pelway_admin`・`pelway_audit`）はマイグレーションが作るため、ジョブでのロール作成ステップは無い。RLS テストの失敗は coverage ジョブに閉じ、品質ゲート（`static` / `lint` / `test`）の必須チェックには影響しない。
 - cargo-llvm-cov は `mise.toml` の `[tools]` で `"aqua:taiki-e/cargo-llvm-cov" = "0.6.17"` と宣言し、`mise.lock` が URL と checksum で取得物を固定する（CI は `mise run coverage`。mise.toml のタスクが cargo-llvm-cov を呼ぶ）。ソースから `cargo install` するとビルドに 45 秒ほどかかるため、事前ビルド済みのバイナリを使う。
 - octocov も `mise.toml` の `[tools]` で `"aqua:k1LoW/octocov" = "0.83.5"` と宣言し、`mise.lock` が URL と checksum で取得物を固定する。CI での実行は公式の `k1LoW/octocov-action`（actions.lock で sha 固定）経由で行う。レポートの artifact 保存に必要な `ACTIONS_RUNTIME_TOKEN` は `run:` ステップには渡されず action のコンテキストでしか取れないためです（octocov 本体は action の `version` + `checksum` 入力で v0.83.5 に固定。checksum は `mise.lock` が固定するのと同一のリリースアセット `octocov_v0.83.5_linux_amd64.tar.gz` の sha256）。レポートの保存と比較は `.octocov.yml` の `report.datastores` / `diff.datastores`（GitHub Actions の artifact のみ）で行い、PR コメントに base ブランチ（main）の前回レポートとの増減を表示する。増減は main でレポートが保存されたあとの PR から出る（それまではカバレッジ値と patch coverage のみ）。
-- rust にはカバレッジ計測用の `llvm-tools-preview` 成分を `mise.toml` の `components` で宣言する。`toolchain-check` が sysroot 上の `llvm-profdata` / `llvm-cov` の存在を確認し、欠けていれば失敗する（暗黙の rustup 自動ダウンロードには頼らない）。`coverage` ジョブは `mise install` のあと、この検査を先に実行する。
+- rust にはカバレッジ計測用の `llvm-tools` 成分を `mise.toml` の `components` で宣言する。`toolchain-check` が sysroot 上の `llvm-profdata` / `llvm-cov` の存在を確認し、欠けていれば失敗する（暗黙の rustup 自動ダウンロードには頼らない）。`coverage` ジョブは `mise install` のあと、この検査を先に実行する。
 
 ### その他のジョブ
 
