@@ -111,3 +111,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 ## 巡回 70（03:11 JST・実値）
 - PR #586 が Kodiak でマージ完了（merged_at 2026-11-21T18:11:38Z、head 95299b89）。レビュー担当の sandbox 堅牢化（#338 系）の前進。
 - PR #587 は automerge 付きでキュー待ち継続。
+
+## 巡回 74（03:18 JST・実値）
+- PR #587 が Kodiak でマージ完了（merged_at 2026-11-21T18:17:05Z、head b4361840）。Codex レビュー担当の専用 home 化が main 入り。#586・#587 の二本立て作業が両方着地。
+- #572 の r8 Claude 枠 Devin レビューは実装後継スレッドにも起動を依頼（issuecomment-7067138659・私の t3-code 不通が長期のため）。
