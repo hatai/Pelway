@@ -102,3 +102,17 @@ hatai の決定（2026-11-19）どおり、数え直し round 2 のやり直し�
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「8. レビューを委託する」に、「PR の head が main の `scripts/agent-gh` より古いと、レビュー子の worktree が古い agent-gh を使って review の設定を読めないことがある。その場合は先に main を取り込む」と足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4・数え直し、修正後に停止）
+
+対象 head: faaa62db7976a426dce4dbc3d54bc091ec092ea4
+
+数え直し round 3（head 06b8f94、Codex）が request-changes・must-fix 2 だった。2 点を直して push し、4 ラウンド目のレビューを委託する前に止まる条件で止めた。
+
+1. 詰まった箇所: docs/technical.md「データの形」: 前の round で「`NewMessage` はバイト列を同じ要求で運ぶ」と書いたことで、全量をメモリに持つ実装に読めるようになっていた（Codex must-fix 1）。「運ぶ」は一時領域への書き込み結果を運ぶ意味だと書き、受信はストリームで扱い全量をメモリに保持しない、と足した。
+2. 曖昧だった文: 「レビューの委託が 4 ラウンド目に入る（修正 3 回でも Approve が取れない）」（skill implement-issue「止まる条件」）: 数え直し round 2 は環境の故障でやり直しになっている。そのやり直しを 1 ラウンドに数えるのか、失敗した 2 回を除いた分だけ数えるのかが書かれていない。
+3. 仮定と解釈: hatai の決定（失敗した 2 回は round に数えない）に従い、やり直しを含めて round 2 を 1 回と数えた。次の委託は 4 ラウンド目になるので、修正までで止めた。修正を push して止めたのは、PR が Draft で、次のレビューの対象を用意しておけば判断のあとすぐに委託できるため。
+4. 足りなかった情報・検証手段: ダウンロードの応答ヘッダーは、いまの `crates/pelway-http` にダウンロードの口がまだ無いため、実際の応答では確かめられない（仕様の文言ピンだけ）。`mise run verify` は mise が Rust 1.99.1 を用意している途中で test が rustc 1.75.0 で走り、2 回 exit 101 になった。再実行で通っている。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の 4 ラウンド目の行に、「環境の故障でやり直したレビューは、やり直しを含めて 1 ラウンドと数える」を足す。
+
+使ったスキル: implement-issue、pr-watch
