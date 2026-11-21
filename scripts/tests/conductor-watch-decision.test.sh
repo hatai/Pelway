@@ -244,7 +244,7 @@ check "6: lines (exact)" eq "$(decision_lines)" \
 check "6: escalated issue waits on human" eq "$(sget 706 waiting_on)" "human"
 check "6: the record is dropped once needs-decision is gone" eq "$(record_of 706)" ""
 
-# 7〜9. 空・symlink・FIFO の登録ファイルは、登録が無いものとして扱う（symlink はたどらない）
+# 7〜9. 空・symlink・FIFO・ディレクトリの登録ファイルは、登録が無いものとして扱う（symlink はたどらない）
 reset; issue_with 707 "$T20" needs-decision; : > "$REG"
 run_cycles 1
 check "7: empty registration -> escalated (exact)" eq "$(decision_lines | tail -n 1)" "DECISION escalated #707 labeled_at=$T20 reason=no-registration"
@@ -254,6 +254,9 @@ check "8: symlinked registration is not followed -> escalated" eq "$(decision_li
 reset; issue_with 709 "$T20" needs-decision; mkfifo "$REG"
 run_cycles 1
 check "9: FIFO registration -> escalated without blocking" eq "$(decision_lines | tail -n 1)" "DECISION escalated #709 labeled_at=$T20 reason=no-registration"
+reset; issue_with 733 "$T20" needs-decision; mkdir "$REG"
+run_cycles 1
+check "9: directory registration -> escalated" eq "$(decision_lines | tail -n 1)" "DECISION escalated #733 labeled_at=$T20 reason=no-registration"
 
 # 10〜11. 登録された ID が一覧に無い・archived のときも格上げする
 reset; issue_with 710 "$T20" needs-decision; reg "$CONDUCTOR"; threads '[]'
