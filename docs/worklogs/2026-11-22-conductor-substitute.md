@@ -124,3 +124,11 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 - 旧指揮役系の QA 委託ノード（qa-619）が完了し結果を返却: PR #619 は 17:12:01Z に merge 済み、QA pass は 9afb58b に pelway-qa[bot] で記録済み（issuecomment-7066088136・run 44923610876）。
 - 指揮役判断を求められた「merge head e81438b に QA コメントがない」点を実値確認: e81438b の parents は 9afb58b2 + main 側 60febfda で、main 取り込みのマージコミットのみ（非 main-merge コミットなし）。
 - #586/#587 と同じ Kodiak 経路のため、遡及 QA コメントは不要と判断し patrol-state に記録。
+
+## 巡回 83–90 + #572 r8 結果（04:22 JST・実値）
+- 受信は旧 finished 通知が中心（review/587-c8・review/586-c11・review/586-c12・mcp:0333a0f6）— すべてマージ済み・引き継ぎ済みで対応不要。
+- #568 実装後継スレッドが finished。#572 に round 8 サマリー投稿（pelway-dev・19:21:20Z）: reviewer=claude-opus-5-5・verdict approve・must-fix 0。
+- 実値確認: pelway-review[bot] APPROVED（19:20:38Z・head 906da20f 一致）・必須チェック全通過。Claude リセット（19:00Z）後に Claude 枠で実行されたため、pending だった Devin 起動は解除。
+- ただし approve 内に `[文書のずれ]` nit 5 件（SKILL.md:57・:17・:39・PR 本文完了条件 2・issue-568.md:139）→ automerge ゲート抵触。実装担当の修正→push→r9→QA の順を issuecomment-7067982887 で指示。
+- 残 nit 3 件（--untracked-files・試験不足・前提追記）+ out-of-scope（委託レビュー worktree が PR の CLAUDE.md/hooks を読むリスク・#637/#638 関連）は非ブロッキングだが修正ラウンドで併せ検討と伝達。
+- patrol-state: #572 r8 pending 解除・マージ済み #586/#587 の旧再送要求 3 件を整理。
