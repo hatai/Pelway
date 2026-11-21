@@ -103,3 +103,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 - PR #586 に `automerge` 付与。条件: r12 approve（pelway-review・39b76eb5・must-fix/nit 0）・必須チェック全通過・pelway-qa[bot] 同一 SHA pass（run 44925963291）・非 Draft。Kodiak キュー待ち。
 - #587: r11 approve（c92910dc）・QA delegate 起動済み。[文書のずれ] nit の残存が automerge ブロッカーである点を私の判断 (b) で取りこぼし、訂正して nit 修正→r11 の順に切り替えた経緯あり。
 - nit 2 件は Issue #638（M8・needs-triage）、資格情報 deny 欠落は Issue #637（M8・needs-triage）として起票済み。
+
+## 巡回 68b（03:08 JST・実値）
+- PR #587 に `automerge` 付与。条件: r11 approve（pelway-review・c92910dc・must-fix/nit 0）・pelway-qa[bot] 同一 SHA pass（run 44932713585）・必須チェック pass（古い cancelled run の failure は dedupe で無害）・非 Draft。Kodiak キュー待ち。
+- PR #586 も automerge 済みで Kodiak が head を 95299b89 に rebase 中。
