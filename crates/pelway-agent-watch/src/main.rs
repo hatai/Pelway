@@ -355,6 +355,11 @@ impl Watcher {
         let inbox_offset =
             match io::read_patrol_state(&patrol_state).and_then(|t| parse_patrol_state(&t)) {
                 Ok(info) => info.inbox_offset,
+                Err(e) if e.contains("too large") => {
+                    // 書きかけ・壊れているのと見分けられるよう、上限超えは別の理由で出す
+                    eprintln!("agent-watch: WAKE skipped reason=patrol-state-too-large");
+                    return;
+                }
                 Err(_) => {
                     eprintln!("agent-watch: WAKE skipped reason=patrol-state-unreadable");
                     return;

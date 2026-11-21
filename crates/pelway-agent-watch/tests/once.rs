@@ -1356,3 +1356,18 @@ fn odd_inbox_offset_skips_wake() {
         assert!(!sb.read_fake("curl-body").is_empty());
     }
 }
+
+#[test]
+fn oversized_patrol_state_has_its_own_reason() {
+    let sb = Sandbox::new("wake-patrol-too-large");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(&format!(
+        r#"{{"inbox_offset":0,"pad":"{}"}}"#,
+        "x".repeat(300 * 1024)
+    ));
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    assert!(stderr(&out).contains("WAKE skipped reason=patrol-state-too-large"));
+}

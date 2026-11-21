@@ -479,7 +479,7 @@ pub fn append_inbox(path: &Path, lines: &[String]) -> Result<u64, String> {
         file.write_all(buf.as_bytes()).map_err(|e| e.to_string())?;
     }
     file.rewind().map_err(|e| e.to_string())?;
-    // 書いたあとの大きさまでしか読まない（書いている間に伸ばされても、上限の内で止める）
+    // EOF まで、固定の上限（`INBOX_MAX_BYTES` + 1 MiB）の内で読む（書いた後に足された行も数えに入る）
     let mut file = file.take(INBOX_MAX_BYTES + 1024 * 1024);
     let mut count = 0u64;
     let mut chunk = [0u8; 8192];

@@ -18,13 +18,22 @@ const MAX_THREAD_ID_LEN: usize = 256;
 /// 受信箱の 1 行。webhook に送る payload と同じ JSON を改行なしで書く。
 pub fn inbox_line(payload: &Value) -> String {
     // serde_json の to_string は改行を含まない（文字列中の改行は \n にエスケープされる）。
-    // ただし U+0085・U+2028・U+2029 はそのまま出すので、JSON として同じ値のエスケープに置き換える
-    // （行を LF 以外でも分ける読み手（Python の str.splitlines など）でも 1 行のまま読めるように）
-    payload
-        .to_string()
-        .replace('\u{0085}', "\\u0085")
-        .replace('\u{2028}', "\\u2028")
-        .replace('\u{2029}', "\\u2029")
+    // 非 ASCII の文字は、JSON として同じ値の `\uXXXX`（U+FFFF を超えるものはサロゲートの組）に
+    // 置き換え、行を ASCII だけにする。追記が文字の途中で切れた断片が残っても UTF-8 として
+    // 壊れた行にならず、U+0085・U+2028・U+2029 で行を分ける読み手（Python の str.splitlines など）
+    // でも 1 行のまま読める。非 ASCII は JSON の文字列の中にしか現れない（構造の記号は ASCII）
+    let mut out = String::new();
+    for c in payload.to_string().chars() {
+        if c.is_ascii() {
+            out.push(c);
+        } else {
+            let mut units = [0u16; 2];
+            for u in c.encode_utf16(&mut units) {
+                out.push_str(&format!("\\u{u:04x}"));
+            }
+        }
+    }
+    out
 }
 
 /// 起こしに要る値。宛先はホスト側の登録ファイル（sandbox から書けない）から、
@@ -136,6 +145,16 @@ mod tests {
             !line.contains(['\u{0085}', '\u{2028}', '\u{2029}']),
             "{line}"
         );
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), p);
+    }
+
+    #[test]
+    fn inbox_line_is_ascii_only() {
+        let p = json!({"event":"finished","report":"state: 実装中\nnote: 😀"});
+        let line = inbox_line(&p);
+        assert!(line.is_ascii(), "{line}");
+        assert!(line.contains("\\u5b9f"), "{line}");
+        assert!(line.contains("\\ud83d\\ude00"), "{line}");
         assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), p);
     }
 
