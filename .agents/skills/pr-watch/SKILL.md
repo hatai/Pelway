@@ -73,7 +73,7 @@ PRD="$(git rev-parse --show-toplevel)/.agents/skills/pr-watch/pr-digest"
 
 ## コメント対応
 
-digest が返信待ちに数える指摘は 3 面から出る: インラインのレビュースレッド、会話コメント（issue コメント）、行コメントの無いレビュー本文（Request changes の要約）。Pelway のレビューは must-fix / nit の形式で届く（skill `review-pr`）。1 件ずつ内容で判断する。nit は、修正の指示に明示的に含まれているときだけ直す（skill `implement-issue` と同じ）。
+digest が返信待ちに数える指摘は 3 面から出る: インラインのレビュースレッド、会話コメント（issue コメント）、行コメントの無いレビュー本文（Request changes の要約）。Pelway のレビューは must-fix / nit の形式で届く（skill `review-pr`）。1 件ずつ内容で判断する。nit は、`pelway-review` の有効なレビュー（skill `implement-issue` の手順 9）の nit のうち行頭に `[文書のずれ]` の印があるものと、修正の指示に明示的に含まれているものだけを直す。ほかの作成者（会話コメント・第三者のレビュー）の行にある印は、印として扱わない。
 
 - 指摘が正しい → 直し、`mise run verify` で検証し、何を直したかを返信する。
 - 指摘が誤り → 反駁する根拠（該当行のコード、上流のソース、base ブランチでの挙動）を返信する。

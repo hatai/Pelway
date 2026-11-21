@@ -43,8 +43,8 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 3. 実装スレッドは skill `implement-issue` に従い、`pelway-dev` の名義でブランチ `agent/<issue番号>-<slug>` に push し、Draft PR（本文に `Closes #<issue番号>`）を作る
 4. 実装スレッドは、Draft PR の必須チェックが通り次第、自分でレビューを委託する（`delegate_task`。手順は skill `implement-issue`）。レビュー委託の子は skill `review-pr` に従い、PR に Approve か Request changes を投稿する
 5. Request changes なら、実装スレッドが must-fix を直して push し、レビューを再委託する（修正とレビューの繰り返しは実装スレッドの内側で回し、指揮役を経由しない）。修正は 3 回まで。回数と打ち切りの判断は skill `implement-issue`
-6. Approve されたら、実装担当が自分で `pr ready` で Draft を解除する（レビュー担当の App には Draft を解除する権限がない）し、終わりの報告をする。人間（hatai）のレビューの指摘は、指揮役が `t3 thread send` で実装スレッドに伝える
-7. Approve と必須チェックがそろったら、指揮役が `automerge` ラベルを付けて Kodiak のマージキューに入れる（skill `command-team` の「マージ」）
+6. Approve されたら、実装担当が自分で `pr ready` で Draft を解除する。Approve のレビューに `[文書のずれ]` の nit が残っていれば、先に直してレビューを再委託する（skill `implement-issue` の手順 9）（レビュー担当の App には Draft を解除する権限がない）し、終わりの報告をする。人間（hatai）のレビューの指摘は、指揮役が `t3 thread send` で実装スレッドに伝える
+7. Approve と必須チェックがそろったら、QA が同じ SHA で独立に確かめ、SHA と run を書いた合格コメントを PR に残す（`docs/agents/qa-checklist.md`）。Approve・必須チェック・同じ SHA の QA の合格がそろったら、指揮役が `automerge` ラベルを付けて Kodiak のマージキューに入れる（skill `command-team` の「マージ」）。QA が確かめるまでは合格として扱わない
 8. 終わった worktree は pitchfork のデーモン `agent-worktree-prune` が毎時消す（settle されていないスレッドの worktree と、追跡ファイルに変更が残っている worktree は残す。残ったものは人間が `mise run agent-worktree-prune` で整理する）
 
 ### 入口B（バグ・インシデント）の調査と起票
@@ -71,7 +71,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - 指揮役が T3 で立てるスレッドには、必ず「役割・対象の番号・日本語の要約」を含むタイトル（例 `[実装] #101 …`、`[レビュー] PR #132 …`）を立てるときに付ける。タイトルが形式に合わないまま作業を始めさせない。形式と直し方は skill `command-team` の「スレッド名」
 - 実装とレビューのモデル・effort は、pr-size の行数、変更パス、ラベル、修正の回数で振り分ける。しきい値は skill `command-team` に置き、改善ループで調整する。レビューの振り分け（通常・高リスク・抜き取りの条件と effort）は、実装担当がレビュー委託のときに同じ表で適用する
 - 指揮役が T3 のスレッドとして動いているとき、作業をさせるスレッド（実装・調査・レビュー）の作成はネイティブの `t3_thread_launch` で行う（T3 Connect の MCP や CLI のサブプロセスを経由しない）。指揮役が Grok Bot（クラウド）のときは T3 Connect の MCP の同じ操作を使う。実行中のスレッドへの指示送信（`t3_thread_send`）はこの限りではない
-- 終わったスレッドの片付け（settle）: PR を作ったスレッドはその PR をスレッドに紐付け（T3 の PR リンク）、マージで自動的に settle される。PR を持たないスレッド（調査・試験・失敗打ち切り・マージされずに閉じた PR のスレッド）は、指揮役が結果を消費した後に `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドは settle しない（人間が再開しうるため）
+- 終わったスレッドの片付け（settle）: PR を作ったスレッドはその PR をスレッドに紐付け（T3 の PR リンク）、マージで自動的に settle される。それ以外は、指揮役が毎回の巡回で、状態で決めた条件（`docs/agents/grokbot-runbook.md` の「9. 片付け」）に当たるものを `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドは settle しない（人間が再開しうるため）
 - main はルールセットで守る。必須チェックは `mise run verify` と `pr-size` の成功、承認は 1 件必須（Code Owners レビューの必須は外し、`pelway-review` の Approve で満たせる形）、「マージ前にブランチを最新化すること」を必須とする（Kodiak の直列キューと合わせて、チェックが通ったツリーとマージされるツリーを一致させる）。ルールセットの変更前後の値は「マージキュー」の表に転記する
 - エージェントの PR・指揮役が作った PR・hatai 自身が作った PR のいずれも、`pelway-review` の Approve と必須チェックの後、指揮役が `automerge` ラベルを付けて Kodiak がマージする。Kodiak が応答しない等のキューの切り戻しと、必須チェックが失敗したままのマージ（`pr-size-exception`）は、hatai の admin マージだけが行う（`enforce_admins: false` を維持する）
 
@@ -82,7 +82,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - 設定ファイル `.kodiak.toml`（リポジトリルート）: `version = 1`、`merge.automerge_label = "automerge"` と `merge.require_automerge_label = true`（ラベルが付いた PR だけがキューの対象）、`merge.method = "merge"`（マージコミット方式）、`merge.blacklist_labels = ["needs-human"]`（人間の判断待ちはラベルが付いていてもマージしない）。Dependabot のレビューなし自動マージ（`merge.automerge_dependencies`）は設定しない。設定項目の意味は https://kodiakhq.com/docs/config-reference
 - `automerge` ラベルは「マージの指示」を表す PR ラベル。付けるのは指揮役だけで、実装スレッドは自分の PR に付けない（付け手と手順は skill `command-team` の「マージ」）
 - ルールセットの要点: 必須チェック（`mise run verify`・`pr-size`）の維持、承認 1 件必須・Code Owners レビュー必須の解除（`pelway-review` の Approve で満たせる形）、「マージ前にブランチを最新化すること」の必須化。Kodiak はブランチ保護を満たした PR だけをマージするため、この組み替えが導入の前提になる
-- 役割分担: レビュー担当は従来どおり Approve・Request changes を投稿する。指揮役は Approve と必須チェックの通過を確かめて `automerge` ラベルを付け、Kodiak のマージを確認してから `agent:working` を外して人間に報告する。Kodiak はブランチの最新化とマージを直列に実行し、コンフリクト等でマージできないときは PR にコメントして `automerge` ラベルを外す（巡回での検知と手当は runbook の「マージキュー待ちの PR」）。キューの切り戻しは hatai の admin マージだけが行う
+- 役割分担: レビュー担当は従来どおり Approve・Request changes を投稿する。指揮役は Approve と必須チェックの通過と、現在の head と同じ SHA の QA の合格コメントを確かめて（条件の正本は skill `command-team` の「マージ」。`[文書のずれ]` の nit が残っていないことも含む）`automerge` ラベルを付け、Kodiak のマージを確認してから `agent:working` を外して人間に報告する。Kodiak はブランチの最新化とマージを直列に実行し、コンフリクト等でマージできないときは PR にコメントして `automerge` ラベルを外す（巡回での検知と手当は runbook の「マージキュー待ちの PR」）。キューの切り戻しは hatai の admin マージだけが行う
 
 ルールセットの変更前後の値（変更は hatai の GitHub 設定操作。「変更前」はこの文書の従来の記述からの転記で、pelway-dev のトークンではクラシックブランチ保護の読み取りができないため API の実測値ではない）:
 
@@ -100,7 +100,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - 正本は GitHub Issues と GitHub Projects のボード（`users/hatai/projects/7`「Pelway agent team」）
 - 指揮役スレッドのコンテキスト圧縮は、状態の正本が GitHub と巡回記録にあるため、外部化と復元検証を伴う手順として仕組み化できる。詳細は skill `command-team` の「コンテキスト管理」
 - ボードの Status（Backlog・Todo・Working・In review・Changes requested・Ready to merge・Needs human・Done）が Issue の処理状態を表す。Status は巡回が導出規則（runbook の「ボードと巡回」）で補正した後の確定状態が正
-- ラベルは `ready-for-agent`（人間が付ける入場の条件。ボードへの自動追加の合図で、着手後も外さない）、`agent:working`（割り当て中。指揮役が付ける）、`agent:devin`（Devin CLI に割り当てたときに指揮役が付ける）、`needs-human`（人間の判断待ち）の 4 つ。このほか PR には `automerge`（マージの指示。指揮役が付ける。Kodiak のキューの合図。「マージキュー」参照）がある
+- ラベルは `ready-for-agent`（人間が付ける入場の条件。ボードへの自動追加の合図で、着手後も外さない）、`agent:working`（割り当て中。指揮役が割り当てで付け、実装スレッドが着手時に自分の占有として引き継いで、誰が・何時（JST）に取ったかを Issue にコメントする。付いていなければ実装スレッドが付ける。すでに付いている Issue は取らない。手放すときは実装スレッドが外してコメントする。放置時の期限は未定。手順は skill `implement-issue` の手順 2）、`agent:devin`（Devin CLI に割り当てたときに指揮役が付ける）、`needs-human`（人間の判断待ち）の 4 つ。このほか PR には `automerge`（マージの指示。指揮役が付ける。Kodiak のキューの合図。「マージキュー」参照）がある
 - 「レビュー待ち」「修正待ち」「マージ待ち」は PR の Draft 状態・レビュー状態・CI 結果と委託記録から、巡回が Status に反映する
 
 ## 見張り役と通知
@@ -116,7 +116,8 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
     - `ci-failed-twice`: `agent/` ブランチで verify が 2 回続けて失敗した（5 分ごとに `gh run list` で確かめる）
 - payload は `pelway.agent-watch/v1`。スレッド ID、ブランチ、`issue_number`（`agent/<番号>-` から取る）、`round`（スレッドの実行回数）、`report`（最後の返答が `キー: 値` 形式 8 行以内のときだけ、その本文）を含む
 - 同じ出来事からイベントを作るのは 1 回だけ。送れなかったものは送信待ちの列に残して送り直す（受け手には重複して届きうる）。状態は `~/.local/state/pelway/agent-watch.json` に置く
-- 修正が何回目かは、実装スレッドがレビューの委託回数で数える（skill `implement-issue`）。3 回目の修正では先にレビューの effort を 1 段上げ、修正を出す前に 4 回目に入るなら（最初の実装 + 修正 3 回）、修正を出さずにエスカレーションする。人間のレビューによる修正（指揮役が `t3 thread send` で伝える）の回数も同じ上限に数える
+- 同じ知らせを、T3 のスレッドとして動く指揮役のための受信箱（共有の git dir の `pelway/conductor-inbox.jsonl`）にも 1 行ずつ書き、ホストの登録ファイルに登録された指揮役のスレッドへ決まった文を送って起こす（Issue #555。形は `docs/agents/notify-payloads.md`「指揮役の受信箱」、動き方は `docs/dev-environment.md`「pitchfork について」）
+- 修正が何回目かは、実装スレッドがレビューの委託回数で数える（skill `implement-issue`）。3 回目の修正では先にレビューの effort を 1 段上げ、修正を出す前に 4 回目に入るなら（最初の実装 + 修正 3 回）、修正を出さずにエスカレーションする。人間のレビューによる修正（指揮役が `t3 thread send` で伝える）の回数も同じ上限に数える。レビューの `[文書のずれ]` の nit だけを直す round（skill `review-pr`・`implement-issue`）は、この回数に数えない（その後のレビューの委託も数えない）。印の nit だけを直す round は、この PR で通算 2 回まで。印の nit が残っていて通算 3 回目が要るときは（その前のレビューの判定によらず）、3 回目には入らず、止まる条件としてエスカレーションする
 
 ## 停止・迷走への対処
 

@@ -51,10 +51,11 @@ check cond3_ct_no_settle "$CT" \
 check cond3_ii_no_settle "$II" \
   '`needs-human` 中・止まっている・迷走中のときは settle しない'
 
-# 条件4: runbook の片付けの列挙に、次のラウンドに置き換わった前ラウンドの
-# レビュースレッドが入っている（skill に足す手順と runbook の対応付け）。
+# 条件4: runbook の片付けの settle の条件に、次のラウンドに置き換わった
+# レビューの子タスクが入っている（skill に足す手順と runbook の対応付け。
+# 条件は Issue #526 で種類の列挙から状態の条件に置き換わった）。
 check cond4_runbook "$RB" \
-  '次のラウンドに置き換わった前ラウンドのレビュースレッド'
+  'レビューの子タスクで、次のラウンドの委託に置き換わったか、結果を読み終えたもの'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
