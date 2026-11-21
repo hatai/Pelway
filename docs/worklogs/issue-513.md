@@ -48,3 +48,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方（このスキルの核）」に「状態ファイルに項目を足す Issue では、『古い状態ファイルが読める』に加えて、項目の無い古いファイルから始めたときにも、その項目が守る性質（例: 受信箱への到達）が保たれることを条件にする」を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 5）
+
+対象 head: b107cd0e30133e2d279320a145eafb4b2ea5ab50
+
+1. 詰まった箇所: 印付きの nit だけの round（`docs/superpowers/specs/agent-team.md` の状態ファイルの場所）。`mise run verify` の前に、`/home` が読み取り専用に再マウントされていて worktree で commit できなくなったため、同じ head に同じ diff を当てた `/tmp` の clone で commit・verify・push した。
+2. 曖昧だった文: 「実装は `XDG_STATE_HOME` を優先するので、既定の場所と環境変数で変わることを書いてください」（PR #609 の round 4 の codex のレビューの nit、印 `[文書のずれ]`）。`XDG_STATE_HOME` の解決の確かな記述は `docs/dev-environment.md` の「pitchfork について」にあり、spec にもその参照を求めているのか、文を spec に写すのかが無い。
+3. 仮定と解釈: 既定の場所（`~/.local/state/pelway/agent-watch.json`）をそのまま示し、`XDG_STATE_HOME` を設定したときの場所は `docs/dev-environment.md`「pitchfork について」を参照する形にした。選ばなかった解釈は「`$XDG_STATE_HOME/pelway/agent-watch.json` と spec に書く」で、環境変数の解決の記述が 2 か所に分かれてずれやすくなる。
+4. 足りなかった情報・検証手段: 読み取り専用への再マウントのため、検証は `/tmp` の clone で `mise run verify` を全パスさせたもので、worktree 上での実行はできていない。
+5. 改善案: なし（nit だけの round）。
+
+使ったスキル: implement-issue
