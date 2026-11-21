@@ -22,7 +22,8 @@ set -euo pipefail
 
 usage() { sed -n '6p' "$0" | sed 's/^# *//' >&2; exit 2; }
 valid_id() { [[ "$1" != -* && "$1" =~ ^[A-Za-z0-9:_.%-]{1,256}$ ]]; }
-valid_ident() { [[ -z "$1" || "$1" =~ ^[A-Za-z0-9._-]{1,64}$ ]]; }
+# provider・model・effort の形。model は opencode の `zai-coding-plan/glm-5.3` のように / を含む。先頭の - は拒む
+valid_ident() { [[ -z "$1" || ( "$1" != -* && "$1" =~ ^[A-Za-z0-9._/-]{1,128}$ ) ]]; }
 die() { echo "conductor-rebuild: $*" >&2; exit 1; }
 
 from="" to="" provider="" model="" effort=""
@@ -95,19 +96,19 @@ if ! valid_ident "$provider" || ! valid_ident "$model"; then die "provider/model
 
 # 1. 新しい指揮役を立てる（何もせずに待たせる）
 if [[ -z "$to" ]]; then
-  errf="$(mktemp)"; trap 'rm -f "$errf"' EXIT
   [[ -n "$effort" ]] || echo "conductor-rebuild: --effort not given; the new conductor uses the provider's default effort" >&2
   HOLD="恒久交代の新しい指揮役として立てた。権限の確かめと引き継ぎの指示が届くまで、何もせずにこのターンを終える。"
   args=(thread start --provider "$provider" --model "$model")
   [[ -n "$effort" ]] && args+=(--option "effort=$effort")
   args+=(--worktree main --branch "conductor/rebuild-$(date +%Y%m%d%H%M%S)" --title "[指揮役] 恒久交代で引き継ぐ" "$project" -)
-  out="$(printf '%s' "$HOLD" | "$T3" "${args[@]}" 2>"$errf")" || {
-    printf '%s\n' "$out" >&2; cat "$errf" >&2
+  # t3 の標準エラーは端末にそのまま出す（共有の /tmp に一時ファイルを作らない。sandbox から symlink に差し替えられるため）
+  out="$(printf '%s' "$HOLD" | "$T3" "${args[@]}")" || {
+    printf '%s\n' "$out" >&2
     die "t3 thread start failed; the new conductor may have been created. Check it in T3. Nothing was sent to the old conductor"
   }
   to="$(printf '%s\n' "$out" | awk 'NF{l=$0} END{print l}' | tr -d '[:space:]')"
   if ! valid_id "$to"; then
-    printf '%s\n' "$out" >&2; cat "$errf" >&2
+    printf '%s\n' "$out" >&2
     die "could not read the new conductor's id; it may have been created. Check it in T3. Nothing was sent to the old conductor"
   fi
 fi

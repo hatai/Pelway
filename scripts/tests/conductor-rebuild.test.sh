@@ -28,7 +28,7 @@ case "$1 $2" in
     mode=auto-accept-edits
     [[ "$3" == *new* ]] && mode="${NEW_MODE:-auto-accept-edits}"
     wt=""; [[ "$3" == *new* ]] && wt="${NEW_WT-/home/u/.t3/worktrees/Pelway/conductor}"
-    echo '{"thread":{"threadId":"'"$3"'","providerInstanceId":"acpRegistry_devin","model":"swe-2-high","runtimeMode":"'"$mode"'","worktreePath":"'"$wt"'"}}' ;;
+    echo '{"thread":{"threadId":"'"$3"'","providerInstanceId":"'"${OLD_PROVIDER:-acpRegistry_devin}"'","model":"'"${OLD_MODEL:-swe-2-high}"'","runtimeMode":"'"$mode"'","worktreePath":"'"$wt"'"}}' ;;
   "thread send")
     if [[ "$3" == --wait ]]; then id="$4"; else id="$3"; fi
     cat > "$LOG.send-stdin.${id##*:}"; [[ -e "$LOG.send-fail" ]] && exit 1; echo "ok" ;;
@@ -103,6 +103,15 @@ check "--to succeeds" [ "$rc" -eq 0 ]
 check "--to does not start a thread" no_line "^thread start"
 check "--to sends the handover" same "$LOG.send-stdin.new-conductor" "$START_WANT"
 check "--to registers the given thread" [ "$(cat "$FILE")" = "$NEW" ]
+
+# opencode の model（/ を含む）が渡る
+run "" --from "$OLD" --provider opencode --model zai-coding-plan/glm-5.3; rc=$?
+check "opencode model with / is accepted" [ "$rc" -eq 0 ]
+check "opencode model is passed" grep -q -- "--provider opencode --model zai-coding-plan/glm-5.3" <(line 2)
+OLD_PROVIDER=opencode OLD_MODEL=zai-coding-plan/glm-5.3 run "" --from "$OLD"; rc=$?
+check "opencode provider and model are inherited" grep -q -- "--provider opencode --model zai-coding-plan/glm-5.3" <(line 2)
+run "" --from "$OLD" --provider opencode --model -x; rc=$?
+check "model starting with - is rejected" [ "$rc" -ne 0 ]
 
 # provider と model は組で指定する
 run "" --from "$OLD" --provider codex; rc=$?
