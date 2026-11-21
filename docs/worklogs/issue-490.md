@@ -35,3 +35,15 @@
 5. 改善案: .agents/skills/implement-issue/SKILL.md の「手順 8」の担当地表に「codex のモデルは command-team『Codex のモデル』の表から選ぶ」の参照を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: dbec2df4d5ff0bce94b32f8a6aa974610b06f567
+
+1. 詰まった箇所: docs/technical/v0.7/body/03-ai-bot-runtime.md:120: round 4 の must-fix への対応文。判断待ちの確定には送信承認の参照が使えないため decision_id と確定後の版（crates/pelway-contract/src/decision.rs の DecisionOutcome）を、期限切れの失効には回答者がいないため server を記録主体とする文を書き分けた。
+2. 曖昧だった文: 「この PR で、判断待ちのまま確定した場合と期限切れの場合に、送信承認への参照を足す。」（Issue #490 の再開指示・2026-11-21 14:35 JST）
+3. 仮定と解釈: 再開指示の「送信承認への参照を足す」を、停止時の Issue コメントに書いた対応案（送信承認の回答は snapshot版・承認decision版、判断待ちの確定は判断の ID と版、期限切れは server を記録主体）の承認と読んで実装した。選ばなかった解釈: 判断待ちの確定にも送信承認の snapshot版を参照させる（reviewer の指摘と逆になるため）。
+4. 足りなかった情報・検証手段: push 条件（Claude レビュー合格・同一 sha QA 合格・push 前点検）を満たす前のローカルコミットを指揮役のレビュー worktree がどう取得するかの確認手段（同一リポジトリのローカルブランチとして参照できる前提で進める）。
+5. 改善案: .agents/skills/implement-issue/SKILL.md の「手順 9」に「無効化されたレビュー（担当の停止・指揮役による無効記録）は実効回数に数えない」と「push 条件を指揮役が指定した再開指示ではその条件に従う」を明記する。
+
+使ったスキル: implement-issue
