@@ -30,6 +30,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | 慣れない機能で、Issue の「採用する方式」が空 | `gh search` で比べた 2 つ以上の方式と、それぞれ採るもの・捨てるもの |
 | Issue が依存するリポジトリ外の成果物（関連情報の URL・抜粋）に到達できない | 到達できなかった成果物の名前と、試した手順（URL へのアクセス結果、抜粋に欠けている部分） |
 | Issue の未決事項に挙がっておらず、避けて進めることもできず、受け入れ条件の成否に関わる判断が必要 | 必要な判断の内容と、避けられない理由。判断を仰ぐ相手（起票者か人間） |
+| Issue の未決事項に決定権者の指定（例: 「hatai が決める」）があり、その決定待ちの部分が避けて進められない | 決定を仰ぐ相手と、決定待ちの未決事項の内容。実装者の判断で代替案を選んで進めず、決定が記録されるのを待つ |
 | `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 | sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
@@ -148,7 +149,7 @@ scripts/agent-gh dev git add <files>
 scripts/agent-gh dev git commit -m "<type>: <英語の要約>"
 scripts/agent-gh dev git fetch origin main
 mise run pr-size
-scripts/agent-gh dev git push -u origin HEAD
+scripts/agent-gh dev git push origin HEAD
 ```
 
 - `mise run verify` が失敗したらコミットしない。直してからやり直す。失敗が自分の変更と無関係に見えるとき（実行ごとに失敗箇所が変わる・ツールチェーンの再インストールを伴うなど）は、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 2（再現と最小化）で切り分ける。変更を退避した同じツリーで再現する失敗は環境起因として、verify の内訳と再現確認を PR 本文の「確認方法/検証」に書いて先へ進めてよい。退避で解消する失敗は自分の変更によるもので、直す。
@@ -161,14 +162,14 @@ scripts/agent-gh dev git push -u origin HEAD
 ```bash
 scripts/agent-gh dev git add docs/worklogs/issue-<N>.md
 scripts/agent-gh dev git commit -m "docs: add implementer memo for issue <N> round <R>"
-scripts/agent-gh dev git push
+scripts/agent-gh dev git push origin HEAD
 ```
 
 - 「対象 head」の記入を含むメモのコミットは、必ずレビュー委託（手順 8）の前に行う。メモはメモコミットの親の実装コミットに対応するため、メモを独立したコミットにしてよい。
 
 ### 7. Draft PR を作る（初回だけ）
 
-`write-pull-request` skill に従って本文を書き、Draft で作る。日本語を含むタイトル・本文・コメントは exec のコマンド引数に書かずファイル経由で渡す決まり（write-pull-request の「定期ルール」）に従うこと。特にタイトルは `--title` に日本語を書かず、英語の仮タイトルで作成したあと `scripts/agent-gh dev api PATCH ... --input <JSON ファイル>` で日本語タイトルを設定する。本文の「概要」の最後に `Closes #<N>` を入れる。差分に確かめ方を弱める変更（skill `review-pr` の手順 2「確かめ方を弱める変更」の一覧）があるときは、「変更内容」に見出し「確かめ方を弱める変更」を立て、変更ごとにファイルと行・何をしたか・その理由を書く。理由が書かれていない変更はレビューで must-fix、QA で不合格になる。修正 round で増えたときも書き足す。本文の「対象」の最後に、次の 1 行を必ず入れる。値は、指揮役の指示の 2 行目 `Assigned: role=implement agent=... model=... effort=...` から写す（`role=implement` を除いた残りを、順番も表記も変えずに書く）。指示に `Assigned:` の行が無いときは `model=unknown effort=unknown` と書く。
+`write-pull-request` skill に従って本文を書き、Draft で作る。日本語を含むタイトル・本文・コメントは exec のコマンド引数に書かずファイル経由で渡す決まり（write-pull-request の「定期ルール」）に従うこと。特にタイトルは `--title` に日本語を書かず、英語の仮タイトルで作成したあと `scripts/agent-gh dev api --method PATCH ... --input <JSON ファイル>` で日本語タイトルを設定する。本文の「概要」の最後に `Closes #<N>` を入れる。差分に確かめ方を弱める変更（skill `review-pr` の手順 2「確かめ方を弱める変更」の一覧）があるときは、「変更内容」に見出し「確かめ方を弱める変更」を立て、変更ごとにファイルと行・何をしたか・その理由を書く。理由が書かれていない変更はレビューで must-fix、QA で不合格になる。修正 round で増えたときも書き足す。本文の「対象」の最後に、次の 1 行を必ず入れる。値は、指揮役の指示の 2 行目 `Assigned: role=implement agent=... model=... effort=...` から写す（`role=implement` を除いた残りを、順番も表記も変えずに書く）。指示に `Assigned:` の行が無いときは `model=unknown effort=unknown` と書く。
 
 ```
 Implementer: agent=<opencode|devin> model=<モデル名> effort=<effort>
@@ -182,7 +183,7 @@ scripts/agent-gh dev pr create --draft --title "wip" --body-file - <<'EOF'
 EOF
 ```
 
-（作成後、PR のタイトルを `api PATCH --input` で日本語に設定する。手順の詳細は write-pull-request skill の手順 3 を参照）
+（作成後、PR のタイトルを `api --method PATCH --input` で日本語に設定する。手順の詳細は write-pull-request skill の手順 3 を参照）
 
 修正依頼の場合は PR を作り直さない。push したあと `scripts/agent-gh dev pr edit` で本文の「レビューと QA」と「対象」の sha を更新する。
 
