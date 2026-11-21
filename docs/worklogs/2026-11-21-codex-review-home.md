@@ -18,7 +18,7 @@
 | `~/.codex-review` への書き込み（確認用の子タスク、`touch ~/.codex-review/config.toml` と新しいファイル） | 合格（どちらも `Read-only file system` で拒否。同じ子タスクで worktree と `/tmp` には書けた） |
 | `codex sandbox -P review` での書き込み（`CODEX_HOME=~/.codex-review`、cwd は worktree） | `~/.codex-review/config.toml` と `~/.codex-review` の新しいファイル、worktree はどれも `Read-only file system` で拒否。`/tmp` は書けた |
 
-`web_search` を確かめる項目に足した後、`main` のコミットから委託した確認用の子タスクで、渡るツールに `t3`・`codex_apps`・`github`・`web_search` を含む名前が無く、ウェブ検索が使えないことを確かめた。MCP サーバーのツールも無かった。
+`web_search` を確かめる項目に足した後、`main` のコミットから委託した確認用の子タスクで、モデルに渡るツールを全部挙げさせた。直接呼べるツール（`functions.exec`・`functions.wait`・`collaboration.*` など）と `exec` から呼べるツール（`apply_patch`・`exec_command`・`list_mcp_resources`・`image_gen__imagegen` など）に、MCP サーバーのツールとウェブ検索（`web_search`・`web.run`）は無く、ウェブ検索は使えなかった。ウェブ検索の実効の設定は、`~/.codex-review/config.toml` の `web_search = "disabled"` で、`launchArgs` に上書きする `-c` は無い。
 
 ## claude_review
 
