@@ -94,3 +94,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「main を取り込んだ後の `mise run verify` は 5 分を超えることがあるので、コマンドの時間切れを 10 分より長くとる」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 10）
+
+対象 head: 6bfddcce51c4b8ee391dff78f68a9c2a2ed0a8fa
+
+1. 詰まった箇所: レビュー round 4: Claude（claude_review）が利用上限で一度 failed し、上限が解けた後に自動で再開して approve を出した。Codex は request-changes（must-fix 5）で判定が割れたため、request-changes 側を優先して直した（`.agents/skills/implement-issue/SKILL.md` の手順 9）。
+2. 曖昧だった文: 「nit は、`pelway-review` のレビューの nit のうち行頭に `[文書のずれ]` の印があるものだけを一緒に直し」（`.agents/skills/implement-issue/SKILL.md` の手順 9）。approve 側（Claude）のレビューの印の nit も、request-changes の修正 round で一緒に直してよいかで迷った。どちらも `pelway-review` のレビューで、Approve のときも印の nit は `pr ready` の前に直すと決まっているので、同じ round で直した。
+3. 仮定と解釈: Codex の must-fix 5（最後の PASS をハッシュの照合の前に出す）を、verdict を summary に書いてからハッシュを作って照合し、照合できたときだけ標準出力に出す、照合できなければ summary の verdict を FAIL に書き換えて SHA256SUMS を消す、と読んだ。verdict を別のファイルにしてハッシュの外に置く読み方は選ばなかった（verdict がハッシュで守られなくなるため）。
+4. 足りなかった情報・検証手段: ハッシュの作成の失敗を実機で起こす手段。`SHA256SUM` で道具を差し替えるテスト（`false`）で確かめた。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 の「複数のレビュー担当の判定が割れたら」に、「approve 側のレビューの `[文書のずれ]` の nit も、その修正 round で一緒に直す」を足す。
+
+使ったスキル: implement-issue
