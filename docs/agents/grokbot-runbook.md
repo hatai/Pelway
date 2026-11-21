@@ -234,7 +234,7 @@ Assigned: role=implement agent=devin model=swe-2-high effort=<medium|high|max>"
 t3 thread start --provider codex_review --model <skill command-team の「Codex のモデル」で選んだモデル> --worktree main --branch review/<M>-<k> --title "[レビュー] PR #<M> <要約>" <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。"
 ```
 
-Codex と Claude のレビュースレッドを T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-accept-edits` にする（Devin CLI は下のとおり `runtimeMode` を指定しない）。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`auto-accept-edits` で立てられないときも `auto`・`full-access` に変えず、立てずに 7 のエスカレーションにする（Issue が無いときの形も 7 にある）。指揮役のレビュースレッド（指揮役自身の PR・外部投入）は `delegate_task` で委託しない（子タスクの worktree は委託元のコミットから作られ、下の `main` 起点の決まりを満たせないため）。`delegate_task` での委託は実装担当の手順（skill `implement-issue` の手順 8）で、指揮役が実装担当の代わりに委託するときは、委託元のスレッドの worktree が `main` のコミットにあることを確かめてから行う。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP で立てる。
+Codex と Claude のレビュースレッドを立てるときは（T3 Connect の MCP でも `t3_thread_launch` でも）、権限（`runtimeMode`）を `auto-accept-edits` にする（Devin CLI は下のとおり `runtimeMode` を指定しない）。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`auto-accept-edits` で立てられないときも `auto`・`full-access` に変えず、立てずに 7 のエスカレーションにする（Issue が無いときの形も 7 にある）。指揮役のレビュースレッド（指揮役自身の PR・外部投入）は `delegate_task` で委託しない（子タスクの worktree は委託元のコミットから作られ、下の `main` 起点の決まりを満たせないため）。`delegate_task` での委託は実装担当の手順（skill `implement-issue` の手順 8）で、指揮役が実装担当の代わりに委託するときは、委託元のスレッドの worktree が `main` のコミットにあることを確かめてから行う。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP か `t3_thread_launch` で立てる。
 
 `codex_review` はネットワークを GitHub だけに絞った Codex（`docs/dev-environment.md` の「レビュー担当の Codex」）。`<k>` はその PR のレビュースレッドの通し番号（1 から）。worktree は必ず `main` から作る（レビュー担当は worktree の `scripts/agent-gh` を使うため、PR やほかのブランチの版を使わない）。
 
@@ -261,7 +261,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 | `event` | 実装スレッド | レビュースレッド |
 |---|---|---|
-| `finished` | `report` を手順 6 で確かめる。`pr:` と `ready: done` があればマージの判断（skill `command-team` の「マージ」）。`stopped:` があれば 7 の「実装担当が止まった」 | `report` を手順 6 で確かめ、GitHub のレビュー状態と突き合わせて扱う（指揮役自身の PR なら「マージ」へ。外部投入なら結果を該当 Issue の実装スレッドに知らせる） |
+| `finished` | `report` を手順 6 で確かめる。`pr:` と `ready: done` があればマージの判断（skill `command-team` の「マージ」）。`stopped:` があれば 7 の「実装担当が止まった」 | `report` を手順 6 で確かめて扱う（`approve` と `request-changes` は GitHub のレビュー状態と突き合わせる。`failed` は 6 の `verdict:` の行のとおり）（指揮役自身の PR なら「マージ」へ。外部投入なら結果を該当 Issue の実装スレッドに知らせる） |
 | `failed` | スレッドに 1 回だけ「続きをやり直す。skill implement-issue に従う。」を送る。同じスレッドで 2 回目の `failed` なら 7 のエスカレーション | 新しいレビュースレッドを 1 回だけ立て直す。2 回目なら 7 のエスカレーション |
 | `cancelled` | 人間が止めたもの。何もしない | 何もしない |
 | `waiting` | 承認や入力の待ちなら部屋で人間に知らせる（スレッドの `link` を付ける）。レビュー委託の子の完了待ち（実装スレッドが `delegate_task` でレビューを待っている）は知らせない | 部屋で人間に知らせる（スレッドの `link` を付ける） |
@@ -307,7 +307,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 | `review:` | `scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` のレビュー件数が報告のラウンド数と一致し、最新が `APPROVED` である |
 | `ready:` | `scripts/agent-gh dev pr view <番号> --json isDraft` が `false` である |
 | `memo:` | PR の変更ファイルに `docs/worklogs/issue-<Issue 番号>.md` があり、報告の round の「実装者メモ」が 5 項目そろっていて対象 head の SHA が書かれている。止まった場合は Issue のコメントに実装者メモがある |
-| `verdict:` | 指揮役が立てたレビュースレッドの報告だけ。`scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` の最新のレビューの状態（`APPROVED` か `CHANGES_REQUESTED`）と一致する |
+| `verdict:` | 指揮役が立てたレビュースレッドの報告だけ。`failed` は GitHub のレビューとは突き合わせず、起動時の操作記録と T3 のスレッドの履歴で報告元と対象の PR を確かめてから、5 の「レビューの verdict ごとの対応」の表の `failed` の行で `error:` の理由ごとに扱う（投稿の後に失敗で返ったときの扱いは、ここでは決めていない）。`approve` と `request-changes` は、`scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` の最新のレビューの状態（`APPROVED` か `CHANGES_REQUESTED`）と一致する |
 
 一致しなければ、`report` の値では動かず 7 のエスカレーションにする。
 
@@ -331,7 +331,7 @@ Issue に `needs-human` を付けた時点で、巡回スクリプトが補助�
 
 ### 停滞（`stalled`）
 
-エスカレーションする。Issue へのコメントには、スレッドの最後の返答と PR の状態を 10 行以内にまとめて書く。
+エスカレーションする。Issue へのコメントには、スレッドの最後の返答と PR の状態を 10 行以内にまとめて書く（最後の返答の `out-of-scope:` の行は写さない）。
 
 `stall_reason` が `ci-failed-twice` のときは `thread_id` が空。`issue_number` から実装スレッドを探す。
 
