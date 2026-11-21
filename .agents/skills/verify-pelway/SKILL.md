@@ -99,7 +99,7 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 
 - `verify-run` の終了時（成功・失敗・中断のどれでも）に、この run が起動した PID だけを止める。まず子の標準入力を閉じ（子は EOF で終わる）、5 秒で終わらなければ SIGTERM、さらに 5 秒で終わらなければ SIGKILL。シグナルを送る前に毎回 `/proc/<pid>/exe` がこの run のバイナリであることを確かめる。プロセス名では kill しない。経過は `cleanup.txt`。
 - `verify-run` 自身が SIGKILL されたときは後片付けが動かないが、子の標準入力のパイプが閉じるので子も終わる。ロック（`<共有 git dir>/pelway/locks/` の下）は残るので、次の run は「ロックが取れない」で止まる。持ち主の pid（`locks/<id>/pid`）が無いことを人が確かめてから外す。
-- 生き残りの確認: 起動の前と後片付けの後に、`demo-serve`・`pitchfork`・`pelway-agent-watch`・`t3-*` のうち 5 分以上動いているものの PID を取り（`survivors-before.txt`・`survivors-after.txt`）、前にあったものが後にもあることを確かめる。pitchfork の定期ジョブのように run の途中で自然に終わる短命なプロセスは比べない。`pitchfork list`（読み取りだけ）も前後で `pitchfork-before.txt`・`pitchfork-after.txt` に残す。
+- 生き残りの確認: 起動の前と後片付けの後に、`demo-serve`・`pitchfork`・`pelway-agent-watch`・`t3-*` のうち 5 分以上動いているものの PID を取り（`survivors-before.txt`・`survivors-after.txt`）、前にあったものが後にもあることを確かめる。pitchfork の定期ジョブのように run の途中で自然に終わる短命なプロセスは比べない。`pitchfork list` も前後で `pitchfork-before.txt`・`pitchfork-after.txt` に残す。`pitchfork list` は supervisor が止まっていると起動してしまうので、起動しない `pitchfork supervisor status` で動いていると確かめられたときだけ、自動起動を止めて（`PITCHFORK_SUPERVISOR_AUTO_START=false`）呼ぶ。止まっていれば「supervisor が動いていない」とだけ書き、起動しない。
 - 一時状態はサーバーのメモリだけ（本文を伏せる前の応答も、`verify-run` のメモリだけで扱いファイルに書かない）。証拠は消さない。
 - 後片付けの後に、証拠が残っていることを確かめる: `(cd <evidence> && sha256sum -c SHA256SUMS)` がすべて `OK`。
 

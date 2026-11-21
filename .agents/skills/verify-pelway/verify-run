@@ -83,7 +83,14 @@ forbidden_env_present() {
 }
 
 # pitchfork のデーモンの一覧（読み取りだけ。記録用で、合否は PID の比較で決める）。
-pitchfork_list() { (cd "${TOP}" && mise exec -- pitchfork list 2>&1) || echo "pitchfork list: 失敗"; }
+# `pitchfork list` は supervisor が止まっていると起動してしまう（自動起動）。起動しない `supervisor status` で
+# 動いていると確かめられたときだけ `list` を呼び、どちらも自動起動を止める設定で呼ぶ。
+pitchfork_list() {
+  if ! (cd "${TOP}" && PITCHFORK_SUPERVISOR_AUTO_START=false mise exec -- pitchfork supervisor status > /dev/null 2>&1); then
+    echo "pitchfork: supervisor が動いていない（起動しないよう list は呼ばない）"; return 0
+  fi
+  (cd "${TOP}" && PITCHFORK_SUPERVISOR_AUTO_START=false mise exec -- pitchfork list 2>&1) || echo "pitchfork list: 失敗"
+}
 
 # 生き残りを比べる対象の PID（1 行 1 つ）。5 分以上動いている常駐のものだけ（pitchfork の定期ジョブのように
 # run の途中で自然に終わる短命なプロセスを、巻き込んで止めたと取り違えないため）。comm と同じ文字列順に並べる。

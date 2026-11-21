@@ -70,6 +70,19 @@ expect_eq "final_verdict: finished FAIL" "$(final_verdict FAIL 1)" FAIL
 expect_eq "final_verdict: interrupted PASS" "$(final_verdict PASS 0)" FAIL
 expect_eq "final_verdict: unset mark" "$(final_verdict PASS '')" FAIL
 
+# pitchfork_list: 偽の mise で、supervisor が止まっているときは list を呼ばない（起動させない）ことを固定する。
+mkdir -p "${tmp}/fakebin"
+cat > "${tmp}/fakebin/mise" <<'FAKE'
+#!/usr/bin/env bash
+echo "args=$* auto_start=${PITCHFORK_SUPERVISOR_AUTO_START:-unset}" >> "${FAKE_LOG}"
+[ "$*" = "exec -- pitchfork supervisor status" ] && exit "${FAKE_STATUS}"
+exit 0
+FAKE
+chmod +x "${tmp}/fakebin/mise"
+pf() { : > "${tmp}/mise.log"; (PATH="${tmp}/fakebin:${PATH}" FAKE_LOG="${tmp}/mise.log" FAKE_STATUS="$1" TOP="${tmp}" pitchfork_list > /dev/null); cat "${tmp}/mise.log"; }
+expect_eq "pitchfork_list: supervisor stopped -> no list" "$(pf 1)" "args=exec -- pitchfork supervisor status auto_start=false"
+expect_eq "pitchfork_list: supervisor running -> list without auto start" "$(pf 0 | tail -n 1)" "args=exec -- pitchfork list auto_start=false"
+
 repo="${tmp}/repo"
 git init -q "${repo}"
 run_args() { (cd "${repo}" && bash "${tool}" "$@" > /dev/null 2>&1); echo $?; }
