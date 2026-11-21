@@ -270,47 +270,58 @@ def escalate(n, lt, reason):
     # 格上げを 3 段（通知のコメント → needs-human を付ける → needs-decision を外す）で進める。付ける方が先なので、途中で
     # 失敗してもどちらのラベルも無い状態にならない。各段は、記録（esc の stage）と、書く直前に読み直した Issue ごとの events
     # （全ページ）と Issue（events の後に読む）だけで決め、Issue が開いていて needs-decision があり、events で lt の付与が
-    # 続いているときだけ書く。読み取りに失敗した周は書かない。needs-human を付ける前に試行（adding と、そのとき読んだ events の
-    # 最大の ID の seen）を残すので、応答が失われても次の周に seen より後の needs-human のイベントで照合できる
+    # 続いているときだけ書く。Issue の読み直しの間にも付け外しは動くので、Issue を読んだ後にもう一度 events を取って照合する。
+    # 読み取りに失敗した周は書かない。needs-human を付ける前に試行（adding と、そのとき読んだ events の最大の ID の seen）を
+    # 残し、コマンドの終了コードではなく seen より後の needs-human のイベントで付与を照合する（変更なしの成功や
+    # 応答の喪失を、自分が付けたものと取り違えない）
     body = (f"{ESCALATION_MARK}\n@hatai `needs-decision` が付いた時刻 {lt} から 15 分決まらず、"
             "指揮役が動いていないため `needs-human` に替えました。")
     steps = {None: ("comment", ["issue", "comment", n, "--body-file", "-"], None, "commented"),
              "commented": ("label", ["issue", "edit", n, "--add-label", "needs-human"], "adding", "added"),
              "added": ("label", ["issue", "edit", n, "--remove-label", "needs-decision"], None, "removed")}
+    add_tried = False
     while True:
         rec = esc.get(n) if (esc.get(n) or {}).get("labeled_at") == lt else {}
-        stage = rec.get("stage")
+        recorded = rec.get("stage")
+        stage = recorded
         if stage not in (None, "commented", "adding", "added"): return  # held・removed: この labeled_at にはもう書かない
         if stage is None:
             cs = all_pages(f"/repos/hatai/Pelway/issues/{n}/comments?per_page=100")
             if cs is None: return
             # 通知の重複を防ぐだけの確かめ: 自分の名義で定型の本文と完全に一致するコメント（実装担当も同じ名義で書くため、
-            # ラベルの操作の根拠にはしない）
+            # ラベルの操作や保留の判定の根拠にはしない。保留の判定は見張りの記録（recorded）で決める）
             if any((c.get("user") or {}).get("login") == ESCALATION_AUTHOR and c.get("body") == body for c in cs):
                 stage = "commented"
         evs = events(n)
         iss = gh_json("api", f"/repos/hatai/Pelway/issues/{n}") if evs is not None else None
         if not isinstance(iss, dict): return
+        evs = events(n)  # Issue の読み直しの間に外して付け直された付与を、古い付与のまま扱わない
+        if evs is None: return
         labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
         if iss.get("state") != "open" or "needs-decision" not in labs or open_labeling(evs) != lt: return
         human = "needs-human" in labs
         if stage == "adding":
             new = [e for e in label_events(evs, "needs-human") if isinstance(e.get("id"), int) and e["id"] > rec.get("seen", 0)]
             if any(e["event"] == "labeled" and (e.get("actor") or {}).get("login") == ESCALATION_AUTHOR for e in new):
+                remember(n, lt, "added", reason=reason)
                 stage = "added"  # 自分の名義で付いた。その後に人間が外していても付け直さず、needs-decision を外す
             elif new: stage = "held"  # 試行の後にほかの誰かが付け外しした: 出どころを確かめられない
             elif human: return  # 付いたが events にまだ出ていない: 次の周で照合する
+            elif add_tried: return  # この周に付け直したのに付与もラベルも見えない: 次の周に回す
             else: stage = "commented"  # 付かなかった: 付け直す
-        elif human and stage != "added":  # 自分で付けていない needs-human はそのままにする（通知の後なら止める）
-            if stage is None: return
+        elif human and stage != "added":  # 自分で付けていない needs-human はそのままにする（記録した通知の後なら止める）
+            if recorded != "commented": return
             stage = "held"
         if stage == "held":
-            remember(n, lt, "held"); print(f"DECISION held #{n} labeled_at={lt}", flush=True); return
+            remember(n, lt, "held", reason=reason); print(f"DECISION held #{n} labeled_at={lt}", flush=True); return
         step, args, intent, done = steps[stage]
-        if intent: remember(n, lt, intent, seen=max((e["id"] for e in evs if isinstance(e.get("id"), int)), default=0))
+        if intent: remember(n, lt, intent, seen=max((e["id"] for e in evs if isinstance(e.get("id"), int)), default=0), reason=reason)
         if agent_gh(*args, stdin=body if stage is None else None) is None:
             print(f"DECISION escalate-failed #{n} step={step}", flush=True); return
-        remember(n, lt, done)
+        if intent:
+            add_tried = True
+            continue  # needs-human の付与は終了コードではなく、記録した試行と付与イベントの照合で確かめる
+        remember(n, lt, done, reason=reason)
         if done == "removed":
             print(f"DECISION escalated #{n} labeled_at={lt} reason={reason}", flush=True); return
 decision_at = {}  # Issue 番号 → 最新の needs-decision の labeled_at（補助記録の next_check_at に使う）
@@ -334,7 +345,19 @@ if issues is not None:
             cur["decision_warned"][n] = lt
         if reason: escalate(n, lt, reason)
     cur["decision_warned"] = {k: v for k, v in cur["decision_warned"].items() if k in labeled}
-    esc = {k: v for k, v in esc.items() if k in labeled}; store()
+    # 一覧の処理対象から外れた Issue に途中の記録が残っていたら、Issue ごとの状態で照合する:
+    # needs-decision の解除が済んでいれば完了を報告してから記録を整理し、閉じているだけ・一覧の窓外なら
+    # 記録を残して再オープン・再出現の後の再開に備える
+    keep = set(labeled)
+    for n, r in esc.items():
+        if n in keep or r.get("stage") not in ("commented", "adding", "added"): continue
+        iss = gh_json("api", f"/repos/hatai/Pelway/issues/{n}")
+        if not isinstance(iss, dict): keep.add(n); continue  # 読めなければ次の周に照合する
+        labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
+        if "needs-decision" in labs: keep.add(n); continue
+        if r.get("stage") == "added":
+            print(f"DECISION escalated #{n} labeled_at={r.get('labeled_at')} reason={r.get('reason') or reason or 'resumed'}", flush=True)
+    esc = {k: v for k, v in esc.items() if k in keep}; store()
 # 読み取りに失敗して空になったときは、前回の状態を残す（全スレッドを「新規」と誤報しない）。
 if prev is not None and not threads: cur["threads"] = prev["threads"]
 if prev is not None and not prs: cur["prs"] = prev["prs"]

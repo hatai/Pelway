@@ -23,7 +23,9 @@ REG="$ROOT/conductor-thread-id"
 CONDUCTOR="conductor-thread-7f3a"
 
 # モックの agent-gh。$MOCK/fail-<events|reread|comment|edit-add|edit-remove> があると、その呼び出しは失敗する。
-# fail-edit-add-lost はラベルを付けてから失敗を返し（応答が失われた）、fail-edit-add-crash は付けた直後に見張りを止める。
+# fail-edit-add-lost・fail-edit-remove-lost はラベルを変えてから失敗を返し（応答が失われた）、
+# fail-edit-add-crash は付けた直後に見張りを止める。ラベルの付け外しは、実際に変わったときだけ
+# GitHub と同じく pelway-dev[bot] の名義のイベントを残す（変更なしでは残さない）。
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env python3
 import json, os, re, sys, time
@@ -73,13 +75,23 @@ if a[:2] == ["issue", "comment"] and a[3:] == ["--body-file", "-"] and a[2] in s
     save(); sys.exit(0)
 if a[:2] == ["issue", "edit"] and len(a) == 5 and a[2] in st and a[3] in ("--add-label", "--remove-label"):
     i, add = st[a[2]], a[3] == "--add-label"; i.pop("list_labels", None)
+    hp = os.path.join(mock, f"on-edit-{a[2]}")  # 書き込みの直前にほかの誰かが Issue を変えた
+    if os.path.exists(hp):
+        skip, code = open(hp).read().split("\n", 1)
+        if int(skip): open(hp, "w").write(f"{int(skip) - 1}\n{code}")
+        else:
+            exec(code, {"i": i, "ev": lambda k, l, at: {"event": k, "label": {"name": l}, "created_at": at}})
+            save(); os.remove(hp)
     if failing("edit-add" if add else "edit-remove"): sys.exit(9)
+    changed = a[4] not in i["labels"] if add else a[4] in i["labels"]
     i["labels"] = sorted(set(i["labels"]) | {a[4]}) if add else [l for l in i["labels"] if l != a[4]]
-    i["events"][-1].append({"event": "labeled" if add else "unlabeled", "label": {"name": a[4]},
-                            "actor": {"login": "pelway-dev[bot]"}, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+    if changed:  # 変更なしのときは GitHub と同じくイベントを残さない
+        i["events"][-1].append({"event": "labeled" if add else "unlabeled", "label": {"name": a[4]},
+                                "actor": {"login": "pelway-dev[bot]"}, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
     save()
     if add and failing("edit-add-lost"): sys.exit(9)
     if add and failing("edit-add-crash"): os.kill(os.getppid(), 9)
+    if not add and failing("edit-remove-lost"): sys.exit(9)
     sys.exit(0)
 sys.exit(9)
 EOF
@@ -370,6 +382,11 @@ run_cycles 1
 rm "$MOCK/fail-edit-remove"; : > "$MOCK/calls"; on_read events 722 "i['events'][-1].append(ev('labeled', 'needs-decision', '$T5'))" 1
 run_cycles 1
 check "21: re-labeled before the retried removal -> no writes" eq "$(calls)" ""
+reset; issue_with 745 "$T20" needs-decision; touch "$MOCK/fail-edit-remove"
+run_cycles 1
+rm "$MOCK/fail-edit-remove"; : > "$MOCK/calls"; on_read issue 745 "i['events'][-1].append(ev('labeled', 'needs-decision', '$T5'))"
+run_cycles 1
+check "21: re-labeled during the issue re-read -> no writes" eq "$(calls)" ""
 reset; issue_with 723 "$T20" needs-decision needs-human; add_comment 723 'pelway-dev[bot]' "$(body_for "$T20")"
 run_cycles 1
 check "21: the template comment without the watcher's record -> needs-decision is not removed" eq "$(calls)" ""
@@ -501,6 +518,56 @@ on_read events 743 "i['labels'].append('needs-human'); i['events'][-1].append(ev
 run_cycles 1
 check "34: someone else's needs-human after the notice -> held, needs-decision kept" eq "$(calls)|$(decision_lines | tail -n 1)" \
   "issue comment 743 --body-file -|DECISION held #743 labeled_at=$T20"
+# 見張りの記録がなく定型コメントだけがある（ほかの担当が書いた）ときも、別の担当の needs-human で held にせず、
+# その needs-human が外れたら格上げを続ける
+reset; issue_with 744 "$T20" needs-decision; add_comment 744 'pelway-dev[bot]' "$(body_for "$T20")"
+on_read issue 744 "i['labels'].append('needs-human')"
+run_cycles 1
+check "34: template comment without a record, another's needs-human -> no writes" eq "$(calls)" ""
+check "34: template comment without a record, another's needs-human -> no held" eq "$(record_of 744)" ""
+set_labels 744 needs-decision; : > "$MOCK/calls"
+run_cycles 1
+check "34: after the other's needs-human is removed -> the notice is not reposted" \
+  eq "$(calls)" "$(lines "issue edit 744 --add-label needs-human" "issue edit 744 --remove-label needs-decision")"
+check "34: after the other's needs-human is removed -> escalated" eq "$(decision_lines | tail -n 1)" \
+  "DECISION escalated #744 labeled_at=$T20 reason=no-registration"
+# 35. needs-human の付与が変更なしで成功しても（直前にほかの担当が付けた）、added にせず、
+# 記録した試行と付与イベントの照合で判断する（試行の後のほかの付与として held）
+reset; issue_with 746 "$T20" needs-decision
+on_read edit 746 "i['labels'].append('needs-human'); i['events'][-1].append(ev('labeled', 'needs-human', '$T5'))"
+run_cycles 1
+check "35: no-op add success -> needs-decision is not removed" eq "$(calls)" \
+  "$(lines "issue comment 746 --body-file -" "issue edit 746 --add-label needs-human")"
+check "35: no-op add success -> held, not added" eq "$(record_of 746)" "$T20 held"
+check "35: no-op add success -> held line (exact)" eq "$(decision_lines | tail -n 1)" "DECISION held #746 labeled_at=$T20"
+check "35: no-op add success -> both labels stay" eq "$(labels_of 746)" "needs-decision needs-human"
+# 36. needs-decision を外す応答が失われても、外れていれば次の周で完了を報告してから記録を整理する
+reset; issue_with 747 "$T20" needs-decision; touch "$MOCK/fail-edit-remove-lost"
+run_cycles 1
+check "36: removal response lost -> step=label" eq "$(decision_lines | tail -n 1)" "DECISION escalate-failed #747 step=label"
+check "36: removal response lost -> needs-decision is actually gone" eq "$(labels_of 747)" "needs-human"
+check "36: removal response lost -> record kept as added" eq "$(record_of 747)" "$T20 added"
+: > "$MOCK/calls"
+run_cycles 1
+check "36: removal confirmed -> escalated reported (exact)" eq "$(decision_lines | tail -n 1)" \
+  "DECISION escalated #747 labeled_at=$T20 reason=no-registration"
+check "36: removal confirmed -> record cleaned" eq "$(record_of 747)" ""
+check "36: removal confirmed -> no writes" eq "$(calls)" ""
+# 37. 途中で Issue が閉じたら記録を残し、再オープン後に解除の再試行を再開する
+reset; issue_with 748 "$T20" needs-decision; touch "$MOCK/fail-edit-remove"
+run_cycles 1
+check "37: mid-flight record is added" eq "$(record_of 748)" "$T20 added"
+gh_edit 'i = st[args[0]]; i["state"] = "closed"' 748
+: > "$MOCK/calls"
+run_cycles 1
+check "37: closed mid-flight -> no writes" eq "$(calls)" ""
+check "37: closed mid-flight -> record kept" eq "$(record_of 748)" "$T20 added"
+gh_edit 'i = st[args[0]]; i["state"] = "open"' 748
+rm "$MOCK/fail-edit-remove"; : > "$MOCK/calls"
+run_cycles 1
+check "37: reopened -> removal retried" eq "$(calls)" "issue edit 748 --remove-label needs-decision"
+check "37: reopened -> escalated" eq "$(decision_lines | tail -n 1)" "DECISION escalated #748 labeled_at=$T20 reason=no-registration"
+check "37: reopened -> labels end as needs-human" eq "$(labels_of 748)" "needs-human"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
