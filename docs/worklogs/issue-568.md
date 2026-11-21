@@ -199,3 +199,14 @@
 5. 改善案: `.agents/skills/verify-pelway/SKILL.md` の 1 章「二重起動の確認」に「ビルド先のロックはビルド先の中に置く（clone 間で共有される出力先でも同じロック）」と足す（今回追加済み）。
 
 使ったスキル: implement-issue、verify-pelway
+## 実装者メモ（round 19）
+
+対象 head: 4e27399ce734b01b935d645918dfd0f930482278
+
+1. 詰まった箇所: round 13（対象 head 8eead8eb、codex・claude とも approve・must-fix 0）の nit の直し: (a) 両レビュアーの nit: 前提 5 の記述が `dir_chain_safe` の実際と違う（上の階層は sticky ならグループ・ほかが書けても通る、置き場とビルド先の各ディレクトリは書けないことが必須、置き場の検査は終了コード 2・ビルド先の検査は終了コード 1）→ 前提 5 をその分岐どおりに書き直し。(b) claude の nit: `CARGO_HOME` を空にしても cargo は `<tmp>` の祖先の `.cargo/config.toml` を読むので、ホームの下に `<tmp>` ができる環境では `build.target-dir` が効いて試験が落ちうる → 祖先に `target-dir` を持つ `.cargo/config.toml` があるとき理由を出して止める検査を試験の冒頭に足した。(c) codex の nit: PR 本文 QA 項目 2 が sha の異なる結果を併記 → 確かめた sha を各結果に付ける旨の断りを足した。(d) claude の nit: 実装者メモが round 18 止まり → このメモ（手順どおり実装コミットの push 後の SHA を対象 head に記入し、独立コミット）。
+2. 曖昧だった文: 「共有 git dir の `pelway/` の上の階層が自分か root の持ち物」（`.agents/skills/verify-pelway/SKILL.md` の前提 5）──「上の階層」の持ち主だけを書き、置き場とビルド先の各ディレクトリが「自分の持ち物でグループ・ほかが書けない」ことが必須なのか、上の階層にも同じ条件を掛けるのかが曖昧だった（実際は上の階層は sticky で書けてもよい）。
+3. 仮定と解釈: 祖先の `.cargo/config.toml` を止める条件は「`target-dir` の行がある」とした（ほかの設定は `target_directory` に影響しないため）。理由を出して止める側を選び、無言で試験を飛ばす形は取らなかった。
+4. 足りなかった情報・検証手段: `~/.cargo/config.toml` に `target-dir` を持ち TMPDIR がホームの下の実環境での落ち方（祖先の検査を試したのは機構上の試験とレビュアーの読みで、実環境での再現はしていない）。
+5. 改善案: `.agents/skills/verify-pelway/SKILL.md` の「前提」の 5 に「上の階層は sticky（`/tmp` の 1777 など）ならグループ・ほかが書けてもよい。置き場とビルド先の各ディレクトリは書けないことが必須。置き場の検査は終了コード 2、ビルド先は 1（FAIL）」と足す（今回追加済み）。
+
+使ったスキル: implement-issue、verify-pelway
