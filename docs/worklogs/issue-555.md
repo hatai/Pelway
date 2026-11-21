@@ -59,3 +59,17 @@
 5. 改善案: `.agents/skills/pr-watch/SKILL.md` の「`--logs`」の説明に「出すのは末尾の `PR_DIGEST_LOG_LINES`（既定 80）行だけ。落ちた試験が前の方にあるときは値を大きくする」を足す。
 
 使ったスキル: implement-issue、pr-watch（`.agents/skills/pr-watch/SKILL.md`）
+
+## 実装者メモ（round 5）
+
+対象 head: fd5d4cf5（実装のコミット）
+
+1. 詰まった箇所: round 4 のレビュー（Codex `gpt-6.2-sol` max が must-fix 7、Claude `claude-opus-5-5` max が must-fix 3）で、次の 2 つが大きかった。
+   - 一覧・詳細を PATH の `t3` で取っていた。版の食い違いで一覧が失敗すると、受信箱・起こし・webhook まで進まない。一覧・詳細・起こしで同じ `t3` を使うようにした。
+   - `scripts/conductor-register` を、hatai がホストで worktree の版のまま実行しうる。sandbox の中の指揮役が書き換えた版がホストで動く。インストールした `pelway-agent-watch` に `--register`・`--unregister`・`--show-registration` を持たせ、スクリプトは消した。
+2. 曖昧だった文: 「hatai が Issue #555 に、宛先をホストの登録ファイルにすること・`scripts/conductor-register` を足すこと・代行の手順を変えることを認めるコメントを書く」（PR #561 round 4 の Claude のレビュー）— 登録の手段をスクリプトからインストールした見張り役に変えるので、コメントはその形で書いてもらった（Issue #555 の hatai のコメント）。
+3. 仮定と解釈: UTF-8 の途中で切れた断片の問題は、書き手では断片を消せない（受信箱は追記だけ）ので、読み手の `scripts/conductor-watch.sh` を直した。LF で分けて 1 行ずつ UTF-8 と JSON として読み、壊れた行の後ろも読む。あわせて、種類・所有者を確かめて開き、末尾の 4 MiB だけを読む（Codex の security-review の「読み手にファイル種別・サイズの検査が無い」）。#504 は main にマージ済みなので、この PR で直した。`timeout -k` で子が止まらない場合の試験は、待つ時間が 35 秒を超えるので書いていない。
+4. 足りなかった情報・検証手段: pr-size は +1561 になった（hatai は「PR サイズは無視しておｋ」と判断）。本物の T3 で起こしが届くこと、bubblewrap の中のプロセスの `/proc/<pid>/exe` の見え方は未確認。Claude が PR 外として挙げた「pitchfork が worktree の `pitchfork.toml` の定義を起動・cron で動かすなら、sandbox の中のエージェントがホストでコマンドを動かせる」は、この PR では確かめていない。
+5. 改善案: `.agents/skills/command-team/SKILL.md` の代行の節に「ホストで hatai に実行を頼むものは、インストールしたバイナリか本体 checkout の版に限る（worktree の版は sandbox の中から書き換えられる）」を足す。
+
+使ったスキル: implement-issue、write-pull-request
