@@ -54,3 +54,15 @@
 5. 改善案: `.agents/skills/verify-pelway/features/decision.md` の「Gotchas」の「確定した決定を 1 件取る経路は無い」を、経路が足されたら「`GET` で確定した決定を読み直す」に直す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 6）
+
+対象 head: 74c2410aac766f665856681bba70b88c16870dff
+
+1. 詰まった箇所: `.agents/skills/verify-pelway/verify-run` の生き残りの確認: 別の証拠の置き場を渡した同時起動の試しで、1 つめの run が「消えた pid」で FAIL した。毎時 0 分の pitchfork の定期ジョブの短命なプロセスが run の途中で自然に終わったもので、比べる対象を 5 分以上動いている常駐のプロセスに絞った。
+2. 曖昧だった文: 「ロックの親が `--evidence-root` で変わります…証拠の保存先とビルドによって変化しないロックの場所・キーを使い」（Codex のレビュー must-fix）。鍵を target の実体ではなく作業ツリーの実体のパスにし、場所を共有 git dir の下に固定した。同じ target を別の作業ツリーが使う場合は、ビルドの前後の「同じ target・同じ実行ファイル」の確認で拒む。
+3. 仮定と解釈: Claude のレビュー must-fix（観察が TCP だけ）を、(a) UDP も観察する、で直し、`/proc/<pid>/fd` のソケットを `ss -e` の inode と突き合わせて TCP・UDP と確かめられないソケットを FAIL にした。TCP・UDP 以外の通信路は未検証と書いた。
+4. 足りなかった情報・検証手段: TCP・UDP 以外の通信路（unix ソケットなど）の宛先を確かめる手段（strace などは道具の追加と権限が要るので使っていない）。
+5. 改善案: `.agents/skills/verify-pelway/SKILL.md` の「5. 後片付け」の生き残りの確認に、T3 の常駐プロセスの comm の一覧（今は `t3-*` だけ）を、T3 の運用文書（`docs/superpowers/specs/agent-team.md`）から参照する形にする。
+
+使ったスキル: implement-issue、review-pr の結果の処理（手順 9）
