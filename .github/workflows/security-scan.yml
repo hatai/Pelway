@@ -50,6 +50,9 @@ jobs:
           install: false
           cache: false
 
+      - name: Assert mise version
+        run: mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
+
       - name: Trust project config
         run: mise trust
 
@@ -93,6 +96,9 @@ jobs:
           version: v2026.11.5
           install: false
           cache: false
+
+      - name: Assert mise version
+        run: mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
 
       - name: Trust project config
         run: mise trust
