@@ -159,3 +159,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 ## 巡回 136–138（07:26–07:34 JST・実値）
 - **#572 マージ完了**（22:31:13Z・head 56f7f389）— verify-pelway スキルが main 入り。r8〜r15 の長いレビューループ（codex/claude の must-fix 延べ 10+・文書ずれ nit 多数）が着地。
 - 残 open: #610 のみ（head b7efc229・draft・応答なし）。
+
+## 巡回 139–151（07:35–08:36 JST・実値）— #610 r7 の未投稿原因を解明
+- #610: r7 review-request（codex+claude・b7efc229・20:28Z）から 2h 超レビュー無し → 起動確認を投稿（issuecomment-7070415771）。
+- 統制の回答（22:47Z）: r7 は両枠とも起動・完了したが、`pr-size: fail`（+868/-35・上限 +68 超過）かつ `pr-size-exception` 無しのため結果を投稿せず終了 — 手順どおりの挙動。verify 他チェックは全 pass。
+- 例外承認は hatai 本人の `<!-- pr-size-exception -->` コメントが必要で指揮役は決められない → issue #602（needs-human 既存）へ hatai あて判断依頼を投稿（issuecomment-7070772750・例外/縮小/分割の 3 択）。#610 へも保留連絡（issuecomment-7070773079）。
+- 以降 hatai 応答待ち。#610 head b7efc229・draft 据え置き。
