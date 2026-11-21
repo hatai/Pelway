@@ -286,17 +286,14 @@ mk_crate() { mkdir -p "$1/src"; printf '[package]\nname = "t"\nversion = "0.0.0"
 # （~/.cargo/config.toml）に左右されないよう、各ケースで変数を決め CARGO_HOME を空にする。
 # ただし cargo は CARGO_HOME とは別に、作業ディレクトリから親を順にたどって
 # <親>/.cargo/config.toml も読む。<tmp> が target-dir を持つ設定の下（たとえば ~/.cargo/
-# config.toml がある利用者のホームの下）にできると下のケースの期待値がずれるので、
-# その環境では理由を出して止める。
+# config.toml がある利用者のホームの下）にできると下のケースの期待値がずれる。
+# 祖先の設定が実際に効いているかは、既定値の問い合わせの答えで確かめる
+# （コメント行だけの config.toml では止まらない）。ずれていたら理由を出して止める。
 mkdir -p "${tmp}/cargo-home"
-_d="$(dirname "${tmp}")"; _bad=""
-while [ "${_d}" != / ]; do
-  if [ -f "${_d}/.cargo/config.toml" ] && grep -q 'target-dir' "${_d}/.cargo/config.toml" 2> /dev/null; then _bad="${_d}/.cargo/config.toml"; break; fi
-  _d="$(dirname "${_d}")"
-done
-[ -z "${_bad}" ] || { echo "cargo_target_dir の試験: ${tmp} の祖先の ${_bad} が target-dir を持ち、期待値がずれる環境。TMPDIR をその設定の届かない場所にしてやり直す" >&2; exit 2; }
-unset _d _bad
 mk_crate "${tmp}/crate"
+_actual="$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; export CARGO_HOME="${tmp}/cargo-home"; cargo_target_dir "${tmp}/crate")"
+[ "${_actual}" = "${tmp}/crate/target" ] || { echo "cargo_target_dir の試験: ${tmp} の祖先の .cargo/config.toml が効いていて既定値が ${_actual} になる環境。TMPDIR をその設定の届かない場所にしてやり直す" >&2; exit 2; }
+unset _actual
 expect_eq "cargo_target_dir: default" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; export CARGO_HOME="${tmp}/cargo-home"; cargo_target_dir "${tmp}/crate")" "${tmp}/crate/target"
 expect_eq "cargo_target_dir: CARGO_TARGET_DIR env" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; export CARGO_HOME="${tmp}/cargo-home"; CARGO_TARGET_DIR="${tmp}/abs-td" cargo_target_dir "${tmp}/crate")" "${tmp}/abs-td"
 expect_eq "cargo_target_dir: relative env resolves from the crate root" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; export CARGO_HOME="${tmp}/cargo-home"; CARGO_TARGET_DIR=rel-td cargo_target_dir "${tmp}/crate")" "${tmp}/crate/rel-td"
