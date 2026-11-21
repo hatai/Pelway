@@ -12,7 +12,7 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 .agents/skills/verify-pelway/verify-run --feature mail-draft --label <Issue 番号など>
 ```
 
-- `--feature` は `features/README.md` の表の名前。省略すると `decision`。
+- `--feature` は `features/README.md` の表の `verify-run --feature` の列の値（`decision`・`mail-draft`）。機能のファイル名（`channel-messages` など）は受け付けない（終了コード 2）。省略すると `decision`。
 - 証拠の置き場は、共有 git dir（`git rev-parse --path-format=absolute --git-common-dir`）の `pelway/evidence/<label>-<sha>/<run-id>/`。実装役も QA もここに揃える（Issue #568 なら `--label 568` で `pelway/evidence/568-<sha>/`）。`~/.local/state` と `/tmp` は使わない。共有 git dir の `pelway/` は、作業ツリーの外に書かない決まり（skill `implement-issue`）の例外として、`docs/superpowers/specs/agent-team.md` が巡回の状態（patrol-state.json）の置き場に認めた場所と同じ扱いで使う（ロックも `pelway/locks/`）。`--evidence-root` で変えられるが、作業ツリーの中（共有 git dir を除く）は拒否する（終了コード 2）。
 - 終了コード: 0 = 全段 PASS、1 = どこかが FAIL か、未対応・道具が無い（`summary.txt` か標準エラーに理由）、2 = 引数の誤り。
 - run は前景の 1 コマンドで終わる。サーバーを run の外で動かし続けない（`nohup`・`setsid`・`systemd-run` を使わない。pitchfork にも登録しない）。
@@ -55,7 +55,7 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 
 - プロセス: `/proc/<pid>/exe` がこの run でビルドした `demo-serve` で、その sha256 が起動前に測った値と同じ。使った道具の版は `tools.txt`（`mise`・ツールチェーンの `rustc`・`cargo`・`ss`・`pgrep` など）。
 - ビルドと sha: `git rev-parse HEAD` が run の開始時と同じ。作業ツリーに未コミットの変更があれば起動前に FAIL（`--allow-dirty` は手元の試しだけに使い、その run は証拠にしない）。
-- ポート: `ss -tlnp` で、この PID の TCP の待ち受けが ready 行の `addr` だけ。`ss -ulnp` で、この PID の UDP のソケットが 0 個。この照合を通るまで HTTP は送らない。
+- ポート: `ss -tlnp` で、この PID の TCP の待ち受けが ready 行の `addr` だけ。`ss -uanp`（未接続も接続済みも含む全状態）で、この PID の UDP のソケットが 0 個（`udp_sockets=0`）。この照合を通るまで HTTP は送らない。
 - 環境: 子の環境の変数の名前の数（`env_name_count`）と、fnox の秘密 3 つ（LLM のキー・Penpot MCP のトークン・DB の URL）と LLM の接続先 2 つ（独自の接続先・既知の接続先）が無いこと（`forbidden_env=none`）。名前の有無だけを見て、値は残さない。証拠には変数名も書かずラベルだけ書く（変数名は leak-phrases の禁止語）。
 - 台本モード: 根拠は、`demo-serve` が LLM の設定を「どの変数も無い」写像で組み立てる（`crates/pelway-http/examples/demo-serve.rs`。キーが無いので必ず `ScriptGateway`）ことと、`network.txt` に外への接続が無いこと。標準エラーの接続先の行 `pelway-runner: LLM endpoint: ...` と ready 行の `llm=script` は記録として残すが、どちらもモードを区別しない（接続先の行はキーの有無を見る前に必ず出る。`llm=script` は固定の文字列）。台本の 2 案は実提供元の失敗時のフォールバックにも使われるので、3 章の段 5 で、ハルの投稿にフォールバックの進捗行（「台本の応答で進めます」）が無いことも確かめる。
 - 認証: デモは認証なし。操作者は合成ヘッダー `x-pelway-member-id`・`x-pelway-member-kind` で名乗る。

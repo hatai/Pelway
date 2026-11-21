@@ -248,7 +248,8 @@ env_check() {
     echo "listen=${listen}"
     [ "${listen}" = "${ADDR} " ] || { echo "NG: 待ち受けが ready 行の addr=${ADDR} だけではない"; ok=1; }
     local udp snap
-    if snap="$(ss -Hulnp 2>/dev/null)"; then
+    # -a で未接続（UNCONN）も接続済み（ESTAB）も含めて、この PID の UDP のソケットを全部数える。
+    if snap="$(ss -Huanp 2>/dev/null)"; then
       udp="$(grep -c "pid=${PID}," <<< "${snap}")"
       echo "udp_sockets=${udp}"
       [ "${udp}" = 0 ] || { echo "NG: UDP のソケットがある"; ok=1; }

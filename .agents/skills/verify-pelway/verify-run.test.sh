@@ -153,11 +153,20 @@ expect_eq "publish_verdict: hash failure leaves no SHA256SUMS" "$([ -e "${tmp}/p
 
 repo="${tmp}/repo"
 git init -q "${repo}"
-run_args() { (cd "${repo}" && bash "${tool}" "$@" > /dev/null 2>&1); echo $?; }
+# 引数の検査まで必ず届くよう、呼び出し元の環境と道具の有無に依存させない: 禁止の 5 つの名前を外し、
+# 前提の確認に使う道具（mise・rustup・ss・pgrep・ps と OS 名）の偽物を PATH の先頭に置く。
+mkdir -p "${tmp}/argbin"
+for b in mise rustup ss pgrep ps; do printf '#!/usr/bin/env bash\nexit 0\n' > "${tmp}/argbin/${b}"; chmod +x "${tmp}/argbin/${b}"; done
+printf '#!/usr/bin/env bash\necho Linux\n' > "${tmp}/argbin/uname"; chmod +x "${tmp}/argbin/uname"
+clean_env=(env -u PELWAY_LLM_API_KEY -u PELWAY_PENPOT_MCP_TOKEN -u PELWAY_DATABASE_URL -u PELWAY_LLM_CUSTOM_BASE_URL -u PELWAY_LLM_BASE_URL)
+run_args() { (cd "${repo}" && PATH="${tmp}/argbin:${PATH}" "${clean_env[@]}" bash "${tool}" "$@" > /dev/null 2>&1); echo $?; }
 expect_eq "unknown feature exits 2" "$(run_args --feature nope --evidence-root "${tmp}/ev")" 2
 expect_eq "unknown argument exits 2" "$(run_args --bogus)" 2
 expect_eq "relative evidence root exits 2" "$(run_args --evidence-root rel/ev)" 2
 expect_eq "evidence root inside repo exits 2" "$(run_args --evidence-root "${repo}/ev")" 2
+# 自分の環境に禁止の変数があれば、引数が正しくても起動の前に exit 1 で止まる（名前の有無だけを見る）。
+expect_eq "forbidden variable in the caller's environment exits 1" \
+  "$( (cd "${repo}" && PATH="${tmp}/argbin:${PATH}" "${clean_env[@]}" PELWAY_DATABASE_URL=x bash "${tool}" --evidence-root "${tmp}/ev" > /dev/null 2>&1); echo $?)" 1
 [ ! -e "${repo}/ev" ] || failures+=("refused evidence root must not be created")
 [ ! -e "${tmp}/ev" ] || failures+=("argument errors must not create evidence")
 
