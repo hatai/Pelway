@@ -68,6 +68,24 @@ if [[ "$1 $2" == "token --help" ]]; then
     ok) printf 'gh-token 2.0.10 help\n'; exit 0 ;;
   esac
 fi
+# FAKE_GH_HINT があれば、gh 2.105 の `gh event listen` の案内（実物の形）を警告・エラーの行と混ぜて
+# stderr に出し、stdout に本来の出力を出して FAKE_GH_EXIT で終わる（#596 の案内の除去の確認用）。
+if [[ -n "${FAKE_GH_HINT:-}" ]]; then
+  printf 'STDOUT-BODY\n'
+  printf 'warning: before the hint\n' >&2
+  printf '%s\n' \
+    'hint: if you need to wait for this pull request to be reviewed, merged, or closed before continuing, use this instead of polling:' \
+    '    gh event listen --resource https://github.com/hatai/Pelway/pull/1 --event com.github.pull_request.review.submitted.v1' \
+    '  - It prints the first event as a JSON line on stdout and exits; run it again to wait for the next one.' \
+    '  - Add `--timeout` to stop waiting after a while, for example `--timeout 30m`; it then exits with status 8.' \
+    '  - Events carry no details; read the pull request to see what changed.' \
+    '  - It misses changes made before it starts, so read the pull request once it is running.' \
+    '  - See `gh event listen --help` for other event types.' \
+    '  - Event subscriptions are in preview and may not be enabled for your account.' >&2
+  printf 'error: after the hint\n' >&2
+  printf '  - indented error detail\n' >&2
+  exit "${FAKE_GH_EXIT:-0}"
+fi
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_NO_UPDATE_NOTIFIER=%s\n' "${GH_NO_UPDATE_NOTIFIER:-}"; printf 'GH_TELEMETRY=%s\n' "${GH_TELEMETRY:-}"; printf 'DO_NOT_TRACK=%s\n' "${DO_NOT_TRACK:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
 EOF
 
@@ -515,6 +533,23 @@ while IFS=$'\t' read -r kind mp; do
     [[ ! -e "$mp" ]] || failures+=("keyfile_chmod_fail: isolated GH_CONFIG_DIR left behind ($mp)")
   fi
 done <"$MKTEMP_LOG"
+
+# --- gh の `gh event listen` の案内（#596）: agent-gh の出力に残さない。警告・エラー・stdout・終了コードは残す ---
+for sub in pr api; do
+  name="hint_removed_$sub"
+  if [[ "$sub" == pr ]]; then args=(pr view 1 --json number); else args=(api repos/hatai/Pelway); fi
+  FAKE_GH_HINT=1 FAKE_GH_EXIT=7 run "$name" dev "${args[@]}"
+  [[ "$RC" == 7 ]] || failures+=("$name: exit $RC, want 7")
+  [[ "$OUT" != *'gh event listen'* && "$OUT" != *'hint:'* && "$OUT" != *'Event subscriptions'* ]] ||
+    failures+=("$name: gh event listen hint left in output")
+  for want in STDOUT-BODY 'warning: before the hint' 'error: after the hint' '  - indented error detail'; do
+    grep -qxF -- "$want" <<<"$OUT" || failures+=("$name: '$want' missing from output")
+  done
+done
+# stdout と stderr は別のまま（案内の除去で stderr が stdout に混ざらない）
+export CALL_LOG="$ROOT/hint_streams.log"
+hint_stdout="$(FAKE_GH_HINT=1 bash "$SCRIPT" dev pr view 1 2>/dev/null)"
+[[ "$hint_stdout" == STDOUT-BODY ]] || failures+=("hint_streams: stdout is '$hint_stdout', want only STDOUT-BODY")
 
 if ((${#failures[@]})); then
   printf 'FAIL %s\n' "${failures[@]}"

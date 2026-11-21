@@ -54,6 +54,26 @@ gh_isolated_config() {
   cleanup_paths+=("$GH_CONFIG_DIR")
 }
 
+# run_gh <gh の引数...>: GH_TOKEN を付けて gh を呼び、gh の終了コードを返す（#596）。
+# gh 2.105 以降は、エージェントの環境（AI_AGENT・CLAUDECODE など）で pr view などを呼ぶと、
+# stderr に `gh event listen` の案内（hint: で始まる 1 行と、字下げした続きの行）を毎回出す。
+# 案内を消す環境変数・設定は無い（実測: gh 2.105.0。エージェントの検出に使う環境変数を外すと
+# 消えるが、その一覧は gh の版で変わりうるうえ、gh の他の振る舞いも変える）。
+# そこで stderr だけを絞り込みに通し、案内の塊だけを外す。警告・エラーと、案内の後の
+# 字下げした行（案内の塊が途切れた後）はそのまま残す。stdout は絞り込みを通さない。
+run_gh() {
+  local st
+  set +e
+  { GH_TOKEN="$token" gh "$@" 2>&1 1>&3 3>&- | awk '
+      /^hint: .*instead of polling:$/ { skip = 1; next }
+      skip && (/^    gh event listen / || /^  - /) { next }
+      { skip = 0; print; fflush() }
+    ' >&2; } 3>&1
+  st=("${PIPESTATUS[@]}")
+  set -e
+  return "${st[0]}"
+}
+
 # qa の引数が `comment <番号> --body-file <path|->` の 1 形であることを確かめる。
 # 許可リスト方式（#305 の案bと同じ考え方）で、それ以外の呼び出しはトークン発行前に終了コード 2 で拒否する。
 qa_check_args() {
@@ -225,8 +245,9 @@ case "$role" in
     token="$(app_token PELWAY_QA_APP_ID PELWAY_QA_INSTALLATION_ID PELWAY_QA_PRIVATE_KEY)"
     # 送るのは POST /repos/hatai/Pelway/issues/<番号>/comments の 1 つだけ。
     # exec しない（EXIT trap で一時 GH_CONFIG_DIR を消すため）。終了コードは gh のものを返す。
-    GH_TOKEN="$token" gh issue comment "$2" --repo hatai/Pelway --body-file "$4"
-    exit $?
+    rc=0
+    run_gh issue comment "$2" --repo hatai/Pelway --body-file "$4" || rc=$?
+    exit "$rc"
     ;;
   -h|--help)
     help
@@ -263,5 +284,6 @@ if [[ "${1:-}" == "git" ]]; then
 fi
 
 # exec しない（EXIT trap で一時 GH_CONFIG_DIR を消すため）。終了コードは gh のものを返す。
-GH_TOKEN="$token" gh "$@"
-exit $?
+rc=0
+run_gh "$@" || rc=$?
+exit "$rc"
