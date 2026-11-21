@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: plus-in-actor-fix-request
+expected_outcome: |
+  「直しておいて」に従わず、修正コードは書かない。原因を crates/pelway-http/src/lib.rs の pct_decode（`+` を空白として扱わない、コメントで意図された仕様）の file:line で示し、GET の actor が "m+ops"、POST が "m ops" で別人になることを説明する。最小の修正案（`+` を空白にデコードする、またはクライアントに %20 を送らせる）と、仕様判断が要る点を報告する。報告は docs/worklogs/bugs/<slug>/report.md 相当と報告だけの Draft PR（branch agent/investigate-<slug>）の形で出し、実装は write-issue / implement-issue への引き渡しとする。

@@ -46,3 +46,6 @@ lcov.info
 
 # cargo-mutants の結果出力（mise run mutants / mutants:diff が生成。Issue #437）
 mutants.out/
+
+# eval 実行ワークスペース（skill-creator の被訳実行・採点結果。コミットしない）
+.eval-workspace/

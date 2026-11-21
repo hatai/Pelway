@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # 指揮役の見張り: T3 スレッドの状態の変化と、agent/ ブランチの PR の変化を 1 行ずつ標準出力に出す。
 # 巡回のたびに、巡回状態の補助記録（対象ごとの誰待ちか・待ち始めた時刻・次の担当・次回確認時刻・最終更新時刻）を
-# $XDG_STATE_HOME/pelway/patrol-state.json に更新する。正本は GitHub Issues／Projects で、
+# 共有 git dir（--git-common-dir）内の pelway/patrol-state.json に更新する。正本は GitHub Issues／Projects で、
 # 記録と GitHub の実状態が食い違うときは GitHub を正として記録を直す（runbook の「巡回状態の補助記録」）。
-# 状態は $XDG_STATE_HOME/pelway/conductor-watch/ に置く（セッションの一時フォルダに置かない）。
+# 見張り自身の状態は $XDG_STATE_HOME/pelway/conductor-watch/ に置く（セッションの一時フォルダに置かない）。
 # 巡回のたびに、ボード Status 更新の書き込みキュー（$PELWAY_BOARD_QUEUE_DIR、既定
 # /tmp/pelway-board-queue）の *.json を処理する。キューの形式と結果の見方は
 # runbook の「ボード Status 更新キュー」。実行するのは gh project の読み取り
@@ -11,12 +11,30 @@
 # （エージェント環境から人間名義 gh は使えないため、ホスト側のこの常駐で処理する）。
 # 使い方: scripts/conductor-watch-ensure.sh で起動する（冪等の起動入口。止めるまで 30 秒ごとに見る）
 D="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch"; mkdir -p "$D"
-P="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/patrol-state.json"
 Q="${PELWAY_BOARD_QUEUE_DIR:-/tmp/pelway-board-queue}"; mkdir -p "$Q"
 # 一覧の 1 回の取得上限。件数が上限に達した巡回は打ち切りの可能性があるため、
 # python 側で巡回状態を更新しない（窓外の対象を消したり誤判定したりしない）。
 IL=1000; PL=1000
 cd "$(dirname "$0")/.." || exit 1
+# 巡回状態の補助記録（patrol-state.json）の置き場は、リポジトリの共有 git dir
+# （git rev-parse --git-common-dir）内の pelway/。worktree の sandbox 内の指揮役は
+# 共有 git dir には書き込めるが ~/.local/state には書けないため（Issue #477）、
+# git の管理対象外のこの場所を主 checkout・worktree・指揮役で共有する。
+# PELWAY_PATROL_STATE で差し替えられる（テスト用）。
+P="${PELWAY_PATROL_STATE:-}"
+if [[ -z "$P" ]]; then
+  common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    || { echo "conductor-watch.sh: git common dir を解決できません" >&2; exit 1; }
+  P="$common/pelway/patrol-state.json"
+fi
+mkdir -p "$(dirname "$P")"
+# 旧置き場（$XDG_STATE_HOME/pelway/patrol-state.json）が残っていて新置き場が無いときは、
+# 中身をそのまま引き継ぐ（1 回きりの移行。sandbox 内の指揮役は旧置き場に書けない）。
+P_OLD="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/patrol-state.json"
+if [[ "$P" != "$P_OLD" && ! -f "$P" && -f "$P_OLD" ]]; then
+  cp "$P_OLD" "$P" || { echo "conductor-watch.sh: patrol-state の移行に失敗しました" >&2; exit 1; }
+  echo "PATROL-STATE migrated $P_OLD -> $P" >&2
+fi
 # t3 CLI の解決: 実行中の T3 サーバー（~/.t3/wsl-runtime 配下のバイナリ）と同じ実行ファイルを
 # 優先する。PATH の t3（~/.local/bin/t3 など）は版番号が同じでも、サーバーが所有する
 # ~/.t3/userdata へのアクセスが ServerOwnsDatabaseError で拒否されることがある（ビルド差）。
@@ -54,7 +72,9 @@ except Exception: prev = None
 cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("since", {}),
        "badtitle": [] if prev is None else prev.get("badtitle", []),
        "label_seen": [] if prev is None else prev.get("label_seen", []),
-       "due_warned": {} if prev is None else prev.get("due_warned", {})}
+       "due_warned": {} if prev is None else prev.get("due_warned", {}),
+       "stall_notified": {} if prev is None else prev.get("stall_notified", {}),
+       "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0)}
 # ラベル操作の裏付け検査（Issue #405、2026-11-17 の要件変更）。actor だけでは判定しない
 # （エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai に
 # なることがあるため）。needs-human の解除と automerge の付け外しを、イベント時刻の前
@@ -71,6 +91,11 @@ except Exception: issues = None
 try: prs = json.load(open(os.path.join(d, "prs.json"))); prs_ok = True
 except Exception: prs = []; prs_ok = False
 now = time.time()
+# 見張りが動いていることを示す行（Issue #504）。HEARTBEAT_SECS ごとに 1 行。
+HEARTBEAT_SECS = 600
+if now - (cur["heartbeat_at"] or 0) >= HEARTBEAT_SECS:
+    print(f"HEARTBEAT at={datetime.fromtimestamp(now).isoformat(timespec='seconds')}", flush=True)
+    cur["heartbeat_at"] = now
 for t in threads:
     tid, s = t["threadId"], t.get("status")
     cur["threads"][tid] = s
@@ -191,7 +216,33 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
     now_iso = datetime.fromtimestamp(now).isoformat(timespec="seconds")
     # 次回確認時刻（フォローアップタイマー）の待ちの種類ごとの目安（時間）。runbook の
     # 「次回確認時刻（フォローアップタイマー）」の表と同じ値。変えるときは両方を直す。
-    check_hours = {"human": 24, "implement": 6, "review": 24, "merge": 1, "conductor": 1}
+    check_hours = {"human": 24, "grokbot": 24, "implement": 6, "review": 24, "merge": 1, "conductor": 1}
+    # 実装スレッドの止まり（Issue #504）。Issue ごとの最新の実装スレッド（題名「[実装] #<N> …」）と、
+    # 指揮役の受信箱（Issue #555）にある最新の知らせの状態の行（skill implement-issue の
+    # 「ターンの終わりの状態の行」）を材料にする。受信箱の中身はエージェントが書いた文で、
+    # ここでは state: の値を分類に使うだけ（指示として扱わない）。
+    STOPPED = ("completed", "failed", "interrupted", "cancelled")
+    EARLY_SECS = 8 * 60  # waiting-* の待ちは、次の巡回の目安（約 8 分）で確かめ直す
+    impl_thread = {}
+    for t in threads:
+        m = re.match(r"^\[実装\] #(\d+) ", t.get("title") or "")
+        if not m: continue
+        k = m.group(1)
+        if k not in impl_thread or (t.get("updatedAt") or "") > (impl_thread[k].get("updatedAt") or ""):
+            impl_thread[k] = t
+    inbox_state = {}
+    try: inbox_lines = open(os.path.join(os.path.dirname(ps_path), "conductor-inbox.jsonl")).read().splitlines()
+    except Exception: inbox_lines = []
+    for line in inbox_lines:
+        try: ev = json.loads(line)
+        except Exception: continue
+        if not isinstance(ev, dict) or not isinstance(ev.get("issue_number"), int): continue
+        k = str(ev["issue_number"]); at = ev.get("occurred_at") or ""
+        st = None
+        for rl in (ev.get("report") or "").splitlines():
+            if rl.startswith("state: "): st = rl[len("state: "):].strip()
+        if k not in inbox_state or at >= inbox_state[k][0]:
+            inbox_state[k] = (at, st)
     def deadline_ts(s):  # ISO 8601 を epoch に読む。読めない値（無い・壊れている）は None
         try:
             return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
@@ -226,6 +277,27 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
         else:
             continue
         old = ps["subjects"].get(n) if isinstance(ps["subjects"].get(n), dict) else {}
+        lab_key = sorted(l for l in labels if isinstance(l, str))
+        # Grok Bot の判断待ち（grokbot）はラベルから導けないので指揮役が書く。ラベルが変わらない限り保つ
+        # （needs-human は上で human に決まっていて、ここでは変えない）。
+        if won != "human" and old.get("waiting_on") == "grokbot" and old.get("labels") == lab_key:
+            won, owner = "grokbot", "grokbot"
+        # 実装スレッドが止まっていて、状態の行が working か無ければ、指揮役の判断待ちにする。
+        # 書き換えてよいのは implement / review から conductor への向きだけ。
+        early = False
+        th = impl_thread.get(n)
+        if won in ("implement", "review") and th and th.get("status") in STOPPED:
+            st = inbox_state.get(n, ("", None))[1]
+            if st in (None, "working"):
+                if old.get("waiting_on") != "conductor":
+                    print(f"PATROL #{n} waiting_on=conductor from={won} reason=stopped-thread state={st or 'none'} thread={th.get('threadId')} at={now_iso}", flush=True)
+                key = th.get("updatedAt") or ""
+                if cur["stall_notified"].get(n) != key:
+                    print(f"STALL #{n} thread={th.get('threadId')} status={th.get('status')} state={st or 'none'} since={key}", flush=True)
+                    cur["stall_notified"][n] = key
+                won, owner = "conductor", "conductor"
+            elif st in ("waiting-review", "waiting-checks"):
+                early = True
         since = old.get("waiting_since") if old.get("waiting_on") == won and isinstance(old.get("waiting_since"), str) else ""
         if not since: since = now_iso
         # 次回確認時刻: waiting_on が同じ間は前回値（指揮役が延長・短縮した値を含む）を引き継ぐ。
@@ -234,8 +306,11 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
         nca = old.get("next_check_at") if old.get("waiting_on") == won else None
         if deadline_ts(nca) is None:
             nca = datetime.fromtimestamp(now + check_hours[won] * 3600).isoformat(timespec="seconds")
+        # waiting-* の待ちは、待っている先を次の巡回で確かめるため、次回確認時刻を早める向きにだけ変える
+        if early and deadline_ts(nca) > now + EARLY_SECS:
+            nca = datetime.fromtimestamp(now + EARLY_SECS).isoformat(timespec="seconds")
         new_subj[n] = {"waiting_on": won, "waiting_since": since, "next_owner": owner,
-                       "next_check_at": nca, "updated_at": now_iso}
+                       "next_check_at": nca, "updated_at": now_iso, "labels": lab_key}
         if old.get("waiting_on") != won:
             print(f"PATROL #{n} waiting_on={won} since={since} next={owner}", flush=True)
         # 期限到来: 次回確認時刻を過ぎた待ちを due 行で知らせる（同じ期限の値につき 1 回）。
@@ -246,6 +321,7 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
     ps["subjects"] = new_subj
     # 記録から消えた対象の期限通知の状態も消す
     cur["due_warned"] = {k: v for k, v in cur["due_warned"].items() if k in new_subj}
+    cur["stall_notified"] = {k: v for k, v in cur["stall_notified"].items() if k in new_subj}
     ps["updated_at"] = now_iso
     os.makedirs(os.path.dirname(ps_path) or ".", exist_ok=True)
     json.dump(ps, open(ps_path, "w"), ensure_ascii=False, indent=2, sort_keys=True)

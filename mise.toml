@@ -52,6 +52,7 @@ jactionlint = "2.5.0"
 # （octocov・cargo-llvm-cov と同じ経路。mise.lock が URL と checksum で取得物を固定する）。
 # 出典: https://github.com/EmbarkStudios/cargo-deny/releases/tag/0.20.2
 "aqua:EmbarkStudios/cargo-deny" = "0.20.2"
+age = "latest"
 # demo-check 一式（scripts/demo-check/*.sh）の静的検査（shellcheck）。shellcheck タスク
 # （verify-static・CI の static ジョブ）から実行する。severity は既定のまま。指摘の個別
 # 抑制は disable コメントに理由を添えたものだけ許す。担当が公式リリースを確認の上でピン。
@@ -144,8 +145,9 @@ env -u PELWAY_LLM_API_KEY cargo mutants --in-diff "$diff_file" --jobs 4
 # （#157。ワークフローに引数をインラインで書くと、ローカル検証と CI で引数がずれる）。
 # --no-cfg-coverage: 既定の --cfg coverage ビルドは、cfg(coverage) で nightly 専用
 # #![feature] を有効にする依存があると stable の E0554 で失敗するため。
-# --exclude: dev 用 crate、開発見張り役 pelway-agent-watch、CI に PostgreSQL が無く
-# 恒常 0% の pelway-db をテスト・レポートの両方から外す。cargo の --exclude は
+# --exclude: dev 用 crate と開発見張り役 pelway-agent-watch をテスト・レポートの
+# 両方から外す。pelway-db は coverage ジョブの PostgreSQL サービスで RLS テストが
+# 走るため集計対象（#161 で #157 の暫定除外を解除）。cargo の --exclude は
 # パッケージ名（Cargo.toml の name）を受け取るため、ディレクトリ名の dev-client-probe
 # ではなく pelway-dev-client-probe と書く。
 # --ignore-filename-regex: build.rs の生成コード（out/ 配下）と統合テストの
@@ -158,7 +160,6 @@ cargo llvm-cov --workspace --locked --no-cfg-coverage \
   --exclude pelway-dev-queue-compare \
   --exclude pelway-dev-smoke \
   --exclude pelway-agent-watch \
-  --exclude pelway-db \
   --ignore-filename-regex '([/\\]out[/\\]|crates/[^/]+/tests/)' \
   --lcov --output-path lcov.info
 '''
@@ -214,7 +215,7 @@ description = "fnox の定義一覧を確認（秘密値の取得・表示は行
 run = "fnox list"
 
 [tasks.pitchfork-check]
-description = "pitchfork のバージョン確認と、pitchfork.toml に見張り役 agent-watch と worktree の片付け agent-worktree-prune が定義されていることの確認"
+description = "pitchfork のバージョン確認と、pitchfork.toml に見張り役 agent-watch（supervisor の起動時に自動で起動する設定つき）と worktree の片付け agent-worktree-prune が定義されていることの確認"
 run = """
 pitchfork --version
 for d in agent-watch agent-worktree-prune; do
@@ -223,6 +224,10 @@ for d in agent-watch agent-worktree-prune; do
     exit 1
   fi
 done
+if ! /usr/bin/python3 -I -c 'import sys, tomllib; d = tomllib.load(open("pitchfork.toml", "rb"))["daemons"]["agent-watch"]; sys.exit(0 if d.get("boot_start") is True else 1)'; then
+  echo "pitchfork.toml の [daemons.agent-watch] に boot_start = true がありません（docs/dev-environment.md の「pitchfork について」参照）" >&2
+  exit 1
+fi
 """
 
 [tasks.deny-check]

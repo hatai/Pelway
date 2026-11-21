@@ -32,19 +32,22 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 
   ```
   PR #<M> をレビューする。skill review-pr に従う。
-  Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort>
+  Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes
   ```
+
+  `security=yes` は、差分が skill `implement-issue` の手順 8 で `security=yes` を付ける条件に当たるときだけ付け、当たらなければ書かない。付いているとレビュー担当は skill `security-review` も行う（skill `review-pr` の手順 2）。指揮役自身の PR は運用文書・スキルの変更が多く、たいてい当たる。
 
   このレビュー指示を使うのは、指揮役が自らレビュースレッドを立てるとき（指揮役自身の PR・外部投入）だけ。通常の実装担当の PR には使わない（実装担当が `delegate_task` で自分で委託する。skill `implement-issue` の手順 8）。調査スレッドを立てる指示の形は `docs/agents/command-team-details.md` の「調査（入口B）」。
 
   実装担当はこの値を PR 本文の `Implementer:` の行に、レビュー担当はレビュー本文の `Reviewer:` の行に、調査担当は報告の PR 本文の `Implementer:` の行に写す。
-- 巡回では、ほかのセッションが担当しているスレッドや PR に介入しない（割り当ての記録の表で担当を確かめる）。人間から依頼された代行・引き継ぎだけが例外で、手順 5 の「代行の開始と終了」に従う。
+- 巡回で介入しないのは、人間が手で立てたスレッドと、別の指揮役のセッションが担当中のスレッド・PR だけ（割り当ての記録の表で担当を確かめる）。人間から依頼された代行・引き継ぎは例外で、手順 5 の「代行の開始と終了」に従う。止まっているチームの実装スレッドとレビュースレッドには、指揮役が次の指示を出す（runbook の「毎回の巡回でスレッドを点検する」）。
 - スレッドを立てるときは、必ず「スレッド名」の形式のタイトルを渡す。タイトルが形式に合わないまま作業を始めさせない。
 - 割り当てのたびに、指揮役の作業ログの「割り当ての記録」の表に 1 行足す（日時、Issue・PR、役割、担当、モデル、effort、理由）。改善ループで、レビュー結果・実装者メモと対照する。
 - スレッドへの指示は、新しい実行として送る（MCP の `t3_thread_send` で `mode: queue`）。実行中のスレッドに `steer`（既定の `auto`）で送ると、実行の途中に差し込まれ、その実行が指示を扱わずに終わることがある。終わりの報告と PR の head で、指示が扱われたかを確かめる。
 - 判断はすべて Issue か PR にコメントで残す。セッションの文脈だけに置かない。
 - 指揮役が Issue を立てる・分割する・差し戻された本文を直すときは、skill `write-issue` に従う。`ready-for-agent` を付ける前（人間に委任されたとき）は、`write-issue` の手順 6 のゲートを通す。
-- 見張りの状態は `scripts/conductor-watch.sh` が `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。
+- sandbox に止められた操作を、sandbox の外へ出る抜け道（`systemd-run`・`nohup`・別のシェル・ラッパースクリプトなど）で実行しない。止められたら止まって報告する。作業ログに残る同種の前例（`systemd-run` 経由の patrol-state 更新・ボードキュー手動適用など）は許可にならない（Issue #477）。
+- 見張りの状態は `scripts/conductor-watch.sh` が `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。巡回状態の補助記録 `patrol-state.json` だけは、sandbox 内の指揮役からも読み書きできるよう、リポジトリの共有 git dir（`git rev-parse --git-common-dir`）内の `pelway/` に置く（git の管理対象外。Issue #477）。
 
 ## スレッド名
 
@@ -85,7 +88,7 @@ PR や Issue に手を付けるときは、最初に対象 Issue の受け入れ
 ## 1. サイクルの始め
 
 1. `scripts/conductor-watch-ensure.sh` を実行する（冪等の起動入口。動いていなければ起き、動いていれば何もしない）
-2. `t3 thread list --json` と `scripts/agent-gh dev pr list` で、実行中のスレッド、Draft の PR、レビュー待ちの PR を数える。PR の中身（チェック・レビュー・コメントの状態）を見るときは、生の `gh api` を読む代わりに skill `pr-watch` の `pr-digest` を使う
+2. `t3 thread list --json` と `scripts/agent-gh dev pr list` で、settle されていないチームのスレッド全部（実行中のものと、終わって止まっているもの）、Draft の PR、レビュー待ちの PR を数え、runbook の「毎回の巡回でスレッドを点検する」で分類して、settle・指示・`automerge` を行う。巡回の間隔は runbook の「指揮役の定期巡回（スケジュール起床）」、報告の形は同じく「巡回の報告の形」。PR の中身（チェック・レビュー・コメントの状態）を見るときは、生の `gh api` を読む代わりに skill `pr-watch` の `pr-digest` を使う
 3. 実行中のスレッドのタイトルが「スレッド名」の形式に合っているかを見て、合わないものを直す
 4. runbook の「同時数と順番待ち」の順で、次の一手を 1 つずつ決める
 5. 実装スレッドがレビュー委託の完了待ちの間も、指揮役は何も割り当てない（修正とレビューの繰り返しは実装スレッドの内側で進む）。実装スレッドの終わりの報告（`pr:` と `ready: done`）を runbook の「報告行の扱い」で確かめられたら、マージの判断（下の「マージ」）に進む
@@ -100,16 +103,7 @@ PR や Issue に手を付けるときは、最初に対象 Issue の受け入れ
 
 ### 割り当ての可否（blocker の確認）
 
-Issue を割り当てる前に、依存する blocker が全部閉じていることを、割り当てる直前に確かめる。巡回の最初に確かめて使い回さない（その間に依存が追加されることがあるため）。手順上の位置づけは runbook の「割り当て・停止・再開」の blocker の確認。
-
-- 割り当ててよいのは `issue_dependencies_summary.blocked_by == 0` のときだけ（開いている blocker の数。0 なら着手可能）。`total_blocked_by` は閉じた blocker も数えるため、使わない
-- 本文に書かれた「Blocked by #N」も確かめる。依存関係の情報と食い違ったら、割り当てを止める
-- 依存関係の情報が取れなかったとき（API の失敗・権限不足・空の結果）は、0 件と同じ扱いにしない。割り当てを止めて needs-human に回す
-- 割り当てる直前に、blocker の番号・状態・取得した時刻を Issue のコメントに残す
-- 依存情報の読み取りには `scripts/agent-gh dev api`（App のトークン）を使い、hatai 名義の gh は使わない。読めなかったときは理由のコード（例: `deps-read`）を巡回記録に残す。API の使い分け: 割り当て可否の条件は `GET /repos/hatai/Pelway/issues/<N>` の `issue_dependencies_summary.blocked_by`、割り当てコメントに書く blocker の一覧は `GET /repos/hatai/Pelway/issues/<N>/dependencies/blocked_by`（`--paginate` を付ける）
-- 順番を変えるときは、割り当てる前に開発リードを通して hatai に確認する。割り当てコメントには了承の根拠（hatai 本人のコメントか、開発リードが中継した了承）のリンクを貼る
-- 割り当てたあとで blocker が開き直したら、止めて hatai に確認する
-- 見張り（conductor-watch）に blocker の確認を組み込むときは、合成のデータで 4 通りの試験を用意する: 開いた blocker があるときは拒否・全部閉じていれば許可・取得に失敗したら拒否・本文にだけ書かれているときは拒否。本物の Issue を割り当てて試すことはしない
+Issue を割り当てる直前に、runbook の「割り当て・停止・再開」の blocker の確認を通す。割り当てを止める条件、Issue に残すコメント、順番を変えるとき、割り当てた後に blocker が開き直したとき、見張りに確認を組み込むときの決まりも、同じ節が正本。
 
 ### 実装のモデルと effort
 
@@ -129,7 +123,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 | 条件 | レビュー担当 |
 |---|---|
-| 通常 | PR 番号が偶数は Codex（`codex_review`、`gpt-6-luna`）、奇数は Devin CLI（`devin_review`、`swe-2-high`）。使えない担当（下の確認ゲート）の番では Codex に回す |
+| 通常 | PR 番号が偶数は Codex（`codex_review`。モデルは下の「Codex のモデル」）、奇数は Devin CLI（`devin_review`、`swe-2-high`）。使えない担当（下の確認ゲート）の番では Codex に回す |
 | 高リスク: `unsafe`、セキュリティの境界（認証・権限・承認・秘密情報・ネットワーク）、`.github/workflows/` の変更、pr-size の追加行が 400 を超える | Codex・Claude（`claude_review`）・Devin CLI の使えるもの全て（3 人） |
 | 抜き取り | PR 番号を 4 で割った余りが 0 の通常の PR には Claude も付ける（Codex・Devin CLI の見落とし率の測定のため） |
 
@@ -140,7 +134,27 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 - Claude のレビュー担当は確認済み。確認記録は `docs/dev-environment.md`「レビュー担当の Claude」の「確認手順の結果（記録欄）」。記録が消えた場合は、記録が戻るまで Claude を使わず Codex だけで回し、高リスクの PR は人間に知らせる。
 - 抜き取りの実施が 10 件に達するか、抜き取りの開始から 4 週間が経つか、どちらか早い方になったら、`docs/agents/command-team-details.md` の「レビュー担当の段階移行」に従って見落とし率を集計し、高リスク PR の複数レビュー体制の有効化を判断する。
 - effort は、追加行が 200 以下で高リスクでなければ既定、それ以外は `high`。同じ PR の 2 回目以降のレビューは 1 段上げる。
+- Codex のモデル（選び方の正本。ほかの文書はここを参照する）: 委託のたびに、上と同じ材料（追加行数、高リスクかどうか、レビューの回数）で次の表から 1 つ選び、Assigned 行と `target.model` に写す。上から順に見て、最初に当たった行のモデルを使う。
+
+  | 条件 | モデル |
+  |---|---|
+  | 追加行が 200 を超える、高リスク（上の表の高リスクの条件）、または同じ PR の 3 回目以降のレビュー | `gpt-6.2-sol` |
+  | 文書だけの PR | `gpt-6-luna` |
+  | それ以外（追加行が 200 以下で、高リスクでないコードの PR） | `gpt-6.1-terra` |
+
+  - 文書だけの PR は、変更したファイルがすべて Markdown（`*.md`）の PR とする。確かめ方は `scripts/agent-gh dev pr diff <M> --name-only` の全行が `.md` で終わること。試験・スクリプト・設定ファイルが 1 つでも含まれれば、文書だけではない。
+  - `gpt-6.2-astra` は使わない。コストが `gpt-6.2-sol` の 4 倍で、セキュリティの評価（SEC-Bench Pro）は `gpt-6.2-sol` の方が高いため（出典は Issue #563）。
+  - 根拠: OpenAI の公式の資料で、`gpt-6.2-sol` は PR のレビューに勧められている。`gpt-6.1-terra` は速く効率的だがコードの評価が `gpt-6.2-sol` より低い。`gpt-6-luna` は最も安く、量の多い作業向け（出典は Issue #563）。
 - 複数のレビュー担当を付けた PR で判定が割れたら（approve と request-changes が混ざったら）、マージせず、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正をそのまま進める（人間へのエスカレーションは不要）。実装担当が委託した複数レビューで割れたときも同じで、実装担当が修正に進む（skill `implement-issue` の手順 9）。
+
+### レビュースレッドの settle
+
+レビューが終わったレビュースレッドを未 settle のまま残さない（runbook 9 の「片付け」と同じ決まり。settle しないと worktree も残る）。settle は `t3_thread_organize`（`action: settle`）で行う。
+
+- verdict を読んだら、指揮役が自分で立てたレビュースレッド（指揮役自身の PR・外部投入）を settle する
+- 次のラウンドのレビュースレッドを立てたら、置き換わった前ラウンドのレビュースレッドを settle する
+- 実装担当の PR のレビュー（実装スレッドが `delegate_task` で立てた子タスク）は実装スレッドの内側で settle される（skill `implement-issue` の手順 8）。指揮役は settle しない
+- `needs-human` 中のスレッドと、止まっている・迷走中のスレッドは settle しない
 
 ### レビュー待ちの滞留
 
@@ -163,17 +177,17 @@ hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終�
 
 ### マージ
 
-マージは Kodiak（ホスト版の GitHub App。正本は `docs/superpowers/specs/agent-team.md` の「マージキュー」）が行う。指揮役が行うのはキューへの投入だけ: 有効な Approve（上の「hatai のレビューの扱い」）と必須チェック（`mise run verify`、`pr-size`）の通過を確かめて、PR に `automerge` ラベルを付ける（`scripts/agent-gh dev pr edit <M> --add-label automerge`）。このラベルを付けることがマージの指示であり、付けるのは指揮役だけ。実装スレッドは自分の PR に付けない。ラベルが付くと、Kodiak がブランチの最新化とマージを直列に進める。指揮役はマージを確認してから Issue から `agent:working` を外し、人間に報告する。
+マージは Kodiak（ホスト版の GitHub App。正本は `docs/superpowers/specs/agent-team.md` の「マージキュー」）が行う。指揮役が行うのはキューへの投入だけ: 有効な Approve（上の「hatai のレビューの扱い」）と必須チェック（`mise run verify`、`pr-size`）の通過を確かめて、PR に `automerge` ラベルを付ける（`scripts/agent-gh dev pr edit <M> --add-label automerge`）。このラベルを付けることがマージの指示であり、付けるのは指揮役だけ。実装スレッドは自分の PR に付けない。ラベルが付くと、Kodiak がブランチの最新化とマージを直列に進める。
 
 - `automerge` ラベルを付ける前の確認は次の 3 つ: 有効な Approve、必須チェックの通過、Approve の後の push が main の取り込みだけであること（`git rev-list <レビューした sha>..<head> --no-merges ^origin/main` が 0 件。それ以外のコミットがあればレビューをやり直す。Kodiak がブランチ最新化で作る main 取り込みのマージコミットはこの条件を壊さない）。マージ以外の PR・Issue への操作（base の変更、Draft の扱い、Issue のクローズ）は、先に「手当て・引き継ぎの前の確認」を通す。目印付きのコメント（`<!-- pr-size-exception -->`、`<!-- split-plan -->`）は人間の名義の `gh issue comment` で書く。レビュー担当は作成者が `hatai` であることで、実装担当（`pelway-dev`）や第三者のコメントと区別する。それ以外の GitHub の操作（読み取り、ラベル、ふつうのコメント）は `scripts/agent-gh dev` で行う。
 - pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の admin マージに回す（キューの切り戻しと同じ扱い）。
-- 必須チェックの完了待ち（ラベルを付ける前の CI 待ち、巡回での PR のベビーシット）には、ポーリングの代わりに skill `pr-watch` の `pr-digest --watch` をバックグラウンド実行して使う。マージの実行は Kodiak が行うため、指揮役がマージコマンドを叩くことはない。
+- 必須チェックの完了待ち（ラベルを付ける前の CI 待ち、巡回での PR のベビーシット）は、ポーリングせず skill `pr-watch` の「待ち方」に従う（T3 のスレッドでは `watch_pull_request`）。マージの実行は Kodiak が行うため、指揮役がマージコマンドを叩くことはない。
 - skill `pr-watch` の `VERDICT green` は、その SHA でチェックが完走して通過していることの確認要素の 1 つ。`automerge` ラベルを付ける条件（`pelway-review` の Approve、必須チェック、レビュー済み SHA 以降の追加コミットの確認、mergeable）を置き換えない。
 - ブランチの最新化はルールセットが「マージ前にブランチを最新化すること」で必須とし、実行は Kodiak が行う。指揮役が `pr update-branch` で手動に取り込む操作は、手当スレッドでの衝突解消などの例外を除き原則しない。
 - 別の PR に積んだ PR は、土台の PR に `automerge` ラベルを付ける前に、後の PR の base を main に替える（`scripts/agent-gh dev pr edit <後の PR> --base main`）。base のままだと、リポジトリのブランチ自動削除で土台のブランチが消えたときに後の PR が閉じることがあり、閉じた PR は base を替えられない。
 - 複数の PR に `automerge` ラベルを付けてよい。Kodiak が直列に 1 本ずつマージする。ただしラベルを付ける時点で各 PR が上の条件を満たしていることを確かめる。
-- PR ができたら mergeable を確かめる（`scripts/agent-gh dev pr view <M> --json mergeable`）。`CONFLICTING` の PR には GitHub が `pull_request` の workflow を動かさず、チェックが 1 つも付かない。実装担当に「main を取り込んで衝突を解消し、verify を通す」を送る。`automerge` ラベルが付いた後に Kodiak がコンフリクト等でマージできないときは、Kodiak が PR にコメントして `automerge` ラベルを外す。巡回手順は runbook の「マージキュー待ちの PR」に従い、手当スレッドで衝突を解消してからラベルを付け直す。
-- マージしたら Issue から `agent:working` を外し、人間に報告する。マージの検知は notify-grokbot の `pull_request`（`merged: true`）の通知と巡回で行う。
+- PR ができたら mergeable を確かめる（`scripts/agent-gh dev pr view <M> --json mergeable`）。`CONFLICTING` の PR には GitHub が `pull_request` の workflow を動かさず、チェックが 1 つも付かない。実装担当に「main を取り込んで衝突を解消し、verify を通す」を送る。`automerge` ラベルを付けた後に Kodiak がマージできなかったときは、runbook の「マージキュー待ちの PR」に従う。
+- マージしたら Issue から `agent:working` と `agent:devin` を外し、人間に報告する。マージの検知は notify-grokbot の `pull_request`（`merged: true`）の通知と巡回で行う。
 - マージが完了したら、ローカルの `main` を `origin/main` へ一致させる。`git fetch origin main` の後、ローカルの `main` が `origin/main` の先祖になっていることを確かめ（`git merge-base --is-ancestor main origin/main`）、`git merge --ff-only origin/main` を `main` で実行して fast-forward のみで行う。ローカルの `main` に origin に無いコミットがあって fast-forward できないときは、強制せず（rebase も reset もしない）そこで止めて、指揮役（代行の場合は hatai）へ報告する。
 - キューの切り戻し（Kodiak が応答しない・詰まった場合の手動マージ）は hatai の admin マージだけが行う（切り戻し条件は運用しながら定める）。`scripts/conductor-merge-queue.sh` はそのときの補助として残す。
 - Dependabot の PR の扱い（minor・patch の通常扱い、major・0.x の移行 Issue 化、Action の更新の `actions.lock` の再生成）は `docs/agents/command-team-details.md` の「Dependabot の PR の扱い」に従う。
@@ -223,6 +237,11 @@ runbook 7 の手順に従う。人間に上げる前に、手順 2 の「effort 
 - 変更の効果は、Claude の挙動だけでなく GLM と SWE-2 の成果物で測る。基準は、同じ種類のレビュー指摘・差し戻しの減少。
 - Claude では効いても GLM・SWE-2 で効かなかった文言は「共有スキルとして未達」とし、モデルの差を前提に書き直す（例: 抽象的な原則より、手順と具体例と禁止事項で書く）。
 - レビュー担当ごとの見落とし率 = 抜き取りで Claude が must-fix を出した PR の数 ÷ 抜き取りの PR の数（Codex 担当分と Devin CLI 担当分で分けて数える）。改善ループの材料にし、同時数の上限の見直しにも使う。
+- 巡回と実装担当の止まり方の効果は、巡回記録に残した次の 4 つで測る（記録の仕方は runbook の「巡回の報告の形」）:
+  - 指示待ちの放置時間（目標: 2 巡回以内）
+  - 毎日のまとめの時点の不要な未 settle のスレッドの件数（目標: 0 件）
+  - 状態の行の無いまま終わった実装スレッドのターンの割合（実装担当のモデルごと。目標: 0）
+  - 巡回の指示が無ければ再開しなかった `waiting-review`・`waiting-checks` の件数
 
 ### 棚卸しする
 
@@ -231,7 +250,7 @@ runbook 7 の手順に従う。人間に上げる前に、手順 2 の「effort 
 
 ### 定期キュレーション（worklog の走査）
 
-既存の改善ループはレビュー指摘を入口とする（同種の指摘が 2 回以上で正本の欠陥として扱う）。それだけでは、レビュー指摘に至る前の滞留・手戻りの型や、実装者メモ・巡回記録に書かれたまま拾われない正本とのずれが溜まる。そこで、週 1 回の定例で worklog 群を横断して走査する定期キュレーションを、レビュー指摘とは別の入口として改善ループに組み込む。実行手順（頻度・対象・観点・出力先）は runbook の「作業ログの定期キュレーション」に置く。
+週 1 回、worklog 群を横断して走査し、レビュー指摘とは別の入口から改善ループの材料を拾う。狙いは、レビュー指摘に至る前の滞留・手戻りの型と、実装者メモ・巡回記録に書かれたまま拾われていない正本とのずれである。実行手順（頻度・対象・観点・出力先）は runbook の「作業ログの定期キュレーション」。
 
 - 役割分担: レビュー指摘を入口とする既存の流れは変えない。キュレーションは、繰り返しの型・正本と実態のずれ・長期間動いていない待ちを候補として拾い、既存の改善ループの材料にする
 - キュレーションは候補の提案までとし、正本（AGENTS.md、スキル、runbook）を直接編集しない。正本の変更が要る候補は Issue 化を人間に提案し、Issue の作成と `ready-for-agent` の判断は従来どおり人間の関与する流れに乗せる
@@ -248,7 +267,7 @@ mattpocock/skills から `.agents/skills/` に取り込んだ輸入スキル（�
 
 指揮役スレッドのコンテキスト圧縮（計画的・予期しない）と恒久交代の手順の正本は `docs/agents/conductor-context.md`。次のいずれかで開き、その手順に従う。
 
-- 圧縮のトリガーに達した（使用率 70% 以上。取得できない環境では代理指標: 起算点から完了 Issue 5 件以上、または巡回 20 回以上。前提欠落の自己検知は数値条件より優先する）
+- 圧縮のトリガーに達した（使用率 70% 以上。取得できない環境では代理指標: 起算点から完了 Issue 5 件以上、または巡回 75 回以上。前提欠落の自己検知は数値条件より優先する）
 - 環境の自動圧縮を検知した、または前提と実状態の食い違いに気づいた
 - 圧縮で改善しないため恒久交代を検討するとき
 

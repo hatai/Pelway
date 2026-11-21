@@ -71,7 +71,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - 指揮役が T3 で立てるスレッドには、必ず「役割・対象の番号・日本語の要約」を含むタイトル（例 `[実装] #101 …`、`[レビュー] PR #132 …`）を立てるときに付ける。タイトルが形式に合わないまま作業を始めさせない。形式と直し方は skill `command-team` の「スレッド名」
 - 実装とレビューのモデル・effort は、pr-size の行数、変更パス、ラベル、修正の回数で振り分ける。しきい値は skill `command-team` に置き、改善ループで調整する。レビューの振り分け（通常・高リスク・抜き取りの条件と effort）は、実装担当がレビュー委託のときに同じ表で適用する
 - 指揮役が T3 のスレッドとして動いているとき、作業をさせるスレッド（実装・調査・レビュー）の作成はネイティブの `t3_thread_launch` で行う（T3 Connect の MCP や CLI のサブプロセスを経由しない）。指揮役が Grok Bot（クラウド）のときは T3 Connect の MCP の同じ操作を使う。実行中のスレッドへの指示送信（`t3_thread_send`）はこの限りではない
-- 終わったスレッドの片付け（settle）: PR を作ったスレッドはその PR をスレッドに紐付け（T3 の PR リンク）、マージで自動的に settle される。PR を持たないスレッド（調査・試験・失敗打ち切り・マージされずに閉じた PR のスレッド）は、指揮役が結果を消費した後に `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドは settle しない（人間が再開しうるため）
+- 終わったスレッドの片付け（settle）: PR を作ったスレッドはその PR をスレッドに紐付け（T3 の PR リンク）、マージで自動的に settle される。それ以外は、指揮役が毎回の巡回で、状態で決めた条件（`docs/agents/grokbot-runbook.md` の「9. 片付け」）に当たるものを `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドは settle しない（人間が再開しうるため）
 - main はルールセットで守る。必須チェックは `mise run verify` と `pr-size` の成功、承認は 1 件必須（Code Owners レビューの必須は外し、`pelway-review` の Approve で満たせる形）、「マージ前にブランチを最新化すること」を必須とする（Kodiak の直列キューと合わせて、チェックが通ったツリーとマージされるツリーを一致させる）。ルールセットの変更前後の値は「マージキュー」の表に転記する
 - エージェントの PR・指揮役が作った PR・hatai 自身が作った PR のいずれも、`pelway-review` の Approve と必須チェックの後、指揮役が `automerge` ラベルを付けて Kodiak がマージする。Kodiak が応答しない等のキューの切り戻しと、必須チェックが失敗したままのマージ（`pr-size-exception`）は、hatai の admin マージだけが行う（`enforce_admins: false` を維持する）
 
@@ -114,7 +114,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
   - `stalled`: 次のどれか。理由を `stall_reason` に入れる
     - `no-activity`: 実行中のまま 45 分更新がない
     - `ci-failed-twice`: `agent/` ブランチで verify が 2 回続けて失敗した（5 分ごとに `gh run list` で確かめる）
-- payload は `pelway.agent-watch/v1`。スレッド ID、ブランチ、`issue_number`（`agent/<番号>-` から取る）、`round`（スレッドの実行回数）、`report`（最後の返答が `キー: 値` 形式 5 行以内のときだけ、その本文）を含む
+- payload は `pelway.agent-watch/v1`。スレッド ID、ブランチ、`issue_number`（`agent/<番号>-` から取る）、`round`（スレッドの実行回数）、`report`（最後の返答が `キー: 値` 形式 8 行以内のときだけ、その本文）を含む
 - 同じ出来事からイベントを作るのは 1 回だけ。送れなかったものは送信待ちの列に残して送り直す（受け手には重複して届きうる）。状態は `~/.local/state/pelway/agent-watch.json` に置く
 - 修正が何回目かは、実装スレッドがレビューの委託回数で数える（skill `implement-issue`）。3 回目の修正では先にレビューの effort を 1 段上げ、修正を出す前に 4 回目に入るなら（最初の実装 + 修正 3 回）、修正を出さずにエスカレーションする。人間のレビューによる修正（指揮役が `t3 thread send` で伝える）の回数も同じ上限に数える
 
@@ -156,7 +156,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 
 - イベントごとの対応表は `docs/agents/grokbot-runbook.md`、毎サイクルの判断の手順は skill `command-team`
 - Grok Bot のルーティンとメモリには「この runbook を読んで従う」とだけ書く
-- 見張りと状態は、リポジトリのスクリプト（`pelway-agent-watch`、代行時は `scripts/conductor-watch.sh`）と `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない
+- 見張りと状態は、リポジトリのスクリプト（`pelway-agent-watch`、代行時は `scripts/conductor-watch.sh`）と `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。巡回状態の補助記録 `patrol-state.json` だけは、sandbox 内の指揮役からも読み書きできるよう、リポジトリの共有 git dir（`git rev-parse --git-common-dir`）内の `pelway/` に置く（git の管理対象外。Issue #477）
 
 ## 改善ループ
 
