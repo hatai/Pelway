@@ -88,3 +88,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「Request changes のとき」に「レビューの指摘が Issue の対象外のファイルに及ぶときは、直す前に指揮役か hatai に、含めるか別の Issue にするかを聞く」を足す。
 
 使ったスキル: implement-issue、write-issue、write-pull-request
+
+## 実装者メモ（round 7）
+
+対象 head: 66e1bf58（実装のコミット）
+
+1. 詰まった箇所: round 6 のレビューで、Codex（`gpt-6.2-sol` max）が must-fix 1 を出した。既読の位置が受信箱の行数を超えていても基準に保存するので、補助記録を直しても以後の起こしが止まり続ける。Codex は `pelway-review[bot]` 名義で投稿できず、結果はスレッドにだけ残った。Claude（`claude-opus-5-5` max）の must-fix 1 は、PR 本文の引用と項目名が round 5 のままだったこと。行数を超える既読の位置は使わず保存もしない形にし、起こしの基準を宛先と組で持つ形にした（Claude の nit）。PR 本文を直した。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: Claude の nit のうち、own-event の回に未読が残っていても起こさない件と、`pelway/` を開く `unsafe` を `OpenOptions` に置き換える件は直していない（implement-issue の「nit は直さない」）。
+4. 足りなかった情報・検証手段: Codex の round 6 の投稿の失敗の原因（T3 の `pull_request_review` で名義を確かめられない）は調べていない。
+5. 改善案: `.agents/skills/review-pr/SKILL.md` に「投稿は `scripts/agent-gh review` で行い、T3 の `pull_request_review` は使わない」を足す。
+
+使ったスキル: implement-issue、write-pull-request
