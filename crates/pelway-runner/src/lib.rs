@@ -64,9 +64,15 @@ pub trait DynChatGateway: Send + Sync {
         &'a self,
         req: ChatRequest,
     ) -> Pin<Box<dyn Future<Output = Result<ChatReply, LlmError>> + Send + 'a>>;
+    /// 実装の型を調べる口（台本モードの判定に使う）。
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
-impl<T: LlmGateway> DynChatGateway for T {
+impl<T: LlmGateway + 'static> DynChatGateway for T {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn chat<'a>(
         &'a self,
         req: ChatRequest,
@@ -359,7 +365,11 @@ impl Runner {
             return;
         };
         match parse_draft(&reply.text) {
-            Ok(draft) => self.complete_draft(&task, draft),
+            Ok(mut draft) => {
+                // 台本モードの下書きは AI 生成ではない（印は応答ではなく gateway の型で決める）。
+                draft.template = self.inner.gateway.as_any().is::<demo::ScriptGateway>();
+                self.complete_draft(&task, draft);
+            }
             Err(reason) => self.stop(&task, &reason),
         }
     }

@@ -1090,6 +1090,8 @@ fn script_mode_runs_mention_to_draft() {
     let (outcome, draft) = decide_to_draft(&ledger, &runner, &task_id, "b");
     assert!(draft.body.contains(&outcome.selected.body), "{draft:?}");
     assert!(!draft.body.contains("2週間"), "{draft:?}");
+    // 台本モードの下書きも AI 生成ではない定型として、印が付く。
+    assert!(draft.template && bot_messages(&store).last().unwrap().contains(TEMPLATE_MARK));
 }
 
 /// 設定の根拠を P03 に差し替えても、seed がその根拠を登録すれば LLM を呼ぶ
