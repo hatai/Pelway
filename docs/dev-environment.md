@@ -245,7 +245,7 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 - GitHub 以外への通信（`scripts/agent-gh review api --hostname example.com /`、`curl https://example.com`）が遮断される
 - 秘密の置き場 5 パス（`/etc/codex/requirements.toml` の `deny_read`）が読めない（`test -r` が 1）。`codex sandbox -P review` は `deny_read` を使わないので、この項目は確認用の子タスクの中で確かめる
 - 確認のあとの `~/.codex-review/config.toml` に、`[projects.` で始まる表が無い（T3 と Codex の app-server は sandbox の外でこのファイルに書けるため。信頼設定が入ると worktree の `.codex/` が読まれる）
-- `~/.codex-review` に書き込めない（`touch ~/.codex-review/config.toml` と、新しいファイルの `touch` が拒否される）。止める設定がこのファイルに集まっているため、書き込めると次のセッションで設定を戻せる。ファイルを書くツール `apply_patch` での書き込みも、同じく `~/.codex-review` と worktree の外に新しいファイルを作らせて確かめる（モデルが試すのを断ったときは未確認として記録する）
+- `~/.codex-review` に書き込めない（`touch ~/.codex-review/config.toml` と、新しいファイルの `touch` が拒否される）。止める設定がこのファイルに集まっているため、書き込めると次のセッションで設定を戻せる
 - `mise run codex-review-check` が ok
 
 どれかが通らなければ `codex_review` をレビューに使わない。T3 のツールや Codex の GitHub 連携が残っていたら `~/.codex-review/config.toml` を直し（`homePath` を変えたときは T3 を再起動し）、全部を確かめ直してから使う。
@@ -300,6 +300,8 @@ EOF
 | フック導入後の実レビューの観察 | 導入後 1 時間の `claude_review` の実レビュー 9 セッションで、フックの拒否は 26 件。拒否を理由に `verdict: failed` になったレビューは無かった（`failed` の 1 件は PR のチェックの未報告による）。拒否のうち `git ls-tree`・`git -C`・`agent-gh review run list` は単純な形でも承認要求になっていたため、`git ls-tree`・`git cat-file`・`run list`・`run view` を許可に足した（`claude -p` で通ることと、`run download` は拒否のままであることを確認）。拒否されたのと同じコマンドを 1 回そのまま送り直す例が多かったため、フックのメッセージに 1 文足した | 2026-11-21 |
 
 前からある未確認の経路: 委託のレビューは PR の head の checkout で動くので、PR が足した `.claude/settings.json`・`.mcp.json`・`.codex/` と、PR が変えたレビュー担当のスキル（`.agents/skills/review-pr`・`.agents/skills/security-review`。`.claude/skills/` はその symlink）を読みうる（project の設定は `~/.claude-review/settings.json` より優先され、`env` の上書きや hooks の実行がありうる）。手当てとして、これらを足す・変える PR はレビューを委託しない（skill `implement-issue` の手順 8）。
+
+未確認の経路: Codex のファイルを書くツール `apply_patch` が、`~/.codex-review` と worktree の外への書き込みを sandbox で止めるか（確認用の子タスクのモデルが試すのを断り、実測できていない。`docs/worklogs/2026-11-22-codex-review-apply-patch.md`）。使う前の確認の一覧には入れず、扱いは hatai が決める。
 
 未確認の経路: `Agent` ツールの `isolation: "remote"`（クラウドの環境でエージェントを動かす）が、アカウントの設定で使えるかを確かめていない。使えると、指示文を sandbox の外へ渡せる。扱いは hatai が決める。
 
@@ -455,7 +457,7 @@ rm -f ~/.config/pelway-agent-review/fnox.toml ~/.config/pelway-agent-review/age.
 | 項目 | 結果 | 実施日 |
 |---|---|---|
 | devin_review: 4 パスの `test -r`（すべて非 0 か） | 未実測 — devin_review は停止中のまま（hatai 決定 2026-11-18・#449 の実測が済むまで使用停止。実測を委託するスレッドを立てられない）。未実測のまま残すことは hatai の決定（2026-11-19 12:58 JST・例外）。実測は #479 で追う | — |
-| claude_review: 4 パスの `test -r`（すべて非 0 か） | 未実測 — claude_review は env の橋渡し（`PELWAY_AGENT_FNOX_CONFIG`）が未導入のため実測できない（review 用の fnox 設定を読めずスレッドが動かない。PR #473 の Claude レビューも同じ理由で実施不可）。実測は #479 で追う | — |
+| claude_review: 4 パスの `test -r`（すべて非 0 か） | 未実測。実測は #479 で追う（資格情報の橋渡しは今は入っていて、`/rate_limit` は下の行のとおり成功する） | — |
 | codex_review: 4 パスの `test -r`（すべて非 0 か） | 合格 — 確認用の子タスクで 4 パス、続けて QA 用を含む 5 パスとも `test -r` が 1（`docs/worklogs/2026-11-21-codex-review-home.md`） | 2026-11-21 |
 | devin_review: `scripts/agent-gh review api /rate_limit` 成功 | 未実測（上記の devin_review 停止中と同じ理由。実測は #479 で追う） | — |
 | claude_review: `scripts/agent-gh review api /rate_limit` 成功 | 合格 — 確認用の子タスクで exit 0（`5000`）。env の橋渡しは `~/.claude-review/settings.json` の `env` で入っている（`docs/worklogs/2026-11-21-codex-review-home.md`） | 2026-11-21 |
