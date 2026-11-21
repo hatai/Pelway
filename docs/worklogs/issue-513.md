@@ -36,3 +36,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「6. 検査してコミットし、行数を確かめてから push する」に「修正 round の追加行の残りが 100 行を切ったら、直し方を選ぶ前に、実装者メモ（約 12 行）と must-fix ごとの試験の行数を見積もる」を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 4）
+
+対象 head: 4aab36c2459a6aa3fbe5d7a181a2cd6d16faacda
+
+1. 詰まった箇所: `mise run pr-size`: round 3 の head で +797 / -71 から始まり、修正・試験・メモを足す行が無かった。`crates/pelway-agent-watch/src/outbox.rs` の単体試験を補助関数 `flush_at` にまとめて 61 行減らし（アサーションは 25 → 28）、`flush` を 3 通りに壊すとどれも試験が失敗することを確かめてから進めた。
+2. 曖昧だった文: 「旧形式で受信箱への記録を確認できない通知も、webhook の列から外した後に受信箱へ届けられるようにしてください。」（PR #609 の round 3 の codex のレビューの must-fix）。更新前の版の状態は、列のどの知らせを受信箱に書けたかを持たないので、全部を書き直すのか、列から外すときだけ書くのかが無い。
+3. 仮定と解釈: 更新前の版の状態（`inbox_pending` が無い。`Option` の `None` で表す）を読んだら、最初の周回で列の写しを全部受信箱に書き直すと解釈した。書けていた知らせは受信箱に 2 行になるが、受信箱の重複は payload 全体の一致で見分ける決まり（`docs/agents/notify-payloads.md` の「重複の見分け方」）に入る。選ばなかった解釈は「列から外すときだけ受信箱に書く」で、知らせごとに更新前の版かの印が要り、200 で送れた知らせは受信箱に届かないまま残るため。
+4. 足りなかった情報・検証手段: 更新前の版（main）の見張りが書いた本物の状態ファイルから更新する場面は確かめていない（試験は `tests/once.rs` の `queue` が書く同じ形の状態）。差分は `.cargo/mutants.toml` の `examine_globs` の外なので、`mise run mutants:diff` は回していない。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方（このスキルの核）」に「状態ファイルに項目を足す Issue では、『古い状態ファイルが読める』に加えて、項目の無い古いファイルから始めたときにも、その項目が守る性質（例: 受信箱への到達）が保たれることを条件にする」を足す。
+
+使ったスキル: implement-issue、write-pull-request
