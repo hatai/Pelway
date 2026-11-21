@@ -71,3 +71,21 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の表の 3 回目のレビューの行に「人間の判断で再開したときは、再開の決定を hatai 名義の Issue コメントとして残してから着手する」を足す（今回は再開の決定が pelway-dev 名義のコメントにしか無く、決まりの「hatai 作のコメントだけを決定として扱う」と食い違った）。
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（round 7: main の取り込み）
+
+対象 head: f802a2ba31ef226f99474b51b287cd446c3855ee（第1親の系列。マージコミット 2d259d31 の第2親は origin/main 3afed983）
+
+1. 詰まった箇所: `docs/dev-environment.md` の「レビュー担当の Claude」設定表の 1 行が衝突した。main（#582）は読み取り系 git に `git ls-tree`・`git cat-file`、`agent-gh review` の形に `run list`・`run view` を足していたが、本 PR のラッパーは `run` を exit 6 で拒否するため、文書だけ合わせると main が実レビューで必要とした `agent-gh review run list` が通らなくなる（テストは `run` を通さないので CI では見つからない）。
+2. 曖昧だった文: 「ブランチ側の説明文との統合は実装者の判断で解消してください。」（指揮役の指示）と、Issue #295 の受け入れ条件「review-pr スキルが実際に使う読み取り系（`gh api`, `gh pr diff/view/checks`, `git show/diff/log/grep` 等）に限定される」。
+3. 仮定と解釈: 「等」と main の実レビューの観察（#582）から、`run list`・`run view` は実際に使う読み取り系に入ると解釈し、ラッパーの許可に足した（`run download`・`rerun`・`cancel`・`delete`・`watch` は exit 6 のまま、テストで確認）。設定表の行は main の列挙を採り、ワイルドカードを使わない理由の文は本 PR 側を残した。main 側の「`agent-gh` が引数を `git`/`gh` にそのまま渡すため」は本 PR でラッパーが絞るようになり事実でなくなるため落とした。`git blame` は設定表が実際の settings.json を表すため足していない。
+4. 足りなかった情報・検証手段: `gh run view` の全フラグ（`--log`・`--log-failed`・`--job`・`--web` など）にファイルへの書き出しが無いことは `gh run view --help` で確かめたが、実機の review 名義での `run view --log-failed` は実測していない。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「修正依頼」の節に「main 側が許可・拒否の集合を変えていたら、文書の衝突だけでなくコード側の集合とも突き合わせる」を足す。
+
+既知の未対応項目（すべて nit。指揮役の判断で修正しない。PR コメント 7058593545 と同じ）:
+- `scripts/agent-gh:6`・`:83` のヘッダと help が `review git` を実行できるような表現のまま（コードは常に exit 6）
+- `docs/dev-environment.md` の「`-` で始まらない endpoint だけ」に対し、コードは `--` とその後続を許す（実害なし）
+- `docs/dev-environment.md` の読み取り系 git の列挙に `git blame` が無い（`.agents/skills/review-pr/SKILL.md:16` には含まれる）
+- `docs/dev-environment.md` と `scripts/agent-gh` の「4 変数とも hosts.yml より優先する」は、github.com については GH_TOKEN・GITHUB_TOKEN の 2 つだけに当たる
+
+使ったスキル: `.agents/skills/implement-issue`
