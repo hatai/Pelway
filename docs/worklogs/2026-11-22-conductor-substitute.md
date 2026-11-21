@@ -146,3 +146,12 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 - **#609 マージ完了**（21:05:04Z・head 0cf086ec）— agent-watch outbox の永続/一時失敗分離・バックオフ。QA は実値で検証済み（pelway-qa[bot]・sha 09094518・run 44944545672）。QA 委託は私の MCP 不通のため issuecomment-7069031781 で統制/実装側に依頼し実行された。
 - **#572**: r8 codex request-changes@906da20f（must-fix 2）→ 修正 5309e958 → r9 codex request-changes@2eaec2db（must-fix 3）→ 修正 bdc760c2 → r9 claude request-changes@12d2bf29（must-fix 4 + 文書ずれ nit 4）→ 実装側が継続修正中（4623e180）。レビューループは実装側が正常に回している。
 - #610: head b7efc229（draft）。#611/612 系の agent/611 スレッド通知は引き継ぎ済み扱い。
+
+## 巡回 119–135（06:14–07:25 JST・実値）— #572 レビュー往復と automerge
+- 実装側が委託を停止: #572 は `.claude/skills/verify-pelway` を足す PR のため、#587 でマージされた手順 8 によりレビューは指揮役起動に限定。私の MCP 不通のため統制後継へ起動を依頼する運用に切り替え（issuecomment-7069518344・7069671556・7069933689）。
+- r13: codex+claude を統制が起動 → approve 1 件@8eead8eb は nit 修正 push で DISMISSED（approve 後に head を動かすと無効になる運用ルールを PR に明記）。
+- r14（3660bd6f）: codex request-changes（must-fix 1: 祖先 config grep）・claude approve（文書ずれ nit 3）。
+- r15（ade842f1）: codex+claude とも approve・must-fix 0・文書ずれ nit 1（PR 本文行数）→ 本文修正で解消（head 不変・push なしを指示）。
+- 非 draft 化 → QA 委託（統制側 delegate、sandbox が pelway-agent-qa 設定を読めず統制セッションから投稿 — #637 の実例）→ pelway-qa[bot] pass@ade842f1・run 44954540983。
+- **#572 に automerge 付与（07:25 JST）** — 全ゲート実値確認済み。Kodiak rebase 待ち。
+- #610: head b7efc229 のまま（draft・応答なし）。
