@@ -263,7 +263,7 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 
 ### 専用 home での確認
 
-確かめ終わるまでの間は、この見出しのすぐ下に `保留中: <更新したもの>` の行を置き、確かめ終わったら消す。指揮役と実装担当（レビューの委託の担当を決めるとき）は、委託の直前に main の最新の版（`scripts/agent-gh dev api -H "Accept: application/vnd.github.raw" "repos/hatai/Pelway/contents/docs/dev-environment.md?ref=main"`）でこの行の有無を見て、`codex_review` を使えるかを判断する。「レビュー担当の Claude」にも、T3・Claude Code・`~/.claude-review` を更新したときに同じ `保留中:` の行を置く。
+確かめ終わるまでの間は、この見出しのすぐ下に `保留中: <更新したもの>` の行を置き、確かめ終わったら消す。更新を予定しているときは、その行が main に載ってから更新を始める（載せ方と、載るまでの間の伝え方は skill `command-team` の「レビュー担当と effort」の確認ゲート）。指揮役と実装担当（レビューの委託の担当を決めるとき）は、委託やスレッドの起動・再開の直前に main の最新の版（`scripts/agent-gh dev api -H "Accept: application/vnd.github.raw" "repos/hatai/Pelway/contents/docs/dev-environment.md?ref=main"`）でこの行の有無を見て、`codex_review` を使えるかを判断する。「レビュー担当の Claude」にも、T3・Claude Code・`~/.claude-review` を更新したときに同じ `保留中:` の行を置く。
 
 `codex_review` を初めて設定したときと、Codex・T3・`codex_review` の home のどれかを更新したときは、`codex_review` に委託した確認用の子タスク（`runtimeMode: "auto-accept-edits"`）で次を確かめる。確かめ終わるまで、`codex_review` をレビューに使わない。確認用の子タスクは、`main` のコミットで動くスレッドから委託する（`delegate_task` の子は委託元のコミットを checkout するので、PR のブランチから委託すると、PR が変えた `scripts/agent-gh` や `mise.toml` のタスクを実行しうる）。`config.toml` の層の `enabled = false` が T3 の設定に上書きされないことは Codex の設定の重ね方に、サーバー名 `t3-code`・`t3-code-direct` は T3 に依存するため、どちらを更新しても確かめ直す。結果は `docs/worklogs/` に日付付きの作業ログとして残し、確かめたときの版（`codex --version`、`claude --version`、T3 の `~/.t3/runtime/service-state.json` の `activeVersion`）も書く（初回は `2026-11-21-codex-review-home.md`）。巡回などで今の版が最後の記録と違うと分かったら、更新があったものとして保留にする。
 
@@ -312,7 +312,7 @@ EOF
 - `git switch` と、ファイルの書き込みが拒否される
 - `agent-gh review` を経由する他の gh サブコマンドが拒否される: `scripts/agent-gh review git switch -c <probe>`・`scripts/agent-gh review repo clone <リポジトリ> <dir>`・`scripts/agent-gh review auth status` が permissions の deny で拒否される（許可は使用するサブコマンド単位に絞ってあり、deny もラッパー経由の形で二重に張ってある）
 - 許可経路からの egress が遮断される: `scripts/agent-gh review api --hostname example.com /` が失敗する（sandbox のネットワーク許可先の実測。許可リスト内で GitHub 以外へ出られるコマンド形で試す）
-- 新しい `claude_review` のセッションのツールの一覧に、`mcp__` で始まるツールが無い（T3 の `mcp__t3-code`・`mcp__t3-code-direct`、claude.ai のコネクタ、プラグインの MCP サーバー）。どれか 1 つでも残っていれば、呼んで確かめずに `claude_review` をレビューに使わない（確かめるための呼び出しが、承認の設定に不備があればそのまま外部のサービスに届くため）。設定でそのツールを止めてから確かめ直す（プラグインなら `env` の `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` を確かめる）。システムの通知に `plugin:` で始まる MCP サーバーが出ていても、同じく使わない。deny はサーバー名に依存するので、T3・Claude Code・`~/.claude-review` を更新したらこの項目を確かめ直す。確かめ終わるまでは、この節の見出しのすぐ下に `保留中: <更新したもの>` の行を置き、指揮役と実装担当は委託やスレッドの起動の直前に main の最新の版でこの行の有無を見る
+- 新しい `claude_review` のセッションのツールの一覧に、`mcp__` で始まるツールが無い（T3 の `mcp__t3-code`・`mcp__t3-code-direct`、claude.ai のコネクタ、プラグインの MCP サーバー）。どれか 1 つでも残っていれば、呼んで確かめずに `claude_review` をレビューに使わない（確かめるための呼び出しが、承認の設定に不備があればそのまま外部のサービスに届くため）。設定でそのツールを止めてから確かめ直す（プラグインなら `env` の `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` を確かめる）。システムの通知に `plugin:` で始まる MCP サーバーが出ていても、同じく使わない。deny はサーバー名に依存するので、T3・Claude Code・`~/.claude-review` を更新したらこの項目を確かめ直す。確かめ終わるまでは、この節の見出しのすぐ下に `保留中: <更新したもの>` の行を置き、指揮役と実装担当は委託やスレッドの起動・再開の直前に main の最新の版でこの行の有無を見る
 - 組み込みのツールの一覧を最後の作業ログの記録と比べ、ほかのセッションや claude.ai へ送れるツールが増えていない（増えていれば `permissions.deny` に足してから使う）
 
 ### 確認手順の結果（記録欄）
