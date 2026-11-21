@@ -203,6 +203,18 @@ evidence_root_ok() {
 # 実行ファイルのパスから、ビルドし直したときに付く " (deleted)" を外す。
 exe_of() { local e; e="$(readlink "/proc/$1/exe" 2>/dev/null)" || return 1; printf '%s\n' "${e% (deleted)}"; }
 
+# 呼び出し元から引き継いだ fd（端末の /dev/ptmx など）を閉じる。子の起動の直前に使い、
+# 環境チェックの「開いているファイル」に、子が自分で開いたものだけが残るようにする。
+# env -i は環境変数だけで fd は継承するため、fd は別に閉じる。
+close_fds_above_stderr() {
+  local fd_path fd
+  for fd_path in /proc/self/fd/*; do
+    fd="${fd_path##*/}"
+    [ "${fd}" -gt 2 ] 2>/dev/null || continue
+    eval "exec ${fd}>&-" 2>/dev/null || true
+  done
+}
+
 # environ（NUL 区切り）のファイルから、forbidden のラベルのうち名前がある（=値は見ない）ものを返す。
 # 読めなかったときは何も返さず 2 で終わる（「禁止の変数なし」と取り違えない）。
 forbidden_env_present() {
@@ -700,7 +712,7 @@ main() {
   if [ -n "${other}" ]; then
     record FAIL "起動: 二重起動の確認（ビルドの後）" "同じ実行ファイルの demo-serve が動いている pid=${other# }。動かさない"; return 1
   fi
-  coproc DS { exec env -i PATH="/usr/bin:/bin" HOME="${HOME}" "${BIN}" > "${EV}/server.stdout" 2> "${EV}/server.stderr"; }
+  coproc DS { close_fds_above_stderr; exec env -i PATH="/usr/bin:/bin" HOME="${HOME}" "${BIN}" > "${EV}/server.stdout" 2> "${EV}/server.stderr"; }
   PID="${DS_PID}"; DS_IN="${DS[1]}"
   for _ in $(seq 50); do [ -s "${EV}/server.stdout" ] && break; sleep 0.1; done
   local line; line="$(cat "${EV}/server.stdout")"

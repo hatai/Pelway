@@ -94,6 +94,12 @@ ln -s "${tmp}/elsewhere" "${tmp}/ev-root/568-link"
 expect_eq "make_run_dir: refuses a symlink under the root" "$(make_run_dir "${tmp}/ev-root" "568-link/run1" > /dev/null 2>&1 && echo 0 || echo 1)" 1
 expect_eq "make_run_dir: wrote nothing through the symlink" "$(find "${tmp}/elsewhere" -mindepth 1 | grep -c .)" 0
 
+# close_fds_above_stderr: 引き継いだ fd だけを閉じ、標準入出力は残す（子に /dev/ptmx などを渡さない）。
+expect_eq "close_fds_above_stderr: inherited fd is closed" \
+  "$(exec 9>/dev/null; (close_fds_above_stderr; echo x 2>/dev/null >&9 && echo open || echo closed))" "closed"
+expect_eq "close_fds_above_stderr: stdout stays open" \
+  "$(exec 9>/dev/null; (close_fds_above_stderr; echo ok))" "ok"
+
 # steps_complete: 送った件数ぶんの .req と .resp がそろっているときだけ 0。
 mkdir -p "${tmp}/steps"
 : > "${tmp}/steps/01-a.req"; : > "${tmp}/steps/01-a.resp"; : > "${tmp}/steps/02-b.req"; : > "${tmp}/steps/02-b.resp"
