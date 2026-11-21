@@ -31,9 +31,10 @@ fn timed(cmd: &std::ffi::OsStr) -> Command {
 }
 
 /// `limit` を過ぎたら子と孫ごと SIGKILL で止めるコマンド。webhook の送信の期限を守るため、
-/// `timed` の SIGTERM の後の猶予は置かない。`limit` が 0 なら起動しない。
+/// `timed` の SIGTERM の後の猶予は置かない。`limit` が 1 ミリ秒より短ければ起動しない
+/// （秒の小数 3 桁で `0.000` になると、timeout は制限なしで実行するため）。
 fn killed_after(cmd: &str, limit: Duration) -> Option<Command> {
-    if limit.is_zero() {
+    if limit < Duration::from_millis(1) {
         return None;
     }
     let mut c = Command::new("timeout");
@@ -732,6 +733,14 @@ mod tests {
     use std::os::unix::fs::symlink;
 
     /// 偽の /proc と HOME を作り、`<pid>/exe` の向き先ごとに選ばれるかを確かめる。
+    #[test]
+    fn killed_after_never_runs_without_a_limit() {
+        assert!(killed_after("true", Duration::from_micros(400)).is_none());
+        let c = killed_after("true", Duration::from_millis(1)).unwrap();
+        let args: Vec<_> = c.get_args().collect();
+        assert_eq!(args, ["-s", "KILL", "0.001", "true"]);
+    }
+
     #[test]
     fn server_t3_only_under_home_runtime() {
         let root = std::env::temp_dir().join(format!("agent-watch-t3bin-{}", std::process::id()));
