@@ -133,6 +133,14 @@ check cond_rec2b_single_request docs/technical.md \
   '発言と同じ 1 つの要求' \
   '発言に付いていない添付'
 
+# 数え直し round 3 の must-fix 対応: 受信はストリームで一時領域へ書き、全量をメモリに
+# 持たない。ダウンロードは常に添付として返し、MIME sniffing をさせない。
+check cond_rec3_streaming docs/technical.md \
+  '全量をメモリに保持しません'
+check cond_rec3_download_headers docs/technical.md \
+  'Content-Disposition: attachment' \
+  'X-Content-Type-Options: nosniff'
+
 # 条件9: 外部との境界（接続だけでは添付を送らない、外へ出すときは ActionSnapshot
 # に hash を固定）。
 check cond9_boundary docs/technical.md \
