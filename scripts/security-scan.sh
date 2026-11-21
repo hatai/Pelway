@@ -58,7 +58,9 @@ case "$tool" in
     # あると「Error during extraction:」で始まる行を作れるため、エラーの行だけにする。
     # --no-call-analysis=all: 呼び出し解析（Go は既定で有効）は失敗を標準エラーに出すだけで、
     # 検出があれば 1 を返して見分けられないため、使わない（依存のバージョンの照合だけにする）。
-    osv-scanner scan source --verbosity error --no-call-analysis=all --recursive --format json --output-file "$report" . \
+    # --no-resolve: マニフェスト（pom.xml など）の推移的な依存の解決は、PR の作者が指定できる
+    # レジストリへランナーから取りに行くため、使わない（ロックファイルの照合だけにする）。
+    osv-scanner scan source --verbosity error --no-call-analysis=all --no-resolve --recursive --format json --output-file "$report" . \
       2>"$out_dir/osv-scanner.stderr" || rc=$?
     found_rc=1
     ;;
@@ -91,32 +93,44 @@ if [[ "$tool" == semgrep ]]; then
 fi
 
 # 検出の一覧（Markdown の表の行）と件数を作る。件数は JSON の検出の数から数える
-# （ファイル名などに改行があっても件数が増えないように）。表のセルでは改行を空白にし、
-# ASCII の記号をすべて \ でエスケープする。パスなどは PR の作者が決められるため、リンク・
-# 装飾・HTML として解釈させず、元の文字のまま表示する（| のエスケープで列も崩れない）。
-cell='def cell: tostring | gsub("[\\r\\n]"; " ") | gsub("(?<c>[!-/:-@\\[-`{-~])"; "\\\(.c)");'
-# ジョブサマリーは 1 ステップ 1 MiB を超えると載らないため、一覧は先頭の max_rows 行までにする。
-max_rows=500
+# （ファイル名などに改行があっても件数が増えないように）。
+# パスなどは PR の作者が決められるため、表のセルはコードスパン（`...`）にして、リンク・装飾・
+# HTML・メールアドレスの自動リンクとして解釈させない。囲む ` の数は値の中の ` の最長の並びより
+# 1 つ多くし、改行は空白に、| は \| にする（GFM の表ではコードスパンの中でも \| が | になる）。
+# shellcheck disable=SC2016 # jq の式（$n など）をそのまま渡す
+cell='def cell: tostring | gsub("[\\r\\n]"; " ") | gsub("\\|"; "\\|")
+  | ([match("`+"; "g").length] | max // 0) as $n | ("`" * ($n + 1)) as $f | "\($f) \(.) \($f)";'
 case "$tool" in
   gitleaks)
     header='| 規則 | 場所 | コミット |'
     count="$(jq 'length' "$report")"
-    rows="$(jq -r --argjson n "$max_rows" "$cell"' .[:$n][] | "| \(.RuleID | cell) | \("\(.File):\(.StartLine)" | cell) | \(.Commit[0:12] | cell) |"' "$report")"
+    rows_json="$(jq "$cell"' [.[] | "| \(.RuleID | cell) | \("\(.File):\(.StartLine)" | cell) | \(.Commit[0:12] | cell) |"]' "$report")"
     places="$(jq '[.[] | "\(.RuleID) \(.File):\(.StartLine)"] | unique | length' "$report")"
     ;;
   semgrep)
     header='| 規則 | 場所 | 重大度 |'
     count="$(jq '.results | length' "$report")"
-    rows="$(jq -r --argjson n "$max_rows" "$cell"' .results[:$n][] | "| \(.check_id | cell) | \("\(.path):\(.start.line)" | cell) | \(.extra.severity | cell) |"' "$report")"
+    rows_json="$(jq "$cell"' [.results[] | "| \(.check_id | cell) | \("\(.path):\(.start.line)" | cell) | \(.extra.severity | cell) |"]' "$report")"
     errors="$(jq '.errors | length' "$report")"
     ;;
   osv-scanner)
     header='| パッケージ | 勧告 | ロックファイル |'
     count="$(jq '[.results[]?.packages[]?] | length' "$report")"
-    rows="$(jq -r --argjson n "$max_rows" "$cell"' [.results[]? | .source.path as $p | .packages[]
-      | "| \("\(.package.name) \(.package.version)" | cell) | \([.vulnerabilities[].id] | join(", ") | cell) | \($p | cell) |"][:$n][]' "$report")"
+    rows_json="$(jq "$cell"' [.results[]? | .source.path as $p | .packages[]
+      | "| \("\(.package.name) \(.package.version)" | cell) | \([.vulnerabilities[].id] | join(", ") | cell) | \($p | cell) |"]' "$report")"
     ;;
 esac
+
+# ジョブサマリーは 1 ステップ 1 MiB を超えると丸ごと載らない。一覧の行は UTF-8 のバイト数の
+# 合計が row_budget に収まる先頭の行までにする（見出しや注記の分の余裕を残す）。
+row_budget="${SECURITY_SCAN_ROW_BUDGET:-900000}"
+rows="$(jq -r --argjson b "$row_budget" '
+  reduce .[] as $r ({n: 0, out: [], full: false};
+    if .full then . elif .n + ($r | utf8bytelength) + 1 > $b then .full = true
+    else .n += ($r | utf8bytelength) + 1 | .out += [$r] end)
+  | .out[]' <<<"${rows_json:-[]}")"
+shown=0
+if [[ -n "$rows" ]]; then shown="$(printf '%s\n' "$rows" | wc -l)"; fi
 
 {
   echo "## $tool"
@@ -132,10 +146,10 @@ esac
     echo
     echo "$header"
     echo "|---|---|---|"
-    printf '%s\n' "$rows"
-    if ((count > max_rows)); then
+    if ((shown > 0)); then printf '%s\n' "$rows"; fi
+    if ((count > shown)); then
       echo
-      echo "一覧は先頭 ${max_rows} 件だけ載せた（残り $((count - max_rows)) 件は省略。全件は $report）。"
+      echo "一覧は先頭 ${shown} 件だけ載せた（残り $((count - shown)) 件は、ジョブサマリーの大きさの上限のため省略。全件は $report）。"
     fi
   fi
   if [[ "${errors:-0}" != 0 ]]; then

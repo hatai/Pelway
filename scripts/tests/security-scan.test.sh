@@ -7,6 +7,8 @@
 #   - gitleaks の検出の値（Secret・Match）はサマリーにもログにも出さない
 # 偽物は、渡された出力先（--report-path / --output の次の引数）へ STUB_JSON の内容を書き、
 # STUB_RC の終了コードで終わる。本物のツールの JSON の形は各ツールの公式の出力に合わせた。
+# 期待する文字列にはコードスパンの ` をそのまま書くため、単一引用符の中の ` を許す。
+# shellcheck disable=SC2016
 set -uo pipefail
 
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/security-scan.sh"
@@ -25,6 +27,7 @@ for a in "$@"; do
   prev="$a"
 done
 if [[ -n "$out" && -n "${STUB_JSON:-}" ]]; then printf '%s' "$STUB_JSON" >"$out"; fi
+if [[ -n "$out" && -n "${STUB_JSON_FILE:-}" ]]; then cp "$STUB_JSON_FILE" "$out"; fi
 if [[ -n "${STUB_ARGS:-}" ]]; then printf '%s\n' "$@" >"$STUB_ARGS"; fi
 echo "stub $(basename "$0") $*" >&2
 if [[ -n "${STUB_STDERR:-}" ]]; then printf '%s\n' "$STUB_STDERR" >&2; fi
@@ -71,8 +74,8 @@ want_absent gitleaks-clean "$REPLY_LOG" "::warning"
 run_case gitleaks-hit gitleaks 2 "$gitleaks_hit" 0
 want_contains gitleaks-hit "$REPLY_LOG" "::warning"
 want_contains gitleaks-hit "$REPLY_LOG" "1 件"
-want_contains gitleaks-hit "$REPLY_SUMMARY" 'github\-pat'
-want_contains gitleaks-hit "$REPLY_SUMMARY" 'docs\/a\.md\:12'
+want_contains gitleaks-hit "$REPLY_SUMMARY" '` github-pat `'
+want_contains gitleaks-hit "$REPLY_SUMMARY" '` docs/a.md:12 `'
 want_contains gitleaks-hit "$REPLY_SUMMARY" "0123456789ab"
 want_absent gitleaks-hit "$REPLY_SUMMARY" "$secret_value"
 want_absent gitleaks-hit "$REPLY_LOG" "$secret_value"
@@ -81,22 +84,24 @@ run_case gitleaks-error gitleaks 1 "" 1
 gitleaks_odd='[{"RuleID":"r","File":"a\nb|c.txt","StartLine":1,"Commit":"3333333333333333"}]'
 run_case gitleaks-odd-path gitleaks 2 "$gitleaks_odd" 0
 want_contains gitleaks-odd-path "$REPLY_LOG" "検出 1 件"
-want_contains gitleaks-odd-path "$REPLY_SUMMARY" 'a b\|c\.txt\:1'
-# 表のセルでは ASCII の記号をすべて \ でエスケープし、パスに Markdown の記号（リンク・強調・HTML・
-# 文字参照）があっても書式として解釈させず、元の文字のまま表示する。
-# shellcheck disable=SC2016 # Markdown の記号（` など）をそのまま渡す
-gitleaks_md='[{"RuleID":"r","File":"[x](https://e.invalid)*b*<i>&amp;`c`","StartLine":1,"Commit":"4444444444444444"}]'
+want_contains gitleaks-odd-path "$REPLY_SUMMARY" '` a b\|c.txt:1 `'
+# 表のセルはコードスパンにし、パスに Markdown の記号（リンク・強調・HTML・文字参照・
+# メールアドレス・`）があっても書式や自動リンクとして解釈させず、元の文字のまま表示する。
+# 囲む ` は値の中の最長の並び（``）より 1 つ多い ``` にする。
+gitleaks_md='[{"RuleID":"r","File":"[x](https://e.invalid)*b*<i>&amp;`c``d`|a@b.invalid","StartLine":1,"Commit":"4444444444444444"}]'
 run_case gitleaks-md-path gitleaks 2 "$gitleaks_md" 0
-# shellcheck disable=SC2016
-want_contains gitleaks-md-path "$REPLY_SUMMARY" '\[x\]\(https\:\/\/e\.invalid\)\*b\*\<i\>\&amp\;\`c\`\:1'
-want_absent gitleaks-md-path "$REPLY_SUMMARY" '[x](https'
-# ジョブサマリーの大きさの上限（1 ステップ 1 MiB）に収めるため、一覧は先頭 500 件までにする。
-gitleaks_many="$(jq -cn '[range(501) | {RuleID:"r",File:"f\(.)",StartLine:1,Commit:"5555555555555555"}]')"
-run_case gitleaks-many gitleaks 2 "$gitleaks_many" 0
-want_contains gitleaks-many "$REPLY_SUMMARY" "検出 501 件"
-want_contains gitleaks-many "$REPLY_SUMMARY" "残り 1 件は省略"
-want_contains gitleaks-many "$REPLY_SUMMARY" '| f499\:1 |'
-want_absent gitleaks-many "$REPLY_SUMMARY" '| f500\:1 |'
+want_contains gitleaks-md-path "$REPLY_SUMMARY" '| ``` [x](https://e.invalid)*b*<i>&amp;`c``d`\|a@b.invalid:1 ``` |'
+# ジョブサマリーの大きさの上限（1 ステップ 1 MiB）に収めるため、一覧の行は UTF-8 のバイト数の
+# 合計で切る。長いパスの行が並んでも上限を超えず、省略した件数を書く。
+long="$(printf 'p%.0s' {1..2000})"
+# 環境変数には入りきらない大きさのため、偽物にはファイルで渡す（STUB_JSON_FILE）。
+jq -cn --arg l "$long" '[range(600) | {RuleID:"r",File:"\($l)\(.)",StartLine:1,Commit:"5555555555555555"}]' >"$work/gitleaks-many.json"
+STUB_JSON_FILE="$work/gitleaks-many.json" run_case gitleaks-many gitleaks 2 "" 0
+want_contains gitleaks-many "$REPLY_SUMMARY" "検出 600 件"
+want_contains gitleaks-many "$REPLY_SUMMARY" "件は、ジョブサマリーの大きさの上限のため省略"
+summary_bytes="$(wc -c <"$work/summary-gitleaks-many.md")"
+((summary_bytes <= 1048576)) || failures+=("gitleaks-many: summary is $summary_bytes bytes, want <= 1048576")
+((summary_bytes >= 800000)) || failures+=("gitleaks-many: summary is $summary_bytes bytes, want rows up to the budget")
 # マージコミットの差分（競合解消で足した行）も走査するため、git log に -m を渡す。
 want_contains gitleaks-merge-diff "$(cat "$work/args-gitleaks-clean")" "--log-opts=-m HEAD"
 # -m では同じ場所の値が複数のコミットで重ねて出るため、場所の重複を除いた数もサマリーに出す。
@@ -111,9 +116,9 @@ run_case semgrep-clean semgrep 0 '{"results":[],"errors":[]}' 0
 want_absent semgrep-clean "$REPLY_LOG" "::warning"
 run_case semgrep-hit semgrep 1 "$semgrep_hit" 0
 want_contains semgrep-hit "$REPLY_LOG" "2 件"
-want_contains semgrep-hit "$REPLY_SUMMARY" 'rust\.lang\.security\.unsafe\-usage'
-want_contains semgrep-hit "$REPLY_SUMMARY" 'crates\/x\/src\/lib\.rs\:7'
-want_contains semgrep-hit "$REPLY_SUMMARY" '\.github\/workflows\/a\.yml\:3'
+want_contains semgrep-hit "$REPLY_SUMMARY" '` rust.lang.security.unsafe-usage `'
+want_contains semgrep-hit "$REPLY_SUMMARY" '` crates/x/src/lib.rs:7 `'
+want_contains semgrep-hit "$REPLY_SUMMARY" '` .github/workflows/a.yml:3 `'
 run_case semgrep-error semgrep 2 "" 2
 # 検出（終了コード 1）があっても、level が error の解析エラーはツールの失敗として扱う
 # （semgrep は検出の終了コードをエラーより優先するため、終了コードだけでは見分けられない）。
@@ -131,11 +136,13 @@ run_case osv-clean osv-scanner 0 '{"results":[]}' 0
 want_absent osv-clean "$REPLY_LOG" "::warning"
 # 呼び出し解析（Go は既定で有効）は失敗を検出の終了コードに埋もれさせるため、無効にする。
 want_contains osv-no-call-analysis "$(cat "$work/args-osv-clean")" "--no-call-analysis=all"
+# マニフェストの推移的な依存の解決は、PR の作者が指定できるレジストリへ取りに行くため、使わない。
+want_contains osv-no-resolve "$(cat "$work/args-osv-clean")" "--no-resolve"
 run_case osv-hit osv-scanner 1 "$osv_hit" 0
 want_contains osv-hit "$REPLY_LOG" "1 件"
-want_contains osv-hit "$REPLY_SUMMARY" 'rsa 0\.9\.8'
-want_contains osv-hit "$REPLY_SUMMARY" 'RUSTSEC\-2023\-0071'
-want_contains osv-hit "$REPLY_SUMMARY" 'Cargo\.lock'
+want_contains osv-hit "$REPLY_SUMMARY" '` rsa 0.9.8 `'
+want_contains osv-hit "$REPLY_SUMMARY" '` RUSTSEC-2023-0071, GHSA-c38w-74pg-36hr `'
+want_contains osv-hit "$REPLY_SUMMARY" '` /w/Cargo.lock `'
 run_case osv-error osv-scanner 127 "" 127
 # 検出（終了コード 1）があっても、ロックファイルの抽出に失敗していれば失敗にする
 # （osv-scanner 2.7.1 は抽出の失敗を標準エラーに出すだけで、検出があれば 1 を返す）。
