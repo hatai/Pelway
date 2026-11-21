@@ -85,7 +85,7 @@ sandbox に止められた操作（書き込み・実行・ネットワークな
 - マージの確認は、notify-grokbot の `pull_request`（`closed`、`merged: true`）の通知と、巡回での PR の状態で行う。マージされれば従来どおり Issue から `agent:working`・`agent:devin` を外す
 - `automerge` ラベルを付けたあとに新しい push や Draft への戻しがあったら、指揮役がラベルを外す。条件が再び揃ったら（Approve のやり直しを含む）付け直す
 - Kodiak の自動更新（main への追いつき）が取り込みを行ったあとも、指揮役は取り込みのコミットに main 以外の差分がないことを確かめる。Kodiak はコンフリクトを解消しないため、その取り込みは「コンフリクトの解消を含まない main の取り込み」に当たる（2026-11-19 の hatai の決定、Issue #480）。main 以外の差分があれば変更として扱い、ラベルを外してレビューと QA をやり直させる
-- QA の合格コメントの確認: QA の合格は PR コメントで残す（形式は skill `command-team` の「マージ」）。1 行目が `QA-PASS pr=<番号> sha=<40桁> run=<CI の run id> verify=pass pr-size=pass` であることと、sha が PR の現在の head と一致することを確かめる。PR 本文だけの「合格」は無効で、sha が一致しない合格コメントはその head では使えない（head が変わったら QA のやり直しを依頼する）
+- QA の合格コメントの確認: QA の合格は PR コメントで残す（形式は skill `command-team` の「マージ」）。1 行目が `QA-PASS pr=<番号> sha=<40桁> run=<CI の run id> verify=pass pr-size=pass` であることと、sha が PR の現在の head と一致することと、コメントの作成者が QA 専用の App `pelway-qa`（`author.login` が `pelway-qa`・`pelway-qa[bot]`・`app/pelway-qa` のいずれか）であることを確かめる。ほかの作成者（hatai を含む）のコメントは、形式と sha が合っていても QA の合格に数えない（作成者の確かめ方は skill `command-team` の「マージ」）。PR 本文だけの「合格」は無効で、sha が一致しない合格コメントはその head では使えない（head が変わったら QA のやり直しを依頼する）
 - Kodiak がコンフリクト等でマージできないときは、Kodiak が PR にコメントして `automerge` ラベルを外す（`.kodiak.toml` の `merge.notify_on_conflict` の既定）。巡回で、Approve 済みなのに `automerge` ラベルが無い PR に Kodiak のマージ不可コメントがあるか、またはラベルが付いたまま長時間 open のままのものを検知する。前者は手当スレッドを立てて main の取り込みと衝突解消をさせ、終わったら指揮役が `automerge` ラベルを付け直す。後者（キューが詰まる・応答しない）は hatai の admin マージへの切り戻しの判断材料として人間に知らせる
 - `automerge` ラベルの付け外しは、conductor-watch が付け外しの時刻を記録と突き合わせて検査する（actor だけでは判定しない）。裏付けが取れない操作は「出どころ不明」として `LABEL unbacked` 行で watch.log に出る。Kodiak がコンフリクトで外したものは、Kodiak のマージ不可コメントを指揮役が確認して正当として記録する
 

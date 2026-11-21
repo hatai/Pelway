@@ -210,7 +210,7 @@ hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終�
 - その Approve のレビューの nit に行頭が `[文書のずれ]` のものが残っていないこと（残っていれば実装担当に直させる。skill `implement-issue` の手順 9「Approve のとき」）
 - 必須チェック（`mise run verify` と `pr-size`）が通っている
 - Draft ではなく、タイトルに `WIP:` がない
-- QA が同じ head の sha で合格の PR コメントを残している（QA 合格コメントの形式はこの節の末尾）
+- QA が `pelway-qa` の名義で、同じ head の sha で合格の PR コメントを残している（QA 合格コメントの形式と作成者の確かめ方はこの節の末尾）
 - Approve と QA 合格のあとに許すのは、コンフリクトの解消を含まない main の取り込みだけ。指揮役は、取り込みのコミットに main 以外の差分がないことを確かめてからラベルを付ける（`git rev-list <Approve した sha>..<head> --no-merges ^origin/main` が 0 件。それ以外のコミットがあればレビューと QA をやり直す。Kodiak がブランチ最新化で作る main 取り込みのマージコミットはこの条件を壊さない）
 - コンフリクトを解消したときは変更として扱い、新しい head でレビューと QA をやり直す
 
@@ -232,6 +232,8 @@ Kodiak が応答しない・詰まった場合（キューの切り戻し）と�
 QA 合格コメント:
 
 - QA の合格は PR コメントで残す。PR 本文だけの「合格」は無効
+- QA の合格に数えるのは、QA 専用の GitHub App `pelway-qa` の名義のコメントだけ（`scripts/agent-gh qa comment` で投稿する。`docs/dev-environment.md` の「QA 担当の GitHub App（pelway-qa）」）。コメントの作成者（`author.login`）が `pelway-qa`・`pelway-qa[bot]`・`app/pelway-qa` のいずれかと一致することを、`scripts/agent-gh dev pr view <M> --json comments --jq '.comments[] | {author: .author.login, body}'` で確かめる（いずれも QA の App を指す表記。API の応答によって表記が揺れる）。それ以外の作成者のコメントは、本文の形式と sha が合っていても QA の合格に数えない。hatai の名義のコメントも QA の合格に数えず、`pelway-qa` の名義のコメントは hatai 本人の裏付けに数えない（2026-11-19 の hatai の決定、Issue #480）
+- `pelway-qa` の名義で合格コメントを投稿できないあいだ（App のトークンが使えないなど）は、QA の合格をもとに `automerge` を付けない。マージは hatai が判断する
 - 1 行目を `QA-PASS pr=<番号> sha=<40桁> run=<CI の run id> verify=pass pr-size=pass` に固定する。sha は短縮しない
 - 2 行目以降に「未検証：<項目 または なし>」と判定を書く
 - 指揮役は、コメントの sha が PR の現在の head と一致することを確かめてからラベルを付ける（head が変わったら QA のやり直しを依頼する）
