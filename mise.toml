@@ -196,6 +196,20 @@ if [ ! -x "$profdata" ] || [ ! -x "$cov" ]; then
 fi
 "$profdata" --version
 "$cov" --version
+# components の名前が rustup の導入済み一覧（-<target> を除いた名前）にあるかを照合する。
+# 別名（llvm-tools-preview など）で書くと mise が導入済みと判定できず、mise exec のたびに
+# rust を入れ直す（#596）。成分の実体は上の検査で揃っていても、名前のずれはここで落とす。
+version=$(mise config get -f mise.toml tools.rust.version)
+installed=$(rustup component list --installed --toolchain "$version" | sed "s/-$host\\$//")
+missing=""
+for c in $(mise config get -f mise.toml tools.rust.components | tr -d '[]",'); do
+  printf '%s\\n' "$installed" | grep -qxF "$c" || missing="$missing $c"
+done
+if [ -n "$missing" ]; then
+  echo "rust.components in mise.toml has name(s) not in 'rustup component list --installed --toolchain $version':$missing. Use the name rustup lists (without the -$host suffix)." >&2
+  exit 1
+fi
+echo "rust.components match rustup installed components:" $(mise config get -f mise.toml tools.rust.components | tr -d '[]",')
 """
 
 [tasks.hk-validate]

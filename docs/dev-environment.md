@@ -36,6 +36,7 @@ mise trust        # 初回のみ。プロジェクト設定の信頼確認（グ
 mise bootstrap    # 上の1〜3を順に実行
 ```
 
+- `hk install --mise` は `.git/config` に `hook.hk-pre-commit.command`（`test "${HK:-1}" = "0" || mise x -- hk run pre-commit --from-hook`）を書く。pre-commit の実体はこの行で、`mise x` が `hk.pkl` を読む前に動く。コミット時の `mise lock` の一覧や rust の入れ直しの出力は `hk.pkl` ではなく、この `mise x` から出る（`git config --get hook.hk-pre-commit.command` で確かめられる）。
 - 導入済みのものはスキップされる（宣言と現在の差分だけを適用）。このため `mise bootstrap` は何度実行してもよく、podman 導入済みの環境では packages 部分で sudo の入力を求められない。
 - 各段階は上表のとおり単独のコマンドでも実行できる。
 - `mise bootstrap` の tools 部分は `[tools]` に加えてグローバル設定のツールも確認対象にする（mise の通常動作）。
@@ -55,7 +56,7 @@ mise bootstrap    # 上の1〜3を順に実行
 | `mise run test` | `cargo test --workspace --locked` |
 | `mise run build` | `cargo build --workspace --locked` |
 | `mise run fetch` | 依存クレートの取得（`cargo fetch --locked`）。ビルド前に取得を済ませる |
-| `mise run toolchain-check` | rustc / cargo / rustfmt / clippy の存在とバージョン確認（rustfmt・clippy を含まない最小構成だと失敗する） |
+| `mise run toolchain-check` | rustc / cargo / rustfmt / clippy / llvm-tools の存在とバージョン確認（rustfmt・clippy を含まない最小構成だと失敗する）。加えて `mise.toml` の rust の `components` の名前が `rustup component list --installed` の名前（`-<target>` を除く）と一致するかを照合し、ずれた名前を出して失敗する |
 | `mise run hk-validate` / `hk-check` | `hk.pkl` の検証 / リポジトリ全体の読み取り専用検査（cargo を伴わないステップだけ。cargo を伴う検査は `fmt-check` / `clippy` が担当する） |
 | `mise run fnox-check` | `fnox list`（定義の一覧確認。秘密値の取得・表示はしない） |
 | `mise run pitchfork-check` | pitchfork のバージョン確認と、`pitchfork.toml` に `agent-watch` が定義されていることの確認 |
@@ -95,13 +96,13 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 | `static` | `static (hk / fnox / pitchfork)` | `verify-static`（hk / fnox / pitchfork / cargo-deny / shellcheck）＋ `mise exec -- jactionlint` | 使わない（cargo-deny は cargo metadata を読むだけでコンパイルしない） |
 | `lint` | `lint (fmt / clippy)` | `verify-lint` | clippy |
 | `test` | `test (cargo test)` | `verify-test` | test |
-| `coverage` | `octocov (coverage diff)` | `coverage` タスク ＋ `mise exec -- octocov` | 計測ビルド |
+| `coverage` | `octocov (coverage diff)` | `coverage` タスク ＋ `k1LoW/octocov-action`（octocov 本体は v0.83.5 に固定） | 計測ビルド |
 | `pr-size` | `pr-size` | `scripts/pr-size.sh`（mise を使わない） | 使わない |
 | `verify` | `mise run verify` | 上の 3 ジョブの集約 | — |
 
 - `.github/workflows/verify.yml` が、`main` 向け Pull Request と手動実行（`workflow_dispatch`）で実行する。main への push でも実行し、その run が main のカバレッジレポートを artifact に保存する（カバレッジの増減表示はこの保存のあとの PR から出る）。
 - クライアント（`yeslogic-fontconfig-sys` など）のビルドに必要な Linux システムパッケージは、cargo をビルドする `lint` / `test` / `coverage` の各ジョブで `apt-get` により `libfontconfig1-dev` を入れる（Ubuntu 24.04 では `libfontconfig-dev` を引く移行パッケージ。`fontconfig.pc` を提供する）。`static` ジョブは cargo を伴わないため要らない。`mise bootstrap`（apt:podman・sudo）は使わない。ツールのバージョンは `mise.toml` / `mise.lock` に従う。
-- mise の導入は公式 Action（`jdx/mise-action`）で行う。`version: v2026.11.5`・`install_args: --locked`・`cache: false` を指定し、導入後にバージョンを検証している。mise-action のツールキャッシュは復元内容を `mise.lock` と突き合わせない（公式の注意）ため無効化し、ダウンロード用のキャッシュも足さない。Action 参照の sha 固定には GitHub 公式 lockfile（`.github/workflows/actions.lock`、担当が `gh actions-lock` で生成）を使う。workflow 側の参照は `actions/checkout@v4.2.2`、`jdx/mise-action@v2.4.4`、`actions/cache@v6.1.0`。lockfile 上のコミットはそれぞれ `11bd71901bbe5b1630ceea73d27597364c9af683`、`c37c93293d6b742fc901e1406b8f764f6fb19dac`、`55cc8345863c7cc4c66a329aec7e433d2d1c52a9` で、どれも公式タグが指すコミットと一致する。
+- mise の導入は公式 Action（`jdx/mise-action`）で行う。`version: v2026.11.5`・`install_args: --locked`・`cache: false` を指定し、導入後にバージョンを検証している。mise-action のツールキャッシュは復元内容を `mise.lock` と突き合わせない（公式の注意）ため無効化し、ダウンロード用のキャッシュも足さない。Action 参照の sha 固定には GitHub 公式 lockfile（`.github/workflows/actions.lock`、担当が `gh actions-lock` で生成）を使う。workflow 側の参照は `actions/checkout@v7.0.1`、`jdx/mise-action@v5.2.7`、`actions/cache@v6.1.0`。公式タグが指すコミットはそれぞれ `3d3c42e5aac5ba805825da76410c181273ba90b1`、`b44d12e7d0d8ee7461bb893e1b1993500433185b`、`55cc8345863c7cc4c66a329aec7e433d2d1c52a9`。
 - この workflow に秘密は不要。workflow 全体の既定の権限は `contents: read` のみで、`coverage` ジョブだけがジョブ単位で `pull-requests: write`（PR コメント投稿）と `actions: write`（octocov の base ブランチの過去レポート artifact の取得と、保存のたびの前レポート削除）を追加する。`fnox-check` は `fnox list`（定義一覧の確認）のみで、秘密値の取得・表示はしない。
 
 ### CI 固有の cargo 設定
@@ -170,6 +171,34 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 - v0.7 の verify.py は、原本（`/workspace/pelway-technical-docs`）と凍結 ZIP が原本作成環境にだけ存在するため、それらを `not-run` として結果 JSON に記録し、リポジトリ内で確かめられる検査（コピーの hash・相対リンク・節対応・アンカー・UI 文言）だけで合否を判定する。
 - 通知は `notify-grokbot.yml` の `workflow_run`（`workflows` に `nightly` を登録）が担う。成功は `digest`、失敗は `immediate` で Grok Bot に届き、`run_url` から失敗ジョブを確認できる。
 - 負荷試験の実行と収集するメトリクスの方針は [負荷試験とメトリクス](load-testing.md) に置く。nightly への組み込みは基盤の実装時に判断する。
+
+### セキュリティスキャン（security-scan）
+
+- `.github/workflows/security-scan.yml` が、main 向け Pull Request・main への push・手動実行で、秘密情報・危ないコードのパターン・脆弱な依存関係を検出する（Issue #571）。すべて無料の OSS で、有料サービス・アカウント登録・スキャナー用のトークンは使わない（checkout は GitHub Actions が自動で発行する読み取り用のトークンを使う）。
+- 報告のみ: 検出があってもジョブは成功し、件数を `::warning::` に、一覧（場所と種類）をジョブサマリーに出す。ツール自体の失敗（ネットワーク断・設定の誤りなど）はジョブを失敗させる。必須チェックにはしていない（必須チェックにするかは hatai が決める）。本体は `scripts/security-scan.sh`、テストは `scripts/tests/security-scan.test.sh`。
+- ツールの診断（標準エラー）: 3 つのツールとも、診断には PR の作者が決められる値（設定の行・パス・取得先の URL など）が入りうり、失敗が終了コードに出ないことがある。そのため次のように扱う。
+  - 標準エラーは公開のジョブログに出さず、ランナー上の一時ファイルにだけ書く。ログには失敗の種類と行数だけを出す。中身は手元で `SECURITY_SCAN_OUT=<dir> bash scripts/security-scan.sh <tool>` を実行し、`<dir>/<tool>.stderr` を読む（`MISE_ENV=security mise exec --` の下で実行する。Semgrep はイメージの中で実行する）。
+  - Gitleaks と OSV-Scanner はログの水準を error に絞り（`--log-level error`・`--verbosity error`）、標準エラーに 1 行でもあれば、終了コードが検出なし・検出ありでも失敗にする。Gitleaks 8.30.1 は git log の失敗を、OSV-Scanner 2.7.1 はロックファイルの抽出の失敗を、ログに出すだけで終了コードに出さない。
+  - Semgrep は解析エラーを JSON の errors に書き、検出の終了コード 1 をエラーより優先して返す。そのため level が error のエラーがあれば失敗にし、level が warn の構文エラーなどは件数だけをサマリーに出す。
+- OSV-Scanner は `Cargo.lock` の照合だけにする: `--x-no-default-plugins --x-plugins rust/cargolock` で、抽出器を `Cargo.lock` 用だけにする。既定の抽出器（同梱の C/C++ ソースのパスとハッシュを OSV.dev に送る `directory` など）も、`lockfile` プリセット（`pom.xml`・`go.mod` などマニフェストの抽出器を含む）も使わない。PR の作者が足したマニフェストの依存を OSV.dev に照会しないため。別のエコシステムのロックファイルを入れるときは、その抽出器の名前を `scripts/security-scan.sh` に足す。`--no-resolve` でマニフェスト（`pom.xml` など）の推移的な依存を、PR の作者が指定できるレジストリへ取りに行かない。`--no-call-analysis=all` で呼び出し解析も使わない。
+- サマリー: 件数は各ツールの JSON の検出の数から数える。表のセルはコードスパンにする（パスなどは PR の作者が決められるため、リンク・装飾・HTML・メールアドレスの自動リンクとして解釈させない）。改行は空白に、`|` は `\|` にする。ジョブサマリーは 1 ステップ 1 MiB を超えると丸ごと載らないため、一覧の行は UTF-8 のバイト数の合計が 900,000 バイトに収まる先頭の行までにし、省略した件数を書く。
+
+| ジョブ | ツールと版 | 対象 | 導入 |
+|---|---|---|---|
+| `gitleaks (secrets)` | Gitleaks 8.30.1（MIT） | HEAD から辿れる git 履歴全体。マージコミットの差分（競合解消で足した行）も含める（`--log-opts="-m HEAD"`、checkout は `fetch-depth: 0`） | `mise.security.toml`（`MISE_ENV=security`）と `mise.security.lock` |
+| `semgrep (code patterns)` | Semgrep CE 1.186.0（LGPL-2.1） | 作業ツリーのファイル（`tests/` の下を含む。リポジトリ直下の `.semgrepignore` が Semgrep の組み込みの既定の除外パターンを置き換え、今はここでは何も除外しない。ファイルの大きさやバイナリかどうか、未追跡のファイルへの `.gitignore` による Semgrep の選別は残る）。ルールセットは `p/rust`・`p/github-actions`・`r/bash` | 公式イメージ `semgrep/semgrep` を digest 固定した job コンテナ |
+| `osv-scanner (dependencies)` | OSV-Scanner 2.7.1（Apache-2.0） | 作業ツリーのロックファイル（今は `Cargo.lock`） | `mise.security.toml` と `mise.security.lock` |
+
+- 秘密の値は出さない: Gitleaks は `--redact` で値を伏せ、サマリーには規則・場所・コミットだけを書く。`-m` で同じ値が複数のマージコミットに重ねて出るため、サマリーには規則と場所の重複を除いた数も書く。
+- Gitleaks は CLI を直接実行し、`gitleaks-action` は使わない。Action は v2 以降、独自の EULA（改変の禁止、Organization のリポジトリではライセンスキーが必要）で配布されている。CLI 本体は MIT で、版の固定も mise の checksum で揃えられる。
+- Semgrep は Registry のルールをログインなしで取得し、`--metrics=off` で利用状況の送信を止める。Registry のルールセットは実行のたびに最新を取り、版は固定されない（イメージの digest が固定するのはエンジンと依存だけ）。同じコミットでも、日によって検出が変わりうる。Registry のルールは Semgrep Rules License v1.0 で配布されている。利用は「自社の内部の業務目的」に限られ、ルールの再配布とサービスとしての提供は禁じられている（出典: https://semgrep.dev/legal/rules-license ）。このリポジトリでは、自分のコードを CI で検査するために使うだけで、ルールを複製してリポジトリに置かない。秘密情報向けのルールセットは入れない（秘密の検出は Gitleaks が担い、Semgrep は一致した行をそのまま出すため）。
+- Semgrep を mise で入れない理由: PyPI 配布で、mise の pypi バックエンドが作る依存の固定（uv.lock）が 1800 行を超えるため。イメージの digest は依存を含む中身全体を固定する。
+- 版の更新: 週次の `mise-bump.yml` は `MISE_ENV` を付けずに実行するため、`mise.security.toml` の Gitleaks・OSV-Scanner の版は上がらない。Semgrep のイメージの digest も同じ。Gitleaks の検出ルールは本体に入っているため、古い版のままだと新しい種類の秘密を見落とす。今は手で上げる: `MISE_ENV=security mise upgrade --bump aqua:gitleaks/gitleaks aqua:google/osv-scanner`（ツール名を付けないと `mise.toml` の共通のツールも上がる）のあと `MISE_ENV=security mise lock` で `mise.security.lock` を作り直し、Semgrep は新しいタグの digest に `security-scan.yml` を書き換える（workflow の変更は hatai が push する）。
+- OSV-Scanner と cargo-deny（`deny-check`）は、どちらも `Cargo.lock` を RustSec の勧告と照合する点で重なる。違いは次のとおり。
+  - OSV-Scanner は、OSV データベースの他の出所（GHSA など）も見る（今は `Cargo.lock` だけを照合する）。
+  - cargo-deny は `deny.toml` の ignore と警告の扱いを持ち、必須チェックの一部である。
+  - OSV-Scanner には `deny.toml` の ignore が効かないため、cargo-deny が無視した勧告も報告に出る。
+- 除外（`.gitleaksignore`・`.semgrepignore`・`osv-scanner.toml`）は、1 件ずつ理由を書いて足す。`.semgrepignore` を消すと、Semgrep は組み込みの既定の除外一覧（`tests/`・`test/`・`vendor/` など）に戻る。そのため、ファイルは中身が空でも残す。既存の検出を理由に、ルールの無効化や除外の範囲を広げない。
 
 ## GitHub 通知（Grok Bot webhook・notify-grokbot）
 
