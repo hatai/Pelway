@@ -147,3 +147,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 4 に「既存の挙動の回帰テストを足すときは、実装を一時的に変異させて red を示し、変異の内容を PR 本文に書く」を足す。
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）、write-issue（`.agents/skills/write-issue`）
+
+## 実装者メモ（round 7 / PR-3）
+
+対象 head: `4a0dca37`（Issue の指揮役コメント 03:10Z・03:11Z の修正指示に対応）
+
+1. 詰まった箇所: 手順 2: 着手時に読んだ Issue のコメントが、修正指示（03:10Z・03:11Z）より前の分だけで、round 6 を古い指示（fail closed）のまま進めた。Codex の子が指摘して気付き、`2aecad7` 向けの委託を取り消した。
+2. 曖昧だった文: 「その下書きには「AI 生成ではない（定型）」の印を付ける」（#330 コメント 03:10Z）。
+3. 仮定と解釈: 印は `MailDraft.template` と投稿の 1 行（`TEMPLATE_MARK`）の両方とした。台本モード（キー無し）の下書きは LLM の応答として解釈する経路のため印は付かない。「ログ」は runner がログを出さないため、投稿とタスクの記録（`RunnerTask` の Debug）で確かめた。
+4. 足りなかった情報・検証手段: `script_draft` の `template` を false にする変異で 2 テストが red、戻して green。`mise run verify` exit 0、pr-size +786。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 8 の冒頭に「委託の直前に Issue のコメントを末尾から読み直す」を足す。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）
