@@ -135,7 +135,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - レビュー担当は PR のコードを実行しない。PR の head は worktree に取り出さずに読み、verify と pr-size は PR のチェック（CI）の結果で判断する（PR のコードはレビュー担当の秘密鍵を読めるため）
 - 通常の PR のレビューは、実装担当のスレッドが `delegate_task` でレビュー専用プロバイダーの子タスクとして委託する（`role: "review"`、権限は `auto-accept-edits`、worktree は独立 checkout。手順は skill `implement-issue`）。委託の子がレビュー専用プロバイダーの sandbox（ネットワークを GitHub だけに絞る権限プロファイル）を継承することを、`docs/dev-environment.md` の確認手順で確かめてから使う
 - 指揮役が立てるレビュースレッド（指揮役自身の PR・外部投入）は、従来どおりトップレベルのスレッドとして worktree を main から立てる（runbook の「レビューを始める」）
-- レビュースレッドは T3 の Codex インスタンス `codex_review` で動かす。ネットワークは `api.github.com` と `github.com` だけに絞る（Codex の `network_proxy` と、`~/.codex/config.toml` の権限プロファイル `review`）
+- レビュースレッドは T3 の Codex インスタンス `codex_review` で動かす。ネットワークは `api.github.com` と `github.com` だけに絞る（Codex の `network_proxy` と、レビュー担当専用の home `~/.codex-review/config.toml` の権限プロファイル `review`。T3 の MCP サーバーと Codex の GitHub 連携もこの home で止める。設定は `docs/dev-environment.md` の「レビュー担当の Codex」）
 - レビュースレッドは T3 の権限 `auto-accept-edits`（Codex の `workspaceWrite`）で立てる。`full-access` ではコマンドが sandbox の外で動き、ネットワークの制限が効かない。この権限では `.git` が読み取り専用になるので、PR の側のファイルは GitHub API で読む
 - Claude のレビュースレッドは T3 の Claude インスタンス `claude_review` で動かす。skill `review-pr` をそのまま使い、使えるコマンドを読み取り系の `git` と `scripts/agent-gh review` に絞り、ネットワークを `api.github.com` と `github.com` だけに絞る。設定と確認の方法は `docs/dev-environment.md` の「レビュー担当の Claude」。確認が済むまでは使わない
 - Devin CLI のレビュースレッドは T3 の Devin CLI インスタンス `devin_review` で動かす。skill `review-pr` をそのまま使い、権限モードは Devin CLI 公式 sandbox の Autonomous 一択になる（`bypass` は使わない）。`devin_review` は起動ラッパーで `DEVIN_SANDBOX=true` と専用設定（ドメイン許可リスト・permissions deny）を付けて立ち上がり、GitHub 以外への通信とワークスペース外への書き込みを実行時に遮断する。仕組みと採用の条件（確認の記録）は `docs/dev-environment.md` の「レビュー担当の Devin CLI」
