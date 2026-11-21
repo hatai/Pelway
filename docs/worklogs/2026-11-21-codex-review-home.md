@@ -36,3 +36,14 @@
 | `mcp__` で始まるツール（遅延読み込みの一覧を含む） | 0 個。claude.ai のコネクタのツールは出なかった |
 | 設定に残る MCP サーバー | アカウントから同期されたプラグインの MCP サーバー（GitHub・1Password ほか）。どれも接続に失敗したか、認証が要る状態で、ツールは 0 個 |
 | `scripts/agent-gh review api /rate_limit --jq .rate.limit` | 合格（`5000`） |
+
+`permissions.deny` に `SendMessage`・`RemoteTrigger`・`Artifact`・`ShareOnboardingGuide`・`PushNotification` を足した後、`main` のコミットから委託した `claude_review` の子タスクで確かめた（ツールは呼ばず、一覧だけを見た）。
+
+| 項目 | 結果 |
+|---|---|
+| `SendMessage`・`RemoteTrigger`・`Artifact`・`ShareOnboardingGuide`・`PushNotification`・`WebFetch`・`WebSearch` | どれも一覧に無い |
+| `mcp__` で始まるツール | 0 個。GitHub のプラグインの MCP サーバーは、ツールを呼ぶと再接続を試みる状態で、今は認証の形式エラーで失敗している |
+| 一覧に残る組み込みのツール | `Agent`・`Bash`・`Read`・`Skill`・`ToolSearch`・`Workflow`・`ScheduleWakeup` ほか、遅延読み込みの `PublishPlugin`・`DesignSync`・`Cron*` など。許可リストに無いものは承認要求になり、フックが拒否する（呼んでは確かめていない） |
+| `scripts/agent-gh review api /rate_limit --jq .rate.limit` | 合格（`5000`） |
+
+`[projects.` の表は、`~/.codex-review/config.toml` に無い（ホストで `grep -c '^\[projects\.'` が 0）。
