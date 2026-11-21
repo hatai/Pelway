@@ -166,3 +166,14 @@
 5. 改善案: `.agents/skills/verify-pelway/SKILL.md` の前提に「共有 git dir の `pelway/` の上の階層が自分か root の持ち物に見えること（見えない環境ではロックの検査で終了コード 2。検査を緩めず、その環境では証拠になる run は取れない）」を足す。
 
 使ったスキル: implement-issue、verify-pelway
+## 実装者メモ（round 16）
+
+対象 head: 3a19475d983ef310779be5168e3dd83eaad4aadd
+
+1. 詰まった箇所: Claude の round 10（must-fix 1・印の nit 6・印なし nit 2）の直し: (a) bin ロックの鍵を `target_dir_of`（`CARGO_TARGET_DIR` のみ・`mise exec` の外）で決めていたため、`.cargo/config.toml` の `build.target-dir` や `CARGO_BUILD_TARGET_DIR`・mise の `[env]` で別の出力先を持つ run と別の鍵を引きうる → `cargo_target_dir` で、ビルドに使うのと同じ `mise exec` の中で `cargo metadata --no-deps --format-version 1 --offline` を呼び、`.target_directory` を鍵にする（ビルドの前・ロック獲得の前に一度だけ問う）。(b) `try_lock` が `mkdir` 成功後に pid の書き込みで失敗すると `LOCK` が立たず、ロックの残骸が後続の run を止め続ける → 書き込み失敗時に `rm -f` と `rmdir` してから失敗を返す。
+2. 曖昧だった文: 「作業ツリーのロック」「ターゲットのビルド先のロック」（`.agents/skills/verify-pelway/SKILL.md` の 2 章）──「ビルド先」が環境変数だけでなく Cargo の設定まで含む実際の出力先を指すのか曖昧で、`CARGO_TARGET_DIR` だけを見る旧実装を生んだ。いまは「Cargo 自身が報告する `target_directory`」と明記した。
+3. 仮定と解釈: `cargo metadata` が必ず解決済みの出力先を返す、と読んだ（`--offline`・`--no-deps` でも `.target_directory` は設定解決の結果で、ロックの鍵として安定）。終了コード 2 の説明は「引数の間違いに加え、起動できない run（証拠・ロックの置き場、git の確認）」を含む、とレビュアーの指摘を解釈した。
+4. 足りなかった情報・検証手段: 実物の `start_sampler`/`stop_sampler` の組を試す試験が無く（偽物のプロセスだけで試していた）、trap の終了コードと判定のずれを検出できなかった → `observe_sockets` を no-op にし、使い捨ての `DS_IN` を与えて実物の組を試す試験を足した（`OBS_FAILED=0` を要求）。
+5. 改善案: レビュー指摘のうち記述のずれ（`SKILL.md` の終了コード・所有権の前提・名前空間の限界・`proc-fd.txt` の章の参照・`--allow-dirty`）は 1 か所に集約して SKILL.md を直し、worklog も「詰まった箇所／曖昧だった文／仮定と解釈／足りなかった情報・検証手段／改善案」の 5 項目に揃え直した。
+
+使ったスキル: implement-issue、verify-pelway
