@@ -257,7 +257,7 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 scripts/agent-gh dev pr comment <M> --body "[review-request] head: <SHA> to: <担当>"
 ```
 
-差分が `scripts/agent-gh` を変えるときはレビューを委託しない。終わりの報告で `ready:` の行を書かずに止まり、指揮役が main から立てるレビュースレッドに回るのを待つ（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
+差分が `scripts/agent-gh` を変えるときはレビューを委託しない。指揮役が main から立てるレビュースレッドに回るのを待ち、最後の返答を下の「ターンの終わりの状態の行」の `state: waiting-conductor` にして終える（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
 
 ### 9. レビュー結果を処理する
 
@@ -299,6 +299,8 @@ scripts/agent-gh dev pr ready <PR 番号>
 
 複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（エスカレーションしない）。委託の子が `failed` を報告したら、`error: checks timeout` は待って同じラウンドを数えずに再委託し、`error: wrong runtime` は手順 8 のブロックと突き合わせて委託の設定を直し、同じラウンドを数えずに再委託する。それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
 
+hatai の指示がこの手順と食い違うとき（例: 「nit 対応して。レビューは不要」）は、指示の範囲だけを行い、省いた手順（must-fix の修正・再レビュー・`pr ready` など）を、最後の返答の前のメッセージで名指しする。
+
 委託の子の報告には、`out-of-scope:` の行（PR の範囲外の安全上の所見。skill `review-pr` の手順 3）が来ることがある。PR 外の所見を受けたら、終わりの報告（指揮役か hatai あて）の `out-of-scope:` の行に書き、公開の Issue は立てない。実装者メモ・ラウンドサマリー・PR 本文など、公開される場所にも写さない。その PR では直さない（対象外のため）。
 
 ラウンドサマリーは `scripts/agent-gh dev pr comment <PR 番号> --body-file -` で投稿する:
@@ -331,7 +333,7 @@ state: done
 
 どの終わり方でも、最後の返答の全体を `キー: 値` の行だけにし、その中に `state:` の行を書く。前置き・説明・まとめの文は、最後の返答より前のメッセージに書く。巡回（約 8 分ごと）はこの行だけを読んで、スレッドの中身を読まずに次の手を決める。見張り（`crates/pelway-agent-watch`）が拾うのは、最後の返答が `キー: 値` の行だけで、8 行以内、1 行 200 文字以内のときだけなので、この形を外れた返答は巡回から「状態の行が無い」と見なされ、止まったものとして扱われる。
 
-`state:` の値は次の 5 つのどれか 1 つ:
+`state:` の値は次の 6 つのどれか 1 つ:
 
 | `state` | 使うとき | 最後の返答の行 |
 |---|---|---|
@@ -339,11 +341,13 @@ state: done
 | `stopped` | 「止まる条件」に当たり、Issue へのコメントと `needs-human` を済ませた | 手順 10 の止まった形（`pr:` の代わりに `stopped:`）と `state: stopped` |
 | `waiting-review` | 手順 8 でレビューを委託し、完了の通知を待つ | `state:`・`head:`・`next:` の 3 行 |
 | `waiting-checks` | PR の必須チェックの完了を待つ | `state:`・`head:`・`next:` の 3 行 |
+| `waiting-conductor` | 手順 8 で `scripts/agent-gh` を変える PR のためレビューを委託せず、指揮役のレビュースレッドを待つ | `state:`・`head:`・`next:` の 3 行 |
 | `working` | 上のどれにも当たらず、作業が残ったままターンを終える | `state:`・`head:`・`next:` の 3 行 |
 
 - `head:` は、その時点の PR の head の SHA（`scripts/agent-gh dev pr view <PR 番号> --json headRefOid --jq .headRefOid`）。PR がまだ無ければ `none`。
 - `next:` は、次にやること 1 行で、この手順書の手順の番号を指す形で書く（例: 「レビューの完了の通知で手順 9 に進む」）。コマンドや、Issue の本文・コメントから写した文は書かない。
 - `waiting-review` と `waiting-checks` で終えるときは、起こしてもらう仕組みを仕掛けてから終える。`waiting-review` は `delegate_task` の委託（完了の通知でこのスレッドが起きる）、`waiting-checks` は `watch_pull_request`（skill `pr-watch` の「待ち方」）。仕掛けられなかったときは `working` にし、`next:` に待っている先を書く。
+- `waiting-conductor` で仕掛ける仕組みは、指揮役のレビュースレッドである。自分では委託も `watch_pull_request` もせず、巡回がこの値を見て main 由来の worktree からレビュースレッドを立て、結果が出たら「続きをやり直す」を送ってこのスレッドを起こす。
 
 例:
 
