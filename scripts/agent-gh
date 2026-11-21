@@ -405,6 +405,13 @@ if [[ "$role" == "review" ]]; then
   # GH_CONFIG_DIR（gh_isolated_config が作った一時ディレクトリ）に 0600 の
   # hosts.yml を書いて認証させる。ディレクトリの削除は共通の EXIT trap（cleanup）が行う。
   (umask 077; printf 'github.com:\n    oauth_token: %s\n    git_protocol: https\n' "$token" >"$GH_CONFIG_DIR/hosts.yml")
+  # hosts.yml に書いたら、gh の環境にトークンが乗る経路を変数名によらず断つ:
+  # - token: 呼び出し元が `token` を export していると、上の token="$(app_token ...)" の代入が
+  #   export 属性を引き継ぎ、review トークンが `token` という名前で gh に渡る
+  # - GH_TOKEN・GITHUB_TOKEN・GH_ENTERPRISE_TOKEN・GITHUB_ENTERPRISE_TOKEN: gh はこれらを
+  #   hosts.yml より優先するため、継承したままだと review の操作（Approve を含む）が
+  #   pelway-review ではなく、そのトークンの持ち主の名義で通る
+  unset token GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN
   rc=0
   gh "$@" || rc=$?
   exit "$rc"

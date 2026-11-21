@@ -73,6 +73,8 @@ fi
 # hosts.yml が無い役割（dev / qa）でも失敗を終了コードにしない（cat の失敗が偽 gh の
 # 終了コードに伝わるのを防ぐ）
 [ -z "${GH_CONFIG_DIR:-}" ] || cat "$GH_CONFIG_DIR/hosts.yml" >"$CALL_LOG.hosts" 2>/dev/null || :
+# 環境の全体も残す（review のトークンがどの変数名でも gh の環境に乗らないことの確認用）
+env >"$CALL_LOG.env"
 EOF
 
 # 偽の git: GH_TOKEN と引数を追記する（push 後の agent-gh-resign からの呼び出しも残すため追記）。
@@ -130,11 +132,18 @@ expect_log() {
   grep -qF -- "$pattern" "$ROOT/$name.log" 2>/dev/null || failures+=("$name: log lacks '$pattern'")
 }
 
-# expect_review_auth <name>: review 名義の gh が、トークンを GH_TOKEN ではなく 0600 の
-# 一時 GH_CONFIG_DIR/hosts.yml で受け取り、終了後に消したことを確かめる。
+# expect_review_auth <name>: review 名義の gh が、トークンを環境変数ではなく一時
+# GH_CONFIG_DIR/hosts.yml で受け取り、終了後に消したことを確かめる。gh の環境には、
+# review トークンの値がどの変数名でも無く、gh が hosts.yml より優先する認証の変数
+# （GH_TOKEN・GITHUB_TOKEN・GH_ENTERPRISE_TOKEN・GITHUB_ENTERPRISE_TOKEN）も無いこと。
 expect_review_auth() {
-  local name="$1" log="$ROOT/$1.log" cfgdir
+  local name="$1" log="$ROOT/$1.log" cfgdir v
   [[ "$(head -n1 "$log" 2>/dev/null)" == "GH_TOKEN=" ]] || failures+=("$name: GH_TOKEN in gh env")
+  [[ -s "$log.env" ]] || failures+=("$name: gh env not recorded")
+  ! grep -qF -- 'review-token' "$log.env" 2>/dev/null || failures+=("$name: review token in gh env")
+  for v in GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN; do
+    ! grep -q "^$v=" "$log.env" 2>/dev/null || failures+=("$name: inherited $v reaches gh")
+  done
   grep -qF 'oauth_token: review-token' "$log.hosts" 2>/dev/null || failures+=("$name: hosts.yml lacks review token")
   cfgdir="$(sed -n 's/^GH_CONFIG_DIR=//p' "$log" 2>/dev/null | head -1)"
   [[ -n "$cfgdir" && ! -e "$cfgdir" ]] || failures+=("$name: GH_CONFIG_DIR left behind")
@@ -401,6 +410,17 @@ run review_gh_api_jq_env review api /rate_limit --jq '$ENV.GH_TOKEN'
 expect_review_auth review_gh_api_jq_env
 # shellcheck disable=SC2016
 expect_log review_gh_api_jq_env 'ARGS=api /rate_limit --jq $ENV.GH_TOKEN'
+
+# 呼び出し元から継承した変数が review の gh に届かない（round 4 の must-fix 2 件）:
+# - `token` を export した環境から起動すると、スクリプト内の token="$(app_token ...)" の代入が
+#   export 属性を引き継ぎ、review トークンが `token` という名前で gh の環境に乗っていた
+# - 継承した GH_TOKEN・GITHUB_TOKEN（と enterprise 版）は gh が hosts.yml より優先するため、
+#   review の操作（Approve を含む）がそのトークンの持ち主の名義で通っていた
+token=inherited GH_TOKEN=human-pat GITHUB_TOKEN=human-pat2 GH_ENTERPRISE_TOKEN=ent-pat GITHUB_ENTERPRISE_TOKEN=ent-pat2 \
+  run review_inherited_env review pr review 1 --approve --body-file -
+expect_review_auth review_inherited_env
+! grep -q '^token=' "$ROOT/review_inherited_env.log.env" 2>/dev/null || failures+=("review_inherited_env: token variable reaches gh")
+expect_log review_inherited_env "ARGS=pr review 1 --approve --body-file -"
 
 run review_gh_issue_view review issue view 1 --json body
 expect_review_auth review_gh_issue_view

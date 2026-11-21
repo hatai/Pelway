@@ -236,7 +236,7 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 
 `api` は GET のみで、引数検査は許可リスト方式: 許すのは値を取らない `-i`/`--include`・`--paginate`・`--slurp`・`--silent`・`--verbose`、値を取る `-H`/`--header`・`-q`/`--jq`・`-t`/`--template`・`--cache`・`--hostname`（`X-HTTP-Method-Override` ヘッダは拒否）、`--method`/`-X` の GET 形、`-` で始まらない endpoint だけ。短いオプションは束ね書きのクラスタを 1 文字ずつ読んで検査するので、`-iX PATCH` や `-iftitle=x` の形も拒否される（body を付けて POST になる `-f`/`--raw-field`・`-F`/`--field`・`--input` は許可リストに入らない）。
 
-review 名義で発行したトークンは子プロセスの環境変数に置かない。`gh` は `--jq '$ENV.GH_TOKEN'` で自分の環境を読めるため、0600 の一時 `GH_CONFIG_DIR/hosts.yml` で認証させ、gh の終了後に消す。`pr review` の引数（`--body-file` など）は絞らず、sandbox の書き込み先の制限は別 Issue（#305・#306）で追う。
+review 名義で発行したトークンは子プロセスの環境変数に置かない。`gh` は `--jq '$ENV.GH_TOKEN'` で自分の環境を読めるため、0600 の一時 `GH_CONFIG_DIR/hosts.yml` で認証させ、gh の終了後に消す。hosts.yml に書いた後、gh を呼ぶ前に、呼び出し元から継承した `token`・`GH_TOKEN`・`GITHUB_TOKEN`・`GH_ENTERPRISE_TOKEN`・`GITHUB_ENTERPRISE_TOKEN` を外す。`token` は継承した export 属性がスクリプト内の代入に残ると review トークンをその名前で gh に渡し、残りの 4 つは gh が hosts.yml より優先するため、残すと review の操作（Approve を含む）がそのトークンの持ち主の名義で通る。`pr review` の引数（`--body-file` など）は絞らず、sandbox の書き込み先の制限は別 Issue（#305・#306）で追う。
 
 運用に入る前に、`auto-accept-edits` のスレッドで次を確かめる。確かめるまでは `claude_review` を使わない。
 
