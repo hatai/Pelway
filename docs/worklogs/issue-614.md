@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「4. 受け入れ条件ごとにテストを先に書く」に「`scripts/tests/` に足すテストは mode 644 で足す」を足す（round 1 と同じ）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: d046400e7f8eeb432a9ebf1e093652dd715264a1
+
+1. 詰まった箇所: `.agents/skills/implement-issue/SKILL.md` 手順 6: main の 4370c8c2（verify の出力の扱いの箇条書きを足した）と、この PR の push 前の再 fetch の箇条書きが同じ位置で衝突した。
+2. 曖昧だった文: 「両立する変更は両側残す。片方を採るときは、落とした側と理由を round サマリーに書く」（`.agents/skills/implement-issue/SKILL.md` 手順 9「修正依頼」）
+3. 仮定と解釈: 2 つの箇条書きは別々の事柄（push 前の取り込みと、verify の出力の読み方）で両立すると判断し、両方を残した（この PR の行を先、main の行を後）。コードブロックの verify の行は main 側の形（出力をファイルに書く）に自動でそろった。取り込みの前に、この PR で足した手順どおり PR ブランチの先端を `merge --ff-only` で確かめた（Already up to date）。
+4. 足りなかった情報・検証手段: merge コミットは `agent-gh-resign` で署名できず、署名なしのまま push された（AGENTS.md の「マージ」の例外どおり）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「修正依頼」に「merge コミットは署名なしのまま残る（`agent-gh-resign` の対象外）」を足す。
+
+使ったスキル: implement-issue
