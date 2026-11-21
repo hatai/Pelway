@@ -5,6 +5,8 @@ set -eux
 
 PGROONGA_VERSION=$1
 GROONGA_VERSION=$2
+# 出典の build.sh と同一内容に保つため、使われない変数も残す。
+# shellcheck disable=SC2034
 MECAB_VERSION=0.996
 
 mkdir build
