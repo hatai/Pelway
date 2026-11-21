@@ -23,7 +23,8 @@ check() {
 # レビュー担当: 文書のずれの nit に印を付ける。
 check review_marks_doc_drift .agents/skills/review-pr/SKILL.md \
   '行頭（`<file>:<line>` の前）に `[文書のずれ]` を付ける' \
-  '- [文書のずれ] <file>:<line>'
+  '- [文書のずれ] <file>:<line>' \
+  '`[文書のずれ]` の印の nit だけは、印の後に `<file>:<line>` を書く'
 
 # 実装担当: Request changes でも Approve でも印の nit を直す。上限に数えない。
 check implementer_fixes_on_request_changes .agents/skills/implement-issue/SKILL.md \
