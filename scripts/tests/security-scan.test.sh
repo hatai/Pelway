@@ -120,9 +120,15 @@ want_contains osv-hit "$REPLY_SUMMARY" "Cargo.lock"
 run_case osv-error osv-scanner 127 "" 127
 # 検出（終了コード 1）があっても、ロックファイルの抽出に失敗していれば失敗にする
 # （osv-scanner 2.7.1 は抽出の失敗を標準エラーに出すだけで、検出があれば 1 を返す）。
-STUB_STDERR="Error during extraction: (extracting as javascript/packagelockjson) bad/package-lock.json: could not extract" \
-  run_case osv-hit-partial osv-scanner 1 "$osv_hit" 127
+osv_diag="Error during extraction: (extracting as javascript/packagelockjson) bad/package-lock.json: fetch https://user:FAKEPASSWORD@registry.invalid/x failed"
+STUB_STDERR="$osv_diag" run_case osv-hit-partial osv-scanner 1 "$osv_hit" 127
 want_contains osv-hit-partial "$REPLY_LOG" "::error::"
+want_contains osv-hit-partial "$REPLY_LOG" "1 件"
+# osv-scanner の標準エラー（取得先の URL などを含みうる）は公開のジョブログに出さない。
+want_absent osv-hit-partial "$REPLY_LOG" "FAKEPASSWORD"
+want_absent osv-hit-partial "$REPLY_LOG" "stub osv-scanner"
+STUB_STDERR="$osv_diag" run_case osv-error-quiet osv-scanner 127 "" 127
+want_absent osv-error-quiet "$REPLY_LOG" "FAKEPASSWORD"
 # ロックファイルが 1 つも見つからない（128）は設定の誤りとして失敗させる。
 run_case osv-nopkg osv-scanner 128 "" 128
 

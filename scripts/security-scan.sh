@@ -52,22 +52,26 @@ case "$tool" in
     found_rc=1
     ;;
   osv-scanner)
-    # 標準エラーはログに出しつつ、抽出の失敗を見分けるためにファイルにも残す。
+    # 標準エラーは公開のジョブログに出さず、ファイルにだけ書く（取得先の URL などを含みうるため）。
+    # 抽出の失敗は、osv-scanner が終わってからこのファイルで見分ける。
     osv-scanner scan source --recursive --format json --output-file "$report" . \
-      2> >(tee "$out_dir/osv-scanner.stderr" >&2) || rc=$?
+      2>"$out_dir/osv-scanner.stderr" || rc=$?
     found_rc=1
     ;;
 esac
 
 if [[ "$rc" != 0 && "$rc" != "$found_rc" ]]; then
   echo "::error::$tool が失敗しました（終了コード $rc）"
+  if [[ "$tool" == osv-scanner ]]; then
+    echo "osv-scanner の標準エラーはログに出さず、$out_dir/osv-scanner.stderr に書いた。手元で同じコマンドを実行して確かめる。"
+  fi
   exit "$rc"
 fi
 
 if [[ "$tool" == osv-scanner ]]; then
-  wait # tee が標準エラーを書き終えるのを待つ
-  if grep -q '^Error during extraction:' "$out_dir/osv-scanner.stderr"; then
-    echo "::error::osv-scanner がロックファイルの抽出に失敗しました（詳細はこのジョブのログの「Error during extraction:」の行）"
+  extraction_errors="$(grep -c '^Error during extraction:' "$out_dir/osv-scanner.stderr" || true)"
+  if [[ "$extraction_errors" != 0 ]]; then
+    echo "::error::osv-scanner がロックファイルの抽出に失敗しました（${extraction_errors} 件。中身はログに出さず、$out_dir/osv-scanner.stderr に書いた）"
     exit 127
   fi
 fi
