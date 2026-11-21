@@ -71,3 +71,15 @@
 5. 改善案: `docs/agents/notify-payloads.md` など GitHub の webhook/API の表記の実際を記録する場所に bot の login 表記の一覧を残す（別 Issue が適切）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 6・main 取り込みの衝突解消）
+
+対象 head: 816fc3adb0441221558092494dc701b320464b06
+
+1. 詰まった箇所: `.agents/skills/command-team/SKILL.md` の「レビュー担当と effort」: main の #565（731f4f26、Codex のモデルを PR の大きさ・リスク・回数で選ぶ）と、この PR の effort の行（セキュリティと仕様の PR は 1 回目から上げる）・判定が割れたときの行が同じ hunk で衝突した。両立するため、この PR の effort の行と判定が割れたときの行を残し、その間に main の「Codex のモデル」の表と注記をそのまま入れた（落とした側は無い）。
+2. 曖昧だった文: 「解消後は Request changes と同じ流れで進める（手順 5・6 のやり直し・本文の sha 更新・ラウンドサマリー・手順 8 の再委託）」（`.agents/skills/implement-issue/SKILL.md` の手順 9「修正依頼のとき」）
+3. 仮定と解釈: round 6 のレビューはまだ一度も投稿されていない（委託が 2 回 failed・開始できず）ため、衝突解消後の head のレビューも round 6 として扱う。ラウンドサマリーは `### review round <R>` の見出しで投稿すると review-pr のラウンド判定（最大の `<R>` + 1）が round 7 に進んでしまうため、見出しを付けない衝突解消の報告コメントにした。選ばなかった解釈: 見出し付きのサマリーを投稿して round 7 として数える。
+4. 足りなかった情報・検証手段: レビューを伴わない修正依頼（衝突の解消）のときのラウンドサマリーの形が手順 9 に無い。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9「修正依頼のとき」に「レビューを経ない修正では `### review round` の見出しを付けずに解消内容をコメントする」を足す（別 Issue が適切）。
+
+使ったスキル: implement-issue
