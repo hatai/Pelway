@@ -24,3 +24,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「時間の上限を条件にするときは、上限の内に入れる処理（外部コマンド・待ち・送り直し）を列挙し、そのどれかが残り時間を超える入力の試験を条件に入れる」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: 2df23d550baf6f2cea41c333d58316a2c9667ac6
+
+1. 詰まった箇所: `crates/pelway-agent-watch/src/io.rs` の `send_once`: 「準備中に期限が切れる場合」を試験にするには一時ファイルの用意を外から遅らせる口が要り、`send_once` が一時ファイルのパスを返す関数（本番は `private_body_path`）を受け取る形にした（`curl_is_not_started_when_the_deadline_passes_while_preparing`）。
+2. 曖昧だった文: 「共通の送信期限に残っている時間で次の通知を試み、期限で処理を終えられなかった通知を列に残してください。」（PR #609 の round 2 の codex のレビューの must-fix 2）。期限の直前に送り始めて打ち切られた通知を、間隔を空ける失敗にするか、間隔を変えない時間切れにするかが無い。
+3. 仮定と解釈: round 2 の決め方（期限での打ち切りは送り直せる失敗として間隔を空ける）をそのまま使った。最初の間隔 30 秒は周回の間隔と同じなので、打ち切りが 1 回なら次の周回の送信は遅れない。選ばなかった解釈は「前の通知に時間を使った後の打ち切りだけは間隔を変えない」で、`Outcome` に値を 1 つ足す設計の変更になり、2 人のレビュー担当が round 2 で受け入れた決め方を最後の round で変えることになるため。
+4. 足りなかった情報・検証手段: 期限の直前（残り 1 ミリ秒前後）に fnox が値を返す場面は、偽の fnox の sleep では狙って起こせない。起動しないことは単体試験（`killed_after` に 300・400 マイクロ秒）で確かめた。差分は `.cargo/mutants.toml` の `examine_globs` の外なので、`mise run mutants:diff` は回していない。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「6. 検査してコミットし、行数を確かめてから push する」に「修正 round の追加行の残りが 100 行を切ったら、直し方を選ぶ前に、実装者メモ（約 12 行）と must-fix ごとの試験の行数を見積もる」を足す。
+
+使ったスキル: implement-issue、write-pull-request
