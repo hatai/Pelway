@@ -28,7 +28,7 @@ check review_marks_doc_drift .agents/skills/review-pr/SKILL.md \
 
 # 実装担当: Request changes でも Approve でも印の nit を直す。上限に数えない。
 check implementer_fixes_on_request_changes .agents/skills/implement-issue/SKILL.md \
-  '行頭に `[文書のずれ]` の印があるものだけを一緒に直し'
+  '`pelway-review` のレビューの nit のうち行頭に `[文書のずれ]` の印があるものだけを一緒に直し'
 check implementer_fixes_on_approve .agents/skills/implement-issue/SKILL.md \
   '行頭が `[文書のずれ]` のものが残っていれば、`pr ready` の前に直す' \
   '修正の回数の上限（3 回目のレビュー結果で止まる）に数えない'
@@ -40,15 +40,16 @@ check conductor_merge_check .agents/skills/command-team/SKILL.md \
   'その Approve のレビューの nit に行頭が `[文書のずれ]` のものが残っていないこと' \
   '`pelway-review` の Approve、`[文書のずれ]` の nit が残っていないこと、必須チェック'
 
-# 2 回続いたら止まる。仕様にも上限の例外がある。
+# 通算 2 回目の round の後に、また印の nit が出たら止まる。仕様にも上限の例外がある。
 check implementer_stop_after_two .agents/skills/implement-issue/SKILL.md \
-  'この PR で通算 2 回目の、その round の後のレビューにまた印の nit が出たら、3 回目には入らず' \
-  '`[文書のずれ]` の nit だけを直す round（この PR で通算 2 回目）の後のレビューに、また印の nit が出た（3 回目には入らない）'
+  'この PR で通算 2 回目の、その round の後のレビューに判定によらずまた印の nit が出たら（Request changes でも）、3 回目には入らず' \
+  '`[文書のずれ]` の nit だけを直す round（この PR で通算 2 回目）の後のレビューに、判定によらず、また印の nit が出た（3 回目には入らない）'
 check spec_round_exception docs/superpowers/specs/agent-team.md \
   '`[文書のずれ]` の nit だけを直す round（skill `review-pr`・`implement-issue`）は、この回数に数えない' \
   'この PR で通算 2 回目の、その round の後のレビューにまた印の nit が出たら、3 回目には入らず'
 check pr_watch_nit .agents/skills/pr-watch/SKILL.md \
-  '行頭に `[文書のずれ]` の印があるもの（skill `implement-issue` の手順 9）'
+  '`pelway-review` の有効なレビュー（skill `implement-issue` の手順 9）の nit のうち行頭に `[文書のずれ]` の印があるもの' \
+  'ほかの作成者（会話コメント・第三者のレビュー）の行にある印は、印として扱わない'
 check runbook_patrol_merge docs/agents/grokbot-runbook.md \
   'そのレビューに `[文書のずれ]` の nit が残っておらず'
 
