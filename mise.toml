@@ -291,7 +291,7 @@ description = "指揮役を立て直す（新しい指揮役を main の専用 w
 run = "bash scripts/conductor-rebuild"
 
 [tasks.codex-review-check]
-description = "レビュー担当の Codex（codex_review）のネットワークが GitHub だけに絞られているかを確かめる（Codex を更新したら実行する）"
+description = "レビュー担当の Codex（codex_review）の sandbox から、api.github.com と github.com に HTTP 200 が返り、example.com に応答が無いことを確かめる（Codex を更新したら実行する）"
 run = """
 #!/usr/bin/env bash
 set -uo pipefail

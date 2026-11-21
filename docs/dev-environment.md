@@ -234,7 +234,7 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 
 ### 専用 home での確認
 
-Codex・T3・`codex_review` の home のどれかを更新したら、`codex_review` に委託した確認用の子タスク（`runtimeMode: "auto-accept-edits"`）で次を確かめる。`config.toml` の層の `enabled = false` が T3 の設定に上書きされないことは Codex の設定の重ね方に、サーバー名 `t3-code`・`t3-code-direct` は T3 に依存するため、どちらを更新しても確かめ直す。結果は作業ログに残す（`docs/worklogs/2026-11-21-codex-review-home.md`）。
+`codex_review` を初めて設定したときと、Codex・T3・`codex_review` の home のどれかを更新したときは、`codex_review` に委託した確認用の子タスク（`runtimeMode: "auto-accept-edits"`）で次を確かめる。確かめ終わるまで、`codex_review` をレビューに使わない。確認用の子タスクは、`main` のコミットで動くスレッドから委託する（`delegate_task` の子は委託元のコミットを checkout するので、PR のブランチから委託すると、PR が変えた `scripts/agent-gh` や `mise.toml` のタスクを実行しうる）。`config.toml` の層の `enabled = false` が T3 の設定に上書きされないことは Codex の設定の重ね方に、サーバー名 `t3-code`・`t3-code-direct` は T3 に依存するため、どちらを更新しても確かめ直す。結果は作業ログに残す（`docs/worklogs/2026-11-21-codex-review-home.md`）。
 
 - 渡るツールに `t3`・`codex_apps`・`github` を含む名前が無い（`ALL_TOOLS` の名前）
 - `CODEX_HOME` が `/home/hatai/.codex-review` になっている
@@ -244,7 +244,9 @@ Codex・T3・`codex_review` の home のどれかを更新したら、`codex_rev
 - `~/.codex-review` に書き込めない（`touch ~/.codex-review/config.toml` と、新しいファイルの `touch` が拒否される）。止める設定がこのファイルに集まっているため、書き込めると次のセッションで設定を戻せる
 - `mise run codex-review-check` が ok
 
-worktree への書き込みは、今は通る（権限プロファイル `review` の `/tmp` だけの制限が、T3 のスレッドの `workspace-write` では worktree に広がる）。直す方向は Issue #589 で決める。それまでは、この項目が通っても `codex_review` を使う（レビュー担当は PR のコードを実行せず、worktree は main から作るため）。
+どれかが通らなければ `codex_review` をレビューに使わない。T3 のツールや Codex の GitHub 連携が残っていたら `~/.codex-review/config.toml` を直し（`homePath` を変えたときは T3 を再起動し）、全部を確かめ直してから使う。
+
+worktree への書き込みは、今は通る（権限プロファイル `review` の `/tmp` だけの制限が、T3 のスレッドの `workspace-write` では worktree に広がる）。直す方向は Issue #589 で決める。それまでは、worktree に書き込めても `codex_review` を使う（レビュー担当は PR のコードを実行せず、ファイルを書き換えないため。skill `review-pr` の「決まり」）。
 
 ## レビュー担当の Claude（claude_review）
 
