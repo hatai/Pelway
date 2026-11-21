@@ -49,3 +49,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の表の 3 回目のレビューの行に「hatai が上限を外したときは、その指示を hatai の名義で Issue にコメントしてもらってから修正 round に入る」を足す（この PR では上限を外した指示が `pelway-dev[bot]` のコメントにしか残っていない）。
 
 使ったスキル: `implement-issue`、`write-pull-request`、pstack の `poteto-mode`（principle-make-operations-idempotent・principle-model-the-domain・principle-separate-before-serializing-shared-state）
+
+## 実装者メモ（round 5）
+
+対象 head: 9d87638e365b0085df7bc24ac569847384239075
+
+1. 詰まった箇所: `scripts/conductor-watch.sh` の `escalate`: 定型コメントの照合は `pelway-dev[bot]` 名義で判定するが、実装担当も同じ App の名義で書けるため、格上げの根拠にできない（round 4 の must-fix 1）。コメントの照合は通知の重複を防ぐだけにし、段の判断は記録と events に分けた。`added` を呼び出しの成功でなく「記録した試行（`seen`）より後の、自分の名義の `labeled` イベント」で進める形にしたところ、解除の呼び出しが失敗したとき記録が `adding` のまま残り、一覧外の照合で完了の報告が出なくなった。照合で自分の付与を確かめた時点で `added` を保存するようにした（`DECISION escalated` は `added` のまま一覧から外れた記録だけが出す）。`/home` が読み取り専用に再マウントされて worktree で commit できなくなったため、同じ head に同じ diff を当てた `/tmp` の clone で commit・verify・push した。
+2. 曖昧だった文: 「処理対象から外れた Issue の記録は捨てず、Issue の状態と履歴を調停してから整理してください。」（PR #610 の round 4 の codex のレビューの must-fix 4）。記録を残したままの Issue を毎周どこまで読み直すかと、調停でどの結果を `DECISION` の行に出すかが書かれていない。
+3. 仮定と解釈: 一覧に無い Issue は、格上げの途中の記録（`commented`・`adding`・`added`）があるものだけ読み直すと解釈した（その周に指揮役が動いていて読み直し自体を見送るときは記録を残す）。閉じている・一覧の窓外にあるだけなら記録を残し、`needs-decision` が外れていて `stage` が `added` のものだけ完了として `DECISION escalated` を出してから消す（選ばなかった解釈は「外れたら無条件で消す」で、解除の応答が失われたあと行が出なくなる。round 4 のメモが残した「行が出ない」という制限をここで解いた）。定型コメントは記録の有無にかかわらず再投稿しない（通知の重複を防ぐための照合なので、ほかの担当が書いた定型コメントも重複とみなす）。見張りの試行の記録が無いのに `needs-human` が付いている Issue は held にしない（must-fix 1 の範囲で、コメントもラベルも根拠にできないため、出どころの追跡は巡回に任せる）。`needs-human` の付与が変更なしで成功しても `added` にしない。直前にほかの誰かが付けた場合、その付与のイベントが試行（`seen`）の後に現れて、ほかの名義のイベントとして `held` になる（場面 35）。
+4. 足りなかった情報・検証手段: GitHub で `issue edit --add-label` が変更なしのとき成功を返すか・イベントを残さないかは、ドキュメント上の振る舞いをモックに写しただけで、実際の API では確かめていない。Issue の一覧が返さない窓外の Issue（古い `needs-decision` など）の照合もモックだけ。読み取り専用への再マウントのため、検証は `/tmp` の clone で `mise run verify` を全パスさせたもので、worktree 上での実行はできていない。
+5. 改善案: `scripts/tests/conductor-watch-decision.test.sh` のモックに `fail-comment-lost`（コメントは書けるが応答が失われる）を足す。今の `fail-comment` は書けない場合だけで、コメントの重複抑止の再試行（書いたが応答が無い → 次の周で照合して書き直さない）は試せていない。
+
+使ったスキル: `implement-issue`
