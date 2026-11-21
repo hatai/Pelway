@@ -221,8 +221,8 @@ def all_pages(path):
     return [x for p in data for x in p if isinstance(x, dict)]
 def conductor_absence():
     # 指揮役が T3 のスレッドとして動いていなければ理由の語を、動いていれば None を返す。
-    # 登録ファイルは symlink をたどらず FIFO で止まらずに開き、自分の所有の通常ファイルだけを読む
-    # （crates/pelway-agent-watch/src/io.rs の read_conductor_file と同じ決まり）。
+    # 登録ファイルは symlink をたどらず FIFO で止まらずに開き、自分の所有の通常ファイルの 1 行目だけを読む
+    # （crates/pelway-agent-watch の read_conductor_file・parse_conductor_file と同じ決まり）。
     try:
         fd = os.open(sys.argv[5], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
@@ -230,7 +230,7 @@ def conductor_absence():
     with os.fdopen(fd, "rb") as f:
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid(): return "no-registration"
-        tid = f.read(4096).decode("utf-8", "replace").strip()
+        tid = f.read(4096).decode("utf-8", "replace").split("\n", 1)[0].strip()
     if not tid: return "no-registration"
     th = next((t for t in threads if isinstance(t, dict) and t.get("threadId") == tid), None)
     if th is None: return "thread-missing"

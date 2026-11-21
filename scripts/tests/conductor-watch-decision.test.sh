@@ -302,6 +302,10 @@ check "17: a stranger's marker comment does not suppress the notice" eq "$(calls
 reset; issue_with 719 "$T20" needs-decision; add_comment 719 'pelway-dev[bot]' "$(body_for "$T40")"
 run_cycles 1
 check "18: a comment for an older labeled_at does not suppress the notice" eq "$(calls)" "$(escalation_calls 719)"
+# 19. 登録ファイルは 1 行目だけを読む（pelway-agent-watch の parse_conductor_file と同じ）
+reset; issue_with 720 "$T20" needs-decision; printf '%s\nsecond line\n' "$CONDUCTOR" > "$REG"
+run_cycles 1
+check "19: only the first line of the registration is the thread id" eq "$(calls)" ""
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
