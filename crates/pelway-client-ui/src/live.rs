@@ -51,10 +51,12 @@ pub const MESSAGE_PAGE_LIMIT: u32 = 200;
 /// ワーカーを占有し続けないよう、ここにも上限を持たせる。
 const FETCH_DEADLINE: Duration = Duration::from_secs(60);
 
-/// メッセージ取得 1 回で蓄積する本文バイト数の上限。ページを足し続けると
-/// メモリを際限なく占有するため、本文の合計サイズで打ち切る
+/// メッセージ取得 1 回で蓄積する応答バイト数の上限。ページを足し続けると
+/// メモリを際限なく占有するため、各ページの生の応答長（本文以外の
+/// フィールドやエンベロープを含む）の合計で打ち切る——本文だけ数えると、
+/// 本文が空のメッセージを詰めたページが上限をすり抜ける
 /// （対象デモの履歴はこの値を大きく下回る）。
-const MAX_FETCH_BODY_BYTES: usize = 32 << 20;
+const MAX_FETCH_BYTES: usize = 32 << 20;
 
 /// サーバー URL 文字列のパース失敗。文言に入力値は含めない
 /// （接続先として拒否した文字列をエラー出力へ持ち出さない）。
@@ -230,6 +232,10 @@ impl LiveSession {
             actor_kind = MemberKind::Human;
         }
         let messages = self.fetch_messages(&channel_id)?;
+        // 取得途中の失敗（`fetch_messages` 内で縮退が起きた場合も含む）で
+        // `connected` が false に戻されていることがあるため、ここでも一緒に
+        // 立て直す。全部そろってから反映する原子性の一部。
+        self.connected = true;
         self.channel = Some(channel);
         self.messages = messages;
         self.actor = actor;
@@ -264,16 +270,16 @@ impl LiveSession {
     /// 件数は応答のバイト数を抑えられないため、応答が上限超過
     /// （[`crate::net::NetError::TooLarge`]）なら同じカーソルから件数を半減して
     /// 再試行する（1 件でも超える場合だけエラー）。1 回の取得全体には
-    /// [`FETCH_DEADLINE`] と蓄積 [`MAX_FETCH_BODY_BYTES`] の上限を掛け、
-    /// 満杯なのにカーソルが進まない応答（サーバーが `after_seq` を見ない等）は
-    /// 部分結果を成功とせず [`LiveError::Protocol`] にする。
+    /// [`FETCH_DEADLINE`] と蓄積 [`MAX_FETCH_BYTES`]（生の応答長の合計）の上限を
+    /// 掛け、満杯なのにカーソルが進まない応答（サーバーが `after_seq` を見ない等）
+    /// や要求した件数を超えるページは [`LiveError::Protocol`] にする。
     fn fetch_messages(&mut self, channel_id: &ChannelId) -> Result<Vec<StoredMessage>, LiveError> {
         let deadline = Instant::now() + FETCH_DEADLINE;
         let base = channel_messages_path(channel_id);
         let mut out = Vec::new();
         let mut after: Option<u64> = None;
         let mut page_limit = MESSAGE_PAGE_LIMIT;
-        let mut body_bytes: usize = 0;
+        let mut response_bytes: usize = 0;
         loop {
             if Instant::now() >= deadline {
                 return Err(LiveError::Protocol("message fetch deadline"));
@@ -283,16 +289,20 @@ impl LiveSession {
             if let Some(s) = after {
                 path.push_str(&format!("&after_seq={s}"));
             }
-            let page: Vec<StoredMessage> = match self.get_json(&path) {
+            let resp = match self.get_response(&path) {
                 Err(LiveError::Net(NetError::TooLarge)) if page_limit > 1 => {
                     page_limit = (page_limit / 2).max(1);
                     continue;
                 }
                 result => result?,
             };
-            body_bytes += page.iter().map(|m| m.body.len()).sum::<usize>();
-            if body_bytes > MAX_FETCH_BODY_BYTES {
+            response_bytes += resp.body.len();
+            if response_bytes > MAX_FETCH_BYTES {
                 return Err(LiveError::Protocol("message history exceeds fetch limit"));
+            }
+            let page: Vec<StoredMessage> = self.parse_json(&resp.body)?;
+            if page.len() > page_limit as usize {
+                return Err(LiveError::Protocol("message page exceeds requested limit"));
             }
             let full = page.len() >= page_limit as usize;
             let last_seq = page.last().map(|m| m.seq);
@@ -400,9 +410,10 @@ impl LiveSession {
     }
 
     /// 投稿応答の保存済みメッセージを seq 昇順を保つ位置に挿入する
-    /// （`message_id` の重複は足さない。`poll` は一覧の取り直しでここを通らない。
-    /// 投稿応答を先に足しているとポーリングでそれより小さい seq が届き得るため、
-    /// 末尾への追加だけだと順序が崩れる）。
+    /// （`message_id` の重複は足さない。呼び出しは `post` の応答 1 件だけで、
+    /// `poll` は一覧の全件置き換えなのでここを通らない。手元の一覧は最後の
+    /// 取得時点のもので、投稿が保存される間に他者の発言が先に入っていると
+    /// 応答の seq が末尾より小さくなり得るため、末尾に足すだけでは順序が崩れる）。
     fn append_new(&mut self, new: Vec<StoredMessage>) {
         for m in new {
             if self.messages.iter().any(|e| e.message_id == m.message_id) {
@@ -430,6 +441,30 @@ impl LiveSession {
         })
     }
 
+    /// GET で応答をそのまま取る。200 以外・通信の失敗は `connected = false`
+    /// にしてから [`LiveError`] を返す。body のバイト数を計上する呼び出し側
+    /// （`fetch_messages` の蓄積上限）があるため、JSON 化前の raw を返す。
+    fn get_response(&mut self, path: &str) -> Result<crate::net::Response, LiveError> {
+        let resp = self.client.get(path).map_err(|e| {
+            self.connected = false;
+            LiveError::Net(e)
+        })?;
+        if resp.status != 200 {
+            self.connected = false;
+            return Err(LiveError::Status(resp.status));
+        }
+        Ok(resp)
+    }
+
+    /// 応答 body を JSON に読む。形式の失敗は `connected = false` にしてから
+    /// [`LiveError`] を返す。
+    fn parse_json<T: serde::de::DeserializeOwned>(&mut self, body: &[u8]) -> Result<T, LiveError> {
+        serde_json::from_slice(body).map_err(|e| {
+            self.connected = false;
+            LiveError::Json(e)
+        })
+    }
+
     /// HTTP 応答を JSON に読む。`accepted` を満たさないステータス・通信・
     /// 形式の失敗はすべて `connected = false` にしてから [`LiveError`] を返す。
     fn decode<T: serde::de::DeserializeOwned>(
@@ -445,10 +480,7 @@ impl LiveSession {
             self.connected = false;
             return Err(LiveError::Status(resp.status));
         }
-        serde_json::from_slice(&resp.body).map_err(|e| {
-            self.connected = false;
-            LiveError::Json(e)
-        })
+        self.parse_json(&resp.body)
     }
 }
 

@@ -9,12 +9,12 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex};
 
-use pelway_client_ui::live::{self, LiveSession};
-use pelway_contract::ids::{ChannelId, MemberId, WorkspaceId};
+use pelway_client_ui::live::{self, LiveError, LiveSession};
+use pelway_contract::ids::{ChannelId, MemberId, MessageId, WorkspaceId};
 use pelway_contract::ledger::ApprovalLedger;
 use pelway_contract::member::{ChannelMember, MemberKind};
 use pelway_contract::message::Channel;
-use pelway_contract::store::{DataStore, NewMessage, PurposeId};
+use pelway_contract::store::{DataStore, NewMessage, PurposeId, StoredMessage};
 use pelway_http::{SharedDataStore, SharedLedger, serve_with_store};
 
 /// デモ seed（`DataStore::new_demo_seeded`）を持つサーバーと保存部の共有ハンドル。
@@ -193,14 +193,12 @@ fn connection_failure_marks_offline_and_recovery_restores() {
 
 // ページング（バイト境界）: 件数上限では応答サイズを抑えられないため、
 // 1 ページが応答上限（1 MiB）を超える履歴では、同じカーソルから件数を
-// 半減して再試行し、最後まで全件取得できる。
+// 半減して再試行し、最後まで全件取得できる。起動時の `bootstrap` が縮退の
+// 経路を通っても `connected` が立ったまま戻ることも確かめる（縮退の中で
+// 立ち下がった `connected` が復帰しないと「つながっていません」から戻れない）。
 #[test]
-fn poll_shrinks_pages_until_they_fit_the_response_limit() {
+fn bootstrap_shrinks_pages_and_stays_connected() {
     let (addr, store) = spawn_demo_server();
-    let mut session = LiveSession::new(addr, "ws-demo-01".into());
-    session.bootstrap().expect("bootstrap succeeds");
-    let base = session.messages().len();
-
     // 1 件あたり約 60 KiB の本文を持つ履歴。MESSAGE_PAGE_LIMIT=200 の 1 ページ
     // 要求では応答が 1 MiB を優に超える（サーバーは要求本文 64 KiB まで受け付け、
     // 一覧の制限は件数だけ）。limit を半減させる再試行が必要な配置。
@@ -226,14 +224,19 @@ fn poll_shrinks_pages_until_they_fit_the_response_limit() {
         }
     }
 
+    let mut session = LiveSession::new(addr, "ws-demo-01".into());
     session
-        .poll()
-        .expect("poll succeeds by shrinking pages under the byte limit");
+        .bootstrap()
+        .expect("bootstrap succeeds by shrinking pages under the byte limit");
+    assert!(
+        session.connected(),
+        "縮退を通った bootstrap でも接続状態に戻る"
+    );
     let messages = session.messages();
     assert_eq!(
         messages.len(),
-        base + extra,
-        "応答上限を超える履歴も縮退したページで全件取れる"
+        extra + 3,
+        "応答上限を超える履歴も全件取れる"
     );
     assert!(
         messages.windows(2).all(|w| w[0].seq < w[1].seq),
@@ -314,6 +317,53 @@ fn bootstrap_failure_mid_refetch_keeps_previous_channel_and_actor() {
         session.actor().as_str(),
         actor,
         "失敗しても前回の表示ユーザーを保持"
+    );
+}
+
+// 蓄積上限: 本文が空でも ID などの可変長フィールドが大きいメッセージを
+// 詰めた満杯のページを返し続ける接続先に対して、取得 1 回の蓄積上限
+// （生の応答長の合計）で打ち切られる。本文だけ数えるとこの経路が
+// 上限をすり抜けるための回帰テスト。
+#[test]
+fn poll_aborts_on_accumulated_response_bytes_even_with_empty_bodies() {
+    let (addr, _store) = spawn_demo_server();
+    let mut session = LiveSession::new(addr, "ws-demo-01".into());
+    session.bootstrap().expect("bootstrap succeeds");
+
+    // 各ページは要求どおりちょうど MESSAGE_PAGE_LIMIT 件・1 MiB 未満で、
+    // seq を進めながら返し続ける。本文は空で、ID だけを大きくする。
+    let pad = "a".repeat(4_000);
+    let next_seq = Arc::new(std::sync::atomic::AtomicU64::new(1));
+    let stub = spawn_stub_server(move |_target| {
+        let base = next_seq.fetch_add(200, std::sync::atomic::Ordering::SeqCst);
+        let msgs: Vec<StoredMessage> = (0..200_u64)
+            .map(|i| StoredMessage {
+                message_id: MessageId::from(format!("m-{}", base + i).as_str()),
+                workspace_id: WorkspaceId::from("ws-demo-01"),
+                channel_id: ChannelId::from("ch-demo-anken-b"),
+                seq: base + i,
+                author_id: MemberId::from(pad.as_str()),
+                member_kind: MemberKind::Bot,
+                purpose_id: PurposeId::P01,
+                body: String::new(),
+                thread_root: None,
+                client_msg_id: None,
+                created_at: 0,
+            })
+            .collect();
+        (
+            200,
+            serde_json::to_string(&msgs).expect("serialize messages"),
+        )
+    });
+    session.set_addr(stub);
+
+    assert!(
+        matches!(
+            session.poll(),
+            Err(LiveError::Protocol("message history exceeds fetch limit"))
+        ),
+        "生の応答長の蓄積上限で取得を打ち切る"
     );
 }
 
