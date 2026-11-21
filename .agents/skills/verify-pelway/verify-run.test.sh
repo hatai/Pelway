@@ -277,12 +277,13 @@ expect_eq "lock_owner: extra lines after the pid" "$(lock_owner "${tmp}/l5")" ""
 # shellcheck disable=SC2329  # cargo_target_dir の中から呼ばれる
 mise() { if [ "${1:-}" = exec ]; then shift; [ "${1:-}" = "--" ] && shift; "$@"; else command mise "$@"; fi; }
 mk_crate() { mkdir -p "$1/src"; printf '[package]\nname = "t"\nversion = "0.0.0"\nedition = "2021"\n' > "$1/Cargo.toml"; : > "$1/src/lib.rs"; }
+# 呼び出し側の環境（CI が CARGO_TARGET_DIR を持つ）に左右されないよう、各ケースで変数を決める。
 mk_crate "${tmp}/crate"
-expect_eq "cargo_target_dir: default" "$(cargo_target_dir "${tmp}/crate")" "${tmp}/crate/target"
-expect_eq "cargo_target_dir: CARGO_TARGET_DIR env" "$(CARGO_TARGET_DIR="${tmp}/abs-td" cargo_target_dir "${tmp}/crate")" "${tmp}/abs-td"
-expect_eq "cargo_target_dir: relative env resolves from the crate root" "$(CARGO_TARGET_DIR=rel-td cargo_target_dir "${tmp}/crate")" "${tmp}/crate/rel-td"
-expect_eq "cargo_target_dir: relative and absolute share the output" "$(CARGO_TARGET_DIR=rel-td cargo_target_dir "${tmp}/crate")" "$(CARGO_TARGET_DIR="${tmp}/crate/rel-td" cargo_target_dir "${tmp}/crate")"
-expect_eq "cargo_target_dir: CARGO_BUILD_TARGET_DIR env" "$(CARGO_BUILD_TARGET_DIR="${tmp}/btd" cargo_target_dir "${tmp}/crate")" "${tmp}/btd"
+expect_eq "cargo_target_dir: default" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; cargo_target_dir "${tmp}/crate")" "${tmp}/crate/target"
+expect_eq "cargo_target_dir: CARGO_TARGET_DIR env" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; CARGO_TARGET_DIR="${tmp}/abs-td" cargo_target_dir "${tmp}/crate")" "${tmp}/abs-td"
+expect_eq "cargo_target_dir: relative env resolves from the crate root" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; CARGO_TARGET_DIR=rel-td cargo_target_dir "${tmp}/crate")" "${tmp}/crate/rel-td"
+expect_eq "cargo_target_dir: relative and absolute share the output" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; CARGO_TARGET_DIR=rel-td cargo_target_dir "${tmp}/crate")" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; CARGO_TARGET_DIR="${tmp}/crate/rel-td" cargo_target_dir "${tmp}/crate")"
+expect_eq "cargo_target_dir: CARGO_BUILD_TARGET_DIR env" "$(unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; CARGO_BUILD_TARGET_DIR="${tmp}/btd" cargo_target_dir "${tmp}/crate")" "${tmp}/btd"
 mk_crate "${tmp}/crate2"; mkdir -p "${tmp}/crate2/.cargo"; printf '[build]\ntarget-dir = "out"\n' > "${tmp}/crate2/.cargo/config.toml"
 expect_eq "cargo_target_dir: config.toml build.target-dir" "$(cargo_target_dir "${tmp}/crate2")" "$(cd "${tmp}/crate2" && cargo metadata --no-deps --format-version 1 --offline | jq -r .target_directory)"
 mkdir -p "${tmp}/empty-dir"
