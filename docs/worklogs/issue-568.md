@@ -25,3 +25,20 @@
 6. 改善案: `scripts/demo-check/lib.sh` の冒頭の「走査範囲」に、`DEMO_CHECK_ROOT` で任意のディレクトリの `target/demo/` を走査させる使い方（verify-pelway の run のログ）を書き足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 3・停止）
+
+停止の報告と round 3 のメモは Issue #568 のコメント（「止まりました: 起動に新しい bin（起動口）が要る」）に書いた。push はしていない。
+
+## 実装者メモ（round 4）
+
+対象 head: 7fedcbfb77273d8dab91236f81937056f108b997
+
+1. 詰まった箇所: `.agents/skills/verify-pelway/verify-run` のビルド: 同時に 2 つの run を始めると、一方の `mise exec -- cargo build` が rustc を `/usr/bin` の 1.75.0 に解決してビルドに失敗した（`mise WARN missing: rust@1.99.1` の再同期と重なったときに出る）。`mise current rust` と `rustup which --toolchain` で決めた rustc を `RUSTC` で渡す形にした。
+2. 詰まった箇所: 二重起動の確かめ: 道具の版を記録する `mise exec` の呼び出しに約 55 秒かかり、その間に手で起動したインスタンス（25 秒で終わる）が先に終わって、確かめが空振りした。ロックとインスタンスの確認を run の最初に寄せた。
+3. 曖昧だった文: 「起動には既存の examples かテストを使い、それを呼ぶ補助スクリプトをスキルのフォルダに置きます。新しい bin が要るとわかったら、そこで止めて報告してください」（開発リードの追加指示）。round 3 で止まった後、開発リードの次の指示は `demo-serve` の手直し（標準入力が閉じたら終わる、など）を求めていた。
+4. 仮定と解釈: 3 の指示を、`demo-serve`（example。本番のコードは変えない）を起動口として認めた決定（Issue #568 で挙げた案 A）と読んだ。認めていない読み方（案 B・C）は選ばなかった。Issue に書き残す。
+5. 足りなかった情報・検証手段: 生き残りの確認の対象（T3 のプロセス）の名前の決まりが無い。`ps` の comm が `demo-serve`・`pitchfork`・`pelway-agent-wa`・`t3-*` のものに限った。
+6. 改善案: `docs/dev-environment.md` の「デモの LLM 接続（#330）」に、`mise exec` の PATH では rustc が `/usr/bin` の版に解決されることがある、を書き足す（`mise WARN missing: rust@1.99.1` の再同期と重なったとき）。
+
+使ったスキル: implement-issue
