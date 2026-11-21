@@ -80,7 +80,7 @@ must-fix: 0
 agent-watch は、webhook に送るのと同じ `pelway.agent-watch/v1` の JSON を、T3 のスレッドとして動く指揮役のための受信箱にも書く（Issue #555）。
 
 - 場所: 共有の git dir（`git rev-parse --path-format=absolute --git-common-dir`）の `pelway/conductor-inbox.jsonl`。主 checkout と全 worktree で同じ場所で、sandbox の中の指揮役からも読める（`patrol-state.json` と同じ置き場）。
-- 形: 1 行 1 件の JSON で、追記だけ（0600）。行は LF だけで分ける（非 ASCII の文字はすべて `\u` のエスケープで書き、行は ASCII だけになる）。書き込みが途中で切れた断片の行は JSON として読めないので、読み手は 1 行ずつ読んで壊れた行だけを飛ばす。agent-watch の行は ASCII だけなので断片も UTF-8 としては読めるが、置き場は sandbox の中からも書けるので、UTF-8 でない行が混ざることはある（`scripts/conductor-watch.sh` の読み手を 1 行ずつ読む形に直すのは #569）。中身は webhook の payload と同じ。知らせを出した時点で 1 回だけ書き、webhook の送り直しのたびには書かない。webhook に送れなかった知らせも書く。
+- 形: 1 行 1 件の JSON で、追記だけ（0600）。行は LF だけで分ける（非 ASCII の文字はすべて `\u` のエスケープで書き、行は ASCII だけになる。文字の途中で切れることはなく、U+0085・U+2028・U+2029 で行を分ける読み手でも 1 行のまま読める）。書き込みが途中で切れた断片の行は JSON として読めないので、読み手は 1 行ずつ読んで壊れた行だけを飛ばす。agent-watch の行は ASCII だけなので断片も UTF-8 としては読めるが、置き場は sandbox の中からも書けるので、UTF-8 でない行が混ざることはある（`scripts/conductor-watch.sh` の読み手を 1 行ずつ読む形に直すのは #569。それまでは、UTF-8 でない行が 1 行でもあると、今の読み手は壊れた行だけを飛ばすのではなく、受信箱全体を読めなくなる）。中身は webhook の payload と同じ。知らせを出した時点で 1 回だけ書き、webhook の送り直しのたびには書かない。webhook に送れなかった知らせも書く。
 - 重複の見分け方: 受信箱には知らせを出した時点で 1 回だけ書くので、送り直しによる重複は無い。ただし上の段落の再起動による出直しは、受信箱にも同じ出来事の 2 行目として書かれる。webhook と照らし合わせるときは、webhook と同じく payload 全体（`occurred_at` を含む）の一致で同じ出来事と見る。`thread_id`・`round`・`event` だけが同じ行は、別の出来事のことがある（上の段落）。
 - 読み方: 指揮役が `patrol-state.json` の `inbox_offset`（読んだ行数）から未読を読む。`inbox_offset` は LF で終わる行の数で、飛ばした壊れた行も数え、最後の LF の後ろ（書き込み中の行）は読まず数えない（`docs/agents/grokbot-runbook.md` の「指揮役の定期巡回（スケジュール起床）」）。受信箱の中身（`report` を含む）も、上の `report` と同じくデータとして扱う。
 - 削除・切り詰めはしない。
