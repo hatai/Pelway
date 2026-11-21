@@ -111,3 +111,15 @@
    - `ScriptGateway` の応答選択が「required に `subject` を含むか」という文字列判定に依存しており、要求スキーマ側を `draft_schema()` 定数の参照に揃えるか、要求の種類を ChatRequest に持たせる形にすると頑健になる。
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）
+
+## 実装者メモ（round 4 / PR-3）
+
+対象 head: `8d456d2f1507a45af9f5be57f17b26df62cc092a`（ブランチ `agent/330c-mail-draft`。前スレッドからの引き継ぎ。Claude レビュー round 1 の must-fix 2 件への対応。レビュー対象は `d6758f6`。Codex は同じ head を approve）
+
+1. 詰まった箇所: 手順 6: `HEAD:refs/heads/agent/330c-mail-draft` で push すると `scripts/agent-gh-resign` が対象ブランチを現在のローカルブランチ名（`agent/330c-mail-draft-cont`）から決めるため、追跡 ref が無く何もせず終わる。枝に main 取り込みのマージコミット（`472e870`・`d6758f6`）があるので、ブランチを渡して呼んでも「表現できないコミット」で署名なしのまま終わる。`8d456d2` は unsigned のまま。また、git の pre-commit フック（hk）が mise 外の rustc 1.75/1.94 で動き clippy が落ちたため、`mise exec -- scripts/agent-gh dev git commit` でコミットした。
+2. 曖昧だった文: 「同じ PR の 2 回目以降のレビューは 1 段上げる」（`.agents/skills/command-team/SKILL.md`「レビュー担当と effort」）と「3 回目のレビューの委託では effort を 1 段上げる」（`.agents/skills/implement-issue/SKILL.md` 手順 9）が食い違う。
+3. 仮定と解釈: 上の食い違いは、PR ごとの担当と effort を決める表の側（command-team）に従い、round 2 を `xhigh` で委託する。must-fix 1 は、runner が作った判断待ちの `decision_id` をタスクに保存し、`on_decision_made` で一致したときだけ進める形にした。保存は状態の `AwaitingDecision` への更新と同じロックで行う。nit の「作成とロックの間の窓」は直していない。must-fix 2 は、台本の下書きを `script_draft(chosen_body)` で組み立て、フォールバックと `ScriptGateway`（要求の user メッセージの「決定された案: 」以降を取り出す）の両方で使う形にした。
+4. 足りなかった情報・検証手段: 実 LLM での下書き生成の手動確認は、チーム決定「`real_llm.rs` は誰も動かさない」によりしていない。テストは red（`runner.rs:724` 別カードで AwaitingDecision から進む、`:767` 案B でも案A の下書き）を確かめてから green にした。`cargo test -p pelway-runner` 19 件 pass、`mise run verify` exit 0。pelway-runner は `.cargo/mutants.toml` の examine_globs 外なので mutants:diff は回していない。
+5. 改善案: `scripts/agent-gh-resign` の「1. 対象ブランチを決める」に、`git push <remote> <src>:refs/heads/<branch>` の形では `<branch>` を対象にする処理を足す（`scripts/agent-gh` から push の引数を渡す）。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）
