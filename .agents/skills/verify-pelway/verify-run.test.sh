@@ -190,22 +190,52 @@ expect_eq "fd_targets_ok: fd dir does not exist (child gone)" "$(fdr "${tmp}/no-
 mkdir -p "${tmp}/empty-fds"
 expect_eq "fd_targets_ok: empty fd dir" "$(fdr "${tmp}/empty-fds" "${odd}" "${tmp}/fd.out")" 2
 
-# stop_sampler: 停止を求めたかどうかにかかわらず、意図した停止（SIGTERM の 143）以外の終了を OBS_FAILED にする。
+# stop_sampler: 意図した停止は、送った TERM に trap で応えた終了（4）だけ。先に終わっていた場合は
+# どんな終わり方でも、応え方が違っても、観察が切れていたので OBS_FAILED にする。
 # shellcheck disable=SC2034  # SAMPLER は source した verify-run の stop_sampler が読む
 ss_rc() { OBS_FAILED=0; ( eval "$1" ) & SAMPLER=$!; sleep "${2:-0}"; stop_sampler; echo "${OBS_FAILED}"; }
+expect_eq "stop_sampler: intended stop (trap answers TERM with 4)" "$(ss_rc 'trap "exit 4" TERM; while :; do sleep 0.05; done' 0.3)" 0
 expect_eq "stop_sampler: sampler already failed" "$(ss_rc 'exit 3' 0.3)" 1
-expect_eq "stop_sampler: sampler fails while being stopped" "$(ss_rc 'trap "exit 3" TERM; while :; do sleep 0.05; done' 0.3)" 1
-expect_eq "stop_sampler: intended stop is not a failure" "$(ss_rc 'while :; do sleep 0.05; done' 0.3)" 0
-# 停止の要求より前に、ほかのシグナルで消えた場合・自分で抜けた場合も、観察が切れていたので失敗にする。
-ss_sig() { OBS_FAILED=0; ( eval "$1" ) & SAMPLER=$!; sleep "${2:-0.2}"; kill -"${3:-KILL}" "${SAMPLER}" 2> /dev/null; sleep 0.2; stop_sampler; echo "${OBS_FAILED}"; }
-expect_eq "stop_sampler: killed by a signal before the stop request" "$(ss_sig 'while :; do sleep 0.05; done')" 1
+expect_eq "stop_sampler: wrong answer to the stop request" "$(ss_rc 'trap "exit 3" TERM; while :; do sleep 0.05; done' 0.3)" 1
 expect_eq "stop_sampler: exits on its own before the stop request" "$(ss_rc 'exit 0' 0.3)" 1
+# 停止の要求より前に、ほかのシグナル（TERM を含む）で消えた場合も、観察が切れていたので失敗にする。
+ss_sig() { OBS_FAILED=0; ( eval "$1" ) & SAMPLER=$!; sleep "${2:-0.2}"; kill -"${3:-KILL}" "${SAMPLER}" 2> /dev/null; sleep 0.2; stop_sampler; echo "${OBS_FAILED}"; }
+expect_eq "stop_sampler: killed by SIGKILL before the stop request" "$(ss_sig 'while :; do sleep 0.05; done')" 1
+expect_eq "stop_sampler: killed by SIGTERM before the stop request" "$(ss_sig 'while :; do sleep 0.05; done' 0.2 TERM)" 1
+expect_eq "stop_sampler: answered TERM before the request" "$(ss_sig 'trap "exit 4" TERM; while :; do sleep 0.05; done' 0.2 TERM)" 1
+expect_eq "stop_sampler: stopped without the trap (no answer)" "$(ss_rc 'while :; do sleep 0.05; done' 0.3)" 1
 
 # try_lock: ビルド先を鍵にしたロックはビルドの前から run の終わりまで持つ（同じビルド先を共有する別の
 # 作業ツリーの run が、検証中の run の実行ファイルをビルドで置き換えるのを防ぐ）。
 expect_eq "try_lock: second holder is refused" "$(d="${tmp}/lock-a"; try_lock "${d}"; a=$?; try_lock "${d}" 2> /dev/null; echo "${a}-$?")" "0-1"
 expect_eq "try_lock: released dir can be retaken" "$(d="${tmp}/lock-b"; try_lock "${d}" && rm -f "${d}/pid" && rmdir "${d}" && try_lock "${d}"; echo $?)" 0
 expect_eq "bin lock is taken before the build" "$(awk '/bin-\$\(printf/{a=NR} /cargo build/{b=NR} END{print (a>0 && b>0 && a<b)?"yes":"no"}' "${tool}")" "yes"
+
+# locks_dir_ready: 共有 git dir の pelway/locks を作り、証拠と同じ規則でほかの利用者が差し替えられない
+# 階層だけを通す（安全な証拠の置き場でも、ロックの階層が安全でなければ止まる）。
+expect_eq "locks_dir_ready: fresh dir" "$(locks_dir_ready "${tmp}/g1" && echo 0 || echo 1)" 0
+mkdir -p "${tmp}/g2/pelway"; ln -s /tmp "${tmp}/g2/pelway/locks"
+expect_eq "locks_dir_ready: locks is a symlink" "$(locks_dir_ready "${tmp}/g2" && echo 0 || echo 1)" 1
+mkdir -p "${tmp}/g3/pelway/locks"; chmod 777 "${tmp}/g3/pelway/locks"
+expect_eq "locks_dir_ready: world-writable locks" "$(locks_dir_ready "${tmp}/g3" && echo 0 || echo 1)" 1
+mkdir -p "${tmp}/g4/pelway"; chmod 777 "${tmp}/g4/pelway"
+expect_eq "locks_dir_ready: world-writable pelway" "$(locks_dir_ready "${tmp}/g4" && echo 0 || echo 1)" 1
+
+# lock_owner: 持ち主の表示は、pid がリンクでない通常ファイルで数字だけのときだけ。
+mkdir -p "${tmp}/l1"; echo 1234 > "${tmp}/l1/pid"
+expect_eq "lock_owner: digits" "$(lock_owner "${tmp}/l1")" 1234
+mkdir -p "${tmp}/l2"; ln -s /etc/passwd "${tmp}/l2/pid"
+expect_eq "lock_owner: symlink pid" "$(lock_owner "${tmp}/l2")" ""
+mkdir -p "${tmp}/l3"; echo "hello" > "${tmp}/l3/pid"
+expect_eq "lock_owner: non-numeric" "$(lock_owner "${tmp}/l3")" ""
+mkdir -p "${tmp}/l4"
+expect_eq "lock_owner: no pid file" "$(lock_owner "${tmp}/l4")" ""
+
+# target_dir_of: 相対の CARGO_TARGET_DIR は作業ツリーのルートから解決する（Cargo と同じ）。
+expect_eq "target_dir_of: unset" "$(unset CARGO_TARGET_DIR; target_dir_of /wt)" "/wt/target"
+expect_eq "target_dir_of: absolute" "$(CARGO_TARGET_DIR=/abs/td target_dir_of /wt)" "/abs/td"
+expect_eq "target_dir_of: relative resolves from the work tree" "$(CARGO_TARGET_DIR=target target_dir_of /wt)" "/wt/target"
+expect_eq "target_dir_of: relative and absolute share the output" "$(CARGO_TARGET_DIR=target target_dir_of /wt)" "$(CARGO_TARGET_DIR=/wt/target target_dir_of /other)"
 
 # tree_state: コミット済み・変更あり・git の確認の失敗を区別する。
 git init -q "${tmp}/ts"; git -C "${tmp}/ts" -c user.email=t@e -c user.name=t commit -q --allow-empty -m init

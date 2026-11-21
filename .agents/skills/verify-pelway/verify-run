@@ -366,19 +366,26 @@ observe_sockets() {
 # 操作の間、0.1 秒ごとに ss を取り続ける（要求ごとの観察の間を埋める。それでも 0.1 秒より短い接続は取りこぼしうる）。
 start_sampler() {
   # 子の標準入力のパイプは持たない（持つと run が SIGKILL されたときに子が終わらない）。親が死んだら止まる。
-  # 取得・記録に失敗したら終了コード 3 で抜ける（stop_sampler が OBS_FAILED にする）。
-  ( exec {DS_IN}>&-; while kill -0 "$$" 2> /dev/null; do observe_sockets || exit 3; sleep 0.1; done ) &
+  # 取得・記録に失敗したら終了コード 3 で抜ける。停止の要求（TERM）には trap で終了コード 4 を返す
+  # （要求に応えて終わったことと、途中で消えたことを分ける）。
+  ( exec {DS_IN}>&-; trap 'exit 4' TERM; while kill -0 "$$" 2> /dev/null; do observe_sockets || exit 3; sleep 0.1; done ) &
   SAMPLER=$!
 }
 stop_sampler() {
   [ -n "${SAMPLER:-}" ] || return 0
-  # 停止を求めたかどうかにかかわらず、終了の理由を見る。意図した停止はこの run が送った SIGTERM（143）
-  # だけ。それ以外の終了は、止める前の取得・記録の失敗（3）、ほかのシグナルによる途中終了（137 など）、
-  # 自分で抜けた（0）のどれでも、観察が切れていた時間帯がありうるので失敗にする。
-  kill "${SAMPLER}" 2> /dev/null
-  local rc=0
-  wait "${SAMPLER}" 2> /dev/null || rc=$?
-  [ "${rc}" != 143 ] && OBS_FAILED=1
+  # 停止を求める前に、観察プロセスがまだ動いているか見る。先に終わっていた（ゾンビ・消えている）場合は、
+  # どんな終わり方でもその時点から観察が切れていたので失敗にする。
+  local st rc=0
+  st="$(ps -o stat= -p "${SAMPLER}" 2>/dev/null | tr -d '[:space:]')"
+  if [ -z "${st}" ] || [[ "${st}" == *Z* ]]; then
+    wait "${SAMPLER}" 2>/dev/null
+    OBS_FAILED=1
+  else
+    kill "${SAMPLER}" 2>/dev/null
+    wait "${SAMPLER}" 2>/dev/null || rc=$?
+    # 意図した停止は、この run が送った TERM に trap で応えた終了（4）だけ。
+    [ "${rc}" != 4 ] && OBS_FAILED=1
+  fi
   SAMPLER=""
 }
 
@@ -412,8 +419,29 @@ network_check() {
 # pid が 5 秒以内に終われば 0。
 gone_within() { local _; for _ in $(seq 50); do [ -e "/proc/$1" ] || return 0; sleep 0.1; done; return 1; }
 
+# 共有のロックの階層を作り、ほかの利用者が差し替えられないことを確かめる（証拠の置き場と同じ規則）。0 = 使える。
+locks_dir_ready() {
+  mkdir -p -- "$1/pelway/locks" 2>/dev/null || return 1
+  dir_chain_safe "$1/pelway" "$1/pelway/locks"
+}
+
+# ロックの持ち主の PID を、pid がリンクでない通常ファイルで中身が数字だけのときだけ返す（読めない・数字以外は空）。
+lock_owner() {
+  local p
+  [ -f "$1/pid" ] && [ ! -L "$1/pid" ] && p="$(head -n 1 -- "$1/pid" 2>/dev/null)" && [[ "${p}" =~ ^[0-9]+$ ]] && printf '%s' "${p}"
+}
+
 # locks/ の下のロックのディレクトリを mkdir で原子的に取る。取れたらこの run の pid を持ち主として書く。
 try_lock() { mkdir "$1" 2> /dev/null && echo "$$" > "$1/pid"; }
+
+# Cargo がビルドに使う出力先。相対の CARGO_TARGET_DIR は Cargo と同じく作業ツリーのルートから解決する。
+target_dir_of() {
+  case "${CARGO_TARGET_DIR:-}" in
+    "") printf '%s\n' "$1/target" ;;
+    /*) printf '%s\n' "${CARGO_TARGET_DIR}" ;;
+    *) printf '%s\n' "$1/${CARGO_TARGET_DIR}" ;;
+  esac
+}
 
 # この run が起動した PID だけを止める: 標準入力を閉じる → SIGTERM → SIGKILL。送る前に毎回 exe を照合する。
 stop_child() {
@@ -636,11 +664,11 @@ main() {
   EV="$(make_run_dir "${ROOT}" "${LABEL}-${SHA}/${RUN_ID}")" \
     || die_usage "cannot create a new run directory under ${ROOT} (it must be new and must not resolve elsewhere)"
   evidence_root_ok "${EV}" "${TOP}" "${COMMON}" || die_usage "the run directory resolves into the work tree"
-  mkdir -p "${COMMON}/pelway/locks" || die_usage "cannot create ${COMMON}/pelway/locks"
+  locks_dir_ready "${COMMON}" || die_usage "the locks directory ${COMMON}/pelway/locks is not safe (it must be a real directory in a chain that only this user or root can modify)"
   EVIDENCE_WRITE_FAILED=0; OBS_FAILED=0
   VERDICT=PASS; STEP=1; PID=""; LOCK=""; LOCK2=""; BIN=""
   trap cleanup EXIT
-  printf 'run_id=%s\nsha=%s\ndirty=%s\nfeature=%s\n' "${RUN_ID}" "${SHA}" "${DIRTY}" "${FEATURE}" | tee "${EV}/summary.txt"
+  printf 'run_id=%s\nsha=%s\ndirty=%s\nallow_dirty=%s\nfeature=%s\n' "${RUN_ID}" "${SHA}" "${DIRTY}" "${ALLOW_DIRTY}" "${FEATURE}" | tee "${EV}/summary.txt"
   if [ "${DIRTY}" = yes ] && [ "${ALLOW_DIRTY}" = 0 ]; then
     record FAIL "前提: 作業ツリーがコミット済み" "未コミットの変更がある。--allow-dirty は証拠にならない"; return 1
   fi
@@ -649,12 +677,12 @@ main() {
   # そのあと同じ target の demo-serve が動いていないかを見る（手で起動したものなどを拒む。触らない）。
   # 動いているほうの exe はビルドし直すと " (deleted)" が付くので、外して比べる。
   local target_real p e other="" lock lock2
-  target_real="$(realpath -m "${CARGO_TARGET_DIR:-${TOP}/target}")"
+  target_real="$(realpath -m "$(target_dir_of "${TOP}")")"
   # ロックは証拠の置き場によらず共有 git dir の下に置き、鍵は作業ツリーの実体のパス（ビルドで変わらない）。
   lock="${COMMON}/pelway/locks/$(printf '%s' "${TOP}" | sha256sum | cut -c1-12)"
   if try_lock "${lock}"; then LOCK="${lock}"
   else
-    record FAIL "起動: 二重起動の確認" "別の run がロックを持っている（pid=$(cat "${lock}/pid" 2>/dev/null)、${lock}）。動かさない"; return 1
+    record FAIL "起動: 二重起動の確認" "別の run がロックを持っている（pid=$(lock_owner "${lock}" || echo 不明)、${lock}）。動かさない"; return 1
   fi
   # ビルドの前から持つ 2 つめのロック: 同じビルド先（${CARGO_TARGET_DIR} か既定の target の実体）を共有する
   # 別の作業ツリーの run が、この run の検証中にビルドして実行ファイルを置き換えるのを防ぐ。置き換わると、
@@ -662,7 +690,7 @@ main() {
   lock2="${COMMON}/pelway/locks/bin-$(printf '%s' "${target_real}" | sha256sum | cut -c1-12)"
   if try_lock "${lock2}"; then LOCK2="${lock2}"
   else
-    record FAIL "起動: 二重起動の確認" "同じビルド先を使う別の run がロックを持っている（pid=$(cat "${lock2}/pid" 2>/dev/null)、${lock2}）。動かさない"; return 1
+    record FAIL "起動: 二重起動の確認" "同じビルド先を使う別の run がロックを持っている（pid=$(lock_owner "${lock2}" || echo 不明)、${lock2}）。動かさない"; return 1
   fi
   for p in $(pgrep -x demo-serve || true); do
     e="$(exe_of "${p}" || true)"
