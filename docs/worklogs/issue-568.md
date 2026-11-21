@@ -12,3 +12,16 @@
 6. 改善案: `docs/dev-environment.md` の「デモの LLM 接続（#330）」の「`mise exec -- fnox exec -- <デモ起動コマンド>`」に、`cargo build --offline --locked -p pelway-http --example demo-serve`（台本モード固定）を書き足す。ただし demo-serve は環境変数を読まないため、実キーでの起動口は別に要る。
 
 使ったスキル: implement-issue、write-pull-request、writing-for-agents（`.agents/skills/writing-for-agents/SKILL.md`）
+
+## 実装者メモ（round 2）
+
+対象 head: c09fa0ae96f814256a8a1ce513ed34ac38f74b93
+
+1. 詰まった箇所: `.agents/skills/verify-pelway/verify-run` の `env_check`: 証拠に変数名 `PELWAY_LLM_*` を書いたら、run のログへ流した demo-check の leak-phrases が `[ident]` で検出した。証拠には変数名を書かず、`env_llm_key=absent` のようなラベルだけを書く形にした。
+2. 詰まった箇所: 同ファイルの `http`: 要求ヘッダーをコマンド置換で組むと末尾の改行が落ち、要求が壊れて 408 になった。ヘッダーの終わりを送るときに改行を足す形にした。`ss -tnp` を PID だけで絞ると接続が閉じた後に 0 行になるため、待ち受けのアドレスを含む行も取る（`ss -tanp`）形にした。
+3. 曖昧だった文: 「台本モードで動いたことは、合成応答が出たことと、接続先を知らせるログ行で確かめる」（開発リードの追加指示 1）。接続先の行は台本モードでも Z.ai の URL を書くので、接続していないことは `network.txt` の集計（loopback 以外 0 件）で別に確かめると読んだ。
+4. 仮定と解釈: 「ログと証拠に、投稿の本文や秘密を出さない」を、証拠の `body`・`question` を長さだけ残して伏せることと読んだ。依頼の本文に demo-check の canary を埋め、伏せ漏れを canary 段で検出できるようにした。案A・案B の一致は伏せる前のメモリ上で確かめ、PASS 行だけを残す。
+5. 足りなかった情報・検証手段: demo-check の各段は走査範囲が固定（`target/`・`logs/` など）で、任意のログを渡す引数が無い。run の証拠の写しを `demo-check-input/target/demo/` に置き、`DEMO_CHECK_ROOT` で流した。
+6. 改善案: `scripts/demo-check/lib.sh` の冒頭の「走査範囲」に、`DEMO_CHECK_ROOT` で任意のディレクトリの `target/demo/` を走査させる使い方（verify-pelway の run のログ）を書き足す。
+
+使ったスキル: implement-issue、write-pull-request
