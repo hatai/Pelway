@@ -83,6 +83,31 @@ pf() { : > "${tmp}/mise.log"; (PATH="${tmp}/fakebin:${PATH}" FAKE_LOG="${tmp}/mi
 expect_eq "pitchfork_list: supervisor stopped -> no list" "$(pf 1)" "args=exec -- pitchfork supervisor status auto_start=false"
 expect_eq "pitchfork_list: supervisor running -> list without auto start" "$(pf 0 | tail -n 1)" "args=exec -- pitchfork list auto_start=false"
 
+# make_run_dir: 新しく作り所有者だけの権限にする。既にある・置き場の下のリンクで外へ出る場合は失敗する。
+mkdir -p "${tmp}/ev-root" "${tmp}/elsewhere"
+got="$(make_run_dir "${tmp}/ev-root" "568-abc/run1")"
+expect_eq "make_run_dir: creates the run dir" "${got}" "${tmp}/ev-root/568-abc/run1"
+expect_eq "make_run_dir: owner-only permissions" "$(stat -c '%a' "${tmp}/ev-root/568-abc/run1")" 700
+expect_eq "make_run_dir: steps dir" "$([ -d "${tmp}/ev-root/568-abc/run1/steps" ] && echo yes)" yes
+expect_eq "make_run_dir: refuses an existing run dir" "$(make_run_dir "${tmp}/ev-root" "568-abc/run1" > /dev/null 2>&1 && echo 0 || echo 1)" 1
+ln -s "${tmp}/elsewhere" "${tmp}/ev-root/568-link"
+expect_eq "make_run_dir: refuses a symlink under the root" "$(make_run_dir "${tmp}/ev-root" "568-link/run1" > /dev/null 2>&1 && echo 0 || echo 1)" 1
+expect_eq "make_run_dir: wrote nothing through the symlink" "$(find "${tmp}/elsewhere" -mindepth 1 | grep -c .)" 0
+
+# steps_complete: 送った件数ぶんの .req と .resp がそろっているときだけ 0。
+mkdir -p "${tmp}/steps"
+: > "${tmp}/steps/01-a.req"; : > "${tmp}/steps/01-a.resp"; : > "${tmp}/steps/02-b.req"; : > "${tmp}/steps/02-b.resp"
+expect_eq "steps_complete: both pairs" "$(steps_complete "${tmp}/steps" 2 && echo 0 || echo 1)" 0
+expect_eq "steps_complete: more requests sent than recorded" "$(steps_complete "${tmp}/steps" 3 && echo 0 || echo 1)" 1
+rm -f "${tmp}/steps/02-b.resp"
+expect_eq "steps_complete: a missing .resp" "$(steps_complete "${tmp}/steps" 2 && echo 0 || echo 1)" 1
+
+# observation_errors: ss の取得に失敗した印を数える（該当なしとは区別する）。
+printf 'tcp LISTEN 0 128 127.0.0.1:4000 0.0.0.0:*\n' > "${tmp}/obs.txt"
+expect_eq "observation_errors: none" "$(observation_errors "${tmp}/obs.txt")" 0
+printf '# ss の取得に失敗 01:02:03\n' >> "${tmp}/obs.txt"
+expect_eq "observation_errors: one failed snapshot" "$(observation_errors "${tmp}/obs.txt")" 1
+
 repo="${tmp}/repo"
 git init -q "${repo}"
 run_args() { (cd "${repo}" && bash "${tool}" "$@" > /dev/null 2>&1); echo $?; }

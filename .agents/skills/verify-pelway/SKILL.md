@@ -82,18 +82,18 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 
 ## 4. 証拠
 
-- 置き場: `<共有 git dir>/pelway/evidence/<label>-<HEAD の sha>/<UTC 時刻>-<feature>-<run の PID>/`。作業ツリーの外で、run ごと・sha ごとに分かれる。
+- 置き場: `<共有 git dir>/pelway/evidence/<label>-<HEAD の sha>/<UTC 時刻>-<feature>-<run の PID>/`。作業ツリーの外で、run ごと・sha ごとに分かれる。run のディレクトリは毎回新しく所有者だけの権限（700）で作り、既にあるとき・置き場の下のシンボリックリンクをたどって実体が置き場の外に出るときは作らずに止まる（終了コード 2）。
 - 中身: `summary.txt`（run_id・sha・dirty・feature・段ごとの `PASS`/`FAIL`・verdict）、`steps/NN-<名前>.req` と `.resp`（送った要求と受け取った応答。NN は送った順で、判断待ちを待つ間は `decisions-pending` が複数並ぶ。`body`・`question` は `<redacted len=N>` に伏せる）、`env-check.txt`、`tools.txt`、`build.json`（cargo の報告）、`survivors-before.txt`・`survivors-after.txt`、`network.txt`（要求ごとと 0.1 秒ごとに `ss -tuanp` で取った、この PID と待ち受けのアドレスに関わる TCP・UDP の行と、最後の集計行）、`proc-fd.txt`（開いているファイル）、`server.stdout`・`server.stderr`、`build.log`、`cleanup.txt`、`demo-check.txt` と `demo-check-input/`（demo-check に渡した写し）、`SHA256SUMS`。
 - 成功の基準:
   - 利用者の道筋（公開の HTTP 経路と合成ヘッダー）だけで動かす。テスト専用の setter・内部の状態を直接読む経路は使わない。
-  - 操作（`.req`）と結果の状態（`.resp`）の両方を残す。
+  - 操作（`.req`）と結果の状態（`.resp`）の両方を残す。送った要求それぞれに `.req` と `.resp` がそろい、書き込みの失敗が無いことを `証拠: 要求ごとの .req と .resp がそろっている` の段で確かめる。
   - 副作用を API で読み直す: 投稿が 1 件だけ保存されたこと、決定が確定して判断待ちから消えたこと、下書きが作られたこと（段 10）。保存はメモリだけなので、決定後の状態は HTTP で取り直したもの（段 9）を証拠にする。
-  - 外に出ていないことを観察で確かめる: 操作の間、要求ごとと 0.1 秒ごとに `ss -tuanp` を取り（TCP と UDP。この PID と待ち受けのアドレスに関わる行）、`network.txt` の集計行が「loopback 以外との接続 0 件、DB（:5432）宛て 0 件」で観察が 1 行以上。`proc-fd.txt` は標準入出力と、`ss -tuanpe` の `ino:` で TCP・UDP と確かめられたソケットだけ（確かめられないソケットがあれば FAIL）。`mise run demo-check` の合格だけでは足りない。観察はスナップショットなので、0.1 秒より短い接続と、TCP・UDP 以外の通信路は未検証（観察の限界。合格の行にもそう書く）。
+  - 外に出ていないことを観察で確かめる: 操作の間、要求ごとと 0.1 秒ごとに `ss -tuanp` を取り（TCP と UDP。この PID と待ち受けのアドレスに関わる行）、`network.txt` の集計行が「取得の失敗 0 回、loopback 以外との接続 0 件、DB（:5432）宛て 0 件」で観察が 1 行以上。`ss` の取得そのものが失敗した回は、該当なしと区別して `# ss の取得に失敗` の行を残し、1 回でもあれば観察は未完了として FAIL。`proc-fd.txt` は標準入出力と、`ss -tuanpe` の `ino:` で TCP・UDP と確かめられたソケットだけ（確かめられないソケットがあれば FAIL）。`mise run demo-check` の合格だけでは足りない。観察はスナップショットなので、0.1 秒より短い接続と、TCP・UDP 以外の通信路は未検証（観察の限界。合格の行にもそう書く）。
   - 証拠のディレクトリとファイルは所有者だけが読める（`umask 077`）。証拠の写しが全部そろったときだけ demo-check を流し、`SHA256SUMS` は作ったあとに `sha256sum -c` で確かめる。どちらかに失敗したら FAIL か終了コード 1。
   - 後片付けの後に、run のログ・証拠の写しに対して `scripts/demo-check/canary.sh` と `leak-phrases.sh` を `DEMO_CHECK_ROOT` で流し、どちらも exit 0（本文の canary と禁止語が証拠に出ていない）。
 - 報告には `summary.txt` の全行と、最後に出る `evidence=<パス>`・`evidence_sha256=<SHA256SUMS の sha256>` を貼る。
 
-失敗: `summary.txt` に `FAIL` 行がある。loopback 以外との接続か DB 宛ての接続が 1 件でもある、または観察が 0 行。`proc-fd.txt` に標準入出力・ソケット以外のファイルがある。demo-check の canary か leak-phrases が exit 0 以外。
+失敗: `summary.txt` に `FAIL` 行がある。要求の `.req`・`.resp` に欠けか書き込みの失敗がある。`ss` の取得に失敗した回がある。loopback 以外との接続か DB 宛ての接続が 1 件でもある、または観察が 0 行。`proc-fd.txt` に標準入出力・ソケット以外のファイルがある。demo-check の canary か leak-phrases が exit 0 以外。
 
 ## 5. 後片付け
 

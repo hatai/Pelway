@@ -58,6 +58,33 @@ redact() {
 # 記録した段が全部 PASS でも FAIL にする（飛ばした段がある証拠を PASS にしない）。
 final_verdict() { if [ "$2" = 1 ]; then echo "$1"; else echo FAIL; fi; }
 
+# run ごとの証拠のディレクトリを作る。$1=証拠の置き場（実体のパス）$2=置き場からの相対パス。
+# 親までは作ってよいが、最後のディレクトリは新しく作り（既にあれば失敗）、所有者だけの権限にする。
+# 途中にシンボリックリンクがあって実体が置き場の外に出たら失敗する。成功したら作ったパスを返す。
+make_run_dir() {
+  local root="$1" rel="$2" want parent
+  want="${root%/}/${rel}"; parent="$(dirname -- "${want}")"
+  mkdir -p -- "${parent}" || return 1
+  [ "$(realpath -- "${parent}")" = "${parent}" ] || return 1
+  mkdir -m 700 -- "${want}" || return 1
+  [ "$(realpath -- "${want}")" = "${want}" ] || return 1
+  chmod 700 -- "${want}" && mkdir -m 700 -- "${want}/steps" && printf '%s\n' "${want}"
+}
+
+# steps/ に、送った n 件の要求それぞれの .req と .resp がそろっていれば 0。
+steps_complete() {
+  local dir="$1" n="$2" i k
+  for ((i = 1; i <= n; i++)); do
+    k="$(printf '%02d' "${i}")"
+    compgen -G "${dir}/${k}-*.req" > /dev/null && compgen -G "${dir}/${k}-*.resp" > /dev/null || return 1
+  done
+  [ "$(find "${dir}" -maxdepth 1 -type f -name '*.req' | grep -c .)" = "${n}" ] \
+    && [ "$(find "${dir}" -maxdepth 1 -type f -name '*.resp' | grep -c .)" = "${n}" ]
+}
+
+# network.txt のうち、ss の取得に失敗した印の行の数を返す。
+observation_errors() { grep -c '^# ss の取得に失敗' "$1" 2>/dev/null; }
+
 # path が dir の中（dir 自身を含む）なら 0。
 under() { case "${1%/}/" in "${2%/}/"*) return 0 ;; *) return 1 ;; esac; }
 
@@ -113,7 +140,7 @@ http() {
     [ -n "${member}" ] && printf 'x-pelway-member-id: %s\r\nx-pelway-member-kind: human\r\n' "${member}"
     printf 'Content-Length: %s\r\n' "$(printf '%s' "${body}" | wc -c)")"
   # 証拠には本文を伏せた形だけを書く（生の本文はメモリにだけ置く）。
-  { printf '%s\n\n' "${head//$'\r'/}"; redact <<< "${body}"; } > "${req}"
+  { printf '%s\n\n' "${head//$'\r'/}"; redact <<< "${body}"; } > "${req}" || EVIDENCE_WRITE_FAILED=1
   STATUS=000; BODY=""
   if exec 3<>"/dev/tcp/${HOST}/${PORT}"; then
     printf '%s\n\r\n%s' "${head}" "${body}" >&3
@@ -123,9 +150,9 @@ http() {
     raw="$(timeout 10 cat <&3)"
     exec 3<&- 3>&-
     STATUS="$(resp_status <<< "${raw}")"; BODY="$(resp_body <<< "${raw}")"
-    { head -n 1 <<< "${raw}" | tr -d '\r'; echo; redact <<< "${BODY}"; } > "${resp}"
+    { head -n 1 <<< "${raw}" | tr -d '\r'; echo; redact <<< "${BODY}"; } > "${resp}" || EVIDENCE_WRITE_FAILED=1
   else
-    echo "connect failed" > "${resp}"
+    echo "connect failed" > "${resp}" || EVIDENCE_WRITE_FAILED=1
   fi
 }
 
@@ -172,8 +199,13 @@ count_nonloopback() {
 }
 
 # この PID のソケットと、待ち受けのアドレス（addr）に関わる接続を network.txt に足す。
+# ss の取得そのものが失敗したときは、該当なしと区別して印の行を書く（network_check がこれを見て FAIL にする）。
 observe_sockets() {
-  ss -Htuanp 2>/dev/null | grep -F -e "pid=${PID}," -e " ${ADDR} " >> "${EV}/network.txt" || true
+  local snap
+  if ! snap="$(ss -Htuanp 2>/dev/null)"; then
+    echo "# ss の取得に失敗 $(date -u +%H:%M:%S.%N)" >> "${EV}/network.txt"; return 0
+  fi
+  grep -F -e "pid=${PID}," -e " ${ADDR} " <<< "${snap}" >> "${EV}/network.txt" || true
 }
 
 # 操作の間、0.1 秒ごとに ss を取り続ける（要求ごとの観察の間を埋める。それでも 0.1 秒より短い接続は取りこぼしうる）。
@@ -191,16 +223,20 @@ network_check() {
   local seen nonlo ino
   ls -l "/proc/${PID}/fd" > "${EV}/proc-fd.txt" 2>&1 || return 1
   # /proc の socket:[N] を、ss -e の ino:N（この PID の TCP・UDP）と突き合わせる。見つからないソケットは種類も宛先も確かめられない。
-  local known; known="$(ss -Htuanpe 2>/dev/null | grep -F "pid=${PID}," | grep -oE 'ino:[0-9]+' | cut -d: -f2)"
+  local known snap
+  snap="$(ss -Htuanpe 2>/dev/null)" || { echo "# ss の取得に失敗（ino の突き合わせ）" >> "${out}"; return 1; }
+  known="$(grep -F "pid=${PID}," <<< "${snap}" | grep -oE 'ino:[0-9]+' | cut -d: -f2)"
   for ino in $(grep -oE 'socket:\[[0-9]+\]' "${EV}/proc-fd.txt" | tr -dc '0-9\n'); do
     grep -qx "${ino}" <<< "${known}" || { echo "# 種類を確かめられないソケット: inode ${ino}" >> "${out}"; return 1; }
   done
   observe_sockets
-  seen="$(grep -c . "${out}" 2>/dev/null)"; seen="${seen:-0}"
-  nonlo="$(count_nonloopback "${out}")"
-  local db; db="$(grep -c ':5432 ' "${out}")"
-  echo "# ss -tuan の観察（TCP・UDP、要求ごと＋0.1 秒ごと）${seen} 行、loopback 以外との接続 ${nonlo} 件、DB（:5432）宛て ${db} 件" >> "${out}"
-  [ "${seen}" -ge 1 ] && [ "${nonlo}" = 0 ] && [ "${db}" = 0 ] || return 1
+  # 印の行（# で始まる）は観察ではないので、数えるのは ss の行だけ。取得に失敗した回が 1 回でもあれば観察は未完了。
+  local errs; errs="$(observation_errors "${out}")"; errs="${errs:-0}"
+  seen="$(grep -vc '^#' "${out}" 2>/dev/null)"; seen="${seen:-0}"
+  nonlo="$(count_nonloopback <(grep -v '^#' "${out}"))"
+  local db; db="$(grep -v '^#' "${out}" | grep -c ':5432 ')"
+  echo "# ss -tuan の観察（TCP・UDP、要求ごと＋0.1 秒ごと）${seen} 行、取得の失敗 ${errs} 回、loopback 以外との接続 ${nonlo} 件、DB（:5432）宛て ${db} 件" >> "${out}"
+  [ "${errs}" = 0 ] && [ "${seen}" -ge 1 ] && [ "${nonlo}" = 0 ] && [ "${db}" = 0 ] || return 1
   ! awk 'NR > 1 {print $NF}' "${EV}/proc-fd.txt" | grep -vqE "^(/dev/null|${EV}/server\.std(out|err)|socket:\[[0-9]+\]|anon_inode:.*|pipe:\[[0-9]+\])$"
 }
 
@@ -412,8 +448,12 @@ main() {
   SHA="$(git -C "${TOP}" rev-parse HEAD)"
   DIRTY=no; [ -z "$(git -C "${TOP}" status --porcelain)" ] || DIRTY=yes
   RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-${FEATURE}-$$"
-  EV="${ROOT}/${LABEL}-${SHA}/${RUN_ID}"
-  mkdir -p "${EV}/steps" "${COMMON}/pelway/locks" || die_usage "cannot create ${EV}"
+  # 置き場の下にシンボリックリンクがあっても外へ出ないよう、run のディレクトリは新しく作って実体を確かめる。
+  EV="$(make_run_dir "${ROOT}" "${LABEL}-${SHA}/${RUN_ID}")" \
+    || die_usage "cannot create a new run directory under ${ROOT} (it must be new and must not resolve elsewhere)"
+  evidence_root_ok "${EV}" "${TOP}" "${COMMON}" || die_usage "the run directory resolves into the work tree"
+  mkdir -p "${COMMON}/pelway/locks" || die_usage "cannot create ${COMMON}/pelway/locks"
+  EVIDENCE_WRITE_FAILED=0
   VERDICT=PASS; STEP=1; PID=""; LOCK=""; BIN=""
   trap cleanup EXIT
   printf 'run_id=%s\nsha=%s\ndirty=%s\nfeature=%s\n' "${RUN_ID}" "${SHA}" "${DIRTY}" "${FEATURE}" | tee "${EV}/summary.txt"
@@ -499,6 +539,12 @@ main() {
   start_sampler
   operate
   stop_sampler
+
+  # 証拠の書き込み: 送った要求それぞれの .req と .resp がそろい、書き込みの失敗が無いこと。
+  local sent=$((STEP - 1))
+  if [ "${EVIDENCE_WRITE_FAILED}" = 0 ] && steps_complete "${EV}/steps" "${sent}"; then
+    record PASS "証拠: 要求ごとの .req と .resp がそろっている" "${sent} 件"
+  else record FAIL "証拠: 要求ごとの .req と .resp がそろっている" "書き込みの失敗か欠けがある（${sent} 件送った）"; fi
 
   # 外に出ていないことの観察
   local net="ネットワーク・ファイル: 観察した範囲で TCP・UDP は 127.0.0.1 だけ、開いているのは標準入出力と TCP・UDP のソケットだけ"
