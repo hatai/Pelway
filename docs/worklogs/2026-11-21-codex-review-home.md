@@ -1,6 +1,6 @@
 # レビュー担当を専用 home に移したときの確認（2026-11-21）
 
-`docs/dev-environment.md` の「専用 home での確認」と「レビュー担当の Claude」の確認項目を実施した記録。
+`docs/dev-environment.md` の「専用 home での確認」と「レビュー担当の Claude」の確認項目を実施した記録。このファイルの確認は、どれも同じ版で行った（`codex-cli 0.171.0`、Claude Code `2.1.330`、T3 `0.1.10-nightly.20261115.4736`。この日の作業の間に版は変わっていない）。
 
 ## codex_review
 

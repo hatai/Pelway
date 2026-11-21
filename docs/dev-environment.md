@@ -234,7 +234,7 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 
 ### 専用 home での確認
 
-確かめ終わるまでの間は、この見出しのすぐ下に `保留中: <更新したもの>` の行を置き、確かめ終わったら消す。指揮役と実装担当（レビューの委託の担当を決めるとき）は、この行の有無で `codex_review` を使えるかを判断する。
+確かめ終わるまでの間は、この見出しのすぐ下に `保留中: <更新したもの>` の行を置き、確かめ終わったら消す。指揮役と実装担当（レビューの委託の担当を決めるとき）は、委託の直前に main の最新の版（`scripts/agent-gh dev api -H "Accept: application/vnd.github.raw" "repos/hatai/Pelway/contents/docs/dev-environment.md?ref=main"`）でこの行の有無を見て、`codex_review` を使えるかを判断する。「レビュー担当の Claude」にも、T3・Claude Code・`~/.claude-review` を更新したときに同じ `保留中:` の行を置く。
 
 `codex_review` を初めて設定したときと、Codex・T3・`codex_review` の home のどれかを更新したときは、`codex_review` に委託した確認用の子タスク（`runtimeMode: "auto-accept-edits"`）で次を確かめる。確かめ終わるまで、`codex_review` をレビューに使わない。確認用の子タスクは、`main` のコミットで動くスレッドから委託する（`delegate_task` の子は委託元のコミットを checkout するので、PR のブランチから委託すると、PR が変えた `scripts/agent-gh` や `mise.toml` のタスクを実行しうる）。`config.toml` の層の `enabled = false` が T3 の設定に上書きされないことは Codex の設定の重ね方に、サーバー名 `t3-code`・`t3-code-direct` は T3 に依存するため、どちらを更新しても確かめ直す。結果は `docs/worklogs/` に日付付きの作業ログとして残し、確かめたときの版（`codex --version`、`claude --version`、T3 の `~/.t3/runtime/service-state.json` の `activeVersion`）も書く（初回は `2026-11-21-codex-review-home.md`）。巡回などで今の版が最後の記録と違うと分かったら、更新があったものとして保留にする。
 
@@ -299,7 +299,7 @@ EOF
 | 承認要求を拒否に変えるフック（`hooks.PermissionRequest`）の結果 | `delegate_task`（target `claude_review`、`auto-accept-edits`、worktree）で確認。`H=$(git rev-parse HEAD); …; echo rc=$?` と `for f in …; do wc -l "$f"; done` は承認待ちにならずフックの拒否が返り、モデルは単純なコマンドに分けて送り直して結果を得た。`scripts/agent-gh review api /rate_limit` はそのまま通り、`curl -sS https://example.com` は permissions の deny で拒否のまま。スレッドに承認待ち（`pendingApproval`）は出なかった | 2026-11-21 |
 | フック導入後の実レビューの観察 | 導入後 1 時間の `claude_review` の実レビュー 9 セッションで、フックの拒否は 26 件。拒否を理由に `verdict: failed` になったレビューは無かった（`failed` の 1 件は PR のチェックの未報告による）。拒否のうち `git ls-tree`・`git -C`・`agent-gh review run list` は単純な形でも承認要求になっていたため、`git ls-tree`・`git cat-file`・`run list`・`run view` を許可に足した（`claude -p` で通ることと、`run download` は拒否のままであることを確認）。拒否されたのと同じコマンドを 1 回そのまま送り直す例が多かったため、フックのメッセージに 1 文足した | 2026-11-21 |
 
-前からある未確認の経路: 委託のレビューは PR の head の checkout で動くので、PR が足した `.claude/settings.json`・`.mcp.json`・`.codex/` を読みうる（project の設定は `~/.claude-review/settings.json` より優先され、`env` の上書きや hooks の実行がありうる）。手当てとして、これらを足す・変える PR はレビューを委託しない（skill `implement-issue` の手順 8）。
+前からある未確認の経路: 委託のレビューは PR の head の checkout で動くので、PR が足した `.claude/settings.json`・`.mcp.json`・`.codex/` と、PR が変えたレビュー担当のスキル（`.agents/skills/review-pr`・`.agents/skills/security-review`。`.claude/skills/` はその symlink）を読みうる（project の設定は `~/.claude-review/settings.json` より優先され、`env` の上書きや hooks の実行がありうる）。手当てとして、これらを足す・変える PR はレビューを委託しない（skill `implement-issue` の手順 8）。
 
 未確認の経路: `Agent` ツールの `isolation: "remote"`（クラウドの環境でエージェントを動かす）が、アカウントの設定で使えるかを確かめていない。使えると、指示文を sandbox の外へ渡せる。扱いは hatai が決める。
 
@@ -456,9 +456,9 @@ rm -f ~/.config/pelway-agent-review/fnox.toml ~/.config/pelway-agent-review/age.
 |---|---|---|
 | devin_review: 4 パスの `test -r`（すべて非 0 か） | 未実測 — devin_review は停止中のまま（hatai 決定 2026-11-18・#449 の実測が済むまで使用停止。実測を委託するスレッドを立てられない）。未実測のまま残すことは hatai の決定（2026-11-19 12:58 JST・例外）。実測は #479 で追う | — |
 | claude_review: 4 パスの `test -r`（すべて非 0 か） | 未実測 — claude_review は env の橋渡し（`PELWAY_AGENT_FNOX_CONFIG`）が未導入のため実測できない（review 用の fnox 設定を読めずスレッドが動かない。PR #473 の Claude レビューも同じ理由で実施不可）。実測は #479 で追う | — |
-| codex_review: 4 パスの `test -r`（すべて非 0 か） | 未実施 — 2026-11-19 10:33 JST の codex_review での実測（下記）は環境変数・`fnox list`・`gh extension list`・`/rate_limit`・`codex features list` の 5 項目で、4 パスの `test -r` は含んでいない | — |
+| codex_review: 4 パスの `test -r`（すべて非 0 か） | 合格 — 確認用の子タスクで 4 パス、続けて QA 用を含む 5 パスとも `test -r` が 1（`docs/worklogs/2026-11-21-codex-review-home.md`） | 2026-11-21 |
 | devin_review: `scripts/agent-gh review api /rate_limit` 成功 | 未実測（上記の devin_review 停止中と同じ理由。実測は #479 で追う） | — |
-| claude_review: `scripts/agent-gh review api /rate_limit` 成功 | 未実測（上記の env の橋渡し未導入と同じ理由。実測は #479 で追う） | — |
+| claude_review: `scripts/agent-gh review api /rate_limit` 成功 | 合格 — 確認用の子タスクで exit 0（`5000`）。env の橋渡しは `~/.claude-review/settings.json` の `env` で入っている（`docs/worklogs/2026-11-21-codex-review-home.md`） | 2026-11-21 |
 | codex_review: `scripts/agent-gh review api /rate_limit` 成功 | 合格 — exit 0。起動引数変更後の codex_review スレッド（環境変数 `PELWAY_AGENT_FNOX_CONFIG`=set・`FNOX_CONFIG_DIR`=/nonexistent・`GH_CONFIG_DIR`=set）での実測。同じスレッドで `gh extension list` が exit 4・「To get started with GitHub CLI…」の認証なし応答（sandbox にログイン状態が残留しない形）も確認 | 2026-11-19 |
 | review 用設定の `fnox list`（`PELWAY_REVIEW_*` だけか。`PELWAY_DEV_*`・`PELWAY_LLM_API_KEY` が載らないか） | 合格 — `fnox -c "$PELWAY_AGENT_FNOX_CONFIG" list` が exit 0 で、review 用設定には `PELWAY_REVIEW_APP_ID`・`PELWAY_REVIEW_APP_INSTALLATION_ID`・`PELWAY_REVIEW_APP_KEY` の 3 名だけが載る（sandbox 側は `FNOX_CONFIG_DIR`=/nonexistent でグローバル設定も載らない。ホスト側の list には fnox グローバル設定由来の `PELWAY_PENPOT_MCP_TOKEN` が追加で現れるが、review 用設定のファイルには含まれない）。旧設定 `~/.config/pelway-agent/fnox.toml` から `PELWAY_REVIEW_*` は削除済み（`PELWAY_DEV_*`・`PELWAY_DEV_GIT_EMAIL` のみ）で、`PELWAY_DEV_*`・`PELWAY_LLM_API_KEY` は review 用設定に載らない | 2026-11-19 |
 | dev 用と review 用の age 鍵のパス（値は書かない）と、review の sandbox から dev 用の鍵が `test -r` 非 0 | 鍵のパス: dev=`~/.config/fnox/age.txt`・review=`~/.config/pelway-agent-review/age.txt`（別ファイル・両方作成済み）。review の sandbox から dev 用の鍵の `test -r` は未実測（今回の実測 5 項目に含まない） | — |
