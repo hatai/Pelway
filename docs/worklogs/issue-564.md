@@ -38,3 +38,15 @@
 5. 改善案: T3 の CLI に権限のフラグが入ったら、`thread start` で指定して確かめを通るようにする。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: c6854e29（実装のコミット）
+
+1. 詰まった箇所: round 2 のレビュー（Claude）の must-fix 2。(1) 本体 checkout で立てた指揮役の sandbox の書き込み範囲は本体 checkout になり、本体 checkout の版を安全とする前提が崩れる。hatai の判断で、本体 checkout で立てたまま危険を認め（Issue #564 のコメント）、conductor-context に判断とホストで実行する前の確かめ方を書いた。(2) 順の変更を申告していなかった。hatai が順の変更を認めたので、PR 本文の「変えた点」に書き、検証の表を今の試験名と round 4 の実行結果に書き直した。nit（手順の順と番号の書き方、`--to` の取り違えと worktree の確かめ、ID は stdout からだけ読む、使わない環境変数）も直した。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: `--to` のスレッドが worktree かどうかは `t3 thread show --json` の `worktreePath` が空かで見る（`t3 thread list --json` の項目にあることは確かめた。`show` での形は未確認）。
+4. 足りなかった情報・検証手段: 本物の `t3 thread start` の出力の形（ID だけの行か）と、立てたスレッドの `runtimeMode` は確かめていない。
+5. 改善案: 検証の表は、試験名を書く前に、その head の試験の出力から写す。
+
+使ったスキル: implement-issue
