@@ -210,3 +210,14 @@
 5. 改善案: `.agents/skills/verify-pelway/SKILL.md` の「前提」の 5 に「上の階層は sticky（`/tmp` の 1777 など）ならグループ・ほかが書けてもよい。置き場とビルド先の各ディレクトリは書けないことが必須。置き場の検査は終了コード 2、ビルド先は 1（FAIL）」と足す（今回追加済み）。
 
 使ったスキル: implement-issue、verify-pelway
+## 実装者メモ（round 20）
+
+対象 head: 93e6dc7f027531e8d765b065033924a0e95a9e20
+
+1. 詰まった箇所: round 14（対象 head 3660bd6f、codex request-changes・claude approve）の直し: (a) codex の must-fix: 祖先の `.cargo/config.toml` を `grep 'target-dir'` で止める検査は、コメント行だけの設定でも試験を止める → 祖先を走査するのをやめ、`cargo_target_dir` の既定値の答え（`${tmp}/crate/target`）が cargo の実際の報告と違うときだけ理由を出して止める形に（`/` までのたどり・旧名 `.cargo/config` も cargo の答えが含むので、claude の nit も同じ修正で解消）。(b) claude の nit: SKILL.md 前提 5 の「`pelway/` の下」では `pelway/` 自身が「上の階層」に読める → 厳しい条件の対象に `pelway/`・`pelway/locks`・証拠の指定場所から run ディレクトリまでの階層・ビルド先そのものを明示。(c) 両者の nit: PR 本文「対象外」の行数が古い → 3660bd6f で測った値（`pr-size` +297 / -0・全差分 13 ファイル +1727 / -0）に更新し、QA の見出しを「各結果に確かめた sha を付ける」に、項目 2 と「ほかに」の「前の sha」を証拠ラベルの sha（bdc760c2・7c5d0e09・4623e180・b0eca510・dd8360c0）に置き換え。
+2. 曖昧だった文: 「<tmp> がホームの下にあって `~/.cargo/config.toml` もあるときは、理由を出して止める」（claude の前回 nit の文）──「止める」条件を「設定ファイルがある」ではなく「cargo の答えが実際にずれる」と定義する必要があった（コメント行だけの config.toml では止まらない）。
+3. 仮定と解釈: 「cargo が実際に返す出力先が既定値と違う」ことを祖先の設定が効いている判定に使えると仮定した（`--offline --no-deps` の metadata は設定解決の結果を返す）。
+4. 足りなかった情報・検証手段: `~/.cargo/config.toml` に `target-dir` を持つ実環境での挙動（probe での検出は機構上正しいが、実環境での再現はしていない）。
+5. 改善案: `.agents/skills/verify-pelway/verify-run.test.sh` の cargo_target_dir の節に「祖先の設定が効いているかは cargo の答えで確かめる（grep で探さない）」のコメントを足す（今回追加済み）。
+
+使ったスキル: implement-issue、verify-pelway
