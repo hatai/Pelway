@@ -86,3 +86,15 @@
 5. 改善案: sandbox の書き込み範囲を前提にする文を書くときは、`docs/dev-environment.md` の「実装担当の sandbox」の書き込み可の一覧（共有 git dir を含む）と突き合わせる。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 8）
+
+対象 head: baa57f02（実装のコミット）
+
+1. 詰まった箇所: round 6 のレビュー（Claude max）の must-fix 2（新指揮役の最初のターンが権限の確かめより前に既定の権限で走る、`mise run` が sandbox から書けるツールの置き場と `mise.local.toml` を使う）でエスカレーションした。hatai の判断は「そこまで厳密にやらなくてよい」（Issue #564 のコメント）で、2 つの経路を危険として認め、作りは変えない。conductor-context に、残る経路として書いた。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: この head はレビューに回さず、hatai のマージの判断に渡す（レビューの判定は request-changes のまま）。
+4. 足りなかった情報・検証手段: 本物の T3 での交代の通しは未検証。
+5. 改善案: sandbox からホストに届く経路の全体を #570 で調べてから、ホストで実行する道具の作りを決める。
+
+使ったスキル: implement-issue
