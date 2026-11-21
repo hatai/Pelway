@@ -115,3 +115,12 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 ## 巡回 74（03:18 JST・実値）
 - PR #587 が Kodiak でマージ完了（merged_at 2026-11-21T18:17:05Z、head b4361840）。Codex レビュー担当の専用 home 化が main 入り。#586・#587 の二本立て作業が両方着地。
 - #572 の r8 Claude 枠 Devin レビューは実装後継スレッドにも起動を依頼（issuecomment-7067138659・私の t3-code 不通が長期のため）。
+
+## 巡回 75–82（03:21–03:57 JST・実値）
+- #572/#609/#610/#612 は draft・head 据え置き（906da20f / 8f7efd74 / be1edd20 / ea887b8d）でレビュー待ち継続。
+- #572 r8 Devin 起動は MCP 不通でリトライ失敗、実装後継への依頼（issuecomment-7067138659）は応答待ち。
+
+## #619 QA 委託ノードの完了報告（04:01 JST・実値）
+- 旧指揮役系の QA 委託ノード（qa-619）が完了し結果を返却: PR #619 は 17:12:01Z に merge 済み、QA pass は 9afb58b に pelway-qa[bot] で記録済み（issuecomment-7066088136・run 44923610876）。
+- 指揮役判断を求められた「merge head e81438b に QA コメントがない」点を実値確認: e81438b の parents は 9afb58b2 + main 側 60febfda で、main 取り込みのマージコミットのみ（非 main-merge コミットなし）。
+- #586/#587 と同じ Kodiak 経路のため、遡及 QA コメントは不要と判断し patrol-state に記録。
