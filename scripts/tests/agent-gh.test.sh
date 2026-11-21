@@ -26,13 +26,14 @@ EOF
 
 # 偽の gh: `gh token generate` は JSON を返す。それ以外は GH_TOKEN と引数を記録する。
 # どちらの経路でも GH_CONFIG_DIR / GH_NO_UPDATE_NOTIFIER も記録する（#522 の隔離の確認用）。
+# GH_TELEMETRY / DO_NOT_TRACK も記録する（#527 のテレメトリ停止の確認用）。
 # GH_TOKEN_GENERATE_FAIL があれば generate は stderr 2 行を出して失敗する（#520 の失敗経路）。
 # GH_EXTENSION_LIST / GH_EXTENSION_LIST_FAIL で `gh extension list` の応答を切り替える。
 cat >"$BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1 $2" == "token generate" ]]; then
   printf '%s\n' "$*" >"$CALL_LOG.token-args"
-  printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}" >"$CALL_LOG.token-env"
+  { printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_TELEMETRY=%s\n' "${GH_TELEMETRY:-}"; printf 'DO_NOT_TRACK=%s\n' "${DO_NOT_TRACK:-}"; } >"$CALL_LOG.token-env"
   # --key <file> の中身と権限を記録する（秘密鍵が argv に載らないことの確認用）
   prev=""
   for a in "$@"; do
@@ -67,14 +68,14 @@ if [[ "$1 $2" == "token --help" ]]; then
     ok) printf 'gh-token 2.0.10 help\n'; exit 0 ;;
   esac
 fi
-{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_NO_UPDATE_NOTIFIER=%s\n' "${GH_NO_UPDATE_NOTIFIER:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
+{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_NO_UPDATE_NOTIFIER=%s\n' "${GH_NO_UPDATE_NOTIFIER:-}"; printf 'GH_TELEMETRY=%s\n' "${GH_TELEMETRY:-}"; printf 'DO_NOT_TRACK=%s\n' "${DO_NOT_TRACK:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
 EOF
 
 # 偽の git: GH_TOKEN と引数を追記する（push 後の agent-gh-resign からの呼び出しも残すため追記）。
-# GH_CONFIG_DIR も記録する（credential helper として呼ばれる gh への隔離の伝搬確認用）。
+# GH_CONFIG_DIR / GH_TELEMETRY / DO_NOT_TRACK も記録する（credential helper として呼ばれる gh への伝搬確認用）。
 cat >"$BIN/git" <<'EOF'
 #!/usr/bin/env bash
-{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
+{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_TELEMETRY=%s\n' "${GH_TELEMETRY:-}"; printf 'DO_NOT_TRACK=%s\n' "${DO_NOT_TRACK:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
 EOF
 
 # 偽の mktemp: 本物に委譤し、作成したパスを種別（f=ファイル、d=ディレクトリ）とともに記録する
@@ -456,6 +457,24 @@ GH_CONFIG_DIR="$fake_gh_dir" run gh_config_isolated_git dev git status
 [[ "$RC" == 0 ]] || failures+=("gh_config_isolated_git: exit $RC, want 0 ($OUT)")
 used="$(used_gh_config gh_config_isolated_git)"
 [[ -n "$used" && "$used" != "$fake_gh_dir" && ! -e "$used" ]] || failures+=("gh_config_isolated_git: GH_CONFIG_DIR not isolated/removed")
+
+# --- #527: gh のテレメトリ（cafe.github.com への送信）を止める ---
+# どのロール（dev / review / qa、git サブコマンド経由も）で呼ばれた gh にも GH_TELEMETRY=false と
+# DO_NOT_TRACK=1 が入る。呼び出し元が別の値を渡しても上書きされる。トークン発行の gh にも入る。
+# expect_no_telemetry <name> <file>: 記録ファイルに 2 変数の値が入っていることを確かめる
+expect_no_telemetry() {
+  grep -qx 'GH_TELEMETRY=false' "$2" || failures+=("$1: GH_TELEMETRY=false not set ($(basename "$2"))")
+  grep -qx 'DO_NOT_TRACK=1' "$2" || failures+=("$1: DO_NOT_TRACK=1 not set ($(basename "$2"))")
+}
+for t in "telemetry_dev:dev pr list" "telemetry_review:review pr list" "telemetry_git:dev git status" \
+  "telemetry_qa:qa comment 1 --body-file $ROOT/qa-body.md"; do
+  name="${t%%:*}"
+  read -r -a targs <<<"${t#*:}"
+  GH_TELEMETRY=enabled DO_NOT_TRACK=0 run "$name" "${targs[@]}"
+  [[ "$RC" == 0 ]] || failures+=("$name: exit $RC, want 0 ($OUT)")
+  expect_no_telemetry "$name" "$ROOT/$name.log"
+  expect_no_telemetry "$name" "$ROOT/$name.log.token-env"
+done
 
 # トークンが取れない（fnox が秘密を返さない）ときは hosts.yml へフォールバックせず fail-closed。
 # gh は一切呼ばれない
