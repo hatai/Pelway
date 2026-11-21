@@ -1,0 +1,5 @@
+# Semgrep の走査から外すパス（security-scan workflow、Issue #571）。
+# このファイルがあると、Semgrep の組み込みの既定の除外一覧（tests/・test/・vendor/・build/・
+# dist/・node_modules/ など）は使われず、ここに書いたものだけが除外される。
+# 除外を足すときは、1 行ごとに直前のコメントで理由を書く（docs/dev-environment.md の
+# 「セキュリティスキャン（security-scan）」）。今は何も除外しない。

@@ -21,18 +21,20 @@ for tool in gitleaks semgrep osv-scanner; do
 out=""
 prev=""
 for a in "$@"; do
-  if [[ "$prev" == "--report-path" || "$prev" == "--output" ]]; then out="$a"; fi
+  if [[ "$prev" == "--report-path" || "$prev" == "--output" || "$prev" == "--output-file" ]]; then out="$a"; fi
   prev="$a"
 done
 if [[ -n "$out" && -n "${STUB_JSON:-}" ]]; then printf '%s' "$STUB_JSON" >"$out"; fi
 if [[ -n "${STUB_ARGS:-}" ]]; then printf '%s\n' "$@" >"$STUB_ARGS"; fi
 echo "stub $(basename "$0") $*" >&2
+if [[ -n "${STUB_STDERR:-}" ]]; then printf '%s\n' "$STUB_STDERR" >&2; fi
 exit "${STUB_RC:-0}"
 EOF
   chmod +x "$work/bin/$tool"
 done
 
 # run_case <name> <tool> <stub-rc> <stub-json> <want-rc>
+# STUB_STDERR が設定されていれば、偽物はその行を標準エラーに出す。
 # 結果は REPLY_LOG（標準出力と標準エラー）と REPLY_SUMMARY（ジョブサマリー）に入る。
 run_case() {
   local name="$1" tool="$2" stub_rc="$3" stub_json="$4" want_rc="$5"
@@ -73,6 +75,11 @@ want_contains gitleaks-hit "$REPLY_SUMMARY" "0123456789ab"
 want_absent gitleaks-hit "$REPLY_SUMMARY" "$secret_value"
 want_absent gitleaks-hit "$REPLY_LOG" "$secret_value"
 run_case gitleaks-error gitleaks 1 "" 1
+# 件数は JSON の検出の数から数える。ファイル名に改行や | があっても件数は増えず、表の列も崩れない。
+gitleaks_odd='[{"RuleID":"r","File":"a\nb|c.txt","StartLine":1,"Commit":"3333333333333333"}]'
+run_case gitleaks-odd-path gitleaks 2 "$gitleaks_odd" 0
+want_contains gitleaks-odd-path "$REPLY_LOG" "検出 1 件"
+want_contains gitleaks-odd-path "$REPLY_SUMMARY" 'a b\|c.txt:1'
 # マージコミットの差分（競合解消で足した行）も走査するため、git log に -m を渡す。
 want_contains gitleaks-merge-diff "$(cat "$work/args-gitleaks-clean")" "--log-opts=-m HEAD"
 # -m では同じ場所の値が複数のコミットで重ねて出るため、場所の重複を除いた数もサマリーに出す。
@@ -111,6 +118,11 @@ want_contains osv-hit "$REPLY_SUMMARY" "rsa 0.9.8"
 want_contains osv-hit "$REPLY_SUMMARY" "RUSTSEC-2023-0071"
 want_contains osv-hit "$REPLY_SUMMARY" "Cargo.lock"
 run_case osv-error osv-scanner 127 "" 127
+# 検出（終了コード 1）があっても、ロックファイルの抽出に失敗していれば失敗にする
+# （osv-scanner 2.7.1 は抽出の失敗を標準エラーに出すだけで、検出があれば 1 を返す）。
+STUB_STDERR="Error during extraction: (extracting as javascript/packagelockjson) bad/package-lock.json: could not extract" \
+  run_case osv-hit-partial osv-scanner 1 "$osv_hit" 127
+want_contains osv-hit-partial "$REPLY_LOG" "::error::"
 # ロックファイルが 1 つも見つからない（128）は設定の誤りとして失敗させる。
 run_case osv-nopkg osv-scanner 128 "" 128
 

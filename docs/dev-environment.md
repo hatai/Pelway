@@ -173,12 +173,12 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 ### セキュリティスキャン（security-scan）
 
 - `.github/workflows/security-scan.yml` が、main 向け Pull Request・main への push・手動実行で、秘密情報・危ないコードのパターン・脆弱な依存関係を検出する（Issue #571）。すべて無料の OSS で、有料サービス・アカウント登録・トークンは使わない。
-- 報告のみ: 検出があってもジョブは成功し、件数を `::warning::` に、一覧（場所と種類）をジョブサマリーに出す。ツール自体の失敗（ネットワーク断・設定の誤りなど）はジョブを失敗させる。Semgrep は検出の終了コードを解析エンジンのエラーより優先して返すため、JSON に level が error のエラーがあれば、検出があっても失敗として扱う（level が warn の構文エラーなどは件数だけをサマリーに出す）。必須チェックにはしていない（必須チェックにするかは hatai が決める）。本体は `scripts/security-scan.sh`、テストは `scripts/tests/security-scan.test.sh`。
+- 報告のみ: 検出があってもジョブは成功し、件数を `::warning::` に、一覧（場所と種類）をジョブサマリーに出す。ツール自体の失敗（ネットワーク断・設定の誤りなど）はジョブを失敗させる。Semgrep は検出の終了コードを解析エンジンのエラーより優先して返すため、JSON に level が error のエラーがあれば、検出があっても失敗として扱う（level が warn の構文エラーなどは件数だけをサマリーに出す）。OSV-Scanner も、ロックファイルの抽出に失敗すると標準エラーの `Error during extraction:` の行に出すだけで、検出があれば終了コード 1 を返す。そのため、その行があれば失敗として扱う。件数は各ツールの JSON の検出の数から数え、サマリーの表のセルでは改行を空白に、`|` を `\|` に置き換える。必須チェックにはしていない（必須チェックにするかは hatai が決める）。本体は `scripts/security-scan.sh`、テストは `scripts/tests/security-scan.test.sh`。
 
 | ジョブ | ツールと版 | 対象 | 導入 |
 |---|---|---|---|
 | `gitleaks (secrets)` | Gitleaks 8.30.1（MIT） | HEAD から辿れる git 履歴全体。マージコミットの差分（競合解消で足した行）も含める（`--log-opts="-m HEAD"`、checkout は `fetch-depth: 0`） | `mise.security.toml`（`MISE_ENV=security`）と `mise.security.lock` |
-| `semgrep (code patterns)` | Semgrep CE 1.186.0（LGPL-2.1） | 作業ツリー。ルールセットは `p/rust`・`p/github-actions`・`r/bash` | 公式イメージ `semgrep/semgrep` を digest 固定した job コンテナ |
+| `semgrep (code patterns)` | Semgrep CE 1.186.0（LGPL-2.1） | 作業ツリーの全ファイル（`tests/` の下を含む。リポジトリ直下の `.semgrepignore` が Semgrep の組み込みの既定の除外一覧を置き換え、今は何も除外しない）。ルールセットは `p/rust`・`p/github-actions`・`r/bash` | 公式イメージ `semgrep/semgrep` を digest 固定した job コンテナ |
 | `osv-scanner (dependencies)` | OSV-Scanner 2.7.1（Apache-2.0） | 作業ツリーのロックファイル（今は `Cargo.lock`） | `mise.security.toml` と `mise.security.lock` |
 
 - 秘密の値は出さない: Gitleaks は `--redact` で値を伏せ、サマリーには規則・場所・コミットだけを書く。`-m` で同じ値が複数のマージコミットに重ねて出るため、サマリーには規則と場所の重複を除いた数も書く。
@@ -189,7 +189,7 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
   - OSV-Scanner は、OSV データベースの他の出所（GHSA など）と、Cargo 以外のロックファイルも見る。
   - cargo-deny は `deny.toml` の ignore と警告の扱いを持ち、必須チェックの一部である。
   - OSV-Scanner には `deny.toml` の ignore が効かないため、cargo-deny が無視した勧告も報告に出る。
-- 除外（`.gitleaksignore`・`.semgrepignore`・`osv-scanner.toml`）は、1 件ずつ理由を書いて足す。既存の検出を理由に、ルールの無効化や除外の範囲を広げない。
+- 除外（`.gitleaksignore`・`.semgrepignore`・`osv-scanner.toml`）は、1 件ずつ理由を書いて足す。`.semgrepignore` を消すと、Semgrep は組み込みの既定の除外一覧（`tests/`・`test/`・`vendor/` など）に戻る。そのため、ファイルは中身が空でも残す。既存の検出を理由に、ルールの無効化や除外の範囲を広げない。
 
 ## GitHub 通知（Grok Bot webhook・notify-grokbot）
 
