@@ -35,14 +35,17 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 ## 1. 起動
 
 - 依存の取得: `mise run fetch`（初回だけ。`verify-run` は `--offline --locked` でビルドする）。
-- 二重起動の確認（ビルドの前）: 同じ target（`${CARGO_TARGET_DIR:-<top>/target}` の実体）の `demo-serve` が動いていれば、触らずに FAIL で止まる（止めるかは人が決める）。動いているほうの exe はビルドし直すと ` (deleted)` が付くので、外して比べる。続けて `<evidence-root>/locks/<target の sha256 の先頭 12 桁>` を `mkdir` で原子的に取り、取れなければ（別の run が実行中）FAIL で止まる。ロックは後片付けで外す。
+- 二重起動の確認（ビルドの前、run の最初）: まず `<evidence-root>/locks/<target の sha256 の先頭 12 桁>` を `mkdir` で原子的に取り、取れなければ（別の run が実行中）FAIL で止まる。続けて、同じ target（`${CARGO_TARGET_DIR:-<top>/target}` の実体）の `demo-serve` が動いていれば（手で起動したものなど）、触らずに FAIL で止まる（止めるかは人が決める）。動いているほうの exe はビルドし直すと ` (deleted)` が付くので、外して比べる。ロックは後片付けで外す。
 - ビルドと起動: `verify-run` が `mise exec -- cargo build --offline --locked -p pelway-http --example demo-serve --message-format=json-render-diagnostics` を実行し、cargo が報告した実行ファイル（mr_boxington のときは `~/.cache/mbx/targets/...` の下）を `env -i PATH=/usr/bin:/bin HOME=$HOME` の子として起動する。子の標準入力は run が持つパイプで、run が終われば（SIGKILL でも）閉じる。起動口 `crates/pelway-http/examples/demo-serve.rs` は標準入力の EOF で終わる。`127.0.0.1:0` で待ち受け（mise の `PELWAY_BIND_ADDR` は読まない）、LLM の設定を「どの変数も無い」写像で組み立てる（環境変数を参照しない）ので、台本モード（`ScriptGateway`）になる。
 - 空のデータから使える状態まで: マイグレーションは無い（保存はメモリだけ）。テスト用データは起動時のデモ seed（ワークスペース `ws-demo-01`、チャンネル `ch-demo-anken-b`「案件B」、田中 `m-tanaka`・山本 `m-yamamoto`・佐藤 `m-sato`・ハル `m-hal`（bot）、過去の発言 3 件）。
 - 使える合図: 実際に待ち受けたポートを書いた標準出力（証拠の `server.stdout`）の 1 行 `demo-serve ready addr=127.0.0.1:<port> pid=<pid> llm=script`。`pid` が起動した子の PID と一致することまで確かめる。ポートが開いただけでは合図にしない。
 
 失敗: 道具が無い。同じ target の `demo-serve` が動いている、またはロックが取れない。ビルドが通らない（`build.log`）。5 秒以内に ready 行が出ない、または ready 行の `pid` が起動した子と違う。
 
-二重起動を拒むことの確かめ方（QA）: 同じ worktree で 2 つ続けて動かす。`verify-run --label <N> & sleep 3; verify-run --label <N>; wait`。2 つめの `summary.txt` が `FAIL 起動: 二重起動の確認` で終わり、1 つめは最後まで通る。
+二重起動を拒むことの確かめ方（QA）:
+
+- 同時に始めた run: `verify-run --label <N> & sleep 3; verify-run --label <N>; wait`。2 つめが `FAIL 起動: 二重起動の確認（別の run がロックを持っている…）` で止まり、1 つめは最後まで通る。
+- 先に起動しておいたインスタンス: 一度 run を通してバイナリを作ったあと、`(sleep 120 | target/debug/examples/demo-serve > /dev/null) &` で 1 つ起動してから `verify-run --label <N>`。`FAIL 起動: 二重起動の確認（同じ target の demo-serve が動いている pid=…）` で止まり、先のインスタンスは触られずに動き続ける（`sleep` が終わると標準入力が閉じて自分で終わる）。
 
 ## 2. 環境チェック
 

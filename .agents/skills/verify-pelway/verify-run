@@ -347,6 +347,31 @@ main() {
   VERDICT=PASS; STEP=1; PID=""; LOCK=""; BIN=""
   trap cleanup EXIT
   printf 'run_id=%s\nsha=%s\ndirty=%s\nfeature=%s\n' "${RUN_ID}" "${SHA}" "${DIRTY}" "${FEATURE}" | tee "${EV}/summary.txt"
+  if [ "${DIRTY}" = yes ] && [ "${ALLOW_DIRTY}" = 0 ]; then
+    record FAIL "前提: 作業ツリーがコミット済み" "未コミットの変更がある。--allow-dirty は証拠にならない"; return 1
+  fi
+
+  # 二重起動の確認（ビルドの前）: 先にロックを mkdir で原子的に取り（同時に始めた run を拒む）、
+  # そのあと同じ target の demo-serve が動いていないかを見る（手で起動したものなどを拒む。触らない）。
+  # 動いているほうの exe はビルドし直すと " (deleted)" が付くので、外して比べる。
+  local target_real p e other="" lock
+  target_real="$(realpath -m "${CARGO_TARGET_DIR:-${TOP}/target}")"
+  lock="${ROOT}/locks/$(printf '%s' "${target_real}" | sha256sum | cut -c1-12)"
+  if mkdir "${lock}" 2> /dev/null; then
+    LOCK="${lock}"; echo "$$" > "${LOCK}/pid"
+  else
+    record FAIL "起動: 二重起動の確認" "別の run がロックを持っている（pid=$(cat "${lock}/pid" 2>/dev/null)、${lock}）。動かさない"; return 1
+  fi
+  for p in $(pgrep -x demo-serve || true); do
+    e="$(exe_of "${p}" || true)"
+    under "${e}" "${target_real}" && other+=" ${p}"
+  done
+  if [ -n "${other}" ]; then
+    record FAIL "起動: 二重起動の確認" "同じ target の demo-serve が動いている pid=${other# }。動かさない（止めるかは人が決める）"; return 1
+  fi
+  record PASS "起動: 二重起動の確認" "同じ target の demo-serve なし、ロック取得"
+  survivor_pids > "${EV}/survivors-before.txt"
+  pitchfork_list > "${EV}/pitchfork-before.txt"
   {
     echo "mise: $(mise --version 2>/dev/null | head -n 1)"
     # rustc は PATH の並びで別の版（/usr/bin など）が出ることがあるので、rustup のツールチェーンの実体を記録する。
@@ -357,31 +382,6 @@ main() {
     echo "sha256sum: $(sha256sum --version | head -n 1)"; echo "jq: $(jq --version)"
     echo "bash: ${BASH_VERSION}"; echo "kernel: $(uname -r)"
   } > "${EV}/tools.txt"
-  if [ "${DIRTY}" = yes ] && [ "${ALLOW_DIRTY}" = 0 ]; then
-    record FAIL "前提: 作業ツリーがコミット済み" "未コミットの変更がある。--allow-dirty は証拠にならない"; return 1
-  fi
-
-  # 二重起動の確認（ビルドの前）: 同じ target の demo-serve が動いていれば触らずに止まる。
-  # 動いているほうの exe はビルドし直すと " (deleted)" が付くので、外して比べる。
-  local target_real p e other=""
-  target_real="$(realpath -m "${CARGO_TARGET_DIR:-${TOP}/target}")"
-  for p in $(pgrep -x demo-serve || true); do
-    e="$(exe_of "${p}" || true)"
-    under "${e}" "${target_real}" && other+=" ${p}"
-  done
-  if [ -n "${other}" ]; then
-    record FAIL "起動: 二重起動の確認" "同じ target の demo-serve が動いている pid=${other# }。動かさない（止めるかは人が決める）"; return 1
-  fi
-  local lock
-  lock="${ROOT}/locks/$(printf '%s' "${target_real}" | sha256sum | cut -c1-12)"
-  if mkdir "${lock}" 2> /dev/null; then
-    LOCK="${lock}"; echo "$$" > "${LOCK}/pid"
-  else
-    record FAIL "起動: 二重起動の確認" "別の run がロックを持っている（pid=$(cat "${lock}/pid" 2>/dev/null)、${lock}）。動かさない"; return 1
-  fi
-  record PASS "起動: 二重起動の確認" "同じ target の demo-serve なし、ロック取得"
-  survivor_pids > "${EV}/survivors-before.txt"
-  pitchfork_list > "${EV}/pitchfork-before.txt"
 
   # 起動: ビルドし、cargo が報告した実行ファイルを、PATH と HOME だけの環境で子として起動する。
   # 子の標準入力はこの run が持つパイプ。run が終われば（SIGKILL でも）閉じて、子は終わる。
