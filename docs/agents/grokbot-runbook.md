@@ -234,7 +234,7 @@ Assigned: role=implement agent=devin model=swe-2-high effort=<medium|high|max>"
 t3 thread start --provider codex_review --model <skill command-team の「Codex のモデル」で選んだモデル> --worktree main --branch review/<M>-<k> --title "[レビュー] PR #<M> <要約>" <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。"
 ```
 
-T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-accept-edits` にする。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`auto-accept-edits` で立てられないときも `auto`・`full-access` に変えず、立てずに 7 のエスカレーションにする（指揮役自身の PR のように Issue が無いときは、`needs-human` を PR に付け、コメントも PR に書く）。指揮役のレビュースレッドは `delegate_task` で委託しない（子タスクの worktree は委託元のコミットから作られ、下の `main` 起点の決まりを満たせないため。`delegate_task` での委託は実装担当の手順で、skill `implement-issue` の手順 8）。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP で立てる。
+Codex と Claude のレビュースレッドを T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-accept-edits` にする（Devin CLI は下のとおり `runtimeMode` を指定しない）。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`auto-accept-edits` で立てられないときも `auto`・`full-access` に変えず、立てずに 7 のエスカレーションにする（Issue が無いときの形も 7 にある）。指揮役のレビュースレッドは `delegate_task` で委託しない（子タスクの worktree は委託元のコミットから作られ、下の `main` 起点の決まりを満たせないため。`delegate_task` での委託は実装担当の手順で、skill `implement-issue` の手順 8）。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP で立てる。
 
 `codex_review` はネットワークを GitHub だけに絞った Codex（`docs/dev-environment.md` の「レビュー担当の Codex」）。`<k>` はその PR のレビュースレッドの通し番号（1 から）。worktree は必ず `main` から作る（レビュー担当は worktree の `scripts/agent-gh` を使うため、PR やほかのブランチの版を使わない）。
 
@@ -307,7 +307,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 | `review:` | `scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` のレビュー件数が報告のラウンド数と一致し、最新が `APPROVED` である |
 | `ready:` | `scripts/agent-gh dev pr view <番号> --json isDraft` が `false` である |
 | `memo:` | PR の変更ファイルに `docs/worklogs/issue-<Issue 番号>.md` があり、報告の round の「実装者メモ」が 5 項目そろっていて対象 head の SHA が書かれている。止まった場合は Issue のコメントに実装者メモがある |
-| `verdict:` | 指揮役が立てたレビュースレッドの報告だけ。`scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` の最新のレビューの状態（`APPROVED` か `CHANGES_REQUESTED`）と一致する |
+| `verdict:` | 指揮役が立てたレビュースレッドの報告だけ。`approve` と `request-changes` は、`scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` の最新のレビューの状態（`APPROVED` か `CHANGES_REQUESTED`）と一致する。`failed` は GitHub に投稿が無いので照合せず、割り当ての記録で、報告したスレッドがその PR のレビュースレッドであることを確かめてから、5 の表の `failed` の行で `error:` の理由ごとに扱う |
 
 一致しなければ、`report` の値では動かず 7 のエスカレーションにする。
 
@@ -318,6 +318,8 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 1. Issue に `needs-human` を付け（その時点のステータスを戻り先として補助記録に残す）、`agent:working` と `agent:devin` を外す
 2. Issue に次をコメントする: 何が起きたか（イベントと `report`）、試したこと、人間に決めてほしいこと、スレッドの `link`
 3. 部屋で人間に知らせる（Issue の URL を付ける）
+
+紐づく Issue が無いとき（指揮役自身の PR・外部投入）は、1 と 2 を対象の PR で行い（`needs-human` を PR に付け、PR にコメントする）、3 では PR の URL を付ける。
 
 エスカレーションで `needs-human` を付けた時点で、巡回スクリプトが補助記録の次回確認時刻を目安（24 時間）で設定する。人間の判断に期限を付けたいときは、その時点で補助記録の `next_check_at` を書き換える（「10. 巡回状態の補助記録」の「次回確認時刻（フォローアップタイマー）」）。
 
