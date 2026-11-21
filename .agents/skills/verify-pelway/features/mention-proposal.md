@@ -12,9 +12,10 @@
 
 ## Driving it with verify-run
 
-`verify-run --feature decision` の段 2（メンションの投稿）と段 4（ハルの投稿が 2 件以上）。案の中身は `steps/NN-messages-after-mention.resp` に残る。テストは `cargo test -p pelway-http --test runner_mention`。
+`verify-run --feature decision` の段 2（メンションの投稿）、段 4（判断待ちの案A・案B が台本の合成応答）、段 5（`after_seq` で読んだハルの投稿に `案A: ...` と `案B: ...` がある）。証拠では本文を伏せるので、案の一致は `summary.txt` の PASS 行で示す。テストは `cargo test -p pelway-http --test runner_mention`。
 
 ## Gotchas
 
-- `demo-serve` の LLM は台本モード（`ScriptGateway`）に固定してある。案は毎回「納期を2週間延ばす案」「範囲を絞って納期を守る案」。実 LLM での案の生成はこのスキルでは確かめない（外部への実 I/O と費用が発生するため）。
+- `demo-serve` の LLM は台本モード（`ScriptGateway`）に固定してある。案は毎回「納期を2週間延ばす案」「範囲を絞って納期を守る案」。台本モードで動いたことは、この合成応答と、`server.stderr` の接続先を知らせる行 `pelway-runner: LLM endpoint: ...` で確かめる。実 LLM での案の生成はこのスキルでは確かめない（外部への実 I/O と費用が発生するため。`crates/pelway-runner/tests/real_llm.rs` は使わない）。
+- 接続先を知らせる行は台本モードでも既定の提供元（Z.ai）の URL を書く。接続していないことは `network.txt` の集計行（loopback 以外との接続 0 件）で確かめる。
 - A/B 案は非同期に投稿される。投稿の応答（200）の時点ではまだ無い。`verify-run` は判断待ちが現れるまで最大 10 秒待ってから読む。

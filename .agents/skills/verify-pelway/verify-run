@@ -17,6 +17,12 @@ BOT=m-hal
 REQUESTER=m-tanaka
 DECIDER=m-yamamoto
 POLL_SECS=10
+# 依頼の本文に埋める demo-check の目印（scripts/demo-check/canaries.txt の 1 行目）。
+# 証拠の本文は伏せるので、run のログ・証拠に現れたら伏せ漏れとして FAIL になる。
+CANARY=PELWAY_CANARY_BODY_7f3a
+# 台本モード（ScriptGateway）の合成応答の 2 案（crates/pelway-runner/src/demo.rs の SCRIPT_AB）。
+SCRIPT_A="納期を2週間延ばす案"
+SCRIPT_B="範囲を絞って納期を守る案"
 
 die_usage() { echo "verify-run: $*" >&2; exit 2; }
 
@@ -24,6 +30,14 @@ die_usage() { echo "verify-run: $*" >&2; exit 2; }
 resp_status() { head -n 1 "$1" | tr -d '\r' | awk '{print $2}'; }
 # HTTP 応答から本文（最初の空行より後）を返す。
 resp_body() { awk 'b {print} /^\r?$/ && !b {b=1}' "$1"; }
+
+# JSON の本文・質問（body・question の文字列）を長さだけ残して伏せる。JSON でなければ全体を伏せる。
+redact() {
+  local text; text="$(cat)"
+  [ -n "${text}" ] || return 0
+  jq -c 'walk(if type == "object" then with_entries(if (.key == "body" or .key == "question") and (.value | type) == "string" then .value = "<redacted len=\(.value | length)>" else . end) else . end)' <<< "${text}" 2>/dev/null \
+    || echo "<redacted non-json len=${#text}>"
+}
 
 # evidence-root がリポジトリ（top）の外なら 0。
 outside_repo() {
@@ -43,22 +57,26 @@ record() {
 http() {
   local name="$1" method="$2" path="$3" member="$4" body="${5:-}" n
   n="$(printf '%02d' "${STEP}")"; STEP=$((STEP + 1))
-  local req="${EV}/steps/${n}-${name}.req" raw="${EV}/steps/${n}-${name}.resp"
-  {
-    printf '%s %s HTTP/1.1\r\nHost: demo.local\r\nConnection: close\r\n' "${method}" "${path}"
+  local req="${EV}/steps/${n}-${name}.req" resp="${EV}/steps/${n}-${name}.resp" head raw
+  head="$(printf '%s %s HTTP/1.1\r\nHost: demo.local\r\nConnection: close\r\n' "${method}" "${path}"
     [ -n "${member}" ] && printf 'x-pelway-member-id: %s\r\nx-pelway-member-kind: human\r\n' "${member}"
-    printf 'Content-Length: %s\r\n\r\n%s' "$(printf '%s' "${body}" | wc -c)" "${body}"
-  } > "${req}"
+    printf 'Content-Length: %s\r\n' "$(printf '%s' "${body}" | wc -c)")"
+  # 証拠には本文を伏せた形だけを書く（生の本文はメモリにだけ置く）。
+  { printf '%s\n\n' "${head//$'\r'/}"; redact <<< "${body}"; } > "${req}"
   STATUS=000; BODY=""
+  raw="${EV}/.raw-${n}"
   if exec 3<>"/dev/tcp/${HOST}/${PORT}"; then
-    cat "${req}" >&3
+    printf '%s\n\r\n%s' "${head}" "${body}" >&3
+    # 実行中の接続を観察する（ss -tanp。この PID の行と、待ち受けのアドレスを含む行）。
+    observe_sockets
     timeout 10 cat <&3 > "${raw}"
     exec 3<&- 3>&-
     STATUS="$(resp_status "${raw}")"; BODY="$(resp_body "${raw}")"
-    ss -Htanp 2>/dev/null | grep "pid=${PID}," >> "${EV}/network.txt" || true
+    { head -n 1 "${raw}" | tr -d '\r'; echo; redact <<< "${BODY}"; } > "${resp}"
   else
-    echo "connect failed" > "${raw}"
+    echo "connect failed" > "${resp}"
   fi
+  rm -f "${raw}"
 }
 
 # 読み取りだけで「このインスタンスを動かしてよいか」を答える。0 = よい。
@@ -77,10 +95,19 @@ env_check() {
     listen="$(ss -Htlnp 2>/dev/null | grep "pid=${PID}," | awk '{print $4}' | sort -u | tr '\n' ' ')"
     echo "listen=${listen}"
     [ "${listen}" = "${ADDR} " ] || { echo "NG: 待ち受けが ready 行の addr=${ADDR} だけではない"; ok=1; }
-    if tr '\0' '\n' < "/proc/${PID}/environ" 2>/dev/null | grep -q '^PELWAY_LLM_API_KEY='; then
-      echo "NG: プロセスの環境に PELWAY_LLM_API_KEY がある（値は記録しない）"; ok=1
+    # 証拠には変数名も値も書かない（変数名は leak-phrases の禁止語）。ラベルだけを書く。
+    local pair
+    for pair in llm_key:PELWAY_LLM_API_KEY llm_custom_base_url:PELWAY_LLM_CUSTOM_BASE_URL; do
+      if tr '\0' '\n' < "/proc/${PID}/environ" 2>/dev/null | grep -q "^${pair#*:}="; then
+        echo "NG: プロセスの環境に ${pair%%:*} の変数がある"; ok=1
+      else
+        echo "env_${pair%%:*}=absent"
+      fi
+    done
+    if grep -q '^pelway-runner: LLM endpoint: ' "${EV}/server.stderr" && grep -q ' llm=script$' "${EV}/server.stdout"; then
+      echo "llm_mode=script（接続先の行: $(grep -m1 '^pelway-runner: LLM endpoint: ' "${EV}/server.stderr")）"
     else
-      echo "llm_key_env=absent"
+      echo "NG: 接続先を知らせる行（pelway-runner: LLM endpoint:）か ready 行の llm=script が無い"; ok=1
     fi
     echo "auth=none（デモは認証なし。操作者は合成ヘッダー x-pelway-member-id）"
   } > "${out}"
@@ -88,14 +115,28 @@ env_check() {
   return "${ok}"
 }
 
+# ss -tan の行（ファイル）のうち、loopback 以外のアドレスを含む端の数を返す。
+# 待ち受け（LISTEN）の相手欄 0.0.0.0:* は数えない。
+count_nonloopback() {
+  awk '{print $4; if ($1 != "LISTEN") print $5}' "$1" 2>/dev/null | grep -cvE '^127\.0\.0\.1:[0-9]+$'
+}
+
+# この PID のソケットと、待ち受けのアドレス（addr）に関わる接続を network.txt に足す。
+observe_sockets() {
+  ss -Htanp 2>/dev/null | grep -F -e "pid=${PID}," -e " ${ADDR} " >> "${EV}/network.txt" || true
+}
+
 # 外に出ていないことの観察: 要求のたびに取ったこの PID のソケット（network.txt）が
 # すべて 127.0.0.1 同士で、開いているファイルが標準入出力とソケットだけか。
 network_check() {
   local out="${EV}/network.txt"
-  ss -Htanp 2>/dev/null | grep "pid=${PID}," >> "${out}" || true
+  local seen nonlo
   ls -l "/proc/${PID}/fd" > "${EV}/proc-fd.txt" 2>&1 || return 1
-  [ -s "${out}" ] || return 1
-  ! awk '{print $4; print $5}' "${out}" | grep -vqE '^(127\.0\.0\.1:[0-9]+|0\.0\.0\.0:\*|\*:\*)$' || return 1
+  observe_sockets
+  seen="$(grep -c . "${out}" 2>/dev/null)"; seen="${seen:-0}"
+  nonlo="$(count_nonloopback "${out}")"
+  echo "# ss -tn の観察 ${seen} 行、loopback 以外との接続 ${nonlo} 件" >> "${out}"
+  [ "${seen}" -ge 1 ] && [ "${nonlo}" = 0 ] || return 1
   ! awk 'NR > 1 {print $NF}' "${EV}/proc-fd.txt" | grep -vqE "^(/dev/null|${EV}/server\.std(out|err)|socket:\[[0-9]+\]|anon_inode:.*|pipe:\[[0-9]+\])$"
 }
 
@@ -108,6 +149,18 @@ cleanup() {
   elif [ -n "${PID:-}" ]; then
     echo "stopped pid=${PID}（この run が起動したものだけ）" > "${EV}/cleanup.txt"
   fi
+  # demo-check の canary と leak-phrases を、この run のログ・証拠の写しに対して流す。
+  local scan="${EV}/demo-check-input" st
+  mkdir -p "${scan}/target/demo"
+  local x
+  for x in "${EV}"/*; do [ "${x}" = "${scan}" ] || cp -r "${x}" "${scan}/target/demo/"; done
+  for st in canary leak-phrases; do
+    DEMO_CHECK_ROOT="${scan}" bash "${TOP}/scripts/demo-check/${st}.sh" >> "${EV}/demo-check.txt" 2>&1
+    rc=$?
+    echo "-- ${st}: exit ${rc}" >> "${EV}/demo-check.txt"
+    if [ "${rc}" = 0 ]; then record PASS "demo-check ${st}: run のログ・証拠" "demo-check.txt"
+    else record FAIL "demo-check ${st}: run のログ・証拠" "exit ${rc}、demo-check.txt"; fi
+  done
   echo "verdict=${VERDICT}" | tee -a "${EV}/summary.txt"
   local sums; sums="$(cd "${EV}" && find . -type f -print0 | sort -z | xargs -0 sha256sum)"
   printf '%s\n' "${sums}" > "${EV}/SHA256SUMS"
@@ -139,32 +192,68 @@ operate() {
   fi
 
   local cm="cm-verify-${RUN_ID}"
-  http mention POST "/v1/channels/${CH}/messages" "${REQUESTER}" \
-    "{\"client_msg_id\":\"${cm}\",\"body\":\"@ハル 納期延長の案を2つ作って\",\"thread_root\":null}"
+  local mention="{\"client_msg_id\":\"${cm}\",\"body\":\"@ハル 納期延長の案を2つ作って ${CANARY}\",\"thread_root\":null}"
+  http mention POST "/v1/channels/${CH}/messages" "${REQUESTER}" "${mention}"
   MSG_ID="$(jq -r '.message_id // empty' <<< "${BODY}" 2>/dev/null)"; MSG_SEQ="$(jq -r '.seq // empty' <<< "${BODY}" 2>/dev/null)"
-  if [ "${STATUS}" = 200 ] && [ -n "${MSG_ID}" ]; then record PASS "投稿: ハル宛てのメンション" "${MSG_ID}"
+  if [ "${STATUS}" = 200 ] && [ -n "${MSG_ID}" ] && [ -n "${MSG_SEQ}" ]; then record PASS "投稿: ハル宛てのメンション" "${MSG_ID}"
   else record FAIL "投稿: ハル宛てのメンション" "status=${STATUS}"; return; fi
+
+  http mention-resend POST "/v1/channels/${CH}/messages" "${REQUESTER}" "${mention}"
+  if [ "${STATUS}" = 200 ] && [ "$(jq -r '.message_id' <<< "${BODY}" 2>/dev/null)" = "${MSG_ID}" ]; then
+    record PASS "冪等: 同じ client_msg_id の再送は同じ message_id"
+  else record FAIL "冪等: 同じ client_msg_id の再送は同じ message_id" "status=${STATUS}"; fi
 
   wait_decision
   if [ -n "${DEC_ID}" ]; then record PASS "判断待ち: 山本に A/B の決定が来る" "${DEC_ID}"
   else record FAIL "判断待ち: 山本に A/B の決定が来る" "${POLL_SECS} 秒で現れない"; return; fi
+  local pending="${BODY}" opt_a opt_b
+  opt_a="$(jq -r --arg d "${DEC_ID}" '.[] | select(.decision_id == $d) | .options[] | select(.option_id == "a") | .body' <<< "${pending}")"
+  opt_b="$(jq -r --arg d "${DEC_ID}" '.[] | select(.decision_id == $d) | .options[] | select(.option_id == "b") | .body' <<< "${pending}")"
+  if [ "${opt_a}" = "${SCRIPT_A}" ] && [ "${opt_b}" = "${SCRIPT_B}" ]; then record PASS "台本モード: 案A・案B が台本の合成応答"
+  else record FAIL "台本モード: 案A・案B が台本の合成応答" "案の本文が台本と違う"; fi
+  if [ "$(jq --arg m "${MSG_ID}" '[.[] | select(.request_message_id == $m)] | length' <<< "${pending}")" = 1 ]; then
+    record PASS "冪等: 再送で判断待ちが増えない" "1 件"
+  else record FAIL "冪等: 再送で判断待ちが増えない"; fi
 
-  http messages-after-mention GET "/v1/channels/${CH}/messages?actor=${REQUESTER}&after_seq=${MSG_SEQ}" ""
-  local bots last; bots="$(jq --arg b "${BOT}" '[.[]? | select(.author_id == $b)] | length' <<< "${BODY}" 2>/dev/null)"
+  http messages-after-mention GET "/v1/channels/${CH}/messages?actor=${REQUESTER}&after_seq=$((MSG_SEQ - 1))" ""
+  local last
   last="$(jq '[.[]?.seq] | max // empty' <<< "${BODY}" 2>/dev/null)"; last="${last:-${MSG_SEQ}}"
-  if [ "${STATUS}" = 200 ] && [ "${bots:-0}" -ge 2 ]; then record PASS "チャンネル: ハルの進捗と案の投稿" "${bots} 件"
-  else record FAIL "チャンネル: ハルの進捗と案の投稿" "bot 投稿 ${bots:-0} 件"; fi
+  if [ "${STATUS}" = 200 ] && [ "$(jq --arg c "${cm}" '[.[] | select(.client_msg_id == $c)] | length' <<< "${BODY}" 2>/dev/null)" = 1 ]; then
+    record PASS "冪等: 再送で投稿が重複しない" "1 件"
+  else record FAIL "冪等: 再送で投稿が重複しない" "status=${STATUS}"; fi
+  if jq -e --arg b "${BOT}" --arg a "案A: ${opt_a}" --arg o "案B: ${opt_b}" \
+      '[.[] | select(.author_id == $b and (.body | contains($a)) and (.body | contains($o)))] | length >= 1' <<< "${BODY}" > /dev/null 2>&1; then
+    record PASS "after_seq: ハルの投稿に案A と案B がある"
+  else record FAIL "after_seq: ハルの投稿に案A と案B がある"; fi
 
   http decide POST "/v1/decisions/${DEC_ID}/decide" "${DECIDER}" \
     "{\"decision_id\":\"${DEC_ID}\",\"version\":${DEC_VER:-0},\"option_id\":\"a\"}"
-  if [ "${STATUS}" = 200 ] && [ "$(jq -r '.selected.option_id' <<< "${BODY}" 2>/dev/null)" = a ]; then
-    record PASS "決定: 山本が案A を選ぶ"
+  local outcome="${BODY}" new_ver
+  new_ver="$(jq -r '.version // empty' <<< "${outcome}" 2>/dev/null)"
+  if [ "${STATUS}" = 200 ] && [ "$(jq -r '.selected.option_id' <<< "${outcome}" 2>/dev/null)" = a ] && [ -n "${new_ver}" ]; then
+    record PASS "決定: 山本が案A を選ぶ" "version ${new_ver}"
   else record FAIL "決定: 山本が案A を選ぶ" "status=${STATUS}"; return; fi
 
-  http decisions-after GET "/v1/workspaces/${WS}/decisions?actor=${DECIDER}" ""
+  http decide-replay POST "/v1/decisions/${DEC_ID}/decide" "${DECIDER}" \
+    "{\"decision_id\":\"${DEC_ID}\",\"version\":${new_ver},\"option_id\":\"a\"}"
+  if [ "${STATUS}" = 200 ] && [ "$(jq -cS . <<< "${BODY}" 2>/dev/null)" = "$(jq -cS . <<< "${outcome}")" ]; then
+    record PASS "冪等: 同じ選択の再決定は同じ結果"
+  else record FAIL "冪等: 同じ選択の再決定は同じ結果" "status=${STATUS}"; fi
+
+  http decide-change POST "/v1/decisions/${DEC_ID}/decide" "${DECIDER}" \
+    "{\"decision_id\":\"${DEC_ID}\",\"version\":${new_ver},\"option_id\":\"b\"}"
+  if [ "${STATUS}" = 409 ] && [ "$(jq -r '.code' <<< "${BODY}" 2>/dev/null)" = already_decided ]; then
+    record PASS "決定後に案B へ変える要求は拒否" "409 already_decided"
+  else record FAIL "決定後に案B へ変える要求は拒否" "status=${STATUS}"; fi
+
+  http final-decisions GET "/v1/workspaces/${WS}/decisions?actor=${DECIDER}" ""
   if [ "${STATUS}" = 200 ] && ! jq -e --arg d "${DEC_ID}" '.[]? | select(.decision_id == $d)' <<< "${BODY}" > /dev/null 2>&1; then
-    record PASS "副作用: 確定した決定が判断待ちから消える"
-  else record FAIL "副作用: 確定した決定が判断待ちから消える" "status=${STATUS}"; fi
+    record PASS "決定後の状態: 確定した決定が判断待ちに無い"
+  else record FAIL "決定後の状態: 確定した決定が判断待ちに無い" "status=${STATUS}"; fi
+  http final-messages GET "/v1/channels/${CH}/messages?actor=${REQUESTER}&after_seq=0" ""
+  if [ "${STATUS}" = 200 ] && [ "$(jq --arg c "${cm}" '[.[] | select(.client_msg_id == $c)] | length' <<< "${BODY}" 2>/dev/null)" = 1 ]; then
+    record PASS "決定後の状態: 依頼の投稿が 1 件だけ保存されている"
+  else record FAIL "決定後の状態: 依頼の投稿が 1 件だけ保存されている" "status=${STATUS}"; fi
 
   [ "${FEATURE}" = mail-draft ] || return 0
   sleep "${POLL_SECS}"
@@ -172,7 +261,7 @@ operate() {
   if [ "${STATUS}" = 200 ] && [ "$(jq --arg b "${BOT}" '[.[]? | select(.author_id == $b)] | length' <<< "${BODY}")" -ge 1 ]; then
     record PASS "メール下書き: 決定後にハルが下書きを投稿する"
   else
-    record FAIL "メール下書き: 決定後にハルが下書きを投稿する" "${POLL_SECS} 秒待っても決定後の bot 投稿が無い"
+    record FAIL "メール下書き: 決定後にハルが下書きを投稿する" "機能なし。${POLL_SECS} 秒待っても決定後の bot 投稿が無い"
   fi
 }
 
@@ -216,7 +305,7 @@ main() {
   if [ -n "${other:-}" ]; then
     record FAIL "起動: 二重起動の確認" "別の run の demo-serve が動いている pid=${other# }。触らずに止まる"; return 1
   fi
-  env -u PELWAY_LLM_API_KEY "${BIN}" > "${EV}/server.stdout" 2> "${EV}/server.stderr" &
+  env -u PELWAY_LLM_API_KEY -u PELWAY_LLM_CUSTOM_BASE_URL "${BIN}" > "${EV}/server.stdout" 2> "${EV}/server.stderr" &
   PID=$!
 
   for _ in $(seq 50); do grep -q '^demo-serve ready ' "${EV}/server.stdout" && break; sleep 0.1; done

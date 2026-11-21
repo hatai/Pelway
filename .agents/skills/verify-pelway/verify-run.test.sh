@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# verify-run の機械な部分（応答の分解・証拠の置き場の検査・引数の検査）のテスト。
+# verify-run の機械な部分（応答の分解・本文の伏せ字・loopback 以外の数え方・証拠の置き場の検査・引数の検査）のテスト。
 # サーバーは起動しない（端から端までの run は SKILL.md の手順で行う）。
 set -uo pipefail
 
@@ -31,6 +31,15 @@ outside_repo /home/u/Pelway /home/u/Pelway && r=0 || r=1
 expect_eq "outside_repo: repo itself" "${r}" 1
 outside_repo /home/u/Pelway-evidence /home/u/Pelway && r=0 || r=1
 expect_eq "outside_repo: prefix-sharing sibling" "${r}" 0
+
+printf 'LISTEN 0 128 127.0.0.1:4000 0.0.0.0:*\nESTAB 0 0 127.0.0.1:4000 127.0.0.1:5000\n' > "${tmp}/lo.ss"
+expect_eq "count_nonloopback: loopback only" "$(count_nonloopback "${tmp}/lo.ss")" 0
+printf 'ESTAB 0 0 10.0.0.2:5000 203.0.113.9:443\nSYN-SENT 0 0 127.0.0.1:5001 192.0.2.1:443\n' >> "${tmp}/lo.ss"
+expect_eq "count_nonloopback: external peers" "$(count_nonloopback "${tmp}/lo.ss")" 3
+
+expect_eq "redact: body and question" "$(redact <<< '{"body":"secret text","question":"q","n":{"body":"x"},"seq":4}')" \
+  '{"body":"<redacted len=11>","question":"<redacted len=1>","n":{"body":"<redacted len=1>"},"seq":4}'
+expect_eq "redact: non-json" "$(redact <<< 'plain words')" '<redacted non-json len=11>'
 
 repo="${tmp}/repo"
 git init -q "${repo}"
