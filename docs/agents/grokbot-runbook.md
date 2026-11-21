@@ -193,7 +193,7 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 |---|---|---|
 | 実装・調査（opencode `zai-coding-plan/glm-5.3`） | 3 | open な Issue の `agent:working` のうち `agent:devin` が無く、作業状態の印が停止中・再開処理中・再開待ちでないものの数と、実行中の調査スレッド（Issue を持たない入口B のものを含む）の数の合計 |
 | 実装（Devin CLI `swe-2-high`） | 6 | open な Issue の `agent:working` のうち `agent:devin` があり、作業状態の印が停止中・再開処理中・再開待ちでないものの数 |
-| レビュー（Codex `codex_review`） | 目安 2 | 通常の PR のレビューは実装担当が `delegate_task` で委託するため、この表では数えない。指揮役が立てたレビュースレッド（指揮役自身の PR・外部投入）だけを数える |
+| レビュー（Codex `codex_review`） | 目安 2 | 通常の PR のレビューは実装担当が `delegate_task` で委託するため、この表では数えない。指揮役が立てたレビュースレッド（指揮役自身の PR・外部投入）だけを数える。Codex・T3・`~/.codex-review` を更新したら、`docs/dev-environment.md` の「専用 home での確認」が済むまでは使わない |
 | レビュー（Devin CLI） | 目安 2 | 同上。`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまでは使わない |
 | レビュー（Claude `claude_review`） | 目安 1 | 同上。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは使わない |
 

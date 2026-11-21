@@ -217,19 +217,29 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 
 ## レビュー担当の Codex（codex_review）
 
-AI 開発チームのレビュースレッドは、T3 の Codex インスタンス `codex_review` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。このマシンでの設定は次の 2 つ。
+AI 開発チームのレビュースレッドは、T3 の Codex インスタンス `codex_review` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。`codex_review` はほかの Codex と home（`CODEX_HOME`）を分け、レビュー担当専用の `~/.codex-review` で動かす。このマシンでの設定は次のとおり。
 
 | 場所 | 設定 |
 |---|---|
-| `~/.t3/userdata/settings.json` の `providerInstances.codex_review` | `driver: codex`、`config.launchArgs: --enable network_proxy -c default_permissions=review` |
-| `~/.codex/config.toml` の `[permissions.review]` | ファイルは読み取り（`/tmp` だけ書ける）、ネットワークは `api.github.com` と `github.com` だけ（SOCKS は使わない） |
-| `/etc/codex/requirements.toml`（#449 で追加。hatai が root で作る） | `[permissions.filesystem]` の `deny_read` に秘密パス 4 件（`~/.config/fnox`・`~/.config/pelway-agent`・`~/.ssh`・`~/.config/gh`）を列挙する。requirements 層の設定で、ユーザーの `config.toml` に書いても効かない。このマシン（単一ユーザー）の全 codex セッションに適用される |
+| `~/.t3/userdata/settings.json` の `providerInstances.codex_review` | `driver: codex`、`config.homePath: /home/hatai/.codex-review`（UI のフィールド名は「CODEX_HOME path」。app-server の環境変数 `CODEX_HOME` になる）、`config.launchArgs: --enable network_proxy -c default_permissions=review`（ほかに `shell_environment_policy.set` で `PELWAY_AGENT_FNOX_CONFIG` と `GH_CONFIG_DIR` を渡す。どちらも `scripts/agent-gh review` が実際に使う値ではない。review ロールの資格情報は `PELWAY_AGENT_FNOX_CONFIG_REVIEW`（未設定なら `~/.config/pelway-agent-review/fnox.toml`）から読み、`GH_CONFIG_DIR` は呼び出しのたびに空の一時ディレクトリへ置き換える） |
+| `~/.codex-review/auth.json` | `~/.codex/auth.json` への symlink（ログインは hatai の Codex と共有する） |
+| `~/.codex-review/config.toml` の `[permissions.review]` | ファイルは読み取り（`codex sandbox -P review` で動かしたコマンドは `/tmp` だけ書ける。T3 のスレッドでは worktree にも書ける。Issue #589）、ネットワークは `api.github.com` と `github.com` だけ（SOCKS は使わない） |
+| `~/.codex-review/config.toml` の `[features]` と `[mcp_servers.*]` | `apps`・`plugins`・`remote_plugin`・`hooks` を `false` にする。`[mcp_servers.t3-code]` と `[mcp_servers.t3-code-direct]` を `enabled = false`（`url` は設定の読み込みのための仮の値 `http://127.0.0.1:1/mcp`）にする。最上位のキーに `web_search = "disabled"` を書く。`[projects.*]` の信頼設定は書かない（worktree の `.codex/` を読ませない） |
+| `/etc/codex/requirements.toml`（#449 で追加。hatai が root で作る） | `[permissions.filesystem]` の `deny_read` に秘密パス 5 件（`~/.config/fnox`・`~/.config/pelway-agent`・`~/.config/pelway-agent-qa`・`~/.ssh`・`~/.config/gh`）を列挙する。requirements 層の設定で、ユーザーの `config.toml` に書いても効かない。このマシン（単一ユーザー）の全 codex セッションに適用される |
 
 `deny_read` は sandbox ポリシー（FileSystemSandboxPolicy）に Deny エントリとして渡り、sandboxed なコマンドから当該パスが読めなくなる（codex 0.169.0 の `codex-rs/config/src/filesystem_constraints.rs` と `requirements_layers/permissions.rs` による。パスは絶対パスで書く）。
 
 ネットワークの制限が効くのは、スレッドの権限が `auto-accept-edits` のとき（コマンドが sandbox の中で動くとき）だけ。`full-access` のスレッドでは効かない。
 
-`network_proxy` は Codex の試験的な機能で、`--enable network_proxy` が無いと権限プロファイルのネットワーク制限が効かない。Codex を更新したら `mise run codex-review-check` で、GitHub にはつながり、それ以外にはつながらないことを確かめる。
+T3 はどのスレッドにも、T3 自身の MCP サーバー（`t3-code`・`t3-code-direct`。PR・Issue・スレッドの操作のツール）を、スレッドの開始時の設定として渡す。そのツールは T3 のサーバーの中で動き、レビュースレッドの sandbox・ネットワーク制限・`GH_CONFIG_DIR` の差し替えが効かないので、`codex_review` では使えなくする。止め方の制約:
+
+- 起動引数の `-c mcp_servers.t3-code.enabled=false` と `disabled_tools` は、T3 がスレッドの開始時に渡す同じ名前の設定に上書きされて効かない。`config.toml` の層に書いた `enabled = false` は残る。
+- `~/.codex/config.toml` に書くとほかの Codex のスレッドからも T3 のツールが消えるため、`codex_review` の home を分ける。`shadowHomePath` は `config.toml` を `~/.codex` と共有するので使えない。
+- `homePath` を変えたら T3 を再起動する（設定画面でインスタンスを入れ直しても、動いている app-server は起動し直されない）。
+
+Codex の GitHub 連携（`apps`・`plugins`）も、OpenAI 側で GitHub を操作し sandbox の外で動くため、`~/.codex-review/config.toml` で止める。
+
+`network_proxy` は Codex の試験的な機能で、`--enable network_proxy` が無いと権限プロファイルのネットワーク制限が効かない。Codex を更新したら `mise run codex-review-check` で、`api.github.com` と `github.com` には HTTP 200 が返り、`example.com` には HTTP の応答が無いことを確かめる（`CODEX_HOME=~/.codex-review` の `[permissions.review]` を使う）。このコマンドが見るのはこの 3 つの宛先への応答だけで、許可先の設定そのものは読まない。`example.com` に応答が無い原因（sandbox の遮断か、ほかの接続の失敗か）も区別しない。許可先は `~/.codex-review/config.toml` を読んで確かめる。
 
 gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有効で、実行のごく一部で `cafe.github.com` へ送信する。許可先に無いため sandbox が通信を止め、gh の実行ごと失敗する。`scripts/agent-gh` は空の `GH_CONFIG_DIR` で gh を動かすので `gh config set telemetry disabled` は効かず、代わりにどのロールでも `GH_TELEMETRY=false` と `DO_NOT_TRACK=1` を渡して送信を止める（#527。許可先は増やさない）。
 
@@ -251,6 +261,26 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 
 `claude_review`・Devin CLI をレビュー委託で使うときも、それぞれの確認手順に加えてこの確認を済ませる。
 
+### 専用 home での確認
+
+確かめ終わるまでの間は、この見出しのすぐ下に `保留中: <更新したもの>` の行を置き、確かめ終わったら消す。更新を予定しているときは、その行が main に載ってから更新を始める（載せ方と、載るまでの間の伝え方は skill `command-team` の「レビュー担当と effort」の確認ゲート）。指揮役と実装担当（レビューの委託の担当を決めるとき）は、委託やスレッドの起動・再開の直前に main の最新の版（`scripts/agent-gh dev api -H "Accept: application/vnd.github.raw" "repos/hatai/Pelway/contents/docs/dev-environment.md?ref=main"`）でこの行の有無を見て、`codex_review` を使えるかを判断する。「レビュー担当の Claude」にも、T3・Claude Code・`~/.claude-review` を更新したときに同じ `保留中:` の行を置く。
+
+`codex_review` を初めて設定したときと、Codex・T3・`codex_review` の home のどれかを更新したときは、`codex_review` に委託した確認用の子タスク（`runtimeMode: "auto-accept-edits"`）で次を確かめる。確かめ終わるまで、`codex_review` をレビューに使わない。確認用の子タスクは、`main` のコミットで動くスレッドから委託する（`delegate_task` の子は委託元のコミットを checkout するので、PR のブランチから委託すると、PR が変えた `scripts/agent-gh` や `mise.toml` のタスクを実行しうる）。`config.toml` の層の `enabled = false` が T3 の設定に上書きされないことは Codex の設定の重ね方に、サーバー名 `t3-code`・`t3-code-direct` は T3 に依存するため、どちらを更新しても確かめ直す。結果は `docs/worklogs/` に日付付きの作業ログとして残し、確かめたときの版（`codex --version`、`claude --version`、T3 の `~/.t3/runtime/service-state.json` の `activeVersion`）も書く（初回は `2026-11-21-codex-review-home.md`）。巡回などで今の版が最後の記録と違うと分かったら、更新があったものとして保留にする。
+
+- モデルに渡るツールを全部挙げさせ（直接呼べるツール、`exec` から呼べるツール、遅延読み込みのツールのすべて）、T3（`t3-code`・`t3-code-direct`）・`codex_apps`・GitHub の MCP サーバーのツールと、ウェブ検索（`web_search`・`web.run`）が無い。`ALL_TOOLS` の一覧だけでは足りない（T3 の `t3-code-direct` とサーバー側のウェブ検索はその一覧に載らない）
+- ウェブ検索の実効の設定が無効になっている（`~/.codex-review/config.toml` の `web_search = "disabled"` と、`launchArgs` にそれを上書きする `-c` が無いこと）
+- `CODEX_HOME` が `/home/hatai/.codex-review` になっている
+- `scripts/agent-gh review api /rate_limit` が成功する
+- GitHub 以外への通信（`scripts/agent-gh review api --hostname example.com /`、`curl https://example.com`）が遮断される
+- 秘密の置き場 5 パス（`/etc/codex/requirements.toml` の `deny_read`）が読めない（`test -r` が 1）。`codex sandbox -P review` は `deny_read` を使わないので、この項目は確認用の子タスクの中で確かめる
+- 確認のあとの `~/.codex-review/config.toml` に、`[projects.` で始まる表が無い（T3 と Codex の app-server は sandbox の外でこのファイルに書けるため。信頼設定が入ると worktree の `.codex/` が読まれる）
+- `~/.codex-review` に書き込めない（`touch ~/.codex-review/config.toml` と、新しいファイルの `touch` が拒否される）。止める設定がこのファイルに集まっているため、書き込めると次のセッションで設定を戻せる
+- `mise run codex-review-check` が ok
+
+どれかが通らなければ `codex_review` をレビューに使わない。T3 のツールや Codex の GitHub 連携が残っていたら `~/.codex-review/config.toml` を直し（`homePath` を変えたときは T3 を再起動し）、全部を確かめ直してから使う。
+
+worktree への書き込みは、今は通る（権限プロファイル `review` の `/tmp` だけの制限が、T3 のスレッドの `workspace-write` では worktree に広がる）。直す方向は Issue #589 で決める。それまでは、worktree に書き込めても `codex_review` を使う（レビュー担当は PR のコードを実行せず、ファイルを書き換えないため。skill `review-pr` の「決まり」）。
+
 ## レビュー担当の Claude（claude_review）
 
 高リスクの PR と抜き取りのレビュースレッドは、T3 の Claude インスタンス `claude_review` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。Codex のレビュー担当と同じ条件にそろえる。
@@ -258,7 +288,7 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 | 場所 | 設定 |
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.claude_review` | `driver: claudeAgent`、`config` の `homePath` に `/home/hatai/.claude-review`（UI のフィールド名は「CLAUDE_CONFIG_DIR path」。子プロセスの環境変数 `CLAUDE_CONFIG_DIR` になる。`config.environment` は claudeAgent の config スキーマに無いキーで無視される） |
-| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`・`git ls-tree`・`git cat-file`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` が引数を `git`/`gh` にそのまま渡すため、ワイルドカードは `auth token`・`repo clone`・`git` 全般などあらゆる形を許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す |
+| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`・`git ls-tree`・`git cat-file`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` が引数を `git`/`gh` にそのまま渡すため、ワイルドカードは `auth token`・`repo clone`・`git` 全般などあらゆる形を許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す（QA 用の `Read(~/.config/pelway-agent-qa/**)` も、下の「QA 担当の GitHub App（pelway-qa）」の手順 5 で足してある）。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す。T3 が渡す MCP サーバーのツールは、`permissions.deny` に `mcp__t3-code` と `mcp__t3-code-direct`（サーバー名だけで、そのサーバーの全ツール）を書いて使えなくする（理由は「レビュー担当の Codex」と同じ）。claude.ai のコネクタ（外部のサービスへ送信できるツールを含む）は、`env` の `ENABLE_CLAUDEAI_MCP_SERVERS=false` で止める。組み込みのツールのうち、ほかのセッションや claude.ai へ送れるもの（`SendMessage`・`RemoteTrigger`・`Artifact`・`ShareOnboardingGuide`・`PushNotification`・`DesignSync`・`PublishPlugin`）は `permissions.deny` に書く（`WebFetch`・`WebSearch` は前から deny にあり、サブエージェントにも効く）。アカウントから同期されるプラグインの MCP サーバーは、`env` の `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` で読み込ませない（接続に失敗しているだけの状態は、セッションの途中で接続が戻りうるので、止めたことにならない）。下の `hooks.PermissionRequest` は承認要求を拒否するが、これに頼ってプラグインのツールを残さない |
 | socat | Claude Code の sandbox（Linux）が使う。`mise.toml` の `conda:socat` で `mise install`（`mise bootstrap`）が入れる。apt と sudo は要らない |
 | ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
 | `~/.claude-review/settings.json` の `hooks.PermissionRequest` | matcher `*` で `/home/hatai/.claude-review/hooks/deny-permission-request.sh` を呼ぶ。承認要求になる場面ごとに、人間に聞かずに拒否を返す。拒否のメッセージは、sandbox の遮断ではないこと、Bash なら単純なコマンドに分けて送り直すことをモデルに伝える。フックは worktree の外に絶対パスで置く（委託のレビューは PR の作者のコミットの checkout で動くため、リポジトリの中に置くと PR が差し替えられる） |
@@ -282,19 +312,27 @@ EOF
 - `git switch` と、ファイルの書き込みが拒否される
 - `agent-gh review` を経由する他の gh サブコマンドが拒否される: `scripts/agent-gh review git switch -c <probe>`・`scripts/agent-gh review repo clone <リポジトリ> <dir>`・`scripts/agent-gh review auth status` が permissions の deny で拒否される（許可は使用するサブコマンド単位に絞ってあり、deny もラッパー経由の形で二重に張ってある）
 - 許可経路からの egress が遮断される: `scripts/agent-gh review api --hostname example.com /` が失敗する（sandbox のネットワーク許可先の実測。許可リスト内で GitHub 以外へ出られるコマンド形で試す）
+- 新しい `claude_review` のセッションのツールの一覧に、`mcp__` で始まるツールが無い（T3 の `mcp__t3-code`・`mcp__t3-code-direct`、claude.ai のコネクタ、プラグインの MCP サーバー）。どれか 1 つでも残っていれば、呼んで確かめずに `claude_review` をレビューに使わない（確かめるための呼び出しが、承認の設定に不備があればそのまま外部のサービスに届くため）。設定でそのツールを止めてから確かめ直す（プラグインなら `env` の `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` を確かめる）。システムの通知に `plugin:` で始まる MCP サーバーが出ていても、同じく使わない。deny はサーバー名に依存するので、T3・Claude Code・`~/.claude-review` を更新したらこの項目を確かめ直す。確かめ終わるまでは、この節の見出しのすぐ下に `保留中: <更新したもの>` の行を置き、指揮役と実装担当は委託やスレッドの起動・再開の直前に main の最新の版でこの行の有無を見る
+- 組み込みのツールの一覧を最後の作業ログの記録と比べ、ほかのセッションや claude.ai へ送れるツールが増えていない（増えていれば `permissions.deny` に足してから使う）
 
 ### 確認手順の結果（記録欄）
 
-確認手順を実施したら、結果を次の表に記録する。記録されるまで `claude_review` は使わない（command-team の保留）。記録は Issue #256 の受け入れ条件の確認にも使う。
+確認手順を実施したら、結果を次の表か、`docs/worklogs/` の作業ログに記録する。記録されるまで `claude_review` は使わない（command-team の保留）。T3 の MCP サーバーとコネクタを止めた後の確認は、作業ログ `docs/worklogs/2026-11-21-codex-review-home.md` にある。記録は Issue #256 の受け入れ条件の確認にも使う。
 
 | 項目 | 結果 | 実施日 |
 |---|---|---|
 | 実施日（hatai によるレビュー用 Claude へのログインと、T3 への `claude_review` の追加を含む） | hatai によるレビュー用 Claude へのログインと `claude_review` の追加は済んでいる（`config.homePath` への修復は指揮役（代行）が hatai の分担を代わりに、許可の gh サブコマンド単位への絞り込みと deny への `git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *` の追加は hatai がそれぞれ適用した）。確認は `delegate_task`（target `claude_review`、`auto-accept-edits`、worktree）で実施。`CLAUDE_CONFIG_DIR` の継承は親側で子プロセスの environ（`CLAUDE_CONFIG_DIR=/home/hatai/.claude-review`）を確認して確かめた。許可・拒否のどちらのリストにも無い `echo "$CLAUDE_CONFIG_DIR"` は承認要求になり、承認を経て同じ値を出力した | 2026-11-14 |
 | 使えるコマンドの制限の結果（読み取り系 `git` と `scripts/agent-gh review` に絞られているか。`git switch` とファイルの書き込みが拒否されたか） | `scripts/agent-gh review api /rate_limit`・`pr view`・`issue view` は承認なしで成功（許可は使用する gh サブコマンド単位に列挙）。`git switch -c perm-check-256` は permissions の deny で拒否。Write ツールは deny によりセッションで無効化され（`No such tool available`）、ファイルは作られなかった。ラッパー経由の形（`scripts/agent-gh review git switch -c <probe>`・`git -c 'alias.x=!<コマンド>' x`・`pr checkout <N>`・`repo clone <リポジトリ> <dir>`・`auth status`）は許可の列挙に入らず、deny（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）でも拒否される | 2026-11-14 |
 | ネットワーク制限の結果（`api.github.com` と `github.com` だけにつながるか。`curl -sS https://example.com` が失敗したか） | `curl -sS https://example.com` は permissions の deny で拒否（実行自体されない）。GitHub API には到達した。egress の実測: 許可経路の `scripts/agent-gh review api --hostname example.com /` は実行されるが sandbox のプロキシで遮断（`host is not on the allow list`）。`scripts/agent-gh review git ls-remote https://example.com/` は deny で拒否 | 2026-11-14 |
-| Codex 側（`codex_review`）との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 許可先は同じく GitHub のみ。遮断の仕組みが異なり、Codex は `network_proxy`＋権限プロファイル、Claude は `~/.claude-review/settings.json` の permissions（allow/deny）＋ sandbox。ファイルの書き込みは Write/Edit ツール自体が無効化される。許可・拒否のどちらにも載っていないコマンドは、T3 が `--permission-mode=acceptEdits` を渡すため承認要求になる（`defaultMode: dontAsk` より acceptEdits が優先される）。書き込みの遮断も異なり、Codex の権限プロファイルは `/tmp` 以外を読み取り専用にするが、Claude の OS sandbox は worktree と共有 `.git` への書き込みを許すため、permissions の deny が漏れる形（許可リスト経由）では書き込みが止まらない | 2026-11-14 |
+| Codex 側（`codex_review`）との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 許可先は同じく GitHub のみ。遮断の仕組みが異なり、Codex は `network_proxy`＋権限プロファイル、Claude は `~/.claude-review/settings.json` の permissions（allow/deny）＋ sandbox。ファイルの書き込みは Write/Edit ツール自体が無効化される。許可・拒否のどちらにも載っていないコマンドは、T3 が `--permission-mode=acceptEdits` を渡すため承認要求になる（`defaultMode: dontAsk` より acceptEdits が優先される）。書き込みの遮断も異なり、Codex の権限プロファイルは `/tmp` 以外を読み取り専用にする（ただし T3 のスレッドでは worktree にも書ける。「レビュー担当の Codex」と Issue #589）が、Claude の OS sandbox は worktree と共有 `.git` への書き込みを許すため、permissions の deny が漏れる形（許可リスト経由）では書き込みが止まらない | 2026-11-14 |
 | 承認要求を拒否に変えるフック（`hooks.PermissionRequest`）の結果 | `delegate_task`（target `claude_review`、`auto-accept-edits`、worktree）で確認。`H=$(git rev-parse HEAD); …; echo rc=$?` と `for f in …; do wc -l "$f"; done` は承認待ちにならずフックの拒否が返り、モデルは単純なコマンドに分けて送り直して結果を得た。`scripts/agent-gh review api /rate_limit` はそのまま通り、`curl -sS https://example.com` は permissions の deny で拒否のまま。スレッドに承認待ち（`pendingApproval`）は出なかった | 2026-11-21 |
 | フック導入後の実レビューの観察 | 導入後 1 時間の `claude_review` の実レビュー 9 セッションで、フックの拒否は 26 件。拒否を理由に `verdict: failed` になったレビューは無かった（`failed` の 1 件は PR のチェックの未報告による）。拒否のうち `git ls-tree`・`git -C`・`agent-gh review run list` は単純な形でも承認要求になっていたため、`git ls-tree`・`git cat-file`・`run list`・`run view` を許可に足した（`claude -p` で通ることと、`run download` は拒否のままであることを確認）。拒否されたのと同じコマンドを 1 回そのまま送り直す例が多かったため、フックのメッセージに 1 文足した | 2026-11-21 |
+
+前からある未確認の経路: 委託のレビューは PR の head の checkout で動くので、PR が足した `.claude/`・`.mcp.json`・`.codex/`・`.devin/`（Devin CLI がプロジェクト層として読む `config.json`・`hooks.v1.json`・`mcp_config.json`・`rules/`・`global_rules.md`・`skills/`）・`.cursor/`・`.cursorrules`・`.windsurf/`・`.windsurfrules`、プロジェクトの指示のファイル（どのディレクトリの `AGENT.md`・`AGENTS.md`・`AGENTS.local.md`・`AGENTS.override.md`・`CLAUDE.md` も）と、PR が変えたレビュー担当のスキル（`.agents/skills/review-pr`・`.agents/skills/security-review`・`.agents/skills/pr-watch`。`.claude/skills/` はその symlink）を読みうる（project の設定は `~/.claude-review/settings.json` より優先され、`env` の上書きや `.devin/hooks.v1.json` のような hooks の実行がありうる）。手当てとして、これらを足す・変える PR はレビューを委託しない（skill `implement-issue` の手順 8）。
+
+未確認の経路: Codex のファイルを書くツール `apply_patch` が、`~/.codex-review` と worktree の外へ書き込めるか。確認用の子タスクのセッションの記録では、承認の方針（`approval_policy`）が `on-request` で、この方針では書き込める範囲の外への patch は拒否ではなく承認要求になる。T3 の `auto-accept-edits` がその承認要求をどう扱うかは確かめていない（`docs/worklogs/2026-11-22-codex-review-apply-patch.md`）。使う前の確認の一覧には入れず、扱いは hatai が決める。
+
+未確認の経路: `Agent` ツールの `isolation: "remote"`（クラウドの環境でエージェントを動かす）が、アカウントの設定で使えるかを確かめていない。使えると、指示文を sandbox の外へ渡せる。扱いは hatai が決める。
 
 残っている既知の経路は hatai の決裁で別 Issue で追う（PR #287 の round 4 で両レビュー担当が request-changes として指摘し、hatai が残リスクを受容）:
 
@@ -341,7 +379,7 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 
 ## レビュー担当の秘密ファイルの遮断と鍵の分割（#449）
 
-レビュー担当（`devin_review`・`claude_review`・`codex_review`）の sandbox から、秘密の置き場を読めないようにする。対象は 4 パス: `~/.config/fnox`（age 秘密鍵 `age.txt` と fnox のグローバル設定）・`~/.config/pelway-agent`（dev 用の fnox 設定。`PELWAY_DEV_*` と `PELWAY_LLM_API_KEY` が同じ age 鍵で暗号化されて同居していた）・`~/.ssh`・`~/.config/gh`。これらはすべて実体のあるディレクトリでなければならない（symlink だと devin の bwrap が exec を全滅させる）。
+レビュー担当（`devin_review`・`claude_review`・`codex_review`）の sandbox から、秘密の置き場を読めないようにする。対象は 4 パス（QA 用の `~/.config/pelway-agent-qa` は、下の「QA 担当の GitHub App（pelway-qa）」の手順 5 で 5 つ目として各担当の拒否リストに足す）: `~/.config/fnox`（age 秘密鍵 `age.txt` と fnox のグローバル設定）・`~/.config/pelway-agent`（dev 用の fnox 設定。`PELWAY_DEV_*` と `PELWAY_LLM_API_KEY` が同じ age 鍵で暗号化されて同居していた）・`~/.ssh`・`~/.config/gh`。これらはすべて実体のあるディレクトリでなければならない（symlink だと devin の bwrap が exec を全滅させる）。
 
 ### hatai が手で適用する変更（リポジトリ外の設定。反映は hatai が行う）
 
@@ -352,7 +390,7 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 "Read(~/.config/pelway-agent/**)",
 ```
 
-**2. `~/.claude-review/settings.json`** — `permissions.deny` に 4 件を追加（`Read(...)` deny は `sandbox.filesystem.denyRead` にマージされ、sandboxed なコマンドにはファイルシステム層でも隠される。`allowUnsandboxedCommands: false` が既に効いているため全 Bash コマンドが対象）:
+**2. `~/.claude-review/settings.json`** — `permissions.deny` に 4 件を追加（QA 用の 5 件目は下の「QA 担当の GitHub App（pelway-qa）」の手順 5 で足す）（`Read(...)` deny は `sandbox.filesystem.denyRead` にマージされ、sandboxed なコマンドにはファイルシステム層でも隠される。`allowUnsandboxedCommands: false` が既に効いているため全 Bash コマンドが対象）:
 
 ```json
 "Read(~/.config/fnox/**)",
@@ -368,6 +406,7 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 deny_read = [
   "/home/hatai/.config/fnox",
   "/home/hatai/.config/pelway-agent",
+  "/home/hatai/.config/pelway-agent-qa",
   "/home/hatai/.ssh",
   "/home/hatai/.config/gh",
 ]
@@ -447,10 +486,10 @@ rm -f ~/.config/pelway-agent-review/fnox.toml ~/.config/pelway-agent-review/age.
 | 項目 | 結果 | 実施日 |
 |---|---|---|
 | devin_review: 4 パスの `test -r`（すべて非 0 か） | 未実測 — devin_review は停止中のまま（hatai 決定 2026-11-18・#449 の実測が済むまで使用停止。実測を委託するスレッドを立てられない）。未実測のまま残すことは hatai の決定（2026-11-19 12:58 JST・例外）。実測は #479 で追う | — |
-| claude_review: 4 パスの `test -r`（すべて非 0 か） | 未実測 — claude_review は env の橋渡し（`PELWAY_AGENT_FNOX_CONFIG`）が未導入のため実測できない（review 用の fnox 設定を読めずスレッドが動かない。PR #473 の Claude レビューも同じ理由で実施不可）。実測は #479 で追う | — |
-| codex_review: 4 パスの `test -r`（すべて非 0 か） | 未実施 — 2026-11-19 10:33 JST の codex_review での実測（下記）は環境変数・`fnox list`・`gh extension list`・`/rate_limit`・`codex features list` の 5 項目で、4 パスの `test -r` は含んでいない | — |
+| claude_review: 4 パスの `test -r`（すべて非 0 か） | 未実測。実測は #479 で追う（`claude_review` は今は動き、`/rate_limit` は下の行のとおり成功する） | — |
+| codex_review: 4 パスの `test -r`（すべて非 0 か） | 合格 — 確認用の子タスクで 4 パス、続けて QA 用を含む 5 パスとも `test -r` が 1（`docs/worklogs/2026-11-21-codex-review-home.md`） | 2026-11-21 |
 | devin_review: `scripts/agent-gh review api /rate_limit` 成功 | 未実測（上記の devin_review 停止中と同じ理由。実測は #479 で追う） | — |
-| claude_review: `scripts/agent-gh review api /rate_limit` 成功 | 未実測（上記の env の橋渡し未導入と同じ理由。実測は #479 で追う） | — |
+| claude_review: `scripts/agent-gh review api /rate_limit` 成功 | 合格 — 確認用の子タスクで exit 0（`5000`）（`docs/worklogs/2026-11-21-codex-review-home.md`） | 2026-11-21 |
 | codex_review: `scripts/agent-gh review api /rate_limit` 成功 | 合格 — exit 0。起動引数変更後の codex_review スレッド（環境変数 `PELWAY_AGENT_FNOX_CONFIG`=set・`FNOX_CONFIG_DIR`=/nonexistent・`GH_CONFIG_DIR`=set）での実測。同じスレッドで `gh extension list` が exit 4・「To get started with GitHub CLI…」の認証なし応答（sandbox にログイン状態が残留しない形）も確認 | 2026-11-19 |
 | review 用設定の `fnox list`（`PELWAY_REVIEW_*` だけか。`PELWAY_DEV_*`・`PELWAY_LLM_API_KEY` が載らないか） | 合格 — `fnox -c "$PELWAY_AGENT_FNOX_CONFIG" list` が exit 0 で、review 用設定には `PELWAY_REVIEW_APP_ID`・`PELWAY_REVIEW_APP_INSTALLATION_ID`・`PELWAY_REVIEW_APP_KEY` の 3 名だけが載る（sandbox 側は `FNOX_CONFIG_DIR`=/nonexistent でグローバル設定も載らない。ホスト側の list には fnox グローバル設定由来の `PELWAY_PENPOT_MCP_TOKEN` が追加で現れるが、review 用設定のファイルには含まれない）。旧設定 `~/.config/pelway-agent/fnox.toml` から `PELWAY_REVIEW_*` は削除済み（`PELWAY_DEV_*`・`PELWAY_DEV_GIT_EMAIL` のみ）で、`PELWAY_DEV_*`・`PELWAY_LLM_API_KEY` は review 用設定に載らない | 2026-11-19 |
 | dev 用と review 用の age 鍵のパス（値は書かない）と、review の sandbox から dev 用の鍵が `test -r` 非 0 | 鍵のパス: dev=`~/.config/fnox/age.txt`・review=`~/.config/pelway-agent-review/age.txt`（別ファイル・両方作成済み）。review の sandbox から dev 用の鍵の `test -r` は未実測（今回の実測 5 項目に含まない） | — |
@@ -471,7 +510,7 @@ QA の合格コメントは QA 専用の名義で書く（#480 の決定）。�
 4. `~/.config/pelway-agent-qa/fnox.toml`（provider `qa_age`）に、次の 3 つの名前で登録する
    - `PELWAY_QA_APP_ID`・`PELWAY_QA_INSTALLATION_ID`・`PELWAY_QA_PRIVATE_KEY`
    - dev / review 用の秘密（`PELWAY_DEV_APP_KEY`・`PELWAY_REVIEW_APP_KEY` など）と名前の付け方が違うので、`scripts/agent-gh` の `qa` ロールが読む名前どおりに登録する
-5. レビュー役の拒否リスト（Codex の権限プロファイル、`~/.claude-review/settings.json`、`~/.config/devin-review/config.json`）に `~/.config/pelway-agent-qa/` を足し、レビュースレッドから秘密を読めなくする
+5. レビュー役の拒否リスト（Codex は `/etc/codex/requirements.toml` の `deny_read`、`~/.claude-review/settings.json`、`~/.config/devin-review/config.json`）に `~/.config/pelway-agent-qa/` を足し、レビュースレッドから秘密を読めなくする
 
 ### 使い方
 

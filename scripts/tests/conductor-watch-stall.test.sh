@@ -168,7 +168,7 @@ check "7: STALL is printed once for the same stop" eq "$(count "$ROOT/out.log" '
 check "8: HEARTBEAT line is printed" has "$ROOT/out.log" "HEARTBEAT"
 check "1-8: no writes to GitHub or threads" no_writes
 
-# 試験 9: waiting-conductor（scripts/agent-gh を変える PR で指揮役のレビュースレッドを待つ。
+# 試験 9: waiting-conductor（レビューを委託しない条件に当たる PR で指揮役のレビュースレッドを待つ。
 # Issue #622）は conductor にし、STALL の行は出さない。
 reset
 issues "$(iss 49 '{"name":"agent:working"}')"; prs "$(draft_pr 49)"; threads "$(impl 49 completed)"
