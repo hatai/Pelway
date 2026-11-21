@@ -106,3 +106,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 の「複数のレビュー担当の判定が割れたら」に、「approve 側のレビューの `[文書のずれ]` の nit も、その修正 round で一緒に直す」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 11）
+
+対象 head: dd8360c0e2cbfaf26c0d89993925156d804fe7de
+
+1. 詰まった箇所: `.agents/skills/verify-pelway/verify-run.test.sh` の引数の検査: verify-run は引数より先に道具の有無と自分の環境の禁止の変数を確かめるため、`PELWAY_DATABASE_URL` を設定したまま `mise run verify-test` を回す nightly では exit 1 になり、テストが落ちていた。直す前のテストを `PELWAY_DATABASE_URL=x` で回して 2 件落ちることを確かめてから直した。
+2. 曖昧だった文: 「PR 本文の「レビューと QA」には round の履歴を書かず、実装者メモ（`docs/worklogs/issue-<N>.md`）を指す 1 行と、最後に検証した sha だけを書く」（Claude の round 5 の nit が引いた implement-issue の手順 7）。このブランチの `.agents/skills/implement-issue/SKILL.md` に見当たらず、印の無い nit なので直さなかった。
+3. 仮定と解釈: Codex の round 5 は利用上限で failed したが、前回と同じく上限が解けた後に自動で再開する見込みとして、再委託しなかった。round 6 の委託で Codex を出し直す。
+4. 足りなかった情報・検証手段: nightly の環境を手元で再現する手段（`PELWAY_DATABASE_URL` を置いて script-test を回す形で代えた）。
+5. 改善案: `.github/workflows/nightly.yml` の冒頭のコメント「script-test を走らせない」を、`verify-test` が script-test を含む事実に合わせる（workflow の変更は人間が行う）。
+
+使ったスキル: implement-issue
