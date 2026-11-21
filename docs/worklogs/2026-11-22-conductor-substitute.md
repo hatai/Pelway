@@ -77,3 +77,13 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 - patrol 5・6: 実値変化なし。#568・#611・a2e1fc7f は T3 障害で failed→再試行。#560 impl 未起床・send 不可
 - patrol 7: PR #619 の QA 委託（Devin・振替）が完了。pelway-qa[bot] 名義「QA: pass sha:9afb58b2… run:44923610876」を投稿（comment 7066088136）。pelway-review APPROVED・必須チェック全 success・QA pass の 3 条件を確認し automerge 付与（Kodiak キュー待ち）
 - QA 投稿の補足: agent-gh qa は PELWAY_AGENT_FNOX_CONFIG の明示が必要（patrol-state に記録）
+
+## Claude 5h 上限のスレッド立て直し（04:15 JST・濱田 01:58 指示）
+
+リセットを待たず Devin（swe-2-high・mode smart・thought_level high）で後継を起動。元スレッドは温存。
+- #611 impl → mcp:launch:d66a14c4（agent/611-prune-keep-live・waiting-review・head bb45b4ea・r4 委託済み）
+- #568 impl → mcp:launch:166fd253（agent/568-verify-pelway・未コミット修正あり・verify 待ち）
+- 実装役待機通知 → mcp:launch:caa0ff74（agent/investigate-agent-watch-not-running・#609/#610 r4 結果待ち）
+- #586/#587 レビュー統制 → mcp:launch:4c9a883a（t3/codex-review-home・#586 39b76eb5 push 済み・#587 apply_patch 判断の指揮役エスカレーションを引き継ぎ）
+- #586 r11 レビュー → mcp:launch:14a715f6（auto-accept-edits）
+- #587 r8 レビュー → mcp:launch:70852e4b（auto-accept-edits）
