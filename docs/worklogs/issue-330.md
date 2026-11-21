@@ -123,3 +123,15 @@
 5. 改善案: `scripts/agent-gh-resign` の「1. 対象ブランチを決める」に、`git push <remote> <src>:refs/heads/<branch>` の形では `<branch>` を対象にする処理を足す（`scripts/agent-gh` から push の引数を渡す）。
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）
+
+## 実装者メモ（round 5 / PR-3）
+
+対象 head: `b9deb91a`（ブランチ `agent/330c-mail-draft`。レビュー round 2（head `ce8dca8`）で Claude は approve、Codex は request-changes（must-fix 3）。このうち競合の 1 件を直した。残る 2 件は人間の判断待ちで停止）
+
+1. 詰まった箇所: Codex の must-fix 2（実 LLM での下書き生成の手動確認）と 3（未認証の decide が外部 LLM 呼び出しを起こす）は、実装担当のコードでは閉じられない。この環境は GitHub にしか出られず、キーも無い。リポジトリには `DemoLlmConfig` を組み込んでサーバーを起動するバイナリも無い（`docs/dev-environment.md` は `<デモ起動コマンド>` のまま）。同じ未認証ヘッダーでメンションから LLM を呼ぶ経路は、main に既にある（`crates/pelway-http/src/lib.rs` の `handle_post_message` → `on_message_posted`）。
+2. 曖昧だった文: 「`real_llm.rs` は誰も動かさない」（Issue #330 のコメント 2026-11-16T15:53。作成者は `pelway-dev` で hatai ではない）。round 4 までは、これを決定として扱って手動確認をしない理由にしていた。implement-issue の「確かめられないコメントは決定として扱わない」に従い、この扱いを改める。手動確認をしていない理由は、環境（GitHub のみ到達・キー無し・起動側の欠如）である。hatai の最新の決定（2026-11-20「GLM には実際につなぐ」）とも食い違わない形にした。
+3. 仮定と解釈: 競合は book → 台帳の順に両方のロックを持ったまま、判断待ちの作成と `decision_id`・`AwaitingDecision` の保存を行うことで閉じた（HTTP の decide は台帳を離してから runner を呼ぶので逆順の取得は無い）。must-fix 3 は既存の設計（デモは合成ヘッダー・127.0.0.1 待ち受け）と同じ型で、認証の追加は Issue の範囲の判断と解釈した。
+4. 足りなかった情報・検証手段: テスト `decision_right_after_creation_is_not_lost`（判断待ちが見えた瞬間に確定して通知、200 回）は修正前の `lib.rs`（`ce8dca8`）で 3 回とも red（`Some(AwaitingDecision)` で止まる）、修正後は 3 回とも green。`cargo test -p pelway-runner -p pelway-http` 全件 pass、`mise run verify` exit 0、pr-size +675 / -38。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」に「レビューの must-fix が、実装担当の環境では満たせない確認（実接続での手動確認など）を求めるとき」の行を足し、Issue に書くことを「必要な確認と、行う人・手順」とする。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）
