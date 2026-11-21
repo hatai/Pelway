@@ -154,3 +154,15 @@
 5. 足りなかった情報・検証手段: 本当に別のコミットから同じビルド先で並行ビルドする結合試験（ロックの試験と並びの検査で代えた）。
 
 使ったスキル: implement-issue、verify-pelway
+
+## 実装者メモ（round 15）
+
+対象 head: bdc760c2c028c44d722e176c28fd454e5023c226
+
+1. 詰まった箇所: Codex の round 9（must-fix 3・印の nit 1）の直し: (a) 停止の要求より前にほかの SIGTERM で終わったサンプラを、終了コード 143 だけではこの run が止めたものと区別できない → サンプラは TERM を trap して終了コード 4 で応答し、stop_sampler は「要求の前に消えている（ゾンビ含む）」と「応答が 4 ではない」の両方を OBS_FAILED にする。(b) `--evidence-root` の有無によらず `<git-common-dir>/pelway/locks` は共有の置き場なのに、置き場の鎖の検査が証拠側だけだった → `locks_dir_ready` で `pelway` と `pelway/locks` の鎖を `dir_chain_safe` で検査し、pid の表示は `lock_owner` で「通常ファイル・リンクではない・数字だけ」のものに限る。(c) 相対の `CARGO_TARGET_DIR` を呼び出し側の cwd から解決していたため、作業ツリーのサブディレクトリからの run と絶対パスの run が同じビルド先で別のロックを引きうる → `target_dir_of` で `TOP` から解決する（`cd "${TOP}"` してから Cargo を呼ぶのと同じ基準）。
+2. 詰まった箇所: この sandbox では `/home` が nobody 所有に見えるため、(b) の検査を加えた版では実 run が `locks_dir_ready` で止まる。検査を緩めず、bwrap で `/home` 以下の必要な範囲だけを自分所有に見せた名前空間で run した。bwrap 内は DNS が切れる（`/etc/resolv.conf` が `/mnt/wsl/resolv.conf` へのリンクで、リンク先を bind していなかった）と `~/.rustup` の bind だけでは mise の shim が channel の同期に落ちるため、`/mnt/wsl` を bind し、PATH の先に `~/.cargo/bin`（本物の rustup、`which` はローカル解決）を置いた。
+3. 曖昧だった文: 印の nit「`SKILL.md` は未コミットの変更で常に失敗とあるが `--allow-dirty` で許される」→ ローカルの試し用であること、`allow_dirty=yes` が記録されること、その run は証拠にならないことを SKILL.md に明記した。
+4. 仮定と解釈: サンプラが TERM で 4 を返す設計は、trap しない限り bash の TERM 既定動作（143）と衝突しない、と読んだ。`wait` が返す他の終了コード（0・3・137・143）は全部失敗に寄せた。
+5. 足りなかった情報・検証手段: bwrap の内側で mise/rustup の shim が辿るパスの一覧（試行錯誤で `.rustup`・`.cargo`・`.local/share|state|cache/mise`・`.cache/mbx`・`/mnt/wsl` の bind が必要と判明）。
+
+使ったスキル: implement-issue、verify-pelway
