@@ -207,6 +207,7 @@ hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終�
 `automerge` ラベルを付ける条件（すべて確かめてから付ける）:
 
 - 有効な Approve（上の「hatai のレビューの扱い」）がある
+- その Approve のレビューの nit に行頭が `[文書のずれ]` のものが残っていないこと（残っていれば実装担当に直させる。skill `implement-issue` の手順 9「Approve のとき」）
 - 必須チェック（`mise run verify` と `pr-size`）が通っている
 - Draft ではなく、タイトルに `WIP:` がない
 - QA が同じ head の sha で合格の PR コメントを残している（QA 合格コメントの形式はこの節の末尾）
@@ -239,7 +240,7 @@ QA 合格コメント:
 
 - pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の例外の判断に回す（マージの例外は上の 3 つだけで、pr-size-exception 自体は例外に加えない）。
 - 必須チェックの完了待ち（ラベルを付ける前の CI 待ち、巡回での PR のベビーシット）は、ポーリングせず skill `pr-watch` の「待ち方」に従う（T3 のスレッドでは `watch_pull_request`）。マージの実行は Kodiak が行うため、指揮役がマージコマンドを叩くことはない。
-- skill `pr-watch` の `VERDICT green` は、その SHA でチェックが完走して通過していることの確認要素の 1 つ。`automerge` ラベルを付ける条件（`pelway-review` の Approve、必須チェック、レビュー済み SHA 以降の追加コミットの確認、mergeable）を置き換えない。
+- skill `pr-watch` の `VERDICT green` は、その SHA でチェックが完走して通過していることの確認要素の 1 つ。`automerge` ラベルを付ける条件（`pelway-review` の Approve、`[文書のずれ]` の nit が残っていないこと、必須チェック、レビュー済み SHA 以降の追加コミットの確認、mergeable）を置き換えない。
 - ブランチの最新化はルールセットが「マージ前にブランチを最新化すること」で必須とし、実行は Kodiak が行う。指揮役が `pr update-branch` で手動に取り込む操作は、手当スレッドでの衝突解消などの例外を除き原則しない。
 - 別の PR に積んだ PR は、土台の PR に `automerge` ラベルを付ける前に、後の PR の base を main に替える（`scripts/agent-gh dev pr edit <後の PR> --base main`）。base のままだと、リポジトリのブランチ自動削除で土台のブランチが消えたときに後の PR が閉じることがあり、閉じた PR は base を替えられない。
 - 複数の PR に `automerge` ラベルを付けてよい。Kodiak が直列に 1 本ずつマージする。ただしラベルを付ける時点で各 PR が上の条件を満たしていることを確かめる。
