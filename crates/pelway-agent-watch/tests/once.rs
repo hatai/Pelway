@@ -1427,30 +1427,31 @@ fn sent_threads(sb: &Sandbox) -> Vec<String> {
 
 #[test]
 fn permanent_failure_is_dropped_and_next_is_sent() {
-    let sb = Sandbox::new("send-dropped");
-    queue(&sb, &["mcp:a", "mcp:b"]);
-    sb.fake("fnox-ok", "");
-    sb.fake("curl-code-by-thread", "mcp:a 400\nmcp:b 200\n");
-    let out = sb.run_with(&["--once"]);
-    let err = stderr(&out);
-    assert!(out.status.success(), "{err}");
-    // 400 を返された 1 件目は送り直さずに列から外し、同じ周回で 2 件目を送る
-    assert_eq!(sent_threads(&sb), ["mcp:a", "mcp:b"], "{err}");
-    assert!(outbox_threads(&sb).is_empty(), "{err}");
-    let dropped: Vec<&str> = err
-        .lines()
-        .filter(|l| l.contains("mode=send-dropped"))
-        .collect();
-    assert_eq!(
-        dropped,
-        ["agent-watch: event=finished thread=mcp:a branch=agent/80-x mode=send-dropped http=400"],
-        "{err}"
-    );
-    // 秘密（偽の fnox が URL と鍵に返す値）と payload の本文はログに出ない
-    assert!(
-        !err.contains("fake-secret") && !err.contains("issue: #80"),
-        "{err}"
-    );
+    for code in ["400", "404", "413"] {
+        let sb = Sandbox::new(&format!("send-dropped-{code}"));
+        queue(&sb, &["mcp:a", "mcp:b"]);
+        sb.fake("fnox-ok", "");
+        sb.fake("curl-code-by-thread", &format!("mcp:a {code}\nmcp:b 200\n"));
+        let out = sb.run_with(&["--once"]);
+        let err = stderr(&out);
+        assert!(out.status.success(), "{err}");
+        // 直らない失敗を返された 1 件目は送り直さずに列から外し、同じ周回で 2 件目を送る
+        assert_eq!(sent_threads(&sb), ["mcp:a", "mcp:b"], "{code}: {err}");
+        assert!(outbox_threads(&sb).is_empty(), "{code}: {err}");
+        let dropped: Vec<&str> = err
+            .lines()
+            .filter(|l| l.contains("mode=send-dropped"))
+            .collect();
+        let want = format!(
+            "agent-watch: event=finished thread=mcp:a branch=agent/80-x mode=send-dropped http={code}"
+        );
+        assert_eq!(dropped, [want.as_str()], "{err}");
+        // 秘密（偽の fnox が URL と鍵に返す値）と payload の本文はログに出ない
+        assert!(
+            !err.contains("fake-secret") && !err.contains("issue: #80"),
+            "{err}"
+        );
+    }
 }
 
 #[test]
