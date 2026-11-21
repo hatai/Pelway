@@ -130,3 +130,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 のコード例を、`mise run verify` が失敗したらそこで止まる形（`mise run verify && scripts/agent-gh dev git add ...`）にする。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 13）
+
+対象 head: 9aef851ba27dc1f05037f95df3990c5f70993b2b
+
+1. 詰まった箇所: この実行環境（Devin の sandbox）のマウント名前空間: `/tmp` と `/home` が nobody 所有のため、`dir_chain_safe` の「置き場より上は自分か root」にどの一時領域も合わず、`make_run_dir` の試験が落ちる（HEAD 版でも再現＝環境起因。`TMPDIR=/dev/shm/<dir>` では全通過）。実 run は `--evidence-root` を `/dev/shm` に向け、run ディレクトリを標準の置き場に写して `sha256sum -c` で照合した。前任の環境では合っていた。
+2. 詰まった箇所: 自分の run で 2 件見つけて直した: ac0621f6 の mail-draft run が「消えた pid 544960」（T3 本体の子 `t3 acp-mcp-bridge`。親が t3 で run の途中に自然終了）で FAIL→ T3 本体を「実行ファイル名が t3 で親が t3 ではないもの」に絞る（59791cb7）。私の run で demo-serve に端末の `/dev/ptmx` が継承され「開いているファイル」FAIL → `env -i` は fd を清めないので、起動の直前に標準入出力以外の fd を閉じる（9aef851b）。
+3. 曖昧だった文: 「生き残りの確認: …と T3 本体（実行ファイル名が `t3`。プロセス名は `node-MainThread` などになる）の PID を取り」（`.agents/skills/verify-pelway/SKILL.md` の「5. 後片付け」）。実行ファイル名だけでは T3 の子も拾う。「親が t3 ではないもの」と絞った。
+4. 仮定と解釈: T3 の子は 5 分以上動いていても比べないと読んだ（短命の常駐に近い子を網羅する comm の一覧は作れず、親が t3 かどうかで機械に分けられる）。comm の一覧に `t3-acp-mcp-bridge` を足す読み方は選ばなかった。
+5. 足りなかった情報・検証手段: この sandbox のマウント構成の仕様（/dev/sdd の分割マウントと exec ごとの /dev/shm）。改善案: `.agents/skills/verify-pelway/SKILL.md` の前提に「証拠置き場の祖先が自分か root の持ち物でない環境（一部の sandbox）では run と試験は止まる」を足す。
+
+使ったスキル: implement-issue、verify-pelway
