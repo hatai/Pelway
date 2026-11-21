@@ -34,7 +34,10 @@ check reviewer_same_kind_sweep .agents/skills/review-pr/SKILL.md \
 check implementer_ff_branch_tip .agents/skills/implement-issue/SKILL.md \
   'scripts/agent-gh dev git fetch origin <ブランチ>' \
   'scripts/agent-gh dev git merge --ff-only origin/<ブランチ>' \
-  'Kodiak が main をマージして PR ブランチの remote の先端が進んでいることがある'
+  'Kodiak が main をマージして PR ブランチの remote の先端が進んでいることがある' \
+  '修正を始める前、作業ツリーに未コミットの変更が無いうちに、PR ブランチの remote の先端を fetch し、進んでいれば fast-forward で取り込む' \
+  '初回（remote にブランチがまだ無い）はこの段を飛ばす' \
+  'push の前の段で PR ブランチの remote の先端をもう一度 fetch し'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
