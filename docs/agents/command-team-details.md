@@ -105,7 +105,7 @@ hatai の指摘の伝達:
 3. `scripts/conductor-watch-ensure.sh` を実行した
 4. 引き継ぐ状態を読んだ: `agent:working` の Issue、Draft・レビュー待ちの PR、実行中のスレッド、`needs-human` の Issue、指揮役の作業ログ
 5. 代行の作業ログ `docs/worklogs/<日付>-conductor-substitute.md` を作った（判断と改善点を書く）
-6. T3 のスレッドとして動くなら、hatai がホストの端末で、インストールした見張り役の `~/.local/bin/pelway-agent-watch --register <自分のスレッド ID>` を実行した（スレッド ID は `t3 thread list --json` の `threadId` と同じ文字列。worktree の中のスクリプトや `cargo run` は sandbox の中から書き換えられるので使わない。agent-watch が受信箱に新着を書いたときに起こす宛先。登録ファイルは sandbox から書けない `~/.config/pelway-agent-notify/conductor-thread-id`。`docs/dev-environment.md` の「pitchfork について」）
+6. T3 のスレッドとして動くなら、hatai がホストの端末で、インストールした見張り役の `~/.local/bin/pelway-agent-watch --register '<自分のスレッド ID>'` を実行した（スレッド ID は `t3 thread list --json` の `threadId` と同じ文字列。指揮役が伝えた値をそのまま貼らず、hatai がホスト側の T3 の画面か `t3 thread list --json` で確かめ、単一引用符で囲んで渡す。`--register` の文字の検査は、シェルが行を解釈した後にしか働かないため。worktree の中のスクリプトや `cargo run` は sandbox の中から書き換えられるので使わない。agent-watch が受信箱に新着を書いたときに起こす宛先。登録ファイルは sandbox から書けない `~/.config/pelway-agent-notify/conductor-thread-id`。`docs/dev-environment.md` の「pitchfork について」）
 
 ### 終了のチェック（正本の指揮役へ戻す）
 
