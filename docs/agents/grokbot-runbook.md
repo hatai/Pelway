@@ -222,7 +222,7 @@ Assigned: role=implement agent=devin model=swe-2-high effort=<medium|high|max>"
 t3 thread start --provider codex_review --model <skill command-team の「Codex のモデル」で選んだモデル> --worktree main --branch review/<M>-<k> --title "[レビュー] PR #<M> <要約>" <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。"
 ```
 
-T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-accept-edits` にする。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP で立てる。
+T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-accept-edits` にする。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`delegate_task` で委託するときも `runtimeMode: "auto-accept-edits"` を省略せずに渡し、拒否されても `auto`・`full-access` に変えない（省略すると委託者の権限を継承する。full-access の指揮役スレッドからの委託は拒否される）。`auto-accept-edits` で委託できないときは、委託せずに `needs-human` で報告する。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP で立てる。
 
 `codex_review` はネットワークを GitHub だけに絞った Codex（`docs/dev-environment.md` の「レビュー担当の Codex」）。`<k>` はその PR のレビュースレッドの通し番号（1 から）。worktree は必ず `main` から作る（レビュー担当は worktree の `scripts/agent-gh` を使うため、PR やほかのブランチの版を使わない）。
 

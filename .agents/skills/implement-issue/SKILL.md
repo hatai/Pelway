@@ -186,7 +186,7 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 | claude | `claude_review` | `claude-opus-5-5` | `effort: <effort>` |
 | devin | `devin_review` | `swe-2-high` | `mode` のみ受け付ける（省略してよい。`thought_level` は渡せず、effort の引き上げはできない） |
 
-これに `role: "review"`、`runtimeMode: "auto-accept-edits"`、`isolation: "worktree"` を付ける。委託したら返答を終えて完了の通知を待つ（ポーリングしない）。このときの最後の返答は、下の「ターンの終わりの状態の行」の `waiting-review` にする。チェックの完了を待って返答を終えるときは `waiting-checks` にする。高リスクで複数担当にしたときは、全員の結果がそろうまで次に進まない。
+これに `role: "review"`、`runtimeMode: "auto-accept-edits"`、`isolation: "worktree"` を付ける。`runtimeMode` は省略せず、委託が拒否されても `auto`・`full-access` に変えない（省略すると委託者の権限を継承し、full-access のスレッドからの委託では拒否されるため）。`auto-accept-edits` で委託できないときは、委託せずに止まって報告する。委託したら返答を終えて完了の通知を待つ（ポーリングしない）。このときの最後の返答は、下の「ターンの終わりの状態の行」の `waiting-review` にする。チェックの完了を待って返答を終えるときは `waiting-checks` にする。高リスクで複数担当にしたときは、全員の結果がそろうまで次に進まない。
 
 次のラウンドのレビューを委託したら、前ラウンドのレビュースレッド（子タスク）を settle する（`t3_thread_organize` の `action: settle`。runbook 9 の「片付け」と同じ決まりで、前ラウンドが `needs-human` 中・止まっている・迷走中のときは settle しない）。
 
