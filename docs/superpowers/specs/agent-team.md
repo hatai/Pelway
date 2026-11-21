@@ -71,7 +71,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - 指揮役が T3 で立てるスレッドには、必ず「役割・対象の番号・日本語の要約」を含むタイトル（例 `[実装] #101 …`、`[レビュー] PR #132 …`）を立てるときに付ける。タイトルが形式に合わないまま作業を始めさせない。形式と直し方は skill `command-team` の「スレッド名」
 - 実装とレビューのモデル・effort は、pr-size の行数、変更パス、ラベル、修正の回数で振り分ける。しきい値は skill `command-team` に置き、改善ループで調整する。レビューの振り分け（通常・高リスク・抜き取りの条件と effort）は、実装担当がレビュー委託のときに同じ表で適用する
 - 指揮役が T3 のスレッドとして動いているとき、作業をさせるスレッド（実装・調査・レビュー）の作成はネイティブの `t3_thread_launch` で行う（T3 Connect の MCP や CLI のサブプロセスを経由しない）。指揮役が Grok Bot（クラウド）のときは T3 Connect の MCP の同じ操作を使う。実行中のスレッドへの指示送信（`t3_thread_send`）はこの限りではない
-- 終わったスレッドの片付け（settle）: PR を作ったスレッドはその PR をスレッドに紐付け（T3 の PR リンク）、マージで自動的に settle される。PR を持たないスレッド（調査・試験・失敗打ち切り・マージされずに閉じた PR のスレッド）は、指揮役が結果を消費した後に `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドは settle しない（人間が再開しうるため）
+- 終わったスレッドの片付け（settle）: PR を作ったスレッドはその PR をスレッドに紐付け（T3 の PR リンク）、マージで自動的に settle される。それ以外は、指揮役が毎回の巡回で、状態で決めた条件（`docs/agents/grokbot-runbook.md` の「9. 片付け」）に当たるものを `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドは settle しない（人間が再開しうるため）
 - main はルールセットで守る。必須チェックは `mise run verify` と `pr-size` の成功、承認は 1 件必須（Code Owners レビューの必須は外し、`pelway-review` の Approve で満たせる形）、「マージ前にブランチを最新化すること」を必須とする（Kodiak の直列キューと合わせて、チェックが通ったツリーとマージされるツリーを一致させる）。ルールセットの変更前後の値は「マージキュー」の表に転記する
 - エージェントの PR・指揮役が作った PR・hatai 自身が作った PR のいずれも、`pelway-review` の Approve と必須チェックの後、指揮役が `automerge` ラベルを付けて Kodiak がマージする。Kodiak が応答しない等のキューの切り戻しと、必須チェックが失敗したままのマージ（`pr-size-exception`）は、hatai の admin マージだけが行う（`enforce_admins: false` を維持する）
 

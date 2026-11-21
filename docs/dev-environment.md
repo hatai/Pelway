@@ -539,7 +539,7 @@ bwrap が作る名前空間の要点:
 | コンテキスト使用率 | 取得できる。T3 からの `/context` 送信に `72.0k/262.0k tokens (27.5%)` の形（System prompt・Tools・Messages・Free の内訳付き）で応答が返る。`~/.local/share/devin/cli/sessions.db` の `message_nodes.metadata`（`num_tokens_preceding`）からもトークン数の絶対値は読める | 2026-11-14 |
 | 自動圧縮の有無と検知 | 自動圧縮は有効（起動フラグ `enable-devin-cli-cloud-compaction-schedule=true`、設定 `agent.compaction_threshold_tokens` で閾値を調整可）。エージェントの会話内では検知できない（changelog に「Automatic context compaction is no longer surfaced in the scrollback or the ACP conversation view」と明記）。環境側では検知できる: ライフサイクルフック `PreCompact` / `PostCompact` / `PostCompaction`（manual/auto を区別、`PostCompaction` は summary を受け取る）、OTel イベント `compaction`、sessions.db の `summarized_from`、`~/.local/share/devin/cli/logs/` | 2026-11-14 |
 
-### Codex（codex_review、gpt-6-luna）
+### Codex（codex_review。検証時のモデルは gpt-6-luna）
 
 | 項目 | 結果 | 実施日 |
 |---|---|---|
