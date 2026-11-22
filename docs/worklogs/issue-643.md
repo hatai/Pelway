@@ -47,3 +47,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の表と手順 9 の「3 回目のレビュー結果に must-fix が残っていたら…エスカレーションする」に、ラウンド上限の撤廃が正式に決まったときはその記録へのリンクを足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4 追記: semgrep 検出）
+
+対象 head: 72299bf5c09050ce82a96f86ec62495163fa1854
+
+1. 詰まった箇所: `semgrep (code patterns)` が `532c21ea` で失敗した。main の `8da28305`（INFO 以外の検出をジョブ失敗にする）が merge ref に入ってから初めての走査で、前の head は失敗にしない旧スクリプトで走っていたため見えていなかった。検出は `bash.lang.security.ifs-tampering`（WARNING）の 1 件で、場所は `scripts/tests/conductor-watch-shared-worktree.test.sh:56` の `local IFS=,`（round 1 の新規ファイルに初めからあった行）。`threads()` を `printf '%s,'` で連結する形に変えて IFS を触らないようにした。検出の一覧はジョブサマリーにしか出ず API では取れないため、`refs/pull/656/merge` をフェッチして別 worktree に置き、mise の `pypi:semgrep@1.186.0`（CI と同じ版）で同じルールセットを実行して再現した（検出 35 → 34 件、WARNING 以上は 0 件になった）。
+2. 曖昧だった文: 「手元で同じコマンドを実行して確かめる」（`security-scan.sh` のヒント）
+3. 仮定と解釈: 「同じコマンド」は `security-scan.sh` 内の `semgrep scan` 行と同じ引数で、対象ツリーは CI と同じ merge ref と読んだ。sandbox のホームは読み取り専用で `~/.semgrep` に書けないため `XDG_CONFIG_HOME=/tmp/xdg` で設定先を変え、イメージではなく mise に入っている同じ版を使った。
+4. 足りなかった情報・検証手段: ジョブサマリーは API の check-runs/annotations やログには出ないため、検出の規則・場所・重大度は手元の再現でしか取れなかった。
+5. 改善案: `docs/dev-environment.md` の「セキュリティスキャン（security-scan）」に「検出の一覧はジョブサマリーに出る。手元の再現は merge ref の worktree に対して `XDG_CONFIG_HOME` を書ける場所に向けて `mise x pypi:semgrep@<版>` で同じ引数の `semgrep scan` を実行する」と足す。
+
+使ったスキル: implement-issue
