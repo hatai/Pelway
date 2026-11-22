@@ -435,3 +435,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **PR #530 QA: fail**（codex QA・head `f74b848a` 不変）。指摘: `check.sh` から削除した `pull_request_review_comment` 系テストの理由が PR 本文「確かめ方を弱める変更」に未記載 → 記載が必要。補足: workflow コメントの「1 回だけ」と実装の重複許容の食い違い
 - impl `5c599260` へ本文更新のみの指示を send（成功）。更新後に QA 再委託
+
+## provider 切替（Claude 週次制限対応・20:30 JST）
+
+- hatai 指示「GLM または Devin に切り替えて継続」に基づき、失敗した Claude 系スレッドを opencode/glm-5.3 に切替
+- **切替＋起床**: 5c599260（#481 QA 対応）・0995ecd5（#657/#662）・335aabd5（#658/#663）・42181892（#660/#661）
+- **切替のみ（起床なし）**: 462a74e7（#330）— pr-size は hatai 判断待ちのため
+- **権限外で切替不可（hatai の手動切替が必要）**: e4009bd3（#643）・2e87e67b（#602）・eaa7764e（#645）・c9d1a5eb（#642）・9fe3e99d（#644）・1db76f66（watcher）— いずれも full-access で runtime_mode_escalation_denied
