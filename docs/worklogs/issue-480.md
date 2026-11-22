@@ -107,3 +107,15 @@
 5. 改善案: `docs/dev-environment.md` に「`mise WARN missing: rust@<版>` が出て `/usr/bin/rustc` に落ちるときの切り分け」を足す（別 Issue が適切）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 9・main 取り込みの衝突解消）
+
+対象 head: c8487dabdae403c58ebf8e6c44daa587a979bd91
+
+1. 詰まった箇所: main（`840e0b93`）を取り込んだときに 2 ファイルが衝突した。`.agents/skills/implement-issue/SKILL.md` は 4 か所で、止まる条件の表、手順 9 の 1、判定が割れたとき、手順 10。`.agents/skills/review-pr/SKILL.md` は 1 か所で、手順 3。main の追加（`設定の不備:`・`auto-accept-edits` の止まる条件、`checks timeout`・`wrong runtime`、同じ種類の must-fix の全経路、PR 外の所見の `out-of-scope:`）と、この PR の追加（round の止まり方、領域分類、セキュリティの修正側優先、#66 の head の確認）は両立するので、両方を残した。`checks pending` は main の `checks timeout`・`wrong runtime` に揃えた。
+2. 曖昧だった文: 「新しい head で、Codex と pelway-review の再レビューを受けてください。」（開発リードの T3 の指示）
+3. 仮定と解釈: Codex のレビューは `pelway-review` の名義で投稿されるため、「Codex と pelway-review」は Codex の 1 委託で両方を満たすと読んだ。選ばなかった解釈: Codex と別の担当（Claude）の 2 委託。
+4. 足りなかった情報・検証手段: 誰が `pelway-qa` の名義で QA を行うのか（実装スレッド自身か、別のスレッドか）。qa-checklist は「QA がレビュー済みの PR を独立に確かめる」とだけ書いている。
+5. 改善案: `docs/agents/qa-checklist.md` の冒頭に、QA を行う主体（指揮役が立てる QA スレッドで、実装スレッドではない）を 1 文で足す（別 Issue が適切）。
+
+使ったスキル: implement-issue
