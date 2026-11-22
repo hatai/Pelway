@@ -221,8 +221,8 @@ def all_pages(path):  # --paginate --slurp の応答（ページの配列）を 
     return [x for p in data for x in p if isinstance(x, dict)]
 def registered_thread():
     # 登録ファイルの 1 行目（スレッド ID）。無い・空・通常のファイルでない（symlink はたどらず、FIFO で止まらない）ときは ""、ほかの理由で
-    # 読めない（権限が無い・自分の所有でない）ときは None（判定の保留）。symlink をたどらないこと・通常ファイルと所有者の確かめ・1 行目を使うことは
-    # crates/pelway-agent-watch の read_conductor_file・parse_conductor_file と同じ（不正な UTF-8 は置き換えて読む）
+    # 読めない（権限が無い・自分の所有でない）ときは None（判定の保留）。O_NOFOLLOW|O_NONBLOCK で開き fd で種類と所有者を見る・1 行目を trim するのは
+    # crates/pelway-agent-watch の read_conductor_file・parse_conductor_file と同じ。違うのは、通常のファイルでないものを Err でなく不在とし、不正な UTF-8 を置き換えて読むこと
     p = sys.argv[5]
     try:
         fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
