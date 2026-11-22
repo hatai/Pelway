@@ -218,7 +218,7 @@ PR を作るたびに、T3 のスレッドにそのスレッドの PR を全部�
 
 差分が `scripts/agent-gh` を変えるとき、または `.claude/`・`.mcp.json`・`.codex/`・`.devin/`・`.cursor/`・`.cursorrules`・`.windsurf/`・`.windsurfrules`・`.agents/skills/review-pr/`・`.agents/skills/security-review/`・`.agents/skills/pr-watch/`・どのディレクトリの `AGENT.md`・`AGENTS.md`・`AGENTS.local.md`・`AGENTS.override.md`・`CLAUDE.md` を足す・変えるときはレビューを委託しない（後者はレビュー担当のツールの設定や従う手順を、委託の子が読む PR の版で差し替えうるため。`.devin/` は Devin CLI がプロジェクト層として読む config・hooks・rules・skills、`.windsurf/`・`.windsurfrules`・`AGENT.md`・`AGENTS.local.md`・`.cursor/`・`.cursorrules` は互換で読まれる経路、`.agents/skills/pr-watch/` は `review-pr` が待ち方の手順として従わせるスキル）。指揮役が main から立てるレビュースレッドに回るのを待ち、最後の返答を下の「ターンの終わりの状態の行」の `state: waiting-conductor` にして終える（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
 
-PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。通過は、委託の直前に同梱の helper `.agents/skills/implement-issue/required-checks <PR 番号>` を実行し、その終了コードで確かめる（標準出力は 2 つのチェックの判定 `<名前>: <pass|fail|pending>`。集計の規則と pr-size の例外の扱いは skill `review-pr` の手順 3 と同じ）。
+PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。通過は、委託の直前に同梱の helper `.agents/skills/implement-issue/required-checks <PR 番号>` を実行し、その終了コードで確かめる（標準出力は 2 つのチェックの判定 `<名前>: <pass|fail|pending>`。同じ名前の行の集計と pr-size の例外の扱いは skill `review-pr` の手順 2 と同じ。`bucket` の `skipping` を pass、`cancel` を fail に数えることと、閉じる Issue をリポジトリと番号の組で照会することは helper だけの規則で、helper の冒頭のコメントに書いてある）。
 
 - 0（通過）: `delegate_task` を呼ぶ
 - 1（失敗）: 手順 6 に戻って直す。pr-size の超過は「止まる条件」の表のとおり止まる

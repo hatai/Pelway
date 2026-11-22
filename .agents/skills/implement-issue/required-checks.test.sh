@@ -47,8 +47,11 @@ case "$all" in
     exit 0 ;;
   "pr view 42 "*) emit "$fix/pr-view.json"; exit 0 ;;
   "issue view "*)
+    # -R <owner>/<name> が無い呼び出しは失敗させる（番号だけで照会しないことの確認）。
     n=$(awk '{print $3}' <<<"$all")
-    emit "$fix/issue-$n.json"; exit 0 ;;
+    repo=$(sed -nE 's/.* -R ([^ ]+).*/\1/p' <<<"$all")
+    [ -n "$repo" ] || { echo "mock: issue view without -R" >&2; exit 2; }
+    emit "$fix/issue-${repo//\//-}-$n.json"; exit 0 ;;
 esac
 echo "mock: unhandled: $all" >&2; exit 2
 MOCK
@@ -72,14 +75,18 @@ checks() { # checks <fix> <name>=<bucket>... -> checks.json を書く
 }
 
 # pr-size-exception の目印に関わるフィクスチャ。
-pr_view() { # pr_view <fix> <labels（カンマ区切り、空可）>
-  jq -n --arg l "$2" '{labels: ($l | split(",") | map(select(length > 0) | {name: .})),
-    closingIssuesReferences: [{number: 645}]}' >"$1/pr-view.json"
+pr_view() { # pr_view <fix> <labels（カンマ区切り、空可）> [閉じる Issue のリポジトリ（既定 hatai/Pelway）]
+  local repo=${3:-hatai/Pelway}
+  jq -n --arg l "$2" --arg o "${repo%%/*}" --arg r "${repo#*/}" \
+    '{labels: ($l | split(",") | map(select(length > 0) | {name: .})),
+      closingIssuesReferences: [{number: 645, repository: {name: $r, owner: {login: $o}}}]}' \
+    >"$1/pr-view.json"
 }
-issue_comment() { # issue_comment <fix> <author> <body>
+issue_comment() { # issue_comment <fix> <author> <body> [Issue のリポジトリ（既定 hatai/Pelway）]
+  local repo=${4:-hatai/Pelway}
   jq -n --arg a "$2" --arg b "$3" \
     '{comments: [{author: {login: "pelway-dev"}, body: "着手"}, {author: {login: $a}, body: $b}]}' \
-    >"$1/issue-645.json"
+    >"$1/issue-${repo//\//-}-645.json"
 }
 MARK='<!-- pr-size-exception -->
 pr-size の超過を認める。'
@@ -239,7 +246,24 @@ issue_comment "$fix" hatai "> <!-- pr-size-exception -->"
 run "$fix" 42
 expect_rc exception_not_line_start 1
 
+# 閉じる Issue が別リポジトリにあるとき、同じ番号の hatai/Pelway の Issue の目印は使わない。
+new_fixture
+checks "$fix" "mise run verify=pass" "pr-size=fail"
+pr_view "$fix" "pr-size-exception" "someone/other"
+issue_comment "$fix" hatai "$MARK" hatai/Pelway
+issue_comment "$fix" someone "pr-size の超過を認める。" someone/other
+run "$fix" 42
+expect_rc exception_other_repo 1
+expect_has exception_other_repo "pr-size: fail"
+
 # ---- 取得の失敗・引数の誤り → 3 -----------------------------------------------
+
+# 標準出力に JSON の値が複数続くとき（一覧が分かれて届いたとき）は判定できない。
+new_fixture
+checks "$fix" "mise run verify=pass" "pr-size=pass"
+printf '[{"name":"mise run verify","bucket":"pass"},{"name":"pr-size","bucket":"pass"}]\n[{"name":"mise run verify","bucket":"fail"},{"name":"pr-size","bucket":"fail"}]\n' >"$fix/checks.json"
+run "$fix" 42
+expect_rc checks_multiple_json 3
 new_fixture
 run "$fix" 42
 expect_rc checks_fetch_error 3

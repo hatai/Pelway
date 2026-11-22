@@ -7,12 +7,14 @@
 #           pr-size の例外を認めたときは `pr-size: fail（pr-size-exception）`。
 # 終了コード: 0 通過 · 1 失敗 · 2 待ち · 3 判定できない（取得の失敗・引数の誤り）
 #
-# 集計の規則は skill review-pr の手順 3 と同じ。`gh pr checks --json name,bucket` の
-# 一覧から名前が一致する行だけを使い、同じ名前の行がすべて pass なら pass、どれかが
-# fail なら fail、どれかが pending か行が無ければ pending。bucket の skipping は pass、
-# cancel は fail に数える。pr-size の fail は、PR に pr-size-exception ラベルがあり、
-# かつ PR が閉じる Issue に作成者 hatai で行頭が `<!-- pr-size-exception -->` の
-# コメントがあるときだけ pass に数える。
+# skill review-pr の手順 2 と同じ規則: `gh pr checks --json name,bucket` の一覧から
+# 名前が一致する行だけを使い、同じ名前の行がすべて pass なら pass、どれかが fail なら
+# fail、どれかが pending か行が無ければ pending。pr-size の fail は、PR に
+# pr-size-exception ラベルがあり、かつ PR が閉じる Issue に作成者 hatai で行頭が
+# `<!-- pr-size-exception -->` のコメントがあるときだけ pass に数える。
+# この helper だけの規則（review-pr は扱わない）: bucket の skipping は pass、cancel は
+# fail に数え、それ以外の未知の bucket は判定できない（3）とする。閉じる Issue は
+# リポジトリと番号の組で照会する。
 #
 # GitHub への呼び出しはすべて scripts/agent-gh dev 経由（REQUIRED_CHECKS_GH で差し替え可能）。
 set -uo pipefail
@@ -35,7 +37,9 @@ err=$(mktemp) || die "一時ファイルが作れない"
 list=$($GH pr checks "$pr" --json name,bucket 2>"$err")
 gh_rc=$?
 msg=$(cat "$err"); rm -f "$err"
-if ! jq -e 'type == "array"' >/dev/null 2>&1 <<<"$list"; then
+# 標準出力がちょうど 1 つの JSON の配列であることを確かめる（値が複数続くと、jq が
+# 配列ごとに判定を出して集計が崩れるため）。
+if ! jq -se 'length == 1 and (.[0] | type == "array")' >/dev/null 2>&1 <<<"$list"; then
   # チェックが 1 つも報告されていない head では一覧が返らない。これは待ちに数える。
   if [ "$gh_rc" -ne 0 ] && grep -q 'no checks reported' <<<"$msg"; then
     list='[]'
@@ -59,25 +63,32 @@ verdict() { # verdict <名前> -> pass|fail|pending|unknown
 
 # pr-size の例外: ラベルと、PR が閉じる Issue の hatai の目印コメントの両方があるか。
 size_exception() {
-  local meta issues n has
+  local meta issues repo n has
   meta=$($GH pr view "$pr" --json labels,closingIssuesReferences 2>/dev/null) || meta=""
   jq -e 'type == "object"' >/dev/null 2>&1 <<<"$meta" || die "PR $pr のラベルが取れない"
   jq -e '[.labels[]?.name] | index("pr-size-exception")' >/dev/null <<<"$meta" || return 1
-  issues=$(jq -r '.closingIssuesReferences[]?.number' <<<"$meta")
-  for n in $issues; do
-    has=$($GH issue view "$n" --json comments \
+  issues=$(jq -r '.closingIssuesReferences[]?
+    | "\(.repository.owner.login // "")/\(.repository.name // "") \(.number)"' <<<"$meta") \
+    || die "PR $pr の閉じる Issue が読めない"
+  while read -r repo n; do
+    [ -n "$repo" ] || continue
+    [[ "$repo" =~ ^[^/]+/[^/]+$ ]] && [[ "$n" =~ ^[0-9]+$ ]] || die "PR $pr の閉じる Issue が読めない: $repo $n"
+    has=$($GH issue view "$n" -R "$repo" --json comments \
       --jq "[.comments[] | select(.author.login == \"hatai\" and (.body | startswith(\"$MARK\")))] | length" \
-      2>/dev/null) || die "Issue $n のコメントが取れない"
-    [[ "$has" =~ ^[0-9]+$ ]] || die "Issue $n のコメントが読めない"
+      2>/dev/null) || die "Issue $repo#$n のコメントが取れない"
+    [[ "$has" =~ ^[0-9]+$ ]] || die "Issue $repo#$n のコメントが読めない"
     [ "$has" -gt 0 ] && return 0
-  done
+  done <<<"$issues"
   return 1
 }
 
 rc=0
 for name in "${NAMES[@]}"; do
   v=$(verdict "$name") || die "PR $pr のチェックの一覧が読めない"
-  [ "$v" = unknown ] && die "$name に未知の bucket がある"
+  case "$v" in
+    pass | fail | pending) ;;
+    *) die "$name の判定が想定外: ${v//$'\n'/ }" ;;
+  esac
   shown=$v
   if [ "$name" = pr-size ] && [ "$v" = fail ] && size_exception; then
     v=pass
