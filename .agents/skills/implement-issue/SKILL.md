@@ -31,14 +31,14 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | Issue が依存するリポジトリ外の成果物（関連情報の URL・抜粋）に到達できない | 到達できなかった成果物の名前と、試した手順（URL へのアクセス結果、抜粋に欠けている部分） |
 | Issue の未決事項に挙がっておらず、避けて進めることもできず、受け入れ条件の成否に関わる判断が必要 | 必要な判断の内容と、避けられない理由。判断を仰ぐ相手（起票者か人間） |
 | Issue の未決事項に決定権者の指定（例: 「hatai が決める」）があり、その決定待ちの部分が避けて進められない | 決定を仰ぐ相手と、決定待ちの未決事項の内容。実装者の判断で代替案を選んで進めず、決定が記録されるのを待つ |
-| `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
+| `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）。相談のために push したとき（手順 6）は、push した head の SHA と PR の URL。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 | sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
 | 委託したレビューが `failed` で、`error:` が `設定の不備:` で始まる（レビュー担当の環境の確認で外したツールが残っている。skill `review-pr` の「決まり」）。再委託しない | `error:` の行と、委託した担当 |
 | レビューの委託が `runtimeMode: "auto-accept-edits"` で受け付けられず、子タスクが作られなかった。`auto`・`full-access` に変えて委託し直さない | 委託の指定（`target`・`runtimeMode`）と、返ったエラー文 |
 | 3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）、`[文書のずれ]` の nit だけを直す round を通算 2 回終えた後に、また印の nit が残った（通算 3 回目には入らない）、委託が 2 回連続で `failed`（`checks timeout` と `wrong runtime` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort） |
 
-止まり方（止まった時点で、どの手順の途中でも手順 5 の形で実装者メモを書き、Issue のコメントに続けて貼る。push しないので `docs/worklogs/` には書かなくてよい）:
+止まり方（止まった時点で、どの手順の途中でも手順 5 の形で実装者メモを書き、Issue のコメントに続けて貼る。メモを push しないので `docs/worklogs/` には書かなくてよい）:
 
 ```bash
 scripts/agent-gh dev issue comment <N> --body-file - <<'EOF'
@@ -166,7 +166,8 @@ scripts/agent-gh dev git push origin HEAD
 - `mise run verify` の出力は 1 万行を超え、手元で約 2〜3 分かかる（ビルドのキャッシュが冷えているときや他のビルドと競合するときは 20 分を超える）。コマンドの時間制限を 10 分（600 秒）にするか、バックグラウンドで実行して完了の通知を待つ。出力はファイルに書き出し、全部は読まない。読むのは終了コード、`grep -nE 'FAIL|ERROR' <scratchpad>/verify.log` の行、最後の要約の行（`tail -n 3 <scratchpad>/verify.log`。通れば `Finished in <秒>s`）だけにする。
 - `mise run verify` が失敗したらコミットしない。直してからやり直す。失敗が自分の変更と無関係に見えるとき（実行ごとに失敗箇所が変わる・ツールチェーンの再インストールを伴うなど）は、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 2（再現と最小化）で切り分ける。変更を退避した同じツリーで再現する失敗は環境起因として、verify の内訳と再現確認を PR 本文の「確認方法/検証」に書いて先へ進めてよい。退避で解消する失敗は自分の変更によるもので、直す。
 - 差分がミューテーションテスト対象の crate（`.cargo/mutants.toml` の examine_globs）のロジックに触れるときは、`mise run mutants:diff` も回し、結果（生き残りと対応）を実装者メモに書く。生き残りの分析は輸入スキル `mutation-testing`（下の「輸入スキル」の節）。
-- `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたら push せずに止まる。
+- `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたら止まる。push は原則しない（例外は次の項の相談のための push だけ）。
+- 上限超過時でも、指揮役・人間への相談（`<!-- pr-size-exception -->` の判断材料や縮小指示の対象）に必要なら push してよい。相談の対象には PR の head の署名付きコミットと `pr-size` のチェックの結果が要り、例外のラベルは PR に付くため、PR がまだ無ければ手順 7 で Draft PR を作る。push した後も先へ進まず、「止まる条件」の表の pr-size の行のとおり止まる（Issue のコメントに push した head の SHA と PR の URL を書き、`needs-human` を付け、状態の行は `stopped`）。手順 8 のレビューの委託はしない。例外の判断が着いた（手順 8 の委託の条件）ら、その head で手順 8 から再開する。縮小の指示が来たら、手順 9 の「修正依頼」として同じブランチで直す。
 - 積み上げ PR（分割計画で親 PR のブランチに積む PR。GitHub 上の base が main ではない PR）では `bash scripts/pr-size.sh --base <親ブランチ>` で測る。`mise run pr-size` は base=origin/main が既定のため、そのまま使うと親 PR の差分まで数えてしまい、上限超過で誤って止まる・例外扱いになる。
 
 次に、実装コミットを push した後の PR の head の SHA を確かめ（push 後は `scripts/agent-gh-resign` による署名付け替えで SHA が変わるため、必ず push 後の値を取る。2 round 目以降は `scripts/agent-gh dev pr view <PR 番号> --json headRefOid --jq .headRefOid`。初回は Draft PR の作成が手順 7 のため PR 番号がまだ無く、手順 7 の後に行うか、push 後の `scripts/agent-gh dev git rev-parse HEAD` で確かめる（`agent-gh-resign` が push の成功後にローカル ref を署名付きコミットに付け替えるため、remote の `headRefOid` と同じ値になる））、それを手順 5 のメモの「対象 head」に記入して、メモだけを独立したコミットにして push する:
@@ -217,7 +218,14 @@ PR を作るたびに、T3 のスレッドにそのスレッドの PR を全部�
 
 差分が `scripts/agent-gh` を変えるとき、または `.claude/`・`.mcp.json`・`.codex/`・`.devin/`・`.cursor/`・`.cursorrules`・`.windsurf/`・`.windsurfrules`・`.agents/skills/review-pr/`・`.agents/skills/security-review/`・`.agents/skills/pr-watch/`・どのディレクトリの `AGENT.md`・`AGENTS.md`・`AGENTS.local.md`・`AGENTS.override.md`・`CLAUDE.md` を足す・変えるときはレビューを委託しない（後者はレビュー担当のツールの設定や従う手順を、委託の子が読む PR の版で差し替えうるため。`.devin/` は Devin CLI がプロジェクト層として読む config・hooks・rules・skills、`.windsurf/`・`.windsurfrules`・`AGENT.md`・`AGENTS.local.md`・`.cursor/`・`.cursorrules` は互換で読まれる経路、`.agents/skills/pr-watch/` は `review-pr` が待ち方の手順として従わせるスキル）。指揮役が main から立てるレビュースレッドに回るのを待ち、最後の返答を下の「ターンの終わりの状態の行」の `state: waiting-conductor` にして終える（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
 
-PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。チェックがまだ動いていれば、完了を待ってから委託する（待ち方は skill `pr-watch` の「待ち方」に従う。必須チェックの通過は `pr-digest` の `required` 行で確かめる。レビュー担当もチェックが終わるまで待ってからレビューする。委託した子が `error: checks timeout` を報告したときも、同じラウンドとして数えずに完了を待って再委託する）。
+PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。対象 head で必須チェック（`mise run verify`・`pr-size`）が fail、未完了、または pr-size の例外判断が未着のときは委託しない（レビュー担当は fail の head に投稿せずに返すため、委託が空振りになる）。それぞれ次のとおり扱う:
+
+- `mise run verify` が fail: 手順 6 で直す
+- 未完了: 下の待ち方で完了を待つ
+- `pr-size` が fail で例外判断が未着: 委託せずに手順 6 の上限超過の扱いで止まる。例外判断が着いたとは、PR に `pr-size-exception` ラベルがあり、かつ PR が閉じる Issue に、行頭が `<!-- pr-size-exception -->` で始まり作成者（`author.login`）が `hatai` のコメントがあること（両方。skill `review-pr` の手順 2 と同じ定義）
+- `pr-size` が fail で例外判断が着いている（`mise run verify` は pass）: 委託してよい
+
+チェックがまだ動いていれば、完了を待ってから委託する（待ち方は skill `pr-watch` の「待ち方」に従う。必須チェックの通過は `pr-digest` の `required` 行で確かめる。レビュー担当もチェックが終わるまで待ってからレビューする。委託した子が `error: checks timeout` を報告したときも、同じラウンドとして数えずに完了を待って再委託する）。
 
 担当と effort は skill `command-team` の「レビュー担当と effort」の表で決める（通常は PR 番号の偶奇、高リスクは使える担当全て、抜き取りは PR 番号を 4 で割った余りが 0 のとき Claude を追加。自分が Devin CLI で実装した PR には Devin CLI を付けない）。差分が `unsafe` を足している、`.github/workflows/`・`scripts/agent-gh`・`AGENTS.md`・`.agents/skills/`・`docs/agents/` のどれかが変わっている、認証・認可・トークン・鍵・暗号・sandbox・egress・gateway・テナント分離・監査に触れている、のどれかに当たるときは Assigned 行に `security=yes` を付ける。
 
@@ -389,9 +397,9 @@ state: done
    |---|---|
    | PR が無い | 手順 2 で Issue の受け入れ条件と対象外を読み直し、ブランチのコミットと作業ツリーで手順 4〜7 のどこまで済んだかを確かめて、次の手順を続ける。`next:` は、それが指す手順がこの確認の結果と一致するときだけ使う |
    | 必須チェックが動いている | `watch_pull_request` を仕掛けて `waiting-checks` で終える |
-   | 必須チェックが失敗している | 手順 6 で直す |
+   | 必須チェックが失敗している（例外判断が着いた pr-size の失敗を除く） | 手順 6 で直す（pr-size の失敗で例外判断が未着なら、手順 6 の上限超過の扱いで止まる） |
    | `mergeable` が `CONFLICTING` | 手順 9 の「修正依頼」 |
-   | 必須チェックが通り、現在の head に有効なレビューが無い | 手順 8（委託中の子が終わっていれば、その結果を手順 9 で扱う） |
+   | 必須チェックが通り（例外判断が着いた pr-size の失敗を含む）、現在の head に有効なレビューが無い | 手順 8（委託中の子が終わっていれば、その結果を手順 9 で扱う） |
    | 最新のレビューが Request changes | 手順 9 の「Request changes のとき」 |
    | 現在の head に有効な Approve があり、まだ Draft | 手順 9 の「Approve のとき」 |
    | 現在の head に有効な Approve があり、Draft でない | 手順 10 の終わりの報告を出し直す |
@@ -448,4 +456,5 @@ state: done
 | 実装者メモに「特になし」や一般論を書く | 迷った文を「」で引用し、置いた仮定と選んだ解釈を書く |
 | Issue コメントに記録された決定を実装側の解釈で差し替える | 決定・判断は書かれたとおりに扱う。できなければ「止まる条件」に従って判断を仰ぐ |
 | `pr-size-exception` ラベルを付ける、または `<!-- pr-size-exception -->` で始まるコメントを書く | 付けない・書かない。pr-size の超過を認めるのは指揮役だけ。超えたら止まる |
+| 必須チェックが fail・未完了の head、または例外判断が未着の pr-size fail の head にレビューを委託する | 委託しない。直す・待つ・止まるのどれかにする（手順 8） |
 | pr-size を合わせるためにテストや説明を削る | 重複の除去で収まらなければ止まり、分割案と実装者メモを Issue に書く |
