@@ -497,3 +497,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **指摘**: pelway-qa の正式記録は `f74b848a` 宛だが、実際のマージ head は kodiak の main 取り込み `d0cb27da` — 「QA pass が現 head と同じ SHA」という条件からの形式的ずれ。差分内容は同一で実害なしとの QA 判定
 - 同じ形は #567（f72b4c59→8d9f2efb）・#652（e87e25ff→27485b92）にもある（#497 は QA が新 head で再実測していたため適合）
 - kodiak merge commit を「現 head ではない」とみなして再 QA を要とするかは運用判断 — hatai に報告
+
+## 暫定運用の終了（11-23 03:00 JST・hatai 事前指示）
+
+- **暫定運用を終了し通常運用に復帰**: Claude Code への実装割り当ては土日限定に戻す・同時実行上限は runbook 正本（実装 GLM 3・Devin 6・レビュー codex/devin 目安 2・claude 目安 1）に戻す
+- 現状: 稼働中の claudeAgent 実装スレッドはなし（GLM/Devin に切替済み）のため、停止操作は不要。新規割り当てから通常ルールを適用
+- patrol-state の `ops_change_20261120` に reverted を追記・`ops_current` を通常ルールで記録
