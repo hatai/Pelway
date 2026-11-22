@@ -97,3 +97,15 @@
 5. 改善案: `scripts/agent-gh-resign` の「2.」で、範囲の下限に push 前のリモートの先頭（`git push` の前の `refs/remotes/<remote>/<branch>`）も加える（push 前から remote にある署名なしのマージを範囲に入れない）。
 
 使ったスキル: `implement-issue`
+
+## 実装者メモ（round 9）
+
+対象 head: 72e5fd81d1ad6a4cf65f00bea8c3bddc91afa1aa
+
+1. 詰まった箇所: `scripts/tests/conductor-watch-decision.test.sh` 場面 16 の「指揮役がいれば外し直さず、読みもしない」が、codex round 8 の must-fix 2（指揮役がいても前の付与の完了は events で照合する）とぶつかった。読むことを許し、書かないことだけを確かめる形に替えた。追加 800 行の残りが 18 行しかなく、3 場面の追加と同じだけ既存の確認の対を `|` でまとめた。`mise run verify` の 1 回目が `pelway-agent-watch` の `once.rs:859`（FIFO・symlink の 3 件）で落ち、単独の再実行と 2 回目の verify は通った（触っていない crate の時間依存の揺れ）。
+2. 曖昧だった文: 「指揮役の有無で制限するのは GitHub への書き込みとし、履歴から前の付与の完了を確認する処理は続けてください」（PR #610 の codex round 8 の must-fix 2）。同じ `labeled_at` の途中の記録でも、指揮役がいる周に events を読むかが書かれていない。
+3. 仮定と解釈: 途中の記録（`commented`・`adding`・`added`）がある両方のラベルの Issue は、指揮役の有無によらず events を読み、`escalate` を呼ぶのは指揮役がいない周だけと解釈した（読む量は記録のある Issue に限られる）。最初の events に一覧の後の `needs-human` の付与かクローズが出ていれば `overdue` を出さず通知済みにもしないが、格上げの判定は `escalate` の書く直前の読み直しに任せる。
+4. 足りなかった情報・検証手段: Issue 本体と events のどちらが先に反映されるかは GitHub の文書に無く、両方の向きの遅れをモックの差し込みで確かめただけ。
+5. 改善案: `docs/agents/grokbot-runbook.md` の格上げの項は 1 段落が長く、段・照合・指揮役がいる周の扱いが同じ段落に混ざっている。#603 で runbook を直すときに、段ごとの小見出しに分ける。
+
+使ったスキル: `implement-issue`
