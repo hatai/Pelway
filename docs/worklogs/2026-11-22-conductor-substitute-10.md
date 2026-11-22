@@ -385,3 +385,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **PR #464 MERGED**（kodiak・Issue #457）— 指揮下 4 件目
 - **PR #567 全条件充足 → Ready+automerge**: [QA pass@f72b4c59](https://github.com/hatai/Pelway/pull/567#issuecomment-7073691294)（条件 3 はチーム決定で「未検証」明記扱い・文書 2 か所に記述確認）・APPROVED・checks pass。`Refs #306` のため Issue は閉じない — QA 実測まで open のまま
+
+## 巡回記録（patrol 58・18:40 JST・受信箱 wake）
+
+- **新 draft PR 3 件**: #661（#660 fnox shim 回避手順）・#662（#657 委託ガード明文化）・#663（#658 pr-size 超過時の相談 push＋必須 fail head 委託抑止）
+- head 更新: #610→`5b7fdaca`・#653-656 も各 impl の push で更新・#567→`8d9f2efb`（kodiak 更新・キュー処理中）・#600→`54304936`（同）
