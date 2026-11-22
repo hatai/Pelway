@@ -390,3 +390,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **新 draft PR 3 件**: #661（#660 fnox shim 回避手順）・#662（#657 委託ガード明文化）・#663（#658 pr-size 超過時の相談 push＋必須 fail head 委託抑止）
 - head 更新: #610→`5b7fdaca`・#653-656 も各 impl の push で更新・#567→`8d9f2efb`（kodiak 更新・キュー処理中）・#600→`54304936`（同）
+
+## 巡回記録（patrol 59・18:55 JST・受信箱 wake）
+
+- スレッド遷移のみ・実害なし
