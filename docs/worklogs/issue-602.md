@@ -121,3 +121,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の pr-size の行に「上限まで 20 行を切ったら、次の round のメモの行数を先に引いて余りを見積もる」を足す。
 
 使ったスキル: `implement-issue`
+
+## 実装者メモ（round 11）
+
+対象 head: 04a8380bbd8aa88edae4dbc6394d77557a50ddf8
+
+1. 詰まった箇所: codex round 10 の印の nit（記録項目の説明に `reason`）を足す分の行を、試験の補助（`once`・`check`）と確認の対のまとめで空けた（+787/-36）。
+2. 曖昧だった文: 「PR 本文の `escalation.json` の項目一覧もそろえ」（codex round 10）。本文のどの一覧かは文脈からの判断。
+3. 仮定と解釈: 印の nit はコード側 2 か所（`conductor-watch.sh`・runbook）と PR 本文（項目一覧・メモの範囲）と解釈した。
+4. 足りなかった情報・検証手段: 特になし。
+5. 改善案: 特になし。
+
+使ったスキル: `implement-issue`
