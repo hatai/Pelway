@@ -304,3 +304,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **PR #497 の状態ズレ修正**: 実測で hatai APPROVED@c18b82eb（2026-11-21T14:41Z）・必須チェック全 pass を確認。`CHANGES_REQUESTED` 表示は pelway-review の旧 head `05c1cbd2` 宛 verdict（hatai DISMISS 済）が原因 — 現 head で codex_review 再レビュー委託を起動
 - 待ち 4 件（#306/#567・#463・#464・#600）はチーム議論の結論まで据え置き
+
+## 巡回記録（patrol 42・15:00 JST・リードのチーム決定）
+
+- **#567**: main 取り込みで衝突解消（dev-environment.md 3 ブロック — #306 実測記述と main の hardening 記述を併記）→ 新 head `b1235f63`・MERGEABLE・push 済み（merge commit は再署名対象外）。[再レビュー起動](gpt-6.1-terra)。(B) 継続: `Refs #306`・受け入れ条件3「未検証」・#306 は QA 実測まで open。route-C は本人名義投稿のみカウント
+- **#600**: 失敗原因を作業ログで確認 — Codex **投稿失敗 3 連続**（審査自体の失敗ではない）。gpt-6.2-sol・effort medium で1回取り直し（Devin 代替不可）。旧 head 286ada9 approve は現 head 3b5ead4 に無効
+- **#463**: #581 マージ後に衝突解消 — 据え置き。**#464/#600 の QA**: route D・pelway-qa 権限は hatai 判断・代名投稿不可・draft のまま
