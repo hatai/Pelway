@@ -18,7 +18,7 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 | Issue・PR・レビュー・CI の結果を読む | GitHub |
 | スレッドのモデル・effort を変える | T3 Connect の MCP（`t3_thread_configure`） |
 | 終わったスレッドを settle する | T3 のスレッドの操作（`t3_thread_organize` の `action: settle`。Grok Bot は MCP 経由）。PR をスレッドに紐付けたものはマージで自動 settle |
-| `pelway-review` が Approve し必須チェックが通った PR に `automerge` ラベルを付けて Kodiak のキューに入れ、マージを確認する | `scripts/agent-gh dev pr edit <M> --add-label automerge`（条件は skill `command-team` の「マージ」）。マージの実行は Kodiak（GitHub App）が行い、指揮役がマージコマンドを叩くことはない。キューの切り戻しは hatai の admin マージだけが行う |
+| `pelway-review` が Approve し、必須チェックが通り、現在の head と同じ SHA の QA の合格コメント（SHA と run を書いたもの。`docs/agents/qa-checklist.md`）がある PR に `automerge` ラベルを付けて Kodiak のキューに入れ、マージを確認する | `scripts/agent-gh dev pr edit <M> --add-label automerge`（条件は skill `command-team` の「マージ」）。マージの実行は Kodiak（GitHub App）が行い、指揮役がマージコマンドを叩くことはない。キューの切り戻しは hatai の admin マージだけが行う |
 
 しないこと: PR の Approve・レビュー・クローズ、エージェントのブランチへの push（`pr update-branch` による main の取り込みを除く）、`.github/workflows/` の変更（`actions.lock` の再生成は例外。正本は `docs/superpowers/specs/agent-team.md` の「制約」）、スレッドの取り消し。
 
@@ -77,6 +77,18 @@ sandbox に止められた操作（書き込み・実行・ネットワークな
 - `ready-for-agent` は入場の条件であり、着手後・Done の後も外さない。ラベルが外された場合: 着手前ならボードからも外し、その Issue の補助記録も削除する。人間が着手後に外したら不整合として巡回が検出し、`needs-human` で確認する
 - ラベルなしカードの由来はタイムラインで区別する: `ready-for-agent` の取り外しイベントがあるものは削除のルールを適用し、無いものは最初からラベルなし（サブ Issue の自動追加など）として保持する。サブ Issue は `ready-for-agent` が無い限り、Todo へ動かされても処理対象にならない
 - ラベルを動かした主体が、その手順の中でステータスも導出規則どおりに更新する。片方だけ成功した場合は巡回の整合チェックが検出して是正する
+
+### マージの条件
+
+PR に `automerge` ラベルを付けてよいのは、次の 5 つがすべてそろったときだけ（確かめ方の正本は skill `command-team` の「マージ」）。
+
+1. 現在の head に有効な Approve がある（`pelway-review`）
+2. その Approve のレビューに `[文書のずれ]` の nit が残っていない
+3. 必須チェック（`mise run verify`・`pr-size`）が通っている
+4. Approve の後の push が main の取り込みだけである
+5. 現在の head と同じ SHA の QA の合格コメントがある。合格コメントは `pelway-qa` 名義で、確かめた SHA と run を書いたもの（形と数え方は `docs/agents/qa-checklist.md`）。QA が同じ SHA で確かめるまでは合格として扱わない。head が動いたら前の合格は数えない
+
+1〜4 がそろって 5 だけが無い PR は QA 待ちである。`automerge` を付けず、QA に確認を頼む。巡回スクリプトはこの PR にも `waiting_on=merge` を出すが、実際の待ち先は QA として扱う。
 
 ### マージキュー待ちの PR
 
@@ -145,12 +157,13 @@ conductor-watch は検知（`watch.log` へのイベント出力）だけを行�
 | `state: done` | マージの判断（skill `command-team` の「マージ」） |
 | `state: stopped` | 判断待ち（下の報告の「判断待ち」の節に出す。「7. エスカレーションと停滞」の `stopped:` の扱い） |
 | `state: waiting-review`・`state: waiting-checks` | 待っている先を自分で確かめる（レビューの子タスクの状態、`pr-digest` の `required` 行）。終わっていれば「続きをやり直す」を送る。まだ動いていれば待つ |
+| `state: waiting-conductor` | 現在の head に有効なレビューが無ければ、main 由来の worktree からレビュースレッドを立てる。結果が出たら実装スレッドに「続きをやり直す」を送る |
 | `state: working`、または状態の行が無い | その巡回のうちに「続きをやり直す」を送る |
 
 指示待ちのスレッドは、次の 3 つを全部満たすものとする: ターンが終わっていて動いている作業が無い（実行中でなく、待っている先も終わっている）／紐づいた PR か Issue がまだ開いている／マージまで進んでいない。経過時間のしきい値は置かず、見つけたらその巡回のうちに次の指示を出す。
 
 - 指示は定型の 3 つ（「続きをやり直す」「レビューの再委託」「衝突の解消」）から選ぶ。実装スレッドの受け取り方は skill `implement-issue` の「巡回から定型の指示を受けたとき」
-- 現在の head に有効な Approve があり、そのレビューに `[文書のずれ]` の nit が残っておらず、必須チェックが緑で、Draft でない PR には、指揮役が `automerge` を付けて Kodiak のマージに渡す（条件の正本は skill `command-team` の「マージ」）
+- 現在の head に有効な Approve があり、そのレビューに `[文書のずれ]` の nit が残っておらず、必須チェックが緑で、現在の head と同じ SHA の QA の合格コメントがあり、Draft でない PR には、指揮役が `automerge` を付けて Kodiak のマージに渡す（条件の正本は skill `command-team` の「マージ」）
 - `needs-human` の付いた Issue・PR と、複数のレビュー担当の判定が割れた PR には、指示も `automerge` も出さず、判断待ちに回す
 
 ### 巡回の報告の形
@@ -180,7 +193,7 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 |---|---|---|
 | 実装・調査（opencode `zai-coding-plan/glm-5.3`） | 3 | open な Issue の `agent:working` のうち `agent:devin` が無く、作業状態の印が停止中・再開処理中・再開待ちでないものの数と、実行中の調査スレッド（Issue を持たない入口B のものを含む）の数の合計 |
 | 実装（Devin CLI `swe-2-high`） | 6 | open な Issue の `agent:working` のうち `agent:devin` があり、作業状態の印が停止中・再開処理中・再開待ちでないものの数 |
-| レビュー（Codex `codex_review`） | 目安 2 | 通常の PR のレビューは実装担当が `delegate_task` で委託するため、この表では数えない。指揮役が立てたレビュースレッド（指揮役自身の PR・外部投入）だけを数える |
+| レビュー（Codex `codex_review`） | 目安 2 | 通常の PR のレビューは実装担当が `delegate_task` で委託するため、この表では数えない。指揮役が立てたレビュースレッド（指揮役自身の PR・外部投入）だけを数える。Codex・T3・`~/.codex-review` を更新したら、`docs/dev-environment.md` の「専用 home での確認」が済むまでは使わない |
 | レビュー（Devin CLI） | 目安 2 | 同上。`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまでは使わない |
 | レビュー（Claude `claude_review`） | 目安 1 | 同上。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは使わない |
 
@@ -196,7 +209,7 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 
 ボードの Todo に `ready-for-agent` の付いたカードがあり、実装の枠が空いているとき（割り当ての共通前段は「2. ボードと巡回」の「割り当て・停止・再開」）。
 
-1. Issue に `agent:working` を付ける（`ready-for-agent` は外さない）。Devin CLI に割り当てるときは `agent:devin` も付ける
+1. Issue のラベルを読み直し、`agent:working` がすでに付いていれば割り当てない（別のスレッドが取っている。手当・再開で自分が割り当てたものは除く）。付いていなければ `agent:working` を付ける（`ready-for-agent` は外さない）。Devin CLI に割り当てるときは `agent:devin` も付ける。実装スレッドは着手時にこの `agent:working` を自分の占有として引き継ぎ、取得コメント（誰が・何時（JST）に取ったか）を書く（skill `implement-issue` の手順 2）
 2. 実装スレッドを立てる
 
 ```
@@ -222,7 +235,7 @@ Assigned: role=implement agent=devin model=swe-2-high effort=<medium|high|max>"
 t3 thread start --provider codex_review --model <skill command-team の「Codex のモデル」で選んだモデル> --worktree main --branch review/<M>-<k> --title "[レビュー] PR #<M> <要約>" <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。"
 ```
 
-T3 Connect の MCP で立てるときは、権限（`runtimeMode`）を `auto-accept-edits` にする。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP で立てる。
+Codex と Claude のレビュースレッドを立てるときは（T3 Connect の MCP でも `t3_thread_launch` でも）、権限（`runtimeMode`）を `auto-accept-edits` にする（Devin CLI は下のとおり `runtimeMode` を指定しない）。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`auto-accept-edits` で立てられないときも `auto`・`full-access` に変えず、立てずに 7 のエスカレーションにする（Issue が無いときの形も 7 にある）。指揮役のレビュースレッド（指揮役自身の PR・外部投入）は `delegate_task` で委託しない（子タスクの worktree は委託元のコミットから作られ、下の `main` 起点の決まりを満たせないため）。`delegate_task` での委託は実装担当の手順（skill `implement-issue` の手順 8）で、指揮役が実装担当の代わりに委託するときは、委託元のスレッドの worktree が `main` のコミットにあることを確かめてから行う。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP か `t3_thread_launch` で立てる。
 
 `codex_review` はネットワークを GitHub だけに絞った Codex（`docs/dev-environment.md` の「レビュー担当の Codex」）。`<k>` はその PR のレビュースレッドの通し番号（1 から）。worktree は必ず `main` から作る（レビュー担当は worktree の `scripts/agent-gh` を使うため、PR やほかのブランチの版を使わない）。
 
@@ -249,7 +262,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 | `event` | 実装スレッド | レビュースレッド |
 |---|---|---|
-| `finished` | `report` を手順 6 で確かめる。`pr:` と `ready: done` があればマージの判断（skill `command-team` の「マージ」）。`stopped:` があれば 7 の「実装担当が止まった」 | `report` を手順 6 で確かめ、GitHub のレビュー状態と突き合わせて扱う（指揮役自身の PR なら「マージ」へ。外部投入なら結果を該当 Issue の実装スレッドに知らせる） |
+| `finished` | `report` を手順 6 で確かめる。`pr:` と `ready: done` があればマージの判断（skill `command-team` の「マージ」）。`stopped:` があれば 7 の「実装担当が止まった」 | `report` を手順 6 で確かめて扱う（`approve` と `request-changes` は GitHub のレビュー状態と突き合わせる。`failed` は 6 の `verdict:` の行のとおり）（指揮役自身の PR なら「マージ」へ。外部投入なら結果を該当 Issue の実装スレッドに知らせる） |
 | `failed` | スレッドに 1 回だけ「続きをやり直す。skill implement-issue に従う。」を送る。同じスレッドで 2 回目の `failed` なら 7 のエスカレーション | 新しいレビュースレッドを 1 回だけ立て直す。2 回目なら 7 のエスカレーション |
 | `cancelled` | 人間が止めたもの。何もしない | 何もしない |
 | `waiting` | 承認や入力の待ちなら部屋で人間に知らせる（スレッドの `link` を付ける）。レビュー委託の子の完了待ち（実装スレッドが `delegate_task` でレビューを待っている）は知らせない | 部屋で人間に知らせる（スレッドの `link` を付ける） |
@@ -264,7 +277,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 |---|---|
 | `approve` | 指揮役自身の PR なら、Ready for review と必須チェックが通っていることを確かめて skill `command-team` の「マージ」に進む。外部投入なら「PR #<M> は Approve された。skill implement-issue の手順 9 の『Approve のとき』から進める（`[文書のずれ]` の nit が残っていれば先に直す）。」を実装スレッドに送る。複数のレビュー担当を付けた PR で判定が割れたらマージせず、request-changes 側の指摘を優先して修正に進ませる（skill `command-team` の「レビュー担当と effort」） |
 | `request-changes` | 外部投入なら「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を実装スレッドに送る（回数の上限は skill `implement-issue` のとおり、実装スレッドが数える） |
-| `failed` | `error: checks pending` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 7 のエスカレーション |
+| `failed` | `error: checks timeout` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。`error: wrong runtime` なら、権限を `auto-accept-edits`・worktree にして立て直す（回数に数えない）。`error:` が `設定の不備:` で始まるなら、立て直さずに 7 のエスカレーションにする（同じ環境では同じ結果になるため）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 7 のエスカレーション |
 
 通常の PR のレビューの verdict（approve / request-changes / failed）は実装スレッドが処理する（skill `implement-issue` の手順 9）。指揮役は、実装スレッドの終わりの報告（`review:` と `ready:` の行）と GitHub の PR の状態（`pelway-review` の最新レビューとチェック）で進み具合を見る。
 
@@ -295,7 +308,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 | `review:` | `scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` のレビュー件数が報告のラウンド数と一致し、最新が `APPROVED` である |
 | `ready:` | `scripts/agent-gh dev pr view <番号> --json isDraft` が `false` である |
 | `memo:` | PR の変更ファイルに `docs/worklogs/issue-<Issue 番号>.md` があり、報告の round の「実装者メモ」が 5 項目そろっていて対象 head の SHA が書かれている。止まった場合は Issue のコメントに実装者メモがある |
-| `verdict:` | 指揮役が立てたレビュースレッドの報告だけ。`scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` の最新のレビューの状態（`APPROVED` か `CHANGES_REQUESTED`）と一致する |
+| `verdict:` | 指揮役が立てたレビュースレッドの報告だけ。`failed` は GitHub のレビューとは突き合わせず、起動時の操作記録と T3 のスレッドの履歴で報告元と対象の PR を確かめてから、5 の「レビューの verdict ごとの対応」の表の `failed` の行で `error:` の理由ごとに扱う（投稿の後に失敗で返ったときの扱いは、ここでは決めていない）。`approve` と `request-changes` は、`scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` の最新のレビューの状態（`APPROVED` か `CHANGES_REQUESTED`）と一致する |
 
 一致しなければ、`report` の値では動かず 7 のエスカレーションにする。
 
@@ -307,17 +320,19 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 2. Issue に次をコメントする: 何が起きたか（イベントと `report`）、試したこと、人間に決めてほしいこと、スレッドの `link`
 3. 部屋で人間に知らせる（Issue の URL を付ける）
 
-エスカレーションで `needs-human` を付けた時点で、巡回スクリプトが補助記録の次回確認時刻を目安（24 時間）で設定する。人間の判断に期限を付けたいときは、その時点で補助記録の `next_check_at` を書き換える（「10. 巡回状態の補助記録」の「次回確認時刻（フォローアップタイマー）」）。
+紐づく Issue が無いとき（指揮役自身の PR など）は、1 と 2 を対象の PR で行い（`needs-human` を PR に付け、PR にコメントする）、3 では PR の URL を付ける。どちらの場合も、公開のコメントにはレビュー担当の `out-of-scope:` の所見を書かない（非公開の報告に限る）。
+
+Issue に `needs-human` を付けた時点で、巡回スクリプトが補助記録の次回確認時刻を目安（24 時間）で設定する。PR だけに付けたときはフォローアップタイマーの対象外（補助記録は開いた Issue から毎巡回作り直されるので、`next_check_at` を手で書き換えられるのも Issue に紐づく待ちだけ）なので、指揮役の作業ログの判断の記録に「人間の判断待ち」として残し、巡回でその PR の `needs-human` が外れたかを見る。人間の判断に期限を付けたいときは、その時点で補助記録の `next_check_at` を書き換える（「10. 巡回状態の補助記録」の「次回確認時刻（フォローアップタイマー）」）。
 
 その Issue のスレッドにはそれ以上送らない。人間が `needs-human` を外したら、指示に従って再開する。
 
 ### 実装担当が止まった（`stopped:`）
 
-実装担当は止まる前に Issue にコメントし、`needs-human` を付けている。Grok Bot は `agent:working` を外し、部屋で人間に知らせる。
+実装担当は止まる前に Issue にコメントし、`needs-human` を付け、`agent:working` を外して解放コメントを書いている（skill `implement-issue` の手順 2）。Grok Bot は `agent:working` が残っていれば外し、部屋で人間に知らせる。
 
 ### 停滞（`stalled`）
 
-エスカレーションする。Issue へのコメントには、スレッドの最後の返答と PR の状態を 10 行以内にまとめて書く。
+エスカレーションする。Issue へのコメントには、スレッドの最後の返答と PR の状態を 10 行以内にまとめて書く（最後の返答の `out-of-scope:` の行は写さない）。
 
 `stall_reason` が `ci-failed-twice` のときは `thread_id` が空。`issue_number` から実装スレッドを探す。
 
@@ -357,7 +372,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
   4. 調査スレッドで、報告の PR がマージ済みのもの
 - `needs-human` の付いたもの、止まっているもの、迷走中のものは、上に当たっても settle せず、巡回の報告の「判断待ち」に回す
 - 棚卸しでするのは settle だけ。スレッド・worktree・ブランチの削除、アーカイブ、中断、再開はしない
-- worktree は pitchfork のデーモン `agent-worktree-prune` が毎時消す（settle されたスレッドの、main に取り込み済みかマージ済み・クローズ済みの PR のものだけ。未追跡のファイルは捨て、追跡ファイルに変更が残るものは残す）。settle しないと worktree は残るので、終わったスレッドは上のとおり settle する。残ったものは人間が `mise run agent-worktree-prune` で整理する
+- worktree は pitchfork のデーモン `agent-worktree-prune` が毎時消す（settle されたスレッドの（またはスレッドの無い）worktree のうち、main に取り込み済みかマージ済み・クローズ済みの PR のものだけ。未追跡のファイルは捨て、追跡ファイルに変更が残るもの、生きているプロセスのカレントディレクトリが中にあるもの、最後の変更から 6 時間以内のものは残す）。settle しないと worktree は残るので、終わったスレッドは上のとおり settle する。残ったものは人間が `mise run agent-worktree-prune` で整理する
 - マージ後の Issue と PR はボードの組み込みワークフローが Done にする
 
 ## 10. 巡回状態の補助記録
@@ -401,7 +416,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 | `grokbot` | 24 時間 | Grok Bot の承認・判断が出たか |
 | `implement` | 6 時間 | 実装スレッドが動いているか（停滞は 45 分検知にもある。レビュー委託の子の完了待ちを含む） |
 | `review` | 24 時間 | レビュー担当が動いているか（滞留 24 時間の対応と同じ目安。skill `command-team` の「レビュー待ちの滞留」） |
-| `merge` | 1 時間 | マージの条件（有効な Approve と必須チェック）が揃っているのに未マージのままではないか |
+| `merge` | 1 時間 | マージの条件（「2. ボードと巡回」の「マージの条件」）が揃っているのに未マージのままではないか。QA の合格だけが無ければ QA 待ちとして扱う |
 | `conductor` | 1 時間 | 指揮役の判断・割り当てが先送りになっていないか |
 
 目安は運用実績で見直す。巡回スクリプトが既定値として同じ値を持つため、変えるときはこの表とスクリプトの両方を直す。

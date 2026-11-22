@@ -15,10 +15,13 @@ lockfile = true
 # rust は mise 経由で rustup のツールチェーンを固定する。
 # mr_boxington = true で cargo を mbx（Cargo ビルド共有キャッシュ）経由にする。
 # components で rustfmt・clippy に加え CI のカバレッジ計測（cargo-llvm-cov）が
-# 必要とする llvm-tools-preview を明示し、最小構成のツールチェーンでも
+# 必要とする llvm-tools を明示し、最小構成のツールチェーンでも
 # fmt・lint・coverage が再現されるようにする（toolchain-check タスクが存在検査する）。
+# 成分名は rustup が一覧に出す名前（llvm-tools）で書く。別名の llvm-tools-preview で書くと、
+# mise は導入済みの成分の一覧に見つけられず、mise exec のたびに rust を入れ直して
+# mise lock の一覧を出す（#596。git hook の出力が毎回約 80 行増える）。
 # 1.99.1 は rig-core 0.46 の MSRV（1.97.1）を満たす版（ADR 0008、#95）。
-rust = { version = "1.99.1", mr_boxington = true, components = ["rustfmt", "clippy", "llvm-tools-preview"] }
+rust = { version = "1.99.1", mr_boxington = true, components = ["rustfmt", "clippy", "llvm-tools"] }
 mr-boxington = "1.29.2"
 hk = "2.11.1"
 fnox = "1.47.0"
@@ -177,7 +180,7 @@ description = "LLMゲートウェイの測定（#95）。合成データでス�
 run = "cargo run --quiet -p pelway-dev-llm-eval --locked"
 
 [tasks.toolchain-check]
-description = "rustfmt・cargo-clippy・llvm-tools-preview 成分の存在確認（欠けていれば失敗し、暗黙の自動ダウンロードには頼らない）"
+description = "rustfmt・cargo-clippy・llvm-tools 成分の存在確認（欠けていれば失敗し、暗黙の自動ダウンロードには頼らない）"
 run = """
 rustc --version
 cargo --version
@@ -188,11 +191,25 @@ host=$(rustc -vV | awk '/^host:/{print $2}')
 profdata="$sysroot/lib/rustlib/$host/bin/llvm-profdata"
 cov="$sysroot/lib/rustlib/$host/bin/llvm-cov"
 if [ ! -x "$profdata" ] || [ ! -x "$cov" ]; then
-  echo "llvm-tools-preview is missing from the project toolchain (expected $profdata and $cov). Declare it in mise.toml rust.components and run mise install --locked. Do not rely on implicit rustup auto-download." >&2
+  echo "llvm-tools is missing from the project toolchain (expected $profdata and $cov). Declare it in mise.toml rust.components and run mise install --locked. Do not rely on implicit rustup auto-download." >&2
   exit 1
 fi
 "$profdata" --version
 "$cov" --version
+# components の名前が rustup の導入済み一覧（-<target> を除いた名前）にあるかを照合する。
+# 別名（llvm-tools-preview など）で書くと mise が導入済みと判定できず、mise exec のたびに
+# rust を入れ直す（#596）。成分の実体は上の検査で揃っていても、名前のずれはここで落とす。
+version=$(mise config get -f mise.toml tools.rust.version)
+installed=$(rustup component list --installed --toolchain "$version" | sed "s/-$host\\$//")
+missing=""
+for c in $(mise config get -f mise.toml tools.rust.components | tr -d '[]",'); do
+  printf '%s\\n' "$installed" | grep -qxF "$c" || missing="$missing $c"
+done
+if [ -n "$missing" ]; then
+  echo "rust.components in mise.toml has name(s) not in 'rustup component list --installed --toolchain $version':$missing. Use the name rustup lists (without the -$host suffix)." >&2
+  exit 1
+fi
+echo "rust.components match rustup installed components:" $(mise config get -f mise.toml tools.rust.components | tr -d '[]",')
 """
 
 [tasks.hk-validate]
@@ -255,16 +272,12 @@ printf '%s\\n' "$warn_out" | bash scripts/deny-warn-extract.sh >&2
 description = "PR の差分行数を数え、800 行を超えたら失敗する（linguist-generated とバイナリは除く）"
 run = "bash scripts/pr-size.sh"
 
-# demo-check 一式の shellcheck 検査（Issue #265）。CI のログに実行と成功を出すため、
-# 合格時に 1 行出す（shellcheck 自体は指摘 0 件だと何も出さない）。
+# scripts/ 以下の bash・sh のスクリプト全部の shellcheck 検査（Issue #265・#621）。
+# demo-check 一式（scripts/demo-check/*.sh）は severity 既定、それ以外は --severity=warning。
+# 本体は scripts/shellcheck.sh（検査したファイルの数を合格時に 1 行出す）。
 [tasks.shellcheck]
-description = "shellcheck で demo-check 一式を検査する（指摘 0 件で通る。verify-static に含まれる）"
-run = """
-#!/usr/bin/env bash
-set -euo pipefail
-shellcheck scripts/demo-check/*.sh
-echo "shellcheck: scripts/demo-check/*.sh clean (0 findings)"
-"""
+description = "shellcheck で scripts/ の bash・sh のスクリプト全部を検査する（demo-check 一式は severity 既定、ほかは warning 以上。指摘 0 件で通る。verify-static に含まれる）"
+run = "bash scripts/shellcheck.sh"
 
 [tasks.script-test]
 # テストは scripts/script-test.sh が収集する（scripts/tests/*.test.sh、
@@ -286,12 +299,16 @@ run = "bash scripts/demo-check/selftest.sh"
 description = "T3 が作った worktree のうち、作業中のスレッドのものを除き、PR がマージ済み・クローズ済みのものを確認してから消す（--dry-run で一覧だけ、--auto で pitchfork の定期実行と同じ処理）"
 run = "bash scripts/agent-worktree-prune"
 
+[tasks.conductor-rebuild]
+description = "指揮役を立て直す（新しい指揮役を main の専用 worktree で立てて待たせ、権限を確かめ、旧指揮役を止め、引き継ぎを指示し、宛先を替える。hatai がホストで実行する。mise run conductor-rebuild -- --from <旧指揮役のスレッド ID> [--to <新指揮役のスレッド ID>] [--provider <id> --model <slug>] [--effort <値>]）"
+run = "bash scripts/conductor-rebuild"
+
 [tasks.codex-review-check]
-description = "レビュー担当の Codex（codex_review）のネットワークが GitHub だけに絞られているかを確かめる（Codex を更新したら実行する）"
+description = "レビュー担当の Codex（codex_review）の sandbox から、api.github.com と github.com に HTTP 200 が返り、example.com に応答が無いことを確かめる（Codex を更新したら実行する）"
 run = """
 #!/usr/bin/env bash
 set -uo pipefail
-probe() { codex sandbox --enable network_proxy -P review -- curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$@" 2>/dev/null; }
+probe() { CODEX_HOME="$HOME/.codex-review" codex sandbox --enable network_proxy -P review -- curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$@" 2>/dev/null; }
 ok=1
 for u in https://api.github.com https://github.com; do
   code="$(probe "$u")"; echo "$u -> $code"; [[ "$code" == 200 ]] || ok=0
@@ -300,7 +317,7 @@ for u in https://example.com; do
   code="$(probe "$u")"; echo "$u -> ${code:-000}"; [[ "$code" == 000 || -z "$code" ]] || ok=0
   code="$(probe --noproxy '*' "$u")"; echo "$u (noproxy) -> ${code:-000}"; [[ "$code" == 000 || -z "$code" ]] || ok=0
 done
-((ok)) && echo "codex-review-check: ok" || { echo "codex-review-check: NG（~/.codex/config.toml の [permissions.review] と features を確かめる）"; exit 1; }
+((ok)) && echo "codex-review-check: ok" || { echo "codex-review-check: NG（~/.codex-review/config.toml の [permissions.review] と features を確かめる）"; exit 1; }
 """
 
 [tasks.agent-watch-install]

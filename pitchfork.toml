@@ -15,7 +15,7 @@ retry = 10
 boot_start = true
 
 # agent-worktree-prune: 終わった T3 worktree の片付け。毎時 0 分に scripts/agent-worktree-prune --auto を走らせる
-# （settle されていないスレッドの worktree と、追跡ファイルに変更が残っている worktree は残す）。
+# （残す条件は docs/dev-environment.md の「pitchfork について」）。
 # supervisor が動いていれば start しなくても cron で動く。supervisor は各 worktree のこの定義も動かすが、
 # --auto は main の checkout 以外では何もしない。手順は docs/dev-environment.md。
 [daemons.agent-worktree-prune]
