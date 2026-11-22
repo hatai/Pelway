@@ -53,7 +53,7 @@ chmod +x "$ROOT/bin/sleep"
 
 # th <id> <settled> <createdBy> — thread list の 1 要素
 th() { printf '{"threadId":"%s","title":"[実装] #1 x","status":"completed","settled":%s,"parentThreadId":null,"createdBy":"%s"}' "$1" "$2" "$3"; }
-threads() { local IFS=,; printf '[%s]\n' "$*" > "$MOCK/threads.json"; }
+threads() { local s; s="$(printf '%s,' "$@")"; printf '[%s]\n' "${s%,}" > "$MOCK/threads.json"; }
 # wt <id> <path|null|FAIL|""> — thread show が返す作業ツリー
 wt() { printf '%s\n' "$2" > "$MOCK/show/$1"; }
 
