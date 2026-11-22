@@ -394,3 +394,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 巡回記録（patrol 59・18:55 JST・受信箱 wake）
 
 - スレッド遷移のみ・実害なし
+
+## QA 結果処理（#652・19:00 JST）
+
+- **PR #652 全条件充足 → Ready 化＋automerge**: pelway-qa で [QA pass@e87e25ff](https://github.com/hatai/Pelway/pull/652#issuecomment-7073947591) を投稿（必須チェック全 pass・security-scan 3 job pass・受け入れ条件 pass・弱化なし）・r2 APPROVED@同 SHA → kodiak キューへ
