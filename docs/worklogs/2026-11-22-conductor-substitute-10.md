@@ -135,3 +135,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - #631: `2cd790bb`・MERGEABLE。push により旧 approve 2 件（pelway-review・hatai）は DISMISSED — r2 レビュー委託で回収中。CI 3 件 pending・fail なし
 - #610: draft・`b7efc229` 不変・引き継ぎスレッド作業中と判断
 - #586/#587: 結果未着
+
+## 巡回記録（patrol 13・11:15 JST・レビュー完了 wake）
+
+- **r2 レビュー完了**: pelway-review APPROVED@`2cd790bb`・must-fix 0
+- **QA 委託起動**: `qa-631-2cd790bb-20261122`（claude-opus-5-5）— verify run 44973960953 が実行中のため、QA 側で run 完了を確かめてから判定するよう指示
+- 残ゲート: 必須チェック完了（verify 実行中・fail なし）+ QA pass のみ。hatai approve は push で DISMISSED されたがマージ条件ではない
