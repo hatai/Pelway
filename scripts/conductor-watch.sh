@@ -322,6 +322,10 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
                     print(f"STALL #{n} thread={th.get('threadId')} status={th.get('status')} state={st or 'none'} since={key}", flush=True)
                     cur["stall_notified"][n] = key
                 won, owner = "conductor", "conductor"
+            elif st == "waiting-conductor":
+                # scripts/agent-gh を変える PR で、指揮役のレビュースレッドを待っている（Issue #622）。
+                # 止まりではなく指揮役が動く合図なので、conductor にして STALL は出さない。
+                won, owner = "conductor", "conductor"
             elif st in ("waiting-review", "waiting-checks"):
                 early = True
         since = old.get("waiting_since") if old.get("waiting_on") == won and isinstance(old.get("waiting_since"), str) else ""
