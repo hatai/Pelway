@@ -225,3 +225,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **新 impl 4 件**: `bfd8ff91`（#641）・`e4009bd3`（#643）・`eaa7764e`（#645）・`b267df2c`（#646）が mcp:launch で起動（claude-opus-5-5・**full-access**・実装フローどおり稼働中）。agent:working は 11→13 件、needs-human は 7 件
 - **異常の記録**: 4 Issue は `needs-triage` が残ったまま（`ready-for-agent` 未付与）＋full-access 起動 — hatai が `mcp:57618b05` 経由で駆動している起動と推定されるため進行は止めず、記録のみ残す（assignment 表に登録済み）
 - `2e87e67b`（#610）継続・`caa0ff74` 再 run・その他遷移のみ
+
+## 巡回記録（patrol 28・11:58 JST・受信箱 wake）
+
+- 変化なし。新 impl 4 件は PR 未作成のまま稼働中。#610 `7bc1bea7` 不変・#586/#587 結果未着
