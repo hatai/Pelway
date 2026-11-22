@@ -100,6 +100,8 @@ EOF
 cat >"$BIN/git" <<'EOF'
 #!/usr/bin/env bash
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_TELEMETRY=%s\n' "${GH_TELEMETRY:-}"; printf 'DO_NOT_TRACK=%s\n' "${DO_NOT_TRACK:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
+# FAKE_GIT_HEAD があれば、symbolic-ref（今のブランチ名の問い合わせ）にその名前を返す（#641）。
+[[ "$*" != *symbolic-ref* || -z "${FAKE_GIT_HEAD:-}" ]] || printf '%s\n' "$FAKE_GIT_HEAD"
 EOF
 
 # 偽の mktemp: 本物に委譤し、作成したパスを種別（f=ファイル、d=ディレクトリ）とともに記録する
@@ -291,6 +293,66 @@ push_rc=$?
 [[ "$push_rc" == 0 ]] || failures+=("dev_git_push_skip: exit $push_rc, want 0")
 expect_log dev_git_push_skip "push"
 ! grep -qF 'rev-parse' "$ROOT/dev_git_push_skip.log" || failures+=("dev_git_push_skip: resign ran despite skip")
+
+# --- push 先を resign に渡す（#641）---
+# resign は位置引数で対象を受け取ると、その追跡 ref を `rev-parse --verify -q refs/remotes/<remote>/<branch>` で引く。
+# 位置引数が無いときだけ `@{u}` を引く。偽の git の記録から、resign に渡った対象を読み取る。
+# push_run <name> <git push の引数...>: リポジトリ外で agent-gh dev git push を実行する（出力は <name>.out）
+push_run() {
+  local name="$1"
+  shift
+  export CALL_LOG="$ROOT/$name.log"
+  rm -f "$CALL_LOG"
+  (cd "$ROOT/norepo" && bash "$SCRIPT" dev git push "$@" >"$ROOT/$name.out" 2>&1)
+  RC=$?
+}
+# expect_push_targets <name> <want>: resign が引いた追跡 ref（remote/branch を空白区切り）と @{u} の照会回数
+expect_push_targets() {
+  local name="$1" want="$2" want_upstream="$3" got upstream
+  got="$(sed -n 's|^ARGS=rev-parse --verify -q refs/remotes/||p' "$ROOT/$name.log" | paste -sd' ' -)"
+  upstream="$(grep -c '^ARGS=rev-parse --abbrev-ref --symbolic-full-name @{u}$' "$ROOT/$name.log")"
+  [[ "$RC" == 0 ]] || failures+=("$name: exit $RC, want 0 ($(cat "$ROOT/$name.out"))")
+  [[ "$got" == "$want" ]] || failures+=("$name: resign targets '$got', want '$want'")
+  [[ "$upstream" == "$want_upstream" ]] || failures+=("$name: @{u} lookups $upstream, want $want_upstream")
+}
+
+push_run push_src_dst origin feature:agent/X
+expect_push_targets push_src_dst "origin/agent/X" 0
+push_run push_force_refs_heads origin +feature:refs/heads/agent/Y
+expect_push_targets push_force_refs_heads "origin/agent/Y" 0
+push_run push_single origin agent/X
+expect_push_targets push_single "origin/agent/X" 0
+FAKE_GIT_HEAD=agent/cur push_run push_u_head -u origin HEAD
+expect_push_targets push_u_head "origin/agent/cur" 0
+FAKE_GIT_HEAD=agent/cur push_run push_head_dst origin HEAD:agent/X
+expect_push_targets push_head_dst "origin/agent/X" 0
+# 値を取るオプション（-o <値>）の値を refspec と取り違えない
+push_run push_option_value -o ci.skip origin feature:agent/Z
+expect_push_targets push_option_value "origin/agent/Z" 0
+# refspec を省いた push は、今までどおり位置引数なしで resign を呼ぶ（resign が @{u} から決める）
+push_run push_no_refspec
+expect_push_targets push_no_refspec "" 1
+push_run push_remote_only origin
+expect_push_targets push_remote_only "" 1
+# 複数のブランチの push は、ブランチごとに 1 回ずつ
+push_run push_multi origin a:agent/A b:agent/B
+expect_push_targets push_multi "origin/agent/A origin/agent/B" 0
+# タグと削除では resign を呼ばない
+push_run push_tag origin refs/tags/v1
+expect_push_targets push_tag "" 0
+push_run push_tag_dst origin v1:refs/tags/v1
+expect_push_targets push_tag_dst "" 0
+push_run push_delete_colon origin :agent/X
+expect_push_targets push_delete_colon "" 0
+push_run push_delete_flag --delete origin agent/X
+expect_push_targets push_delete_flag "" 0
+push_run push_delete_short -d origin agent/X
+expect_push_targets push_delete_short "" 0
+# 上のどれにも当たらない形（--all・--mirror）は、今までどおり位置引数なしで呼ぶ
+push_run push_all --all origin
+expect_push_targets push_all "" 1
+push_run push_mirror --mirror origin
+expect_push_targets push_mirror "" 1
 
 run bad_role admin pr list
 [[ "$RC" == 2 ]] || failures+=("bad_role: exit $RC, want 2")

@@ -24,6 +24,11 @@ mkdir -p "$BIN" "$REPO"
 cat >"$BIN/gh" <<'MOCK'
 #!/usr/bin/env bash
 printf 'ARGS=%s\n' "$*" >>"$CALL_LOG"
+# scripts/agent-gh を通す試験（#641）のトークン発行。値は使われない。
+if [[ "$1 $2" == "token generate" ]]; then
+  printf '{"token":"fake-token","expires_at":"x"}\n'
+  exit 0
+fi
 if [[ "$1 $2" == "repo view" ]]; then
   printf 'hatai/Pelway\n'
   exit 0
@@ -117,6 +122,17 @@ fi
 MOCK
 chmod +x "$BIN/gh"
 
+# 偽の fnox（scripts/agent-gh を通す試験用）: `fnox -c <config> get NAME` に固定の値を返す。
+cat >"$BIN/fnox" <<'MOCK'
+#!/usr/bin/env bash
+[[ "$1" == "-c" && "$3" == "get" ]] || exit 9
+case "$4" in
+  PELWAY_DEV_GIT_EMAIL) printf '9+pelway-dev[bot]@users.noreply.github.com\n' ;;
+  *) printf 'fake-%s\n' "$4" ;;
+esac
+MOCK
+chmod +x "$BIN/fnox"
+
 # 本物の git でリポジトリを用意する。origin = 裸リポジトリ（ローカルパス）。
 git init -q --bare "$REMOTE_DIR"
 git -C "$REMOTE_DIR" symbolic-ref HEAD refs/heads/main
@@ -137,12 +153,13 @@ export GH_TOKEN=fake-token
 export REMOTE_DIR
 export CALL_LOG="$ROOT/calls.log"
 
-# run_resign <name>: CALL_LOG を空にして agent-gh-resign を実行。RC に終了コード。
+# run_resign <name> [<remote> <branch>]: CALL_LOG を空にして agent-gh-resign を実行。RC に終了コード。
 run_resign() {
   local name="$1"
+  shift
   : >"$CALL_LOG"
   rm -f "$CALL_LOG".body.*
-  (cd "$REPO" && GH_TOKEN=fake-token bash "$SCRIPT" >"$ROOT/$name.out" 2>"$ROOT/$name.err")
+  (cd "$REPO" && GH_TOKEN=fake-token bash "$SCRIPT" "$@" >"$ROOT/$name.out" 2>"$ROOT/$name.err")
   RC=$?
 }
 
@@ -285,6 +302,36 @@ git -C "$REMOTE_DIR" cat-file -p "$(git -C "$REMOTE_DIR" rev-parse refs/heads/ag
 # --- 8. リポジトリ外では何もせず終了コード 0 ---
 (cd "$ROOT" && GH_TOKEN=fake-token bash "$SCRIPT" >/dev/null 2>&1)
 [[ "$?" == 0 ]] || failures+=("outside_repo: non-zero exit outside repo")
+
+# --- 9. upstream の無いローカルブランチから HEAD:<dst> で push すると、dst の署名を付け直す（#641） ---
+# scripts/agent-gh dev git push を通す。トークンと名義は偽の fnox・gh から取る。
+AGENT_GH="$(dirname "$SCRIPT")/agent-gh"
+git -C "$REPO" switch -qc agent/x-r8 origin/main
+git -C "$REPO" branch -q --unset-upstream 2>/dev/null || true
+echo r8 >"$REPO/r8.txt"
+git -C "$REPO" add r8.txt
+git -C "$REPO" commit -qm "feat: r8"
+: >"$CALL_LOG"
+(cd "$REPO" && PELWAY_AGENT_FNOX_CONFIG="$ROOT/fnox.toml" bash "$AGENT_GH" dev git push -q origin HEAD:agent/x \
+  >"$ROOT/push_head_dst.out" 2>"$ROOT/push_head_dst.err")
+RC=$?
+[[ "$RC" == 0 ]] || failures+=("push_head_dst: exit $RC, want 0 ($(cat "$ROOT/push_head_dst.err"))")
+x_tip="$(git -C "$REMOTE_DIR" rev-parse refs/heads/agent/x)"
+git -C "$REMOTE_DIR" cat-file -p "$x_tip" | grep -q '^gpgsig ' ||
+  failures+=("push_head_dst: origin agent/x tip unsigned")
+[[ "$(git -C "$REPO" rev-parse refs/heads/agent/x-r8)" == "$x_tip" ]] ||
+  failures+=("push_head_dst: local agent/x-r8 not moved to signed tip")
+[[ "$(git -C "$REPO" rev-parse refs/remotes/origin/agent/x)" == "$x_tip" ]] ||
+  failures+=("push_head_dst: refs/remotes/origin/agent/x not moved to signed tip")
+
+# --- 10. 決めた追跡 ref が無いときは、署名なしのまま残ったことを警告して終了コード 0 ---
+run_resign resign_no_tracking origin agent/nope
+[[ "$RC" == 0 ]] || failures+=("resign_no_tracking: exit $RC, want 0")
+err="$(cat "$ROOT/resign_no_tracking.err")"
+[[ "$err" == agent-gh-resign:* ]] || failures+=("resign_no_tracking: stderr does not start with agent-gh-resign: ('$err')")
+[[ "$err" == *origin* && "$err" == *agent/nope* ]] || failures+=("resign_no_tracking: stderr lacks remote/branch ('$err')")
+[[ "$err" == *署名なし* ]] || failures+=("resign_no_tracking: stderr does not say the commits stay unsigned ('$err')")
+[[ ! -s "$CALL_LOG" ]] || failures+=("resign_no_tracking: api was called")
 
 if ((${#failures[@]})); then
   printf 'FAIL %s\n' "${failures[@]}"

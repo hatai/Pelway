@@ -262,6 +262,57 @@ case "$role" in
   *) usage ;;
 esac
 
+# push_targets <git push の引数（push より後）...>: push 先から署名を付け直す対象を決める（#641）。
+# 結果: push_remote と push_branches（ブランチ名の配列。重複なし）、push_fallback（1 なら
+# agent-gh-resign を位置引数なしで呼び、resign が @{u} から対象を決める）。
+# - refspec を省いた push、--all / --branches / --mirror / --tags / --prune / --repo、glob を含む refspec、
+#   detached HEAD の HEAD は fallback（今までどおり）
+# - 削除（:dst、-d / --delete）とブランチ以外（refs/tags/ など refs/heads/ でない refs/）は対象にしない
+# - src:dst は dst、コロンの無い refspec はそれ自身（HEAD は今のブランチ名）。先頭の + と refs/heads/ は除く
+push_targets() {
+  push_remote="" push_branches=() push_fallback=0
+  local positional=() delete=0 a spec dst b seen
+  while (($#)); do
+    a="$1"
+    shift
+    case "$a" in
+      --) positional+=("$@"); break ;;
+      -o | --push-option | --receive-pack | --exec) shift ;;
+      -d | --delete) delete=1 ;;
+      --all | --branches | --mirror | --tags | --prune | --repo | --repo=*) push_fallback=1 ;;
+      -*) ;;
+      *) positional+=("$a") ;;
+    esac
+  done
+  ((delete)) && { push_fallback=0; return 0; }
+  ((push_fallback)) && return 0
+  if ((${#positional[@]} < 2)); then
+    push_fallback=1
+    return 0
+  fi
+  push_remote="${positional[0]}"
+  for spec in "${positional[@]:1}"; do
+    spec="${spec#+}"
+    if [[ "$spec" == *:* ]]; then
+      [[ -n "${spec%%:*}" ]] || continue # :dst は削除
+      dst="${spec#*:}"
+    else
+      dst="$spec"
+    fi
+    if [[ "$dst" == HEAD ]]; then
+      dst="$(git symbolic-ref -q --short HEAD 2>/dev/null || true)"
+      [[ -n "$dst" ]] || { push_fallback=1; continue; }
+    fi
+    [[ "$dst" != *'*'* ]] || { push_fallback=1; continue; }
+    dst="${dst#refs/heads/}"
+    [[ "$dst" != refs/* ]] || continue # タグなど、ブランチ以外
+    seen=0
+    for b in ${push_branches[@]+"${push_branches[@]}"}; do [[ "$b" != "$dst" ]] || seen=1; done
+    ((seen)) || push_branches+=("$dst")
+  done
+  return 0
+}
+
 if [[ "${1:-}" == "git" ]]; then
   shift
   # origin が SSH（git@github.com:）だと credential helper は使われず、hatai の SSH 鍵で認証される。
@@ -278,7 +329,16 @@ if [[ "${1:-}" == "git" ]]; then
     rc=0
     GH_TOKEN="$token" git "${git_cfg[@]}" "$@" || rc=$?
     if ((rc == 0)); then
-      if ! GH_TOKEN="$token" bash "$(cd "$(dirname "$0")" && pwd)/agent-gh-resign"; then
+      resign="$(cd "$(dirname "$0")" && pwd)/agent-gh-resign"
+      push_targets "${@:2}"
+      resign_rc=0
+      if ((push_fallback)); then
+        GH_TOKEN="$token" bash "$resign" || resign_rc=$?
+      fi
+      for t in ${push_branches[@]+"${push_branches[@]}"}; do
+        GH_TOKEN="$token" bash "$resign" "$push_remote" "$t" || resign_rc=$?
+      done
+      if ((resign_rc != 0)); then
         echo "agent-gh: 署名付きコミットへの付け替えに失敗しました（push 自体は成功）。再度 push すると再試行されます。スキップは PELWAY_AGENT_SKIP_RESIGN=1" >&2
         exit 4
       fi
