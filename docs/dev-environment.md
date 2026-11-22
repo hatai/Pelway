@@ -662,6 +662,22 @@ bwrap が作る名前空間の要点:
 - 本物の値を登録するときは、各自が暗号化プロバイダ（age 等）を設定した上で `fnox set <名前>` を使う。暗号文は `fnox set` が `fnox.toml` へ書き込む設計のため、**運用方針としてチームの合意を先に得ること**。
 - 個人用の上書きは `fnox.local.toml`（`.gitignore` 済み）。秘密値を含みうるためコミットしない。
 
+### /home が読み取り専用のとき /tmp 側で作業する手順
+
+/home が読み取り専用に再マウントされたときは、リポジトリを /tmp 側に clone して作業する。このとき PATH 上の `fnox`（`scripts/agent-gh` が呼ぶものも同じ）は mise の shim で、shim は作業ディレクトリの `mise.toml` を読む。/tmp 側の clone の設定は信頼済みではなく、`mise trust` の記録も /home 側に書けないため、shim は untrusted で失敗する。次の 2 つで回避する。
+
+```bash
+mkdir -p /tmp/sshims
+ln -sf ~/.local/share/mise/installs/fnox/latest/fnox /tmp/sshims/fnox   # fnox 実体への symlink
+export PATH="/tmp/sshims:$PATH"
+export MISE_TRUSTED_CONFIG_PATHS="/tmp/<clone のディレクトリ>"
+```
+
+- fnox 実体のパスは `~/.local/share/mise/installs/fnox/latest/fnox`。`/tmp/sshims` にはこの symlink だけを置き、PATH の先頭に置いて shim より先に実体が解決されるようにする。
+- `MISE_TRUSTED_CONFIG_PATHS` は /tmp 側の clone を mise に信頼させる（`mise trust` の記録を書かずに済む）。`mise run` などの mise 経由のコマンドもこれで動く。
+- 確かめ方: `command -v fnox` が `/tmp/sshims/fnox` を返し、`scripts/agent-gh dev api /rate_limit` が成功する。
+- 再マウント自体の対策・マウント設定の変更はこの手順の範囲外。
+
 ### デモの LLM 接続（#330）
 
 - デモの runner（`pelway-runner`）は環境変数で LLM 接続を組み立てる（`DemoLlmConfig::from_env`。定数名は `crates/pelway-runner/src/demo.rs` の定数を参照）:
