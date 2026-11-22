@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/review-pr/SKILL.md` の手順 2 の pr-size の例外の段に「PR が閉じる Issue」の照会を `-R <owner>/<name>` 付きにする旨を足す別 Issue を立てる（レビュー担当側も番号だけで `issue view` している。この PR の対象外）。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 3）
+
+対象 head: acd1ba36ced55e601e2f4dcfc99abb1adbe4c109
+
+1. 詰まった箇所: `.agents/skills/implement-issue/required-checks`: round 2 で `pr checks` の応答だけを「ちょうど 1 つの JSON の値」に限り、`pr view` の応答には同じ制約を当てていなかった（レビュー round 2 の must-fix）。
+2. 曖昧だった文: 「同じ種類の must-fix が 2 round 続いたら（同じ種類かは自分で判断する）、指摘された経路だけを直さず、その種類の全経路に当てる決まりを決めてから直し」（`.agents/skills/implement-issue/SKILL.md` の手順 9）。round 1 の複数 JSON の指摘と round 2 の `pr view` の指摘を同じ種類と判断した。
+3. 仮定と解釈: 決めた決まりは「GitHub の応答は、どれもちょうど 1 つの JSON の値で、型が期待どおりのときだけ使う」。`one_json` にまとめ、`pr checks`（配列）・`pr view`（オブジェクト）・`issue view`（オブジェクト。`--jq` で数えるのをやめ、生の応答を確かめてから手元の jq で数える）の 3 経路すべてに当てた。`issue_view_multiple_json` は修正前から通った（件数を数字だけに限る既存の検査が弾いていた）ので、修正の証拠ではなく決まりの回帰の確認として置いた。
+4. 足りなかった情報・検証手段: 今回の `mise run verify` は 713.97s で、バックグラウンドで完了を待った。
+5. 改善案: `docs/agents/skill-helpers.md` の「同梱できるものの範囲」に「GitHub の応答は、ちょうど 1 つの JSON の値で型が期待どおりのときだけ使い、それ以外は判定できないとして非 0 で終える」を足す（helper ごとに同じ指摘を受けないため）。
+
+使ったスキル: implement-issue、write-pull-request
