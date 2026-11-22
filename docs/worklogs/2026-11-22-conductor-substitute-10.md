@@ -342,3 +342,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **PR #567 r2 結果: CHANGES_REQUESTED**（must-fix 2・いずれも文書表現）: 1) 戻し方の全復元は後追加の PermissionRequest/許可リストを消す → denyWrite のみ戻す手順に、2) 「書けるのは $TMPDIR だけ」の断定を実測パスに限定（記録欄・残存経路も同様）
 - impl `dab971b2` へ `mcp:` プレフィックス付き send で指示配信成功（send 経路復旧の兆し）
+
+## 巡回記録（patrol 49・16:50 JST・受信箱 wake）
+
+- **PR #652**: `cb1a1122` が must-fix 修正コミット `e87e25ff`（"pin gitleaks allowlists to the known dummy values and files"）を作成 — ローカルのみ（push 禁止）。push コマンドをリード経由で hatai へ転送
+- **PR #653**: head→`14591023`（impl `b267df2c` が push）・`dab971b2`（#567 must-fix）対応開始
