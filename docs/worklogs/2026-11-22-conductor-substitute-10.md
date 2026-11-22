@@ -244,3 +244,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **PR #653** が draft で出現（`agent/646-supervisor-path-doc`・head `ad981543`・MERGEABLE）— impl `b267df2c` の成果。Issue #646 に `agent:working` も付与済み
 - `mcp:57618b05` 反復・その他変化なし
+
+## 巡回記録（patrol 32・12:20 JST・リード指示）
+
+- **PR #652 を通常流へ**: hatai 手 push PR（`t3/security-check-fix-findings`・draft・head `8da28305`・`.github/workflows/security-scan.yml` 含む・実装スレッド `cb1a1122`）。codex_review（gpt-6.1-terra）へ r1 委託起動 — workflow・秘密・検査スクリプトの high-risk 変更として security-review 重点に指定
+- 制約の登録: 修正はコミットまで・push 禁止（push コマンドはリード経由で hatai へ）。Ready 化と automerge はマージ条件充足後。security-scan 必須化は hatai 別判断で触らない
