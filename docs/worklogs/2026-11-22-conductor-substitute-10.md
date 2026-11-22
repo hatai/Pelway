@@ -315,3 +315,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **新 impl 4 件**: `0995ecd5`（#657 委託タスク定型ガード）・`335aabd5`（#658 pr-size 委託抑止）・`cd045355`（#659 場面フィルタ・#610 待ち）・`42181892`（#660 fnox shim 記録）— いずれも稼働開始・登録のみ
 - `cb1a1122`（#652）再起動→waiting — must-fix 対応中の可能性（push 禁止のため head 不変）
+
+## 巡回記録（patrol 44・15:30 JST・委託完了 wake）
+
+- **PR #497 再レビュー結果: APPROVED@c18b82eb**（pelway-review 投稿確認済み）— 前回 must-fix 解消・新規問題なし。QA 委託（claude-opus-5-5）を起動 → pass なら pelway-qa 投稿 → 条件充足で Ready 化＋automerge
