@@ -352,3 +352,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **PR #497 全条件充足 → automerge**: kodiak の main 取り込みで head `415b7e5b` に変化したが、QA が新 head で再実測 pass（PR 差分は同一と確認）。[QA 記録投稿](https://github.com/hatai/Pelway/pull/497#issuecomment-7073471650)・reviewDecision=APPROVED・checks 全 pass・既に Ready → kodiak キューへ（本日 4 件目）
 - 残件: PR 本文の「対象 HEAD」「未検証」記述が古い — impl `3f022128` への修正依頼が要る
+
+## 巡回記録（patrol 51・17:10 JST・受信箱 wake）
+
+- **PR #497 MERGED**（kodiak・Issue #490）— 私の指揮で 3 件目のマージ。PR 本文修正依頼は `3f022128` へ send 不可（full-access）→ [PR コメント](https://github.com/hatai/Pelway/pull/497#issuecomment-7073481958)で依頼（初回投稿はシェルクォートで一部欠落・PATCH で修正済み）
+- #464・#600 は kodiak キュー処理中
