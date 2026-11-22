@@ -239,6 +239,8 @@ if levs is not None:
 # 読み取りに失敗して空になったときは、前回の状態を残す（全スレッドを「新規」と誤報しない）。
 if prev is not None and not threads: cur["threads"] = prev["threads"]
 if prev is not None and not prs: cur["prs"] = prev["prs"]
+# 状態は GitHub の取得結果にかかわらず毎巡回ここで保存する。取得失敗・上限到達で下の
+# 巡回状態ブロックが動かない回でも thread_list・heartbeat_at を残し、通知が繰り返されないようにする。
 json.dump(cur, open(sp, "w"))
 # 巡回状態の補助記録（patrol-state.json）。対象は Issue 番号ごと。正本は GitHub Issues と
 # Projects で、ここには GitHub に載らない情報（誰待ちか・待ち始めた時刻・次の担当・次回確認時刻）だけを置く。

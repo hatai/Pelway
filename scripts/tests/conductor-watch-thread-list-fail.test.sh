@@ -23,8 +23,9 @@ SNAP="$ROOT/state/pelway/conductor-watch/threads.json"
 
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env bash
-[[ "$2 $3" == "issue list" ]] && { cat "$MOCK/issues.json"; exit 0; }
-[[ "$2 $3" == "pr list" ]] && { cat "$MOCK/prs.json"; exit 0; }
+gf="$(cat "$MOCK/gh-fail" 2>/dev/null || true)"
+[[ "$2 $3" == "issue list" ]] && { case "$gf" in issue|both) exit 9;; esac; cat "$MOCK/issues.json"; exit 0; }
+[[ "$2 $3" == "pr list" ]] && { case "$gf" in pr|both) exit 9;; esac; cat "$MOCK/prs.json"; exit 0; }
 [[ "$2 $3" == "api /repos/hatai/Pelway/issues/events?per_page=100" ]] && { echo '[]'; exit 0; }
 exit 9
 EOF
@@ -63,6 +64,8 @@ EOF
 chmod +x "$ROOT/bin/sleep"
 
 mode() { echo "$1" > "$MOCK/t3-mode"; }
+# GitHub の一覧取得の失敗を切り替える: off / issue / pr / both
+ghfail() { echo "$1" > "$MOCK/gh-fail"; }
 issues() { printf '%s\n' "$1" > "$MOCK/issues.json"; }
 prs() { printf '%s\n' "$1" > "$MOCK/prs.json"; }
 threads() { printf '%s\n' "$1" > "$MOCK/threads.json"; }
@@ -241,8 +244,10 @@ check "4: snapshot keeps the last good list on a malformed fetch" same "$SNAP" "
 i=1
 for m in nanlist badtitle badupdated badstatus; do
   mode "$m"; now_is $((T0 + 700 * i)); i=$((i + 1))
+  # 巡回ごとにログを空にし、その回の再通知だけを確かめる（前のケースの行では通さない）
+  : > "$ROOT/out.log"
   run_cycles 1
-  check "4: $m is reported as a fetch failure" has "$ROOT/out.log" "WATCHER thread-list-still-failing"
+  check "4: $m is reported as a fetch failure" eq "$(count "$ROOT/out.log" 'WATCHER thread-list-still-failing')" "1"
   check "4: snapshot keeps the last good list on $m" same "$SNAP" "$ROOT/snapshot.json"
 done
 
@@ -260,6 +265,45 @@ check "5: stalled-45m line normalizes a null title" has "$ROOT/out.log" "stalled
 threads '[{"threadId":"t-null","title":null,"status":"completed","updatedAt":null,"createdBy":"agent","itemCount":3}]'
 run_cycles 1
 check "5: status-change line normalizes a null title" has "$ROOT/out.log" "THREAD completed t-null prev=running"
+
+# 試験 6: GitHub の一覧取得に失敗する間、取得件数が上限に達する間も、T3 の通知状態は
+# 巡回のたびに保存される。失敗開始・回復の通知は各 1 回だけで、再通知は間隔どおりに出る
+# （巡回状態ブロックが動かない回でも state.json が保存されないと、同じ通知が繰り返される）。
+gh_outage() { # gh_outage <label> — GitHub 側の状態は呼び出し側で用意しておく
+  reset
+  threads "[$(th mcp:ok running '[実装] #1 あ')]"
+  mode ok
+  run_cycles 1
+  mode fail
+  now_is $((T0 + 1)); : > "$ROOT/out.log"
+  run_cycles 2 5
+  check "6: $1 failed line is printed once across patrols" \
+    eq "$(count "$ROOT/out.log" 'WATCHER thread-list-failed')" "1"
+  now_is $((T0 + 6)); : > "$ROOT/out.log"
+  run_cycles 1 5
+  check "6: $1 still-failing at the interval" \
+    eq "$(count "$ROOT/out.log" 'WATCHER thread-list-still-failing')" "1"
+  now_is $((T0 + 7)); : > "$ROOT/out.log"
+  run_cycles 1 5
+  check "6: $1 no extra re-notify before the next interval" \
+    eq "$(count "$ROOT/out.log" 'WATCHER thread-list-still-failing')" "0"
+  mode ok
+  now_is $((T0 + 8)); : > "$ROOT/out.log"
+  run_cycles 2 5
+  check "6: $1 recovered line is printed once across patrols" \
+    eq "$(count "$ROOT/out.log" 'WATCHER thread-list-recovered')" "1"
+}
+# GitHub の一覧取得が失敗する場合
+ghfail both
+issues '[]'; prs '[]'
+gh_outage "github-outage"
+# 取得件数が上限（IL=1000 件）に達する場合
+ghfail off
+python3 -I -c 'import json; print(json.dumps([{"number": i + 1, "state": "OPEN", "labels": []} for i in range(1000)]))' \
+  > "$MOCK/issues.json"
+prs '[]'
+gh_outage "github-limit"
+ghfail off
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
