@@ -80,15 +80,9 @@ sandbox に止められた操作（書き込み・実行・ネットワークな
 
 ### マージの条件
 
-PR に `automerge` ラベルを付けてよいのは、次の 5 つがすべてそろったときだけ（確かめ方の正本は skill `command-team` の「マージ」）。
+PR に `automerge` ラベルを付けてよいのは、skill `command-team` の「マージ」の「`automerge` ラベルを付ける条件」がすべてそろったときだけ。条件の列挙と確かめ方はそこが正本で、この手順書には写さない（有効な Approve、`[文書のずれ]` の nit が残っていないこと、必須チェック、Draft でも `WIP:` でもないこと、現在の head と同じ SHA の `pelway-qa` の合格、Approve と QA の合格の後の push がコンフリクトの解消を含まない main の取り込みだけであること、衝突を解消したらレビューと QA をやり直すこと、などを含む）。
 
-1. 現在の head に有効な Approve がある（`pelway-review`）
-2. その Approve のレビューに `[文書のずれ]` の nit が残っていない
-3. 必須チェック（`mise run verify`・`pr-size`）が通っている
-4. Approve の後の push が main の取り込みだけである
-5. 現在の head と同じ SHA の QA の合格コメントがある。合格コメントは `pelway-qa` 名義で、確かめた SHA と run を書いたもの（形と数え方は `docs/agents/qa-checklist.md`）。QA が同じ SHA で確かめるまでは合格として扱わない。head が動いたら前の合格は数えない
-
-1〜4 がそろって 5 だけが無い PR は QA 待ちである。`automerge` を付けず、QA に確認を頼む。巡回スクリプトはこの PR にも `waiting_on=merge` を出すが、実際の待ち先は QA として扱う。
+正本の条件のうち QA の合格（現在の head と同じ SHA の `pelway-qa` の合格コメント。形と数え方は `docs/agents/qa-checklist.md`）だけが欠けている PR は QA 待ちである。`automerge` を付けず、QA に確認を頼む。巡回スクリプトはこの PR にも `waiting_on=merge` を出すが、実際の待ち先は QA として扱う。
 
 ### マージキュー待ちの PR
 
