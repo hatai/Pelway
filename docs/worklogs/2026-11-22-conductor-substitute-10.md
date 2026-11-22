@@ -376,3 +376,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 巡回記録（patrol 55・18:05 JST・委託完了 wake）
 
 - **PR #652 r2 結果: APPROVED@e87e25ff**（hex64 除外の列挙化を確認・must-fix 0）→ QA 委託起動。Issue 無しのため QA には PR 本文の目的を受け入れ条件として確認するよう指示
+
+## 巡回記録（patrol 56・18:15 JST・受信箱 wake）
+
+- スレッド遷移のみ・実害なし。#464/#600 は kodiak キュー処理中
