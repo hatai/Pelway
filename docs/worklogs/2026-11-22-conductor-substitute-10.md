@@ -141,3 +141,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **r2 レビュー完了**: pelway-review APPROVED@`2cd790bb`・must-fix 0
 - **QA 委託起動**: `qa-631-2cd790bb-20261122`（claude-opus-5-5）— verify run 44973960953 が実行中のため、QA 側で run 完了を確かめてから判定するよう指示
 - 残ゲート: 必須チェック完了（verify 実行中・fail なし）+ QA pass のみ。hatai approve は push で DISMISSED されたがマージ条件ではない
+
+## 巡回記録（patrol 14・11:20 JST・スケジュール）
+
+- **【要 hatai 対応】aborted full-access 指揮役 `mcp:57618b05` が run 2 を実行**（02:05–02:06Z・スレッド棚卸しのみ・完了済・status completed・未 settle）。auto 権限の自分から settle 不可（`runtime_mode_escalation_denied`・再確認済）。起床元不明 — 独自 scheduled task の可能性があるが `scheduled_task_list` も同一経路で不通のため照合できず。**二重指揮の危険があるため hatai の UI での settle/停止を要請**
+- MCP 障害の範囲を確定: `t3_thread_send` と `scheduled_task_list` が不通（read・update・organize・delegate・task_status は正常）— send/schedule 管理系の経路障害
+- QA 委託 `qa-631-2cd790bb` 実行中。#610 引き継ぎ `2e87e67b` 稼働中。#586/#587 結果未着
