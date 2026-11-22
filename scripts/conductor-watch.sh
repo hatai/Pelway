@@ -60,7 +60,7 @@ while true; do
   # （runbook の「1. 役割と触ってよい範囲」）に使う。取得に失敗したらファイルを消す
   # （python 側で取得失敗と扱い、前回の処理済み ID を保つ）。
   scripts/agent-gh dev api "/repos/hatai/Pelway/issues/events?per_page=100" > "$D/label-events.json" 2>/dev/null || rm -f "$D/label-events.json"
-  python3 -I - "$D" "$P" "$IL" "$PL" <<'PY'
+  python3 -I - "$D" "$P" "$IL" "$PL" "$T3_BIN" <<'PY'
 import json, sys, time, os, re, subprocess
 from datetime import datetime, timedelta
 d = sys.argv[1]; sp = os.path.join(d, "state.json")
@@ -74,6 +74,7 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
        "label_seen": [] if prev is None else prev.get("label_seen", []),
        "due_warned": {} if prev is None else prev.get("due_warned", {}),
        "stall_notified": {} if prev is None else prev.get("stall_notified", {}),
+       "shared_notified": [] if prev is None else prev.get("shared_notified", []),
        "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0)}
 # ラベル操作の裏付け検査（Issue #405、2026-11-17 の要件変更）。actor だけでは判定しない
 # （エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai に
@@ -187,6 +188,33 @@ if levs is not None:
     else:
         done.update(e.get("id") for e in levs if isinstance(e, dict))
     cur["label_seen"] = [e.get("id") for e in levs if isinstance(e, dict) and e.get("id") in done]
+# 作業ツリーの共有（Issue #643）: settle されていないトップレベルのスレッドの worktreePath を
+# t3 thread show で 1 本 1 回ずつ集め、2 本以上が同じパスなら THREAD shared-worktree の行を出す。
+# 同じ組み合わせ（パスとスレッドの集合）は続く間 1 回だけ出す。show が失敗したスレッドは
+# この巡回で数えず、そのスレッドを含む既出の組み合わせは記録に残す（失敗の巡回で再通知しない）。
+if threads:
+    by_path, failed = {}, set()
+    for t in threads:
+        if t.get("settled") or t.get("parentThreadId"): continue
+        tid = t.get("threadId")
+        try:
+            r = subprocess.run([sys.argv[5], "thread", "show", tid, "--json"],
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=60)
+            wp = json.loads(r.stdout)["thread"].get("worktreePath") if r.returncode == 0 else None
+            if r.returncode != 0: failed.add(tid)
+        except Exception:
+            failed.add(tid); wp = None
+        if isinstance(wp, str) and wp:
+            by_path.setdefault(wp, []).append(tid)
+    seen = []
+    for wp, tids in sorted(by_path.items()):
+        if len(tids) < 2: continue
+        key = f"{wp}|{','.join(sorted(tids))}"
+        seen.append(key)
+        if key not in cur["shared_notified"]:
+            print(f"THREAD shared-worktree path={wp} threads={','.join(sorted(tids))}", flush=True)
+    keep = [k for k in cur["shared_notified"] if set(k.rsplit("|", 1)[1].split(",")) & failed]
+    cur["shared_notified"] = sorted(set(seen) | set(keep))
 # 読み取りに失敗して空になったときは、前回の状態を残す（全スレッドを「新規」と誤報しない）。
 if prev is not None and not threads: cur["threads"] = prev["threads"]
 if prev is not None and not prs: cur["prs"] = prev["prs"]
