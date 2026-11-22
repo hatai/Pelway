@@ -28,6 +28,12 @@ MARK='<!-- pr-size-exception -->'
 
 die() { echo "required-checks: $*" >&2; exit 3; }
 
+# GitHub の応答は、どれもちょうど 1 つの JSON の値で、型が期待どおりのときだけ使う。
+# 値が複数続くと、jq が値ごとに結果を出し、別々の値の結果が組み合わさるため。
+one_json() { # one_json <array|object> <text>
+  jq -se --arg t "$1" 'length == 1 and (.[0] | type == $t)' >/dev/null 2>&1 <<<"$2"
+}
+
 [ $# -eq 1 ] && [[ "$1" =~ ^[0-9]+$ ]] || die "usage: required-checks <PR 番号>"
 pr=$1
 
@@ -37,9 +43,7 @@ err=$(mktemp) || die "一時ファイルが作れない"
 list=$($GH pr checks "$pr" --json name,bucket 2>"$err")
 gh_rc=$?
 msg=$(cat "$err"); rm -f "$err"
-# 標準出力がちょうど 1 つの JSON の配列であることを確かめる（値が複数続くと、jq が
-# 配列ごとに判定を出して集計が崩れるため）。
-if ! jq -se 'length == 1 and (.[0] | type == "array")' >/dev/null 2>&1 <<<"$list"; then
+if ! one_json array "$list"; then
   # チェックが 1 つも報告されていない head では一覧が返らない。これは待ちに数える。
   if [ "$gh_rc" -ne 0 ] && grep -q 'no checks reported' <<<"$msg"; then
     list='[]'
@@ -63,9 +67,9 @@ verdict() { # verdict <名前> -> pass|fail|pending|unknown
 
 # pr-size の例外: ラベルと、PR が閉じる Issue の hatai の目印コメントの両方があるか。
 size_exception() {
-  local meta issues repo n has
+  local meta issues repo n comments has
   meta=$($GH pr view "$pr" --json labels,closingIssuesReferences 2>/dev/null) || meta=""
-  jq -e 'type == "object"' >/dev/null 2>&1 <<<"$meta" || die "PR $pr のラベルが取れない"
+  one_json object "$meta" || die "PR $pr のラベルが取れない"
   jq -e '[.labels[]?.name] | index("pr-size-exception")' >/dev/null <<<"$meta" || return 1
   issues=$(jq -r '.closingIssuesReferences[]?
     | "\(.repository.owner.login // "")/\(.repository.name // "") \(.number)"' <<<"$meta") \
@@ -73,9 +77,12 @@ size_exception() {
   while read -r repo n; do
     [ -n "$repo" ] || continue
     [[ "$repo" =~ ^[^/]+/[^/]+$ ]] && [[ "$n" =~ ^[0-9]+$ ]] || die "PR $pr の閉じる Issue が読めない: $repo $n"
-    has=$($GH issue view "$n" -R "$repo" --json comments \
-      --jq "[.comments[] | select(.author.login == \"hatai\" and (.body | startswith(\"$MARK\")))] | length" \
-      2>/dev/null) || die "Issue $repo#$n のコメントが取れない"
+    comments=$($GH issue view "$n" -R "$repo" --json comments 2>/dev/null) \
+      || die "Issue $repo#$n のコメントが取れない"
+    one_json object "$comments" || die "Issue $repo#$n のコメントが読めない"
+    has=$(jq --arg m "$MARK" \
+      '[.comments[] | select(.author.login == "hatai" and (.body | startswith($m)))] | length' \
+      <<<"$comments") || die "Issue $repo#$n のコメントが読めない"
     [[ "$has" =~ ^[0-9]+$ ]] || die "Issue $repo#$n のコメントが読めない"
     [ "$has" -gt 0 ] && return 0
   done <<<"$issues"

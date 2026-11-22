@@ -264,6 +264,26 @@ checks "$fix" "mise run verify=pass" "pr-size=pass"
 printf '[{"name":"mise run verify","bucket":"pass"},{"name":"pr-size","bucket":"pass"}]\n[{"name":"mise run verify","bucket":"fail"},{"name":"pr-size","bucket":"fail"}]\n' >"$fix/checks.json"
 run "$fix" 42
 expect_rc checks_multiple_json 3
+
+# pr view の応答に JSON の値が複数続くとき、別々の値のラベルと閉じる Issue を組み合わせない。
+new_fixture
+checks "$fix" "mise run verify=pass" "pr-size=fail"
+printf '%s\n%s\n' \
+  '{"labels":[],"closingIssuesReferences":[{"number":645,"repository":{"name":"Pelway","owner":{"login":"hatai"}}}]}' \
+  '{"labels":[{"name":"pr-size-exception"}],"closingIssuesReferences":[]}' >"$fix/pr-view.json"
+issue_comment "$fix" hatai "$MARK"
+run "$fix" 42
+expect_rc pr_view_multiple_json 3
+
+# issue view の応答に JSON の値が複数続くときも判定できない。
+new_fixture
+checks "$fix" "mise run verify=pass" "pr-size=fail"
+pr_view "$fix" "pr-size-exception"
+issue_comment "$fix" hatai "$MARK"
+cp "$fix/issue-hatai-Pelway-645.json" "$fix/one.json"
+cat "$fix/one.json" "$fix/one.json" >"$fix/issue-hatai-Pelway-645.json"
+run "$fix" 42
+expect_rc issue_view_multiple_json 3
 new_fixture
 run "$fix" 42
 expect_rc checks_fetch_error 3
