@@ -239,3 +239,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - `c9d1a5eb`（#642）・`9fe3e99d`（#644）の run 1 完了・PR は未作成（branch 作業中と推定）
 - #610・#530・#586/#587: 変化なし
+
+## 巡回記録（patrol 31・12:15 JST・受信箱 wake）
+
+- **PR #653** が draft で出現（`agent/646-supervisor-path-doc`・head `ad981543`・MERGEABLE）— impl `b267df2c` の成果。Issue #646 に `agent:working` も付与済み
+- `mcp:57618b05` 反復・その他変化なし
