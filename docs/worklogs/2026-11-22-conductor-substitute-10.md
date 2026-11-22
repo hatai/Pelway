@@ -80,3 +80,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - #630: OPEN・MERGEABLE・kodiak キュー処理中（automerge 付与直後）
 - #631: `67d48dd6`・CONFLICTING 不変。send 再試も失敗（MCP 断続・発生から約 3 分・pending 継続）
 - #586/#587: 事後レビュー結果未着
+
+## 巡回記録（patrol 5・10:50 JST・受信箱 wake）
+
+- 受信箱 388–389・watch.log 3741–3742: 自スレッド run 遷移と ab1a11fa の追加 run のみ。実害なし
+- **send 経路の障害を確定**: `t3_thread_send` が queue・default どちらの mode でも失敗する一方、`t3_thread_read`・update・organize・delegate_task・task_status は正常 — send 経路単独の障害と判断
+- **#631 指示の代替配信**: impl スレッド 02127d0e（completed・未 settle・wake 手段が send のみ）に届かないため、指示本文を PR コメントで配信（issuecomment-7072497846・pelway-dev 名義）
+- #630: OPEN・kodiak キュー処理継続。#586/#587: 事後レビュー結果未着
