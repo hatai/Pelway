@@ -269,3 +269,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - `bfd8ff91`（#641）・`1db76f66`（conductor-watch 通知改善）completed — 新規 PR 確認なし（#655 は既出）
 - `caa0ff74`（旧 #602 impl）1 run 実行後 completed — 後片付けと判断
 - PR #652: CI pending 2 に減少・review r1c 実行中
+
+## 巡回記録（patrol 35・13:15 JST・委託完了 wake）
+
+- **PR #652 r1c 結果: CHANGES_REQUESTED**（must-fix 1: `.gitleaks.toml:40` の hex64 除外を具体的ハッシュ列挙に — 実キーも除外しうる）。その他の除外・workflow・テスト差分に問題なし、確かめ方の弱化なし
+- impl `cb1a1122` への send は `runtime_mode_escalation_denied`（full-access）→ [PR コメント](https://github.com/hatai/Pelway/pull/652#issuecomment-7073078521)で must-fix＋push 禁止制約を配信。pending_thread_sends に記録
