@@ -14,7 +14,8 @@ trap 'rm -rf "$ROOT"' EXIT
 #   pr checks  : checks.json（無ければ失敗）。checks.rc があればその終了コードで、
 #                checks.err があればその内容を標準エラーに出す（gh の終了コード 8 などの再現）
 #   pr view    : pr-view.json（無ければ失敗）
-#   issue view : issue-<番号>.json（無ければ失敗）
+#   issue view : -R <owner>/<name> が必須（無ければ失敗）。issue-<owner>-<name>-<番号>.json
+#                を読む（無ければ失敗）
 # --jq が付いた呼び出しは、その式をモック内で jq に通してから返す（gh と同じ扱い）。
 mkdir -p "$ROOT/bin"
 cat >"$ROOT/bin/agent-gh" <<'MOCK'
