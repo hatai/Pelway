@@ -75,7 +75,7 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
        "label_seen": [] if prev is None else prev.get("label_seen", []),
        "due_warned": {} if prev is None else prev.get("due_warned", {}),
        "stall_notified": {} if prev is None else prev.get("stall_notified", {}),
-       "shared_notified": [] if prev is None else prev.get("shared_notified", []),
+       "shared_notified": {} if prev is None else prev.get("shared_notified", {}),
        "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0)}
 # ラベル操作の裏付け検査（Issue #405、2026-11-17 の要件変更）。actor だけでは判定しない
 # （エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai に
@@ -193,8 +193,11 @@ if levs is not None:
     cur["label_seen"] = [e.get("id") for e in levs if isinstance(e, dict) and e.get("id") in done]
 # 作業ツリーの共有（Issue #643）: settle されていないトップレベルのスレッドの worktreePath を
 # t3 thread show で 1 本 1 回ずつ集め、2 本以上が同じパスなら THREAD shared-worktree の行を出す。
-# 同じ組み合わせ（パスとスレッドの集合）は続く間 1 回だけ出す。show が失敗したスレッドは
-# この巡回で数えず、そのスレッドを含む既出の組み合わせは記録に残す（失敗の巡回で再通知しない）。
+# 同じ組み合わせ（パスとスレッドの集合）は続く間 1 回だけ出す。通知済みの記録は stall_notified と
+# 同じ JSON オブジェクトで、パス → 昇順の threadId をカンマでつないだ文字列。show が失敗したスレッドは
+# この巡回で数えない。既出の組み合わせに失敗したスレッドが含まれ、残りのスレッドが同じパスにいると
+# 確かめられたときだけ記録を保つ（失敗の巡回で再通知しない）。残りのどれかが一覧から消えた・
+# 別のパスに移ったと確かめられたら、共有の解消として記録を消す。
 # 一覧の取得に失敗した巡回は記録を保ち、正常に空の一覧は共有の解消として記録を消す。
 if threads_ok:
     by_path, failed = {}, set()
@@ -210,15 +213,21 @@ if threads_ok:
             failed.add(tid); wp = None
         if isinstance(wp, str) and wp:
             by_path.setdefault(wp, []).append(tid)
-    seen = []
+    old = cur["shared_notified"] if isinstance(cur["shared_notified"], dict) else {}
+    keep = {}
+    for wp, v in old.items():
+        ids = set(str(v).split(","))
+        if ids & failed and all(i in failed or i in by_path.get(wp, []) for i in ids):
+            keep[wp] = v
+    notified = {}
     for wp, tids in sorted(by_path.items()):
         if len(tids) < 2: continue
-        key = f"{wp}|{','.join(sorted(tids))}"
-        seen.append(key)
-        if key not in cur["shared_notified"]:
-            print(f"THREAD shared-worktree path={wp} threads={','.join(sorted(tids))}", flush=True)
-    keep = [k for k in cur["shared_notified"] if set(k.rsplit("|", 1)[1].split(",")) & failed]
-    cur["shared_notified"] = sorted(set(seen) | set(keep))
+        v = ",".join(sorted(tids))
+        if wp in keep and set(tids) <= set(keep[wp].split(",")): continue  # 失敗分が欠けただけ
+        if old.get(wp) != v:
+            print(f"THREAD shared-worktree path={wp} threads={v}", flush=True)
+        notified[wp] = v
+    cur["shared_notified"] = {**keep, **notified}
 # 読み取りに失敗して空になったときは、前回の状態を残す（全スレッドを「新規」と誤報しない）。
 if prev is not None and not threads: cur["threads"] = prev["threads"]
 if prev is not None and not prs: cur["prs"] = prev["prs"]

@@ -144,6 +144,30 @@ threads "$(th t-a false agent)" "$(th t-b false agent)"
 run_cycles 1
 check "6: sharing after an empty list is reported again" \
   eq "$(count "$ROOT/out.log" "THREAD shared-worktree path=/w/r threads=t-a,t-b")" "2"
+# 通知済みの記録は stall_notified と同じ JSON オブジェクト（パス → スレッドの組）。
+check "6: shared_notified is an object like stall_notified" eq "$(python3 -I -c 'import json,sys
+d = json.load(open(sys.argv[1])); print(type(d["shared_notified"]).__name__, type(d["stall_notified"]).__name__)' \
+  "$ROOT/state/pelway/conductor-watch/state.json")" "dict dict"
+
+# 試験 7: thread show の失敗中も、残りのスレッドが同じパスにいる間は記録を保ち、回復しても再通知しない。
+reset
+threads "$(th t-a false agent)" "$(th t-b false agent)"
+wt t-a /w/s; wt t-b /w/s
+run_cycles 1
+wt t-a FAIL
+run_cycles 1
+wt t-a /w/s
+run_cycles 1
+check "7: show failure while still shared does not re-notify" \
+  eq "$(count "$ROOT/out.log" "THREAD shared-worktree path=/w/s threads=t-a,t-b")" "1"
+# 取得失敗と、別のスレッドが別のパスに移ったこと（共有の解消）が同じ巡回に起きたら記録を消し、
+# 再び共有されたら出す。
+wt t-a FAIL; wt t-b /w/t
+run_cycles 1
+wt t-a /w/s; wt t-b /w/s
+run_cycles 1
+check "7: resolution seen during a show failure clears the record" \
+  eq "$(count "$ROOT/out.log" "THREAD shared-worktree path=/w/s threads=t-a,t-b")" "2"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

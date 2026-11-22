@@ -268,7 +268,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 | `waiting` | 承認や入力の待ちなら部屋で人間に知らせる（スレッドの `link` を付ける）。レビュー委託の子の完了待ち（実装スレッドが `delegate_task` でレビューを待っている）は知らせない | 部屋で人間に知らせる（スレッドの `link` を付ける） |
 | `stalled` | 7 の「停滞」 | 7 の「停滞」 |
 | `bad-title`（`scripts/conductor-watch.sh`） | タイトルを skill `command-team` の「スレッド名」の形式に直す（`t3_thread_update` の rename） | 同じ |
-| `shared-worktree`（`scripts/conductor-watch.sh`。行は `THREAD shared-worktree path=<パス> threads=<threadId>,…`） | 人間が立てたスレッド（`createdBy` が `agent` でないもの）を含むときは、どれも止めずに人間に知らせる。チームのスレッドだけのときは、後から立ったスレッド（`createdAt` が新しい方）を止め（`t3_thread_interrupt`）、人間に知らせる | 同じ |
+| `shared-worktree`（`scripts/conductor-watch.sh`。行は `THREAD shared-worktree path=<パス> threads=<threadId>,…`） | 人間が立てたスレッド（`createdBy` が `agent` でないもの）を含むときは、どれも止めずに人間に知らせる。チームのスレッドだけのときは、後から立ったスレッドをすべて止め（`t3_thread_interrupt`。本数によらず、最も早く立った 1 本だけを残す）、人間に知らせる | 同じ |
 
 実装担当のレビュー委託の子スレッドは `t3 thread list` に現れない（委託の結果は実装スレッドが処理する）。この表の「レビュースレッド」は、指揮役が立てたトップレベルのレビュースレッドのこと。
 
