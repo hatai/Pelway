@@ -51,7 +51,8 @@ if [[ -z "$T3_BIN" ]]; then
   done
 fi
 while true; do
-  "$T3_BIN" thread list --json > "$D/threads.json" 2>/dev/null || true
+  # threads.json は python 側で取得の成功を確かめてから差し替える（失敗で前回の一覧を消さない）
+  "$T3_BIN" thread list --json > "$D/threads.json.new" 2> "$D/threads.err"; trc=$?
   # GitHub からの取得に失敗したらファイルを消す（空の実状態と区別する。python 側で取得失敗と扱い、
   # 巡回状態の記録を書き換えさせない）。
   scripts/agent-gh dev issue list --state all --limit "$IL" --json number,state,labels > "$D/issues.json" 2>/dev/null || rm -f "$D/issues.json"
@@ -60,7 +61,7 @@ while true; do
   # （runbook の「1. 役割と触ってよい範囲」）に使う。取得に失敗したらファイルを消す
   # （python 側で取得失敗と扱い、前回の処理済み ID を保つ）。
   scripts/agent-gh dev api "/repos/hatai/Pelway/issues/events?per_page=100" > "$D/label-events.json" 2>/dev/null || rm -f "$D/label-events.json"
-  python3 -I - "$D" "$P" "$IL" "$PL" <<'PY'
+  python3 -I - "$D" "$P" "$IL" "$PL" "$trc" <<'PY'
 import json, sys, time, os, re, subprocess
 from datetime import datetime, timedelta
 d = sys.argv[1]; sp = os.path.join(d, "state.json")
@@ -74,7 +75,8 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
        "label_seen": [] if prev is None else prev.get("label_seen", []),
        "due_warned": {} if prev is None else prev.get("due_warned", {}),
        "stall_notified": {} if prev is None else prev.get("stall_notified", {}),
-       "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0)}
+       "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0),
+       "thread_list": None if prev is None else prev.get("thread_list")}
 # ラベル操作の裏付け検査（Issue #405、2026-11-17 の要件変更）。actor だけでは判定しない
 # （エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai に
 # なることがあるため）。needs-human の解除と automerge の付け外しを、イベント時刻の前
@@ -84,18 +86,51 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
 # （runbook の「指揮役の定期巡回（スケジュール起床）」）。
 LABEL_BACKUP_HOURS = 24
 LABEL_BACKING_AUTHOR = "hatai"
-try: threads = json.load(open(os.path.join(d, "threads.json")))
-except Exception: threads = []
+# t3 thread list の取得の判定（Issue #651）。終了コードが 0 で標準出力が JSON の配列のときだけ成功とし、
+# threads.json を差し替える。失敗した巡回は空の一覧として扱い、スレッドに基づく判定
+# （THREAD 行・停滞・止まり）をしない。失敗の理由は stderr の最初の行、無ければ失敗の種類。
+def fetch_threads(rc):
+    try: out = open(os.path.join(d, "threads.json.new"), "rb").read()
+    except Exception: out = b""
+    try: err = next((l.strip() for l in open(os.path.join(d, "threads.err"), errors="replace") if l.strip()), "")
+    except Exception: err = ""
+    if rc != 0: kind = f"exit={rc}"
+    elif not out.strip(): kind = "empty"
+    else:
+        try: v = json.loads(out)
+        except Exception: v = None
+        if isinstance(v, list): return v, None
+        kind = "invalid-json"
+    return [], err[:120] or kind
+threads, thread_err = fetch_threads(int(sys.argv[5]))
+if thread_err is None: os.replace(os.path.join(d, "threads.json.new"), os.path.join(d, "threads.json"))
 try: issues = json.load(open(os.path.join(d, "issues.json")))
 except Exception: issues = None
 try: prs = json.load(open(os.path.join(d, "prs.json"))); prs_ok = True
 except Exception: prs = []; prs_ok = False
 now = time.time()
+def stamp(ts): return datetime.fromtimestamp(ts).isoformat(timespec="seconds")
 # 見張りが動いていることを示す行（Issue #504）。HEARTBEAT_SECS ごとに 1 行。
-HEARTBEAT_SECS = 600
+# PELWAY_WATCH_HEARTBEAT_SECS で差し替えられる（テスト用）。
+HEARTBEAT_SECS = float(os.environ.get("PELWAY_WATCH_HEARTBEAT_SECS") or 600)
 if now - (cur["heartbeat_at"] or 0) >= HEARTBEAT_SECS:
-    print(f"HEARTBEAT at={datetime.fromtimestamp(now).isoformat(timespec='seconds')}", flush=True)
+    print(f"HEARTBEAT at={stamp(now)}", flush=True)
     cur["heartbeat_at"] = now
+# スレッド一覧の取得の状態は ok（thread_list が None）か failing の 2 つ。failing の間は
+# 失敗の始まりから HEARTBEAT_SECS ごとに知らせ直す（HEARTBEAT の行とは別に数える）。
+tl = cur["thread_list"]
+if thread_err is None:
+    if tl: print(f"WATCHER thread-list-recovered since={stamp(tl['fail_since'])} after={int(now - tl['fail_since'])}s", flush=True)
+    tl = None
+elif tl is None:
+    tl = {"fail_since": now, "notified_at": now, "reason": thread_err}
+    print(f"WATCHER thread-list-failed since={stamp(now)} reason={thread_err}", flush=True)
+else:
+    tl["reason"] = thread_err
+    if now - tl["notified_at"] >= HEARTBEAT_SECS:
+        tl["notified_at"] = now
+        print(f"WATCHER thread-list-still-failing since={stamp(tl['fail_since'])} for={int(now - tl['fail_since'])}s reason={thread_err}", flush=True)
+cur["thread_list"] = tl
 for t in threads:
     tid, s = t["threadId"], t.get("status")
     cur["threads"][tid] = s
@@ -282,6 +317,10 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
         # （needs-human は上で human に決まっていて、ここでは変えない）。
         if won != "human" and old.get("waiting_on") == "grokbot" and old.get("labels") == lab_key:
             won, owner = "grokbot", "grokbot"
+        # スレッド一覧が取れない間は止まりが続いているかを確かめられないため、conductor を
+        # implement・review に戻さない（止まりで conductor にした対象を見失わない）。
+        if cur["thread_list"] and won in ("implement", "review") and old.get("waiting_on") == "conductor":
+            won, owner = "conductor", "conductor"
         # 実装スレッドが止まっていて、状態の行が working か無ければ、指揮役の判断待ちにする。
         # 書き換えてよいのは implement / review から conductor への向きだけ。
         early = False
