@@ -415,3 +415,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## レビュー結果処理（#530 r2・19:40 JST）
 
 - **PR #530 r2: APPROVED@f74b848a**（must-fix の文書化対応を確認・投稿検証済み・checks 全 pass）→ QA 委託起動（qa-530-f74b848a-20261122・claude-opus-5-5）
+
+## 巡回記録（patrol 62・19:50 JST・受信箱 wake）
+
+- **failed 続報**: 0995ecd5（#657）・eaa7764e（#645）・335aabd5（#658）・2e87e67b（#602）・1db76f66（watcher）。patrol 61 と合わせ実装スレッドの大半が failed — 系統的失敗（provider 側）の可能性。GitHub 側の head は全 PR 不変・実害なし
+- #600・#652 は kodiak キュー待ち継続（head 不変）
