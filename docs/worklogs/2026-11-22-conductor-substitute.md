@@ -170,3 +170,27 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 - hatai の pr-size 例外判断は未着（#602 needs-human・依頼投稿済み）。#610 head b7efc229・draft 据え置き。
 - open PR 棚卸し: #560 の pr-size-exception ラベルは #333 の hatai 承認中継記録（14:13Z・条件付き）で裏付けあり。
 - リード指示（濱田さん了承済み）で起票: **#639**（レビュー役が専用 home 外の指示ファイルを読む隔離の穴・#587 c10 由来）・**#640**（review-pr のツール数えが exec 経由を含まず多層防御の欠け・#586 c11 由来）。どちらも milestone 8・ready-for-agent なし。
+
+## 恒久交代の引き継ぎ記録（10:40 JST・旧指揮役）
+
+hatai の指示で恒久交代を開始（conductor-context.md「恒久交代」手順 1）。この記録の後、案件を進める一切の操作を停止した。新指揮役は手順 3 の引き継ぎ確認（GitHub 実状態・patrol-state・巡回記録・実行中スレッドの照合）を行い、完了で操作権限が移る。旧指揮役スレッド: `mcp:launch:8892e0a8733d8e8cccc8f7695e875e96bd607bf145ba49fa561c0ccb8d38cc4b`。巡回の scheduled task: `scheduled-task:e2663dd5-77e4-4e3a-8129-da098625dde5`（新指揮役が作り直す）。
+
+### 引き継ぎ時点の状態（実値）
+
+- **#610**（draft・head `b7efc229`・mergeable=behind）: r7（codex+claude・`b7efc229` 宛て）は両枠完了したが `pr-size: fail`（+868/-35・上限 +68 超過）のため未投稿。**例外承認は hatai 本人の `<!-- pr-size-exception -->` コメントが必要**で #602（needs-human 付き）へ判断依頼を投稿済み（issuecomment-7070772750）。hatai の判断が出るまで r7 再委託・縮小指示は保留。
+- **#586・#587 事後レビュー**（リード指示）: codex_review 依頼を投稿済み（#586: issuecomment-7072171855・対象 `a6ec060e→3676b5f2`／#587: issuecomment-7072172160・対象 `3676b5f2→c2123c15`）。結果は各 PR へのコメント指定。**must-fix が出たら修正 Issue を起票（マイルストーン紐付け・ready-for-agent なし）して番号を報告**。
+- **リード指示の残務**: Devin 代替役の本来担当への復帰（#610 へ伝達済み）。上限中に Devin 承認のみで進んだ PR は #586/#587 のみ（#609・#612・#619・#572 は codex/claude 実承認で検証済み）。
+- **新規起票**: #639（レビュー役の専用 home 外指示ファイルの隔離・#587 c10 由来）・#640（review-pr のツール数えの範囲欠け・#586 c11 由来）。milestone 8・ready-for-agent なし。
+- **#560**: pr-size-exception ラベルは裏付けあり（#333 への hatai 承認中継記録・条件付き）。
+- **codex_review 検証**: `conductor/rebuild-20261122103150` worktree の apply_patch 範囲外書き込み確認タスクが finished・結果「未確認」（on-request + workspace-write では承認要求になるが実測できず）。レビュー環境の検証ギャップ。
+- **T3 MCP**: `t3-code` への接続が約 5.5 時間不通（`Failed to connect to MCP server 't3-code'`）。本セッションからのスレッド起動は不可で、委託はすべて GitHub コメント経由で統制に依頼した。新指揮役側で確認すること。
+- **open PR**（14 件・棚卸し済み）: 追跡中は #610 のみ。#497 は旧 automerge 滞留案件。#631/#630 非 draft ほかは前 conductor 以来の既知リスト。
+- **#602**: `needs-human` 継続中（解除は hatai のみ）。
+- inbox offset: 382。patrol-state 最終巡回: patrol176（10:34 JST）。
+- conductor ブランチ `conductor/rebuild-20261122012600` の最新署名付きコミットはこの記録を含む push 以後のもの（`7a67e50` の次）。
+
+### 新指揮役への注意
+
+- 手順 4 の完了まで操作権限は移らない。完了後は旧スレッド（上記 ID）を `t3_thread_organize`（settle）し、巡回の scheduled task を作り直すこと。
+- QA・レビュー・マージの判定は必ず GitHub 実値で（prose・スレッド報告を信用しない）。`automerge` は現 head の承認・必須チェック・pelway-qa[bot] の sha 一致合格の 3 条件がそろったときだけ。
+- devin_review_suspended は hatai が #449 の封じ込めを確認するまで有効（11-18 から）。
