@@ -23,3 +23,17 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 5 の「使ったスキル」の説明に「試行でない割り当てで手順 4 の red→green を行っただけのときは、輸入スキルを書かない（`implement-issue` の手順として数える）」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: 2305850f7c5021cfd00c53be27237e4d68f16175
+
+（round 3 は停止時のメモで、Issue #569 のコメントにある。）
+
+1. 詰まった箇所: 手順 9「修正依頼」: hatai が取り込んだ 3b5ead4a の後に main が進み、`docs/agents/notify-payloads.md` と `scripts/tests/conductor-watch-stall.test.sh` が衝突した。main 側は #622 の waiting-conductor の試験 9 と、受信箱の書き直しの説明を足していた。両方を残し、main の試験 9 を残してこの PR の試験を 10〜17 に繰り下げた。notify-payloads は main の文に、#569 の括弧書きの置き換えだけを当てた。1 回目の `mise run verify` は `crates/pelway-llm/tests/gateway.rs` の 2 件がローカルの HTTP の送信エラーで落ちたが、単独では 16 件とも通り、PR は `crates/` を変えておらず、2 回目の verify は pass した。
+2. 曖昧だった文: 「head 3b5ead4a に対する QA PASS の記録を、pelway-qa 名義でもう一度投稿してください」（開発リードの指示）。PR #600 に pelway-qa の QA コメントは 1 件も無く、「もう一度」の元になる記録が見つからない。`docs/agents/qa-checklist.md` は QA を「レビュー済みの PR を独立に確かめる」ものとしている。
+3. 仮定と解釈: 実装担当の自分が pelway-qa 名義で自分の PR の合格を書くと、QA の独立が崩れ、確かめていない合格の記録にもなると判断し、QA のコメントは投稿しなかった。3b5ead4a は CONFLICTING で、衝突の解消で head が動くことも理由にした。
+4. 足りなかった情報・検証手段: Codex の 2 回の `failed` は、実行したコマンドがすべて成功したまま約 40 秒で終わっていた（スレッドの activity）。どの手順を終えられなかったかの記録は無い。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 8 に「QA（`docs/agents/qa-checklist.md`）は実装担当が行わない。Approve を得たら QA 待ちとして指揮役に渡す」を足す。
+
+使ったスキル: implement-issue、pr-watch
