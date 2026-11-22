@@ -201,10 +201,10 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
   - OSV-Scanner は、OSV データベースの他の出所（GHSA など）も見る（今は `Cargo.lock` だけを照合する）。
   - cargo-deny は `deny.toml` の ignore と警告の扱いを持ち、必須チェックの一部である。
   - OSV-Scanner には `deny.toml` の ignore が効かない。cargo-deny で ignore した勧告のうち告知でないもの（今は rsa の RUSTSEC-2023-0071）は、`osv-scanner.toml` にも同じ理由で書く。
-- Semgrep の `yaml.github-actions.security.github-actions-mutable-action-tag` は `--exclude-rule` で使わない。この規則は `uses:` がコミット SHA でないことを検出するが、このリポジトリは `uses:` をタグで参照し、SHA を `.github/workflows/actions.lock`（`gh actions-lock` が生成）で固定する。
+- Semgrep の `yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag` は `--exclude-rule` で使わない。この規則は `uses:` がコミット SHA でないことを検出するが、このリポジトリは `uses:` をタグで参照し、SHA を `.github/workflows/actions.lock`（`gh actions-lock` が生成）で固定する。
 - 除外（`.gitleaks.toml`・`.semgrepignore`・`osv-scanner.toml`）は、1 件ずつ理由を書いて足す。`.semgrepignore` を消すと、Semgrep は組み込みの既定の除外一覧（`tests/`・`test/`・`vendor/` など）に戻る。そのため、ファイルは中身が空でも残す。既存の検出を理由に、ルールの無効化や除外の範囲を広げない。
-  - Gitleaks の除外は `.gitleaks.toml` の `[[allowlists]]` に書く（`[extend] useDefault = true` で組み込みの規則はそのまま使う）。1 つの allowlist は `condition = "AND"` にし、`targetRules`（規則）・`paths`（テストのファイルなど、ダミー値を置く場所）・`regexes`（検出された値に当てる、ダミーだと分かる値の形）のすべてに合うものだけを許す。行番号を使わないため、ファイルの行がずれても CI は落ちない。パスだけ・値の形だけの除外や、本物の秘密に合いうる広い値の形は書かない。
-  - `.gitleaksignore`（「コミット:ファイル:規則:行」や「ファイル:規則:行」の指紋）は使わない。指紋は行番号を含むため、行がずれると同じ値が別の検出として出直す。新しいダミー値が既存の allowlist の値の形に合わないときは、そのダミー値を既存の形に合わせるか、値の形を狭く書いた allowlist を足す。
+  - Gitleaks の除外は `.gitleaks.toml` の `[[allowlists]]` に書く（`[extend] useDefault = true` で組み込みの規則はそのまま使う）。1 つの allowlist は `condition = "AND"` にし、`targetRules`（規則）・`paths`（ダミー値を置いたファイル。`^…$` で 1 ファイルずつ）・`regexes`（既知のダミー値そのもの。`^…$` で値全体を書き、検出された値に当てる）のすべてに合うものだけを許す。行番号を使わないため、ファイルの行がずれても CI は落ちない。同じファイルの別の値は除外されない。値の形（桁数・文字種）だけの除外は書かない。
+  - `.gitleaksignore`（「コミット:ファイル:規則:行」や「ファイル:規則:行」の指紋）は使わない。指紋は行番号を含むため、行がずれると同じ値が別の検出として出直す。新しいダミー値を除外するときは、そのファイルとその値を書いた allowlist を足すか、既存の allowlist の値をそのまま使う。
   - `osv-scanner.toml` は `Cargo.lock` と同じディレクトリに置き、`[[IgnoredVulns]]` に `id` と `reason` を書く。`deny.toml` の `ignore` と同じ勧告は同じ理由と Issue を書く。unmaintained の告知は足さない（報告のみのため）。
 
 ## GitHub 通知（Grok Bot webhook・notify-grokbot）

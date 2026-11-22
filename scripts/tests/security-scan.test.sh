@@ -149,6 +149,10 @@ run_case semgrep-unknown-severity semgrep 1 "$semgrep_unknown" 4
 # uses: のタグ参照は actions.lock が SHA を固定するため、mutable-action-tag の規則は使わない。
 want_contains semgrep-exclude-rule "$(cat "$work/args-semgrep-clean")" $'--exclude-rule\nyaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag'
 run_case semgrep-error semgrep 2 "" 2
+# ツール自身が終了コード 4 を返したときも、ログの ::error:: で「失敗させる検出」と見分けられる。
+run_case semgrep-error-rc4 semgrep 4 "" 4
+want_contains semgrep-error-rc4 "$REPLY_LOG" "::error::semgrep が失敗しました（終了コード 4"
+want_absent semgrep-error-rc4 "$REPLY_LOG" "ジョブを失敗させる検出"
 # semgrep の標準エラー（進捗など）は失敗の判定に使わず（解析エラーは JSON で見る）、ログにも出さない。
 STUB_STDERR="semgrep progress FAKESEMGREPDIAG" run_case semgrep-clean-stderr semgrep 0 '{"results":[],"errors":[]}' 0
 want_absent semgrep-clean-stderr "$REPLY_LOG" "FAKESEMGREPDIAG"
@@ -188,6 +192,10 @@ want_absent osv-unmaintained "$REPLY_LOG" "::error"
 osv_unsound='{"results":[{"source":{"path":"/w/Cargo.lock","type":"lockfile"},"packages":[{"package":{"name":"x","version":"1.0.0","ecosystem":"crates.io"},"vulnerabilities":[{"id":"RUSTSEC-2099-0001","affected":[{"database_specific":{"informational":"unsound"}}]}]}]}]}'
 run_case osv-unsound osv-scanner 1 "$osv_unsound" 4
 want_contains osv-unsound "$REPLY_SUMMARY" '` RUSTSEC-2099-0001 (unsound) `'
+# 同じパッケージに unmaintained と通常の勧告があれば、通常の勧告の分で失敗させる。
+osv_mixed='{"results":[{"source":{"path":"/w/Cargo.lock","type":"lockfile"},"packages":[{"package":{"name":"y","version":"1.0.0","ecosystem":"crates.io"},"vulnerabilities":[{"id":"RUSTSEC-2099-0002","affected":[{"database_specific":{"informational":"unmaintained"}}]},{"id":"RUSTSEC-2099-0003","affected":[{"database_specific":{"informational":null}}]}]}]}]}'
+run_case osv-mixed osv-scanner 1 "$osv_mixed" 4
+want_contains osv-mixed "$REPLY_SUMMARY" '` RUSTSEC-2099-0002 (unmaintained), RUSTSEC-2099-0003 `'
 run_case osv-error osv-scanner 127 "" 127
 # 検出（終了コード 1）があっても、ロックファイルの抽出に失敗していれば失敗にする
 # （osv-scanner 2.7.1 は抽出の失敗を標準エラーに出すだけで、検出があれば 1 を返す）。

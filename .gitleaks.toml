@@ -2,42 +2,52 @@
 # gitleaks は走査するディレクトリの .gitleaks.toml を読む。規則は組み込みの既定をそのまま使い、
 # ここでは除外（allowlist）だけを足す。
 #
-# 除外は 1 つずつ、次の 3 つをすべて満たすものだけを許す（condition = "AND"、targetRules で規則も絞る）:
-#   - paths:   テストのファイルなど、ダミー値を置く場所のパス
-#   - regexes: ダミーだと分かる値の形（検出された値 = Secret に当てる）
-#   - 規則:    その値を検出した規則だけ
-# 行番号を使わないため、ファイルの行がずれても CI は落ちない。直前のコメントに理由を書く。
-# 本物の秘密に合いうる広い形（任意の英数字など）や、パスだけ・値の形だけの除外は書かない。
+# 除外は 1 つずつ、次の 3 つをすべて満たすものだけを許す（condition = "AND"）:
+#   - targetRules: その値を検出した規則
+#   - paths:       そのダミー値を置いたファイル（^…$ で 1 ファイルずつ）
+#   - regexes:     既知のダミー値そのもの（^…$ で値全体。検出された値 = Secret に当てる）
+# 行番号を使わないため、ファイルの行がずれても CI は落ちない。同じファイルの別の値は除外されない。
+# 直前のコメントに、その値が秘密でない理由を書く。値の形（桁数・文字種）だけの除外は書かない。
 
 [extend]
 useDefault = true
 
-# agent-gh のテストの合成のダミー鍵。本体の行は MIIBfake で始まる（本物の PEM の鍵本体は
-# base64 の DER で、fake のような英単語の並びにはならない）。
+# agent-gh のテストの合成のダミー鍵（本体の行は MIIBfake…）。本物の鍵ではない。
+# ソースでは $'…' の中に書くため、検出された値の改行は \n の 2 文字になる。
 [[allowlists]]
-description = "scripts/tests の合成のダミー PEM（MIIBfake…）"
+description = "agent-gh のテストの合成のダミー PEM"
 targetRules = ["private-key"]
 condition = "AND"
-paths = ['''^scripts/tests/[^/]+\.test\.sh$''']
-regexes = ['''MIIBfake[A-Za-z]+''']
+paths = ['''^scripts/tests/agent-gh\.test\.sh$''']
+regexes = ['''^-----BEGIN PRIVATE KEY-----\\nMIIBfakeKEYbodyLINEone1234\\nMIIBfakeKEYbodyLINEtwo5678\\n-----END PRIVATE KEY-----$''']
 
-# 契約テストの JSON の idempotency_key の例の値。UUID の先頭 3 組だけの切り詰めた形で、
-# 本物の API キーの形ではない。
+# 契約テストの JSON の idempotency_key の例の値（UUID の先頭 3 組だけの固定値）。秘密ではない。
 [[allowlists]]
-description = "crates/*/tests の idempotency_key の例（切り詰めた UUID）"
+description = "契約テストの idempotency_key の例の値"
 targetRules = ["generic-api-key"]
 condition = "AND"
-paths = ['''^crates/[^/]+/tests/[^/]+\.rs$''']
-regexes = ['''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}$''']
+paths = ['''^crates/pelway-contract/tests/serde_contract\.rs$''']
+regexes = ['''^3f1c2a9e-7b4d-4e21$''']
 
-# 技術文書の保存記録（削除済み）の JSON。ファイル名に api を含む文書の SHA-256 ハッシュ
-# （小文字の 16 進 64 文字）が、キーの名前から generic-api-key に当たる。
+# 技術文書の保存記録（削除済み）の JSON にある、04-data-api-realtime.md の 2 つの版の SHA-256。
+# キーのファイル名に api を含むため generic-api-key に当たる。秘密ではない。
 [[allowlists]]
-description = "docs/technical/v0.7 の保存記録の SHA-256 ハッシュ"
+description = "docs/technical/v0.7 の保存記録の 04-data-api-realtime.md の SHA-256"
 targetRules = ["generic-api-key"]
 condition = "AND"
-paths = ['''^docs/technical/v0\.7/.+\.json$''']
-regexes = ['''^[0-9a-f]{64}$''']
+paths = [
+  '''^docs/technical/v0\.7/sources/addenda/2026-11-09-best-effort-cancel/baseline-preservation\.json$''',
+  '''^docs/technical/v0\.7/sources/addenda/2026-11-09-secrecy/operational-defaults-preservation-v0\.1\.json$''',
+  '''^docs/technical/v0\.7/sources/addenda/2026-11-09-secrecy/preservation-v0\.2\.json$''',
+  '''^docs/technical/v0\.7/sources/v0\.6/verification/delivery-hashes\.json$''',
+  '''^docs/technical/v0\.7/sources/v0\.6/verification/v0\.6-dependencies-manifest\.json$''',
+  '''^docs/technical/v0\.7/sources/v0\.6/verification/v0\.6-manifest\.json$''',
+  '''^docs/technical/v0\.7/verification/source-preservation\.json$''',
+]
+regexes = [
+  '''^675aa8ac486490744fed2aa98e89bda05f39f6d274edb870f6f4053e7211f842$''',
+  '''^b4f0fcab9a1219d7cf8349facbb42b40a953a06b521b37ed607ccb111202c078$''',
+]
 
 # RFC 6455 の 1.3 節の例のハンドシェイクの Sec-WebSocket-Key（例の固定値）。秘密ではない。
 [[allowlists]]
