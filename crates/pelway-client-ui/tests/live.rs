@@ -1156,10 +1156,13 @@ fn poll_after_restart_with_colliding_ids_fetches_the_new_history() {
         )
         .into_bytes()
     };
-    // 再起動前は old-1..=old-400（id は m-id-N）。再起動後の履歴は
-    // 同じ採番・同じ id だが本文だけ違う new-1..=new-3。probe
-    // （after_seq=399&limit=1）は seq=400・id=m-id-400 だが本文が
-    // 違う 1 件を返す → 照合は全フィールドで不一致 → 先頭から取り直す。
+    // 再起動前は old-1..=old-400（id は m-id-N）。再起動後の履歴も
+    // 同じ採番・同じ id の new-1..=new-400 で、本文だけが違う。
+    // probe（limit=1&after_seq=399）はカーソル位置の seq=400・
+    // id=m-id-400 の「new」を返す → 全フィールド照合で不一致 →
+    // 先頭から取り直す。応答は実際のページング契約どおりにする
+    // （probe は履歴中の実在する seq=400 を返し、取り直しは
+    // new-1..=new-400 の正規ページに応答する）。
     let msg_calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let calls2 = msg_calls.clone();
     let stub = spawn_raw_stub_server(move |_method, target| {
@@ -1175,14 +1178,30 @@ fn poll_after_restart_with_colliding_ids_fetches_the_new_history() {
                     .unwrap(),
                 ),
                 3 => vec![], // 切断（再起動前の取得は中断）
-                _ if target.contains("after_seq=") => {
-                    // probe: 識別子は同じだが本文が違う投稿
-                    http_ok(serde_json::to_string(&vec![msg(400, "new")]).unwrap())
+                _ => {
+                    if target.contains("limit=1&") {
+                        // probe: 識別子は同じだが本文が違う実在の 1 件
+                        http_ok(serde_json::to_string(&vec![msg(400, "new")]).unwrap())
+                    } else if !target.contains("after_seq=") {
+                        // 先頭からの取り直し（ページ 1）
+                        http_ok(
+                            serde_json::to_string(
+                                &(1..=200).map(|s| msg(s, "new")).collect::<Vec<_>>(),
+                            )
+                            .unwrap(),
+                        )
+                    } else if target.contains("after_seq=200") {
+                        http_ok(
+                            serde_json::to_string(
+                                &(201..=400).map(|s| msg(s, "new")).collect::<Vec<_>>(),
+                            )
+                            .unwrap(),
+                        )
+                    } else {
+                        // after_seq=400: 末尾に達した短いページ
+                        http_ok(serde_json::to_string(&Vec::<StoredMessage>::new()).unwrap())
+                    }
                 }
-                _ => http_ok(
-                    serde_json::to_string(&(1..=3).map(|s| msg(s, "new")).collect::<Vec<_>>())
-                        .unwrap(),
-                ),
             }
         } else if target.contains("/channels/ch-") {
             http_ok(channel_json.clone())
@@ -1198,18 +1217,19 @@ fn poll_after_restart_with_colliding_ids_fetches_the_new_history() {
         .poll()
         .expect("内容が変わった履歴は先頭から取り直す");
     let messages = session.messages();
-    assert_eq!(messages.len(), 3);
+    assert_eq!(messages.len(), 400);
     assert!(
         messages.iter().all(|m| m.body.starts_with("new")),
         "識別子が同じでも内容が違えば古い履歴は残らない"
     );
 }
 
-// 保存カーソルの検証: サーバーが seq=0 を末尾にした満杯ページを返すと
-// カーソルは 0 になり、再開時の probe（after_seq = カーソル-1）は
-// アンダーフローする。減算前に検査して Protocol として扱う。
+// 採番違反の拒否と復旧: seq=0 で終わる満杯ページはカーソルに使えない
+// （probe の `after_seq = カーソル-1` を組めない）ため、途中経過への追加
+// 前に `Protocol` で拒否する。サーバーが正常な応答に戻れば、先頭から
+// 取り直して復旧できる。
 #[test]
-fn saved_cursor_zero_is_a_protocol_error_not_an_underflow() {
+fn page_ending_at_seq_zero_is_rejected_and_fetch_recovers() {
     let ch = Channel {
         workspace_id: WorkspaceId::from("ws-demo-01"),
         channel_id: ChannelId::from("ch-stub"),
@@ -1243,9 +1263,9 @@ fn saved_cursor_zero_is_a_protocol_error_not_an_underflow() {
         )
         .into_bytes()
     };
-    // seq が 0 で終わる満杯ページ（サーバー採番違反）を受けてカーソル 0
-    // を保存し、次のページ要求は切断。再開時の probe 計算が
-    // パニックせず Protocol になることを見る。
+    // 1 回目: seq=0 で終わる満杯ページ（採番違反 → Protocol で拒否）。
+    // 2 回目以降: 正常な履歴（good ではなく同じ msg で seq 1..=200 と
+    // 短いページ 1 件）。
     let msg_calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let calls2 = msg_calls.clone();
     let stub = spawn_raw_stub_server(move |_method, target| {
@@ -1255,7 +1275,10 @@ fn saved_cursor_zero_is_a_protocol_error_not_an_underflow() {
                 1 => http_ok(
                     serde_json::to_string(&(0..200u64).rev().map(msg).collect::<Vec<_>>()).unwrap(),
                 ),
-                _ => vec![],
+                _ if !target.contains("after_seq=") => {
+                    http_ok(serde_json::to_string(&(1..=200).map(msg).collect::<Vec<_>>()).unwrap())
+                }
+                _ => http_ok(serde_json::to_string(&vec![msg(201)]).unwrap()),
             }
         } else if target.contains("/channels/ch-") {
             http_ok(channel_json.clone())
@@ -1265,14 +1288,22 @@ fn saved_cursor_zero_is_a_protocol_error_not_an_underflow() {
     });
 
     let mut session = LiveSession::new(stub, "ws-demo-01".into());
-    assert!(session.bootstrap().is_err(), "2 ページ目で切断");
-
-    let result = session.poll();
     assert!(
-        matches!(result, Err(LiveError::Protocol(_)) | Err(LiveError::Net(_))),
-        "seq=0 のカーソルは Protocol で扱い、パニックしない: {result:?}"
+        matches!(
+            session.bootstrap(),
+            Err(LiveError::Protocol("message seq is zero"))
+        ),
+        "seq=0 で終わるページは採番違反として拒否"
     );
-    if let Err(LiveError::Protocol(msg)) = result {
-        assert_eq!(msg, "saved fetch cursor is zero");
-    }
+
+    // 拒否ページは途中経過に残らない（カーソル未設定）ため、サーバーが
+    // 正常な応答に戻れば先頭から取り直して復旧する。
+    session.poll().expect("正常な応答では取得が再開する");
+    let messages = session.messages();
+    assert_eq!(messages.len(), 201);
+    assert!(
+        messages.windows(2).all(|w| w[0].seq < w[1].seq),
+        "seq 昇順・重複なし"
+    );
+    assert_eq!(messages.last().map(|m| m.seq), Some(201));
 }

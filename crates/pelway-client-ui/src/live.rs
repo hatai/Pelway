@@ -421,8 +421,12 @@ impl LiveSession {
             let full = page.len() >= p.page_limit as usize;
             let last_seq = page.last().map(|m| m.seq);
             // 途中経過に足す前にページを検査する——拒否したページの内容が
-            // 残ると、次の取得がそれを含んだ結果を返してしまう。
+            // 残ると、次の取得がそれを含んだ結果を返してしまう。`seq=0`
+            // のカーソルは probe の `after_seq = カーソル-1` を組めないため
+            // 採番違反として拒否する（保存してしまうと以後の取得が必ず
+            // カーソル検査で失敗し、復旧できなくなる）。
             let advance = match (full, last_seq) {
+                (true, Some(0)) => return Err(self.protocol_err("message seq is zero")),
                 (true, Some(s)) if p.after.is_none_or(|a| s > a) => Some(s),
                 (true, _) => return Err(self.protocol_err("message page did not advance")),
                 _ => None,
@@ -456,7 +460,9 @@ impl LiveSession {
             return Ok(false);
         };
         let Some(prev) = after.checked_sub(1) else {
-            return Err(self.protocol_err("saved fetch cursor is zero"));
+            // 保存済みのカーソル 0 は破棄して先頭から取り直す（ページ検査で
+            // `seq=0` は拒否するが、拒否前の版で保存されたものの保険）。
+            return Ok(false);
         };
         let mut path = self.actor_path_for(&p.actor, &channel_messages_path(&p.channel_id));
         path.push_str(&format!("&limit=1&after_seq={prev}"));
