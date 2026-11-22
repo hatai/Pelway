@@ -221,7 +221,8 @@ def all_pages(path):  # --paginate --slurp の応答（ページの配列）を 
     return [x for p in data for x in p if isinstance(x, dict)]
 def registered_thread():
     # 登録ファイルの 1 行目（スレッド ID）。無い・空・通常のファイルでない（symlink はたどらず、FIFO で止まらない）ときは ""、ほかの理由で
-    # 読めない（権限が無い・自分の所有でない）ときは None（判定の保留）。crates/pelway-agent-watch の read_conductor_file・parse_conductor_file と同じ決まり
+    # 読めない（権限が無い・自分の所有でない）ときは None（判定の保留）。symlink をたどらないこと・通常ファイルと所有者の確かめ・1 行目を使うことは
+    # crates/pelway-agent-watch の read_conductor_file・parse_conductor_file と同じ（不正な UTF-8 は置き換えて読む）
     p = sys.argv[5]
     try:
         fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -246,6 +247,7 @@ def conductor_absence():  # 指揮役が T3 のスレッドとして動いてい
 def events(n): return all_pages(f"/repos/hatai/Pelway/issues/{n}/events?per_page=100")  # 全ページ。取得失敗は None
 def label_events(evs, label):  # evs のうち label の付け外しのイベント（GitHub が返す古い順のまま）
     return [e for e in evs or [] if e.get("event") in ("labeled", "unlabeled") and (e.get("label") or {}).get("name") == label]
+def last_event(es): return (es or [{}])[-1].get("event")
 def open_labeling(evs):  # needs-decision の今の付与の時刻。最後の付け外しが外したもの・見つからない・時刻が読めないときは None
     last = (label_events(evs, "needs-decision") or [{}])[-1]
     return last.get("created_at") if last.get("event") == "labeled" and iso(last.get("created_at")) else None
@@ -275,8 +277,7 @@ def escalate(n, lt, reason):
         if evs is None: return
         labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
         # Issue の読み取りとの間の付け外し・開閉は最後の events の方が新しい: events の最後のイベントで確かめ直す
-        st = [e for e in evs if e.get("event") in ("closed", "reopened")]
-        open_ = st[-1]["event"] == "reopened" if st else iss.get("state") == "open"
+        open_ = iss.get("state") == "open" and last_event([e for e in evs if e.get("event") in ("closed", "reopened")]) in (None, "reopened")
         if not open_ or "needs-decision" not in labs or open_labeling(evs) != lt: return
         nh = label_events(evs, "needs-human")
         human = "needs-human" in labs or bool(nh and nh[-1]["event"] == "labeled")
@@ -307,10 +308,10 @@ if issues is not None:
         labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
         if iss.get("state") != "OPEN" or "needs-decision" not in labs: continue
         n = str(iss.get("number")); labeled.add(n)
-        # needs-human もあれば人間待ち（DECISION も補助記録の起点も出さない）。格上げが途中の Issue だけ、指揮役がいない周に続きを照合する
+        # needs-human もあれば人間待ち（DECISION も補助記録の起点も出さない）。格上げが途中の Issue だけ、前の付与の完了を照合する（書くのは指揮役がいない周だけ）
         human = "needs-human" in labs
-        if human and not (reason and (esc.get(n) or {}).get("stage") in ("commented", "adding", "added")): continue
-        lt = open_labeling(events(n))
+        if human and (esc.get(n) or {}).get("stage") not in ("commented", "adding", "added"): continue
+        evs = events(n); lt = open_labeling(evs)
         if lt is None: continue  # 取得失敗・イベントが見つからない: 遅れとは扱わず、次の周で取り直す
         old = esc.get(n)
         if old and old.get("labeled_at") != lt:
@@ -321,7 +322,9 @@ if issues is not None:
             del esc[n]; store()
         if not human: decision_at[n] = lt
         if now - iso(lt).timestamp() < DECISION_SECS: continue
-        if not human and cur["decision_warned"].get(n) != lt: print(f"DECISION overdue #{n} labeled_at={lt}", flush=True); cur["decision_warned"][n] = lt
+        # 一覧の後の needs-human の付与・クローズが events に出ていれば知らせず、通知済みにもしない
+        gone = last_event(label_events(evs, "needs-human")) == "labeled" or last_event([e for e in evs if e.get("event") in ("closed", "reopened")]) == "closed"
+        if not human and not gone and cur["decision_warned"].get(n) != lt: print(f"DECISION overdue #{n} labeled_at={lt}", flush=True); cur["decision_warned"][n] = lt
         if reason: escalate(n, lt, reason)
     # 一覧から外れた Issue（閉じた・一覧の窓外）の通知済み時刻も残す。同じ labeled_at で再出現しても重複して知らせない
     # 処理対象から外れた Issue に途中の記録があれば Issue ごとの状態で照合する（読むだけで書き込みはしない）。needs-decision が

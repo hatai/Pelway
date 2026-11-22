@@ -277,15 +277,13 @@ check "13: needs-human already added on re-read -> no writes" eq "$(calls)" ""
 fail_first comment 715
 check "14: failed comment -> step=comment line (exact), no label change" eq "$(calls)|$(last_line)" "issue comment 715 --body-file -|DECISION escalate-failed #715 step=comment"
 retry
-check "14: retried from the re-read on the next cycle" eq "$(calls)" "$(escalation_calls 715)"
-check "14: escalated after retry" eq "$(last_line)" "$(escalated 715)"
+check "14: retried from the re-read on the next cycle, escalated after retry" eq "$(calls)|$(last_line)" "$(escalation_calls 715)|$(escalated 715)"
 
 # 15. コメントは書けてラベルの変更に失敗: step=label。次の周で同じコメントを 2 回目は書かない
 fail_first edit-add 716
 check "15: failed label change line (exact)" eq "$(last_line)" "DECISION escalate-failed #716 step=label"
 retry
-check "15: no second comment for the same labeled_at" eq "$(calls)" "$(label_calls 716)"
-check "15: escalated after retry" eq "$(last_line)" "$(escalated 716)"
+check "15: no second comment for the same labeled_at, escalated after retry" eq "$(calls)|$(last_line)" "$(label_calls 716)|$(escalated 716)"
 
 # 16. needs-human を付けた後に外すのが失敗したら両方残る。次の周で、同じ labeled_at の見張りの記録で自分の格上げと確かめて外し直す
 fail_first edit-remove 717
@@ -294,16 +292,14 @@ check "16: failed removal leaves both labels" eq "$(labels_of 717)" "needs-decis
 check "16: the watcher's record is stage added for the labeled_at" eq "$(record_of 717)" "$T20 added"
 again
 check "16: retried removal fails again -> only the removal is retried" eq "$(calls)" "issue edit 717 --remove-label needs-decision"
-check "16: retried removal fails again -> step=label (exact)" eq "$(decision_lines)" \
-  "$(lines "$(overdue 717)" "DECISION escalate-failed #717 step=label" "DECISION escalate-failed #717 step=label")"
+check "16: retried removal fails again -> step=label (exact)" eq "$(decision_lines)" "$(lines "$(overdue 717)" "DECISION escalate-failed #717 step=label" "DECISION escalate-failed #717 step=label")"
 retry
-check "16: next cycle removes needs-decision only" eq "$(calls)" "issue edit 717 --remove-label needs-decision"
-check "16: escalated after retry" eq "$(last_line)" "$(escalated 717)"
+check "16: next cycle removes needs-decision only, escalated after retry" eq "$(calls)|$(last_line)" "issue edit 717 --remove-label needs-decision|$(escalated 717)"
 check "16: the notice is written once" eq "$(find "$MOCK" -name 'body-717-*' | wc -l)" "1"
 check "16: labels end as needs-human, issue waits on human" eq "$(labels_of 717)|$(sget 717 waiting_on)" "needs-human|human"
 # 外すのに失敗した後に指揮役が動き始めたら、見張りは外し直さない（ラベルを替えるのは指揮役がいない周だけ）
 fail_first edit-remove 717; heal; : > "$MOCK/reads"; reg "$CONDUCTOR"; run_cycles 1
-check "16: conductor running -> the leftover removal is not retried, the leftover issue is not read" eq "$(calls)|$(reads_of 717)" "|"
+check "16: conductor running -> the leftover removal is not retried" eq "$(calls)" ""
 
 # 17. 同じ目印・同じ本文でも、pelway-dev[bot] 以外のコメントは書いた印にしない
 once 718 add_comment 718 stranger "$(body_for "$T20")"
@@ -344,13 +340,15 @@ once 755 on_read issue 755 "i['events'][-1].append(ev('labeled', 'needs-human', 
 check "24: needs-human event between the issue read and the last events fetch -> no writes" eq "$(calls)" ""
 once 756 on_read issue 756 "i['events'][-1].append(ev('closed', '', '$T5'))"
 check "24: closed event between the issue read and the last events fetch -> no writes" eq "$(calls)" ""
+reset; issue_with 762 "$T20" needs-decision; gh_edit 'st[args[0]]["events"][0][:0] = [ev("closed", "", args[1]), ev("reopened", "", args[1])]' 762 "$(ago 60)"
+on_read issue 762 "i['state'] = 'closed'"; run_cycles 1
+check "24: issue read as closed while events still end with an old reopened -> no writes" eq "$(calls)" ""
 # 25. 見張りのコメントの後に needs-human を付けるのに失敗し、ほかの誰かが needs-human を付けたら、needs-decision を外さない
 fail_first edit-add 728; heal; set_labels 728 needs-decision needs-human; run_cycles 1
 check "25: someone else's needs-human -> needs-decision is not removed, both labels stay" eq "$(calls)|$(labels_of 728)" "|needs-decision needs-human"
 # 26. 見張りが付けた needs-human を、needs-decision を外し損ねている間に人間が外したら、付け直さずに needs-decision だけを外す
 fail_first edit-remove 729; heal
-gh_edit 'i = st[args[0]]; i["labels"] = ["needs-decision"]; i["events"][-1].append(ev("unlabeled", "needs-human", args[1]))' 729 "$T5"
-run_cycles 1
+gh_edit 'i = st[args[0]]; i["labels"] = ["needs-decision"]; i["events"][-1].append(ev("unlabeled", "needs-human", args[1]))' 729 "$T5"; run_cycles 1
 check "26: human removed needs-human -> only needs-decision is removed, neither label stays" eq "$(calls)|$(labels_of 729)" "issue edit 729 --remove-label needs-decision|"
 # 27. 付与の試行（`adding` の記録）のあとにほかの名義の needs-human の付け外しがあれば、出どころを確かめられないので `held` にして付け直さない。通知前なら、試行前の付け外しは試行の照合に入らないので通常どおり進める
 fail_first edit-add 730; heal; flip_human 730; run_cycles 1
@@ -360,8 +358,7 @@ check "27: fresh escalation, needs-human removed after labeled_at -> escalated a
 # 28. 記録は同じ labeled_at のものだけを使う。外し損ねの記録の後に外して付け直されたら、新しい labeled_at の格上げを初めからする
 fail_first edit-remove 732 "$T40"; heal
 gh_edit 'i = st[args[0]]; i["labels"] = ["needs-decision"]
-i["events"][-1] += [ev("unlabeled", "needs-human", args[1]), ev("unlabeled", "needs-decision", args[1]), ev("labeled", "needs-decision", args[2])]' 732 "$(ago 30)" "$T20"
-run_cycles 1
+i["events"][-1] += [ev("unlabeled", "needs-human", args[1]), ev("unlabeled", "needs-decision", args[1]), ev("labeled", "needs-decision", args[2])]' 732 "$(ago 30)" "$T20"; run_cycles 1
 check "28: a record for an older labeled_at is not reused" eq "$(calls)" "$(escalation_calls 732)"
 
 # --- 試行の記録と GitHub のラベル履歴での照合（記録は段ごとにその場で保存する） ---
@@ -373,14 +370,12 @@ check "29: removed before the attempt, transient failure -> added again, then ne
 # 30. 付いたのに応答が失われたら、記録の試行の後の自分の名義の labeled で付けたと確かめ、needs-decision だけを外す。
 # その間に人間が needs-human を外していても付け直さない。付けた直後に保存の前で止まっても同じ
 fail_first edit-add-lost 736
-check "30: add applied but the response lost -> step=label (exact)" eq "$(last_line)" "DECISION escalate-failed #736 step=label"
-check "30: the attempt is recorded before the call" eq "$(record_of 736)" "$T20 adding"
+check "30: add applied but the response lost -> step=label (exact), the attempt is recorded before the call" eq "$(last_line)|$(record_of 736)" "DECISION escalate-failed #736 step=label|$T20 adding"
 retry
 check "30: lost response -> next cycle removes needs-decision only" eq "$(calls)" "issue edit 736 --remove-label needs-decision"
 check "30: lost response -> escalated (exact), labels end as needs-human" eq "$(last_line)|$(labels_of 736)" "$(escalated 736)|needs-human"
 fail_first edit-add-lost 737; heal
-gh_edit 'i = st[args[0]]; i["labels"].remove("needs-human"); i["events"][-1].append(ev("unlabeled", "needs-human", args[1]))' 737 "$T5"
-run_cycles 1
+gh_edit 'i = st[args[0]]; i["labels"].remove("needs-human"); i["events"][-1].append(ev("unlabeled", "needs-human", args[1]))' 737 "$T5"; run_cycles 1
 check "30: removed by a human after the attempt -> not added again, needs-decision removed" eq "$(calls)" "issue edit 737 --remove-label needs-decision"
 fail_first edit-add-crash 738; retry
 check "30: stopped before saving -> next cycle removes needs-decision only, labels end as needs-human" eq "$(calls)|$(labels_of 738)" "issue edit 738 --remove-label needs-decision|needs-human"
@@ -398,8 +393,7 @@ check "32: removed during the events fetch (unlabeled returned), back on the iss
 once 741 on_read events 741 "i['labels'].remove('needs-decision')" 1
 check "32: removed during the events fetch (not yet in events) -> no writes" eq "$(calls)" ""
 # 33. 付いたのに応答が失われ、その labeled が events にまだ出ていないうちは、held にせず次の周に回す
-fail_first edit-add-lost 742; heal; gh_edit 'json.dump(st[args[0]]["events"][-1].pop(), open(args[1], "w"))' 742 "$MOCK/lagged"
-run_cycles 1
+fail_first edit-add-lost 742; heal; gh_edit 'json.dump(st[args[0]]["events"][-1].pop(), open(args[1], "w"))' 742 "$MOCK/lagged"; run_cycles 1
 check "33: added but not yet in events -> no writes, the attempt kept" eq "$(calls)|$(record_of 742)" "|$T20 adding"
 gh_edit 'st[args[0]]["events"][-1].append(json.load(open(args[1])))' 742 "$MOCK/lagged"; run_cycles 1
 check "33: once in events -> needs-decision removed" eq "$(calls)" "issue edit 742 --remove-label needs-decision"
@@ -415,14 +409,12 @@ check "34: after the other's needs-human is removed -> the notice is not reposte
 check "34: after the other's needs-human is removed -> escalated" eq "$(last_line)" "$(escalated 744)"
 # 通知の後、Issue の読み取りと最後の events の取得の間に付与が出るとき（ラベル一覧はまだ古い）は、通知だけ書いて held になる
 once 758 on_read issue 758 "i['events'][-1].append(ev('labeled', 'needs-human', '$T5'))" 1
-check "34: needs-human after the notice, before the add step -> notice once, no label edit"   eq "$(calls)" "$(lines "issue comment 758 --body-file -")"
-check "34: needs-human after the notice, before the add step -> held (exact)"   eq "$(last_line)" "DECISION held #758 labeled_at=$T20"
-check "34: needs-human after the notice, before the add step -> needs-decision kept"   eq "$(labels_of 758)" "needs-decision"
+check "34: needs-human after the notice, before the add step -> notice once, no label edit, held (exact), needs-decision kept" \
+  eq "$(calls)|$(last_line)|$(labels_of 758)" "issue comment 758 --body-file -|DECISION held #758 labeled_at=$T20|needs-decision"
 # 35. needs-human の付与が変更なしで成功しても（直前にほかの担当が付けた）added にせず、試行と付与イベントの照合で held にする
 once 746 on_read edit 746 "i['labels'].append('needs-human'); i['events'][-1].append(ev('labeled', 'needs-human', '$T5'))"
-check "35: no-op add success -> needs-decision is not removed" eq "$(calls)" "$(lines "issue comment 746 --body-file -" "issue edit 746 --add-label needs-human")"
+check "35: no-op add success -> needs-decision is not removed, both labels stay" eq "$(calls)|$(labels_of 746)" "$(lines "issue comment 746 --body-file -" "issue edit 746 --add-label needs-human")|needs-decision needs-human"
 check "35: no-op add success -> held, not added, held line (exact)" eq "$(record_of 746)|$(last_line)" "$T20 held|DECISION held #746 labeled_at=$T20"
-check "35: no-op add success -> both labels stay" eq "$(labels_of 746)" "needs-decision needs-human"
 # 36. needs-decision を外す応答が失われても、外れていれば次の周で完了を報告してから記録を整理する
 fail_first edit-remove-lost 747
 check "36: removal response lost -> step=label" eq "$(last_line)" "DECISION escalate-failed #747 step=label"
@@ -434,16 +426,16 @@ check "36: removal confirmed -> record cleaned, no writes" eq "$(record_of 747)|
 fail_first edit-remove-lost 759 "$T40"; heal
 relabel 759 "$T5"; set_labels 759 needs-decision needs-human; run_cycles 1
 check "36: relabeled after a lost removal -> old escalation completed once" eq "$(decision_lines | grep -c "escalated #759 labeled_at=$T40")" "1"
-check "36: relabeled after a lost removal -> no writes for the new labeling" eq "$(calls)" ""
-check "36: relabeled after a lost removal -> old record replaced" eq "$(record_of 759)" ""
+check "36: relabeled after a lost removal -> no writes for the new labeling, old record replaced" eq "$(calls)|$(record_of 759)" "|"
+fail_first edit-remove-lost 763 "$T40"; heal; relabel 763 "$T5"; set_labels 763 needs-decision needs-human; reg "$CONDUCTOR"; run_cycles 1
+check "36: relabeled after a lost removal, conductor running -> old escalation completed once, no writes" eq "$(decision_lines | grep -c "escalated #763 labeled_at=$T40")|$(calls)" "1|"
 # 37. 途中で Issue が閉じたら記録を残し、再オープン後に解除の再試行を再開する
 fail_first edit-remove 748
 check "37: mid-flight record is added" eq "$(record_of 748)" "$T20 added"
 gh_edit 'i = st[args[0]]; i["state"] = "closed"' 748; again
 check "37: closed mid-flight -> no writes, record kept" eq "$(calls)|$(record_of 748)" "|$T20 added"
 gh_edit 'i = st[args[0]]; i["state"] = "open"' 748; retry
-check "37: reopened -> removal retried" eq "$(calls)" "issue edit 748 --remove-label needs-decision"
-check "37: reopened -> escalated, labels end as needs-human" eq "$(last_line)|$(labels_of 748)" "$(escalated 748)|needs-human"
+check "37: reopened -> removal retried, escalated, labels end as needs-human" eq "$(calls)|$(last_line)|$(labels_of 748)" "issue edit 748 --remove-label needs-decision|$(escalated 748)|needs-human"
 # 38. 同じ付与が続いている間は通知済みの記録を残す: needs-decision の付いたまま閉じて再オープンしても通知は繰り返さない
 reset; issue_with 760 "$T40" needs-decision; reg "$CONDUCTOR"; run_cycles 1  # 指揮役がいるので知らせるだけ（overdue 1 回）
 gh_edit 'st[args[0]]["state"] = "closed"' 760; run_cycles 1
@@ -456,6 +448,11 @@ gh_edit 'i = st[args[0]]; i["state"] = "closed"; i["labels"].remove("needs-human
 gh_edit 'st[args[0]]["state"] = "open"' 761; run_cycles 1
 check "38: held record survives close+reopen -> still held, no re-escalation" eq "$(record_of 761)|$(calls)" "$T20 held|"
 check "38: held record survives close+reopen -> overdue once (exact)" eq "$(decision_lines | grep -c 'overdue #761')" "1"
+# 39. 一覧の後に needs-human が付き、最初の Issue ごとの events に出たら DECISION overdue を出さず、通知済みにもしない（外れたら知らせる）
+once 764 on_read events 764 "i['labels'].append('needs-human'); i['events'][-1].append(ev('labeled', 'needs-human', '$T5'))"
+check "39: needs-human in the first events fetch -> no overdue, no writes" eq "$(decision_lines)|$(calls)" "|"
+gh_edit 'i = st[args[0]]; i["labels"].remove("needs-human"); i["events"][-1].append(ev("unlabeled", "needs-human", args[1]))' 764 "$T5"; run_cycles 1
+check "39: after needs-human is removed -> overdue, then escalated" eq "$(decision_lines)" "$(lines "$(overdue 764)" "$(escalated 764)")"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
