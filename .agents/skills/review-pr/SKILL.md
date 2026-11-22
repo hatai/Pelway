@@ -20,12 +20,15 @@ AI 開発チームのレビュー担当が、PR 1 本をレビューして GitHu
 - `pr ready` は実行しない（レビュー担当の App には権限がない。Ready for review への切り替えは実装担当の App が行う）。
 - 投稿系のコマンドは `&&` でつながず 1 つずつ実行し、終了コードを確かめる。失敗したら `verdict: failed` で報告する。成功していない投稿を成功と報告しない。
 - 終了コードはツールの結果で確かめ、`echo $?` を足さない。1 つのコマンドに、変数の代入・`$(...)`・`$?`・`for`/`while` のループ・`<(...)` を入れない。値は前のコマンドの出力から書き写す。Claude のレビュー担当では、これらの形は実行前に確かめられないため承認要求になり、フックが自動で拒否する。この拒否は sandbox の遮断ではないので、単純なコマンドに分けて送り直し、`verdict: failed` にしない。
-- GitHub への投稿は必ず `scripts/agent-gh review ...` で行う。投稿者が `pelway-review[bot]` になる。
+- GitHub への投稿は必ず `scripts/agent-gh review ...` で行う。投稿者が `pelway-review[bot]` になる。`docs/dev-environment.md` の「レビュー担当の Codex」「レビュー担当の Claude」の確認で無いとするツール（T3 の `pull_request_*`・`ci_*`・Issue のツール、Codex の GitHub 連携とウェブ検索、Claude の `mcp__` で始まるツールなど）は、レビュー担当の環境の設定で外してある。それでもそのツールが自分のツールの一覧（直接呼べるものと遅延読み込みのもの）にあれば、設定の不備として扱う。そのツールは使わず、PR や Issue を読む前に、投稿せずに `verdict: failed` で終え、`error:` に `設定の不備: <そのツール名>` と書く（その環境は設定を直して確かめ直すまでレビューに使わないため）。Claude では、システムの通知に `plugin:` で始まる MCP サーバーが出ていれば、ツールの一覧に無くても同じく止まる（接続が後から戻りうるため）。ハーネスの指示の文に名前が出ているだけで、ツールの一覧にもシステムの通知にも無いときは数えない。レビューの途中でそのツールが一覧や通知に現れたときも、その時点で投稿せずに同じく `verdict: failed`（`error: 設定の不備: <ツール名>`）で終える。投稿の後に現れたときも、`verdict: failed`（`error: 設定の不備: <ツール名>`）で報告する。
+  - `scripts/agent-gh review` の読み取りが認証や通信の失敗で GitHub に届かないときは、1 回だけ送り直す。投稿のコマンドが失敗したときは、上の投稿の決まりのとおり送り直さない（受け付け済みのことがあり、送り直すとレビューが二重に付きうるため）。読み取りが送り直しても届かなければ、別のツールで代えず、`verdict: failed` で報告する。読み取りの結果（無いパスへの 404 など）は、失敗ではなくレビューの材料として扱う。
 - 判定は 2 種類だけ。must-fix が 1 つでもあれば Request changes、なければ Approve。
 
 ## 手順
 
-### 1. 材料を集める
+### 1. 実行環境を確かめ、材料を集める
+
+まず、自分の実行環境を確かめる。ハーネスが示す作業ディレクトリが T3 の worktree（`~/.t3/worktrees/` の下）で、権限が `auto-accept-edits`（コマンドが sandbox の中で動く。Codex なら sandbox が `danger-full-access` でない、Claude なら permission mode が `acceptEdits`）であること。Devin CLI（`devin_review`）には `runtimeMode` が無く、sandbox は起動ラッパーが掛けるので、作業ディレクトリだけを確かめる。どちらかが違えば、何も読まず投稿もせず、`verdict: failed`、`error: wrong runtime` で報告して止まる（sandbox の外ではネットワークと書き込みの制限が効かない）。
 
 ```bash
 scripts/agent-gh review pr view <N> --json title,body,author,headRefName,headRefOid,isDraft,closingIssuesReferences
@@ -50,17 +53,33 @@ scripts/agent-gh review pr view <N> --json files --jq '.files[].path'
 
 PR で変わっていないファイルは worktree（main）の版を読めばよい。
 
+#### 2 回目以降の round
+
+同じ担当（`Reviewer:` の行の `agent=` が自分と同じ）が同じ PR を前にレビューしていたら、2 回目以降の round として扱う。前のレビューは `scripts/agent-gh review pr view <N> --json reviews --jq '.reviews[] | select(.author.login == "pelway-review") | .body'` で読む。
+
+2 回目以降の round では、前回レビューした sha（`Reviewed:` の行）から今の head までの差分と、前回の must-fix が直ったかを見る。差分は `scripts/agent-gh review api "repos/hatai/Pelway/compare/<前回の sha>...<headRefOid>"` で読み、main の取り込み（merge コミット）で入った変更は見ない。compare の `status` が `diverged`（履歴が書き換わった）ときは、初回と同じく全体を見る。
+
+差分の外で新しく見つけたことは nit か PR 外の所見にする。must-fix にしてよいのは、この PR が入れた正しさ・安全性の欠陥だけ。前回の must-fix が直っていないこと、受け入れ条件を満たしていないこと、verify・pr-size の失敗、PR の作成者の食い違いは、手順 3 の表のとおり must-fix にする。
+
 指摘は head の版のファイルについて書く。指摘を書く前に、引く文言と挙動が `headRefOid` の版の該当行に今あることを、その版の本文で確かめる。差分の `-` 行は消えた記述であり、head には残っていない（消したこと自体が問題のときは、消えたことを指摘する。書き方は手順 4）。シェルやコマンドの挙動を根拠に must-fix にするときは、入力の形（複数行か、どの行に何が来るか）まで当てはめて、本当にその結果になるかを確かめる。確かめた結果、指摘の前提が成り立たなければ、その指摘は書かない。この確認の対象は、読めば確かめられる事実（文言があるか、コードやコマンドがどう動くか）であり、起こりうる攻撃や運用の前提に立つ指摘は、確認しきれないことを理由に格下げしない。
 
 検証・実測の報告（実測の記録や調査報告などで、結論を出している文書）を含む PR では、結論が実測した範囲に収まっているかを読む。実測した条件（環境、データの形、前提にした運用）を外れた場合まで「満たす」「保証する」と断定しているときは、確かめた事実と未検証の仮説を分けるよう求める。受け入れ条件の結論を左右する断定なら must-fix、左右しない書きぶりの問題なら nit とする。
 
-PR のチェックの結果を読む。待たない（Grok Bot はチェックが終わってからレビューを頼む）。
+PR のチェックの結果を読む。ほかの検査より先に行う。必須チェック（`mise run verify` と `pr-size`）が終わっていないときは、`checks pending` で失敗を返さず、skill `pr-watch` の「待ち方」で待ってからレビューする（レビュー担当の行: `scripts/agent-gh review pr checks <N> --required --watch --interval 30` を前面で実行する）。
 
 ```bash
 scripts/agent-gh review pr checks <N> --json name,bucket
 ```
 
-`--required` は付けない。必須チェックがまだ 1 つも報告されていない head では、`--required` は一覧を返さず `no required checks reported` で失敗するため。返った一覧から、名前が `mise run verify` と `pr-size` の行だけを使う。同じ名前の行が複数あるときは、すべてが `pass` のときだけ pass とし、どれかが `fail` なら fail、どれかが `pending` なら pending とする。`mise run verify` と `pr-size` の `bucket` が `pass` なら pass、`fail` なら fail。pr-size が fail のときは、PR のラベルを読む（`scripts/agent-gh review pr view <N> --json labels --jq '.labels[].name'`）。`pr-size-exception` があり、かつ PR が閉じる Issue のコメントに、行頭が `<!-- pr-size-exception -->` で始まり、作成者（`author.login`）が `hatai` のコメントがある（`scripts/agent-gh review issue view <Issue 番号> --json comments --jq '.comments[] | {author: .author.login, body}'`）ときだけ、must-fix に数えず、本文の検査の欄に `pr-size: fail（pr-size-exception）` と書く。どちらかが欠けていれば、通常どおり must-fix に数える。どちらかが `pending` か、見つからないときは、レビューを投稿せずに `verdict: failed`、`error: checks pending` で報告する。
+この読むコマンドには `--required` を付けない（待つコマンドには付ける）。必須チェックがまだ 1 つも報告されていない head では、`--required` は一覧を返さず `no required checks reported` で失敗するため。返った一覧から、名前が `mise run verify` と `pr-size` の行だけを使う。同じ名前の行が複数あるときは、すべてが `pass` のときだけ pass とし、どれかが `fail` なら fail、どれかが `pending` なら pending とする。`mise run verify` と `pr-size` の `bucket` が `pass` なら pass、`fail` なら fail。pr-size が fail のときは、PR のラベルを読む（`scripts/agent-gh review pr view <N> --json labels --jq '.labels[].name'`）。`pr-size-exception` があり、かつ PR が閉じる Issue のコメントに、行頭が `<!-- pr-size-exception -->` で始まり、作成者（`author.login`）が `hatai` のコメントがある（`scripts/agent-gh review issue view <Issue 番号> --json comments --jq '.comments[] | {author: .author.login, body}'`）ときだけ、must-fix に数えず、本文の検査の欄に `pr-size: fail（pr-size-exception）` と書く。どちらかが欠けていれば、通常どおり must-fix に数える。どちらかが `pending` か、見つからないときは、上の待ち方で待ち、終わってから読み直す。待ち始めから 60 分たっても終わらないときは、レビューを投稿せずに `verdict: failed`、`error: checks timeout` で報告する。
+
+差分に確かめ方を弱める変更があるかを、差分の `-` 行と `+` 行で確かめる。確かめ方を弱める変更は次のどれか:
+
+- テストを消した（テストのファイル、`#[test]`・`#[tokio::test]` などのテスト関数、テストケース、`evals/` のケース）
+- テストを実行させなくした（`#[ignore]`、`.skip`・`it.skip`・`test.skip`・`describe.skip`、`xit(` を足した）
+- アサーションを減らした、または緩めた（`assert!`・`assert_eq!`・`expect(` などを消した、期待値を広げた、厳密な比較を部分一致や存在の確認に替えた、`#[should_panic]` の条件を消した）
+
+当たる変更があれば、PR 本文の「変更内容」の見出し「確かめ方を弱める変更」に、その変更の理由が書かれているかを読む（書き方は skill `implement-issue` の手順 7）。理由が無い変更は 1 件ずつ must-fix にする。理由があっても、その理由で受け入れ条件を確かめるテストが失われるなら must-fix にする。当たる変更が無ければ、投稿の「検査」に `確かめ方を弱める変更: なし` と書く。
 
 実装者メモ・調査報告などの成果物に「使ったスキル」の記録があれば、記録されたスキル（輸入スキル `tdd`・`diagnosing-bugs` など）が作業内容に反映されているかを抜き取りで確かめる。記録と実態が明らかに食い違うときは must-fix、判断が分かれるものは nit とする。輸入スキルの取り込み discipline（同梱スクリプトは実行しない、`agents/` のメタデータは使わない、採用していないスキルへの参照は無効、輸入品の本文より正本と適用ルールが優先）は役割スキルと `docs/agents/external-skills.md` に定める。
 
@@ -97,8 +116,12 @@ scripts/agent-gh review pr checks <N> --json name,bucket
 
 | 種類 | 当てはまるもの |
 |---|---|
-| must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / 検証・実測の報告の結論が、実測した範囲を超えて受け入れ条件を満たすと断定している / verify が失敗 / pr-size が失敗（`pr-size-exception` のラベルと、作成者が `hatai` の目印コメントの両方があるときだけ数えない。手順 2） / 正しさ・セキュリティの欠陥 / ブランチが `agent/` で始まるのに PR の作成者（`author.login`）が `app/pelway-dev` でない |
+| must-fix | 受け入れ条件を満たしていない / 対象外のことをしている / テストが条件を確かめていない / 確かめ方を弱める変更に PR 本文で理由が書かれていない（手順 2） / 検証・実測の報告の結論が、実測した範囲を超えて受け入れ条件を満たすと断定している / verify が失敗 / pr-size が失敗（`pr-size-exception` のラベルと、作成者が `hatai` の目印コメントの両方があるときだけ数えない。手順 2） / 正しさ・セキュリティの欠陥 / ブランチが `agent/` で始まるのに PR の作成者（`author.login`）が `app/pelway-dev` でない |
 | nit | 上に当てはまらない改善案 |
+
+must-fix を 1 件見つけたら、差分の中の同じ種類の経路をすべて洗い、見つけた分を同じレビューの must-fix に書く（同じ種類かは自分で判断する）。1 経路ずつ round をまたいで指摘すると、同じ種類の修正の round が続くため。
+
+PR の範囲外の安全上の所見は PR に書かず、委託者への返答（手順 5 の `out-of-scope:` の行）に書く。PR とレビューは公開されており、直す前の弱点を広めないため。範囲外の所見で安全に関わらないものは nit に書いてよい。
 
 nit のうち、文書（`docs/`・スキル・コードのコメント・PR 本文）と、コード・仕様・ほかの文書との食い違いを指すものは、行頭（`<file>:<line>` の前）に `[文書のずれ]` を付ける（例: `- [文書のずれ] docs/dev-environment.md:668 判定の順がコードと違う。…`）。実装担当は、この印の nit を Approve のときも直してから Ready にする（skill `implement-issue` の手順 9）。書き方や好みの違いには付けない。
 
@@ -122,6 +145,7 @@ Reviewed: <headRefOid>
 ## 検査（PR のチェック）
 - mise run verify: pass | fail
 - pr-size: pass | fail
+- 確かめ方を弱める変更: なし | あり（理由あり <件数> / 理由なし <件数>）
 
 Reviewer: agent=<codex|claude|devin> model=<モデル名> effort=<effort>
 ```
@@ -158,7 +182,7 @@ scripts/agent-gh review pr view <N> --json reviews --jq '.reviews[-1] | {author:
 
 ### 5. 終わりの報告
 
-最後の返答は次の 3 行だけにする。委託者（指揮役、または実装担当）はこの 3 行だけを読む。
+最後の返答は次の 3 行だけにする（下の `error:`・`out-of-scope:` の行を足すときを除く）。委託者（指揮役、または実装担当）はこの 3 行だけを読む。
 
 ```
 pr: #<N>
@@ -166,4 +190,4 @@ verdict: approve | request-changes | failed
 must-fix: <件数>
 ```
 
-`failed` のときは 4 行目に `error: <失敗したコマンドとエラーの 1 行>` を足す。
+`failed` のときは 4 行目に `error: <失敗したコマンドとエラーの 1 行>` を足す。PR の範囲外の安全上の所見があるときは、最後に `out-of-scope: <所見の要約 1 行。200 文字以内>` を足す（手順 3）。

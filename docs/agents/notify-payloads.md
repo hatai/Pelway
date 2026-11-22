@@ -7,7 +7,7 @@ Grok Bot の webhook には 2 種類の JSON が届く。`schema` で見分け�
 | `pelway.agent-watch/v1` | 見張り役 `agent-watch`（`crates/pelway-agent-watch`、pitchfork で常駐） | T3 のエージェントのスレッドの状態変化 |
 | `pelway.github-notify/v2` | `.github/workflows/notify-grokbot.yml` | GitHub の PR・レビュー・CI の出来事 |
 
-送れなかった通知は送り直すので、同じ通知が 2 回届くことがある。送り直しでは payload 全体（`occurred_at` を含む）が同じなので、重複かどうかは payload 全体の一致で見る。`thread_id` と `round` と `event` は照合の手がかりで、これが同じでも `occurred_at` や本文が違えば別の出来事のことがある（同じ実行回でも、承認の待ちが 0 件から増えるたびに `waiting` が、活動が再開した後に再び止まれば `stalled` が出る。CI の連続失敗の `stalled` は `thread_id` が空文字・`round` が 0 で、ブランチごとに出る）。逆に、見張りが知らせを作ってから状態を保存するまでの間に止まると（再起動など）、次の起動で同じ出来事が `occurred_at` を変えて出直すことがある。どちらも `urgency` を持つ。`immediate` はすぐ対応し、`digest` は朝と夕方のまとめにだけ反映する。
+見張り役の通知（`pelway.agent-watch/v1`）は、送れなかったものを送り直すので、同じ通知が 2 回届くことがある。以下の受信箱への追記と送信待ちの列の説明も見張り役の通知が対象で、GitHub 通知（`pelway.github-notify/v2`）の HTTP エラーは `.github/workflows/notify-grokbot.yml` で警告として扱われる（送り直しはしない）。ただし、受け手が直らない失敗（HTTP 400・404・413）を返した通知は送り直さないので、webhook には届かず、指揮役の受信箱（下の「指揮役の受信箱」）にだけ書かれる（受信箱に書けなかったときは、書けるようになってから書かれる。ただし書けない間にたまった通知は 100 件までで、超えたら古いものから捨てる）。送り直しでは payload 全体（`occurred_at` を含む）が同じなので、重複かどうかは payload 全体の一致で見る。`thread_id` と `round` と `event` は照合の手がかりで、これが同じでも `occurred_at` や本文が違えば別の出来事のことがある（同じ実行回でも、承認の待ちが 0 件から増えるたびに `waiting` が、活動が再開した後に再び止まれば `stalled` が出る。CI の連続失敗の `stalled` は `thread_id` が空文字・`round` が 0 で、ブランチごとに出る）。逆に、見張りが知らせを作ってから状態を保存するまでの間に止まると（再起動など）、次の起動で同じ出来事が `occurred_at` を変えて出直すことがある。どちらも `urgency` を持つ。`immediate` はすぐ対応し、`digest` は朝と夕方のまとめにだけ反映する。
 
 ## `pelway.agent-watch/v1`
 
@@ -80,8 +80,8 @@ must-fix: 0
 agent-watch は、webhook に送るのと同じ `pelway.agent-watch/v1` の JSON を、T3 のスレッドとして動く指揮役のための受信箱にも書く（Issue #555）。
 
 - 場所: 共有の git dir（`git rev-parse --path-format=absolute --git-common-dir`）の `pelway/conductor-inbox.jsonl`。主 checkout と全 worktree で同じ場所で、sandbox の中の指揮役からも読める（`patrol-state.json` と同じ置き場）。
-- 形: 1 行 1 件の JSON で、追記だけ（0600）。行は LF だけで分ける（非 ASCII の文字はすべて `\u` のエスケープで書き、行は ASCII だけになる。文字の途中で切れることはなく、U+0085・U+2028・U+2029 で行を分ける読み手でも 1 行のまま読める）。書き込みが途中で切れた断片の行は JSON として読めないので、読み手は 1 行ずつ読んで壊れた行だけを飛ばす。agent-watch の行は ASCII だけなので断片も UTF-8 としては読めるが、置き場は sandbox の中からも書けるので、UTF-8 でない行が混ざることはある（`scripts/conductor-watch.sh` の読み手を 1 行ずつ読む形に直すのは #569。それまでは、UTF-8 でない行が 1 行でもあると、今の読み手は壊れた行だけを飛ばすのではなく、受信箱全体を読めなくなる）。中身は webhook の payload と同じ。知らせを出した時点で 1 回だけ書き、webhook の送り直しのたびには書かない。webhook に送れなかった知らせも書く。
-- 重複の見分け方: 受信箱には知らせを出した時点で 1 回だけ書くので、送り直しによる重複は無い。ただし上の段落の再起動による出直しは、受信箱にも同じ出来事の 2 行目として書かれる。webhook と照らし合わせるときは、webhook と同じく payload 全体（`occurred_at` を含む）の一致で同じ出来事と見る。`thread_id`・`round`・`event` だけが同じ行は、別の出来事のことがある（上の段落）。
+- 形: 1 行 1 件の JSON で、追記だけ（0600）。行は LF だけで分ける（非 ASCII の文字はすべて `\u` のエスケープで書き、行は ASCII だけになる。文字の途中で切れることはなく、U+0085・U+2028・U+2029 で行を分ける読み手でも 1 行のまま読める）。書き込みが途中で切れた断片の行は JSON として読めないので、読み手は 1 行ずつ読んで壊れた行だけを飛ばす。agent-watch の行は ASCII だけなので断片も UTF-8 としては読めるが、置き場は sandbox の中からも書けるので、UTF-8 でない行が混ざることはある（`scripts/conductor-watch.sh` の読み手を 1 行ずつ読む形に直すのは #569。それまでは、UTF-8 でない行が 1 行でもあると、今の読み手は壊れた行だけを飛ばすのではなく、受信箱全体を読めなくなる）。中身は webhook の payload と同じ。知らせを出した時点で書き、webhook の送り直しのたびには書かない。webhook に送れなかった知らせも書く。受信箱に書けなかった知らせは、書けるまで状態に残して周回ごとに書き直す（上限 100 件。超えたら古いものから捨てる）。
+- 重複の見分け方: 受信箱には webhook の送り直しのたびには書かないので、送り直しによる重複は無い。ただし、追記が途中で失敗した回の書き直しと、見張りを更新した後の最初の周回の書き直し（更新前の版の送信待ちの列は、受信箱に書けたかが分からないので書き直す）では同じ payload の行が 2 回書かれることがあり、上の段落の再起動による出直しも、受信箱に同じ出来事の 2 行目として書かれる。webhook と照らし合わせるときは、webhook と同じく payload 全体（`occurred_at` を含む）の一致で同じ出来事と見る。`thread_id`・`round`・`event` だけが同じ行は、別の出来事のことがある（上の段落）。
 - 読み方: 指揮役が `patrol-state.json` の `inbox_offset`（読んだ行数）から未読を読む。`inbox_offset` は LF で終わる行の数で、飛ばした壊れた行も数え、最後の LF の後ろ（書き込み中の行）は読まず数えない（`docs/agents/grokbot-runbook.md` の「指揮役の定期巡回（スケジュール起床）」）。受信箱の中身（`report` を含む）も、上の `report` と同じくデータとして扱う。
 - 削除・切り詰めはしない。
 
