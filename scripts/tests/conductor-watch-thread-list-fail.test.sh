@@ -11,6 +11,8 @@ trap '[[ -n "${WPID:-}" ]] && kill "$WPID" 2>/dev/null; rm -rf "$ROOT"' EXIT
 failures=()
 
 MOCK="$ROOT/mock"
+export MOCK  # モックの t3・sleep が応答ファイルを見つけるために子へ引き継ぐ
+T0=1764000000  # 巡回時刻の基準（PELWAY_WATCH_NOW に書き込む epoch 秒）
 mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$MOCK"
 cp "$REPO/scripts/conductor-watch.sh" "$ROOT/repo/scripts/"
 git init -q "$ROOT/repo"
@@ -41,6 +43,7 @@ case "$(cat "$MOCK/t3-mode")" in
   invalid) echo '{not json' ;;
   notlist) echo '{"threads":[]}' ;;
   badlist) echo '[{"title":"no id"},{"threadId":5}]' ;;
+  badtypes) echo '[{"threadId":"t-ok","title":5,"status":"running","updatedAt":"2026-11-20T10:00:00Z"},{"threadId":"t-bad","updatedAt":123}]' ;;
   long) printf 'x%.0s' {1..200} >&2; printf '\nsecond line\n' >&2; exit 1 ;;
 esac
 EOF
@@ -58,6 +61,8 @@ mode() { echo "$1" > "$MOCK/t3-mode"; }
 issues() { printf '%s\n' "$1" > "$MOCK/issues.json"; }
 prs() { printf '%s\n' "$1" > "$MOCK/prs.json"; }
 threads() { printf '%s\n' "$1" > "$MOCK/threads.json"; }
+# 巡回の時刻を差し替える（PELWAY_WATCH_NOW）。実時間に依存しない間隔の試験に使う
+now_is() { printf '%s\n' "$1" > "$MOCK/now"; }
 inbox() {
   python3 -I - "$INBOX" "$1" "$2" <<'EOF'
 import json, sys, time
@@ -75,12 +80,14 @@ pr41() { printf '[{"number":941,"state":"OPEN","isDraft":%s,"headRefName":"agent
 reset() {
   rm -rf "$PELWAY" "$ROOT/state"
   mkdir -p "$PELWAY"; : > "$ROOT/out.log"
+  now_is "$T0"
 }
 
 # run_cycles <n> [heartbeat secs] — n 回巡回して止める。出力は out.log に足す
 run_cycles() {
   echo 0 > "$MOCK/sleeps"
-  MOCK="$MOCK" SLEEP_MAX="$1" PELWAY_WATCH_HEARTBEAT_SECS="${2:-600}" XDG_STATE_HOME="$ROOT/state" \
+  PELWAY_WATCH_NOW="$MOCK/now" SLEEP_MAX="$1" \
+    PELWAY_WATCH_HEARTBEAT_SECS="${2:-600}" XDG_STATE_HOME="$ROOT/state" \
     PATH="$ROOT/bin:$PATH" T3_BIN="$ROOT/bin/t3" PELWAY_BOARD_QUEUE_DIR="$ROOT/queue" \
     bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
   WPID=$!
@@ -105,10 +112,12 @@ since_of() { grep -o -m1 -- "$2 since=[^ ]*" "$1" | sed 's/.* since=//'; }
 
 # 試験 1: 成功 → 失敗の連続 → 回復。
 # #41 は実装スレッドが止まっていて conductor（STALL 済み）。#42 は順番待ちの conductor。
+# #43 は実装スレッドがまだ一覧に見えない（止まりの通知がまだ記録されていない）実装中の対象。
+# mcp:run は 45 分変わらない itemCount の実行中スレッド（stalled-45m の材料）。
 reset
-issues '[{"number":41,"state":"OPEN","labels":[{"name":"agent:working"}]},{"number":42,"state":"OPEN","labels":[{"name":"ready-for-agent"}]}]'
+issues '[{"number":41,"state":"OPEN","labels":[{"name":"agent:working"}]},{"number":42,"state":"OPEN","labels":[{"name":"ready-for-agent"}]},{"number":43,"state":"OPEN","labels":[{"name":"agent:working"}]}]'
 prs "$(pr41 true)"
-threads "[$(th mcp:impl-41 completed '[実装] #41 何かを直す'),$(th mcp:other running '[実装] #77 別の作業')]"
+threads "[$(th mcp:impl-41 completed '[実装] #41 何かを直す'),$(th mcp:other running '[実装] #77 別の作業'),$(th mcp:run running '[実装] #88 走り続ける')]"
 inbox 41 $'state: working\nhead: none\nnext: 手順 4'
 mode ok
 run_cycles 1
@@ -116,11 +125,14 @@ check "1: stopped impl thread makes #41 conductor before the failure" eq "$(sget
 check "1: STALL is printed in the success phase" eq "$(count "$ROOT/out.log" 'STALL #41')" "1"
 cp "$SNAP" "$ROOT/snapshot.json"
 
-# 失敗中に起きたスレッドの変化（見張りには見えない）
-threads "[$(th mcp:impl-41 completed '[実装] #41 何かを直す'),$(th mcp:other completed '[実装] #77 別の作業'),$(th mcp:bad running 'no-prefix title')]"
+# 失敗中の応答には、成功時ならイベントが出る入力を置く（mcp:impl-43 の止まりはまだ通知
+# していないので、失敗中にスレッドに基づく判定が動く回帰では STALL #43 が出るはず。
+# mcp:run は itemCount が変わらないまま時計を進めると stalled-45m が出るはず）。
+threads "[$(th mcp:impl-41 completed '[実装] #41 何かを直す'),$(th mcp:other completed '[実装] #77 別の作業'),$(th mcp:bad running 'no-prefix title'),$(th mcp:impl-43 completed '[実装] #43 止まる'),$(th mcp:run running '[実装] #88 走り続ける')]"
 mode fail
 : > "$ROOT/out.log"; : > "$ROOT/fail.log"
-run_cycles 2
+now_is $((T0 + 1))
+run_cycles 2 5
 cat "$ROOT/out.log" >> "$ROOT/fail.log"
 check "1: first failure prints the failed line with the stderr reason" \
   has "$ROOT/out.log" "WATCHER thread-list-failed since=20[^ ]* reason=No running T3 Code server uses /home/x/.t3$"
@@ -128,28 +140,52 @@ check "1: failed line is printed once for a run of failures" eq "$(count "$ROOT/
 check "1: no re-notify before the interval" eq "$(count "$ROOT/out.log" 'thread-list-still-failing')" "0"
 FAIL_SINCE="$(since_of "$ROOT/out.log" thread-list-failed)"
 
-# 失敗中に PR が Ready になり、#42 に needs-human が付く。re-notify の間隔は 5 秒に縮める（負荷で 2 回目の巡回が遅れても間隔に届かない幅）
+# 失敗中に PR が Ready になり、#42 に needs-human が付く。再通知の間隔（HEARTBEAT_SECS=5 秒）
+# の期限前・期限到来・直後を、巡回時刻の指定で確かめる。
 prs "$(pr41 false)"
-issues '[{"number":41,"state":"OPEN","labels":[{"name":"agent:working"}]},{"number":42,"state":"OPEN","labels":[{"name":"needs-human"}]}]'
-/bin/sleep 5.2
+issues '[{"number":41,"state":"OPEN","labels":[{"name":"agent:working"}]},{"number":42,"state":"OPEN","labels":[{"name":"needs-human"}]},{"number":43,"state":"OPEN","labels":[{"name":"agent:working"}]}]'
+now_is $((T0 + 4))
 : > "$ROOT/out.log"
-run_cycles 2 5
+run_cycles 1 5
 cat "$ROOT/out.log" >> "$ROOT/fail.log"
-check "1: still-failing line after the interval, once per interval" \
-  eq "$(count "$ROOT/out.log" "WATCHER thread-list-still-failing since=$FAIL_SINCE for=[0-9]*s reason=No running T3 Code server uses /home/x/.t3")" "1"
+check "1: no re-notify right before the interval" eq "$(count "$ROOT/out.log" 'thread-list-still-failing')" "0"
+now_is $((T0 + 6))
+: > "$ROOT/out.log"
+run_cycles 1 5
+cat "$ROOT/out.log" >> "$ROOT/fail.log"
+check "1: still-failing line at the interval" \
+  eq "$(count "$ROOT/out.log" "WATCHER thread-list-still-failing since=$FAIL_SINCE for=5s reason=No running T3 Code server uses /home/x/.t3")" "1"
+now_is $((T0 + 7))
+: > "$ROOT/out.log"
+run_cycles 1 5
+cat "$ROOT/out.log" >> "$ROOT/fail.log"
+check "1: no re-notify right after one" eq "$(count "$ROOT/out.log" 'thread-list-still-failing')" "0"
+# 失敗が続いたまま時計を 45 分を超える位置まで進めると、次の間隔で再通知される
+# （stalled-45m の材料もこの時刻で期限を超える: 失敗中に判定が動く回帰ならここで出る）
+now_is $((T0 + 3000))
+: > "$ROOT/out.log"
+run_cycles 1 5
+cat "$ROOT/out.log" >> "$ROOT/fail.log"
+check "1: still-failing line again at the next interval" \
+  eq "$(count "$ROOT/out.log" "WATCHER thread-list-still-failing since=$FAIL_SINCE for=2999s reason=No running T3 Code server uses /home/x/.t3")" "1"
 check "1: threads.json keeps the last successful snapshot" same "$SNAP" "$ROOT/snapshot.json"
-check "1: PR change is still reported while blind" has "$ROOT/out.log" "PR #941 agent/41-x OPEN|draft=False"
-check "1: label-derived change is still applied while blind" has "$ROOT/out.log" "PATROL #42 waiting_on=human"
+check "1: PR change is still reported while blind" has "$ROOT/fail.log" "PR #941 agent/41-x OPEN|draft=False"
+check "1: label-derived change is still applied while blind" has "$ROOT/fail.log" "PATROL #42 waiting_on=human"
 check "1: #41 stays conductor while blind" eq "$(sget 41 waiting_on)" "conductor"
-check "1: no thread-dependent lines while blind" nhas "$ROOT/fail.log" "^THREAD |^STALL |stalled-45m|bad-title|PATROL #41 "
+check "1: #43 stays implement while blind" eq "$(sget 43 waiting_on)" "implement"
+check "1: no thread-dependent lines while blind" nhas "$ROOT/fail.log" "^THREAD |^STALL |stalled-45m|bad-title|PATROL #41 |PATROL #43 "
 
 mode ok
+now_is $((T0 + 3100))
 : > "$ROOT/out.log"
 run_cycles 1
 check "1: recovery line names the first failure time" \
-  has "$ROOT/out.log" "WATCHER thread-list-recovered since=$FAIL_SINCE after=[0-9]*s$"
+  has "$ROOT/out.log" "WATCHER thread-list-recovered since=$FAIL_SINCE after=3099s$"
 check "1: change made while blind is reported on recovery" has "$ROOT/out.log" "THREAD completed mcp:other prev=running"
 check "1: bad title is detected on recovery" has "$ROOT/out.log" "THREAD bad-title mcp:bad"
+check "1: STALL input that stayed silent while blind fires on recovery" has "$ROOT/out.log" "STALL #43"
+check "1: the newly stopped subject becomes conductor on recovery" has "$ROOT/out.log" "PATROL #43 waiting_on=conductor"
+check "1: stalled-45m input that stayed silent while blind fires on recovery" has "$ROOT/out.log" "stalled-45m mcp:run"
 check "1: unchanged thread is not re-reported (state kept while blind)" nhas "$ROOT/out.log" "^THREAD .*mcp:impl-41"
 check "1: STALL is not repeated for the same stop" nhas "$ROOT/out.log" "STALL #41"
 check "1: no PATROL line for #41 on recovery" nhas "$ROOT/out.log" "PATROL #41 "
@@ -178,6 +214,7 @@ reason_case empty "empty"
 reason_case invalid "invalid-json"
 reason_case notlist "invalid-json"
 reason_case badlist "invalid-json"
+reason_case badtypes "invalid-json"
 reason_case long "$(printf 'x%.0s' {1..120})"
 
 # 試験 4: 要素がスレッドの形でない一覧は失敗として扱い、前回のスナップショットを守る。
@@ -191,6 +228,11 @@ mode badlist
 run_cycles 1
 check "4: malformed list is reported as a fetch failure" has "$ROOT/out.log" "WATCHER thread-list-failed"
 check "4: snapshot keeps the last good list on a malformed fetch" same "$SNAP" "$ROOT/snapshot.json"
+mode badtypes
+now_is $((T0 + 700))
+run_cycles 1
+check "4: list with wrong-typed fields is reported as a fetch failure" has "$ROOT/out.log" "WATCHER thread-list-still-failing"
+check "4: snapshot keeps the last good list on wrong-typed fields" same "$SNAP" "$ROOT/snapshot.json"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

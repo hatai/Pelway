@@ -86,7 +86,8 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
 # （runbook の「指揮役の定期巡回（スケジュール起床）」）。
 LABEL_BACKUP_HOURS = 24
 LABEL_BACKING_AUTHOR = "hatai"
-# t3 thread list の取得の判定（Issue #651）。終了コードが 0 で標準出力が JSON の配列のときだけ成功とし、
+# t3 thread list の取得の判定（Issue #651）。終了コードが 0 で、標準出力が JSON の配列で、
+# 各要素がスレッドの形（後の処理が読むフィールドの型を持つ dict）のときだけ成功とし、
 # threads.json を差し替える。失敗した巡回は空の一覧として扱い、スレッドに基づく判定
 # （THREAD 行・停滞・止まり）をしない。失敗の理由は stderr の最初の行、無ければ失敗の種類。
 def fetch_threads(rc):
@@ -99,9 +100,15 @@ def fetch_threads(rc):
     else:
         try: v = json.loads(out)
         except Exception: v = None
-        # 一覧でも要素がスレッドの形（"threadId" が文字列の dict）でないものは失敗と同じ扱い。
-        # 受け入れると下の t["threadId"] で python が落ち、WATCHER 行も出ずに巡回が止まる。
-        if isinstance(v, list) and all(isinstance(t, dict) and isinstance(t.get("threadId"), str) for t in v): return v, None
+        # 一覧でも要素がスレッドの形でないものは失敗と同じ扱い。後の処理は "threadId" への
+        # 直接アクセス・"title" のスライスと正規表現・"updatedAt" の比較をするため、型が
+        # 壊れた一覧を成功として保存すると、スナップショットを差し替えたあと python が
+        # 落ちて WATCHER 行も出ずに巡回が止まる。欠落や null のフィールドは後の処理が
+        # 既定値として扱うので許容する。
+        def ok_thread(t):
+            return isinstance(t, dict) and isinstance(t.get("threadId"), str) \
+                and all(t.get(k) is None or isinstance(t.get(k), str) for k in ("title", "updatedAt", "status"))
+        if isinstance(v, list) and all(ok_thread(t) for t in v): return v, None
         kind = "invalid-json"
     return [], err[:120] or kind
 threads, thread_err = fetch_threads(int(sys.argv[5]))
@@ -110,7 +117,9 @@ try: issues = json.load(open(os.path.join(d, "issues.json")))
 except Exception: issues = None
 try: prs = json.load(open(os.path.join(d, "prs.json"))); prs_ok = True
 except Exception: prs = []; prs_ok = False
-now = time.time()
+# 巡回の時刻。PELWAY_WATCH_NOW が指すファイルに epoch 秒が書かれていればそれを使う（テスト用）。
+try: now = float(open(os.environ["PELWAY_WATCH_NOW"]).read().strip())
+except Exception: now = time.time()
 def stamp(ts): return datetime.fromtimestamp(ts).isoformat(timespec="seconds")
 # 見張りが動いていることを示す行（Issue #504）。HEARTBEAT_SECS ごとに 1 行。
 # PELWAY_WATCH_HEARTBEAT_SECS で差し替えられる（テスト用）。
