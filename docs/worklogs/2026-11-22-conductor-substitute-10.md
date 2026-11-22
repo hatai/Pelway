@@ -442,3 +442,12 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **切替＋起床**: 5c599260（#481 QA 対応）・0995ecd5（#657/#662）・335aabd5（#658/#663）・42181892（#660/#661）
 - **切替のみ（起床なし）**: 462a74e7（#330）— pr-size は hatai 判断待ちのため
 - **権限外で切替不可（hatai の手動切替が必要）**: e4009bd3（#643）・2e87e67b（#602）・eaa7764e（#645）・c9d1a5eb（#642）・9fe3e99d（#644）・1db76f66（watcher）— いずれも full-access で runtime_mode_escalation_denied
+
+## 全スレッド点検（20:45 JST・hatai 指示）
+
+- **67 件 unsettled**。provider 切替は全体に反映: full-access 系は Devin(swe-2-high)、auto 系は GLM-5.3（指揮役が切替えた 5 件）または Devin
+- **running**: e4009bd3(#643)・1db76f66(watcher→#664 作成)・462a74e7(#330)・eaa7764e(#645)・42181892(#660)・335aabd5(#658)・0995ecd5(#657)・2e87e67b(#602)・cb1a1122(#652)
+- **waiting**: cd045355(#659・#610 待ち)・28d8f688(#480・#482 レビュー委託中)・970f6c1e(#333/#560)
+- **completed（PR 紐付き・マージで settle 予定）**: 5c599260(#481)・9fe3e99d(#644)・c9d1a5eb(#642)・5fc0e3f5(#295)・b267df2c(#646)・bfd8ff91(#641)・3bcaf0e3(#613)
+- **異常**: idle サブエージェント `d4e700d1`（"Implement issue 651 watcher"・claude・未稼働）— 経路不明・記録のみ
+- **GitHub**: **#652 MERGED**（指揮下 6 件目）・新 draft **#664**（#651・watcher スレッド作）・#530 本文更新済みで codex QA r3 委託・#600 はキュー待ち継続
