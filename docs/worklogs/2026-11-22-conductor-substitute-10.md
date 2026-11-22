@@ -58,3 +58,12 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - ボード読み取り: 人間名義 `gh` が未認証のため不可（`board_queue_broken` と同じ制約）。Todo 順の新規割り当ては不可のまま保留
 - patrol-state: inbox_offset=386・watch_offset=3731・subjects 630/631 更新
 - 人間が手で立てたスレッド: なし（未 settle は本スレッド・caa0ff74・旧指揮役（settle 済）・aborted mcp:57618b05 のみ）
+
+## 巡回記録（patrol 2・10:49 JST）
+
+- 受信箱新着なし（386 のまま）。watch.log 3732–3737: 遷移のみ。新スレッド `ab1a11fa`「指揮役交代スクリプトの動作改善」が running/waiting 往復中 — hatai の作業と判断・監視のみ
+- #630: head `3c7780eb` 不変・MERGEABLE。QA 委託 `qa-630-3c7780eb-20261122` 実行中（claude-opus-5-5）
+- #631: head `67d48dd6`・依然 CONFLICTING。衝突解消指示の send が MCP 断続で再び未達（pending 継続）
+- #586/#587: 事後レビュー結果のコメント未着。継続待ち
+- MCP: t3_thread_send 断続継続（task_status・rename・delegate_task は成功）。発生から約 4 分 — 15 分継続で人間報告の閾値には未到達
+- 対応不要のため automerge・ラベル操作・新規割り当てなし
