@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「状態の型を既存の値に合わせるときは、型（JSON のオブジェクト・配列など）とキーを書く」と足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: 005194114b5290092aba5b20b1171c3c426c70c2
+
+1. 詰まった箇所: `scripts/conductor-watch.sh`: round 3 までは `shared_notified` がパス → 直近の組み合わせの 1 件だけだったため、失敗するスレッドが巡回ごとに入れ替わると別の組み合わせで上書きされ、共有が続く同じ組み合わせを再通知していた（codex round 3 の must-fix）。記録をパス → 組み合わせごとの入れ子の JSON オブジェクトに変え、入れ替わりの試験 8 を足した。`mise run verify` では `.agents/skills/verify-pelway/verify-run.test.sh` の `make_run_dir`/`locks_dir_ready` 系 6 件だけが失敗した。sandbox の `/tmp` が uid 65534 所有のため `dir_chain_safe` が拒む環境起因で、変更を退避した同じツリーでも再現したため、その内訳と再現確認を PR 本文に書いて進める。
+2. 曖昧だった文: 「パスとスレッド集合の組ごとに通知済みの記録を保持できる JSON オブジェクトにし」（PR #656 の codex round 3 レビューの must-fix）
+3. 仮定と解釈: 「組ごとの記録」を「パス → {組み合わせ文字列: 1}」の入れ子と読み、round 2 で置いた「パス → スレッドの組」（平坦な文字列 → 文字列）の型の読みをこの指摘で更新した。旧形式の記録は読み替えてアップグレード直後の再通知を防ぐ。開発リードの指示（ラウンド上限の撤廃・claude_review を代用せず未完了とする）は「hatai の指示がこの手順と食い違うとき」に当たると解釈し、指示の範囲（must-fix の修正と修正⇔レビューの継続）だけを行う。`pr ready`・マージ・force push は指示にも無く行わない。
+4. 足りなかった情報・検証手段: 撤廃の一次情報（`t629u` の実体）。main の `.agents/skills/implement-issue/SKILL.md` にはまだ上限の記述があり、docs では判断を裏付けられなかった。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の表と手順 9 の「3 回目のレビュー結果に must-fix が残っていたら…エスカレーションする」に、ラウンド上限の撤廃が正式に決まったときはその記録へのリンクを足す。
+
+使ったスキル: implement-issue
