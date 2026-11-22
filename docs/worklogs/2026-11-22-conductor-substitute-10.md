@@ -474,3 +474,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **waiting**: cd045355(#659)・335aabd5(#658)・0995ecd5(#657)・eaa7764e(#645)
 - **settle**: 5c599260(#481) は #530 マージで自動 settle
 - **GitHub 対応**: #653 automerge 付与（APPROVED+QA pass@14591023）・#600 は kodiak 更新で approve 失効→再レビュー委託（rev-600-b3fe09fd）・#610 QA 委託・#664 QA 委託・新 PR #665 登録・#560 は引き続き pr-size fail（needs-human）
+
+## レビュー結果処理（#600・22:00 JST）
+
+- **PR #600 再レビュー: APPROVED@b3fe09fd**（投稿検証済み・checks 全 pass）→ 旧 head 3b5ead4a 宛の QA を新 head で取り直し（qa-600-b3fe09fd-20261122・Devin）
