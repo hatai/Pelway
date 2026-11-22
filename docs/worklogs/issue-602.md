@@ -85,3 +85,15 @@
 5. 改善案: `scripts/tests/conductor-watch-decision.test.sh` の `issue_with` は `labeled_at` より前の `needs-human` の `unlabeled` を必ず仕込むので、events だけを根拠にした実装は全員が付いていないと誤認する。差し込みの `ev` に actor を付けられるようにすると、「自分の名義の付与か」の分岐もそのまま試せる。
 
 使ったスキル: `implement-issue`
+
+## 実装者メモ（round 8）
+
+対象 head: 4523e1c7112e958cdd79e8b82600eb99628ddc78
+
+1. 詰まった箇所: 手順 6 の push: ローカルブランチ `agent/602-decision-escalation-r8` に upstream が無く、`agent-gh-resign` が何もせずに終わった。upstream を設定すると、今度はこのブランチにしか無いマージ `401a7a5b` が署名の範囲に入り「表現できない」で止まった。`b7efc229` を指す一時の `refs/remotes/` を置いて範囲を新しいコミットだけにし、署名を付けてから一時の ref を消した。
+2. 曖昧だった文: 「行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる」（`implement-issue` の「止まる条件」）。同じ場面の 2 つの確認を `eq "$(a)|$(b)"` の 1 つにまとめることが「重複の除去」に入るかが書かれていない。
+3. 仮定と解釈: 期待値を完全一致のまま保つなら、確認をまとめても確かめ方は弱まらないと解釈した（診断の細かさは落ちる）。場面 34 の 757 は 755 と準備も確認も同じなので外した。準備をまとめた `once` は argv で受け、準備の失敗は FAIL に数える（`set -e` が無く、黙って進むと「通常どおり格上げ」の場面が準備なしでも通るため）。前の実装（`0eaebb16^`）に当てた FAIL は 14 件から 11 件になり、減った分はまとめた確認と外した重複だけ。
+4. 足りなかった情報・検証手段: `agent-gh-resign` の範囲の決め方（ほかの `refs/remotes/` から届かないコミット全部）だと、マージを含む PR ブランチでは、ほかの ref にそのマージが無い worktree からの push が必ず署名なしになる。前の round で署名が付いた理由は、この worktree からは確かめられない。
+5. 改善案: `scripts/agent-gh-resign` の「2.」で、範囲の下限に push 前のリモートの先頭（`git push` の前の `refs/remotes/<remote>/<branch>`）も加える（push 前から remote にある署名なしのマージを範囲に入れない）。
+
+使ったスキル: `implement-issue`
