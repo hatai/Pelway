@@ -89,7 +89,7 @@ LABEL_BACKING_AUTHOR = "hatai"
 # t3 thread list の取得の判定（Issue #651）。終了コードが 0 で、標準出力が JSON の配列で、
 # 各要素がスレッドの形（後の処理が読むフィールドの型を持つ dict）のときだけ成功とし、
 # threads.json を差し替える。失敗した巡回は空の一覧として扱い、スレッドに基づく判定
-# （THREAD 行・停滞・止まり）をしない。失敗の理由は stderr の最初の行、無ければ失敗の種類。
+# （THREAD 行・停滞・止まり）をしない。失敗の理由は stderr の空白だけの行を除いた最初の行、無ければ失敗の種類。
 def fetch_threads(rc):
     try: out = open(os.path.join(d, "threads.json.new"), "rb").read()
     except Exception: out = b""
@@ -98,13 +98,16 @@ def fetch_threads(rc):
     if rc != 0: kind = f"exit={rc}"
     elif not out.strip(): kind = "empty"
     else:
-        try: v = json.loads(out)
+        # Python の json は JSON 外のリテラル NaN・Infinity・-Infinity も読む。保存する
+        # 一覧の形式としては受け付けないため、読み取りで例外にして失敗側に回す。
+        def reject_const(s): raise ValueError(s)
+        try: v = json.loads(out, parse_constant=reject_const)
         except Exception: v = None
         # 一覧でも要素がスレッドの形でないものは失敗と同じ扱い。後の処理は "threadId" への
         # 直接アクセス・"title" のスライスと正規表現・"updatedAt" の比較をするため、型が
         # 壊れた一覧を成功として保存すると、スナップショットを差し替えたあと python が
         # 落ちて WATCHER 行も出ずに巡回が止まる。欠落や null のフィールドは後の処理が
-        # 既定値として扱うので許容する。
+        # 空文字・None として扱うので許容する（表示側は "title" を or "" で正規化する）。
         def ok_thread(t):
             return isinstance(t, dict) and isinstance(t.get("threadId"), str) \
                 and all(t.get(k) is None or isinstance(t.get(k), str) for k in ("title", "updatedAt", "status"))
@@ -146,7 +149,7 @@ for t in threads:
     tid, s = t["threadId"], t.get("status")
     cur["threads"][tid] = s
     if prev is not None and prev["threads"].get(tid) != s:
-        print(f"THREAD {s} {tid} prev={prev['threads'].get(tid)} {t.get('title','')[:40]}", flush=True)
+        print(f"THREAD {s} {tid} prev={prev['threads'].get(tid)} {(t.get('title') or '')[:40]}", flush=True)
     title = t.get("title") or ""
     # 古い終わったスレッドは数えない（次に操作するときに直す）。動いているものと新しく現れたものだけを見る。
     active = s in ("running", "starting", "preparing") or (prev is not None and tid not in prev["threads"])
@@ -165,7 +168,7 @@ for t in threads:
             cur["since"][tid] = {"items": ic, "at": now, "warned": False}
         elif now - last["at"] > 2700 and not last.get("warned"):
             last["warned"] = True
-            print(f"THREAD stalled-45m {tid} {t.get('title','')[:40]}", flush=True)
+            print(f"THREAD stalled-45m {tid} {(t.get('title') or '')[:40]}", flush=True)
     else:
         cur["since"].pop(tid, None)
 for pr in prs:

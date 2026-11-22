@@ -43,7 +43,12 @@ case "$(cat "$MOCK/t3-mode")" in
   invalid) echo '{not json' ;;
   notlist) echo '{"threads":[]}' ;;
   badlist) echo '[{"title":"no id"},{"threadId":5}]' ;;
-  badtypes) echo '[{"threadId":"t-ok","title":5,"status":"running","updatedAt":"2026-11-20T10:00:00Z"},{"threadId":"t-bad","updatedAt":123}]' ;;
+  # フィールドを 1 つずつ壊した入力（どの検査が欠けても試験で分かる形）
+  badtitle) echo '[{"threadId":"t-1","title":5,"status":"running","updatedAt":"2026-11-20T10:00:00Z"}]' ;;
+  badupdated) echo '[{"threadId":"t-1","title":"x","status":"running","updatedAt":123}]' ;;
+  badstatus) echo '[{"threadId":"t-1","title":"x","status":5,"updatedAt":"2026-11-20T10:00:00Z"}]' ;;
+  # JSON 外のリテラル（Python の json.loads は既定で読めてしまう）
+  nanlist) echo '[{"threadId":"t-1","title":"x","status":"running","updatedAt":"2026-11-20T10:00:00Z","itemCount":NaN}]' ;;
   long) printf 'x%.0s' {1..200} >&2; printf '\nsecond line\n' >&2; exit 1 ;;
 esac
 EOF
@@ -214,7 +219,10 @@ reason_case empty "empty"
 reason_case invalid "invalid-json"
 reason_case notlist "invalid-json"
 reason_case badlist "invalid-json"
-reason_case badtypes "invalid-json"
+reason_case badtitle "invalid-json"
+reason_case badupdated "invalid-json"
+reason_case badstatus "invalid-json"
+reason_case nanlist "invalid-json"
 reason_case long "$(printf 'x%.0s' {1..120})"
 
 # 試験 4: 要素がスレッドの形でない一覧は失敗として扱い、前回のスナップショットを守る。
@@ -228,11 +236,26 @@ mode badlist
 run_cycles 1
 check "4: malformed list is reported as a fetch failure" has "$ROOT/out.log" "WATCHER thread-list-failed"
 check "4: snapshot keeps the last good list on a malformed fetch" same "$SNAP" "$ROOT/snapshot.json"
-mode badtypes
+mode nanlist
 now_is $((T0 + 700))
 run_cycles 1
-check "4: list with wrong-typed fields is reported as a fetch failure" has "$ROOT/out.log" "WATCHER thread-list-still-failing"
-check "4: snapshot keeps the last good list on wrong-typed fields" same "$SNAP" "$ROOT/snapshot.json"
+check "4: list with a non-JSON literal is reported as a fetch failure" has "$ROOT/out.log" "WATCHER thread-list-still-failing"
+check "4: snapshot keeps the last good list on a non-JSON literal" same "$SNAP" "$ROOT/snapshot.json"
+
+# 試験 5: null のフィールドは空として扱って受理する（壊れた型だけが失敗）。
+# 状態変化と 45 分停滞の通知でも title: null を空文字に正規化して巡回が止まらない。
+reset
+issues '[]'; prs '[]'
+threads '[{"threadId":"t-null","title":null,"status":"running","updatedAt":null,"createdBy":"agent","itemCount":3}]'
+mode ok
+run_cycles 1
+check "5: list with null fields is accepted and saved" has "$SNAP" "t-null"
+now_is $((T0 + 3000))
+run_cycles 1
+check "5: stalled-45m line normalizes a null title" has "$ROOT/out.log" "stalled-45m t-null"
+threads '[{"threadId":"t-null","title":null,"status":"completed","updatedAt":null,"createdBy":"agent","itemCount":3}]'
+run_cycles 1
+check "5: status-change line normalizes a null title" has "$ROOT/out.log" "THREAD completed t-null prev=running"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
