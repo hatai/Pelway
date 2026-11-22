@@ -115,3 +115,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **send 障害が 15 分継続**: `t3_thread_send` が 9 回連続失敗（queue/default とも）。read・update・organize・delegate_task・task_status は全て正常のため send 経路単独の障害。人間報告条件に達し、hatai へ報告した（本巡回の報告文）
 - 手当委託 `hand-631-merge-main-20261122` 実行中（claude-sonnet-5-5）
 - #631: `67d48dd6`・CONFLICTING 不変。#586/#587: 結果未着
+
+## 巡回記録（patrol 10・11:02 JST・受信箱 wake）
+
+- **#602 人間判断**: hatai が 01:54Z に `needs-human` → `agent:working`（+ready-for-agent 維持）を直接入替。on-issue の裏付けコメントはないが、同時刻に hatai が `#602 PR #610 引き継ぎ（専用 worktree）` impl スレッド `2e87e67b` を起動 — 直接操作を許可と認定（agent 名義の付け外しではなく手順違反には当たらない判断）
+- `caa0ff74`（旧 #602 impl）が run 完了、`4649721f`（通知試行）が再 run — #602 の担当は新スレッド `2e87e67b` へ移ったと判断
+- #610: draft・MERGEABLE・`b7efc229` 不変・pr-size-exception ラベル未付与 — 例外承認か分割指示かの明示はまだ無し
+- 手当 `hand-631` 実行中。#631 `67d48dd6` CONFLICTING 不変。#586/#587 結果未着
