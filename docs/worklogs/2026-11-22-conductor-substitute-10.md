@@ -249,3 +249,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **PR #652 を通常流へ**: hatai 手 push PR（`t3/security-check-fix-findings`・draft・head `8da28305`・`.github/workflows/security-scan.yml` 含む・実装スレッド `cb1a1122`）。codex_review（gpt-6.1-terra）へ r1 委託起動 — workflow・秘密・検査スクリプトの high-risk 変更として security-review 重点に指定
 - 制約の登録: 修正はコミットまで・push 禁止（push コマンドはリード経由で hatai へ）。Ready 化と automerge はマージ条件充足後。security-scan 必須化は hatai 別判断で触らない
+
+## 巡回記録（patrol 32 続報・12:35 JST）
+
+- PR #652: codex_review r1 は「必須チェック未完了」で判定・投稿せず中断。チェック待ちを外す指示を付けて r1b として再起動（CI 合否は指揮役側で別途判定）
