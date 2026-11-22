@@ -177,3 +177,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **PR #631 QA 完了**: 委託 `qa-631-2cd790bb` が `QA: pass`（受け入れ条件 6 項全満たす・弱める変更なし・run 44973960953）
 - head `2cd790bb` 不変・全チェック完了・fail なしを確認後、`pelway-qa[bot]` 名義で合格コメント投稿（issuecomment-7072773986・api で author/format 検証済）
 - **automerge 付与**: 5 条件すべて充足（r2 pelway-review APPROVED@2cd790bb・nit 0・必須チェック pass・head 不変・pelway-qa 同 SHA pass）→ kodiak キュー待ちへ
+
+## 巡回記録（patrol 20・11:14 JST・レビュー追加確認 wake）
+
+- **PR #631 MERGED**（02:13:36Z・kodiak・Issue #617 auto-close）— 衝突解消（hand-care）→ r2 レビュー → QA → automerge の手順どおりのマージ
+- レビュー委託 rev-631-r2 の追加確認 run: verdict 不変（approve@2cd790bb・追加チェック全通過を確認）
+- **時計の注記**: 本日の worklog の JST 表記は `date` 実測より約 30–40 分先行していた可能性がある（例: patrol 19 を 11:48 と記したが実測 11:14 前後）。イベントの UTC 時刻は GitHub 側が正確 — patrol-state/worklog の記録は以降 `date` 実測で記す
