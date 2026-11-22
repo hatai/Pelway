@@ -294,3 +294,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **`cb1a1122`（#652 impl）が起床** — PR コメント経由の must-fix 指示を読み対応中と推定。push 禁止のため head `8da28305` は不変のまま（修正コミットはローカル、push は hatai 経由の手順）
 - `eaa7764e`・`e4009bd3`・`b267df2c` も再起動・waiting 往復 — 実害なし
+
+## 巡回記録（patrol 40・14:20 JST・受信箱 wake）
+
+- `cb1a1122` run 3 は hatai「PR 作成済み」への応答のみ（PR 確認・CI 状況報告）— **must-fix 未着手**。send は権限外のため、修正指示の経路は [PR コメント](https://github.com/hatai/Pelway/pull/652#issuecomment-7073078521)で hatai のスレッド指示が前提
+- **新スレッド `19a2d8c5`**: [実装] #657 委託タスク定型ガード（idle・hatai 起動と推定）
