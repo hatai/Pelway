@@ -165,3 +165,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-7da7a83a6346
 - 統制の回答（22:47Z）: r7 は両枠とも起動・完了したが、`pr-size: fail`（+868/-35・上限 +68 超過）かつ `pr-size-exception` 無しのため結果を投稿せず終了 — 手順どおりの挙動。verify 他チェックは全 pass。
 - 例外承認は hatai 本人の `<!-- pr-size-exception -->` コメントが必要で指揮役は決められない → issue #602（needs-human 既存）へ hatai あて判断依頼を投稿（issuecomment-7070772750・例外/縮小/分割の 3 択）。#610 へも保留連絡（issuecomment-7070773079）。
 - 以降 hatai 応答待ち。#610 head b7efc229・draft 据え置き。
+
+## 巡回 152–172（08:41–10:13 JST・実値）— hatai 判断待ち + 起票 2 件
+- hatai の pr-size 例外判断は未着（#602 needs-human・依頼投稿済み）。#610 head b7efc229・draft 据え置き。
+- open PR 棚卸し: #560 の pr-size-exception ラベルは #333 の hatai 承認中継記録（14:13Z・条件付き）で裏付けあり。
+- リード指示（濱田さん了承済み）で起票: **#639**（レビュー役が専用 home 外の指示ファイルを読む隔離の穴・#587 c10 由来）・**#640**（review-pr のツール数えが exec 経由を含まず多層防御の欠け・#586 c11 由来）。どちらも milestone 8・ready-for-agent なし。
