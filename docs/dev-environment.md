@@ -217,7 +217,7 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 
 ## レビュー担当の Codex（codex_review）
 
-AI 開発チームのレビュースレッドは、T3 の Codex インスタンス `codex_review` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。`codex_review` はほかの Codex と home（`CODEX_HOME`）を分け、レビュー担当専用の `~/.codex-review` で動かす。このマシンでの設定は次のとおり。
+AI 開発チームのレビュースレッドは、T3 の Codex インスタンス `codex_review` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。`codex_review` はほかの Codex と home（`CODEX_HOME`）を分け、レビュー担当専用の `~/.codex-review` で動かす。レビュー担当（`codex_review`・`claude_review` のどちらも）が `scripts/agent-gh review` で読む fnox の設定は、環境変数 `PELWAY_AGENT_FNOX_CONFIG_REVIEW`（既定 `~/.config/pelway-agent-review/fnox.toml`）。`PELWAY_REVIEW_APP_ID` などの `PELWAY_REVIEW_*` の秘密はこのファイルに載る（dev 用の `PELWAY_AGENT_FNOX_CONFIG`・`~/.config/pelway-agent/fnox.toml` とは分離）。このマシンでの設定は次のとおり。
 
 | 場所 | 設定 |
 |---|---|
