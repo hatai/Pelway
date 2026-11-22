@@ -165,3 +165,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - #631: `2cd790bb`・MERGEABLE・pending は octocov のみ（verify 完了）・QA 委託実行中
 - caa0ff74（旧 #602 impl）が 1 run 実行後 completed — 引き継ぎ後の後片付けと判断
 - #586/#587: 結果未着
+
+## 巡回記録（patrol 18・11:41 JST・受信箱 wake）
+
+- `mcp:57618b05` が run 4 を開始 — 反復起床継続（hatai の UI settle 要請は未対応）
+- #631: `2cd790bb`・MERGEABLE・octocov のみ pending・QA 実行中
+- #610・#586/#587: 変化なし
