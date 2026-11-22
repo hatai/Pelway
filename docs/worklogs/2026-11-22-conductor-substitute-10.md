@@ -214,3 +214,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **#530 r2 結果**: pelway-review CHANGES_REQUESTED@`f74b848a` — must-fix 1: 重複通知が未解消（直近 100 件以前が見えない・API エラー時も送信）。Issue #481 の hatai 決定（同一 PR・同一 sha で 1 回のみ）は文書追記では満たせず、仕組み化か hatai の条件緩和決定が必要
 - send 障害で impl `mcp:5c599260` へ届かないため [PR コメント](https://github.com/hatai/Pelway/pull/530#issuecomment-7072879032) で代替配信
+
+## 巡回記録（patrol 26・11:45 JST・受信箱 wake）
+
+- 通知は遷移のみ（2e87e67b 継続・cb1a1122/mcp:57618b05/4649721f は hatai Web スレッドの往復）
+- #610 `7bc1bea7`・#530 impl 待ち・#586/#587 結果未着 — 変化なし
