@@ -101,3 +101,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **PR #630 MERGED**（10:53 JST・kodiak・merge commit `6441bf8c`）— Issue #621 auto-close。Devin 10 初のマージ
 - #631: CONFLICTING 不変・send 障害約 9 分（指示は issuecomment-7072497846 で代替配信済み）
 - #586/#587: 事後レビュー結果未着
+
+## 巡回記録（patrol 8・10:56 JST・受信箱 wake）
+
+- 通知: 4649721f の追加 run ×2・自スレッド遷移のみ。実害なし
+- **#631 手当委託起動**: send 障害が 10 分継続（read/organize/delegate は正常・send 経路のみ）のため、approve 済み PR を滞留させない判断で claudeAgent 手当委託 `hand-631-merge-main-20261122` を起動 — impl worktree が同 branch を checkout 中のため detached/仮 branch から main 取り込み・verify・push を指示
+- #631: 新 head が出たら review・QA をやり直す（現 approve は旧 head 67d48dd6 対象）
+- #586/#587: 事後レビュー結果未着
