@@ -73,3 +73,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **PR #630 QA 完了**: 委託 `qa-630-3c7780eb-20261122` が `QA: pass` を返却（実測 detach 検証・受け入れ条件 5 項全満たす・弱める変更なし・run 44922166726）
 - head `3c7780eb` 不変を確認後、`pelway-qa[bot]` 名義で合格コメント投稿（issuecomment-7072453481・author/type Bot・`QA: pass`/`sha:`/`run:` 全要件充足を api で検証）
 - **automerge 付与**: pelway-review APPROVED@3c7780eb・nit 0・必須チェック全 pass・承認後 head 不変・pelway-qa 同 SHA pass — 5 条件すべて充足。kodiak マージキュー待ちへ移行
+
+## 巡回記録（patrol 4・10:48 JST・受信箱 wake）
+
+- 受信箱 387・watch.log 3738–3740: `ab1a11fa`（指揮役交代スクリプトの動作改善）completed・新スレッド `cb1a1122`（CI セキュリティチェックの検出事項の修正）running — いずれも hatai の作業・監視のみ
+- #630: OPEN・MERGEABLE・kodiak キュー処理中（automerge 付与直後）
+- #631: `67d48dd6`・CONFLICTING 不変。send 再試も失敗（MCP 断続・発生から約 3 分・pending 継続）
+- #586/#587: 事後レビュー結果未着
