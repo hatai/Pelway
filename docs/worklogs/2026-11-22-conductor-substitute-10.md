@@ -289,3 +289,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - スレッド遷移のみ（`caa0ff74`・`1db76f66` 反復）— 実害なし
 - PR #652: head `8da28305` 不変・応答待ち継続
+
+## 巡回記録（patrol 39・14:05 JST・受信箱 wake）
+
+- **`cb1a1122`（#652 impl）が起床** — PR コメント経由の must-fix 指示を読み対応中と推定。push 禁止のため head `8da28305` は不変のまま（修正コミットはローカル、push は hatai 経由の手順）
+- `eaa7764e`・`e4009bd3`・`b267df2c` も再起動・waiting 往復 — 実害なし
