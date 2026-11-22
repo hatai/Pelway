@@ -490,3 +490,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## QA 結果処理（#600・22:25 JST）
 
 - **PR #600 全条件充足 → automerge 再付与**: [QA pass@b3fe09fd](https://github.com/hatai/Pelway/pull/600#issuecomment-7080855006)（必須チェック全 pass・受け入れ条件全 pass・機能差分は旧 head と不変・弱化なし）・APPROVED@同 SHA → kodiak キューへ復帰
+
+## 後着 QA が指摘したマージ条件のずれ（#530・11-23 08:00 JST）
+
+- 制限解除で復帰した claude QA 委託（qa-530-r1）が、マージ済み head `d0cb27da` で事後 QA を実施し pass（実送信の検証も含む・dedup の実動作も確認）
+- **指摘**: pelway-qa の正式記録は `f74b848a` 宛だが、実際のマージ head は kodiak の main 取り込み `d0cb27da` — 「QA pass が現 head と同じ SHA」という条件からの形式的ずれ。差分内容は同一で実害なしとの QA 判定
+- 同じ形は #567（f72b4c59→8d9f2efb）・#652（e87e25ff→27485b92）にもある（#497 は QA が新 head で再実測していたため適合）
+- kodiak merge commit を「現 head ではない」とみなして再 QA を要とするかは運用判断 — hatai に報告
