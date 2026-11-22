@@ -337,3 +337,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - 多数スレッド一括起床（hatai 操作と推定）: `dab971b2`(#306)・`16efc920`(#457)・`3f022128`(#490)・`5fc0e3f5`(#295)・`28d8f688`(#480)・`9c9657f9`(#615)・`5c599260`(#481) 等
 - **PR #464**: head が `bc04c41e` に変化 — kodiak がブランチを main 取り込み更新中（automerge 進行）。**PR #600**: キュー待ち・head 不変
 - `5c599260`（#481 must-fix）起床→waiting — #530 への push はまだ
+
+## 巡回記録（patrol 48・16:35 JST・委託完了 wake）
+
+- **PR #567 r2 結果: CHANGES_REQUESTED**（must-fix 2・いずれも文書表現）: 1) 戻し方の全復元は後追加の PermissionRequest/許可リストを消す → denyWrite のみ戻す手順に、2) 「書けるのは $TMPDIR だけ」の断定を実測パスに限定（記録欄・残存経路も同様）
+- impl `dab971b2` へ `mcp:` プレフィックス付き send で指示配信成功（send 経路復旧の兆し）
