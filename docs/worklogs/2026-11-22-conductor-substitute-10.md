@@ -319,3 +319,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 巡回記録（patrol 44・15:30 JST・委託完了 wake）
 
 - **PR #497 再レビュー結果: APPROVED@c18b82eb**（pelway-review 投稿確認済み）— 前回 must-fix 解消・新規問題なし。QA 委託（claude-opus-5-5）を起動 → pass なら pelway-qa 投稿 → 条件充足で Ready 化＋automerge
+
+## 巡回記録（patrol 45・15:50 JST・リード指示）
+
+- **pelway-qa 正式記録の投稿に成功**: `PELWAY_AGENT_FNOX_CONFIG=~/.config/pelway-agent-qa/fnox.toml` で [#464](https://github.com/hatai/Pelway/pull/464#issuecomment-7073321499)・[#600](https://github.com/hatai/Pelway/pull/600#issuecomment-7073322623) へ `QA: pass`＋同 head sha＋run URL を投稿し、REST で `pelway-qa[bot]`・`Bot` 型を検証
+- **#593 を close**: 「権限付与前の試行による失敗」と記録（403 の原因解消）
+- **PR #464**: マージ 5 条件充足（pelway-review APPROVED@4606fad3・checks 全 pass・QA pass@同 SHA）→ **Ready 化＋automerge 付与**（kodiak キューへ）
+- **PR #600**: QA 記録完了。残条件は pelway-review 現 head `3b5ead4a` の approve（rev-600 委託実行中）
