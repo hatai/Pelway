@@ -957,7 +957,7 @@ fn poll_after_server_restart_fetches_the_new_history() {
     };
     // 再起動前: メッセージ要求 1・2 回目は満杯ページ（old-1..=old-400）、
     // 3 回目は切断。再起動後（4 回目以降）: 同じチャンネルの履歴は
-    // new-1..=new-3 の 3 件だけ。probe（after_seq=199・limit=1）は
+    // new-1..=new-3 の 3 件だけ。probe（after_seq=399・limit=1）は
     // 空を返し、カーソル不所属で先頭から取り直す。
     let msg_calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let calls2 = msg_calls.clone();
@@ -1116,4 +1116,163 @@ fn rejected_page_does_not_leak_into_the_resumed_fetch() {
         messages.windows(2).all(|w| w[0].seq < w[1].seq),
         "seq 昇順・重複なし"
     );
+}
+
+// probe の照合は全フィールド: サーバー再起動で別の投稿に同じ seq と
+// message_id が付いていても、内容が違えばカーソルは不所属として
+// 先頭から取り直す。
+#[test]
+fn poll_after_restart_with_colliding_ids_fetches_the_new_history() {
+    let ch = Channel {
+        workspace_id: WorkspaceId::from("ws-demo-01"),
+        channel_id: ChannelId::from("ch-stub"),
+        name: "スタブ".to_owned(),
+        members: vec![ChannelMember {
+            member_id: MemberId::from("m-tanaka"),
+            display_name: "田中".to_owned(),
+            member_kind: MemberKind::Human,
+        }],
+    };
+    let channels_json = serde_json::to_string(&vec![ch.clone()]).unwrap();
+    let channel_json = serde_json::to_string(&ch).unwrap();
+    let msg = |seq: u64, body: &str| StoredMessage {
+        message_id: MessageId::from(format!("m-id-{seq}").as_str()),
+        workspace_id: WorkspaceId::from("ws-demo-01"),
+        channel_id: ChannelId::from("ch-stub"),
+        seq,
+        author_id: MemberId::from("m-bot"),
+        member_kind: MemberKind::Bot,
+        purpose_id: PurposeId::P01,
+        body: body.to_owned(),
+        thread_root: None,
+        client_msg_id: None,
+        created_at: 0,
+    };
+    let http_ok = |body: String| {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .into_bytes()
+    };
+    // 再起動前は old-1..=old-400（id は m-id-N）。再起動後の履歴は
+    // 同じ採番・同じ id だが本文だけ違う new-1..=new-3。probe
+    // （after_seq=399&limit=1）は seq=400・id=m-id-400 だが本文が
+    // 違う 1 件を返す → 照合は全フィールドで不一致 → 先頭から取り直す。
+    let msg_calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let calls2 = msg_calls.clone();
+    let stub = spawn_raw_stub_server(move |_method, target| {
+        if target.contains("/messages") {
+            let call = calls2.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            match call {
+                1 | 2 => http_ok(
+                    serde_json::to_string(
+                        &((call - 1) * 200 + 1..=call * 200)
+                            .map(|s| msg(s, "old"))
+                            .collect::<Vec<_>>(),
+                    )
+                    .unwrap(),
+                ),
+                3 => vec![], // 切断（再起動前の取得は中断）
+                _ if target.contains("after_seq=") => {
+                    // probe: 識別子は同じだが本文が違う投稿
+                    http_ok(serde_json::to_string(&vec![msg(400, "new")]).unwrap())
+                }
+                _ => http_ok(
+                    serde_json::to_string(&(1..=3).map(|s| msg(s, "new")).collect::<Vec<_>>())
+                        .unwrap(),
+                ),
+            }
+        } else if target.contains("/channels/ch-") {
+            http_ok(channel_json.clone())
+        } else {
+            http_ok(channels_json.clone())
+        }
+    });
+
+    let mut session = LiveSession::new(stub, "ws-demo-01".into());
+    assert!(session.bootstrap().is_err(), "3 ページ目で切断");
+
+    session
+        .poll()
+        .expect("内容が変わった履歴は先頭から取り直す");
+    let messages = session.messages();
+    assert_eq!(messages.len(), 3);
+    assert!(
+        messages.iter().all(|m| m.body.starts_with("new")),
+        "識別子が同じでも内容が違えば古い履歴は残らない"
+    );
+}
+
+// 保存カーソルの検証: サーバーが seq=0 を末尾にした満杯ページを返すと
+// カーソルは 0 になり、再開時の probe（after_seq = カーソル-1）は
+// アンダーフローする。減算前に検査して Protocol として扱う。
+#[test]
+fn saved_cursor_zero_is_a_protocol_error_not_an_underflow() {
+    let ch = Channel {
+        workspace_id: WorkspaceId::from("ws-demo-01"),
+        channel_id: ChannelId::from("ch-stub"),
+        name: "スタブ".to_owned(),
+        members: vec![ChannelMember {
+            member_id: MemberId::from("m-tanaka"),
+            display_name: "田中".to_owned(),
+            member_kind: MemberKind::Human,
+        }],
+    };
+    let channels_json = serde_json::to_string(&vec![ch.clone()]).unwrap();
+    let channel_json = serde_json::to_string(&ch).unwrap();
+    let msg = |seq: u64| StoredMessage {
+        message_id: MessageId::from(format!("m-{seq}").as_str()),
+        workspace_id: WorkspaceId::from("ws-demo-01"),
+        channel_id: ChannelId::from("ch-stub"),
+        seq,
+        author_id: MemberId::from("m-bot"),
+        member_kind: MemberKind::Bot,
+        purpose_id: PurposeId::P01,
+        body: "x".to_owned(),
+        thread_root: None,
+        client_msg_id: None,
+        created_at: 0,
+    };
+    let http_ok = |body: String| {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .into_bytes()
+    };
+    // seq が 0 で終わる満杯ページ（サーバー採番違反）を受けてカーソル 0
+    // を保存し、次のページ要求は切断。再開時の probe 計算が
+    // パニックせず Protocol になることを見る。
+    let msg_calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let calls2 = msg_calls.clone();
+    let stub = spawn_raw_stub_server(move |_method, target| {
+        if target.contains("/messages") {
+            let call = calls2.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            match call {
+                1 => http_ok(
+                    serde_json::to_string(&(0..200u64).rev().map(msg).collect::<Vec<_>>()).unwrap(),
+                ),
+                _ => vec![],
+            }
+        } else if target.contains("/channels/ch-") {
+            http_ok(channel_json.clone())
+        } else {
+            http_ok(channels_json.clone())
+        }
+    });
+
+    let mut session = LiveSession::new(stub, "ws-demo-01".into());
+    assert!(session.bootstrap().is_err(), "2 ページ目で切断");
+
+    let result = session.poll();
+    assert!(
+        matches!(result, Err(LiveError::Protocol(_)) | Err(LiveError::Net(_))),
+        "seq=0 のカーソルは Protocol で扱い、パニックしない: {result:?}"
+    );
+    if let Err(LiveError::Protocol(msg)) = result {
+        assert_eq!(msg, "saved fetch cursor is zero");
+    }
 }

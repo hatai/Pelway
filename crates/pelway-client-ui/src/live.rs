@@ -447,20 +447,22 @@ impl LiveSession {
 
     /// 保存した取得カーソル（`p.after`）が今の履歴に属するかを probe で確かめる。
     /// `after_seq = カーソル-1, limit = 1` でカーソル位置の 1 件を取り、保持中の
-    /// 末尾と seq・`message_id` が一致すれば同じ履歴とみなす（サーバーが
-    /// 再起動して採番・内容が入れ替わった場合は不一致になる）。
+    /// 末尾と全フィールドが一致すれば同じ履歴とみなす。サーバーが再起動して
+    /// 採番をやり直すと、別の投稿に同じ `seq` と `message_id` が付き得るため、
+    /// 識別子だけでなく本文・投稿者・保存時刻まで一致を要求する。
     /// 保持中の一覧が空なら比較できないため `false` を返す。
     fn cursor_belongs(&mut self, p: &FetchProgress) -> Result<bool, LiveError> {
         let (Some(after), Some(tail)) = (p.after, p.out.back()) else {
             return Ok(false);
         };
+        let Some(prev) = after.checked_sub(1) else {
+            return Err(self.protocol_err("saved fetch cursor is zero"));
+        };
         let mut path = self.actor_path_for(&p.actor, &channel_messages_path(&p.channel_id));
-        path.push_str(&format!("&limit=1&after_seq={}", after - 1));
+        path.push_str(&format!("&limit=1&after_seq={prev}"));
         let resp = self.get_response(&path)?;
         let probe: Vec<StoredMessage> = self.parse_json(&resp.body)?;
-        Ok(probe
-            .first()
-            .is_some_and(|m| m.seq == after && m.message_id == tail.message_id))
+        Ok(probe.first().is_some_and(|m| m == tail))
     }
 
     /// 投稿の冪等キー（`client_msg_id`）を新規発行する。応答の受け取りに
