@@ -667,12 +667,17 @@ bwrap が作る名前空間の要点:
 /home が読み取り専用に再マウントされたときは、リポジトリを /tmp 側に clone して作業する。このとき PATH 上の `fnox`（`scripts/agent-gh` が呼ぶものも同じ）は mise の shim で、shim は作業ディレクトリの `mise.toml` を読む。/tmp 側の clone の設定は信頼済みではなく、`mise trust` の記録も /home 側に書けないため、shim は untrusted で失敗する。次の 2 つで回避する。
 
 ```bash
-mkdir -p /tmp/sshims
-ln -sf ~/.local/share/mise/installs/fnox/latest/fnox /tmp/sshims/fnox   # fnox 実体への symlink
-export PATH="/tmp/sshims:$PATH"
-export MISE_TRUSTED_CONFIG_PATHS="/tmp/<clone のディレクトリ>"
+if mkdir -m 700 /tmp/sshims 2>/dev/null ||
+  { [ -d /tmp/sshims ] && [ ! -L /tmp/sshims ] && [ -O /tmp/sshims ] && chmod 700 /tmp/sshims; }; then
+  ln -sfn ~/.local/share/mise/installs/fnox/latest/fnox /tmp/sshims/fnox   # fnox 実体への symlink
+  export PATH="/tmp/sshims:$PATH"
+  export MISE_TRUSTED_CONFIG_PATHS="/tmp/<clone のディレクトリ>"
+else
+  echo "/tmp/sshims が自分のものではない。PATH に足さずに止める" >&2
+fi
 ```
 
+- `/tmp` は同じマシンのほかのユーザーも書けるため、`/tmp/sshims` を先に作られていると、その相手が中の `fnox` を差し替えられる。PATH の先頭に置いたそれを `scripts/agent-gh` が起動すると、本人の権限で App の秘密鍵を読まれる。そこで、自分が作ったか、symlink でない自分所有のディレクトリのときだけ mode 700 にして使い、それ以外は PATH に足さずに止める。
 - fnox 実体のパスは `~/.local/share/mise/installs/fnox/latest/fnox`。`/tmp/sshims` にはこの symlink だけを置き、PATH の先頭に置いて shim より先に実体が解決されるようにする。
 - `MISE_TRUSTED_CONFIG_PATHS` は /tmp 側の clone を mise に信頼させる（`mise trust` の記録を書かずに済む）。`mise run` などの mise 経由のコマンドもこれで動く。
 - 確かめ方: `command -v fnox` が `/tmp/sshims/fnox` を返し、`scripts/agent-gh dev api /rate_limit` が成功する。
