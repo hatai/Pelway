@@ -11,3 +11,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の「`pelway.agent-watch/v1`」の表の直後に「`THREAD shared-worktree` の組み合わせは、`thread show` の失敗中も通知済みとして保つ」と足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 2）
+
+対象 head: ab51a167208edf8e27099d1cb83a1077120850a1
+
+1. 詰まった箇所: `scripts/conductor-watch.sh`: round 1 は `if threads:` で判定を飛ばしており、一覧の取得失敗と正常な空の一覧（`[]`）を区別していなかった（codex の must-fix）。`thread list` の失敗時に `threads.json` を消し、python 側で `threads_ok` を立てて区別した。試験 6 を足した。
+2. 曖昧だった文: 「同じ PR の 2 回目以降のレビューは 1 段上げる」（`.agents/skills/command-team/SKILL.md` の「レビュー担当と effort」）と「3 回目のレビューの委託では effort を 1 段上げる」（`.agents/skills/implement-issue/SKILL.md` の手順 9）
+3. 仮定と解釈: effort は、実装担当が担当と effort を決めるときに従う表として command-team の文を採り、round 2 の委託から 1 段上げた（codex low→medium、claude medium→high）。claude の nit 4 件は `[文書のずれ]` の印が無いため直していない。
+4. 足りなかった情報・検証手段: round 1 と同じく、実物の `t3 thread list`/`thread show` の JSON（`createdAt` の有無を含む）を sandbox から確かめられない。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 の「3 回目のレビューの委託では effort を 1 段上げる」を、command-team の「2 回目以降は 1 段上げる」と揃える。
+
+使ったスキル: implement-issue
