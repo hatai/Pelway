@@ -299,3 +299,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - `cb1a1122` run 3 は hatai「PR 作成済み」への応答のみ（PR 確認・CI 状況報告）— **must-fix 未着手**。send は権限外のため、修正指示の経路は [PR コメント](https://github.com/hatai/Pelway/pull/652#issuecomment-7073078521)で hatai のスレッド指示が前提
 - **新スレッド `19a2d8c5`**: [実装] #657 委託タスク定型ガード（idle・hatai 起動と推定）
+
+## 巡回記録（patrol 41・14:30 JST・リード指示）
+
+- **PR #497 の状態ズレ修正**: 実測で hatai APPROVED@c18b82eb（2026-11-21T14:41Z）・必須チェック全 pass を確認。`CHANGES_REQUESTED` 表示は pelway-review の旧 head `05c1cbd2` 宛 verdict（hatai DISMISS 済）が原因 — 現 head で codex_review 再レビュー委託を起動
+- 待ち 4 件（#306/#567・#463・#464・#600）はチーム議論の結論まで据え置き
