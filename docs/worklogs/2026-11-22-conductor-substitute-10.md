@@ -196,3 +196,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **#610**: 引き継ぎスレッド `2e87e67b` が新 head `7bc1bea7` を push（2 件目）・**pr-size が pass に転じた** → 例外ではなく分割での対応と解釈（`pr-size-exception` 不要）。draft・CI 実行中・スレッドは waiting（レビュー回しは undraft 後）
 - `cb1a1122`（CI セキュリティ修正）completed。`mcp:57618b05` は hatai の Web 操作で run 終了（対処不要の方針どおり）
 - #586/#587: 結果未着
+
+## 巡回記録（patrol 23・11:26 JST・受信箱 wake）
+
+- open PR 棚卸し（12 件・#630/#631 のマージ反映）: CHANGES_REQUESTED は #610・#567・#560・#530・#497・#399。APPROVED draft は #600・#482・#464・#463。#625/#624 は REVIEW_REQUIRED
+- #530（#481・non-draft・MERGEABLE・CHANGES_REQUESTED@f74b848a）: must-fix 未対応のまま滞留 — send 障害で impl の wake ができず、PR コメントでの指示は未実施（要否を次巡回で判断）
+- #586/#587: 結果未着
