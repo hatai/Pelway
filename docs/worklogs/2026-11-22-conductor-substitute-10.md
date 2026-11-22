@@ -171,3 +171,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - `mcp:57618b05` が run 4 を開始 — 反復起床継続（hatai の UI settle 要請は未対応）
 - #631: `2cd790bb`・MERGEABLE・octocov のみ pending・QA 実行中
 - #610・#586/#587: 変化なし
+
+## 巡回記録（patrol 19・11:48 JST・QA 委託完了 wake）
+
+- **PR #631 QA 完了**: 委託 `qa-631-2cd790bb` が `QA: pass`（受け入れ条件 6 項全満たす・弱める変更なし・run 44973960953）
+- head `2cd790bb` 不変・全チェック完了・fail なしを確認後、`pelway-qa[bot]` 名義で合格コメント投稿（issuecomment-7072773986・api で author/format 検証済）
+- **automerge 付与**: 5 条件すべて充足（r2 pelway-review APPROVED@2cd790bb・nit 0・必須チェック pass・head 不変・pelway-qa 同 SHA pass）→ kodiak キュー待ちへ
