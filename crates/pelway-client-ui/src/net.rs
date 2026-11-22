@@ -26,7 +26,8 @@ pub struct Response {
     pub body: Vec<u8>,
 }
 
-/// 通信の失敗。接続できない・途中で切れる・応答の形がおかしい、の 3 つに畳む
+/// 通信の失敗。接続・読み書きの失敗（`Io`）・応答の形の異常（`Malformed`）・
+/// 応答サイズ超過（`TooLarge`）・接続先の拒否（`NonLoopback`）の 4 つに畳む
 /// （UI は「つながっていません」の 1 状態として扱う）。
 #[derive(Debug)]
 pub enum NetError {

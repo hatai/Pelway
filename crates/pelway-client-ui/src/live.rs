@@ -116,7 +116,14 @@ pub fn parse_server_addr(text: &str) -> Result<SocketAddr, AddrError> {
 /// 非 Unicode を含む）なら [`AddrError`]。既定値に戻すのは「未設定」のときだけ
 /// （設定ミスをデフォルト接続で取りこぼさない）。
 pub fn server_addr() -> Result<SocketAddr, AddrError> {
-    match std::env::var(SERVER_URL_ENV) {
+    server_addr_from(std::env::var(SERVER_URL_ENV))
+}
+
+/// [`server_addr`] の本体。環境変数の読み取り結果を値で受ける
+/// （設定あり・未設定・非 Unicode の 3 分岐を、環境を変えずに単体テストで
+/// 確かめられるようにする。edition 2024 では `set_var` が `unsafe`）。
+fn server_addr_from(value: Result<String, std::env::VarError>) -> Result<SocketAddr, AddrError> {
+    match value {
         Ok(value) => parse_server_addr(&value),
         Err(std::env::VarError::NotPresent) => parse_server_addr(DEFAULT_SERVER_URL),
         Err(std::env::VarError::NotUnicode(_)) => Err(AddrError("not Unicode")),
@@ -149,7 +156,9 @@ impl fmt::Display for LiveError {
         match self {
             Self::Net(e) => write!(f, "{e}"),
             Self::Status(code) => write!(f, "server returned status {code}"),
-            Self::Json(e) => write!(f, "unexpected response JSON: {e}"),
+            Self::Json(e) => {
+                write!(f, "unexpected response JSON at {}:{}", e.line(), e.column())
+            }
             Self::NoChannel => f.write_str("no channel selected"),
             Self::StaleTarget => f.write_str("post target changed while reconnecting"),
             Self::Protocol(msg) => write!(f, "unexpected server response: {msg}"),
@@ -512,8 +521,9 @@ impl LiveSession {
     }
 
     /// GET で応答をそのまま取る。200 以外・通信の失敗は `connected = false`
-    /// にしてから [`LiveError`] を返す。body のバイト数を計上する呼び出し側
-    /// （`fetch_messages` の蓄積上限）があるため、JSON 化前の raw を返す。
+    /// にしてから [`LiveError`] を返す。縮退の再試行の判断に使う
+    /// （`fetch_messages` は [`crate::net::NetError::TooLarge`] を見て件数を
+    /// 半減する）ため、JSON 化前の [`crate::net::Response`] を返す。
     fn get_response(&mut self, path: &str) -> Result<crate::net::Response, LiveError> {
         let resp = self.client.get(path).map_err(|e| {
             self.connected = false;
@@ -573,5 +583,29 @@ mod tests {
         let mut s = LiveSession::new("127.0.0.1:1".parse().unwrap(), "w".into());
         s.actor = MemberId::from("m a?&=b");
         assert_eq!(s.actor_path("/p"), "/p?actor=m%20a%3F%26%3Db");
+    }
+
+    #[test]
+    fn server_addr_from_covers_env_read_branches() {
+        // 設定あり → その値をパースする。
+        assert_eq!(
+            server_addr_from(Ok("http://127.0.0.1:9999".to_owned()))
+                .expect("valid value parses")
+                .port(),
+            9999
+        );
+        // 未設定 → 既定値。
+        assert_eq!(
+            server_addr_from(Err(std::env::VarError::NotPresent))
+                .expect("default applies when unset"),
+            parse_server_addr(DEFAULT_SERVER_URL).expect("default URL parses")
+        );
+        // 設定ありだが非 Unicode → エラー（既定値には戻らない）。
+        assert!(
+            server_addr_from(Err(std::env::VarError::NotUnicode(
+                std::ffi::OsString::from("not-utf8")
+            )))
+            .is_err()
+        );
     }
 }

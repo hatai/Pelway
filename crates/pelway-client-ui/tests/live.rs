@@ -10,6 +10,7 @@ use std::net::{SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex};
 
 use pelway_client_ui::live::{self, LiveError, LiveSession};
+use pelway_client_ui::net::NetError;
 use pelway_contract::ids::{ChannelId, MemberId, MessageId, WorkspaceId};
 use pelway_contract::ledger::ApprovalLedger;
 use pelway_contract::member::{ChannelMember, MemberKind};
@@ -264,6 +265,24 @@ fn spawn_stub_server(respond: impl Fn(&str) -> (u16, String) + Send + 'static) -
             );
             let _ = stream.write_all(head.as_bytes());
             let _ = stream.write_all(body.as_bytes());
+        }
+    });
+    addr
+}
+
+/// クロージャが返すバイト列をそのまま応答として書き出すスタブ
+/// （HTTP として壊れた応答を作るため）。
+fn spawn_raw_stub_server(respond: impl Fn(&str) -> Vec<u8> + Send + 'static) -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
+    let addr = listener.local_addr().expect("stub addr");
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut buf = vec![0u8; 16 * 1024];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]);
+            let target = request.split_whitespace().nth(1).unwrap_or("").to_owned();
+            let _ = stream.write_all(&respond(&target));
         }
     });
     addr
@@ -554,4 +573,67 @@ fn parse_server_addr_accepts_ipv4_loopback_only() {
     // 既定値はデモ用の暫定値（Issue 390 の固定ポートが確定したら揃える）。
     assert!(live::DEFAULT_SERVER_URL.starts_with("http://127.0.0.1:"));
     assert!(live::parse_server_addr(live::DEFAULT_SERVER_URL).is_ok());
+}
+
+// 受信側の検査（net.rs）: エラーの種類ごとに呼び出し側の動作が変わるため、
+// それぞれを直接確かめる（`TooLarge` は縮退の再試行、`Malformed`/`Io`/
+// `NonLoopback` は接続失敗として扱う）。
+#[test]
+fn net_rejects_non_loopback_target() {
+    // parse_server_addr を通らない経路（アドレスの直接指定）でも拒否する。
+    let mut session = LiveSession::new("192.0.2.1:80".parse().unwrap(), "ws".into());
+    assert!(matches!(
+        session.bootstrap(),
+        Err(LiveError::Net(NetError::NonLoopback))
+    ));
+}
+
+#[test]
+fn net_rejects_malformed_http_response() {
+    let stub = spawn_raw_stub_server(|_| b"this is not an http response".to_vec());
+    let mut session = LiveSession::new(stub, "ws".into());
+    assert!(matches!(
+        session.bootstrap(),
+        Err(LiveError::Net(NetError::Malformed))
+    ));
+}
+
+#[test]
+fn net_rejects_content_length_mismatch() {
+    let stub = spawn_raw_stub_server(|_| {
+        b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n[]".to_vec()
+    });
+    let mut session = LiveSession::new(stub, "ws".into());
+    assert!(
+        matches!(
+            session.bootstrap(),
+            Err(LiveError::Net(NetError::Malformed))
+        ),
+        "宣言と本文の長さが違う応答は受け付けない"
+    );
+}
+
+#[test]
+fn net_rejects_oversized_response() {
+    // 1 MiB を超える応答は読み取りの途中で打ち切る。
+    let stub = spawn_stub_server(|_| (200, "x".repeat(2 * 1024 * 1024)));
+    let mut session = LiveSession::new(stub, "ws".into());
+    assert!(matches!(
+        session.bootstrap(),
+        Err(LiveError::Net(NetError::TooLarge))
+    ));
+}
+
+#[test]
+fn net_times_out_on_a_silent_server() {
+    // 接続を受けても応答を返さない接続先は、読み取り期限で失敗する。
+    let stub = spawn_raw_stub_server(|_| {
+        std::thread::sleep(std::time::Duration::from_secs(10));
+        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]".to_vec()
+    });
+    let mut session = LiveSession::new(stub, "ws".into());
+    assert!(matches!(
+        session.bootstrap(),
+        Err(LiveError::Net(NetError::Io(_)))
+    ));
 }
