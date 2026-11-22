@@ -279,3 +279,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - `e4009bd3`（#643）・`1db76f66` 再起動・`caa0ff74` 反復 — 実害なし
 - PR #652: head `8da28305` 不変・must-fix 指示コメント以降の応答なし
+
+## 巡回記録（patrol 37・13:40 JST・受信箱 wake）
+
+- スレッド遷移のみ（`caa0ff74` 反復・`b267df2c` 一瞬再起動・`1db76f66` 再完了）— 実害なし
+- PR #652: head `8da28305` 不変・応答待ち継続
