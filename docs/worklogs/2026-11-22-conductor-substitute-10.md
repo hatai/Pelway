@@ -347,3 +347,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **PR #652**: `cb1a1122` が must-fix 修正コミット `e87e25ff`（"pin gitleaks allowlists to the known dummy values and files"）を作成 — ローカルのみ（push 禁止）。push コマンドをリード経由で hatai へ転送
 - **PR #653**: head→`14591023`（impl `b267df2c` が push）・`dab971b2`（#567 must-fix）対応開始
+
+## 巡回記録（patrol 50・17:00 JST・委託完了 wake）
+
+- **PR #497 全条件充足 → automerge**: kodiak の main 取り込みで head `415b7e5b` に変化したが、QA が新 head で再実測 pass（PR 差分は同一と確認）。[QA 記録投稿](https://github.com/hatai/Pelway/pull/497#issuecomment-7073471650)・reviewDecision=APPROVED・checks 全 pass・既に Ready → kodiak キューへ（本日 4 件目）
+- 残件: PR 本文の「対象 HEAD」「未検証」記述が古い — impl `3f022128` への修正依頼が要る
