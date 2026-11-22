@@ -460,3 +460,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## QA 結果処理（#530 r4・21:15 JST）
 
 - **PR #530 全条件充足 → automerge**: Devin QA で [QA pass@f74b848a](https://github.com/hatai/Pelway/pull/530#issuecomment-7074233435)（必須チェック全 pass・受け入れ条件全 pass・弱化変更は理由記載ありで実態と整合）・APPROVED@同 SHA → kodiak キューへ
+
+## 後着 QA 結果の整理（#530・21:30 JST）
+
+- **PR #530 MERGED**（kodiak・head `d0cb27da`）— 指揮下 7 件目
+- 制限解除で後着した codex QA r3 は `QA: fail` を返したが、判定は「実送信未確認」を不合格理由とする旧 AC 基準。hatai の条件変更（issuecomment-7073923640）で実送信確認は対象外のため、この fail は採用しない。正式記録は Devin r4 の `QA: pass`@`f74b848a`（pelway-qa 投稿済み）
