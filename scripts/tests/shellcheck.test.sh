@@ -7,10 +7,15 @@
 #   - shellcheck scripts/demo-check/*.sh が severity 既定で指摘 0 件・exit 0
 #   - 専用の mise タスク（shellcheck）が通り、verify-static の依存に含まれる
 #     （= mise run verify と CI の static ジョブから実行される）
+# Issue #621（検査の範囲を scripts/ の bash・sh 全部に広げる）の受け入れ条件:
+#   - mise run shellcheck が検査したファイルの数を出し、scripts/ 以下で 1 行目が
+#     #! で始まり bash か sh を含むファイルの数と一致する
+#   - scripts/ の写しに warning 級の指摘を 1 件含むスクリプトを足すと、検査が
+#     0 以外で終わる（info 級だけなら通る）。リポジトリのファイルは変えない
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$ROOT"
+cd "$ROOT" || exit 1
 failures=()
 
 # 1. mise exec -- shellcheck --version（mise のツール定義に載っていること）
@@ -49,11 +54,53 @@ elif [[ -n "$sc_out" ]]; then
 fi
 
 # 5. 専用タスクの実行と verify-static への組込み
-if ! mise run shellcheck >/dev/null 2>&1; then
-  failures+=("mise run shellcheck failed")
+task_out="$(mise run shellcheck 2>/dev/null)"
+task_rc=$?
+if [[ "$task_rc" -ne 0 ]]; then
+  failures+=("mise run shellcheck failed (exit ${task_rc})")
 fi
 if ! sed -n '/^\[tasks\.verify-static\]/,/^\[/p' mise.toml | grep -q '"shellcheck"'; then
   failures+=("verify-static does not depend on the shellcheck task")
+fi
+
+# 6. 検査したファイルの数が、scripts/ 以下の bash・sh のスクリプトの数と一致する
+want_count="$(find scripts -type f -exec sh -c 'head -n 1 "$1" | grep -qE "^#!.*\b(bash|sh)\b"' _ {} \; -print | wc -l)"
+got_count="$(sed -nE 's/^shellcheck: ([0-9]+) files checked.*/\1/p' <<<"$task_out")"
+if [[ "$got_count" != "$want_count" ]]; then
+  failures+=("mise run shellcheck reported '${got_count:-<none>}' files checked, want ${want_count}")
+fi
+
+# 7. scripts/ の写しで確かめる（mise タスクの本体 scripts/shellcheck.sh を写しのルートに当てる。
+#    リポジトリのファイルは変えない）:
+#    - info 級（SC2016）だけのスクリプトは、demo-check の外なら通り、
+#      scripts/demo-check/*.sh なら既定の severity のため失敗する
+#    - warning 級（SC2164）を 1 件含むスクリプトで失敗し、その指摘を出す
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+cp -a scripts "$tmp/scripts"
+sc() { mise exec -- bash "$tmp/scripts/shellcheck.sh" "$tmp" 2>&1; }
+if [[ ! -f "$tmp/scripts/shellcheck.sh" ]]; then
+  failures+=("scripts/shellcheck.sh is missing")
+else
+  info_fixture="$(printf '#!/usr/bin/env bash\necho %s\n' "'\$HOME'")"
+  printf '%s\n' "$info_fixture" > "$tmp/scripts/info-only.sh"
+  if ! out="$(sc)"; then
+    failures+=("shellcheck.sh failed on an info-level-only script outside demo-check (want pass): $(head -n3 <<<"$out")")
+  fi
+  printf '%s\n' "$info_fixture" > "$tmp/scripts/demo-check/info-only.sh"
+  if out="$(sc)"; then
+    failures+=("shellcheck.sh passed an info-level finding in scripts/demo-check/info-only.sh (want non-zero at default severity)")
+  elif ! grep -q 'SC2016' <<<"$out"; then
+    failures+=("shellcheck.sh failed on demo-check/info-only.sh without reporting SC2016: $(head -n3 <<<"$out")")
+  fi
+  rm "$tmp/scripts/demo-check/info-only.sh"
+  mkdir -p "$tmp/scripts/sub"
+  printf '#!/bin/sh\ncd /nonexistent\n' > "$tmp/scripts/sub/warn.sh"
+  if out="$(sc)"; then
+    failures+=("shellcheck.sh passed with a warning-level finding in scripts/sub/warn.sh (want non-zero)")
+  elif ! grep -q 'sub/warn.sh' <<<"$out" || ! grep -q 'SC2164' <<<"$out"; then
+    failures+=("shellcheck.sh failed without reporting SC2164 in scripts/sub/warn.sh: $(head -n3 <<<"$out")")
+  fi
 fi
 
 if ((${#failures[@]})); then

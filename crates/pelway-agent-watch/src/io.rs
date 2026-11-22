@@ -6,6 +6,7 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use pelway_agent_watch::ci::{AgentPr, RunInfo, parse_agent_prs};
 use pelway_agent_watch::t3::{parse_list, parse_show};
@@ -27,6 +28,31 @@ fn timed(cmd: &std::ffi::OsStr) -> Command {
     c.args(["-k", COMMAND_KILL_AFTER_SECS, COMMAND_TIMEOUT_SECS])
         .arg(cmd);
     c
+}
+
+/// timeout に渡せる最短の制限。秒の小数 3 桁で `0.000` になると、timeout は制限なしで実行するため。
+const MIN_LIMIT: Duration = Duration::from_millis(1);
+
+/// `limit` を過ぎたら子と孫ごと SIGKILL で止めるコマンド。webhook の送信の期限を守るため、
+/// `timed` の SIGTERM の後の猶予は置かない。`limit` が `MIN_LIMIT` より短ければ起動しない。
+/// 期限からの残り時間は、起動の直前に測って渡す。
+fn killed_after(cmd: &str, limit: Duration) -> Option<Command> {
+    if limit < MIN_LIMIT {
+        return None;
+    }
+    let mut c = Command::new("timeout");
+    c.args(["-s", "KILL", &format!("{:.3}", limit.as_secs_f64())])
+        .arg(cmd);
+    Some(c)
+}
+
+fn left(deadline: Instant) -> Duration {
+    deadline.saturating_duration_since(Instant::now())
+}
+
+/// `deadline` までに、外部コマンドを起動できる時間（`MIN_LIMIT` 以上）が残っているか。
+pub fn has_time(deadline: Instant) -> bool {
+    left(deadline) >= MIN_LIMIT
 }
 
 fn run(cmd: &str, args: &[&str], cwd: &Path) -> Result<String, String> {
@@ -216,20 +242,32 @@ pub fn save_state(path: &Path, state: &State) -> Result<(), String> {
     fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
+/// 送り直しても届かない HTTP ステータス。ほかの 4xx（408 など）を加えるかは Issue #513 の未決事項で、
+/// 決まるまでは送り直せる失敗として扱う。
+const PERMANENT_HTTP: [&str; 3] = ["400", "404", "413"];
+
 /// 送信の結果。ログに書くのは HTTP ステータスだけ。
 pub enum SendResult {
     Sent(String),
+    /// 受け手が `PERMANENT_HTTP` のどれかを返した。送り直さない。
+    Rejected(String),
     Failed(String),
     DryRunNoSecret,
 }
 
-fn fnox_get(name: &str, project: &Path) -> Option<String> {
-    let cfg = home().join(NOTIFY_FNOX);
-    let cfg = cfg.to_string_lossy();
-    run("fnox", &["-c", &cfg, "get", name], project)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+/// 秘密を 1 つ読む。外部コマンドの制限時間（30 秒）と送信の期限の、早い方で止める。
+fn fnox_get(name: &str, project: &Path, deadline: Instant) -> Option<String> {
+    let limit = left(deadline).min(Duration::from_secs(30));
+    let out = killed_after("fnox", limit)?
+        .arg("-c")
+        .arg(home().join(NOTIFY_FNOX))
+        .args(["get", name])
+        .current_dir(project)
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    let value = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    (out.status.success() && !value.is_empty()).then_some(value)
 }
 
 /// 送信本文の一時ファイルの置き場所。状態ディレクトリの下の、所有者だけが入れる（0700）ディレクトリ。
@@ -254,27 +292,50 @@ fn curl_quote(s: &str) -> String {
 
 /// payload を webhook に送る。URL と鍵は curl の設定として標準入力から渡す（引数・プロセス一覧に出さない）。
 /// 本文は所有者だけが読める一時ファイルに置き、送ったら消す。
-pub fn send(payload: &Value, project: &Path) -> SendResult {
-    // 受け手が一時的に応答しないことがあるので、失敗したら 2 秒おいて最大 2 回まで送り直す
-    let mut result = send_once(payload, project);
+/// 秘密の読み取り・curl・送り直しの待ちは `deadline` までに終える（子は残り時間で止める）。
+/// 期限を過ぎて（残りが `MIN_LIMIT` 未満で）終わった送り直せる失敗は、理由を `deadline` にする。
+pub fn send(payload: &Value, project: &Path, deadline: Instant) -> SendResult {
+    match send_until(payload, project, deadline) {
+        SendResult::Failed(_) | SendResult::DryRunNoSecret if !has_time(deadline) => {
+            SendResult::Failed("deadline".to_string())
+        }
+        result => result,
+    }
+}
+
+fn send_until(payload: &Value, project: &Path, deadline: Instant) -> SendResult {
+    // 秘密は 1 件につき 1 回だけ読む（送り直しのたびには読まない）
+    let Some((url, key)) =
+        fnox_get("PELWAY_NOTIFY_WEBHOOK_URL", project, deadline).and_then(|url| {
+            Some((
+                url,
+                fnox_get("PELWAY_NOTIFY_WEBHOOK_KEY", project, deadline)?,
+            ))
+        })
+    else {
+        return SendResult::DryRunNoSecret;
+    };
+    // 受け手が一時的に応答しないことがあるので、送り直せる失敗なら 2 秒おいて最大 2 回まで送り直す
+    // （curl は 1 回 --max-time 10 秒。待ちの後に期限が残らないときは送り直さない）
+    let mut result = send_once(payload, &url, &key, deadline, private_body_path);
     for _ in 0..2 {
-        if !matches!(result, SendResult::Failed(_)) {
+        if !matches!(result, SendResult::Failed(_)) || left(deadline) <= Duration::from_secs(2) {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        result = send_once(payload, project);
+        std::thread::sleep(Duration::from_secs(2));
+        result = send_once(payload, &url, &key, deadline, private_body_path);
     }
     result
 }
 
-fn send_once(payload: &Value, project: &Path) -> SendResult {
-    let (Some(url), Some(key)) = (
-        fnox_get("PELWAY_NOTIFY_WEBHOOK_URL", project),
-        fnox_get("PELWAY_NOTIFY_WEBHOOK_KEY", project),
-    ) else {
-        return SendResult::DryRunNoSecret;
-    };
-    let body_path = match private_body_path() {
+fn send_once(
+    payload: &Value,
+    url: &str,
+    key: &str,
+    deadline: Instant,
+    tmp_path: impl FnOnce() -> std::io::Result<PathBuf>,
+) -> SendResult {
+    let body_path = match tmp_path() {
         Ok(p) => p,
         Err(e) => return SendResult::Failed(format!("tmpfile: {e}")),
     };
@@ -291,11 +352,16 @@ fn send_once(payload: &Value, project: &Path) -> SendResult {
     }
     let config = format!(
         "url = \"{}\"\nheader = \"Authorization: Bearer {}\"\n",
-        curl_quote(&url),
-        curl_quote(&key)
+        curl_quote(url),
+        curl_quote(key)
     );
     let data = format!("@{}", body_path.display());
-    let result = Command::new("curl")
+    // 残り時間は本文の用意の後、起動の直前に測る（用意にかかった分だけ curl が期限を越えないように）
+    let Some(mut curl) = killed_after("curl", left(deadline)) else {
+        let _ = fs::remove_file(&body_path);
+        return SendResult::Failed("deadline".to_string());
+    };
+    let result = curl
         .args([
             "-s",
             "--connect-timeout",
@@ -328,6 +394,8 @@ fn send_once(payload: &Value, project: &Path) -> SendResult {
             let code = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if code.len() == 3 && code.starts_with('2') {
                 SendResult::Sent(code)
+            } else if PERMANENT_HTTP.contains(&code.as_str()) {
+                SendResult::Rejected(code)
             } else {
                 // curl の終了コードだけを残す（エラー文には URL のホスト名が入りうるので出さない）
                 let exit = out
@@ -679,6 +747,30 @@ pub fn wake(bin: &Path, thread_id: &str, message: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
+
+    #[test]
+    fn killed_after_never_runs_without_a_limit() {
+        assert!(killed_after("true", Duration::from_micros(300)).is_none());
+        assert!(killed_after("true", Duration::from_micros(400)).is_none());
+        let c = killed_after("true", Duration::from_millis(1)).unwrap();
+        let args: Vec<_> = c.get_args().collect();
+        assert_eq!(args, ["-s", "KILL", "0.001", "true"]);
+    }
+
+    #[test]
+    fn curl_is_not_started_when_the_deadline_passes_while_preparing() {
+        let body = std::env::temp_dir().join(format!("agent-watch-body-{}", std::process::id()));
+        let _ = fs::remove_file(&body);
+        let deadline = Instant::now() + Duration::from_millis(20);
+        // 本文の一時ファイルの用意に、期限までの残りより長い 30 ミリ秒かかった
+        let tmp_path = || {
+            std::thread::sleep(Duration::from_millis(30));
+            Ok(body.clone())
+        };
+        let result = send_once(&Value::Null, "http://127.0.0.1:9/", "k", deadline, tmp_path);
+        assert!(matches!(result, SendResult::Failed(why) if why == "deadline"));
+        assert!(!body.exists());
+    }
 
     /// 偽の /proc と HOME を作り、`<pid>/exe` の向き先ごとに選ばれるかを確かめる。
     #[test]

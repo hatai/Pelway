@@ -19,7 +19,6 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 WORK=${WORK_DIR:-$SCRIPT_DIR/work}
 N_MESSAGES=${N_MESSAGES:-300000}
-N_WARM=10000
 PORT_BIGM=55433
 PORT_GRN=55434
 PGDATA_VOL_BIGM=ja-fts-bigm-pgdata
@@ -262,8 +261,8 @@ SQL
 # 中央値を "engine|label|n|median_ms" で出力する。acl_clause は空（alive だけ）
 # または EXISTS 句（権限込み）。
 timed_search() { # timed_search <engine> <label> <acl clause> <match式>
-  local e=$1 label=$2 acl=$3 match=$4 times=() i out n=""
-  for i in 1 2 3; do
+  local e=$1 label=$2 acl=$3 match=$4 times=() out n=""
+  for _ in 1 2 3; do
     out=$(psql_e "$e" -A -t <<SQL
 SELECT count(*) FROM messages m WHERE $ALIVE$acl AND $match;
 EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF)
