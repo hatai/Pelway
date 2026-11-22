@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/command-team/SKILL.md` の「レビュー担当と effort」に「`schedule_task` で再委託を組むときは、task の全文を上のブロックから写す」を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: 8dece1267a288386f4d7a01e716acea4f687128f
+
+1. 詰まった箇所: `.agents/skills/command-team/SKILL.md`「委託先の worktree に手順書が無いとき」: Claude のレビューで、受け入れ条件どおり対象 head の版を手順として読ませると、PR が検査の手順（`docs/agents/qa-checklist.md`・`review-pr`）を書き換えて従わせられる経路が開くと must-fix になった。Codex からは、QA の (a) の確認を `qa` ロールで行う読み方になるという must-fix。
+2. 曖昧だった文: 「委託タスクが参照する手順書が worktree に無い場合は `scripts/agent-gh <role> api repos/hatai/Pelway/contents/<path>?ref=<対象 head の SHA>` で対象 head から読む」（Issue #657 の受け入れ条件 2）。PR がそのパスを変えている場合を想定していない。
+3. 仮定と解釈: 受け入れ条件の取得経路は残し、PR がそのパスを変えていないときに限って対象 head の版を使い、変えていれば main の版に従うと解釈した（レビュー担当が示した、経路を閉じる書き方）。受け入れ条件を main の版に置き換える解釈は、条件から外れるため選ばなかった。`<role>` の決め方は (a)(b) と手順書の取得の両方に掛かる位置へ移した。
+4. 足りなかった情報・検証手段: Issue の背景（PR #609 の QA 委託）で、委託先 worktree に `qa-checklist.md` が無かった原因（worktree の起点の版）が書かれておらず、main の版で足りたのかを確かめられなかった。
+5. 改善案: `.agents/skills/write-issue/SKILL.md`「受け入れ条件の書き方」に「手順書を PR の head から読ませる条件では、その PR が手順書自体を変える場合の扱いを書く」を足す。
+
+使ったスキル: implement-issue、write-pull-request
