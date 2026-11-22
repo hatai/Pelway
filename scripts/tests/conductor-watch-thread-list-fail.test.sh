@@ -33,11 +33,14 @@ cat > "$ROOT/bin/t3" <<'EOF'
 [[ "$1 $2" == "thread list" ]] || exit 9
 case "$(cat "$MOCK/t3-mode")" in
   ok) cat "$MOCK/threads.json" ;;
-  fail) echo '[]'; echo 'No running T3 Code server uses /home/x/.t3' >&2; exit 1 ;;
+  # 失敗でも標準出力に一覧を残す（取得結果を読む実装への回帰で、失敗中にスレッドに
+  # 基づく行が出ることを確かめられる形にする）
+  fail) cat "$MOCK/threads.json" 2>/dev/null; echo 'No running T3 Code server uses /home/x/.t3' >&2; exit 1 ;;
   silent) exit 3 ;;
   empty) ;;
   invalid) echo '{not json' ;;
   notlist) echo '{"threads":[]}' ;;
+  badlist) echo '[{"title":"no id"},{"threadId":5}]' ;;
   long) printf 'x%.0s' {1..200} >&2; printf '\nsecond line\n' >&2; exit 1 ;;
 esac
 EOF
@@ -174,7 +177,20 @@ reason_case silent "exit=3"
 reason_case empty "empty"
 reason_case invalid "invalid-json"
 reason_case notlist "invalid-json"
+reason_case badlist "invalid-json"
 reason_case long "$(printf 'x%.0s' {1..120})"
+
+# 試験 4: 要素がスレッドの形でない一覧は失敗として扱い、前回のスナップショットを守る。
+reset
+issues '[]'; prs '[]'
+threads "[$(th mcp:ok running '[実装] #1 あ')]"
+mode ok
+run_cycles 1
+cp "$SNAP" "$ROOT/snapshot.json"
+mode badlist
+run_cycles 1
+check "4: malformed list is reported as a fetch failure" has "$ROOT/out.log" "WATCHER thread-list-failed"
+check "4: snapshot keeps the last good list on a malformed fetch" same "$SNAP" "$ROOT/snapshot.json"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

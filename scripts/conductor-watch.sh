@@ -99,7 +99,9 @@ def fetch_threads(rc):
     else:
         try: v = json.loads(out)
         except Exception: v = None
-        if isinstance(v, list): return v, None
+        # 一覧でも要素がスレッドの形（"threadId" が文字列の dict）でないものは失敗と同じ扱い。
+        # 受け入れると下の t["threadId"] で python が落ち、WATCHER 行も出ずに巡回が止まる。
+        if isinstance(v, list) and all(isinstance(t, dict) and isinstance(t.get("threadId"), str) for t in v): return v, None
         kind = "invalid-json"
     return [], err[:120] or kind
 threads, thread_err = fetch_threads(int(sys.argv[5]))
