@@ -274,3 +274,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **PR #652 r1c 結果: CHANGES_REQUESTED**（must-fix 1: `.gitleaks.toml:40` の hex64 除外を具体的ハッシュ列挙に — 実キーも除外しうる）。その他の除外・workflow・テスト差分に問題なし、確かめ方の弱化なし
 - impl `cb1a1122` への send は `runtime_mode_escalation_denied`（full-access）→ [PR コメント](https://github.com/hatai/Pelway/pull/652#issuecomment-7073078521)で must-fix＋push 禁止制約を配信。pending_thread_sends に記録
+
+## 巡回記録（patrol 36・13:25 JST・受信箱 wake）
+
+- `e4009bd3`（#643）・`1db76f66` 再起動・`caa0ff74` 反復 — 実害なし
+- PR #652: head `8da28305` 不変・must-fix 指示コメント以降の応答なし
