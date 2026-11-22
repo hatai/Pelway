@@ -37,3 +37,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 8 に「QA（`docs/agents/qa-checklist.md`）は実装担当が行わない。Approve を得たら QA 待ちとして指揮役に渡す」を足す。
 
 使ったスキル: implement-issue、pr-watch
+
+## 実装者メモ（round 5）
+
+対象 head: bd6c3609d9db7ae812ebaeeb6d40c5655b01d984
+
+1. 詰まった箇所: 手順 9「Approve のとき」の 1: head 5430493 で codex（effort=high）と claude（effort=high）がどちらも approve したが、claude に `[文書のずれ]` の nit が 2 件あった（`docs/agents/notify-payloads.md` の括弧書きが「読めない行だけを飛ばす」でコードより狭い、`docs/agents/grokbot-runbook.md` の補助記録の段落に main から来た `waiting-conductor` の扱いが無い）。両方を直した。印の nit だけを直す round の通算 2 回目。
+2. 曖昧だった文: 「食い違いは main の #622 から始まっているが、同じ文を直しているので」（claude のレビューの nit）。main 由来の食い違いをこの PR で直すのは範囲の外に見えるが、印の nit は直す決まり（手順 9）なので直した。
+3. 仮定と解釈: 印の nit は作成者が `pelway-review` であることを確かめて扱った。印の無い nit（末尾 4 MiB の境目の 1 行、試験 12 の補強）は手順どおり直していない。
+4. 足りなかった情報・検証手段: PR がいつ、誰によって Ready にされたかが分からない（実装担当は `pr ready` を実行していない）。
+5. 改善案: `.agents/skills/review-pr/SKILL.md` の nit の節に「`[文書のずれ]` の印は、この PR の差分が書き換えた文の中の食い違いに付ける。main 由来でも同じ文の中なら付けてよい」を足す。
+
+使ったスキル: implement-issue、pr-watch
