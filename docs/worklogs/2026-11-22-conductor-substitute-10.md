@@ -465,3 +465,12 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **PR #530 MERGED**（kodiak・head `d0cb27da`）— 指揮下 7 件目
 - 制限解除で後着した codex QA r3 は `QA: fail` を返したが、判定は「実送信未確認」を不合格理由とする旧 AC 基準。hatai の条件変更（issuecomment-7073923640）で実送信確認は対象外のため、この fail は採用しない。正式記録は Devin r4 の `QA: pass`@`f74b848a`（pelway-qa 投稿済み）
+
+## 全スレッド点検 2 回目（21:50 JST・hatai 指示）
+
+- **95 件 unsettled**。provider 切替は全体に反映
+- **完了に移行**: 5fc0e3f5(#295)・9fe3e99d(#644)・c9d1a5eb(#642)・970f6c1e(#333)・1db76f66(#664 作成済み)・e4009bd3(#643)・2e87e67b(#602)・cb1a1122(#652→新 PR #665)・462a74e7(#330)・b267df2c(#646)・bfd8ff91(#641)・3bcaf0e3(#613)
+- **cancelled**: 42181892(#660・head a30cebfd push 済み)・28d8f688(#480・#482 レビュー委託中に)
+- **waiting**: cd045355(#659)・335aabd5(#658)・0995ecd5(#657)・eaa7764e(#645)
+- **settle**: 5c599260(#481) は #530 マージで自動 settle
+- **GitHub 対応**: #653 automerge 付与（APPROVED+QA pass@14591023）・#600 は kodiak 更新で approve 失効→再レビュー委託（rev-600-b3fe09fd）・#610 QA 委託・#664 QA 委託・新 PR #665 登録・#560 は引き続き pr-size fail（needs-human）
