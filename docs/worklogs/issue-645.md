@@ -35,3 +35,15 @@
 5. 改善案: `docs/agents/skill-helpers.md` の「同梱できるものの範囲」に「GitHub の応答は、ちょうど 1 つの JSON の値で型が期待どおりのときだけ使い、それ以外は判定できないとして非 0 で終える」を足す（helper ごとに同じ指摘を受けないため）。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 4）
+
+対象 head: dafef7ef970fa852c65e07d81c719928688e1091
+
+1. 詰まった箇所: claude 担当（round 3）の `[文書のずれ]` nit 2 件のうち、test.sh のモック説明の方はファイル変更で、push が head を動かし両担当の approve が無効になるため、印の nit の round（通算 1 回目）として再委託まで行った。codex 担当の印の nit（本文の件数 33→32）は `pr edit` で直せたため round にせず済ませた。
+2. 曖昧だった文: 手順 9 の「印の nit だけを直す round は、この PR で通算 2 回まで」。PR 本文だけの修正（head が動かず手順 5・6 のやり直しが無い）も回数に数えるかは書かれていない。
+3. 仮定と解釈: 本文だけの修正は approve を無効にしないため round に数えず、ファイルを含むこの round を通算 1 回目の印の nit round とした。effort は上げず round 3 と同じ（codex `max`・claude `max`）にした。本文の「対象外」の署名の記述は、737d49ae が表せないため以降の push も全体署名なしになる実態に合わせた。
+4. 足りなかった情報・検証手段: claude 担当のレビューは provider の 7 日間上限で 1 回起動に失敗し、snooze から自動再開した（issue-568 の先例どおり）。上限の解除を待つ間の動作は skill に書かれていないため、先例に従った。
+5. 改善案: `agent-gh-resign` の「表せないコミットがあれば push 全体を署名なしにする」が後の push にも及ぶことは AGENTS.md:38 の書き方（push 単位の記述）からは読み取りにくい。補う別 Issue（この PR の範囲外。レビュー本文も「この PR の範囲外」と明記）。
+
+使ったスキル: implement-issue
