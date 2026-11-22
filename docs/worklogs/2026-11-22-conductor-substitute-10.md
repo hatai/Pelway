@@ -372,3 +372,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **PR #652**: hatai が must-fix 修正 `e87e25ff` を push（push コマンドの伝達が機能）→ r2 レビュー委託を起動
 - stalled 1 件は #399 の重複報告・#464/#600 は kodiak キュー処理中
+
+## 巡回記録（patrol 55・18:05 JST・委託完了 wake）
+
+- **PR #652 r2 結果: APPROVED@e87e25ff**（hex64 除外の列挙化を確認・must-fix 0）→ QA 委託起動。Issue 無しのため QA には PR 本文の目的を受け入れ条件として確認するよう指示
