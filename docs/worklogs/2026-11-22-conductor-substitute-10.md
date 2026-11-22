@@ -263,3 +263,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 巡回記録（patrol 33 続報・13:00 JST）
 
 - PR #652: r1b も `.gitleaks.toml` の hex64 除外の security 審査を完了できず中断（投稿なし）。指揮役が diff を照合 — 除外は AND 条件で `docs/technical/v0.7/*.json`・`generic-api-key`・`^[0-9a-f]{64}$` 全一致に限定。許容か must-fix かの判断材料として r1c に添えて再起動
+
+## 巡回記録（patrol 34・13:10 JST・受信箱 wake）
+
+- `bfd8ff91`（#641）・`1db76f66`（conductor-watch 通知改善）completed — 新規 PR 確認なし（#655 は既出）
+- `caa0ff74`（旧 #602 impl）1 run 実行後 completed — 後片付けと判断
+- PR #652: CI pending 2 に減少・review r1c 実行中
