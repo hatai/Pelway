@@ -94,3 +94,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - #630: automerge 保持・MERGEABLE・kodiak キュー処理継続
 - #631: CONFLICTING 不変・send 再試も失敗（障害約 6 分・15 分閾値を監視中）
 - #586/#587: 事後レビュー結果未着
+
+## 巡回記録（patrol 7・10:54 JST・受信箱 wake）
+
+- 受信箱 390–392・watch.log 3744–3746: cb1a1122 waiting・新スレッド `4649721f`「実装役の待機状態をGrokボットへ自動通知」queued→completed（PR なし・通知動作の試行と判断）
+- **PR #630 MERGED**（10:53 JST・kodiak・merge commit `6441bf8c`）— Issue #621 auto-close。Devin 10 初のマージ
+- #631: CONFLICTING 不変・send 障害約 9 分（指示は issuecomment-7072497846 で代替配信済み）
+- #586/#587: 事後レビュー結果未着
