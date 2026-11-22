@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# PR の必須チェック（mise run verify と pr-size）を判定し、レビューを委託してよいかを返す。
+#
+#   required-checks <PR 番号>
+#
+# 標準出力: 2 つのチェックの判定を 1 行ずつ `<名前>: <pass|fail|pending>`。
+#           pr-size の例外を認めたときは `pr-size: fail（pr-size-exception）`。
+# 終了コード: 0 通過 · 1 失敗 · 2 待ち · 3 判定できない（取得の失敗・引数の誤り）
+#
+# 集計の規則は skill review-pr の手順 3 と同じ。`gh pr checks --json name,bucket` の
+# 一覧から名前が一致する行だけを使い、同じ名前の行がすべて pass なら pass、どれかが
+# fail なら fail、どれかが pending か行が無ければ pending。bucket の skipping は pass、
+# cancel は fail に数える。pr-size の fail は、PR に pr-size-exception ラベルがあり、
+# かつ PR が閉じる Issue に作成者 hatai で行頭が `<!-- pr-size-exception -->` の
+# コメントがあるときだけ pass に数える。
+#
+# GitHub への呼び出しはすべて scripts/agent-gh dev 経由（REQUIRED_CHECKS_GH で差し替え可能）。
+set -uo pipefail
+
+# .agents/skills/implement-issue にも .claude/skills/implement-issue（symlink）にも置かれるため、
+# 実行されたパスから 3 つ上った所をリポジトリルートとする。
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+GH=${REQUIRED_CHECKS_GH:-"$ROOT/scripts/agent-gh dev"}
+NAMES=("mise run verify" "pr-size")
+MARK='<!-- pr-size-exception -->'
+
+die() { echo "required-checks: $*" >&2; exit 3; }
+
+[ $# -eq 1 ] && [[ "$1" =~ ^[0-9]+$ ]] || die "usage: required-checks <PR 番号>"
+pr=$1
+
+# gh pr checks は pending があると 8、fail があると 1 で終わっても一覧を返すことがある。
+# 終了コードではなく、標準出力が JSON の配列かで取得の成否を決める。
+err=$(mktemp) || die "一時ファイルが作れない"
+list=$($GH pr checks "$pr" --json name,bucket 2>"$err")
+gh_rc=$?
+msg=$(cat "$err"); rm -f "$err"
+if ! jq -e 'type == "array"' >/dev/null 2>&1 <<<"$list"; then
+  # チェックが 1 つも報告されていない head では一覧が返らない。これは待ちに数える。
+  if [ "$gh_rc" -ne 0 ] && grep -q 'no checks reported' <<<"$msg"; then
+    list='[]'
+  else
+    die "PR $pr のチェックが取れない: ${msg:-出力が JSON の配列ではない}"
+  fi
+fi
+
+verdict() { # verdict <名前> -> pass|fail|pending|unknown
+  jq -r --arg n "$1" '
+    [.[] | select(.name == $n) | .bucket
+     | if . == "pass" or . == "skipping" then "pass"
+       elif . == "fail" or . == "cancel" then "fail"
+       elif . == "pending" then "pending"
+       else "unknown" end] as $b
+    | if ($b | index("unknown")) then "unknown"
+      elif ($b | index("fail")) then "fail"
+      elif ($b | length) == 0 or ($b | index("pending")) then "pending"
+      else "pass" end' <<<"$list"
+}
+
+# pr-size の例外: ラベルと、PR が閉じる Issue の hatai の目印コメントの両方があるか。
+size_exception() {
+  local meta issues n has
+  meta=$($GH pr view "$pr" --json labels,closingIssuesReferences 2>/dev/null) || meta=""
+  jq -e 'type == "object"' >/dev/null 2>&1 <<<"$meta" || die "PR $pr のラベルが取れない"
+  jq -e '[.labels[]?.name] | index("pr-size-exception")' >/dev/null <<<"$meta" || return 1
+  issues=$(jq -r '.closingIssuesReferences[]?.number' <<<"$meta")
+  for n in $issues; do
+    has=$($GH issue view "$n" --json comments \
+      --jq "[.comments[] | select(.author.login == \"hatai\" and (.body | startswith(\"$MARK\")))] | length" \
+      2>/dev/null) || die "Issue $n のコメントが取れない"
+    [[ "$has" =~ ^[0-9]+$ ]] || die "Issue $n のコメントが読めない"
+    [ "$has" -gt 0 ] && return 0
+  done
+  return 1
+}
+
+rc=0
+for name in "${NAMES[@]}"; do
+  v=$(verdict "$name") || die "PR $pr のチェックの一覧が読めない"
+  [ "$v" = unknown ] && die "$name に未知の bucket がある"
+  shown=$v
+  if [ "$name" = pr-size ] && [ "$v" = fail ] && size_exception; then
+    v=pass
+    shown="fail（pr-size-exception）"
+  fi
+  results+=("$name: $shown")
+  case "$v" in
+    fail) rc=1 ;;
+    pending) [ "$rc" -eq 1 ] || rc=2 ;;
+  esac
+done
+
+printf '%s\n' "${results[@]}"
+exit "$rc"
