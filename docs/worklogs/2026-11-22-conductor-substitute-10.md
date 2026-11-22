@@ -259,3 +259,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **新 draft PR 3 件**: #654（#645 required-checks helper）・#655（#641 resign push target）・#656（#643 shared-worktree detect）— 各 impl waiting 遷移に対応。調査 PR #650（orphaned impl threads）も出現
 - **新スレッド `1db76f66`**: conductor-watch スレッド一覧取得失敗の WATCHER 通知改善（hatai 起動と推定）
 - **PR #652**: CI 残 pending 3（test・octocov・Analyze rust）・review r1b 実行中
+
+## 巡回記録（patrol 33 続報・13:00 JST）
+
+- PR #652: r1b も `.gitleaks.toml` の hex64 除外の security 審査を完了できず中断（投稿なし）。指揮役が diff を照合 — 除外は AND 条件で `docs/technical/v0.7/*.json`・`generic-api-key`・`^[0-9a-f]{64}$` 全一致に限定。許容か must-fix かの判断材料として r1c に添えて再起動
