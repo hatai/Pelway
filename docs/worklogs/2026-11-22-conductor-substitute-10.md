@@ -45,3 +45,16 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - 10:41 JST: 引き継ぎ確認を完了と判定し操作権限を受領。旧スレッド settle・巡回タスク作り直しを実施（上記「恒久交代の記録」）
 - 10:41 JST: 巡回間隔は旧運用どおり 5 分で作り直した。runbook「指揮役の定期巡回」は「約 8 分」と記述（文書と実運用のずれ・棚卸し候補）
+
+## 巡回記録（patrol 1・10:52 JST）
+
+- 受信箱 383–386: 旧指揮役の最終 run と自スレッド run 1 の finished のみ。watch.log 3497–3731: スレッド遷移のみ（恒久交代の再起動群・#568 後継 166fd253 の running/waiting 往復・caa0ff74 の bad-title 検知）。実害イベントなし
+- bad-title 是正: `caa0ff74`（PR #610 watch 中の #602 実装スレッド）を `[実装] #602 実装役の待機状態をGrokボットへ自動通知` に rename
+- **PR #630**（#621）: pelway-review APPROVED@3c7780eb（must-fix/nit 0）・hatai APPROVED・必須チェック全 pass・MERGEABLE・非 draft。**QA pass のみ残** → claudeAgent で QA 委託起動（`qa-630-3c7780eb-20261122`・worktree・結果は投稿せず返却指定）。結果受領後に pelway-qa コメント → automerge へ
+- **PR #631**（#617）: pelway-review APPROVED@67d48dd6・hatai APPROVED・チェック全 pass だが **mergeable=CONFLICTING**。main 取り込み指示を impl スレッド 02127d0e へ send → MCP 断続で未達・`pending_thread_sends` に登録（次回巡回で再送）
+- #586/#587 事後レビュー: 依頼コメント（01:23Z・pelway-dev）以降の結果未着。継続待ち
+- `pending_thread_sends` 旧分 2 件: `mcp:970f6c1e`（#560 例外条件）への send も MCP 断続で未達・#568 締切共有は PR #572 マージ済みで陳腐化のため破棄判断
+- **MCP 断続**: t3_thread_send が 10:47 JST 以降 `Failed to connect` ×3（rename・delegate_task は成功）。`mcp_down` に記録・15 分継続で人間報告のルールに従う
+- ボード読み取り: 人間名義 `gh` が未認証のため不可（`board_queue_broken` と同じ制約）。Todo 順の新規割り当ては不可のまま保留
+- patrol-state: inbox_offset=386・watch_offset=3731・subjects 630/631 更新
+- 人間が手で立てたスレッド: なし（未 settle は本スレッド・caa0ff74・旧指揮役（settle 済）・aborted mcp:57618b05 のみ）
