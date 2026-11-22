@@ -300,7 +300,7 @@ def escalate(n, lt, reason):
         if intent: add_tried = True; continue  # 付与は終了コードでなく試行の後の付与イベントで照合する（変更なしの成功・応答の喪失と取り違えない）
         remember(n, lt, done, reason=reason)
         if done == "removed": print(f"DECISION escalated #{n} labeled_at={lt} reason={reason}", flush=True); return
-decision_at = {}  # Issue 番号 → 最新の needs-decision の labeled_at（補助記録の next_check_at に使う）
+decision_at, late_human = {}, set()  # 最新の needs-decision の labeled_at（補助記録の next_check_at に使う）・一覧の後に events で needs-human が付いた Issue
 if issues is not None:
     labeled = set()
     reason = conductor_absence() if threads_ok else None  # 一覧の取得に失敗した周は判定しない
@@ -320,10 +320,11 @@ if issues is not None:
             if old.get("stage") == "added":
                 print(f"DECISION escalated #{n} labeled_at={old.get('labeled_at')} reason={old.get('reason') or reason or 'resumed'}", flush=True)
             del esc[n]; store()
-        if not human: decision_at[n] = lt
+        if last_event(label_events(evs, "needs-human")) == "labeled": late_human.add(n)  # 補助記録も人間待ちにする
+        if not human and n not in late_human: decision_at[n] = lt
         if now - iso(lt).timestamp() < DECISION_SECS: continue
         # 一覧の後の needs-human の付与・クローズが events に出ていれば知らせず、通知済みにもしない
-        gone = last_event(label_events(evs, "needs-human")) == "labeled" or last_event([e for e in evs if e.get("event") in ("closed", "reopened")]) == "closed"
+        gone = n in late_human or last_event([e for e in evs if e.get("event") in ("closed", "reopened")]) == "closed"
         if not human and not gone and cur["decision_warned"].get(n) != lt: print(f"DECISION overdue #{n} labeled_at={lt}", flush=True); cur["decision_warned"][n] = lt
         if reason: escalate(n, lt, reason)
     # 一覧から外れた Issue（閉じた・一覧の窓外）の通知済み時刻も残す。同じ labeled_at で再出現しても重複して知らせない
@@ -409,7 +410,7 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
         if iss.get("state") != "OPEN": continue
         labels = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
         pr = pr_of.get(n)
-        if "needs-human" in labels:
+        if "needs-human" in labels or n in late_human:
             won, owner = "human", "hatai"
         elif "needs-decision" in labels:
             won, owner = "grokbot", "grokbot"
