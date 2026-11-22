@@ -2,7 +2,9 @@
 # scripts/security-scan.sh のテスト（Issue #571）。gitleaks・semgrep・osv-scanner を
 # PATH 上の偽物に差し替え、終了コードの扱いとサマリーの中身を確かめる:
 #   - 検出なし: 終了コード 0、警告なし
-#   - 検出あり: 終了コード 0（報告のみ）、::warning:: に件数、サマリーに場所と種類
+#   - 失敗させる検出あり（gitleaks の全件・semgrep の INFO 以外・osv-scanner の unmaintained
+#     以外の勧告）: 終了コード 4、::error:: に件数、サマリーに場所と種類
+#   - 報告のみの検出だけ（semgrep の INFO・osv-scanner の unmaintained）: 終了コード 0、::warning::
 #   - ツールの失敗: 終了コード 0 以外（検出と区別してジョブを失敗させる）
 #   - gitleaks の検出の値（Secret・Match）はサマリーにもログにも出さない
 # 偽物は、渡された出力先（--report-path / --output の次の引数）へ STUB_JSON の内容を書き、
@@ -70,8 +72,9 @@ EOF
 )"
 run_case gitleaks-clean gitleaks 0 "[]" 0
 want_absent gitleaks-clean "$REPLY_LOG" "::warning"
-run_case gitleaks-hit gitleaks 2 "$gitleaks_hit" 0
-want_contains gitleaks-hit "$REPLY_LOG" "::warning"
+run_case gitleaks-hit gitleaks 2 "$gitleaks_hit" 4
+want_contains gitleaks-hit "$REPLY_LOG" "::error::gitleaks: 検出 1 件のうち 1 件"
+want_absent gitleaks-hit "$REPLY_LOG" "::warning"
 want_contains gitleaks-hit "$REPLY_LOG" "1 件"
 want_contains gitleaks-hit "$REPLY_SUMMARY" '` github-pat `'
 want_contains gitleaks-hit "$REPLY_SUMMARY" '` docs/a.md:12 `'
@@ -80,7 +83,7 @@ want_absent gitleaks-hit "$REPLY_SUMMARY" "$secret_value"
 want_absent gitleaks-hit "$REPLY_LOG" "$secret_value"
 run_case gitleaks-error gitleaks 1 "" 1
 # gitleaks 8.30.1 は git log の失敗を ERR のログに出すだけで、終了コードは 0（検出ありなら 2）に
-# なる。--log-level error で、標準エラーに 1 行でもあれば失敗にする。診断の中身（.gitleaksignore の
+# なる。--log-level error で、標準エラーに 1 行でもあれば失敗にする。診断の中身（.gitleaks.toml の
 # 誤った行など、秘密を含みうる）はログに出さない。
 gitleaks_diag="ERR [git] fatal: ambiguous argument 'FAKEGITLEAKSSECRET': unknown revision"
 STUB_STDERR="$gitleaks_diag" run_case gitleaks-clean-stderr gitleaks 0 "[]" 3
@@ -91,21 +94,21 @@ want_absent gitleaks-hit-stderr "$REPLY_LOG" "FAKEGITLEAKSSECRET"
 want_contains gitleaks-log-level "$(cat "$work/args-gitleaks-clean")" $'--log-level\nerror'
 # 件数は JSON の検出の数から数える。ファイル名に改行や | があっても件数は増えず、表の列も崩れない。
 gitleaks_odd='[{"RuleID":"r","File":"a\nb|c.txt","StartLine":1,"Commit":"3333333333333333"}]'
-run_case gitleaks-odd-path gitleaks 2 "$gitleaks_odd" 0
+run_case gitleaks-odd-path gitleaks 2 "$gitleaks_odd" 4
 want_contains gitleaks-odd-path "$REPLY_LOG" "検出 1 件"
 want_contains gitleaks-odd-path "$REPLY_SUMMARY" '` a b\|c.txt:1 `'
 # 表のセルはコードスパンにし、パスに Markdown の記号（リンク・強調・HTML・文字参照・
 # メールアドレス・`）があっても書式や自動リンクとして解釈させず、元の文字のまま表示する。
 # 囲む ` は値の中の最長の並び（``）より 1 つ多い ``` にする。
 gitleaks_md='[{"RuleID":"r","File":"[x](https://e.invalid)*b*<i>&amp;`c``d`|a@b.invalid","StartLine":1,"Commit":"4444444444444444"}]'
-run_case gitleaks-md-path gitleaks 2 "$gitleaks_md" 0
+run_case gitleaks-md-path gitleaks 2 "$gitleaks_md" 4
 want_contains gitleaks-md-path "$REPLY_SUMMARY" '| ``` [x](https://e.invalid)*b*<i>&amp;`c``d`\|a@b.invalid:1 ``` |'
 # ジョブサマリーの大きさの上限（1 ステップ 1 MiB）に収めるため、一覧の行は UTF-8 のバイト数の
 # 合計で切る。長いパスの行が並んでも上限を超えず、省略した件数を書く。
 long="$(printf 'p%.0s' {1..2000})"
 # 環境変数には入りきらない大きさのため、偽物にはファイルで渡す（STUB_JSON_FILE）。
 jq -cn --arg l "$long" '[range(600) | {RuleID:"r",File:"\($l)\(.)",StartLine:1,Commit:"5555555555555555"}]' >"$work/gitleaks-many.json"
-STUB_JSON_FILE="$work/gitleaks-many.json" run_case gitleaks-many gitleaks 2 "" 0
+STUB_JSON_FILE="$work/gitleaks-many.json" run_case gitleaks-many gitleaks 2 "" 4
 want_contains gitleaks-many "$REPLY_SUMMARY" "検出 600 件"
 want_contains gitleaks-many "$REPLY_SUMMARY" "件は、ジョブサマリーの大きさの上限のため省略"
 summary_bytes="$(wc -c <"$work/summary-gitleaks-many.md")"
@@ -117,7 +120,7 @@ want_contains gitleaks-redact "$(cat "$work/args-gitleaks-clean")" "--redact"
 want_contains gitleaks-merge-diff "$(cat "$work/args-gitleaks-clean")" "--log-opts=-m HEAD"
 # -m では同じ場所の値が複数のコミットで重ねて出るため、場所の重複を除いた数もサマリーに出す。
 gitleaks_dup='[{"RuleID":"r","File":"a.txt","StartLine":3,"Commit":"1111111111111111"},{"RuleID":"r","File":"a.txt","StartLine":3,"Commit":"2222222222222222"}]'
-run_case gitleaks-dup gitleaks 2 "$gitleaks_dup" 0
+run_case gitleaks-dup gitleaks 2 "$gitleaks_dup" 4
 want_contains gitleaks-dup "$REPLY_LOG" "2 件"
 want_contains gitleaks-dup "$REPLY_SUMMARY" "1 か所"
 
@@ -126,11 +129,25 @@ semgrep_hit='{"results":[{"check_id":"rust.lang.security.unsafe-usage","path":"c
 run_case semgrep-clean semgrep 0 '{"results":[],"errors":[]}' 0
 want_absent semgrep-clean "$REPLY_LOG" "::warning"
 want_contains semgrep-metrics-off "$(cat "$work/args-semgrep-clean")" "--metrics=off"
-run_case semgrep-hit semgrep 1 "$semgrep_hit" 0
-want_contains semgrep-hit "$REPLY_LOG" "2 件"
+run_case semgrep-hit semgrep 1 "$semgrep_hit" 4
+want_contains semgrep-hit "$REPLY_LOG" "::error::semgrep: 検出 2 件のうち 2 件"
 want_contains semgrep-hit "$REPLY_SUMMARY" '` rust.lang.security.unsafe-usage `'
 want_contains semgrep-hit "$REPLY_SUMMARY" '` crates/x/src/lib.rs:7 `'
 want_contains semgrep-hit "$REPLY_SUMMARY" '` .github/workflows/a.yml:3 `'
+# 重大度 INFO の検出（unsafe の使用など監査向けの規則）は報告だけにし、ジョブを失敗させない。
+semgrep_info='{"results":[{"check_id":"rust.lang.security.unsafe-usage","path":"a.rs","start":{"line":1},"extra":{"severity":"INFO"}},{"check_id":"y","path":"b.yml","start":{"line":2},"extra":{"severity":"WARNING"}}],"errors":[]}'
+run_case semgrep-mixed semgrep 1 "$semgrep_info" 4
+want_contains semgrep-mixed "$REPLY_LOG" "検出 2 件のうち 1 件"
+want_contains semgrep-mixed "$REPLY_SUMMARY" "うちジョブを失敗させるもの 1 件"
+semgrep_info_only='{"results":[{"check_id":"rust.lang.security.unsafe-usage","path":"a.rs","start":{"line":1},"extra":{"severity":"INFO"}}],"errors":[]}'
+run_case semgrep-info semgrep 1 "$semgrep_info_only" 0
+want_contains semgrep-info "$REPLY_LOG" "::warning::semgrep: 検出 1 件（報告のみ）"
+want_absent semgrep-info "$REPLY_LOG" "::error"
+# 知らない重大度は失敗させる側に倒す（Registry の規則が新しい重大度を使っても見逃さない）。
+semgrep_unknown='{"results":[{"check_id":"z","path":"c.rs","start":{"line":3},"extra":{"severity":"CRITICAL"}}],"errors":[]}'
+run_case semgrep-unknown-severity semgrep 1 "$semgrep_unknown" 4
+# uses: のタグ参照は actions.lock が SHA を固定するため、mutable-action-tag の規則は使わない。
+want_contains semgrep-exclude-rule "$(cat "$work/args-semgrep-clean")" $'--exclude-rule\nyaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag'
 run_case semgrep-error semgrep 2 "" 2
 # semgrep の標準エラー（進捗など）は失敗の判定に使わず（解析エラーは JSON で見る）、ログにも出さない。
 STUB_STDERR="semgrep progress FAKESEMGREPDIAG" run_case semgrep-clean-stderr semgrep 0 '{"results":[],"errors":[]}' 0
@@ -146,7 +163,7 @@ run_case semgrep-hit-warn semgrep 1 "$semgrep_warn" 0
 want_contains semgrep-hit-warn "$REPLY_SUMMARY" "解析エラー 1 件"
 
 # ---- osv-scanner
-osv_hit='{"results":[{"source":{"path":"/w/Cargo.lock","type":"lockfile"},"packages":[{"package":{"name":"rsa","version":"0.9.8","ecosystem":"crates.io"},"vulnerabilities":[{"id":"RUSTSEC-2023-0071"},{"id":"GHSA-c38w-74pg-36hr"}]}]}]}'
+osv_hit='{"results":[{"source":{"path":"/w/Cargo.lock","type":"lockfile"},"packages":[{"package":{"name":"rsa","version":"0.9.8","ecosystem":"crates.io"},"vulnerabilities":[{"id":"RUSTSEC-2023-0071","affected":[{"database_specific":{"informational":null}}]},{"id":"GHSA-c38w-74pg-36hr"}]}]}]}'
 run_case osv-clean osv-scanner 0 '{"results":[]}' 0
 want_absent osv-clean "$REPLY_LOG" "::warning"
 # 呼び出し解析（Go は既定で有効）は失敗を検出の終了コードに埋もれさせるため、無効にする。
@@ -156,11 +173,21 @@ want_contains osv-no-resolve "$(cat "$work/args-osv-clean")" "--no-resolve"
 # 既定の抽出器（同梱のソースのパスとハッシュを OSV.dev に送る directory など）も、マニフェストの
 # 抽出器を含む lockfile プリセットも使わず、Cargo.lock の抽出器だけにする。
 want_contains osv-plugins "$(cat "$work/args-osv-clean")" $'--x-no-default-plugins\n--x-plugins\nrust/cargolock'
-run_case osv-hit osv-scanner 1 "$osv_hit" 0
-want_contains osv-hit "$REPLY_LOG" "1 件"
+run_case osv-hit osv-scanner 1 "$osv_hit" 4
+want_contains osv-hit "$REPLY_LOG" "::error::osv-scanner: 検出 1 件のうち 1 件"
 want_contains osv-hit "$REPLY_SUMMARY" '` rsa 0.9.8 `'
 want_contains osv-hit "$REPLY_SUMMARY" '` RUSTSEC-2023-0071, GHSA-c38w-74pg-36hr `'
 want_contains osv-hit "$REPLY_SUMMARY" '` /w/Cargo.lock `'
+# unmaintained の告知（RUSTSEC の informational）だけのパッケージは報告だけにし、サマリーに種類を書く。
+osv_unmaintained='{"results":[{"source":{"path":"/w/Cargo.lock","type":"lockfile"},"packages":[{"package":{"name":"pin-utils","version":"0.1.1","ecosystem":"crates.io"},"vulnerabilities":[{"id":"RUSTSEC-2026-0441","affected":[{"database_specific":{"informational":"unmaintained"}}]}]}]}]}'
+run_case osv-unmaintained osv-scanner 1 "$osv_unmaintained" 0
+want_contains osv-unmaintained "$REPLY_LOG" "::warning::osv-scanner: 検出 1 件（報告のみ）"
+want_contains osv-unmaintained "$REPLY_SUMMARY" '` RUSTSEC-2026-0441 (unmaintained) `'
+want_absent osv-unmaintained "$REPLY_LOG" "::error"
+# unmaintained 以外の告知（unsound など）は失敗させる。
+osv_unsound='{"results":[{"source":{"path":"/w/Cargo.lock","type":"lockfile"},"packages":[{"package":{"name":"x","version":"1.0.0","ecosystem":"crates.io"},"vulnerabilities":[{"id":"RUSTSEC-2099-0001","affected":[{"database_specific":{"informational":"unsound"}}]}]}]}]}'
+run_case osv-unsound osv-scanner 1 "$osv_unsound" 4
+want_contains osv-unsound "$REPLY_SUMMARY" '` RUSTSEC-2099-0001 (unsound) `'
 run_case osv-error osv-scanner 127 "" 127
 # 検出（終了コード 1）があっても、ロックファイルの抽出に失敗していれば失敗にする
 # （osv-scanner 2.7.1 は抽出の失敗を標準エラーに出すだけで、検出があれば 1 を返す）。
@@ -173,8 +200,8 @@ want_absent osv-hit-partial "$REPLY_LOG" "FAKEPASSWORD"
 # 進捗ログは読めたファイルのパスをそのまま書く。パスに改行があると「Error during extraction:」で
 # 始まる行を作れるため、進捗ログを出させず（--verbosity error）、正常な抽出を失敗と取り違えない。
 STUB_INFO=$'Scanned /w/a\nError during extraction: x/Cargo.lock file and found 1 packages' \
-  run_case osv-hit-odd-path osv-scanner 1 "$osv_hit" 0
-want_contains osv-hit-odd-path "$REPLY_LOG" "::warning::"
+  run_case osv-hit-odd-path osv-scanner 1 "$osv_hit" 4
+want_contains osv-hit-odd-path "$REPLY_LOG" "::error::osv-scanner: 検出 1 件"
 STUB_STDERR="$osv_diag" run_case osv-error-quiet osv-scanner 127 "" 127
 want_absent osv-error-quiet "$REPLY_LOG" "FAKEPASSWORD"
 # ロックファイルが 1 つも見つからない（128）は設定の誤りとして失敗させる。

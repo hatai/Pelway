@@ -1,0 +1,48 @@
+# gitleaks の設定（security-scan workflow。方針は docs/dev-environment.md の「セキュリティスキャン（security-scan）」）。
+# gitleaks は走査するディレクトリの .gitleaks.toml を読む。規則は組み込みの既定をそのまま使い、
+# ここでは除外（allowlist）だけを足す。
+#
+# 除外は 1 つずつ、次の 3 つをすべて満たすものだけを許す（condition = "AND"、targetRules で規則も絞る）:
+#   - paths:   テストのファイルなど、ダミー値を置く場所のパス
+#   - regexes: ダミーだと分かる値の形（検出された値 = Secret に当てる）
+#   - 規則:    その値を検出した規則だけ
+# 行番号を使わないため、ファイルの行がずれても CI は落ちない。直前のコメントに理由を書く。
+# 本物の秘密に合いうる広い形（任意の英数字など）や、パスだけ・値の形だけの除外は書かない。
+
+[extend]
+useDefault = true
+
+# agent-gh のテストの合成のダミー鍵。本体の行は MIIBfake で始まる（本物の PEM の鍵本体は
+# base64 の DER で、fake のような英単語の並びにはならない）。
+[[allowlists]]
+description = "scripts/tests の合成のダミー PEM（MIIBfake…）"
+targetRules = ["private-key"]
+condition = "AND"
+paths = ['''^scripts/tests/[^/]+\.test\.sh$''']
+regexes = ['''MIIBfake[A-Za-z]+''']
+
+# 契約テストの JSON の idempotency_key の例の値。UUID の先頭 3 組だけの切り詰めた形で、
+# 本物の API キーの形ではない。
+[[allowlists]]
+description = "crates/*/tests の idempotency_key の例（切り詰めた UUID）"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^crates/[^/]+/tests/[^/]+\.rs$''']
+regexes = ['''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}$''']
+
+# 技術文書の保存記録（削除済み）の JSON。ファイル名に api を含む文書の SHA-256 ハッシュ
+# （小文字の 16 進 64 文字）が、キーの名前から generic-api-key に当たる。
+[[allowlists]]
+description = "docs/technical/v0.7 の保存記録の SHA-256 ハッシュ"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^docs/technical/v0\.7/.+\.json$''']
+regexes = ['''^[0-9a-f]{64}$''']
+
+# RFC 6455 の 1.3 節の例のハンドシェイクの Sec-WebSocket-Key（例の固定値）。秘密ではない。
+[[allowlists]]
+description = "websocket-engineer スキルの RFC 6455 の例の Sec-WebSocket-Key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^\.agents/skills/websocket-engineer/references/protocol\.md$''']
+regexes = ['''^x3JJHMbDL1EzLkh9GBhXDw==$''']

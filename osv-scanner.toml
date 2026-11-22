@@ -1,0 +1,19 @@
+# OSV-Scanner の除外（security-scan workflow。方針は docs/dev-environment.md の「セキュリティスキャン（security-scan）」）。
+# osv-scanner はロックファイル（Cargo.lock）と同じディレクトリのこのファイルを読む。
+# 1 件ごとに理由を書く。cargo-deny（deny.toml）の ignore と同じ勧告は、同じ理由と Issue を書く。
+# unmaintained の告知（RUSTSEC の informational が unmaintained）はここに足さない: security-scan.sh が報告だけにし、
+# ジョブを失敗させない（cargo-deny の第1段の unmaintained = "none" と同じ扱い）。
+
+# rsa の Marvin Attack。deny.toml の ignore と同じ（修正版の rsa >= 0.10.0 は crypto-glue /
+# webauthn-rs / openidconnect の対応待ち）。
+[[IgnoredVulns]]
+id = "RUSTSEC-2023-0071"
+reason = "rsa >= 0.10.0 への更新が crypto-glue / webauthn-rs / openidconnect の対応待ち。解消は #228"
+
+# libsqlite3-sys 0.37.0（SQLite の CVE）。Cargo.lock には sqlx 0.9.0 の sqlx-sqlite の依存として
+# 載るだけで、ワークスペースは sqlx の sqlite feature を使わず、ビルドに入らない
+# （cargo tree -i libsqlite3-sys --target all --all-features が何も出さない）。修正版の 0.39.0 は
+# sqlx-sqlite 0.9.0 の版の指定を満たさないため、cargo update では上げられない。
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0459"
+reason = "libsqlite3-sys は Cargo.lock に載るだけでビルドに入らない（sqlx の sqlite feature 未使用）。修正版 0.39.0 は sqlx-sqlite 0.9.0 の版の指定を満たさない"
