@@ -271,8 +271,9 @@ fn spawn_stub_server(respond: impl Fn(&str) -> (u16, String) + Send + 'static) -
 }
 
 /// クロージャが返すバイト列をそのまま応答として書き出すスタブ
-/// （HTTP として壊れた応答を作るため）。
-fn spawn_raw_stub_server(respond: impl Fn(&str) -> Vec<u8> + Send + 'static) -> SocketAddr {
+/// （HTTP として壊れた応答を作るため）。`respond` は要求のメソッドと
+/// ターゲットを受ける。
+fn spawn_raw_stub_server(respond: impl Fn(&str, &str) -> Vec<u8> + Send + 'static) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
     let addr = listener.local_addr().expect("stub addr");
     std::thread::spawn(move || {
@@ -281,8 +282,10 @@ fn spawn_raw_stub_server(respond: impl Fn(&str) -> Vec<u8> + Send + 'static) -> 
             let mut buf = vec![0u8; 16 * 1024];
             let n = stream.read(&mut buf).unwrap_or(0);
             let request = String::from_utf8_lossy(&buf[..n]);
-            let target = request.split_whitespace().nth(1).unwrap_or("").to_owned();
-            let _ = stream.write_all(&respond(&target));
+            let mut parts = request.split_whitespace();
+            let method = parts.next().unwrap_or("").to_owned();
+            let target = parts.next().unwrap_or("").to_owned();
+            let _ = stream.write_all(&respond(&method, &target));
         }
     });
     addr
@@ -590,7 +593,7 @@ fn net_rejects_non_loopback_target() {
 
 #[test]
 fn net_rejects_malformed_http_response() {
-    let stub = spawn_raw_stub_server(|_| b"this is not an http response".to_vec());
+    let stub = spawn_raw_stub_server(|_, _| b"this is not an http response".to_vec());
     let mut session = LiveSession::new(stub, "ws".into());
     assert!(matches!(
         session.bootstrap(),
@@ -600,7 +603,7 @@ fn net_rejects_malformed_http_response() {
 
 #[test]
 fn net_rejects_content_length_mismatch() {
-    let stub = spawn_raw_stub_server(|_| {
+    let stub = spawn_raw_stub_server(|_, _| {
         b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n[]".to_vec()
     });
     let mut session = LiveSession::new(stub, "ws".into());
@@ -627,7 +630,7 @@ fn net_rejects_oversized_response() {
 #[test]
 fn net_times_out_on_a_silent_server() {
     // 接続を受けても応答を返さない接続先は、読み取り期限で失敗する。
-    let stub = spawn_raw_stub_server(|_| {
+    let stub = spawn_raw_stub_server(|_, _| {
         std::thread::sleep(std::time::Duration::from_secs(10));
         b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]".to_vec()
     });
@@ -636,4 +639,276 @@ fn net_times_out_on_a_silent_server() {
         session.bootstrap(),
         Err(LiveError::Net(NetError::Io(_)))
     ));
+}
+
+// 取得の再開: 途中で失敗した履歴取得は、同じチャンネル・名義の次の取得で
+// カーソルの続きから再開する（毎回先頭から取り直すと、履歴が長い
+// チャンネルでは呼び出しごとの期限の中でいつまでも末尾に届かない）。
+#[test]
+fn poll_resumes_fetch_from_the_saved_cursor_after_failure() {
+    let ch = Channel {
+        workspace_id: WorkspaceId::from("ws-demo-01"),
+        channel_id: ChannelId::from("ch-stub"),
+        name: "スタブ".to_owned(),
+        members: vec![ChannelMember {
+            member_id: MemberId::from("m-tanaka"),
+            display_name: "田中".to_owned(),
+            member_kind: MemberKind::Human,
+        }],
+    };
+    let channels_json = serde_json::to_string(&vec![ch.clone()]).unwrap();
+    let channel_json = serde_json::to_string(&ch).unwrap();
+    let msg = |seq: u64| StoredMessage {
+        message_id: MessageId::from(format!("m-{seq}").as_str()),
+        workspace_id: WorkspaceId::from("ws-demo-01"),
+        channel_id: ChannelId::from("ch-stub"),
+        seq,
+        author_id: MemberId::from("m-bot"),
+        member_kind: MemberKind::Bot,
+        purpose_id: PurposeId::P01,
+        body: "x".to_owned(),
+        thread_root: None,
+        client_msg_id: None,
+        created_at: 0,
+    };
+    let http_ok = |body: String| {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .into_bytes()
+    };
+    // メッセージ要求 1・2 回目は満杯ページ、3 回目は応答を返さず切断、
+    // 4 回目以降は残りのページを返す。要求ターゲットをすべて記録する。
+    let msg_calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+    let (calls2, seen2) = (msg_calls.clone(), seen.clone());
+    let stub = spawn_raw_stub_server(move |_method, target| {
+        seen2.lock().unwrap().push(target.to_owned());
+        if target.contains("/messages") {
+            let call = calls2.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            match call {
+                1 | 2 => http_ok(
+                    serde_json::to_string(
+                        &((call - 1) * 200 + 1..=call * 200)
+                            .map(msg)
+                            .collect::<Vec<_>>(),
+                    )
+                    .unwrap(),
+                ),
+                3 => vec![], // 3 ページ目は応答を返さず切断
+                4 => http_ok(
+                    serde_json::to_string(&(401..=600).map(msg).collect::<Vec<_>>()).unwrap(),
+                ),
+                _ => http_ok(serde_json::to_string(&vec![msg(601)]).unwrap()),
+            }
+        } else if target.contains("/channels/ch-") {
+            http_ok(channel_json.clone())
+        } else {
+            http_ok(channels_json.clone())
+        }
+    });
+
+    let mut session = LiveSession::new(stub, "ws-demo-01".into());
+    assert!(
+        session.bootstrap().is_err(),
+        "3 ページ目で切断されるため初回は失敗"
+    );
+    assert!(!session.connected());
+
+    session.poll().expect("続きから再開して取り切れる");
+    assert!(session.connected());
+    let messages = session.messages();
+    assert_eq!(messages.len(), 601);
+    assert_eq!(messages.last().map(|m| m.seq), Some(601));
+
+    // 再開後のメッセージ要求はカーソルの続き（after_seq=400）から始まり、
+    // 先頭への取り直し（after_seq なしの要求）は送られない。
+    let seen = seen.lock().unwrap();
+    let resumed: Vec<&String> = seen
+        .iter()
+        .skip_while(|t| !t.contains("/messages"))
+        .skip(3) // 失敗した最初の取得の 3 要求（うち 1 つは応答なしで切断）
+        .filter(|t| t.contains("/messages"))
+        .collect();
+    assert!(
+        resumed.iter().all(|t| t.contains("after_seq=")),
+        "再開後は必ずカーソルを送る: {resumed:?}"
+    );
+    assert!(
+        resumed.iter().any(|t| t.contains("after_seq=400")),
+        "保存したカーソルの続きから再開する: {resumed:?}"
+    );
+}
+
+// 保持予算を超える履歴でも復帰できる（実サーバー）: 32 MiB を超える履歴を
+// 持つチャンネルで切断→再取得しても、最新側の履歴が取れ、切断中に他者が
+// 投稿した発言も見える。
+#[test]
+fn poll_shows_new_posts_on_a_history_over_the_fetch_budget() {
+    let (addr, store) = spawn_demo_server();
+    // 1 件約 60 KiB の投稿を 570 件（合計で保持予算 32 MiB を超える配置。
+    // ASCII 60,000 バイトなので投稿の要求本文上限 64 KiB に収まる投稿）。
+    let extra = 570usize;
+    {
+        let mut store = store.lock().expect("store lock");
+        for i in 0..extra {
+            store
+                .post_message(
+                    NewMessage {
+                        workspace_id: "ws-demo-01".into(),
+                        channel_id: "ch-demo-anken-b".into(),
+                        author_id: "m-hal".into(),
+                        member_kind: MemberKind::Bot,
+                        purpose_id: PurposeId::P01,
+                        body: "a".repeat(60_000) + &i.to_string(),
+                        thread_root: None,
+                        client_msg_id: None,
+                    },
+                    4_000_000 + i as u64,
+                )
+                .expect("seed post");
+        }
+    }
+
+    let mut session = LiveSession::new(addr, "ws-demo-01".into());
+    session.bootstrap().expect("bootstrap succeeds");
+    let total = session.messages().last().map(|m| m.seq);
+    assert!(
+        (session.messages().len() as u64) < total.unwrap_or_default(),
+        "予算を超える分の古い側は保持しない"
+    );
+
+    // 切断 → その間に他者の投稿 → 再取得でも最新の発言が見える。
+    session.set_addr(dead_addr());
+    assert!(session.poll().is_err(), "接続先が死んでいるので失敗");
+    {
+        let mut store = store.lock().expect("store lock");
+        store
+            .post_message(
+                NewMessage {
+                    workspace_id: "ws-demo-01".into(),
+                    channel_id: "ch-demo-anken-b".into(),
+                    author_id: "m-sato".into(),
+                    member_kind: MemberKind::Human,
+                    purpose_id: PurposeId::P01,
+                    body: "復帰後の投稿".to_owned(),
+                    thread_root: None,
+                    client_msg_id: None,
+                },
+                5_000_000,
+            )
+            .expect("post during disconnect");
+    }
+    session.set_addr(addr);
+    session.poll().expect("recovered fetch");
+    assert!(session.connected());
+    assert_eq!(
+        session.messages().last().map(|m| m.body.as_str()),
+        Some("復帰後の投稿"),
+        "予算を超える履歴でも最新の投稿は届く"
+    );
+}
+
+// 冪等キーの宛先・名義の固定: 応答を受け取った投稿でも、同じ
+// `client_msg_id` の再送を別の名義で送ろうとすれば送信前に止める
+// （サーバーは workspace×author×client_msg_id で冪等に扱うため、名義が
+// 変わると同じ ID でも別の投稿として保存される）。
+#[test]
+fn repost_with_same_id_after_actor_switch_is_rejected() {
+    let (addr, store) = spawn_demo_server();
+    let mut session = LiveSession::new(addr, "ws-demo-01".into());
+    session.bootstrap().expect("bootstrap succeeds");
+
+    let id = LiveSession::new_client_msg_id();
+    session
+        .post_with_id("同じ操作の投稿", id.clone())
+        .expect("first post");
+
+    assert!(session.switch_actor("m-yamamoto"), "メンバー内なら切替可");
+    assert!(
+        matches!(
+            session.post_with_id("同じ操作の投稿", id.clone()),
+            Err(LiveError::StaleTarget)
+        ),
+        "初回と違う名義での再送は送信前に止める"
+    );
+    let stored = {
+        let store = store.lock().expect("store lock");
+        store
+            .channel_messages(&"ch-demo-anken-b".into())
+            .iter()
+            .filter(|m| m.client_msg_id.as_ref().map(|c| c.as_str()) == Some(id.as_str()))
+            .count()
+    };
+    assert_eq!(stored, 1, "別人名義の再送は保存部にも届かない");
+}
+
+// 応答の喪失＋名義切替: 初回の送信が応答を受け取れなかった場合でも、
+// 記録した宛先・名義と今の組が違えば再送を送信前に止める。
+#[test]
+fn repost_with_same_id_lost_response_then_switch_is_rejected() {
+    let ch = Channel {
+        workspace_id: WorkspaceId::from("ws-demo-01"),
+        channel_id: ChannelId::from("ch-stub"),
+        name: "スタブ".to_owned(),
+        members: vec![
+            ChannelMember {
+                member_id: MemberId::from("m-tanaka"),
+                display_name: "田中".to_owned(),
+                member_kind: MemberKind::Human,
+            },
+            ChannelMember {
+                member_id: MemberId::from("m-yamamoto"),
+                display_name: "山本".to_owned(),
+                member_kind: MemberKind::Human,
+            },
+        ],
+    };
+    let channels_json = serde_json::to_string(&vec![ch.clone()]).unwrap();
+    let channel_json = serde_json::to_string(&ch).unwrap();
+    let posts = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let posts2 = posts.clone();
+    let stub = spawn_raw_stub_server(move |method, target| {
+        if method == "POST" {
+            posts2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            return vec![]; // 保存の成否にかかわらず応答を返さず切断
+        }
+        let body = if target.contains("/messages") {
+            "[]".to_owned()
+        } else if target.contains("/channels/ch-") {
+            channel_json.clone()
+        } else {
+            channels_json.clone()
+        };
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .into_bytes()
+    });
+
+    let mut session = LiveSession::new(stub, "ws-demo-01".into());
+    session.bootstrap().expect("bootstrap succeeds");
+    let id = LiveSession::new_client_msg_id();
+    assert!(
+        session.post_with_id("応答を失う投稿", id.clone()).is_err(),
+        "応答を返さないので失敗になる"
+    );
+
+    assert!(session.switch_actor("m-yamamoto"));
+    assert!(
+        matches!(
+            session.post_with_id("応答を失う投稿", id),
+            Err(LiveError::StaleTarget)
+        ),
+        "名義が切り替わっていれば再送も送信前に止める"
+    );
+    assert_eq!(
+        posts.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "再送の POST はサーバーへ届かない"
+    );
 }

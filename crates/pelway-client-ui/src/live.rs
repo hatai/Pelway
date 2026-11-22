@@ -16,7 +16,7 @@
 //! - 接続先は環境変数 `PELWAY_SERVER_URL`（`http://127.0.0.1:{port}` の形。
 //!   ポートはデモ準備キット Issue 390 の固定ポートと同じ値を渡す前提）。
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -142,12 +142,14 @@ pub enum LiveError {
     Json(serde_json::Error),
     /// チャンネルがまだ選ばれていない（`bootstrap` 前に投稿した等）。
     NoChannel,
-    /// 断線からの再接続で `bootstrap` がチャンネルや表示ユーザーを選び直し、
-    /// 投稿を受け付けた時点の宛先・名義と食い違った（別チャンネル・別人名義に
-    /// 送らないため投稿を止めた）。
+    /// 投稿を受け付けた時点の宛先・名義と食い違った（断線からの再接続で
+    /// `bootstrap` がチャンネルや表示ユーザーを選び直した場合、または同じ
+    /// `client_msg_id` の再送を初回と違う宛先・名義で送ろうとした場合。
+    /// 別チャンネル・別人名義に届かないよう投稿を止めた）。
     StaleTarget,
-    /// サーバーの応答が取得の前提を満たさない（ページが進まない・履歴が
-    /// クライアント側の蓄積上限や期限を超える）。文言に応答内容は含めない。
+    /// サーバーの応答が取得の前提を満たさない（満杯のページがカーソルを
+    /// 進めない・ページが要求件数を超える・取得 1 呼び出しの期限に達した）。
+    /// 文言に応答内容は含めない。
     Protocol(&'static str),
 }
 
@@ -183,6 +185,42 @@ pub struct LiveSession {
     messages: Vec<StoredMessage>,
     /// 直近の要求が成功しているか。失敗したら「つながっていません」。
     connected: bool,
+    /// `fetch_messages` の中断した取得の途中経過（チャンネル・名義が同じ
+    /// 呼び出しでのみ続きから再開する）。
+    fetch_progress: Option<FetchProgress>,
+    /// 論理投稿（`client_msg_id`）ごとに初回の宛先・名義を記録する。
+    /// 応答を受け取れず再送する間に表示ユーザーやチャンネルが切り替わっても、
+    /// 同じ ID を別の宛先・名義で送らないため（サーバーは
+    /// workspace×author×client_msg_id で冪等に扱う——名義が変わると同じ ID
+    /// でも別の投稿として保存される）。
+    post_targets: HashMap<ClientMsgId, (ChannelId, MemberId)>,
+}
+
+/// `fetch_messages` が呼び出しの途中で中断したときに残す途中経過。
+/// 期限や通信の失敗で打ち切られても、同じチャンネル・名義の次の取得は
+/// カーソルの続きから再開する——毎回先頭から取り直すと、履歴が長い
+/// チャンネルでは 1 呼び出しの期限の中でいつまでも末尾に届かず、
+/// 切断状態から復帰できなくなるため。
+struct FetchProgress {
+    channel_id: ChannelId,
+    actor: MemberId,
+    after: Option<u64>,
+    page_limit: u32,
+    out: VecDeque<StoredMessage>,
+    out_bytes: usize,
+}
+
+impl FetchProgress {
+    fn new(channel_id: &ChannelId, actor: &MemberId) -> Self {
+        Self {
+            channel_id: channel_id.clone(),
+            actor: actor.clone(),
+            after: None,
+            page_limit: MESSAGE_PAGE_LIMIT,
+            out: VecDeque::new(),
+            out_bytes: 0,
+        }
+    }
 }
 
 impl LiveSession {
@@ -198,12 +236,16 @@ impl LiveSession {
             channel: None,
             messages: Vec::new(),
             connected: false,
+            fetch_progress: None,
+            post_targets: HashMap::new(),
         }
     }
 
     /// 接続先を変える（テスト・復帰で同じセッションを使い回すため）。
     pub fn set_addr(&mut self, addr: SocketAddr) {
         self.client = Client::new(addr);
+        // 別の接続先では採番が食い違うため、前の接続先の取得カーソルは捨てる。
+        self.fetch_progress = None;
     }
 
     /// `path` に表示ユーザーの `actor` クエリを付けた要求ターゲット。
@@ -315,63 +357,69 @@ impl LiveSession {
     /// 予算を超える履歴のあるチャンネルが二度と復帰できなくなるため
     /// （一覧の `limit` は先頭からの昇順で、末尾側の直接取得はできない）。
     /// `actor` は履歴取得に使う名義（`bootstrap` が選び直した名義を渡す）。
+    /// 期限や通信の失敗で中断しても、同じチャンネル・名義の次の呼び出しは
+    /// カーソルの続きから再開する（`FetchProgress`）。毎回先頭から取り直すと、
+    /// 履歴が長いチャンネルでは 1 呼び出しの期限の中で末尾に届かず、
+    /// 切断状態から復帰できなくなるため。
     fn fetch_messages(
         &mut self,
         channel_id: &ChannelId,
         actor: &MemberId,
     ) -> Result<Vec<StoredMessage>, LiveError> {
+        let mut p = match self.fetch_progress.take() {
+            Some(p) if p.channel_id == *channel_id && p.actor == *actor => p,
+            _ => FetchProgress::new(channel_id, actor),
+        };
+        let result = self.fetch_pages(&mut p);
+        if result.is_err() {
+            // 中断した分は次の取得に引き継ぐ（成功したときは残さない）。
+            self.fetch_progress = Some(p);
+        }
+        result
+    }
+
+    fn fetch_pages(&mut self, p: &mut FetchProgress) -> Result<Vec<StoredMessage>, LiveError> {
         let deadline = Instant::now() + FETCH_DEADLINE;
-        let base = channel_messages_path(channel_id);
-        let mut out = VecDeque::new();
-        let mut out_bytes = 0usize;
-        let mut after: Option<u64> = None;
-        let mut page_limit = MESSAGE_PAGE_LIMIT;
+        let base = channel_messages_path(&p.channel_id);
         loop {
             if Instant::now() >= deadline {
                 return Err(self.protocol_err("message fetch deadline"));
             }
-            let mut path = self.actor_path_for(actor, &base);
-            path.push_str(&format!("&limit={page_limit}"));
-            if let Some(s) = after {
+            let mut path = self.actor_path_for(&p.actor, &base);
+            path.push_str(&format!("&limit={}", p.page_limit));
+            if let Some(s) = p.after {
                 path.push_str(&format!("&after_seq={s}"));
             }
             let resp = match self.get_response(&path) {
-                Err(LiveError::Net(NetError::TooLarge)) if page_limit > 1 => {
-                    page_limit = (page_limit / 2).max(1);
+                Err(LiveError::Net(NetError::TooLarge)) if p.page_limit > 1 => {
+                    p.page_limit = (p.page_limit / 2).max(1);
                     continue;
                 }
                 result => result?,
             };
             let page: Vec<StoredMessage> = self.parse_json(&resp.body)?;
-            if page.len() > page_limit as usize {
+            if page.len() > p.page_limit as usize {
                 return Err(self.protocol_err("message page exceeds requested limit"));
             }
-            let full = page.len() >= page_limit as usize;
+            let full = page.len() >= p.page_limit as usize;
             let last_seq = page.last().map(|m| m.seq);
             for m in page {
-                out_bytes += message_size(&m);
-                out.push_back(m);
+                p.out_bytes += message_size(&m);
+                p.out.push_back(m);
             }
-            while out_bytes > MAX_FETCH_BYTES
-                && let Some(m) = out.pop_front()
+            while p.out_bytes > MAX_FETCH_BYTES
+                && let Some(m) = p.out.pop_front()
             {
-                out_bytes -= message_size(&m);
+                p.out_bytes -= message_size(&m);
             }
             match (full, last_seq) {
-                (true, Some(s)) if after.is_none_or(|a| s > a) => after = Some(s),
+                (true, Some(s)) if p.after.is_none_or(|a| s > a) => p.after = Some(s),
                 (true, _) => return Err(self.protocol_err("message page did not advance")),
-                _ => return Ok(out.into_iter().collect()),
+                _ => return Ok(p.out.drain(..).collect()),
             }
         }
     }
 
-    /// 表示ユーザーとして `body` を投稿する。成功したら保存済みメッセージを返し、
-    /// 一覧にも足す。断線中は先に `bootstrap` で取り直してから投稿する
-    /// （サーバー再起動で履歴が入れ替わっていても、古い一覧の上に追記しない）。
-    /// 再接続で `bootstrap` がチャンネルの並びやメンバーを取り直し、受け付け
-    /// 時点の宛先・名義と食い違ったら [`LiveError::StaleTarget`] で止める
-    /// （同じ操作が別のチャンネル・別人名義に届くのを構造で防ぐ）。
-    ///
     /// 投稿の冪等キー（`client_msg_id`）を新規発行する。応答の受け取りに
     /// 失敗した投稿を再送したい呼び出し元は、この ID を保持して
     /// [`Self::post_with_id`] に渡す。同じ論理投稿の再送は同じ ID で送る——
@@ -384,6 +432,16 @@ impl LiveSession {
         ClientMsgId::from(uuid::Uuid::new_v4().to_string().as_str())
     }
 
+    /// 表示ユーザーとして `body` を投稿する。成功したら保存済みメッセージを返し、
+    /// 一覧にも足す。断線中は先に `bootstrap` で取り直してから投稿する
+    /// （サーバー再起動で履歴が入れ替わっていても、古い一覧の上に追記しない）。
+    /// 再接続で `bootstrap` がチャンネルの並びやメンバーを取り直し、受け付け
+    /// 時点の宛先・名義と食い違ったら [`LiveError::StaleTarget`] で止める
+    /// （同じ操作が別のチャンネル・別人名義に届くのを構造で防ぐ）。
+    /// 冪等キーは呼び出しごとに [`Self::new_client_msg_id`] で発行するため、
+    /// `post` の再送は冪等にならない——応答を受け取れなかった投稿を再送
+    /// したい呼び出し元は [`Self::post_with_id`] を使う。
+    ///
     /// # Errors
     /// チャンネル未選択・宛先の食い違い・要求の失敗。
     pub fn post(&mut self, body: &str) -> Result<StoredMessage, LiveError> {
@@ -392,6 +450,10 @@ impl LiveSession {
 
     /// [`Self::post`] に冪等キーを指定する版。呼び出し元が保持した
     /// `client_msg_id` で送る（応答を受け取れなかった投稿の再送用）。
+    /// 初めて受け付けた ID にはその時点の宛先・名義を記録し、同じ ID の
+    /// 再送はその組と今の宛先・名義が一致するときだけ送る——応答の喪失後に
+    /// 表示ユーザーやチャンネルが切り替わっていても、同じ ID を別人名義・
+    /// 別チャンネルには送らない（一致しなければ [`LiveError::StaleTarget`]）。
     /// 宛先・名義の確定と食い違い検査は `post` と同じ。
     ///
     /// # Errors
@@ -417,6 +479,18 @@ impl LiveSession {
         let after = self.channel.as_ref().map(|c| c.channel_id.clone());
         if after.as_ref() != Some(&want_channel) || self.actor != want_actor {
             return Err(LiveError::StaleTarget);
+        }
+        // 初回の宛先・名義をこの ID に記録する。再送は同じ組でだけ送る
+        // （応答を受け取れず再送する間に名義・チャンネルが切り替わっても、
+        // 同じ ID が別人・別チャンネルの投稿として保存されないよう送信前に
+        // 止める。記録は送信前に済ませる——応答が途切れても残る）。
+        match self.post_targets.get(&client_msg_id).cloned() {
+            Some((c, a)) if c == want_channel && a == want_actor => {}
+            Some(_) => return Err(LiveError::StaleTarget),
+            None => {
+                self.post_targets
+                    .insert(client_msg_id.clone(), (want_channel.clone(), want_actor));
+            }
         }
         let channel_id = want_channel;
         let request = PostMessageRequest {
@@ -537,7 +611,7 @@ impl LiveSession {
     }
 
     /// [`LiveError::Protocol`] を返す前に接続状態を下げる。`decode`/`parse_json`
-    /// を通らない取得条件の失敗（取得全体の期限・蓄積上限・ページ形状の
+    /// を通らない取得条件の失敗（取得全体の期限・ページ形状の
     /// 不整合）でも、操作の最終結果として `connected = false` に揃える
     /// ——通信自体は正常でも、取得が打ち切られたなら「つながっていません」
     /// 側に倒す。
