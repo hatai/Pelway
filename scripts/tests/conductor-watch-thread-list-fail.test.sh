@@ -149,7 +149,7 @@ FAIL_SINCE="$(since_of "$ROOT/out.log" thread-list-failed)"
 # の期限前・期限到来・直後を、巡回時刻の指定で確かめる。
 prs "$(pr41 false)"
 issues '[{"number":41,"state":"OPEN","labels":[{"name":"agent:working"}]},{"number":42,"state":"OPEN","labels":[{"name":"needs-human"}]},{"number":43,"state":"OPEN","labels":[{"name":"agent:working"}]}]'
-now_is $((T0 + 4))
+now_is $((T0 + 5))
 : > "$ROOT/out.log"
 run_cycles 1 5
 cat "$ROOT/out.log" >> "$ROOT/fail.log"
@@ -208,7 +208,7 @@ threads '[]'; mode ok
 run_cycles 1
 check "2: empty array with exit 0 is a success" has "$ROOT/out.log" "WATCHER thread-list-recovered"
 
-# 試験 3: 失敗の理由。stderr があればその 1 行目（120 文字まで）、無ければ種類。
+# 試験 3: 失敗の理由。stderr があれば空白だけの行を除いた最初の行（120 文字まで）、無ければ種類。
 reason_case() { # reason_case <mode> <expected reason>
   reset; issues '[]'; prs '[]'; mode "$1"
   run_cycles 1
@@ -236,11 +236,15 @@ mode badlist
 run_cycles 1
 check "4: malformed list is reported as a fetch failure" has "$ROOT/out.log" "WATCHER thread-list-failed"
 check "4: snapshot keeps the last good list on a malformed fetch" same "$SNAP" "$ROOT/snapshot.json"
-mode nanlist
-now_is $((T0 + 700))
-run_cycles 1
-check "4: list with a non-JSON literal is reported as a fetch failure" has "$ROOT/out.log" "WATCHER thread-list-still-failing"
-check "4: snapshot keeps the last good list on a non-JSON literal" same "$SNAP" "$ROOT/snapshot.json"
+# 文字列の threadId を持ち項目の型だけが不正な一覧と、JSON 外のリテラルを含む一覧でも、
+# 失敗と通知されて前回の一覧が残ることを確かめる
+i=1
+for m in nanlist badtitle badupdated badstatus; do
+  mode "$m"; now_is $((T0 + 700 * i)); i=$((i + 1))
+  run_cycles 1
+  check "4: $m is reported as a fetch failure" has "$ROOT/out.log" "WATCHER thread-list-still-failing"
+  check "4: snapshot keeps the last good list on $m" same "$SNAP" "$ROOT/snapshot.json"
+done
 
 # 試験 5: null のフィールドは空として扱って受理する（壊れた型だけが失敗）。
 # 状態変化と 45 分停滞の通知でも title: null を空文字に正規化して巡回が止まらない。
