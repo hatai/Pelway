@@ -11,3 +11,15 @@
 5. 改善案: `scripts/conductor-watch.sh` の python 側に `PELWAY_WATCH_NOW`（テスト用の現在時刻）を足すと、HEARTBEAT・再通知・45 分停滞の試験を実時間に頼らず書ける。
 
 使ったスキル: implement-issue、grilling、pstack poteto-mode（Feature の手順）
+
+## 実装者メモ（round 2）
+
+対象 head: 476619b7cefc768b60096ab62e091cfb728401e5
+
+1. 詰まった箇所: Codex のレビュー委託が `verdict: failed` で、必須チェック未登録を理由にレビュー未投稿のまま must-fix 2 件だけ届いた。投稿前の指摘でも、実害（一覧の要素がスレッドの形でないと `t["threadId"]` で python が落ち、WATCHER 行も出ず巡回が止まる）を自分で確かめてから直した。
+2. 曖昧だった文: 「それ以外は 1 回だけ再委託する（2 回連続で止まる条件）」（skill implement-issue の手順 9「レビュー結果を処理する」）。`verdict: failed` の報告に添えられた must-fix を、再委託の前に直してよいかが読み取れなかった。
+3. 仮定と解釈: 指摘は GitHub のレビューとして投稿されていないが、自分で再現確認できる具体的な欠陥として扱い、再委託の前に直す解釈を選んだ。Claude 側の委託はプロバイダの週次上限で失敗したため「使えない担当」とみなし、回し先を Codex にした。devin に回す案は、Devin で実装を続けた PR に Devin のレビューを付けない決まりの意図に沿って退けた。
+4. 足りなかった情報・検証手段: `mise run verify` が `.agents/skills/verify-pelway/verify-run.test.sh`（この環境では /tmp の所有者が uid 65534 で `dir_chain_safe` の所有者条件を満たせず常に失敗）と、本試験の「still-failing line after the interval」（実時間依存の既知の揺らぎ。単独では 3/3 回通過）で落ち、緑の verify が採れなかった。
+5. 改善案: `docs/dev-environment.md` の環境の節に「WSL 環境によっては /tmp の所有者が uid 65534 で、`verify-run.test.sh` の `dir_chain_safe` 系のチェックが落ちる」と 1 行足すと、同じ失敗の切り分けが速い。再通知試験の時計差し替え（`PELWAY_WATCH_NOW`）は引き続き改善候補として残す。
+
+使ったスキル: implement-issue
