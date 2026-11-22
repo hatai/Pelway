@@ -411,3 +411,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **スレッド failed 多発**: cb1a1122（#652）・5c599260（#481）・e4009bd3（#643）・42181892（#660）・9fe3e99d（#644）・c9d1a5eb（#642）・1db76f66（watch 通知）。一括起床の反動か基盤側の失敗と推定。GitHub 側の head は全 PR 不変・失われた push なし
 - #654/#655/#656 の draft head 更新（`44d8fd7a`/`86c7bf0a`/`dc8db5ff`）
 - #600・#652 は kodiak キュー待ち継続
+
+## レビュー結果処理（#530 r2・19:40 JST）
+
+- **PR #530 r2: APPROVED@f74b848a**（must-fix の文書化対応を確認・投稿検証済み・checks 全 pass）→ QA 委託起動（qa-530-f74b848a-20261122・claude-opus-5-5）
