@@ -218,7 +218,7 @@ PR を作るたびに、T3 のスレッドにそのスレッドの PR を全部�
 
 差分が `scripts/agent-gh` を変えるとき、または `.claude/`・`.mcp.json`・`.codex/`・`.devin/`・`.cursor/`・`.cursorrules`・`.windsurf/`・`.windsurfrules`・`.agents/skills/review-pr/`・`.agents/skills/security-review/`・`.agents/skills/pr-watch/`・どのディレクトリの `AGENT.md`・`AGENTS.md`・`AGENTS.local.md`・`AGENTS.override.md`・`CLAUDE.md` を足す・変えるときはレビューを委託しない（後者はレビュー担当のツールの設定や従う手順を、委託の子が読む PR の版で差し替えうるため。`.devin/` は Devin CLI がプロジェクト層として読む config・hooks・rules・skills、`.windsurf/`・`.windsurfrules`・`AGENT.md`・`AGENTS.local.md`・`.cursor/`・`.cursorrules` は互換で読まれる経路、`.agents/skills/pr-watch/` は `review-pr` が待ち方の手順として従わせるスキル）。指揮役が main から立てるレビュースレッドに回るのを待ち、最後の返答を下の「ターンの終わりの状態の行」の `state: waiting-conductor` にして終える（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
 
-PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。対象 head で必須チェック（`mise run verify`・`pr-size`）が fail、未完了、または pr-size の例外判断が未着のときは委託しない（レビュー担当は fail の head に投稿せずに返すため、委託が空振りになる）。それぞれ次のとおり扱う:
+PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。対象 head で必須チェック（`mise run verify`・`pr-size`）が fail、未完了、または pr-size の例外判断が未着のときは委託しない（レビュー担当（skill `review-pr` の手順 2）は verify の fail と例外の無い pr-size の fail を must-fix に数えるため、内容を読む前に結論が決まり、委託が空振りになる）。それぞれ次のとおり扱う:
 
 - `mise run verify` が fail: 手順 6 で直す
 - 未完了: 下の待ち方で完了を待つ
