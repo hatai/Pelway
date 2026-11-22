@@ -183,3 +183,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **PR #631 MERGED**（02:13:36Z・kodiak・Issue #617 auto-close）— 衝突解消（hand-care）→ r2 レビュー → QA → automerge の手順どおりのマージ
 - レビュー委託 rev-631-r2 の追加確認 run: verdict 不変（approve@2cd790bb・追加チェック全通過を確認）
 - **時計の注記**: 本日の worklog の JST 表記は `date` 実測より約 30–40 分先行していた可能性がある（例: patrol 19 を 11:48 と記したが実測 11:14 前後）。イベントの UTC 時刻は GitHub 側が正確 — patrol-state/worklog の記録は以降 `date` 実測で記す
+
+## 巡回記録（patrol 21・11:18 JST・受信箱 wake＋リード指示 3 点）
+
+- **ab1a11fa（指揮役交代スクリプト改善）**: 実体を確認 — branch `t3/fix-conductor-handover-script` に main 超過コミットはなく（stash は `not for PR` 明記）、round 4 は Q5'（新指揮役を誰が立てるか）の質問で終了し settled 済み。PR 化できる成果物が現状ない。send は MCP 障害＋full-access 上限で未達 — 実質 hatai が Q5' に回答する形が必要と判断・報告に記載
+- **mcp:57618b05**: hatai の説明どおり Web からの直接送信が起床元と確認（二重指揮ではない）。duplicate_conductor_alert を解除し、同スレッドへの操作は行わない方針に固定
+- **旧指揮役 8892e0a8**: `settled: true`・settledAt 01:41:02Z を thread_read で再確認済み（恒久交代時に実施済）
+- watch.log 3781–3787: cb1a1122（CI セキュリティ修正）completed・4649721f 反復・自スレッドの interrupted/running（報告中の割り込み）
