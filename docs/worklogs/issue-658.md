@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/command-team/SKILL.md` の「マージ」の pr-size の項に「実装担当が相談のために push した pr-size fail の PR は、例外を認めるか縮小を指示するまで `needs-human` のまま置く」を足す。
 
 使ったスキル: なし
+
+## 実装者メモ（round 2）
+
+対象 head: 75fd0854a955783700082519d1c24abca5cd639a
+
+1. 詰まった箇所: `.agents/skills/implement-issue/SKILL.md` 手順 8: 委託しない理由の括弧書きを Issue の背景（PR #610 round 7 で両担当が「pr-size fail のため未投稿」で返した）から書いたが、`review-pr` 手順 2 では verify fail・例外なしの pr-size fail は must-fix として Request changes を投稿する決まりで、両レビュー担当から `[文書のずれ]` の nit を受けた。
+2. 曖昧だった文: 「レビュー担当の決まりどおりの挙動で委託が空振り」（Issue #658 の「背景・前提」）。決まり（`review-pr` 手順 2）と、#610 での実際の挙動（未投稿）が一致していない。
+3. 仮定と解釈: 理由は `review-pr` の決まりを正として「must-fix に数えるため内容を読む前に結論が決まる」に直した。#610 の未投稿の挙動に合わせて `review-pr` を直す解釈は、対象外（review-pr は委託を止める差分の範囲外）として選ばなかった。
+4. 足りなかった情報・検証手段: PR #610 round 7 のレビュー担当の返答の実物（未投稿とした根拠の行）。
+5. 改善案: Issue の背景に挙動を書くときは、`.agents/skills/write-issue/SKILL.md` の「背景・前提」に「観察した挙動と、それを決める決まりの文（ファイル:行）を並べて書き、食い違えば食い違いと書く」を足す。
+
+使ったスキル: なし
