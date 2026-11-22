@@ -157,11 +157,8 @@ heal() { rm "$MOCK"/fail-*; : > "$MOCK/calls"; }  # 失敗を外し、書き込�
 retry() { heal; run_cycles 1; }
 again() { : > "$MOCK/calls"; run_cycles 1; }  # 書き込みの記録を空にして 1 周回す
 # once <番号> [準備のコマンド...] — 新しい Issue（labeled_at=$T20）で準備のコマンドを実行してから ${CYCLES:-1} 周回す。準備の失敗は FAIL
-once() {
-  local n="$1"; shift; reset; issue_with "$n" "$T20" needs-decision
-  if (($#)) && ! "$@"; then printf 'FAIL setup #%s\n' "$n"; failures+=("setup #$n"); fi
-  run_cycles "${CYCLES:-1}"
-}
+once() { local n="$1"; shift; reset; issue_with "$n" "$T20" needs-decision
+  if (($#)) && ! "$@"; then printf 'FAIL setup #%s\n' "$n"; failures+=("setup #$n"); fi; run_cycles "${CYCLES:-1}"; }
 # flip_human <番号> — labeled_at の後に needs-human が付いて（$T16）外れた（$T5）イベントを足す
 flip_human() { gh_edit 'st[args[0]]["events"][-1] += [ev("labeled", "needs-human", args[1]), ev("unlabeled", "needs-human", args[2])]' "$1" "$T16" "$T5"; }
 # other_adds_human <番号> — ほかの誰かが needs-human を付けた（$T5）
@@ -189,10 +186,7 @@ escalated() { echo "DECISION escalated #$1 labeled_at=$T20 reason=${2:-no-regist
 label_calls() { lines "issue edit $1 --add-label needs-human" "issue edit $1 --remove-label needs-decision"; }
 escalation_calls() { lines "issue comment $1 --body-file -" "$(label_calls "$1")"; }
 
-check() {
-  local name="$1"; shift
-  if "$@"; then printf 'ok   %s\n' "$name"; else printf 'FAIL %s\n' "$name"; failures+=("$name"); fi
-}
+check() { local name="$1"; shift; if "$@"; then printf 'ok   %s\n' "$name"; else printf 'FAIL %s\n' "$name"; failures+=("$name"); fi; }
 eq() { [[ "$1" == "$2" ]]; }
 lacks() { ! grep -qF -- "$2" "$1"; }
 
@@ -202,22 +196,19 @@ lacks() { ! grep -qF -- "$2" "$1"; }
 reset; reg "$CONDUCTOR"; issue_with 701 "$T20" needs-decision
 run_cycles 2
 check "1: overdue line once for the same labeled_at (exact), conductor running -> no comment or label change" eq "$(decision_lines)|$(calls)" "$(overdue 701)|"
-check "1: record waiting_on and next_owner are grokbot" eq "$(sget 701 waiting_on) $(sget 701 next_owner)" "grokbot grokbot"
-check "1: record next_check_at is labeled_at + 15 min" eq "$(nca_after 701 "$T20")" "900"
+check "1: record waiting_on and next_owner are grokbot, next_check_at is labeled_at + 15 min" eq "$(sget 701 waiting_on) $(sget 701 next_owner) $(nca_after 701 "$T20")" "grokbot grokbot 900"
 check "1: record holds no thread id" lacks "$STATE" "$CONDUCTOR"
 
 # 2. 15 分より前は出さない（指揮役がいなくても書き込まない）
 reset; issue_with 702 "$T5" needs-decision; run_cycles 2
-check "2: no line and no writes before 15 minutes" eq "$(decision_lines)|$(calls)" "|"
-check "2: next_check_at is labeled_at + 15 min" eq "$(nca_after 702 "$T5")" "900"
+check "2: no line and no writes before 15 minutes, next_check_at is labeled_at + 15 min" eq "$(decision_lines)|$(calls)|$(nca_after 702 "$T5")" "||900"
 
 # 3. 外れてから付け直されたら、新しい labeled_at で改めて数える。外れずに付け直しのイベントだけ増えたときも同じ
 reset; reg "$CONDUCTOR"; issue_with 703 "$T40" needs-decision; run_cycles 1
 set_labels 703; run_cycles 1
 relabel 703 "$T20"; set_labels 703 needs-decision; run_cycles 1
 relabel 703 "$T16"; run_cycles 1
-check "3: re-labeling counts again from the new labeled_at" eq "$(decision_lines)" "$(lines "$(overdue 703 "$T40")" "$(overdue 703)" "$(overdue 703 "$T16")")"
-check "3: next_check_at follows the new labeled_at" eq "$(nca_after 703 "$T16")" "900"
+check "3: re-labeling counts again from the new labeled_at, next_check_at follows it" eq "$(decision_lines)|$(nca_after 703 "$T16")" "$(lines "$(overdue 703 "$T40")" "$(overdue 703)" "$(overdue 703 "$T16")")|900"
 
 # 4. Issue ごとのイベントの取得に失敗した周は、行も書き込みも無く、次の周で取り直す
 fail_first events 704
@@ -227,8 +218,7 @@ check "4: next cycle fetches again and reports" eq "$(decision_lines)" "$(lines 
 
 # 5. needs-decision と needs-human の両方が付いていれば human のまま、DECISION は出さない
 reset; issue_with 705 "$T20" needs-decision needs-human; run_cycles 1
-check "5: both labels -> waiting_on human" eq "$(sget 705 waiting_on)" "human"
-check "5: both labels -> no DECISION line, no writes, no per-issue reads without the watcher's record" eq "$(decision_lines)|$(calls)|$(reads_of 705)" "||"
+check "5: both labels -> waiting_on human, no DECISION line, no writes, no per-issue reads without the watcher's record" eq "$(sget 705 waiting_on)|$(decision_lines)|$(calls)|$(reads_of 705)" "human|||"
 check "5: both labels -> next_check_at is not labeled_at + 15 min" eval '[[ "$(nca_after 705 "$T20")" != 900 ]]'
 
 # --- 指揮役が動いていないときの格上げ ---
@@ -438,8 +428,7 @@ gh_edit 'st[args[0]]["state"] = "open"' 761; run_cycles 1
 check "38: held record survives close+reopen -> still held, no re-escalation, overdue once (exact)" eq "$(record_of 761)|$(calls)|$(decision_lines | grep -c 'overdue #761')" "$T20 held||1"
 # 39. 一覧の後に needs-human が付き、最初の Issue ごとの events に出たら DECISION overdue を出さず、通知済みにもしない（外れたら知らせる）
 once 764 on_read events 764 "i['labels'].append('needs-human'); i['events'][-1].append(ev('labeled', 'needs-human', '$T5'))"
-check "39: needs-human in the first events fetch -> no overdue, no writes" eq "$(decision_lines)|$(calls)" "|"
-check "39: needs-human in the first events fetch -> waiting_on human, next_owner hatai" eq "$(sget 764 waiting_on) $(sget 764 next_owner)" "human hatai"
+check "39: needs-human in the first events fetch -> no overdue, no writes, waiting_on human, next_owner hatai" eq "$(decision_lines)|$(calls)|$(sget 764 waiting_on) $(sget 764 next_owner)" "||human hatai"
 check "39: needs-human in the first events fetch -> next_check_at is not labeled_at + 15 min" eval '[[ "$(nca_after 764 "$T20")" != 900 ]]'
 gh_edit 'i = st[args[0]]; i["labels"].remove("needs-human"); i["events"][-1].append(ev("unlabeled", "needs-human", args[1]))' 764 "$T5"; run_cycles 1
 check "39: after needs-human is removed -> overdue, then escalated" eq "$(decision_lines)" "$(lines "$(overdue 764)" "$(escalated 764)")"

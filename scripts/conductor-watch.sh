@@ -207,7 +207,7 @@ if levs is not None:
 DECISION_SECS = 15 * 60
 ESCALATION_MARK = "<!-- conductor-watch-escalation -->"
 ESCALATION_AUTHOR = "pelway-dev[bot]"
-# 格上げの段の記録（Issue 番号 → labeled_at・stage・seen）。どこで止まっても次の周が照合できるよう、段が変わるたびにその場で置き換える
+# 格上げの段の記録（Issue 番号 → labeled_at・stage・seen・reason）。どこで止まっても次の周が照合できるよう、段が変わるたびにその場で置き換える
 EP = os.path.join(d, "escalation.json")
 try: esc = {k: v for k, v in json.load(open(EP)).items() if isinstance(v, dict)}
 except Exception: esc = {}
