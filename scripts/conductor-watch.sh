@@ -51,7 +51,8 @@ if [[ -z "$T3_BIN" ]]; then
   done
 fi
 while true; do
-  "$T3_BIN" thread list --json > "$D/threads.json" 2>/dev/null || true
+  # 取得に失敗したらファイルを消す（正常な空の一覧と区別する。python 側で取得失敗と扱う）。
+  "$T3_BIN" thread list --json > "$D/threads.json" 2>/dev/null || rm -f "$D/threads.json"
   # GitHub からの取得に失敗したらファイルを消す（空の実状態と区別する。python 側で取得失敗と扱い、
   # 巡回状態の記録を書き換えさせない）。
   scripts/agent-gh dev issue list --state all --limit "$IL" --json number,state,labels > "$D/issues.json" 2>/dev/null || rm -f "$D/issues.json"
@@ -86,7 +87,9 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
 LABEL_BACKUP_HOURS = 24
 LABEL_BACKING_AUTHOR = "hatai"
 try: threads = json.load(open(os.path.join(d, "threads.json")))
-except Exception: threads = []
+except Exception: threads = None
+threads_ok = isinstance(threads, list)
+if not threads_ok: threads = []
 try: issues = json.load(open(os.path.join(d, "issues.json")))
 except Exception: issues = None
 try: prs = json.load(open(os.path.join(d, "prs.json"))); prs_ok = True
@@ -192,7 +195,8 @@ if levs is not None:
 # t3 thread show で 1 本 1 回ずつ集め、2 本以上が同じパスなら THREAD shared-worktree の行を出す。
 # 同じ組み合わせ（パスとスレッドの集合）は続く間 1 回だけ出す。show が失敗したスレッドは
 # この巡回で数えず、そのスレッドを含む既出の組み合わせは記録に残す（失敗の巡回で再通知しない）。
-if threads:
+# 一覧の取得に失敗した巡回は記録を保ち、正常に空の一覧は共有の解消として記録を消す。
+if threads_ok:
     by_path, failed = {}, set()
     for t in threads:
         if t.get("settled") or t.get("parentThreadId"): continue

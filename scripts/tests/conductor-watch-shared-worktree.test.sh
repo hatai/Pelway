@@ -27,7 +27,10 @@ chmod +x "$ROOT/repo/scripts/agent-gh"
 # ファイルが無いか中身が FAIL のスレッドは失敗する。呼び出しは $MOCK/show-calls に記録する。
 cat > "$ROOT/bin/t3" <<'EOF'
 #!/usr/bin/env bash
-[[ "$1 $2" == "thread list" ]] && { cat "$MOCK/threads.json"; exit 0; }
+if [[ "$1 $2" == "thread list" ]]; then
+  [[ -f "$MOCK/list-fail" ]] && exit 1
+  cat "$MOCK/threads.json"; exit 0
+fi
 if [[ "$1 $2" == "thread show" && "${4:-}" == "--json" ]]; then
   echo "$3" >> "$MOCK/show-calls"
   f="$MOCK/show/$3"
@@ -123,6 +126,24 @@ check "5: show is not called for settled threads" eq "$(count "$MOCK/show-calls"
 check "5: show is called once per unsettled thread per cycle" \
   eq "$(sort "$MOCK/show-calls" | uniq -c | awk '{print $2"="$1}' | tr '\n' ' ')" "t-a=2 t-b=2 t-c=2 t-x=2 "
 check "5: no other t3 calls" eq "$(cat "$MOCK/other-calls" 2>/dev/null)" ""
+
+# 試験 6: thread list の取得に失敗した巡回では記録を保ち、同じ組み合わせを再び出さない。
+# 一覧が正常に空（[]）になった巡回では共有が解消されたとして記録を消し、再び共有されたら出す。
+reset
+threads "$(th t-a false agent)" "$(th t-b false agent)"
+wt t-a /w/r; wt t-b /w/r
+run_cycles 1
+touch "$MOCK/list-fail"
+run_cycles 1
+rm -f "$MOCK/list-fail"
+run_cycles 1
+check "6: list failure keeps the record" eq "$(shared)" "1"
+threads
+run_cycles 1
+threads "$(th t-a false agent)" "$(th t-b false agent)"
+run_cycles 1
+check "6: sharing after an empty list is reported again" \
+  eq "$(count "$ROOT/out.log" "THREAD shared-worktree path=/w/r threads=t-a,t-b")" "2"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
