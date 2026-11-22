@@ -175,7 +175,10 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 ### セキュリティスキャン（security-scan）
 
 - `.github/workflows/security-scan.yml` が、main 向け Pull Request・main への push・手動実行で、秘密情報・危ないコードのパターン・脆弱な依存関係を検出する（Issue #571）。すべて無料の OSS で、有料サービス・アカウント登録・スキャナー用のトークンは使わない（checkout は GitHub Actions が自動で発行する読み取り用のトークンを使う）。
-- 報告のみ: 検出があってもジョブは成功し、件数を `::warning::` に、一覧（場所と種類）をジョブサマリーに出す。ツール自体の失敗（ネットワーク断・設定の誤りなど）はジョブを失敗させる。必須チェックにはしていない（必須チェックにするかは hatai が決める）。本体は `scripts/security-scan.sh`、テストは `scripts/tests/security-scan.test.sh`。
+- 検出の一覧（場所と種類）はジョブサマリーに出す。次の検出が 1 件でもあれば、件数を `::error::` に出してジョブを失敗させる（`scripts/security-scan.sh` の終了コード 4）。それ以外の検出は件数を `::warning::` に出すだけで、ジョブは成功する（報告のみ）。ツール自体の失敗（ネットワーク断・設定の誤りなど）もジョブを失敗させる。必須チェックにはしていない（必須チェックにするかは hatai が決める）。本体は `scripts/security-scan.sh`、テストは `scripts/tests/security-scan.test.sh`。
+  - Gitleaks: すべての検出。
+  - Semgrep: 重大度が INFO 以外（WARNING・ERROR と、知らない重大度）の検出。INFO（`unsafe` の使用・`std::env::args`・`std::env::temp_dir` など、監査の目印にとどまる規則）は報告のみ。
+  - OSV-Scanner: unmaintained の告知（RUSTSEC の `informational` が `unmaintained`。OSV の `affected[].database_specific.informational` で見分ける）以外の勧告が付いたパッケージ。unmaintained は報告のみにする（cargo-deny の第1段が unmaintained を失敗させないのと同じ扱い）。`unsound` など他の告知は失敗させる。サマリーでは、告知の勧告の後ろに種類を書く。
 - ツールの診断（標準エラー）: 3 つのツールとも、診断には PR の作者が決められる値（設定の行・パス・取得先の URL など）が入りうり、失敗が終了コードに出ないことがある。そのため次のように扱う。
   - 標準エラーは公開のジョブログに出さず、ランナー上の一時ファイルにだけ書く。ログには失敗の種類と行数だけを出す。中身は手元で `SECURITY_SCAN_OUT=<dir> bash scripts/security-scan.sh <tool>` を実行し、`<dir>/<tool>.stderr` を読む（`MISE_ENV=security mise exec --` の下で実行する。Semgrep はイメージの中で実行する）。
   - Gitleaks と OSV-Scanner はログの水準を error に絞り（`--log-level error`・`--verbosity error`）、標準エラーに 1 行でもあれば、終了コードが検出なし・検出ありでも失敗にする。Gitleaks 8.30.1 は git log の失敗を、OSV-Scanner 2.7.1 はロックファイルの抽出の失敗を、ログに出すだけで終了コードに出さない。
@@ -186,19 +189,23 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 | ジョブ | ツールと版 | 対象 | 導入 |
 |---|---|---|---|
 | `gitleaks (secrets)` | Gitleaks 8.30.1（MIT） | HEAD から辿れる git 履歴全体。マージコミットの差分（競合解消で足した行）も含める（`--log-opts="-m HEAD"`、checkout は `fetch-depth: 0`） | `mise.security.toml`（`MISE_ENV=security`）と `mise.security.lock` |
-| `semgrep (code patterns)` | Semgrep CE 1.186.0（LGPL-2.1） | 作業ツリーのファイル（`tests/` の下を含む。リポジトリ直下の `.semgrepignore` が Semgrep の組み込みの既定の除外パターンを置き換え、今はここでは何も除外しない。ファイルの大きさやバイナリかどうか、未追跡のファイルへの `.gitignore` による Semgrep の選別は残る）。ルールセットは `p/rust`・`p/github-actions`・`r/bash` | 公式イメージ `semgrep/semgrep` を digest 固定した job コンテナ |
+| `semgrep (code patterns)` | Semgrep CE 1.186.0（LGPL-2.1） | 作業ツリーのファイル（`tests/` の下を含む。リポジトリ直下の `.semgrepignore` が Semgrep の組み込みの既定の除外パターンを置き換え、今はここでは何も除外しない。ファイルの大きさやバイナリかどうか、未追跡のファイルへの `.gitignore` による Semgrep の選別は残る）。ルールセットは `p/rust`・`p/github-actions`・`r/bash`（`github-actions-mutable-action-tag` を除く） | 公式イメージ `semgrep/semgrep` を digest 固定した job コンテナ |
 | `osv-scanner (dependencies)` | OSV-Scanner 2.7.1（Apache-2.0） | 作業ツリーのロックファイル（今は `Cargo.lock`） | `mise.security.toml` と `mise.security.lock` |
 
 - 秘密の値は出さない: Gitleaks は `--redact` で値を伏せ、サマリーには規則・場所・コミットだけを書く。`-m` で同じ値が複数のマージコミットに重ねて出るため、サマリーには規則と場所の重複を除いた数も書く。
 - Gitleaks は CLI を直接実行し、`gitleaks-action` は使わない。Action は v2 以降、独自の EULA（改変の禁止、Organization のリポジトリではライセンスキーが必要）で配布されている。CLI 本体は MIT で、版の固定も mise の checksum で揃えられる。
-- Semgrep は Registry のルールをログインなしで取得し、`--metrics=off` で利用状況の送信を止める。Registry のルールセットは実行のたびに最新を取り、版は固定されない（イメージの digest が固定するのはエンジンと依存だけ）。同じコミットでも、日によって検出が変わりうる。Registry のルールは Semgrep Rules License v1.0 で配布されている。利用は「自社の内部の業務目的」に限られ、ルールの再配布とサービスとしての提供は禁じられている（出典: https://semgrep.dev/legal/rules-license ）。このリポジトリでは、自分のコードを CI で検査するために使うだけで、ルールを複製してリポジトリに置かない。秘密情報向けのルールセットは入れない（秘密の検出は Gitleaks が担い、Semgrep は一致した行をそのまま出すため）。
+- Semgrep は Registry のルールをログインなしで取得し、`--metrics=off` で利用状況の送信を止める。Registry のルールセットは実行のたびに最新を取り、版は固定されない（イメージの digest が固定するのはエンジンと依存だけ）。同じコミットでも、日によって検出が変わりうる。WARNING 以上の規則が Registry に増えると、コードを変えなくてもジョブが失敗しうる。Registry のルールは Semgrep Rules License v1.0 で配布されている。利用は「自社の内部の業務目的」に限られ、ルールの再配布とサービスとしての提供は禁じられている（出典: https://semgrep.dev/legal/rules-license ）。このリポジトリでは、自分のコードを CI で検査するために使うだけで、ルールを複製してリポジトリに置かない。秘密情報向けのルールセットは入れない（秘密の検出は Gitleaks が担い、Semgrep は一致した行をそのまま出すため）。
 - Semgrep を mise で入れない理由: PyPI 配布で、mise の pypi バックエンドが作る依存の固定（uv.lock）が 1800 行を超えるため。イメージの digest は依存を含む中身全体を固定する。
 - 版の更新: 週次の `mise-bump.yml` は `MISE_ENV` を付けずに実行するため、`mise.security.toml` の Gitleaks・OSV-Scanner の版は上がらない。Semgrep のイメージの digest も同じ。Gitleaks の検出ルールは本体に入っているため、古い版のままだと新しい種類の秘密を見落とす。今は手で上げる: `MISE_ENV=security mise upgrade --bump aqua:gitleaks/gitleaks aqua:google/osv-scanner`（ツール名を付けないと `mise.toml` の共通のツールも上がる）のあと `MISE_ENV=security mise lock` で `mise.security.lock` を作り直し、Semgrep は新しいタグの digest に `security-scan.yml` を書き換える（workflow の変更は hatai が push する）。
 - OSV-Scanner と cargo-deny（`deny-check`）は、どちらも `Cargo.lock` を RustSec の勧告と照合する点で重なる。違いは次のとおり。
   - OSV-Scanner は、OSV データベースの他の出所（GHSA など）も見る（今は `Cargo.lock` だけを照合する）。
   - cargo-deny は `deny.toml` の ignore と警告の扱いを持ち、必須チェックの一部である。
-  - OSV-Scanner には `deny.toml` の ignore が効かないため、cargo-deny が無視した勧告も報告に出る。
-- 除外（`.gitleaksignore`・`.semgrepignore`・`osv-scanner.toml`）は、1 件ずつ理由を書いて足す。`.semgrepignore` を消すと、Semgrep は組み込みの既定の除外一覧（`tests/`・`test/`・`vendor/` など）に戻る。そのため、ファイルは中身が空でも残す。既存の検出を理由に、ルールの無効化や除外の範囲を広げない。
+  - OSV-Scanner には `deny.toml` の ignore が効かない。cargo-deny で ignore した勧告のうち告知でないもの（今は rsa の RUSTSEC-2023-0071）は、`osv-scanner.toml` にも同じ理由で書く。
+- Semgrep の `yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag` は `--exclude-rule` で使わない。この規則は `uses:` がコミット SHA でないことを検出するが、このリポジトリは `uses:` をタグで参照し、SHA を `.github/workflows/actions.lock`（`gh actions-lock` が生成）で固定する。
+- 除外（`.gitleaks.toml`・`.semgrepignore`・`osv-scanner.toml`）は、1 件ずつ理由を書いて足す。`.semgrepignore` を消すと、Semgrep は組み込みの既定の除外一覧（`tests/`・`test/`・`vendor/` など）に戻る。そのため、ファイルは中身が空でも残す。既存の検出を理由に、ルールの無効化や除外の範囲を広げない。
+  - Gitleaks の除外は `.gitleaks.toml` の `[[allowlists]]` に書く（`[extend] useDefault = true` で組み込みの規則はそのまま使う）。1 つの allowlist は `condition = "AND"` にし、`targetRules`（規則）・`paths`（ダミー値を置いたファイル。`^…$` で 1 ファイルずつ）・`regexes`（既知のダミー値そのもの。`^…$` で値全体を書き、検出された値に当てる）のすべてに合うものだけを許す。行番号を使わないため、ファイルの行がずれても CI は落ちない。同じファイルの別の値は除外されない。値の形（桁数・文字種）だけの除外は書かない。
+  - `.gitleaksignore`（「コミット:ファイル:規則:行」や「ファイル:規則:行」の指紋）は使わない。指紋は行番号を含むため、行がずれると同じ値が別の検出として出直す。新しいダミー値を除外するときは、そのファイルとその値を書いた allowlist を足すか、既存の allowlist の値をそのまま使う。
+  - `osv-scanner.toml` は `Cargo.lock` と同じディレクトリに置き、`[[IgnoredVulns]]` に `id` と `reason` を書く。`deny.toml` の `ignore` と同じ勧告は同じ理由と Issue を書く。unmaintained の告知は足さない（報告のみのため）。
 
 ## GitHub 通知（Grok Bot webhook・notify-grokbot）
 
