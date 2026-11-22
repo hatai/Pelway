@@ -456,3 +456,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - qa-530-r3（codex）が **Codex 使用上限**で failed（作業途中まで進行）。Claude・Codex 両方が制限中
 - Devin（swe-2-high）で QA を取り直し（qa-530-f74b848a-r4-20261122）
+
+## QA 結果処理（#530 r4・21:15 JST）
+
+- **PR #530 全条件充足 → automerge**: Devin QA で [QA pass@f74b848a](https://github.com/hatai/Pelway/pull/530#issuecomment-7074233435)（必須チェック全 pass・受け入れ条件全 pass・弱化変更は理由記載ありで実態と整合）・APPROVED@同 SHA → kodiak キューへ
