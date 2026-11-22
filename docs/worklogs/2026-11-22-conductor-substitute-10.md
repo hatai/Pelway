@@ -425,3 +425,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - qa-530-f74b848a（claude-opus-5-5）が **Claude 週次レート制限**（3am JST reset）で failed — patrol 61/62 の mass failed の原因と判明
 - Codex（gpt-6.1-terra）で QA を取り直し（qa-530-f74b848a-r2-20261122）。Claude 系スレッドは reset まで停止見込み
+
+## 巡回記録（patrol 63・20:05 JST・受信箱 wake）
+
+- failed 2件追加（2e87e67b #602・5fc0e3f5 #295）— Claude 制限の余波と推定
+- #600・#652 は kodiak キュー待ち継続
