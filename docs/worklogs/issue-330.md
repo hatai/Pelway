@@ -159,3 +159,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 8 の冒頭に「委託の直前に Issue のコメントを末尾から読み直す」を足す。
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）
+
+## 実装者メモ（round 8 / PR-3）
+
+対象 head: `cf82d921`（round 3 レビューの must-fix 1 件を案 (a) で修正。行数例外 +811 と案 (a) は hatai が #330 で許可（2026-11-22T03:04Z）、`pr-size-exception` は hatai が付与）
+
+1. 詰まった箇所: 手順 6: `mise run verify` が 2 回、変更と無関係に落ちた（`agent-sandbox.test.sh` の /tmp 書き込み、mise 外の rustc 1.75/1.94 で動いた clippy と test）。単体の再実行と 3 回目の verify で通った。続くメモの commit と push は auto mode に拒否され、hatai の記録が付くまで止まった。
+2. 曖昧だった文: 「API キーが使えず台本モードになると…台本モードの経路でも定型の印を保持し、その動作をテストで確認してください」（round 3 レビューの must-fix）。
+3. 仮定と解釈: 印は LLM の応答の内容では決めず、runner が持つ gateway の型（`demo::ScriptGateway`）で決めた（`DynChatGateway::as_any`）。応答の JSON に印を持たせる形は、LLM が自己申告できるため採らなかった。
+4. 足りなかった情報・検証手段: `script_mode_runs_mention_to_draft` に印の確認を足し、修正前に red（`assertion failed: draft.template && …`）、修正後に green。pr-size +811。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 の verify の切り分けに「mise の toolchain 解決の失敗（`rustc 1.75.0 is not supported`）は再実行で解消することがある」を足す。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）
