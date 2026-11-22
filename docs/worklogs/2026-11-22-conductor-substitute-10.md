@@ -253,3 +253,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 巡回記録（patrol 32 続報・12:35 JST）
 
 - PR #652: codex_review r1 は「必須チェック未完了」で判定・投稿せず中断。チェック待ちを外す指示を付けて r1b として再起動（CI 合否は指揮役側で別途判定）
+
+## 巡回記録（patrol 33・12:50 JST・受信箱 wake）
+
+- **新 draft PR 3 件**: #654（#645 required-checks helper）・#655（#641 resign push target）・#656（#643 shared-worktree detect）— 各 impl waiting 遷移に対応。調査 PR #650（orphaned impl threads）も出現
+- **新スレッド `1db76f66`**: conductor-watch スレッド一覧取得失敗の WATCHER 通知改善（hatai 起動と推定）
+- **PR #652**: CI 残 pending 3（test・octocov・Analyze rust）・review r1b 実行中
