@@ -2,9 +2,15 @@
 # security-scan workflow（.github/workflows/security-scan.yml）の 1 ツール分の本体（Issue #571）。
 # 呼び出しは `bash scripts/security-scan.sh <gitleaks|semgrep|osv-scanner>`。ツールは PATH 上のものを使う。
 #
-# 当面は報告のみ: 検出があっても終了コード 0 で終わり、::warning:: とジョブサマリー
-# （$GITHUB_STEP_SUMMARY。無ければ標準出力）に件数と一覧を出す。ツール自体の失敗は
-# ジョブを失敗させる（検出と取り違えない）。各ツールの終了コードの意味:
+# 検出は件数と一覧をジョブサマリー（$GITHUB_STEP_SUMMARY。無ければ標準出力）に出し、
+# 次の「失敗させる検出」が 1 件でもあれば ::error:: を出して終了コード 4 で終わる。それ以外の
+# 検出は ::warning:: を出すだけで終了コード 0 にする（報告のみ）:
+#   gitleaks    すべての検出（除外は .gitleaks.toml の allowlist）
+#   semgrep     重大度が INFO 以外の検出（INFO は報告のみ）
+#   osv-scanner unmaintained の告知（RUSTSEC の informational が unmaintained）以外の勧告が
+#               付いたパッケージ（unsound などの他の告知は失敗させる）
+#               （除外は osv-scanner.toml）
+# ツール自体の失敗もジョブを失敗させる（検出と取り違えない）。各ツールの終了コードの意味:
 #   gitleaks    0 = 検出なし、2 = 検出あり（--exit-code 2 で指定）、それ以外 = 失敗
 #   semgrep     0 = 検出なし、1 = 検出あり（--error）、それ以外 = 失敗
 #   osv-scanner 0 = 検出なし、1 = 検出あり、128 = ロックファイルが無い、それ以外 = 失敗
@@ -22,9 +28,10 @@
 # 秘密の値は出さない: gitleaks は --redact で値を伏せ、サマリーにも規則・場所・コミットだけを書く
 # （レポートの Secret / Match は読まない）。
 # 結果の JSON は $SECURITY_SCAN_OUT（既定: リポジトリ外の一時ディレクトリ）に置く。
-# 終了コード: 0 = 検出なし・検出あり（報告のみ）、それ以外 = 失敗。2 = 引数の誤り、3 = 終了コードに
-# 出ないツールの失敗（標準エラーの診断・semgrep の解析エラー）、それ以外はツール自身の終了コードを
-# そのまま返す（ツールの終了コードが 2・3 と重なることがあるため、どの失敗かはログの ::error:: で見る）
+# 終了コード: 0 = 検出なし・報告のみの検出だけ、それ以外 = 失敗。2 = 引数の誤り、3 = 終了コードに
+# 出ないツールの失敗（標準エラーの診断・semgrep の解析エラー）、4 = 失敗させる検出あり、それ以外は
+# ツール自身の終了コードをそのまま返す（ツールの終了コードが 2・3・4 と重なることがあるため、
+# どの失敗かはログの ::error:: で見る）
 set -euo pipefail
 
 tool="${1:-}"
@@ -45,7 +52,10 @@ local_hint="中身はログに出さない。手元で SECURITY_SCAN_OUT=<dir> b
 
 # Semgrep のルールセット（Semgrep Registry から取得。ログイン・トークンは使わない）。
 # p/rust: Rust、p/github-actions: CI 設定、r/bash: シェル（p/bash は Registry に無い）。
-semgrep_configs=(--config p/rust --config p/github-actions --config r/bash)
+# github-actions-mutable-action-tag は使わない: uses: のタグ参照の SHA は
+# .github/workflows/actions.lock（gh actions-lock）が固定するため、この規則の前提と合わない。
+semgrep_configs=(--config p/rust --config p/github-actions --config r/bash
+  --exclude-rule yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag)
 
 rc=0
 case "$tool" in
@@ -109,20 +119,28 @@ case "$tool" in
   gitleaks)
     header='| 規則 | 場所 | コミット |'
     count="$(jq 'length' "$report")"
+    blocking="$count"
     rows_json="$(jq "$cell"' [.[] | "| \(.RuleID | cell) | \("\(.File):\(.StartLine)" | cell) | \(.Commit[0:12] | cell) |"]' "$report")"
     places="$(jq '[.[] | "\(.RuleID) \(.File):\(.StartLine)"] | unique | length' "$report")"
     ;;
   semgrep)
     header='| 規則 | 場所 | 重大度 |'
     count="$(jq '.results | length' "$report")"
+    # INFO 以外（WARNING・ERROR と、知らない重大度）を失敗させる検出にする。
+    blocking="$(jq '[.results[] | select(.extra.severity != "INFO")] | length' "$report")"
     rows_json="$(jq "$cell"' [.results[] | "| \(.check_id | cell) | \("\(.path):\(.start.line)" | cell) | \(.extra.severity | cell) |"]' "$report")"
     errors="$(jq '.errors | length' "$report")"
     ;;
   osv-scanner)
     header='| パッケージ | 勧告 | ロックファイル |'
+    # 勧告の告知の種類（unmaintained・unsound など。RUSTSEC の informational）は、OSV の
+    # affected[].database_specific.informational で見分ける。報告だけにするのは unmaintained だけ。
+    # shellcheck disable=SC2016 # jq の式をそのまま渡す
+    info='def info: [.affected[]?.database_specific.informational // empty] | first;'
     count="$(jq '[.results[]?.packages[]?] | length' "$report")"
-    rows_json="$(jq "$cell"' [.results[]? | .source.path as $p | .packages[]
-      | "| \("\(.package.name) \(.package.version)" | cell) | \([.vulnerabilities[].id] | join(", ") | cell) | \($p | cell) |"]' "$report")"
+    blocking="$(jq "$info"' [.results[]?.packages[]? | select(any(.vulnerabilities[]; info != "unmaintained"))] | length' "$report")"
+    rows_json="$(jq "$info $cell"' [.results[]? | .source.path as $p | .packages[]
+      | "| \("\(.package.name) \(.package.version)" | cell) | \([.vulnerabilities[] | .id + (info | if . then " (\(.))" else "" end)] | join(", ") | cell) | \($p | cell) |"]' "$report")"
     ;;
 esac
 
@@ -143,7 +161,7 @@ if [[ -n "$rows" ]]; then shown="$(printf '%s\n' "$rows" | wc -l)"; fi
   if [[ "$count" == 0 ]]; then
     echo "検出なし。"
   else
-    echo "検出 $count 件（報告のみ。ジョブは失敗させない）。"
+    echo "検出 $count 件（うちジョブを失敗させるもの $blocking 件）。"
     if [[ -n "${places:-}" ]]; then
       echo
       echo "規則と場所の重複を除くと ${places} か所（マージコミットの差分も走査するため、同じ値が複数のコミットで出る）。"
@@ -163,6 +181,10 @@ if [[ -n "$rows" ]]; then shown="$(printf '%s\n' "$rows" | wc -l)"; fi
   fi
 } >>"$summary"
 
+if [[ "$blocking" != 0 ]]; then
+  echo "::error::$tool: 検出 $count 件のうち $blocking 件がジョブを失敗させる検出です。一覧はジョブサマリーにあります（直すか、理由を書いて除外する: docs/dev-environment.md の「セキュリティスキャン（security-scan）」）"
+  exit 4
+fi
 if [[ "$count" != 0 ]]; then
   echo "::warning::$tool: 検出 $count 件（報告のみ）。一覧はジョブサマリーにあります"
 fi

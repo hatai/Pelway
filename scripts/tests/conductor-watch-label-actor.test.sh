@@ -85,7 +85,7 @@ print(json.dumps({"user": {"login": sys.argv[1]}, "created_at": sys.argv[2], **(
 EOF
 }
 
-jarr() { local IFS=,; printf '[%s]' "$*"; }
+jarr() { local out="" x; for x in "$@"; do out+="${out:+,}$x"; done; printf '[%s]' "$out"; }
 
 start_watch() {
   MOCK="$MOCK" SLEEP_MAX="${SLEEP_MAX:-}" MOCK_EVENTS_FAIL="${MOCK_EVENTS_FAIL:-}" \

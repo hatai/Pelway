@@ -116,6 +116,35 @@ rm -rf "$REPO/src/impl.txt"
 mv "$ROOT/impl.txt.bak" "$REPO/src/impl.txt"
 git -C "$REPO" add src/impl.txt
 
+# ref 側で重ねる先の親が作業ツリーの外を指す symlink なら、3 で止め、外のファイルを消しも書き換えもしない。
+# ref symref では tests が $ROOT/outside への symlink になっている（作業ツリーでは通常のディレクトリ）。
+mkdir -p "$ROOT/outside"
+printf 'outside-original\n' >"$ROOT/outside/check.txt"
+git clone -q "$REPO" "$ROOT/clone"
+git -C "$ROOT/clone" config user.name test
+git -C "$ROOT/clone" config user.email test@example.invalid
+git -C "$ROOT/clone" config commit.gpgsign false
+git -C "$ROOT/clone" checkout -q old
+rm -rf "$ROOT/clone/tests"
+ln -s "$ROOT/outside" "$ROOT/clone/tests"
+git -C "$ROOT/clone" add -A
+git -C "$ROOT/clone" commit -q -m symlinked-parent
+git -C "$ROOT/clone" push -q origin HEAD:refs/tags/symref
+for k in tests/check.txt tests/sub/new.txt; do
+  printf 'outside-original\n' >"$ROOT/outside/check.txt"
+  rm -rf "$ROOT/outside/sub"
+  mkdir -p "$REPO/tests/sub"
+  printf 'new\n' >"$REPO/tests/sub/new.txt"
+  run "symlink_parent_${k//[^a-z]/_}" symref --keep "$k" -- sh -c 'pwd >"$1"; echo ran' _ "$ROOT/symlink_parent.wt"
+  [[ "$RC" == 3 ]] || failures+=("$CASE: exit $RC, want 3")
+  ! grep -qxF ran "$OUT" || failures+=("$CASE: command ran despite the symlinked parent")
+  [[ "$(cat "$ROOT/outside/check.txt" 2>/dev/null)" == outside-original ]] || failures+=("$CASE: file outside the worktree was changed or removed")
+  [[ ! -e "$ROOT/outside/sub" ]] || failures+=("$CASE: directory created outside the worktree")
+  n="$(git -C "$REPO" worktree list --porcelain | grep -c '^worktree ')"
+  [[ "$n" == 1 ]] || failures+=("$CASE: $n worktrees registered after run, want 1")
+  rm -rf "$REPO/tests/sub"
+done
+
 if ((${#failures[@]})); then
   printf 'FAIL %s\n' "${failures[@]}"
   exit 1

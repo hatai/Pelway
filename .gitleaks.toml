@@ -1,0 +1,58 @@
+# gitleaks の設定（security-scan workflow。方針は docs/dev-environment.md の「セキュリティスキャン（security-scan）」）。
+# gitleaks は走査するディレクトリの .gitleaks.toml を読む。規則は組み込みの既定をそのまま使い、
+# ここでは除外（allowlist）だけを足す。
+#
+# 除外は 1 つずつ、次の 3 つをすべて満たすものだけを許す（condition = "AND"）:
+#   - targetRules: その値を検出した規則
+#   - paths:       そのダミー値を置いたファイル（^…$ で 1 ファイルずつ）
+#   - regexes:     既知のダミー値そのもの（^…$ で値全体。検出された値 = Secret に当てる）
+# 行番号を使わないため、ファイルの行がずれても CI は落ちない。同じファイルの別の値は除外されない。
+# 直前のコメントに、その値が秘密でない理由を書く。値の形（桁数・文字種）だけの除外は書かない。
+
+[extend]
+useDefault = true
+
+# agent-gh のテストの合成のダミー鍵（本体の行は MIIBfake…）。本物の鍵ではない。
+# ソースでは $'…' の中に書くため、検出された値の改行は \n の 2 文字になる。
+[[allowlists]]
+description = "agent-gh のテストの合成のダミー PEM"
+targetRules = ["private-key"]
+condition = "AND"
+paths = ['''^scripts/tests/agent-gh\.test\.sh$''']
+regexes = ['''^-----BEGIN PRIVATE KEY-----\\nMIIBfakeKEYbodyLINEone1234\\nMIIBfakeKEYbodyLINEtwo5678\\n-----END PRIVATE KEY-----$''']
+
+# 契約テストの JSON の idempotency_key の例の値（UUID の先頭 3 組だけの固定値）。秘密ではない。
+[[allowlists]]
+description = "契約テストの idempotency_key の例の値"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^crates/pelway-contract/tests/serde_contract\.rs$''']
+regexes = ['''^3f1c2a9e-7b4d-4e21$''']
+
+# 技術文書の保存記録（削除済み）の JSON にある、04-data-api-realtime.md の 2 つの版の SHA-256。
+# キーのファイル名に api を含むため generic-api-key に当たる。秘密ではない。
+[[allowlists]]
+description = "docs/technical/v0.7 の保存記録の 04-data-api-realtime.md の SHA-256"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = [
+  '''^docs/technical/v0\.7/sources/addenda/2026-11-09-best-effort-cancel/baseline-preservation\.json$''',
+  '''^docs/technical/v0\.7/sources/addenda/2026-11-09-secrecy/operational-defaults-preservation-v0\.1\.json$''',
+  '''^docs/technical/v0\.7/sources/addenda/2026-11-09-secrecy/preservation-v0\.2\.json$''',
+  '''^docs/technical/v0\.7/sources/v0\.6/verification/delivery-hashes\.json$''',
+  '''^docs/technical/v0\.7/sources/v0\.6/verification/v0\.6-dependencies-manifest\.json$''',
+  '''^docs/technical/v0\.7/sources/v0\.6/verification/v0\.6-manifest\.json$''',
+  '''^docs/technical/v0\.7/verification/source-preservation\.json$''',
+]
+regexes = [
+  '''^675aa8ac486490744fed2aa98e89bda05f39f6d274edb870f6f4053e7211f842$''',
+  '''^b4f0fcab9a1219d7cf8349facbb42b40a953a06b521b37ed607ccb111202c078$''',
+]
+
+# RFC 6455 の 1.3 節の例のハンドシェイクの Sec-WebSocket-Key（例の固定値）。秘密ではない。
+[[allowlists]]
+description = "websocket-engineer スキルの RFC 6455 の例の Sec-WebSocket-Key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^\.agents/skills/websocket-engineer/references/protocol\.md$''']
+regexes = ['''^x3JJHMbDL1EzLkh9GBhXDw==$''']

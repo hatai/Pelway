@@ -1,19 +1,18 @@
 {
-  "action": "created",
-  "comment": {
-    "body": "COMMENT-BODY-MUST-NOT-APPEAR",
-    "author_association": "COLLABORATOR",
-    "user": { "login": "example-commenter" }
-  },
+  "action": "synchronize",
+  "number": 42,
+  "before": "1111111111111111111111111111111111111111",
+  "after": "8888888888888888888888888888888888888888",
   "pull_request": {
     "number": 42,
     "merged": false,
     "title": "PR-TITLE-MUST-NOT-APPEAR",
     "body": "PR-BODY-MUST-NOT-APPEAR",
+    "labels": [{ "name": "LABEL-MUST-NOT-APPEAR" }],
     "user": { "login": "example-user" },
     "head": {
       "ref": "feature/demo",
-      "sha": "1111111111111111111111111111111111111111",
+      "sha": "8888888888888888888888888888888888888888",
       "repo": { "full_name": "example-org/pelway" }
     },
     "base": {
@@ -23,5 +22,5 @@
     }
   },
   "repository": { "full_name": "example-org/pelway" },
-  "sender": { "login": "example-commenter" }
+  "sender": { "login": "pelway-dev[bot]" }
 }

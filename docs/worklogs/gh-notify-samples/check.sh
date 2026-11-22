@@ -4,13 +4,16 @@
 #
 # このディレクトリの見本 payload（github.event 相当・架空値）ごとに、workflow と
 # 同じ判定・同じ env 名・同じ jq の組み立てを実行し、次を確かめる:
-#   1. ゲート判定: 送るべきイベントは "send"、送らないイベント（外部投稿者の
-#      コメント・fork 由来）は "skip" になること
-#   2. 送るイベントの JSON: キーが指示の 13 個だけであること
+#   1. ゲート判定: 送るべきイベントは "send"、送らないイベント（fork 由来）は
+#      "skip" になること。synchronize で同じ head sha の送信済み run がある
+#      （dedup.duplicate=true 相当）ときも "skip" になること
+#   2. 送るイベントの JSON: キーが指示の 14 個だけであること
 #   3. タイトル・本文等のテキスト（*-MUST-NOT-APPEAR マーカー）が混入していないこと
-#   4. イベントごとの期待値（null の扱い、run_url の切り替え等）が合っていること
+#   4. イベントごとの期待値（urgency・null の扱い、run_url の切り替え等）が合っていること
 #   5. workflow 自体が issue_comment trigger を持たず、concurrency が実行ごとの
-#      別グループ（cancel-in-progress: false）であること
+#      別グループ（cancel-in-progress: false）であり、pull_request の types が
+#      opened / ready_for_review / synchronize / closed であり、Send step が
+#      dedup 条件（steps.dedup.outputs.duplicate == 'true'）を参照すること
 #
 # 使い方: bash docs/worklogs/gh-notify-samples/check.sh
 set -euo pipefail
@@ -22,13 +25,23 @@ export GITHUB_SERVER_URL="https://github.com"
 export GITHUB_REPOSITORY="example-org/pelway"
 export GITHUB_RUN_ID="123456789"
 
-# webhook payload に許されるキーはこの 13 個だけ。
-expected_keys="action,actor,conclusion,event,head_branch,head_sha,merged,occurred_at,pr_number,repo,run_url,schema,workflow_name"
+# webhook payload に許されるキーはこの 14 個だけ。
+expected_keys="action,actor,conclusion,event,head_branch,head_sha,merged,occurred_at,pr_number,repo,run_url,schema,urgency,workflow_name"
 
-# --- workflow "Send notification" step の jq 部分の逐語コピー（ここから） ---
+# --- workflow "Send notification" step の urgency 判定と jq 部分の逐語コピー（ここから） ---
 build_payload() {
+  # digest（まとめにだけ反映）: verify の成功・Approve のレビュー・
+  # PR への push（synchronize）。それ以外は immediate。
+  urgency="immediate"
+  if { [ "$EVENT" = workflow_run ] && [ "${CONCLUSION:-}" = success ]; } \
+    || { [ "$EVENT" = pull_request_review ] && [ "${REVIEW_STATE:-}" = approved ]; } \
+    || { [ "$EVENT" = pull_request ] && [ "${ACTION:-}" = synchronize ]; }; then
+    urgency="digest"
+  fi
+
   jq -n \
-    --arg schema "pelway.github-notify/v1" \
+    --arg schema "pelway.github-notify/v2" \
+    --arg urgency "$urgency" \
     --arg repo "$REPO" \
     --arg event "$EVENT" \
     --arg action "${ACTION:-}" \
@@ -43,6 +56,7 @@ build_payload() {
     --arg occurred_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{
       schema: $schema,
+      urgency: $urgency,
       repo: $repo,
       event: $event,
       action: (if $action == "" then null else $action end),
@@ -61,35 +75,40 @@ build_payload() {
 
 # --- workflow のゲート判定と同じ対応で "send" / "skip" を返す ---
 # 対応関係（いずれも run: への ${{ }} 書き込みなし・if:/env 相当の再現）:
-#   1. gate step     : pull_request / pull_request_review /
-#                      pull_request_review_comment / workflow_run は
+#   1. gate step     : pull_request / pull_request_review / workflow_run は
 #                      HEAD_REPO（= pull_request.head.repo.full_name または
 #                      workflow_run.head_repository.full_name）が
 #                      GITHUB_REPOSITORY と違えば fork として送らない
-#   2. COMMENT_ALLOWED(job env 式) + Send step if: コメント系2イベントは
+#   2. COMMENT_ALLOWED(job env 式) + Send step if: pull_request_review は
 #                      投稿者の author_association が OWNER / MEMBER /
 #                      COLLABORATOR のいずれかのときだけ送る
-#                      （19:13 訂正: github-actions[bot] 例外なし）
+#                      （ボット例外なし）
+#   3. dedup（Check duplicate notification step + Send step if）:
+#                      synchronize で、同じ PR・同じ head sha を送った過去
+#                      run があるときは送らない（第3引数 dup=true で再現）。
+#                      dedup は過去 run の送信を step 名 "Send notification" で
+#                      照合するため、workflow の Send step 名を変えるときは
+#                      dedup step の照合文字列も合わせること
 gate_decision() {
-  local ev="$1" event_name="$2"
-  local head_repo assoc
-  local should_send=true comment_allowed=true
+  local ev="$1" event_name="$2" dup="${3:-false}"
+  local head_repo assoc action
+  local should_send=true comment_allowed=true dedup_ok=true
 
   # gate step の fork 判定（HEAD_REPO != GITHUB_REPOSITORY）
   head_repo="$(jq -r '.pull_request.head.repo.full_name // .workflow_run.head_repository.full_name // empty' <<<"$ev")"
   case "$event_name" in
-    pull_request|pull_request_review|pull_request_review_comment|workflow_run)
+    pull_request|pull_request_review|workflow_run)
       if [ "$head_repo" != "$GITHUB_REPOSITORY" ]; then
         should_send=false
       fi
       ;;
   esac
 
-  # COMMENT_ALLOWED 式のコメント系2イベントの投稿者判定
+  # COMMENT_ALLOWED 式の pull_request_review 投稿者判定
   # （author_association が OWNER / MEMBER / COLLABORATOR のいずれかのみ）
   case "$event_name" in
-    pull_request_review|pull_request_review_comment)
-      assoc="$(jq -r '.comment.author_association // .review.author_association // empty' <<<"$ev")"
+    pull_request_review)
+      assoc="$(jq -r '.review.author_association // empty' <<<"$ev")"
       case "$assoc" in
         OWNER|MEMBER|COLLABORATOR) ;;
         *) comment_allowed=false ;;
@@ -97,7 +116,16 @@ gate_decision() {
       ;;
   esac
 
-  if [ "$should_send" = true ] && [ "$comment_allowed" = true ]; then
+  # Send step の dedup 条件（Check duplicate notification step の出力に相当）:
+  #   synchronize で、同じ PR・同じ head sha を送った過去 run がある
+  #   （dup=true に相当）は送らない。synchronize 以外の action は dedup を
+  #   参照しない（workflow は dedup step を synchronize でだけ動かす）
+  action="$(jq -r '.action // empty' <<<"$ev")"
+  if [ "$action" = synchronize ] && [ "$dup" = true ]; then
+    dedup_ok=false
+  fi
+
+  if [ "$should_send" = true ] && [ "$comment_allowed" = true ] && [ "$dedup_ok" = true ]; then
     echo send
   else
     echo skip
@@ -105,8 +133,8 @@ gate_decision() {
 }
 
 check_gate() {
-  local file="$1" event_name="$2" want="$3" got
-  got="$(gate_decision "$(cat "$samples_dir/$file")" "$event_name")"
+  local file="$1" event_name="$2" want="$3" dup="${4:-false}" got
+  got="$(gate_decision "$(cat "$samples_dir/$file")" "$event_name" "$dup")"
   if [ "$got" != "$want" ]; then
     echo "FAIL $file: gate decision is $got, want $want"
     return 1
@@ -125,6 +153,7 @@ check_gate() {
 #   CONCLUSION   <- workflow_run.conclusion
 #   WORKFLOW_NAME<- workflow_run.name
 #   RUN_URL      <- workflow_run.html_url
+#   REVIEW_STATE <- github.event.review.state
 #   ACTOR        <- github.actor（= sender.login）
 load_env_from_event() {
   local ev="$1" event_name="$2"
@@ -142,8 +171,9 @@ load_env_from_event() {
   CONCLUSION="$(jq -r '.workflow_run.conclusion // empty' <<<"$ev")"
   WORKFLOW_NAME="$(jq -r '.workflow_run.name // empty' <<<"$ev")"
   RUN_URL="$(jq -r '.workflow_run.html_url // empty' <<<"$ev")"
+  REVIEW_STATE="$(jq -r '.review.state // empty' <<<"$ev")"
   ACTOR="$(jq -r '.sender.login // empty' <<<"$ev")"
-  export REPO EVENT ACTION PR_NUMBER HEAD_BRANCH HEAD_SHA MERGED CONCLUSION WORKFLOW_NAME RUN_URL ACTOR
+  export REPO EVENT ACTION PR_NUMBER HEAD_BRANCH HEAD_SHA MERGED CONCLUSION WORKFLOW_NAME RUN_URL REVIEW_STATE ACTOR
 }
 
 run_sample() {
@@ -154,19 +184,19 @@ run_sample() {
   load_env_from_event "$ev" "$event_name"
   payload="$(build_payload)"
 
-  # 1) キーが 13 個だけ
+  # 1) キーが 14 個だけ
   keys="$(jq -r 'keys | join(",")' <<<"$payload")"
   if [ "$keys" != "$expected_keys" ]; then
     echo "FAIL $file: keys are [$keys]"
     return 1
   fi
-  # 2) ペイロード本文（タイトル・本文等）の混入なし
+  # 2) ペイロード本文（タイトル・本文・ラベル等）の混入なし
   if grep -q 'MUST-NOT-APPEAR' <<<"$payload"; then
     echo "FAIL $file: sensitive payload text leaked into the notification"
     return 1
   fi
   # 3-1) 共通の固定値
-  if ! jq -e '.schema == "pelway.github-notify/v1"' <<<"$payload" >/dev/null; then
+  if ! jq -e '.schema == "pelway.github-notify/v2"' <<<"$payload" >/dev/null; then
     echo "FAIL $file: wrong schema"
     return 1
   fi
@@ -192,8 +222,11 @@ main() {
   local own_run_url="https://github.com/example-org/pelway/actions/runs/123456789"
   local workflow_file="$samples_dir/../../../.github/workflows/notify-grokbot.yml"
 
-  # --- workflow 自体の検査: issue_comment trigger を持たないことと、
-  #     concurrency が実行ごとの別グループ（cancel しない）であること ---
+  # --- workflow 自体の検査: issue_comment trigger を持たないこと、
+  #     concurrency が実行ごとの別グループ（cancel しない）であること、
+  #     Send step が dedup 条件を参照すること、
+  #     pull_request の types が #481 の 4 種であること ---
+  # shellcheck disable=SC2016 # ${{ }} は workflow 内のリテラル文字列を grep -F で探すため意図的に単一引用符
   if grep -n 'issue_comment' "$workflow_file"; then
     echo "FAIL notify-grokbot.yml still contains issue_comment"
     failures=$((failures + 1))
@@ -203,50 +236,91 @@ main() {
   elif ! grep -qF 'cancel-in-progress: false' "$workflow_file"; then
     echo "FAIL notify-grokbot.yml: cancel-in-progress is not false"
     failures=$((failures + 1))
+  elif ! grep -qF "steps.dedup.outputs.duplicate == 'true'" "$workflow_file"; then
+    echo "FAIL notify-grokbot.yml: Send step does not reference the dedup gate (steps.dedup.outputs.duplicate)"
+    failures=$((failures + 1))
   else
-    echo "PASS notify-grokbot.yml (no issue_comment / per-run concurrency without cancel)"
+    echo "PASS notify-grokbot.yml (no issue_comment / per-run concurrency without cancel / dedup gate wired)"
   fi
 
-  # --- ゲート判定: 全8サンプル。6件は送る、2件（fork×2）は送らない ---
+  # pull_request の types 一覧（`  pull_request:` ブロック内の `- <type>` 行だけ
+  # 取り、末尾コメントを除いてソート済みのカンマ区切りにする）。
+  pr_types="$(awk '
+    /^  pull_request:$/ { in_pr = 1; next }
+    in_pr && /^  [a-z_]+:/ { in_pr = 0 }
+    in_pr && /^ *- / {
+      line = $0
+      sub(/^ *- */, "", line)
+      sub(/ *#.*$/, "", line)
+      sub(/ *$/, "", line)
+      print line
+    }
+  ' "$workflow_file" | sort | paste -sd, -)"
+  if [ "$pr_types" != "closed,opened,ready_for_review,synchronize" ]; then
+    echo "FAIL notify-grokbot.yml: pull_request types are [$pr_types], want [closed,opened,ready_for_review,synchronize]"
+    failures=$((failures + 1))
+  else
+    echo "PASS notify-grokbot.yml (pull_request types: opened/ready_for_review/synchronize/closed)"
+  fi
+
+  # --- ゲート判定: 11件。8件は送る、3件（fork×2・dedup した synchronize）は
+  #     送らない ---
   check_gate pull_request.opened.json pull_request send || failures=$((failures + 1))
+  check_gate pull_request.ready_for_review.json pull_request send || failures=$((failures + 1))
+  check_gate pull_request.synchronize.json pull_request send || failures=$((failures + 1))
+  # 同じ head sha を送った過去 run がある（dup=true 相当）synchronize は送らない。
+  # opened は dedup を参照しないため、dup=true でも送る。
+  check_gate pull_request.synchronize.json pull_request skip true || failures=$((failures + 1))
+  check_gate pull_request.opened.json pull_request send true || failures=$((failures + 1))
   check_gate pull_request.closed-merged.json pull_request send || failures=$((failures + 1))
   check_gate pull_request_review.submitted.json pull_request_review send || failures=$((failures + 1))
-  check_gate pull_request_review_comment.created.json pull_request_review_comment send || failures=$((failures + 1))
   check_gate workflow_run.completed.json workflow_run send || failures=$((failures + 1))
   check_gate workflow_dispatch.json workflow_dispatch send || failures=$((failures + 1))
   check_gate pull_request.opened-fork.json pull_request skip || failures=$((failures + 1))
   check_gate workflow_run.completed-fork.json workflow_run skip || failures=$((failures + 1))
 
-  # --- payload 組立（送る判定になる6サンプルのみ。送らない2件は workflow でも
+  # --- payload 組立（送る判定になる7サンプルのみ。送らない2件は workflow でも
   #     Send step の if: が false になり jq までは来ない） ---
   run_sample pull_request.opened.json pull_request \
-    'action=opened' 'pr_number=42' 'head_branch=feature/demo' \
+    'event=pull_request' 'action=opened' 'urgency=immediate' 'pr_number=42' \
+    'head_branch=feature/demo' \
     'head_sha=1111111111111111111111111111111111111111' \
     'merged=false' 'conclusion=null' 'workflow_name=null' \
     "run_url=$own_run_url" 'actor=example-user' || failures=$((failures + 1))
+  run_sample pull_request.ready_for_review.json pull_request \
+    'event=pull_request' 'action=ready_for_review' 'urgency=immediate' \
+    'pr_number=44' 'head_branch=feature/demo' \
+    'head_sha=7777777777777777777777777777777777777777' \
+    'merged=false' 'conclusion=null' 'workflow_name=null' \
+    "run_url=$own_run_url" 'actor=example-user' || failures=$((failures + 1))
+  run_sample pull_request.synchronize.json pull_request \
+    'event=pull_request' 'action=synchronize' 'urgency=digest' 'pr_number=42' \
+    'head_branch=feature/demo' \
+    'head_sha=8888888888888888888888888888888888888888' \
+    'merged=false' 'conclusion=null' 'workflow_name=null' \
+    "run_url=$own_run_url" 'actor=pelway-dev[bot]' || failures=$((failures + 1))
   run_sample pull_request.closed-merged.json pull_request \
-    'action=closed' 'pr_number=42' 'head_branch=feature/demo' \
+    'event=pull_request' 'action=closed' 'urgency=immediate' 'pr_number=42' \
+    'head_branch=feature/demo' \
     'head_sha=3333333333333333333333333333333333333333' \
     'merged=true' 'conclusion=null' 'workflow_name=null' \
     "run_url=$own_run_url" 'actor=example-user' || failures=$((failures + 1))
   run_sample pull_request_review.submitted.json pull_request_review \
-    'action=submitted' 'pr_number=42' 'head_branch=feature/demo' \
+    'event=pull_request_review' 'action=submitted' 'urgency=digest' 'pr_number=42' \
+    'head_branch=feature/demo' \
     'head_sha=1111111111111111111111111111111111111111' \
     'merged=false' 'conclusion=null' 'workflow_name=null' \
     "run_url=$own_run_url" 'actor=example-reviewer' || failures=$((failures + 1))
-  run_sample pull_request_review_comment.created.json pull_request_review_comment \
-    'action=created' 'pr_number=42' 'head_branch=feature/demo' \
-    'head_sha=1111111111111111111111111111111111111111' \
-    'merged=false' 'conclusion=null' 'workflow_name=null' \
-    "run_url=$own_run_url" 'actor=example-commenter' || failures=$((failures + 1))
   run_sample workflow_run.completed.json workflow_run \
-    'action=completed' 'pr_number=42' 'head_branch=feature/demo' \
+    'event=workflow_run' 'action=completed' 'urgency=digest' 'pr_number=42' \
+    'head_branch=feature/demo' \
     'head_sha=4444444444444444444444444444444444444444' \
     'merged=null' 'conclusion=success' 'workflow_name=verify' \
     'run_url=https://github.com/example-org/pelway/actions/runs/9999999999' \
     'actor=example-user' || failures=$((failures + 1))
   run_sample workflow_dispatch.json workflow_dispatch \
-    'event=test' 'action=null' 'pr_number=null' 'head_branch=null' 'head_sha=null' \
+    'event=test' 'action=null' 'urgency=immediate' 'pr_number=null' \
+    'head_branch=null' 'head_sha=null' \
     'merged=null' 'conclusion=null' 'workflow_name=null' \
     "run_url=$own_run_url" 'actor=example-admin' || failures=$((failures + 1))
 
@@ -254,7 +328,7 @@ main() {
     echo "$failures check(s) FAILED"
     exit 1
   fi
-  echo "all checks passed (workflow static + 8 gate decisions + 6 payload assemblies)"
+  echo "all checks passed (workflow static + 11 gate decisions + 7 payload assemblies)"
 }
 
 main "$@"
