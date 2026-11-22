@@ -158,3 +158,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - `mcp:57618b05` が run 3（02:08Z・未回収の子タスク結果を読んで delivered 化＋棚卸し・GitHub 副作用なし）。約 2.5 分間隔での反復起床 → 独自 scheduled task の可能性が強い。hatai の UI settle 要請を継続
 - その他変化なし（#631 QA 実行中・#610 引き継ぎ稼働中・#586/#587 結果待ち）
+
+## 巡回記録（patrol 17・11:36 JST・スケジュール）
+
+- #610: 引き継ぎスレッド 2e87e67b が新 head `4523e1c7` を push（draft・例外ラベル未付与）
+- #631: `2cd790bb`・MERGEABLE・pending は octocov のみ（verify 完了）・QA 委託実行中
+- caa0ff74（旧 #602 impl）が 1 run 実行後 completed — 引き継ぎ後の後片付けと判断
+- #586/#587: 結果未着
