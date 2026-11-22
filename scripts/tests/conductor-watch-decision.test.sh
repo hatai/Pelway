@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # scripts/conductor-watch.sh の needs-decision の 15 分の検知（DECISION overdue）と、指揮役が動いていないときの
-# needs-human への格上げ（Issue #602）のテスト。モックの agent-gh が GitHub の状態（ラベル・Issue ごとのイベント・コメント）を
-# $MOCK/gh.json に持ち、書き込み（issue comment・issue edit）の引数を $MOCK/calls に、Issue ごとの読み取りの path を
-# $MOCK/reads に順に記録する。読み取りの間のほかの誰かの変更は on_read で差し込む。モックの t3 がスレッドの一覧を返す。
+# needs-human への格上げ（Issue #602）のテスト。モックの agent-gh が GitHub の状態を $MOCK/gh.json に持ち、書き込みの引数を
+# $MOCK/calls に、読み取りの path を $MOCK/reads に記録する。読み取りの間の変更は on_read で差し込む。モックの t3 が一覧を返す。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -21,8 +20,7 @@ REG="$ROOT/conductor-thread-id"
 CONDUCTOR="conductor-thread-7f3a"
 
 # モックの agent-gh。$MOCK/fail-<events|reread|comment|edit-add|edit-remove> があると、その呼び出しは失敗する。-lost の付く
-# ものはラベルを変えてから失敗を返し（応答が失われた）、fail-edit-add-crash は付けた直後に見張りを止める。ラベルが実際に変わった
-# ときだけ GitHub と同じく pelway-dev[bot] の名義のイベントを残し、イベントには古い順に増える ID を付けて返す。
+# ものはラベルを変えてから失敗を返し（応答が失われた）、fail-edit-add-crash は付けた直後に見張りを止める。ラベルが変わったときだけ pelway-dev[bot] 名義のイベント（増える ID 付き）を残す。
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env python3
 import json, os, re, sys, time
@@ -118,8 +116,7 @@ exec(code)
 json.dump(st, open(p, "w"))
 EOF
 }
-# issue_with <番号> <labeled_at> <ラベル...> — 開いた Issue を置く。イベントは 2 ページで、古い付け外し（labeled_at
-# より前の needs-human の解除を含む）と labeled_at の後の別のラベルを混ぜる（最新の needs-decision の labeled だけが起点になる）。
+# issue_with <番号> <labeled_at> <ラベル...> — 開いた Issue を置く。イベントは 2 ページで、古い付け外し（labeled_at より前の needs-human の解除を含む）と後の別ラベルを混ぜる。
 issue_with() {
   gh_edit '
 from datetime import datetime, timedelta

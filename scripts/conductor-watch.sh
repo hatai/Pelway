@@ -56,8 +56,7 @@ if [[ -z "$T3_BIN" ]]; then
   done
 fi
 while true; do
-  # 取得に失敗したらファイルを消す（空の実状態と区別する）。python 側では、T3 の一覧の失敗ではスレッドの状態を前回のまま保ち
-  # 格上げを判定しない。Issue・PR の一覧の失敗では patrol-state.json を書き換えない（Issue の一覧なら DECISION の検知もしない）。
+  # 取得に失敗したらファイルを消す（空の実状態と区別する）。T3 の失敗はスレッドを前回のまま・格上げは判定せず、Issue・PR の失敗は patrol-state.json を書き換えない（Issue なら DECISION の検知もしない）
   "$T3_BIN" thread list --json > "$D/threads.json" 2>/dev/null || rm -f "$D/threads.json"
   scripts/agent-gh dev issue list --state all --limit "$IL" --json number,state,labels > "$D/issues.json" 2>/dev/null || rm -f "$D/issues.json"
   scripts/agent-gh dev pr list --state all --limit "$PL" --json number,state,isDraft,headRefName,reviewDecision,statusCheckRollup > "$D/prs.json" 2>/dev/null || rm -f "$D/prs.json"
@@ -162,8 +161,7 @@ if not isinstance(levs, list): levs = None
 if levs is not None:
     comments_cache = {}
     def human_backed(num, t, skip_mark=None):
-        # num の Issue・PR のコメントを取得し、t の前 LABEL_BACKUP_HOURS 時間〜t の間の hatai 本人のコメント
-        # （指示の記録。skip_mark を含むものは数えない）を探す。取得失敗は None（判定の延期）
+        # num の Issue・PR のコメントから t の前 LABEL_BACKUP_HOURS 時間〜t の hatai のコメント（指示の記録。skip_mark 以外）を探す。取得失敗は None（判定の延期）
         if num not in comments_cache:
             cs = gh_json("api", f"/repos/hatai/Pelway/issues/{num}/comments?per_page=100&sort=created&direction=desc")
             comments_cache[num] = cs if isinstance(cs, list) else None
@@ -202,8 +200,7 @@ if levs is not None:
     else:
         done.update(e.get("id") for e in levs if isinstance(e, dict))
     cur["label_seen"] = [e.get("id") for e in levs if isinstance(e, dict) and e.get("id") in done]
-# needs-decision（実装担当が止まったときに付けるラベル。Issue #603）が最新の labeled から DECISION_SECS たっても外れない Issue を
-# DECISION overdue の行で知らせ（同じ labeled_at につき 1 回）、指揮役が動いていなければ needs-human に格上げする（Issue #602）。
+# needs-decision（実装担当の停止の印。#603）が最新の labeled から DECISION_SECS たっても外れない Issue を DECISION overdue で知らせ（同じ labeled_at に 1 回）、指揮役が動いていなければ needs-human に格上げする（#602）
 DECISION_SECS = 15 * 60
 ESCALATION_MARK = "<!-- conductor-watch-escalation -->"
 ESCALATION_AUTHOR = "pelway-dev[bot]"
@@ -220,9 +217,8 @@ def all_pages(path):  # --paginate --slurp の応答（ページの配列）を 
     if not isinstance(data, list) or not all(isinstance(p, list) for p in data): return None
     return [x for p in data for x in p if isinstance(x, dict)]
 def registered_thread():
-    # 登録ファイルの 1 行目（スレッド ID）。無い・空・通常のファイルでない（symlink はたどらず、FIFO で止まらない）ときは ""、ほかの理由で
-    # 読めない（権限が無い・自分の所有でない）ときは None（判定の保留）。O_NOFOLLOW|O_NONBLOCK で開き fd で種類と所有者を見る・1 行目を trim するのは
-    # crates/pelway-agent-watch の read_conductor_file・parse_conductor_file と同じ。違うのは、通常のファイルでないものを Err でなく不在とし、不正な UTF-8 を置き換えて読むこと
+    # 登録ファイルの 1 行目（スレッド ID）。無い・空・通常のファイルでない（symlink・FIFO）ときは ""、ほかの理由で読めないときは None（判定の保留）。
+    # O_NOFOLLOW|O_NONBLOCK と fd での種類・所有者の確認・1 行目の trim は pelway-agent-watch の read_conductor_file と同じ（通常でないファイルを不在・UTF-8 を置き換えて読む点だけ違う）
     p = sys.argv[5]
     try:
         fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -252,8 +248,7 @@ def open_labeling(evs):  # needs-decision の今の付与の時刻。最後の�
     last = (label_events(evs, "needs-decision") or [{}])[-1]
     return last.get("created_at") if last.get("event") == "labeled" and iso(last.get("created_at")) else None
 def escalate(n, lt, reason):
-    # 3 段（通知 → needs-human を付ける → needs-decision を外す）の決まりは runbook の「指揮役の定期巡回（スケジュール起床）」の
-    # 格上げの項。各段は記録と書く直前の読み直し（events・Issue・events）だけで決め、読み取りに失敗した周は書かない
+    # 3 段（通知 → needs-human の付与 → needs-decision の解除）は runbook の格上げの項どおり。各段は記録と書く直前の読み直し（events・Issue・events）だけで決め、読み取りに失敗した周は書かない
     body = (f"{ESCALATION_MARK}\n@hatai `needs-decision` が付いた時刻 {lt} から 15 分決まらず、"
             "指揮役が動いていないため `needs-human` に替えました。")
     steps = {None: ("comment", ["issue", "comment", n, "--body-file", "-"], None, "commented"),
@@ -315,10 +310,9 @@ if issues is not None:
         if lt is None: continue  # 取得失敗・イベントが見つからない: 遅れとは扱わず、次の周で取り直す
         old = esc.get(n)
         if old and old.get("labeled_at") != lt:
-            # 前の labeled_at の途中の記録: 新しい付与が開いているので前の付与の解除は確定。
-            # 見張りの格上げ（added）なら完了を 1 回報告してから、新しい付与の記録に替える
+            # 前の labeled_at の途中の記録: 新しい付与が開いているので前の付与の解除は確定。added なら完了を 1 回報告してから替える
             if old.get("stage") == "added":
-                print(f"DECISION escalated #{n} labeled_at={old.get('labeled_at')} reason={old.get('reason') or reason or 'resumed'}", flush=True)
+                print(f"DECISION escalated #{n} labeled_at={old.get('labeled_at')} reason={old.get('reason') or reason}", flush=True)
             del esc[n]; store()
         if last_event(label_events(evs, "needs-human")) == "labeled": late_human.add(n)  # 補助記録も人間待ちにする
         if not human and n not in late_human: decision_at[n] = lt
@@ -328,8 +322,7 @@ if issues is not None:
         if not human and not gone and cur["decision_warned"].get(n) != lt: print(f"DECISION overdue #{n} labeled_at={lt}", flush=True); cur["decision_warned"][n] = lt
         if reason: escalate(n, lt, reason)
     # 一覧から外れた Issue（閉じた・一覧の窓外）の通知済み時刻も残す。同じ labeled_at で再出現しても重複して知らせない
-    # 処理対象から外れた Issue に途中の記録があれば Issue ごとの状態で照合する（読むだけで書き込みはしない）。needs-decision が
-    # 外れていれば消す（完了の行は added のときだけ出す）。残っていれば閉じている・一覧の窓外でも残す。held の記録は読まずに残し、removed は消す
+    # 処理対象外の Issue に途中の記録があれば Issue の状態で照合する（読むだけ）。needs-decision が外れていれば消す（完了の行は added のときだけ）、残っていれば残す。held は読まずに残し、removed は消す
     keep = set(labeled)
     for n, r in esc.items():
         if n in keep: continue
@@ -340,7 +333,7 @@ if issues is not None:
         labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
         if "needs-decision" in labs: keep.add(n); continue
         if r.get("stage") == "added":
-            print(f"DECISION escalated #{n} labeled_at={r.get('labeled_at')} reason={r.get('reason') or reason or 'resumed'}", flush=True)
+            print(f"DECISION escalated #{n} labeled_at={r.get('labeled_at')} reason={r.get('reason') or reason}", flush=True)
     esc = {k: v for k, v in esc.items() if k in keep}; store()
 # 読み取りに失敗して空になったときは、前回の状態を残す（全スレッドを「新規」と誤報しない）。
 if prev is not None and not threads: cur["threads"] = prev["threads"]
