@@ -430,3 +430,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - failed 2件追加（2e87e67b #602・5fc0e3f5 #295）— Claude 制限の余波と推定
 - #600・#652 は kodiak キュー待ち継続
+
+## QA 結果処理（#530・20:15 JST）
+
+- **PR #530 QA: fail**（codex QA・head `f74b848a` 不変）。指摘: `check.sh` から削除した `pull_request_review_comment` 系テストの理由が PR 本文「確かめ方を弱める変更」に未記載 → 記載が必要。補足: workflow コメントの「1 回だけ」と実装の重複許容の食い違い
+- impl `5c599260` へ本文更新のみの指示を send（成功）。更新後に QA 再委託
