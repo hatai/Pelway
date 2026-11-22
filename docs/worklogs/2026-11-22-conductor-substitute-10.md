@@ -486,3 +486,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## QA 結果処理（#664・22:15 JST）
 
 - **PR #664 全条件充足 → automerge**: [QA pass@7d830907](https://github.com/hatai/Pelway/pull/664#issuecomment-7080847070)（必須チェック全 pass・受け入れ条件全 pass・弱化なし）・APPROVED@同 SHA → kodiak キューへ
+
+## QA 結果処理（#600・22:25 JST）
+
+- **PR #600 全条件充足 → automerge 再付与**: [QA pass@b3fe09fd](https://github.com/hatai/Pelway/pull/600#issuecomment-7080855006)（必須チェック全 pass・受け入れ条件全 pass・機能差分は旧 head と不変・弱化なし）・APPROVED@同 SHA → kodiak キューへ復帰
