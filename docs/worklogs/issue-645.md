@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「巡回から定型の指示を受けたとき」の 2 に残る「`pr-digest <PR 番号>` の `required` 行」を、手順 8 と同じく `required-checks` の終了コードに置き換える別 Issue を立てる（この Issue の受け入れ条件は手順 8 の 220 行だけを指すため触れていない）。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: 787b957c43da6f938a8681524e0a80f9ca39d50f
+
+1. 詰まった箇所: `.agents/skills/implement-issue/required-checks`: round 1 は `jq -e 'type == "array"'` で形を確かめていたため、標準出力に JSON の配列が 2 つ続くと各配列が通り、判定が 2 行になって `case` のどれにも当たらず終了コード 0 で抜けた（レビューの must-fix 1）。閉じる Issue も番号だけで照会していた（must-fix 2）。
+2. 曖昧だった文: 「PR が閉じる Issue に作成者 `hatai` で行頭が `<!-- pr-size-exception -->` のコメントがあれば」（Issue #645 の「受け入れ条件」）。閉じる Issue が別リポジトリにある場合をどう扱うかが書かれていない。
+3. 仮定と解釈: 閉じる Issue は `closingIssuesReferences` の `repository.owner.login`/`repository.name` と番号の組で `issue view -R` に渡し、リポジトリが読めない参照は 3（判定できない）にした。別リポジトリの Issue を一律に無視する解釈は選ばなかった（受け入れ条件は「PR が閉じる Issue」とだけ言うため）。判定の値が pass・fail・pending 以外なら、どんな形でも 3 で終わるように `case` の既定を die にした（同じ種類の取りこぼしを全経路で塞ぐ決まり）。
+4. 足りなかった情報・検証手段: `mise run verify` が今回 853.99s かかり、600 秒の制限を超えてバックグラウンドに回った。完了の通知を待って終了コード 0 を確かめた。
+5. 改善案: `.agents/skills/review-pr/SKILL.md` の手順 2 の pr-size の例外の段に「PR が閉じる Issue」の照会を `-R <owner>/<name>` 付きにする旨を足す別 Issue を立てる（レビュー担当側も番号だけで `issue view` している。この PR の対象外）。
+
+使ったスキル: implement-issue、write-pull-request
