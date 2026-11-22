@@ -331,3 +331,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **PR #600 全条件充足**: pelway-review APPROVED@3b5ead4a（投稿失敗3連続を経て gpt-6.2-sol medium で成功）・checks 全 pass・QA:pass@同 SHA → **Ready 化＋automerge**（kodiak キュー・本日 3 件目）
 - **PR #567**: r1 委託は verify 未出現で中断（#652 と同型）。CI 非待機を明示して r2 再起動
+
+## 巡回記録（patrol 47・16:20 JST・受信箱 wake）
+
+- 多数スレッド一括起床（hatai 操作と推定）: `dab971b2`(#306)・`16efc920`(#457)・`3f022128`(#490)・`5fc0e3f5`(#295)・`28d8f688`(#480)・`9c9657f9`(#615)・`5c599260`(#481) 等
+- **PR #464**: head が `bc04c41e` に変化 — kodiak がブランチを main 取り込み更新中（automerge 進行）。**PR #600**: キュー待ち・head 不変
+- `5c599260`（#481 must-fix）起床→waiting — #530 への push はまだ
