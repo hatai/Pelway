@@ -109,3 +109,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の格上げの項は 1 段落が長く、段・照合・指揮役がいる周の扱いが同じ段落に混ざっている。#603 で runbook を直すときに、段ごとの小見出しに分ける。
 
 使ったスキル: `implement-issue`
+
+## 実装者メモ（round 10）
+
+対象 head: 71f35e8d4814b1878ed4c55e0b97630878b5c4dc
+
+1. 詰まった箇所: `scripts/conductor-watch.sh` の補助記録（`waiting_on` の導出）は一覧のラベルだけを見るので、round 9 で `DECISION overdue` を抑えた「一覧の後に events で `needs-human` が付いた」周に、`grokbot` と 15 分の期限が残った（codex round 9 の must-fix）。その周に見えた Issue を `late_human` に入れ、補助記録でも `human` にした。追加 800 行の残りが無く、場面 1・6・11・16・30・34・36・38 の確認の対をまとめて空けた。
+2. 曖昧だった文: 「イベントで確認済みの `needs-human` を補助記録のラベル判定にも反映し、人間待ちの期限を使ってください」（PR #610 の codex round 9 の must-fix）。`labels`（補助記録の `labels` の値）にも `needs-human` を足すかが書かれていない。
+3. 仮定と解釈: `waiting_on`・`next_owner`・期限だけを `human` にし、記録する `labels` は一覧の値のままにした（次の周に一覧が追いつけば同じ結果になり、指揮役の `grokbot` を保つ判定の `labels` の比較を崩さない）。
+4. 足りなかった情報・検証手段: クローズの側（最初の events に `closed` が出る場合に `overdue` を出さない）は試験していない（claude round 9 の印の無い nit。行数の残りが無い）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の pr-size の行に「上限まで 20 行を切ったら、次の round のメモの行数を先に引いて余りを見積もる」を足す。
+
+使ったスキル: `implement-issue`
