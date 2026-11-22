@@ -142,7 +142,7 @@ threads() { printf '%s\n' "$1" > "$MOCK/threads.json"; }
 live_thread() { threads "[{\"threadId\":\"$CONDUCTOR\",\"title\":\"指揮役\",\"status\":\"idle\",\"archived\":${1:-false},\"createdBy\":\"user\"}]"; }
 reg() { printf '%s\n' "$1" > "$REG"; }
 
-reset() { rm -rf "$PELWAY" "$ROOT/state/pelway" "$MOCK"/* "$REG"; mkdir -p "$PELWAY"; : > "$ROOT/out.log"; live_thread; }
+reset() { rm -rf "$PELWAY" "$ROOT/state/pelway" "${MOCK:?}"/* "$REG"; mkdir -p "$PELWAY"; : > "$ROOT/out.log"; live_thread; }
 run_cycles() {
   echo 0 > "$MOCK/sleeps"
   MOCK="$MOCK" SLEEP_MAX="$1" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
