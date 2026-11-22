@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「手順 9」に「人間が『nit 対応、レビュー不要』と指示したときの must-fix の扱い（直す・直さない・報告だけ）」を 1 文足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: 676d2a02971ad09bad2b159ba384de9e201a6687
+
+1. 詰まった箇所: `scripts/red-check`: PR #599 のレビュー（Codex）の must-fix を直している途中で、PR #599 が main に取り込まれていた（`scripts/red-check origin/main --keep scripts/tests/agent-gh.test.sh -- ...` が ok になり、`pr view 599` の `state` が `MERGED` で気づいた）。修正は main から切った `agent/596-red-check-symlink` の別 PR にした。
+2. 曖昧だった文: 「修正依頼の場合は PR を作り直さない」（`.agents/skills/implement-issue/SKILL.md` 手順 7）。元の PR がマージされた後の修正にもこの文が及ぶかが書かれていない。
+3. 仮定と解釈: マージ済みの PR には push できないので、別 PR は「作り直し」に当たらないと解釈した。新しい PR は `scripts/agent-gh` を含まないため、手順 8 どおりにレビューを委託する（hatai が選んだ）。
+4. 足りなかった情報・検証手段: 修正中の PR がマージされたことを知らせる仕組みがなかった。`watch_pull_request` は手前で外していた（手を離すときの決まり）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「手順 9」の修正依頼の項に「push の前に `pr view <番号> --json state` で PR が開いていることを確かめる。マージ済みなら main から新しいブランチを切り、元の PR を本文で参照する」を足す。
+
+使ったスキル: implement-issue、grilling

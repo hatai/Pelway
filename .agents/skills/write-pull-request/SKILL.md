@@ -49,7 +49,7 @@ git diff <base>...HEAD
 scripts/agent-gh dev pr list --head <ブランチ名>
 ```
 
-- 既存がある → `scripts/agent-gh dev pr edit <番号> --body-file` で本文を更新し、タイトルは手順 3 の `api -X PATCH --input` で更新する。重複 PR を作らない。
+- 既存がある → `scripts/agent-gh dev pr edit <番号> --body-file` で本文を更新し、タイトルは手順 3 の `api --method PATCH --input` で更新する。重複 PR を作らない。
 - 無い → `scripts/agent-gh dev pr create --draft`。
 
 ### 3. タイトルを書く
@@ -66,10 +66,10 @@ scripts/agent-gh dev pr list --head <ブランチ名>
 cat > /tmp/opencode/pr-title.json <<'EOF'
 {"title": "<日本語タイトル>"}
 EOF
-scripts/agent-gh dev api -X PATCH /repos/hatai/Pelway/pulls/<PR 番号> --input /tmp/opencode/pr-title.json
+scripts/agent-gh dev api --method PATCH /repos/hatai/Pelway/pulls/<PR 番号> --input /tmp/opencode/pr-title.json
 ```
 
-- 既存 PR のタイトルを直すときも同じく `api -X PATCH --input` を使う。`pr edit --title` に日本語を渡さない。
+- 既存 PR のタイトルを直すときも同じく `api --method PATCH --input` を使う。`pr edit --title` に日本語を渡さない。
 
 ### 4. 本文を書く
 
