@@ -143,6 +143,15 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
     "task": "PR #<M> をレビューする。skill review-pr に従う。\nAssigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes"
   }
   ```
+- 再委託・遅延実行タスクの陳腐化ガード: レビュー・QA の再委託（同じ PR に 2 回目以降の委託を出すとき）と、遅延実行タスク（`schedule_task` などで、組んだ時点より後に発火して委託や実行の指示を出すタスク）の task には、上のブロックの task の 2 行の後に次の 1 行を定型文として足す。組んだ時点の head と、発火・着手の時点の head や成果の有無がずれていても、古い SHA のまま動かないようにするため。
+
+  ```
+  Guard: head=<対象 head の SHA>。実行時点で (a) 対象 PR の head が指定 SHA と一致すること、(b) 目的の成果（その SHA に向いたレビュー・QA の判定）が未投稿であることの両方を確かめ、どちらかが外れていれば何もせず終了する。
+  ```
+
+  - 受け取った側（委託の子・発火したタスク）は、作業の前に (a) と (b) を確かめる。(a) は `scripts/agent-gh <role> pr view <M> --json headRefOid --jq .headRefOid` が指定 SHA と同じであること。(b) は、レビューなら `pr view <M> --json reviews` に `pelway-review` の、対象コミットが指定 SHA のレビューが無いこと、QA なら `pelway-qa[bot]` のコメントに指定 SHA を書いた判定が無いこと（確かめ方は `docs/agents/qa-checklist.md` の「合格として数えるもの」）。どちらかが外れていれば、委託・投稿・コメントのどれもせず、外れた条件（現在の head、見つけた成果の URL）を返答に書いて終える。
+  - 遅延実行タスクが委託を出すタスクなら、出す委託の task にもこの行を写す。
+- 委託先の worktree に手順書が無いとき: 委託タスクが参照する手順書（skill の `SKILL.md`、`docs/agents/qa-checklist.md` など）が委託先の worktree に無いときは、対象 head の版を `scripts/agent-gh <role> api 'repos/hatai/Pelway/contents/<path>?ref=<対象 head の SHA>' --jq .content | base64 -d` で読む。`<role>` は委託先の名義で、レビューは `review`、それ以外（QA を含む）は `dev`（`qa` は判定のコメントの投稿しか受け付けない）。main の版や別の SHA の版で代えない。この取得も失敗したら、手順書を推測で補わず、取得できなかったパスとエラーを返答に書いて止まる。
 - Devin CLI が実装した PR には Devin CLI のレビューを付けない。通常の番が奇数でも Codex に回し、高リスクの PR でも Devin CLI の枠は外す。
 - Devin CLI のレビュー担当は確認済み。確認記録は `docs/dev-environment.md`「レビュー担当の Devin CLI」の「確認手順の結果（記録欄）」。記録が消えた場合は、記録が戻るまで Devin CLI を使わず、通常は Codex、高リスクは Codex と Claude で回す。
 - Devin CLI のレビュースレッド（`devin_review`）では、モデルオプションは `mode` だけを受け付ける（`thought_level`・`speed` は渡せず、effort の引き上げは行えない）。sandbox のため権限モードは Autonomous 一択で、`mode` は省略してよい。設定は `docs/dev-environment.md` の「レビュー担当の Devin CLI」。
