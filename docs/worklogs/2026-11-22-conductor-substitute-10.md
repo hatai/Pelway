@@ -367,3 +367,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 巡回記録（patrol 53・17:45 JST・委託完了 wake）
 
 - **PR #567 r3 結果: APPROVED@f72b4c59**（must-fix 2 件の解消を確認）→ QA 委託起動。Issue #306 の受け入れ条件 3 はチーム決定で「未検証」明記扱いのため、QA には対象外として明記するよう指示
+
+## 巡回記録（patrol 54・17:55 JST・受信箱 wake）
+
+- **PR #652**: hatai が must-fix 修正 `e87e25ff` を push（push コマンドの伝達が機能）→ r2 レビュー委託を起動
+- stalled 1 件は #399 の重複報告・#464/#600 は kodiak キュー処理中
