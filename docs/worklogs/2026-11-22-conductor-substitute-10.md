@@ -153,3 +153,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - mcp:57618b05 の run 2 は completed のまま（棚卸しのみ・GitHub 副作用なしをコメントで確認）— hatai の settle 要請は継続
 - #631: `2cd790bb`・MERGEABLE・CI 2 件 pending・fail なし・QA 委託実行中
 - #610: draft・`b7efc229` 不変。#586/#587: 結果未着
+
+## 巡回記録（patrol 16・11:30 JST・受信箱 wake）
+
+- `mcp:57618b05` が run 3（02:08Z・未回収の子タスク結果を読んで delivered 化＋棚卸し・GitHub 副作用なし）。約 2.5 分間隔での反復起床 → 独自 scheduled task の可能性が強い。hatai の UI settle 要請を継続
+- その他変化なし（#631 QA 実行中・#610 引き継ぎ稼働中・#586/#587 結果待ち）
