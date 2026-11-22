@@ -451,3 +451,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **completed（PR 紐付き・マージで settle 予定）**: 5c599260(#481)・9fe3e99d(#644)・c9d1a5eb(#642)・5fc0e3f5(#295)・b267df2c(#646)・bfd8ff91(#641)・3bcaf0e3(#613)
 - **異常**: idle サブエージェント `d4e700d1`（"Implement issue 651 watcher"・claude・未稼働）— 経路不明・記録のみ
 - **GitHub**: **#652 MERGED**（指揮下 6 件目）・新 draft **#664**（#651・watcher スレッド作）・#530 本文更新済みで codex QA r3 委託・#600 はキュー待ち継続
+
+## QA 委託の取り直し（#530 r4・21:00 JST）
+
+- qa-530-r3（codex）が **Codex 使用上限**で failed（作業途中まで進行）。Claude・Codex 両方が制限中
+- Devin（swe-2-high）で QA を取り直し（qa-530-f74b848a-r4-20261122）
