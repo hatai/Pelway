@@ -62,7 +62,7 @@ merge_one() {
     [ "$draft" = false ] && break
     sleep 20
   done
-  for attempt in 1 2 3; do
+  for _ in 1 2 3; do
     fetch || { echo "#$pr fetch failed"; return 1; }
     H=$(remote_head "$br") || { echo "#$pr branch $br not found"; return 1; }
     if ! git merge-base --is-ancestor origin/main "$H"; then
