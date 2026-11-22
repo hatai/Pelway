@@ -363,3 +363,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **PR #567**: `dab971b2` が must-fix 対応を push（`f72b4c59`）→ r3 レビュー委託を起動（解消確認を指定）
 - **stalled 2 件（immediate）**: #560（+1209/-0）・#399（+823/-40）— いずれも `pr-size` 2 連続失敗・上限 +800 超過。**例外（pr-size-exception）か分割かの hatai 判断が必要**として needs_human 登録
 - **PR #600**: head→`54304936`（kodiak のブランチ更新・キュー処理中）
+
+## 巡回記録（patrol 53・17:45 JST・委託完了 wake）
+
+- **PR #567 r3 結果: APPROVED@f72b4c59**（must-fix 2 件の解消を確認）→ QA 委託起動。Issue #306 の受け入れ条件 3 はチーム決定で「未検証」明記扱いのため、QA には対象外として明記するよう指示
