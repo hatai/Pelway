@@ -310,3 +310,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **#567**: main 取り込みで衝突解消（dev-environment.md 3 ブロック — #306 実測記述と main の hardening 記述を併記）→ 新 head `b1235f63`・MERGEABLE・push 済み（merge commit は再署名対象外）。[再レビュー起動](gpt-6.1-terra)。(B) 継続: `Refs #306`・受け入れ条件3「未検証」・#306 は QA 実測まで open。route-C は本人名義投稿のみカウント
 - **#600**: 失敗原因を作業ログで確認 — Codex **投稿失敗 3 連続**（審査自体の失敗ではない）。gpt-6.2-sol・effort medium で1回取り直し（Devin 代替不可）。旧 head 286ada9 approve は現 head 3b5ead4 に無効
 - **#463**: #581 マージ後に衝突解消 — 据え置き。**#464/#600 の QA**: route D・pelway-qa 権限は hatai 判断・代名投稿不可・draft のまま
+
+## 巡回記録（patrol 43・15:15 JST・受信箱 wake）
+
+- **新 impl 4 件**: `0995ecd5`（#657 委託タスク定型ガード）・`335aabd5`（#658 pr-size 委託抑止）・`cd045355`（#659 場面フィルタ・#610 待ち）・`42181892`（#660 fnox shim 記録）— いずれも稼働開始・登録のみ
+- `cb1a1122`（#652）再起動→waiting — must-fix 対応中の可能性（push 禁止のため head 不変）
