@@ -43,7 +43,7 @@ printf '{}\n' > "$wt/opencode.json"
 mkdir -p "$wt/.opencode" "$wt/.devin"
 printf '{}\n' > "$wt/.devin/config.json"
 
-cd "$wt"
+cd "$wt" || exit 1
 export PELWAY_SBX_ROOT="$wt"
 export T3_ACP_MCP_AUTHORIZATION="secret-token"
 
@@ -138,7 +138,7 @@ run ':' >/dev/null
 [[ -d "$wt/target" ]] || failures+=("mbx target: dir missing")
 
 # 11. --wrap モードでもコマンドが動く
-out="$(cd "$wt" && PELWAY_SBX_ROOT= "$SCRIPT" --wrap -- bash -c 'echo WRAPOK; echo x > "$HOME/sbx-wrap-home" 2>&1 || echo DENIED')"
+out="$(cd "$wt" && PELWAY_SBX_ROOT='' "$SCRIPT" --wrap -- bash -c 'echo WRAPOK; echo x > "$HOME/sbx-wrap-home" 2>&1 || echo DENIED')"
 check "wrap run" "$(echo "$out" | head -1)" "WRAPOK"
 check "wrap home write" "$(echo "$out" | tail -1)" "DENIED"
 [[ -f "$HOME/sbx-wrap-home" ]] && failures+=("wrap: home file created")
@@ -185,7 +185,7 @@ cmd="$(echo '{"tool_input":{"command":"echo $(mkdir -p ~/.local/share/devin/evil
   | "$SCRIPT" --hook \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["hookSpecificOutput"]["updatedInput"]["command"])')"
 (cd "$wt" && PELWAY_SBX_ROOT="$wt" "$SCRIPT" --wrap -- sh -c "$cmd" >/dev/null)
-[[ ! -d "$HOME/.local/share/devin/evil" ]] || failures+=("hook outer-eval: $(...) が外側で評価された")
+[[ ! -d "$HOME/.local/share/devin/evil" ]] || failures+=('hook outer-eval: $(...) が外側で評価された')
 
 # 15. wrap 内でネストした shell は devin 資格情報を隠す（outer では見える）
 mkdir -p "$HOME/.local/share/devin" && touch "$HOME/.local/share/devin/sbx-probe"

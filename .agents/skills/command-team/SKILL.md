@@ -128,9 +128,25 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 | 抜き取り | PR 番号を 4 で割った余りが 0 の通常の PR には Claude も付ける（Codex・Devin CLI の見落とし率の測定のため） |
 
 - この表の適用は指揮役だけでなく実装担当も行う。実装担当はこの表でレビュー委託（`delegate_task`）の担当と effort を決め、Assigned 行に写す（skill `implement-issue` の手順 8）。通常と抜き取りの判定は PR 番号だけで決まり、割り当ての記録への記入は不要（実装担当の分は省く。指揮役が立てた分だけ記録する）
+- レビューを `delegate_task` で委託するとき（実装担当の手順 8、指揮役が実装担当の代わりに委託するとき。指揮役は委託元の worktree が `main` のコミットにあることを確かめる。指揮役自身の PR・外部投入のレビュースレッドは委託せず、runbook の「レビューを始める」で立てる）は、呼び出しを次のブロックから丸ごと写し、`<...>` を埋める。`target.model` と `options` の値は skill `implement-issue` の手順 8 の表（codex は `reasoningEffort`、claude は `effort`、devin は `{}`）。`role`・`runtimeMode`・`isolation` は省かない。
+
+  ```json
+  {
+    "target": {
+      "providerInstanceId": "<codex_review|claude_review|devin_review>",
+      "model": "<モデル名>",
+      "options": {"<reasoningEffort|effort>": "<effort>"}
+    },
+    "role": "review",
+    "runtimeMode": "auto-accept-edits",
+    "isolation": "worktree",
+    "task": "PR #<M> をレビューする。skill review-pr に従う。\nAssigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes"
+  }
+  ```
 - Devin CLI が実装した PR には Devin CLI のレビューを付けない。通常の番が奇数でも Codex に回し、高リスクの PR でも Devin CLI の枠は外す。
 - Devin CLI のレビュー担当は確認済み。確認記録は `docs/dev-environment.md`「レビュー担当の Devin CLI」の「確認手順の結果（記録欄）」。記録が消えた場合は、記録が戻るまで Devin CLI を使わず、通常は Codex、高リスクは Codex と Claude で回す。
 - Devin CLI のレビュースレッド（`devin_review`）では、モデルオプションは `mode` だけを受け付ける（`thought_level`・`speed` は渡せず、effort の引き上げは行えない）。sandbox のため権限モードは Autonomous 一択で、`mode` は省略してよい。設定は `docs/dev-environment.md` の「レビュー担当の Devin CLI」。
+- レビュー担当の確認ゲート（更新後の保留）。`codex_review` は Codex・T3・`~/.codex-review` のどれか、`claude_review` は T3・Claude Code・`~/.claude-review` のどれかを更新したら、`docs/dev-environment.md` の対応する確認（Codex は「専用 home での確認」、Claude は「レビュー担当の Claude」の MCP のツールと組み込みのツールの確認）が済むまで使わない（T3 の更新では両方が同時に保留になりうる。そのときは人間に知らせる）。更新を予定しているときは、更新の前に、影響を受ける側の節に `保留中:` の行を置き、その行が main に載るまで更新を始めない（行が main にあれば、委託や起動・再開の直前に main の最新の版を確かめるすべての割り当て元が保留を見られる）。更新済みと後から気づいたときは、気づいた者（人間か指揮役）が同じ行を置いてから確認を行い、その行が main に載るまでは、指揮役が動いている実装担当に直接伝え、委託元となりうるスレッドの新規の起動・再開を行わない（指揮役自身の起動でも同じ）。指揮役と実装担当は、委託やスレッドの起動・再開の直前に、main の最新の `docs/dev-environment.md` で、割り当てる担当と回し先の両方の節（「専用 home での確認」と「レビュー担当の Claude」）の `保留中:` の行の有無を確かめる。保留の間は、使えない担当の番とその担当への回し先をもう片方の担当に回し（Codex の保留なら Claude、Claude の保留なら Codex）、両方使えなければ人間に知らせる。
 - Claude のレビュー担当は確認済み。確認記録は `docs/dev-environment.md`「レビュー担当の Claude」の「確認手順の結果（記録欄）」。記録が消えた場合は、記録が戻るまで Claude を使わず Codex だけで回し、高リスクの PR は人間に知らせる。
 - 抜き取りの実施が 10 件に達するか、抜き取りの開始から 4 週間が経つか、どちらか早い方になったら、`docs/agents/command-team-details.md` の「レビュー担当の段階移行」に従って見落とし率を集計し、高リスク PR の複数レビュー体制の有効化を判断する。
 - effort は、追加行が 200 以下で高リスク（セキュリティの境界）・仕様（正本 `docs/superpowers/specs/` と ADR `docs/adr/` を変える）の PR でなければ既定、それ以外は `high`。セキュリティと仕様の PR では 1 回目から effort を上げておく。同じ PR の 2 回目以降のレビューは 1 段上げる。3 回目のレビューで改めて effort を上げる運用はやめる（skill `implement-issue` の手順 9 も同じ）。

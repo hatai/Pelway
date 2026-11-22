@@ -38,6 +38,7 @@ The AI dev team (the conductor, T3 Code, opencode, Codex, Claude) follows `docs/
 - `scripts/agent-gh` の `git push` は、成功後に `scripts/agent-gh-resign` が署名なしコミットを `createCommitOnBranch`（GitHub API）で作り直した署名付きコミットへ ref を付け替える（GitHub App の Verified 署名）。ローカルの署名設定（`commit.gpgsign`）は App 名義のコミットには適用しない。API で表現できない変更（新規の実行ファイル・mode 変更・symlink・submodule・マージ・空コミット）を含む push は署名なしのままになる。止めるときは `PELWAY_AGENT_SKIP_RESIGN=1`。
 - A PR is merged only when all of these hold for its current head: a valid approval from `pelway-review`, the required checks passing, and a QA pass comment by the GitHub App `pelway-qa` that names the same SHA and the run QA checked. A PR is not treated as passed before QA has checked that SHA. The conductor adds `automerge` only then (see `docs/agents/qa-checklist.md` and the `command-team` skill, "マージ").
 - A PR's diff stays within 800 added lines and 2000 deleted lines as counted by `mise run pr-size`, unless the conductor approved the overrun with the `pr-size-exception` label.
+- 人間のアカウントで投稿する道具（T3 の `comment_on_issue` など）で hatai の判断を書くのは、hatai がその文面か選択肢を明示して選んだときだけで、中身を補うときは先に文面を見せて確かめる。
 - Labels and who sets them: `docs/agents/triage-labels.md`.
 - Worklogs live under `docs/worklogs/`.
 

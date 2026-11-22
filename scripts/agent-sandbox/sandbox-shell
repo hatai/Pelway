@@ -114,6 +114,8 @@ mkdir -p "$sbx_cache" 2>/dev/null || true
 # （別ユーザーが先に作った dir や symlink 置き場にキャッシュを書かせない）。
 if [[ -L "$sbx_cache" || ! -d "$sbx_cache" || ! -w "$sbx_cache" ]]; then
   sbx_cache="/tmp/pelway-sbx-cache-${UID:-$(id -u)}"
+  # 退避先は /tmp 直下の 1 階層だけなので、-m 700 は作る dir そのものに掛かる。
+  # shellcheck disable=SC2174
   mkdir -p -m 700 "$sbx_cache" 2>/dev/null || true
   [[ ! -L "$sbx_cache" && -d "$sbx_cache" && -O "$sbx_cache" && -w "$sbx_cache" ]] \
     || sbx_cache="$(mktemp -d /tmp/pelway-sbx-cache-XXXXXX)"
