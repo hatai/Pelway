@@ -108,3 +108,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **#631 手当委託起動**: send 障害が 10 分継続（read/organize/delegate は正常・send 経路のみ）のため、approve 済み PR を滞留させない判断で claudeAgent 手当委託 `hand-631-merge-main-20261122` を起動 — impl worktree が同 branch を checkout 中のため detached/仮 branch から main 取り込み・verify・push を指示
 - #631: 新 head が出たら review・QA をやり直す（現 approve は旧 head 67d48dd6 対象）
 - #586/#587: 事後レビュー結果未着
+
+## 巡回記録（patrol 9・11:00 JST・スケジュール）
+
+- 未読なし
+- **send 障害が 15 分継続**: `t3_thread_send` が 9 回連続失敗（queue/default とも）。read・update・organize・delegate_task・task_status は全て正常のため send 経路単独の障害。人間報告条件に達し、hatai へ報告した（本巡回の報告文）
+- 手当委託 `hand-631-merge-main-20261122` 実行中（claude-sonnet-5-5）
+- #631: `67d48dd6`・CONFLICTING 不変。#586/#587: 結果未着
