@@ -169,6 +169,23 @@ run_cycles 1
 check "7: resolution seen during a show failure clears the record" \
   eq "$(count "$ROOT/out.log" "THREAD shared-worktree path=/w/s threads=t-a,t-b")" "2"
 
+# 試験 8: 取得に失敗するスレッドが巡回ごとに入れ替わっても、通知済みの組み合わせを再通知しない。
+# A・B・C が同じパスにいる間に show が C、A、C の順に失敗すると、成功した組み合わせは
+# A・B、B・C、A・B。A・B の記録が B・C で上書きされないことを確かめる。
+reset
+threads "$(th t-a false agent)" "$(th t-b false agent)" "$(th t-c false agent)"
+wt t-a /w/u; wt t-b /w/u; wt t-c FAIL
+run_cycles 1
+wt t-c /w/u; wt t-a FAIL
+run_cycles 1
+wt t-a /w/u; wt t-c FAIL
+run_cycles 1
+check "8: first combination is not re-notified after rotating failures" \
+  eq "$(count "$ROOT/out.log" "THREAD shared-worktree path=/w/u threads=t-a,t-b")" "1"
+check "8: overlapping combination is reported once" \
+  eq "$(count "$ROOT/out.log" "THREAD shared-worktree path=/w/u threads=t-b,t-c")" "1"
+check "8: total shared-worktree lines" eq "$(shared)" "2"
+
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
   exit 1

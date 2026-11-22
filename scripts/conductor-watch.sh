@@ -194,10 +194,11 @@ if levs is not None:
 # 作業ツリーの共有（Issue #643）: settle されていないトップレベルのスレッドの worktreePath を
 # t3 thread show で 1 本 1 回ずつ集め、2 本以上が同じパスなら THREAD shared-worktree の行を出す。
 # 同じ組み合わせ（パスとスレッドの集合）は続く間 1 回だけ出す。通知済みの記録は stall_notified と
-# 同じ JSON オブジェクトで、パス → 昇順の threadId をカンマでつないだ文字列。show が失敗したスレッドは
-# この巡回で数えない。既出の組み合わせに失敗したスレッドが含まれ、残りのスレッドが同じパスにいると
-# 確かめられたときだけ記録を保つ（失敗の巡回で再通知しない）。残りのどれかが一覧から消えた・
-# 別のパスに移ったと確かめられたら、共有の解消として記録を消す。
+# 同じ JSON オブジェクトで、パス → 組み合わせ（昇順の threadId をカンマでつないだ文字列）ごとの記録。
+# 失敗するスレッドが巡回ごとに入れ替わると同じパスに複数の組み合わせが並存しうるため、組み合わせごとに
+# 記録する。show が失敗したスレッドはこの巡回で数えない。既出の組み合わせに失敗したスレッドが含まれ、
+# 残りのスレッドが同じパスにいると確かめられたときだけ記録を保つ（失敗の巡回で再通知しない）。
+# 残りのどれかが一覧から消えた・別のパスに移ったと確かめられたら、共有の解消として記録を消す。
 # 一覧の取得に失敗した巡回は記録を保ち、正常に空の一覧は共有の解消として記録を消す。
 if threads_ok:
     by_path, failed = {}, set()
@@ -213,21 +214,26 @@ if threads_ok:
             failed.add(tid); wp = None
         if isinstance(wp, str) and wp:
             by_path.setdefault(wp, []).append(tid)
-    old = cur["shared_notified"] if isinstance(cur["shared_notified"], dict) else {}
+    old = {}
+    for wp, combs in (cur["shared_notified"] if isinstance(cur["shared_notified"], dict) else {}).items():
+        if isinstance(combs, str): combs = {combs: 1}  # 旧形式（パス → 組み合わせ）を読み替える
+        if isinstance(combs, dict): old[wp] = combs
     keep = {}
-    for wp, v in old.items():
-        ids = set(str(v).split(","))
-        if ids & failed and all(i in failed or i in by_path.get(wp, []) for i in ids):
-            keep[wp] = v
+    for wp, combs in old.items():
+        for v in combs:
+            ids = set(str(v).split(","))
+            if ids & failed and all(i in failed or i in by_path.get(wp, []) for i in ids):
+                keep.setdefault(wp, {})[v] = 1
     notified = {}
     for wp, tids in sorted(by_path.items()):
         if len(tids) < 2: continue
         v = ",".join(sorted(tids))
-        if wp in keep and set(tids) <= set(keep[wp].split(",")): continue  # 失敗分が欠けただけ
-        if old.get(wp) != v:
+        if any(set(tids) <= set(k.split(",")) for k in keep.get(wp, {})): continue  # 失敗分が欠けただけ
+        if v not in old.get(wp, {}):
             print(f"THREAD shared-worktree path={wp} threads={v}", flush=True)
-        notified[wp] = v
-    cur["shared_notified"] = {**keep, **notified}
+        notified.setdefault(wp, {})[v] = 1
+    cur["shared_notified"] = {wp: {**keep.get(wp, {}), **notified.get(wp, {})}
+                            for wp in set(keep) | set(notified)}
 # 読み取りに失敗して空になったときは、前回の状態を残す（全スレッドを「新規」と誤報しない）。
 if prev is not None and not threads: cur["threads"] = prev["threads"]
 if prev is not None and not prs: cur["prs"] = prev["prs"]
