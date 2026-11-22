@@ -11,7 +11,8 @@
 //! - 起動してよいのは本体 checkout からだけ。worktree では理由を 1 行ログに出して終わる
 //! - 同時に動かせるのは 1 つだけ。状態ディレクトリの lock ファイルを flock で取り、取れなければ終わる
 //! - 状態は起動時に 1 回だけ読み、以降はメモリに持つ。保存に失敗しても同じイベントを繰り返し作らない
-//! - 送れなかった payload は状態の送信待ちの列に残し、次の周回で送り直す
+//! - webhook に送れなかった payload は状態の送信待ちの列に残し、古い順に送り直す。直らない失敗
+//!   （HTTP 400・404・413）は列から外し、送り直せる失敗が続く間は間隔を空ける（`outbox::flush`）
 //! - ログは標準エラーに 1 行ずつ。秘密と返答の本文は出さない
 
 mod io;
@@ -26,13 +27,16 @@ use pelway_agent_watch::inbox::{
     INBOX_FILE, PATROL_STATE_FILE, PatrolInfo, WAKE_MESSAGE, WakeDecision, decide_wake, inbox_line,
     parse_conductor_file, parse_patrol_state,
 };
-use pelway_agent_watch::outbox;
+use pelway_agent_watch::outbox::{self, Outcome};
 use pelway_agent_watch::payload::build_payload;
 use pelway_agent_watch::watch::{Event, StallReason, State, ThreadDetail, needs_detail, step};
 use serde_json::Value;
 
 const DEFAULT_POLL_SECS: u64 = 30;
 const CI_INTERVAL: Duration = Duration::from_secs(5 * 60);
+/// 1 周の webhook の送信の期限。期限が残る間は次の知らせを送り始め、秘密を読む fnox・curl・送り直しの待ちは
+/// 期限で止める（`io::send`）ので、1 周の送信は列の長さによらず 45 秒以内に収まる。期限までに送れなかった知らせは列に残る。
+const SEND_DEADLINE: Duration = Duration::from_secs(40);
 const USAGE: &str =
     "usage: pelway-agent-watch [--once | --cycles <n>] [--dry-run] [--project <path>]
        pelway-agent-watch --register <thread-id> | --unregister | --show-registration";
@@ -282,18 +286,29 @@ impl Watcher {
             return;
         }
 
-        // 指揮役の受信箱に、知らせを出した時点で 1 回だけ書く（送信待ちの列の再送では書かない）。
-        // 受信箱に書けなくても webhook の送信と見張りは続ける。
-        if !payloads.is_empty() {
-            let lines: Vec<String> = payloads.iter().map(|(p, _)| inbox_line(p)).collect();
-            let sources: Vec<String> = payloads
+        // 指揮役の受信箱に、知らせを出した時点で書く（送信待ちの列の再送では書かない）。
+        // 書けなかった知らせは状態に残し、受信箱が直るまで周回ごとに古い順に書き直す
+        // （webhook が外した知らせも、上限 100 件の内なら後で届く）。受信箱に書けなくても webhook の送信と見張りは続ける。
+        // 更新前の版の状態では、列の知らせを書けたかが分からないので、最初の周回で列の写しを書き直す（重複しうる）
+        let pending = self.state.inbox_pending.replace(Vec::new());
+        let mut to_inbox = pending.unwrap_or_else(|| self.state.outbox.clone());
+        to_inbox.extend(payloads.iter().map(|(p, _)| p.clone()));
+        if !to_inbox.is_empty() {
+            let lines: Vec<String> = to_inbox.iter().map(inbox_line).collect();
+            let sources: Vec<String> = to_inbox
                 .iter()
-                .filter_map(|(p, _)| p.get("thread_id").and_then(Value::as_str))
+                .filter_map(|p| p.get("thread_id").and_then(Value::as_str))
                 .map(str::to_string)
                 .collect();
             match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &lines) {
                 Ok(total) => self.maybe_wake(&t3, total, &sources),
-                Err(e) => eprintln!("agent-watch: ERROR inbox append failed: {e}"),
+                Err(e) => {
+                    eprintln!("agent-watch: ERROR inbox append failed: {e}");
+                    let pending = self.state.inbox_pending.get_or_insert_default();
+                    for p in to_inbox {
+                        outbox::push(pending, p);
+                    }
+                }
             }
         }
 
@@ -302,23 +317,50 @@ impl Watcher {
             outbox::push(&mut self.state.outbox, payload);
         }
         let project = self.opts.project.clone();
-        outbox::flush(&mut self.state.outbox, |payload| {
-            let tag = tag(payload);
-            match io::send(payload, &project) {
-                io::SendResult::Sent(code) => {
-                    eprintln!("agent-watch: {tag} mode=send http={code}");
-                    true
+        let deadline = Instant::now() + SEND_DEADLINE;
+        let backoff_before = self.state.outbox_backoff;
+        outbox::flush(
+            &mut self.state.outbox,
+            &mut self.state.outbox_backoff,
+            now_epoch,
+            || io::has_time(deadline),
+            |payload| {
+                let tag = tag(payload);
+                match io::send(payload, &project, deadline) {
+                    io::SendResult::Sent(code) => {
+                        eprintln!("agent-watch: {tag} mode=send http={code}");
+                        Outcome::Sent
+                    }
+                    io::SendResult::Rejected(code) => {
+                        eprintln!("agent-watch: {tag} mode=send-dropped http={code}");
+                        Outcome::Rejected
+                    }
+                    io::SendResult::Failed(why) => {
+                        eprintln!(
+                            "agent-watch: {tag} mode=send-failed reason={why} (kept for retry)"
+                        );
+                        Outcome::Retry
+                    }
+                    io::SendResult::DryRunNoSecret => {
+                        eprintln!(
+                            "agent-watch: {tag} mode=not-sent reason=no-secret (kept for retry)"
+                        );
+                        Outcome::Retry
+                    }
                 }
-                io::SendResult::Failed(why) => {
-                    eprintln!("agent-watch: {tag} mode=send-failed reason={why} (kept for retry)");
-                    false
-                }
-                io::SendResult::DryRunNoSecret => {
-                    eprintln!("agent-watch: {tag} mode=not-sent reason=no-secret (kept for retry)");
-                    false
-                }
-            }
-        });
+            },
+        );
+        if let Some(b) = self
+            .state
+            .outbox_backoff
+            .filter(|b| Some(*b) != backoff_before)
+        {
+            eprintln!(
+                "agent-watch: outbox retry_after={}s queued={}",
+                b.interval_secs,
+                self.state.outbox.len()
+            );
+        }
         if let Err(e) = io::save_state(&self.state_path, &self.state) {
             eprintln!(
                 "agent-watch: ERROR cannot save state {}: {e}",
