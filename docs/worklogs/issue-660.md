@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「文書に書く条件では、書き足す先の節（見出し）を指定する」を足す。
 
 使ったスキル: implement-issue, write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: ce1763e316c93ccb804e6f93cd165a7d7d976c32
+
+1. 詰まった箇所: 手順 9: codex と claude の must-fix（`mkdir -p /tmp/sshims` が別ユーザーの作った既存ディレクトリを受け入れ、PATH の先頭経由で `fnox` を差し替えられる）は同じ所見だが、直し方が `mktemp -d`（codex）と所有者の確認（claude）で分かれた。
+2. 曖昧だった文: 「`/tmp/sshims` に symlink を置く形」（Issue #660 の「受け入れ条件」）
+3. 仮定と解釈: `mktemp -d` だとパスが `/tmp/sshims` でなくなり受け入れ条件から外れるため、`/tmp/sshims` を保ったまま、自分が作ったか symlink でない自分所有のディレクトリのときだけ mode 700 にして使う形（claude の案）を選んだ。印の無い nit（原因が推定であること）は手順 9 の決まりどおり直していない。
+4. 足りなかった情報・検証手段: 別ユーザー所有の `/tmp/sshims` を作る手段が無く、拒否の経路は root 所有の `/tmp` と symlink を対象に scratchpad で確かめた（どちらも「自分のものではない」で止まり、PATH に足さない）。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「共有の一時ディレクトリ（/tmp）の固定パスを条件に含めるときは、所有者の確認を条件に含める」を足す。
+
+使ったスキル: implement-issue
