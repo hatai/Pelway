@@ -119,3 +119,15 @@
 5. 改善案: `docs/agents/qa-checklist.md` の冒頭に、QA を行う主体（指揮役が立てる QA スレッドで、実装スレッドではない）を 1 文で足す（別 Issue が適切）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 10・`[文書のずれ]` の nit）
+
+対象 head: 7df909bb7f41ecfc0267a32b5a363037f21c2605
+
+1. 詰まった箇所: Codex のレビュー（head `35759d5e`）は approve だったが、`[文書のずれ]` の nit が 3 件あった。直したのは次の 3 つ。`.agents/skills/implement-issue/SKILL.md` の手順 10 の SHA の照合（`agent-gh review api` から、実装担当の名義の `agent-gh dev pr view --json headRefOid` へ）。`docs/agents/grokbot-runbook.md`「マージの条件」の 5 項目の写し（command-team「マージ」の正本への参照に置き換えた）。PR 本文の A7 の説明（qa-checklist の形に「未検証」の欄が無いこと）。
+2. 曖昧だった文: 「条件の列挙を正本への参照に置き換え、QA 待ちの判定でも正本の条件を使ってください。」（Codex のレビューの nit）
+3. 仮定と解釈: runbook には、正本の条件の要約を括弧で残した（読み手が条件の範囲をつかめるよう「などを含む」と書き、確かめ方は正本だけにした）。QA 待ちは「正本の条件のうち QA の合格だけが欠けている PR」と定義した。選ばなかった解釈: runbook から条件の名前を全部消す。
+4. 足りなかった情報・検証手段: 手順 10 の「fetch は禁止なので」の前提（Issue #480 A6）と、手順 6 の `scripts/agent-gh dev git fetch origin main` の関係が文書に書かれていない。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 10 の「fetch は禁止なので」を、何の fetch が禁止なのか（PR ブランチの remote を書き換える操作か）を明記する文に直す（別 Issue が適切）。
+
+使ったスキル: implement-issue
