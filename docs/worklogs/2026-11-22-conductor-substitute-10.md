@@ -420,3 +420,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **failed 続報**: 0995ecd5（#657）・eaa7764e（#645）・335aabd5（#658）・2e87e67b（#602）・1db76f66（watcher）。patrol 61 と合わせ実装スレッドの大半が failed — 系統的失敗（provider 側）の可能性。GitHub 側の head は全 PR 不変・実害なし
 - #600・#652 は kodiak キュー待ち継続（head 不変）
+
+## QA 委託の取り直し（#530・19:55 JST）
+
+- qa-530-f74b848a（claude-opus-5-5）が **Claude 週次レート制限**（3am JST reset）で failed — patrol 61/62 の mass failed の原因と判明
+- Codex（gpt-6.1-terra）で QA を取り直し（qa-530-f74b848a-r2-20261122）。Claude 系スレッドは reset まで停止見込み
