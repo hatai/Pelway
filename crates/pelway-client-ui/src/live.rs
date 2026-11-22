@@ -162,7 +162,7 @@ impl fmt::Display for LiveError {
                 write!(f, "unexpected response JSON at {}:{}", e.line(), e.column())
             }
             Self::NoChannel => f.write_str("no channel selected"),
-            Self::StaleTarget => f.write_str("post target changed while reconnecting"),
+            Self::StaleTarget => f.write_str("post target or actor changed"),
             Self::Protocol(msg) => write!(f, "unexpected server response: {msg}"),
         }
     }
@@ -370,6 +370,23 @@ impl LiveSession {
             Some(p) if p.channel_id == *channel_id && p.actor == *actor => p,
             _ => FetchProgress::new(channel_id, actor),
         };
+        // 保存したカーソルが今の履歴に属することを確かめる（同じアドレスで
+        // サーバーが再起動し、同じチャンネルに別の履歴が入っていると、
+        // 古い seq の続きから取っても空ページが返り、古い一覧が残って
+        // 新しい履歴が欠ける）。カーソル位置の 1 件を probe して、保持中の
+        // 末尾と一致しなければ先頭から取り直す。
+        if p.after.is_some() {
+            match self.cursor_belongs(&p) {
+                Ok(true) => {}
+                Ok(false) => {
+                    p = FetchProgress::new(channel_id, actor);
+                }
+                Err(e) => {
+                    self.fetch_progress = Some(p);
+                    return Err(e);
+                }
+            }
+        }
         let result = self.fetch_pages(&mut p);
         if result.is_err() {
             // 中断した分は次の取得に引き継ぐ（成功したときは残さない）。
@@ -403,6 +420,13 @@ impl LiveSession {
             }
             let full = page.len() >= p.page_limit as usize;
             let last_seq = page.last().map(|m| m.seq);
+            // 途中経過に足す前にページを検査する——拒否したページの内容が
+            // 残ると、次の取得がそれを含んだ結果を返してしまう。
+            let advance = match (full, last_seq) {
+                (true, Some(s)) if p.after.is_none_or(|a| s > a) => Some(s),
+                (true, _) => return Err(self.protocol_err("message page did not advance")),
+                _ => None,
+            };
             for m in page {
                 p.out_bytes += message_size(&m);
                 p.out.push_back(m);
@@ -412,12 +436,31 @@ impl LiveSession {
             {
                 p.out_bytes -= message_size(&m);
             }
-            match (full, last_seq) {
-                (true, Some(s)) if p.after.is_none_or(|a| s > a) => p.after = Some(s),
-                (true, _) => return Err(self.protocol_err("message page did not advance")),
-                _ => return Ok(p.out.drain(..).collect()),
+            match advance {
+                Some(s) => p.after = Some(s),
+                // `advance` が無いのは短いページ（取得の終わり）。満杯で
+                // 進まないページは上の検査で既に `Protocol` を返している。
+                None => return Ok(p.out.drain(..).collect()),
             }
         }
+    }
+
+    /// 保存した取得カーソル（`p.after`）が今の履歴に属するかを probe で確かめる。
+    /// `after_seq = カーソル-1, limit = 1` でカーソル位置の 1 件を取り、保持中の
+    /// 末尾と seq・`message_id` が一致すれば同じ履歴とみなす（サーバーが
+    /// 再起動して採番・内容が入れ替わった場合は不一致になる）。
+    /// 保持中の一覧が空なら比較できないため `false` を返す。
+    fn cursor_belongs(&mut self, p: &FetchProgress) -> Result<bool, LiveError> {
+        let (Some(after), Some(tail)) = (p.after, p.out.back()) else {
+            return Ok(false);
+        };
+        let mut path = self.actor_path_for(&p.actor, &channel_messages_path(&p.channel_id));
+        path.push_str(&format!("&limit=1&after_seq={}", after - 1));
+        let resp = self.get_response(&path)?;
+        let probe: Vec<StoredMessage> = self.parse_json(&resp.body)?;
+        Ok(probe
+            .first()
+            .is_some_and(|m| m.seq == after && m.message_id == tail.message_id))
     }
 
     /// 投稿の冪等キー（`client_msg_id`）を新規発行する。応答の受け取りに

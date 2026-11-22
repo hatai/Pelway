@@ -679,29 +679,33 @@ fn poll_resumes_fetch_from_the_saved_cursor_after_failure() {
         )
         .into_bytes()
     };
-    // メッセージ要求 1・2 回目は満杯ページ、3 回目は応答を返さず切断、
-    // 4 回目以降は残りのページを返す。要求ターゲットをすべて記録する。
-    let msg_calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    // after_seq=400 の要求は 1 回目は応答を返さず切断し、2 回目以降は
+    // 残りのページを返す。再開時にはカーソル位置の確認（probe）と
+    // カーソルの続きの 2 要求が来る。要求ターゲットをすべて記録する。
+    let tail_calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let seen = Arc::new(Mutex::new(Vec::<String>::new()));
-    let (calls2, seen2) = (msg_calls.clone(), seen.clone());
+    let (calls2, seen2) = (tail_calls.clone(), seen.clone());
     let stub = spawn_raw_stub_server(move |_method, target| {
         seen2.lock().unwrap().push(target.to_owned());
         if target.contains("/messages") {
-            let call = calls2.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-            match call {
-                1 | 2 => http_ok(
-                    serde_json::to_string(
-                        &((call - 1) * 200 + 1..=call * 200)
-                            .map(msg)
-                            .collect::<Vec<_>>(),
+            if !target.contains("after_seq=") {
+                http_ok(serde_json::to_string(&(1..=200).map(msg).collect::<Vec<_>>()).unwrap())
+            } else if target.contains("after_seq=200") {
+                http_ok(serde_json::to_string(&(201..=400).map(msg).collect::<Vec<_>>()).unwrap())
+            } else if target.contains("after_seq=399") {
+                // 再開時の probe: カーソル位置（seq 400）の 1 件を返す
+                http_ok(serde_json::to_string(&vec![msg(400)]).unwrap())
+            } else if target.contains("after_seq=400") {
+                let n = calls2.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                if n == 1 {
+                    vec![] // 3 ページ目は応答を返さず切断
+                } else {
+                    http_ok(
+                        serde_json::to_string(&(401..=600).map(msg).collect::<Vec<_>>()).unwrap(),
                     )
-                    .unwrap(),
-                ),
-                3 => vec![], // 3 ページ目は応答を返さず切断
-                4 => http_ok(
-                    serde_json::to_string(&(401..=600).map(msg).collect::<Vec<_>>()).unwrap(),
-                ),
-                _ => http_ok(serde_json::to_string(&vec![msg(601)]).unwrap()),
+                }
+            } else {
+                http_ok(serde_json::to_string(&vec![msg(601)]).unwrap())
             }
         } else if target.contains("/channels/ch-") {
             http_ok(channel_json.clone())
@@ -910,5 +914,206 @@ fn repost_with_same_id_lost_response_then_switch_is_rejected() {
         posts.load(std::sync::atomic::Ordering::SeqCst),
         1,
         "再送の POST はサーバーへ届かない"
+    );
+}
+
+// カーソルの所属確認: 同じアドレスでサーバーが再起動して履歴が
+// 入れ替わっていても、保存した途中経過は採用せず先頭から取り直し、
+// 再取得の成功時点で新しい履歴だけが入る。
+#[test]
+fn poll_after_server_restart_fetches_the_new_history() {
+    let ch = Channel {
+        workspace_id: WorkspaceId::from("ws-demo-01"),
+        channel_id: ChannelId::from("ch-stub"),
+        name: "スタブ".to_owned(),
+        members: vec![ChannelMember {
+            member_id: MemberId::from("m-tanaka"),
+            display_name: "田中".to_owned(),
+            member_kind: MemberKind::Human,
+        }],
+    };
+    let channels_json = serde_json::to_string(&vec![ch.clone()]).unwrap();
+    let channel_json = serde_json::to_string(&ch).unwrap();
+    let msg = |seq: u64, body: &str| StoredMessage {
+        message_id: MessageId::from(format!("m-{body}-{seq}").as_str()),
+        workspace_id: WorkspaceId::from("ws-demo-01"),
+        channel_id: ChannelId::from("ch-stub"),
+        seq,
+        author_id: MemberId::from("m-bot"),
+        member_kind: MemberKind::Bot,
+        purpose_id: PurposeId::P01,
+        body: body.to_owned(),
+        thread_root: None,
+        client_msg_id: None,
+        created_at: 0,
+    };
+    let http_ok = |body: String| {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .into_bytes()
+    };
+    // 再起動前: メッセージ要求 1・2 回目は満杯ページ（old-1..=old-400）、
+    // 3 回目は切断。再起動後（4 回目以降）: 同じチャンネルの履歴は
+    // new-1..=new-3 の 3 件だけ。probe（after_seq=199・limit=1）は
+    // 空を返し、カーソル不所属で先頭から取り直す。
+    let msg_calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let calls2 = msg_calls.clone();
+    let stub = spawn_raw_stub_server(move |_method, target| {
+        if target.contains("/messages") {
+            let call = calls2.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            match call {
+                1 | 2 => http_ok(
+                    serde_json::to_string(
+                        &((call - 1) * 200 + 1..=call * 200)
+                            .map(|s| msg(s, "old"))
+                            .collect::<Vec<_>>(),
+                    )
+                    .unwrap(),
+                ),
+                3 => vec![], // ここで切断（再起動前の取得は中断）
+                // 再起動後: probe（after_seq=199&limit=1）は新履歴に
+                // seq 200 が無いので空を返し、カーソル不所属と判定される。
+                // その後の先頭取り直し（after_seq なし）は新履歴の短い
+                // ページを返す。
+                _ if target.contains("after_seq=") => {
+                    http_ok(serde_json::to_string(&Vec::<StoredMessage>::new()).unwrap())
+                }
+                _ => http_ok(
+                    serde_json::to_string(&(1..=3).map(|s| msg(s, "new")).collect::<Vec<_>>())
+                        .unwrap(),
+                ),
+            }
+        } else if target.contains("/channels/ch-") {
+            http_ok(channel_json.clone())
+        } else {
+            http_ok(channels_json.clone())
+        }
+    });
+
+    let mut session = LiveSession::new(stub, "ws-demo-01".into());
+    assert!(session.bootstrap().is_err(), "3 ページ目で切断");
+
+    session
+        .poll()
+        .expect("再起動後は新しい履歴を先頭から取り直す");
+    let messages = session.messages();
+    assert_eq!(
+        messages.len(),
+        3,
+        "再起動前の途中経過は残らない: {:?}",
+        messages.iter().map(|m| m.seq).collect::<Vec<_>>()
+    );
+    assert!(
+        messages.iter().all(|m| m.body.starts_with("new")),
+        "新しい履歴だけが入る"
+    );
+    assert_eq!(msg_calls.load(std::sync::atomic::Ordering::SeqCst), 5);
+}
+
+// ページ検査は途中経過の変更より前: カーソルが進まない満杯ページを
+// 拒否しても、その内容は途中経過に残らず、次に成功する取得の結果に
+// 混ざらない。
+#[test]
+fn rejected_page_does_not_leak_into_the_resumed_fetch() {
+    let ch = Channel {
+        workspace_id: WorkspaceId::from("ws-demo-01"),
+        channel_id: ChannelId::from("ch-stub"),
+        name: "スタブ".to_owned(),
+        members: vec![ChannelMember {
+            member_id: MemberId::from("m-tanaka"),
+            display_name: "田中".to_owned(),
+            member_kind: MemberKind::Human,
+        }],
+    };
+    let channels_json = serde_json::to_string(&vec![ch.clone()]).unwrap();
+    let channel_json = serde_json::to_string(&ch).unwrap();
+    let msg = |seq: u64, body: &str| StoredMessage {
+        message_id: MessageId::from(format!("m-{body}-{seq}").as_str()),
+        workspace_id: WorkspaceId::from("ws-demo-01"),
+        channel_id: ChannelId::from("ch-stub"),
+        seq,
+        author_id: MemberId::from("m-bot"),
+        member_kind: MemberKind::Bot,
+        purpose_id: PurposeId::P01,
+        body: body.to_owned(),
+        thread_root: None,
+        client_msg_id: None,
+        created_at: 0,
+    };
+    let http_ok = |body: String| {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .into_bytes()
+    };
+    // ページ 1: 正常な満杯ページ（good-1..=200）。ページ 2: 同じ範囲を
+    // 違う内容で繰り返す不正な満杯ページ（カーソルを進めない →
+    // Protocol で拒否）。再開後: probe（after_seq=199）にはカーソル
+    // 位置の 1 件、after_seq=200 の再要求には正規の続き
+    // （good-201..=400）、最後に短いページ（good-401）。
+    let tail_calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let calls2 = tail_calls.clone();
+    let stub = spawn_raw_stub_server(move |_method, target| {
+        if target.contains("/messages") {
+            if !target.contains("after_seq=") {
+                http_ok(
+                    serde_json::to_string(&(1..=200).map(|s| msg(s, "good")).collect::<Vec<_>>())
+                        .unwrap(),
+                )
+            } else if target.contains("after_seq=199") {
+                // probe: カーソル位置（seq 200）の 1 件を返す
+                http_ok(serde_json::to_string(&vec![msg(200, "good")]).unwrap())
+            } else if target.contains("after_seq=200") {
+                let n = calls2.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                if n == 1 {
+                    // カーソルが進まない満杯ページ（seq 1..=200 を再送）
+                    http_ok(
+                        serde_json::to_string(
+                            &(1..=200).map(|s| msg(s, "bad")).collect::<Vec<_>>(),
+                        )
+                        .unwrap(),
+                    )
+                } else {
+                    http_ok(
+                        serde_json::to_string(
+                            &(201..=400).map(|s| msg(s, "good")).collect::<Vec<_>>(),
+                        )
+                        .unwrap(),
+                    )
+                }
+            } else {
+                http_ok(serde_json::to_string(&vec![msg(401, "good")]).unwrap())
+            }
+        } else if target.contains("/channels/ch-") {
+            http_ok(channel_json.clone())
+        } else {
+            http_ok(channels_json.clone())
+        }
+    });
+
+    let mut session = LiveSession::new(stub, "ws-demo-01".into());
+    assert!(
+        matches!(
+            session.bootstrap(),
+            Err(LiveError::Protocol("message page did not advance"))
+        ),
+        "カーソルが進まない満杯ページは拒否"
+    );
+
+    session.poll().expect("正しい残りのページで取り切れる");
+    let messages = session.messages();
+    assert_eq!(messages.len(), 401);
+    assert!(
+        messages.iter().all(|m| m.body.starts_with("good")),
+        "拒否したページの内容は次の取得に混ざらない"
+    );
+    assert!(
+        messages.windows(2).all(|w| w[0].seq < w[1].seq),
+        "seq 昇順・重複なし"
     );
 }
