@@ -67,3 +67,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - #586/#587: 事後レビュー結果のコメント未着。継続待ち
 - MCP: t3_thread_send 断続継続（task_status・rename・delegate_task は成功）。発生から約 4 分 — 15 分継続で人間報告の閾値には未到達
 - 対応不要のため automerge・ラベル操作・新規割り当てなし
+
+## 巡回記録（patrol 3・10:53 JST・QA 委託完了 wake）
+
+- **PR #630 QA 完了**: 委託 `qa-630-3c7780eb-20261122` が `QA: pass` を返却（実測 detach 検証・受け入れ条件 5 項全満たす・弱める変更なし・run 44922166726）
+- head `3c7780eb` 不変を確認後、`pelway-qa[bot]` 名義で合格コメント投稿（issuecomment-7072453481・author/type Bot・`QA: pass`/`sha:`/`run:` 全要件充足を api で検証）
+- **automerge 付与**: pelway-review APPROVED@3c7780eb・nit 0・必須チェック全 pass・承認後 head 不変・pelway-qa 同 SHA pass — 5 条件すべて充足。kodiak マージキュー待ちへ移行
