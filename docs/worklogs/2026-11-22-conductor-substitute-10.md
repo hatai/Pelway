@@ -357,3 +357,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **PR #497 MERGED**（kodiak・Issue #490）— 私の指揮で 3 件目のマージ。PR 本文修正依頼は `3f022128` へ send 不可（full-access）→ [PR コメント](https://github.com/hatai/Pelway/pull/497#issuecomment-7073481958)で依頼（初回投稿はシェルクォートで一部欠落・PATCH で修正済み）
 - #464・#600 は kodiak キュー処理中
+
+## 巡回記録（patrol 52・17:30 JST・受信箱 wake）
+
+- **PR #567**: `dab971b2` が must-fix 対応を push（`f72b4c59`）→ r3 レビュー委託を起動（解消確認を指定）
+- **stalled 2 件（immediate）**: #560（+1209/-0）・#399（+823/-40）— いずれも `pr-size` 2 連続失敗・上限 +800 超過。**例外（pr-size-exception）か分割かの hatai 判断が必要**として needs_human 登録
+- **PR #600**: head→`54304936`（kodiak のブランチ更新・キュー処理中）
