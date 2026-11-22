@@ -190,3 +190,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **mcp:57618b05**: hatai の説明どおり Web からの直接送信が起床元と確認（二重指揮ではない）。duplicate_conductor_alert を解除し、同スレッドへの操作は行わない方針に固定
 - **旧指揮役 8892e0a8**: `settled: true`・settledAt 01:41:02Z を thread_read で再確認済み（恒久交代時に実施済）
 - watch.log 3781–3787: cb1a1122（CI セキュリティ修正）completed・4649721f 反復・自スレッドの interrupted/running（報告中の割り込み）
+
+## 巡回記録（patrol 22・11:22 JST・受信箱 wake）
+
+- **#610**: 引き継ぎスレッド `2e87e67b` が新 head `7bc1bea7` を push（2 件目）・**pr-size が pass に転じた** → 例外ではなく分割での対応と解釈（`pr-size-exception` 不要）。draft・CI 実行中・スレッドは waiting（レビュー回しは undraft 後）
+- `cb1a1122`（CI セキュリティ修正）completed。`mcp:57618b05` は hatai の Web 操作で run 終了（対処不要の方針どおり）
+- #586/#587: 結果未着
