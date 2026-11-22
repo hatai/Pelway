@@ -16,6 +16,7 @@
 //! - 接続先は環境変数 `PELWAY_SERVER_URL`（`http://127.0.0.1:{port}` の形。
 //!   ポートはデモ準備キット Issue 390 の固定ポートと同じ値を渡す前提）。
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -48,15 +49,32 @@ pub const MESSAGE_PAGE_LIMIT: u32 = 200;
 
 /// メッセージ取得 1 回（`bootstrap`/`poll` の中の `fetch_messages`）全体の期限。
 /// 各ページの通信は別途 `net` の期限が掛かるが、ページを繰り返すループ全体が
-/// ワーカーを占有し続けないよう、ここにも上限を持たせる。
+/// ワーカーを占有し続けないよう、ここにも上限を持たせる。期限は各ページの
+/// 開始時点で判定する（ページの途中では止めない。期限直前に始まった
+/// ページはそのまま取り終え得る）。
 const FETCH_DEADLINE: Duration = Duration::from_secs(60);
 
-/// メッセージ取得 1 回で蓄積する応答バイト数の上限。ページを足し続けると
-/// メモリを際限なく占有するため、各ページの生の応答長（本文以外の
-/// フィールドやエンベロープを含む）の合計で打ち切る——本文だけ数えると、
-/// 本文が空のメッセージを詰めたページが上限をすり抜ける
+/// メッセージ取得 1 回で保持する履歴の量の目安（応答バイト数相当）。
+/// ページを足し続けるとメモリを際限なく占有するため、保持するのは
+/// 最新側からこの量までとし、超えた古い側は捨てながら末尾まで取る
+/// ——上限到達をもって取得を失敗にすると、上限を超える履歴のある
+/// チャンネルが二度と復帰できなくなるため
 /// （対象デモの履歴はこの値を大きく下回る）。
 const MAX_FETCH_BYTES: usize = 32 << 20;
+
+/// `fetch_messages` が保持量を見積もるための 1 件あたりのサイズ。
+/// 可変長フィールド（本文・各種 ID）の実長にエンベロープ分の定数を足す
+/// ——本文だけ数えると、本文が空のメッセージを詰めた応答が上限をすり抜ける。
+fn message_size(m: &StoredMessage) -> usize {
+    m.body.len()
+        + m.message_id.as_str().len()
+        + m.author_id.as_str().len()
+        + m.workspace_id.as_str().len()
+        + m.channel_id.as_str().len()
+        + m.thread_root.as_ref().map_or(0, |id| id.as_str().len())
+        + m.client_msg_id.as_ref().map_or(0, |id| id.as_str().len())
+        + 256
+}
 
 /// サーバー URL 文字列のパース失敗。文言に入力値は含めない
 /// （接続先として拒否した文字列をエラー出力へ持ち出さない）。
@@ -180,13 +198,20 @@ impl LiveSession {
     }
 
     /// `path` に表示ユーザーの `actor` クエリを付けた要求ターゲット。
+    fn actor_path(&self, path: &str) -> String {
+        self.actor_path_for(&self.actor, path)
+    }
+
+    /// `path` に指定した `actor` のクエリを付けた要求ターゲット。
     /// 値はパーセントエンコードする（unreserved: `[A-Za-z0-9-._~]` 以外は %XX。
     /// member_id 以外の文字が混入してもクエリやリクエスト行を壊さない）。
-    fn actor_path(&self, path: &str) -> String {
-        let mut out = String::with_capacity(path.len() + self.actor.as_str().len() + 7);
+    /// `bootstrap` が名義を選び直した直後（`self.actor` 反映前）にも、
+    /// 取得に使う名義を渡せるよう引数で受ける。
+    fn actor_path_for(&self, actor: &MemberId, path: &str) -> String {
+        let mut out = String::with_capacity(path.len() + actor.as_str().len() + 7);
         out.push_str(path);
         out.push_str("?actor=");
-        for b in self.actor.as_str().bytes() {
+        for b in actor.as_str().bytes() {
             if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
                 out.push(b as char);
             } else {
@@ -231,7 +256,9 @@ impl LiveSession {
             actor = first_human.member_id.clone();
             actor_kind = MemberKind::Human;
         }
-        let messages = self.fetch_messages(&channel_id)?;
+        // 履歴の取得は選び直した名義で行う（GET の actor をサーバーが記録する
+        // ため、表示ユーザーと取得名義を食い違わせない）。
+        let messages = self.fetch_messages(&channel_id, &actor)?;
         // 取得途中の失敗（`fetch_messages` 内で縮退が起きた場合も含む）で
         // `connected` が false に戻されていることがあるため、ここでも一緒に
         // 立て直す。全部そろってから反映する原子性の一部。
@@ -259,32 +286,42 @@ impl LiveSession {
         let Some(channel_id) = self.channel.as_ref().map(|c| c.channel_id.clone()) else {
             return self.bootstrap();
         };
-        let all = self.fetch_messages(&channel_id)?;
+        let actor = self.actor.clone();
+        let all = self.fetch_messages(&channel_id, &actor)?;
         self.connected = true;
         self.messages = all;
         Ok(())
     }
 
-    /// メッセージ一覧を `limit` + `after_seq` のページングで全件取る。
+    /// メッセージ一覧を `limit` + `after_seq` のページングで取る。
     /// 満杯のページが返ったら最後の seq の続きを要求し、短いページで終わる。
     /// 件数は応答のバイト数を抑えられないため、応答が上限超過
     /// （[`crate::net::NetError::TooLarge`]）なら同じカーソルから件数を半減して
     /// 再試行する（1 件でも超える場合だけエラー）。1 回の取得全体には
-    /// [`FETCH_DEADLINE`] と蓄積 [`MAX_FETCH_BYTES`]（生の応答長の合計）の上限を
-    /// 掛け、満杯なのにカーソルが進まない応答（サーバーが `after_seq` を見ない等）
-    /// や要求した件数を超えるページは [`LiveError::Protocol`] にする。
-    fn fetch_messages(&mut self, channel_id: &ChannelId) -> Result<Vec<StoredMessage>, LiveError> {
+    /// [`FETCH_DEADLINE`] の上限を掛け、満杯なのにカーソルが進まない応答
+    /// （サーバーが `after_seq` を見ない等）や要求した件数を超えるページは
+    /// [`LiveError::Protocol`] にする。
+    /// 保持する履歴は最新側から [`MAX_FETCH_BYTES`] 相当まで。それを超えた
+    /// 古い側は捨てながら末尾まで取り続ける——上限到達をもって失敗にすると、
+    /// 予算を超える履歴のあるチャンネルが二度と復帰できなくなるため
+    /// （一覧の `limit` は先頭からの昇順で、末尾側の直接取得はできない）。
+    /// `actor` は履歴取得に使う名義（`bootstrap` が選び直した名義を渡す）。
+    fn fetch_messages(
+        &mut self,
+        channel_id: &ChannelId,
+        actor: &MemberId,
+    ) -> Result<Vec<StoredMessage>, LiveError> {
         let deadline = Instant::now() + FETCH_DEADLINE;
         let base = channel_messages_path(channel_id);
-        let mut out = Vec::new();
+        let mut out = VecDeque::new();
+        let mut out_bytes = 0usize;
         let mut after: Option<u64> = None;
         let mut page_limit = MESSAGE_PAGE_LIMIT;
-        let mut response_bytes: usize = 0;
         loop {
             if Instant::now() >= deadline {
                 return Err(self.protocol_err("message fetch deadline"));
             }
-            let mut path = self.actor_path(&base);
+            let mut path = self.actor_path_for(actor, &base);
             path.push_str(&format!("&limit={page_limit}"));
             if let Some(s) = after {
                 path.push_str(&format!("&after_seq={s}"));
@@ -296,21 +333,25 @@ impl LiveSession {
                 }
                 result => result?,
             };
-            response_bytes += resp.body.len();
-            if response_bytes > MAX_FETCH_BYTES {
-                return Err(self.protocol_err("message history exceeds fetch limit"));
-            }
             let page: Vec<StoredMessage> = self.parse_json(&resp.body)?;
             if page.len() > page_limit as usize {
                 return Err(self.protocol_err("message page exceeds requested limit"));
             }
             let full = page.len() >= page_limit as usize;
             let last_seq = page.last().map(|m| m.seq);
-            out.extend(page);
+            for m in page {
+                out_bytes += message_size(&m);
+                out.push_back(m);
+            }
+            while out_bytes > MAX_FETCH_BYTES
+                && let Some(m) = out.pop_front()
+            {
+                out_bytes -= message_size(&m);
+            }
             match (full, last_seq) {
                 (true, Some(s)) if after.is_none_or(|a| s > a) => after = Some(s),
                 (true, _) => return Err(self.protocol_err("message page did not advance")),
-                _ => return Ok(out),
+                _ => return Ok(out.into_iter().collect()),
             }
         }
     }
@@ -322,9 +363,35 @@ impl LiveSession {
     /// 時点の宛先・名義と食い違ったら [`LiveError::StaleTarget`] で止める
     /// （同じ操作が別のチャンネル・別人名義に届くのを構造で防ぐ）。
     ///
+    /// 投稿の冪等キー（`client_msg_id`）を新規発行する。応答の受け取りに
+    /// 失敗した投稿を再送したい呼び出し元は、この ID を保持して
+    /// [`Self::post_with_id`] に渡す。同じ論理投稿の再送は同じ ID で送る——
+    /// サーバーは `workspace`×`author`×`client_msg_id` で冪等に扱い、
+    /// 同じ ID の再投稿は保存済みのものを返す（内容が違えば 409）。
+    /// `post` は呼び出しごとに新しい ID を発行するため、再送しても
+    /// 冪等にはならない。
+    #[must_use]
+    pub fn new_client_msg_id() -> ClientMsgId {
+        ClientMsgId::from(uuid::Uuid::new_v4().to_string().as_str())
+    }
+
     /// # Errors
     /// チャンネル未選択・宛先の食い違い・要求の失敗。
     pub fn post(&mut self, body: &str) -> Result<StoredMessage, LiveError> {
+        self.post_with_id(body, Self::new_client_msg_id())
+    }
+
+    /// [`Self::post`] に冪等キーを指定する版。呼び出し元が保持した
+    /// `client_msg_id` で送る（応答を受け取れなかった投稿の再送用）。
+    /// 宛先・名義の確定と食い違い検査は `post` と同じ。
+    ///
+    /// # Errors
+    /// チャンネル未選択・宛先の食い違い・要求の失敗。
+    pub fn post_with_id(
+        &mut self,
+        body: &str,
+        client_msg_id: ClientMsgId,
+    ) -> Result<StoredMessage, LiveError> {
         // 受け付け時点の宛先（チャンネル）と名義（表示ユーザー）を保持する。
         // 宛先が未選択ならここで止める——通信を始めて `bootstrap` が選び直した
         // チャンネルへ（表示ユーザーが見ていない先へ）送ることはしない。
@@ -344,7 +411,7 @@ impl LiveSession {
         }
         let channel_id = want_channel;
         let request = PostMessageRequest {
-            client_msg_id: ClientMsgId::from(uuid::Uuid::new_v4().to_string().as_str()),
+            client_msg_id,
             body: body.to_owned(),
             thread_root: None,
         };
@@ -413,9 +480,10 @@ impl LiveSession {
 
     /// 投稿応答の保存済みメッセージを seq 昇順を保つ位置に挿入する
     /// （`message_id` の重複は足さない。呼び出しは `post` の応答 1 件だけで、
-    /// `poll` は一覧の全件置き換えなのでここを通らない。手元の一覧は最後の
-    /// 取得時点のもので、投稿が保存される間に他者の発言が先に入っていると
-    /// 応答の seq が末尾より小さくなり得るため、末尾に足すだけでは順序が崩れる）。
+    /// `poll` は一覧の全件置き換えなのでここを通らない。サーバーはチャンネル内で
+    /// seq を単調に採番するため通常は末尾への追加で済むが、保存部が
+    /// 再初期化されて採番が振り直された場合など、一覧と応答の seq が
+    /// 交差し得る経路でも順序が崩れないよう位置に挿入する）。
     fn append_new(&mut self, new: Vec<StoredMessage>) {
         for m in new {
             if self.messages.iter().any(|e| e.message_id == m.message_id) {

@@ -199,9 +199,10 @@ fn connection_failure_marks_offline_and_recovery_restores() {
 #[test]
 fn bootstrap_shrinks_pages_and_stays_connected() {
     let (addr, store) = spawn_demo_server();
-    // 1 件あたり約 60 KiB の本文を持つ履歴。MESSAGE_PAGE_LIMIT=200 の 1 ページ
-    // 要求では応答が 1 MiB を優に超える（サーバーは要求本文 64 KiB まで受け付け、
-    // 一覧の制限は件数だけ）。limit を半減させる再試行が必要な配置。
+    // 1 件あたり約 60 KiB の本文を持つ履歴（ASCII 60,000 バイト＝投稿の
+    // 要求本文上限 64 KiB に収まる投稿）。MESSAGE_PAGE_LIMIT=200 の 1 ページ
+    // 要求では応答が 1 MiB を優に超える（一覧の制限は件数だけ）。
+    // limit を半減させる再試行が必要な配置。
     let extra = 20usize;
     {
         let mut store = store.lock().expect("store lock");
@@ -214,7 +215,7 @@ fn bootstrap_shrinks_pages_and_stays_connected() {
                         author_id: "m-hal".into(),
                         member_kind: MemberKind::Bot,
                         purpose_id: PurposeId::P01,
-                        body: "あ".repeat(60_000) + &i.to_string(),
+                        body: "a".repeat(60_000) + &i.to_string(),
                         thread_root: None,
                         client_msg_id: None,
                     },
@@ -320,22 +321,30 @@ fn bootstrap_failure_mid_refetch_keeps_previous_channel_and_actor() {
     );
 }
 
-// 蓄積上限: 本文が空でも ID などの可変長フィールドが大きいメッセージを
-// 詰めた満杯のページを返し続ける接続先に対して、取得 1 回の蓄積上限
-// （生の応答長の合計）で打ち切られる。本文だけ数えるとこの経路が
-// 上限をすり抜けるための回帰テスト。
+// 保持上限（スライディングウィンドウ）: 本文が空でも ID などの可変長
+// フィールドが大きいメッセージを詰めた満杯のページを連続して返す接続先でも、
+// 保持する履歴を最新側の予算内に収めながら末尾まで取り切れる
+// （上限到達をもって失敗にすると、予算を超える履歴のあるチャンネルが
+// 復帰できなくなるため）。本文だけ数えるとこの経路が上限をすり抜けるため、
+// 可変長フィールドを含めて見積もる。
 #[test]
-fn poll_aborts_on_accumulated_response_bytes_even_with_empty_bodies() {
+fn poll_keeps_the_newest_messages_within_the_fetch_budget() {
     let (addr, _store) = spawn_demo_server();
     let mut session = LiveSession::new(addr, "ws-demo-01".into());
     session.bootstrap().expect("bootstrap succeeds");
 
     // 各ページは要求どおりちょうど MESSAGE_PAGE_LIMIT 件・1 MiB 未満で、
-    // seq を進めながら返し続ける。本文は空で、ID だけを大きくする。
+    // seq を進めながら 45 ページ返し、その後は空ページで取得を終わらせる。
+    // 本文は空で、ID だけを大きくする（ページあたり約 860 KiB、合計で
+    // 保持予算 32 MiB を超える配置）。
+    let total: u64 = 45 * 200;
     let pad = "a".repeat(4_000);
     let next_seq = Arc::new(std::sync::atomic::AtomicU64::new(1));
     let stub = spawn_stub_server(move |_target| {
         let base = next_seq.fetch_add(200, std::sync::atomic::Ordering::SeqCst);
+        if base > total {
+            return (200, "[]".to_owned());
+        }
         let msgs: Vec<StoredMessage> = (0..200_u64)
             .map(|i| StoredMessage {
                 message_id: MessageId::from(format!("m-{}", base + i).as_str()),
@@ -358,16 +367,100 @@ fn poll_aborts_on_accumulated_response_bytes_even_with_empty_bodies() {
     });
     session.set_addr(stub);
 
+    session
+        .poll()
+        .expect("poll succeeds by keeping only the newest within budget");
+    assert!(session.connected(), "取得に成功したら接続状態");
+    let messages = session.messages();
     assert!(
-        matches!(
-            session.poll(),
-            Err(LiveError::Protocol("message history exceeds fetch limit"))
-        ),
-        "生の応答長の蓄積上限で取得を打ち切る"
+        messages.len() < total as usize,
+        "予算を超える分の古い側は保持しない（{} 件中 {} 件）",
+        total,
+        messages.len()
+    );
+    assert_eq!(
+        messages.last().map(|m| m.seq),
+        Some(total),
+        "最新のメッセージは残る"
     );
     assert!(
-        !session.connected(),
-        "通信は正常でも取得条件の失敗は接続状態を下げる"
+        messages.first().map(|m| m.seq).unwrap_or_default() > 1,
+        "古い側は予算の分だけ捨てられる"
+    );
+    assert!(
+        messages.windows(2).all(|w| w[0].seq < w[1].seq),
+        "seq 昇順を保つ"
+    );
+}
+
+// 名義の切替と GET の actor: `bootstrap` がチャンネルのメンバーから
+// 表示ユーザーを選び直したとき、履歴取得の GET はその新しい名義を送る
+// （サーバーは GET の actor を記録するため、表示と取得で名義を食い違わせない）。
+#[test]
+fn bootstrap_fetches_history_with_the_switched_actor() {
+    // 既定の表示ユーザー（m-tanaka）が居ないチャンネルを返すスタブ。
+    let other = Channel {
+        workspace_id: WorkspaceId::from("ws-demo-01"),
+        channel_id: ChannelId::from("ch-other"),
+        name: "別チャンネル".to_owned(),
+        members: vec![ChannelMember {
+            member_id: MemberId::from("m-sato"),
+            display_name: "佐藤".to_owned(),
+            member_kind: MemberKind::Human,
+        }],
+    };
+    let channels_json = serde_json::to_string(&vec![other.clone()]).unwrap();
+    let channel_json = serde_json::to_string(&other).unwrap();
+    let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+    let seen_in_stub = seen.clone();
+    let stub = spawn_stub_server(move |target| {
+        seen_in_stub.lock().unwrap().push(target.to_owned());
+        if target.contains("/messages") {
+            (200, "[]".to_owned())
+        } else if target.contains("/channels/ch-") {
+            (200, channel_json.clone())
+        } else {
+            (200, channels_json.clone())
+        }
+    });
+
+    let mut session = LiveSession::new(stub, "ws-demo-01".into());
+    session.bootstrap().expect("bootstrap succeeds");
+    assert_eq!(session.actor().as_str(), "m-sato", "先頭の人に切り替わる");
+    let seen = seen.lock().unwrap();
+    assert!(
+        seen.iter()
+            .any(|t| t.contains("/messages") && t.contains("actor=m-sato")),
+        "履歴取得の GET は選び直した名義を送る: {seen:?}"
+    );
+}
+
+// 冪等キー: 同じ論理投稿の再送は同じ `client_msg_id` で送り、
+// サーバーは二重に記録しない。新しい投稿は別の ID で送る。
+#[test]
+fn repost_with_same_client_msg_id_is_idempotent() {
+    let (addr, _store) = spawn_demo_server();
+    let mut session = LiveSession::new(addr, "ws-demo-01".into());
+    session.bootstrap().expect("bootstrap succeeds");
+    let base = session.messages().len();
+
+    let id = LiveSession::new_client_msg_id();
+    let first = session
+        .post_with_id("再送テスト", id.clone())
+        .expect("first post");
+    let second = session
+        .post_with_id("再送テスト", id)
+        .expect("repost with same id");
+    assert_eq!(
+        first.message_id, second.message_id,
+        "同じ client_msg_id の再送は保存済みを返す"
+    );
+    assert_eq!(session.messages().len(), base + 1, "二重には記録されない");
+
+    let third = session.post("別の投稿").expect("new post gets new id");
+    assert_ne!(
+        third.message_id, first.message_id,
+        "新規の投稿は別の ID（別の保存済みメッセージ）"
     );
 }
 
