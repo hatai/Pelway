@@ -196,6 +196,20 @@ if [ ! -x "$profdata" ] || [ ! -x "$cov" ]; then
 fi
 "$profdata" --version
 "$cov" --version
+# components の名前が rustup の導入済み一覧（-<target> を除いた名前）にあるかを照合する。
+# 別名（llvm-tools-preview など）で書くと mise が導入済みと判定できず、mise exec のたびに
+# rust を入れ直す（#596）。成分の実体は上の検査で揃っていても、名前のずれはここで落とす。
+version=$(mise config get -f mise.toml tools.rust.version)
+installed=$(rustup component list --installed --toolchain "$version" | sed "s/-$host\\$//")
+missing=""
+for c in $(mise config get -f mise.toml tools.rust.components | tr -d '[]",'); do
+  printf '%s\\n' "$installed" | grep -qxF "$c" || missing="$missing $c"
+done
+if [ -n "$missing" ]; then
+  echo "rust.components in mise.toml has name(s) not in 'rustup component list --installed --toolchain $version':$missing. Use the name rustup lists (without the -$host suffix)." >&2
+  exit 1
+fi
+echo "rust.components match rustup installed components:" $(mise config get -f mise.toml tools.rust.components | tr -d '[]",')
 """
 
 [tasks.hk-validate]
@@ -290,11 +304,11 @@ description = "指揮役を立て直す（新しい指揮役を main の専用 w
 run = "bash scripts/conductor-rebuild"
 
 [tasks.codex-review-check]
-description = "レビュー担当の Codex（codex_review）のネットワークが GitHub だけに絞られているかを確かめる（Codex を更新したら実行する）"
+description = "レビュー担当の Codex（codex_review）の sandbox から、api.github.com と github.com に HTTP 200 が返り、example.com に応答が無いことを確かめる（Codex を更新したら実行する）"
 run = """
 #!/usr/bin/env bash
 set -uo pipefail
-probe() { codex sandbox --enable network_proxy -P review -- curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$@" 2>/dev/null; }
+probe() { CODEX_HOME="$HOME/.codex-review" codex sandbox --enable network_proxy -P review -- curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$@" 2>/dev/null; }
 ok=1
 for u in https://api.github.com https://github.com; do
   code="$(probe "$u")"; echo "$u -> $code"; [[ "$code" == 200 ]] || ok=0
@@ -303,7 +317,7 @@ for u in https://example.com; do
   code="$(probe "$u")"; echo "$u -> ${code:-000}"; [[ "$code" == 000 || -z "$code" ]] || ok=0
   code="$(probe --noproxy '*' "$u")"; echo "$u (noproxy) -> ${code:-000}"; [[ "$code" == 000 || -z "$code" ]] || ok=0
 done
-((ok)) && echo "codex-review-check: ok" || { echo "codex-review-check: NG（~/.codex/config.toml の [permissions.review] と features を確かめる）"; exit 1; }
+((ok)) && echo "codex-review-check: ok" || { echo "codex-review-check: NG（~/.codex-review/config.toml の [permissions.review] と features を確かめる）"; exit 1; }
 """
 
 [tasks.agent-watch-install]

@@ -9,7 +9,7 @@
 # mise に信頼されていないため。mise trust と違い、mise の状態に記録を残さない）。
 # 終了コード: <コマンド> の終了コード。2 = 引数の誤り（-- が無い・コマンドが無い・--keep のパスが
 # 作業ツリーに無いかリポジトリの外、最後の要素が . か ..）、3 = 準備の失敗（一時 worktree を作れない・
-# --keep のパスを重ねられない）。準備に失敗したときはコマンドを走らせない（red の失敗と見分けるため）。
+# --keep のパスを重ねられない・<ref> 側で重ね先の親が一時 worktree の外を指す symlink）。準備に失敗したときはコマンドを走らせない（red の失敗と見分けるため）。
 set -euo pipefail
 
 usage() {
@@ -83,7 +83,25 @@ if ! git -C "$top" worktree add --quiet --detach "$wt" "$ref" >&2; then
   exit 3
 fi
 
+# 重ねる先の親を、今ある祖先までさかのぼって実体パスにし、一時 worktree の中に収まることを確かめる。
+# <ref> 側で親が worktree の外を指す symlink だと、削除・mkdir・コピーがその先に及ぶため、重ねる前に止める。
+wt_real="$(cd "$wt" && pwd -P)"
+inside_worktree() {
+  local d="$1"
+  while [[ ! -e "$d" && ! -L "$d" ]]; do
+    d="$(dirname "$d")"
+  done
+  [[ ! -L "$d" || -d "$d" ]] || return 1 # リンク先の無い symlink は行き先を確かめられないので外と見なす
+  [[ -d "$d" ]] || return 0               # 祖先が通常のファイルなら mkdir が失敗する（下で 3 になる）
+  d="$(cd "$d" && pwd -P)"
+  [[ "$d" == "$wt_real" || "$d" == "$wt_real"/* ]]
+}
+
 for r in ${rels[@]+"${rels[@]}"}; do
+  if ! inside_worktree "$(dirname "$wt/$r")"; then
+    echo "red-check: --keep のパスの重ね先が $ref の一時 worktree の外に出ます（親が外への symlink）: $r" >&2
+    exit 3
+  fi
   if ! { rm -rf -- "${wt:?}/$r" && mkdir -p "$(dirname "$wt/$r")" && cp -a -- "$top/$r" "$wt/$r"; }; then
     echo "red-check: --keep のパスを $ref の一時 worktree に重ねられません: $r" >&2
     exit 3
