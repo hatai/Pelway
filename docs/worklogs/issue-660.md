@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「共有の一時ディレクトリ（/tmp）の固定パスを条件に含めるときは、所有者の確認を条件に含める」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: 1d19d4392203925bff92daf74ef966d8851d486f
+
+1. 詰まった箇所: 手順 9: codex（既存ディレクトリの中身の検査）と claude（1 回の lstat で種類と所有者を確かめる）の must-fix を 1 つの if 条件にまとめた。`find` の中身検査は scratchpad で新規作成・自分の既存・余計なファイルあり・`/tmp/sshims` が symlink・`fnox` がディレクトリの 5 通りを確かめた。
+2. 曖昧だった文: 「信頼できない内容が残っていないことを確認してください（安全に確認できなければ利用を拒否してください）」（PR #661 の round 2 レビュー、codex must-fix）
+3. 仮定と解釈: 「安全な確認」は `fnox` という名前の symlink 以外の entry を 1 つでも見つけたら（`find -print -quit`）拒否する形と解釈した（entry ごとの所有者検査は選ばなかった）。`stat -c '%F %u'` が `directory <uid>` を返すのは GNU stat の Linux 環境の前提。
+4. 足りなかった情報・検証手段: 別ユーザーを実際に作る手段が無く、rename 入れ替えの競合（TOCTOU）の実測はできていない（5 通りの scratchpad 検証で代替）。非英語 locale での `%F` の出力も未確認（環境は C locale）。
+5. 改善案: `.agents/skills/review-pr/SKILL.md` の must-fix の書き方に「提案する直し方が Issue の受け入れ条件（例: 固定パス）と矛盾しないか確かめる」を足す。
+
+使ったスキル: implement-issue
