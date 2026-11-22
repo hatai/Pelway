@@ -398,3 +398,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## QA 結果処理（#652・19:00 JST）
 
 - **PR #652 全条件充足 → Ready 化＋automerge**: pelway-qa で [QA pass@e87e25ff](https://github.com/hatai/Pelway/pull/652#issuecomment-7073947591) を投稿（必須チェック全 pass・security-scan 3 job pass・受け入れ条件 pass・弱化なし）・r2 APPROVED@同 SHA → kodiak キューへ
+
+## 巡回記録（patrol 60・19:15 JST・受信箱 wake）
+
+- **PR #567 MERGED**（kodiak・Refs #306 は条件 3 未検証のため Issue open 継続）— 指揮下 5 件目
+- **PR #530**: impl `5c599260` が must-fix 対応を push（`f74b848a`）→ r2 レビュー委託（rev-530-f74b848a-20261122）
+- **#652**: kodiak が main 取り込み（head `27485b92`・マージ待ち）・**#600**: 同様に更新中（`b3fe09fd`）
+- **#662/#663**: draft のまま impl が head 更新（`99bd141e`/`79c09a6b`）
