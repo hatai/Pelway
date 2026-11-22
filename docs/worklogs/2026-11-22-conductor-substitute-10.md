@@ -202,3 +202,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - open PR 棚卸し（12 件・#630/#631 のマージ反映）: CHANGES_REQUESTED は #610・#567・#560・#530・#497・#399。APPROVED draft は #600・#482・#464・#463。#625/#624 は REVIEW_REQUIRED
 - #530（#481・non-draft・MERGEABLE・CHANGES_REQUESTED@f74b848a）: must-fix 未対応のまま滞留 — send 障害で impl の wake ができず、PR コメントでの指示は未実施（要否を次巡回で判断）
 - #586/#587: 結果未着
+
+## 巡回記録（patrol 24・11:32 JST・受信箱 wake）
+
+- **#530 レビュー r2 委託起動**: subject の「hatai 手動 push 待ち」は実測で解消済みと確認 — head `f74b848a`（r1 CR 対応コミット・`.github/workflows/notify-grokbot.yml` を含む）が既に origin 上。codex_review（gpt-6.1-terra）へ `rev-530-r2-f74b848a` を起動（r1 must-fix の解消確認＋workflow 権限面を重点に指示）
+- `2e87e67b`（#610 引き継ぎ）短い run（waiting→running→waiting）・継続稼働
+- `mcp:57618b05`: hatai Web 操作の反復（方針どおり対処せず）
+- #586/#587: 結果未着
