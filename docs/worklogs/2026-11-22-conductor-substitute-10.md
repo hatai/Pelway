@@ -128,3 +128,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **手当 `hand-631` 完了**: main 取り込み・衝突解消（docs/dev-environment.md 1 箇所・両側の変更を両残し）・verify pass → 新 head `2cd790bb`・MERGEABLE（merge commit は API 再署名対象外で署名なし — 仕様どおり）
 - **レビュー r2 委託**: 旧 approve は旧 head `67d48dd6` 対象のため codex_review（gpt-6-luna）へ `rev-631-r2-2cd790bb-20261122` を起動。差分は merge commit のみ — 衝突解消の正当性と承認済み差分の不変を重点に指示
 - CI は新 head で 9 件 pending 中（pr-size・semgrep は既に pass）
+
+## 巡回記録（patrol 12・11:12 JST・スケジュール）
+
+- 未読なし
+- #631: `2cd790bb`・MERGEABLE。push により旧 approve 2 件（pelway-review・hatai）は DISMISSED — r2 レビュー委託で回収中。CI 3 件 pending・fail なし
+- #610: draft・`b7efc229` 不変・引き継ぎスレッド作業中と判断
+- #586/#587: 結果未着
