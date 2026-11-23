@@ -660,3 +660,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 11-23 22:40 — #673 QA pass・automerge
 
 - QA（Devin）: pass@32f3b85d → pelway-qa 投稿（issuecomment-7096488932）・`automerge` 付与。Kodiak の追随で head が変われば codex 承認失効のため要監視
+
+## 11-23 22:50 — glm-5.4 一回限り指示（濱田さん）
+
+- 次に新規起動する GLM 実装スレッド 1 件のみ `zai-coding-plan/glm-5.4`。稼働中スレッドは 5.3 のまま・手順書既定は不変。長い思考ループにはまりやすいため長時間停止時は報告
