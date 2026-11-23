@@ -35,6 +35,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 | sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
 | 委託したレビューが `failed` で、`error:` が `設定の不備:` で始まる（レビュー担当の環境の確認で外したツールが残っている。skill `review-pr` の「決まり」）。再委託しない | `error:` の行と、委託した担当 |
+| 手順 8 の helper `required-checks` が、実行し直しても続けて 3（判定できない）を返した | 2 回の実行の標準エラー出力と、対象の PR 番号 |
 | レビューの委託が `runtimeMode: "auto-accept-edits"` で受け付けられず、子タスクが作られなかった。`auto`・`full-access` に変えて委託し直さない | 委託の指定（`target`・`runtimeMode`）と、返ったエラー文 |
 | 3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）、`[文書のずれ]` の nit だけを直す round を通算 2 回終えた後に、また印の nit が残った（通算 3 回目には入らない）、委託が 2 回連続で `failed`（`checks timeout` と `wrong runtime` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort） |
 
@@ -217,7 +218,14 @@ PR を作るたびに、T3 のスレッドにそのスレッドの PR を全部�
 
 差分が `scripts/agent-gh` を変えるとき、または `.claude/`・`.mcp.json`・`.codex/`・`.devin/`・`.cursor/`・`.cursorrules`・`.windsurf/`・`.windsurfrules`・`.agents/skills/review-pr/`・`.agents/skills/security-review/`・`.agents/skills/pr-watch/`・どのディレクトリの `AGENT.md`・`AGENTS.md`・`AGENTS.local.md`・`AGENTS.override.md`・`CLAUDE.md` を足す・変えるときはレビューを委託しない（後者はレビュー担当のツールの設定や従う手順を、委託の子が読む PR の版で差し替えうるため。`.devin/` は Devin CLI がプロジェクト層として読む config・hooks・rules・skills、`.windsurf/`・`.windsurfrules`・`AGENT.md`・`AGENTS.local.md`・`.cursor/`・`.cursorrules` は互換で読まれる経路、`.agents/skills/pr-watch/` は `review-pr` が待ち方の手順として従わせるスキル）。指揮役が main から立てるレビュースレッドに回るのを待ち、最後の返答を下の「ターンの終わりの状態の行」の `state: waiting-conductor` にして終える（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
 
-PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。チェックがまだ動いていれば、完了を待ってから委託する（待ち方は skill `pr-watch` の「待ち方」に従う。必須チェックの通過は `pr-digest` の `required` 行で確かめる。レビュー担当もチェックが終わるまで待ってからレビューする。委託した子が `error: checks timeout` を報告したときも、同じラウンドとして数えずに完了を待って再委託する）。
+PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。通過は、委託の直前に同梱の helper `.agents/skills/implement-issue/required-checks <PR 番号>` を実行し、その終了コードで確かめる（標準出力は 2 つのチェックの判定 `<名前>: <pass|fail|pending>`。同じ名前の行の集計と pr-size の例外の扱いは skill `review-pr` の手順 2 と同じ。`bucket` の `skipping` を pass、`cancel` を fail に数えることと、閉じる Issue をリポジトリと番号の組で照会することは helper だけの規則で、helper の冒頭のコメントに書いてある）。
+
+- 0（通過）: `delegate_task` を呼ぶ
+- 1（失敗）: 手順 6 に戻って直す。pr-size の超過は「止まる条件」の表のとおり止まる
+- 2（待ち）: skill `pr-watch` の「待ち方」で待ってから、helper を実行し直す
+- 3（判定できない。取得の失敗・引数の誤り）: 1 回だけ実行し直し、また 3 なら止まる（「止まる条件」の表）
+
+レビュー担当もチェックが終わるまで待ってからレビューする。委託した子が `error: checks timeout` を報告したときも、同じラウンドとして数えずに完了を待って再委託する。
 
 担当と effort は skill `command-team` の「レビュー担当と effort」の表で決める（通常は PR 番号の偶奇、高リスクは使える担当全て、抜き取りは PR 番号を 4 で割った余りが 0 のとき Claude を追加。自分が Devin CLI で実装した PR には Devin CLI を付けない）。差分が `unsafe` を足している、`.github/workflows/`・`scripts/agent-gh`・`AGENTS.md`・`.agents/skills/`・`docs/agents/` のどれかが変わっている、認証・認可・トークン・鍵・暗号・sandbox・egress・gateway・テナント分離・監査に触れている、のどれかに当たるときは Assigned 行に `security=yes` を付ける。
 
