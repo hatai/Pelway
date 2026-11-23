@@ -517,3 +517,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **指揮役が直接手当て**: MCP send 不通で調査スレッド（c6a55f0d）へ回付できず、証拠はすべて巡回記録と実コードのため conductor-worktree で修正 → head `13097549` push・[対応要約コメント](https://github.com/hatai/Pelway/pull/650#issuecomment-7090665028)
 - 新規証拠の発見: 61092c の `prev=completed→running` 遷移 22 回（定期起床込み）・`patrol-state.json.bak-devin10-handover` の存在・substitute-11 worklog の interrupt 実測（run 23 自動起き直り）
 - **再レビュー委託**（codex gpt-6.2-sol r2 @13097549）
+
+## hatai 優先指示: #669/#670/#671 起動（11-23 12:55 JST）
+
+- 起票した 3 Issue に hatai の直接指示「以下を優先的に処理して」→ ボード順を覆して割り当て（理由・根拠は Issue コメントに記録）
+- 前段: 本文の相互参照を実番号に修正・blocker 確認（各 0 件・コメント記録）・`ready-for-agent`+`agent:working`（#671 は `agent:devin` も）・ボードキュー Working 投入
+- **#669 → GLM**（glm-5.3 high）・**#670 → GLM**（glm-5.3 high）・**#671 → Devin**（swe-2-high high +`agent:devin`）。通常運用の枠内（GLM 計 3・Devin 計 4）
+- **経路の分岐を実測**: `t3_thread_launch` は ×3「Failed to connect」だが `create_threads`+`t3_thread_send` は成功 — send 系障害は launch API 限定と判明（#650 報告の非対称と同系）
