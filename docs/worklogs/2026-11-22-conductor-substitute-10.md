@@ -642,3 +642,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - QA（Devin・`qa-678-c7344eab`）: **pass**。事故シナリオ再現で offset 巻き戻し拒否+anomaly 記録を実測・書き込み一元化確認 → pelway-qa 投稿（issuecomment-7094612295）。automerge は codex approve 待ち（現承認は claude）
 - #610 Devin 再レビュー: approve@548faa59（QA は実行中）
+
+## 11-23 21:25 — #610 QA pass
+
+- QA（Devin・`qa-610-548faa59`）: **pass**。bb7a7f78→548faa59 は main 取り込み以外に実変更 12 件を含むが、後続承認（be1edd20〜41d7cd2e・現 head で APPROVED×2）で裁かれていると確認。弱体化変更はすべて本文に理由記載 → pelway-qa 投稿（issuecomment-XXX）。automerge は codex 待ち
