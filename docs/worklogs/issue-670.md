@@ -11,3 +11,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の「スレッド連絡の帳簿（`thread_contacts`）」に「Issue #671 の書き込み手順（`scripts/patrol-state-update`）が導入された後は、この帳簿への書き込みもその手順を通る」を足す（#671 のマージ後に、帳簿の項目も共通手順の保護対象であることを明示する）
 
 使ったスキル: implement-issue, write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: cb2f2edefcab9aabf6052ecbf4187c3b0994c2a8
+
+1. 詰まった箇所: 手順 6: マージコミットを含む push は `agent-gh-resign` が署名なしのまま通した（API で表現できない変更の既知の制約）。verify の deny-check は main 取り込み（url 2.5.9）で緑に戻り、残る失敗は `verify-run.test.sh` のみ（round 1 と同じ環境起因・退避でも再現済み）
+2. 曖昧だった文: 「`what` と `due` は組で書き、次の連絡予定が無いときは両方とも書かない」（docs/agents/grokbot-runbook.md「スレッド連絡の帳簿（`thread_contacts`）」）— レビューの must-fix が指したとおり、round 1 の「送れないときは…帳簿の `what` にその旨を残す」がこの定義と矛盾していた
+3. 仮定と解釈: 送信失敗時の帳簿は「`what`・`due` とも書かない（予定が無いものとして次の棚卸しで数え上げ、再送を試みる）」に統一した。`due` を過ぎた項目の再確認段がまだ無い（レビュー nit 1）中で `what`・`due` を書く案は追跡手段を欠くため選ばず、毎巡回の棚卸しで拾う道を選んだ。nit 3 件は `[文書のずれ]` の印が無いため直していない（決まりどおり）
+4. 足りなかった情報・検証手段: レビューの must-fix 2 件（チェック緑化・帳簿更新の矛盾解消）の対応に不足は無かった
+5. 改善案: `docs/agents/grokbot-runbook.md` の「スレッド連絡の帳簿（`thread_contacts`）」に「`due` を過ぎた項目は棚卸しの手順 2 で期限切れとして数え、確認し直す」（レビュー nit 1・2 の対応）を別 Issue で足す
+
+使ったスキル: implement-issue, pr-watch
