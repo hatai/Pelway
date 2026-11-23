@@ -689,3 +689,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 11-24 00:20 — #679 request-changes を impl へ転送
 
 - Devin レビュー@86b91cac: request-changes・must-fix 2・nit 3 → 実装スレッドへ送付（修正→再レビュー→QA・codex 待ち前提）
+
+## 11-24 00:35 — #680 must-fix を指揮役で解消・再チェック委託
+
+- Devin レビュー@b20964cc: request-changes・must-fix 1（`Closes #669` がバッククォート内で closing 認識されない）→ PR 本文を修正（closingIssuesReferences=[669] 確認）。nit 3 は impl へ共有。同 head で再チェック委託
