@@ -11,3 +11,15 @@
 5. 改善案: `docs/superpowers/specs/agent-team.md` の「実装」の節に「実装スレッドが conductor 由来の worktree で起動されたときは、着手前に stash・ブランチの衝突を指揮役に確認する」を足す
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 2）
+
+対象 head: cd3f47cfe96a2d9c10a9ee4de74c8f48afe08006
+
+1. 詰まった箇所: PR #680 の必須チェックが RUSTSEC-2026-0592（url 2.5.8。Issue #674）で 2 回連続失敗（ローカルの `mise run verify` も deny-check 同原因で exit 1・cargo test キャンセル）。開発リードの指示（main 取り込み → 直せなければ報告して停止）に従い、PR #677 マージ済みの origin/main（187a42a6）を merge して解消
+2. 曖昧だった文: 「いまの worktree が指揮役の worktree（conductor/rebuild-20261122103800）なら、#669 専用の worktree に移ってから作業してください」（開発リード指示）。round 1 では `git worktree add` が sandbox に拒まれた（`Read-only file system`）
+3. 仮定と解釈: OpenCode の `worktree_create`（ホスト側で作成）＋ `session_move` なら sandbox 制限を回避できると解釈し、`/home/hatai/.local/share/opencode/worktree/413a66/issue-669-pending-sends` に移って作業した（成功。conductor worktree にはもう触れていない）。指揮役が共有 worktree 上に積んだコミット 3639f6cf（worklog 混入）は指揮役自身が 35ad0025 で revert 済みのため、取り込んだだけで手を加えていない
+4. 足りなかった情報・検証手段: 共有 worktree の併発によるブランチ切替の通知（round 1 に同じ。リード指示で専用 worktree への退避が確定したため解消）
+5. 改善案: `docs/superpowers/specs/agent-team.md` の「実装」の節に「実装スレッドの起動時に専用 worktree を作れないときは、指揮役が代替手段（worktree_create + session_move）を指示する」を足す
+
+使ったスキル: implement-issue
