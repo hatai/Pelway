@@ -630,3 +630,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - 濱田さんが #330/#480/#333/#602/#660 の needs-human を除去（open で残るのは #305/#306 のみ）
 - **#399** `00c7f261`: Ready・CLEAN・全条件充足 → `automerge` 付与（Kodiak 待ち）
 - #482 `4819469a`・#560 `9b92b448`・#661 `a30cebfd` は Draft — approve/Ready 待ちで QA 経路を保留中
+
+## 11-23 20:45 — codex 承認必須ルールの確認と各 PR の判定
+
+- 濱田さん確認: codex の approve は全 PR でマージ必須・Claude/Devin は代替不可。codex 上限（11/28 復旧）中は他条件のみ準備
+- **#399**: 承認は codex（実装メモで review-request to: codex を確認・approve は 640db248 レビューが head 00c7f261 に着地）→ automerge 維持
+- **#678**: approve は claude → codex 待ち（QA は準備として継続）
+- **#610**: Devin 再レビュー+QA は準備扱い、automerge は codex 待ち。#482/#560/#661 も同扱い
