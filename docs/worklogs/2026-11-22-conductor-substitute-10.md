@@ -685,3 +685,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - #661 QA（Devin）: pass@90ed8d97 → pelway-qa 投稿。automerge は codex 待ち（現承認は claude）
 - #560 レビュー（Devin 代替・codex 上限）: approve@9b92b448 must-fix 0
+
+## 11-24 00:20 — #679 request-changes を impl へ転送
+
+- Devin レビュー@86b91cac: request-changes・must-fix 2・nit 3 → 実装スレッドへ送付（修正→再レビュー→QA・codex 待ち前提）
