@@ -701,3 +701,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 11-24 01:00 — #560 QA 実測 pass だが例外ピン超過を検出
 
 - QA（Devin）@9b92b448: verify 実走 pass・受け入れ条件 pass（live.rs 25 件）・弱体化なし。**ただし pr-size +2289 が例外ピン（dd3362f5/+2285）を 4 行超過**（r9 nit 修正由来・決定が認めた範囲内の作業）→ hatai の例外取り直し or 削減が必要としてエスカレーション
+
+## 11-24 01:20 — #680 QA は Ready 化のみ未達
+
+- QA（Devin）@b20964cc: コード全 pass だが条件 5（Ready 化）未達で fail → impl へ `pr ready` 依頼（SHA 不変）
