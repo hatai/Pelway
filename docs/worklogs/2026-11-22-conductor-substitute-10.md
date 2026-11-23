@@ -611,3 +611,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - head `b4ea8e0a`（main 取り込み済み）を GitHub で確認: verify・pr-size success、レビューなし
 - codex gpt-6.2-sol・security=yes・worktree 隔離でレビュー委託（`rev-482-b4ea8e0a`）。approve 後に QA 委託、#480 needs-human 除去後に automerge
+
+## 11-23 19:20 — #482 レビューを Devin へ代替
+
+- codex が利用上限（11/28 14:00 JST 復旧）。手順書許可の Devin swe-2-high に差し替え（`rev-482-b4ea8e0a-devin`・security=yes・worktree）
