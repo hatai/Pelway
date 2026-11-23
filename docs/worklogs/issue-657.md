@@ -59,3 +59,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」に「印なし nit を指示で直した round の前後の委託の数え方」を書き足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 6）
+
+対象 head: 494747106be3909469f93ff64181fceb2050daea
+
+1. 詰まった箇所: 手順 9「修正依頼」: Cargo.lock の url 2.5.9 を独立 PR #677（Issue #674）として main に取り込んでもらう開発リードの決定を受け、PR #677 のマージ（11ba653）を待って origin/main を merge で取り込んだ。`git diff origin/main...HEAD -- Cargo.lock` は空になり、この PR の差分は文書だけに戻った。
+2. 曖昧だった文: 「ラウンド数の上限は濡田さんの方針で無視してよい」（開発リードの T3 メッセージ）。手順 9 の「3 回目のレビュー結果に must-fix が残った」上限との関係が、メモ round 5 の仮定とは別の指示として届いた。
+3. 仮定と解釈: 開発リード（人間）の指示を手順の上限より優先した（「Issue の最新のコメントにある指揮役・人間の決定・判断は、受け入れ条件と同じ重さ」の類推）。マージの取り込みは rebase せず merge とし、Cargo.lock を main の版に合わせる追加コミットは不要だった（差分が自然に消えた）。
+4. 足りなかった情報・検証手段: PR #677 の QA・automerge の進行は別スレッドが持つため、マージ時刻の事前見込みを立てられなかった（watch の通知で受け取った）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「修正依頼」に「待つ相手の PR を watch_pull_request で監視する」を書き足す。
+
+使ったスキル: implement-issue
