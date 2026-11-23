@@ -291,6 +291,15 @@ if [[ "${1:-}" == "git" ]]; then
         fi
         i=$((i + 1))
         ;;
+      -c?*)
+        # -c と設定値を連結した形も、git の版に頼らず拒否する（git 2.56 は unknown option で拒むが、
+        # 受け付ける版ではフックを外す引数になる）。
+        v="${a#-c}"
+        if [[ "${v,,}" == core.hookspath* ]]; then
+          echo "agent-gh: core.hooksPath の上書き・--config-env は使えません（push の名義の確認を外せないため）" >&2
+          exit 2
+        fi
+        ;;
       -C | --git-dir | --work-tree | --namespace) i=$((i + 1)) ;;
       -*) ;;
       *) git_sub="$a"; break ;;

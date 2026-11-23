@@ -638,6 +638,15 @@ for bypass in "push --no-verify" "push --no-verif origin HEAD" "-c core.hooksPat
   [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("no_bypass ($bypass): remote ref changed")
 done
 
+# -c と設定値を連結した形（-ccore.hooksPath=...）も、git の版に頼らず agent-gh が終了コード 2 で拒否する
+# （git 2.56 は連結形を unknown option の 129 で拒むが、受け付ける版ではフックを外す引数になる）。
+for attached in "-ccore.hooksPath=/dev/null" "-cCORE.HOOKSPATH=/dev/null"; do
+  push_run attached_c dev git "$attached" push origin HEAD
+  [[ "$RC" == 2 ]] || failures+=("attached_c ($attached): exit $RC, want 2: $OUT")
+  [[ "$OUT" == *"core.hooksPath"* ]] || failures+=("attached_c ($attached): stderr lacks reason: $OUT")
+  [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("attached_c ($attached): remote ref changed")
+done
+
 # 6. review の push も同じ確認を通る。正しい名義は pelway-review[bot]。
 setup_push_repo review_push
 (cd "$PUSH_DIR/work" && as 'pelway-review[bot]' commit -q --allow-empty -m r1)
