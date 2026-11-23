@@ -593,3 +593,11 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - codex 再レビュー（`68b27805`）: APPROVE。PR 固有差分は前承認時と全 5 ファイル一致・main 取り込みによる意図しない変更なし（nit: PR 本文の HEAD 記述が旧コミットのまま）
 - QA の保留項 `mise run verify` が 68b27805 で success を確認 → 全ゲート充足（APPROVED・verify/pr-size success・QA pass 同 SHA）→ pelway-qa 投稿（issuecomment-7093368321）＋`automerge` 付与
 - 留意: #677・#654 が Kodiak キューに同居。先に一方が main へ入ると他方が BEHIND → Kodiak 追随で head 変化→承認・QA が旧 SHA 宛になる可能性（#530/#567/#652 と同形のずれ）。発生したら新 head で再レビュー＋再 QA を回す
+
+## 11-23 18:10 — needs-human 5 件の決定記録とマージ準備
+
+- 濱田さんの決定（15:38 JST・開発リード経由「全部おすすめどおり」）を 5 Issue に記録（#330 コメント・#480・#333・#602・#660）。`needs-human` は hatai のみ除去可のため維持、automerge は除去後
+- **#399**: head `00c7f261`（640db248 + main のマージのみ・追加コミットなしを compare で確認）に APPROVED 済み・checks 実行中 → QA 委託（Devin・`qa-399-00c7f261`）。Ready 化は実装側
+- **#482**: 実装の main 取り込み push 待ち → その後 codex security=yes レビュー → approve 後 QA
+- **#560/#610/#661**: 再レビューは実装側が委託。approve 出現後に新 head で QA を委託（#560 は結果を PR に投稿）
+- 留意: 5 件とも Draft または needs-human 維持のため automerge は保留
