@@ -561,3 +561,13 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - #674 の実装スレッドが Draft PR [#677](https://github.com/hatai/Pelway/pull/677)（`d5dfb190`・branch agent/674-rustsec-url）を作成、チェック実行中（osv-scanner 既 pass）
 - #650 の残ゲート: 現 head での pelway-review 承認・必須チェック・pelway-qa pass（verify-static は #677 マージと main 取り込み待ち）
 - 障害メモ（2 度目）: この worktree が `agent/669-pending-sends-watch` に切り替わり誤コミット（d9a7d2a7・未 push・除去済み）。create_threads で起こした実装スレッドが指揮役 worktree を共有しており、ブランチ切り替えが競合する — 以後の実装スレッド起動は worktree 隔離の委託に切り替える
+
+## 11-23 16:45 — 開発リードからのマージ引き取り（濡田さん依頼）
+
+- 5 条件の GitHub 実値を確認: #677（APPROVED@937648b3・verify/pr-size success・CLEAN）/ #654（APPROVED×2@9e0f81f3）/ #663（APPROVED×2@79c09a6b）/ #656（APPROVED×2@7a1258a9・Ready 済み）/ #665（レビュー 0 件）
+- **#677**: QA 委託（Devin swe-2-high・`qa-677-937648b3`）→ 合格したら automerge
+- **#654**: `update-branch` で main 追随 → head `68b27805`・承認失効（想定どおり）。新 head で再レビュー（codex）＋QA（Devin）を委託。現在 head での QA は追随後に無効になるため先に追随させた
+- **#663/#656**: ブランド追随が url 2.5.8 のままの main を取り込むと verify が落ちるため、#677 マージ後に update-branch → 再レビュー＋QA → automerge の順（濡田さんの指示どおり）
+- **#665**: codex gpt-6.2-sol に security=yes のレビューを委託（worktree 隔離）。要修正なら差分案を開発リードへ返す（workflow の push は濡田さん手作業）
+- needs-human の #399/#482/#560/#610/#661 は濡田さん判断待ちで対象外（依頼どおり）
+- 障害メモ（3 度目）: worktree が #669 実装ブランチに切り替わっており worklog コミットが同ブランチへ混入・push された（3639f6cf）。`git rm` で除去して 35ad0025 を push（実装側の成果物は無傷）。以後コミット前に `git branch --show-current` を必ず確認する
