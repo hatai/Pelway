@@ -131,3 +131,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 10 の「fetch は禁止なので」を、何の fetch が禁止なのか（PR ブランチの remote を書き換える操作か）を明記する文に直す（別 Issue が適切）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 12・main 取り込み・衝突なし）
+
+対象 head: 9a8a33ea950d2372aca74b98d47bfca1751ed500
+
+1. 詰まった箇所: main（`e045c78f`。#677 の url 2.5.9、#645 の required-checks helper などを含む）を merge で取り込んだ。衝突は無かった。verify の 1 回目は `.agents/skills/verify-pelway/verify-run.test.sh` が失敗した。このマシンの `/tmp`（`/dev/sdd` の ext4 マウント）と `/home` が nobody（uid 65534）所有で、verify-run の `dir_chain_safe` が「置き場より上のディレクトリは自分か root の持ち物」を満たさず、`make_run_dir`・`locks_dir_ready` が 1 を返した。`TMPDIR` を `/dev/shm` 配下（`/dev/shm`・`/dev`・`/` が uid 1000 所有のチェーン）に変えて再実行すると 47 tests ok。merge は verify-pelway に触れていないため、環境の問題として扱った。push はマージコミットを含むため `agent-gh-resign` の署名付けが行われず、署名なしのままになった。
+2. 曖昧だった文: 「停止を解いて、main を取り込んでからレビューをやり直す」（開発リードの決定の伝達）。
+3. 仮定と解釈: 「レビューをやり直す」は、手順 8 の委託除外（この PR の差分は `.agents/skills/review-pr/` を変える）に従い、実装側の委託ではなく指揮役が main から立てるレビュースレッドを待つと読んだ（開発リードの指示の項目 4 が明示）。選ばなかった解釈: 実装側から `codex_review` に再委託する。
+4. 足りなかった情報・検証手段: `/tmp`・`/home` が nobody 所有になった時期と理由（11/22 の verify では `/tmp` は通常の所有だった）。ローカルでは `TMPDIR` で切り分けたが、CI との環境差として残るかは確かめていない。
+5. 改善案: `docs/dev-environment.md` に「`/tmp`・`/home` が nobody 所有の環境で `verify-run.test.sh` が `dir_chain_safe` に落ちるときの切り分け（`TMPDIR` を uid 1000 所有のチェーンに向ける）」を足す（別 Issue が適切）。
+
+使ったスキル: implement-issue
