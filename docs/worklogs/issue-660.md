@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/review-pr/SKILL.md` の must-fix の書き方に「提案する直し方が Issue の受け入れ条件（例: 固定パス）と矛盾しないか確かめる」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: 410b9e19244ffdb7eda5776312bccfa73b03fe6c
+
+1. 詰まった箇所: 手順 6: merge 前の `mise run verify` が `deny-check` の RUSTSEC-2026-0592（`url` 2.5.8）で失敗した。main の PR #677（`url` 2.5.9 への bump）で直るもののため、決定の手順 3 の merge を前倒しし、merge 後のツリーで verify をやり直して通した。
+2. 曖昧だった文: 「ラウンド数の上限は無視する方針です。round 4 に進める。」（開発リード経由の決定、2026-11-23）
+3. 仮定と解釈: 決定はこの PR の round 4 に限った上限解除と解釈した（他の PR へは一般化しない）。印なしの nit 2 件（`LC_ALL=C`、`[ -k /tmp ]`）は must-fix 1 の条件を正しく書く一部として一緒に入れた（両担当が同じ箇所を指摘）。push は、決定の手順 2→3 の順で途中の赤い head を出さないよう、merge まで済ませた 1 回にまとめた。
+4. 足りなかった情報・検証手段: ro 環境での手順の実行は引き続き未検証。`ln -sfn` 失敗時に古い symlink が残ることの実機確認はできていない（gnulib の実装読みによる。レビューの未確認事項と同じ）。`ln`・`find` の失敗経路は scratchpad に偽のコマンド（exit 1 する `ln`・`find`）を置いて再現した。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「verify の失敗が main で既に直されている既知のもの（アドバイザリ等）のときは、main の取り込みを前倒ししてよい」を足す。
+
+使ったスキル: implement-issue
