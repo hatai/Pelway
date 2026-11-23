@@ -524,3 +524,12 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - 前段: 本文の相互参照を実番号に修正・blocker 確認（各 0 件・コメント記録）・`ready-for-agent`+`agent:working`（#671 は `agent:devin` も）・ボードキュー Working 投入
 - **#669 → GLM**（glm-5.3 high）・**#670 → GLM**（glm-5.3 high）・**#671 → Devin**（swe-2-high high +`agent:devin`）。通常運用の枠内（GLM 計 3・Devin 計 4）
 - **経路の分岐を実測**: `t3_thread_launch` は ×3「Failed to connect」だが `create_threads`+`t3_thread_send` は成功 — send 系障害は launch API 限定と判明（#650 報告の非対称と同系）
+
+## 11-23 13:30 — PR #650 レビュー r2 対応と verify-static 遮断の切り分け
+
+- codex r2（`13097549` レビュー）: request-changes・must-fix 5・nit 2。内容系 4 件と nit 2 件を報告書に反映して `d0550557` を push（集計の一意化・#602 観測順・STALL 条件の正確化・失明範囲を観測可能な範囲に限定・再起動/上書きの前後関係を未確認と明記・行番号 87-88・旧側 schedule 障害を未確認扱い）
+- must-fix の残り 1 件は `Verify (mise run verify-static)` の失敗。原因は `RUSTSEC-2026-0592`（url 2.5.8、修正版 2.5.9）で PR 差分と無関係のリポジトリ全体ブロッカー → Issue [#674](https://github.com/hatai/Pelway/issues/674) 起票（needs-triage・blocker 0 件）。gate 遮断のため優先対応を推薦するコメントを記載、`ready-for-agent` は hatai の工程として格上げは保留
+- 再レビュー r3 を codex gpt-6.2-sol（effort=high）に委託（`rev-650-d0550557-20261123`）。チェック成否と内容レビューを分けるよう指示
+- PR #650 に対応要約コメント投稿（issuecomment-7090818804）
+- patrol-state: assignments 追記・anomaly（rustsec-blocker）登録
+- 障害メモ: この worktree が agent/671-patrol-state-guard に切り替わっていて誤コミット（a29101ea・未 push）。conductor ブランチへ付け直し、671 側は 4e74a9ef に戻した。#671 の実装スレッドによる切り替えの可能性
