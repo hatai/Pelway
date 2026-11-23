@@ -1,7 +1,6 @@
 # Issue #602 の作業ログ
 
 ## 実装者メモ（round 1）
-
 対象 head: d7abbed28d7e8a7935df9f8fe5ea40fc4f1c1423
 
 1. 詰まった箇所: `scripts/conductor-watch.sh` の `"$T3_BIN" thread list --json > threads.json || true`: t3 が失敗しても空の一覧と同じに読まれ、登録があると `thread-missing` の誤った格上げになる。`|| rm -f` に替えて取得失敗を区別した。`gh issue edit --add-label needs-human --remove-label needs-decision` が 1 回の不可分な更新かを確かめられなかったため、`needs-human` を付けてから `needs-decision` を外す 2 回の呼び出しに分けた（途中で失敗してもどちらのラベルも無い状態にしない）。
@@ -14,7 +13,6 @@
 使ったスキル: `implement-issue`、`write-pull-request`
 
 ## 実装者メモ（round 2）
-
 対象 head: 97557b9e69dc860c3d777411d48b4c393e7ac82a
 
 1. 詰まった箇所: 手順 3（修正依頼は今のブランチのまま）: `agent/602-decision-escalation` が round 1 の worktree（`.claude/worktrees/agent-af759d14a5b9ce62e`）に checkout されたままで、同じ名前のブランチに切り替えられなかった。別名のローカルブランチ `agent/602-decision-escalation-r2` に `--track origin/agent/602-decision-escalation` を付け、`scripts/agent-gh dev git push origin HEAD:agent/602-decision-escalation` で push した（`agent-gh-resign` は `@{u}` で同じブランチを解く）。
@@ -26,7 +24,6 @@
 使ったスキル: `implement-issue`、`write-pull-request`
 
 ## 実装者メモ（round 3）
-
 対象 head: 693e27801afca34980b8c039cb8109519215e9f5
 
 1. 詰まった箇所: `scripts/conductor-watch.sh` の登録ファイルの読み取り: round 2 の `os.fdopen` は、登録ファイルの場所がディレクトリだと `IsADirectoryError`（CPython の FileIO はディレクトリを拒む）で python ごと落ちる形だった。fd のまま `os.fstat` と `os.read` で読み、ディレクトリは「通常のファイルでない」として扱うようにした（`registered_thread`、場面 9 の確認を足した）。
@@ -39,7 +36,6 @@
 使ったスキル: `implement-issue`、`write-pull-request`、pstack の `poteto-mode`（principle-make-operations-idempotent・principle-laziness-protocol・principle-model-the-domain）
 
 ## 実装者メモ（round 4）
-
 対象 head: f2bddb26dbecdc20f5de4c8f52a7717d9bd04043
 
 1. 詰まった箇所: `scripts/conductor-watch.sh` の `escalate`: Issue と events は別々の読み取りなので、どちらを先に読んでも、後の読み取りの間の変化は先の読み取りに出ない。must-fix 2 に合わせて events → Issue の順にし、events の最後の `needs-decision` の付け外しで付与が続いているかも確かめた。この順では Issue の読み取りの間の付け直しが見えないので、場面 21 の前半の差し込みを events の取得に移した（PR 本文の「確かめ方を弱める変更」）。`mise run verify` の `typos` が変数名 `nd` を `and` の誤字と判定して落ちた（名前を変えた）。
@@ -51,7 +47,6 @@
 使ったスキル: `implement-issue`、`write-pull-request`、pstack の `poteto-mode`（principle-make-operations-idempotent・principle-model-the-domain・principle-separate-before-serializing-shared-state）
 
 ## 実装者メモ（round 5）
-
 対象 head: 9d87638e365b0085df7bc24ac569847384239075
 
 1. 詰まった箇所: `scripts/conductor-watch.sh` の `escalate`: 定型コメントの照合は `pelway-dev[bot]` 名義で判定するが、実装担当も同じ App の名義で書けるため、格上げの根拠にできない（round 4 の must-fix 1）。コメントの照合は通知の重複を防ぐだけにし、段の判断は記録と events に分けた。`added` を呼び出しの成功でなく「記録した試行（`seen`）より後の、自分の名義の `labeled` イベント」で進める形にしたところ、解除の呼び出しが失敗したとき記録が `adding` のまま残り、一覧外の照合で完了の報告が出なくなった。照合で自分の付与を確かめた時点で `added` を保存するようにした（`DECISION escalated` は `added` のまま一覧から外れた記録だけが出す）。`/home` が読み取り専用に再マウントされて worktree で commit できなくなったため、同じ head に同じ diff を当てた `/tmp` の clone で commit・verify・push した。
@@ -63,7 +58,6 @@
 使ったスキル: `implement-issue`
 
 ## 実装者メモ（round 6）
-
 対象 head: 0d493031
 
 1. 詰まった箇所: `mise run pr-size`: be1edd20 で +881（上限 800）。試験の繰り返し（1 周目を失敗させて戻す、期待する行の組み立て、モックの差し込みの重複）を `fail_first`・`heal`・`overdue`・`escalated`・`label_calls`・`hook` にまとめ、スクリプトは runbook の格上げの項と重なるコメントを縮めた。
@@ -75,7 +69,6 @@
 使ったスキル: `implement-issue`、pstack の `poteto-mode`（principle-laziness-protocol・principle-minimize-reader-load）
 
 ## 実装者メモ（round 7）
-
 対象 head: 0eaebb166fa0eefb684bc321745917f623b658d9
 
 1. 詰まった箇所: 「Issue の読み取りと最後の events の取得の間の付与・開閉を確かめ直す」を、events の最後の付け外しだけで決めると、モックの `issue_with` が `labeled_at` より前に必ず仕込む `unlabeled` の `needs-human` が最後のイベントになり、「ラベルは付いているのにイベントがまだ出ていない」場面（場面 13・25・33・34）を人間待ちと取り違えた。`needs-human` は「Issue のラベルにある、または最後の events の `needs-human` の付け外しが `labeled`」のどちらかで見る形に直した。一覧外の記録を残す範囲を `held`・`removed` 両方にすると、場面 6 の「`needs-decision` が外れたら記録を消す」が壊れたので、残すのは `held` だけにした。
@@ -87,7 +80,6 @@
 使ったスキル: `implement-issue`
 
 ## 実装者メモ（round 8）
-
 対象 head: 1e4748c7847fd096a85bc62a883058f3c096e535
 
 1. 詰まった箇所: 手順 6 の push: ローカルブランチ `agent/602-decision-escalation-r8` に upstream が無く、`agent-gh-resign` が何もせずに終わった。upstream を設定すると、今度はこのブランチにしか無いマージ `401a7a5b` が署名の範囲に入り「表現できない」で止まった。`b7efc229` を指す一時の `refs/remotes/` を置いて範囲を新しいコミットだけにし、署名を付けてから一時の ref を消した。CI の static は、main で広がった shellcheck（`scripts/` 全体、warning 以上）が既存の `reset` の `rm -rf "$MOCK"/*` に SC2115 を出して落ちた（ローカルの verify は main を取り込んでいないので通った）。`${MOCK:?}` に直した。
@@ -99,7 +91,6 @@
 使ったスキル: `implement-issue`
 
 ## 実装者メモ（round 9）
-
 対象 head: 72e5fd81d1ad6a4cf65f00bea8c3bddc91afa1aa
 
 1. 詰まった箇所: `scripts/tests/conductor-watch-decision.test.sh` 場面 16 の「指揮役がいれば外し直さず、読みもしない」が、codex round 8 の must-fix 2（指揮役がいても前の付与の完了は events で照合する）とぶつかった。読むことを許し、書かないことだけを確かめる形に替えた。追加 800 行の残りが 18 行しかなく、3 場面の追加と同じだけ既存の確認の対を `|` でまとめた。`mise run verify` の 1 回目が `pelway-agent-watch` の `once.rs:859`（FIFO・symlink の 3 件）で落ち、単独の再実行と 2 回目の verify は通った（触っていない crate の時間依存の揺れ）。
@@ -111,7 +102,6 @@
 使ったスキル: `implement-issue`
 
 ## 実装者メモ（round 10）
-
 対象 head: 71f35e8d4814b1878ed4c55e0b97630878b5c4dc
 
 1. 詰まった箇所: `scripts/conductor-watch.sh` の補助記録（`waiting_on` の導出）は一覧のラベルだけを見るので、round 9 で `DECISION overdue` を抑えた「一覧の後に events で `needs-human` が付いた」周に、`grokbot` と 15 分の期限が残った（codex round 9 の must-fix）。その周に見えた Issue を `late_human` に入れ、補助記録でも `human` にした。追加 800 行の残りが無く、場面 1・6・11・16・30・34・36・38 の確認の対をまとめて空けた。
@@ -123,7 +113,6 @@
 使ったスキル: `implement-issue`
 
 ## 実装者メモ（round 11）
-
 対象 head: 04a8380bbd8aa88edae4dbc6394d77557a50ddf8
 
 1. 詰まった箇所: codex round 10 の印の nit（記録項目の説明に `reason`）を足す分の行を、試験の補助（`once`・`check`）と確認の対のまとめで空けた（+787/-36）。
@@ -134,7 +123,6 @@
 
 使ったスキル: `implement-issue`
 ## 実装者メモ（round 12）
-
 対象 head: 841bad17dc584f424594e3c274b95210f73cbc7a
 
 1. 詰まった箇所: devin round 11 の印の nit（`reason=` の取りこぼし値 `resumed` が文書の値に無い）を `or 'resumed'` の除去で直し、行を相殺するためコメントを畳んだ（+789/-36）。
@@ -145,7 +133,6 @@
 
 使ったスキル: `implement-issue`
 ## 実装者メモ（round 13）
-
 対象 head: d2e45a27f1b17582d5d0c5fcb35fa132653fe253
 
 1. 詰まった箇所: なし。開発リードの決定で印の nit の round 上限を外し、残っていた印の nit（:221 の関数の帰属）を直した。
