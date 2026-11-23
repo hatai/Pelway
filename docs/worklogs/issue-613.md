@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/review-pr/SKILL.md` の security-review の所見に「回避の経路は、手元の git などの版で再現したかを書く（未再現なら、その旨と版を書く）」と足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: c3c965f501a07c75e88cd4dea6cdd42d7f1f7130
+
+1. 詰まった箇所: PR #624 の CI（head b87d9ea）: static（deny-check の `advisories FAILED`）、osv-scanner、集約の `mise run verify` が失敗した。手元の deny-check の error は RUSTSEC-2026-0592（url 2.5.8）の 1 件だけで、この差分は Cargo.lock に触れていない。開発リードの指示どおり url は上げず、main 側の PR #677 のマージを待った。
+2. 曖昧だった文: 「main 側の修正 PR #677 のマージを待って origin/main を merge で取り込み、verify が緑になるのを確かめる」（開発リードの指示、PR #624 の次の一手）。#677 の状態は watch の対象外のため、#624 の次の通知で `pr view 677 --json state` を確かめて MERGED を知った。
+3. 仮定と解釈: origin/main の merge は衝突なし。Cargo.lock の url は 2.5.9 になった。この round の差分の実体は merge だけで、`scripts/agent-gh` と試験は round 3 のまま。
+4. 足りなかった情報・検証手段: merge 後の `mise run verify` は exit 0（script-test: 46 tests ok）。CI の osv-scanner の検出の一覧はジョブサマリーにあり、`ci_logs` の末尾には出ないため、url 以外の検出かは CI の再実行の結果で確かめる。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 の「修正依頼」に「main 側の別 PR の修正を待つときは、その PR の状態を、自分の PR の通知のたびに `pr view <番号> --json state` で確かめる」と足す。
+
+使ったスキル: implement-issue
