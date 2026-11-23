@@ -144,6 +144,7 @@ conductor-watch は検知（`watch.log` へのイベント出力）だけを行�
 - scheduled task は指揮役スレッドに bind する（`bindToCurrentThread`）。指揮役が代わったら（代行の開始・交代）、新しい指揮役スレッドで `schedule_task` を作り直し、古いタスクは `delete_scheduled_task` で削除する。`patrol-state.json` の `scheduled_task_id` に現行のタスク ID を記録する
 - `watch.log` からスレッドへの転送スクリプト（`t3` CLI の `acp-mcp-call` 経由）は使わない。`t3` CLI は実行中の T3 サーバーと `~/.t3/userdata` の所有権が衝突して送信に失敗することがあり、送信先スレッド ID の固定も指揮役の交代で壊れるため。agent-watch の起こし（Issue #555）はこれとは別の仕組みで、知らせの中身を送らず決まった文だけを送り、宛先はホスト側の登録ファイル（インストールした `pelway-agent-watch --register` で hatai が書く。sandbox からは書けない）を毎回読み直し、`t3` は動いている T3 サーバーと同じ実行ファイルを優先する（`T3_BIN` の指定があればそれ、サーバーが見つからなければ PATH の `t3`）（`docs/dev-environment.md` の「pitchfork について」）
 - `LABEL unbacked` の行は、`needs-human` の解除・`automerge` の付け外しのうち、付け外しの時刻の前 24 時間以内に同じ Issue・PR への hatai 本人のコメント（指示の記録）が見つからなかった操作である。指揮役と T3 スレッドの操作記録と突き合わせて分類する: 指揮役の正当な操作（マージ条件を満たしての `automerge` 付与・Kodiak のコンフリクトによる解除など）は裏付けが見つかり次第正当として巡回記録に残す。Grok Bot が中継した了承も同じく裏付けになる。`needs-human` の解除は指揮役の操作記録では正当化できず、hatai の指示の記録だけが正当化する。どちらの記録でも裏付けられないものは「出どころ不明」の手順違反として該当の Issue・PR に記録し、Grok Bot と人間に知らせる（「1. 役割と触ってよい範囲」のラベル操作の裏付け検査）
+- 巡回のたびにスレッド連絡の帳簿（`thread_contacts`）の棚卸しをする（下の「毎回の巡回でスレッドを点検する」。Issue #670）
 - 巡回の報告は、下の「巡回の報告の形」に従う
 
 ### 毎回の巡回でスレッドを点検する
@@ -165,6 +166,17 @@ conductor-watch は検知（`watch.log` へのイベント出力）だけを行�
 - 指示は定型の 3 つ（「続きをやり直す」「レビューの再委託」「衝突の解消」）から選ぶ。実装スレッドの受け取り方は skill `implement-issue` の「巡回から定型の指示を受けたとき」
 - 現在の head に有効な Approve があり、そのレビューに `[文書のずれ]` の nit が残っておらず、必須チェックが緑で、現在の head と同じ SHA の QA の合格コメントがあり、Draft でない PR には、指揮役が `automerge` を付けて Kodiak のマージに渡す（条件の正本は skill `command-team` の「マージ」）
 - `needs-human` の付いた Issue・PR と、複数のレビュー担当の判定が割れた PR には、指示も `automerge` も出さず、判断待ちに回す
+
+スレッド連絡の帳簿（`thread_contacts`）の棚卸しも、毎回の巡回で行う（構造は「10. 巡回状態の補助記録」の「スレッド連絡の帳簿（`thread_contacts`）」）:
+
+1. `t3_thread_list` の未 settle のスレッドのうち、open な PR を持つか `agent:working` の Issue を持ち、完了済み（completed・failed・interrupted・cancelled。指示を受け取れる状態）のものを抜き出す
+2. それぞれを帳簿と突き合わせ、次の連絡予定（`what`・`due`）が無いものを数える。帳簿に項目が無いスレッドも「予定が無い」に数える。件数を巡回記録に残す（0 件のときも残す）
+3. 予定が無いものを見つけたら、その巡回のうちに次のどれかに振り、帳簿をその結果で更新する:
+   - 送るべき指示が決まっている: `t3_thread_send` で送る。送れたら `last_contact` を送った時刻に、`what`・`due` を次の予定に書き換える。送れないときは `pending_thread_sends`（`to`・`what`・`since` の配列。送れなかった指示の滞留記録）に足し、帳簿の `what` にその旨を残す
+   - 指揮役の判断が要る: 判断待ちに上げ、`what` に判断の内容を、`due` に見直し時刻を書く
+   - もう用が無い（マージ済み・別スレッドで対応済み・PR が閉じた）: settle し、帳簿から項目を消す
+
+この棚卸しは、監視（conductor-watch）の STALL 検知（`waiting_on=conductor` への書き換え）とは独立に、帳簿の側でも「次の連絡予定の欠落」を数える。監視が死んでいる間も、巡回さえ起きていれば、連絡すべきスレッドを帳簿から数えられる。
 
 ### 巡回の報告の形
 
@@ -387,6 +399,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 | `watch_log_offset` | `watch.log` の既読の位置（行番号） |
 | `scheduled_task_id` | 現行の巡回の scheduled task の ID |
 | `inbox_offset` | 受信箱 `conductor-inbox.jsonl` の既読の位置（行番号）。agent-watch は、前回の起こしの後にこの値が進んでいなければ、次の起こしを送らない（Issue #555）。起こしの宛先はこの記録には置かない（sandbox から書けるため。`pelway-agent-watch --register`） |
+| `thread_contacts` | スレッド連絡の帳簿。スレッド ID をキーに、最終接触時刻と次の連絡予定を持つ（下の「スレッド連絡の帳簿（`thread_contacts`）」。Issue #670） |
 
 対象（キーは Issue 番号）ごとの必須項目:
 
@@ -400,6 +413,33 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 | `labels` | その巡回で見た Issue のラベル | 巡回のたびに書き換わる。指揮役が書いた `grokbot` は、ラベルがこの値から変わらない限り巡回スクリプトに保たれる |
 
 巡回スクリプト `scripts/conductor-watch.sh` が巡回のたびに必須項目を更新する。実装スレッド（題名「[実装] #<N> …」）が completed・failed・interrupted・cancelled で止まっていて、受信箱にある最新の知らせの状態の行（skill `implement-issue` の「ターンの終わりの状態の行」）が `working` か無いときは、`implement`・`review` を `conductor` に書き換え、元の値と時刻を `PATROL #<N> waiting_on=conductor from=… reason=stopped-thread` の 1 行に残す。同じ止まりにつき 1 回だけ `STALL #<N>` の行も出す。状態の行が `waiting-review`・`waiting-checks` なら `waiting_on` は変えず、次回確認時刻を約 8 分後まで早める。`needs-human` の対象は書き換えない。見張りが動いていることは、10 分ごとの `HEARTBEAT` の行で分かる。記録と GitHub の実状態（Issue の状態とラベル、PR の Draft・レビュー・CI の状態）が食い違う場合は GitHub を正として記録を直す: Issue が閉じたら対象を記録から消し、ラベルと PR の状態から決まる `waiting_on` を毎巡回上書きし、`waiting_on` が変わった対象に `PATROL` 行を出力する。GitHub からの取得に失敗した巡回と、一覧の取得上限に達して打ち切られた巡回では記録を書き換えず、前回の記録を保持する。指揮役が GitHub に載せない判断の途中（例: レビューを始めるか迷っている）は、`waiting_on` が `conductor` の対象として記録の側にだけ残る。次の巡回で GitHub の状態が変われば、スクリプトが GitHub 側の値で上書きする。
+
+### スレッド連絡の帳簿（`thread_contacts`）
+
+T3 のスレッドは pull 型で、`completed` で終わると次の指示（`t3_thread_send`）か settle が届くまで二度と起きない。`subjects` は Issue/PR ごとの待ちを持つが、スレッドごとの「最終接触・次の連絡予定」は持たない。そのため「open な PR を持つ完了済みスレッドのうち、次に指揮役が連絡すべきもの」を、監視（conductor-watch）が動いていなくてもこの帳簿だけで数えられるようにする（Issue #670）。
+
+トップレベルキー `thread_contacts` はスレッド ID をキーとするオブジェクトで、項目の書き方は `pending_thread_sends` の流儀（`what` に内容・ISO 8601 の時刻）に揃える:
+
+```json
+"thread_contacts": {
+  "mcp:launch:61092c…": {
+    "last_contact": "2026-11-23T12:34:00+09:00",
+    "what": "PR #674 レビュー r3 の結果を送る",
+    "due": "2026-11-23T13:00:00+09:00"
+  }
+}
+```
+
+| 項目 | 意味 |
+|---|---|
+| （オブジェクトのキー） | スレッド ID |
+| `last_contact` | そのスレッドとの最終接触時刻（ISO 8601）。指示を送ったとき・報告や結果を受け取ったとき・棚卸しで扱ったときに書き換える |
+| `what` | 次の連絡予定の内容（指示の中身・判断の問い・見直す条件を 1 行で書く） |
+| `due` | 次の連絡予定の時刻（ISO 8601）。この時刻を過ぎたらそのスレッドを確認し直す |
+
+- `what` と `due` は組で書き、次の連絡予定が無いときは両方とも書かない。鍵が無い状態が「次の連絡予定が無い」を表し、巡回の棚卸し（「2. ボードと巡回」の「毎回の巡回でスレッドを点検する」）で数える対象になる
+- 項目の追加・書き換え・削除は指揮役が行う。settle したスレッドの項目は消す。PR のマージで自動 settle されたスレッドは、次の棚卸しで消す
+- 巡回スクリプトはこのキーを読むだけで書き換えない
 
 ### 次回確認時刻（フォローアップタイマー）
 
