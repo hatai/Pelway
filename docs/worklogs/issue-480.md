@@ -155,3 +155,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` と qa-checklist・名義の確かめ方の `user.type == "Bot"` への揃え（レビューの nit と round 10 のメモの改善案と同じ件）は別 Issue が適切。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 14・main 取り込みの衝突解消）
+
+対象 head: 8aae0a1df060da3ea4b8ee848019a32287d5ceb6
+
+1. 詰まった箇所: main（`79bd5a4e`。#673 の運用まわり Issue の事前分割と #666 などを含む）を取り込んだときに `.agents/skills/command-team/SKILL.md` の「マージ」が 1 か所で衝突した。main の変更は、pr-size 例外の段の末尾に「運用まわりの PR が pr-size を超えたときは、例外の提案より先に `<!-- split-plan -->` での分割を提案する（下の「分割を認めるとき」）」を足すもので、この PR が書き換えた節の旧文に対する追記だった。この PR の新しい節を残し、main の追記だけを pr-size の段の末尾に写した（「分割を認めるとき」の節は衝突せず取り込まれた）。push はマージコミットを含むため署名付け替えが行われず、署名なしのままになった。
+2. 曖昧だった文: 「PR #482（head 4819469a）は must-fix 2 件の修正 push 済みを確認しましたが、現在 main とのコンフリクトで mergeable_state=dirty です。main を取り込んでコンフリクトを解消し push してください」（指揮役の T3 の指示）。
+3. 仮定と解釈: main の追記（運用まわりの PR の分割優先）は、この PR の新しい規則と両立する追加として残した。選ばなかった解釈: 衝突した節を丸ごと main の版に戻す（この PR の書き換えを失うため不採用）。verify は `TMPDIR=/dev/shm` 配下で実施（round 12 の `/tmp`・`/home` が nobody 所有の環境の問題の継続）。
+4. 足りなかった情報・検証手段: main の `85069080`（運用まわり Issue の事前分割）とこの PR の `pr-size-exception` の規則の意図の遡及は、コミットメッセージと両側の文面で確かめた。Issue 側の決定記録は読んでいない。
+5. 改善案: なし（round 12 の `dir_chain_safe` の環境の件は引き続き別 Issue が適切）。
+
+使ったスキル: implement-issue
