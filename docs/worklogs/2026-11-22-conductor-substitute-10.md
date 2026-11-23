@@ -711,3 +711,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - #655: update-branch で `86c7bf0a`→`a2a7691c`（main 取り込み）→ claude claude-opus-5-5・security=yes・worktree でレビュー委託（`rev-655-a2a7691c`）。codex approve は必須・11/28 待ち
 - #642/#644 は #655 マージ待ちの意図的待機と確認（30 分起床は監視動作）→ 対応不要として patrol-state の waiting に記録
 - #610 impl（full-access）はリード経由で main 取り込み指示済み → 新 head で再レビュー+QA
+
+## 11-24 02:00 — #655 claude approve・QA 委託
+
+- #655@a2a7691c: claude approve・must-fix 0・nit 3（1 件は security-review: 新警告が資格情報入り URL を出しうる — impl 判断・bfd8ff91 は full-access のためリード経由で伝達）→ QA 委託（`qa-655-a2a7691c`）
