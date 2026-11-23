@@ -664,3 +664,15 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 11-23 22:50 — glm-5.4 一回限り指示（濱田さん）
 
 - 次に新規起動する GLM 実装スレッド 1 件のみ `zai-coding-plan/glm-5.4`。稼働中スレッドは 5.3 のまま・手順書既定は不変。長い思考ループにはまりやすいため長時間停止時は報告
+
+## 11-23 23:20 — スレッド棚卸し（hatai 指示）
+
+**実行した一手**:
+- QA 委託: #661@90ed8d97（impl が round4 修正+claude approve+Ready 化まで完了後に停止していた）・#675@d434ce76
+- レビュー委託（Devin 準備・codex 必須は別途）: #560@9b92b448・#679@86b91cac・#680@b20964cc（#669/#670 の新規 Draft PR）
+- impl 起床: #482・#663（dirty コンフリクト解消を依頼）
+- failed codex 委託 5 件を settle
+
+**指揮役から届かない（full-access・要リード/hatai 直接操作）**:
+- #610 impl 2e87e67b — dirty・main 取り込みが必要
+- #642 impl c9d1a5eb / #644 impl 9fe3e99d — completed で成果（PR/ブランチ）なし・Issue は ready-for-agent のまま。再開指示か新規スレッド起動の判断が必要
