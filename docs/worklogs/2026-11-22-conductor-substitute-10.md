@@ -624,3 +624,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - **#678**: head `c7344eab`（Ready・APPROVED 同 SHA・BEHIND）→ QA 委託（Devin・`qa-678-c7344eab`）
 - **#610**: head `548faa59`（Ready・CLEAN）だが最新 APPROVED は旧 head `bb7a7f78` — 差分は main 取り込み+worklog 調整のみと確認。現 head 承認が必須のため Devin 再レビュー（`rev-610-548faa59`）と QA（`qa-610-548faa59`）を同時委託。automerge は #602 needs-human 除去＋codex 扱いのリード確認後
+
+## 11-23 20:30 — needs-human 5 件除去・#399 automerge
+
+- 濱田さんが #330/#480/#333/#602/#660 の needs-human を除去（open で残るのは #305/#306 のみ）
+- **#399** `00c7f261`: Ready・CLEAN・全条件充足 → `automerge` 付与（Kodiak 待ち）
+- #482 `4819469a`・#560 `9b92b448`・#661 `a30cebfd` は Draft — approve/Ready 待ちで QA 経路を保留中
