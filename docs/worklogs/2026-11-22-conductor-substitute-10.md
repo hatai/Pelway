@@ -533,3 +533,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - PR #650 に対応要約コメント投稿（issuecomment-7090818804）
 - patrol-state: assignments 追記・anomaly（rustsec-blocker）登録
 - 障害メモ: この worktree が agent/671-patrol-state-guard に切り替わっていて誤コミット（a29101ea・未 push）。conductor ブランチへ付け直し、671 側は 4e74a9ef に戻した。#671 の実装スレッドによる切り替えの可能性
+
+## 11-23 14:00 — r3 環境障害と引用切れの修正、#674 緊急割り当て
+
+- codex r3 はレビュー未投稿で失敗: `agent-gh review api .../jobs/<id>/logs` がレビュアーのサンドボックス許可外。内容指摘 4 件のうち「worklog 引用先が GitHub から取得不可」を検証 → 引用していた `679086bb` は substitute-11 の worklog コミットで、ブランチ `conductor/rebuild-20261122103150` が remote 未 push だったためリンク切れ。**報告 PR に substitute-11 worklog を同梱し permalink を本 PR 内のパス参照に修正**（`ded0f335` push）
+- 残る内容指摘 3 件（棚卸し件数・障害継続・起き直り順序）は r4 で再確認する形に。r4 を codex gpt-6.2-sol に委託（`rev-650-ded0f335-20261123`）— jobs/logs 遮断時は check-runs で代替・未投稿でも結果テキストで返すよう指示
+- #674（RUSTSEC-2026-0592）: gate 遮断の緊急性から、起票時の推薦コメントに基づき `ready-for-agent`+`agent:working`+`agent:devin` 付与・ボード Working・Devin swe-2-high 実装スレッド起動。異議あれば中断の旨を Issue コメントで宣言済み
+- patrol-state: assignments（impl-674・rev-650-r4）登録
