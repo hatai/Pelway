@@ -47,3 +47,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「verify の失敗が main で既に直されている既知のもの（アドバイザリ等）のときは、main の取り込みを前倒ししてよい」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: 8c730af4fb72b95d1335d6ed3d8e7bea119f4e24
+
+1. 詰まった箇所: 手順 9: claude の round 4 の must-fix（相対パスの `scripts/agent-gh` を `$clone` への `cd` なしで動かす）は、nit 1 の形（clone と `cd` を if の条件に入れ、`|| exit 1` を除く）と不可分だったため、その形で直した。scratchpad では偽の `git`（mkdir するだけ）で clone を模倣し、`cd` 後の pwd と `MISE_TRUSTED_CONFIG_PATHS` まで確認した。
+2. 曖昧だった文: 「確かめ方は手順を始めたときのディレクトリで動く」（PR #661 の round 4 レビュー、claude の must-fix）
+3. 仮定と解釈: 印なしの nit 1（`|| exit 1` がシェルごと閉じる、`mktemp` の失敗を見ない）は、must-fix の `cd` を入れる箇所と同じ条件に当たるため、レビューが示した形そのもので一緒に直した。`Implementer:` の行は round 4 以降の実装（opencode / GLM-5.3）に合わせた。
+4. 足りなかった情報・検証手段: ro 環境での手順の実行は引き続き未検証。実 `git clone` を使った動作確認（scratchpad では偽 `git` で代替）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「よくある失敗」に「文書の手順ブロックに `exit` を書くと、貼り付けたシェルごと閉じる。失敗は if/else で止める」を足す。
+
+使ったスキル: implement-issue
