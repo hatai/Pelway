@@ -14,6 +14,12 @@
 - watch_log_offset・inbox_offset を現行値より小さい値へ書き戻す変更（巻き戻り）は
   拒否し、試みを anomalies に記録する。ログの切り詰めなどで意図して小さい値に
   戻すときだけ --allow-offset-regression を付け、適用のうえ anomalies に記録する
+- 状態ファイルが JSON のオブジェクトとして読めないときは、空として上書きしない。
+  元のファイルを <state>.unreadable-<時刻> に退避して anomalies に記録し、
+  --claim-conductor 以外の --writer-thread の書き込みと、オフセットを書く
+  書き込み（--allow-offset-regression なし）は拒否する（照合を確かめられないため）。
+  拒否・回復途中の記録には needs_conductor_claim を立て、--claim-conductor の
+  回復書き込みが来るまで拒否が続く
 
 入力は標準入力の merge patch（RFC 7386。オブジェクトは深く併合し、null は鍵を消す。
 JSON 配列は併合の列として順に適用する — 鍵の集合ごとの置き換えは
@@ -178,9 +184,40 @@ def main():
         now_iso = datetime.now().isoformat(timespec="seconds")
         notes = []
         if unreadable:
-            notes.append({"kind": "state-unreadable", "writer": who, "at": now_iso})
+            # 読めない状態を空として上書きすると、持ち主の照合とオフセットの照合が
+            # ともに素通りし元の中身も残らない。元のファイルを退避し、照合を
+            # 確かめられない書き込みは拒否する（--claim-conductor の回復書き込みを除く）。
+            stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+            backup = f"{state}.unreadable-{stamp}"
+            n = 0
+            while os.path.exists(backup):
+                n += 1
+                backup = f"{state}.unreadable-{stamp}.{n}"
+            os.replace(state, backup)
+            notes.append({"kind": "state-unreadable", "writer": who,
+                          "backup": os.path.basename(backup), "at": now_iso})
+
+        # needs_conductor_claim は unreadable からの回復途中の印。立てるのは
+        # この手順が unreadable に会ったときだけ、下ろすのは --claim-conductor の
+        # 回復書き込みだけ（patch からの操作は受け付けない）。
+        if opts["claim"]:
+            result.pop("needs_conductor_claim", None)
+        elif unreadable or base.get("needs_conductor_claim"):
+            result["needs_conductor_claim"] = True
+        else:
+            result.pop("needs_conductor_claim", None)
 
         refuse = []
+        unverifiable = unreadable or bool(base.get("needs_conductor_claim"))
+        if unverifiable and not opts["claim"]:
+            if opts["writer_thread"]:
+                keys = sorted({k for p in patches for k in p})
+                refuse.append({"kind": "owner-unverifiable", "writer": who,
+                               "keys": keys, "at": now_iso})
+            offs = [k for k in OFFSET_KEYS if any(k in p for p in patches)]
+            if offs and not opts["allow_reg"]:
+                refuse.append({"kind": "offset-unverifiable", "writer": who,
+                               "keys": offs, "at": now_iso})
         if opts["writer_thread"] and not opts["claim"]:
             rec = base.get("conductor_thread_id")
             res_tid = result.get("conductor_thread_id")
@@ -213,6 +250,8 @@ def main():
 
         if refuse:
             out = copy.deepcopy(base)
+            if unreadable:
+                out["needs_conductor_claim"] = True
             anoms = out.get("anomalies")
             anoms = anoms if isinstance(anoms, list) else []
             out["anomalies"] = (anoms + notes + refuse)[-ANOMALY_MAX:]

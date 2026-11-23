@@ -389,7 +389,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 | `scheduled_task_id` | 現行の巡回の scheduled task の ID |
 | `inbox_offset` | 受信箱 `conductor-inbox.jsonl` の既読の位置（行番号）。agent-watch は、前回の起こしの後にこの値が進んでいなければ、次の起こしを送らない（Issue #555）。起こしの宛先はこの記録には置かない（sandbox から書けるため。`pelway-agent-watch --register`） |
 | `conductor_thread_id` | 現指揮役のスレッド ID。引き継ぎ・交代で新指揮役が書き込み手順の `--claim-conductor` で自分の値にする。一致しないスレッドからの書き込みは適用されず `anomalies` に記録される（Issue #671） |
-| `anomalies` | 書き込み手順が記録した異常の一覧（`conductor-mismatch`・`offset-regression`・`offset-regression-refused`・`invalid-offset`・`state-unreadable`。直近 100 件まで）。巡回は新しい項目を見つけたら巡回記録に残す |
+| `anomalies` | 書き込み手順が記録した異常の一覧（`conductor-mismatch`・`offset-regression`・`offset-regression-refused`・`invalid-offset`・`state-unreadable`・`owner-unverifiable`・`offset-unverifiable`。直近 100 件まで）。巡回は新しい項目を見つけたら巡回記録に残す |
 
 対象（キーは Issue 番号）ごとの必須項目:
 
@@ -414,6 +414,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 
 - `--writer-thread` の名乗りが記録の `conductor_thread_id` と一致しない書き込み。引き継ぎ・交代で新指揮役が自分の ID にするときだけ `--claim-conductor` を付ける（patch が別の ID を書こうとしても名乗った ID が入る）
 - `watch_log_offset`・`inbox_offset` を現行値より小さい値へ戻す変更（巻き戻し）。`--allow-offset-regression` を付けたときだけ適用し、適用も `anomalies` に記録する。オフセットを意図して戻す場面（ログの切り詰めなど）に限る
+- 状態ファイルが JSON のオブジェクトとして読めないとき、手順は元のファイルを `patrol-state.json.unreadable-<時刻>` に退避して `anomalies` に記録し、`--claim-conductor` 以外の `--writer-thread` の書き込みとオフセットを書く書き込み（`--allow-offset-regression` なし）を拒否する（照合を確かめられないため）。回復途中の記録には `needs_conductor_claim` が立ち、`--claim-conductor` の回復書き込みが来るまで拒否が続く。退避されたファイルは残り、現指揮役が回復の材料にできる
 
 ### 次回確認時刻（フォローアップタイマー）
 

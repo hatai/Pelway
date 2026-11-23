@@ -130,10 +130,45 @@ rm -f "$STATE"
 check "missing state file is created" upd 0 '{"a":1}' --writer conductor-watch
 check "created file has patch" eq "$(pget a)" '1'
 
+# --- 読めない状態（壊れた JSON・非原子的な直書きの途中）---
+# 元のファイルは <state>.unreadable-<時刻> に退避され、照合できない書き込みは拒否する。
 put_state '{"broken'
-check "corrupt state recovered" upd 0 '{"a":2}' --writer conductor-watch
-check "corrupt recovery applied patch" eq "$(pget a)" '2'
-check "corrupt recovery recorded" anoms_has "state-unreadable"
+check "corrupt: foreign thread write refused" \
+  upd 3 '{"watch_log_offset":3796,"last_patrol_note":"old"}' --writer-thread mcp:old
+check "corrupt: refusal recorded" anoms_has "owner-unverifiable"
+check "corrupt: refused write not applied" eq "$(pget watch_log_offset)" '""'
+check "corrupt: broken file backed up" \
+  bash -c 'compgen -G "$1.unreadable-*" >/dev/null' _ "$STATE"
+check "corrupt: unreadable recorded" anoms_has "state-unreadable"
+
+# 拒否で書き戻した回復途中の記録からは持ち主もオフセットも確かめられないので、
+# --claim-conductor の回復書き込みが来るまで拒否が続く。
+check "corrupt: flag marks recovery" eq "$(pget needs_conductor_claim)" 'true'
+check "corrupt: second foreign thread write still refused" \
+  upd 3 '{"watch_log_offset":3796}' --writer-thread mcp:old
+check "corrupt: second write not applied" eq "$(pget watch_log_offset)" '""'
+check "corrupt: non-thread offset write still refused" \
+  upd 3 '{"watch_log_offset":100}' --writer conductor-watch
+check "corrupt: second offset refusal recorded" anoms_has "offset-unverifiable"
+check "corrupt: patch cannot clear flag" \
+  upd 0 '{"needs_conductor_claim":false,"a":1}' --writer conductor-watch
+check "corrupt: flag survives patch" eq "$(pget needs_conductor_claim)" 'true'
+
+put_state '{"broken'
+check "corrupt: offset write by non-thread refused" \
+  upd 3 '{"watch_log_offset":100}' --writer conductor-watch
+check "corrupt: offset refusal recorded" anoms_has "offset-unverifiable"
+
+put_state '{"broken'
+check "corrupt: claim recovers" upd 0 '{"scheduled_task_id":"s1"}' --writer-thread mcp:new --claim-conductor
+check "corrupt: claim sets owner" eq "$(pget conductor_thread_id)" '"mcp:new"'
+check "corrupt: claim clears flag" eq "$(pget needs_conductor_claim)" '""'
+check "corrupt: recovery recorded" anoms_has "state-unreadable"
+check "corrupt: claim applies patch" eq "$(pget scheduled_task_id)" '"s1"'
+
+put_state '{"broken'
+check "corrupt: non-offset write by non-thread applies" upd 0 '{"a":2}' --writer conductor-watch
+check "corrupt: non-offset write applied" eq "$(pget a)" '2'
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
 
 # --- 入力の誤り ---

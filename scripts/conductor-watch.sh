@@ -328,9 +328,9 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
     # 書き戻しは共通の書き込み手順 scripts/patrol-state-update にだけ出す（Issue #671。
     # 手順側でロックを取って読み直した現在値に併合するため、読み込みの後に他の書き手が
     # 進めたオフセットや項目を巻き戻さない）。subjects は対象ごとの置き換えなので、
-    # 記録から消えた対象を null で消す merge patch の列を組み立てる（読み込んだ時点で
-    # 無かった対象には触れず、他の書き手が間に足した対象は残る）。
-    removed = {k: None for k in ps["subjects"] if k not in new_subj}
+    # 読み込んだ時点の対象をすべて null で消す merge patch を先に出してから
+    # new_subj を書く（読み込み後に他の書き手が足した対象は残る）。
+    removed = {k: None for k in ps["subjects"]}
     patch = [{"subjects": removed}, {"subjects": new_subj, "updated_at": now_iso}]
     r = subprocess.run([sys.executable, "scripts/patrol-state-update",
                         "--writer", "conductor-watch", "--state", ps_path],
