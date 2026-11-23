@@ -48,9 +48,9 @@
 
 ## 13件孤立の詳細調査（人間依頼）
 
-- 「13件が孤立」の実体: `completed`・未 settle・トップレベルスレッド 13 本（open PR 持ち 11・なし 2）。内訳: 真の孤立（起こす経路の障害で停止）最大 6 件・意図的保留 4〜5 件・settle 負債 3 件
-- 根本原因（確認済み）: ①`scripts/conductor-watch.sh` が `t3 thread list` の失敗を `|| true` + `2>/dev/null` + `except: threads=[]` で握り潰し、watcher_blind（11-20 00:50〜）の間 STALL 検知（Issue #504 実装）が完全沈黙 ②`t3_thread_send` MCP 経路障害（`mcp_down` 10:45〜継続・本調査中も再送2回失敗。read 系は成功）
-- 増幅: 指揮役 4 代交代・旧指揮役の settle 後自動再起動で patrol-state 上書き（offset 逆行）・巡回タスク fe5a87db が enabled:false
+- 「13件が孤立」の実体（当時の記述。訂: スナップショットで `completed`・未 settle・トップレベルと確定したのは 12 本＝open PR 対応 10・なし 2。#569 分はスレッド ID 未特定で状態未確認の候補として扱う — report.md 2 節）。内訳: 真の孤立（起こす経路の障害で停止）最大 6 件・意図的保留 4〜5 件・settle 負債 3 件
+- 根本原因（確認済み）: ①`scripts/conductor-watch.sh` が `t3 thread list` の失敗を `|| true` + `2>/dev/null` + `except: threads=[]` で握り潰し、watcher_blind（11-20 00:50 の申し送りと 11-21 01:50 の記録の 2 点が確認済み。訂: この間の各回の実行結果は未確認のため「の間…完全沈黙」は断定できない — report.md 3.1 節）の間 STALL 検知（Issue #504 実装）が沈黙 ②`t3_thread_send` MCP 経路障害（`mcp_down` 10:45〜継続・本調査中も再送2回失敗。read 系は成功）
+- 増幅: 指揮役 4 代交代・旧指揮役スレッドの起き直りと patrol-state 上書き（offset 逆行）（訂: 観測できた起き直りは割り込み直後・settle 完了とほぼ同時期で、settle 後の起き直りと上書きの前後関係・因果は未確認 — report.md 3.4・6 節）・巡回タスク fe5a87db が enabled:false
 - 成果物: 調査報告 `docs/worklogs/bugs/orphaned-impl-threads/report.md`（report-only Draft PR #650・branch `agent/investigate-orphaned-impl-threads`）、対策 Issue #651（conductor-watch の取得失敗イベント化）起票
 - link_pull_request/link_issue の T3 ツール呼び出しは MCP 再接続失敗で未完了
 
