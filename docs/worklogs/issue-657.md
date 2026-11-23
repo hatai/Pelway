@@ -26,11 +26,11 @@
 
 ## 実装者メモ（round 3）
 
-対象 head: c488719c9ff8363fa2e398fafcef76b803ead218
+対象 head: b5b714d（round 3 の最終実装コミット。1 行目の SKILL.md 修正は c488719）
 
-1. 詰まった箇所: 手順 6: `mise run verify` の deny-check が RUSTSEC-2026-0592（`url` クレートの advisory、slint 経由）で失敗。変更（`.agents/skills/command-team/SKILL.md` の 1 行）を退避した同じツリーでも再現したため環境起因とし、内訳と再現確認を PR 本文の検証欄に書いて先へ進めた。
+1. 詰まった箇所: 手順 6: `mise run verify` の deny-check が RUSTSEC-2026-0592（`url` クレートの advisory、slint 経由）で失敗。変更（`.agents/skills/command-team/SKILL.md` の 1 行）を退避した同じツリーでも再現し、CI の static（cargo deny check）と main の nightly（run 45086598217）も同一失敗のため環境起因。advisory の解決策（`url` >=2.5.9）に従い `cargo update -p url --precise 2.5.9`（Cargo.lock 4 行）で解消し、verify 全体を `exit=0` で通した（b5b714d）。
 2. 曖昧だった文: 「直し方は二つある。(1) 変わっていないパスも `ref=main` で読むと書く（受け入れ条件 2 の文言から外れるので、指揮役に確かめる）。(2) 少なくとも、レビューの委託先は review-pr の決まり（main の版）に従うと書き、「同じ」と書いている括弧を、実際の違いに合わせて直す。」（PR #662 の Claude の round 2 レビューの `[文書のずれ]` の nit）
-3. 仮定と解釈: (2) を選んだ。(1) は受け入れ条件 2（対象 head から読む旨を書くこと）の文言から外れ指揮役の確認を要するため。head の版を読む規定自体は受け入れ条件どおり残し、レビューの委託先に限り review-pr の決まり（変わっていないパスも main の版）が優先すると書き、「同じ」の括弧は実際に同じ部分（変えたパスは main の版に従う）に付け直した。
+3. 仮定と解釈: (2) を選んだ。(1) は受け入れ条件 2（対象 head から読む旨を書くこと）の文言から外れ指揮役の確認を要するため。head の版を読む規定自体は受け入れ条件どおり残し、レビューの委託先に限り review-pr の決まり（変わっていないパスも main の版）が優先すると書き、「同じ」の括弧は実際に同じ部分（変えたパスは main の版に従う）に付け直した。Cargo.lock の更新は Issue の趣旨の外だが、必須チェックを緑にする唯一の手段でパッチバージョンのセキュリティ修正の取り込みのためこの round に含めた（専用 Issue を待つと PR が停滞する）。
 4. 足りなかった情報・検証手段: Guard (b) の確かめ方が複数担当の再委託で先に投稿された片方のレビューでもう片方の完了と誤判定する点（Codex と Claude の印なし nit が共に指摘）は、この round の直す対象外。同時再委託で後投稿側が停止しないか確かめる手段が無い。
 5. 改善案: `.agents/skills/command-team/SKILL.md` の「レビュー担当と effort」の (b) の確かめ方に「委託された `Reviewer:` の行の `agent=` と一致するレビューに絞る」を足す（両レビュアーの nit と同じ修正。別 Issue で扱う）。
 
