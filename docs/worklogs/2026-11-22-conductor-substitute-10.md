@@ -680,3 +680,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 11-23 23:45 — #675 QA pass・automerge
 
 - QA（Devin）: pass@d434ce76。codex approve が同 SHA・必須チェック success → pelway-qa 投稿（issuecomment-7100252844）・`automerge` 付与（Kodiak 待ち）
+
+## 11-24 00:05 — #661 QA pass・#560 Devin approve
+
+- #661 QA（Devin）: pass@90ed8d97 → pelway-qa 投稿。automerge は codex 待ち（現承認は claude）
+- #560 レビュー（Devin 代替・codex 上限）: approve@9b92b448 must-fix 0
