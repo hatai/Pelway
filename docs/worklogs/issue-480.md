@@ -143,3 +143,15 @@
 5. 改善案: `docs/dev-environment.md` に「`/tmp`・`/home` が nobody 所有の環境で `verify-run.test.sh` が `dir_chain_safe` に落ちるときの切り分け（`TMPDIR` を uid 1000 所有のチェーンに向ける）」を足す（別 Issue が適切）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 13・レビューの must-fix 2 件と印の nit 1 件）
+
+対象 head: 52a281b4d01e018dbe4588c95bf23f175a587fb6
+
+1. 詰まった箇所: 指揮役のレビュースレッド（Devin swe-2-high 代替・codex 上限のため）のレビュー（head `b4ea8e0a`）は request-changes、must-fix 2 件・nit 3 件。直したのは must-fix 2 件と、印 `[文書のずれ]` のある nit 1 件。`docs/agents/grokbot-runbook.md` の 27 行・96 行・143 行（`LABEL unbacked` の裏付け検査: 条件を満たした PR への指揮役の `automerge` 付け外しは指揮役の操作記録を裏付けに数え、例外の PR（round 4 以降・`.github/`・`fnox.toml`）への付与は hatai 本人の記録だけを裏付けにする）。`AGENTS.md` の 37 行（手マージ前提の「a manual merge is used only when the queue cannot merge」を、例外 PR のみに hatai が判断する admin マージという正本への参照に置き換え）。`docs/superpowers/specs/agent-team.md` の 60 行（`pr-size-exception` はレビューで must-fix に数えないが、Kodiak は必須チェック失敗の PR をマージできないため `automerge` は付けず hatai の例外の判断に回す、という形に 76 行と揃えた）。
+2. 曖昧だった文: 「条件を満たした PR に指揮役（リード）が付けた `automerge` ラベルは『裏付けあり』として扱い `LABEL unbacked` にせず」（レビューの must-fix と Issue #480 の hatai コメント「追加でやること」1）。
+3. 仮定と解釈: 「裏付けあり」の範囲は付与だけでなく解除にも及ぶと読んだ（指揮役が条件崩れで外す操作も正当な操作記録で裏付ける。元の文は「付けたラベル」とあるが、裏付け検査は付け外しの両方を見る決まりのため）。例外 PR では付与のみ hatai 本人の記録を求める書き方にした（解除は不適切なラベルを除く操作で、検出すべき対象は付与側）。選ばなかった解釈: 例外 PR では付け外しの両方に hatai の記録を求める。
+4. 足りなかった情報・検証手段: nit の `author.login` の `[bot]` 落ちの件（review-pr:122）は印が無いため直さなかったが、`pelway-dev` の同名ユーザーが登録可能かは未検証のまま（レビュー本文も「未確認」としている）。
+5. 改善案: `docs/agents/grokbot-runbook.md` と qa-checklist・名義の確かめ方の `user.type == "Bot"` への揃え（レビューの nit と round 10 のメモの改善案と同じ件）は別 Issue が適切。
+
+使ったスキル: implement-issue
