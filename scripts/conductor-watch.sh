@@ -74,7 +74,8 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
        "label_seen": [] if prev is None else prev.get("label_seen", []),
        "due_warned": {} if prev is None else prev.get("due_warned", {}),
        "stall_notified": {} if prev is None else prev.get("stall_notified", {}),
-       "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0)}
+       "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0),
+       "pending_sends": None if prev is None else prev.get("pending_sends")}
 # ラベル操作の裏付け検査（Issue #405、2026-11-17 の要件変更）。actor だけでは判定しない
 # （エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai に
 # なることがあるため）。needs-human の解除と automerge の付け外しを、イベント時刻の前
@@ -90,12 +91,57 @@ try: issues = json.load(open(os.path.join(d, "issues.json")))
 except Exception: issues = None
 try: prs = json.load(open(os.path.join(d, "prs.json"))); prs_ok = True
 except Exception: prs = []; prs_ok = False
-now = time.time()
+# 巡回の時刻。PELWAY_WATCH_NOW が指すファイルに epoch 秒が書かれていればそれを使う（テスト用）。
+try: now = float(open(os.environ["PELWAY_WATCH_NOW"]).read().strip())
+except Exception: now = time.time()
+def stamp(ts): return datetime.fromtimestamp(ts).isoformat(timespec="seconds")
+def deadline_ts(s):  # ISO 8601 を epoch に読む。読めない値（無い・壊れている）は None
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
 # 見張りが動いていることを示す行（Issue #504）。HEARTBEAT_SECS ごとに 1 行。
-HEARTBEAT_SECS = 600
+# PELWAY_WATCH_HEARTBEAT_SECS で差し替えられる（テスト用）。
+HEARTBEAT_SECS = float(os.environ.get("PELWAY_WATCH_HEARTBEAT_SECS") or 600)
 if now - (cur["heartbeat_at"] or 0) >= HEARTBEAT_SECS:
-    print(f"HEARTBEAT at={datetime.fromtimestamp(now).isoformat(timespec='seconds')}", flush=True)
+    print(f"HEARTBEAT at={stamp(now)}", flush=True)
     cur["heartbeat_at"] = now
+# 未配送のスレッド指示（patrol-state.json の pending_thread_sends）の滞留（Issue #669）。
+# MCP の send 系障害などで配信されないままの指示を、最古の since からの経過が
+# PENDING_SENDS_SECS（既定 30 分。PELWAY_WATCH_PENDING_SENDS_SECS で上書きできる）を
+# 超えたら知らせる。配列が空・キーが無い・patrol-state.json が読めないときは滞留なしとして
+# 扱う（since を読めない要素は数に入れず、誤検知で止まらない）。滞留の間は HEARTBEAT_SECS
+# ごとに知らせ直し、解消（配列が空になるか最古の since が新しい値に変わる）で回復の行を
+# 1 つ出す。巡回状態（GitHub の一覧）の成否にかかわらず毎巡回動かす。
+PENDING_SENDS_SECS = float(os.environ.get("PELWAY_WATCH_PENDING_SENDS_SECS") or 1800)
+oldest, pend_cnt, pend_to = None, 0, ""
+try:
+    psw = json.load(open(sys.argv[2]))
+    pend_arr = psw.get("pending_thread_sends")
+except Exception:
+    pend_arr = None
+if isinstance(pend_arr, list):
+    for e in pend_arr:
+        if not isinstance(e, dict): continue
+        ts = deadline_ts(e.get("since"))
+        if ts is None: continue
+        pend_cnt += 1
+        if oldest is None or ts < oldest:
+            oldest, pend_to = ts, str(e.get("to") or "")
+pend = cur["pending_sends"] if isinstance(cur["pending_sends"], dict) else None
+if oldest is not None and now - oldest >= PENDING_SENDS_SECS:
+    if pend is None or pend.get("since") != oldest:
+        if pend is not None:
+            print(f"WATCHER pending-sends-recovered since={stamp(pend['since'])} after={int(now - pend['since'])}s", flush=True)
+        pend = {"since": oldest, "notified_at": now}
+        print(f"WATCHER pending-sends-stalled since={stamp(oldest)} for={int(now - oldest)}s count={pend_cnt} oldest_to={pend_to}", flush=True)
+    elif now - pend["notified_at"] >= HEARTBEAT_SECS:
+        pend["notified_at"] = now
+        print(f"WATCHER pending-sends-still-stalled since={stamp(oldest)} for={int(now - oldest)}s count={pend_cnt} oldest_to={pend_to}", flush=True)
+elif pend is not None:
+    print(f"WATCHER pending-sends-recovered since={stamp(pend['since'])} after={int(now - pend['since'])}s", flush=True)
+    pend = None
+cur["pending_sends"] = pend
 for t in threads:
     tid, s = t["threadId"], t.get("status")
     cur["threads"][tid] = s
@@ -243,11 +289,6 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
             if rl.startswith("state: "): st = rl[len("state: "):].strip()
         if k not in inbox_state or at >= inbox_state[k][0]:
             inbox_state[k] = (at, st)
-    def deadline_ts(s):  # ISO 8601 を epoch に読む。読めない値（無い・壊れている）は None
-        try:
-            return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
-        except Exception:
-            return None
     new_subj = {}
     for iss in issues:
         n = str(iss.get("number"))
