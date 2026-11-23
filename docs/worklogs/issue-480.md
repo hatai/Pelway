@@ -167,3 +167,15 @@
 5. 改善案: なし（round 12 の `dir_chain_safe` の環境の件は引き続き別 Issue が適切）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 15・レビューの must-fix 1 件と印の nit 4 件）
+
+対象 head: 46bea5b7
+
+1. 詰まった箇所: 指揮役のレビュースレッド（claude）のレビュー（head `1803ee9d`）は request-changes、must-fix 1 件・nit 5 件（印 `[文書のずれ]` 4 件・印なし 1 件）。直したのは must-fix 1 件と印の nit 4 件。must-fix は `.agents/skills/security-review/SKILL.md`（この PR で変えていないファイル）の「素の `gh` の例外」の括弧の説明が、前の AGENTS.md の例外（キューの切り戻し）のまま残っていた件で、正本（command-team「マージ」の 3 つの例外）への参照に替えた。同じ種類の must-fix が 2 round 続いたため、その種類の全経路に当てる決まり（キュー切り戻し・`pr-size-exception` を admin マージの経路として書く記述は、正本の 3 つの例外に揃える）を定め、`docs/agents/human-actions.md` の H11 の行（内容と参照の行番号）も同じ形に直した。印の nit: implement-issue:334（「fetch は禁止なので」の前提を外す）、3 ファイルの「2026-11-19 の hatai の決定」の日付消し（Facts over history）、command-team:260（`VERDICT green` の行の条件の列挙を「上の『`automerge` ラベルを付ける条件』」への参照に）、runbook:95（キューが詰まったときの文言を「hatai に知らせる（admin マージは例外に当たると判断したときだけ）」に）。印なしの nit（review-pr:122 の `[bot]` 判定）は直さなかった。`doc-drift-nit-docs.test.sh` の文言ピンが消した列挙を固定していたため、ピンを新しい参照の文に更新した。
+2. 曖昧だった文: 「must-fix（security-review/SKILL.md:104 の例外記述を正本への参照に替える件）と [文書のずれ] nit に対応して再レビューを委託してください」（指揮役の T3 の指示）。
+3. 仮定と解釈: 「再レビューを委託してください」は、手順 8 の委託除外（この PR の差分は `.agents/skills/review-pr/` を変える）に従い、修正 push と新 head の報告までを実装側が行い、委託そのものは指揮役が行うと読んだ。選ばなかった解釈: 実装側から再委託する（除外規則に反する）。「同じ種類の全経路」は、キュー切り戻しや `pr-size-exception` を admin マージの前提として書く記述すべて（security-review:104 と human-actions:60 の H11）と読んだ。
+4. 足りなかった情報・検証手段: `pelway-dev` を利用者名として登録できるか（review-pr:122 の nit の前提）は未検証。レビュー本文の「未確認」に従い今回も確かめていない。
+5. 改善案: `doc-drift-nit-docs.test.sh` のような文言ピンが「列挙を参照に替える」類のレビュー修正と毎回衝突する。ピンは「条件が文書にあること」より「参照が切れていないこと」を見る形にすると両立する（別 Issue が適切）。
+
+使ったスキル: implement-issue
