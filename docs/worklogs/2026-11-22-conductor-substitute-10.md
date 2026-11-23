@@ -547,3 +547,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - must-fix 反映して `cfae9905` push: #569 を「候補」（スレッド ID 未特定・状態未確認）として確定 12 件と分離・分類を一意に / 「失敗し続けた」を観測 2 点に限定 / settle 後の起き直りを観測した記録無し・上書きの根拠を bak-devin10-handover（mtime 10:40・offset 3425）を含む突き合わせに限定。同梱 worklog と PR 概要にも訂正注記を揃えた。nit 2 件（PATROL は前回保存した waiting_on 参照・87-88 行）も反映
 - 発見: offset 逆行の観測（3796 側）は時刻の記録が worklog に残っていなかった — 時刻付きの前後記録として `patrol-state.json.bak-devin10-handover` を証拠に採用
 - r5 を codex gpt-6.2-sol に委託（`rev-650-cfae9905-20261123`）
+
+## 11-23 15:40 — PR #650 レビュー r5 対応
+
+- codex r5（`cfae9905` レビュー・pullrequestreview-6016317439）: request-changes・must-fix 3・nit 1（前回 nit 2 件は解消）
+- 反映して `f5b6ac84` push: 証拠行の「合算」を確定 12＋候補 1 に / worklog 内訳を当時の記述と明示・確定分 4・2・3・3＋候補 1 併記 / 沈黙を「列挙に失敗した回は検知されない構造」に分離 / バックアップを交代前の参考記録・507473/3796 各時点の記録済み/未記録を明記 / 「削除前後で挙動」は未確認に / 題名を「孤立が報告されたスレッド 13 件の調査」に（PR 題名も更新）
+- 3796 側の読み取りは時刻・記録先が worklog・patrol-state いずれにも残っていないことを確認（未記録観測として明示）
+- r6 を codex gpt-6.2-sol に委託（`rev-650-f5b6ac84-20261123`）
