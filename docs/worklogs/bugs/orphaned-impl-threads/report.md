@@ -90,13 +90,13 @@ T3 のスレッドは pull 型である。1 回の run が `completed` で終わ
 
 | 主張 | 証拠 |
 |---|---|
-| 13 件の構成 | 指揮役スレッド `mcp:57618b05` run 6 の棚卸しメッセージ（`completed`・未 settle・トップレベルで 12 本・スナップショット範囲外の #569 分は PR #600 から確認して合算 13 本）と、[同 worklog の記録](https://github.com/hatai/Pelway/blob/679086bb6a5aed752280ed508701fa3336a92240/docs/worklogs/2026-11-22-conductor-substitute-11.md)（「13件孤立の詳細調査」節） |
+| 13 件の構成 | 指揮役スレッド `mcp:57618b05` run 6 の棚卸しメッセージ（`completed`・未 settle・トップレベルで 12 本・スナップショット範囲外の #569 分は PR #600 から確認して合算 13 本）と、`docs/worklogs/2026-11-22-conductor-substitute-11.md`（本 PR に同梱。旧指揮役 11 のブランチは remote 未 push のためコミット permalink は使わない）（「13件孤立の詳細調査」節） |
 | 監視の失明の期間と症状 | `patrol-state.json` の `watcher_blind` キー: `{"since":"2026-11-20T00:50:00+09:00","symptom":"t3 thread list --json が \"No running T3 Code server uses /home/hatai/.t3\" で失敗（wsl-runtime 実バイナリでも同じ）。threads.json 空→state.json に現行スレッドなし・watch.log 00:50 以降無記録","recorded_at":"2026-11-21T01:50:00+09:00"}` — 連続失敗は `watch.log 00:50 以降無記録` の記述が示す。終了時刻は未記録 |
 | 失明のコード上の原因 | `scripts/conductor-watch.sh` 54 行の失敗握り潰し（`> "$D/threads.json" 2>/dev/null \|\| true`）、87-88 行の `try: threads = json.load(...)` / `except Exception: threads = []` |
 | STALL 検知の存在と対象・条件 | `scripts/conductor-watch.sh` 224 行（`STOPPED`）・289-298 行（waiting_on が implement/review・最新実装スレッド停止・状態行 `working` か無記録で conductor へ切替（298 行）・PATROL は切替前 waiting_on != conductor のときだけ（292-293 行）・STALL は同 `updatedAt` 再通知しない（295-297 行））。`needs-human` は分岐に入らない（巡回 1 時点で同ラベルだった 1・2・5・8・11 番。3.1 節） |
-| send 障害 | `patrol-state.json` `mcp_down.since: 2026-11-22T10:45+09:00`（旧指揮役側の記録）、`pending_thread_sends` 3 件（最古 11-22 02:45）、現指揮役側の巡回 1 で `t3_thread_send` 2 回連続失敗（[同 worklog](https://github.com/hatai/Pelway/blob/679086bb6a5aed752280ed508701fa3336a92240/docs/worklogs/2026-11-22-conductor-substitute-11.md)「巡回 1」節。同日 11:05-11:15 台の `schedule_task` 疎通は同 worklog「引き継ぎ確認」節） |
-| 旧指揮役の自動起き直りと共有状態の上書き | `conductor-watch/watch.log` で `mcp:launch:61092c…` の `prev=completed`→`running` 遷移が計 22 回（定期巡回の起床を含む）。割り込み後の起き直りは[同 worklog](https://github.com/hatai/Pelway/blob/679086bb6a5aed752280ed508701fa3336a92240/docs/worklogs/2026-11-22-conductor-substitute-11.md)の中断記録（11:14 JST 台・run 22・23、23 は起き直り後に再度中断）で実測。settle 完了は同日 11:15 JST 台。上書きは `watch_log_offset` 507473→3796 の逆行と `last_patrol_note` の旧指揮役記録での置き換えを巡回で実測（同 worklog「増幅」の記録）。起き直りと上書きの前後関係は settle 後の時刻付き書き込み記録が無く未確認 |
-| 巡回の実値 | [`docs/worklogs/2026-11-22-conductor-substitute-11.md`](https://github.com/hatai/Pelway/blob/679086bb6a5aed752280ed508701fa3336a92240/docs/worklogs/2026-11-22-conductor-substitute-11.md)（PR 12・agent:working 9・needs-human 7） |
+| send 障害 | `patrol-state.json` `mcp_down.since: 2026-11-22T10:45+09:00`（旧指揮役側の記録）、`pending_thread_sends` 3 件（最古 11-22 02:45）、現指揮役側の巡回 1 で `t3_thread_send` 2 回連続失敗（同 worklog（`docs/worklogs/2026-11-22-conductor-substitute-11.md`・本 PR 同梱）「巡回 1」節。同日 11:05-11:15 台の `schedule_task` 疎通は同 worklog「引き継ぎ確認」節） |
+| 旧指揮役の自動起き直りと共有状態の上書き | `conductor-watch/watch.log` で `mcp:launch:61092c…` の `prev=completed`→`running` 遷移が計 22 回（定期巡回の起床を含む）。割り込み後の起き直りは同 worklog（`docs/worklogs/2026-11-22-conductor-substitute-11.md`・本 PR 同梱）の中断記録（11:14 JST 台・run 22・23、23 は起き直り後に再度中断）で実測。settle 完了は同日 11:15 JST 台。上書きは `watch_log_offset` 507473→3796 の逆行と `last_patrol_note` の旧指揮役記録での置き換えを巡回で実測（同 worklog「増幅」の記録）。起き直りと上書きの前後関係は settle 後の時刻付き書き込み記録が無く未確認 |
+| 巡回の実値 | `docs/worklogs/2026-11-22-conductor-substitute-11.md`（本 PR 同梱）（PR 12・agent:working 9・needs-human 7） |
 
 ## 5. 最小の修正案
 
