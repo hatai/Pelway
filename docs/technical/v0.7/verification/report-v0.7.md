@@ -49,3 +49,17 @@ UIの除外表示は出力先の権限で分け、停止要求の表示は実際
 Issue #489 に基づき body/06-i18n.md へ ch06-display-name（表示名の文字規則）を新設した。body/03-ai-bot-runtime.md には正本への参照を、body/08-decisions-open.md には未決 U08（バッジ紛らわしい語の拒否範囲）を登録した。節対応（current-sections.json・section-correspondence.json・source-correspondence.md）へ新節を登録し、対応は160行から161行へ、現行見出しは130から131へ増えた。
 verify.py を再実行し static_pass=true（相対リンク440件エラー0、本文アンカー重複0、履歴コピー182件一致、元見出し・現行見出しの未対応0）。原本と凍結ZIPはこの環境に無いため not-run と記録された。
 追記は文書のみで、runtime 試験・実装・実外部I/Oの許可を意味しない。紛らわしい語の拒否範囲は U08 として未決のまま。
+
+## 監査事象への承認回答と主体削除後の保持（2026-11-19 JST、Issue #490）
+
+03の監査節（ch03-s08）に、承認・却下・失効・取り下げの回答の監査事象への必須記録、監査行と`action_snapshot`/`approval_decision`の主体への外部キー依存の禁止（Botを外す・削除の操作での連鎖消去なし）、監査ログの仮名識別子（pseudonymous id）とhashへの限定（承認カードの本文を残さない。濱田さん決定 2026-11-19 17:23 JST）、同一transaction内の監査行の順序付け（単調な順序番号）、削除された主体を表す契約の`pelway-contract`配置を追記した。
+
+実測（自己点検）：検証時刻 2026-11-19T17:34:54 JST、verify.py再実行 static_pass=true、相対リンク436件エラー0、節対応の未対応0、本文アンカー重複0、UI限定回帰エラー0。追記は03の既存節内で、見出しと対応表（section-correspondence）の変更なし。13のR11（記録から365日・本文を複写しない）・D01〜05と、#415の「残すもの」（監査ログは追記だけ、外す操作も監査に残す）との整合は目視で確認した。監査表の実装・移行、監査の外部搬出（#204）、署名付きチェックポイント（ADR 0007）は対象外のまま。
+
+round 2（レビュー指摘への対応）: 監査行の保存項目を「節冒頭の定義（actor、承認snapshot、policy版、操作、結果、時刻、correlation ID）＋事象の種類」の一つの出力へ統合し、actor・承認者・依頼者は仮名識別子（pseudonymous id）、承認snapshotは版と内容hash、操作はlogical operation IDで保存する形を明示した。verify.py再実行 static_pass=true、相対リンク436件エラー0、アンカー重複0（検証時刻 2026-11-19T19:52:58 JST）。
+
+round 3（レビュー指摘への対応・2026-11-21）: 監査行の保存項目の正本を04の`audit_events`の定義（actor、subject、操作、結果、snapshot hash、policy版、日時、prev_hash）とADR 0007の輸出項目（workspace_id、event ID、`hash`・`prev_hash`）へ明示的に参照させ、節冒頭のcorrelation IDと事象の種類（承認・却下・失効・取り下げの回答）をこの節の追加とした。既存項目への適用として、主体の識別子（actor・subject・承認者・依頼者）を仮名識別子（pseudonymous id）で保存し、承認snapshotは版と内容hashで、操作はlogical operation IDで参照させ、承認カードの本文・添付の中身は監査行へ複写しない（R11とADR 0007の記録しない項目の境界のまま）。verify.py再実行 static_pass=true、相対リンク442件エラー0（04・ADR 0007への参照を追加）、アンカー重複0（検証時刻 2026-11-21T11:16:46 JST）。
+
+round 4（レビュー指摘への対応・2026-11-21・濱田さん決定 14:34 JST）: 送信承認待ちへの回答（snapshot版・承認decision版を参照）と判断待ちのまま確定した場合（decision_idと確定後の版を参照し、送信承認のsnapshot版を参照させない）の参照を書き分け、承認期限の到来など人・Botが回答しない期限切れの失効を、失効を確定したserverを記録主体として監査に残し応答の無い承認者・決定者へ帰属させない文を定めた。テストの固定文言にdecision_idと確定後の版・serverを記録主体の2行を追加。verify.py再実行 static_pass=true（検証時刻 2026-11-21T15:15:13 JST）。main e109a2b1をgit mergeで取り込み（mergeコミット bc903426）。
+
+round 5（Claude 例外レビューの指摘への対応・2026-11-21）: 期限切れの失効の事象に、actorを失効を確定したserverとし、失効した承認のsnapshot版・承認decision版を結び付ける参照を明記した。送信承認待ちへの回答者必須の記述を承認・却下・取り下げに限定して期限切れ失効を外し、判断待ちに期限切れが無いため当該文の「決定者」を削った。テストの固定文言に失効した承認への参照の1行を追加し、serverの文言を行の修正に合わせて更新した。verify.py再実行 static_pass=true（検証時刻 2026-11-21T15:34:17 JST）。

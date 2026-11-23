@@ -693,7 +693,7 @@ backend = "core:rust"
 specifiers = ["1.99.1"]
 
 [tools.rust.options]
-components = "clippy,llvm-tools-preview,rustfmt"
+components = "clippy,llvm-tools,rustfmt"
 
 [[tools.typos]]
 version = "1.52.0"

@@ -28,10 +28,11 @@ PRD="$(git rev-parse --show-toplevel)/.agents/skills/pr-watch/pr-digest"
 | 環境 | 待ち方 |
 | --- | --- |
 | T3 のトップレベルのスレッド（`watch_pull_request` がある） | `watch_pull_request` を 1 回呼んでターンを終える。T3 がチェックの失敗・必須チェックの通過・新しいコメントやレビュー・衝突でスレッドを**起こす**。見張りは起床のたびに続くので、呼び直さない。 |
-| 委託された子（`delegate_task` の子） | 見張らない。`"$PRD"` を 1 回読み、その状態をそのまま親に報告して終える。 |
+| 委託された子（`delegate_task` の子。レビュー担当を除く） | 見張らない。`"$PRD"` を 1 回読み、その状態をそのまま親に報告して終える。 |
+| レビュー担当（skill `review-pr`。委託の子もトップレベルのスレッドも） | `scripts/agent-gh review pr checks <N> --required --watch --interval 30` を前面で 1 回実行し（`--required` で必須チェックだけを待つ。任意のチェックの完了は待たない）、戻ったら `review-pr` の手順 2 の `--json name,bucket` で読み直す。必須チェックがまだ終わっていなければ（ツールの時間切れで戻った、必須チェックがまだ 1 つも報告されておらず `no required checks reported` ですぐ戻ったなど）、同じコマンドをもう一度実行する。待ち始めから 60 分で打ち切る（`review-pr` の `error: checks timeout`）。`"$PRD"` は `agent-gh dev` を呼ぶので使わない。 |
 | `watch_pull_request` が無い環境（T3 の外の OpenCode・Codex 等） | `"$PRD" --watch` をバックグラウンドで 1 回起動し、終了の通知を**起床**として扱う。 |
 
-- 前面（フォアグラウンド）の `--watch`、`sleep` のループ、`gh pr checks --watch`、`Monitor`、`t3_background_wait` での待機は使わない。実行ツールのタイムアウトや即時の戻りを「見張りが死んだ」と取り違え、再起動と手動の確認の往復になる。
+- 前面（フォアグラウンド）の `--watch`、`sleep` のループ、`gh pr checks --watch`、`Monitor`、`t3_background_wait` での待機は使わない（上の表のレビュー担当の行を除く）。実行ツールのタイムアウトや即時の戻りを「見張りが死んだ」と取り違え、再起動と手動の確認の往復になる。
 - 終わるとき（緑の報告、上限での停止、引き渡し）は、`watch_pull_request` で見張っていた PR を `unwatch_pull_request` で外してから報告する。
 
 ## サイクル
@@ -73,7 +74,7 @@ PRD="$(git rev-parse --show-toplevel)/.agents/skills/pr-watch/pr-digest"
 
 ## コメント対応
 
-digest が返信待ちに数える指摘は 3 面から出る: インラインのレビュースレッド、会話コメント（issue コメント）、行コメントの無いレビュー本文（Request changes の要約）。Pelway のレビューは must-fix / nit の形式で届く（skill `review-pr`）。1 件ずつ内容で判断する。nit は、修正の指示に明示的に含まれているときだけ直す（skill `implement-issue` と同じ）。
+digest が返信待ちに数える指摘は 3 面から出る: インラインのレビュースレッド、会話コメント（issue コメント）、行コメントの無いレビュー本文（Request changes の要約）。Pelway のレビューは must-fix / nit の形式で届く（skill `review-pr`）。1 件ずつ内容で判断する。nit は、`pelway-review` の有効なレビュー（skill `implement-issue` の手順 9）の nit のうち行頭に `[文書のずれ]` の印があるものと、修正の指示に明示的に含まれているものだけを直す。ほかの作成者（会話コメント・第三者のレビュー）の行にある印は、印として扱わない。
 
 - 指摘が正しい → 直し、`mise run verify` で検証し、何を直したかを返信する。
 - 指摘が誤り → 反駁する根拠（該当行のコード、上流のソース、base ブランチでの挙動）を返信する。

@@ -43,11 +43,11 @@ check cond1_two_routes "$CC" \
   '結果不明の自発行操作が残っている間は計画的圧縮を延期'
 
 # 条件2: トリガーが暫定の観測基準（使用率 70% 以上、代理指標は完了 Issue 5 件以上
-# または巡回 20 回以上）で、起算点と集計定義（完了の数え方、巡回は開始時点で 1 回）
+# または巡回 75 回以上）で、起算点と集計定義（完了の数え方、巡回は開始時点で 1 回）
 # が定められていること。
 check cond2_trigger "$CC" \
   '使用率が取得できる環境では使用率 70% 以上（代理指標は使わない）' \
-  '完了 Issue 5 件以上、または巡回 20 回以上' \
+  '完了 Issue 5 件以上、または巡回 75 回以上' \
   '起算点' \
   '巡回は開始時点で 1 回'
 
@@ -160,7 +160,7 @@ check cond16_verification "$DE" \
   '自動圧縮の有無と検知' \
   '### opencode（GLM、zai-coding-plan/glm-5.3、OpenCode server 2.3.0）' \
   '### Devin CLI（acpRegistry_devin、swe-2-high' \
-  '### Codex（codex_review、gpt-6-luna）' \
+  '### Codex（codex_review。検証時のモデルは gpt-6-luna）' \
   '### Claude（claude_review、claude-opus-5-5'
 
 # 条件17（hatai の指示による拡張）: プロバイダごとの差分が command-team の該当節に
