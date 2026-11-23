@@ -705,3 +705,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 11-24 01:20 — #680 QA は Ready 化のみ未達
 
 - QA（Devin）@b20964cc: コード全 pass だが条件 5（Ready 化）未達で fail → impl へ `pr ready` 依頼（SHA 不変）
+
+## 11-24 01:40 — #655 main 追従・claude レビュー委託
+
+- #655: update-branch で `86c7bf0a`→`a2a7691c`（main 取り込み）→ claude claude-opus-5-5・security=yes・worktree でレビュー委託（`rev-655-a2a7691c`）。codex approve は必須・11/28 待ち
+- #642/#644 は #655 マージ待ちの意図的待機と確認（30 分起床は監視動作）→ 対応不要として patrol-state の waiting に記録
+- #610 impl（full-access）はリード経由で main 取り込み指示済み → 新 head で再レビュー+QA
