@@ -12,3 +12,15 @@
 5. 改善案: `.agents/skills/command-team/SKILL.md` の「決まり」に「patrol-state.json の書き込みは `scripts/patrol-state-update` にだけ出す（直書きしない）」の 1 行を足すと、runbook を読み直さない指揮役にも届く
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 2）
+
+対象 head: 8bf29ff5e9294ba964a76366bf183af449d3689b
+
+1. 詰まった箇所: must-fix「unreadable を空として上書きする fail-open」の修正で、拒否時に `{anomalies}` だけの最小状態を書き戻すと、次の書き込みは「読めるが持ち主もオフセットも無い」状態になり拒否が 1 回で抜けることに試験を足す過程で気づいた。回復印 `needs_conductor_claim` を残し、`--claim-conductor` の回復書き込みが来るまで拒否が続く形にした
+2. 曖昧だった文: 「`--claim-conductor` 付きの書き込み（または明示の回復フラグ）が来るまで、`--writer-thread` の書き込みとオフセットを書く書き込みを拒否する」（pelway-review の must-fix）。「書き込みを拒否する」がその試行だけか、回復完了までの全試行かが読み取れなかった
+3. 仮定と解釈: 「来るまで」を期間と読み、回復完了まで拒否が続く解釈を選んだ（その場限りの拒否では fail-open の穴が残るため）。回復印は patch からは操作できず、`--claim-conductor` だけが下ろす。unreadable 時に `--writer`（conductor-watch）がオフセットを書かない書き込みは、レビューの「オフセットを書く書き込みを拒否する」の文言どおり適用を許した。印の無い nit（O_NOFOLLOW、`--writer` の conductor_thread_id 制限、conductor-mismatch 後の指針、presence check の名前、`-I` フラグ）は決まりどおり直していない
+4. 足りなかった情報・検証手段: unreadable からの回復運用（退避ファイルから現指揮役が手で戻す手順）は runbook に回復の材料としての言及までで、完全な手順は現指揮役の判断に委ねた
+5. 改善案: `scripts/patrol-state-update` の `--help` 出力か runbook に「unreadable を見つけた現指揮役は、退避ファイルの中身を確かめて `--claim-conductor` で回復する」までの回復手順を足すと、異常時の判断が現指揮役ごとにばらつかない
+
+使ったスキル: implement-issue
