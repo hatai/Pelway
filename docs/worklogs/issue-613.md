@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 8 の「チェックがまだ動いていれば」の前に「`mergeable` が `CONFLICTING` なら pull_request のチェックは作られないため、先に手順 9 の修正依頼で main を取り込む」と足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: 5f8fab27701ab1734738ca00a853481f575fdd92
+
+1. 詰まった箇所: `scripts/tests/agent-gh.test.sh` の `no_bypass`: 連結形（`-ccore.hooksPath=/dev/null`）を既存のループに足しても、実装前から通った。git 2.56.1 が連結形を `unknown option` の exit 129 で拒むため、remote は変わらない。agent-gh の拒否（exit 2 と理由の文）を確かめる別の試験 `attached_c` に書き直し、実装前に `exit 129, want 2` の red を確かめた。
+2. 曖昧だった文: 「Git は後から渡された設定を優先するため一時フックが無効になり、他の名義のコミットも送れます」（PR #624 の pelway-review のレビュー、must-fix）。手元の git 2.56.1 では連結形が受け付けられず、再現しなかった。git の版に頼らない防御として拒否を足す、と解釈した。
+3. 仮定と解釈: 連結形は `-c?*` の分岐で受け、値が `core.hookspath`（大小文字を問わない）で始まるときだけ拒否する。それ以外の連結形は今までどおり git に渡す（git が拒む）。
+4. 足りなかった情報・検証手段: `mise run verify` は deny-check の RUSTSEC-2026-0592（url 2.5.8）で exit 1 になり、ほかのタスクも途中で打ち切られた。この差分は Cargo.lock に触れていない。`mise run verify-lint`・`mise run verify-test`（script-test 40 tests ok）・`mise run shellcheck` を個別に実行し、どれも exit 0 だった。url は main 側の PR #677 で上げる（開発リードの指示）。
+5. 改善案: `.agents/skills/review-pr/SKILL.md` の security-review の所見に「回避の経路は、手元の git などの版で再現したかを書く（未再現なら、その旨と版を書く）」と足す。
+
+使ったスキル: implement-issue
