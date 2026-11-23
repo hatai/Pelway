@@ -601,3 +601,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **#482**: 実装の main 取り込み push 待ち → その後 codex security=yes レビュー → approve 後 QA
 - **#560/#610/#661**: 再レビューは実装側が委託。approve 出現後に新 head で QA を委託（#560 は結果を PR に投稿）
 - 留意: 5 件とも Draft または needs-human 維持のため automerge は保留
+
+## 11-23 18:50 — #399 QA pass
+
+- QA（Devin・`qa-399-00c7f261`）: **pass**。head 両時点一致・必須チェック success・受け入れ条件全件 pass（fixture テスト範囲・#433 移管分は対象外の決定どおり）・混入なし・弱体化なし → pelway-qa 投稿（issuecomment-7093755658）
+- automerge は Draft 解除（Ready 化＝実装側）と #330 の needs-human 除去（hatai のみ）を待つ
