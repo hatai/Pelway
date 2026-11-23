@@ -3,8 +3,9 @@
 # 方針は docs/dev-environment.md の「セキュリティスキャン（security-scan）」に従う:
 #   - gitleaks と osv-scanner は mise.security.toml / mise.security.lock で版を固定する（MISE_ENV=security の
 #     ときだけ読まれるため、必須チェックの verify ジョブには影響しない）。semgrep は公式イメージを digest で固定する
-#   - 当面は報告のみ。検出があってもジョブは成功させ、警告とジョブサマリーに出す。ツール自体の
-#     失敗（ネットワーク断・設定の誤りなど）はジョブを失敗させる。必須チェックにするかは人間が決める
+#   - 検出はジョブサマリーに出す。gitleaks の全件・semgrep の INFO 以外・osv-scanner の
+#     unmaintained 以外の勧告はジョブを失敗させ、semgrep の INFO と unmaintained は警告だけにする。
+#     ツール自体の失敗（ネットワーク断・設定の誤りなど）もジョブを失敗させる。必須チェックにするかは人間が決める
 #   - 秘密の値はログ・サマリーに出さない（gitleaks --redact、サマリーは場所と種類だけ）
 #   - 有料サービス・アカウント登録・トークンは使わない（Semgrep はログインなし、--metrics=off）
 

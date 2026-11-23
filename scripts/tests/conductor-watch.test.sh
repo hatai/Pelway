@@ -70,7 +70,7 @@ print(json.dumps({"number": int(sys.argv[1]), "state": sys.argv[2],
 EOF
 }
 
-jarr() { local IFS=,; printf '[%s]' "$*"; }
+jarr() { local out="" x; for x in "$@"; do out+="${out:+,}$x"; done; printf '[%s]' "$out"; }
 
 # pr 101 OPEN true agent/11-abc "" … の形で PR 1 件の JSON を作る
 # （番号 状態 isDraft ブランチ reviewDecision verify結論: ""|SUCCESS|FAILURE）
