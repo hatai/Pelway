@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「決まり（毎回守る）」に「共有 worktree（他者の未コミット変更・別ブランチの未収録コミットがある）を割り当てられたときは `mktemp -d` の一時 worktree で作る。`refs/stash` は全 worktree で共有のため `git stash`/`stash pop` を使わない」を足す。
 
 使ったスキル: implement-issue、write-pull-request、command-team（レビュー担当の表）、`.agents/skills/diagnosing-bugs/SKILL.md`（Phase 2: 変更を退避した同一ツリーでの再現確認）
+
+## 実装者メモ（round 2）
+
+対象 head: d5dfb1907bc70a1c43a29e286ca121f9470ba969
+
+1. 詰まった箇所: レビュー r1 の must-fix は「実行可能な環境で `mise run verify` を完走し終了コード 0 を確認」。round 1 では sandbox 内に `dir_chain_safe` を満たす置き場が無いと判断したが、sandbox の `/` が exec ごとの自分所有（uid 1000・mode 755）の tmpfs で書き込めるため、同一コマンド内で `mkdir -p /v674 && TMPDIR=/v674 mise run verify` とし、完走・終了コード 0（94.76s、script-test 46/46 含む全段 ok）を確認した。exec をまたぐと / 配下の mkdir は残らない（/v674 の作成と利用は必ず同じコマンドで）。
+2. 曖昧だった文: 「変更を退避した同じツリーで再現する失敗は環境起因として、verify の内訳と再現確認を PR 本文の「確認方法/検証」に書いて先へ進めてよい。」（`.agents/skills/implement-issue/SKILL.md` 手順 6）— この文を受け入れ条件の「ローカル完走・終了コード 0」の代替としてよいと読んだが、レビューは「実行可能な環境を用意して完走する」を要求した。
+3. 仮定と解釈: 「先へ進めてよい」は、環境の制約でどうやっても実行できないときの扱いで、実行可能な置き場を作れるなら条件どおり完走させる、と解釈を改めた。TMPDIR の変更は検査の弱めではなく、`dir_chain_safe` の意図（祖先が自分か root の持ち物）を実際に満たす置き場を使うもの。
+4. 足りなかった情報・検証手段: sandbox の `/` が exec ごとの tmpfs で自分所有・書き込み可能という実測（round 1 で `mkdir /v674` が成功するまで未確認だった）。verify-run.test.sh の失敗を「sandbox 構造上の不可避」と決めつけた早合点。
+5. 改善案: `docs/dev-environment.md` の「実装担当の sandbox」節に「`dir_chain_safe` を満たす TMPDIR は sandbox の `/` 直下に同一コマンド内で作る（exec をまたぐと残らない）」を足す。
+
+使ったスキル: implement-issue、write-pull-request、command-team（レビュー担当の表）、`.agents/skills/diagnosing-bugs/SKILL.md`（Phase 2 の最小化は環境要因の切り分けに使ったが、回避可能な置き場があった）
