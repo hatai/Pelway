@@ -580,3 +580,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
   - nit: `SECURITY_SCAN_BASE_SHA` の検証を Gitleaks 分岐内へ（他ツールの手元実行が不要に止まらないよう）
 - セキュリティ観点は問題なし（contents:read・persist-credentials:false・書き込み権限/シークレット参照なし）
 - 差分案（yq を mise で版固定＋抽出/エラー/固定 SHA/ref 大小文字の回帰試験追加）を開発リードへ返却 — workflow 変更の push は濡田さんの手作業
+
+## 11-23 17:45 — #677 QA pass・automerge 付与
+
+- QA（Devin・`qa-677-937648b3`）: **pass**。head 両時点一致・必須チェック success・受け入れ条件 4 件全 pass・弱体化なし。cargo-deny advisories 直接実行でも `advisories ok`（RUSTSEC-2026-0592 非検出）
+- `agent-gh qa` で pelway-qa 投稿（issuecomment-7093358175）→ `automerge` 付与。mergeState CLEAN・APPROVED@937648b3・verify/pr-size success・QA 同 SHA で全ゲート充足
+- マージ後の予定: #663・#656 を update-branch → 再レビュー＋QA → automerge。#654 は verify 結論待ち（68b27805）
+- `agent-gh qa` は `PELWAY_AGENT_FNOX_CONFIG=~/.config/pelway-agent-qa/fnox.toml` が必要（未設定は終了コード 3）
