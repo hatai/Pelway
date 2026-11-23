@@ -697,3 +697,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 11-24 00:50 — #680 approve・QA 委託
 
 - 再チェック（Devin）: approve@b20964cc・must-fix 0・nit 3 は impl 判断 → QA 委託（codex 待ち前提）
+
+## 11-24 01:00 — #560 QA 実測 pass だが例外ピン超過を検出
+
+- QA（Devin）@9b92b448: verify 実走 pass・受け入れ条件 pass（live.rs 25 件）・弱体化なし。**ただし pr-size +2289 が例外ピン（dd3362f5/+2285）を 4 行超過**（r9 nit 修正由来・決定が認めた範囲内の作業）→ hatai の例外取り直し or 削減が必要としてエスカレーション
