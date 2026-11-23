@@ -715,3 +715,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 11-24 02:00 — #655 claude approve・QA 委託
 
 - #655@a2a7691c: claude approve・must-fix 0・nit 3（1 件は security-review: 新警告が資格情報入り URL を出しうる — impl 判断・bfd8ff91 は full-access のためリード経由で伝達）→ QA 委託（`qa-655-a2a7691c`）
+
+## 11-24 02:15 — #655 QA pass
+
+- QA（Devin）@a2a7691c: pass → pelway-qa 投稿（issuecomment）。Ready 化は impl（bfd8ff91・リード経由）、automerge は codex 待ち
