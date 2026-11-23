@@ -175,7 +175,10 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 ### セキュリティスキャン（security-scan）
 
 - `.github/workflows/security-scan.yml` が、main 向け Pull Request・main への push・手動実行で、秘密情報・危ないコードのパターン・脆弱な依存関係を検出する（Issue #571）。すべて無料の OSS で、有料サービス・アカウント登録・スキャナー用のトークンは使わない（checkout は GitHub Actions が自動で発行する読み取り用のトークンを使う）。
-- 報告のみ: 検出があってもジョブは成功し、件数を `::warning::` に、一覧（場所と種類）をジョブサマリーに出す。ツール自体の失敗（ネットワーク断・設定の誤りなど）はジョブを失敗させる。必須チェックにはしていない（必須チェックにするかは hatai が決める）。本体は `scripts/security-scan.sh`、テストは `scripts/tests/security-scan.test.sh`。
+- 検出の一覧（場所と種類）はジョブサマリーに出す。次の検出が 1 件でもあれば、件数を `::error::` に出してジョブを失敗させる（`scripts/security-scan.sh` の終了コード 4）。それ以外の検出は件数を `::warning::` に出すだけで、ジョブは成功する（報告のみ）。ツール自体の失敗（ネットワーク断・設定の誤りなど）もジョブを失敗させる。必須チェックにはしていない（必須チェックにするかは hatai が決める）。本体は `scripts/security-scan.sh`、テストは `scripts/tests/security-scan.test.sh`。
+  - Gitleaks: すべての検出。
+  - Semgrep: 重大度が INFO 以外（WARNING・ERROR と、知らない重大度）の検出。INFO（`unsafe` の使用・`std::env::args`・`std::env::temp_dir` など、監査の目印にとどまる規則）は報告のみ。
+  - OSV-Scanner: unmaintained の告知（RUSTSEC の `informational` が `unmaintained`。OSV の `affected[].database_specific.informational` で見分ける）以外の勧告が付いたパッケージ。unmaintained は報告のみにする（cargo-deny の第1段が unmaintained を失敗させないのと同じ扱い）。`unsound` など他の告知は失敗させる。サマリーでは、告知の勧告の後ろに種類を書く。
 - ツールの診断（標準エラー）: 3 つのツールとも、診断には PR の作者が決められる値（設定の行・パス・取得先の URL など）が入りうり、失敗が終了コードに出ないことがある。そのため次のように扱う。
   - 標準エラーは公開のジョブログに出さず、ランナー上の一時ファイルにだけ書く。ログには失敗の種類と行数だけを出す。中身は手元で `SECURITY_SCAN_OUT=<dir> bash scripts/security-scan.sh <tool>` を実行し、`<dir>/<tool>.stderr` を読む（`MISE_ENV=security mise exec --` の下で実行する。Semgrep はイメージの中で実行する）。
   - Gitleaks と OSV-Scanner はログの水準を error に絞り（`--log-level error`・`--verbosity error`）、標準エラーに 1 行でもあれば、終了コードが検出なし・検出ありでも失敗にする。Gitleaks 8.30.1 は git log の失敗を、OSV-Scanner 2.7.1 はロックファイルの抽出の失敗を、ログに出すだけで終了コードに出さない。
@@ -186,32 +189,37 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 | ジョブ | ツールと版 | 対象 | 導入 |
 |---|---|---|---|
 | `gitleaks (secrets)` | Gitleaks 8.30.1（MIT） | HEAD から辿れる git 履歴全体。マージコミットの差分（競合解消で足した行）も含める（`--log-opts="-m HEAD"`、checkout は `fetch-depth: 0`） | `mise.security.toml`（`MISE_ENV=security`）と `mise.security.lock` |
-| `semgrep (code patterns)` | Semgrep CE 1.186.0（LGPL-2.1） | 作業ツリーのファイル（`tests/` の下を含む。リポジトリ直下の `.semgrepignore` が Semgrep の組み込みの既定の除外パターンを置き換え、今はここでは何も除外しない。ファイルの大きさやバイナリかどうか、未追跡のファイルへの `.gitignore` による Semgrep の選別は残る）。ルールセットは `p/rust`・`p/github-actions`・`r/bash` | 公式イメージ `semgrep/semgrep` を digest 固定した job コンテナ |
+| `semgrep (code patterns)` | Semgrep CE 1.186.0（LGPL-2.1） | 作業ツリーのファイル（`tests/` の下を含む。リポジトリ直下の `.semgrepignore` が Semgrep の組み込みの既定の除外パターンを置き換え、今はここでは何も除外しない。ファイルの大きさやバイナリかどうか、未追跡のファイルへの `.gitignore` による Semgrep の選別は残る）。ルールセットは `p/rust`・`p/github-actions`・`r/bash`（`github-actions-mutable-action-tag` を除く） | 公式イメージ `semgrep/semgrep` を digest 固定した job コンテナ |
 | `osv-scanner (dependencies)` | OSV-Scanner 2.7.1（Apache-2.0） | 作業ツリーのロックファイル（今は `Cargo.lock`） | `mise.security.toml` と `mise.security.lock` |
 
 - 秘密の値は出さない: Gitleaks は `--redact` で値を伏せ、サマリーには規則・場所・コミットだけを書く。`-m` で同じ値が複数のマージコミットに重ねて出るため、サマリーには規則と場所の重複を除いた数も書く。
 - Gitleaks は CLI を直接実行し、`gitleaks-action` は使わない。Action は v2 以降、独自の EULA（改変の禁止、Organization のリポジトリではライセンスキーが必要）で配布されている。CLI 本体は MIT で、版の固定も mise の checksum で揃えられる。
-- Semgrep は Registry のルールをログインなしで取得し、`--metrics=off` で利用状況の送信を止める。Registry のルールセットは実行のたびに最新を取り、版は固定されない（イメージの digest が固定するのはエンジンと依存だけ）。同じコミットでも、日によって検出が変わりうる。Registry のルールは Semgrep Rules License v1.0 で配布されている。利用は「自社の内部の業務目的」に限られ、ルールの再配布とサービスとしての提供は禁じられている（出典: https://semgrep.dev/legal/rules-license ）。このリポジトリでは、自分のコードを CI で検査するために使うだけで、ルールを複製してリポジトリに置かない。秘密情報向けのルールセットは入れない（秘密の検出は Gitleaks が担い、Semgrep は一致した行をそのまま出すため）。
+- Semgrep は Registry のルールをログインなしで取得し、`--metrics=off` で利用状況の送信を止める。Registry のルールセットは実行のたびに最新を取り、版は固定されない（イメージの digest が固定するのはエンジンと依存だけ）。同じコミットでも、日によって検出が変わりうる。WARNING 以上の規則が Registry に増えると、コードを変えなくてもジョブが失敗しうる。Registry のルールは Semgrep Rules License v1.0 で配布されている。利用は「自社の内部の業務目的」に限られ、ルールの再配布とサービスとしての提供は禁じられている（出典: https://semgrep.dev/legal/rules-license ）。このリポジトリでは、自分のコードを CI で検査するために使うだけで、ルールを複製してリポジトリに置かない。秘密情報向けのルールセットは入れない（秘密の検出は Gitleaks が担い、Semgrep は一致した行をそのまま出すため）。
 - Semgrep を mise で入れない理由: PyPI 配布で、mise の pypi バックエンドが作る依存の固定（uv.lock）が 1800 行を超えるため。イメージの digest は依存を含む中身全体を固定する。
 - 版の更新: 週次の `mise-bump.yml` は `MISE_ENV` を付けずに実行するため、`mise.security.toml` の Gitleaks・OSV-Scanner の版は上がらない。Semgrep のイメージの digest も同じ。Gitleaks の検出ルールは本体に入っているため、古い版のままだと新しい種類の秘密を見落とす。今は手で上げる: `MISE_ENV=security mise upgrade --bump aqua:gitleaks/gitleaks aqua:google/osv-scanner`（ツール名を付けないと `mise.toml` の共通のツールも上がる）のあと `MISE_ENV=security mise lock` で `mise.security.lock` を作り直し、Semgrep は新しいタグの digest に `security-scan.yml` を書き換える（workflow の変更は hatai が push する）。
 - OSV-Scanner と cargo-deny（`deny-check`）は、どちらも `Cargo.lock` を RustSec の勧告と照合する点で重なる。違いは次のとおり。
   - OSV-Scanner は、OSV データベースの他の出所（GHSA など）も見る（今は `Cargo.lock` だけを照合する）。
   - cargo-deny は `deny.toml` の ignore と警告の扱いを持ち、必須チェックの一部である。
-  - OSV-Scanner には `deny.toml` の ignore が効かないため、cargo-deny が無視した勧告も報告に出る。
-- 除外（`.gitleaksignore`・`.semgrepignore`・`osv-scanner.toml`）は、1 件ずつ理由を書いて足す。`.semgrepignore` を消すと、Semgrep は組み込みの既定の除外一覧（`tests/`・`test/`・`vendor/` など）に戻る。そのため、ファイルは中身が空でも残す。既存の検出を理由に、ルールの無効化や除外の範囲を広げない。
+  - OSV-Scanner には `deny.toml` の ignore が効かない。cargo-deny で ignore した勧告のうち告知でないもの（今は rsa の RUSTSEC-2023-0071）は、`osv-scanner.toml` にも同じ理由で書く。
+- Semgrep の `yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag` は `--exclude-rule` で使わない。この規則は `uses:` がコミット SHA でないことを検出するが、このリポジトリは `uses:` をタグで参照し、SHA を `.github/workflows/actions.lock`（`gh actions-lock` が生成）で固定する。
+- 除外（`.gitleaks.toml`・`.semgrepignore`・`osv-scanner.toml`）は、1 件ずつ理由を書いて足す。`.semgrepignore` を消すと、Semgrep は組み込みの既定の除外一覧（`tests/`・`test/`・`vendor/` など）に戻る。そのため、ファイルは中身が空でも残す。既存の検出を理由に、ルールの無効化や除外の範囲を広げない。
+  - Gitleaks の除外は `.gitleaks.toml` の `[[allowlists]]` に書く（`[extend] useDefault = true` で組み込みの規則はそのまま使う）。1 つの allowlist は `condition = "AND"` にし、`targetRules`（規則）・`paths`（ダミー値を置いたファイル。`^…$` で 1 ファイルずつ）・`regexes`（既知のダミー値そのもの。`^…$` で値全体を書き、検出された値に当てる）のすべてに合うものだけを許す。行番号を使わないため、ファイルの行がずれても CI は落ちない。同じファイルの別の値は除外されない。値の形（桁数・文字種）だけの除外は書かない。
+  - `.gitleaksignore`（「コミット:ファイル:規則:行」や「ファイル:規則:行」の指紋）は使わない。指紋は行番号を含むため、行がずれると同じ値が別の検出として出直す。新しいダミー値を除外するときは、そのファイルとその値を書いた allowlist を足すか、既存の allowlist の値をそのまま使う。
+  - `osv-scanner.toml` は `Cargo.lock` と同じディレクトリに置き、`[[IgnoredVulns]]` に `id` と `reason` を書く。`deny.toml` の `ignore` と同じ勧告は同じ理由と Issue を書く。unmaintained の告知は足さない（報告のみのため）。
 
 ## GitHub 通知（Grok Bot webhook・notify-grokbot）
 
-`.github/workflows/notify-grokbot.yml` が、Grok Bot が動く必要のあるイベント（PR のクローズ（マージを含む）、レビューの投稿、verify・nightly workflow の完了（`workflow_run`））と手動実行（`workflow_dispatch`）を Grok Bot の webhook に POST する。エージェントのスレッドの状態は見張り役 `agent-watch` が別に送る（「pitchfork について」参照）。送るのはメタデータのみで、PR タイトル・本文、コメント本文、レビュー本文、ラベル、メールアドレス等は送らない。
+`.github/workflows/notify-grokbot.yml` が、Grok Bot が動く必要のあるイベント（PR の作成（`opened`・`ready_for_review`）と push（`synchronize`）、クローズ（マージを含む）、レビューの投稿、verify・nightly workflow の完了（`workflow_run`））と手動実行（`workflow_dispatch`）を Grok Bot の webhook に POST する。エージェントのスレッドの状態は見張り役 `agent-watch` が別に送る（「pitchfork について」参照）。送るのはメタデータのみで、PR タイトル・本文、コメント本文、レビュー本文、ラベル、メールアドレス等は送らない。
 
 - Secret（リポジトリの Settings → Secrets and variables → Actions → New repository secret で登録。値はドキュメント・コードに置かない）:
   - `GROKBOT_WEBHOOK_URL` — webhook の URL
   - `GROKBOT_WEBHOOK_AUTH` — `Authorization` ヘッダーの値全体
-- 送る JSON のキーは 14 個固定: `schema`（`"pelway.github-notify/v2"`）, `urgency`（`digest` は workflow_run の成功（verify・nightly）と Approve のレビュー、それ以外は `immediate`）, `repo`, `event`, `action`, `pr_number`, `head_branch`, `head_sha`, `merged`, `conclusion`, `workflow_name`, `run_url`, `actor`, `occurred_at`。値の無いものは `null`。
+- 送る JSON のキーは 14 個固定: `schema`（`"pelway.github-notify/v2"`）, `urgency`（`digest` は workflow_run の成功（verify・nightly）・Approve のレビュー・PR への push（`synchronize`）、それ以外は `immediate`）, `repo`, `event`, `action`, `pr_number`, `head_branch`, `head_sha`, `merged`, `conclusion`, `workflow_name`, `run_url`, `actor`, `occurred_at`。値の無いものは `null`。
 - 送らない条件（通知をスキップし、ジョブは成功で終わる。CI は落ちない）:
   - 上記 Secret のどちらかが未設定のとき
   - fork 由来のイベント（PR 系は head リポジトリ、workflow_run は head_repository の full_name がこのリポジトリと違うとき）
   - レビュー（pull_request_review）で、投稿者の `author_association` が `OWNER` / `MEMBER` / `COLLABORATOR` のいずれでもないとき（ボット例外なし。レビュー担当の GitHub App の結果は `agent-watch` がスレッドの報告行として送る）
+  - `synchronize` で、同じ PR・同じ head sha の通知をすでに送った過去 run があるとき（dedup。workflow が `actions: read` 権限でこの workflow の過去 run を調べ、`Send notification` step が成功した run があれば送らない。調べられなければ送る側に倒す）
 - 対象外: PR の会話欄に書いた普通のコメント（issue_comment）は通知しない。fork から来た PR へのコメントを安全に見分けられないため。あとで足す場合は、`pull-requests: read` で PR を調べて fork を除く形にし、別の PR で行う。
 - 手動実行（workflow_dispatch）は `event: "test"` のテスト通知を 1 通送る。送信の失敗（タイムアウト・HTTP エラー）で CI は落ちない。
 
@@ -288,7 +296,7 @@ worktree への書き込みは、今は通る（権限プロファイル `review
 | 場所 | 設定 |
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.claude_review` | `driver: claudeAgent`、`config` の `homePath` に `/home/hatai/.claude-review`（UI のフィールド名は「CLAUDE_CONFIG_DIR path」。子プロセスの環境変数 `CLAUDE_CONFIG_DIR` になる。`config.environment` は claudeAgent の config スキーマに無いキーで無視される） |
-| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`・`git ls-tree`・`git cat-file`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` が引数を `git`/`gh` にそのまま渡すため、ワイルドカードは `auth token`・`repo clone`・`git` 全般などあらゆる形を許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す（QA 用の `Read(~/.config/pelway-agent-qa/**)` も、下の「QA 担当の GitHub App（pelway-qa）」の手順 5 で足してある）。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す。T3 が渡す MCP サーバーのツールは、`permissions.deny` に `mcp__t3-code` と `mcp__t3-code-direct`（サーバー名だけで、そのサーバーの全ツール）を書いて使えなくする（理由は「レビュー担当の Codex」と同じ）。claude.ai のコネクタ（外部のサービスへ送信できるツールを含む）は、`env` の `ENABLE_CLAUDEAI_MCP_SERVERS=false` で止める。組み込みのツールのうち、ほかのセッションや claude.ai へ送れるもの（`SendMessage`・`RemoteTrigger`・`Artifact`・`ShareOnboardingGuide`・`PushNotification`・`DesignSync`・`PublishPlugin`）は `permissions.deny` に書く（`WebFetch`・`WebSearch` は前から deny にあり、サブエージェントにも効く）。アカウントから同期されるプラグインの MCP サーバーは、`env` の `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` で読み込ませない（接続に失敗しているだけの状態は、セッションの途中で接続が戻りうるので、止めたことにならない）。下の `hooks.PermissionRequest` は承認要求を拒否するが、これに頼ってプラグインのツールを残さない |
+| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`・`git ls-tree`・`git cat-file`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` が引数を `git`/`gh` にそのまま渡すため、ワイルドカードは `auth token`・`repo clone`・`git` 全般などあらゆる形を許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す（QA 用の `Read(~/.config/pelway-agent-qa/**)` も、下の「QA 担当の GitHub App（pelway-qa）」の手順 5 で足してある）。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す。#306 では `sandbox.filesystem.denyWrite` に `"~/"` を入れ、ホームの下（worktree・共有 `.git`・`$HOME`・`~/.config`・`~/.claude-review` 自身）への書き込みを sandbox で拒否する。実測で書けたのは sandbox の一時フォルダ（`$TMPDIR`。実体は `/tmp/claude-1000` で、uid ごとに 1 つのためレビュー専用ではない）で、`/tmp` 直下は拒否された。ホームの外のほかの場所（`/dev/shm`・`/var/tmp` など）は測っていない。許可した読み取り系 `git` の `--output=<path>` や `git grep -O<コマンド>` で起動したコマンドも、この拒否を受ける。T3 が渡す MCP サーバーのツールは、`permissions.deny` に `mcp__t3-code` と `mcp__t3-code-direct`（サーバー名だけで、そのサーバーの全ツール）を書いて使えなくする（理由は「レビュー担当の Codex」と同じ）。claude.ai のコネクタ（外部のサービスへ送信できるツールを含む）は、`env` の `ENABLE_CLAUDEAI_MCP_SERVERS=false` で止める。組み込みのツールのうち、ほかのセッションや claude.ai へ送れるもの（`SendMessage`・`RemoteTrigger`・`Artifact`・`ShareOnboardingGuide`・`PushNotification`・`DesignSync`・`PublishPlugin`）は `permissions.deny` に書く（`WebFetch`・`WebSearch` は前から deny にあり、サブエージェントにも効く）。アカウントから同期されるプラグインの MCP サーバーは、`env` の `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` で読み込ませない（接続に失敗しているだけの状態は、セッションの途中で接続が戻りうるので、止めたことにならない）。下の `hooks.PermissionRequest` は承認要求を拒否するが、これに頼ってプラグインのツールを残さない |
 | socat | Claude Code の sandbox（Linux）が使う。`mise.toml` の `conda:socat` で `mise install`（`mise bootstrap`）が入れる。apt と sudo は要らない |
 | ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
 | `~/.claude-review/settings.json` の `hooks.PermissionRequest` | matcher `*` で `/home/hatai/.claude-review/hooks/deny-permission-request.sh` を呼ぶ。承認要求になる場面ごとに、人間に聞かずに拒否を返す。拒否のメッセージは、sandbox の遮断ではないこと、Bash なら単純なコマンドに分けて送り直すことをモデルに伝える。フックは worktree の外に絶対パスで置く（委託のレビューは PR の作者のコミットの checkout で動くため、リポジトリの中に置くと PR が差し替えられる） |
@@ -314,6 +322,10 @@ EOF
 - 許可経路からの egress が遮断される: `scripts/agent-gh review api --hostname example.com /` が失敗する（sandbox のネットワーク許可先の実測。許可リスト内で GitHub 以外へ出られるコマンド形で試す）
 - 新しい `claude_review` のセッションのツールの一覧に、`mcp__` で始まるツールが無い（T3 の `mcp__t3-code`・`mcp__t3-code-direct`、claude.ai のコネクタ、プラグインの MCP サーバー）。どれか 1 つでも残っていれば、呼んで確かめずに `claude_review` をレビューに使わない（確かめるための呼び出しが、承認の設定に不備があればそのまま外部のサービスに届くため）。設定でそのツールを止めてから確かめ直す（プラグインなら `env` の `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` を確かめる）。システムの通知に `plugin:` で始まる MCP サーバーが出ていても、同じく使わない。deny はサーバー名に依存するので、T3・Claude Code・`~/.claude-review` を更新したらこの項目を確かめ直す。確かめ終わるまでは、この節の見出しのすぐ下に `保留中: <更新したもの>` の行を置き、指揮役と実装担当は委託やスレッドの起動・再開の直前に main の最新の版でこの行の有無を見る
 - 組み込みのツールの一覧を最後の作業ログの記録と比べ、ほかのセッションや claude.ai へ送れるツールが増えていない（増えていれば `permissions.deny` に足してから使う）
+- 許可された形で worktree と共有 `.git` に書けない: `git log -1 --format=%H --output=<worktree のファイル>` と `--output=<共有 .git のファイル>` が `Read-only file system` で失敗する。`git grep -O"bash -c 'echo x > <ファイル>'" -e <パターン>` で起動したコマンドも worktree・`/tmp` 直下に書けず、`git grep -O` で起動した `curl` は GitHub 以外へ接続できない。`mktemp` は `$TMPDIR` に作れる。書式は `%` を含むもの（`%H`）にする（git 2.56 は `--format=x` のような `%` の無い書式を `fatal: invalid --pretty format` で拒否し、`--output` まで届かない）
+- 許可にも deny にも無い読み取り系でない形（例: `scripts/agent-gh review release list`）が止まる（承認要求になる、または拒否される）
+
+今の保留の扱い: 上の最後の項目（`release list` が止まる）と、下の「#306 で追っている経路」「確かめ終えていない項目」は確かめ終えていないが、`claude_review` は hatai の決定で運用を続けている。保留を解く条件は、#306 の実測と QA の照合が済むこと。
 
 ### 確認手順の結果（記録欄）
 
@@ -324,9 +336,25 @@ EOF
 | 実施日（hatai によるレビュー用 Claude へのログインと、T3 への `claude_review` の追加を含む） | hatai によるレビュー用 Claude へのログインと `claude_review` の追加は済んでいる（`config.homePath` への修復は指揮役（代行）が hatai の分担を代わりに、許可の gh サブコマンド単位への絞り込みと deny への `git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *` の追加は hatai がそれぞれ適用した）。確認は `delegate_task`（target `claude_review`、`auto-accept-edits`、worktree）で実施。`CLAUDE_CONFIG_DIR` の継承は親側で子プロセスの environ（`CLAUDE_CONFIG_DIR=/home/hatai/.claude-review`）を確認して確かめた。許可・拒否のどちらのリストにも無い `echo "$CLAUDE_CONFIG_DIR"` は承認要求になり、承認を経て同じ値を出力した | 2026-11-14 |
 | 使えるコマンドの制限の結果（読み取り系 `git` と `scripts/agent-gh review` に絞られているか。`git switch` とファイルの書き込みが拒否されたか） | `scripts/agent-gh review api /rate_limit`・`pr view`・`issue view` は承認なしで成功（許可は使用する gh サブコマンド単位に列挙）。`git switch -c perm-check-256` は permissions の deny で拒否。Write ツールは deny によりセッションで無効化され（`No such tool available`）、ファイルは作られなかった。ラッパー経由の形（`scripts/agent-gh review git switch -c <probe>`・`git -c 'alias.x=!<コマンド>' x`・`pr checkout <N>`・`repo clone <リポジトリ> <dir>`・`auth status`）は許可の列挙に入らず、deny（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）でも拒否される | 2026-11-14 |
 | ネットワーク制限の結果（`api.github.com` と `github.com` だけにつながるか。`curl -sS https://example.com` が失敗したか） | `curl -sS https://example.com` は permissions の deny で拒否（実行自体されない）。GitHub API には到達した。egress の実測: 許可経路の `scripts/agent-gh review api --hostname example.com /` は実行されるが sandbox のプロキシで遮断（`host is not on the allow list`）。`scripts/agent-gh review git ls-remote https://example.com/` は deny で拒否 | 2026-11-14 |
-| Codex 側（`codex_review`）との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 許可先は同じく GitHub のみ。遮断の仕組みが異なり、Codex は `network_proxy`＋権限プロファイル、Claude は `~/.claude-review/settings.json` の permissions（allow/deny）＋ sandbox。ファイルの書き込みは Write/Edit ツール自体が無効化される。許可・拒否のどちらにも載っていないコマンドは、T3 が `--permission-mode=acceptEdits` を渡すため承認要求になる（`defaultMode: dontAsk` より acceptEdits が優先される）。書き込みの遮断も異なり、Codex の権限プロファイルは `/tmp` 以外を読み取り専用にする（ただし T3 のスレッドでは worktree にも書ける。「レビュー担当の Codex」と Issue #589）が、Claude の OS sandbox は worktree と共有 `.git` への書き込みを許すため、permissions の deny が漏れる形（許可リスト経由）では書き込みが止まらない | 2026-11-14 |
+| Codex 側（`codex_review`）との差（許可先・効く条件・コマンドの制限で異なる点。無ければ「差なし」） | 許可先は同じく GitHub のみ。遮断の仕組みが異なり、Codex は `network_proxy`＋権限プロファイル、Claude は `~/.claude-review/settings.json` の permissions（allow/deny）＋ sandbox。ファイルの書き込みは Write/Edit ツール自体が無効化される。許可・拒否のどちらにも載っていないコマンドは、T3 が `--permission-mode=acceptEdits` を渡すため承認要求になるのが規則だが（`defaultMode: dontAsk` より acceptEdits が優先される）、#306 の実測では 2 通りに分かれた。変数展開を含む `echo "$CLAUDE_CONFIG_DIR"` は承認要求になった（上の行）。変数展開を含まない `scripts/agent-gh review release list` は、承認要求にならずに実行された（#306。下の行）。許可外のコマンドがどう扱われるかの規則は、上の「T3 は `--permission-mode=acceptEdits` を渡すので」の段落にある。書き込みの遮断も異なり、Codex の権限プロファイルは `/tmp` 以外を読み取り専用にする（ただし T3 のスレッドでは worktree にも書ける。「レビュー担当の Codex」と Issue #589）のに対し、Claude は sandbox の `denyWrite: ["~/"]` でホームの下を拒否する。Claude の実測では `$TMPDIR`（`/tmp/claude-1000`）に書けて、Codex と違い `/tmp` 直下は拒否された（ホームの外のほかの場所は測っていない） | 2026-11-14（書き込みの遮断と、許可にも deny にも無いコマンドの扱いは 2026-11-21） |
 | 承認要求を拒否に変えるフック（`hooks.PermissionRequest`）の結果 | `delegate_task`（target `claude_review`、`auto-accept-edits`、worktree）で確認。`H=$(git rev-parse HEAD); …; echo rc=$?` と `for f in …; do wc -l "$f"; done` は承認待ちにならずフックの拒否が返り、モデルは単純なコマンドに分けて送り直して結果を得た。`scripts/agent-gh review api /rate_limit` はそのまま通り、`curl -sS https://example.com` は permissions の deny で拒否のまま。スレッドに承認待ち（`pendingApproval`）は出なかった | 2026-11-21 |
 | フック導入後の実レビューの観察 | 導入後 1 時間の `claude_review` の実レビュー 9 セッションで、フックの拒否は 26 件。拒否を理由に `verdict: failed` になったレビューは無かった（`failed` の 1 件は PR のチェックの未報告による）。拒否のうち `git ls-tree`・`git -C`・`agent-gh review run list` は単純な形でも承認要求になっていたため、`git ls-tree`・`git cat-file`・`run list`・`run view` を許可に足した（`claude -p` で通ることと、`run download` は拒否のままであることを確認）。拒否されたのと同じコマンドを 1 回そのまま送り直す例が多かったため、フックのメッセージに 1 文足した | 2026-11-21 |
+| 書き込み先の制限の結果（#306。許可された形で worktree と共有 `.git` に書けないか） | `denyWrite: ["~/"]` の適用後、`delegate_task`（target `claude_review`、`auto-accept-edits`、worktree）で実測。`git log -1 --format=%H --output=t306-probe-wt.tmp`（worktree）と `--output=/home/hatai/repos/hatai/Pelway/.git/t306-probe-gitdir.tmp`（共有 `.git`）はどちらも exit 128・`Read-only file system`。`git grep -O"bash -c 'echo x > t306-probe-grep.tmp'" -e mise`（worktree）と同じ形の `/tmp/t306-probe-tmp.tmp`（`/tmp` 直下）は、コマンドは起動するが書き込みが `Read-only file system` で失敗。`git grep -O"bash -c 'mktemp'" -e mise` は `/tmp/claude-1000/tmp.*` を作れた。`git grep -O"bash -c 'curl -sS -m 10 https://example.com -o /dev/null'" -e mise` は sandbox のプロキシで遮断（`CONNECT tunnel failed, response 403`、`host is not on the allow list`）。実測の後、親スレッドから 4 つの書き込み先にファイルが無いことを `ls` で確かめた。別の実測スレッドでは `touch` の結果が worktree・`$HOME`・`$HOME/.config` で拒否、`$TMPDIR` で成功だった | 2026-11-20・2026-11-21 |
+| 許可にも deny にも無い読み取り系でない形の結果（#306。`scripts/agent-gh review release list` が止まるか） | 止まらなかった。承認要求にならずに実行され、exit 0・出力なし（リポジトリにリリースが無いため。セッションの記録 `~/.claude-review/projects/<作業パス>/<SESSION_ID>.jsonl` でも、承認を挟まずに `Bash completed with no output` で終わっている）。セッションの `permissionMode` は `acceptEdits`、設定は `defaultMode: dontAsk`。`sandbox.autoAllowBashIfSandboxed` は設定に無い。この項目の既定は false（実測時の Claude Code 2.1.329 の本体に同梱された設定の説明に「Default: false」「still defaults to false」とある。2.1.330 も同じ）ため、この項目は原因ではない。止まらなかった原因（T3 の `auto-accept-edits` が承認要求に自動で許可を返しているのか、Claude Code の permissions の評価なのか）は特定していない。この実測は、承認要求を拒否に変えるフック（`hooks.PermissionRequest`）を入れる前のもの。上の「T3 は `--permission-mode=acceptEdits` を渡すので」の段落は、許可リストに無いスクリプトやサブコマンドは承認要求になる（フックで拒否される）としており、フック導入後の観察では `agent-gh review run list` が承認要求になって拒否された。この記述と、`release list` がフック導入前に承認なしで通った実測は食い違う。フック導入後の測定では拒否された（承認要求は出ず、実行されなかった）が、`cd <repo> && …` の複合形で行ったため、拒否の対象が `release list` 自体かは切り分けられていない。単一形での再測と QA の照合は #306 で待っている | 2026-11-21 |
+| 秘密の置き場の読み取り（#306 の決定で、`denyWrite` の適用後に記録する項目。1 = 拒否、0 = 成功） | `test -r` の結果は `~/.config/fnox` 0・`~/.config/pelway-agent` 0・`~/.config/pelway-agent-qa` 0・`~/.config/gh/hosts.yml` 1。期待した「1 のまま」になっていない。`test -r` は access(2) で権限ビットを見るだけのため、denyRead で中身が隠されたディレクトリでも 0 になりうる。中身を読む実測（`wc -c` など）はエージェントには行わせない | 2026-11-20 |
+
+`denyWrite` の差分と戻し方（`~/.claude-review/settings.json`。設定は hatai が手で変える）:
+
+```diff
+     "filesystem": {
+       "denyRead": [ ...変更なし... ],
++      "denyWrite": [
++        "~/"
++      ]
+     }
+```
+
+戻すときは、`~/.claude-review/settings.json` の `sandbox.filesystem` から `denyWrite` の項目だけを消す（`denyRead` などほかの項目は残す）。変える直前の控え `~/.claude-review/settings.json.bak-306-20261120` をまるごと戻すと、控えを取った後に足した `hooks.PermissionRequest` や許可リストの変更まで消えるため、控えは差分を確かめるためだけに使う
 
 前からある未確認の経路: 委託のレビューは PR の head の checkout で動くので、PR が足した `.claude/`・`.mcp.json`・`.codex/`・`.devin/`（Devin CLI がプロジェクト層として読む `config.json`・`hooks.v1.json`・`mcp_config.json`・`rules/`・`global_rules.md`・`skills/`）・`.cursor/`・`.cursorrules`・`.windsurf/`・`.windsurfrules`、プロジェクトの指示のファイル（どのディレクトリの `AGENT.md`・`AGENTS.md`・`AGENTS.local.md`・`AGENTS.override.md`・`CLAUDE.md` も）と、PR が変えたレビュー担当のスキル（`.agents/skills/review-pr`・`.agents/skills/security-review`・`.agents/skills/pr-watch`。`.claude/skills/` はその symlink）を読みうる（project の設定は `~/.claude-review/settings.json` より優先され、`env` の上書きや `.devin/hooks.v1.json` のような hooks の実行がありうる）。手当てとして、これらを足す・変える PR はレビューを委託しない（skill `implement-issue` の手順 8）。
 
@@ -337,7 +365,17 @@ EOF
 残っている既知の経路は hatai の決裁で別 Issue で追う（PR #287 の round 4 で両レビュー担当が request-changes として指摘し、hatai が残リスクを受容）:
 
 - `api -F <key>=@<file>`・`pr review --body-file <file>` で読み取り可能なローカルファイルを GitHub へ送信できる（#305）
-- 読み取り系 `git` の `--output=<path>` での書き込みと `git grep -O<cmd>` での実行が、sandbox が worktree・共有 `.git` への書き込みを許すことと重なって残る（#306）
+
+#306 で追っている経路（#306 は開いたまま。受け入れ条件は変えず、実測と QA の照合が済んだら閉じる）:
+
+- 許可した `git grep *` の `-O<コマンド>`（`--open-files-in-pager`）で、任意のコマンドを起動できる。起動するのは git で、シェル経由で起動するため、内側のコマンドは permissions の deny（`curl *`・`git *`・`auth *`・`gist *` など）とも、承認要求を拒否に変えるフックとも照らし合わされない。`denyWrite` の適用後は、内側のコマンドも sandbox の中で動く。実測では、ホームの下と `/tmp` 直下への書き込みは拒否され、`$TMPDIR` には書けた（ホームの外のほかの場所は測っていない）。外への接続は GitHub だけになる（記録欄の「書き込み先の制限の結果」の行）。起動したコマンドから何を読めるか、`scripts/agent-gh review` の資格情報を使えるかは確かめていない
+- 許可にも deny にも無いコマンド（例: `scripts/agent-gh review release list`）が止まること（受け入れ条件 3）は、未検証。フックの導入前の実測では、承認要求にならずに実行された（記録欄の「許可にも deny にも無い読み取り系でない形の結果」の行）。フックの導入後の測定では拒否されたが、`cd <repo> && …` の複合形で行ったため、拒否の対象が `release list` 自体かは切り分けられていない。単一形での再測と QA の照合を #306 で待っている
+
+`denyWrite` の適用後の確認で、確かめ終えていない、または満たしていない項目（#306）:
+
+- 満たしていない: 書ける一時フォルダがレビュー専用であること。`$TMPDIR` の実体の `/tmp/claude-1000` は uid ごとに 1 つで、同じユーザーのほかのプロセスと共有される
+- 確かめていない: 秘密の置き場の読み取りが拒否されること。`test -r` は権限ビットしか見ないため拒否を測れず、中身を読む実測はエージェントには行わせない。人が sandbox の下で、中身を読むコマンドで確かめる
+- 確かめていない: `denyWrite` の下で、実際の PR レビュー（`scripts/agent-gh review pr review` による投稿まで）が最後まで終わること
 
 ## レビュー担当の Devin CLI（devin_review）
 
