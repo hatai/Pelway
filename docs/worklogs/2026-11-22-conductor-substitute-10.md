@@ -510,3 +510,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **#650 にレビュー回付**（codex gpt-6.2-sol @c2ac7050）— report-only でもレビュー・QA を通す運用どおり
 - **#610 stale automerge 除去**: kodiak 更新後に impl が自走 push（`41d7cd2e`）・自己レビュー r5 が CHANGES_REQUESTED → 条件を満たさない automerge を除去。impl が must-fix 対応中
 - MCP が再度不通（t3_thread_list/send 失敗）。調査スレッドへの判断通知は `pending_thread_sends` に登録（MCP 復旧時に再送）
+
+## #650 レビュー r1 の must-fix 対応（11-23 12:30 JST）
+
+- **codex レビュー r1: request-changes（must-fix 5・nit 1）** — 棚卸し記録の明記・STALL 検知の対象条件・失明範囲（部分盲・復旧未確定）・send/schedule 障害の操作単位・証拠引用・報告書形式（配備状況/再現/スキル節）
+- **指揮役が直接手当て**: MCP send 不通で調査スレッド（c6a55f0d）へ回付できず、証拠はすべて巡回記録と実コードのため conductor-worktree で修正 → head `13097549` push・[対応要約コメント](https://github.com/hatai/Pelway/pull/650#issuecomment-7090665028)
+- 新規証拠の発見: 61092c の `prev=completed→running` 遷移 22 回（定期起床込み）・`patrol-state.json.bak-devin10-handover` の存在・substitute-11 worklog の interrupt 実測（run 23 自動起き直り）
+- **再レビュー委託**（codex gpt-6.2-sol r2 @13097549）
