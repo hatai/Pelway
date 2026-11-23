@@ -587,3 +587,9 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - `agent-gh qa` で pelway-qa 投稿（issuecomment-7093358175）→ `automerge` 付与。mergeState CLEAN・APPROVED@937648b3・verify/pr-size success・QA 同 SHA で全ゲート充足
 - マージ後の予定: #663・#656 を update-branch → 再レビュー＋QA → automerge。#654 は verify 結論待ち（68b27805）
 - `agent-gh qa` は `PELWAY_AGENT_FNOX_CONFIG=~/.config/pelway-agent-qa/fnox.toml` が必要（未設定は終了コード 3）
+
+## 11-23 17:55 — #654 automerge 付与
+
+- codex 再レビュー（`68b27805`）: APPROVE。PR 固有差分は前承認時と全 5 ファイル一致・main 取り込みによる意図しない変更なし（nit: PR 本文の HEAD 記述が旧コミットのまま）
+- QA の保留項 `mise run verify` が 68b27805 で success を確認 → 全ゲート充足（APPROVED・verify/pr-size success・QA pass 同 SHA）→ pelway-qa 投稿（issuecomment-7093368321）＋`automerge` 付与
+- 留意: #677・#654 が Kodiak キューに同居。先に一方が main へ入ると他方が BEHIND → Kodiak 追随で head 変化→承認・QA が旧 SHA 宛になる可能性（#530/#567/#652 と同形のずれ）。発生したら新 head で再レビュー＋再 QA を回す
