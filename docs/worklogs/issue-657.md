@@ -47,3 +47,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の「委託が 2 回連続で failed」に「待てば解消する一時障害（使用上限・ネットワーク）を数えるかどうか」を書き足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: a3178b2
+
+1. 詰まった箇所: 手順 9: codex の must-fix 2（Cargo.lock の依存更新を受け入れ条件 5「文書のみ」と整合させるため、独立修正として main に先に入れるか、指揮役と合意して受け入れ条件を更新するか）は、実装側の一存では解けない（main への直接修正も受け入れ条件の書き換えも実装担当の権限外）。Issue と PR に判断を仰ぐコメントを書き、決定を待つ間に他の must-fix・印付き nit の修正を進めた。
+2. 曖昧だった文: 「3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）」（`.agents/skills/implement-issue/SKILL.md` の「止まる条件」）。round 3・4（印付き nit・開発リード指示の nit 対応）を挟んだ後の委託を何回目と数えるかが定まらない。
+3. 仮定と解釈: 「その後のレビューの委託も数えず」は、印付き nit を直した round の後の委託（= 今回の request-changes を出した委託）も通算に入らないと解釈した。よって must-fix 判定の出た委託は round 1・2 のみで、今回の修正 round は 2 回目の must-fix 対応（round 5）として進め、止まる条件には当たらないと判断した。選ばなかった解釈: 今回の委託を 3 回目と数えてエスカレーションする読み（round 4 が「印の nit だけ」の round ではないため）。
+4. 足りなかった情報・検証手段: `compare/main...<SHA>` の files 一覧が rename_only や 1000 件超えの PR でどう落ちるかを確かめる手段が無い（PR #662 自体の差分では起きない）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」に「印なし nit を指示で直した round の前後の委託の数え方」を書き足す。
+
+使ったスキル: implement-issue
