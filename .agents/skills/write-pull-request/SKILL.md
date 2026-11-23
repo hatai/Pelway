@@ -49,7 +49,7 @@ git diff <base>...HEAD
 scripts/agent-gh dev pr list --head <ブランチ名>
 ```
 
-- 既存がある → `scripts/agent-gh dev pr edit <番号> --body-file` で本文を更新し、タイトルは手順 3 の `api -X PATCH --input` で更新する。重複 PR を作らない。
+- 既存がある → `scripts/agent-gh dev pr edit <番号> --body-file` で本文を更新し、タイトルは手順 3 の `api --method PATCH --input` で更新する。重複 PR を作らない。
 - 無い → `scripts/agent-gh dev pr create --draft`。
 
 ### 3. タイトルを書く
@@ -66,10 +66,10 @@ scripts/agent-gh dev pr list --head <ブランチ名>
 cat > /tmp/opencode/pr-title.json <<'EOF'
 {"title": "<日本語タイトル>"}
 EOF
-scripts/agent-gh dev api -X PATCH /repos/hatai/Pelway/pulls/<PR 番号> --input /tmp/opencode/pr-title.json
+scripts/agent-gh dev api --method PATCH /repos/hatai/Pelway/pulls/<PR 番号> --input /tmp/opencode/pr-title.json
 ```
 
-- 既存 PR のタイトルを直すときも同じく `api -X PATCH --input` を使う。`pr edit --title` に日本語を渡さない。
+- 既存 PR のタイトルを直すときも同じく `api --method PATCH --input` を使う。`pr edit --title` に日本語を渡さない。
 
 ### 4. 本文を書く
 
@@ -83,7 +83,7 @@ scripts/agent-gh dev api -X PATCH /repos/hatai/Pelway/pulls/<PR 番号> --input 
 1. **概要** — 何を、なぜ変えたか。最初に読む 2〜3 文。Issue に紐づく PR は末尾に `Closes #<N>` を入れる(implement-issue 手順 7 の慣行)。
 2. **変更内容** — diff から読み取った変更点を箇条書き。ファイル/機能単位。
 3. **確認方法/検証** — レビュアーが自分で確認する手順。Issue の受け入れ条件に「→」の確かめ方(テスト名・コマンド・確認の手順)が付いている条件は、ここでその結果と対応させる(条件の書き方は write-issue の「受け入れ条件の書き方」)。
-4. **レビューと QA** — 事実と sha のみ記載(下のルール参照)。
+4. **レビューと QA** — 事実と sha のみ記載(下のルール参照)。round の履歴は書かない。実装担当の PR では、実装者メモ（`docs/worklogs/issue-<N>.md`）を指す 1 行と、最後に検証した sha だけを書く(implement-issue 手順 7)。
 5. **対象外** — この PR で触れていないこと、後回しにしたこと。
 6. **対象** — ブランチ名と、手順 1 で取った現在の HEAD sha。実装担当の PR は末尾に `Implementer:` 行を置く。値は指揮役の指示の `Assigned:` 行から `role=implement` を除いて写し、指示に `Assigned:` 行が無いときは `model=unknown effort=unknown` とする(書式は implement-issue 手順 7)。
 

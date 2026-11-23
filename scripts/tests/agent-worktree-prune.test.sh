@@ -5,7 +5,8 @@ set -uo pipefail
 
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/agent-worktree-prune"
 ROOT="$(mktemp -d)"
-trap 'rm -rf "$ROOT"' EXIT
+sleeper=""
+trap '[[ -n "$sleeper" ]] && kill "$sleeper" 2>/dev/null; rm -rf "$ROOT"' EXIT
 failures=()
 
 BIN="$ROOT/bin"
@@ -36,12 +37,35 @@ cat >"$BIN/mbx" <<EOF
 echo "\$*" >"$ROOT/mbx-called"
 EOF
 chmod +x "$BIN/mbx"
+# 偽の find: FIND_LATE_PROC_DIR が指定されているとき、そのパスへの 2 回目の呼び出しで、
+# そのディレクトリをカレントにする sleeper を起動してから本物の find を実行する
+# （削除直前の更新時刻の走査の間にプロセスが始まる場面を確実に再現する）。
+# それ以外では本物の find にそのまま渡す
+cat >"$BIN/find" <<EOF
+#!/usr/bin/env bash
+dir="\${FIND_LATE_PROC_DIR:-}"
+if [[ -n "\$dir" && "\$1" == "\$dir" ]]; then
+  n=\$(( \$(cat "$ROOT/find-count" 2>/dev/null || echo 0) + 1 ))
+  echo "\$n" >"$ROOT/find-count"
+  if ((n == 2)); then
+    (cd "\$dir" && exec sleep 300) </dev/null >/dev/null 2>&1 &
+    pid=\$!
+    echo "\$pid" >"$ROOT/find-late-pid"
+    for _ in \$(seq 300); do
+      [[ "\$(readlink "/proc/\$pid/cwd" 2>/dev/null)" == "\$dir" ]] && break
+      sleep 0.1
+    done
+  fi
+fi
+exec /usr/bin/find "\$@"
+EOF
+chmod +x "$BIN/find"
 
 g() { git -c user.name=t -c user.email=t@example.com "$@"; }
 
 # 毎回まっさらな origin・本体・worktree を作る
 setup() {
-  rm -rf "$ROOT/origin.git" "$ROOT/main" "$ROOT/wt" "$ROOT/other" "$ROOT/mbx-called"
+  rm -rf "$ROOT/origin.git" "$ROOT/main" "$ROOT/wt" "$ROOT/other" "$ROOT/mbx-called" "$ROOT/answer"
   git init -q --bare -b main "$ROOT/origin.git"
   g clone -q "$ROOT/origin.git" "$ROOT/main" 2>/dev/null
   g -C "$ROOT/main" commit -q --allow-empty -m init
@@ -63,6 +87,11 @@ add_unmerged() {
   g -C "$ROOT/wt/$1" commit -q --allow-empty -m "work $1"
 }
 
+# worktree の作業ツリーと git dir の HEAD・index を 7 時間前にする（6 時間以内に更新された worktree は残すため）
+age() {
+  find "$ROOT/wt" "$ROOT/other" "$ROOT/main/.git/worktrees" -exec touch -h -d '7 hours ago' {} + 2>/dev/null
+}
+
 run() {
   (cd "$ROOT/main" && PATH="$BIN:$PATH" T3_BIN="$BIN/t3" XDG_STATE_HOME="$ROOT/state" PELWAY_T3_WORKTREES="$ROOT/wt" bash "$SCRIPT" "$@")
 }
@@ -80,6 +109,7 @@ branch_kept() { git -C "$ROOT/main" rev-parse -q --verify "refs/heads/$1" >/dev/
 # 1. main に取り込まれたものは worktree もブランチも消す
 setup
 add_merged a-merged
+age
 run --yes >/dev/null 2>&1
 check "merged worktree removed" gone a-merged
 check "merged branch deleted" branch_gone a-merged
@@ -87,6 +117,7 @@ check "merged branch deleted" branch_gone a-merged
 # 2. 取り込まれていず PR も無いものは残す
 setup
 add_unmerged b-open
+age
 run --yes >/dev/null 2>&1
 check "unmerged worktree kept" kept b-open
 
@@ -94,6 +125,7 @@ check "unmerged worktree kept" kept b-open
 setup
 add_merged c-dirty
 echo x >"$ROOT/wt/c-dirty/new.txt"
+age
 run --yes >/dev/null 2>&1
 check "dirty worktree kept" kept c-dirty
 
@@ -102,12 +134,14 @@ setup
 add_merged d-plugin
 mkdir -p "$ROOT/wt/d-plugin/.opencode/plugins"
 echo x >"$ROOT/wt/d-plugin/.opencode/plugins/pelway-agent-notify.ts"
+age
 run --yes >/dev/null 2>&1
 check "old plugin file is not a change" gone d-plugin
 
 # 5. squash などで取り込まれ、PR がマージ済みなら消す
 setup
 add_unmerged e-squashed
+age
 FAKE_PRS='[{"headRefName":"e-squashed","state":"MERGED"}]' run --yes >/dev/null 2>&1
 check "merged PR worktree removed" gone e-squashed
 check "merged PR branch deleted" branch_gone e-squashed
@@ -115,6 +149,7 @@ check "merged PR branch deleted" branch_gone e-squashed
 # 6. PR が閉じただけなら worktree は消すがブランチは残す
 setup
 add_unmerged f-closed
+age
 FAKE_PRS='[{"headRefName":"f-closed","state":"CLOSED"}]' run --yes >/dev/null 2>&1
 check "closed PR worktree removed" gone f-closed
 check "closed PR branch kept" branch_kept f-closed
@@ -122,12 +157,14 @@ check "closed PR branch kept" branch_kept f-closed
 # 7. 同じブランチで開いている PR があれば残す
 setup
 add_unmerged g-reopened
+age
 FAKE_PRS='[{"headRefName":"g-reopened","state":"CLOSED"},{"headRefName":"g-reopened","state":"OPEN"}]' run --yes >/dev/null 2>&1
 check "open PR worktree kept" kept g-reopened
 
 # 8. 確認に n と答えたら何も消さない
 setup
 add_merged h-ask
+age
 echo n | run >/dev/null 2>&1
 check "answer n removes nothing" kept h-ask
 
@@ -135,34 +172,40 @@ check "answer n removes nothing" kept h-ask
 setup
 mkdir -p "$ROOT/other"
 g -C "$ROOT/main" worktree add -q -b i-outside "$ROOT/other/i-outside" main
+age
 run --yes >/dev/null 2>&1
 check "worktree outside root untouched" test -d "$ROOT/other/i-outside"
 
 # 10. --dry-run は一覧を出すだけ
 setup
 add_merged j-dry
+age
 out="$(run --dry-run 2>&1)"
 check "dry-run removes nothing" kept j-dry
-check "dry-run lists candidate" grep -q "j-dry" <<<"$out"
+check "dry-run lists candidate" grep -qx "  $ROOT/wt/j-dry" <<<"$out"
 
 # 11. settle されていないスレッドの worktree は、取り込み済みでも残す（作りたてで main と同じものを含む）
 setup
 g -C "$ROOT/main" worktree add -q -b k-busy "$ROOT/wt/k-busy" main
+age
 FAKE_THREADS='[{"threadId":"t1","settled":false,"worktreePath":"'"$ROOT/wt/k-busy"'"}]' run --auto >/dev/null 2>&1
 check "unsettled thread worktree kept" kept k-busy
 check "unsettled thread branch kept" branch_kept k-busy
+age
 FAKE_THREADS='[{"threadId":"t1","settled":false,"worktreePath":"'"$ROOT/wt/k-busy"'"}]' run --yes >/dev/null 2>&1
 check "unsettled thread worktree kept with --yes" kept k-busy
 
 # 12. settle 済みのスレッドの worktree は消す
 setup
 add_merged l-settled
+age
 FAKE_THREADS='[{"threadId":"t1","settled":true,"worktreePath":"'"$ROOT/wt/l-settled"'"}]' run --auto >/dev/null 2>&1
 check "settled thread worktree removed" gone l-settled
 
 # 13. T3 に問い合わせられなければ何も消さず、失敗で終わる
 setup
 add_merged m-t3down
+age
 FAKE_T3_FAIL=1 run --auto >/dev/null 2>&1; rc=$?
 check "t3 failure removes nothing" kept m-t3down
 check "t3 failure exits non-zero" test "$rc" -ne 0
@@ -173,6 +216,7 @@ setup
 add_merged n-untracked
 mkdir -p "$ROOT/wt/n-untracked/.pelway-review"
 echo x >"$ROOT/wt/n-untracked/.pelway-review/notes.md"
+age
 run --auto >/dev/null 2>&1
 check "auto removes untracked-only worktree" gone n-untracked
 check "auto runs mbx gc" grep -qx gc "$ROOT/mbx-called"
@@ -182,6 +226,7 @@ setup
 add_merged o-modified
 echo x >"$ROOT/wt/o-modified/tracked.txt"
 g -C "$ROOT/wt/o-modified" add tracked.txt
+age
 run --auto >/dev/null 2>&1
 check "auto keeps worktree with tracked changes" kept o-modified
 
@@ -189,6 +234,7 @@ check "auto keeps worktree with tracked changes" kept o-modified
 setup
 add_merged p-yes-untracked
 echo x >"$ROOT/wt/p-yes-untracked/new.txt"
+age
 run --yes >/dev/null 2>&1
 check "yes keeps untracked worktree" kept p-yes-untracked
 check "yes skips mbx gc" test ! -e "$ROOT/mbx-called"
@@ -197,6 +243,7 @@ check "yes skips mbx gc" test ! -e "$ROOT/mbx-called"
 setup
 add_merged q-from-wt
 g -C "$ROOT/main" worktree add -q -b q-runner "$ROOT/other/q-runner" main
+age
 (cd "$ROOT/other/q-runner" && PATH="$BIN:$PATH" T3_BIN="$BIN/t3" XDG_STATE_HOME="$ROOT/state" PELWAY_T3_WORKTREES="$ROOT/wt" bash "$SCRIPT" --auto >/dev/null 2>&1)
 check "auto from linked worktree removes nothing" kept q-from-wt
 check "auto from linked worktree skips mbx gc" test ! -e "$ROOT/mbx-called"
@@ -206,9 +253,129 @@ setup
 add_merged r-locked
 mkdir -p "$ROOT/state/pelway"
 exec 8>"$ROOT/state/pelway/agent-worktree-prune.lock"; flock 8
+age
 run --auto >/dev/null 2>&1
 exec 8>&-
 check "auto under lock removes nothing" kept r-locked
+
+# 19. 生きているプロセスのカレントディレクトリが中にある worktree は、取り込み済みでも残し、止めた後は消す
+setup
+add_merged s-proc
+mkdir -p "$ROOT/wt/s-proc/sub"
+(cd "$ROOT/wt/s-proc/sub" && exec sleep 300) &
+sleeper=$!
+for _ in $(seq 300); do [[ "$(readlink "/proc/$sleeper/cwd" 2>/dev/null)" == "$ROOT/wt/s-proc/sub" ]] && break; sleep 0.1; done
+age
+out="$(run --auto 2>&1)"
+check "worktree with live process kept" kept s-proc
+check "live process reason listed" grep -q "s-proc (プロセスが動いている: pid $sleeper sleep)" <<<"$out"
+out="$(run --dry-run 2>&1)"
+check "dry-run lists live process reason" grep -q "s-proc (プロセスが動いている: pid $sleeper sleep)" <<<"$out"
+kill "$sleeper"; wait "$sleeper" 2>/dev/null; sleeper=""
+age
+run --auto >/dev/null 2>&1
+check "worktree removed after process stops" gone s-proc
+
+# 20. 6 時間以内に更新された worktree は、スレッドが無くても残し、古くなれば消す
+setup
+add_merged t-recent
+echo x >"$ROOT/wt/t-recent/.pelway-review-notes"
+out="$(run --auto 2>&1)"
+check "recently updated worktree kept" kept t-recent
+check "recent update reason listed" grep -q "t-recent (6 時間以内に更新された)" <<<"$out"
+out="$(run --dry-run 2>&1)"
+check "dry-run lists recent update reason" grep -q "t-recent (6 時間以内に更新された)" <<<"$out"
+age
+run --auto >/dev/null 2>&1
+check "worktree older than 6 hours removed" gone t-recent
+
+# 21. 作業ツリーが古くても、git dir の HEAD か index が 6 時間以内なら残す
+setup
+add_merged u-index
+age
+touch "$ROOT/main/.git/worktrees/u-index/index"
+run --auto >/dev/null 2>&1
+check "worktree with recent index kept" kept u-index
+setup
+add_merged v-head
+age
+touch "$ROOT/main/.git/worktrees/v-head/HEAD"
+run --auto >/dev/null 2>&1
+check "worktree with recent HEAD kept" kept v-head
+
+# 22. 作業ツリーの中の深い場所のファイルだけが 6 時間以内でも残す
+setup
+add_merged w-tree
+mkdir -p "$ROOT/wt/w-tree/sub/deep"
+echo x >"$ROOT/wt/w-tree/sub/deep/f"
+age
+touch "$ROOT/wt/w-tree/sub/deep/f"
+run --auto >/dev/null 2>&1
+check "worktree with recent file deep in tree kept" kept w-tree
+
+# 23. 一覧を作った後、消す前にプロセスが始まった worktree はブランチごと残す（確認の質問の間に起動する）
+setup
+add_merged x-late
+age
+mkfifo "$ROOT/answer"
+run <"$ROOT/answer" >"$ROOT/late.out" 2>&1 &
+runner=$!
+exec 7>"$ROOT/answer"
+for _ in $(seq 600); do grep -q '残す worktree' "$ROOT/late.out" && break; sleep 0.1; done
+(cd "$ROOT/wt/x-late" && exec sleep 300) &
+sleeper=$!
+for _ in $(seq 300); do [[ "$(readlink "/proc/$sleeper/cwd" 2>/dev/null)" == "$ROOT/wt/x-late" ]] && break; sleep 0.1; done
+echo y >&7
+exec 7>&-
+wait "$runner"
+check "worktree with process started after listing kept" kept x-late
+check "branch of worktree with late process kept" branch_kept x-late
+check "late process reason reported" grep -q "x-late (プロセスが動いている: pid $sleeper sleep)" "$ROOT/late.out"
+kill "$sleeper"; wait "$sleeper" 2>/dev/null; sleeper=""
+
+# 24. 一覧を作った後、消す前に無視対象のファイルだけが更新された worktree はブランチごと残す（確認の質問の間に更新する）
+setup
+add_merged y-touched
+echo '*.log' >>"$ROOT/main/.git/info/exclude"
+echo x >"$ROOT/wt/y-touched/build.log"
+age
+rm -f "$ROOT/answer"; mkfifo "$ROOT/answer"
+run <"$ROOT/answer" >"$ROOT/touched.out" 2>&1 &
+runner=$!
+exec 7>"$ROOT/answer"
+for _ in $(seq 600); do grep -q '残す worktree' "$ROOT/touched.out" && break; sleep 0.1; done
+check "ignored-only worktree listed for removal" grep -qx "  $ROOT/wt/y-touched" "$ROOT/touched.out"
+touch "$ROOT/wt/y-touched/build.log"
+echo y >&7
+exec 7>&-
+wait "$runner"
+check "worktree updated after listing kept" kept y-touched
+check "branch of worktree updated after listing kept" branch_kept y-touched
+check "late update reason reported" grep -q "y-touched (6 時間以内に更新された)" "$ROOT/touched.out"
+
+# 25. 追跡ファイルのある取り込み済みの worktree は、一覧を作るときの git status で index が書き換わらず、消える
+setup
+g -C "$ROOT/main" worktree add -q -b z-tracked "$ROOT/wt/z-tracked" main
+echo x >"$ROOT/wt/z-tracked/tracked.txt"
+g -C "$ROOT/wt/z-tracked" add tracked.txt
+g -C "$ROOT/wt/z-tracked" commit -q -m "work z-tracked"
+g -C "$ROOT/main" merge -q --no-ff -m "merge z-tracked" z-tracked
+g -C "$ROOT/main" push -q origin main
+age
+run --auto >/dev/null 2>&1
+check "merged worktree with tracked files removed" gone z-tracked
+
+# 26. 消す直前の更新時刻の走査（find）の間に始まったプロセスも、消す直前の再確認で見つけてブランチごと残す
+setup
+add_merged za-scan
+age
+rm -f "$ROOT/find-count" "$ROOT/find-late-pid"
+out="$(FIND_LATE_PROC_DIR="$ROOT/wt/za-scan" run --auto 2>&1)"
+sleeper="$(cat "$ROOT/find-late-pid")"
+check "worktree with process started during rescan kept" kept za-scan
+check "branch of worktree with process started during rescan kept" branch_kept za-scan
+check "process during rescan reported" grep -q "za-scan (プロセスが動いている: pid $sleeper sleep)" <<<"$out"
+kill "$sleeper"; wait "$sleeper" 2>/dev/null; sleeper=""
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

@@ -1,0 +1,111 @@
+# 秘密情報・危ないコードのパターン・脆弱な依存関係の機械検出（Issue #571）。
+# main 向け Pull Request と main への push で、Gitleaks・Semgrep CE・OSV-Scanner を 1 ジョブずつ走らせる。
+# 方針は docs/dev-environment.md の「セキュリティスキャン（security-scan）」に従う:
+#   - gitleaks と osv-scanner は mise.security.toml / mise.security.lock で版を固定する（MISE_ENV=security の
+#     ときだけ読まれるため、必須チェックの verify ジョブには影響しない）。semgrep は公式イメージを digest で固定する
+#   - 検出はジョブサマリーに出す。gitleaks の全件・semgrep の INFO 以外・osv-scanner の
+#     unmaintained 以外の勧告はジョブを失敗させ、semgrep の INFO と unmaintained は警告だけにする。
+#     ツール自体の失敗（ネットワーク断・設定の誤りなど）もジョブを失敗させる。必須チェックにするかは人間が決める
+#   - 秘密の値はログ・サマリーに出さない（gitleaks --redact、サマリーは場所と種類だけ）
+#   - 有料サービス・アカウント登録・トークンは使わない（Semgrep はログインなし、--metrics=off）
+
+name: security-scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# この workflow は秘密を使わず、結果も書き戻さないため、権限は読み取りのみに制限する。
+permissions:
+  contents: read
+
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # mise.security.toml / mise.security.lock を読ませる。
+  MISE_ENV: security
+
+jobs:
+  gitleaks:
+    name: gitleaks (secrets)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          # 履歴全体を走査するため全コミットを取得する。
+          fetch-depth: 0
+
+      # mise.toml の全ツール（rust など）は入れず、このジョブで使う CLI だけを --locked で入れる。
+      - name: Setup mise (official action)
+        uses: jdx/mise-action@v5.2.7
+        with:
+          version: v2026.11.5
+          install: false
+          cache: false
+
+      - name: Assert mise version
+        run: mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
+
+      - name: Trust project config
+        run: mise trust
+
+      - name: Install gitleaks
+        run: mise install --locked aqua:gitleaks/gitleaks
+
+      - name: Scan (gitleaks git)
+        run: mise exec -- bash scripts/security-scan.sh gitleaks
+
+  # Semgrep CE は公式イメージ（semgrep/semgrep:1.186.0、LGPL-2.1）を digest で固定して使う。
+  # イメージに bash・jq・git が入っているため、同じスクリプトをコンテナ内で動かす。
+  # 出典: https://hub.docker.com/r/semgrep/semgrep （タグ 1.186.0 の manifest list の digest）
+  semgrep:
+    name: semgrep (code patterns)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: semgrep/semgrep@sha256:25251de66c3b0fdea1c1c519bbc130170349f3da79edd517335b847f30d3c493
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scan (semgrep scan)
+        run: bash scripts/security-scan.sh semgrep
+
+  osv-scanner:
+    name: osv-scanner (dependencies)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup mise (official action)
+        uses: jdx/mise-action@v5.2.7
+        with:
+          version: v2026.11.5
+          install: false
+          cache: false
+
+      - name: Assert mise version
+        run: mise --version | grep -q "2026\.11\.5" || { echo "::error::mise version mismatch (expected 2026.11.5)"; exit 1; }
+
+      - name: Trust project config
+        run: mise trust
+
+      - name: Install osv-scanner
+        run: mise install --locked aqua:google/osv-scanner
+
+      - name: Scan (osv-scanner scan source)
+        run: mise exec -- bash scripts/security-scan.sh osv-scanner
