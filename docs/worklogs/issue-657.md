@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/command-team/SKILL.md` の「レビュー担当と effort」の (b) の確かめ方に「委託された `Reviewer:` の行の `agent=` と一致するレビューに絞る」を足す（両レビュアーの nit と同じ修正。別 Issue で扱う）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: 680a0aa
+
+1. 詰まった箇所: 手順 8〜9: round 2 の claude の再委託子が、必須チェック待ちの間に投稿された Codex の approve（同 SHA 向き）を Guard (b) の「成果あり」と見て停止した（2026-11-23 03:04 JST の報告）。(b) の確かめ方が「その SHA 向きのレビュー全体」を見るため、複数担当の同時委託で後投稿側が誤停止する。
+2. 曖昧だった文: 「委託が 2 回連続で failed（checks timeout と wrong runtime は数えない）」（`.agents/skills/implement-issue/SKILL.md` の「止まる条件」）。レート制限による failed を数えるかどうかが規定に無く、Guard 停止と合わせて停止扱いにするか迷った。
+3. 仮定と解釈: 開発リードの指示（「この PR の範囲で直すか、範囲外なら out-of-scope として書く」）により、Guard (b) の確かめ方を委託された担当のレビューに絞る修正をこの PR に含めた。印なし nit は直さない規定に対する明示的な指示であるため直す解釈を選んだ。修正は「`Reviewer:` の行の `agent=` が委託の担当と一致するレビューが無いこと」へ文言を変えるだけにとどめ、Guard の構造は変えていない。
+4. 足りなかった情報・検証手段: `Reviewer:` の行が無いレビュー（委託によらない投稿）を (b) の対象から外すことが、指揮役の立てるレビュースレッドの完了判定に影響しないかを確かめる手段が無い。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の「委託が 2 回連続で failed」に「待てば解消する一時障害（使用上限・ネットワーク）を数えるかどうか」を書き足す。
+
+使ったスキル: implement-issue
