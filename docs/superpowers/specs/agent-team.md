@@ -91,7 +91,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 | 必須チェック | `mise run verify`・`pr-size` | 同じ（維持） |
 | 承認 | Code Owners（`* @hatai`）のレビューが必須 | 1 件必須（Code Owners レビュー必須は解除） |
 | マージ前のブランチ最新化 | 必須でない | 必須 |
-| stale な承認の取り消し（新しい push で承認を無効化） | — | 有効化する（新しいコミットで古い Approve を外す。2026-11-19 の hatai の決定、Issue #480。手順書は入っている前提で書く） |
+| stale な承認の取り消し（新しい push で承認を無効化） | — | 有効化する（新しいコミットで古い Approve を外す。hatai の決定、Issue #480。手順書は入っている前提で書く） |
 | `enforce_admins` | `false`（hatai の admin マージによる迂回が可能） | `false`（例外 PR の admin マージを残す） |
 | リポジトリのルールセット `main`（id 26958258） | `deletion`・`non_fast_forward` のみ | 同じ（ブランチ保護の必須チェック・承認・最新化とは別に維持） |
 

@@ -331,7 +331,7 @@ must-fix: <対応した内容。Approve のときは「なし」>
 
 ### 10. 終わりの報告
 
-終わりの報告の前に、自分のブランチがすべて push され、PR のコミット一覧に入っているかを GitHub で確かめる（#66 の再発防止）。fetch は禁止なので、PR の `headRefOid` を GitHub から読み取り（`scripts/agent-gh dev pr view <PR 番号> --json headRefOid --jq .headRefOid`）、手元の `git rev-parse HEAD` と同じかを見る。食い違っていれば push し忘れなので、push してから確かめ直す。担当の報告には PR 番号と 40 桁の head sha を書く。
+終わりの報告の前に、自分のブランチがすべて push され、PR のコミット一覧に入っているかを GitHub で確かめる（#66 の再発防止）。fetch し直した remote の ref ではなく、PR の `headRefOid` を GitHub から読み取り（`scripts/agent-gh dev pr view <PR 番号> --json headRefOid --jq .headRefOid`）、手元の `git rev-parse HEAD` と同じかを見る。食い違っていれば push し忘れなので、push してから確かめ直す。担当の報告には PR 番号と 40 桁の head sha を書く。
 
 最後の返答は次の 6 行だけにする（下の「ターンの終わりの状態の行」の `done`）。Grok Bot と巡回はこの 6 行だけを読む。手順 9 で PR 外の所見を受けていたら、`state:` の行の前に `out-of-scope: <所見の要約 1 行。200 文字以内>` を足して 7 行にする（止まった形でも同じ）。
 
