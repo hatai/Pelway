@@ -10,4 +10,11 @@
 4. 足りなかった情報・検証手段: `waiting_since` が `needs-human` 付与時刻を持たない既存対象の待ち始めの取り方が正本に無かったため、ラベル付与時刻を使う旨を runbook に明記した。
 5. 改善案: `docs/agents/grokbot-runbook.md` の「8. まとめ」の「判断待ちの一括出し」に「`waiting_since` が無い対象は `needs-human` の付与時刻から数える」の 1 文を足した（この PR で実施済み）。
 
+## 実装者メモ（round 2）
+
+対象 head: 7a967e567b01ec65bab48cdf58904fd5d31e576f（メモコミットの親）
+
+- レビュー 1 回目（codex `gpt-6-luna`、effort=medium、security=yes）は `request-changes`。must-fix は 1 件: 必須チェック `mise run verify` が head で失敗しており、受け入れ条件の「`mise run verify` と `pr-size` が head で通る」を満たさない。通る状態にするか失敗を解消してから再レビューせよ、との指摘
+- 対応: round 1 では「`url` の更新は対象外」と判断していたが、必須チェックの失敗はこの PR の承認条件に関わる避けられない要因で、解消には `url >= 2.5.9` が必要。修正は `Cargo.lock` の `url` 2.5.8 → 2.5.9 とその依存 `form_urlencoded` 1.2.2 → 1.2.3 の semver パッチ更新のみ（`cargo update -p url --precise 2.5.9`、diff 4 行）と小さいため、レビュー指摘どおり失敗を解消する形でこの PR に含めた。残り 9 件（unmaintained の informational、検査を失敗させない）と今後の依存棚卸しは Issue #676 に残す。ローカルで `cargo deny check advisories` が `advisories ok`、`cargo check` が通ることを確認した
+
 使ったスキル: implement-issue、write-pull-request、pr-watch
