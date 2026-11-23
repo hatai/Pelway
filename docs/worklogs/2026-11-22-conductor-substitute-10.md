@@ -571,3 +571,12 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **#665**: codex gpt-6.2-sol に security=yes のレビューを委託（worktree 隔離）。要修正なら差分案を開発リードへ返す（workflow の push は濡田さん手作業）
 - needs-human の #399/#482/#560/#610/#661 は濡田さん判断待ちで対象外（依頼どおり）
 - 障害メモ（3 度目）: worktree が #669 実装ブランチに切り替わっており worklog コミットが同ブランチへ混入・push された（3639f6cf）。`git rm` で除去して 35ad0025 を push（実装側の成果物は無傷）。以後コミット前に `git branch --show-current` を必ず確認する
+
+## 11-23 17:10 — #665 security レビュー結果（差分案を開発リードへ返却）
+
+- codex r1（`c134b6f0`・pullrequestreview-6017355315）: request-changes・must-fix 2・nit 1
+  - must-fix 1: 行単位 regex では有効な YAML 書式から uses を取りこぼす・プロセス置換内 awk の読み取り失敗が呼び出し元に伝わらない → YAML パーサーで jobs/steps の参照を取得し、読み取り・解析失敗で検査も失敗に（actions-lock-check.sh:53）
+  - must-fix 2: 参照全体の小文字化で ref/サブパスの大小文字差を無視・workflows 一覧にあれば dependencies の固定 SHA 欠落でも通る → owner/repo のみ正規化＋固定 SHA まで確認
+  - nit: `SECURITY_SCAN_BASE_SHA` の検証を Gitleaks 分岐内へ（他ツールの手元実行が不要に止まらないよう）
+- セキュリティ観点は問題なし（contents:read・persist-credentials:false・書き込み権限/シークレット参照なし）
+- 差分案（yq を mise で版固定＋抽出/エラー/固定 SHA/ref 大小文字の回帰試験追加）を開発リードへ返却 — workflow 変更の push は濡田さんの手作業
