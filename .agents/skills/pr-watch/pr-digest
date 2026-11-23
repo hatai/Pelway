@@ -16,7 +16,13 @@ set -uo pipefail
 # .agents/skills/pr-watch にも .claude/skills/pr-watch（symlink）にも置かれるため、
 # 実行されたパスから 3 つ上った所をリポジトリルートとする。
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-GH=${PR_DIGEST_GH:-"$ROOT/scripts/agent-gh dev"}
+# GH は配列で持つ（リポジトリのパスに空白があっても 1 語のまま渡すため）。
+# PR_DIGEST_GH は空白で区切ったコマンド（例: "bash /path/agent-gh dev"）として読む。
+if [[ -n "${PR_DIGEST_GH:-}" ]]; then
+  read -ra GH <<<"$PR_DIGEST_GH"
+else
+  GH=("$ROOT/scripts/agent-gh" dev)
+fi
 
 POLL=${PR_DIGEST_POLL:-30}
 DEADLINE=${PR_DIGEST_DEADLINE:-7200}
@@ -53,7 +59,7 @@ failure_ids() {
 # 標準エラー出力を混ぜない（JSON が壊れる）。
 api() {
   local out
-  if ! out=$($GH api "$@" 2>/dev/null); then
+  if ! out=$("${GH[@]}" api "$@" 2>/dev/null); then
     die "GitHub API のリクエストが失敗した（再試行はしない）"
   fi
   printf '%s' "$out"
@@ -91,7 +97,7 @@ logs() {
   keep='^(\[[^] ]+\] )?(error(\[[^]]+\])?: |test .+ FAILED$|failures:$|---- |test result: |In .+ line [0-9]+:$|Diff in )|panicked at|^(\[[^] ]+\] )? *[0-9]+ \| |^(\[[^] ]+\] )? *\^|left: |right: |SC[0-9]{4}|ERROR task failed|^##\[error\]'
   use_writable_cache
   err=$(mktemp) || die "一時ファイルが作れない"
-  if ! raw=$($GH run view --job "$job" --log-failed 2>"$err"); then
+  if ! raw=$("${GH[@]}" run view --job "$job" --log-failed 2>"$err"); then
     msg=$(tail -n 5 "$err"); rm -f "$err"
     die "job $job の失敗ログが取れない: ${msg:-gh のエラー出力なし}"
   fi
@@ -116,7 +122,7 @@ logs() {
 # 返信先のエンドポイントには PR 番号が要る。番号はコメント自身が持っている。
 reply() {
   local repo id=$1 body=$2 pr
-  repo=$($GH repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) || die "GitHub リポジトリの中ではない"
+  repo=$("${GH[@]}" repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) || die "GitHub リポジトリの中ではない"
   pr=$(api "repos/$repo/pulls/comments/$id" --jq '.pull_request_url | split("/") | last')
   [ -n "$pr" ] || die "コメント $id の PR 番号が解決できない"
   api "repos/$repo/pulls/$pr/comments/$id/replies" -f body="$body" --jq '"replied \(.id)"'
@@ -154,7 +160,7 @@ review_wait() {
 REQUIRED=${PR_DIGEST_REQUIRED-"mise run verify,pr-size"}
 required_line() {
   local repo=$1 pr=$2 line
-  line=$($GH api graphql \
+  line=$("${GH[@]}" api graphql \
     -f query='query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename ... on CheckRun{name status conclusion isRequired(pullRequestNumber:$pr)} ... on StatusContext{context state isRequired(pullRequestNumber:$pr)}}}}}}}}}}' \
     -f owner="${repo%%/*}" -f name="${repo#*/}" -F pr="$pr" \
     --jq '[.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?
@@ -276,7 +282,7 @@ digest() {
   local pr=$1 repo=$2 viewer=$3
 
   local meta head state mergeable branch
-  meta=$($GH pr view "$pr" --repo "$repo" \
+  meta=$("${GH[@]}" pr view "$pr" --repo "$repo" \
     --json headRefOid,state,mergeable,headRefName,reviewDecision,createdAt,isDraft 2>/dev/null) \
     || die "PR $pr が読めない（存在しない、認証、ネットワークのどれか）"
   head=$(jq -r .headRefOid <<<"$meta")
@@ -376,7 +382,7 @@ digest() {
   # 上の出力はすべて古い可能性がある。読み直しの失敗は「不一致」ではなくエラー。
   # 呼び出し側は、見えない変化に合わせて push してはならない。
   local head_now
-  head_now=$($GH pr view "$pr" --repo "$repo" --json headRefOid --jq .headRefOid 2>/dev/null) \
+  head_now=$("${GH[@]}" pr view "$pr" --repo "$repo" --json headRefOid --jq .headRefOid 2>/dev/null) \
     || die "PR $pr の head を読み直せない"
   if [ "$head_now" != "$head" ]; then
     echo "VERDICT out-of-sync (head moved during this observation)"
@@ -414,21 +420,21 @@ main() {
   command -v jq >/dev/null || die "jq が無い"
 
   local repo viewer
-  repo=$($GH repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) || die "GitHub リポジトリの中ではない"
+  repo=$("${GH[@]}" repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) || die "GitHub リポジトリの中ではない"
   # GraphQL を優先する。GitHub App のトークンでは GET /user が叩けないことが多く、
   # 失敗した REST 呼び出しも標準出力にエラー本文を残すので、$(a || b) で繋ぐと
   # 本物のログインにエラー本文が連結されてしまう。
-  viewer=$($GH api graphql -f query='query { viewer { login } }' --jq .data.viewer.login 2>/dev/null) \
-    || viewer=$($GH api user --jq .login 2>/dev/null) \
+  viewer=$("${GH[@]}" api graphql -f query='query { viewer { login } }' --jq .data.viewer.login 2>/dev/null) \
+    || viewer=$("${GH[@]}" api user --jq .login 2>/dev/null) \
     || die "認証ユーザーが解決できない"
   case $viewer in ''|null|\{*) die "認証ユーザーが解決できない" ;; esac
-  [ -n "$pr" ] || pr=$($GH pr view --json number --jq .number 2>/dev/null) || die "このブランチの PR が無い"
+  [ -n "$pr" ] || pr=$("${GH[@]}" pr view --json number --jq .number 2>/dev/null) || die "このブランチの PR が無い"
 
   if [ "$watch" -eq 1 ]; then
     local started=$SECONDS head runs statuses empty=0 left baseline="" first=1 seen
     seen=$(seen_path "$repo" "$pr")
     while :; do
-      head=$($GH pr view "$pr" --repo "$repo" --json headRefOid --jq .headRefOid 2>/dev/null) \
+      head=$("${GH[@]}" pr view "$pr" --repo "$repo" --json headRefOid --jq .headRefOid 2>/dev/null) \
         || die "PR の head が読めない"
       runs=$(check_runs "$repo" "$head") || die "check runs が読めない"
       statuses=$(commit_statuses "$repo" "$head") || die "commit statuses が読めない"

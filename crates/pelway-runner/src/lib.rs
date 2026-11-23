@@ -1,15 +1,17 @@
 //! runner-lite（#329）。サーバー内プロセスの進行管理として、
 //! 「ハルへのメンション → タスク化 → 進捗投稿 → LLM で A/B 案 → 判断待ち」
-//! をメモリ上で回す。LLM は [`LlmGateway`] trait 越しに差し替えられる
-//! （テストはフェイク。実提供元への接続と台本モードは [`demo`] モジュール。
-//! Issue #330。決定後のメール下書き生成は PR-3 で加える）。
+//! 「決定 → LLM でメール下書き → 送信承認待ち」をメモリ上で回す。
+//! LLM は [`LlmGateway`] trait 越しに差し替えられる（テストはフェイク。
+//! 実提供元への接続と台本モードは [`demo`] モジュール。Issue #330）。
 //!
 //! 固定段階: メンション → タスク登録（Working）と「受付」の進捗 1 行 →
 //! LLM 利用の根拠の検査（設定で受けた目的 ID。無ければ LLM を呼ばず停止投稿）
 //! → LLM 呼び出し → 成功は A/B 案の投稿と判断待ち（#328）で AwaitingDecision。
 //! 検証に失敗した応答は1回だけ再試行し、それでもだめなら台本の応答で進める
 //! （フォールバック。タイムアウト・提供元の拒否など他の失敗も同様に台本へ落ちる。
-//! 「台本の応答で進めます」の進捗行を出す）。
+//! 「台本の応答で進めます」の進捗行を出す）。決定の確定後は、決定された案を
+//! 入力に LLM でメール下書きのデータ（宛先・件名・本文）を作り、
+//! AwaitingSendApproval へ進める（承認カード化は #332 で確認する）。
 //! LLM 呼び出しの間はどのロックも持たない。
 
 pub mod demo;
@@ -20,8 +22,8 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use pelway_contract::decision::{CreateDecisionRequest, DecisionOption};
-use pelway_contract::ids::{ChannelId, MemberId, MessageId, OptionId, WorkspaceId};
+use pelway_contract::decision::{CreateDecisionRequest, DecisionOption, DecisionOutcome};
+use pelway_contract::ids::{ChannelId, DecisionId, MemberId, MessageId, OptionId, WorkspaceId};
 use pelway_contract::ledger::ApprovalLedger;
 use pelway_contract::member::MemberKind;
 use pelway_contract::store::{DataStore, NewMessage, PurposeId, StoredMessage};
@@ -33,8 +35,14 @@ use demo::SCRIPT_AB;
 
 /// 「受付」の進捗 1 行（固定段階）。
 const STAGE_ACCEPTED: &str = "依頼を受け付けました。A/B 案を作成しています。";
+/// 「下書き生成中」の進捗 1 行（固定段階。決定の確定後）。
+const STAGE_DRAFTING: &str = "決定を受け付けました。メール下書きを作成しています。";
 /// A/B 案の投稿の先頭行。
 const PROPOSALS_LEAD: &str = "案を作成しました。どちらにするか判断をお願いします。";
+/// メール下書きの投稿の先頭行。
+const DRAFT_LEAD: &str = "メール下書きを作成しました。送信してよいか確認をお願いします。";
+/// 定型の下書き（[`MailDraft::template`]）の投稿に付ける印の行。
+pub const TEMPLATE_MARK: &str = "【定型】この下書きは AI 生成ではなく、定型の文面です。";
 /// 外部へ投稿してよい「応答を解釈できない」理由（内部の文字列は含めない）。
 const REASON_INVALID: &str = "LLM の応答を解釈できません";
 /// LLM 呼び出しが panic・キャンセルで中断したときの固定の理由（内部の値は出さない）。
@@ -56,9 +64,15 @@ pub trait DynChatGateway: Send + Sync {
         &'a self,
         req: ChatRequest,
     ) -> Pin<Box<dyn Future<Output = Result<ChatReply, LlmError>> + Send + 'a>>;
+    /// 実装の型を調べる口（台本モードの判定に使う）。
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
-impl<T: LlmGateway> DynChatGateway for T {
+impl<T: LlmGateway + 'static> DynChatGateway for T {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn chat<'a>(
         &'a self,
         req: ChatRequest,
@@ -98,11 +112,32 @@ pub struct RunnerTask {
     pub requester: MemberId,
     /// 依頼本文（LLM への要求・判断待ちの論点に使う）。
     pub request_body: String,
-    /// 状態。runner が触るのは Working → AwaitingDecision まで（失敗で
-    /// Stopped。台本フォールバックは Stopped を経由しない）。
+    /// 状態。runner が触るのは Working → AwaitingDecision →
+    /// Working（下書き生成）→ AwaitingSendApproval まで（失敗で Stopped。
+    /// 台本フォールバックは Stopped を経由しない）。
     pub state: TaskState,
     /// Stopped のときの理由（停止メッセージに出したものと同じ）。
     pub stop_reason: Option<String>,
+    /// runner が作った判断待ちの ID（作る前は `None`）。決定の確定通知は
+    /// この ID と一致するときだけ受ける（同じ依頼メッセージを指す別の判断待ちの
+    /// 確定ではタスクを進めない）。
+    pub decision_id: Option<DecisionId>,
+    /// 決定後に生成したメール下書きのデータ（#330。承認カード化は #332）。
+    /// 生成前は `None`。
+    pub draft: Option<MailDraft>,
+}
+
+/// 決定後に生成するメール下書きのデータ（合成。承認カード化は #332）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MailDraft {
+    /// 宛先（表示名）。
+    pub to: String,
+    /// 件名。
+    pub subject: String,
+    /// 本文。
+    pub body: String,
+    /// AI 生成ではない定型の下書きか（LLM の応答が使えず台本に落ちたとき）。
+    pub template: bool,
 }
 
 /// runner の操作の失敗。
@@ -136,6 +171,8 @@ impl TaskBook {
             request_body: message.body.clone(),
             state: TaskState::Working,
             stop_reason: None,
+            decision_id: None,
+            draft: None,
         };
         self.by_request
             .insert(task.request_message_id.clone(), task.task_id.clone());
@@ -266,6 +303,35 @@ impl Runner {
             .map_err(RunnerError::InvalidReply)
     }
 
+    /// 決定が確定したときに HTTP 層から呼ばれるフック（#330）。依頼メッセージに
+    /// 対応するタスクが判断待ちで、確定したのがそのタスク用に runner が作った
+    /// 判断待ち（`outcome.decision_id` が一致）なら、決定された案を入力に LLM で
+    /// メール下書きを作るスレッドを立てる（判断待ちでない・対応するタスクが無い・
+    /// 別の判断待ちの確定の呼び出しは何もしない。冪等リプレイ・二重通知では走らない）。
+    pub fn on_decision_made(&self, request_message_id: &MessageId, outcome: &DecisionOutcome) {
+        let task = self.inner.book.lock().ok().and_then(|book| {
+            book.by_request
+                .get(request_message_id)
+                .and_then(|id| book.tasks.get(id).cloned())
+        });
+        let Some(task) = task else { return };
+        if task.decision_id.as_ref() != Some(&outcome.decision_id) {
+            return;
+        }
+        // 判断待ち → 下書き生成中（Working）の遷移をアトミックに確かめる。
+        if !self.transition(
+            &task.task_id,
+            TaskState::AwaitingDecision,
+            TaskState::Working,
+        ) {
+            return;
+        }
+        let _ = self.post_stage(&task, STAGE_DRAFTING);
+        let runner = self.clone();
+        let chosen = outcome.selected.body.clone();
+        std::thread::spawn(move || runner.run_draft(task, chosen));
+    }
+
     /// タスク用スレッド: LLM を呼び、成功は案の投稿＋判断待ち、失敗は台本の
     /// 応答で案の投稿＋判断待ちへ（フォールバック。Stopped を経由しない）。
     /// 呼び出しの間はどのロックも持たない。
@@ -284,6 +350,48 @@ impl Runner {
                 }
             }
         }
+    }
+
+    /// 下書き生成用スレッド: 決定された案を入力にメール下書きのデータを作り、
+    /// 投稿して AwaitingSendApproval へ。失敗は台本の下書きで進める。
+    fn run_draft(&self, task: RunnerTask, chosen_body: String) {
+        let request = draft_request(&task.request_body, &chosen_body);
+        let reply = self.call_chat(&request, |r| parse_draft(&r.text).is_ok());
+        let Ok(reply) = reply.inspect_err(|reason| {
+            let _ = self.post_stage(&task, &fallback_line(reason));
+        }) else {
+            // 決定された案を差し込んだ台本の下書きへ落ちる。
+            self.complete_draft(&task, script_draft(&chosen_body));
+            return;
+        };
+        match parse_draft(&reply.text) {
+            Ok(mut draft) => {
+                // 台本モードの下書きは AI 生成ではない（印は応答ではなく gateway の型で決める）。
+                draft.template = self.inner.gateway.as_any().is::<demo::ScriptGateway>();
+                self.complete_draft(&task, draft);
+            }
+            Err(reason) => self.stop(&task, &reason),
+        }
+    }
+
+    /// 下書きのデータをタスクに入れ、投稿して AwaitingSendApproval へ進める。
+    fn complete_draft(&self, task: &RunnerTask, draft: MailDraft) {
+        self.set_draft(&task.task_id, draft.clone());
+        let _ = self.post_stage(
+            task,
+            &format!(
+                "{DRAFT_LEAD}{}\n\n宛先: {}\n件名: {}\n\n{}",
+                if draft.template {
+                    format!("\n{TEMPLATE_MARK}")
+                } else {
+                    String::new()
+                },
+                draft.to,
+                draft.subject,
+                draft.body
+            ),
+        );
+        self.set_state(&task.task_id, TaskState::AwaitingSendApproval, None);
     }
 
     /// LLM を1回呼ぶ。検証に失敗した応答（提供元の検証失敗 [`LlmError::Invalid`]
@@ -363,10 +471,22 @@ impl Runner {
             task,
             &format!("{PROPOSALS_LEAD}\n\n案A: {option_a}\n\n案B: {option_b}"),
         )?;
-        self.inner
+        // 判断待ちの作成とタスクへの `decision_id`・状態の保存を、book → 台帳の順に
+        // 両方のロックを持ったまま行う。作成直後に確定されても、`on_decision_made`
+        // は book のロックを待つので、保存済みの ID と AwaitingDecision を見る
+        // （HTTP の decide は台帳のロックを離してから runner を呼ぶので、逆順の
+        // 取得は無い）。
+        let mut book = self
+            .inner
+            .book
+            .lock()
+            .map_err(|_| "タスク台帳のロックに失敗しました".to_owned())?;
+        let mut ledger = self
+            .inner
             .ledger
             .lock()
-            .map_err(|_| "台帳のロックに失敗しました".to_owned())?
+            .map_err(|_| "台帳のロックに失敗しました".to_owned())?;
+        let decision_id = ledger
             .create_decision(
                 task.workspace_id.clone(),
                 CreateDecisionRequest {
@@ -388,8 +508,16 @@ impl Runner {
                 },
                 now_ms(),
             )
-            .map_err(|_| "判断待ちを作れませんでした".to_owned())?;
-        self.set_state(&task.task_id, TaskState::AwaitingDecision, None);
+            .map_err(|_| "判断待ちを作れませんでした".to_owned())?
+            .decision_id
+            .clone();
+        if let Some(task) = book.tasks.get_mut(&task.task_id) {
+            task.decision_id = Some(decision_id);
+            task.state = TaskState::AwaitingDecision;
+            task.stop_reason = None;
+        }
+        drop(ledger);
+        drop(book);
         Ok(())
     }
 
@@ -429,6 +557,30 @@ impl Runner {
             task.stop_reason = stop_reason;
         }
     }
+
+    /// `from` のときだけ `to` に進める（二重の決定通知で下書き生成が
+    /// 重複して走らないよう、確認と遷移を同じロックで行う）。
+    fn transition(&self, task_id: &RunnerTaskId, from: TaskState, to: TaskState) -> bool {
+        let Ok(mut book) = self.inner.book.lock() else {
+            return false;
+        };
+        let Some(task) = book.tasks.get_mut(task_id) else {
+            return false;
+        };
+        if task.state != from {
+            return false;
+        }
+        task.state = to;
+        true
+    }
+
+    fn set_draft(&self, task_id: &RunnerTaskId, draft: MailDraft) {
+        if let Ok(mut book) = self.inner.book.lock()
+            && let Some(task) = book.tasks.get_mut(task_id)
+        {
+            task.draft = Some(draft);
+        }
+    }
 }
 
 /// LLM 呼び出しの結果（runner 内部用。応答本文など内部の値は残さない）。
@@ -454,6 +606,20 @@ fn ab_schema() -> Value {
     })
 }
 
+/// メール下書きの応答スキーマ（#330。宛先・件名・本文）。
+pub(crate) fn draft_schema() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "required": ["to", "subject", "body"],
+        "properties": {
+            "to": {"type": "string"},
+            "subject": {"type": "string"},
+            "body": {"type": "string"}
+        },
+        "additionalProperties": false
+    })
+}
+
 /// LLM への要求。応答は `schema` 指定の A/B JSON に固定し、runner 側でも同じ形に解釈する。
 fn ab_request(request_body: &str) -> ChatRequest {
     ChatRequest {
@@ -465,6 +631,50 @@ fn ab_request(request_body: &str) -> ChatRequest {
         ],
         schema: Some(ab_schema()),
     }
+}
+
+/// メール下書き生成の LLM への要求（#330）。決定された案を入力に、
+/// B社宛ての下書きデータを `schema` 指定の JSON で受ける。
+fn draft_request(request_body: &str, chosen_body: &str) -> ChatRequest {
+    ChatRequest {
+        messages: vec![
+            ChatMessage::system(
+                "あなたは社内の AI Bot「ハル」です。決定された案をもとに、\
+                 取引先の B社宛てのメール下書き（宛先・件名・本文）を作ってください。",
+            ),
+            ChatMessage::user(format!(
+                "依頼: {request_body}\n\n{CHOSEN_LABEL}{chosen_body}"
+            )),
+        ],
+        schema: Some(draft_schema()),
+    }
+}
+
+/// 下書き要求の user メッセージで、決定された案の直前に置く見出し
+/// （台本モードの gateway が決定された案を取り出すのにも使う）。
+const CHOSEN_LABEL: &str = "決定された案: ";
+
+/// 台本のメール下書き（合成）。件名・宛先は固定で、本文に決定された案を差し込む
+/// （実 LLM 失敗時のフォールバックと台本モードの両方で使う）。
+pub(crate) fn script_draft(chosen_body: &str) -> MailDraft {
+    MailDraft {
+        to: "B社 ご担当者".to_owned(),
+        subject: "案件B 納期のご相談".to_owned(),
+        body: format!(
+            "お世話になっております。案件Bの納期について、{chosen_body}で\
+             調整させていただけますでしょうか。"
+        ),
+        template: true,
+    }
+}
+
+/// 下書き要求から決定された案を取り出す（台本モード用。見つからなければ空）。
+pub(crate) fn chosen_from_draft_request(req: &ChatRequest) -> &str {
+    req.messages
+        .iter()
+        .rev()
+        .find_map(|m| m.content.split_once(CHOSEN_LABEL).map(|(_, chosen)| chosen))
+        .unwrap_or_default()
 }
 
 /// 台本の応答（フォールバック用。`usage` は 0 のまま）。
@@ -494,6 +704,20 @@ fn parse_ab(text: &str) -> Result<(String, String), String> {
 
 fn invalid_ab() -> String {
     "応答を A/B の形に解釈できません".to_owned()
+}
+
+/// 応答本文をメール下書きの形に解釈する。`to`・`subject`・`body` の
+/// 非空白文字列が必須。
+fn parse_draft(text: &str) -> Result<MailDraft, String> {
+    let invalid = || "応答をメール下書きの形に解釈できません".to_owned();
+    let value: serde_json::Value = serde_json::from_str(text).map_err(|_| invalid())?;
+    let pick = |key: &str| pick_str(&value, key).ok_or_else(invalid);
+    Ok(MailDraft {
+        to: pick("to")?,
+        subject: pick("subject")?,
+        body: pick("body")?,
+        template: false,
+    })
 }
 
 /// `value` から `key` の非空白文字列を取り出す。
