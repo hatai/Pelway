@@ -322,13 +322,23 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
         if deadline_ts(nca) <= now and cur["due_warned"].get(n) != nca:
             print(f"PATROL #{n} due next_check_at={nca} waiting_on={won} next={owner}", flush=True)
             cur["due_warned"][n] = nca
-    ps["subjects"] = new_subj
     # 記録から消えた対象の期限通知の状態も消す
     cur["due_warned"] = {k: v for k, v in cur["due_warned"].items() if k in new_subj}
     cur["stall_notified"] = {k: v for k, v in cur["stall_notified"].items() if k in new_subj}
-    ps["updated_at"] = now_iso
-    os.makedirs(os.path.dirname(ps_path) or ".", exist_ok=True)
-    json.dump(ps, open(ps_path, "w"), ensure_ascii=False, indent=2, sort_keys=True)
+    # 書き戻しは共通の書き込み手順 scripts/patrol-state-update にだけ出す（Issue #671。
+    # 手順側でロックを取って読み直した現在値に併合するため、読み込みの後に他の書き手が
+    # 進めたオフセットや項目を巻き戻さない）。subjects は対象ごとの置き換えなので、
+    # 記録から消えた対象を null で消す merge patch の列を組み立てる（読み込んだ時点で
+    # 無かった対象には触れず、他の書き手が間に足した対象は残る）。
+    removed = {k: None for k in ps["subjects"] if k not in new_subj}
+    patch = [{"subjects": removed}, {"subjects": new_subj, "updated_at": now_iso}]
+    r = subprocess.run([sys.executable, "scripts/patrol-state-update",
+                        "--writer", "conductor-watch", "--state", ps_path],
+                       input=json.dumps(patch), text=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=30)
+    if r.returncode != 0:
+        print(f"PATROL-STATE write-failed rc={r.returncode} err={(r.stderr or '').strip()[:160]}",
+              flush=True)
     json.dump(cur, open(sp, "w"))
 PY
   # ボード Status 更新キュー: $Q の *.json を 1 件ずつ処理する。要求は

@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""patrol-state.json の共通の書き込み手順（Issue #671）。
+
+補助記録 patrol-state.json への書き込みはすべてこの手順に集約する。指揮役スレッドの
+巡回での書き戻し（オフセット・items・scheduled_task_id など）も、見張り
+（scripts/conductor-watch.sh）の subjects の書き戻しも、ここを通る。直接の
+書き換え（python の json.dump や echo のリダイレクト）は行わない。
+
+保護（ロックを取って読み直した現在値に対して行う）:
+
+- 名乗ったスレッド ID が記録の conductor_thread_id と一致しない書き込みは適用せず、
+  試みを anomalies に記録する（旧指揮役スレッドが残って書き込んだ場合の上書きを防ぐ）。
+  引き継ぎ・交代で新指揮役が最初に自分の ID を記録するときだけ --claim-conductor を使う
+- watch_log_offset・inbox_offset を現行値より小さい値へ書き戻す変更（巻き戻り）は
+  拒否し、試みを anomalies に記録する。ログの切り詰めなどで意図して小さい値に
+  戻すときだけ --allow-offset-regression を付け、適用のうえ anomalies に記録する
+
+入力は標準入力の merge patch（RFC 7386。オブジェクトは深く併合し、null は鍵を消す。
+JSON 配列は併合の列として順に適用する — 鍵の集合ごとの置き換えは
+[{"<k>": null}, {"<k>": <新しい値>}] の形で表す）。
+
+使い方:
+  patrol-state-update [--state PATH] (--writer-thread TID | --writer NAME)
+                      [--claim-conductor] [--allow-offset-regression]
+
+  --state          状態ファイルのパス。省略時は環境変数 PELWAY_PATROL_STATE、
+                   それも無ければ共有 git dir（--git-common-dir）内の
+                   pelway/patrol-state.json
+  --writer-thread  書き手のスレッド ID（指揮役スレッドからの書き込み）
+  --writer         スレッドを持たない書き手の名前（conductor-watch など）
+  --claim-conductor  記録の conductor_thread_id を名乗ったスレッド ID にする
+                   （引き継ぎ・交代の最初の書き込みだけに使う）
+  --allow-offset-regression  オフセットの巻き戻しを anomalies に記録して適用する
+
+終了コード: 0 = 適用、2 = 引数・入力の誤り、3 = 保護による拒否（anomalies に記録）、
+1 = 入出力・ロックの失敗。
+"""
+import copy
+import fcntl
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime
+
+OFFSET_KEYS = ("watch_log_offset", "inbox_offset")
+ANOMALY_MAX = 100
+LOCK_TIMEOUT_SECS = 10.0
+LOCK_RETRY_SECS = 0.1
+
+
+def die(msg, rc):
+    print(f"patrol-state-update: {msg}", file=sys.stderr)
+    sys.exit(rc)
+
+
+def parse_args(argv):
+    opts = {"state": os.environ.get("PELWAY_PATROL_STATE", ""),
+            "writer": None, "writer_thread": None,
+            "claim": False, "allow_reg": False}
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--state" and i + 1 < len(argv):
+            opts["state"] = argv[i + 1]; i += 2
+        elif a == "--writer" and i + 1 < len(argv):
+            opts["writer"] = argv[i + 1]; i += 2
+        elif a == "--writer-thread" and i + 1 < len(argv):
+            opts["writer_thread"] = argv[i + 1]; i += 2
+        elif a == "--claim-conductor":
+            opts["claim"] = True; i += 1
+        elif a == "--allow-offset-regression":
+            opts["allow_reg"] = True; i += 1
+        elif a in ("-h", "--help"):
+            print(__doc__); sys.exit(0)
+        else:
+            die(f"unknown or incomplete argument: {a}", 2)
+    if bool(opts["writer"]) == bool(opts["writer_thread"]):
+        die("書き手の名乗りは --writer-thread か --writer のどちらか 1 つを指定する", 2)
+    if opts["claim"] and not opts["writer_thread"]:
+        die("--claim-conductor には --writer-thread が必要", 2)
+    if not opts["state"]:
+        try:
+            r = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                               capture_output=True, text=True, timeout=10)
+            common = r.stdout.strip() if r.returncode == 0 else ""
+        except Exception:
+            common = ""
+        if not common:
+            die("state path unresolved: --state か PELWAY_PATROL_STATE で指定する", 2)
+        opts["state"] = os.path.join(common, "pelway", "patrol-state.json")
+    return opts
+
+
+def merge(dst, patch):
+    # RFC 7386: null は鍵を消し、オブジェクトどうしは再帰的に併合し、それ以外は置き換える
+    if not isinstance(dst, dict):
+        dst = {}
+    for k, v in patch.items():
+        if v is None:
+            dst.pop(k, None)
+        elif isinstance(v, dict) and isinstance(dst.get(k), dict):
+            merge(dst[k], v)
+        else:
+            dst[k] = v
+    return dst
+
+
+def atomic_write(path, obj):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".patrol-state-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2, sort_keys=True)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def main():
+    opts = parse_args(sys.argv[1:])
+    who = opts["writer_thread"] or opts["writer"]
+
+    raw = sys.stdin.read()
+    if not raw.strip():
+        die("merge patch を標準入力に渡す（JSON オブジェクト、またはオブジェクトの配列）", 2)
+    try:
+        doc = json.loads(raw)
+    except Exception as e:
+        die(f"merge patch が JSON として読めない: {e}", 2)
+    patches = doc if isinstance(doc, list) else [doc]
+    for p in patches:
+        if not isinstance(p, dict):
+            die("merge patch の各要素は JSON オブジェクトでなければならない", 2)
+
+    state = opts["state"]
+    os.makedirs(os.path.dirname(state) or ".", exist_ok=True)
+    # 状態ファイルは書き込みのたびに os.replace で差し替わるため、ファイルそのものではなく
+    # 別のロックファイル（<state>.lock。差し替わらない）を flock で取る。
+    lock_fd = os.open(state + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    deadline = time.time() + LOCK_TIMEOUT_SECS
+    while True:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.time() >= deadline:
+                die("could not acquire patrol-state lock within timeout", 1)
+            time.sleep(LOCK_RETRY_SECS)
+
+    try:
+        base, unreadable = {}, False
+        try:
+            with open(state) as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                base = loaded
+            else:
+                unreadable = True
+        except FileNotFoundError:
+            pass
+        except Exception:
+            unreadable = True
+
+        result = copy.deepcopy(base)
+        for p in patches:
+            result = merge(result, p)
+
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        notes = []
+        if unreadable:
+            notes.append({"kind": "state-unreadable", "writer": who, "at": now_iso})
+
+        refuse = []
+        if opts["writer_thread"] and not opts["claim"]:
+            rec = base.get("conductor_thread_id")
+            res_tid = result.get("conductor_thread_id")
+            mismatched = (isinstance(rec, str) and rec and rec != opts["writer_thread"]) or \
+                         (isinstance(res_tid, str) and res_tid and res_tid != opts["writer_thread"])
+            if mismatched:
+                keys = sorted({k for p in patches for k in p})
+                refuse.append({"kind": "conductor-mismatch", "writer": who,
+                               "recorded": rec, "keys": keys, "at": now_iso})
+        if opts["writer_thread"] and opts["claim"]:
+            # 引き継ぎ・交代の名乗り: 記録の持ち主は名乗ったスレッドに移る
+            # （patch が別の値を書こうとしても、名乗った値が優先される）
+            result["conductor_thread_id"] = opts["writer_thread"]
+
+        for k in OFFSET_KEYS:
+            # 検査するのは patch が実際に書き換える鍵だけ。既存ファイルの値が
+            # 変な型でも、この書き込みがその鍵に触れなければ関係しない。
+            if not any(k in p for p in patches):
+                continue
+            cur, new = base.get(k), result.get(k)
+            if isinstance(new, bool) or not isinstance(new, int) or new < 0:
+                refuse.append({"kind": "invalid-offset", "key": k, "value": new,
+                               "writer": who, "at": now_iso})
+            elif isinstance(cur, int) and not isinstance(cur, bool) and new < cur:
+                entry = {"key": k, "from": cur, "to": new, "writer": who, "at": now_iso}
+                if opts["allow_reg"]:
+                    notes.append({"kind": "offset-regression", **entry})
+                else:
+                    refuse.append({"kind": "offset-regression-refused", **entry})
+
+        if refuse:
+            out = copy.deepcopy(base)
+            anoms = out.get("anomalies")
+            anoms = anoms if isinstance(anoms, list) else []
+            out["anomalies"] = (anoms + notes + refuse)[-ANOMALY_MAX:]
+            atomic_write(state, out)
+            kinds = ", ".join(r["kind"] for r in refuse)
+            die(f"refused ({kinds}) by {who}; attempt recorded in anomalies", 3)
+
+        if notes or isinstance(result.get("anomalies"), list):
+            anoms = result.get("anomalies")
+            anoms = anoms if isinstance(anoms, list) else []
+            result["anomalies"] = (anoms + notes)[-ANOMALY_MAX:]
+        atomic_write(state, result)
+        print(f"patrol-state-update: applied {state}", file=sys.stderr)
+        return 0
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

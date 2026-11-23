@@ -13,10 +13,11 @@ failures=()
 MOCK="$ROOT/mock"
 mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$MOCK" "$ROOT/state/pelway"
 
-# 本物の conductor-watch.sh をコピーした偽リポジトリ（scripts/agent-gh をモックに差し替える）。
+# 本物の conductor-watch.sh と patrol-state-update（書き戻しの共通手順）をコピーした偽リポジトリ（scripts/agent-gh をモックに差し替える）。
 # patrol-state.json の既定の置き場は共有 git dir（--git-common-dir）内の pelway/ のため、
 # 偽リポジトリも git init して実際の解決を通す（Issue #477）。
 cp "$REPO/scripts/conductor-watch.sh" "$ROOT/repo/scripts/"
+cp "$REPO/scripts/patrol-state-update" "$ROOT/repo/scripts/"
 git init -q "$ROOT/repo"
 STATE="$ROOT/repo/.git/pelway/patrol-state.json"
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'

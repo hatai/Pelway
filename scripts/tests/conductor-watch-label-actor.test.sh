@@ -17,8 +17,9 @@ failures=()
 MOCK="$ROOT/mock"
 mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$MOCK" "$ROOT/state/pelway"
 
-# 本物の conductor-watch.sh をコピーした偽リポジトリ（scripts/agent-gh をモックに差し替える）
+# 本物の conductor-watch.sh と patrol-state-update（書き戻しの共通手順）をコピーした偽リポジトリ（scripts/agent-gh をモックに差し替える）
 cp "$REPO/scripts/conductor-watch.sh" "$ROOT/repo/scripts/"
+cp "$REPO/scripts/patrol-state-update" "$ROOT/repo/scripts/"
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env bash
 # モック: issue list / pr list は空を返す。api は issues/events と issues/{n}/comments に
