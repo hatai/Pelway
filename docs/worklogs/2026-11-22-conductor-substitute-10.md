@@ -656,3 +656,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 11-23 22:10 — #673 QA 委託（branch 更新は見送り）
 
 - #673 `32f3b85d`: codex approve 現 head 宛て・BEHIND。update-branch すると codex 承認が失効し 11/28 まで再取得不可のため、現 head で QA 委託（`qa-673-32f3b85d`）→ 揃えば automerge で Kodiak の追随に任せる
+
+## 11-23 22:40 — #673 QA pass・automerge
+
+- QA（Devin）: pass@32f3b85d → pelway-qa 投稿（issuecomment-7096488932）・`automerge` 付与。Kodiak の追随で head が変われば codex 承認失効のため要監視
