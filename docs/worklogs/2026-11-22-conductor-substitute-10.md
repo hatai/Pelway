@@ -619,3 +619,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 ## 11-23 19:40 — #482 request-changes を実装へ転送
 
 - Devin レビュー（codex 上限で代替）@b4ea8e0a: request-changes・must-fix 2（runbook LABEL unbacked 未実装・AGENTS.md 英語記述の矛盾）・nit 3 → 実装スレッド mcp:28d8f688 へ送付
+
+## 11-23 20:00 — #610/#678 QA 委託・#610 再レビュー委託
+
+- **#678**: head `c7344eab`（Ready・APPROVED 同 SHA・BEHIND）→ QA 委託（Devin・`qa-678-c7344eab`）
+- **#610**: head `548faa59`（Ready・CLEAN）だが最新 APPROVED は旧 head `bb7a7f78` — 差分は main 取り込み+worklog 調整のみと確認。現 head 承認が必須のため Devin 再レビュー（`rev-610-548faa59`）と QA（`qa-610-548faa59`）を同時委託。automerge は #602 needs-human 除去＋codex 扱いのリード確認後
