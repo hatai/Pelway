@@ -706,9 +706,11 @@ bwrap が作る名前空間の要点:
 
 ```bash
 # clone 先は mktemp -d で一意に作る。固定の名前（/tmp/Pelway など）は先に作られた同名ディレクトリを git clone が受け入れる
-clone="$(mktemp -d /tmp/pelway-clone.XXXXXX)/Pelway"
-git clone <このリポジトリの URL> "$clone" || exit 1
-if [ -k /tmp ] &&                                # この手順の前提: /tmp の sticky bit
+if tmp="$(mktemp -d /tmp/pelway-clone.XXXXXX)" &&
+   clone="$tmp/Pelway" &&
+   git clone <このリポジトリの URL> "$clone" &&
+   cd "$clone" &&                                # 確かめ方は相対パスで動かすため、clone の中に入る
+   [ -k /tmp ] &&                                # この手順の前提: /tmp の sticky bit
    { mkdir -m 700 /tmp/sshims 2>/dev/null ||
      { [ "$(LC_ALL=C stat -c '%F %u' /tmp/sshims 2>/dev/null)" = "directory $(id -u)" ] && chmod 700 /tmp/sshims; }; } &&
    extra="$(find /tmp/sshims -mindepth 1 ! \( -name fnox -type l \) -print -quit)" &&   # 終了状態も条件に入れる
@@ -717,7 +719,7 @@ if [ -k /tmp ] &&                                # この手順の前提: /tmp �
   export PATH="/tmp/sshims:$PATH"                # 検査も symlink の置き換えも成功したときだけ足す
   export MISE_TRUSTED_CONFIG_PATHS="$clone"
 else
-  echo "/tmp/sshims が自分専用のディレクトリではない、中に fnox の symlink 以外がある、または検査・リンクの更新に失敗した。PATH に足さずに止める" >&2
+  echo "clone、または /tmp/sshims の検査・リンクの更新に失敗した（自分専用のディレクトリではない、中に fnox の symlink 以外がある、など）。PATH に足さずに止める" >&2
 fi
 ```
 
@@ -727,10 +729,11 @@ fi
   - mode 700 にして、ほかのユーザーが書き込めない。chmod の後に中身を調べるため、検査の後に相手が項目を足せない
   - 中に `fnox` という名前の symlink 以外が無いことを、`find` の終了状態と出力の両方で確かめた。出力だけを見ると、列挙に失敗して出力が空のときに通ってしまう（以前ほかのユーザーが書き込めた時期に置かれた項目を使わない）
   - `ln -sfn` で fnox 実体への symlink の置き換えに成功した。`-f` は一時名に作ってから rename で置き換えるため、失敗すると相手が以前置いた `fnox` が残ることがあり、成功するまで PATH に足さない
-- clone 先は `mktemp -d` で作る。固定の名前（`git clone` の既定の `/tmp/Pelway` など）は、同じマシンの別ユーザーが先に空のディレクトリ（mode 0777）を作っておくと `git clone` がそのまま受け入れ、最上位のディレクトリが相手の持ち物のまま残る。相手はその所有者なので `scripts/agent-gh` を差し替えたり、本人の `mise.toml` を消して自分のものを置いたりでき、`MISE_TRUSTED_CONFIG_PATHS` で信頼した設定ごと本人の権限で動く。`mktemp -d` は O_EXCL で一意な名前を作るため、先に作られた名前を受け入れない
+- clone 先は `mktemp -d` で作り、その直後に `cd` で中に入る。固定の名前（`git clone` の既定の `/tmp/Pelway` など）は、同じマシンの別ユーザーが先に空のディレクトリ（mode 0777）を作っておくと `git clone` がそのまま受け入れ、最上位のディレクトリが相手の持ち物のまま残る。相手はその所有者なので `scripts/agent-gh` を差し替えたり、本人の `mise.toml` を消して自分のものを置いたりでき、`MISE_TRUSTED_CONFIG_PATHS` で信頼した設定ごと本人の権限で動く。`mktemp -d` は mkdir(2) で作るため、既にある名前では EEXIST で失敗して別の名前を試し、先に作られた名前を受け入れない
+- 確かめ方の `scripts/agent-gh` は相対パスなので、clone の中で実行する。`cd` をせずに /tmp など別のディレクトリにいると、そこに先に置かれた同名のスクリプトが本人の権限で動く
 - fnox 実体のパスは `~/.local/share/mise/installs/fnox/latest/fnox`。`/tmp/sshims` にはこの symlink だけを置き、PATH の先頭に置いて shim より先に実体が解決されるようにする。
 - `MISE_TRUSTED_CONFIG_PATHS` は /tmp 側の clone（`$clone`）を mise に信頼させる（`mise trust` の記録を書かずに済む）。`mise run` など mise 経由のコマンドがこれで動くかは未確認。
-- 確かめ方: `command -v fnox` が `/tmp/sshims/fnox` を返し、`scripts/agent-gh dev api /rate_limit` が成功する。
+- 確かめ方: `cd "$clone"` の後（clone の中で）、`command -v fnox` が `/tmp/sshims/fnox` を返し、`scripts/agent-gh dev api /rate_limit` が成功する。
 - 再マウント自体の対策・マウント設定の変更はこの手順の範囲外。
 
 ### デモの LLM 接続（#330）
