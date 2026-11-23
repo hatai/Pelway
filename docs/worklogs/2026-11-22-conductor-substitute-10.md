@@ -554,3 +554,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - 反映して `f5b6ac84` push: 証拠行の「合算」を確定 12＋候補 1 に / worklog 内訳を当時の記述と明示・確定分 4・2・3・3＋候補 1 併記 / 沈黙を「列挙に失敗した回は検知されない構造」に分離 / バックアップを交代前の参考記録・507473/3796 各時点の記録済み/未記録を明記 / 「削除前後で挙動」は未確認に / 題名を「孤立が報告されたスレッド 13 件の調査」に（PR 題名も更新）
 - 3796 側の読み取りは時刻・記録先が worklog・patrol-state いずれにも残っていないことを確認（未記録観測として明示）
 - r6 を codex gpt-6.2-sol に委託（`rev-650-f5b6ac84-20261123`）
+
+## 11-23 16:20 — PR #650 承認到達・#674 は PR #677 へ
+
+- codex r5（`f5b6ac84` レビュー・pullrequestreview-6016337512）: **APPROVE・must-fix 0**。軽微な提案（#602 の観測時点）を反映して `475344b8` push — この head 変更で承認は旧 SHA 宛のため、#674 マージ後の main 取り込み head で最終レビューを取り直す
+- #674 の実装スレッドが Draft PR [#677](https://github.com/hatai/Pelway/pull/677)（`d5dfb190`・branch agent/674-rustsec-url）を作成、チェック実行中（osv-scanner 既 pass）
+- #650 の残ゲート: 現 head での pelway-review 承認・必須チェック・pelway-qa pass（verify-static は #677 マージと main 取り込み待ち）
+- 障害メモ（2 度目）: この worktree が `agent/669-pending-sends-watch` に切り替わり誤コミット（d9a7d2a7・未 push・除去済み）。create_threads で起こした実装スレッドが指揮役 worktree を共有しており、ブランチ切り替えが競合する — 以後の実装スレッド起動は worktree 隔離の委託に切り替える
