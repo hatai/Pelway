@@ -652,3 +652,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **#660 impl (42181892)**: run 32 は決定受領・worktree 確認着手直後に GLM 基盤 failed（停止条件ではない）→ t3_thread_send で round 4 継続を指示し起床
 - **codex レビュー failed 4 件**（#560 r10/#610/#662/#482）: 使用上限起因。#662 は 11/28 まで snooze 妥当、他条件のみ準備して待つ運用で合意どおり
 - **#668 impl (bd822fcb)**: 12:18 JST completed・成果は branch agent/668-mcp-check-slim-conductor（push 済み・PR 未作成）。#666 の PR #673（open・BEHIND）マージ後に手順 6 へ進む設計で駐車 — 再開の要否は #673 の進捗次第。ラベル agent:working/agent:devin は実質所有が残っている状態
+
+## 11-23 22:10 — #673 QA 委託（branch 更新は見送り）
+
+- #673 `32f3b85d`: codex approve 現 head 宛て・BEHIND。update-branch すると codex 承認が失効し 11/28 まで再取得不可のため、現 head で QA 委託（`qa-673-32f3b85d`）→ 揃えば automerge で Kodiak の追随に任せる
