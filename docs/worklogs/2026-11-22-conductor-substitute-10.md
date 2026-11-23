@@ -540,3 +540,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - 残る内容指摘 3 件（棚卸し件数・障害継続・起き直り順序）は r4 で再確認する形に。r4 を codex gpt-6.2-sol に委託（`rev-650-ded0f335-20261123`）— jobs/logs 遮断時は check-runs で代替・未投稿でも結果テキストで返すよう指示
 - #674（RUSTSEC-2026-0592）: gate 遮断の緊急性から、起票時の推薦コメントに基づき `ready-for-agent`+`agent:working`+`agent:devin` 付与・ボード Working・Devin swe-2-high 実装スレッド起動。異議あれば中断の旨を Issue コメントで宣言済み
 - patrol-state: assignments（impl-674・rev-650-r4）登録
+
+## 11-23 15:00 — PR #650 レビュー r4 対応
+
+- codex r4（`ded0f335` レビュー・pullrequestreview-6016287129）: request-changes・must-fix 3・nit 2
+- must-fix 反映して `cfae9905` push: #569 を「候補」（スレッド ID 未特定・状態未確認）として確定 12 件と分離・分類を一意に / 「失敗し続けた」を観測 2 点に限定 / settle 後の起き直りを観測した記録無し・上書きの根拠を bak-devin10-handover（mtime 10:40・offset 3425）を含む突き合わせに限定。同梱 worklog と PR 概要にも訂正注記を揃えた。nit 2 件（PATROL は前回保存した waiting_on 参照・87-88 行）も反映
+- 発見: offset 逆行の観測（3796 側）は時刻の記録が worklog に残っていなかった — 時刻付きの前後記録として `patrol-state.json.bak-devin10-handover` を証拠に採用
+- r5 を codex gpt-6.2-sol に委託（`rev-650-cfae9905-20261123`）
