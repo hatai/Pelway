@@ -637,3 +637,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **#399**: 承認は codex（実装メモで review-request to: codex を確認・approve は 640db248 レビューが head 00c7f261 に着地）→ automerge 維持
 - **#678**: approve は claude → codex 待ち（QA は準備として継続）
 - **#610**: Devin 再レビュー+QA は準備扱い、automerge は codex 待ち。#482/#560/#661 も同扱い
+
+## 11-23 21:10 — #678 QA pass
+
+- QA（Devin・`qa-678-c7344eab`）: **pass**。事故シナリオ再現で offset 巻き戻し拒否+anomaly 記録を実測・書き込み一元化確認 → pelway-qa 投稿（issuecomment-7094612295）。automerge は codex approve 待ち（現承認は claude）
+- #610 Devin 再レビュー: approve@548faa59（QA は実行中）
