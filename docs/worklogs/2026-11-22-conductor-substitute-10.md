@@ -503,3 +503,10 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 - **暫定運用を終了し通常運用に復帰**: Claude Code への実装割り当ては土日限定に戻す・同時実行上限は runbook 正本（実装 GLM 3・Devin 6・レビュー codex/devin 目安 2・claude 目安 1）に戻す
 - 現状: 稼働中の claudeAgent 実装スレッドはなし（GLM/Devin に切替済み）のため、停止操作は不要。新規割り当てから通常ルールを適用
 - patrol-state の `ops_change_20261120` に reverted を追記・`ops_current` を通常ルールで記録
+
+## レビュー待ち確認と起票判断（11-23 09:30 JST）
+
+- **#650 調査報告（13 件孤立の根因調査）を読み起票判断**: [#669](https://github.com/hatai/Pelway/issues/669) pending_thread_sends 滞留監視・[#670](https://github.com/hatai/Pelway/issues/670) スレッド連絡帳簿・[#671](https://github.com/hatai/Pelway/issues/671) patrol-state 競合/巻き戻り保護（各 needs-triage）。報告 5.1/5.3 は #651/#664 で対応済み。T3 側起因（自動再起動・send 障害）は #671 未決事項として hatai 判断待ち。[判断コメント](https://github.com/hatai/Pelway/pull/650#issuecomment-7090579245)
+- **#650 にレビュー回付**（codex gpt-6.2-sol @c2ac7050）— report-only でもレビュー・QA を通す運用どおり
+- **#610 stale automerge 除去**: kodiak 更新後に impl が自走 push（`41d7cd2e`）・自己レビュー r5 が CHANGES_REQUESTED → 条件を満たさない automerge を除去。impl が must-fix 対応中
+- MCP が再度不通（t3_thread_list/send 失敗）。調査スレッドへの判断通知は `pending_thread_sends` に登録（MCP 復旧時に再送）
