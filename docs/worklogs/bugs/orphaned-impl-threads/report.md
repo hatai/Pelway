@@ -1,4 +1,4 @@
-# 調査報告: 実装スレッド 13 件の孤立（completed・未 settle で滞留）
+# 調査報告: 孤立が報告されたスレッド 13 件の調査（completed・未 settle で滞留した 12 本＋候補 1 件）
 
 調査日: 2026-11-22（JST）
 調査者: 指揮役スレッド `mcp:57618b05-7233-4524-9910-75946dd4a367`（Devin・恒久交代後の現指揮役）
@@ -84,19 +84,19 @@ T3 のスレッドは pull 型である。1 回の run が `completed` で終わ
 ### 3.4 構造的弱点 2: 指揮役交代と共有状態の競合
 
 - 約 34 時間で指揮役が 4 代交代（Devin 8→9→10→11、主立った交代は 11-22 01:45・10:41・11:15 JST）。各交代で保留キューの引き継ぎとスケジュールタスクの作り直しが発生し、MCP 障害期と重なって送り損ないが累積した。
-- さらに旧指揮役スレッド（`mcp:launch:61092c…`）に 2 つの観測が別々に記録されている。1 つ目は割り込み直後の自動起き直り: 現指揮役が同スレッドへ `t3_thread_interrupt` を 11:14 JST 台に 2 回送り（run 22・23）、run 23 は割り込み後に自動起き直り、再度中断で停止（現指揮役の中断記録）。2 つ目は `patrol-state.json` の上書き: 同梱 worklog の「offset を 507473 へ前倒し」記録（11 時台）と、その後の読み取りで offset 3796・`last_patrol_note` が旧指揮役の巡回記録だった観測の突き合わせで確認した（3796 側の読み取りは時刻の記録が worklog に残っていない。時刻付きの前後記録はバックアップ `patrol-state.json.bak-devin10-handover`・ファイル更新 11-22 10:40 JST・offset 3425）。settle 完了は同日 11:15 JST 台（同 worklog の記録）。**起き直りと上書きの前後関係・因果、および上書きの発生時刻は、時刻付きの書き込み記録がないため未確認**（上書きが自動起き直りした run のものとは特定できていない）。`conductor-watch/watch.log` では当該スレッドの `prev=completed` から `running` への遷移が計 22 回記録されているが、定期巡回の起床を含むため settle 後に限った回数は分離できていない。共有状態ファイルが複数の指揮役から同時に書かれ得る設計になっている。
+- さらに旧指揮役スレッド（`mcp:launch:61092c…`）に 2 つの観測が別々に記録されている。1 つ目は割り込み直後の自動起き直り: 現指揮役が同スレッドへ `t3_thread_interrupt` を 11:14 JST 台に 2 回送り（run 22・23）、run 23 は割り込み後に自動起き直り、再度中断で停止（現指揮役の中断記録）。2 つ目は `patrol-state.json` の上書き: 同梱 worklog 47 行の「offset を 507473 へ前倒し」記録（11 時台・当該時点の `last_patrol_note` の値は未記録）と、その後の読み取りで offset 3796・`last_patrol_note` が旧指揮役の巡回記録だった観測（読み取り時刻・記録先は未記録）の突き合わせで確認した。参考記録として、交代前の 1 時点のバックアップ `patrol-state.json.bak-devin10-handover`（ファイル更新 11-22 10:40 JST・offset 3425・`last_patrol_note` は旧指揮役の交代宣言）がある。settle 完了は同日 11:15 JST 台（同 worklog の記録）。**起き直りと上書きの前後関係・因果、および上書きの発生時刻は、時刻付きの書き込み記録がないため未確認**（上書きが自動起き直りした run のものとは特定できていない）。`conductor-watch/watch.log` では当該スレッドの `prev=completed` から `running` への遷移が計 22 回記録されているが、定期巡回の起床を含むため settle 後に限った回数は分離できていない。共有状態ファイルが複数の指揮役から同時に書かれ得る設計になっている。
 - 現指揮役の巡回スケジュールタスク `scheduled-task:fe5a87db-…` も `enabled:false` で無効化されているのを確認（誰が/いつ無効化したかは未確認）。
 
 ## 4. 証拠一覧（一次記録）
 
 | 主張 | 証拠 |
 |---|---|
-| 13 件の構成 | 指揮役スレッド `mcp:57618b05` run 6 の棚卸しメッセージ（`completed`・未 settle・トップレベルで 12 本・スナップショット範囲外の #569 分は PR #600 から確認して合算 13 本）と、`docs/worklogs/2026-11-22-conductor-substitute-11.md`（本 PR に同梱。旧指揮役 11 のブランチは remote 未 push のためコミット permalink は使わない）（「13件孤立の詳細調査」節） |
+| 13 件の構成 | 指揮役スレッド `mcp:57618b05` run 6 の棚卸しメッセージ（`completed`・未 settle・トップレベルで 12 本・確定 12 本に、スレッド状態が未確認の候補 1 件（[実装] #569 — open の PR #600 から Issue↔PR の対応のみ確認。スレッドの存在・状態は未確認）を加えた 13 件）と、`docs/worklogs/2026-11-22-conductor-substitute-11.md`（本 PR に同梱。旧指揮役 11 のブランチは remote 未 push のためコミット permalink は使わない）（「13件孤立の詳細調査」節） |
 | 監視の失明の期間と症状 | `patrol-state.json` の `watcher_blind` キー: `{"since":"2026-11-20T00:50:00+09:00","symptom":"t3 thread list --json が \"No running T3 Code server uses /home/hatai/.t3\" で失敗（wsl-runtime 実バイナリでも同じ）。threads.json 空→state.json に現行スレッドなし・watch.log 00:50 以降無記録","recorded_at":"2026-11-21T01:50:00+09:00"}` — 確認できた失敗は `since` の申し送り時点と `recorded_at` の記録の 2 点。間の各回の実行結果は未確認のため連続失敗とは断言しない（`watch.log 00:50 以降無記録` はその期間に記録行が無かったことの記述で、失敗の連続性そのものは示さない）。終了時刻は未記録 |
 | 失明のコード上の原因 | `scripts/conductor-watch.sh` 54 行の失敗握り潰し（`> "$D/threads.json" 2>/dev/null \|\| true`）、87-88 行の `try: threads = json.load(...)` / `except Exception: threads = []` |
 | STALL 検知の存在と対象・条件 | `scripts/conductor-watch.sh` 224 行（`STOPPED`）・289-298 行（waiting_on が implement/review・最新実装スレッド停止・状態行 `working` か無記録で conductor へ切替（298 行）・PATROL は前回保存した `waiting_on` が conductor 以外のときだけ（292-293 行）・STALL は同 `updatedAt` 再通知しない（295-297 行））。`needs-human` は分岐に入らない（巡回 1 時点で同ラベルだった 1・2・5・8・11 番。3.1 節） |
 | send 障害 | `patrol-state.json` `mcp_down.since: 2026-11-22T10:45+09:00`（旧指揮役側の記録）、`pending_thread_sends` 3 件（最古 11-22 02:45）、現指揮役側の巡回 1 で `t3_thread_send` 2 回連続失敗（同 worklog（`docs/worklogs/2026-11-22-conductor-substitute-11.md`・本 PR 同梱）「巡回 1」節。同日 11:05-11:15 台の `schedule_task` 疎通は同 worklog「引き継ぎ確認」節） |
-| 旧指揮役の自動起き直りと共有状態の上書き | `conductor-watch/watch.log` で `mcp:launch:61092c…` の `prev=completed`→`running` 遷移が計 22 回（定期巡回の起床を含む）。割り込み後の起き直りは同 worklog（`docs/worklogs/2026-11-22-conductor-substitute-11.md`・本 PR 同梱）の中断記録（11:14 JST 台・run 22・23、23 は起き直り後に再度中断）で実測。settle 完了は同日 11:15 JST 台。上書きの存在は、同梱 worklog の「offset を 507473 へ前倒し」記録（11 時台）と、その後の読み取りで offset 3796・`last_patrol_note` が旧指揮役の巡回記録だった観測の突き合わせによる。ただし 3796 側の読み取りは時刻を記した記録が worklog に残っていない。時刻付きの前後記録として、バックアップ `patrol-state.json.bak-devin10-handover`（ファイル更新 2026-11-22 10:40 JST）には offset 3425・`last_patrol_note` は旧指揮役の交代宣言（「恒久交代のため旧指揮役は操作停止」）。上書きの発生時刻、および起き直りとの前後関係・因果は未確認 |
+| 旧指揮役の自動起き直りと共有状態の上書き | `conductor-watch/watch.log` で `mcp:launch:61092c…` の `prev=completed`→`running` 遷移が計 22 回（定期巡回の起床を含む）。割り込み後の起き直りは同 worklog（`docs/worklogs/2026-11-22-conductor-substitute-11.md`・本 PR 同梱）の中断記録（11:14 JST 台・run 22・23、23 は起き直り後に再度中断）で実測。settle 完了は同日 11:15 JST 台。上書きの存在は、同梱 worklog 47 行の「offset を 507473 へ前倒し」記録（11 時台・当該時点の `last_patrol_note` は未記録）と、その後の読み取りで offset 3796・`last_patrol_note` が旧指揮役の巡回記録だった観測（読み取り時刻・記録先は未記録）の突き合わせによる。交代前の 1 時点の参考記録として、バックアップ `patrol-state.json.bak-devin10-handover`（ファイル更新 2026-11-22 10:40 JST・offset 3425・`last_patrol_note` は旧指揮役の交代宣言「恒久交代のため旧指揮役は操作停止」）がある。上書きの発生時刻、および起き直りとの前後関係・因果は未確認 |
 | 巡回の実値 | `docs/worklogs/2026-11-22-conductor-substitute-11.md`（本 PR 同梱）（PR 12・agent:working 9・needs-human 7） |
 
 ## 5. 最小の修正案
@@ -115,7 +115,7 @@ T3 プラットフォーム側の send 障害そのもの（MCP の send ルー�
 
 - `t3 thread list` が `No running T3 Code server` を返しつつ MCP `t3_thread_list` が通る理由（CLI のサーバー検出方式の差）は未確定。`watcher_blind` 記録の推定どおりホスト側の検出不良が濃厚だが、T3 の内部は検証していない。
 - `t3_thread_send` の障害が read 系と切り分けられる内部理由は未確定。
-- 旧指揮役のスレッドがいつ・何によって起き直ったか（残存スケジュールか、T3 側の再試行か）は未確定。観測できた起き直りは 11:14 JST 台の割り込み後のもの（settle 完了 11:15 JST 台とほぼ同時期）で、**settle 後の起き直りを別に観測した記録は無い**（証拠一覧の行を参照）。`patrol-state.json` の上書きも発生時刻の記録が無く、起き直りとの前後関係・因果は未確認のまま。当時のスケジュールタスク `a3fcb862` は削除済みだが、削除前後で挙動が続いた記録がある。
+- 旧指揮役のスレッドがいつ・何によって起き直ったか（残存スケジュールか、T3 側の再試行か）は未確定。観測できた起き直りは 11:14 JST 台の割り込み後のもの（settle 完了 11:15 JST 台とほぼ同時期）で、**settle 後の起き直りを別に観測した記録は無い**（証拠一覧の行を参照）。`patrol-state.json` の上書きも発生時刻の記録が無く、起き直りとの前後関係・因果は未確認のまま。当時のスケジュールタスク `a3fcb862` は削除済み。同梱 worklog では削除と割り込みが同じ 11:14 JST 台の記録で、削除前後で挙動が続いたかを示す順序の記録は無く未確認。
 - 「13 件」のうち #569 の実装スレッド ID は監視スナップショットの範囲外で特定できていない（タイトル検索に非一致）。そのためスレッドの状態（`completed`・未 settle・トップレベル）は未確認で、本報告では候補として扱う（2 節）。
 
 ## 7. 修正の有無と配備状況
