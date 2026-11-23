@@ -254,6 +254,20 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 `<slug>` は症状を英小文字とハイフンで短くしたもの。effort は `docs/agents/command-team-details.md` の「調査（入口B）」で決める。調査スレッドの報告（`pr:` に報告の Draft PR）を受けたら、同じ節の「調査の引き渡し」に従う。
 
+### 棚卸し担当を立てる
+
+週次の棚卸し（`docs/agents/command-team-details.md` の「週次: 長命 PR の棚卸し」）と作業ログの定期キュレーション（下の「12. 作業ログの定期キュレーション」）は、指揮役の巡回から外し、週 1 回、指揮役とは別の「棚卸し担当」スレッドが行う。棚卸し担当が行うのは提案まで（巡回記録への判断案と期限の記入、`docs/worklogs/<日付>-curation.md` の候補リスト）で、ラベル・マージ・スレッドへの指示はしない。
+
+```
+t3 thread start --provider acpRegistry_devin --model swe-2-high --worktree main --title "[棚卸し] <日付>" <Pelway のパス> "週次の棚卸しを行う。長命 PR の棚卸しは docs/agents/command-team-details.md の「週次: 長命 PR の棚卸し」に、作業ログの定期キュレーションは docs/agents/grokbot-runbook.md の「12. 作業ログの定期キュレーション」に従う。
+Assigned: role=inventory agent=devin model=swe-2-high effort=high"
+```
+
+- provider・モデル: Devin CLI（`acpRegistry_devin`、`swe-2-high`）を既定とする
+- 権限（`runtimeMode`）: `full-access` にしない。権限を指定できる経路（T3 Connect の MCP・`t3_thread_launch`）では `auto-accept-edits` で立てる。Devin CLI のスレッドは権限を指定できず sandbox の権限モード（Autonomous）で動くため `full-access` にはならない（「レビューを始める」の Devin CLI と同じ扱い）
+- worktree は必ず `main` から作る
+- スレッド名: 「[棚卸し] <日付>」（「スレッド名」の形式の「その他」に当たる）
+
 ## 5. イベントごとの対応
 
 ### `pelway.agent-watch/v1`
@@ -478,9 +492,9 @@ Grok Bot が動かない（レート制限、障害）とき、人間が別の�
 
 ## 12. 作業ログの定期キュレーション
 
-週 1 回、巡回とは別枠で、直近の worklog 群を走査し、繰り返しの型や正本とのずれを候補リストとして残す。位置づけ（レビュー指摘を入口とする既存の改善ループとの役割分担、提案までで正本を直接編集しないこと）の正本は skill `command-team` の「改善ループ」の「定期キュレーション」。
+週 1 回、巡回とは別枠の「棚卸し担当」スレッドが、直近の worklog 群を走査し、繰り返しの型や正本とのずれを候補リストとして残す（実行者と立て方は「4. 仕事の始め方」の「棚卸し担当を立てる」）。位置づけ（レビュー指摘を入口とする既存の改善ループとの役割分担、提案までで正本を直接編集しないこと）の正本は skill `command-team` の「改善ループ」の「定期キュレーション」。
 
-- 頻度: 週 1 回。実施タイミングは運用しながら定める（まとめや週次の棚卸しと合わせてもよい）
+- 頻度: 週 1 回。実施タイミングは運用しながら定める（週次の棚卸しと同じスレッド・同じ回に合わせてもよい）
 - 対象: 直近の worklog 群。指揮役の巡回記録・判断の記録（`docs/worklogs/` の指揮役の作業ログ）、実装者メモ（`docs/worklogs/issue-*.md`）、引き継ぎ記録（代行の作業ログと引き継ぎ確認の記録）、レビュー結果の記録（PR のレビューとラウンドサマリー）
 - 観点:
   1. 同種の滞留・手戻り・停止が繰り返し起きていないか（型としての繰り返し）
