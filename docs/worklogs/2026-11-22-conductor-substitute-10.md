@@ -676,3 +676,7 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 **指揮役から届かない（full-access・要リード/hatai 直接操作）**:
 - #610 impl 2e87e67b — dirty・main 取り込みが必要
 - #642 impl c9d1a5eb / #644 impl 9fe3e99d — completed で成果（PR/ブランチ）なし・Issue は ready-for-agent のまま。再開指示か新規スレッド起動の判断が必要
+
+## 11-23 23:45 — #675 QA pass・automerge
+
+- QA（Devin）: pass@d434ce76。codex approve が同 SHA・必須チェック success → pelway-qa 投稿（issuecomment-7100252844）・`automerge` 付与（Kodiak 待ち）
