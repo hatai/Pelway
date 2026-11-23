@@ -606,3 +606,8 @@ worktree: `/home/hatai/.t3/worktrees/Pelway/conductor-rebuild-20261-81a85fdf7efb
 
 - QA（Devin・`qa-399-00c7f261`）: **pass**。head 両時点一致・必須チェック success・受け入れ条件全件 pass（fixture テスト範囲・#433 移管分は対象外の決定どおり）・混入なし・弱体化なし → pelway-qa 投稿（issuecomment-7093755658）
 - automerge は Draft 解除（Ready 化＝実装側）と #330 の needs-human 除去（hatai のみ）を待つ
+
+## 11-23 19:05 — #482 レビュー委託
+
+- head `b4ea8e0a`（main 取り込み済み）を GitHub で確認: verify・pr-size success、レビューなし
+- codex gpt-6.2-sol・security=yes・worktree 隔離でレビュー委託（`rev-482-b4ea8e0a`）。approve 後に QA 委託、#480 needs-human 除去後に automerge
