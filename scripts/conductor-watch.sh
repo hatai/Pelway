@@ -218,7 +218,7 @@ def all_pages(path):  # --paginate --slurp の応答（ページの配列）を 
     return [x for p in data for x in p if isinstance(x, dict)]
 def registered_thread():
     # 登録ファイルの 1 行目（スレッド ID）。無い・空・通常のファイルでない（symlink・FIFO）ときは ""、ほかの理由で読めないときは None（判定の保留）。
-    # O_NOFOLLOW|O_NONBLOCK と fd での種類・所有者の確認・1 行目の trim は pelway-agent-watch の read_conductor_file と同じ（通常でないファイルを不在・UTF-8 を置き換えて読む点だけ違う）
+    # O_NOFOLLOW|O_NONBLOCK と fd での種類・所有者の確認は pelway-agent-watch の read_conductor_file、1 行目の trim は parse_conductor_file と同じ（通常でないファイルを不在・UTF-8 を置き換えて読む点だけ違う）
     p = sys.argv[5]
     try:
         fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
