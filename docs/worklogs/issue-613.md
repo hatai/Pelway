@@ -83,3 +83,15 @@
 5. 改善案: `scripts/agent-gh` の冒頭のコメントに「git の入口の保証の範囲は、agent-gh に渡す引数と GIT_CONFIG_* の形まで。git が設定から起動するプロセスは対象外」と書き、レビューが範囲外の経路を must-fix にしないで済むようにする。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 8）
+
+対象 head: 73aad7dbe112d0bccf98ff2797e9d418ba834938
+
+1. 詰まった箇所: 手順 9 の 4: これは 3 回目のレビュー結果（head a0fa847、must-fix 1 件）で、skill の決まりでは修正に入らずにエスカレーションする場面だった。指揮役の [conductor-wake] コメント（2026-11-24T03:52Z）と開発リードの依頼が、どちらも修正の round に進むよう明示していたため、その判断に従った。must-fix の経路（`GIT_CONFIG_*` の subsection 形の alias `alias.pull push.command=push` と、引数 `'pull push'`）は、試験で実際に push されることを再現してから直した。
+2. 曖昧だった文: 「3 回目のレビュー結果に must-fix が残っていたら、4 回目の修正には入らず、止まる条件の形でエスカレーションする」（`.agents/skills/implement-issue/SKILL.md` の手順 9）。指揮役がすでに修正の継続を指示しているときにも、この決まりが掛かるのかが書かれていない。
+3. 仮定と解釈: 許可リストの照合は、`qa_check_args` と同じく要素ごとの `==` で完全一致させる。nit は 3 件とも直した。追跡 ref の nit は help と PR 本文の「保証の範囲」に書き、`[文書のずれ]` は docs/dev-environment.md の「レビュー担当の Claude」の表の文を、許可リストの挙動に合わせて書き換えた。
+4. 足りなかった情報・検証手段: レビューが未確認とした、設定のフック（`hook.<名前>.*`。hk が入れる形）が pre-push にある repo でも一時フックが走るかは、試験 `env_block (config-hook)` で確かめた。`mise run verify` は exit 0（script-test: 46 tests ok）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 の 4 に「指揮役が Issue か PR のコメントで修正の継続を明示したときは、その round を進め、経緯を実装者メモに書く」と足す。
+
+使ったスキル: implement-issue
