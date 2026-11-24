@@ -62,7 +62,7 @@ while true; do
   # （python 側で取得失敗と扱い、前回の処理済み ID を保つ）。
   scripts/agent-gh dev api "/repos/hatai/Pelway/issues/events?per_page=100" > "$D/label-events.json" 2>/dev/null || rm -f "$D/label-events.json"
   python3 -I - "$D" "$P" "$IL" "$PL" "$trc" "$T3_BIN" <<'PY'
-import json, sys, time, os, re, subprocess
+import json, sys, time, os, re, stat, subprocess
 from datetime import datetime, timedelta
 d = sys.argv[1]; sp = os.path.join(d, "state.json")
 # スレッド名の形式（skill command-team の「スレッド名」）。指揮役が作ったスレッドだけを見る。
@@ -145,9 +145,17 @@ def env_secs(name, default):  # 間隔の環境変数。数値でなければ設
     except ValueError:
         print(f"WATCHER bad-config {name}={v} default={int(default)}s", flush=True)
         return float(default)
-def safe_to(v):  # watch.log の 1 行に収めるため、宛先はスレッド ID の形（英数字と :._- で 128 文字以内）に限る
+def safe_to(v):  # watch.log の 1 行に収めるため、宛先はスレッド ID の形に限る（conductor-rebuild の valid_id と同じ文字と長さ）
     s = str(v or "")
-    return s if re.fullmatch(r"[A-Za-z0-9:._-]{1,128}", s) else "invalid"
+    return s if re.fullmatch(r"[A-Za-z0-9:_.%-]{1,256}", s) else "invalid"
+PS_MAX = 4194304  # patrol-state.json の読み取り上限（4 MiB）
+def read_ps(path):  # 補助記録は共有 git dir の中。read_request と同じく通常ファイル・待ち・量に限る
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode) or st.st_size > PS_MAX:
+            raise ValueError("not a regular patrol-state file")
+        return f.read()
 # 見張りが動いていることを示す行（Issue #504）。HEARTBEAT_SECS ごとに 1 行。
 # PELWAY_WATCH_HEARTBEAT_SECS で差し替えられる（テスト用）。
 HEARTBEAT_SECS = env_secs("PELWAY_WATCH_HEARTBEAT_SECS", 600)
@@ -165,7 +173,7 @@ PENDING_SENDS_SECS = env_secs("PELWAY_WATCH_PENDING_SENDS_SECS", 1800)
 try:  # 検知の失敗で巡回の後段を止めない（誤検知で止まらない方針と同じ）
     oldest, pend_cnt, pend_to = None, 0, ""
     try:
-        psw = json.load(open(sys.argv[2]))
+        psw = json.loads(read_ps(sys.argv[2]))
         pend_arr = psw.get("pending_thread_sends")
     except Exception:
         pend_arr = None

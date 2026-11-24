@@ -269,8 +269,9 @@ check "9: heartbeat still emitted on the default" has "$ROOT/out.log" "HEARTBEAT
 check "9: stall detection still works on the default threshold" \
   has "$ROOT/out.log" "WATCHER pending-sends-stalled since=20[^ ]* for=1900s count=1 oldest_to=mcp:t0"
 
-# 試験 10: 宛先がスレッド ID の形（英数字と :._- で 128 文字以内）でないときは固定値に
-# 置き換える。改行入りの宛先で watch.log に偽の行を書かせない。
+# 試験 10: 宛先がスレッド ID の形（conductor-rebuild の valid_id と同じ・英数字と :_.%- で
+# 256 文字以内）でないときは固定値に置き換える。改行入りの宛先で watch.log に偽の行を
+# 書かせない。% を含む正規の宛先（委託スレッドの ID）はそのまま出る。
 reset
 pend_to $((T0 - 1900)) $'x\nTHREAD shared-worktree path=/w threads=a,b'
 run_cycles 1
@@ -278,6 +279,11 @@ check "10: invalid to is replaced with a fixed value" \
   has "$ROOT/out.log" "WATCHER pending-sends-stalled since=20[^ ]* for=1900s count=1 oldest_to=invalid"
 check "10: stalled line is still one line" eq "$(count "$ROOT/out.log" 'WATCHER pending-sends-stalled ')" "1"
 check "10: no forged line from the to value" nhas "$ROOT/out.log" "THREAD shared-worktree"
+reset
+pend_to $((T0 - 1900)) 'thread:delegated-task:command%3Amcp%3Aabc123'
+run_cycles 1
+check "10: percent-encoded to is shown as-is" \
+  has "$ROOT/out.log" "WATCHER pending-sends-stalled since=20[^ ]* for=1900s count=1 oldest_to=thread:delegated-task:command%3Amcp%3Aabc123"
 
 # 試験 11: fromisoformat では読めるが地方時では年の範囲を外れる since は、読めないものと
 # 同じく数に入れない。置かれても巡回が止まらず、後段（記録の書き戻し）が動く。
@@ -287,6 +293,32 @@ run_cycles 1
 check "11: no traceback from an out-of-range since" nhas "$ROOT/out.log" "Traceback"
 check "11: out-of-range since is not counted" nhas "$ROOT/out.log" "WATCHER pending-sends"
 check "11: patrol still writes the state back" eq "$(state_has updated_at)" "yes"
+
+# 試験 12: patrol-state.json が通常ファイルでない（symlink）・読み取り上限を超えるときは、
+# 読めないものと同じく滞留を数えず、後段（記録の書き戻し）まで止まらない。
+# （FIFO のような待ちを起こすファイルは、既存の補助記録の読み込み（PS 正の直し側）でも
+# 待つため、ここでは symlink とサイズで確かめる）
+reset
+pend_to $((T0 - 1900)) mcp:t0
+mv "$STATE" "$ROOT/real-state.json" && ln -s "$ROOT/real-state.json" "$STATE"
+run_cycles 1
+check "12: symlinked patrol-state is not read for pending-sends" \
+  nhas "$ROOT/out.log" "WATCHER pending-sends-stalled"
+check "12: patrol still writes the state back over a symlink" eq "$(state_has updated_at)" "yes"
+reset
+pend_to $((T0 - 1900)) mcp:t0
+python3 -I - "$STATE" <<'EOF'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["pad"] = "x" * 5_000_000  # 読み取り上限（4 MiB）を超える有効な JSON にする
+json.dump(d, open(p, "w"), ensure_ascii=False)
+EOF
+run_cycles 1
+check "12: oversized patrol-state is not counted" \
+  nhas "$ROOT/out.log" "WATCHER pending-sends-stalled"
+check "12: patrol still writes the state back over an oversized file" \
+  eq "$(state_has updated_at)" "yes"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
