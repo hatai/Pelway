@@ -60,7 +60,6 @@ check "conductor_thread_id preserved" eq "$(pget conductor_thread_id)" '"mcp:cur
 check "deep merge keeps sibling keys" upd 0 '{"items":{"11":{"work_state":"再開待ち"}}}' --writer-thread mcp:cur
 check "merged items keep main_pr" has <(pget items) '"main_pr"'
 check "merged items add work_state" has <(pget items) '再開待ち'
-
 check "null deletes key" upd 0 '{"items":{"11":{"work_state":null}}}' --writer-thread mcp:cur
 check "work_state deleted" eq "$(python3 -I -c 'import json,sys
 print("work_state" in json.load(open(sys.argv[1]))["items"]["11"])' "$STATE")" "False"
@@ -102,7 +101,6 @@ check "patch deleting thread id refused" upd 3 '{"conductor_thread_id":null,"wat
 check "delete refused keeps thread id" eq "$(pget conductor_thread_id)" '"mcp:cur"'
 check "delete refused keeps offset" eq "$(pget watch_log_offset)" '600'
 check "delete refusal recorded" anoms_has "conductor-id-change-refused"
-
 check "patch emptying thread id refused" upd 3 '{"conductor_thread_id":""}' --writer-thread mcp:cur
 check "patch non-string thread id refused" upd 3 '{"conductor_thread_id":123}' --writer-thread mcp:cur
 check "thread id still registered" eq "$(pget conductor_thread_id)" '"mcp:cur"'
@@ -142,7 +140,6 @@ put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset
 check "watch_log_offset regression refused" upd 3 '{"watch_log_offset":100}' --writer-thread mcp:cur
 check "regression refused keeps value" eq "$(pget watch_log_offset)" '600'
 check "regression refusal recorded" anoms_has "offset-regression-refused"
-
 check "inbox_offset regression refused" upd 3 '{"inbox_offset":10}' --writer-thread mcp:cur
 check "inbox regression refused keeps value" eq "$(pget inbox_offset)" '40'
 
@@ -154,7 +151,6 @@ check "allow flag applies regression" upd 0 '{"inbox_offset":5}' --writer-thread
 check "allowed regression applied" eq "$(pget inbox_offset)" '5'
 check "allowed regression recorded" anoms_has "offset-regression"
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
-
 check "non-integer offset refused" upd 3 '{"watch_log_offset":"abc"}' --writer-thread mcp:cur
 check "bool offset refused" upd 3 '{"watch_log_offset":true}' --writer-thread mcp:cur
 check "negative offset refused" upd 3 '{"watch_log_offset":-1}' --writer-thread mcp:cur
@@ -239,18 +235,15 @@ check "corrupt: non-thread offset write still refused" upd 3 '{"watch_log_offset
 check "corrupt: second offset refusal recorded" anoms_has "offset-unverifiable"
 check "corrupt: patch cannot clear flag" upd 0 '{"needs_conductor_claim":false,"a":1}' --writer conductor-watch
 check "corrupt: flag survives patch" eq "$(pget needs_conductor_claim)" 'true'
-
 put_state '{"broken'
 check "corrupt: offset write by non-thread refused" upd 3 '{"watch_log_offset":100}' --writer conductor-watch
 check "corrupt: offset refusal recorded" anoms_has "offset-unverifiable"
-
 put_state '{"broken'
 check "corrupt: claim recovers" upd 0 '{"scheduled_task_id":"s1"}' --writer-thread mcp:new --claim-conductor
 check "corrupt: claim sets owner" eq "$(pget conductor_thread_id)" '"mcp:new"'
 check "corrupt: claim clears flag" eq "$(pget needs_conductor_claim)" '""'
 check "corrupt: recovery recorded" anoms_has "state-unreadable"
 check "corrupt: claim applies patch" eq "$(pget scheduled_task_id)" '"s1"'
-
 put_state '{"broken'
 check "corrupt: non-offset write by non-thread applies" upd 0 '{"a":2}' --writer conductor-watch
 check "corrupt: non-offset write applied" eq "$(pget a)" '2'
@@ -263,7 +256,6 @@ rm -f "$STATE".unreadable-*
 SECRET_JSON="$ROOT/host-secret.json"
 printf '{"conductor_thread_id":"mcp:host","token":"TOPSECRET"}' > "$SECRET_JSON"
 printf 'TOPSECRET host bytes' > "$ROOT/host-secret.txt"
-
 rm -f "$STATE"
 ln -s "$ROOT/host-secret.txt" "$STATE"
 check "symlink to non-json host file refused" upd 3 '{"a":1}' --writer-thread mcp:cur
@@ -272,14 +264,12 @@ check "symlink: no quarantine copy of target" bash -c '! compgen -G "$1.unreadab
 check "symlink: host bytes not copied into pelway dir" bash -c '! grep -rlq TOPSECRET "$1"' _ "$PDIR"
 check "symlink: target file unchanged" eq "$(cat "$ROOT/host-secret.txt")" 'TOPSECRET host bytes'
 check "symlink: canonical replaced by recovery state" eq "$(pget needs_conductor_claim)" 'true'
-
 rm -f "$STATE"
 ln -s "$SECRET_JSON" "$STATE"
 check "symlink to json object refused" upd 3 '{"a":1}' --writer-thread mcp:cur
 check "symlink-json: target content not adopted as base" bash -c '! grep -q TOPSECRET "$1"' _ "$STATE"
 check "symlink-json: registered id not adopted" eq "$(pget conductor_thread_id)" '""'
 check "symlink-json: link target owner still refused" upd 3 '{"a":2}' --writer-thread mcp:host
-
 rm -f "$STATE" "$STATE".unreadable-*
 mkfifo "$STATE"
 check "fifo state refused without blocking" \

@@ -379,7 +379,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 
 ## 10. 巡回状態の補助記録
 
-状態の正本は GitHub Issues と Projects ボードである。`patrol-state.json` は正本を増やさないための補助記録で、GitHub に対応する置き場が無い情報（誰待ちか・待ち始めた時刻・次の担当）だけを持つ。置き場はリポジトリの共有 git dir（`git rev-parse --path-format=absolute --git-common-dir` が指す `.git`）内の `pelway/patrol-state.json` — 主 checkout と全 worktree で共有される git の管理対象外の場所で、sandbox 内の指揮役からも読み書きできる（Issue #477。旧置き場 `~/.local/state/pelway/patrol-state.json` の中身は conductor-watch.sh が初回起動時に引き継ぐ）。
+状態の正本は GitHub Issues と Projects ボードである。`patrol-state.json` は正本を増やさないための補助記録で、GitHub に対応する置き場が無い情報（誰待ちか・待ち始めた時刻・次の担当）だけを持つ。置き場はリポジトリの共有 git dir（`git rev-parse --path-format=absolute --git-common-dir` が指す `.git`）内の `pelway/patrol-state.json` — 主 checkout と全 worktree で共有される git の管理対象外の場所で、sandbox 内の指揮役からも読み書きできる（Issue #477。旧置き場 `~/.local/state/pelway/patrol-state.json` の中身は、正規パスに通常ファイルが無い起動のたびに conductor-watch.sh が写す（書き込み手順の例外。後述の「書き込み手順」参照））。
 
 トップレベルの項目（書くのは指揮役。巡回スクリプトは `subjects` と `updated_at` だけを書き戻すので、これらは消えない）:
 

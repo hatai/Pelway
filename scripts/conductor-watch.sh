@@ -29,7 +29,8 @@ if [[ -z "$P" ]]; then
 fi
 mkdir -p "$(dirname "$P")"
 # 旧置き場（$XDG_STATE_HOME/pelway/patrol-state.json）が残っていて新置き場が無いときは、
-# 中身をそのまま引き継ぐ（1 回きりの移行。sandbox 内の指揮役は旧置き場に書けない）。
+# 中身をそのまま引き継ぐ（旧ファイルは残るので、正規パスに通常ファイルが無い起動の
+# たびに写し直す。sandbox 内の指揮役は旧置き場に書けない）。
 P_OLD="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/patrol-state.json"
 if [[ "$P" != "$P_OLD" && ! -f "$P" && -f "$P_OLD" ]]; then
   cp "$P_OLD" "$P" || { echo "conductor-watch.sh: patrol-state の移行に失敗しました" >&2; exit 1; }

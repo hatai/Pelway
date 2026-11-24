@@ -60,3 +60,9 @@
 5. 改善案: 旧置き場のファイルを移行後に改名するか消して本当に 1 回きりにする挙動側の直しは、フォロー Issue 候補（レビュー文でも代替案として示されていた）
 
 使ったスキル: implement-issue
+
+## implementer memo — round 6（claude approve の [文書のずれ] nit 対応）
+
+- head: 本コミット（9a030a05 の approve review の印付き nit 1 件への対応）
+- 直し: runbook:382 の「初回起動時に引き継ぐ」と conductor-watch.sh:32 の「1 回きりの移行」を、実際の条件（旧ファイルは残り、正規パスに通常ファイルが無い起動のたびに写し直す）に合わせた。pr-size 対策で試験ファイルの空行を 10 行削った（意味のある行は不変）
+- 結果: mise run verify 実施・pr-size +796/-11
