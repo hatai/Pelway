@@ -119,3 +119,15 @@
 5. 改善案: なし
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 12）
+
+対象 head: 903232f8（main 取り込みのマージコミット）
+
+1. 詰まった箇所: main（Issue #602 の needs-decision 格上げ）が python 引数に `$C`（指揮役スレッド登録ファイル）を足して argv の番号がずれた衝突と、main 側の `iso`・`agent_gh`・`gh_json` とこちらの `stampable`・`deadline_ts`・`env_secs`・`safe_to`・`read_ps` が同じ位置に足された衝突。前者は main 側の引数列を採り、後者は両側を残す union で解消した。verify の初回実行は他セッション由来のディスクフル（/dev/sdd 100%）で clippy・test が `No space left on device` に倒れ、空きが戻ってからの再実行で demo-check の loopback 試験が 1 件タイムアウトした（単独再実行で 138 checks 全緑。いずれも環境起因）
+2. 曖昧だった文: 「`main` を取り込み（merge・rebase 禁止）」（指揮役の修正指示）。字義では取り込み方の両方を禁じるが、implement-issue の「main の取り込みは merge で行い」と本ブランチの既存マージコミット（`f3ef1778`）から、PR の merge と rebase の禁止と解釈した
+3. 仮定と解釈: argv の番号は main の版（argv[5]=`$C`・argv[6]=`$trc`・argv[7]=`$T3_BIN`）に合わせた。main の `iso`（datetime を返す）とこちらの `deadline_ts`（epoch を返す）は別の役割として両方残した
+4. 足りなかった情報・検証手段: なし
+5. 改善案: `.agents/skills/command-team/SKILL.md` の衝突解消の定型指示を「main を merge で取り込んで衝突を解消（rebase・force push はしない）」の形にする（「merge・rebase 禁止」と読める文は取り込みそのものを禁じるように読める）
+
+使ったスキル: implement-issue
