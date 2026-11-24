@@ -47,3 +47,15 @@
 5. 改善案: `push_targets` の頭のコメントに `--no-<名>` と `=<値>` の扱いを書き足した。試験の並びも否定形・値消費・fallback 省略形の順にまとめた。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: 79a746d25bfe92cd91490d2b0e1ad0b5643a728c
+
+1. 詰まった箇所: `--repo` は値を取る形だが round 4 で値を取る一覧に入れ忘れていた。fallback の判定と値の消費は独立なので、fallback を立てる形のうち `--repo` だけは別の枝に分けて値も消費する形にした。
+2. 曖昧だった文: 「`--repo`（`--rep` 省略形を含む）の値を wrapper が読み飛ばさないため、今 round の `--no-` 処理と組み合わさると git と wrapper の dry-run 判定が食い違う」（PR #655 claude r4 レビュー must-fix）
+3. 仮定と解釈: `--repo` の否定形（`--no-repo`）は値を取らず fallback も立てない、`=<値>` の連結形は次の引数を取らないと解釈した（git の parse-options の振る舞いと同じ）。`--repo` の fallback 自体は変えず、値の消費だけを足した。
+4. 足りなかった情報・検証手段: 指摘の 2 コマンド（`-n --repo --no-dry-run --no-all origin feature:agent/X` と `--repo -n origin HEAD:agent/X`）を試験に足し、実装前に `resign targets 'origin/agent/X'`（dry-run なのに resign）と `@{u} lookups 0`（実 push なのに resign 無し）の red を確かめた。
+5. 改善案: `push_targets` の頭のコメントに「`--repo` は値を取る fallback 形」と断りを足す。値を取る形の一覧を試験で固定する（6 個）。
+
+使ったスキル: implement-issue
