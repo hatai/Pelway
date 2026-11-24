@@ -74,7 +74,7 @@
 
 ## 実装者メモ（round 7）
 
-対象 head: <SHA>
+対象 head: f7d204359a642c47a4d4639e5e406b8b8211e155
 
 1. 詰まった箇所: round 6 で `--end-of-options` の一意な省略形（`--en` など）を `push_longopt` で拾う枝を足したが、git は `--end-of-options` を正確形でしか受理しないため、その枝は届かないデッドコードだった。
 2. 曖昧だった文: 「`--en` 等の省略形枝とそのコメントはデッドコード…また memo の『--e は曖昧』も誤り」（PR #655 claude r6 レビュー nit）
