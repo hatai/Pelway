@@ -60,6 +60,9 @@ chmod +x "$ROOT/bin/sleep"
 mock_issues() { printf '%s\n' "$1" > "$MOCK/issues.json"; }
 mock_prs() { printf '%s\n' "$1" > "$MOCK/prs.json"; }
 mock_threads() { printf '%s\n' "${1:-[]}" > "$MOCK/threads.json"; }
+# スレッド一覧の取得は成功（0 本）にしておく。失敗した巡回では conductor が implement・review に
+# 戻らないため（Issue #651）、ここでのラベルと PR からの導出の試験が成り立たない。
+mock_threads
 
 # iss 11 OPEN agent:working needs-human … の形で Issue 1 件の JSON を作る
 iss() {
@@ -70,7 +73,7 @@ print(json.dumps({"number": int(sys.argv[1]), "state": sys.argv[2],
 EOF
 }
 
-jarr() { local IFS=,; printf '[%s]' "$*"; }
+jarr() { local out="" x; for x in "$@"; do out+="${out:+,}$x"; done; printf '[%s]' "$out"; }
 
 # pr 101 OPEN true agent/11-abc "" … の形で PR 1 件の JSON を作る
 # （番号 状態 isDraft ブランチ reviewDecision verify結論: ""|SUCCESS|FAILURE）

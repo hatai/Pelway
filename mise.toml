@@ -272,16 +272,12 @@ printf '%s\\n' "$warn_out" | bash scripts/deny-warn-extract.sh >&2
 description = "PR の差分行数を数え、800 行を超えたら失敗する（linguist-generated とバイナリは除く）"
 run = "bash scripts/pr-size.sh"
 
-# demo-check 一式の shellcheck 検査（Issue #265）。CI のログに実行と成功を出すため、
-# 合格時に 1 行出す（shellcheck 自体は指摘 0 件だと何も出さない）。
+# scripts/ 以下の bash・sh のスクリプト全部の shellcheck 検査（Issue #265・#621）。
+# demo-check 一式（scripts/demo-check/*.sh）は severity 既定、それ以外は --severity=warning。
+# 本体は scripts/shellcheck.sh（検査したファイルの数を合格時に 1 行出す）。
 [tasks.shellcheck]
-description = "shellcheck で demo-check 一式を検査する（指摘 0 件で通る。verify-static に含まれる）"
-run = """
-#!/usr/bin/env bash
-set -euo pipefail
-shellcheck scripts/demo-check/*.sh
-echo "shellcheck: scripts/demo-check/*.sh clean (0 findings)"
-"""
+description = "shellcheck で scripts/ の bash・sh のスクリプト全部を検査する（demo-check 一式は severity 既定、ほかは warning 以上。指摘 0 件で通る。verify-static に含まれる）"
+run = "bash scripts/shellcheck.sh"
 
 [tasks.script-test]
 # テストは scripts/script-test.sh が収集する（scripts/tests/*.test.sh、

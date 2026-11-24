@@ -1,0 +1,23 @@
+=== ok_padded_extra_key
+  {"to": " C社 ご担当者 ", "subject": "納期のご相談", "body": "お世話になっております。", "note": "x"}
+=== broken_code_fence
+```json
+{"to": "CANARY宛先", "subject": "CANARY件名", "body": "CANARY本文"}
+```
+=== broken_prose_before_json
+以下が下書きです。{"to": "CANARY宛先", "subject": "CANARY件名", "body": "CANARY本文"}
+=== broken_truncated
+{"to": "CANARY宛先", "subject": "CANARY件名", "body": "CANARY本文の途中で
+=== broken_missing_subject
+{"to": "CANARY宛先", "body": "CANARY本文"}
+=== broken_blank_body
+{"to": "CANARY宛先", "subject": "CANARY件名", "body": "  \n "}
+=== broken_null_body
+{"to": "CANARY宛先", "subject": "CANARY件名", "body": null}
+=== broken_non_string_to
+{"to": ["CANARY宛先"], "subject": "CANARY件名", "body": "CANARY本文"}
+=== broken_nested
+{"draft": {"to": "CANARY宛先", "subject": "CANARY件名", "body": "CANARY本文"}}
+=== broken_ab_shape
+{"option_a": "CANARY案A", "option_b": "CANARY案B"}
+=== broken_empty
