@@ -49,3 +49,15 @@
 5. 改善案: `.agents/skills/review-pr/SKILL.md` の nit の節に「`[文書のずれ]` の印は、この PR の差分が書き換えた文の中の食い違いに付ける。main 由来でも同じ文の中なら付けてよい」を足す。
 
 使ったスキル: implement-issue、pr-watch
+
+## 実装者メモ（round 6）
+
+対象 head: 414c7e01cee9a7f4b080827ece60176b0e282dce
+
+1. 詰まった箇所: 手順 9「修正依頼」: PR ブランチ `agent/569-inbox-line-reader` が停止した前の実装スレッドの worktree（`t3-d46a015b`）で checkout 済みのまま残っていて、自分の worktree では同名ブランチを checkout できなかった。`merge-569` を `origin/agent/569-inbox-line-reader` から切って進めた。さらに `.git/config` への書き込みが `Device or resource busy`（sandbox が ro-bind）で失敗し、upstream を設定できなかった。resign はブランチを解決できないが、merge コミットは createCommitOnBranch で表現できず、どちらにしても署名なしのままになるので実害は無い。
+2. 曖昧だった文: 「main の取り込みは merge で行い、各 hunk を解消する前に、両側の変更の意図を一次情報（コミット・PR・Issue）まで遡って確かめる」（`.agents/skills/implement-issue/SKILL.md` の手順 9）。`grokbot-runbook.md` の段落は、この PR の threadId 結び付けと main の #651（`WATCHER thread-list-*`）が別の変更として同じ段落を書き換えていた。`waiting-conductor` の文は main の同段落には無く表の行だけにあるが、merge 後のコードはその動作を持つので残した。
+3. 仮定と解釈: 衝突した 2 ファイルはどちらも直交する変更（#569 の受信箱の読み手・#622 の waiting-conductor と、main の #651 スレッド一覧の取得失敗の扱い）が同じ箇所を編集したものと解釈し、両側を残した。落とした側は無い。`scripts/conductor-watch.sh` は main の引数（`$trc`・`$T3_BIN`）とこの PR の `stat` の import を併記した。
+4. 足りなかった情報・検証手段: 停止した実装スレッドの worktree の引き継ぎ方の手順書（Issue #644 が進行中）。`mise run verify` は `.agents/skills/verify-pelway/verify-run.test.sh` の `make_run_dir`・`locks_dir_ready` が 6 件失敗した。sandbox 内の `/tmp` が `65534:1777`（nobody 所有）で、`dir_chain_safe` の「自分か root の持ち物」の条件を満たさないためで、このファイルは merge の両側で同一・機能と無関係。CI では /tmp が root 所有のため通る見込み。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 の「修正依頼」に「前の実装スレッドが停止して PR ブランチがその worktree に checkout されたままのときは、自分の worktree に別名のブランチ（upstream をリモートの PR ブランチに合わせる）を切って merge し、`HEAD:<PR ブランチ>` で push する」を足す。
+
+使ったスキル: implement-issue
