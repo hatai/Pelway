@@ -59,3 +59,15 @@
 5. 改善案: `docs/agents/` か `scripts/agent-gh` の冒頭のコメントに「agent-gh の git の入口は、グローバルオプションも alias も受け付けない。サブコマンドを最初の引数に書く」と、呼び出し側の決まりとして書く。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 6）
+
+対象 head: b7e41321cc123e8e94e323497c95dbc56ea02c0d
+
+1. 詰まった箇所: `scripts/agent-gh` のサブコマンドの判定: round 5 の alias の照会（`git config --get alias.<名前>`）と配管コマンドの拒否リストを、push 後の自動のセキュリティレビューが 2 件指摘した（subsection 形の alias による照会のすり抜けと、rebase -x などの入れ子の push）。試験では、`help.autocorrect=immediate` と打ち間違えた名前（`pushh`）で、実際に push されることを再現した。
+2. 曖昧だった文: 「確認を外す環境変数・引数が無い」（Issue #613 の受け入れ条件）。agent-gh は GH_TOKEN を付けて git を起動するので、git が起動する別プロセス（設定の diff・merge のドライバなど）を経由する経路は、クライアント側では閉じられない。この条件の保証の範囲を「agent-gh に渡す引数と環境変数の形」と読んだ。
+3. 仮定と解釈: サブコマンドは許可リスト（`git_allowed_subcommands`）と完全に一致するものだけを通す。許可リストは、repo 内で使われている add・commit・fetch・ls-remote・merge・merge-base・push・rev-parse・switch に、確認と取り込みに使う読み取り・作業ツリーの操作を足したもの。コマンドを実行するもの（rebase・bisect・submodule など）は入れていない。alias の照会と配管コマンドの拒否リストは不要になったので消した。
+4. 足りなかった情報・検証手段: 環境変数（`GIT_CONFIG_COUNT`・`GIT_CONFIG_PARAMETERS`）と repo の設定で core.hooksPath・include.path を渡す経路は、レビューの文書上の判断だけで、実行して確かめた者がいなかった。試験 `env_block` を足し、どの経路でもフックの確認で止まることを確かめた。`mise run verify` は exit 0（script-test: 46 tests ok）。
+5. 改善案: Issue #613 の範囲の外として、`docs/agents/` に「push の名義の完全な強制は、サーバー側（ruleset か必須チェック）で行う。agent-gh の確認は事故の防止」と書く Issue を起こす。
+
+使ったスキル: implement-issue
