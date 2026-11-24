@@ -205,3 +205,15 @@
 
 使ったスキル: implement-issue
 
+
+## 実装者メモ（round 18）
+
+対象 head: 5b18ce56f79c6d8cc88457f0e3e9f05d35485159
+
+1. 詰まった箇所: CI（test ジョブ）が push_exec_abbrev で FAIL（exit 2・resign targets 空・@{u} lookups 0）。05ddf293 自身の試験は通る。原因は CI が merge ref（05ddf293 + main）で走ること: main の #641（e115201f 系）が足した `push_exec_abbrev`（`push --ex pack origin feature:agent/Z` で resign 目標を確かめる試験）が、merge 結果の試験ファイルに残っていた。`--ex` は `--exec` の一意な省略形で、この PR が加えた転送コマンドの拒否が push_targets より前に exit 2 で止めるため、#641 当時の通過期待と衝突した。
+2. 曖昧だった文: 「値を別の引数で取る長いオプションの省略形は、次の引数を値として消費する（remote と取り違えない）」。
+3. 仮定と解釈: `--ex` の試験が本来確かめたい「別引数の値を消費する省略形」の網羅は `--push-o`・`--recu` が担っているため、push_exec_abbrev は「--exec の省略形も拒否される」を確かめる試験に置き換えた（値の消費より拒否が先、という二機能の交点をその場所で固定する）。9d203e2d→05ddf293（コメント圧縮）由来の不具合ではなく、fail-closed 化の退行でもないことを、merge 済みツリーでの再現（同じ 3 件の FAIL）で確かめた。
+4. 足りなかった情報・検証手段: ブランチの試験ファイルに push_exec_abbrev が無いため、ブランチ上で `bash scripts/tests/agent-gh.test.sh` しても再現しない。再現には main の merge が要る。CI の job ログは `scripts/agent-gh dev api repos/hatai/Pelway/actions/jobs/<id>/logs --allow-escape-sequences` で取れた。`mise run verify` は round 9〜17 と同じくこの sandbox では完走しない（mbx の gc が稼働中の target dir を回収し、dep-info 欠落で cargo が失敗）。agent-gh.test.sh・agent-gh-resign.test.sh・scripts/shellcheck.sh は通る。
+5. 改善案: CI を merge ref で走るリポジトリでは、「自分のブランチの試験ファイルに無い試験名」が CI で落ちたら、先に origin/main 側の同名試験を疑う。両側が同じファイルに試験を足す形は、マージ時の意味衝突の温床（試験名を grep しただけでは発見できない）。
+
+使ったスキル: implement-issue
