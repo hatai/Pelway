@@ -67,7 +67,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - Devin CLI に割り当てた Issue には `agent:devin` ラベルを付け、GitHub 上で担当が見えるようにする（`agent:working` と同じタイミングで付け外し。一覧は `docs/agents/triage-labels.md`）
 - SWE-2 は Devin CLI のプランの無料枠で使う。プランの無料モードの同時セッション上限（現在 2 本）は Devin Cloud のセッションの制限で、Devin CLI 経由のスレッドには適用されない。無料枠を超える利用が必要になったら、有料枠の追加か上限の見直しを改善ループで判断する
 - Issue の書き方（タイトル、本文の見出し、受け入れ条件、分割、`ready-for-agent` の前のゲート、差し戻されたときの直し方）は skill `write-issue` に置く。`.github/ISSUE_TEMPLATE/agent-task.yml` はその写しで、空の Issue は作れない（`blank_issues_enabled: false`）
-- 指揮役が渡すプロンプトは Issue 番号と使う skill 名だけにする。作業ルールは AGENTS.md と skill に置く。例外として、スレッドを立てる指示には担当・モデル・effort を示す定型の割り当ての行を入れ、実装担当は PR 本文に `Implementer:`、レビュー担当はレビュー本文に `Reviewer:` の定型の行で写す（書式は skill `command-team`）
+- 指揮役が渡すプロンプトは Issue 番号と使う skill 名だけにする。作業ルールは AGENTS.md と skill に置く。例外として、スレッドを立てる指示には担当・モデル・effort を示す定型の割り当ての行を入れ、実装担当は PR 本文に `Implementer:`、レビュー担当はレビュー本文に `Reviewer:` の定型の行で写す（書式は skill `command-team`）。Issue 番号も PR 番号も持たない定期作業のスレッド（棚卸し担当）の起動指示は、従う節を名指す定型の文にする（形は runbook「棚卸し担当を立てる」が正本）
 - 指揮役が T3 で立てるスレッドには、必ず「役割・対象の番号・日本語の要約」を含むタイトル（例 `[実装] #101 …`、`[レビュー] PR #132 …`）を立てるときに付ける。タイトルが形式に合わないまま作業を始めさせない。形式と直し方は skill `command-team` の「スレッド名」
 - 実装とレビューのモデル・effort は、pr-size の行数、変更パス、ラベル、修正の回数で振り分ける。しきい値は skill `command-team` に置き、改善ループで調整する。レビューの振り分け（通常・高リスク・抜き取りの条件と effort）は、実装担当がレビュー委託のときに同じ表で適用する
 - 指揮役が T3 のスレッドとして動いているとき、作業をさせるスレッド（実装・調査・レビュー）の作成はネイティブの `t3_thread_launch` で行う（T3 Connect の MCP や CLI のサブプロセスを経由しない）。指揮役が Grok Bot（クラウド）のときは T3 Connect の MCP の同じ操作を使う。実行中のスレッドへの指示送信（`t3_thread_send`）はこの限りではない

@@ -4,24 +4,51 @@ skill `command-team` から、特定の条件でだけ必要になる詳細を�
 
 ## 週次: 長命 PR の棚卸し
 
-読む条件: 棚卸し担当のスレッドが週次の棚卸しを行うとき。実行者は棚卸し担当（週 1 回、指揮役の巡回では行わない。立て方は `docs/agents/grokbot-runbook.md` の「4. 仕事の始め方」）。
+読む条件: 棚卸し担当のスレッドが週次の棚卸しを行うとき。実行者は棚卸し担当（週 1 回、指揮役の巡回では行わない。立てるのは指揮役。立て方は `docs/agents/grokbot-runbook.md` の「4. 仕事の始め方」）。
 
-開いている PR の棚卸しをする。前回の実施日は巡回記録で確かめる。
+開いている PR の棚卸しをする。前回の実施日は、main に載った前回の報告（`docs/worklogs/*-inventory.md` とその報告 PR）で確かめる。
 
-- 判定には GitHub の `updated_at`（`scripts/agent-gh dev pr list --json number,updatedAt,state`）と巡回記録を並べて使う。GitHub 側だけ見ると、指揮役が待たせる理由を決めている PR を「進展が無い」と誤認し、巡回記録側だけ見るとコミットやレビューの動きを書き漏らすためである。
+- 判定には GitHub の `updated_at`（`scripts/agent-gh dev pr list --json number,updatedAt,state`）と巡回記録を並べて使う。GitHub 側だけ見ると、指揮役が待たせる理由を決めている PR を「進展が無い」と誤認し、巡回記録側だけ見るとコミットやレビューの動きを書き漏らすためである。巡回記録は指揮役の worktree にあり未コミットのことがあるため、main に載った分だけを読む
 - 「進展」は次のいずれか。進展が一定期間（目安 7 日）無い PR を棚卸しの対象にする。
   - コミットの追加
   - レビューの投稿（Approve・Request changes）
   - レビューコメント
   - CI 状態の変化（`updated_at` に現れないことがあるので `scripts/agent-gh dev pr list` の `statusCheckRollup` で確かめる）
   - 巡回記録への状態注記（待たせる理由や期限を指揮役が書いたとき。注記した日を進展と数える）
-- 対象にした PR ごとに、判断期限（次の週次の棚卸しまで）付きで「残す」「作り直す」「閉じる」のどれかの判断案を決め、判断案と期限を巡回記録の「判断の記録」に書く。棚卸し担当が行うのは提案までで、ラベル・マージ・スレッドへの指示はしない。
+- 対象にした PR ごとに、判断期限（次の週次の棚卸しまで）付きで「残す」「作り直す」「閉じる」のどれかの判断案を決め、判断案と期限を `docs/worklogs/<日付>-inventory.md` に書き、報告 PR で指揮役に渡す（下の「成果の出し方」）。棚卸し担当が行うのは提案までで、ラベル・マージ・スレッドへの指示はしない。
   - 残す: 理由（例: 依存する PR のマージ待ち）と次の判断期限を注記する
   - 作り直す: 実装担当に新しいブランチ・PR で作り直させる
   - 閉じる: PR を閉じて Issue を `ready-for-human` か `wontfix` で整理する（`docs/agents/triage-labels.md`）
-  - 「作り直す」「閉じる」の操作は棚卸し担当も行わず、人間に依頼する（PR に依頼のコメントを書き、部屋で人間に知らせる。PR のクローズは指揮役の「しないこと」（runbook 1）にあり、棚卸し担当も同じ扱いとする）
-- 判断期限を過ぎても判断が残っている PR は、次回の棚卸しで人間に知らせる。
+  - 「作り直す」「閉じる」の操作は棚卸し担当も行わず、人間に依頼する（PR に依頼のコメントを書く。人間への知らせは棚卸し担当には経路が無いため、報告を受けた指揮役が部屋で行う。PR のクローズは指揮役の「しないこと」（runbook 1）にあり、棚卸し担当も同じ扱いとする）
+- 判断期限を過ぎても判断が残っている PR は、報告の期限切れの一覧に書く。指揮役が受け取り、`docs/agents/grokbot-runbook.md` の「7. エスカレーションと停滞」に回す（次回の棚卸しを待たない）。
 - 7 日という期間は目安であり、運用実績で見直す。
+
+### 成果の出し方
+
+棚卸し担当は main から作った自分の worktree でしか書き込めず、指揮役の作業ログ（巡回記録）には書けない。成果は次の 2 ファイルに書き、それだけを含む報告用 Draft PR で指揮役に渡す。
+
+- `docs/worklogs/<日付>-inventory.md`: 対象にした PR ごとの判断案・理由・判断期限、期限切れの判断の一覧
+- `docs/worklogs/<日付>-curation.md`: 定期キュレーションの候補リスト（`docs/agents/grokbot-runbook.md` の「12. 作業ログの定期キュレーション」の出力）
+
+1. 起動時に `--branch` で指定されたブランチに 2 ファイルをコミットし、報告用 Draft PR を作る（`scripts/agent-gh dev pr create --draft`。本文に割り当ての行を `Implementer:` の行として写す）
+2. 実装スレッドと同じ流れでレビューを回す（skill `implement-issue` の手順 8〜9。委託記録コメント・`[文書のずれ]` の nit の扱い・Approve の確認も同じ）
+3. Approve されたら Draft を解除し（`scripts/agent-gh dev pr ready`）、終わりの報告を出す。報告は指揮役の巡回と `finished` の通知で拾われる
+
+終わりの報告の形（実装スレッドの状態の行と同じ規則。巡回はこの行だけを読む）:
+
+```
+inventory: done（棚卸し対象 <n> 件、うち期限切れ <m> 件・キュレーション候補 <k> 件）
+pr: <報告 PR の URL>（head <SHA>）
+ready: done
+state: done
+```
+
+止まったときは次の形。止まる条件は skill `implement-issue` に準じるが、Issue が無いのでコメントの代わりに返答に理由を書く（`needs-human` は指揮役が巡回で付ける）:
+
+```
+inventory: stopped <止まった理由 1 行>
+state: stopped
+```
 
 ## 外部からのレビュースレッド投入
 
@@ -100,8 +127,8 @@ hatai の指摘の伝達:
 
 ### 開始のチェック
 
-1. `docs/agents/conductor-context.md` の「恒久交代」の「立て替える前の確認」を済ませた
-2. Grok Bot が動かないことを人間が確かめ、代行を頼んだ
+1. Grok Bot が動かないことを人間が確かめ、代行を頼んだ
+2. `docs/agents/conductor-context.md` の「恒久交代」の「立て替える前の確認」を、代行の開始の側の扱いで済ませた
 3. T3 のスレッドとして動くなら `t3_thread_launch` で作業スレッドを、それ以外なら T3 Connect の MCP につながる（レビューの権限 `auto-accept-edits` を指定してスレッドを立てるために必要）
 4. `scripts/conductor-watch-ensure.sh` を実行した
 5. 引き継ぐ状態を読んだ: `agent:working` の Issue、Draft・レビュー待ちの PR、実行中のスレッド、`needs-human` の Issue、指揮役の作業ログ

@@ -256,17 +256,32 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 ### 棚卸し担当を立てる
 
-週次の棚卸し（`docs/agents/command-team-details.md` の「週次: 長命 PR の棚卸し」）と作業ログの定期キュレーション（下の「12. 作業ログの定期キュレーション」）は、指揮役の巡回から外し、週 1 回、指揮役とは別の「棚卸し担当」スレッドが行う。棚卸し担当が行うのは提案まで（巡回記録への判断案と期限の記入、`docs/worklogs/<日付>-curation.md` の候補リスト）で、ラベル・マージ・スレッドへの指示はしない。
+週次の棚卸し（`docs/agents/command-team-details.md` の「週次: 長命 PR の棚卸し」）と作業ログの定期キュレーション（下の「12. 作業ログの定期キュレーション」）は、指揮役の巡回から外し、週 1 回、指揮役とは別の「棚卸し担当」スレッドが行う。棚卸し担当が行うのは提案まで（判断案と期限、キュレーションの候補リスト）で、ラベル・マージ・スレッドへの指示はしない。
+
+立てるのは指揮役。前回の棚卸し（棚卸し担当の前回の起動。割り当ての記録と前回の報告 PR で確かめる）から 7 日以上経った巡回で立てる。同時数と順番待ちの枠では数えない（Issue を持たず `agent:devin` も付かない）。
 
 ```
-t3 thread start --provider acpRegistry_devin --model swe-2-high --worktree main --title "[棚卸し] <日付>" <Pelway のパス> "週次の棚卸しを行う。長命 PR の棚卸しは docs/agents/command-team-details.md の「週次: 長命 PR の棚卸し」に、作業ログの定期キュレーションは docs/agents/grokbot-runbook.md の「12. 作業ログの定期キュレーション」に従う。
+t3 thread start --provider acpRegistry_devin --model swe-2-high --worktree main --branch agent/inventory-<日付> --title "[棚卸し] <日付>" <Pelway のパス> "週次の棚卸しと作業ログの定期キュレーションを行う。docs/agents/command-team-details.md の「週次: 長命 PR の棚卸し」（成果の出し方を含む）と docs/agents/grokbot-runbook.md の「12. 作業ログの定期キュレーション」に従う。
 Assigned: role=inventory agent=devin model=swe-2-high effort=high"
 ```
 
 - provider・モデル: Devin CLI（`acpRegistry_devin`、`swe-2-high`）を既定とする
-- 権限（`runtimeMode`）: `full-access` にしない。権限を指定できる経路（T3 Connect の MCP・`t3_thread_launch`）では `auto-accept-edits` で立てる。Devin CLI のスレッドは権限を指定できず sandbox の権限モード（Autonomous）で動くため `full-access` にはならない（「レビューを始める」の Devin CLI と同じ扱い）
-- worktree は必ず `main` から作る
+- 権限（`runtimeMode`）: `full-access` にしない。Devin CLI（`acpRegistry_devin`）で立てるときは「実装を始める」と同じ扱い: `devin-impl` の起動ラッパーがスレッドを bwrap の sandbox に入れ（書き込みは worktree などに限られ、ネットワークは開放。`docs/dev-environment.md` の「実装担当の sandbox」。T3 の実スレッドでの確認は未実施）、`runtimeMode` の指定は要らない。`mode` は `smart` までに限り、`bypass` は使わない（正本は `docs/superpowers/specs/agent-team.md` の「制約」）。Devin 以外の provider に替えるときは、`t3 thread start` ではなく権限を指定できる経路（T3 Connect の MCP・`t3_thread_launch`）で `auto-accept-edits` を指定して立てる（`t3 thread start` には権限のフラグが無く、本体のプロジェクトの既定が `full-access` のことがある。「レビューを始める」と同じ決まり）。`auto-accept-edits` で立てられないときも `auto`・`full-access` に変えず、立てずに 7 のエスカレーションにする
+- worktree は必ず `main` から作る。ブランチは `agent/inventory-<日付>` にする（巡回はブランチでの識別を正として実装・調査の列で扱う）
 - スレッド名: 「[棚卸し] <日付>」（「スレッド名」の形式の「その他」に当たる）
+
+成果の受け渡しと巡回での扱い:
+
+棚卸し担当は自分の worktree でしか書き込めず（`docs/dev-environment.md` の「実装担当の sandbox」）、指揮役の作業ログ（巡回記録）にも「部屋」（人間と指揮役の会話）にも届かない。成果は報告用 Draft PR で指揮役に渡し、巡回記録への転記と人間への連絡は指揮役が担う（棚卸し担当が書く手順と報告の形は `docs/agents/command-team-details.md` の「週次: 長命 PR の棚卸し」の「成果の出し方」）。
+
+- 巡回で棚卸し担当のスレッドを、実装・調査と同じ状態の行の分類で扱う（`agent/` のブランチで点検対象になり、最後の返答の `state:` の行で分類する）。`state:` の行が無ければ実装スレッドと同じく「続きをやり直す」を送る
+- `state: done` なら（`finished` の通知でも同じ）、指揮役は報告 PR を読んで次を行う:
+  1. 判断案と期限を巡回記録の「判断の記録」に写す（棚卸し担当の提案と明記する）
+  2. 「作り直す」「閉じる」の提案と期限切れの項目を部屋で人間に知らせる（人間が PR を名指して応えたら `docs/agents/human-actions.md` H26 の条件に従う）
+  3. 判断期限を過ぎて残っている判断は、次の棚卸しを待たず、その PR に `needs-human` を付けて 7 のエスカレーションに回す
+  4. 報告 PR は調査の報告 PR と同じ扱いで、レビューを経てマージする（記録が main に残る）。レビューの委託と Draft の解除は棚卸し担当が行い、`automerge` は指揮役が「マージ」の条件で付ける
+- `state: stopped` なら判断待ちに回し、部屋で人間に知らせる
+- settle は 9 の「片付け」の条件 1 に従う（紐づいた報告 PR がマージ済みかクローズ済みで、動いている作業が無いとき。PR を紐付けていればマージで自動 settle される）
 
 ## 5. イベントごとの対応
 
@@ -386,7 +401,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
   3. レビューの子タスクで、次のラウンドの委託に置き換わったか、結果を読み終えたもの
   4. 調査スレッドで、報告の PR がマージ済みのもの
 - `needs-human` の付いたもの、止まっているもの、迷走中のものは、上に当たっても settle せず、巡回の報告の「判断待ち」に回す
-- 棚卸しでするのは settle だけ。スレッド・worktree・ブランチの削除、アーカイブ、中断、再開はしない
+- 棚卸し担当はスレッドに触れない（settle・スレッド・worktree・ブランチの削除、アーカイブ、中断、再開のいずれも行わない。棚卸し担当の成果は提案まで）。終わったスレッドの settle は指揮役が毎回の巡回で行う
 - worktree は pitchfork のデーモン `agent-worktree-prune` が毎時消す（settle されたスレッドの（またはスレッドの無い）worktree のうち、main に取り込み済みかマージ済み・クローズ済みの PR のものだけ。未追跡のファイルは捨て、追跡ファイルに変更が残るもの、生きているプロセスのカレントディレクトリが中にあるもの、最後の変更から 6 時間以内のものは残す）。settle しないと worktree は残るので、終わったスレッドは上のとおり settle する。残ったものは人間が `mise run agent-worktree-prune` で整理する
 - マージ後の Issue と PR はボードの組み込みワークフローが Done にする
 
@@ -501,4 +516,4 @@ Grok Bot が動かない（レート制限、障害）とき、人間が別の�
   2. 正本（AGENTS.md、スキル、runbook）の記述と実際の運用がずれている箇所はないか
   3. 長期間動いていない待ちや、引き継ぎで落ちたままの項目はないか
 - 出力: `docs/worklogs/<日付>-curation.md` に候補リストを残す。候補には根拠となる worklog への参照を付ける。候補が無い場合はその旨を残す
-- 後続: 候補のうち正本の変更が要るものは Issue 化を人間に提案する。キュレーション自体は正本を編集しない
+- 後続: 候補リストは棚卸しの報告 PR に載せて指揮役に渡す（「4. 仕事の始め方」の「棚卸し担当を立てる」の「成果の受け渡し」）。候補のうち正本の変更が要るものは、指揮役が Issue 化を人間に提案する。キュレーション自体は正本を編集しない
