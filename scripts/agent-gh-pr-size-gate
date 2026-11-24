@@ -15,6 +15,9 @@ set -euo pipefail
 # 一時ファイル（pr-size.sh の mktemp など）は一時フックの dir（絶対パス・agent-gh が終了時に消す）に作る。
 # 呼び出し元の TMPDIR が相対パスだと、worktree のルートで動くフックからは別の場所を指すため
 export TMPDIR="$PELWAY_AGENT_HOOKS_DIR"
+# 測定（pr-size.sh の git diff など）で refs/replace の置き換えを使わない。Git は転送では置き換えを使わず
+# 本体を送るため、置き換えを読むと、小さいコミットに見せ替えた上限超えのコミットを測らずに通してしまう
+export GIT_NO_REPLACE_OBJECTS=1
 url="${2:-}"
 pr_size="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pr-size.sh"
 

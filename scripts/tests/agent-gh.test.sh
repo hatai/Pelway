@@ -1164,6 +1164,11 @@ for global in "-C $GATE_DIR/work" "-c push.default=current"; do
   [[ "$RC" == 2 && -z "$(gate_ref refs/heads/agent/642-x)" ]] ||
     failures+=("gate_global (${global%% *}): exit $RC (want 2), remote $(gate_ref refs/heads/agent/642-x): $ERR")
 done
+# refs/replace で上限超えのコミットを小さいコミット（small）に見せ替えても、Git が送る本体（+810）を測って止める
+gate_git replace "$(gate_git rev-parse agent/642-x)" "$(gate_git rev-parse small)"
+gate_run gate_replace push origin HEAD
+gate_blocked gate_replace refs/heads/agent/642-x
+gate_git replace -d "$(gate_git rev-parse agent/642-x)" >/dev/null
 
 # 2. 例外があれば通す: 接続先のリポジトリの開いた PR の pr-size-exception ラベル + PR が閉じる Issue の hatai の目印コメント。
 #    Issue はリポジトリ付きの参照（url）で取り、別リポジトリの Issue もその参照で取る
