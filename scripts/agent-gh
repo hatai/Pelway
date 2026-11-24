@@ -340,8 +340,12 @@ push_targets() {
   # オプションでの指定がなければ設定を見る。Git は push.recurseSubmodules と submodule.recurse を
   # 読み、後に読んだ設定を使うため、両方のキーを設定ファイルの順序で見て最後のものを採用する。
   # submodule.recurse は真偽値で only を取り得ない。only（サブモジュールだけを送る）は親リポジトリの
-  # ref を更新しないため resign を呼ばない
-  ((!submod_seen)) && [[ "$(git config --get-regexp '^(push\.recursesubmodules|submodule\.recurse)$' 2>/dev/null | tail -n 1)" == "push.recursesubmodules only" ]] && submod_only=1
+  # ref を更新しないため resign を呼ばない。
+  # GIT_CONFIG は照会の子プロセスから除く: git config はこの変数があればそのファイルだけを読むが、
+  # git push は変数を見ずに通常の設定を読むため、そのままでは判定が push の実態と食い違う。
+  # GIT_CONFIG_PARAMETERS / GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM / GIT_CONFIG_NOSYSTEM は push でも
+  # 同じように効くため残す
+  ((!submod_seen)) && [[ "$(env -u GIT_CONFIG git config --get-regexp '^(push\.recursesubmodules|submodule\.recurse)$' 2>/dev/null | tail -n 1)" == "push.recursesubmodules only" ]] && submod_only=1
   ((delete || submod_only)) && { push_fallback=0; return 0; }
   ((push_fallback)) && return 0
   if ((${#positional[@]} < 2)); then

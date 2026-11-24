@@ -104,10 +104,18 @@ cat >"$BIN/git" <<'EOF'
 [[ "$*" != *symbolic-ref* || -z "${FAKE_GIT_HEAD:-}" ]] || printf '%s\n' "$FAKE_GIT_HEAD"
 # FAKE_GIT_RECURSE があれば、config --get-regexp（push.recurseSubmodules / submodule.recurse）にその値を返す（#641）。
 # 旧形の config --get push.recurseSubmodules にも、その中の push.recursesubmodules の最後の値を返す。
-if [[ "$*" == "config --get push.recurseSubmodules" && -n "${FAKE_GIT_RECURSE:-}" ]]; then
+# GIT_CONFIG があると git config はそのファイルだけを読むため、そのときは FAKE_GIT_CONFIG_RECURSE を返す
+# （push は GIT_CONFIG を見ずに通常の設定を読む。実装側の判定が同じ設定を読むことを確かめる）。
+if [[ "$*" == "config --get push.recurseSubmodules" && -n "${FAKE_GIT_RECURSE:-}" && -z "${GIT_CONFIG:-}" ]]; then
   printf '%s\n' "$FAKE_GIT_RECURSE" | sed -n 's|^push\.recursesubmodules ||p' | tail -n 1
 fi
-[[ "$*" != config\ --get-regexp* || -z "${FAKE_GIT_RECURSE:-}" ]] || printf '%s\n' "$FAKE_GIT_RECURSE"
+if [[ "$*" == config\ --get-regexp* ]]; then
+  if [[ -n "${GIT_CONFIG:-}" ]]; then
+    [[ -z "${FAKE_GIT_CONFIG_RECURSE:-}" ]] || printf '%s\n' "$FAKE_GIT_CONFIG_RECURSE"
+  else
+    [[ -z "${FAKE_GIT_RECURSE:-}" ]] || printf '%s\n' "$FAKE_GIT_RECURSE"
+  fi
+fi
 EOF
 
 # 偽の mktemp: 本物に委譤し、作成したパスを種別（f=ファイル、d=ディレクトリ）とともに記録する
@@ -443,7 +451,17 @@ export FAKE_GIT_RECURSE='submodule.recurse true
 push.recursesubmodules only'
 push_run push_submod_config_last_only origin a:agent/X
 expect_push_targets push_submod_config_last_only "" 0
+# GIT_CONFIG が別のファイルを指していても、判定は push が読む通常の設定で行う（#641 r11）。
+# 通常の設定が only（GIT_CONFIG 側には only が無い）なら親を送っていないため resign を呼ばない
+export FAKE_GIT_RECURSE='push.recursesubmodules only'
+GIT_CONFIG="$ROOT/gitconfig-elsewhere" push_run push_submod_gitconfig_ignored origin a:agent/X
+expect_push_targets push_submod_gitconfig_ignored "" 0
+# 逆に GIT_CONFIG 側のファイルにだけ only があっても、push は通常の設定で親を送るため resign を呼ぶ
 unset FAKE_GIT_RECURSE
+GIT_CONFIG="$ROOT/gitconfig-elsewhere" FAKE_GIT_CONFIG_RECURSE='push.recursesubmodules only' \
+  push_run push_submod_gitconfig_only origin a:agent/X
+expect_push_targets push_submod_gitconfig_only "origin/agent/X" 0
+unset FAKE_GIT_CONFIG_RECURSE GIT_CONFIG
 push_run push_mirror_abbrev --mi origin
 expect_push_targets push_mirror_abbrev "" 1
 push_run push_tags_abbrev --ta origin v1
