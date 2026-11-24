@@ -47,3 +47,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」に「レビュー結果の回数の数え方（何を 1 回と数えるか、approve のみの wave を含めるか）」を明記する。hk の stash 残骸が次のコミットで警告になる場合の対処（中身が HEAD と同じなら `git update-ref -d refs/hk/stash/<sha>` と `hk-pending-stash` の削除で消せる）を `.agents/skills/` か `docs/agents/` に書く
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: f3ef17787eafd0bc5b0047c3b3fea4f9f2f4c04b（修正 9515708c + main merge）
+
+1. 詰まった箇所: 4 回目のレビュー結果に must-fix が残ったため round 4 と同じ「止まる条件」で Issue を解放した直後、開発リードの直接指示（濱田さん 2026-11-21、t629u）で「レビューのラウンド上限は無視し、must-fix が無くなるまで続ける」が明示され再着手した。また push 前に PR #664（thread-list 失敗検知）が main に入り、`conductor-watch.sh`（検知ブロックの並び）と runbook（同じ段落）で衝突。両方 union で解消したが、衝突解消の編集で自分側ブロックを複写してしまい重複の除去が必要だった（マーカー残骸も 1 行残っていた）
+2. 曖昧だった文: 「止まる条件」の回数上限（SKILL.md）。round 4・5 で同じ場所に 2 連続で止まり、どちらも上からの上書き指示で戻った
+3. 仮定と解釈: must-fix の直し方のうち「変換失敗で巡回ごとに死ぬ」への対応は、検知ブロック全体を try/except で包み `WATCHER pending-sends-error <TypeName>` を出す形にした（HEARTBEAT が出続ける silent な死亡を、行を出す側に倒す）。「読めない since は数に入れない」は既存方針と同じく、`stamp()` に通らない `since`（例: `0001-01-01T00:00:00+23:59` は fromisoformat は通るが fromtimestamp で落ちる）も同じ扱いに揃えた。Codex は usage limit のため遅延タスクでの再委託とした
+4. 足りなかった情報・検証手段: main への他 PR マージのタイミングを早く知る手段（merge 時点で初めて衝突に気づく）。`ps.get("subjects")` の非 object クラッシュ（レビュー指摘の out-of-scope、既存バグ）は本 PR では触らず別 Issue 起票候補
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」に「開発リードが回数上限を上書きした旨の指示が来たときは上書きに従う」を明記する（round 4・5 の 2 回とも実際に起きた）。`conductor-watch.sh` の `ps.get("subjects")` に object 確かめを入れる件は別 Issue にする
+
+使ったスキル: implement-issue
