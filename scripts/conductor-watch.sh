@@ -51,7 +51,8 @@ if [[ -z "$T3_BIN" ]]; then
   done
 fi
 while true; do
-  "$T3_BIN" thread list --json > "$D/threads.json" 2>/dev/null || true
+  # threads.json は python 側で取得の成功を確かめてから差し替える（失敗で前回の一覧を消さない）
+  "$T3_BIN" thread list --json > "$D/threads.json.new" 2> "$D/threads.err"; trc=$?
   # GitHub からの取得に失敗したらファイルを消す（空の実状態と区別する。python 側で取得失敗と扱い、
   # 巡回状態の記録を書き換えさせない）。
   scripts/agent-gh dev issue list --state all --limit "$IL" --json number,state,labels > "$D/issues.json" 2>/dev/null || rm -f "$D/issues.json"
@@ -60,7 +61,7 @@ while true; do
   # （runbook の「1. 役割と触ってよい範囲」）に使う。取得に失敗したらファイルを消す
   # （python 側で取得失敗と扱い、前回の処理済み ID を保つ）。
   scripts/agent-gh dev api "/repos/hatai/Pelway/issues/events?per_page=100" > "$D/label-events.json" 2>/dev/null || rm -f "$D/label-events.json"
-  python3 -I - "$D" "$P" "$IL" "$PL" <<'PY'
+  python3 -I - "$D" "$P" "$IL" "$PL" "$trc" "$T3_BIN" <<'PY'
 import json, sys, time, os, re, subprocess
 from datetime import datetime, timedelta
 d = sys.argv[1]; sp = os.path.join(d, "state.json")
@@ -74,7 +75,9 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
        "label_seen": [] if prev is None else prev.get("label_seen", []),
        "due_warned": {} if prev is None else prev.get("due_warned", {}),
        "stall_notified": {} if prev is None else prev.get("stall_notified", {}),
-       "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0)}
+       "shared_notified": {} if prev is None else prev.get("shared_notified", {}),
+       "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0),
+       "thread_list": None if prev is None else prev.get("thread_list")}
 # ラベル操作の裏付け検査（Issue #405、2026-11-17 の要件変更）。actor だけでは判定しない
 # （エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai に
 # なることがあるため）。needs-human の解除と automerge の付け外しを、イベント時刻の前
@@ -84,23 +87,70 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
 # （runbook の「指揮役の定期巡回（スケジュール起床）」）。
 LABEL_BACKUP_HOURS = 24
 LABEL_BACKING_AUTHOR = "hatai"
-try: threads = json.load(open(os.path.join(d, "threads.json")))
-except Exception: threads = []
+# t3 thread list の取得の判定（Issue #651）。終了コードが 0 で、標準出力が JSON の配列で、
+# 各要素がスレッドの形（後の処理が読むフィールドの型を持つ dict）のときだけ成功とし、
+# threads.json を差し替える。失敗した巡回は空の一覧として扱い、スレッドに基づく判定
+# （THREAD 行・停滞・止まり）をしない。失敗の理由は stderr の空白だけの行を除いた最初の行、無ければ失敗の種類。
+def fetch_threads(rc):
+    try: out = open(os.path.join(d, "threads.json.new"), "rb").read()
+    except Exception: out = b""
+    try: err = next((l.strip() for l in open(os.path.join(d, "threads.err"), errors="replace") if l.strip()), "")
+    except Exception: err = ""
+    if rc != 0: kind = f"exit={rc}"
+    elif not out.strip(): kind = "empty"
+    else:
+        # Python の json は JSON 外のリテラル NaN・Infinity・-Infinity も読む。保存する
+        # 一覧の形式としては受け付けないため、読み取りで例外にして失敗側に回す。
+        def reject_const(s): raise ValueError(s)
+        try: v = json.loads(out, parse_constant=reject_const)
+        except Exception: v = None
+        # 一覧でも要素がスレッドの形でないものは失敗と同じ扱い。後の処理は "threadId" への
+        # 直接アクセス・"title" のスライスと正規表現・"updatedAt" の比較をするため、型が
+        # 壊れた一覧を成功として保存すると、スナップショットを差し替えたあと python が
+        # 落ちて WATCHER 行も出ずに巡回が止まる。欠落や null のフィールドは後の処理が
+        # 空文字・None として扱うので許容する（表示側は "title" を or "" で正規化する）。
+        def ok_thread(t):
+            return isinstance(t, dict) and isinstance(t.get("threadId"), str) \
+                and all(t.get(k) is None or isinstance(t.get(k), str) for k in ("title", "updatedAt", "status"))
+        if isinstance(v, list) and all(ok_thread(t) for t in v): return v, None
+        kind = "invalid-json"
+    return [], err[:120] or kind
+threads, thread_err = fetch_threads(int(sys.argv[5]))
+if thread_err is None: os.replace(os.path.join(d, "threads.json.new"), os.path.join(d, "threads.json"))
 try: issues = json.load(open(os.path.join(d, "issues.json")))
 except Exception: issues = None
 try: prs = json.load(open(os.path.join(d, "prs.json"))); prs_ok = True
 except Exception: prs = []; prs_ok = False
-now = time.time()
+# 巡回の時刻。PELWAY_WATCH_NOW が指すファイルに epoch 秒が書かれていればそれを使う（テスト用）。
+try: now = float(open(os.environ["PELWAY_WATCH_NOW"]).read().strip())
+except Exception: now = time.time()
+def stamp(ts): return datetime.fromtimestamp(ts).isoformat(timespec="seconds")
 # 見張りが動いていることを示す行（Issue #504）。HEARTBEAT_SECS ごとに 1 行。
-HEARTBEAT_SECS = 600
+# PELWAY_WATCH_HEARTBEAT_SECS で差し替えられる（テスト用）。
+HEARTBEAT_SECS = float(os.environ.get("PELWAY_WATCH_HEARTBEAT_SECS") or 600)
 if now - (cur["heartbeat_at"] or 0) >= HEARTBEAT_SECS:
-    print(f"HEARTBEAT at={datetime.fromtimestamp(now).isoformat(timespec='seconds')}", flush=True)
+    print(f"HEARTBEAT at={stamp(now)}", flush=True)
     cur["heartbeat_at"] = now
+# スレッド一覧の取得の状態は ok（thread_list が None）か failing の 2 つ。failing の間は
+# 失敗の始まりから HEARTBEAT_SECS ごとに知らせ直す（HEARTBEAT の行とは別に数える）。
+tl = cur["thread_list"]
+if thread_err is None:
+    if tl: print(f"WATCHER thread-list-recovered since={stamp(tl['fail_since'])} after={int(now - tl['fail_since'])}s", flush=True)
+    tl = None
+elif tl is None:
+    tl = {"fail_since": now, "notified_at": now, "reason": thread_err}
+    print(f"WATCHER thread-list-failed since={stamp(now)} reason={thread_err}", flush=True)
+else:
+    tl["reason"] = thread_err
+    if now - tl["notified_at"] >= HEARTBEAT_SECS:
+        tl["notified_at"] = now
+        print(f"WATCHER thread-list-still-failing since={stamp(tl['fail_since'])} for={int(now - tl['fail_since'])}s reason={thread_err}", flush=True)
+cur["thread_list"] = tl
 for t in threads:
     tid, s = t["threadId"], t.get("status")
     cur["threads"][tid] = s
     if prev is not None and prev["threads"].get(tid) != s:
-        print(f"THREAD {s} {tid} prev={prev['threads'].get(tid)} {t.get('title','')[:40]}", flush=True)
+        print(f"THREAD {s} {tid} prev={prev['threads'].get(tid)} {(t.get('title') or '')[:40]}", flush=True)
     title = t.get("title") or ""
     # 古い終わったスレッドは数えない（次に操作するときに直す）。動いているものと新しく現れたものだけを見る。
     active = s in ("running", "starting", "preparing") or (prev is not None and tid not in prev["threads"])
@@ -119,7 +169,7 @@ for t in threads:
             cur["since"][tid] = {"items": ic, "at": now, "warned": False}
         elif now - last["at"] > 2700 and not last.get("warned"):
             last["warned"] = True
-            print(f"THREAD stalled-45m {tid} {t.get('title','')[:40]}", flush=True)
+            print(f"THREAD stalled-45m {tid} {(t.get('title') or '')[:40]}", flush=True)
     else:
         cur["since"].pop(tid, None)
 for pr in prs:
@@ -187,9 +237,54 @@ if levs is not None:
     else:
         done.update(e.get("id") for e in levs if isinstance(e, dict))
     cur["label_seen"] = [e.get("id") for e in levs if isinstance(e, dict) and e.get("id") in done]
+# 作業ツリーの共有（Issue #643）: settle されていないトップレベルのスレッドの worktreePath を
+# t3 thread show で 1 本 1 回ずつ集め、2 本以上が同じパスなら THREAD shared-worktree の行を出す。
+# 同じ組み合わせ（パスとスレッドの集合）は続く間 1 回だけ出す。通知済みの記録は stall_notified と
+# 同じ JSON オブジェクトで、パス → 組み合わせ（昇順の threadId をカンマでつないだ文字列）ごとの記録。
+# 失敗するスレッドが巡回ごとに入れ替わると同じパスに複数の組み合わせが並存しうるため、組み合わせごとに
+# 記録する。show が失敗したスレッドはこの巡回で数えない。既出の組み合わせに失敗したスレッドが含まれ、
+# 残りのスレッドが同じパスにいると確かめられたときだけ記録を保つ（失敗の巡回で再通知しない）。
+# 残りのどれかが一覧から消えた・別のパスに移ったと確かめられたら、共有の解消として記録を消す。
+# 一覧の取得に失敗した巡回は記録を保ち、正常に空の一覧は共有の解消として記録を消す。
+if thread_err is None:
+    by_path, failed = {}, set()
+    for t in threads:
+        if t.get("settled") or t.get("parentThreadId"): continue
+        tid = t.get("threadId")
+        try:
+            r = subprocess.run([sys.argv[6], "thread", "show", tid, "--json"],
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=60)
+            wp = json.loads(r.stdout)["thread"].get("worktreePath") if r.returncode == 0 else None
+            if r.returncode != 0: failed.add(tid)
+        except Exception:
+            failed.add(tid); wp = None
+        if isinstance(wp, str) and wp:
+            by_path.setdefault(wp, []).append(tid)
+    old = {}
+    for wp, combs in (cur["shared_notified"] if isinstance(cur["shared_notified"], dict) else {}).items():
+        if isinstance(combs, str): combs = {combs: 1}  # 旧形式（パス → 組み合わせ）を読み替える
+        if isinstance(combs, dict): old[wp] = combs
+    keep = {}
+    for wp, combs in old.items():
+        for v in combs:
+            ids = set(str(v).split(","))
+            if ids & failed and all(i in failed or i in by_path.get(wp, []) for i in ids):
+                keep.setdefault(wp, {})[v] = 1
+    notified = {}
+    for wp, tids in sorted(by_path.items()):
+        if len(tids) < 2: continue
+        v = ",".join(sorted(tids))
+        if any(set(tids) <= set(k.split(",")) for k in keep.get(wp, {})): continue  # 失敗分が欠けただけ
+        if v not in old.get(wp, {}):
+            print(f"THREAD shared-worktree path={wp} threads={v}", flush=True)
+        notified.setdefault(wp, {})[v] = 1
+    cur["shared_notified"] = {wp: {**keep.get(wp, {}), **notified.get(wp, {})}
+                            for wp in set(keep) | set(notified)}
 # 読み取りに失敗して空になったときは、前回の状態を残す（全スレッドを「新規」と誤報しない）。
 if prev is not None and not threads: cur["threads"] = prev["threads"]
 if prev is not None and not prs: cur["prs"] = prev["prs"]
+# 状態は GitHub の取得結果にかかわらず毎巡回ここで保存する。取得失敗・上限到達で下の
+# 巡回状態ブロックが動かない回でも thread_list・heartbeat_at を残し、通知が繰り返されないようにする。
 json.dump(cur, open(sp, "w"))
 # 巡回状態の補助記録（patrol-state.json）。対象は Issue 番号ごと。正本は GitHub Issues と
 # Projects で、ここには GitHub に載らない情報（誰待ちか・待ち始めた時刻・次の担当・次回確認時刻）だけを置く。
@@ -282,6 +377,10 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
         # （needs-human は上で human に決まっていて、ここでは変えない）。
         if won != "human" and old.get("waiting_on") == "grokbot" and old.get("labels") == lab_key:
             won, owner = "grokbot", "grokbot"
+        # スレッド一覧が取れない間は止まりが続いているかを確かめられないため、conductor を
+        # implement・review に戻さない（止まりで conductor にした対象を見失わない）。
+        if cur["thread_list"] and won in ("implement", "review") and old.get("waiting_on") == "conductor":
+            won, owner = "conductor", "conductor"
         # 実装スレッドが止まっていて、状態の行が working か無ければ、指揮役の判断待ちにする。
         # 書き換えてよいのは implement / review から conductor への向きだけ。
         early = False
