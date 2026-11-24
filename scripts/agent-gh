@@ -278,8 +278,10 @@ push_targets() {
     case "$a" in
       --) positional+=("$@"); break ;;
       -o | --push-option | --receive-pack | --exec) shift ;;
-      -d | --delete) delete=1 ;;
-      -n | --dry-run) push_dry_run=1 ;;
+      # 長いオプションは一意に特定できる接頭辞で省略できる（--de は --delete、--dr は --dry-run。
+      # --d は --delete と --dry-run で曖昧になり git が拒否するため、ここには届かない）
+      -d | --de | --del | --dele | --delet | --delete) delete=1 ;;
+      -n | --dr | --dry | --dry- | --dry-r | --dry-ru | --dry-run) push_dry_run=1 ;;
       --all | --branches | --mirror | --tags | --prune | --repo | --repo=*) push_fallback=1 ;;
       -[!-]*)
         # まとめ書きの短いオプションを 1 文字ずつ見る（-fn の dry-run、-fd の削除）。

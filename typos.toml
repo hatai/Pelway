@@ -35,3 +35,5 @@ canva = "canva"
 ba = "ba"
 # POSIX の基本正規表現（Basic Regular Expressions）の略号（docs/worklogs/issue-220.md）。
 bre = "bre"
+# git push の --delete の一意な接頭辞省略形（scripts/agent-gh の push_targets）。
+delet = "delet"

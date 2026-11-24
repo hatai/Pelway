@@ -360,9 +360,20 @@ push_run push_dry_run_short -n origin feature:agent/N
 expect_push_targets push_dry_run_short "" 0
 push_run push_dry_run_bundle -fn origin feature:agent/N
 expect_push_targets push_dry_run_bundle "" 0
+# Git は一意に特定できる接頭辞の長いオプション省略形を受理する（--dry、--dr も試行になる。
+# --d は --delete と曖昧で git が拒否するため push_targets には届かない）
+push_run push_dry_run_abbrev_dr --dr origin feature:agent/N
+expect_push_targets push_dry_run_abbrev_dr "" 0
+push_run push_dry_run_abbrev_dry --dry origin feature:agent/N
+expect_push_targets push_dry_run_abbrev_dry "" 0
+push_run push_dry_run_abbrev_dry_ru --dry-ru origin feature:agent/N
+expect_push_targets push_dry_run_abbrev_dry_ru "" 0
 # まとめ書きの削除（-fd）でも resign を呼ばない
 push_run push_delete_bundle -fd origin agent/X
 expect_push_targets push_delete_bundle "" 0
+# --delete の一意な省略形も削除
+push_run push_delete_abbrev --del origin agent/X
+expect_push_targets push_delete_abbrev "" 0
 # まとめ書きの末尾が -o のとき、次の引数はその値（remote と取り違えない）。
 # -f + -o のまとめ書きはスペルチェッカの誤検出になるため -u + -o（-uo）で確かめる
 push_run push_bundle_option_tail -uo ci.skip origin feature:agent/Z
