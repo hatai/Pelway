@@ -542,8 +542,7 @@ while IFS=$'\t' read -r kind mp; do
   fi
 done <"$MKTEMP_LOG"
 
-# --- push するコミットの名義の確認（#613）---
-# 本物の git とローカルの bare remote で、pre-push フックによる名義の確認を確かめる。
+# --- push するコミットの名義の確認（#613）。本物の git とローカルの bare remote で確かめる ---
 # 利用者の git 設定（署名・フック）に左右されないよう、この節では global / system の設定を読ませない。
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 RGBIN="$ROOT/realgit-bin"
@@ -557,9 +556,8 @@ as() {
   GIT_AUTHOR_NAME="$who" GIT_AUTHOR_EMAIL="$who@example.com" GIT_COMMITTER_NAME="$who" GIT_COMMITTER_EMAIL="$who@example.com" \
     "$REAL_GIT" -c commit.gpgsign=false "$@"
 }
-# setup_push_repo <name>: remote.git（bare）と、それを clone した work を作る。
-# main には hatai のコミットと、kodiakhq[bot]（committer は GitHub）のマージコミットを置く。
-# work では agent/<name> ブランチを main から切る。PUSH_DIR に置き場所を入れる。
+# setup_push_repo <name>: remote.git（bare）と、それを clone した work を作り、PUSH_DIR に置き場所を入れる。
+# main には hatai のコミットと kodiakhq[bot]（committer は GitHub）のマージコミットを置き、work では agent/<name> ブランチを切る。
 setup_push_repo() {
   PUSH_DIR="$ROOT/push-$1"
   mkdir -p "$PUSH_DIR"
@@ -589,8 +587,7 @@ push_run() {
 remote_ref() { "$REAL_GIT" --git-dir="$PUSH_DIR/remote.git" rev-parse -q --verify "refs/heads/$1"; }
 work_git() { "$REAL_GIT" -C "$PUSH_DIR/work" "$@"; }
 
-# 1. 範囲は「push する ref から辿れて origin の追跡 ref から辿れないコミット」。main から取り込んだ
-#    hatai のコミットと、remote に既にある kodiakhq[bot] のマージコミットがあっても push は通る。
+# 1. 範囲は「push する ref から辿れて origin の追跡 ref から辿れないコミット」。main から取り込んだ hatai のコミットと remote に既にある kodiakhq[bot] のマージコミットがあっても push は通る。
 setup_push_repo author_range
 (cd "$PUSH_DIR/work" && as 'pelway-dev[bot]' commit -q --allow-empty -m a1)
 (cd "$PUSH_DIR/seed" && as hatai commit -q --allow-empty -m main2 && "$REAL_GIT" push -q "$PUSH_DIR/remote.git" main)
@@ -600,8 +597,7 @@ PELWAY_AGENT_SKIP_RESIGN=1 push_run author_range dev git push -u origin HEAD
 [[ "$RC" == 0 ]] || failures+=("author_range: exit $RC, want 0: $OUT")
 [[ "$(remote_ref agent/author_range)" == "$(work_git rev-parse HEAD)" ]] || failures+=("author_range: remote ref not updated")
 
-# 2・3. hatai 名義のコミット（author と committer の両方、または committer だけ）を含む push は止まる。
-#       remote の ref は変わらず、標準エラーに短い sha・名義・作り直しの案内が出る。
+# 2・3. hatai 名義のコミット（author と committer の両方、または片方だけ）を含む push は止まる。remote の ref は変わらず、標準エラーに短い sha・名義・作り直しの案内が出る。
 setup_push_repo author_block
 (cd "$PUSH_DIR/work" && as 'pelway-dev[bot]' commit -q --allow-empty -m ok)
 PELWAY_AGENT_SKIP_RESIGN=1 push_run author_block_setup dev git push -u origin HEAD
@@ -634,8 +630,7 @@ push_run author_only_block dev git push
 [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("author_only_block: remote ref changed")
 [[ "$OUT" == *"$bad_sha"* && "$OUT" == *"author=hatai"* ]] || failures+=("author_only_block: stderr lacks sha/author: $OUT")
 
-# 5. 確認を外す環境変数・引数は無い: PELWAY_AGENT_SKIP_RESIGN=1・--no-verify（その省略形）・
-#    core.hooksPath の上書きのどれでも push されない。
+# 5. 確認を外す環境変数・引数は無い: PELWAY_AGENT_SKIP_RESIGN=1・--no-verify（その省略形）・core.hooksPath の上書きのどれでも push されない。
 PELWAY_AGENT_SKIP_RESIGN=1 push_run skip_resign_still_checks dev git push
 [[ "$RC" != 0 ]] || failures+=("skip_resign_still_checks: exit 0, want non-zero")
 [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("skip_resign_still_checks: remote ref changed")
@@ -647,8 +642,7 @@ for bypass in "push --no-verify" "push --no-verif origin HEAD" "-c core.hooksPat
   [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("no_bypass ($bypass): remote ref changed")
 done
 
-# -c と設定値を連結した形（-ccore.hooksPath=...）も、git の版に頼らず agent-gh が終了コード 2 で拒否する
-# （git 2.56 は連結形を unknown option の 129 で拒むが、受け付ける版ではフックを外す引数になる）。
+# -c と設定値を連結した形（-ccore.hooksPath=...）も agent-gh が終了コード 2 で拒否する（git 2.56 は連結形を unknown option の 129 で拒むが、受け付ける版ではフックを外す引数になる）。
 for attached in "-ccore.hooksPath=/dev/null" "-cCORE.HOOKSPATH=/dev/null"; do
   push_run attached_c dev git "$attached" push origin HEAD
   [[ "$RC" == 2 ]] || failures+=("attached_c ($attached): exit $RC, want 2: $OUT")
@@ -657,10 +651,7 @@ for attached in "-ccore.hooksPath=/dev/null" "-cCORE.HOOKSPATH=/dev/null"; do
 done
 
 # 名前や設定の読み込み先を変えてフックを外す経路も、agent-gh が終了コード 2 で拒否し、remote は変わらない:
-# - グローバルオプションの -c include.path / -c includeIf.<条件>.path（読み込んだ設定の core.hooksPath を効かせる）
-# - グローバルオプションの -c alias.<x>=push、-c 'alias.<x>=!git push'（サブコマンドの名前を変える）
-# - repo の設定に置いた alias（push と、! で始まるシェルの alias）
-# - pre-push フックを通らない配管コマンド（send-pack）
+# -c include.path / includeIf.<条件>.path（読み込んだ設定の core.hooksPath を効かせる）・-c alias.<x>=push と '!git push' 形（サブコマンドの名前を変える）・repo の設定に置いた alias・pre-push フックを通らない配管コマンド（send-pack）
 printf '[core]\n\thooksPath = /dev/null\n' >"$PUSH_DIR/nohook.cfg"
 expect_rejected() {
   local label="$1"
@@ -686,8 +677,7 @@ expect_rejected unknown-name p origin HEAD
 work_git config help.autocorrect immediate
 expect_rejected autocorrect pushh origin HEAD
 expect_rejected glob-question 'pu?h' origin HEAD
-# 許可リストの名前を空白でつないだ 1 つの引数は、部分一致では通ってしまう。空白を含む subsection 形の alias
-# （環境変数でも repo の設定でも置ける）で push になるため、完全一致で拒否する。
+# 許可リストの名前を空白でつないだ 1 つの引数は、部分一致では通ってしまう。空白を含む subsection 形の alias（環境変数でも repo の設定でも置ける）で push になるため、完全一致で拒否する。
 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0='alias.pull push.command' GIT_CONFIG_VALUE_0=push \
   expect_rejected joined-env-alias 'pull push' origin HEAD
 work_git config 'alias.pull push.command' push
@@ -721,10 +711,7 @@ expect_rejected bundle-attached-then-blocked push -of "--exec=touch $ran; false"
 # （`git push -o -- --no-verify` は git 側でも --no-verify が効く）
 expect_rejected ddash-value-transport push -o -- "--receive-pack=touch $ran; false" origin HEAD
 expect_rejected ddash-value-no-verify push -o -- --no-verify origin HEAD
-# -o 以外の値を取るオプション（--jobs・-o の省略形 --push-opt など）の値は、検査の単純さのため
-# 意図的に区別しない（git は値として読むが、誤って値と見なしても拒否側に倒れるだけなので一律に走査する）。
-# それらの値が `--`・-o・ls-remote の位置引数に見えるときも同じ
-# （`push --repo -- --no-verify` では `--` が --repo の値で --no-verify は効く）
+# -o 以外の値を取るオプション（--jobs・-o の省略形 --push-opt など）の値は区別せず一律に走査する（git は値として読むが、誤って値と見なしても拒否側に倒れる）。それらの値が `--`・-o・ls-remote の位置引数に見えるときも同じ（`push --repo -- --no-verify` では `--` が --repo の値で --no-verify は効く）
 expect_rejected value-jobs fetch --jobs --exec origin
 expect_rejected value-push-option-abbrev push --push-opt --exec origin HEAD
 expect_rejected marker-repo-ddash push --repo -- --no-verify origin HEAD
@@ -736,8 +723,7 @@ expect_rejected marker-sort ls-remote --sort refname "--upload-pack=touch $ran; 
 expect_rejected ddash-refspec-fetch fetch origin -- "--upload-pack=touch $ran; false"
 expect_rejected ddash-refspec-push push origin -- --exec
 # pull・push は `--` の後ろを `--` なしで子の git（pull は fetch、push はサブモジュールの push）に渡し、
-# 子はオプションとして解釈する（実測: `git pull -- . --upload-pack=<cmd>` は <cmd> を実行する）ため、
-# pull・push では `--` を終端にせず末尾まで走査する
+# 子はオプションとして解釈する（実測: `git pull -- . --upload-pack=<cmd>` は <cmd> を実行する）ため、`--` を終端にせず末尾まで走査する
 expect_rejected ddash-pull pull -- . "--upload-pack=touch $ran; false"
 expect_rejected ddash-pull-after-o pull -o x -- "--receive-pack=touch $ran; false"
 expect_rejected ddash-repo push -- "--receive-pack=touch $ran; false"
@@ -745,8 +731,7 @@ expect_rejected ddash-after-o push -o x -- --exec
 expect_rejected ddash-submodule push --recurse-submodules=on-demand -- origin --no-verify
 [[ ! -e "$ran" ]] || failures+=("transport options: a command ran")
 
-# 値として消費される引数・参照パターン・確かな `--` の後ろの位置引数は、git がオプションとして解釈しないため
-# 通す。agent-gh が終了コード 2 を返さないことと、コマンドが実行されないことを確かめる
+# 値として消費される引数・参照パターン・確かな `--` の後ろの位置引数は、git がオプションとして解釈しないため通す。agent-gh が終了コード 2 を返さないことと、コマンドが実行されないことを確かめる
 expect_not_rejected() {
   local label="$1"
   shift
@@ -755,8 +740,7 @@ expect_not_rejected() {
   [[ "$RC" != 2 ]] || failures+=("not_rejected ($label): exit $RC, want != 2: $OUT")
   [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("not_rejected ($label): remote ref changed")
 }
-# -o（push の --push-option・fetch・pull・ls-remote の --server-option）の値はオプションとして解釈されない
-# （-o の値は remote が受け付けず git が失敗するが、agent-gh の拒否ではない）
+# -o（push の --push-option・fetch・pull・ls-remote の --server-option）の値はオプションとして解釈されない（-o の値は remote が受け付けず git が失敗するが、agent-gh の拒否ではない）
 expect_not_rejected value-o-exec push -o --exec origin HEAD
 expect_not_rejected value-o-no-verify push -o --no-verify origin HEAD
 expect_not_rejected value-o-attached push -o--exec origin HEAD
@@ -768,14 +752,12 @@ expect_not_rejected pattern-upload-pack ls-remote origin "--upload-pack=x"
 expect_not_rejected pattern-server-opt ls-remote -o --exec origin
 # `=` 付きのオプションは値を自身で持つため、後ろの位置引数や `--` の扱いに影響しない
 expect_not_rejected pattern-sort-eq ls-remote --sort=refname origin --exec
-# fetch・ls-remote では clean な `--` の後ろは refspec・参照パターンで、オプションとしては解釈されない
-# （`--upload-pack` が refspec・パターン扱いで git が失敗するのは、agent-gh の拒否ではない）
+# fetch・ls-remote では clean な `--` の後ろは refspec・参照パターンで、オプションとしては解釈されない（`--upload-pack` が refspec・パターン扱いで git が失敗するのは、agent-gh の拒否ではない）
 expect_not_rejected ddash-fetch fetch -- "--upload-pack=touch $ran; false" origin
 expect_not_rejected ddash-ls-remote ls-remote -o x -- --exec
 [[ ! -e "$ran" ]] || failures+=("transport passthrough: a command ran")
 
-# 検査対象外のサブコマンドでは、`--` の後ろに転送オプションと同じ名前のファイルがあっても通す
-# （`git add -- --exec` のようなパスの指定を拒否しない）。
+# 検査対象外のサブコマンドでは、`--` の後ろに転送オプションと同じ名前のファイルがあっても通す（`git add -- --exec` のようなパスの指定を拒否しない）。
 (cd "$PUSH_DIR/work" && touch -- --exec --upload-pack --receive-pack)
 push_run pathspec_add dev git add -- --exec --upload-pack --receive-pack
 [[ "$RC" == 0 ]] || failures+=("pathspec_add: exit $RC, want 0: $OUT")
@@ -788,8 +770,7 @@ done
 work_git reset -q
 (cd "$PUSH_DIR/work" && rm -f -- --exec --upload-pack --receive-pack)
 
-# 許可リストの名前は、どれも git の組み込みのサブコマンドである（git の alias は組み込みを上書きできないため、
-# 同じ名前の alias を設定に置いても alias は使われない）。
+# 許可リストの名前は、どれも git の組み込みのサブコマンドである（git の alias は組み込みを上書きできないため、同じ名前の alias を設定に置いても使われない）。
 git_allowed_subcommands=()
 eval "$(grep '^git_allowed_subcommands=' "$SCRIPT")"
 ((${#git_allowed_subcommands[@]})) || failures+=("allowlist: git_allowed_subcommands not found in agent-gh")
@@ -797,8 +778,7 @@ builtins="$("$REAL_GIT" --list-cmds=builtins)"
 for c in "${git_allowed_subcommands[@]}"; do
   grep -qxF -- "$c" <<<"$builtins" || failures+=("allowlist: $c is not a git builtin")
 done
-# 転送のオプションの検査は fetch・pull・push・ls-remote にだけ掛ける。それ以外の許可名が同じオプションを
-# 解釈するなら検査の漏れになるため、-h の出力にそれらが無いことを確かめる
+# 転送のオプションの検査は fetch・pull・push・ls-remote にだけ掛ける。それ以外の許可名が同じオプションを解釈するなら検査の漏れになるため、-h の出力にそれらが無いことを確かめる
 for c in "${git_allowed_subcommands[@]}"; do
   case "$c" in fetch|pull|push|ls-remote) continue ;; esac
   if "$REAL_GIT" "$c" -h 2>&1 | grep -qE -- '--(upload-pack|receive-pack|exec)( |,|=|\[|$)'; then
@@ -811,8 +791,7 @@ push_run alias_shadow dev git status
 [[ ! -e "$PUSH_DIR/work/alias-ran" ]] || failures+=("alias_shadow: alias for a builtin ran")
 work_git config --unset alias.status
 
-# 呼び出し元の環境変数（GIT_CONFIG_COUNT・GIT_CONFIG_PARAMETERS）と repo の設定で core.hooksPath・include.path を
-# 渡しても、一時フックの確認で止まり、remote は変わらない（agent-gh の -c が後で効く）。
+# 呼び出し元の環境変数（GIT_CONFIG_COUNT・GIT_CONFIG_PARAMETERS）と repo の設定で core.hooksPath・include.path を渡しても、一時フックの確認で止まり、remote は変わらない（agent-gh の -c が後で効く）。
 expect_hook_block() {
   local label="$1"
   shift
@@ -839,9 +818,7 @@ expect_hook_block config-hook X=1
 work_git config --unset hook.other.event
 work_git config --unset hook.other.command
 
-# 名義の確認を通った push では、core.hooksPath が指す既存の pre-push を続けて呼ぶ。パスにタブを含んでも
-# 値全体を保って読む（git config のスコープと値の区切りはタブのため、タブ区切りで読むとパスの後ろが落ちて
-# 別の場所を見に行き、元フックの拒否をすり抜ける）。拒否を返すフックが呼ばれ、remote の ref は変わらない。
+# 名義の確認を通った push では、core.hooksPath が指す既存の pre-push を続けて呼ぶ。パスにタブを含んでも値全体を保って読む（git config のスコープと値の区切りはタブのため、タブ区切りで読むとパスの後ろが落ちて別の場所を見に行き、元フックの拒否をすり抜ける）。拒否を返すフックが呼ばれ、remote の ref は変わらない。
 work_git reset -q --hard "$before"
 (cd "$PUSH_DIR/work" && as 'pelway-dev[bot]' commit -q --allow-empty -m orig-hook)
 tabhookdir="$PUSH_DIR/hooks$(printf 'with\ttab')"
@@ -856,9 +833,7 @@ work_git config --unset core.hooksPath
 [[ -e "$PUSH_DIR/orighook-called" ]] || failures+=("orighook_tab: original pre-push not called")
 [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("orighook_tab: remote ref changed")
 
-# core.hooksPath の読み取り自体に失敗するとき（存在しないユーザの `~` を含む値は --type=path の展開で
-# 失敗する。フック内では agent-gh の -c が command スコープで効くため、git log 等は動くが全値を
-# 展開する --get-all --type=path は失敗する）は、既存のフックを確認できないまま push しない
+# core.hooksPath の読み取り自体に失敗するとき（存在しないユーザの `~` を含む値は --type=path の展開で失敗する。フック内では agent-gh の -c が command スコープで効くため git log 等は動くが、全値を展開する --get-all --type=path は失敗する）は、既存のフックを確認できないまま push しない
 work_git config core.hooksPath '~agent-gh-no-such-user/hooks'
 OUT="$(cd "$PUSH_DIR/work" && PATH="$RGBIN:$PATH" bash "$SCRIPT" dev git push origin HEAD 2>&1)"
 RC=$?
@@ -867,11 +842,7 @@ work_git config --unset-all core.hooksPath 2>/dev/null || sed -i '/hooksPath/d' 
 [[ "$OUT" == *"core.hooksPath の読み取りに失敗"* ]] || failures+=("cfg_read_fail: not stopped by the read failure: $OUT")
 [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("cfg_read_fail: remote ref changed")
 
-# core.hooksPath の照会先を GIT_CONFIG で別ファイルに固定された環境では、フック内の照会はその
-# ファイルだけを読む（agent-gh が -c で渡した一時フック設定も照会の結果には出ない）。終了コード 1 を
-# 「キー無し＝既定の場所」と読む旧来の判定では、この照会で command スコープの値に一時フックの dir が
-# 無いとき（rc 0 で返ってきても）既存のフックを見逃したまま push してしまう。照会結果の不整合も
-# fail closed で止め、既存の拒否フックの置き場所が GIT_CONFIG の側にあっても remote の ref は変わらない。
+# core.hooksPath の照会先を GIT_CONFIG で別ファイルに固定された環境では、フック内の照会はそのファイルだけを読む（agent-gh が -c で渡した一時フック設定も照会の結果には出ない）。終了コード 1 を「キー無し＝既定の場所」と読む旧来の判定では、この照会で command スコープの値に一時フックの dir が無いとき既存のフックを見逃したまま push してしまう。照会結果の不整合も fail closed で止め、既存の拒否フックの置き場所が GIT_CONFIG の側にあっても remote の ref は変わらない。
 deny_hooks="$PUSH_DIR/deny-hooks"
 mkdir -p "$deny_hooks"
 printf '#!/usr/bin/env bash\nexit 1\n' >"$deny_hooks/pre-push"
@@ -885,11 +856,7 @@ RC=$?
 [[ "$OUT" == *"一時フックの設定を確認できない"* ]] || failures+=("cfg_env_override: not stopped by the scope check: $OUT")
 [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("cfg_env_override: remote ref changed")
 
-# TMPDIR が相対パスだと mktemp は呼び出しの cwd 基準の相対パスを返すが、git は core.hooksPath の
-# 相対パスを worktree ルート基準で解決する。サブディレクトリからの呼び出しでは基準がずれて一時
-# フックを見つけられず、名義の確認なしに push が通る（実測: 存在しない core.hooksPath は git が
-# 「フックなし」として扱い、push を失敗させない）。絶対パスへの解決で、サブディレクトリからでも
-# 名義の確認が効き、正しい名義の push は通る。
+# TMPDIR が相対パスだと mktemp は呼び出しの cwd 基準の相対パスを返すが、git は core.hooksPath の相対パスを worktree ルート基準で解決する。サブディレクトリからの呼び出しでは基準がずれて一時フックを見つけられず、名義の確認なしに push が通る（実測: 存在しない core.hooksPath は git が「フックなし」として扱い、push を失敗させない）。絶対パスへの解決で、サブディレクトリからでも名義の確認が効き、正しい名義の push は通る。
 mkdir -p "$PUSH_DIR/work/sub/dir/rel-tmp"
 work_git reset -q --hard "$before"
 (cd "$PUSH_DIR/work" && as hatai commit -q --allow-empty -m bad-subdir)
