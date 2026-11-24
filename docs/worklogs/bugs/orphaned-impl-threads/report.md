@@ -131,7 +131,7 @@ T3 プラットフォーム側の send 障害そのもの（MCP の send ルー�
 | 項目 | 状態（報告の更新時点・2026-11-25） |
 |---|---|
 | 修正案 1（thread list 失敗の WATCHER 行） | Issue #651 起票・PR #664 で実装済み（PR #664 は 2026-11-24 22:38 JST に main マージ・`e7dfbd2d`）。本番デーモンへの配備は未実施と読める — 巡回状態 `state.json` に `heartbeat_at` キーが無く、動作中の見張りは #562（HEARTBEAT 導入）前の版のまま（6 節・2026-11-25 実測） |
-| 修正案 2（pending_thread_sends 滞留の検知） | Issue #669 に引き継ぎ → PR #680 で実装中（2026-11-23 起・OPEN。Issue に `agent:working`） |
+| 修正案 2（pending_thread_sends 滞留の検知） | Issue #669 に引き継ぎ → PR #680 で実装済み（PR #680 は 2026-11-25 06:21 JST に main マージ・`0c6a50d`・Issue #669 はマージで連鎖 close。配備は 1 と同じく未実施と読める） |
 | 修正案 3（列挙失敗の回帰試験） | PR #664 の `scripts/tests/conductor-watch-thread-list-fail.test.sh` で実装済み（main マージ済み・配備は 1 と同じく未実施と読める） |
 | 3.3（スレッド別・次の連絡帳簿） | Issue #670 に引き継ぎ → PR #679 で実装中（2026-11-23 起・OPEN。Issue に `agent:working`・`needs-human`） |
 | 3.4（patrol-state.json 競合・巻き戻り保護） | Issue #671 に引き継ぎ → PR #678 で実装中（2026-11-23 起・OPEN。Issue に `agent:devin`・`needs-human`） |
