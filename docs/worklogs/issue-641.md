@@ -11,3 +11,15 @@
 5. 改善案: `scripts/tests/agent-gh-resign.test.sh` の冒頭のコメントに「`scripts/agent-gh` を通す試験は偽の fnox と `gh token generate` の応答を使う」と書き足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 2）
+
+対象 head: 03c78ddcd51d6162f6577fb6423325fc599b9a53
+
+1. 詰まった箇所: 前スレッドの worktree（`agent-641-resign-push-t-70c636fcae005892`）がこの sandbox では読み取り専用マウントで、fetch は通るが checkout が `Read-only file system` で止まった。自分の worktree の内側に `git worktree add --detach` と `git switch --ignore-other-worktrees` で nested worktree を立てて作業した。`scripts/tests/agent-gh.test.sh`: `-fo` が typos に誤検出されるため、同じ経路の `-uo`（-u + -o のまとめ書き）に変えた。
+2. 曖昧だった文: 「`--dry-run` と `-n` では署名処理を呼ばず、呼ばれないことを試験で固定してください」（PR #655 codex レビュー must-fix）
+3. 仮定と解釈: `-n` はまとめ書き（`-fn`）も含むと解釈し、単一ハイフンの引数を 1 文字ずつ走査する形にした（`o` は残り・次引数を値に取るためそこで打ち切る。`--` 始まりは `--no-verify` など `n` を含み得るため走査しない）。同じ走査で `d` も拾い、`-fd` の削除でも resign を呼ばない形にした。
+4. 足りなかった情報・検証手段: `verify-run.test.sh` がこの環境では `/tmp` の所有者が nobody（root でない）のため `dir_chain_safe` に拒否されて失敗する。main の checkout でも同じ失敗が再現し、`TMPDIR=/dev/shm` で pass することを確かめて環境起因と切り分けた。
+5. 改善案: `docs/dev-environment.md` に「/tmp の所有者が nobody の環境では `verify-run.test.sh` が失敗する。`TMPDIR=/dev/shm` で実行する」を足す。
+
+使ったスキル: implement-issue
