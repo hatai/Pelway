@@ -119,3 +119,14 @@
 5. 改善案: 設定を読む処理を足すときは、同じ変数に書く設定キーが複数ないかを Git の実装（config コールバック）で確かめる。
 
 使ったスキル: implement-issue
+## 実装者メモ（round 11）
+
+対象 head: ba08058d8848d2a96fe238d5dd25e1ac49e29a43
+
+1. 詰まった箇所: 前任スレッドの worktree（`agent-641-resign-push-t-70c636fcae005892`）がこの sandbox では読み取り専用で、index・作業ツリーに古い版への退行が staged のまま残っていた（`git stash` で退避済み）。自分の worktree を `git switch --ignore-other-worktrees` で同じブランチに切り替えて作業した。
+2. 曖昧だった文: 「照会の子プロセスから `GIT_CONFIG` を除き、Git が push 時に使う設定範囲で判定すること。`GIT_CONFIG` が別ファイルを指していても通常の設定の `only` が効く場合の回帰試験を追加する」（指揮役 comment 7135942665 経由の codex r10 must-fix）
+3. 仮定と解釈: 「push 時に使う設定範囲」は `GIT_CONFIG_PARAMETERS`・`GIT_CONFIG_GLOBAL`・`GIT_CONFIG_SYSTEM`・`GIT_CONFIG_NOSYSTEM` も含むと解釈した。これらは `git config` と `git push` の両方が同じく読むため残し、扱いが違う `GIT_CONFIG`（`git config` だけが読み、push は見ない）だけを `env -u` で照会の子プロセスから除いた。
+4. 足りなかった情報・検証手段: 偽の git が環境変数で応答を分ける経路が無かったため、`GIT_CONFIG` があるときは `FAKE_GIT_CONFIG_RECURSE`（GIT_CONFIG のファイルの中身に見立てた値）を返す形にした。両方向の回帰試験（通常の設定が only／GIT_CONFIG 側だけが only）は `red-check cd7a8977` で実装前に 2 件とも FAIL を確かめた。
+5. 改善案: `scripts/agent-gh` に git の設定を読む子プロセスを足すときは、その照会が `git push` と同じ設定範囲を読むかを確かめる（`GIT_CONFIG` は `git config` だけが読む）。
+
+使ったスキル: implement-issue
