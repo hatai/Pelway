@@ -59,3 +59,15 @@
 5. 改善案: `push_targets` の頭のコメントに「`--repo` は値を取る fallback 形」と断りを足す。値を取る形の一覧を試験で固定する（6 個）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 6）
+
+対象 head: d89ed9d1905220bbc54f4755171da007af05932b
+
+1. 詰まった箇所: `--end-of-options` が抜けていた。git はそこでオプション解釈を止めるので、以降の `--no-dry-run` などを旗と取り違えて dry-run 判定が食い違っていた。
+2. 曖昧だった文: 「push_targets が `--end-of-options` を越えて後続引数をオプション扱いする」（PR #655 claude r5 レビュー nit・指揮役の判断で同 round に追加）
+3. 仮定と解釈: `--` と同じ扱い（以降を位置引数として畳んで走査を止める）と解釈した。一意な省略形（`--en` など、`--e` は --exec と曖昧で届かない）も `push_longopt` で同じ経路に入れた。`-` で始まるブランチ名は update-ref でしか作れない稀少形だが、dry-run 誤検出は同じ経路なので直した。
+4. 足りなかった情報・検証手段: 指摘のコマンド（`-n --end-of-options origin --no-dry-run`）を試験に足し、実装前に `@{u} lookups 1`（dry-run なのに fallback resign）の red を確かめてから実装 → green。
+5. 改善案: 特になし（オプション解釈の抜けはほぼ埋まった。残る知られている読み違いは対象外に記録済み）。
+
+使ったスキル: implement-issue
