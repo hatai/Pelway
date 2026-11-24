@@ -23,3 +23,15 @@
 5. 改善案: `docs/superpowers/specs/agent-team.md` の「実装」の節に「実装スレッドの起動時に専用 worktree を作れないときは、指揮役が代替手段（worktree_create + session_move）を指示する」を足す
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: 54f94fbc7d9f678ee5f51123a81c7a76ed2704bd
+
+1. 詰まった箇所: 引き継ぎ元の worktree（`/home/hatai/.local/share/opencode/worktree/413a66/issue-669-pending-sends`）が本スレッドの sandbox では読み取り専用マウントで、`request_scope` の write 許可後も EROFS のまま書き込めなかった。スレッドの worktree に `impl-669`（upstream = `origin/agent/669-pending-sends-watch`）を切って作業し `HEAD:agent/669-pending-sends-watch` で push した。PR は CONFLICTING だったため先に origin/main を merge（`cur` の state dict の 1 hunk。`shared_notified`・`heartbeat_at`・`pending_sends` を両立で解消）。`mise run verify` は `verify-run.test.sh` のみ失敗（本 sandbox で /tmp が uid 65534 に見え `dir_chain_safe` が親階層を拒む。変更を退避した同じツリーで再現する環境起因）
+2. 曖昧だった文: 「nit: 不正な間隔設定で巡回処理が中断する点」（指揮役の修正依頼メッセージ）
+3. 仮定と解釈: 依頼文に挙げられた nit を「修正の指示に明示的に含まれている」と読み must-fix と併せて直した（`[文書のずれ]` の印は無い）。直し方は codex の 2 択のうち「既定値で巡回を続ける」側を採り、設定名を出す `WATCHER bad-config <name>=<value> default=<d>s` 行を添えた（見張りを止めない方が「誤検知で止まらない」方針に沿い、round 1 の devin レビューの nit の助言とも一致）
+4. 足りなかった情報・検証手段: この環境には `watch_pull_request` ツールが無い。チェック待ちは `pr-digest --watch` のバックグラウンド実行で起きる形になる
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「手順 3」に「引き継ぎの修正依頼で前の担当の worktree に書き込めないときは、upstream を PR ブランチに向けた別名のローカルブランチで作業し `HEAD:<PR ブランチ>` で push する」を足す
+
+使ったスキル: implement-issue, pr-watch, receiving-code-review
