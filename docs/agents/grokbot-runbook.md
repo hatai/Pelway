@@ -207,7 +207,7 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 
 ### MCP の `t3_thread_launch` と `t3_thread_send` の引数
 
-実装・レビュー・調査のスレッドを MCP の `t3_thread_launch` で立てるときの引数の例。`title` は必須で、省略すると最初の指示の 1 行目がタイトルになる（スレッド名の形式は skill `command-team` の「スレッド名」）。`modelSelection.instanceId` にはこの手順書の provider の名前（`opencode`・`acpRegistry_devin`・`codex_review`・`claude_review`・`devin_review`）、`runtimeMode` には `approval-required`・`auto-accept-edits`・`auto`・`full-access` のどれか、`workspaceStrategy.type` には `root`・`existing_worktree`・`worktree` のどれかを入れる。effort は `modelSelection.options` に入れる。
+実装・レビュー・調査のスレッドを MCP の `t3_thread_launch` で立てるときの引数の例。`title` は `t3_thread_launch` のツール定義上の必須項目で、省略すると T3 が `-32602`（引数の誤り）を返す。「省略すると最初の指示の 1 行目がタイトルになる」という既定動作があるのは CLI の `t3 thread start` の `--title` 側であり、こちらも省略しない（スレッド名の形式は skill `command-team` の「スレッド名」）。`modelSelection.instanceId` にはこの手順書の provider の名前（`opencode`・`acpRegistry_devin`・`codex_review`・`claude_review`・`devin_review`）、`runtimeMode` には `approval-required`・`auto-accept-edits`・`auto`・`full-access` のどれか、`workspaceStrategy.type` には `root`・`existing_worktree`・`worktree` のどれかを入れる。effort は `modelSelection.options` に入れる。
 
 ```json
 {
