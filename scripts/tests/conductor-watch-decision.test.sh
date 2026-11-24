@@ -17,7 +17,7 @@ while (($#)); do
 done
 ((have_only)) && [[ ! "$ONLY" =~ ^[0-9]+(,[0-9]+)*$ ]] && usage
 
-matched="" # --only で実行した場面の番号（`,6,13,` の形）
+matched="" # --only で実行した場面の番号（`,6,13` の形。照合は `,$matched,` と両端にカンマを足してから行う）
 want() { # want <番号> — その場面を実行するか。実行する番号は matched に残す
   ((have_only)) || return 0
   [[ ",$ONLY," == *",$1,"* ]] || return 1
