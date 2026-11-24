@@ -17,9 +17,11 @@ while (($#)); do
 done
 ((have_only)) && [[ ! "$ONLY" =~ ^[0-9]+(,[0-9]+)*$ ]] && usage
 
-want() { # want <番号> — その場面を実行するか
+matched="" # --only で実行した場面の番号（`,6,13,` の形）
+want() { # want <番号> — その場面を実行するか。実行する番号は matched に残す
   ((have_only)) || return 0
-  [[ ",$ONLY," == *",$1,"* ]]
+  [[ ",$ONLY," == *",$1,"* ]] || return 1
+  matched+=",$1"
 }
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -201,8 +203,7 @@ escalated() { echo "DECISION escalated #$1 labeled_at=$T20 reason=${2:-no-regist
 label_calls() { lines "issue edit $1 --add-label needs-human" "issue edit $1 --remove-label needs-decision"; }
 escalation_calls() { lines "issue comment $1 --body-file -" "$(label_calls "$1")"; }
 
-checks_run=0
-check() { local name="$1"; shift; checks_run=$((checks_run + 1)); if "$@"; then printf 'ok   %s\n' "$name"; else printf 'FAIL %s\n' "$name"; failures+=("$name"); fi; }
+check() { local name="$1"; shift; if "$@"; then printf 'ok   %s\n' "$name"; else printf 'FAIL %s\n' "$name"; failures+=("$name"); fi; }
 eq() { [[ "$1" == "$2" ]]; }
 lacks() { ! grep -qF -- "$2" "$1"; }
 
@@ -527,9 +528,15 @@ gh_edit 'i = st[args[0]]; i["labels"].remove("needs-human"); i["events"][-1].app
 check "39: after needs-human is removed -> overdue, then escalated" eq "$(decision_lines)" "$(lines "$(overdue 764)" "$(escalated 764)")"
 fi
 
-if ((have_only && checks_run == 0)); then
-  printf 'no scenario matched --only %s\n' "$ONLY" >&2
-  exit 2
+if ((have_only)); then
+  missed=""
+  for n in ${ONLY//,/ }; do
+    [[ ",$matched," == *",$n,"* ]] || missed="${missed:+$missed,}$n"
+  done
+  if [[ -n "$missed" ]]; then
+    printf 'no scenario matched --only %s\n' "$missed" >&2
+    exit 2
+  fi
 fi
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
