@@ -216,7 +216,7 @@ check "4: next cycle fetches again and reports" eq "$(decision_lines)" "$(lines 
 # 5. needs-decision と needs-human の両方が付いていれば human のまま、DECISION は出さない
 reset; issue_with 705 "$T20" needs-decision needs-human; run_cycles 1
 check "5: both labels -> waiting_on human, no DECISION line, no writes, no per-issue reads without the watcher's record" eq "$(sget 705 waiting_on)|$(decision_lines)|$(calls)|$(reads_of 705)" "human|||"
-check "5: both labels -> next_check_at is not labeled_at + 15 min" eval '[[ "$(nca_after 705 "$T20")" != 900 ]]'
+check "5: both labels -> next_check_at is a readable datetime, not labeled_at + 15 min" eval 'v="$(nca_after 705 "$T20")" && [[ "$v" =~ ^-?[0-9]+$ && "$v" != 900 ]]'
 
 # --- 指揮役が動いていないときの格上げ ---
 
@@ -426,7 +426,7 @@ check "38: held record survives close+reopen -> still held, no re-escalation, ov
 # 39. 一覧の後に needs-human が付き、最初の Issue ごとの events に出たら DECISION overdue を出さず、通知済みにもしない（外れたら知らせる）
 once 764 on_read events 764 "i['labels'].append('needs-human'); i['events'][-1].append(ev('labeled', 'needs-human', '$T5'))"
 check "39: needs-human in the first events fetch -> no overdue, no writes, waiting_on human, next_owner hatai" eq "$(decision_lines)|$(calls)|$(sget 764 waiting_on) $(sget 764 next_owner)" "||human hatai"
-check "39: needs-human in the first events fetch -> next_check_at is not labeled_at + 15 min" eval '[[ "$(nca_after 764 "$T20")" != 900 ]]'
+check "39: needs-human in the first events fetch -> next_check_at is a readable datetime, not labeled_at + 15 min" eval 'v="$(nca_after 764 "$T20")" && [[ "$v" =~ ^-?[0-9]+$ && "$v" != 900 ]]'
 gh_edit 'i = st[args[0]]; i["labels"].remove("needs-human"); i["events"][-1].append(ev("unlabeled", "needs-human", args[1]))' 764 "$T5"; run_cycles 1
 check "39: after needs-human is removed -> overdue, then escalated" eq "$(decision_lines)" "$(lines "$(overdue 764)" "$(escalated 764)")"
 
