@@ -10,6 +10,8 @@ failures=()
 # 偽の mktemp / chmod は本物に委譲する。この時点（PATH 変更前）に本物のパスを取っておく
 REAL_MKTEMP="$(command -v mktemp)"
 REAL_CHMOD="$(command -v chmod)"
+# 偽の git が FAKE_GIT_REAL=1 で本物に委譲するためのパス（#642 の実リポジトリ試験用）
+REAL_GIT="$(command -v git)"; export REAL_GIT
 
 BIN="$ROOT/bin"
 mkdir -p "$BIN"
@@ -92,7 +94,16 @@ if [[ -n "${FAKE_GH_HINT:-}" ]]; then
   printf '  - indented error detail\n' >&2
   exit "${FAKE_GH_EXIT:-0}"
 fi
-{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_NO_UPDATE_NOTIFIER=%s\n' "${GH_NO_UPDATE_NOTIFIER:-}"; printf 'GH_TELEMETRY=%s\n' "${GH_TELEMETRY:-}"; printf 'DO_NOT_TRACK=%s\n' "${DO_NOT_TRACK:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
+{ printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_NO_UPDATE_NOTIFIER=%s\n' "${GH_NO_UPDATE_NOTIFIER:-}"; printf 'GH_TELEMETRY=%s\n' "${GH_TELEMETRY:-}"; printf 'DO_NOT_TRACK=%s\n' "${DO_NOT_TRACK:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
+# #642: pr-size 例外の照会用の応答。FAKE_GH_FAIL があれば、どの問い合わせもそのコードで失敗する。
+if [[ -n "${FAKE_GH_FAIL:-}" ]]; then
+  exit "$FAKE_GH_FAIL"
+fi
+case "${1:-} ${2:-}" in
+  "pr list") printf '%s\n' "${FAKE_GH_PR_LIST:-[]}" ;;
+  "issue view") printf '%s\n' "${FAKE_GH_ISSUE_VIEW:-"{\"comments\":[]}"}" ;;
+esac
+exit 0
 EOF
 
 # 偽の git: GH_TOKEN と引数を追記する（push 後の agent-gh-resign からの呼び出しも残すため追記）。
@@ -100,6 +111,10 @@ EOF
 cat >"$BIN/git" <<'EOF'
 #!/usr/bin/env bash
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_TELEMETRY=%s\n' "${GH_TELEMETRY:-}"; printf 'DO_NOT_TRACK=%s\n' "${DO_NOT_TRACK:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
+# FAKE_GIT_REAL があれば、記録だけして本物の git に委譲する（#642 の pr-size ゲート試験の実リポジトリ用）。
+if [[ -n "${FAKE_GIT_REAL:-}" ]]; then
+  exec "$REAL_GIT" "$@"
+fi
 # FAKE_GIT_HEAD があれば、symbolic-ref（今のブランチ名の問い合わせ）にその名前を返す（#641）。
 [[ "$*" != *symbolic-ref* || -z "${FAKE_GIT_HEAD:-}" ]] || printf '%s\n' "$FAKE_GIT_HEAD"
 # FAKE_GIT_RECURSE があれば、config --get-regexp（push.recurseSubmodules / submodule.recurse）にその値を返す（#641）。
@@ -744,6 +759,174 @@ done
 export CALL_LOG="$ROOT/hint_streams.log"
 hint_stdout="$(FAKE_GH_HINT=1 bash "$SCRIPT" dev pr view 1 2>/dev/null)"
 [[ "$hint_stdout" == STDOUT-BODY ]] || failures+=("hint_streams: stdout is '$hint_stdout', want only STDOUT-BODY")
+
+# --- push 前の pr-size ゲート（#642）---
+# 差分の行数を実際に数える必要があるため、実リポジトリで FAKE_GIT_REAL=1（偽の git が
+# 記録だけして本物に委譲する）にして試す。origin はローカルの bare リポジトリで、実 push が届く。
+gate_repo="$ROOT/gate-repo"
+"$REAL_GIT" init -q -b main "$gate_repo"
+"$REAL_GIT" -C "$gate_repo" config user.name test
+"$REAL_GIT" -C "$gate_repo" config user.email test@example.invalid
+"$REAL_GIT" -C "$gate_repo" config commit.gpgsign false
+"$REAL_GIT" -C "$gate_repo" commit -q --allow-empty -m base
+"$REAL_GIT" -C "$gate_repo" update-ref refs/remotes/origin/main HEAD
+"$REAL_GIT" init --bare -q "$ROOT/gate-bare.git"
+"$REAL_GIT" -C "$gate_repo" remote add origin "$ROOT/gate-bare.git"
+# ブランチ: agent/642-x +810（上限超え）、feature +900、head-small +10、agent/642-small +12
+"$REAL_GIT" -C "$gate_repo" switch -qc agent/642-x
+seq 810 >"$gate_repo/big.txt"; "$REAL_GIT" -C "$gate_repo" add -A; "$REAL_GIT" -C "$gate_repo" commit -qm add
+"$REAL_GIT" -C "$gate_repo" switch -qc feature main
+seq 900 >"$gate_repo/big2.txt"; "$REAL_GIT" -C "$gate_repo" add -A; "$REAL_GIT" -C "$gate_repo" commit -qm add
+"$REAL_GIT" -C "$gate_repo" switch -qc head-small main
+seq 10 >"$gate_repo/small.txt"; "$REAL_GIT" -C "$gate_repo" add -A; "$REAL_GIT" -C "$gate_repo" commit -qm add
+"$REAL_GIT" -C "$gate_repo" switch -qc agent/642-small main
+seq 12 >"$gate_repo/small2.txt"; "$REAL_GIT" -C "$gate_repo" add -A; "$REAL_GIT" -C "$gate_repo" commit -qm add
+# merge-base の確認用: mb-branch / mb-unset は同じ先端（feature と同じ +900）。mb-branch だけ
+# gh-merge-base=topic を持ち、origin/topic はその先端を指す（config が効けば差分 0 になる）
+"$REAL_GIT" -C "$gate_repo" switch -qc mb-branch feature
+"$REAL_GIT" -C "$gate_repo" update-ref refs/remotes/origin/topic HEAD
+"$REAL_GIT" -C "$gate_repo" switch -qc mb-unset
+"$REAL_GIT" -C "$gate_repo" config branch.mb-branch.gh-merge-base topic
+"$REAL_GIT" -C "$gate_repo" tag v1 # 先端が +900 のタグ。タグ push が検査されなければ通る
+"$REAL_GIT" -C "$gate_repo" push -q origin mb-unset:refs/heads/tmp-del # 削除試験の対象
+"$REAL_GIT" -C "$gate_repo" switch -q agent/642-x
+
+# push_gate <name> <git push の引数...>: gate_repo で agent-gh dev git push を実行する（OUT/RC に入る）
+push_gate() {
+  local name="$1"
+  shift
+  export CALL_LOG="$ROOT/$name.log"
+  rm -f "$CALL_LOG"
+  OUT="$(cd "$gate_repo" && FAKE_GIT_REAL=1 bash "$SCRIPT" dev git push "$@" 2>&1)"
+  RC=$?
+}
+# push_gate_skip: PELWAY_AGENT_SKIP_RESIGN=1 で同じことをする。通す側の試験（resign の成否を外す）と、
+# skip の経路でもゲートが効くことの確認に使う（resign 自体の試験は #641 で別にある）
+push_gate_skip() {
+  local name="$1"
+  shift
+  export CALL_LOG="$ROOT/$name.log"
+  rm -f "$CALL_LOG"
+  OUT="$(cd "$gate_repo" && FAKE_GIT_REAL=1 PELWAY_AGENT_SKIP_RESIGN=1 bash "$SCRIPT" dev git push "$@" 2>&1)"
+  RC=$?
+}
+expect_push_called() {
+  grep -qE '^ARGS=.* push ' "$ROOT/$1.log" || failures+=("$1: git push was not invoked")
+}
+expect_no_push() {
+  ! grep -qE '^ARGS=.* push ' "$ROOT/$1.log" || failures+=("$1: git push was invoked")
+}
+# pr list / issue view（例外の照会）が呼ばれていないことを確かめる
+expect_no_pr_query() {
+  [[ -e "$ROOT/$1.log" ]] || return 0
+  ! grep -qE '^ARGS=(pr list|issue view)' "$ROOT/$1.log" || failures+=("$1: PR query was issued")
+}
+# 差分を測っていないこと（pr-size の git diff --numstat が無い）を確かめる
+expect_no_measure() {
+  ! grep -qF 'numstat' "$ROOT/$1.log" || failures+=("$1: pr-size measured the diff")
+}
+
+# 上限超えは push しない。終了コードは 0 以外（6）、stderr に行数・base・例外の条件が出る
+push_gate gate_over_limit origin HEAD
+[[ "$RC" == 6 ]] || failures+=("gate_over_limit: exit $RC, want 6")
+expect_no_push gate_over_limit
+grep -qF '+810 / -0' <<<"$OUT" || failures+=("gate_over_limit: stderr lacks counts: $OUT")
+grep -qF 'base: origin/main' <<<"$OUT" || failures+=("gate_over_limit: stderr lacks base: $OUT")
+grep -qF 'pr-size-exception' <<<"$OUT" || failures+=("gate_over_limit: stderr lacks exception conditions: $OUT")
+
+# 例外があれば通す: 開いた PR の pr-size-exception ラベル + 閉じる Issue の hatai の目印コメント
+FAKE_GH_PR_LIST='[{"number":42,"labels":[{"name":"pr-size-exception"}],"closingIssuesReferences":[{"number":640}]}]' \
+FAKE_GH_ISSUE_VIEW='{"comments":[{"author":{"login":"hatai"},"body":"<!-- pr-size-exception -->\nこの PR の超過を認める"}]}' \
+  push_gate_skip gate_exception origin HEAD
+[[ "$RC" == 0 ]] || failures+=("gate_exception: exit $RC, want 0 ($OUT)")
+expect_push_called gate_exception
+
+# ラベルだけ（閉じる Issue に目印コメントが無い）では止める
+FAKE_GH_PR_LIST='[{"number":42,"labels":[{"name":"pr-size-exception"}],"closingIssuesReferences":[{"number":640}]}]' \
+FAKE_GH_ISSUE_VIEW='{"comments":[{"author":{"login":"hatai"},"body":"この PR の超過を認める"}]}' \
+  push_gate gate_label_only origin HEAD
+[[ "$RC" == 6 ]] || failures+=("gate_label_only: exit $RC, want 6")
+expect_no_push gate_label_only
+
+# コメントだけ（ラベル無し）では止める
+FAKE_GH_PR_LIST='[{"number":42,"labels":[],"closingIssuesReferences":[{"number":640}]}]' \
+FAKE_GH_ISSUE_VIEW='{"comments":[{"author":{"login":"hatai"},"body":"<!-- pr-size-exception -->\n認める"}]}' \
+  push_gate gate_comment_only origin HEAD
+[[ "$RC" == 6 ]] || failures+=("gate_comment_only: exit $RC, want 6")
+expect_no_push gate_comment_only
+
+# 目印コメントの作成者が hatai でないときは止める
+FAKE_GH_PR_LIST='[{"number":42,"labels":[{"name":"pr-size-exception"}],"closingIssuesReferences":[{"number":640}]}]' \
+FAKE_GH_ISSUE_VIEW='{"comments":[{"author":{"login":"someone"},"body":"<!-- pr-size-exception -->\n認める"}]}' \
+  push_gate gate_not_hatai origin HEAD
+[[ "$RC" == 6 ]] || failures+=("gate_not_hatai: exit $RC, want 6")
+expect_no_push gate_not_hatai
+
+# 目印が本文の行頭でないコメントは止める
+FAKE_GH_PR_LIST='[{"number":42,"labels":[{"name":"pr-size-exception"}],"closingIssuesReferences":[{"number":640}]}]' \
+FAKE_GH_ISSUE_VIEW='{"comments":[{"author":{"login":"hatai"},"body":"x <!-- pr-size-exception -->\n認める"}]}' \
+  push_gate gate_marker_not_at_start origin HEAD
+[[ "$RC" == 6 ]] || failures+=("gate_marker_not_at_start: exit $RC, want 6")
+expect_no_push gate_marker_not_at_start
+
+# 開いた PR が無いときは例外を調べず行数だけで判定する（issue view は呼ばない）
+FAKE_GH_PR_LIST='[]' push_gate gate_no_pr origin HEAD
+[[ "$RC" == 6 ]] || failures+=("gate_no_pr: exit $RC, want 6")
+expect_no_push gate_no_pr
+! grep -qF 'issue view' "$ROOT/gate_no_pr.log" || failures+=("gate_no_pr: issue view was called")
+
+# GitHub の問い合わせが失敗したときは止める（fail-closed）
+FAKE_GH_FAIL=1 push_gate gate_gh_fail origin HEAD
+[[ "$RC" == 6 ]] || failures+=("gate_gh_fail: exit $RC, want 6")
+expect_no_push gate_gh_fail
+
+# PELWAY_AGENT_SKIP_RESIGN=1 の経路でも検査される
+push_gate_skip gate_skip_resign origin HEAD
+[[ "$RC" == 6 ]] || failures+=("gate_skip_resign: exit $RC, want 6")
+expect_no_push gate_skip_resign
+
+# src:dst は src の差分を数える（HEAD が上限内でも src が超えれば止める）
+"$REAL_GIT" -C "$gate_repo" switch -q head-small # HEAD は +10（上限内）
+push_gate gate_src_diff origin feature:agent/642-x
+[[ "$RC" == 6 ]] || failures+=("gate_src_diff: exit $RC, want 6")
+expect_no_push gate_src_diff
+grep -qF '+900 / -0' <<<"$OUT" || failures+=("gate_src_diff: counts not from src: $OUT")
+
+# base は branch.<名>.gh-merge-base があれば origin/<その値>（同じ先端でも config で結果が変わる）
+"$REAL_GIT" -C "$gate_repo" switch -q mb-branch
+push_gate_skip gate_merge_base origin HEAD
+[[ "$RC" == 0 ]] || failures+=("gate_merge_base: exit $RC, want 0 ($OUT)")
+expect_push_called gate_merge_base
+"$REAL_GIT" -C "$gate_repo" switch -q mb-unset
+push_gate gate_merge_base_unset origin HEAD
+[[ "$RC" == 6 ]] || failures+=("gate_merge_base_unset: exit $RC, want 6")
+expect_no_push gate_merge_base_unset
+grep -qF 'base: origin/main' <<<"$OUT" || failures+=("gate_merge_base_unset: stderr lacks base: $OUT")
+
+# 上限以下は例外を調べずに push する（GitHub への問い合わせが無い）
+"$REAL_GIT" -C "$gate_repo" switch -q agent/642-small
+push_gate_skip gate_under_limit origin HEAD
+[[ "$RC" == 0 ]] || failures+=("gate_under_limit: exit $RC, want 0 ($OUT)")
+expect_push_called gate_under_limit
+expect_no_pr_query gate_under_limit
+
+# タグの push は検査しない（先端が上限超えの内容でも通る）
+"$REAL_GIT" -C "$gate_repo" switch -q main
+push_gate_skip gate_tag origin v1
+[[ "$RC" == 0 ]] || failures+=("gate_tag: exit $RC, want 0 ($OUT)")
+expect_push_called gate_tag
+expect_no_measure gate_tag
+
+# 削除は検査しない
+push_gate gate_delete origin :tmp-del
+[[ "$RC" == 0 ]] || failures+=("gate_delete: exit $RC, want 0 ($OUT)")
+expect_no_measure gate_delete
+
+# --dry-run は検査しない（上限超えのブランチでも試行は通る）
+"$REAL_GIT" -C "$gate_repo" switch -q agent/642-x
+push_gate_skip gate_dry_run --dry-run origin HEAD
+[[ "$RC" == 0 ]] || failures+=("gate_dry_run: exit $RC, want 0 ($OUT)")
+expect_no_measure gate_dry_run
 
 if ((${#failures[@]})); then
   printf 'FAIL %s\n' "${failures[@]}"

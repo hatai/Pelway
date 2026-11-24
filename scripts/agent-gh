@@ -11,7 +11,9 @@
 # 黙ったフォールバックを防ぐため）。一時ディレクトリは終了時に消す。
 # qa は許可リスト方式で、上の 1 形以外の呼び出し（ラベル・Approve・マージ・編集・削除など）はトークン発行前に終了コード 2 で拒否する。
 # qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持たない（~/.config/pelway-agent-qa/fnox.toml を指す。未設定は終了コード 3）。
-# 終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない（qa の PELWAY_AGENT_FNOX_CONFIG 未設定を含む）、5 = 引数に \uXXXX エスケープ混入、それ以外は gh / git の終了コード（--help / -h は 0）
+# dev 役の git push は、push の前に差分を scripts/pr-size.sh で測り、上限（追加 800 行・削除 2000 行）を
+# 超えて例外（PR の pr-size-exception ラベル + Issue の hatai の目印コメント）が無ければ止める（#642）。
+# 終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない（qa の PELWAY_AGENT_FNOX_CONFIG 未設定を含む）、4 = 署名の付け替えに失敗、5 = 引数に \uXXXX エスケープ混入、6 = dev 役の push で差分が pr-size の上限超え（例外なし）、それ以外は gh / git の終了コード（--help / -h は 0）
 set -euo pipefail
 # コマンド置換 $(...) の中でも set -e を効かせる（app_token 内の secret の失敗で止めるため）。
 shopt -s inherit_errexit
@@ -112,7 +114,7 @@ help() {
     "git push の成功後は scripts/agent-gh-resign がコミットを GitHub API の署名付きに付け替える（止めるときは PELWAY_AGENT_SKIP_RESIGN=1）。" \
     "qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持ちません（~/.config/pelway-agent-qa/fnox.toml を指してください）。" \
     "非 ASCII の文字列は argv 経由で渡せません（\\uXXXX に潰れます）。--body-file / api --input / git commit -F などファイル経由で渡してください。" \
-    "終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、それ以外は gh / git の終了コード"
+    "終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、6 = dev 役の push で差分が pr-size の上限超え（例外なし）、それ以外は gh / git の終了コード"
   exit 0
 }
 
@@ -268,7 +270,8 @@ esac
 push_longopt() { ((${#1} >= $3)) && [[ "$2" == "$1"* ]]; }
 
 # push_targets <git push の引数（push より後）...>: push 先から署名を付け直す対象を決める（#641）。
-# 結果: push_remote と push_branches（ブランチ名の配列。重複なし）、push_fallback（1 なら
+# 結果: push_remote と push_branches（ブランチ名の配列。重複なし）、push_srcs（push_branches と
+# 対応する push 元の refspec の src。#642 の pr-size ゲートが数える）、push_fallback（1 なら
 # agent-gh-resign を位置引数なしで呼び、resign が @{u} から対象を決める）、push_dry_run
 # （1 なら試行で何も push されないため resign を呼ばない）。
 # - refspec を省いた push、--all / --branches / --mirror / --tags / --prune / --repo、glob を含む refspec、
@@ -279,8 +282,8 @@ push_longopt() { ((${#1} >= $3)) && [[ "$2" == "$1"* ]]; }
 # - 長いオプションは一意に特定できる接頭辞で省略でき（--dr は --dry-run、--del は --delete）、
 #   --no-<名> は直前の指定を戻す（-n --no-dry-run は実 push）。=<値> の連結は残りの引数を取らない
 push_targets() {
-  push_remote="" push_branches=() push_fallback=0 push_dry_run=0
-  local positional=() delete=0 a spec dst b seen i opt neg joined val submod_seen=0 submod_only=0
+  push_remote="" push_branches=() push_srcs=() push_fallback=0 push_dry_run=0
+  local positional=() delete=0 a spec src dst b seen i opt neg joined val submod_seen=0 submod_only=0
   while (($#)); do
     a="$1"
     shift
@@ -357,8 +360,10 @@ push_targets() {
     spec="${spec#+}"
     if [[ "$spec" == *:* ]]; then
       [[ -n "${spec%%:*}" ]] || continue # :dst は削除
+      src="${spec%%:*}"
       dst="${spec#*:}"
     else
+      src="$spec"
       dst="$spec"
     fi
     if [[ "$dst" == HEAD ]]; then
@@ -373,7 +378,71 @@ push_targets() {
     dst="${dst#refs/heads/}"
     seen=0
     for b in ${push_branches[@]+"${push_branches[@]}"}; do [[ "$b" != "$dst" ]] || seen=1; done
-    ((seen)) || push_branches+=("$dst")
+    ((seen)) || { push_branches+=("$dst"); push_srcs+=("$src"); }
+  done
+  return 0
+}
+
+# pr_size_exception_ok <push 先のブランチ名>: pr-size 上限超えの例外を確かめる（#642）。
+# 開いた PR が pr-size-exception ラベルを持ち、その PR が閉じる Issue（closingIssuesReferences）に、
+# 作成者が hatai で本文の行頭が <!-- pr-size-exception --> のコメントがあれば 0
+# （review-pr の手順 2 と同じ条件）。それ以外（PR 無し・ラベル無し・コメント無し・
+# 作成者が hatai でない）は 1。GitHub への問い合わせが失敗しても 1（fail-closed）。
+pr_size_exception_ok() {
+  local dst="$1" prs issues n issue_json found
+  prs="$(run_gh pr list --head "$dst" --state open \
+    --json number,labels,closingIssuesReferences)" || return 1
+  issues="$(jq -r '[.[] | select([.labels[].name] | any(. == "pr-size-exception"))
+      | .closingIssuesReferences[].number] | unique | .[]' <<<"$prs")" || return 1
+  [[ -n "$issues" ]] || return 1
+  while IFS= read -r n; do
+    issue_json="$(run_gh issue view "$n" --json comments)" || return 1
+    found="$(jq '[.comments[] | select(.author.login == "hatai"
+        and (.body | startswith("<!-- pr-size-exception -->")))] | length' <<<"$issue_json")" || return 1
+    ((found > 0)) && return 0
+  done <<<"$issues"
+  return 1
+}
+
+# pr_size_gate: dev 役の git push の前に、push するブランチごとに pr-size を測り、
+# 上限（追加 800 行・削除 2000 行）を超えて例外が認められていなければ push せずに止める（#642）。
+# - 数えるのは push するローカルの sha（push_srcs: HEAD:dst なら HEAD、src:dst なら src）の差分
+# - base は push 元のローカルブランチの branch.<名前>.gh-merge-base があれば origin/<その値>、無ければ origin/main
+# - 止めるときは stderr に追加・削除の行数・使った base・例外の条件を出し、終了コード 6
+pr_size_gate() {
+  local pr_size i src dst local_branch mb base out rc counts
+  pr_size="$(cd "$(dirname "$0")" && pwd)/pr-size.sh"
+  for i in "${!push_branches[@]}"; do
+    dst="${push_branches[i]}"
+    src="${push_srcs[i]}"
+    # dst がローカルのタグでブランチでない push（例: git push origin v1）はブランチの
+    # push ではないため検査しない（refs/tags/... の形は push_targets で既に対象外）。
+    if git rev-parse -q --verify "refs/tags/$dst" >/dev/null 2>&1 &&
+      ! git rev-parse -q --verify "refs/heads/$dst" >/dev/null 2>&1; then
+      continue
+    fi
+    # push 元のローカルブランチ: HEAD は今のブランチ、refs/heads/X は X
+    case "$src" in
+      HEAD) local_branch="$(git symbolic-ref -q --short HEAD 2>/dev/null || true)" ;;
+      refs/heads/*) local_branch="${src#refs/heads/}" ;;
+      *) local_branch="$src" ;;
+    esac
+    # GIT_CONFIG は除く: 判定は push が読む通常の設定と同じもので行う（push_targets と同じ理由）。
+    mb="$(env -u GIT_CONFIG git config --get "branch.$local_branch.gh-merge-base" 2>/dev/null || true)"
+    base="origin/${mb:-main}"
+    rc=0
+    out="$(bash "$pr_size" --base "$base" --head "$src" 2>&1)" || rc=$?
+    ((rc == 0)) && continue
+    if ((rc != 1)); then
+      echo "agent-gh: push を止めました: $dst へ push する $src の差分を測れません（base: $base）" >&2
+      printf '%s\n' "$out" >&2
+      exit 6
+    fi
+    pr_size_exception_ok "$dst" && continue
+    counts="$(sed -n 's/^pr-size: \(+[^（]*\)（.*$/\1/p' <<<"$out" | head -n 1)"
+    echo "agent-gh: push を止めました: $dst への push の差分が上限を超えています（${counts:-測定不能}、base: $base、上限は追加 800 行・削除 2000 行）" >&2
+    echo "agent-gh: 例外で通すには、push 先ブランチの開いた PR に pr-size-exception ラベルがあり、その PR が閉じる Issue に hatai の、行頭が <!-- pr-size-exception --> のコメントが必要です（例外を認めるのは指揮役だけです）" >&2
+    exit 6
   done
   return 0
 }
@@ -390,12 +459,21 @@ if [[ "${1:-}" == "git" ]]; then
   done
   git_cfg+=(-c credential.helper= -c 'credential.helper=!gh auth git-credential')
 
+  if [[ "${1:-}" == "push" ]]; then
+    push_targets "${@:2}"
+    # dev 役の push では、push する前に差分の行数を測る（#642）。上限を超えて例外が
+    # 認められていなければ push しない。dry-run・削除・タグ・fallback（push 先を
+    # 決められない形）と review 役の push は対象外。
+    if [[ "$role" == dev ]] && ((!push_fallback && !push_dry_run)) && ((${#push_branches[@]} > 0)); then
+      pr_size_gate
+    fi
+  fi
+
   if [[ "${1:-}" == "push" && -z "${PELWAY_AGENT_SKIP_RESIGN:-}" ]]; then
     rc=0
     GH_TOKEN="$token" git "${git_cfg[@]}" "$@" || rc=$?
     if ((rc == 0)); then
       resign="$(cd "$(dirname "$0")" && pwd)/agent-gh-resign"
-      push_targets "${@:2}"
       resign_rc=0
       if ((push_dry_run)); then
         : # --dry-run / -n の試行では何も push されていないため、署名の付け直しは呼ばない
