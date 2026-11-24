@@ -99,6 +99,11 @@ except Exception: prs = []; prs_ok = False
 try: now = float(open(os.environ["PELWAY_WATCH_NOW"]).read().strip())
 except Exception: now = time.time()
 def stamp(ts): return datetime.fromtimestamp(ts).isoformat(timespec="seconds")
+def stampable(ts):  # 地方時の年の範囲を外れる時刻は、読めない since と同じく数に入れないための確かめ
+    try:
+        stamp(ts); return True
+    except Exception:
+        return False
 def deadline_ts(s):  # ISO 8601 を epoch に読む。読めない値（無い・壊れている）は None
     try:
         return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
@@ -130,34 +135,37 @@ if now - (cur["heartbeat_at"] or 0) >= HEARTBEAT_SECS:
 # ごとに知らせ直し、解消（配列が空になるか最古の since が新しい値に変わる）で回復の行を
 # 1 つ出す。巡回状態（GitHub の一覧）の成否にかかわらず毎巡回動かす。
 PENDING_SENDS_SECS = env_secs("PELWAY_WATCH_PENDING_SENDS_SECS", 1800)
-oldest, pend_cnt, pend_to = None, 0, ""
-try:
-    psw = json.load(open(sys.argv[2]))
-    pend_arr = psw.get("pending_thread_sends")
-except Exception:
-    pend_arr = None
-if isinstance(pend_arr, list):
-    for e in pend_arr:
-        if not isinstance(e, dict): continue
-        ts = deadline_ts(e.get("since"))
-        if ts is None: continue
-        pend_cnt += 1
-        if oldest is None or ts < oldest:
-            oldest, pend_to = ts, safe_to(e.get("to"))
-pend = cur["pending_sends"] if isinstance(cur["pending_sends"], dict) else None
-if oldest is not None and now - oldest > PENDING_SENDS_SECS:
-    if pend is None or pend.get("since") != oldest:
-        if pend is not None:
-            print(f"WATCHER pending-sends-recovered since={stamp(pend['since'])} after={int(now - pend['since'])}s", flush=True)
-        pend = {"since": oldest, "notified_at": now}
-        print(f"WATCHER pending-sends-stalled since={stamp(oldest)} for={int(now - oldest)}s count={pend_cnt} oldest_to={pend_to}", flush=True)
-    elif now - pend["notified_at"] >= HEARTBEAT_SECS:
-        pend["notified_at"] = now
-        print(f"WATCHER pending-sends-still-stalled since={stamp(oldest)} for={int(now - oldest)}s count={pend_cnt} oldest_to={pend_to}", flush=True)
-elif pend is not None:
-    print(f"WATCHER pending-sends-recovered since={stamp(pend['since'])} after={int(now - pend['since'])}s", flush=True)
-    pend = None
-cur["pending_sends"] = pend
+try:  # 検知の失敗で巡回の後段を止めない（誤検知で止まらない方針と同じ）
+    oldest, pend_cnt, pend_to = None, 0, ""
+    try:
+        psw = json.load(open(sys.argv[2]))
+        pend_arr = psw.get("pending_thread_sends")
+    except Exception:
+        pend_arr = None
+    if isinstance(pend_arr, list):
+        for e in pend_arr:
+            if not isinstance(e, dict): continue
+            ts = deadline_ts(e.get("since"))
+            if ts is None or not stampable(ts): continue
+            pend_cnt += 1
+            if oldest is None or ts < oldest:
+                oldest, pend_to = ts, safe_to(e.get("to"))
+    pend = cur["pending_sends"] if isinstance(cur["pending_sends"], dict) else None
+    if oldest is not None and now - oldest > PENDING_SENDS_SECS:
+        if pend is None or pend.get("since") != oldest:
+            if pend is not None:
+                print(f"WATCHER pending-sends-recovered since={stamp(pend['since'])} after={int(now - pend['since'])}s", flush=True)
+            pend = {"since": oldest, "notified_at": now}
+            print(f"WATCHER pending-sends-stalled since={stamp(oldest)} for={int(now - oldest)}s count={pend_cnt} oldest_to={pend_to}", flush=True)
+        elif now - pend["notified_at"] >= HEARTBEAT_SECS:
+            pend["notified_at"] = now
+            print(f"WATCHER pending-sends-still-stalled since={stamp(oldest)} for={int(now - oldest)}s count={pend_cnt} oldest_to={pend_to}", flush=True)
+    elif pend is not None:
+        print(f"WATCHER pending-sends-recovered since={stamp(pend['since'])} after={int(now - pend['since'])}s", flush=True)
+        pend = None
+    cur["pending_sends"] = pend
+except Exception as ex:
+    print(f"WATCHER pending-sends-error {type(ex).__name__}", flush=True)
 for t in threads:
     tid, s = t["threadId"], t.get("status")
     cur["threads"][tid] = s

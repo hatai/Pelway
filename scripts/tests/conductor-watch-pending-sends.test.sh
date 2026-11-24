@@ -78,6 +78,23 @@ d["pending_thread_sends"] = [{"to": to, "what": "wake",
 json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
 EOF
 }
+# pend_iso <to> <since-string> — pending_thread_sends を任意の since 文字列の 1 要素で書き直す
+pend_iso() {
+  python3 -I - "$STATE" "$1" "$2" <<'EOF'
+import json, sys
+p, to, since = sys.argv[1], sys.argv[2], sys.argv[3]
+try: d = json.load(open(p))
+except Exception: d = {}
+if not isinstance(d, dict): d = {}
+d["pending_thread_sends"] = [{"to": to, "what": "wake", "since": since}]
+json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
+EOF
+}
+# state_has <key> — patrol-state.json のトップレベルにキーがあるか（読めなければ unreadable）
+state_has() {
+  python3 -I -c 'import json,sys
+print("yes" if sys.argv[2] in json.load(open(sys.argv[1])) else "no")' "$STATE" "$1" 2>/dev/null || echo unreadable
+}
 # pending_thread_sends キーが無い patrol-state.json にする
 pend_none() {
   python3 -I -c 'import json,sys
@@ -261,6 +278,15 @@ check "10: invalid to is replaced with a fixed value" \
   has "$ROOT/out.log" "WATCHER pending-sends-stalled since=20[^ ]* for=1900s count=1 oldest_to=invalid"
 check "10: stalled line is still one line" eq "$(count "$ROOT/out.log" 'WATCHER pending-sends-stalled ')" "1"
 check "10: no forged line from the to value" nhas "$ROOT/out.log" "THREAD shared-worktree"
+
+# 試験 11: fromisoformat では読めるが地方時では年の範囲を外れる since は、読めないものと
+# 同じく数に入れない。置かれても巡回が止まらず、後段（記録の書き戻し）が動く。
+reset
+pend_iso mcp:t0 "0001-01-01T00:00:00+23:59"
+run_cycles 1
+check "11: no traceback from an out-of-range since" nhas "$ROOT/out.log" "Traceback"
+check "11: out-of-range since is not counted" nhas "$ROOT/out.log" "WATCHER pending-sends"
+check "11: patrol still writes the state back" eq "$(state_has updated_at)" "yes"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
