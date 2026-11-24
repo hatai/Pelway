@@ -11,3 +11,7 @@
 5. 改善案: `scripts/tests/t3-tool-args-docs.test.sh` の先頭コメントに「JSON 例は jq でキー集合と値の許容集合を確かめる」と検査の範囲を明記済み。今後同種の docs テストを足すときのひな形になる。
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）
+
+## 実装者メモ（round 1・停止時追記）
+
+停止: レビュー委託（手順 8）が 2 回連続で `verdict: failed`。どちらも「セキュリティレビューを含む確認を完了できなかった」で GitHub への投稿無し。`checks timeout`・`wrong runtime`・`設定の不備:` のいずれにも当たらず、再委託の上限（2 回連続で止まる）に達したため `needs-human` で判断を仰ぐ。
