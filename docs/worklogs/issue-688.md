@@ -15,3 +15,15 @@
 ## 実装者メモ（round 1・停止時追記）
 
 停止: レビュー委託（手順 8）が 2 回連続で `verdict: failed`。どちらも「セキュリティレビューを含む確認を完了できなかった」で GitHub への投稿無し。`checks timeout`・`wrong runtime`・`設定の不備:` のいずれにも当たらず、再委託の上限（2 回連続で止まる）に達したため `needs-human` で判断を仰ぐ。
+
+## 実装者メモ（round 2）
+
+対象 head: 9d133cfdd01d73e4d0166eafad210a86cef54e29
+
+1. 詰まった箇所: 手順 9: round 1 の Approve に `[文書のずれ]` nit 1 件（runbook:210 の `title` 省略時の説明の適用先が不明確）。印の nit だけを直す round として対応（通算 1 回目）。
+2. 曖昧だった文: 「`title` は必須で、省略すると最初の指示の 1 行目がタイトルになる」（`docs/agents/grokbot-runbook.md` の「MCP の `t3_thread_launch` と `t3_thread_send` の引数」）
+3. 仮定と解釈: 「省略すると最初の指示の 1 行目がタイトルになる」は command-team の文面を写したもので、既定動作の主体が CLI の `--title` 側と解釈した（`t3_thread_launch` では省略自体が `-32602` になるため、必須項目の省略時動作としては説明できない）。両者を分けて書き直した。
+4. 足りなかった情報・検証手段: `t3 thread start --title` 省略時の実際の挙動はコード未確認で、command-team の既存の記述を根拠にした。
+5. 改善案: `.agents/skills/command-team/SKILL.md` の「スレッド名」の箇条も「省略すると…」の適用先が曖昧なので、別 Issue で「`t3 thread start` の `--title` を省略したとき」の限定を足すとよい。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）
