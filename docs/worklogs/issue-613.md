@@ -47,3 +47,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 の「修正依頼」に「main 側の別 PR の修正を待つときは、その PR の状態を、自分の PR の通知のたびに `pr view <番号> --json state` で確かめる」と足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: 4da48537a6ee6079983caca99bda3f7047a87b0e
+
+1. 詰まった箇所: `scripts/agent-gh` のサブコマンドの判定: 拒否リスト（`-c core.hooksPath`・`--config-env`・連結形）では、`-c include.path=<file>`（file に `hooksPath = /dev/null`）や `-c alias.p=push p` で一時フックを外せた（PR #624 の 2 回目のレビュー、must-fix 2 件）。include.path の経路は、試験 `rejected (include.path)` で実際に push されることを再現した。
+2. 曖昧だった文: 「`-c alias.*` を拒否する。または、サブコマンドが alias なら `git config --get alias.<名前>` で展開先を確かめ、push なら同じ確認を掛ける」（PR #624 のレビュー、must-fix 2）。展開先が `!` で始まるシェルの alias なら、push かどうかを判定できない。そのため、展開はせずに alias をすべて拒否する形を選んだ。
+3. 仮定と解釈: グローバルオプションは許可リストを空にし、サブコマンドより前の `-` で始まる引数をすべて exit 2 で拒否する。repo 内に `agent-gh <dev|review> git -...` の呼び出しは無い（`grep -rnoE "agent-gh (dev|review) git [^ ]+"` で確認）。一時フックの `-c core.hooksPath` は `git_cfg` の最後に置く。呼び出し元はグローバルオプションを渡せないので、サブコマンドの直前に当たる。repo・利用者・環境変数の設定にある alias は `git config --get alias.<サブコマンド>` で拒否する（git の alias は組み込みを上書きできない）。pre-push フックを通らない `send-pack`・`http-push`・`remote-*` も拒否した。
+4. 足りなかった情報・検証手段: `--attr-source <tree>` のような値を取るグローバルオプションの取りこぼしは、グローバルオプションの全拒否で起きなくなった。`git remote-https` を App の認証で直接使えるかは確かめていない（`remote-*` の拒否で塞いだ）。`mise run verify` exit 0（script-test: 46 tests ok）。
+5. 改善案: `docs/agents/` か `scripts/agent-gh` の冒頭のコメントに「agent-gh の git の入口は、グローバルオプションも alias も受け付けない。サブコマンドを最初の引数に書く」と、呼び出し側の決まりとして書く。
+
+使ったスキル: implement-issue
