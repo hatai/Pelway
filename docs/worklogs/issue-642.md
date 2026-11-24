@@ -29,3 +29,15 @@
 9. 改善案: `push_targets` は引数の形の記録（push_raw/pos_idx/expand_idx）と検査の対象外フラグ（push_no_gate/push_no_pin）をまとめて返すため、push 関連の引数解析はここに集約して増やすこと。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3・codex r2 must-fix 対応）
+
+対象 head: 09cb4299da408cb152a3ba0d1b4c046c97263084
+
+1. 詰まった箇所: PR が main と CONFLICTING（`scripts/agent-gh`・`scripts/tests/agent-gh.test.sh`）。main に入った #613 の一時 pre-push フックは Git が解決した後の送る ref・sha・接続先 URL を受けるため、round 2 の dry-run・pin・引数の組み直しを捨て、ゲートをそのフックの中（`scripts/agent-gh-pr-size-gate`）へ移して衝突を解いた。main 側（#613）は全部残した。
+2. 曖昧だった文: 「着手の時点でマージ済みなら、その上に作る。」（Issue #642 の「背景・前提」）。round 2 までは #613 が未マージだった。「着手の時点」を round ごとの修正の着手と読み、マージ済みの #613 の上に作り直した。
+3. 仮定と解釈: Git が送るものとゲートが検査したものの食い違いが 2 round 続いた。そこで、push の引数を一切解釈せず、Git の pre-push の入力だけを測る決まりを全経路に当てた。must-fix 2 の「試行結果を確定できない」は、試行をやめたため構造上起きない。終了コード 6 は受け入れ条件ではない（「0 以外」）ため廃止し、git の終了コードを返す。`--dry-run` でも Git がフックを呼ぶため検査する（round 2 の「dry-run は検査しない」は撤回）。
+4. 足りなかった情報・検証手段: フックの中の `git` は exec-path の本物で、偽の git の記録（numstat の有無）では測定を確かめられない。remote の ref・標準エラー・偽 gh の記録で照合し直した。例外の試験では接続先 URL を github.com のまま輸送するため、`remote.<名>.vcs` の偽の remote helper（connect でローカルの bare につなぐ）を置いた。呼び出し元の TMPDIR が相対パスのときに pr-size.sh の mktemp が失敗する不具合は、#613 の既存の試験（rel_tmpdir_ok）が見つけた。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「### 1. 調べる（Prior art first）」に「push の前の検査を足す Issue では、採用する方式に『scripts/agent-gh の一時 pre-push フックの入力（Git が送る ref・sha・接続先 URL）で検査する』と書く。push の引数から送るものを推定する方式は、Git の解決（upstream・remote.<名>.push・pushRemote・insteadOf・否定形のオプション）とずれる」を足す。
+
+使ったスキル: implement-issue
