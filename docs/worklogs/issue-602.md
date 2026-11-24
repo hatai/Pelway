@@ -57,7 +57,6 @@
 使ったスキル: `implement-issue`、pstack の `poteto-mode`（principle-laziness-protocol・principle-minimize-reader-load）
 ## 実装者メモ（round 7）
 対象 head: 0eaebb166fa0eefb684bc321745917f623b658d9
-
 1. 詰まった箇所: 「Issue の読み取りと最後の events の取得の間の付与・開閉を確かめ直す」を、events の最後の付け外しだけで決めると、モックの `issue_with` が `labeled_at` より前に必ず仕込む `unlabeled` の `needs-human` が最後のイベントになり、「ラベルは付いているのにイベントがまだ出ていない」場面（場面 13・25・33・34）を人間待ちと取り違えた。`needs-human` は「Issue のラベルにある、または最後の events の `needs-human` の付け外しが `labeled`」のどちらかで見る形に直した。一覧外の記録を残す範囲を `held`・`removed` 両方にすると、場面 6 の「`needs-decision` が外れたら記録を消す」が壊れたので、残すのは `held` だけにした。
 2. 曖昧だった文: 「付与が続いている間は通知済み記録を保持してください」（PR #610 の round 6 の codex のレビューの must-fix 2）。一覧外の Issue は「付与が続いているか」を読まずに判断する必要があり、読めない場合に残すか消すかが書かれていない。
 3. 仮定と解釈: Issue の読み取りとの間の変更は events の方が新しいと解釈し、開いているかは最後の `closed`/`reopened` イベント、`needs-human` の付与はラベルか最後の `needs-human` の付け外しで見る（ラベルがあって `unlabeled` が後から返る場合は保守的に人間待ちとして次の周に回す）。一覧外の `held` は、同じ `labeled_at` の付与がまだ有効か確かめられなくても残す（付与が終わっていたとしても、新しい付与には新しい `labeled_at` が付くので残した記録は使われない）。前の `labeled_at` の `added` 記録は、新しい付与の `labeled` が見えた時点で前の付与の解除は確定とみなし、完了を 1 回報告してから消す。
@@ -67,7 +66,6 @@
 使ったスキル: `implement-issue`
 ## 実装者メモ（round 8）
 対象 head: 1e4748c7847fd096a85bc62a883058f3c096e535
-
 1. 詰まった箇所: 手順 6 の push: ローカルブランチ `agent/602-decision-escalation-r8` に upstream が無く、`agent-gh-resign` が何もせずに終わった。upstream を設定すると、今度はこのブランチにしか無いマージ `401a7a5b` が署名の範囲に入り「表現できない」で止まった。`b7efc229` を指す一時の `refs/remotes/` を置いて範囲を新しいコミットだけにし、署名を付けてから一時の ref を消した。CI の static は、main で広がった shellcheck（`scripts/` 全体、warning 以上）が既存の `reset` の `rm -rf "$MOCK"/*` に SC2115 を出して落ちた（ローカルの verify は main を取り込んでいないので通った）。`${MOCK:?}` に直した。
 2. 曖昧だった文: 「行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる」（`implement-issue` の「止まる条件」）。同じ場面の 2 つの確認を `eq "$(a)|$(b)"` の 1 つにまとめることが「重複の除去」に入るかが書かれていない。
 3. 仮定と解釈: 期待値を完全一致のまま保つなら、確認をまとめても確かめ方は弱まらないと解釈した（診断の細かさは落ちる）。場面 34 の 757 は 755 と準備も確認も同じなので外した。準備をまとめた `once` は argv で受け、準備の失敗は FAIL に数える（`set -e` が無く、黙って進むと「通常どおり格上げ」の場面が準備なしでも通るため）。前の実装（`0eaebb16^`）に当てた FAIL は 14 件から 11 件になり、減った分はまとめた確認と外した重複だけ。
@@ -77,7 +75,6 @@
 使ったスキル: `implement-issue`
 ## 実装者メモ（round 9）
 対象 head: 72e5fd81d1ad6a4cf65f00bea8c3bddc91afa1aa
-
 1. 詰まった箇所: `scripts/tests/conductor-watch-decision.test.sh` 場面 16 の「指揮役がいれば外し直さず、読みもしない」が、codex round 8 の must-fix 2（指揮役がいても前の付与の完了は events で照合する）とぶつかった。読むことを許し、書かないことだけを確かめる形に替えた。追加 800 行の残りが 18 行しかなく、3 場面の追加と同じだけ既存の確認の対を `|` でまとめた。`mise run verify` の 1 回目が `pelway-agent-watch` の `once.rs:859`（FIFO・symlink の 3 件）で落ち、単独の再実行と 2 回目の verify は通った（触っていない crate の時間依存の揺れ）。
 2. 曖昧だった文: 「指揮役の有無で制限するのは GitHub への書き込みとし、履歴から前の付与の完了を確認する処理は続けてください」（PR #610 の codex round 8 の must-fix 2）。同じ `labeled_at` の途中の記録でも、指揮役がいる周に events を読むかが書かれていない。
 3. 仮定と解釈: 途中の記録（`commented`・`adding`・`added`）がある両方のラベルの Issue は、指揮役の有無によらず events を読み、`escalate` を呼ぶのは指揮役がいない周だけと解釈した（読む量は記録のある Issue に限られる）。最初の events に一覧の後の `needs-human` の付与かクローズが出ていれば `overdue` を出さず通知済みにもしないが、格上げの判定は `escalate` の書く直前の読み直しに任せる。
@@ -87,7 +84,6 @@
 使ったスキル: `implement-issue`
 ## 実装者メモ（round 10）
 対象 head: 71f35e8d4814b1878ed4c55e0b97630878b5c4dc
-
 1. 詰まった箇所: `scripts/conductor-watch.sh` の補助記録（`waiting_on` の導出）は一覧のラベルだけを見るので、round 9 で `DECISION overdue` を抑えた「一覧の後に events で `needs-human` が付いた」周に、`grokbot` と 15 分の期限が残った（codex round 9 の must-fix）。その周に見えた Issue を `late_human` に入れ、補助記録でも `human` にした。追加 800 行の残りが無く、場面 1・6・11・16・30・34・36・38 の確認の対をまとめて空けた。
 2. 曖昧だった文: 「イベントで確認済みの `needs-human` を補助記録のラベル判定にも反映し、人間待ちの期限を使ってください」（PR #610 の codex round 9 の must-fix）。`labels`（補助記録の `labels` の値）にも `needs-human` を足すかが書かれていない。
 3. 仮定と解釈: `waiting_on`・`next_owner`・期限だけを `human` にし、記録する `labels` は一覧の値のままにした（次の周に一覧が追いつけば同じ結果になり、指揮役の `grokbot` を保つ判定の `labels` の比較を崩さない）。
@@ -97,7 +93,6 @@
 使ったスキル: `implement-issue`
 ## 実装者メモ（round 11）
 対象 head: 04a8380bbd8aa88edae4dbc6394d77557a50ddf8
-
 1. 詰まった箇所: codex round 10 の印の nit（記録項目の説明に `reason`）を足す分の行を、試験の補助（`once`・`check`）と確認の対のまとめで空けた（+787/-36）。
 2. 曖昧だった文: 「PR 本文の `escalation.json` の項目一覧もそろえ」（codex round 10）。本文のどの一覧かは文脈からの判断。
 3. 仮定と解釈: 印の nit はコード側 2 か所（`conductor-watch.sh`・runbook）と PR 本文（項目一覧・メモの範囲）と解釈した。
@@ -107,7 +102,6 @@
 使ったスキル: `implement-issue`
 ## 実装者メモ（round 12）
 対象 head: 841bad17dc584f424594e3c274b95210f73cbc7a
-
 1. 詰まった箇所: devin round 11 の印の nit（`reason=` の取りこぼし値 `resumed` が文書の値に無い）を `or 'resumed'` の除去で直し、行を相殺するためコメントを畳んだ（+789/-36）。
 2. 曖昧だった文: 「取りこぼしを外すか、値を文書に足す」のどちらかは任されていた（外す方を選んだ）。
 3. 仮定と解釈: 記録は `remember` が必ず `reason` を付けるので、`or reason` までのフォールバックで十分と判断した。
@@ -139,5 +133,13 @@
 2. 曖昧だった文: 引数の衝突の解消法は書かれていない（round 14 と同じ形の判断）。`threads_ok` と `thread_err` の対応も文書に無い
 3. 仮定と解釈: 「一覧の取得に失敗した周は判定しない」の条件を `threads_ok` から `thread_err is None` に読み替えた（同じ意味）。main の `now`・`stamp`（巡回時刻の差し替え）と、こちらの `iso`・`agent_gh`・`gh_json`（格上げ・裏付けの読み取り）は両方残した
 4. 足りなかった情報・検証手段: `conductor-watch*.test.sh` 8 本（#651 の `conductor-watch-thread-list-fail.test.sh` を含む）pass。`mise run verify` は `script-test` 50 件中 `.agents/skills/verify-pelway/verify-run.test.sh` のみ失敗（round 14 と同じ sandbox 環境起因）、ほか全 pass
+5. 改善案: なし
+使ったスキル: `implement-issue`
+## 実装者メモ（round 16）
+対象 head: dd4957fa51c0a9c146d3e9ec7653890d618cdf25
+1. 詰まった箇所: 両レビューが approve で残った `[文書のずれ]` の nit（PR 本文「変更内容」が `rm -f "$D/threads.json"` の仕組みを説明しているが head では #651 の `threads.json.new`・`fetch_threads` に替わっている）を本文の書き換えで解消。印なし nit（場面 39 の `!= 900` は期限の欠落・読み取り失敗でも成立する）は、アサーションを「日時として読める数値で、かつ 900 でない」に強めた。同じ形の場面 5 も同じ修正にした
+2. 曖昧だった文: なし
+3. 仮定と解釈: 場面 5 の同じ `!= 900` も同じ弱点なので一緒に直した（同じ指摘が次の round で出るのを防ぐ）
+4. 足りなかった情報・検証手段: `conductor-watch-decision.test.sh` 全 pass。この round は `[文書のずれ]` の nit の round（回数の上限に数えない）
 5. 改善案: なし
 使ったスキル: `implement-issue`
