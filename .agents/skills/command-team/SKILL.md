@@ -223,7 +223,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 ### hatai のレビューの扱い
 
-有効な Approve: `pelway-review` の最新の有効なレビューが APPROVED で、対象が主 PR の現在の head であるもの（head が変われば失効し、レビューが無いものとして扱う。dismiss されたレビューは数えない）。投稿したレビュー担当が後から `error:` が `設定の不備:` で始まる `verdict: failed` を報告したレビューは、Approve・Request changes のどちらも数えない（fail-closed のツール一覧チェックに失敗したレビューは結果を採用しない決まりによる。GitHub 上の投稿は残るため、環境の修復と投稿の dismiss は人間が扱う。同じ環境では同じ結果になるため、再委託では置き換えない）。
+有効な Approve: `pelway-review` の最新の有効なレビューが APPROVED で、対象が主 PR の現在の head であるもの（head が変われば失効し、レビューが無いものとして扱う。dismiss されたレビューは数えない）。投稿したレビュー担当が後から `error:` が `設定の不備:` で始まる `verdict: failed` を報告したレビューは、Approve・Request changes のどちらも数えない（fail-closed のツール一覧チェックに失敗したレビューは結果を採用しない決まりによる。GitHub 上の投稿は残るため、環境の修復と投稿の dismiss は人間が扱う。同じ環境では同じ結果になるため、再委託では置き換えない）。その報告の対象は、対象 PR に残される `[review-invalid]` の記録（対象の PR・SHA・レビューを特定する行頭の定型コメント。形と残し方・照合は skill `implement-issue` の手順 9「投稿後の `設定の不備:` の記録」）で確かめる。記録があり記録のレビューが `DISMISSED` でないあいだ、そのレビューは GitHub のレビュー状態にかかわらず数えない — 承認の判定はこの定義を通るため、環境の修復と dismiss の確認までは Ready to merge にも `automerge` にも進まない。
 
 hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終了条件・Status の扱い）と、hatai が紐づく PR にレビュー・コメントを投稿したときの伝達の手順は、`docs/agents/command-team-details.md` の「hatai のレビューの扱い」に従う。巡回での検知と Status の反映は runbook の「ボードと巡回」の「hatai のレビューに関する連動」が正本。
 

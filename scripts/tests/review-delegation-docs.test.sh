@@ -93,6 +93,19 @@ check fail_closed_spec docs/superpowers/specs/agent-team.md \
   '結果を採用しない' \
   '投稿済みのレビュー'
 
+# 投稿後の設定不備は [review-invalid] の記録として PR に残し、実装担当の再開手順と
+# 指揮役の承認判定の両方で照合する。記録のレビューが DISMISSED になるまで停止を維持する（Issue #581 r2）。
+check fail_closed_record_implement .agents/skills/implement-issue/SKILL.md \
+  '[review-invalid] head: <SHA> review:' \
+  '投稿後の `設定の不備:` の記録' \
+  '記録のレビューが `DISMISSED` でない'
+check fail_closed_record_command_team .agents/skills/command-team/SKILL.md \
+  '[review-invalid]' \
+  '記録のレビューが `DISMISSED` でない'
+check fail_closed_record_runbook docs/agents/grokbot-runbook.md \
+  '[review-invalid]' \
+  'DISMISSED'
+
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
   exit 1
