@@ -204,7 +204,7 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 
 ### MCP の `t3_thread_launch` と `t3_thread_send` の引数
 
-実装・レビュー・調査のスレッドを MCP の `t3_thread_launch` で立てるときの引数の例。`title` は `t3_thread_launch` のツール定義上の必須項目で、省略すると T3 が `-32602`（引数の誤り）を返す。「省略すると最初の指示の 1 行目がタイトルになる」という既定動作があるのは CLI の `t3 thread start` の `--title` 側であり、こちらも省略しない（スレッド名の形式は skill `command-team` の「スレッド名」）。`modelSelection.instanceId` にはこの手順書の provider の名前（`opencode`・`acpRegistry_devin`・`codex_review`・`claude_review`・`devin_review`）、`runtimeMode` には `approval-required`・`auto-accept-edits`・`auto`・`full-access` のどれか、`workspaceStrategy.type` には `root`・`existing_worktree`・`worktree` のどれかを入れる。effort は `modelSelection.options` に入れる（opencode なら `variant`、Devin CLI なら `thought_level`）。`acpRegistry_devin`（Devin CLI）に割り当てるときは `runtimeMode` の指定が無い（「レビューを始める」の Devin CLI の項を参照）。`workspaceStrategy.branch` には CLI の形と同じブランチ名を入れる（実装は `agent/<N>-<slug>`、レビューは `review/<M>-<k>`、調査は `agent/investigate-<slug>`）。
+実装・レビュー・調査のスレッドを MCP の `t3_thread_launch` で立てるときの引数の例。`title` は `t3_thread_launch` のツール定義上の必須項目で、省略すると T3 が `-32602`（引数の誤り）を返す。「省略すると最初の指示の 1 行目がタイトルになる」という既定動作があるのは CLI の `t3 thread start` の `--title` 側であり、こちらも省略しない（スレッド名の形式は skill `command-team` の「スレッド名」）。`modelSelection.instanceId` にはこの手順書の provider の名前（`opencode`・`acpRegistry_devin`・`codex_review`・`claude_review`・`devin_review`）、`runtimeMode` には `approval-required`・`auto-accept-edits`・`auto`・`full-access` のどれか、`workspaceStrategy.type` には `root`・`existing_worktree`・`worktree` のどれかを入れる。effort は `modelSelection.options` に入れる（opencode なら `variant`、Devin CLI なら `thought_level`。opencode で effort が `default`（通常）のときは `variant` を入れない）。`acpRegistry_devin`（Devin CLI）に割り当てるときは `runtimeMode` の指定が無い（「レビューを始める」の Devin CLI の項を参照）。`workspaceStrategy.branch` には CLI の形と同じブランチ名を入れる（実装は `agent/<N>-<slug>`、レビューは `review/<M>-<k>`（Claude は `review/<M>-c<k>`、Devin CLI は `review/<M>-d<k>`）、調査は `agent/investigate-<slug>`）。
 
 ```json
 {
@@ -217,7 +217,7 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
   },
   "runtimeMode": "auto-accept-edits",
   "workspaceStrategy": {"type": "worktree", "branch": "agent/<N>-<slug>", "baseRef": "main"},
-  "message": "Issue #<N> を実装する。skill implement-issue に従う。",
+  "message": "Issue #<N> を実装する。skill implement-issue に従う。\nAssigned: role=implement agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>",
   "clientRequestId": "<新しく作る一意の ID>"
 }
 ```
