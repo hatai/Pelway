@@ -23,3 +23,15 @@
 5. 改善案: `docs/agents/command-team-details.md` の「hatai のレビューの扱い」に「`設定の不備:` のエスカレーションで残った投稿済みレビューを誰が dismiss するか」を足す。
 
 使ったスキル: implement-issue、receiving-code-review
+
+## 実装者メモ（round 3）
+
+対象 head: a998dd40
+
+1. 詰まった箇所: worktree の用意: このスレッドに割り当てられた worktree（`t3-d4c9a861`、ブランチ `t3/fail-closed-approve-config-gate`、head は無関係の impl-669 のコミット）は対象ブランチを checkout しておらず、共有の `.git/config` が読み取り専用で upstream を設定できなかった（agent-gh-resign が push 後に付け替えるブランチの推定に使う）。`agent/581-fail-closed-tool-check` を checkout している空きの worktree（`t3-87e45af5`）で作業した（round 2 と同じ回避。もう 1 つの `t3-7f831f70` には別作業の未コミットの staged 変更が残っていたため触らなかった）。その worktree はこのスレッドの sandbox からは読み取り専用で、ファイルの変更は worktree 内の git コマンドでは行えなかった。
+2. 曖昧だった文: 「投稿後の設定不備を受けたときに対象の PR・SHA・レビューを特定できる記録を残し」（codex r2 の must-fix）
+3. 仮定と解釈: 記録は対象 PR への定型コメント（行頭 `[review-invalid] head: <SHA> review: <URL>`）と解釈した（`[review-request]` の委託記録コメントと同じ仕組みで、再開する別スレッドと指揮役の両方が GitHub 上で読める）。レビューの特定は REST の整数 id（`#pullrequestreview-<id>` の URL）とし、照合はその id のレビューの state を読む形にした。「停止の維持」は、記録のレビューが `DISMISSED` でないあいだ再開・再委託しない形にし（dismiss が人間による環境修復の確認の印になる）、`DISMISSED` になったら記録は解消済みとして通常の再開（手順 8 の再委託）に戻る形にした。
+4. 足りなかった情報・検証手段: 「そのレビュー」を一意に指す手段が `pr view --json reviews`（node id と対象コミットしか取れない）だけでは URL に使う整数 id に届かず、REST API `pulls/<M>/reviews` の `id` を使う形にした。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 3 に、「割り当ての worktree が対象ブランチを checkout していない・`.git/config` が書けないときは、対象ブランチを checkout しているほかの worktree で作業する」旨を足す（round 2 と今回で 2 度起きた）。
+
+使ったスキル: implement-issue、writing-for-agents
