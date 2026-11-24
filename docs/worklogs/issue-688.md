@@ -51,3 +51,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の例を 1 つに絞り、provider ごとの差分（instanceId・options・runtimeMode・branch）を表で示す形にすると、例の肥大と食い違いを減らせる。
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）
+
+## 実装者メモ（round 5）
+
+対象 head: <push 後に記入>
+
+1. 詰まった箇所: 手順 9: round 4 の Approve に印 nit 2 件（runbook:207 の `devin_review` に合わない 2 文、PR 本文が round 1 のまま古い）。印 nit round の上限は hatai の決定（t629u）で無効化され継続中。Codex の委託は利用上限（4:39 AM JST リセット見込み）で blocked。
+2. 曖昧だった文: 「effort は `modelSelection.options` に入れる（…Devin CLI なら `thought_level`…）」「`acpRegistry_devin`（Devin CLI）に割り当てるときは `runtimeMode` の指定が無い」（`docs/agents/grokbot-runbook.md` の「MCP の `t3_thread_launch` と `t3_thread_send` の引数」）
+3. 仮定と解釈: `acpRegistry_devin` と `devin_review` は別の provider なので、「Devin CLI に割り当てるとき」の記述を `acpRegistry_devin`・`devin_review` の両名に広げる解釈を採った。`devin_review` の `options` は `mode` のみで `thought_level` を渡せない制約も同じ段落に添えた。PR 本文の印 nit（初めて本文自身が対象になった）は、レビューが読む現状の記述として全面更新した。
+4. 足りなかった情報・検証手段: `devin_review` に `runtimeMode`・`thought_level` を渡したときの T3 の挙動は未検証（レビューの未確認と同じ）。
+5. 改善案: `docs/agents/grokbot-runbook.md` の「MCP の…引数」節に、provider ごとの `options`・`runtimeMode` の可否の対応表を足すと、箇条書きの組み合わせ漏れを減らせる。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）
