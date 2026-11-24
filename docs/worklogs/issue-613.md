@@ -119,3 +119,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 の verify の段に「git の引数解釈に関わる検査を実装したときは、`git <sub> -h`・builtin のオプション定義・parse-options のフラグを一次情報として残し、実測で確かめた挙動も書く」と足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 11）
+
+対象 head: 0e1646f5f232279a50e97a1deb9e398e4bbe46df
+
+1. 詰まった箇所: 指揮役の補足で、codex r2 の must-fix への対応を絞るよう指示があった。claude が debd0ad9 を approve しつつ「git の引数解析を再実装してはいけない」と codex must-fix に反論していたため、両者を踏まえ、検査が扱うオプションの「値を消費する位置」だけを教える形に直した。round 10 で実装したサブコマンドごとの値オプション表（val_longs・val_shorts）は取りやめ、一律走査に戻したうえで `-o`（--push-option・--server-option）の次の引数・オプション位置の `--` の後ろ・ls-remote の最初の位置引数の後ろの参照パターンだけを検査しない形にした。
+2. 曖昧だった文: 「検査が扱うオプションの『値を消費する位置』だけを正確に教える限定的な修正に留める」（指揮役の [指揮役・補足] コメント）。
+3. 仮定と解釈: 「値を消費する位置」は、must-fix で挙がった -o 系（push の --push-option・fetch・pull・ls-remote の --server-option）の次の引数と、オプションの位置の `--` の後ろの位置引数と解釈した。-o の省略形（--push-opt など）や、ほかの値を取るオプション（fetch の --jobs・pull の -s など）の値は区別せず一律に走査する。git はそれらを値として読むが、誤って値と見なした側の誤りは拒否側に倒れ、安全側には倒れない。`--` はオプションの位置に置かれたときだけ解釈を終え、-o が値として消費した `--` は終端にしない（`git push -o -- --no-verify` は git 側でも --no-verify が効く）。
+4. 足りなかった情報・検証手段: `bash scripts/tests/agent-gh.test.sh` ok。`mise run verify` は round 9・10 と同じ sandbox 起因で実行できない。
+5. 改善案: レビュー担当どうしの判定が割れたとき（approve と request-changes の混在）、指揮役が両方の立場を踏まえた修正方針を出す流れがある。その方針の文面を必ず Issue か PR のコメントに残す（実装者が判断の根拠を後から追えるように）。implement-issue の「指揮役・人間の決定は受け入れ条件と同じ重さ」の運用と整合する。
+
+使ったスキル: implement-issue
