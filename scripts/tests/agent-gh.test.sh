@@ -353,6 +353,23 @@ push_run push_all --all origin
 expect_push_targets push_all "" 1
 push_run push_mirror --mirror origin
 expect_push_targets push_mirror "" 1
+# 試行（--dry-run / -n、まとめ書きの -fn も）では何も push されないため、resign を呼ばない
+push_run push_dry_run --dry-run origin feature:agent/N
+expect_push_targets push_dry_run "" 0
+push_run push_dry_run_short -n origin feature:agent/N
+expect_push_targets push_dry_run_short "" 0
+push_run push_dry_run_bundle -fn origin feature:agent/N
+expect_push_targets push_dry_run_bundle "" 0
+# まとめ書きの削除（-fd）でも resign を呼ばない
+push_run push_delete_bundle -fd origin agent/X
+expect_push_targets push_delete_bundle "" 0
+# まとめ書きの末尾が -o のとき、次の引数はその値（remote と取り違えない）。
+# -f + -o のまとめ書きはスペルチェッカの誤検出になるため -u + -o（-uo）で確かめる
+push_run push_bundle_option_tail -uo ci.skip origin feature:agent/Z
+expect_push_targets push_bundle_option_tail "origin/agent/Z" 0
+# 名前空間つきの宛先 refs/heads/refs/topic は、ブランチ名 refs/topic として署名対象に入る
+push_run push_refs_heads_branch origin x:refs/heads/refs/topic
+expect_push_targets push_refs_heads_branch "origin/refs/topic" 0
 
 run bad_role admin pr list
 [[ "$RC" == 2 ]] || failures+=("bad_role: exit $RC, want 2")

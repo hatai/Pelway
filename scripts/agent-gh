@@ -270,8 +270,8 @@ esac
 # - 削除（:dst、-d / --delete）とブランチ以外（refs/tags/ など refs/heads/ でない refs/）は対象にしない
 # - src:dst は dst、コロンの無い refspec はそれ自身（HEAD は今のブランチ名）。先頭の + と refs/heads/ は除く
 push_targets() {
-  push_remote="" push_branches=() push_fallback=0
-  local positional=() delete=0 a spec dst b seen
+  push_remote="" push_branches=() push_fallback=0 push_dry_run=0
+  local positional=() delete=0 a spec dst b seen i
   while (($#)); do
     a="$1"
     shift
@@ -279,7 +279,19 @@ push_targets() {
       --) positional+=("$@"); break ;;
       -o | --push-option | --receive-pack | --exec) shift ;;
       -d | --delete) delete=1 ;;
+      -n | --dry-run) push_dry_run=1 ;;
       --all | --branches | --mirror | --tags | --prune | --repo | --repo=*) push_fallback=1 ;;
+      -[!-]*)
+        # まとめ書きの短いオプションを 1 文字ずつ見る（-fn の dry-run、-fd の削除）。
+        # -o は残り（無ければ次の引数）を値に取るため、そこで走査を止める。
+        for ((i = 1; i < ${#a}; i++)); do
+          case "${a:i:1}" in
+            n) push_dry_run=1 ;;
+            d) delete=1 ;;
+            o) ((i == ${#a} - 1)) && shift || :; break ;;
+          esac
+        done
+        ;;
       -*) ;;
       *) positional+=("$a") ;;
     esac
@@ -304,8 +316,11 @@ push_targets() {
       [[ -n "$dst" ]] || { push_fallback=1; continue; }
     fi
     [[ "$dst" != *'*'* ]] || { push_fallback=1; continue; }
+    # 名前空間を先に判定する（refs/heads/ を除いてから refs/* を見ると refs/heads/refs/topic が外れる）。
+    if [[ "$dst" == refs/* && "$dst" != refs/heads/* ]]; then
+      continue # タグなど、ブランチ以外
+    fi
     dst="${dst#refs/heads/}"
-    [[ "$dst" != refs/* ]] || continue # タグなど、ブランチ以外
     seen=0
     for b in ${push_branches[@]+"${push_branches[@]}"}; do [[ "$b" != "$dst" ]] || seen=1; done
     ((seen)) || push_branches+=("$dst")
@@ -332,12 +347,16 @@ if [[ "${1:-}" == "git" ]]; then
       resign="$(cd "$(dirname "$0")" && pwd)/agent-gh-resign"
       push_targets "${@:2}"
       resign_rc=0
-      if ((push_fallback)); then
-        GH_TOKEN="$token" bash "$resign" || resign_rc=$?
+      if ((push_dry_run)); then
+        : # --dry-run / -n の試行では何も push されていないため、署名の付け直しは呼ばない
+      else
+        if ((push_fallback)); then
+          GH_TOKEN="$token" bash "$resign" || resign_rc=$?
+        fi
+        for t in ${push_branches[@]+"${push_branches[@]}"}; do
+          GH_TOKEN="$token" bash "$resign" "$push_remote" "$t" || resign_rc=$?
+        done
       fi
-      for t in ${push_branches[@]+"${push_branches[@]}"}; do
-        GH_TOKEN="$token" bash "$resign" "$push_remote" "$t" || resign_rc=$?
-      done
       if ((resign_rc != 0)); then
         echo "agent-gh: 署名付きコミットへの付け替えに失敗しました（push 自体は成功）。再度 push すると再試行されます。スキップは PELWAY_AGENT_SKIP_RESIGN=1" >&2
         exit 4

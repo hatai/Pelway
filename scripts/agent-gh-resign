@@ -46,7 +46,12 @@ tracking="refs/remotes/$remote/$branch"
 tip="$(git rev-parse --verify -q "$tracking" 2>/dev/null || true)"
 if [[ -z "$tip" ]]; then
   # 追跡 ref が無い（push 先の名前と追跡 ref の食い違い、URL への push など）。付け直せないことを知らせる。
-  warn "追跡 ref $tracking が無いため、$remote の $branch の署名を付け直せません。push したコミットは署名なしのまま残ります"
+  # remote には資格情報付きの URL が来ることがあるため、登録済みのリモート名のときだけ値を出す。
+  if git remote | grep -qxF -- "$remote"; then
+    warn "追跡 ref $tracking が無いため、$remote の $branch の署名を付け直せません。push したコミットは署名なしのまま残ります"
+  else
+    warn "追跡 ref が無いため、$branch の署名を付け直せません（push 先は登録済みのリモート名ではありません）。push したコミットは署名なしのまま残ります"
+  fi
   exit 0
 fi
 

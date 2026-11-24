@@ -333,6 +333,16 @@ err="$(cat "$ROOT/resign_no_tracking.err")"
 [[ "$err" == *署名なし* ]] || failures+=("resign_no_tracking: stderr does not say the commits stay unsigned ('$err')")
 [[ ! -s "$CALL_LOG" ]] || failures+=("resign_no_tracking: api was called")
 
+# --- 11. push 先が登録済みのリモート名でない（URL など）とき、警告にその値を出さない（#641 round 2） ---
+# 資格情報付き URL が標準エラーに残ると、stderr を保存するログに資格情報が残るため。
+run_resign resign_url_remote 'https://x-access-token:SECRET-VALUE-123@github.com/hatai/Pelway.git' agent/nope
+[[ "$RC" == 0 ]] || failures+=("resign_url_remote: exit $RC, want 0")
+err="$(cat "$ROOT/resign_url_remote.err")"
+[[ "$err" == agent-gh-resign:* ]] || failures+=("resign_url_remote: stderr does not start with agent-gh-resign: ('$err')")
+[[ "$err" == *agent/nope* && "$err" == *署名なし* ]] || failures+=("resign_url_remote: stderr lacks branch/unsigned ('$err')")
+[[ "$err" != *SECRET-VALUE-123* && "$err" != *'x-access-token'* ]] || failures+=("resign_url_remote: credential-like value leaked ('$err')")
+[[ ! -s "$CALL_LOG" ]] || failures+=("resign_url_remote: api was called")
+
 if ((${#failures[@]})); then
   printf 'FAIL %s\n' "${failures[@]}"
   exit 1
