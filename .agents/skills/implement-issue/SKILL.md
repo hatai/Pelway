@@ -147,8 +147,6 @@ EOF
 
 Kodiak が main をマージして PR ブランチの remote の先端が進んでいることがある。修正の round（remote に PR ブランチがある 2 round 目以降）では、修正を始める前、作業ツリーに未コミットの変更が無いうちに、PR ブランチの remote の先端を fetch し、進んでいれば fast-forward で取り込む。手元の先端は前の round の push の後に `scripts/agent-gh-resign` が remote と同じコミットに付け替えているため、fast-forward できる。初回（remote にブランチがまだ無い）はこの段を飛ばす。
 
-ローカルのブランチ名が PR ブランチと違うとき（引き継ぎ・再開・手当てで `<PRブランチ>-r<N>` の作業ツリーにいるとき、修正 round の子で委託元と違うブランチ名のとき）は、この手順の `fetch`・`push` の形ではなく、`docs/agents/grokbot-runbook.md` の「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」の節の fetch と push の形に従う（`git push origin HEAD` は upstream を見ず同名のブランチに push するため、そのままでは PR の head は動かない）。
-
 ```bash
 scripts/agent-gh dev git fetch origin <ブランチ>
 scripts/agent-gh dev git merge --ff-only origin/<ブランチ>
@@ -166,6 +164,7 @@ mise run pr-size
 scripts/agent-gh dev git push origin HEAD
 ```
 
+- ローカルのブランチ名が PR ブランチと違うとき（runbook「4. 仕事の始め方」→「既存の PR ブランチを引き継ぐ」で立てた `<PRブランチ>-r<N>`、修正 round を任せた子の作業ツリー）は、この手順の push（実装コミットの push と、後段の実装者メモの push の両方）を `scripts/agent-gh dev git push origin HEAD:<PRブランチ>` に置き換える。`origin HEAD` のままではローカルと同名の別の remote ブランチができ、既存の PR は更新されない。
 - push の前の段で PR ブランチの remote の先端をもう一度 fetch し、修正の間にまた進んでいれば（`scripts/agent-gh dev git merge-base --is-ancestor origin/<ブランチ> HEAD` が非 0）、`scripts/agent-gh dev git merge origin/<ブランチ>` で取り込み、`mise run verify` をやり直してから push する。手元にコミットがあるので、ここでは fast-forward できない。merge はコミットの後に行うため、作業ツリーに残る未コミットの変更は手順 5 のメモ（`docs/worklogs/issue-<N>.md`）だけで、main の変更と重ならない。衝突したら手順 9 の「修正依頼」の解消の決まりに従う。rebase や force push はしない。
 - `mise run verify` の出力は 1 万行を超え、手元で約 2〜3 分かかる（ビルドのキャッシュが冷えているときや他のビルドと競合するときは 20 分を超える）。コマンドの時間制限を 10 分（600 秒）にするか、バックグラウンドで実行して完了の通知を待つ。出力はファイルに書き出し、全部は読まない。読むのは終了コード、`grep -nE 'FAIL|ERROR' <scratchpad>/verify.log` の行、最後の要約の行（`tail -n 3 <scratchpad>/verify.log`。通れば `Finished in <秒>s`）だけにする。
 - `mise run verify` が失敗したらコミットしない。直してからやり直す。失敗が自分の変更と無関係に見えるとき（実行ごとに失敗箇所が変わる・ツールチェーンの再インストールを伴うなど）は、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 2（再現と最小化）で切り分ける。変更を退避した同じツリーで再現する失敗は環境起因として、verify の内訳と再現確認を PR 本文の「確認方法/検証」に書いて先へ進めてよい。退避で解消する失敗は自分の変更によるもので、直す。
