@@ -14,7 +14,7 @@
 
 ## 実装者メモ（round 2）
 
-対象 head: <round 2 の実装コミットの SHA を push 後に記入>
+対象 head: 8c35ee0105e648914cf9a5b3a7995b7a799d4cb8
 
 1. 詰まった箇所: 手順 3: このスレッドに割り当てられた worktree（`t3-671ed54d`、ブランチ `t3/fail-closed-tool-check`、head は無関係の impl-669 のコミット）は対象ブランチを checkout していなかった。`agent/581-fail-closed-tool-check` は別の worktree（`t3-7f831f70`）で checkout されていたため、そちらで作業した。
 2. 曖昧だった文: 「（投稿の後に失敗で返ったときの扱いは、この手順では決めていない）」（`.agents/skills/implement-issue/SKILL.md` 手順 9）
