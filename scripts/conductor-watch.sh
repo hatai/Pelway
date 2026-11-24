@@ -145,7 +145,7 @@ def env_secs(name, default):  # 間隔の環境変数。数値でなければ設
     except ValueError:
         print(f"WATCHER bad-config {name}={v} default={int(default)}s", flush=True)
         return float(default)
-def safe_to(v):  # watch.log の 1 行に収めるため、宛先はスレッド ID の形に限る（conductor-rebuild の valid_id と同じ文字と長さ）
+def safe_to(v):  # watch.log の 1 行に収めるため、宛先はスレッド ID の形に限る（conductor-rebuild の valid_id が受け付ける文字種と長さと同じ。先頭ハイフンの拒否は対象外）
     s = str(v or "")
     return s if re.fullmatch(r"[A-Za-z0-9:_.%-]{1,256}", s) else "invalid"
 PS_MAX = 4194304  # patrol-state.json の読み取り上限（4 MiB）

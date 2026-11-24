@@ -269,8 +269,9 @@ check "9: heartbeat still emitted on the default" has "$ROOT/out.log" "HEARTBEAT
 check "9: stall detection still works on the default threshold" \
   has "$ROOT/out.log" "WATCHER pending-sends-stalled since=20[^ ]* for=1900s count=1 oldest_to=mcp:t0"
 
-# 試験 10: 宛先がスレッド ID の形（conductor-rebuild の valid_id と同じ・英数字と :_.%- で
-# 256 文字以内）でないときは固定値に置き換える。改行入りの宛先で watch.log に偽の行を
+# 試験 10: 宛先がスレッド ID の形でないときは固定値に置き換える。形は conductor-rebuild の
+# valid_id が受け付ける文字種と長さに限って合わせた（英数字と :_.%- で 256 文字以内。
+# valid_id が別に持つ先頭ハイフンの拒否までは真似ない）。改行入りの宛先で watch.log に偽の行を
 # 書かせない。% を含む正規の宛先（委託スレッドの ID）はそのまま出る。
 reset
 pend_to $((T0 - 1900)) $'x\nTHREAD shared-worktree path=/w threads=a,b'
