@@ -84,7 +84,8 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
        "decision_warned": {} if prev is None else prev.get("decision_warned", {}),
        "shared_notified": {} if prev is None else prev.get("shared_notified", {}),
        "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0),
-       "thread_list": None if prev is None else prev.get("thread_list")}
+       "thread_list": None if prev is None else prev.get("thread_list"),
+       "pending_sends": None if prev is None else prev.get("pending_sends")}
 # ラベル操作の裏付け検査（Issue #405、2026-11-17 の要件変更）。actor だけでは判定しない
 # （エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai に
 # なることがあるため）。needs-human の解除と automerge の付け外しを、イベント時刻の前
@@ -134,6 +135,39 @@ except Exception: prs = []; prs_ok = False
 try: now = float(open(os.environ["PELWAY_WATCH_NOW"]).read().strip())
 except Exception: now = time.time()
 def stamp(ts): return datetime.fromtimestamp(ts).isoformat(timespec="seconds")
+def stampable(ts):  # 地方時の年の範囲を外れる時刻は、読めない since と同じく数に入れないための確かめ
+    try:
+        stamp(ts); return True
+    except Exception:
+        return False
+def deadline_ts(s):  # ISO 8601 を epoch に読む。読めない値（無い・壊れている）は None
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+def env_secs(name, default):  # 間隔の環境変数。数値でなければ設定名を警告して既定値に倒す（見張りを止めない）
+    v = os.environ.get(name)
+    if not v:
+        return float(default)
+    try:
+        return float(v)
+    except ValueError:
+        print(f"WATCHER bad-config {name}={v} default={int(default)}s", flush=True)
+        return float(default)
+def safe_to(v):  # watch.log の 1 行に収めるため、宛先はスレッド ID の形に限る（conductor-rebuild の valid_id が受け付ける文字種と長さと同じ。先頭ハイフンの拒否は対象外）
+    s = str(v or "")
+    return s if re.fullmatch(r"[A-Za-z0-9:_.%-]{1,256}", s) else "invalid"
+PS_MAX = 4194304  # patrol-state.json の読み取り上限（4 MiB）
+def read_ps(path):  # 補助記録は共有 git dir の中。read_request と同じく通常ファイル・待ち・量に限る
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode) or st.st_size > PS_MAX:
+            raise ValueError("not a regular patrol-state file")
+        data = f.read(PS_MAX + 1)  # 確かめの後にファイルが増えても、読み取りは上限で切る
+        if len(data) > PS_MAX:
+            raise ValueError("not a regular patrol-state file")
+        return data
 def iso(s):
     try: return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
     except Exception: return None
@@ -149,10 +183,49 @@ def gh_json(*args):
     except Exception: return None
 # 見張りが動いていることを示す行（Issue #504）。HEARTBEAT_SECS ごとに 1 行。
 # PELWAY_WATCH_HEARTBEAT_SECS で差し替えられる（テスト用）。
-HEARTBEAT_SECS = float(os.environ.get("PELWAY_WATCH_HEARTBEAT_SECS") or 600)
+HEARTBEAT_SECS = env_secs("PELWAY_WATCH_HEARTBEAT_SECS", 600)
 if now - (cur["heartbeat_at"] or 0) >= HEARTBEAT_SECS:
     print(f"HEARTBEAT at={stamp(now)}", flush=True)
     cur["heartbeat_at"] = now
+# 未配送のスレッド指示（patrol-state.json の pending_thread_sends）の滞留（Issue #669）。
+# MCP の send 系障害などで配信されないままの指示を、最古の since からの経過が
+# PENDING_SENDS_SECS（既定 30 分。PELWAY_WATCH_PENDING_SENDS_SECS で上書きできる）を
+# 超えたら知らせる。配列が空・キーが無い・patrol-state.json が読めないときは滞留なしとして
+# 扱う（since を読めない要素は数に入れず、誤検知で止まらない）。滞留の間は HEARTBEAT_SECS
+# ごとに知らせ直し、解消（配列が空になるか最古の since が新しい値に変わる）で回復の行を
+# 1 つ出す。巡回状態（GitHub の一覧）の成否にかかわらず毎巡回動かす。
+PENDING_SENDS_SECS = env_secs("PELWAY_WATCH_PENDING_SENDS_SECS", 1800)
+try:  # 検知の失敗で巡回の後段を止めない（誤検知で止まらない方針と同じ）
+    oldest, pend_cnt, pend_to = None, 0, ""
+    try:
+        psw = json.loads(read_ps(sys.argv[2]))
+        pend_arr = psw.get("pending_thread_sends")
+    except Exception:
+        pend_arr = None
+    if isinstance(pend_arr, list):
+        for e in pend_arr:
+            if not isinstance(e, dict): continue
+            ts = deadline_ts(e.get("since"))
+            if ts is None or not stampable(ts): continue
+            pend_cnt += 1
+            if oldest is None or ts < oldest:
+                oldest, pend_to = ts, safe_to(e.get("to"))
+    pend = cur["pending_sends"] if isinstance(cur["pending_sends"], dict) else None
+    if oldest is not None and now - oldest > PENDING_SENDS_SECS:
+        if pend is None or pend.get("since") != oldest:
+            if pend is not None:
+                print(f"WATCHER pending-sends-recovered since={stamp(pend['since'])} after={int(now - pend['since'])}s", flush=True)
+            pend = {"since": oldest, "notified_at": now}
+            print(f"WATCHER pending-sends-stalled since={stamp(oldest)} for={int(now - oldest)}s count={pend_cnt} oldest_to={pend_to}", flush=True)
+        elif now - pend["notified_at"] >= HEARTBEAT_SECS:
+            pend["notified_at"] = now
+            print(f"WATCHER pending-sends-still-stalled since={stamp(oldest)} for={int(now - oldest)}s count={pend_cnt} oldest_to={pend_to}", flush=True)
+    elif pend is not None:
+        print(f"WATCHER pending-sends-recovered since={stamp(pend['since'])} after={int(now - pend['since'])}s", flush=True)
+        pend = None
+    cur["pending_sends"] = pend
+except Exception as ex:
+    print(f"WATCHER pending-sends-error {type(ex).__name__}", flush=True)
 # スレッド一覧の取得の状態は ok（thread_list が None）か failing の 2 つ。failing の間は
 # 失敗の始まりから HEARTBEAT_SECS ごとに知らせ直す（HEARTBEAT の行とは別に数える）。
 tl = cur["thread_list"]
@@ -512,11 +585,6 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
             if rl.startswith("state: "): st = rl[len("state: "):].strip()
         if k not in inbox_state or at >= inbox_state[k][0]:
             inbox_state[k] = (at, st)
-    def deadline_ts(s):  # ISO 8601 を epoch に読む。読めない値（無い・壊れている）は None
-        try:
-            return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
-        except Exception:
-            return None
     new_subj = {}
     for iss in issues:
         n = str(iss.get("number"))
