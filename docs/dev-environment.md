@@ -702,7 +702,7 @@ bwrap が作る名前空間の要点:
 
 ### /home が読み取り専用のとき /tmp 側で作業する手順
 
-/home が読み取り専用に再マウントされたときは、リポジトリを /tmp 側に clone して作業する。clone 先は `mktemp -d` で作った一意な名前にする（理由は下の箇条）。このとき PATH 上の `fnox`（`scripts/agent-gh` が呼ぶものも同じ）は mise の shim で、shim は作業ディレクトリの `mise.toml` を読む。/tmp 側の clone の設定は信頼済みではなく、`mise trust` の記録も /home 側に書けないため、shim は untrusted で失敗すると推定される。mise 2026.11.11 では untrusted の `mise.toml` だけでは shim は失敗せず（`mise.toml` の無いディレクトリでは 'No version is set' で失敗）、/home が ro の環境で失敗するかとその原因は未特定。次の 2 つで回避する。
+/home が読み取り専用に再マウントされたときは、リポジトリを /tmp 側に clone して作業する。clone 先は `mktemp -d` で作った一意な名前にする（理由は下の箇条）。このとき PATH 上の `fnox`（`scripts/agent-gh` が呼ぶものも同じ）は mise の shim で、shim は作業ディレクトリの `mise.toml` を読む。/tmp 側の clone の設定は信頼済みではなく、`mise trust` の記録も /home 側に書けないため、shim は untrusted で失敗すると推定される。mise 2026.11.11 では untrusted の `mise.toml` だけでは shim は失敗せず（`mise.toml` の無いディレクトリでは 'No version is set' で失敗）、/home が ro の環境で shim が失敗したことは Issue #660 の報告どおりだが、その原因は未特定。次の 2 つで回避する。
 
 ```bash
 # clone 先は mktemp -d で一意に作る。固定の名前（/tmp/Pelway など）は先に作られた同名ディレクトリを git clone が受け入れる
