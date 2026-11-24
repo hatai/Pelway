@@ -61,3 +61,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 の「修正依頼」に「前の実装スレッドが停止して PR ブランチがその worktree に checkout されたままのときは、自分の worktree に別名のブランチ（upstream をリモートの PR ブランチに合わせる）を切って merge し、`HEAD:<PR ブランチ>` で push する」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 7）
+
+対象 head: 7e6c6e774c2c81dd60cb60ecf1de0af5338903ba
+
+1. 詰まった箇所: 手順 9「修正依頼」: `mise run verify` が 1 回目は cargo の fingerprint 書き込み失敗（`target/debug/.fingerprint/.../invoked.timestamp`、ENOENT）、2 回目は共有マシンのディスク 100%（No space left on device）で失敗。空きが戻ってからの 3 回目は `[test]`・clippy・deny-check・shellcheck・hk-check が通り、script-test は `.agents/skills/verify-pelway/verify-run.test.sh` の 6 件（make_run_dir・locks_dir_ready。sandbox 内の /tmp が nobody 所有で dir_chain_safe を満たさない。round 6 と同じ環境起因）だけ失敗した。
+2. 曖昧だった文: 「`main` を取り込み（merge・rebase 禁止）衝突を解消して push」（指揮役の指示）。「merge・rebase 禁止」は字義では merge も禁じるが、手順 9 は「main の取り込みは merge で行い」と定めており、「merge（rebase 禁止）」と解釈した。
+3. 仮定と解釈: 衝突は `scripts/conductor-watch.sh` の python 起動行の 1 箇所だけ。main が `$C`（指揮役スレッドの登録ファイル）を `$PL` と `$trc` の間に足しており、自動 merge された python 側は `sys.argv[5]`=`$C`・`[6]`=`$trc`・`[7]`=`$T3_BIN` を読むため、起動行は main 側を採った（この PR の引数はすべて残る）。落とした側は無い。
+4. 足りなかった情報・検証手段: ディスク満杯で verify が途中失敗した。空きが戻ってからの再実行で残った失敗だけを切り分けたが、verify-run.test.sh の 6 件は sandbox 内の /tmp の所有者を変えられないため、ここでは通せない（CI の runner では /tmp が root 所有）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` 手順 6 の verify の説明に「共有マシンのディスク満杯（No space left on device）は環境起因。空きが戻ってから再実行し、それでも残る失敗だけを切り分ける」を足す。
+
+使ったスキル: implement-issue、fix-merge-conflicts（ユーザーレベル）
