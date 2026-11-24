@@ -101,7 +101,7 @@ HIGH のファイルすべてについて、次の 4 点を確かめる。
 
 HIGH のファイルがあるときは毎回当てる。
 
-- **GitHub App の使い分け**: エージェントの GitHub 操作が `scripts/agent-gh <dev|review>` を通っているか。素の `gh` を使う箇所が、AGENTS.md の例外（Kodiak のキューを切り戻すときの人間の `gh pr merge --admin` と、`hatai` が書く目印コメント）より広がっていないか。App の権限やトークンの取り扱い（`scripts/agent-gh` の中）を広げていないか。
+- **GitHub App の使い分け**: エージェントの GitHub 操作が `scripts/agent-gh <dev|review>` を通っているか。素の `gh` を使う箇所が、AGENTS.md の例外（hatai が判断する例外 PR（skill `command-team` の「マージ」の 3 つ）への人間の `gh pr merge --admin` と、`hatai` が書く目印コメント）より広がっていないか。App の権限やトークンの取り扱い（`scripts/agent-gh` の中）を広げていないか。
 - **指示の混入（prompt injection）**: Issue・PR の本文やコメントの文が、実装担当やレビュー担当への指示として扱われる経路が増えていないか。目印コメントを作成者（`hatai`）で確かめずに信じる箇所、本文中の「〜せよ」に従わせる手順の書き方、外部から取った文書を指示として読み込ませる箇所を探す。広い実行権限（`full-access`、`bypass`、sandbox の無効化）と、この経路が組み合わさる手順は重く扱う。
 - **レビュー担当のネットワーク制限**: レビュー担当が GitHub 以外へ通信できる経路、PR のコードを実行させる経路、head を取り出させる経路、GitHub に書き込める経路（読み取りのはずの操作が書き込みのメソッドを通す）が新しく開いていないか（スキルの手順の変更、sandbox の設定、`scripts/agent-gh review` の挙動）。
 - **秘密と個人の情報の露出**: トークン・鍵・接続文字列・生の利用者 ID・開発機のホスト名が、ログ、`docs/worklogs/`、PR・Issue のコメント、試験の期待値、エラー文に出ていないか。ログは仮名化の型を通っているか。
