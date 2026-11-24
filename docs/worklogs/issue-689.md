@@ -13,6 +13,27 @@
 
 使ったスキル: `implement-issue`、`ja-text-communication`
 
+## 実装者メモ（round 2）
+
+対象 head: 970fd62f1989b9db719f0cdecf4bb2f0e9291807 のレビュー指摘への対応。
+
+1. レビュー指摘と対応:
+   - must-fix「`mise run verify` が exit 0 でない」: sandbox 内で `/tmp` の所有者が `nobody`（uid 65534）に見えるため `verify-run.test.sh` の `dir_chain_safe` が落ちる環境起因は Issue #692 のとおり。一方、sandbox 内の `/` は uid 1000 所有の書き込み可 tmpfs なので、`TMPDIR=/verify-tmp`（自分所有・祖先すべて自分所有）を指定して再実行したところ exit 0 で通った（2026-11-24 19:44 JST に終了、182 秒）。`verify-run.test.sh` 自身も「TMPDIR をその設定の届かない場所にしてやり直す」運用を想定しており、テストの性質上 TMPDIR の指定は検査を弱めない。
+   - must-fix「調査文書に時系列の記述」: `docs/research/docker-sandboxes.md` から確認日時・「直近のものは修正が入っている」等の時系列表現を取り除き、「minisforum で確認」の根拠コマンドと日時は本 worklog の節（下記）へ移した。文書側は `docs/worklogs/issue-689.md` へのポインタを残す。
+2. 対応での判断: `TMPDIR` に `/dev/shm` を先に試したが mise が一時ファイル作成で ENOENT を返した（`/dev/shm` は小さな tmpfs で mise の使い方と合わない模様）。`/` 直下に `verify-tmp` を作って代用した。sandbox 側で新しく書き込める場所に TMPDIR を向ける対処は Issue #692 の恒久対応で整理する。
+3. 変更ファイル: `docs/research/docker-sandboxes.md`（時系列の除去）、本ファイル（確認コマンドの日時・verify 再実行の記録）。
+
+## `mise run verify` の再実行記録
+
+```text
+$ mkdir -p /verify-tmp && chmod 700 /verify-tmp
+$ TMPDIR=/verify-tmp mise run verify
+（全タスク成功、script-test 含む）exit=0
+```
+
+- 2026-11-24 19:44 JST に終了、実装スレッド（agent-sandbox 内）で実行。`/verify-tmp` は `/`（uid 1000 所有の書き込み可 tmpfs）直下に作った自分所有ディレクトリ。`/tmp`・`/var/tmp`・`/run/shm` は sandbox 内では `nobody` 所有または read-only で `dir_chain_safe` の祖先検査を通らない。
+- 初回の失敗（`/tmp` 起因）と本対処の記録は実装者メモ（round 1・2）と Issue #692 を参照。
+
 ## 受け入れ条件「導入・設定変更・サインインを何もしていない」の確認
 
 2026-11-24 19:07 JST、実装スレッド（agent-sandbox 内）で実行。
@@ -28,3 +49,25 @@ exit=0
 
 - `command -v sbx` が何も返さず、`id -nG` に `kvm` が無い。導入・グループ変更・サインインは行っていない。
 - 補足: 実装担当の sandbox の内側のため、`/dev/kvm` はこの名前空間では見えない（ホスト側の記録では `root:kvm`・`crw-rw----` で存在。Issue #689 本文、2026-11-24 18:57 JST）。
+
+## minisforum で確認：調査文書の根拠コマンドと日時
+
+調査文書の「minisforum で確認」の項目は、以下のコマンドで確かめた。初回は 2026-11-24 19:05 JST 頃、時系列を文書から worklog へ移す見直し（round 2）に合わせて 19:34 JST に再実行し、いずれも同じ結果。
+
+```text
+$ uname -a
+Linux minisforum 6.18.58.1-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Tue Oct 27 00:24:11 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+$ lsb_release -ds
+Ubuntu 24.04.5 LTS
+$ lsmod | grep -E '^kvm'
+kvm_amd                   -2  -2
+kvm                       -2  -2
+$ id -nG
+hatai nogroup
+$ command -v sbx
+（出力なし）exit=1
+$ stat -c '%u %a' /tmp
+65534 1777
+```
+
+- `/dev/kvm` は実装担当の sandbox（bwrap）の内側からは見えない（sandbox の `/dev` は最小構成）。ホスト側で `root:kvm`・`crw-rw----` で存在する記録は Issue #689 本文（2026-11-24 18:57 JST）。

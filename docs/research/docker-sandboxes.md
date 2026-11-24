@@ -1,6 +1,6 @@
 # Docker Sandboxes（sbx）を実装担当の sandbox に使えるかの調査
 
-確認日：2026-11-24（JST）。Issue #689。`sbx` は導入せず、公式文書・`docker/sbx-releases` の公開 Issue・ホストの読むだけのコマンドで確認した。
+Issue #689。`sbx` は導入せず、公式文書・`docker/sbx-releases` の公開 Issue・ホストの読むだけのコマンドで確認した。「minisforum で確認」の項目のコマンドと日時（JST）は `docs/worklogs/issue-689.md` に記録する。
 
 ## 結論
 
@@ -21,8 +21,8 @@
 | 公式の条件 | minisforum の状態 | 判定 |
 |---|---|---|
 | Ubuntu 24.04 以降 | Ubuntu 24.04.5 LTS（WSL2。`uname -a` は `6.18.58.1-microsoft-standard-WSL2`） | 合う |
-| KVM 仮想化が有効 | `kvm_amd`・`kvm` モジュール読み込み済み（`lsmod`。実装スレッド内で 2026-11-24 19:05 JST に確認。カーネルモジュール一覧は名前空間で分かれないためホストの状態を示す）。`/dev/kvm` が `root:kvm`・`crw-rw----` で存在（Issue #689 本文のホスト側記録、2026-11-24 18:57 JST） | 合う（下記のグループを除く） |
-| 利用者が `kvm` グループに所属 | `id -nG` の出力は `hatai nogroup` で `kvm` を含まない（2026-11-24 19:05 JST に確認） | **未達。`usermod -aG kvm` が要る** |
+| KVM 仮想化が有効 | `kvm_amd`・`kvm` モジュール読み込み済み（`lsmod`、minisforum で確認。カーネルモジュール一覧は名前空間で分かれないためホストの状態を示す）。`/dev/kvm` が `root:kvm`・`crw-rw----` で存在（Issue #689 本文のホスト側記録） | 合う（下記のグループを除く） |
+| 利用者が `kvm` グループに所属 | `id -nG` の出力は `hatai nogroup` で `kvm` を含まない（minisforum で確認） | **未達。`usermod -aG kvm` が要る** |
 | VM 内では入れ子の仮想化 | WSL2 は amd64 で入れ子の仮想化が既定で有効（Microsoft 公式リリースノート Build 20175）[ms-wsl-rel]。`kvm_amd` の読み込みと `/dev/kvm` の存在が有効であることの証拠 | 追加の Windows 側設定は不要の見込み |
 
 補足：上の確認は実装担当の sandbox（bwrap）の内側から行った。sandbox 内の `/dev` は最小限の構成で `/dev/kvm` を含まないため、スレッド内からは `/dev/kvm` の有無を確認できない。これは sandbox のマウント構成による見え方の差で、ホスト側の記録（`/dev/kvm` 存在）と矛盾しない。
@@ -32,7 +32,7 @@
 - 公式文書の対応環境（macOS・Windows 11・Ubuntu 24.04 以降）に WSL2 は載っていない [install]。
 - `docker/sbx-releases` の Issue #397（closed）で、メンバー（`kiview`、author_association: MEMBER）が「Windows 版を入れて `sbx.exe` を使うのが推奨で、WSL に Linux 版を入れるのは best-effort」と回答している [issue-397]。
 - 実績の報告はある。Issue #787 の報告者は WSL2（Arch、入れ子の仮想化あり・`networkingMode=mirrored`）で Linux 版を日常的に使っていたと書いている（同 Issue は clone-mode の remote が `lo` に bind される回帰で、closed・completed）[issue-787]。
-- WSL 固有の不具合は複数報告され、直近のものは修正が入っている：`--clone` が WSL で作れない（#491、closed・completed）、ログイン資格の保存失敗（#180、closed）、ssh-agent の転送（#391、closed）、mirrored モードでの loopback ルーティング（#787・#822）。
+- WSL 固有の不具合は複数報告されている：`--clone` が WSL で作れない（#491）、ログイン資格の保存失敗（#180）、ssh-agent の転送（#391）、mirrored モードでの loopback ルーティング（#787・#822）。いずれも closed。
 - 別経路として Windows 版を入れて `\\wsl.localhost` のワークスペースを渡す案は、chmod/symlink が失敗する障害（#598、closed）と、Windows 側の sbx デーモンが WSL2 の VM 起動を壊す報告（#900、open・Windows 10 + Hypervisor Platform）があり、この調査では採らない。
 
 **見込みの結論**：minisforum の WSL2 でローカル sandbox が動く見込みはある（KVM は揃っており、残る操作は `kvm` グループへの追加だけ）。ただし正式サポート外の「best-effort」であり、WSL 固有の不具合に当たる可能性は残る。
