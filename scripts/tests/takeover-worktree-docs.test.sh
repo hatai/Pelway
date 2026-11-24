@@ -61,9 +61,19 @@ check fix_round_child "$RB" \
 
 # runbook の再開手順の 5 と手当スレッドの項が新しい節を指す。
 check resume_pointer "$RB" \
-  '同じブランチ／PR で新しいスレッドを起動して引き継ぐ（立て方は「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」）'
+  'open な主 PR があるときはその PR ブランチで引き継ぐ（立て方は「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」）'
 check assist_pointer "$RB" \
   'その PR のブランチで起動する（立て方は「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」）'
+
+# 節に、起動・委託の前に PR の head リポジトリと ref を照合し、外れれば止める決まりがある。
+check head_repo_guard "$RB" \
+  '--json isCrossRepository,headRefName' \
+  '`isCrossRepository` が `true`、または `headRefName` が `<PRブランチ>` と違うときは、起動・委託を止める'
+
+# implement-issue の手順 6 に、別名ブランチのときは両方の push を HEAD:<PRブランチ> に
+# 置き換える決まりがある。
+check implement_push_target "$II" \
+  '`scripts/agent-gh dev git push origin HEAD:<PRブランチ>` に置き換える'
 
 # implement-issue の手順 9 に、修正 round を子に任せるときは runbook の節に従う 1 文がある。
 check implement_issue_pointer "$II" \
