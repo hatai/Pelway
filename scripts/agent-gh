@@ -316,8 +316,9 @@ if [[ "${1:-}" == "git" ]]; then
   # のときだけ（どちらも次の引数を値として消費しないことが綴りから確かめられる）。その状態（clean）では:
   # - `-o`（push では --push-option、fetch・pull・ls-remote では --server-option）の次の引数は、その値で
   #   あってオプションではない。`git push -o --exec` の --exec は remote のフックに送られる文字列で、
-  #   push の --exec や --no-verify とは別物。連結形（-o--exec）や `=` の形（--push-option=--exec）は
-  #   clean に影響しない。
+  #   push の --exec や --no-verify とは別物。`=` の形（--push-option=--exec）は clean に影響しない。
+  #   短いオプションの連結形（-o--exec）は `-o` の別引数と綴りで区別できないため clean を崩す
+  #   （git はそれを -o の値 "--exec" として読むので、連結形自体が危ない引数になることはない）。
   # - `--` の後ろは、fetch・ls-remote では位置引数（refspec・参照パターン）で、オプションとしては
   #   解釈されない。値として消費された `--`（`git push -o -- --no-verify` の `--`）は終端にならない。
   #   pull・push は `--` を外して後ろの引数を子の git に渡す（pull は builtin/pull.c の run_fetch が
@@ -400,7 +401,19 @@ if [[ "${1:-}" == "git" ]]; then
     # 役割の App の名義でなければ push しない。フックは実行時に一時ディレクトリへ作る（リポジトリに
     # 実行ファイルを置くと agent-gh-resign で署名できないため）。元のフックの場所に pre-push があれば続けて呼ぶ。
     push_name="pelway-${role}[bot]"
-    hooks_dir="$(mktemp -d)"
+    # TMPDIR が相対パスだと mktemp は呼び出しの cwd 基準の相対パスを返すが、git は core.hooksPath の
+    # 相対パスを worktree ルート基準で解決する。サブディレクトリからの呼び出しでは基準がずれて
+    # 一時フックを見つけられず、名義の確認なしに push が通ってしまう。絶対パスに解決してから渡す。
+    hooks_dir="$(mktemp -d)" || {
+      echo "agent-gh: 一時フックのディレクトリを作れないため push しません" >&2
+      exit 1
+    }
+    if ! abs_hooks_dir="$(cd -- "$hooks_dir" && pwd -P)"; then
+      rm -rf -- "$hooks_dir"
+      echo "agent-gh: 一時フックのディレクトリを絶対パスに解決できないため push しません" >&2
+      exit 1
+    fi
+    hooks_dir="$abs_hooks_dir"
     cleanup_paths+=("$hooks_dir")
     cat >"$hooks_dir/pre-push" <<'HOOK'
 #!/usr/bin/env bash
@@ -425,35 +438,51 @@ if ((${#bad[@]})); then
 fi
 # スコープと値は `-z` の NUL 区切り（scope\0value\0 の並び）で読む。タブや改行を含むパスを壊さないため
 # （`--show-scope` の区切りはタブで、パスにタブがあると awk のフィールド切りで後ろが落ちる）。
-# 読み取り自体の失敗（設定ファイルを読めない・値の展開に失敗する、終了コード 1 以外）では、既存の
-# フックを確認できないまま push しない。キーが無い（終了 1）は既定の場所に進む。NUL を含む出力は
-# bash の変数に入らず、プロセス置換は終了コードを返さないため、一時ファイルに書いて値と終了コードを
-# 同じ呼び出しから得る。
-cfg_out="$(mktemp)"
-trap 'rm -f "$cfg_out"' EXIT
+# agent-gh はこのフックを core.hooksPath の一時設定（command スコープの -c）経由で起動するため、
+# 照会は必ず終了コード 0 で、command スコープの値として一時フックの dir が取れなければならない。
+# 「キー無し」（終了コード 1）を「設定なし＝既定の場所」と読むと、照会自体の失敗（読み取り先を
+# GIT_CONFIG で別ファイルに固定された環境など）を「設定なし」と取り違え、既存のフックを見逃した
+# まま push してしまう。終了コード 0 以外、または command スコープの値に一時フックの dir が無い
+# ときは、既存のフックを確認できないまま push しない。NUL を含む出力は bash の変数に入らず、
+# プロセス置換は終了コードを返さないため、一時ファイルに書いて値と終了コードを同じ呼び出しから
+# 得る。一時ファイルは一時フックの dir（絶対パス・親側の cleanup が消す）の中に置く。呼び出しの
+# TMPDIR が相対パスや存在しない dir を指していても、確実に作れる場所にするため。
+cfg_out="$PELWAY_AGENT_HOOKS_DIR/cfg.out"
 cfg_rc=0
-git config -z --show-scope --get-all --type=path core.hooksPath >"$cfg_out" 2>/dev/null || cfg_rc=$?
-if ((cfg_rc != 0 && cfg_rc != 1)); then
-  rm -f "$cfg_out"
-  echo "agent-gh: core.hooksPath の読み取りに失敗したため push を止めました" >&2
+cfg_err="$(git config -z --show-scope --get-all --type=path core.hooksPath 2>&1 >"$cfg_out")" || cfg_rc=$?
+orig=""
+got_tmp=0
+while IFS= read -r -d '' scope && IFS= read -r -d '' val; do
+  if [[ "$scope" == command ]]; then
+    [[ "$val" == "$PELWAY_AGENT_HOOKS_DIR" ]] && got_tmp=1
+  else
+    orig="$val"
+  fi
+done <"$cfg_out"
+if ((cfg_rc != 0)); then
+  echo "agent-gh: core.hooksPath の読み取りに失敗したため push を止めました${cfg_err:+: $cfg_err}" >&2
   exit 1
 fi
-orig=""
-while IFS= read -r -d '' scope && IFS= read -r -d '' val; do
-  [[ "$scope" != command ]] && orig="$val"
-done <"$cfg_out"
+if ((!got_tmp)); then
+  echo "agent-gh: core.hooksPath の照会で一時フックの設定を確認できないため push を止めました" >&2
+  exit 1
+fi
 orig="${orig:-$(git rev-parse --git-common-dir)/hooks}"
 if [[ -x "$orig/pre-push" ]]; then
   "$orig/pre-push" "$@" <<<"$input"
 fi
 HOOK
     chmod 700 "$hooks_dir/pre-push"
+    if [[ ! -x "$hooks_dir/pre-push" ]]; then
+      echo "agent-gh: 一時フックを実行可能にできないため push しません" >&2
+      exit 1
+    fi
     if [[ "$role" == dev ]]; then
       PELWAY_AGENT_PUSH_GUIDE="該当コミットを scripts/agent-gh dev git commit で作り直してから push してください"
     else
       PELWAY_AGENT_PUSH_GUIDE="該当コミットを $push_name の名義で作り直してから push してください"
     fi
-    export PELWAY_AGENT_PUSH_NAME="$push_name" PELWAY_AGENT_PUSH_GUIDE
+    export PELWAY_AGENT_PUSH_NAME="$push_name" PELWAY_AGENT_PUSH_GUIDE PELWAY_AGENT_HOOKS_DIR="$hooks_dir"
     # git_cfg の最後（呼び出し元の引数とサブコマンドの直前）に置き、ほかの設定より後で効かせる。
     git_cfg+=(-c "core.hooksPath=$hooks_dir")
   fi

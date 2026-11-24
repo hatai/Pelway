@@ -867,6 +867,47 @@ work_git config --unset-all core.hooksPath 2>/dev/null || sed -i '/hooksPath/d' 
 [[ "$OUT" == *"core.hooksPath の読み取りに失敗"* ]] || failures+=("cfg_read_fail: not stopped by the read failure: $OUT")
 [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("cfg_read_fail: remote ref changed")
 
+# core.hooksPath の照会先を GIT_CONFIG で別ファイルに固定された環境では、フック内の照会はその
+# ファイルだけを読む（agent-gh が -c で渡した一時フック設定も照会の結果には出ない）。終了コード 1 を
+# 「キー無し＝既定の場所」と読む旧来の判定では、この照会で command スコープの値に一時フックの dir が
+# 無いとき（rc 0 で返ってきても）既存のフックを見逃したまま push してしまう。照会結果の不整合も
+# fail closed で止め、既存の拒否フックの置き場所が GIT_CONFIG の側にあっても remote の ref は変わらない。
+deny_hooks="$PUSH_DIR/deny-hooks"
+mkdir -p "$deny_hooks"
+printf '#!/usr/bin/env bash\nexit 1\n' >"$deny_hooks/pre-push"
+chmod +x "$deny_hooks/pre-push"
+printf '[core]\n\thooksPath = %s\n[remote "origin"]\n\turl = %s\n' "$deny_hooks" "$PUSH_DIR/remote.git" >"$PUSH_DIR/hooks.cfg"
+work_git reset -q --hard "$before"
+(cd "$PUSH_DIR/work" && as 'pelway-dev[bot]' commit -q --allow-empty -m cfg-env-override)
+OUT="$(cd "$PUSH_DIR/work" && GIT_CONFIG="$PUSH_DIR/hooks.cfg" PATH="$RGBIN:$PATH" bash "$SCRIPT" dev git push origin HEAD 2>&1)"
+RC=$?
+[[ "$RC" != 0 ]] || failures+=("cfg_env_override: exit 0, want non-zero")
+[[ "$OUT" == *"一時フックの設定を確認できない"* ]] || failures+=("cfg_env_override: not stopped by the scope check: $OUT")
+[[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("cfg_env_override: remote ref changed")
+
+# TMPDIR が相対パスだと mktemp は呼び出しの cwd 基準の相対パスを返すが、git は core.hooksPath の
+# 相対パスを worktree ルート基準で解決する。サブディレクトリからの呼び出しでは基準がずれて一時
+# フックを見つけられず、名義の確認なしに push が通る（実測: 存在しない core.hooksPath は git が
+# 「フックなし」として扱い、push を失敗させない）。絶対パスへの解決で、サブディレクトリからでも
+# 名義の確認が効き、正しい名義の push は通る。
+mkdir -p "$PUSH_DIR/work/sub/dir/rel-tmp"
+work_git reset -q --hard "$before"
+(cd "$PUSH_DIR/work" && as hatai commit -q --allow-empty -m bad-subdir)
+bad_sha="$(work_git rev-parse --short HEAD)"
+OUT="$(cd "$PUSH_DIR/work/sub/dir" && TMPDIR=rel-tmp PATH="$RGBIN:$PATH" bash "$SCRIPT" dev git push origin HEAD 2>&1)"
+RC=$?
+[[ "$RC" != 0 ]] || failures+=("rel_tmpdir_block: exit 0, want non-zero")
+[[ "$OUT" == *"$bad_sha"* && "$OUT" == *"push を止めました"* ]] || failures+=("rel_tmpdir_block: not stopped by the hook: $OUT")
+[[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("rel_tmpdir_block: remote ref changed")
+work_git reset -q --hard "$before"
+(cd "$PUSH_DIR/work" && as 'pelway-dev[bot]' commit -q --allow-empty -m ok-subdir)
+OUT="$(cd "$PUSH_DIR/work/sub/dir" && TMPDIR=rel-tmp PELWAY_AGENT_SKIP_RESIGN=1 PATH="$RGBIN:$PATH" bash "$SCRIPT" dev git push origin HEAD 2>&1)"
+RC=$?
+[[ "$RC" == 0 ]] || failures+=("rel_tmpdir_ok: exit $RC, want 0: $OUT")
+[[ "$(remote_ref agent/author_block)" == "$(work_git rev-parse HEAD)" ]] || failures+=("rel_tmpdir_ok: remote ref not updated")
+work_git reset -q --hard "$before"
+rm -rf "$PUSH_DIR/work/sub"
+
 # 6. review の push も同じ確認を通る。正しい名義は pelway-review[bot]。
 setup_push_repo review_push
 (cd "$PUSH_DIR/work" && as 'pelway-review[bot]' commit -q --allow-empty -m r1)
