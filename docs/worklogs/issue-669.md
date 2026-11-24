@@ -55,8 +55,8 @@
 1. 詰まった箇所: 4 回目のレビュー結果に must-fix が残ったため round 4 と同じ「止まる条件」で Issue を解放した直後、開発リードの直接指示（濱田さん 2026-11-21、t629u）で「レビューのラウンド上限は無視し、must-fix が無くなるまで続ける」が明示され再着手した。また push 前に PR #664（thread-list 失敗検知）が main に入り、`conductor-watch.sh`（検知ブロックの並び）と runbook（同じ段落）で衝突。両方 union で解消したが、衝突解消の編集で自分側ブロックを複写してしまい重複の除去が必要だった（マーカー残骸も 1 行残っていた）
 2. 曖昧だった文: 「止まる条件」の回数上限（SKILL.md）。round 4・5 で同じ場所に 2 連続で止まり、どちらも上からの上書き指示で戻った
 3. 仮定と解釈: must-fix の直し方のうち「変換失敗で巡回ごとに死ぬ」への対応は、検知ブロック全体を try/except で包み `WATCHER pending-sends-error <TypeName>` を出す形にした（HEARTBEAT が出続ける silent な死亡を、行を出す側に倒す）。「読めない since は数に入れない」は既存方針と同じく、`stamp()` に通らない `since`（例: `0001-01-01T00:00:00+23:59` は fromisoformat は通るが fromtimestamp で落ちる）も同じ扱いに揃えた。Codex は usage limit のため遅延タスクでの再委託とした
-4. 足りなかった情報・検証手段: main への他 PR マージのタイミングを早く知る手段（merge 時点で初めて衝突に気づく）。`ps.get("subjects")` の非 object クラッシュ（レビュー指摘の out-of-scope、既存バグ）は本 PR では触らず別 Issue 起票候補
-5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」に「開発リードが回数上限を上書きした旨の指示が来たときは上書きに従う」を明記する（round 4・5 の 2 回とも実際に起きた）。`conductor-watch.sh` の `ps.get("subjects")` に object 確かめを入れる件は別 Issue にする
+4. 足りなかった情報・検証手段: main への他 PR マージのタイミングを早く知る手段（merge 時点で初めて衝突に気づく）
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」に「開発リードが回数上限を上書きした旨の指示が来たときは上書きに従う」を明記する（round 4・5 の 2 回とも実際に起きた）
 
 使ったスキル: implement-issue
 
@@ -64,10 +64,10 @@
 
 対象 head: a7a251e2（実装コミット。直前の push head は 2c8b6779）
 
-1. 詰まった箇所: codex の must-fix は「`patrol-state.json` を通常ファイルかの確かめと読み取りの上限なしに、ラベル裏付け検査より前に読む」。試験の材料として FIFO（open が待つファイル）を考えたが、main 由来の既存の読み取り（`ps = json.load(open(ps_path))`、レビューで out-of-scope とされた側）も同じパスを読むため、FIFO にすると修正後もそこで待つ。symlink（O_NOFOLLOW で拒否）とサイズ超過（上限で拒否）で確かめる形に変えた
+1. 詰まった箇所: codex の must-fix は「`patrol-state.json` を通常ファイルかの確かめと読み取りの上限なしに、ラベル裏付け検査より前に読む」。待ちを起こし得るファイル種（FIFO 等）は試験の材料にせず、symlink（O_NOFOLLOW で拒否）とサイズ超過（上限で拒否）で確かめる形にした
 2. 曖昧だった文: 「委託スレッドの正規の ID は `%` を含む」（codex の nit）。実例の `thread:delegated-task:command%3A...` で確認できた
 3. 仮定と解釈: `to` の文字種は `scripts/conductor-rebuild` の `valid_id`（`[A-Za-z0-9:_.%-]{1,256}`）と完全に合わせた。読み取りの上限は要求側の `REQ_MAX`（16 KiB）より補助記録が大きくなり得るため 4 MiB とした。待ちの上限は `read_request` と同じく `O_NONBLOCK` + `O_NOFOLLOW` + `S_ISREG` + サイズ検査の組み合わせ
-4. 足りなかった情報・検証手段: `patrol-state.json` の実際のサイズの分布（上限の妥当性は推測。4 MiB は subjects を抱える記録として十分に大きいはず）。既存の `ps` 読み取り側の上限は別 Issue 候補（round 5 のメモに同じ）
+4. 足りなかった情報・検証手段: `patrol-state.json` の実際のサイズの分布（上限の妥当性は推測。4 MiB は subjects を抱える記録として十分に大きいはず）
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` か review-pr に「共有ディレクトリ内ファイルの読み取りには regular-file 限定と量の上限を求める」という観点をレビュー基準として書く（codex・claude の両レビューで同じパターンが指摘された）
 
 使ったスキル: implement-issue
