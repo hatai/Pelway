@@ -69,6 +69,19 @@ check resume_pointer "$RB" \
 check assist_pointer "$RB" \
   'その PR のブランチで起動する（立て方は「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」）'
 
+# 再開手順の 5 が、PR が無いときも引き継ぐ成果が残っていれば同じ節の形で
+# 引き継ぎ、新規の立て方を引き継ぐ成果が無い場合に限定している。
+check resume_no_pr_takeover "$RB" \
+  '引き継ぐ成果が残っていれば同じ節の形でその作業ブランチを引き継ぐ' \
+  '引き継ぐ成果が無いときだけ、実装スレッドの通常の立て方（「実装を始める」）で起動する'
+
+# 引き継ぎ時に items の implement_thread へ新しいスレッドの thread_id を記録し、
+# レビュー結果を送る前にその記録で現在の担当を確かめる決まりがある。
+check implement_thread_record "$RB" \
+  '`items` の `implement_thread` に新しいスレッドの `thread_id` を書き' \
+  '`implement_thread` で現在の担当を確かめる' \
+  '記録が無い、または記録のスレッドが一覧に無いときは'
+
 # 節に、起動・委託の前に PR の head リポジトリと ref を照合し、外れれば止める決まりがある。
 check head_repo_guard "$RB" \
   '--json isCrossRepository,headRefName' \
