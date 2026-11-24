@@ -407,7 +407,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 
 ### 書き込み手順
 
-`patrol-state.json` への書き込みはすべて、共通の書き込み手順 `scripts/patrol-state-update` にだけ出す。指揮役スレッドの巡回でのオフセットの書き戻し・`items`・`scheduled_task_id` の記録も、巡回スクリプト `conductor-watch.sh` の `subjects` の書き戻しも、この手順を通る。直接の書き換え（python の `json.dump`・`echo` のリダイレクトなど）は行わない（Issue #671: 複数の指揮役スレッドから同時に書かれ、オフセットが古い値に巻き戻った事故の対策）。例外は初回起動時の旧置き場からの引き継ぎだけ: `conductor-watch.sh` が旧置き場（`$XDG_STATE_HOME/pelway/patrol-state.json`）のファイルを新置き場へ 1 回きり `cp` で移す（項目の書き込みではなくファイルごとのコピーで、手順の保護が働くべき競合も起きえないため）。
+`patrol-state.json` への書き込みはすべて、共通の書き込み手順 `scripts/patrol-state-update` にだけ出す。指揮役スレッドの巡回でのオフセットの書き戻し・`items`・`scheduled_task_id` の記録も、巡回スクリプト `conductor-watch.sh` の `subjects` の書き戻しも、この手順を通る。直接の書き換え（python の `json.dump`・`echo` のリダイレクトなど）は行わない（Issue #671: 複数の指揮役スレッドから同時に書かれ、オフセットが古い値に巻き戻った事故の対策）。例外は旧置き場からの引き継ぎだけ: `conductor-watch.sh` が起動ごとに、正規パスに通常ファイルが無く旧置き場（`$XDG_STATE_HOME/pelway/patrol-state.json`）が残っていると、そのファイルを新置き場へ `cp` で写す（旧ファイルは残るため、正規パスに通常ファイルが無い起動のたびに繰り返す。項目の書き込みではなくファイルごとのコピーで、`<state>.lock` の外で行い、手順の保護は働かない）。
 
 手順は merge patch ベースの指定（オブジェクトは深く併合し、`null` は鍵を消す。RFC 7386 とは違い、patch のオブジェクトは既存値がオブジェクトでなくても再帰的に併合する — そのため中の `null` も常に「鍵を消す」で、値としては残らない。JSON 配列は併合の列として順に適用する）を標準入力に取り、ロックを取って現在値を読み直してから併合し、保護を通った結果だけを原子的に書き戻す。名乗りは `--writer-thread <スレッド ID>`（指揮役スレッド）か `--writer <名前>`（スレッドを持たない書き手。巡回スクリプトは `conductor-watch`）のどちらかを必ず付ける。
 
