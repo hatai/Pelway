@@ -71,3 +71,15 @@
 5. 改善案: Issue #613 の範囲の外として、`docs/agents/` に「push の名義の完全な強制は、サーバー側（ruleset か必須チェック）で行う。agent-gh の確認は事故の防止」と書く Issue を起こす。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 7）
+
+対象 head: a40d9f8d8ff0a1300e29ceeb4144eca46b3d2919
+
+1. 詰まった箇所: round 6 の push の後、自動のセキュリティレビューが 3 件を指摘した。許可リストの照合の glob 化、転送のオプション（`--upload-pack`・`--receive-pack`・`--exec`）によるコマンドの実行、ls-remote の `-u`。転送のオプションは、試験でローカルの remote に対して実際にコマンドが実行されることを確かめた。
+2. 曖昧だった文: 「Compare literally rather than as a glob」（自動のセキュリティレビュー、所見 1）。照合 `*" $git_sub "*` の展開はダブルクォートの内側なので、文字列として照合される。`pu?h`・`p*` の試験が、変更前のコードでも exit 2 で通ることで確かめた。誤検知と判断し、試験は回帰試験として残した。
+3. 仮定と解釈: 転送のオプションは、全サブコマンドで 3 文字以上の前方一致で拒否する（git の省略形を含む。曖昧な省略形は git でも通らないので、拒否しても失うものは無い）。ls-remote の `-u` は git 2.56 では unknown switch だが、連結形の `-c` と同じく、git の版に頼らない形で拒否した。
+4. 足りなかった情報・検証手段: repo の設定の `remote.<name>.uploadpack` や diff・merge のドライバのように、git が設定から起動する別プロセスの経路は試験していない。PR 本文の「対象外」に保証の範囲として書いた。`mise run verify` は exit 0（script-test: 46 tests ok）。
+5. 改善案: `scripts/agent-gh` の冒頭のコメントに「git の入口の保証の範囲は、agent-gh に渡す引数と GIT_CONFIG_* の形まで。git が設定から起動するプロセスは対象外」と書き、レビューが範囲外の経路を must-fix にしないで済むようにする。
+
+使ったスキル: implement-issue
