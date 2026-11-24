@@ -262,27 +262,51 @@ case "$role" in
   *) usage ;;
 esac
 
+# push_targets 用: $1=-- と --no- と =<値> を除いたオプション名が $2=正規形と一致するか
+# 判定する（$3=一意に特定できる最短の長さ）。長いオプションは一意な接頭辞で省略でき、
+# それより短い形は他のオプションと曖昧で git が拒否するため届かない。
+push_longopt() { ((${#1} >= $3)) && [[ "$2" == "$1"* ]]; }
+
 # push_targets <git push の引数（push より後）...>: push 先から署名を付け直す対象を決める（#641）。
 # 結果: push_remote と push_branches（ブランチ名の配列。重複なし）、push_fallback（1 なら
-# agent-gh-resign を位置引数なしで呼び、resign が @{u} から対象を決める）。
+# agent-gh-resign を位置引数なしで呼び、resign が @{u} から対象を決める）、push_dry_run
+# （1 なら試行で何も push されないため resign を呼ばない）。
 # - refspec を省いた push、--all / --branches / --mirror / --tags / --prune / --repo、glob を含む refspec、
 #   detached HEAD の HEAD は fallback（今までどおり）
 # - 削除（:dst、-d / --delete）とブランチ以外（refs/tags/ など refs/heads/ でない refs/）は対象にしない
 # - src:dst は dst、コロンの無い refspec はそれ自身（HEAD は今のブランチ名）。先頭の + と refs/heads/ は除く
+# - 長いオプションは一意に特定できる接頭辞で省略でき（--dr は --dry-run、--del は --delete）、
+#   --no-<名> は直前の指定を戻す（-n --no-dry-run は実 push）。=<値> の連結は残りの引数を取らない
 push_targets() {
   push_remote="" push_branches=() push_fallback=0 push_dry_run=0
-  local positional=() delete=0 a spec dst b seen i
+  local positional=() delete=0 a spec dst b seen i opt neg joined
   while (($#)); do
     a="$1"
     shift
     case "$a" in
       --) positional+=("$@"); break ;;
-      -o | --push-option | --receive-pack | --exec) shift ;;
-      # 長いオプションは一意に特定できる接頭辞で省略できる（--de は --delete、--dr は --dry-run。
-      # --d は --delete と --dry-run で曖昧になり git が拒否するため、ここには届かない）
-      -d | --de | --del | --dele | --delet | --delete) delete=1 ;;
-      -n | --dr | --dry | --dry- | --dry-r | --dry-ru | --dry-run) push_dry_run=1 ;;
-      --all | --branches | --mirror | --tags | --prune | --repo | --repo=*) push_fallback=1 ;;
+      -o) shift ;; # -o <値>。まとめ書きは下の走査で扱う
+      -d) delete=1 ;;
+      -n) push_dry_run=1 ;;
+      --*)
+        opt="${a:2}" neg=0 joined=0
+        [[ "$opt" == no-* ]] && { neg=1; opt="${opt#no-}"; }
+        [[ "$opt" == *=* ]] && { joined=1; opt="${opt%%=*}"; }
+        if push_longopt "$opt" dry-run 2; then
+          if ((neg)); then push_dry_run=0; else push_dry_run=1; fi
+        elif push_longopt "$opt" delete 2; then
+          if ((neg)); then delete=0; else delete=1; fi
+        elif push_longopt "$opt" all 2 || push_longopt "$opt" branches 1 ||
+          push_longopt "$opt" mirror 1 || push_longopt "$opt" tags 2 ||
+          push_longopt "$opt" prune 3 || push_longopt "$opt" repo 3; then
+          if ((neg)); then push_fallback=0; else push_fallback=1; fi
+        elif ((neg || joined)); then
+          : # --no-* の否定と =<値> の連結は残りの引数を取らない
+        elif push_longopt "$opt" push-option 2 || push_longopt "$opt" receive-pack 4 ||
+          push_longopt "$opt" exec 1 || push_longopt "$opt" recurse-submodules 4; then
+          shift # 値を別の引数で取る
+        fi
+        ;;
       -[!-]*)
         # まとめ書きの短いオプションを 1 文字ずつ見る（-fn の dry-run、-fd の削除）。
         # -o は残り（無ければ次の引数）を値に取るため、そこで走査を止める。

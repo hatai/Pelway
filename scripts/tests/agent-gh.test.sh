@@ -374,6 +374,33 @@ expect_push_targets push_delete_bundle "" 0
 # --delete の一意な省略形も削除
 push_run push_delete_abbrev --del origin agent/X
 expect_push_targets push_delete_abbrev "" 0
+# 否定形（--no-）は直前の指定を戻す。-n --no-dry-run は実 push になるため署名を付け直す
+push_run push_no_dry_run -n --no-dry-run origin feature:agent/N
+expect_push_targets push_no_dry_run "origin/agent/N" 0
+push_run push_no_dry_abbrev -n --no-dr origin feature:agent/N
+expect_push_targets push_no_dry_abbrev "origin/agent/N" 0
+push_run push_no_delete -d --no-delete origin agent/X
+expect_push_targets push_no_delete "origin/agent/X" 0
+# fallback を立てる形の否定は fallback を戻す
+push_run push_no_all --all --no-all origin a:agent/A
+expect_push_targets push_no_all "origin/agent/A" 0
+# 値を別の引数で取る長いオプションの省略形は、次の引数を値として消費する（remote と取り違えない）
+push_run push_pushopt_abbrev --push-o ci.skip origin feature:agent/Z
+expect_push_targets push_pushopt_abbrev "origin/agent/Z" 0
+push_run push_exec_abbrev --ex pack origin feature:agent/Z
+expect_push_targets push_exec_abbrev "origin/agent/Z" 0
+push_run push_recurse_abbrev --recu check origin feature:agent/Z
+expect_push_targets push_recurse_abbrev "origin/agent/Z" 0
+# =<値> の連結形は次の引数を取らない
+push_run push_pushopt_joined --push-option=x origin feature:agent/Z
+expect_push_targets push_pushopt_joined "origin/agent/Z" 0
+# fallback を立てる形の一意な省略形も fallback
+push_run push_all_abbrev --al origin
+expect_push_targets push_all_abbrev "" 1
+push_run push_mirror_abbrev --mi origin
+expect_push_targets push_mirror_abbrev "" 1
+push_run push_tags_abbrev --ta origin v1
+expect_push_targets push_tags_abbrev "" 1
 # まとめ書きの末尾が -o のとき、次の引数はその値（remote と取り違えない）。
 # -f + -o のまとめ書きはスペルチェッカの誤検出になるため -u + -o（-uo）で確かめる
 push_run push_bundle_option_tail -uo ci.skip origin feature:agent/Z
