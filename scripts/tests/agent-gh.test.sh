@@ -403,6 +403,9 @@ expect_push_targets push_repo_value_no_dry "" 0
 # --repo が -n を値として消費すると実 push になる（fallback で resign を呼ぶ）
 push_run push_repo_value_flag --repo -n origin HEAD:agent/X
 expect_push_targets push_repo_value_flag "" 1
+# --end-of-options 以降はオプションとして解釈しない。--no-dry-run も位置引数のため dry-run のまま
+push_run push_end_of_options -n --end-of-options origin --no-dry-run
+expect_push_targets push_end_of_options "" 0
 push_run push_mirror_abbrev --mi origin
 expect_push_targets push_mirror_abbrev "" 1
 push_run push_tags_abbrev --ta origin v1

@@ -284,7 +284,7 @@ push_targets() {
     a="$1"
     shift
     case "$a" in
-      --) positional+=("$@"); break ;;
+      -- | --end-of-options) positional+=("$@"); break ;; # 以降はオプションとして解釈しない
       -o) shift ;; # -o <値>。まとめ書きは下の走査で扱う
       -d) delete=1 ;;
       -n) push_dry_run=1 ;;
@@ -292,7 +292,9 @@ push_targets() {
         opt="${a:2}" neg=0 joined=0
         [[ "$opt" == no-* ]] && { neg=1; opt="${opt#no-}"; }
         [[ "$opt" == *=* ]] && { joined=1; opt="${opt%%=*}"; }
-        if push_longopt "$opt" dry-run 2; then
+        if push_longopt "$opt" end-of-options 2; then
+          positional+=("$@"); break # --en など --end-of-options の一意な省略形
+        elif push_longopt "$opt" dry-run 2; then
           if ((neg)); then push_dry_run=0; else push_dry_run=1; fi
         elif push_longopt "$opt" delete 2; then
           if ((neg)); then delete=0; else delete=1; fi
