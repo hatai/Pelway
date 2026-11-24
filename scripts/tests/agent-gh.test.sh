@@ -671,6 +671,50 @@ expect_rejected alias-repo-shell sp origin HEAD
 work_git config --unset alias.pp
 work_git config --unset alias.sp
 expect_rejected send-pack send-pack "$PUSH_DIR/remote.git" HEAD:refs/heads/agent/author_block
+# 許可リストに無いサブコマンドは exit 2（コマンドを実行するもの、名前の打ち間違いの自動修正を含む）
+expect_rejected rebase-exec rebase -x 'git push origin HEAD' HEAD
+expect_rejected unknown-name p origin HEAD
+work_git config help.autocorrect immediate
+expect_rejected autocorrect pushh origin HEAD
+work_git config --unset help.autocorrect
+
+# 許可リストの名前は、どれも git の組み込みのサブコマンドである（git の alias は組み込みを上書きできないため、
+# 同じ名前の alias を設定に置いても alias は使われない）。
+git_allowed_subcommands=()
+git_allowed_subcommands=()
+eval "$(grep '^git_allowed_subcommands=' "$SCRIPT")"
+((${#git_allowed_subcommands[@]})) || failures+=("allowlist: git_allowed_subcommands not found in agent-gh")
+builtins="$("$REAL_GIT" --list-cmds=builtins)"
+for c in "${git_allowed_subcommands[@]}"; do
+  grep -qxF -- "$c" <<<"$builtins" || failures+=("allowlist: $c is not a git builtin")
+done
+work_git config alias.status '!touch alias-ran'
+push_run alias_shadow dev git status
+[[ "$RC" == 0 ]] || failures+=("alias_shadow: exit $RC, want 0: $OUT")
+[[ ! -e "$PUSH_DIR/work/alias-ran" ]] || failures+=("alias_shadow: alias for a builtin ran")
+work_git config --unset alias.status
+
+# 呼び出し元の環境変数（GIT_CONFIG_COUNT・GIT_CONFIG_PARAMETERS）と repo の設定で core.hooksPath・include.path を
+# 渡しても、一時フックの確認で止まり、remote は変わらない（agent-gh の -c が後で効く）。
+expect_hook_block() {
+  local label="$1"
+  shift
+  OUT="$(cd "$PUSH_DIR/work" && env "$@" PATH="$RGBIN:$PATH" bash "$SCRIPT" dev git push origin HEAD 2>&1)"
+  RC=$?
+  [[ "$RC" != 0 ]] || failures+=("env_block ($label): exit 0, want non-zero")
+  [[ "$OUT" == *"push を止めました"* ]] || failures+=("env_block ($label): not stopped by the hook: $OUT")
+  [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("env_block ($label): remote ref changed")
+}
+expect_hook_block count GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null
+expect_hook_block count-include GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=include.path GIT_CONFIG_VALUE_0="$PUSH_DIR/nohook.cfg"
+expect_hook_block parameters "GIT_CONFIG_PARAMETERS='core.hookspath'='/dev/null'"
+expect_hook_block parameters-include "GIT_CONFIG_PARAMETERS='include.path'='$PUSH_DIR/nohook.cfg'"
+work_git config core.hooksPath /dev/null
+expect_hook_block repo-hookspath X=1
+work_git config --unset core.hooksPath
+work_git config include.path "$PUSH_DIR/nohook.cfg"
+expect_hook_block repo-include X=1
+work_git config --unset include.path
 
 # 6. review の push も同じ確認を通る。正しい名義は pelway-review[bot]。
 setup_push_repo review_push
