@@ -420,8 +420,8 @@ if [[ "${1:-}" == "git" ]]; then
   fi
   # 転送の相手側で実行するコマンドを指定するオプション（--upload-pack・--receive-pack・--exec。ls-remote では
   # --exec が --upload-pack の別名になっている）と、push の --no-verify（pre-push フックを飛ばす）は、ローカルの
-  # remote ではその場で効くため拒否する。git が受け付ける省略形（転送オプションは 3 文字以上の前方一致、
-  # --no-verify は --no-veri 以上）も含める。この検査は、このオプションを解釈するサブコマンド
+  # remote ではその場で効くため拒否する。git が受け付ける省略形に限らず、オプション名の接頭辞は一律に
+  # 照合する（--ex のような短い形も含む。--no-verify は --no-veri 以上）。この検査は、このオプションを解釈するサブコマンド
   # （fetch・pull・push・ls-remote）にだけ掛ける。ほかのサブコマンド（add・status・diff・restore など）の
   # `-` で始まる引数は、git がパス名として扱うものを拒否しない（`git add -- --exec` のようなファイルの指定）。
   #
