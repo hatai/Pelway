@@ -71,3 +71,15 @@
 5. 改善案: `docs/dev-environment.md` の「/home が読み取り専用のとき /tmp 側で作業する手順」に「sandbox 等で /tmp の所有者が root でも自分でもない環境では `dir_chain_safe` 系の検査が /tmp を拒否する」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 7）
+
+対象 head: 8037946fcfbd8ff9fbfff27ce1c788364d5187f5
+
+1. 詰まった箇所: 手順 9: 判定が割れた（codex request-changes・claude approve）ため修正側を優先。claude の approve には [文書のずれ] の nit が残り、round 6 のメモの記述（「shim も untrusted で失敗」）が未検証のまま書かれていたため、実測し直して直した（untrusted の `mise.toml` では shim は fnox のバージョンを解決した。`mise.toml` 無しでは 'No version is set' で失敗）。
+2. 曖昧だった文: 「`/tmp` が root または実行ユーザーの所有するディレクトリであることも確認してください」（PR #661 の round 6 レビュー、codex must-fix）
+3. 仮定と解釈: 所有者の確認は `[ -O /tmp ]`（自分が所有）`|| stat -c %u が 0`（root）と解釈し、`dir_chain_safe` と同じ条件で `[ -k /tmp ]` の直後に置いた（sticky と併せて clone 先の作成より前）。claude は所有者の確認で「この手順を使う環境そのもの（sandbox の nobody 所有 /tmp）を拒む」点を指摘したが、must-fix 側を優先した。手順が拒否される環境（この sandbox も該当）は別途の扱いになる。
+4. 足りなかった情報・検証手段: 別ユーザー所有の /tmp を作る手段が無く、所有者の拒否経路は実際の /tmp（nobody 所有）でしか確かめられなかった（拒否されることは確認。自分所有の 1777 ディレクトリに読み替えた成功経路も確認）。
+5. 改善案: `docs/dev-environment.md` の同節に「untrusted の `mise.toml` でも shim がバージョンを解決する mise の版がある（2026.11.11 で観測）。shim の失敗を手順の前提にするときは版ごとに確かめる」を足す。
+
+使ったスキル: implement-issue
