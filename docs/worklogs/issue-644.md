@@ -11,3 +11,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` は合併で行番号がずれやすい。`.agents/skills/write-issue/SKILL.md` の「関連情報」に「節は行番号ではなく見出し名で指す」という 1 文を足すと、起票時の参照がずれにくい
 
 使ったスキル: implement-issue、writing-for-agents
+
+## 実装者メモ（round 2）
+
+対象 head: 1b66bf9ddba2ba7815cf9fffcf196f56731fde90
+
+1. 詰まった箇所: 特になし。must-fix 3 件と印付き nit 1 件は、指摘箇所と直し方がどれも明確だった
+2. 曖昧だった文: 「既存 PR がある場合に限定してください」（must-fix 2）。PR がまだ無い停止の再開先はレビューに書かれていない。割り当て手順の「どちらも無ければ新規に割り当てる」と同じ分岐に合わせ、「実装を始める」の通常の立て方に回す形で限定した
+3. 仮定と解釈: must-fix 3 の「head リポジトリと ref を照合」は `isCrossRepository` が `false`（head が本体リポジトリにある）と `headRefName` が `<PRブランチ>` と一致の 2 条件で判定する形にした。`headRefOid` と追跡 ref の先端の一致までは要求しない（追跡 ref の古さは fetch で解消する別の問題）
+4. 足りなかった情報・検証手段: フォークの PR がこのリポジトリの運用で実際に起きうるかは未確認（pelway-dev[bot] 以外の head を持つ open PR は現状無い）。照合の置き場所は「起動・委託の前」として節の先頭に置いた
+5. 改善案: implement-issue の push の形はローカルブランチ名と remote ブランチ名の一致を暗に仮定している。引き継ぎの運用が定着したら、同じ前提に依る記述が他に無いか棚卸しするとよい
+
+使ったスキル: implement-issue
