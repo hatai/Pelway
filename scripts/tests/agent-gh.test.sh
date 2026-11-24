@@ -677,6 +677,14 @@ expect_rejected unknown-name p origin HEAD
 work_git config help.autocorrect immediate
 expect_rejected autocorrect pushh origin HEAD
 expect_rejected glob-question 'pu?h' origin HEAD
+# 許可リストの名前を空白でつないだ 1 つの引数は、部分一致では通ってしまう。空白を含む subsection 形の alias
+# （環境変数でも repo の設定でも置ける）で push になるため、完全一致で拒否する。
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0='alias.pull push.command' GIT_CONFIG_VALUE_0=push \
+  expect_rejected joined-env-alias 'pull push' origin HEAD
+work_git config 'alias.pull push.command' push
+expect_rejected joined-repo-alias 'pull push' origin HEAD
+work_git config --unset 'alias.pull push.command'
+expect_rejected joined-names 'merge merge-base' origin HEAD
 expect_rejected glob-star 'p*' origin HEAD
 work_git config --unset help.autocorrect
 # 許可したサブコマンドでも、コマンドを実行させる転送のオプション（とその省略形）は exit 2 で、コマンドは実行されない
@@ -696,7 +704,6 @@ expect_rejected ls-remote-u-bundled ls-remote -qu "touch $ran; false" origin
 
 # 許可リストの名前は、どれも git の組み込みのサブコマンドである（git の alias は組み込みを上書きできないため、
 # 同じ名前の alias を設定に置いても alias は使われない）。
-git_allowed_subcommands=()
 git_allowed_subcommands=()
 eval "$(grep '^git_allowed_subcommands=' "$SCRIPT")"
 ((${#git_allowed_subcommands[@]})) || failures+=("allowlist: git_allowed_subcommands not found in agent-gh")
@@ -731,6 +738,12 @@ work_git config --unset core.hooksPath
 work_git config include.path "$PUSH_DIR/nohook.cfg"
 expect_hook_block repo-include X=1
 work_git config --unset include.path
+# 設定のフック（hk が入れる hook.<名前>.*）が pre-push にあっても、一時フックの確認は走る
+work_git config hook.other.event pre-push
+work_git config hook.other.command true
+expect_hook_block config-hook X=1
+work_git config --unset hook.other.event
+work_git config --unset hook.other.command
 
 # 6. review の push も同じ確認を通る。正しい名義は pelway-review[bot]。
 setup_push_repo review_push

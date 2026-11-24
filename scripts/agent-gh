@@ -115,7 +115,7 @@ help() {
     "" \
     "呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。" \
     "git push の成功後は scripts/agent-gh-resign がコミットを GitHub API の署名付きに付け替える（止めるときは PELWAY_AGENT_SKIP_RESIGN=1）。" \
-    "git push は、push するコミット（origin の追跡 ref から辿れないもの）の author と committer がその役割の App（pelway-<dev|review>[bot]）でなければ止める。確認を外す引数は受け付けない: サブコマンドは許可リスト（git_allowed_subcommands）だけ、グローバルオプションは無し、push の --no-verify は拒否。git が起動する別プロセス（設定の diff・merge のドライバなど）を経由する経路は対象外。" \
+    "git push は、push するコミット（origin の追跡 ref から辿れないもの）の author と committer がその役割の App（pelway-<dev|review>[bot]）でなければ止める。確認を外す引数は受け付けない: サブコマンドは許可リスト（git_allowed_subcommands）の名前と完全一致するものだけ、グローバルオプションは無し、転送のコマンドのオプション（--upload-pack・--receive-pack・--exec）と push の --no-verify は拒否。範囲は手元の追跡 ref（refs/remotes/origin/*）で決まるため、追跡 ref を手元で動かした経路と、git が起動する別プロセス（設定の diff・merge のドライバなど）を経由する経路は対象外。" \
     "qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持ちません（~/.config/pelway-agent-qa/fnox.toml を指してください）。" \
     "非 ASCII の文字列は argv 経由で渡せません（\\uXXXX に潰れます）。--body-file / api --input / git commit -F などファイル経由で渡してください。" \
     "終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、それ以外は gh / git の終了コード"
@@ -293,7 +293,12 @@ if [[ "${1:-}" == "git" ]]; then
   # 名前の自動修正（help.autocorrect）、コマンドを実行するもの（rebase -x・submodule foreach など）、
   # pre-push フックを通らない配管コマンド（send-pack など）は、どれも許可リストに無いため拒否される。
   # 許可リストの名前はどれも git の組み込みで、git の alias は組み込みを上書きできない。
-  if [[ " ${git_allowed_subcommands[*]} " != *" $git_sub "* ]]; then
+  # qa_check_args と同じく、要素ごとの == で完全一致させる（空白でつないだ 1 つの引数を部分一致で通さない）。
+  allowed=0
+  for c in "${git_allowed_subcommands[@]}"; do
+    [[ "$git_sub" == "$c" ]] && allowed=1
+  done
+  if ((!allowed)); then
     echo "agent-gh: git のサブコマンド（$git_sub）は使えません。使えるもの: ${git_allowed_subcommands[*]}" >&2
     exit 2
   fi
