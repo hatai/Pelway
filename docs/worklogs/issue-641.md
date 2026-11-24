@@ -107,3 +107,15 @@
 5. 改善案: 値を取るオプションを足すときは「その値が push 自体の対象を変えないか」を確かめる。試験の「実装前の HEAD」は作業ツリーに残してから差し替える手順が速い。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 10）
+
+対象 head: 7034f69b9a94c7cc6156420e8e878668d27a459b
+
+1. 詰まった箇所: `push.recurseSubmodules` だけを読んでいた。Git は `submodule.recurse` も同じ変数に読み、設定ファイルの順序で後に読んだものを使うため、後の `submodule.recurse=true` で親が送られるのに resign を省く場合があった。
+2. 曖昧だった文: 「両設定を Git と同じ順序で評価し、競合時の回帰試験を追加」（指揮役経由の codex must-fix）
+3. 仮定と解釈: 「同じ順序」は設定ファイルの読み順（`git config --get-regexp` の出力順）と解釈し、両キーを一発で取って `tail` の最後を採用した。`submodule.recurse` は真偽値（`only` は `bad boolean config value` で拒否されることを実機で確かめた）で only を取り得ないため、最後が `submodule.recurse` なら only ではない。
+4. 足りなかった情報・検証手段: 実機で `submodule.recurse=only`（拒否）・`=true`（受理）・`push.recurseSubmodules=only`（受理）を確かめ、`git config --get-regexp` がキーを小文字化して設定順に出すことを確かめた。偽の git は旧形の `config --get push.recurseSubmodules` にも答えるようにし、競合試験が実装前のコードで red（`resign targets '', want 'origin/agent/X'`）になることを確かめた。
+5. 改善案: 設定を読む処理を足すときは、同じ変数に書く設定キーが複数ないかを Git の実装（config コールバック）で確かめる。
+
+使ったスキル: implement-issue
