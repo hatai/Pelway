@@ -49,7 +49,7 @@
 ## 13件孤立の詳細調査（人間依頼）
 
 - 「13件が孤立」の実体（当時の記述。訂: スナップショットで `completed`・未 settle・トップレベルと確定したのは 12 本＝open PR 対応 10・なし 2。#569 分はスレッド ID 未特定で状態未確認の候補として扱う — report.md 2 節）。内訳（当時の記述。訂: 確定分の内訳は真の孤立 4・複合 2・意図的保留 3・settle 負債 3 に候補 1 件 — report.md 2 節）: 真の孤立（起こす経路の障害で停止）最大 6 件・意図的保留 4〜5 件・settle 負債 3 件
-- 根本原因（確認済み）: ①`scripts/conductor-watch.sh` が `t3 thread list` の失敗を `|| true` + `2>/dev/null` + `except: threads=[]` で握り潰し、スレッド列挙に失敗した回は STALL 検知（Issue #504 実装）が実行されないコード構造（訂: 列挙失敗の確認できる記録は 11-20 00:50 の申し送りと 11-21 01:50 の記録の 2 点で、間の連続性・復旧時刻は未確認 — report.md 3.1 節） ②`t3_thread_send` MCP 経路障害（`mcp_down` 10:45〜継続・本調査中も再送2回失敗。read 系は成功）
+- 根本原因（確認済み）: ①`scripts/conductor-watch.sh` が `t3 thread list` の失敗を `|| true` + `2>/dev/null` + `except: threads=[]` で握り潰し、スレッド列挙に失敗した回は STALL 検知（Issue #504 実装）が実行されないコード構造（訂: 列挙失敗の確認できる記録は 11-20 00:50 の申し送りと 11-21 01:50 の記録の 2 点で、間の連続性・復旧時刻は未確認 — report.md 3.1 節） ②`t3_thread_send` MCP 経路障害（`mcp_down` 10:45〜継続・本調査中も再送2回失敗。read 系は成功）（訂: 「確認済み」と言えるのは ① のコード構造と失敗の 2 時点の観測・② の send 系障害の実測まで — 12 本が止まった時点で列挙が失敗していたか、障害区間の見張りの版と生死は未確認（STALL/HEARTBEAT は PR #562 で 11-21 00:49 JST に main 入り・`watcher_blind.since` の始点はその約 24 時間前）。report.md 3.1・6 節）
 - 増幅: 指揮役 4 代交代・旧指揮役スレッドの起き直りと patrol-state 上書き（offset 逆行）（訂: 観測した起き直りは割り込み直後の 1 回で、起き直りと上書きの前後関係・因果、および上書きの発生時刻は未確認 — report.md 3.4・6 節）・巡回タスク fe5a87db が enabled:false
 - 成果物: 調査報告 `docs/worklogs/bugs/orphaned-impl-threads/report.md`（report-only Draft PR #650・branch `agent/investigate-orphaned-impl-threads`）、対策 Issue #651（conductor-watch の取得失敗イベント化）起票
 - link_pull_request/link_issue の T3 ツール呼び出しは MCP 再接続失敗で未完了
