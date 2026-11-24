@@ -107,3 +107,16 @@ r6 の approve 後に指揮役から届いた残り nit 3 件への対応。①[
 5. 改善案: 無し。
 
 使ったスキル: implement-issue、ja-text-communication
+## 実装者メモ（round 9）
+
+対象 head: `89b40037e24ef95f4b6d51c4d04d29a19e2a0f45`
+
+レビュー r8（codex、CHANGES_REQUESTED @`d5e21a5`）の must-fix 1 件と [文書のずれ] nit 1 件への対応。印の無い nit 2 件（枠数えの巻き戻し参照の明示・起票照合記録と通知済み記録の区別）は対象外。
+
+1. 詰まった箇所: 特になし。
+2. 曖昧だった文: 無し。指摘は正確で、権限指定の失敗などで `needs-human` が付いた未起動 Issue は、ボードに載らない棚卸し Issue では列移動の停止検知も効かず、次巡回の再試行対象に戻ってしまう隙間があった。
+3. 仮定と解釈: must-fix は、新規の起動・やり直し・結果不明の照合後の起動のすべての直前に `needs-human` と巡回記録の「人間の判断待ち」を確かめ、保留中は起動しない（結果の照合は行い、起動は人間の判断後）旨を runbook :263 に追加し、SKILL.md の入口文にも保留中は起動しない 1 節を足した。nit は PR 本文の「変更内容」で `agent:devin` を Devin CLI の場合に限ると runbook に合わせた（pr edit のみ）。エスカレーション経路のどれで `needs-human` が付いても、起動直前の確認で同じ形に止まるよう、特定の経路ではなく保留状態そのものを見る条件にした。
+4. 足りなかった情報・検証手段: `scripts/conductor-watch.sh` の `needs-human` による人間待ち分類（レビュー指摘で確認）。検証は hk-check 通過（docs のみの変更）。
+5. 改善案: 無し。
+
+使ったスキル: implement-issue、ja-text-communication
