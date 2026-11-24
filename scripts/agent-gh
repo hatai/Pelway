@@ -111,7 +111,7 @@ help() {
     "" \
     "呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。" \
     "git push の成功後は scripts/agent-gh-resign がコミットを GitHub API の署名付きに付け替える（止めるときは PELWAY_AGENT_SKIP_RESIGN=1）。" \
-    "git push は、push するコミット（origin の追跡 ref から辿れないもの）の author と committer がその役割の App（pelway-<dev|review>[bot]）でなければ止める。確認を外す方法は無い（--no-verify・core.hooksPath の上書きは拒否）。" \
+    "git push は、push するコミット（origin の追跡 ref から辿れないもの）の author と committer がその役割の App（pelway-<dev|review>[bot]）でなければ止める。確認を外す方法は無い（git のグローバルオプション・alias・send-pack などの配管コマンド・push の --no-verify は拒否）。" \
     "qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持ちません（~/.config/pelway-agent-qa/fnox.toml を指してください）。" \
     "非 ASCII の文字列は argv 経由で渡せません（\\uXXXX に潰れます）。--body-file / api --input / git commit -F などファイル経由で渡してください。" \
     "終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、それ以外は gh / git の終了コード"
@@ -276,37 +276,30 @@ if [[ "${1:-}" == "git" ]]; then
   done
   git_cfg+=(-c credential.helper= -c 'credential.helper=!gh auth git-credential')
 
-  # push するコミットの名義を確かめる（#613）。git_sub はグローバルオプションの後の最初の引数（サブコマンド）。
-  git_sub=""
-  git_args=("$@")
-  for ((i = 0; i < ${#git_args[@]}; i++)); do
-    a="${git_args[i]}"
-    case "$a" in
-      -c | --config-env | --config-env=*)
-        # フックの場所の上書き（確認を外す引数になる）は拒否する。
-        v="${git_args[i + 1]:-}"
-        if [[ "$a" != -c || "${v,,}" == core.hookspath* ]]; then
-          echo "agent-gh: core.hooksPath の上書き・--config-env は使えません（push の名義の確認を外せないため）" >&2
-          exit 2
-        fi
-        i=$((i + 1))
-        ;;
-      -c?*)
-        # -c と設定値を連結した形も、git の版に頼らず拒否する（git 2.56 は unknown option で拒むが、
-        # 受け付ける版ではフックを外す引数になる）。
-        v="${a#-c}"
-        if [[ "${v,,}" == core.hookspath* ]]; then
-          echo "agent-gh: core.hooksPath の上書き・--config-env は使えません（push の名義の確認を外せないため）" >&2
-          exit 2
-        fi
-        ;;
-      -C | --git-dir | --work-tree | --namespace) i=$((i + 1)) ;;
-      -*) ;;
-      *) git_sub="$a"; break ;;
-    esac
-  done
+  # push するコミットの名義を確かめる（#613）。git_sub はサブコマンド（最初の引数）。
+  # サブコマンドより前のグローバルオプション（-c・-C・--config-env など）は一つも許さない（許可リストが空。
+  # qa_check_args と同じ考え方）。-c core.hooksPath・include.path・includeIf.*.path・alias.* は、どれも
+  # 一時フックを外す引数になり、値を取るオプションの取りこぼしはサブコマンドの判定を誤らせるため。
+  if [[ "${1:-}" == -* ]]; then
+    echo "agent-gh: git のグローバルオプション（サブコマンドより前の -c・-C・--config-env など。core.hooksPath・include・alias の上書きを含む）は使えません（push の名義の確認を外せないため）" >&2
+    exit 2
+  fi
+  git_sub="${1:-}"
+  # pre-push フックを通らずに push できる配管コマンドは拒否する。
+  case "$git_sub" in
+    send-pack | http-push | remote-*)
+      echo "agent-gh: git $git_sub は使えません（pre-push フックを通らず、push の名義の確認を外せるため）" >&2
+      exit 2
+      ;;
+  esac
+  # alias（repo・利用者・環境変数の設定）はサブコマンドの名前を変えて確認を外せるため拒否する。
+  # git の alias は組み込みのサブコマンドを上書きできないので、組み込みの呼び出しには影響しない。
+  if [[ -n "$git_sub" && -n "$(git config --get "alias.$git_sub" 2>/dev/null || true)" ]]; then
+    echo "agent-gh: git の alias（$git_sub）は使えません（サブコマンドの名前を変えて push の名義の確認を外せるため）" >&2
+    exit 2
+  fi
   if [[ "$git_sub" == push ]]; then
-    for a in "${git_args[@]:i+1}"; do
+    for a in "${@:2}"; do
       # --no-verify と、git が受け付けるその省略形（--no-veri 以上）は pre-push フックを飛ばすため拒否する。
       if ((${#a} >= 9)) && [[ "--no-verify" == "$a"* ]]; then
         echo "agent-gh: push の --no-verify は使えません（push の名義の確認を外せないため）" >&2
@@ -352,6 +345,7 @@ HOOK
       PELWAY_AGENT_PUSH_GUIDE="該当コミットを $push_name の名義で作り直してから push してください"
     fi
     export PELWAY_AGENT_PUSH_NAME="$push_name" PELWAY_AGENT_PUSH_GUIDE
+    # git_cfg の最後（呼び出し元の引数とサブコマンドの直前）に置き、ほかの設定より後で効かせる。
     git_cfg+=(-c "core.hooksPath=$hooks_dir")
   fi
 

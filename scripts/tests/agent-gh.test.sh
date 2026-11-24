@@ -647,6 +647,31 @@ for attached in "-ccore.hooksPath=/dev/null" "-cCORE.HOOKSPATH=/dev/null"; do
   [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("attached_c ($attached): remote ref changed")
 done
 
+# 名前や設定の読み込み先を変えてフックを外す経路も、agent-gh が終了コード 2 で拒否し、remote は変わらない:
+# - グローバルオプションの -c include.path / -c includeIf.<条件>.path（読み込んだ設定の core.hooksPath を効かせる）
+# - グローバルオプションの -c alias.<x>=push、-c 'alias.<x>=!git push'（サブコマンドの名前を変える）
+# - repo の設定に置いた alias（push と、! で始まるシェルの alias）
+# - pre-push フックを通らない配管コマンド（send-pack）
+printf '[core]\n\thooksPath = /dev/null\n' >"$PUSH_DIR/nohook.cfg"
+expect_rejected() {
+  local label="$1"
+  shift
+  push_run rejected dev git "$@"
+  [[ "$RC" == 2 ]] || failures+=("rejected ($label): exit $RC, want 2: $OUT")
+  [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("rejected ($label): remote ref changed")
+}
+expect_rejected include.path -c "include.path=$PUSH_DIR/nohook.cfg" push origin HEAD
+expect_rejected includeIf -c "includeIf.gitdir:/.path=$PUSH_DIR/nohook.cfg" push origin HEAD
+expect_rejected alias-arg -c alias.p=push p origin HEAD
+expect_rejected alias-arg-shell -c 'alias.p=!git push' p origin HEAD
+work_git config alias.pp push
+expect_rejected alias-repo pp origin HEAD
+work_git config alias.sp '!git push'
+expect_rejected alias-repo-shell sp origin HEAD
+work_git config --unset alias.pp
+work_git config --unset alias.sp
+expect_rejected send-pack send-pack "$PUSH_DIR/remote.git" HEAD:refs/heads/agent/author_block
+
 # 6. review の push も同じ確認を通る。正しい名義は pelway-review[bot]。
 setup_push_repo review_push
 (cd "$PUSH_DIR/work" && as 'pelway-review[bot]' commit -q --allow-empty -m r1)
