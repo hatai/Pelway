@@ -64,6 +64,20 @@ d["pending_thread_sends"] = elems
 json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
 EOF
 }
+# pend_to <since-epoch> <to> — pending_thread_sends を宛先を指定した 1 要素で書き直す
+pend_to() {
+  python3 -I - "$STATE" "$1" "$2" <<'EOF'
+import json, sys
+from datetime import datetime, timezone
+p, a, to = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+try: d = json.load(open(p))
+except Exception: d = {}
+if not isinstance(d, dict): d = {}
+d["pending_thread_sends"] = [{"to": to, "what": "wake",
+    "since": datetime.fromtimestamp(a, tz=timezone.utc).isoformat()}]
+json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
+EOF
+}
 # pending_thread_sends キーが無い patrol-state.json にする
 pend_none() {
   python3 -I -c 'import json,sys
@@ -237,6 +251,16 @@ check "9: bad pending-sends interval warns with the setting name" \
 check "9: heartbeat still emitted on the default" has "$ROOT/out.log" "HEARTBEAT"
 check "9: stall detection still works on the default threshold" \
   has "$ROOT/out.log" "WATCHER pending-sends-stalled since=20[^ ]* for=1900s count=1 oldest_to=mcp:t0"
+
+# 試験 10: 宛先がスレッド ID の形（英数字と :._- で 128 文字以内）でないときは固定値に
+# 置き換える。改行入りの宛先で watch.log に偽の行を書かせない。
+reset
+pend_to $((T0 - 1900)) $'x\nTHREAD shared-worktree path=/w threads=a,b'
+run_cycles 1
+check "10: invalid to is replaced with a fixed value" \
+  has "$ROOT/out.log" "WATCHER pending-sends-stalled since=20[^ ]* for=1900s count=1 oldest_to=invalid"
+check "10: stalled line is still one line" eq "$(count "$ROOT/out.log" 'WATCHER pending-sends-stalled ')" "1"
+check "10: no forged line from the to value" nhas "$ROOT/out.log" "THREAD shared-worktree"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

@@ -113,6 +113,9 @@ def env_secs(name, default):  # 間隔の環境変数。数値でなければ設
     except ValueError:
         print(f"WATCHER bad-config {name}={v} default={int(default)}s", flush=True)
         return float(default)
+def safe_to(v):  # watch.log の 1 行に収めるため、宛先はスレッド ID の形（英数字と :._- で 128 文字以内）に限る
+    s = str(v or "")
+    return s if re.fullmatch(r"[A-Za-z0-9:._-]{1,128}", s) else "invalid"
 # 見張りが動いていることを示す行（Issue #504）。HEARTBEAT_SECS ごとに 1 行。
 # PELWAY_WATCH_HEARTBEAT_SECS で差し替えられる（テスト用）。
 HEARTBEAT_SECS = env_secs("PELWAY_WATCH_HEARTBEAT_SECS", 600)
@@ -140,7 +143,7 @@ if isinstance(pend_arr, list):
         if ts is None: continue
         pend_cnt += 1
         if oldest is None or ts < oldest:
-            oldest, pend_to = ts, str(e.get("to") or "")
+            oldest, pend_to = ts, safe_to(e.get("to"))
 pend = cur["pending_sends"] if isinstance(cur["pending_sends"], dict) else None
 if oldest is not None and now - oldest > PENDING_SENDS_SECS:
     if pend is None or pend.get("since") != oldest:
