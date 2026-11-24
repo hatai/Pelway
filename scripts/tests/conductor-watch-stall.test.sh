@@ -36,6 +36,8 @@ chmod +x "$ROOT/repo/scripts/agent-gh"
 cat > "$ROOT/bin/t3" <<'EOF'
 #!/usr/bin/env bash
 [[ "$1 $2" == "thread list" ]] && { cat "$MOCK/threads.json"; exit 0; }
+# 作業ツリーの共有の検知（Issue #643）が呼ぶ読み取り。共有の無い空の作業ツリーを返す。
+[[ "$1 $2" == "thread show" ]] && { echo '{"thread":{"worktreePath":""}}'; exit 0; }
 echo "t3 $*" >> "$MOCK/other-calls"; exit 9
 EOF
 chmod +x "$ROOT/bin/t3"
