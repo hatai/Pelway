@@ -95,3 +95,15 @@
 5. 改善案: メモを書き直すときは「当時の実装」と「今の実装」を混ぜない（誤記の訂正と内容の更新を分ける）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 9）
+
+対象 head: 402cf038c776a94a5dde6785508964901d708e40
+
+1. 詰まった箇所: `--recurse-submodules=only` はサブモジュールだけを送り親リポジトリの ref を更新しないのに、値を消費するだけで親の refspec を resign に渡していた。追跡 ref が残っている宛先は実際に書き換わり得る（resign は既存の追跡 ref とリモート先頭を検査してから ref を更新する）。
+2. 曖昧だった文: 「Git の `--recurse-submodules=only` はサブモジュールだけを送り、親リポジトリのブランチを更新せずに成功する…親リポジトリの署名処理を呼ばないように」（PR #655 codex レビュー must-fix）
+3. 仮定と解釈: 「only のときは飛ばす」を「有効な recurse-submodules の値が only のときは親の対象を空にする」と解釈した。CLI の指定は後に書いたものが勝ち（`--no-` 形は解除）、CLI での指定が無いときだけ `git config --get push.recurseSubmodules` を見る。`git -c` での指定は push より前の引数のため push_targets には届かない（既知の限界）。値の比較は `only` との厳密一致。
+4. 足りなかった情報・検証手段: 実機の git で `--recurse-submodules` が値を必須とし（`requires a value`）、別引数・連結・省略形の値を消費することを確かめた。偽の git に `FAKE_GIT_RECURSE`（`config --get push.recurseSubmodules` への応答）を足し、連結形・別引数の省略形・設定・後続の解除の 7 件を試験にした（4 件は実装前に red）。
+5. 改善案: 値を取るオプションを足すときは「その値が push 自体の対象を変えないか」を確かめる。試験の「実装前の HEAD」は作業ツリーに残してから差し替える手順が速い。
+
+使ったスキル: implement-issue
