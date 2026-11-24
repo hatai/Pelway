@@ -24,6 +24,18 @@
   （--allow-offset-regression なし）は拒否する（照合を確かめられないため）。
   拒否・回復途中の記録には needs_conductor_claim を立て、--claim-conductor の
   回復書き込みが来るまで拒否が続く
+- 正規パス・ロックファイルが信頼できる通常ファイルでないときは中身を読まず
+  写さず扱わない: O_NOFOLLOW で symlink をたどらず、fstat で通常ファイル・
+  自己所有・リンク数 1 を確かめ、状態ファイルは 256KiB 上限で 1 回だけ読む
+  （そのバイト列を解析と unreadable の退避の両方に使う）。symlink・FIFO・
+  デバイス・他人所有・巨大な正規パスは種類だけ anomalies（state-untrusted）に
+  記録し、unreadable と同じ照合不能の扱いで回復を待つ。ロックパスの不適合は
+  失敗（rc 1）とする。これで、sandbox 内の書き手が正規パスをホストの
+  ファイルへの symlink 等に差し替えても、その中身が pelway/ 配下や
+  正規パスに写り込まない
+- anomalies はこの手順だけが記録する項目。patch が anomalies に書いたものは
+  採らず、base の記録に今回の記録を追記したものだけを結果に入れる
+  （記録の注入・消去を防ぐ）
 
 入力は標準入力の merge patch ベースの指定（オブジェクトは深く併合し、null は鍵を消す。
 RFC 7386 と違い、patch のオブジェクトは既存値がオブジェクトでなくても再帰的に
@@ -49,9 +61,11 @@ JSON 配列は併合の列として順に適用する — 鍵の集合ごとの�
 1 = 入出力・ロックの失敗。
 """
 import copy
+import errno
 import fcntl
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -61,6 +75,7 @@ from datetime import datetime
 OFFSET_KEYS = ("watch_log_offset", "inbox_offset")
 ANOMALY_MAX = 100
 LOCK_TIMEOUT_SECS = 10.0
+STATE_MAX_BYTES = 256 * 1024
 LOCK_RETRY_SECS = 0.1
 
 
@@ -166,7 +181,18 @@ def main():
     os.makedirs(os.path.dirname(state) or ".", exist_ok=True)
     # 状態ファイルは書き込みのたびに os.replace で差し替わるため、ファイルそのものではなく
     # 別のロックファイル（<state>.lock。差し替わらない）を flock で取る。
-    lock_fd = os.open(state + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    # O_NOFOLLOW で symlink をたどらず、fstat で通常ファイル・自己所有・リンク数 1 を
+    # 確かめる: ロックパスが symlink だと、ロックがリンク先の別ファイルに掛かる。
+    try:
+        lock_fd = os.open(state + ".lock",
+                          os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    except OSError as e:
+        die(f"patrol-state lock のパスを開けない: {e}", 1)
+    lst = os.fstat(lock_fd)
+    if not stat.S_ISREG(lst.st_mode) or lst.st_uid != os.geteuid() or \
+            lst.st_nlink != 1:
+        os.close(lock_fd)
+        die("patrol-state lock のパスが信頼できる通常ファイルでない", 1)
     deadline = time.time() + LOCK_TIMEOUT_SECS
     while True:
         try:
@@ -178,18 +204,52 @@ def main():
             time.sleep(LOCK_RETRY_SECS)
 
     try:
-        base, unreadable = {}, False
+        # 正規パスは O_RDONLY|O_NOFOLLOW|O_NONBLOCK で 1 回だけ開き、fstat で
+        # 通常ファイル・自己所有・リンク数 1・サイズ上限を確かめる。その fd から
+        # 読んだバイト列を解析と unreadable の退避の両方に使い、二度読まない。
+        # symlink・FIFO・デバイス・他人所有・巨大ファイルは中身を読まず写さず、
+        # 種類だけ anomalies に記録して照合不能な書き込みを拒否する（読むと
+        # ホストのファイルの中身が pelway/ 配下や正規パスに写り、sandbox の
+        # 外の情報が流れ込む）。
+        base, unreadable, untrusted_reason, raw_state = {}, False, None, None
         try:
-            with open(state) as f:
-                loaded = json.load(f)
-            if isinstance(loaded, dict):
-                base = loaded
-            else:
-                unreadable = True
+            sfd = os.open(state, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         except FileNotFoundError:
-            pass
-        except Exception:
-            unreadable = True
+            sfd = None
+        except OSError as e:
+            sfd = None
+            untrusted_reason = ("symlink" if e.errno == errno.ELOOP
+                                else "unreadable-path")
+        if sfd is not None:
+            try:
+                sst = os.fstat(sfd)
+                if not stat.S_ISREG(sst.st_mode):
+                    untrusted_reason = "not-regular"
+                elif sst.st_uid != os.geteuid():
+                    untrusted_reason = "not-owned"
+                elif sst.st_nlink != 1:
+                    untrusted_reason = "hardlinked"
+                elif sst.st_size > STATE_MAX_BYTES:
+                    untrusted_reason = "too-large"
+                else:
+                    raw_state = os.read(sfd, STATE_MAX_BYTES + 1)
+                    if len(raw_state) > STATE_MAX_BYTES:
+                        untrusted_reason = "too-large"
+                        raw_state = None
+            except OSError:
+                untrusted_reason = "unreadable-path"
+                raw_state = None
+            finally:
+                os.close(sfd)
+        if raw_state is not None:
+            try:
+                loaded = json.loads(raw_state)
+                if isinstance(loaded, dict):
+                    base = loaded
+                else:
+                    unreadable = True
+            except Exception:
+                unreadable = True
 
         result = copy.deepcopy(base)
         for p in patches:
@@ -205,29 +265,36 @@ def main():
             # 書き戻されるまで、読めない元ファイルを正規パスに残す。退避と書き戻しの
             # 間で中断されても、正規パスには「読めない元ファイル」か「回復を待つ
             # 新しい状態」のどちらかが残り、次回は初回作成扱いにならない。
+            # 退避するのは上で検査した fd から読んだバイト列そのもの（二度読まない）。
             stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
             backup = f"{state}.unreadable-{stamp}"
             n = 0
             while os.path.exists(backup):
                 n += 1
                 backup = f"{state}.unreadable-{stamp}.{n}"
-            with open(state, "rb") as f:
-                atomic_write(backup, f.read())
+            atomic_write(backup, raw_state)
             notes.append({"kind": "state-unreadable", "writer": who,
                           "backup": os.path.basename(backup), "at": now_iso})
+        if untrusted_reason:
+            # 正規パスが信頼できる通常ファイルでなかった（symlink・FIFO・
+            # 他人所有・巨大など）。中身は読んでいないので退避コピーも作らず、
+            # 種類だけ記録する。
+            notes.append({"kind": "state-untrusted", "reason": untrusted_reason,
+                          "writer": who, "at": now_iso})
 
-        # needs_conductor_claim は unreadable からの回復途中の印。立てるのは
-        # この手順が unreadable に会ったときだけ、下ろすのは --claim-conductor の
+        # needs_conductor_claim は unreadable・untrusted からの回復途中の印。立てるのは
+        # この手順がそれらに会ったときだけ、下ろすのは --claim-conductor の
         # 回復書き込みだけ（patch からの操作は受け付けない）。
+        unverifiable_state = unreadable or untrusted_reason is not None
         if opts["claim"]:
             result.pop("needs_conductor_claim", None)
-        elif unreadable or base.get("needs_conductor_claim"):
+        elif unverifiable_state or base.get("needs_conductor_claim"):
             result["needs_conductor_claim"] = True
         else:
             result.pop("needs_conductor_claim", None)
 
         refuse = []
-        unverifiable = unreadable or bool(base.get("needs_conductor_claim"))
+        unverifiable = unverifiable_state or bool(base.get("needs_conductor_claim"))
         if unverifiable and not opts["claim"]:
             if opts["writer_thread"]:
                 keys = sorted({k for p in patches for k in p})
@@ -275,7 +342,7 @@ def main():
 
         if refuse:
             out = copy.deepcopy(base)
-            if unreadable:
+            if unverifiable_state:
                 out["needs_conductor_claim"] = True
             anoms = out.get("anomalies")
             anoms = anoms if isinstance(anoms, list) else []
@@ -284,10 +351,15 @@ def main():
             kinds = ", ".join(r["kind"] for r in refuse)
             die(f"refused ({kinds}) by {who}; attempt recorded in anomalies", 3)
 
-        if notes or isinstance(result.get("anomalies"), list):
-            anoms = result.get("anomalies")
-            anoms = anoms if isinstance(anoms, list) else []
+        # anomalies はこの手順だけが記録する項目。base に残る記録に今回の notes を
+        # 追記したもので結果を組み直し、patch が anomalies に書いたものは採らない
+        # （記録の注入・消去ができると拒否の履歴を偽装・抹消できてしまう）。
+        anoms = base.get("anomalies")
+        anoms = anoms if isinstance(anoms, list) else []
+        if anoms or notes:
             result["anomalies"] = (anoms + notes)[-ANOMALY_MAX:]
+        else:
+            result.pop("anomalies", None)
         atomic_write(state, result)
         print(f"patrol-state-update: applied {state}", file=sys.stderr)
         return 0

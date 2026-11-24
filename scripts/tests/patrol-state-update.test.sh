@@ -19,12 +19,12 @@ mkdir -p "$(dirname "$STATE")"
 put_state() { printf '%s' "$1" > "$STATE"; }
 
 pget() { # pget <top-level key>
-  python3 -I -c 'import json,sys
+  timeout 30 python3 -I -c 'import json,sys
 print(json.dumps(json.load(open(sys.argv[1])).get(sys.argv[2], ""), ensure_ascii=False))' "$STATE" "$1"
 }
 
 anoms() { # anomalies の kind 一覧（改行区切り）
-  python3 -I -c 'import json,sys
+  timeout 30 python3 -I -c 'import json,sys
 d = json.load(open(sys.argv[1]))
 for a in d.get("anomalies", []):
     if isinstance(a, dict): print(a.get("kind", ""))' "$STATE"
@@ -32,7 +32,7 @@ for a in d.get("anomalies", []):
 
 upd() { # upd <expected-rc> <patch> [args...] — 標準エラーは $LAST_ERR に残る
   local want="$1" patch="$2" got; shift 2
-  printf '%s' "$patch" | python3 -I "$UPD" --state "$STATE" "$@" >"$ROOT/out" 2>"$ROOT/err"
+  printf '%s' "$patch" | timeout 30 python3 -I "$UPD" --state "$STATE" "$@" >"$ROOT/out" 2>"$ROOT/err"
   got=$?
   LAST_ERR="$(cat "$ROOT/err")"
   [[ "$got" == "$want" ]]
@@ -280,6 +280,75 @@ check "corrupt: non-offset write by non-thread applies" upd 0 '{"a":2}' --writer
 check "corrupt: non-offset write applied" eq "$(pget a)" '2'
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
 
+# --- 正規パスのリンク先・特殊ファイルは中身を読まず写さず拒否する ---
+# sandbox 内の書き手が patrol-state.json をホストファイルへの symlink や
+# FIFO・デバイスに差し替えても、リンク先の中身を読んだり pelway/ 配下や
+# 正規パスに写したりしてはいけない（Issue #671 レビュー指摘）。
+PDIR="$(dirname "$STATE")"
+rm -f "$STATE".unreadable-*
+SECRET_JSON="$ROOT/host-secret.json"
+printf '{"conductor_thread_id":"mcp:host","token":"TOPSECRET"}' > "$SECRET_JSON"
+printf 'TOPSECRET host bytes' > "$ROOT/host-secret.txt"
+
+rm -f "$STATE"
+ln -s "$ROOT/host-secret.txt" "$STATE"
+check "symlink to non-json host file refused" \
+  upd 3 '{"a":1}' --writer-thread mcp:cur
+check "symlink: refusal recorded" anoms_has "state-untrusted"
+check "symlink: no quarantine copy of target" \
+  bash -c '! compgen -G "$1.unreadable-*" >/dev/null' _ "$STATE"
+check "symlink: host bytes not copied into pelway dir" \
+  bash -c '! grep -rlq TOPSECRET "$1"' _ "$PDIR"
+check "symlink: target file unchanged" \
+  eq "$(cat "$ROOT/host-secret.txt")" 'TOPSECRET host bytes'
+check "symlink: canonical replaced by recovery state" \
+  eq "$(pget needs_conductor_claim)" 'true'
+
+rm -f "$STATE"
+ln -s "$SECRET_JSON" "$STATE"
+check "symlink to json object refused" \
+  upd 3 '{"a":1}' --writer-thread mcp:cur
+check "symlink-json: target content not adopted as base" \
+  bash -c '! grep -q TOPSECRET "$1"' _ "$STATE"
+check "symlink-json: registered id not adopted" \
+  eq "$(pget conductor_thread_id)" '""'
+check "symlink-json: link target owner still refused" \
+  upd 3 '{"a":2}' --writer-thread mcp:host
+
+rm -f "$STATE" "$STATE".unreadable-*
+mkfifo "$STATE"
+check "fifo state refused without blocking" \
+  bash -c 'printf "%s" "{\"a\":1}" | timeout 15 python3 -I "$1" --state "$2" --writer-thread mcp:cur 2>/dev/null; [[ $? == 3 ]]' _ "$UPD" "$STATE"
+check "fifo: no quarantine copy made" \
+  bash -c '! compgen -G "$1.unreadable-*" >/dev/null' _ "$STATE"
+check "fifo: procedure continues with claim" \
+  upd 0 '{"scheduled_task_id":"s3"}' --writer-thread mcp:new --claim-conductor
+check "fifo: claim sets owner" eq "$(pget conductor_thread_id)" '"mcp:new"'
+rm -f "$STATE"
+put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
+
+# ロックファイルの symlink もたどらない（flock をホストファイルに掛けない）
+rm -f "$STATE.lock"
+ln -s "$ROOT/host-secret.txt" "$STATE.lock"
+check "symlinked lock file fails closed" \
+  upd 1 '{"a":1}' --writer conductor-watch
+check "lock symlink: state file untouched" eq "$(pget watch_log_offset)" '600'
+rm -f "$STATE.lock"
+
+# --- anomalies は手順だけが記録する項目。patch からの注入・消去はできない ---
+check "patch cannot inject anomalies" \
+  upd 0 '{"anomalies":[{"kind":"fake","note":"planted"}],"a":7}' --writer-thread mcp:cur
+check "injected anomaly not stored" \
+  bash -c '! grep -q fake "$1"' _ "$STATE"
+put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"anomalies":[{"kind":"owner-unverifiable","writer":"w","at":"t"}]}'
+check "patch cannot wipe anomalies" \
+  upd 0 '{"anomalies":[],"a":8}' --writer-thread mcp:cur
+check "recorded anomaly survives empty patch" anoms_has "owner-unverifiable"
+check "patch cannot null anomalies" \
+  upd 0 '{"anomalies":null,"a":9}' --writer-thread mcp:cur
+check "recorded anomaly survives null patch" anoms_has "owner-unverifiable"
+put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
+
 # --- 入力の誤り ---
 check "empty stdin refused" upd 2 '' --writer-thread mcp:cur
 check "non-json patch refused" upd 2 'not json' --writer-thread mcp:cur
@@ -295,8 +364,8 @@ check "conductor-watch writes via shared procedure" \
   has "$REPO/scripts/conductor-watch.sh" "patrol-state-update"
 check "conductor-watch has no direct patrol-state dump" \
   bash -c '! grep -q "json.dump(ps, open(ps_path" "$1"' _ "$REPO/scripts/conductor-watch.sh"
-check "runbook: shared write procedure and protections documented" \
-  has_all "$RUNBOOK" "patrol-state-update" "conductor_thread_id" "anomalies" "巻き戻し" "claim-conductor"
+check "presence check: runbook mentions write procedure and protection terms" \
+  has_all "$RUNBOOK" "patrol-state-update" "conductor_thread_id" "anomalies" "巻き戻し" "claim-conductor" "needs_conductor_claim" "state-untrusted" "O_NOFOLLOW"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

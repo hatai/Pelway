@@ -389,7 +389,8 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 | `scheduled_task_id` | 現行の巡回の scheduled task の ID |
 | `inbox_offset` | 受信箱 `conductor-inbox.jsonl` の既読の位置（行番号）。agent-watch は、前回の起こしの後にこの値が進んでいなければ、次の起こしを送らない（Issue #555）。起こしの宛先はこの記録には置かない（sandbox から書けるため。`pelway-agent-watch --register`） |
 | `conductor_thread_id` | 現指揮役のスレッド ID。引き継ぎ・交代・回復・初回登録で指揮役が書き込み手順の `--claim-conductor` で自分の値にする（この項目は `--claim-conductor` でだけ変わり、通常の patch での変更・削除・無効化は拒否される）。一致しないスレッドからの書き込みは適用されず `anomalies` に記録される（Issue #671） |
-| `anomalies` | 書き込み手順が記録した異常の一覧（`conductor-mismatch`・`conductor-id-change-refused`・`offset-regression`・`offset-regression-refused`・`invalid-offset`・`state-unreadable`・`owner-unverifiable`・`offset-unverifiable`。直近 100 件まで）。巡回は新しい項目を見つけたら巡回記録に残す |
+| `anomalies` | 書き込み手順が記録した異常の一覧（`conductor-mismatch`・`conductor-id-change-refused`・`offset-regression`・`offset-regression-refused`・`invalid-offset`・`state-unreadable`・`state-untrusted`・`owner-unverifiable`・`offset-unverifiable`。直近 100 件まで）。巡回は新しい項目を見つけたら巡回記録に残す。`anomalies` は書き込み手順だけが書く項目で、patch からの追記・消去は受け付けない |
+| `needs_conductor_claim` | 状態ファイルが読めなかった・正規パスが信頼できる通常ファイルでなかった場合の回復途中の印。書き込み手順が立て、`--claim-conductor` の回復書き込みだけが下ろす（patch からの操作は受け付けない）。立っている間は `--writer-thread` の書き込みとオフセットを書く書き込みが拒否される |
 
 対象（キーは Issue 番号）ごとの必須項目:
 
@@ -406,7 +407,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 
 ### 書き込み手順
 
-`patrol-state.json` への書き込みはすべて、共通の書き込み手順 `scripts/patrol-state-update` にだけ出す。指揮役スレッドの巡回でのオフセットの書き戻し・`items`・`scheduled_task_id` の記録も、巡回スクリプト `conductor-watch.sh` の `subjects` の書き戻しも、この手順を通る。直接の書き換え（python の `json.dump`・`echo` のリダイレクトなど）は行わない（Issue #671: 複数の指揮役スレッドから同時に書かれ、オフセットが古い値に巻き戻った事故の対策）。例外は初回起動時の旧置き場からの引き継ぎだけ: `conductor-watch.sh` が旧置き場（`$XDG_STATE_HOME/pelway/patrol-state.json`）のファイルを新置き場へ 1 回きり `cp` で移す（項目の書き込みではなくファイルごとの移動で、手順の保護が働くべき競合も起きえないため）。
+`patrol-state.json` への書き込みはすべて、共通の書き込み手順 `scripts/patrol-state-update` にだけ出す。指揮役スレッドの巡回でのオフセットの書き戻し・`items`・`scheduled_task_id` の記録も、巡回スクリプト `conductor-watch.sh` の `subjects` の書き戻しも、この手順を通る。直接の書き換え（python の `json.dump`・`echo` のリダイレクトなど）は行わない（Issue #671: 複数の指揮役スレッドから同時に書かれ、オフセットが古い値に巻き戻った事故の対策）。例外は初回起動時の旧置き場からの引き継ぎだけ: `conductor-watch.sh` が旧置き場（`$XDG_STATE_HOME/pelway/patrol-state.json`）のファイルを新置き場へ 1 回きり `cp` で移す（項目の書き込みではなくファイルごとのコピーで、手順の保護が働くべき競合も起きえないため）。
 
 手順は merge patch ベースの指定（オブジェクトは深く併合し、`null` は鍵を消す。RFC 7386 とは違い、patch のオブジェクトは既存値がオブジェクトでなくても再帰的に併合する — そのため中の `null` も常に「鍵を消す」で、値としては残らない。JSON 配列は併合の列として順に適用する）を標準入力に取り、ロックを取って現在値を読み直してから併合し、保護を通った結果だけを原子的に書き戻す。名乗りは `--writer-thread <スレッド ID>`（指揮役スレッド）か `--writer <名前>`（スレッドを持たない書き手。巡回スクリプトは `conductor-watch`）のどちらかを必ず付ける。
 
@@ -416,6 +417,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 - `conductor_thread_id` そのものを patch で変更・削除・無効化する書き込み（`--writer`・`--writer-thread` のどちらの名乗りでも拒否し、`conductor-id-change-refused` として記録する。同じ値の書き戻しは除く）。この項目は `--claim-conductor` でだけ変わる — この項目が失われると後続の持ち主照合が素通りになるため
 - `watch_log_offset`・`inbox_offset` を現行値より小さい値へ戻す変更（巻き戻し）。`--allow-offset-regression` を付けたときだけ適用し、適用も `anomalies` に記録する。オフセットを意図して戻す場面（ログの切り詰めなど）に限る
 - 状態ファイルが JSON のオブジェクトとして読めないとき、手順は元のファイルを `patrol-state.json.unreadable-<時刻>` にコピーして `anomalies` に記録する（移動ではなくコピーなので、回復状態が原子的に書き戻されるまで読めない元ファイルが正規パスに残り、処理が中断しても正規パスは空にならない）。`--claim-conductor` 以外の `--writer-thread` の書き込みとオフセットを書く書き込み（`--allow-offset-regression` なし）を拒否する（照合を確かめられないため）。回復途中の記録には `needs_conductor_claim` が立ち、`--claim-conductor` の回復書き込みが来るまで拒否が続く。退避されたファイルは残り、現指揮役が回復の材料にできる。回復書き込みは照合の比較元が無いため、`--allow-offset-regression` なしでもオフセットを書け、巻き戻しの検査も行われない。回復は現指揮役だけが行う: 回復の前に、退避ファイルが読めればその `conductor_thread_id` が自分のスレッド ID であることと、巡回の scheduled task の持ち主が自分のスレッドであることを確かめてから `--claim-conductor` で `conductor_thread_id`・オフセット・`subjects` を書き戻す
+- 正規パス（状態ファイル）とロックファイル（`<state>.lock`）が信頼できる通常ファイルでないときは、手順は中身を読まず写さず扱わない: `O_NOFOLLOW` で symlink をたどらず、`fstat` で通常ファイル・自己所有・リンク数 1 を確かめ、状態ファイルは 256KiB 上限で 1 回だけ読み、そのバイト列を解析と unreadable の退避の両方に使う（二度読まない）。symlink・FIFO・デバイス・他人所有・巨大な正規パスは `state-untrusted` として種類だけ `anomalies` に記録し（退避コピーは作らない）、unreadable と同じ照合不能の扱いで `needs_conductor_claim` を立てて回復を待つ。ロックパスの不適合は失敗（終了コード 1）とする。sandbox 内の書き手が正規パスをホストのファイルへの symlink 等に差し替えても、その中身は `pelway/` 配下や正規パスに写り込まない
 
 ### 次回確認時刻（フォローアップタイマー）
 
