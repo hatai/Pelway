@@ -262,6 +262,122 @@ case "$role" in
   *) usage ;;
 esac
 
+# push_targets 用: $1=-- と --no- と =<値> を除いたオプション名が $2=正規形と一致するか
+# 判定する（$3=一意に特定できる最短の長さ）。長いオプションは一意な接頭辞で省略でき、
+# それより短い形は他のオプションと曖昧で git が拒否するため届かない。
+push_longopt() { ((${#1} >= $3)) && [[ "$2" == "$1"* ]]; }
+
+# push_targets <git push の引数（push より後）...>: push 先から署名を付け直す対象を決める（#641）。
+# 結果: push_remote と push_branches（ブランチ名の配列。重複なし）、push_fallback（1 なら
+# agent-gh-resign を位置引数なしで呼び、resign が @{u} から対象を決める）、push_dry_run
+# （1 なら試行で何も push されないため resign を呼ばない）。
+# - refspec を省いた push、--all / --branches / --mirror / --tags / --prune / --repo、glob を含む refspec、
+#   detached HEAD の HEAD は fallback（今までどおり）
+# - 削除（:dst、-d / --delete）、サブモジュールだけを送る --recurse-submodules=only（push.recurseSubmodules=only の
+#   設定を含む。後の指定や否定形で解除される）、ブランチ以外（refs/tags/ など refs/heads/ でない refs/）は対象にしない
+# - src:dst は dst、コロンの無い refspec はそれ自身（HEAD は今のブランチ名）。先頭の + と refs/heads/ は除く
+# - 長いオプションは一意に特定できる接頭辞で省略でき（--dr は --dry-run、--del は --delete）、
+#   --no-<名> は直前の指定を戻す（-n --no-dry-run は実 push）。=<値> の連結は残りの引数を取らない
+push_targets() {
+  push_remote="" push_branches=() push_fallback=0 push_dry_run=0
+  local positional=() delete=0 a spec dst b seen i opt neg joined val submod_seen=0 submod_only=0
+  while (($#)); do
+    a="$1"
+    shift
+    case "$a" in
+      -- | --end-of-options) positional+=("$@"); break ;; # 以降はオプションとして解釈しない
+      -o) shift ;; # -o <値>。まとめ書きは下の走査で扱う
+      -d) delete=1 ;;
+      -n) push_dry_run=1 ;;
+      --*)
+        opt="${a:2}" neg=0 joined=0 val=""
+        [[ "$opt" == no-* ]] && { neg=1; opt="${opt#no-}"; }
+        [[ "$opt" == *=* ]] && { joined=1; val="${opt#*=}"; opt="${opt%%=*}"; }
+        if push_longopt "$opt" dry-run 2; then
+          if ((neg)); then push_dry_run=0; else push_dry_run=1; fi
+        elif push_longopt "$opt" delete 2; then
+          if ((neg)); then delete=0; else delete=1; fi
+        elif push_longopt "$opt" all 2 || push_longopt "$opt" branches 1 ||
+          push_longopt "$opt" mirror 1 || push_longopt "$opt" tags 2 ||
+          push_longopt "$opt" prune 3; then
+          if ((neg)); then push_fallback=0; else push_fallback=1; fi
+        elif push_longopt "$opt" repo 3; then
+          # --repo は値を取る（=<値> の連結でなければ次の引数）。値を読み飛ばさないと
+          # 直後の --no-dry-run や -n を旗と取り違えて dry-run の判定が食い違う。
+          # 否定形（--no-repo）は値を取らず fallback も立てない
+          if ((neg)); then push_fallback=0; else push_fallback=1; ((joined)) || shift; fi
+        elif push_longopt "$opt" recurse-submodules 4; then
+          # --recurse-submodules=only はサブモジュールだけを送り、親リポジトリの ref を
+          # 更新しないため resign を呼ばない。後に書いた指定が勝ち、否定形は解除する
+          submod_seen=1
+          if ((neg)); then submod_only=0
+          else
+            ((joined)) || { val="${1:-}"; shift; }
+            if [[ "$val" == only ]]; then submod_only=1; else submod_only=0; fi
+          fi
+        elif ((neg || joined)); then
+          : # --no-* の否定と =<値> の連結は残りの引数を取らない
+        elif push_longopt "$opt" push-option 2 || push_longopt "$opt" receive-pack 4 ||
+          push_longopt "$opt" exec 1; then
+          shift # 値を別の引数で取る
+        fi
+        ;;
+      -[!-]*)
+        # まとめ書きの短いオプションを 1 文字ずつ見る（-fn の dry-run、-fd の削除）。
+        # -o は残り（無ければ次の引数）を値に取るため、そこで走査を止める。
+        for ((i = 1; i < ${#a}; i++)); do
+          case "${a:i:1}" in
+            n) push_dry_run=1 ;;
+            d) delete=1 ;;
+            o) ((i == ${#a} - 1)) && shift || :; break ;;
+          esac
+        done
+        ;;
+      -*) ;;
+      *) positional+=("$a") ;;
+    esac
+  done
+  # オプションでの指定がなければ設定を見る。Git は push.recurseSubmodules と submodule.recurse を
+  # 読み、後に読んだ設定を使うため、両方のキーを設定ファイルの順序で見て最後のものを採用する。
+  # submodule.recurse は真偽値で only を取り得ない。only（サブモジュールだけを送る）は親リポジトリの
+  # ref を更新しないため resign を呼ばない。
+  # GIT_CONFIG は照会の子プロセスから除く: git config はこの変数があればそのファイルだけを読むが、
+  # git push は変数を見ずに通常の設定を読むため、そのままでは判定が push の実態と食い違う。
+  # GIT_CONFIG_PARAMETERS / GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM / GIT_CONFIG_NOSYSTEM は push でも
+  # 同じように効くため残す
+  ((!submod_seen)) && [[ "$(env -u GIT_CONFIG git config --get-regexp '^(push\.recursesubmodules|submodule\.recurse)$' 2>/dev/null | tail -n 1)" == "push.recursesubmodules only" ]] && submod_only=1
+  ((delete || submod_only)) && { push_fallback=0; return 0; }
+  ((push_fallback)) && return 0
+  if ((${#positional[@]} < 2)); then
+    push_fallback=1
+    return 0
+  fi
+  push_remote="${positional[0]}"
+  for spec in "${positional[@]:1}"; do
+    spec="${spec#+}"
+    if [[ "$spec" == *:* ]]; then
+      [[ -n "${spec%%:*}" ]] || continue # :dst は削除
+      dst="${spec#*:}"
+    else
+      dst="$spec"
+    fi
+    if [[ "$dst" == HEAD ]]; then
+      dst="$(git symbolic-ref -q --short HEAD 2>/dev/null || true)"
+      [[ -n "$dst" ]] || { push_fallback=1; continue; }
+    fi
+    [[ "$dst" != *'*'* ]] || { push_fallback=1; continue; }
+    # 名前空間を先に判定する（refs/heads/ を除いてから refs/* を見ると refs/heads/refs/topic が外れる）。
+    if [[ "$dst" == refs/* && "$dst" != refs/heads/* ]]; then
+      continue # タグなど、ブランチ以外
+    fi
+    dst="${dst#refs/heads/}"
+    seen=0
+    for b in ${push_branches[@]+"${push_branches[@]}"}; do [[ "$b" != "$dst" ]] || seen=1; done
+    ((seen)) || push_branches+=("$dst")
+  done
+  return 0
+}
+
 if [[ "${1:-}" == "git" ]]; then
   shift
   # origin が SSH（git@github.com:）だと credential helper は使われず、hatai の SSH 鍵で認証される。
@@ -278,7 +394,20 @@ if [[ "${1:-}" == "git" ]]; then
     rc=0
     GH_TOKEN="$token" git "${git_cfg[@]}" "$@" || rc=$?
     if ((rc == 0)); then
-      if ! GH_TOKEN="$token" bash "$(cd "$(dirname "$0")" && pwd)/agent-gh-resign"; then
+      resign="$(cd "$(dirname "$0")" && pwd)/agent-gh-resign"
+      push_targets "${@:2}"
+      resign_rc=0
+      if ((push_dry_run)); then
+        : # --dry-run / -n の試行では何も push されていないため、署名の付け直しは呼ばない
+      else
+        if ((push_fallback)); then
+          GH_TOKEN="$token" bash "$resign" || resign_rc=$?
+        fi
+        for t in ${push_branches[@]+"${push_branches[@]}"}; do
+          GH_TOKEN="$token" bash "$resign" "$push_remote" "$t" || resign_rc=$?
+        done
+      fi
+      if ((resign_rc != 0)); then
         echo "agent-gh: 署名付きコミットへの付け替えに失敗しました（push 自体は成功）。再度 push すると再試行されます。スキップは PELWAY_AGENT_SKIP_RESIGN=1" >&2
         exit 4
       fi
