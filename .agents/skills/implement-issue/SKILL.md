@@ -400,7 +400,7 @@ state: done
    | 必須チェックが動いている | `watch_pull_request` を仕掛けて `waiting-checks` で終える |
    | 必須チェックが失敗している（required-checks の判定で例外判断が着いた pr-size の失敗を除く） | 手順 6 で直す（pr-size の失敗で例外判断が未着なら、手順 6 の上限超過の扱いで止まる） |
    | `mergeable` が `CONFLICTING` | 手順 9 の「修正依頼」 |
-   | 必須チェックが通り（required-checks の判定で例外判断が着いた pr-size の失敗を含む）、現在の head に有効なレビューが無い | 手順 8（委託中の子が終わっていれば、その結果を手順 9 で扱う）。相談のための push の後でこの round のメモのコミットがまだ無ければ、手順 6（171 行目）のとおりメモを push してから |
+   | 必須チェックが通り（required-checks の判定で例外判断が着いた pr-size の失敗を含む）、現在の head に有効なレビューが無い | 手順 8（委託中の子が終わっていれば、その結果を手順 9 で扱う）。相談のための push の後でこの round のメモのコミットがまだ無ければ、手順 6 の相談のための push の項のとおりメモを push してから |
    | 最新のレビューが Request changes | 手順 9 の「Request changes のとき」 |
    | 現在の head に有効な Approve があり、まだ Draft | 手順 9 の「Approve のとき」 |
    | 現在の head に有効な Approve があり、Draft でない | 手順 10 の終わりの報告を出し直す |
