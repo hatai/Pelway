@@ -36,3 +36,15 @@
 5. 改善案: `scripts/patrol-state-update` の「保護」の項に「通常の patch での変更・削除・無効化は拒否」の記述を足したので、`.agents/skills/command-team/SKILL.md` の patrol-state 記述にも同じ 1 行があるとスキルだけ読む指揮役にも届く
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: 20f56c235c189ff48c897127e5ed8d58744ba01c
+
+1. 詰まった箇所: symlink・FIFO の再現試験で、旧実装のままだと FIFO の正規パスを open した時点で試験自体が止まり、赤確認が取れなかった。upd・pget・anoms の各ヘルパに timeout を入れ、ブロックする実装を試験の停止ではなく失敗として扱う形にした
+2. 曖昧だった文: 「不適合は中身を読まず写さず拒否側へ」（pelway-review/claude の must-fix）
+3. 仮定と解釈: 「拒否側へ」を unreadable と同じ照合不能の扱い（`--claim-conductor` 以外の `--writer-thread` の書き込みとオフセットを書く書き込みの拒否）と読み、`--writer` のオフセットを書かない書き込みは unreadable と同じく適用を許す解釈を選んだ（不適合なパスを回復状態で置き替えるだけで、中身の漏洩にはならないため）。anomalies は手順だけが書く項目として、base の記録に今回の記録を追記したものだけを結果に入れ、patch が anomalies に書いたものは採らない形にした。fstat の検査項目（通常ファイル・自己所有・リンク数 1・256KiB 上限）はレビュー文の指定をそのまま採用し、読み取りは検査した fd からの 1 回だけにして解析と退避で共用した
+4. 足りなかった情報・検証手段: レビュー結果の通算数。この round で pelway-review のレビュー結果は 4 件目（codex@9d8579c3 CR・claude@c7344eab APPROVED・codex@c7344eab CR・claude@06dcc874 CR）。「3 回目のレビュー結果に must-fix が残ったら 4 回目の修正には入らない」の数え方（delegation 単位か結果単位か）は指揮役の指示で進めた
+5. 改善案: state-untrusted は unreadable と違い退避コピーが残らないため、回復の材料は anomalies の reason（symlink・not-regular・not-owned・hardlinked・too-large・unreadable-path）だけになる。runbook の回復説明に reason の見方を足すと、差し替えの手口に応じた対処（リンク先の所在確認など）がしやすい
+
+使ったスキル: implement-issue
