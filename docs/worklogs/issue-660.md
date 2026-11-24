@@ -64,10 +64,10 @@
 
 対象 head: d690c9306a5df034acd97a4bdae87598feb884ce
 
-1. 詰まった箇所: 手順 6: この環境は /home が実際に ro マウントで（手順書の前提どおり）、`target` の symlink 先（~/.cache/mbx）に cargo がロックを書けず `mise run verify` が失敗した。`CARGO_TARGET_DIR` を /tmp 側に向けてやり直したところ、script-test 1 件（`verify-run.test.sh`）だけ残った。sandbox の /tmp が uid 65534（nobody）所有のため、`dir_chain_safe` が「自分か root の持ち物」の条件で /tmp を拒否する。変更を退避した同じツリーで同じ失敗を再現し、環境起因と確認した。
+1. 詰まった箇所: 手順 6: この環境の /home は sandbox の ro バインドマウントで（手順書が想定する ro 再マウントと同じ書き込み制限）、`target` の symlink 先（~/.cache/mbx）に cargo がロックを書けず `mise run verify` が失敗した。`CARGO_TARGET_DIR` を /tmp 側に向けてやり直したところ、script-test 1 件（`verify-run.test.sh`）だけ残った。sandbox の /tmp が uid 65534（nobody）所有のため、`dir_chain_safe` が「自分か root の持ち物」の条件で /tmp を拒否する。変更を退避した同じツリーで同じ失敗を再現し、環境起因と確認した。
 2. 曖昧だった文: 「`[ -k /tmp ]` を最初の条件にしてください」（PR #661 の round 5 レビュー、codex must-fix）
 3. 仮定と解釈: 「最初の条件」は `if` の条件列の先頭（mktemp・clone・cd のすべてより前）と解釈した（sticky でない /tmp では mode 700 の clone 先も rename で差し替えられるため）。確かめ方の箇条は「`if` ブロック全体が成功した場合に限り実行する」と明記する形を選び、失敗メッセージに sticky bit の欠落も足した。
-4. 足りなかった情報・検証手段: /home が ro の実環境で手順書どおりの回避が必要になった（本文どおり shim も untrusted で失敗）。実 `git clone` と `mise run` の挙動は未検証（scratchpad の挙動確認で代替）。verify の script-test 失敗は CI（GitHub runner の /tmp は root 所有）では起きない見込みだが、この環境では直せない。
+4. 足りなかった情報・検証手段: 手順の実行そのものは scratchpad で代替し、実 `git clone` と `mise run` の挙動は未検証。shim の失敗は untrusted では観測できなかった（round 7 で確認: mise 2026.11.11 では untrusted の `mise.toml` でも shim は fnox のバージョンを解決した。`mise.toml` の無いディレクトリでは 'No version is set' で失敗）。verify の script-test 失敗は CI（GitHub runner の /tmp は root 所有）では起きない見込みだが、この環境では直せない。
 5. 改善案: `docs/dev-environment.md` の「/home が読み取り専用のとき /tmp 側で作業する手順」に「sandbox 等で /tmp の所有者が root でも自分でもない環境では `dir_chain_safe` 系の検査が /tmp を拒否する」を足す。
 
 使ったスキル: implement-issue
