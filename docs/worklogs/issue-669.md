@@ -59,3 +59,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」に「開発リードが回数上限を上書きした旨の指示が来たときは上書きに従う」を明記する（round 4・5 の 2 回とも実際に起きた）。`conductor-watch.sh` の `ps.get("subjects")` に object 確かめを入れる件は別 Issue にする
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 6）
+
+対象 head: a7a251e2（実装コミット。直前の push head は 2c8b6779）
+
+1. 詰まった箇所: codex の must-fix は「`patrol-state.json` を通常ファイルかの確かめと読み取りの上限なしに、ラベル裏付け検査より前に読む」。試験の材料として FIFO（open が待つファイル）を考えたが、main 由来の既存の読み取り（`ps = json.load(open(ps_path))`、レビューで out-of-scope とされた側）も同じパスを読むため、FIFO にすると修正後もそこで待つ。symlink（O_NOFOLLOW で拒否）とサイズ超過（上限で拒否）で確かめる形に変えた
+2. 曖昧だった文: 「委託スレッドの正規の ID は `%` を含む」（codex の nit）。実例の `thread:delegated-task:command%3A...` で確認できた
+3. 仮定と解釈: `to` の文字種は `scripts/conductor-rebuild` の `valid_id`（`[A-Za-z0-9:_.%-]{1,256}`）と完全に合わせた。読み取りの上限は要求側の `REQ_MAX`（16 KiB）より補助記録が大きくなり得るため 4 MiB とした。待ちの上限は `read_request` と同じく `O_NONBLOCK` + `O_NOFOLLOW` + `S_ISREG` + サイズ検査の組み合わせ
+4. 足りなかった情報・検証手段: `patrol-state.json` の実際のサイズの分布（上限の妥当性は推測。4 MiB は subjects を抱える記録として十分に大きいはず）。既存の `ps` 読み取り側の上限は別 Issue 候補（round 5 のメモに同じ）
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` か review-pr に「共有ディレクトリ内ファイルの読み取りには regular-file 限定と量の上限を求める」という観点をレビュー基準として書く（codex・claude の両レビューで同じパターンが指摘された）
+
+使ったスキル: implement-issue
