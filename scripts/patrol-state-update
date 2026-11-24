@@ -10,18 +10,24 @@
 
 - 名乗ったスレッド ID が記録の conductor_thread_id と一致しない書き込みは適用せず、
   試みを anomalies に記録する（旧指揮役スレッドが残って書き込んだ場合の上書きを防ぐ）。
-  引き継ぎ・交代で新指揮役が最初に自分の ID を記録するときだけ --claim-conductor を使う
+  conductor_thread_id そのものも保護する: patch での変更・削除・無効化は
+  --writer・--writer-thread のどちらの名乗りでも拒否する（同じ値の書き戻しは除く）。
+  引き継ぎ・交代・登録で指揮役の ID を記録するときだけ --claim-conductor を使う
 - watch_log_offset・inbox_offset を現行値より小さい値へ書き戻す変更（巻き戻り）は
   拒否し、試みを anomalies に記録する。ログの切り詰めなどで意図して小さい値に
   戻すときだけ --allow-offset-regression を付け、適用のうえ anomalies に記録する
 - 状態ファイルが JSON のオブジェクトとして読めないときは、空として上書きしない。
-  元のファイルを <state>.unreadable-<時刻> に退避して anomalies に記録し、
-  --claim-conductor 以外の --writer-thread の書き込みと、オフセットを書く
-  書き込み（--allow-offset-regression なし）は拒否する（照合を確かめられないため）。
+  元のファイルを <state>.unreadable-<時刻> にコピーして anomalies に記録する
+  （コピーなので、回復状態が原子的に書き戻されるまで読めない元ファイルが
+  正規パスに残り、中断しても正規パスは空にならない）。--claim-conductor 以外の
+  --writer-thread の書き込みと、オフセットを書く書き込み
+  （--allow-offset-regression なし）は拒否する（照合を確かめられないため）。
   拒否・回復途中の記録には needs_conductor_claim を立て、--claim-conductor の
   回復書き込みが来るまで拒否が続く
 
-入力は標準入力の merge patch（RFC 7386。オブジェクトは深く併合し、null は鍵を消す。
+入力は標準入力の merge patch ベースの指定（オブジェクトは深く併合し、null は鍵を消す。
+RFC 7386 と違い、patch のオブジェクトは既存値がオブジェクトでなくても再帰的に
+併合する — そのため中の null も常に「鍵を消す」で、値としては残らない。
 JSON 配列は併合の列として順に適用する — 鍵の集合ごとの置き換えは
 [{"<k>": null}, {"<k>": <新しい値>}] の形で表す）。
 
@@ -35,7 +41,8 @@ JSON 配列は併合の列として順に適用する — 鍵の集合ごとの�
   --writer-thread  書き手のスレッド ID（指揮役スレッドからの書き込み）
   --writer         スレッドを持たない書き手の名前（conductor-watch など）
   --claim-conductor  記録の conductor_thread_id を名乗ったスレッド ID にする
-                   （引き継ぎ・交代の最初の書き込みだけに使う）
+                   （引き継ぎ・交代・回復・初回登録の書き込みだけに使う。
+                   conductor_thread_id はこのフラグでだけ変更できる）
   --allow-offset-regression  オフセットの巻き戻しを anomalies に記録して適用する
 
 終了コード: 0 = 適用、2 = 引数・入力の誤り、3 = 保護による拒否（anomalies に記録）、
@@ -101,26 +108,33 @@ def parse_args(argv):
 
 
 def merge(dst, patch):
-    # RFC 7386: null は鍵を消し、オブジェクトどうしは再帰的に併合し、それ以外は置き換える
+    # merge patch ベースの併合: null は鍵を消し、それ以外は置き換える。
+    # patch のオブジェクトは、既存値がオブジェクトでなくても常に再帰的に併合する
+    # （既存値を {} として扱う。RFC 7386 とはこの点が違う — そのため patch の中の
+    # null は常に「鍵を消す」で、値として残ることはない）。
     if not isinstance(dst, dict):
         dst = {}
     for k, v in patch.items():
         if v is None:
             dst.pop(k, None)
-        elif isinstance(v, dict) and isinstance(dst.get(k), dict):
+        elif isinstance(v, dict):
+            if not isinstance(dst.get(k), dict):
+                dst[k] = {}
             merge(dst[k], v)
         else:
             dst[k] = v
     return dst
 
 
-def atomic_write(path, obj):
+def atomic_write(path, data):
+    if not isinstance(data, (bytes, bytearray)):
+        data = (json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)
+                + "\n").encode("utf-8")
     d = os.path.dirname(path) or "."
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".patrol-state-", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(obj, f, ensure_ascii=False, indent=2, sort_keys=True)
-            f.write("\n")
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)
@@ -187,13 +201,18 @@ def main():
             # 読めない状態を空として上書きすると、持ち主の照合とオフセットの照合が
             # ともに素通りし元の中身も残らない。元のファイルを退避し、照合を
             # 確かめられない書き込みは拒否する（--claim-conductor の回復書き込みを除く）。
+            # 退避は移動ではなくコピー: 回復状態が下の atomic_write で原子的に
+            # 書き戻されるまで、読めない元ファイルを正規パスに残す。退避と書き戻しの
+            # 間で中断されても、正規パスには「読めない元ファイル」か「回復を待つ
+            # 新しい状態」のどちらかが残り、次回は初回作成扱いにならない。
             stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
             backup = f"{state}.unreadable-{stamp}"
             n = 0
             while os.path.exists(backup):
                 n += 1
                 backup = f"{state}.unreadable-{stamp}.{n}"
-            os.replace(state, backup)
+            with open(state, "rb") as f:
+                atomic_write(backup, f.read())
             notes.append({"kind": "state-unreadable", "writer": who,
                           "backup": os.path.basename(backup), "at": now_iso})
 
@@ -218,12 +237,18 @@ def main():
             if offs and not opts["allow_reg"]:
                 refuse.append({"kind": "offset-unverifiable", "writer": who,
                                "keys": offs, "at": now_iso})
-        if opts["writer_thread"] and not opts["claim"]:
+        if not opts["claim"]:
             rec = base.get("conductor_thread_id")
-            res_tid = result.get("conductor_thread_id")
-            mismatched = (isinstance(rec, str) and rec and rec != opts["writer_thread"]) or \
-                         (isinstance(res_tid, str) and res_tid and res_tid != opts["writer_thread"])
-            if mismatched:
+            # conductor_thread_id は --claim-conductor でだけ変更できる。通常の patch
+            # による削除・無効化・別の値への変更は、登録の有無や書き手の種類
+            # （--writer・--writer-thread）にかかわらず拒否する。この項目が失われると
+            # 後続の持ち主照合が素通りになるため。同じ値の書き戻しは変更にならない。
+            if any("conductor_thread_id" in p for p in patches) and \
+                    result.get("conductor_thread_id") != rec:
+                refuse.append({"kind": "conductor-id-change-refused", "writer": who,
+                               "recorded": rec, "at": now_iso})
+            if opts["writer_thread"] and isinstance(rec, str) and rec and \
+                    rec != opts["writer_thread"]:
                 keys = sorted({k for p in patches for k in p})
                 refuse.append({"kind": "conductor-mismatch", "writer": who,
                                "recorded": rec, "keys": keys, "at": now_iso})

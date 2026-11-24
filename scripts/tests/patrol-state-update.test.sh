@@ -68,6 +68,14 @@ print("work_state" in json.load(open(sys.argv[1]))["items"]["11"])' "$STATE")" "
 check "patch list applies in order" upd 0 '[{"subjects":null},{"subjects":{"12":{"waiting_on":"human"}}}]' --writer-thread mcp:cur
 check "list patch replaced subjects" eq "$(pget subjects)" '{"12": {"waiting_on": "human"}}'
 
+# patch のオブジェクトは、既存値がオブジェクトでなくても深く併合される
+# （この手順の併合仕様。中の null は常に鍵を消し、値として残らない）
+put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"items":5}'
+check "object patch deep-merges over non-object value" \
+  upd 0 '{"items":{"a":null,"b":1}}' --writer-thread mcp:cur
+check "inner null is a delete, not a stored value" eq "$(pget items)" '{"b": 1}'
+put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
+
 # --- conductor_thread_id の持ち主でない書き手（Issue #671 受け入れ条件 1） ---
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
 
@@ -90,10 +98,56 @@ check "writer id wins" eq "$(pget conductor_thread_id)" '"mcp:new"'
 check "old conductor now refused" upd 3 '{"watch_log_offset":700}' --writer-thread mcp:cur
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
 
+# 登録済みの conductor_thread_id は --claim-conductor でだけ変更できる。
+# 現指揮役自身の通常 patch による削除・無効化・別の値への変更も拒否する
+# （この項目が失われると後続の持ち主照合が素通りになるため）。
+check "patch deleting thread id refused" \
+  upd 3 '{"conductor_thread_id":null,"watch_log_offset":601}' --writer-thread mcp:cur
+check "delete refused keeps thread id" eq "$(pget conductor_thread_id)" '"mcp:cur"'
+check "delete refused keeps offset" eq "$(pget watch_log_offset)" '600'
+check "delete refusal recorded" anoms_has "conductor-id-change-refused"
+
+check "patch emptying thread id refused" \
+  upd 3 '{"conductor_thread_id":""}' --writer-thread mcp:cur
+check "patch non-string thread id refused" \
+  upd 3 '{"conductor_thread_id":123}' --writer-thread mcp:cur
+check "thread id still registered" eq "$(pget conductor_thread_id)" '"mcp:cur"'
+
+# 同じ値の書き戻しは変更にならないので許す
+check "patch rewriting same thread id applies" \
+  upd 0 '{"conductor_thread_id":"mcp:cur","watch_log_offset":601}' --writer-thread mcp:cur
+check "same-id write applied" eq "$(pget watch_log_offset)" '601'
+put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
+
+# スレッド ID を名乗らない書き手も conductor_thread_id を変えられない
+check "non-thread writer cannot change thread id" \
+  upd 3 '{"conductor_thread_id":"mcp:evil","subjects":{"9":{"waiting_on":"human"}}}' --writer conductor-watch
+check "non-thread change keeps thread id" eq "$(pget conductor_thread_id)" '"mcp:cur"'
+check "non-thread change refused wholesale" eq "$(pget subjects)" '""'
+check "non-thread refusal recorded" anoms_has "conductor-id-change-refused"
+check "non-thread cannot delete thread id" \
+  upd 3 '{"conductor_thread_id":null}' --writer conductor-watch
+check "non-thread delete keeps thread id" eq "$(pget conductor_thread_id)" '"mcp:cur"'
+
+# 登録が残るので、削除を試みた後も旧指揮役の書き込みは拒否され続ける
+check "old conductor still refused after tamper tries" \
+  upd 3 '{"watch_log_offset":700}' --writer-thread mcp:old
+
 # conductor_thread_id が無い（未記録の）状態では書ける
 put_state '{"watch_log_offset":10}'
 check "unclaimed state accepts thread write" upd 0 '{"watch_log_offset":20}' --writer-thread mcp:any
 check "unclaimed write applied" eq "$(pget watch_log_offset)" '20'
+
+# 登録前の既存ファイル: 登録も --claim-conductor で行い、通常の patch では登録できない
+check "unclaimed: patch cannot register thread id" \
+  upd 3 '{"conductor_thread_id":"mcp:a","watch_log_offset":30}' --writer-thread mcp:a
+check "unclaimed: refused write not applied" eq "$(pget watch_log_offset)" '20'
+check "unclaimed: non-thread cannot register thread id" \
+  upd 3 '{"conductor_thread_id":"mcp:a"}' --writer conductor-watch
+check "unclaimed: still no thread id" eq "$(pget conductor_thread_id)" '""'
+check "unclaimed: claim registers id" \
+  upd 0 '{"watch_log_offset":30}' --writer-thread mcp:a --claim-conductor
+check "unclaimed: claim sets id" eq "$(pget conductor_thread_id)" '"mcp:a"'
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
 
 # --- オフセットの巻き戻り保護（Issue #671 受け入れ条件 2） ---
@@ -139,7 +193,62 @@ check "corrupt: refusal recorded" anoms_has "owner-unverifiable"
 check "corrupt: refused write not applied" eq "$(pget watch_log_offset)" '""'
 check "corrupt: broken file backed up" \
   bash -c 'compgen -G "$1.unreadable-*" >/dev/null' _ "$STATE"
+check "corrupt: backup holds original bytes" \
+  bash -c 'grep -lq broken "$1".unreadable-*' _ "$STATE"
 check "corrupt: unreadable recorded" anoms_has "state-unreadable"
+
+# 退避と回復状態の保存の間で中断しても、正規パスには読めない元ファイルか
+# 回復を待つ新しい状態のどちらかが残る（残らないと次回は初回作成扱いになり、
+# 持ち主照合とオフセット照合が素通りになる）。回復状態の保存に失敗した後も
+# 次の書き込みは拒否され続ける。os.replace の 2 回目（退避コピーの設置の次、
+# 回復状態の書き戻し）を失敗させて中断を再現する。
+put_state '{"broken'
+check "crash after backup leaves unreadable file at canonical path" \
+  python3 -I - "$UPD" "$STATE" <<'PY'
+import importlib.util, io, json, os, sys
+from importlib.machinery import SourceFileLoader
+
+upd, state = sys.argv[1], sys.argv[2]
+sys.dont_write_bytecode = True
+loader = SourceFileLoader("patrol_state_update", upd)
+spec = importlib.util.spec_from_loader(loader.name, loader)
+m = importlib.util.module_from_spec(spec)
+loader.exec_module(m)
+
+real_replace = os.replace
+calls = []
+def flaky_replace(src, dst):
+    calls.append(dst)
+    if len(calls) > 1:
+        raise OSError("simulated crash")
+    return real_replace(src, dst)
+os.replace = flaky_replace
+
+sys.argv = ["patrol-state-update", "--state", state, "--writer-thread", "mcp:old"]
+sys.stdin = io.StringIO('{"watch_log_offset": 5}')
+try:
+    m.main()
+except (OSError, SystemExit):
+    pass
+
+# 中断の後: 正規パスにファイルが残り、それが読めない元ファイルであること
+exists = os.path.exists(state)
+unreadable = False
+if exists:
+    try:
+        with open(state) as f:
+            json.load(f)
+    except Exception:
+        unreadable = True
+sys.exit(0 if len(calls) >= 2 and exists and unreadable else 1)
+PY
+check "crash sim: backup preserves original" \
+  bash -c 'grep -lq broken "$1".unreadable-*' _ "$STATE"
+check "crash sim: next foreign write still refused" \
+  upd 3 '{"watch_log_offset":700}' --writer-thread mcp:old
+check "crash sim: refusal recorded" anoms_has "owner-unverifiable"
+check "crash sim: recovery flag set" eq "$(pget needs_conductor_claim)" 'true'
+rm -f "$STATE".unreadable-*
 
 # 拒否で書き戻した回復途中の記録からは持ち主もオフセットも確かめられないので、
 # --claim-conductor の回復書き込みが来るまで拒否が続く。
