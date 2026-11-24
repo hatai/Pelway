@@ -23,3 +23,15 @@
 5. 改善案: `docs/dev-environment.md` に「/tmp の所有者が nobody の環境では `verify-run.test.sh` が失敗する。`TMPDIR=/dev/shm` で実行する」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: 5fa96afa598245a26f38998282143d3ace485000
+
+1. 詰まった箇所: `scripts/agent-gh`: `--delet`（--delete の省略形）が typos に `delete` の typo と誤検出される。パターンの書き方を変えても `delet` の字が残るため、typos.toml の extend-words に足した。
+2. 曖昧だった文: 「Git が受理する省略形でも署名処理を呼ばないようにして、回帰試験を追加してください」（PR #655 codex r2 レビュー must-fix）
+3. 仮定と解釈: 「省略形」は一意に特定できる接頭辞だけと解釈した（`--d` は --delete と --dry-run で曖昧になり git 自身が拒否して push_targets に届かないことを実機で確かめた）。曖昧な形は Git が受理しないため列挙に含めず、届きうる形だけを列挙した。同じ種類の見落としとして --delete の省略形（--de 〜 --delet）も同じ行で拾い、削除で resign を呼ばない経路に統一した。
+4. 足りなかった情報・検証手段: 実機で `git push --dry o`・`git push --dr o`・`git push --d o` を試し、曖昧形は git が `ambiguous option` で拒否して push_targets に届かないことを確かめた。
+5. 改善案: `scripts/agent-gh` の `push_targets` の上のコメントに「長いオプションの曖昧な省略形は git が弾くため列挙には含めない」と書き足す。
+
+使ったスキル: implement-issue
