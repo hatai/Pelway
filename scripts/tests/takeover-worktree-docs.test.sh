@@ -59,9 +59,17 @@ check fix_round_child "$RB" \
   '`delegate_task`（`isolation: "worktree"`）で立て' \
   'Claude の Agent ツールの worktree 隔離では立てない'
 
+# 節に、立てる前の照合（PR の head のリポジトリと ref が origin の対象ブランチと一致）と、
+# 新しいスレッド・子への依頼文に PR ブランチ名と fetch・push の形を入れることがある。
+check fork_repo_check "$RB" \
+  '対象 PR の head のリポジトリと ref が `origin` の `<PRブランチ>` と一致することを確かめる' \
+  '一致しなければ起動も委託もせず'
+check handoff_instruction "$RB" \
+  '新しいスレッドへの最初の指示と、修正 round の子への依頼文には、PR ブランチ名と、取り込み・push の形'
+
 # runbook の再開手順の 5 と手当スレッドの項が新しい節を指す。
 check resume_pointer "$RB" \
-  '同じブランチ／PR で新しいスレッドを起動して引き継ぐ（立て方は「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」）'
+  '同じブランチ／PR で新しいスレッドを起動して引き継ぐ（PR のブランチが `origin` にあるときは、立て方は「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」）'
 check assist_pointer "$RB" \
   'その PR のブランチで起動する（立て方は「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」）'
 
@@ -69,9 +77,15 @@ check assist_pointer "$RB" \
 check implement_issue_pointer "$II" \
   '修正 round を子に任せるときは、`docs/agents/grokbot-runbook.md` の「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」の節に従う'
 
+# implement-issue の手順 6 に、ローカルのブランチ名が PR ブランチと違うときは runbook の節の
+# fetch と push の形に従う 1 文がある。
+check implement_issue_fetch_push "$II" \
+  'ローカルのブランチ名が PR ブランチと違うとき' \
+  '「既存の PR ブランチを引き継ぐ」の節の fetch と push の形に従う'
+
 # command-team の「手当て・引き継ぎの前の確認」に、runbook の節の形で立てる 1 文がある。
 check command_team_pointer "$CT" \
-  '引き継ぎ・再開・手当てのスレッドは、runbook の「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」の節の形で立てる'
+  'PR がすでにあり、そのブランチが `origin` にある引き継ぎ・再開・手当てのスレッドは、runbook の「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」の節の形で立てる'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2

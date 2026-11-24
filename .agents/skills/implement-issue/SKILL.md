@@ -147,6 +147,8 @@ EOF
 
 Kodiak が main をマージして PR ブランチの remote の先端が進んでいることがある。修正の round（remote に PR ブランチがある 2 round 目以降）では、修正を始める前、作業ツリーに未コミットの変更が無いうちに、PR ブランチの remote の先端を fetch し、進んでいれば fast-forward で取り込む。手元の先端は前の round の push の後に `scripts/agent-gh-resign` が remote と同じコミットに付け替えているため、fast-forward できる。初回（remote にブランチがまだ無い）はこの段を飛ばす。
 
+ローカルのブランチ名が PR ブランチと違うとき（引き継ぎ・再開・手当てで `<PRブランチ>-r<N>` の作業ツリーにいるとき、修正 round の子で委託元と違うブランチ名のとき）は、この手順の `fetch`・`push` の形ではなく、`docs/agents/grokbot-runbook.md` の「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」の節の fetch と push の形に従う（`git push origin HEAD` は upstream を見ず同名のブランチに push するため、そのままでは PR の head は動かない）。
+
 ```bash
 scripts/agent-gh dev git fetch origin <ブランチ>
 scripts/agent-gh dev git merge --ff-only origin/<ブランチ>
