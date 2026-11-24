@@ -144,3 +144,16 @@
 5. 改善案: 「一律走査から例外を引く」形の検査を書くとき、例外の発火条件が「それより前の全引数が、次の引数を消費しないと綴りから分かるもの」でなければ fail-open になる。git のオプションは値を別の引数で取れるため、先に出た綴りを値として消費する可能性は常にある。この形の検査を設計するときは、例外の適用条件を先に書いてから実装する。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 13）
+
+対象 head: 792055b834ae1be1506ade7cfc820b802e964849
+
+1. 詰まった箇所: claude r4 の must-fix。round 12 で「clean な `--` の後ろは位置引数」とした例外が、pull・push では成立しない。両者は `--` を外して後ろの引数を子の git に渡す（pull は builtin/pull.c の run_fetch が `git fetch` を起動、push は submodule.c がサブモジュールの `git push` を起動）ため、子はそれをオプションとして解釈する。`git pull -- . --upload-pack=/bin/echo` を実測し、/bin/echo が動くこと（出力が protocol error に出る）を確かめた。修正方針どおり、`--` で走査を止めるのは fetch・ls-remote だけにし、pull・push では `--` で clean を崩して末尾まで走査する。
+2. 曖昧だった文: 「`--` で走査を止めてよいのは fetch・ls-remote のみ」（レビュアーの修正方針）。
+3. 仮定と解釈: fetch・ls-remote は `--` の後ろを子プロセスに再解釈させる経路がなく、位置引数としてだけ読むため、clean な `--` は終端として安全。pull・push は既存試験の `push -- --receive-pack=...`・`push -o x -- --exec` を拒否に反転し、`pull -- . --upload-pack=...`・`pull -o x -- --receive-pack=...`・`push --recurse-submodules=on-demand -- origin --no-verify`（サブモジュール push のフックを外す形）を拒否試験に足した。fetch・ls-remote の `--` は通す側に残し、`fetch -- --upload-pack=...`・`ls-remote -o x -- --exec` を通過試験に足した。レビュアー注記の out-of-scope（PATH 差替えで名称検査ごと迂回される問題。main も同じで本当の直しはサーバー側 ruleset）は報告のみで、PR 本文には書かない。
+4. 足りなかった情報・検証手段: `bash scripts/tests/agent-gh.test.sh` ok。`mise run verify` は round 9〜12 と同じ sandbox 起因で実行できない。round 12 で付けた clean 条件は「前の引数が次の引数を消費しない」ことだけを見ていたが、`--` の後ろの引数が「この git」でなく「子の git」で解釈される経路を見落としていた。ラップされる側のコマンドが子プロセスに引数を引き継ぐかは、同じ git のサブコマンドでも違う（pull・push は引き継ぐ、fetch・ls-remote は引き継がない）。
+5. 改善案: 検査対象のコマンドが別プロセスを起動するとき、wrapper が付け外しした区切り（`--` など）が子にどう見えるかは、親の解釈と別に確かめる。git のようにサブコマンドが子の git を起動する形では、`--` の終端としての効力は親と子で一致しない。サブコマンドごとに「後ろの引数が子プロセスに渡るか」を調べる一覧があると、同じ形の検査を設計するときに役立つ。
+
+使ったスキル: implement-issue
+
