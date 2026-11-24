@@ -13,7 +13,7 @@
 # qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持たない（~/.config/pelway-agent-qa/fnox.toml を指す。未設定は終了コード 3）。
 # dev 役の git push は、push の前に差分を scripts/pr-size.sh で測り、上限（追加 800 行・削除 2000 行）を
 # 超えて例外（PR の pr-size-exception ラベル + Issue の hatai の目印コメント）が無ければ止める（#642）。
-# 終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない（qa の PELWAY_AGENT_FNOX_CONFIG 未設定を含む）、4 = 署名の付け替えに失敗、5 = 引数に \uXXXX エスケープ混入、6 = dev 役の push で差分が pr-size の上限超え（例外なし）、それ以外は gh / git の終了コード（--help / -h は 0）
+# 終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない（qa の PELWAY_AGENT_FNOX_CONFIG 未設定を含む）、4 = 署名の付け替えに失敗、5 = 引数に \uXXXX エスケープ混入、6 = dev 役の push で差分が pr-size の上限超え（例外なし）か、差分を測れない・Git が送る対象を検査できないため push を止めたとき、それ以外は gh / git の終了コード（--help / -h は 0）
 set -euo pipefail
 # コマンド置換 $(...) の中でも set -e を効かせる（app_token 内の secret の失敗で止めるため）。
 shopt -s inherit_errexit
@@ -114,7 +114,7 @@ help() {
     "git push の成功後は scripts/agent-gh-resign がコミットを GitHub API の署名付きに付け替える（止めるときは PELWAY_AGENT_SKIP_RESIGN=1）。" \
     "qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持ちません（~/.config/pelway-agent-qa/fnox.toml を指してください）。" \
     "非 ASCII の文字列は argv 経由で渡せません（\\uXXXX に潰れます）。--body-file / api --input / git commit -F などファイル経由で渡してください。" \
-    "終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、6 = dev 役の push で差分が pr-size の上限超え（例外なし）、それ以外は gh / git の終了コード"
+    "終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、6 = dev 役の push で差分が pr-size の上限超え（例外なし）か、差分を測れない・Git が送る対象を検査できないため push を止めたとき、それ以外は gh / git の終了コード"
   exit 0
 }
 
@@ -271,9 +271,16 @@ push_longopt() { ((${#1} >= $3)) && [[ "$2" == "$1"* ]]; }
 
 # push_targets <git push の引数（push より後）...>: push 先から署名を付け直す対象を決める（#641）。
 # 結果: push_remote と push_branches（ブランチ名の配列。重複なし）、push_srcs（push_branches と
-# 対応する push 元の refspec の src。#642 の pr-size ゲートが数える）、push_fallback（1 なら
+# 対応する push 元の refspec の src）、push_fallback（1 なら
 # agent-gh-resign を位置引数なしで呼び、resign が @{u} から対象を決める）、push_dry_run
-# （1 なら試行で何も push されないため resign を呼ばない）。
+# （1 なら試行で何も push されないため resign を呼ばない）、push_no_gate（1 なら pr-size の
+# 検査自体をしない形: 削除・サブモジュールだけの push）。
+# #642 の pr-size ゲートが pin した引数を組み立て直すために、引数の形も記録する:
+#   push_raw（元の引数の配列）、push_pos_idx（位置引数が push_raw の何番目か）、
+#   push_positional（位置引数。--repo が無ければ先頭はリモート、以降は refspec）、
+#   push_expand_idx（--all / --branches の位置。pin のときは外し、解決した refspec に展開する）、
+#   push_repo_opt / push_repo_value（--repo の有無と値。あるとき位置引数はすべて refspec）、
+#   push_no_pin（1 なら <sha>:<dst> に pin できない形: --mirror・--prune・glob refspec）
 # - refspec を省いた push、--all / --branches / --mirror / --tags / --prune / --repo、glob を含む refspec、
 #   detached HEAD の HEAD は fallback（今までどおり）
 # - 削除（:dst、-d / --delete）、サブモジュールだけを送る --recurse-submodules=only（push.recurseSubmodules=only の
@@ -282,13 +289,25 @@ push_longopt() { ((${#1} >= $3)) && [[ "$2" == "$1"* ]]; }
 # - 長いオプションは一意に特定できる接頭辞で省略でき（--dr は --dry-run、--del は --delete）、
 #   --no-<名> は直前の指定を戻す（-n --no-dry-run は実 push）。=<値> の連結は残りの引数を取らない
 push_targets() {
-  push_remote="" push_branches=() push_srcs=() push_fallback=0 push_dry_run=0
-  local positional=() delete=0 a spec src dst b seen i opt neg joined val submod_seen=0 submod_only=0
+  push_remote="" push_branches=() push_srcs=() push_fallback=0 push_dry_run=0 push_no_gate=0
+  push_positional=() push_pos_idx=() push_expand_idx=() push_no_pin=0 push_repo_opt=0 push_repo_value=""
+  push_raw=("$@")
+  local delete=0 a spec src dst b seen i opt neg joined val submod_seen=0 submod_only=0 ai
   while (($#)); do
     a="$1"
     shift
+    ai=$((${#push_raw[@]} - $# - 1))
     case "$a" in
-      -- | --end-of-options) positional+=("$@"); break ;; # 以降はオプションとして解釈しない
+      -- | --end-of-options)
+        # 以降はオプションとして解釈しない
+        while (($#)); do
+          a="$1"
+          shift
+          ai=$((${#push_raw[@]} - $# - 1))
+          push_positional+=("$a")
+          push_pos_idx+=("$ai")
+        done
+        break ;;
       -o) shift ;; # -o <値>。まとめ書きは下の走査で扱う
       -d) delete=1 ;;
       -n) push_dry_run=1 ;;
@@ -300,15 +319,24 @@ push_targets() {
           if ((neg)); then push_dry_run=0; else push_dry_run=1; fi
         elif push_longopt "$opt" delete 2; then
           if ((neg)); then delete=0; else delete=1; fi
-        elif push_longopt "$opt" all 2 || push_longopt "$opt" branches 1 ||
-          push_longopt "$opt" mirror 1 || push_longopt "$opt" tags 2 ||
-          push_longopt "$opt" prune 3; then
+        elif push_longopt "$opt" all 2 || push_longopt "$opt" branches 1; then
+          # pin のときは旗を外し、dry-run が解決したブランチの refspec に展開する
+          if ((neg)); then push_fallback=0; push_expand_idx=(); else push_fallback=1; push_expand_idx+=("$ai"); fi
+        elif push_longopt "$opt" mirror 1 || push_longopt "$opt" prune 3; then
+          # ブランチ以外の ref や削除も送る形は、送るブランチを pin できない
+          if ((neg)); then push_fallback=0; push_no_pin=0; else push_fallback=1; push_no_pin=1; fi
+        elif push_longopt "$opt" tags 2; then
           if ((neg)); then push_fallback=0; else push_fallback=1; fi
         elif push_longopt "$opt" repo 3; then
           # --repo は値を取る（=<値> の連結でなければ次の引数）。値を読み飛ばさないと
           # 直後の --no-dry-run や -n を旗と取り違えて dry-run の判定が食い違う。
           # 否定形（--no-repo）は値を取らず fallback も立てない
-          if ((neg)); then push_fallback=0; else push_fallback=1; ((joined)) || shift; fi
+          if ((neg)); then push_fallback=0
+          else
+            push_fallback=1
+            push_repo_opt=1
+            if ((joined)); then push_repo_value="$val"; else push_repo_value="${1:-}"; shift; fi
+          fi
         elif push_longopt "$opt" recurse-submodules 4; then
           # --recurse-submodules=only はサブモジュールだけを送り、親リポジトリの ref を
           # 更新しないため resign を呼ばない。後に書いた指定が勝ち、否定形は解除する
@@ -337,7 +365,10 @@ push_targets() {
         done
         ;;
       -*) ;;
-      *) positional+=("$a") ;;
+      *)
+        push_positional+=("$a")
+        push_pos_idx+=("$ai")
+        ;;
     esac
   done
   # オプションでの指定がなければ設定を見る。Git は push.recurseSubmodules と submodule.recurse を
@@ -349,15 +380,21 @@ push_targets() {
   # GIT_CONFIG_PARAMETERS / GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM / GIT_CONFIG_NOSYSTEM は push でも
   # 同じように効くため残す
   ((!submod_seen)) && [[ "$(env -u GIT_CONFIG git config --get-regexp '^(push\.recursesubmodules|submodule\.recurse)$' 2>/dev/null | tail -n 1)" == "push.recursesubmodules only" ]] && submod_only=1
-  ((delete || submod_only)) && { push_fallback=0; return 0; }
+  ((delete || submod_only)) && { push_fallback=0; push_no_gate=1; return 0; }
   ((push_fallback)) && return 0
-  if ((${#positional[@]} < 2)); then
+  if ((${#push_positional[@]} < 2)); then
     push_fallback=1
     return 0
   fi
-  push_remote="${positional[0]}"
-  for spec in "${positional[@]:1}"; do
+  push_remote="${push_positional[0]}"
+  for spec in "${push_positional[@]:1}"; do
     spec="${spec#+}"
+    if [[ "$spec" == *'*'* ]]; then
+      # glob refspec は Git が展開する ref をこちらで列挙して pin できない
+      push_fallback=1
+      push_no_pin=1
+      continue
+    fi
     if [[ "$spec" == *:* ]]; then
       [[ -n "${spec%%:*}" ]] || continue # :dst は削除
       src="${spec%%:*}"
@@ -370,7 +407,6 @@ push_targets() {
       dst="$(git symbolic-ref -q --short HEAD 2>/dev/null || true)"
       [[ -n "$dst" ]] || { push_fallback=1; continue; }
     fi
-    [[ "$dst" != *'*'* ]] || { push_fallback=1; continue; }
     # 名前空間を先に判定する（refs/heads/ を除いてから refs/* を見ると refs/heads/refs/topic が外れる）。
     if [[ "$dst" == refs/* && "$dst" != refs/heads/* ]]; then
       continue # タグなど、ブランチ以外
@@ -383,44 +419,232 @@ push_targets() {
   return 0
 }
 
-# pr_size_exception_ok <push 先のブランチ名>: pr-size 上限超えの例外を確かめる（#642）。
-# 開いた PR が pr-size-exception ラベルを持ち、その PR が閉じる Issue（closingIssuesReferences）に、
-# 作成者が hatai で本文の行頭が <!-- pr-size-exception --> のコメントがあれば 0
-# （review-pr の手順 2 と同じ条件）。それ以外（PR 無し・ラベル無し・コメント無し・
+# repo_of_github_url <URL>: URL が github.com のリポジトリなら <owner>/<repo> を出す。違えば 1。
+repo_of_github_url() {
+  local u="${1%.git}"
+  [[ "$u" =~ github\.com[:/]([^/]+)/([^/]+)$ ]] || return 1
+  printf '%s/%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+}
+
+# push_remote_name: リモートの指定（位置引数・--repo）が無い push が使うリモート名を出す。
+# Git と同じ順で remote.pushDefault → branch.<今のブランチ>.remote → origin を見て、
+# 実在すればその名を出す。解けなければ 1。
+push_remote_name() {
+  local rname cur
+  rname="$(env -u GIT_CONFIG git config --get remote.pushDefault 2>/dev/null || true)"
+  if [[ -z "$rname" ]]; then
+    cur="$(git symbolic-ref -q --short HEAD 2>/dev/null || true)"
+    [[ -n "$cur" ]] && rname="$(env -u GIT_CONFIG git config --get "branch.$cur.remote" 2>/dev/null || true)"
+  fi
+  [[ -z "$rname" ]] && rname="origin"
+  git remote get-url "$rname" >/dev/null 2>&1 || return 1
+  printf '%s\n' "$rname"
+}
+
+# push_remote_spec: push 先の指定（--repo の値、または位置引数の先頭）。無ければ空。
+push_remote_spec() {
+  if ((push_repo_opt)); then
+    printf '%s' "$push_repo_value"
+  elif ((${#push_positional[@]} >= 1)); then
+    printf '%s' "${push_positional[0]}"
+  fi
+}
+
+# push_dest_repo <リモート名または URL> <dry-run の To 行の URL>: push 先の GitHub
+# リポジトリを <owner>/<repo> で出す（例外の照会に使う）。リモート名なら
+# remote.<名>.pushurl / .url の設定値を見る（url.*.insteadOf で書き換わる前の値。
+# 輸送先は変わっても同じリポジトリを指す）。解けなければ 1（fail-closed）。
+push_dest_repo() {
+  local spec="$1" to_url="$2" url="" rname
+  if [[ -n "$spec" ]]; then
+    url="$(env -u GIT_CONFIG git config --get "remote.$spec.pushurl" 2>/dev/null ||
+      env -u GIT_CONFIG git config --get "remote.$spec.url" 2>/dev/null || true)"
+    [[ -z "$url" ]] && url="$spec" # リモート名でなければ URL そのもの
+  else
+    rname="$(push_remote_name || true)"
+    [[ -n "$rname" ]] &&
+      url="$(env -u GIT_CONFIG git config --get "remote.$rname.pushurl" 2>/dev/null ||
+        env -u GIT_CONFIG git config --get "remote.$rname.url" 2>/dev/null || true)"
+    [[ -z "$url" ]] && url="$to_url"
+  fi
+  [[ -n "$url" ]] || return 1
+  repo_of_github_url "$url"
+}
+
+# pr_size_exception_ok <push 先のブランチ名> <owner>/<repo>: pr-size 上限超えの例外を確かめる（#642）。
+# push 先リポジトリの開いた PR のうち、head のリポジトリとブランチが push 先と一致し、
+# pr-size-exception ラベルを持つものが閉じる Issue（closingIssuesReferences）に、作成者が hatai で
+# 本文の行頭が <!-- pr-size-exception --> のコメントがあれば 0（review-pr の手順 2 と同じ条件）。
+# head リポジトリは、同名ブランチを持つフォークの PR の承認を使わないため必ず照合する。
+# Issue は GitHub が返すリポジトリ付きの参照（url、無ければ repository + number）で取得し、
+# 別リポジトリの同番号 Issue の承認を使わない。それ以外（PR 無し・ラベル無し・コメント無し・
 # 作成者が hatai でない）は 1。GitHub への問い合わせが失敗しても 1（fail-closed）。
 pr_size_exception_ok() {
-  local dst="$1" prs issues n issue_json found
-  prs="$(run_gh pr list --head "$dst" --state open \
-    --json number,labels,closingIssuesReferences)" || return 1
-  issues="$(jq -r '[.[] | select([.labels[].name] | any(. == "pr-size-exception"))
-      | .closingIssuesReferences[].number] | unique | .[]' <<<"$prs")" || return 1
-  [[ -n "$issues" ]] || return 1
-  while IFS= read -r n; do
-    issue_json="$(run_gh issue view "$n" --json comments)" || return 1
+  local dst="$1" repo="$2" prs refs ref issue_json found
+  prs="$(run_gh pr list --repo "$repo" --head "$dst" --state open \
+    --json number,labels,headRefName,headRepository,headRepositoryOwner,closingIssuesReferences)" || return 1
+  refs="$(jq -r --arg repo "${repo,,}" --arg dst "$dst" '
+    [.[] | select(.headRefName == $dst)
+        | select((.headRepository.nameWithOwner //
+            "\(.headRepositoryOwner.login // "")/\(.headRepository.name // "")")
+          | ascii_downcase == $repo)
+        | select([.labels[].name] | any(. == "pr-size-exception"))
+        | .closingIssuesReferences[]
+        | if .url then .url
+          elif .repository.nameWithOwner then "\(.repository.nameWithOwner)#\(.number)"
+          else empty end] | unique | .[]' <<<"$prs")" || return 1
+  [[ -n "$refs" ]] || return 1
+  while IFS= read -r ref; do
+    if [[ "$ref" == *'#'* ]]; then
+      issue_json="$(run_gh issue view "${ref#*#}" --repo "${ref%#*}" --json comments)" || return 1
+    else
+      issue_json="$(run_gh issue view "$ref" --json comments)" || return 1
+    fi
     found="$(jq '[.comments[] | select(.author.login == "hatai"
         and (.body | startswith("<!-- pr-size-exception -->")))] | length' <<<"$issue_json")" || return 1
     ((found > 0)) && return 0
-  done <<<"$issues"
+  done <<<"$refs"
   return 1
 }
 
-# pr_size_gate: dev 役の git push の前に、push するブランチごとに pr-size を測り、
+# pin_push_argv <dry-run の To 行の URL>: pr_size_gate が検査したブランチ更新について、
+# 実 push の引数を組み立て直して push_argv に入れる。ブランチの更新は <sha>:<dst> に pin し、
+# 検査した sha と送る sha を一致させる。タグ・削除・最新のままの refspec は元の形のまま残す。
+# リモートは、位置引数の先頭、--repo、解決したリモート名、dry-run の接続先 URL の順で使う。
+pin_push_argv() {
+  local url="$1" remote_tok="" pi j tok plus t d2 ndst covered ref_i=0 pos_i=0 k skip e
+  local -a new_refs=() gate_used=()
+  local rs=1
+  ((push_repo_opt)) && rs=0 # --repo があるとき位置引数はすべて refspec
+  # 位置引数の refspec を、dry-run が解決した更新と dst で対応付けて <sha>:<dst> に pin する。
+  # 対応する更新が無い refspec（タグ・削除・最新のまま・拒否されるもの）は元の形のまま残す。
+  for ((pi = rs; pi < ${#push_positional[@]}; pi++)); do
+    tok="${push_positional[pi]}"
+    plus=""
+    t="${tok#+}"
+    [[ "$tok" == +* ]] && plus="+"
+    if [[ "$t" == *:* ]]; then d2="${t#*:}"; else d2="$t"; fi
+    [[ "$d2" == HEAD ]] && d2="refs/heads/$(git symbolic-ref -q --short HEAD 2>/dev/null || true)"
+    case "$d2" in
+      refs/*) ndst="$d2" ;;
+      "") ndst="" ;;
+      *) ndst="refs/heads/$d2" ;;
+    esac
+    covered=0
+    for j in "${!gate_dsts[@]}"; do
+      [[ -n "${gate_used[j]:-}" || "${gate_dsts[j]}" != "$ndst" ]] && continue
+      new_refs+=("${plus}${gate_sha[$ndst]}:$ndst")
+      gate_used[j]=1
+      covered=1
+      break
+    done
+    ((covered)) || new_refs+=("$tok")
+  done
+  # 位置引数でカバーされないブランチ更新（refspec 省略・--all/--branches）を pin して足す
+  for j in "${!gate_dsts[@]}"; do
+    [[ -n "${gate_used[j]:-}" ]] && continue
+    new_refs+=("${gate_sha[${gate_dsts[j]}]}:${gate_dsts[j]}")
+  done
+  if ((!push_repo_opt)); then
+    if ((${#push_positional[@]} >= 1)); then
+      remote_tok="${push_positional[0]}"
+    else
+      remote_tok="$(push_remote_name || true)"
+      [[ -z "$remote_tok" ]] && remote_tok="$url"
+      if [[ -z "$remote_tok" ]]; then
+        echo "agent-gh: push を止めました: push 先のリモートを特定できません" >&2
+        exit 6
+      fi
+    fi
+  fi
+  # 元の引数を位置情報どおりに並べ直す: --all/--branches は省き、位置引数は pin した refspec に置き換える
+  push_argv=()
+  for k in "${!push_raw[@]}"; do
+    skip=0
+    for e in ${push_expand_idx[@]+"${push_expand_idx[@]}"}; do [[ "$k" != "$e" ]] || skip=1; done
+    ((skip)) && continue
+    if ((pos_i < ${#push_pos_idx[@]})) && [[ "${push_pos_idx[pos_i]}" == "$k" ]]; then
+      if ((pos_i == 0 && !push_repo_opt)); then
+        push_argv+=("$remote_tok") # 位置引数の先頭はリモート
+      else
+        push_argv+=("${new_refs[ref_i]}")
+        ref_i=$((ref_i + 1))
+      fi
+      pos_i=$((pos_i + 1))
+      continue
+    fi
+    push_argv+=("${push_raw[k]}")
+  done
+  # refspec の無い形（refspec 省略・リモートだけ）はリモートを足してから pin した refspec を足す
+  ((!push_repo_opt && ${#push_positional[@]} == 0)) && push_argv+=("$remote_tok")
+  for (( ; ref_i < ${#new_refs[@]}; ref_i++)); do
+    push_argv+=("${new_refs[ref_i]}")
+  done
+}
+
+# pr_size_gate <git push の引数（push より後）...>: dev 役の git push の前に、Git が実際に
+# 更新するブランチを `git push --dry-run --porcelain` で解決し、送る sha ごとに pr-size を測る。
 # 上限（追加 800 行・削除 2000 行）を超えて例外が認められていなければ push せずに止める（#642）。
-# - 数えるのは push するローカルの sha（push_srcs: HEAD:dst なら HEAD、src:dst なら src）の差分
+# - 検査するのは dry-run の出力で refs/heads/ への更新（` `・`+`・`*`）だけ。タグ・削除・
+#   最新のまま・拒否される更新は対象外。タグとブランチの区別は出力中の ref の名前空間で行い、
+#   ローカルのタグの有無には依存しない
+# - 数えるのは Git が送る sha そのもの（解決した src を rev-parse で sha に pin してから測り、
+#   実 push の refspec も pin_push_argv で <sha>:<dst> に組み替える。測定と push の間にブランチが
+#   動いても、測った sha が送られる）
 # - base は push 元のローカルブランチの branch.<名前>.gh-merge-base があれば origin/<その値>、無ければ origin/main
 # - 止めるときは stderr に追加・削除の行数・使った base・例外の条件を出し、終了コード 6
 pr_size_gate() {
-  local pr_size i src dst local_branch mb base out rc counts
+  push_argv=()
+  gate_srcs=()
+  gate_dsts=()
+  local pr_size out line flag refs src dst url="" repo i sha local_branch mb base mrc mout counts
   pr_size="$(cd "$(dirname "$0")" && pwd)/pr-size.sh"
-  for i in "${!push_branches[@]}"; do
-    dst="${push_branches[i]}"
-    src="${push_srcs[i]}"
-    # dst がローカルのタグでブランチでない push（例: git push origin v1）はブランチの
-    # push ではないため検査しない（refs/tags/... の形は push_targets で既に対象外）。
-    if git rev-parse -q --verify "refs/tags/$dst" >/dev/null 2>&1 &&
-      ! git rev-parse -q --verify "refs/heads/$dst" >/dev/null 2>&1; then
-      continue
+  # dry-run は失敗しても出力だけ読む。更新を解決できない push（upstream 無し・接続失敗・
+  # refspec の誤り）は実 push も同じ理由で失敗しブランチは更新されないため、そのまま回す。
+  out="$(GH_TOKEN="$token" git "${git_cfg[@]}" push --dry-run --porcelain "$@" 2>/dev/null)" || true
+  while IFS= read -r line; do
+    case "$line" in
+      "To "*) url="${line#To }"; continue ;;
+      Done | "Everything up-to-date" | "") continue ;;
+    esac
+    # 更新行は <旗 1 文字><TAB><src>:<dst><TAB><要約>
+    if ((${#line} < 3)) || [[ "${line:1:1}" != $'\t' || "$line" != *$'\t'*:*$'\t'* ]]; then
+      echo "agent-gh: push を止めました: git push --dry-run の出力を判定できません（$line）" >&2
+      exit 6
     fi
+    flag="${line:0:1}"
+    refs="${line#*$'\t'}"
+    refs="${refs%%$'\t'*}"
+    src="${refs%%:*}"
+    dst="${refs#*:}"
+    # Git が更新する ref の名前空間でブランチか区別する（ローカルのタグの有無には依存しない）
+    [[ "$dst" == refs/heads/* ]] || continue
+    case "$flag" in
+      ' '|'+'|'*') ;; # fast-forward・強制・新規 = 送られる更新
+      =|!|-) continue ;; # 最新のまま・拒否・削除 = 送られない
+      *)
+        echo "agent-gh: push を止めました: git push --dry-run の旗 '$flag' を判定できません" >&2
+        exit 6 ;;
+    esac
+    gate_srcs+=("$src")
+    gate_dsts+=("$dst")
+  done <<<"$out"
+  ((${#gate_dsts[@]} == 0)) && return 0
+  if ((push_no_pin)); then
+    echo "agent-gh: push を止めました: --mirror・--prune・glob refspec の形では Git が送るブランチを pin して検査できません。ブランチを refspec で明示して push してください" >&2
+    exit 6
+  fi
+  local -A gate_sha=()
+  for i in "${!gate_dsts[@]}"; do
+    dst="${gate_dsts[i]}"
+    src="${gate_srcs[i]}"
+    # Git が送る sha を先に pin してから測る（測った sha と実際に送る sha を一致させる）
+    sha="$(git rev-parse --verify --quiet "$src^{commit}" 2>/dev/null || true)"
+    if [[ -z "$sha" ]]; then
+      echo "agent-gh: push を止めました: $dst へ push する $src を解決できません" >&2
+      exit 6
+    fi
+    gate_sha[$dst]="$sha"
     # push 元のローカルブランチ: HEAD は今のブランチ、refs/heads/X は X
     case "$src" in
       HEAD) local_branch="$(git symbolic-ref -q --short HEAD 2>/dev/null || true)" ;;
@@ -430,20 +654,25 @@ pr_size_gate() {
     # GIT_CONFIG は除く: 判定は push が読む通常の設定と同じもので行う（push_targets と同じ理由）。
     mb="$(env -u GIT_CONFIG git config --get "branch.$local_branch.gh-merge-base" 2>/dev/null || true)"
     base="origin/${mb:-main}"
-    rc=0
-    out="$(bash "$pr_size" --base "$base" --head "$src" 2>&1)" || rc=$?
-    ((rc == 0)) && continue
-    if ((rc != 1)); then
+    mrc=0
+    mout="$(bash "$pr_size" --base "$base" --head "$sha" 2>&1)" || mrc=$?
+    ((mrc == 0)) && continue
+    if ((mrc != 1)); then
       echo "agent-gh: push を止めました: $dst へ push する $src の差分を測れません（base: $base）" >&2
-      printf '%s\n' "$out" >&2
+      printf '%s\n' "$mout" >&2
       exit 6
     fi
-    pr_size_exception_ok "$dst" && continue
-    counts="$(sed -n 's/^pr-size: \(+[^（]*\)（.*$/\1/p' <<<"$out" | head -n 1)"
+    repo="$(push_dest_repo "$(push_remote_spec)" "$url" || true)"
+    if [[ -n "$repo" ]] && pr_size_exception_ok "${dst#refs/heads/}" "$repo"; then
+      continue
+    fi
+    counts="$(sed -n 's/^pr-size: \(+[^（]*\)（.*$/\1/p' <<<"$mout" | head -n 1)"
     echo "agent-gh: push を止めました: $dst への push の差分が上限を超えています（${counts:-測定不能}、base: $base、上限は追加 800 行・削除 2000 行）" >&2
     echo "agent-gh: 例外で通すには、push 先ブランチの開いた PR に pr-size-exception ラベルがあり、その PR が閉じる Issue に hatai の、行頭が <!-- pr-size-exception --> のコメントが必要です（例外を認めるのは指揮役だけです）" >&2
     exit 6
   done
+  # 全ブランチの検査を通った。実 push の refspec を <sha>:<dst> に pin する
+  pin_push_argv "$url"
   return 0
 }
 
@@ -461,11 +690,13 @@ if [[ "${1:-}" == "git" ]]; then
 
   if [[ "${1:-}" == "push" ]]; then
     push_targets "${@:2}"
-    # dev 役の push では、push する前に差分の行数を測る（#642）。上限を超えて例外が
-    # 認められていなければ push しない。dry-run・削除・タグ・fallback（push 先を
-    # 決められない形）と review 役の push は対象外。
-    if [[ "$role" == dev ]] && ((!push_fallback && !push_dry_run)) && ((${#push_branches[@]} > 0)); then
-      pr_size_gate
+    # dev 役の push では、push する前に Git が実際に送るブランチ更新を dry-run で解決し、
+    # 送る sha の差分を測る（#642）。上限を超えて例外が認められていなければ push しない。
+    # 試行（--dry-run）・削除・サブモジュールだけの push と review 役の push は対象外。
+    if [[ "$role" == dev ]] && ((!push_dry_run && !push_no_gate)); then
+      pr_size_gate "${@:2}"
+      # 検査を通った push の refspec は <sha>:<dst> に pin してから実行する
+      ((${#push_argv[@]} > 0)) && set -- push "${push_argv[@]}"
     fi
   fi
 

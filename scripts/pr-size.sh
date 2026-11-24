@@ -2,7 +2,7 @@
 # PR の差分行数を追加行と削除行に分けて数え、どちらかの上限を超えたら失敗する。
 # base 側の .gitattributes で linguist-generated を付けたファイルとバイナリは数えない。
 # 使い方: scripts/pr-size.sh [--base <ref>] [--head <ref>] [--limit <n>] [--delete-limit <n>]（既定: origin/main, HEAD, 800, 2000）
-# 終了コード: 0 = 両方とも上限以下、1 = 上限超え、2 = 引数の誤り
+# 終了コード: 0 = 両方とも上限以下、1 = 上限超え、2 = 引数の誤り、3 = 差分を測れない（base・head は解決できても共通祖先が無いなど）
 set -euo pipefail
 
 base="origin/main"
@@ -28,7 +28,7 @@ options:
   --delete-limit <n>    削除行数の上限（既定: 2000）
   -h, --help            この使い方を標準出力に出して終了する
 
-終了コード: 0 = 両方とも上限以下、1 = 上限超え、2 = 引数の誤り
+終了コード: 0 = 両方とも上限以下、1 = 上限超え、2 = 引数の誤り、3 = 差分を測れない（共通祖先が無いなど）
 EOF
   exit 0
 }
@@ -66,6 +66,14 @@ deleted_total=0
 per_file=()
 
 # -z 形式: 通常は "add<TAB>del<TAB>path\0"、リネームは "add<TAB>del<TAB>\0old\0new\0"。
+# git diff の失敗（共通祖先が無いなど）を呼び出し元に伝えるため、先にファイルへ出して
+# 正常終了を確かめてから読む（プロセス置換の終了コードは親のシェルに伝わらない）。
+numstat_file="$(mktemp)"
+trap 'rm -f "$numstat_file"' EXIT
+if ! git diff --numstat -z -M "$base...$head" >"$numstat_file"; then
+  echo "pr-size: 差分を測れません（$base...$head）" >&2
+  exit 3
+fi
 while IFS= read -r -d '' record; do
   added="${record%%$'\t'*}"
   rest="${record#*$'\t'}"
@@ -80,7 +88,7 @@ while IFS= read -r -d '' record; do
   added_total=$((added_total + added))
   deleted_total=$((deleted_total + deleted))
   per_file+=("$((added + deleted))"$'\t'"$path"$'\t'"+$added"$'\t'"-$deleted")
-done < <(git diff --numstat -z -M "$base...$head")
+done <"$numstat_file"
 
 echo "pr-size: +$added_total / -$deleted_total（追加の上限 $limit、削除の上限 $delete_limit）"
 
