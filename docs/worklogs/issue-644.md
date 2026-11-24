@@ -33,3 +33,15 @@
 5. 改善案: 再開したスレッドと新しいスレッドが同じ Issue の同じ round を並行して触れる。runbook の再開手順に「復帰したスレッドは Issue の claim コメントと最新の push を確かめ、別スレッドが進めていれば重複作業をしない」という 1 段を足すと再発しにくい
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: 407a9a4747d19ee39d9eefab76d1f1aaace75546
+
+1. 詰まった箇所: 作業ツリー: PR ブランチをチェックアウトした前スレッドの worktree（`agent-644-takeover-work-…`）が自分の sandbox では read-only の bind マウントで、`git merge --ff-only` が `Read-only file system` で落ちた。自分の worktree に `agent-644-takeover-r3`（base `a893249a`）を切って作業し、`.git/config` も ro で upstream が保存できないため、push は `HEAD:agent/644-takeover-worktree-procedure` の明示 refspec と、`GIT_CONFIG_*` 環境変数で注入した upstream で resign の対象を合わせた
+2. 曖昧だった文: 「PR がまだ無い（Working の段で止まった）ときは、実装スレッドの通常の立て方（「実装を始める」）で起動する。」（`docs/agents/grokbot-runbook.md` 再開手順 5）。「PR が無い」が「引き継ぐ成果も無い」に読めるが、実装は push → Draft PR の順なので、PR 無しでもブランチにコミットが残りうる。「引き継ぐ成果の有無」で分岐する形に直した
+3. 仮定と解釈: must-fix 2 の「対応を記録」は補助記録 `items` に `implement_thread` を足す形にした（`items` は巡回スクリプトに消されず、`main_pr` と同じ置き場で Issue 番号がキー）。書く段は新規・手当・再開の全起動が通る割り当て手順 4 にし、記録の無い既存スレッドへのフォールバックとして `branch` の照合（`<PRブランチ>-r<数>` も対象・稼働中に限定）を残した
+4. 足りなかった情報・検証手段: 前スレッドの worktree が読み取り専用であることは `git merge` の失敗で実機確認した。`-r<N>` スレッドが `t3 thread list` にどう見えるか、sandbox 内では実機確認できなかった（文書の前提どおりの状態を再現する手段が無い）
+5. 改善案: `docs/agents/grokbot-runbook.md` の「指揮役が持つ項目（`items`）」の表に「書く主体とタイミング」の列があると、`implement_thread` のような記録項目を足すとき書き手がどこに書くか迷わない（今回は割り当て手順 4 の括弧で示した）
+
+使ったスキル: implement-issue
