@@ -24,3 +24,15 @@
 5. 改善案: `scripts/patrol-state-update` の `--help` 出力か runbook に「unreadable を見つけた現指揮役は、退避ファイルの中身を確かめて `--claim-conductor` で回復する」までの回復手順を足すと、異常時の判断が現指揮役ごとにばらつかない
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: 1c29fd897bfc56acd04494e776577c1724aeee4a
+
+1. 詰まった箇所: must-fix 1（退避直後の中断で初回作成扱い）の再現試験。実行中の中断を試験する経路がなく、`os.replace` の 2 回目（退避コピー設置の次、回復状態の書き戻し）を SourceFileLoader + monkeypatch で失敗させる形で決定的に再現した
+2. 曖昧だった文: 「有効な登録を更新する操作は明示的な `--claim-conductor` に限り、通常の patch による削除・無効化・別名義からの変更を拒否してください」（pelway-review の must-fix）
+3. 仮定と解釈: 「更新する操作」を変更一般と読み、登録の有無・書き手の種類（`--writer`・`--writer-thread`）にかかわらず、通常の patch で `conductor_thread_id` が変わる書き込みは全て拒否する解釈を選んだ（登録前ファイルの patch での登録も拒否し、登録は `--claim-conductor` だけに揃えた。同じ値の書き戻しは変更にならないため許す）。must-fix 1 はレビュー提示の「退避コピーを保存してから正規パスを原子的に置き換える」を採り、退避を `os.replace` の移動から原子的なコピーに変えた
+4. 足りなかった情報・検証手段: 中断の再現にはプロセス内の失敗注入が要り、シェル試験に埋め込む Python（`os.replace` を 2 回目で失敗させる）で済ませた。外部から kill する実時間の中断試験はタイミング依存で書けなかった
+5. 改善案: `scripts/patrol-state-update` の「保護」の項に「通常の patch での変更・削除・無効化は拒否」の記述を足したので、`.agents/skills/command-team/SKILL.md` の patrol-state 記述にも同じ 1 行があるとスキルだけ読む指揮役にも届く
+
+使ったスキル: implement-issue
