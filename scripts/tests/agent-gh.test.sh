@@ -95,6 +95,12 @@ if [[ -n "${FAKE_GH_HINT:-}" ]]; then
   exit "${FAKE_GH_EXIT:-0}"
 fi
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_NO_UPDATE_NOTIFIER=%s\n' "${GH_NO_UPDATE_NOTIFIER:-}"; printf 'GH_TELEMETRY=%s\n' "${GH_TELEMETRY:-}"; printf 'DO_NOT_TRACK=%s\n' "${DO_NOT_TRACK:-}"; printf 'ARGS=%s\n' "$*"; } >"$CALL_LOG"
+# pr-size の例外の照会（#642）: 呼び出しを $CALL_LOG.gate に追記し、FAKE_GH_PR_LIST・FAKE_GH_ISSUE_VIEW を返す。
+# FAKE_GH_FAIL_PR・FAKE_GH_FAIL_ISSUE があれば、その照会だけを失敗させる
+case "${1:-} ${2:-}" in
+  "pr list") printf 'ARGS=%s\n' "$*" >>"$CALL_LOG.gate"; [[ -z "${FAKE_GH_FAIL_PR:-}" ]] || exit 1; printf '%s\n' "${FAKE_GH_PR_LIST:-[]}" ;;
+  "issue view") printf 'ARGS=%s\n' "$*" >>"$CALL_LOG.gate"; [[ -z "${FAKE_GH_FAIL_ISSUE:-}" ]] || exit 1; printf '%s\n' "${FAKE_GH_ISSUE_VIEW:-"{\"comments\":[]}"}" ;;
+esac
 EOF
 
 # 偽の git: GH_TOKEN と引数を追記する（push 後の agent-gh-resign からの呼び出しも残すため追記）。
@@ -1070,6 +1076,209 @@ PELWAY_AGENT_SKIP_RESIGN=1 push_run review_push_block review git push
 [[ "$RC" != 0 ]] || failures+=("review_push_block: exit 0, want non-zero")
 [[ "$(remote_ref agent/review_push)" == "$before" ]] || failures+=("review_push_block: remote ref changed")
 [[ "$OUT" == *"pelway-review[bot]"* && "$OUT" == *"author=pelway-dev[bot]"* ]] || failures+=("review_push_block: stderr lacks identity: $OUT")
+
+# --- push 前の pr-size ゲート（#642）。#613 の一時 pre-push フックの中で、Git が送る更新ごとに差分を測る ---
+# remote の URL は https://github.com/<owner>/Pelway.git のまま、remote.<名>.vcs の偽の remote helper で輸送する。
+# helper は connect で <owner>-Pelway.git（ローカルの bare）につなぐ（github.com でない URL はそのままパスとして使う）。
+# フックの第 2 引数（Git が接続する URL）は github.com の URL のまま残る
+cat >"$RGBIN/git-remote-gatetest" <<'EOF'
+#!/usr/bin/env bash
+dir="$2"
+[[ "$2" =~ ^https://github\.com/([^/]+)/([^/]+)\.git$ ]] && dir="$GATE_DIR/${BASH_REMATCH[1]}-${BASH_REMATCH[2]}.git"
+while IFS= read -r line; do
+  case "$line" in
+    capabilities) printf 'connect\n\n' ;;
+    "connect "*) printf '\n'; exec git "${line#connect git-}" "$dir" ;;
+    *) exit 1 ;;
+  esac
+done
+EOF
+chmod +x "$RGBIN/git-remote-gatetest"
+export GATE_DIR="$ROOT/gate"
+for r in hatai someone; do "$REAL_GIT" init -q --bare -b main "$GATE_DIR/$r-Pelway.git"; done
+"$REAL_GIT" init -q -b main "$GATE_DIR/work"
+gate_git() { "$REAL_GIT" -C "$GATE_DIR/work" "$@"; }
+for r in origin:hatai fork:someone; do
+  gate_git remote add "${r%%:*}" "https://github.com/${r#*:}/Pelway.git"
+  gate_git config "remote.${r%%:*}.vcs" gatetest
+done
+(cd "$GATE_DIR/work" && as hatai commit -q --allow-empty -m base)
+gate_git update-ref refs/remotes/origin/main HEAD
+# gate_branch <名前> <起点> <行数>: 起点に <行数> 行のファイルを足すコミット（pelway-dev[bot] の名義）でブランチを作る
+gate_branch() {
+  gate_git switch -q -c "$1" "$2"
+  seq "$3" >"$GATE_DIR/work/${1//\//-}.txt"
+  gate_git add -A
+  (cd "$GATE_DIR/work" && as 'pelway-dev[bot]' commit -q -m "$1")
+}
+gate_branch agent/642-x main 810 # 上限超え（下の PR の応答の headRefName）
+gate_branch feature main 900
+gate_branch small main 10
+# gate_run <name> <agent-gh dev git の引数...>: 標準出力を OUT、標準エラーを ERR に分けて入れる（診断は ERR で照合する）
+gate_run() {
+  local name="$1"
+  shift
+  export CALL_LOG="$ROOT/$name.log"
+  rm -f "$CALL_LOG.gate"
+  OUT="$(cd "$GATE_DIR/work" && PATH="$RGBIN:$PATH" bash "$SCRIPT" dev git "$@" 2>"$ROOT/$name.err")"
+  RC=$?
+  ERR="$(cat "$ROOT/$name.err")"
+}
+# gate_ref <ref> [<owner>-Pelway]: bare の ref の sha（無ければ空）。gate_clear は通した push が bare に残した ref を消す
+gate_ref() { "$REAL_GIT" --git-dir="$GATE_DIR/${2:-hatai-Pelway}.git" rev-parse -q --verify "$1"; }
+gate_clear() { "$REAL_GIT" --git-dir="$GATE_DIR/hatai-Pelway.git" update-ref -d "$1"; }
+# gate_blocked <name> <ref> [<owner>-Pelway] [<行数>]: ゲートが止め（0 以外・標準エラーに行数）、remote の ref が無いままか
+gate_blocked() {
+  [[ "$RC" != 0 && "$ERR" == *"${4:-+810 / -0}"* && "$ERR" == *'上限を超えています'* ]] || failures+=("$1: not stopped by the gate: rc=$RC $ERR")
+  [[ -z "$(gate_ref "$2" "${3:-}")" ]] || failures+=("$1: remote $2 changed")
+}
+
+# 1. 上限超えは push しない。標準エラーに行数・base・例外の条件が出て、remote の ref は変わらない。
+#    Git が送る更新を測るため、引数の形（否定形・試行・refspec の省略・リモートだけ・-u）によらず止まる
+gate_git switch -q agent/642-x
+gate_git config branch.agent/642-x.remote origin
+gate_git config branch.agent/642-x.merge refs/heads/agent/642-x
+while IFS= read -r form; do
+  read -ra form_args <<<"$form"
+  gate_run gate_over "${form_args[@]}"
+  gate_blocked "gate_over ($form)" refs/heads/agent/642-x
+done <<'EOF'
+push --dry-run origin HEAD
+push --no-dry-run --no-porcelain origin HEAD
+push
+push origin
+push -u origin agent/642-x
+push origin HEAD
+EOF
+for want in 'base: origin/main' 'pr-size-exception' 'hatai' '<!-- pr-size-exception -->'; do
+  [[ "$ERR" == *"$want"* ]] || failures+=("gate_over: stderr lacks '$want': $ERR")
+done
+PELWAY_AGENT_SKIP_RESIGN=1 gate_run gate_skip_resign push origin HEAD
+gate_blocked gate_skip_resign refs/heads/agent/642-x
+# グローバルオプション（-C）付きの push は、ゲートの前に agent-gh が終了コード 2 で拒否し、remote は変わらない
+gate_run gate_global -C "$GATE_DIR/work" push origin HEAD
+[[ "$RC" == 2 && -z "$(gate_ref refs/heads/agent/642-x)" ]] || failures+=("gate_global: exit $RC (want 2), remote $(gate_ref refs/heads/agent/642-x): $ERR")
+
+# 2. 例外があれば通す: 接続先のリポジトリの開いた PR の pr-size-exception ラベル + PR が閉じる Issue の hatai の目印コメント。
+#    Issue はリポジトリ付きの参照（url）で取り、別リポジトリの Issue もその参照で取る
+PR_LABELED='[{"number":42,"labels":[{"name":"pr-size-exception"}],"headRefName":"agent/642-x","headRepository":{"nameWithOwner":"hatai/Pelway"},"closingIssuesReferences":[{"number":640,"url":"https://github.com/hatai/Pelway/issues/640"}]}]'
+PR_UNLABELED='[{"number":42,"labels":[],"headRefName":"agent/642-x","headRepository":{"nameWithOwner":"hatai/Pelway"},"closingIssuesReferences":[{"number":640,"url":"https://github.com/hatai/Pelway/issues/640"}]}]'
+PR_FORK='[{"number":42,"labels":[{"name":"pr-size-exception"}],"headRefName":"agent/642-x","headRepository":{"nameWithOwner":"someone/Pelway"},"closingIssuesReferences":[{"number":640,"url":"https://github.com/hatai/Pelway/issues/640"}]}]'
+PR_CROSS_ISSUE='[{"number":42,"labels":[{"name":"pr-size-exception"}],"headRefName":"agent/642-x","headRepository":{"nameWithOwner":"hatai/Pelway"},"closingIssuesReferences":[{"number":640,"url":"https://github.com/other/repo/issues/640"}]}]'
+ISSUE_MARKER='{"comments":[{"author":{"login":"hatai"},"body":"<!-- pr-size-exception -->\nこの PR の超過を認める"}]}'
+for c in "$PR_LABELED|hatai/Pelway" "$PR_CROSS_ISSUE|other/repo"; do
+  FAKE_GH_PR_LIST="${c%|*}" FAKE_GH_ISSUE_VIEW="$ISSUE_MARKER" PELWAY_AGENT_SKIP_RESIGN=1 gate_run gate_exception push origin HEAD
+  [[ "$RC" == 0 && "$(gate_ref refs/heads/agent/642-x)" == "$(gate_git rev-parse agent/642-x)" ]] ||
+    failures+=("gate_exception (${c#*|}): not pushed: rc=$RC $ERR")
+  grep -qF "ARGS=pr list --repo hatai/Pelway --head agent/642-x" "$ROOT/gate_exception.log.gate" ||
+    failures+=("gate_exception (${c#*|}): PR not queried in the destination repo")
+  grep -qF "ARGS=issue view https://github.com/${c#*|}/issues/640" "$ROOT/gate_exception.log.gate" ||
+    failures+=("gate_exception (${c#*|}): issue not fetched by its repo-qualified url")
+  gate_clear refs/heads/agent/642-x
+done
+
+# 3. 例外の条件が欠けると止める: ラベルだけ・コメントだけ・作成者が hatai でない・目印が行頭でない・head がフォークの同名ブランチ・
+#    開いた PR が無い（Issue は照会しない）・PR の照会の失敗・PR の照会は通り Issue のコメントの照会だけが失敗
+gate_exception_blocked() {
+  FAKE_GH_PR_LIST="$2" FAKE_GH_ISSUE_VIEW="$3" FAKE_GH_FAIL_PR="${4:-}" FAKE_GH_FAIL_ISSUE="${5:-}" gate_run "$1" push origin HEAD
+  gate_blocked "$1" refs/heads/agent/642-x
+}
+gate_exception_blocked gate_label_only "$PR_LABELED" '{"comments":[{"author":{"login":"hatai"},"body":"この PR の超過を認める"}]}'
+gate_exception_blocked gate_comment_only "$PR_UNLABELED" "$ISSUE_MARKER"
+gate_exception_blocked gate_not_hatai "$PR_LABELED" '{"comments":[{"author":{"login":"someone"},"body":"<!-- pr-size-exception -->\n認める"}]}'
+gate_exception_blocked gate_marker_not_at_start "$PR_LABELED" '{"comments":[{"author":{"login":"hatai"},"body":"x <!-- pr-size-exception -->"}]}'
+gate_exception_blocked gate_fork_pr "$PR_FORK" "$ISSUE_MARKER"
+gate_exception_blocked gate_no_pr '[]' "$ISSUE_MARKER"
+! grep -qF 'issue view' "$ROOT/gate_no_pr.log.gate" || failures+=("gate_no_pr: issue view was called")
+gate_exception_blocked gate_pr_query_fail "$PR_LABELED" "$ISSUE_MARKER" 1
+[[ "$ERR" == *'問い合わせに失敗'* ]] || failures+=("gate_pr_query_fail: stderr lacks the query failure: $ERR")
+gate_exception_blocked gate_issue_query_fail "$PR_LABELED" "$ISSUE_MARKER" "" 1
+[[ "$ERR" == *'問い合わせに失敗'* ]] || failures+=("gate_issue_query_fail: stderr lacks the query failure: $ERR")
+grep -qF 'ARGS=issue view' "$ROOT/gate_issue_query_fail.log.gate" || failures+=("gate_issue_query_fail: issue was not queried")
+
+# 4. 例外は Git が実際に接続する先のリポジトリで確かめる。位置引数のリモート（origin）は --repo（fork）より優先され、
+#    origin = hatai/Pelway の承認で通る。branch.<名>.pushRemote が向ける fork・複数の pushurl の someone/Pelway・
+#    insteadOf で github.com 以外に書き換わった接続先では、hatai/Pelway の承認を使わずに止める
+FAKE_GH_PR_LIST="$PR_LABELED" FAKE_GH_ISSUE_VIEW="$ISSUE_MARKER" PELWAY_AGENT_SKIP_RESIGN=1 gate_run gate_repo_opt push --repo=fork origin HEAD
+[[ "$RC" == 0 && -n "$(gate_ref refs/heads/agent/642-x)" && -z "$(gate_ref refs/heads/agent/642-x someone-Pelway)" ]] ||
+  failures+=("gate_repo_opt: not pushed to origin: rc=$RC $ERR")
+gate_clear refs/heads/agent/642-x
+gate_git config branch.agent/642-x.pushRemote fork
+FAKE_GH_PR_LIST="$PR_LABELED" FAKE_GH_ISSUE_VIEW="$ISSUE_MARKER" gate_run gate_push_remote push
+gate_blocked gate_push_remote refs/heads/agent/642-x someone-Pelway
+grep -qF 'ARGS=pr list --repo someone/Pelway ' "$ROOT/gate_push_remote.log.gate" || failures+=("gate_push_remote: PR not queried in fork")
+gate_git config --unset branch.agent/642-x.pushRemote
+gate_git remote add both https://github.com/hatai/Pelway.git
+gate_git config remote.both.vcs gatetest
+gate_git config --add remote.both.pushurl https://github.com/hatai/Pelway.git
+gate_git config --add remote.both.pushurl https://github.com/someone/Pelway.git
+FAKE_GH_PR_LIST="$PR_LABELED" FAKE_GH_ISSUE_VIEW="$ISSUE_MARKER" PELWAY_AGENT_SKIP_RESIGN=1 gate_run gate_multi_url push both HEAD
+gate_blocked gate_multi_url refs/heads/agent/642-x someone-Pelway
+[[ -n "$(gate_ref refs/heads/agent/642-x)" ]] || failures+=("gate_multi_url: not pushed to the approved hatai/Pelway: $ERR")
+gate_clear refs/heads/agent/642-x
+gate_git config "url.$GATE_DIR/hatai-Pelway.git.insteadOf" https://github.com/hatai/Pelway.git
+FAKE_GH_PR_LIST="$PR_LABELED" FAKE_GH_ISSUE_VIEW="$ISSUE_MARKER" gate_run gate_instead_of push origin HEAD
+gate_blocked gate_instead_of refs/heads/agent/642-x
+[[ "$ERR" == *'GitHub のリポジトリではない'* && ! -e "$ROOT/gate_instead_of.log.gate" ]] ||
+  failures+=("gate_instead_of: exception was looked up for a non-GitHub destination: $ERR")
+gate_git config --unset "url.$GATE_DIR/hatai-Pelway.git.insteadOf"
+
+# 5. 上限以下は GitHub に照会せずに push する。-u は元のブランチに upstream を保存する
+gate_git switch -q small
+PELWAY_AGENT_SKIP_RESIGN=1 gate_run gate_under push -u origin HEAD
+[[ "$RC" == 0 && "$(gate_ref refs/heads/small)" == "$(gate_git rev-parse small)" ]] || failures+=("gate_under: not pushed: rc=$RC $ERR")
+[[ "$(gate_git config branch.small.remote) $(gate_git config branch.small.merge)" == "origin refs/heads/small" ]] ||
+  failures+=("gate_under: upstream not saved")
+[[ ! -e "$ROOT/gate_under.log.gate" ]] || failures+=("gate_under: GitHub was queried")
+gate_clear refs/heads/small
+
+# 6. 同名のタグとブランチを一緒に送る push と、remote.<名>.push で宛先が変わる push は、Git が解決した宛先のまま通る。
+#    タグは測らない（タグ rel の先は上限超えの feature）。削除も測らない
+gate_git tag rel feature
+gate_git branch rel small
+PELWAY_AGENT_SKIP_RESIGN=1 gate_run gate_tag_branch push origin tag rel refs/heads/rel
+[[ "$RC" == 0 && "$(gate_ref refs/tags/rel)" == "$(gate_git rev-parse feature)" && "$(gate_ref refs/heads/rel)" == "$(gate_git rev-parse small)" ]] ||
+  failures+=("gate_tag_branch: rc=$RC $ERR")
+PELWAY_AGENT_SKIP_RESIGN=1 gate_run gate_delete push origin :refs/heads/rel :refs/tags/rel
+[[ "$RC" == 0 && -z "$(gate_ref refs/heads/rel)" && -z "$(gate_ref refs/tags/rel)" ]] || failures+=("gate_delete: rc=$RC $ERR")
+gate_git config remote.origin.push refs/heads/small:refs/heads/mapped
+PELWAY_AGENT_SKIP_RESIGN=1 gate_run gate_push_config push origin small
+[[ "$RC" == 0 && "$(gate_ref refs/heads/mapped)" == "$(gate_git rev-parse small)" && -z "$(gate_ref refs/heads/small)" ]] ||
+  failures+=("gate_push_config: rc=$RC $ERR")
+gate_clear refs/heads/mapped
+gate_git config --unset remote.origin.push
+
+# 7. src:dst は送る src の差分を数える（HEAD の small は上限内でも、送る feature は +900）
+gate_run gate_src push origin feature:refs/heads/agent/642-new
+gate_blocked gate_src refs/heads/agent/642-new "" '+900 / -0'
+
+# 8. base は push 元のブランチの branch.<名>.gh-merge-base があれば origin/<その値>（feature と同じ先端でも、設定で差分が 0 になる）。
+#    設定が無いときの origin/main は 1 で確かめた
+gate_git branch mb-set feature
+gate_git update-ref refs/remotes/origin/topic feature
+gate_git config branch.mb-set.gh-merge-base topic
+PELWAY_AGENT_SKIP_RESIGN=1 gate_run gate_merge_base push origin mb-set
+[[ "$RC" == 0 && "$(gate_ref refs/heads/mb-set)" == "$(gate_git rev-parse feature)" ]] || failures+=("gate_merge_base: rc=$RC $ERR")
+gate_clear refs/heads/mb-set
+
+# 9. base と送る sha に共通祖先が無く差分を測れないときも止める（0 行で通さない）
+gate_git switch -q --orphan orphan-hist
+(cd "$GATE_DIR/work" && as hatai commit -q --allow-empty -m unrelated)
+gate_git update-ref refs/remotes/origin/orphan HEAD
+gate_git switch -q small
+gate_git config branch.small.gh-merge-base orphan
+gate_run gate_unmeasurable push origin HEAD
+[[ "$RC" != 0 && "$ERR" == *'測れません'* && -z "$(gate_ref refs/heads/small)" ]] || failures+=("gate_unmeasurable: rc=$RC $ERR")
+gate_git config --unset branch.small.gh-merge-base
+
+# 10. 測る sha は Git がフックの前に決めた送る sha そのもの。先に走る設定のフックが push 元のブランチを上限超えの先へ
+#     動かしても、測った（動かす前の）sha が送られる
+small_sha="$(gate_git rev-parse small)"
+gate_git config hook.mover.event pre-push
+gate_git config hook.mover.command "sh -c 'git update-ref refs/heads/small $(gate_git rev-parse feature)'"
+PELWAY_AGENT_SKIP_RESIGN=1 gate_run gate_measured_sha push origin small
+[[ "$RC" == 0 && "$(gate_ref refs/heads/small)" == "$small_sha" ]] || failures+=("gate_measured_sha: rc=$RC, remote $(gate_ref refs/heads/small), want $small_sha: $ERR")
+gate_git config --remove-section hook.mover
 unset GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
 
 # --- gh の `gh event listen` の案内（#596）: agent-gh の出力に残さない。警告・エラー・stdout・終了コードは残す ---

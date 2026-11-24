@@ -14,11 +14,13 @@
 
 ## 実装者メモ（round 2・codex r1 must-fix 対応）
 
+この round の dry-run・pin・引数の組み直しの方式（1〜4・7・9）は round 3 で廃止した。現在の方式は round 3 のメモのとおり。
+
 対象 head: 未 push（このメモを含むコミット）
 
 1. 設計の決め手: must-fix の 1（refspec 省略）・2（タグ名前空間）・3（測定 sha と送信 sha の一致）を 1 つの機構で解くため、`git push --dry-run --porcelain` で Git が実際に更新する ref を解決し、porcelain の `<旗>\t<src>:<dst>` 行で `refs/heads/` への ` `・`+`・`*` 更新だけを検査対象にした。`=`（最新のまま）・`!`（拒否）・`-`（削除）は実際に送られないため対象外。
 2. sha の pin（must-fix 3）: 解決した src を `rev-parse` で sha に固定してから測定し、検査を通ったら実 push の引数を `<sha>:<dst>` に組み替える（`pin_push_argv`）。測定と push の間に別 worktree がブランチを動かしても、測った sha が送られる。pin できない形（`--mirror`・`--prune`・glob refspec）は exit 6 で止める（fail-closed）。`--all`/`--branches` は旗を外して解決した refspec に展開する。
-3. refspec 省略・リモートだけの push（must-fix 1）: dry-run が upstream・`push.default`・引数をすべて解決するため、その出力を検査するだけで網羅できる。dry-run 自体が失敗した場合は検査対象なしとして実 push に回す（upstream 未設定・接続失敗では実 push も同じ理由で失敗し、ブランチは更新されない）。
+3. refspec 省略・リモートだけの push（must-fix 1）: dry-run が upstream・`push.default`・引数をすべて解決するため、その出力を検査するだけで網羅できる。dry-run 自体が失敗した場合は検査対象なしとして実 push に回していた。ただし「実 push も同じ理由で失敗する」という前提は誤りで、一時的な接続の失敗の後に実 push が成功すると未測定の更新が送られた（codex r2 の must-fix）。round 3 で試行をやめ、pre-push フックが受ける Git の送る更新を測る方式に置き換えた。
 4. 例外照合のリポジトリ識別（must-fix 4）: `gh pr list --repo <owner/repo>` に headRepository.nameWithOwner + headRefName を取らせ、head のリポジトリとブランチの両方が push 先と一致する PR だけを例外対象にした（同名ブランチを持つフォークの承認を使わない）。closingIssuesReferences は `url`（無ければ `repository.nameWithOwner` + `number` の `owner/repo#n` 形）で issue view するため、別リポジトリの同番号 Issue を取り違えない。push 先の owner/repo は `remote.<名>.pushurl`/`.url` の設定値（insteadOf 書き換え前）から取り、解けなければ fail-closed。
 5. 測定不能の扱い（must-fix 5）: `git diff --numstat` はプロセス置換の終了コードが親に伝わらないため、いったん mktemp のファイルに出して正常終了を確かめてから読む。失敗（共通祖先が無い等）は終了コード 3 を返し、ゲートは exit 6 で止める（0 行で通さない）。
 6. 試験の stderr 分離（must-fix 6）: `push_gate`/`push_gate_skip` は stdout=OUT・stderr=ERR に分け、行数・base・例外ラベル・hatai・目印マーカーは ERR を照合する。
