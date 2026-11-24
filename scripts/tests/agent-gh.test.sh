@@ -516,7 +516,7 @@ GH_CONFIG_DIR="$fake_gh_dir" FAKE_PELWAY_DEV_APP_ID=999 run no_fallback_generate
 tok="$(sed -n 's/^GH_CONFIG_DIR=//p' "$ROOT/no_fallback_generate_fails.log.token-env")"
 [[ -n "$tok" && "$tok" != "$fake_gh_dir" ]] || failures+=("no_fallback_generate_fails: token generate saw caller GH_CONFIG_DIR")
 
-# --- review round 1 の must-fix: app_token の subshell 途中終了でも秘密鍵の一時ファイルが残らない ---
+# --- app_token の subshell 途中終了でも秘密鍵の一時ファイルが残らない ---
 # app_token は token="$(app_token ...)" のコマンド置換 subshell の中で動く。subshell では親の
 # EXIT trap は走らないため、subshell 内で trap を設定して mktemp から消し忘れを防いでいる。
 
@@ -713,13 +713,23 @@ expect_rejected bundle-attached-then-blocked push -of "--exec=touch $ran; false"
 expect_rejected ddash-value-transport push -o -- "--receive-pack=touch $ran; false" origin HEAD
 expect_rejected ddash-value-no-verify push -o -- --no-verify origin HEAD
 # -o 以外の値を取るオプション（--jobs・-o の省略形 --push-opt など）の値は、検査の単純さのため
-# 意図的に区別しない（git は値として読むが、誤って値と見なしても拒否側に倒れるだけなので一律に走査する）
+# 意図的に区別しない（git は値として読むが、誤って値と見なしても拒否側に倒れるだけなので一律に走査する）。
+# それらの値が `--`・-o・ls-remote の位置引数に見えるときも同じ
+# （`push --repo -- --no-verify` では `--` が --repo の値で --no-verify は効く）
 expect_rejected value-jobs fetch --jobs --exec origin
 expect_rejected value-push-option-abbrev push --push-opt --exec origin HEAD
+expect_rejected marker-repo-ddash push --repo -- --no-verify origin HEAD
+expect_rejected marker-vo-ddash push -vo -- --no-verify origin HEAD
+expect_rejected marker-repo-o push --repo -o --no-verify origin HEAD
+expect_rejected marker-vo-upload fetch -vo -- "--upload-pack=touch $ran; false" origin
+expect_rejected marker-sort ls-remote --sort refname "--upload-pack=touch $ran; false" origin
+# 位置引数が先に来ると `--` を値として取るオプションとの区別が付かないため、`--` の後ろも一律に走査する
+expect_rejected ddash-refspec-fetch fetch origin -- "--upload-pack=touch $ran; false"
+expect_rejected ddash-refspec-push push origin -- --exec
 [[ ! -e "$ran" ]] || failures+=("transport options: a command ran")
 
-# 値として消費される引数・参照パターン・`--` の後ろの位置引数は、git がオプションとして解釈しないため通す
-# （codex review round 10 must-fix）。agent-gh が終了コード 2 を返さないことと、コマンドが実行されないことを確かめる
+# 値として消費される引数・参照パターン・確かな `--` の後ろの位置引数は、git がオプションとして解釈しないため
+# 通す。agent-gh が終了コード 2 を返さないことと、コマンドが実行されないことを確かめる
 expect_not_rejected() {
   local label="$1"
   shift
@@ -739,14 +749,15 @@ expect_not_rejected pattern-exec ls-remote origin --exec
 expect_not_rejected pattern-u ls-remote origin -u
 expect_not_rejected pattern-upload-pack ls-remote origin "--upload-pack=x"
 expect_not_rejected pattern-server-opt ls-remote -o --exec origin
-# オプション位置の `--` の後ろは位置引数（refspec・参照パターン）で、オプションとしては解釈されない
-expect_not_rejected ddash-refspec-fetch fetch origin -- "--upload-pack=touch $ran; false"
-expect_not_rejected ddash-refspec-push push origin -- --exec
+# `=` 付きのオプションは値を自身で持つため、後ろの位置引数や `--` の扱いに影響しない
+expect_not_rejected pattern-sort-eq ls-remote --sort=refname origin --exec
 expect_not_rejected ddash-repo push -- "--receive-pack=touch $ran; false"
+# -o 系の綴りとその値だけが先にあるときも、`--` は確かにオプションの終端
+expect_not_rejected ddash-after-o push -o x -- --exec
 [[ ! -e "$ran" ]] || failures+=("transport passthrough: a command ran")
 
 # 検査対象外のサブコマンドでは、`--` の後ろに転送オプションと同じ名前のファイルがあっても通す
-# （`git add -- --exec` のようなパスの指定を拒否しない。codex review round 9 must-fix）。
+# （`git add -- --exec` のようなパスの指定を拒否しない）。
 (cd "$PUSH_DIR/work" && touch -- --exec --upload-pack --receive-pack)
 push_run pathspec_add dev git add -- --exec --upload-pack --receive-pack
 [[ "$RC" == 0 ]] || failures+=("pathspec_add: exit $RC, want 0: $OUT")
@@ -767,6 +778,14 @@ eval "$(grep '^git_allowed_subcommands=' "$SCRIPT")"
 builtins="$("$REAL_GIT" --list-cmds=builtins)"
 for c in "${git_allowed_subcommands[@]}"; do
   grep -qxF -- "$c" <<<"$builtins" || failures+=("allowlist: $c is not a git builtin")
+done
+# 転送のオプションの検査は fetch・pull・push・ls-remote にだけ掛ける。それ以外の許可名が同じオプションを
+# 解釈するなら検査の漏れになるため、-h の出力にそれらが無いことを確かめる
+for c in "${git_allowed_subcommands[@]}"; do
+  case "$c" in fetch|pull|push|ls-remote) continue ;; esac
+  if "$REAL_GIT" "$c" -h 2>&1 | grep -qE -- '--(upload-pack|receive-pack|exec)( |,|=|\[|$)'; then
+    failures+=("allowlist: $c has a transport option in -h")
+  fi
 done
 work_git config alias.status '!touch alias-ran'
 push_run alias_shadow dev git status

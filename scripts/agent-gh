@@ -309,36 +309,59 @@ if [[ "${1:-}" == "git" ]]; then
   # （fetch・pull・push・ls-remote）にだけ掛ける。ほかのサブコマンド（add・status・diff・restore など）の
   # `-` で始まる引数は、git がパス名として扱うものを拒否しない（`git add -- --exec` のようなファイルの指定）。
   #
-  # 走査は全引数を対象にするが、git がオプションとして解釈しない 3 つの位置だけは省く（git の引数解析の
-  # 再実装はしない。検査が扱うオプションに関わる位置だけを知る）:
+  # 走査は全引数を対象にする。git の引数解析の再実装はしないが、マーカー（`--`・-o・ls-remote の位置引数）は
+  # 別のオプションの値として消費されることがあるため（`push --repo -- --no-verify` では `--` が --repo の値、
+  # `ls-remote --sort refname --upload-pack` では refname が --sort の値）、その位置だけは見極めて省く。
+  # マーカーを信頼できるのは、それより前の引数がすべて「-o 系の綴りとその値」か「`=` 付きの長いオプション」
+  # のときだけ（どちらも次の引数を値として消費しないことが綴りから確かめられる）。その状態（clean）では:
   # - `-o`（push では --push-option、fetch・pull・ls-remote では --server-option）の次の引数は、その値で
   #   あってオプションではない。`git push -o --exec` の --exec は remote のフックに送られる文字列で、
-  #   push の --exec や --no-verify とは別物。連結形（-o--exec）や `=` の形（--push-option=--exec）は値を
-  #   自身で持つため次の引数を消費せず、-o と同じ読み方をするオプションの省略形（--push-opt など）や、
-  #   ほかの値を取るオプション（fetch の --jobs・pull の -s など）の値は区別しない（誤って値と見なしても
-  #   拒否側に倒れるだけなので、一律に走査する）。
-  # - オプションの位置に置かれた `--` の後ろは位置引数（refspec・参照パターン）で、オプションとしては
-  #   解釈されない。ただし `-o` などが値として消費した `--` は終端にならず、その後ろの引数はオプションの
-  #   位置のまま（`git push -o -- --no-verify` は git 側でも --no-verify が効く）。
+  #   push の --exec や --no-verify とは別物。連結形（-o--exec）や `=` の形（--push-option=--exec）は
+  #   clean に影響しない。
+  # - `--` の後ろは位置引数（refspec・参照パターン）で、オプションとしては解釈されない。値として消費
+  #   された `--`（`git push -o -- --no-verify` の `--`）は終端にならない。
   # - ls-remote は最初の位置引数の後ろをリポジトリ名と参照パターンとして読む（builtin/ls-remote.c の
   #   PARSE_OPT_STOP_AT_NON_OPTION）ため、`-` で始まらない引数が来た時点で走査を終える（`git ls-remote
   #   origin --exec` の --exec は参照パターンとして扱われる）。fetch・pull・push は parse-options の既定で、
   #   位置引数の後ろでも `-` の引数をオプションとして解釈する（実測: git fetch <repo> --upload-pack <path>
-  #   は <path> を実行する）ため、走査を止めない。
+  #   は <path> を実行する）ため、位置引数は clean を崩すだけで走査を止めない。
+  # clean が崩れたあとの引数は、値かどうかを誤っても拒否側に倒れるため、末尾まで一律に走査する。
   case "$git_sub" in
     fetch|pull|push|ls-remote)
+      clean=1
       skip_arg=0
       for a in "${@:2}"; do
         if ((skip_arg)); then
           skip_arg=0
           continue
         fi
+        if ((clean)); then
+          case "$a" in
+            --)
+              break ;; # clean な `--` の後ろは位置引数（refspec・参照パターン）
+            -o|--push-option|--server-option)
+              # -o は別の引数を値として取る。次の引数は値で、オプションとしては検査しない。
+              skip_arg=1
+              continue ;;
+            --?*=*)
+              # `=` 付きの長いオプションは値を自身で持ち、clean は崩れない。転送オプションの照合は掛ける。
+              opt="${a%%=*}"
+              for t in --upload-pack --receive-pack --exec; do
+                if [[ "$t" == "$opt"* ]]; then
+                  echo "agent-gh: git $git_sub の $t は使えません（コマンドを実行して push の名義の確認を外せるため）" >&2
+                  exit 2
+                fi
+              done
+              continue ;;
+            *)
+              # ls-remote は、clean な最初の位置引数の後ろを参照パターンとして読む（STOP_AT_NON_OPTION）
+              if [[ "$git_sub" == ls-remote && "$a" != -* ]]; then
+                break
+              fi
+              clean=0 ;;
+          esac
+        fi
         case "$a" in
-          --)
-            break ;; # オプション位置の `--` の後ろは位置引数（refspec・参照パターン）
-          -o|--push-option|--server-option)
-            # -o は別の引数を値として取る。次の引数は値で、オプションとしては検査しない。
-            skip_arg=1 ;;
           --?*)
             opt="${a%%=*}"
             for t in --upload-pack --receive-pack --exec; do
@@ -359,12 +382,6 @@ if [[ "${1:-}" == "git" ]]; then
               exit 2
             fi
             ;;
-          *)
-            # ls-remote は最初の位置引数の後ろを参照パターンとして読む（STOP_AT_NON_OPTION）
-            if [[ "$git_sub" == ls-remote ]]; then
-              break
-            fi
-            ;;
         esac
       done
       ;;
@@ -383,8 +400,9 @@ input="$(cat)"
 bad=()
 while read -r _lref loid _rref _roid; do
   [[ -n "${loid:-}" && ! "$loid" =~ ^0+$ ]] || continue # 削除（全ゼロ）は確かめるコミットが無い
-  # 代入の形で呼び、git log の失敗で止める（プロセス置換だと失敗が通ってしまう）
-  log="$(git log --format='%h%x09%an%x09%cn' "$loid" --not --remotes=origin)"
+  # 代入の形で呼び、git log の失敗で止める（プロセス置換だと失敗が通ってしまう）。
+  # --no-replace-objects: refs/replace で別のコミット（名義の違うもの）に見せ替えた履歴を読まないため
+  log="$(git --no-replace-objects log --format='%h%x09%an%x09%cn' "$loid" --not --remotes=origin)"
   while IFS=$'\t' read -r h an cn; do
     [[ -n "$h" ]] || continue
     [[ "$an" == "$PELWAY_AGENT_PUSH_NAME" && "$cn" == "$PELWAY_AGENT_PUSH_NAME" ]] || bad+=("$h author=$an committer=$cn")
@@ -396,7 +414,7 @@ if ((${#bad[@]})); then
   echo "agent-gh: $PELWAY_AGENT_PUSH_GUIDE" >&2
   exit 1
 fi
-orig="$(git config --show-scope --get-all core.hooksPath 2>/dev/null | awk -F'\t' '$1 != "command" {v = $2} END {print v}')"
+orig="$(git config --show-scope --get-all --type=path core.hooksPath 2>/dev/null | awk -F'\t' '$1 != "command" {v = $2} END {print v}')"
 orig="${orig:-$(git rev-parse --git-common-dir)/hooks}"
 if [[ -x "$orig/pre-push" ]]; then
   "$orig/pre-push" "$@" <<<"$input"
