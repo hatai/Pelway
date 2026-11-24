@@ -35,3 +35,15 @@
 5. 改善案: `scripts/agent-gh` の `push_targets` の上のコメントに「長いオプションの曖昧な省略形は git が弾くため列挙には含めない」と書き足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: d1eb45a2b05e6c0b8da7e2dc106ba36dbc2cd5c5
+
+1. 詰まった箇所: 省略形の列挙方式では補いきれない種類の読み違いが残った（否定形 `=` 連結・値を取る形）。個別パターンの列挙から、一意な接頭辞を判定する共有の道具（push_longopt）に変えた。
+2. 曖昧だった文: 「他の省略形・否定形も push 先を読み違える」（PR #655 claude レビュー nit・指揮役経由）
+3. 仮定と解釈: 「読み違える」を resign の要否・対象の決定に効く読み違いと解釈した。`--no-<名>` の否定は直前の指定を戻す（`-n --no-dry-run` は実 push → resign する。`-d --no-delete` は実 push、`--all --no-all` は fallback を戻す）。`=<値>` の連結は残りの引数を取らない。値を別の引数で取る形（`--push-option`・`--receive-pack`・`--exec`・`--recurse-submodules`）の一意な省略形は次の引数を値として消費する。一意になる最短の長さは隣の候補と分かれる字まで（`--rece` は receive-pack、`--recu` は recurse-submodules、`--rec` は曖昧で届かない）。
+4. 足りなかった情報・検証手段: `git push` の長いオプション一覧と各形の最小の一意な長さは、git の `--help` と実機の `git push --<形>` で確かめた（曖昧形は `ambiguous option` で弾かれる）。`scripts/agent-gh` は source できない（末尾で exit）ため、読み違いの実機確認は試験ハーネスの `push_run` で行った。
+5. 改善案: `push_targets` の頭のコメントに `--no-<名>` と `=<値>` の扱いを書き足した。試験の並びも否定形・値消費・fallback 省略形の順にまとめた。
+
+使ったスキル: implement-issue
