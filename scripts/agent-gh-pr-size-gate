@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# dev 役の push の pr-size ゲート（#642）。scripts/agent-gh の一時 pre-push フックから bash で呼ばれる。
+# 引数は pre-push フックと同じ（<リモート名> <接続先の URL>）、標準入力は Git が送る更新の行
+# （<ローカルの ref> <ローカルの sha> <リモートの ref> <リモートの sha>）。Git が引数と設定（upstream・push.default・
+# remote.<名>.push・pushRemote・--repo・insteadOf）を解決した後の送り先と sha を受けるため、push の引数は解釈しない。
+# 送る sha は Git がフックの前に決めたもので、フックの後に送られるのもその sha である（測った sha と送る sha が同じ）。
+# 0 以外で終わると、Git はこの接続先に何も送らない。複数の pushurl では接続先ごとに呼ばれる。
+# - refs/heads/ への更新（削除を除く）ごとに、送る sha の差分を scripts/pr-size.sh で測る。タグなどブランチ以外と削除は測らない
+# - base は push 元のローカルブランチの branch.<名前>.gh-merge-base があれば origin/<その値>、無ければ origin/main
+# - 上限を超えたら、接続先の URL が指す GitHub のリポジトリで例外を確かめる（pr_size_exception_ok）。
+#   URL が https://github.com/<owner>/<repo> の形でなければ、例外を確かめられないので止める
+# - 差分を測れないとき・GitHub への問い合わせに失敗したとき・入力の行を読めないときも止める
+set -euo pipefail
+
+# 一時ファイル（pr-size.sh の mktemp など）は一時フックの dir（絶対パス・agent-gh が終了時に消す）に作る。
+# 呼び出し元の TMPDIR が相対パスだと、worktree のルートで動くフックからは別の場所を指すため
+export TMPDIR="$PELWAY_AGENT_HOOKS_DIR"
+# 測定（pr-size.sh の git diff など）で refs/replace の置き換えを使わない。Git は転送では置き換えを使わず
+# 本体を送るため、置き換えを読むと、小さいコミットに見せ替えた上限超えのコミットを測らずに通してしまう
+export GIT_NO_REPLACE_OBJECTS=1
+url="${2:-}"
+pr_size="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pr-size.sh"
+
+# pr_size_exception_ok <push 先のブランチ名> <owner>/<repo>: pr-size 上限超えの例外を確かめる。
+# push 先リポジトリの開いた PR のうち、head のリポジトリとブランチが push 先と一致し、
+# pr-size-exception ラベルを持つものが閉じる Issue（closingIssuesReferences）に、作成者が hatai で
+# 本文の行頭が <!-- pr-size-exception --> のコメントがあれば 0（review-pr の手順 2 と同じ条件）。
+# head リポジトリは、同名ブランチを持つフォークの PR の承認を使わないため必ず照合する。
+# Issue は GitHub が返すリポジトリ付きの参照（url、無ければ repository + number）で取得し、
+# 別リポジトリの同番号 Issue の承認を使わない。例外が無ければ 1、GitHub への問い合わせに失敗したら 2。
+pr_size_exception_ok() {
+  local dst="$1" repo="$2" prs refs ref issue_json found
+  prs="$(gh pr list --repo "$repo" --head "$dst" --state open \
+    --json number,labels,headRefName,headRepository,headRepositoryOwner,closingIssuesReferences </dev/null)" || return 2
+  refs="$(jq -r --arg repo "${repo,,}" --arg dst "$dst" '
+    [.[] | select(.headRefName == $dst)
+        | select((.headRepository.nameWithOwner //
+            "\(.headRepositoryOwner.login // "")/\(.headRepository.name // "")")
+          | ascii_downcase == $repo)
+        | select([.labels[].name] | any(. == "pr-size-exception"))
+        | .closingIssuesReferences[]
+        | if .url then .url
+          elif .repository.nameWithOwner then "\(.repository.nameWithOwner)#\(.number)"
+          else empty end] | unique | .[]' <<<"$prs")" || return 2
+  [[ -n "$refs" ]] || return 1
+  while IFS= read -r ref; do
+    if [[ "$ref" == *'#'* ]]; then
+      issue_json="$(gh issue view "${ref#*#}" --repo "${ref%#*}" --json comments </dev/null)" || return 2
+    else
+      issue_json="$(gh issue view "$ref" --json comments </dev/null)" || return 2
+    fi
+    found="$(jq '[.comments[] | select(.author.login == "hatai"
+        and (.body | startswith("<!-- pr-size-exception -->")))] | length' <<<"$issue_json")" || return 2
+    ((found > 0)) && return 0
+  done <<<"$refs"
+  return 1
+}
+
+repo=""
+if [[ "${url%.git}" =~ ^https://github\.com/([^/]+)/([^/]+)$ ]]; then
+  repo="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+fi
+# 行を先に全部読む（測定や照会のコマンドに、残りの入力を読ませないため）
+mapfile -t lines
+for line in ${lines[@]+"${lines[@]}"}; do
+  [[ -n "$line" ]] || continue
+  read -r lref lsha rref rsha extra <<<"$line"
+  if [[ -z "${rsha:-}" || -n "${extra:-}" || ! "$lsha" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
+    echo "agent-gh: push を止めました: pre-push の入力の行を判定できません（$line）" >&2
+    exit 1
+  fi
+  [[ "$lsha" =~ ^0+$ || "$rref" != refs/heads/* ]] && continue # 削除とブランチ以外は測らない
+  case "$lref" in
+    HEAD) branch="$(git symbolic-ref -q --short HEAD || true)" ;;
+    refs/heads/*) branch="${lref#refs/heads/}" ;;
+    *) branch="" ;; # sha などブランチでない送り元は gh-merge-base を持たない
+  esac
+  # GIT_CONFIG は除く: git config だけがこの変数でファイルを差し替え、push は通常の設定を読むため
+  mb=""
+  [[ -z "$branch" ]] || mb="$(env -u GIT_CONFIG git config --get "branch.$branch.gh-merge-base" || true)"
+  base="origin/${mb:-main}"
+  mrc=0
+  mout="$(bash "$pr_size" --base "$base" --head "$lsha" 2>&1 </dev/null)" || mrc=$?
+  ((mrc == 0)) && continue
+  counts="$(sed -n 's/^pr-size: \(+[^（]*\)（.*$/\1/p' <<<"$mout" | head -n 1)"
+  # 上限超えは終了コード 1 と行数の行の両方があるときだけ（途中の失敗の 1 を上限超えと読まない）
+  if ((mrc != 1)) || [[ -z "$counts" ]]; then
+    echo "agent-gh: push を止めました: $rref へ送る $lsha の差分を測れません（base: $base）" >&2
+    printf '%s\n' "$mout" >&2
+    exit 1
+  fi
+  erc=1 # 接続先が GitHub のリポジトリでなければ、例外を確かめられない
+  if [[ -n "$repo" ]]; then
+    erc=0
+    pr_size_exception_ok "${rref#refs/heads/}" "$repo" || erc=$?
+    ((erc == 0)) && continue
+  fi
+  echo "agent-gh: push を止めました: $rref への push の差分が上限を超えています（$counts、base: $base、上限は追加 800 行・削除 2000 行）" >&2
+  if [[ -z "$repo" ]]; then
+    echo "agent-gh: 接続先（$url）が GitHub のリポジトリではないため、例外を確かめられません" >&2
+  elif ((erc == 2)); then
+    echo "agent-gh: 例外を確かめる GitHub への問い合わせに失敗しました（$repo）" >&2
+  fi
+  echo "agent-gh: 例外で通すには、push 先ブランチの開いた PR に pr-size-exception ラベルがあり、その PR が閉じる Issue に hatai の、行頭が <!-- pr-size-exception --> のコメントが必要です（例外を認めるのは指揮役だけです）" >&2
+  exit 1
+done
