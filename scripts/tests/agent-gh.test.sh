@@ -712,6 +712,10 @@ expect_rejected bundle-attached-then-blocked push -of "--exec=touch $ran; false"
 # （`git push -o -- --no-verify` は git 側でも --no-verify が効く）
 expect_rejected ddash-value-transport push -o -- "--receive-pack=touch $ran; false" origin HEAD
 expect_rejected ddash-value-no-verify push -o -- --no-verify origin HEAD
+# -o 以外の値を取るオプション（--jobs・-o の省略形 --push-opt など）の値は、検査の単純さのため
+# 意図的に区別しない（git は値として読むが、誤って値と見なしても拒否側に倒れるだけなので一律に走査する）
+expect_rejected value-jobs fetch --jobs --exec origin
+expect_rejected value-push-option-abbrev push --push-opt --exec origin HEAD
 [[ ! -e "$ran" ]] || failures+=("transport options: a command ran")
 
 # 値として消費される引数・参照パターン・`--` の後ろの位置引数は、git がオプションとして解釈しないため通す
@@ -724,14 +728,12 @@ expect_not_rejected() {
   [[ "$RC" != 2 ]] || failures+=("not_rejected ($label): exit $RC, want != 2: $OUT")
   [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("not_rejected ($label): remote ref changed")
 }
-# 別の引数を値として取るオプションの値はオプションとして解釈されない（-o の値は remote が受け付けず git が
-# 失敗するが、agent-gh の拒否ではない）
+# -o（push の --push-option・fetch・pull・ls-remote の --server-option）の値はオプションとして解釈されない
+# （-o の値は remote が受け付けず git が失敗するが、agent-gh の拒否ではない）
 expect_not_rejected value-o-exec push -o --exec origin HEAD
 expect_not_rejected value-o-no-verify push -o --no-verify origin HEAD
 expect_not_rejected value-o-attached push -o--exec origin HEAD
 expect_not_rejected value-push-option-eq push "--push-option=--exec" origin HEAD
-expect_not_rejected value-push-option-abbrev push --push-opt --exec origin HEAD
-expect_not_rejected value-jobs fetch --jobs --exec origin
 # ls-remote は最初の位置引数（リポジトリ名）の後ろを参照パターンとして読む（STOP_AT_NON_OPTION）
 expect_not_rejected pattern-exec ls-remote origin --exec
 expect_not_rejected pattern-u ls-remote origin -u
