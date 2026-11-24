@@ -833,7 +833,7 @@ container run --rm alpine echo hello   # hello 程度の smoke
   - 送れなかったら `WAKE failed <理由>`（理由は `exit=<終了コード>`・`exit=signal`・`spawn:`・`stdin:`・`wait:` のどれか）を 1 行残すだけで送り直さず、次の新しい知らせで改めて試みる。知らせは受信箱に残り、指揮役の巡回が読む。
   - `patrol-state.json` は sandbox の中のエージェントが書けるので、`inbox_offset` を書き換えれば重ねての起こしの抑止は外れる。逆に、受信箱の行数以内で実際より先の値に書き換えると、起こしたときにその値が基準に残り、補助記録を正しい値に戻しても、既読の位置がその値を超えるまで起こしは送られない（知らせは受信箱に残り、定期巡回が読む）。その場合も送られるのは、決まった文を、hatai が登録した 1 つのスレッドへ、知らせ 1 件につき最大 1 回だけである。
 - 送らずに試すには `cargo run -p pelway-agent-watch -- --once --dry-run`（新しいイベントの payload を標準出力に出す。状態ファイルは読むだけで書き換えず、受信箱にも書かず、起こしも送らない）。
-- 再起動のあとの自動起動: `pitchfork.toml` の `agent-watch` には `boot_start = true` を付けてあり、login 時に起動する pitchfork の supervisor（`pitchfork supervisor run --boot`）が agent-watch を起動する。起動時の supervisor は作業ディレクトリを持たず、読むのはユーザーの設定（`~/.config/pitchfork/config.toml`）と、その `[namespaces]` に登録されたプロジェクト（とその全 worktree）の `pitchfork.toml` だけなので、次の 2 つを PC 側で入れておく。どちらもリポジトリの外の設定で、hatai が OK のうえで手で行う。
+- 再起動のあとの自動起動: `pitchfork.toml` の `agent-watch` には `boot_start = true` を付けてあり、login 時に起動する pitchfork の supervisor（`pitchfork supervisor run --boot`）が agent-watch を起動する。起動時の supervisor は作業ディレクトリを持たず、読むのはユーザーの設定（`~/.config/pitchfork/config.toml`）と、その `[namespaces]` に登録されたプロジェクト（とその全 worktree）の `pitchfork.toml` だけなので、次の 3 つを PC 側で入れておく。3 つともリポジトリの外の設定で、hatai が OK のうえで手で行う。
   1. supervisor の login 時の起動を登録する: `pitchfork boot enable`（sudo なし。`~/.config/systemd/user/pitchfork.service` ができる）。`pitchfork boot status` が `Boot start is enabled` になれば済み。
   2. 本体 checkout を namespace として登録する: `~/.config/pitchfork/config.toml` に次を書く（`dir` は本体 checkout の絶対パス。`git worktree list` の 1 行目）。
 
@@ -841,6 +841,15 @@ container run --rm alpine echo hello   # hello 程度の smoke
      [namespaces.pelway]
      dir = "/home/<ユーザー>/repos/hatai/Pelway"
      ```
+
+  3. supervisor の PATH を足す: login 時に起動する supervisor（`~/.config/systemd/user/pitchfork.service`）の PATH には `git`・`gh`（`/home/linuxbrew/.linuxbrew/bin`）と `t3`（`~/.local/bin`）が無く、agent-watch は `git rev-parse: exit 127` で止まり、`agent-worktree-prune` も `git: command not found` で失敗する（[調査報告](worklogs/bugs/agent-watch-not-running/report.md)の根本原因の 4）。drop-in `~/.config/systemd/user/pitchfork.service.d/path.conf` を次の中身で作る。systemd の `Environment=` は `~` も `$HOME` も展開しないので、ホームは指定子 `%h` で書く。
+
+     ```ini
+     [Service]
+     Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+     ```
+
+     `systemctl --user daemon-reload` のあと `systemctl --user restart pitchfork.service` で適用する。入ったかの確かめ方: `systemctl --user show pitchfork.service -p Environment` の出力に、上の PATH（`%h` がホームのパスに展開されたもの）が出る。
 
   - 起動時に読まれるのは、本体 checkout にいまチェックアウトされているブランチの `pitchfork.toml` なので、本体 checkout は `boot_start = true` の入った main に置いておく。
   - 起動時の supervisor は各 worktree の同じ定義からも agent-watch の起動を試みるが、上の決まりで worktree からの起動は理由を 1 行出して終了コード 0 で終わる（pitchfork の再起動は起きない）。動き続けるのは本体 checkout の 1 つだけ。
