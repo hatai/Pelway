@@ -37,3 +37,17 @@
 5. 改善案: 週次の棚卸し Issue の本文を指揮役が毎回書く負担を減らすため、本文の形を `docs/agents/command-team-details.md` の「棚卸し Issue」に固定した（今回追加）。これで起票が機械的になる。
 
 使ったスキル: implement-issue、ja-text-communication
+
+## 実装者メモ（round 4）
+
+対象 head: `91d72b7193fef5af40682ba856b1852242454402`
+
+レビュー r3（CHANGES_REQUESTED、codex）の must-fix 1 件・[文書のずれ] nit 1 件と、指揮役経由の追加所見（claude の未投稿分から採用された a〜c）への対応。
+
+1. 詰まった箇所: r3 は 3 回目のレビュー結果に must-fix が残った形で、止まる条件の表に字義どおり当たる。指揮役が修正の方向（期限切れの検出を毎回の巡回での「判断の記録」との照合にする）まで定めて r3 対応を振ったため、その決定に従って修正に入った。
+2. 曖昧だった文: 「Issue をボードに載せ（`gh project item-add`。`ready-for-agent` が無いので自動では載らず、載っていなければ Status の導出が書けない）」（docs/agents/grokbot-runbook.md「4. 仕事の始め方」の「棚卸し担当を立てる」）— round 3 で自分が書いた文だが、指揮役環境では人間名義の `gh project` が実行できず、キューも `item-add` を扱わないため、そのままでは実行不能だった。
+3. 仮定と解釈: (a) 棚卸し Issue はボードに載せず、Status の導出とボード列移動による停止検知の対象外とし、追跡は `agent:working` ラベル・割り当ての記録・状態の行・報告 PR で行う案を採った（キューへの `item-add` 追加は `conductor-watch.sh` の変更を伴い、doc-only のこの PR の範囲を超えるため退けた）。(b) 題名は「その他」形式の `[棚卸し]` ではなく `[実装] #<N> 棚卸し <日付>` に変え、conductor-watch の題名→Issue 紐づけと実装スレッドの止まり検知にそのまま載る形にした。Assigned 行の役割は `role=implement` に戻し、棚卸し担当の識別はブランチの `-inventory-` と割り当ての記録の役割欄で行う。(c) open の棚卸し Issue が残っている間は再発票しないガードを起動条件に足した。
+4. 足りなかった情報・検証手段: ボード非掲載の `agent:working` 付き Issue が整合チェックで何を要求されるか。Status の導出は「各カード」に限る旨を runbook「ステータスの導出規則」の記述で確かめ、非掲載でも矛盾しないことを確認した。
+5. 改善案: 「棚卸し Issue」テンプレートの対象外は「`docs/` のうち `docs/worklogs/` 以外」と直したが、正本の範囲を `docs/` 一括りにする書き方は、成果物が `docs/` 配下にある他の Issue でも同じ衝突を起こしうる。skill `write-issue` の雛形に「成果物のパスは対象外から除く」旨を明記する。
+
+使ったスキル: implement-issue、ja-text-communication
