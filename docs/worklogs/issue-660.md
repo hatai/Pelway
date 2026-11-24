@@ -83,3 +83,15 @@
 5. 改善案: `docs/dev-environment.md` の同節に「untrusted の `mise.toml` でも shim がバージョンを解決する mise の版がある（2026.11.11 で観測）。shim の失敗を手順の前提にするときは版ごとに確かめる」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 8）
+
+対象 head: 3cecedce68d4292f8fdcd0fce5cc131bf0c5d865
+
+1. 詰まった箇所: なし。
+2. 曖昧だった文: 「`/tmp` が symlink でない本物のディレクトリであることを確かめる」（PR #661 の round 7 レビュー、codex must-fix）
+3. 仮定と解釈: codex は「`[ -k ]`・`[ -O ]` は symlink の参照先を、`stat -c %u`（-L なし）は symlink 自体を見るため、root 所有の symlink から別ユーザー所有の sticky dir への参照が通る」と指摘。`dir_chain_safe` が各階層に求める `[ -d ] && [ ! -L ]` と同じ条件を if の先頭に足し、失敗メッセージと理由の箇条も揃えた。claude の approve に残った [文書のずれ] nit（本文が untrusted 失敗を推定と書くのに対し実測は解決成功）も、705 行を実測（untrusted の `mise.toml` だけでは失敗せず、`mise.toml` 無しでは 'No version is set' で失敗）に合わせて直した。同じ symlink の指摘を持つ claude の nit は must-fix と同じ条件で解決。PATH に残った `/tmp/sshims` の名義を再利用する nit（round 7 claude の 2 つ目の nit）は印付き nit ではないため対象外。
+4. 足りなかった情報・検証手段: なし。symlink・存在しない・nobody 所有・自分所有 1777 の 4 経路を代替パスへの読み替えで実際に確かめた。
+5. 改善案: なし。
+
+使ったスキル: implement-issue
