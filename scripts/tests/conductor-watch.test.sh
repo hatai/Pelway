@@ -60,6 +60,9 @@ chmod +x "$ROOT/bin/sleep"
 mock_issues() { printf '%s\n' "$1" > "$MOCK/issues.json"; }
 mock_prs() { printf '%s\n' "$1" > "$MOCK/prs.json"; }
 mock_threads() { printf '%s\n' "${1:-[]}" > "$MOCK/threads.json"; }
+# スレッド一覧の取得は成功（0 本）にしておく。失敗した巡回では conductor が implement・review に
+# 戻らないため（Issue #651）、ここでのラベルと PR からの導出の試験が成り立たない。
+mock_threads
 
 # iss 11 OPEN agent:working needs-human … の形で Issue 1 件の JSON を作る
 iss() {

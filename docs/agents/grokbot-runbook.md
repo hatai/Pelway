@@ -165,7 +165,7 @@ conductor-watch は検知（`watch.log` へのイベント出力）だけを行�
 
 ### 巡回の報告の形
 
-hatai への報告は、変化があった回だけ出す。変化は、判断待ちの増減、指示を出した・settle した、マージした・止まりを見つけた、のどれか。変化の無い回は、巡回記録に 1 行（時刻、確認した件数、「変化なし」）だけ残す。
+hatai への報告は、変化があった回だけ出す。変化は、判断待ちの増減、指示を出した・settle した、マージした・止まりを見つけた、見張りがスレッド一覧の取得に失敗し始めた・回復した、のどれか。変化の無い回は、巡回記録に 1 行（時刻、確認した件数、「変化なし」）だけ残す。取得の失敗が続いている回は、変化が無くても巡回記録のその行に見張りが見えない状態である旨を添える。失敗が続いているかの判断は、その巡回で読んだ未読分ではなく、これまでに読んだ最後の `WATCHER` 行で行う（再通知は既定で 10 分間隔で、巡回の間隔（「指揮役の定期巡回（スケジュール起床）」）より長いため、失敗が続いていても未読分に `WATCHER` 行が無い回がある）。最後の `WATCHER` 行が `thread-list-failed`・`thread-list-still-failing` なら失敗が続いているとして記録に添え、`thread-list-recovered` が読めたら以降は添えない。
 
 報告を出すときは、先頭に必ず「判断待ち」の節を置く。節は「hatai 待ち」と「Grok Bot 待ち」に分け、1 件 1 行で、対象（Issue・PR・スレッドのリンク）、何の判断か、いつから待っているか、判断が出るまで止まっている作業を書く。0 件のときも「なし」と書く。
 
@@ -422,7 +422,7 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 | `updated_at` | その対象の最終更新時刻（ISO 8601） | 巡回のたびに書き換わる |
 | `labels` | その巡回で見た Issue のラベル | 巡回のたびに書き換わる。指揮役が書いた `grokbot` は、ラベルがこの値から変わらない限り巡回スクリプトに保たれる |
 
-巡回スクリプト `scripts/conductor-watch.sh` が巡回のたびに必須項目を更新する。実装スレッド（題名「[実装] #<N> …」）が completed・failed・interrupted・cancelled で止まっていて、受信箱にある最新の知らせの状態の行（skill `implement-issue` の「ターンの終わりの状態の行」）が `working` か無いときは、`implement`・`review` を `conductor` に書き換え、元の値と時刻を `PATROL #<N> waiting_on=conductor from=… reason=stopped-thread` の 1 行に残す。同じ止まりにつき 1 回だけ `STALL #<N>` の行も出す。状態の行が `waiting-review`・`waiting-checks` なら `waiting_on` は変えず、次回確認時刻を約 8 分後まで早める。`needs-human` の対象は書き換えない。見張りが動いていることは、10 分ごとの `HEARTBEAT` の行で分かる。記録と GitHub の実状態（Issue の状態とラベル、PR の Draft・レビュー・CI の状態）が食い違う場合は GitHub を正として記録を直す: Issue が閉じたら対象を記録から消し、ラベルと PR の状態から決まる `waiting_on` を毎巡回上書きし、`waiting_on` が変わった対象に `PATROL` 行を出力する。GitHub からの取得に失敗した巡回と、一覧の取得上限に達して打ち切られた巡回では記録を書き換えず、前回の記録を保持する。指揮役が GitHub に載せない判断の途中（例: レビューを始めるか迷っている）は、`waiting_on` が `conductor` の対象として記録の側にだけ残る。次の巡回で GitHub の状態が変われば、スクリプトが GitHub 側の値で上書きする。
+巡回スクリプト `scripts/conductor-watch.sh` が巡回のたびに必須項目を更新する。実装スレッド（題名「[実装] #<N> …」）が completed・failed・interrupted・cancelled で止まっていて、受信箱にある最新の知らせの状態の行（skill `implement-issue` の「ターンの終わりの状態の行」）が `working` か無いときは、`implement`・`review` を `conductor` に書き換え、元の値と時刻を `PATROL #<N> waiting_on=conductor from=… reason=stopped-thread` の 1 行に残す。同じ止まりにつき 1 回だけ `STALL #<N>` の行も出す。状態の行が `waiting-review`・`waiting-checks` なら `waiting_on` は変えず、次回確認時刻を約 8 分後まで早める。`needs-human` の対象は書き換えない。見張りが動いていることは、10 分ごとの `HEARTBEAT` の行で分かる。T3 のスレッド一覧（`t3 thread list`）の取得に失敗し始めると `WATCHER thread-list-failed`、失敗が続く間は 10 分ごとに `WATCHER thread-list-still-failing`、取得が戻ると `WATCHER thread-list-recovered` の行が出る。失敗している間の見張りはスレッドに基づく検知（`THREAD` 行・`STALL` 行・止まりによる `conductor` への書き換え）ができず、`threads.json` は最後に取得できた一覧のまま残り、`conductor` の対象を `implement`・`review` に戻さない。巡回はこの間を見張りの見えない状態として扱い、見張りの行に基づくスレッドの判断を保留して、「巡回の報告の形」に従って報告する。記録と GitHub の実状態（Issue の状態とラベル、PR の Draft・レビュー・CI の状態）が食い違う場合は GitHub を正として記録を直す: Issue が閉じたら対象を記録から消し、ラベルと PR の状態から決まる `waiting_on` を毎巡回上書きし（スレッド一覧の取得に失敗している間だけ、止まりを見失わないよう `conductor` の対象を `implement`・`review` に戻さない）、`waiting_on` が変わった対象に `PATROL` 行を出力する。GitHub からの取得に失敗した巡回と、一覧の取得上限に達して打ち切られた巡回では記録を書き換えず、前回の記録を保持する。指揮役が GitHub に載せない判断の途中（例: レビューを始めるか迷っている）は、`waiting_on` が `conductor` の対象として記録の側にだけ残る。次の巡回で GitHub の状態が変われば、スクリプトが GitHub 側の値で上書きする（スレッド一覧の取得に失敗している間だけ、止まりを見失わないよう `conductor` の対象を `implement`・`review` に戻さない）。
 
 ### 次回確認時刻（フォローアップタイマー）
 
