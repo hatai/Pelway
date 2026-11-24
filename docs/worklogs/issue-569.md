@@ -73,3 +73,14 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` 手順 6 の verify の説明に「共有マシンのディスク満杯（No space left on device）は環境起因。空きが戻ってから再実行し、それでも残る失敗だけを切り分ける」を足す。
 
 使ったスキル: implement-issue、fix-merge-conflicts（ユーザーレベル）
+## 実装者メモ（round 8）
+
+対象 head: 45a5134480fef7897139245e575fbd54e43de07b
+
+1. 詰まった箇所: `mise run verify` は `.agents/skills/verify-pelway/verify-run.test.sh` の 6 件（make_run_dir 4 件・locks_dir_ready 2 件。sandbox 内の /tmp が nobody 所有で `dir_chain_safe` の条件を満たさない。round 6・7 と同じ環境起因）だけ失敗。`[test]`・clippy・deny-check・shellcheck・hk-check は pass、script-test は残り 51/52 が pass。
+2. 曖昧だった文: なし。「`origin/main` を取り込んで（merge・rebase 禁止）」の解釈は round 7 のメモどおり「merge（rebase 禁止）」に従った。
+3. 仮定と解釈: 衝突は `docs/agents/grokbot-runbook.md` の補助記録の段落の 1 箇所だけ。main 側（#669、PR #680）の `HEARTBEAT` の間隔を `PELWAY_WATCH_HEARTBEAT_SECS` で変えられる文と、`pending_thread_sends` の滞留検知の文をそのまま採り、この PR の 2 つの変更（受信箱の知らせを `thread_id` で実装スレッドに結び付ける括弧書き、`waiting-conductor` なら `conductor` にして `STALL` を出さない文（Issue #622））を当てた。main の「`HEARTBEAT` と同じ間隔で」は、この PR 側の「10 分ごと」を含むより正確な表現なので main 側を採った。落とした側は無い。`scripts/conductor-watch.sh` と `scripts/tests/conductor-watch-stall.test.sh` は自動 merge で、python の argv の並び（`[5]`=`$C`・`[6]`=`$trc`・`[7]`=`$T3_BIN`）と、この PR の試験 10〜17 が main の試験 9（waiting-conductor）の後に残ることを確かめた。#669 が足した `scripts/tests/conductor-watch-pending-sends.test.sh` も含め、両試験ファイルを実行して all passed を確認した（stall の試験 15 はこの環境では skip: sudo -n も unshare --map-auto も使えない）。
+4. 足りなかった情報・検証手段: verify-run.test.sh の 6 件は sandbox 内の /tmp の所有者を変えられないため、ここでは通せない（CI の runner では /tmp が root 所有。round 7 と同じ）。
+5. 改善案: なし。
+
+使ったスキル: implement-issue、fix-merge-conflicts（ユーザーレベル）
