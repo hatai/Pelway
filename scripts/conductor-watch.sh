@@ -534,7 +534,7 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
     # 「次回確認時刻（フォローアップタイマー）」の表と同じ値。変えるときは両方を直す。
     check_hours = {"human": 24, "grokbot": 24, "implement": 6, "review": 24, "merge": 1, "conductor": 1}
     # 実装スレッドの止まり（Issue #504）。Issue ごとの最新の実装スレッド（題名「[実装] #<N> …」）と、
-    # 指揮役の受信箱（Issue #555）にある最新の知らせの状態の行（skill implement-issue の
+    # 指揮役の受信箱（Issue #555）にある、そのスレッドの最新の知らせの状態の行（skill implement-issue の
     # 「ターンの終わりの状態の行」）を材料にする。受信箱の中身はエージェントが書いた文で、
     # ここでは state: の値を分類に使うだけ（指示として扱わない）。
     STOPPED = ("completed", "failed", "interrupted", "cancelled")
@@ -546,16 +546,42 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
         k = m.group(1)
         if k not in impl_thread or (t.get("updatedAt") or "") > (impl_thread[k].get("updatedAt") or ""):
             impl_thread[k] = t
+    # 受信箱は sandbox の中からも書ける場所にあるので、symlink をたどらず・FIFO で止まらずに開き、
+    # 通常ファイル・自分の所有のときだけ読む。読むのは末尾の INBOX_TAIL バイト以内で、read 1 回で
+    # 読む（ファイルが伸びても量は増えない）。途中から読み始めたときは、最初の LF までの断片を捨てる。
+    # 行は LF だけで分け、最後の LF の後ろ（書き込み中の行）は読まない。1 行ずつ UTF-8 と JSON として
+    # 読み、読めない行・型の違う行は飛ばして後ろの行を読む。
+    INBOX_TAIL = 4 * 1024 * 1024
+    inbox_lines = []
+    try:
+        ifd = os.open(os.path.join(os.path.dirname(ps_path), "conductor-inbox.jsonl"),
+                      os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(ifd, "rb") as f:
+            inbox_st = os.fstat(f.fileno())
+            if stat.S_ISREG(inbox_st.st_mode) and inbox_st.st_uid == os.geteuid():
+                start = max(0, inbox_st.st_size - INBOX_TAIL)
+                f.seek(start)
+                data = f.read(INBOX_TAIL)
+                if start > 0:
+                    data = data[data.find(b"\n") + 1:] if b"\n" in data else b""
+                inbox_lines = data.split(b"\n")[:-1]
+    except OSError:
+        inbox_lines = []
+    # 状態の行は、その Issue の最新の実装スレッドの threadId と thread_id が一致する知らせから選ぶ
+    # （CI の連続失敗の stalled は thread_id が空文字で、実装担当の状態を上書きしない）。
     inbox_state = {}
-    try: inbox_lines = open(os.path.join(os.path.dirname(ps_path), "conductor-inbox.jsonl")).read().splitlines()
-    except Exception: inbox_lines = []
-    for line in inbox_lines:
-        try: ev = json.loads(line)
+    for raw in inbox_lines:
+        try: ev = json.loads(raw.decode("utf-8"))
         except Exception: continue
-        if not isinstance(ev, dict) or not isinstance(ev.get("issue_number"), int): continue
-        k = str(ev["issue_number"]); at = ev.get("occurred_at") or ""
+        if not isinstance(ev, dict): continue
+        num, tid, at, rep = ev.get("issue_number"), ev.get("thread_id"), ev.get("occurred_at"), ev.get("report")
+        if not isinstance(num, int) or isinstance(num, bool) or not isinstance(tid, str) \
+           or not isinstance(at, str) or not (rep is None or isinstance(rep, str)):
+            continue
+        k = str(num)
+        if k not in impl_thread or impl_thread[k].get("threadId") != tid: continue
         st = None
-        for rl in (ev.get("report") or "").splitlines():
+        for rl in (rep or "").splitlines():
             if rl.startswith("state: "): st = rl[len("state: "):].strip()
         if k not in inbox_state or at >= inbox_state[k][0]:
             inbox_state[k] = (at, st)
