@@ -700,13 +700,48 @@ expect_rejected ls-remote-upload-pack ls-remote "--upload-pack=touch $ran; false
 expect_rejected ls-remote-u ls-remote -u "touch $ran; false" origin
 expect_rejected ls-remote-u-attached ls-remote "-utouch $ran" origin
 expect_rejected ls-remote-u-bundled ls-remote -qu "touch $ran; false" origin
-# `--` で走査は止めない: `--` 自身が、値を別の引数で取るオプション（push の -o/--push-option など）の
-# 値になりうるため（実測: git commit -m -- --no-verify はメッセージ `--` のコミットを作る）、
-# `--` の後ろに並べても検査を通らないことを確かめる（round 9。オプションの終端は拒否の境界に使えない）。
-expect_rejected ddash-transport fetch origin -- "--upload-pack=touch $ran; false"
+# ls-remote は --exec も --upload-pack の別名（builtin/ls-remote.c の隠れたオプション）なので、位置引数の前では拒否する
+expect_rejected ls-remote-exec ls-remote "--exec=touch $ran; false" origin
+# fetch・pull・push は位置引数の後ろでも `-` の引数をオプションとして解釈する（parse-options の既定）ため、
+# リポジトリ名の後ろの転送オプションも拒否する（実測: git fetch <repo> --upload-pack <path> は <path> を実行する）
+expect_rejected fetch-after-positional fetch origin "--upload-pack=touch $ran; false"
+expect_rejected push-after-positional push origin "--exec=touch $ran; false" HEAD
+# 短いオプションの連結形（-of は -o の値が "f"）のあとに続く引数は、オプションの位置のまま
+expect_rejected bundle-attached-then-blocked push -of "--exec=touch $ran; false" origin HEAD
+# 別の引数を値として取るオプションが `--` を値として消費したときは、その後ろの引数はオプションの位置のまま
+# （`git push -o -- --no-verify` は git 側でも --no-verify が効く）
 expect_rejected ddash-value-transport push -o -- "--receive-pack=touch $ran; false" origin HEAD
 expect_rejected ddash-value-no-verify push -o -- --no-verify origin HEAD
 [[ ! -e "$ran" ]] || failures+=("transport options: a command ran")
+
+# 値として消費される引数・参照パターン・`--` の後ろの位置引数は、git がオプションとして解釈しないため通す
+# （codex review round 10 must-fix）。agent-gh が終了コード 2 を返さないことと、コマンドが実行されないことを確かめる
+expect_not_rejected() {
+  local label="$1"
+  shift
+  push_run "$label" dev git "$@"
+  # 終了コード 2 が agent-gh の引数の拒否（pre-push フックの名義確認は 1。git 自身は 2 を返さない）
+  [[ "$RC" != 2 ]] || failures+=("not_rejected ($label): exit $RC, want != 2: $OUT")
+  [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("not_rejected ($label): remote ref changed")
+}
+# 別の引数を値として取るオプションの値はオプションとして解釈されない（-o の値は remote が受け付けず git が
+# 失敗するが、agent-gh の拒否ではない）
+expect_not_rejected value-o-exec push -o --exec origin HEAD
+expect_not_rejected value-o-no-verify push -o --no-verify origin HEAD
+expect_not_rejected value-o-attached push -o--exec origin HEAD
+expect_not_rejected value-push-option-eq push "--push-option=--exec" origin HEAD
+expect_not_rejected value-push-option-abbrev push --push-opt --exec origin HEAD
+expect_not_rejected value-jobs fetch --jobs --exec origin
+# ls-remote は最初の位置引数（リポジトリ名）の後ろを参照パターンとして読む（STOP_AT_NON_OPTION）
+expect_not_rejected pattern-exec ls-remote origin --exec
+expect_not_rejected pattern-u ls-remote origin -u
+expect_not_rejected pattern-upload-pack ls-remote origin "--upload-pack=x"
+expect_not_rejected pattern-server-opt ls-remote -o --exec origin
+# オプション位置の `--` の後ろは位置引数（refspec・参照パターン）で、オプションとしては解釈されない
+expect_not_rejected ddash-refspec-fetch fetch origin -- "--upload-pack=touch $ran; false"
+expect_not_rejected ddash-refspec-push push origin -- --exec
+expect_not_rejected ddash-repo push -- "--receive-pack=touch $ran; false"
+[[ ! -e "$ran" ]] || failures+=("transport passthrough: a command ran")
 
 # 検査対象外のサブコマンドでは、`--` の後ろに転送オプションと同じ名前のファイルがあっても通す
 # （`git add -- --exec` のようなパスの指定を拒否しない。codex review round 9 must-fix）。

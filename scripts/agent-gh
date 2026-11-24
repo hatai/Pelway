@@ -302,45 +302,113 @@ if [[ "${1:-}" == "git" ]]; then
     echo "agent-gh: git のサブコマンド（$git_sub）は使えません。使えるもの: ${git_allowed_subcommands[*]}" >&2
     exit 2
   fi
-  # 転送の相手側で実行するコマンドを指定するオプション（--upload-pack・--receive-pack・--exec）は、ローカルの
-  # remote ではコマンドをその場で実行するため拒否する。git が受け付ける省略形（3 文字以上の前方一致）も含める。
-  # このオプションを解釈するサブコマンド（fetch・pull・push・ls-remote）にだけ掛ける。ほかのサブコマンド
-  # （add・status・diff・restore など）の `-` で始まる引数は、git がパス名として扱うものを拒否しない
-  # （`git add -- --exec` のようなファイルの指定）。
-  # `--` で走査を止めない: 値を別の引数で取るオプションは `--` を値として取り込むため（実測: git commit
-  # -m -- --no-verify はメッセージが `--` のコミットを作る）、`git push -o -- --no-verify` のような形は
-  # `--` の後ろでもオプションとして解釈される。これらのサブコマンドの位置引数はリポジトリ名と refspec
-  # だけで、`-` で始まる正当な指定は無い（`--` の後ろの `-` で始まる引数は git 側でも refspec として
-  # 受理できない）。
+  # 転送の相手側で実行するコマンドを指定するオプション（--upload-pack・--receive-pack・--exec。ls-remote では
+  # --exec が --upload-pack の別名になっている）と、push の --no-verify（pre-push フックを飛ばす）は、ローカルの
+  # remote ではその場で効くため拒否する。git が受け付ける省略形（転送オプションは 3 文字以上の前方一致、
+  # --no-verify は --no-veri 以上）も含める。この検査は、このオプションを解釈するサブコマンド
+  # （fetch・pull・push・ls-remote）にだけ掛ける。ほかのサブコマンド（add・status・diff・restore など）の
+  # `-` で始まる引数は、git がパス名として扱うものを拒否しない（`git add -- --exec` のようなファイルの指定）。
+  #
+  # 走査は、git が引数をオプションとして解釈する位置だけを見る（builtin のオプション定義と parse-options と
+  # 同じ考え方）:
+  # - 別の引数を値として取るオプション（下の val_longs・val_shorts。`git <サブコマンド> -h` で <値> の形のもの）は、
+  #   次の引数を値として消費し、その引数はオプションとして解釈されない。`git push -o --exec` の --exec は -o
+  #   （push-option）の値で remote のフックに送られる文字列、`git fetch --jobs --exec` の --exec は jobs の値。
+  #   `=` で結んだ形（--push-option=--exec）や短いオプションの連結（-o--exec）は値を自身で持ち、次の引数は
+  #   消費しない。[=値] の形の省略値を持つオプション（pull の -j・push の --signed など）と --no-<名前> の
+  #   否定形も、次の引数を消費しない。
+  # - ls-remote は最初の位置引数の後ろをリポジトリ名と参照パターンとして読む（builtin/ls-remote.c の
+  #   PARSE_OPT_STOP_AT_NON_OPTION）ため、`-` で始まらない引数が来た時点で走査を終える（`git ls-remote
+  #   origin --exec` の --exec は参照パターンとして扱われる）。fetch・pull・push は parse-options の既定で、
+  #   位置引数の後ろでも `-` の引数をオプションとして解釈する（実測: git fetch <repo> --upload-pack <path>
+  #   は <path> を実行する）ため、走査を止めない。
+  # - `--` は、オプションとして解釈される位置に置かれたときだけ解釈を終える（後ろは位置引数で、転送
+  #   オプションや --no-verify としては効かない）。値として消費された `--`（`git push -o --` の `--`）は
+  #   終端にならず、その後ろの引数はオプションとして解釈される。
   case "$git_sub" in
     fetch|pull|push|ls-remote)
+      case "$git_sub" in
+        fetch)
+          val_longs=(upload-pack jobs depth deepen shallow-since shallow-exclude refmap server-option negotiation-restrict negotiation-tip negotiation-include filter)
+          val_shorts=(o j) ;;
+        pull)
+          val_longs=(cleanup strategy strategy-option upload-pack depth deepen shallow-since shallow-exclude refmap server-option negotiation-restrict negotiation-tip negotiation-include)
+          val_shorts=(o s X) ;;
+        push)
+          val_longs=(repo push-option receive-pack exec recurse-submodules)
+          val_shorts=(o) ;;
+        ls-remote)
+          val_longs=(upload-pack exec sort server-option)
+          val_shorts=(o) ;;
+      esac
+      skip_arg=0
       for a in "${@:2}"; do
-        opt="${a%%=*}"
-        # ls-remote の -u は --upload-pack の短い形（分離・連結・まとめた形のどれでも拒否する）。
-        if [[ "$git_sub" == ls-remote && "$a" =~ ^-[^-]*u ]]; then
-          echo "agent-gh: git ls-remote の -u は使えません（コマンドを実行して push の名義の確認を外せるため）" >&2
-          exit 2
+        if ((skip_arg)); then
+          skip_arg=0
+          continue
         fi
-        if [[ "$opt" == --?* ]]; then
-          for t in --upload-pack --receive-pack --exec; do
-            if [[ "$t" == "$opt"* ]]; then
-              echo "agent-gh: git $git_sub の $t は使えません（コマンドを実行して push の名義の確認を外せるため）" >&2
+        case "$a" in
+          --)
+            break ;; # オプション位置の `--` の後ろは位置引数（refspec・参照パターン）
+          --?*)
+            opt="${a%%=*}"
+            for t in --upload-pack --receive-pack --exec; do
+              if [[ "$t" == "$opt"* ]]; then
+                echo "agent-gh: git $git_sub の $t は使えません（コマンドを実行して push の名義の確認を外せるため）" >&2
+                exit 2
+              fi
+            done
+            if [[ "$git_sub" == push ]] && ((${#a} >= 9)) && [[ "--no-verify" == "$a"* ]]; then
+              echo "agent-gh: push の --no-verify は使えません（push の名義の確認を外せないため）" >&2
               exit 2
             fi
-          done
-        fi
+            # 別の引数を値として取る長いオプション（省略形を含む前方一致）なら、次の引数は値
+            if [[ "$a" != *=* ]]; then
+              for v in "${val_longs[@]}"; do
+                if [[ "$v" == "${a#--}"* ]]; then
+                  skip_arg=1
+                  break
+                fi
+              done
+            fi
+            ;;
+          -*)
+            # 短いオプションはまとめた形を先頭から読み、値を取るもの（val_shorts）が来たら、
+            # 残りがその値（なければ次の引数が値）。
+            rest="${a#-}"
+            for ((i = 0; i < ${#rest}; i++)); do
+              c="${rest:i:1}"
+              # ls-remote の -u は --upload-pack の短い形（連結・まとめた形でも拒否する）。
+              if [[ "$git_sub" == ls-remote && "$c" == u ]]; then
+                echo "agent-gh: git ls-remote の -u は使えません（コマンドを実行して push の名義の確認を外せるため）" >&2
+                exit 2
+              fi
+              value_short=0
+              for v in "${val_shorts[@]}"; do
+                if [[ "$c" == "$v" ]]; then
+                  value_short=1
+                  break
+                fi
+              done
+              if ((value_short)); then
+                if ((i == ${#rest} - 1)); then
+                  skip_arg=1
+                fi
+                break
+              fi
+            done
+            ;;
+          *)
+            # ls-remote は最初の位置引数の後ろを参照パターンとして読む（STOP_AT_NON_OPTION）
+            if [[ "$git_sub" == ls-remote ]]; then
+              break
+            fi
+            ;;
+        esac
       done
       ;;
   esac
   if [[ "$git_sub" == push ]]; then
-    for a in "${@:2}"; do
-      # --no-verify と、git が受け付けるその省略形（--no-veri 以上）は pre-push フックを飛ばすため拒否する。
-      # 走査は `--` で止めない（上の転送オプションの検査と同じ理由）。
-      if ((${#a} >= 9)) && [[ "--no-verify" == "$a"* ]]; then
-        echo "agent-gh: push の --no-verify は使えません（push の名義の確認を外せないため）" >&2
-        exit 2
-      fi
-    done
     # 範囲は push する ref から辿れて origin の追跡 ref から辿れないコミット。author か committer の名前が
     # 役割の App の名義でなければ push しない。フックは実行時に一時ディレクトリへ作る（リポジトリに
     # 実行ファイルを置くと agent-gh-resign で署名できないため）。元のフックの場所に pre-push があれば続けて呼ぶ。
