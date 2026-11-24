@@ -1,5 +1,4 @@
 # Issue #602 の作業ログ
-
 ## 実装者メモ（round 1）
 対象 head: d7abbed28d7e8a7935df9f8fe5ea40fc4f1c1423
 
@@ -11,7 +10,6 @@
 5. 改善案: `docs/agents/triage-labels.md` の `needs-human` の行の Who adds に「conductor-watch, when `needs-decision` stays 15 minutes and no conductor is running」を足す（#603 で `needs-decision` の行を足すときに一緒に）。
 
 使ったスキル: `implement-issue`、`write-pull-request`
-
 ## 実装者メモ（round 2）
 対象 head: 97557b9e69dc860c3d777411d48b4c393e7ac82a
 
@@ -22,7 +20,6 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「3. ブランチを用意する」に「修正依頼のブランチが別の worktree に checkout されたままなら、別名のローカルブランチに `--track origin/<ブランチ>` を付け、`scripts/agent-gh dev git push origin HEAD:<ブランチ>` で push する」を足す。
 
 使ったスキル: `implement-issue`、`write-pull-request`
-
 ## 実装者メモ（round 3）
 対象 head: 693e27801afca34980b8c039cb8109519215e9f5
 
@@ -34,7 +31,6 @@
 5. 改善案: `scripts/conductor-watch.sh` の「ボード Status 更新キュー」の第 1 段に「名前が `[A-Za-z0-9._-]+\.json` に合わない要求ファイルは、名前を行に出さずに `bad-name` で退ける」を足す（エージェントが決められるファイル名で `watch.log` に行を作り込めないようにする。PR #610 の round 2 の codex の security-review の指摘）。
 
 使ったスキル: `implement-issue`、`write-pull-request`、pstack の `poteto-mode`（principle-make-operations-idempotent・principle-laziness-protocol・principle-model-the-domain）
-
 ## 実装者メモ（round 4）
 対象 head: f2bddb26dbecdc20f5de4c8f52a7717d9bd04043
 
@@ -45,7 +41,6 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の表の 3 回目のレビューの行に「hatai が上限を外したときは、その指示を hatai の名義で Issue にコメントしてもらってから修正 round に入る」を足す（この PR では上限を外した指示が `pelway-dev[bot]` のコメントにしか残っていない）。
 
 使ったスキル: `implement-issue`、`write-pull-request`、pstack の `poteto-mode`（principle-make-operations-idempotent・principle-model-the-domain・principle-separate-before-serializing-shared-state）
-
 ## 実装者メモ（round 5）
 対象 head: 9d87638e365b0085df7bc24ac569847384239075
 
@@ -56,7 +51,6 @@
 5. 改善案: `scripts/tests/conductor-watch-decision.test.sh` のモックに `fail-comment-lost`（コメントは書けるが応答が失われる）を足す。今の `fail-comment` は書けない場合だけで、コメントの重複抑止の再試行（書いたが応答が無い → 次の周で照合して書き直さない）は試せていない。
 
 使ったスキル: `implement-issue`
-
 ## 実装者メモ（round 6）
 対象 head: 0d493031
 
@@ -67,7 +61,6 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「6. 検査してコミットし、行数を確かめてから push する」の pr-size の項に「実装者メモのコミットも数えられる。実装コミットの後の値に、この round のメモの行数を足しても上限内かを確かめてから push する」を足す。
 
 使ったスキル: `implement-issue`、pstack の `poteto-mode`（principle-laziness-protocol・principle-minimize-reader-load）
-
 ## 実装者メモ（round 7）
 対象 head: 0eaebb166fa0eefb684bc321745917f623b658d9
 
@@ -78,7 +71,6 @@
 5. 改善案: `scripts/tests/conductor-watch-decision.test.sh` の `issue_with` は `labeled_at` より前の `needs-human` の `unlabeled` を必ず仕込むので、events だけを根拠にした実装は全員が付いていないと誤認する。差し込みの `ev` に actor を付けられるようにすると、「自分の名義の付与か」の分岐もそのまま試せる。
 
 使ったスキル: `implement-issue`
-
 ## 実装者メモ（round 8）
 対象 head: 1e4748c7847fd096a85bc62a883058f3c096e535
 
@@ -89,7 +81,6 @@
 5. 改善案: `scripts/agent-gh-resign` の「2.」で、範囲の下限に push 前のリモートの先頭（`git push` の前の `refs/remotes/<remote>/<branch>`）も加える（push 前から remote にある署名なしのマージを範囲に入れない）。
 
 使ったスキル: `implement-issue`
-
 ## 実装者メモ（round 9）
 対象 head: 72e5fd81d1ad6a4cf65f00bea8c3bddc91afa1aa
 
@@ -100,7 +91,6 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の格上げの項は 1 段落が長く、段・照合・指揮役がいる周の扱いが同じ段落に混ざっている。#603 で runbook を直すときに、段ごとの小見出しに分ける。
 
 使ったスキル: `implement-issue`
-
 ## 実装者メモ（round 10）
 対象 head: 71f35e8d4814b1878ed4c55e0b97630878b5c4dc
 
@@ -111,7 +101,6 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の pr-size の行に「上限まで 20 行を切ったら、次の round のメモの行数を先に引いて余りを見積もる」を足す。
 
 使ったスキル: `implement-issue`
-
 ## 実装者メモ（round 11）
 対象 head: 04a8380bbd8aa88edae4dbc6394d77557a50ddf8
 
@@ -141,4 +130,12 @@
 4. 足りなかった情報・検証手段: なし。
 5. 改善案: なし。
 
+使ったスキル: `implement-issue`
+## 実装者メモ（round 14）
+対象 head: b275f28d8b80e020df192a6a1d77c73e35582776
+1. 詰まった箇所: 手順 9「修正依頼」: Issue の worktree がこのセッションからは読み取り専用で merge できず、自分の worktree 内に一時 worktree（`.wt-602-merge`・`agent/602-decision-escalation-r9`）を立てて解消した。取り込みの間に main が 2 度進み（PR #683・#482）、2 回目の merge で runbook が再衝突した
+2. 曖昧だった文: 「main の取り込みは merge で行い、各 hunk を解消する前に、両側の変更の意図を一次情報（コミット・PR・Issue）まで遡って確かめる」（`.agents/skills/implement-issue/SKILL.md` の「修正依頼（CONFLICTING の解消など、レビュー結果を介さない修正指示）のとき」）。python の引数 `$C` と `$T3_BIN` が同じ `sys.argv[5]` を使う衝突の解消法は書かれていない
+3. 仮定と解釈: 引数は `"$C" "$T3_BIN"` の順で足し、main の shared-worktree 検知の `sys.argv[5]` を `sys.argv[6]` にずらした（PR 側の `registered_thread` は据え置き）。runbook の裏付け検査は、main の例外 PR 規定と、こちらの grokbot-decision 目印の規定を併記した
+4. 足りなかった情報・検証手段: `.agents/skills/verify-pelway/verify-run.test.sh` が sandbox 下で `make_run_dir`・`locks_dir_ready` 系 6 件失敗。main の同一ファイルでも同じ失敗が再現するため環境起因として進めた
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「修正依頼」の項に「Issue の worktree が読み取り専用のときは自分の worktree 内に一時 worktree を立てて解消する」を足す
 使ったスキル: `implement-issue`
