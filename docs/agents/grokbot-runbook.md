@@ -205,6 +205,39 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 
 ## 4. 仕事の始め方
 
+### MCP の `t3_thread_launch` と `t3_thread_send` の引数
+
+実装・レビュー・調査のスレッドを MCP の `t3_thread_launch` で立てるときの引数の例。`title` は必須で、省略すると最初の指示の 1 行目がタイトルになる（スレッド名の形式は skill `command-team` の「スレッド名」）。`modelSelection.instanceId` にはこの手順書の provider の名前（`opencode`・`acpRegistry_devin`・`codex_review`・`claude_review`・`devin_review`）、`runtimeMode` には `approval-required`・`auto-accept-edits`・`auto`・`full-access` のどれか、`workspaceStrategy.type` には `root`・`existing_worktree`・`worktree` のどれかを入れる。effort は `modelSelection.options` に入れる。
+
+```json
+{
+  "title": "[実装] #<N> <要約>",
+  "projectId": "e73c7c04-fd96-49c9-a3d0-71aa74f9ee3f",
+  "modelSelection": {
+    "instanceId": "acpRegistry_devin",
+    "model": "swe-2-high",
+    "options": {"mode": "smart"}
+  },
+  "runtimeMode": "auto-accept-edits",
+  "workspaceStrategy": {"type": "worktree", "baseRef": "main"},
+  "message": "Issue #<N> を実装する。skill implement-issue に従う。\nAssigned: role=implement agent=devin model=swe-2-high effort=<medium|high|max>",
+  "clientRequestId": "<新しく作る一意の ID>"
+}
+```
+
+動いているスレッドに指示を送る `t3_thread_send` の引数の例（`threadId` と `message` は必須。`mode` は `auto`・`queue`・`steer`・`restart` のどれかで、実行中のスレッドへの新しい指示には `queue` を使う）:
+
+```json
+{
+  "threadId": "<対象スレッドの ID>",
+  "message": "続きをやり直す",
+  "mode": "queue",
+  "clientRequestId": "<新しく作る一意の ID>"
+}
+```
+
+`delegate_task` の `task`・`target` の形を `t3_thread_launch` に、`text` を `t3_thread_send` に使わない。`delegate_task` の引数（`task`・`target.providerInstanceId`・`target.model`・`target.options`）は子タスクを委託するツール専用の形で、`t3_thread_launch`・`t3_thread_send` にそのまま渡すと T3 が `-32602`（引数の誤り）を返す。`t3_thread_launch` に `task`・`target` は無く `title` が必須、`t3_thread_send` に `text` は無く `threadId`・`message` が必須。
+
 ### 実装を始める
 
 ボードの Todo に `ready-for-agent` の付いたカードがあり、実装の枠が空いているとき（割り当ての共通前段は「2. ボードと巡回」の「割り当て・停止・再開」）。
@@ -327,6 +360,12 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 Issue に `needs-human` を付けた時点で、巡回スクリプトが補助記録の次回確認時刻を目安（24 時間）で設定する。PR だけに付けたときはフォローアップタイマーの対象外（補助記録は開いた Issue から毎巡回作り直されるので、`next_check_at` を手で書き換えられるのも Issue に紐づく待ちだけ）なので、指揮役の作業ログの判断の記録に「人間の判断待ち」として残し、巡回でその PR の `needs-human` が外れたかを見る。人間の判断に期限を付けたいときは、その時点で補助記録の `next_check_at` を書き換える（「10. 巡回状態の補助記録」の「次回確認時刻（フォローアップタイマー）」）。
 
 その Issue のスレッドにはそれ以上送らない。人間が `needs-human` を外したら、指示に従って再開する。
+
+### `Failed to connect to MCP server 't3-code'` が出たとき
+
+Devin CLI は、T3 が引数の検証で返す `-32602` を接続の失敗として扱い、つなぎ直して同じ失敗を繰り返したあと、モデルには `Failed to connect to MCP server 't3-code'. Please try again.` だけを返す。このメッセージが出ても接続は切れていないことがあり、本当のエラーは Devin CLI のログに残っている（Issue #687 で引数の誤りと分かった例）。
+
+`Failed to connect to MCP server 't3-code'` が出たら、まず `~/.local/share/devin/cli/logs/` の最新のログで `Invalid parameters for tool` を探し、本当のエラー（引数の誤りかどうか）を確かめてから、接続の障害として扱うかを決める。引数の誤りなら「4. 仕事の始め方」の「MCP の `t3_thread_launch` と `t3_thread_send` の引数」の例に合わせて直す（`delegate_task` の形の流用が多い）。接続の障害と分かったときだけ、エスカレーションの手順に進む。
 
 ### 実装担当が止まった（`stopped:`）
 
