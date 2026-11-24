@@ -19,36 +19,66 @@ skill `command-team` から、特定の条件でだけ必要になる詳細を�
   - 残す: 理由（例: 依存する PR のマージ待ち）と次の判断期限を注記する
   - 作り直す: 実装担当に新しいブランチ・PR で作り直させる
   - 閉じる: PR を閉じて Issue を `ready-for-human` か `wontfix` で整理する（`docs/agents/triage-labels.md`）
-  - 「作り直す」「閉じる」の操作は棚卸し担当も行わず、人間に依頼する（PR に依頼のコメントを書く。人間への知らせは棚卸し担当には経路が無いため、報告を受けた指揮役が部屋で行う。PR のクローズは指揮役の「しないこと」（runbook 1）にあり、棚卸し担当も同じ扱いとする）
+  - 「作り直す」「閉じる」の操作は棚卸し担当も指揮役も行わず、人間に依頼する。棚卸し担当は対象の PR にコメントを書かず、提案は報告ファイルにだけ書く（第三者も書ける PR のコメントを読んで書いた文を、別の PR のコメントに載せないため）。人間への知らせは棚卸し担当には経路が無いため、報告を受けた指揮役が部屋で行い、人間が名指しした PR への記録のコメント（`docs/agents/human-actions.md` H26 の条件）も指揮役が書く。PR のクローズは指揮役の「しないこと」（runbook 1）にあり、棚卸し担当も同じ扱いとする
 - 判断期限を過ぎても判断が残っている PR は、報告の期限切れの一覧に書く。指揮役が受け取り、`docs/agents/grokbot-runbook.md` の「7. エスカレーションと停滞」に回す（次回の棚卸しを待たない）。
 - 7 日という期間は目安であり、運用実績で見直す。
 
 ### 成果の出し方
 
-棚卸し担当は main から作った自分の worktree でしか書き込めず、指揮役の作業ログ（巡回記録）には書けない。成果は次の 2 ファイルに書き、それだけを含む報告用 Draft PR で指揮役に渡す。
+棚卸し担当は main から作った自分の worktree でしか書き込めず、指揮役の作業ログ（巡回記録）には書けない。成果は次の 2 ファイルに書き、棚卸し Issue の主 PR（報告 PR）で指揮役に渡す。
 
 - `docs/worklogs/<日付>-inventory.md`: 対象にした PR ごとの判断案・理由・判断期限、期限切れの判断の一覧
 - `docs/worklogs/<日付>-curation.md`: 定期キュレーションの候補リスト（`docs/agents/grokbot-runbook.md` の「12. 作業ログの定期キュレーション」の出力）
 
-1. 起動時に `--branch` で指定されたブランチに 2 ファイルをコミットし、報告用 Draft PR を作る（`scripts/agent-gh dev pr create --draft`。本文に割り当ての行を `Implementer:` の行として写す）
-2. 実装スレッドと同じ流れでレビューを回す（skill `implement-issue` の手順 8〜9。委託記録コメント・`[文書のずれ]` の nit の扱い・Approve の確認も同じ）
-3. Approve されたら Draft を解除し（`scripts/agent-gh dev pr ready`）、終わりの報告を出す。報告は指揮役の巡回と `finished` の通知で拾われる
+棚卸し担当は棚卸し Issue の実装担当として、skill `implement-issue` の手順どおりに動く（Issue の占有・実装者メモ・Draft PR・レビューの委託と `[文書のずれ]` の nit の扱い・Approve の確認・Draft の解除・終わりの報告）。報告 PR の本文には `Closes #<棚卸し Issue の番号>` と、割り当ての行から写した `Implementer:` の行を書く。終わりの報告は指揮役の巡回と `finished` の通知で拾われる。
 
-終わりの報告の形（実装スレッドの状態の行と同じ規則。巡回はこの行だけを読む）:
+### 棚卸し Issue
 
-```
-inventory: done（棚卸し対象 <n> 件、うち期限切れ <m> 件・キュレーション候補 <k> 件）
-pr: <報告 PR の URL>（head <SHA>）
-ready: done
-state: done
-```
+指揮役が棚卸し担当を立てる前に起票する、その週の棚卸しの Issue の形（起票は skill `write-issue` に従う。`ready-for-agent` は付けない。人間の着手の合図を待たない定期作業のため）。立て方は `docs/agents/grokbot-runbook.md` の「棚卸し担当を立てる」。
 
-止まったときは次の形。止まる条件は skill `implement-issue` に準じるが、Issue が無いのでコメントの代わりに返答に理由を書く（`needs-human` は指揮役が巡回で付ける）:
+タイトル: `週次の棚卸し <YYYY-MM-DD>`
 
-```
-inventory: stopped <止まった理由 1 行>
-state: stopped
-```
+本文（`<日付>` は実施日）:
+
+````markdown
+### 目的
+
+開いている PR の週次の棚卸しと、作業ログの定期キュレーションを行い、成果を報告 PR で指揮役に渡す。
+
+### 背景・前提
+
+週 1 回の定期作業。前回の棚卸しから 7 日以上経ったため指揮役が起票した。
+
+### 受け入れ条件
+
+- `docs/worklogs/<日付>-inventory.md` に、対象にした PR ごとの判断案・理由・判断期限と、期限切れの判断の一覧がある → 該当ファイルを読む
+- `docs/worklogs/<日付>-curation.md` にキュレーションの候補リストがある → 該当ファイルを読む
+- 上の 2 ファイルとこの Issue の実装者メモ（`docs/worklogs/issue-<この Issue の番号>.md`）だけを含む報告 PR がある → PR の変更ファイル一覧
+- `mise run verify` と `pr-size` が PR の head で通る → PR のチェック
+- マージまで行う
+
+### 対象外
+
+- 対象の PR へのラベル・クローズ・コメント、スレッドへの指示（提案は報告ファイルにだけ書く）
+- 正本（`AGENTS.md`・`.agents/skills/`・`docs/`）の編集
+
+### 関連情報
+
+- `docs/agents/command-team-details.md`「週次: 長命 PR の棚卸し」
+- `docs/agents/grokbot-runbook.md`「12. 作業ログの定期キュレーション」
+
+### 未決事項
+
+なし
+
+### 規模の見積もり
+
+追加 40〜100 行の見込み（`docs/worklogs/` の新規 2 ファイルと実装者メモ）
+
+### 採用する方式
+
+なし（既存の手順の定期実施）
+````
 
 ## 外部からのレビュースレッド投入
 
@@ -127,13 +157,12 @@ hatai の指摘の伝達:
 
 ### 開始のチェック
 
-1. Grok Bot が動かないことを人間が確かめ、代行を頼んだ
-2. `docs/agents/conductor-context.md` の「恒久交代」の「立て替える前の確認」を、代行の開始の側の扱いで済ませた
-3. T3 のスレッドとして動くなら `t3_thread_launch` で作業スレッドを、それ以外なら T3 Connect の MCP につながる（レビューの権限 `auto-accept-edits` を指定してスレッドを立てるために必要）
-4. `scripts/conductor-watch-ensure.sh` を実行した
-5. 引き継ぐ状態を読んだ: `agent:working` の Issue、Draft・レビュー待ちの PR、実行中のスレッド、`needs-human` の Issue、指揮役の作業ログ
-6. 代行の作業ログ `docs/worklogs/<日付>-conductor-substitute.md` を作った（判断と改善点を書く）
-7. T3 のスレッドとして動くなら、hatai がホストの端末で、インストールした見張り役の `~/.local/bin/pelway-agent-watch --register '<自分のスレッド ID>'` を実行した（スレッド ID は `t3 thread list --json` の `threadId` と同じ文字列。指揮役が伝えた値をそのまま貼らず、hatai がホスト側の T3 の画面か `t3 thread list --json` で確かめ、値が ASCII の英数字と `:`・`_`・`-`・`.`・`%` だけで、先頭が `-` でないことを見てから、単一引用符で囲んで渡す。`--register` の文字の検査は、シェルが行を解釈した後にしか働かないため。worktree の中のスクリプトや `cargo run` は sandbox の中から書き換えられるので使わない。agent-watch が受信箱に新着を書いたときに起こす宛先。登録ファイルは sandbox から書けない `~/.config/pelway-agent-notify/conductor-thread-id`。`docs/dev-environment.md` の「pitchfork について」）
+1. `docs/agents/conductor-context.md` の「恒久交代」の「立て替える前の確認」を、代行の開始の側の扱いで済ませた（人間が代行を頼んだ後に行う。読む条件と同じ順）
+2. T3 のスレッドとして動くなら `t3_thread_launch` で作業スレッドを、それ以外なら T3 Connect の MCP につながる（レビューの権限 `auto-accept-edits` を指定してスレッドを立てるために必要）
+3. `scripts/conductor-watch-ensure.sh` を実行した
+4. 引き継ぐ状態を読んだ: `agent:working` の Issue、Draft・レビュー待ちの PR、実行中のスレッド、`needs-human` の Issue、指揮役の作業ログ
+5. 代行の作業ログ `docs/worklogs/<日付>-conductor-substitute.md` を作った（判断と改善点を書く）
+6. T3 のスレッドとして動くなら、hatai がホストの端末で、インストールした見張り役の `~/.local/bin/pelway-agent-watch --register '<自分のスレッド ID>'` を実行した（スレッド ID は `t3 thread list --json` の `threadId` と同じ文字列。指揮役が伝えた値をそのまま貼らず、hatai がホスト側の T3 の画面か `t3 thread list --json` で確かめ、値が ASCII の英数字と `:`・`_`・`-`・`.`・`%` だけで、先頭が `-` でないことを見てから、単一引用符で囲んで渡す。`--register` の文字の検査は、シェルが行を解釈した後にしか働かないため。worktree の中のスクリプトや `cargo run` は sandbox の中から書き換えられるので使わない。agent-watch が受信箱に新着を書いたときに起こす宛先。登録ファイルは sandbox から書けない `~/.config/pelway-agent-notify/conductor-thread-id`。`docs/dev-environment.md` の「pitchfork について」）
 
 ### 終了のチェック（正本の指揮役へ戻す）
 
