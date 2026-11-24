@@ -23,3 +23,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の「スレッド連絡の帳簿（`thread_contacts`）」に「`due` を過ぎた項目は棚卸しの手順 2 で期限切れとして数え、確認し直す」（レビュー nit 1・2 の対応）を別 Issue で足す
 
 使ったスキル: implement-issue, pr-watch
+
+## 実装者メモ（round 3）
+
+対象 head: 5c6378782ef91e270273cf1aa9e1a9ce163e819e
+
+1. 詰まった箇所: なし。review round 2（claude・effort=high）の must-fix は棚卸し手順への追記で解決した。verify の失敗は round 2 と同じ `verify-run.test.sh` のみ（環境起因）
+2. 曖昧だった文: 「手順 2 で『`due` を過ぎた項目』も数えて手順 3 に回す（件数は『予定が無い』と分けて巡回記録に残す）か、予定した連絡が済んだ・スレッドの報告を受け取ったときに `what`・`due` を消すことを L436〜L440 と手順 3 に書く。前者を推す」（PR #679 review round 2 の must-fix）
+3. 仮定と解釈: レビューが「前者を推す」とした案A（期限切れを棚卸しで数える）を主に採り、案B（連絡が済んだら消す）も「消し忘れは期限で拾える」形で補助的に採った（両立し、帳簿が際限なく残るのを防ぐ）。指揮役指示の「nit に対応して」は `[文書のずれ]` の印つき nit 1 件（自動 settle 済み項目の消去）と解釈して手順 4 で対応し、印の無い nit 3 件は規定（implement-issue 手順 9）により直していない
+4. 足りなかった情報・検証手段: 委託の担当表（PR 番号の偶奇 → devin）と「3 回目のレビューの委託では effort を 1 段上げる」（devin は effort を渡せない）の組み合わせ。前回指揮役が「codex 上限・Devin 代替」で claude を使った経緯から、effort を渡せる claude（effort=max）に委託すると判断した
+5. 改善案: `docs/agents/grokbot-runbook.md` の「スレッド連絡の帳簿」に、印の無い nit が指した「待ち先が動いている（waiting-review/checks）枝」「`what` は控えとして読み GitHub で確かめる一文」「`pending_thread_sends` の表への掲載」を、別 Issue（#669 と併せて）で足す
+
+使ったスキル: implement-issue, pr-watch
