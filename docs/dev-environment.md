@@ -700,6 +700,44 @@ bwrap が作る名前空間の要点:
 - 本物の値を登録するときは、各自が暗号化プロバイダ（age 等）を設定した上で `fnox set <名前>` を使う。暗号文は `fnox set` が `fnox.toml` へ書き込む設計のため、**運用方針としてチームの合意を先に得ること**。
 - 個人用の上書きは `fnox.local.toml`（`.gitignore` 済み）。秘密値を含みうるためコミットしない。
 
+### /home が読み取り専用のとき /tmp 側で作業する手順
+
+/home が読み取り専用に再マウントされたときは、リポジトリを /tmp 側に clone して作業する。clone 先は `mktemp -d` で作った一意な名前にする（理由は下の箇条）。このとき PATH 上の `fnox`（`scripts/agent-gh` が呼ぶものも同じ）は mise の shim で、shim は作業ディレクトリの `mise.toml` を読む。/tmp 側の clone の設定は信頼済みではなく、`mise trust` の記録も /home 側に書けないため、shim は untrusted で失敗すると推定される。mise 2026.11.11 では untrusted の `mise.toml` だけでは shim は失敗せず（`mise.toml` の無いディレクトリでは 'No version is set' で失敗）、/home が ro の環境で shim が失敗したことは Issue #660 の報告どおりだが、その原因は未特定。次の 2 つで回避する。
+
+```bash
+# clone 先は mktemp -d で一意に作る。固定の名前（/tmp/Pelway など）は先に作られた同名ディレクトリを git clone が受け入れる
+if [ -d /tmp ] && [ ! -L /tmp ] &&              # /tmp 自体が symlink でない本物のディレクトリ（-k や -O は参照先を見る）
+   [ -k /tmp ] &&                                # この手順の前提: /tmp の sticky bit。clone 先の作成・使用と移動より前に確かめる
+   { [ -O /tmp ] || [ "$(stat -c %u /tmp)" = 0 ]; } &&   # /tmp の所有者が自分か root。所有者は sticky の中でも項目をどけられる
+   tmp="$(mktemp -d /tmp/pelway-clone.XXXXXX)" &&
+   clone="$tmp/Pelway" &&
+   git clone <このリポジトリの URL> "$clone" &&
+   cd "$clone" &&                                # 確かめ方は相対パスで動かすため、clone の中に入る
+   { mkdir -m 700 /tmp/sshims 2>/dev/null ||
+     { [ "$(LC_ALL=C stat -c '%F %u' /tmp/sshims 2>/dev/null)" = "directory $(id -u)" ] && chmod 700 /tmp/sshims; }; } &&
+   extra="$(find /tmp/sshims -mindepth 1 ! \( -name fnox -type l \) -print -quit)" &&   # 終了状態も条件に入れる
+   [ -z "$extra" ] &&
+   ln -sfn ~/.local/share/mise/installs/fnox/latest/fnox /tmp/sshims/fnox; then        # fnox 実体への symlink
+  export PATH="/tmp/sshims:$PATH"                # 検査も symlink の置き換えも成功したときだけ足す
+  export MISE_TRUSTED_CONFIG_PATHS="$clone"
+else
+  echo "/tmp が symlink・sticky bit 無し・別ユーザー所有のどれか、または clone・/tmp/sshims の検査・リンクの更新に失敗した（自分専用のディレクトリではない、中に fnox の symlink 以外がある、など）。PATH に足さずに止める" >&2
+fi
+```
+
+- `/tmp` は同じマシンのほかのユーザーも書けるため、`/tmp/sshims` を先に作られていたり、中に実行ファイルを置かれていたりすると、PATH の先頭から本人の権限で起動され（`scripts/agent-gh` が呼ぶ `fnox` も）、App の秘密鍵を読まれる。そこで次がすべて成功したときだけ使い、1 つでも失敗したら PATH に足さずに止める。
+  - `/tmp` が symlink でない本物のディレクトリ（`[ -d /tmp ] && [ ! -L /tmp ]`）で、sticky bit（`[ -k /tmp ]`）と、所有者が自分（`[ -O /tmp ]`）か root（`stat -c %u` が 0）であることを、clone 先の作成・使用と `cd` より前（`if` の先頭の条件）に確かめた。`[ -k ]`・`[ -O ]` は symlink の参照先を見るのに対し `stat -c %u`（`-L` なし）は symlink 自体の所有者を返すため、参照先が別ユーザー所有でも root 所有の symlink なら通ってしまう。symlink 自体も拒否する（`dir_chain_safe` と同じ条件）。sticky でないと、mode 700 で作ったディレクトリでも、相手が本人の `/tmp/sshims` や clone 先を親ディレクトリ内で rename でどけて差し替えられる。sticky があっても /tmp の所有者はほかの利用者の項目を消したり改名したりできるため、所有者が自分でも root でもない /tmp（一部の sandbox など）は使わない。後から検査に失敗しても、シェルはすでに差し替えられたディレクトリに移動している場合がある
+  - 自分で新しく作れた（`mkdir -m 700` は既にあれば失敗する）か、symlink をたどらない 1 回の stat（GNU `stat -c '%F %u'`。`LC_ALL=C` でロケールによる翻訳を外す）で「自分が持つ本物のディレクトリ」と分かった。種類と所有者を別々の検査で見ると、検査の間に相手がディレクトリと symlink を入れ替えられる
+  - mode 700 にして、ほかのユーザーが書き込めない。chmod の後に中身を調べるため、検査の後に相手が項目を足せない
+  - 中に `fnox` という名前の symlink 以外が無いことを、`find` の終了状態と出力の両方で確かめた。出力だけを見ると、列挙に失敗して出力が空のときに通ってしまう（以前ほかのユーザーが書き込めた時期に置かれた項目を使わない）
+  - `ln -sfn` で fnox 実体への symlink の置き換えに成功した。`-f` は一時名に作ってから rename で置き換えるため、失敗すると相手が以前置いた `fnox` が残ることがあり、成功するまで PATH に足さない
+- clone 先は `mktemp -d` で作り、その直後に `cd` で中に入る。固定の名前（`git clone` の既定の `/tmp/Pelway` など）は、同じマシンの別ユーザーが先に空のディレクトリ（mode 0777）を作っておくと `git clone` がそのまま受け入れ、最上位のディレクトリが相手の持ち物のまま残る。相手はその所有者なので `scripts/agent-gh` を差し替えたり、本人の `mise.toml` を消して自分のものを置いたりでき、`MISE_TRUSTED_CONFIG_PATHS` で信頼した設定ごと本人の権限で動く。`mktemp -d` は mkdir(2) で作るため、既にある名前では EEXIST で失敗して別の名前を試し、先に作られた名前を受け入れない
+- 確かめ方の `scripts/agent-gh` は相対パスなので、clone の中で実行する。`cd` をせずに /tmp など別のディレクトリにいると、そこに先に置かれた同名のスクリプトが本人の権限で動く
+- fnox 実体のパスは `~/.local/share/mise/installs/fnox/latest/fnox`。`/tmp/sshims` にはこの symlink だけを置き、PATH の先頭に置いて shim より先に実体が解決されるようにする。
+- `MISE_TRUSTED_CONFIG_PATHS` は /tmp 側の clone（`$clone`）を mise に信頼させる（`mise trust` の記録を書かずに済む）。`mise run` など mise 経由のコマンドがこれで動くかは未確認。
+- 確かめ方: セットアップ（上の `if` ブロック）全体が成功して `PATH` と `MISE_TRUSTED_CONFIG_PATHS` が設定された場合に限り、clone の中で確かめる（`else` に落ちたときは実行しない）。`command -v fnox` が `/tmp/sshims/fnox` を返し、`scripts/agent-gh dev api /rate_limit` が成功する。
+- 再マウント自体の対策・マウント設定の変更はこの手順の範囲外。
+
 ### デモの LLM 接続（#330）
 
 - デモの runner（`pelway-runner`）は環境変数で LLM 接続を組み立てる（`DemoLlmConfig::from_env`。定数名は `crates/pelway-runner/src/demo.rs` の定数を参照）:
