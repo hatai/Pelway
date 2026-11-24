@@ -127,6 +127,16 @@ run_cycles 1
 check "2: no watcher line within the threshold" nhas "$ROOT/out.log" "WATCHER pending-sends"
 check "2: pending_thread_sends survives the patrol's write-back" eq "$(pend_count)" "1"
 
+# 試験 2b: 経過がしきい値と等しい巡回では行は出ない（通知は超えたときだけ）。1 秒超えれば出る。
+reset
+pend $((T0 - 1800))
+run_cycles 1
+check "2b: no stalled line at exactly the threshold" nhas "$ROOT/out.log" "WATCHER pending-sends"
+pend $((T0 - 1801))
+run_cycles 1
+check "2b: stalled line just past the threshold" \
+  has "$ROOT/out.log" "WATCHER pending-sends-stalled since=20[^ ]* for=1801s count=1 oldest_to=mcp:t0"
+
 # 試験 3: 滞留の間は HEARTBEAT_SECS ごとに再通知する（間隔の直前・到来・直後を確かめる）。
 reset
 pend $((T0 - 2000))
@@ -214,6 +224,19 @@ pend $((T0 - 100))
 run_cycles 1 600 60
 check "8: threshold overridable by the environment" \
   has "$ROOT/out.log" "WATCHER pending-sends-stalled since=20[^ ]* for=100s count=1 oldest_to=mcp:t0"
+
+# 試験 9: 間隔の設定値が数値でないときは設定名を警告して既定値で巡回を続ける
+# （python が途中で落ちて HEARTBEAT だけが出続ける状態にならない）。
+reset
+pend $((T0 - 1900))
+run_cycles 1 bad abc
+check "9: bad heartbeat interval warns with the setting name" \
+  has "$ROOT/out.log" "WATCHER bad-config PELWAY_WATCH_HEARTBEAT_SECS"
+check "9: bad pending-sends interval warns with the setting name" \
+  has "$ROOT/out.log" "WATCHER bad-config PELWAY_WATCH_PENDING_SENDS_SECS"
+check "9: heartbeat still emitted on the default" has "$ROOT/out.log" "HEARTBEAT"
+check "9: stall detection still works on the default threshold" \
+  has "$ROOT/out.log" "WATCHER pending-sends-stalled since=20[^ ]* for=1900s count=1 oldest_to=mcp:t0"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

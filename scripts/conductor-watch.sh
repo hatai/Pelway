@@ -104,9 +104,18 @@ def deadline_ts(s):  # ISO 8601 を epoch に読む。読めない値（無い�
         return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
     except Exception:
         return None
+def env_secs(name, default):  # 間隔の環境変数。数値でなければ設定名を警告して既定値に倒す（見張りを止めない）
+    v = os.environ.get(name)
+    if not v:
+        return float(default)
+    try:
+        return float(v)
+    except ValueError:
+        print(f"WATCHER bad-config {name}={v} default={int(default)}s", flush=True)
+        return float(default)
 # 見張りが動いていることを示す行（Issue #504）。HEARTBEAT_SECS ごとに 1 行。
 # PELWAY_WATCH_HEARTBEAT_SECS で差し替えられる（テスト用）。
-HEARTBEAT_SECS = float(os.environ.get("PELWAY_WATCH_HEARTBEAT_SECS") or 600)
+HEARTBEAT_SECS = env_secs("PELWAY_WATCH_HEARTBEAT_SECS", 600)
 if now - (cur["heartbeat_at"] or 0) >= HEARTBEAT_SECS:
     print(f"HEARTBEAT at={stamp(now)}", flush=True)
     cur["heartbeat_at"] = now
@@ -117,7 +126,7 @@ if now - (cur["heartbeat_at"] or 0) >= HEARTBEAT_SECS:
 # 扱う（since を読めない要素は数に入れず、誤検知で止まらない）。滞留の間は HEARTBEAT_SECS
 # ごとに知らせ直し、解消（配列が空になるか最古の since が新しい値に変わる）で回復の行を
 # 1 つ出す。巡回状態（GitHub の一覧）の成否にかかわらず毎巡回動かす。
-PENDING_SENDS_SECS = float(os.environ.get("PELWAY_WATCH_PENDING_SENDS_SECS") or 1800)
+PENDING_SENDS_SECS = env_secs("PELWAY_WATCH_PENDING_SENDS_SECS", 1800)
 oldest, pend_cnt, pend_to = None, 0, ""
 try:
     psw = json.load(open(sys.argv[2]))
@@ -133,7 +142,7 @@ if isinstance(pend_arr, list):
         if oldest is None or ts < oldest:
             oldest, pend_to = ts, str(e.get("to") or "")
 pend = cur["pending_sends"] if isinstance(cur["pending_sends"], dict) else None
-if oldest is not None and now - oldest >= PENDING_SENDS_SECS:
+if oldest is not None and now - oldest > PENDING_SENDS_SECS:
     if pend is None or pend.get("since") != oldest:
         if pend is not None:
             print(f"WATCHER pending-sends-recovered since={stamp(pend['since'])} after={int(now - pend['since'])}s", flush=True)
