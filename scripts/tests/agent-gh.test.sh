@@ -102,6 +102,8 @@ cat >"$BIN/git" <<'EOF'
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_TELEMETRY=%s\n' "${GH_TELEMETRY:-}"; printf 'DO_NOT_TRACK=%s\n' "${DO_NOT_TRACK:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
 # FAKE_GIT_HEAD があれば、symbolic-ref（今のブランチ名の問い合わせ）にその名前を返す（#641）。
 [[ "$*" != *symbolic-ref* || -z "${FAKE_GIT_HEAD:-}" ]] || printf '%s\n' "$FAKE_GIT_HEAD"
+# FAKE_GIT_RECURSE があれば、config --get push.recurseSubmodules にその値を返す（#641）。
+[[ "$*" != "config --get push.recurseSubmodules" || -z "${FAKE_GIT_RECURSE:-}" ]] || printf '%s\n' "$FAKE_GIT_RECURSE"
 EOF
 
 # 偽の mktemp: 本物に委譤し、作成したパスを種別（f=ファイル、d=ディレクトリ）とともに記録する
@@ -406,6 +408,27 @@ expect_push_targets push_repo_value_flag "" 1
 # --end-of-options 以降はオプションとして解釈しない。--no-dry-run も位置引数のため dry-run のまま
 push_run push_end_of_options -n --end-of-options origin --no-dry-run
 expect_push_targets push_end_of_options "" 0
+# --recurse-submodules=only はサブモジュールだけを送り親リポジトリを更新しないため resign を呼ばない
+push_run push_submod_only --recurse-submodules=only origin a:agent/X
+expect_push_targets push_submod_only "" 0
+# 連結形の一意な省略形でも同じ
+push_run push_submod_only_abbrev --recu=only origin a:agent/X
+expect_push_targets push_submod_only_abbrev "" 0
+# 別引数で取る省略形でも同じ
+push_run push_submod_only_sep --recu only origin a:agent/X
+expect_push_targets push_submod_only_sep "" 0
+# 後に書いた指定が勝つ: 否定形と別の値で解除される
+push_run push_submod_only_undone --recu=only --no-recurse-submodules origin a:agent/X
+expect_push_targets push_submod_only_undone "origin/agent/X" 0
+push_run push_submod_only_recheck --recu=only --recurse-submodules=check origin a:agent/X
+expect_push_targets push_submod_only_recheck "origin/agent/X" 0
+# push.recurseSubmodules=only の設定でも resign を呼ばない（CLI で上書きすれば呼ぶ）
+export FAKE_GIT_RECURSE=only
+push_run push_submod_only_config origin a:agent/X
+expect_push_targets push_submod_only_config "" 0
+push_run push_submod_config_cli --recurse-submodules=check origin a:agent/X
+expect_push_targets push_submod_config_cli "origin/agent/X" 0
+unset FAKE_GIT_RECURSE
 push_run push_mirror_abbrev --mi origin
 expect_push_targets push_mirror_abbrev "" 1
 push_run push_tags_abbrev --ta origin v1

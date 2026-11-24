@@ -273,13 +273,14 @@ push_longopt() { ((${#1} >= $3)) && [[ "$2" == "$1"* ]]; }
 # （1 なら試行で何も push されないため resign を呼ばない）。
 # - refspec を省いた push、--all / --branches / --mirror / --tags / --prune / --repo、glob を含む refspec、
 #   detached HEAD の HEAD は fallback（今までどおり）
-# - 削除（:dst、-d / --delete）とブランチ以外（refs/tags/ など refs/heads/ でない refs/）は対象にしない
+# - 削除（:dst、-d / --delete）、サブモジュールだけを送る --recurse-submodules=only（push.recurseSubmodules=only の
+#   設定を含む。後の指定や否定形で解除される）、ブランチ以外（refs/tags/ など refs/heads/ でない refs/）は対象にしない
 # - src:dst は dst、コロンの無い refspec はそれ自身（HEAD は今のブランチ名）。先頭の + と refs/heads/ は除く
 # - 長いオプションは一意に特定できる接頭辞で省略でき（--dr は --dry-run、--del は --delete）、
 #   --no-<名> は直前の指定を戻す（-n --no-dry-run は実 push）。=<値> の連結は残りの引数を取らない
 push_targets() {
   push_remote="" push_branches=() push_fallback=0 push_dry_run=0
-  local positional=() delete=0 a spec dst b seen i opt neg joined
+  local positional=() delete=0 a spec dst b seen i opt neg joined val submod_seen=0 submod_only=0
   while (($#)); do
     a="$1"
     shift
@@ -289,9 +290,9 @@ push_targets() {
       -d) delete=1 ;;
       -n) push_dry_run=1 ;;
       --*)
-        opt="${a:2}" neg=0 joined=0
+        opt="${a:2}" neg=0 joined=0 val=""
         [[ "$opt" == no-* ]] && { neg=1; opt="${opt#no-}"; }
-        [[ "$opt" == *=* ]] && { joined=1; opt="${opt%%=*}"; }
+        [[ "$opt" == *=* ]] && { joined=1; val="${opt#*=}"; opt="${opt%%=*}"; }
         if push_longopt "$opt" dry-run 2; then
           if ((neg)); then push_dry_run=0; else push_dry_run=1; fi
         elif push_longopt "$opt" delete 2; then
@@ -305,10 +306,19 @@ push_targets() {
           # 直後の --no-dry-run や -n を旗と取り違えて dry-run の判定が食い違う。
           # 否定形（--no-repo）は値を取らず fallback も立てない
           if ((neg)); then push_fallback=0; else push_fallback=1; ((joined)) || shift; fi
+        elif push_longopt "$opt" recurse-submodules 4; then
+          # --recurse-submodules=only はサブモジュールだけを送り、親リポジトリの ref を
+          # 更新しないため resign を呼ばない。後に書いた指定が勝ち、否定形は解除する
+          submod_seen=1
+          if ((neg)); then submod_only=0
+          else
+            ((joined)) || { val="${1:-}"; shift; }
+            if [[ "$val" == only ]]; then submod_only=1; else submod_only=0; fi
+          fi
         elif ((neg || joined)); then
           : # --no-* の否定と =<値> の連結は残りの引数を取らない
         elif push_longopt "$opt" push-option 2 || push_longopt "$opt" receive-pack 4 ||
-          push_longopt "$opt" exec 1 || push_longopt "$opt" recurse-submodules 4; then
+          push_longopt "$opt" exec 1; then
           shift # 値を別の引数で取る
         fi
         ;;
@@ -327,7 +337,10 @@ push_targets() {
       *) positional+=("$a") ;;
     esac
   done
-  ((delete)) && { push_fallback=0; return 0; }
+  # オプションでの指定がなければ push.recurseSubmodules の設定を見る。
+  # only（サブモジュールだけを送る）は親リポジトリの ref を更新しないため resign を呼ばない
+  ((!submod_seen)) && [[ "$(git config --get push.recurseSubmodules 2>/dev/null)" == only ]] && submod_only=1
+  ((delete || submod_only)) && { push_fallback=0; return 0; }
   ((push_fallback)) && return 0
   if ((${#positional[@]} < 2)); then
     push_fallback=1
