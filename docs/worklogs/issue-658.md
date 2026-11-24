@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「背景・前提」に「同じファイル・節を変える未マージの PR があるかを確かめ、あれば本文に書く」を足す（#645 と #658 が同一段落を独立に変えて今回の競合になったため）。
 
 使ったスキル: なし
+
+## 実装者メモ（round 4）
+
+対象 head: 19deb28b84e4f823eb4e3fba65c07498095f078c
+
+1. 詰まった箇所: 手順 9「Approve のとき」: codex の `[文書のずれ]` nit 3 件の修正。3 件目で「required-checks の判定を確認」を巡回表の 2 行に書くか、判定を行う 2 の突き合わせに書くかが分かれた（両方に足す形を選んだ）。
+2. 曖昧だった文: 「例外の有無で分岐する 401・403 行目では required-checks の判定も確認してください」（PR #663 の codex レビューの nit）。「その行に書け」と「その行の判定時に使え」のどちらとも読める。
+3. 仮定と解釈: 行の適用を決める実状態の確認は 2 で行うため、2 に required-checks による確認を足し、指摘された 2 行の括弧にも required-checks への言及を足した（2 だけに足す解釈は、指摘行が黙ったまま再指摘を招く恐れがあるため選ばなかった）。
+4. 足りなかった情報・検証手段: このセッションの `/home` が read-only マウントで `target`（mbx の共有キャッシュへの symlink）に cargo が書けず、`/tmp` の所有者が nobody（65534）で `verify-run.test.sh` の `dir_chain_safe` も失敗した。`CARGO_TARGET_DIR=/tmp/ptarget-658 TMPDIR=/dev/shm/tmp658` で verify 完走（47 tests ok）。
+5. 改善案: `.agents/skills/implement-issue/required-checks` の冒頭コメントに「`pr-digest` の required 行は例外を反映しないため、巡回の実状態の確認（「巡回から定型の指示を受けたとき」の 2）でも使う」を足す。
+
+使ったスキル: なし
