@@ -3,7 +3,8 @@
 # actor だけでは判定しない（エージェントが hatai のトークンで gh を動かすと actor が hatai に
 # なることがある）。needs-human の unlabeled と automerge の labeled/unlabeled について、
 # イベント時刻の前 24 時間以内に同じ Issue・PR への hatai 本人のコメントがあるかを突き合わせ、
-# 無ければ LABEL unbacked（出どころ不明）行を出す。モック agent-gh の api が
+# 無ければ LABEL unbacked（出どころ不明）行を出す。needs-human の解除では Grok Bot 自身の決定の
+# コメント（<!-- grokbot-decision -->）を裏付けに数えない（Issue #602）。モック agent-gh の api が
 # issues/events と issues/{n}/comments の固定応答を返す。runbook の記述も grep で確かめる。
 set -uo pipefail
 
@@ -76,11 +77,11 @@ print(json.dumps({"id": int(sys.argv[1]), "event": sys.argv[2],
 EOF
 }
 
-# lc <author> <iso時刻> — issue コメント 1 件の JSON
+# lc <author> <iso時刻> [本文] — issue コメント 1 件の JSON
 lc() {
   python3 -I - "$@" <<'EOF'
 import json, sys
-print(json.dumps({"user": {"login": sys.argv[1]}, "created_at": sys.argv[2]}))
+print(json.dumps({"user": {"login": sys.argv[1]}, "created_at": sys.argv[2], **({"body": sys.argv[3]} if len(sys.argv) > 3 else {})}))
 EOF
 }
 
@@ -206,6 +207,27 @@ mock_events "$(jarr "$(lev 60 unlabeled needs-human rogue 196 "$T0")")"
 MOCK_EVENTS_FAIL=1 run_cycles 2
 check "failed events fetch emits no warning" nhas "$ROOT/out.log" "#196"
 check "no traceback on events fetch failure" nhas "$ROOT/out.log" "Traceback"
+
+# 10. needs-human の解除では、hatai の名義でも Grok Bot 自身の決定のコメント（<!-- grokbot-decision -->）を裏付けに数えない。
+# 人間の判断の記録（<!-- grokbot-human-decision -->）と目印の無い hatai のコメントは数える。automerge は目印を見ない。
+DEC=$'<!-- grokbot-decision -->\n決定: 範囲を縮めて続ける'
+HUM=$'<!-- grokbot-human-decision -->\nhatai「続けてよい」（09:50 JST）'
+mock_comments 501 "$(jarr "$(lc hatai "$T1H" "$DEC")" "$(lc hatai "$T1H" "$DEC")")"
+mock_comments 502 "$(jarr "$(lc hatai "$T1H" "$HUM")")"
+mock_comments 503 "$(jarr "$(lc hatai "$T1H" "$DEC")" "$(lc hatai "$T1H" "外してよい")")"
+mock_comments 504 "$(jarr "$(lc hatai "$T1H" "$DEC")")"
+mock_events "$(jarr \
+  "$(lev 70 unlabeled needs-human hatai 501 "$T0")" \
+  "$(lev 71 unlabeled needs-human hatai 502 "$T0")" \
+  "$(lev 72 unlabeled needs-human hatai 503 "$T0")" \
+  "$(lev 73 labeled automerge hatai 504 "$T0" pr)")"
+: > "$ROOT/out.log"
+run_cycles 2
+check "needs-human removal backed only by grokbot-decision comments is unbacked (exact line)" \
+  eq "$(grep '^LABEL ' "$ROOT/out.log")" "LABEL unbacked unlabeled needs-human issue #501 at=$T0 by=hatai"
+check "grokbot-human-decision comment backs needs-human removal" nhas "$ROOT/out.log" "#502"
+check "unmarked hatai comment still backs needs-human removal" nhas "$ROOT/out.log" "#503"
+check "automerge backing still counts grokbot-decision comments" nhas "$ROOT/out.log" "#504"
 
 # --- runbook の記述（Issue #405 の受け入れ条件と 2026-11-17 の要件変更） ---
 

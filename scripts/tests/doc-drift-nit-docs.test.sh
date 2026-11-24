@@ -38,7 +38,7 @@ check implementer_dont_table .agents/skills/implement-issue/SKILL.md \
 # 指揮役: automerge の前に印の nit が残っていないことを確かめる。
 check conductor_merge_check .agents/skills/command-team/SKILL.md \
   'その Approve のレビューの nit に行頭が `[文書のずれ]` のものが残っていないこと' \
-  '`pelway-review` の Approve、`[文書のずれ]` の nit が残っていないこと、必須チェック'
+  '上の「`automerge` ラベルを付ける条件」を置き換えない'
 
 # 印の nit だけの round は通算 2 回まで。3 回目が要るときは止まる。仕様にも上限の例外がある。
 check implementer_stop_after_two .agents/skills/implement-issue/SKILL.md \

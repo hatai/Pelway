@@ -37,7 +37,8 @@ EOF
 
 指揮役がマージの条件として数える QA の合格は、次をすべて満たすコメントだけである（リポジトリは public で、誰でもコメントできるため）。
 
-- 作成者が GitHub App `pelway-qa` である。REST の `user.login` が `pelway-qa[bot]` で `user.type` が `Bot` であることで確かめる（`scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<M>/comments --jq '.[] | select(.user.login == "pelway-qa[bot]" and .user.type == "Bot") | .body'`）。`gh pr view --json comments` の `author.login` は `[bot]` を落として `pelway-qa` と出すため、同名の利用者と区別できない
+- 作成者が GitHub App `pelway-qa` である。REST の `user.login` が `pelway-qa[bot]` で `user.type` が `Bot` であることで確かめる（`scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<M>/comments --jq '.[] | select(.user.login == "pelway-qa[bot]" and .user.type == "Bot" and .created_at == .updated_at) | .body'`）。`gh pr view --json comments` の `author.login` は `[bot]` を落として `pelway-qa` と出すため、同名の利用者と区別できない
+- 投稿の後に編集されていない。REST の `created_at` と `updated_at` が同じであることで確かめる（上のコマンドの条件に含む）。Issues・PR の書き込み権限を持つ名義（実装担当の App `pelway-dev` など）は、ほかの名義のコメントを編集できるため、古い合格コメントの `sha:` を書き換えると作成者・1 行目・SHA の一致がすべて通ってしまう
 - 1 行目が `QA: pass` である
 - `sha:` の値が PR の現在の head の SHA と一致する
 - `run:` の行がある
