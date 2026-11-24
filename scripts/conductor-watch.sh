@@ -9,6 +9,8 @@
 # runbook の「ボード Status 更新キュー」。実行するのは gh project の読み取り
 # （view・field-list・item-list）と item-edit だけで、人間名義の gh が使われる
 # （エージェント環境から人間名義 gh は使えないため、ホスト側のこの常駐で処理する）。
+# GitHub への書き込みはほかに 1 つだけ: needs-decision が 15 分決まらず指揮役が動いていない Issue に、scripts/agent-gh dev で
+# コメントを書き、needs-decision を needs-human に替える（Issue #602。runbook の「指揮役の定期巡回（スケジュール起床）」）。
 # 使い方: scripts/conductor-watch-ensure.sh で起動する（冪等の起動入口。止めるまで 30 秒ごとに見る）
 D="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch"; mkdir -p "$D"
 Q="${PELWAY_BOARD_QUEUE_DIR:-/tmp/pelway-board-queue}"; mkdir -p "$Q"
@@ -35,6 +37,9 @@ if [[ "$P" != "$P_OLD" && ! -f "$P" && -f "$P_OLD" ]]; then
   cp "$P_OLD" "$P" || { echo "conductor-watch.sh: patrol-state の移行に失敗しました" >&2; exit 1; }
   echo "PATROL-STATE migrated $P_OLD -> $P" >&2
 fi
+# 指揮役スレッドの登録ファイル（pelway-agent-watch --register が書く。docs/dev-environment.md の「pitchfork について」）。
+# needs-decision の格上げで指揮役が動いているかの判定に使う。PELWAY_CONDUCTOR_FILE で差し替えられる（テスト用）。
+C="${PELWAY_CONDUCTOR_FILE:-$HOME/.config/pelway-agent-notify/conductor-thread-id}"
 # t3 CLI の解決: 実行中の T3 サーバー（~/.t3/wsl-runtime 配下のバイナリ）と同じ実行ファイルを
 # 優先する。PATH の t3（~/.local/bin/t3 など）は版番号が同じでも、サーバーが所有する
 # ~/.t3/userdata へのアクセスが ServerOwnsDatabaseError で拒否されることがある（ビルド差）。
@@ -51,7 +56,9 @@ if [[ -z "$T3_BIN" ]]; then
   done
 fi
 while true; do
-  "$T3_BIN" thread list --json > "$D/threads.json" 2>/dev/null || true
+  # threads.json は python 側で取得の成功を確かめてから差し替える（失敗で前回の一覧を消さない）。
+  # T3 の失敗はスレッドに基づく判定をせず（格上げは判定しない）、Issue・PR の失敗は patrol-state.json を書き換えない（Issue なら DECISION の検知もしない）
+  "$T3_BIN" thread list --json > "$D/threads.json.new" 2> "$D/threads.err"; trc=$?
   # GitHub からの取得に失敗したらファイルを消す（空の実状態と区別する。python 側で取得失敗と扱い、
   # 巡回状態の記録を書き換えさせない）。
   scripts/agent-gh dev issue list --state all --limit "$IL" --json number,state,labels > "$D/issues.json" 2>/dev/null || rm -f "$D/issues.json"
@@ -60,8 +67,8 @@ while true; do
   # （runbook の「1. 役割と触ってよい範囲」）に使う。取得に失敗したらファイルを消す
   # （python 側で取得失敗と扱い、前回の処理済み ID を保つ）。
   scripts/agent-gh dev api "/repos/hatai/Pelway/issues/events?per_page=100" > "$D/label-events.json" 2>/dev/null || rm -f "$D/label-events.json"
-  python3 -I - "$D" "$P" "$IL" "$PL" <<'PY'
-import json, sys, time, os, re, subprocess
+  python3 -I - "$D" "$P" "$IL" "$PL" "$C" "$trc" "$T3_BIN" <<'PY'
+import json, sys, time, os, re, stat, subprocess
 from datetime import datetime, timedelta
 d = sys.argv[1]; sp = os.path.join(d, "state.json")
 # スレッド名の形式（skill command-team の「スレッド名」）。指揮役が作ったスレッドだけを見る。
@@ -74,7 +81,10 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
        "label_seen": [] if prev is None else prev.get("label_seen", []),
        "due_warned": {} if prev is None else prev.get("due_warned", {}),
        "stall_notified": {} if prev is None else prev.get("stall_notified", {}),
-       "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0)}
+       "decision_warned": {} if prev is None else prev.get("decision_warned", {}),
+       "shared_notified": {} if prev is None else prev.get("shared_notified", {}),
+       "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0),
+       "thread_list": None if prev is None else prev.get("thread_list")}
 # ラベル操作の裏付け検査（Issue #405、2026-11-17 の要件変更）。actor だけでは判定しない
 # （エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai に
 # なることがあるため）。needs-human の解除と automerge の付け外しを、イベント時刻の前
@@ -84,23 +94,85 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
 # （runbook の「指揮役の定期巡回（スケジュール起床）」）。
 LABEL_BACKUP_HOURS = 24
 LABEL_BACKING_AUTHOR = "hatai"
-try: threads = json.load(open(os.path.join(d, "threads.json")))
-except Exception: threads = []
+# Grok Bot も hatai の名義で書くので、needs-human の解除では Grok Bot 自身の決定のコメントを裏付けに数えない（Issue #602）
+GROKBOT_DECISION_MARK = "<!-- grokbot-decision -->"
+# t3 thread list の取得の判定（Issue #651）。終了コードが 0 で、標準出力が JSON の配列で、
+# 各要素がスレッドの形（後の処理が読むフィールドの型を持つ dict）のときだけ成功とし、
+# threads.json を差し替える。失敗した巡回は空の一覧として扱い、スレッドに基づく判定
+# （THREAD 行・停滞・止まり）をしない。失敗の理由は stderr の空白だけの行を除いた最初の行、無ければ失敗の種類。
+def fetch_threads(rc):
+    try: out = open(os.path.join(d, "threads.json.new"), "rb").read()
+    except Exception: out = b""
+    try: err = next((l.strip() for l in open(os.path.join(d, "threads.err"), errors="replace") if l.strip()), "")
+    except Exception: err = ""
+    if rc != 0: kind = f"exit={rc}"
+    elif not out.strip(): kind = "empty"
+    else:
+        # Python の json は JSON 外のリテラル NaN・Infinity・-Infinity も読む。保存する
+        # 一覧の形式としては受け付けないため、読み取りで例外にして失敗側に回す。
+        def reject_const(s): raise ValueError(s)
+        try: v = json.loads(out, parse_constant=reject_const)
+        except Exception: v = None
+        # 一覧でも要素がスレッドの形でないものは失敗と同じ扱い。後の処理は "threadId" への
+        # 直接アクセス・"title" のスライスと正規表現・"updatedAt" の比較をするため、型が
+        # 壊れた一覧を成功として保存すると、スナップショットを差し替えたあと python が
+        # 落ちて WATCHER 行も出ずに巡回が止まる。欠落や null のフィールドは後の処理が
+        # 空文字・None として扱うので許容する（表示側は "title" を or "" で正規化する）。
+        def ok_thread(t):
+            return isinstance(t, dict) and isinstance(t.get("threadId"), str) \
+                and all(t.get(k) is None or isinstance(t.get(k), str) for k in ("title", "updatedAt", "status"))
+        if isinstance(v, list) and all(ok_thread(t) for t in v): return v, None
+        kind = "invalid-json"
+    return [], err[:120] or kind
+threads, thread_err = fetch_threads(int(sys.argv[6]))
+if thread_err is None: os.replace(os.path.join(d, "threads.json.new"), os.path.join(d, "threads.json"))
 try: issues = json.load(open(os.path.join(d, "issues.json")))
 except Exception: issues = None
 try: prs = json.load(open(os.path.join(d, "prs.json"))); prs_ok = True
 except Exception: prs = []; prs_ok = False
-now = time.time()
+# 巡回の時刻。PELWAY_WATCH_NOW が指すファイルに epoch 秒が書かれていればそれを使う（テスト用）。
+try: now = float(open(os.environ["PELWAY_WATCH_NOW"]).read().strip())
+except Exception: now = time.time()
+def stamp(ts): return datetime.fromtimestamp(ts).isoformat(timespec="seconds")
+def iso(s):
+    try: return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except Exception: return None
+def agent_gh(*args, stdin=None):  # scripts/agent-gh dev の標準出力。失敗（終了コード・例外）は None
+    io = {"input": stdin} if stdin is not None else {"stdin": subprocess.DEVNULL}
+    try:
+        r = subprocess.run(["scripts/agent-gh", "dev", *args], stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, text=True, timeout=60, **io)
+    except Exception: return None
+    return r.stdout if r.returncode == 0 else None
+def gh_json(*args):
+    try: return json.loads(agent_gh(*args))
+    except Exception: return None
 # 見張りが動いていることを示す行（Issue #504）。HEARTBEAT_SECS ごとに 1 行。
-HEARTBEAT_SECS = 600
+# PELWAY_WATCH_HEARTBEAT_SECS で差し替えられる（テスト用）。
+HEARTBEAT_SECS = float(os.environ.get("PELWAY_WATCH_HEARTBEAT_SECS") or 600)
 if now - (cur["heartbeat_at"] or 0) >= HEARTBEAT_SECS:
-    print(f"HEARTBEAT at={datetime.fromtimestamp(now).isoformat(timespec='seconds')}", flush=True)
+    print(f"HEARTBEAT at={stamp(now)}", flush=True)
     cur["heartbeat_at"] = now
+# スレッド一覧の取得の状態は ok（thread_list が None）か failing の 2 つ。failing の間は
+# 失敗の始まりから HEARTBEAT_SECS ごとに知らせ直す（HEARTBEAT の行とは別に数える）。
+tl = cur["thread_list"]
+if thread_err is None:
+    if tl: print(f"WATCHER thread-list-recovered since={stamp(tl['fail_since'])} after={int(now - tl['fail_since'])}s", flush=True)
+    tl = None
+elif tl is None:
+    tl = {"fail_since": now, "notified_at": now, "reason": thread_err}
+    print(f"WATCHER thread-list-failed since={stamp(now)} reason={thread_err}", flush=True)
+else:
+    tl["reason"] = thread_err
+    if now - tl["notified_at"] >= HEARTBEAT_SECS:
+        tl["notified_at"] = now
+        print(f"WATCHER thread-list-still-failing since={stamp(tl['fail_since'])} for={int(now - tl['fail_since'])}s reason={thread_err}", flush=True)
+cur["thread_list"] = tl
 for t in threads:
     tid, s = t["threadId"], t.get("status")
     cur["threads"][tid] = s
     if prev is not None and prev["threads"].get(tid) != s:
-        print(f"THREAD {s} {tid} prev={prev['threads'].get(tid)} {t.get('title','')[:40]}", flush=True)
+        print(f"THREAD {s} {tid} prev={prev['threads'].get(tid)} {(t.get('title') or '')[:40]}", flush=True)
     title = t.get("title") or ""
     # 古い終わったスレッドは数えない（次に操作するときに直す）。動いているものと新しく現れたものだけを見る。
     active = s in ("running", "starting", "preparing") or (prev is not None and tid not in prev["threads"])
@@ -119,7 +191,7 @@ for t in threads:
             cur["since"][tid] = {"items": ic, "at": now, "warned": False}
         elif now - last["at"] > 2700 and not last.get("warned"):
             last["warned"] = True
-            print(f"THREAD stalled-45m {tid} {t.get('title','')[:40]}", flush=True)
+            print(f"THREAD stalled-45m {tid} {(t.get('title') or '')[:40]}", flush=True)
     else:
         cur["since"].pop(tid, None)
 for pr in prs:
@@ -138,25 +210,16 @@ except Exception: levs = None
 if not isinstance(levs, list): levs = None
 if levs is not None:
     comments_cache = {}
-    def iso(s):
-        try: return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
-        except Exception: return None
-    def human_backed(num, t):
-        # num の Issue・PR のコメントを取得し、t の前 LABEL_BACKUP_HOURS 時間〜t の間の
-        # hatai 本人のコメント（指示の記録）を探す。取得失敗は None（判定の延期）
+    def human_backed(num, t, skip_mark=None):
+        # num の Issue・PR のコメントから t の前 LABEL_BACKUP_HOURS 時間〜t の hatai のコメント（指示の記録。skip_mark 以外）を探す。取得失敗は None（判定の延期）
         if num not in comments_cache:
-            try:
-                r = subprocess.run(["scripts/agent-gh", "dev", "api",
-                    f"/repos/hatai/Pelway/issues/{num}/comments?per_page=100&sort=created&direction=desc"],
-                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=60)
-                cs = json.loads(r.stdout) if r.returncode == 0 else None
-            except Exception:
-                cs = None
+            cs = gh_json("api", f"/repos/hatai/Pelway/issues/{num}/comments?per_page=100&sort=created&direction=desc")
             comments_cache[num] = cs if isinstance(cs, list) else None
         cs = comments_cache[num]
         if cs is None: return None
         for c in cs:
             if (c.get("user") or {}).get("login") != LABEL_BACKING_AUTHOR: continue
+            if skip_mark and skip_mark in (c.get("body") or ""): continue
             ct = iso(c.get("created_at"))
             if ct is not None and t - timedelta(hours=LABEL_BACKUP_HOURS) <= ct <= t:
                 return True
@@ -177,7 +240,7 @@ if levs is not None:
             num, t = iss.get("number"), iso(e.get("created_at"))
             if num is None or t is None:
                 done.add(evid); continue
-            backed = human_backed(num, t)
+            backed = human_backed(num, t, GROKBOT_DECISION_MARK if lab == "needs-human" else None)
             if backed is None: continue  # comments 取得失敗: 次の巡回で再試行
             if not backed:
                 actor = ((e.get("actor") or {}).get("login") or "")
@@ -187,9 +250,189 @@ if levs is not None:
     else:
         done.update(e.get("id") for e in levs if isinstance(e, dict))
     cur["label_seen"] = [e.get("id") for e in levs if isinstance(e, dict) and e.get("id") in done]
+# needs-decision（実装担当の停止の印。#603）が最新の labeled から DECISION_SECS たっても外れない Issue を DECISION overdue で知らせ（同じ labeled_at に 1 回）、指揮役が動いていなければ needs-human に格上げする（#602）
+DECISION_SECS = 15 * 60
+ESCALATION_MARK = "<!-- conductor-watch-escalation -->"
+ESCALATION_AUTHOR = "pelway-dev[bot]"
+# 格上げの段の記録（Issue 番号 → labeled_at・stage・seen・reason）。どこで止まっても次の周が照合できるよう、段が変わるたびにその場で置き換える
+EP = os.path.join(d, "escalation.json")
+try: esc = {k: v for k, v in json.load(open(EP)).items() if isinstance(v, dict)}
+except Exception: esc = {}
+def store():
+    with open(EP + ".tmp", "w") as f: json.dump(esc, f)
+    os.replace(EP + ".tmp", EP)
+def remember(n, lt, stage, **more): esc[n] = {"labeled_at": lt, "stage": stage, **more}; store()
+def all_pages(path):  # --paginate --slurp の応答（ページの配列）を 1 つの一覧にする。取得失敗は None
+    data = gh_json("api", path, "--paginate", "--slurp")
+    if not isinstance(data, list) or not all(isinstance(p, list) for p in data): return None
+    return [x for p in data for x in p if isinstance(x, dict)]
+def registered_thread():
+    # 登録ファイルの 1 行目（スレッド ID）。無い・空・通常のファイルでない（symlink・FIFO）ときは ""、ほかの理由で読めないときは None（判定の保留）。
+    # O_NOFOLLOW|O_NONBLOCK と fd での種類・所有者の確認は pelway-agent-watch の read_conductor_file、1 行目の trim は parse_conductor_file と同じ（通常でないファイルを不在・UTF-8 を置き換えて読む点だけ違う）
+    p = sys.argv[5]
+    try:
+        fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError: return ""
+    except OSError:
+        try: return None if stat.S_ISREG(os.lstat(p).st_mode) else ""
+        except OSError: return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode): return ""
+        if st.st_uid != os.geteuid(): return None
+        return os.read(fd, 4096).decode("utf-8", "replace").split("\n", 1)[0].strip()
+    except OSError: return None
+    finally: os.close(fd)
+def conductor_absence():  # 指揮役が T3 のスレッドとして動いていないと確かめられたときだけ理由の語（ほかは None）
+    tid = registered_thread()
+    if tid is None: return None
+    if not tid: return "no-registration"
+    th = next((t for t in threads if isinstance(t, dict) and t.get("threadId") == tid), None)
+    if th is None: return "thread-missing"
+    return "thread-archived" if th.get("archived") else None
+def events(n): return all_pages(f"/repos/hatai/Pelway/issues/{n}/events?per_page=100")  # 全ページ。取得失敗は None
+def label_events(evs, label):  # evs のうち label の付け外しのイベント（GitHub が返す古い順のまま）
+    return [e for e in evs or [] if e.get("event") in ("labeled", "unlabeled") and (e.get("label") or {}).get("name") == label]
+def last_event(es): return (es or [{}])[-1].get("event")
+def open_labeling(evs):  # needs-decision の今の付与の時刻。最後の付け外しが外したもの・見つからない・時刻が読めないときは None
+    last = (label_events(evs, "needs-decision") or [{}])[-1]
+    return last.get("created_at") if last.get("event") == "labeled" and iso(last.get("created_at")) else None
+def escalate(n, lt, reason):
+    # 3 段（通知 → needs-human の付与 → needs-decision の解除）は runbook の格上げの項どおり。各段は記録と書く直前の読み直し（events・Issue・events）だけで決め、読み取りに失敗した周は書かない
+    body = (f"{ESCALATION_MARK}\n@hatai `needs-decision` が付いた時刻 {lt} から 15 分決まらず、"
+            "指揮役が動いていないため `needs-human` に替えました。")
+    steps = {None: ("comment", ["issue", "comment", n, "--body-file", "-"], None, "commented"),
+             "commented": ("label", ["issue", "edit", n, "--add-label", "needs-human"], "adding", "added"),
+             "added": ("label", ["issue", "edit", n, "--remove-label", "needs-decision"], None, "removed")}
+    add_tried = False
+    while True:
+        rec = esc.get(n) if (esc.get(n) or {}).get("labeled_at") == lt else {}
+        recorded = rec.get("stage")
+        stage = recorded
+        if stage not in (None, "commented", "adding", "added"): return  # held・removed: この labeled_at にはもう書かない
+        if stage is None:
+            cs = all_pages(f"/repos/hatai/Pelway/issues/{n}/comments?per_page=100")
+            if cs is None: return
+            # 通知の重複を防ぐだけの確かめ（実装担当も同じ名義で書くので、ラベルの操作や保留の判定の根拠にはしない）
+            if any((c.get("user") or {}).get("login") == ESCALATION_AUTHOR and c.get("body") == body for c in cs): stage = "commented"
+        evs = events(n)
+        iss = gh_json("api", f"/repos/hatai/Pelway/issues/{n}") if evs is not None else None
+        if not isinstance(iss, dict): return
+        evs = events(n)  # Issue の読み直しの間に外して付け直された付与を、古い付与のまま扱わない
+        if evs is None: return
+        labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
+        # Issue の読み取りとの間の付け外し・開閉は最後の events の方が新しい: events の最後のイベントで確かめ直す
+        open_ = iss.get("state") == "open" and last_event([e for e in evs if e.get("event") in ("closed", "reopened")]) in (None, "reopened")
+        if not open_ or "needs-decision" not in labs or open_labeling(evs) != lt: return
+        nh = label_events(evs, "needs-human")
+        human = "needs-human" in labs or bool(nh and nh[-1]["event"] == "labeled")
+        if stage == "adding":
+            new = [e for e in label_events(evs, "needs-human") if isinstance(e.get("id"), int) and e["id"] > rec.get("seen", 0)]
+            if any(e["event"] == "labeled" and (e.get("actor") or {}).get("login") == ESCALATION_AUTHOR for e in new):
+                remember(n, lt, "added", reason=reason)
+                stage = "added"  # 自分の名義で付いた。その後に人間が外していても付け直さず、needs-decision を外す
+            elif new: stage = "held"  # 試行の後にほかの誰かが付け外しした: 出どころを確かめられない
+            elif human: return  # 付いたが events にまだ出ていない: 次の周で照合する
+            elif add_tried: return  # この周に付け直したのに付与もラベルも見えない: 次の周に回す
+            else: stage = "commented"  # 付かなかった: 付け直す
+        elif human and stage != "added":  # 自分で付けていない needs-human はそのままにする（記録した通知の後なら止める）
+            if recorded != "commented": return
+            stage = "held"
+        if stage == "held": remember(n, lt, "held", reason=reason); print(f"DECISION held #{n} labeled_at={lt}", flush=True); return
+        step, args, intent, done = steps[stage]
+        if intent: remember(n, lt, intent, seen=max((e["id"] for e in evs if isinstance(e.get("id"), int)), default=0), reason=reason)
+        if agent_gh(*args, stdin=body if stage is None else None) is None: print(f"DECISION escalate-failed #{n} step={step}", flush=True); return
+        if intent: add_tried = True; continue  # 付与は終了コードでなく試行の後の付与イベントで照合する（変更なしの成功・応答の喪失と取り違えない）
+        remember(n, lt, done, reason=reason)
+        if done == "removed": print(f"DECISION escalated #{n} labeled_at={lt} reason={reason}", flush=True); return
+decision_at, late_human = {}, set()  # 最新の needs-decision の labeled_at（補助記録の next_check_at に使う）・一覧の後に events で needs-human が付いた Issue
+if issues is not None:
+    labeled = set()
+    reason = conductor_absence() if thread_err is None else None  # 一覧の取得に失敗した周は判定しない
+    for iss in issues:
+        labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
+        if iss.get("state") != "OPEN" or "needs-decision" not in labs: continue
+        n = str(iss.get("number")); labeled.add(n)
+        # needs-human もあれば人間待ち（DECISION も補助記録の起点も出さない）。格上げが途中の Issue だけ、前の付与の完了を照合する（書くのは指揮役がいない周だけ）
+        human = "needs-human" in labs
+        if human and (esc.get(n) or {}).get("stage") not in ("commented", "adding", "added"): continue
+        evs = events(n); lt = open_labeling(evs)
+        if lt is None: continue  # 取得失敗・イベントが見つからない: 遅れとは扱わず、次の周で取り直す
+        old = esc.get(n)
+        if old and old.get("labeled_at") != lt:
+            # 前の labeled_at の途中の記録: 新しい付与が開いているので前の付与の解除は確定。added なら完了を 1 回報告してから替える
+            if old.get("stage") == "added":
+                print(f"DECISION escalated #{n} labeled_at={old.get('labeled_at')} reason={old.get('reason') or reason}", flush=True)
+            del esc[n]; store()
+        if last_event(label_events(evs, "needs-human")) == "labeled": late_human.add(n)  # 補助記録も人間待ちにする
+        if not human and n not in late_human: decision_at[n] = lt
+        if now - iso(lt).timestamp() < DECISION_SECS: continue
+        # 一覧の後の needs-human の付与・クローズが events に出ていれば知らせず、通知済みにもしない
+        gone = n in late_human or last_event([e for e in evs if e.get("event") in ("closed", "reopened")]) == "closed"
+        if not human and not gone and cur["decision_warned"].get(n) != lt: print(f"DECISION overdue #{n} labeled_at={lt}", flush=True); cur["decision_warned"][n] = lt
+        if reason: escalate(n, lt, reason)
+    # 一覧から外れた Issue（閉じた・一覧の窓外）の通知済み時刻も残す。同じ labeled_at で再出現しても重複して知らせない
+    # 処理対象外の Issue に途中の記録があれば Issue の状態で照合する（読むだけ）。needs-decision が外れていれば消す（完了の行は added のときだけ）、残っていれば残す。held は読まずに残し、removed は消す
+    keep = set(labeled)
+    for n, r in esc.items():
+        if n in keep: continue
+        if r.get("stage") == "held": keep.add(n); continue  # 同じ labeled_at の保留は残す
+        if r.get("stage") not in ("commented", "adding", "added"): continue
+        iss = gh_json("api", f"/repos/hatai/Pelway/issues/{n}")
+        if not isinstance(iss, dict): keep.add(n); continue  # 読めなければ次の周に照合する
+        labs = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
+        if "needs-decision" in labs: keep.add(n); continue
+        if r.get("stage") == "added":
+            print(f"DECISION escalated #{n} labeled_at={r.get('labeled_at')} reason={r.get('reason') or reason}", flush=True)
+    esc = {k: v for k, v in esc.items() if k in keep}; store()
+# 作業ツリーの共有（Issue #643）: settle されていないトップレベルのスレッドの worktreePath を
+# t3 thread show で 1 本 1 回ずつ集め、2 本以上が同じパスなら THREAD shared-worktree の行を出す。
+# 同じ組み合わせ（パスとスレッドの集合）は続く間 1 回だけ出す。通知済みの記録は stall_notified と
+# 同じ JSON オブジェクトで、パス → 組み合わせ（昇順の threadId をカンマでつないだ文字列）ごとの記録。
+# 失敗するスレッドが巡回ごとに入れ替わると同じパスに複数の組み合わせが並存しうるため、組み合わせごとに
+# 記録する。show が失敗したスレッドはこの巡回で数えない。既出の組み合わせに失敗したスレッドが含まれ、
+# 残りのスレッドが同じパスにいると確かめられたときだけ記録を保つ（失敗の巡回で再通知しない）。
+# 残りのどれかが一覧から消えた・別のパスに移ったと確かめられたら、共有の解消として記録を消す。
+# 一覧の取得に失敗した巡回は記録を保ち、正常に空の一覧は共有の解消として記録を消す。
+if thread_err is None:
+    by_path, failed = {}, set()
+    for t in threads:
+        if t.get("settled") or t.get("parentThreadId"): continue
+        tid = t.get("threadId")
+        try:
+            r = subprocess.run([sys.argv[7], "thread", "show", tid, "--json"],
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=60)
+            wp = json.loads(r.stdout)["thread"].get("worktreePath") if r.returncode == 0 else None
+            if r.returncode != 0: failed.add(tid)
+        except Exception:
+            failed.add(tid); wp = None
+        if isinstance(wp, str) and wp:
+            by_path.setdefault(wp, []).append(tid)
+    old = {}
+    for wp, combs in (cur["shared_notified"] if isinstance(cur["shared_notified"], dict) else {}).items():
+        if isinstance(combs, str): combs = {combs: 1}  # 旧形式（パス → 組み合わせ）を読み替える
+        if isinstance(combs, dict): old[wp] = combs
+    keep = {}
+    for wp, combs in old.items():
+        for v in combs:
+            ids = set(str(v).split(","))
+            if ids & failed and all(i in failed or i in by_path.get(wp, []) for i in ids):
+                keep.setdefault(wp, {})[v] = 1
+    notified = {}
+    for wp, tids in sorted(by_path.items()):
+        if len(tids) < 2: continue
+        v = ",".join(sorted(tids))
+        if any(set(tids) <= set(k.split(",")) for k in keep.get(wp, {})): continue  # 失敗分が欠けただけ
+        if v not in old.get(wp, {}):
+            print(f"THREAD shared-worktree path={wp} threads={v}", flush=True)
+        notified.setdefault(wp, {})[v] = 1
+    cur["shared_notified"] = {wp: {**keep.get(wp, {}), **notified.get(wp, {})}
+                            for wp in set(keep) | set(notified)}
 # 読み取りに失敗して空になったときは、前回の状態を残す（全スレッドを「新規」と誤報しない）。
 if prev is not None and not threads: cur["threads"] = prev["threads"]
 if prev is not None and not prs: cur["prs"] = prev["prs"]
+# 状態は GitHub の取得結果にかかわらず毎巡回ここで保存する。取得失敗・上限到達で下の
+# 巡回状態ブロックが動かない回でも thread_list・heartbeat_at を残し、通知が繰り返されないようにする。
 json.dump(cur, open(sp, "w"))
 # 巡回状態の補助記録（patrol-state.json）。対象は Issue 番号ごと。正本は GitHub Issues と
 # Projects で、ここには GitHub に載らない情報（誰待ちか・待ち始めた時刻・次の担当・次回確認時刻）だけを置く。
@@ -255,8 +498,10 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
         if iss.get("state") != "OPEN": continue
         labels = {l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)}
         pr = pr_of.get(n)
-        if "needs-human" in labels:
+        if "needs-human" in labels or n in late_human:
             won, owner = "human", "hatai"
+        elif "needs-decision" in labels:
+            won, owner = "grokbot", "grokbot"
         elif "agent:working" in labels:
             if pr is None:
                 won, owner = "implement", f"implement thread (#{n})"
@@ -278,10 +523,14 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
             continue
         old = ps["subjects"].get(n) if isinstance(ps["subjects"].get(n), dict) else {}
         lab_key = sorted(l for l in labels if isinstance(l, str))
-        # Grok Bot の判断待ち（grokbot）はラベルから導けないので指揮役が書く。ラベルが変わらない限り保つ
+        # needs-decision の無い Grok Bot の判断待ち（grokbot）は指揮役が書く。ラベルが変わらない限り保つ
         # （needs-human は上で human に決まっていて、ここでは変えない）。
         if won != "human" and old.get("waiting_on") == "grokbot" and old.get("labels") == lab_key:
             won, owner = "grokbot", "grokbot"
+        # スレッド一覧が取れない間は止まりが続いているかを確かめられないため、conductor を
+        # implement・review に戻さない（止まりで conductor にした対象を見失わない）。
+        if cur["thread_list"] and won in ("implement", "review") and old.get("waiting_on") == "conductor":
+            won, owner = "conductor", "conductor"
         # 実装スレッドが止まっていて、状態の行が working か無ければ、指揮役の判断待ちにする。
         # 書き換えてよいのは implement / review から conductor への向きだけ。
         early = False
@@ -308,6 +557,9 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
         # 待ちが変わった、または値が無い・読めないときは、待ちの種類の目安で設定し直す
         # （自己修復として扱い、特別な報告はしない）。
         nca = old.get("next_check_at") if old.get("waiting_on") == won else None
+        # needs-decision の待ちは毎周 labeled_at から導き直す（付け直されたら起点が変わるため）
+        if n in decision_at:
+            nca = datetime.fromtimestamp(iso(decision_at[n]).timestamp() + DECISION_SECS).isoformat(timespec="seconds")
         if deadline_ts(nca) is None:
             nca = datetime.fromtimestamp(now + check_hours[won] * 3600).isoformat(timespec="seconds")
         # waiting-* の待ちは、待っている先を次の巡回で確かめるため、次回確認時刻を早める向きにだけ変える

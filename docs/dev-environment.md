@@ -700,6 +700,44 @@ bwrap が作る名前空間の要点:
 - 本物の値を登録するときは、各自が暗号化プロバイダ（age 等）を設定した上で `fnox set <名前>` を使う。暗号文は `fnox set` が `fnox.toml` へ書き込む設計のため、**運用方針としてチームの合意を先に得ること**。
 - 個人用の上書きは `fnox.local.toml`（`.gitignore` 済み）。秘密値を含みうるためコミットしない。
 
+### /home が読み取り専用のとき /tmp 側で作業する手順
+
+/home が読み取り専用に再マウントされたときは、リポジトリを /tmp 側に clone して作業する。clone 先は `mktemp -d` で作った一意な名前にする（理由は下の箇条）。このとき PATH 上の `fnox`（`scripts/agent-gh` が呼ぶものも同じ）は mise の shim で、shim は作業ディレクトリの `mise.toml` を読む。/tmp 側の clone の設定は信頼済みではなく、`mise trust` の記録も /home 側に書けないため、shim は untrusted で失敗すると推定される。mise 2026.11.11 では untrusted の `mise.toml` だけでは shim は失敗せず（`mise.toml` の無いディレクトリでは 'No version is set' で失敗）、/home が ro の環境で shim が失敗したことは Issue #660 の報告どおりだが、その原因は未特定。次の 2 つで回避する。
+
+```bash
+# clone 先は mktemp -d で一意に作る。固定の名前（/tmp/Pelway など）は先に作られた同名ディレクトリを git clone が受け入れる
+if [ -d /tmp ] && [ ! -L /tmp ] &&              # /tmp 自体が symlink でない本物のディレクトリ（-k や -O は参照先を見る）
+   [ -k /tmp ] &&                                # この手順の前提: /tmp の sticky bit。clone 先の作成・使用と移動より前に確かめる
+   { [ -O /tmp ] || [ "$(stat -c %u /tmp)" = 0 ]; } &&   # /tmp の所有者が自分か root。所有者は sticky の中でも項目をどけられる
+   tmp="$(mktemp -d /tmp/pelway-clone.XXXXXX)" &&
+   clone="$tmp/Pelway" &&
+   git clone <このリポジトリの URL> "$clone" &&
+   cd "$clone" &&                                # 確かめ方は相対パスで動かすため、clone の中に入る
+   { mkdir -m 700 /tmp/sshims 2>/dev/null ||
+     { [ "$(LC_ALL=C stat -c '%F %u' /tmp/sshims 2>/dev/null)" = "directory $(id -u)" ] && chmod 700 /tmp/sshims; }; } &&
+   extra="$(find /tmp/sshims -mindepth 1 ! \( -name fnox -type l \) -print -quit)" &&   # 終了状態も条件に入れる
+   [ -z "$extra" ] &&
+   ln -sfn ~/.local/share/mise/installs/fnox/latest/fnox /tmp/sshims/fnox; then        # fnox 実体への symlink
+  export PATH="/tmp/sshims:$PATH"                # 検査も symlink の置き換えも成功したときだけ足す
+  export MISE_TRUSTED_CONFIG_PATHS="$clone"
+else
+  echo "/tmp が symlink・sticky bit 無し・別ユーザー所有のどれか、または clone・/tmp/sshims の検査・リンクの更新に失敗した（自分専用のディレクトリではない、中に fnox の symlink 以外がある、など）。PATH に足さずに止める" >&2
+fi
+```
+
+- `/tmp` は同じマシンのほかのユーザーも書けるため、`/tmp/sshims` を先に作られていたり、中に実行ファイルを置かれていたりすると、PATH の先頭から本人の権限で起動され（`scripts/agent-gh` が呼ぶ `fnox` も）、App の秘密鍵を読まれる。そこで次がすべて成功したときだけ使い、1 つでも失敗したら PATH に足さずに止める。
+  - `/tmp` が symlink でない本物のディレクトリ（`[ -d /tmp ] && [ ! -L /tmp ]`）で、sticky bit（`[ -k /tmp ]`）と、所有者が自分（`[ -O /tmp ]`）か root（`stat -c %u` が 0）であることを、clone 先の作成・使用と `cd` より前（`if` の先頭の条件）に確かめた。`[ -k ]`・`[ -O ]` は symlink の参照先を見るのに対し `stat -c %u`（`-L` なし）は symlink 自体の所有者を返すため、参照先が別ユーザー所有でも root 所有の symlink なら通ってしまう。symlink 自体も拒否する（`dir_chain_safe` と同じ条件）。sticky でないと、mode 700 で作ったディレクトリでも、相手が本人の `/tmp/sshims` や clone 先を親ディレクトリ内で rename でどけて差し替えられる。sticky があっても /tmp の所有者はほかの利用者の項目を消したり改名したりできるため、所有者が自分でも root でもない /tmp（一部の sandbox など）は使わない。後から検査に失敗しても、シェルはすでに差し替えられたディレクトリに移動している場合がある
+  - 自分で新しく作れた（`mkdir -m 700` は既にあれば失敗する）か、symlink をたどらない 1 回の stat（GNU `stat -c '%F %u'`。`LC_ALL=C` でロケールによる翻訳を外す）で「自分が持つ本物のディレクトリ」と分かった。種類と所有者を別々の検査で見ると、検査の間に相手がディレクトリと symlink を入れ替えられる
+  - mode 700 にして、ほかのユーザーが書き込めない。chmod の後に中身を調べるため、検査の後に相手が項目を足せない
+  - 中に `fnox` という名前の symlink 以外が無いことを、`find` の終了状態と出力の両方で確かめた。出力だけを見ると、列挙に失敗して出力が空のときに通ってしまう（以前ほかのユーザーが書き込めた時期に置かれた項目を使わない）
+  - `ln -sfn` で fnox 実体への symlink の置き換えに成功した。`-f` は一時名に作ってから rename で置き換えるため、失敗すると相手が以前置いた `fnox` が残ることがあり、成功するまで PATH に足さない
+- clone 先は `mktemp -d` で作り、その直後に `cd` で中に入る。固定の名前（`git clone` の既定の `/tmp/Pelway` など）は、同じマシンの別ユーザーが先に空のディレクトリ（mode 0777）を作っておくと `git clone` がそのまま受け入れ、最上位のディレクトリが相手の持ち物のまま残る。相手はその所有者なので `scripts/agent-gh` を差し替えたり、本人の `mise.toml` を消して自分のものを置いたりでき、`MISE_TRUSTED_CONFIG_PATHS` で信頼した設定ごと本人の権限で動く。`mktemp -d` は mkdir(2) で作るため、既にある名前では EEXIST で失敗して別の名前を試し、先に作られた名前を受け入れない
+- 確かめ方の `scripts/agent-gh` は相対パスなので、clone の中で実行する。`cd` をせずに /tmp など別のディレクトリにいると、そこに先に置かれた同名のスクリプトが本人の権限で動く
+- fnox 実体のパスは `~/.local/share/mise/installs/fnox/latest/fnox`。`/tmp/sshims` にはこの symlink だけを置き、PATH の先頭に置いて shim より先に実体が解決されるようにする。
+- `MISE_TRUSTED_CONFIG_PATHS` は /tmp 側の clone（`$clone`）を mise に信頼させる（`mise trust` の記録を書かずに済む）。`mise run` など mise 経由のコマンドがこれで動くかは未確認。
+- 確かめ方: セットアップ（上の `if` ブロック）全体が成功して `PATH` と `MISE_TRUSTED_CONFIG_PATHS` が設定された場合に限り、clone の中で確かめる（`else` に落ちたときは実行しない）。`command -v fnox` が `/tmp/sshims/fnox` を返し、`scripts/agent-gh dev api /rate_limit` が成功する。
+- 再マウント自体の対策・マウント設定の変更はこの手順の範囲外。
+
 ### デモの LLM 接続（#330）
 
 - デモの runner（`pelway-runner`）は環境変数で LLM 接続を組み立てる（`DemoLlmConfig::from_env`。定数名は `crates/pelway-runner/src/demo.rs` の定数を参照）:
@@ -795,7 +833,7 @@ container run --rm alpine echo hello   # hello 程度の smoke
   - 送れなかったら `WAKE failed <理由>`（理由は `exit=<終了コード>`・`exit=signal`・`spawn:`・`stdin:`・`wait:` のどれか）を 1 行残すだけで送り直さず、次の新しい知らせで改めて試みる。知らせは受信箱に残り、指揮役の巡回が読む。
   - `patrol-state.json` は sandbox の中のエージェントが書けるので、`inbox_offset` を書き換えれば重ねての起こしの抑止は外れる。逆に、受信箱の行数以内で実際より先の値に書き換えると、起こしたときにその値が基準に残り、補助記録を正しい値に戻しても、既読の位置がその値を超えるまで起こしは送られない（知らせは受信箱に残り、定期巡回が読む）。その場合も送られるのは、決まった文を、hatai が登録した 1 つのスレッドへ、知らせ 1 件につき最大 1 回だけである。
 - 送らずに試すには `cargo run -p pelway-agent-watch -- --once --dry-run`（新しいイベントの payload を標準出力に出す。状態ファイルは読むだけで書き換えず、受信箱にも書かず、起こしも送らない）。
-- 再起動のあとの自動起動: `pitchfork.toml` の `agent-watch` には `boot_start = true` を付けてあり、login 時に起動する pitchfork の supervisor（`pitchfork supervisor run --boot`）が agent-watch を起動する。起動時の supervisor は作業ディレクトリを持たず、読むのはユーザーの設定（`~/.config/pitchfork/config.toml`）と、その `[namespaces]` に登録されたプロジェクト（とその全 worktree）の `pitchfork.toml` だけなので、次の 2 つを PC 側で入れておく。どちらもリポジトリの外の設定で、hatai が OK のうえで手で行う。
+- 再起動のあとの自動起動: `pitchfork.toml` の `agent-watch` には `boot_start = true` を付けてあり、login 時に起動する pitchfork の supervisor（`pitchfork supervisor run --boot`）が agent-watch を起動する。起動時の supervisor は作業ディレクトリを持たず、読むのはユーザーの設定（`~/.config/pitchfork/config.toml`）と、その `[namespaces]` に登録されたプロジェクト（とその全 worktree）の `pitchfork.toml` だけなので、次の 3 つを PC 側で入れておく。3 つともリポジトリの外の設定で、hatai が OK のうえで手で行う。
   1. supervisor の login 時の起動を登録する: `pitchfork boot enable`（sudo なし。`~/.config/systemd/user/pitchfork.service` ができる）。`pitchfork boot status` が `Boot start is enabled` になれば済み。
   2. 本体 checkout を namespace として登録する: `~/.config/pitchfork/config.toml` に次を書く（`dir` は本体 checkout の絶対パス。`git worktree list` の 1 行目）。
 
@@ -803,6 +841,15 @@ container run --rm alpine echo hello   # hello 程度の smoke
      [namespaces.pelway]
      dir = "/home/<ユーザー>/repos/hatai/Pelway"
      ```
+
+  3. supervisor の PATH を足す: login 時に起動する supervisor（`~/.config/systemd/user/pitchfork.service`）の PATH には `git`・`gh`（`/home/linuxbrew/.linuxbrew/bin`）と `t3`（`~/.local/bin`）が無く、agent-watch は `git rev-parse: exit 127` で止まり、`agent-worktree-prune` も `git: command not found` で失敗する（[調査報告](worklogs/bugs/agent-watch-not-running/report.md)の根本原因の 4）。drop-in `~/.config/systemd/user/pitchfork.service.d/path.conf` を次の中身で作る。systemd の `Environment=` は `~` も `$HOME` も展開しないので、ホームは指定子 `%h` で書く。
+
+     ```ini
+     [Service]
+     Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+     ```
+
+     `systemctl --user daemon-reload` のあと `systemctl --user restart pitchfork.service` で適用する。入ったかの確かめ方: `systemctl --user show pitchfork.service -p Environment` の出力に、上の PATH（`%h` がホームのパスに展開されたもの）が出る。
 
   - 起動時に読まれるのは、本体 checkout にいまチェックアウトされているブランチの `pitchfork.toml` なので、本体 checkout は `boot_start = true` の入った main に置いておく。
   - 起動時の supervisor は各 worktree の同じ定義からも agent-watch の起動を試みるが、上の決まりで worktree からの起動は理由を 1 行出して終了コード 0 で終わる（pitchfork の再起動は起きない）。動き続けるのは本体 checkout の 1 つだけ。

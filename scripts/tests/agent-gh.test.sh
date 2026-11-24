@@ -102,6 +102,22 @@ EOF
 cat >"$BIN/git" <<'EOF'
 #!/usr/bin/env bash
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_TELEMETRY=%s\n' "${GH_TELEMETRY:-}"; printf 'DO_NOT_TRACK=%s\n' "${DO_NOT_TRACK:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
+# FAKE_GIT_HEAD があれば、symbolic-ref（今のブランチ名の問い合わせ）にその名前を返す（#641）。
+[[ "$*" != *symbolic-ref* || -z "${FAKE_GIT_HEAD:-}" ]] || printf '%s\n' "$FAKE_GIT_HEAD"
+# FAKE_GIT_RECURSE があれば、config --get-regexp（push.recurseSubmodules / submodule.recurse）にその値を返す（#641）。
+# 旧形の config --get push.recurseSubmodules にも、その中の push.recursesubmodules の最後の値を返す。
+# GIT_CONFIG があると git config はそのファイルだけを読むため、そのときは FAKE_GIT_CONFIG_RECURSE を返す
+# （push は GIT_CONFIG を見ずに通常の設定を読む。実装側の判定が同じ設定を読むことを確かめる）。
+if [[ "$*" == "config --get push.recurseSubmodules" && -n "${FAKE_GIT_RECURSE:-}" && -z "${GIT_CONFIG:-}" ]]; then
+  printf '%s\n' "$FAKE_GIT_RECURSE" | sed -n 's|^push\.recursesubmodules ||p' | tail -n 1
+fi
+if [[ "$*" == config\ --get-regexp* ]]; then
+  if [[ -n "${GIT_CONFIG:-}" ]]; then
+    [[ -z "${FAKE_GIT_CONFIG_RECURSE:-}" ]] || printf '%s\n' "$FAKE_GIT_CONFIG_RECURSE"
+  else
+    [[ -z "${FAKE_GIT_RECURSE:-}" ]] || printf '%s\n' "$FAKE_GIT_RECURSE"
+  fi
+fi
 EOF
 
 # 偽の mktemp: 本物に委譤し、作成したパスを種別（f=ファイル、d=ディレクトリ）とともに記録する
@@ -293,6 +309,173 @@ push_rc=$?
 [[ "$push_rc" == 0 ]] || failures+=("dev_git_push_skip: exit $push_rc, want 0")
 expect_log dev_git_push_skip "push"
 ! grep -qF 'rev-parse' "$ROOT/dev_git_push_skip.log" || failures+=("dev_git_push_skip: resign ran despite skip")
+
+# --- push 先を resign に渡す（#641）---
+# resign は位置引数で対象を受け取ると、その追跡 ref を `rev-parse --verify -q refs/remotes/<remote>/<branch>` で引く。
+# 位置引数が無いときだけ `@{u}` を引く。偽の git の記録から、resign に渡った対象を読み取る。
+# push_run <name> <git push の引数...>: リポジトリ外で agent-gh dev git push を実行する（出力は <name>.out）
+push_run() {
+  local name="$1"
+  shift
+  export CALL_LOG="$ROOT/$name.log"
+  rm -f "$CALL_LOG"
+  (cd "$ROOT/norepo" && bash "$SCRIPT" dev git push "$@" >"$ROOT/$name.out" 2>&1)
+  RC=$?
+}
+# expect_push_targets <name> <want>: resign が引いた追跡 ref（remote/branch を空白区切り）と @{u} の照会回数
+expect_push_targets() {
+  local name="$1" want="$2" want_upstream="$3" got upstream
+  got="$(sed -n 's|^ARGS=rev-parse --verify -q refs/remotes/||p' "$ROOT/$name.log" | paste -sd' ' -)"
+  upstream="$(grep -c '^ARGS=rev-parse --abbrev-ref --symbolic-full-name @{u}$' "$ROOT/$name.log")"
+  [[ "$RC" == 0 ]] || failures+=("$name: exit $RC, want 0 ($(cat "$ROOT/$name.out"))")
+  [[ "$got" == "$want" ]] || failures+=("$name: resign targets '$got', want '$want'")
+  [[ "$upstream" == "$want_upstream" ]] || failures+=("$name: @{u} lookups $upstream, want $want_upstream")
+}
+
+push_run push_src_dst origin feature:agent/X
+expect_push_targets push_src_dst "origin/agent/X" 0
+push_run push_force_refs_heads origin +feature:refs/heads/agent/Y
+expect_push_targets push_force_refs_heads "origin/agent/Y" 0
+push_run push_single origin agent/X
+expect_push_targets push_single "origin/agent/X" 0
+FAKE_GIT_HEAD=agent/cur push_run push_u_head -u origin HEAD
+expect_push_targets push_u_head "origin/agent/cur" 0
+FAKE_GIT_HEAD=agent/cur push_run push_head_dst origin HEAD:agent/X
+expect_push_targets push_head_dst "origin/agent/X" 0
+# 値を取るオプション（-o <値>）の値を refspec と取り違えない
+push_run push_option_value -o ci.skip origin feature:agent/Z
+expect_push_targets push_option_value "origin/agent/Z" 0
+# refspec を省いた push は、今までどおり位置引数なしで resign を呼ぶ（resign が @{u} から決める）
+push_run push_no_refspec
+expect_push_targets push_no_refspec "" 1
+push_run push_remote_only origin
+expect_push_targets push_remote_only "" 1
+# 複数のブランチの push は、ブランチごとに 1 回ずつ
+push_run push_multi origin a:agent/A b:agent/B
+expect_push_targets push_multi "origin/agent/A origin/agent/B" 0
+# タグと削除では resign を呼ばない
+push_run push_tag origin refs/tags/v1
+expect_push_targets push_tag "" 0
+push_run push_tag_dst origin v1:refs/tags/v1
+expect_push_targets push_tag_dst "" 0
+push_run push_delete_colon origin :agent/X
+expect_push_targets push_delete_colon "" 0
+push_run push_delete_flag --delete origin agent/X
+expect_push_targets push_delete_flag "" 0
+push_run push_delete_short -d origin agent/X
+expect_push_targets push_delete_short "" 0
+# 上のどれにも当たらない形（--all・--mirror）は、今までどおり位置引数なしで呼ぶ
+push_run push_all --all origin
+expect_push_targets push_all "" 1
+push_run push_mirror --mirror origin
+expect_push_targets push_mirror "" 1
+# 試行（--dry-run / -n、まとめ書きの -fn も）では何も push されないため、resign を呼ばない
+push_run push_dry_run --dry-run origin feature:agent/N
+expect_push_targets push_dry_run "" 0
+push_run push_dry_run_short -n origin feature:agent/N
+expect_push_targets push_dry_run_short "" 0
+push_run push_dry_run_bundle -fn origin feature:agent/N
+expect_push_targets push_dry_run_bundle "" 0
+# Git は一意に特定できる接頭辞の長いオプション省略形を受理する（--dry、--dr も試行になる。
+# --d は --delete と曖昧で git が拒否するため push_targets には届かない）
+push_run push_dry_run_abbrev_dr --dr origin feature:agent/N
+expect_push_targets push_dry_run_abbrev_dr "" 0
+push_run push_dry_run_abbrev_dry --dry origin feature:agent/N
+expect_push_targets push_dry_run_abbrev_dry "" 0
+push_run push_dry_run_abbrev_dry_ru --dry-ru origin feature:agent/N
+expect_push_targets push_dry_run_abbrev_dry_ru "" 0
+# まとめ書きの削除（-fd）でも resign を呼ばない
+push_run push_delete_bundle -fd origin agent/X
+expect_push_targets push_delete_bundle "" 0
+# --delete の一意な省略形も削除
+push_run push_delete_abbrev --del origin agent/X
+expect_push_targets push_delete_abbrev "" 0
+# 否定形（--no-）は直前の指定を戻す。-n --no-dry-run は実 push になるため署名を付け直す
+push_run push_no_dry_run -n --no-dry-run origin feature:agent/N
+expect_push_targets push_no_dry_run "origin/agent/N" 0
+push_run push_no_dry_abbrev -n --no-dr origin feature:agent/N
+expect_push_targets push_no_dry_abbrev "origin/agent/N" 0
+push_run push_no_delete -d --no-delete origin agent/X
+expect_push_targets push_no_delete "origin/agent/X" 0
+# fallback を立てる形の否定は fallback を戻す
+push_run push_no_all --all --no-all origin a:agent/A
+expect_push_targets push_no_all "origin/agent/A" 0
+# 値を別の引数で取る長いオプションの省略形は、次の引数を値として消費する（remote と取り違えない）
+push_run push_pushopt_abbrev --push-o ci.skip origin feature:agent/Z
+expect_push_targets push_pushopt_abbrev "origin/agent/Z" 0
+# --ex は --exec の一意な省略形。次の引数を値として消費する形だが、転送コマンドの指定なので push_targets より前に拒否される
+push_run push_exec_abbrev --ex pack origin feature:agent/Z
+[[ "$RC" == 2 ]] || failures+=("push_exec_abbrev: exit $RC, want 2: $(cat "$ROOT/push_exec_abbrev.out")")
+push_run push_recurse_abbrev --recu check origin feature:agent/Z
+expect_push_targets push_recurse_abbrev "origin/agent/Z" 0
+# =<値> の連結形は次の引数を取らない
+push_run push_pushopt_joined --push-option=x origin feature:agent/Z
+expect_push_targets push_pushopt_joined "origin/agent/Z" 0
+# fallback を立てる形の一意な省略形も fallback
+push_run push_all_abbrev --al origin
+expect_push_targets push_all_abbrev "" 1
+# --repo は値を取る: 値として --no-dry-run を消費するため dry-run のまま（何も push されない）
+push_run push_repo_value_no_dry -n --repo --no-dry-run --no-all origin feature:agent/X
+expect_push_targets push_repo_value_no_dry "" 0
+# --repo が -n を値として消費すると実 push になる（fallback で resign を呼ぶ）
+push_run push_repo_value_flag --repo -n origin HEAD:agent/X
+expect_push_targets push_repo_value_flag "" 1
+# --end-of-options 以降はオプションとして解釈しない。--no-dry-run も位置引数のため dry-run のまま
+push_run push_end_of_options -n --end-of-options origin --no-dry-run
+expect_push_targets push_end_of_options "" 0
+# --recurse-submodules=only はサブモジュールだけを送り親リポジトリを更新しないため resign を呼ばない
+push_run push_submod_only --recurse-submodules=only origin a:agent/X
+expect_push_targets push_submod_only "" 0
+# 連結形の一意な省略形でも同じ
+push_run push_submod_only_abbrev --recu=only origin a:agent/X
+expect_push_targets push_submod_only_abbrev "" 0
+# 別引数で取る省略形でも同じ
+push_run push_submod_only_sep --recu only origin a:agent/X
+expect_push_targets push_submod_only_sep "" 0
+# 後に書いた指定が勝つ: 否定形と別の値で解除される
+push_run push_submod_only_undone --recu=only --no-recurse-submodules origin a:agent/X
+expect_push_targets push_submod_only_undone "origin/agent/X" 0
+push_run push_submod_only_recheck --recu=only --recurse-submodules=check origin a:agent/X
+expect_push_targets push_submod_only_recheck "origin/agent/X" 0
+# push.recurseSubmodules=only の設定でも resign を呼ばない（CLI で上書きすれば呼ぶ）。
+# Git は submodule.recurse も読み、後に読んだ設定を使うため、両キーの最後の項目で決める
+export FAKE_GIT_RECURSE='push.recursesubmodules only'
+push_run push_submod_only_config origin a:agent/X
+expect_push_targets push_submod_only_config "" 0
+push_run push_submod_config_cli --recurse-submodules=check origin a:agent/X
+expect_push_targets push_submod_config_cli "origin/agent/X" 0
+# submodule.recurse が後に読まれれば only は解除される（真偽値で only を取り得ないため親も送る）
+export FAKE_GIT_RECURSE='push.recursesubmodules only
+submodule.recurse true'
+push_run push_submod_config_conflict origin a:agent/X
+expect_push_targets push_submod_config_conflict "origin/agent/X" 0
+# push.recurseSubmodules=only が後に読まれれば only のまま
+export FAKE_GIT_RECURSE='submodule.recurse true
+push.recursesubmodules only'
+push_run push_submod_config_last_only origin a:agent/X
+expect_push_targets push_submod_config_last_only "" 0
+# GIT_CONFIG が別のファイルを指していても、判定は push が読む通常の設定で行う（#641 r11）。
+# 通常の設定が only（GIT_CONFIG 側には only が無い）なら親を送っていないため resign を呼ばない
+export FAKE_GIT_RECURSE='push.recursesubmodules only'
+GIT_CONFIG="$ROOT/gitconfig-elsewhere" push_run push_submod_gitconfig_ignored origin a:agent/X
+expect_push_targets push_submod_gitconfig_ignored "" 0
+# 逆に GIT_CONFIG 側のファイルにだけ only があっても、push は通常の設定で親を送るため resign を呼ぶ
+unset FAKE_GIT_RECURSE
+GIT_CONFIG="$ROOT/gitconfig-elsewhere" FAKE_GIT_CONFIG_RECURSE='push.recursesubmodules only' \
+  push_run push_submod_gitconfig_only origin a:agent/X
+expect_push_targets push_submod_gitconfig_only "origin/agent/X" 0
+unset FAKE_GIT_CONFIG_RECURSE GIT_CONFIG
+push_run push_mirror_abbrev --mi origin
+expect_push_targets push_mirror_abbrev "" 1
+push_run push_tags_abbrev --ta origin v1
+expect_push_targets push_tags_abbrev "" 1
+# まとめ書きの末尾が -o のとき、次の引数はその値（remote と取り違えない）。
+# -f + -o のまとめ書きはスペルチェッカの誤検出になるため -u + -o（-uo）で確かめる
+push_run push_bundle_option_tail -uo ci.skip origin feature:agent/Z
+expect_push_targets push_bundle_option_tail "origin/agent/Z" 0
+# 名前空間つきの宛先 refs/heads/refs/topic は、ブランチ名 refs/topic として署名対象に入る
+push_run push_refs_heads_branch origin x:refs/heads/refs/topic
+expect_push_targets push_refs_heads_branch "origin/refs/topic" 0
 
 run bad_role admin pr list
 [[ "$RC" == 2 ]] || failures+=("bad_role: exit $RC, want 2")
