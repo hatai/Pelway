@@ -337,9 +337,11 @@ push_targets() {
       *) positional+=("$a") ;;
     esac
   done
-  # オプションでの指定がなければ push.recurseSubmodules の設定を見る。
-  # only（サブモジュールだけを送る）は親リポジトリの ref を更新しないため resign を呼ばない
-  ((!submod_seen)) && [[ "$(git config --get push.recurseSubmodules 2>/dev/null)" == only ]] && submod_only=1
+  # オプションでの指定がなければ設定を見る。Git は push.recurseSubmodules と submodule.recurse を
+  # 読み、後に読んだ設定を使うため、両方のキーを設定ファイルの順序で見て最後のものを採用する。
+  # submodule.recurse は真偽値で only を取り得ない。only（サブモジュールだけを送る）は親リポジトリの
+  # ref を更新しないため resign を呼ばない
+  ((!submod_seen)) && [[ "$(git config --get-regexp '^(push\.recursesubmodules|submodule\.recurse)$' 2>/dev/null | tail -n 1)" == "push.recursesubmodules only" ]] && submod_only=1
   ((delete || submod_only)) && { push_fallback=0; return 0; }
   ((push_fallback)) && return 0
   if ((${#positional[@]} < 2)); then

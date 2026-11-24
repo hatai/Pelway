@@ -102,8 +102,12 @@ cat >"$BIN/git" <<'EOF'
 { printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"; printf 'GH_CONFIG_DIR=%s\n' "${GH_CONFIG_DIR:-}"; printf 'GH_TELEMETRY=%s\n' "${GH_TELEMETRY:-}"; printf 'DO_NOT_TRACK=%s\n' "${DO_NOT_TRACK:-}"; printf 'ARGS=%s\n' "$*"; } >>"$CALL_LOG"
 # FAKE_GIT_HEAD があれば、symbolic-ref（今のブランチ名の問い合わせ）にその名前を返す（#641）。
 [[ "$*" != *symbolic-ref* || -z "${FAKE_GIT_HEAD:-}" ]] || printf '%s\n' "$FAKE_GIT_HEAD"
-# FAKE_GIT_RECURSE があれば、config --get push.recurseSubmodules にその値を返す（#641）。
-[[ "$*" != "config --get push.recurseSubmodules" || -z "${FAKE_GIT_RECURSE:-}" ]] || printf '%s\n' "$FAKE_GIT_RECURSE"
+# FAKE_GIT_RECURSE があれば、config --get-regexp（push.recurseSubmodules / submodule.recurse）にその値を返す（#641）。
+# 旧形の config --get push.recurseSubmodules にも、その中の push.recursesubmodules の最後の値を返す。
+if [[ "$*" == "config --get push.recurseSubmodules" && -n "${FAKE_GIT_RECURSE:-}" ]]; then
+  printf '%s\n' "$FAKE_GIT_RECURSE" | sed -n 's|^push\.recursesubmodules ||p' | tail -n 1
+fi
+[[ "$*" != config\ --get-regexp* || -z "${FAKE_GIT_RECURSE:-}" ]] || printf '%s\n' "$FAKE_GIT_RECURSE"
 EOF
 
 # 偽の mktemp: 本物に委譤し、作成したパスを種別（f=ファイル、d=ディレクトリ）とともに記録する
@@ -422,12 +426,23 @@ push_run push_submod_only_undone --recu=only --no-recurse-submodules origin a:ag
 expect_push_targets push_submod_only_undone "origin/agent/X" 0
 push_run push_submod_only_recheck --recu=only --recurse-submodules=check origin a:agent/X
 expect_push_targets push_submod_only_recheck "origin/agent/X" 0
-# push.recurseSubmodules=only の設定でも resign を呼ばない（CLI で上書きすれば呼ぶ）
-export FAKE_GIT_RECURSE=only
+# push.recurseSubmodules=only の設定でも resign を呼ばない（CLI で上書きすれば呼ぶ）。
+# Git は submodule.recurse も読み、後に読んだ設定を使うため、両キーの最後の項目で決める
+export FAKE_GIT_RECURSE='push.recursesubmodules only'
 push_run push_submod_only_config origin a:agent/X
 expect_push_targets push_submod_only_config "" 0
 push_run push_submod_config_cli --recurse-submodules=check origin a:agent/X
 expect_push_targets push_submod_config_cli "origin/agent/X" 0
+# submodule.recurse が後に読まれれば only は解除される（真偽値で only を取り得ないため親も送る）
+export FAKE_GIT_RECURSE='push.recursesubmodules only
+submodule.recurse true'
+push_run push_submod_config_conflict origin a:agent/X
+expect_push_targets push_submod_config_conflict "origin/agent/X" 0
+# push.recurseSubmodules=only が後に読まれれば only のまま
+export FAKE_GIT_RECURSE='submodule.recurse true
+push.recursesubmodules only'
+push_run push_submod_config_last_only origin a:agent/X
+expect_push_targets push_submod_config_last_only "" 0
 unset FAKE_GIT_RECURSE
 push_run push_mirror_abbrev --mi origin
 expect_push_targets push_mirror_abbrev "" 1
