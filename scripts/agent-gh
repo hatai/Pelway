@@ -323,7 +323,7 @@ if [[ "${1:-}" == "git" ]]; then
   #   pull・push は `--` を外して後ろの引数を子の git に渡す（pull は builtin/pull.c の run_fetch が
   #   `git fetch` を、push は submodule.c がサブモジュールの `git push` を起動する）ため、子はそれらを
   #   オプションとして解釈する（実測: `git pull -- . --upload-pack=<cmd>` は <cmd> を実行する）。
-  # - ls-remote は最初の位置引数の後ろをリポジトリ名と参照パターンとして読む（builtin/ls-remote.c の
+  # - ls-remote は最初の位置引数をリポジトリ名、その後ろの引数を参照パターンとして読む（builtin/ls-remote.c の
   #   PARSE_OPT_STOP_AT_NON_OPTION）ため、`-` で始まらない引数が来た時点で走査を終える（`git ls-remote
   #   origin --exec` の --exec は参照パターンとして扱われる）。fetch・pull・push は parse-options の既定で、
   #   位置引数の後ろでも `-` の引数をオプションとして解釈する（実測: git fetch <repo> --upload-pack <path>
@@ -423,7 +423,12 @@ if ((${#bad[@]})); then
   echo "agent-gh: $PELWAY_AGENT_PUSH_GUIDE" >&2
   exit 1
 fi
-orig="$(git config --show-scope --get-all --type=path core.hooksPath 2>/dev/null | awk -F'\t' '$1 != "command" {v = $2} END {print v}')"
+# スコープと値は `-z` の NUL 区切り（scope\0value\0 の並び）で読む。タブや改行を含むパスを壊さないため
+# （`--show-scope` の区切りはタブで、パスにタブがあると awk のフィールド切りで後ろが落ちる）。
+orig=""
+while IFS= read -r -d '' scope && IFS= read -r -d '' val; do
+  [[ "$scope" != command ]] && orig="$val"
+done < <(git config -z --show-scope --get-all --type=path core.hooksPath 2>/dev/null)
 orig="${orig:-$(git rev-parse --git-common-dir)/hooks}"
 if [[ -x "$orig/pre-push" ]]; then
   "$orig/pre-push" "$@" <<<"$input"

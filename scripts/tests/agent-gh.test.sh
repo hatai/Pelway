@@ -625,6 +625,15 @@ push_run committer_block dev git push
 [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("committer_block: remote ref changed")
 [[ "$OUT" == *"$bad_sha"* && "$OUT" == *"committer=hatai"* ]] || failures+=("committer_block: stderr lacks sha/committer: $OUT")
 
+work_git reset -q --hard "$before"
+(cd "$PUSH_DIR/work" && GIT_AUTHOR_NAME=hatai GIT_AUTHOR_EMAIL=h@example.com GIT_COMMITTER_NAME='pelway-dev[bot]' GIT_COMMITTER_EMAIL="$DEV_EMAIL" \
+  "$REAL_GIT" -c commit.gpgsign=false commit -q --allow-empty -m author-only)
+bad_sha="$(work_git rev-parse --short HEAD)"
+push_run author_only_block dev git push
+[[ "$RC" != 0 ]] || failures+=("author_only_block: exit 0, want non-zero")
+[[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("author_only_block: remote ref changed")
+[[ "$OUT" == *"$bad_sha"* && "$OUT" == *"author=hatai"* ]] || failures+=("author_only_block: stderr lacks sha/author: $OUT")
+
 # 5. 確認を外す環境変数・引数は無い: PELWAY_AGENT_SKIP_RESIGN=1・--no-verify（その省略形）・
 #    core.hooksPath の上書きのどれでも push されない。
 PELWAY_AGENT_SKIP_RESIGN=1 push_run skip_resign_still_checks dev git push
@@ -829,6 +838,23 @@ work_git config hook.other.command true
 expect_hook_block config-hook X=1
 work_git config --unset hook.other.event
 work_git config --unset hook.other.command
+
+# 名義の確認を通った push では、core.hooksPath が指す既存の pre-push を続けて呼ぶ。パスにタブを含んでも
+# 値全体を保って読む（git config のスコープと値の区切りはタブのため、タブ区切りで読むとパスの後ろが落ちて
+# 別の場所を見に行き、元フックの拒否をすり抜ける）。拒否を返すフックが呼ばれ、remote の ref は変わらない。
+work_git reset -q --hard "$before"
+(cd "$PUSH_DIR/work" && as 'pelway-dev[bot]' commit -q --allow-empty -m orig-hook)
+tabhookdir="$PUSH_DIR/hooks$(printf 'with\ttab')"
+mkdir -p "$tabhookdir"
+printf '#!/usr/bin/env bash\ntouch "$ORIGHOOK_CALLED"\nexit 1\n' >"$tabhookdir/pre-push"
+chmod +x "$tabhookdir/pre-push"
+work_git config core.hooksPath "$tabhookdir"
+OUT="$(cd "$PUSH_DIR/work" && ORIGHOOK_CALLED="$PUSH_DIR/orighook-called" PATH="$RGBIN:$PATH" bash "$SCRIPT" dev git push origin HEAD 2>&1)"
+RC=$?
+work_git config --unset core.hooksPath
+[[ "$RC" != 0 ]] || failures+=("orighook_tab: exit 0, want non-zero")
+[[ -e "$PUSH_DIR/orighook-called" ]] || failures+=("orighook_tab: original pre-push not called")
+[[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("orighook_tab: remote ref changed")
 
 # 6. review の push も同じ確認を通る。正しい名義は pelway-review[bot]。
 setup_push_repo review_push
