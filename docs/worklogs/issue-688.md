@@ -54,7 +54,7 @@
 
 ## 実装者メモ（round 5）
 
-対象 head: <push 後に記入>
+対象 head: e5bed8de
 
 1. 詰まった箇所: 手順 9: round 4 の Approve に印 nit 2 件（runbook:207 の `devin_review` に合わない 2 文、PR 本文が round 1 のまま古い）。印 nit round の上限は hatai の決定（t629u）で無効化され継続中。Codex の委託は利用上限（4:39 AM JST リセット見込み）で blocked。
 2. 曖昧だった文: 「effort は `modelSelection.options` に入れる（…Devin CLI なら `thought_level`…）」「`acpRegistry_devin`（Devin CLI）に割り当てるときは `runtimeMode` の指定が無い」（`docs/agents/grokbot-runbook.md` の「MCP の `t3_thread_launch` と `t3_thread_send` の引数」）
