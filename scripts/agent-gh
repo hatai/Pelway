@@ -298,8 +298,13 @@ push_targets() {
           if ((neg)); then delete=0; else delete=1; fi
         elif push_longopt "$opt" all 2 || push_longopt "$opt" branches 1 ||
           push_longopt "$opt" mirror 1 || push_longopt "$opt" tags 2 ||
-          push_longopt "$opt" prune 3 || push_longopt "$opt" repo 3; then
+          push_longopt "$opt" prune 3; then
           if ((neg)); then push_fallback=0; else push_fallback=1; fi
+        elif push_longopt "$opt" repo 3; then
+          # --repo は値を取る（=<値> の連結でなければ次の引数）。値を読み飛ばさないと
+          # 直後の --no-dry-run や -n を旗と取り違えて dry-run の判定が食い違う。
+          # 否定形（--no-repo）は値を取らず fallback も立てない
+          if ((neg)); then push_fallback=0; else push_fallback=1; ((joined)) || shift; fi
         elif ((neg || joined)); then
           : # --no-* の否定と =<値> の連結は残りの引数を取らない
         elif push_longopt "$opt" push-option 2 || push_longopt "$opt" receive-pack 4 ||

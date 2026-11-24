@@ -397,6 +397,12 @@ expect_push_targets push_pushopt_joined "origin/agent/Z" 0
 # fallback を立てる形の一意な省略形も fallback
 push_run push_all_abbrev --al origin
 expect_push_targets push_all_abbrev "" 1
+# --repo は値を取る: 値として --no-dry-run を消費するため dry-run のまま（何も push されない）
+push_run push_repo_value_no_dry -n --repo --no-dry-run --no-all origin feature:agent/X
+expect_push_targets push_repo_value_no_dry "" 0
+# --repo が -n を値として消費すると実 push になる（fallback で resign を呼ぶ）
+push_run push_repo_value_flag --repo -n origin HEAD:agent/X
+expect_push_targets push_repo_value_flag "" 1
 push_run push_mirror_abbrev --mi origin
 expect_push_targets push_mirror_abbrev "" 1
 push_run push_tags_abbrev --ta origin v1
