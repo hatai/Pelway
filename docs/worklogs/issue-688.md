@@ -27,3 +27,15 @@
 5. 改善案: `.agents/skills/command-team/SKILL.md` の「スレッド名」の箇条も「省略すると…」の適用先が曖昧なので、別 Issue で「`t3 thread start` の `--title` を省略したとき」の限定を足すとよい。
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）
+
+## 実装者メモ（round 3）
+
+対象 head: e79992674edf42e1bf7d0d71232d08e0bf671c70
+
+1. 詰まった箇所: 手順 9: round 2 の Approve に `[文書のずれ]` nit 4 件（command-team:62 の省略時動作の適用先、例の options に effort が無い、`acpRegistry_devin` の例と `runtimeMode` 非対応の矛盾、`workspaceStrategy` に `branch` が無い）。印の nit だけを直す round の通算 2 回目。
+2. 曖昧だった文: 「`runtimeMode` には `approval-required`・`auto-accept-edits`・`auto`・`full-access` のどれか、…effort は `modelSelection.options` に入れる」（`docs/agents/grokbot-runbook.md` の「MCP の `t3_thread_launch` と `t3_thread_send` の引数」）
+3. 仮定と解釈: nit の提案どおり例の provider を `runtimeMode` が効く `opencode` に替え、options は `variant` にした。`acpRegistry_devin` への差し替え方は本文の 1 文（`runtimeMode` の指定が無い）でカバーする解釈とした。`workspaceStrategy.branch` はツール定義（Issue 抜粋）に列挙があるため、CLI と同じブランチ名を入れる形にした。
+4. 足りなかった情報・検証手段: `acpRegistry_devin` に `runtimeMode` を渡したときの T3 の実挙動は未検証で、文書の決まり（Devin CLI に指定が無い）を正とした。
+5. 改善案: `docs/agents/grokbot-runbook.md` の「レビューを始める」に、MCP でレビュースレッドを立てるときの instanceId ごとの `runtimeMode` 可否の表を足すと、例との参照が一方向で済む。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）
