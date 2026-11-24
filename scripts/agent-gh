@@ -304,25 +304,38 @@ if [[ "${1:-}" == "git" ]]; then
   fi
   # 転送の相手側で実行するコマンドを指定するオプション（--upload-pack・--receive-pack・--exec）は、ローカルの
   # remote ではコマンドをその場で実行するため拒否する。git が受け付ける省略形（3 文字以上の前方一致）も含める。
-  for a in "${@:2}"; do
-    opt="${a%%=*}"
-    # ls-remote の -u は --upload-pack の短い形（分離・連結・まとめた形のどれでも拒否する）。
-    if [[ "$git_sub" == ls-remote && "$a" =~ ^-[^-]*u ]]; then
-      echo "agent-gh: git ls-remote の -u は使えません（コマンドを実行して push の名義の確認を外せるため）" >&2
-      exit 2
-    fi
-    if [[ "$opt" == --?* ]]; then
-      for t in --upload-pack --receive-pack --exec; do
-        if [[ "$t" == "$opt"* ]]; then
-          echo "agent-gh: git $git_sub の $t は使えません（コマンドを実行して push の名義の確認を外せるため）" >&2
+  # このオプションを解釈するサブコマンド（fetch・pull・push・ls-remote）にだけ掛ける。ほかのサブコマンド
+  # （add・status・diff・restore など）の `-` で始まる引数は、git がパス名として扱うものを拒否しない
+  # （`git add -- --exec` のようなファイルの指定）。
+  # `--` で走査を止めない: 値を別の引数で取るオプションは `--` を値として取り込むため（実測: git commit
+  # -m -- --no-verify はメッセージが `--` のコミットを作る）、`git push -o -- --no-verify` のような形は
+  # `--` の後ろでもオプションとして解釈される。これらのサブコマンドの位置引数はリポジトリ名と refspec
+  # だけで、`-` で始まる正当な指定は無い（`--` の後ろの `-` で始まる引数は git 側でも refspec として
+  # 受理できない）。
+  case "$git_sub" in
+    fetch|pull|push|ls-remote)
+      for a in "${@:2}"; do
+        opt="${a%%=*}"
+        # ls-remote の -u は --upload-pack の短い形（分離・連結・まとめた形のどれでも拒否する）。
+        if [[ "$git_sub" == ls-remote && "$a" =~ ^-[^-]*u ]]; then
+          echo "agent-gh: git ls-remote の -u は使えません（コマンドを実行して push の名義の確認を外せるため）" >&2
           exit 2
         fi
+        if [[ "$opt" == --?* ]]; then
+          for t in --upload-pack --receive-pack --exec; do
+            if [[ "$t" == "$opt"* ]]; then
+              echo "agent-gh: git $git_sub の $t は使えません（コマンドを実行して push の名義の確認を外せるため）" >&2
+              exit 2
+            fi
+          done
+        fi
       done
-    fi
-  done
+      ;;
+  esac
   if [[ "$git_sub" == push ]]; then
     for a in "${@:2}"; do
       # --no-verify と、git が受け付けるその省略形（--no-veri 以上）は pre-push フックを飛ばすため拒否する。
+      # 走査は `--` で止めない（上の転送オプションの検査と同じ理由）。
       if ((${#a} >= 9)) && [[ "--no-verify" == "$a"* ]]; then
         echo "agent-gh: push の --no-verify は使えません（push の名義の確認を外せないため）" >&2
         exit 2

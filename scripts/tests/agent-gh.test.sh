@@ -700,7 +700,27 @@ expect_rejected ls-remote-upload-pack ls-remote "--upload-pack=touch $ran; false
 expect_rejected ls-remote-u ls-remote -u "touch $ran; false" origin
 expect_rejected ls-remote-u-attached ls-remote "-utouch $ran" origin
 expect_rejected ls-remote-u-bundled ls-remote -qu "touch $ran; false" origin
+# `--` で走査は止めない: `--` 自身が、値を別の引数で取るオプション（push の -o/--push-option など）の
+# 値になりうるため（実測: git commit -m -- --no-verify はメッセージ `--` のコミットを作る）、
+# `--` の後ろに並べても検査を通らないことを確かめる（round 9。オプションの終端は拒否の境界に使えない）。
+expect_rejected ddash-transport fetch origin -- "--upload-pack=touch $ran; false"
+expect_rejected ddash-value-transport push -o -- "--receive-pack=touch $ran; false" origin HEAD
+expect_rejected ddash-value-no-verify push -o -- --no-verify origin HEAD
 [[ ! -e "$ran" ]] || failures+=("transport options: a command ran")
+
+# 検査対象外のサブコマンドでは、`--` の後ろに転送オプションと同じ名前のファイルがあっても通す
+# （`git add -- --exec` のようなパスの指定を拒否しない。codex review round 9 must-fix）。
+(cd "$PUSH_DIR/work" && touch -- --exec --upload-pack --receive-pack)
+push_run pathspec_add dev git add -- --exec --upload-pack --receive-pack
+[[ "$RC" == 0 ]] || failures+=("pathspec_add: exit $RC, want 0: $OUT")
+[[ "$(work_git diff --cached --name-only | sort)" == $'--exec\n--receive-pack\n--upload-pack' ]] ||
+  failures+=("pathspec_add: files not staged: $(work_git diff --cached --name-only)")
+for pathspec_sub in status diff restore; do
+  push_run "pathspec_$pathspec_sub" dev git "$pathspec_sub" -- --exec
+  [[ "$RC" == 0 ]] || failures+=("pathspec_$pathspec_sub: exit $RC, want 0: $OUT")
+done
+work_git reset -q
+(cd "$PUSH_DIR/work" && rm -f -- --exec --upload-pack --receive-pack)
 
 # 許可リストの名前は、どれも git の組み込みのサブコマンドである（git の alias は組み込みを上書きできないため、
 # 同じ名前の alias を設定に置いても alias は使われない）。
