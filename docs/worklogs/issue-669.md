@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「手順 3」に「引き継ぎの修正依頼で前の担当の worktree に書き込めないときは、upstream を PR ブランチに向けた別名のローカルブランチで作業し `HEAD:<PR ブランチ>` で push する」を足す
 
 使ったスキル: implement-issue, pr-watch, receiving-code-review
+
+## 実装者メモ（round 4）
+
+対象 head: 5b5cd6971e9b2feb7373ff14dee62d7a883c0e28
+
+1. 詰まった箇所: 3 回目のレビュー結果に must-fix が残ったため「止まる条件」で needs-human エスカレーションと Issue 解放まで行った直後に、指揮役から同じ must-fix の修正指示が来て再着手した（解放→再 claim の一往復が余分にかかった）。また、この worktree は他スレッドとも共用で、自分の切り欠いた merge コミットが kill された際の hk の stash 残骸（`refs/hk/stash/3bb6fdbc`。対象ファイルはすべて HEAD と同内容で実害なし）が残っており、今回のコミットで警告として表示された
+2. 曖昧だった文: 「3 回目のレビュー結果に must-fix が残った（4 回目の修正には入らない）」（.agents/skills/implement-issue/SKILL.md「止まる条件」）
+3. 仮定と解釈: 「レビュー結果」の回数を、PR に着いた must-fix を含むレビュー判定の件数（devin・codex・claude で 3 件）と数えて止まる方を選んだが、指揮役はこの must-fix の修正を指示した。回数の数え方（委託 wave か・判定のついたレビュー件数か・approve のみの wave を含めるか）が文に無い。今回は指揮役の指示を優先して修正に入った。`to` の文字種は、実例（`mcp:launch:<64hex>`・`mcp:<uuid>`）が収まる `[A-Za-z0-9:._-]{1,128}` を採った
+4. 足りなかった情報・検証手段: `pending_thread_sends[].to` の値の書式一覧（登録側のコードはこのリポジトリに無く、本番 patrol-state.json の当該配列は空だったため実例から推測）。レビューの回数の厳密な数え方（前項）
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」に「レビュー結果の回数の数え方（何を 1 回と数えるか、approve のみの wave を含めるか）」を明記する。hk の stash 残骸が次のコミットで警告になる場合の対処（中身が HEAD と同じなら `git update-ref -d refs/hk/stash/<sha>` と `hk-pending-stash` の削除で消せる）を `.agents/skills/` か `docs/agents/` に書く
+
+使ったスキル: implement-issue
