@@ -25,3 +25,15 @@
 5. レビュー指摘の対応内訳: nit「round 1 メモ項目 5 の前提誤り」は項目 5 を正しい前提（行番号は基準コミットに固定・ずれるのは参照先の改訂時）に書き換えた。PR 本文に `Closes #668` と `Implementer:` 行が無かった件は、本文をテンプレート構成に整えて追記した。
 
 使ったスキル: implement-issue、ja-text-communication
+
+## 実装者メモ（round 3）
+
+対象 head: `975b522578863ed8391f7e9462437c7b9ac1d7db`
+
+1. 詰まった箇所: r2 must-fix 1（報告 PR が `pr:` 確認・再開指示・Issue 起点のレビュー/QA に載らない）の直し方に 2 案があり、レビュアの第 2 案（指揮役が週ごとに棚卸し Issue を起票し、報告 PR がそれを閉じて既存の実装の手順に載る）を採った。第 1 案（`review-pr`・runbook §6 に `agent/inventory-` の例外を足す）は `.agents/skills/review-pr/` を変える PR になるため本 PR 自体の委託レビューができなくなり（implement-issue 手順 8）、週次の報告 PR がすべて恒久的な例外経路を通る設計になるため退けた。
+2. 曖昧だった文: 「例えば review-pr に `agent/inventory-` の例外を足す（ただし `.agents/skills/review-pr/` を変える PR は委託できない。implement-issue 手順 8）。または、指揮役が週ごとに棚卸しの Issue を立て、報告 PR がそれを閉じる形にして、Issue を前提にした既存の手順にそのまま乗せる」（PR #686 の r2 レビュー must-fix 1 の「直し方」）
+3. 仮定と解釈: 棚卸し Issue は `ready-for-agent` を付けず（人間の着手の合図を待たない定期作業）、指揮役が `write-issue` の形で起票して `gh project item-add` でボードに載せ、`agent:working`・`agent:devin` を付けてから起動する、と解釈した。同時数の枠は Issue を持つ実装スレッドになったため Devin CLI の実装と同じく数える（旧設計の「枠で数えない」の根拠が消えた）。また must-fix 2 について、「人間が代行を頼んだ」の項目は読む条件（`command-team-details.md` の「代行の開始と終了」の読む条件）と重複するため消し、参照を項目 1 に戻した。nit「報告 PR をデータとして扱う」は、棚卸し担当が対象 PR にコメントを書かない設計（H26 の記録コメントは指揮役が書く）と、runbook 側で報告内容を GitHub の実状態で確かめる段を入れて応えた。
+4. 足りなかった情報・検証手段: `ready-for-agent` 無しの Issue がボードに載らない場合の巡回の整合チェックの扱い。ボードへの追加は自動では起きないため、起票後に `gh project item-add` で載せる手順にした（載っていなければ Status 導出の書き込みが失敗しうる）。検証は `.md` のみの変更で、語句ピンのテスト（board-patrol-docs・conductor-compaction-docs・doc-drift-nit-docs・review-delegation-docs・review-isolation-docs・routine-safety-docs・settle-procedure-docs・worklog-curation・pr-body-round-history-docs・reply-guard-docs・same-kind-must-fix-docs）はすべて通過。`mise run verify` の `cargo test` は sandbox の read-only mount（worktree の `target/` に書けない）で失敗、`deny-check` は round 2 と同じ環境起因の既知失敗。
+5. 改善案: 週次の棚卸し Issue の本文を指揮役が毎回書く負担を減らすため、本文の形を `docs/agents/command-team-details.md` の「棚卸し Issue」に固定した（今回追加）。これで起票が機械的になる。
+
+使ったスキル: implement-issue、ja-text-communication
