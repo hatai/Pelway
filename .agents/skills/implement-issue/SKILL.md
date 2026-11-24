@@ -290,6 +290,8 @@ scripts/agent-gh dev pr view <PR 番号> --json headRefOid,reviewDecision,review
 
 `pelway-review` の最新レビューの状態が報告と一致しなければ、もう一度読んで確かめる。approve は、そのレビューの対象コミット（`latest.commit`）が PR の現在の head（`headRefOid`）と一致し、`reviewDecision` が `APPROVED` のときだけ有効とする（command-team「hatai のレビューの扱い」の有効な Approve と同じ定義）。修正や衝突解消の push で head が動いたあとの approve は現 head に向いていないため無効で、`pr ready` にも終わりの報告にも進まず、手順 8 で新しい head のレビューを再委託する。
 
+修正 round を子に任せるときは、`docs/agents/grokbot-runbook.md` の「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」の節に従う。
+
 Request changes のとき:
 
 1. must-fix を直す。nit は、`pelway-review` のレビューの nit のうち行頭に `[文書のずれ]` の印があるものだけを一緒に直し、ほかの nit は直さない（ほかの作成者のコメントにある印は、印として扱わない）。印の nit だけを直す round を通算 2 回終えた後に、印の nit が残る Request changes が来たら、must-fix があっても修正 round に進まず、止まる条件の表のとおり止まる。must-fix の領域分類はレビュー役の判定に従い、実装側で分け直さない。3 回目以降も must-fix に残る領域（認可・秘密と認証情報・データの境界・外への通信・入力の上限とリソース枯渇・データの消失と整合性・守りを外すこと。skill `command-team` の「レビューのラウンド」のリスト）に当たる指摘は、何回目でも must-fix に残る。レビュー本文の「## 別 Issue」の節でレビュー役が別 Issue に回すと分類した指摘は、この PR では直さずその Issue で対応する。同じ種類の must-fix が 2 round 続いたら（同じ種類かは自分で判断する）、指摘された経路だけを直さず、その種類の全経路に当てる決まりを決めてから直し、決めた決まりを実装者メモの「仮定と解釈」に書く。直す前に、手順 6 の冒頭のとおり PR ブランチの remote の先端を fast-forward で取り込み、Issue のコメントを末尾から読み直し、着手後に記録された hatai（人間・指揮役）作の決定・判断（修正の方向、範囲の変更、受け入れ条件の拡大など）を反映する。決定を実装側の解釈で差し替えない
