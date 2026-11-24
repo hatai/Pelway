@@ -157,3 +157,15 @@
 
 使ったスキル: implement-issue
 
+## 実装者メモ（round 14）
+
+対象 head: 2a6b195043f735b0205206eebb881e919453fb6a
+
+1. 詰まった箇所: codex の must-fix。既存の pre-push を呼ぶ処理が `git config --show-scope` の出力を awk のタブ区切り `$2` で読んでおり、タブ・改行を含む `core.hooksPath` のパスが壊れる（名義確認を通った push で元フックの拒否をすり抜ける）。`-z` の出力が `scope\0value\0` の並びであることを od で確かめ、NUL 区切りの read 対に書き換えた。`--type=path`（round 12 で追加）はそのまま残した。
+2. 曖昧だった文: 「NUL 区切りでスコープと値を読み」（must-fix 本文）。
+3. 仮定と解釈: `git config -z --show-scope` は entry ごとに scope と value を別々の NUL 終端フィールドとして出す（実測）。元の awk は `END {print v}` で最後の非 command 値を取っていたため、ループでも最後の非 command 値を保持する。試験はタブを含むパスに拒否を返す pre-push を置き、フックの呼び出し（marker ファイル）・非 0 終了・remote の ref 不変を確かめる。設定値に改行は .git/config には書けないが、NUL 区切りはどちらにも対応する。あわせて nit 2 件: ls-remote の説明を「最初の位置引数をリポジトリ名、その後ろを参照パターン」に修正、author だけが異なるコミットを止める試験（author_only_block）を追加。
+4. 足りなかった情報・検証手段: `bash scripts/tests/agent-gh.test.sh` ok。`mise run verify` は round 9〜13 と同じ sandbox 起因で実行できない。round 12 で `--type=path` を足すとき、出力の区切り文字と値の中の文字の衝突（タブ区切りの出力にタブ入りの値）は見ていなかった。機械が出す区切りのある出力を awk のフィールドで読むときは、値が区切りを含みうるかを常に確かめる。
+5. 改善案: `git config` の出力をプログラムから読むときは最初から `-z`（NUL 区切り）を使う習慣にする。`--show-scope`・`--show-origin`・`--name-only` など表示系の区切りはどれも値の中の文字と衝突しうる。
+
+使ったスキル: implement-issue
+
