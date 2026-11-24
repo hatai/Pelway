@@ -193,3 +193,15 @@
 
 使ったスキル: implement-issue
 
+## 実装者メモ（round 17）
+
+対象 head: 131ffc84e4f52166d407d4914b2859f96e163bbc
+
+1. 詰まった箇所: codex r12 の must-fix 2 件。core.hooksPath の照会（`git config -z --show-scope --get-all --type=path`）の終了コード 1 を「キー無し＝既定の場所」と読んでいたが、照会先を GIT_CONFIG で別ファイルに固定された環境では、`git config` はそのファイルだけを読み、agent-gh が -c で付けた一時設定は照会に出ない（実測）。終了コード 0 かつ command スコープの値として一時フックの dir が取れることを必須にした。もう 1 件は TMPDIR が相対パスのとき、mktemp が呼び出しの cwd 基準の相対パスを返し、git が core.hooksPath の相対パスを worktree ルート基準で解決するため、サブディレクトリ呼び出しで一時フックを見つけられず push が素通りする。存在しない core.hooksPath で push が失敗しないこと（フックなし扱い）を実測で確かめ、`cd && pwd -P` で絶対パスに解決してから渡す形にした。
+2. 曖昧だった文: 「照会には :458 の一時フック設定が command スコープ値の取得確認を必須化し、照会失敗は fail-closed に」。
+3. 仮定と解釈: 「command スコープ値の取得確認」は、照会結果の command スコープの値に一時フックの dir（絶対パス）自体があること、と解釈した。GIT_CONFIG で照会先を固定された環境では照会の command スコープの値がそのファイルの値になるため、dir との一致で確かめる。claude の nit「`2>/dev/null` で git のエラー文が消える」は、指揮役の指示（comment 7138751822）が「印 nit: claude approve@84b0072a の nit 2 件」とするため対象に含め、照会失敗時に stderr の文を添えて出す形にした。照会の一時ファイルは一時フックの dir の中に置き、TMPDIR が相対・存在しない dir を指していても作れる場所にした（mktemp をやめた）。
+4. 足りなかった情報・検証手段: `bash scripts/tests/agent-gh.test.sh` ok。`mise run verify` は round 9〜16 と同じ sandbox 起因で完走できない（`CARGO_TARGET_DIR=/tmp/target-613` を指しても ld が bus error・verify-run.test.sh が run dir を作れない・hk-check の typos が main 由来の worklog で落ちる）。回帰試験は `scripts/red-check 84b0072a --keep scripts/tests/agent-gh.test.sh -- bash scripts/tests/agent-gh.test.sh` で旧実装に red（cfg_env_override・rel_tmpdir_block で remote の ref が変わる）になることを確かめた。GIT_CONFIG で照会先を固定した環境での `git config` の挙動（ファイルの値が command スコープとして返り、-c の値は照会に出ない）は実機で確かめた。
+5. 改善案: 「キー無し」を許す照会では、照会が意図した読み取り先を見ているかの検証手段が要る。照会で必ず返る値（自分で付けた -c の値など）を結果に含めることで、「値が無い」と「照会が別のものを見ている」を区別できる。
+
+使ったスキル: implement-issue
+
