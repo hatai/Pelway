@@ -153,9 +153,10 @@ def read_ps(path):  # 補助記録は共有 git dir の中。read_request と同
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as f:
         st = os.fstat(f.fileno())
-        if not stat.S_ISREG(st.st_mode) or st.st_size > PS_MAX:
+        data = f.read(PS_MAX + 1)  # 確かめの後にファイルが増えても、読み取りは上限で切る
+        if not stat.S_ISREG(st.st_mode) or st.st_size > PS_MAX or len(data) > PS_MAX:
             raise ValueError("not a regular patrol-state file")
-        return f.read()
+        return data
 # 見張りが動いていることを示す行（Issue #504）。HEARTBEAT_SECS ごとに 1 行。
 # PELWAY_WATCH_HEARTBEAT_SECS で差し替えられる（テスト用）。
 HEARTBEAT_SECS = env_secs("PELWAY_WATCH_HEARTBEAT_SECS", 600)
