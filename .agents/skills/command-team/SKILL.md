@@ -59,7 +59,7 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 | レビュー | `[レビュー] PR #<PR 番号> <要約>` | `[レビュー] PR #132 本体LLMの提供元とBYOK（ADR 0008）` |
 | その他 | `[<役割>] <対象があれば番号> <要約>` | `[調査] GLMの利用上限の解除を確かめる`、`[修正] #95 ツールチェーンの更新` |
 
-- MCP の `t3_thread_launch` では `title` に、CLI の `t3 thread start` では `--title` に渡す。省略すると最初の指示の 1 行目がタイトルになるので、省略しない。`t3_thread_launch`・`t3_thread_send` の引数の JSON 例は `docs/agents/grokbot-runbook.md` の「4. 仕事の始め方」の「MCP の `t3_thread_launch` と `t3_thread_send` の引数」に従う。
+- MCP の `t3_thread_launch` では `title` に、CLI の `t3 thread start` では `--title` に渡す。`t3 thread start` の `--title` を省略すると最初の指示の 1 行目がタイトルになるので、省略しない（`t3_thread_launch` の `title` は必須項目で、省略は `-32602` になる）。`t3_thread_launch`・`t3_thread_send` の引数の JSON 例は `docs/agents/grokbot-runbook.md` の「4. 仕事の始め方」の「MCP の `t3_thread_launch` と `t3_thread_send` の引数」に従う。
 - 立てた後で形式に合わないと分かったら、そのスレッドへの次の操作の前に `t3_thread_update`（`action: rename`）で直す。形式に合わない古いスレッドも、次に操作するときに直す。
 - `scripts/conductor-watch.sh` は、指揮役が立てたスレッドのうち、動いているものと新しく現れたもので形式に合わないタイトルを `THREAD bad-title` として知らせる。
 
