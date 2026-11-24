@@ -48,3 +48,15 @@
 5. 改善案: state-untrusted は unreadable と違い退避コピーが残らないため、回復の材料は anomalies の reason（symlink・not-regular・not-owned・hardlinked・too-large・unreadable-path）だけになる。runbook の回復説明に reason の見方を足すと、差し替えの手口に応じた対処（リンク先の所在確認など）がしやすい
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5・[文書のずれ] の nit のみ）
+
+対象 head: 74ed4d69599963c56f7cf825b7a97fb2be1fb925
+
+1. 詰まった箇所: なし（runbook:410 の移行の記述のみの修正）
+2. 曖昧だった文: 「1 回きり `cp` で移す」— claude の approve の [文書のずれ] nit が、旧ファイルが残るため正規パスに通常ファイルが無い起動のたびに写し直す点と、確認と `cp` が `<state>.lock` の外で行われる点を指摘した
+3. 仮定と解釈: 印の nit にはコードか文書で対応する決まりのうち、実際の条件を書く側（文書）を選んだ（挙動の変更はレビューの対象を広げるため）。印の無い nit（untrusted の open・fstat・read の失敗をデータ消失の危うさとして分ける、pelway 親ディレクトリの symlink、hardlinked・too-large の試験追加、ロック不適合の戻し方の記述）は決まりどおり対象外
+4. 足りなかった情報・検証手段: なし
+5. 改善案: 旧置き場のファイルを移行後に改名するか消して本当に 1 回きりにする挙動側の直しは、フォロー Issue 候補（レビュー文でも代替案として示されていた）
+
+使ったスキル: implement-issue
