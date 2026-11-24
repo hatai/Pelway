@@ -55,7 +55,7 @@ jobs:
         uses: actions/checkout@v7.0.1
 
       # mise 本体とプロジェクトツールを導入する。verify.yml と同じピン
-      # （jdx/mise-action v5.2.7 / mise v2026.11.5 / cache: false）。
+      # （jdx/mise-action v5.2.9 / mise v2026.11.5 / cache: false）。
       # install は省略できない: ツールが未導入（[MISSING]）の状態で mise upgrade を
       # 実行すると、各ツールを「最新の eligible 版」として install しようとし、
       # 公開から日が浅いピン（例: jactionlint 2.5.0）を旧版へ書き戻してしまう。
