@@ -9,17 +9,17 @@ publish = false
 description = "Draft integration gateway spike for the Pelway demo backend (MCP client via rmcp). Not a fixed schema."
 
 [dependencies]
-# MCP 公式 Rust SDK（#96 の検証対象）。固定版 3.9.0（crates.io、2026-11-05）。
+# MCP 公式 Rust SDK（#96 の検証対象）。固定版 3.10.0（crates.io、2026-11-12）。
 # ライセンス: crate の表記は Apache-2.0（workspace の license = "Apache-2.0" を継承）。
 # ただし同梱 LICENSE 本文は「MIT から Apache-2.0 へ移行中。再許諾の同意がない旧寄稿は
 # MIT のまま」で、Apache-2.0・MIT・CC-BY-4.0（文書）の3条文を含む。NOTICE ファイルは
-# パッケージにもタグ rmcp-v3.9.0 のリポジトリにも無い（#96 の確認結果）。
+# パッケージにもタグ rmcp-v3.10.0 のリポジトリにも無い（#96 は 3.9.0 で確認。3.9.0→3.10.0 で同梱は変わっていない）。
 # 両条文の同梱を前提に扱う（docs/technical/v0.7/body/09-sources.md、U05）。
 # features: client（tools/list・tools/call の送信側）、transport-async-rw（in-process
 # 検証の duplex）、transport-child-process（本体の既定方式である stdio 子プロセス）、
 # transport-io と server（src/bin の echo サーバーとテスト内 in-process サーバー用。
 # cargo test では [[bin]] も通常依存の feature でビルドされる）。
-rmcp = { version = "=3.9.0", default-features = false, features = [
+rmcp = { version = "=3.10.0", default-features = false, features = [
   "client",
   "server",
   "transport-async-rw",
@@ -31,7 +31,7 @@ serde_json = "1"
 # src/bin の echo サーバーの実行（#[tokio::main]）とテストの #[tokio::test]。
 # io-util は acp 試験の in-process double（tokio::io::duplex）が使う。
 tokio = { version = "1", features = ["rt", "macros", "io-util", "time"] }
-# ACP 公式 Rust SDK（#133、質問票 R1-Q1 の確定回答 A 案）。固定版 5.2.0。
+# ACP 公式 Rust SDK（#133、質問票 R1-Q1 の確定回答 A 案）。固定版 5.3.0。
 # `unstable_protocol_v2` で draft v2 の型付き API（Client.v2()）を有効にする。
 # v2 は仕様上 draft のため feature `acp` 後ろに囲い、版も pin する
 # （docs/research/agent-runtime-standard-protocols.md「移行」）。
@@ -39,7 +39,7 @@ tokio = { version = "1", features = ["rt", "macros", "io-util", "time"] }
 # 起動しないため `process`（AcpAgent の子プロセス起動）は使わない。
 # 起動と隔離は後続 Issue の task container launcher の責務。
 # ライセンス: Apache-2.0（rust-sdk workspace の license 表記）。
-agent-client-protocol = { version = "=5.2.0", optional = true, features = [
+agent-client-protocol = { version = "=5.3.0", optional = true, features = [
   "unstable_protocol_v2",
 ] }
 
