@@ -107,3 +107,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「worktree への書き込みが sandbox で拒否される環境では、`CARGO_TARGET_DIR` を書き込める場所に向けて verify を再実行し、書き込みを要する試験の失敗は一時 worktree（`scripts/red-check`）での再現で切り分ける」と足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 10）
+
+対象 head: 3ade3ecf73a22ad37e71289b2ae82f5c653a9b0d
+
+1. 詰まった箇所: codex の r2 レビュー（head debd0ad9）の must-fix: 転送系サブコマンドの全引数走査が、別の引数を値として取るオプションの値（`git push -o --exec` の --exec は -o の値）と、ls-remote の参照パターン（`git ls-remote origin --exec`）も拒否していた。`--` も値になりうる（`git push -o --`）ため、「`--` で止める」だけでは直せない。
+2. 曖昧だった文: 「値を消費するオプションと各サブコマンドの位置引数を考慮して、実際にオプションとして解釈されるものを検査してください」（PR #624 の codex r2 レビュー、must-fix）。
+3. 仮定と解釈: git のオプション解釈を一次情報で確かめてから決めた。別の引数を値として取るオプションは、各サブコマンドの `git <sub> -h` で <値> の形のものと builtin の OPT_STRING などから洗い出した（pull の -j・push の --signed など [=値] の形は次の引数を消費しない）。ls-remote は builtin/ls-remote.c が PARSE_OPT_STOP_AT_NON_OPTION で parse_options を呼び、--exec が --upload-pack の隠れた別名であることを source で確かめた（`git ls-remote <repo> --exec` がパターンになることは実測でも確かめた）。fetch・pull・push は parse-options の既定（位置引数の後ろでもオプションを解釈する）を実測で確かめた（`git fetch <repo> --upload-pack <path>` は <path> を実行する）。`--` はオプションの位置に置かれたときだけ解釈を終えるため、値として消費された `--` は終端にしない。
+4. 足りなかった情報・検証手段: ls-remote の -u は git 2.56 では unknown switch で実在しないが、版に頼らずオプションの位置では拒否を維持した（既存試験もその形）。`mise run verify` はこのスレッドの sandbox では round 9 と同じ環境起因で実行できない（worktree への書き込み拒否・/tmp の所有者）。`bash scripts/tests/agent-gh.test.sh` は ok。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 の verify の段に「git の引数解釈に関わる検査を実装したときは、`git <sub> -h`・builtin のオプション定義・parse-options のフラグを一次情報として残し、実測で確かめた挙動も書く」と足す。
+
+使ったスキル: implement-issue
