@@ -238,6 +238,8 @@ Codex と Claude のレビュースレッドを立てるときは（T3 Connect �
 
 レビュー担当（誰に付けるか）と effort は skill `command-team` の「レビュー担当と effort」で決める。Claude のレビュースレッドは `--provider claude_review --model claude-opus-5-5`、ブランチは `review/<M>-c<k>` にし、同じく `auto-accept-edits` で立てる。Devin CLI のレビュースレッドは `--provider devin_review --model swe-2-high`、ブランチは `review/<M>-d<k>` にする。Devin CLI には `runtimeMode` の指定が無く、`devin_review` のモデルオプションは `mode` だけを受け付ける。sandbox のため権限モードは Autonomous 一択で、`bypass` は使わない。effort の引き上げ（`thought_level`）は `devin_review` には渡せない。
 
+レビュー担当は、スレッドの指示とは別に、開始時に fail-closed のツール一覧チェックを行う（開始時に渡されたツール名の一覧を記録し、merge・Issue の変更・comment などの書き込み系ツールが含まれる、または一覧が読めないときは何もせず終了する。チェックの本体は skill `review-pr` の「決まり」）。チェックに失敗したレビュー（`verdict: failed` で `error:` が `設定の不備:` で始まるもの）は結果を採用しない（「5. イベントごとの対応」の表のとおり、立て直さずに 7 のエスカレーションにする）。
+
 主 PR のレビュー委託・再委託の証跡は、実装担当が対象 PR に残す委託記録コメント（「2. ボードと巡回」の「主 PR と委託記録」）で追う。
 
 ### 調査を始める

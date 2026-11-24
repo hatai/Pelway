@@ -66,6 +66,27 @@ check conductor_delegate_block .agents/skills/command-team/SKILL.md \
 check agents_human_account AGENTS.md \
   '人間のアカウントで投稿する道具（T3 の `comment_on_issue` など）で hatai の判断を書くのは、hatai がその文面か選択肢を明示して選んだときだけ'
 
+# レビュー委託の標準手順に fail-closed のツール一覧チェックが明記されている（Issue #581）。
+# チェックに失敗したレビュー（error: が 設定の不備: で始まる verdict: failed）は結果を採用しない。
+check fail_closed_review_pr .agents/skills/review-pr/SKILL.md \
+  '自分に渡されたツール名の一覧を返答に記録' \
+  '設定の不備: ツール名の一覧が読めない'
+check fail_closed_implement_issue .agents/skills/implement-issue/SKILL.md \
+  'fail-closed のツール一覧チェック' \
+  '書き込み系ツールが含まれる、または一覧が読めないときは何もせず終了する' \
+  '結果を採用しない'
+check fail_closed_command_team .agents/skills/command-team/SKILL.md \
+  'fail-closed のツール一覧チェック' \
+  '書き込み系ツールが含まれる、または一覧が読めないときは何もせず終了する' \
+  '結果を採用しない'
+check fail_closed_runbook docs/agents/grokbot-runbook.md \
+  'fail-closed のツール一覧チェック' \
+  '書き込み系ツールが含まれる、または一覧が読めないときは何もせず終了する' \
+  '結果を採用しない'
+check fail_closed_spec docs/superpowers/specs/agent-team.md \
+  'fail-closed のツール一覧チェック' \
+  '結果を採用しない'
+
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
   exit 1
