@@ -95,3 +95,15 @@
 5. 改善案: 「従来どおり」と添える文は、従来の条件（ここでは取得成功・上限未満）が読み手に伝わるとは限らない。条件を括弧で添えて書くと往復を減らせる（この PR では扱わない）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 9）
+
+対象 head: 054f0380（main 取り込みのマージコミット。マージは署名付け替えの対象外のため push 前後で同じ SHA）
+
+1. 詰まった箇所: scripts/conductor-watch.sh の衝突 4 箇所。こちらの検証付き取得（threads.json.new + threads.err + trc、Issue #651）と main の作業ツリー共有の検知（shared_notified・threads_ok・argv[5]=T3_BIN、Issue #643）が、python への引数 argv[5] と一覧の成否判定で重なった。両側を残し、引数を "$trc" "$T3_BIN" の 2 つに増やし、threads_ok を thread_err is None に読み替えた。片側を落とした hunk は無し。
+2. 曖昧だった文: 「worktree 継続」（指揮役の修正指示）。担当の作業ツリー（t3-aee57027-985a0af9155d4e31）は読み取り専用で fetch・merge の作業ツリー更新ができず、cwd 内に nested worktree（.agent-641-worktree と同じ形）を作って解消した。
+3. 仮定と解釈: main の threads_ok（threads.json が正常な一覧か）は、fetch_threads の成功（thread_err is None、空一覧も成功）と同じ意味と解釈した。検証は単独試験でも確認（shared-worktree・thread-list-fail・stall・本体の 4 本 all passed）。
+4. 足りなかった情報・検証手段: 特になし。
+5. 改善案: scripts/conductor-watch.sh の python 呼び出しに引数の対応表が無く、argv[5] が 2 機能で衝突した。呼び出し行の直上に引数一覧のコメントを添えると次の衝突を減らせる（この PR では扱わない）。
+
+使ったスキル: implement-issue
