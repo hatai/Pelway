@@ -144,7 +144,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
     "task": "PR #<M> をレビューする。skill review-pr に従う。\nAssigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes"
   }
   ```
-- レビュー担当は、委託の指示とは別に、開始時に fail-closed のツール一覧チェックを行う（開始時に渡されたツール名の一覧を記録し、merge・Issue の変更・comment などの書き込み系ツールが含まれる、または一覧が読めないときは何もせず終了する。チェックの本体は skill `review-pr` の「決まり」）。チェックに失敗したレビュー（`verdict: failed` で `error:` が `設定の不備:` で始まるもの）は結果を採用しない（同じ環境では同じ結果になるため立て直さず、人間に知らせる）。
+- レビュー担当は、委託の指示とは別に、開始時に fail-closed のツール一覧チェックを行う（開始時に渡されたツール名の一覧を記録し、merge・Issue の変更・comment などの書き込み系ツールが含まれる、または一覧が読めないときは何もせず終了する。チェックの本体は skill `review-pr` の「決まり」）。チェックに失敗したレビュー（`verdict: failed` で `error:` が `設定の不備:` で始まるもの）は結果を採用しない（同じ環境では同じ結果になるため立て直さず、人間に知らせる。投稿済みのレビューも「hatai のレビューの扱い」の「有効な Approve」に数えない）。
 - 再委託・遅延実行タスクの陳腐化ガード: レビュー・QA の再委託（同じ PR に 2 回目以降の委託を出すとき）と、遅延実行タスク（`schedule_task` などで、組んだ時点より後に発火して委託や実行の指示を出すタスク）の task には、上のブロックの task の 2 行の後に次の 1 行を定型文として足す。組んだ時点の head と、発火・着手の時点の head や成果の有無がずれていても、古い SHA のまま動かないようにするため。
 
   ```
@@ -223,7 +223,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 ### hatai のレビューの扱い
 
-有効な Approve: `pelway-review` の最新の有効なレビューが APPROVED で、対象が主 PR の現在の head であるもの（head が変われば失効し、レビューが無いものとして扱う。dismiss されたレビューは数えない）。
+有効な Approve: `pelway-review` の最新の有効なレビューが APPROVED で、対象が主 PR の現在の head であるもの（head が変われば失効し、レビューが無いものとして扱う。dismiss されたレビューは数えない）。投稿したレビュー担当が後から `error:` が `設定の不備:` で始まる `verdict: failed` を報告したレビューは、Approve・Request changes のどちらも数えない（fail-closed のツール一覧チェックに失敗したレビューは結果を採用しない決まりによる。GitHub 上の投稿は残るため、環境の修復と投稿の dismiss は人間が扱う。同じ環境では同じ結果になるため、再委託では置き換えない）。
 
 hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終了条件・Status の扱い）と、hatai が紐づく PR にレビュー・コメントを投稿したときの伝達の手順は、`docs/agents/command-team-details.md` の「hatai のレビューの扱い」に従う。巡回での検知と Status の反映は runbook の「ボードと巡回」の「hatai のレビューに関する連動」が正本。
 

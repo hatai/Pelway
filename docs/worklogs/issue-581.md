@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 8 に「レビュースレッドを立てる側の手順には、レビュー担当が開始時に行う fail-closed のツール一覧チェックと、チェック失敗のレビューを採用しない決まりを書く」を足す（今回の変更で実質それを行った）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 2）
+
+対象 head: <round 2 の実装コミットの SHA を push 後に記入>
+
+1. 詰まった箇所: 手順 3: このスレッドに割り当てられた worktree（`t3-671ed54d`、ブランチ `t3/fail-closed-tool-check`、head は無関係の impl-669 のコミット）は対象ブランチを checkout していなかった。`agent/581-fail-closed-tool-check` は別の worktree（`t3-7f831f70`）で checkout されていたため、そちらで作業した。
+2. 曖昧だった文: 「（投稿の後に失敗で返ったときの扱いは、この手順では決めていない）」（`.agents/skills/implement-issue/SKILL.md` 手順 9）
+3. 仮定と解釈: 指揮役の指定した直し方 (a) に従い、「有効な Approve」の定義に `設定の不備:` で失敗報告したレビュー担当の投稿は数えないことを足した。対象は Approve だけでなく Request changes の投稿にも広げ（レビュー結果全般を採用しない決まりと整合）、runbook の差し戻し解消条件に (iv) を追加した。「dismiss 主体」は、指揮役経由・実装担当経由どちらも最終的に人間へのエスカレーションに帰着するため、「環境の修復と投稿の dismiss は人間が扱う」と書いた（再委託で置き換えない。同じ環境では同じ結果になるため）。
+4. 足りなかった情報・検証手段: 投稿済みレビューの dismiss を agent 名義（`pelway-dev`/`pelway-review`）で行う手順や権限の記載が正本に無かった。人間が扱う形に書くことで回避した。
+5. 改善案: `docs/agents/command-team-details.md` の「hatai のレビューの扱い」に「`設定の不備:` のエスカレーションで残った投稿済みレビューを誰が dismiss するか」を足す。
+
+使ったスキル: implement-issue、receiving-code-review

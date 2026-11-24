@@ -266,7 +266,7 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 }
 ```
 
-レビュー担当は、委託の指示とは別に、開始時に fail-closed のツール一覧チェックを行う（開始時に渡されたツール名の一覧を記録し、merge・Issue の変更・comment などの書き込み系ツールが含まれる、または一覧が読めないときは何もせず終了する。チェックの本体は skill `review-pr` の「決まり」）。チェックに失敗したレビュー（`verdict: failed` で `error:` が `設定の不備:` で始まるもの）は結果を採用しない（「止まる条件」の表のとおり止まり、再委託しない）。
+レビュー担当は、委託の指示とは別に、開始時に fail-closed のツール一覧チェックを行う（開始時に渡されたツール名の一覧を記録し、merge・Issue の変更・comment などの書き込み系ツールが含まれる、または一覧が読めないときは何もせず終了する。チェックの本体は skill `review-pr` の「決まり」）。チェックに失敗したレビュー（`verdict: failed` で `error:` が `設定の不備:` で始まるもの）は結果を採用しない（「止まる条件」の表のとおり止まり、再委託しない。投稿済みのレビューも「有効な Approve」に数えない — 数え方は手順 9）。
 
 再委託（同じ PR の 2 回目以降の委託）と、委託を後から出す遅延実行タスクでは、task の 2 行の後に `Guard:` の行（実行時点の head と成果の有無を確かめ、外れていれば何もせず終了する定型文）を足す。委託先の worktree に参照する手順書が無いときは、PR がそのパスを変えていなければ対象 head の版を、変えていれば main の版を、GitHub の contents API で読む（レビューの委託先は、変わっていないパスも main の版に限る review-pr の決まりが優先する）。どちらも形と確かめ方は skill `command-team` の「レビュー担当と effort」の「再委託・遅延実行タスクの陳腐化ガード」と「委託先の worktree に手順書が無いとき」に従う。
 
@@ -282,13 +282,13 @@ scripts/agent-gh dev pr comment <M> --body "[review-request] head: <SHA> to: <�
 
 ### 9. レビュー結果を処理する
 
-委託の子の報告（`pr:` / `verdict:` / `must-fix:`）が `verdict: failed` なら、GitHub のレビューとは突き合わせず、委託記録コメントで対象の PR を確かめてから、下の `failed` の扱い（`error:` の理由ごと）に進む（投稿の後に失敗で返ったときの扱いは、この手順では決めていない）。`approve` と `request-changes` は、GitHub の実状態と突き合わせてから扱う:
+委託の子の報告（`pr:` / `verdict:` / `must-fix:`）が `verdict: failed` なら、GitHub のレビューとは突き合わせず、委託記録コメントで対象の PR を確かめてから、下の `failed` の扱い（`error:` の理由ごと）に進む（投稿の後に失敗で返ったときは、`error:` が `設定の不備:` で始まるなら同じく「止まる条件」の表のとおり止まり、投稿済みのレビューは「有効な Approve」に数えない。それ以外の理由のときの扱いは、この手順では決めていない）。`approve` と `request-changes` は、GitHub の実状態と突き合わせてから扱う:
 
 ```bash
 scripts/agent-gh dev pr view <PR 番号> --json headRefOid,reviewDecision,reviews --jq '{headRefOid, reviewDecision, latest: (.reviews[-1] | {author: .author.login, state, commit: .commit.oid})}'
 ```
 
-`pelway-review` の最新レビューの状態が報告と一致しなければ、もう一度読んで確かめる。approve は、そのレビューの対象コミット（`latest.commit`）が PR の現在の head（`headRefOid`）と一致し、`reviewDecision` が `APPROVED` のときだけ有効とする（command-team「hatai のレビューの扱い」の有効な Approve と同じ定義）。修正や衝突解消の push で head が動いたあとの approve は現 head に向いていないため無効で、`pr ready` にも終わりの報告にも進まず、手順 8 で新しい head のレビューを再委託する。
+`pelway-review` の最新レビューの状態が報告と一致しなければ、もう一度読んで確かめる。approve は、そのレビューの対象コミット（`latest.commit`）が PR の現在の head（`headRefOid`）と一致し、`reviewDecision` が `APPROVED` のときだけ有効とする（command-team「hatai のレビューの扱い」の有効な Approve と同じ定義）。そのレビューを投稿したレビュー担当が後から `error:` が `設定の不備:` で始まる `verdict: failed` を報告していたときは、Approve が現在の head を向いていても数えない。修正や衝突解消の push で head が動いたあとの approve は現 head に向いていないため無効で、`pr ready` にも終わりの報告にも進まず、手順 8 で新しい head のレビューを再委託する。
 
 Request changes のとき:
 

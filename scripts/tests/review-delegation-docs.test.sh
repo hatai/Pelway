@@ -68,24 +68,30 @@ check agents_human_account AGENTS.md \
 
 # レビュー委託の標準手順に fail-closed のツール一覧チェックが明記されている（Issue #581）。
 # チェックに失敗したレビュー（error: が 設定の不備: で始まる verdict: failed）は結果を採用しない。
+# 投稿済みのレビューも「有効な Approve」に数えない（投稿の後に 設定の不備: で失敗を報告したレビュー担当の投稿）。
 check fail_closed_review_pr .agents/skills/review-pr/SKILL.md \
-  '自分に渡されたツール名の一覧を返答に記録' \
+  '自分に渡されたツール名の一覧を最後の返答より前のメッセージに記録' \
   '設定の不備: ツール名の一覧が読めない'
 check fail_closed_implement_issue .agents/skills/implement-issue/SKILL.md \
   'fail-closed のツール一覧チェック' \
   '書き込み系ツールが含まれる、または一覧が読めないときは何もせず終了する' \
-  '結果を採用しない'
+  '結果を採用しない' \
+  '投稿済みのレビュー'
 check fail_closed_command_team .agents/skills/command-team/SKILL.md \
   'fail-closed のツール一覧チェック' \
   '書き込み系ツールが含まれる、または一覧が読めないときは何もせず終了する' \
-  '結果を採用しない'
+  '結果を採用しない' \
+  '投稿したレビュー担当が後から `error:` が `設定の不備:` で始まる `verdict: failed` を報告したレビューは' \
+  '投稿済みのレビューも'
 check fail_closed_runbook docs/agents/grokbot-runbook.md \
   'fail-closed のツール一覧チェック' \
   '書き込み系ツールが含まれる、または一覧が読めないときは何もせず終了する' \
-  '結果を採用しない'
+  '結果を採用しない' \
+  '投稿済みのレビュー'
 check fail_closed_spec docs/superpowers/specs/agent-team.md \
   'fail-closed のツール一覧チェック' \
-  '結果を採用しない'
+  '結果を採用しない' \
+  '投稿済みのレビュー'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
