@@ -676,7 +676,23 @@ expect_rejected rebase-exec rebase -x 'git push origin HEAD' HEAD
 expect_rejected unknown-name p origin HEAD
 work_git config help.autocorrect immediate
 expect_rejected autocorrect pushh origin HEAD
+expect_rejected glob-question 'pu?h' origin HEAD
+expect_rejected glob-star 'p*' origin HEAD
 work_git config --unset help.autocorrect
+# 許可したサブコマンドでも、コマンドを実行させる転送のオプション（とその省略形）は exit 2 で、コマンドは実行されない
+ran="$PUSH_DIR/transport-ran"
+expect_rejected receive-pack push "--receive-pack=touch $ran; false" origin HEAD
+expect_rejected receive-pack-split push --receive-pack "touch $ran; false" origin HEAD
+expect_rejected exec push "--exec=touch $ran; false" origin HEAD
+expect_rejected upload-pack fetch "--upload-pack=touch $ran; false" origin
+expect_rejected upload-pack-abbrev fetch "--upload=touch $ran; false" origin
+expect_rejected pull-upload-pack pull "--upload-pack=touch $ran; false" origin
+expect_rejected ls-remote-upload-pack ls-remote "--upload-pack=touch $ran; false" origin
+# ls-remote の -u（--upload-pack の短い形。git 2.56 は受け付けないが、版に頼らず agent-gh が拒否する）
+expect_rejected ls-remote-u ls-remote -u "touch $ran; false" origin
+expect_rejected ls-remote-u-attached ls-remote "-utouch $ran" origin
+expect_rejected ls-remote-u-bundled ls-remote -qu "touch $ran; false" origin
+[[ ! -e "$ran" ]] || failures+=("transport options: a command ran")
 
 # 許可リストの名前は、どれも git の組み込みのサブコマンドである（git の alias は組み込みを上書きできないため、
 # 同じ名前の alias を設定に置いても alias は使われない）。

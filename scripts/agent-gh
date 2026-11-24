@@ -297,6 +297,24 @@ if [[ "${1:-}" == "git" ]]; then
     echo "agent-gh: git のサブコマンド（$git_sub）は使えません。使えるもの: ${git_allowed_subcommands[*]}" >&2
     exit 2
   fi
+  # 転送の相手側で実行するコマンドを指定するオプション（--upload-pack・--receive-pack・--exec）は、ローカルの
+  # remote ではコマンドをその場で実行するため拒否する。git が受け付ける省略形（3 文字以上の前方一致）も含める。
+  for a in "${@:2}"; do
+    opt="${a%%=*}"
+    # ls-remote の -u は --upload-pack の短い形（分離・連結・まとめた形のどれでも拒否する）。
+    if [[ "$git_sub" == ls-remote && "$a" =~ ^-[^-]*u ]]; then
+      echo "agent-gh: git ls-remote の -u は使えません（コマンドを実行して push の名義の確認を外せるため）" >&2
+      exit 2
+    fi
+    if [[ "$opt" == --?* ]]; then
+      for t in --upload-pack --receive-pack --exec; do
+        if [[ "$t" == "$opt"* ]]; then
+          echo "agent-gh: git $git_sub の $t は使えません（コマンドを実行して push の名義の確認を外せるため）" >&2
+          exit 2
+        fi
+      done
+    fi
+  done
   if [[ "$git_sub" == push ]]; then
     for a in "${@:2}"; do
       # --no-verify と、git が受け付けるその省略形（--no-veri 以上）は pre-push フックを飛ばすため拒否する。
