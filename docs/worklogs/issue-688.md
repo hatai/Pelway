@@ -39,3 +39,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の「レビューを始める」に、MCP でレビュースレッドを立てるときの instanceId ごとの `runtimeMode` 可否の表を足すと、例との参照が一方向で済む。
 
 使ったスキル: implement-issue（`.agents/skills/implement-issue`）
+
+## 実装者メモ（round 4）
+
+対象 head: e9733cffdc6bd208d3ac8375d3cd97a8eb041c99
+
+1. 詰まった箇所: 手順 9: round 3 の Approve に残った印 nit 2 件を対応。印 nit round の上限（通算 2 回）は指揮役の指示で hatai の決定（t629u）により無視して継続。main を merge で取り込んだ（PR #686 が同じ runbook を変えていたが自動解消）。
+2. 曖昧だった文: 「`workspaceStrategy.branch` には CLI の形と同じブランチ名を入れる（…レビューは `review/<M>-<k>`…）」（`docs/agents/grokbot-runbook.md` の「MCP の `t3_thread_launch` と `t3_thread_send` の引数」）
+3. 仮定と解釈: ブランチ名の括弧は Codex 形だけでなく Claude（`review/<M>-c<k>`）・Devin CLI（`review/<M>-d<k>`）の形も併記する解釈を採った。`Assigned:` 行は opencode の形（`effort=<low|default|high|max>`）で戻し、`variant` に `default` 相当が無い件は「effort が `default` のときは `variant` を入れない」を本文に添える形で表現した。
+4. 足りなかった情報・検証手段: opencode の `modelSelection.options.variant` が受け付けられるかは実行未確認（レビューの「未確認」と同じ）。
+5. 改善案: `docs/agents/grokbot-runbook.md` の例を 1 つに絞り、provider ごとの差分（instanceId・options・runtimeMode・branch）を表で示す形にすると、例の肥大と食い違いを減らせる。
+
+使ったスキル: implement-issue（`.agents/skills/implement-issue`）
