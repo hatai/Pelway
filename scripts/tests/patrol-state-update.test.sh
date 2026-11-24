@@ -71,8 +71,7 @@ check "list patch replaced subjects" eq "$(pget subjects)" '{"12": {"waiting_on"
 # patch のオブジェクトは、既存値がオブジェクトでなくても深く併合される
 # （この手順の併合仕様。中の null は常に鍵を消し、値として残らない）
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"items":5}'
-check "object patch deep-merges over non-object value" \
-  upd 0 '{"items":{"a":null,"b":1}}' --writer-thread mcp:cur
+check "object patch deep-merges over non-object value" upd 0 '{"items":{"a":null,"b":1}}' --writer-thread mcp:cur
 check "inner null is a delete, not a stored value" eq "$(pget items)" '{"b": 1}'
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
 
@@ -84,16 +83,14 @@ check "refused patch not applied" eq "$(pget watch_log_offset)" '600'
 check "refusal records mismatch anomaly" anoms_has "conductor-mismatch"
 check "stderr explains refusal" has <(printf '%s' "$LAST_ERR") "mcp:old"
 
-check "patch setting another thread id refused" \
-  upd 3 '{"conductor_thread_id":"mcp:old"}' --writer-thread mcp:cur
+check "patch setting another thread id refused" upd 3 '{"conductor_thread_id":"mcp:old"}' --writer-thread mcp:cur
 check "thread id still current" eq "$(pget conductor_thread_id)" '"mcp:cur"'
 
 # 引き継ぎ・交代: --claim-conductor で新指揮役が自分の ID にする
 check "claim succeeds" upd 0 '{"scheduled_task_id":"sched-new"}' --writer-thread mcp:new --claim-conductor
 check "claim sets conductor_thread_id" eq "$(pget conductor_thread_id)" '"mcp:new"'
 check "claim applies the rest of the patch" eq "$(pget scheduled_task_id)" '"sched-new"'
-check "claim forces writer id over patch value" \
-  upd 0 '{"conductor_thread_id":"mcp:evil"}' --writer-thread mcp:new --claim-conductor
+check "claim forces writer id over patch value" upd 0 '{"conductor_thread_id":"mcp:evil"}' --writer-thread mcp:new --claim-conductor
 check "writer id wins" eq "$(pget conductor_thread_id)" '"mcp:new"'
 check "old conductor now refused" upd 3 '{"watch_log_offset":700}' --writer-thread mcp:cur
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
@@ -101,21 +98,17 @@ put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset
 # 登録済みの conductor_thread_id は --claim-conductor でだけ変更できる。
 # 現指揮役自身の通常 patch による削除・無効化・別の値への変更も拒否する
 # （この項目が失われると後続の持ち主照合が素通りになるため）。
-check "patch deleting thread id refused" \
-  upd 3 '{"conductor_thread_id":null,"watch_log_offset":601}' --writer-thread mcp:cur
+check "patch deleting thread id refused" upd 3 '{"conductor_thread_id":null,"watch_log_offset":601}' --writer-thread mcp:cur
 check "delete refused keeps thread id" eq "$(pget conductor_thread_id)" '"mcp:cur"'
 check "delete refused keeps offset" eq "$(pget watch_log_offset)" '600'
 check "delete refusal recorded" anoms_has "conductor-id-change-refused"
 
-check "patch emptying thread id refused" \
-  upd 3 '{"conductor_thread_id":""}' --writer-thread mcp:cur
-check "patch non-string thread id refused" \
-  upd 3 '{"conductor_thread_id":123}' --writer-thread mcp:cur
+check "patch emptying thread id refused" upd 3 '{"conductor_thread_id":""}' --writer-thread mcp:cur
+check "patch non-string thread id refused" upd 3 '{"conductor_thread_id":123}' --writer-thread mcp:cur
 check "thread id still registered" eq "$(pget conductor_thread_id)" '"mcp:cur"'
 
 # 同じ値の書き戻しは変更にならないので許す
-check "patch rewriting same thread id applies" \
-  upd 0 '{"conductor_thread_id":"mcp:cur","watch_log_offset":601}' --writer-thread mcp:cur
+check "patch rewriting same thread id applies" upd 0 '{"conductor_thread_id":"mcp:cur","watch_log_offset":601}' --writer-thread mcp:cur
 check "same-id write applied" eq "$(pget watch_log_offset)" '601'
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
 
@@ -125,13 +118,11 @@ check "non-thread writer cannot change thread id" \
 check "non-thread change keeps thread id" eq "$(pget conductor_thread_id)" '"mcp:cur"'
 check "non-thread change refused wholesale" eq "$(pget subjects)" '""'
 check "non-thread refusal recorded" anoms_has "conductor-id-change-refused"
-check "non-thread cannot delete thread id" \
-  upd 3 '{"conductor_thread_id":null}' --writer conductor-watch
+check "non-thread cannot delete thread id" upd 3 '{"conductor_thread_id":null}' --writer conductor-watch
 check "non-thread delete keeps thread id" eq "$(pget conductor_thread_id)" '"mcp:cur"'
 
 # 登録が残るので、削除を試みた後も旧指揮役の書き込みは拒否され続ける
-check "old conductor still refused after tamper tries" \
-  upd 3 '{"watch_log_offset":700}' --writer-thread mcp:old
+check "old conductor still refused after tamper tries" upd 3 '{"watch_log_offset":700}' --writer-thread mcp:old
 
 # conductor_thread_id が無い（未記録の）状態では書ける
 put_state '{"watch_log_offset":10}'
@@ -139,14 +130,11 @@ check "unclaimed state accepts thread write" upd 0 '{"watch_log_offset":20}' --w
 check "unclaimed write applied" eq "$(pget watch_log_offset)" '20'
 
 # 登録前の既存ファイル: 登録も --claim-conductor で行い、通常の patch では登録できない
-check "unclaimed: patch cannot register thread id" \
-  upd 3 '{"conductor_thread_id":"mcp:a","watch_log_offset":30}' --writer-thread mcp:a
+check "unclaimed: patch cannot register thread id" upd 3 '{"conductor_thread_id":"mcp:a","watch_log_offset":30}' --writer-thread mcp:a
 check "unclaimed: refused write not applied" eq "$(pget watch_log_offset)" '20'
-check "unclaimed: non-thread cannot register thread id" \
-  upd 3 '{"conductor_thread_id":"mcp:a"}' --writer conductor-watch
+check "unclaimed: non-thread cannot register thread id" upd 3 '{"conductor_thread_id":"mcp:a"}' --writer conductor-watch
 check "unclaimed: still no thread id" eq "$(pget conductor_thread_id)" '""'
-check "unclaimed: claim registers id" \
-  upd 0 '{"watch_log_offset":30}' --writer-thread mcp:a --claim-conductor
+check "unclaimed: claim registers id" upd 0 '{"watch_log_offset":30}' --writer-thread mcp:a --claim-conductor
 check "unclaimed: claim sets id" eq "$(pget conductor_thread_id)" '"mcp:a"'
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
 
@@ -162,8 +150,7 @@ check "same offset is not a regression" upd 0 '{"watch_log_offset":600}' --write
 check "larger offset applies" upd 0 '{"watch_log_offset":601,"inbox_offset":41}' --writer-thread mcp:cur
 check "advanced offsets stored" eq "$(pget inbox_offset)" '41'
 
-check "allow flag applies regression" \
-  upd 0 '{"inbox_offset":5}' --writer-thread mcp:cur --allow-offset-regression
+check "allow flag applies regression" upd 0 '{"inbox_offset":5}' --writer-thread mcp:cur --allow-offset-regression
 check "allowed regression applied" eq "$(pget inbox_offset)" '5'
 check "allowed regression recorded" anoms_has "offset-regression"
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
@@ -174,8 +161,7 @@ check "negative offset refused" upd 3 '{"watch_log_offset":-1}' --writer-thread 
 check "offset still 600" eq "$(pget watch_log_offset)" '600'
 
 # --- 書き手でない名乗り（conductor-watch など）はスレッド照合の対象外 ---
-check "non-thread writer skips thread check" \
-  upd 0 '{"subjects":{"9":{"waiting_on":"conductor"}},"updated_at":"t0"}' --writer conductor-watch
+check "non-thread writer skips thread check" upd 0 '{"subjects":{"9":{"waiting_on":"conductor"}},"updated_at":"t0"}' --writer conductor-watch
 check "non-thread write applied" has <(pget subjects) '"9"'
 check "non-thread write keeps offsets" eq "$(pget watch_log_offset)" '600'
 
@@ -187,14 +173,11 @@ check "created file has patch" eq "$(pget a)" '1'
 # --- 読めない状態（壊れた JSON・非原子的な直書きの途中）---
 # 元のファイルは <state>.unreadable-<時刻> に退避され、照合できない書き込みは拒否する。
 put_state '{"broken'
-check "corrupt: foreign thread write refused" \
-  upd 3 '{"watch_log_offset":3796,"last_patrol_note":"old"}' --writer-thread mcp:old
+check "corrupt: foreign thread write refused" upd 3 '{"watch_log_offset":3796,"last_patrol_note":"old"}' --writer-thread mcp:old
 check "corrupt: refusal recorded" anoms_has "owner-unverifiable"
 check "corrupt: refused write not applied" eq "$(pget watch_log_offset)" '""'
-check "corrupt: broken file backed up" \
-  bash -c 'compgen -G "$1.unreadable-*" >/dev/null' _ "$STATE"
-check "corrupt: backup holds original bytes" \
-  bash -c 'grep -lq broken "$1".unreadable-*' _ "$STATE"
+check "corrupt: broken file backed up" bash -c 'compgen -G "$1.unreadable-*" >/dev/null' _ "$STATE"
+check "corrupt: backup holds original bytes" bash -c 'grep -lq broken "$1".unreadable-*' _ "$STATE"
 check "corrupt: unreadable recorded" anoms_has "state-unreadable"
 
 # 退避と回復状態の保存の間で中断しても、正規パスには読めない元ファイルか
@@ -203,8 +186,7 @@ check "corrupt: unreadable recorded" anoms_has "state-unreadable"
 # 次の書き込みは拒否され続ける。os.replace の 2 回目（退避コピーの設置の次、
 # 回復状態の書き戻し）を失敗させて中断を再現する。
 put_state '{"broken'
-check "crash after backup leaves unreadable file at canonical path" \
-  python3 -I - "$UPD" "$STATE" <<'PY'
+check "crash after backup leaves unreadable file at canonical path" python3 -I - "$UPD" "$STATE" <<'PY'
 import importlib.util, io, json, os, sys
 from importlib.machinery import SourceFileLoader
 
@@ -242,10 +224,8 @@ if exists:
         unreadable = True
 sys.exit(0 if len(calls) >= 2 and exists and unreadable else 1)
 PY
-check "crash sim: backup preserves original" \
-  bash -c 'grep -lq broken "$1".unreadable-*' _ "$STATE"
-check "crash sim: next foreign write still refused" \
-  upd 3 '{"watch_log_offset":700}' --writer-thread mcp:old
+check "crash sim: backup preserves original" bash -c 'grep -lq broken "$1".unreadable-*' _ "$STATE"
+check "crash sim: next foreign write still refused" upd 3 '{"watch_log_offset":700}' --writer-thread mcp:old
 check "crash sim: refusal recorded" anoms_has "owner-unverifiable"
 check "crash sim: recovery flag set" eq "$(pget needs_conductor_claim)" 'true'
 rm -f "$STATE".unreadable-*
@@ -253,19 +233,15 @@ rm -f "$STATE".unreadable-*
 # 拒否で書き戻した回復途中の記録からは持ち主もオフセットも確かめられないので、
 # --claim-conductor の回復書き込みが来るまで拒否が続く。
 check "corrupt: flag marks recovery" eq "$(pget needs_conductor_claim)" 'true'
-check "corrupt: second foreign thread write still refused" \
-  upd 3 '{"watch_log_offset":3796}' --writer-thread mcp:old
+check "corrupt: second foreign thread write still refused" upd 3 '{"watch_log_offset":3796}' --writer-thread mcp:old
 check "corrupt: second write not applied" eq "$(pget watch_log_offset)" '""'
-check "corrupt: non-thread offset write still refused" \
-  upd 3 '{"watch_log_offset":100}' --writer conductor-watch
+check "corrupt: non-thread offset write still refused" upd 3 '{"watch_log_offset":100}' --writer conductor-watch
 check "corrupt: second offset refusal recorded" anoms_has "offset-unverifiable"
-check "corrupt: patch cannot clear flag" \
-  upd 0 '{"needs_conductor_claim":false,"a":1}' --writer conductor-watch
+check "corrupt: patch cannot clear flag" upd 0 '{"needs_conductor_claim":false,"a":1}' --writer conductor-watch
 check "corrupt: flag survives patch" eq "$(pget needs_conductor_claim)" 'true'
 
 put_state '{"broken'
-check "corrupt: offset write by non-thread refused" \
-  upd 3 '{"watch_log_offset":100}' --writer conductor-watch
+check "corrupt: offset write by non-thread refused" upd 3 '{"watch_log_offset":100}' --writer conductor-watch
 check "corrupt: offset refusal recorded" anoms_has "offset-unverifiable"
 
 put_state '{"broken'
@@ -280,10 +256,8 @@ check "corrupt: non-offset write by non-thread applies" upd 0 '{"a":2}' --writer
 check "corrupt: non-offset write applied" eq "$(pget a)" '2'
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
 
-# --- 正規パスのリンク先・特殊ファイルは中身を読まず写さず拒否する ---
-# sandbox 内の書き手が patrol-state.json をホストファイルへの symlink や
-# FIFO・デバイスに差し替えても、リンク先の中身を読んだり pelway/ 配下や
-# 正規パスに写したりしてはいけない（Issue #671 レビュー指摘）。
+# --- 正規パス・ロックパスの symlink・特殊ファイルは中身を読まず写さず拒否する ---
+# （Issue #671 レビュー指摘: 差し替えでホストファイルの中身が漏れないこと）
 PDIR="$(dirname "$STATE")"
 rm -f "$STATE".unreadable-*
 SECRET_JSON="$ROOT/host-secret.json"
@@ -292,37 +266,26 @@ printf 'TOPSECRET host bytes' > "$ROOT/host-secret.txt"
 
 rm -f "$STATE"
 ln -s "$ROOT/host-secret.txt" "$STATE"
-check "symlink to non-json host file refused" \
-  upd 3 '{"a":1}' --writer-thread mcp:cur
+check "symlink to non-json host file refused" upd 3 '{"a":1}' --writer-thread mcp:cur
 check "symlink: refusal recorded" anoms_has "state-untrusted"
-check "symlink: no quarantine copy of target" \
-  bash -c '! compgen -G "$1.unreadable-*" >/dev/null' _ "$STATE"
-check "symlink: host bytes not copied into pelway dir" \
-  bash -c '! grep -rlq TOPSECRET "$1"' _ "$PDIR"
-check "symlink: target file unchanged" \
-  eq "$(cat "$ROOT/host-secret.txt")" 'TOPSECRET host bytes'
-check "symlink: canonical replaced by recovery state" \
-  eq "$(pget needs_conductor_claim)" 'true'
+check "symlink: no quarantine copy of target" bash -c '! compgen -G "$1.unreadable-*" >/dev/null' _ "$STATE"
+check "symlink: host bytes not copied into pelway dir" bash -c '! grep -rlq TOPSECRET "$1"' _ "$PDIR"
+check "symlink: target file unchanged" eq "$(cat "$ROOT/host-secret.txt")" 'TOPSECRET host bytes'
+check "symlink: canonical replaced by recovery state" eq "$(pget needs_conductor_claim)" 'true'
 
 rm -f "$STATE"
 ln -s "$SECRET_JSON" "$STATE"
-check "symlink to json object refused" \
-  upd 3 '{"a":1}' --writer-thread mcp:cur
-check "symlink-json: target content not adopted as base" \
-  bash -c '! grep -q TOPSECRET "$1"' _ "$STATE"
-check "symlink-json: registered id not adopted" \
-  eq "$(pget conductor_thread_id)" '""'
-check "symlink-json: link target owner still refused" \
-  upd 3 '{"a":2}' --writer-thread mcp:host
+check "symlink to json object refused" upd 3 '{"a":1}' --writer-thread mcp:cur
+check "symlink-json: target content not adopted as base" bash -c '! grep -q TOPSECRET "$1"' _ "$STATE"
+check "symlink-json: registered id not adopted" eq "$(pget conductor_thread_id)" '""'
+check "symlink-json: link target owner still refused" upd 3 '{"a":2}' --writer-thread mcp:host
 
 rm -f "$STATE" "$STATE".unreadable-*
 mkfifo "$STATE"
 check "fifo state refused without blocking" \
   bash -c 'printf "%s" "{\"a\":1}" | timeout 15 python3 -I "$1" --state "$2" --writer-thread mcp:cur 2>/dev/null; [[ $? == 3 ]]' _ "$UPD" "$STATE"
-check "fifo: no quarantine copy made" \
-  bash -c '! compgen -G "$1.unreadable-*" >/dev/null' _ "$STATE"
-check "fifo: procedure continues with claim" \
-  upd 0 '{"scheduled_task_id":"s3"}' --writer-thread mcp:new --claim-conductor
+check "fifo: no quarantine copy made" bash -c '! compgen -G "$1.unreadable-*" >/dev/null' _ "$STATE"
+check "fifo: procedure continues with claim" upd 0 '{"scheduled_task_id":"s3"}' --writer-thread mcp:new --claim-conductor
 check "fifo: claim sets owner" eq "$(pget conductor_thread_id)" '"mcp:new"'
 rm -f "$STATE"
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
@@ -330,22 +293,17 @@ put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset
 # ロックファイルの symlink もたどらない（flock をホストファイルに掛けない）
 rm -f "$STATE.lock"
 ln -s "$ROOT/host-secret.txt" "$STATE.lock"
-check "symlinked lock file fails closed" \
-  upd 1 '{"a":1}' --writer conductor-watch
+check "symlinked lock file fails closed" upd 1 '{"a":1}' --writer conductor-watch
 check "lock symlink: state file untouched" eq "$(pget watch_log_offset)" '600'
 rm -f "$STATE.lock"
 
 # --- anomalies は手順だけが記録する項目。patch からの注入・消去はできない ---
-check "patch cannot inject anomalies" \
-  upd 0 '{"anomalies":[{"kind":"fake","note":"planted"}],"a":7}' --writer-thread mcp:cur
-check "injected anomaly not stored" \
-  bash -c '! grep -q fake "$1"' _ "$STATE"
+check "patch cannot inject anomalies" upd 0 '{"anomalies":[{"kind":"fake","note":"planted"}],"a":7}' --writer-thread mcp:cur
+check "injected anomaly not stored" bash -c '! grep -q fake "$1"' _ "$STATE"
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"anomalies":[{"kind":"owner-unverifiable","writer":"w","at":"t"}]}'
-check "patch cannot wipe anomalies" \
-  upd 0 '{"anomalies":[],"a":8}' --writer-thread mcp:cur
+check "patch cannot wipe anomalies" upd 0 '{"anomalies":[],"a":8}' --writer-thread mcp:cur
 check "recorded anomaly survives empty patch" anoms_has "owner-unverifiable"
-check "patch cannot null anomalies" \
-  upd 0 '{"anomalies":null,"a":9}' --writer-thread mcp:cur
+check "patch cannot null anomalies" upd 0 '{"anomalies":null,"a":9}' --writer-thread mcp:cur
 check "recorded anomaly survives null patch" anoms_has "owner-unverifiable"
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
 
@@ -360,10 +318,8 @@ check "claim without writer-thread refused" upd 2 '{"a":1}' --writer conductor-w
 check "input errors leave file alone" eq "$(pget watch_log_offset)" '600'
 
 # --- 書き込み経路の一元化（Issue #671 受け入れ条件 4） ---
-check "conductor-watch writes via shared procedure" \
-  has "$REPO/scripts/conductor-watch.sh" "patrol-state-update"
-check "conductor-watch has no direct patrol-state dump" \
-  bash -c '! grep -q "json.dump(ps, open(ps_path" "$1"' _ "$REPO/scripts/conductor-watch.sh"
+check "conductor-watch writes via shared procedure" has "$REPO/scripts/conductor-watch.sh" "patrol-state-update"
+check "conductor-watch has no direct patrol-state dump" bash -c '! grep -q "json.dump(ps, open(ps_path" "$1"' _ "$REPO/scripts/conductor-watch.sh"
 check "presence check: runbook mentions write procedure and protection terms" \
   has_all "$RUNBOOK" "patrol-state-update" "conductor_thread_id" "anomalies" "巻き戻し" "claim-conductor" "needs_conductor_claim" "state-untrusted" "O_NOFOLLOW"
 

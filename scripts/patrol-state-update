@@ -24,18 +24,14 @@
   （--allow-offset-regression なし）は拒否する（照合を確かめられないため）。
   拒否・回復途中の記録には needs_conductor_claim を立て、--claim-conductor の
   回復書き込みが来るまで拒否が続く
-- 正規パス・ロックファイルが信頼できる通常ファイルでないときは中身を読まず
-  写さず扱わない: O_NOFOLLOW で symlink をたどらず、fstat で通常ファイル・
-  自己所有・リンク数 1 を確かめ、状態ファイルは 256KiB 上限で 1 回だけ読む
-  （そのバイト列を解析と unreadable の退避の両方に使う）。symlink・FIFO・
-  デバイス・他人所有・巨大な正規パスは種類だけ anomalies（state-untrusted）に
-  記録し、unreadable と同じ照合不能の扱いで回復を待つ。ロックパスの不適合は
-  失敗（rc 1）とする。これで、sandbox 内の書き手が正規パスをホストの
-  ファイルへの symlink 等に差し替えても、その中身が pelway/ 配下や
-  正規パスに写り込まない
-- anomalies はこの手順だけが記録する項目。patch が anomalies に書いたものは
-  採らず、base の記録に今回の記録を追記したものだけを結果に入れる
-  （記録の注入・消去を防ぐ）
+- 正規パス・ロックパスが信頼できる通常ファイルでないときは中身を読まず写さず
+  扱わない: O_NOFOLLOW・fstat で通常ファイル・自己所有・リンク数 1・256KiB
+  上限を確かめ、1 回読んだバイト列を解析と unreadable の退避の両方に使う。
+  symlink・FIFO・他人所有・巨大な正規パスは state-untrusted として anomalies
+  に記録し unreadable と同じ照合不能の扱い、ロックパスの不適合は失敗（rc 1）。
+  ホストのファイルへの symlink 差し替えで中身が漏れないようにするため
+- anomalies はこの手順だけが記録する項目。patch が書いたものは採らず、base の
+  記録に今回の記録を追記したものだけを結果に入れる（注入・消去を防ぐ）
 
 入力は標準入力の merge patch ベースの指定（オブジェクトは深く併合し、null は鍵を消す。
 RFC 7386 と違い、patch のオブジェクトは既存値がオブジェクトでなくても再帰的に
@@ -181,8 +177,7 @@ def main():
     os.makedirs(os.path.dirname(state) or ".", exist_ok=True)
     # 状態ファイルは書き込みのたびに os.replace で差し替わるため、ファイルそのものではなく
     # 別のロックファイル（<state>.lock。差し替わらない）を flock で取る。
-    # O_NOFOLLOW で symlink をたどらず、fstat で通常ファイル・自己所有・リンク数 1 を
-    # 確かめる: ロックパスが symlink だと、ロックがリンク先の別ファイルに掛かる。
+    # O_NOFOLLOW・fstat でロックパスも検査する（symlink だとロックがリンク先の別ファイルに掛かる）
     try:
         lock_fd = os.open(state + ".lock",
                           os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
@@ -205,12 +200,9 @@ def main():
 
     try:
         # 正規パスは O_RDONLY|O_NOFOLLOW|O_NONBLOCK で 1 回だけ開き、fstat で
-        # 通常ファイル・自己所有・リンク数 1・サイズ上限を確かめる。その fd から
-        # 読んだバイト列を解析と unreadable の退避の両方に使い、二度読まない。
-        # symlink・FIFO・デバイス・他人所有・巨大ファイルは中身を読まず写さず、
-        # 種類だけ anomalies に記録して照合不能な書き込みを拒否する（読むと
-        # ホストのファイルの中身が pelway/ 配下や正規パスに写り、sandbox の
-        # 外の情報が流れ込む）。
+        # 通常ファイル・自己所有・リンク数 1・サイズ上限を確かめ、その fd から
+        # 読んだバイト列を解析と退避の両方に使う（二度読まない。不適合な
+        # symlink・FIFO 等は読まず写さず、種類だけ記録して照合不能として拒否する）
         base, unreadable, untrusted_reason, raw_state = {}, False, None, None
         try:
             sfd = os.open(state, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -276,15 +268,14 @@ def main():
             notes.append({"kind": "state-unreadable", "writer": who,
                           "backup": os.path.basename(backup), "at": now_iso})
         if untrusted_reason:
-            # 正規パスが信頼できる通常ファイルでなかった（symlink・FIFO・
-            # 他人所有・巨大など）。中身は読んでいないので退避コピーも作らず、
-            # 種類だけ記録する。
+            # 正規パスが信頼できる通常ファイルでなかった。中身は読んでいないので
+            # 退避コピーは作らず、種類だけ記録する
             notes.append({"kind": "state-untrusted", "reason": untrusted_reason,
                           "writer": who, "at": now_iso})
 
         # needs_conductor_claim は unreadable・untrusted からの回復途中の印。立てるのは
-        # この手順がそれらに会ったときだけ、下ろすのは --claim-conductor の
-        # 回復書き込みだけ（patch からの操作は受け付けない）。
+        # この手順だけ、下ろすのは --claim-conductor の回復書き込みだけ
+        # （patch からの操作は受け付けない）。
         unverifiable_state = unreadable or untrusted_reason is not None
         if opts["claim"]:
             result.pop("needs_conductor_claim", None)
@@ -351,9 +342,8 @@ def main():
             kinds = ", ".join(r["kind"] for r in refuse)
             die(f"refused ({kinds}) by {who}; attempt recorded in anomalies", 3)
 
-        # anomalies はこの手順だけが記録する項目。base に残る記録に今回の notes を
-        # 追記したもので結果を組み直し、patch が anomalies に書いたものは採らない
-        # （記録の注入・消去ができると拒否の履歴を偽装・抹消できてしまう）。
+        # anomalies はこの手順だけが記録する項目。patch が書いたものは採らず、
+        # base の記録に今回の notes を追記したものだけを結果に入れる（注入・消去を防ぐ）
         anoms = base.get("anomalies")
         anoms = anoms if isinstance(anoms, list) else []
         if anoms or notes:
