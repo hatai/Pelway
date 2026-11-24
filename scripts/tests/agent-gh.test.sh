@@ -726,6 +726,14 @@ expect_rejected marker-sort ls-remote --sort refname "--upload-pack=touch $ran; 
 # 位置引数が先に来ると `--` を値として取るオプションとの区別が付かないため、`--` の後ろも一律に走査する
 expect_rejected ddash-refspec-fetch fetch origin -- "--upload-pack=touch $ran; false"
 expect_rejected ddash-refspec-push push origin -- --exec
+# pull・push は `--` の後ろを `--` なしで子の git（pull は fetch、push はサブモジュールの push）に渡し、
+# 子はオプションとして解釈する（実測: `git pull -- . --upload-pack=<cmd>` は <cmd> を実行する）ため、
+# pull・push では `--` を終端にせず末尾まで走査する
+expect_rejected ddash-pull pull -- . "--upload-pack=touch $ran; false"
+expect_rejected ddash-pull-after-o pull -o x -- "--receive-pack=touch $ran; false"
+expect_rejected ddash-repo push -- "--receive-pack=touch $ran; false"
+expect_rejected ddash-after-o push -o x -- --exec
+expect_rejected ddash-submodule push --recurse-submodules=on-demand -- origin --no-verify
 [[ ! -e "$ran" ]] || failures+=("transport options: a command ran")
 
 # 値として消費される引数・参照パターン・確かな `--` の後ろの位置引数は、git がオプションとして解釈しないため
@@ -751,9 +759,10 @@ expect_not_rejected pattern-upload-pack ls-remote origin "--upload-pack=x"
 expect_not_rejected pattern-server-opt ls-remote -o --exec origin
 # `=` 付きのオプションは値を自身で持つため、後ろの位置引数や `--` の扱いに影響しない
 expect_not_rejected pattern-sort-eq ls-remote --sort=refname origin --exec
-expect_not_rejected ddash-repo push -- "--receive-pack=touch $ran; false"
-# -o 系の綴りとその値だけが先にあるときも、`--` は確かにオプションの終端
-expect_not_rejected ddash-after-o push -o x -- --exec
+# fetch・ls-remote では clean な `--` の後ろは refspec・参照パターンで、オプションとしては解釈されない
+# （`--upload-pack` が refspec・パターン扱いで git が失敗するのは、agent-gh の拒否ではない）
+expect_not_rejected ddash-fetch fetch -- "--upload-pack=touch $ran; false" origin
+expect_not_rejected ddash-ls-remote ls-remote -o x -- --exec
 [[ ! -e "$ran" ]] || failures+=("transport passthrough: a command ran")
 
 # 検査対象外のサブコマンドでは、`--` の後ろに転送オプションと同じ名前のファイルがあっても通す

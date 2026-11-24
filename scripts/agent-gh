@@ -318,8 +318,11 @@ if [[ "${1:-}" == "git" ]]; then
   #   あってオプションではない。`git push -o --exec` の --exec は remote のフックに送られる文字列で、
   #   push の --exec や --no-verify とは別物。連結形（-o--exec）や `=` の形（--push-option=--exec）は
   #   clean に影響しない。
-  # - `--` の後ろは位置引数（refspec・参照パターン）で、オプションとしては解釈されない。値として消費
-  #   された `--`（`git push -o -- --no-verify` の `--`）は終端にならない。
+  # - `--` の後ろは、fetch・ls-remote では位置引数（refspec・参照パターン）で、オプションとしては
+  #   解釈されない。値として消費された `--`（`git push -o -- --no-verify` の `--`）は終端にならない。
+  #   pull・push は `--` を外して後ろの引数を子の git に渡す（pull は builtin/pull.c の run_fetch が
+  #   `git fetch` を、push は submodule.c がサブモジュールの `git push` を起動する）ため、子はそれらを
+  #   オプションとして解釈する（実測: `git pull -- . --upload-pack=<cmd>` は <cmd> を実行する）。
   # - ls-remote は最初の位置引数の後ろをリポジトリ名と参照パターンとして読む（builtin/ls-remote.c の
   #   PARSE_OPT_STOP_AT_NON_OPTION）ため、`-` で始まらない引数が来た時点で走査を終える（`git ls-remote
   #   origin --exec` の --exec は参照パターンとして扱われる）。fetch・pull・push は parse-options の既定で、
@@ -338,7 +341,13 @@ if [[ "${1:-}" == "git" ]]; then
         if ((clean)); then
           case "$a" in
             --)
-              break ;; # clean な `--` の後ろは位置引数（refspec・参照パターン）
+              # clean な `--` の後ろは fetch・ls-remote では位置引数（refspec・参照パターン）。
+              # pull・push は `--` の後ろを子の git（fetch・サブモジュールの push）にオプションとして
+              # 渡すため、終端にせず clean を崩して末尾まで走査する。
+              case "$git_sub" in
+                fetch|ls-remote) break ;;
+                *) clean=0 ;;
+              esac ;;
             -o|--push-option|--server-option)
               # -o は別の引数を値として取る。次の引数は値で、オプションとしては検査しない。
               skip_arg=1
