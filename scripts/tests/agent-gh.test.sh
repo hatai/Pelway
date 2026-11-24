@@ -1114,6 +1114,7 @@ gate_branch() {
 gate_branch agent/642-x main 810 # 上限超え（下の PR の応答の headRefName）
 gate_branch feature main 900
 gate_branch small main 10
+gate_branch small-big small 900 # small の先に +900（push の途中でブランチが動く試験の動かし先。small から fast-forward）
 # gate_run <name> <agent-gh dev git の引数...>: 標準出力を OUT、標準エラーを ERR に分けて入れる（診断は ERR で照合する）
 gate_run() {
   local name="$1"
@@ -1134,7 +1135,7 @@ gate_blocked() {
 }
 
 # 1. 上限超えは push しない。標準エラーに行数・base・例外の条件が出て、remote の ref は変わらない。
-#    Git が送る更新を測るため、引数の形（否定形・試行・refspec の省略・リモートだけ・-u）によらず止まる
+#    Git が送る更新を測るため、引数の形（否定形・試行・-q・refspec の省略・リモートだけ・-u）によらず止まる
 gate_git switch -q agent/642-x
 gate_git config branch.agent/642-x.remote origin
 gate_git config branch.agent/642-x.merge refs/heads/agent/642-x
@@ -1145,6 +1146,7 @@ while IFS= read -r form; do
 done <<'EOF'
 push --dry-run origin HEAD
 push --no-dry-run --no-porcelain origin HEAD
+push -q origin HEAD
 push
 push origin
 push -u origin agent/642-x
@@ -1155,9 +1157,13 @@ for want in 'base: origin/main' 'pr-size-exception' 'hatai' '<!-- pr-size-except
 done
 PELWAY_AGENT_SKIP_RESIGN=1 gate_run gate_skip_resign push origin HEAD
 gate_blocked gate_skip_resign refs/heads/agent/642-x
-# グローバルオプション（-C）付きの push は、ゲートの前に agent-gh が終了コード 2 で拒否し、remote は変わらない
-gate_run gate_global -C "$GATE_DIR/work" push origin HEAD
-[[ "$RC" == 2 && -z "$(gate_ref refs/heads/agent/642-x)" ]] || failures+=("gate_global: exit $RC (want 2), remote $(gate_ref refs/heads/agent/642-x): $ERR")
+# グローバルオプション（-C・-c）付きの push は、ゲートの前に agent-gh が終了コード 2 で拒否し、remote は変わらない
+for global in "-C $GATE_DIR/work" "-c push.default=current"; do
+  read -ra global_args <<<"$global"
+  gate_run gate_global "${global_args[@]}" push origin HEAD
+  [[ "$RC" == 2 && -z "$(gate_ref refs/heads/agent/642-x)" ]] ||
+    failures+=("gate_global (${global%% *}): exit $RC (want 2), remote $(gate_ref refs/heads/agent/642-x): $ERR")
+done
 
 # 2. 例外があれば通す: 接続先のリポジトリの開いた PR の pr-size-exception ラベル + PR が閉じる Issue の hatai の目印コメント。
 #    Issue はリポジトリ付きの参照（url）で取り、別リポジトリの Issue もその参照で取る
@@ -1271,14 +1277,18 @@ gate_run gate_unmeasurable push origin HEAD
 [[ "$RC" != 0 && "$ERR" == *'測れません'* && -z "$(gate_ref refs/heads/small)" ]] || failures+=("gate_unmeasurable: rc=$RC $ERR")
 gate_git config --unset branch.small.gh-merge-base
 
-# 10. 測る sha は Git がフックの前に決めた送る sha そのもの。先に走る設定のフックが push 元のブランチを上限超えの先へ
+# 10. 測る sha は Git がフックの前に決めた送る sha そのもの。先に走る設定のフックが push 元のブランチを上限超えの先（small-big）へ
 #     動かしても、測った（動かす前の）sha が送られる
 small_sha="$(gate_git rev-parse small)"
 gate_git config hook.mover.event pre-push
-gate_git config hook.mover.command "sh -c 'git update-ref refs/heads/small $(gate_git rev-parse feature)'"
+gate_git config hook.mover.command "sh -c 'git update-ref refs/heads/small $(gate_git rev-parse small-big)'"
 PELWAY_AGENT_SKIP_RESIGN=1 gate_run gate_measured_sha push origin small
 [[ "$RC" == 0 && "$(gate_ref refs/heads/small)" == "$small_sha" ]] || failures+=("gate_measured_sha: rc=$RC, remote $(gate_ref refs/heads/small), want $small_sha: $ERR")
 gate_git config --remove-section hook.mover
+# remote と同じ sha だった（最新のまま）ブランチが後で動いても、次の push は動いた先（+910）を送る更新として測って止める
+gate_run gate_moved_after push origin small
+[[ "$RC" != 0 && "$ERR" == *'+910 / -0'* && "$(gate_ref refs/heads/small)" == "$small_sha" ]] ||
+  failures+=("gate_moved_after: rc=$RC, remote $(gate_ref refs/heads/small), want $small_sha: $ERR")
 unset GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
 
 # --- gh の `gh event listen` の案内（#596）: agent-gh の出力に残さない。警告・エラー・stdout・終了コードは残す ---
