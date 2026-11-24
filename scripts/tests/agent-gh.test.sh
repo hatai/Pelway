@@ -856,6 +856,17 @@ work_git config --unset core.hooksPath
 [[ -e "$PUSH_DIR/orighook-called" ]] || failures+=("orighook_tab: original pre-push not called")
 [[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("orighook_tab: remote ref changed")
 
+# core.hooksPath の読み取り自体に失敗するとき（存在しないユーザの `~` を含む値は --type=path の展開で
+# 失敗する。フック内では agent-gh の -c が command スコープで効くため、git log 等は動くが全値を
+# 展開する --get-all --type=path は失敗する）は、既存のフックを確認できないまま push しない
+work_git config core.hooksPath '~agent-gh-no-such-user/hooks'
+OUT="$(cd "$PUSH_DIR/work" && PATH="$RGBIN:$PATH" bash "$SCRIPT" dev git push origin HEAD 2>&1)"
+RC=$?
+work_git config --unset-all core.hooksPath 2>/dev/null || sed -i '/hooksPath/d' "$PUSH_DIR/work/.git/config"
+[[ "$RC" != 0 ]] || failures+=("cfg_read_fail: exit 0, want non-zero")
+[[ "$OUT" == *"core.hooksPath の読み取りに失敗"* ]] || failures+=("cfg_read_fail: not stopped by the read failure: $OUT")
+[[ "$(remote_ref agent/author_block)" == "$before" ]] || failures+=("cfg_read_fail: remote ref changed")
+
 # 6. review の push も同じ確認を通る。正しい名義は pelway-review[bot]。
 setup_push_repo review_push
 (cd "$PUSH_DIR/work" && as 'pelway-review[bot]' commit -q --allow-empty -m r1)

@@ -425,6 +425,14 @@ if ((${#bad[@]})); then
 fi
 # スコープと値は `-z` の NUL 区切り（scope\0value\0 の並び）で読む。タブや改行を含むパスを壊さないため
 # （`--show-scope` の区切りはタブで、パスにタブがあると awk のフィールド切りで後ろが落ちる）。
+# 読み取り自体の失敗（設定ファイルを読めない・値の展開に失敗する、終了コード 1 以外）では、既存の
+# フックを確認できないまま push しない。キーが無い（終了 1）は既定の場所に進む。
+cfg_rc=0
+git config -z --show-scope --get-all --type=path core.hooksPath >/dev/null 2>&1 || cfg_rc=$?
+if ((cfg_rc != 0 && cfg_rc != 1)); then
+  echo "agent-gh: core.hooksPath の読み取りに失敗したため push を止めました" >&2
+  exit 1
+fi
 orig=""
 while IFS= read -r -d '' scope && IFS= read -r -d '' val; do
   [[ "$scope" != command ]] && orig="$val"
