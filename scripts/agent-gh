@@ -5,6 +5,7 @@
 #   scripts/agent-gh qa comment <番号> --body-file <path|->   QA 担当 GitHub App pelway-qa（この形だけ許可）
 #   scripts/agent-gh <dev|review> git <git の引数...>   その名義の認証で git を実行する
 #   scripts/agent-gh -h | --help               使い方を標準出力に出して終了コード 0（fnox も gh も呼ばない）
+# git push は、push するコミットの名義が pelway-<dev|review>[bot] でなければ止める（#613。一時ディレクトリの pre-push フック）。
 # 呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。
 # gh は毎回空の一時 GH_CONFIG_DIR で呼ぶ。~/.config/gh や呼び出し元の GH_CONFIG_DIR（外部の hosts.yml）は
 # 参照もフォールバックもさせない（#522。レビュー sandbox が ~/.config/gh を読めないのと、人間のトークンへの
@@ -21,6 +22,10 @@ shopt -s inherit_errexit
 # review の sandbox からは dev 用の設定・age 鍵が読めない前提の構成。
 fnox_config="${PELWAY_AGENT_FNOX_CONFIG:-$HOME/.config/pelway-agent/fnox.toml}"
 review_fnox_config="${PELWAY_AGENT_FNOX_CONFIG_REVIEW:-$HOME/.config/pelway-agent-review/fnox.toml}"
+
+# agent-gh <dev|review> git で使えるサブコマンド（#613）。repo 内の呼び出し（skills・docs・scripts）と、それに伴う
+# 確認・取り込みの操作に絞る。コマンドを引数に取って実行するもの（rebase・bisect・submodule など）は入れない。
+git_allowed_subcommands=(add branch checkout commit diff fetch log ls-files ls-remote merge merge-base pull push restore rev-parse show status switch)
 
 usage() { echo "usage: $0 <dev|review> [git] <args...> | $0 qa comment <番号> --body-file <path|->" >&2; exit 2; }
 
@@ -110,6 +115,7 @@ help() {
     "" \
     "呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。" \
     "git push の成功後は scripts/agent-gh-resign がコミットを GitHub API の署名付きに付け替える（止めるときは PELWAY_AGENT_SKIP_RESIGN=1）。" \
+    "git push は、push するコミット（origin の追跡 ref から辿れないもの）の author と committer がその役割の App（pelway-<dev|review>[bot]）でなければ止める。確認を外す引数は受け付けない: サブコマンドは許可リスト（git_allowed_subcommands）の名前と完全一致するものだけ、グローバルオプションは無し、転送のコマンドのオプション（--upload-pack・--receive-pack・--exec）と push の --no-verify は拒否。範囲は手元の追跡 ref（refs/remotes/origin/*）で決まるため、追跡 ref を手元で動かした経路と、git が起動する別プロセス（設定の diff・merge のドライバなど）を経由する経路は対象外。" \
     "qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持ちません（~/.config/pelway-agent-qa/fnox.toml を指してください）。" \
     "非 ASCII の文字列は argv 経由で渡せません（\\uXXXX に潰れます）。--body-file / api --input / git commit -F などファイル経由で渡してください。" \
     "終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、それ以外は gh / git の終了コード"
@@ -390,7 +396,214 @@ if [[ "${1:-}" == "git" ]]; then
   done
   git_cfg+=(-c credential.helper= -c 'credential.helper=!gh auth git-credential')
 
-  if [[ "${1:-}" == "push" && -z "${PELWAY_AGENT_SKIP_RESIGN:-}" ]]; then
+  # push するコミットの名義を確かめる（#613）。git_sub はサブコマンド（最初の引数）。
+  # サブコマンドより前のグローバルオプション（-c・-C・--config-env など）は一つも許さない（許可リストが空。
+  # qa_check_args と同じ考え方）。-c core.hooksPath・include.path・includeIf.*.path・alias.* は、どれも
+  # 一時フックを外す引数になり、値を取るオプションの取りこぼしはサブコマンドの判定を誤らせるため。
+  if [[ "${1:-}" == -* ]]; then
+    echo "agent-gh: git のグローバルオプション（サブコマンドより前の -c・-C・--config-env など。core.hooksPath・include・alias の上書きを含む）は使えません（push の名義の確認を外せないため）" >&2
+    exit 2
+  fi
+  git_sub="${1:-}"
+  # サブコマンドは許可リストの名前と完全に一致するものだけを通す。alias（設定の alias は名前を変えて確認を外せる）、
+  # 名前の自動修正（help.autocorrect）、コマンドを実行するもの（rebase -x・submodule foreach など）、
+  # pre-push フックを通らない配管コマンド（send-pack など）は、どれも許可リストに無いため拒否される。
+  # 許可リストの名前はどれも git の組み込みで、git の alias は組み込みを上書きできない。
+  # qa_check_args と同じく、要素ごとの == で完全一致させる（空白でつないだ 1 つの引数を部分一致で通さない）。
+  allowed=0
+  for c in "${git_allowed_subcommands[@]}"; do
+    [[ "$git_sub" == "$c" ]] && allowed=1
+  done
+  if ((!allowed)); then
+    echo "agent-gh: git のサブコマンド（$git_sub）は使えません。使えるもの: ${git_allowed_subcommands[*]}" >&2
+    exit 2
+  fi
+  # 転送の相手側で実行するコマンドを指定するオプション（--upload-pack・--receive-pack・--exec。ls-remote では
+  # --exec が --upload-pack の別名になっている）と、push の --no-verify（pre-push フックを飛ばす）は、ローカルの
+  # remote ではその場で効くため拒否する。git が受け付ける省略形に限らず、オプション名の接頭辞は一律に
+  # 照合する（--ex のような短い形も含む。--no-verify は --no-veri 以上）。この検査は、このオプションを解釈するサブコマンド
+  # （fetch・pull・push・ls-remote）にだけ掛ける。ほかのサブコマンド（add・status・diff・restore など）の
+  # `-` で始まる引数は、git がパス名として扱うものを拒否しない（`git add -- --exec` のようなファイルの指定）。
+  #
+  # 走査は全引数を対象にする。git の引数解析の再実装はしないが、マーカー（`--`・-o・ls-remote の位置引数）は
+  # 別のオプションの値として消費されることがあるため（`push --repo -- --no-verify` では `--` が --repo の値、
+  # `ls-remote --sort refname --upload-pack` では refname が --sort の値）、その位置だけは見極めて省く。
+  # マーカーを信頼できるのは、それより前の引数がすべて「-o 系の綴りとその値」か「`=` 付きの長いオプション」
+  # のときだけ（どちらも次の引数を値として消費しないことが綴りから確かめられる）。その状態（clean）では:
+  # - `-o`（push では --push-option、fetch・pull・ls-remote では --server-option）の次の引数は、その値で
+  #   あってオプションではない。`git push -o --exec` の --exec は remote のフックに送られる文字列で、
+  #   push の --exec や --no-verify とは別物。`=` の形（--push-option=--exec）は clean に影響しない。
+  #   短いオプションの連結形（-o--exec）は `-o` の別引数と綴りで区別できないため clean を崩す
+  #   （git はそれを -o の値 "--exec" として読むので、連結形自体が危ない引数になることはない）。
+  # - `--` の後ろは、fetch・ls-remote では位置引数（refspec・参照パターン）で、オプションとしては
+  #   解釈されない。値として消費された `--`（`git push -o -- --no-verify` の `--`）は終端にならない。
+  #   pull・push は `--` を外して後ろの引数を子の git に渡す（pull は builtin/pull.c の run_fetch が
+  #   `git fetch` を、push は submodule.c がサブモジュールの `git push` を起動する）ため、子はそれらを
+  #   オプションとして解釈する（実測: `git pull -- . --upload-pack=<cmd>` は <cmd> を実行する）。
+  # - ls-remote は最初の位置引数をリポジトリ名、その後ろの引数を参照パターンとして読む（builtin/ls-remote.c の
+  #   PARSE_OPT_STOP_AT_NON_OPTION）ため、`-` で始まらない引数が来た時点で走査を終える（`git ls-remote
+  #   origin --exec` の --exec は参照パターンとして扱われる）。fetch・pull・push は parse-options の既定で、
+  #   位置引数の後ろでも `-` の引数をオプションとして解釈する（実測: git fetch <repo> --upload-pack <path>
+  #   は <path> を実行する）ため、位置引数は clean を崩すだけで走査を止めない。
+  # clean が崩れたあとの引数は、値かどうかを誤っても拒否側に倒れるため、末尾まで一律に走査する。
+  case "$git_sub" in
+    fetch|pull|push|ls-remote)
+      clean=1
+      skip_arg=0
+      for a in "${@:2}"; do
+        if ((skip_arg)); then
+          skip_arg=0
+          continue
+        fi
+        if ((clean)); then
+          case "$a" in
+            --)
+              # clean な `--` の後ろは fetch・ls-remote では位置引数（refspec・参照パターン）。
+              # pull・push は `--` の後ろを子の git（fetch・サブモジュールの push）にオプションとして
+              # 渡すため、終端にせず clean を崩して末尾まで走査する。
+              case "$git_sub" in
+                fetch|ls-remote) break ;;
+                *) clean=0 ;;
+              esac ;;
+            -o|--push-option|--server-option)
+              # -o は別の引数を値として取る。次の引数は値で、オプションとしては検査しない。
+              skip_arg=1
+              continue ;;
+            --?*=*)
+              # `=` 付きの長いオプションは値を自身で持ち、clean は崩れない。転送オプションの照合は掛ける。
+              opt="${a%%=*}"
+              for t in --upload-pack --receive-pack --exec; do
+                if [[ "$t" == "$opt"* ]]; then
+                  echo "agent-gh: git $git_sub の $t は使えません（コマンドを実行して push の名義の確認を外せるため）" >&2
+                  exit 2
+                fi
+              done
+              continue ;;
+            *)
+              # ls-remote は、clean な最初の位置引数の後ろを参照パターンとして読む（STOP_AT_NON_OPTION）
+              if [[ "$git_sub" == ls-remote && "$a" != -* ]]; then
+                break
+              fi
+              clean=0 ;;
+          esac
+        fi
+        case "$a" in
+          --?*)
+            opt="${a%%=*}"
+            for t in --upload-pack --receive-pack --exec; do
+              if [[ "$t" == "$opt"* ]]; then
+                echo "agent-gh: git $git_sub の $t は使えません（コマンドを実行して push の名義の確認を外せるため）" >&2
+                exit 2
+              fi
+            done
+            if [[ "$git_sub" == push ]] && ((${#a} >= 9)) && [[ "--no-verify" == "$a"* ]]; then
+              echo "agent-gh: push の --no-verify は使えません（push の名義の確認を外せないため）" >&2
+              exit 2
+            fi
+            ;;
+          -*)
+            # ls-remote の -u は --upload-pack の短い形（分離・連結・まとめた形のどれでも拒否する）。
+            if [[ "$git_sub" == ls-remote && "$a" =~ ^-[^-]*u ]]; then
+              echo "agent-gh: git ls-remote の -u は使えません（コマンドを実行して push の名義の確認を外せるため）" >&2
+              exit 2
+            fi
+            ;;
+        esac
+      done
+      ;;
+  esac
+  if [[ "$git_sub" == push ]]; then
+    # 範囲は push する ref から辿れて origin の追跡 ref から辿れないコミット。author か committer の名前が
+    # 役割の App の名義でなければ push しない。フックは実行時に一時ディレクトリへ作る（リポジトリに
+    # 実行ファイルを置くと agent-gh-resign で署名できないため）。元のフックの場所に pre-push があれば続けて呼ぶ。
+    push_name="pelway-${role}[bot]"
+    # TMPDIR が相対パスだと mktemp は呼び出しの cwd 基準の相対パスを返すが、git は core.hooksPath の
+    # 相対パスを worktree ルート基準で解決する。サブディレクトリからの呼び出しでは基準がずれて
+    # 一時フックを見つけられず、名義の確認なしに push が通ってしまう。絶対パスに解決してから渡す。
+    hooks_dir="$(mktemp -d)" || {
+      echo "agent-gh: 一時フックのディレクトリを作れないため push しません" >&2
+      exit 1
+    }
+    if ! abs_hooks_dir="$(cd -- "$hooks_dir" && pwd -P)"; then
+      rm -rf -- "$hooks_dir"
+      echo "agent-gh: 一時フックのディレクトリを絶対パスに解決できないため push しません" >&2
+      exit 1
+    fi
+    hooks_dir="$abs_hooks_dir"
+    cleanup_paths+=("$hooks_dir")
+    cat >"$hooks_dir/pre-push" <<'HOOK'
+#!/usr/bin/env bash
+set -euo pipefail
+input="$(cat)"
+bad=()
+while read -r _lref loid _rref _roid; do
+  [[ -n "${loid:-}" && ! "$loid" =~ ^0+$ ]] || continue # 削除（全ゼロ）は確かめるコミットが無い
+  # 代入の形で呼び、git log の失敗で止める（プロセス置換だと失敗が通ってしまう）。
+  # --no-replace-objects: refs/replace で別のコミット（名義の違うもの）に見せ替えた履歴を読まないため
+  log="$(git --no-replace-objects log --format='%h%x09%an%x09%cn' "$loid" --not --remotes=origin)"
+  while IFS=$'\t' read -r h an cn; do
+    [[ -n "$h" ]] || continue
+    [[ "$an" == "$PELWAY_AGENT_PUSH_NAME" && "$cn" == "$PELWAY_AGENT_PUSH_NAME" ]] || bad+=("$h author=$an committer=$cn")
+  done <<<"$log"
+done <<<"$input"
+if ((${#bad[@]})); then
+  echo "agent-gh: push を止めました。$PELWAY_AGENT_PUSH_NAME 以外の名義のコミットが含まれています:" >&2
+  printf '  %s\n' "${bad[@]}" >&2
+  echo "agent-gh: $PELWAY_AGENT_PUSH_GUIDE" >&2
+  exit 1
+fi
+# スコープと値は `-z` の NUL 区切り（scope\0value\0 の並び）で読む。タブや改行を含むパスを壊さないため
+# （`--show-scope` の区切りはタブで、パスにタブがあると awk のフィールド切りで後ろが落ちる）。
+# agent-gh はこのフックを core.hooksPath の一時設定（command スコープの -c）経由で起動するため、
+# 照会は必ず終了コード 0 で、command スコープの値として一時フックの dir が取れなければならない。
+# 「キー無し」（終了コード 1）を「設定なし＝既定の場所」と読むと、照会自体の失敗（読み取り先を
+# GIT_CONFIG で別ファイルに固定された環境など）を「設定なし」と取り違え、既存のフックを見逃した
+# まま push してしまう。終了コード 0 以外、または command スコープの値に一時フックの dir が無い
+# ときは、既存のフックを確認できないまま push しない。NUL を含む出力は bash の変数に入らず、
+# プロセス置換は終了コードを返さないため、一時ファイルに書いて値と終了コードを同じ呼び出しから
+# 得る。一時ファイルは一時フックの dir（絶対パス・親側の cleanup が消す）の中に置く。呼び出しの
+# TMPDIR が相対パスや存在しない dir を指していても、確実に作れる場所にするため。
+cfg_out="$PELWAY_AGENT_HOOKS_DIR/cfg.out"
+cfg_rc=0
+cfg_err="$(git config -z --show-scope --get-all --type=path core.hooksPath 2>&1 >"$cfg_out")" || cfg_rc=$?
+orig=""
+got_tmp=0
+while IFS= read -r -d '' scope && IFS= read -r -d '' val; do
+  if [[ "$scope" == command ]]; then
+    [[ "$val" == "$PELWAY_AGENT_HOOKS_DIR" ]] && got_tmp=1
+  else
+    orig="$val"
+  fi
+done <"$cfg_out"
+if ((cfg_rc != 0)); then
+  echo "agent-gh: core.hooksPath の読み取りに失敗したため push を止めました${cfg_err:+: $cfg_err}" >&2
+  exit 1
+fi
+if ((!got_tmp)); then
+  echo "agent-gh: core.hooksPath の照会で一時フックの設定を確認できないため push を止めました" >&2
+  exit 1
+fi
+orig="${orig:-$(git rev-parse --git-common-dir)/hooks}"
+if [[ -x "$orig/pre-push" ]]; then
+  "$orig/pre-push" "$@" <<<"$input"
+fi
+HOOK
+    chmod 700 "$hooks_dir/pre-push"
+    if [[ ! -x "$hooks_dir/pre-push" ]]; then
+      echo "agent-gh: 一時フックを実行可能にできないため push しません" >&2
+      exit 1
+    fi
+    if [[ "$role" == dev ]]; then
+      PELWAY_AGENT_PUSH_GUIDE="該当コミットを scripts/agent-gh dev git commit で作り直してから push してください"
+    else
+      PELWAY_AGENT_PUSH_GUIDE="該当コミットを $push_name の名義で作り直してから push してください"
+    fi
+    export PELWAY_AGENT_PUSH_NAME="$push_name" PELWAY_AGENT_PUSH_GUIDE PELWAY_AGENT_HOOKS_DIR="$hooks_dir"
+    # git_cfg の最後（呼び出し元の引数とサブコマンドの直前）に置き、ほかの設定より後で効かせる。
+    git_cfg+=(-c "core.hooksPath=$hooks_dir")
+  fi
+
+  if [[ "$git_sub" == "push" && -z "${PELWAY_AGENT_SKIP_RESIGN:-}" ]]; then
     rc=0
     GH_TOKEN="$token" git "${git_cfg[@]}" "$@" || rc=$?
     if ((rc == 0)); then
