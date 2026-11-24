@@ -14,8 +14,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use pelway_contract::decision::DecisionListItem;
-use pelway_contract::ids::{ChannelId, MemberId, WorkspaceId};
+use pelway_contract::decision::{
+    CreateDecisionRequest, DecideRequest, DecisionListItem, DecisionOption, DecisionOutcome,
+};
+use pelway_contract::ids::{ChannelId, MemberId, OptionId, WorkspaceId};
 use pelway_contract::ledger::ApprovalLedger;
 use pelway_contract::member::{ChannelMember, MemberKind};
 use pelway_contract::message::Channel;
@@ -29,7 +31,7 @@ use pelway_runner::demo::{
     BASIS_ENV, CHAT_MODEL_ENV, CUSTOM_BASE_URL_ENV, DemoLlmConfig, RESPONSE_FORMAT_ENV,
     TIMEOUT_SECS_ENV,
 };
-use pelway_runner::{Runner, RunnerConfig, RunnerError, RunnerTaskId};
+use pelway_runner::{MailDraft, Runner, RunnerConfig, RunnerError, RunnerTaskId, TEMPLATE_MARK};
 
 const WS: &str = DEMO_WORKSPACE_ID;
 const CH: &str = DEMO_CHANNEL_ID;
@@ -56,6 +58,25 @@ fn ab_reply() -> ChatReply {
         usage: Usage::default(),
     }
 }
+
+/// LLM の応答（メール下書き）の合成 JSON。下書きスキーマに従う形。
+fn draft_reply() -> ChatReply {
+    ChatReply {
+        text: r#"{"to": "B社 ご担当者", "subject": "案件B 納期のご相談", "body": "お世話になっております。納期を2週間延ばす案で調整させていただけますでしょうか。"}"#
+            .to_owned(),
+        usage: Usage::default(),
+    }
+}
+
+/// 要求が下書きの応答スキーマか（required に `subject` を含むか）。
+fn is_draft_request(req: &ChatRequest) -> bool {
+    req.schema
+        .as_ref()
+        .and_then(|s| s.get("required"))
+        .and_then(|r| r.as_array())
+        .is_some_and(|a| a.iter().any(|v| v == "subject"))
+}
+
 /// フェイクの gateway。`LlmGateway` trait 越しの差し替えを確かめる実装。
 /// `reply` を即返すか、`release` を受け取るまで呼び出し中で止まるかのどちらか。
 struct FakeGateway {
@@ -139,6 +160,36 @@ impl LlmGateway for SeqGateway {
             1 => replies[0].clone(),
             _ => replies.pop_front().expect("front"),
         }
+    }
+
+    async fn embed(&self, _texts: Vec<String>) -> Result<EmbedReply, LlmError> {
+        Err(LlmError::NotSent("embed は runner では使わない".to_owned()))
+    }
+}
+
+/// 要求スキーマで応答を切り分けるフェイク（下書きの決定フロー用）。下書き要求には
+/// `draft_text`（`None` なら [`draft_reply`]）、それ以外には A/B 案を返す。
+#[derive(Default)]
+struct SchemaGateway {
+    calls: AtomicUsize,
+    draft_calls: AtomicUsize,
+    draft_text: Option<String>,
+}
+
+impl LlmGateway for SchemaGateway {
+    async fn chat(&self, req: ChatRequest) -> Result<ChatReply, LlmError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if !is_draft_request(&req) {
+            return Ok(ab_reply());
+        }
+        self.draft_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(match &self.draft_text {
+            Some(text) => ChatReply {
+                text: text.clone(),
+                usage: Usage::default(),
+            },
+            None => draft_reply(),
+        })
     }
 
     async fn embed(&self, _texts: Vec<String>) -> Result<EmbedReply, LlmError> {
@@ -529,6 +580,226 @@ fn timeout_falls_back_to_script_reply() {
     );
 }
 
+// ---- 決定の確定 → メール下書きの生成（#330） ----
+
+#[test]
+fn decision_generates_mail_draft() {
+    let gateway = Arc::new(SchemaGateway::default());
+    let (store, ledger, runner) = fixture(DataStore::new_demo_seeded(now()), gateway.clone());
+
+    let (message, task_id) = mention_to_decision(&store, &runner);
+
+    // 決定者が案Aを決定すると、下書きのデータが生成され、投稿されて
+    // AwaitingSendApproval へ進む（HTTP 層はこれと同じ手順で runner に知らせる）。
+    let (outcome, draft) = decide_to_draft(&ledger, &runner, &task_id, "a");
+    assert_eq!(draft.to, "B社 ご担当者");
+    assert_eq!(draft.subject, "案件B 納期のご相談");
+    assert!(draft.body.contains("納期を2週間延ばす案"));
+    let posts = bot_messages(&store);
+    assert!(
+        posts
+            .iter()
+            .any(|b| b.contains("メール下書き") && b.contains(&draft.subject)),
+        "下書きが投稿される: {posts:?}"
+    );
+
+    // 同じ決定の二重通知・冪等リプレイでは下書き生成を再び走らせない。
+    runner.on_decision_made(&message.message_id, &outcome);
+    let calls_after = gateway.calls.load(Ordering::SeqCst);
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(
+        gateway.calls.load(Ordering::SeqCst),
+        calls_after,
+        "二重通知では LLM を再び呼ばない"
+    );
+}
+
+/// `item` の判断待ちを `option` で確定する（決定者は `decider`）。
+fn decide_item(
+    ledger: &Mutex<ApprovalLedger>,
+    item: &DecisionListItem,
+    option: &str,
+    decider: &str,
+) -> DecisionOutcome {
+    ledger
+        .lock()
+        .expect("ledger")
+        .decide(
+            DecideRequest {
+                decision_id: item.decision_id.clone(),
+                version: item.version,
+                option_id: OptionId::from(option),
+            },
+            &MemberId::from(decider),
+            now(),
+        )
+        .expect("decide")
+}
+
+/// 依頼をメンションで投稿し、runner が判断待ちまで進むのを待つ。
+fn mention_to_decision(store: &Mutex<DataStore>, runner: &Runner) -> (StoredMessage, RunnerTaskId) {
+    let message = post(
+        store,
+        REQUESTER,
+        MemberKind::Human,
+        "@ハル 納期の案を作って",
+    );
+    let task_id = runner.on_message_posted(&message).expect("task");
+    assert!(wait_state(runner, &task_id, TaskState::AwaitingDecision));
+    (message, task_id)
+}
+
+/// runner の判断待ち（1 件）を決定者が `option` で確定して知らせ、下書きの承認待ちまで待つ。
+fn decide_to_draft(
+    ledger: &Mutex<ApprovalLedger>,
+    runner: &Runner,
+    task_id: &RunnerTaskId,
+    option: &str,
+) -> (DecisionOutcome, MailDraft) {
+    let items = pending_items(ledger);
+    assert_eq!(items.len(), 1);
+    let outcome = decide_item(ledger, &items[0], option, DECIDER);
+    runner.on_decision_made(&items[0].request_message_id, &outcome);
+    let reached = wait_state(runner, task_id, TaskState::AwaitingSendApproval);
+    assert!(reached, "{:?}", runner.task(task_id).map(|t| t.state));
+    let draft = runner
+        .task(task_id)
+        .and_then(|t| t.draft)
+        .expect("下書きのデータが残る");
+    (outcome, draft)
+}
+
+/// 同じ依頼メッセージを指す別の判断待ちを確定しても、runner のタスクは進まない
+/// （runner が作った判断待ちの確定だけで下書き生成に入る）。
+#[test]
+fn decision_for_another_card_does_not_advance_task() {
+    let gateway = Arc::new(SchemaGateway::default());
+    let (store, ledger, runner) = fixture(DataStore::new_demo_seeded(now()), gateway.clone());
+    let (message, task_id) = mention_to_decision(&store, &runner);
+    let calls_before = gateway.calls.load(Ordering::SeqCst);
+
+    // 別の利用者が同じ依頼メッセージを指す判断待ちを作り、自分で確定する。
+    const OTHER: &str = "m-intruder";
+    let other = ledger
+        .lock()
+        .expect("ledger")
+        .create_decision(
+            WorkspaceId::from(WS),
+            CreateDecisionRequest {
+                channel_id: ChannelId::from(CH),
+                request_message_id: message.message_id.clone(),
+                requester: MemberId::from(OTHER),
+                decider: MemberId::from(OTHER),
+                question: "別の論点".to_owned(),
+                options: vec![
+                    DecisionOption {
+                        option_id: OptionId::from("a"),
+                        body: "別カードの案".to_owned(),
+                    },
+                    DecisionOption {
+                        option_id: OptionId::from("b"),
+                        body: "別カードの案2".to_owned(),
+                    },
+                ],
+            },
+            now(),
+        )
+        .expect("create")
+        .clone();
+    let other_item = ledger
+        .lock()
+        .expect("ledger")
+        .pending_decisions(&WorkspaceId::from(WS), &MemberId::from(OTHER), now())
+        .into_iter()
+        .find(|i| i.decision_id == other.decision_id)
+        .expect("other item");
+    let outcome = decide_item(&ledger, &other_item, "a", OTHER);
+    runner.on_decision_made(&message.message_id, &outcome);
+    std::thread::sleep(Duration::from_millis(100));
+    let task = runner.task(&task_id).expect("task");
+    assert_eq!(
+        task.state,
+        TaskState::AwaitingDecision,
+        "別カードでは進まない"
+    );
+    assert!(task.draft.is_none());
+    assert_eq!(gateway.calls.load(Ordering::SeqCst), calls_before);
+
+    // runner の判断待ちを確定すれば、下書き生成に進む。
+    decide_to_draft(&ledger, &runner, &task_id, "a");
+}
+
+/// 下書き生成が失敗して台本へ落ちても、下書きは決定された案（案B）に沿う。
+#[test]
+fn draft_fallback_follows_chosen_option() {
+    let gateway = Arc::new(FakeGateway::new(Err(LlmError::NotSent(
+        "接続できない".to_owned(),
+    ))));
+    let (store, ledger, runner) = fixture(DataStore::new_demo_seeded(now()), gateway.clone());
+    let (_, task_id) = mention_to_decision(&store, &runner);
+    let (outcome, draft) = decide_to_draft(&ledger, &runner, &task_id, "b");
+    assert!(draft.body.contains(&outcome.selected.body), "{draft:?}");
+    assert!(!draft.body.contains("2週間"), "{draft:?}");
+    assert!(draft.template, "フォールバックの下書きは定型の印付き");
+}
+
+/// `tests/fixtures/draft_replies.txt` の `=== <名前>` で区切った応答本文（合成）。
+fn draft_fixtures() -> Vec<(String, String)> {
+    let raw = include_str!("fixtures/draft_replies.txt");
+    raw.split("=== ")
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let (name, body) = s.split_once('\n').unwrap_or((s, ""));
+            (
+                name.to_owned(),
+                body.strip_suffix('\n').unwrap_or(body).to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// GLM 風の壊れた下書き応答は、1回だけ再試行したあと決定された案に沿う定型の
+/// 下書きに落ちる。(1) 定型の印が付く (2) 壊れた応答の中身（CANARY）が下書き・
+/// 投稿・タスクの記録に出ない (3) 送信側の状態へ進まない。正しい形は印なしで採る。
+#[test]
+fn draft_fixtures_fail_closed_on_broken_replies() {
+    let fixtures = draft_fixtures();
+    assert_eq!(fixtures.len(), 11, "fixture の数");
+    for (name, text) in fixtures {
+        let ok = name.starts_with("ok_");
+        let gw = Arc::new(SchemaGateway {
+            draft_text: Some(text),
+            ..Default::default()
+        });
+        let (store, ledger, runner) = fixture(DataStore::new_demo_seeded(now()), gw.clone());
+        let (_, task_id) = mention_to_decision(&store, &runner);
+        let (outcome, draft) = decide_to_draft(&ledger, &runner, &task_id, "b");
+        std::thread::sleep(Duration::from_millis(50));
+        let task = runner.task(&task_id).expect("task");
+        let posts = bot_messages(&store);
+        let last = posts.last().expect("最後の投稿");
+        let calls = gw.draft_calls.load(Ordering::SeqCst);
+        let ctx = format!("{name}: {task:?} {posts:?}");
+        // (3) 送信経路なし: 下書きの投稿で止まり、送信側の状態へ進まない。
+        assert_eq!(task.state, TaskState::AwaitingSendApproval, "{ctx}");
+        assert!(last.contains(&draft.subject), "{ctx}");
+        // (1) 定型の印は壊れた応答のときだけ、下書きのデータと投稿の両方に付く。
+        let marks = (draft.template, last.contains(TEMPLATE_MARK));
+        assert_eq!(marks, (!ok, !ok), "{ctx}");
+        // 再試行は壊れた応答のときだけ1回。正しい形はそのまま採る。
+        assert_eq!(calls, if ok { 1 } else { 2 }, "{ctx}");
+        assert!(!ok || draft.to == "C社 ご担当者", "{ctx}");
+        // 壊れた応答は決定された案に沿う定型へ落ち、その理由が投稿される。
+        assert!(ok || draft.body.contains(&outcome.selected.body), "{ctx}");
+        let reason = posts
+            .iter()
+            .any(|p| p.contains("LLM の応答を解釈できません"));
+        assert_eq!(reason, !ok, "{ctx}");
+        // (2) 壊れた応答の中身が下書き・投稿・タスクの記録に出ない。
+        assert!(!ctx.contains("CANARY"), "{ctx}");
+    }
+}
+
 // ---- 根拠は設定で受けた目的 ID で検査する（#330） ----
 
 #[test]
@@ -794,6 +1065,35 @@ fn endpoint_log_line_redacts_url_secrets() {
     assert!(line.contains("auth=***"), "{line}");
 }
 
+/// 台本モード（キー無し）の runner がデモの流れを最後まで回せる。
+#[test]
+fn script_mode_runs_mention_to_draft() {
+    let config = DemoLlmConfig::from_vars(|_| None).expect("config");
+    let store = Arc::new(Mutex::new(DataStore::new_demo_seeded_with_basis(
+        now(),
+        config.llm_basis,
+    )));
+    let ledger = Arc::new(Mutex::new(ApprovalLedger::new()));
+    let runner = Runner::new(
+        RunnerConfig {
+            llm_basis: config.llm_basis,
+            llm_timeout: config.timeout,
+            ..runner_config(TEST_TIMEOUT)
+        },
+        Arc::clone(&store),
+        Arc::clone(&ledger),
+        config.build_gateway_with(|_| None),
+    );
+
+    let (_, task_id) = mention_to_decision(&store, &runner);
+    // 案Bを選ぶ（台本の下書きも決定された案に沿うことを確かめる）。
+    let (outcome, draft) = decide_to_draft(&ledger, &runner, &task_id, "b");
+    assert!(draft.body.contains(&outcome.selected.body), "{draft:?}");
+    assert!(!draft.body.contains("2週間"), "{draft:?}");
+    // 台本モードの下書きも AI 生成ではない定型として、印が付く。
+    assert!(draft.template && bot_messages(&store).last().unwrap().contains(TEMPLATE_MARK));
+}
+
 /// 設定の根拠を P03 に差し替えても、seed がその根拠を登録すれば LLM を呼ぶ
 /// （目的 ID はコードやゲートに固定されていない。#330）。
 #[test]
@@ -816,4 +1116,37 @@ fn configured_basis_p03_also_gates_the_llm_call() {
     let message = post(&store, REQUESTER, MemberKind::Human, "@ハル 案を作って");
     let task_id = runner.on_message_posted(&message).expect("task");
     assert!(wait_state(&runner, &task_id, TaskState::AwaitingDecision));
+}
+
+/// 判断待ちが作られた直後に確定されても、通知を取りこぼさず下書きに進む
+/// （判断待ちの作成とタスクへの ID・状態の保存の間に隙間が無い）。
+#[test]
+fn decision_right_after_creation_is_not_lost() {
+    for _ in 0..200 {
+        let gateway = Arc::new(SchemaGateway::default());
+        let (store, ledger, runner) = fixture(DataStore::new_demo_seeded(now()), gateway.clone());
+        let message = post(
+            &store,
+            REQUESTER,
+            MemberKind::Human,
+            "@ハル 納期の案を作って",
+        );
+        let task_id = runner.on_message_posted(&message).expect("task");
+        // 判断待ちが見えた瞬間に確定して通知する（HTTP の decide と同じ手順）。
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let item = loop {
+            if let Some(item) = pending_items(&ledger).into_iter().next() {
+                break item;
+            }
+            assert!(Instant::now() < deadline, "判断待ちが作られない");
+            std::hint::spin_loop();
+        };
+        let outcome = decide_item(&ledger, &item, "a", DECIDER);
+        runner.on_decision_made(&item.request_message_id, &outcome);
+        assert!(
+            wait_state(&runner, &task_id, TaskState::AwaitingSendApproval),
+            "作成直後の確定で下書きに進まない: {:?}",
+            runner.task(&task_id).map(|t| t.state)
+        );
+    }
 }

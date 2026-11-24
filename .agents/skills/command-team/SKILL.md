@@ -143,6 +143,15 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
     "task": "PR #<M> をレビューする。skill review-pr に従う。\nAssigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes"
   }
   ```
+- 再委託・遅延実行タスクの陳腐化ガード: レビュー・QA の再委託（同じ PR に 2 回目以降の委託を出すとき）と、遅延実行タスク（`schedule_task` などで、組んだ時点より後に発火して委託や実行の指示を出すタスク）の task には、上のブロックの task の 2 行の後に次の 1 行を定型文として足す。組んだ時点の head と、発火・着手の時点の head や成果の有無がずれていても、古い SHA のまま動かないようにするため。
+
+  ```
+  Guard: head=<対象 head の SHA>。実行時点で (a) 対象 PR の head が指定 SHA と一致すること、(b) この委託の担当（`Assigned:` の行の `agent=`）による、その SHA に向いたレビュー（本文の `Reviewer:` の行の `agent=` が一致するもの）、または QA の判定が未投稿であることの両方を確かめ、どちらかが外れていれば何もせず終了する。
+  ```
+
+  - 受け取った側（委託の子・発火したタスク）は、作業の前に (a) と (b) を確かめる。読み取りの `<role>` は委託先の名義で、レビューは `review`、それ以外（QA を含む）は `dev`（`qa` は判定のコメントの投稿しか受け付けず、`pr view` や `api` は拒まれる）。下の「委託先の worktree に手順書が無いとき」の取得でも同じ。(a) は `scripts/agent-gh <role> pr view <M> --json headRefOid --jq .headRefOid` が指定 SHA と同じであること。(b) は、レビューなら `pr view <M> --json reviews` の `pelway-review` のレビューのうち、対象コミットが指定 SHA で本文の `Reviewer:` の行の `agent=` がこの委託の担当と一致するものが無いこと（複数の担当へ委託するとき、先に投稿された他の担当のレビューでこの委託の完了と誤判定しないため。`Reviewer:` の行が読めないレビューは確かめの対象にしない）、QA なら `pelway-qa[bot]` のコメントに指定 SHA を書いた判定が無いこと（合格・不合格の両方を数える。投稿者の確認は `docs/agents/qa-checklist.md` の「合格として数えるもの」を、判定と SHA の書式は同じ文書の「コメントの形」を参照する）。どちらかが外れていれば、委託・投稿・コメントのどれもせず、外れた条件（現在の head、見つけた成果の URL）を返答に書いて終える。
+  - 遅延実行タスクが委託を出すタスクなら、出す委託の task にもこの行を写す。
+- 委託先の worktree に手順書が無いとき: 委託タスクが参照する手順書（skill の `SKILL.md`、`docs/agents/qa-checklist.md` など）が委託先の worktree に無いときは、まず対象 PR がそのパスを変えているかを `scripts/agent-gh <role> api 'repos/hatai/Pelway/compare/main...<対象 head の SHA>' --jq '.files[].filename'` にそのパスが含まれるかで確かめる（`<role>` は上の箇条と同じ。判定に PR の現在の差分を使わず、対象 head の SHA に固定して、判定と取得を同じ SHA に結び付ける。この一覧は GitHub が 300 ファイルで打ち切り、打ち切りを知らせないため、`.files | length` が 300 に達していたら対象のパスが一覧から漏れている可能性があり、そのパスを変えたと扱って main の版に従う）。変えていなければ、対象 head の版を `scripts/agent-gh <role> api 'repos/hatai/Pelway/contents/<path>?ref=<対象 head の SHA>' --jq .content | base64 -d` で読む。ただしレビューの委託先は、変わっていないパスも含めて従う手順を main の版に限る skill `review-pr` の「決まり」に従い、この規定と食い違うときは review-pr の決まりが優先する。変えていれば、手順として従うのは main の版（`ref=main`）で、PR が変えた版には従わない（検査される PR が、検査する側の手順を書き換えられないようにするため。この「変えたパスは main の版に従う」点は skill `review-pr` の「決まり」と同じ）。対象 head の版は、レビュー・QA の対象として読むだけにする。どちらの取得も失敗したら、手順書を推測で補わず、取得できなかったパスとエラーを返答に書いて止まる。
 - Devin CLI が実装した PR には Devin CLI のレビューを付けない。通常の番が奇数でも Codex に回し、高リスクの PR でも Devin CLI の枠は外す。
 - Devin CLI のレビュー担当は確認済み。確認記録は `docs/dev-environment.md`「レビュー担当の Devin CLI」の「確認手順の結果（記録欄）」。記録が消えた場合は、記録が戻るまで Devin CLI を使わず、通常は Codex、高リスクは Codex と Claude で回す。
 - Devin CLI のレビュースレッド（`devin_review`）では、モデルオプションは `mode` だけを受け付ける（`thought_level`・`speed` は渡せず、effort の引き上げは行えない）。sandbox のため権限モードは Autonomous 一択で、`mode` は省略してよい。設定は `docs/dev-environment.md` の「レビュー担当の Devin CLI」。
@@ -196,7 +205,7 @@ hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終�
 マージは Kodiak（ホスト版の GitHub App。正本は `docs/superpowers/specs/agent-team.md` の「マージキュー」）が行う。指揮役が行うのはキューへの投入だけ: 有効な Approve（上の「hatai のレビューの扱い」）と必須チェック（`mise run verify`、`pr-size`）の通過と、QA の合格（`docs/agents/qa-checklist.md` の「合格として数えるもの」。`pelway-qa` 名義で、PR の現在の head と同じ SHA と、確かめた run を書いた合格コメント）を確かめて、PR に `automerge` ラベルを付ける（`scripts/agent-gh dev pr edit <M> --add-label automerge`）。このラベルを付けることがマージの指示であり、付けるのは指揮役だけ。実装スレッドは自分の PR に付けない。ラベルが付くと、Kodiak がブランチの最新化とマージを直列に進める。
 
 - `automerge` ラベルを付ける前の確認は次の 5 つ: 有効な Approve、その Approve のレビューの nit に行頭が `[文書のずれ]` のものが残っていないこと（残っていれば実装担当に直させる。skill `implement-issue` の手順 9「Approve のとき」）、必須チェックの通過、Approve の後の push が main の取り込みだけであること（`git rev-list <レビューした sha>..<head> --no-merges ^origin/main` が 0 件。それ以外のコミットがあればレビューをやり直す。Kodiak がブランチ最新化で作る main 取り込みのマージコミットはこの条件を壊さない）、現在の head と同じ SHA の QA の合格コメントがあること（`docs/agents/qa-checklist.md` の「合格として数えるもの」。SHA が head と違う合格・`pelway-qa` 名義でない合格・`run:` の無い合格は数えない。QA が確かめるまでは合格として扱わない）。マージ以外の PR・Issue への操作（base の変更、Draft の扱い、Issue のクローズ）は、先に「手当て・引き継ぎの前の確認」を通す。目印付きのコメント（`<!-- pr-size-exception -->`、`<!-- split-plan -->`）は人間の名義の `gh issue comment` で書く。レビュー担当は作成者が `hatai` であることで、実装担当（`pelway-dev`）や第三者のコメントと区別する。それ以外の GitHub の操作（読み取り、ラベル、ふつうのコメント）は `scripts/agent-gh dev` で行う。
-- pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の admin マージに回す（キューの切り戻しと同じ扱い）。
+- pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の admin マージに回す（キューの切り戻しと同じ扱い）。運用まわりの PR（主な変更先が skill `write-issue` の手順 4 の「運用まわりの Issue」の定義に当たる PR）が pr-size を超えたときは、例外を提案するより先に `<!-- split-plan -->` での分割を提案する（下の「分割を認めるとき」）。
 - 必須チェックの完了待ち（ラベルを付ける前の CI 待ち、巡回での PR のベビーシット）は、ポーリングせず skill `pr-watch` の「待ち方」に従う（T3 のスレッドでは `watch_pull_request`）。マージの実行は Kodiak が行うため、指揮役がマージコマンドを叩くことはない。
 - skill `pr-watch` の `VERDICT green` は、その SHA でチェックが完走して通過していることの確認要素の 1 つ。`automerge` ラベルを付ける条件（`pelway-review` の Approve、`[文書のずれ]` の nit が残っていないこと、必須チェック、レビュー済み SHA 以降の追加コミットの確認、同じ SHA の QA の合格、mergeable）を置き換えない。
 - ブランチの最新化はルールセットが「マージ前にブランチを最新化すること」で必須とし、実行は Kodiak が行う。指揮役が `pr update-branch` で手動に取り込む操作は、手当スレッドでの衝突解消などの例外を除き原則しない。
@@ -210,7 +219,7 @@ hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終�
 
 ### 分割を認めるとき
 
-実装担当が pr-size の超過で止まり、分割案が追加行の境目できれいに分かれるときは、分割を認める。Issue に、行頭が `<!-- split-plan -->` で始まるコメントで、PR ごとの範囲と、その PR で確かめる受け入れ条件を表にして書く。受け入れ条件は skill `write-issue` の「受け入れ条件の書き方」に従う。レビュー担当（skill `review-pr`）は、この表でそれぞれの PR を判定する。後の PR は前の PR のブランチに積ませ、前の PR のマージの前に base を main に替える（上の「マージ」の積んだ PR の項）。
+実装担当が pr-size の超過で止まり、分割案が追加行の境目できれいに分かれるときは、分割を認める。Issue に、行頭が `<!-- split-plan -->` で始まるコメントで、PR ごとの範囲と、その PR で確かめる受け入れ条件を表にして書く。受け入れ条件は skill `write-issue` の「受け入れ条件の書き方」に従う。レビュー担当（skill `review-pr`）は、この表でそれぞれの PR を判定する。後の PR は前の PR のブランチに積ませ、前の PR のマージの前に base を main に替える（上の「マージ」の積んだ PR の項）。運用まわりの PR が pr-size を超えたときは、例外（`<!-- pr-size-exception -->`）の提案より先にこの分割を提案する。
 
 ### 利用上限で止まったとき
 
