@@ -100,7 +100,7 @@ PR に `automerge` ラベルを付けてよいのは、skill `command-team` の�
 
 ### 割り当て・停止・再開
 
-- 枠の数え方: open な Issue の `agent:working` の数から、作業状態の印が停止中・再開処理中・再開待ちのものを除き、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）を加えたものが、担当ごとの上限（正本の「制約」）以下であること。内訳は `agent:devin` の有無で判定する。Issue の枠の使用数は見張りの `slots.json`（watch.log の `SLOTS` の行と同じ数を見張り自身が書く記録）で読む（「3. 同時数と順番待ち」）。通常完了時の `agent:working` の解除は既存のマージ後処理のとおり
+- 枠の数え方: open な Issue の `agent:working` の数から、実際の停止を確認できるもの（「3. 同時数と順番待ち」の決まり）を除き、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）を加えたものが、担当ごとの上限（正本の「制約」）以下であること。内訳は `agent:devin` の有無で判定する。Issue の枠の使用数は見張りの `slots.json`（watch.log の `SLOTS` の行と同じ数を見張り自身が書く記録）で読む（「3. 同時数と順番待ち」）。通常完了時の `agent:working` の解除は既存のマージ後処理のとおり
 - blocker の確認（割り当ての前段。新規・手当・再開の共通。巡回の最初に確かめて使い回さず、割り当てる直前に行う。その間に依存が追加されることがあるため）:
   1. 割り当て可否は `issue_dependencies_summary.blocked_by` だけで判定する（`GET /repos/hatai/Pelway/issues/<N>` を `scripts/agent-gh dev api` で読む。開いている blocker の数。0 なら着手可能）。`total_blocked_by` は閉じた blocker も数えるため、判定に使わない。hatai 名義の gh は使わない
   2. 本文に書かれた「Blocked by #N」も確かめる。依存関係の情報と食い違ったら、割り当てを止める
@@ -195,13 +195,13 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 
 | スレッド | 同時に動かす上限 | 数え方 |
 |---|---|---|
-| 実装・調査（opencode `zai-coding-plan/glm-5.3`） | 3 | open な Issue の `agent:working` のうち `agent:devin` が無く、作業状態の印が停止中・再開処理中・再開待ちでないものの数と、実行中の調査スレッド（Issue を持たない入口B のものを含む）の数の合計 |
-| 実装（Devin CLI `swe-2-high`） | 6 | open な Issue の `agent:working` のうち `agent:devin` があり、作業状態の印が停止中・再開処理中・再開待ちでないものの数 |
+| 実装・調査（opencode `zai-coding-plan/glm-5.3`） | 3 | open な Issue の `agent:working` のうち `agent:devin` が無く、実際の停止を確認できるもの（下の決まり）を除いた数と、実行中の調査スレッド（Issue を持たない入口B のものを含む）の数の合計 |
+| 実装（Devin CLI `swe-2-high`） | 6 | open な Issue の `agent:working` のうち `agent:devin` があり、実際の停止を確認できるもの（下の決まり）を除いた数 |
 | レビュー（Codex `codex_review`） | 目安 2 | 通常の PR のレビューは実装担当が `delegate_task` で委託するため、この表では数えない。指揮役が立てたレビュースレッド（指揮役自身の PR・外部投入）だけを数える。Codex・T3・`~/.codex-review` を更新したら、`docs/dev-environment.md` の「専用 home での確認」が済むまでは使わない |
 | レビュー（Devin CLI） | 目安 2 | 同上。`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまでは使わない |
 | レビュー（Claude `claude_review`） | 目安 1 | 同上。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは使わない |
 
-実装・調査の使用数は、見張り（`scripts/conductor-watch.sh`）が巡回ごとに `agent-team.toml` の枠の上限と突き合わせて、見張りの状態ディレクトリ（`$XDG_STATE_HOME/pelway/conductor-watch`。`XDG_STATE_HOME` が無ければ `~/.local/state/pelway/conductor-watch`）の `slots.json` に書くもので読む。`status` が `ok` のときだけ `usage` に担当ごとの使用数と上限が入る。割り当ての判断には watch.log の行ではなく `slots.json` を使う: ボード更新キューの要求のファイル名もそのまま行として watch.log に残るため、同じ数が `SLOTS <担当> <使用数>/<上限>` の行でも出る watch.log からは、見張りの出した行と区別できない（行は、使用数か状態が前回の巡回から変わったときと `HEARTBEAT` の行を出す巡回にだけ書き足され、上限超過は `SLOTS over`、使用数を確かめられなかった巡回は `SLOTS error`。`agent-team.toml` が無い環境では行自体が出ず、`slots.json` の `status` は `unavailable` になる）。`slots.json` が読めない・`status` が `ok` でない・`updated_at` の記録から 60 秒を超えて経っているときは、見張りが止まっているか最新の巡回で数えられていないものとして、上の表の数え方で数える。記録の `usage` は直前の巡回時点のものなので、割り当て・再開を行ったあとは、新しい記録の `usage` にその変更が載ったと確かめられるまで、自分が動かした分を `usage` に足して数える。`updated_at` が進んだだけでは確かめられない（一覧の取得から記録の公開までの間に挟んだ割り当ては、その回の記録に載らない）。確かめられないまま続けて割り当てると上限を超えるため、確かめられないときは、次の割り当ての前に現在の使用数を実測で数える。`slots.json` の `usage` が数えるのは Issue の枠だけなので、Issue を持たない入口B の調査の稼働中スレッドは指揮役が巡回記録の割り当て表から加算する。Issue #714 の受け入れ条件の表記は「`SLOTS` の行で読む」だが、上の偽装経路のため判断の正本は `slots.json` とする（`SLOTS` の行の出力自体は受け入れ条件どおり行う）。
+実装・調査の使用数は、見張り（`scripts/conductor-watch.sh`）が巡回ごとに `agent-team.toml` の枠の上限と突き合わせて、見張りの状態ディレクトリ（`$XDG_STATE_HOME/pelway/conductor-watch`。`XDG_STATE_HOME` が無ければ `~/.local/state/pelway/conductor-watch`）の `slots.json` に書くもので読む。`status` が `ok` のときだけ `usage` に担当ごとの使用数と上限が入る。割り当ての判断には watch.log の行ではなく `slots.json` を使う: ボード更新キューの要求のファイル名もそのまま行として watch.log に残るため、同じ数が `SLOTS <担当> <使用数>/<上限>` の行でも出る watch.log からは、見張りの出した行と区別できない（行は、使用数か状態が前回の巡回から変わったときと `HEARTBEAT` の行を出す巡回にだけ書き足され、上限超過は `SLOTS over`、使用数を確かめられなかった巡回は `SLOTS error`。`agent-team.toml` が無い環境では行自体が出ず、`slots.json` の `status` は `unavailable` になる）。`slots.json` が読めない・`status` が `ok` でない・`updated_at` の記録から 60 秒を超えて経ている・`slots.json` の更新時刻が `state.json` の更新時刻から 30 秒以上遅れている（見張りは巡回ごとに `state.json` を書き直すため、遅れていれば最新の巡回で記録を公開できていない）ときは、見張りが止まっているか最新の巡回で数えられていないものとして、上の表の数え方で数える。記録の `usage` は直前の巡回時点のものなので、割り当て・再開を行ったあとは、新しい記録の `usage` にその変更が載ったと確かめられるまで、自分が動かした分を `usage` に足して数える。`updated_at` が進んだだけでは確かめられない（一覧の取得から記録の公開までの間に挟んだ割り当ては、その回の記録に載らない）。確かめられないまま続けて割り当てると上限を超えるため、確かめられないときは、次の割り当ての前に現在の使用数を実測で数える。上の表の「実際の停止を確認できるもの」とは、補助記録の作業状態の印が停止中・再開処理中・再開待ちで、その Issue の `pelway-dev[bot]` のコメントに `[stop-processing]` の印があり、それ以後の取得（`<!-- claim` の）コメントが無いもの（補助記録は実装エージェントも書き込めるため、印だけでは由来を確かめられない。確認できないものは使用中として数える）。`slots.json` の `usage` が数えるのは Issue の枠だけなので、Issue を持たない入口B の調査の稼働中スレッドは指揮役が巡回記録の割り当て表から加算する。Issue #714 の受け入れ条件の表記は「`SLOTS` の行で読む」だが、上の偽装経路のため判断の正本は `slots.json` とする（`SLOTS` の行の出力自体は受け入れ条件どおり行う）。
 
 上限に達しているときは新しいスレッドを立てない。空きが出たら、待っているものを次の順で始める。
 

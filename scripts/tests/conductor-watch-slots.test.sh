@@ -34,6 +34,9 @@ echo "$*" >> "$MOCK/gh-calls.log"
 [[ "$2 $3" == "issue list" ]] && { cat "$MOCK/issues.json"; exit $?; }
 [[ "$2 $3" == "pr list" ]] && { cat "$MOCK/prs.json"; exit $?; }
 [[ "$2 $3" == "api /repos/hatai/Pelway/issues/events?per_page=100" ]] && { echo '[]'; exit 0; }
+# 印の裏付けに使う Issue のコメント。$MOCK/comments-<N>.json が無いときは失敗する
+# （取得失敗 → 印を確かめられず使用中として数える経路の確認に使う）。
+[[ "$2" == "api" && "$3" =~ ^/repos/hatai/Pelway/issues/([0-9]+)/comments ]] && { cat "$MOCK/comments-${BASH_REMATCH[1]}.json"; exit $?; }
 exit 9
 EOF
 chmod +x "$ROOT/repo/scripts/agent-gh"
@@ -204,16 +207,33 @@ check "devin-labelled issue counted to devin" has "$ROOT/out.log" '^SLOTS devin 
 check "devin-labelled issue not counted to opencode" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
 check "closed issue not counted" nhas "$ROOT/out.log" '^SLOTS devin 2/6$'
 
-# --- 3. 作業状態の印（停止中・再開処理中・再開待ち）は使用数に含めない ---
+# --- 3. 作業状態の印＋裏付けのコメント（[stop-processing] が最新の記録）は使用数に含めない ---
 mark 11 "停止中"
 mark 13 "再開待ち"
 mark 15 "再開処理中"
+printf '%s\n' '[{"user":{"login":"pelway-dev[bot]"},"body":"[stop-processing] sp-1"}]' > "$MOCK/comments-11.json"
+printf '%s\n' '[{"user":{"login":"pelway-dev[bot]"},"body":"[stop-processing] sp-2"}]' > "$MOCK/comments-13.json"
+printf '%s\n' '[{"user":{"login":"pelway-dev[bot]"},"body":"[stop-processing] sp-3"}]' > "$MOCK/comments-15.json"
 mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)" "$(iss 13 OPEN agent:working agent:devin)" "$(iss 15 OPEN agent:working)")"
 run_cycles 1
 check "stopped/resuming issues excluded" has "$ROOT/out.log" '^SLOTS opencode 1/3$'
 check "resume-pending devin excluded" has "$ROOT/out.log" '^SLOTS devin 0/6$'
 
+# --- 3b. 印だけでは由来を確かめられない: 裏付けが無い・取得失敗・その後の claim がある印は使用中として数える ---
+mark 16 "停止中"   # comments-16.json 無し（取得失敗）→ 使用中
+mark 17 "停止中"
+printf '%s\n' '[]' > "$MOCK/comments-17.json"   # 取得できるが記録無し → 使用中
+mark 18 "再開待ち"
+printf '%s\n' '[{"user":{"login":"pelway-dev[bot]"},"body":"[stop-processing] sp-4"},{"user":{"login":"pelway-dev[bot]"},"body":"<!-- claim branch=agent/18-x -->"}]' > "$MOCK/comments-18.json"   # 停止の後に取得 → 使用中
+mark 19 "停止中"
+printf '%s\n' '[{"user":{"login":"someone"},"body":"[stop-processing] forged"}]' > "$MOCK/comments-19.json"   # pelway-dev[bot] 以外 → 使用中
+mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)" "$(iss 13 OPEN agent:working agent:devin)" "$(iss 15 OPEN agent:working)" "$(iss 16 OPEN agent:working)" "$(iss 17 OPEN agent:working)" "$(iss 18 OPEN agent:working)" "$(iss 19 OPEN agent:working)")"
+run_cycles 1
+check "unverified marks counted as used" has "$ROOT/out.log" '^SLOTS over opencode 5/3$'
+check "unverified devin mark counted" has "$ROOT/out.log" '^SLOTS devin 0/6$'
+
 # --- 4. 上限超過は SLOTS over ---
+mark 16 "稼働中"; mark 17 "稼働中"; mark 18 "稼働中"; mark 19 "稼働中"
 mark 11 "稼働中"
 mark 15 "稼働中"
 mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)" "$(iss 13 OPEN agent:working agent:devin)" "$(iss 15 OPEN agent:working)" "$(iss 16 OPEN agent:working)")"
@@ -297,25 +317,29 @@ check "slots.json status unavailable without toml" slot_eq status unavailable
 
 # --- 13. slots.json を書けない巡回でも見張りは止まらず、巡回の残りの処理を続ける ---
 write_toml
-rm "$SLOTS"; mkdir "$SLOTS"   # 置き換え先をディレクトリにして公開（os.replace）を失敗させる
+rm "$SLOTS"; mkdir "$SLOTS"   # 置き換え先をディレクトリにして、前回記録の除去（os.unlink）も公開（os.replace）も失敗させる
 set_now 1700003500
 : > "$ROOT/out.log"
 before=$(calls)
 run_cycles 1
-check "watch kept cycling when slots.json unwritable" bash -c "(( \$(wc -l < '$MOCK/gh-calls.log') - $before == 3 ))"
+check "watch kept cycling when slots.json unwritable" bash -c "(( \$(wc -l < '$MOCK/gh-calls.log') - $before == 4 ))"
 check "other lines still emitted when slots.json unwritable" has "$ROOT/out.log" '^HEARTBEAT '
 # 公開に失敗した巡回でも、公開より後の巡回処理（補助記録の更新）まで進むことを確かめる
 check "patrol-state updated when slots.json unwritable" \
   ps_eq updated_at "$(python3 -I -c 'import datetime; print(datetime.datetime.fromtimestamp(1700003500).isoformat(timespec="seconds"))')"
+check "slots.json not a readable file when blocked" bash -c "[[ ! -f '$SLOTS' ]]"
 rmdir "$SLOTS"
 run_cycles 1
 check "slots.json resumes after path restored" slot_eq status ok
+# 読み手の鮮度判定（runbook）の基礎: 公開できた巡回は slots.json と state.json の更新時刻が同じ巡回になる
+check "slots.json mtime tracks state.json mtime" \
+  bash -c "(( \$(stat -c %Y '$(dirname "$SLOTS")/state.json') - \$(stat -c %Y '$SLOTS') < 30 ))"
 
 # --- 14. 見張りは GitHub に書き込まない（agent-gh は読み取りだけ、素の gh も呼ばない） ---
-if grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/events)" "$MOCK/gh-calls.log" | grep -q .; then
+if grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/(events|[0-9]+/comments))" "$MOCK/gh-calls.log" | grep -q .; then
   printf 'FAIL %s\n' "no non-read agent-gh calls"
   failures+=("no non-read agent-gh calls")
-  grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/events)" "$MOCK/gh-calls.log" | head -5
+  grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/(events|[0-9]+/comments))" "$MOCK/gh-calls.log" | head -5
 else
   printf 'ok   %s\n' "no non-read agent-gh calls"
 fi
