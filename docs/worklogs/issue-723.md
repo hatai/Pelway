@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の受け入れ条件の書き方に「配布物の完全性を決める Issue では、何に対して確かめるか（信頼の根）を書く」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: 5ecfc13fa88a60303f78658cc4fe3cd1c1de3db6
+
+1. 詰まった箇所: `docs/adr/0014-desktop-client-electron.md` の配布経路: codex の must-fix 2 件（タグは作成だけでなく付け替え・削除も守り、attestation をタグが今指すコミットに照合する／Release の `latest*.yml` をそのまま置くと国内ホストの外の URL を指せる）。最初の codex の委託（run 7167538818）は使用量の上限で `failed` を返したあと、上限の解除で自動で再開し、head 9d84a7e をレビューした。予約していた再委託は消した。
+2. 曖昧だった文: 「round 3 のレビュー結果に must-fix が残っていたら、4 回目の修正には入らず、止まる条件の形でエスカレーションする」（`.agents/skills/implement-issue/SKILL.md` 手順 9）。指揮役が伝えた hatai の判断（t629u：ラウンドの上限は気にしない、その場合のマージは hatai の admin マージ）に従い、止まらずに直した。
+3. 仮定と解釈: 公開の判断はタグの push とみなし、取り下げはタグの削除か新しい版で行う形を選んだ（ホストで Release の公開者を確かめる形は選ばなかった。確かめる手段が API の読み取りの権限に依るため）。ホストは Release の `latest*.yml` を配らず、検証した値だけで作り直し、取得先は Caddy の下の相対の名前だけにした。claude の nit（`releaseNotes` などの照合しない項目、`files[].url` の絶対 URL）もこの形で同時に閉じる。safeStorage の nit は `[文書のずれ]` ではないので直していない。
+4. 足りなかった情報・検証手段: electron-updater が作り直した manifest の相対の名前とブロックマップをどう解決するかは実行して確かめていない。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 に「使用量の上限で `failed` を返した委託は、上限の解除で自動で再開し投稿することがある。再委託の予約は、元の委託の実行の投稿が無いことを確かめてから出す」を足す。
+
+使ったスキル: implement-issue
