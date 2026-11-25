@@ -90,7 +90,7 @@ PR: #722
 
 ## 実装者メモ（round 7）
 
-対象 head: e9bb528fcf97e0cbebe5187a22658711903d1a8f
+対象 head: 55c86f2c4ec36202d22f029272b989fbe595dd21
 PR: #722
 
 レビュー指摘（run 7170056854 claude request-changes、head 6a59e981）への対応。高リスク PR の必須実行（codex+claude）のうち、claude の 1 回目:
