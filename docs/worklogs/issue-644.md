@@ -201,3 +201,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の「送り先の照合」の 2 に「名指しの照合でも同じ止まりの判定を使う」と書き、168 行はそこを参照する形にすると、止まりの判定の正本が 1 か所になる
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 17）
+
+対象 head: 26403e34f242daac2c469fda0056af37e6466b8f
+
+1. 詰まった箇所: `docs/agents/grokbot-runbook.md` の 168 行: round 16 では名指しのスレッドの止まりを interrupted・cancelled だけで判定し、completed・failed で終わり最後の返答で `state: stopped` を報告した旧スレッド（skill `implement-issue` の手順 10 の止まった形）が名指しされると組に入り、410 行で引き継ぎ先が対象外になった（codex r13）
+2. 曖昧だった文: 「completed・failed で終わったスレッドは、照合の 2 と同じく名指しの照合では外さないとした（終わった担当を人間が残すことはありうる）」（`docs/worklogs/issue-644.md` の round 16 の「仮定と解釈」）。照合の 2 は `stopped` を外すのに、名指しの照合だけ外さないと読める判断を自分で置いていた
+3. 仮定と解釈: 同じ種類（止まった旧スレッドが名指しで組に入る）の must-fix が r12・r13 と 2 round 続いたため、「名指しの照合は、T3 の状態（interrupted・cancelled）と、completed・failed のときの最後の返答の `state: stopped` の両方で止まりを判定し、最後の返答が読めなければ確かめられないものとして保留する」を決まりにし、168 行（PR 作成前）・406 行（作成後、168 行を参照）・608 行に当てた。状態の行が無いだけの completed・failed は外さない（`failed` は状態の行を書かずに終わることがあり、407 行の巡回の経路と同じ扱い）
+4. 足りなかった情報・検証手段: 「最後の返答が読めない」を `t3_thread_read` の失敗とする以外に、返答の切り詰めなどで状態の行だけ読めない場合の実例を確かめていない
+5. 改善案: `docs/agents/grokbot-runbook.md` の「送り先の照合」の 2 に名指しの照合が使う止まりの判定（T3 の状態と `state: stopped`）を正本として置き、168 行はそこを参照する形にする
+
+使ったスキル: implement-issue
