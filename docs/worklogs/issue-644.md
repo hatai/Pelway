@@ -69,3 +69,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の「10. 巡回状態の補助記録」の `implement_thread` の行に「組を読む側は `pelway.agent-watch/v1` の『送り先の照合』を通す」を足すと、記録の定義から照合の手順へたどれる
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 6）
+
+対象 head: cd4f2971562981284c317147b6cb7c89ddc66d3a
+
+1. 詰まった箇所: `docs/agents/grokbot-runbook.md` の「送り先の照合」: 調査の分岐で「割り当ての記録」を候補の出所にしようとしたが、表の列（日時・Issue・PR・役割・担当・モデル・effort・理由。skill `command-team`）に `thread_id` と `branch` が無い。記録は割り当ての有無の確認に使い、候補は `t3 thread list` の `branch` で選んだ
+2. 曖昧だった文: 「Issue の有無にかかわらず、調査の割り当て記録と、手順 6 で GitHub と照合した `pr:` の報告から、対象 PR を作った調査スレッドを確認する分岐を設けてください」（PR #697 の round 5 のレビュー、must-fix 3）。調査の返答の `pr:` は番号だけで head を含まず（skill `investigate-bug` の手順 5）、「6. 報告行の扱い」は sha の無い報告を値として扱わないため、照合を作成者とブランチに絞った
+3. 仮定と解釈: 送り先の取り違えは round 3〜5 に続く同じ種類の must-fix のため、送信経路を棚卸しして全経路に同じ決まりを当てた: 候補を探す前に `isCrossRepository` が明示的に `false` であることと `headRefName` を確かめる／同じ Issue の並行は組の有無を問わず `branch` の `agent/<N>-` と起動結果が不明な割り当て ID で除外する／巡回の定型の指示（「続きをやり直す」など）と `docs/agents/command-team-details.md` の hatai の指摘の伝達も送る直前にこの照合を通す。組はあるがスレッドが一覧に無いときは、名前で探しても 2 で外れるため保留とし、新しいスレッドを立てて組を書き換える復旧に寄せた
+4. 足りなかった情報・検証手段: 起動結果が不明な割り当て ID の置き場所が runbook の割り当て手順の 4 に「巡回記録と補助記録に残す」とだけあり、`items` のどの項目かは決まっていない。フィールド名を断定せず手順を指した。T3 での送信と照合は実際には試していない
+5. 改善案: `docs/agents/grokbot-runbook.md` の「10. 巡回状態の補助記録」の「指揮役が持つ項目（`items`）」に、起動結果が不明な割り当て ID の項目（例: `pending_launch`）を足すと、並行の除外が記録だけで確かめられる
+
+使ったスキル: implement-issue
