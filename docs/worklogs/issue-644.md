@@ -225,3 +225,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の「既存の PR ブランチを引き継ぐ」の 6 行の説明は、各行の値を手順 10 を参照する形にして、手順 10 の書式の変更に追従させる
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 19）
+
+対象 head: e78d8db56f38bcfc27abdcec910ff58d38c9dd5e
+
+1. 詰まった箇所: `docs/agents/grokbot-runbook.md` の 311 行（「既存の PR ブランチを引き継ぐ」）: 調査の報告 PR を引き継いだスレッドは、巡回の定型の指示で「最新のレビューが Request changes」だけで修正に進むため、前の head の差し戻しや dismiss された投稿でも現在の head を直しえた。round 18 で取り込んだ #695 の委託記録の照合が、この経路には当たっていなかった（codex r15）
+2. 曖昧だった文: 「最新のレビューが Request changes なら報告 PR の修正」（`docs/agents/grokbot-runbook.md` の「既存の PR ブランチを引き継ぐ」、head `9105b1e7`）。skill `implement-issue` の「巡回から定型の指示を受けたとき」の表にも同じ「最新のレビューが Request changes」の行があり、そちらは 2 の `run <ID>` の照合が前に掛かるが、この文には掛かっていなかった
+3. 仮定と解釈: 修正に進む条件を、主 PR の「巡回から定型の指示を受けたとき」の 2 と同じ照合（添えた `run <ID>: request-changes` の `<ID>` が現在の head に向けた委託記録で、その実行の投稿がちょうど 1 件、`commit_id` が現在の head、`CHANGES_REQUESTED`）にした。照合できないときは、主 PR の「結び付かない投稿の取り消し」（`CHANGES_REQUESTED` なら直す）には乗せず、修正も Draft の解除もせず `waiting-conductor` で終えて、指揮役の確かめ直しと「7. エスカレーションと停滞」に回す形を選んだ（引き継ぎのスレッドは報告 PR のレビューを自分で委託しない）。wording pin は直した文の presence check を 2 本足しただけ
+4. 足りなかった情報・検証手段: 指揮役が調査の報告 PR の引き継ぎスレッドへ「続きをやり直す」に `run <ID>: request-changes` を添えて送る経路（5 の表の `request-changes` の行は外部投入の実装スレッドを宛先にしている）が実際に届く実例は確かめていない
+5. 改善案: `docs/agents/grokbot-runbook.md` の「5. イベントごとの対応」の `request-changes` の行に「調査の報告 PR の引き継ぎスレッドにも、報告を受けた実行ごとに `run <ID>: request-changes` を添えて送る」を足し、送る側と受ける側の決まりをそろえる
+
+使ったスキル: implement-issue
