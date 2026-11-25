@@ -150,7 +150,8 @@ check investigation_handoff_bind docs/agents/command-team-details.md \
 
 # implement_thread の組の更新条件に、送り先の照合で組を新規に書く場合がある。
 check implement_thread_new_pair "$RB" \
-  '送り先の照合の 4 で組が無かった PR の組を書くとき（push 先は照合済みの PR の `headRefName`）に書き換える'
+  '送り先の照合の 4 で組が無かった PR の組を書くとき（push 先は照合済みの PR の `headRefName`）、巡回の定型の指示を組の無い PR 前のスレッドへ送るとき' \
+  '（「毎回の巡回でスレッドを点検する」。PR の番号は `none`）に書き換える'
 
 # 別名の作業ツリーで引き継いだときの占有の比較と取得・解放コメントは push 先のブランチで行う。
 check claim_branch_push_target "$II" \
@@ -158,7 +159,22 @@ check claim_branch_push_target "$II" \
 
 # 巡回の定型の指示と、command-team-details の hatai の指摘の伝達も、送る直前に送り先の照合を通す。
 check patrol_send_target "$RB" \
-  '定型の指示も、送る直前に送り先を確かめる。'
+  '定型の指示も、送る直前に送り先を確かめる。' \
+  'この経路では、照合の 2 の状態の行による除外は当てない' \
+  '組が無い（この記録の決まりより前に立ったスレッド）ときは、最初の指示（`t3_thread_read` で読む）がその Issue の番号を指し' \
+  'ただし巡回の定型の指示と、上の表の `failed` の「続きをやり直す」では、この状態の行による除外だけは当てない' \
+  'この 2 つの経路でも、interrupted・cancelled の除外、作業状態の印、引き継ぎ済みの除外、同じ Issue の並行の確認と、3 の割り当ての一致は当てる' \
+  '送る直前に、巡回の定型の指示と同じく送り先を確かめる' \
+  '「2. ボードと巡回」の「毎回の巡回でスレッドを点検する」の巡回の定型の指示、'
+# 保留が続いたときの出口がある。
+check send_target_hold_exit "$RB" \
+  '同じ対象への同じ指示が 2 回続けて保留になったら、3 回目の巡回を待たずに 7 のエスカレーションにする'
+# 調査の報告 PR を引き継いだときは、割り当ての記録に新しいスレッドの行を書き、送り先の照合はその行で確かめる。
+check investigation_takeover_record "$RB" \
+  '調査の報告 PR（`headRefName` が `agent/investigate-` で始まる）を引き継いだときは、`implement_thread` の組の代わりに、割り当ての記録に役割 investigate の行を足し' \
+  '引き継ぎで立てた行の候補は、`branch` が `<PRブランチ>-r<N>` で返答に `pr:` が無いことがあるため'
+check investigation_takeover_record_details docs/agents/command-team-details.md \
+  '報告 PR を引き継いで立てたスレッドの行は、起動時に報告 PR の番号を書く'
 check details_send_target docs/agents/command-team-details.md \
   '送る直前に `docs/agents/grokbot-runbook.md` の「5. イベントごとの対応」の `pelway.agent-watch/v1` の「送り先の照合」を行い'
 
