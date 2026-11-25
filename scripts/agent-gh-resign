@@ -11,7 +11,9 @@
 #   → 途中失敗時は ref を元の SHA に復元 → 成功したら fetch してローカル ref を揃える
 # 表現できない変更（新規の実行ファイル・mode 変更・symlink・submodule・マージ・空コミット）は
 #   fileChanges では作れないため、その push は警告して署名なしのままにする。
-# scripts/agent-gh が git push の成功後に呼ぶ。手で呼んでもよい。何度実行してもよい。
+# scripts/agent-gh が git push の成功後に、push 先ごとに `<remote> <branch>` を渡して呼ぶ（push 先を
+#   決められない形では引数なし）。手で呼んでもよい。何度実行してもよい。
+# 決めた対象の追跡 ref（refs/remotes/<remote>/<branch>）が無いときは、署名なしのまま残ることを警告して 0 で終わる。
 # 前提: GH_TOKEN に対象リポジトリへ contents:write のトークンが入っている。
 # 終了コード: 0 = 署名付きにできた・署名の必要が無い・表現不能でスキップ、それ以外 = 途中失敗（ref は復元済み）
 set -euo pipefail
@@ -42,7 +44,16 @@ fi
 
 tracking="refs/remotes/$remote/$branch"
 tip="$(git rev-parse --verify -q "$tracking" 2>/dev/null || true)"
-[[ -n "$tip" ]] || exit 0 # push 先がブランチ以外（タグ等）か、追跡 ref が無い場合は何もしない
+if [[ -z "$tip" ]]; then
+  # 追跡 ref が無い（push 先の名前と追跡 ref の食い違い、URL への push など）。付け直せないことを知らせる。
+  # remote には資格情報付きの URL が来ることがあるため、登録済みのリモート名のときだけ値を出す。
+  if git remote | grep -qxF -- "$remote"; then
+    warn "追跡 ref $tracking が無いため、$remote の $branch の署名を付け直せません。push したコミットは署名なしのまま残ります"
+  else
+    warn "追跡 ref が無いため、$branch の署名を付け直せません（push 先は登録済みのリモート名ではありません）。push したコミットは署名なしのまま残ります"
+  fi
+  exit 0
+fi
 
 # 2. リモートの他 ref から到達できないコミットのうち、署名（gpgsig）が無いものを古い順に取る。
 mapfile -t others < <(git for-each-ref --format='%(refname) %(objectname)' refs/remotes/ |

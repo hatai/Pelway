@@ -89,6 +89,19 @@ run_case self_exemption_ignored "$d" 1 "pr-size: +901 / -0（追加の上限 800
 d="$(new_repo)"; lines 900 >"$d/a.rs"; commit_all "$d"
 run_case missing_base_fails "$d" 2 "" --base origin/nope --limit 800
 
+# --head で HEAD 以外の ref を比較先にできる（#642）。topic が +900、HEAD（main）は +10。
+d="$(new_repo)"; git -C "$d" switch -qc topic
+lines 900 >"$d/b.rs"; commit_all "$d"
+git -C "$d" switch -q main; lines 10 >"$d/a.rs"; commit_all "$d"
+run_case head_option "$d" 1 "pr-size: +900 / -0（追加の上限 800、削除の上限 2000）" --base base --head topic
+run_case head_default "$d" 0 "pr-size: +10 / -0（追加の上限 800、削除の上限 2000）" --base base
+run_case missing_head_fails "$d" 2 "" --base base --head refs/heads/nope
+
+# base・head は解決できるが共通祖先が無く差分を測れないときは、0 行で通さず専用の終了コード 3。
+d="$(new_repo)"; git -C "$d" switch -q --orphan orphan; git -C "$d" rm -rfq --ignore-unmatch .
+lines 5 >"$d/x.rs"; commit_all "$d"; git -C "$d" tag orphan-tip
+run_case unmeasurable_diff "$d" 3 "" --base base --head orphan-tip
+
 d="$(new_repo)"
 run_case bad_args "$d" 2 "" --base base --limit abc
 run_case bad_delete_limit "$d" 2 "" --base base --delete-limit abc

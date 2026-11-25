@@ -25,8 +25,8 @@
   拒否・回復途中の記録には needs_conductor_claim を立て、--claim-conductor の
   回復書き込みが来るまで拒否が続く
 - 正規パス・ロックパスが信頼できる通常ファイルでないときは中身を読まず写さず
-  扱わない: O_NOFOLLOW・fstat で通常ファイル・自己所有・リンク数 1・256KiB
-  上限を確かめ、1 回読んだバイト列を解析と unreadable の退避の両方に使う。
+  扱わない: O_NOFOLLOW・fstat で通常ファイル・自己所有・リンク数 1・巡回の read_ps
+  と同じ 4 MiB 上限を確かめ、1 回読んだバイト列を解析と unreadable の退避の両方に使う。
   symlink・FIFO・他人所有・巨大な正規パスは state-untrusted として anomalies
   に記録し unreadable と同じ照合不能の扱い、ロックパスの不適合は失敗（rc 1）。
   ホストのファイルへの symlink 差し替えで中身が漏れないようにするため
@@ -71,7 +71,7 @@ from datetime import datetime
 OFFSET_KEYS = ("watch_log_offset", "inbox_offset")
 ANOMALY_MAX = 100
 LOCK_TIMEOUT_SECS = 10.0
-STATE_MAX_BYTES = 256 * 1024
+STATE_MAX_BYTES = 4 * 1024 * 1024  # conductor-watch.sh の read_ps と同じ読み取り上限（4 MiB）。変えるときは両方を直す
 LOCK_RETRY_SECS = 0.1
 
 
