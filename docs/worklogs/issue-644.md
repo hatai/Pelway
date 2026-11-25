@@ -45,3 +45,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の「指揮役が持つ項目（`items`）」の表に「書く主体とタイミング」の列があると、`implement_thread` のような記録項目を足すとき書き手がどこに書くか迷わない（今回は割り当て手順 4 の括弧で示した）
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: e03c7dd080cb9236e07d003bc8d6136fdf0c206f
+
+1. 詰まった箇所: 手順 9 と「止まる条件」: round 3 のレビュー（`bb13d161`、codex・claude）に must-fix が残り、skill のままでは止まる条件に当たる。指揮役スレッドに届いた開発リードの中継（「2026-11-21 20:28 JST 以降、hatai の指示（t629u）でレビューのラウンド上限は無視してよく、must-fix がなくなるまで修正と再レビューを続ける」）と、main の `docs/worklogs/issue-669.md`・`issue-688.md` の同じ扱いの前例に従って round 4 に進んだ。PR ブランチは別の worktree でチェックアウト済みのため、自分の worktree のブランチを `origin/<PRブランチ>` に合わせ、`HEAD:agent/644-takeover-worktree-procedure` で push した
+2. 曖昧だった文: 「round 4 に入るのは hatai の例外の判断だけ」（`.agents/skills/implement-issue/SKILL.md`「止まる条件」）。t629u は GitHub に hatai 作のコメントとして無く、開発リードの中継でしか確かめられなかった
+3. 仮定と解釈: ブランチ名の特定が 2 round 続いた must-fix のため、経路ごとに直さず、どの経路（PR の `headRefName`・`implement_thread` の記録・取得コメント）で得た名前にも同じ照合（`agent/<N>-` と英小文字・数字・ハイフンだけ）を当て、照合を通らない名前はどのコマンドにも入れない、を全経路の決まりにした。取得コメントは `pelway-dev[bot]` 名義に限り、止まったスレッドの `branch`（`-r<N>` の別名でありうる）は使わない。codex が must-fix、claude が nit とした `-r<数>` の扱いは must-fix として直した。`implement_thread` は PR ごとの組（PR 番号・`thread_id`・push 先）にした
+4. 足りなかった情報・検証手段: `implement_thread` の組の形（JSON の形）は文書でしか決めておらず、巡回スクリプトが読む実装は無い。誤記の nit 2 件（`placeholeder`・`曖だった文`）は `[文書のずれ]` の印が無いため直していない
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の round 3 の行に、t629u の扱い（上限を無視する決定の有無と、その一次情報の場所）を書くと、毎回止まって再委託される往復が無くなる
+
+使ったスキル: implement-issue
