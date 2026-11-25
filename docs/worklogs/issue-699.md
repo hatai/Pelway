@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方（このスキルの核）」に「レビューの範囲外指摘から起票するときは、指摘が挙げた行ごとに、それが読み取りか書き込みかを書き、その行を確かめる受け入れ条件を 1 つずつ置く」を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: 9582275ab05ed16bf20f5ca6b6d5f405dd915a39
+
+1. 詰まった箇所: `scripts/tests/conductor-watch-ensure.test.sh` の fallback・systemd: 移行の python を置き場と旧置き場が同じときにも走らせたら、名前空間の中で `python3`（mise の shim）が「not a valid shim」で動かず、移行の失敗として見張りが終了した。前の版と同じく移行の python は置き場が旧置き場と異なるときだけ走らせ、親ディレクトリの作成は巡回の `open_ps_dir` に任せた。
+2. 曖昧だった文: 「既存のボード更新キュー（737–762 行目）と同様に、信頼できる基点から親ディレクトリを検証して開き」（PR #705 の codex r1 レビュー、must-fix 3）。ボード更新キューはキューのディレクトリ自体を O_NOFOLLOW で開くだけで、その親（/tmp）は検証していないため、「信頼できる基点」がどこかが決まらない。
+3. 仮定と解釈: 信頼できる基点を記録の親ディレクトリの 1 つ上（既定は git が解決した共有 git dir）と置いた。sandbox は共有 git dir の中には書けるが、`.git` 自体の名前は置き換えられないという前提。「許可ビットを広げない」は、元の記録の許可ビットを写す解釈ではなく、0600 で作る解釈にした（読み手の conductor-watch・pelway-agent-watch・conductor-rebuild・指揮役はどれも同じユーザーで動く。実機の 0644 の記録は 0600 に狭まる）。書き戻さない理由の行は、毎巡回ではなく thread-list・pending-sends と同じく HEARTBEAT_SECS ごとに出し直す形にした。受信箱 `conductor-inbox.jsonl` の読み取りは同じ親ディレクトリの下だが、Issue #699 の範囲（patrol-state.json）の外として親ディレクトリ基準にしなかった。
+4. 足りなかった情報・検証手段: 親ディレクトリを確かめてから開くまでの差し替え（競合の窓）は試験で作れず、symlink に置き換えた状態の試験 14 だけで確かめた。移行の lstat による種類の判別は、ソケットでは ENXIO の捕捉でも同じ結果になるため、lstat を外した変異では試験 12 が red にならない（lstat はデバイスを開かないための判別）。
+5. 改善案: `scripts/tests/conductor-watch-ensure.test.sh` の冒頭のコメントに「名前空間の中では mise の shim の python3 が動かないため、見張りの起動時に python3 の成功を前提にする処理を足すと、この試験で見張りが終了する」を足す。
+
+使ったスキル: implement-issue、write-pull-request
