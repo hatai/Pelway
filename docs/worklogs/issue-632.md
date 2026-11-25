@@ -11,3 +11,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の「MCP の `t3_thread_launch` と `t3_thread_send` の引数」に、実装・レビュー・調査とは別に恒久交代（指揮役）向けの例（`title`・`message` の形）を足すと、`conductor-context.md` の「恒久交代」からそのまま引ける。
 
 使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/write-pull-request`
+
+## 実装者メモ（round 2）
+
+対象 head: 815444b0e6c48c4f67448acdc12310aabf5bb552
+
+1. 詰まった箇所: scripts/conductor-rebuild: Codex の must-fix（worktree 無しと権限の不適合が重なったとき、worktree の確かめが先に die して exit 1 になる）。権限の検査を worktree の検査より前に動かし、worktree 不成立の失敗も die の 1 行ではなく、権限の失敗と同じ 3 行の案内（理由・無送信・`t3_thread_launch` での立て直しと `--to` 付きの再実行）にそろえた。
+2. 曖昧だった文: Codex の `[文書のずれ]` nit「『始め方』へ戻すか、スクリプトでも立て直し手順を表示」は二者択一で、スクリプト側に表示を足す方を選んだ（worktree 不成立も直し方は立て直しで、権限の失敗と同じ案内でそろうため）。
+3. 仮定と解釈: Claude の `[文書のずれ]` nit に対し、H23 の「操作」欄は MCP での起動の主体を conductor-context.md:119 の「人か指揮役」にそろえ、Grok Bot 経由が「できない」のは本体 checkout での実行（PC の物理的な操作）に限ると理由に書いた。H23 の参照は :109（空行で参照先を失っていた）を :119（始め方）に、:62 を実際のコマンドがある :63 に直した。
+4. 足りなかった情報・検証手段: T3 の `existing_worktree` で本体 checkout を指したとき `thread show` が `worktreePath` に何を返すかは未確認（Claude の nit。`new_wt` が `$project` と同じパスなら拒む多層防御は、範囲を広げるためこの round では入れていない）。
+5. 改善案: `conductor-context.md:119` の `t3_thread_launch` の引数の例に必須の `title` が無い（Claude の nit。round 1 の改善案 5 と同じ趣旨。印の無い nit のためこの round では直していない。次の round で指摘が残れば対応し、残らなければ別 Issue 候補）。
+
+使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/receiving-code-review`
