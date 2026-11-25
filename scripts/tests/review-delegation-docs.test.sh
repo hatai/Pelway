@@ -194,8 +194,8 @@ check fail_closed_r8_implement .agents/skills/implement-issue/SKILL.md \
   '承認の採用（手順 9・10 と skill `command-team`）では `DISMISSED` を数えない' \
   '起動中の実行も確定した結果も無い担当がある'
 check fail_closed_r8_runbook docs/agents/grokbot-runbook.md \
-  'PR 全体の有効なレビュー（有効な Approve）の有無と、担当ごとの起動・報告の状態を、別々に確かめる' \
-  '起動中の実行も確定した結果も無い担当があるときは（同じ head に別の担当の有効な Approve があっても）'
+  'PR 全体の有効な Approve の有無と、担当ごとの起動・報告の状態を、別々に確かめる' \
+  '起動中の実行も確定した結果も無い担当があれば（同じ head に別の担当の有効な Approve があっても）'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
