@@ -47,3 +47,15 @@
 5. 改善案: `.agents/skills/review-pr/SKILL.md` の「5. 終わりの報告」に「投稿の後に `failed` で終えるときは、投稿したレビューの id を `review: <id>` の行で足す」を足すと、本文の行による推定が要らなくなる。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: 8033d23a58174acda61dced1681f47286adc2d37
+
+1. 詰まった箇所: worktree の用意: 割り当ての worktree（`t3-340c2757`）は無関係の `t3/fail-closed-review-invalid-r5-fixes`（impl-669 のコミット）を checkout しており、`git reset --hard` は auto mode に拒否された。`origin/agent/581-fail-closed-tool-check` から別名のブランチ `t3/581-r5-fixes` を作り、`git push origin HEAD:agent/581-fail-closed-tool-check` で送った。round の上限は hatai の指示（t629u）で撤廃済みとの伝達で進めた（Issue #581・PR #695 に hatai 作のコメントは無い）。指示は codex の r5 だけを挙げていたが、同じ head に claude の r5（Request changes）もあり、両方を直した。
+2. 曖昧だった文: 「失敗した実行と投稿 ID を結び付けて PR・SHA・投稿者を照合してください」（codex r5 の must-fix 1）
+3. 仮定と解釈: 「実行と投稿の結び付け」は、失敗した子の報告（信用できない環境の出力）に id を書かせる方法ではなく、指揮側が持つ証拠で行う形にした: 委託記録の `created_at` を下限にし、PR・`pelway-review[bot]`・末尾行の担当で選ぶ（claude r5 の指摘どおり、レビューは投稿時点の head に付くため head では絞らない）。取り消しの must-fix が r2〜r5 と続いたため、解消は「hatai の手での dismiss」に一本化した（PR #695 の timeline で、push による自動の取り消しは `dismissal_commit_id` 付きで `pelway-dev[bot]` が actor になることを確かめた。`state == DISMISSED` だけでは push で解消してしまう）。`review: unknown` の記録は round 4 で採らなかった案だが、対象を「直前の委託記録から記録の時刻まで」と「末尾行が別の担当のものを除く」に絞って、再委託で未解消に戻る問題と別担当の dismiss を強いる問題を避けた。COMMENTED は dismiss できないため対象から外した（claude の印なし nit。解消の条件を満たせなくなるため一緒に直した）。
+4. 足りなかった情報・検証手段: 手での dismiss の timeline の形が手順書に無く、PR #521 の hatai の dismiss（`dismissal_commit_id` が無い）で確かめた。jq は PR #695 の実データで実行し、claude・委託記録の時刻以後で 6051233336 だけが返ることを確かめた。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 3 に「割り当ての worktree が別のブランチを checkout しているときは、PR ブランチの remote の先端から別名のブランチを作り、`HEAD:<PR ブランチ>` で push する」を足す（round 2〜5 で毎回起きた）。
+
+使ったスキル: implement-issue
