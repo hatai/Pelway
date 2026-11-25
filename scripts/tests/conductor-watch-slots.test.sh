@@ -54,7 +54,12 @@ chmod +x "$ROOT/bin/gh"
 
 cat > "$ROOT/bin/t3" <<'EOF'
 #!/usr/bin/env bash
-[[ "$1 $2" == "thread list" ]] && cat "$MOCK/threads.json" && exit 0
+[[ "$1 $2" == "thread list" ]] && {
+  # T3 の一覧の取得中に時計が進む形を作るフラグ（記録の updated_at が T3 一覧の
+  # 取得開始時刻を含む、使用数の根拠のうち最も古い時刻であることの確認に使う）。
+  [[ -f "$MOCK/advance-threads" ]] && echo $(( $(cat "$PELWAY_WATCH_NOW") + 90 )) > "$PELWAY_WATCH_NOW"
+  cat "$MOCK/threads.json"; exit 0
+}
 exit 9
 EOF
 chmod +x "$ROOT/bin/t3"
@@ -193,6 +198,37 @@ json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
 EOF
 }
 
+# implement_thread の組を patrol-state.json の items に書く（bind <issue> <thread_id> [pr]。
+# 現在の割り当てに結び付いたスレッドの形で、PR がまだ無い組は pr に "none"）。
+bind() {
+  python3 -I - "$STATE" "$1" "$2" "${3:-none}" <<'EOF'
+import json, sys
+p, n, tid, pr = sys.argv[1:5]
+try: d = json.load(open(p))
+except Exception: d = {}
+if not isinstance(d, dict): d = {}
+items = d.setdefault("items", {})
+it = items.setdefault(n, {})
+lst = it.setdefault("implement_thread", [])
+lst.append({"pr": pr, "thread_id": tid, "branch": "agent/x"})
+json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
+EOF
+}
+
+# 巻き戻し中の印（rollback。起動結果の照合が残る割り当て）を書く。
+set_rollback() {
+  python3 -I - "$STATE" "$1" <<'EOF'
+import json, sys
+p, n = sys.argv[1:3]
+try: d = json.load(open(p))
+except Exception: d = {}
+if not isinstance(d, dict): d = {}
+it = d.setdefault("items", {}).setdefault(n, {})
+it["rollback"] = {"assignment_id": "a", "started_at": "t", "steps_done": []}
+json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
+EOF
+}
+
 : > "$ROOT/out.log"; : > "$MOCK/gh-calls.log"
 
 # --- 1. agent:working の open Issue が 2 件（agent:devin なし）で上限 3 → SLOTS opencode 2/3 ---
@@ -213,21 +249,21 @@ check "devin-labelled issue counted to devin" has "$ROOT/out.log" '^SLOTS devin 
 check "devin-labelled issue not counted to opencode" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
 check "closed issue not counted" nhas "$ROOT/out.log" '^SLOTS devin 2/6$'
 
-# --- 3. 作業状態の印＋実装スレッドが動いていないことの確認が取れたものは使用数に含めない ---
-mark 11 "停止中"
-mark 13 "再開待ち"
-mark 15 "再開処理中"
+# --- 3. 作業状態の印＋現在の割り当てに結び付いたスレッドが動いていないことの確認が取れたものは使用数に含めない ---
+mark 11 "停止中";   bind 11 t1
+mark 13 "再開待ち"; bind 13 t2
+mark 15 "再開処理中"; bind 15 t3
 mock_threads "$(jarr "$(thread_item t1 '[実装] #11 a' completed)" "$(thread_item t2 '[実装] #13 b' failed)" "$(thread_item t3 '[実装] #15 c' interrupted)")"
 mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)" "$(iss 13 OPEN agent:working agent:devin)" "$(iss 15 OPEN agent:working)")"
 run_cycles 1
 check "stopped/resuming issues excluded" has "$ROOT/out.log" '^SLOTS opencode 1/3$'
 check "resume-pending devin excluded" has "$ROOT/out.log" '^SLOTS devin 0/6$'
 
-# --- 3b. 印だけでは由来を確かめられない: 動いているスレッドが残る・スレッドが見つからないものは使用中として数える ---
-mark 16 "停止中"   # [実装] #16 のスレッドが無い → 確かめられない → 使用中
-mark 17 "停止中"   # 動いているスレッドが残る → 使用中
-mark 18 "再開待ち" # 止まったスレッドと動いているスレッドの両方がある → 使用中
-mark 19 "再開処理中" # [実装] #19 のスレッドが無い → 使用中
+# --- 3b. 印だけでは由来を確かめられない: 組の無いもの・動いているスレッドが残るものは使用中として数える ---
+mark 16 "停止中"   # implement_thread の組もスレッドも無い → 確かめられない → 使用中
+mark 17 "停止中"; bind 17 t4   # 組のスレッドが動いている → 使用中
+mark 18 "再開待ち"; bind 18 t5 # 組のスレッドは止まっているが一覧に動いているものが残る → 使用中
+mark 19 "再開処理中" # 組もスレッドも無い → 使用中
 mock_threads "$(jarr \
   "$(thread_item t1 '[実装] #11 a' completed)" \
   "$(thread_item t2 '[実装] #13 b' failed)" \
@@ -239,6 +275,22 @@ mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)
 run_cycles 1
 check "unverified marks counted as used" has "$ROOT/out.log" '^SLOTS over opencode 5/3$'
 check "unverified devin mark counted" has "$ROOT/out.log" '^SLOTS devin 0/6$'
+
+# --- 3c. 引き継ぎ先が一覧から欠ける回: 組のスレッドが一覧に無く、止まった旧スレッドだけが見える → 使用中 ---
+# （一覧にある [実装] #20 の旧スレッドは止まっているが、現在の割り当てに結び付いた
+#   t-new-successor が一覧に無い → 起動した引き継ぎ先が一時的に欠けた形と区別できない）
+mark 20 "再開待ち"; bind 20 t-new-successor
+mock_threads "$(jarr "$(thread_item t-old-20 '[実装] #20 old' completed)")"
+mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 20 OPEN agent:working)")"
+run_cycles 1
+check "successor missing from list counted as used" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
+
+# --- 3d. 割り当ての照合が残るもの（rollback）は、組のスレッドが止まっていても使用中 ---
+mark 21 "停止中"; bind 21 t-rb; set_rollback 21
+mock_threads "$(jarr "$(thread_item t-rb '[実装] #21 g' completed)")"
+mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 16 OPEN agent:working)" "$(iss 21 OPEN agent:working)")"
+run_cycles 1
+check "unconfirmed assignment counted as used" has "$ROOT/out.log" '^SLOTS opencode 3/3$'
 
 # --- 4. 上限超過は SLOTS over ---
 mark 16 "稼働中"; mark 17 "稼働中"; mark 18 "稼働中"; mark 19 "稼働中"
@@ -378,6 +430,14 @@ check "updated_at is issue-list fetch start" slot_eq updated_at 1700003800.0
 check "patrol work runs on the later clock" \
   ps_eq updated_at "$(python3 -I -c 'import datetime; print(datetime.datetime.fromtimestamp(1700003920).isoformat(timespec="seconds"))')"
 check "patrol_at is the patrol's processing time" slot_eq patrol_at 1700003920.0
+
+# --- 13d. updated_at は使用数の根拠のうち最も古い取得開始時刻（T3 一覧の取得が遅れた回も古い時刻を保つ） ---
+touch "$MOCK/advance-threads"
+set_now 1700004000
+run_cycles 1
+rm -f "$MOCK/advance-threads"
+check "updated_at is T3-list fetch start" slot_eq updated_at 1700004000.0
+check "patrol work runs on the post-T3 clock" slot_eq patrol_at 1700004090.0
 
 # --- 14. 見張りは GitHub に書き込まない（agent-gh は読み取りだけ、素の gh も呼ばない） ---
 if grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/events)" "$MOCK/gh-calls.log" | grep -q .; then
