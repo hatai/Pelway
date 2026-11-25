@@ -55,12 +55,12 @@ check implementer_delegate_block .agents/skills/implement-issue/SKILL.md \
   '"runtimeMode": "auto-accept-edits"' \
   '"isolation": "worktree"' \
   '"role": "review"' \
-  '"providerInstanceId": "<codex_review|claude_review|devin_review>"'
+  '"providerInstanceId": "<agent-team.toml の instance.review>"'
 check conductor_delegate_block .agents/skills/command-team/SKILL.md \
   '"runtimeMode": "auto-accept-edits"' \
   '"isolation": "worktree"' \
   '"role": "review"' \
-  '"providerInstanceId": "<codex_review|claude_review|devin_review>"'
+  '"providerInstanceId": "<agent-team.toml の instance.review>"'
 
 # 人間のアカウントで投稿する道具で hatai の判断を書く条件。
 check agents_human_account AGENTS.md \

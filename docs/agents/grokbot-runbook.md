@@ -100,7 +100,7 @@ PR に `automerge` ラベルを付けてよいのは、skill `command-team` の�
 
 ### 割り当て・停止・再開
 
-- 枠の数え方: open な Issue の `agent:working` の数から、作業状態の印が停止中・再開処理中・再開待ちのものを除き、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）を加えたものが、担当ごとの上限（正本の「制約」）以下であること。内訳は `agent:devin` の有無で判定する。通常完了時の `agent:working` の解除は既存のマージ後処理のとおり
+- 枠の数え方: open な Issue の `agent:working` の数から、作業状態の印が停止中・再開処理中・再開待ちのものを除き、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）を加えたものが、担当ごとの上限（`agent-team.toml` の `[developers.<login>.slots]`）以下であること。内訳は `agent:devin` の有無で判定する。通常完了時の `agent:working` の解除は既存のマージ後処理のとおり
 - blocker の確認（割り当ての前段。新規・手当・再開の共通。巡回の最初に確かめて使い回さず、割り当てる直前に行う。その間に依存が追加されることがあるため）:
   1. 割り当て可否は `issue_dependencies_summary.blocked_by` だけで判定する（`GET /repos/hatai/Pelway/issues/<N>` を `scripts/agent-gh dev api` で読む。開いている blocker の数。0 なら着手可能）。`total_blocked_by` は閉じた blocker も数えるため、判定に使わない。hatai 名義の gh は使わない
   2. 本文に書かれた「Blocked by #N」も確かめる。依存関係の情報と食い違ったら、割り当てを止める
@@ -193,13 +193,13 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 
 ## 3. 同時数と順番待ち
 
-| スレッド | 同時に動かす上限 | 数え方 |
+| スレッド | 同時に動かす上限 | 使用数の見方 |
 |---|---|---|
-| 実装・調査（opencode `zai-coding-plan/glm-5.3`） | 3 | open な Issue の `agent:working` のうち `agent:devin` が無く、作業状態の印が停止中・再開処理中・再開待ちでないものの数と、実行中の調査スレッド（Issue を持たない入口B のものを含む）の数の合計 |
-| 実装（Devin CLI `swe-2-high`） | 6 | open な Issue の `agent:working` のうち `agent:devin` があり、作業状態の印が停止中・再開処理中・再開待ちでないものの数 |
-| レビュー（Codex `codex_review`） | 目安 2 | 通常の PR のレビューは実装担当が `delegate_task` で委託するため、この表では数えない。指揮役が立てたレビュースレッド（指揮役自身の PR・外部投入）だけを数える。Codex・T3・`~/.codex-review` を更新したら、`docs/dev-environment.md` の「専用 home での確認」が済むまでは使わない |
-| レビュー（Devin CLI） | 目安 2 | 同上。`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまでは使わない |
-| レビュー（Claude `claude_review`） | 目安 1 | 同上。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは使わない |
+| 実装・調査（opencode） | `agent-team.toml` の `[developers.<login>.slots]`（実装と調査の合算の枠。正本） | 見張りが `watch.log` に出す最新の `SLOTS` の行（`SLOTS <担当の id> <使用数>/<上限>` の形）。行が無いときは「2. ボードと巡回」の「割り当て・停止・再開」の「枠の数え方」で自分で数える |
+| 実装（Devin CLI） | 同上（Devin CLI の枠） | 同上 |
+| レビュー（Codex） | `agent-team.toml` の `[developers.<login>.review_limits]` の目安 | 通常の PR のレビューは実装担当が `delegate_task` で委託するため、この表では数えない。指揮役が立てたレビュースレッド（指揮役自身の PR・外部投入）だけを数える。Codex・T3・`~/.codex-review` を更新したら、`docs/dev-environment.md` の「専用 home での確認」が済むまでは使わない |
+| レビュー（Devin CLI） | 同上 | 同上。`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまでは使わない |
+| レビュー（Claude） | 同上 | 同上。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは使わない |
 
 上限に達しているときは新しいスレッドを立てない。空きが出たら、待っているものを次の順で始める。
 
@@ -211,7 +211,7 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 
 ### MCP の `t3_thread_launch` と `t3_thread_send` の引数
 
-実装・レビュー・調査のスレッドを MCP の `t3_thread_launch` で立てるときの引数の例。`title` は `t3_thread_launch` のツール定義上の必須項目で、省略すると T3 が `-32602`（引数の誤り）を返す。「省略すると最初の指示の 1 行目がタイトルになる」という既定動作があるのは CLI の `t3 thread start` の `--title` 側であり、こちらも省略しない（スレッド名の形式は skill `command-team` の「スレッド名」）。`modelSelection.instanceId` にはこの手順書の provider の名前（`opencode`・`acpRegistry_devin`・`codex_review`・`claude_review`・`devin_review`）、`runtimeMode` には `approval-required`・`auto-accept-edits`・`auto`・`full-access` のどれか、`workspaceStrategy.type` には `root`・`existing_worktree`・`worktree` のどれかを入れる。effort は `modelSelection.options` に入れる（opencode なら `variant`、Devin CLI なら `thought_level`。opencode で effort が `default`（通常）のときは `variant` を入れない。ただし `devin_review` の `options` は `mode` だけを受け付け、`thought_level` は渡せない。「レビューを始める」の Devin CLI の項を参照）。`acpRegistry_devin`・`devin_review`（Devin CLI）に割り当てるときは `runtimeMode` の指定が無い（同項を参照）。`workspaceStrategy.branch` には CLI の形と同じブランチ名を入れる（実装は `agent/<N>-<slug>`、レビューは `review/<M>-<k>`（Claude は `review/<M>-c<k>`、Devin CLI は `review/<M>-d<k>`）、調査は `agent/investigate-<slug>`）。
+実装・レビュー・調査のスレッドを MCP の `t3_thread_launch` で立てるときの引数の例。`title` は `t3_thread_launch` のツール定義上の必須項目で、省略すると T3 が `-32602`（引数の誤り）を返す。「省略すると最初の指示の 1 行目がタイトルになる」という既定動作があるのは CLI の `t3 thread start` の `--title` 側であり、こちらも省略しない（スレッド名の形式は skill `command-team` の「スレッド名」）。`modelSelection.instanceId` には `agent-team.toml` の `[agents.<担当>].instance.<役割>` の provider インスタンス名、`runtimeMode` には `approval-required`・`auto-accept-edits`・`auto`・`full-access` のどれか、`workspaceStrategy.type` には `root`・`existing_worktree`・`worktree` のどれかを入れる。effort は `modelSelection.options` に入れる（option の名前は `[agents.<担当>].effort.option`。effort が `default`（通常）のときは option を入れない。ただし Devin CLI のレビュー用インスタンスの `options` は `mode` だけを受け付け、effort の option は渡せない。「レビューを始める」の Devin CLI の項を参照）。Devin CLI（実装用・レビュー用どちらのインスタンスでも）に割り当てるときは `runtimeMode` の指定が無い（同項を参照）。`workspaceStrategy.branch` には CLI の形と同じブランチ名を入れる（実装は `agent/<N>-<slug>`、レビューは `review/<M>-<k>`（Claude は `review/<M>-c<k>`、Devin CLI は `review/<M>-d<k>`）、調査は `agent/investigate-<slug>`）。
 
 ```json
 {
@@ -219,12 +219,12 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
   "projectId": "e73c7c04-fd96-49c9-a3d0-71aa74f9ee3f",
   "modelSelection": {
     "instanceId": "opencode",
-    "model": "zai-coding-plan/glm-5.3",
-    "options": {"variant": "<low|high|max>"}
+    "model": "<モデル名>",
+    "options": {"<effort.option>": "<effort>"}
   },
   "runtimeMode": "auto-accept-edits",
   "workspaceStrategy": {"type": "worktree", "branch": "agent/<N>-<slug>", "baseRef": "main"},
-  "message": "Issue #<N> を実装する。skill implement-issue に従う。\nAssigned: role=implement agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>",
+  "message": "Issue #<N> を実装する。skill implement-issue に従う。\nAssigned: role=implement agent=<担当の id> model=<モデル名> effort=<effort>",
   "clientRequestId": "<新しく作る一意の ID>"
 }
 ```
@@ -252,17 +252,11 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 2. 実装スレッドを立てる
 
 ```
-t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree main --branch agent/<N>-<slug> --title "[実装] #<N> <要約>" <Pelway のパス> "Issue #<N> を実装する。skill implement-issue に従う。"
+t3 thread start --provider <provider インスタンス名> --model <モデル名> --worktree main --branch agent/<N>-<slug> --title "[実装] #<N> <要約>" <Pelway のパス> "Issue #<N> を実装する。skill implement-issue に従う。
+Assigned: role=implement agent=<担当の id> model=<モデル名> effort=<effort>"
 ```
 
-Devin CLI に割り当てるときは次で立てる。
-
-```
-t3 thread start --provider acpRegistry_devin --model swe-2-high --worktree main --branch agent/<N>-<slug> --title "[実装] #<N> <要約>" <Pelway のパス> "Issue #<N> を実装する。skill implement-issue に従う。
-Assigned: role=implement agent=devin model=swe-2-high effort=<medium|high|max>"
-```
-
-`<slug>` は Issue の題名を英小文字とハイフンで 3〜5 語にしたもの。effort（opencode の variant、Devin CLI の `thought_level`）は skill `command-team` の「実装のモデルと effort」で決め、MCP の `t3_thread_launch` で立てるときは `modelSelection.options` に入れる。Devin CLI の `mode` は `smart` までに限り、`bypass` は使わない（正本は `docs/superpowers/specs/agent-team.md` の「制約」）。
+`--provider` と `--model`、割り当ての行の `agent=`・`model=`・`effort=` は `agent-team.toml` の `[agents.<担当>]` の `instance.implement`・`models`・`effort` から読む。`<slug>` は Issue の題名を英小文字とハイフンで 3〜5 語にしたもの。effort（`[agents.<担当>].effort.option` に渡す値）は skill `command-team` の「実装のモデルと effort」で決め、MCP の `t3_thread_launch` で立てるときは `modelSelection.options` に入れる。Devin CLI の `mode` は `smart` までに限り、`bypass` は使わない（正本は `docs/superpowers/specs/agent-team.md` の「制約」）。
 
 ### 既存の PR ブランチを引き継ぐ
 
@@ -317,15 +311,15 @@ scripts/agent-gh dev git push origin HEAD:<PRブランチ>
 レビュースレッドを次の内容で立てる（`t3 thread start` の形で書くが、権限を指定するため実際は MCP または `t3_thread_launch` で立てる）。立てる前に、対象 PR に委託記録（`[review-request] head: <SHA> to: <担当>`）を `scripts/agent-gh dev` で残し、そのコメント ID を、指示の 2 行目の割り当ての行の `run=` に書く（割り当ての行は skill `command-team` の「決まり」、記録と投稿の結び付けは skill `implement-issue` の手順 8 の「委託記録」と「実行の投稿」の段落）。
 
 ```
-t3 thread start --provider codex_review --model <skill command-team の「Codex のモデル」で選んだモデル> --worktree main --branch review/<M>-<k> --title "[レビュー] PR #<M> <要約>" <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。
+t3 thread start --provider <Codex のレビュー用インスタンス> --model <skill command-team の「Codex のモデル」で選んだモデル> --worktree main --branch review/<M>-<k> --title "[レビュー] PR #<M> <要約>" <Pelway のパス> "PR #<M> をレビューする。skill review-pr に従う。
 Assigned: role=review agent=codex model=<モデル名> effort=<effort> security=yes run=<委託記録のコメント ID>"
 ```
 
 Codex と Claude のレビュースレッドを立てるときは（T3 Connect の MCP でも `t3_thread_launch` でも）、権限（`runtimeMode`）を `auto-accept-edits` にする（Devin CLI は下のとおり `runtimeMode` を指定しない）。`full-access` で立てると、コマンドが sandbox の外で動き、ネットワークの制限が効かない。`auto-accept-edits` で立てられないときも `auto`・`full-access` に変えず、立てずに 7 のエスカレーションにする（Issue が無いときの形も 7 にある）。指揮役のレビュースレッド（指揮役自身の PR・外部投入）は `delegate_task` で委託しない（子タスクの worktree は委託元のコミットから作られ、下の `main` 起点の決まりを満たせないため）。`delegate_task` での委託は実装担当の手順（skill `implement-issue` の手順 8）で、指揮役が実装担当の代わりに委託するときは、委託元のスレッドの worktree が `main` のコミットにあることを確かめてから行う。`t3 thread start` には権限を指定するフラグが無いので、レビュースレッドは MCP か `t3_thread_launch` で立てる。
 
-`codex_review` はネットワークを GitHub だけに絞った Codex（`docs/dev-environment.md` の「レビュー担当の Codex」）。`<k>` はその PR のレビュースレッドの通し番号（1 から）。worktree は必ず `main` から作る（レビュー担当は worktree の `scripts/agent-gh` を使うため、PR やほかのブランチの版を使わない）。
+Codex のレビュー用インスタンス（`agent-team.toml` の `[agents.codex].instance.review`）は、ネットワークを GitHub だけに絞った Codex（`docs/dev-environment.md` の「レビュー担当の Codex」）。`<k>` はその PR のレビュースレッドの通し番号（1 から）。worktree は必ず `main` から作る（レビュー担当は worktree の `scripts/agent-gh` を使うため、PR やほかのブランチの版を使わない）。
 
-レビュー担当（誰に付けるか）と effort は skill `command-team` の「レビュー担当と effort」で決める。Claude のレビュースレッドは `--provider claude_review --model claude-opus-5-5`、ブランチは `review/<M>-c<k>` にし、同じく `auto-accept-edits` で立てる。Devin CLI のレビュースレッドは `--provider devin_review --model swe-2-high`、ブランチは `review/<M>-d<k>` にする。Devin CLI には `runtimeMode` の指定が無く、`devin_review` のモデルオプションは `mode` だけを受け付ける。sandbox のため権限モードは Autonomous 一択で、`bypass` は使わない。effort の引き上げ（`thought_level`）は `devin_review` には渡せない。
+レビュー担当（誰に付けるか）と effort は skill `command-team` の「レビュー担当と effort」で決める。`--provider` と `--model` は `agent-team.toml` の `[agents.<担当>].instance.review` と `models` から読む。Claude のレビュースレッドはブランチを `review/<M>-c<k>` にし、同じく `auto-accept-edits` で立てる。Devin CLI のレビュースレッドはブランチを `review/<M>-d<k>` にする。Devin CLI には `runtimeMode` の指定が無く、レビュー用インスタンスのモデルオプションは `mode` だけを受け付ける。sandbox のため権限モードは Autonomous 一択で、`bypass` は使わない。effort の option は Devin CLI のレビュー用インスタンスには渡せない。
 
 レビュー担当は、スレッドの指示とは別に、開始時に fail-closed のツール一覧チェックを行う（開始時に渡されたツール名の一覧を記録し、merge・Issue の変更・comment などの書き込み系ツールが含まれる、または一覧が読めないときは何もせず終了する。チェックの本体は skill `review-pr` の「決まり」）。チェックに失敗したレビュー（`verdict: failed` で `error:` が `設定の不備:` で始まるもの）は結果を採用しない（「5. イベントごとの対応」の表のとおり、立て直さずに 7 のエスカレーションにする。投稿済みのレビューも skill `command-team` の「有効な Approve」に数えない）。
 
@@ -336,8 +330,8 @@ Codex と Claude のレビュースレッドを立てるときは（T3 Connect �
 原因が未理解のバグ・インシデントの報告（入口B）があり、実装と調査を合算した枠が空いているとき。報告の対象が Issue なら、調査の間その Issue に `needs-info` が付くことがある（報告に不足があるとき。skill `investigate-bug`）。
 
 ```
-t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree main --branch agent/investigate-<slug> --title "[調査] <対象があれば番号> <要約>" <Pelway のパス> "<報告の対象> を調査する。skill investigate-bug に従う。
-Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>"
+t3 thread start --provider <provider インスタンス名> --model <モデル名> --worktree main --branch agent/investigate-<slug> --title "[調査] <対象があれば番号> <要約>" <Pelway のパス> "<報告の対象> を調査する。skill investigate-bug に従う。
+Assigned: role=investigate agent=<担当の id> model=<モデル名> effort=<effort>"
 ```
 
 `<slug>` は症状を英小文字とハイフンで短くしたもの。effort は `docs/agents/command-team-details.md` の「調査（入口B）」で決める。起動したら、割り当ての記録に役割 investigate の行を足し、起動が返した調査スレッドの `thread_id` と作業ブランチ（`--branch` の `agent/investigate-<slug>`）を書く。報告 PR の番号は、この時点では `none` とし、引き渡しで書く。起動結果が不明で `thread_id` を確かめられなかったときは、「2. ボードと巡回」の「割り当て・停止・再開」の割り当て手順の 4 と同じく、次の巡回で割り当て ID とスレッド履歴を照合し、その ID のスレッドがあればその `thread_id` を行に書き、無ければ起動し直す。`thread_id` が書かれるまでは、引き渡しの結び付けも調査スレッドへの指示も保留にする。調査スレッドの報告（`pr:` に報告の Draft PR）を受けたら、同じ節の「調査の引き渡し」に従う。
@@ -351,12 +345,12 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 立てる前に、その週の棚卸し Issue を起票する（形は `docs/agents/command-team-details.md` の「週次: 長命 PR の棚卸し」の「棚卸し Issue」が正本。`ready-for-agent` は付けず、Todo の順番待ちは通らない）。起動とやり直しの直前には、巡回記録の番号の Issue の題名と本文が正本（「棚卸し Issue」の形）と日付・Issue 番号を除いて一致することを確かめる。一致しなければ起動もやり直しもせず、部屋で人間に知らせ、人間の判断があるまで新たに起票しない。起票者の名義は補助の確認に留める（表記は REST で `pelway-dev[bot]`、`gh --json author` で `app/pelway-dev`）。新規の起動・やり直し・結果不明の照合後の起動のいずれでも、直前に `needs-human` と巡回記録の「人間の判断待ち」を確かめ、保留中なら起動しない（結果の照合は行い、起動は人間の判断が届いてから進める。ボードに載らないので保留はラベルと巡回記録で追跡し、「7. エスカレーションと停滞」の `needs-human` の扱いに従う）。棚卸し Issue はボードに載せない: 指揮役の環境では人間名義の `gh project` が実行できず（「1. 役割と触ってよい範囲」）、「ボード Status 更新キュー」は Status の書き換えだけを扱い `item-add` は渡せない。`ready-for-agent` が無いので組み込みワークフローでも載らない。Status の導出と、ボード上の列の移動による停止の検知（「割り当て・停止・再開」）は棚卸し Issue には適用せず、追跡は `agent:working` ラベル・割り当ての記録・スレッドの状態の行・報告 PR で行う。Issue に `agent:working` を付けてから起動する（`agent:devin` は Devin CLI で立てるときだけ。ラベルと枠は実際に立てる担当で決める。「割り当て・停止・再開」の割り当て手順と同じ）。同時数の枠は立てる担当の実装と同じ数え方に従う（「3. 同時数と順番待ち」の表。Devin CLI なら `agent:devin` が付く実装枠）、満杯なら空くまで次の巡回でその Issue の起動を再試行する（週次の定期作業で急がない）。起動コマンドの失敗などで立ち上がらなかった Issue も巡回で拾う。やり直すかどうかは起動の記録で分ける: 起動の記録が無い（未試行）ものと、起動が失敗と確定した（記録はあってもスレッドが存在しない）ものは、同じ Issue で起動をやり直す（新たに起票しない）。起動結果が不明なものは「割り当て・停止・再開」の割り当て手順の割り当て ID の照合に従い、起動済みでスレッドがあるものは「毎回の巡回でスレッドを点検する」の表で扱う（新しいスレッドは立てない）。棚卸し担当のスレッドは棚卸し Issue の実装スレッドであり、成果の報告 PR はその Issue を閉じる主 PR になるため、巡回の `pr:` の確認・再開の定型文・Issue を起点にしたレビューと QA は、通常の実装と同じ手順にそのまま載る。
 
 ```
-t3 thread start --provider acpRegistry_devin --model swe-2-high --worktree main --branch agent/<Issue 番号>-inventory-<日付> --title "[実装] #<Issue 番号> 棚卸し <日付>" <Pelway のパス> "Issue #<Issue 番号> を実装する。skill implement-issue に従う。
-Assigned: role=implement agent=devin model=swe-2-high effort=high"
+t3 thread start --provider <provider インスタンス名> --model <モデル名> --worktree main --branch agent/<Issue 番号>-inventory-<日付> --title "[実装] #<Issue 番号> 棚卸し <日付>" <Pelway のパス> "Issue #<Issue 番号> を実装する。skill implement-issue に従う。
+Assigned: role=implement agent=devin model=<モデル名> effort=high"
 ```
 
-- provider・モデル: Devin CLI（`acpRegistry_devin`、`swe-2-high`）を既定とする
-- 権限（`runtimeMode`）: `full-access` にしない。Devin CLI（`acpRegistry_devin`）で立てるときは「実装を始める」と同じ扱い: `devin-impl` の起動ラッパーがスレッドを bwrap の sandbox に入れ（書き込みは worktree などに限られ、ネットワークは開放。`docs/dev-environment.md` の「実装担当の sandbox」。T3 の実スレッドでの確認は未実施）、`runtimeMode` の指定は要らない。`mode` は `smart` までに限り、`bypass` は使わない（正本は `docs/superpowers/specs/agent-team.md` の「制約」）。Devin 以外の provider に替えるときは、`t3 thread start` ではなく権限を指定できる経路（T3 Connect の MCP・`t3_thread_launch`）で `auto-accept-edits` を指定して立てる（`t3 thread start` には権限のフラグが無く、本体のプロジェクトの既定が `full-access` のことがある。「レビューを始める」と同じ決まり）。`auto-accept-edits` で立てられないときも `auto`・`full-access` に変えず、立てずに 7 のエスカレーションにする
+- 担当・モデル: devin（`agent-team.toml` の `[agents.devin]` の `instance.implement` と `models`）を既定とする
+- 権限（`runtimeMode`）: `full-access` にしない。Devin CLI で立てるときは「実装を始める」と同じ扱い: `devin-impl` の起動ラッパーがスレッドを bwrap の sandbox に入れ（書き込みは worktree などに限られ、ネットワークは開放。`docs/dev-environment.md` の「実装担当の sandbox」。T3 の実スレッドでの確認は未実施）、`runtimeMode` の指定は要らない。`mode` は `smart` までに限り、`bypass` は使わない（正本は `docs/superpowers/specs/agent-team.md` の「制約」）。Devin 以外の provider に替えるときは、`t3 thread start` ではなく権限を指定できる経路（T3 Connect の MCP・`t3_thread_launch`）で `auto-accept-edits` を指定して立てる（`t3 thread start` には権限のフラグが無く、本体のプロジェクトの既定が `full-access` のことがある。「レビューを始める」と同じ決まり）。`auto-accept-edits` で立てられないときも `auto`・`full-access` に変えず、立てずに 7 のエスカレーションにする
 - worktree は必ず `main` から作る。ブランチは `agent/<Issue 番号>-inventory-<日付>` にする（`agent/<Issue 番号>-` で始まる実装スレッドのブランチとして、巡回は実装の列で扱う）
 - スレッド名: 「[実装] #<Issue 番号> 棚卸し <日付>」（「スレッド名」の形式の「実装」に当たる。`[実装] #<番号>` で始めることで、`scripts/conductor-watch.sh` が題名から実装スレッドとして Issue に紐づけ、実装スレッドの止まりの検知にも載る）
 - 割り当ての行の役割: `role=implement`（implement-issue 手順 7 の `Implementer:` 行の転記は `role=implement` を前提に定義されている。棚卸し担当であることの識別はブランチの `-inventory-` と割り当ての記録の役割欄で行う）
@@ -379,7 +373,7 @@ Assigned: role=implement agent=devin model=swe-2-high effort=high"
 
 ### `pelway.agent-watch/v1`
 
-スレッドが実装かレビューかは `branch` で見分ける。`agent/` で始まるものが実装・調査、`review/` で始まるものがレビュー。`provider` でも補助的に見られる（`acpRegistry_devin` は実装、`devin_review` はレビュー）が、ブランチでの識別を正とする。
+スレッドが実装かレビューかは `branch` で見分ける。`agent/` で始まるものが実装・調査、`review/` で始まるものがレビュー。`provider` でも補助的に見られる（`agent-team.toml` の `instance.implement` は実装、`instance.review` はレビュー）が、ブランチでの識別を正とする。
 
 | `event` | 実装スレッド | レビュースレッド |
 |---|---|---|
@@ -486,7 +480,7 @@ Devin CLI は、T3 が引数の検証で返す `-32602` を接続の失敗とし
 
 ### Claude 不能時の例外
 
-Claude（`claude_review`）が使えない間のレビュー運用の例外。Codex の承認だけ進めてよいのは、差分が文書だけの PR（コード・秘密・外部接続・権限に触れないもの）に限る。それらに触れる PR と、Claude か Devin のレビューが必須の PR は `needs-human` を付けたまま停止し、Claude の復旧を待つ（この例外は使えない）。
+Claude が使えない間のレビュー運用の例外。Codex の承認だけ進めてよいのは、差分が文書だけの PR（コード・秘密・外部接続・権限に触れないもの）に限る。それらに触れる PR と、Claude か Devin のレビューが必須の PR は `needs-human` を付けたまま停止し、Claude の復旧を待つ（この例外は使えない）。
 
 文書だけの PR を Codex の承認だけで進めるときは、作業ログ（`docs/worklogs/`）に次を残す:
 

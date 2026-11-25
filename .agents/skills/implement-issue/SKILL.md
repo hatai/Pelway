@@ -250,18 +250,18 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 
 | 担当 | `target.providerInstanceId` | `target.model` | `target.options` |
 |---|---|---|---|
-| codex | `codex_review` | skill `command-team` の「Codex のモデル」の表で選ぶ | `reasoningEffort: <effort>` |
-| claude | `claude_review` | `claude-opus-5-5` | `effort: <effort>` |
-| devin | `devin_review` | `swe-2-high` | `mode` のみ受け付ける（省略してよい。`thought_level` は渡せず、effort の引き上げはできない） |
+| codex | `agent-team.toml` の `[agents.codex].instance.review` | skill `command-team` の「Codex のモデル」の表で選ぶ（`[agents.codex].models` の中から） | `{<`[agents.codex].effort.option`>: <effort>}` |
+| claude | `[agents.claude].instance.review` | `[agents.claude].models` のモデル | `{<`[agents.claude].effort.option`>: <effort>}` |
+| devin | `[agents.devin].instance.review` | `[agents.devin].models` のモデル | `mode` のみ受け付ける（省略してよい。effort の option は渡せず、effort の引き上げはできない） |
 
 `delegate_task` の呼び出しは、次のブロックを丸ごと写し、`<...>` を上の表と割り当ての行で埋める。`role`・`runtimeMode`・`isolation` は担当によらず同じ値で、省かない（省くと子が sandbox の外の権限で動き、レビュー担当は `error: wrong runtime` で止まる）。devin の `options` は `{}` にする。委託が拒否されても `auto`・`full-access` に変えない。`auto-accept-edits` で委託できないときは、委託せずに止まる（「止まる条件」の行。状態の行は `stopped`）。
 
 ```json
 {
   "target": {
-    "providerInstanceId": "<codex_review|claude_review|devin_review>",
+    "providerInstanceId": "<agent-team.toml の instance.review>",
     "model": "<上の表の target.model>",
-    "options": {"<reasoningEffort|effort>": "<effort>"}
+    "options": {"<担当の effort.option>": "<effort>"}
   },
   "role": "review",
   "runtimeMode": "auto-accept-edits",

@@ -26,7 +26,7 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
   Assigned: role=implement agent=<opencode|devin> model=<モデル名> effort=<effort>
   ```
 
-  実装の値は、opencode なら `model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>`、devin なら `model=swe-2-high effort=<medium|high|max>`（effort の値は `thought_level` に写す）にする。
+  実装の値は、`agent=` は担当の id、`model=` は `agent-team.toml` の `[agents.<担当>].models` のモデル、`effort=` は `[agents.<担当>].effort.raise` の段の値にする（起動時は `effort.option` の option に effort を写す）。
 
   スキル改訂の Issue（skill `improve-skills` の入口Aで起票されたもの）を割り当てるときは、1 行目を「Issue #<N> を実装する。skill implement-issue と skill improve-skills に従う。」にする。実装担当は implement-issue の手順に加えて、improve-skills の入口B以降の手順を読む（入口Bの指定は improve-skills の本文が担う）。
 
@@ -110,35 +110,37 @@ Issue を割り当てる直前に、runbook の「割り当て・停止・再開
 
 ### 実装のモデルと effort
 
-| 条件 | モデル・effort |
+条件ごとの担当は `agent-team.toml` の `[developers.<login>.priority.implement]` の対応するキーの先頭から枠の空いているものを選ぶ。選んだ担当の provider インスタンス名・モデル・effort の option と段の一覧は `[agents.<担当>]` の登録情報から読む（起動の形は runbook の「実装を始める」）。
+
+| 条件 | 担当と effort |
 |---|---|
-| 定型・小規模（Issue の規模の見積もりが小、変更が文書・設定・テストだけ） | opencode `zai-coding-plan/glm-5.3`、variant `low` |
-| 通常（仕様が固まった実装） | GLM と Devin CLI の空いている方。同時に空いていれば Devin CLI を優先する（`acpRegistry_devin`、`swe-2-high`、`thought_level=high`）。GLM なら variant 指定なし |
-| 曖昧で長い調査・デバッグ系の Issue | opencode `zai-coding-plan/glm-5.3` |
-| 「Devin CLI のハーネスごと任せる」チケット（人間が Issue で明示するか、指揮役が「実装スレッドの枠組みでは進めにくい自律作業」と判断したもの。例: 環境構築を伴う検証、複数リポジトリにまたがる調査） | Devin CLI（`acpRegistry_devin`、`swe-2-high`）。Issue に `agent:devin` を付ける |
-| コア部分（`crates/pelway-contract`、承認・状態遷移・権限）、`unsafe` を含む・含みうる変更 | GLM なら variant `high`、Devin CLI なら `thought_level=max` |
-| 同じ Issue の修正の指示が 2 回を超えた（3 回目の修正に入る）。数えるのは、レビューの本物の must-fix に基づく指示だけ（分割計画が無い時期の誤判定や、再起動による自動の再開は数えない） | `t3_thread_configure` で variant または `thought_level` を 1 段上げる（GLM: `low`→通常→`high`→`max`。Devin CLI: `medium`→`high`→`max`）。`max` でも直らなければ Devin CLI の `swe-2-high`（`thought_level=max`）に替える。Issue に理由をコメントする |
+| 定型・小規模（Issue の規模の見積もりが小、変更が文書・設定・テストだけ） | `small` の先頭の担当。effort は `effort.raise` の先頭の値 |
+| 通常（仕様が固まった実装） | `normal` の先頭から枠が空いている担当。同時に空いていれば先頭を優先する。effort は `effort.raise` の先頭から 2 番目の値（`default` なら option を渡さない） |
+| 曖昧で長い調査・デバッグ系の Issue | `ambiguous` の先頭の担当 |
+| 「Devin CLI のハーネスごと任せる」チケット（人間が Issue で明示するか、指揮役が「実装スレッドの枠組みでは進めにくい自律作業」と判断したもの。例: 環境構築を伴う検証、複数リポジトリにまたがる調査） | `harness` の先頭の担当。その担当に `assign_label` があれば Issue に付ける |
+| コア部分（`crates/pelway-contract`、承認・状態遷移・権限）、`unsafe` を含む・含みうる変更 | 選んだ担当の effort を `effort.raise` の先頭から 3 番目の値にする |
+| 同じ Issue の修正の指示が 2 回を超えた（3 回目の修正に入る）。数えるのは、レビューの本物の must-fix に基づく指示だけ（分割計画が無い時期の誤判定や、再起動による自動の再開は数えない） | `t3_thread_configure` で `effort.option` の値を `effort.raise` の順で 1 段上げる。最後の値でも直らなければ、`normal` の先頭からまだ使っていない担当に替え、その担当の `effort.raise` の最後の値にする。Issue に理由をコメントする |
 | 同じ Issue の修正の指示が 3 回を超えた（4 回目の修正に入る）。数え方は上の行と同じ | 修正を出さずにエスカレーション（runbook 7）。round 4 に入るのは hatai が例外と判断した PR だけ（例外は下の「マージ」。これ以外に広げない）。エスカレーションでは、残った must-fix の一覧と止まった head の sha を Issue に書かせ、止まっている間は指揮役も修正を中継しない（#462 の再発防止。「レビューのラウンド」の止まり方と同じ） |
 
 runbook と仕様の `round`（スレッドの実行回数）は、誤判定や再起動による再開でも増える。指揮役は `round` を目安にとどめ、effort の引き上げとエスカレーションは上の表の「修正の指示の回数」で判断する。ここで数える「修正の指示の回数」と、実装側がレビューの委託回数で数えるレビューのラウンド（下の「レビューのラウンド」）は別の数え方である。
 
 ### レビュー担当と effort
 
-| 条件 | レビュー担当 |
+| 条件 | レビュー担当（`agent-team.toml` の `[developers.<login>.priority.review]` の対応するキーの並び。登録情報は `[agents.<担当>]`） |
 |---|---|
-| 通常 | PR 番号が偶数は Codex（`codex_review`。モデルは下の「Codex のモデル」）、奇数は Devin CLI（`devin_review`、`swe-2-high`）。使えない担当（下の確認ゲート）の番では Codex に回す |
-| 高リスク: `unsafe`、セキュリティの境界（認証・権限・承認・秘密情報・ネットワーク）、`.github/workflows/` の変更、pr-size の追加行が 400 を超える | Codex・Claude（`claude_review`）・Devin CLI の使えるもの全て（3 人） |
-| 抜き取り | PR 番号を 4 で割った余りが 0 の通常の PR には Claude も付ける（Codex・Devin CLI の見落とし率の測定のため） |
+| 通常 | `normal` の先頭から PR 番号の偶奇で交互（偶数は先頭、奇数は次）。使えない担当（下の確認ゲート）の番では `normal` の先頭の担当に回す |
+| 高リスク: `unsafe`、セキュリティの境界（認証・権限・承認・秘密情報・ネットワーク）、`.github/workflows/` の変更、pr-size の追加行が 400 を超える | `high_risk` の使えるもの全て |
+| 抜き取り | PR 番号を 4 で割った余りが 0 の通常の PR には `sampling` の担当も付ける（ほかのレビュー担当の見落とし率の測定のため） |
 
 - この表の適用は指揮役だけでなく実装担当も行う。実装担当はこの表でレビュー委託（`delegate_task`）の担当と effort を決め、Assigned 行に写す（skill `implement-issue` の手順 8）。通常と抜き取りの判定は PR 番号だけで決まり、割り当ての記録への記入は不要（実装担当の分は省く。指揮役が立てた分だけ記録する）
-- レビューを `delegate_task` で委託するとき（実装担当の手順 8、指揮役が実装担当の代わりに委託するとき。指揮役は委託元の worktree が `main` のコミットにあることを確かめる。指揮役自身の PR・外部投入のレビュースレッドは委託せず、runbook の「レビューを始める」で立てる）は、呼び出しを次のブロックから丸ごと写し、`<...>` を埋める。`target.model` と `options` の値は skill `implement-issue` の手順 8 の表（codex は `reasoningEffort`、claude は `effort`、devin は `{}`）。`role`・`runtimeMode`・`isolation` は省かない。
+- レビューを `delegate_task` で委託するとき（実装担当の手順 8、指揮役が実装担当の代わりに委託するとき。指揮役は委託元の worktree が `main` のコミットにあることを確かめる。指揮役自身の PR・外部投入のレビュースレッドは委託せず、runbook の「レビューを始める」で立てる）は、呼び出しを次のブロックから丸ごと写し、`<...>` を埋める。`target.providerInstanceId`・`target.model`・`options` の値は skill `implement-issue` の手順 8 の表（`agent-team.toml` の登録情報から読む。devin の `options` は `{}`）。`role`・`runtimeMode`・`isolation` は省かない。
 
   ```json
   {
     "target": {
-      "providerInstanceId": "<codex_review|claude_review|devin_review>",
-      "model": "<モデル名>",
-      "options": {"<reasoningEffort|effort>": "<effort>"}
+      "providerInstanceId": "<agent-team.toml の instance.review>",
+      "model": "<models から選んだモデル>",
+      "options": {"<effort.option>": "<effort>"}
     },
     "role": "review",
     "runtimeMode": "auto-accept-edits",
@@ -157,10 +159,10 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
   - (b) は、末尾行に ` run=<ID>` の無い投稿（委託記録の ID で結ぶ決まりより前の書式）でも外れる。そうした投稿は、どの実行にも結び付かず Approve にも数えないため、再委託でも置き換えられない。委託する側は、再委託の前に、現在の head にどの実行にも結び付かない投稿が残っていないかを確かめ、残っていれば skill `implement-issue` の手順 9「結び付かない投稿の取り消し」のとおり、hatai の dismiss を確かめてから新しい委託記録を残して委託する（エージェントは dismiss しない。`CHANGES_REQUESTED` の投稿は、指摘を直す push で現在の head から外れる）。
   - 遅延実行タスクが委託を出すタスクなら、出す委託の task にもこの行を写す。
 - 委託先の worktree に手順書が無いとき: 委託タスクが参照する手順書（skill の `SKILL.md`、`docs/agents/qa-checklist.md` など）が委託先の worktree に無いときは、まず対象 PR がそのパスを変えているかを `scripts/agent-gh <role> api 'repos/hatai/Pelway/compare/main...<対象 head の SHA>' --jq '.files[].filename'` にそのパスが含まれるかで確かめる（`<role>` は上の箇条と同じ。判定に PR の現在の差分を使わず、対象 head の SHA に固定して、判定と取得を同じ SHA に結び付ける。この一覧は GitHub が 300 ファイルで打ち切り、打ち切りを知らせないため、`.files | length` が 300 に達していたら対象のパスが一覧から漏れている可能性があり、そのパスを変えたと扱って main の版に従う）。変えていなければ、対象 head の版を `scripts/agent-gh <role> api 'repos/hatai/Pelway/contents/<path>?ref=<対象 head の SHA>' --jq .content | base64 -d` で読む。ただしレビューの委託先は、変わっていないパスも含めて従う手順を main の版に限る skill `review-pr` の「決まり」に従い、この規定と食い違うときは review-pr の決まりが優先する。変えていれば、手順として従うのは main の版（`ref=main`）で、PR が変えた版には従わない（検査される PR が、検査する側の手順を書き換えられないようにするため。この「変えたパスは main の版に従う」点は skill `review-pr` の「決まり」と同じ）。対象 head の版は、レビュー・QA の対象として読むだけにする。どちらの取得も失敗したら、手順書を推測で補わず、取得できなかったパスとエラーを返答に書いて止まる。
-- Devin CLI が実装した PR には Devin CLI のレビューを付けない。通常の番が奇数でも Codex に回し、高リスクの PR でも Devin CLI の枠は外す。
+- Devin CLI が実装した PR には Devin CLI のレビューを付けない。通常の番が Devin CLI でも `normal` の並びで Devin CLI 以外の先頭の担当に回し、高リスクの PR でも `high_risk` から Devin CLI を外す。
 - Devin CLI のレビュー担当は確認済み。確認記録は `docs/dev-environment.md`「レビュー担当の Devin CLI」の「確認手順の結果（記録欄）」。記録が消えた場合は、記録が戻るまで Devin CLI を使わず、通常は Codex、高リスクは Codex と Claude で回す。
-- Devin CLI のレビュースレッド（`devin_review`）では、モデルオプションは `mode` だけを受け付ける（`thought_level`・`speed` は渡せず、effort の引き上げは行えない）。sandbox のため権限モードは Autonomous 一択で、`mode` は省略してよい。設定は `docs/dev-environment.md` の「レビュー担当の Devin CLI」。
-- レビュー担当の確認ゲート（更新後の保留）。`codex_review` は Codex・T3・`~/.codex-review` のどれか、`claude_review` は T3・Claude Code・`~/.claude-review` のどれかを更新したら、`docs/dev-environment.md` の対応する確認（Codex は「専用 home での確認」、Claude は「レビュー担当の Claude」の MCP のツールと組み込みのツールの確認）が済むまで使わない（T3 の更新では両方が同時に保留になりうる。そのときは人間に知らせる）。更新を予定しているときは、更新の前に、影響を受ける側の節に `保留中:` の行を置き、その行が main に載るまで更新を始めない（行が main にあれば、委託や起動・再開の直前に main の最新の版を確かめるすべての割り当て元が保留を見られる）。更新済みと後から気づいたときは、気づいた者（人間か指揮役）が同じ行を置いてから確認を行い、その行が main に載るまでは、指揮役が動いている実装担当に直接伝え、委託元となりうるスレッドの新規の起動・再開を行わない（指揮役自身の起動でも同じ）。指揮役と実装担当は、委託やスレッドの起動・再開の直前に、main の最新の `docs/dev-environment.md` で、割り当てる担当と回し先の両方の節（「専用 home での確認」と「レビュー担当の Claude」）の `保留中:` の行の有無を確かめる。保留の間は、使えない担当の番とその担当への回し先をもう片方の担当に回し（Codex の保留なら Claude、Claude の保留なら Codex）、両方使えなければ人間に知らせる。
+- Devin CLI のレビュースレッドでは、モデルオプションは `mode` だけを受け付ける（effort の option は渡せず、effort の引き上げは行えない。`agent-team.toml` の `[agents.devin]` の注記も参照）。sandbox のため権限モードは Autonomous 一択で、`mode` は省略してよい。設定は `docs/dev-environment.md` の「レビュー担当の Devin CLI」。
+- レビュー担当の確認ゲート（更新後の保留）。codex 担当は Codex・T3・`~/.codex-review` のどれか、claude 担当は T3・Claude Code・`~/.claude-review` のどれかを更新したら、`docs/dev-environment.md` の対応する確認（Codex は「専用 home での確認」、Claude は「レビュー担当の Claude」の MCP のツールと組み込みのツールの確認）が済むまで使わない（T3 の更新では両方が同時に保留になりうる。そのときは人間に知らせる）。更新を予定しているときは、更新の前に、影響を受ける側の節に `保留中:` の行を置き、その行が main に載るまで更新を始めない（行が main にあれば、委託や起動・再開の直前に main の最新の版を確かめるすべての割り当て元が保留を見られる）。更新済みと後から気づいたときは、気づいた者（人間か指揮役）が同じ行を置いてから確認を行い、その行が main に載るまでは、指揮役が動いている実装担当に直接伝え、委託元となりうるスレッドの新規の起動・再開を行わない（指揮役自身の起動でも同じ）。指揮役と実装担当は、委託やスレッドの起動・再開の直前に、main の最新の `docs/dev-environment.md` で、割り当てる担当と回し先の両方の節（「専用 home での確認」と「レビュー担当の Claude」）の `保留中:` の行の有無を確かめる。保留の間は、使えない担当の番とその担当への回し先をもう片方の担当に回し（Codex の保留なら Claude、Claude の保留なら Codex）、両方使えなければ人間に知らせる。
 - Claude のレビュー担当は確認済み。確認記録は `docs/dev-environment.md`「レビュー担当の Claude」の「確認手順の結果（記録欄）」。記録が消えた場合は、記録が戻るまで Claude を使わず Codex だけで回し、高リスクの PR は人間に知らせる。
 - 抜き取りの実施が 10 件に達するか、抜き取りの開始から 4 週間が経つか、どちらか早い方になったら、`docs/agents/command-team-details.md` の「レビュー担当の段階移行」に従って見落とし率を集計し、高リスク PR の複数レビュー体制の有効化を判断する。
 - effort は、追加行が 200 以下で高リスク（セキュリティの境界）・仕様（正本 `docs/superpowers/specs/` と ADR `docs/adr/` を変える）の PR でなければ既定、それ以外は `high`。セキュリティと仕様の PR では 1 回目から effort を上げておく。同じ PR の 2 回目以降のレビューは 1 段上げる。3 回目のレビューで改めて effort を上げる運用はやめる（skill `implement-issue` の手順 9 も同じ）。
@@ -217,7 +219,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 - 経過が目安の 24 時間を超えた PR の対応は、その時点の指揮役（正本の Grok Bot、代行中は代行者）が責任を持つ。責任の持ち方は、対象によって次のとおりその場で決めて実行することである。
   - 実装担当の PR: レビューの委託は実装担当の内側で進むため、まず実装スレッドの状態（実行中か・レビュー委託の子を待っているか・止まっているか）を `t3 thread list` と `t3 thread show` で確かめる。止まっていれば再開の指示か runbook 7 のエスカレーション、実装スレッドが動けないときは外部投入（`docs/agents/command-team-details.md` の「外部からのレビュースレッド投入」）へエスカレーションする
-  - 指揮役自身の PR: レビュー担当を割り当てる（上の「レビュー担当と effort」で決める。レビューの枠が埋まっているときは、その PR を順番待ちの先頭に置く）
+  - 指揮役自身の PR: レビュー担当を割り当てる（上の「レビュー担当と effort」で決める。レビューの同時数は目安で、順番待ちの管理はしない — 正本の「制約」）
 - 24 時間は目安であり、超えた時点で必ず上のどちらかを取る。何もしないまま放置しない。値は運用実績で見直す。
 
 ### 調査（入口B）
@@ -317,7 +319,7 @@ runbook 7 の手順に従う。人間に上げる前に、手順 2 の「effort 
 
 ### 共有層に反映する
 
-- 書き込み先は両方のツールが読む場所だけ: `AGENTS.md`、`.agents/skills/`、`docs/`。
+- 書き込み先は両方のツールが読む場所だけ: `AGENTS.md`、`.agents/skills/`、`docs/`、`agent-team.toml`。
 - `.claude/skills/<name>` は `.agents/skills/<name>` へのシンボリックリンクにする。変更したら `diff -r .claude/skills/<name> .agents/skills/<name>` の差分がゼロであることを確かめてから完了とする。
 - 変更は PR にして、レビュー担当のスレッドに回す。
 - スキル改訂の候補（自前スキルの改善・作成・最適化）は、skill `improve-skills` の入口A（候補の調査と起票）に渡す。共有層への反映のうち、スキル改訂の編集作業そのものは improve-skills の手順に従う。この手順 4 が担い続けるのは、材料の集め方・裏取り・効果測定・棚卸しの管理である。

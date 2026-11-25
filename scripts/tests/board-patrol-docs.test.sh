@@ -77,6 +77,31 @@ check cond5_write_issue_board .agents/skills/write-issue/SKILL.md \
   'サブ Issue' \
   'Todo'
 
+# 条件6（Issue #715）: 上限と登録情報の正本が agent-team.toml であることが、
+# 対象の 5 文書のそれぞれに参照として書かれている。
+check cond6_toml_ref_spec docs/superpowers/specs/agent-team.md \
+  'agent-team.toml'
+check cond6_toml_ref_runbook docs/agents/grokbot-runbook.md \
+  'agent-team.toml'
+check cond6_toml_ref_command_team .agents/skills/command-team/SKILL.md \
+  'agent-team.toml'
+check cond6_toml_ref_implement_issue .agents/skills/implement-issue/SKILL.md \
+  'agent-team.toml'
+check cond6_toml_ref_details docs/agents/command-team-details.md \
+  'agent-team.toml'
+
+# 条件6b: command-team-details の調査の数え方に、停止中・再開処理中・再開待ちの
+# 除外と agent:devin による内訳がある。
+check cond6b_details_count docs/agents/command-team-details.md \
+  '停止中・再開処理中・再開待ち' \
+  'agent:devin'
+
+# 条件6c: runbook の「3. 同時数と順番待ち」で、実装・調査の枠の使用数は
+# watch.log の SLOTS の行で見る形になっている。
+check cond6c_runbook_slots docs/agents/grokbot-runbook.md \
+  '`SLOTS`' \
+  '[developers.<login>.slots]'
+
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
   exit 1
