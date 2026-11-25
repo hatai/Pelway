@@ -64,7 +64,6 @@ check "matching writer-thread applies patch" upd 0 '{"watch_log_offset":600}' --
 check "patch applied" eq "$(pget watch_log_offset)" '600'
 check "untouched top-level keys preserved" has <(pget items) '"main_pr"'
 check "conductor_thread_id preserved" eq "$(pget conductor_thread_id)" '"mcp:cur"'
-
 check "deep merge keeps sibling keys" upd 0 '{"items":{"11":{"work_state":"再開待ち"}}}' --writer-thread mcp:cur
 check "merged items keep main_pr" has <(pget items) '"main_pr"'
 check "merged items add work_state" has <(pget items) '再開待ち'
@@ -74,25 +73,20 @@ print("work_state" in json.load(open(sys.argv[1]))["items"]["11"])' "$STATE")" "
 
 check "patch list applies in order" upd 0 '[{"subjects":null},{"subjects":{"12":{"waiting_on":"human"}}}]' --writer-thread mcp:cur
 check "list patch replaced subjects" eq "$(pget subjects)" '{"12": {"waiting_on": "human"}}'
-
 # patch のオブジェクトは、既存値がオブジェクトでなくても深く併合される
 # （この手順の併合仕様。中の null は常に鍵を消し、値として残らない）
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"items":5}'
 check "object patch deep-merges over non-object value" upd 0 '{"items":{"a":null,"b":1}}' --writer-thread mcp:cur
 check "inner null is a delete, not a stored value" eq "$(pget items)" '{"b": 1}'
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
-
 # --- conductor_thread_id の持ち主でない書き手（Issue #671 受け入れ条件 1） ---
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
-
 check "foreign thread write refused" upd 3 '{"watch_log_offset":700,"last_patrol_note":"old"}' --writer-thread mcp:old
 check "refused patch not applied" eq "$(pget watch_log_offset)" '600'
 check "refusal records mismatch anomaly" anoms_has "conductor-mismatch"
 check "stderr explains refusal" has <(printf '%s' "$LAST_ERR") "mcp:old"
-
 check "patch setting another thread id refused" upd 3 '{"conductor_thread_id":"mcp:old"}' --writer-thread mcp:cur
 check "thread id still current" eq "$(pget conductor_thread_id)" '"mcp:cur"'
-
 # 引き継ぎ・交代: --claim-conductor で新指揮役が自分の ID にする
 check "claim succeeds" upd 0 '{"scheduled_task_id":"sched-new"}' --writer-thread mcp:new --claim-conductor
 check "claim sets conductor_thread_id" eq "$(pget conductor_thread_id)" '"mcp:new"'
@@ -101,7 +95,6 @@ check "claim forces writer id over patch value" upd 0 '{"conductor_thread_id":"m
 check "writer id wins" eq "$(pget conductor_thread_id)" '"mcp:new"'
 check "old conductor now refused" upd 3 '{"watch_log_offset":700}' --writer-thread mcp:cur
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
-
 # 登録済みの conductor_thread_id は --claim-conductor でだけ変更できる。
 # 現指揮役自身の通常 patch による削除・無効化・別の値への変更も拒否する
 # （この項目が失われると後続の持ち主照合が素通りになるため）。
@@ -112,12 +105,10 @@ check "delete refusal recorded" anoms_has "conductor-id-change-refused"
 check "patch emptying thread id refused" upd 3 '{"conductor_thread_id":""}' --writer-thread mcp:cur
 check "patch non-string thread id refused" upd 3 '{"conductor_thread_id":123}' --writer-thread mcp:cur
 check "thread id still registered" eq "$(pget conductor_thread_id)" '"mcp:cur"'
-
 # 同じ値の書き戻しは変更にならないので許す
 check "patch rewriting same thread id applies" upd 0 '{"conductor_thread_id":"mcp:cur","watch_log_offset":601}' --writer-thread mcp:cur
 check "same-id write applied" eq "$(pget watch_log_offset)" '601'
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
-
 # スレッド ID を名乗らない書き手も conductor_thread_id を変えられない
 check "non-thread writer cannot change thread id" upd 3 '{"conductor_thread_id":"mcp:evil","subjects":{"9":{"waiting_on":"human"}}}' --writer conductor-watch
 check "non-thread change keeps thread id" eq "$(pget conductor_thread_id)" '"mcp:cur"'
