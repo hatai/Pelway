@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # scripts/conductor-watch.sh の SLOTS 行と slots.json（Issue #714）のテスト。
 # 巡回ごとに枠の使用数を `SLOTS <担当> <使用数>/<上限>`（超過は over、未確定は error）で
-# watch.log に出し、同じ判定を slots.json に書く（正本は slots.json）。agent-team.toml が
-# 無いときは出さない。見張りは GitHub に書き込まない。
+# watch.log に出し、同じ判定を slots.json（正本）に書く。agent-team.toml が無いときは出さない。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -22,8 +21,7 @@ STATE="$ROOT/repo/.git/pelway/patrol-state.json"
 ISTATE="$ROOT/repo/.git/pelway/patrol-items.json"
 SLOTS="$ROOT/state/pelway/conductor-watch/slots.json"
 
-# モックの agent-gh: 呼び出しをすべて記録し、issue list / pr list / label-events の読み取りだけに答える。
-# issues.json が無いときは失敗する（取得失敗の再現）。読み取り以外は exit 9（書き込まないことの確認）。
+# モックの agent-gh: 呼び出しを記録し、issue list / pr list / label-events の読み取りだけに答える（issues.json が無いときは失敗―取得失敗の再現。読み取り以外は exit 9）。
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$MOCK/gh-calls.log"
@@ -120,13 +118,9 @@ mock_prs() { printf '%s\n' "$1" > "$MOCK/prs.json"; }
 mock_threads() { printf '%s\n' "${1:-[]}" > "$MOCK/threads.json"; }
 mock_threads
 
-iss() {
-  python3 -I - "$@" <<'EOF'
-import json, sys
+iss() { python3 -I -c 'import json,sys
 print(json.dumps({"number": int(sys.argv[1]), "state": sys.argv[2],
-                  "labels": [{"name": l} for l in sys.argv[3:]]}))
-EOF
-}
+                  "labels": [{"name": l} for l in sys.argv[3:]]}))' "$@"; }
 
 jarr() { local out="" x; for x in "$@"; do out+="${out:+,}$x"; done; printf '[%s]' "$out"; }
 
@@ -162,15 +156,12 @@ check() {
 has() { grep -Eq "$2" "$1"; }
 nhas() { ! grep -Eq "$2" "$1"; }
 calls() { wc -l < "$MOCK/gh-calls.log"; }
-# slots.json / patrol-state.json の <key> の値を取り出す（jq 風のパス。slot_eq/ps_eq は値の一致を確かめる）。
-slot() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[2]));
+# 記録の <key> の値を取り出す（jq 風のパス。slot_eq/ps_eq は値の一致を確かめる）。
+get() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[2]));
 for k in sys.argv[1].split("."): d=d[k]
-print(d)' "$1" "$SLOTS"; }
-slot_eq() { [[ "$(slot "$1")" == "$2" ]]; }
-psval() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[2]));
-for k in sys.argv[1].split("."): d=d[k]
-print(d)' "$1" "$STATE"; }
-ps_eq() { [[ "$(psval "$1")" == "$2" ]]; }
+print(d)' "$1" "$2"; }
+slot_eq() { [[ "$(get "$1" "$SLOTS")" == "$2" ]]; }
+ps_eq() { [[ "$(get "$1" "$STATE")" == "$2" ]]; }
 
 # <file> の items[<issue>] に <key>=<JSON> を書く小道具（implement_thread は一覧に追加）。
 jput() { python3 -I -c 'import json,sys
@@ -264,22 +255,22 @@ mock_threads "$(jarr "$(thread_item t-24 '[実装] #24 i' completed)")"
 mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 24 OPEN agent:working)")"
 run_cycles 1
 check "unreadable patrol-items keeps slot counted" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
-# --- 3g. patrol-items.json が無く旧置き場が残る回（初回移行）は旧置き場を保守的に読む ---
-# （issue 24（停止中+止まった組）は枠を空け、issue 25（再開待ち・rollback なし）は使用中。直前と同じ値で行は出ない）
+# --- 3g. patrol-items.json が無い回は、旧置き場が残っていても読まない（旧記録は復活しうるため） ---
+# （枠を空けられそうな issue 24・25 とも使用中）
 rm -f "$ISTATE"
 litem 24 "停止中" t-24; litem 25 "再開待ち" t-25
 mock_threads "$(jarr "$(thread_item t-24 '[実装] #24 i' completed)" "$(thread_item t-25 '[実装] #25 i' completed)")"
 mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 24 OPEN agent:working)" "$(iss 25 OPEN agent:working)")"
 run_cycles 1
-check "first-migration legacy: only 停止中 frees" slot_eq "usage.opencode.used" "2"
-# --- 3h. 移行後に patrol-items.json が欠けた回は空として扱う（旧置き場は移行手順で消される） ---
+check "missing patrol-items never reads legacy" has "$ROOT/out.log" '^SLOTS opencode 3/3$'
+# --- 3h. 旧置き場も無い回も同じくすべて使用中（直前と同じ値で行は出ないため記録で確かめる） ---
 python3 -I - "$STATE" <<'EOF'
 import json, sys
 d = json.load(open(sys.argv[1])); d.pop("items", None)
 json.dump(d, open(sys.argv[1], "w"), ensure_ascii=False, indent=2, sort_keys=True)
 EOF
 run_cycles 1
-check "post-migration loss counts all used" has "$ROOT/out.log" '^SLOTS opencode 3/3$'
+check "post-migration loss counts all used" slot_eq "usage.opencode.used" "3"
 
 # --- 4. 上限超過は SLOTS over ---
 mark 16 "稼働中"; mark 17 "稼働中"; mark 18 "稼働中"; mark 19 "稼働中"
