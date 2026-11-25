@@ -245,9 +245,15 @@ def read_ps():  # read_request と同じく通常ファイル・待ち・量に�
         return data
 def write_ps(obj):  # 書き戻せたら None、書き戻さなかったらその理由（dir-invalid・too-large）を返す
     if ps_dfd is None: return "dir-invalid"
-    # 次の巡回で読めない大きさ（read_ps の上限超え）なら置き換えず、読めていた記録を保つ
-    data = json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
-    if len(data) > PS_MAX: return "too-large"
+    # 次の巡回で読めない大きさ（read_ps の上限超え）なら置き換えず、読めていた記録を保つ。字下げは入れ子が
+    # 深いほど膨らみ、上限内の記録でも全体を一度に整形するとメモリを使い切るため、少しずつ整形して UTF-8 の
+    # 累計バイト数を数え、上限を超えた時点で打ち切る（json.dumps と同じ出力）。
+    parts, size = [], 0
+    for chunk in json.JSONEncoder(ensure_ascii=False, indent=2, sort_keys=True).iterencode(obj):
+        b = chunk.encode("utf-8"); size += len(b)
+        if size > PS_MAX: return "too-large"
+        parts.append(b)
+    data = b"".join(parts)
     # symlink の先・FIFO に書かず、同じディレクトリの一時ファイルからの置き換えで行う。一時ファイルは
     # 予測できない名前を O_EXCL|O_NOFOLLOW・0600 で作る（ボード Status 更新キューの結果ファイルと同じ）。
     # 置き換えた記録はこの一時ファイルそのものなので、umask によらず許可ビットは 0600 を超えない。

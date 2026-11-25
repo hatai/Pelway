@@ -6,7 +6,7 @@
 # 旧置き場（$XDG_STATE_HOME/pelway/patrol-state.json）からの移行も同じ検査で読み（通常ファイル以外は
 # 開かずに飛ばす）、新置き場に何も無いときだけ作る。記録の親ディレクトリ（共有 git dir の pelway/）は
 # symlink をたどらずに開いて確かめ、確かめられない回は読まず書かない。移行と書き戻しは記録を 0600 で作り、
-# 書き戻しが上限を超える回は置き換えずに読めていた記録を保つ。止まりの検知のテスト（conductor-watch-stall.test.sh）と同じく、
+# 書き戻しが上限を超える回は置き換えずに読めていた記録を保つ（字下げで膨らむ記録も、全体を一度に整形せずに判定する）。止まりの検知のテスト（conductor-watch-stall.test.sh）と同じく、
 # 巡回は setsid で動かし、10 秒で終わらなければ止めて「時間内に終わらない」とする。
 set -uo pipefail
 
@@ -56,6 +56,8 @@ SEEDED_SINCE="2020-01-01T00:00:00+09:00"
 # seed <path> [埋め草のバイト数 | near] — 引き継がれたかを見分けられる記録を書く（埋め草で大きさを変える）。
 # near は、読み取り上限（4 MiB）の 64 バイト手前まで埋めた詰めた JSON で、巡回の書き戻し（字下げと
 # トップレベルの updated_at）では上限を超える大きさになる。
+# deep は、300 段に入れ子にした配列で読み取り上限の手前まで埋めた詰めた JSON で、字下げで 1 GiB を超える
+# 大きさに膨らむ（全体を一度に整形すると、試験 16 のメモリ上限を超える）。
 seed() {
   python3 -I - "$1" "${2:-0}" "$SEEDED_SINCE" <<'EOF'
 import json, sys
@@ -68,6 +70,14 @@ if pad == "near":
     compact = lambda: json.dumps(d, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     d["pad"] = ""
     d["pad"] = "x" * (4194304 - 64 - len(compact().encode("utf-8")))
+    open(p, "w", encoding="utf-8").write(compact())
+elif pad == "deep":
+    compact = lambda: json.dumps(d, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    depth, d["deep"] = 300, []
+    leaves = (4194304 - 64 - len(compact().encode("utf-8")) - 2 * depth) // 2
+    deep = [0] * leaves
+    for _ in range(depth - 1): deep = [deep]
+    d["deep"] = deep
     open(p, "w", encoding="utf-8").write(compact())
 else:
     if int(pad): d["pad"] = "x" * int(pad)
@@ -83,13 +93,14 @@ reset() {
 }
 
 # run_cycles <回数> — 巡回を回す。10 秒以内に終わらなければ、プロセスグループごと止めて
-# RUN_RC=1 にする（終わったら 0）。
+# RUN_RC=1 にする（終わったら 0）。MEM_KB を渡すと、見張りの仮想メモリをその KiB に制限する（ulimit -v）。
 run_cycles() {
   local i
   echo 0 > "$MOCK/sleeps"
-  MOCK="$MOCK" SLEEP_MAX="$1" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
-    T3_BIN="$ROOT/bin/t3" PELWAY_BOARD_QUEUE_DIR="$ROOT/queue" \
-    setsid bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
+  ( if [[ -n "${MEM_KB:-}" ]]; then ulimit -v "$MEM_KB" || exit 97; fi
+    MOCK="$MOCK" SLEEP_MAX="$1" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
+      T3_BIN="$ROOT/bin/t3" PELWAY_BOARD_QUEUE_DIR="$ROOT/queue" \
+      exec setsid bash "$ROOT/repo/scripts/conductor-watch.sh" ) >>"$ROOT/out.log" 2>&1 &
   WPID=$!
   for ((i = 0; i < 100; i++)); do kill -0 "$WPID" 2>/dev/null || break; /bin/sleep 0.1; done
   RUN_RC=0
@@ -285,6 +296,22 @@ run_cycles 1
 check "15: the write-back resumes once the record fits" has "$ROOT/out.log" "WATCHER patrol-state-write-recovered"
 check "15: the resumed write-back is written" stamped
 check "15: the resumed write-back keeps the conductor's items" eq "$(task_id)" "seeded"
+
+# 試験 16: 字下げで大きく膨らむ記録（300 段の入れ子。詰めた形は上限内）でも、全体を一度に整形せずに
+# 上限を判定する。見張りの仮想メモリを 1 GiB に制限しても、その回は中断されず（Python の例外を出さず）、
+# 理由の行を 1 回だけ出し、置き換えずに読めていた記録を保つ。
+reset; seed "$STATE" deep; cp "$STATE" "$ROOT/deep.orig"
+check "16: the deeply nested record is within the read limit" test "$(stat -c %s "$STATE")" -le 4194304
+MEM_KB=1048576 run_cycles 3
+check "16: the cycles finish within 10 seconds under a 1 GiB memory limit" in_time
+check "16: the cycles raise no Python exception" lacks "$ROOT/out.log" "Traceback"
+check "16: the skipped write-back is logged once" \
+  eq "$(grep -c 'WATCHER patrol-state-write-skipped .*reason=too-large' "$ROOT/out.log")" "1"
+check "16: the deeply nested record is kept byte-identical" cmp -s "$STATE" "$ROOT/deep.orig"
+check "16: the conductor's items survive three cycles" eq "$(task_id)" "seeded"
+check "16: waiting_since survives three cycles" eq "$(since61)" "$SEEDED_SINCE"
+check "16: no temporary file is left" \
+  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name patrol-state.json | wc -l)" "0"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
