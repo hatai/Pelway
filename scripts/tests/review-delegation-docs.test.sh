@@ -103,7 +103,7 @@ check fail_closed_record_implement .agents/skills/implement-issue/SKILL.md \
   'pullrequestreview-<id> to: <担当>' \
   '投稿後の `設定の不備:` の記録' \
   'REST の `user.login` が `pelway-dev[bot]` のコメントだけ' \
-  'any(startswith("Reviewer: agent=<担当> "))' \
+  '($last | startswith("Reviewer: agent=<担当> "))' \
   '未解消の記録が PR に 1 件でもあるあいだは、その PR のどのレビューも'
 check fail_closed_record_command_team .agents/skills/command-team/SKILL.md \
   '[review-invalid]' \
@@ -113,6 +113,28 @@ check fail_closed_record_runbook docs/agents/grokbot-runbook.md \
   '[review-invalid]' \
   '`pelway-dev[bot]` のコメントだけ' \
   'その PR のどの Approve も有効な Approve に数えず'
+
+# 担当は本文の末尾行だけで見分け、対象のレビューは委託の時刻で絞る。投稿を特定できないときも
+# review: unknown の記録を残し、PR に needs-human を付ける。解消は hatai の手での dismiss で確かめ、
+# 解消の後の再レビューは解消より後の委託記録の後のレビューだけを数える。Guard (b) は DISMISSED を数えない。
+# 結果の確定前の投稿はキュー投入の承認に使わず、記録を見つけた PR の automerge は外す（Issue #581 r5）。
+# いずれも文言の存在確認で、意味はレビューで引用を読んで判定する。
+check fail_closed_r5_implement .agents/skills/implement-issue/SKILL.md \
+  'レビューの担当は本文の最後の空でない行（末尾行' \
+  '.submitted_at >= "<T0>"' \
+  '投稿前と確認' \
+  '`review: unknown` の記録を 1 つ残す' \
+  'scripts/agent-gh dev pr edit <M> --add-label needs-human' \
+  'by_push: (.dismissed_review.dismissal_commit_id != null)' \
+  'すべての記録の解消の時刻より後に残した委託記録'
+check fail_closed_r5_command_team .agents/skills/command-team/SKILL.md \
+  'その SHA に向いた `DISMISSED` でないレビュー' \
+  'その Approve を投稿したレビューの委託の結果が確定している' \
+  'キュー投入の承認に使わない'
+check fail_closed_r5_runbook docs/agents/grokbot-runbook.md \
+  'Kodiak は PR の `needs-human` でマージを止める' \
+  '記録を見つけた PR に `automerge` が付いていれば、指揮役がすぐ外す' \
+  'その定義をそのまま当てて判定する'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2

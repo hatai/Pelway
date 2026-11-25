@@ -67,7 +67,7 @@ sandbox に止められた操作（書き込み・実行・ネットワークな
 - 主 PR は自動では交代しない。未マージで閉じられたら検出し（記録された主 PR 自体の状態で判定する）、新規割り当てを止め、`needs-human` を付けて Needs human に置き、棚卸しの判断に回す。その PR のレビュー証跡は導出に使わない
 - 実装 Issue の主 PR は `Closes #<番号>` を必須とする。記録された主 PR のマージを検知したのに Issue が open のままなら、指揮役がステータスを Done にして閉じさせる。調査 Issue では報告 PR がそのまま主 PR で、報告 PR の本文に `Part of #<番号>` を必ず書く。報告 PR のマージを巡回が検知したら、指揮役がステータスを Done にする（`Part of` はクローズ用キーワードではないため組み込みには任せない）
 - 委託記録: レビュー委託・再委託のたびに、実装スレッドが対象 PR 自身に定型コメント（行頭 `[review-request] head: <SHA> to: <担当>`）を残す。判定では、その PR の最新の委託記録コメントだけを証跡とする。引用やコードブロック内の出現は無効。終わりの報告と head の結び付けは、実装者メモに head の SHA が明示されている場合に限る
-- 無効記録: レビュー担当が投稿の後に `error:` が `設定の不備:` で始まる `verdict: failed` を報告したとき、報告を受けた側（実装スレッドか指揮役）が対象 PR に定型コメント（`[review-invalid] head: <SHA> review: <URL> to: <担当>`。失敗した担当のレビューと、担当を見分けられないレビューの id ごとに 1 つ）を残す。形・記録するレビューの選び方・記録として数える作成者（REST の `user.login` が `pelway-dev[bot]` のコメントだけ。ほかの作成者のコメントは形が同じでも数えない）・解消の照合は、skill `implement-issue` の手順 9「投稿後の `設定の不備:` の記録」が正本。未解消の記録が主 PR に 1 件でもあるあいだは、その PR のどの Approve も有効な Approve に数えず（skill `command-team` の「hatai のレビューの扱い」）、Ready to merge・`automerge`・その Issue の作業の再開のどれにも進まない。その Issue に `needs-human` が無ければ指揮役が付け、Needs human に置く（環境の修復とレビューの dismiss は人間が扱い、すべての記録の解消まで停止を維持する）。記録のレビューの Request changes は、dismiss（上の 4 の (iii)）でだけ対応済みになる。巡回で主 PR のレビューを読むときは、この記録も併せて見る（GitHub のレビュー一覧には `APPROVED` のまま残るため）
+- 無効記録: レビュー担当が `error:` が `設定の不備:` で始まる `verdict: failed` を報告したとき、報告を受けた側（実装スレッドか指揮役）が投稿の有無を確かめ、対象 PR に定型コメント（`[review-invalid] head: <SHA> review: <URL か unknown> to: <担当>`。失敗した担当のレビューと担当を見分けられないレビューごとに 1 つ。投稿を特定できないときは `unknown` で 1 つ）を残し、PR に `needs-human` を付ける（Kodiak は PR の `needs-human` でマージを止める。Issue のラベルは見ない）。形・記録するレビューの選び方・記録として数える作成者（REST の `user.login` が `pelway-dev[bot]` のコメントだけ。ほかの作成者のコメントは形が同じでも数えない）・解消の照合は、skill `implement-issue` の手順 9「投稿後の `設定の不備:` の記録」が正本。未解消の記録が主 PR に 1 件でもあるあいだは、その PR のどの Approve も有効な Approve に数えず（skill `command-team` の「hatai のレビューの扱い」）、Ready to merge・`automerge`・その Issue の作業の再開のどれにも進まない。その Issue と PR に `needs-human` が無ければ指揮役が付け、Needs human に置く（環境の修復とレビューの dismiss は人間が扱い、すべての記録の解消まで停止を維持する。解消は hatai の手での dismiss で確かめ、push による自動の取り消しは数えない）。記録を見つけた PR に `automerge` が付いていれば、指揮役がすぐ外す（下の「マージキュー待ちの PR」）。すでにマージされていれば、緊急として 7 のエスカレーションにする。記録のレビューの Request changes は、dismiss（上の 4 の (iii)）でだけ対応済みになる。すべての記録の解消の後、記録の head が現在の head のままなら、記録の `to:` の担当の再レビューがそろうまでその head の Approve を数えない。再レビューは記録を残した側が始め（実装スレッドなら skill `implement-issue` の手順 8 か `waiting-conductor`、指揮役のレビュースレッドの記録なら指揮役が立て直す）、始め方と数えるレビューは同じ手順 9 の最後の段落が正本。巡回で主 PR のレビューを読むときは、この記録も併せて見る（GitHub のレビュー一覧には `APPROVED` のまま残るため）
 
 ### hatai のレビューに関する連動
 
@@ -83,7 +83,7 @@ sandbox に止められた操作（書き込み・実行・ネットワークな
 
 ### マージの条件
 
-PR に `automerge` ラベルを付けてよいのは、skill `command-team` の「マージ」の「`automerge` ラベルを付ける条件」がすべてそろったときだけ。条件の列挙と確かめ方はそこが正本で、この手順書には写さない（有効な Approve、`[文書のずれ]` の nit が残っていないこと、必須チェック、Draft でも `WIP:` でもないこと、現在の head と同じ SHA の `pelway-qa` の合格、Approve と QA の合格の後の push がコンフリクトの解消を含まない main の取り込みだけであること、衝突を解消したらレビューと QA をやり直すこと、などを含む）。
+PR に `automerge` ラベルを付けてよいのは、skill `command-team` の「マージ」の「`automerge` ラベルを付ける条件」がすべてそろったときだけ。条件の列挙と確かめ方はそこが正本で、この手順書には写さない（有効な Approve、その Approve の委託の結果が確定していること、PR に `needs-human` が無いこと、`[文書のずれ]` の nit が残っていないこと、必須チェック、Draft でも `WIP:` でもないこと、現在の head と同じ SHA の `pelway-qa` の合格、Approve と QA の合格の後の push がコンフリクトの解消を含まない main の取り込みだけであること、衝突を解消したらレビューと QA をやり直すこと、などを含む）。
 
 正本の条件のうち QA の合格（現在の head と同じ SHA の `pelway-qa` の合格コメント。形と数え方は `docs/agents/qa-checklist.md`）だけが欠けている PR は QA 待ちである。`automerge` を付けず、QA に確認を頼む。巡回スクリプトはこの PR にも `waiting_on=merge` を出すが、実際の待ち先は QA として扱う。
 
@@ -92,7 +92,7 @@ PR に `automerge` ラベルを付けてよいのは、skill `command-team` の�
 `automerge` ラベルが付いた open な PR は、待ち先が Kodiak（マージキューの GitHub App。正本は `docs/superpowers/specs/agent-team.md` の「マージキュー」）である。補助記録では `waiting_on=merge` のままとし、巡回スクリプトの `next_owner` は `conductor (PR #<M>)` を出すが、実際の待ち先は Kodiak として扱う。
 
 - マージの確認は、notify-grokbot の `pull_request`（`closed`、`merged: true`）の通知と、巡回での PR の状態で行う。マージされれば従来どおり Issue から `agent:working`・`agent:devin` を外す
-- `automerge` ラベルを付けたあとに新しい push や Draft への戻しがあったら、指揮役がラベルを外す。条件が再び揃ったら（Approve のやり直しを含む）付け直す
+- `automerge` ラベルを付けたあとに新しい push や Draft への戻しがあったら、または主 PR に未解消の `[review-invalid]` の記録か `needs-human` が付いたら、指揮役がラベルを外す。外したことは、記録（`[review-invalid]` のコメントの URL）を添えて操作記録に残す（`automerge` の付け外しの裏付けになる）。条件が再び揃ったら（Approve のやり直しを含む）付け直す
 - Kodiak の自動更新（main への追いつき）が取り込みを行ったあとも、指揮役は取り込みのコミットに main 以外の差分がないことを確かめる。Kodiak はコンフリクトを解消しないため、その取り込みは「コンフリクトの解消を含まない main の取り込み」に当たる（hatai の決定、Issue #480）。main 以外の差分があれば変更として扱い、ラベルを外してレビューと QA をやり直させる
 - QA の合格コメントの確認: 形と数え方は `docs/agents/qa-checklist.md` の「合格として数えるもの」に従う（`pelway-qa[bot]` の Bot であること・投稿の後に編集されていないこと・1 行目・`sha:` が PR の現在の head と一致すること・`run:`）。ほかの作成者（hatai を含む）のコメントと、編集されたコメントは、形と SHA が合っていても QA の合格に数えない（書き込み権限を持つ名義は、ほかの名義のコメントの `sha:` を書き換えられるため。skill `command-team` の「マージ」）。PR 本文だけの「合格」は無効で、SHA が一致しない合格コメントはその head では使えない（head が変わったら QA のやり直しを依頼する）
 - Kodiak がコンフリクト等でマージできないときは、Kodiak が PR にコメントして `automerge` ラベルを外す（`.kodiak.toml` の `merge.notify_on_conflict` の既定）。巡回で、Approve 済みなのに `automerge` ラベルが無い PR に Kodiak のマージ不可コメントがあるか、またはラベルが付いたまま長時間 open のままのものを検知する。前者は手当スレッドを立てて main の取り込みと衝突解消をさせ、終わったら指揮役が `automerge` ラベルを付け直す。後者（キューが詰まる・応答しない）は hatai に知らせる（admin マージは、command-team「マージ」の例外に当たると hatai が判断したときだけ）
@@ -160,13 +160,13 @@ conductor-watch は、上の「ボード Status 更新キュー」の処理（`g
 | `state: done` | マージの判断（skill `command-team` の「マージ」） |
 | `state: stopped` | 判断待ち（下の報告の「判断待ち」の節に出す。「7. エスカレーションと停滞」の `stopped:` の扱い） |
 | `state: waiting-review`・`state: waiting-checks` | 待っている先を自分で確かめる（レビューの子タスクの状態、`pr-digest` の `required` 行）。終わっていれば「続きをやり直す」を送る。まだ動いていれば待つ |
-| `state: waiting-conductor` | 現在の head に有効なレビューが無ければ、main 由来の worktree からレビュースレッドを立てる。結果が出たら実装スレッドに「続きをやり直す」を送る |
+| `state: waiting-conductor` | 現在の head に有効なレビューが無ければ、main 由来の worktree からレビュースレッドを立てる。`[review-invalid]` の記録がすべて解消した後の、記録の head のままの PR なら、記録の `to:` の担当で立て、立てる前に委託記録（`[review-request] head: <SHA> to: <担当>`）を `scripts/agent-gh dev` で残す（skill `implement-issue` の手順 9「投稿後の `設定の不備:` の記録」の最後の段落）。結果が出たら実装スレッドに「続きをやり直す」を送る |
 | `state: working`、または状態の行が無い | その巡回のうちに「続きをやり直す」を送る |
 
 指示待ちのスレッドは、次の 3 つを全部満たすものとする: ターンが終わっていて動いている作業が無い（実行中でなく、待っている先も終わっている）／紐づいた PR か Issue がまだ開いている／マージまで進んでいない。経過時間のしきい値は置かず、見つけたらその巡回のうちに次の指示を出す。
 
 - 指示は定型の 3 つ（「続きをやり直す」「レビューの再委託」「衝突の解消」）から選ぶ。実装スレッドの受け取り方は skill `implement-issue` の「巡回から定型の指示を受けたとき」
-- 現在の head に有効な Approve があり、そのレビューに `[文書のずれ]` の nit が残っておらず、必須チェックが緑で、現在の head と同じ SHA の QA の合格コメントがあり、Draft でない PR には、指揮役が `automerge` を付けて Kodiak のマージに渡す（条件の正本は skill `command-team` の「マージ」）
+- 現在の head に有効な Approve があり、その Approve の委託の結果が確定し（実装スレッドの終わりの報告がその head を指す、または指揮役のレビュースレッドの `verdict: approve` を受けている）、そのレビューに `[文書のずれ]` の nit が残っておらず、必須チェックが緑で、現在の head と同じ SHA の QA の合格コメントがあり、Draft でない PR には、指揮役が `automerge` を付けて Kodiak のマージに渡す（条件の正本は skill `command-team` の「マージ」）
 - `needs-human` の付いた Issue・PR と、複数のレビュー担当の判定が割れた PR には、指示も `automerge` も出さず、判断待ちに回す
 
 ### 巡回の報告の形
@@ -349,7 +349,7 @@ Assigned: role=implement agent=devin model=swe-2-high effort=high"
 |---|---|
 | `approve` | 指揮役自身の PR なら、Ready for review と必須チェックと QA 合格コメントが揃っていることを確かめて skill `command-team` の「マージ」に進む。外部投入なら「PR #<M> は Approve された。skill implement-issue の手順 9 の『Approve のとき』から進める（`[文書のずれ]` の nit が残っていれば先に直す）。」を実装スレッドに送る。複数のレビュー担当を付けた PR で判定が割れたらマージせず、request-changes 側の指摘を優先して修正に進ませる（skill `command-team` の「レビュー担当と effort」） |
 | `request-changes` | 外部投入なら「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を実装スレッドに送る（回数の上限は skill `implement-issue` のとおり、実装スレッドが数える） |
-| `failed` | `error: checks timeout` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。`error: wrong runtime` なら、権限を `auto-accept-edits`・worktree にして立て直す（回数に数えない）。`error:` が `設定の不備:` で始まるなら、投稿済みのレビューがあるときは先に対象 PR に `[review-invalid]` の記録を残してから（形は skill `implement-issue` の手順 9「投稿後の `設定の不備:` の記録」）、立て直さずに 7 のエスカレーションにする（同じ環境では同じ結果になるため）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 7 のエスカレーション |
+| `failed` | `error: checks timeout` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。`error: wrong runtime` なら、権限を `auto-accept-edits`・worktree にして立て直す（回数に数えない）。`error:` が `設定の不備:` で始まるなら、先に投稿の有無を確かめて対象 PR に `[review-invalid]` の記録を残し、PR に `needs-human` を付けてから（確かめ方と形は skill `implement-issue` の手順 9「投稿後の `設定の不備:` の記録」）、立て直さずに 7 のエスカレーションにする（同じ環境では同じ結果になるため）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 7 のエスカレーション |
 
 通常の PR のレビューの verdict（approve / request-changes / failed）は実装スレッドが処理する（skill `implement-issue` の手順 9）。指揮役は、実装スレッドの終わりの報告（`review:` と `ready:` の行）と GitHub の PR の状態（`pelway-review` の最新レビューとチェック）で進み具合を見る。
 
@@ -378,10 +378,10 @@ Assigned: role=implement agent=devin model=swe-2-high effort=high"
 | 行 | 確かめること |
 |---|---|
 | `pr:` | `scripts/agent-gh dev pr view <番号> --json author,isDraft,headRefName,headRefOid` で、作成者が `app/pelway-dev`、ブランチが `agent/<Issue 番号>-` で始まる。調査スレッドの報告の PR のときは、作成者が `app/pelway-dev` で Draft であり、ブランチが `agent/investigate-` で始まる。行内の対象 head が `headRefOid` と一致する。担当の報告には PR 番号と 40 桁の head sha を書く決まりなので（#66 の再発防止。担当は報告の前に GitHub の `headRefOid` と手元の `git rev-parse HEAD` が同じかを確かめている。skill `implement-issue` の手順 10）、sha が短縮されている・書かれていない報告は、確かめ直すまで値として扱わない |
-| `review:` | `scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` の最新が `APPROVED` で、その対象が報告の head である。主 PR に未解消の `[review-invalid]` の記録（`pelway-dev[bot]` 作のものだけ。定義は skill `implement-issue` の手順 9「投稿後の `設定の不備:` の記録」）が 1 件でもあれば、どのレビューも `APPROVED` に数えない（skill `command-team` の「有効な Approve」と同じ判定）。レビュー件数は報告のラウンド数と一致しないことがある（ラウンドの数え方は skill `command-team` の「レビューのラウンド」: 同じ head は 1 ラウンドに数え、コンフリクトの解消を含まない main の取り込みだけで head が変わったときは、同じラウンドのままレビューをやり直すため） |
+| `review:` | 報告の head に、skill `command-team` の「hatai のレビューの扱い」の有効な Approve がある（`scripts/agent-gh dev pr view <番号> --json reviews` と `[review-invalid]` の記録で、その定義をそのまま当てて判定する。未解消の記録がある間と、記録の解消の後に記録の head で再レビューがそろうまでの間は有効な Approve に当たらない）。レビュー件数は報告のラウンド数と一致しないことがある（ラウンドの数え方は skill `command-team` の「レビューのラウンド」: 同じ head は 1 ラウンドに数え、コンフリクトの解消を含まない main の取り込みだけで head が変わったときは、同じラウンドのままレビューをやり直すため） |
 | `ready:` | `scripts/agent-gh dev pr view <番号> --json isDraft` が `false` である |
 | `memo:` | PR の変更ファイルに `docs/worklogs/issue-<Issue 番号>.md` があり、報告の round の「実装者メモ」が 5 項目そろっていて対象 head の SHA が書かれている。止まった場合は Issue のコメントに実装者メモがある |
-| `verdict:` | 指揮役が立てたレビュースレッドの報告だけ。`failed` は GitHub のレビューとは突き合わせず、起動時の操作記録と T3 のスレッドの履歴で報告元と対象の PR を確かめてから、5 の「レビューの verdict ごとの対応」の表の `failed` の行で `error:` の理由ごとに扱う（投稿の後に失敗で返ったときは、`error:` が `設定の不備:` で始まるなら、対象 PR に `[review-invalid]` の記録を残したうえで（形は skill `implement-issue` の手順 9「投稿後の `設定の不備:` の記録」）、投稿済みのレビューを skill `command-team` の「有効な Approve」に数えず、5 の表の `failed` の行どおり 7 のエスカレーションにする。それ以外の理由のときの扱いは、ここでは決めていない）。`approve` と `request-changes` は、`scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` の最新のレビューの状態（`APPROVED` か `CHANGES_REQUESTED`）と一致する |
+| `verdict:` | 指揮役が立てたレビュースレッドの報告だけ。`failed` は GitHub のレビューとは突き合わせず、起動時の操作記録と T3 のスレッドの履歴で報告元と対象の PR を確かめてから、5 の「レビューの verdict ごとの対応」の表の `failed` の行で `error:` の理由ごとに扱う（`error:` が `設定の不備:` で始まるなら、投稿の有無を確かめて対象 PR に `[review-invalid]` の記録を残し、PR に `needs-human` を付けたうえで（確かめ方と形は skill `implement-issue` の手順 9「投稿後の `設定の不備:` の記録」）、投稿済みのレビューを skill `command-team` の「有効な Approve」に数えず、5 の表の `failed` の行どおり 7 のエスカレーションにする。それ以外の理由で投稿の後に失敗で返ったときの扱いは、ここでは決めていない）。`approve` と `request-changes` は、`scripts/agent-gh dev pr view <番号> --json reviews` で、`pelway-review` の最新のレビューの状態（`APPROVED` か `CHANGES_REQUESTED`）と一致する |
 
 一致しなければ、`report` の値では動かず 7 のエスカレーションにする。
 
