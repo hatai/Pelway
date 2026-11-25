@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # scripts/conductor-watch.sh の SLOTS 行と slots.json（Issue #714）のテスト。
-# 巡回ごとに、実装と調査に使っている枠の数を agent-team.toml の上限と比べ、
-# `SLOTS <担当> <使用数>/<上限>`（上限超過は `SLOTS over`、確かめられない巡回は `SLOTS error`）を
-# watch.log に出し、同じ判定を状態ディレクトリの slots.json に書く。指揮役の判断は
-# slots.json で行う（キューの要求のファイル名がそのまま watch.log の行になるため）。
-# 出すのは使用数または状態が前回の巡回から変わったときと、HEARTBEAT の行を出した巡回。
-# agent-team.toml が作業ツリーに無いときは出さない。見張りは GitHub に書き込まない。
+# 巡回ごとに枠の使用数を `SLOTS <担当> <使用数>/<上限>`（超過は over、未確定は error）で
+# watch.log に出し、同じ判定を slots.json に書く（判断の正本は slots.json: キューの
+# 要求のファイル名がそのまま行になるため watch.log の行は区別できない）。
+# agent-team.toml が無いときは出さない。見張りは GitHub に書き込まない。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -23,11 +21,11 @@ cp "$REPO/scripts/conductor-watch.sh" "$ROOT/repo/scripts/"
 cp "$REPO/scripts/agent-team-config" "$ROOT/repo/scripts/"
 git init -q "$ROOT/repo"
 STATE="$ROOT/repo/.git/pelway/patrol-state.json"
+ISTATE="$ROOT/repo/.git/pelway/patrol-items.json"
 SLOTS="$ROOT/state/pelway/conductor-watch/slots.json"
 
 # モックの agent-gh: 呼び出しをすべて記録し、issue list / pr list / label-events の読み取りだけに答える。
-# issues.json が無いときは失敗する（issue 一覧の取得失敗を再現する）。
-# 読み取り以外の呼び出しは exit 9 で失敗する（見張りが GitHub に書き込まないことの確認に使う）。
+# issues.json が無いときは失敗する（取得失敗の再現）。読み取り以外は exit 9（書き込まないことの確認）。
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$MOCK/gh-calls.log"
@@ -43,8 +41,7 @@ exit 9
 EOF
 chmod +x "$ROOT/repo/scripts/agent-gh"
 
-# 素の gh のモック: ボード更新キューの処理が呼ぶ。呼ばれたことを記録して失敗する
-# （テスト中の見張りが実運用のキューや実際の gh に触れないことの確認に使う）。
+# 素の gh のモック: 呼ばれたことを記録して失敗する（実運用のキュー・実際の gh に触れないことの確認）。
 cat > "$ROOT/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$MOCK/gh-direct-calls.log"
@@ -137,8 +134,7 @@ EOF
 
 jarr() { local out="" x; for x in "$@"; do out+="${out:+,}$x"; done; printf '[%s]' "$out"; }
 
-# t3 thread list の要素（thread_item <threadId> <題名> <status> [updatedAt]）。
-# 実装スレッドの題名の形は「[実装] #<番号> 」（skill command-team の「スレッド名」）。
+# t3 thread list の要素（thread_item <threadId> <題名> <status> [updatedAt]。題名の形は「[実装] #<番号> 」）。
 thread_item() { printf '{"threadId":"%s","title":"%s","status":"%s","updatedAt":"%s"}' "$1" "$2" "$3" "${4:-2026-01-01T00:00:00Z}"; }
 
 NOW="$ROOT/now"
@@ -183,9 +179,9 @@ for k in sys.argv[1].split("."): d=d[k]
 print(d)' "$1" "$STATE"; }
 ps_eq() { [[ "$(psval "$1")" == "$2" ]]; }
 
-# 作業状態の印を patrol-state.json の items に書く（mark <issue> <印>。巡回が書き戻しても items は残る）。
+# 作業状態の印を patrol-items.json の items に書く（mark <issue> <印>。巡回が書き換えない記録）。
 mark() {
-  python3 -I - "$STATE" "$1" "$2" <<'EOF'
+  python3 -I - "$ISTATE" "$1" "$2" <<'EOF'
 import json, sys
 p, n, st = sys.argv[1:4]
 try: d = json.load(open(p))
@@ -198,10 +194,9 @@ json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
 EOF
 }
 
-# implement_thread の組を patrol-state.json の items に書く（bind <issue> <thread_id> [pr]。
-# 現在の割り当てに結び付いたスレッドの形で、PR がまだ無い組は pr に "none"）。
+# implement_thread の組を patrol-items.json に書く（bind <issue> <thread_id> [pr]。PR が無い組は pr="none"）。
 bind() {
-  python3 -I - "$STATE" "$1" "$2" "${3:-none}" <<'EOF'
+  python3 -I - "$ISTATE" "$1" "$2" "${3:-none}" <<'EOF'
 import json, sys
 p, n, tid, pr = sys.argv[1:5]
 try: d = json.load(open(p))
@@ -215,9 +210,9 @@ json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
 EOF
 }
 
-# 巻き戻し中の印（rollback。起動結果の照合が残る割り当て）を書く。
+# 巻き戻し中の印（rollback。起動結果の照合が残る割り当て）を patrol-items.json に書く。
 set_rollback() {
-  python3 -I - "$STATE" "$1" <<'EOF'
+  python3 -I - "$ISTATE" "$1" <<'EOF'
 import json, sys
 p, n = sys.argv[1:3]
 try: d = json.load(open(p))
@@ -249,22 +244,22 @@ check "devin-labelled issue counted to devin" has "$ROOT/out.log" '^SLOTS devin 
 check "devin-labelled issue not counted to opencode" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
 check "closed issue not counted" nhas "$ROOT/out.log" '^SLOTS devin 2/6$'
 
-# --- 3. 印が停止中で、現在の割り当てに結び付いたスレッドが動いていないと確かめられたものだけが枠を空ける ---
-# （再開処理中・再開待ちの印が残るものは再開手順の途中・直後なので使用中として数える）
+# --- 3. 印が停止中・再開処理中・再開待ちで、現在の割り当てに結び付いたスレッドが動いていないと確かめられたものだけが枠を空ける ---
+# （起動を試みる前の待機の印は枠を消費しない。起動を試みた回は巻き戻し中の印が残るため使用中）
 mark 11 "停止中";   bind 11 t1
 mark 13 "再開待ち"; bind 13 t2
 mark 15 "再開処理中"; bind 15 t3
 mock_threads "$(jarr "$(thread_item t1 '[実装] #11 a' completed)" "$(thread_item t2 '[実装] #13 b' failed)" "$(thread_item t3 '[実装] #15 c' interrupted)")"
 mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)" "$(iss 13 OPEN agent:working agent:devin)" "$(iss 15 OPEN agent:working)" "$(iss 16 OPEN agent:working)")"
 run_cycles 1
-check "stopped issue excluded" has "$ROOT/out.log" '^SLOTS opencode 3/3$'
-check "resume marks counted as used" has "$ROOT/out.log" '^SLOTS devin 1/6$'
+check "stopped and pre-attempt-resume issues excluded" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
+check "pre-attempt resume marks free the slot" has "$ROOT/out.log" '^SLOTS devin 0/6$'
 
 # --- 3b. 印だけでは由来を確かめられない: 組の無いもの・動いているスレッドが残るものは使用中として数える ---
 mark 16 "停止中"   # implement_thread の組もスレッドも無い → 確かめられない → 使用中
 mark 17 "停止中"; bind 17 t4   # 組のスレッドが動いている → 使用中
 mark 18 "停止中"; bind 18 t5   # 組のスレッドは止まっているが一覧に動いているものが残る → 使用中
-mark 19 "再開待ち" # 再開の印が残るものは組の有無にかかわらず使用中
+mark 19 "再開待ち" # 組が無い再開の印は由来を確かめられない → 使用中
 mock_threads "$(jarr \
   "$(thread_item t1 '[実装] #11 a' completed)" \
   "$(thread_item t2 '[実装] #13 b' failed)" \
@@ -274,25 +269,29 @@ mock_threads "$(jarr \
   "$(thread_item t6 '[実装] #18 f' running)")"
 mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)" "$(iss 13 OPEN agent:working agent:devin)" "$(iss 15 OPEN agent:working)" "$(iss 16 OPEN agent:working)" "$(iss 17 OPEN agent:working)" "$(iss 18 OPEN agent:working)" "$(iss 19 OPEN agent:working)")"
 run_cycles 1
-check "unverified marks counted as used" has "$ROOT/out.log" '^SLOTS over opencode 6/3$'
-check "unverified devin mark counted" has "$ROOT/out.log" '^SLOTS devin 1/6$'
+check "unverified marks counted as used" has "$ROOT/out.log" '^SLOTS over opencode 5/3$'
+check "devin resume mark still free" has "$ROOT/out.log" '^SLOTS devin 0/6$'
 
-# --- 3c. 再開の照合が残る形: 止まった旧スレッドの組と「再開待ち」の印だけが見える → 使用中 ---
-# （起動の応答が失われて新しい ID をまだ記録できず、一覧に旧スレッドしか返らない巡回の形。
-#   停止中でも組のスレッドが一覧に無いもの（issue 22）も使用中）
+# --- 3c. 起動を試みる前の「再開待ち」は枠を空ける（巻き戻し中の印が無い待機は消費しない） ---
+# （組のスレッドが一覧に無いもの（issue 22）は確かめられないので使用中）
 mark 20 "再開待ち"; bind 20 t-old-20
 mark 22 "停止中";   bind 22 t-missing-22
 mock_threads "$(jarr "$(thread_item t-old-20 '[実装] #20 old' completed)")"
 mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 20 OPEN agent:working)" "$(iss 22 OPEN agent:working)")"
 run_cycles 1
-check "resume verification pending counted as used" has "$ROOT/out.log" '^SLOTS opencode 3/3$'
+check "pre-attempt resume mark frees the slot" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
 
-# --- 3d. 割り当ての照合が残るもの（rollback）は、組のスレッドが止まっていても使用中 ---
+# --- 3d. 起動を試みたあと（rollback が残るもの）は、組のスレッドが止まっていても使用中（再開待ちでも同じ） ---
 mark 21 "停止中"; bind 21 t-rb; set_rollback 21
-mock_threads "$(jarr "$(thread_item t-rb '[実装] #21 g' completed)")"
-mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 21 OPEN agent:working)")"
+mark 23 "再開待ち"; bind 23 t-rb2; set_rollback 23
+mock_threads "$(jarr "$(thread_item t-rb '[実装] #21 g' completed)" "$(thread_item t-rb2 '[実装] #23 h' completed)")"
+mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 21 OPEN agent:working)" "$(iss 23 OPEN agent:working)")"
 run_cycles 1
-check "unconfirmed assignment counted as used" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
+check "post-attempt assignments counted as used" has "$ROOT/out.log" '^SLOTS opencode 3/3$'
+
+# --- 3e. 巡回の書き戻しは patrol-items.json を一度も書き換えない ---
+items_hash_before="$(sha256sum "$ISTATE" | cut -d' ' -f1)"; run_cycles 1
+check "watch never rewrites patrol-items.json" bash -c "[[ \$(sha256sum '$ISTATE' | cut -d' ' -f1) == '$items_hash_before' ]]"
 
 # --- 4. 上限超過は SLOTS over ---
 mark 16 "稼働中"; mark 17 "稼働中"; mark 18 "稼働中"; mark 19 "稼働中"
@@ -359,8 +358,7 @@ check "no usage emitted on truncated list" nhas "$ROOT/out.log" '^SLOTS (over )?
 mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)" "$(iss 13 OPEN agent:working agent:devin)" "$(iss 15 OPEN agent:working)" "$(iss 16 OPEN agent:working)")"
 
 # --- 11. キューの要求のファイル名が watch.log に SLOTS の行を作れても、slots.json は実測のまま ---
-# （ファイル名に / は使えないため `SLOTS error` 系の行を偽装できる。使用数の行 <n>/<m> は
-# ファイル名だけでは作れない。判断が slots.json で行われるのはこの偽装経路のため）
+# （ファイル名に / は使えないため `SLOTS error` 系の行を偽装できる。判断が slots.json で行われるのはこの経路のため）
 touch "$ROOT/queue/"$'\n'"SLOTS error injected"$'\n'".json"
 run_cycles 1
 check "queue filename can forge a SLOTS error line" has "$ROOT/out.log" '^SLOTS error injected$'
@@ -399,11 +397,9 @@ check "record patrol_at matches state.json" \
 s=json.load(open(sys.argv[1])); w=json.load(open(sys.argv[2])); sys.exit(0 if s["patrol_at"]==w["patrol_at"] else 1)' "$SLOTS" "$(dirname "$SLOTS")/state.json"
 
 # --- 13b. 読めるまま残った古い記録は patrol_at で見抜ける ---
-# 公開に失敗した回に前回の記録が読めるまま残った形を作る（再開直後の巡回で公開が
-# 失敗した残留物）。posix では親ディレクトリが書き込める限り通常ファイルの os.unlink は
-# 失敗しないため、書き手側の失敗経路でこの形は作れず、残留物と同じ内容の記録を書いて
-# 読み手側の判定を確かめる。updated_at は 60 秒以内・status は ok のままなので、
-# 読み手が見抜けるのは patrol_at の不一致だけになる。
+# 公開に失敗した回に前回の記録が読めるまま残った形を作る（再開直後の巡回の残留物）。
+# posix では親ディレクトリが書き込める限り通常ファイルの os.unlink は失敗しないため、
+# 書き手側の失敗経路でこの形は作れず、同じ内容の記録を書いて読み手側の判定を確かめる。
 python3 -I - "$SLOTS" <<'EOF'
 import json, sys
 s = json.load(open(sys.argv[1]))
@@ -442,8 +438,7 @@ check "updated_at is T3-list fetch start" slot_eq updated_at 1700004000.0
 check "patrol work runs on the post-T3 clock" slot_eq patrol_at 1700004090.0
 
 # --- 13e. 一覧の取得開始時刻が記録できなかった巡回は使用数を公開しない ---
-# （threads-at の置き場をディレクトリにして書き込みだけを失敗させ、T3 の一覧の
-#   取得には時間がかかった形を重ねる。時刻が読めなければ取得開始を確かめられない）
+# （threads-at の置き場をディレクトリにして書き込みだけを失敗させ、遅い T3 の取得を重ねる）
 rm -f "$(dirname "$SLOTS")/threads-at"
 mkdir "$(dirname "$SLOTS")/threads-at"
 touch "$MOCK/advance-threads"
@@ -455,6 +450,18 @@ check "unrecorded fetch time emits SLOTS error" has "$ROOT/out.log" '^SLOTS erro
 check "slots.json status error on unrecorded fetch time" slot_eq status error
 run_cycles 1
 check "slots.json back to ok when fetch time recorded" slot_eq status ok
+
+# --- 13f. 残った時刻ファイルが読めても、今回の巡回で書けていなければ使わない（古い値で鮮度を誤魔化さない） ---
+TSA="$(dirname "$SLOTS")/threads-at"
+if (( EUID == 0 )); then rm -f "$TSA"; ln -s /dev/full "$TSA"; else rm -f "$TSA"; echo 0 > "$TSA"; chmod 0444 "$TSA"; fi
+touch "$MOCK/advance-threads"
+set_now 1700006000
+run_cycles 1
+rm -f "$MOCK/advance-threads" "$TSA"
+check "stale readable fetch time still errors" has "$ROOT/out.log" '^SLOTS error fetch-time-missing$'
+check "slots.json status error with stale fetch time" slot_eq status error
+run_cycles 1
+check "slots.json recovers after stale file removed" slot_eq status ok
 
 # --- 14. 見張りは GitHub に書き込まない（agent-gh は読み取りだけ、素の gh も呼ばない） ---
 if grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/events)" "$MOCK/gh-calls.log" | grep -q .; then

@@ -47,7 +47,7 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 - 判断はすべて Issue か PR にコメントで残す。セッションの文脈だけに置かない。
 - 指揮役が Issue を立てる・分割する・差し戻された本文を直すときは、skill `write-issue` に従う。`ready-for-agent` を付ける前（人間に委任されたとき）は、`write-issue` の手順 6 のゲートを通す。
 - sandbox に止められた操作を、sandbox の外へ出る抜け道（`systemd-run`・`nohup`・別のシェル・ラッパースクリプトなど）で実行しない。止められたら止まって報告する。作業ログに残る同種の前例（`systemd-run` 経由の patrol-state 更新・ボードキュー手動適用など）は許可にならない（Issue #477）。
-- 見張りの状態は `scripts/conductor-watch.sh` が `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。巡回状態の補助記録 `patrol-state.json` だけは、sandbox 内の指揮役からも読み書きできるよう、リポジトリの共有 git dir（`git rev-parse --git-common-dir`）内の `pelway/` に置く（git の管理対象外。Issue #477）。
+- 見張りの状態は `scripts/conductor-watch.sh` が `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。巡回状態の補助記録 `patrol-state.json` と、指揮役が持つ項目の記録 `patrol-items.json`（`items`。作業状態の印・`implement_thread` の組・`rollback` の割り当て ID）は、sandbox 内の指揮役からも読み書きできるよう、リポジトリの共有 git dir（`git rev-parse --git-common-dir`）内の `pelway/` に置く（git の管理対象外。Issue #477）。`patrol-items.json` は巡回スクリプトが一度も書き換えない―再開判定の根拠を巡回の書き戻しで巻き戻さないため。
 
 ## スレッド名
 

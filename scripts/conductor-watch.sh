@@ -110,14 +110,16 @@ while true; do
   # threads.json は python 側で取得の成功を確かめてから差し替える（失敗で前回の一覧を消さない）。
   # T3 の失敗はスレッドに基づく判定をせず（格上げは判定しない）、Issue・PR の失敗は patrol-state.json を書き換えない（Issue なら DECISION の検知もしない）
   # T3 一覧の取得開始時刻も記録する（SLOTS の記録の時刻は、使用数の根拠のうち最も古い
-  # 取得開始時刻にする。一覧の取得が遅れた回に、古い停止の状態に新しい時刻が付かないようにする）。
-  if [[ -n "${PELWAY_WATCH_NOW:-}" && -r "$PELWAY_WATCH_NOW" ]]; then cat "$PELWAY_WATCH_NOW"; else date +%s; fi > "$D/threads-at"
+  # 取得開始時刻にする）。記録に失敗した回は、前回の値が読めるまま残っていても渡さない。
+  tat="$(if [[ -n "${PELWAY_WATCH_NOW:-}" && -r "$PELWAY_WATCH_NOW" ]]; then cat "$PELWAY_WATCH_NOW"; else date +%s; fi)"
+  if printf '%s' "$tat" > "$D/threads-at"; then PELWAY_WATCH_THREADS_AT="$tat"; else PELWAY_WATCH_THREADS_AT=""; fi
   "$T3_BIN" thread list --json > "$D/threads.json.new" 2> "$D/threads.err"; trc=$?
   # GitHub からの取得に失敗したらファイルを消す（空の実状態と区別する。python 側で取得失敗と扱い、
   # 巡回状態の記録を書き換えさせない）。
-  # SLOTS の記録の時刻の一部に使う Issue 一覧の取得開始時刻（PR 一覧・ラベルイベントの取得が
-  # 遅れても、古い使用数に新しい時刻が付かないようにする。テストは PELWAY_WATCH_NOW の値を使う）。
-  if [[ -n "${PELWAY_WATCH_NOW:-}" && -r "$PELWAY_WATCH_NOW" ]]; then cat "$PELWAY_WATCH_NOW"; else date +%s; fi > "$D/issues-at"
+  # SLOTS の記録の時刻の一部に使う Issue 一覧の取得開始時刻（同上）。
+  iat="$(if [[ -n "${PELWAY_WATCH_NOW:-}" && -r "$PELWAY_WATCH_NOW" ]]; then cat "$PELWAY_WATCH_NOW"; else date +%s; fi)"
+  if printf '%s' "$iat" > "$D/issues-at"; then PELWAY_WATCH_ISSUES_AT="$iat"; else PELWAY_WATCH_ISSUES_AT=""; fi
+  export PELWAY_WATCH_THREADS_AT PELWAY_WATCH_ISSUES_AT
   scripts/agent-gh dev issue list --state all --limit "$IL" --json number,state,labels > "$D/issues.json" 2>/dev/null || rm -f "$D/issues.json"
   scripts/agent-gh dev pr list --state all --limit "$PL" --json number,state,isDraft,headRefName,reviewDecision,statusCheckRollup > "$D/prs.json" 2>/dev/null || rm -f "$D/prs.json"
   # ラベルイベント（issues/events は PR のラベルイベントも含む）。付け外しの裏付け検査
@@ -193,14 +195,13 @@ except Exception: prs = []; prs_ok = False
 # 巡回の時刻。PELWAY_WATCH_NOW が指すファイルに epoch 秒が書かれていればそれを使う（テスト用）。
 try: now = float(open(os.environ["PELWAY_WATCH_NOW"]).read().strip())
 except Exception: now = time.time()
-# Issue 一覧の取得開始時刻（巡回の冒頭で巡回ループが書く。SLOTS の記録の updated_at に使う。
-# 後続の取得が遅れた回に、古い使用数へ巡回処理の時刻を付けないため）。読めない回は
-# 時刻を補わない（古い停止状態に新しい時刻が付かないよう、使用数を公開しない）。
-try: issues_at = float(open(os.path.join(d, "issues-at")).read().strip())
+# Issue 一覧の取得開始時刻（巡回ループが、今巡回の記録に書けたときだけ環境変数で渡す。
+# SLOTS の updated_at に使う）。渡らない回は補わない: 残った古いファイルの値を拾って
+# 遅れた取得に新しい時刻を付けないため、status: ok を公開しない。
+try: issues_at = float(os.environ["PELWAY_WATCH_ISSUES_AT"])
 except Exception: issues_at = None
-# T3 のスレッド一覧の取得開始時刻（同じく巡回ループが書く。停止の判定の根拠にもなるため、
-# 記録の updated_at はこちらと Issue 一覧の、より古い方の時刻にする）。
-try: threads_at = float(open(os.path.join(d, "threads-at")).read().strip())
+# T3 のスレッド一覧の取得開始時刻（同じく記録できた回だけ渡る。updated_at は両者の古い方）。
+try: threads_at = float(os.environ["PELWAY_WATCH_THREADS_AT"])
 except Exception: threads_at = None
 # 巡回の印。state.json と slots.json の両方に書き、一致すれば記録が最新の巡回のものと
 # 読み手が分かる（公開に失敗した回は state.json の印だけが進む）。
@@ -252,8 +253,10 @@ ps_name = os.path.basename(sys.argv[2])
 try: ps_dfd = open_ps_dir(sys.argv[2])
 except OSError: ps_dfd = None
 def read_ps():  # read_request と同じく通常ファイル・待ち・量に限る
+    return read_named(ps_name)
+def read_named(name):  # 同じディレクトリにあるほかの記録（patrol-items.json）も同じ形で読む
     if ps_dfd is None: raise OSError("patrol-state dir not usable")
-    fd = os.open(ps_name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=ps_dfd)
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=ps_dfd)
     with os.fdopen(fd, "rb") as f:
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode) or st.st_size > PS_MAX:
@@ -647,6 +650,18 @@ try: ps = json.loads(read_ps())
 except Exception: ps = {}
 if not isinstance(ps, dict): ps = {}
 if not isinstance(ps.get("subjects"), dict): ps["subjects"] = {}
+# 指揮役が持つ項目（items）は patrol-items.json に置く（runbook「10. 巡回状態の補助記録」）。
+# patrol-state.json は読み直しと置き換えの間に指揮役の更新を巻き戻す隙間が残るが、items は
+# 再開判定（枠を空けるかどうか）の根拠なので、巡回が一度も書き換えない patrol-items.json
+# にだけ置き、巻き戻らないようにする。無い・読めない回は旧置き場（ps の items）を読む。
+try: items_rec = json.loads(read_named("patrol-items.json"))
+except Exception: items_rec = None
+if isinstance(items_rec, dict) and isinstance(items_rec.get("items"), dict):
+    items = items_rec["items"]
+elif isinstance(ps.get("items"), dict):
+    items = ps["items"]
+else:
+    items = {}
 # SLOTS 行（Issue #714）。実装・調査に使っている枠の数を agent-team.toml の上限と
 # 突き合わせて出す。指揮役は割り当ての前に使用数を読む（runbook「3. 同時数と順番待ち」。
 # 判断に使うのは watch.log の行でなく、見張り自身が巡回ごとに書き直す slots.json）。
@@ -656,15 +671,13 @@ if not isinstance(ps.get("subjects"), dict): ps["subjects"] = {}
 # 出すのは、使用数または状態が前回の巡回から変わったときと、HEARTBEAT の行を出した巡回。
 # Issue を持たない調査（入口B）は数えない（指揮役が巡回記録から加算する）。数えるのは
 # open で agent:working の付いた Issue で、agent:devin が付いたものは devin に、ほかは
-# opencode に入れる。作業状態の印が停止中のものは、印の裏付けを
-# 取ってから使っていない枠として除く: 補助記録は実装エージェントも書き込め、pelway-dev[bot] は
-# 実装担当と指揮役の共通名義のため、GitHub の記録では実際の停止を確かめられない。代わりに
-# 現在の割り当てに結び付いたスレッド（補助記録の implement_thread の組の thread_id）の、
-# 実装エージェントには書き換えられない T3 の一覧での状態で確かめ、組のスレッドがすべて
-# 一覧にあってどれも動いていない（完了・失敗・中断・取消、アーカイブを含む）、かつ一覧の
-# [実装] #<番号> のスレッドもどれも動いていないものだけを除く。組が無いもの・組のスレッドが
-# 一覧に無いもの（起動した引き継ぎ先が一覧から一時的に欠ける回を含む）・割り当ての照合が
-# 残るもの・動いているスレッドが残るものは使用中として数える。
+# opencode に入れる。停止を確認できる印（停止中・再開処理中・再開待ち）の付いたものは
+# 裏付けを取ってから使っていない枠として除く: 補助記録は実装エージェントも書き込め、
+# pelway-dev[bot] は共通名義のため、GitHub の記録では実際の停止を確かめられない。代わりに
+# 現在の割り当てに結び付いたスレッド（implement_thread の組）と一覧の [実装] #<番号> の
+# スレッドが、実装エージェントには書き換えられない T3 の一覧でどれも動いていないものだけ
+# を除く（確かめられないものは使用中）。stop_verified の決まりは runbook「3. 同時数と
+# 順番待ち」の「実際の停止を確認できるもの」と同じ。
 slots_st = "unavailable"; slots_reason = "agent-team.toml not in worktree"
 slots_usage = None; slots_lines = None; slots_sig = "unavailable"
 if os.path.isfile("agent-team.toml"):
@@ -673,8 +686,7 @@ if os.path.isfile("agent-team.toml"):
     elif len(issues) >= issue_limit:
         slots_st, slots_reason = "error", "issue-list-limit"
     elif issues_at is None or threads_at is None:
-        # 一覧の取得開始時刻が記録できなかった回は、時刻の新しさで鮮度を誤魔化さないよう
-        # 割り当てに使える使用数を公開しない。
+        # 取得開始時刻が記録できなかった回は、時刻の新しさで鮮度を誤魔化さないよう公開しない。
         slots_st, slots_reason = "error", "fetch-time-missing"
     else:
         try:
@@ -689,17 +701,15 @@ if os.path.isfile("agent-team.toml"):
                     p = ln.split()
                     if len(p) == 2 and p[1].isdigit(): limits[p[0]] = int(p[1])
                 marks = set()
-                items = ps.get("items")
-                if isinstance(items, dict):
-                    for n, it in items.items():
-                        ws = it.get("work_state") if isinstance(it, dict) else None
-                        # 枠を空ける印は停止中だけに限る: 再開処理中・再開待ちは再開手順の
-                        # 途中・直後の状態で、起動を試みた回と試みる前の回は記録上区別できず、
-                        # 起動の応答が失われた回は旧スレッドの組と印だけが残る（runbook
-                        # 「割り当て・停止・再開」: 起動を試みた後は照合が終わるまで枠に計上）。
-                        # 使用中として数える。
-                        if isinstance(ws, dict) and ws.get("state") == "停止中":
-                            marks.add(str(n))
+                for n, it in items.items():
+                    ws = it.get("work_state") if isinstance(it, dict) else None
+                    # 枠を空ける印は停止中・再開処理中・再開待ち: 停止中は枠を消費せず、
+                    # 再開処理中・再開待ちは起動を試みる前の待機で枠を消費しない（消費して
+                    # いると待機中のものが上限を超えて並んだときどれも起動に進めない）。
+                    # 起動を試みた回は巻き戻し中の印（rollback の割り当て ID）が残り、
+                    # 照合が終わるまで使用中として数える（印の有無で起動前の待機と分ける）。
+                    if isinstance(ws, dict) and ws.get("state") in ("停止中", "再開処理中", "再開待ち"):
+                        marks.add(str(n))
                 impl = {}
                 for t in threads:
                     if not isinstance(t, dict): continue
@@ -709,9 +719,8 @@ if os.path.isfile("agent-team.toml"):
                 def is_stopped(t): return t.get("status") in stopped or t.get("archived")
                 by_id = {t.get("threadId"): t for t in threads if isinstance(t, dict)}
                 def bound_ids(it):
-                    # implement_thread の組（PR の番号・thread_id・push 先のブランチ。組の形は
-                    # dict でも 3 要素の列でも読む）から結び付いたスレッドの ID を全部挙げる。
-                    # 読めない組が 1 つでもあれば結び付きを確かめられないとして None。
+                    # implement_thread の組（dict でも 3 要素の列でも読む）から結び付いた
+                    # スレッドの ID を全部挙げる。読めない組があれば None。
                     ids = []
                     for pair in it.get("implement_thread") or []:
                         if isinstance(pair, dict): tid = pair.get("thread_id")
@@ -721,14 +730,11 @@ if os.path.isfile("agent-team.toml"):
                         ids.append(tid)
                     return ids or None
                 def stop_verified(n):
-                    # 枠を空ける印の裏付け。現在の割り当てに結び付いたスレッド（補助記録の
-                    # implement_thread の組の thread_id）が T3 の一覧にあってどれも動いていない
-                    # （完了・失敗・中断・取消、アーカイブを含む）ことと、一覧にある
-                    # [実装] #<番号> のスレッドがどれも動いていないことの両方を確かめる。
-                    # 組の無いもの・組のスレッドが一覧に無いもの（起動した引き継ぎ先が一時的に
-                    # 一覧から欠ける回を含む）・割り当ての照合が残るもの（rollback の割り当て
-                    # ID）・一覧に動いているものが残るものは確かめられず使用中として数える。
-                    it = items.get(n) if isinstance(items, dict) else None
+                    # 枠を空ける印の裏付け。組の thread_id が一覧にあってどれも動いていない
+                    # ことと、一覧の [実装] #<番号> のスレッドもどれも動いていないことの両方を
+                    # 確かめる。組が無い・組のスレッドが一覧に無い（引き継ぎ先が一時的に欠ける
+                    # 回を含む）・rollback の照合が残る・動いているものが残るものは使用中。
+                    it = items.get(n)
                     if not isinstance(it, dict) or it.get("rollback") is not None: return False
                     ids = bound_ids(it)
                     if ids is None: return False
