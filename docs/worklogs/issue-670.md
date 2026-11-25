@@ -74,3 +74,18 @@ PR: #679
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「初回のビルドをバックグラウンドで走らせている間は別のコマンドを起動しない（mbx の `target` symlink が sandbox で実ディレクトリに戻り、ビルドが壊れる）」を足す。`.agents/skills/command-team/SKILL.md` の「レビュー担当と effort」に `agent-team.toml` の `effort.raise` と「既定」の値を書く。`.agents/skills/implement-issue/SKILL.md` の手順 9「Approve のとき」に QA の依頼方法を書く
 
 使ったスキル: .agents/skills/implement-issue、fix-merge-conflicts（round 6 の競合解消）
+
+## 実装者メモ（round 9）
+
+対象 head: f38d4588accfff26050361ca2e068532718933cd
+PR: #679
+
+レビュー指摘（run 7164161403 codex approve、run 7164162291 claude approve、head 7093bae4）への対応。印の nit だけを直す round（通算 1 回目）。あわせて main（#697・#718 など、4e94b11c）を取り込んだ。
+
+1. 詰まった箇所: .agents/skills/implement-issue/SKILL.md「輸入スキル」の取り込みの discipline: round 6〜7 で `.agents/skills/` に無いユーザーレベルの `fix-merge-conflicts` を読んでいた（`docs/agents/external-skills.md` では不採用。ユーザーレベル版の直接参照は規律上不可）。成果物への影響は無く（round 6 の解消は round 7 のレビューで両側残しを確認済み）、この round からは使っていない
+2. 曖昧だった文: 「`needs-human` の付いたもの、止まっているもの、迷走中のものは、上に当たっても settle せず、巡回の報告の「判断待ち」に回す」（docs/agents/grokbot-runbook.md「9. 片付け」。main の 8f3e3c80 の版）
+3. 仮定と解釈: この「止まっているもの」をまず `stopped:` を報告したものと解釈し、手順 3 と「9. 片付け」の除外の行の両方に絞る注を書いて push した（d21d0f2f）。main を取り込むと同じ行が衝突し、main（#697）が「止まっているもの（上の 5 に当たるものを除く）」と、引き継ぎの前に止めた interrupted を含む広い意味で使っていたため、注を外して main 側を採った（merge コミット 1fc9d50d）。手順 3 から除外の項目の列挙を外し、「9. 片付け」への参照と、手順 1 の「完了済み」は除外の「止まっているもの」を意味しない旨の 1 文だけにした
+4. 足りなかった情報・検証手段: PR が既存の行を変えると、main が同じ行を変えたときに衝突する（PR を足す行だけなら round 7 まで衝突しなかった）。QA の依頼方法（誰が `pelway-qa` 名義で行うか、委託の task の形）は引き続き skill に無い。`~/.config/pelway-agent-qa/fnox.toml` が実装担当の sandbox から読めることは `fnox list`（名前のみ）で確認した
+5. 改善案: `docs/agents/grokbot-runbook.md` の「9. 片付け」の除外の語「止まっているもの」を、「5. イベントごとの対応」の「送り先の照合」の 2 の「止まったもの」と同じ意味と分かる語にそろえる。`.agents/skills/implement-issue/SKILL.md` の手順 9「Approve のとき」に QA の依頼方法を書く（round 7 の改善案と同じ）
+
+使ったスキル: .agents/skills/implement-issue
