@@ -180,6 +180,23 @@ check fail_closed_r7_runbook docs/agents/grokbot-runbook.md \
   'run 7140000001: approve' \
   '上の 6 の In review の判定では、その PR の最新の委託記録コメントだけを証跡とする'
 
+# GitHub を変更できるツールは名前・提供元を問わず設定の不備として止まる。失敗した実行の帰属の確認では
+# DISMISSED の投稿も同じ条件で照合し、submitted_at を出力に含める。巡回は PR 全体の承認と担当ごとの
+# 起動・報告の状態を別々に確かめ、起動中の実行も確定した結果も無い担当のレビューを立てる（Issue #581 r8）。
+# いずれも文言の存在確認で、意味はレビューで引用を読んで判定する。
+check fail_closed_r8_review_pr .agents/skills/review-pr/SKILL.md \
+  '名前・提供元を問わず' \
+  '許可されたレビュー投稿経路以外に GitHub を変更できる' \
+  '判断できないツールは変更できるものとして扱う'
+check fail_closed_r8_implement .agents/skills/implement-issue/SKILL.md \
+  '{id, state, commit_id, submitted_at, run: ($last' \
+  'この帰属の確認に限り、`<X>` の実行の投稿は状態が `DISMISSED` の投稿も同じ条件で照合して数える' \
+  '承認の採用（手順 9・10 と skill `command-team`）では `DISMISSED` を数えない' \
+  '起動中の実行も確定した結果も無い担当がある'
+check fail_closed_r8_runbook docs/agents/grokbot-runbook.md \
+  'PR 全体の有効なレビュー（有効な Approve）の有無と、担当ごとの起動・報告の状態を、別々に確かめる' \
+  '起動中の実行も確定した結果も無い担当があるときは（同じ head に別の担当の有効な Approve があっても）'
+
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
   exit 1

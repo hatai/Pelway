@@ -312,12 +312,12 @@ scripts/agent-gh dev api --paginate repos/hatai/Pelway/pulls/<PR 番号>/reviews
 
 1. 投稿の有無を確かめる。1 行目のコマンドで失敗した実行の委託記録（`<ID>`）の作成者・対象 PR・時刻・1 行目を読み、2 行目のコマンドで、`<T0>` 以後に `pelway-review[bot]` 名義で投稿された `APPROVED`・`CHANGES_REQUESTED`・`DISMISSED` のレビュー（`COMMENTED` は Approve にも Request changes にも数えず、dismiss もできないため除く。報告の前に push で取り消された投稿も、失敗した実行の投稿として記録に残すため `DISMISSED` を含める）の id・対象のコミット・末尾行の `run=` の値を読み、次の 3 つに分ける。担当と時刻だけでは分けない（同じ担当の別の実行が、失敗の報告を処理する前に投稿していることがあるため）:
    - 失敗した実行の投稿: 末尾行が ` run=<ID>` で終わる
-   - 別の実行の投稿と確かめたもの: 末尾行が `Reviewer: agent=<codex|claude|devin> ` で始まって ` run=<X>`（`<X>` は `<ID>` と違う）で終わり、`<X>` を 1 行目のコマンドで読むと委託記録として数えられ（手順 8 の「実行の投稿」の最後の文）、その 1 行目が ` to: <末尾行の agent= の担当>` で終わり、`created_at` がその投稿の `submitted_at` 以前で、`<X>` の実行の投稿（手順 8）がその 1 件だけのもの。対象から外す
+   - 別の実行の投稿と確かめたもの: 末尾行が `Reviewer: agent=<codex|claude|devin> ` で始まって ` run=<X>`（`<X>` は `<ID>` と違う）で終わり、`<X>` を 1 行目のコマンドで読むと委託記録として数えられ（手順 8 の「実行の投稿」の最後の文）、その 1 行目が ` to: <末尾行の agent= の担当>` で終わり、`created_at` がその投稿の `submitted_at`（2 行目の出力）以前で、`<X>` の実行の投稿（手順 8）がその 1 件だけのもの。この帰属の確認に限り、`<X>` の実行の投稿は状態が `DISMISSED` の投稿も同じ条件で照合して数える（取得の時点で取り消されていた投稿も、別の実行の投稿と確かめられるように。承認の採用（手順 9・10 と skill `command-team`）では `DISMISSED` を数えない）。`<X>` の委託記録の `created_at` が `<T0>` より前なら、2 行目のコマンドの `<T0>` をその `created_at` に替えて読み直してから数える。対象から外す
    - 対応を判別できないもの: 上の 2 つのどちらでもない（末尾行に `run=` が無い・担当を見分けられない・`<X>` を確かめられないなど）
 
    ```bash
    scripts/agent-gh dev api repos/hatai/Pelway/issues/comments/<ID> --jq '{user: .user.login, issue_url, created_at, first: (.body | split("\n")[0])}'
-   scripts/agent-gh dev api --paginate repos/hatai/Pelway/pulls/<M>/reviews --jq '.[] | select(.user.login == "pelway-review[bot]" and (.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") and .submitted_at >= "<T0>") | ([.body | splits("\r?\n") | select(test("\\S"))] | last // "") as $last | {id, state, commit_id, run: ($last | capture(" run=(?<id>[0-9]+)$").id // null), last: $last}'
+   scripts/agent-gh dev api --paginate repos/hatai/Pelway/pulls/<M>/reviews --jq '.[] | select(.user.login == "pelway-review[bot]" and (.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") and .submitted_at >= "<T0>") | ([.body | splits("\r?\n") | select(test("\\S"))] | last // "") as $last | {id, state, commit_id, submitted_at, run: ($last | capture(" run=(?<id>[0-9]+)$").id // null), last: $last}'
    ```
 
 2. 結果ごとに記録を残す。記録を残したら、続けて PR に `needs-human` を付ける（下のブロックの 2 行目）。Kodiak は PR に `needs-human` があるあいだ `automerge` があってもマージしない（`.kodiak.toml` の `blacklist_labels`。Issue のラベルは見ない）。付いている `automerge` を外すのは指揮役（runbook「マージキュー待ちの PR」）
@@ -472,7 +472,7 @@ state: done
    | 必須チェックが動いている | `watch_pull_request` を仕掛けて `waiting-checks` で終える |
    | 必須チェックが失敗している（required-checks の判定で例外判断が着いた pr-size の失敗を除く） | 手順 6 で直す（pr-size の失敗で例外判断が未着なら、手順 6 の上限超過の扱いで止まる） |
    | `mergeable` が `CONFLICTING` | 手順 9 の「修正依頼」 |
-   | 必須チェックが通り（required-checks の判定で例外判断が着いた pr-size の失敗を含む）、現在の head に有効なレビューが無い | 手順 8（委託中の子が終わっていれば、その結果を手順 9 で扱う）。相談のための push の後でこの round のメモのコミットがまだ無ければ、手順 6 の相談のための push の項のとおりメモを push してから |
+   | 必須チェックが通り（required-checks の判定で例外判断が着いた pr-size の失敗を含む）、現在の head に有効なレビューが無い、または現在の head の必要な担当（手順 8 の「必要な実行」）に、起動中の実行も確定した結果も無い担当がある | 手順 8（委託中の子が終わっていれば、その結果を手順 9 で扱う。起動中の実行も確定した結果も無い担当には、同じ head に別の担当の有効な Approve があっても委託する）。相談のための push の後でこの round のメモのコミットがまだ無ければ、手順 6 の相談のための push の項のとおりメモを push してから |
    | 最新のレビューが Request changes | 手順 9 の「Request changes のとき」 |
    | 現在の head に有効な Approve（手順 9 の定義。現在の head の投稿のすべてが、報告を受けた実行の投稿であること。報告を確かめられなければ有効としない）があり、まだ Draft | 手順 9 の「Approve のとき」 |
    | 現在の head に有効な Approve（上の行と同じ定義）があり、Draft でない | 手順 10 の終わりの報告を出し直す（`review:` の行の `run` には、照合に使った実行の ID を書く） |
