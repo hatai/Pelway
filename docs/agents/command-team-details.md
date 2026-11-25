@@ -134,7 +134,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 
 hatai の指摘の伝達:
 
-- hatai が紐づく PR（open のもの。主 PR 以外も含む）にレビュー・コメントを投稿したら、紐づく Issue の Status を Changes requested にし、実装スレッドに `t3 thread send` で伝える（`needs-human` 付きの Issue には手当スレッドを起動せず、伝達と対応済みの記録だけを行い、Status は Needs human のまま）
+- hatai が紐づく PR（open のもの。主 PR 以外も含む）にレビュー・コメントを投稿したら、紐づく Issue の Status を Changes requested にし、実装スレッドに `t3 thread send` で伝える（送る直前に `docs/agents/grokbot-runbook.md` の「5. イベントごとの対応」の `pelway.agent-watch/v1` の「送り先の照合」を行い、確定できなければ送らずに保留し、対応済みにしない。`needs-human` 付きの Issue には手当スレッドを起動せず、伝達と対応済みの記録だけを行い、Status は Needs human のまま）
 - 実装スレッドが対応（修正の push、または対応不要の返答）したら、指揮役が確認して指摘の ID を補助記録の対応済みに残す。対応済みになった時点で Status を導出値に戻す
 
 ## Dependabot の PR の扱い

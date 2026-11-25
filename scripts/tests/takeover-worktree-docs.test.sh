@@ -111,11 +111,45 @@ check send_target_check "$RB" \
   '4. 2 と 3 を通った候補がちょうど 1 本のときだけ送り' \
   '0 本か 2 本以上、または最初の指示が読めず割り当てを確かめられないときは、送らずに保留し' \
   '`working`・`stopped` か状態の行が無ければ止まったものとして外す' \
-  '同じ Issue の別の組のスレッドが走っている（interrupted・cancelled・completed・failed のどれでもない）ときは' \
+  '`implement_thread` の組の有無を問わず、同じ Issue のスレッドを調べる' \
+  'またはその Issue に起動結果が不明なまま照合の済んでいない割り当て ID（「割り当て・停止・再開」の割り当て手順の 4）が残っているときは、どの候補にも送らない' \
+  '組はあるが組のスレッドが `t3 thread list` に無いときは、名前の一致で候補を探さずに保留し' \
+  '組が無かった・`none` だったときはその PR の番号で組を書く（組の push 先は、照合済みの PR の `headRefName`）' \
   '保留した指示は対応済みにしない' \
   '伝達は「5. イベントごとの対応」の `pelway.agent-watch/v1` の「送り先の照合」を通ったときだけ行い、保留したものは対応済みにしない' \
   'でそのスレッドが対象 PR の現在の担当であることを確かめ、確定できなければ伝達も起動もせずに保留して' \
   '実装スレッドへ伝達する（送る直前に「5. イベントごとの対応」の `pelway.agent-watch/v1` の「送り先の照合」を行い'
+
+# 送り先の照合では、候補を探す前に対象 PR の head が本体リポジトリであることを確かめ、
+# 外れたら保留する決まりがある。
+check send_target_head_repo "$RB" \
+  '候補を探す前に、対象 PR の head を確かめる:' \
+  '`isCrossRepository` が `false` と明示されていること' \
+  '外れたら、候補を探さず、送らず、組も書かずに保留し'
+
+# 調査の報告 PR は、割り当て表と GitHub で照合した `pr:` の報告から調査スレッドを確かめて
+# 送り、停止・引き継ぎ済みを外す決まりがある。
+check investigation_send_target "$RB" \
+  '調査の報告 PR の送り先: 上の head の確認を通った `agent/investigate-` の PR について' \
+  '巡回記録の「割り当ての記録」に、対象 PR' \
+  'の役割 investigate の行があることを確かめ' \
+  '作成者（`app/pelway-dev`）とブランチ（`agent/investigate-` で始まり、候補の `branch` と同じ）を通ること' \
+  '前に立ったスレッドは引き継ぎ済みとして外す' \
+  '（送り先は上の「調査の報告 PR の送り先」で確かめる）'
+
+# implement_thread の組の更新条件に、送り先の照合で組を新規に書く場合がある。
+check implement_thread_new_pair "$RB" \
+  '送り先の照合の 4 で組が無かった PR の組を書くとき（push 先は照合済みの PR の `headRefName`）に書き換える'
+
+# 別名の作業ツリーで引き継いだときの占有の比較と取得・解放コメントは push 先のブランチで行う。
+check claim_branch_push_target "$II" \
+  'ローカルのブランチ名ではなく最初の指示に書かれた push 先の `<PRブランチ>` を使う'
+
+# 巡回の定型の指示と、command-team-details の hatai の指摘の伝達も、送る直前に送り先の照合を通す。
+check patrol_send_target "$RB" \
+  '定型の指示も、送る直前に送り先を確かめる。'
+check details_send_target docs/agents/command-team-details.md \
+  '送る直前に `docs/agents/grokbot-runbook.md` の「5. イベントごとの対応」の `pelway.agent-watch/v1` の「送り先の照合」を行い'
 
 # 別名のブランチから初めて Draft PR を作るときは --head で push 先を指定し、作成後の
 # headRefName を push 先と照合する決まりが implement-issue の手順 7 にあり、runbook の
