@@ -1,0 +1,91 @@
+# agent-team.toml: AI 開発チーム（docs/superpowers/specs/agent-team.md）が使う担当の
+# 登録情報と、開発者ごとの使える担当・同時数の上限・条件ごとの担当の優先順位。
+#
+# - 検証と読み出しは scripts/agent-team-config（使い方は `scripts/agent-team-config --help`）。
+#   検証は scripts/tests/agent-team-config.test.sh 経由で mise run verify（script-test）に入る。
+# - 「担当」は実装・調査・レビューを担うコーディングエージェントの 1 種で、id は割り当ての行
+#   （Assigned: ...）の agent= の値と同じ 4 種。「枠」は実装または調査のスレッドを 1 本
+#   同時に動かすための許容（skill command-team・runbook「3. 同時数と順番待ち」の同じ語）。
+# - 上限の数え方と順番待ちの運用の正本は、変更が入るまで
+#   docs/superpowers/specs/agent-team.md「制約」と docs/agents/grokbot-runbook.md
+#   「3. 同時数と順番待ち」。このファイルは同じ値をコードから読める形にしたもの。
+
+# ── 担当の登録情報（全開発者で共有）───────────────────────────────────
+# 各担当に置くもの:
+#   instance      役割ごとの T3 の provider インスタンス名（implement・investigate・review。
+#                 その役割を担わない担当は書かない。この表が役割の可否の正本）
+#   models        その担当が使うモデルの id。複数あるときの選び方の条件は skill 側に残す
+#   effort        effort を渡す option の名前（option）と、1 段上げるときの値の順序（raise）
+#   assign_label  割り当て時に Issue に付けるラベル（付けないときは空文字）
+
+[agents.opencode]
+instance = { implement = "opencode", investigate = "opencode" }
+models = ["zai-coding-plan/glm-5.3"]
+effort = { option = "variant", raise = ["low", "default", "high", "max"] }
+assign_label = ""
+# raise の "default" は variant を渡さない通常値（skill command-team「実装のモデルと effort」の
+# GLM の段 low→通常→high→max の「通常」）。
+
+[agents.devin]
+instance = { implement = "acpRegistry_devin", review = "devin_review" }
+models = ["swe-2-high"]
+effort = { option = "thought_level", raise = ["medium", "high", "max"] }
+assign_label = "agent:devin"
+# review（devin_review）の options は mode だけを受け付け、effort の引き上げは行えない。
+
+[agents.codex]
+instance = { review = "codex_review" }
+models = ["gpt-6.2-sol", "gpt-6.1-terra", "gpt-6-luna"]
+effort = { option = "reasoningEffort", raise = ["low", "medium", "high", "xhigh", "max"] }
+assign_label = ""
+# raise の有効値の一覧は文書に無い（docs/worklogs/issue-713.md の 4 項目め）。low〜xhigh と
+# max は docs/worklogs/ で委託に使われた実績のある値から取った。
+# models の 3 つの選び方の条件は skill command-team「Codex のモデル」に残す（この Issue では変えない）。
+
+[agents.claude]
+instance = { review = "claude_review" }
+models = ["claude-opus-5-5"]
+effort = { option = "effort", raise = ["low", "medium", "high", "xhigh", "max"] }
+assign_label = ""
+# raise の有効値の一覧は文書に無い（docs/worklogs/issue-713.md の 4 項目め）。xhigh・max は
+# docs/worklogs/ で委託に使われた実績と、レビュー担当が確認したハーネスの列挙から取った。
+
+# ── 開発者ごとの表（キーは GitHub の login 名）────────────────────────
+# 各開発者に置くもの:
+#   use            使える担当。使えない担当は書かない（上限 0 で「使えない」は表さない）。
+#                  実装の役割を持つ担当とレビューの役割を持つ担当がそれぞれ 1 つ以上要る
+#   slots          実装と調査に使う担当ごとの同時枠の上限（実装と調査で合算。1 以上の整数。
+#                  use のうち実装・調査の役割を持つ担当すべてに要る）
+#   review_limits  レビューの同時数の目安（順番待ちの管理はしない。use のうちレビューの
+#                  役割を持つ担当すべてに要る）
+#   priority       条件ごとの担当の優先順位（先頭ほど優先）。役割（implement・investigate・
+#                  review）の下に条件名のキーを置き、値はその条件で使う担当の並び
+
+[developers.hatai]
+use = ["opencode", "devin", "codex", "claude"]
+
+[developers.hatai.slots]
+opencode = 3   # GLM の実装スレッドと調査スレッドの合算
+devin = 6      # Devin CLI の実装スレッド
+
+[developers.hatai.review_limits]
+codex = 2
+devin = 2
+claude = 1
+
+# 実装の条件は skill command-team「実装のモデルと effort」の行に対応する。
+[developers.hatai.priority.implement]
+small = ["opencode"]             # 定型・小規模（見積もりが小、文書・設定・テストだけの変更）
+normal = ["devin", "opencode"]   # 通常（仕様が固まった実装。同時に空いていれば先頭を優先）
+ambiguous = ["opencode"]         # 曖昧で長い調査・デバッグ系の Issue
+harness = ["devin"]              # 「Devin CLI のハーネスごと任せる」チケット
+
+# 調査は GLM だけ（実装の枠と合算して数える）。
+[developers.hatai.priority.investigate]
+default = ["opencode"]
+
+# レビューの条件は skill command-team「レビュー担当と effort」の行に対応する。
+[developers.hatai.priority.review]
+normal = ["codex", "devin"]            # 通常（PR 番号の偶奇で先頭から交互: 偶数→codex、奇数→devin）
+high_risk = ["codex", "claude", "devin"]  # 高リスク（使えるもの全て）
+sampling = ["claude"]                  # 抜き取り（PR 番号が 4 の倍数）で追加する担当
