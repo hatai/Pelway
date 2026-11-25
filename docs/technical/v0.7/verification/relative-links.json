@@ -13,6 +13,14 @@
   },
   {
     "from": "body/02-stack-comparison.md",
+    "to": "../../../adr/0014-desktop-client-electron.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../../../adr/0014-desktop-client-electron.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
     "to": "../sources/v0.6/fixed/pelway-technical-docs/input/ui.md"
   },
   {
@@ -57,6 +65,10 @@
   },
   {
     "from": "body/02-stack-comparison.md",
+    "to": "../../../adr/0014-desktop-client-electron.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
     "to": "../../../adr/0007-signed-audit-checkpoints.md"
   },
   {
@@ -74,6 +86,10 @@
   {
     "from": "body/02-stack-comparison.md",
     "to": "../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
+    "to": "../../../adr/0014-desktop-client-electron.md"
   },
   {
     "from": "body/03-ai-bot-runtime.md",
@@ -98,6 +114,14 @@
   {
     "from": "body/03-ai-bot-runtime.md",
     "to": "13-operational-defaults.md"
+  },
+  {
+    "from": "body/03-ai-bot-runtime.md",
+    "to": "04-data-api-realtime.md"
+  },
+  {
+    "from": "body/03-ai-bot-runtime.md",
+    "to": "../../../adr/0007-signed-audit-checkpoints.md"
   },
   {
     "from": "body/03-ai-bot-runtime.md",
@@ -136,6 +160,18 @@
     "to": "13-operational-defaults.md"
   },
   {
+    "from": "body/07-performance-plan.md",
+    "to": "../../../adr/0014-desktop-client-electron.md"
+  },
+  {
+    "from": "body/07-performance-plan.md",
+    "to": "../../../adr/0014-desktop-client-electron.md"
+  },
+  {
+    "from": "body/08-decisions-open.md",
+    "to": "../../../adr/0014-desktop-client-electron.md"
+  },
+  {
     "from": "body/08-decisions-open.md",
     "to": "../../../adr/0002-designated-approver-and-expiry.md"
   },
@@ -149,7 +185,15 @@
   },
   {
     "from": "body/08-decisions-open.md",
+    "to": "../../../adr/0014-desktop-client-electron.md"
+  },
+  {
+    "from": "body/08-decisions-open.md",
     "to": "../../../research/slint-royalty-free-license.md"
+  },
+  {
+    "from": "body/08-decisions-open.md",
+    "to": "../../../adr/0014-desktop-client-electron.md"
   },
   {
     "from": "body/08-decisions-open.md",

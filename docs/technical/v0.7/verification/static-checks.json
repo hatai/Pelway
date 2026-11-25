@@ -1,5 +1,5 @@
 {
-  "checked_at_jst": "2026-11-19T17:34:12.297153+09:00",
+  "checked_at_jst": "2026-11-26T00:38:54.865757+09:00",
   "original_files": 183,
   "originals_check": "not-run: originals absent",
   "original_changed": [],
@@ -10,7 +10,7 @@
   "frozen_zip_expected": "d00c771272000d529197b7dca16d1d16fe56b07e82c0d0e4b315da8e4e7c3927",
   "frozen_zip_check": "not-run: archive absent",
   "current_markdown_files": 20,
-  "relative_links_checked": 440,
+  "relative_links_checked": 451,
   "relative_link_errors": [],
   "original_sections": 100,
   "original_sections_without_mapping": [],
