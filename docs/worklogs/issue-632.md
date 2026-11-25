@@ -23,3 +23,15 @@
 5. 改善案: `conductor-context.md:119` の `t3_thread_launch` の引数の例に必須の `title` が無い（Claude の nit。round 1 の改善案 5 と同じ趣旨。印の無い nit のためこの round では直していない。次の round で指摘が残れば対応し、残らなければ別 Issue 候補）。
 
 使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/command-team`、`.agents/skills/pr-watch`
+
+## 実装者メモ（round 3）
+
+対象 head: 88d1b816d12f6099424d9046e6acfaf3697eb402
+
+1. 詰まった箇所: docs/worklogs/issue-632.md: Claude の must-fix — round 2 の「使ったスキル」に repo に無い `.agents/skills/receiving-code-review` を書いていた（ユーザーレベルのスキル名を repo のパスで書いた記録の食い違い）。そのスキルは読んでいなかったので、実際にこの round で読み・従った repo のスキル（implement-issue・command-team・pr-watch）に書き換えた。
+2. 曖昧だった文: `conductor-context.md` の「始め方」の `t3_thread_launch` の引数に必須の `title` が無い指摘は印の無い nit だが、round 2 のメモで「次の round で指摘が残れば対応」と書いており、両担当から再指摘されたためこの round で対応した（`[指揮役] 恒久交代で引き継ぐ` のような名前と、省くと `-32602` であることを追記）。
+3. 仮定と解釈: `title` の例は旧スクリプトが `t3 thread start` に付けていた「[指揮役] 恒久交代で引き継ぐ」系の名前を使った（レビューの提示した例と同じ）。`clientRequestId` など他の引数は runbook の参照に任せ、この段落には必須項目として指摘のあった `title` だけを足した。
+4. 足りなかった情報・検証手段: なし（文書と記録の修正のみ）。
+5. 改善案: 「使ったスキル」は、書くときにパスの実在を `ls .agents/skills/<name>` で確かめると、repo に無いスキル名の混入を防げる（今回の must-fix の再発防止）。
+
+使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/command-team`、`.agents/skills/pr-watch`
