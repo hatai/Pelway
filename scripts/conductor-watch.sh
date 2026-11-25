@@ -194,6 +194,9 @@ except Exception: now = time.time()
 # 後続の取得が遅れた回に、古い使用数へ巡回処理の時刻を付けないため）。
 try: issues_at = float(open(os.path.join(d, "issues-at")).read().strip())
 except Exception: issues_at = now
+# 巡回の印。state.json と slots.json の両方に書き、一致すれば記録が最新の巡回のものと
+# 読み手が分かる（公開に失敗した回は state.json の印だけが進む）。
+cur["patrol_at"] = now
 def stamp(ts): return datetime.fromtimestamp(ts).isoformat(timespec="seconds")
 def stampable(ts):  # 地方時の年の範囲を外れる時刻は、読めない since と同じく数に入れないための確かめ
     try:
@@ -646,10 +649,12 @@ if not isinstance(ps.get("subjects"), dict): ps["subjects"] = {}
 # Issue を持たない調査（入口B）は数えない（指揮役が巡回記録から加算する）。数えるのは
 # open で agent:working の付いた Issue で、agent:devin が付いたものは devin に、ほかは
 # opencode に入れる。作業状態の印が停止中・再開処理中・再開待ちのものは、印の裏付けを
-# 取ってから使っていない枠として除く: 補助記録は実装エージェントも書き込めるため、印だけでは
-# 実際の停止を確かめられない。pelway-dev[bot] の [stop-processing] のコメントが、その Issue の
-# 最新の起動・停止の記録（<!-- claim の取得コメントより新しい）として残るものだけを除き、
-# 確かめられないもの（コメント無し・取得失敗・その後の claim あり）は使用中として数える。
+# 取ってから使っていない枠として除く: 補助記録は実装エージェントも書き込め、pelway-dev[bot] は
+# 実装担当と指揮役の共通名義のため、GitHub の記録では実際の停止を確かめられない。代わりに
+# 実装スレッドの実際の状態（T3 の一覧。題名が「[実装] #<番号> 」のもの）で確かめ、その Issue の
+# スレッドがどれも動いていない（完了・失敗・中断・取消、アーカイブを含む）ものだけを除く。
+# 動いているスレッドが残るもの・スレッドが見つからないもの（一覧の取得失敗を含む）は
+# 使用中として数える。
 slots_st = "unavailable"; slots_reason = "agent-team.toml not in worktree"
 slots_usage = None; slots_lines = None; slots_sig = "unavailable"
 if os.path.isfile("agent-team.toml"):
@@ -676,19 +681,20 @@ if os.path.isfile("agent-team.toml"):
                         ws = it.get("work_state") if isinstance(it, dict) else None
                         if isinstance(ws, dict) and ws.get("state") in ("停止中", "再開処理中", "再開待ち"):
                             marks.add(str(n))
+                impl = {}
+                for t in threads:
+                    if not isinstance(t, dict): continue
+                    tm = re.match(r"^\[実装\] #(\d+) ", t.get("title") or "")
+                    if tm: impl.setdefault(tm.group(1), []).append(t)
                 def stop_verified(n):
-                    # 枠を空ける印の裏付け。pelway-dev[bot] の [stop-processing] コメントが
-                    # 最新の起動・停止の記録（<!-- claim の取得コメントより新しい）なら真。
-                    # 印だけ・取得失敗・その後に claim があるものは確かめられず使用中として数える。
-                    cs = gh_json("api", f"/repos/hatai/Pelway/issues/{n}/comments?per_page=100")
-                    if not isinstance(cs, list): return False
-                    last = None
-                    for c in cs:
-                        if not isinstance(c, dict) or (c.get("user") or {}).get("login") != "pelway-dev[bot]": continue
-                        b = c.get("body") or ""
-                        if "[stop-processing]" in b: last = "stop"
-                        elif "<!-- claim" in b: last = "claim"
-                    return last == "stop"
+                    # 枠を空ける印の裏付け。その Issue の実装スレッドが、実装エージェントには
+                    # 書き換えられない T3 の一覧で、どれも動いていない（完了・失敗・中断・取消、
+                    # アーカイブを含む）なら真。スレッドが見つからないもの（一覧の取得失敗を含む）
+                    # や動いているものが残るものは確かめられず使用中として数える。
+                    ts = impl.get(n)
+                    if not ts: return False
+                    stopped = ("completed", "failed", "interrupted", "cancelled")
+                    return all(t.get("status") in stopped or t.get("archived") for t in ts)
                 used = {name: 0 for name in limits}
                 for iss in issues:
                     if not isinstance(iss, dict) or iss.get("state") != "OPEN": continue
@@ -712,7 +718,7 @@ cur["slots"] = slots_sig
 # 指揮役の照合用の記録（Issue #714）。キューに書けるファイル名がそのまま watch.log の行に
 # なるため、行の見た目だけでは出どころを区別できない。巡回ごとに最新の判定を書き直し、
 # 直前の巡回の結果が残って使われないようにする。読み手の規約は runbook「3. 同時数と順番待ち」。
-rec = {"updated_at": issues_at, "status": slots_st}
+rec = {"updated_at": issues_at, "patrol_at": now, "status": slots_st}
 if slots_reason is not None: rec["reason"] = slots_reason
 if slots_usage is not None: rec["usage"] = slots_usage
 # 同じディレクトリの一時ファイルからの置き換えで公開し、読み手に空・書きかけの記録が

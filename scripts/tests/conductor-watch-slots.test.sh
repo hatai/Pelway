@@ -31,12 +31,14 @@ SLOTS="$ROOT/state/pelway/conductor-watch/slots.json"
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$MOCK/gh-calls.log"
-[[ "$2 $3" == "issue list" ]] && { cat "$MOCK/issues.json"; exit $?; }
+[[ "$2 $3" == "issue list" ]] && {
+  # 取得の開始と後続の巡回処理で時計が進む形を作るフラグ（記録の updated_at が
+  # 取得開始時刻であって巡回処理の時刻でないことの確認に使う）。
+  [[ -f "$MOCK/advance-now" ]] && echo $(( $(cat "$PELWAY_WATCH_NOW") + 120 )) > "$PELWAY_WATCH_NOW"
+  cat "$MOCK/issues.json"; exit $?
+}
 [[ "$2 $3" == "pr list" ]] && { cat "$MOCK/prs.json"; exit $?; }
 [[ "$2 $3" == "api /repos/hatai/Pelway/issues/events?per_page=100" ]] && { echo '[]'; exit 0; }
-# 印の裏付けに使う Issue のコメント。$MOCK/comments-<N>.json が無いときは失敗する
-# （取得失敗 → 印を確かめられず使用中として数える経路の確認に使う）。
-[[ "$2" == "api" && "$3" =~ ^/repos/hatai/Pelway/issues/([0-9]+)/comments ]] && { cat "$MOCK/comments-${BASH_REMATCH[1]}.json"; exit $?; }
 exit 9
 EOF
 chmod +x "$ROOT/repo/scripts/agent-gh"
@@ -130,6 +132,10 @@ EOF
 
 jarr() { local out="" x; for x in "$@"; do out+="${out:+,}$x"; done; printf '[%s]' "$out"; }
 
+# t3 thread list の要素（thread_item <threadId> <題名> <status> [updatedAt]）。
+# 実装スレッドの題名の形は「[実装] #<番号> 」（skill command-team の「スレッド名」）。
+thread_item() { printf '{"threadId":"%s","title":"%s","status":"%s","updatedAt":"%s"}' "$1" "$2" "$3" "${4:-2026-01-01T00:00:00Z}"; }
+
 NOW="$ROOT/now"
 echo 1700000000 > "$NOW"
 set_now() { echo "$1" > "$NOW"; }
@@ -207,26 +213,28 @@ check "devin-labelled issue counted to devin" has "$ROOT/out.log" '^SLOTS devin 
 check "devin-labelled issue not counted to opencode" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
 check "closed issue not counted" nhas "$ROOT/out.log" '^SLOTS devin 2/6$'
 
-# --- 3. 作業状態の印＋裏付けのコメント（[stop-processing] が最新の記録）は使用数に含めない ---
+# --- 3. 作業状態の印＋実装スレッドが動いていないことの確認が取れたものは使用数に含めない ---
 mark 11 "停止中"
 mark 13 "再開待ち"
 mark 15 "再開処理中"
-printf '%s\n' '[{"user":{"login":"pelway-dev[bot]"},"body":"[stop-processing] sp-1"}]' > "$MOCK/comments-11.json"
-printf '%s\n' '[{"user":{"login":"pelway-dev[bot]"},"body":"[stop-processing] sp-2"}]' > "$MOCK/comments-13.json"
-printf '%s\n' '[{"user":{"login":"pelway-dev[bot]"},"body":"[stop-processing] sp-3"}]' > "$MOCK/comments-15.json"
+mock_threads "$(jarr "$(thread_item t1 '[実装] #11 a' completed)" "$(thread_item t2 '[実装] #13 b' failed)" "$(thread_item t3 '[実装] #15 c' interrupted)")"
 mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)" "$(iss 13 OPEN agent:working agent:devin)" "$(iss 15 OPEN agent:working)")"
 run_cycles 1
 check "stopped/resuming issues excluded" has "$ROOT/out.log" '^SLOTS opencode 1/3$'
 check "resume-pending devin excluded" has "$ROOT/out.log" '^SLOTS devin 0/6$'
 
-# --- 3b. 印だけでは由来を確かめられない: 裏付けが無い・取得失敗・その後の claim がある印は使用中として数える ---
-mark 16 "停止中"   # comments-16.json 無し（取得失敗）→ 使用中
-mark 17 "停止中"
-printf '%s\n' '[]' > "$MOCK/comments-17.json"   # 取得できるが記録無し → 使用中
-mark 18 "再開待ち"
-printf '%s\n' '[{"user":{"login":"pelway-dev[bot]"},"body":"[stop-processing] sp-4"},{"user":{"login":"pelway-dev[bot]"},"body":"<!-- claim branch=agent/18-x -->"}]' > "$MOCK/comments-18.json"   # 停止の後に取得 → 使用中
-mark 19 "停止中"
-printf '%s\n' '[{"user":{"login":"someone"},"body":"[stop-processing] forged"}]' > "$MOCK/comments-19.json"   # pelway-dev[bot] 以外 → 使用中
+# --- 3b. 印だけでは由来を確かめられない: 動いているスレッドが残る・スレッドが見つからないものは使用中として数える ---
+mark 16 "停止中"   # [実装] #16 のスレッドが無い → 確かめられない → 使用中
+mark 17 "停止中"   # 動いているスレッドが残る → 使用中
+mark 18 "再開待ち" # 止まったスレッドと動いているスレッドの両方がある → 使用中
+mark 19 "再開処理中" # [実装] #19 のスレッドが無い → 使用中
+mock_threads "$(jarr \
+  "$(thread_item t1 '[実装] #11 a' completed)" \
+  "$(thread_item t2 '[実装] #13 b' failed)" \
+  "$(thread_item t3 '[実装] #15 c' interrupted)" \
+  "$(thread_item t4 '[実装] #17 d' running)" \
+  "$(thread_item t5 '[実装] #18 e' completed)" \
+  "$(thread_item t6 '[実装] #18 f' running)")"
 mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)" "$(iss 13 OPEN agent:working agent:devin)" "$(iss 15 OPEN agent:working)" "$(iss 16 OPEN agent:working)" "$(iss 17 OPEN agent:working)" "$(iss 18 OPEN agent:working)" "$(iss 19 OPEN agent:working)")"
 run_cycles 1
 check "unverified marks counted as used" has "$ROOT/out.log" '^SLOTS over opencode 5/3$'
@@ -322,7 +330,7 @@ set_now 1700003500
 : > "$ROOT/out.log"
 before=$(calls)
 run_cycles 1
-check "watch kept cycling when slots.json unwritable" bash -c "(( \$(wc -l < '$MOCK/gh-calls.log') - $before == 4 ))"
+check "watch kept cycling when slots.json unwritable" bash -c "(( \$(wc -l < '$MOCK/gh-calls.log') - $before == 3 ))"
 check "other lines still emitted when slots.json unwritable" has "$ROOT/out.log" '^HEARTBEAT '
 # 公開に失敗した巡回でも、公開より後の巡回処理（補助記録の更新）まで進むことを確かめる
 check "patrol-state updated when slots.json unwritable" \
@@ -331,15 +339,51 @@ check "slots.json not a readable file when blocked" bash -c "[[ ! -f '$SLOTS' ]]
 rmdir "$SLOTS"
 run_cycles 1
 check "slots.json resumes after path restored" slot_eq status ok
-# 読み手の鮮度判定（runbook）の基礎: 公開できた巡回は slots.json と state.json の更新時刻が同じ巡回になる
-check "slots.json mtime tracks state.json mtime" \
-  bash -c "(( \$(stat -c %Y '$(dirname "$SLOTS")/state.json') - \$(stat -c %Y '$SLOTS') < 30 ))"
+# 読み手の規約（runbook）の基礎: 公開できた巡回は slots.json と state.json の patrol_at が一致する
+check "record patrol_at matches state.json" \
+  python3 -I -c 'import json,sys
+s=json.load(open(sys.argv[1])); w=json.load(open(sys.argv[2])); sys.exit(0 if s["patrol_at"]==w["patrol_at"] else 1)' "$SLOTS" "$(dirname "$SLOTS")/state.json"
+
+# --- 13b. 読めるまま残った古い記録は patrol_at で見抜ける ---
+# 公開に失敗した回に前回の記録が読めるまま残った形を作る（再開直後の巡回で公開が
+# 失敗した残留物）。posix では親ディレクトリが書き込める限り通常ファイルの os.unlink は
+# 失敗しないため、書き手側の失敗経路でこの形は作れず、残留物と同じ内容の記録を書いて
+# 読み手側の判定を確かめる。updated_at は 60 秒以内・status は ok のままなので、
+# 読み手が見抜けるのは patrol_at の不一致だけになる。
+python3 -I - "$SLOTS" <<'EOF'
+import json, sys
+s = json.load(open(sys.argv[1]))
+s["patrol_at"] -= 60      # 残留物: state.json の巡回より前の記録
+s["updated_at"] -= 10     # 60 秒の鮮度の内側に収まる
+json.dump(s, open(sys.argv[1], "w"), ensure_ascii=False)
+EOF
+check "residue is still a readable ok record" slot_eq status ok
+check "residue passes updated_at freshness" \
+  python3 -I -c 'import json,sys,time
+s=json.load(open(sys.argv[1])); w=json.load(open(sys.argv[2])); sys.exit(0 if w["patrol_at"]-s["updated_at"] < 60 else 1)' "$SLOTS" "$(dirname "$SLOTS")/state.json"
+check "stale readable record detectable via patrol_at" \
+  python3 -I -c 'import json,sys
+s=json.load(open(sys.argv[1])); w=json.load(open(sys.argv[2])); sys.exit(0 if s["patrol_at"] < w["patrol_at"] else 1)' "$SLOTS" "$(dirname "$SLOTS")/state.json"
+run_cycles 1
+check "republished record patrol_at matches state.json" \
+  python3 -I -c 'import json,sys
+s=json.load(open(sys.argv[1])); w=json.load(open(sys.argv[2])); sys.exit(0 if s["patrol_at"]==w["patrol_at"] else 1)' "$SLOTS" "$(dirname "$SLOTS")/state.json"
+
+# --- 13c. updated_at は Issue 一覧の取得開始時刻（後続の処理が遅れても記録の時刻を押し上げない） ---
+touch "$MOCK/advance-now"
+set_now 1700003800
+run_cycles 1
+rm -f "$MOCK/advance-now"
+check "updated_at is issue-list fetch start" slot_eq updated_at 1700003800.0
+check "patrol work runs on the later clock" \
+  ps_eq updated_at "$(python3 -I -c 'import datetime; print(datetime.datetime.fromtimestamp(1700003920).isoformat(timespec="seconds"))')"
+check "patrol_at is the patrol's processing time" slot_eq patrol_at 1700003920.0
 
 # --- 14. 見張りは GitHub に書き込まない（agent-gh は読み取りだけ、素の gh も呼ばない） ---
-if grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/(events|[0-9]+/comments))" "$MOCK/gh-calls.log" | grep -q .; then
+if grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/events)" "$MOCK/gh-calls.log" | grep -q .; then
   printf 'FAIL %s\n' "no non-read agent-gh calls"
   failures+=("no non-read agent-gh calls")
-  grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/(events|[0-9]+/comments))" "$MOCK/gh-calls.log" | head -5
+  grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/events)" "$MOCK/gh-calls.log" | head -5
 else
   printf 'ok   %s\n' "no non-read agent-gh calls"
 fi
