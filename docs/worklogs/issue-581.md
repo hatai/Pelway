@@ -46,4 +46,4 @@
 4. 足りなかった情報・検証手段: 失敗した担当とレビューを結ぶ手段が、レビュー本文の `Reviewer: agent=` の行しかない（失敗の報告 `verdict: failed` にはレビューの id が無い）。jq の選び方は PR #695 の実データ（42df844a の codex のレビュー 6047534233 だけが返る）で確かめた。
 5. 改善案: `.agents/skills/review-pr/SKILL.md` の「5. 終わりの報告」に「投稿の後に `failed` で終えるときは、投稿したレビューの id を `review: <id>` の行で足す」を足すと、本文の行による推定が要らなくなる。
 
-使ったスキル: implement-issue、writing-for-agents
+使ったスキル: implement-issue
