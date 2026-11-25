@@ -75,7 +75,7 @@ scripts/agent-gh dev issue view <N> --json title,body,labels,comments
 読んだら、着手の前に Issue を取る（占有する）。占有の印は `agent:working` ラベルと、`pelway-dev` 名義の取得コメントの組である。
 
 1. ラベルと、`pelway-dev` 名義の取得コメント・解放コメント（行頭が `<!-- claim ` / `<!-- release ` で始まるもの）を読む。名義は REST の `user.login` が `pelway-dev[bot]` であることで確かめ（`scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<N>/comments --jq '.[] | select(.user.login == "pelway-dev[bot]") | {created_at, body}'`）、他の作成者のコメントは占有の印として扱わない
-2. 次のどちらかなら取らずに止まる（「止まる条件」の表）: 別のブランチの取得コメントがあり、それより後に同じブランチの解放コメントが無い／指揮役の割り当て指示ではなく立ったスレッドで、`agent:working` がすでに付いている
+2. 次のどちらかなら取らずに止まる（「止まる条件」の表）: 別のブランチの取得コメントがあり、それより後に同じブランチの解放コメントが無い／指揮役の割り当て指示ではなく立ったスレッドで、`agent:working` がすでに付いている。ここでの「ブランチ」は push 先のブランチで、別名の作業ツリー（`<PRブランチ>-r<N>`）で引き継いだときは、この比較にも 3 の取得コメントと解放コメントの `branch=` にも、ローカルのブランチ名ではなく最初の指示に書かれた push 先の `<PRブランチ>` を使う（ローカルの別名で比べると、前のスレッドの未解放の取得コメントが別のブランチの占有に見え、手順 7 の前に止まる）
 3. 取る: `agent:working` が無ければ付ける（指揮役が割り当てで付けたものはそのまま自分の占有として引き継ぐ）。そのうえで取得コメントを書く。同じブランチの取得コメントがすでにあり解放されていない（修正依頼・巡回からの再開）ときは書き直さない
 
 ```bash
@@ -165,6 +165,7 @@ mise run pr-size
 scripts/agent-gh dev git push origin HEAD
 ```
 
+- ローカルのブランチ名が PR ブランチと違うとき（runbook「4. 仕事の始め方」→「既存の PR ブランチを引き継ぐ」で立てた `<PRブランチ>-r<N>`、修正 round を任せた子の作業ツリー）は、この手順の push（実装コミットの push と、後段の実装者メモの push の両方）を `scripts/agent-gh dev git push origin HEAD:<PRブランチ>` に置き換える。`origin HEAD` のままではローカルと同名の別の remote ブランチができ、既存の PR は更新されない。
 - push の前の段で PR ブランチの remote の先端をもう一度 fetch し、修正の間にまた進んでいれば（`scripts/agent-gh dev git merge-base --is-ancestor origin/<ブランチ> HEAD` が非 0）、`scripts/agent-gh dev git merge origin/<ブランチ>` で取り込み、`mise run verify` をやり直してから push する。手元にコミットがあるので、ここでは fast-forward できない。merge はコミットの後に行うため、作業ツリーに残る未コミットの変更は手順 5 のメモ（`docs/worklogs/issue-<N>.md`）だけで、main の変更と重ならない。衝突したら手順 9 の「修正依頼」の解消の決まりに従う。rebase や force push はしない。
 - `mise run verify` の出力は 1 万行を超え、手元で約 2〜3 分かかる（ビルドのキャッシュが冷えているときや他のビルドと競合するときは 20 分を超える）。コマンドの時間制限を 10 分（600 秒）にするか、バックグラウンドで実行して完了の通知を待つ。出力はファイルに書き出し、全部は読まない。読むのは終了コード、`grep -nE 'FAIL|ERROR' <scratchpad>/verify.log` の行、最後の要約の行（`tail -n 3 <scratchpad>/verify.log`。通れば `Finished in <秒>s`）だけにする。
 - `mise run verify` が失敗したらコミットしない。直してからやり直す。失敗が自分の変更と無関係に見えるとき（実行ごとに失敗箇所が変わる・ツールチェーンの再インストールを伴うなど）は、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 2（再現と最小化）で切り分ける。変更を退避した同じツリーで再現する失敗は環境起因として、verify の内訳と再現確認を PR 本文の「確認方法/検証」に書いて先へ進めてよい。退避で解消する失敗は自分の変更によるもので、直す。
@@ -200,6 +201,8 @@ EOF
 ```
 
 （作成後、PR のタイトルを `api --method PATCH --input` で日本語に設定する。手順の詳細は write-pull-request skill の手順 3 を参照）
+
+ローカルのブランチ名が push 先と違うとき（手順 6 で `HEAD:<PRブランチ>` に push したとき。PR を作る前に止まった作業を別名の作業ツリーで引き継いだ場合）は、`pr create` に `--head <PRブランチ>` を付け、push 先のブランチを PR の head に指定する。`--head` を省くと gh はローカルの別名に当たる remote のブランチを探し、それは `origin` に無いため、非対話では PR を作れない。作成後に `scripts/agent-gh dev pr view <PR 番号> --json headRefName --jq .headRefName` が、最初の指示に書かれた push 先の `<PRブランチ>` と同じことを確かめ、違えば止まる条件と同じ扱いにする。
 
 修正依頼の場合は PR を作り直さない。push したあと `scripts/agent-gh dev pr edit` で本文の「レビューと QA」と「対象」の sha を更新する。
 
@@ -347,6 +350,8 @@ scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<M>/comments --jq 
 
 - 差分が手順 8 の委託しない条件（`.agents/skills/review-pr/` の変更など）に当たらない: 手順 8 で `to:` の担当に再委託する（`Guard:` の行を付ける。`Guard:` の (b) は `DISMISSED` のレビューを数えないため、取り消した投稿で止まらない）
 - 当たる: 自分では委託せず `waiting-conductor` で終える。指揮役が委託記録を残してから、main 由来の worktree で `to:` の担当のレビュースレッドを立てる（runbook「毎回の巡回でスレッドを点検する」の `state: waiting-conductor` の行）。指揮役のレビュースレッドで失敗した記録も、記録を残した指揮役が同じように立て直す
+
+修正 round を子に任せるときは、`docs/agents/grokbot-runbook.md` の「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」の節に従う。
 
 Request changes のとき:
 
