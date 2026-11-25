@@ -58,3 +58,12 @@
 5. 改善案: .agents/skills/implement-issue/SKILL.md の「止まる条件」の pr-size の行に「衝突の解消で行数が増えたときは、空行・継続行を詰めた先例（548faa59）がある」と書くと、解消のたびに停止にならない
 
 使ったスキル: implement-issue（初回の解消で読んだユーザーレベルの fix-merge-conflicts は、手順は implement-issue の手順 9 に合わせた）
+## 実装者メモ（round 9）
+対象 head: 0f0ca8d9c546d72fea9c95070ce65b23c9dc6702
+1. 詰まった箇所: 手順 6: レビュー round 7（codex・claude とも request-changes、must-fix 3 + 1）への修正で pr-size が +978 / -56 になり（上限を 178 行超える）、push が `scripts/agent-gh` の pre-push ゲートで止まった。分割では収まらない（手順とその試験だけで +845 で、巡回の書き戻しを別 PR に分けても 1 本目が上限を超える。手順の守りはどれも前の round までの must-fix）。hatai の承認コメント https://github.com/hatai/Pelway/issues/671#issuecomment-7167069771 と PR の `pr-size-exception` ラベルで例外が認められ、0f0ca8d9 を push した
+2. 曖昧だった文: 「追加 800 行または削除 2000 行の上限を超えたら止まる。push は原則しない（例外は次の項の相談のための push だけ）。」（.agents/skills/implement-issue/SKILL.md の手順 6）。相談のための push は例外として認められて読めるが、pre-push ゲートは例外のラベルと目印コメントが無い push を止める
+3. 仮定と解釈: 巡回側の書き込み前の検査（`check_ps`）と手順内の上限の検査を両方残す案と、手順だけにまとめる案があり、保護が 1 箇所になる後者を選んだ（Issue #671 の受け入れ条件 4）。巡回がどの回も手順を呼ぶようになるため、main の試験 15〜17 の「一時ファイルが残らない」は、試験 10 と同じく手順が残すロックファイルを除外して数える形にした
+4. 足りなかった情報・検証手段: 例外が認められるまで、手元の修正コミットを PR に載せる方法が無い。初回の push は GitHub 側の Internal Server Error で拒まれ、送り直したら通った
+5. 改善案: .agents/skills/implement-issue/SKILL.md の手順 6 の pr-size の段落に「pre-push ゲートがあるため、上限を超えた head は push できない。手元のコミットの SHA と行数を Issue に書いて止める」と書くと、相談のための push を試みずに済む
+
+使ったスキル: implement-issue
