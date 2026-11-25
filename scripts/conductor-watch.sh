@@ -630,51 +630,69 @@ except Exception: ps = {}
 if not isinstance(ps, dict): ps = {}
 if not isinstance(ps.get("subjects"), dict): ps["subjects"] = {}
 # SLOTS 行（Issue #714）。実装・調査に使っている枠の数を agent-team.toml の上限と
-# 突き合わせて出す。指揮役は割り当ての前にこの行を読む（runbook「3. 同時数と順番待ち」）。
-# agent-team.toml が作業ツリーに無いときは何も出さない。検証を通らないときは
-# SLOTS error <理由> を出し、使用数は出さない。出すのは、使用数または理由が前回の巡回から
-# 変わったときと、HEARTBEAT の行を出した巡回。Issue を持たない調査（入口B）は数えない
-# （指揮役が巡回記録から加算する）。数えるのは open で agent:working の付いた Issue で、
-# agent:devin が付いたものは devin に、ほかは opencode に入れる。巡回記録の作業状態の印が
-# 停止中・再開処理中・再開待ちのものは使っていない枠として除く。
-if issues is not None and len(issues) < issue_limit and os.path.isfile("agent-team.toml"):
-    try:
-        r = subprocess.run(["scripts/agent-team-config", "slots", "hatai"],
-                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
-        if r.returncode != 0:
-            reason = next((ln.strip() for ln in r.stderr.splitlines() if ln.strip()), None) or f"exit={r.returncode}"
-            slots_sig = f"error|{reason[:160]}"
-            if cur["slots"] != slots_sig or hb:
-                print(f"SLOTS error {reason[:160]}", flush=True)
-        else:
-            limits = {}
-            for ln in r.stdout.splitlines():
-                p = ln.split()
-                if len(p) == 2 and p[1].isdigit(): limits[p[0]] = int(p[1])
-            marks = set()
-            items = ps.get("items")
-            if isinstance(items, dict):
-                for n, it in items.items():
-                    ws = it.get("work_state") if isinstance(it, dict) else None
-                    if isinstance(ws, dict) and ws.get("state") in ("停止中", "再開処理中", "再開待ち"):
-                        marks.add(str(n))
-            used = {name: 0 for name in limits}
-            for iss in issues:
-                if not isinstance(iss, dict) or iss.get("state") != "OPEN": continue
-                labs = {lb.get("name") for lb in (iss.get("labels") or []) if isinstance(lb, dict)}
-                if "agent:working" not in labs or str(iss.get("number")) in marks: continue
-                who = "devin" if "agent:devin" in labs else "opencode"
-                if who in used: used[who] += 1
-            lines = [f"SLOTS{' over' if used[n] > lim else ''} {n} {used[n]}/{lim}" for n, lim in limits.items()]
-            slots_sig = "|".join(lines)
-            if cur["slots"] != slots_sig or hb:
-                for ln in lines: print(ln, flush=True)
-    except Exception as e:
-        slots_sig = f"error|{type(e).__name__}"
-        if cur["slots"] != slots_sig or hb:
-            print(f"SLOTS error agent-team-config failed ({type(e).__name__})", flush=True)
-    cur["slots"] = slots_sig
-    json.dump(cur, open(sp, "w"))
+# 突き合わせて出す。指揮役は割り当ての前に使用数を読む（runbook「3. 同時数と順番待ち」。
+# 判断に使うのは watch.log の行でなく、見張り自身が巡回ごとに書き直す slots.json）。
+# agent-team.toml が作業ツリーに無いときは SLOTS の行を出さない。使用数を確かめられない
+# 巡回（issue 一覧の取得失敗・件数の打ち切り・agent-team.toml の検証失敗）は
+# SLOTS error <理由> を出し、使用数は出さない（直前の巡回の行が残ったまま使われないようにする）。
+# 出すのは、使用数または状態が前回の巡回から変わったときと、HEARTBEAT の行を出した巡回。
+# Issue を持たない調査（入口B）は数えない（指揮役が巡回記録から加算する）。数えるのは
+# open で agent:working の付いた Issue で、agent:devin が付いたものは devin に、ほかは
+# opencode に入れる。巡回記録の作業状態の印が停止中・再開処理中・再開待ちのものは
+# 使っていない枠として除く。
+slots_st = "unavailable"; slots_reason = "agent-team.toml not in worktree"
+slots_usage = None; slots_lines = None; slots_sig = "unavailable"
+if os.path.isfile("agent-team.toml"):
+    if issues is None:
+        slots_st, slots_reason = "error", "issue-list-failed"
+    elif len(issues) >= issue_limit:
+        slots_st, slots_reason = "error", "issue-list-limit"
+    else:
+        try:
+            r = subprocess.run(["scripts/agent-team-config", "slots", "hatai"],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+            if r.returncode != 0:
+                reason = next((ln.strip() for ln in r.stderr.splitlines() if ln.strip()), None) or f"exit={r.returncode}"
+                slots_st, slots_reason = "error", reason[:160]
+            else:
+                limits = {}
+                for ln in r.stdout.splitlines():
+                    p = ln.split()
+                    if len(p) == 2 and p[1].isdigit(): limits[p[0]] = int(p[1])
+                marks = set()
+                items = ps.get("items")
+                if isinstance(items, dict):
+                    for n, it in items.items():
+                        ws = it.get("work_state") if isinstance(it, dict) else None
+                        if isinstance(ws, dict) and ws.get("state") in ("停止中", "再開処理中", "再開待ち"):
+                            marks.add(str(n))
+                used = {name: 0 for name in limits}
+                for iss in issues:
+                    if not isinstance(iss, dict) or iss.get("state") != "OPEN": continue
+                    labs = {lb.get("name") for lb in (iss.get("labels") or []) if isinstance(lb, dict)}
+                    if "agent:working" not in labs or str(iss.get("number")) in marks: continue
+                    who = "devin" if "agent:devin" in labs else "opencode"
+                    if who in used: used[who] += 1
+                slots_usage = {n: {"used": used[n], "limit": lim} for n, lim in limits.items()}
+                slots_lines = [f"SLOTS{' over' if used[n] > lim else ''} {n} {used[n]}/{lim}" for n, lim in limits.items()]
+                slots_st, slots_reason, slots_sig = "ok", None, "|".join(slots_lines)
+        except Exception as e:
+            slots_st, slots_reason = "error", f"agent-team-config failed ({type(e).__name__})"
+if slots_st != "ok": slots_sig = f"{slots_st}|{slots_reason}"
+emit = None
+if slots_st == "ok": emit = slots_lines
+elif slots_st == "error": emit = [f"SLOTS error {slots_reason}"]
+if emit is not None and (cur["slots"] != slots_sig or hb):
+    for ln in emit: print(ln, flush=True)
+cur["slots"] = slots_sig
+# 指揮役の照合用の記録（Issue #714）。キューに書けるファイル名がそのまま watch.log の行に
+# なるため、行の見た目だけでは出どころを区別できない。巡回ごとに最新の判定を書き直し、
+# 直前の巡回の結果が残って使われないようにする。読み手の規約は runbook「3. 同時数と順番待ち」。
+rec = {"updated_at": now, "status": slots_st}
+if slots_reason is not None: rec["reason"] = slots_reason
+if slots_usage is not None: rec["usage"] = slots_usage
+json.dump(rec, open(os.path.join(d, "slots.json"), "w"), ensure_ascii=False)
+json.dump(cur, open(sp, "w"))
 # 取得に成功し、かつどちらの一覧も打ち切られていない（件数が上限に達していない）ときだけ更新する。
 if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr_limit:
     pr_of = {}
