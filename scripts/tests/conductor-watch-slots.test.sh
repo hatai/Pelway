@@ -264,7 +264,6 @@ mock_threads "$(jarr "$(thread_item t-24 '[実装] #24 i' completed)")"
 mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 24 OPEN agent:working)")"
 run_cycles 1
 check "unreadable patrol-items keeps slot counted" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
-
 # --- 3g. patrol-items.json が無く旧置き場が残る回（初回移行）は旧置き場を保守的に読む ---
 # （issue 24（停止中+止まった組）は枠を空け、issue 25（再開待ち・rollback なし）は使用中。直前と同じ値で行は出ない）
 rm -f "$ISTATE"
@@ -273,7 +272,6 @@ mock_threads "$(jarr "$(thread_item t-24 '[実装] #24 i' completed)" "$(thread_
 mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 24 OPEN agent:working)" "$(iss 25 OPEN agent:working)")"
 run_cycles 1
 check "first-migration legacy: only 停止中 frees" slot_eq "usage.opencode.used" "2"
-
 # --- 3h. 移行後に patrol-items.json が欠けた回は空として扱う（旧置き場は移行手順で消される） ---
 python3 -I - "$STATE" <<'EOF'
 import json, sys
