@@ -12,3 +12,18 @@ PR: #722（この Issue の実装 PR。レビューで確かめる実装の head
 5. 改善案: `docs/agents/grokbot-runbook.md` の「MCP の `t3_thread_launch` と `t3_thread_send` の引数」に「`modelSelection.model` には `agent-team.toml` の `[agents.<担当>].models` のモデルを入れる」の 1 文を足す（今回の改訂で `instanceId` は登録情報参照と明記したが、`model` は例のプレースホルダに留まる）
 
 使ったスキル: .agents/skills/implement-issue
+
+## 実装者メモ（round 2）
+
+対象 head: 063595b74cb567dcec5b419ec93cc663090cb0e4
+PR: #722
+
+レビュー指摘（run 7164371558 codex request-changes、head 5e5d6e1）への対応:
+
+1. 詰まった箇所: なし
+2. must-fix の対応:
+   - implement-issue の委託の表が作業ツリーの `agent-team.toml` を指していた → 「レビューの優先順位と登録情報は main の承認済みの版から読み、読めなければ委託・起動を止める」を implement-issue・command-team・runbook の指摘箇所すべてに書いた（レビューの隔離を担うインスタンスを審査中のブランチの設定で選べてしまう穴）
+   - 修正指示 2 回超の移行先が「`normal` の先頭からまだ使っていない担当」だった → 移行先を `normal` の先頭の担当に限定し、すでにその担当のときは替えない形に戻した（変更前の Devin CLI 限定の条件と同等）
+   - command-team-details の調査の数え方が「実行中の調査スレッド（Issue を持たない入口B のものを含む）」で全スレッドを数えていた → 正本どおり「Issue を持たない入口B の調査の稼働中スレッド」だけに絞った（Issue 付きの調査は `agent:working` で数えるため二重計上になる）
+   - runbook の使用数の見方が `SLOTS` の行が無い場合しか触れていなかった → `SLOTS over`（上限超過の行）と `SLOTS error`（toml 検証の失敗）の扱いを足し、使用数か上限を確認できなければ割り当てない形にした
+3. nit の対応: [文書のずれ] runbook の空き枠を待つ段落が上限超過のスレッド全般に読める → 「実装・調査の上限」（レビューの順番待ちは管理しない）と明記した
