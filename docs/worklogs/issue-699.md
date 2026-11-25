@@ -38,12 +38,13 @@
 
 ## 実装者メモ（round 4）
 
-対象 head: 4fbb4c67110fd58064387367d3ed7e2ef22f0c1a
+対象 head: b956a152dde1e460116c27064a68b8237d5c91f3（実装は 4fbb4c67。b956a152 は runbook 483 行目の概要の条件の一覧に、整形できない回を足した文書だけの追加）
 
 1. 詰まった箇所: `scripts/conductor-watch.sh` の `write_ps`: round 3 で整形を `iterencode` で少しずつ行う形にしたが、`try` が一時ファイルの書き込みだけを囲み、整形中の例外（2000 段の入れ子での `RecursionError`）が巡回の python を止めていた。round 3 の試験 16（300 段）は Python の再帰の上限（既定 1000）に届かず、この経路を通らなかった。
 2. 曖昧だった文: 「整形中の例外（少なくとも RecursionError）を捕まえて理由（例: reason=unencodable・too-large に含めてもよい）を返し」（PR #705 の pelway-review r3 レビュー、must-fix）。捕まえる例外の範囲と理由の名前が選べる。
 3. 仮定と解釈: 理由は `too-large` に含めず、別の `reason=unencodable` にした（大きさの上限と原因が違い、記録を小さくしても直らないため）。捕まえる範囲は整形の繰り返し全体の `Exception`（`RecursionError` のほか、制限下の `MemoryError`・型の誤りの `TypeError`・`ValueError` を含む）とし、`RecursionError` だけに絞る解釈は選ばなかった。理由の行の出し直し・回復の行の扱いは既存の `dir-invalid`・`too-large` と同じ経路に乗せた。
 4. 足りなかった情報・検証手段: 読み取りの `json.loads` が読める深さ（C の再帰の上限）は Python の版で変わる。手元の Python 3.13.12 では 2000 段は読め、20000 段は読み取りで `RecursionError` になる（読み取り側の例外は既存の空扱いの経路）ことを確かめ、試験 17 は 2000 段で作った。
 5. 改善案: `.agents/skills/review-pr/SKILL.md` の must-fix の確かめ方に「例外を捕まえる try の範囲が、例外を出しうる処理（整形・変換）まで覆っているかを見る」を足す。
+6. 詰まった箇所（追記）: `docs/agents/grokbot-runbook.md`: 理由の一覧を `too-large` の語で探して 505 行目だけを直し、同じ条件を語を使わずに並べる 483 行目（「書き戻す中身が 4 MiB を超える回は置き換えず」）を最初は漏らした。`書き戻` で探し直して足した。
 
 使ったスキル: implement-issue
