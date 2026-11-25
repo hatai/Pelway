@@ -170,12 +170,14 @@ check fail_closed_r7_implement .agents/skills/implement-issue/SKILL.md \
   '`created_at` が対象の記録の `created_at` より後' \
   '結び付かない投稿の取り消し: ' \
   '必要な実行: ある head のレビューに要る実行の集合は、委託の時点で決まる' \
-  '`run <ID>: <approve|request-changes>` の行が添えてあれば'
+  '`run <ID>: <approve|request-changes>` の行が添えてあれば' \
+  '投稿の無い記録は飛ばす'
 check fail_closed_r7_command_team .agents/skills/command-team/SKILL.md \
   '(b) は、末尾行に ` run=<ID>` の無い投稿' \
   '必要な実行のうち報告の無いもの'
 check fail_closed_r7_runbook docs/agents/grokbot-runbook.md \
   '最初の `approve` で次に進まず残りの報告を待つ' \
+  'run 7140000001: approve' \
   '上の 6 の In review の判定では、その PR の最新の委託記録コメントだけを証跡とする'
 
 if ((${#failures[@]})); then

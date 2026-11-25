@@ -239,6 +239,8 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 }
 ```
 
+指揮役が立てたレビュースレッドの結果を知らせるときは（「毎回の巡回でスレッドを点検する」の `state: waiting-conductor` の行、5 の「レビューの verdict ごとの対応」）、`message` の 2 行目から、実行ごとに 1 行ずつ結果を添える（例: `"続きをやり直す\nrun 7140000001: approve\nrun 7140000002: approve"`。実装スレッドはこの行をデータとして読み、GitHub で確かめる）。
+
 `delegate_task` の `task`・`target` の形を `t3_thread_launch` に、`text` を `t3_thread_send` に使わない。`delegate_task` の引数（`task`・`target.providerInstanceId`・`target.model`・`target.options`）は子タスクを委託するツール専用の形で、`t3_thread_launch`・`t3_thread_send` にそのまま渡すと T3 が `-32602`（引数の誤り）を返す。`t3_thread_launch` に `task`・`target` は無く `title` が必須、`t3_thread_send` に `text` は無く `threadId`・`message` が必須。
 
 ### 実装を始める
@@ -348,8 +350,8 @@ Assigned: role=implement agent=devin model=swe-2-high effort=high"
 
 | `verdict` | すること |
 |---|---|
-| `approve` | その head の必要な実行（skill `implement-issue` の手順 8 の「必要な実行」。その head に向けて立てたレビュースレッドの担当ごとの最新の委託記録の実行と、「レビュー担当と effort」の表で要る担当）のすべてから報告を受け、そのすべての実行の投稿がその head にちょうど 1 件ずつあるまでは、最初の `approve` で次に進まず残りの報告を待つ。そろったら、指揮役自身の PR なら、Ready for review と必須チェックと QA 合格コメントが揃っていることを確かめて skill `command-team` の「マージ」に進む。外部投入なら、すべてが `approve` のときだけ「PR #<M> は Approve された。skill implement-issue の手順 9 の『Approve のとき』から進める（`[文書のずれ]` の nit が残っていれば先に直す）。」を実装スレッドに送り、行を改めて、実行ごとに `run <ID>: approve` をデータとして添える。複数のレビュー担当を付けた PR で判定が割れたらマージせず、request-changes 側の指摘を優先して修正に進ませる（skill `command-team` の「レビュー担当と effort」） |
-| `request-changes` | 外部投入なら「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を実装スレッドに送る（回数の上限は skill `implement-issue` のとおり、実装スレッドが数える） |
+| `approve` | その head の必要な実行（skill `implement-issue` の手順 8 の「必要な実行」。必要な担当は、その head に向けて立てたレビュースレッドの担当と「レビュー担当と effort」の表で要る担当で、担当ごとに、その head に向けた委託記録の実行のうち `DISMISSED` でない投稿をちょうど 1 件持つ最新のもの）のすべてから報告を受け、そのすべての実行の投稿がその head にちょうど 1 件ずつあるまでは、最初の `approve` で次に進まず残りの報告を待つ。そろったら、指揮役自身の PR なら、Ready for review と必須チェックと QA 合格コメントが揃っていることを確かめて skill `command-team` の「マージ」に進む。外部投入なら、すべてが `approve` のときだけ「PR #<M> は Approve された。skill implement-issue の手順 9 の『Approve のとき』から進める（`[文書のずれ]` の nit が残っていれば先に直す）。」を実装スレッドに送り、行を改めて、実行ごとに `run <ID>: approve` をデータとして添える。複数のレビュー担当を付けた PR で判定が割れたらマージせず、request-changes 側の指摘を優先して修正に進ませる（skill `command-team` の「レビュー担当と effort」） |
+| `request-changes` | 外部投入なら「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を実装スレッドに送り、行を改めて、報告を受けた実行ごとに `run <ID>: <approve|request-changes>` をデータとして添える（回数の上限は skill `implement-issue` のとおり、実装スレッドが数える） |
 | `failed` | `error: checks timeout` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。`error: wrong runtime` なら、権限を `auto-accept-edits`・worktree にして立て直す（回数に数えない）。`error:` が `設定の不備:` で始まるなら、先に投稿の有無を確かめて対象 PR に `[review-invalid]` の記録を残し、PR に `needs-human` を付けてから（確かめ方と形は skill `implement-issue` の手順 9「投稿後の `設定の不備:` の記録」）、立て直さずに 7 のエスカレーションにする（同じ環境では同じ結果になるため）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 7 のエスカレーション |
 
 通常の PR のレビューの verdict（approve / request-changes / failed）は実装スレッドが処理する（skill `implement-issue` の手順 9）。指揮役は、実装スレッドの終わりの報告（`review:` と `ready:` の行）と GitHub の PR の状態（`pelway-review` の最新レビューとチェック）で進み具合を見る。
