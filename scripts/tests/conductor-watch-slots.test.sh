@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# scripts/conductor-watch.sh の SLOTS 行と slots.json（Issue #714）のテスト。
-# 巡回ごとに枠の使用数を `SLOTS <担当> <使用数>/<上限>`（超過は over、未確定は error）で
-# watch.log に出し、同じ判定を slots.json（正本）に書く。agent-team.toml が無いときは出さない。
+# scripts/conductor-watch.sh の SLOTS 行と slots.json（Issue #714）のテスト。巡回ごとに枠の使用数を
+# `SLOTS <担当> <使用数>/<上限>`（超過は over、未確定は error）で watch.log に出し、同じ判定を slots.json（正本）に書く。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -14,8 +13,7 @@ MOCK="$ROOT/mock"
 mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$MOCK" "$ROOT/state/pelway" "$ROOT/repo/.git/pelway" "$ROOT/queue"
 
 # 本物の conductor-watch.sh と agent-team-config を置く偽リポジトリ（agent-gh はモックに差し替える）。
-cp "$REPO/scripts/conductor-watch.sh" "$ROOT/repo/scripts/"
-cp "$REPO/scripts/agent-team-config" "$ROOT/repo/scripts/"
+cp "$REPO/scripts/"{conductor-watch.sh,agent-team-config} "$ROOT/repo/scripts/"
 git init -q "$ROOT/repo"
 STATE="$ROOT/repo/.git/pelway/patrol-state.json"
 ISTATE="$ROOT/repo/.git/pelway/patrol-items.json"
@@ -127,9 +125,7 @@ jarr() { local out="" x; for x in "$@"; do out+="${out:+,}$x"; done; printf '[%s
 # t3 thread list の要素（thread_item <threadId> <題名> <status> [updatedAt]。題名の形は「[実装] #<番号> 」）。
 thread_item() { printf '{"threadId":"%s","title":"%s","status":"%s","updatedAt":"%s"}' "$1" "$2" "$3" "${4:-2026-01-01T00:00:00Z}"; }
 
-NOW="$ROOT/now"
-echo 1700000000 > "$NOW"
-set_now() { echo "$1" > "$NOW"; }
+NOW="$ROOT/now"; echo 1700000000 > "$NOW"; set_now() { echo "$1" > "$NOW"; }
 
 start_watch() {
   MOCK="$MOCK" SLEEP_MAX="${SLEEP_MAX:-}" XDG_STATE_HOME="$ROOT/state" \
@@ -139,8 +135,7 @@ start_watch() {
   WPID=$!
 }
 
-# 各ケースの新規出力だけを対象にするため、巡回の前にログを切り詰める。
-run_cycles() {
+run_cycles() {  # 各ケースの新規出力だけを対象にするため、巡回の前にログを切り詰める
   local want="$1"
   : > "$ROOT/out.log"
   echo 0 > "$MOCK/sleeps"
@@ -163,7 +158,6 @@ print(d)' "$1" "$2"; }
 slot_eq() { [[ "$(get "$1" "$SLOTS")" == "$2" ]]; }
 ps_eq() { [[ "$(get "$1" "$STATE")" == "$2" ]]; }
 
-# <file> の items[<issue>] に <key>=<JSON> を書く小道具（implement_thread は一覧に追加）。
 jput() { python3 -I -c 'import json,sys
 p,n,k,v=sys.argv[1:5]
 try: d=json.load(open(p))
@@ -171,13 +165,12 @@ except Exception: d={}
 if not isinstance(d,dict): d={}
 it=d.setdefault("items",{}).setdefault(n,{})
 it[k] = it.setdefault(k,[])+[json.loads(v)] if k=="implement_thread" else json.loads(v)
-json.dump(d,open(p,"w"),ensure_ascii=False,indent=2,sort_keys=True)' "$1" "$2" "$3" "$4"; }
+json.dump(d,open(p,"w"),ensure_ascii=False,indent=2,sort_keys=True)' "$1" "$2" "$3" "$4"; }  # <file> の items[<issue>] に <key>=<JSON> を書く（implement_thread は一覧に追加）
 
-# 作業状態の印・implement_thread の組・巻き戻し中の印（いずれも patrol-items.json）。
+# 作業状態の印・implement_thread の組・巻き戻し中の印を書く（いずれも patrol-items.json。旧置き場は litem が patrol-state.json に書く）。
 mark()         { jput "$ISTATE" "$1" work_state "{\"state\": \"$2\"}"; }
 bind()         { jput "$ISTATE" "$1" implement_thread "{\"pr\": \"${3:-none}\", \"thread_id\": \"$2\", \"branch\": \"agent/x\"}"; }
 set_rollback() { jput "$ISTATE" "$1" rollback "{\"assignment_id\": \"a\", \"started_at\": \"t\", \"steps_done\": []}"; }
-# 旧置き場（patrol-state.json の items）に印と組を持つ項目を書く（移行前の記録の再現）。
 litem() { jput "$STATE" "$1" work_state "{\"state\": \"$2\"}"; jput "$STATE" "$1" implement_thread "{\"pr\": \"none\", \"thread_id\": \"$3\", \"branch\": \"agent/x\"}"; }
 
 : > "$ROOT/out.log"; : > "$MOCK/gh-calls.log"
@@ -256,19 +249,16 @@ mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 24 OPEN agent:working)
 run_cycles 1
 check "unreadable patrol-items keeps slot counted" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
 # --- 3g. patrol-items.json が無い回は、旧置き場が残っていても読まない（旧記録は復活しうるため） ---
-# （枠を空けられそうな issue 24・25 とも使用中）
 rm -f "$ISTATE"
 litem 24 "停止中" t-24; litem 25 "再開待ち" t-25
 mock_threads "$(jarr "$(thread_item t-24 '[実装] #24 i' completed)" "$(thread_item t-25 '[実装] #25 i' completed)")"
 mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 24 OPEN agent:working)" "$(iss 25 OPEN agent:working)")"
 run_cycles 1
 check "missing patrol-items never reads legacy" has "$ROOT/out.log" '^SLOTS opencode 3/3$'
+check "missing patrol-items publishes all-used usage" slot_eq "usage.opencode.used" "3"
 # --- 3h. 旧置き場も無い回も同じくすべて使用中（直前と同じ値で行は出ないため記録で確かめる） ---
-python3 -I - "$STATE" <<'EOF'
-import json, sys
-d = json.load(open(sys.argv[1])); d.pop("items", None)
-json.dump(d, open(sys.argv[1], "w"), ensure_ascii=False, indent=2, sort_keys=True)
-EOF
+python3 -I -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d.pop("items",None)
+json.dump(d,open(p,"w"),ensure_ascii=False,indent=2,sort_keys=True)' "$STATE"
 run_cycles 1
 check "post-migration loss counts all used" slot_eq "usage.opencode.used" "3"
 

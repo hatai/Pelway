@@ -651,15 +651,14 @@ except Exception: ps = {}
 if not isinstance(ps, dict): ps = {}
 if not isinstance(ps.get("subjects"), dict): ps["subjects"] = {}
 # 指揮役が持つ項目（items）は patrol-items.json に置く（巡回の書き戻しで巻き戻らないよう
-# patrol-state.json と別記録にする。置き場の規則と移行手順は runbook「10. 巡回状態の補助記録」）。
-# 無い・読めない回は空として扱いすべて使用中に倒す: patrol-state.json に残る旧置き場の
-# items は読まない（巡回の書き戻しや起動時の引き継ぎで復活しうるため移行前の判別にならない）。
+# patrol-state.json と別記録にする。置き場の規則・移行手順・旧置き場を読まない決まりは
+# runbook「10. 巡回状態の補助記録」）。無い・読めない回は空として扱いすべて使用中に倒す。
 try: items = json.loads(read_named("patrol-items.json"))["items"]
 except Exception: items = {}
 if not isinstance(items, dict): items = {}
 # SLOTS 行（Issue #714）。実装・調査に使っている枠の数を agent-team.toml の上限と突き
-# 合わせて出す。指揮役は割り当ての前に使用数を読む（runbook「3. 同時数と順番待ち」。判断
-# に使うのは watch.log の行でなく、見張り自身が巡回ごとに書き直す slots.json）。
+# 合わせて出す。判断の正本は watch.log の行でなく、見張り自身が巡回ごとに書き直す
+# slots.json（決まりは runbook「3. 同時数と順番待ち」）。
 # agent-team.toml が無いときは SLOTS を出さない。使用数を確かめられない巡回（一覧の
 # 取得失敗・件数の打ち切り・toml の検証失敗）は SLOTS error <理由> だけを出す（直前の
 # 巡回の行が残ったまま使われないようにする）。出すのは、使用数または状態が前回から
@@ -692,10 +691,9 @@ if os.path.isfile("agent-team.toml"):
                 marks = set()
                 for n, it in items.items():
                     ws = it.get("work_state") if isinstance(it, dict) else None
-                    # 枠を空ける印は停止中・再開処理中・再開待ち: 起動を試みる前の待機は枠を
-                    # 消費しない（消費していると待機中のものが上限を超えて並んだときどれも
-                    # 起動に進めない）。起動を試みた回は rollback の割り当て ID が残り照合が
-                    # 終わるまで使用中（印の有無で起動前の待機と分ける）。
+                    # 枠を空ける印は停止中・再開処理中・再開待ち（起動前の待機は枠を消費しない―
+                    # 消費していると待機中のものが上限を超えて並んだときどれも起動に進めない）。
+                    # 起動を試みた回は rollback の割り当て ID が残り照合が終わるまで使用中。
                     if isinstance(ws, dict) and ws.get("state") in ("停止中", "再開処理中", "再開待ち"):
                         marks.add(str(n))
                 impl = {}
