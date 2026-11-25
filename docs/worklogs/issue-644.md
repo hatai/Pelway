@@ -81,3 +81,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の「10. 巡回状態の補助記録」の「指揮役が持つ項目（`items`）」に、起動結果が不明な割り当て ID の項目（例: `pending_launch`）を足すと、並行の除外が記録だけで確かめられる
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 7）
+
+対象 head: 9046f14481d323c22bf0c2b590400dfea37abaca
+
+1. 詰まった箇所: `docs/agents/grokbot-runbook.md` の「調査の報告 PR の送り先」の 1: 「割り当ての記録」の表（skill `command-team` の列: 日時・Issue・PR・役割・担当・モデル・effort・理由）に `thread_id` と作業ブランチの置き場が無く、Issue の無い調査は `items`（キーは Issue 番号）にも置けない。調査の行にだけ列を足し、起動時に `thread_id`・作業ブランチ・報告 PR の番号 `none` を書く形にした
+2. 曖昧だった文: 「引き渡し時に、本体リポジトリ・作成者・ブランチを照合した報告 PR の番号を、起動記録で確認した調査スレッドの ID に結び付けて記録してください」（PR #697 の round 6 のレビュー、must-fix）。「起動記録」を、調査の起動時に割り当ての記録の行へ書く `thread_id` と読んだ
+3. 仮定と解釈: 送り先の取り違えは round 3〜6 に続く同じ種類のため、調査の分岐からも `branch` の一致で候補を探す道を外し、候補は引き渡しで報告 PR を結び付けた行の `thread_id` だけにした（行が無ければ保留）。起動が `thread_id` を返さないときは名前で補わず、エスカレーションに倒した。nit 2 件（`[文書のずれ]`）も直した: 起動時の head の照合を「`false` と明示され `headRefName` が同じときだけ進む」に揃え、`implement_thread` の使途を「送り先の照合」への参照にした
+4. 足りなかった情報・検証手段: `t3 thread start`（CLI）が起動時に `thread_id` を返す形と、`pelway.agent-watch/v1` の調査スレッドの知らせに `thread_id` が入ることは T3 で試していない
+5. 改善案: `.agents/skills/command-team/SKILL.md` の「割り当ての記録」の列の一覧に「調査の行は `thread_id`・作業ブランチ・報告 PR の番号も書く（`docs/agents/command-team-details.md` の「調査（入口B）」）」を足すと、列の正本から調査の追加の列へたどれる
+
+使ったスキル: implement-issue
