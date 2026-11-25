@@ -307,6 +307,18 @@ expect_log dev_git_push "push -u origin HEAD"
 # resign が upstream を確かめる rev-parse を呼んだ形跡（= push 後に走った証拠）
 expect_log dev_git_push "rev-parse --abbrev-ref --symbolic-full-name @{u}"
 
+# CDPATH に一致する項目（`.` など）があると、bash の cd は `/`・`.`・`..` で始まらない相対パスへ移ったとき移動先を標準出力に出す（#700）。
+# 標準の呼び方 `scripts/agent-gh` では $0 が相対のため、`$(cd "$(dirname "$0")" && pwd)` の値にその行が混ざり、resign のパスが壊れて
+# push の成功後に終了コード 4 になる。`./` で始まらない相対の $0（シンボリックリンク bin 経由）と CDPATH=. で、resign まで走って 0 で終わる。
+ln -s "$(dirname "$SCRIPT")" "$ROOT/norepo/bin"
+export CALL_LOG="$ROOT/cdpath_rel0_resign.log"
+rm -f "$CALL_LOG"
+(cd "$ROOT/norepo" && CDPATH=. bash bin/agent-gh dev git push -u origin HEAD >"$ROOT/cdpath_rel0_resign.out" 2>&1)
+push_rc=$?
+[[ "$push_rc" == 0 ]] || failures+=("cdpath_rel0_resign: exit $push_rc, want 0: $(cat "$ROOT/cdpath_rel0_resign.out")")
+expect_log cdpath_rel0_resign "rev-parse --abbrev-ref --symbolic-full-name @{u}"
+rm -f "$ROOT/norepo/bin"
+
 # PELWAY_AGENT_SKIP_RESIGN=1 のときは resign を呼ばない
 export CALL_LOG="$ROOT/dev_git_push_skip.log"
 rm -f "$CALL_LOG"
@@ -1062,6 +1074,35 @@ RC=$?
 [[ "$RC" == 0 ]] || failures+=("rel_tmpdir_ok: exit $RC, want 0: $OUT")
 [[ "$(remote_ref agent/author_block)" == "$(work_git rev-parse HEAD)" ]] || failures+=("rel_tmpdir_ok: remote ref not updated")
 work_git reset -q --hard "$before"
+rm -rf "$PUSH_DIR/work/sub"
+
+# 相対 TMPDIR と CDPATH の併用（#700）。CDPATH に一致する項目（`.` など）があると、bash の cd は `/`・`.`・`..` で始まらない相対パスへ移ったとき
+# 移動先を標準出力に出す。mktemp が返す相対の一時フックの dir を `$(cd … && pwd -P)` で解決すると、その行が値に混ざって改行入りのパスになり、
+# 一時フックを書けずに正しい名義の push も止まる。CDPATH を無効にして解決すれば、名義の確認は効き（止まるべき push は止まる）、正しい名義の push は通る。
+setup_push_repo cdpath
+mkdir -p "$PUSH_DIR/work/sub/dir/rel-tmp"
+base="$(work_git rev-parse HEAD)"
+(cd "$PUSH_DIR/work" && as hatai commit -q --allow-empty -m bad-cdpath)
+bad_sha="$(work_git rev-parse --short HEAD)"
+OUT="$(cd "$PUSH_DIR/work/sub/dir" && CDPATH=. TMPDIR=rel-tmp PATH="$RGBIN:$PATH" bash "$SCRIPT" dev git push -u origin HEAD 2>&1)"
+RC=$?
+[[ "$RC" != 0 ]] || failures+=("cdpath_rel_tmpdir_block: exit 0, want non-zero")
+[[ "$OUT" == *"$bad_sha"* && "$OUT" == *"push を止めました"* ]] || failures+=("cdpath_rel_tmpdir_block: not stopped by the hook: $OUT")
+[[ -z "$(remote_ref agent/cdpath)" ]] || failures+=("cdpath_rel_tmpdir_block: remote ref created")
+work_git reset -q --hard "$base"
+(cd "$PUSH_DIR/work" && as 'pelway-dev[bot]' commit -q --allow-empty -m ok-cdpath)
+OUT="$(cd "$PUSH_DIR/work/sub/dir" && CDPATH=. TMPDIR=rel-tmp PELWAY_AGENT_SKIP_RESIGN=1 PATH="$RGBIN:$PATH" bash "$SCRIPT" dev git push -u origin HEAD 2>&1)"
+RC=$?
+[[ "$RC" == 0 ]] || failures+=("cdpath_rel_tmpdir_ok: exit $RC, want 0: $OUT")
+[[ "$(remote_ref agent/cdpath)" == "$(work_git rev-parse HEAD)" ]] || failures+=("cdpath_rel_tmpdir_ok: remote ref not updated")
+# 標準の呼び方 `scripts/agent-gh` では $0 が相対のため、pr-size ゲートのパス（`$(cd "$(dirname "$0")" && pwd)`）にも同じ行が混ざり、
+# 一時フックがゲートを起動できずに正しい名義の push が止まる。`./` で始まらない相対の $0（シンボリックリンク bin 経由）と CDPATH=. でも通る。
+ln -s "$(dirname "$SCRIPT")" "$PUSH_DIR/work/sub/dir/bin"
+(cd "$PUSH_DIR/work" && as 'pelway-dev[bot]' commit -q --allow-empty -m ok-cdpath-rel0)
+OUT="$(cd "$PUSH_DIR/work/sub/dir" && CDPATH=. PELWAY_AGENT_SKIP_RESIGN=1 PATH="$RGBIN:$PATH" bash bin/agent-gh dev git push origin HEAD 2>&1)"
+RC=$?
+[[ "$RC" == 0 ]] || failures+=("cdpath_rel0_gate_ok: exit $RC, want 0: $OUT")
+[[ "$(remote_ref agent/cdpath)" == "$(work_git rev-parse HEAD)" ]] || failures+=("cdpath_rel0_gate_ok: remote ref not updated")
 rm -rf "$PUSH_DIR/work/sub"
 
 # 6. review の push も同じ確認を通る。正しい名義は pelway-review[bot]。
