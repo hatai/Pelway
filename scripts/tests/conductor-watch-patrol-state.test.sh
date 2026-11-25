@@ -6,7 +6,7 @@
 # 旧置き場（$XDG_STATE_HOME/pelway/patrol-state.json）からの移行も同じ検査で読み（通常ファイル以外は
 # 開かずに飛ばす）、新置き場に何も無いときだけ作る。記録の親ディレクトリ（共有 git dir の pelway/）は
 # symlink をたどらずに開いて確かめ、確かめられない回は読まず書かない。移行と書き戻しは記録を 0600 で作り、
-# 書き戻しが上限を超える回は置き換えずに読めていた記録を保つ（字下げで膨らむ記録も、全体を一度に整形せずに判定する）。止まりの検知のテスト（conductor-watch-stall.test.sh）と同じく、
+# 書き戻しが上限を超える回は置き換えずに読めていた記録を保つ（字下げで膨らむ記録も、全体を一度に整形せずに判定する）。整形が例外で止まる深い入れ子の記録も、置き換えずに保つ。止まりの検知のテスト（conductor-watch-stall.test.sh）と同じく、
 # 巡回は setsid で動かし、10 秒で終わらなければ止めて「時間内に終わらない」とする。
 set -uo pipefail
 
@@ -58,6 +58,8 @@ SEEDED_SINCE="2020-01-01T00:00:00+09:00"
 # トップレベルの updated_at）では上限を超える大きさになる。
 # deep は、300 段に入れ子にした配列で読み取り上限の手前まで埋めた詰めた JSON で、字下げで 1 GiB を超える
 # 大きさに膨らむ（全体を一度に整形すると、試験 16 のメモリ上限を超える）。
+# deeper は、2000 段に入れ子にした小さな配列の詰めた JSON で、読み取り上限より十分小さく、読み取り（json.loads）は
+# できるが、整形（Python の再帰の上限。既定 1000）では RecursionError になる深さを持つ。
 seed() {
   python3 -I - "$1" "${2:-0}" "$SEEDED_SINCE" <<'EOF'
 import json, sys
@@ -79,6 +81,11 @@ elif pad == "deep":
     for _ in range(depth - 1): deep = [deep]
     d["deep"] = deep
     open(p, "w", encoding="utf-8").write(compact())
+elif pad == "deeper":
+    deep = []
+    for _ in range(1999): deep = [deep]
+    d["deep"] = deep
+    open(p, "w", encoding="utf-8").write(json.dumps(d, ensure_ascii=False, separators=(",", ":"), sort_keys=True))
 else:
     if int(pad): d["pad"] = "x" * int(pad)
     json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
@@ -311,6 +318,22 @@ check "16: the deeply nested record is kept byte-identical" cmp -s "$STATE" "$RO
 check "16: the conductor's items survive three cycles" eq "$(task_id)" "seeded"
 check "16: waiting_since survives three cycles" eq "$(since61)" "$SEEDED_SINCE"
 check "16: no temporary file is left" \
+  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name patrol-state.json | wc -l)" "0"
+
+# 試験 17: 読み取りはできるが整形で Python の再帰の上限を超える記録（2000 段の入れ子。読み取り上限より十分小さい）
+# でも、整形の例外で巡回を止めない。3 周回しても例外を出さず、理由の行を 1 回だけ出し、置き換えずに読めていた
+# 記録を保ち、一時ファイルを残さない。
+reset; seed "$STATE" deeper; cp "$STATE" "$ROOT/deeper.orig"
+check "17: the deeper record is far below the read limit" test "$(stat -c %s "$STATE")" -le 65536
+run_cycles 3
+check "17: the cycles finish within 10 seconds" in_time
+check "17: the cycles raise no Python exception" lacks "$ROOT/out.log" "Traceback"
+check "17: the skipped write-back is logged once" \
+  eq "$(grep -c 'WATCHER patrol-state-write-skipped .*reason=unencodable' "$ROOT/out.log")" "1"
+check "17: the deeper record is kept byte-identical" cmp -s "$STATE" "$ROOT/deeper.orig"
+check "17: the conductor's items survive three cycles" eq "$(task_id)" "seeded"
+check "17: waiting_since survives three cycles" eq "$(since61)" "$SEEDED_SINCE"
+check "17: no temporary file is left" \
   eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name patrol-state.json | wc -l)" "0"
 
 if ((${#failures[@]})); then

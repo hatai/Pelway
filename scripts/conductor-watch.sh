@@ -243,16 +243,21 @@ def read_ps():  # read_request と同じく通常ファイル・待ち・量に�
         if len(data) > PS_MAX:
             raise ValueError("not a regular patrol-state file")
         return data
-def write_ps(obj):  # 書き戻せたら None、書き戻さなかったらその理由（dir-invalid・too-large）を返す
+def write_ps(obj):  # 書き戻せたら None、書き戻さなかったらその理由（dir-invalid・too-large・unencodable）を返す
     if ps_dfd is None: return "dir-invalid"
     # 次の巡回で読めない大きさ（read_ps の上限超え）なら置き換えず、読めていた記録を保つ。字下げは入れ子が
     # 深いほど膨らみ、上限内の記録でも全体を一度に整形するとメモリを使い切るため、少しずつ整形して UTF-8 の
     # 累計バイト数を数え、上限を超えた時点で打ち切る（json.dumps と同じ出力）。
+    # 整形が例外で止まる記録（json.loads は C の再帰の上限まで読めるが、整形は Python の再帰の上限で
+    # RecursionError になる深い入れ子など）も置き換えず、読めていた記録を保って理由を返す。
     parts, size = [], 0
-    for chunk in json.JSONEncoder(ensure_ascii=False, indent=2, sort_keys=True).iterencode(obj):
-        b = chunk.encode("utf-8"); size += len(b)
-        if size > PS_MAX: return "too-large"
-        parts.append(b)
+    try:
+        for chunk in json.JSONEncoder(ensure_ascii=False, indent=2, sort_keys=True).iterencode(obj):
+            b = chunk.encode("utf-8"); size += len(b)
+            if size > PS_MAX: return "too-large"
+            parts.append(b)
+    except Exception:
+        return "unencodable"
     data = b"".join(parts)
     # symlink の先・FIFO に書かず、同じディレクトリの一時ファイルからの置き換えで行う。一時ファイルは
     # 予測できない名前を O_EXCL|O_NOFOLLOW・0600 で作る（ボード Status 更新キューの結果ファイルと同じ）。
@@ -778,7 +783,7 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
     cur["due_warned"] = {k: v for k, v in cur["due_warned"].items() if k in new_subj}
     cur["stall_notified"] = {k: v for k, v in cur["stall_notified"].items() if k in new_subj}
     ps["updated_at"] = now_iso
-    # 書き戻さなかった回（親ディレクトリを確かめられない・上限を超える）は理由の行を出す。続く間は
+    # 書き戻さなかった回（親ディレクトリを確かめられない・上限を超える・整形できない）は理由の行を出す。続く間は
     # HEARTBEAT_SECS ごと（理由が変わればすぐ）に出し直し、書き戻せた回に回復の行を 1 つ出す。
     why = write_ps(ps)
     wsk = cur["ps_write_skipped"] if isinstance(cur["ps_write_skipped"], dict) else None
