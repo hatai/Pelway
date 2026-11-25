@@ -691,7 +691,22 @@ cur["slots"] = slots_sig
 rec = {"updated_at": now, "status": slots_st}
 if slots_reason is not None: rec["reason"] = slots_reason
 if slots_usage is not None: rec["usage"] = slots_usage
-json.dump(rec, open(os.path.join(d, "slots.json"), "w"), ensure_ascii=False)
+# 同じディレクトリの一時ファイルからの置き換えで公開し、読み手に空・書きかけの記録が
+# 見えないようにする（write_ps と同じ形）。書けない巡回はそのまま次へ進める: 更新されない
+# slots.json は updated_at の鮮度の条件で、無いものは置き場の条件で、指揮役が実測の
+# 数え方に戻る（runbook「3. 同時数と順番待ち」）。
+try:
+    tmp = os.path.join(d, f".slots.{secrets.token_hex(8)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f: json.dump(rec, f, ensure_ascii=False)
+        os.replace(tmp, os.path.join(d, "slots.json"))
+    except BaseException:
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
+except Exception:
+    pass
 json.dump(cur, open(sp, "w"))
 # 取得に成功し、かつどちらの一覧も打ち切られていない（件数が上限に達していない）ときだけ更新する。
 if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr_limit:

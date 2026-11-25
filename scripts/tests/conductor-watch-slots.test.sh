@@ -31,8 +31,8 @@ SLOTS="$ROOT/state/pelway/conductor-watch/slots.json"
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$MOCK/gh-calls.log"
-[[ "$2 $3" == "issue list" ]] && { cat "$MOCK/issues.json"; exit 0; }
-[[ "$2 $3" == "pr list" ]] && { cat "$MOCK/prs.json"; exit 0; }
+[[ "$2 $3" == "issue list" ]] && { cat "$MOCK/issues.json"; exit $?; }
+[[ "$2 $3" == "pr list" ]] && { cat "$MOCK/prs.json"; exit $?; }
 [[ "$2 $3" == "api /repos/hatai/Pelway/issues/events?per_page=100" ]] && { echo '[]'; exit 0; }
 exit 9
 EOF
@@ -153,8 +153,8 @@ check() {
   if "$@"; then printf 'ok   %s\n' "$name"; else printf 'FAIL %s\n' "$name"; failures+=("$name"); fi
 }
 
-has() { grep -q "$2" "$1"; }
-nhas() { ! grep -q "$2" "$1"; }
+has() { grep -Eq "$2" "$1"; }
+nhas() { ! grep -Eq "$2" "$1"; }
 calls() { wc -l < "$MOCK/gh-calls.log"; }
 # slots.json の <key> の値を取り出す（status・usage.<担当>.used などの jq 風のパス）
 slot() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[2]));
@@ -289,7 +289,20 @@ check "other lines still emitted without toml" has "$ROOT/out.log" '^HEARTBEAT '
 check "watch kept cycling without toml" bash -c "(( \$(wc -l < '$MOCK/gh-calls.log') - $before == 3 ))"
 check "slots.json status unavailable without toml" slot_eq status unavailable
 
-# --- 13. 見張りは GitHub に書き込まない（agent-gh は読み取りだけ、素の gh も呼ばない） ---
+# --- 13. slots.json を書けない巡回でも見張りは止まらず、巡回の残りの処理を続ける ---
+write_toml
+rm "$SLOTS"; mkdir "$SLOTS"   # 置き換え先をディレクトリにして公開（os.replace）を失敗させる
+set_now 1700003500
+: > "$ROOT/out.log"
+before=$(calls)
+run_cycles 1
+check "watch kept cycling when slots.json unwritable" bash -c "(( \$(wc -l < '$MOCK/gh-calls.log') - $before == 3 ))"
+check "other lines still emitted when slots.json unwritable" has "$ROOT/out.log" '^HEARTBEAT '
+rmdir "$SLOTS"
+run_cycles 1
+check "slots.json resumes after path restored" slot_eq status ok
+
+# --- 14. 見張りは GitHub に書き込まない（agent-gh は読み取りだけ、素の gh も呼ばない） ---
 if grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/events)" "$MOCK/gh-calls.log" | grep -q .; then
   printf 'FAIL %s\n' "no non-read agent-gh calls"
   failures+=("no non-read agent-gh calls")
