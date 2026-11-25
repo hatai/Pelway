@@ -260,7 +260,7 @@ check investigation_takeover_record "$RB" \
 check investigation_takeover_skill "$RB" \
   '報告 PR のレビューを待つ間（修正を push した後など）は `state: waiting-conductor`・`head:`・`next:` の 3 行の形で書かせ' \
   'Draft を解除し終えたら同じ skill の手順 10 の終わりの報告の 6 行（`issue:`・`pr:`・`review:`・`ready: done`・`memo:`・`state: done`）で書かせる' \
-  '`review:` は指揮役が立てた報告 PR のレビューのラウンド数と `approve`、`memo:` は `none`（報告 PR は報告のファイルだけで、実装者メモを書かないため）' \
+  '`review:` は指揮役が立てた報告 PR のレビューのラウンド数と `approve`、および同じ手順 10 の形の `run` の ID（現在の head の必要な実行の委託記録の ID。指揮役が「続きをやり直す」に添えた `run <ID>` を GitHub で確かめて書く）、`memo:` は `none`（報告 PR は報告のファイルだけで、実装者メモを書かないため）' \
   '巡回の定型の指示（「続きをやり直す」など）を受けたときは、GitHub の実状態で作業を決めさせる' \
   '終了通知（5 の表の `finished`）は、実装スレッドと同じく `pr:` と `ready: done` を読んでマージの判断に進む' \
   '同じ照合のうち Draft の代わりに Draft でないこと（`ready:` の行）で確かめ' \
