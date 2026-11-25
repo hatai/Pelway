@@ -41,13 +41,13 @@ assign_label = "agent:devin"
 [agents.codex]
 instance = { review = "codex_review" }
 models = ["gpt-6.2-sol", "gpt-6.1-terra", "gpt-6-luna"]
-effort = { option = "reasoningEffort", raise = ["low", "medium", "high", "xhigh"] }
+effort = { option = "reasoningEffort", raise = ["low", "medium", "high", "xhigh", "max"] }
 assign_label = ""
 
 [agents.claude]
 instance = { review = "claude_review" }
 models = ["claude-opus-5-5"]
-effort = { option = "effort", raise = ["low", "medium", "high", "max"] }
+effort = { option = "effort", raise = ["low", "medium", "high", "xhigh", "max"] }
 assign_label = ""
 EOF
 }
@@ -70,22 +70,35 @@ check "2: slots hatai prints opencode 3" eq "$(printf '%s\n' "$out" | grep -cx '
 check "2: slots hatai prints devin 6" eq "$(printf '%s\n' "$out" | grep -cx 'devin 6')" "1"
 check "2: slots hatai prints exactly 2 lines" eq "$(printf '%s\n' "$out" | grep -c .)" "2"
 
-# 試験 3: 登録情報のインスタンス名とモデルが運用中の名前と同じ。
+# 試験 3: 登録情報のインスタンス名とモデルが運用中の名前と同じ。役割ごとの
+# インスタンス名の表全体と、モデルの一覧全体を各担当で比較する。
 pins="$(python3 -I - "$REPO/agent-team.toml" <<'PY' 2>&1
 import sys, tomllib
 d = tomllib.load(open(sys.argv[1], "rb"))
 a = d["agents"]
-checks = [
-    (a["opencode"]["instance"]["implement"], "opencode"),
-    (a["opencode"]["models"][0], "zai-coding-plan/glm-5.3"),
-    (a["devin"]["instance"]["implement"], "acpRegistry_devin"),
-    (a["devin"]["instance"]["review"], "devin_review"),
-    (a["devin"]["models"][0], "swe-2-high"),
-    (a["codex"]["instance"]["review"], "codex_review"),
-    (a["claude"]["instance"]["review"], "claude_review"),
-    (a["claude"]["models"][0], "claude-opus-5-5"),
+want = {
+    "opencode": (
+        {"implement": "opencode", "investigate": "opencode"},
+        ["zai-coding-plan/glm-5.3"],
+    ),
+    "devin": (
+        {"implement": "acpRegistry_devin", "review": "devin_review"},
+        ["swe-2-high"],
+    ),
+    "codex": (
+        {"review": "codex_review"},
+        ["gpt-6.2-sol", "gpt-6.1-terra", "gpt-6-luna"],
+    ),
+    "claude": (
+        {"review": "claude_review"},
+        ["claude-opus-5-5"],
+    ),
+}
+bad = [
+    f"{n}: instance={a[n]['instance']} models={a[n]['models']}"
+    for n, (inst, models) in want.items()
+    if a[n]["instance"] != inst or a[n]["models"] != models
 ]
-bad = [f"{got}!={want}" for got, want in checks if got != want]
 print("\n".join(bad) if bad else "ok")
 PY
 )"
@@ -230,7 +243,9 @@ normal = ["codex"]
 [developers.dev.priority.review]
 normal = ["codex", "claude"]
 EOF
-v_run "$ROOT/noimpl.toml"; check "8: no implement-capable agent fails" eq "$?" "1"
+v_run "$ROOT/noimpl.toml"; rc=$?
+check "8: no implement-capable agent fails" eq "$rc" "1"
+check "8: names the use check for implement" has "$ROOT/err" "developers.dev.use: 実装の役割を持つ担当が 1 つも無い"
 write_case "$ROOT/norev.toml" <<'EOF'
 [developers.dev]
 use = ["opencode"]
@@ -244,7 +259,7 @@ normal = ["opencode"]
 EOF
 v_run "$ROOT/norev.toml"; rc=$?
 check "8: no review-capable agent fails" eq "$rc" "1"
-check "8: names the use key" has "$ROOT/err" "developers.dev.use"
+check "8: names the use check for review" has "$ROOT/err" "developers.dev.use: レビューの役割を持つ担当が 1 つも無い"
 
 # 試験 9: TOML として読めないファイルは非 0。
 printf 'this is [ not valid toml\n' > "$ROOT/broken.toml"
@@ -302,6 +317,34 @@ EOF
 v_run "$ROOT/nolimit.toml"; rc=$?
 check "14: implement-capable agent without a limit fails" eq "$rc" "1"
 check "14: names the missing limit" has "$ROOT/err" "devin"
+
+# 試験 15: slots はファイル全体の検証を通してから出す。未登録の担当・枠の欠落・
+# 途中の上限値の誤りでは、非 0 で標準出力は空。
+s_run() { bash "$CFG" slots dev "$1" 2> "$ROOT/err" > "$ROOT/out"; }
+s_run "$ROOT/unknown.toml"; rc=$?
+check "15: slots with unregistered agent fails" eq "$rc" "1"
+check "15: slots prints nothing on unregistered agent" eq "$(grep -c . "$ROOT/out")" "0"
+s_run "$ROOT/nolimit.toml"; rc=$?
+check "15: slots with missing limit fails" eq "$rc" "1"
+check "15: slots prints nothing on missing limit" eq "$(grep -c . "$ROOT/out")" "0"
+write_case "$ROOT/midbad.toml" <<'EOF'
+[developers.dev]
+use = ["opencode", "devin", "codex", "claude"]
+[developers.dev.slots]
+opencode = 1
+devin = 0
+[developers.dev.review_limits]
+codex = 1
+devin = 1
+claude = 1
+[developers.dev.priority.implement]
+normal = ["devin", "opencode"]
+[developers.dev.priority.review]
+normal = ["codex", "devin"]
+EOF
+s_run "$ROOT/midbad.toml"; rc=$?
+check "15: slots with mid-list bad limit fails" eq "$rc" "1"
+check "15: slots prints nothing on mid-list bad limit" eq "$(grep -c . "$ROOT/out")" "0"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

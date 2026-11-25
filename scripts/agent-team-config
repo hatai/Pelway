@@ -3,6 +3,7 @@
 # 使い方:
 #   scripts/agent-team-config validate [<file>]       検証する。<file> の既定はルートの agent-team.toml
 #   scripts/agent-team-config slots <login> [<file>]  その開発者の実装・調査の枠を「<担当> <上限>」で 1 行 1 つ出す
+#                                                     （validate と同じ検証を通してから出す。違反があれば非 0 で標準出力は空）
 #   scripts/agent-team-config -h | --help             この使い方を出す
 # 終了コード: 0 = 成功、1 = 検証の失敗・TOML として読めない・読み出せない、2 = 引数の誤り・ファイルが無い
 # TOML は python3 の tomllib で読み、scripts/conductor-watch.sh と同じ python3 -I で起動する。
@@ -24,7 +25,9 @@ subcommands:
                           違反は 1 行 1 つ「<file>: <キー>: <内容>」を標準エラーに出し、
                           1 件でもあれば終了コード 1。合格なら 1 行だけ標準出力に出す
   slots <login> [<file>]  開発者 <login>（GitHub の login）の実装・調査の同時枠を
-                          「<担当> <上限>」で 1 行 1 つ、ファイルの並びどおりに出す
+                          「<担当> <上限>」で 1 行 1 つ、ファイルの並びどおりに出す。
+                          validate と同じ検証を通してから出し、違反があれば
+                          標準出力には何も出さずに終了コード 1 で止まる
 EOF
   exit 0
 }
@@ -197,7 +200,7 @@ def check_developers(doc, agents):
                             err(ckey, f"{role} の役割を担わない担当: {n}")
 
 
-def do_validate(path):
+def validate_doc(path):
     doc = load(path)
     agents = check_agents(doc)
     check_developers(doc, agents)
@@ -205,20 +208,21 @@ def do_validate(path):
         for e in errors:
             sys.stderr.write(f"{path}: {e}\n")
         sys.exit(1)
+    return doc
+
+
+def do_validate(path):
+    validate_doc(path)
     print(f"agent-team-config: ok {path}")
 
 
 def do_slots(login, path):
-    doc = load(path)
-    devs = doc.get("developers")
-    if not isinstance(devs, dict) or not isinstance(devs.get(login), dict):
+    # 読み出しも検証を共有する。違反があれば標準出力には何も出さずに非 0 で止まる。
+    doc = validate_doc(path)
+    devs = doc.get("developers", {})
+    if not isinstance(devs.get(login), dict):
         fail(f"{path}: developers.{login} の表が無い")
-    slots = devs[login].get("slots")
-    if not isinstance(slots, dict):
-        fail(f"{path}: developers.{login}.slots の表が無い")
-    for name, v in slots.items():
-        if not pos_int(v):
-            fail(f"{path}: developers.{login}.slots.{name} が 1 以上の整数でない")
+    for name, v in devs[login]["slots"].items():
         print(f"{name} {v}")
 
 

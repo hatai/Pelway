@@ -36,15 +36,19 @@ assign_label = "agent:devin"
 [agents.codex]
 instance = { review = "codex_review" }
 models = ["gpt-6.2-sol", "gpt-6.1-terra", "gpt-6-luna"]
-effort = { option = "reasoningEffort", raise = ["low", "medium", "high", "xhigh"] }
+effort = { option = "reasoningEffort", raise = ["low", "medium", "high", "xhigh", "max"] }
 assign_label = ""
+# raise の有効値の一覧は文書に無い（docs/worklogs/issue-713.md の 4 項目め）。low〜xhigh と
+# max は docs/worklogs/ で委託に使われた実績のある値から取った。
 # models の 3 つの選び方の条件は skill command-team「Codex のモデル」に残す（この Issue では変えない）。
 
 [agents.claude]
 instance = { review = "claude_review" }
 models = ["claude-opus-5-5"]
-effort = { option = "effort", raise = ["low", "medium", "high", "max"] }
+effort = { option = "effort", raise = ["low", "medium", "high", "xhigh", "max"] }
 assign_label = ""
+# raise の有効値の一覧は文書に無い（docs/worklogs/issue-713.md の 4 項目め）。xhigh・max は
+# docs/worklogs/ で委託に使われた実績と、レビュー担当が確認したハーネスの列挙から取った。
 
 # ── 開発者ごとの表（キーは GitHub の login 名）────────────────────────
 # 各開発者に置くもの:
