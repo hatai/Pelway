@@ -2,7 +2,7 @@
 # scripts/conductor-watch.sh の patrol-state.json の読み書き（Issue #699）のテスト。
 # 補助記録は sandbox の中からも書ける共有 git dir にあるため、巡回は symlink をたどらず、
 # FIFO で止まらず、通常ファイルで 4 MiB 以下のときだけ読み（#680 の read_ps）、書き戻しは
-# 同じディレクトリの一時ファイルからの置き換えで行う（symlink の先や FIFO に書かない）。
+# 同じディレクトリの一時ファイルからの置き換えで行う（symlink の先や FIFO に書かない）。辞書でない記録は空として扱う。
 # 旧置き場（$XDG_STATE_HOME/pelway/patrol-state.json）からの移行も同じ検査で読み、
 # 新置き場に何も無いときだけ作る。止まりの検知のテスト（conductor-watch-stall.test.sh）と同じく、
 # 巡回は setsid で動かし、10 秒で終わらなければ止めて「時間内に終わらない」とする。
@@ -194,6 +194,12 @@ run_cycles 1
 check "10: the cycle finishes within 10 seconds" in_time
 check "10: no temporary file is left after a failed replace" \
   eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name patrol-state.json | wc -l)" "0"
+
+# 試験 11: 記録が JSON として読めても辞書でない（[]）なら、空の記録として扱い、巡回を止めずに書き戻す。
+reset; printf '[]\n' > "$STATE"
+run_cycles 1
+check "11: the cycle finishes within 10 seconds" in_time
+check "11: a non-object patrol-state is replaced by a fresh record" written
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

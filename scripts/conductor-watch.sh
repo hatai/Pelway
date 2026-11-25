@@ -551,9 +551,10 @@ json.dump(cur, open(sp, "w"))
 ps_path = sys.argv[2]
 issue_limit = int(sys.argv[3]); pr_limit = int(sys.argv[4])
 # 記録は sandbox の中からも置き換えられるため read_ps で読み（Issue #699）、読めないもの（JSON でない・
-# 通常ファイルでない・4 MiB を超える）は無いものとして扱って、下の書き戻しで新しい記録に置き換える。
+# 辞書でない・通常ファイルでない・4 MiB を超える）は無いものとして扱って、下の書き戻しで新しい記録に置き換える。
 try: ps = json.loads(read_ps(ps_path))
 except Exception: ps = {}
+if not isinstance(ps, dict): ps = {}
 if not isinstance(ps.get("subjects"), dict): ps["subjects"] = {}
 # 取得に成功し、かつどちらの一覧も打ち切られていない（件数が上限に達していない）ときだけ更新する。
 if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr_limit:
