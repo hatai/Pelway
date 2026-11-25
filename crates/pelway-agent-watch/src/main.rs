@@ -294,7 +294,15 @@ impl Watcher {
         let mut to_inbox: Vec<(Value, Option<String>)> = pending
             .unwrap_or_else(|| self.state.outbox.clone())
             .iter()
-            .map(pending_notice_parts)
+            .map(|item| {
+                let (p, wrapped_creator) = pending_notice_parts(item);
+                let stored = wrapped_creator.or_else(|| {
+                    p.get("thread_id")
+                        .and_then(Value::as_str)
+                        .and_then(|id| self.state.inbox_pending_creators.get(id).cloned())
+                });
+                (p, stored)
+            })
             .collect();
         to_inbox.extend(payloads.iter().map(|(p, _)| (p.clone(), None)));
         if !to_inbox.is_empty() {
@@ -342,7 +350,18 @@ impl Watcher {
                     eprintln!("agent-watch: ERROR inbox append failed: {e}");
                     let pending = self.state.inbox_pending.get_or_insert_default();
                     for ((p, _), notice) in to_inbox.iter().zip(&notices) {
-                        outbox::push(pending, pending_notice(p, notice.created_by.as_deref()));
+                        // 記録の要素は payload そのものに留める（別の形に包むと、更新前の
+                        // 版に戻したときに包んだ形のまま受信箱に書かれて読み手に拾えない）。
+                        // 判明している立て手は別項目に thread_id で残す
+                        outbox::push(pending, p.clone());
+                        if let (Some(id), Some(c)) = (
+                            p.get("thread_id").and_then(Value::as_str),
+                            notice.created_by.as_deref(),
+                        ) {
+                            self.state
+                                .inbox_pending_creators
+                                .insert(id.to_string(), c.to_string());
+                        }
                     }
                 }
             }
@@ -519,20 +538,10 @@ impl Watcher {
     }
 }
 
-/// 受信箱への再試行の記録 1 件の形。その時点で判明している立て手を `created_by` に残す。
-/// 立て手を残さないと、追記が失敗した回のあとでは詳細を取り直さない（完了済みのスレッドは
-/// 状態が変わらないため詳細を取らない）ので、立て手不明として起こす側に倒れてしまう。
-fn pending_notice(payload: &Value, created_by: Option<&str>) -> Value {
-    let mut v = serde_json::json!({ "notice": payload });
-    if let Some(c) = created_by {
-        v["created_by"] = serde_json::json!(c);
-    }
-    v
-}
-
 /// 再試行の記録を（受信箱に書く payload, 記録されていた立て手）に戻す。
-/// 前の版の記録（`schema` を持つ payload そのもの）と形の違うものは、payload そのもの・
-/// 立て手なしとして扱い、その周の一覧・詳細から立て手を取り直す。
+/// 記録の要素は payload そのものが正の形で、`{ "notice": <payload>, "created_by": ... }` に
+/// 包んだ中間の版の記録は payload と立て手に戻す。どちらの形でもないものは、payload その
+/// もの・立て手なしとして扱い、その周の一覧・詳細から立て手を取り直す。
 fn pending_notice_parts(item: &Value) -> (Value, Option<String>) {
     if item.get("schema").is_none()
         && let Some(p) = item.get("notice").filter(|n| n.is_object())

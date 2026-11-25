@@ -1312,6 +1312,19 @@ fn inbox_retry_keeps_resolved_creator() {
         "{}",
         stderr(&out)
     );
+    // 再試行の記録は payload そのものに留める（別の形に包むと、更新前の版に戻した
+    // ときに包んだ形のまま受信箱に書かれて、読み手が拾えない行になる）。判明して
+    // いた立て手は別項目に残る
+    let state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
+    let pending = &state["inbox_pending"][0];
+    assert_eq!(pending["schema"], "pelway.agent-watch/v1", "{state}");
+    assert_eq!(pending["event"], "finished", "{state}");
+    assert!(
+        pending.get("notice").is_none() && pending.get("created_by").is_none(),
+        "{state}"
+    );
+    assert_eq!(state["inbox_pending_creators"]["mcp:a"], "user", "{state}");
     // 受信箱を直してもう一周。次の周回では詳細を取り直さないため、
     // 記録に残した立て手で判定する
     fs::remove_file(sb.inbox()).unwrap();

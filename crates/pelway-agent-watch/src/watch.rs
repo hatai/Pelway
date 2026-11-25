@@ -79,8 +79,16 @@ pub struct State {
     pub outbox_backoff: Option<crate::outbox::Backoff>,
     /// 指揮役の受信箱に書けなかった payload（古い順）。次の周回で、新しい知らせより先に書き直す。
     /// `None` はこの項目の無い更新前の版の状態で、送信待ちの列の知らせを受信箱に書けたかが分からない。
+    /// 要素は payload そのものに留める。別の形に包むと、更新前の版に戻したときに
+    /// 包んだ形のまま受信箱に書かれて、読み手が拾えない行になる。
     #[serde(default)]
     pub inbox_pending: Option<Vec<serde_json::Value>>,
+    /// `inbox_pending` に残した知らせの元のスレッドの立て手（thread_id → `createdBy`）。
+    /// 追記に失敗した時点で判明していた立て手を残す。残さないと、追記をやり直す回では
+    /// 完了済みスレッドの詳細を取り直さないため、立て手不明として起こす側に倒れてしまう。
+    /// 立て手は payload に入れずこの別項目に持つ（上の `inbox_pending` の形の約束）。
+    #[serde(default)]
+    pub inbox_pending_creators: BTreeMap<String, String>,
     /// 前回指揮役を起こしたときの、指揮役の既読の位置（補助記録の `inbox_offset`）。
     /// 既読の位置がここから進むまで、重ねて起こさない。
     #[serde(default)]
