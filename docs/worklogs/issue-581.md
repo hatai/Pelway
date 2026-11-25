@@ -95,3 +95,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 3 に「割り当ての worktree が別のブランチを checkout しているときは、PR ブランチの remote の先端から別名のブランチを作り、`HEAD:<PR ブランチ>` で push する」を足す（round 2〜8 で毎回起きた）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 9）
+
+対象 head: 5c2bee62d04047541a2c8519e96068a2e55649b2
+
+1. 詰まった箇所: worktree の用意: 割り当ての worktree は別のブランチ（`t3/fix-pr695-doc-nits`）だったので、`origin/agent/581-fail-closed-tool-check` から作り直し、`HEAD:agent/581-fail-closed-tool-check` で push した。範囲内のマージコミット 42df844a により署名は付け替えられず、push は署名なしのまま。
+2. 曖昧だった文: 「直し方: 先頭の句を外して runbook:163 にそろえる。または、括弧書きに「委託中の子が動いていれば待つ」を足す。」（claude r9 のレビュー 6053502006 の nit 1）
+3. 仮定と解釈: 両方を当てた。句を外すだけでは、必要な担当の全員が起動中の head でどの行にも当たらなくなるため、括弧書きに「この行に当たらず `waiting-review` で完了の通知を待つ」を足した。runbook:70 は正本（手順 9 の 2）の 3 つの場合に合わせ、`unknown` の記録は失敗した実行の投稿の記録に「加えて」残すと書いた。この round は `[文書のずれ]` の nit だけを直す round の通算 1 回目。委託元の指示が 2 件に絞っているため、r9 の残りの印の nit（implement-issue:477・:39、command-team:238）は直していない。
+4. 足りなかった情報・検証手段: 文書だけの変更で、文の意味を確かめる試験は無い（pin は `fail_closed_r8_*` の文言の存在の確認だけで、今回の文言は残る）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「巡回から定型の指示を受けたとき」の表に「必要な担当のすべてに起動中の実行がある」の行を独立に立てる（括弧書きに埋めず、表の行で再開先を決められるように）。
+
+使ったスキル: implement-issue
