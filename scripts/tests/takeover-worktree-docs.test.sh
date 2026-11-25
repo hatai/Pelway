@@ -61,7 +61,7 @@ check fix_round_child "$RB" \
 
 # 節に、新しいスレッド・子への依頼文に PR ブランチ名と fetch・push の形を入れることがある。
 check handoff_instruction "$RB" \
-  '新しいスレッドへの最初の指示と、修正 round の子への依頼文には、PR ブランチ名と、取り込み・push の形'
+  '新しいスレッドへの最初の指示と、修正 round の子への依頼文には、対象の PR の番号（PR がまだ無ければ Issue の番号）、PR ブランチ名と、取り込み・push の形'
 
 # runbook の再開手順の 5 と手当スレッドの項が新しい節を指す。
 check resume_pointer "$RB" \
@@ -96,8 +96,37 @@ check implement_thread_record "$RB" \
   '手当てする PR の番号（PR がまだ無ければ `none`）・新しいスレッドの `thread_id`・push 先の `<PRブランチ>` の組を書く' \
   '組は PR ごとに持ち' \
   '`implement_thread` で、その PR の番号の組を選び' \
-  'ちょうど 1 本のときだけ送って、その PR の組を書く。0 本か 2 本以上で担当を確定できないときは送らずに保留し' \
   'そのスレッドの `thread_id` で `implement_thread` の組を書き換える'
+
+# 実装スレッドへ PR についての指示を送るすべての経路で、送る直前に「送り先の照合」を行い、
+# 止まった・引き継ぎ済みのスレッドを外し、最初の指示の PR 番号と push 先で割り当てを確かめ、
+# 確定できなければ保留する決まりがある（手当スレッドの伝達・人間のレビューの伝達からも指す）。
+check send_target_check "$RB" \
+  '送り先の照合: 実装スレッドへ PR についての指示を送るすべての経路' \
+  '`branch` の一致だけでは送り先を確定しない' \
+  '2. 止まっていないこと: 候補が `t3 thread list` にあり、interrupted・cancelled で止まっていないこと' \
+  '同じ PR の組が別の `thread_id` に書き換わっているスレッドは引き継ぎ済みとして外す' \
+  '3. 割り当てが一致すること: 候補の最初の指示（`t3_thread_read` で読む）が対象 PR の番号を指すか' \
+  'かつ、そのスレッドの push 先が対象 PR の `headRefName` と同じであること' \
+  '4. 2 と 3 を通った候補がちょうど 1 本のときだけ送り' \
+  '0 本か 2 本以上、または最初の指示が読めず割り当てを確かめられないときは、送らずに保留し' \
+  '`working`・`stopped` か状態の行が無ければ止まったものとして外す' \
+  '同じ Issue の別の組のスレッドが走っている（interrupted・cancelled・completed・failed のどれでもない）ときは' \
+  '保留した指示は対応済みにしない' \
+  '伝達は「5. イベントごとの対応」の `pelway.agent-watch/v1` の「送り先の照合」を通ったときだけ行い、保留したものは対応済みにしない' \
+  'でそのスレッドが対象 PR の現在の担当であることを確かめ、確定できなければ伝達も起動もせずに保留して' \
+  '実装スレッドへ伝達する（送る直前に「5. イベントごとの対応」の `pelway.agent-watch/v1` の「送り先の照合」を行い'
+
+# 別名のブランチから初めて Draft PR を作るときは --head で push 先を指定し、作成後の
+# headRefName を push 先と照合する決まりが implement-issue の手順 7 にあり、runbook の
+# 最初の指示と再開手順の 5 がそれを指す。
+check draft_pr_head "$II" \
+  '`pr create` に `--head <PRブランチ>` を付け、push 先のブランチを PR の head に指定する' \
+  'が、最初の指示に書かれた push 先の `<PRブランチ>` と同じことを確かめ、違えば止まる条件と同じ扱いにする'
+check draft_pr_head_runbook "$RB" \
+  'Draft PR を `scripts/agent-gh dev pr create --draft --head <PRブランチ>` で作り、作成後の `headRefName` が `<PRブランチ>` と同じことを確かめる' \
+  '`--head <PRブランチ>` で作り、作成後の `headRefName` を `<PRブランチ>` と照合することを入れる' \
+  '対象の PR の番号（PR がまだ無ければ Issue の番号）、PR ブランチ名と'
 
 # 節に、起動・委託の前に PR の head リポジトリと ref を照合し、外れれば止める決まりがある。
 check head_repo_guard "$RB" \

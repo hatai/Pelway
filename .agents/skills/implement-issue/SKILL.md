@@ -201,6 +201,8 @@ EOF
 
 （作成後、PR のタイトルを `api --method PATCH --input` で日本語に設定する。手順の詳細は write-pull-request skill の手順 3 を参照）
 
+ローカルのブランチ名が push 先と違うとき（手順 6 で `HEAD:<PRブランチ>` に push したとき。PR を作る前に止まった作業を別名の作業ツリーで引き継いだ場合）は、`pr create` に `--head <PRブランチ>` を付け、push 先のブランチを PR の head に指定する。`--head` を省くと gh はローカルの別名に当たる remote のブランチを探し、それは `origin` に無いため、非対話では PR を作れない。作成後に `scripts/agent-gh dev pr view <PR 番号> --json headRefName --jq .headRefName` が、最初の指示に書かれた push 先の `<PRブランチ>` と同じことを確かめ、違えば止まる条件と同じ扱いにする。
+
 修正依頼の場合は PR を作り直さない。push したあと `scripts/agent-gh dev pr edit` で本文の「レビューと QA」と「対象」の sha を更新する。
 
 PR 本文の「レビューと QA」には round の履歴を書かず、実装者メモ（`docs/worklogs/issue-<N>.md`）を指す 1 行と、最後に検証した sha だけを書く。round の履歴の正本は実装者メモとする（round サマリーのコメント（手順 9）は別に残す）。
