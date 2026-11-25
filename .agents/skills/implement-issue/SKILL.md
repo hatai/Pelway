@@ -36,6 +36,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 | sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
 | 委託したレビューが `failed` で、`error:` が `設定の不備:` で始まる（レビュー担当の環境の確認で外したツールが残っている。skill `review-pr` の「決まり」）。再委託しない | `error:` の行と、委託した担当。手順 9「投稿後の `設定の不備:` の記録」で確かめた投稿の有無（投稿前と確認／記録を残した（記録の内容）／投稿を特定できず `review: unknown` で記録） |
+| 委託の結果を投稿に結び付けられない（手順 9: 報告を受けた実行の投稿が 0 件・2 件以上・状態の不一致のまま、または報告を待つ実行が無いのに、現在の head にどの実行にも結び付かない投稿が残る） | 委託記録の ID と担当、見つかった投稿の id・`commit_id`・`state`・末尾行 |
 | 手順 8 の helper `required-checks` が、実行し直しても続けて 3（判定できない）を返した | 2 回の実行の標準エラー出力と、対象の PR 番号 |
 | レビューの委託が `runtimeMode: "auto-accept-edits"` で受け付けられず、子タスクが作られなかった。`auto`・`full-access` に変えて委託し直さない | 委託の指定（`target`・`runtimeMode`）と、返ったエラー文 |
 | round 3 のレビュー結果に must-fix が残った（別 Issue に回せる側の指摘は除く。4 回目の修正には入らない。round 4 に入るのは hatai の例外の判断だけ。skill `command-team` の「レビューのラウンド」）、`[文書のずれ]` の nit だけを直す round を通算 2 回終えた後に、また印の nit が残った（通算 3 回目には入らない）、委託が 2 回連続で `failed`（`checks timeout` と `wrong runtime` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort）。must-fix が残ったときは、must-fix の一覧と止まった head の sha。手元にすでに修正があれば worktree に置いたまま push も削除もしない |
@@ -222,7 +223,7 @@ PR を作るたびに、T3 のスレッドにそのスレッドの PR を全部�
 
 PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。対象 head で verify が fail、必須チェックが未完了、または例外が承認されていない pr-size の失敗（例外判断が未着を含む）のときは委託しない（レビュー担当（skill `review-pr` の手順 2）は verify の fail と例外の無い pr-size の fail を must-fix に数えるため、内容を読む前に結論が決まり、委託が空振りになる）。例外が承認された pr-size の失敗は通過に数えるため、委託の可否は GitHub 上のチェックの見た目ではなく下の終了コードに従う。通過は、委託の直前に同梱の helper `.agents/skills/implement-issue/required-checks <PR 番号>` を実行し、その終了コードで確かめる（標準出力は 2 つのチェックの判定 `<名前>: <pass|fail|pending>`。同じ名前の行の集計と pr-size の例外の扱いは skill `review-pr` の手順 2 と同じ。`bucket` の `skipping` を pass、`cancel` を fail に数えることと、閉じる Issue をリポジトリと番号の組で照会することは helper だけの規則で、helper の冒頭のコメントに書いてある）。
 
-- 0（通過）: `delegate_task` を呼ぶ
+- 0（通過）: 委託記録（下の「委託記録」の段落）を残してから、`delegate_task` を呼ぶ
 - 1（失敗）: 手順 6 に戻って直す。pr-size の超過は「止まる条件」の表のとおり止まる
 - 2（待ち）: skill `pr-watch` の「待ち方」で待ってから、helper を実行し直す
 - 3（判定できない。取得の失敗・引数の誤り）: 1 回だけ実行し直し、また 3 なら止まる（「止まる条件」の表）
@@ -239,10 +240,10 @@ PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、�
 
 ```
 PR #<M> をレビューする。skill review-pr に従う。
-Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes
+Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes run=<委託記録のコメント ID>
 ```
 
-`security=yes` が不要なときは書かない。target・options は担当に応じる:
+`security=yes` が不要なときは書かない。`run=` には、この委託のために起動の前に残した委託記録（下の「委託記録」の段落）のコメント ID を書く。この ID がその委託の実行 ID で、レビュー担当は割り当ての行を本文の末尾行 `Reviewer:` にそのまま写すため、投稿は末尾行の ` run=<ID>` でその実行に結び付く。target・options は担当に応じる:
 
 | 担当 | `target.providerInstanceId` | `target.model` | `target.options` |
 |---|---|---|---|
@@ -262,7 +263,7 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
   "role": "review",
   "runtimeMode": "auto-accept-edits",
   "isolation": "worktree",
-  "task": "PR #<M> をレビューする。skill review-pr に従う。\nAssigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes"
+  "task": "PR #<M> をレビューする。skill review-pr に従う。\nAssigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes run=<委託記録のコメント ID>"
 }
 ```
 
@@ -276,39 +277,42 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 
 次のラウンドのレビューを委託したら、前ラウンドのレビュースレッド（子タスク）を settle する（`t3_thread_organize` の `action: settle`。runbook 9 の「片付け」と同じ決まりで、前ラウンドが `needs-human` 中・止まっている・迷走中のときは settle しない）。
 
-委託・再委託のたびに、対象 PR に委託記録コメントを残す（巡回がレビューの証跡として使う）。コメントの行頭がこの形であること（引用やコードブロック内の出現は証跡にならない）。`<SHA>` は委託時点の PR の head、`to:` はレビュー担当。
+委託記録: 委託・再委託のたびに、`delegate_task` を呼ぶ前に、対象 PR に委託記録コメントを残す（巡回がレビューの証跡として使う。指揮役がレビュースレッドを立てるときも、立てる前に同じ形で残す）。コメントの行頭がこの形であること（引用やコードブロック内の出現は証跡にならない）。`<SHA>` は委託時点の PR の head、`to:` はレビュー担当。コマンドが出力するコメントの URL の末尾 `#issuecomment-<ID>` の `<ID>` を、その委託の割り当ての行の `run=` に書く。記録を残せなかったとき・ID を読めなかったときは委託しない。
 
 ```bash
 scripts/agent-gh dev pr comment <M> --body "[review-request] head: <SHA> to: <担当>"
 ```
 
+実行の投稿: 委託記録 `<ID>` の実行の投稿とは、`pelway-review[bot]` 名義の `APPROVED`・`CHANGES_REQUESTED` のレビューのうち、末尾行（手順 9 の定義）が `Reviewer: agent=<その記録の to: の担当> ` で始まって ` run=<ID>` で終わり、`submitted_at` がその記録の `created_at` 以後のもの。手順 9 と skill `command-team` で投稿を委託の実行に結び付けるところは、すべてこの定義による。
+
 ### 9. レビュー結果を処理する
 
-委託の子の報告（`pr:` / `verdict:` / `must-fix:`）が `verdict: failed` なら、GitHub のレビューとは突き合わせず、委託記録コメントで対象の PR を確かめてから、下の `failed` の扱い（`error:` の理由ごと）に進む（`error:` が `設定の不備:` で始まるなら、投稿の後の失敗でありうるため、先に下の「投稿後の `設定の不備:` の記録」で投稿の有無を確かめて記録を残してから、「止まる条件」の表のとおり止まる。投稿済みのレビューは「有効な Approve」に数えない。それ以外の理由で投稿の後に失敗で返ったときの扱いは、この手順では決めていない）。`approve` と `request-changes` は、GitHub の実状態と突き合わせてから扱う:
+委託の子の報告（`pr:` / `verdict:` / `must-fix:`）が `verdict: failed` なら、GitHub のレビューとは突き合わせず、委託記録コメントで対象の PR を確かめてから、下の `failed` の扱い（`error:` の理由ごと）に進む（`error:` が `設定の不備:` で始まるなら、投稿の後の失敗でありうるため、先に下の「投稿後の `設定の不備:` の記録」で投稿の有無を確かめて記録を残してから、「止まる条件」の表のとおり止まる。投稿済みのレビューは「有効な Approve」に数えない。それ以外の理由で投稿の後に失敗で返ったときの扱いは、この手順では決めていない）。`approve` と `request-changes` は、その委託の実行の投稿（手順 8 の「実行の投稿」。`<ID>` は、その子の割り当ての行に自分が書いた `run=` の値）と GitHub の実状態を突き合わせてから扱う。1 行目で現在の head を、2 行目で `pelway-review[bot]` のレビューの末尾行を読む:
 
 ```bash
-scripts/agent-gh dev pr view <PR 番号> --json headRefOid,reviewDecision,reviews --jq '{headRefOid, reviewDecision, latest: (.reviews[-1] | {author: .author.login, state, commit: .commit.oid})}'
+scripts/agent-gh dev pr view <PR 番号> --json headRefOid,reviewDecision --jq '{headRefOid, reviewDecision}'
+scripts/agent-gh dev api --paginate repos/hatai/Pelway/pulls/<PR 番号>/reviews --jq '.[] | select(.user.login == "pelway-review[bot]") | ([.body | splits("\r?\n") | select(test("\\S"))] | last // "") as $last | {id, state, commit_id, submitted_at, last: $last}'
 ```
 
-`pelway-review` の最新レビューの状態が報告と一致しなければ、もう一度読んで確かめる。approve は、そのレビューの対象コミット（`latest.commit`）が PR の現在の head（`headRefOid`）と一致し、`reviewDecision` が `APPROVED` のときだけ有効とする（command-team「hatai のレビューの扱い」の有効な Approve と同じ定義）。そのレビューを投稿したレビュー担当が後から `error:` が `設定の不備:` で始まる `verdict: failed` を報告していたときは、Approve が現在の head を向いていても数えない。同じ報告を別のスレッドや指揮役に残す記録が `[review-invalid]` のコメントで、未解消の記録が PR に 1 件でもあるあいだは、その PR のどのレビューも数えず、解消の後も記録の head では再レビューがそろうまで Approve を数えない（記録の形・作成者の条件・解消の照合・再レビューは下の「投稿後の `設定の不備:` の記録」）。修正や衝突解消の push で head が動いたあとの approve は現 head に向いていないため無効で、`pr ready` にも終わりの報告にも進まず、手順 8 で新しい head のレビューを再委託する。
+その実行の投稿がちょうど 1 件で、状態が報告の判定と一致するときだけ、その報告を実行の結果として扱う。0 件・2 件以上・状態の不一致は、もう一度読んで確かめ、変わらなければ「止まる条件」の表のとおり止まる（ほかの投稿や「最新のレビュー」で代えない。同じ App の名義で複数の担当が投稿するため）。approve は、その投稿の対象コミット（`commit_id`）が PR の現在の head（`headRefOid`）と一致し、`reviewDecision` が `APPROVED` で、現在の head を向いた `pelway-review[bot]` の `APPROVED`・`CHANGES_REQUESTED` の投稿のすべてが、`approve` か `request-changes` の報告を受けた実行の投稿であるときだけ有効とする（command-team「hatai のレビューの扱い」の有効な Approve と、「マージ」の結果の確定と同じ定義）。まだ報告の無い実行の投稿や、どの実行にも結び付かない投稿（末尾行に `run=` が無いものを含む）が現在の head にあれば、その Approve で `pr ready` にも終わりの報告にも進まない。報告を待つ実行が無いのに結び付かない投稿が残るときは、「止まる条件」の表のとおり止まる。そのレビューを投稿したレビュー担当が後から `error:` が `設定の不備:` で始まる `verdict: failed` を報告していたときは、Approve が現在の head を向いていても数えない。同じ報告を別のスレッドや指揮役に残す記録が `[review-invalid]` のコメントで、未解消の記録が PR に 1 件でもあるあいだは、その PR のどのレビューも数えず、解消の後も記録の head では再レビューがそろうまで Approve を数えない（記録の形・作成者の条件・解消の照合・再レビューは下の「投稿後の `設定の不備:` の記録」）。修正や衝突解消の push で head が動いたあとの approve は現 head に向いていないため無効で、`pr ready` にも終わりの報告にも進まず、手順 8 で新しい head のレビューを再委託する。
 
 投稿後の `設定の不備:` の記録（無効記録）。レビュー担当が `error:` が `設定の不備:` で始まる `verdict: failed` を報告したとき、報告を受けた側（実装担当。指揮役のレビュースレッドなら指揮役 — runbook「5. イベントごとの対応」の `failed` の行）が、下の 1 で投稿の有無を確かめ、2 のとおり対象 PR に記録を残す。失敗の報告はスレッドの履歴にしか残らないため、別のスレッドが引き継いで再開するときと指揮役の承認判定では、この記録だけが手掛かりになる。`<担当>` は失敗を報告した委託先（委託記録 `[review-request] head: <SHA> to: <担当>` の `to:` と同じ表記）。
 
 末尾行: `pelway-review[bot]` は全担当に共通の名義なので、レビューの担当は本文の最後の空でない行（末尾行。skill `review-pr` の手順 4 で最後に書く `Reviewer:` の行）だけで見分ける。末尾行が `Reviewer: agent=<codex|claude|devin> ` で始まればその担当のレビュー、そうでなければ（末尾行の欠損・不正な形）担当を見分けられないレビューとする。本文の途中にある `Reviewer:` の行（引用など）は使わない。この手順書と skill `command-team` でレビューの担当を見分けるところは、すべてこの定義による。
 
-委託の時刻 `<T0>`: その実行の委託記録（`pelway-dev[bot]` 作で、1 行目が `[review-request] ` で始まり ` to: <担当>` で終わるコメントのうち、失敗の報告より前の最新のもの）の `created_at`。指揮役のレビュースレッドでは、スレッドを立てた時刻。どちらも分からないときは空文字（下限なし）にする。レビューは投稿した時点の head に付き、委託した head とは限らないため、対象のレビューは head ではなく `<T0>` で絞る。
+委託の時刻 `<T0>`: 失敗した実行の委託記録（その子の割り当ての行の `run=` の ID のコメント。指揮役のレビュースレッドでも同じ）の `created_at`。委託記録は起動の前に残すため、その実行の投稿はすべて `<T0>` 以後に付く。レビューは投稿した時点の head に付き、委託した head とは限らないため、対象のレビューは head ではなく `<T0>` で絞る。実行と委託記録の対応を確かめられないとき（割り当ての行に `run=` が無い・引き継いだスレッドで失敗した子の割り当ての行を読めない・その ID のコメントが無い・作成者が `pelway-dev[bot]` でない・1 行目が `[review-request] ` で始まり ` to: <担当>` で終わる形でない）は、`<T0>` を同じ担当の別の委託記録や推測で補わず、下の 2 の `review: unknown` に進む。
 
-1. 投稿の有無を確かめる。1 行目のコマンドで委託記録の時刻を読み（最後の行が最新）、2 行目のコマンドで、`<T0>` 以後に `pelway-review[bot]` 名義で投稿された `APPROVED`・`CHANGES_REQUESTED` のレビュー（`COMMENTED` は Approve にも Request changes にも数えず、dismiss もできないため除く）のうち、末尾行が失敗した担当のものと担当を見分けられないものの id と対象のコミットを読む:
+1. 投稿の有無を確かめる。1 行目のコマンドで失敗した実行の委託記録（`<ID>`）の作成者・時刻・1 行目を読み、2 行目のコマンドで、`<T0>` 以後に `pelway-review[bot]` 名義で投稿された `APPROVED`・`CHANGES_REQUESTED`・`DISMISSED` のレビュー（`COMMENTED` は Approve にも Request changes にも数えず、dismiss もできないため除く。報告の前に push で取り消された投稿も、失敗した実行の投稿として記録に残すため `DISMISSED` を含める）のうち、末尾行が失敗した担当のものと担当を見分けられないものの id と対象のコミットを読む:
 
    ```bash
-   scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<M>/comments --jq '.[] | select(.user.login == "pelway-dev[bot]" and (.body | split("\n")[0] | startswith("[review-request] ") and endswith(" to: <担当>"))) | .created_at'
-   scripts/agent-gh dev api --paginate repos/hatai/Pelway/pulls/<M>/reviews --jq '.[] | select(.user.login == "pelway-review[bot]" and (.state == "APPROVED" or .state == "CHANGES_REQUESTED") and .submitted_at >= "<T0>") | ([.body | splits("\r?\n") | select(test("\\S"))] | last // "") as $last | select(($last | startswith("Reviewer: agent=<担当> ")) or ($last | test("^Reviewer: agent=(codex|claude|devin) ") | not)) | {id, commit_id}'
+   scripts/agent-gh dev api repos/hatai/Pelway/issues/comments/<ID> --jq '{user: .user.login, created_at, first: (.body | split("\n")[0])}'
+   scripts/agent-gh dev api --paginate repos/hatai/Pelway/pulls/<M>/reviews --jq '.[] | select(.user.login == "pelway-review[bot]" and (.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") and .submitted_at >= "<T0>") | ([.body | splits("\r?\n") | select(test("\\S"))] | last // "") as $last | select(($last | startswith("Reviewer: agent=<担当> ")) or ($last | test("^Reviewer: agent=(codex|claude|devin) ") | not)) | {id, state, commit_id}'
    ```
 
 2. 結果ごとに記録を残す。記録を残したら、続けて PR に `needs-human` を付ける（下のブロックの 2 行目）。Kodiak は PR に `needs-human` があるあいだ `automerge` があってもマージしない（`.kodiak.toml` の `blacklist_labels`。Issue のラベルは見ない）。付いている `automerge` を外すのは指揮役（runbook「マージキュー待ちの PR」）
    - レビューが返った: レビューごとに 1 つ、`[review-invalid] head: <そのレビューの commit_id> review: https://github.com/hatai/Pelway/pull/<M>#pullrequestreview-<id> to: <担当>` の記録を残す（担当を見分けられないレビューは失敗した担当の投稿でありうるため含める）
-   - 2 つのコマンドが成功して 2 行目が何も返さなかった: 投稿の前の失敗と確かめられたので記録は残さない。止まるときのコメントに「投稿前と確認」と書く
-   - どちらかのコマンドが、1 回送り直しても失敗した: 投稿を特定できないので、`head:` に委託した head、`review: unknown` の記録を 1 つ残す。止まるときのコメントに「投稿を特定できず」と書く
+   - 実行と委託記録の対応を確かめたうえで、2 つのコマンドが成功して 2 行目が何も返さなかった: 投稿の前の失敗と確かめられたので記録は残さない。止まるときのコメントに「投稿前と確認」と書く
+   - 実行と委託記録の対応を確かめられなかった、またはどちらかのコマンドが 1 回送り直しても失敗した: 投稿を特定できないので、`head:` に委託した head（分からなければ現在の head）、`review: unknown` の記録を 1 つ残す。止まるときのコメントに「投稿を特定できず」と書き、読めた範囲で、`pelway-review[bot]` の投稿（`DISMISSED` を含む）の id・`commit_id`・`state`・末尾行を挙げる（人間が解消を判断する材料）
 
    ```bash
    scripts/agent-gh dev pr comment <M> --body "[review-invalid] head: <SHA> review: <URL か unknown> to: <担当>"
@@ -322,14 +326,12 @@ scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<M>/comments --jq 
 scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<M>/timeline --jq '.[] | select(.event == "review_dismissed") | {review_id: .dismissed_review.review_id, actor: .actor.login, by_push: (.dismissed_review.dismissal_commit_id != null), created_at}'
 ```
 
-解消: 記録の対象のレビューのすべてが、記録より後に hatai の手で dismiss されていれば（2 行目で `actor` が `hatai`、`by_push` が `false`）、その記録は解消とする。push による自動の取り消し（`by_push` が `true`）は数えず、`state` が `DISMISSED` であることだけでは解消にしない（環境の修復の確認は人間が行うため）。記録の対象のレビュー:
+解消は、記録ごとに次のどちらかで確かめる。`state` が `DISMISSED` であることだけでは解消にしない（環境の修復の確認は人間が行うため）。1 行目の記録の読み出しと同じく、`[review-invalid-resolved]` のコメントも REST の `user.login` で作成者を確かめる。
 
-- `review: <URL>` の記録: URL の id のレビュー。`pulls/<M>/reviews` で、その id の `user` が `pelway-review[bot]`、`commit_id` が記録の `head:` と一致することも確かめ、見つからない・一致しないときは未解消として人間に知らせる
-- `review: unknown` の記録: 記録より前の最新の委託記録（`to:` が同じもの）の時刻から記録の `created_at` までに投稿された `pelway-review[bot]` のレビューのうち、`COMMENTED` と、末尾行が別の担当のものと、記録の時点ですでに dismiss されていたもの（2 行目の `created_at` が記録より前）を除いたすべて。委託記録が無ければ時刻の下限を置かない。記録より後に投稿されたレビューは対象にしない
+- hatai の dismiss: `review: <URL>` の記録で、URL の id のレビュー（`pulls/<M>/reviews` で、その id の `user` が `pelway-review[bot]`、`commit_id` が記録の `head:` と一致することも確かめる）が、記録より後に hatai の手で dismiss されていれば（2 行目で `actor` が `hatai`、`by_push` が `false`）解消とする。解消の時刻はその dismiss の `created_at`
+- hatai の解消コメント: `review: unknown` の記録と、`review: <URL>` の記録のうち対象のレビューが見つからない・一致しない・push で自動に取り消された（`by_push` が `true`）・記録より前に取り消されていたものは、dismiss では解消しない（対象の投稿を確定できない、または取り消しが人の確認を経ていないため）。hatai が書いた、1 行目が `[review-invalid-resolved] <記録のコメントの URL>` のコメント（REST の `user.login` が `hatai`）があるときだけ解消とする。解消の時刻はそのコメントの `created_at`。エージェントはこの形のコメントを書かない。解消コメントで解消しても、失敗した担当の投稿が `DISMISSED` でないまま現在の head に残っていると、その投稿はどの完了した実行にも結び付かず Approve を数えられないので、その投稿の dismiss も要る。止まるときのコメントに、解消にこのコメントが要ることと、残っている投稿の dismiss も要ることを書く
 
-記録の解消の時刻は、その記録の対象のレビューの dismiss の `created_at` のうち最も遅いもの（対象が無い `unknown` の記録は、記録の `created_at`）。
-
-未解消の記録が PR に 1 件でもあるあいだは、その PR のどのレビューも（記録のレビューに限らず、別の担当の Approve も）有効なレビューに数えず、再開も再委託もしない（環境の修復とレビューの dismiss は人間が扱うため、dismiss の確認まで停止を維持する。記録の head が現在の head と違っても同じ）。すべての記録が解消した後、記録の head のどれかが現在の head のままなら、その head の Approve は、その記録の `to:` の担当の再レビューがそろうまで数えない（同じ head の別の担当の結果はそのまま使う）。再レビューとして数えるのは、すべての記録の解消の時刻より後に残した委託記録 `[review-request] head: <現在の head> to: <担当>`（`pelway-dev[bot]` 作）より後に、その担当が現在の head へ投稿した `DISMISSED` でないレビュー（担当は末尾行で見分ける）だけ。再レビューは次のどちらかで始める。どちらも委託記録を先に残してから始める:
+未解消の記録が PR に 1 件でもあるあいだは、その PR のどのレビューも（記録のレビューに限らず、別の担当の Approve も）有効なレビューに数えず、再開も再委託もしない（環境の修復とレビューの dismiss は人間が扱うため、dismiss の確認まで停止を維持する。記録の head が現在の head と違っても同じ）。すべての記録が解消した後、記録の対象の head のどれかが現在の head なら、その head の Approve は、その記録の `to:` の担当の再レビューがそろうまで数えない（同じ head の別の担当の結果はそのまま使う）。記録の対象の head は、dismiss で解消した記録では記録の `head:`（対象のレビューの `commit_id`）、解消コメントで解消した記録では、記録の `head:` によらず現在の head とする（対象の投稿の head を確定できないため）。再レビューとして数えるのは、すべての記録の解消の時刻より後に残した委託記録 `[review-request] head: <現在の head> to: <担当>`（`pelway-dev[bot]` 作）の実行の投稿（手順 8）で、現在の head を向いた `DISMISSED` でないものだけ。再レビューは次のどちらかで始める。どちらも委託記録を先に残してから始める:
 
 - 差分が手順 8 の委託しない条件（`.agents/skills/review-pr/` の変更など）に当たらない: 手順 8 で `to:` の担当に再委託する（`Guard:` の行を付ける。`Guard:` の (b) は `DISMISSED` のレビューを数えないため、取り消した投稿で止まらない）
 - 当たる: 自分では委託せず `waiting-conductor` で終える。指揮役が委託記録を残してから、main 由来の worktree で `to:` の担当のレビュースレッドを立てる（runbook「毎回の巡回でスレッドを点検する」の `state: waiting-conductor` の行）。指揮役のレビュースレッドで失敗した記録も、記録を残した指揮役が同じように立て直す
@@ -387,11 +389,13 @@ must-fix: <対応した内容。Approve のときは「なし」>
 ```
 issue: #<N>
 pr: <PR の URL>（head <SHA>）
-review: <ラウンド数> → approve
+review: <ラウンド数> → approve（run <ID>[, <ID>...]）
 ready: done
 memo: docs/worklogs/issue-<N>.md（round <R>）
 state: done
 ```
+
+`review:` の行の `run` には、手順 9 で現在の head の Approve を有効とした照合に使った実行（現在の head を向いた投稿を持ち、`approve` か `request-changes` の報告を受けた実行）の委託記録の ID をすべて書く。指揮役はこの ID から GitHub 上で投稿と委託記録を確かめ直す（skill `command-team` の「マージ」）。
 
 `pr:` の行には終わりの報告時点（`pr ready` を実行した時点）の PR の head の SHA を併記する。実装者メモの「対象 head」はメモを含むコミットの親（その round の実装の実体を含むコミット）を指し、`pr:` 行の head は終わりの報告時点の PR の head（メモを含むコミット）を指す、という関係である（巡回はこの親関係で終わりの報告と実装を結び付ける）。
 
@@ -434,7 +438,7 @@ next: 手順 4 の受け入れ条件 3 のテストを書く
 ```
 issue: #80
 pr: https://github.com/hatai/Pelway/pull/81（head c23a83a3615a13d2440c3173e13dc4b3714a05a6）
-review: 1 → approve
+review: 1 → approve（run 7140000001）
 ready: done
 memo: docs/worklogs/issue-80.md（round 1）
 state: done
@@ -457,8 +461,8 @@ state: done
    | `mergeable` が `CONFLICTING` | 手順 9 の「修正依頼」 |
    | 必須チェックが通り（required-checks の判定で例外判断が着いた pr-size の失敗を含む）、現在の head に有効なレビューが無い | 手順 8（委託中の子が終わっていれば、その結果を手順 9 で扱う）。相談のための push の後でこの round のメモのコミットがまだ無ければ、手順 6 の相談のための push の項のとおりメモを push してから |
    | 最新のレビューが Request changes | 手順 9 の「Request changes のとき」 |
-   | 現在の head に有効な Approve があり、まだ Draft | 手順 9 の「Approve のとき」 |
-   | 現在の head に有効な Approve があり、Draft でない | 手順 10 の終わりの報告を出し直す |
+   | 現在の head に有効な Approve（手順 9 の定義。現在の head の投稿のすべてが、報告を受けた実行の投稿であること。報告を確かめられなければ有効としない）があり、まだ Draft | 手順 9 の「Approve のとき」 |
+   | 現在の head に有効な Approve（上の行と同じ定義）があり、Draft でない | 手順 10 の終わりの報告を出し直す（`review:` の行の `run` には、照合に使った実行の ID を書く） |
 
 `[review-invalid]` の記録がすべて解消していれば、記録のレビューは有効なレビューに数えず、表の残りの行で再開先を決める。記録の head が現在の head のままなら、手順 9「投稿後の `設定の不備:` の記録」の最後の段落の再レビュー（始め方と、数えるレビュー）を済ませてから表の残りの行に当てる（同じ head の別の担当の結果はそのまま使う）。
 

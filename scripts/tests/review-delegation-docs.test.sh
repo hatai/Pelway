@@ -136,6 +136,28 @@ check fail_closed_r5_runbook docs/agents/grokbot-runbook.md \
   '記録を見つけた PR に `automerge` が付いていれば、指揮役がすぐ外す' \
   'その定義をそのまま当てて判定する'
 
+# 委託記録は起動の前に残し、そのコメント ID を割り当ての行の run= に書いて、投稿の末尾行の run= で実行に結び付ける。
+# 対応を確かめられない失敗は review: unknown に進み、unknown と dismiss で確かめられない記録は hatai の解消コメントでだけ解消する。
+# マージと終わりの報告は、現在の head の投稿のすべてが報告を受けた実行の投稿であることで結果の確定を確かめる（Issue #581 r6）。
+# いずれも文言の存在確認で、意味はレビューで引用を読んで判定する。
+check fail_closed_r6_implement .agents/skills/implement-issue/SKILL.md \
+  '`delegate_task` を呼ぶ前に、対象 PR に委託記録コメントを残す' \
+  'security=yes run=<委託記録のコメント ID>' \
+  '実行の投稿: 委託記録 `<ID>` の実行の投稿とは' \
+  '`<T0>` を同じ担当の別の委託記録や推測で補わず' \
+  '[review-invalid-resolved] <記録のコメントの URL>' \
+  '解消コメントで解消した記録では、記録の `head:` によらず現在の head とする' \
+  'review: <ラウンド数> → approve（run <ID>[, <ID>...]）'
+check fail_closed_r6_review_pr .agents/skills/review-pr/SKILL.md \
+  '割り当ての行の末尾の `run=<ID>`（委託記録のコメント ID）も、そのまま写す' \
+  'last == "<Reviewer 行>"'
+check fail_closed_r6_command_team .agents/skills/command-team/SKILL.md \
+  '結果の報告を受けた実行の投稿' \
+  '`[review-invalid-resolved]`'
+check fail_closed_r6_runbook docs/agents/grokbot-runbook.md \
+  '立てる前に、対象 PR に委託記録' \
+  '最新のレビューでは照合しない'
+
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
   exit 1

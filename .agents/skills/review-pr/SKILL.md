@@ -170,7 +170,7 @@ must-fix がなければ「なし」と書く。
 
 must-fix と nit の各行は `<file>:<line>` で始める（`[文書のずれ]` の印の nit だけは、印の後に `<file>:<line>` を書く）。`<line>` は `headRefOid` の版の行番号で、差分の表示上の位置ではない。委託者は複数のレビュー担当の指摘をこの位置で突き合わせるため、同じ問題は同じ位置を指す。同じ問題が複数の行にあるときは 1 行にまとめ、最初の位置を先頭に書き、ほかの位置は本文に挙げる。特定の行を持たない指摘（verify・pr-size の失敗、PR の作成者の食い違い、受け入れ条件に対応する変更がどこにも無いもの）は、行番号を作らず、`<file>:<line>` の代わりに `(PR)` か、対象のファイルだけ（`<file>`）を書く。消したこと自体が問題の指摘（検査・制限・手順を消した）は、head の版で消えた箇所のすぐ前後に残っている行を `<file>:<line>` に書き、本文で何が消えたかを差分の `-` 行から引く。ファイルごと消えたときは `<file>` だけを書く。
 
-最後の `Reviewer:` の行は必ず書く。値は、指示の 2 行目 `Assigned: role=review agent=... model=... effort=...` から写す（`role=review` を除いた残りを、順番も表記も変えずに書く）。指示は、指揮役のスレッド指示（指揮役自身の PR・外部投入）か、実装担当のレビュー委託（`delegate_task`）の指示のどちらかである。指示に `Assigned:` の行が無いときは、`Reviewer: agent=<codex|claude|devin> model=unknown effort=unknown` と書く。改善ループが集計するので、自由文にしない。
+最後の `Reviewer:` の行は必ず書く。値は、指示の 2 行目 `Assigned: role=review agent=... model=... effort=...` から写す（`role=review` を除いた残りを、順番も表記も変えずに書く）。指示は、指揮役のスレッド指示（指揮役自身の PR・外部投入）か、実装担当のレビュー委託（`delegate_task`）の指示のどちらかである。割り当ての行の末尾の `run=<ID>`（委託記録のコメント ID）も、そのまま写す。委託者はこの値で投稿を委託の実行に結び付ける（skill `implement-issue` の手順 8 の「実行の投稿」）。指示に `Assigned:` の行が無いときは、`Reviewer: agent=<codex|claude|devin> model=unknown effort=unknown` と書く。改善ループが集計するので、自由文にしない。
 
 PR が Draft のままでも投稿する。
 
@@ -188,13 +188,13 @@ scripts/agent-gh review pr review <N> --request-changes --body-file - <<'EOF'
 EOF
 ```
 
-投稿したら、PR に自分のレビューが付いたことを確かめる。
+投稿したら、PR に自分のレビューが付いたことを確かめる。同じ App の名義で複数の担当が投稿するため、最新のレビューではなく、末尾行が自分の `Reviewer:` の行と一致するレビューを読む（`<Reviewer 行>` は本文の最後に書いた行そのまま）。
 
 ```bash
-scripts/agent-gh review pr view <N> --json reviews --jq '.reviews[-1] | {author: .author.login, state}'
+scripts/agent-gh review api --paginate repos/hatai/Pelway/pulls/<N>/reviews --jq '.[] | select(.user.login == "pelway-review[bot]") | select([.body | splits("\r?\n") | select(test("\\S"))] | last == "<Reviewer 行>") | {id, state}'
 ```
 
-`state` が `APPROVED` か `CHANGES_REQUESTED` で、投稿した判定と一致していれば成功。そうでなければ `verdict: failed` で報告する。
+`run=` のある割り当てで、返ったレビューがちょうど 1 件で、その `state` が `APPROVED` か `CHANGES_REQUESTED` で投稿した判定と一致していれば成功（`run=` の無い割り当てでは、返った最後のレビューで確かめる）。そうでなければ `verdict: failed` で報告する。
 
 ### 5. 終わりの報告
 

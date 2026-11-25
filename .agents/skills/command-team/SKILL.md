@@ -32,10 +32,10 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
 
   ```
   PR #<M> をレビューする。skill review-pr に従う。
-  Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes
+  Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes run=<委託記録のコメント ID>
   ```
 
-  `security=yes` は、差分が skill `implement-issue` の手順 8 で `security=yes` を付ける条件に当たるときだけ付け、当たらなければ書かない。付いているとレビュー担当は skill `security-review` も行う（skill `review-pr` の手順 2）。指揮役自身の PR は運用文書・スキルの変更が多く、たいてい当たる。
+  `run=` には、スレッドを立てる前に残した委託記録のコメント ID を書く（記録の形と ID の読み方、投稿との結び付けは skill `implement-issue` の手順 8 の「委託記録」と「実行の投稿」の段落）。`security=yes` は、差分が skill `implement-issue` の手順 8 で `security=yes` を付ける条件に当たるときだけ付け、当たらなければ書かない。付いているとレビュー担当は skill `security-review` も行う（skill `review-pr` の手順 2）。指揮役自身の PR は運用文書・スキルの変更が多く、たいてい当たる。
 
   このレビュー指示を使うのは、指揮役が自らレビュースレッドを立てるとき（指揮役自身の PR・外部投入）だけ。通常の実装担当の PR には使わない（実装担当が `delegate_task` で自分で委託する。skill `implement-issue` の手順 8）。調査スレッドを立てる指示の形は `docs/agents/command-team-details.md` の「調査（入口B）」。
 
@@ -141,7 +141,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
     "role": "review",
     "runtimeMode": "auto-accept-edits",
     "isolation": "worktree",
-    "task": "PR #<M> をレビューする。skill review-pr に従う。\nAssigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes"
+    "task": "PR #<M> をレビューする。skill review-pr に従う。\nAssigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<effort> security=yes run=<委託記録のコメント ID>"
   }
   ```
 - レビュー担当は、委託の指示とは別に、開始時に fail-closed のツール一覧チェックを行う（開始時に渡されたツール名の一覧を記録し、merge・Issue の変更・comment などの書き込み系ツールが含まれる、または一覧が読めないときは何もせず終了する。チェックの本体は skill `review-pr` の「決まり」）。チェックに失敗したレビュー（`verdict: failed` で `error:` が `設定の不備:` で始まるもの）は結果を採用しない（同じ環境では同じ結果になるため立て直さず、人間に知らせる。投稿済みのレビューも「hatai のレビューの扱い」の「有効な Approve」に数えない）。
@@ -223,7 +223,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 ### hatai のレビューの扱い
 
-有効な Approve: `pelway-review` の最新の有効なレビューが APPROVED で、対象が主 PR の現在の head であるもの（head が変われば失効し、レビューが無いものとして扱う。dismiss されたレビューは数えない）。投稿したレビュー担当が後から `error:` が `設定の不備:` で始まる `verdict: failed` を報告したレビューは、Approve・Request changes のどちらも数えない（fail-closed のツール一覧チェックに失敗したレビューは結果を採用しない決まりによる。GitHub 上の投稿は残るため、環境の修復と投稿の dismiss は人間が扱う。同じ環境では同じ結果になるため、再委託では置き換えない）。その報告の対象は、対象 PR に残される `[review-invalid]` の記録（対象の PR・SHA・レビューを特定する定型コメント。形・記録として数える作成者（`pelway-dev[bot]` だけ）・解消の照合は skill `implement-issue` の手順 9「投稿後の `設定の不備:` の記録」が正本）で確かめる。未解消の記録が主 PR に 1 件でもあるあいだは、記録のレビューに限らず、その PR のどの Approve も有効な Approve に数えない（同じ head に別の担当の Approve が先にあっても数えない）。承認の判定はこの定義を通るため、環境の修復とすべての記録の解消までは、その PR の作業の再開も Ready to merge も `automerge` も行わない。記録の解消は、記録のレビューを hatai が手で dismiss したこと（push による自動の取り消しは数えない）で確かめる。すべての記録が解消した後も、記録の head が現在の head のままなら、記録の `to:` の担当の再レビュー（すべての記録の解消の後に残した委託記録より後に、その担当が同じ head へ投稿した、dismiss されていないレビュー。条件と始め方は同じ節）がそろうまで、その head の Approve を数えない。
+有効な Approve: `pelway-review` の最新の有効なレビューが APPROVED で、対象が主 PR の現在の head であるもの（head が変われば失効し、レビューが無いものとして扱う。dismiss されたレビューは数えない）。投稿したレビュー担当が後から `error:` が `設定の不備:` で始まる `verdict: failed` を報告したレビューは、Approve・Request changes のどちらも数えない（fail-closed のツール一覧チェックに失敗したレビューは結果を採用しない決まりによる。GitHub 上の投稿は残るため、環境の修復と投稿の dismiss は人間が扱う。同じ環境では同じ結果になるため、再委託では置き換えない）。その報告の対象は、対象 PR に残される `[review-invalid]` の記録（対象の PR・SHA・レビューを特定する定型コメント。形・記録として数える作成者（`pelway-dev[bot]` だけ）・解消の照合は skill `implement-issue` の手順 9「投稿後の `設定の不備:` の記録」が正本）で確かめる。未解消の記録が主 PR に 1 件でもあるあいだは、記録のレビューに限らず、その PR のどの Approve も有効な Approve に数えない（同じ head に別の担当の Approve が先にあっても数えない）。承認の判定はこの定義を通るため、環境の修復とすべての記録の解消までは、その PR の作業の再開も Ready to merge も `automerge` も行わない。記録の解消は、記録のレビューを hatai が手で dismiss したこと（push による自動の取り消しは数えない）か、`review: unknown` の記録と対象を dismiss で確かめられない記録では hatai の解消コメント（`[review-invalid-resolved]`。エージェントは書かない）で確かめる。すべての記録が解消した後も、記録の対象の head（解消コメントで解消した記録では現在の head）が現在の head なら、記録の `to:` の担当の再レビュー（すべての記録の解消の後に残した委託記録の実行の投稿で、同じ head を向いた、dismiss されていないもの。条件と始め方は同じ節）がそろうまで、その head の Approve を数えない。
 
 hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終了条件・Status の扱い）と、hatai が紐づく PR にレビュー・コメントを投稿したときの伝達の手順は、`docs/agents/command-team-details.md` の「hatai のレビューの扱い」に従う。巡回での検知と Status の反映は runbook の「ボードと巡回」の「hatai のレビューに関する連動」が正本。
 
@@ -234,7 +234,7 @@ hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終�
 `automerge` ラベルを付ける条件（すべて確かめてから付ける）:
 
 - 有効な Approve（上の「hatai のレビューの扱い」）がある。未解消の `[review-invalid]` の記録があればこの条件を満たさない
-- その Approve を投稿したレビューの委託の結果が確定している: 実装スレッドの終わりの報告（`state: done`）の `pr:` の行がその head を指している、または指揮役が立てたレビュースレッドから `verdict: approve` の報告を受けている。結果の報告の前に見えている投稿は、キュー投入の承認に使わない（レビュー担当は投稿の後に `設定の不備:` で失敗を報告することがあるため。skill `review-pr` の「決まり」）
+- その Approve を投稿したレビューの委託の結果が確定している: 現在の head を向いた `pelway-review[bot]` の `APPROVED`・`CHANGES_REQUESTED` の投稿（dismiss されたものを除く）のすべてが、結果の報告を受けた実行の投稿（skill `implement-issue` の手順 8 の「実行の投稿」。委託記録の ID と末尾行の `run=` で結び付き、実行ごとにちょうど 1 件）である。結果の報告は、実装スレッドの終わりの報告（`state: done`）では `pr:` の行がその head を指し、`review:` の行の `run` にその実行の ID があること、指揮役が立てたレビュースレッドでは、その実行（スレッドを立てる前に残した委託記録の ID）から `verdict: approve` か `verdict: request-changes` の報告を受けていること。指揮役は、報告の ID ごとに、委託記録（REST の `user.login` が `pelway-dev[bot]`、1 行目が `[review-request] head: <その head> to: <担当>`）と、その実行の投稿の `id`・`state`・`commit_id` を GitHub で確かめる。報告の無い実行の投稿・どの実行にも結び付かない投稿（末尾行に `run=` が無いものを含む）が現在の head に 1 件でもあれば、最新のレビューが `APPROVED` でもキュー投入の承認に使わない（レビュー担当は投稿の後に `設定の不備:` で失敗を報告することがあり、同じ App の名義で複数の担当が投稿するため。skill `review-pr` の「決まり」）
 - PR に `needs-human` が付いていない
 - その Approve のレビューの nit に行頭が `[文書のずれ]` のものが残っていないこと（残っていれば実装担当に直させる。skill `implement-issue` の手順 9「Approve のとき」）
 - 必須チェック（`mise run verify` と `pr-size`）が通っている
