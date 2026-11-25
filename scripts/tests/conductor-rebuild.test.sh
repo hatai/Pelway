@@ -139,6 +139,19 @@ check "main-checkout new conductor: no thread start" no_line "thread start"
 check "main-checkout new conductor: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
 check "main-checkout new conductor: logs worktree=-" \
   grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=auto-accept-edits worktree=-" "$ROOT/err"
+check "main-checkout new conductor: tells how to continue" \
+  all_err "$ROOT/err" "t3_thread_launch" "--to"
+
+# worktree が無く、かつ権限も合わないときは、権限の失敗（exit 3）で止まる
+printf 'mcp:launch:kept\n' > "$FILE"
+NEW_MODE=full-access NEW_WT="" run "" --from "$OLD" --to "$NEW"; rc=$?
+check "no worktree + bad mode: exits 3" [ "$rc" -eq 3 ]
+check "no worktree + bad mode: nothing sent to the old conductor" no_line "thread send --wait $OLD"
+check "no worktree + bad mode: no handover sent" no_line "thread send $NEW"
+check "no worktree + bad mode: no thread start" no_line "thread start"
+check "no worktree + bad mode: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+check "no worktree + bad mode: logs both read values" \
+  grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=full-access worktree=-" "$ROOT/err"
 
 # 失敗したら登録を変えずに止まる
 printf 'mcp:launch:kept\n' > "$FILE"
@@ -148,9 +161,10 @@ check "stop failure keeps the registration" [ "$(cat "$FILE")" = "mcp:launch:kep
 check "stop failure: no thread start" no_line "thread start"
 
 # スレッド ID の検査
-run "" --from "--help"; rc=$?
+run "" --from "--help" --to "$NEW"; rc=$?
 check "rejects an id starting with -" [ "$rc" -ne 0 ]
-run "" --from 'a;rm'; rc=$?
+check "id starting with - makes no t3 calls" [ ! -s "$LOG" ]
+run "" --from 'a;rm' --to "$NEW"; rc=$?
 check "rejects odd characters" [ "$rc" -ne 0 ]
 check "rejected ids make no t3 calls" [ ! -s "$LOG" ]
 run "" --from "$OLD" --to "--bad"; rc=$?

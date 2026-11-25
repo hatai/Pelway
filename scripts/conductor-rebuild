@@ -95,7 +95,6 @@ read -r old_mode _ < <(show "$from") || die "cannot read the old conductor"
 read -r new_mode new_wt < <(show "$to") \
   || die "cannot read the new conductor $to (check it in T3). Nothing was sent to the old conductor"
 echo "conductor-rebuild: new conductor $to runtimeMode=$new_mode worktree=$new_wt" >&2
-[[ "$new_wt" != - ]] || die "the new conductor $to runs in the main checkout; it must run in its own worktree. Nothing was sent to the old conductor"
 if [[ "$new_mode" == - ]]; then
   echo "conductor-rebuild: cannot read the new conductor $to's runtimeMode." >&2
   echo "conductor-rebuild: nothing was sent to the old conductor and the registration is unchanged." >&2
@@ -107,6 +106,11 @@ if [[ "$new_mode" != "$old_mode" || "$new_mode" == full-access ]]; then
   echo "conductor-rebuild: nothing was sent to the old conductor and the registration is unchanged." >&2
   echo "conductor-rebuild: launch a replacement with MCP t3_thread_launch (runtimeMode '$old_mode', workspaceStrategy worktree baseRef main), then run: $0 --from '$from' --to '<新指揮役のスレッド ID>'" >&2
   exit 3
+fi
+if [[ "$new_wt" == - ]]; then
+  echo "conductor-rebuild: the new conductor $to runs in the main checkout; it must run in its own worktree. Nothing was sent to the old conductor and the registration is unchanged." >&2
+  echo "conductor-rebuild: launch a replacement with MCP t3_thread_launch (runtimeMode '$old_mode', workspaceStrategy worktree baseRef main), then run: $0 --from '$from' --to '<新指揮役のスレッド ID>'" >&2
+  exit 1
 fi
 
 # 2. 旧指揮役を止める
