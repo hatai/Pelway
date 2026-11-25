@@ -71,3 +71,15 @@
 5. 改善案: `.agents/skills/command-team/SKILL.md` の「hatai のレビューの扱い」の解消の手段を、`[review-invalid-resolved]` コメントだけにそろえる（timeline の actor では人の操作を確かめられないため。claude r6 の nit）。別 Issue で扱う。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 7）
+
+対象 head: 27a34fb1af1af06c1843403d6e7ab2d48e7446dc
+
+1. 詰まった箇所: worktree の用意: 割り当ての worktree は別のブランチ（`t3/fix-fail-closed-review-r7`）で、`git reset --hard` は auto mode に拒否された。`origin/agent/581-fail-closed-tool-check` から `t3/581-r7-fixes` を作り、`HEAD:agent/581-fail-closed-tool-check` で push した。round の上限の撤廃は委託元の指示（hatai 指示 t629u）で、Issue #581 に hatai のコメントは無く、GitHub では確かめられなかった。
+2. 曖昧だった文: 「既存の投稿を安全に取り消してから再委託する経路など、同じ head で移行できる手順を明記してください」（codex r7 の must-fix 3）
+3. 仮定と解釈: 取り消しはエージェントが dismiss する案を選ばず、hatai の dismiss を `needs-human` で待つ形にした（この PR は dismiss を人間の扱いとしてきたため。runbook の Changes requested の (iii) は dismiss を対応済みにするため、エージェントの dismiss を許すと範囲を絞る決まりが別に要る）。従来の書式は「末尾行に ` run=<ID>` が無い」形で見分ける（導入の前後は観測できないため）。照合の must-fix が r3〜r7 と続いたので、全経路に「委託の時点で決まる必要な実行の集合（担当ごとの最新の委託記録）のすべての報告と投稿で確定する」決まりを当てた。claude r7 の must-fix（指揮役のレビュースレッドの結果が実装スレッドに届かない）も同じ種類として直し、`run <ID>: <verdict>` を指示に添える形にした。
+4. 足りなかった情報・検証手段: 新しい jq（末尾行の `run=` の capture、`issue_url`）は PR #695 の実データで読み取りだけ実行した。`run=` の付いた投稿と hatai の `[review-invalid-resolved]` コメントは実データに無く、`updated_at` の比較は qa-checklist の既存の確かめ方に合わせた。
+5. 改善案: `docs/agents/grokbot-runbook.md` の「毎回の巡回でスレッドを点検する」の「続きをやり直す」の定型文（`"message": "続きをやり直す"` の例）に、`run <ID>: <verdict>` の行を添える例を足す（この round では表の行の説明だけを直した）。
+
+使ったスキル: implement-issue
