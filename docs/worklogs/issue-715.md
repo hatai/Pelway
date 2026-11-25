@@ -104,3 +104,19 @@ PR: #722
 3. 印の nit（`[文書のずれ]`）の対応: implement-issue の `target.options` の列でコードスパン内にバッククォートが入れ子になり表示が崩れていた箇所（codex・claude の 2 行）を、`{"<[agents.<担当>].effort.option>": "<effort>"}` の形に直した
 4. 仮定と解釈:
    - runbook:214（MCP `t3_thread_launch` の引数の項）は指摘の 3 箇所に含まれないが、同じ「main の版から読む」規則を並記している箇所のため、同じ照合の条件を足した
+
+## 実装者メモ（round 8）
+
+対象 head: <新規コミット>
+PR: #722
+
+レビュー指摘（run 7171154483 claude approve・must-fix 0、marked nit 3+文書のずれ 1、head a602da88）への対応:
+
+1. 詰まった箇所: なし
+2. must-fix の対応: なし（approve）
+3. 印の nit の対応:
+   - command-team「レビュー担当と effort」の高リスクの条件と implement-issue 手順 8 の `security=yes` の条件に、「`agent-team.toml` の `[developers.*.priority.review]` の変更」を `[agents.*].instance` と並べて追加（round 7 と同じ種類の、toml だけを変える PR が条件を抜ける経路。レビューの人数と抜き取りを減らせる）
+   - `instance.review` と `docs/dev-environment.md` の照合が読む版を「main の最新の版」（読めなければ止める）と指定した（command-team の表・implement-issue 手順 8・runbook 2 箇所・正本の「レビュー担当の権限」。手元の版を読むと PR が見出しのインスタンス名を書き換えて照合を通せる弱まりを閉じる）
+   - review-delegation-docs.test.sh に照合の文言の存在確認を 4 箇所分追加（委託ブロックのインスタンス名のピンの役目を照合が継いだ分）
+   - PR 本文をこの head に合わせた（対象・最後に検証した sha・変更内容と対応表に round 7・8 の変更を追記）
+4. 仮定と解釈: なし

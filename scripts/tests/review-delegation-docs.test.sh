@@ -62,6 +62,16 @@ check conductor_delegate_block .agents/skills/command-team/SKILL.md \
   '"role": "review"' \
   '"providerInstanceId": "<agent-team.toml の instance.review>"'
 
+# 委託・起動の前に instance.review が main の最新の版の dev-environment.md が名指す確認済みインスタンスと一致することを確かめる照合（PR #722 の指摘）。
+check instance_match_implement .agents/skills/implement-issue/SKILL.md \
+  'main の最新の版の `docs/dev-environment.md`（読めなければ委託を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ'
+check instance_match_command_team .agents/skills/command-team/SKILL.md \
+  'main の最新の版の `docs/dev-environment.md`（読めなければ委託・起動を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ'
+check instance_match_runbook docs/agents/grokbot-runbook.md \
+  'main の最新の版の `docs/dev-environment.md`（読めなければ起動を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ'
+check instance_match_spec docs/superpowers/specs/agent-team.md \
+  'main の最新の版の `docs/dev-environment.md`（読めなければ委託・起動しない）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致するものだけを使う'
+
 # 人間のアカウントで投稿する道具で hatai の判断を書く条件。
 check agents_human_account AGENTS.md \
   '人間のアカウントで投稿する道具（T3 の `comment_on_issue` など）で hatai の判断を書くのは、hatai がその文面か選択肢を明示して選んだときだけ'
