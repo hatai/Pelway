@@ -1029,6 +1029,15 @@ fn show_prose(id: &str, status: &str, updated: &str) -> String {
     )
 }
 
+/// 報告の行にならない最後の返答で、thread に `createdBy` を持たせた show の JSON。
+fn show_prose_with_creator(id: &str, status: &str, updated: &str, created_by: &str) -> String {
+    format!(
+        r#"{{"thread":{{"threadId":"{id}","status":"{status}","updatedAt":"{updated}","branch":null,
+  "providerInstanceId":"opencode","model":"m","runCount":1,"pendingRequestCount":0,"link":"l","createdBy":"{created_by}"}},
+  "messages":[{{"role":"assistant","text":"確認しました。"}}]}}"#
+    )
+}
+
 /// `show` と同じ報告行のメッセージで、thread に `createdBy` を持たせた show の JSON。
 fn show_with_creator(id: &str, status: &str, updated: &str, created_by: &str) -> String {
     format!(
@@ -1157,6 +1166,187 @@ fn unknown_creator_finished_without_report_wakes() {
     let out = sb.run_with(&["--once"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     assert_eq!(inbox_events(&sb).len(), 1);
+    assert_eq!(sb.read_fake("t3-send-args").trim(), "mcp:conductor-1 -");
+}
+
+#[test]
+fn detail_only_creator_finished_without_report_does_not_wake() {
+    // createdBy が詳細（show）にだけあり一覧には無い人間スレッドの、報告の無い finished:
+    // 詳細から立て手を取り込んで起こさない（人間×報告ありで確かめると、
+    // 立て手不明でも同じように起こすので詳細の取り込みを検査できないため）
+    let sb = Sandbox::new("wake-human-detail-only");
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_a.json",
+        &show_prose_with_creator("mcp:a", "completed", "2026-11-10T16:10:00Z", "user"),
+    );
+    fs::write(sb.state_file(), state_one_running("mcp:a")).unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 1);
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    assert!(
+        stderr(&out).contains("WAKE skipped reason=human-non-urgent"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn human_waiting_wakes() {
+    // 人間が立てたスレッドの waiting は起こす（承認・入力の待ちは報告が無くても急ぐ）
+    let sb = Sandbox::new("wake-human-waiting");
+    sb.fake(
+        "list.json",
+        &list_with_creator("mcp:a", "running", "2026-11-10T16:10:00Z", "user"),
+    );
+    sb.fake(
+        "show-mcp_a.json",
+        &show("mcp:a", "running", "2026-11-10T16:10:00Z", 1),
+    );
+    fs::write(sb.state_file(), state_one_running("mcp:a")).unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let events = inbox_events(&sb);
+    assert!(events.iter().any(|e| e["event"] == "waiting"), "{events:?}");
+    assert_eq!(sb.read_fake("t3-send-args").trim(), "mcp:conductor-1 -");
+}
+
+#[test]
+fn human_stalled_wakes() {
+    // 人間が立てたスレッドの stalled も起こす（迷走の知らせは急ぐ）
+    let sb = Sandbox::new("wake-human-stalled");
+    sb.fake(
+        "list.json",
+        &list_with_creator("mcp:a", "running", "2026-11-10T16:00:00Z", "user"),
+    );
+    sb.fake(
+        "show-mcp_a.json",
+        &show("mcp:a", "running", "2026-11-10T16:00:00Z", 0),
+    );
+    fs::write(sb.state_file(), state_one_running("mcp:a")).unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let events = inbox_events(&sb);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["event"], "stalled");
+    assert_eq!(sb.read_fake("t3-send-args").trim(), "mcp:conductor-1 -");
+}
+
+#[test]
+fn own_and_human_quiet_notices_do_not_wake() {
+    // 指揮役自身のスレッドの知らせと、人間スレッドの報告の無い finished が同じ周回でも
+    // 起こさない（自身の知らせは起こすに足るかの判定に数えない）。2 件とも受信箱には残る
+    let sb = Sandbox::new("wake-own-plus-human");
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:conductor-1","status":"completed","updatedAt":"2026-11-10T16:10:00Z","createdBy":"agent"},
+  {"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z","createdBy":"user"}]"#,
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show_with_creator(
+            "mcp:conductor-1",
+            "completed",
+            "2026-11-10T16:10:00Z",
+            "agent",
+        ),
+    );
+    sb.fake(
+        "show-mcp_a.json",
+        &show_prose("mcp:a", "completed", "2026-11-10T16:10:00Z"),
+    );
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{
+  "mcp:conductor-1":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:a":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null}},"ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 2);
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    assert!(
+        stderr(&out).contains("WAKE skipped reason=human-non-urgent"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn inbox_retry_keeps_resolved_creator() {
+    // 受信箱への追記が失敗したあとの再試行でも、その時点で判明していた立て手を使う:
+    // 人間スレッドの報告の無い finished は、再試行で書けても起こさない。
+    // 完了済みのスレッドは次の周回で詳細を取り直さないので、記録に立て手を残さないと
+    // 立て手不明として起こしてしまう（createdBy は詳細にだけある形で確かめる）
+    let sb = Sandbox::new("wake-retry-creator");
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}]"#,
+    );
+    sb.fake(
+        "show-mcp_a.json",
+        &show_prose_with_creator("mcp:a", "completed", "2026-11-10T16:10:00Z", "user"),
+    );
+    fs::write(sb.state_file(), state_one_running("mcp:a")).unwrap();
+    sb.conductor("mcp:conductor-1");
+    // 受信箱を symlink にして追記を失敗させる
+    fs::create_dir_all(sb.pelway_dir()).unwrap();
+    std::os::unix::fs::symlink(sb.root.join("elsewhere"), sb.inbox()).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(
+        stderr(&out).contains("inbox append failed"),
+        "{}",
+        stderr(&out)
+    );
+    // 受信箱を直してもう一周。次の周回では詳細を取り直さないため、
+    // 記録に残した立て手で判定する
+    fs::remove_file(sb.inbox()).unwrap();
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let events = inbox_events(&sb);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["event"], "finished");
+    assert!(sb.read_fake("t3-send-args").is_empty());
+    assert!(
+        stderr(&out).contains("WAKE skipped reason=human-non-urgent"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn legacy_inbox_pending_is_still_read() {
+    // 立て手を持たない前の版の再試行の記録（payload そのもの）も読んで受信箱に書く。
+    // 立て手はその周の一覧・詳細から取り直し、分からなければ従来どおり起こす
+    let sb = Sandbox::new("inbox-legacy-pending");
+    sb.fake("list.json", "[]");
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{},"inbox_pending":[{"schema":"pelway.agent-watch/v1","event":"finished","thread_id":"mcp:x","report":null}],"ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let events = inbox_events(&sb);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["thread_id"], "mcp:x");
     assert_eq!(sb.read_fake("t3-send-args").trim(), "mcp:conductor-1 -");
 }
 

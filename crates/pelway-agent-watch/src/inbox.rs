@@ -88,7 +88,7 @@ pub fn valid_thread_id(id: &str) -> bool {
 }
 
 /// 起こすかの判定に使う、知らせ 1 件の要約。
-/// `maybe_wake` が、受信箱に書いた payload（`thread_id`・`event`・`report`）と、
+/// `Watcher::cycle` が、受信箱に書いた payload（`thread_id`・`event`・`report`）と、
 /// その周の `t3 thread list`/`show` の `createdBy` から作る。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WakeNotice {
@@ -145,7 +145,9 @@ pub enum WakeDecision {
 /// 起こすかを決める。`last_wake_offset` は前回起こしたときの指揮役の既読の位置（`inbox_offset`。
 /// 一度も起こしていなければ None）。既読の位置がそこから進んでいなければ、重ねて起こさない
 /// （前回の起こしの後に 1 行でも読めば、次の知らせで起こす）。`notices` はその周に受信箱へ
-/// 書いた知らせの要約で、どれか 1 件でも起こすに足る（`wake_worthy`）ものがあれば起こす側に進む。
+/// 書いた知らせの要約で、登録された指揮役自身のスレッドの知らせを除いた残りのどれか 1 件でも
+/// 起こすに足る（`wake_worthy`）ものがあれば起こす側に進む。自身の知らせだけの回は呼び出し側
+/// （`maybe_wake` の own-event）が先に抜けるため、除いた残りが空になることはない。
 pub fn decide_wake(
     info: &PatrolInfo,
     last_wake_offset: Option<u64>,
@@ -157,7 +159,11 @@ pub fn decide_wake(
     if !valid_thread_id(id) {
         return WakeDecision::InvalidThreadId;
     }
-    if !notices.iter().any(wake_worthy) {
+    if !notices
+        .iter()
+        .filter(|n| n.thread_id != *id)
+        .any(wake_worthy)
+    {
         return WakeDecision::HumanNonUrgent;
     }
     if last_wake_offset.is_some_and(|at| info.inbox_offset <= at) {
@@ -179,8 +185,17 @@ mod tests {
     }
 
     fn notice(created_by: Option<&str>, event: &str, has_report: bool) -> WakeNotice {
+        notice_on("mcp:t", created_by, event, has_report)
+    }
+
+    fn notice_on(
+        thread_id: &str,
+        created_by: Option<&str>,
+        event: &str,
+        has_report: bool,
+    ) -> WakeNotice {
         WakeNotice {
-            thread_id: "mcp:t".to_string(),
+            thread_id: thread_id.to_string(),
             event: event.to_string(),
             has_report,
             created_by: created_by.map(str::to_string),
@@ -403,6 +418,34 @@ mod tests {
         let notices = vec![
             notice(Some("user"), "finished", false),
             notice(Some("agent"), "finished", true),
+        ];
+        assert_eq!(
+            decide_wake(&info(Some("mcp:a"), 0), None, &notices),
+            WakeDecision::Send("mcp:a".to_string())
+        );
+    }
+
+    #[test]
+    fn own_notice_does_not_make_quiet_batch_worthy() {
+        // 指揮役自身（agent で立てたスレッド）の finished と、人間の報告の無い finished が
+        // 同じ回なら、起こすに足るものは無い（自身の知らせは起こす側に数えない）
+        let notices = vec![
+            notice_on("mcp:a", Some("agent"), "finished", false),
+            notice_on("mcp:t", Some("user"), "finished", false),
+        ];
+        assert_eq!(
+            decide_wake(&info(Some("mcp:a"), 0), None, &notices),
+            WakeDecision::HumanNonUrgent
+        );
+    }
+
+    #[test]
+    fn own_notice_plus_agent_notice_wakes() {
+        // 指揮役自身の finished と、エージェントが立てたスレッドの finished が
+        // 同じ回なら、後者で起こす
+        let notices = vec![
+            notice_on("mcp:a", Some("agent"), "finished", false),
+            notice_on("mcp:t", Some("agent"), "finished", true),
         ];
         assert_eq!(
             decide_wake(&info(Some("mcp:a"), 0), None, &notices),

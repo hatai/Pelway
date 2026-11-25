@@ -291,10 +291,14 @@ impl Watcher {
         // （webhook が外した知らせも、上限 100 件の内なら後で届く）。受信箱に書けなくても webhook の送信と見張りは続ける。
         // 更新前の版の状態では、列の知らせを書けたかが分からないので、最初の周回で列の写しを書き直す（重複しうる）
         let pending = self.state.inbox_pending.replace(Vec::new());
-        let mut to_inbox = pending.unwrap_or_else(|| self.state.outbox.clone());
-        to_inbox.extend(payloads.iter().map(|(p, _)| p.clone()));
+        let mut to_inbox: Vec<(Value, Option<String>)> = pending
+            .unwrap_or_else(|| self.state.outbox.clone())
+            .iter()
+            .map(pending_notice_parts)
+            .collect();
+        to_inbox.extend(payloads.iter().map(|(p, _)| (p.clone(), None)));
         if !to_inbox.is_empty() {
-            let lines: Vec<String> = to_inbox.iter().map(inbox_line).collect();
+            let lines: Vec<String> = to_inbox.iter().map(|(p, _)| inbox_line(p)).collect();
             // 起こしの判定に使う、知らせごとの種類（event・report の有無）と元のスレッドの立て手。
             // 立て手は詳細（t3 thread show）を優先し、無ければ一覧（t3 thread list）の createdBy を使う。
             // どちらにも無ければ立て手不明（None。起こす側に倒す。inbox::human_created）
@@ -312,14 +316,16 @@ impl Watcher {
             };
             let notices: Vec<WakeNotice> = to_inbox
                 .iter()
-                .map(|p| {
+                .map(|(p, stored)| {
                     let thread_id = p
                         .get("thread_id")
                         .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string();
                     WakeNotice {
-                        created_by: creator_of(&thread_id),
+                        // 再試行の記録に判明済みの立て手があればそれを使う
+                        // （完了済みのスレッドはこの周回で詳細を取り直さないため）
+                        created_by: stored.clone().or_else(|| creator_of(&thread_id)),
                         thread_id,
                         event: p
                             .get("event")
@@ -335,8 +341,8 @@ impl Watcher {
                 Err(e) => {
                     eprintln!("agent-watch: ERROR inbox append failed: {e}");
                     let pending = self.state.inbox_pending.get_or_insert_default();
-                    for p in to_inbox {
-                        outbox::push(pending, p);
+                    for ((p, _), notice) in to_inbox.iter().zip(&notices) {
+                        outbox::push(pending, pending_notice(p, notice.created_by.as_deref()));
                     }
                 }
             }
@@ -511,6 +517,34 @@ impl Watcher {
         }
         out
     }
+}
+
+/// 受信箱への再試行の記録 1 件の形。その時点で判明している立て手を `created_by` に残す。
+/// 立て手を残さないと、追記が失敗した回のあとでは詳細を取り直さない（完了済みのスレッドは
+/// 状態が変わらないため詳細を取らない）ので、立て手不明として起こす側に倒れてしまう。
+fn pending_notice(payload: &Value, created_by: Option<&str>) -> Value {
+    let mut v = serde_json::json!({ "notice": payload });
+    if let Some(c) = created_by {
+        v["created_by"] = serde_json::json!(c);
+    }
+    v
+}
+
+/// 再試行の記録を（受信箱に書く payload, 記録されていた立て手）に戻す。
+/// 前の版の記録（`schema` を持つ payload そのもの）と形の違うものは、payload そのもの・
+/// 立て手なしとして扱い、その周の一覧・詳細から立て手を取り直す。
+fn pending_notice_parts(item: &Value) -> (Value, Option<String>) {
+    if item.get("schema").is_none()
+        && let Some(p) = item.get("notice").filter(|n| n.is_object())
+    {
+        return (
+            p.clone(),
+            item.get("created_by")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        );
+    }
+    (item.clone(), None)
 }
 
 /// ログ用の短い識別（秘密と返答の本文は含めない）。
