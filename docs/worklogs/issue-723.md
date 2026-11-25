@@ -23,3 +23,15 @@
 5. 改善案: `scripts/agent-gh-resign` の「ブランチを base に巻き戻し」の段は、途中で失敗すると PR が閉じる。`.agents/skills/implement-issue/SKILL.md` の手順 6 に「付け替えの失敗のあとは `scripts/agent-gh dev pr view <M> --json state` で PR が開いているかを確かめ、閉じていれば `api --method PATCH pulls/<M>` で開き直す」を足す。巻き戻さずに付け替える方式も検討したい。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: 107a288e5cc6c27a1e185fde237d4de5e4308db4
+
+1. 詰まった箇所: `docs/adr/0014-desktop-client-electron.md` の配布経路: round 2 で本体だけを attestation に結び付け、同じ Release から取る `latest*.yml` を照合していなかった（claude の must-fix。Release の資産を書き換えられる者が `version` を偽って古い版へ巻き戻せる）。
+2. 曖昧だった文: 「sha256 を確かめてから入れ替える。」（Issue #723「未決事項」の 8）。何に対して確かめるか（同じ Release の `SHA256SUMS` か、タグに結び付いた値か）が書かれていない。
+3. 仮定と解釈: ホストが `latest*.yml` を (a) タグの版と `version` の一致、(b) 本体の `sha512`・`size` の自前の計算との一致、(c) 今の版より新しいこと、で照合する形を「決定」に足した。`stagingPercentage` の改ざんは公開の速さと停止だけに効くので許すと書いた（`desktop:rollout` の案と両立させるため、`latest*.yml` 自体への attestation は選ばなかった）。直したのは must-fix と `[文書のずれ]` の nit（「v0.7 との関係」の列挙）だけで、ほかの nit 3 件（fine-grained トークンは Contents read になる、Linux の safeStorage の平文、人の発言のリンク）は手順どおり直していない。
+4. 足りなかった情報・検証手段: electron-updater が `latest.yml` のどの項目で更新を判断するかは実行して確かめていない（レビューの読みと公開の仕様に拠った）。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の受け入れ条件の書き方に「配布物の完全性を決める Issue では、何に対して確かめるか（信頼の根）を書く」を足す。
+
+使ったスキル: implement-issue
