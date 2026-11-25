@@ -49,3 +49,12 @@
 - head: 本コミット（9a030a05 の approve review の印付き nit 1 件への対応）
 - 直し: runbook:382 の「初回起動時に引き継ぐ」と conductor-watch.sh:32 の「1 回きりの移行」を、実際の条件（旧ファイルは残り、正規パスに通常ファイルが無い起動のたびに写し直す）に合わせた。pr-size 対策で試験ファイルの空行を 10 行削った（意味のある行は不変）
 - 結果: mise run verify 実施・pr-size +797/-13
+## 実装者メモ（round 8。round 7 は停止時のメモで Issue #671 のコメントにのみ記録）
+対象 head: 006749b0d4900bdadfb1ae5801850f6783518416
+1. 詰まった箇所: 手順 9「修正依頼」: scripts/conductor-watch.sh の書き戻しで、main の #699（PR #705）の検査とこの PR の共通手順が同じ箇所を変えていた。#699 の write_ps を検査だけの check_ps にし、通った回だけ scripts/patrol-state-update を呼ぶ形で併合した
+2. 曖昧だった文: 「両立する変更は両側残す。片方を採るときは、落とした側と理由を round サマリーに書く」（.agents/skills/implement-issue/SKILL.md の手順 9「修正依頼」）。どちらも書き戻しを守る変更で、両立できる部分と排他的な部分の区別が読み取れなかった
+3. 仮定と解釈: 巡回の読み取り上限（4 MiB）と手順の読み取り上限（256KiB）の差は意図の食い違いと読み、手順の STATE_MAX_BYTES を 4 MiB に揃えた。手順を 256KiB のままにする解釈では、巡回が読める 256KiB 超 4 MiB 以下の記録が手順に置き換えられるため。手順が親ディレクトリを検査しない点は変えず、巡回が dir-invalid の回に手順を呼ばないことで済ませた
+4. 足りなかった情報・検証手段: `.agents/skills/verify-pelway/verify-run.test.sh` がこの sandbox では /tmp の所有者 uid 65534 のために落ちる。`scripts/red-check origin/main -- bash .agents/skills/verify-pelway/verify-run.test.sh` で同じ 6 項目の失敗を再現し、環境起因と切り分けた
+5. 改善案: .agents/skills/implement-issue/SKILL.md の「止まる条件」の pr-size の行に「衝突の解消で行数が増えたときは、空行・継続行を詰めた先例（548faa59）がある」と書くと、解消のたびに停止にならない
+
+使ったスキル: implement-issue（初回の解消で読んだユーザーレベルの fix-merge-conflicts は、手順は implement-issue の手順 9 に合わせた）
