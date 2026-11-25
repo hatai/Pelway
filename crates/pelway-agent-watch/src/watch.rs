@@ -9,6 +9,15 @@ use crate::parse::parse_utc_epoch;
 /// 実行中のまま更新がないとき `stalled` にするまでの秒数。
 pub const NO_ACTIVITY_SECS: i64 = 45 * 60;
 
+/// JSON の値を、文字列なら `Some`、それ以外（欠落・null・数値など）は `None` にする。
+/// `createdBy` の型が変わっても一覧・詳細の読み取り自体は失敗させず、立て手不明に倒すため。
+fn as_opt_string<'de, D>(d: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<serde_json::Value>::deserialize(d)?.and_then(|v| v.as_str().map(str::to_string)))
+}
+
 /// `t3 thread list --json` の 1 要素。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ListedThread {
@@ -17,6 +26,11 @@ pub struct ListedThread {
     pub status: String,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
+    /// スレッドの立て手（`createdBy`。`"agent"` はエージェント、それ以外は人間として扱う。
+    /// `docs/agents/grokbot-runbook.md` の shared-worktree と同じ見分け）。項目が無い・
+    /// 文字列でないときは `None`（立て手不明）。
+    #[serde(default, rename = "createdBy", deserialize_with = "as_opt_string")]
+    pub created_by: Option<String>,
 }
 
 /// `t3 thread show --json` から読んだスレッドの詳細。
@@ -32,6 +46,8 @@ pub struct ThreadDetail {
     pub run_count: u32,
     pub pending_requests: u32,
     pub last_assistant_text: Option<String>,
+    /// `ListedThread::created_by` と同じ項目を詳細からも読む（無い・読めないときは `None`）。
+    pub created_by: Option<String>,
 }
 
 /// スレッドごとに覚えておく前回の値。
@@ -207,6 +223,7 @@ mod tests {
             id: id.into(),
             status: status.into(),
             updated_at: updated_at.into(),
+            created_by: None,
         }
     }
 
