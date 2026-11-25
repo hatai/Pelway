@@ -100,7 +100,7 @@ PR に `automerge` ラベルを付けてよいのは、skill `command-team` の�
 
 ### 割り当て・停止・再開
 
-- 枠の数え方: open な Issue の `agent:working` の数から、作業状態の印が停止中・再開処理中・再開待ちのものを除き、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）を加えたものが、担当ごとの上限（正本の「制約」）以下であること。内訳は `agent:devin` の有無で判定する。通常完了時の `agent:working` の解除は既存のマージ後処理のとおり
+- 枠の数え方: open な Issue の `agent:working` の数から、作業状態の印が停止中・再開処理中・再開待ちのものを除き、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）を加えたものが、担当ごとの上限（正本の「制約」）以下であること。内訳は `agent:devin` の有無で判定する。Issue の枠の使用数は見張りの `SLOTS` の行で読む（「3. 同時数と順番待ち」）。通常完了時の `agent:working` の解除は既存のマージ後処理のとおり
 - blocker の確認（割り当ての前段。新規・手当・再開の共通。巡回の最初に確かめて使い回さず、割り当てる直前に行う。その間に依存が追加されることがあるため）:
   1. 割り当て可否は `issue_dependencies_summary.blocked_by` だけで判定する（`GET /repos/hatai/Pelway/issues/<N>` を `scripts/agent-gh dev api` で読む。開いている blocker の数。0 なら着手可能）。`total_blocked_by` は閉じた blocker も数えるため、判定に使わない。hatai 名義の gh は使わない
   2. 本文に書かれた「Blocked by #N」も確かめる。依存関係の情報と食い違ったら、割り当てを止める
@@ -200,6 +200,8 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 | レビュー（Codex `codex_review`） | 目安 2 | 通常の PR のレビューは実装担当が `delegate_task` で委託するため、この表では数えない。指揮役が立てたレビュースレッド（指揮役自身の PR・外部投入）だけを数える。Codex・T3・`~/.codex-review` を更新したら、`docs/dev-environment.md` の「専用 home での確認」が済むまでは使わない |
 | レビュー（Devin CLI） | 目安 2 | 同上。`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまでは使わない |
 | レビュー（Claude `claude_review`） | 目安 1 | 同上。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは使わない |
+
+実装・調査の使用数は、見張り（`scripts/conductor-watch.sh`）が巡回ごとに `agent-team.toml` の枠の上限と突き合わせて `SLOTS <担当> <使用数>/<上限>` の行を watch.log に出すもので読む（上限を超えている担当は `SLOTS over`、検証を通らないときは `SLOTS error` の行。`agent-team.toml` が無い環境では行自体が出ない）。`SLOTS` の行が数えるのは Issue の枠だけなので、Issue を持たない入口B の調査の稼働中スレッドは指揮役が巡回記録の割り当て表から加算する。`SLOTS` の行が無い・`SLOTS error` のときは、上の表の数え方で数える。
 
 上限に達しているときは新しいスレッドを立てない。空きが出たら、待っているものを次の順で始める。
 

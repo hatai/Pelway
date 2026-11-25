@@ -77,6 +77,18 @@ check cond5_write_issue_board .agents/skills/write-issue/SKILL.md \
   'サブ Issue' \
   'Todo'
 
+# 条件6（Issue #714）: 枠の使用数は見張りの SLOTS の行で読むことが、runbook の
+# 「3. 同時数と順番待ち」・「割り当て・停止・再開」と、skill command-team の
+# 「1. サイクルの始め」に書かれている。
+check cond6_runbook_slots_lines docs/agents/grokbot-runbook.md \
+  '`SLOTS <担当> <使用数>/<上限>` の行' \
+  '`SLOTS over`' \
+  '`SLOTS error`' \
+  'Issue の枠の使用数は見張りの `SLOTS` の行で読む'
+check cond6_command_team_slots .agents/skills/command-team/SKILL.md \
+  '`SLOTS` の行で枠の使用数を確かめる' \
+  '`SLOTS error`'
+
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
   exit 1

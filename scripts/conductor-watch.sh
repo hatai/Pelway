@@ -137,7 +137,8 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
        "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0),
        "thread_list": None if prev is None else prev.get("thread_list"),
        "pending_sends": None if prev is None else prev.get("pending_sends"),
-       "ps_write_skipped": None if prev is None else prev.get("ps_write_skipped")}
+       "ps_write_skipped": None if prev is None else prev.get("ps_write_skipped"),
+       "slots": None if prev is None else prev.get("slots")}
 # ラベル操作の裏付け検査（Issue #405、2026-11-17 の要件変更）。actor だけでは判定しない
 # （エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai に
 # なることがあるため）。needs-human の解除と automerge の付け外しを、イベント時刻の前
@@ -290,7 +291,8 @@ def gh_json(*args):
 # 見張りが動いていることを示す行（Issue #504）。HEARTBEAT_SECS ごとに 1 行。
 # PELWAY_WATCH_HEARTBEAT_SECS で差し替えられる（テスト用）。
 HEARTBEAT_SECS = env_secs("PELWAY_WATCH_HEARTBEAT_SECS", 600)
-if now - (cur["heartbeat_at"] or 0) >= HEARTBEAT_SECS:
+hb = now - (cur["heartbeat_at"] or 0) >= HEARTBEAT_SECS
+if hb:
     print(f"HEARTBEAT at={stamp(now)}", flush=True)
     cur["heartbeat_at"] = now
 # 未配送のスレッド指示（patrol-state.json の pending_thread_sends）の滞留（Issue #669）。
@@ -627,6 +629,52 @@ try: ps = json.loads(read_ps())
 except Exception: ps = {}
 if not isinstance(ps, dict): ps = {}
 if not isinstance(ps.get("subjects"), dict): ps["subjects"] = {}
+# SLOTS 行（Issue #714）。実装・調査に使っている枠の数を agent-team.toml の上限と
+# 突き合わせて出す。指揮役は割り当ての前にこの行を読む（runbook「3. 同時数と順番待ち」）。
+# agent-team.toml が作業ツリーに無いときは何も出さない。検証を通らないときは
+# SLOTS error <理由> を出し、使用数は出さない。出すのは、使用数または理由が前回の巡回から
+# 変わったときと、HEARTBEAT の行を出した巡回。Issue を持たない調査（入口B）は数えない
+# （指揮役が巡回記録から加算する）。数えるのは open で agent:working の付いた Issue で、
+# agent:devin が付いたものは devin に、ほかは opencode に入れる。巡回記録の作業状態の印が
+# 停止中・再開処理中・再開待ちのものは使っていない枠として除く。
+if issues is not None and len(issues) < issue_limit and os.path.isfile("agent-team.toml"):
+    try:
+        r = subprocess.run(["scripts/agent-team-config", "slots", "hatai"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+        if r.returncode != 0:
+            reason = next((ln.strip() for ln in r.stderr.splitlines() if ln.strip()), None) or f"exit={r.returncode}"
+            slots_sig = f"error|{reason[:160]}"
+            if cur["slots"] != slots_sig or hb:
+                print(f"SLOTS error {reason[:160]}", flush=True)
+        else:
+            limits = {}
+            for ln in r.stdout.splitlines():
+                p = ln.split()
+                if len(p) == 2 and p[1].isdigit(): limits[p[0]] = int(p[1])
+            marks = set()
+            items = ps.get("items")
+            if isinstance(items, dict):
+                for n, it in items.items():
+                    ws = it.get("work_state") if isinstance(it, dict) else None
+                    if isinstance(ws, dict) and ws.get("state") in ("停止中", "再開処理中", "再開待ち"):
+                        marks.add(str(n))
+            used = {name: 0 for name in limits}
+            for iss in issues:
+                if not isinstance(iss, dict) or iss.get("state") != "OPEN": continue
+                labs = {lb.get("name") for lb in (iss.get("labels") or []) if isinstance(lb, dict)}
+                if "agent:working" not in labs or str(iss.get("number")) in marks: continue
+                who = "devin" if "agent:devin" in labs else "opencode"
+                if who in used: used[who] += 1
+            lines = [f"SLOTS{' over' if used[n] > lim else ''} {n} {used[n]}/{lim}" for n, lim in limits.items()]
+            slots_sig = "|".join(lines)
+            if cur["slots"] != slots_sig or hb:
+                for ln in lines: print(ln, flush=True)
+    except Exception as e:
+        slots_sig = f"error|{type(e).__name__}"
+        if cur["slots"] != slots_sig or hb:
+            print(f"SLOTS error agent-team-config failed ({type(e).__name__})", flush=True)
+    cur["slots"] = slots_sig
+    json.dump(cur, open(sp, "w"))
 # 取得に成功し、かつどちらの一覧も打ち切られていない（件数が上限に達していない）ときだけ更新する。
 if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr_limit:
     pr_of = {}
