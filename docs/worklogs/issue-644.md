@@ -213,3 +213,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の「送り先の照合」の 2 に名指しの照合が使う止まりの判定（T3 の状態と `state: stopped`）を正本として置き、168 行はそこを参照する形にする
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 18）
+
+対象 head: e92cd92e597fd4a1d32396a8a89fad0d22e060fe
+
+1. 詰まった箇所: `docs/agents/grokbot-runbook.md`: main（#695 のマージ 8f3e3c8）の取り込みで 3 か所が衝突した。(a) 巡回の箇条: 自分側が足した「定型の指示も、送る直前に送り先を確かめる」の箇条と、#695 が書き換えた automerge の条件（結果の確定）の箇条。(b) 5 の表: #695 が `finished` に足した知らせ方と、自分側が `failed` に足した送り先の確かめ。(c) 6 の表: `pr:`・`memo:` は自分側（調査の報告 PR を引き継いだスレッドの終わりの報告）、`review:`・`verdict:` は #695（`run` の ID と実行の投稿での照合）の変更。base（6c811fb5）と比べ、どの行も片側だけが変えていたので両側を残した。落とした側は無い
+2. 曖昧だった文: 「`review:` は指揮役が立てた報告 PR のレビューのラウンド数と `approve`」（`docs/agents/grokbot-runbook.md` の「既存の PR ブランチを引き継ぐ」）。#695 の後の 6 の表の `review:` 行は行の `run` の ID で照合するため、この文のままでは引き継ぎのスレッドの 6 行が照合に通らない
+3. 仮定と解釈: 引き継ぎの 6 行は skill `implement-issue` の手順 10 と同じ照合を受けると解釈し、`review:` に同じ手順 10 の形の `run` の ID（指揮役が「続きをやり直す」に添えた `run <ID>` を GitHub で確かめて書く）を足した。6 の表の `review:` 行に調査の報告 PR の例外を足す解釈は、#695 の fail-closed の照合を緩めるので選ばなかった。wording pin（`scripts/tests/takeover-worktree-docs.test.sh`）は変えた文言に合わせて直しただけ
+4. 足りなかった情報・検証手段: 調査の報告 PR で、指揮役が「続きをやり直す」に `run <ID>` を添える経路（6 の表の `waiting-conductor` の行）が実際に引き継ぎのスレッドへ届く実例は確かめていない
+5. 改善案: `docs/agents/grokbot-runbook.md` の「既存の PR ブランチを引き継ぐ」の 6 行の説明は、各行の値を手順 10 を参照する形にして、手順 10 の書式の変更に追従させる
+
+使ったスキル: implement-issue
