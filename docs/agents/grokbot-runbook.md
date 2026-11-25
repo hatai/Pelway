@@ -334,7 +334,7 @@ t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree m
 Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>"
 ```
 
-`<slug>` は症状を英小文字とハイフンで短くしたもの。effort は `docs/agents/command-team-details.md` の「調査（入口B）」で決める。起動したら、割り当ての記録に役割 investigate の行を足し、起動が返した調査スレッドの `thread_id` と作業ブランチ（`--branch` の `agent/investigate-<slug>`）を書く。報告 PR の番号は、この時点では `none` とし、引き渡しで書く。起動が `thread_id` を返さず確かめられなかったときは `thread_id` を書かず、7 のエスカレーションで人間に知らせる（その行には引き渡しで報告 PR を結び付けられず、調査スレッドへの指示は送り先が確定しないため保留になる）。調査スレッドの報告（`pr:` に報告の Draft PR）を受けたら、同じ節の「調査の引き渡し」に従う。
+`<slug>` は症状を英小文字とハイフンで短くしたもの。effort は `docs/agents/command-team-details.md` の「調査（入口B）」で決める。起動したら、割り当ての記録に役割 investigate の行を足し、起動が返した調査スレッドの `thread_id` と作業ブランチ（`--branch` の `agent/investigate-<slug>`）を書く。報告 PR の番号は、この時点では `none` とし、引き渡しで書く。起動結果が不明で `thread_id` を確かめられなかったときは、「2. ボードと巡回」の「割り当て・停止・再開」の割り当て手順の 4 と同じく、次の巡回で割り当て ID とスレッド履歴を照合し、その ID のスレッドがあればその `thread_id` を行に書き、無ければ起動し直す。`thread_id` が書かれるまでは、引き渡しの結び付けも調査スレッドへの指示も保留にする。調査スレッドの報告（`pr:` に報告の Draft PR）を受けたら、同じ節の「調査の引き渡し」に従う。
 
 ### 棚卸し担当を立てる
 
