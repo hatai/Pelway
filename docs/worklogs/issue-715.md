@@ -87,3 +87,20 @@ PR: #722
    - round 5 のメモの照合を、`stop_verified` が偽を返す条件の全列挙と round 5 時点の残差（要約側の欠落と題名 0 件の扱い）を書く形に直した
    - PR 本文の「確かめ方を弱める変更」を差分に合わせた（board-patrol-docs.test.sh は存在確認の追加のみ、既存の文言を置き換えたのは review-delegation-docs.test.sh）
 4. 仮定と解釈: なし
+
+## 実装者メモ（round 7）
+
+対象 head: e9bb528fcf97e0cbebe5187a22658711903d1a8f
+PR: #722
+
+レビュー指摘（run 7170056854 claude request-changes、head 6a59e981）への対応。高リスク PR の必須実行（codex+claude）のうち、claude の 1 回目:
+
+1. 詰まった箇所: なし
+2. must-fix の対応:
+   - 指摘: `instance.review` の正本を `agent-team.toml` に移した結果、`[agents.*].instance` だけを変える PR が高リスク・`security=yes` のパス条件のどれにも当たらず、通常のレビューで通りうる。マージ後の toml はそのまま委託・起動に読まれ、隔離の無いインスタンスへ替えられうる
+   - 直し方の (1)・(2) の両方を適用:
+     - (1) command-team「レビュー担当と effort」の高リスクの条件と implement-issue 手順 8 の `security=yes` の条件に「`agent-team.toml` の `[agents.*].instance` の変更」を追加
+     - (2) 委託・起動の直前に、読んだ `instance.review` が `docs/dev-environment.md` の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致することを確かめ、一致しなければ止める、を command-team の表・implement-issue 手順 8・runbook（`t3_thread_launch` の引数と「レビューを始める」の 2 箇所）に追加。正本の「レビュー担当の権限」にも同じ条件を 1 行追加
+3. 印の nit（`[文書のずれ]`）の対応: implement-issue の `target.options` の列でコードスパン内にバッククォートが入れ子になり表示が崩れていた箇所（codex・claude の 2 行）を、`{"<[agents.<担当>].effort.option>": "<effort>"}` の形に直した
+4. 仮定と解釈:
+   - runbook:214（MCP `t3_thread_launch` の引数の項）は指摘の 3 箇所に含まれないが、同じ「main の版から読む」規則を並記している箇所のため、同じ照合の条件を足した

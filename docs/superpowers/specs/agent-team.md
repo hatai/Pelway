@@ -140,6 +140,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - レビュースレッドは T3 の権限 `auto-accept-edits`（Codex の `workspaceWrite`）で立てる。`full-access` ではコマンドが sandbox の外で動き、ネットワークの制限が効かない。この権限では `.git` が読み取り専用になるので、PR の側のファイルは GitHub API で読む
 - Claude のレビュースレッドは Claude のレビュー用インスタンス（`agent-team.toml` の `[agents.claude].instance.review`）で動かす。skill `review-pr` をそのまま使い、使えるコマンドを読み取り系の `git` と `scripts/agent-gh review` に絞り、ネットワークを `api.github.com` と `github.com` だけに絞る。設定と確認の方法は `docs/dev-environment.md` の「レビュー担当の Claude」。確認が済むまでは使わない
 - Devin CLI のレビュースレッドは Devin CLI のレビュー用インスタンス（`agent-team.toml` の `[agents.devin].instance.review`）で動かす。skill `review-pr` をそのまま使い、権限モードは Devin CLI 公式 sandbox の Autonomous 一択になる（`bypass` は使わない）。このインスタンスは起動ラッパーで `DEVIN_SANDBOX=true` と専用設定（ドメイン許可リスト・permissions deny）を付けて立ち上がり、GitHub 以外への通信とワークスペース外への書き込みを実行時に遮断する。仕組みと採用の条件（確認の記録）は `docs/dev-environment.md` の「レビュー担当の Devin CLI」
+- 委託・起動で読んだ `[agents.<担当>].instance.review` は、`docs/dev-environment.md` の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致するものだけを使う。一致しなければ委託・起動しない
 - Devin CLI が実装した PR には Devin CLI のレビューを付けない。同じモデル系列が自分の出力を採点する偏りを避ける
 - 指揮役はレビューを兼ねない。指揮役が作った PR もレビュースレッドに回す
 - CI 上で動かす助言セキュリティレビューの起動の認可と実行の隔離は `docs/agents/ci-security-review.md` に定める
