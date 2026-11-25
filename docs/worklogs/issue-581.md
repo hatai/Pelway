@@ -83,3 +83,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 3 に「割り当ての worktree が別のブランチを checkout しているときは、PR ブランチの remote の先端から別名のブランチを作り、`HEAD:<PR ブランチ>` で push する」を足す（round 2〜7 で毎回起きた）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 8）
+
+対象 head: 154389f5475eda20040caf0198dc50abed284948
+
+1. 詰まった箇所: worktree の用意: 割り当ての worktree は別のブランチ（`t3/pr695-r8-review-must-fix`）だった。`origin/agent/581-fail-closed-tool-check` に合わせて `HEAD:agent/581-fail-closed-tool-check` で push した。`agent-gh-resign` は範囲内のマージコミット 42df844a を理由に署名を付け替えず、push は署名なしのまま。Issue #581 に hatai のコメントは無く、round の上限の撤廃（t629u）は委託元の指示だけが根拠。
+2. 曖昧だった文: 「名前や提供元を問わず、許可されたレビュー投稿経路以外に GitHub を変更できるツールがある場合は停止する」（codex r8 の must-fix 1）
+3. 仮定と解釈: 許可経路は「コマンドを実行するツールで動かす `scripts/agent-gh review ...`」とし、シェルのツール自体は照合に数えないと解釈した（数えると全レビューが止まる）。判定はツールの名前・説明・引数の定義で行い、判断できないものは変更できるものとして扱う（fail-closed）。帰属の確認での `DISMISSED` は、手順 8 の定義を変えずに 315 行の側で局所的に足した。巡回の起動漏れは runbook のほか、実装スレッドの巡回の表（「巡回から定型の指示を受けたとき」）にも同じ決まりを当てた。r3 から r8 まで照合の must-fix が続いたので、同じ条件を言い直している箇所を grep してそろえる決まりにした。
+4. 足りなかった情報・検証手段: `submitted_at` を足した jq は、PR #695 の実データで読み取りだけ実行した。`DISMISSED` の別実行の投稿と、2 人目の担当が未起動の状態は、実データでは確かめていない。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 3 に「割り当ての worktree が別のブランチを checkout しているときは、PR ブランチの remote の先端から別名のブランチを作り、`HEAD:<PR ブランチ>` で push する」を足す（round 2〜8 で毎回起きた）。
+
+使ったスキル: implement-issue
