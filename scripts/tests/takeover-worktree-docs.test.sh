@@ -262,6 +262,8 @@ check investigation_takeover_skill "$RB" \
   'Draft を解除し終えたら同じ skill の手順 10 の終わりの報告の 6 行（`issue:`・`pr:`・`review:`・`ready: done`・`memo:`・`state: done`）で書かせる' \
   '`review:` は指揮役が立てた報告 PR のレビューのラウンド数と `approve`、および同じ手順 10 の形の `run` の ID（現在の head の必要な実行の委託記録の ID。指揮役が「続きをやり直す」に添えた `run <ID>` を GitHub で確かめて書く）、`memo:` は `none`（報告 PR は報告のファイルだけで、実装者メモを書かないため）' \
   '巡回の定型の指示（「続きをやり直す」など）を受けたときは、GitHub の実状態で作業を決めさせる' \
+  '現在の head に向けた実行の `request-changes` を確かめられたときだけ報告 PR の修正' \
+  '「最新のレビュー」の状態だけでは修正に進まない: 行が添えられていない、前の head に向けた委託記録の実行、dismiss された投稿、投稿の無い実行、投稿が 0 件・2 件以上・状態の不一致、GitHub を読めないときは、修正にも Draft の解除にも進まず' \
   '終了通知（5 の表の `finished`）は、実装スレッドと同じく `pr:` と `ready: done` を読んでマージの判断に進む' \
   '同じ照合のうち Draft の代わりに Draft でないこと（`ready:` の行）で確かめ' \
   '調査の報告 PR を引き継いだスレッドの終わりの報告の `memo: none` は確かめず' \
