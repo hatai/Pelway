@@ -32,12 +32,28 @@
   ホストのファイルへの symlink 差し替えで中身が漏れないようにするため
 - anomalies はこの手順だけが記録する項目。patch が書いたものは採らず、base の
   記録に今回の記録を追記したものだけを結果に入れる（注入・消去を防ぐ）
+- 親ディレクトリ（正規パスの 1 つ上。既定は共有 git dir の pelway/）は、そのさらに
+  1 つ上を基点として symlink をたどらずに開き（O_DIRECTORY|O_NOFOLLOW）、ディレクトリで
+  自分の所有であることを確かめる。ディレクトリの作成・ロック・正規パス・退避・一時
+  ファイル・置き換えはすべてそのディレクトリの記述子を基準に行う（巡回の open_ps_dir と
+  同じ検査。確かめた後に親が symlink に差し替えられても、記述子は元のディレクトリを
+  指し続けるため、リンク先には何も作らない・書かない）。開けない・確かめられないときは
+  何も書かず終了コード 1
+- 通常ファイルを読めるはずなのに開く・読むのに失敗したとき（一時的な入出力エラーや
+  権限）は、種類の不適合とは分けて扱う。読めなかった内容を空として書き直すと持ち主・
+  オフセット・未配送の指示が消えるため、正規パスを保ったまま何も書かず終了コード 1。
+  次の書き込みは元の記録から再開する
+- 書き戻す結果（末尾の改行を含む）が 4 MiB（読み取り上限と同じ）を超えるか整形
+  できないときは書き込まない。適用も拒否の記録も同じで、元の記録を保つ。終了コードは
+  4（上限超過）・5（整形できない）。巡回はこの終了コードを書き戻さなかった理由として
+  報告する
 
-入力は標準入力の merge patch ベースの指定（オブジェクトは深く併合し、null は鍵を消す。
-RFC 7386 と違い、patch のオブジェクトは既存値がオブジェクトでなくても再帰的に
-併合する — そのため中の null も常に「鍵を消す」で、値としては残らない。
-JSON 配列は併合の列として順に適用する — 鍵の集合ごとの置き換えは
-[{"<k>": null}, {"<k>": <新しい値>}] の形で表す）。
+入力は標準入力の merge patch（RFC 7386。オブジェクトは深く併合し、null は鍵を消す。
+patch のオブジェクトは既存値がオブジェクトでなくても空のオブジェクトに再帰的に
+併合する — この点は RFC 7386 と同じで、中の null は常に「鍵を消す」になる）。
+RFC 7386 に無い拡張は、最上位が JSON 配列のときは併合の列として順に適用する点
+だけである — 鍵の集合ごとの置き換えは [{"<k>": null}, {"<k>": <新しい値>}] の形で
+表す。最上位がオブジェクトでも配列でもない入力は受け付けない。
 
 使い方:
   patrol-state-update [--state PATH] (--writer-thread TID | --writer NAME)
@@ -53,25 +69,27 @@ JSON 配列は併合の列として順に適用する — 鍵の集合ごとの�
                    conductor_thread_id はこのフラグでだけ変更できる）
   --allow-offset-regression  オフセットの巻き戻しを anomalies に記録して適用する
 
-終了コード: 0 = 適用、2 = 引数・入力の誤り、3 = 保護による拒否（anomalies に記録）、
-1 = 入出力・ロックの失敗。
+終了コード: 0 = 適用、2 = 引数・入力の誤り、3 = 保護による拒否（anomalies に記録。
+上限超過で記録できなかったときは stderr にそう書く）、4 = 結果が上限を超えるため
+書き込まなかった、5 = 結果を整形できないため書き込まなかった、
+1 = それ以外の入出力・ロック・親ディレクトリの失敗。
 """
 import copy
 import errno
 import fcntl
 import json
 import os
+import secrets
 import stat
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime
 
 OFFSET_KEYS = ("watch_log_offset", "inbox_offset")
 ANOMALY_MAX = 100
 LOCK_TIMEOUT_SECS = 10.0
-STATE_MAX_BYTES = 4 * 1024 * 1024  # conductor-watch.sh の read_ps と同じ読み取り上限（4 MiB）。変えるときは両方を直す
+STATE_MAX_BYTES = 4 * 1024 * 1024  # 読み取りと書き込みの上限（4 MiB）。conductor-watch.sh の read_ps と同じ値。変えるときは両方を直す
 LOCK_RETRY_SECS = 0.1
 
 
@@ -119,9 +137,9 @@ def parse_args(argv):
 
 
 def merge(dst, patch):
-    # merge patch ベースの併合: null は鍵を消し、それ以外は置き換える。
+    # merge patch（RFC 7386）: null は鍵を消し、それ以外は置き換える。
     # patch のオブジェクトは、既存値がオブジェクトでなくても常に再帰的に併合する
-    # （既存値を {} として扱う。RFC 7386 とはこの点が違う — そのため patch の中の
+    # （既存値を {} として扱う。この点は RFC 7386 と同じ — そのため patch の中の
     # null は常に「鍵を消す」で、値として残ることはない）。
     if not isinstance(dst, dict):
         dst = {}
@@ -137,23 +155,60 @@ def merge(dst, patch):
     return dst
 
 
-def atomic_write(path, data):
-    if not isinstance(data, (bytes, bytearray)):
-        data = (json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)
-                + "\n").encode("utf-8")
-    d = os.path.dirname(path) or "."
-    fd, tmp = tempfile.mkstemp(dir=d, prefix=".patrol-state-", suffix=".tmp")
+def open_dir(path):
+    # 親ディレクトリを、信頼できる基点（その 1 つ上）から symlink をたどらずに開き、
+    # ディレクトリで自分の所有であることを確かめる。巡回（conductor-watch.sh）の open_ps_dir と
+    # 同じ検査（変えるときは両方を直す）。以降のファイル操作はすべて戻り値の記述子を基準に
+    # 行う。確かめた後に親が symlink に差し替えられても、記述子は元のディレクトリを指し続ける。
+    base, name = os.path.split(os.path.dirname(os.path.abspath(path)))
+    os.makedirs(base, exist_ok=True)
+    bfd = os.open(base, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        try: os.mkdir(name, dir_fd=bfd)
+        except FileExistsError: pass
+        dfd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=bfd)
+    finally:
+        os.close(bfd)
+    st = os.fstat(dfd)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
+        os.close(dfd); raise OSError("patrol-state dir not usable")
+    return dfd
+
+
+def encode_capped(obj):
+    # 書き込むバイト列（末尾に改行）を返す。結果が読み取り上限を超えるか整形できないときは
+    # 書き込まない（次の巡回で読めない大きさの記録にしない）。字下げは入れ子が深いほど膨らみ、
+    # 上限内の記録でも全体を一度に整形するとメモリを使い切るため、少しずつ整形して UTF-8 の
+    # 累計バイト数を数え、上限を超えた時点で打ち切る（巡回の read_ps が読める形と同じ出力）。
+    # 整形が例外で止まる記録（json.loads は C の再帰の上限まで読めるが、整形は Python の再帰の
+    # 上限で RecursionError になる深い入れ子など）も書き込まない。
+    parts, size = [], 1  # 末尾の改行の分
+    try:
+        for chunk in json.JSONEncoder(ensure_ascii=False, indent=2, sort_keys=True).iterencode(obj):
+            b = chunk.encode("utf-8"); size += len(b)
+            if size > STATE_MAX_BYTES: return "too-large", None
+            parts.append(b)
+    except Exception:
+        return "unencodable", None
+    return None, b"".join(parts) + b"\n"
+
+
+def atomic_write(dfd, name, data):
+    # 検査済みの親ディレクトリ（dfd）を基準に、同じディレクトリの一時ファイルからの置き換えで
+    # 書く。置き場が symlink・FIFO なら、指す先ではなくそれ自体を置き換える。一時ファイルは
+    # 予測できない名前を O_EXCL|O_NOFOLLOW・0600 で作る（置き換えた記録はこの一時ファイルその
+    # ものであるため、umask によらず許可ビットは 0600 を超えない）。
+    tmp = f".patrol-state-{secrets.token_hex(8)}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        os.replace(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
     except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
+        try: os.unlink(tmp, dir_fd=dfd)
+        except OSError: pass
         raise
 
 
@@ -174,13 +229,26 @@ def main():
             die("merge patch の各要素は JSON オブジェクトでなければならない", 2)
 
     state = opts["state"]
-    os.makedirs(os.path.dirname(state) or ".", exist_ok=True)
+    name = os.path.basename(state)
+    # 親ディレクトリを確かめて以降は、その記述子を基準にだけ操作する（open_dir のコメント）。
+    # 呼び出し元が巡回（conductor-watch.sh）のとき、巡回が親を確かめる時点と手順が使う時点は
+    # 別なので、パスを受け渡すだけでは確かめた後の差し替えを防げない。手順自身が確かめ直す。
+    try:
+        dfd = open_dir(state)
+    except OSError as e:
+        die(f"patrol-state の親ディレクトリを確かめられない: {os.path.dirname(os.path.abspath(state))} ({e})", 1)
+
+    def taken(nm):  # 親ディレクトリ（dfd）に nm があるか。symlink はたどらない
+        try:
+            os.stat(nm, dir_fd=dfd, follow_symlinks=False); return True
+        except FileNotFoundError:
+            return False
     # 状態ファイルは書き込みのたびに os.replace で差し替わるため、ファイルそのものではなく
     # 別のロックファイル（<state>.lock。差し替わらない）を flock で取る。
     # O_NOFOLLOW・fstat でロックパスも検査する（symlink だとロックがリンク先の別ファイルに掛かる）
     try:
-        lock_fd = os.open(state + ".lock",
-                          os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        lock_fd = os.open(name + ".lock",
+                          os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
     except OSError as e:
         die(f"patrol-state lock のパスを開けない: {e}", 1)
     lst = os.fstat(lock_fd)
@@ -205,13 +273,18 @@ def main():
         # symlink・FIFO 等は読まず写さず、種類だけ記録して照合不能として拒否する）
         base, unreadable, untrusted_reason, raw_state = {}, False, None, None
         try:
-            sfd = os.open(state, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            sfd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
         except FileNotFoundError:
             sfd = None
         except OSError as e:
+            # 種類の不適合（symlink・開くと失敗するソケットなど）は中身を読まず照合不能として
+            # 扱う。それ以外（一時的な入出力エラー・権限）は正常なパスを読めなかった場合なので、
+            # 種類の不適合とは分けて、正規パスを保ったまま何も書かずに終える。読めなかった内容を
+            # 空として書き直すと、持ち主・オフセット・未配送の指示が消えるため。
+            if e.errno == errno.ELOOP: untrusted_reason = "symlink"
+            elif e.errno == errno.ENXIO: untrusted_reason = "not-regular"
+            else: die(f"patrol-state を開けない: {e}", 1)
             sfd = None
-            untrusted_reason = ("symlink" if e.errno == errno.ELOOP
-                                else "unreadable-path")
         if sfd is not None:
             try:
                 sst = os.fstat(sfd)
@@ -228,9 +301,9 @@ def main():
                     if len(raw_state) > STATE_MAX_BYTES:
                         untrusted_reason = "too-large"
                         raw_state = None
-            except OSError:
-                untrusted_reason = "unreadable-path"
-                raw_state = None
+            except OSError as e:
+                # 通常ファイルと確かめた後に読み取りに失敗した。上と同じく正規パスを保って終える
+                die(f"patrol-state を読めない: {e}", 1)
             finally:
                 os.close(sfd)
         if raw_state is not None:
@@ -243,7 +316,11 @@ def main():
             except Exception:
                 unreadable = True
 
-        result = copy.deepcopy(base)
+        try:
+            result = copy.deepcopy(base)
+        except RecursionError:
+            # 入れ子が深すぎて複製できない記録は整形もできないため、書き込まずに終える
+            die("結果を整形できないため書き込みません（入れ子が深すぎる）: 元の記録を保ちました", 5)
         for p in patches:
             result = merge(result, p)
 
@@ -259,14 +336,14 @@ def main():
             # 新しい状態」のどちらかが残り、次回は初回作成扱いにならない。
             # 退避するのは上で検査した fd から読んだバイト列そのもの（二度読まない）。
             stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
-            backup = f"{state}.unreadable-{stamp}"
+            backup = f"{name}.unreadable-{stamp}"
             n = 0
-            while os.path.exists(backup):
+            while taken(backup):
                 n += 1
-                backup = f"{state}.unreadable-{stamp}.{n}"
-            atomic_write(backup, raw_state)
+                backup = f"{name}.unreadable-{stamp}.{n}"
+            atomic_write(dfd, backup, raw_state)
             notes.append({"kind": "state-unreadable", "writer": who,
-                          "backup": os.path.basename(backup), "at": now_iso})
+                          "backup": backup, "at": now_iso})
         if untrusted_reason:
             # 正規パスが信頼できる通常ファイルでなかった。中身は読んでいないので
             # 退避コピーは作らず、種類だけ記録する
@@ -338,8 +415,12 @@ def main():
             anoms = out.get("anomalies")
             anoms = anoms if isinstance(anoms, list) else []
             out["anomalies"] = (anoms + notes + refuse)[-ANOMALY_MAX:]
-            atomic_write(state, out)
             kinds = ", ".join(r["kind"] for r in refuse)
+            # 拒否の記録も上限を超えるなら書かない（元の記録を保つ）。拒否自体は有効
+            skip, data = encode_capped(out)
+            if skip:
+                die(f"refused ({kinds}) by {who}; 記録に追記すると上限を超えるため試みは記録されていません ({skip})", 3)
+            atomic_write(dfd, name, data)
             die(f"refused ({kinds}) by {who}; attempt recorded in anomalies", 3)
 
         # anomalies はこの手順だけが記録する項目。patch が書いたものは採らず、
@@ -350,12 +431,18 @@ def main():
             result["anomalies"] = (anoms + notes)[-ANOMALY_MAX:]
         else:
             result.pop("anomalies", None)
-        atomic_write(state, result)
+        # 上限の検査はロックの中で併合した結果に対して行う。呼び出し元が読んだ時点の記録では、
+        # その後に別の書き手が足した項目を見られない。超えたときは元の記録を保つ。
+        skip, data = encode_capped(result)
+        if skip:
+            die(f"not written ({skip}): 元の記録を保ちました", 4 if skip == "too-large" else 5)
+        atomic_write(dfd, name, data)
         print(f"patrol-state-update: applied {state}", file=sys.stderr)
         return 0
     finally:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         os.close(lock_fd)
+        os.close(dfd)
 
 
 if __name__ == "__main__":

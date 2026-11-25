@@ -226,10 +226,12 @@ run_cycles 2
 check "10: no temporary file is left after a write-back" \
   eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name 'patrol-state.json*' | wc -l)" "0"
 reset; mkdir "$STATE"
-run_cycles 1
+run_cycles 2
 check "10: the cycle finishes within 10 seconds" in_time
 check "10: no temporary file is left after a failed replace" \
   eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name 'patrol-state.json*' | wc -l)" "0"
+check "10: the failed write-back is reported with its reason" has "$ROOT/out.log" "reason=write-failed"
+check "10: the failed write-back is reported once while it persists" eq "$(grep -c 'PATROL-STATE write-failed' "$ROOT/out.log")" "1"
 
 # 試験 11: 記録が JSON として読めても辞書でない（[]）なら、空の記録として扱い、巡回を止めずに書き戻す。
 reset; printf '[]\n' > "$STATE"
@@ -298,7 +300,7 @@ check "15: waiting_since survives three cycles" eq "$(since61)" "$SEEDED_SINCE"
 check "15: the skipped write-back is logged once" \
   eq "$(grep -c 'WATCHER patrol-state-write-skipped .*reason=too-large' "$ROOT/out.log")" "1"
 check "15: no temporary file is left" \
-  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name patrol-state.json | wc -l)" "0"
+  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name 'patrol-state.json*' | wc -l)" "0"
 seed "$STATE"
 run_cycles 1
 check "15: the write-back resumes once the record fits" has "$ROOT/out.log" "WATCHER patrol-state-write-recovered"
@@ -319,7 +321,7 @@ check "16: the deeply nested record is kept byte-identical" cmp -s "$STATE" "$RO
 check "16: the conductor's items survive three cycles" eq "$(task_id)" "seeded"
 check "16: waiting_since survives three cycles" eq "$(since61)" "$SEEDED_SINCE"
 check "16: no temporary file is left" \
-  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name patrol-state.json | wc -l)" "0"
+  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name 'patrol-state.json*' | wc -l)" "0"
 
 # 試験 17: 読み取りはできるが整形で Python の再帰の上限を超える記録（2000 段の入れ子。読み取り上限より十分小さい）
 # でも、整形の例外で巡回を止めない。3 周回しても例外を出さず、理由の行を 1 回だけ出し、置き換えずに読めていた
@@ -335,7 +337,7 @@ check "17: the deeper record is kept byte-identical" cmp -s "$STATE" "$ROOT/deep
 check "17: the conductor's items survive three cycles" eq "$(task_id)" "seeded"
 check "17: waiting_since survives three cycles" eq "$(since61)" "$SEEDED_SINCE"
 check "17: no temporary file is left" \
-  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name patrol-state.json | wc -l)" "0"
+  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name 'patrol-state.json*' | wc -l)" "0"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

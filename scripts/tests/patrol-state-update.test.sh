@@ -3,7 +3,7 @@
 # patrol-state.json の共通の書き込み手順が、conductor_thread_id の持ち主でないスレッドの
 # 書き込みを拒否して anomalies に記録すること、watch_log_offset・inbox_offset の
 # 巻き戻し（現行値より小さい値への書き戻し）を拒否すること、merge patch の適用と
-# 書き込み経路の一元化（conductor-watch.sh も同じ手順を通ること）を確かめる。
+# 書き込み経路の一元化（conductor-watch.sh も同じ手順を通ること）を確かめる。あわせて親ディレクトリの検査（確かめた後の差し替えを含む）・書き戻す結果の上限・読み取りの入出力エラーの扱いを確かめる。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -33,6 +33,14 @@ for a in d.get("anomalies", []):
 upd() { # upd <expected-rc> <patch> [args...] — 標準エラーは $LAST_ERR に残る
   local want="$1" patch="$2" got; shift 2
   printf '%s' "$patch" | timeout 30 python3 -I "$UPD" --state "$STATE" "$@" >"$ROOT/out" 2>"$ROOT/err"
+  got=$?
+  LAST_ERR="$(cat "$ROOT/err")"
+  [[ "$got" == "$want" ]]
+}
+
+upd_at() { # upd_at <expected-rc> <state> <patch> [args...] — 置き場を指定する upd。標準エラーは $LAST_ERR に残る
+  local want="$1" st="$2" patch="$3" got; shift 3
+  printf '%s' "$patch" | timeout 30 python3 -I "$UPD" --state "$st" "$@" >"$ROOT/out" 2>"$ROOT/err"
   got=$?
   LAST_ERR="$(cat "$ROOT/err")"
   [[ "$got" == "$want" ]]
@@ -194,11 +202,11 @@ loader.exec_module(m)
 
 real_replace = os.replace
 calls = []
-def flaky_replace(src, dst):
+def flaky_replace(src, dst, **kw):
     calls.append(dst)
     if len(calls) > 1:
         raise OSError("simulated crash")
-    return real_replace(src, dst)
+    return real_replace(src, dst, **kw)
 os.replace = flaky_replace
 
 sys.argv = ["patrol-state-update", "--state", state, "--writer-thread", "mcp:old"]
@@ -304,6 +312,77 @@ check "missing writer identity refused" upd 2 '{"a":1}'
 check "both writer flags refused" upd 2 '{"a":1}' --writer x --writer-thread t
 check "claim without writer-thread refused" upd 2 '{"a":1}' --writer conductor-watch --claim-conductor
 check "input errors leave file alone" eq "$(pget watch_log_offset)" '600'
+
+# --- 親ディレクトリの検査（Issue #699 の write_ps と同じ守りを、手順自身がロックの前に行う） ---
+# (a) 親が symlink なら rc 1 で何も書かない。リンク先には何も作らず、リンク先の既存の記録は byte 単位で変わらない
+LINKROOT="$ROOT/linked"; OUT="$ROOT/outside"
+mkdir -p "$OUT" "$LINKROOT"
+printf '%s' '{"conductor_thread_id":"mcp:host","token":"TOPSECRET"}' > "$OUT/patrol-state.json"; cp "$OUT/patrol-state.json" "$ROOT/outside.orig"
+ln -s "$OUT" "$LINKROOT/pelway"
+check "symlinked parent: refused with rc 1" upd_at 1 "$LINKROOT/pelway/patrol-state.json" '{"a":1}' --writer conductor-watch
+check "symlinked parent: link target byte-identical" cmp -s "$OUT/patrol-state.json" "$ROOT/outside.orig"
+check "symlinked parent: nothing created at the link target" eq "$(find "$OUT" -mindepth 1 | wc -l)" 1
+check "symlinked parent: stderr names the parent directory" has <(printf '%s' "$LAST_ERR") "親ディレクトリ"
+# (b) ロック待ちの間に親が symlink に差し替えられても、確かめたディレクトリ（記述子）にだけ書き、リンク先には書かない
+REAL="$ROOT/real"; MOVED="$ROOT/real-moved"; OUT2="$ROOT/outside2"
+mkdir -p "$REAL/pelway" "$OUT2"; printf '%s' '{"a":0}' > "$REAL/pelway/patrol-state.json"
+printf '%s' '{"conductor_thread_id":"mcp:host","token":"TOPSECRET"}' > "$OUT2/patrol-state.json"; cp "$OUT2/patrol-state.json" "$ROOT/outside2.orig"
+python3 -I -c 'import fcntl,sys,time
+f = open(sys.argv[1], "a"); fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2], "w").write("1"); time.sleep(20)' "$REAL/pelway/patrol-state.json.lock" "$ROOT/locked" &
+HOLDER=$!
+until [ -e "$ROOT/locked" ]; do /bin/sleep 0.05; done  # ロックは握られた
+printf '%s' '{"a":1}' | python3 -I "$UPD" --state "$REAL/pelway/patrol-state.json" --writer conductor-watch >"$ROOT/out" 2>"$ROOT/err" &
+PROC=$!
+# 手順が親を確かめてロックファイルを開き、待ち始めたこと（手順の fd にロックファイルが現れる）を確かめてから差し替える
+for ((i = 0; i < 100; i++)); do [[ -n "$(find "/proc/$PROC/fd" -lname 'patrol-state.json.lock' 2>/dev/null)" ]] && break; /bin/sleep 0.05; done
+mv "$REAL/pelway" "$MOVED"; ln -s "$OUT2" "$REAL/pelway"
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+wait "$PROC"; B_RC=$?
+check "parent swapped while waiting for the lock: write applied to the checked directory" eq "$B_RC" 0
+check "parent swapped while waiting for the lock: moved directory holds the patch" has "$MOVED/patrol-state.json" '"a": 1'
+check "parent swapped while waiting for the lock: link target byte-identical" cmp -s "$OUT2/patrol-state.json" "$ROOT/outside2.orig"
+check "parent swapped while waiting for the lock: nothing created at the link target" eq "$(find "$OUT2" -mindepth 1 | wc -l)" 1
+
+# --- 書き戻す結果の上限（読み取り上限と同じ 4 MiB。末尾の改行を含む） ---
+# seed_near <埋め草のバイト数> — 詰めた形で読み取り上限の近くまで埋めた、読める記録を置く
+seed_near() { python3 -I -c 'import json,sys
+json.dump({"conductor_thread_id": "mcp:cur", "watch_log_offset": 600, "pad": "x" * int(sys.argv[2])}, open(sys.argv[1], "w"), separators=(",", ":"))' "$STATE" "$1"; }
+# 埋め草 4194150: 適用結果（字下げ + subjects）は上限の 4 バイト下。4194180: 適用結果は上限の 26 バイト上、拒否の記録（異常 2 件の追記）は 351 バイト上
+seed_near 4194150
+check "result just under the limit is written" upd 0 '{"subjects":{"61":{"waiting_on":"implement"}}}' --writer conductor-watch
+check "result just under the limit: subject stored" has <(pget subjects) '"61"'
+seed_near 4194180; cp "$STATE" "$ROOT/near.orig"
+check "result over the limit is not written" upd 4 '{"subjects":{"61":{"waiting_on":"implement"}}}' --writer conductor-watch
+check "result over the limit: state byte-identical" cmp -s "$STATE" "$ROOT/near.orig"
+check "result over the limit: stderr says too-large" has <(printf '%s' "$LAST_ERR") "too-large"
+check "refusal record over the limit is not written" upd 3 '{"watch_log_offset":1}' --writer-thread mcp:old
+check "refusal record over the limit: state byte-identical" cmp -s "$STATE" "$ROOT/near.orig"
+check "refusal record over the limit: stderr says the attempt is not recorded" has <(printf '%s' "$LAST_ERR") "記録されていません"
+
+# --- 読み取りの入出力エラーは、種類の不適合と分けて扱う（正常なファイルを読めなかったときは正規パスを保つ） ---
+put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'; cp "$STATE" "$ROOT/io.orig"
+check "read failure exits 1 and keeps the state" python3 -I - "$UPD" "$STATE" <<'PY'
+import errno, importlib.util, io, os, sys
+from importlib.machinery import SourceFileLoader
+upd, state = sys.argv[1], sys.argv[2]
+sys.dont_write_bytecode = True
+loader = SourceFileLoader("patrol_state_update", upd)
+spec = importlib.util.spec_from_loader(loader.name, loader)
+m = importlib.util.module_from_spec(spec); loader.exec_module(m)
+before = open(state, "rb").read()
+def flaky_read(fd, n): raise OSError(errno.EIO, "simulated read failure")
+os.read = flaky_read
+sys.argv = ["patrol-state-update", "--state", state, "--writer", "conductor-watch"]
+sys.stdin = io.StringIO('{"subjects":{"9":{"waiting_on":"conductor"}}}')
+try:
+    m.main(); code = 0
+except SystemExit as e:
+    code = e.code
+sys.exit(0 if code == 1 and open(state, "rb").read() == before else 1)
+PY
+check "read failure: the next update resumes from the original record" upd 0 '{"watch_log_offset":601}' --writer-thread mcp:cur
+check "read failure: watch_log_offset continues from the recorded value" eq "$(pget watch_log_offset)" '601'
+check "read failure: inbox_offset carried over" eq "$(pget inbox_offset)" '40'
 
 # --- 書き込み経路の一元化（Issue #671 受け入れ条件 4） ---
 check "conductor-watch writes via shared procedure" has "$REPO/scripts/conductor-watch.sh" "patrol-state-update"
