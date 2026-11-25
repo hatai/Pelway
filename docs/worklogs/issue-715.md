@@ -72,3 +72,18 @@ PR: #722
    - 照合と round 5 の残差: `stop_verified` は `it.get("rollback") is not None`・`bound_ids` が `None`・結び付いた thread_id が一覧に無い・結び付いたか題名のスレッドに動いているものがある・一覧に題名一致の実装スレッドが 1 件も無い（`if not ts: return False`）、のどれかで偽を返し使用中と数える。round 5 では command-team-details の要約に `rollback` の照合と「一覧に実装スレッドが 1 件以上ある」の条件が抜け、3 文書とも題名のスレッドが 0 件の場合の扱いが抜けていた（round 6 で修正: runbook に 1 件以上を明記し、要約と正本は runbook の手順を参照する形に集約）
 3. 印の nit（`[文書のずれ]`）の対応: メモに実際に記載した条件と照合結果をこの節に残した
 4. 仮定と解釈: なし
+
+## 実装者メモ（round 6）
+
+対象 head: 58247475782206bb3c75acb6c0e244134c69a573
+PR: #722
+
+レビュー指摘（run 7169605014 codex request-changes、head 908983de）への対応。hatai の例外（ラウンド上限の免除）で継続:
+
+1. 詰まった箇所: なし
+2. must-fix の対応:
+   - 停止の判定を runbook「枠の数え方」に集約し、正本の「制約」と command-team-details の要約は runbook の手順を参照する形に替えた。runbook 側には「一覧に同じ Issue の実装スレッドが 1 件以上あってどれも動いていないこと」を明記（PR #721 の `stop_verified` の `if not ts: return False` と同じ。題名で 1 件も確認できないときは除外できない）。要約には、起動結果の照合が残るもの（`rollback`）と一覧に実装スレッドが無いものを使用中として数えることを明記
+3. 印の nit（`[文書のずれ]`）の対応:
+   - round 5 のメモの照合を、`stop_verified` が偽を返す条件の全列挙と round 5 時点の残差（要約側の欠落と題名 0 件の扱い）を書く形に直した
+   - PR 本文の「確かめ方を弱める変更」を差分に合わせた（board-patrol-docs.test.sh は存在確認の追加のみ、既存の文言を置き換えたのは review-delegation-docs.test.sh）
+4. 仮定と解釈: なし
