@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「6. 検査してコミットし、行数を確かめてから push する」に「`agent-gh-resign` が GitHub の 5xx で失敗したときは、push は成功しているので先へ進み、次の push で付け替えを再試行する。署名なしのまま残ったら PR 本文に書く」を足す。
 
 使ったスキル: grilling、domain-modeling、implement-issue、write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: 7ea367f61e1b43fb0dabad46dfb046d1662aad94
+
+1. 詰まった箇所: 手順 6 の push: `scripts/agent-gh-resign` が `createCommitOnBranch` で毎回 HTTP 502 になり、そのたびに PR #726 が自動で閉じた（付け替えの途中で ref が base まで巻き戻るため）。REST の `PATCH pulls/726 {"state":"open"}` で 2 回開き直し、以後の push は `PELWAY_AGENT_SKIP_RESIGN=1` にした。コミットは 3 つとも署名なし。
+2. 曖昧だった文: 「それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。」（`.agents/skills/implement-issue/SKILL.md` 手順 9）。claude の `failed` は投稿が GitHub の障害で通らなかったもので、must-fix 1 件の中身は報告に書かれていた。結果としては採用せず、指摘だけを直してから再委託した。
+3. 仮定と解釈: claude の must-fix「ホストが同じ Release の `SHA256SUMS` だけで確かめるので、hatai のタグの push に結び付かない」を正しい指摘と判断した。artifact attestation（`desktop-release.yml` が `refs/tags/desktop-v*` から作ったこと）を確かめ、`desktop-v*` のタグの作成を hatai だけに限ることを、配布経路の「決定」に書き足した。署名を入れない決定とは両立する（鍵も費用も増えない）と解釈した。codex の `failed` は使用量の上限によるもので、上限が解ける時刻のあとに再委託する。
+4. 足りなかった情報・検証手段: fine-grained トークンで attestation を読めるかを確かめる手段が手元に無い。ADR では「取りに行く仕組みの Issue で確かめる。書き込みの権限は足さない」とした。
+5. 改善案: `scripts/agent-gh-resign` の「ブランチを base に巻き戻し」の段は、途中で失敗すると PR が閉じる。`.agents/skills/implement-issue/SKILL.md` の手順 6 に「付け替えの失敗のあとは `scripts/agent-gh dev pr view <M> --json state` で PR が開いているかを確かめ、閉じていれば `api --method PATCH pulls/<M>` で開き直す」を足す。巻き戻さずに付け替える方式も検討したい。
+
+使ったスキル: implement-issue
