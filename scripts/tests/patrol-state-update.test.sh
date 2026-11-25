@@ -111,8 +111,7 @@ check "same-id write applied" eq "$(pget watch_log_offset)" '601'
 put_state '{"conductor_thread_id":"mcp:cur","watch_log_offset":600,"inbox_offset":40}'
 
 # スレッド ID を名乗らない書き手も conductor_thread_id を変えられない
-check "non-thread writer cannot change thread id" \
-  upd 3 '{"conductor_thread_id":"mcp:evil","subjects":{"9":{"waiting_on":"human"}}}' --writer conductor-watch
+check "non-thread writer cannot change thread id" upd 3 '{"conductor_thread_id":"mcp:evil","subjects":{"9":{"waiting_on":"human"}}}' --writer conductor-watch
 check "non-thread change keeps thread id" eq "$(pget conductor_thread_id)" '"mcp:cur"'
 check "non-thread change refused wholesale" eq "$(pget subjects)" '""'
 check "non-thread refusal recorded" anoms_has "conductor-id-change-refused"
@@ -272,8 +271,7 @@ check "symlink-json: registered id not adopted" eq "$(pget conductor_thread_id)"
 check "symlink-json: link target owner still refused" upd 3 '{"a":2}' --writer-thread mcp:host
 rm -f "$STATE" "$STATE".unreadable-*
 mkfifo "$STATE"
-check "fifo state refused without blocking" \
-  bash -c 'printf "%s" "{\"a\":1}" | timeout 15 python3 -I "$1" --state "$2" --writer-thread mcp:cur 2>/dev/null; [[ $? == 3 ]]' _ "$UPD" "$STATE"
+check "fifo state refused without blocking" bash -c 'printf "%s" "{\"a\":1}" | timeout 15 python3 -I "$1" --state "$2" --writer-thread mcp:cur 2>/dev/null; [[ $? == 3 ]]' _ "$UPD" "$STATE"
 check "fifo: no quarantine copy made" bash -c '! compgen -G "$1.unreadable-*" >/dev/null' _ "$STATE"
 check "fifo: procedure continues with claim" upd 0 '{"scheduled_task_id":"s3"}' --writer-thread mcp:new --claim-conductor
 check "fifo: claim sets owner" eq "$(pget conductor_thread_id)" '"mcp:new"'
@@ -310,8 +308,7 @@ check "input errors leave file alone" eq "$(pget watch_log_offset)" '600'
 # --- 書き込み経路の一元化（Issue #671 受け入れ条件 4） ---
 check "conductor-watch writes via shared procedure" has "$REPO/scripts/conductor-watch.sh" "patrol-state-update"
 check "conductor-watch has no direct patrol-state dump" bash -c '! grep -q "json.dump(ps, open(ps_path" "$1"' _ "$REPO/scripts/conductor-watch.sh"
-check "presence check: runbook mentions write procedure and protection terms" \
-  has_all "$RUNBOOK" "patrol-state-update" "conductor_thread_id" "anomalies" "巻き戻し" "claim-conductor" "needs_conductor_claim" "state-untrusted" "O_NOFOLLOW"
+check "presence check: runbook mentions write procedure and protection terms" has_all "$RUNBOOK" "patrol-state-update" "conductor_thread_id" "anomalies" "巻き戻し" "claim-conductor" "needs_conductor_claim" "state-untrusted" "O_NOFOLLOW"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
