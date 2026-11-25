@@ -75,12 +75,27 @@ check resume_no_pr_takeover "$RB" \
   '引き継ぐ成果が残っていれば同じ節の形でその作業ブランチを引き継ぐ' \
   '引き継ぐ成果が無いときだけ、実装スレッドの通常の立て方（「実装を始める」）で起動する'
 
-# 引き継ぎ時に items の implement_thread へ新しいスレッドの thread_id を記録し、
-# レビュー結果を送る前にその記録で現在の担当を確かめる決まりがある。
+# 再開手順の 5 が、取得コメントを pelway-dev[bot] 名義のものだけに限り、止まったスレッドの
+# branch（別名 -r<N> でありうる）を使わず、特定できないときは確認待ちにする。
+check claim_author "$RB" \
+  '取得コメントは REST の `user.login` が `pelway-dev[bot]` のものだけを使い、ほかの作成者のコメントは読まない' \
+  '止まったスレッドの `branch` は使わない' \
+  '成果が無いと判断せず起動しない（作業状態の印を確認待ちにして hatai に報告する）'
+
+# 節に、どの経路で得たブランチ名も agent/<N>- と英小文字・数字・ハイフンだけかを照合し、
+# 外れたら止め、照合を通らない名前をコマンドに入れない決まりがある。
+check branch_name_check "$RB" \
+  '`agent/<N>-` で始まり、続きが英小文字・数字・ハイフンだけであることを確かめる。外れたら起動・委託を止める' \
+  '照合を通らない名前は、成果の有無を確かめる git のコマンド・`t3 thread start`・`git branch --set-upstream-to`・push のどの行にも入れない'
+
+# 引き継ぎ時に items の implement_thread へ PR 番号・thread_id・push 先の組を PR ごとに記録し、
+# レビュー結果を送る直前に対象 PR の組で担当を確かめ、確定できなければ保留する決まりがある。
 check implement_thread_record "$RB" \
-  '`items` の `implement_thread` に新しいスレッドの `thread_id` を書き' \
-  '`implement_thread` で現在の担当を確かめる' \
-  '記録が無い、または記録のスレッドが一覧に無いときは'
+  '手当てする PR の番号（PR がまだ無ければ `none`）・新しいスレッドの `thread_id`・push 先の `<PRブランチ>` の組を書く' \
+  '組は PR ごとに持ち' \
+  '`implement_thread` で、その PR の番号の組を選び' \
+  'ちょうど 1 本のときだけ送って、その PR の組を書く。0 本か 2 本以上で担当を確定できないときは送らずに保留し' \
+  'そのスレッドの `thread_id` で `implement_thread` の組を書き換える'
 
 # 節に、起動・委託の前に PR の head リポジトリと ref を照合し、外れれば止める決まりがある。
 check head_repo_guard "$RB" \
