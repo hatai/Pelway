@@ -692,10 +692,13 @@ rec = {"updated_at": now, "status": slots_st}
 if slots_reason is not None: rec["reason"] = slots_reason
 if slots_usage is not None: rec["usage"] = slots_usage
 # 同じディレクトリの一時ファイルからの置き換えで公開し、読み手に空・書きかけの記録が
-# 見えないようにする（write_ps と同じ形）。書けない巡回はそのまま次へ進める: 更新されない
-# slots.json は updated_at の鮮度の条件で、無いものは置き場の条件で、指揮役が実測の
-# 数え方に戻る（runbook「3. 同時数と順番待ち」）。
+# 見えないようにする（write_ps と同じ形）。先に前回の記録を外してから公開する:
+# 公開に失敗した回に前回の記録が残ると、読み手が鮮度の条件の内側で古い status:ok を
+# 使い続ける。書けない巡回はそのまま次へ進める: 外れた・古い記録は読み手の規約どおり
+# 実測の数え方に戻る（runbook「3. 同時数と順番待ち」）。
 try:
+    try: os.unlink(os.path.join(d, "slots.json"))
+    except FileNotFoundError: pass
     tmp = os.path.join(d, f".slots.{secrets.token_hex(8)}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:

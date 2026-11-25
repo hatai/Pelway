@@ -163,6 +163,12 @@ print(d)' "$1" "$SLOTS"; }
 # slot_eq <パス> <期待値> — slots.json の値が期待値と等しい
 slot_eq() { [[ "$(slot "$1")" == "$2" ]]; }
 
+# patrol-state.json の <key> の値を取り出す（slots.json の公開より後の巡回処理の効果を見る）。
+psval() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[2]));
+for k in sys.argv[1].split("."): d=d[k]
+print(d)' "$1" "$STATE"; }
+ps_eq() { [[ "$(psval "$1")" == "$2" ]]; }
+
 # 作業状態の印を patrol-state.json の items に書く（mark <issue> <印>。巡回が書き戻しても items は残る）。
 mark() {
   python3 -I - "$STATE" "$1" "$2" <<'EOF'
@@ -298,6 +304,9 @@ before=$(calls)
 run_cycles 1
 check "watch kept cycling when slots.json unwritable" bash -c "(( \$(wc -l < '$MOCK/gh-calls.log') - $before == 3 ))"
 check "other lines still emitted when slots.json unwritable" has "$ROOT/out.log" '^HEARTBEAT '
+# 公開に失敗した巡回でも、公開より後の巡回処理（補助記録の更新）まで進むことを確かめる
+check "patrol-state updated when slots.json unwritable" \
+  ps_eq updated_at "$(python3 -I -c 'import datetime; print(datetime.datetime.fromtimestamp(1700003500).isoformat(timespec="seconds"))')"
 rmdir "$SLOTS"
 run_cycles 1
 check "slots.json resumes after path restored" slot_eq status ok
