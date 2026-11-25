@@ -30,12 +30,36 @@ if [[ -z "$P" ]]; then
   P="$common/pelway/patrol-state.json"
 fi
 mkdir -p "$(dirname "$P")"
-# 旧置き場（$XDG_STATE_HOME/pelway/patrol-state.json）が残っていて新置き場が無いときは、
-# 中身をそのまま引き継ぐ（1 回きりの移行。sandbox 内の指揮役は旧置き場に書けない）。
+# 旧置き場（$XDG_STATE_HOME/pelway/patrol-state.json）が残っていて新置き場に何も無い（symlink・FIFO も無い）
+# ときは、中身をそのまま引き継ぐ（1 回きりの移行。sandbox 内の指揮役は旧置き場に書けない）。
+# 新置き場は sandbox の中から置き換えられるため、旧置き場は巡回の read_ps と同じ検査（symlink をたどらず・
+# FIFO で待たず・通常ファイルで 4 MiB 以下）で読み、新置き場は O_EXCL|O_NOFOLLOW で作る（Issue #699）。
 P_OLD="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/patrol-state.json"
-if [[ "$P" != "$P_OLD" && ! -f "$P" && -f "$P_OLD" ]]; then
-  cp "$P_OLD" "$P" || { echo "conductor-watch.sh: patrol-state の移行に失敗しました" >&2; exit 1; }
-  echo "PATROL-STATE migrated $P_OLD -> $P" >&2
+if [[ "$P" != "$P_OLD" ]]; then
+  python3 -I - "$P_OLD" "$P" <<'PY' || { echo "conductor-watch.sh: patrol-state の移行に失敗しました" >&2; exit 1; }
+import errno, os, stat, sys
+old, new = sys.argv[1], sys.argv[2]
+PS_MAX = 4194304  # 巡回の read_ps と同じ読み取り上限（4 MiB）
+if os.path.lexists(new): sys.exit(0)
+try:
+    fd = os.open(old, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+except FileNotFoundError:
+    sys.exit(0)
+except OSError as e:
+    if e.errno != errno.ELOOP: raise
+    print(f"PATROL-STATE not-migrated {old} reason=symlink", file=sys.stderr); sys.exit(0)
+with os.fdopen(fd, "rb") as f:
+    if not stat.S_ISREG(os.fstat(f.fileno()).st_mode): sys.exit(0)  # 通常ファイルでない（FIFO など）
+    data = f.read(PS_MAX + 1)
+if len(data) > PS_MAX:
+    print(f"PATROL-STATE not-migrated {old} reason=too-large", file=sys.stderr); sys.exit(0)
+try:
+    out = os.open(new, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666)
+except FileExistsError:
+    sys.exit(0)  # 確かめた後に何かが置かれた: 引き継がない
+with os.fdopen(out, "wb") as f: f.write(data)
+print(f"PATROL-STATE migrated {old} -> {new}", file=sys.stderr)
+PY
 fi
 # 指揮役スレッドの登録ファイル（pelway-agent-watch --register が書く。docs/dev-environment.md の「pitchfork について」）。
 # needs-decision の格上げで指揮役が動いているかの判定に使う。PELWAY_CONDUCTOR_FILE で差し替えられる（テスト用）。
@@ -68,7 +92,7 @@ while true; do
   # （python 側で取得失敗と扱い、前回の処理済み ID を保つ）。
   scripts/agent-gh dev api "/repos/hatai/Pelway/issues/events?per_page=100" > "$D/label-events.json" 2>/dev/null || rm -f "$D/label-events.json"
   python3 -I - "$D" "$P" "$IL" "$PL" "$C" "$trc" "$T3_BIN" <<'PY'
-import json, sys, time, os, re, stat, subprocess
+import json, sys, time, os, re, secrets, stat, subprocess
 from datetime import datetime, timedelta
 d = sys.argv[1]; sp = os.path.join(d, "state.json")
 # スレッド名の形式（skill command-team の「スレッド名」）。指揮役が作ったスレッドだけを見る。
@@ -168,6 +192,18 @@ def read_ps(path):  # 補助記録は共有 git dir の中。read_request と同
         if len(data) > PS_MAX:
             raise ValueError("not a regular patrol-state file")
         return data
+def write_ps(path, obj):  # 書き戻しは symlink の先・FIFO に書かず、同じディレクトリの一時ファイルからの置き換えで行う
+    # 一時ファイルは予測できない名前を O_EXCL|O_NOFOLLOW で作る（ボード Status 更新キューの結果ファイルと同じ）
+    tmp = os.path.join(os.path.dirname(path) or ".", f".patrol-state.{secrets.token_hex(8)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2, sort_keys=True)
+        os.replace(tmp, path)  # 置き場が symlink・FIFO なら、指す先ではなくそれ自体を置き換える
+    except BaseException:
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
 def iso(s):
     try: return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
     except Exception: return None
@@ -514,7 +550,9 @@ json.dump(cur, open(sp, "w"))
 # 正として直す。waiting_on が同じ対象だけ待ち始めた時刻を引き継ぐ。
 ps_path = sys.argv[2]
 issue_limit = int(sys.argv[3]); pr_limit = int(sys.argv[4])
-try: ps = json.load(open(ps_path))
+# 記録は sandbox の中からも置き換えられるため read_ps で読み（Issue #699）、読めないもの（JSON でない・
+# 通常ファイルでない・4 MiB を超える）は無いものとして扱って、下の書き戻しで新しい記録に置き換える。
+try: ps = json.loads(read_ps(ps_path))
 except Exception: ps = {}
 if not isinstance(ps.get("subjects"), dict): ps["subjects"] = {}
 # 取得に成功し、かつどちらの一覧も打ち切られていない（件数が上限に達していない）ときだけ更新する。
@@ -674,7 +712,7 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
     cur["stall_notified"] = {k: v for k, v in cur["stall_notified"].items() if k in new_subj}
     ps["updated_at"] = now_iso
     os.makedirs(os.path.dirname(ps_path) or ".", exist_ok=True)
-    json.dump(ps, open(ps_path, "w"), ensure_ascii=False, indent=2, sort_keys=True)
+    write_ps(ps_path, ps)
     json.dump(cur, open(sp, "w"))
 PY
   # ボード Status 更新キュー: $Q の *.json を 1 件ずつ処理する。要求は

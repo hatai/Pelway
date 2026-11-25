@@ -478,9 +478,11 @@ Claude（`claude_review`）が使えない間のレビュー運用の例外。Co
 
 ## 10. 巡回状態の補助記録
 
-状態の正本は GitHub Issues と Projects ボードである。`patrol-state.json` は正本を増やさないための補助記録で、GitHub に対応する置き場が無い情報（誰待ちか・待ち始めた時刻・次の担当）だけを持つ。置き場はリポジトリの共有 git dir（`git rev-parse --path-format=absolute --git-common-dir` が指す `.git`）内の `pelway/patrol-state.json` — 主 checkout と全 worktree で共有される git の管理対象外の場所で、sandbox 内の指揮役からも読み書きできる（Issue #477。旧置き場 `~/.local/state/pelway/patrol-state.json` の中身は conductor-watch.sh が初回起動時に引き継ぐ）。
+状態の正本は GitHub Issues と Projects ボードである。`patrol-state.json` は正本を増やさないための補助記録で、GitHub に対応する置き場が無い情報（誰待ちか・待ち始めた時刻・次の担当）だけを持つ。置き場はリポジトリの共有 git dir（`git rev-parse --path-format=absolute --git-common-dir` が指す `.git`）内の `pelway/patrol-state.json` — 主 checkout と全 worktree で共有される git の管理対象外の場所で、sandbox 内の指揮役からも読み書きできる（Issue #477。旧置き場 `~/.local/state/pelway/patrol-state.json` の中身は、新置き場に何も無い起動のときに conductor-watch.sh が引き継ぐ）。
 
-トップレベルの項目（書くのは指揮役。巡回スクリプトは全体を読んで書き戻すので、これらは消えない）:
+sandbox の中から置き換えられる場所なので、conductor-watch.sh は記録を symlink をたどらず、FIFO で待たずに開き、通常ファイルで 4 MiB 以下のときだけ読む（旧置き場からの引き継ぎも同じ）。書き戻しは同じディレクトリの一時ファイルからの置き換えで行い、置き場が symlink・FIFO ならその指す先ではなくそれ自体を置き換える（Issue #699）。
+
+トップレベルの項目（書くのは指揮役。巡回スクリプトは全体を読んで書き戻すので、これらは消えない。ただし記録が読めない回（JSON として読めない・通常ファイルでない・4 MiB を超える）は、巡回スクリプトが中身を引き継がずに新しい記録で置き換えるため、これらも消える）:
 
 | 項目 | 意味 |
 |---|---|
