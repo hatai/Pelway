@@ -100,7 +100,7 @@ PR に `automerge` ラベルを付けてよいのは、skill `command-team` の�
 
 ### 割り当て・停止・再開
 
-- 枠の数え方: open な Issue の `agent:working` の数から、作業状態の印が停止中・再開処理中・再開待ちのものを除き、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）を加えたものが、担当ごとの上限（`agent-team.toml` の `[developers.<login>.slots]`）以下であること。内訳は `agent:devin` の有無で判定する。通常完了時の `agent:working` の解除は既存のマージ後処理のとおり
+- 枠の数え方: open な Issue の `agent:working` の数から、実際の停止を確認できるもの（補助記録の作業状態の印が停止中・再開処理中・再開待ちで、かつその Issue の実装スレッドが T3 のスレッド一覧で、完了・失敗・中断・取消のどれかまたはアーカイブ済みにすべてなっているもの。補助記録は実装エージェントにも書き込めるため印だけでは除かず、一覧で停止を確認できないものは使用中として数える）を除き、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）を加えたものが、担当ごとの上限（`agent-team.toml` の `[developers.<login>.slots]`）以下であること。内訳は `agent:devin` の有無で判定する。通常完了時の `agent:working` の解除は既存のマージ後処理のとおり
 - blocker の確認（割り当ての前段。新規・手当・再開の共通。巡回の最初に確かめて使い回さず、割り当てる直前に行う。その間に依存が追加されることがあるため）:
   1. 割り当て可否は `issue_dependencies_summary.blocked_by` だけで判定する（`GET /repos/hatai/Pelway/issues/<N>` を `scripts/agent-gh dev api` で読む。開いている blocker の数。0 なら着手可能）。`total_blocked_by` は閉じた blocker も数えるため、判定に使わない。hatai 名義の gh は使わない
   2. 本文に書かれた「Blocked by #N」も確かめる。依存関係の情報と食い違ったら、割り当てを止める
@@ -195,7 +195,7 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 
 | スレッド | 同時に動かす上限 | 使用数の見方 |
 |---|---|---|
-| 実装・調査（opencode） | `agent-team.toml` の `[developers.<login>.slots]`（実装と調査の合算の枠。正本） | 見張り（`scripts/conductor-watch.sh`）が巡回ごとに公開する `slots.json`（見張りの状態ディレクトリの記録。`status` が `ok` で、`updated_at` の記録から 60 秒以内、`slots.json` の更新時刻が `state.json` の更新時刻から 30 秒以上遅れていないものだけを有効とする。有効性と鮮度の判定は Issue #714・PR #721 の決まり）の `usage` に、Issue を持たない入口B の調査の稼働中スレッド数を足した合計（`usage` は Issue の枠だけを数えるため、この調査は指揮役が巡回記録の割り当て表から加算する。合計の形は「2. ボードと巡回」の「割り当て・停止・再開」の「枠の数え方」と同じ）。割り当ての判断に watch.log の行は使わない（キューの要求のファイル名も行として残るため、同じ数が出る `SLOTS` 系の行は見張りの出した行と区別できない）。記録を確認できなければ（`slots.json` が無い・`status` が `ok` でない・鮮度の条件を外れる）、同じ「枠の数え方」で自分で数え、上限は `agent-team.toml` の `[developers.<login>.slots]` から読む。使用数か上限を確認できなければ割り当てない |
+| 実装・調査（opencode） | `agent-team.toml` の `[developers.<login>.slots]`（実装と調査の合算の枠。正本） | 見張り（`scripts/conductor-watch.sh`）が巡回ごとに公開する `slots.json`（見張りの状態ディレクトリの記録）の `usage`。使えるのは `status` が `ok` で、`updated_at` の記録から 60 秒以内、かつ `patrol_at` が `state.json` の `patrol_at` と一致するものだけ（両ファイルに巡回の印を書くため、印が異なれば最新の巡回の記録ではない。ファイルの更新時刻の差が小さくても印が一致しないものは無効。有効性と鮮度の判定は Issue #714・PR #721 の決まり）。`usage` は直前の巡回時点のもので、割り当て・再開の直後には自分が動かした分が載らないため、新しい記録の `usage` にその変更が載ったと確かめられるまで自分が動かした分を足して数え、確かめられなければ現在の使用数を数え直す。これに Issue を持たない入口B の調査の稼働中スレッド数を足した合計を使う（`usage` は Issue の枠だけを数えるため、この調査は指揮役が巡回記録の割り当て表から加算する。合計の形は「2. ボードと巡回」の「割り当て・停止・再開」の「枠の数え方」と同じ）。割り当ての判断に watch.log の行は使わない（キューの要求のファイル名も行として残るため、同じ数が出る `SLOTS` 系の行は見張りの出した行と区別できない）。記録を確認できなければ（`slots.json` が無い・`status` が `ok` でない・鮮度か巡回の印の条件を外れる）、同じ「枠の数え方」で自分で数え、上限は `agent-team.toml` の `[developers.<login>.slots]` から読む。使用数か上限を確認できなければ割り当てない |
 | 実装（Devin CLI） | 同上（Devin CLI の枠） | 同上 |
 | レビュー（Codex） | `agent-team.toml` の `[developers.<login>.review_limits]` の目安 | 通常の PR のレビューは実装担当が `delegate_task` で委託するため、この表では数えない。指揮役が立てたレビュースレッド（指揮役自身の PR・外部投入）だけを数える。Codex・T3・`~/.codex-review` を更新したら、`docs/dev-environment.md` の「専用 home での確認」が済むまでは使わない |
 | レビュー（Devin CLI） | 同上 | 同上。`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまでは使わない |
