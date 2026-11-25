@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 3 に、「割り当ての worktree が対象ブランチを checkout していない・`.git/config` が書けないときは、対象ブランチを checkout しているほかの worktree で作業する」旨を足す（round 2 と今回で 2 度起きた）。
 
 使ったスキル: implement-issue、writing-for-agents
+
+## 実装者メモ（round 4）
+
+対象 head: 56191a63e0a157c7320d2656d2b7bcc8c18191a3
+
+1. 詰まった箇所: 手順 9「Request changes のとき」: round 3 の結果に must-fix が残り、「止まる条件」の round 3 の行に当たった。指揮役から、round 3 以降の停止規則は hatai の指示（t629u）で撤廃済みとの伝達を受けて round 4 に進んだ。Issue #581 と PR #695 には hatai 作のコメントが無く、伝達以外では確かめられなかった（main の worklog には、issue-669・issue-688 で同じ識別子による継続の記録がある）。worktree は割り当ての `t3-64587ac5` で、対象ブランチを別名の `t3/581-r3-must-fix` として作り、upstream を `origin/agent/581-fail-closed-tool-check` にして `git push origin HEAD:agent/581-fail-closed-tool-check` で送った（今回は `.git/config` に書けた）。
+2. 曖昧だった文: 「投稿後の該当レビューを一意に確認できない場合も、引き継ぎ先で停止を維持できるようにしてください」（codex r3 の must-fix 2）
+3. 仮定と解釈: 無効記録の must-fix が r2・r3 と続いたため、読む側がすべて手順 9 の 1 つの定義（作成者 `pelway-dev[bot]`・解消の照合）を指す形に決めた。そのうえで、未解消の記録が 1 件でもあれば、その PR のどの Approve も数えない形にした（実装担当の再開・指揮役の Ready to merge と `automerge`・runbook の Status は、どれもこの定義を通る）。一意に確認できない場合は、`Reviewer: agent=` の行が無いレビューも id ごとに記録して止める形にした。最初は `review: unknown` で全部の dismiss を待つ案を考えた。この案は、解消の後に同じ head へ再委託するとまた未解消に戻り、別の担当の正当なレビューまで dismiss させるため採らなかった。
+4. 足りなかった情報・検証手段: 失敗した担当とレビューを結ぶ手段が、レビュー本文の `Reviewer: agent=` の行しかない（失敗の報告 `verdict: failed` にはレビューの id が無い）。jq の選び方は PR #695 の実データ（42df844a の codex のレビュー 6047534233 だけが返る）で確かめた。
+5. 改善案: `.agents/skills/review-pr/SKILL.md` の「5. 終わりの報告」に「投稿の後に `failed` で終えるときは、投稿したレビューの id を `review: <id>` の行で足す」を足すと、本文の行による推定が要らなくなる。
+
+使ったスキル: implement-issue、writing-for-agents
