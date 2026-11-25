@@ -30,7 +30,7 @@ PR: #722
 
 ## 実装者メモ（round 3）
 
-対象 head: ac0b4cce
+対象 head: ac0b4cce4a91a352d4edfe87f1ba1ef0ebf6ebf9
 PR: #722
 
 レビュー指摘（run 7164704743 codex request-changes、head 188f3eff）への対応:
