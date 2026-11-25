@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # scripts/conductor-watch.sh の SLOTS 行と slots.json（Issue #714）のテスト。
 # 巡回ごとに枠の使用数を `SLOTS <担当> <使用数>/<上限>`（超過は over、未確定は error）で
-# watch.log に出し、同じ判定を slots.json に書く（判断の正本は slots.json: キューの
-# 要求のファイル名がそのまま行になるため watch.log の行は区別できない）。
-# agent-team.toml が無いときは出さない。見張りは GitHub に書き込まない。
+# watch.log に出し、同じ判定を slots.json に書く（正本は slots.json）。agent-team.toml が
+# 無いときは出さない。見張りは GitHub に書き込まない。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -173,41 +172,22 @@ for k in sys.argv[1].split("."): d=d[k]
 print(d)' "$1" "$STATE"; }
 ps_eq() { [[ "$(psval "$1")" == "$2" ]]; }
 
-# 作業状態の印・implement_thread の組・巻き戻し中の印を patrol-items.json の items に書く。
-mark() {
-  python3 -I - "$ISTATE" "$1" "$2" <<'EOF'
-import json, sys
-p, n, st = sys.argv[1:4]
-try: d = json.load(open(p))
-except Exception: d = {}
-if not isinstance(d, dict): d = {}
-d.setdefault("items", {}).setdefault(n, {})["work_state"] = {"state": st}
-json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
-EOF
-}
-bind() {
-  python3 -I - "$ISTATE" "$1" "$2" "${3:-none}" <<'EOF'
-import json, sys
-p, n, tid, pr = sys.argv[1:5]
-try: d = json.load(open(p))
-except Exception: d = {}
-if not isinstance(d, dict): d = {}
-it = d.setdefault("items", {}).setdefault(n, {})
-it.setdefault("implement_thread", []).append({"pr": pr, "thread_id": tid, "branch": "agent/x"})
-json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
-EOF
-}
-set_rollback() {
-  python3 -I - "$ISTATE" "$1" <<'EOF'
-import json, sys
-p, n = sys.argv[1:3]
-try: d = json.load(open(p))
-except Exception: d = {}
-if not isinstance(d, dict): d = {}
-d.setdefault("items", {}).setdefault(n, {})["rollback"] = {"assignment_id": "a", "started_at": "t", "steps_done": []}
-json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
-EOF
-}
+# <file> の items[<issue>] に <key>=<JSON> を書く小道具（implement_thread は一覧に追加）。
+jput() { python3 -I -c 'import json,sys
+p,n,k,v=sys.argv[1:5]
+try: d=json.load(open(p))
+except Exception: d={}
+if not isinstance(d,dict): d={}
+it=d.setdefault("items",{}).setdefault(n,{})
+it[k] = it.setdefault(k,[])+[json.loads(v)] if k=="implement_thread" else json.loads(v)
+json.dump(d,open(p,"w"),ensure_ascii=False,indent=2,sort_keys=True)' "$1" "$2" "$3" "$4"; }
+
+# 作業状態の印・implement_thread の組・巻き戻し中の印（いずれも patrol-items.json）。
+mark()         { jput "$ISTATE" "$1" work_state "{\"state\": \"$2\"}"; }
+bind()         { jput "$ISTATE" "$1" implement_thread "{\"pr\": \"${3:-none}\", \"thread_id\": \"$2\", \"branch\": \"agent/x\"}"; }
+set_rollback() { jput "$ISTATE" "$1" rollback "{\"assignment_id\": \"a\", \"started_at\": \"t\", \"steps_done\": []}"; }
+# 旧置き場（patrol-state.json の items）に印と組を持つ項目を書く（移行前の記録の再現）。
+litem() { jput "$STATE" "$1" work_state "{\"state\": \"$2\"}"; jput "$STATE" "$1" implement_thread "{\"pr\": \"none\", \"thread_id\": \"$3\", \"branch\": \"agent/x\"}"; }
 
 : > "$ROOT/out.log"; : > "$MOCK/gh-calls.log"
 
@@ -278,22 +258,30 @@ items_hash_before="$(sha256sum "$ISTATE" | cut -d' ' -f1)"; run_cycles 1
 check "watch never rewrites patrol-items.json" bash -c "[[ \$(sha256sum '$ISTATE' | cut -d' ' -f1) == '$items_hash_before' ]]"
 
 # --- 3f. patrol-items.json が読めない回は、旧置き場の古い記録で枠を空けない（使用中に倒す） ---
-python3 -I - "$STATE" "$ISTATE" <<'EOF'
-import json, sys
-d = json.load(open(sys.argv[1]))
-d["items"] = {"24": {"work_state": {"state": "停止中"},
-    "implement_thread": [{"pr": "none", "thread_id": "t-24", "branch": "agent/x"}]}}
-json.dump(d, open(sys.argv[1], "w"), ensure_ascii=False, indent=2, sort_keys=True)
-open(sys.argv[2], "w").write("{")
-EOF
+litem 24 "停止中" t-24
+echo '{' > "$ISTATE"
 mock_threads "$(jarr "$(thread_item t-24 '[実装] #24 i' completed)")"
 mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 24 OPEN agent:working)")"
 run_cycles 1
 check "unreadable patrol-items keeps slot counted" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
 
-# --- 3g. patrol-items.json が無い回（移行前）だけ旧置き場を読む ---
-rm -f "$ISTATE"; run_cycles 1
-check "missing patrol-items falls back to legacy items" has "$ROOT/out.log" '^SLOTS opencode 1/3$'
+# --- 3g. patrol-items.json が無く旧置き場が残る回（初回移行）は旧置き場を保守的に読む ---
+# （issue 24（停止中+止まった組）は枠を空け、issue 25（再開待ち・rollback なし）は使用中。直前と同じ値で行は出ない）
+rm -f "$ISTATE"
+litem 24 "停止中" t-24; litem 25 "再開待ち" t-25
+mock_threads "$(jarr "$(thread_item t-24 '[実装] #24 i' completed)" "$(thread_item t-25 '[実装] #25 i' completed)")"
+mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 24 OPEN agent:working)" "$(iss 25 OPEN agent:working)")"
+run_cycles 1
+check "first-migration legacy: only 停止中 frees" slot_eq "usage.opencode.used" "2"
+
+# --- 3h. 移行後に patrol-items.json が欠けた回は空として扱う（旧置き場は移行手順で消される） ---
+python3 -I - "$STATE" <<'EOF'
+import json, sys
+d = json.load(open(sys.argv[1])); d.pop("items", None)
+json.dump(d, open(sys.argv[1], "w"), ensure_ascii=False, indent=2, sort_keys=True)
+EOF
+run_cycles 1
+check "post-migration loss counts all used" has "$ROOT/out.log" '^SLOTS opencode 3/3$'
 
 # --- 4. 上限超過は SLOTS over ---
 mark 16 "稼働中"; mark 17 "稼働中"; mark 18 "稼働中"; mark 19 "稼働中"
