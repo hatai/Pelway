@@ -29,32 +29,59 @@ if [[ -z "$P" ]]; then
     || { echo "conductor-watch.sh: git common dir を解決できません" >&2; exit 1; }
   P="$common/pelway/patrol-state.json"
 fi
-mkdir -p "$(dirname "$P")"
 # 旧置き場（$XDG_STATE_HOME/pelway/patrol-state.json）が残っていて新置き場に何も無い（symlink・FIFO も無い）
-# ときは、中身をそのまま引き継ぐ（1 回きりの移行。sandbox 内の指揮役は旧置き場に書けない）。
-# 新置き場は sandbox の中から置き換えられるため、旧置き場は巡回の read_ps と同じ検査（symlink をたどらず・
-# FIFO で待たず・通常ファイルで 4 MiB 以下）で読み、新置き場は O_EXCL|O_NOFOLLOW で作る（Issue #699）。
+# ときは、中身をそのまま引き継ぐ（1 回きりの移行。sandbox 内の指揮役は旧置き場に書けない）。新置き場は sandbox の
+# 中から置き換えられるため、親ディレクトリ（既定は共有 git dir の pelway/）は巡回の open_ps_dir と同じく作って、
+# 信頼できる基点（その 1 つ上。既定は git が解決した共有 git dir）から symlink をたどらずに開いて確かめ、
+# 移行先はそのファイル記述子を基準に O_EXCL|O_NOFOLLOW・0600 で作る。旧置き場は種類を確かめ、通常ファイルだけを
+# 巡回の read_ps と同じ検査（symlink をたどらず・FIFO で待たず・4 MiB 以下）で読む（ソケットなど開くと失敗する
+# 種類で見張りを止めない）。親ディレクトリを確かめられないときは移行しない（巡回がその回ごとに確かめ直す。Issue #699）。
+# 親ディレクトリは巡回の open_ps_dir が作るため、置き場が旧置き場と同じときはここでは何もしない。
 P_OLD="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/patrol-state.json"
 if [[ "$P" != "$P_OLD" ]]; then
   python3 -I - "$P_OLD" "$P" <<'PY' || { echo "conductor-watch.sh: patrol-state の移行に失敗しました" >&2; exit 1; }
 import errno, os, stat, sys
 old, new = sys.argv[1], sys.argv[2]
 PS_MAX = 4194304  # 巡回の read_ps と同じ読み取り上限（4 MiB）
-if os.path.lexists(new): sys.exit(0)
+def open_ps_dir(path):  # 巡回の open_ps_dir と同じ（変えるときは両方を直す）
+    base, name = os.path.split(os.path.dirname(os.path.abspath(path)))
+    os.makedirs(base, exist_ok=True)
+    bfd = os.open(base, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        try: os.mkdir(name, dir_fd=bfd)
+        except FileExistsError: pass
+        dfd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=bfd)
+    finally:
+        os.close(bfd)
+    st = os.fstat(dfd)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
+        os.close(dfd); raise OSError("patrol-state dir not usable")
+    return dfd
+def skip(reason):
+    print(f"PATROL-STATE not-migrated {old} reason={reason}", file=sys.stderr); sys.exit(0)
+try: dfd = open_ps_dir(new)
+except OSError:
+    print(f"PATROL-STATE dir-invalid {os.path.dirname(new)}", file=sys.stderr); sys.exit(0)
+name = os.path.basename(new)
+try:
+    os.lstat(name, dir_fd=dfd); sys.exit(0)  # 新置き場に何かある（symlink・FIFO を含む）: 引き継がない
+except FileNotFoundError: pass
+try: st = os.lstat(old)
+except FileNotFoundError: sys.exit(0)
+if stat.S_ISLNK(st.st_mode): skip("symlink")
+if not stat.S_ISREG(st.st_mode): skip("not-regular")  # ソケット・FIFO・デバイスなど
 try:
     fd = os.open(old, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-except FileNotFoundError:
-    sys.exit(0)
 except OSError as e:
-    if e.errno != errno.ELOOP: raise
-    print(f"PATROL-STATE not-migrated {old} reason=symlink", file=sys.stderr); sys.exit(0)
+    if e.errno in (errno.ELOOP, errno.ENXIO): skip("not-regular")  # 確かめた後に差し替えられた
+    if e.errno == errno.ENOENT: sys.exit(0)
+    raise
 with os.fdopen(fd, "rb") as f:
-    if not stat.S_ISREG(os.fstat(f.fileno()).st_mode): sys.exit(0)  # 通常ファイルでない（FIFO など）
+    if not stat.S_ISREG(os.fstat(f.fileno()).st_mode): skip("not-regular")
     data = f.read(PS_MAX + 1)
-if len(data) > PS_MAX:
-    print(f"PATROL-STATE not-migrated {old} reason=too-large", file=sys.stderr); sys.exit(0)
+if len(data) > PS_MAX: skip("too-large")
 try:
-    out = os.open(new, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666)
+    out = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
 except FileExistsError:
     sys.exit(0)  # 確かめた後に何かが置かれた: 引き継がない
 with os.fdopen(out, "wb") as f: f.write(data)
@@ -109,7 +136,8 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
        "shared_notified": {} if prev is None else prev.get("shared_notified", {}),
        "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0),
        "thread_list": None if prev is None else prev.get("thread_list"),
-       "pending_sends": None if prev is None else prev.get("pending_sends")}
+       "pending_sends": None if prev is None else prev.get("pending_sends"),
+       "ps_write_skipped": None if prev is None else prev.get("ps_write_skipped")}
 # ラベル操作の裏付け検査（Issue #405、2026-11-17 の要件変更）。actor だけでは判定しない
 # （エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai に
 # なることがあるため）。needs-human の解除と automerge の付け外しを、イベント時刻の前
@@ -181,9 +209,32 @@ def env_secs(name, default):  # 間隔の環境変数。数値でなければ設
 def safe_to(v):  # watch.log の 1 行に収めるため、宛先はスレッド ID の形に限る（conductor-rebuild の valid_id が受け付ける文字種と長さと同じ。先頭ハイフンの拒否は対象外）
     s = str(v or "")
     return s if re.fullmatch(r"[A-Za-z0-9:_.%-]{1,256}", s) else "invalid"
-PS_MAX = 4194304  # patrol-state.json の読み取り上限（4 MiB）
-def read_ps(path):  # 補助記録は共有 git dir の中。read_request と同じく通常ファイル・待ち・量に限る
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+PS_MAX = 4194304  # patrol-state.json の読み取りと書き戻しの上限（4 MiB）
+# 補助記録は sandbox の中からも書ける共有 git dir の中にある。末尾の名前だけを O_NOFOLLOW で開いても、
+# 親ディレクトリ（pelway/）が symlink に差し替えられると保存先の外を読み書きするため、ボード Status 更新キューと
+# 同じく、親ディレクトリを信頼できる基点（その 1 つ上。既定は git が解決した共有 git dir）から symlink を
+# たどらずに開いて、自分の所有のディレクトリであることを確かめ、記録の読み書きはそのファイル記述子を基準に行う。
+# 確かめられない回は記録を読まず（無いものとして扱い）、書き戻さない（Issue #699）。
+def open_ps_dir(path):  # 移行の open_ps_dir と同じ（変えるときは両方を直す）
+    base, name = os.path.split(os.path.dirname(os.path.abspath(path)))
+    os.makedirs(base, exist_ok=True)
+    bfd = os.open(base, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        try: os.mkdir(name, dir_fd=bfd)
+        except FileExistsError: pass
+        dfd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=bfd)
+    finally:
+        os.close(bfd)
+    st = os.fstat(dfd)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
+        os.close(dfd); raise OSError("patrol-state dir not usable")
+    return dfd
+ps_name = os.path.basename(sys.argv[2])
+try: ps_dfd = open_ps_dir(sys.argv[2])
+except OSError: ps_dfd = None
+def read_ps():  # read_request と同じく通常ファイル・待ち・量に限る
+    if ps_dfd is None: raise OSError("patrol-state dir not usable")
+    fd = os.open(ps_name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=ps_dfd)
     with os.fdopen(fd, "rb") as f:
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode) or st.st_size > PS_MAX:
@@ -192,18 +243,26 @@ def read_ps(path):  # 補助記録は共有 git dir の中。read_request と同
         if len(data) > PS_MAX:
             raise ValueError("not a regular patrol-state file")
         return data
-def write_ps(path, obj):  # 書き戻しは symlink の先・FIFO に書かず、同じディレクトリの一時ファイルからの置き換えで行う
-    # 一時ファイルは予測できない名前を O_EXCL|O_NOFOLLOW で作る（ボード Status 更新キューの結果ファイルと同じ）
-    tmp = os.path.join(os.path.dirname(path) or ".", f".patrol-state.{secrets.token_hex(8)}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666)
+def write_ps(obj):  # 書き戻せたら None、書き戻さなかったらその理由（dir-invalid・too-large）を返す
+    if ps_dfd is None: return "dir-invalid"
+    # 次の巡回で読めない大きさ（read_ps の上限超え）なら置き換えず、読めていた記録を保つ
+    data = json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
+    if len(data) > PS_MAX: return "too-large"
+    # symlink の先・FIFO に書かず、同じディレクトリの一時ファイルからの置き換えで行う。一時ファイルは
+    # 予測できない名前を O_EXCL|O_NOFOLLOW・0600 で作る（ボード Status 更新キューの結果ファイルと同じ）。
+    # 置き換えた記録はこの一時ファイルそのものなので、umask によらず許可ビットは 0600 を超えない。
+    tmp = f".patrol-state.{secrets.token_hex(8)}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=ps_dfd)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(obj, f, ensure_ascii=False, indent=2, sort_keys=True)
-        os.replace(tmp, path)  # 置き場が symlink・FIFO なら、指す先ではなくそれ自体を置き換える
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        # 置き場が symlink・FIFO なら、指す先ではなくそれ自体を置き換える
+        os.replace(tmp, ps_name, src_dir_fd=ps_dfd, dst_dir_fd=ps_dfd)
     except BaseException:
-        try: os.unlink(tmp)
+        try: os.unlink(tmp, dir_fd=ps_dfd)
         except OSError: pass
         raise
+    return None
 def iso(s):
     try: return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
     except Exception: return None
@@ -234,7 +293,7 @@ PENDING_SENDS_SECS = env_secs("PELWAY_WATCH_PENDING_SENDS_SECS", 1800)
 try:  # 検知の失敗で巡回の後段を止めない（誤検知で止まらない方針と同じ）
     oldest, pend_cnt, pend_to = None, 0, ""
     try:
-        psw = json.loads(read_ps(sys.argv[2]))
+        psw = json.loads(read_ps())
         pend_arr = psw.get("pending_thread_sends")
     except Exception:
         pend_arr = None
@@ -551,8 +610,9 @@ json.dump(cur, open(sp, "w"))
 ps_path = sys.argv[2]
 issue_limit = int(sys.argv[3]); pr_limit = int(sys.argv[4])
 # 記録は sandbox の中からも置き換えられるため read_ps で読み（Issue #699）、読めないもの（JSON でない・
-# 辞書でない・通常ファイルでない・4 MiB を超える）は無いものとして扱って、下の書き戻しで新しい記録に置き換える。
-try: ps = json.loads(read_ps(ps_path))
+# 辞書でない・通常ファイルでない・4 MiB を超える）は無いものとして扱って、下の書き戻しで新しい記録に置き換える
+# （親ディレクトリを確かめられない回は、無いものとして扱い、書き戻さない）。
+try: ps = json.loads(read_ps())
 except Exception: ps = {}
 if not isinstance(ps, dict): ps = {}
 if not isinstance(ps.get("subjects"), dict): ps["subjects"] = {}
@@ -712,8 +772,17 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
     cur["due_warned"] = {k: v for k, v in cur["due_warned"].items() if k in new_subj}
     cur["stall_notified"] = {k: v for k, v in cur["stall_notified"].items() if k in new_subj}
     ps["updated_at"] = now_iso
-    os.makedirs(os.path.dirname(ps_path) or ".", exist_ok=True)
-    write_ps(ps_path, ps)
+    # 書き戻さなかった回（親ディレクトリを確かめられない・上限を超える）は理由の行を出す。続く間は
+    # HEARTBEAT_SECS ごと（理由が変わればすぐ）に出し直し、書き戻せた回に回復の行を 1 つ出す。
+    why = write_ps(ps)
+    wsk = cur["ps_write_skipped"] if isinstance(cur["ps_write_skipped"], dict) else None
+    if why is None:
+        if wsk: print(f"WATCHER patrol-state-write-recovered since={stamp(wsk['since'])} after={int(now - wsk['since'])}s", flush=True)
+        wsk = None
+    elif wsk is None or wsk.get("reason") != why or now - wsk["notified_at"] >= HEARTBEAT_SECS:
+        wsk = {"since": now if wsk is None else wsk["since"], "notified_at": now, "reason": why}
+        print(f"WATCHER patrol-state-write-skipped since={stamp(wsk['since'])} reason={why} max={PS_MAX}", flush=True)
+    cur["ps_write_skipped"] = wsk
     json.dump(cur, open(sp, "w"))
 PY
   # ボード Status 更新キュー: $Q の *.json を 1 件ずつ処理する。要求は

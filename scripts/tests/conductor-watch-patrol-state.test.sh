@@ -3,8 +3,10 @@
 # 補助記録は sandbox の中からも書ける共有 git dir にあるため、巡回は symlink をたどらず、
 # FIFO で止まらず、通常ファイルで 4 MiB 以下のときだけ読み（#680 の read_ps）、書き戻しは
 # 同じディレクトリの一時ファイルからの置き換えで行う（symlink の先や FIFO に書かない）。辞書でない記録は空として扱う。
-# 旧置き場（$XDG_STATE_HOME/pelway/patrol-state.json）からの移行も同じ検査で読み、
-# 新置き場に何も無いときだけ作る。止まりの検知のテスト（conductor-watch-stall.test.sh）と同じく、
+# 旧置き場（$XDG_STATE_HOME/pelway/patrol-state.json）からの移行も同じ検査で読み（通常ファイル以外は
+# 開かずに飛ばす）、新置き場に何も無いときだけ作る。記録の親ディレクトリ（共有 git dir の pelway/）は
+# symlink をたどらずに開いて確かめ、確かめられない回は読まず書かない。移行と書き戻しは記録を 0600 で作り、
+# 書き戻しが上限を超える回は置き換えずに読めていた記録を保つ。止まりの検知のテスト（conductor-watch-stall.test.sh）と同じく、
 # 巡回は setsid で動かし、10 秒で終わらなければ止めて「時間内に終わらない」とする。
 set -uo pipefail
 
@@ -26,7 +28,7 @@ OLD_STATE="$ROOT/state/pelway/patrol-state.json"
 # モックの agent-gh: issue list / pr list だけに答える
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env bash
-[[ "$2 $3" == "issue list" ]] && { cat "$MOCK/issues.json"; exit 0; }
+[[ "$2 $3" == "issue list" ]] && { [[ -e "$MOCK/issues-fail" ]] && exit 1; cat "$MOCK/issues.json"; exit 0; }
 [[ "$2 $3" == "pr list" ]] && { echo '[]'; exit 0; }
 [[ "$2 $3" == "api /repos/hatai/Pelway/issues/events?per_page=100" ]] && { echo '[]'; exit 0; }
 exit 9
@@ -51,22 +53,32 @@ chmod +x "$ROOT/bin/sleep"
 # （SEEDED_SINCE）と指揮役の項目（scheduled_task_id）が引き継がれ、読まれなければ新しくなる。
 printf '%s\n' '[{"number":61,"state":"OPEN","labels":[{"name":"agent:working"}]}]' > "$MOCK/issues.json"
 SEEDED_SINCE="2020-01-01T00:00:00+09:00"
-# seed <path> [埋め草のバイト数] — 引き継がれたかを見分けられる記録を書く（埋め草で大きさを変える）
+# seed <path> [埋め草のバイト数 | near] — 引き継がれたかを見分けられる記録を書く（埋め草で大きさを変える）。
+# near は、読み取り上限（4 MiB）の 64 バイト手前まで埋めた詰めた JSON で、巡回の書き戻し（字下げと
+# トップレベルの updated_at）では上限を超える大きさになる。
 seed() {
   python3 -I - "$1" "${2:-0}" "$SEEDED_SINCE" <<'EOF'
 import json, sys
-p, pad, since = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+p, pad, since = sys.argv[1], sys.argv[2], sys.argv[3]
 d = {"subjects": {"61": {"waiting_on": "implement", "waiting_since": since,
                          "next_owner": "implement thread (#61)", "next_check_at": "2099-01-01T00:00:00+09:00",
                          "updated_at": since, "labels": ["agent:working"]}},
      "scheduled_task_id": "seeded"}
-if pad: d["pad"] = "x" * pad
-json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
+if pad == "near":
+    compact = lambda: json.dumps(d, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    d["pad"] = ""
+    d["pad"] = "x" * (4194304 - 64 - len(compact().encode("utf-8")))
+    open(p, "w", encoding="utf-8").write(compact())
+else:
+    if int(pad): d["pad"] = "x" * int(pad)
+    json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
 EOF
 }
 
+UMASK0="$(umask)"
 reset() {
-  rm -rf "$PELWAY" "$ROOT/state/pelway" "$ROOT/target" "$ROOT/old-target"
+  umask "$UMASK0"
+  rm -rf "$PELWAY" "$ROOT/state/pelway" "$ROOT/target" "$ROOT/old-target" "$ROOT/outside" "$MOCK/issues-fail"
   mkdir -p "$PELWAY" "$ROOT/state/pelway"; : > "$ROOT/out.log"
 }
 
@@ -93,12 +105,15 @@ since61() {
 try: print(json.load(open(sys.argv[1]))["subjects"]["61"]["waiting_since"])
 except Exception: print("")' "$STATE"
 }
-task_id() {
+# top <key> — 記録のトップレベルの項目の値（無ければ空）
+top() {
   regular || { echo not-regular; return; }
   python3 -I -c 'import json,sys
-try: print(json.load(open(sys.argv[1])).get("scheduled_task_id", ""))
-except Exception: print("")' "$STATE"
+try: print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))
+except Exception: print("")' "$STATE" "$1"
 }
+task_id() { top scheduled_task_id; }
+mode() { stat -c %a "$1" 2>/dev/null; }
 
 check() {
   local name="$1"; shift
@@ -106,6 +121,8 @@ check() {
 }
 eq() { [[ "$1" == "$2" ]]; }
 has() { grep -qF -- "$2" "$1"; }
+lacks() { ! grep -qF -- "$2" "$1"; }
+stamped() { [[ "$(top updated_at)" == 20* ]]; }  # 巡回がこの記録を書き戻した（トップレベルの updated_at）
 in_time() { [[ "$RUN_RC" == 0 ]]; }
 absent() { [[ ! -e "$1" && ! -L "$1" ]]; }
 written() { regular && [[ "$(since61)" == 20* ]]; }  # 巡回が通常ファイルとして書き戻した
@@ -200,6 +217,74 @@ reset; printf '[]\n' > "$STATE"
 run_cycles 1
 check "11: the cycle finishes within 10 seconds" in_time
 check "11: a non-object patrol-state is replaced by a fresh record" written
+
+# 試験 12: 旧置き場が通常ファイルでない（Unix ドメインソケット。開くと ENXIO になる種類）なら、
+# 移行せずに理由を残し、見張りは止まらずに巡回を始める。bind はパスの長さの上限を避けて相対パスで行う。
+reset
+(cd "$ROOT/state/pelway" && python3 -I -c 'import socket; socket.socket(socket.AF_UNIX).bind("patrol-state.json")')
+run_cycles 1
+check "12: a socket is placed at the old place" test -S "$OLD_STATE"
+check "12: the cycle finishes within 10 seconds" in_time
+check "12: a socket at the old place does not stop the watcher" written
+check "12: the skipped migration is logged" has "$ROOT/out.log" "PATROL-STATE not-migrated $OLD_STATE reason=not-regular"
+
+# 試験 13: umask 022 でも、移行・書き戻し（一時ファイルからの置き換え）・新しい記録の作成は、記録の
+# 許可ビットを 0600 より広げない。移行だけを見る回は、Issue の一覧の取得を失敗させて書き戻しを止める。
+reset; seed "$OLD_STATE"; chmod 600 "$OLD_STATE"; : > "$MOCK/issues-fail"
+umask 022; run_cycles 1; umask "$UMASK0"
+check "13: the 0600 old record is migrated" eq "$(task_id)" "seeded"
+check "13: the patrol does not write back while the issue list fails" eq "$(top updated_at)" ""
+check "13: migration keeps the record at 0600 under umask 022" eq "$(mode "$STATE")" "600"
+reset; seed "$STATE"; chmod 600 "$STATE"
+umask 022; run_cycles 2; umask "$UMASK0"
+check "13: the 0600 record is written back" stamped
+check "13: the written-back record carries the conductor's items over" eq "$(task_id)" "seeded"
+check "13: write-back keeps the record at 0600 under umask 022" eq "$(mode "$STATE")" "600"
+reset
+umask 022; run_cycles 1; umask "$UMASK0"
+check "13: a new record is written" written
+check "13: a new record is created at 0600 under umask 022" eq "$(mode "$STATE")" "600"
+
+# 試験 14: 記録の親ディレクトリ（共有 git dir の pelway/）が symlink なら、その指す先の記録を読まず、
+# 指す先に書かない（一時ファイルも移行先も作らない）。その回は書き戻さず、理由の行を出す。
+# 指す先の記録は 30 分より前から未配送の指示を持つので、読まれれば pending-sends-stalled の行が出る。
+reset; rm -rf "$PELWAY"; mkdir -p "$ROOT/outside"
+printf '%s\n' '{"scheduled_task_id":"outside","pending_thread_sends":[{"to":"mcp:x","what":"w","since":"2020-01-01T00:00:00+09:00"}]}' \
+  > "$ROOT/outside/patrol-state.json"
+cp "$ROOT/outside/patrol-state.json" "$ROOT/outside.orig"
+ln -s "$ROOT/outside" "$PELWAY"
+run_cycles 1
+check "14: the cycle finishes within 10 seconds" in_time
+check "14: the record behind a symlinked directory is not read" lacks "$ROOT/out.log" "pending-sends-stalled"
+check "14: the record behind a symlinked directory is left byte-identical" \
+  cmp -s "$ROOT/outside/patrol-state.json" "$ROOT/outside.orig"
+check "14: no file is created behind a symlinked directory" eq "$(find "$ROOT/outside" -mindepth 1 | wc -l)" "1"
+check "14: the skipped write-back is logged with its reason" has "$ROOT/out.log" "reason=dir-invalid"
+reset; rm -rf "$PELWAY"; mkdir -p "$ROOT/outside"; ln -s "$ROOT/outside" "$PELWAY"; seed "$OLD_STATE"
+run_cycles 1
+check "14: the cycle finishes within 10 seconds (migration)" in_time
+check "14: migration creates nothing behind a symlinked directory" eq "$(find "$ROOT/outside" -mindepth 1 | wc -l)" "0"
+check "14: the invalid directory is logged at startup" has "$ROOT/out.log" "PATROL-STATE dir-invalid $PELWAY"
+
+# 試験 15: 上限（4 MiB）付近の有効な記録で、書き戻すと上限を超えるなら、置き換えずに読めていた記録を保つ。
+# 3 周回しても記録はそのまま引き継がれ（指揮役の項目と待ち始めた時刻が残る）、理由の行は 1 回だけ出る。
+# 記録が上限に収まる大きさに戻れば、書き戻しが戻ったことを示す行が出る。
+reset; seed "$STATE" near; cp "$STATE" "$ROOT/near.orig"
+check "15: the near-limit record is within the read limit" test "$(stat -c %s "$STATE")" -le 4194304
+run_cycles 3
+check "15: the cycles finish within 10 seconds" in_time
+check "15: the near-limit record is kept byte-identical" cmp -s "$STATE" "$ROOT/near.orig"
+check "15: the conductor's items survive three cycles" eq "$(task_id)" "seeded"
+check "15: waiting_since survives three cycles" eq "$(since61)" "$SEEDED_SINCE"
+check "15: the skipped write-back is logged once" \
+  eq "$(grep -c 'WATCHER patrol-state-write-skipped .*reason=too-large' "$ROOT/out.log")" "1"
+check "15: no temporary file is left" \
+  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name patrol-state.json | wc -l)" "0"
+seed "$STATE"
+run_cycles 1
+check "15: the write-back resumes once the record fits" has "$ROOT/out.log" "WATCHER patrol-state-write-recovered"
+check "15: the resumed write-back is written" stamped
+check "15: the resumed write-back keeps the conductor's items" eq "$(task_id)" "seeded"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
