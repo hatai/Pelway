@@ -103,7 +103,7 @@ check fail_closed_record_implement .agents/skills/implement-issue/SKILL.md \
   'pullrequestreview-<id> to: <担当>' \
   '投稿後の `設定の不備:` の記録' \
   'REST の `user.login` が `pelway-dev[bot]` のコメントだけ' \
-  '($last | startswith("Reviewer: agent=<担当> "))' \
+  'run: ($last | capture(" run=(?<id>[0-9]+)$").id // null)' \
   '未解消の記録が PR に 1 件でもあるあいだは、その PR のどのレビューも'
 check fail_closed_record_command_team .agents/skills/command-team/SKILL.md \
   '[review-invalid]' \
@@ -157,6 +157,26 @@ check fail_closed_r6_command_team .agents/skills/command-team/SKILL.md \
 check fail_closed_r6_runbook docs/agents/grokbot-runbook.md \
   '立てる前に、対象 PR に委託記録' \
   '最新のレビューでは照合しない'
+
+# 失敗した実行の投稿は末尾行の run= で選び、判別できない投稿は review: unknown に進める。解消コメントは
+# 記録より後に作られ編集されていないものだけを数える。結び付かない投稿（run= の無い従来の書式を含む）は
+# hatai の dismiss を待って再委託する。結果の確定は、委託の時点で決まる必要な実行のすべての報告と投稿で
+# 確かめ、指揮役のレビュースレッドの結果は run <ID>: <verdict> を添えて実装スレッドに渡す（Issue #581 r7）。
+# いずれも文言の存在確認で、意味はレビューで引用を読んで判定する。
+check fail_closed_r7_implement .agents/skills/implement-issue/SKILL.md \
+  '担当と時刻だけでは分けない' \
+  '対応を判別できないもの' \
+  '`created_at` と `updated_at` が同じ（投稿の後に編集されていない' \
+  '`created_at` が対象の記録の `created_at` より後' \
+  '結び付かない投稿の取り消し: ' \
+  '必要な実行: ある head のレビューに要る実行の集合は、委託の時点で決まる' \
+  '`run <ID>: <approve|request-changes>` の行が添えてあれば'
+check fail_closed_r7_command_team .agents/skills/command-team/SKILL.md \
+  '(b) は、末尾行に ` run=<ID>` の無い投稿' \
+  '必要な実行のうち報告の無いもの'
+check fail_closed_r7_runbook docs/agents/grokbot-runbook.md \
+  '最初の `approve` で次に進まず残りの報告を待つ' \
+  '上の 6 の In review の判定では、その PR の最新の委託記録コメントだけを証跡とする'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
