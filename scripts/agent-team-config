@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+# リポジトリルートの agent-team.toml の検証と読み出し（Issue #713）。
+# 使い方:
+#   scripts/agent-team-config validate [<file>]       検証する。<file> の既定はルートの agent-team.toml
+#   scripts/agent-team-config slots <login> [<file>]  その開発者の実装・調査の枠を「<担当> <上限>」で 1 行 1 つ出す
+#   scripts/agent-team-config -h | --help             この使い方を出す
+# 終了コード: 0 = 成功、1 = 検証の失敗・TOML として読めない・読み出せない、2 = 引数の誤り・ファイルが無い
+# TOML は python3 の tomllib で読み、scripts/conductor-watch.sh と同じ python3 -I で起動する。
+set -uo pipefail
+
+usage_text="usage: $0 <validate [<file>] | slots <login> [<file>]>"
+
+usage() { echo "$usage_text" >&2; exit 2; }
+
+help() {
+  cat <<EOF
+$usage_text
+
+agent-team.toml（リポジトリルート）の検証と読み出し。
+検証は scripts/tests/agent-team-config.test.sh 経由で mise run verify に入る。
+
+subcommands:
+  validate [<file>]       ファイルを検証する。<file> の既定は <root>/agent-team.toml。
+                          違反は 1 行 1 つ「<file>: <キー>: <内容>」を標準エラーに出し、
+                          1 件でもあれば終了コード 1。合格なら 1 行だけ標準出力に出す
+  slots <login> [<file>]  開発者 <login>（GitHub の login）の実装・調査の同時枠を
+                          「<担当> <上限>」で 1 行 1 つ、ファイルの並びどおりに出す
+EOF
+  exit 0
+}
+
+case "${1:-}" in
+  validate|slots) ;;
+  -h|--help) help ;;
+  *) usage ;;
+esac
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec python3 -I - "$ROOT" "$@" <<'PY'
+import sys, tomllib
+
+root, argv = sys.argv[1], sys.argv[2:]
+roles = ("implement", "investigate", "review")
+known_agents = ("opencode", "devin", "codex", "claude")
+
+
+def fail(msg, rc=1):
+    sys.stderr.write(f"agent-team-config: {msg}\n")
+    sys.exit(rc)
+
+
+def load(path):
+    try:
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    except FileNotFoundError:
+        fail(f"{path}: ファイルが無い", 2)
+    except tomllib.TOMLDecodeError as e:
+        fail(f"{path}: TOML として読めない（{e}）")
+    except OSError as e:
+        fail(f"{path}: 読めない（{e}）")
+
+
+errors = []
+
+
+def err(key, msg):
+    errors.append(f"{key}: {msg}")
+
+
+def pos_int(v):
+    # bool は TOML では int と別の型（Python の isinstance(True, int) は True なので型で見る）
+    return type(v) is int and v >= 1
+
+
+def str_list(key, v):
+    if isinstance(v, list) and v and all(isinstance(x, str) and x for x in v):
+        return True
+    err(key, "空でない文字列の一覧が要る")
+    return False
+
+
+def capable(agent, wants):
+    inst = agent.get("instance") if isinstance(agent, dict) else None
+    return isinstance(inst, dict) and any(r in inst for r in wants)
+
+
+def limit_table(key, t, use, agents, wants):
+    if not isinstance(t, dict):
+        err(key, "上限の表が要る")
+        return
+    seen = set()
+    for name, v in t.items():
+        k = f"{key}.{name}"
+        if name not in known_agents:
+            err(k, "登録情報に無い担当 id")
+        elif name not in use:
+            err(k, "この開発者の use に無い担当")
+        elif not capable(agents.get(name), wants):
+            err(k, "この役割を担わない担当に上限を書いている")
+        if not pos_int(v):
+            err(k, "上限は 1 以上の整数が要る")
+        seen.add(name)
+    for name in use:
+        if capable(agents.get(name), wants) and name not in seen:
+            err(f"{key}.{name}", "この役割を担う使える担当に上限が無い（無制限になるため要る）")
+
+
+def check_agents(doc):
+    agents = doc.get("agents")
+    if not isinstance(agents, dict):
+        err("agents", "担当の登録情報の表が要る")
+        return {}
+    for want in known_agents:
+        if want not in agents:
+            err(f"agents.{want}", "登録が無い")
+    for name, a in agents.items():
+        akey = f"agents.{name}"
+        if name not in known_agents:
+            err(akey, "登録情報に無い担当 id（id は opencode・devin・codex・claude の 4 種）")
+            continue
+        if not isinstance(a, dict):
+            err(akey, "表が要る")
+            continue
+        inst = a.get("instance")
+        if not isinstance(inst, dict) or not inst:
+            err(f"{akey}.instance", "役割ごとの provider インスタンス名の表が要る")
+        else:
+            for r, v in inst.items():
+                if r not in roles:
+                    err(f"{akey}.instance.{r}", "役割は implement・investigate・review のどれか")
+                elif not isinstance(v, str) or not v:
+                    err(f"{akey}.instance.{r}", "空でない文字列が要る")
+        str_list(f"{akey}.models", a.get("models"))
+        eff = a.get("effort")
+        if not isinstance(eff, dict):
+            err(f"{akey}.effort", "表が要る")
+        else:
+            if not isinstance(eff.get("option"), str) or not eff.get("option"):
+                err(f"{akey}.effort.option", "空でない文字列が要る")
+            str_list(f"{akey}.effort.raise", eff.get("raise"))
+        if not isinstance(a.get("assign_label"), str):
+            err(f"{akey}.assign_label", "文字列が要る（付けないときは空文字）")
+    return agents
+
+
+def check_developers(doc, agents):
+    devs = doc.get("developers")
+    if not isinstance(devs, dict) or not devs:
+        err("developers", "開発者の表が 1 つ以上要る")
+        return
+    for login, d in devs.items():
+        dkey = f"developers.{login}"
+        if not isinstance(d, dict):
+            err(dkey, "表が要る")
+            continue
+        use = d.get("use")
+        use_known = [n for n in (use if isinstance(use, list) else []) if n in known_agents]
+        if str_list(f"{dkey}.use", use):
+            for n in use:
+                if n not in known_agents:
+                    err(f"{dkey}.use", f"登録情報に無い担当 id: {n}")
+        if not any(capable(agents.get(n), ("implement",)) for n in use_known):
+            err(f"{dkey}.use", "実装の役割を持つ担当が 1 つも無い")
+        if not any(capable(agents.get(n), ("review",)) for n in use_known):
+            err(f"{dkey}.use", "レビューの役割を持つ担当が 1 つも無い")
+        use_set = set(use_known)
+        limit_table(f"{dkey}.slots", d.get("slots"), use_known, agents,
+                    ("implement", "investigate"))
+        limit_table(f"{dkey}.review_limits", d.get("review_limits"), use_known,
+                    agents, ("review",))
+        prio = d.get("priority")
+        if not isinstance(prio, dict):
+            err(f"{dkey}.priority", "条件ごとの優先順位の表が要る")
+        else:
+            for role in ("implement", "review"):
+                if not isinstance(prio.get(role), dict) or not prio.get(role):
+                    err(f"{dkey}.priority.{role}", "この役割の優先順位が要る")
+            for role, conds in prio.items():
+                rkey = f"{dkey}.priority.{role}"
+                if role not in roles:
+                    err(rkey, "役割は implement・investigate・review のどれか")
+                    continue
+                if not isinstance(conds, dict):
+                    err(rkey, "条件名→担当の並びの表が要る")
+                    continue
+                for cond, lst in conds.items():
+                    ckey = f"{rkey}.{cond}"
+                    if not str_list(ckey, lst):
+                        continue
+                    for n in lst:
+                        if n not in known_agents:
+                            err(ckey, f"登録情報に無い担当 id: {n}")
+                        elif n not in use_set:
+                            err(ckey, f"この開発者の use に無い担当: {n}")
+                        elif not capable(agents.get(n), (role,)):
+                            err(ckey, f"{role} の役割を担わない担当: {n}")
+
+
+def do_validate(path):
+    doc = load(path)
+    agents = check_agents(doc)
+    check_developers(doc, agents)
+    if errors:
+        for e in errors:
+            sys.stderr.write(f"{path}: {e}\n")
+        sys.exit(1)
+    print(f"agent-team-config: ok {path}")
+
+
+def do_slots(login, path):
+    doc = load(path)
+    devs = doc.get("developers")
+    if not isinstance(devs, dict) or not isinstance(devs.get(login), dict):
+        fail(f"{path}: developers.{login} の表が無い")
+    slots = devs[login].get("slots")
+    if not isinstance(slots, dict):
+        fail(f"{path}: developers.{login}.slots の表が無い")
+    for name, v in slots.items():
+        if not pos_int(v):
+            fail(f"{path}: developers.{login}.slots.{name} が 1 以上の整数でない")
+        print(f"{name} {v}")
+
+
+mode = argv[0]
+if mode == "validate":
+    if len(argv) > 2:
+        sys.stderr.write(f"usage: agent-team-config validate [<file>]\n")
+        sys.exit(2)
+    do_validate(argv[1] if len(argv) == 2 else f"{root}/agent-team.toml")
+elif mode == "slots":
+    if len(argv) not in (2, 3):
+        sys.stderr.write(f"usage: agent-team-config slots <login> [<file>]\n")
+        sys.exit(2)
+    do_slots(argv[1], argv[2] if len(argv) == 3 else f"{root}/agent-team.toml")
+PY
