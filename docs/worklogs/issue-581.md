@@ -59,3 +59,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 3 に「割り当ての worktree が別のブランチを checkout しているときは、PR ブランチの remote の先端から別名のブランチを作り、`HEAD:<PR ブランチ>` で push する」を足す（round 2〜5 で毎回起きた）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 6）
+
+対象 head: cc44fa87a61ad921c46787aedce59034192a44d9
+
+1. 詰まった箇所: worktree の用意: 割り当ての worktree は別のブランチ（`t3/review-invalid-fail-closed-r6-1`）で、PR ブランチは他の worktree が checkout していた。round 5 と同じく、手元のブランチを `origin/agent/581-fail-closed-tool-check` に合わせ、`HEAD:agent/581-fail-closed-tool-check` で push した。round の上限の撤廃は委託元の指示（hatai の指示 t629u）による。Issue #581・PR #695 に hatai 作のコメントは無く、確かめていない。指示が挙げた codex r6 のほか、同じ head に claude r6（6051472964）もあった。claude の must-fix 2 件は codex の 1・2 と同じ指摘なので、同じ修正で直した。
+2. 曖昧だった文: 「委託記録を起動前に残してコメント ID と子の実行 ID を結び付け、その実行の記録から下限を取ってください」（codex r6 の must-fix 1）
+3. 仮定と解釈: 照合の must-fix が r3・r5・r6 と続いた。そこで全経路に、時刻や「最新」で照合せず、起動前の委託記録の ID（割り当ての行の `run=`）で結ぶ決まりを当てた。末尾行の ` run=<ID>` を通して、投稿と委託の実行を結ぶ。結べないものは「該当なし」ではなく `review: unknown` にして、人間の判断に回す。`run=` は task を書く時点で委託記録がすでにあるので、記録が起動より前に付く順序は手順の形で保証される。結び付けは子の報告（信用しない環境の出力）に書かせず、委託者が自分で書いた `run=` と GitHub の末尾行で行った。`unknown` の記録と、dismiss で確かめられない記録は、hatai の `[review-invalid-resolved]` コメントでだけ解消する。そのうえで再レビューは、記録の `head:` によらず現在の head に求める。claude の印なしの nit（timeline の actor が hatai であるだけでは人の操作と言えない）は直していない。
+4. 足りなかった情報・検証手段: 新しい jq 3 本（手順 9 の一覧、`issues/comments/<ID>`、review-pr の `last == "<Reviewer 行>"`）は、PR #695 の実データで読み取りだけ実行して確かめた。`run=` の付いた投稿は、まだ実データに無い。
+5. 改善案: `.agents/skills/command-team/SKILL.md` の「hatai のレビューの扱い」の解消の手段を、`[review-invalid-resolved]` コメントだけにそろえる（timeline の actor では人の操作を確かめられないため。claude r6 の nit）。別 Issue で扱う。
+
+使ったスキル: implement-issue
