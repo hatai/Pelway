@@ -23,3 +23,15 @@
 5. 改善案: `scripts/tests/conductor-watch-ensure.test.sh` の冒頭のコメントに「名前空間の中では mise の shim の python3 が動かないため、見張りの起動時に python3 の成功を前提にする処理を足すと、この試験で見張りが終了する」を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 3）
+
+対象 head: 487d502a6ac566f28196f30b50bd99aeee0107ce
+
+1. 詰まった箇所: `scripts/tests/conductor-watch-patrol-state.test.sh` の試験 16: 整形で膨らむだけの記録では、修正前の `json.dumps` も手元のメモリでは整形を終えて `reason=too-large` を出し、red にならない。見張りを `ulimit -v 1048576`（1 GiB）の下で動かし、300 段の入れ子で 1 GiB を超える記録を使って、修正前は `MemoryError` の Traceback が出て理由の行が出ないことを `scripts/red-check` で確かめた。
+2. 曖昧だった文: 「JSON を少しずつシリアライズして UTF-8 の累計バイト数を数え、上限を超えた時点で処理を打ち切って既存の記録を保持してください」（PR #705 の codex r2 レビュー、must-fix）。整形した断片を一時ファイルへ直接書くのか、手元に溜めるのかが書かれていない。
+3. 仮定と解釈: 断片は上限（4 MiB）まで手元に溜め、超えたら一時ファイルを作る前に `too-large` を返す解釈を選んだ（一時ファイルの作成と後始末が要らず、溜める量は上限と断片 1 つまでに収まる）。断片 1 つの大きさは入力の文字列 1 つの escape 後の大きさで決まり、読み取り上限の数倍に収まると置いた。`JSONEncoder(...).iterencode` は `indent` を指定すると `json.dumps` と同じ Python 側の整形を通るため、出力は変わらない前提にした。
+4. 足りなかった情報・検証手段: 試験 16 の 1 GiB の仮想メモリの制限は CI の runner でも効く前提で、CI での `ulimit -v` の可否は PR のチェックの結果で確かめる。整形中の実際の最大メモリ量は測っていない。
+5. 改善案: `.agents/skills/review-pr/SKILL.md` の must-fix の書き方に「メモリなど資源の上限の指摘には、red にする条件（制限の値や入力の形）を添える」を足す。
+
+使ったスキル: implement-issue
