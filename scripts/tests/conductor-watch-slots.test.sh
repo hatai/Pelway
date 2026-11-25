@@ -249,21 +249,22 @@ check "devin-labelled issue counted to devin" has "$ROOT/out.log" '^SLOTS devin 
 check "devin-labelled issue not counted to opencode" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
 check "closed issue not counted" nhas "$ROOT/out.log" '^SLOTS devin 2/6$'
 
-# --- 3. 作業状態の印＋現在の割り当てに結び付いたスレッドが動いていないことの確認が取れたものは使用数に含めない ---
+# --- 3. 印が停止中で、現在の割り当てに結び付いたスレッドが動いていないと確かめられたものだけが枠を空ける ---
+# （再開処理中・再開待ちの印が残るものは再開手順の途中・直後なので使用中として数える）
 mark 11 "停止中";   bind 11 t1
 mark 13 "再開待ち"; bind 13 t2
 mark 15 "再開処理中"; bind 15 t3
 mock_threads "$(jarr "$(thread_item t1 '[実装] #11 a' completed)" "$(thread_item t2 '[実装] #13 b' failed)" "$(thread_item t3 '[実装] #15 c' interrupted)")"
-mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)" "$(iss 13 OPEN agent:working agent:devin)" "$(iss 15 OPEN agent:working)")"
+mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)" "$(iss 13 OPEN agent:working agent:devin)" "$(iss 15 OPEN agent:working)" "$(iss 16 OPEN agent:working)")"
 run_cycles 1
-check "stopped/resuming issues excluded" has "$ROOT/out.log" '^SLOTS opencode 1/3$'
-check "resume-pending devin excluded" has "$ROOT/out.log" '^SLOTS devin 0/6$'
+check "stopped issue excluded" has "$ROOT/out.log" '^SLOTS opencode 3/3$'
+check "resume marks counted as used" has "$ROOT/out.log" '^SLOTS devin 1/6$'
 
 # --- 3b. 印だけでは由来を確かめられない: 組の無いもの・動いているスレッドが残るものは使用中として数える ---
 mark 16 "停止中"   # implement_thread の組もスレッドも無い → 確かめられない → 使用中
 mark 17 "停止中"; bind 17 t4   # 組のスレッドが動いている → 使用中
-mark 18 "再開待ち"; bind 18 t5 # 組のスレッドは止まっているが一覧に動いているものが残る → 使用中
-mark 19 "再開処理中" # 組もスレッドも無い → 使用中
+mark 18 "停止中"; bind 18 t5   # 組のスレッドは止まっているが一覧に動いているものが残る → 使用中
+mark 19 "再開待ち" # 再開の印が残るものは組の有無にかかわらず使用中
 mock_threads "$(jarr \
   "$(thread_item t1 '[実装] #11 a' completed)" \
   "$(thread_item t2 '[実装] #13 b' failed)" \
@@ -273,24 +274,25 @@ mock_threads "$(jarr \
   "$(thread_item t6 '[実装] #18 f' running)")"
 mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)" "$(iss 13 OPEN agent:working agent:devin)" "$(iss 15 OPEN agent:working)" "$(iss 16 OPEN agent:working)" "$(iss 17 OPEN agent:working)" "$(iss 18 OPEN agent:working)" "$(iss 19 OPEN agent:working)")"
 run_cycles 1
-check "unverified marks counted as used" has "$ROOT/out.log" '^SLOTS over opencode 5/3$'
-check "unverified devin mark counted" has "$ROOT/out.log" '^SLOTS devin 0/6$'
+check "unverified marks counted as used" has "$ROOT/out.log" '^SLOTS over opencode 6/3$'
+check "unverified devin mark counted" has "$ROOT/out.log" '^SLOTS devin 1/6$'
 
-# --- 3c. 引き継ぎ先が一覧から欠ける回: 組のスレッドが一覧に無く、止まった旧スレッドだけが見える → 使用中 ---
-# （一覧にある [実装] #20 の旧スレッドは止まっているが、現在の割り当てに結び付いた
-#   t-new-successor が一覧に無い → 起動した引き継ぎ先が一時的に欠けた形と区別できない）
-mark 20 "再開待ち"; bind 20 t-new-successor
+# --- 3c. 再開の照合が残る形: 止まった旧スレッドの組と「再開待ち」の印だけが見える → 使用中 ---
+# （起動の応答が失われて新しい ID をまだ記録できず、一覧に旧スレッドしか返らない巡回の形。
+#   停止中でも組のスレッドが一覧に無いもの（issue 22）も使用中）
+mark 20 "再開待ち"; bind 20 t-old-20
+mark 22 "停止中";   bind 22 t-missing-22
 mock_threads "$(jarr "$(thread_item t-old-20 '[実装] #20 old' completed)")"
-mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 20 OPEN agent:working)")"
+mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 20 OPEN agent:working)" "$(iss 22 OPEN agent:working)")"
 run_cycles 1
-check "successor missing from list counted as used" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
+check "resume verification pending counted as used" has "$ROOT/out.log" '^SLOTS opencode 3/3$'
 
 # --- 3d. 割り当ての照合が残るもの（rollback）は、組のスレッドが止まっていても使用中 ---
 mark 21 "停止中"; bind 21 t-rb; set_rollback 21
 mock_threads "$(jarr "$(thread_item t-rb '[実装] #21 g' completed)")"
-mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 16 OPEN agent:working)" "$(iss 21 OPEN agent:working)")"
+mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 21 OPEN agent:working)")"
 run_cycles 1
-check "unconfirmed assignment counted as used" has "$ROOT/out.log" '^SLOTS opencode 3/3$'
+check "unconfirmed assignment counted as used" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
 
 # --- 4. 上限超過は SLOTS over ---
 mark 16 "稼働中"; mark 17 "稼働中"; mark 18 "稼働中"; mark 19 "稼働中"
@@ -438,6 +440,21 @@ run_cycles 1
 rm -f "$MOCK/advance-threads"
 check "updated_at is T3-list fetch start" slot_eq updated_at 1700004000.0
 check "patrol work runs on the post-T3 clock" slot_eq patrol_at 1700004090.0
+
+# --- 13e. 一覧の取得開始時刻が記録できなかった巡回は使用数を公開しない ---
+# （threads-at の置き場をディレクトリにして書き込みだけを失敗させ、T3 の一覧の
+#   取得には時間がかかった形を重ねる。時刻が読めなければ取得開始を確かめられない）
+rm -f "$(dirname "$SLOTS")/threads-at"
+mkdir "$(dirname "$SLOTS")/threads-at"
+touch "$MOCK/advance-threads"
+set_now 1700005000
+run_cycles 1
+rmdir "$(dirname "$SLOTS")/threads-at"
+rm -f "$MOCK/advance-threads"
+check "unrecorded fetch time emits SLOTS error" has "$ROOT/out.log" '^SLOTS error fetch-time-missing$'
+check "slots.json status error on unrecorded fetch time" slot_eq status error
+run_cycles 1
+check "slots.json back to ok when fetch time recorded" slot_eq status ok
 
 # --- 14. 見張りは GitHub に書き込まない（agent-gh は読み取りだけ、素の gh も呼ばない） ---
 if grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/events)" "$MOCK/gh-calls.log" | grep -q .; then

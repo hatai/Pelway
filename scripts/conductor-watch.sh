@@ -194,13 +194,14 @@ except Exception: prs = []; prs_ok = False
 try: now = float(open(os.environ["PELWAY_WATCH_NOW"]).read().strip())
 except Exception: now = time.time()
 # Issue 一覧の取得開始時刻（巡回の冒頭で巡回ループが書く。SLOTS の記録の updated_at に使う。
-# 後続の取得が遅れた回に、古い使用数へ巡回処理の時刻を付けないため）。
+# 後続の取得が遅れた回に、古い使用数へ巡回処理の時刻を付けないため）。読めない回は
+# 時刻を補わない（古い停止状態に新しい時刻が付かないよう、使用数を公開しない）。
 try: issues_at = float(open(os.path.join(d, "issues-at")).read().strip())
-except Exception: issues_at = now
+except Exception: issues_at = None
 # T3 のスレッド一覧の取得開始時刻（同じく巡回ループが書く。停止の判定の根拠にもなるため、
 # 記録の updated_at はこちらと Issue 一覧の、より古い方の時刻にする）。
 try: threads_at = float(open(os.path.join(d, "threads-at")).read().strip())
-except Exception: threads_at = now
+except Exception: threads_at = None
 # 巡回の印。state.json と slots.json の両方に書き、一致すれば記録が最新の巡回のものと
 # 読み手が分かる（公開に失敗した回は state.json の印だけが進む）。
 cur["patrol_at"] = now
@@ -655,13 +656,15 @@ if not isinstance(ps.get("subjects"), dict): ps["subjects"] = {}
 # 出すのは、使用数または状態が前回の巡回から変わったときと、HEARTBEAT の行を出した巡回。
 # Issue を持たない調査（入口B）は数えない（指揮役が巡回記録から加算する）。数えるのは
 # open で agent:working の付いた Issue で、agent:devin が付いたものは devin に、ほかは
-# opencode に入れる。作業状態の印が停止中・再開処理中・再開待ちのものは、印の裏付けを
+# opencode に入れる。作業状態の印が停止中のものは、印の裏付けを
 # 取ってから使っていない枠として除く: 補助記録は実装エージェントも書き込め、pelway-dev[bot] は
 # 実装担当と指揮役の共通名義のため、GitHub の記録では実際の停止を確かめられない。代わりに
-# 実装スレッドの実際の状態（T3 の一覧。題名が「[実装] #<番号> 」のもの）で確かめ、その Issue の
-# スレッドがどれも動いていない（完了・失敗・中断・取消、アーカイブを含む）ものだけを除く。
-# 動いているスレッドが残るもの・スレッドが見つからないもの（一覧の取得失敗を含む）は
-# 使用中として数える。
+# 現在の割り当てに結び付いたスレッド（補助記録の implement_thread の組の thread_id）の、
+# 実装エージェントには書き換えられない T3 の一覧での状態で確かめ、組のスレッドがすべて
+# 一覧にあってどれも動いていない（完了・失敗・中断・取消、アーカイブを含む）、かつ一覧の
+# [実装] #<番号> のスレッドもどれも動いていないものだけを除く。組が無いもの・組のスレッドが
+# 一覧に無いもの（起動した引き継ぎ先が一覧から一時的に欠ける回を含む）・割り当ての照合が
+# 残るもの・動いているスレッドが残るものは使用中として数える。
 slots_st = "unavailable"; slots_reason = "agent-team.toml not in worktree"
 slots_usage = None; slots_lines = None; slots_sig = "unavailable"
 if os.path.isfile("agent-team.toml"):
@@ -669,6 +672,10 @@ if os.path.isfile("agent-team.toml"):
         slots_st, slots_reason = "error", "issue-list-failed"
     elif len(issues) >= issue_limit:
         slots_st, slots_reason = "error", "issue-list-limit"
+    elif issues_at is None or threads_at is None:
+        # 一覧の取得開始時刻が記録できなかった回は、時刻の新しさで鮮度を誤魔化さないよう
+        # 割り当てに使える使用数を公開しない。
+        slots_st, slots_reason = "error", "fetch-time-missing"
     else:
         try:
             r = subprocess.run(["scripts/agent-team-config", "slots", "hatai"],
@@ -686,7 +693,12 @@ if os.path.isfile("agent-team.toml"):
                 if isinstance(items, dict):
                     for n, it in items.items():
                         ws = it.get("work_state") if isinstance(it, dict) else None
-                        if isinstance(ws, dict) and ws.get("state") in ("停止中", "再開処理中", "再開待ち"):
+                        # 枠を空ける印は停止中だけに限る: 再開処理中・再開待ちは再開手順の
+                        # 途中・直後の状態で、起動を試みた回と試みる前の回は記録上区別できず、
+                        # 起動の応答が失われた回は旧スレッドの組と印だけが残る（runbook
+                        # 「割り当て・停止・再開」: 起動を試みた後は照合が終わるまで枠に計上）。
+                        # 使用中として数える。
+                        if isinstance(ws, dict) and ws.get("state") == "停止中":
                             marks.add(str(n))
                 impl = {}
                 for t in threads:
@@ -747,7 +759,8 @@ cur["slots"] = slots_sig
 # 指揮役の照合用の記録（Issue #714）。キューに書けるファイル名がそのまま watch.log の行に
 # なるため、行の見た目だけでは出どころを区別できない。巡回ごとに最新の判定を書き直し、
 # 直前の巡回の結果が残って使われないようにする。読み手の規約は runbook「3. 同時数と順番待ち」。
-rec = {"updated_at": min(issues_at, threads_at), "patrol_at": now, "status": slots_st}
+ats = [t for t in (issues_at, threads_at) if t is not None]
+rec = {"updated_at": min(ats) if ats else now, "patrol_at": now, "status": slots_st}
 if slots_reason is not None: rec["reason"] = slots_reason
 if slots_usage is not None: rec["usage"] = slots_usage
 # 同じディレクトリの一時ファイルからの置き換えで公開し、読み手に空・書きかけの記録が
@@ -926,6 +939,16 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
     cur["due_warned"] = {k: v for k, v in cur["due_warned"].items() if k in new_subj}
     cur["stall_notified"] = {k: v for k, v in cur["stall_notified"].items() if k in new_subj}
     ps["updated_at"] = now_iso
+    # 読んでから書き戻すまでの間に指揮役が書いた項目（items の組や印など、巡回が持たない
+    # 項目）を消さないように、書き戻す直前に記録を読み直し、巡回が持つ項目（subjects と
+    # updated_at）だけを載せ替える。読み直せなかった回は読んだ時点の記録のまま書く
+    # （読めない記録を置き換える既存の決まりと同じ）。
+    try: latest_ps = json.loads(read_ps())
+    except Exception: latest_ps = None
+    if isinstance(latest_ps, dict):
+        latest_ps["subjects"] = ps["subjects"]
+        latest_ps["updated_at"] = ps["updated_at"]
+        ps = latest_ps
     # 書き戻さなかった回（親ディレクトリを確かめられない・上限を超える・整形できない）は理由の行を出す。続く間は
     # HEARTBEAT_SECS ごと（理由が変わればすぐ）に出し直し、書き戻せた回に回復の行を 1 つ出す。
     why = write_ps(ps)
