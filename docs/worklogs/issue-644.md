@@ -48,7 +48,7 @@
 
 ## 実装者メモ（round 4）
 
-対象 head: e03c7dd080cb9236e07d003bc8d6136fdf0c206f
+対象 head: afdbebc44b6b68b9f39603942f1acc0cc773e08a（実装の本体は e03c7dd0。その後の afdbebc4 で、照合の文の Issue 番号を `<Issue 番号>` と書き分け（`-r<N>` の `<N>` と別の意味のため）、PR の `headRefName` では調査の報告 PR の `agent/investigate-` も通し、複数の取得コメントは最新を使う、を足した）
 
 1. 詰まった箇所: 手順 9 と「止まる条件」: round 3 のレビュー（`bb13d161`、codex・claude）に must-fix が残り、skill のままでは止まる条件に当たる。指揮役スレッドに届いた開発リードの中継（「2026-11-21 20:28 JST 以降、hatai の指示（t629u）でレビューのラウンド上限は無視してよく、must-fix がなくなるまで修正と再レビューを続ける」）と、main の `docs/worklogs/issue-669.md`・`issue-688.md` の同じ扱いの前例に従って round 4 に進んだ。PR ブランチは別の worktree でチェックアウト済みのため、自分の worktree のブランチを `origin/<PRブランチ>` に合わせ、`HEAD:agent/644-takeover-worktree-procedure` で push した
 2. 曖昧だった文: 「round 4 に入るのは hatai の例外の判断だけ」（`.agents/skills/implement-issue/SKILL.md`「止まる条件」）。t629u は GitHub に hatai 作のコメントとして無く、開発リードの中継でしか確かめられなかった
