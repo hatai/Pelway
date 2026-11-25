@@ -99,7 +99,7 @@ skill `command-team` から、特定の条件でだけ必要になる詳細を�
 - 担当は GLM（opencode `zai-coding-plan/glm-5.3`）。実装スレッドと合算して同時 3 本の枠で数える（正本の「制約」）。数え方は、`agent:working` が付いた Issue の数と実行中の調査スレッドの数の合計
 - 枠が満杯のときは指揮役が優先度を判断する。原則として、本番インシデントの調査をほかの実装や調査より先に置く
 - effort は、調査は読み取り中心のため既定。対象が広い（複数のクレートやサブシステムにまたがる等）場合は 1 段上げる
-- 割り当ての記録の表には、役割 investigate で書く
+- 割り当ての記録の表には、役割 investigate で書く。調査の行には、表の列に加えて調査スレッドの `thread_id`・作業ブランチ・報告 PR の番号（起動時は `none`。下の「調査の引き渡し」で書く）を書く（起動時の書き方は runbook の「4. 仕事の始め方」の「調査を始める」）
 
 調査スレッドを立てる指示は次の形にする（2 行目に割り当ての行を必ず入れる）:
 
@@ -113,6 +113,7 @@ Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<
 調査スレッドが報告を出したときの処理。
 
 - 報告は `docs/worklogs/bugs/<slug>/report.md` と、そのファイルだけの Draft PR（skill `investigate-bug` の手順 5）。PR とスレッドの返答の両方で報告を確認する
+- レビューを割り当てる前に、報告 PR を調査スレッドに結び付ける（Issue の有無を問わない）。確かめるのは 2 つ: (1) 報告を返したスレッドの ID が、割り当ての記録の役割 investigate の行に起動時に書いた `thread_id` と同じこと。(2) `scripts/agent-gh dev pr view <番号> --json isCrossRepository,author,isDraft,headRefName` で、`isCrossRepository` が `false` と明示され（`true`・値が無い・読めないときは外れ）、作成者が `app/pelway-dev` で Draft であり、`headRefName` がその行の作業ブランチと同じで、runbook の「4. 仕事の始め方」の「既存の PR ブランチを引き継ぐ」のブランチ名の照合を通ること。両方を通ったら、その行に報告 PR の番号を書く（調査 Issue なら `items` の `report_pr` にも書く）。どちらかが外れたら書かず、レビューにも回さず、runbook の 7 のエスカレーションにする。以後、Draft の解除など調査スレッドへの指示の送り先は、この行から runbook の「5. イベントごとの対応」の「調査の報告 PR の送り先」で確かめる
 - 調査 Issue（ボード上の調査タスク）では、報告 PR がそのまま主 PR になる。報告 PR の本文には `Part of #<番号>` を必ず書かせること（`Part of` はクローズ用キーワードではないため、報告 PR のマージを検知したら指揮役が Status を Done にする）
 - 指揮役が報告を確認して起票可否を判断し、判断と理由を報告の PR にコメントする
 - 直す必要があるときは、指揮役が skill `write-issue` で起票する（実装の指示は出さない）。人間は `ready-for-agent` で承認し、入口A の流れに合流する。Issue 本文の「関連情報」には、報告のパス（`docs/worklogs/bugs/<slug>/report.md`）と調査スレッドのリンクを書く

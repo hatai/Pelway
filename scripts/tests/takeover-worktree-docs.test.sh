@@ -127,15 +127,26 @@ check send_target_head_repo "$RB" \
   '`isCrossRepository` が `false` と明示されていること' \
   '外れたら、候補を探さず、送らず、組も書かずに保留し'
 
-# 調査の報告 PR は、割り当て表と GitHub で照合した `pr:` の報告から調査スレッドを確かめて
-# 送り、停止・引き継ぎ済みを外す決まりがある。
+# 調査の報告 PR は、引き渡しで報告 PR の番号を結び付けた割り当ての記録の行の thread_id を
+# 候補にし、GitHub で照合した `pr:` の報告で確かめて送り、停止・引き継ぎ済みを外す決まりがある。
 check investigation_send_target "$RB" \
   '調査の報告 PR の送り先: 上の head の確認を通った `agent/investigate-` の PR について' \
-  '巡回記録の「割り当ての記録」に、対象 PR' \
-  'の役割 investigate の行があることを確かめ' \
+  '巡回記録の「割り当ての記録」から、対象 PR の番号が書かれた役割 investigate の行' \
+  'その行の `thread_id` を候補とする' \
+  '`branch` の一致で候補を探さず、送らずに保留し' \
   '作成者（`app/pelway-dev`）とブランチ（`agent/investigate-` で始まり、候補の `branch` と同じ）を通ること' \
   '前に立ったスレッドは引き継ぎ済みとして外す' \
   '（送り先は上の「調査の報告 PR の送り先」で確かめる）'
+
+# 調査を立てたら割り当ての記録の行に thread_id と作業ブランチを書き、引き渡しで
+# 本体リポジトリ・作成者・ブランチを照合した報告 PR の番号をその行に結び付ける決まりがある。
+check investigation_launch_record "$RB" \
+  '起動したら、割り当ての記録に役割 investigate の行を足し、起動が返した調査スレッドの `thread_id` と作業ブランチ'
+check investigation_handoff_bind docs/agents/command-team-details.md \
+  'レビューを割り当てる前に、報告 PR を調査スレッドに結び付ける（Issue の有無を問わない）' \
+  '報告を返したスレッドの ID が、割り当ての記録の役割 investigate の行に起動時に書いた `thread_id` と同じこと' \
+  '--json isCrossRepository,author,isDraft,headRefName' \
+  '両方を通ったら、その行に報告 PR の番号を書く'
 
 # implement_thread の組の更新条件に、送り先の照合で組を新規に書く場合がある。
 check implement_thread_new_pair "$RB" \
@@ -165,7 +176,7 @@ check draft_pr_head_runbook "$RB" \
 # 節に、起動・委託の前に PR の head リポジトリと ref を照合し、外れれば止める決まりがある。
 check head_repo_guard "$RB" \
   '--json isCrossRepository,headRefName' \
-  '`isCrossRepository` が `true`、または `headRefName` が `<PRブランチ>` と違うときは、起動・委託を止める'
+  '`isCrossRepository` が `false` と明示され（`true`・値が無い・読めないときは外れ）、`headRefName` が `<PRブランチ>` と同じときだけ進む。外れたら起動・委託を止める'
 
 # implement-issue の手順 6 に、別名ブランチのときは両方の push を HEAD:<PRブランチ> に
 # 置き換える決まりがある。

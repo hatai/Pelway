@@ -271,7 +271,7 @@ Assigned: role=implement agent=devin model=swe-2-high effort=<medium|high|max>"
 scripts/agent-gh dev pr view <PR番号> --json isCrossRepository,headRefName
 ```
 
-`isCrossRepository` が `true`、または `headRefName` が `<PRブランチ>` と違うときは、起動・委託を止める。
+`isCrossRepository` が `false` と明示され（`true`・値が無い・読めないときは外れ）、`headRefName` が `<PRブランチ>` と同じときだけ進む。外れたら起動・委託を止める。
 
 ブランチ名の照合: どの経路で得た `<PRブランチ>`（PR の `headRefName`、`items` の `implement_thread` の記録、`pelway-dev[bot]` 名義の取得コメント）も、起動・委託の前とコマンドに入れる前に、`agent/<Issue 番号>-`（対象の Issue の番号）で始まり、続きが英小文字・数字・ハイフンだけであることを確かめる（PR の `headRefName` に限り、調査の報告の PR の `agent/investigate-` で始まる名前も同じ文字の決まりで通す）。外れたら起動・委託を止める。照合を通らない名前は、成果の有無を確かめる git のコマンド・`t3 thread start`・`git branch --set-upstream-to`・push のどの行にも入れない（Issue のコメント由来の名前に `$(...)` などシェルが解釈する文字があると、指揮役のシェルで評価されうるため）。
 
@@ -334,7 +334,7 @@ t3 thread start --provider opencode --model zai-coding-plan/glm-5.3 --worktree m
 Assigned: role=investigate agent=opencode model=zai-coding-plan/glm-5.3 effort=<low|default|high|max>"
 ```
 
-`<slug>` は症状を英小文字とハイフンで短くしたもの。effort は `docs/agents/command-team-details.md` の「調査（入口B）」で決める。調査スレッドの報告（`pr:` に報告の Draft PR）を受けたら、同じ節の「調査の引き渡し」に従う。
+`<slug>` は症状を英小文字とハイフンで短くしたもの。effort は `docs/agents/command-team-details.md` の「調査（入口B）」で決める。起動したら、割り当ての記録に役割 investigate の行を足し、起動が返した調査スレッドの `thread_id` と作業ブランチ（`--branch` の `agent/investigate-<slug>`）を書く。報告 PR の番号は、この時点では `none` とし、引き渡しで書く。起動が `thread_id` を返さず確かめられなかったときは `thread_id` を書かず、7 のエスカレーションで人間に知らせる（その行には引き渡しで報告 PR を結び付けられず、調査スレッドへの指示は送り先が確定しないため保留になる）。調査スレッドの報告（`pr:` に報告の Draft PR）を受けたら、同じ節の「調査の引き渡し」に従う。
 
 ### 棚卸し担当を立てる
 
@@ -410,7 +410,7 @@ Assigned: role=implement agent=devin model=swe-2-high effort=high"
 
 調査の報告 PR の送り先: 上の head の確認を通った `agent/investigate-` の PR について、調査スレッドへ指示（Approve 後の Draft 解除など）を送る直前に行う。Issue の有無を問わない。
 
-1. 候補を選ぶ: 巡回記録の「割り当ての記録」に、対象 PR（調査 Issue なら、`items` の `report_pr` がその PR の番号の Issue）の役割 investigate の行があることを確かめ、`t3 thread list` から `branch` が対象 PR の `headRefName` と同じ調査スレッドを候補にする。その行が無いときは送らずに保留する
+1. 候補を選ぶ: 巡回記録の「割り当ての記録」から、対象 PR の番号が書かれた役割 investigate の行（`docs/agents/command-team-details.md` の「調査の引き渡し」で、照合した報告 PR の番号を、起動時に書いた調査スレッドの `thread_id` と作業ブランチに結び付けた行）を選び、その行の `thread_id` を候補とする。同じ PR の番号の行が複数あれば、最も新しい行だけを使う。行の作業ブランチが対象 PR の `headRefName` と違うときは外れとする。その行が無い（引き渡しの結び付けが済んでいない）ときは、`branch` の一致で候補を探さず、送らずに保留し、引き渡しの結び付けを済ませてから照合し直す
 2. 止まっていないこと: 候補が `t3 thread list` にあり、interrupted・cancelled で止まっていないこと。completed・failed で終わった候補は、返答に対象 PR を指す `pr:` の行があるとき（skill `investigate-bug` の手順 5。脆弱性の疑いで止まり報告の PR を出していないスレッドには無い）だけ残す。調査 Issue の作業状態の印が停止処理中・停止中・再開処理中・再開待ち・確認待ちのときは、どの候補にも送らない。同じ PR について「割り当ての記録」に後から別の調査スレッドの行が書かれていれば、前に立ったスレッドは引き継ぎ済みとして外す
 3. 割り当てが一致すること: 候補の返答の `pr:` の行が対象 PR の番号を指し、GitHub の対象 PR が「6. 報告行の扱い」の `pr:` の照合のうち作成者（`app/pelway-dev`）とブランチ（`agent/investigate-` で始まり、候補の `branch` と同じ）を通ること（調査の返答の `pr:` は番号だけで head を含まないため、head は照合しない）
 4. 2 と 3 を通った候補がちょうど 1 本のときだけ送る。0 本か 2 本以上、または返答が読めず確かめられないときは、上の送り先の照合の 4 と同じく送らずに保留し、巡回記録に残す
@@ -603,7 +603,7 @@ agents の表示（busy・working）はセッションの内側の値で、実�
 | `resolved_ids` | 対応済みにした hatai のレビュー／コメントの ID |
 | `rollback` | 巻き戻し中の印（割り当て ID、開始時刻、変更前のステータスとラベルの集合、成功した段） |
 | `work_state` | 作業状態の印（停止処理中／停止中／再開処理中／再開待ち／確認待ち。成功した段も一緒に残す） |
-| `implement_thread` | その Issue の実装スレッドの組の一覧。組は PR の番号（PR がまだ無ければ `none`）・`thread_id`・push 先のブランチ。PR ごとに 1 組で、新しい実装スレッドを立てたとき、起動結果が不明だったスレッドを割り当て ID の照合で見つけたとき、`none` の組のスレッドが PR を作ったとき、「5. イベントごとの対応」の送り先の照合の 4 で組が無かった PR の組を書くとき（push 先は照合済みの PR の `headRefName`）に書き換える（引き継ぎで `branch` が `<PRブランチ>-r<N>` になったあとも、PR ごとの現在の担当と push 先が分かるようにするため）。「5. イベントごとの対応」で外部投入のレビュー結果の送り先を、再開手順の 5 で引き継ぐ作業ブランチを確かめるのに使う |
+| `implement_thread` | その Issue の実装スレッドの組の一覧。組は PR の番号（PR がまだ無ければ `none`）・`thread_id`・push 先のブランチ。PR ごとに 1 組で、新しい実装スレッドを立てたとき、起動結果が不明だったスレッドを割り当て ID の照合で見つけたとき、`none` の組のスレッドが PR を作ったとき、「5. イベントごとの対応」の送り先の照合の 4 で組が無かった PR の組を書くとき（push 先は照合済みの PR の `headRefName`）に書き換える（引き継ぎで `branch` が `<PRブランチ>-r<N>` になったあとも、PR ごとの現在の担当と push 先が分かるようにするため）。「5. イベントごとの対応」の `pelway.agent-watch/v1` の「送り先の照合」で実装スレッドへの指示（巡回の定型の指示・手当スレッドの伝達・人間のレビューの伝達・外部投入のレビュー結果）の送り先を、再開手順の 5 で引き継ぐ作業ブランチを確かめるのに使う |
 | `status_log` | 指揮役のステータス変更ログ（Issue 番号・変更前後の値・時刻。前回巡回の時刻も記録する） |
 
 `status_log` との照合は、タイムラインのイベントの時刻と変更前後の値が一致するものを指揮役の操作とする。ログへの書き込みに失敗した場合は、その巡回ではステータス変更自体を行わず次回に持ち越す。
