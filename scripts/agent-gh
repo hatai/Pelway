@@ -18,6 +18,11 @@
 set -euo pipefail
 # コマンド置換 $(...) の中でも set -e を効かせる（app_token 内の secret の失敗で止めるため）。
 shopt -s inherit_errexit
+# CDPATH を無効にする（#700）。CDPATH に一致する項目（`.` など）があると、cd は `/`・`.`・`..` で始まらない相対パスへ
+# 移ったとき移動先を標準出力に出し、`$(cd … && pwd)` の値に混ざって改行入りのパスになる。相対 TMPDIR の一時フックの dir、
+# 相対の $0（標準の呼び方 `scripts/agent-gh`）から引く pr-size ゲートと resign のパスが壊れ、正しい名義の push も止まるため。
+# 環境から消すので、git・一時フック・ゲート・resign などの子プロセスにも渡らない。
+unset CDPATH
 
 # 値はリポジトリの fnox.toml ではなく、マシンごとの設定に age で暗号化して置く（scripts/setup/agent-accounts.sh が作る）。
 # dev と review で設定ファイルと age 鍵を分離する（#449）。review 用の設定には PELWAY_REVIEW_* だけが載り、
