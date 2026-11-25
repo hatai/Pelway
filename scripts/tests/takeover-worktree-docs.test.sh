@@ -194,7 +194,8 @@ check send_target_excluded "$RB" \
   '対象外のスレッドには送らず、保留にせず、4 の回数に数えない' \
   '巡回記録には、同じスレッドの対象外の記録がまだ無いときだけ' \
   '送り先の照合（「5. イベントごとの対応」の `pelway.agent-watch/v1`）の 5 で対象外になったスレッド（' \
-  'その照合の 5 で対象外（現在の担当が別のスレッドに記録で確定している）に当たるスレッドには送らず、保留にもしない' \
+  '「送り先の照合」の 5 で対象外（現在の担当が別のスレッドに記録で確定している）に当たるスレッドには、調査の報告 PR でも送らず、保留にもしない' \
+  '同じ PR の組が別の `thread_id` に書き換わっているスレッドは引き継ぎ済みとして外す（5 の対象外で、4 の保留の回数に数えない）' \
   '5. 送り先の照合（「5. イベントごとの対応」の `pelway.agent-watch/v1`）の 5 で対象外になったスレッドで、そのスレッドで動いている作業が無いもの'
 # 調査の報告 PR を引き継いだときは、割り当ての記録に新しいスレッドの行を書き、送り先の照合はその行で確かめる。
 check investigation_takeover_record "$RB" \
@@ -202,7 +203,7 @@ check investigation_takeover_record "$RB" \
   '引き継ぎで立てた行の候補は、`branch` が `<PRブランチ>-r<N>` で返答に `pr:` が無いことがあるため'
 # 調査の報告 PR を引き継ぐスレッドの最初の指示で従わせる skill と、その返答の形での判定がある。
 check investigation_takeover_skill "$RB" \
-  'このスレッドへの最初の指示では、報告 PR の修正・レビュー結果の処理・Draft の解除を skill `implement-issue` の手順 9・10 に従って行い' \
+  '最後の返答を skill `implement-issue` の「ターンの終わりの状態の行」の `state:`・`head:`・`next:` の 3 行の形で書かせ' \
   '最後の返答の状態の行（同じ節で最初の指示に従わせる skill `implement-issue` の「ターンの終わりの状態の行」）'
 check investigation_takeover_record_details docs/agents/command-team-details.md \
   '報告 PR を引き継いで立てたスレッドの行は、起動時に報告 PR の番号を書く'
