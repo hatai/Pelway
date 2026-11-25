@@ -237,3 +237,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の「5. イベントごとの対応」の `request-changes` の行に「調査の報告 PR の引き継ぎスレッドにも、報告を受けた実行ごとに `run <ID>: request-changes` を添えて送る」を足し、送る側と受ける側の決まりをそろえる
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 20）
+
+対象 head: 0904caafa8ba2bbd26ac5395b4679f949142ef71
+
+1. 詰まった箇所: `docs/agents/grokbot-runbook.md` の 311 行（「既存の PR ブランチを引き継ぐ」）: round 19 で足した保留の条件「行が添えられていない」が Draft の解除にも掛かっていた。承認の通知（「レビューを始める」の verdict 表の `approve` の行）には `run <ID>: approve` だけが添えられるため、現在の head の必要なレビューがすべて有効でも Draft の解除に進めなかった（codex r16）
+2. 曖昧だった文: 「行が添えられていない、前の head に向けた委託記録の実行、…、GitHub を読めないときは、修正にも Draft の解除にも進まず」（`docs/agents/grokbot-runbook.md` の「既存の PR ブランチを引き継ぐ」、head `f651d031`）。「行」が `request-changes` の行だけを指すのか、判定を問わない行を指すのかが文から決まらない
+3. 仮定と解釈: 同じ箇所の must-fix が r15・r16 と 2 round 続いたため、「修正と Draft の解除は、それぞれを裏付ける判定の行（`request-changes` / `approve`）だけで照合し、行の欠落はその先だけを止める」を決まりにした。Draft の解除は、添えた行がすべて `approve` で全部の照合が通ったときだけにし、`request-changes` の行が混ざる（判定が割れた）ときは Draft の解除に進まない（「レビューを始める」の割れたら修正を優先する決まりに合わせた）。照合の中身（現在の head の委託記録・投稿ちょうど 1 件・`commit_id`・状態・`DISMISSED` でない）は両方に共通にし、状態だけを行の判定に合わせた。wording pin は直した文に合わせて 3 本を差し替えただけ
+4. 足りなかった情報・検証手段: 指揮役が調査の報告 PR の引き継ぎスレッドへ「続きをやり直す」に `run <ID>: approve` を添えて送る経路が実際に届く実例は確かめていない
+5. 改善案: `docs/agents/grokbot-runbook.md` の「レビューを始める」の verdict 表の `approve` の行に、調査の報告 PR の引き継ぎスレッドへも `run <ID>: approve` を添えて送ることを足し、送る側と受ける側をそろえる
+
+使ったスキル: implement-issue
