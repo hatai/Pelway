@@ -18,11 +18,13 @@
 set -euo pipefail
 # コマンド置換 $(...) の中でも set -e を効かせる（app_token 内の secret の失敗で止めるため）。
 shopt -s inherit_errexit
-# CDPATH を無効にする（#700）。CDPATH に一致する項目（`.` など）があると、cd は `/`・`.`・`..` で始まらない相対パスへ
-# 移ったとき移動先を標準出力に出し、`$(cd … && pwd)` の値に混ざって改行入りのパスになる。相対 TMPDIR の一時フックの dir、
-# 相対の $0（標準の呼び方 `scripts/agent-gh`）から引く pr-size ゲートと resign のパスが壊れ、正しい名義の push も止まるため。
-# 環境から消すので、git・一時フック・ゲート・resign などの子プロセスにも渡らない。
-unset CDPATH
+# この script でパスを解決する cd には `CDPATH=''` を前置する（#700・#706）。CDPATH に項目（`.` など）があると、bash の cd は
+# 絶対パスと、先頭の要素が `.`・`..` のパス（`./x`・`../x`）を除く相対パス（`.hidden/x` も含む）を CDPATH の項目から探し、空でない
+# 項目で見つけたときは移動先を標準出力に出す。その行が `$(cd … && pwd)` の値に混ざって改行入りのパスになり、相対 TMPDIR の一時フックの
+# dir と、相対の $0（標準の呼び方 `scripts/agent-gh`）から引く pr-size ゲートと resign のパスが壊れ、正しい名義の push も止まる。
+# CDPATH は環境から消さない。消すと Git が起動する既存のフック（一時フックから呼ぶ元の pre-push など）にも呼び出し元の CDPATH が
+# 届かず、それを使うフックが失敗する。前置した代入はその cd 1 回にだけ効く。ゲートと resign は絶対パスで起動するため、
+# ゲートが自分の dir へ移る cd も CDPATH を探さない。
 
 # 値はリポジトリの fnox.toml ではなく、マシンごとの設定に age で暗号化して置く（scripts/setup/agent-accounts.sh が作る）。
 # dev と review で設定ファイルと age 鍵を分離する（#449）。review 用の設定には PELWAY_REVIEW_* だけが載り、
@@ -532,7 +534,7 @@ if [[ "${1:-}" == "git" ]]; then
       echo "agent-gh: 一時フックのディレクトリを作れないため push しません" >&2
       exit 1
     }
-    if ! abs_hooks_dir="$(cd -- "$hooks_dir" && pwd -P)"; then
+    if ! abs_hooks_dir="$(CDPATH='' cd -- "$hooks_dir" && pwd -P)"; then
       rm -rf -- "$hooks_dir"
       echo "agent-gh: 一時フックのディレクトリを絶対パスに解決できないため push しません" >&2
       exit 1
@@ -608,7 +610,7 @@ HOOK
     # pr-size のゲート（#642）は dev 役の push だけに掛ける。review 役では空にして、呼び出し元の値も使わない
     if [[ "$role" == dev ]]; then
       PELWAY_AGENT_PUSH_GUIDE="該当コミットを scripts/agent-gh dev git commit で作り直してから push してください"
-      PELWAY_AGENT_PR_SIZE_GATE="$(cd "$(dirname "$0")" && pwd)/agent-gh-pr-size-gate"
+      PELWAY_AGENT_PR_SIZE_GATE="$(CDPATH='' cd "$(dirname "$0")" && pwd)/agent-gh-pr-size-gate"
     else
       PELWAY_AGENT_PUSH_GUIDE="該当コミットを $push_name の名義で作り直してから push してください"
       PELWAY_AGENT_PR_SIZE_GATE=""
@@ -622,7 +624,7 @@ HOOK
     rc=0
     GH_TOKEN="$token" git "${git_cfg[@]}" "$@" || rc=$?
     if ((rc == 0)); then
-      resign="$(cd "$(dirname "$0")" && pwd)/agent-gh-resign"
+      resign="$(CDPATH='' cd "$(dirname "$0")" && pwd)/agent-gh-resign"
       push_targets "${@:2}"
       resign_rc=0
       if ((push_dry_run)); then

@@ -307,8 +307,8 @@ expect_log dev_git_push "push -u origin HEAD"
 # resign が upstream を確かめる rev-parse を呼んだ形跡（= push 後に走った証拠）
 expect_log dev_git_push "rev-parse --abbrev-ref --symbolic-full-name @{u}"
 
-# CDPATH に一致する項目（`.` など）があると、bash の cd は `/`・`.`・`..` で始まらない相対パスへ移ったとき移動先を標準出力に出す（#700）。
-# 標準の呼び方 `scripts/agent-gh` では $0 が相対のため、`$(cd "$(dirname "$0")" && pwd)` の値にその行が混ざり、resign のパスが壊れて
+# CDPATH に項目（`.` など）があると、bash の cd は絶対パスと、先頭の要素が `.`・`..` のパス（`./x`・`../x`）を除く相対パス（`.hidden/x` も含む）を
+# CDPATH の項目から探し、空でない項目で見つけたとき移動先を標準出力に出す（#700）。標準の呼び方 `scripts/agent-gh` では $0 が相対のため、`$(cd "$(dirname "$0")" && pwd)` の値にその行が混ざり、resign のパスが壊れて
 # push の成功後に終了コード 4 になる。`./` で始まらない相対の $0（シンボリックリンク bin 経由）と CDPATH=. で、resign まで走って 0 で終わる。
 ln -s "$(dirname "$SCRIPT")" "$ROOT/norepo/bin"
 export CALL_LOG="$ROOT/cdpath_rel0_resign.log"
@@ -1076,9 +1076,10 @@ RC=$?
 work_git reset -q --hard "$before"
 rm -rf "$PUSH_DIR/work/sub"
 
-# 相対 TMPDIR と CDPATH の併用（#700）。CDPATH に一致する項目（`.` など）があると、bash の cd は `/`・`.`・`..` で始まらない相対パスへ移ったとき
-# 移動先を標準出力に出す。mktemp が返す相対の一時フックの dir を `$(cd … && pwd -P)` で解決すると、その行が値に混ざって改行入りのパスになり、
-# 一時フックを書けずに正しい名義の push も止まる。CDPATH を無効にして解決すれば、名義の確認は効き（止まるべき push は止まる）、正しい名義の push は通る。
+# 相対 TMPDIR と CDPATH の併用（#700）。CDPATH に項目（`.` など）があると、bash の cd は絶対パスと、先頭の要素が `.`・`..` のパス（`./x`・`../x`）を
+# 除く相対パス（`.hidden/x` も含む）を CDPATH の項目から探し、空でない項目で見つけたとき移動先を標準出力に出す。mktemp が返す相対の一時フックの dir を
+# `$(cd … && pwd -P)` で解決すると、その行が値に混ざって改行入りのパスになり、一時フックを書けずに正しい名義の push も止まる。その cd でだけ CDPATH を
+# 空にして解決すれば、名義の確認は効き（止まるべき push は止まる）、正しい名義の push は通る。
 setup_push_repo cdpath
 mkdir -p "$PUSH_DIR/work/sub/dir/rel-tmp"
 base="$(work_git rev-parse HEAD)"
@@ -1104,6 +1105,21 @@ RC=$?
 [[ "$RC" == 0 ]] || failures+=("cdpath_rel0_gate_ok: exit $RC, want 0: $OUT")
 [[ "$(remote_ref agent/cdpath)" == "$(work_git rev-parse HEAD)" ]] || failures+=("cdpath_rel0_gate_ok: remote ref not updated")
 rm -rf "$PUSH_DIR/work/sub"
+
+# Git が一時フックを経て起動する既存の pre-push には、呼び出し元の CDPATH が届く（#706）。agent-gh が CDPATH を環境から消すと、共有の検査
+# ディレクトリの親を CDPATH に置き、その子ディレクトリへ cd してから検査する既存のフックが失敗し、正しい名義の push も止まる。フックは
+# CDPATH でしか見つからない子ディレクトリ（work の直下には無い）へ cd し、着いた先を書く。呼ばれずに通った push を緑にしないため、着いた先も確かめる。
+setup_push_repo cdpath_hook
+mkdir -p "$PUSH_DIR/shared/precheck" "$PUSH_DIR/hooks"
+printf '#!/usr/bin/env bash\nset -euo pipefail\ncd precheck >/dev/null\npwd -P >"$CDPATH_HOOK_MARK"\n' >"$PUSH_DIR/hooks/pre-push"
+chmod +x "$PUSH_DIR/hooks/pre-push"
+work_git config core.hooksPath "$PUSH_DIR/hooks"
+(cd "$PUSH_DIR/work" && as 'pelway-dev[bot]' commit -q --allow-empty -m ok-cdpath-hook)
+OUT="$(cd "$PUSH_DIR/work" && CDPATH="$PUSH_DIR/shared" CDPATH_HOOK_MARK="$PUSH_DIR/hook-mark" PELWAY_AGENT_SKIP_RESIGN=1 PATH="$RGBIN:$PATH" bash "$SCRIPT" dev git push -u origin HEAD 2>&1)"
+RC=$?
+[[ "$RC" == 0 ]] || failures+=("cdpath_orig_hook: exit $RC, want 0: $OUT")
+[[ "$(cat "$PUSH_DIR/hook-mark" 2>/dev/null)" == "$(cd "$PUSH_DIR/shared/precheck" && pwd -P)" ]] || failures+=("cdpath_orig_hook: original pre-push did not reach the CDPATH dir")
+[[ "$(remote_ref agent/cdpath_hook)" == "$(work_git rev-parse HEAD)" ]] || failures+=("cdpath_orig_hook: remote ref not updated")
 
 # 6. review の push も同じ確認を通る。正しい名義は pelway-review[bot]。
 setup_push_repo review_push
