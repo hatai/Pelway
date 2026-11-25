@@ -300,7 +300,7 @@ description = "T3 が作った worktree のうち、作業中のスレッドの�
 run = "bash scripts/agent-worktree-prune"
 
 [tasks.conductor-rebuild]
-description = "指揮役を立て直す（新しい指揮役を main の専用 worktree で立てて待たせ、権限を確かめ、旧指揮役を止め、引き継ぎを指示し、宛先を替える。hatai がホストで実行する。mise run conductor-rebuild -- --from <旧指揮役のスレッド ID> [--to <新指揮役のスレッド ID>] [--provider <id> --model <slug>] [--effort <値>]）"
+description = "指揮役を立て直す（新指揮役は MCP の t3_thread_launch で main の専用 worktree に立ててから --to に渡して実行。権限を確かめ、旧指揮役を止め、引き継ぎを指示し、宛先を替える。hatai がホストで実行する。mise run conductor-rebuild -- --from <旧指揮役のスレッド ID> --to <新指揮役のスレッド ID>）"
 run = "bash scripts/conductor-rebuild"
 
 [tasks.codex-review-check]

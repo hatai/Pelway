@@ -80,7 +80,7 @@ jobs:
 
       # verify.yml と同じ導入（mise 公式 Action・キャッシュなし・--locked）。
       - name: Setup mise (official action)
-        uses: jdx/mise-action@v5.2.7
+        uses: jdx/mise-action@v5.2.9
         with:
           version: v2026.11.5
           install: true
@@ -144,7 +144,7 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends libfontconfig1-dev
 
       - name: Setup mise (official action)
-        uses: jdx/mise-action@v5.2.7
+        uses: jdx/mise-action@v5.2.9
         with:
           version: v2026.11.5
           install: true
@@ -196,7 +196,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup mise (official action)
-        uses: jdx/mise-action@v5.2.7
+        uses: jdx/mise-action@v5.2.9
         with:
           version: v2026.11.5
           install: true

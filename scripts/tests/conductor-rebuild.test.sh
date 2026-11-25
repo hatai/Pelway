@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # scripts/conductor-rebuild のテスト。偽の t3（T3_BIN）が受けた呼び出しを記録し、
-# 新しい指揮役の起動（本体 checkout、worktree なし、待たせる文）→ 権限の確かめ → 旧指揮役の停止
-# → 引き継ぎの指示 → 宛先の登録、の順と引数・本文を確かめる。本文は決まった文と完全一致で比べる。
+# --to で渡した新しい指揮役の権限の確かめ → 旧指揮役の停止 → 引き継ぎの指示 → 宛先の登録、
+# の順と引数・本文を確かめる。本文は決まった文と完全一致で比べる。
+# 新しい指揮役はスクリプトでは立てない（--to は必須。t3 thread start には権限のフラグが無い）。
+# --to なし・--provider/--model/--effort 付きは、偽の t3 を一度も呼ばずに止まることを確かめる。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -12,14 +14,16 @@ LOG="$ROOT/t3-calls"
 FILE="$ROOT/home/.config/pelway-agent-notify/conductor-thread-id"
 OLD="mcp:launch:old-conductor"
 NEW="mcp:launch:new-conductor"
+NEW_WT_PATH="/home/u/.t3/worktrees/Pelway/conductor"
 
 # 期待する本文（スクリプトの決まった文と完全一致で比べる）
-HOLD_WANT="恒久交代の新しい指揮役として立てた。権限の確かめと引き継ぎの指示が届くまで、何もせずにこのターンを終える。"
 STOP_WANT="恒久交代を始める（docs/agents/conductor-context.md の「恒久交代」）。案件を進める操作（スレッドの起動・指示、マージ、ラベル、コメント、ステータス変更）を止め、引き継ぎの記録を指揮役の作業ログと patrol-state.json に書き出して、このターンを終える。以後は操作しない。scheduled task や起こしで起きても、巡回も patrol-state.json の書き込みもせずにターンを終える。"
 START_WANT="あなたは新しい指揮役。skill command-team と docs/agents/conductor-context.md の「恒久交代」に従い、旧指揮役（スレッド $OLD）から引き継ぐ。引き継ぎ確認（GitHub の実状態、patrol-state、巡回記録、実行中スレッドの照合）を済ませて操作権限を受け取ったら、旧指揮役のスレッドを t3_thread_organize で settle し、巡回の scheduled task を作り直し、patrol-state.json の conductor_thread_id を書き込み手順の --claim-conductor で自分のスレッド ID にする（runbook の「指揮役の定期巡回（スケジュール起床）」）。確認が完了しない場合は権限を受け取らず、hatai に知らせる。"
 
 # 偽の t3。呼び出しを 1 行ずつ記録し、標準入力の本文は宛先ごとのファイルに残す。
+# thread start は受け付けない（スクリプトは新しい指揮役を立てない。呼ぶと exit 9 で失敗し、記録に残る）。
 # 旧指揮役の runtimeMode は auto-accept-edits、新しい指揮役は $NEW_MODE（無ければ auto-accept-edits）。
+# NEW_NOMODE=1 のとき、新しい指揮役の thread show は runtimeMode を返さない。
 cat > "$ROOT/t3" <<'T3'
 #!/usr/bin/env bash
 echo "$*" >> "$LOG"
@@ -28,11 +32,12 @@ case "$1 $2" in
     mode=auto-accept-edits
     [[ "$3" == *new* ]] && mode="${NEW_MODE:-auto-accept-edits}"
     wt=""; [[ "$3" == *new* ]] && wt="${NEW_WT-/home/u/.t3/worktrees/Pelway/conductor}"
-    echo '{"thread":{"threadId":"'"$3"'","providerInstanceId":"'"${OLD_PROVIDER:-acpRegistry_devin}"'","model":"'"${OLD_MODEL:-swe-2-high}"'","runtimeMode":"'"$mode"'","worktreePath":"'"$wt"'"}}' ;;
+    mode_field=',"runtimeMode":"'"$mode"'"'
+    [[ "$3" == *new* && -n "${NEW_NOMODE:-}" ]] && mode_field=""
+    echo '{"thread":{"threadId":"'"$3"'","providerInstanceId":"'"${OLD_PROVIDER:-acpRegistry_devin}"'","model":"'"${OLD_MODEL:-swe-2-high}"'"'"$mode_field"',"worktreePath":"'"$wt"'"}}' ;;
   "thread send")
     if [[ "$3" == --wait ]]; then id="$4"; else id="$3"; fi
     cat > "$LOG.send-stdin.${id##*:}"; [[ -e "$LOG.send-fail" ]] && exit 1; echo "ok" ;;
-  "thread start") cat > "$LOG.start-stdin"; [[ -e "$LOG.start-fail" ]] && exit 1; echo "mcp:launch:new-conductor" ;;
   *) exit 9 ;;
 esac
 T3
@@ -53,7 +58,7 @@ run() {
   rm -f "$LOG" "$LOG".*; [[ -n "${1:-}" ]] && touch "$LOG.$1"
   shift || true
   HOME="$ROOT/home" T3_BIN="$ROOT/t3" LOG="$LOG" PELWAY_REBUILD_ALLOW_WORKTREE=1 \
-    bash "$REPO/scripts/conductor-rebuild" "$@" >"$ROOT/out" 2>&1
+    bash "$REPO/scripts/conductor-rebuild" "$@" >"$ROOT/out" 2>"$ROOT/err"
 }
 check() {
   local name="$1"; shift
@@ -62,61 +67,63 @@ check() {
 line() { sed -n "${1}p" "$LOG"; }
 same() { [[ "$(cat "$1" 2>/dev/null)" == "$2" ]]; }
 no_line() { ! grep -q -- "$1" "$LOG" 2>/dev/null; }
+all_err() { local f="$1"; shift; local p; for p in "$@"; do grep -qF -- "$p" "$f" || return 1; done; }
 
-# 既定: 旧指揮役の provider・model を引き継ぎ、立てる → 確かめる → 止める → 指示する → 登録する
-run "" --from "$OLD"; rc=$?
+# --to 付き: 権限の確かめ → 旧指揮役の停止 → 引き継ぎ → 宛先の登録（新しい指揮役は立てない）
+mkdir -p "$(dirname "$FILE")"
+printf 'mcp:launch:kept\n' > "$FILE"
+run "" --from "$OLD" --to "$NEW"; rc=$?
 check "succeeds" [ "$rc" -eq 0 ]
 check "1st call reads the old conductor" [ "$(line 1)" = "thread show $OLD --json" ]
-check "2nd call starts the new conductor" grep -q "^thread start " <(line 2)
-no_arg() { ! grep -q -- "$1" <(line 2); }
-check "new conductor runs in its own worktree from main" grep -q -- "--worktree main --branch conductor/rebuild-" <(line 2)
-check "new conductor inherits provider and model" grep -q -- "--provider acpRegistry_devin --model swe-2-high" <(line 2)
-check "no effort option unless given" no_arg "--option"
-check "missing --effort is reported" grep -q -- "--effort not given" "$ROOT/out"
-check "first message is exactly the hold message" same "$LOG.start-stdin" "$HOLD_WANT"
-check "3rd call reads the new conductor's mode" [ "$(line 3)" = "thread show $NEW --json" ]
-check "4th call stops the old conductor with --wait" [ "$(line 4)" = "thread send --wait $OLD -" ]
+check "2nd call reads the new conductor" [ "$(line 2)" = "thread show $NEW --json" ]
+check "no thread start" no_line "thread start"
+check "3rd call stops the old conductor with --wait" [ "$(line 3)" = "thread send --wait $OLD -" ]
 check "stop message is exactly the fixed text" same "$LOG.send-stdin.old-conductor" "$STOP_WANT"
-check "5th call sends the handover to the new conductor" [ "$(line 5)" = "thread send $NEW -" ]
+check "4th call sends the handover to the new conductor" [ "$(line 4)" = "thread send $NEW -" ]
 check "handover message is exactly the fixed text" same "$LOG.send-stdin.new-conductor" "$START_WANT"
-check "registers the new conductor" [ "$(cat "$FILE" 2>/dev/null)" = "$NEW" ]
+check "registers the new conductor" [ "$(cat "$FILE")" = "$NEW" ]
+check "logs the new conductor's runtimeMode and worktree" \
+  grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=auto-accept-edits worktree=$NEW_WT_PATH" "$ROOT/err"
 
-# 引数で指定した値が渡る
-run "" --from "$OLD" --provider codex --model gpt-6.2-sol --effort high
-check "explicit provider/model/effort are passed" grep -q -- "--provider codex --model gpt-6.2-sol --option effort=high" <(line 2)
+# --to なし: 何も作らず、t3_thread_launch で立てて --to で実行し直す手順を出して止まる
+printf 'mcp:launch:kept\n' > "$FILE"
+run "" --from "$OLD"; rc=$?
+check "no --to: exits non-zero" [ "$rc" -ne 0 ]
+check "no --to: makes no t3 calls" [ ! -s "$LOG" ]
+check "no --to: shows how to launch and rerun" \
+  all_err "$ROOT/err" "t3_thread_launch" "runtimeMode" "full-access" "worktree" "baseRef" "main" "--to" "'<新指揮役のスレッド ID>'"
+check "no --to: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+
+# --provider・--model・--effort は受け付けない（立てる処理が無く、使い道が無いため）
+for arg in "--provider codex --model gpt-6.2-sol" "--provider codex" "--model gpt-6.2-sol" "--effort high"; do
+  run "" --from "$OLD" --to "$NEW" $arg; rc=$?
+  check "rejects: $arg" [ "$rc" -ne 0 ]
+  check "rejects $arg: shows usage" grep -qF "conductor-rebuild --from" "$ROOT/err"
+  check "rejects $arg: makes no t3 calls" [ ! -s "$LOG" ]
+done
 
 # 権限が合わなければ、旧指揮役に何も送らず、登録も変えずに止まる
 for mode in full-access auto; do
   printf 'mcp:launch:kept\n' > "$FILE"
-  NEW_MODE="$mode" run "" --from "$OLD"; rc=$?
+  NEW_MODE="$mode" run "" --from "$OLD" --to "$NEW"; rc=$?
   check "mode $mode: exits 3" [ "$rc" -eq 3 ]
   check "mode $mode: nothing sent to the old conductor" no_line "thread send --wait $OLD"
   check "mode $mode: no handover sent" no_line "thread send $NEW"
+  check "mode $mode: no thread start" no_line "thread start"
   check "mode $mode: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
-  check "mode $mode: tells how to continue with --to" grep -q -- "--to '$NEW'" "$ROOT/out"
+  check "mode $mode: tells how to continue" all_err "$ROOT/err" "t3_thread_launch" "--to"
 done
 
-# --to で渡したスレッドを使う（立てない）
+# 新しい指揮役の runtimeMode が読めない（show が値を返さない）ときも、何も送らず exit 3 で止まる
 printf 'mcp:launch:kept\n' > "$FILE"
-run "" --from "$OLD" --to "$NEW"; rc=$?
-check "--to succeeds" [ "$rc" -eq 0 ]
-check "--to does not start a thread" no_line "^thread start"
-check "--to sends the handover" same "$LOG.send-stdin.new-conductor" "$START_WANT"
-check "--to registers the given thread" [ "$(cat "$FILE")" = "$NEW" ]
-
-# opencode の model（/ を含む）が渡る
-run "" --from "$OLD" --provider opencode --model zai-coding-plan/glm-5.3; rc=$?
-check "opencode model with / is accepted" [ "$rc" -eq 0 ]
-check "opencode model is passed" grep -q -- "--provider opencode --model zai-coding-plan/glm-5.3" <(line 2)
-OLD_PROVIDER=opencode OLD_MODEL=zai-coding-plan/glm-5.3 run "" --from "$OLD"; rc=$?
-check "opencode provider and model are inherited" grep -q -- "--provider opencode --model zai-coding-plan/glm-5.3" <(line 2)
-run "" --from "$OLD" --provider opencode --model -x; rc=$?
-check "model starting with - is rejected" [ "$rc" -ne 0 ]
-
-# provider と model は組で指定する
-run "" --from "$OLD" --provider codex; rc=$?
-check "provider without model is rejected" [ "$rc" -eq 2 ]
-check "provider without model makes no t3 calls" [ ! -s "$LOG" ]
+NEW_NOMODE=1 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "unreadable mode: exits 3" [ "$rc" -eq 3 ]
+check "unreadable mode: nothing sent to the old conductor" no_line "thread send --wait $OLD"
+check "unreadable mode: no handover sent" no_line "thread send $NEW"
+check "unreadable mode: no thread start" no_line "thread start"
+check "unreadable mode: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+check "unreadable mode: logs the read values" \
+  grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=- worktree=$NEW_WT_PATH" "$ROOT/err"
 
 # --to が --from と同じなら止まる
 run "" --from "$OLD" --to "$OLD"; rc=$?
@@ -128,25 +135,41 @@ printf 'mcp:launch:kept\n' > "$FILE"
 NEW_WT="" run "" --from "$OLD" --to "$NEW"; rc=$?
 check "main-checkout new conductor is rejected" [ "$rc" -ne 0 ]
 check "main-checkout new conductor: nothing sent to the old conductor" no_line "thread send --wait $OLD"
+check "main-checkout new conductor: no thread start" no_line "thread start"
 check "main-checkout new conductor: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+check "main-checkout new conductor: logs worktree=-" \
+  grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=auto-accept-edits worktree=-" "$ROOT/err"
+check "main-checkout new conductor: tells how to continue" \
+  all_err "$ROOT/err" "t3_thread_launch" "--to"
+
+# worktree が無く、かつ権限も合わないときは、権限の失敗（exit 3）で止まる
+printf 'mcp:launch:kept\n' > "$FILE"
+NEW_MODE=full-access NEW_WT="" run "" --from "$OLD" --to "$NEW"; rc=$?
+check "no worktree + bad mode: exits 3" [ "$rc" -eq 3 ]
+check "no worktree + bad mode: nothing sent to the old conductor" no_line "thread send --wait $OLD"
+check "no worktree + bad mode: no handover sent" no_line "thread send $NEW"
+check "no worktree + bad mode: no thread start" no_line "thread start"
+check "no worktree + bad mode: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+check "no worktree + bad mode: logs both read values" \
+  grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=full-access worktree=-" "$ROOT/err"
 
 # 失敗したら登録を変えずに止まる
 printf 'mcp:launch:kept\n' > "$FILE"
-run send-fail --from "$OLD"; rc=$?
+run send-fail --from "$OLD" --to "$NEW"; rc=$?
 check "stop failure exits non-zero" [ "$rc" -ne 0 ]
 check "stop failure keeps the registration" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
-run start-fail --from "$OLD"; rc=$?
-check "start failure exits non-zero" [ "$rc" -ne 0 ]
-check "start failure sends nothing to the old conductor" no_line "thread send --wait $OLD"
-check "start failure says the conductor may exist" grep -q "may have been created" "$ROOT/out"
-check "start failure keeps the registration" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+check "stop failure: no thread start" no_line "thread start"
 
 # スレッド ID の検査
-run "" --from "--help"; rc=$?
+run "" --from "--help" --to "$NEW"; rc=$?
 check "rejects an id starting with -" [ "$rc" -ne 0 ]
-run "" --from 'a;rm'; rc=$?
+check "id starting with - makes no t3 calls" [ ! -s "$LOG" ]
+run "" --from 'a;rm' --to "$NEW"; rc=$?
 check "rejects odd characters" [ "$rc" -ne 0 ]
 check "rejected ids make no t3 calls" [ ! -s "$LOG" ]
+run "" --from "$OLD" --to "--bad"; rc=$?
+check "rejects a bad --to id" [ "$rc" -ne 0 ]
+check "bad --to id makes no t3 calls" [ ! -s "$LOG" ]
 
 # mise のタスクから同じスクリプトを呼べる（引数は -- の後ろがそのまま渡る）
 task_runs() { /usr/bin/python3 -I -c 'import sys, tomllib
@@ -159,7 +182,7 @@ check "no mise task for the removed conductor-register" no_task conductor-regist
 
 # 見張り役が入っていなければ、何も送らずに止まる
 mv "$ROOT/home/.local/bin/pelway-agent-watch" "$ROOT/watch.bak"
-run "" --from "$OLD"; rc=$?
+run "" --from "$OLD" --to "$NEW"; rc=$?
 check "missing pelway-agent-watch exits non-zero" [ "$rc" -ne 0 ]
 check "missing pelway-agent-watch makes no t3 calls" [ ! -s "$LOG" ]
 mv "$ROOT/watch.bak" "$ROOT/home/.local/bin/pelway-agent-watch"
@@ -169,10 +192,10 @@ mv "$ROOT/watch.bak" "$ROOT/home/.local/bin/pelway-agent-watch"
 wt="$ROOT/wt"
 if git -C "$REPO" worktree add -q --detach "$wt" HEAD 2>/dev/null; then
   rm -f "$LOG"
-  HOME="$ROOT/home" T3_BIN="$ROOT/t3" LOG="$LOG" bash "$wt/scripts/conductor-rebuild" --from "$OLD" >"$ROOT/out" 2>&1; rc=$?
+  HOME="$ROOT/home" T3_BIN="$ROOT/t3" LOG="$LOG" bash "$wt/scripts/conductor-rebuild" --from "$OLD" --to "$NEW" >"$ROOT/out" 2>"$ROOT/err"; rc=$?
   git -C "$REPO" worktree remove --force "$wt"
   check "refuses to run from a worktree" [ "$rc" -eq 1 ]
-  check "worktree refusal says why" grep -q "not from a worktree" "$ROOT/out"
+  check "worktree refusal says why" grep -q "not from a worktree" "$ROOT/err"
   check "worktree refusal makes no t3 calls" [ ! -s "$LOG" ]
 else
   echo "skip worktree refusal check: git worktree add failed here"
