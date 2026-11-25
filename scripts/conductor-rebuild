@@ -3,37 +3,32 @@
 # hatai がホストの端末で、必ず本体 checkout の版を実行する（worktree の版は sandbox の中から
 # 書き換えられる。下の worktree の確かめは、書き換えられていない版を誤って worktree から起動したときの止め具）。
 #
-#   scripts/conductor-rebuild --from <旧指揮役のスレッド ID> [--to <新指揮役のスレッド ID>] [--provider <id> --model <slug>] [--effort <値>]
+#   scripts/conductor-rebuild --from <旧指揮役のスレッド ID> --to <新指揮役のスレッド ID>
 #
-# 1. 新しい指揮役を、main から作った専用の worktree で立てる（t3 thread start --worktree main。本体 checkout は
-#    sandbox から書けないままにする）。最初の文は、何もせずに
-#    待たせる決まった文。--to を渡したときは立てずに、そのスレッドを使う
-# 2. 新しい指揮役の権限（runtimeMode）が旧指揮役と同じで、full-access でないことを確かめる。合わなければ、
-#    旧指揮役には何も送らず、登録も変えずに止まる（t3 CLI には権限のフラグが無いので、hatai が T3 の画面で
-#    新しい指揮役の権限を直し、--to <新指揮役> を付けて実行し直す）
-# 3. 旧指揮役に決まった停止の文を送り、終わるまで待つ（t3 thread send --wait）
-# 4. 新しい指揮役に引き継ぎの指示を送る（t3 thread send）
-# 5. 起こしの宛先を新しい指揮役に替える（インストールした ~/.local/bin/pelway-agent-watch --register）
+# 新しい指揮役はこのスクリプトでは立てない。t3 thread start には権限（runtimeMode）を指定する
+# フラグが無く、プロジェクトの既定の full-access で立ってしまうため、先に MCP の
+# t3_thread_launch で旧指揮役と同じ権限（full-access 以外）と main から作った worktree を
+# 指定して立て、そのスレッド ID を --to に渡す（手順は docs/agents/conductor-context.md の
+# 「恒久交代」。--to が無いときはその手順を出して止まる）。
+# 1. 新しい指揮役の権限（runtimeMode）が旧指揮役と同じで、full-access でなく、worktree で
+#    動いていることを確かめる。合わなければ、旧指揮役には何も送らず、登録も変えずに止まる
+# 2. 旧指揮役に決まった停止の文を送り、終わるまで待つ（t3 thread send --wait）
+# 3. 新しい指揮役に引き継ぎの指示を送る（t3 thread send）
+# 4. 起こしの宛先を新しい指揮役に替える（インストールした ~/.local/bin/pelway-agent-watch --register）
 # 旧指揮役の settle と巡回の scheduled task の作り直しは、新しい指揮役が引き継ぎの確認の後に行う
 # （t3 CLI には settle が無い。権限は確認の完了で移る）。
-# provider・model を省略したときは旧指揮役と同じものを使う（t3 thread show で読む）。
-# effort は t3 thread show から読めないので、--effort を指定したときだけ渡す。
 set -euo pipefail
 
 usage() { sed -n '6p' "$0" | sed 's/^# *//' >&2; exit 2; }
 valid_id() { [[ "$1" != -* && "$1" =~ ^[A-Za-z0-9:_.%-]{1,256}$ ]]; }
-# provider・model・effort の形。model は opencode の `zai-coding-plan/glm-5.3` のように / を含む。先頭の - は拒む
-valid_ident() { [[ -z "$1" || ( "$1" != -* && "$1" =~ ^[A-Za-z0-9._/-]{1,128}$ ) ]]; }
 die() { echo "conductor-rebuild: $*" >&2; exit 1; }
 
-from="" to="" provider="" model="" effort=""
+from="" to=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --from) from="${2-}"; shift 2 || usage ;;
     --to) to="${2-}"; shift 2 || usage ;;
-    --provider) provider="${2-}"; shift 2 || usage ;;
-    --model) model="${2-}"; shift 2 || usage ;;
-    --effort) effort="${2-}"; shift 2 || usage ;;
+    --provider|--model|--effort) usage ;;  # 立てる処理が無くなったため受け付けない
     *) usage ;;
   esac
 done
@@ -41,11 +36,6 @@ done
 valid_id "$from" || die "--from is not a thread id"
 [[ -z "$to" ]] || valid_id "$to" || die "--to is not a thread id"
 [[ "$to" != "$from" ]] || die "--to must differ from --from"
-# provider と model は組で指定する（片方だけだと、もう片方を旧指揮役から引き継いで組み合わなくなる）
-if [[ -n "$provider" && -z "$model" ]] || [[ -z "$provider" && -n "$model" ]]; then usage; fi
-for v in "$provider" "$model" "$effort"; do
-  valid_ident "$v" || die "--provider/--model/--effort must be plain identifiers"
-done
 
 # 本体 checkout（共有の git dir の親）。新しい指揮役は、ここから main の worktree を作って動く。
 common="$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)"
@@ -54,6 +44,18 @@ project="$(dirname "$common")"
 # worktree からの起動は止める（誤って起動したときの止め具。試験だけ PELWAY_REBUILD_ALLOW_WORKTREE=1 で外す）
 if [[ "$gitdir" != "$common" && "${PELWAY_REBUILD_ALLOW_WORKTREE:-}" != 1 ]]; then
   die "run it from the main checkout ($project), not from a worktree"
+fi
+
+# --to は必須。このスクリプトは新しい指揮役を立てない。立てるのは MCP の t3_thread_launch で、
+# 旧指揮役と同じ runtimeMode（full-access 以外）と worktree（baseRef main）を指定して立ててから、
+# そのスレッド ID を --to に渡して実行し直す。
+if [[ -z "$to" ]]; then
+  echo "conductor-rebuild: --to is required; this script does not create the new conductor." >&2
+  echo "conductor-rebuild: launch the new conductor with MCP t3_thread_launch (docs/agents/conductor-context.md の「恒久交代」):" >&2
+  echo "conductor-rebuild:   \"runtimeMode\": \"<旧指揮役と同じ値。full-access 以外>\"" >&2
+  echo "conductor-rebuild:   \"workspaceStrategy\": {\"type\": \"worktree\", \"baseRef\": \"main\"}" >&2
+  echo "conductor-rebuild: then run: $0 --from '$from' --to '<新指揮役のスレッド ID>'" >&2
+  exit 2
 fi
 
 # 宛先の登録に使う、インストールした見張り役（mise run agent-watch-install で入れる）
@@ -77,64 +79,47 @@ if [[ -z "$T3" ]]; then
 fi
 [[ -n "$T3" ]] || die "t3 not found"
 
-# show <id> — provider・model・runtimeMode・worktree の有無（yes/no）を 1 行で返す
+# show <id> — runtimeMode と worktree のパス（無ければ -）を 1 行で返す
 show() {
   "$T3" thread show "$1" --json | /usr/bin/python3 -I -c '
 import json, sys
 t = json.load(sys.stdin); t = t.get("thread", t)
-print(t.get("providerInstanceId") or "-", t.get("model") or "-", t.get("runtimeMode") or "-",
-      "yes" if t.get("worktreePath") else "no")'
+print(t.get("runtimeMode") or "-", t.get("worktreePath") or "-")'
 }
 
-read -r old_provider old_model old_mode _ < <(show "$from") || die "cannot read the old conductor"
-provider="${provider:-$old_provider}"; model="${model:-$old_model}"
-[[ "$provider" != - && "$model" != - ]] || die "cannot determine provider/model"
-# 旧指揮役から引き継いだ値にも、引数と同じ確かめをかける
-if ! valid_ident "$provider" || ! valid_ident "$model"; then die "provider/model from the old conductor are not plain identifiers"; fi
+read -r old_mode _ < <(show "$from") || die "cannot read the old conductor"
 [[ "$old_mode" != - ]] || die "cannot read the old conductor's runtimeMode"
 [[ "$old_mode" != full-access ]] || die "the old conductor runs in full-access; fix it before rebuilding"
 
-# 1. 新しい指揮役を立てる（何もせずに待たせる）
-if [[ -z "$to" ]]; then
-  [[ -n "$effort" ]] || echo "conductor-rebuild: --effort not given; the new conductor uses the provider's default effort" >&2
-  HOLD="恒久交代の新しい指揮役として立てた。権限の確かめと引き継ぎの指示が届くまで、何もせずにこのターンを終える。"
-  args=(thread start --provider "$provider" --model "$model")
-  [[ -n "$effort" ]] && args+=(--option "effort=$effort")
-  args+=(--worktree main --branch "conductor/rebuild-$(date +%Y%m%d%H%M%S)" --title "[指揮役] 恒久交代で引き継ぐ" "$project" -)
-  # t3 の標準エラーは端末にそのまま出す（共有の /tmp に一時ファイルを作らない。sandbox から symlink に差し替えられるため）
-  out="$(printf '%s' "$HOLD" | "$T3" "${args[@]}")" || {
-    printf '%s\n' "$out" >&2
-    die "t3 thread start failed; the new conductor may have been created. Check it in T3. Nothing was sent to the old conductor"
-  }
-  to="$(printf '%s\n' "$out" | awk 'NF{l=$0} END{print l}' | tr -d '[:space:]')"
-  if ! valid_id "$to"; then
-    printf '%s\n' "$out" >&2
-    die "could not read the new conductor's id; it may have been created. Check it in T3. Nothing was sent to the old conductor"
-  fi
+# 1. 権限を確かめる
+read -r new_mode new_wt < <(show "$to") \
+  || die "cannot read the new conductor $to (check it in T3). Nothing was sent to the old conductor"
+echo "conductor-rebuild: new conductor $to runtimeMode=$new_mode worktree=$new_wt" >&2
+[[ "$new_wt" != - ]] || die "the new conductor $to runs in the main checkout; it must run in its own worktree. Nothing was sent to the old conductor"
+if [[ "$new_mode" == - ]]; then
+  echo "conductor-rebuild: cannot read the new conductor $to's runtimeMode." >&2
+  echo "conductor-rebuild: nothing was sent to the old conductor and the registration is unchanged." >&2
+  echo "conductor-rebuild: launch a replacement with MCP t3_thread_launch (runtimeMode '$old_mode', workspaceStrategy worktree baseRef main), then run: $0 --from '$from' --to '<新指揮役のスレッド ID>'" >&2
+  exit 3
 fi
-
-# 2. 権限を確かめる
-read -r _ _ new_mode new_wt < <(show "$to") \
-  || die "cannot read the new conductor $to (it may have been created; check it in T3). Nothing was sent to the old conductor"
-[[ "$new_wt" == yes ]] || die "the new conductor $to runs in the main checkout; it must run in its own worktree. Nothing was sent to the old conductor"
 if [[ "$new_mode" != "$old_mode" || "$new_mode" == full-access ]]; then
   echo "conductor-rebuild: the new conductor $to runs in '$new_mode', but the old one runs in '$old_mode'." >&2
   echo "conductor-rebuild: nothing was sent to the old conductor and the registration is unchanged." >&2
-  echo "conductor-rebuild: set $to to '$old_mode' in T3, then run: $0 --from '$from' --to '$to'" >&2
+  echo "conductor-rebuild: launch a replacement with MCP t3_thread_launch (runtimeMode '$old_mode', workspaceStrategy worktree baseRef main), then run: $0 --from '$from' --to '<新指揮役のスレッド ID>'" >&2
   exit 3
 fi
 
-# 3. 旧指揮役を止める
+# 2. 旧指揮役を止める
 STOP="恒久交代を始める（docs/agents/conductor-context.md の「恒久交代」）。案件を進める操作（スレッドの起動・指示、マージ、ラベル、コメント、ステータス変更）を止め、引き継ぎの記録を指揮役の作業ログと patrol-state.json に書き出して、このターンを終える。以後は操作しない。scheduled task や起こしで起きても、巡回も patrol-state.json の書き込みもせずにターンを終える。"
 printf '%s' "$STOP" | "$T3" thread send --wait "$from" - >/dev/null \
   || die "failed to stop the old conductor; the new conductor $to is waiting and the registration is unchanged"
 
-# 4. 新しい指揮役に引き継ぎを指示する
+# 3. 新しい指揮役に引き継ぎを指示する
 START="あなたは新しい指揮役。skill command-team と docs/agents/conductor-context.md の「恒久交代」に従い、旧指揮役（スレッド $from）から引き継ぐ。引き継ぎ確認（GitHub の実状態、patrol-state、巡回記録、実行中スレッドの照合）を済ませて操作権限を受け取ったら、旧指揮役のスレッドを t3_thread_organize で settle し、巡回の scheduled task を作り直す（runbook の「指揮役の定期巡回（スケジュール起床）」）。確認が完了しない場合は権限を受け取らず、hatai に知らせる。"
 printf '%s' "$START" | "$T3" thread send "$to" - >/dev/null \
   || die "the old conductor is stopped, but sending the handover to $to failed; send it by hand. The registration is unchanged"
 
-# 5. 宛先を替える
+# 4. 宛先を替える
 "$WATCH" --register "$to" \
   || die "the new conductor $to has the handover, but registering it failed; run: $WATCH --register '$to'"
 echo "conductor-rebuild: new conductor $to (the old conductor is settled by the new one after the handover check)"
