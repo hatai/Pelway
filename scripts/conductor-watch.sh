@@ -650,34 +650,31 @@ try: ps = json.loads(read_ps())
 except Exception: ps = {}
 if not isinstance(ps, dict): ps = {}
 if not isinstance(ps.get("subjects"), dict): ps["subjects"] = {}
-# 指揮役が持つ項目（items）は patrol-items.json に置く（runbook「10. 巡回状態の補助記録」）。
-# patrol-state.json は読み直しと置き換えの間に指揮役の更新を巻き戻す隙間が残るが、items は
-# 再開判定（枠を空けるかどうか）の根拠なので、巡回が一度も書き換えない patrol-items.json
-# にだけ置き、巻き戻らないようにする。無い・読めない回は旧置き場（ps の items）を読む。
+# 指揮役が持つ項目（items）は patrol-items.json に置く（runbook「10. 巡回状態の補助記録」。巡回の
+# 書き戻しで巻き戻らないよう patrol-state.json と別記録にする）。置き場が無い回（移行前）だけ
+# 旧置き場（ps の items）を読み、あるのに読めない回は旧記録に戻らず空として扱う: 古い組で
+# 起動の照合が残る割り当てを枠を空けるものにしないため。
 try: items_rec = json.loads(read_named("patrol-items.json"))
-except Exception: items_rec = None
-if isinstance(items_rec, dict) and isinstance(items_rec.get("items"), dict):
-    items = items_rec["items"]
-elif isinstance(ps.get("items"), dict):
-    items = ps["items"]
-else:
+except FileNotFoundError:
+    items = ps["items"] if isinstance(ps.get("items"), dict) else {}
+except Exception:
     items = {}
-# SLOTS 行（Issue #714）。実装・調査に使っている枠の数を agent-team.toml の上限と
-# 突き合わせて出す。指揮役は割り当ての前に使用数を読む（runbook「3. 同時数と順番待ち」。
-# 判断に使うのは watch.log の行でなく、見張り自身が巡回ごとに書き直す slots.json）。
-# agent-team.toml が作業ツリーに無いときは SLOTS の行を出さない。使用数を確かめられない
-# 巡回（issue 一覧の取得失敗・件数の打ち切り・agent-team.toml の検証失敗）は
-# SLOTS error <理由> を出し、使用数は出さない（直前の巡回の行が残ったまま使われないようにする）。
-# 出すのは、使用数または状態が前回の巡回から変わったときと、HEARTBEAT の行を出した巡回。
-# Issue を持たない調査（入口B）は数えない（指揮役が巡回記録から加算する）。数えるのは
-# open で agent:working の付いた Issue で、agent:devin が付いたものは devin に、ほかは
-# opencode に入れる。停止を確認できる印（停止中・再開処理中・再開待ち）の付いたものは
-# 裏付けを取ってから使っていない枠として除く: 補助記録は実装エージェントも書き込め、
-# pelway-dev[bot] は共通名義のため、GitHub の記録では実際の停止を確かめられない。代わりに
-# 現在の割り当てに結び付いたスレッド（implement_thread の組）と一覧の [実装] #<番号> の
-# スレッドが、実装エージェントには書き換えられない T3 の一覧でどれも動いていないものだけ
-# を除く（確かめられないものは使用中）。stop_verified の決まりは runbook「3. 同時数と
-# 順番待ち」の「実際の停止を確認できるもの」と同じ。
+else:
+    items = items_rec["items"] if isinstance(items_rec, dict) and isinstance(items_rec.get("items"), dict) else {}
+# SLOTS 行（Issue #714）。実装・調査に使っている枠の数を agent-team.toml の上限と突き
+# 合わせて出す。指揮役は割り当ての前に使用数を読む（runbook「3. 同時数と順番待ち」。判断
+# に使うのは watch.log の行でなく、見張り自身が巡回ごとに書き直す slots.json）。
+# agent-team.toml が無いときは SLOTS を出さない。使用数を確かめられない巡回（一覧の
+# 取得失敗・件数の打ち切り・toml の検証失敗）は SLOTS error <理由> だけを出す（直前の
+# 巡回の行が残ったまま使われないようにする）。出すのは、使用数または状態が前回から
+# 変わったときと HEARTBEAT の巡回。Issue を持たない調査（入口B）は数えない。数えるのは
+# open で agent:working の付いた Issue で、agent:devin は devin、ほかは opencode。
+# 停止の印（停止中・再開処理中・再開待ち）が付いたものは裏付けを取ってから除く:
+# 補助記録は実装エージェントも書き込め pelway-dev[bot] は共通名義のため、GitHub の
+# 記録では実際の停止を確かめられない。代わりに割り当てに結び付いたスレッドと一覧の
+# [実装] #<番号> のスレッドが、書き換えられない T3 の一覧でどれも動いていないものだけを
+# 除く。stop_verified は runbook「3. 同時数と順番待ち」の「実際の停止を確認できる
+# もの」と同じ決まり。
 slots_st = "unavailable"; slots_reason = "agent-team.toml not in worktree"
 slots_usage = None; slots_lines = None; slots_sig = "unavailable"
 if os.path.isfile("agent-team.toml"):
@@ -703,11 +700,10 @@ if os.path.isfile("agent-team.toml"):
                 marks = set()
                 for n, it in items.items():
                     ws = it.get("work_state") if isinstance(it, dict) else None
-                    # 枠を空ける印は停止中・再開処理中・再開待ち: 停止中は枠を消費せず、
-                    # 再開処理中・再開待ちは起動を試みる前の待機で枠を消費しない（消費して
-                    # いると待機中のものが上限を超えて並んだときどれも起動に進めない）。
-                    # 起動を試みた回は巻き戻し中の印（rollback の割り当て ID）が残り、
-                    # 照合が終わるまで使用中として数える（印の有無で起動前の待機と分ける）。
+                    # 枠を空ける印は停止中・再開処理中・再開待ち: 起動を試みる前の待機は枠を
+                    # 消費しない（消費していると待機中のものが上限を超えて並んだときどれも
+                    # 起動に進めない）。起動を試みた回は rollback の割り当て ID が残り、照合が
+                    # 終わるまで使用中（印の有無で起動前の待機と分ける）。
                     if isinstance(ws, dict) and ws.get("state") in ("停止中", "再開処理中", "再開待ち"):
                         marks.add(str(n))
                 impl = {}
@@ -719,8 +715,7 @@ if os.path.isfile("agent-team.toml"):
                 def is_stopped(t): return t.get("status") in stopped or t.get("archived")
                 by_id = {t.get("threadId"): t for t in threads if isinstance(t, dict)}
                 def bound_ids(it):
-                    # implement_thread の組（dict でも 3 要素の列でも読む）から結び付いた
-                    # スレッドの ID を全部挙げる。読めない組があれば None。
+                    # implement_thread の組から結び付いたスレッド ID を全部挙げる。読めない組があれば None。
                     ids = []
                     for pair in it.get("implement_thread") or []:
                         if isinstance(pair, dict): tid = pair.get("thread_id")
@@ -730,10 +725,10 @@ if os.path.isfile("agent-team.toml"):
                         ids.append(tid)
                     return ids or None
                 def stop_verified(n):
-                    # 枠を空ける印の裏付け。組の thread_id が一覧にあってどれも動いていない
-                    # ことと、一覧の [実装] #<番号> のスレッドもどれも動いていないことの両方を
-                    # 確かめる。組が無い・組のスレッドが一覧に無い（引き継ぎ先が一時的に欠ける
-                    # 回を含む）・rollback の照合が残る・動いているものが残るものは使用中。
+                    # 印の裏付け。組の thread_id と一覧の [実装] #<番号> のスレッドがどれも
+                    # 動いていないことの両方を確かめる。組が無い・組のスレッドが一覧に無い
+                    # （引き継ぎ先が一時的に欠ける回を含む）・rollback が残る・動いているものが
+                    # 残るものは使用中。
                     it = items.get(n)
                     if not isinstance(it, dict) or it.get("rollback") is not None: return False
                     ids = bound_ids(it)
@@ -945,10 +940,9 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
     cur["due_warned"] = {k: v for k, v in cur["due_warned"].items() if k in new_subj}
     cur["stall_notified"] = {k: v for k, v in cur["stall_notified"].items() if k in new_subj}
     ps["updated_at"] = now_iso
-    # 読んでから書き戻すまでの間に指揮役が書いた項目（items の組や印など、巡回が持たない
-    # 項目）を消さないように、書き戻す直前に記録を読み直し、巡回が持つ項目（subjects と
-    # updated_at）だけを載せ替える。読み直せなかった回は読んだ時点の記録のまま書く
-    # （読めない記録を置き換える既存の決まりと同じ）。
+    # 書き戻す直前に記録を読み直し、巡回が持つ項目（subjects と updated_at）だけを載せ替えて、
+    # 読んでから書き戻すまでの間に指揮役が書いた項目を消さないようにする（items は別記録）。
+    # 読み直せなかった回は読んだ時点の記録のまま書く。
     try: latest_ps = json.loads(read_ps())
     except Exception: latest_ps = None
     if isinstance(latest_ps, dict):

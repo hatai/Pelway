@@ -15,8 +15,7 @@ failures=()
 MOCK="$ROOT/mock"
 mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$MOCK" "$ROOT/state/pelway" "$ROOT/repo/.git/pelway" "$ROOT/queue"
 
-# 本物の conductor-watch.sh と agent-team-config を置く偽リポジトリ
-# （agent-gh はモックに差し替える。patrol-state.json の既定の置き場の解決を実際に通す）。
+# 本物の conductor-watch.sh と agent-team-config を置く偽リポジトリ（agent-gh はモックに差し替える）。
 cp "$REPO/scripts/conductor-watch.sh" "$ROOT/repo/scripts/"
 cp "$REPO/scripts/agent-team-config" "$ROOT/repo/scripts/"
 git init -q "$ROOT/repo"
@@ -30,8 +29,7 @@ cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$MOCK/gh-calls.log"
 [[ "$2 $3" == "issue list" ]] && {
-  # 取得の開始と後続の巡回処理で時計が進む形を作るフラグ（記録の updated_at が
-  # 取得開始時刻であって巡回処理の時刻でないことの確認に使う）。
+  # 取得の開始と後続の巡回処理で時計が進む形を作るフラグ（updated_at の確認に使う）。
   [[ -f "$MOCK/advance-now" ]] && echo $(( $(cat "$PELWAY_WATCH_NOW") + 120 )) > "$PELWAY_WATCH_NOW"
   cat "$MOCK/issues.json"; exit $?
 }
@@ -52,8 +50,7 @@ chmod +x "$ROOT/bin/gh"
 cat > "$ROOT/bin/t3" <<'EOF'
 #!/usr/bin/env bash
 [[ "$1 $2" == "thread list" ]] && {
-  # T3 の一覧の取得中に時計が進む形を作るフラグ（記録の updated_at が T3 一覧の
-  # 取得開始時刻を含む、使用数の根拠のうち最も古い時刻であることの確認に使う）。
+  # T3 の一覧の取得中に時計が進む形を作るフラグ（updated_at が最も古い取得開始時刻であることの確認に使う）。
   [[ -f "$MOCK/advance-threads" ]] && echo $(( $(cat "$PELWAY_WATCH_NOW") + 90 )) > "$PELWAY_WATCH_NOW"
   cat "$MOCK/threads.json"; exit 0
 }
@@ -166,20 +163,17 @@ check() {
 has() { grep -Eq "$2" "$1"; }
 nhas() { ! grep -Eq "$2" "$1"; }
 calls() { wc -l < "$MOCK/gh-calls.log"; }
-# slots.json の <key> の値を取り出す（status・usage.<担当>.used などの jq 風のパス）
+# slots.json / patrol-state.json の <key> の値を取り出す（jq 風のパス。slot_eq/ps_eq は値の一致を確かめる）。
 slot() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[2]));
 for k in sys.argv[1].split("."): d=d[k]
 print(d)' "$1" "$SLOTS"; }
-# slot_eq <パス> <期待値> — slots.json の値が期待値と等しい
 slot_eq() { [[ "$(slot "$1")" == "$2" ]]; }
-
-# patrol-state.json の <key> の値を取り出す（slots.json の公開より後の巡回処理の効果を見る）。
 psval() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[2]));
 for k in sys.argv[1].split("."): d=d[k]
 print(d)' "$1" "$STATE"; }
 ps_eq() { [[ "$(psval "$1")" == "$2" ]]; }
 
-# 作業状態の印を patrol-items.json の items に書く（mark <issue> <印>。巡回が書き換えない記録）。
+# 作業状態の印・implement_thread の組・巻き戻し中の印を patrol-items.json の items に書く。
 mark() {
   python3 -I - "$ISTATE" "$1" "$2" <<'EOF'
 import json, sys
@@ -187,14 +181,10 @@ p, n, st = sys.argv[1:4]
 try: d = json.load(open(p))
 except Exception: d = {}
 if not isinstance(d, dict): d = {}
-items = d.setdefault("items", {})
-it = items.setdefault(n, {})
-it["work_state"] = {"state": st}
+d.setdefault("items", {}).setdefault(n, {})["work_state"] = {"state": st}
 json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
 EOF
 }
-
-# implement_thread の組を patrol-items.json に書く（bind <issue> <thread_id> [pr]。PR が無い組は pr="none"）。
 bind() {
   python3 -I - "$ISTATE" "$1" "$2" "${3:-none}" <<'EOF'
 import json, sys
@@ -202,15 +192,11 @@ p, n, tid, pr = sys.argv[1:5]
 try: d = json.load(open(p))
 except Exception: d = {}
 if not isinstance(d, dict): d = {}
-items = d.setdefault("items", {})
-it = items.setdefault(n, {})
-lst = it.setdefault("implement_thread", [])
-lst.append({"pr": pr, "thread_id": tid, "branch": "agent/x"})
+it = d.setdefault("items", {}).setdefault(n, {})
+it.setdefault("implement_thread", []).append({"pr": pr, "thread_id": tid, "branch": "agent/x"})
 json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
 EOF
 }
-
-# 巻き戻し中の印（rollback。起動結果の照合が残る割り当て）を patrol-items.json に書く。
 set_rollback() {
   python3 -I - "$ISTATE" "$1" <<'EOF'
 import json, sys
@@ -218,8 +204,7 @@ p, n = sys.argv[1:3]
 try: d = json.load(open(p))
 except Exception: d = {}
 if not isinstance(d, dict): d = {}
-it = d.setdefault("items", {}).setdefault(n, {})
-it["rollback"] = {"assignment_id": "a", "started_at": "t", "steps_done": []}
+d.setdefault("items", {}).setdefault(n, {})["rollback"] = {"assignment_id": "a", "started_at": "t", "steps_done": []}
 json.dump(d, open(p, "w"), ensure_ascii=False, indent=2, sort_keys=True)
 EOF
 }
@@ -272,8 +257,7 @@ run_cycles 1
 check "unverified marks counted as used" has "$ROOT/out.log" '^SLOTS over opencode 5/3$'
 check "devin resume mark still free" has "$ROOT/out.log" '^SLOTS devin 0/6$'
 
-# --- 3c. 起動を試みる前の「再開待ち」は枠を空ける（巻き戻し中の印が無い待機は消費しない） ---
-# （組のスレッドが一覧に無いもの（issue 22）は確かめられないので使用中）
+# --- 3c. 起動を試みる前の「再開待ち」は枠を空ける（組のスレッドが一覧に無いものは使用中） ---
 mark 20 "再開待ち"; bind 20 t-old-20
 mark 22 "停止中";   bind 22 t-missing-22
 mock_threads "$(jarr "$(thread_item t-old-20 '[実装] #20 old' completed)")"
@@ -292,6 +276,24 @@ check "post-attempt assignments counted as used" has "$ROOT/out.log" '^SLOTS ope
 # --- 3e. 巡回の書き戻しは patrol-items.json を一度も書き換えない ---
 items_hash_before="$(sha256sum "$ISTATE" | cut -d' ' -f1)"; run_cycles 1
 check "watch never rewrites patrol-items.json" bash -c "[[ \$(sha256sum '$ISTATE' | cut -d' ' -f1) == '$items_hash_before' ]]"
+
+# --- 3f. patrol-items.json が読めない回は、旧置き場の古い記録で枠を空けない（使用中に倒す） ---
+python3 -I - "$STATE" "$ISTATE" <<'EOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["items"] = {"24": {"work_state": {"state": "停止中"},
+    "implement_thread": [{"pr": "none", "thread_id": "t-24", "branch": "agent/x"}]}}
+json.dump(d, open(sys.argv[1], "w"), ensure_ascii=False, indent=2, sort_keys=True)
+open(sys.argv[2], "w").write("{")
+EOF
+mock_threads "$(jarr "$(thread_item t-24 '[実装] #24 i' completed)")"
+mock_issues "$(jarr "$(iss 12 OPEN agent:working)" "$(iss 24 OPEN agent:working)")"
+run_cycles 1
+check "unreadable patrol-items keeps slot counted" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
+
+# --- 3g. patrol-items.json が無い回（移行前）だけ旧置き場を読む ---
+rm -f "$ISTATE"; run_cycles 1
+check "missing patrol-items falls back to legacy items" has "$ROOT/out.log" '^SLOTS opencode 1/3$'
 
 # --- 4. 上限超過は SLOTS over ---
 mark 16 "稼働中"; mark 17 "稼働中"; mark 18 "稼働中"; mark 19 "稼働中"
@@ -397,9 +399,8 @@ check "record patrol_at matches state.json" \
 s=json.load(open(sys.argv[1])); w=json.load(open(sys.argv[2])); sys.exit(0 if s["patrol_at"]==w["patrol_at"] else 1)' "$SLOTS" "$(dirname "$SLOTS")/state.json"
 
 # --- 13b. 読めるまま残った古い記録は patrol_at で見抜ける ---
-# 公開に失敗した回に前回の記録が読めるまま残った形を作る（再開直後の巡回の残留物）。
-# posix では親ディレクトリが書き込める限り通常ファイルの os.unlink は失敗しないため、
-# 書き手側の失敗経路でこの形は作れず、同じ内容の記録を書いて読み手側の判定を確かめる。
+# 公開に失敗した回に前回の記録が読めるまま残った形を作る（書き手側の失敗経路では作れない
+# ため、同じ内容の記録を書いて読み手側の判定を確かめる）。
 python3 -I - "$SLOTS" <<'EOF'
 import json, sys
 s = json.load(open(sys.argv[1]))
