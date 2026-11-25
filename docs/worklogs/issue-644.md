@@ -57,3 +57,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の round 3 の行に、t629u の扱い（上限を無視する決定の有無と、その一次情報の場所）を書くと、毎回止まって再委託される往復が無くなる
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: eeced1e7c6e3c3b77595fc8fa7bf013202a8ed2b
+
+1. 詰まった箇所: 手順 3 と手順 6: PR ブランチ `agent/644-takeover-worktree-procedure` が別の worktree でチェックアウト済みのため、自分の worktree で別名 `agent-644-takeover-r4` を `origin/agent/644-takeover-worktree-procedure` から作り、`HEAD:agent/644-takeover-worktree-procedure` で push した（この PR が決める引き継ぎの形そのもの）
+2. 曖昧だった文: 「送信直前に、停止・引き継ぎ済みでないことと、そのスレッドの割り当てが対象 PR の番号および push 先と一致することを確認してください」（PR #697 の round 4 のレビュー、must-fix 2）。「止まっている」を T3 のどの状態で判定するかが書かれていない。runbook の「10. 巡回状態の補助記録」は止まった実装スレッドを completed・failed・interrupted・cancelled と最後の状態の行で判定する
+3. 仮定と解釈: 送り先の取り違えは round 3・4 に続く同じ種類の must-fix のため、経路ごとに直さず「送り先の照合」を 1 か所に決め、実装スレッドへ PR についての指示を送るすべての経路（verdict の表・手当スレッドの伝達・人間のレビューの伝達）から指した。止まっている判定は interrupted・cancelled に加え、completed・failed で最後の状態の行が `working`・`stopped`・無しのものとした（ターンを終えて待っている `waiting-*`・`done` は送り先に残す）。割り当ては、スレッドの最初の指示の PR 番号（PR 前に立ったスレッドは Issue 番号）と push 先（指示に PR ブランチが無ければスレッドの `branch`）で確かめる。そのために最初の指示に PR の番号を入れる決まりを足した。同じ Issue の別の組のスレッドが走っている間は送らない（同一 Issue で 1 本の決まりとの食い違いを避ける）。保留した hatai のコメントは対応済みにしない。must-fix 1 は、別名から初めて PR を作るのは再開で引き継いだスレッドだけのため、`--head` の決まりを skill `implement-issue` の手順 7 に置き、runbook の最初の指示と再開手順の 5 から指した
+4. 足りなかった情報・検証手段: `t3 thread list` の状態の値と最初の指示の読み方（`t3_thread_read` が最初のメッセージを返すか）を T3 で実際に試していない。`gh pr create --head` の非対話の挙動はレビューが引いた gh v2.105.0 のソースに拠り、手元では Draft PR を作って試していない
+5. 改善案: `docs/agents/grokbot-runbook.md` の「10. 巡回状態の補助記録」の `implement_thread` の行に「組を読む側は `pelway.agent-watch/v1` の『送り先の照合』を通す」を足すと、記録の定義から照合の手順へたどれる
+
+使ったスキル: implement-issue
