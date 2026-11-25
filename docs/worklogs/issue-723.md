@@ -47,3 +47,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 に「使用量の上限で `failed` を返した委託は、上限の解除で自動で再開し投稿することがある。再委託の予約は、元の委託の実行の投稿が無いことを確かめてから出す」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: b990a85814e4c3195e16d887ae8ff7324f5908fa
+
+1. 詰まった箇所: `docs/adr/0014-desktop-client-electron.md` の配布経路: round 4 の書き換えで、新しさの判定が Release の `latest*.yml` の版に残った（codex と claude が同じ must-fix を出した）。codex はもう 1 件、取り込んだあとのタグの削除が配布に効かないことを must-fix にした（claude は同じ点を nit にした）。
+2. 曖昧だった文: 「公開を取り下げるときは、hatai がタグを消すか、より新しい版を出す。」（round 4 で自分が書いた ADR の文）。取り込んだあとの版に効くかを書いていなかった。
+3. 仮定と解釈: 版の比較もタグの版で行い、Release の `latest*.yml` からは `stagingPercentage` だけを読む形にした。取り下げは、GitHub が「タグは無い」と答えたときだけとみなし、取得の失敗は取り下げとみなさない。取り下げたら一つ前の版の manifest に戻す。直したのは must-fix と、codex の `[文書のずれ]` の nit（ADR 0012 の外向きの通信の 2 経路との関係）だけで、claude の nit 3 件（ブロックマップの出どころ、公開の日時の出どころ、トークンは Contents read になる）は直していない。
+4. 足りなかった情報・検証手段: GitHub の API でタグが「無い」ことと障害を区別する応答（404 と 5xx）の扱いは、取りに行く仕組みの Issue で実装と試験で確かめる必要がある。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 の「Request changes のとき」に「配布や認可の決定を書き換えるときは、前の round で塞いだ経路の条件を消していないかを、前の round のレビューの must-fix と突き合わせてから push する」を足す。
+
+使ったスキル: implement-issue
