@@ -297,7 +297,7 @@ check "11: patrol still writes the state back" eq "$(state_has updated_at)" "yes
 
 # 試験 12: patrol-state.json が通常ファイルでない（symlink）・読み取り上限を超えるときは、
 # 読めないものと同じく滞留を数えず、後段（記録の書き戻し）まで止まらない。
-# （待ちを起こし得るファイル種の扱いは別の検討とし、ここでは symlink とサイズで確かめる）
+# （FIFO を含む記録の読み書きの検査は conductor-watch-patrol-state.test.sh で確かめる。Issue #699）
 reset
 pend_to $((T0 - 1900)) mcp:t0
 mv "$STATE" "$ROOT/real-state.json" && ln -s "$ROOT/real-state.json" "$STATE"
