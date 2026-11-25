@@ -79,13 +79,15 @@ check resume_no_pr_takeover "$RB" \
 # branch（別名 -r<N> でありうる）を使わず、特定できないときは確認待ちにする。
 check claim_author "$RB" \
   '取得コメントは REST の `user.login` が `pelway-dev[bot]` のものだけを使い、ほかの作成者のコメントは読まない' \
+  '`pelway-dev[bot]` 名義の取得コメントが複数あるときは、最新のものを使う' \
   '止まったスレッドの `branch` は使わない' \
   '成果が無いと判断せず起動しない（作業状態の印を確認待ちにして hatai に報告する）'
 
-# 節に、どの経路で得たブランチ名も agent/<N>- と英小文字・数字・ハイフンだけかを照合し、
+# 節に、どの経路で得たブランチ名も agent/<Issue 番号>- と英小文字・数字・ハイフンだけかを照合し、
 # 外れたら止め、照合を通らない名前をコマンドに入れない決まりがある。
 check branch_name_check "$RB" \
-  '`agent/<N>-` で始まり、続きが英小文字・数字・ハイフンだけであることを確かめる。外れたら起動・委託を止める' \
+  '`agent/<Issue 番号>-`（対象の Issue の番号）で始まり、続きが英小文字・数字・ハイフンだけであることを確かめる' \
+  '外れたら起動・委託を止める。照合を通らない名前は' \
   '照合を通らない名前は、成果の有無を確かめる git のコマンド・`t3 thread start`・`git branch --set-upstream-to`・push のどの行にも入れない'
 
 # 引き継ぎ時に items の implement_thread へ PR 番号・thread_id・push 先の組を PR ごとに記録し、
