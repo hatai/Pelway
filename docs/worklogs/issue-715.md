@@ -107,7 +107,7 @@ PR: #722
 
 ## 実装者メモ（round 8）
 
-対象 head: <新規コミット>
+対象 head: f9dc583f358b8cc7025d2e8815133a187093474d
 PR: #722
 
 レビュー指摘（run 7171154483 claude approve・must-fix 0、marked nit 3+文書のずれ 1、head a602da88）への対応:
