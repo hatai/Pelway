@@ -22,4 +22,4 @@
 4. 足りなかった情報・検証手段: T3 の `existing_worktree` で本体 checkout を指したとき `thread show` が `worktreePath` に何を返すかは未確認（Claude の nit。`new_wt` が `$project` と同じパスなら拒む多層防御は、範囲を広げるためこの round では入れていない）。
 5. 改善案: `conductor-context.md:119` の `t3_thread_launch` の引数の例に必須の `title` が無い（Claude の nit。round 1 の改善案 5 と同じ趣旨。印の無い nit のためこの round では直していない。次の round で指摘が残れば対応し、残らなければ別 Issue 候補）。
 
-使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/receiving-code-review`
+使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/command-team`、`.agents/skills/pr-watch`
