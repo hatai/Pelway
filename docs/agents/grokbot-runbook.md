@@ -195,13 +195,13 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 
 | スレッド | 同時に動かす上限 | 使用数の見方 |
 |---|---|---|
-| 実装・調査（opencode） | `agent-team.toml` の `[developers.<login>.slots]`（実装と調査の合算の枠。正本） | 見張りが `watch.log` に出す最新の `SLOTS` の行（`SLOTS <担当の id> <使用数>/<上限>` の形）。行が無いときは「2. ボードと巡回」の「割り当て・停止・再開」の「枠の数え方」で自分で数える |
+| 実装・調査（opencode） | `agent-team.toml` の `[developers.<login>.slots]`（実装と調査の合算の枠。正本） | 見張りが `watch.log` に出す最新の `SLOTS`・`SLOTS over` の行（`SLOTS <担当の id> <使用数>/<上限>` の形。`SLOTS over` は使用数が上限超過）。最新が `SLOTS error`（`agent-team.toml` が検証を通らない）または行が無いときは「2. ボードと巡回」の「割り当て・停止・再開」の「枠の数え方」で自分で数え、上限は `agent-team.toml` の `[developers.<login>.slots]` から読む。使用数か上限を確認できなければ割り当てない |
 | 実装（Devin CLI） | 同上（Devin CLI の枠） | 同上 |
 | レビュー（Codex） | `agent-team.toml` の `[developers.<login>.review_limits]` の目安 | 通常の PR のレビューは実装担当が `delegate_task` で委託するため、この表では数えない。指揮役が立てたレビュースレッド（指揮役自身の PR・外部投入）だけを数える。Codex・T3・`~/.codex-review` を更新したら、`docs/dev-environment.md` の「専用 home での確認」が済むまでは使わない |
 | レビュー（Devin CLI） | 同上 | 同上。`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまでは使わない |
 | レビュー（Claude） | 同上 | 同上。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは使わない |
 
-上限に達しているときは新しいスレッドを立てない。空きが出たら、待っているものを次の順で始める。
+実装・調査の上限に達しているときは新しいスレッドを立てない（レビューの順番待ちは管理しない）。空きが出たら、待っているものを次の順で始める。
 
 1. 修正の指示（既にあるスレッドへの `send`。人間のレビューの指摘など）
 2. 指揮役が立てるレビュー（指揮役自身の PR・外部投入）
@@ -211,7 +211,7 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 
 ### MCP の `t3_thread_launch` と `t3_thread_send` の引数
 
-実装・レビュー・調査のスレッドを MCP の `t3_thread_launch` で立てるときの引数の例。`title` は `t3_thread_launch` のツール定義上の必須項目で、省略すると T3 が `-32602`（引数の誤り）を返す。「省略すると最初の指示の 1 行目がタイトルになる」という既定動作があるのは CLI の `t3 thread start` の `--title` 側であり、こちらも省略しない（スレッド名の形式は skill `command-team` の「スレッド名」）。`modelSelection.instanceId` には `agent-team.toml` の `[agents.<担当>].instance.<役割>` の provider インスタンス名、`runtimeMode` には `approval-required`・`auto-accept-edits`・`auto`・`full-access` のどれか、`workspaceStrategy.type` には `root`・`existing_worktree`・`worktree` のどれかを入れる。effort は `modelSelection.options` に入れる（option の名前は `[agents.<担当>].effort.option`。effort が `default`（通常）のときは option を入れない。ただし Devin CLI のレビュー用インスタンスの `options` は `mode` だけを受け付け、effort の option は渡せない。「レビューを始める」の Devin CLI の項を参照）。Devin CLI（実装用・レビュー用どちらのインスタンスでも）に割り当てるときは `runtimeMode` の指定が無い（同項を参照）。`workspaceStrategy.branch` には CLI の形と同じブランチ名を入れる（実装は `agent/<N>-<slug>`、レビューは `review/<M>-<k>`（Claude は `review/<M>-c<k>`、Devin CLI は `review/<M>-d<k>`）、調査は `agent/investigate-<slug>`）。
+実装・レビュー・調査のスレッドを MCP の `t3_thread_launch` で立てるときの引数の例。`title` は `t3_thread_launch` のツール定義上の必須項目で、省略すると T3 が `-32602`（引数の誤り）を返す。「省略すると最初の指示の 1 行目がタイトルになる」という既定動作があるのは CLI の `t3 thread start` の `--title` 側であり、こちらも省略しない（スレッド名の形式は skill `command-team` の「スレッド名」）。`modelSelection.instanceId` には `agent-team.toml` の `[agents.<担当>].instance.<役割>` の provider インスタンス名、`runtimeMode` には `approval-required`・`auto-accept-edits`・`auto`・`full-access` のどれか、`workspaceStrategy.type` には `root`・`existing_worktree`・`worktree` のどれかを入れる。effort は `modelSelection.options` に入れる（option の名前は `[agents.<担当>].effort.option`。effort が `default`（通常）のときは option を入れない。ただし Devin CLI のレビュー用インスタンスの `options` は `mode` だけを受け付け、effort の option は渡せない。「レビューを始める」の Devin CLI の項を参照）。Devin CLI（実装用・レビュー用どちらのインスタンスでも）に割り当てるときは `runtimeMode` の指定が無い（同項を参照）。レビューの役割の登録情報（`instance.review`・`models`・`effort.option`）は、対象のブランチが toml を変えていても main の承認済みの版の `agent-team.toml` から読み、読めなければ起動を止める。`workspaceStrategy.branch` には CLI の形と同じブランチ名を入れる（実装は `agent/<N>-<slug>`、レビューは `review/<M>-<k>`（Claude は `review/<M>-c<k>`、Devin CLI は `review/<M>-d<k>`）、調査は `agent/investigate-<slug>`）。
 
 ```json
 {
@@ -319,7 +319,7 @@ Codex と Claude のレビュースレッドを立てるときは（T3 Connect �
 
 Codex のレビュー用インスタンス（`agent-team.toml` の `[agents.codex].instance.review`）は、ネットワークを GitHub だけに絞った Codex（`docs/dev-environment.md` の「レビュー担当の Codex」）。`<k>` はその PR のレビュースレッドの通し番号（1 から）。worktree は必ず `main` から作る（レビュー担当は worktree の `scripts/agent-gh` を使うため、PR やほかのブランチの版を使わない）。
 
-レビュー担当（誰に付けるか）と effort は skill `command-team` の「レビュー担当と effort」で決める。`--provider` と `--model` は `agent-team.toml` の `[agents.<担当>].instance.review` と `models` から読む。Claude のレビュースレッドはブランチを `review/<M>-c<k>` にし、同じく `auto-accept-edits` で立てる。Devin CLI のレビュースレッドはブランチを `review/<M>-d<k>` にする。Devin CLI には `runtimeMode` の指定が無く、レビュー用インスタンスのモデルオプションは `mode` だけを受け付ける。sandbox のため権限モードは Autonomous 一択で、`bypass` は使わない。effort の option は Devin CLI のレビュー用インスタンスには渡せない。
+レビュー担当（誰に付けるか）と effort は skill `command-team` の「レビュー担当と effort」で決める。`--provider` と `--model` は main の承認済みの版の `agent-team.toml` の `[agents.<担当>].instance.review` と `models` から読む（読めなければ起動を止める）。Claude のレビュースレッドはブランチを `review/<M>-c<k>` にし、同じく `auto-accept-edits` で立てる。Devin CLI のレビュースレッドはブランチを `review/<M>-d<k>` にする。Devin CLI には `runtimeMode` の指定が無く、レビュー用インスタンスのモデルオプションは `mode` だけを受け付ける。sandbox のため権限モードは Autonomous 一択で、`bypass` は使わない。effort の option は Devin CLI のレビュー用インスタンスには渡せない。
 
 レビュー担当は、スレッドの指示とは別に、開始時に fail-closed のツール一覧チェックを行う（開始時に渡されたツール名の一覧を記録し、merge・Issue の変更・comment などの書き込み系ツールが含まれる、または一覧が読めないときは何もせず終了する。チェックの本体は skill `review-pr` の「決まり」）。チェックに失敗したレビュー（`verdict: failed` で `error:` が `設定の不備:` で始まるもの）は結果を採用しない（「5. イベントごとの対応」の表のとおり、立て直さずに 7 のエスカレーションにする。投稿済みのレビューも skill `command-team` の「有効な Approve」に数えない）。
 

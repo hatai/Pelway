@@ -119,21 +119,21 @@ Issue を割り当てる直前に、runbook の「割り当て・停止・再開
 | 曖昧で長い調査・デバッグ系の Issue | `ambiguous` の先頭の担当 |
 | 「Devin CLI のハーネスごと任せる」チケット（人間が Issue で明示するか、指揮役が「実装スレッドの枠組みでは進めにくい自律作業」と判断したもの。例: 環境構築を伴う検証、複数リポジトリにまたがる調査） | `harness` の先頭の担当。その担当に `assign_label` があれば Issue に付ける |
 | コア部分（`crates/pelway-contract`、承認・状態遷移・権限）、`unsafe` を含む・含みうる変更 | 選んだ担当の effort を `effort.raise` の先頭から 3 番目の値にする |
-| 同じ Issue の修正の指示が 2 回を超えた（3 回目の修正に入る）。数えるのは、レビューの本物の must-fix に基づく指示だけ（分割計画が無い時期の誤判定や、再起動による自動の再開は数えない） | `t3_thread_configure` で `effort.option` の値を `effort.raise` の順で 1 段上げる。最後の値でも直らなければ、`normal` の先頭からまだ使っていない担当に替え、その担当の `effort.raise` の最後の値にする。Issue に理由をコメントする |
+| 同じ Issue の修正の指示が 2 回を超えた（3 回目の修正に入る）。数えるのは、レビューの本物の must-fix に基づく指示だけ（分割計画が無い時期の誤判定や、再起動による自動の再開は数えない） | `t3_thread_configure` で `effort.option` の値を `effort.raise` の順で 1 段上げる。最後の値でも直らなければ、`normal` の先頭の担当に替え、その担当の `effort.raise` の最後の値にする（すでにその担当のときは替えない）。Issue に理由をコメントする |
 | 同じ Issue の修正の指示が 3 回を超えた（4 回目の修正に入る）。数え方は上の行と同じ | 修正を出さずにエスカレーション（runbook 7）。round 4 に入るのは hatai が例外と判断した PR だけ（例外は下の「マージ」。これ以外に広げない）。エスカレーションでは、残った must-fix の一覧と止まった head の sha を Issue に書かせ、止まっている間は指揮役も修正を中継しない（#462 の再発防止。「レビューのラウンド」の止まり方と同じ） |
 
 runbook と仕様の `round`（スレッドの実行回数）は、誤判定や再起動による再開でも増える。指揮役は `round` を目安にとどめ、effort の引き上げとエスカレーションは上の表の「修正の指示の回数」で判断する。ここで数える「修正の指示の回数」と、実装側がレビューの委託回数で数えるレビューのラウンド（下の「レビューのラウンド」）は別の数え方である。
 
 ### レビュー担当と effort
 
-| 条件 | レビュー担当（`agent-team.toml` の `[developers.<login>.priority.review]` の対応するキーの並び。登録情報は `[agents.<担当>]`） |
+| 条件 | レビュー担当（`agent-team.toml` の `[developers.<login>.priority.review]` の対応するキーの並び。登録情報は `[agents.<担当>]`。優先順位と登録情報は、委託・起動のたびに main の承認済みの版の `agent-team.toml` から読み、読めなければ委託・起動を止める） |
 |---|---|
 | 通常 | `normal` の先頭から PR 番号の偶奇で交互（偶数は先頭、奇数は次）。使えない担当（下の確認ゲート）の番では `normal` の先頭の担当に回す |
 | 高リスク: `unsafe`、セキュリティの境界（認証・権限・承認・秘密情報・ネットワーク）、`.github/workflows/` の変更、pr-size の追加行が 400 を超える | `high_risk` の使えるもの全て |
 | 抜き取り | PR 番号を 4 で割った余りが 0 の通常の PR には `sampling` の担当も付ける（ほかのレビュー担当の見落とし率の測定のため） |
 
 - この表の適用は指揮役だけでなく実装担当も行う。実装担当はこの表でレビュー委託（`delegate_task`）の担当と effort を決め、Assigned 行に写す（skill `implement-issue` の手順 8）。通常と抜き取りの判定は PR 番号だけで決まり、割り当ての記録への記入は不要（実装担当の分は省く。指揮役が立てた分だけ記録する）
-- レビューを `delegate_task` で委託するとき（実装担当の手順 8、指揮役が実装担当の代わりに委託するとき。指揮役は委託元の worktree が `main` のコミットにあることを確かめる。指揮役自身の PR・外部投入のレビュースレッドは委託せず、runbook の「レビューを始める」で立てる）は、呼び出しを次のブロックから丸ごと写し、`<...>` を埋める。`target.providerInstanceId`・`target.model`・`options` の値は skill `implement-issue` の手順 8 の表（`agent-team.toml` の登録情報から読む。devin の `options` は `{}`）。`role`・`runtimeMode`・`isolation` は省かない。
+- レビューを `delegate_task` で委託するとき（実装担当の手順 8、指揮役が実装担当の代わりに委託するとき。指揮役は委託元の worktree が `main` のコミットにあることを確かめる。指揮役自身の PR・外部投入のレビュースレッドは委託せず、runbook の「レビューを始める」で立てる）は、呼び出しを次のブロックから丸ごと写し、`<...>` を埋める。`target.providerInstanceId`・`target.model`・`options` の値は skill `implement-issue` の手順 8 の表（main の承認済みの版の `agent-team.toml` の登録情報から読む。devin の `options` は `{}`）。`role`・`runtimeMode`・`isolation` は省かない。
 
   ```json
   {
