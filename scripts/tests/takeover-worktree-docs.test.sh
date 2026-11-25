@@ -181,13 +181,29 @@ check patrol_no_pair_current_owner "$RB" \
 check report_pr_row_investigation "$RB" \
   '調査スレッドの報告の PR のときは、この行ではなく `docs/agents/command-team-details.md` の「調査の引き渡し」の照合' \
   'head の一致とこの行の 40 桁の sha の決まりは当てない'
-# 保留が続いたときの出口がある。
+# 保留が続いたときの出口がある。出口に数えるのは現在の担当を確定できない保留だけ。
 check send_target_hold_exit "$RB" \
-  '同じ対象への同じ指示が 2 回続けて保留になったら、3 回目の巡回を待たずに 7 のエスカレーションにする'
+  '保留は、回数に数えるものと数えないものに分ける。数えるのは、現在の担当を確定できない保留だけである' \
+  '同じ対象への同じ指示で、数える保留が 2 回続いたら、3 回目の巡回を待たずに 7 のエスカレーションにする' \
+  '5 の対象外は保留ではなく、この回数に数えない'
+# 現在の担当が別のスレッドに記録で確定しているための外れは、保留と分けて対象外とし、
+# 巡回記録に 1 回だけ残して以後の指示待ちから外し、settle する。
+check send_target_excluded "$RB" \
+  '5. 対象外: 指示の宛先として見ているスレッド' \
+  '確定は 2 と 3 より前に記録だけで決める' \
+  '対象外のスレッドには送らず、保留にせず、4 の回数に数えない' \
+  '巡回記録には、同じスレッドの対象外の記録がまだ無いときだけ' \
+  '送り先の照合（「5. イベントごとの対応」の `pelway.agent-watch/v1`）の 5 で対象外になったスレッド（' \
+  'その照合の 5 で対象外（現在の担当が別のスレッドに記録で確定している）に当たるスレッドには送らず、保留にもしない' \
+  '5. 送り先の照合（「5. イベントごとの対応」の `pelway.agent-watch/v1`）の 5 で対象外になったスレッドで、そのスレッドで動いている作業が無いもの'
 # 調査の報告 PR を引き継いだときは、割り当ての記録に新しいスレッドの行を書き、送り先の照合はその行で確かめる。
 check investigation_takeover_record "$RB" \
   '調査の報告 PR（`headRefName` が `agent/investigate-` で始まる）を引き継いだときは、`implement_thread` の組の代わりに、割り当ての記録に役割 investigate の行を足し' \
   '引き継ぎで立てた行の候補は、`branch` が `<PRブランチ>-r<N>` で返答に `pr:` が無いことがあるため'
+# 調査の報告 PR を引き継ぐスレッドの最初の指示で従わせる skill と、その返答の形での判定がある。
+check investigation_takeover_skill "$RB" \
+  'このスレッドへの最初の指示では、報告 PR の修正・レビュー結果の処理・Draft の解除を skill `implement-issue` の手順 9・10 に従って行い' \
+  '最後の返答の状態の行（同じ節で最初の指示に従わせる skill `implement-issue` の「ターンの終わりの状態の行」）'
 check investigation_takeover_record_details docs/agents/command-team-details.md \
   '報告 PR を引き継いで立てたスレッドの行は、起動時に報告 PR の番号を書く'
 check details_send_target docs/agents/command-team-details.md \
