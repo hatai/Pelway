@@ -2,7 +2,7 @@
 
 AI 開発チームの指揮役が従うイベント対応の手順。指揮役の正本は Grok Bot で、Grok Bot が動かないときは「11. 代行」の手順で別のエージェントが代行する。この手順書の「Grok Bot」は、代行中は代行者と読み替える。
 
-- 体制と上限の正本は `docs/superpowers/specs/agent-team.md`、受け取る通知の形は `docs/agents/notify-payloads.md`
+- 体制の正本は `docs/superpowers/specs/agent-team.md`、同時数の上限の正本は `agent-team.toml`、受け取る通知の形は `docs/agents/notify-payloads.md`
 - 毎サイクルの判断（振り分け、モデル・effort、エスカレーション、改善ループ、代行の開始・終了）は skill `command-team` に従う
 
 ## 1. 役割と触ってよい範囲
@@ -195,13 +195,13 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 
 | スレッド | 同時に動かす上限 | 使用数の見方 |
 |---|---|---|
-| 実装・調査（opencode） | `agent-team.toml` の `[developers.<login>.slots]`（実装と調査の合算の枠。正本） | 見張りが `watch.log` に出す最新の `SLOTS`・`SLOTS over` の行（`SLOTS <担当の id> <使用数>/<上限>` の形。`SLOTS over` は使用数が上限超過）。最新が `SLOTS error`（`agent-team.toml` が検証を通らない）または行が無いときは「2. ボードと巡回」の「割り当て・停止・再開」の「枠の数え方」で自分で数え、上限は `agent-team.toml` の `[developers.<login>.slots]` から読む。使用数か上限を確認できなければ割り当てない |
+| 実装・調査（opencode） | `agent-team.toml` の `[developers.<login>.slots]`（実装と調査の合算の枠。正本） | 見張り（`scripts/conductor-watch.sh`）が巡回ごとに公開する `slots.json`（見張りの状態ディレクトリの記録。`status` が `ok` で、`updated_at` の記録から 60 秒以内、`slots.json` の更新時刻が `state.json` の更新時刻から 30 秒以上遅れていないものだけを有効とする。有効性と鮮度の判定は Issue #714・PR #721 の決まり）の `usage` に、Issue を持たない入口B の調査の稼働中スレッド数を足した合計（`usage` は Issue の枠だけを数えるため、この調査は指揮役が巡回記録の割り当て表から加算する。合計の形は「2. ボードと巡回」の「割り当て・停止・再開」の「枠の数え方」と同じ）。割り当ての判断に watch.log の行は使わない（キューの要求のファイル名も行として残るため、同じ数が出る `SLOTS` 系の行は見張りの出した行と区別できない）。記録を確認できなければ（`slots.json` が無い・`status` が `ok` でない・鮮度の条件を外れる）、同じ「枠の数え方」で自分で数え、上限は `agent-team.toml` の `[developers.<login>.slots]` から読む。使用数か上限を確認できなければ割り当てない |
 | 実装（Devin CLI） | 同上（Devin CLI の枠） | 同上 |
 | レビュー（Codex） | `agent-team.toml` の `[developers.<login>.review_limits]` の目安 | 通常の PR のレビューは実装担当が `delegate_task` で委託するため、この表では数えない。指揮役が立てたレビュースレッド（指揮役自身の PR・外部投入）だけを数える。Codex・T3・`~/.codex-review` を更新したら、`docs/dev-environment.md` の「専用 home での確認」が済むまでは使わない |
 | レビュー（Devin CLI） | 同上 | 同上。`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまでは使わない |
 | レビュー（Claude） | 同上 | 同上。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは使わない |
 
-実装・調査の上限に達しているときは新しいスレッドを立てない（レビューの順番待ちは管理しない）。空きが出たら、待っているものを次の順で始める。
+実装・調査の上限に達しているときは、実装・調査の新しいスレッドを立てない（枠を待つのは実装・調査のスレッドだけ。レビューは枠に数えないため順番待ちを管理しない）。空きが出たら、待っているものを次の順で始める（この順は起動の優先順位で、枠の順番待ちは実装・調査にだけ適用する）。
 
 1. 修正の指示（既にあるスレッドへの `send`。人間のレビューの指摘など）
 2. 指揮役が立てるレビュー（指揮役自身の PR・外部投入）

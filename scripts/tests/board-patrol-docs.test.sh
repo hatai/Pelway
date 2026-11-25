@@ -97,10 +97,11 @@ check cond6b_details_count docs/agents/command-team-details.md \
   'agent:devin'
 
 # 条件6c: runbook の「3. 同時数と順番待ち」で、実装・調査の枠の使用数は
-# watch.log の SLOTS の行で見る形になっている。
+# 見張りが公開する slots.json で見る形になっている。
 check cond6c_runbook_slots docs/agents/grokbot-runbook.md \
-  '`SLOTS`' \
-  '[developers.<login>.slots]'
+  '`slots.json`' \
+  '[developers.<login>.slots]' \
+  '巡回記録の割り当て表'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2

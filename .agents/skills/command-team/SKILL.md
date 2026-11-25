@@ -7,7 +7,7 @@ description: "Use when acting as the conductor (指揮役) of the AI dev team: a
 
 AI 開発チームの指揮役が、毎サイクル実行する判断の手順。
 
-- 体制・役割・同時数の上限の正本は `docs/superpowers/specs/agent-team.md`
+- 体制・役割の正本は `docs/superpowers/specs/agent-team.md`、同時数の上限の正本は `agent-team.toml`
 - イベントごとの対応表は `docs/agents/grokbot-runbook.md`
 - このスキルは、その 2 つの間で指揮役が下す判断（振り分け、エスカレーション、改善ループ、代行）を決める
 
