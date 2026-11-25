@@ -59,3 +59,18 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の棚卸し手順 4 に「一覧の取得が失敗・打ち切りの巡回では項目を消さない」（416 行目の取得失敗時の扱いに揃える。round 4 の印の無い nit の指摘）を別 Issue で足す
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 7）
+
+対象 head: da4f25064c3f1675d4b6005698ce8393507b688b
+PR: #679
+
+レビュー指摘（run 7163125256 codex request-changes、run 7163126088 claude approve、head 96b3af0f）への対応。round 6（main の取り込み・コンフリクト解消。merge コミット 96b3af0f）はメモを書かずに push したため、その分もここに書く。
+
+1. 詰まった箇所: 手順 6（round 6）: 新しい worktree の初回ビルドをバックグラウンドで走らせている間に別のコマンドを起動したら、mbx が作った `target` symlink を `scripts/agent-sandbox/sandbox-shell` が空ディレクトリへ戻し、`cargo test` と `cargo clippy` が `couldn't create a temp dir` で落ちた（`docs/dev-environment.md`「実装担当の sandbox」に書かれた動作）。`target` が実ディレクトリの状態でやり直して通った
+2. 曖昧だった文: 「effort は、追加行が 200 以下で高リスク（セキュリティの境界）・仕様（正本 `docs/superpowers/specs/` と ADR `docs/adr/` を変える）の PR でなければ既定、それ以外は `high`。セキュリティと仕様の PR では 1 回目から effort を上げておく。同じ PR の 2 回目以降のレビューは 1 段上げる。3 回目のレビューで改めて effort を上げる運用はやめる（skill `implement-issue` の手順 9 も同じ）。」（.agents/skills/command-team/SKILL.md「レビュー担当と effort」）
+3. 仮定と解釈: 「既定」を `medium`、「1 段上げ」を `high` と解釈した（`agent-team.toml` の `effort.raise` の並びと、PR #718 の codex・claude の委託実績による。codex の T3 上の option の既定値 `low` から数える解釈は選ばなかった）。レビュー担当は指示どおり Codex と Claude にした（表だけなら奇数番で Devin CLI だが、PR 本文の `Implementer:` が devin で「Devin CLI が実装した PR には Devin CLI のレビューを付けない。」に当たると解釈）。must-fix は条件の一覧を「9. 片付け」への参照に置き換える方を選び、条件を全文で写す方は選ばなかった（写すと今後ずれる）。round 4 の手順 1 と同じ種類の決まりとして、棚卸しの手順は対象・条件・除外を写さず正本の節を参照する。ラウンド数は PR のラウンドサマリーの最大 R + 1 で数え、96b3af0f のレビューを round 7、この修正後を round 8 とした
+4. 足りなかった情報・検証手段: QA の依頼方法（誰が `pelway-qa` 名義で行うか、委託の task の形）が skill に無い（`docs/worklogs/issue-480.md`・`docs/worklogs/issue-569.md` の改善案のまま）。`effort` の「既定」に当たる値は `agent-team.toml` にも skill にも無い
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「初回のビルドをバックグラウンドで走らせている間は別のコマンドを起動しない（mbx の `target` symlink が sandbox で実ディレクトリに戻り、ビルドが壊れる）」を足す。`.agents/skills/command-team/SKILL.md` の「レビュー担当と effort」に `agent-team.toml` の `effort.raise` と「既定」の値を書く。`.agents/skills/implement-issue/SKILL.md` の手順 9「Approve のとき」に QA の依頼方法を書く
+
+使ったスキル: .agents/skills/implement-issue、fix-merge-conflicts（round 6 の競合解消）
