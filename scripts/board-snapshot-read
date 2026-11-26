@@ -27,6 +27,7 @@ reason の意味:
 - PELWAY_BOARD_SNAPSHOT_NOW: 「今」の epoch 秒（既定は現在時刻）
 """
 import json
+import math
 import os
 import stat
 import sys
@@ -41,8 +42,8 @@ ITEM_TYPES = {"Issue", "PullRequest", "DraftIssue"}
 def envfloat(name, default):
     try:
         return float(os.environ.get(name, "") or default)
-    except ValueError:
-        return float(default)
+    except (ValueError, TypeError):
+        return float(default) if default is not None else None
 
 
 def out(obj, rc):
@@ -58,7 +59,7 @@ def fail(reason, **detail):
 def valid_item(it):
     if not isinstance(it, dict):
         return False
-    if it.get("type") not in ITEM_TYPES:
+    if not isinstance(it.get("type"), str) or it["type"] not in ITEM_TYPES:
         return False
     if not isinstance(it.get("id"), str):
         return False
@@ -75,10 +76,12 @@ def valid_item(it):
     return True
 
 
-def main():
+def _main():
     path = os.environ.get("PELWAY_BOARD_SNAPSHOT") or "/tmp/pelway-board-snapshot.json"
     max_age = envfloat("PELWAY_BOARD_SNAPSHOT_MAX_AGE", 960)
     now = envfloat("PELWAY_BOARD_SNAPSHOT_NOW", None) if os.environ.get("PELWAY_BOARD_SNAPSHOT_NOW") else time.time()
+    if not isinstance(now, (int, float)) or not math.isfinite(now):
+        now = time.time()
 
     if not os.path.lexists(path):
         fail("missing", path=path)
@@ -101,7 +104,7 @@ def main():
     if not isinstance(snap, dict) or snap.get("version") != 1:
         fail("broken", detail="bad-shape", path=path)
     fetched = snap.get("fetched_at")
-    if not isinstance(fetched, (int, float)) or isinstance(fetched, bool):
+    if not isinstance(fetched, (int, float)) or isinstance(fetched, bool) or not math.isfinite(fetched):
         fail("broken", detail="bad-fetched-at", path=path)
     items = snap.get("items")
     if not isinstance(items, list) or not all(valid_item(it) for it in items):
@@ -124,6 +127,20 @@ def main():
             e["repository"] = it["repository"]
         norm.append(e)
     out({"ok": True, "fetched_at": fetched, "age_seconds": int(age), "items": norm}, 0)
+
+
+def main():
+    try:
+        _main()
+    except SystemExit:
+        raise
+    except Exception:
+        # どんな読み取りの途中の例外でも、約束の JSON（ok: false）で返す
+        path = os.environ.get("PELWAY_BOARD_SNAPSHOT") or "/tmp/pelway-board-snapshot.json"
+        try:
+            fail("broken", detail="read-error", path=path)
+        except Exception:
+            sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -63,13 +63,8 @@ exit 9
 EOF
 chmod +x "$ROOT/bin/gh"
 
-# スナップショットの書き出しが新しい状態にして、見張りの読み取りが item-list を
-# 引かないようにする（このテストはキューの呼び出しだけを確かめる。書き出し側は
-# conductor-watch-board-snapshot.test.sh が確かめる）
-python3 -I - "$ROOT/snapshot.json" <<'PYSEED'
-import json, sys, time
-json.dump({"version": 1, "fetched_at": time.time(), "items": []}, open(sys.argv[1], "w"))
-PYSEED
+# スナップショットの書き出しは空で止める（このテストはキューの呼び出しだけを
+# 確かめる。書き出し側は conductor-watch-board-snapshot.test.sh が確かめる）
 
 cat > "$MOCK/project-view.json" <<'EOF'
 {"id": "PVT_proj7", "number": 7, "title": "Pelway agent team"}
@@ -96,7 +91,7 @@ start_watch() {
   MOCK="$MOCK" SLEEP_MAX="${SLEEP_MAX:-}" MOCK_EDIT_FAIL="${MOCK_EDIT_FAIL:-}" \
   PELWAY_BOARD_QUEUE_DIR="$QUEUE" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
   PELWAY_PATROL_STATE="$ROOT/state/pelway/patrol-state.json" \
-  PELWAY_BOARD_SNAPSHOT="$ROOT/snapshot.json" PELWAY_BOARD_SNAPSHOT_INTERVAL=86400 \
+  PELWAY_BOARD_SNAPSHOT="" \
     bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
   WPID=$!
 }

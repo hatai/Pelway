@@ -95,6 +95,34 @@ echo '{"version": 1, "fetched_at": '"$((NOW - 10))"', "items": [{"id": "X", "typ
 run_read
 check "broken(item without number): reason is broken" test "$(jqv 'd["reason"]')" = "broken"
 
+# 3b. 型の読めない項目・有限でない時刻も、例外を出さず契約どおり ok=false・reason=broken の
+# JSON を返す（type が配列・オブジェクトだと集合の照合で、NaN・±Infinity だと時刻の計算で
+# 例外になっていた）
+python3 -c 'import json,sys; json.dump({"version": 1, "fetched_at": float(sys.argv[2]), "items": [{"id": "x", "type": "Issue", "number": 1}]}, open(sys.argv[1], "w"))' "$SNAP" "$NOW"
+python3 -c 'import json; d = json.load(open("'$SNAP'")); d["items"][0]["type"] = ["Issue"]; json.dump(d, open("'$SNAP'", "w"))'
+run_read
+check "broken(type array): exit nonzero" test "$rc" -ne 0
+check "broken(type array): reason is broken" test "$(jqv 'd["reason"]')" = "broken"
+
+python3 -c 'import json,sys; json.dump({"version": 1, "fetched_at": float(sys.argv[2]), "items": [{"id": "x", "type": {"name": "Issue"}, "number": 1}]}, open(sys.argv[1], "w"))' "$SNAP" "$NOW"
+run_read
+check "broken(type object): reason is broken" test "$(jqv 'd["reason"]')" = "broken"
+
+printf '{"version": 1, "fetched_at": NaN, "items": []}' > "$SNAP"
+run_read
+check "broken(NaN fetched_at): exit nonzero" test "$rc" -ne 0
+check "broken(NaN fetched_at): reason is broken" test "$(jqv 'd["reason"]')" = "broken"
+check "broken(NaN fetched_at): no traceback" test ! -s "$ROOT/err.txt"
+
+printf '{"version": 1, "fetched_at": Infinity, "items": []}' > "$SNAP"
+run_read
+check "broken(Infinity fetched_at): reason is broken" test "$(jqv 'd["reason"]')" = "broken"
+
+printf '{"version": 1, "fetched_at": -Infinity, "items": []}' > "$SNAP"
+run_read
+check "broken(-Infinity fetched_at): reason is broken" test "$(jqv 'd["reason"]')" = "broken"
+check "broken(-Infinity fetched_at): no traceback" test ! -s "$ROOT/err.txt"
+
 # 4. 書き出しが無い: ok=false・reason=missing・非 0 終了
 rm -f "$SNAP"
 run_read

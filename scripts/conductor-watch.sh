@@ -116,6 +116,9 @@ if [[ -z "$T3_BIN" ]]; then
     esac
   done
 fi
+# スナップショットの取得間隔はプロセスの中の記憶だけで管理する。
+# 共有の書き出し（エージェントが書ける場所）の内容は鮮度の判定に使わない。
+snap_last_fetch=0
 while true; do
   # threads.json は python 側で取得の成功を確かめてから差し替える（失敗で前回の一覧を消さない）。
   # T3 の失敗はスレッドに基づく判定をせず（格上げは判定しない）、Issue・PR の失敗は patrol-state.json を書き換えない（Issue なら DECISION の検知もしない）
@@ -1092,58 +1095,63 @@ for name, req in pending:
 PY
   # ボード読み取りスナップショット: 人間名義の gh で item-list を読み、
   # 指揮役が sandbox から読める JSON を原子的に書き出す（runbook の
-  # 「ボード読み取りスナップショット」）。前の書き出しが間隔
-  # （PELWAY_BOARD_SNAPSHOT_INTERVAL 秒、既定 240）より新しいうちは取り直さない。
+  # 「ボード読み取りスナップショット」）。間隔（PELWAY_BOARD_SNAPSHOT_INTERVAL 秒、
+  # 既定 240）ごとに必ず取り直す。前の書き出しは読まない（共有の置き場の内容を
+  # 鮮度の判定に信じない）。
   # 取得に失敗した巡回は前の書き出しを残し、失敗を BOARD snapshot-failed の行で出す。
   # 書き出し先はキューと同じく利用者が書ける場所にあるため、一時ファイルは
   # 予測不能な名前を O_EXCL|O_NOFOLLOW で作ってから置き換える。
   if [[ -n "$SNAP" ]]; then
+  snap_interval="${PELWAY_BOARD_SNAPSHOT_INTERVAL:-240}"
+  [[ "$snap_interval" =~ ^[0-9]+$ ]] || snap_interval=240
+  now_epoch=$(date +%s)
+  if (( now_epoch - snap_last_fetch >= snap_interval )); then
+    snap_last_fetch=$now_epoch
   python3 -I - "$SNAP" <<'PY' || true
 import json, os, secrets, subprocess, sys, time
 snap_path = sys.argv[1]
 OWNER, NUM = "hatai", "7"
-INTERVAL = os.environ.get("PELWAY_BOARD_SNAPSHOT_INTERVAL")
-try: interval = float(INTERVAL) if INTERVAL else 240.0
-except ValueError: interval = 240.0
-# 巡回の時刻。PELWAY_WATCH_NOW が指すファイルに epoch 秒が書かれていればそれを使う（テスト用）。
-try: now = float(open(os.environ["PELWAY_WATCH_NOW"]).read().strip())
-except Exception: now = time.time()
+now = time.time()
 
 def failed(reason):
     print(f"BOARD snapshot-failed reason={reason}", flush=True)
     sys.exit(0)
 
-# 前の書き出しが間隔より新しいうちは取り直さない。読めない・形が違うときは取り直す。
-try:
-    prev = json.load(open(snap_path))
-    fetched = prev.get("fetched_at") if isinstance(prev, dict) else None
-    if isinstance(fetched, (int, float)) and not isinstance(fetched, bool) \
-            and 0 <= now - fetched < interval:
-        sys.exit(0)
-except Exception:
-    pass
-
-try:
-    r = subprocess.run(["gh", "project", "item-list", NUM, "--owner", OWNER,
-                        "--format", "json", "--limit", "1000"],
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
-except Exception:
-    failed("gh-exec")
-try:
+def fetch(limit):
+    # gh は limit の件数まで内部でページをたどる（返却順は変わらない）
+    try:
+        r = subprocess.run(["gh", "project", "item-list", NUM, "--owner", OWNER,
+                            "--format", "json", "--limit", str(limit)],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+    except Exception:
+        failed("gh-exec")
     if r.returncode != 0:
         failed("item-list")
-    data = json.loads(r.stdout)
-except Exception:
-    failed("bad-json")
-raw_items = data.get("items") if isinstance(data, dict) else None
-if not isinstance(raw_items, list):
-    failed("bad-shape")
-# 上限で打ち切られた書き出しは Todo の並び順を欠くため公開しない
-# （runbook の「ボード読み取りスナップショット」。打ち切りが解消しないときは
-# limit を見直す）
-total = data.get("totalCount")
-if isinstance(total, int) and total > len(raw_items):
-    failed("truncated")
+    try:
+        return json.loads(r.stdout)
+    except Exception:
+        failed("bad-json")
+
+def shape(d):
+    items = d.get("items") if isinstance(d, dict) else None
+    total = d.get("totalCount") if isinstance(d, dict) else None
+    if not isinstance(items, list) or not isinstance(total, int) or isinstance(total, bool):
+        failed("bad-shape")
+    return items, total
+
+# 最初の取得の上限（既定 1000。PELWAY_BOARD_SNAPSHOT_FIRST_LIMIT はテスト用）
+try: first_limit = int(os.environ.get("PELWAY_BOARD_SNAPSHOT_FIRST_LIMIT") or 1000)
+except ValueError: first_limit = 1000
+data = fetch(first_limit)
+raw_items, total = shape(data)
+# 上限で打ち切られた（totalCount が件数を超える）ときは、件数を上限に取り直す。
+# それでも足りなければ全カードを読めたと言えないため公開しない
+# （runbook の「ボード読み取りスナップショット」）。
+if len(raw_items) < total:
+    data = fetch(total)
+    raw_items, total = shape(data)
+    if len(raw_items) < total:
+        failed("truncated")
 
 def names(v):
     # labels・assignees は gh の版で文字列の配列か {"name": ...} の配列かが違いうるため、
@@ -1161,10 +1169,14 @@ items = []
 for it in raw_items:
     if not isinstance(it, dict):
         failed("bad-item")
-    c = it.get("content") or {}
+    c = it.get("content")
+    if not isinstance(c, dict):
+        failed("bad-item")
     t = c.get("type")
+    # 型の読めない項目を落とした一覧は、欠けた一覧を完全なものとして指揮役に
+    # 渡すことになるため公開しない
     if t not in ("Issue", "PullRequest", "DraftIssue"):
-        continue  # 型が読めない項目は落とす（並び順を壊してまで載せない）
+        failed("bad-item")
     e = {"id": it.get("id") if isinstance(it.get("id"), str) else "",
          "type": t,
          "status": it.get("status") if isinstance(it.get("status"), str) else None,
@@ -1175,7 +1187,7 @@ for it in raw_items:
     if t in ("Issue", "PullRequest"):
         n = c.get("number")
         if not isinstance(n, int) or isinstance(n, bool) or n <= 0:
-            continue  # 番号の取れない項目は落とす
+            failed("bad-item")
         e["number"] = n
     if isinstance(c.get("repository"), str):
         e["repository"] = c["repository"]
@@ -1201,6 +1213,7 @@ except OSError:
     except OSError: pass
     failed("replace")
 PY
+  fi
   fi
   sleep 30
 done
