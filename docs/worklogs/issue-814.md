@@ -35,3 +35,15 @@ push 後の修正: スナップショットの鮮度判定が `now - fetched < i
 5. 改善案: scripts/board-snapshot-read の冒頭の説明に「真正性の前提（所有者が同じ uid であることだけが確かめられること）」を 1 行足すと、読み手が runbook を開かなくても前提を追える。
 
 使ったスキル: implement-issue。輸入スキルはなし
+
+## 実装者メモ（round 4）
+
+対象 head: 102da796bcf473cb2e1669fa75b28c4d6c7f954a
+
+1. 詰まった箇所: main のマージで `.devin/config.json` が sandbox の読み取り専用マウントで更新できず `git merge` が失敗した。コミットは worktree のそのファイルに触れずに作れるため、`git merge-tree --write-tree` → `commit-tree` → `read-tree` でマージコミットだけを作り、書けるファイルだけを checkout で合わせた。worktree の `.devin/config.json` は古いままで、以後のコミットに含めないようファイルを個別に add する。
+2. 曖昧だった文: 「UTF-8 以外のロケールでラベル名などに非 ASCII 文字があると、容量の検査を通った後に、reader が解釈できないバイト列で有効な前回分を置き換える場合があります」（codex round 3 レビュー）——再現の確かめで `python3 -I` は `PYTHONUTF8` を無視すること、C ロケールは PEP 538 で UTF-8 に矯正されることが分かり、環境変数だけではこの状態を作れなかった。テストは mock python3 で `-X utf8=0` を差し込み、UTF-8 モードを強制できないホストを模す形にした。
+3. 仮定と解釈: must-fix 1 は、見張りの状態ディレクトリが sandbox から読み取り専用で見えることをこの環境で実測してから進めた（`/home` が ro マウント、`~/.local/state` への書き込みは Read-only file system で失敗、ファイルの所有者は自分と同じ uid 1000 に見える）。符号化の指摘は書き込み側だけでなく gh の出力の読み取り側も同じ種類と判断し、`text=True` に `encoding="utf-8"` を明示した（SJIS 系のロケールではデコードが黙って文字化けしうるため。同じ種類の must-fix の全経路に当てる決まり）。
+4. 足りなかった情報・検証手段: 非 UTF-8 ロケールがこの環境に入っていない（`locale -a` は C・POSIX と UTF-8 系だけ）ため、SJIS ロケールでの文字化けの経路は実測できず、構造上の解析（デコードとエンコードの両方を UTF-8 と決める）で閉じた。
+5. 改善案: scripts/agent-sandbox/sandbox-shell のコメントに「`/home` の ro-bind により `$XDG_STATE_HOME` は sandbox から読み取り専用。ホストの見張りだけが書ける経路として使える」と 1 行あると、同じ判断を次の設計で即座に引ける。
+
+使ったスキル: implement-issue。輸入スキルはなし
