@@ -69,3 +69,15 @@
 5. 改善案: `docs/agents/grokbot-runbook.md` の分割の節に「積んだ PR は base が main でないあいだ必須チェックが走らないので、親のマージの後に base を main に替えてからレビューを委託する」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（PR-2 round 3）
+
+対象 head: 1d61d5e26f382128154640928c76b20f1ee54f63
+
+1. 詰まった箇所: `client/README.md` の「IPC のチャンネルを足すとき」: `useWindowState`・`useNativeTheme` を名前で挙げていたので、受け入れ条件の `git grep -n -E 'useWindowState|useNativeTheme|windowControls' client/` が README の行を出していた（Claude の must-fix）。名前を挙げずに、頼るチャンネルの種類（窓の状態・テーマ・窓の操作など）で書いた。
+2. 曖昧だった文: 「`git grep -n -E 'useWindowState|useNativeTheme|windowControls' client/` が何も出さない」（Issue #734 の受け入れ条件）。round 1 で「README の注意書きの 1 行だけ（コードには無い）」として満たしたと書いたが、確かめ方は出力が空であることだった。
+3. 仮定と解釈: must-fix だけを直した。印の無い nit（`will-frame-navigate`、`<meta>` の CSP の `frame-ancestors`、`spellcheck`、スクリーンショットの添付）は直していない。Codex は利用の上限で失敗し、hatai の判断で上限が解けたあとに再委託する。
+4. 足りなかった情報・検証手段: スクリーンショットは GitHub App の API から PR に貼れない。WSLg で撮った窓の画像は実装スレッドに出した。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「`git grep` で使っていないことを確かめる条件は、文書がその名前を挙げると空にならないので、対象をコードのファイルに絞る（`-- '*.ts' '*.tsx'`）」を足す。
+
+使ったスキル: `.agents/skills/implement-issue`
