@@ -23,3 +23,13 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「検査器の差分表示を使う条件では、rename・copies・mode だけの変更を試験に入れる」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/diagnosing-bugs`（CI 失敗の切り分け方針だけ）
+
+## 実装者メモ（round 3）
+
+1. 詰まった箇所: round 2 の Approve に残った `[文書のずれ]` は、調査の報告 PR が `docs/worklogs/` だけの差でも、印の無い worktree では新しい門に止められるという不整合だった。
+2. 曖昧だった文: 「investigate-bug の報告 PR を出す段にどちらで push するかを足し、dev-environment.md:88 に「印が無ければ docs/worklogs/ の下だけの差でも止まる」を足す。」（PR #832、claude_review の round 2）
+3. 仮定と解釈: 調査の報告 PR も実装と同じく、原則は `mise run verify` を成功させて印を残してから push する。調査と無関係の失敗が変わらないときだけ `PELWAY_AGENT_SKIP_VERIFY_GATE=1` を使い、PR 本文に残す。
+4. 足りなかった情報・検証手段: 挙動は round 1・2 の門の試験で確かめてあるため、この round は文書の手順をそろえるだけにし、新しい試験は足さない。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「既存の作業経路を止める門では、例外を使う側の手順も受け入れ条件に入れる」を足す。
+
+使ったスキル: `.agents/skills/implement-issue`

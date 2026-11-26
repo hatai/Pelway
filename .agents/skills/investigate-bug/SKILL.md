@@ -149,7 +149,10 @@ ls docs/worklogs/bugs
 
 同じ内容を `docs/worklogs/bugs/<slug>/report.md` に保存する（`<slug>` は症状の短い
 英小文字とハイフン。ログの断片やキャプチャは同じディレクトリに置く）。保存したら、
-報告ファイルだけを含む Draft PR を出す（skill `write-pull-request`。証拠のファイルは
+`mise run verify` を成功させて印を残してから、報告ファイルだけを含む Draft PR を出す
+（報告だけの差は `agent-gh` の verify ゲートの `docs/worklogs/` の例外で通る。調査と無関係の
+失敗が変わらないときだけ `PELWAY_AGENT_SKIP_VERIFY_GATE=1` を付けて push し、そのことと
+失敗の内訳を PR 本文に書く）（skill `write-pull-request`。証拠のファイルは
 PR に含めない。報告には必要な最小の引用を書く。ブランチは `agent/investigate-<slug>`、
 本文の「対象」節の最後に `Implementer:` の行を置き、指示の 2 行目
 `Assigned: role=investigate ...` の値を `role=investigate` を除いて写す。置き場所は

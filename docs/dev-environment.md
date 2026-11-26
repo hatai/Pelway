@@ -85,7 +85,7 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 
 - `mise run verify` は、依存タスクがすべて成功したときだけ `scripts/agent-verify-record` を実行し、検証した作業ツリーの木の hash をその worktree の gitdir（`.git/`、linked worktree ではその gitdir）にある `pelway-verify-tree` に残す。依存タスクが失敗したときは印を書かない。
 - `scripts/agent-gh dev git push` と `scripts/agent-gh review git push` は、pre-push フックの中で `scripts/agent-gh-verify-gate` を呼び、送るブランチの木が印の木と一致するかを確かめる。印が無い・形が違う・木が違う push は止まり、停止の理由と `mise run verify` を実行する案内を標準エラーに出す。
-- HEAD の木と印の木の差が `docs/worklogs/` の下だけなら push を通す。実装者メモは verify の後に commit するための例外である。
+- HEAD の木と印の木の差が `docs/worklogs/` の下だけなら push を通す。実装者メモは verify の後に commit するための例外である。この例外は印があるときだけ効き、印が無ければ `docs/worklogs/` の下だけの差でも止まる。
 - `PELWAY_AGENT_SKIP_VERIFY_GATE=1` を付けた push はこの門を確かめずに通し、通したことを標準エラーに出す。CI の verify が正本であることは変わらない。
 
 ## CI（GitHub Actions）
