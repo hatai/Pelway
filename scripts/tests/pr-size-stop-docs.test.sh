@@ -58,7 +58,7 @@ check implement_exception_restart .agents/skills/implement-issue/SKILL.md \
 check command_team_exception .agents/skills/command-team/SKILL.md \
   '実装担当は例外が認められる前の上限超過の差分を push せずに止まる' \
   'push 先のリポジトリとブランチを head とする開いた PR で' \
-  'その PR が閉じる Issue に hatai が、行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き' \
+  'その PR が閉じる Issue に hatai が、本文先頭が `<!-- pr-size-exception -->` のコメントで超過を認めた理由を書き' \
   'PR がまだ無いときは例外を選ばず分割を指示する'
 check command_team_split .agents/skills/command-team/SKILL.md \
   '分割案・手元の head の SHA・`git diff --stat origin/main...HEAD` の出力'
