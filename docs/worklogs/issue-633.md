@@ -131,3 +131,18 @@ PR: #735
 4. 仮定と解釈: 受理する書式は「数字だけの十進の秒」（`1`・`0.5` など。`.5` や `1.` は形に合わず拒否）とした。`timeout` が受理する `1e3` や `inf` も形に合わないため拒否するが、秒数としての意味は検査と消費側でそろう形に限定する指摘の意図どおり
 
 試験の更新・追加: 「first timeout <値>」（`1d`・`5m`・`abc` を拒否。読み取り・送信なし・登録不変。計 167 件 pass）。`scripts/red-check 6608d30 --keep scripts/tests/conductor-rebuild.test.sh` で前の実装だと `1d`・`5m` の 8 件が落ちることを確かめた（`abc` は旧実装でも `v+0` が 0 になり拒否されるため落ちない。「term-ignoring read killed: returns after the grace」は旧実装に `-k` が無く TERM が効かない読み取りが稀に遅れる経路が残るため、稀に落ちる）
+
+## 実装者メモ（round 9）
+
+対象 head: （push 後に記入）
+PR: #735
+
+レビュー指摘（run 7184768069 codex request-changes・must-fix 1、run 7184768661 claude approve・印なし nit 1 件。ともに head 0ec024de3094b36656462b3015e3897182d1f3da）への対応。判定が割れたため request-changes 側を優先した。
+
+1. 詰まった箇所: なし
+2. must-fix の対応:
+   - `scripts/conductor-rebuild`:108 round 8 で `v+0 < 1e308` の上限を落としたため、309 桁以上の数字列が awk で `inf` となり `v+0 > 0` を通り、そのまま `timeout` に渡ると GNU timeout は範囲外の期間を最大値として扱う（実質打ち切りなし）→ 下限に実用的な上限 60 秒を足した（`v+0 > 0 && v+0 <= 60`。1 回のローカルの読み取りの猶予として既定 2 秒の 30 倍の幅。書式の検査はそのまま維持）。試験に 400 桁の数字列と 61 を追加（codex の指摘どおり数値の範囲を超える十進入力を T3 の呼び出し前に拒否することを固定）
+3. nit の対応: なし（codex 0 件。claude の 1 件は同じ指摘を含むが印なし — `[文書のずれ]` でないため対象外）
+4. 仮定と解釈: 「実用的な上限」は 60 秒とした。下限は残りが尽きたあとの 1 回目の読み取りを締める猶予で、既定 2 秒に対し十分な幅。これ以上を指定する運用は意図が無いため、運用の値ではなく異常系として起動時に拒否する形にした
+
+試験の更新・追加: 「first timeout <400-digit>」「first timeout 61」（ともに拒否。読み取り・送信なし・登録不変。計 175 件 pass）。`scripts/red-check 0ec024d --keep scripts/tests/conductor-rebuild.test.sh` で前の実装だとこの 2 グループ 8 件が落ちることを確かめた（「no worktree until the limit: logs the last-read values」が 1 件、経過秒の表示の境目の競合で稀に落ちる既存の試験。変更とは無関係）

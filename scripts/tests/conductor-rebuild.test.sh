@@ -275,14 +275,18 @@ check "zero first timeout: nothing sent to either conductor" no_line "thread sen
 check "zero first timeout: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
 
 # 1 回目の読み取りの上限に timeout の期間接尾辞（d=日・m=分）や非数を指定したときも、
-# 読み取りの前に拒否する（awk の数値変換は先頭だけで成功するため 1d は 1 と読めてしまう）
-for bad in 1d 5m abc; do
+# 読み取りの前に拒否する（awk の数値変換は先頭だけで成功するため 1d は 1 と読めてしまう）。
+# 400 桁の数字列は double で inf（awk の v+0 > 0 を通り、timeout の最大値の期間になる）、
+# 61 は実用上限の 60 秒を超えるため、どちらも拒否する
+big="$(printf '9%.0s' $(seq 400))"
+for bad in 1d 5m abc "$big" 61; do
+  label="$bad"; [[ "$bad" == "$big" ]] && label="<400-digit>"
   printf 'mcp:launch:kept\n' > "$FILE"
   PELWAY_REBUILD_SHOW_FIRST_TIMEOUT="$bad" run "" --from "$OLD" --to "$NEW"; rc=$?
-  check "first timeout $bad: exits non-zero" [ "$rc" -ne 0 ]
-  check "first timeout $bad: makes no t3 calls" no_line "thread show"
-  check "first timeout $bad: nothing sent to either conductor" no_line "thread send"
-  check "first timeout $bad: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+  check "first timeout $label: exits non-zero" [ "$rc" -ne 0 ]
+  check "first timeout $label: makes no t3 calls" no_line "thread show"
+  check "first timeout $label: nothing sent to either conductor" no_line "thread send"
+  check "first timeout $label: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
 done
 
 # 打ち切りの TERM に応答しない読み取りも、猶予のあとの強制終了で期限に戻る

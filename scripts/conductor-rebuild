@@ -26,7 +26,7 @@
 #                                    失敗したときのやり直しの上限（回。既定 3）
 #   PELWAY_REBUILD_SHOW_RETRY_SLEEP  そのやり直しの間（秒。既定 1）
 #   PELWAY_REBUILD_SHOW_FIRST_TIMEOUT  残り時間が尽きたあとも必ず行う 1 回目の読み取りの
-#                                    上限（秒。既定 2。正の数以外は起動時に拒否）
+#                                    上限（秒。既定 2。正の数・60 以下以外は起動時に拒否）
 #   PELWAY_REBUILD_NOW_US_OFFSET     単調時計への加算（マイクロ秒。試験用。既定 0）
 # やり直すのは読み取りの thread show だけ。thread send は二重送信を防ぐためやり直さない。
 # 旧指揮役の settle と巡回の scheduled task の作り直しは、新しい指揮役が引き継ぎの確認の後に行う
@@ -102,11 +102,13 @@ SHOW_RETRY_SLEEP="${PELWAY_REBUILD_SHOW_RETRY_SLEEP:-1}"
 # timeout の期間 0 は打ち切り無効のため、残り 0 以下の読み取りにはこの下限を渡す。
 # その下限自体が 0 や非数では期間 0 と同じ意味になるので、正の数だけを受け付ける。
 # 接尾辞の付く値（1d・5m など）は timeout の日・分の期間になるため、数字だけの形で検査する
-# （awk の数値変換は文字列の先頭だけで成功するため v+0 では接尾辞を落とせない）
+# （awk の数値変換は文字列の先頭だけで成功するため v+0 では接尾辞を落とせない）。
+# 桁数の多い値は awk で inf となり、timeout の最大値の期間（実質打ち切りなし）になるため、
+# 1 回の読み取りの猶予として実用的な 60 秒を上限にする
 SHOW_FIRST_TIMEOUT="${PELWAY_REBUILD_SHOW_FIRST_TIMEOUT:-2}"
 [[ "$SHOW_FIRST_TIMEOUT" =~ ^[0-9]+(\.[0-9]+)?$ ]] \
-  && awk -v v="$SHOW_FIRST_TIMEOUT" 'BEGIN{exit !(v+0 > 0)}' \
-  || die "PELWAY_REBUILD_SHOW_FIRST_TIMEOUT must be a positive number of seconds (got '$SHOW_FIRST_TIMEOUT')"
+  && awk -v v="$SHOW_FIRST_TIMEOUT" 'BEGIN{exit !(v+0 > 0 && v+0 <= 60)}' \
+  || die "PELWAY_REBUILD_SHOW_FIRST_TIMEOUT must be a positive number of seconds, at most 60 (got '$SHOW_FIRST_TIMEOUT')"
 
 # 最後の thread show の生の出力（"database is locked" の判定に stderr が要るためファイルに受ける）
 SHOW_OUT="$(mktemp)"; SHOW_ERR="$(mktemp)"
