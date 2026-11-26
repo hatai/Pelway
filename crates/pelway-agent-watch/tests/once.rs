@@ -44,10 +44,11 @@ esac
         write_exec(&root.join("bin/gh"), "#!/usr/bin/env bash\necho '[]'\n");
         // 偽の fnox: 秘密は取れない（本物の webhook に送らないため。送信は「送れなかった」扱いになる）
         // fake/fnox-ok があるときだけ偽の値を返す（送信が失敗する場合の試験に使う）。
-        // fake/fnox-sleep・fake/curl-sleep があれば、その秒数だけ待ってから答える
+        // fake/fnox-sleep・fake/curl-sleep があれば、その秒数だけ待ってから答える。
+        // 呼び出しの引数は fake/fnox-calls に 1 行ずつ記録する（-c の場所の確認に使う）
         write_exec(
             &root.join("bin/fnox"),
-            "#!/usr/bin/env bash\nsleep \"$(cat \"$FAKE_DIR/fnox-sleep\" 2>/dev/null || echo 0)\"\n[ -e \"$FAKE_DIR/fnox-ok\" ] && { echo fake-secret; exit 0; }\nexit 1\n",
+            "#!/usr/bin/env bash\necho \"$*\" >> \"$FAKE_DIR/fnox-calls\"\nsleep \"$(cat \"$FAKE_DIR/fnox-sleep\" 2>/dev/null || echo 0)\"\n[ -e \"$FAKE_DIR/fnox-ok\" ] && { echo fake-secret; exit 0; }\nexit 1\n",
         );
         // 偽の curl: 本文（--data-binary @<file>）を fake/curl-body に写し、fake/curl-bodies に 1 行ずつ足す。
         // 返す HTTP ステータスは fake/curl-code（無ければ 500）。fake/curl-code-by-thread の
@@ -156,7 +157,9 @@ done
             .env("T3_BIN", self.root.join("bin/t3"))
             // 指揮役の登録ファイル（~/.config/pelway-agent-notify/conductor-thread-id）の置き場
             .env("HOME", self.root.join("home"))
-            .env("XDG_STATE_HOME", self.root.join("state"));
+            .env("XDG_STATE_HOME", self.root.join("state"))
+            // 通知用 fnox 設定の場所は試験ごとに決める（実行環境の値を拾わない）
+            .env_remove("PELWAY_NOTIFY_FNOX_CONFIG");
         cmd
     }
 
@@ -331,6 +334,82 @@ fn unsent_payload_is_kept_in_outbox() {
     assert_eq!(outbox.len(), 1);
     assert_eq!(outbox[0]["event"], "finished");
     assert_eq!(state["threads"]["mcp:a"]["status"], "completed");
+}
+
+/// `PELWAY_NOTIFY_FNOX_CONFIG` の絶対パスが `fnox -c` に渡る。
+#[test]
+fn notify_fnox_config_env_override() {
+    let sb = Sandbox::new("notify-cfg-override");
+    one_event(&sb);
+    sb.fake("fnox-ok", "");
+    let cfg = sb.root.join("fake/notify-elsewhere.toml");
+    let out = sb
+        .command(&["--once"])
+        .env("PELWAY_NOTIFY_FNOX_CONFIG", &cfg)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    // 秘密は URL と鍵の 2 件を、上書きした設定の場所から読みにいく
+    let calls = sb.read_fake("fnox-calls");
+    assert_eq!(
+        calls,
+        format!(
+            "-c {0} get PELWAY_NOTIFY_WEBHOOK_URL\n-c {0} get PELWAY_NOTIFY_WEBHOOK_KEY\n",
+            cfg.display()
+        )
+    );
+}
+
+/// 環境変数が無ければ既定の `~/.config/pelway-agent-notify/fnox.toml` のまま（既定は変えない）。
+#[test]
+fn notify_fnox_config_default() {
+    let sb = Sandbox::new("notify-cfg-default");
+    one_event(&sb);
+    sb.fake("fnox-ok", "");
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let cfg = sb.root.join("home/.config/pelway-agent-notify/fnox.toml");
+    let calls = sb.read_fake("fnox-calls");
+    assert_eq!(
+        calls,
+        format!(
+            "-c {0} get PELWAY_NOTIFY_WEBHOOK_URL\n-c {0} get PELWAY_NOTIFY_WEBHOOK_KEY\n",
+            cfg.display()
+        )
+    );
+}
+
+/// 空文字・相対パスは設定として使わない（fnox を呼ばず、送らずに `reason=no-secret` と同じ扱い。
+/// 相対パスを `--project` のカレントから解決して、sandbox の中から置かれた設定を読むこともない）。
+#[test]
+fn notify_fnox_config_invalid_is_not_used() {
+    for (name, value) in [
+        ("notify-cfg-empty", ""),
+        ("notify-cfg-relative", "conf/notify.toml"),
+    ] {
+        let sb = Sandbox::new(name);
+        one_event(&sb);
+        sb.fake("fnox-ok", "");
+        let out = sb
+            .command(&["--once"])
+            .env("PELWAY_NOTIFY_FNOX_CONFIG", value)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "stderr: {}", stderr(&out));
+        let err = stderr(&out);
+        assert!(
+            err.contains("mode=not-sent reason=no-secret"),
+            "{name}: {err}"
+        );
+        assert!(
+            sb.read_fake("fnox-calls").is_empty(),
+            "{name}: fnox を呼んでいる"
+        );
+        // 知らせは送信待ちの列に残る（no-secret と同じ扱い）
+        let state: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
+        assert_eq!(state["outbox"].as_array().unwrap().len(), 1, "{name}");
+    }
 }
 
 #[test]
