@@ -97,11 +97,11 @@ client/                 Web と Electron（Node。版は mise で固定）
 - **workflow の変更の扱い**：`verify.yml`・`nightly.yml`・`dependabot.yml` の変更と `desktop-release.yml` の追加は、hatai の admin マージが要る別の Issue にする。
 - **agent の運用とのつなぎ**：実装は worktree の T3 スレッドで行い、PR とレビューは `scripts/agent-gh` を使う。署名の鍵と environment（署名を入れるとき）、タグの push、公開、配布用の読み取り専用トークンの作成とホストへの登録は hatai が行う。
 - **Node とパッケージマネージャ**：Node は 26.13.1（LTS）、パッケージマネージャは bun の安定版 1.4.5 にし、どちらも `mise.toml` で固定して `mise-bump.yml` で上げる。mise の Node は開発の道具（electron-vite・Vite・Octane のコンパイラ）を動かすためのもので、アプリの中で動く Node は Electron に同梱のもの。install・`bun fmt`・`bun check`・`bun test` は mise の bun で回す。
-- **依存の版**：版は `exact` で固定し、bun の catalog で `client/package.json` の 1 か所にまとめる。`client/bunfig.toml` の `minimumReleaseAge` で、公開から 7 日以上経った版だけを入れる。例外は `octane`・`@octanejs/*`・`@tsrx/*`（Octane はほぼ毎日出る beta で、7 日待つと peer の組がそろわない）と `bun`（下の lint の canary）だけ。TypeScript は Octane の peer の範囲に入る 6.0.3 にする。
+- **依存の版**：版は `exact` で固定し、bun の catalog で `client/package.json` の 1 か所にまとめる。`client/bunfig.toml` の `minimumReleaseAge` で、公開から 7 日以上経った版だけを入れる。例外は `octane`・`@octanejs/electron`・`@octanejs/testing-library`・`@tsrx/oxc`（Octane の一式。ほぼ毎日出る beta で、7 日待つと peer の組がそろわない）と、`bun` とその OS ごとの本体 `@oven/bun-<OS>`（下の lint の canary）だけ。`minimumReleaseAgeExcludes` は glob を受け付けないので、包みの名前で並べる。TypeScript は Octane の peer の範囲に入る 6.0.3 にする。
 - **ビルド**：`client/apps/desktop` を electron-vite で作り、renderer の設定に Octane の Vite プラグインを入れる。preload は `sandbox: true` で読めるよう 1 つのファイルにまとめる。
-- **lint と format**：lint は `bun lint`、format は `bun fmt` にする。`bun lint` は bun の安定版にまだ無いので、日付つきの canary 版（npm の `bun@<版>-canary.<日付>.<n>`）を `client/package.json` の devDependency にして lockfile で固定し、`bun run lint` から呼ぶ。`bun lint` が安定版に入ったら、mise の bun を上げて canary の依存を外す。`bun fmt` の対象は `client/` の下だけにし、`hk.pkl` の pre-commit で `bun fmt --check`（直さずに検査だけ）を回す。typos は今のまま全体にかける。
+- **lint と format**：lint は `bun lint`、format は `bun fmt` にする。`bun lint` は bun の安定版にまだ無いので、日付つきの canary 版（npm の `bun@<版>-canary.<日付>.<n>`）を `client/package.json` の devDependency にして lockfile で固定し、`bun run lint` から呼ぶ。依存の postinstall は走らせない（`client/bunfig.toml` の `ignoreScripts = true` と、`client/package.json` の `trustedDependencies: []`）。canary の postinstall は本体が無いと lockfile で照合せずに取り直すので、使わない。代わりに `client/scripts/canary-bun.ts` が、lockfile の sha512 で照合して入った本体 `@oven/bun-<OS>` を直接起動し、本体が見つからないときと `client/node_modules` の外にあるときは失敗する。`bun lint` が安定版に入ったら、mise の bun を上げて canary の依存を外す。`bun fmt` の対象は `client/` の下だけにし、`hk.pkl` の pre-commit で `bun fmt --check`（直さずに検査だけ）を回す。typos は今のまま全体にかける。
 - **型検査**：`bun check` で回す。Octane の JSX の型を `bun check` が扱えないときは、Octane の `octane-tsc` に替える。
-- **単体の試験**：`bun test` で回し、`*.test.ts` を対象のファイルの隣に置く。Octane の部品は、Octane のコンパイラを `environment: 'client'` で通す bun のプラグインと、happy-dom・`@octanejs/testing-library` で試験する。main の試験では `electron` を `mock.module` で模擬する。
+- **単体の試験**：`bun test` で回し、`*.test.ts` を対象のファイルの隣に置く。Octane の部品は、Octane のコンパイラを `environment: 'client'` で通す bun のプラグインと、happy-dom・`@octanejs/testing-library` で試験する。main の試験では `electron` を読み込まず、対象の関数にセッションや WebContents の代わりの物（試験に要るメソッドだけを持つ物）を渡す（`client/apps/desktop/src/main/security.test.ts`）。
 - **client の検査**：`mise run client:verify`（`bun install --frozen-lockfile`・`bun fmt --check`・`bun run lint`・`bun check`・`bun test`）にまとめ、`mise run verify` から呼ぶ。
 
 ### 運用の Issue で決める案
@@ -151,7 +151,7 @@ server 側の検査（Origin、CSRF、WebSocket の認証。v0.7 [04](../technic
 ## 配布とライセンス表示
 
 - 3 つの OS の配布物は CI の同じ sha から作り、sha256 を一緒に出す（#551 の条件を Electron 向けに書き換えて引き継ぐ）。
-- About から開くサードパーティライセンスの一覧には、Electron・Chromium・Node.js と npm の依存を入れる。Rust の依存（cargo-about）は、画面側に Rust（WASM）を残すときだけ含める。
+- About から開くサードパーティライセンスの一覧には、Electron・Chromium・Node.js と npm の依存を入れる。画面側に Rust を残さない（共通核は TypeScript に移す）ので、Rust の依存（cargo-about）は含めない。
 - Slint の Royalty-free の条件（AboutSlint の表示）は、Slint をやめた時点で要らなくなる。
 - 最初は署名なしで配る。自動更新は Windows と Linux だけで、配布経路は国内ホストが GitHub Releases を取りに行く形（「運用の仕組み」の「決定」）。署名の選択肢の調査は #723 のコメント（`adr-0014-research`）にある。
 

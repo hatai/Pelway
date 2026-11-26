@@ -12,6 +12,7 @@
     "packages/core/src/**/*.ts",
     "packages/tokens/src/**/*.ts",
     "packages/i18n/src/**/*.ts",
-    "test/**/*.ts"
+    "test/**/*.ts",
+    "scripts/**/*.ts"
   ]
 }
