@@ -60,7 +60,7 @@ crates/
   pelway-contract/      契約の型の正本。ts-rs で TS の型を書き出す（feature を足す）
   pelway-http/ ほか      サーバー側（変えない）
   pelway-client-ui/     Slint。D1 の後に廃止
-  pelway-client-core/   Slint 用の核。TS に移したら廃止
+  pelway-client-core/   Slint 用の核。Slint の廃止と一緒に廃止（TS 版は client/packages/core）
   dev-client-probe/     D1 の後に廃止
 client/                 Web と Electron（Node。版は mise で固定）
   package.json          workspaces（apps/*・packages/*）
