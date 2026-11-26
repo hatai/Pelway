@@ -151,7 +151,7 @@ push 後の CI で既存の「no worktree until the limit: logs the last-read va
 
 ## 実装者メモ（round 10）
 
-対象 head: c504ed37ebd5e6b88afb1d94d5ae049e44ce2f8e
+対象 head: e705d4dc1c27de6daec3992bfdcf776545985e9a
 PR: #735
 
 レビュー指摘（run 7185187523 codex request-changes・must-fix 1、run 7185188739 claude request-changes・must-fix 1。ともに head 4ab57fba4860afccbf222c3fc3e30b7c184d0380、同一趣旨の指摘）への対応。
