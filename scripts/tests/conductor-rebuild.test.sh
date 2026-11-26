@@ -24,14 +24,32 @@ START_WANT="あなたは新しい指揮役。skill command-team と docs/agents/
 # thread start は受け付けない（スクリプトは新しい指揮役を立てない。呼ぶと exit 9 で失敗し、記録に残る）。
 # 旧指揮役の runtimeMode は auto-accept-edits、新しい指揮役は $NEW_MODE（無ければ auto-accept-edits）。
 # NEW_NOMODE=1 のとき、新しい指揮役の thread show は runtimeMode を返さない。
+# NEW_WT_AFTER=<n> で新しい指揮役の worktreePath を n 回目の thread show から返す（立てた直後の準備中の演出）。
+# T3_LOCK_TIMES=<n>（全部の呼び出し）・NEW_LOCK_TIMES=<n>（新しい指揮役の呼び出しだけ）で
+# 先頭 n 回の thread show を "database is locked"（標準エラー・終了コード 1）にする。
+# T3_SHOW_FAIL=<n> で先頭 n 回の thread show を lock 以外の失敗にする。
 cat > "$ROOT/t3" <<'T3'
 #!/usr/bin/env bash
 echo "$*" >> "$LOG"
 case "$1 $2" in
   "thread show")
+    n=$(( $(cat "$LOG.show-count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$LOG.show-count"
+    kn=0; if [[ "$3" == *new* ]]; then
+      kn=$(( $(cat "$LOG.show-new" 2>/dev/null || echo 0) + 1 )); echo "$kn" > "$LOG.show-new"
+    fi
+    if { [[ -n "${T3_LOCK_TIMES:-}" ]] && [[ "$n" -le "$T3_LOCK_TIMES" ]]; } \
+      || { [[ -n "${NEW_LOCK_TIMES:-}" ]] && [[ "$kn" -gt 0 && "$kn" -le "$NEW_LOCK_TIMES" ]]; }; then
+      echo "error: database is locked" >&2; exit 1
+    fi
+    if [[ -n "${T3_SHOW_FAIL:-}" && "$n" -le "$T3_SHOW_FAIL" ]]; then
+      echo "error: t3 server unreachable" >&2; exit 1
+    fi
     mode=auto-accept-edits
     [[ "$3" == *new* ]] && mode="${NEW_MODE:-auto-accept-edits}"
-    wt=""; [[ "$3" == *new* ]] && wt="${NEW_WT-/home/u/.t3/worktrees/Pelway/conductor}"
+    wt=""; if [[ "$3" == *new* ]]; then
+      wt="${NEW_WT-/home/u/.t3/worktrees/Pelway/conductor}"
+      [[ -n "${NEW_WT_AFTER:-}" && "$kn" -lt "$NEW_WT_AFTER" ]] && wt=""
+    fi
     mode_field=',"runtimeMode":"'"$mode"'"'
     [[ "$3" == *new* && -n "${NEW_NOMODE:-}" ]] && mode_field=""
     echo '{"thread":{"threadId":"'"$3"'","providerInstanceId":"'"${OLD_PROVIDER:-acpRegistry_devin}"'","model":"'"${OLD_MODEL:-swe-2-high}"'"'"$mode_field"',"worktreePath":"'"$wt"'"}}' ;;
@@ -67,6 +85,7 @@ check() {
 line() { sed -n "${1}p" "$LOG"; }
 same() { [[ "$(cat "$1" 2>/dev/null)" == "$2" ]]; }
 no_line() { ! grep -q -- "$1" "$LOG" 2>/dev/null; }
+count() { local n; n="$(grep -c -- "$1" "$LOG" 2>/dev/null)"; echo "${n:-0}"; }
 all_err() { local f="$1"; shift; local p; for p in "$@"; do grep -qF -- "$p" "$f" || return 1; done; }
 
 # --to 付き: 権限の確かめ → 旧指揮役の停止 → 引き継ぎ → 宛先の登録（新しい指揮役は立てない）
@@ -130,21 +149,74 @@ run "" --from "$OLD" --to "$OLD"; rc=$?
 check "--to equal to --from is rejected" [ "$rc" -ne 0 ]
 check "--to equal to --from makes no t3 calls" [ ! -s "$LOG" ]
 
-# 新しい指揮役が本体 checkout で動いていたら（worktree でなければ）、旧指揮役に何も送らずに止まる
+# worktree のパスが上限まで空のままのときは、旧指揮役にも新指揮役にも何も送らず、
+# 宛先の登録も変えずに止まる（試験では上限・間隔を小さく上書きする）
 printf 'mcp:launch:kept\n' > "$FILE"
-NEW_WT="" run "" --from "$OLD" --to "$NEW"; rc=$?
-check "main-checkout new conductor is rejected" [ "$rc" -ne 0 ]
-check "main-checkout new conductor: nothing sent to the old conductor" no_line "thread send --wait $OLD"
-check "main-checkout new conductor: no thread start" no_line "thread start"
-check "main-checkout new conductor: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
-check "main-checkout new conductor: logs worktree=-" \
+NEW_WT="" PELWAY_REBUILD_WT_WAIT=1 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "no worktree until the limit: exits non-zero" [ "$rc" -ne 0 ]
+check "no worktree until the limit: rereads the new conductor" [ "$(count "thread show $NEW --json")" -gt 1 ]
+check "no worktree until the limit: nothing sent to either conductor" no_line "thread send"
+check "no worktree until the limit: no thread start" no_line "thread start"
+check "no worktree until the limit: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+check "no worktree until the limit: stderr has the waited seconds" \
+  grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
+check "no worktree until the limit: stderr gives the undecided cause and the T3 window check" \
+  all_err "$ROOT/err" "準備中" "worktree なしで立てられ" "T3"
+check "no worktree until the limit: logs the last-read values" \
   grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=auto-accept-edits worktree=-" "$ROOT/err"
-check "main-checkout new conductor: tells how to continue" \
+check "no worktree until the limit: tells how to continue" \
   all_err "$ROOT/err" "t3_thread_launch" "--to"
+
+# worktree のパスが読み直しの途中で入ったときは、権限の確かめ以降に進む
+printf 'mcp:launch:kept\n' > "$FILE"
+NEW_WT="/home/u/.t3/worktrees/Pelway/late" NEW_WT_AFTER=3 \
+  PELWAY_REBUILD_WT_WAIT=30 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "worktree arrives while waiting: succeeds" [ "$rc" -eq 0 ]
+check "worktree arrives while waiting: reread the new conductor 3 times" \
+  [ "$(count "thread show $NEW --json")" -eq 3 ]
+check "worktree arrives while waiting: stops the old conductor once" \
+  [ "$(count "thread send --wait $OLD -")" -eq 1 ]
+check "worktree arrives while waiting: sends the handover" \
+  [ "$(count "thread send $NEW -")" -eq 1 ]
+check "worktree arrives while waiting: registers the new conductor" [ "$(cat "$FILE")" = "$NEW" ]
+check "worktree arrives while waiting: logs the last-read worktree" \
+  grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=auto-accept-edits worktree=/home/u/.t3/worktrees/Pelway/late" "$ROOT/err"
+
+# thread show が "database is locked" を返し続けるときは、やり直しの上限（初回 + 3 回）のあと
+# 旧指揮役に何も送らずに止まる
+printf 'mcp:launch:kept\n' > "$FILE"
+T3_LOCK_TIMES=99 PELWAY_REBUILD_SHOW_RETRY_SLEEP=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "lock keeps failing: exits non-zero" [ "$rc" -ne 0 ]
+check "lock keeps failing: retried 3 times (4 reads)" [ "$(count "thread show $OLD --json")" -eq 4 ]
+check "lock keeps failing: nothing sent to either conductor" no_line "thread send"
+check "lock keeps failing: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+
+# "database is locked" のあと成功すれば、やり直して進む
+printf 'mcp:launch:kept\n' > "$FILE"
+T3_LOCK_TIMES=1 PELWAY_REBUILD_SHOW_RETRY_SLEEP=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "lock then ok: succeeds" [ "$rc" -eq 0 ]
+check "lock then ok: reread the old conductor" [ "$(count "thread show $OLD --json")" -eq 2 ]
+check "lock then ok: stops the old conductor once" [ "$(count "thread send --wait $OLD -")" -eq 1 ]
+
+# 新しい指揮役の読み取りでも "database is locked" はやり直す
+printf 'mcp:launch:kept\n' > "$FILE"
+NEW_LOCK_TIMES=1 PELWAY_REBUILD_SHOW_RETRY_SLEEP=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "lock on the new conductor then ok: succeeds" [ "$rc" -eq 0 ]
+check "lock on the new conductor then ok: reread the new conductor" \
+  [ "$(count "thread show $NEW --json")" -eq 2 ]
+
+# "database is locked" 以外の thread show の失敗では、やり直さずに止まる
+printf 'mcp:launch:kept\n' > "$FILE"
+T3_SHOW_FAIL=1 PELWAY_REBUILD_SHOW_RETRY_SLEEP=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "non-lock show failure: exits non-zero" [ "$rc" -ne 0 ]
+check "non-lock show failure: reads once" [ "$(count "thread show")" -eq 1 ]
+check "non-lock show failure: nothing sent to either conductor" no_line "thread send"
+check "non-lock show failure: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
 
 # worktree が無く、かつ権限も合わないときは、権限の失敗（exit 3）で止まる
 printf 'mcp:launch:kept\n' > "$FILE"
-NEW_MODE=full-access NEW_WT="" run "" --from "$OLD" --to "$NEW"; rc=$?
+NEW_MODE=full-access NEW_WT="" PELWAY_REBUILD_WT_WAIT=0 PELWAY_REBUILD_WT_INTERVAL=0.1 \
+  run "" --from "$OLD" --to "$NEW"; rc=$?
 check "no worktree + bad mode: exits 3" [ "$rc" -eq 3 ]
 check "no worktree + bad mode: nothing sent to the old conductor" no_line "thread send --wait $OLD"
 check "no worktree + bad mode: no handover sent" no_line "thread send $NEW"
@@ -153,12 +225,15 @@ check "no worktree + bad mode: registration unchanged" [ "$(cat "$FILE")" = "mcp
 check "no worktree + bad mode: logs both read values" \
   grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=full-access worktree=-" "$ROOT/err"
 
-# 失敗したら登録を変えずに止まる
+# 失敗したら登録を変えずに止まる。thread send はやり直さない（二重送信を防ぐため）。
 printf 'mcp:launch:kept\n' > "$FILE"
 run send-fail --from "$OLD" --to "$NEW"; rc=$?
 check "stop failure exits non-zero" [ "$rc" -ne 0 ]
 check "stop failure keeps the registration" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
 check "stop failure: no thread start" no_line "thread start"
+check "stop failure: thread send is tried once" [ "$(count "thread send")" -eq 1 ]
+check "stop failure: the one send was the stop to the old conductor" \
+  [ "$(count "thread send --wait $OLD -")" -eq 1 ]
 
 # スレッド ID の検査
 run "" --from "--help" --to "$NEW"; rc=$?

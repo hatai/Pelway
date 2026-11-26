@@ -11,10 +11,21 @@
 # 指定して立て、そのスレッド ID を --to に渡す（手順は docs/agents/conductor-context.md の
 # 「恒久交代」。--to が無いときはその手順を出して止まる）。
 # 1. 新しい指揮役の権限（runtimeMode）が旧指揮役と同じで、full-access でなく、worktree で
-#    動いていることを確かめる。合わなければ、旧指揮役には何も送らず、登録も変えずに止まる
+#    動いていることを確かめる。合わなければ、旧指揮役には何も送らず、登録も変えずに止まる。
+#    worktree のパスは立てた直後にまだ空のことがあるため、入るまで上限付きで読み直して待つ
+#    （下の環境変数）。上限を超えても空なら、準備中か worktree なしで立てられたかの判定が
+#    thread show からは取れないため、T3 の画面で確かめる案内を出して止まる
 # 2. 旧指揮役に決まった停止の文を送り、終わるまで待つ（t3 thread send --wait）
 # 3. 新しい指揮役に引き継ぎの指示を送る（t3 thread send）
 # 4. 起こしの宛先を新しい指揮役に替える（インストールした ~/.local/bin/pelway-agent-watch --register）
+#
+# 環境変数（試験が小さい値に上書きする）:
+#   PELWAY_REBUILD_WT_WAIT           worktree のパスが入るまで待つ上限（秒。既定 120）
+#   PELWAY_REBUILD_WT_INTERVAL       読み直しの間隔（秒。既定 2）
+#   PELWAY_REBUILD_SHOW_RETRIES      読み取りの thread show が "database is locked" で
+#                                    失敗したときのやり直しの上限（回。既定 3）
+#   PELWAY_REBUILD_SHOW_RETRY_SLEEP  そのやり直しの間（秒。既定 1）
+# やり直すのは読み取りの thread show だけ。thread send は二重送信を防ぐためやり直さない。
 # 旧指揮役の settle と巡回の scheduled task の作り直しは、新しい指揮役が引き継ぎの確認の後に行う
 # （t3 CLI には settle が無い。権限は確認の完了で移る）。
 set -euo pipefail
@@ -79,21 +90,52 @@ if [[ -z "$T3" ]]; then
 fi
 [[ -n "$T3" ]] || die "t3 not found"
 
-# show <id> — runtimeMode と worktree のパス（無ければ -）を 1 行で返す
+# 待ちとやり直しの上限・間隔（冒頭のコメント参照。試験は小さい値に上書きする）
+WT_WAIT="${PELWAY_REBUILD_WT_WAIT:-120}"
+WT_INTERVAL="${PELWAY_REBUILD_WT_INTERVAL:-2}"
+SHOW_RETRIES="${PELWAY_REBUILD_SHOW_RETRIES:-3}"
+SHOW_RETRY_SLEEP="${PELWAY_REBUILD_SHOW_RETRY_SLEEP:-1}"
+
+# 最後の thread show の生の出力（"database is locked" の判定に stderr が要るためファイルに受ける）
+SHOW_OUT="$(mktemp)"; SHOW_ERR="$(mktemp)"
+trap 'rm -f "$SHOW_OUT" "$SHOW_ERR"' EXIT
+
+# show <id> — runtimeMode と worktree のパス（無ければ -）を 1 行で返す。
+# "database is locked" で失敗したときだけ、間を空けて最大 $SHOW_RETRIES 回やり直す。
+# それ以外の失敗（lock 以外のエラー、JSON にならない出力）ではやり直さない。
 show() {
-  "$T3" thread show "$1" --json | /usr/bin/python3 -I -c '
+  local tries=0
+  while :; do
+    : >"$SHOW_OUT"; : >"$SHOW_ERR"
+    if "$T3" thread show "$1" --json >"$SHOW_OUT" 2>"$SHOW_ERR" \
+      && /usr/bin/python3 -I -c '
 import json, sys
 t = json.load(sys.stdin); t = t.get("thread", t)
-print(t.get("runtimeMode") or "-", t.get("worktreePath") or "-")'
+print(t.get("runtimeMode") or "-", t.get("worktreePath") or "-")' <"$SHOW_OUT"; then
+      return 0
+    fi
+    tries=$((tries + 1))
+    if (( tries > SHOW_RETRIES )) || ! grep -q "database is locked" "$SHOW_ERR" "$SHOW_OUT"; then
+      return 1
+    fi
+    sleep "$SHOW_RETRY_SLEEP"
+  done
 }
+show_err() { local e; e="$(sed -n '1p' "$SHOW_ERR")"; [[ -n "$e" ]] && printf ': %s' "$e"; }
 
-read -r old_mode _ < <(show "$from") || die "cannot read the old conductor"
+read -r old_mode _ < <(show "$from") || die "cannot read the old conductor$(show_err)"
 [[ "$old_mode" != - ]] || die "cannot read the old conductor's runtimeMode"
 [[ "$old_mode" != full-access ]] || die "the old conductor runs in full-access; fix it before rebuilding"
 
-# 1. 権限を確かめる
-read -r new_mode new_wt < <(show "$to") \
-  || die "cannot read the new conductor $to (check it in T3). Nothing was sent to the old conductor"
+# 1. 権限を確かめる。worktree のパスは立てた直後にまだ空のことがあるため、入るまで
+#    上限付きで読み直して待つ（待っている間、どのスレッドにも thread send は呼ばない）
+start=$SECONDS; end=$((start + WT_WAIT))
+while :; do
+  read -r new_mode new_wt < <(show "$to") \
+    || die "cannot read the new conductor $to (check it in T3)$(show_err). Nothing was sent to the old conductor and the registration is unchanged"
+  [[ "$new_wt" != - || "$SECONDS" -ge "$end" ]] && break
+  sleep "$WT_INTERVAL"
+done
 echo "conductor-rebuild: new conductor $to runtimeMode=$new_mode worktree=$new_wt" >&2
 if [[ "$new_mode" == - ]]; then
   echo "conductor-rebuild: cannot read the new conductor $to's runtimeMode." >&2
@@ -108,7 +150,9 @@ if [[ "$new_mode" != "$old_mode" || "$new_mode" == full-access ]]; then
   exit 3
 fi
 if [[ "$new_wt" == - ]]; then
-  echo "conductor-rebuild: the new conductor $to runs in the main checkout; it must run in its own worktree. Nothing was sent to the old conductor and the registration is unchanged." >&2
+  waited=$((SECONDS - start))
+  echo "conductor-rebuild: the new conductor $to still has no worktree after waiting ${waited}s (limit ${WT_WAIT}s); worktree がまだ無い（準備中か、worktree なしで立てられた）." >&2
+  echo "conductor-rebuild: check the new conductor's worktree in the T3 window; if it was launched without a worktree, launch a replacement as below. Nothing was sent to the old conductor and the registration is unchanged." >&2
   echo "conductor-rebuild: launch a replacement with MCP t3_thread_launch (runtimeMode '$old_mode', workspaceStrategy worktree baseRef main), then run: $0 --from '$from' --to '<新指揮役のスレッド ID>'" >&2
   exit 1
 fi
