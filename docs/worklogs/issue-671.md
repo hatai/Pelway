@@ -77,3 +77,13 @@
 5. 改善案: script-test の逐次実行でも patrol-state-update.test.sh が 1 回だけ落ちることがあった（直後の 2 回の単独実行と script-test 再実行では全パス。時刻依存のフレークの可能性）
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 11）
+対象 head: cfd5db02（77a6ba69 の codex request-changes への修正。claude の同 head の判定は委託実行中）
+1. 詰まった箇所: なし
+2. 曖昧だった文: なし（must-fix「次の巡回が通知の間引きに使う状態が保存されることまで検証する」はそのまま実装）
+3. 仮定と解釈: 「その回の ps_write_skipped.reason がディスク上で write-failed になったこと」を、見張りの state.json の ps_write_skipped.reason の保存と読み、patrol_at の確認は残して間引き用の状態の確認を別の項目として足した
+4. 足りなかった情報・検証手段: なし
+5. 改善案: なし
+
+使ったスキル: implement-issue
