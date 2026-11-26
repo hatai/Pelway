@@ -129,7 +129,7 @@ describe("denyAllPermissions", () => {
 });
 
 describe("disableSpellChecker", () => {
-  test("既定のセッションの綴りの辞書の一覧を空にし、辞書を取りに行かせない", () => {
+  test("既定のセッションの綴りの辞書の一覧を空にする（setSpellCheckerLanguages に空の一覧を渡す）", () => {
     const calls: string[][] = [];
     const fakeSession = {
       setSpellCheckerLanguages(languages: string[]) {
