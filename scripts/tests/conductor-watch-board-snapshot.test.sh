@@ -36,6 +36,16 @@ exit 9
 MOCK2
 chmod +x "$ROOT/bin/t3"
 
+REALPY="$(command -v python3)"
+cat > "$ROOT/bin/python3" <<MOCKP
+#!/usr/bin/env bash
+# UTF8HACK=1 のとき -X utf8=0 を差し込み、UTF-8 モードを強制できない
+# ホスト（非 UTF-8 ロケール）を模す
+if [[ -n "\${UTF8HACK:-}" ]]; then exec "$REALPY" -X utf8=0 "\$@"; fi
+exec "$REALPY" "\$@"
+MOCKP
+chmod +x "$ROOT/bin/python3"
+
 cat > "$ROOT/bin/sleep" <<'MOCK3'
 #!/usr/bin/env bash
 n=$(( $(cat "$MOCK/sleeps" 2>/dev/null || echo 0) + 1 ))
@@ -64,6 +74,7 @@ if [[ "$1 $2" == "project item-list" ]]; then
     exit 0
   fi
   if [[ -n "${MOCK_BAD_ITEM:-}" ]]; then cat "$MOCK/item-list-bad.json"; exit 0; fi
+  if [[ -n "${MOCK_NONASCII:-}" ]]; then cat "$MOCK/item-list-nonascii.json"; exit 0; fi
   cat "$MOCK/item-list.json"; exit 0
 fi
 echo "unexpected gh call: $*" >&2
@@ -108,6 +119,12 @@ cat > "$MOCK/item-list-full5.json" <<'MOCK7'
    "status": "Todo", "labels": [], "assignees": []}
 ], "totalCount": 5}
 MOCK7
+cat > "$MOCK/item-list-nonascii.json" <<'MOCKN'
+{"items": [
+  {"id": "PVTI_a", "content": {"type": "Issue", "number": 810, "repository": "hatai/Pelway", "title": "a"},
+   "status": "Todo", "labels": ["準備完了"], "assignees": []}
+], "totalCount": 1}
+MOCKN
 cat > "$MOCK/item-list-bad.json" <<'MOCK8'
 {"items": [
   {"id": "PVTI_x", "content": {"type": "Issue", "repository": "hatai/Pelway", "title": "x"},
@@ -118,10 +135,15 @@ MOCK8
 start_watch() {
   local interval="${INTERVAL:-0}" mock_fail="${RFAIL:-}" mock_truncate="${TRUNC:-}" mock_bad="${BADITEM:-}"
   echo 0 > "$MOCK/sleeps"
-  MOCK="$MOCK" SLEEP_MAX="$1" MOCK_READ_FAIL="$mock_fail" MOCK_TRUNCATE="$mock_truncate" MOCK_BAD_ITEM="$mock_bad" \
+  local snapvar=(PELWAY_BOARD_SNAPSHOT="$SNAP")
+  [[ -n "${NOSNAPVAR:-}" ]] && snapvar=()
+  local locenv=()
+  [[ -n "${LOCALE_ASCII:-}" ]] && locenv=(LC_ALL=C PYTHONUTF8=0)
+  env "${locenv[@]}" \
+  MOCK="$MOCK" SLEEP_MAX="$1" MOCK_READ_FAIL="$mock_fail" MOCK_TRUNCATE="$mock_truncate" MOCK_BAD_ITEM="$mock_bad" MOCK_NONASCII="${NONASCII:-}" UTF8HACK="${UTF8HACK:-}" \
   PELWAY_BOARD_QUEUE_DIR="$QUEUE" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
   PELWAY_PATROL_STATE="$ROOT/state/pelway/patrol-state.json" \
-  PELWAY_BOARD_SNAPSHOT="$SNAP" PELWAY_BOARD_SNAPSHOT_INTERVAL="$interval" \
+  "${snapvar[@]}" PELWAY_BOARD_SNAPSHOT_INTERVAL="$interval" \
   PELWAY_BOARD_SNAPSHOT_FIRST_LIMIT="${FIRST_LIMIT:-}" \
   PELWAY_BOARD_SNAPSHOT_MAX_BYTES="${MAXBYTES:-}" \
     bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
@@ -215,6 +237,28 @@ check "oversized logged with reason too-large" has "$ROOT/out.log" "snapshot-fai
 # 上限を戻せば次の巡回で公開できる（止まり続けない）
 INTERVAL=0 start_watch 2
 check "publish resumes after limit restored" test "$(jqv '[i["number"] for i in d["items"]]' "$SNAP")" = "[810, 811, 812]"
+
+# 10. 既定の置き場は見張りの状態ディレクトリ（$XDG_STATE_HOME/pelway/conductor-watch/）。
+#     共有の /tmp はエージェントも書けるため真正性を確かめられないが、状態ディレクトリは
+#     sandbox から読み取り専用で見える（runbook「ボード読み取りスナップショット」）。
+#     PELWAY_BOARD_SNAPSHOT を指定しない起動で状態ディレクトリに書き出す
+rm -f "$SNAP"
+STATESNAP="$ROOT/state/pelway/conductor-watch/board-snapshot.json"
+rm -f "$STATESNAP"
+NOSNAPVAR=1 INTERVAL=0 start_watch 2
+check "default path writes to state dir" test -f "$STATESNAP"
+check "default path snapshot readable" test "$(jqv '[i["number"] for i in d["items"]]' "$STATESNAP")" = "[810, 811, 812]"
+
+# 11. 非 ASCII の内容を UTF-8 でない環境でも正しく書き出す。
+#     UTF8HACK で UTF-8 モードを強制できないホスト（非 UTF-8 ロケール）を模す。
+#     容量は UTF-8 のバイト数で測るため、gh の出力の読み取りも書き出しも
+#     UTF-8 と決めて行う。ロケールの既定の文字コードに任せると、検査を通った後に
+#     読めないバイト列で前回分を置き換える・公開が止まる
+rm -f "$SNAP"
+NONASCII=1 UTF8HACK=1 LOCALE_ASCII=1 INTERVAL=0 start_watch 2
+check "non-ascii under C locale published" test -f "$SNAP"
+check "non-ascii label round-trips" test "$(jqv 'd["items"][0]["labels"]' "$SNAP")" = "['準備完了']"
+check "non-ascii write has no traceback" nhas "$ROOT/out.log" "Traceback"
 
 printf '\n'
 if ((${#failures[@]})); then

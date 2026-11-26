@@ -11,7 +11,7 @@
 # （エージェント環境から人間名義 gh は使えないため、ホスト側のこの常駐で処理する）。
 # 巡回のたびに（間隔の制御あり）、人間名義の gh でボードを読み、Todo の並び順と
 # 各カードの Status などをスナップショット JSON（$PELWAY_BOARD_SNAPSHOT、既定
-# /tmp/pelway-board-snapshot.json）に書き出す（runbook の「ボード読み取り
+# $XDG_STATE_HOME/pelway/conductor-watch/board-snapshot.json）に書き出す（runbook の「ボード読み取り
 # スナップショット」。指揮役はそれを scripts/board-snapshot-read で読む）。
 # 取得に失敗した巡回は前の書き出しを残す（消さない・空にしない）。
 # GitHub への書き込みはほかに 1 つだけ: needs-decision が 15 分決まらず指揮役が動いていない Issue に、scripts/agent-gh dev で
@@ -20,10 +20,11 @@
 D="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch"; mkdir -p "$D"
 Q="${PELWAY_BOARD_QUEUE_DIR:-/tmp/pelway-board-queue}"; mkdir -p "$Q"
 # ボード読み取りスナップショットの書き出し先（runbook の「ボード読み取りスナップショット」）。
-# エージェント環境とホストで同一の /tmp を共有している前提はキューと同じ。
+# 既定は見張りの状態ディレクトリ。共有の /tmp とは違い、sandbox からは読み取り専用で
+# 見えるため、エージェントは書き出しを偽装できない（slots.json と同じ経路）。
 # PELWAY_BOARD_SNAPSHOT を空にすると書き出し自体を止める（テスト用。
 # 人間名義の gh を呼ばせない）。
-SNAP="${PELWAY_BOARD_SNAPSHOT-/tmp/pelway-board-snapshot.json}"
+SNAP="${PELWAY_BOARD_SNAPSHOT-${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch/board-snapshot.json}"
 # 一覧の 1 回の取得上限。件数が上限に達した巡回は打ち切りの可能性があるため、
 # python 側で巡回状態を更新しない（窓外の対象を消したり誤判定したりしない）。
 IL=1000; PL=1000
@@ -1122,7 +1123,8 @@ def fetch(limit):
     try:
         r = subprocess.run(["gh", "project", "item-list", NUM, "--owner", OWNER,
                             "--format", "json", "--limit", str(limit)],
-                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                           encoding="utf-8", errors="strict", timeout=60)
     except Exception:
         failed("gh-exec")
     if r.returncode != 0:
@@ -1209,12 +1211,20 @@ if len(payload.encode("utf-8")) > max_bytes:
 d = os.path.dirname(os.path.abspath(snap_path)) or "/"
 name = os.path.basename(snap_path)
 tmp = f".snap-{os.getpid()}-{secrets.token_hex(8)}.tmp"
+# 容量を測った UTF-8 のバイト列をそのまま書く。ロケールの既定の文字コードに任せると、
+# UTF-8 以外の環境で読めないバイト列で前回分を置き換えうる。書き込みに失敗したときも
+# 前回分を残し、一時ファイルを片付ける
 try:
     fd = os.open(os.path.join(d, tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
 except OSError:
     failed("write")
-with os.fdopen(fd, "w") as f:
-    f.write(payload)
+try:
+    with os.fdopen(fd, "wb") as f:
+        f.write(payload.encode("utf-8"))
+except BaseException:
+    try: os.unlink(os.path.join(d, tmp))
+    except OSError: pass
+    failed("write")
 try:
     os.replace(os.path.join(d, tmp), os.path.join(d, name))
 except OSError:

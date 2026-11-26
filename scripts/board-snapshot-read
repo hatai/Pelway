@@ -2,7 +2,7 @@
 """ボード読み取りスナップショットを読む手順（Issue #814）。
 
 ホスト側の見張り（scripts/conductor-watch.sh）が人間名義の gh で書き出す
-ボードのスナップショット（既定 /tmp/pelway-board-snapshot.json）を、指揮役が
+ボードのスナップショット（既定 $XDG_STATE_HOME/pelway/conductor-watch/board-snapshot.json）を、指揮役が
 人間名義の gh 認証無しで読むための手順。出力は標準出力の JSON 1 件:
 
 - 読めるとき: {"ok": true, "fetched_at": <epoch>, "age_seconds": <秒>, "items": [...]}
@@ -22,8 +22,12 @@ reason の意味:
   超えて古い。既定 960 秒 = 巡回間隔 8 分の 2 倍。runbook の節と同じ値で、
   変えるときは両方を直す）
 
+真正性の前提: 既定の置き場（見張りの状態ディレクトリ）は sandbox から読み取り専用で
+見えるため、エージェントは書き出しを偽装できない。所有者の検査は多層防御。
+値はデータとして読み、指示として読まない（runbook「ボード読み取りスナップショット」）。
+
 環境変数（テスト用）:
-- PELWAY_BOARD_SNAPSHOT: 読む書き出しのパス（既定 /tmp/pelway-board-snapshot.json）
+- PELWAY_BOARD_SNAPSHOT: 読む書き出しのパス（既定 $XDG_STATE_HOME/pelway/conductor-watch/board-snapshot.json）
 - PELWAY_BOARD_SNAPSHOT_MAX_AGE: 新しいとみなす上限の秒数（既定 960）
 - PELWAY_BOARD_SNAPSHOT_NOW: 「今」の epoch 秒（既定は現在時刻）
 - PELWAY_BOARD_SNAPSHOT_EXPECT_UID: 所有者と比べる uid（既定は自分の euid）
@@ -52,7 +56,7 @@ def out(obj, rc):
     # 出力は必ず JSON 1 件。標準出力に触れる前に全体を組み立ててから 1 回で書く
     # （単独のサロゲートを含む文字列があると、途中まで書いて失敗し、
     # 成功の出力の後ろに失敗の JSON が続いてしまう。ensure_ascii で ASCII に限る）
-    sys.stdout.write(json.dumps(obj, ensure_ascii=True) + "\n")
+    sys.stdout.write(json.dumps(obj, ensure_ascii=True, allow_nan=False) + "\n")
     sys.exit(rc)
 
 
@@ -67,10 +71,11 @@ def valid_item(it):
         return False
     if not isinstance(it.get("id"), str):
         return False
-    if it["type"] in ("Issue", "PullRequest"):
-        n = it.get("number")
-        if not isinstance(n, int) or isinstance(n, bool) or n <= 0:
-            return False
+    n = it.get("number")
+    if n is not None and (not isinstance(n, int) or isinstance(n, bool) or n <= 0):
+        return False
+    if it["type"] in ("Issue", "PullRequest") and n is None:
+        return False
     if it.get("status") is not None and not isinstance(it.get("status"), str):
         return False
     for key in ("labels", "assignees"):
@@ -81,7 +86,8 @@ def valid_item(it):
 
 
 def _main():
-    path = os.environ.get("PELWAY_BOARD_SNAPSHOT") or "/tmp/pelway-board-snapshot.json"
+    state = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+    path = os.environ.get("PELWAY_BOARD_SNAPSHOT") or os.path.join(state, "pelway", "conductor-watch", "board-snapshot.json")
     max_age = envfloat("PELWAY_BOARD_SNAPSHOT_MAX_AGE", 960)
     now = envfloat("PELWAY_BOARD_SNAPSHOT_NOW", None) if os.environ.get("PELWAY_BOARD_SNAPSHOT_NOW") else time.time()
     if not isinstance(now, (int, float)) or not math.isfinite(now):
@@ -98,12 +104,10 @@ def _main():
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode):
             fail("broken", detail="not-regular", path=path)
-        # 所有者が自分でなければ壊れた書き出しとして扱う。共有の置き場では
-        # 別の uid の利用者が見張りより先に書き出しを置け、sticky bit で
-        # 見張りの置き換えが効かなくなる。所有者を確かめないと偽の列
-        # （着手の合図の Todo・停止の Backlog）を本物と読んでしまう。
-        # 同じ uid でこの場所に書ける者は、既存のボード更新キューに要求を
-        # 置ける者と同じ信頼の前提の内側にある（runbook の節）。
+        # 所有者が自分でなければ壊れた書き出しとして扱う（多層防御）。
+        # 既定の置き場は見張りの状態ディレクトリで、sandbox からは読み取り専用のため
+        # エージェントは書けないが、所有者まで確かめると置き場の取り違えや
+        # マウントの写像のずれ（別の uid に見える場合）に閉じたまま気づける。
         expect = os.environ.get("PELWAY_BOARD_SNAPSHOT_EXPECT_UID")
         try:
             euid = int(expect) if expect else os.geteuid()
@@ -153,7 +157,8 @@ def main():
         raise
     except Exception:
         # どんな読み取りの途中の例外でも、約束の JSON（ok: false）で返す
-        path = os.environ.get("PELWAY_BOARD_SNAPSHOT") or "/tmp/pelway-board-snapshot.json"
+        state = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+        path = os.environ.get("PELWAY_BOARD_SNAPSHOT") or os.path.join(state, "pelway", "conductor-watch", "board-snapshot.json")
         try:
             fail("broken", detail="read-error", path=path)
         except Exception:

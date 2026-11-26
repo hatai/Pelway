@@ -183,6 +183,38 @@ run_read
 check "surrogate: stdout is a single valid json" python3 -c 'import json,sys; json.loads(open(sys.argv[1], encoding="utf-8").read())' "$ROOT/out.json"
 check "surrogate: no traceback" test ! -s "$ROOT/err.txt"
 
+# 10. DraftIssue の number は型検査を通らない値（非有限数）であってはならない。
+# DraftIssue は番号を持たないため number の検査を飛ばすが、値が在ればそのまま
+# 成功結果にコピーされ、非有限数は標準 JSON として無効な表記で出力される
+python3 -I - "$SNAP" "$NOW" <<'PY'
+import json, sys
+items = [{"id": "PVTI_d", "type": "DraftIssue", "number": float("nan"), "status": "Todo", "labels": [], "assignees": []}]
+json.dump({"version": 1, "fetched_at": float(sys.argv[2]) - 10, "items": items}, open(sys.argv[1], "w"))
+PY
+run_read
+check "nan number in draft: exit nonzero" test "$rc" -ne 0
+check "nan number in draft: reason is broken" test "$(jqv 'd["reason"]')" = "broken"
+
+python3 -I - "$SNAP" "$NOW" <<'PY'
+import json, sys
+items = [{"id": "PVTI_d", "type": "DraftIssue", "number": float("inf"), "status": "Todo", "labels": [], "assignees": []}]
+json.dump({"version": 1, "fetched_at": float(sys.argv[2]) - 10, "items": items}, open(sys.argv[1], "w"))
+PY
+run_read
+check "inf number in draft: reason is broken" test "$(jqv 'd["reason"]')" = "broken"
+
+# 11. 既定の置き場は見張りの状態ディレクトリ（$XDG_STATE_HOME/pelway/conductor-watch/）。
+# 共有の /tmp とは違い、sandbox からは読み取り専用で見えるため、書き出し元の
+# 区別ができる（runbook「ボード読み取りスナップショット」）
+mkdir -p "$ROOT/state/pelway/conductor-watch"
+write_ok_snapshot $((NOW - 60))
+cp "$SNAP" "$ROOT/state/pelway/conductor-watch/board-snapshot.json"
+rm -f "$SNAP"
+( cd "$ROOT" && XDG_STATE_HOME="$ROOT/state" HOME="$ROOT/nohome" PELWAY_BOARD_SNAPSHOT_NOW="$NOW"     python3 "$READER" > "$ROOT/out.json" 2> "$ROOT/err.txt" )
+rc=$?
+check "default path is state dir: exit 0" test "$rc" -eq 0
+check "default path is state dir: ok=true" test "$(jqv 'd["ok"]')" = "True"
+
 printf '\n'
 if ((${#failures[@]})); then
   printf 'failed: %s\n' "${failures[@]}" >&2
