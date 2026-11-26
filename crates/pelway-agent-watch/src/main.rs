@@ -353,7 +353,9 @@ impl Watcher {
                         round: p
                             .get("round")
                             .and_then(Value::as_u64)
-                            .and_then(|r| u32::try_from(r).ok()),
+                            .and_then(|r| u32::try_from(r).ok())
+                            // T3 が実行回数を返さないと 0 になる。0 は round として数えない
+                            .filter(|r| *r > 0),
                         has_report: p.get("report").is_some_and(Value::is_string),
                     }
                 })
@@ -381,7 +383,8 @@ impl Watcher {
             }
         } else if self.state.wake_pending.is_some() {
             // 新しい知らせの無い周回でも、後に回した起こし（起こし待ちの印）を確かめる（Issue #839）。
-            // 受信箱の行数は、何も書かずに追記の手続きで数える。書けない受信箱は、知らせを書く
+            // 受信箱の行数は、行を足さない追記の手続きで数える（受信箱が無ければ空で作り、末尾の
+            // 改行の欠けた断片は改行で閉じる）。書けない受信箱は、知らせを書く
             // 周回で `inbox append failed` として出るので、ここでは印を残したまま黙って次の周回に回す
             if let Ok(total) = io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &[]) {
                 self.maybe_wake(&t3, total, &[]);
@@ -501,15 +504,24 @@ impl Watcher {
         // 前回の起こしの記録は、そのときの宛先にだけ使う（指揮役が替わったら一度も起こしていない扱い）
         let same_target = self.state.last_wake_thread_id.as_deref() == Some(registered.as_str());
         let batch = classify_notices(notices, &registered, &mut self.state.wake_waiting_rounds);
-        let fresh = batch == NoticeBatch::Worthy;
-        if !fresh && self.state.wake_pending.is_none() {
+        // 起こすに足る新しい知らせのうち最後のものまでの受信箱の行数（知らせは受信箱の末尾に、
+        // 並びの順に 1 行ずつ書いてある）
+        let fresh_upto = match batch {
+            NoticeBatch::Worthy(last) => {
+                Some(inbox_lines.saturating_sub((notices.len() - 1 - last) as u64))
+            }
+            _ => None,
+        };
+        // 起こせなかった新しい知らせを、起こし待ちの印に入れる（後の周回で確かめ直す）
+        let defer = |state: &mut State| state.wake_pending = state.wake_pending.max(fresh_upto);
+        if fresh_upto.is_none() && self.state.wake_pending.is_none() {
             // 知らせの元が指揮役自身だけの回（巡回の終わりなど）は起こさない。起こすと、
             // 巡回の終わり → 知らせ → 起こし → 巡回、を繰り返すため
             let reason = match batch {
                 NoticeBatch::OwnOnly => "own-event",
                 NoticeBatch::RepeatWaiting => "repeat-waiting",
                 NoticeBatch::HumanNonUrgent => "human-non-urgent",
-                NoticeBatch::Empty | NoticeBatch::Worthy => return,
+                NoticeBatch::Empty | NoticeBatch::Worthy(_) => return,
             };
             eprintln!("agent-watch: WAKE skipped reason={reason}");
             return;
@@ -523,10 +535,12 @@ impl Watcher {
                 Err(e) if e.contains("too large") => {
                     // 書きかけ・壊れているのと見分けられるよう、上限超えは別の理由で出す
                     log("patrol-state-too-large");
+                    defer(&mut self.state);
                     return;
                 }
                 Err(_) => {
                     log("patrol-state-unreadable");
+                    defer(&mut self.state);
                     return;
                 }
             };
@@ -534,6 +548,7 @@ impl Watcher {
         // 使わず保存もしない（保存すると、補助記録を直しても以後の起こしが止まり続けるため）
         if inbox_offset > inbox_lines {
             log("offset-out-of-range");
+            defer(&mut self.state);
             return;
         }
         let history = WakeHistory {
@@ -545,20 +560,14 @@ impl Watcher {
             conductor_thread_id: Some(registered),
             inbox_offset,
         };
-        let now = now_epoch();
-        match decide_wake(
-            &info,
-            inbox_lines,
-            &history,
-            fresh,
-            now,
-            wake_cooldown_secs(),
-        ) {
+        let cooldown = wake_cooldown_secs();
+        match decide_wake(&info, &history, fresh_upto, now_epoch(), cooldown) {
             WakeDecision::Send(thread_id) => match io::wake(t3, &thread_id, WAKE_MESSAGE) {
                 Ok(()) => {
                     eprintln!("agent-watch: WAKE sent inbox_lines={inbox_lines}");
                     self.state.last_wake_inbox_offset = Some(inbox_offset);
-                    self.state.last_wake_at = Some(now);
+                    // 最短間隔は送り終えた時刻から数える（送るのにかかった時間の分、次の起こしを早めない）
+                    self.state.last_wake_at = Some(now_epoch());
                     self.state.last_wake_thread_id = Some(thread_id);
                     self.state.wake_pending = None;
                 }
@@ -572,10 +581,7 @@ impl Watcher {
                 if self.state.wake_pending.is_none() {
                     eprintln!("agent-watch: WAKE deferred reason=cooldown");
                 }
-                // 起こすに足る行の末尾を、新しい知らせの分まで伸ばす
-                if fresh {
-                    self.state.wake_pending = Some(inbox_lines);
-                }
+                defer(&mut self.state);
             }
             WakeDecision::AlreadyRead => {
                 eprintln!("agent-watch: WAKE skipped reason=already-read");
@@ -587,6 +593,7 @@ impl Watcher {
             }
             WakeDecision::NotYetRead => {
                 log("not-yet-read");
+                defer(&mut self.state);
             }
         }
     }

@@ -34,6 +34,7 @@ case "$1 $2" in
   "thread show") cat "$F/show-${3//:/_}.json" ;;
   "thread send")
     [ -e "$F/t3-send-fail" ] && exit 1
+    sleep "$(cat "$F/t3-send-sleep" 2>/dev/null || echo 0)"
     echo "$3 $4" >> "$F/t3-send-args"
     cat >> "$F/t3-send-stdin" ;;
   *) exit 2 ;;
@@ -2503,4 +2504,114 @@ fn pending_wake_is_dropped_when_unregistered() {
     .unwrap();
     run_cooldown(&sb);
     assert!(read_state(&sb)["wake_pending"].is_null());
+}
+
+#[test]
+fn waiting_without_run_count_is_not_treated_as_repeat() {
+    // T3 が runCount を返さない（payload の round は 0）承認待ちは、組を作らず毎回数える
+    let sb = Sandbox::new("wake-839-no-run-count");
+    conductor_and_waiting_thread(&sb);
+    let no_round =
+        show_round("mcp:d", "running", "2026-11-10T16:10:00Z", 1, 1).replace("\"runCount\":1,", "");
+    sb.fake("show-mcp_d.json", &no_round);
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    sb.run_with(&["--once"]);
+    sb.patrol_state(&format!(r#"{{"inbox_offset":{}}}"#, inbox_lines(&sb)));
+    conductor_finishes_and_d_waits_again(&sb);
+    let out = sb.run_with(&["--once"]);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
+
+#[test]
+fn deferred_notice_survives_unreadable_patrol_state() {
+    // 最短間隔の内に来た知らせは、補助記録が一時的に読めない周でも起こし待ちに入る
+    let sb = Sandbox::new("wake-839-patrol-gone");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    run_cooldown(&sb);
+    fs::remove_file(sb.pelway_dir().join("patrol-state.json")).unwrap();
+    b_fails_at(&sb, "2026-11-10T16:30:00Z");
+    run_cooldown(&sb);
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    // 補助記録が直り（1 行目まで読んだ）、間隔がたった: 新しい知らせが無くても起こす
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    backdate_last_wake(&sb);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
+
+#[test]
+fn pending_position_is_last_worthy_line_in_batch() {
+    // 同じ周に b の failed（2 行目）と指揮役自身の finished（3 行目）を書いた。
+    // 指揮役が 2 行目まで読めば、3 行目が未読でも起こさない
+    let sb = Sandbox::new("wake-839-batch-tail");
+    let list = |b: &str, conductor: &str| {
+        format!(
+            r#"[{{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}},
+  {{"threadId":"mcp:b","status":"{b}","updatedAt":"2026-11-10T16:30:00Z"}},
+  {{"threadId":"mcp:conductor-1","status":"{conductor}","updatedAt":"2026-11-10T16:40:00Z"}}]"#
+        )
+    };
+    sb.fake("list.json", &list("running", "running"));
+    sb.fake("show-mcp_a.json", SHOW_A_DONE);
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{
+  "mcp:a":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:b":{"status":"running","updated_at":"2026-11-10T16:30:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:30:00Z"},
+  "mcp:conductor-1":{"status":"running","updated_at":"2026-11-10T16:40:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:40:00Z"}},
+  "ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "running", "2026-11-10T16:30:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "running", "2026-11-10T16:40:00Z", 0),
+    );
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    run_cooldown(&sb);
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    sb.fake("list.json", &list("failed", "completed"));
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "completed", "2026-11-10T16:40:00Z", 0),
+    );
+    run_cooldown(&sb);
+    assert_eq!(inbox_lines(&sb), 3);
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    backdate_last_wake(&sb);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+}
+
+#[test]
+fn cooldown_counts_from_when_the_wake_was_sent() {
+    // 送るのに 2 秒かかった。最短間隔 2 秒は、送り終えた時刻から数える
+    let sb = Sandbox::new("wake-839-sent-at");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    sb.fake("t3-send-sleep", "2");
+    let run = |sb: &Sandbox| {
+        sb.command(&["--once"])
+            .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "2")
+            .output()
+            .unwrap()
+    };
+    run(&sb);
+    assert_eq!(sends(&sb), 1);
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    b_fails_at(&sb, "2026-11-10T16:30:00Z");
+    let out = run(&sb);
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
 }

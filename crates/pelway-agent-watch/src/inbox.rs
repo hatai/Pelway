@@ -133,8 +133,8 @@ pub fn wake_worthy(notice: &WakeNotice) -> bool {
 pub enum NoticeBatch {
     /// 知らせが無い（起こし待ちの印だけを確かめる周）。
     Empty,
-    /// 起こすに足る新しい知らせがある。
-    Worthy,
+    /// 起こすに足る新しい知らせがある。値は、そのうち最後のものの `notices` の中の位置。
+    Worthy(usize),
     /// 知らせの元がすべて、登録された指揮役自身（巡回の終わりなど）。
     OwnOnly,
     /// 指揮役自身のものを除くと、起こすに足るのは、すでに起こしに数えた承認待ちの繰り返しだけ（Issue #839）。
@@ -159,9 +159,12 @@ pub fn classify_notices(
         return NoticeBatch::Empty;
     }
     let mut any_other = false;
-    let mut worthy = false;
+    let mut worthy = None;
     let mut repeat = false;
-    for n in notices.iter().filter(|n| n.thread_id != conductor) {
+    for (i, n) in notices.iter().enumerate() {
+        if n.thread_id == conductor {
+            continue;
+        }
         any_other = true;
         if !wake_worthy(n) {
             continue;
@@ -172,16 +175,16 @@ pub fn classify_notices(
                     repeat = true;
                 } else {
                     waiting_rounds.insert(n.thread_id.clone(), round);
-                    worthy = true;
+                    worthy = Some(i);
                 }
             }
-            _ => worthy = true,
+            _ => worthy = Some(i),
         }
     }
     match (any_other, worthy, repeat) {
         (false, _, _) => NoticeBatch::OwnOnly,
-        (_, true, _) => NoticeBatch::Worthy,
-        (_, false, true) => NoticeBatch::RepeatWaiting,
+        (_, Some(last), _) => NoticeBatch::Worthy(last),
+        (_, None, true) => NoticeBatch::RepeatWaiting,
         _ => NoticeBatch::HumanNonUrgent,
     }
 }
@@ -194,7 +197,7 @@ pub struct WakeHistory {
     /// 前回起こした時刻（UNIX 秒）。一度も起こしていなければ None。
     pub last_at: Option<i64>,
     /// 最短間隔の間に起こすに足る知らせが来て、起こしを後に回している（起こし待ちの印）。
-    /// 値は、後に回した知らせを書き終えた時点の受信箱の行数（起こすに足る行がそこまである）。
+    /// 値は、後に回した知らせのうち最後のものまでの受信箱の行数（起こすに足る行がそこまである）。
     pub pending: Option<u64>,
 }
 
@@ -213,27 +216,27 @@ pub enum WakeDecision {
     Cooldown,
     /// 前回の起こしの後に、指揮役の既読の位置が進んでいない。
     NotYetRead,
-    /// 指揮役が受信箱を末尾まで読み終えている。起こし待ちの印は取り消す（Issue #839）。
+    /// 指揮役が、起こすに足る行の末尾（`decide_wake` の 4）まで読み終えている。その後に足された
+    /// 起こさない行だけが未読でもこれにする。起こし待ちの印は取り消す（Issue #839）。
     AlreadyRead,
 }
 
-/// 起こすかを決める。`fresh` はその周に起こすに足る新しい知らせがあったか（`classify_notices` が
-/// `Worthy`）。`inbox_lines` は受信箱のいまの行数、`now` はいまの時刻（UNIX 秒）、`cooldown_secs` は
-/// 起こしの最短間隔（秒）。
+/// 起こすかを決める。`fresh_upto` は、その周に起こすに足る新しい知らせがあれば、そのうち最後のもの
+/// までの受信箱の行数（無ければ None）。`now` はいまの時刻（UNIX 秒）、`cooldown_secs` は
+/// 起こしの最短間隔（秒。前回の起こしから丸 `cooldown_secs` 秒たつまでは起こさない）。
 ///
 /// 1. 新しい知らせも起こし待ちの印も無ければ起こさない
 /// 2. 前回の起こしから最短間隔がたっていなければ、起こし待ちの印を付けて後に回す。どの知らせも
 ///    例外にしない（間隔の後に、溜まった分で 1 回起こす）
 /// 3. 前回の起こしの後に既読の位置が進んでいなければ、重ねて起こさない（前回の起こしの後に 1 行でも
 ///    読めば、次の機会に起こす）
-/// 4. 既読の位置が、起こすに足る行の末尾（新しい知らせがあればいまの受信箱の行数、無ければ
-///    起こし待ちの印の行数）に追いついていれば、起こさない（定期巡回などで読み終えている。その後に
-///    足された起こさない行（指揮役自身の finished など）だけが未読でも起こさない）
+/// 4. 既読の位置が、起こすに足る行の末尾（`fresh_upto` と起こし待ちの印の行数の大きい方）に
+///    追いついていれば、起こさない（定期巡回などで読み終えている。その後に足された起こさない行
+///    （指揮役自身の finished など）だけが未読でも起こさない）
 pub fn decide_wake(
     info: &PatrolInfo,
-    inbox_lines: u64,
     history: &WakeHistory,
-    fresh: bool,
+    fresh_upto: Option<u64>,
     now: i64,
     cooldown_secs: i64,
 ) -> WakeDecision {
@@ -243,15 +246,15 @@ pub fn decide_wake(
     if !valid_thread_id(id) {
         return WakeDecision::InvalidThreadId;
     }
-    let worthy_upto = match (fresh, history.pending) {
-        (true, _) => inbox_lines,
-        (false, Some(upto)) => upto,
-        (false, None) => return WakeDecision::Nothing,
+    let Some(worthy_upto) = fresh_upto.max(history.pending) else {
+        return WakeDecision::Nothing;
     };
+    // 時刻は秒で切り捨てているので、ちょうど `cooldown_secs` 秒の差もまだ間隔の内とする。
     // 時計が戻った（前回の起こしが未来にある）ときは、間隔がたったものとして扱う（起こしを止め続けない）
-    if history
-        .last_at
-        .is_some_and(|at| (0..cooldown_secs).contains(&(now - at)))
+    if cooldown_secs > 0
+        && history
+            .last_at
+            .is_some_and(|at| (0..=cooldown_secs).contains(&(now - at)))
     {
         return WakeDecision::Cooldown;
     }
@@ -315,7 +318,8 @@ mod tests {
 
     /// 最短間隔 300 秒で、指揮役 `mcp:a`、受信箱 10 行のときの判定。
     fn decide(offset: u64, history: WakeHistory, fresh: bool) -> WakeDecision {
-        decide_wake(&info(Some("mcp:a"), offset), 10, &history, fresh, NOW, 300)
+        let fresh_upto = fresh.then_some(10);
+        decide_wake(&info(Some("mcp:a"), offset), &history, fresh_upto, NOW, 300)
     }
 
     fn woke(offset: u64, ago: i64) -> WakeHistory {
@@ -425,7 +429,7 @@ mod tests {
     #[test]
     fn wake_needs_conductor() {
         assert_eq!(
-            decide_wake(&info(None, 0), 10, &WakeHistory::default(), true, NOW, 300),
+            decide_wake(&info(None, 0), &WakeHistory::default(), Some(10), NOW, 300),
             WakeDecision::NoConductor
         );
     }
@@ -435,9 +439,8 @@ mod tests {
         assert_eq!(
             decide_wake(
                 &info(Some("--version"), 0),
-                10,
                 &WakeHistory::default(),
-                true,
+                Some(10),
                 NOW,
                 300
             ),
@@ -460,10 +463,10 @@ mod tests {
 
     #[test]
     fn notice_within_cooldown_is_deferred() {
-        // 前回の起こしから 299 秒: 既読が進んでいても後に回す
-        assert_eq!(decide(4, woke(3, 299), true), WakeDecision::Cooldown);
-        // 300 秒たてば起こす
-        assert_eq!(decide(4, woke(3, 300), true), send());
+        // 前回の起こしから 300 秒（秒の切り捨てで、実際には 300 秒未満のこともある）: 後に回す
+        assert_eq!(decide(4, woke(3, 300), true), WakeDecision::Cooldown);
+        // 301 秒たてば起こす
+        assert_eq!(decide(4, woke(3, 301), true), send());
     }
 
     #[test]
@@ -536,7 +539,7 @@ mod tests {
     fn human_finished_with_report_wakes() {
         assert_eq!(
             classify(&[notice(Some("user"), "finished", true)]),
-            NoticeBatch::Worthy
+            NoticeBatch::Worthy(0)
         );
     }
 
@@ -545,7 +548,7 @@ mod tests {
         for event in ["failed", "waiting", "stalled"] {
             assert_eq!(
                 classify(&[notice(Some("user"), event, false)]),
-                NoticeBatch::Worthy,
+                NoticeBatch::Worthy(0),
                 "{event}"
             );
         }
@@ -566,7 +569,7 @@ mod tests {
         for event in ["finished", "failed", "cancelled", "waiting", "stalled"] {
             assert_eq!(
                 classify(&[notice(Some("agent"), event, false)]),
-                NoticeBatch::Worthy,
+                NoticeBatch::Worthy(0),
                 "{event}"
             );
         }
@@ -578,7 +581,7 @@ mod tests {
         for event in ["finished", "cancelled"] {
             assert_eq!(
                 classify(&[notice(None, event, false)]),
-                NoticeBatch::Worthy,
+                NoticeBatch::Worthy(0),
                 "{event}"
             );
         }
@@ -591,7 +594,7 @@ mod tests {
             notice(Some("user"), "finished", false),
             notice(Some("agent"), "finished", true),
         ];
-        assert_eq!(classify(&notices), NoticeBatch::Worthy);
+        assert_eq!(classify(&notices), NoticeBatch::Worthy(1));
     }
 
     #[test]
@@ -612,7 +615,7 @@ mod tests {
             notice_on("mcp:a", Some("agent"), "finished", false),
             notice_on("mcp:t", Some("agent"), "finished", true),
         ];
-        assert_eq!(classify(&notices), NoticeBatch::Worthy);
+        assert_eq!(classify(&notices), NoticeBatch::Worthy(1));
     }
 
     #[test]
@@ -621,7 +624,7 @@ mod tests {
         let first = [waiting_on("mcp:t", 1)];
         assert_eq!(
             classify_notices(&first, "mcp:a", &mut rounds),
-            NoticeBatch::Worthy
+            NoticeBatch::Worthy(0)
         );
         // 同じスレッドの同じ round の承認待ちは、何回来ても数えない（自分の finished と一緒でも）
         for _ in 0..3 {
@@ -637,11 +640,11 @@ mod tests {
         // 別のスレッドの承認待ちと、次の round の承認待ちは数える
         assert_eq!(
             classify_notices(&[waiting_on("mcp:u", 1)], "mcp:a", &mut rounds),
-            NoticeBatch::Worthy
+            NoticeBatch::Worthy(0)
         );
         assert_eq!(
             classify_notices(&[waiting_on("mcp:t", 2)], "mcp:a", &mut rounds),
-            NoticeBatch::Worthy
+            NoticeBatch::Worthy(0)
         );
     }
 
@@ -654,7 +657,7 @@ mod tests {
         ];
         assert_eq!(
             classify_notices(&notices, "mcp:a", &mut rounds),
-            NoticeBatch::Worthy
+            NoticeBatch::Worthy(1)
         );
     }
 
@@ -665,7 +668,7 @@ mod tests {
         for _ in 0..2 {
             assert_eq!(
                 classify_notices(std::slice::from_ref(&w), "mcp:a", &mut rounds),
-                NoticeBatch::Worthy
+                NoticeBatch::Worthy(0)
             );
         }
     }
