@@ -914,11 +914,13 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
     if why is None:
         # 手順が応答しない（タイムアウト）・起動自体に失敗した（OSError）回も書き戻せなかった回として扱い、
         # 理由の通知・間引きと state.json の保存に進む（例外で巡回が止まらないようにする）。
+        # 子プロセスにも本体と同じ -I（分離モード）を渡し、手順の標準エラー出力の符号化が
+        # 読めなくても UnicodeDecodeError で止まらないよう errors=replace にする。
         # PELWAY_WATCH_PS_UPDATE_TIMEOUT は試験用の差し替え。
         try:
-            r = subprocess.run([sys.executable, "scripts/patrol-state-update",
+            r = subprocess.run([sys.executable, "-I", "scripts/patrol-state-update",
                                 "--writer", "conductor-watch", "--state", ps_path],
-                               input=json.dumps(patch), text=True,
+                               input=json.dumps(patch), text=True, errors="replace",
                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                timeout=env_secs("PELWAY_WATCH_PS_UPDATE_TIMEOUT", 30))
             why = {0: None, 4: "too-large", 5: "unencodable"}.get(r.returncode, "write-failed")

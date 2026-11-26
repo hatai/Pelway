@@ -348,12 +348,14 @@ cat > "$ROOT/repo/scripts/patrol-state-update" <<'EOF'
 import time
 time.sleep(60)
 EOF
-PS_TIMEOUT=1 run_cycles 1
+PS_TIMEOUT=1 run_cycles 2
 PS_TIMEOUT=""
-check "18: the cycle finishes within 10 seconds" in_time
+check "18: the cycles finish within 10 seconds" in_time
 check "18: the timed-out write-back is reported with its reason" has "$ROOT/out.log" "reason=write-failed"
 check "18: the timeout is logged as an exception, not an exit code" \
   has "$ROOT/out.log" "PATROL-STATE write-failed exc=TimeoutExpired"
+check "18: the same failure is reported once while it persists" \
+  eq "$(grep -c 'PATROL-STATE write-failed' "$ROOT/out.log")" "1"
 check "18: the watch still saves its own state" \
   python3 -I -c 'import json,sys; json.load(open(sys.argv[1]))["patrol_at"]' "$ROOT/state/pelway/conductor-watch/state.json"
 check "18: the throttling state is saved for the next cycle" \

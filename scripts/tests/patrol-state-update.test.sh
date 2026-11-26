@@ -325,7 +325,7 @@ until [ -e "$ROOT/locked" ]; do /bin/sleep 0.05; done  # ロックは握られ�
 printf '%s' '{"a":1}' | python3 -I "$UPD" --state "$REAL/pelway/patrol-state.json" --writer conductor-watch >"$ROOT/out" 2>"$ROOT/err" &
 PROC=$!
 # 手順が親を確かめてロックファイルを開き、待ち始めたこと（手順の fd にロックファイルが現れる）を確かめてから差し替える
-for ((i = 0; i < 100; i++)); do [[ -n "$(find "/proc/$PROC/fd" -lname 'patrol-state.json.lock' 2>/dev/null)" ]] && break; /bin/sleep 0.05; done
+for ((i = 0; i < 100; i++)); do [[ -n "$(find "/proc/$PROC/fd" -lname '*/patrol-state.json.lock' 2>/dev/null)" ]] && break; /bin/sleep 0.05; done
 mv "$REAL/pelway" "$MOVED"; ln -s "$OUT2" "$REAL/pelway"
 kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
 wait "$PROC"; B_RC=$?
