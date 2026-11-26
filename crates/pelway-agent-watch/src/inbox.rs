@@ -194,7 +194,8 @@ pub struct WakeHistory {
     /// 前回起こした時刻（UNIX 秒）。一度も起こしていなければ None。
     pub last_at: Option<i64>,
     /// 最短間隔の間に起こすに足る知らせが来て、起こしを後に回している（起こし待ちの印）。
-    pub pending: bool,
+    /// 値は、後に回した知らせを書き終えた時点の受信箱の行数（起こすに足る行がそこまである）。
+    pub pending: Option<u64>,
 }
 
 /// 起こすかの判定の結果。
@@ -225,7 +226,9 @@ pub enum WakeDecision {
 ///    例外にしない（間隔の後に、溜まった分で 1 回起こす）
 /// 3. 前回の起こしの後に既読の位置が進んでいなければ、重ねて起こさない（前回の起こしの後に 1 行でも
 ///    読めば、次の機会に起こす）
-/// 4. 既読の位置が受信箱の末尾に追いついていれば、起こさない（定期巡回などで読み終えている）
+/// 4. 既読の位置が、起こすに足る行の末尾（新しい知らせがあればいまの受信箱の行数、無ければ
+///    起こし待ちの印の行数）に追いついていれば、起こさない（定期巡回などで読み終えている。その後に
+///    足された起こさない行（指揮役自身の finished など）だけが未読でも起こさない）
 pub fn decide_wake(
     info: &PatrolInfo,
     inbox_lines: u64,
@@ -240,9 +243,11 @@ pub fn decide_wake(
     if !valid_thread_id(id) {
         return WakeDecision::InvalidThreadId;
     }
-    if !fresh && !history.pending {
-        return WakeDecision::Nothing;
-    }
+    let worthy_upto = match (fresh, history.pending) {
+        (true, _) => inbox_lines,
+        (false, Some(upto)) => upto,
+        (false, None) => return WakeDecision::Nothing,
+    };
     // 時計が戻った（前回の起こしが未来にある）ときは、間隔がたったものとして扱う（起こしを止め続けない）
     if history
         .last_at
@@ -256,7 +261,7 @@ pub fn decide_wake(
     {
         return WakeDecision::NotYetRead;
     }
-    if info.inbox_offset >= inbox_lines {
+    if info.inbox_offset >= worthy_upto {
         return WakeDecision::AlreadyRead;
     }
     WakeDecision::Send(id.clone())
@@ -317,7 +322,7 @@ mod tests {
         WakeHistory {
             last_offset: Some(offset),
             last_at: Some(NOW - ago),
-            pending: false,
+            pending: None,
         }
     }
 
@@ -464,13 +469,13 @@ mod tests {
     #[test]
     fn pending_wake_fires_after_cooldown_without_new_notice() {
         let pending = WakeHistory {
-            pending: true,
+            pending: Some(8),
             ..woke(3, 1000)
         };
         assert_eq!(decide(4, pending, false), send());
         // 間隔の内なら、まだ待つ
         let pending = WakeHistory {
-            pending: true,
+            pending: Some(8),
             ..woke(3, 10)
         };
         assert_eq!(decide(4, pending, false), WakeDecision::Cooldown);
@@ -479,11 +484,24 @@ mod tests {
     #[test]
     fn pending_wake_is_dropped_when_all_read() {
         let pending = WakeHistory {
-            pending: true,
+            pending: Some(10),
             ..woke(3, 1000)
         };
         // 受信箱 10 行を末尾まで読み終えている
         assert_eq!(decide(10, pending, false), WakeDecision::AlreadyRead);
+    }
+
+    #[test]
+    fn quiet_lines_after_pending_do_not_count_as_unread() {
+        // 後に回した知らせは 8 行目まで。指揮役は 8 行目まで読み、その後に起こさない行が
+        // 2 行足された（受信箱 10 行）: 未読は起こさない行だけなので起こさない
+        let pending = WakeHistory {
+            pending: Some(8),
+            ..woke(3, 1000)
+        };
+        assert_eq!(decide(8, pending, false), WakeDecision::AlreadyRead);
+        // 同じ周に起こすに足る新しい知らせがあれば、受信箱の末尾までを見る
+        assert_eq!(decide(8, pending, true), send());
     }
 
     #[test]

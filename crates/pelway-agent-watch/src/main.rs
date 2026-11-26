@@ -379,7 +379,7 @@ impl Watcher {
                     }
                 }
             }
-        } else if self.state.wake_pending {
+        } else if self.state.wake_pending.is_some() {
             // 新しい知らせの無い周回でも、後に回した起こし（起こし待ちの印）を確かめる（Issue #839）。
             // 受信箱の行数は、何も書かずに追記の手続きで数える
             match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &[]) {
@@ -492,7 +492,7 @@ impl Watcher {
         let same_target = self.state.last_wake_thread_id.as_deref() == Some(registered.as_str());
         let batch = classify_notices(notices, &registered, &mut self.state.wake_waiting_rounds);
         let fresh = batch == NoticeBatch::Worthy;
-        if !fresh && !self.state.wake_pending {
+        if !fresh && self.state.wake_pending.is_none() {
             // 知らせの元が指揮役自身だけの回（巡回の終わりなど）は起こさない。起こすと、
             // 巡回の終わり → 知らせ → 起こし → 巡回、を繰り返すため
             let reason = match batch {
@@ -550,19 +550,22 @@ impl Watcher {
                     self.state.last_wake_inbox_offset = Some(inbox_offset);
                     self.state.last_wake_at = Some(now);
                     self.state.last_wake_thread_id = Some(thread_id);
-                    self.state.wake_pending = false;
+                    self.state.wake_pending = None;
                 }
                 Err(why) => eprintln!("agent-watch: WAKE failed {why}"),
             },
             WakeDecision::Cooldown => {
-                if !self.state.wake_pending {
+                if self.state.wake_pending.is_none() {
                     eprintln!("agent-watch: WAKE deferred reason=cooldown");
                 }
-                self.state.wake_pending = true;
+                // 起こすに足る行の末尾を、新しい知らせの分まで伸ばす
+                if fresh {
+                    self.state.wake_pending = Some(inbox_lines);
+                }
             }
             WakeDecision::AlreadyRead => {
                 eprintln!("agent-watch: WAKE skipped reason=already-read");
-                self.state.wake_pending = false;
+                self.state.wake_pending = None;
             }
             WakeDecision::NoConductor | WakeDecision::Nothing => {}
             WakeDecision::InvalidThreadId => {

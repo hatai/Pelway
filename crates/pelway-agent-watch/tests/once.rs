@@ -2346,7 +2346,7 @@ fn notices_within_cooldown_wake_once_after_it() {
         "{}",
         stderr(&out)
     );
-    assert_eq!(read_state(&sb)["wake_pending"], true);
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
 
     // 新しい知らせの無い周回でも、最短間隔の内なら起こさない
     let out = run(&sb);
@@ -2358,7 +2358,7 @@ fn notices_within_cooldown_wake_once_after_it() {
     let out = run(&sb);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     assert_eq!(sends(&sb), 2, "{}", stderr(&out));
-    assert_eq!(read_state(&sb)["wake_pending"], false);
+    assert!(read_state(&sb)["wake_pending"].is_null());
 
     // 次の周回では、もう起こさない
     backdate_last_wake(&sb);
@@ -2397,5 +2397,81 @@ fn pending_wake_is_dropped_when_conductor_already_read() {
         "{}",
         stderr(&out)
     );
-    assert_eq!(read_state(&sb)["wake_pending"], false);
+    assert!(read_state(&sb)["wake_pending"].is_null());
+}
+
+#[test]
+fn quiet_lines_after_reading_do_not_revive_pending_wake() {
+    // 起こし待ちの間に指揮役が読み終え、その後に起こさない行（指揮役自身の finished）だけが
+    // 足されても、溜まった起こしは送らない（未読は起こさない行だけ）
+    let sb = Sandbox::new("wake-839-quiet-after-read");
+    let list = |b: &str, conductor: &str| {
+        format!(
+            r#"[{{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}},
+  {{"threadId":"mcp:b","status":"{b}","updatedAt":"2026-11-10T16:30:00Z"}},
+  {{"threadId":"mcp:conductor-1","status":"{conductor}","updatedAt":"2026-11-10T16:40:00Z"}}]"#
+        )
+    };
+    sb.fake("list.json", &list("running", "running"));
+    sb.fake("show-mcp_a.json", SHOW_A_DONE);
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "running", "2026-11-10T16:30:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "running", "2026-11-10T16:40:00Z", 0),
+    );
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{
+  "mcp:a":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:b":{"status":"running","updated_at":"2026-11-10T16:30:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:30:00Z"},
+  "mcp:conductor-1":{"status":"running","updated_at":"2026-11-10T16:40:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:40:00Z"}},
+  "ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let run = |sb: &Sandbox| {
+        let out = sb
+            .command(&["--once"])
+            .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "300")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "stderr: {}", stderr(&out));
+        out
+    };
+    // a の finished で起こす
+    let out = run(&sb);
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+    // 最短間隔の内に b の failed: 後に回す
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    sb.fake("list.json", &list("failed", "running"));
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    let out = run(&sb);
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+    assert_eq!(inbox_lines(&sb), 2);
+    // 指揮役が末尾（2 行）まで読み、そのあと自分の巡回の finished が足された
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    sb.fake("list.json", &list("failed", "completed"));
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "completed", "2026-11-10T16:40:00Z", 0),
+    );
+    let out = run(&sb);
+    assert_eq!(inbox_lines(&sb), 3);
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+    // 最短間隔がたっても、未読は起こさない行だけなので送らない
+    backdate_last_wake(&sb);
+    let out = run(&sb);
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("WAKE skipped reason=already-read"),
+        "{}",
+        stderr(&out)
+    );
 }
