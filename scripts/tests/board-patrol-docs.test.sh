@@ -115,6 +115,11 @@ check cond7c_runbook_slots docs/agents/grokbot-runbook.md \
   '[developers.<login>.slots]' \
   '巡回記録の割り当て表'
 
+# 条件7d: 使用数か上限を確認できないとき（toml を読めないときを含む）は
+# 割り当てない決まりが、runbook の枠の数え方にある。
+check cond7d_runbook_no_assign docs/agents/grokbot-runbook.md \
+  '使用数か上限を確認できなければ'
+
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
