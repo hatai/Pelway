@@ -745,7 +745,9 @@ done <"$MKTEMP_LOG"
 
 # --- push するコミットの名義の確認（#613）。本物の git とローカルの bare remote で確かめる ---
 # 利用者の git 設定（署名・フック）に左右されないよう、この節では global / system の設定を読ませない。
-export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+# このファイルの既存の push 試験は名義・署名・pr-size の門に絞るため、verify の門（#807）は外す。
+# verify の門の既定の動きは scripts/tests/agent-gh-verify-gate.test.sh で確かめる。
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 PELWAY_AGENT_SKIP_VERIFY_GATE=1
 RGBIN="$ROOT/realgit-bin"
 mkdir -p "$RGBIN"
 ln -s "$REAL_GIT" "$RGBIN/git"

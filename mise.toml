@@ -339,7 +339,10 @@ description = "開発環境の一括確認（依存タスクは並列実行）"
 # cargo でコンパイルするグループを 2 つに絞って、依存クレートの二重コンパイル
 # を避けること。check は clippy に含まれ、build は test が同じ成果物を作るため
 # verify には含めない（check / build タスク自体は残す）。
+# 依存タスクがすべて通ったときだけ、検証した作業ツリーの木の印を残す（#807。
+# agent-gh の push の verify ゲートが確かめる）。依存タスクが落ちたときは run の段に進まず、印は残らない。
 depends = ["verify-lint", "verify-test", "verify-static"]
+run = "bash scripts/agent-verify-record"
 
 # cargo fmt / clippy と、ツールチェーン・hk.pkl の構文を確かめる。
 [tasks.verify-lint]

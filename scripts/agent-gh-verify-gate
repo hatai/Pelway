@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# agent-gh の push の verify ゲート（#807）。scripts/agent-gh の一時 pre-push フックから bash で呼ばれる。
+# 引数と標準入力は pre-push フックと同じ。Git が送るブランチの更新ごとに、送る sha の木が
+# scripts/agent-verify-record の残した印と同じかを確かめる。差が docs/worklogs/ の下だけなら通す
+# （実装者メモのコミットのため）。0 以外で終わると Git はこの接続先に何も送らない。
+set -euo pipefail
+
+# 印と木の比較で refs/replace の置き換えを使わない。Git は転送では置き換えを使わず本体を送るため。
+export GIT_NO_REPLACE_OBJECTS=1
+
+stop_unverified() {
+  local reason="$1"
+  echo "agent-gh: push を止めました: verify が通った木の印を確認できません（$reason）" >&2
+  echo "agent-gh: mise run verify を成功させてから push してください。確かめずに通すときは PELWAY_AGENT_SKIP_VERIFY_GATE=1" >&2
+  exit 1
+}
+
+git_dir="$(git rev-parse --git-dir 2>/dev/null)" || stop_unverified "gitdir を解決できません"
+git_dir="$(CDPATH='' cd -- "$git_dir" 2>/dev/null && pwd -P)" || stop_unverified "gitdir を絶対パスに解決できません"
+marker_path="$git_dir/pelway-verify-tree"
+[[ -r "$marker_path" ]] || stop_unverified "印 $marker_path がありません"
+marker="$(head -n 1 "$marker_path")"
+[[ "$marker" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || stop_unverified "印 $marker_path の形を判定できません"
+[[ "$(git --no-replace-objects cat-file -t "$marker" 2>/dev/null)" == tree ]] || stop_unverified "印の木 $marker を読めません"
+
+# 行を先に全部読む（比較のコマンドに、残りの入力を読ませないため）。
+mapfile -t lines
+for line in ${lines[@]+"${lines[@]}"}; do
+  [[ -n "$line" ]] || continue
+  read -r _lref lsha rref rsha extra <<<"$line"
+  if [[ -z "${rsha:-}" || -n "${extra:-}" || ! "$lsha" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
+    stop_unverified "pre-push の入力の行を判定できません（$line）"
+  fi
+  [[ "$lsha" =~ ^0+$ || "$rref" != refs/heads/* ]] && continue # 削除とブランチ以外は確かめない
+  tree="$(git --no-replace-objects rev-parse -q --verify "$lsha^{tree}" 2>/dev/null)" ||
+    stop_unverified "$rref へ送る $lsha の木を読めません"
+  [[ "$tree" == "$marker" ]] && continue
+
+  # 木どうしの差が docs/worklogs/ の下だけなら通す。ファイル名の空白や改行を壊さないよう NUL 区切りで読む。
+  diff_out="$PELWAY_AGENT_HOOKS_DIR/verify-gate-diff.out"
+  git --no-replace-objects diff --name-only -z "$marker" "$tree" -- >"$diff_out" 2>/dev/null ||
+    stop_unverified "印の木と $rref へ送る木の差を読めません"
+  only_worklogs=1
+  saw_diff=0
+  while IFS= read -r -d '' path; do
+    saw_diff=1
+    case "$path" in
+      docs/worklogs/*) ;;
+      *) only_worklogs=0; break ;;
+    esac
+  done <"$diff_out"
+  if ((only_worklogs && saw_diff)); then
+    continue
+  fi
+  stop_unverified "$rref へ送る木が印の木と違い、差は docs/worklogs/ の下だけではありません"
+done

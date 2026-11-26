@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# mise run verify が成功したとき、検証した作業ツリーの木の hash を git の外の手元（この worktree の gitdir）に残す（#807）。
+# 次に作るコミットが検証した内容だけを含むなら、そのコミットの木はここで残す hash と一致する。実装者メモだけの差は
+# scripts/agent-gh-verify-gate が docs/worklogs/ の例外として扱う。
+# 一時 index に作業ツリー全体（無視するファイルを除く）を入れて write-tree するため、verify を commit の前に回す
+# 通常の手順でも、commit 後の HEAD の木と同じ印になる。
+set -euo pipefail
+
+fail() {
+  echo "agent-verify-record: $1" >&2
+  exit 1
+}
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "git の作業ツリーの中ではないため印を書き残せません"
+root="$(git rev-parse --show-toplevel)" || fail "作業ツリーのルートを解決できません"
+git_dir="$(git rev-parse --git-dir)" || fail "gitdir を解決できません"
+git_dir="$(CDPATH='' cd -- "$git_dir" && pwd -P)" || fail "gitdir を絶対パスに解決できません"
+
+index_dir="$(mktemp -d)" || fail "一時 index のディレクトリを作れません"
+out_tmp=""
+cleanup() {
+  rm -rf -- "$index_dir"
+  [[ -z "$out_tmp" || ! -e "$out_tmp" ]] || rm -f -- "$out_tmp"
+}
+trap cleanup EXIT
+
+index="$index_dir/index"
+# 一時 index は空から始める。無視するファイルは commit に入らないため含めず、それ以外の作業ツリー全体を記録する。
+env GIT_INDEX_FILE="$index" git -C "$root" add -A || fail "作業ツリーを一時 index に読めません"
+tree="$(env GIT_INDEX_FILE="$index" git -C "$root" write-tree)" || fail "作業ツリーの木の hash を作れません"
+[[ "$tree" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || fail "作業ツリーの木の hash の形を判定できません"
+
+out_tmp="$(mktemp "$git_dir/pelway-verify-tree.XXXXXX")" || fail "印の一時ファイルを作れません"
+printf '%s\n' "$tree" >"$out_tmp" || fail "印の一時ファイルに書けません"
+mv -f -- "$out_tmp" "$git_dir/pelway-verify-tree" || fail "印を $git_dir/pelway-verify-tree に置けません"
+out_tmp=""
