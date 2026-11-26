@@ -67,6 +67,7 @@ run_cycles() {
   echo 0 > "$MOCK/sleeps"
   MOCK="$MOCK" SLEEP_MAX="$1" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
     T3_BIN="$ROOT/bin/t3" PELWAY_BOARD_QUEUE_DIR="$ROOT/queue" \
+    PELWAY_BOARD_SNAPSHOT="" \
     bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
   WPID=$!
   wait "$WPID" 2>/dev/null; WPID=""

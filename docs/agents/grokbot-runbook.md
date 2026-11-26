@@ -14,7 +14,7 @@ Grok Bot は Issue を実装・調査スレッドに割り振り、通知を受�
 | スレッドを立てる・指示を送る・様子を見る | 指揮役が T3 のスレッドとして動いているときはネイティブの `t3_thread_launch`（作成）と `t3_thread_send`（指示）。Grok Bot（クラウド）のときは T3 Connect の MCP（`t3 thread start` / `send` / `show` / `list` と同じ操作） |
 | ラベルを付け外しする（`agent:working`・`agent:devin` の付け外し、`needs-human` の付与、`needs-decision`（実装担当が止まったときに付けるラベル。流れは Issue #603）が 15 分決まらないときの `needs-human` への付け替え（「指揮役の定期巡回（スケジュール起床）」）。`ready-for-agent` は外さない。`needs-human` を外すのは hatai のみ。指揮役は Grok Bot 経由で解除を依頼する） | GitHub |
 | Issue にコメントする | GitHub |
-| Projects ボード `Pelway agent team`（https://github.com/users/hatai/projects/7）のカードを読み、Status を書き換える | 人間の名義の `gh`（読み取り `read:project`、書き込み `project` スコープ）。`scripts/agent-gh` は使わない |
+| Projects ボード `Pelway agent team`（https://github.com/users/hatai/projects/7）のカードを読み、Status を書き換える | 読み取りはボード読み取りスナップショット（「2. ボードと巡回」の「ボード読み取りスナップショット」）、書き込みはボード Status 更新キュー（同「ボード Status 更新キュー」）。どちらもホスト側の `conductor-watch.sh` が人間の名義の `gh`（読み取り `read:project`、書き込み `project` スコープ）で仲介し、指揮役は人間名義の `gh` を直接は使わない。`scripts/agent-gh` は使わない |
 | Issue・PR・レビュー・CI の結果を読む | GitHub |
 | スレッドのモデル・effort を変える | T3 Connect の MCP（`t3_thread_configure`） |
 | 終わったスレッドを settle する | T3 のスレッドの操作（`t3_thread_organize` の `action: settle`。Grok Bot は MCP 経由）。PR をスレッドに紐付けたものはマージで自動 settle |
@@ -32,9 +32,9 @@ sandbox に止められた操作（書き込み・実行・ネットワークな
 
 ## 2. ボードと巡回
 
-ボードは GitHub Projects の `users/hatai/projects/7`（「Pelway agent team」）。Status の値は Backlog・Todo・Working・In review・Changes requested・Ready to merge・Needs human・Done。ボードの読み書きは人間の名義の `gh` で行う（読み取り `read:project`、書き込み `project` スコープ。`scripts/agent-gh` は使わない）。スコープが無ければ巡回を止めて hatai に報告する。
+ボードは GitHub Projects の `users/hatai/projects/7`（「Pelway agent team」）。Status の値は Backlog・Todo・Working・In review・Changes requested・Ready to merge・Needs human・Done。ボードの読み取りはボード読み取りスナップショット（下の「ボード読み取りスナップショット」）、書き込みはボード Status 更新キュー（下の「ボード Status 更新キュー」）で行う。どちらもホスト側の `conductor-watch.sh` が人間の名義の `gh`（読み取り `read:project`、書き込み `project` スコープ）で仲介し、指揮役は人間名義の `gh` を直接は使わず、`scripts/agent-gh` も使わない。
 
-巡回はボードの Todo を `gh project item-list` の返却順（全件取得、上限で打ち切らない）で読み、`ready-for-agent` 付きを並び順に割り当てる。処理順を覆した場合は理由を巡回記録に残す。巡回の処理順は次のとおり。
+巡回はボードの Todo をスナップショットの並び順（`gh project item-list` の返却順と同じ。全件取得、上限で打ち切らない）で読み、`ready-for-agent` 付きを並び順に割り当てる。読み方と、書き出しが読めない・古いときの扱いは「ボード読み取りスナップショット」に従う。処理順を覆した場合は理由を巡回記録に残す。巡回の処理順は次のとおり。
 
 1. 未完了の復元検証待ち記録があれば復元検証から始める（`docs/agents/conductor-context.md` の「復元検証」。部分復旧の継続照合もここで行う）
 2. Done の分類と復旧
@@ -134,6 +134,14 @@ PR に `automerge` ラベルを付けてよいのは、skill `command-team` の�
 - 失敗の種類と gh 呼び出しの関係は 2 段で決まる。第 1 段（JSON の形式・許可キー・Status 名・対象指定の検証）で落ちる要求は gh を一切呼ばない。第 2 段（Issue 番号→item id、Status 名→選択肢 id の解決）では `gh project` の `view`・`field-list`・`item-list` の読み取りを使い、解決できない要求は `item-edit` を呼ばず `.error` にする。書き込みは `item-edit` だけで、完全に解決できた要求にだけ実行する
 - 失敗は再試行しない。やり直すときは新しい `.json` を置く
 - 要求の文字列がシェルのコマンドに組み込まれることはない
+
+### ボード読み取りスナップショット
+
+エージェント実行環境では人間名義の `gh` が使えないため、ボードの読み取りはホスト側の `conductor-watch.sh` が書き出すスナップショット JSON を読む。書き出し先は `/tmp/pelway-board-snapshot.json`（キューと同じく、エージェント環境とホストで同一の `/tmp` を共有している前提）。書き込みキューの読み取り版で、この仕組みではボードへの書き込みの権限は増えない（書き込みは上の「ボード Status 更新キュー」のまま）。トークンの値は書き出しにも巡回記録にも出さない。
+
+- 見張りは巡回ごとに（間隔の制御あり。既定 240 秒）`gh project item-list`（全件取得、上限で打ち切らない）を人間名義で読み、`version: 1`・`fetched_at`（取得時刻の epoch 秒）・各カード（`id`・`type`・`number`（Issue・PR のとき）・`repository`・`status`・`labels`・`assignees`）を持つ JSON を書き出す。カードの並び順は `item-list` の返却順のまま。書き出しは一時ファイルに書いてから置き換える。上限で打ち切られた取得（`totalCount` が件数を超える）は公開しない。取得に失敗した巡回は前の書き出しを残す（消さない・空にしない）ため、取得が止まると書き出しは古くなる
+- 指揮役は `scripts/board-snapshot-read` で読む。`ok: true` のときだけカードの一覧を使い、`fetched_at` の時点の読みとして扱う。`ok: false` のときは、reason（`stale`：古すぎる。巡回間隔の 2 倍 = 960 秒を超える／`missing`：書き出しが無い／`broken`：読めない・形が違う）のいずれでも、ボードを 0 件とは扱わず、割り当てを止めて（停止・整合チェックなどほかの巡回処理は続ける）、理由のコード `board-read` と reason を巡回記録に残す。回復したら次の巡回で割り当てを再開する。続くときは見張りの出力（`BOARD snapshot-failed` の行）を確かめ、ホスト側の gh の認証を hatai に依頼する
+- スナップショットは読み取り専用の写しで、正本はボード本体。Status の書き込みは従来どおりキューに渡し、書き出しへの反映は次の書き出しを待つ。キューに渡した直後の巡回でスナップショットに反映が無くても不整合とは扱わず、次の書き出し（`fetched_at` が進む）まで待ってから整合チェックに当てる
 
 ### 指揮役の定期巡回（スケジュール起床）
 

@@ -101,6 +101,9 @@ export HOME="$ROOT/home" XDG_STATE_HOME="$ROOT/state" XDG_CONFIG_HOME="$ROOT/con
 # fake repo は git 管理でなく最小 PATH に git も無いため、patrol-state の置き場は
 # 環境変数で明示する（他の conductor-watch テストと同じやり方）。
 export PELWAY_PATROL_STATE="$ROOT/state/pelway/patrol-state.json"
+# ボード読み取りスナップショットの書き出しを止める（人間名義の gh を呼ばせない。
+# このテストは起動の形だけを確かめる）
+export PELWAY_BOARD_SNAPSHOT=""
 if [[ "$MODE" == systemd ]]; then
   export PATH="$ROOT/bin:$ROOT/systemd-bin:$ROOT/sysbin"
 else

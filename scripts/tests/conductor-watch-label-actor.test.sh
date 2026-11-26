@@ -93,6 +93,7 @@ start_watch() {
   MOCK_COMMENTS_FAIL="${MOCK_COMMENTS_FAIL:-}" \
   XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
   PELWAY_PATROL_STATE="$ROOT/state/pelway/patrol-state.json" \
+  PELWAY_BOARD_SNAPSHOT="" \
     bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
   WPID=$!
 }
