@@ -36,7 +36,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | 作業の継続に force push・rebase・履歴の書き換えが必要 | 必要になった理由と対象ブランチ。force push は実行しない |
 | 修正を続けるうえで PR のマージまたは admin マージの判断が必要 | 対象 PR とマージが必要になった経緯。実装担当はマージせず、hatai の判断を待つ |
 | round 4 以降のレビューでセキュリティ領域の must-fix が出た（領域は skill `command-team` の「レビューのラウンド」のリスト） | 該当する must-fix の一覧と止まった head の sha、レビュー結果の回数・担当・effort。手元にすでに修正があれば worktree に置いたまま push も削除もしない |
-| `mise run pr-size` が追加 800 行または削除 2000 行の上限を超え、pr-size の例外が要る | 分割案（PR ごとの範囲と見込み行数）、手元の head の SHA、`git diff --stat origin/main...HEAD` の出力。push せずに止まる。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
+| `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える（分割か pr-size の例外が要る） | 分割案（PR ごとの範囲と見込み行数）、手元の head の SHA、`git diff --stat origin/main...HEAD` の出力。push せずに止まる。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
 | 作業に `.github/workflows/` の変更と push が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 | sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
 | 委託したレビューが `failed` で、`error:` が `設定の不備:` で始まる（レビュー担当の環境の確認で外したツールが残っている。skill `review-pr` の「決まり」）。再委託しない | `error:` の行と、委託した担当。手順 9「投稿後の `設定の不備:` の記録」で確かめた投稿の有無（投稿前と確認／記録を残した（記録の内容）／投稿を特定できず `review: unknown` で記録） |
@@ -388,7 +388,7 @@ scripts/agent-gh dev pr ready <PR 番号>
 
 1 で直したとき以外は、Approve の後は PR に push しない。実装者メモのみのコミットでも head が動き、command-team のマージ規則によりレビューのやり直しになる。メモの追記が必要なときは、修正 round の手順 5・6（レビュー委託の前）で行う。
 
-複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する（セキュリティの指摘は特に修正側を優先する。skill `command-team` の「レビューのラウンド」）。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（エスカレーションしない）。委託の子が `failed` を報告したら、`error: checks timeout` は待って同じラウンドを数えずに再委託し、`error: wrong runtime` は手順 8 のブロックと突き合わせて委託の設定を直し、同じラウンドを数えずに再委託する。`error:` が `設定の不備:` で始まるときは再委託せずに止まる（止まる条件）。それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
+複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する（セキュリティの指摘は特に修正側を優先する。skill `command-team` の「レビューのラウンド」）。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（判定が割れたこと自体ではエスカレーションしない）。ただし round 4 以降のレビューで request-changes 側の must-fix にセキュリティ領域の指摘があるときは、「止まる条件」の表のとおり止まる。委託の子が `failed` を報告したら、`error: checks timeout` は待って同じラウンドを数えずに再委託し、`error: wrong runtime` は手順 8 のブロックと突き合わせて委託の設定を直し、同じラウンドを数えずに再委託する。`error:` が `設定の不備:` で始まるときは再委託せずに止まる（止まる条件）。それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
 
 hatai の指示がこの手順と食い違うとき（例: 「nit 対応して。レビューは不要」）は、指示の範囲だけを行い、省いた手順（must-fix の修正・再レビュー・`pr ready` など）を、最後の返答の前のメッセージで名指しする。
 

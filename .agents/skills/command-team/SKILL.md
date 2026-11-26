@@ -177,7 +177,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
   - 文書だけの PR は、変更したファイルがすべて Markdown（`*.md`）の PR とする。確かめ方は `scripts/agent-gh dev pr diff <M> --name-only` の全行が `.md` で終わること。試験・スクリプト・設定ファイルが 1 つでも含まれれば、文書だけではない。
   - `gpt-6.2-astra` は使わない。コストが `gpt-6.2-sol` の 4 倍で、セキュリティの評価（SEC-Bench Pro）は `gpt-6.2-sol` の方が高いため（出典は Issue #563）。
   - 根拠: OpenAI の公式の資料で、`gpt-6.2-sol` は PR のレビューに勧められている。`gpt-6.1-terra` は速く効率的だがコードの評価が `gpt-6.2-sol` より低い。`gpt-6-luna` は最も安く、量の多い作業向け（出典は Issue #563）。
-- 複数のレビュー担当を付けた PR で判定が割れたら（approve と request-changes が混ざったら）、マージせず、修正側（request-changes）の指摘を優先して対応する。セキュリティの指摘は特に修正側を優先する（「レビューのラウンド」）。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正をそのまま進める（人間へのエスカレーションは不要）。実装担当が委託した複数レビューで割れたときも同じで、実装担当が修正に進む（skill `implement-issue` の手順 9）。
+- 複数のレビュー担当を付けた PR で判定が割れたら（approve と request-changes が混ざったら）、マージせず、修正側（request-changes）の指摘を優先して対応する。セキュリティの指摘は特に修正側を優先する（「レビューのラウンド」）。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正をそのまま進める（判定が割れたこと自体では人間へのエスカレーションは不要）。ただし round 4 以降のレビューで request-changes 側の must-fix にセキュリティ領域（「レビューのラウンド」のリスト）の指摘があるときは、修正・中継の前に「レビューのラウンド」の停止条件に従って hatai の判断に戻す。実装担当が委託した複数レビューで割れたときも同じで、実装担当が修正に進む（skill `implement-issue` の手順 9）。
 
 ### レビューのラウンド
 
@@ -201,7 +201,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 - must-fix が残ったままマージしない。ラウンドの回数では止めず、must-fix が残る限り修正と再レビューを続ける。round 4 以降に進むこと自体に hatai の例外の判断は要らない。
 - round 4 以降のレビューでセキュリティ領域（上のリスト）の must-fix が出たら止めて、hatai の判断に戻す。must-fix の一覧と止まった head の sha を Issue に書く。手元にすでに修正があれば、worktree に置いたまま push も削除もしない。止まっている間は、指揮役も修正を中継しない。
 - 修正の継続に force push・PR のマージ・`.github/workflows/` の push・pr-size の例外のどれかが必要なときは、回数とは別に hatai の判断を待つ。
-- 判定が割れたときは「レビュー担当と effort」のとおり修正側（request-changes）を優先する。セキュリティの指摘は特に修正側を優先する。
+- 判定が割れたときは「レビュー担当と effort」のとおり修正側（request-changes）を優先する。セキュリティの指摘は特に修正側を優先する。ただし round 4 以降のレビューで request-changes 側にセキュリティ領域の must-fix があるときは、修正に進まず上の停止条件に従って hatai の判断に戻す。
 - `--no-verify` は使わない（commit のフックを止めない）。
 - 見張り（conductor-watch）は、別 Issue に回した件数を数える。QA があとで抜き出して確かめる。
 
@@ -237,8 +237,9 @@ hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終�
 
 マージは Kodiak（ホスト版の GitHub App。正本は `docs/superpowers/specs/agent-team.md` の「マージキュー」）が行う。原則は、条件を満たしたら指揮役が `automerge` ラベルを付けて Kodiak がマージする、である。指揮役が行うのはキューへの投入だけ: 下の条件を確かめて、PR に `automerge` ラベルを付ける（`scripts/agent-gh dev pr edit <M> --add-label automerge`）。このラベルを付けることがマージの指示であり、付けるのは指揮役だけ。実装スレッドは自分の PR に付けない。ラベルが付くと、Kodiak がブランチの最新化とマージを直列に進める。指揮役はマージを確認してから Issue から `agent:working` を外し、人間に報告する。
 
-`automerge` ラベルを付ける条件（すべて確かめてから付ける）:
+`automerge` ラベルを付ける条件（初回の付与と付け直しの両方で、すべて確かめてから付ける）:
 
+- admin マージの対象（下の 3 つ）に当たらないこと。当たる PR には `automerge` を付けず、hatai の admin マージに回す。round 4 以降に達したかは、実装担当が記録するレビューのラウンド数（終わりの報告の `review:` のラウンド数）で確かめる
 - 有効な Approve（上の「hatai のレビューの扱い」）がある。未解消の `[review-invalid]` の記録があればこの条件を満たさない
 - その Approve を投稿したレビューの委託の結果が確定している: 現在の head の必要な実行（skill `implement-issue` の手順 8 の「必要な実行」。必要な担当は委託の時点で上の「レビュー担当と effort」の表で決まり、その head に向けた委託記録のある担当も含む。担当ごとに、その head に向けた委託記録の実行のうち、`DISMISSED` でない投稿をちょうど 1 件持つ最新のもの。そうした実行の無い担当が残れば確定しない）のすべてから結果の報告を受け、そのすべての実行の投稿が現在の head を向いてちょうど 1 件ずつあり、さらに現在の head を向いた `pelway-review[bot]` の `APPROVED`・`CHANGES_REQUESTED` の投稿（dismiss されたものを除く）のすべてが、結果の報告を受けた実行の投稿（skill `implement-issue` の手順 8 の「実行の投稿」。委託記録の ID と末尾行の `run=` で結び付き、実行ごとにちょうど 1 件）である。結果の報告は、実装スレッドの終わりの報告（`state: done`）では `pr:` の行がその head を指し、`review:` の行の `run` にその実行の ID があること、指揮役が立てたレビュースレッドでは、その実行（スレッドを立てる前に残した委託記録の ID）から `verdict: approve` か `verdict: request-changes` の報告を受けていること。指揮役は、報告の ID ごとに、委託記録（対象 PR のコメント（REST の `issue_url` が `/issues/<M>` で終わる）で、`user.login` が `pelway-dev[bot]`、1 行目が `[review-request] head: <その head> to: <担当>`。skill `implement-issue` の手順 8 の「実行の投稿」の最後の文の定義）と、その実行の投稿の `id`・`state`・`commit_id` を GitHub で確かめる。必要な実行のうち報告の無いもの（まだ投稿していない・実行中のものを含む）が 1 つでも、報告の無い実行の投稿・どの実行にも結び付かない投稿（末尾行に `run=` が無いものを含む）が現在の head に 1 件でもあれば、先に結果の確定した担当の Approve がそろっていても、最新のレビューが `APPROVED` でもキュー投入の承認に使わない。結び付かない投稿は、skill `implement-issue` の手順 9「結び付かない投稿の取り消し」のとおり hatai の dismiss を待つ（レビュー担当は投稿の後に `設定の不備:` で失敗を報告することがあり、同じ App の名義で複数の担当が投稿するため。skill `review-pr` の「決まり」）
 - PR に `needs-human` が付いていない

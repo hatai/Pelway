@@ -26,7 +26,7 @@ check review_marks_doc_drift .agents/skills/review-pr/SKILL.md \
   '- [文書のずれ] <file>:<line>' \
   '`[文書のずれ]` の印の nit だけは、印の後に `<file>:<line>` を書く'
 
-# 実装担当: Request changes でも Approve でも印の nit を直す。上限に数えない。
+# 実装担当: Request changes でも Approve でも印の nit を直す。レビューのラウンド数に数えない。
 check implementer_fixes_on_request_changes .agents/skills/implement-issue/SKILL.md \
   '`pelway-review` のレビューの nit のうち行頭に `[文書のずれ]` の印があるものだけを一緒に直し'
 check implementer_fixes_on_approve .agents/skills/implement-issue/SKILL.md \
