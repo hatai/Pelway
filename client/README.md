@@ -42,4 +42,4 @@ bun test           # 試験
 
 ## IPC のチャンネルを足すとき
 
-`packages/contracts/src/ipc.ts` に宣言し、main のハンドラ（送り元を `isTrustedSender` で確かめる）、preload、画面の模擬（`@octanejs/electron` の `installElectronBridge`）を同じ変更で直す。`@octanejs/electron` から使うのは、`invoke`/`on` だけで動くフック（`useInvoke`・`useInvokeState`・`useIpcEvent`）と試験用の模擬だけで、組み込みの `octane:*` のチャンネルに頼るもの（`useWindowState`・`useNativeTheme` など）は使わない。
+`packages/contracts/src/ipc.ts` に宣言し、main のハンドラ（送り元を `isTrustedSender` で確かめる）、preload、画面の模擬（`@octanejs/electron` の `installElectronBridge`）を同じ変更で直す。`@octanejs/electron` から使うのは、`invoke`/`on` だけで動くフック（`useInvoke`・`useInvokeState`・`useIpcEvent`）と試験用の模擬だけで、組み込みの `octane:*` のチャンネルに頼るフックとヘルパー（窓の状態・テーマ・窓の操作・ダイアログ・シェル・クリップボード・画面）は使わない。
