@@ -230,7 +230,7 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 
 値は通知専用の age 鍵（既定 `~/.config/pelway-agent-notify/age.txt`）で暗号化する。provider を `age` ではなく `notify_age` という名前にするのは、fnox のグローバル設定（`~/.config/fnox/config.toml`）の `[providers.age]`（鍵ファイルの指定が無い）とのマージで鍵の指定が曖昧にならないためで、`review_age`（「鍵の分割（review 用の fnox 設定と age 鍵）」）と同じ考え方。`key_file` を明示するので、`~/.config/fnox` が読めない実行環境でも復号できる（以前は dev と同じ `~/.config/fnox/age.txt` 1 つで dev の App 鍵と webhook の URL・鍵の両方が復号できた。#737 の鍵分割）。
 
-**`~/.config/pelway-agent-notify` は全担当の sandbox で読み取り拒否にする。** 復号鍵（`age.txt`）と暗号文（`fnox.toml`）が同じディレクトリにあり、`key_file` は絶対パスで書かれているため、このディレクトリが読める sandbox の中から `fnox -c ~/.config/pelway-agent-notify/fnox.toml get` で webhook の URL と鍵を復号できる（以前は復号に拒否済みの `~/.config/fnox/age.txt` が要った）。`agent-gh` が読む `~/.config/fnox`・`~/.config/pelway-agent` と違い、sandbox の中の担当が読む必要のあるものは置かない（`conductor-thread-id` を読むのはホスト側の agent-watch と `scripts/conductor-watch.sh` だけ）ため、ディレクトリごと拒否する。実装担当側はリポジトリの設定（`.devin/config.json`・`scripts/agent-sandbox/devin-config.json`・`scripts/agent-sandbox/opencode-plugin/index.js` の `READ_DENY`・`scripts/agent-sandbox/sandbox-shell` の `masks`）に列挙する。ただし `scripts/agent-sandbox/` の 3 つは `scripts/setup/agent-sandbox.sh` でホストに写した版が使われるため、写し直して初めて効く（`.devin/config.json` だけは worktree の版が読まれる）。レビュー担当（`devin_review`・`claude_review`・`codex_review`）の拒否リストはリポジトリの外の設定なので、hatai が「通知用の age 鍵への移し替え」の手順 0 で適用する（QA 担当は実装担当のインスタンスで動くため、実装担当側の拒否で済む）。
+**`~/.config/pelway-agent-notify` は全担当の sandbox で読み取り拒否にする。** 復号鍵（`age.txt`）と暗号文（`fnox.toml`）が同じディレクトリにあり、`key_file` は絶対パスで書かれているため、このディレクトリが読める sandbox の中から `fnox -c ~/.config/pelway-agent-notify/fnox.toml get` で webhook の URL と鍵を復号できる（以前は復号に拒否済みの `~/.config/fnox/age.txt` が要った）。`agent-gh` が読む `~/.config/fnox`・`~/.config/pelway-agent` と違い、sandbox の中の担当が読む必要のあるものは置かない（`conductor-thread-id` を読むのはホスト側の agent-watch と `scripts/conductor-watch.sh` だけ）ため、ディレクトリごと拒否する。実装担当側はリポジトリの設定（`.devin/config.json`・`scripts/agent-sandbox/devin-config.json`・`scripts/agent-sandbox/opencode-plugin/index.js` の `READ_DENY`・`scripts/agent-sandbox/sandbox-shell` の `masks`）に列挙する。ただし `scripts/agent-sandbox/` の 3 つは `scripts/setup/agent-sandbox.sh` でホストに写した版が使われるため、写し直したうえで動いているエージェントのプロセスを起動し直して（T3 の再起動で）初めて効く（`.devin/config.json` だけは worktree の版が読まれる）。レビュー担当（`devin_review`・`claude_review`・`codex_review`）の拒否リストはリポジトリの外の設定なので、hatai が「通知用の age 鍵への移し替え」の手順 0 で適用する（QA 担当は実装担当のインスタンスで動くため、実装担当側の拒否で済む）。
 
 設定ファイルの形（`scripts/setup/agent-accounts.sh` の「通知用の fnox 設定と age 鍵を作る」が新規にはこの形で作る）:
 
@@ -266,6 +266,14 @@ printf '%s' '<鍵>'  | fnox -c ~/.config/pelway-agent-notify/fnox.toml set --pro
 #    - ~/.claude-review/settings.json の permissions.deny に "Read(~/.config/pelway-agent-notify/**)"
 #    - /etc/codex/requirements.toml の deny_read に "/home/hatai/.config/pelway-agent-notify"
 #    QA 担当は実装担当のインスタンスで動く（読み取りは dev 名義）ため、実装担当側の拒否で済む。
+#
+#    最後に T3 を再起動する。写し直したファイル・書き換えた設定が効くのは
+#    プロセスの起動時だけ（opencode の READ_DENY は plugin の import 時、
+#    devin-impl の --config と devin_review・codex_review の設定も起動時に読む）
+#    ため、動いているままのエージェントは古い拒否で動き続ける。再起動のあと、
+#    各担当の新しいスレッドで ls ~/.config/pelway-agent-notify を試し、
+#    中身が見えないことを確かめてから手順 1 に進む（test -r は使わない。
+#    denyRead で隠したディレクトリでも access(2) は 0 を返しうる）。
 
 # 1. 通知専用の鍵ペアを作る（秘密鍵は表示しない）
 (umask 077 && age-keygen -o ~/.config/pelway-agent-notify/age.txt)
