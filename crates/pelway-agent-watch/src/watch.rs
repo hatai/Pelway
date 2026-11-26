@@ -95,9 +95,22 @@ pub struct State {
     /// 既読の位置がここから進むまで、重ねて起こさない。
     #[serde(default)]
     pub last_wake_inbox_offset: Option<u64>,
-    /// 前回起こした指揮役のスレッド ID。登録が替わったら、`last_wake_inbox_offset` は使わない。
+    /// 前回起こした指揮役のスレッド ID。登録が替わったら、`last_wake_inbox_offset` と
+    /// `last_wake_at` は使わない。
     #[serde(default)]
     pub last_wake_thread_id: Option<String>,
+    /// 前回指揮役を起こした時刻（UNIX 秒）。ここから起こしの最短間隔の間は起こさない（Issue #839）。
+    #[serde(default)]
+    pub last_wake_at: Option<i64>,
+    /// 最短間隔の間に起こすに足る知らせが来て、起こしを後に回している（起こし待ちの印。Issue #839）。
+    /// 間隔がたった周回で、新しい知らせが無くても 1 回起こす（読み終えていれば取り消す）。
+    #[serde(default)]
+    pub wake_pending: bool,
+    /// スレッドごとに、起こしに数えた最後の承認待ち（`waiting`）の round（Issue #839）。
+    /// 同じスレッドの同じ round の承認待ちは、2 件目から起こしに数えない。
+    /// 一覧の記録（`threads`）から外れたスレッドの項目は消す。
+    #[serde(default)]
+    pub wake_waiting_rounds: BTreeMap<String, u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
