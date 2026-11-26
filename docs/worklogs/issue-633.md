@@ -82,3 +82,18 @@ PR: #735
 4. 足りなかった情報・検証手段: なし。打ち切りは `timeout`（coreutils）の TERM で、t3 の `thread show` は読み取りだけなので途中で切っても副作用が無い。打ち切られた呼び出しは lock の文字を出さないため、やり直しの対象にはならずそのまま期限の判定に進む
 
 試験の更新・追加: 「read finishes past the limit」を「read killed at the limit」に替え（打ち切り・戻り時刻・1 回のみの読み取りを確かめる）、「retry read killed at the limit」（1 回目は lock で即失敗・2 回目を遅延で期限にかける）、「ambient aborted」（同名の環境変数でも権限の確かめを必ず通る）を追加。`scripts/red-check f51c659 --keep scripts/tests/conductor-rebuild.test.sh` で前の実装だと 3 グループが落ちることを確かめた
+
+## 実装者メモ（round 6）
+
+対象 head: 6ee3d244b945382bd2eec5a0fc6c6196bcba295b
+PR: #735
+
+レビュー指摘（run 7183693439 codex request-changes・run 7183693916 claude request-changes、ともに head f700de548596411eb0bed4e776154f1e52fcf3b0、同一の must-fix 1 件）への対応。
+
+1. 詰まった箇所: なし
+2. must-fix の対応:
+   - `scripts/conductor-rebuild`:128 残り時間が 0 以下になると `awk` が 0 を返し、GNU `timeout` は期間 0 を「打ち切り無効」と扱うため、まさに打ち切るべき読み取り（残りが尽きた読み取り）だけが上限なしで走っていた。2 経路: `PELWAY_REBUILD_WT_WAIT=0` では 1 回目の読み取りが必ず残り 0 以下、既定でもループ先頭（旧 168 行）や `show` 内の期限確認から残りを測るまでの数十 ms の窓で期限を迎える → `show` の中で残り時間をイテレーションごとに 1 回だけ計測し（確認と呼び出しの窓を閉じる）、残り 0 以下では 2 回目以降のやり直し・呼び出し側の読み直し（`SHOW_REREAD=1` で来る）は呼び出さず失敗を返す。1 回目の読み取りは必ず読む仕様を残し、`PELWAY_REBUILD_SHOW_FIRST_TIMEOUT`（既定 2 秒）の正の下限を `timeout` に渡す形にした（`max(残り, 下限)` ではなく残りが 0 以下のときだけ下限を使い、残りが正なら残りどおりに打ち切る）
+3. nit の対応: なし（codex 0 件。claude 2 件は印なし — `timeout -k` と試験経路の欠落 — 決まりどおり直さない）
+4. 仮定と解釈: 「1 回目は必ず読む」の下限は、既定 120 秒の待機に対して無視できる大きさで、実際の `t3 thread show`（ローカルの読み取り）に足りる 2 秒とし、試験から縮められるよう環境変数にした。下限で打ち切られた読み取りは lock を出さない失敗として扱われ、時間切れの経路に進む（`WT_WAIT=0` かつ応答なしでも時間切れの案内が出る）
+
+試験の更新・追加: 「first read at zero limit」（上限 0・遅延 4 秒・下限 1 秒で、読み取りが下限で打ち切られ時間切れを報告して戻る。読み取り 1 回・送信なし・登録不変）、「reread killed near the limit」（期限直前に始まった読み直しも残り時間で打ち切る。読み取り 2 回）。`scripts/red-check f700de5 --keep scripts/tests/conductor-rebuild.test.sh` で前の実装だと「first read at zero limit」が落ちることを確かめた（「reread killed」は旧実装でも打ち切りが効く経路のため回帰固定として残る）
