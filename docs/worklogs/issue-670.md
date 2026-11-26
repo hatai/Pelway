@@ -104,7 +104,7 @@ PR: #679
 
 ## 実装者メモ（round 11）
 
-対象 head: （実装コミットの push 後に記入）
+対象 head: 3128947ed366f03856782e9a1017a98d0ccb8d27
 
 1. 詰まった箇所: なし。review round 10（codex・claude とも approve・must-fix 0）の印つき nit 4 件（通算 2 回目の印 nit の round）に対応した
 2. 曖昧だった文: 「docs/worklogs/issue-670.md:95 の「対象 head」は完全 SHA 31c16301a42ffbb682b6a259226864b4d2836370 が解決可」（review round 10 codex の nit）
