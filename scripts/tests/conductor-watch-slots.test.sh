@@ -104,16 +104,12 @@ EOF
 }
 write_toml
 
-mock_issues() { printf '%s\n' "$1" > "$MOCK/issues.json"; }; mock_prs() { printf '%s\n' "$1" > "$MOCK/prs.json"; }
-mock_threads() { printf '%s\n' "${1:-[]}" > "$MOCK/threads.json"; }; mock_threads
-
+mock_issues() { printf '%s\n' "$1" > "$MOCK/issues.json"; }; mock_prs() { printf '%s\n' "$1" > "$MOCK/prs.json"; }; mock_threads() { printf '%s\n' "${1:-[]}" > "$MOCK/threads.json"; }; mock_threads
 iss() { python3 -I -c 'import json,sys
 print(json.dumps({"number": int(sys.argv[1]), "state": sys.argv[2],
                   "labels": [{"name": l} for l in sys.argv[3:]]}))' "$@"; }
 
-jarr() { local out="" x; for x in "$@"; do out+="${out:+,}$x"; done; printf '[%s]' "$out"; }
-
-thread_item() { printf '{"threadId":"%s","title":"%s","status":"%s","updatedAt":"%s"}' "$1" "$2" "$3" "${4:-2026-01-01T00:00:00Z}"; }  # t3 thread list の要素（題名の形は「[実装] #<番号> 」）
+jarr() { local out="" x; for x in "$@"; do out+="${out:+,}$x"; done; printf '[%s]' "$out"; }; thread_item() { printf '{"threadId":"%s","title":"%s","status":"%s","updatedAt":"%s"}' "$1" "$2" "$3" "${4:-2026-01-01T00:00:00Z}"; }  # t3 thread list の要素（題名の形は「[実装] #<番号> 」）
 
 NOW="$ROOT/now"; echo 1700000000 > "$NOW"; set_now() { echo "$1" > "$NOW"; }
 
