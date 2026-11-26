@@ -140,7 +140,7 @@ PR: #722
 
 ## 実装者メモ（round 10）
 
-対象 head: <新規コミット>
+対象 head: 2d87f038f325ee269583a31984c43750b8116c50
 PR: #722
 
 レビュー指摘（head 70996e1a で codex run=7179732392 approve・must-fix 0・nit 0、claude run=7179732924 approve・must-fix 0・marked nit 2+文書のずれ 1）への対応:
