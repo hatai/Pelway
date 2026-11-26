@@ -148,3 +148,18 @@ PR: #735
 試験の更新・追加: 「first timeout <400-digit>」「first timeout 61」（ともに拒否。読み取り・送信なし・登録不変。計 175 件 pass）。`scripts/red-check 0ec024d --keep scripts/tests/conductor-rebuild.test.sh` で前の実装だとこの 2 グループ 8 件が落ちることを確かめた
 
 push 後の CI で既存の「no worktree until the limit: logs the last-read values」が落ちた（red-check でも稀に見えていた境目の競合）: 期限の境目で最後の読み取りが打ち切られると権限は読めずログが `runtimeMode=-` になるが、試験は `auto-accept-edits` に固定していた。読み取りの所要時間は環境差があるため、境目のどちら側に落ちるかは決まらない。`runtimeMode=(auto-accept-edits|-)` のどちらでも受ける形に直した（値は読み取りの結果か - だけで、欠落や別の値は引き続き落ちる）
+
+## 実装者メモ（round 10）
+
+対象 head: （push 後に記入）
+PR: #735
+
+レビュー指摘（run 7185187523 codex request-changes・must-fix 1、run 7185188739 claude request-changes・must-fix 1。ともに head 4ab57fba4860afccbf222c3fc3e30b7c184d0380、同一趣旨の指摘）への対応。
+
+1. 詰まった箇所: なし
+2. must-fix の対応:
+   - `scripts/tests/conductor-rebuild.test.sh`:177（両者同一趣旨）round 9 の CI 失敗の直しで「logs the last-read values」の期待値を固定文字列から `(auto-accept-edits|-)` に広げたため、(a) 最後の読み取りが成功したのに権限を消す回帰を検出できない（codex）、(b) 期待値を広げる「確かめ方を弱める変更」が PR 本文に指定の見出しなし（claude）→ 権限の値を決定的な条件で厳密に確かめる 2 件を追加: 「interval past the limit」（1 回の読み取りが期限より十分前に即応答で終わる → `runtimeMode=auto-accept-edits worktree=-` と厳密比較）、「first read at zero limit」（遅延 4 秒・下限 1 秒で必ず打ち切られる → `runtimeMode=- worktree=-` と厳密比較）。境目のシナリオ側のチェックは値が読み取り結果か - のどちらかだけを受ける形のまま残し、理由と厳密ピンの所在をコメントに書いた。PR 本文の「変更内容」に見出し「確かめ方を弱める変更」を立て、ファイルと行・何をしたか・理由（境目のどちら側になるかは読み取りの所要時間で決まる）と、厳密なピンは 2 件の決定的な試験に残ることを記載した
+3. nit の対応: なし（両者 0 件）
+4. 仮定と解釈: 「読み取り成功の厳密ピン」には「interval past the limit」を選んだ（1 回の読み取りが残り 0.6 秒で即応答し、以後の読み直しを始めず期限の先で止まる条件のため決定的。「worktree arrives」のピンとは別に、時間切れの経路で読み取れた権限が出ることを確かめる）。境目のシナリオの緩和は codex の案 (c)（緩和を残して理由を記載）を取った — 境目のどちら側になるかを決定的に作る手段（読み取りの所要時間を時計から切り離す仕組み）がなく、固定に戻すと CI が再び不安定になるため
+
+試験の更新・追加: 「interval past the limit: logs the last-read values」「first read at zero limit: logs the killed-read values」を追加（計 177 件 pass）

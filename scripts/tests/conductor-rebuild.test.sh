@@ -171,8 +171,11 @@ check "no worktree until the limit: stderr has the waited seconds" \
   grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
 check "no worktree until the limit: stderr gives the undecided cause and the T3 window check" \
   all_err "$ROOT/err" "準備中" "worktree なしで立てられ" "T3"
-# 最後に読んだ値を出す。期限の境目で読み取りが打ち切られたときは権限は読めず - と出る
-# （読み取りの所要時間は環境差があるため、どちらかに固定しない）
+# 最後に読んだ値を出す。期限の境目で読み取りが打ち切られたときは権限は読めず - と出る。
+# 読み取りの所要時間は環境差があるため境目のどちら側になるかは決まらず、ここでは両方を
+# 受ける。権限の値そのものは決定的な条件で厳密に確かめる（読み取りが期限前に終わると
+# auto-accept-edits と出る「interval past the limit」、必ず打ち切られると - と出る
+# 「first read at zero limit」）
 check "no worktree until the limit: logs the last-read values" \
   grep -qE "conductor-rebuild: new conductor $NEW runtimeMode=(auto-accept-edits|-) worktree=-" "$ROOT/err"
 check "no worktree until the limit: tells how to continue" \
@@ -198,6 +201,10 @@ printf 'mcp:launch:kept\n' > "$FILE"
 NEW_WT="/home/u/.t3/worktrees/Pelway/too-late" NEW_WT_AFTER=2 \
   PELWAY_REBUILD_WT_WAIT=0.6 PELWAY_REBUILD_WT_INTERVAL=1.5 run "" --from "$OLD" --to "$NEW"; rc=$?
 check "interval past the limit: exits non-zero" [ "$rc" -ne 0 ]
+# 最後の読み取りが期限より前に終わる条件（読み取り 1 回・即応答）では、権限は読み取れた
+# 値のまま出る（打ち切られていないため - にならない）
+check "interval past the limit: logs the last-read values" \
+  grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=auto-accept-edits worktree=-" "$ROOT/err"
 check "interval past the limit: does not read past the deadline" \
   [ "$(count "thread show $NEW --json")" -eq 1 ]
 check "interval past the limit: nothing sent to either conductor" no_line "thread send"
@@ -249,6 +256,10 @@ check "first read at zero limit: reads once" \
   [ "$(count "thread show $NEW --json")" -eq 1 ]
 check "first read at zero limit: nothing sent to either conductor" no_line "thread send"
 check "first read at zero limit: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+# 読み取りが打ち切られた条件（遅延 4 秒・下限 1 秒で必ず打ち切られる）では、権限は
+# 読めていないため - と出る
+check "first read at zero limit: logs the killed-read values" \
+  grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=- worktree=-" "$ROOT/err"
 check "first read at zero limit: stderr reports the timeout" \
   grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
 
