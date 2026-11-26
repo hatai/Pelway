@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「4. 受け入れ条件ごとにテストを先に書く」に「文書の確認条件では、変更後の決まりが関連する手順書どうしで矛盾しないことを確認方法に書く」を足す。
 
 使ったスキル: implement-issue、write-pull-request、writing-for-agents、diagnosing-bugs
+
+## 実装者メモ（round 2）
+
+対象 head: 32ee0359b61c69286b2d9d976136862ab69f6a0a
+
+1. 詰まった箇所: 手順 9（Request changes）: round 1 では、回数上限の一部だった「4 回目にセキュリティの must-fix が出たら止める」行を上限そのものと一緒に消し、Issue の「セキュリティの must-fix の扱いは変えない」を見落とした。
+2. 曖昧だった文: 「いままでどおり残す条件（委託の連続 failed、セキュリティの must-fix の扱い、`needs-human` など）は変えない」（Issue #725「直し方」）
+3. 仮定と解釈: 「セキュリティの must-fix の扱い」は、round 4 以降でセキュリティ領域の must-fix が出たときに hatai の判断へ戻す停止条件を指すと解釈し、回数上限から切り離して残す。round 4 に進むこと自体は例外にしない解釈は変えない。`automerge` を付ける条件に round の確認を足す指摘は印の無い nit なので、この round では直さない。
+4. 足りなかった情報・検証手段: main は `d1c177fa`・`ac5c9fce` で `agent-team-config.test.sh` を同じ内容に直していた。`origin/main` を取り込んでこの PR の差分から外した。`human-actions.md` の行番号は基準コミットの行なので、H11 の参照を基準コミットの値に戻した。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「Request changes」の 1 に「既存の停止条件を直す変更では、回数だけの条件と中身による条件を分けて確認する」を足す。
+
+使ったスキル: implement-issue、write-pull-request
