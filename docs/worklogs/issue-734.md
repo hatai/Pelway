@@ -105,3 +105,15 @@
 5. 改善案: `client/README.md` の「道具」に、tsconfig の 4 つ（base・node・web・test）の分け方を書き足す（最初に画面の Issue を立てるときに）。
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（PR-2 round 6）
+
+対象 head: 96798e0190362449a64c6b85510d73b7a3272969
+
+1. 詰まった箇所: `client/apps/desktop/src/main/index.ts`: round 5 の `spellcheck: false`（webPreferences）では、既定のセッションが綴りの辞書を外から取るのを止められなかった（Codex の must-fix。外への通信の領域）。修正前のコードで空のプロファイル（`--user-data-dir`、`LANG=en_US.UTF-8`）から起動すると `Dictionaries/en-US-10-2.bdic` ができた。`whenReady` の最初で `session.defaultSession.setSpellCheckerLanguages([])` を呼ぶ `disableSpellChecker` を足し、修正後は同じ条件で `.bdic` が 0 件になった。
+2. 曖昧だった文: 「spellcheck を決めていない（Electron の既定は有効で、辞書の取得で外へ通信しうる。未確認）」（Claude の nit）。round 5 で webPreferences だけを見て「辞書を外から取りに行かない」と PR に書いたが、確かめていなかった。
+3. 仮定と解釈: round 3 の結果に must-fix が残ったので、hatai の例外の判断で round 4 の修正に入った（#744 のレビューの round。実装者メモの round とは数え方が違う）。印の nit のうち、ADR 0014 の「`electron` を `mock.module` で模擬する」は #745 に回し、PR 本文の 2 か所は本文で直した。
+4. 足りなかった情報・検証手段: 1 回目の `mise run verify` は `scripts/tests/shellcheck.test.sh` が落ちた。単独で 2 回通り、2 回目の `mise run verify` は exit 0。
+5. 改善案: `client/README.md` に「外へ通信する Electron の既定（綴りの辞書など）は、空のプロファイル（`--user-data-dir`）で起動して確かめる」を足す。
+
+使ったスキル: `.agents/skills/implement-issue`
