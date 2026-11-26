@@ -16,6 +16,7 @@
 | [fnox](https://fnox.jdx.dev) | シークレットの管理 | 採用。`fnox.toml` にはシークレットの名前と秘密を含まないテンプレートだけを置く |
 | [pitchfork](https://pitchfork.jdx.dev) | ローカル開発用プロセスマネージャー | 採用。`pitchfork.toml` に AI 開発チームの見張り役 `agent-watch` を定義する。ツールは mise で固定 |
 | [cargo-deny](https://embarkstudios.github.io/cargo-deny/) | 依存クレートの脆弱性（RustSec）・ライセンス・重複・取得元の検査 | 採用。`mise.toml` で 0.20.2 を固定し、ポリシーは `deny.toml` に置く。`verify-static`（CI の static ジョブ）で実行 |
+| Node・[bun](https://bun.sh) | `client/`（Electron と Octane の画面。ADR 0014）の開発の道具 | 採用。`mise.toml` で Node 26.13.1（LTS）と bun 1.4.5 を固定する。依存の入れ方・整形・lint・型検査・試験は `client/README.md`。`client:verify` タスク（`verify-static`・CI の static ジョブ）で実行 |
 | [shellcheck](https://github.com/koalaman/shellcheck) | シェルスクリプトの静的検査 | 採用。`mise.toml` で 0.11.0 を固定し、`shellcheck` タスク（`verify-static`・CI の static ジョブ）が `scripts/` 以下で 1 行目が `#!` で始まり `bash` か `sh` を含むファイル全部を検査する。demo-check 一式（`scripts/demo-check/*.sh`）は severity 既定、それ以外は `--severity=warning`（info・style 級は対象外。Issue #265・#621） |
 
 ## セットアップ手順（初回）
@@ -74,7 +75,7 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 ## git hook の挙動
 
 - フックはリポジトリローカルの Git 設定（`hook.hk-pre-commit.command` 等）へ書き込まれる。設定ベースフックには **Git 2.54 以上**が必要（hk 公式ドキュメントの要件）。この環境の Git 2.56.0 では `git commit` からの発火を確認済み。
-- `git commit`（pre-commit）: **品質ゲート**。fix を実行せず、check コマンドの失敗でコミットを阻止する（trailing whitespace / 最終改行 / typos によるスペル検査 / `cargo fmt --check` / `cargo clippy -D warnings` / `cargo check --locked`、いずれもワークスペース全体）。コードの自動書き換えは行わない。typos の検査範囲は `hk.pkl` の `exclude`（docs/**・assets/**）と `typos.toml` の `extend-exclude`（外部管理のベンダー込みスキル `.agents/skills`・`.claude/skills`）を除くリポジトリ全体。
+- `git commit`（pre-commit）: **品質ゲート**。fix を実行せず、check コマンドの失敗でコミットを阻止する（trailing whitespace / 最終改行 / typos によるスペル検査 / `cargo fmt --check` / `cargo clippy -D warnings` / `cargo check --locked`、いずれもワークスペース全体。`client/**` が変わったときは `bun fmt --check`（`client_fmt` ステップ））。コードの自動書き換えは行わない。typos の検査範囲は `hk.pkl` の `exclude`（docs/**・assets/**）と `typos.toml` の `extend-exclude`（外部管理のベンダー込みスキル `.agents/skills`・`.claude/skills`）を除くリポジトリ全体。
 - `git push`（pre-push）: `cargo test --workspace --locked` を実行する。
 - 検査に失敗したら `mise run fmt` や `mise exec -- hk fix` で直してから再度コミットする。
 - 一時的に無効化するには `HK=0` を付ける（例: `HK=0 git commit ...`）。hk の既定動作。
@@ -93,7 +94,7 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 
 | ジョブ | チェック名 | 実行する mise タスク | cargo |
 |---|---|---|---|
-| `static` | `static (hk / fnox / pitchfork)` | `verify-static`（hk / fnox / pitchfork / cargo-deny / shellcheck）＋ `mise exec -- jactionlint` | 使わない（cargo-deny は cargo metadata を読むだけでコンパイルしない） |
+| `static` | `static (hk / fnox / pitchfork)` | `verify-static`（hk / fnox / pitchfork / cargo-deny / shellcheck / client）＋ `mise exec -- jactionlint` | 使わない（cargo-deny は cargo metadata を読むだけでコンパイルしない） |
 | `lint` | `lint (fmt / clippy)` | `verify-lint` | clippy |
 | `test` | `test (cargo test)` | `verify-test` | test |
 | `coverage` | `octocov (coverage diff)` | `coverage` タスク ＋ `k1LoW/octocov-action`（octocov 本体は v0.83.5 に固定） | 計測ビルド |
