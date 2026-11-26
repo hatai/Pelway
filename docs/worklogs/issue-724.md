@@ -48,3 +48,15 @@
 5. 改善案: `.agents/skills/command-team/SKILL.md` の「Codex のモデル」の表を、材料の一覧（:167）と同じ順（追加行数・高リスク・security・文書だけ・回数）で並べ直し、一覧と表の条件の対応を機械的に照合できるようにする。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 5）
+
+対象 head: ee2fd7e6dfe09930165608d1371929556ce4c62f
+
+1. 詰まった箇所: `mise run verify`（main の取り込み後のツリー）: 既知の環境起因 6 件のみ（verify-pelway。round 1 のメモの 1 を参照）。main で増えた `client:verify`（bun）はこの環境でも通った。自分の 2 本のテストは両方 `ok`。
+2. 曖昧だった文: 「両方 approve のあと QA（pelway-qa）→ main に追いつく → Ready。」（開発リードの指示、2026-11-26 09:55 JST。T3 のメッセージ）（skill `implement-issue` の手順 9「Approve のとき」）— 同じ手順の 3 は「Draft を解除する」を QA の前に置いており、順序が食い違う。
+3. 仮定と解釈: 開発リードの指示を「hatai の指示がこの手順と食い違うとき」に当たると解釈し、指示の順序（main の取り込み → その head の verify → Codex の Approve の確認 → QA → `pr ready`）を優先した。取り込みは merge で行い、衝突は無かった（main 側の `command-team/SKILL.md` の変更は :50・:95 で、この PR の変更（:167〜:171）と重ならない）。選ばなかった解釈: 手順 9 のとおり先に `pr ready` を行う。
+4. 足りなかった情報・検証手段: Codex の再レビューと QA（`pelway-qa`）は実装担当からは起動できない（差分が `.agents/skills/review-pr/` を含むため手順 8 の委託除外。QA は指揮役が頼む）。`waiting-conductor` で指揮役を待つ。ラウンドサマリー 3 件の誤り（見出しの番号が 1 つ大きい、`Reviewer:` 行が実装担当）は PR のコメントを編集して訂正した（各コメント末尾の「訂正」）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「ターンの終わりの状態の行」に、Draft の解除を QA のあとに置くよう指揮役が指定したときの待ち方（QA 待ちを表す状態の行と `next:` の書き方）を書く。
+
+使ったスキル: implement-issue, pr-watch
