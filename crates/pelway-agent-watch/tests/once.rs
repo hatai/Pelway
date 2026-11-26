@@ -2293,6 +2293,17 @@ fn own_finished_and_repeated_waiting_do_not_wake() {
     assert_eq!(sends(&sb), 2, "{}", stderr(&out));
 }
 
+/// 起こしの最短間隔を 300 秒にして 1 周だけ走らせ、成功したことを確かめる。
+fn run_cooldown(sb: &Sandbox) -> Output {
+    let out = sb
+        .command(&["--once"])
+        .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "300")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    out
+}
+
 /// b が失敗する一覧と詳細にし、状態では b を実行中に戻す（次の周回で b の failed が出る）。
 fn b_fails_at(sb: &Sandbox, updated: &str) {
     sb.fake(
@@ -2318,79 +2329,59 @@ fn backdate_last_wake(sb: &Sandbox) {
     write_state(sb, &state);
 }
 
+/// a の finished で 1 回起こし、最短間隔の内に b の failed を後に回す（受信箱 2 行、印の値は 2）。
+/// `read` は b の failed の前に指揮役が読んだ行数（補助記録の `inbox_offset`）。
+fn wake_then_defer_b_failure(sb: &Sandbox, read: u64) -> Output {
+    one_event(sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = run_cooldown(sb);
+    assert_eq!(sends(sb), 1, "{}", stderr(&out));
+    sb.patrol_state(&format!(r#"{{"inbox_offset":{read}}}"#));
+    b_fails_at(sb, "2026-11-10T16:30:00Z");
+    let out = run_cooldown(sb);
+    assert_eq!(sends(sb), 1, "{}", stderr(&out));
+    assert_eq!(read_state(sb)["wake_pending"], 2);
+    out
+}
+
 #[test]
 fn notices_within_cooldown_wake_once_after_it() {
     let sb = Sandbox::new("wake-839-cooldown");
-    one_event(&sb);
-    sb.conductor("mcp:conductor-1");
-    sb.patrol_state(r#"{"inbox_offset":0}"#);
-    let run = |sb: &Sandbox| {
-        sb.command(&["--once"])
-            .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "300")
-            .output()
-            .unwrap()
-    };
-    let out = run(&sb);
-    assert!(out.status.success(), "stderr: {}", stderr(&out));
-    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
-
     // 最短間隔の内に、指揮役が読み終えてから b の failed が来た: 起こさず、起こし待ちの印を付ける
-    sb.patrol_state(r#"{"inbox_offset":1}"#);
-    b_fails_at(&sb, "2026-11-10T16:30:00Z");
-    let out = run(&sb);
-    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let out = wake_then_defer_b_failure(&sb, 1);
     assert_eq!(inbox_lines(&sb), 2);
-    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
     assert!(
         stderr(&out).contains("WAKE deferred reason=cooldown"),
         "{}",
         stderr(&out)
     );
-    assert_eq!(read_state(&sb)["wake_pending"], 2);
 
     // 新しい知らせの無い周回でも、最短間隔の内なら起こさない
-    let out = run(&sb);
-    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 1, "{}", stderr(&out));
 
     // 最短間隔がたった: 新しい知らせが無くても、溜まった分で 1 回だけ起こす
     backdate_last_wake(&sb);
-    let out = run(&sb);
-    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 2, "{}", stderr(&out));
     assert!(read_state(&sb)["wake_pending"].is_null());
 
     // 次の周回では、もう起こさない
     backdate_last_wake(&sb);
-    let out = run(&sb);
-    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 2, "{}", stderr(&out));
 }
 
 #[test]
 fn pending_wake_is_dropped_when_conductor_already_read() {
     let sb = Sandbox::new("wake-839-already-read");
-    one_event(&sb);
-    sb.conductor("mcp:conductor-1");
-    sb.patrol_state(r#"{"inbox_offset":0}"#);
-    let run = |sb: &Sandbox| {
-        sb.command(&["--once"])
-            .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "300")
-            .output()
-            .unwrap()
-    };
-    let out = run(&sb);
-    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
-    sb.patrol_state(r#"{"inbox_offset":1}"#);
-    b_fails_at(&sb, "2026-11-10T16:30:00Z");
-    let out = run(&sb);
-    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+    wake_then_defer_b_failure(&sb, 1);
 
     // 最短間隔の間に、指揮役が定期巡回で受信箱を末尾まで読んだ: 溜まった起こしは送らずに取り消す
     sb.patrol_state(r#"{"inbox_offset":2}"#);
     backdate_last_wake(&sb);
-    let out = run(&sb);
-    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 1, "{}", stderr(&out));
     assert!(
         stderr(&out).contains("WAKE skipped reason=already-read"),
@@ -2433,17 +2424,8 @@ fn quiet_lines_after_reading_do_not_revive_pending_wake() {
     .unwrap();
     sb.conductor("mcp:conductor-1");
     sb.patrol_state(r#"{"inbox_offset":0}"#);
-    let run = |sb: &Sandbox| {
-        let out = sb
-            .command(&["--once"])
-            .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "300")
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "stderr: {}", stderr(&out));
-        out
-    };
     // a の finished で起こす
-    let out = run(&sb);
+    let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 1, "{}", stderr(&out));
     // 最短間隔の内に b の failed: 後に回す
     sb.patrol_state(r#"{"inbox_offset":1}"#);
@@ -2452,7 +2434,7 @@ fn quiet_lines_after_reading_do_not_revive_pending_wake() {
         "show-mcp_b.json",
         &show("mcp:b", "failed", "2026-11-10T16:30:00Z", 0),
     );
-    let out = run(&sb);
+    let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 1, "{}", stderr(&out));
     assert_eq!(inbox_lines(&sb), 2);
     // 指揮役が末尾（2 行）まで読み、そのあと自分の巡回の finished が足された
@@ -2462,12 +2444,12 @@ fn quiet_lines_after_reading_do_not_revive_pending_wake() {
         "show-mcp_conductor-1.json",
         &show("mcp:conductor-1", "completed", "2026-11-10T16:40:00Z", 0),
     );
-    let out = run(&sb);
+    let out = run_cooldown(&sb);
     assert_eq!(inbox_lines(&sb), 3);
     assert_eq!(sends(&sb), 1, "{}", stderr(&out));
     // 最短間隔がたっても、未読は起こさない行だけなので送らない
     backdate_last_wake(&sb);
-    let out = run(&sb);
+    let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 1, "{}", stderr(&out));
     assert!(
         stderr(&out).contains("WAKE skipped reason=already-read"),
@@ -2479,18 +2461,6 @@ fn quiet_lines_after_reading_do_not_revive_pending_wake() {
 #[test]
 fn pending_wake_is_not_resent_after_failure_and_stays_quiet() {
     let sb = Sandbox::new("wake-839-pending-fail");
-    one_event(&sb);
-    sb.conductor("mcp:conductor-1");
-    sb.patrol_state(r#"{"inbox_offset":0}"#);
-    let run = |sb: &Sandbox| {
-        let out = sb
-            .command(&["--once"])
-            .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "300")
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "stderr: {}", stderr(&out));
-        out
-    };
     let send_calls = |sb: &Sandbox| {
         fs::read_to_string(sb.t3_calls())
             .unwrap_or_default()
@@ -2498,17 +2468,13 @@ fn pending_wake_is_not_resent_after_failure_and_stays_quiet() {
             .filter(|l| l.starts_with("t3 thread send"))
             .count()
     };
-    run(&sb);
-    assert_eq!(send_calls(&sb), 1);
     // 最短間隔の内に b の failed。指揮役はまだ読んでいない（既読は 0 のまま）
-    b_fails_at(&sb, "2026-11-10T16:30:00Z");
-    run(&sb);
-    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    wake_then_defer_b_failure(&sb, 0);
 
     // 間隔がたったが既読が進んでいない: 印は残し、印だけを確かめる周では理由のログを出さない
     backdate_last_wake(&sb);
     for _ in 0..2 {
-        let out = run(&sb);
+        let out = run_cooldown(&sb);
         assert!(!stderr(&out).contains("WAKE"), "{}", stderr(&out));
     }
     assert_eq!(read_state(&sb)["wake_pending"], 2);
@@ -2517,10 +2483,10 @@ fn pending_wake_is_not_resent_after_failure_and_stays_quiet() {
     // 既読が進んだ周で送りに失敗した: 印を消し、次の周回で送り直さない
     sb.patrol_state(r#"{"inbox_offset":1}"#);
     sb.fake("t3-send-fail", "");
-    let out = run(&sb);
+    let out = run_cooldown(&sb);
     assert!(stderr(&out).contains("WAKE failed"), "{}", stderr(&out));
     assert!(read_state(&sb)["wake_pending"].is_null());
-    let out = run(&sb);
+    let out = run_cooldown(&sb);
     assert!(!stderr(&out).contains("WAKE"), "{}", stderr(&out));
     assert_eq!(send_calls(&sb), 2);
 }
@@ -2528,27 +2494,13 @@ fn pending_wake_is_not_resent_after_failure_and_stays_quiet() {
 #[test]
 fn pending_wake_is_dropped_when_unregistered() {
     let sb = Sandbox::new("wake-839-pending-unregistered");
-    one_event(&sb);
-    sb.conductor("mcp:conductor-1");
-    sb.patrol_state(r#"{"inbox_offset":0}"#);
-    let run = |sb: &Sandbox| {
-        sb.command(&["--once"])
-            .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "300")
-            .output()
-            .unwrap()
-    };
-    run(&sb);
-    sb.patrol_state(r#"{"inbox_offset":1}"#);
-    b_fails_at(&sb, "2026-11-10T16:30:00Z");
-    run(&sb);
-    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    wake_then_defer_b_failure(&sb, 1);
     // 登録を外した（代行の終わり）: 後に回した起こしも取り消す
     fs::remove_file(
         sb.root
             .join("home/.config/pelway-agent-notify/conductor-thread-id"),
     )
     .unwrap();
-    let out = run(&sb);
-    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    run_cooldown(&sb);
     assert!(read_state(&sb)["wake_pending"].is_null());
 }
