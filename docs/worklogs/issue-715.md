@@ -136,7 +136,7 @@ PR: #722
    - implement-issue:238 の括弧内の要約の「Claude を追加」を「`sampling` の担当を追加」に直した（command-team:133 の表と同じく担当を toml の `sampling` から読む形）
    - agent-team.toml の冒頭コメントが古くなる指摘は、toml の中身が Issue #715 の対象外のため別の PR に回す（レビュー側も同じ扱い）
 4. 仮定と解釈:
-   - codex の out-of-scope: Devin CLI のレビュー利用可否について、`command-team` の「確認済み」の記載と `docs/dev-environment.md` の「秘密ファイル遮断の実測まで使用停止」の記載が食い違う。終わりの報告の `out-of-scope:` に書く
+   - codex から PR 外の所見を受けた（終わりの報告の `out-of-scope:` に書く。内容は公開のメモ・コメントに写さない）
 
 ## 実装者メモ（round 10）
 
@@ -152,5 +152,19 @@ PR: #722
    - `instance_match_runbook_review` のピンを「main の最新の版」の指定まで含む文言に広げた（後半だけだと照合先の版の指定が消えても落ちないため）
    - docs/agents/skill-helpers.md:32 の高リスク判定の列挙を、command-team「レビュー担当と effort」の表の高リスクの条件を参照する形に直した（toml の変更が抜けていた）
 4. 仮定と解釈:
-   - codex の out-of-scope: Devin CLI のレビュー利用可否について、`command-team` の「確認済み」と `docs/dev-environment.md` の「秘密ファイル遮断の実測まで使用停止」が食い違う。終わりの報告の `out-of-scope:` に書く
-   - claude の out-of-scope: review-pr の security-review の起動条件と HIGH の表に agent-team.toml が無い。終わりの報告の `out-of-scope:` に書く
+   - codex から PR 外の所見を受けた（終わりの報告の `out-of-scope:` に書く。内容は公開のメモ・コメントに写さない）
+   - claude から PR 外の所見を受けた（終わりの報告の `out-of-scope:` に書く。内容は公開のメモ・コメントに写さない）
+
+## 実装者メモ（round 11）
+
+対象 head: <新規コミット>
+PR: #722
+
+レビュー指摘（run 7180129626 claude request-changes、head 46a84bce）への対応:
+
+1. 詰まった箇所: なし
+2. must-fix の対応:
+   - 指摘: main の skill `implement-issue`（388 行）は、レビュー担当から受けた PR 外の所見を終わりの報告の `out-of-scope:` の行にだけ書き、メモ・ラウンドサマリー・PR 本文など公開される場所に写さないと定める。round 9・10 のメモと PR のラウンドサマリーに所見の内容を写していた（公開リポジトリを読める者が、直していない弱点の所在をレビュー担当の判断付きで一か所で拾えるため）
+   - メモの 3 行と、PR の round 9・10 のラウンドサマリーのコメント（7178650718・7179850431）の該当行を、内容を含まない形（「PR 外の所見を受けた。終わりの報告に書く」）に直した
+3. 印の nit（`[文書のずれ]`）の対応: PR 本文のピンの説明を、照合の文言 5 箇所と条件の文言 2 つの今の数と種類に合わせた
+4. 仮定と解釈: なし
