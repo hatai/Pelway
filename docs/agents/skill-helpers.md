@@ -29,7 +29,7 @@
 
 | スキル | 機械な手順 | ヘルパーの案 |
 |---|---|---|
-| command-team | 振り分け: pr-size の行数・変更パス・ラベル・修正回数からモデルと effort を決める表の適用。高リスク判定（unsafe、セキュリティ境界、workflows、追加 400 行超）。Codex の見落とし率の集計 | 行数・パス・ラベルから振り分け行と高リスク判定を返す |
+| command-team | 振り分け: pr-size の行数・変更パス・ラベル・修正回数からモデルと effort を決める表の適用。高リスク判定（skill `command-team` の「レビュー担当と effort」の表の高リスクの条件）。Codex の見落とし率の集計 | 行数・パス・ラベルから振り分け行と高リスク判定を返す |
 | review-pr | high-risk 判定（security-review の起動条件）、PR のチェックの検査コマンド群 | PR の差分から high-risk トリガーを列挙して返す |
 | write-pull-request | 「事実を集める」: verify の出力、pr-size の行数、コミット一覧の整形 | 差分とコマンド出力から PR 本文の材料を整形 |
 | write-issue | 本文の形式検査: 見出しの構成、受け入れ条件に検証方法が付くかの形チェック | Issue 本文を受け取り形式の欠落を列挙 |
