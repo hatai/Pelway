@@ -76,3 +76,12 @@ export function denyAllPermissions(
   session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   session.setPermissionCheckHandler(() => false);
 }
+
+/**
+ * 綴りの検査の辞書の一覧を空にする。既定のセッションは作られた時点で辞書を読み始め、
+ * 手元に無ければ外（Google の配信サーバー）から取ってくるので、窓を開く前に呼ぶ。
+ * webPreferences の spellcheck: false は画面の側の設定で、この取得は止めない。
+ */
+export function disableSpellChecker(session: Pick<Session, "setSpellCheckerLanguages">): void {
+  session.setSpellCheckerLanguages([]);
+}

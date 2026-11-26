@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { denyAllPermissions, hardenWebContents, isTrustedSender, isTrustedUrl, secureWebPreferences } from "./security";
+import {
+  denyAllPermissions,
+  disableSpellChecker,
+  hardenWebContents,
+  isTrustedSender,
+  isTrustedUrl,
+  secureWebPreferences,
+} from "./security";
 
 const ORIGIN = "pelway://app";
 
@@ -118,5 +125,18 @@ describe("denyAllPermissions", () => {
     request?.(null, "notifications", (value) => (granted = value));
     expect(granted).toBe(false);
     expect(check?.(null, "media")).toBe(false);
+  });
+});
+
+describe("disableSpellChecker", () => {
+  test("既定のセッションの綴りの辞書の一覧を空にし、辞書を取りに行かせない", () => {
+    const calls: string[][] = [];
+    const fakeSession = {
+      setSpellCheckerLanguages(languages: string[]) {
+        calls.push(languages);
+      },
+    };
+    disableSpellChecker(fakeSession as unknown as Parameters<typeof disableSpellChecker>[0]);
+    expect(calls).toEqual([[]]);
   });
 });

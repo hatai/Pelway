@@ -7,6 +7,7 @@ import {
   APP_ORIGIN,
   APP_SCHEME,
   denyAllPermissions,
+  disableSpellChecker,
   hardenWebContents,
   originOf,
   secureWebPreferences,
@@ -36,6 +37,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  disableSpellChecker(session.defaultSession);
   denyAllPermissions(session.defaultSession);
   protocol.handle(APP_SCHEME, (request) => {
     const file = resolveAppAsset(rendererDir, request.url);
