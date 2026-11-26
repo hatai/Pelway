@@ -34,3 +34,15 @@ PR: #735
 2. must-fix の対応:
    - `scripts/conductor-rebuild`:133 期限を超えて返った `show` の結果にパスがあっても処理を進めていた → ループの先頭で `SECONDS > end` なら `worktreePath` を空に戻して待ちを抜ける形にした（読み取りの返りが期限をまたぐのは、間隔 `WT_INTERVAL` の超過と `show` 内の lock のやり直しの両方でありうる）。`runtimeMode` は進む・止まるの判定を変えないため、最後に読んだ値のままログに出す。試験を 2 件追加（`worktree after the limit`: 間隔 3 秒で 2 回目の読み取りにパスが入っても期限超過で止まる、`lock retry past the limit`: lock のやり直しが期限をまたいだ読み取りを受け入れない）
 3. nit の対応: なし（nit 0 件）。`[文書のずれ]` の印も無し
+
+## 実装者メモ（round 3）
+
+対象 head: 4c8e332d23a82a816f99dee74e9be74af63216ec
+PR: #735
+
+レビュー指摘（run 7180639512 codex request-changes、head b3ee1180e5913022c4684d17b4ed29615bf35b95）への対応:
+
+1. 詰まった箇所: なし
+2. must-fix の対応:
+   - `scripts/conductor-rebuild`:138 `SECONDS` は整数秒なので、実際の経過が上限を超えても `SECONDS == end` の間は読み取りを受け入れていた → 期限の判定を `EPOCHREALTIME`（秒.マイクロ秒を整数化）に替え、上限・開始・待った秒数の計算をすべてマイクロ秒に揃えた。上限は awk で小数の `WT_WAIT` も扱える計算にした。試験を 1 件追加（`worktree just past the limit`: 上限 1 秒・間隔 1.1 秒で、整数秒では `SECONDS == end` に見えるが実経過は超過している読み取りを受け入れない）。既存の「worktree after the limit」「lock retry past the limit」の待ち時間も短くし、全体を約 7 秒に保った
+3. nit の対応: なし（nit 0 件）。`[文書のずれ]` の印も無し
