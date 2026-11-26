@@ -214,13 +214,14 @@ check "interval past the limit: stderr reports the timeout" \
   grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
 
 # 期限までに終わらない読み取りは残り時間で打ち切られ、時間切れを報告して戻る
-# （偽の t3 が応答を 4 秒遅らせる。上限 0.6 秒で打ち切られ、3 秒以内に戻ることを確かめる）
+# （偽の t3 が応答を 8 秒遅らせる。上限 0.6 秒で打ち切られ、6 秒以内に戻ることを確かめる。
+# 負荷で起動が遅れても打ち切り経路と打ち切られない経路（8 秒超）を分けられる幅を取る）
 printf 'mcp:launch:kept\n' > "$FILE"
 start=$SECONDS
-NEW_WT="/home/u/.t3/worktrees/Pelway/hung" NEW_WT_AFTER=1 NEW_SHOW_DELAY=4 \
+NEW_WT="/home/u/.t3/worktrees/Pelway/hung" NEW_WT_AFTER=1 NEW_SHOW_DELAY=8 \
   PELWAY_REBUILD_WT_WAIT=0.6 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
 check "read killed at the limit: exits non-zero" [ "$rc" -ne 0 ]
-check "read killed at the limit: returns at the deadline" [ "$(( SECONDS - start ))" -lt 3 ]
+check "read killed at the limit: returns at the deadline" [ "$(( SECONDS - start ))" -lt 6 ]
 check "read killed at the limit: reads once" \
   [ "$(count "thread show $NEW --json")" -eq 1 ]
 check "read killed at the limit: nothing sent to either conductor" no_line "thread send"
@@ -230,13 +231,13 @@ check "read killed at the limit: stderr reports the timeout" \
   grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
 
 # やり直しの読み取りも残り時間で打ち切る（1 回目は lock で即失敗し、やり直しの 2 回目が
-# 4 秒遅延で期限にかかる）
+# 8 秒遅延で期限にかかる）
 printf 'mcp:launch:kept\n' > "$FILE"
 start=$SECONDS
-NEW_LOCK_TIMES=1 NEW_SHOW_DELAY=4 NEW_SHOW_DELAY_FROM=2 PELWAY_REBUILD_SHOW_RETRY_SLEEP=0.1 \
+NEW_LOCK_TIMES=1 NEW_SHOW_DELAY=8 NEW_SHOW_DELAY_FROM=2 PELWAY_REBUILD_SHOW_RETRY_SLEEP=0.1 \
   PELWAY_REBUILD_WT_WAIT=0.6 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
 check "retry read killed at the limit: exits non-zero" [ "$rc" -ne 0 ]
-check "retry read killed at the limit: returns at the deadline" [ "$(( SECONDS - start ))" -lt 3 ]
+check "retry read killed at the limit: returns at the deadline" [ "$(( SECONDS - start ))" -lt 6 ]
 check "retry read killed at the limit: retried once" \
   [ "$(count "thread show $NEW --json")" -eq 2 ]
 check "retry read killed at the limit: nothing sent to either conductor" no_line "thread send"
@@ -245,32 +246,32 @@ check "retry read killed at the limit: stderr reports the timeout" \
   grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
 
 # 待機上限 0 でも 1 回目の読み取りは行うが、正の下限で打ち切られる（timeout の期間 0 は
-# 打ち切り無効のため、残り 0 のままは渡さない。偽の t3 が応答を 4 秒遅らせる）
+# 打ち切り無効のため、残り 0 のままは渡さない。偽の t3 が応答を 8 秒遅らせる）
 printf 'mcp:launch:kept\n' > "$FILE"
 start=$SECONDS
-NEW_SHOW_DELAY=4 PELWAY_REBUILD_SHOW_FIRST_TIMEOUT=1 \
+NEW_SHOW_DELAY=8 PELWAY_REBUILD_SHOW_FIRST_TIMEOUT=1 \
   PELWAY_REBUILD_WT_WAIT=0 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
 check "first read at zero limit: exits non-zero" [ "$rc" -ne 0 ]
-check "first read at zero limit: returns at the floor" [ "$(( SECONDS - start ))" -lt 3 ]
+check "first read at zero limit: returns at the floor" [ "$(( SECONDS - start ))" -lt 6 ]
 check "first read at zero limit: reads once" \
   [ "$(count "thread show $NEW --json")" -eq 1 ]
 check "first read at zero limit: nothing sent to either conductor" no_line "thread send"
 check "first read at zero limit: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
-# 読み取りが打ち切られた条件（遅延 4 秒・下限 1 秒で必ず打ち切られる）では、権限は
+# 読み取りが打ち切られた条件（遅延 8 秒・下限 1 秒で必ず打ち切られる）では、権限は
 # 読めていないため - と出る
 check "first read at zero limit: logs the killed-read values" \
   grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=- worktree=-" "$ROOT/err"
 check "first read at zero limit: stderr reports the timeout" \
   grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
 
-# 期限の直前に始まった読み直しも残り時間で打ち切る（1 回目は即応答し、2 回目が 4 秒遅延で
+# 期限の直前に始まった読み直しも残り時間で打ち切る（1 回目は即応答し、2 回目が 8 秒遅延で
 # 期限にかかる）
 printf 'mcp:launch:kept\n' > "$FILE"
 start=$SECONDS
-NEW_WT="" NEW_SHOW_DELAY=4 NEW_SHOW_DELAY_FROM=2 \
+NEW_WT="" NEW_SHOW_DELAY=8 NEW_SHOW_DELAY_FROM=2 \
   PELWAY_REBUILD_WT_WAIT=0.6 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
 check "reread killed near the limit: exits non-zero" [ "$rc" -ne 0 ]
-check "reread killed near the limit: returns at the deadline" [ "$(( SECONDS - start ))" -lt 3 ]
+check "reread killed near the limit: returns at the deadline" [ "$(( SECONDS - start ))" -lt 6 ]
 check "reread killed near the limit: two reads" \
   [ "$(count "thread show $NEW --json")" -eq 2 ]
 check "reread killed near the limit: nothing sent to either conductor" no_line "thread send"
@@ -303,13 +304,13 @@ for bad in 1d 5m abc "$big" 61; do
 done
 
 # 打ち切りの TERM に応答しない読み取りも、猶予のあとの強制終了で期限に戻る
-# （偽の t3 が TERM を無視して 6 秒遅らせる。期限の TERM のあと KILL で落ちる）
+# （偽の t3 が TERM を無視して 8 秒遅らせる。期限の TERM のあと猶予 1 秒で KILL で落ちる）
 printf 'mcp:launch:kept\n' > "$FILE"
 start=$SECONDS
-NEW_WT="" NEW_SHOW_DELAY=6 NEW_TERM_IGNORE=1 \
+NEW_WT="" NEW_SHOW_DELAY=8 NEW_TERM_IGNORE=1 \
   PELWAY_REBUILD_WT_WAIT=0.6 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
 check "term-ignoring read killed: exits non-zero" [ "$rc" -ne 0 ]
-check "term-ignoring read killed: returns after the grace" [ "$(( SECONDS - start ))" -lt 4 ]
+check "term-ignoring read killed: returns after the grace" [ "$(( SECONDS - start ))" -lt 6 ]
 check "term-ignoring read killed: reads once" \
   [ "$(count "thread show $NEW --json")" -eq 1 ]
 check "term-ignoring read killed: nothing sent to either conductor" no_line "thread send"

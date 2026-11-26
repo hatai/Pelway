@@ -163,3 +163,5 @@ PR: #735
 4. 仮定と解釈: 「読み取り成功の厳密ピン」には「interval past the limit」を選んだ（1 回の読み取りが残り 0.6 秒で即応答し、以後の読み直しを始めず期限の先で止まる条件のため決定的。「worktree arrives」のピンとは別に、時間切れの経路で読み取れた権限が出ることを確かめる）。境目のシナリオの緩和は codex の案 (c)（緩和を残して理由を記載）を取った — 境目のどちら側になるかを決定的に作る手段（読み取りの所要時間を時計から切り離す仕組み）がなく、固定に戻すと CI が再び不安定になるため
 
 試験の更新・追加: 「interval past the limit: logs the last-read values」「first read at zero limit: logs the killed-read values」を追加（計 177 件 pass）
+
+push 後のローカル verify で `term-ignoring read killed: returns after the grace` が 1 度落ちた（cargo test との並走負荷で、打ち切り経路の戻り ~1.6 秒に対し上限 4 秒がタイトすぎた）→ 5 件の時間チェック（read/retry read/first read/reread killed、term-ignoring）の偽の遅延を 8 秒・戻り上限を 6 秒に広げた。打ち切り経路は遅延の完了を待たないため試験時間は増えず、打ち切られない経路（8 秒超）との区別は保たれる
