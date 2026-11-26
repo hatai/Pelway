@@ -12,15 +12,13 @@ failures=()
 MOCK="$ROOT/mock"
 mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$MOCK" "$ROOT/state/pelway" "$ROOT/repo/.git/pelway" "$ROOT/queue"
 
-# 本物の conductor-watch.sh と agent-team-config を置く偽リポジトリ（agent-gh はモックに差し替える）。
-cp "$REPO/scripts/"{conductor-watch.sh,agent-team-config} "$ROOT/repo/scripts/"
+cp "$REPO/scripts/"{conductor-watch.sh,agent-team-config} "$ROOT/repo/scripts/"  # 本物を置く偽リポジトリ（agent-gh はモックに差し替える）
 git init -q "$ROOT/repo"
 STATE="$ROOT/repo/.git/pelway/patrol-state.json"
 ISTATE="$ROOT/repo/.git/pelway/patrol-items.json"
 SLOTS="$ROOT/state/pelway/conductor-watch/slots.json"
 
-# モックの agent-gh: 呼び出しを記録し、issue list / pr list / label-events の読み取りだけに答える（issues.json が無いときは失敗―取得失敗の再現。読み取り以外は exit 9）。
-cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
+cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'  # モック: 呼び出しを記録し、issue list / pr list / label-events の読み取りだけに答える（issues.json が無いときは失敗―取得失敗の再現。読み取り以外は exit 9）
 #!/usr/bin/env bash
 echo "$*" >> "$MOCK/gh-calls.log"
 [[ "$2 $3" == "issue list" ]] && {
@@ -34,8 +32,7 @@ exit 9
 EOF
 chmod +x "$ROOT/repo/scripts/agent-gh"
 
-# 素の gh のモック: 呼ばれたことを記録して失敗する（実運用のキュー・実際の gh に触れないことの確認）。
-cat > "$ROOT/bin/gh" <<'EOF'
+cat > "$ROOT/bin/gh" <<'EOF'  # 素の gh のモック: 呼ばれたことを記録して失敗する（実運用のキュー・実際の gh に触れないことの確認）
 #!/usr/bin/env bash
 echo "$*" >> "$MOCK/gh-direct-calls.log"
 exit 9
@@ -65,8 +62,7 @@ exec /bin/sleep 0.03
 EOF
 chmod +x "$ROOT/bin/sleep"
 
-# 試験用の agent-team.toml（opencode 3 枠・devin 6 枠。検証を通る最小の形）。
-write_toml() {
+write_toml() {  # 試験用の agent-team.toml（opencode 3 枠・devin 6 枠。検証を通る最小の形）
   cat > "$ROOT/repo/agent-team.toml" <<'EOF'
 [agents.opencode]
 instance = { implement = "opencode", investigate = "opencode" }
@@ -111,8 +107,7 @@ EOF
 }
 write_toml
 
-mock_issues() { printf '%s\n' "$1" > "$MOCK/issues.json"; }
-mock_prs() { printf '%s\n' "$1" > "$MOCK/prs.json"; }
+mock_issues() { printf '%s\n' "$1" > "$MOCK/issues.json"; }; mock_prs() { printf '%s\n' "$1" > "$MOCK/prs.json"; }
 mock_threads() { printf '%s\n' "${1:-[]}" > "$MOCK/threads.json"; }
 mock_threads
 
@@ -122,8 +117,7 @@ print(json.dumps({"number": int(sys.argv[1]), "state": sys.argv[2],
 
 jarr() { local out="" x; for x in "$@"; do out+="${out:+,}$x"; done; printf '[%s]' "$out"; }
 
-# t3 thread list の要素（thread_item <threadId> <題名> <status> [updatedAt]。題名の形は「[実装] #<番号> 」）。
-thread_item() { printf '{"threadId":"%s","title":"%s","status":"%s","updatedAt":"%s"}' "$1" "$2" "$3" "${4:-2026-01-01T00:00:00Z}"; }
+thread_item() { printf '{"threadId":"%s","title":"%s","status":"%s","updatedAt":"%s"}' "$1" "$2" "$3" "${4:-2026-01-01T00:00:00Z}"; }  # t3 thread list の要素（題名の形は「[実装] #<番号> 」）
 
 NOW="$ROOT/now"; echo 1700000000 > "$NOW"; set_now() { echo "$1" > "$NOW"; }
 
@@ -148,15 +142,11 @@ check() {
   if "$@"; then printf 'ok   %s\n' "$name"; else printf 'FAIL %s\n' "$name"; failures+=("$name"); fi
 }
 
-has() { grep -Eq "$2" "$1"; }
-nhas() { ! grep -Eq "$2" "$1"; }
-calls() { wc -l < "$MOCK/gh-calls.log"; }
-# 記録の <key> の値を取り出す（jq 風のパス。slot_eq/ps_eq は値の一致を確かめる）。
-get() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[2]));
+has() { grep -Eq "$2" "$1"; }; nhas() { ! grep -Eq "$2" "$1"; }; calls() { wc -l < "$MOCK/gh-calls.log"; }
+get() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[2]));  # 記録の <key> の値を取り出す（jq 風のパス）
 for k in sys.argv[1].split("."): d=d[k]
 print(d)' "$1" "$2"; }
-slot_eq() { [[ "$(get "$1" "$SLOTS")" == "$2" ]]; }
-ps_eq() { [[ "$(get "$1" "$STATE")" == "$2" ]]; }
+slot_eq() { [[ "$(get "$1" "$SLOTS")" == "$2" ]]; }; ps_eq() { [[ "$(get "$1" "$STATE")" == "$2" ]]; }
 
 jput() { python3 -I -c 'import json,sys
 p,n,k,v=sys.argv[1:5]
@@ -167,8 +157,7 @@ it=d.setdefault("items",{}).setdefault(n,{})
 it[k] = it.setdefault(k,[])+[json.loads(v)] if k=="implement_thread" else json.loads(v)
 json.dump(d,open(p,"w"),ensure_ascii=False,indent=2,sort_keys=True)' "$1" "$2" "$3" "$4"; }  # <file> の items[<issue>] に <key>=<JSON> を書く（implement_thread は一覧に追加）
 
-# 作業状態の印・implement_thread の組・巻き戻し中の印を書く（いずれも patrol-items.json。旧置き場は litem が patrol-state.json に書く）。
-mark()         { jput "$ISTATE" "$1" work_state "{\"state\": \"$2\"}"; }
+mark()         { jput "$ISTATE" "$1" work_state "{\"state\": \"$2\"}"; }  # 作業状態の印（bind/set_rollback/litem も patrol-items.json。旧置き場 litem だけ patrol-state.json）
 bind()         { jput "$ISTATE" "$1" implement_thread "{\"pr\": \"${3:-none}\", \"thread_id\": \"$2\", \"branch\": \"agent/x\"}"; }
 set_rollback() { jput "$ISTATE" "$1" rollback "{\"assignment_id\": \"a\", \"started_at\": \"t\", \"steps_done\": []}"; }
 litem() { jput "$STATE" "$1" work_state "{\"state\": \"$2\"}"; jput "$STATE" "$1" implement_thread "{\"pr\": \"none\", \"thread_id\": \"$3\", \"branch\": \"agent/x\"}"; }
@@ -310,8 +299,7 @@ run_cycles 1
 check "issue fetch failure emits SLOTS error" has "$ROOT/out.log" '^SLOTS error '
 check "no stale usage on fetch failure" nhas "$ROOT/out.log" '^SLOTS (over )?[a-z]+ [0-9]+/[0-9]+$'
 check "slots.json status error on fetch failure" slot_eq status error
-# 取得に戻った巡回は、あらためて最新の使用数を出す
-mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)" "$(iss 13 OPEN agent:working agent:devin)" "$(iss 15 OPEN agent:working)" "$(iss 16 OPEN agent:working)")"
+mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)" "$(iss 13 OPEN agent:working agent:devin)" "$(iss 15 OPEN agent:working)" "$(iss 16 OPEN agent:working)")"  # 取得に戻った巡回は、あらためて最新の使用数を出す
 run_cycles 1
 check "fresh usage re-emitted after recovery" has "$ROOT/out.log" '^SLOTS over opencode 4/3$'
 check "slots.json back to ok" slot_eq status ok

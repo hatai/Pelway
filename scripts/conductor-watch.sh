@@ -659,11 +659,11 @@ if not isinstance(items, dict): items = {}
 # SLOTS 行（Issue #714）。実装・調査に使っている枠の数を agent-team.toml の上限と突き
 # 合わせて出す。判断の正本は watch.log の行でなく、見張り自身が巡回ごとに書き直す
 # slots.json（決まりは runbook「3. 同時数と順番待ち」）。
-# agent-team.toml が無いときは SLOTS を出さない。使用数を確かめられない巡回（一覧の
-# 取得失敗・件数の打ち切り・toml の検証失敗）は SLOTS error <理由> だけを出す（直前の
-# 巡回の行が残ったまま使われないようにする）。出すのは、使用数または状態が前回から
-# 変わったときと HEARTBEAT の巡回。Issue を持たない調査（入口B）は数えない。数えるのは
-# open で agent:working の付いた Issue で、agent:devin は devin、ほかは opencode。
+# agent-team.toml が無いときは SLOTS を出さない。使用数を確かめられない巡回は
+# SLOTS error <理由> だけを出す（直前の巡回の行が残ったまま使われないようにする）。
+# 出すのは、使用数または状態が前回から変わったときと HEARTBEAT の巡回。Issue を持た
+# ない調査（入口B）は数えない。数えるのは open で agent:working の付いた Issue で、
+# agent:devin は devin、ほかは opencode。
 # 停止の印（停止中・再開処理中・再開待ち）が付いたものは裏付けを取ってから除く
 # （stop_verified は runbook「3. 同時数と順番待ち」の「実際の停止を確認できるもの」と同じ決まり）。
 slots_st = "unavailable"; slots_reason = "agent-team.toml not in worktree"
@@ -755,10 +755,9 @@ rec = {"updated_at": min(ats) if ats else now, "patrol_at": now, "status": slots
 if slots_reason is not None: rec["reason"] = slots_reason
 if slots_usage is not None: rec["usage"] = slots_usage
 # 同じディレクトリの一時ファイルからの置き換えで公開し、読み手に空・書きかけの記録が
-# 見えないようにする（write_ps と同じ形）。先に前回の記録を外してから公開する:
-# 公開に失敗した回に前回の記録が残ると、読み手が鮮度の条件の内側で古い status:ok を
-# 使い続ける。書けない巡回はそのまま次へ進める: 外れた・古い記録は読み手の規約どおり
-# 実測の数え方に戻る（runbook「3. 同時数と順番待ち」）。
+# 見えないようにする（write_ps と同じ形）。先に前回の記録を外してから公開する―
+# 公開に失敗した回に残ると、読み手が鮮度の条件の内側で古い status:ok を使い続ける。
+# 書けない巡回はそのまま次へ進める（外れた・古い記録は読み手の規約どおり実測に戻る）。
 try:
     try: os.unlink(os.path.join(d, "slots.json"))
     except FileNotFoundError: pass
