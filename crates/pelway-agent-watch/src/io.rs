@@ -16,6 +16,20 @@ use serde_json::Value;
 /// Grok Bot の webhook の URL と鍵を置く fnox 設定（pelway-agent-notify と共用）。
 const NOTIFY_FNOX: &str = ".config/pelway-agent-notify/fnox.toml";
 
+/// 通知用 fnox 設定の場所。`PELWAY_NOTIFY_FNOX_CONFIG` が絶対パスならそれ、未設定なら既定の
+/// `~/.config/pelway-agent-notify/fnox.toml`。空文字・絶対パスでない値は使わない（None を返し、
+/// 秘密を読まない＝送らない。`reason=no-secret` と同じ扱い）。相対パスを `--project` の
+/// カレントから解決しないので、sandbox の中から置かれた設定を読むこともない。
+fn notify_fnox_config() -> Option<PathBuf> {
+    match std::env::var_os("PELWAY_NOTIFY_FNOX_CONFIG") {
+        None => Some(home().join(NOTIFY_FNOX)),
+        Some(v) => {
+            let p = PathBuf::from(v);
+            p.is_absolute().then_some(p)
+        }
+    }
+}
+
 /// 外部コマンド 1 回あたりの制限時間（秒）。固まったコマンドで見張り役ごと止まらないため。
 const COMMAND_TIMEOUT_SECS: &str = "30";
 /// 制限時間で SIGTERM を送っても終わらないときに、SIGKILL を送るまでの猶予（`timeout -k`）。
@@ -257,10 +271,11 @@ pub enum SendResult {
 
 /// 秘密を 1 つ読む。外部コマンドの制限時間（30 秒）と送信の期限の、早い方で止める。
 fn fnox_get(name: &str, project: &Path, deadline: Instant) -> Option<String> {
+    let config = notify_fnox_config()?;
     let limit = left(deadline).min(Duration::from_secs(30));
     let out = killed_after("fnox", limit)?
         .arg("-c")
-        .arg(home().join(NOTIFY_FNOX))
+        .arg(config)
         .args(["get", name])
         .current_dir(project)
         .stdin(Stdio::null())

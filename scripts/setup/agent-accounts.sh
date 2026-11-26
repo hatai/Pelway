@@ -202,16 +202,30 @@ finish() {
 # 実装担当の GitHub App pelway-dev と、レビュー担当の GitHub App pelway-review を作り、
 # 認証情報を age で暗号化して置き、ブランチ保護と Projects ボードを設定する。
 # dev の秘密は ~/.config/pelway-agent/fnox.toml（age 鍵は ~/.config/fnox/age.txt）に、
-# review の秘密は ~/.config/pelway-agent-review/fnox.toml（review 専用の age 鍵は同ディレクトリの age.txt）に置く（#449 の鍵分割）。
+# review の秘密は ~/.config/pelway-agent-review/fnox.toml（review 専用の age 鍵は同ディレクトリの age.txt）に、
+# 通知の秘密は ~/.config/pelway-agent-notify/fnox.toml（通知専用の age 鍵は同ディレクトリの age.txt）に置く
+# （#449・#737 の鍵分割）。
 # scripts/agent-gh はこれらの設定から認証情報を読む。
 
 REPO="hatai/Pelway"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CFG="${PELWAY_AGENT_FNOX_CONFIG:-$HOME/.config/pelway-agent/fnox.toml}"
+DEV_AGE_KEY="$HOME/.config/fnox/age.txt"
 # レビュー担当の秘密は dev と別の設定・別の age 鍵に置く（#449）。scripts/agent-gh review はこちらを読む。
 REVIEW_CFG="${PELWAY_AGENT_FNOX_CONFIG_REVIEW:-$HOME/.config/pelway-agent-review/fnox.toml}"
 REVIEW_AGE_KEY="$HOME/.config/pelway-agent-review/age.txt"
+# 通知の秘密は dev とも review とも別の設定・通知専用の age 鍵に置く（#737）。agent-watch はこちらを読む。
+# PELWAY_NOTIFY_FNOX_CONFIG は agent-watch（io.rs の notify_fnox_config）と同じく絶対パスのみ受け付ける。
+# 空文字・相対パスは使わない（その値では agent-watch も送らないため、警告して既定の場所に作る）。
 NOTIFY_CFG="$HOME/.config/pelway-agent-notify/fnox.toml"
+if [[ -v PELWAY_NOTIFY_FNOX_CONFIG ]]; then
+  if [[ "$PELWAY_NOTIFY_FNOX_CONFIG" == /* ]]; then
+    NOTIFY_CFG="$PELWAY_NOTIFY_FNOX_CONFIG"
+  else
+    warn "PELWAY_NOTIFY_FNOX_CONFIG は絶対パスでないため使わない（agent-watch もこの値では送らない）: $PELWAY_NOTIFY_FNOX_CONFIG"
+  fi
+fi
+NOTIFY_AGE_KEY="$HOME/.config/pelway-agent-notify/age.txt"
 ENV_FILE="/nonexistent/pelway-agent-accounts.env" # 値は .env ではなく fnox に置く
 
 # fnox_set <config> <provider> NAME：標準入力の値を <config> に age で暗号化して保存する（値は argv に載せない）。
@@ -276,7 +290,7 @@ app_stages() {
 
 run_wizard() {
 
-TOTAL_STAGES=13
+TOTAL_STAGES=14
 
 banner "Pelway AI 開発チームの GitHub 名義とブランチ保護"
 
@@ -297,16 +311,13 @@ if [[ -f "$CFG" ]]; then
   note "作成済み"
 else
   mkdir -p "$(dirname "$CFG")"
-  recipients=""
-  [[ -f "$NOTIFY_CFG" ]] && recipients="$(grep -E '^recipients' "$NOTIFY_CFG" | head -n1 || true)"
-  if [[ -z "$recipients" ]]; then
-    warn "pelway-agent-notify の age 公開鍵が見つからない"
-    step "age の公開鍵（age1... で始まる）を用意する。秘密鍵は ~/.config/fnox/age.txt に置く。"
-    ask AGE_RECIPIENT "age の公開鍵:"
-    recipients="recipients = [\"$AGE_RECIPIENT\"]"
-  else
-    note "pelway-agent-notify と同じ age 公開鍵を使う"
+  # dev の秘密は fnox 既定の鍵（$DEV_AGE_KEY）で暗号化する。通知用とは別の鍵（#737）
+  if [[ ! -f "$DEV_AGE_KEY" ]]; then
+    mkdir -p "$(dirname "$DEV_AGE_KEY")"
+    (umask 077 && age-keygen -o "$DEV_AGE_KEY")
+    printf '  %s✓ created%s %s（秘密鍵。値は表示しない）\n' "$GREEN" "$RESET" "$DEV_AGE_KEY"
   fi
+  recipients="recipients = [\"$(age-keygen -y "$DEV_AGE_KEY")\"]"
   (umask 077 && cat >"$CFG" <<EOF
 # Pelway AI 開発チームの GitHub 名義（scripts/agent-gh が読む）。値は age で暗号化されている。
 # 作成と更新: scripts/setup/agent-accounts.sh
@@ -318,6 +329,49 @@ $recipients
 EOF
   )
   printf '  %s✓ created%s %s\n' "$GREEN" "$RESET" "$CFG"
+fi
+pause
+
+stage "通知用の fnox 設定と age 鍵を作る"
+say "見張り役（agent-watch）が Grok Bot の webhook の URL と鍵を読む設定は、dev の設定・鍵とは別にする（#737）。"
+if [[ -f "$NOTIFY_CFG" ]]; then
+  note "$NOTIFY_CFG は作成済み"
+  grep -q 'providers\.notify_age' "$NOTIFY_CFG" ||
+    warn "この設定は旧形式（dev と同じ age 鍵を共有）。docs/dev-environment.md の「通知用の age 鍵への移し替え」で専用の鍵に移す"
+else
+  # NOTIFY_CFG を別のディレクトリに上書きしていても NOTIFY_AGE_KEY は既定の場所なので、両方の親を作る。
+  mkdir -p "$(dirname "$NOTIFY_CFG")" "$(dirname "$NOTIFY_AGE_KEY")"
+  if [[ -f "$NOTIFY_AGE_KEY" ]]; then
+    note "age 鍵は作成済み"
+  else
+    (umask 077 && age-keygen -o "$NOTIFY_AGE_KEY")
+    printf '  %s✓ created%s %s（秘密鍵。値は表示しない）\n' "$GREEN" "$RESET" "$NOTIFY_AGE_KEY"
+  fi
+  notify_recipient="$(age-keygen -y "$NOTIFY_AGE_KEY")"
+  (umask 077 && cat >"$NOTIFY_CFG" <<EOF
+# agent-watch が Grok Bot の webhook に送るときの秘密。値は通知専用の age 鍵で暗号化されている。
+# 作成と更新: scripts/setup/agent-accounts.sh
+# agent-watch は環境変数 PELWAY_NOTIFY_FNOX_CONFIG でこの場所を変えられる。
+[providers.notify_age]
+type = "age"
+key_file = "$NOTIFY_AGE_KEY"
+recipients = ["$notify_recipient"]
+
+[secrets]
+EOF
+  )
+  printf '  %s✓ created%s %s\n' "$GREEN" "$RESET" "$NOTIFY_CFG"
+fi
+# webhook の値は自分の Grok Bot の webhook ルーティンが発行したものを入れる（人ごと）
+if grep -q 'providers\.notify_age' "$NOTIFY_CFG" 2>/dev/null; then
+  if confirm "webhook の URL と鍵を今登録する（あとから fnox set でもよい）？"; then
+    ask_secret NOTIFY_URL "webhook の URL:"
+    printf '%s' "$NOTIFY_URL" | fnox_set "$NOTIFY_CFG" notify_age PELWAY_NOTIFY_WEBHOOK_URL
+    ask_secret NOTIFY_KEY "webhook の鍵:"
+    printf '%s' "$NOTIFY_KEY" | fnox_set "$NOTIFY_CFG" notify_age PELWAY_NOTIFY_WEBHOOK_KEY
+  else
+    SKIPPED+=("webhook の秘密の登録（fnox -c $NOTIFY_CFG set --provider notify_age PELWAY_NOTIFY_WEBHOOK_URL / PELWAY_NOTIFY_WEBHOOK_KEY）")
+  fi
 fi
 pause
 
@@ -334,7 +388,8 @@ say "レビュー担当の秘密は dev と別の設定・別の age 鍵に置�
 if [[ -f "$REVIEW_CFG" ]]; then
   note "$REVIEW_CFG は作成済み"
 else
-  mkdir -p "$(dirname "$REVIEW_CFG")"
+  # REVIEW_CFG を別のディレクトリに上書きしていても REVIEW_AGE_KEY は既定の場所なので、両方の親を作る。
+  mkdir -p "$(dirname "$REVIEW_CFG")" "$(dirname "$REVIEW_AGE_KEY")"
   if [[ -f "$REVIEW_AGE_KEY" ]]; then
     note "age 鍵は作成済み"
   else

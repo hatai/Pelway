@@ -15,6 +15,7 @@
       "Read(~/.config/opencode/**)",
       "Read(~/.config/fnox/**)",
       "Read(~/.config/pelway-agent/**)",
+      "Read(~/.config/pelway-agent-notify/**)",
       "Read(~/.local/share/devin/credentials.toml)",
       "Read(~/.t3/userdata/**)",
       "Read(/mnt/**)",
