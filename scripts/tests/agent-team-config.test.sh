@@ -79,11 +79,11 @@ a = d["agents"]
 want = {
     "opencode": (
         {"implement": "opencode", "investigate": "opencode"},
-        ["zai-coding-plan/glm-5.3"],
+        ["zai-coding-plan/glm-5.4"],
     ),
     "devin": (
         {"implement": "acpRegistry_devin", "review": "devin_review"},
-        ["swe-2-high"],
+        ["swe-2-1-high"],
     ),
     "codex": (
         {"review": "codex_review"},
@@ -91,7 +91,7 @@ want = {
     ),
     "claude": (
         {"review": "claude_review"},
-        ["claude-opus-5-5"],
+        ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
     ),
 }
 bad = [
