@@ -87,6 +87,45 @@ pub fn valid_thread_id(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b':' | b'_' | b'-' | b'.' | b'%'))
 }
 
+/// 起こすかの判定に使う、知らせ 1 件の要約。
+/// `Watcher::cycle` が、受信箱に書いた payload（`thread_id`・`event`・`report`）と、
+/// その周の `t3 thread list`/`show` の `createdBy` から作る。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WakeNotice {
+    /// 知らせの元のスレッド ID（`thread_id`。知らせの元が指揮役自身かの照合にも使う）。
+    pub thread_id: String,
+    /// payload の `event`（`finished`・`failed`・`cancelled`・`waiting`・`stalled`）。
+    pub event: String,
+    /// payload の `report` に報告の行があるか。
+    pub has_report: bool,
+    /// 元のスレッドの立て手（`createdBy` の値）。項目が無い・読めないときは `None`。
+    pub created_by: Option<String>,
+}
+
+/// 人間が立てたスレッドか。`createdBy` が `agent` 以外の値（`user` など）を持つものを
+/// 人間が立てたスレッドと見る（`docs/agents/grokbot-runbook.md` の shared-worktree と同じ見分け）。
+/// 項目が無い・読めない（`None`）ときは、起こし漏れを避けるため人間ではない側
+/// （従来どおり起こす）に倒す。
+pub fn human_created(created_by: Option<&str>) -> bool {
+    matches!(created_by, Some(v) if v != "agent")
+}
+
+/// その知らせで指揮役を起こすに足るか（Issue #727）。
+/// 人間が立てたスレッドの知らせは、`failed`・`waiting`・`stalled`、または報告の行のある
+/// `finished` のときだけ起こす。それ以外（報告の無い `finished`・`cancelled` など）は起こさず、
+/// 受信箱に残して次の定期巡回で読ませる。人間以外（エージェント・立て手不明）の知らせは
+/// 従来どおり起こす。
+pub fn wake_worthy(notice: &WakeNotice) -> bool {
+    if !human_created(notice.created_by.as_deref()) {
+        return true;
+    }
+    match notice.event.as_str() {
+        "failed" | "waiting" | "stalled" => true,
+        "finished" => notice.has_report,
+        _ => false,
+    }
+}
+
 /// 起こすかの判定の結果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WakeDecision {
@@ -96,19 +135,36 @@ pub enum WakeDecision {
     NoConductor,
     /// 登録された値がスレッド ID の形をしていない。
     InvalidThreadId,
+    /// 知らせがすべて、人間が立てたスレッドの起こさない種類のもの
+    /// （報告の無い `finished`・`cancelled` など。Issue #727）。
+    HumanNonUrgent,
     /// 前回の起こしの後に、指揮役の既読の位置が進んでいない。
     NotYetRead,
 }
 
 /// 起こすかを決める。`last_wake_offset` は前回起こしたときの指揮役の既読の位置（`inbox_offset`。
 /// 一度も起こしていなければ None）。既読の位置がそこから進んでいなければ、重ねて起こさない
-/// （前回の起こしの後に 1 行でも読めば、次の知らせで起こす）。
-pub fn decide_wake(info: &PatrolInfo, last_wake_offset: Option<u64>) -> WakeDecision {
+/// （前回の起こしの後に 1 行でも読めば、次の知らせで起こす）。`notices` はその周に受信箱へ
+/// 書いた知らせの要約で、登録された指揮役自身のスレッドの知らせを除いた残りのどれか 1 件でも
+/// 起こすに足る（`wake_worthy`）ものがあれば起こす側に進む。自身の知らせだけの回は呼び出し側
+/// （`maybe_wake` の own-event）が先に抜けるため、除いた残りが空になることはない。
+pub fn decide_wake(
+    info: &PatrolInfo,
+    last_wake_offset: Option<u64>,
+    notices: &[WakeNotice],
+) -> WakeDecision {
     let Some(id) = &info.conductor_thread_id else {
         return WakeDecision::NoConductor;
     };
     if !valid_thread_id(id) {
         return WakeDecision::InvalidThreadId;
+    }
+    if !notices
+        .iter()
+        .filter(|n| n.thread_id != *id)
+        .any(wake_worthy)
+    {
+        return WakeDecision::HumanNonUrgent;
     }
     if last_wake_offset.is_some_and(|at| info.inbox_offset <= at) {
         return WakeDecision::NotYetRead;
@@ -126,6 +182,29 @@ mod tests {
             conductor_thread_id: id.map(str::to_string),
             inbox_offset: offset,
         }
+    }
+
+    fn notice(created_by: Option<&str>, event: &str, has_report: bool) -> WakeNotice {
+        notice_on("mcp:t", created_by, event, has_report)
+    }
+
+    fn notice_on(
+        thread_id: &str,
+        created_by: Option<&str>,
+        event: &str,
+        has_report: bool,
+    ) -> WakeNotice {
+        WakeNotice {
+            thread_id: thread_id.to_string(),
+            event: event.to_string(),
+            has_report,
+            created_by: created_by.map(str::to_string),
+        }
+    }
+
+    /// エージェントが立てたスレッドの finished（従来どおり起こす側の既定）。
+    fn agent_notice() -> Vec<WakeNotice> {
+        vec![notice(Some("agent"), "finished", false)]
     }
 
     #[test]
@@ -218,20 +297,23 @@ mod tests {
     #[test]
     fn wake_first_time_sends() {
         assert_eq!(
-            decide_wake(&info(Some("mcp:a"), 0), None),
+            decide_wake(&info(Some("mcp:a"), 0), None, &agent_notice()),
             WakeDecision::Send("mcp:a".to_string())
         );
     }
 
     #[test]
     fn wake_needs_conductor() {
-        assert_eq!(decide_wake(&info(None, 0), None), WakeDecision::NoConductor);
+        assert_eq!(
+            decide_wake(&info(None, 0), None, &agent_notice()),
+            WakeDecision::NoConductor
+        );
     }
 
     #[test]
     fn wake_rejects_invalid_id() {
         assert_eq!(
-            decide_wake(&info(Some("--version"), 0), None),
+            decide_wake(&info(Some("--version"), 0), None, &agent_notice()),
             WakeDecision::InvalidThreadId
         );
     }
@@ -240,13 +322,147 @@ mod tests {
     fn wake_waits_until_read() {
         // 前回の起こしのときの既読は 3。まだ進んでいない
         assert_eq!(
-            decide_wake(&info(Some("mcp:a"), 3), Some(3)),
+            decide_wake(&info(Some("mcp:a"), 3), Some(3), &agent_notice()),
             WakeDecision::NotYetRead
         );
         // 前回の起こしの時点の未読（たとえば 2 件）のうち 1 件だけ読んだ: 進んだので次の知らせで起こす
         assert_eq!(
-            decide_wake(&info(Some("mcp:a"), 4), Some(3)),
+            decide_wake(&info(Some("mcp:a"), 4), Some(3), &agent_notice()),
             WakeDecision::Send("mcp:a".to_string())
+        );
+    }
+
+    #[test]
+    fn human_finished_without_report_does_not_wake() {
+        assert_eq!(
+            decide_wake(
+                &info(Some("mcp:a"), 0),
+                None,
+                &[notice(Some("user"), "finished", false)]
+            ),
+            WakeDecision::HumanNonUrgent
+        );
+    }
+
+    #[test]
+    fn human_finished_with_report_wakes() {
+        assert_eq!(
+            decide_wake(
+                &info(Some("mcp:a"), 0),
+                None,
+                &[notice(Some("user"), "finished", true)]
+            ),
+            WakeDecision::Send("mcp:a".to_string())
+        );
+    }
+
+    #[test]
+    fn human_urgent_events_wake() {
+        for event in ["failed", "waiting", "stalled"] {
+            assert_eq!(
+                decide_wake(
+                    &info(Some("mcp:a"), 0),
+                    None,
+                    &[notice(Some("user"), event, false)]
+                ),
+                WakeDecision::Send("mcp:a".to_string()),
+                "{event}"
+            );
+        }
+    }
+
+    #[test]
+    fn human_cancelled_does_not_wake() {
+        // 起こすのは failed・waiting・stalled・報告のある finished だけ。cancelled は次の定期巡回で読ませる
+        assert_eq!(
+            decide_wake(
+                &info(Some("mcp:a"), 0),
+                None,
+                &[notice(Some("user"), "cancelled", false)]
+            ),
+            WakeDecision::HumanNonUrgent
+        );
+    }
+
+    #[test]
+    fn agent_thread_notices_wake_unchanged() {
+        // エージェントが立てたスレッドの知らせの扱いは変えない（報告の無い finished・cancelled でも起こす）
+        for event in ["finished", "failed", "cancelled", "waiting", "stalled"] {
+            assert_eq!(
+                decide_wake(
+                    &info(Some("mcp:a"), 0),
+                    None,
+                    &[notice(Some("agent"), event, false)]
+                ),
+                WakeDecision::Send("mcp:a".to_string()),
+                "{event}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_creator_wakes() {
+        // 立て手が分からない（createdBy が無い・読めない）ときは、起こし漏れを避けるため従来どおり起こす
+        for event in ["finished", "cancelled"] {
+            assert_eq!(
+                decide_wake(&info(Some("mcp:a"), 0), None, &[notice(None, event, false)]),
+                WakeDecision::Send("mcp:a".to_string()),
+                "{event}"
+            );
+        }
+    }
+
+    #[test]
+    fn mixed_batch_wakes_for_agent_notice() {
+        // 人間の報告の無い finished とエージェントの知らせが同じ回なら、後者で起こす
+        let notices = vec![
+            notice(Some("user"), "finished", false),
+            notice(Some("agent"), "finished", true),
+        ];
+        assert_eq!(
+            decide_wake(&info(Some("mcp:a"), 0), None, &notices),
+            WakeDecision::Send("mcp:a".to_string())
+        );
+    }
+
+    #[test]
+    fn own_notice_does_not_make_quiet_batch_worthy() {
+        // 指揮役自身（agent で立てたスレッド）の finished と、人間の報告の無い finished が
+        // 同じ回なら、起こすに足るものは無い（自身の知らせは起こす側に数えない）
+        let notices = vec![
+            notice_on("mcp:a", Some("agent"), "finished", false),
+            notice_on("mcp:t", Some("user"), "finished", false),
+        ];
+        assert_eq!(
+            decide_wake(&info(Some("mcp:a"), 0), None, &notices),
+            WakeDecision::HumanNonUrgent
+        );
+    }
+
+    #[test]
+    fn own_notice_plus_agent_notice_wakes() {
+        // 指揮役自身の finished と、エージェントが立てたスレッドの finished が
+        // 同じ回なら、後者で起こす
+        let notices = vec![
+            notice_on("mcp:a", Some("agent"), "finished", false),
+            notice_on("mcp:t", Some("agent"), "finished", true),
+        ];
+        assert_eq!(
+            decide_wake(&info(Some("mcp:a"), 0), None, &notices),
+            WakeDecision::Send("mcp:a".to_string())
+        );
+    }
+
+    #[test]
+    fn human_quiet_notice_skips_even_when_unread_progressed() {
+        // 既読が進んでいても、人間の起こさない種類の知らせだけなら起こさない
+        assert_eq!(
+            decide_wake(
+                &info(Some("mcp:a"), 4),
+                Some(3),
+                &[notice(Some("user"), "finished", false)]
+            ),
+            WakeDecision::HumanNonUrgent
         );
     }
 }

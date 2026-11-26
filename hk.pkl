@@ -44,6 +44,12 @@ steps {
   // docs/**・assets/** は上の exclude で対象外（凍結文書を書き換えない方針に合わせる）。
   ["typos"] = Builtins.typos
 
+  // client/ の整形の検査（bun fmt。ADR 0014）。対象は client/ の下だけ。
+  ["client_fmt"] {
+    glob = List("client/**")
+    check = "cd client && bun fmt --check"
+  }
+
   ["cargo_fmt"] {
     glob = List("**/*.rs", "**/Cargo.toml", "Cargo.lock", "**/rustfmt.toml", "**/.rustfmt.toml")
     check = "cargo fmt --all --check"

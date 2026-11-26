@@ -46,6 +46,7 @@ else
   mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$ROOT/sysbin" "$ROOT/systemd-bin" \
            "$ROOT/state" "$ROOT/config" "$ROOT/home" "$ROOT/mock"
   cp "$REPO/scripts/conductor-watch.sh" "$ENSURE" "$ROOT/repo/scripts/"
+  cp "$REPO/scripts/patrol-state-update" "$ROOT/repo/scripts/"
 
   # 見張りが呼ぶ外部コマンドのモック。巡回の成否は問わない（動作検査はプロセスの
   # 生死だけを見る）ため、どちらも空の一覧を返すだけにする。

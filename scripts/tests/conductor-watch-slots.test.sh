@@ -11,7 +11,7 @@ trap '[[ -n "${WPID:-}" ]] && kill "$WPID" 2>/dev/null; rm -rf "$ROOT"' EXIT
 MOCK="$ROOT/mock"
 mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$MOCK" "$ROOT/state/pelway" "$ROOT/repo/.git/pelway" "$ROOT/queue"
 
-cp "$REPO/scripts/"{conductor-watch.sh,agent-team-config} "$ROOT/repo/scripts/"  # 本物を置く偽リポジトリ（agent-gh はモックに差し替える）
+cp "$REPO/scripts/"{conductor-watch.sh,agent-team-config,patrol-state-update} "$ROOT/repo/scripts/"  # 本物を置く偽リポジトリ（agent-gh はモックに差し替える）
 git init -q "$ROOT/repo"
 STATE="$ROOT/repo/.git/pelway/patrol-state.json"; ISTATE="$ROOT/repo/.git/pelway/patrol-items.json"; SLOTS="$ROOT/state/pelway/conductor-watch/slots.json"
 

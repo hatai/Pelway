@@ -24,8 +24,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use pelway_agent_watch::ci::{ci_should_notify, runs_belong_to_pr};
 use pelway_agent_watch::format_utc;
 use pelway_agent_watch::inbox::{
-    INBOX_FILE, PATROL_STATE_FILE, PatrolInfo, WAKE_MESSAGE, WakeDecision, decide_wake, inbox_line,
-    parse_conductor_file, parse_patrol_state,
+    INBOX_FILE, PATROL_STATE_FILE, PatrolInfo, WAKE_MESSAGE, WakeDecision, WakeNotice, decide_wake,
+    inbox_line, parse_conductor_file, parse_patrol_state,
 };
 use pelway_agent_watch::outbox::{self, Outcome};
 use pelway_agent_watch::payload::build_payload;
@@ -291,26 +291,97 @@ impl Watcher {
         // （webhook が外した知らせも、上限 100 件の内なら後で届く）。受信箱に書けなくても webhook の送信と見張りは続ける。
         // 更新前の版の状態では、列の知らせを書けたかが分からないので、最初の周回で列の写しを書き直す（重複しうる）
         let pending = self.state.inbox_pending.replace(Vec::new());
-        let mut to_inbox = pending.unwrap_or_else(|| self.state.outbox.clone());
-        to_inbox.extend(payloads.iter().map(|(p, _)| p.clone()));
+        let mut to_inbox: Vec<(Value, Option<String>)> = pending
+            .unwrap_or_else(|| self.state.outbox.clone())
+            .iter()
+            .map(|item| {
+                let stored = item
+                    .get("thread_id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| self.state.inbox_pending_creators.get(id).cloned());
+                (item.clone(), stored)
+            })
+            .collect();
+        to_inbox.extend(payloads.iter().map(|(p, _)| (p.clone(), None)));
         if !to_inbox.is_empty() {
-            let lines: Vec<String> = to_inbox.iter().map(inbox_line).collect();
-            let sources: Vec<String> = to_inbox
+            let lines: Vec<String> = to_inbox.iter().map(|(p, _)| inbox_line(p)).collect();
+            // 起こしの判定に使う、知らせごとの種類（event・report の有無）と元のスレッドの立て手。
+            // 立て手は詳細（t3 thread show）を優先し、無ければ一覧（t3 thread list）の createdBy を使う。
+            // どちらにも無ければ立て手不明（None。起こす側に倒す。inbox::human_created）
+            let creator_of = |id: &str| -> Option<String> {
+                details
+                    .iter()
+                    .find(|d| d.id == id)
+                    .and_then(|d| d.created_by.clone())
+                    .or_else(|| {
+                        listed
+                            .iter()
+                            .find(|l| l.id == id)
+                            .and_then(|l| l.created_by.clone())
+                    })
+            };
+            let notices: Vec<WakeNotice> = to_inbox
                 .iter()
-                .filter_map(|p| p.get("thread_id").and_then(Value::as_str))
-                .map(str::to_string)
+                .map(|(p, stored)| {
+                    let thread_id = p
+                        .get("thread_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    WakeNotice {
+                        // 再試行の記録に判明済みの立て手があればそれを使う
+                        // （完了済みのスレッドはこの周回で詳細を取り直さないため）
+                        created_by: stored.clone().or_else(|| creator_of(&thread_id)),
+                        thread_id,
+                        event: p
+                            .get("event")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                        has_report: p.get("report").is_some_and(Value::is_string),
+                    }
+                })
                 .collect();
             match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &lines) {
-                Ok(total) => self.maybe_wake(&t3, total, &sources),
+                Ok(total) => self.maybe_wake(&t3, total, &notices),
                 Err(e) => {
                     eprintln!("agent-watch: ERROR inbox append failed: {e}");
                     let pending = self.state.inbox_pending.get_or_insert_default();
-                    for p in to_inbox {
-                        outbox::push(pending, p);
+                    for ((p, _), notice) in to_inbox.iter().zip(&notices) {
+                        // 記録の要素は payload そのものに留める（別の形に包むと、更新前の
+                        // 版に戻したときに包んだ形のまま受信箱に書かれて読み手に拾えない）。
+                        // 判明している立て手は別項目に thread_id で残す
+                        outbox::push(pending, p.clone());
+                        if let (Some(id), Some(c)) = (
+                            p.get("thread_id").and_then(Value::as_str),
+                            notice.created_by.as_deref(),
+                        ) {
+                            self.state
+                                .inbox_pending_creators
+                                .insert(id.to_string(), c.to_string());
+                        }
                     }
                 }
             }
         }
+
+        // キューに残った知らせの分だけ立て手を残す。全件書けた場合・上限で古い
+        // 知らせが外れた場合・キューが空の場合は、対応する項目も消す
+        // （残し続けると、追記の失敗が繰り返されるたびに状態ファイルが増え続ける）
+        let live: std::collections::BTreeSet<String> = self
+            .state
+            .inbox_pending
+            .iter()
+            .flatten()
+            .filter_map(|p| {
+                p.get("thread_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect();
+        self.state
+            .inbox_pending_creators
+            .retain(|id, _| live.contains(id));
 
         for (payload, tag) in payloads {
             eprintln!("agent-watch: queued {tag}");
@@ -371,8 +442,9 @@ impl Watcher {
 
     /// 受信箱に書いたあと、ホストの登録ファイルに登録されたいまの指揮役を起こす。
     /// 前回の起こしの後に指揮役の既読の位置（補助記録の `inbox_offset`）が進んでいなければ、重ねて起こさない。
+    /// `notices` はその周に受信箱へ書いた知らせの要約（種類と元のスレッドの立て手。Issue #727）。
     /// 失敗しても記録を進めず、次の新しい知らせで改めて試みる（再送の列は持たない）。
-    fn maybe_wake(&mut self, t3: &std::path::Path, inbox_lines: u64, sources: &[String]) {
+    fn maybe_wake(&mut self, t3: &std::path::Path, inbox_lines: u64, notices: &[WakeNotice]) {
         // 宛先はホスト側の登録ファイルからだけ読む（sandbox から書ける補助記録の値は使わない）
         let registered = match io::read_conductor_file(&io::conductor_file()) {
             Ok(Some(text)) => match parse_conductor_file(&text) {
@@ -387,7 +459,11 @@ impl Watcher {
         };
         // 知らせの元が登録された指揮役自身だけの回（指揮役の巡回の終わりなど）は起こさない。
         // 起こすと、巡回の終わり → 知らせ → 起こし → 巡回、を繰り返すため。
-        if !sources.is_empty() && sources.iter().all(|s| Some(s) == registered.as_ref()) {
+        if !notices.is_empty()
+            && notices
+                .iter()
+                .all(|n| Some(n.thread_id.as_str()) == registered.as_deref())
+        {
             eprintln!("agent-watch: WAKE skipped reason=own-event");
             return;
         }
@@ -422,7 +498,7 @@ impl Watcher {
             conductor_thread_id: registered,
             inbox_offset,
         };
-        match decide_wake(&info, last_wake) {
+        match decide_wake(&info, last_wake, notices) {
             WakeDecision::Send(thread_id) => match io::wake(t3, &thread_id, WAKE_MESSAGE) {
                 Ok(()) => {
                     eprintln!("agent-watch: WAKE sent inbox_lines={inbox_lines}");
@@ -434,6 +510,9 @@ impl Watcher {
             WakeDecision::NoConductor => {}
             WakeDecision::InvalidThreadId => {
                 eprintln!("agent-watch: WAKE skipped reason=invalid-thread-id");
+            }
+            WakeDecision::HumanNonUrgent => {
+                eprintln!("agent-watch: WAKE skipped reason=human-non-urgent");
             }
             WakeDecision::NotYetRead => {
                 eprintln!("agent-watch: WAKE skipped reason=not-yet-read");

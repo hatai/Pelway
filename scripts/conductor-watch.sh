@@ -30,7 +30,7 @@ if [[ -z "$P" ]]; then
   P="$common/pelway/patrol-state.json"
 fi
 # 旧置き場（$XDG_STATE_HOME/pelway/patrol-state.json）が残っていて新置き場に何も無い（symlink・FIFO も無い）
-# ときは、中身をそのまま引き継ぐ（1 回きりの移行。sandbox 内の指揮役は旧置き場に書けない）。新置き場は sandbox の
+# ときは、中身をそのまま引き継ぐ（旧ファイルは残るので、新置き場に何も無い起動のたびに写し直す。sandbox 内の指揮役は旧置き場に書けない）。新置き場は sandbox の
 # 中から置き換えられるため、親ディレクトリ（既定は共有 git dir の pelway/）は巡回の open_ps_dir と同じく作って、
 # 信頼できる基点（その 1 つ上。既定は git が解決した共有 git dir）から symlink をたどらずに開いて確かめ、
 # 移行先はそのファイル記述子を基準に O_EXCL|O_NOFOLLOW・0600 で作る。旧置き場は種類を確かめ、通常ファイルだけを
@@ -229,11 +229,13 @@ def env_secs(name, default):  # 間隔の環境変数。数値でなければ設
 def safe_to(v):  # watch.log の 1 行に収めるため、宛先はスレッド ID の形に限る（conductor-rebuild の valid_id が受け付ける文字種と長さと同じ。先頭ハイフンの拒否は対象外）
     s = str(v or "")
     return s if re.fullmatch(r"[A-Za-z0-9:_.%-]{1,256}", s) else "invalid"
-PS_MAX = 4194304  # patrol-state.json の読み取りと書き戻しの上限（4 MiB）
+PS_MAX = 4194304  # patrol-state.json の読み取りの上限（4 MiB）。書き込みの上限は共通の書き込み手順が同じ値で持つ
 # 補助記録は sandbox の中からも書ける共有 git dir の中にある。末尾の名前だけを O_NOFOLLOW で開いても、
 # 親ディレクトリ（pelway/）が symlink に差し替えられると保存先の外を読み書きするため、ボード Status 更新キューと
 # 同じく、親ディレクトリを信頼できる基点（その 1 つ上。既定は git が解決した共有 git dir）から symlink を
-# たどらずに開いて、自分の所有のディレクトリであることを確かめ、記録の読み書きはそのファイル記述子を基準に行う。
+# たどらずに開いて、自分の所有のディレクトリであることを確かめ、記録の読み取りはそのファイル記述子を基準に行う。
+# 書き戻しは共通の書き込み手順 scripts/patrol-state-update が行い、手順も同じ検査で親を開き直してその記述子を
+# 基準に書く（巡回が確かめた時点と手順が使う時点は別のため、パスの受け渡しだけでは足りない）。
 # 確かめられない回は記録を読まず（無いものとして扱い）、書き戻さない（Issue #699）。
 def open_ps_dir(path):  # 移行の open_ps_dir と同じ（変えるときは両方を直す）
     base, name = os.path.split(os.path.dirname(os.path.abspath(path)))
@@ -265,37 +267,6 @@ def read_named(name):  # 同じディレクトリにあるほかの記録（patr
         if len(data) > PS_MAX:
             raise ValueError("not a regular patrol-state file")
         return data
-def write_ps(obj):  # 書き戻せたら None、書き戻さなかったらその理由（dir-invalid・too-large・unencodable）を返す
-    if ps_dfd is None: return "dir-invalid"
-    # 次の巡回で読めない大きさ（read_ps の上限超え）なら置き換えず、読めていた記録を保つ。字下げは入れ子が
-    # 深いほど膨らみ、上限内の記録でも全体を一度に整形するとメモリを使い切るため、少しずつ整形して UTF-8 の
-    # 累計バイト数を数え、上限を超えた時点で打ち切る（json.dumps と同じ出力）。
-    # 整形が例外で止まる記録（json.loads は C の再帰の上限まで読めるが、整形は Python の再帰の上限で
-    # RecursionError になる深い入れ子など）も置き換えず、読めていた記録を保って理由を返す。
-    parts, size = [], 0
-    try:
-        for chunk in json.JSONEncoder(ensure_ascii=False, indent=2, sort_keys=True).iterencode(obj):
-            b = chunk.encode("utf-8"); size += len(b)
-            if size > PS_MAX: return "too-large"
-            parts.append(b)
-    except Exception:
-        return "unencodable"
-    data = b"".join(parts)
-    # symlink の先・FIFO に書かず、同じディレクトリの一時ファイルからの置き換えで行う。一時ファイルは
-    # 予測できない名前を O_EXCL|O_NOFOLLOW・0600 で作る（ボード Status 更新キューの結果ファイルと同じ）。
-    # 置き換えた記録はこの一時ファイルそのものなので、umask によらず許可ビットは 0600 を超えない。
-    tmp = f".patrol-state.{secrets.token_hex(8)}.tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=ps_dfd)
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        # 置き場が symlink・FIFO なら、指す先ではなくそれ自体を置き換える
-        os.replace(tmp, ps_name, src_dir_fd=ps_dfd, dst_dir_fd=ps_dfd)
-    except BaseException:
-        try: os.unlink(tmp, dir_fd=ps_dfd)
-        except OSError: pass
-        raise
-    return None
 def iso(s):
     try: return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
     except Exception: return None
@@ -924,23 +895,38 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
         if deadline_ts(nca) <= now and cur["due_warned"].get(n) != nca:
             print(f"PATROL #{n} due next_check_at={nca} waiting_on={won} next={owner}", flush=True)
             cur["due_warned"][n] = nca
-    ps["subjects"] = new_subj
     # 記録から消えた対象の期限通知の状態も消す
     cur["due_warned"] = {k: v for k, v in cur["due_warned"].items() if k in new_subj}
     cur["stall_notified"] = {k: v for k, v in cur["stall_notified"].items() if k in new_subj}
-    ps["updated_at"] = now_iso
-    # 書き戻す直前に記録を読み直し、巡回が持つ項目（subjects と updated_at）だけを載せ替えて、
-    # 読んでから書き戻すまでの間に指揮役が書いた項目を消さないようにする（items は別記録）。
-    # 読み直せなかった回は読んだ時点の記録のまま書く。
-    try: latest_ps = json.loads(read_ps())
-    except Exception: latest_ps = None
-    if isinstance(latest_ps, dict):
-        latest_ps["subjects"] = ps["subjects"]
-        latest_ps["updated_at"] = ps["updated_at"]
-        ps = latest_ps
-    # 書き戻さなかった回（親ディレクトリを確かめられない・上限を超える・整形できない）は理由の行を出す。続く間は
+    # 書き戻しは共通の書き込み手順 scripts/patrol-state-update にだけ出す（Issue #671。
+    # 手順側でロックを取って読み直した現在値に併合するため、読み込みの後に他の書き手が
+    # 進めたオフセットや項目を巻き戻さない）。subjects は対象ごとの置き換えなので、
+    # 読み込んだ時点の対象をすべて null で消す merge patch を先に出してから
+    # new_subj を書く（読み込み後に他の書き手が足した対象は残る。items は patrol-items.json の
+    # 別記録で、この patch も手順の併合も触れない）。
+    removed = {k: None for k in ps["subjects"]}
+    patch = [{"subjects": removed}, {"subjects": new_subj, "updated_at": now_iso}]
+    # 書き戻さなかった回（親ディレクトリを確かめられない・上限を超える・整形できない・手順の失敗）は理由の行を出す。続く間は
     # HEARTBEAT_SECS ごと（理由が変わればすぐ）に出し直し、書き戻せた回に回復の行を 1 つ出す。
-    why = write_ps(ps)
+    # 上限（4 MiB）と整形の検査は手順がロックの中で併合した結果に対して行い、結果を終了コードで返す
+    # （4 = 上限超過、5 = 整形できない。どちらも元の記録が残る）。巡回はその結果を理由として報告する。
+    why, r, wexc = ("dir-invalid" if ps_dfd is None else None), None, None
+    if why is None:
+        # 手順が応答しない（タイムアウト）・起動自体に失敗した（OSError）回も書き戻せなかった回として扱い、
+        # 理由の通知・間引きと state.json の保存に進む（例外で巡回が止まらないようにする）。
+        # 子プロセスにも本体と同じ -I（分離モード）を渡し、手順の標準エラー出力の符号化が
+        # 読めなくても UnicodeDecodeError で止まらないよう errors=replace にする。
+        # PELWAY_WATCH_PS_UPDATE_TIMEOUT は試験用の差し替え。
+        try:
+            r = subprocess.run([sys.executable, "-I", "scripts/patrol-state-update",
+                                "--writer", "conductor-watch", "--state", ps_path],
+                               input=json.dumps(patch), text=True, errors="replace",
+                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                               timeout=env_secs("PELWAY_WATCH_PS_UPDATE_TIMEOUT", 30))
+            why = {0: None, 4: "too-large", 5: "unencodable"}.get(r.returncode, "write-failed")
+        except (subprocess.TimeoutExpired, OSError) as e:
+            wexc = e
+            why = "write-failed"
     wsk = cur["ps_write_skipped"] if isinstance(cur["ps_write_skipped"], dict) else None
     if why is None:
         if wsk: print(f"WATCHER patrol-state-write-recovered since={stamp(wsk['since'])} after={int(now - wsk['since'])}s", flush=True)
@@ -948,6 +934,11 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
     elif wsk is None or wsk.get("reason") != why or now - wsk["notified_at"] >= HEARTBEAT_SECS:
         wsk = {"since": now if wsk is None else wsk["since"], "notified_at": now, "reason": why}
         print(f"WATCHER patrol-state-write-skipped since={stamp(wsk['since'])} reason={why} max={PS_MAX}", flush=True)
+        if why == "write-failed":
+            if r is not None:
+                print(f"PATROL-STATE write-failed rc={r.returncode} err={(r.stderr or '').strip()[:160]}", flush=True)
+            else:
+                print(f"PATROL-STATE write-failed exc={type(wexc).__name__}: {str(wexc)[:160]}", flush=True)
     cur["ps_write_skipped"] = wsk
     json.dump(cur, open(sp, "w"))
 PY
