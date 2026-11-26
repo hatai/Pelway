@@ -133,6 +133,9 @@ start=$SECONDS; end=$((start + WT_WAIT))
 while :; do
   read -r new_mode new_wt < <(show "$to") \
     || die "cannot read the new conductor $to (check it in T3)$(show_err). Nothing was sent to the old conductor and the registration is unchanged"
+  # 期限を超えて返った読み取りは worktree の有無の判定に使わない（読み直しの間隔や、
+  # show 内の lock のやり直しで期限をまたぐことがある）
+  (( SECONDS > end )) && { new_wt=-; break; }
   [[ "$new_wt" != - || "$SECONDS" -ge "$end" ]] && break
   sleep "$WT_INTERVAL"
 done
