@@ -224,6 +224,74 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 - 対象外: PR の会話欄に書いた普通のコメント（issue_comment）は通知しない。fork から来た PR へのコメントを安全に見分けられないため。あとで足す場合は、`pull-requests: read` で PR を調べて fork を除く形にし、別の PR で行う。
 - 手動実行（workflow_dispatch）は `event: "test"` のテスト通知を 1 通送る。送信の失敗（タイムアウト・HTTP エラー）で CI は落ちない。
 
+## 通知用の秘密（agent-watch の fnox 設定と age 鍵）
+
+見張り役 `agent-watch` が Grok Bot の webhook に送るときに読む秘密（`PELWAY_NOTIFY_WEBHOOK_URL`・`PELWAY_NOTIFY_WEBHOOK_KEY`）は、通知用の fnox 設定に置く。開発者ごとの設定なので、場所は環境変数 `PELWAY_NOTIFY_FNOX_CONFIG` で変えられる（絶対パスのみ。既定は `~/.config/pelway-agent-notify/fnox.toml`。空文字・相対パスは設定として使わず、秘密が無いときと同じく送らない）。
+
+値は通知専用の age 鍵（既定 `~/.config/pelway-agent-notify/age.txt`）で暗号化する。provider を `age` ではなく `notify_age` という名前にするのは、fnox のグローバル設定（`~/.config/fnox/config.toml`）の `[providers.age]`（鍵ファイルの指定が無い）とのマージで鍵の指定が曖昧にならないためで、`review_age`（「鍵の分割（review 用の fnox 設定と age 鍵）」）と同じ考え方。`key_file` を明示するので、`~/.config/fnox` が読めない実行環境でも復号できる（以前は dev と同じ `~/.config/fnox/age.txt` 1 つで dev の App 鍵と webhook の URL・鍵の両方が復号できた。#737 の鍵分割）。
+
+設定ファイルの形（`scripts/setup/agent-accounts.sh` の「通知用の fnox 設定と age 鍵を作る」が新規にはこの形で作る）:
+
+```toml
+[providers.notify_age]
+type = "age"
+key_file = "/home/<ユーザー>/.config/pelway-agent-notify/age.txt"
+recipients = ["<age-keygen -y で出る公開鍵>"]
+
+[secrets]
+```
+
+webhook の値は自分の Grok Bot の webhook ルーティンが発行したものを `fnox set` で登録する（値は画面に出さない）:
+
+```bash
+printf '%s' '<URL>' | fnox -c ~/.config/pelway-agent-notify/fnox.toml set --provider notify_age PELWAY_NOTIFY_WEBHOOK_URL
+printf '%s' '<鍵>'  | fnox -c ~/.config/pelway-agent-notify/fnox.toml set --provider notify_age PELWAY_NOTIFY_WEBHOOK_KEY
+```
+
+### 通知用の age 鍵への移し替え（既存環境・hatai が手で行う）
+
+`~/.config/pelway-agent-notify/fnox.toml` が `[providers.age]`（鍵ファイルの指定が無く、`~/.config/fnox/age.txt` で復号する形）の環境を、通知専用の鍵に移す。値は一切表示しない（`fnox get` の出力はパイプで次の `fnox set` に渡す）。agent-watch は送信のたびに設定を読み直すので、移し替えのあと再起動は要らない。
+
+```bash
+# 1. 通知専用の鍵ペアを作る（秘密鍵は表示しない）
+(umask 077 && age-keygen -o ~/.config/pelway-agent-notify/age.txt)
+notify_recipient="$(age-keygen -y ~/.config/pelway-agent-notify/age.txt)"
+
+# 2. 古い設定を退避してから、通知専用の鍵の設定に作り替える
+cp -p ~/.config/pelway-agent-notify/fnox.toml ~/.config/pelway-agent-notify/fnox.toml.bak
+(umask 077 && cat >~/.config/pelway-agent-notify/fnox.toml <<EOF
+# agent-watch が Grok Bot の webhook に送るときの秘密。値は通知専用の age 鍵で暗号化されている。
+# agent-watch は環境変数 PELWAY_NOTIFY_FNOX_CONFIG でこの場所を変えられる。
+[providers.notify_age]
+type = "age"
+key_file = "$HOME/.config/pelway-agent-notify/age.txt"
+recipients = ["$notify_recipient"]
+
+[secrets]
+EOF
+)
+
+# 3. 値を新しい鍵で登録し直す（古い設定は ~/.config/fnox/age.txt で復号できる）
+for name in PELWAY_NOTIFY_WEBHOOK_URL PELWAY_NOTIFY_WEBHOOK_KEY; do
+  fnox -c ~/.config/pelway-agent-notify/fnox.toml.bak get "$name" |
+    fnox -c ~/.config/pelway-agent-notify/fnox.toml set --provider notify_age "$name" >/dev/null
+done
+```
+
+**確かめ方（名前とパスだけ出す。値は出さない）**:
+
+```bash
+fnox -c ~/.config/pelway-agent-notify/fnox.toml list                      # PELWAY_NOTIFY_* の 2 名だけが載る
+fnox -c ~/.config/pelway-agent-notify/fnox.toml get PELWAY_NOTIFY_WEBHOOK_URL >/dev/null  # 新しい鍵で復号できる
+```
+
+**戻し方**: 退避した設定を戻し、通知専用の鍵を消す:
+
+```bash
+mv ~/.config/pelway-agent-notify/fnox.toml.bak ~/.config/pelway-agent-notify/fnox.toml
+rm -f ~/.config/pelway-agent-notify/age.txt
+```
+
 ## レビュー担当の Codex（codex_review）
 
 AI 開発チームのレビュースレッドは、T3 の Codex インスタンス `codex_review` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。`codex_review` はほかの Codex と home（`CODEX_HOME`）を分け、レビュー担当専用の `~/.codex-review` で動かす。レビュー担当（`codex_review`・`claude_review` のどちらも）が `scripts/agent-gh review` で読む fnox の設定は、環境変数 `PELWAY_AGENT_FNOX_CONFIG_REVIEW`（既定 `~/.config/pelway-agent-review/fnox.toml`）。`PELWAY_REVIEW_APP_ID` などの `PELWAY_REVIEW_*` の秘密はこのファイルに載る（dev 用の `PELWAY_AGENT_FNOX_CONFIG`・`~/.config/pelway-agent/fnox.toml` とは分離）。このマシンでの設定は次のとおり。
@@ -825,6 +893,7 @@ container run --rm alpine echo hello   # hello 程度の smoke
   | `pitchfork logs agent-watch` | ログ（送ったイベントと HTTP ステータス。秘密と返答の本文は出さない） |
 
 - 状態は `$XDG_STATE_HOME/pelway/agent-watch.json`（未設定なら `~/.local/state/pelway/agent-watch.json`）に置く。初めて起動したときは既存のスレッドを記録するだけで、通知しない。webhook に送れなかった通知は状態の送信待ちの列に残り、古い順に送り直す。受け手が直らない失敗（HTTP 400・404・413）を返した通知は、送り直さずに列から外して `mode=send-dropped http=<コード>` を 1 行残し、下の期限が残っていれば同じ周回で次の通知を送る（期限までに送り終えなかった通知は列に残る）。外した通知も指揮役の受信箱には書かれる（受信箱に書けなかった通知は、書けるまで状態に残して書き直す。上限 100 件で、超えたら古いものから捨てる。下の「指揮役の受信箱と起こし」）。送り直せる失敗（ほかの HTTP ステータス・接続の失敗・秘密が無い・下の期限での打ち切り）では、通知を列に残してその周回の送信をやめ、次に送るまで間隔を空ける（`outbox retry_after=<秒>s` を 1 行残す）。間隔は 30 秒から失敗のたびに倍にし、上限は 15 分、送れたら 30 秒に戻す。間隔は失敗が分かった時刻から数える。間隔を空けている間に出た通知も列の後ろに並び、時刻が来たら古い順に送る。間隔と次に送る時刻は状態ファイルに保存するので、再起動しても引き継ぐ。1 周の送信には、送信の開始から 40 秒の期限を置く。秘密を読む `fnox`（1 件につき URL と鍵の 2 回、1 回の上限 30 秒）・curl（1 回の上限 10 秒、2 秒おいて最大 2 回まで送り直す）・送り直しの待ちはすべて期限の内で行い、`fnox` と curl の制限は起動の直前に期限からの残り時間で決め、期限を過ぎたものは止めて、その通知を列に残す（`mode=send-failed reason=deadline` を 1 行残す。期限の直前に送り始めた通知の打ち切りも、送り直せる失敗として間隔を空ける）。残りが 1 ミリ秒未満なら `fnox` と curl を起動せず、次の通知も送り始めない。そのため 1 周の webhook の送信は、列の長さによらず 45 秒以内に収まる。
+- webhook の秘密（URL と鍵）は通知用の fnox 設定から読む。場所は既定 `~/.config/pelway-agent-notify/fnox.toml` で、環境変数 `PELWAY_NOTIFY_FNOX_CONFIG` に絶対パスを渡せばそちらを読む（複数人開発で、開発者ごとに自分の設定に向けるため。場所だけが変わり、読むキー名 `PELWAY_NOTIFY_WEBHOOK_URL`・`PELWAY_NOTIFY_WEBHOOK_KEY` は変わらない）。未設定なら既定のまま。空文字・絶対パスでない値は設定として使わず、その場所の読み取りも既定への戻しもせず、秘密が無いときと同じく送らずに送信待ちの列に残す（`mode=not-sent reason=no-secret`）。設定の値は通知専用の age 鍵（既定 `~/.config/pelway-agent-notify/age.txt`）で暗号化する。作り方と既存環境の移し替えは「通知用の秘密（agent-watch の fnox 設定と age 鍵）」を参照。
 - 起動してよいのは本体 checkout だけ。worktree にも同じ `pitchfork.toml` の定義があるが、worktree から起動されたときは起動元（実行時のカレントディレクトリ）の `git rev-parse --git-dir` と `--git-common-dir` の差で検出して理由を 1 行ログに出して終わる。見張り対象の `--project` が起動元の checkout の toplevel と一致しないときも、本体から別の checkout を見張る起動になるため同じく理由を 1 行出して終わる。同時に動かせるのは 1 つだけで、状態ディレクトリの `agent-watch.lock`（0600）を flock で取り、取れなければ理由を 1 行出して終わる（いずれも終了コード 0。agent-worktree-prune と同じ決まり。拒否のログにはパスの種類だけを書き、中身や環境変数は出さない）。
 - 指揮役の受信箱と起こし（Issue #555）: 知らせを出すたびに、webhook と同じ JSON を共有の git dir の `pelway/conductor-inbox.jsonl` に 1 行ずつ追記する（形は `docs/agents/notify-payloads.md` の「指揮役の受信箱」）。受信箱に書けなくても webhook の送信と見張りは続け、ログに 1 行残す。書けなかった知らせは状態ファイルに残し、次の周回から、その周回の新しい知らせより先に書き直す（上限 100 件。超えたら古いものから捨てる）。その項目（`inbox_pending`）が無い更新前の版の状態ファイルでは、送信待ちの列の知らせを受信箱に書けたかが分からないので、更新後の最初の周回で列の写しも書き直す（書けていた知らせは受信箱に 2 行になる）。`pelway/` は sandbox の中のエージェントも書ける場所で、agent-watch はホストの権限で動くので、`pelway/` が symlink・自分の所有でないディレクトリのとき、受信箱が symlink・FIFO などの通常ファイルでないもの・自分の所有でないもの・ハードリンクが 2 本以上あるもののときは書かない（`O_NOFOLLOW`・`O_NONBLOCK` で開き、開いた fd で種類・所有者・リンク数を確かめる。前からある受信箱に所有者以外の権限があれば書かない（0600 に直しても、すでに他人が開いている fd からは読めるため。webhook の送信は続ける）。`scripts/conductor-watch.sh` のボード Status 更新キューと同じ型）。前回の追記が途中で失敗して改行の無い断片が残っていれば、追記の前に改行で閉じ、次の知らせを独立した 1 行にする（行の形・断片の行・UTF-8・読み手の扱いは `docs/agents/notify-payloads.md` の「指揮役の受信箱」）。受信箱が 256 MiB を超えているときは、書かず、行数も数えず、その回は起こさない（`inbox append failed: inbox is too large` を 1 行残す。webhook の送信は続ける）。`patrol-state.json` は、symlink・FIFO などの種類・所有者・リンク数を同じく確かめ（権限は見ない。conductor-watch の移行と書き戻しは記録を作るときに 0600 を指定するが、それより前の版が既定の umask で書いた記録は、次に書き戻されるまで広い権限のまま残るため）、256 KiB を超えるものは読まない（`WAKE skipped reason=patrol-state-too-large`）。追記のあと、次の決まりで指揮役を起こす（判定の順は、登録ファイル → own-event → 補助記録 → 既読の位置の範囲 → スレッド ID の形 → 知らせの種類と元のスレッドの立て手 → 既読が進んだか。ログに出るのは最初に当たった理由だけ）。
   - 宛先は、ホスト側の登録ファイル `~/.config/pelway-agent-notify/conductor-thread-id`（webhook の秘密の設定と同じ置き場で、sandbox の中からは書けない）を毎回読み直す。登録は hatai がホストの端末で、インストールした見張り役で行う: 代行の指揮役を始めるときに `~/.local/bin/pelway-agent-watch --register '<スレッド ID>'`（スレッド ID は、指揮役が伝えた値をそのまま貼らず、hatai がホスト側の T3 の画面か `t3 thread list --json` の `threadId` で確かめ、値が ASCII の英数字と `:`・`_`・`-`・`.`・`%` だけで、先頭が `-` でないことを見てから、単一引用符で囲んで渡す。`--register` の文字の検査は、シェルが行を解釈した後にしか働かないため）、終えるときに `--unregister`、確かめるときに `--show-registration`（見張りは始めない）。worktree の中のスクリプトや `cargo run` は sandbox の中のエージェントが書き換えられるので、ホストでは実行しない（インストールは本体 checkout で `mise run agent-watch-install`。指揮役は本体 checkout の作業ツリーを書けない専用の worktree で立てるが、共有 git dir の `index`・`refs/` は worktree のスレッドからも書けるので、ホストで実行する前の確かめは `docs/agents/conductor-context.md` の「恒久交代」に従う）。登録する値は、受信箱の `thread_id` と同じ文字列（`t3 thread list --json` の `threadId`）にする。`--register` は文字の種類だけを確かめ、表記は確かめない。違う表記を登録すると、知らせの元が指揮役自身かの判定が一致せず、`t3 thread send` がその表記を受け付けるなら、指揮役の巡回の終わりの知らせでも起こすので「起こし → 巡回 → 起こし」が続く（受け付けなければ、起こしは毎回 `WAKE failed` になる）。そうなったら `--unregister` で止め、正しい表記で登録し直す。登録ファイルの位置がディレクトリなら登録は失敗し、それ以外（symlink・FIFO など）はたどらずに置き換える。読むときも symlink をたどらず、FIFO で止まらず、通常ファイル・自分の所有でなければ使わない（`WAKE skipped reason=conductor-file-unreadable`）。ファイルが無いときは起こさない。`patrol-state.json` に `conductor_thread_id` が書かれていても使わない。値の先頭が `-`、または英数字と `:`・`_`・`-`・`.`・`%` 以外を含む、または 256 文字を超えるときは使わない（`WAKE skipped reason=invalid-thread-id`。`--register` も同じ規則で登録を拒む）。`patrol-state.json` は既読の位置（`inbox_offset`）だけに使い、無い・読めない（書きかけ・壊れている・`inbox_offset` が 0 以上の整数でない。項目が無いときは 0 として扱う）ときはその回は起こさず `WAKE skipped reason=patrol-state-unreadable` を 1 行残す。その回の知らせの元がすべて登録された指揮役自身のスレッド（payload の `thread_id` と登録値の完全一致で見る）（指揮役の巡回の終わりなど）のときも起こさない（`WAKE skipped reason=own-event`。起こすと、巡回の終わりと起こしを繰り返すため）。
