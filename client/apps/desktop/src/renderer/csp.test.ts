@@ -15,4 +15,6 @@ test("画面の HTML の CSP が同梱のスクリプトだけを許す", () => 
   expect(directives.get("default-src")).toEqual(["'self'"]);
   expect(directives.get("script-src")).toEqual(["'self'"]);
   expect(directives.get("object-src")).toEqual(["'none'"]);
+  // frame-ancestors は <meta> の CSP では効かないので書かない（CSP の仕様）。
+  expect(directives.has("frame-ancestors")).toBe(false);
 });

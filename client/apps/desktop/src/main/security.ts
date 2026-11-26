@@ -7,7 +7,7 @@ export const APP_SCHEME = "pelway";
 /** 同梱の資産のオリジン。 */
 export const APP_ORIGIN = `${APP_SCHEME}://app`;
 
-/** 窓の webPreferences。チェックリストの #2・#3・#4・#6・#8・#9・#11 を満たす。 */
+/** 窓の webPreferences。チェックリストの #2・#3・#4・#6・#8・#9・#11 を満たし、綴りの検査を切る。 */
 export function secureWebPreferences(preload: string) {
   return {
     preload,
@@ -20,6 +20,8 @@ export function secureWebPreferences(preload: string) {
     allowRunningInsecureContent: false,
     experimentalFeatures: false,
     webviewTag: false,
+    // 綴りの検査は使わない。有効だと辞書を外から取りに行きうる。
+    spellcheck: false,
   } as const satisfies WebPreferences;
 }
 
@@ -51,16 +53,18 @@ export function isTrustedSender(event: IpcEventLike, trustedOrigin: string): boo
   return frame !== null && isTrustedUrl(frame.url, trustedOrigin);
 }
 
-/** 遷移・新しい窓・webview を止める（チェックリスト #12・#13・#14）。 */
+/** 遷移（子フレームを含む）・新しい窓・webview を止める（チェックリスト #12・#13・#14）。 */
 export function hardenWebContents(
   contents: Pick<WebContents, "on" | "setWindowOpenHandler">,
   trustedOrigin: string,
 ): void {
-  const blockUntrusted = (event: { preventDefault(): void }, url: string) => {
-    if (!isTrustedUrl(url, trustedOrigin)) event.preventDefault();
+  // 遷移先は 1 番目の引数（details）の url で読む。2 番目の url 引数は Electron で非推奨。
+  const blockUntrusted = (details: { url: string; preventDefault(): void }) => {
+    if (!isTrustedUrl(details.url, trustedOrigin)) details.preventDefault();
   };
   contents.on("will-navigate", blockUntrusted);
   contents.on("will-redirect", blockUntrusted);
+  contents.on("will-frame-navigate", blockUntrusted);
   contents.on("will-attach-webview", (event) => event.preventDefault());
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
 }
