@@ -39,16 +39,26 @@ check implement_step6 .agents/skills/implement-issue/SKILL.md \
 check_absent implement_no_consult_push .agents/skills/implement-issue/SKILL.md \
   '相談のため'
 
-# 例外が認められたあとは、ラベルとコメントを確かめてから push し、メモと必須チェックを経て手順 8 へ戻る。
+# 例外が認められたあとは、push 先に対応する開いた PR のラベルと、その PR が閉じる Issue のコメントを確かめてから push し、メモと必須チェックを経て手順 8 へ戻る。
 check implement_exception_resume .agents/skills/implement-issue/SKILL.md \
   '例外が認められたあとに再開するときは' \
-  'PR に `pr-size-exception` ラベルがあり' \
-  'hatai の行頭が `<!-- pr-size-exception -->` のコメントがあること' \
+  'push 先のリポジトリとブランチを head とする開いた PR に `pr-size-exception` ラベルがあり' \
+  'その PR が閉じる Issue に hatai が書いた本文先頭が `<!-- pr-size-exception -->` のコメントがあること' \
   '必須チェックを確かめて手順 8 から再開する'
+
+# 既存の PR があり、上限超過で未 push のコミットを残して止まったあとに例外が認められたときは、
+# チェックやレビュー結果で分岐する前に手順 6 へ戻る。
+check implement_exception_restart .agents/skills/implement-issue/SKILL.md \
+  '手元の `git rev-parse HEAD` が Issue の pr-size の止まりのコメントに書かれた手元の head の SHA と一致し' \
+  'その SHA が PR の head の後に積まれている' \
+  '手順 6 の同じ項に戻り、未 push のコミットを push する' \
+  'チェックやレビュー結果の行より先にこの行で分岐する'
 
 # 指揮役側の分割と例外の節も、push せずに止まる実装担当の止まり方に合わせる。
 check command_team_exception .agents/skills/command-team/SKILL.md \
   '実装担当は例外が認められる前の上限超過の差分を push せずに止まる' \
+  'push 先のリポジトリとブランチを head とする開いた PR で' \
+  'その PR が閉じる Issue に hatai が、行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き' \
   'PR がまだ無いときは例外を選ばず分割を指示する'
 check command_team_split .agents/skills/command-team/SKILL.md \
   '分割案・手元の head の SHA・`git diff --stat origin/main...HEAD` の出力'

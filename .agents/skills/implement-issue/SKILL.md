@@ -172,7 +172,7 @@ scripts/agent-gh dev git push origin HEAD
 - 差分がミューテーションテスト対象の crate（`.cargo/mutants.toml` の examine_globs）のロジックに触れるときは、`mise run mutants:diff` も回し、結果（生き残りと対応）を実装者メモに書く。生き残りの分析は輸入スキル `mutation-testing`（下の「輸入スキル」の節）。
 - `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたときは、例外が認められる前に push しない。`scripts/agent-gh-pr-size-gate` は例外の無い上限超過の push を止めるため、Draft PR を作るための push もしない。
 - 上限を超えたら、「止まる条件」の表の pr-size の行のとおり止まる。Issue のコメントには、分割案（PR ごとの範囲と見込み行数）、手元の head の SHA（`git rev-parse HEAD`）、`git diff --stat origin/main...HEAD` の出力を書く。
-- 例外が認められたあとに再開するときは、PR に `pr-size-exception` ラベルがあり、PR が閉じる Issue に hatai の行頭が `<!-- pr-size-exception -->` のコメントがあることを確かめてから push する。PR がまだ無いときはラベルを付けられずゲートが通らないため、例外だけでは push できず、分割または人間の判断を待つ。push したら、push 後の SHA を手順 5 のメモの「対象 head」に記入し、メモだけを独立したコミットにして push し、その後の head の必須チェックを確かめて手順 8 から再開する。縮小の指示が来たら、手順 9 の「修正依頼」として同じブランチで直す。
+- 例外が認められたあとに再開するときは、push 先のリポジトリとブランチを head とする開いた PR に `pr-size-exception` ラベルがあり、その PR が閉じる Issue に hatai が書いた本文先頭が `<!-- pr-size-exception -->` のコメントがあることを確かめてから push する。PR がまだ無いときはラベルを付けられずゲートが通らないため、例外だけでは push できず、分割または人間の判断を待つ。push したら、push 後の SHA を手順 5 のメモの「対象 head」に記入し、メモだけを独立したコミットにして push し、その後の head の必須チェックを確かめて手順 8 から再開する。縮小の指示が来たら、手順 9 の「修正依頼」として同じブランチで直す。
 - 積み上げ PR（分割計画で親 PR のブランチに積む PR。GitHub 上の base が main ではない PR）では `bash scripts/pr-size.sh --base <親ブランチ>` で測る。`mise run pr-size` は base=origin/main が既定のため、そのまま使うと親 PR の差分まで数えてしまい、上限超過で誤って止まる・例外扱いになる。
 
 次に、実装コミットを push した後の PR の head の SHA を確かめ（push 後は `scripts/agent-gh-resign` による署名付け替えで SHA が変わるため、必ず push 後の値を取る。2 round 目以降は `scripts/agent-gh dev pr view <PR 番号> --json headRefOid --jq .headRefOid`。初回は Draft PR の作成が手順 7 のため PR 番号がまだ無く、手順 7 の後に行うか、push 後の `scripts/agent-gh dev git rev-parse HEAD` で確かめる（`agent-gh-resign` が push の成功後にローカル ref を署名付きコミットに付け替えるため、remote の `headRefOid` と同じ値になる））、それを手順 5 のメモの「対象 head」に記入して、メモだけを独立したコミットにして push する:
@@ -477,6 +477,7 @@ state: done
    |---|---|
    | PR に未解消の `[review-invalid]` の記録が 1 件でもある（記録と解消の定義は手順 9「投稿後の `設定の不備:` の記録」。この行が当たるときは他の行より優先する） | 再開せず、「止まる条件」の表の `設定の不備:` の行のとおり止まる（環境の修復とレビューの dismiss は人間が扱う。dismiss を確認するまでは停止を維持し、再委託もしない） |
    | PR が無い | 手順 2 で Issue の受け入れ条件と対象外を読み直し、ブランチのコミットと作業ツリーで手順 4〜7 のどこまで済んだかを確かめて、次の手順を続ける。`next:` は、それが指す手順がこの確認の結果と一致するときだけ使う |
+   | 既存の PR があり、手元の `git rev-parse HEAD` が Issue の pr-size の止まりのコメントに書かれた手元の head の SHA と一致し、その SHA が PR の head の後に積まれている（上限超過の実装コミットが未 push）。かつ手順 6 の「例外が認められたあとに再開するとき」の項のラベルとコメントの条件を満たす | 手順 6 の同じ項に戻り、未 push のコミットを push する（チェックやレビュー結果の行より先にこの行で分岐する） |
    | 必須チェックが動いている | `watch_pull_request` を仕掛けて `waiting-checks` で終える |
    | 必須チェックが失敗している（required-checks の判定で例外判断が着いた pr-size の失敗を除く） | 手順 6 で直す（pr-size の失敗で例外判断が未着なら、手順 6 の上限超過の扱いで止まる） |
    | `mergeable` が `CONFLICTING` | 手順 9 の「修正依頼」 |
