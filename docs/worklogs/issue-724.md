@@ -36,3 +36,15 @@
 5. 改善案: `scripts/tests/conductor-watch-decision.test.sh` の test 16 に、タイミング依存と思われる箇所の待ちの明記（失敗が verify の並行実行でだけ起きる場合の再現条件）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 4）
+
+対象 head: 8cc9764c91b3839eececfd08c25e94dd84045561
+
+1. 詰まった箇所: `mise run verify`: 既知の環境起因 6 件のみ（verify-pelway。round 1 のメモの 1 を参照。round 3 に揺らいだ conductor-watch-decision は今回通った）。自分の 2 本のテストは verify の中で両方 `ok`。`mise run pr-size`: `+148 / -1`。
+2. 曖昧だった文: 「この欠けは main の版からあるが、この PR がこの文を材料の一覧として正確にするために書き換えたので、ここで合わせる」（PR #730 の round 3 の Claude レビューの nit）— 印の nit の対象がこの PR が書き換えた文なので、Approve の後でも直す対象になるという読みで合っているか。
+3. 仮定と解釈: この round も Approve の後の `[文書のずれ]` の nit のみを直す round（通算 2 回目。implement-issue 手順 9「Approve のとき」1）と解釈した。選んだ解釈は nit の指示どおり括弧の中に「文書だけの PR かどうか」を足し、pin `a_materials` を合わせた。採らなかった解釈は材料の一覧から表の 2 行目の条件を外す記述（表が変わるため）。
+4. 足りなかった情報・検証手段: 特になし。
+5. 改善案: `.agents/skills/command-team/SKILL.md` の「Codex のモデル」の表を、材料の一覧（:167）と同じ順（追加行数・高リスク・security・文書だけ・回数）で並べ直し、一覧と表の条件の対応を機械的に照合できるようにする。
+
+使ったスキル: implement-issue
