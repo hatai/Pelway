@@ -181,7 +181,7 @@ PR: #735
 
 ## 実装者メモ（round 12）
 
-対象 head: （push 後に記入）
+対象 head: f05c082fb28d3bbfa4c4faf54ef3cd87e6f59b1b
 PR: #735
 
 レビュー指摘（run 7185864592 codex approve・印付き nit 1、run 7185865165 claude approve。ともに head 8204c6883ff810e47070b6eccda6236e50bcdd06）への対応。印の nit だけを直す round（通算 2 回目、回数上限に数えない）。
