@@ -95,6 +95,9 @@ WT_WAIT="${PELWAY_REBUILD_WT_WAIT:-120}"
 WT_INTERVAL="${PELWAY_REBUILD_WT_INTERVAL:-2}"
 SHOW_RETRIES="${PELWAY_REBUILD_SHOW_RETRIES:-3}"
 SHOW_RETRY_SLEEP="${PELWAY_REBUILD_SHOW_RETRY_SLEEP:-1}"
+# 待機上限 0 など残り時間が尽きたあとでも必ず 1 回は行う読み取りに渡す正の上限（秒）。
+# timeout の期間 0 は打ち切り無効のため、残り 0 以下の読み取りにはこの下限を渡す
+SHOW_FIRST_TIMEOUT="${PELWAY_REBUILD_SHOW_FIRST_TIMEOUT:-2}"
 
 # 最後の thread show の生の出力（"database is locked" の判定に stderr が要るためファイルに受ける）
 SHOW_OUT="$(mktemp)"; SHOW_ERR="$(mktemp)"
@@ -114,18 +117,22 @@ sleep_min_us() {
 # t3 コマンドが "database is locked" で失敗したときだけ、間を空けて最大 $SHOW_RETRIES 回
 # やり直す。それ以外の失敗（lock 以外のエラー、t3 が成功したが JSON にならない出力、
 # 期限での打ち切り）ではやり直さない。SHOW_DEADLINE_US に期限（マイクロ秒）があれば、
-# 読み取りの呼び出し自体を残り時間で打ち切り（初回も再試行も）、やり直しの待ちも残り
-# 時間に収め、期限を超える読み直しは始めない（各呼び出しは必ず 1 回読む）
+# 読み取りの呼び出し自体を残り時間で打ち切り、やり直しの待ちも残り時間に収める。
+# 呼び出しの 1 回目（呼び出し側の 1 回目の読み取り）は残りが尽きていても必ず読むが、
+# 正の下限（SHOW_FIRST_TIMEOUT 秒）で打ち切る。2 回目以降のやり直しと呼び出し側の
+# 読み直し（SHOW_REREAD=1 で来る）は、残りが尽きていれば呼び出さずに失敗を返す
+# （timeout の期間 0 は打ち切り無効なため、残り 0 以下の読み取りを起動しない）
 show() {
-  local tries=0 deadline="${SHOW_DEADLINE_US:-}" rc
+  local tries=0 deadline="${SHOW_DEADLINE_US:-}" rc rem
   while :; do
-    if (( tries > 0 )) && [[ -n "$deadline" ]] && (( $(now_us) >= deadline )); then
-      return 1
-    fi
     : >"$SHOW_OUT"; : >"$SHOW_ERR"
     rc=0
     if [[ -n "$deadline" ]]; then
-      timeout "$(awk -v u="$(( deadline - $(now_us) ))" 'BEGIN{s=u/1000000; print (s>0)?s:0}')" \
+      rem=$(( deadline - $(now_us) ))
+      if (( rem <= 0 )) && { (( tries > 0 )) || [[ "${SHOW_REREAD:-0}" == 1 ]]; }; then
+        return 1
+      fi
+      timeout "$(awk -v u="$rem" -v m="$SHOW_FIRST_TIMEOUT" 'BEGIN{s=u/1000000; print (s>0)?s:m}')" \
         "$T3" thread show "$1" --json >"$SHOW_OUT" 2>"$SHOW_ERR" || rc=$?
     else
       "$T3" thread show "$1" --json >"$SHOW_OUT" 2>"$SHOW_ERR" || rc=$?
@@ -156,9 +163,10 @@ read -r old_mode _ < <(show "$from") || die "cannot read the old conductor$(show
 
 # 1. 権限を確かめる。worktree のパスは立てた直後にまだ空のことがあるため、入るまで
 #    上限付きで読み直して待つ（待っている間、どのスレッドにも thread send は呼ばない）。
-#    待ちそのものも上限に収める：期限を過ぎたら次の読み取りを始めず（1 回目は必ず読む）、
-#    読み直しの間隔と show 内のやり直しの待ちは残り時間で切り詰め、読み取りの呼び出し
-#    自体も残り時間で打ち切る（show の SHOW_DEADLINE_US。初回も再試行も）
+#    待ちそのものも上限に収める：期限を過ぎたら次の読み取りを始めず（1 回目は必ず読む。
+#    1 回目も残りが尽きていれば正の下限で打ち切る）、読み直しの間隔と show 内のやり直し
+#    の待ちは残り時間で切り詰め、読み取りの呼び出し自体も残り時間で打ち切る
+#    （show の SHOW_DEADLINE_US。初回・読み直し・再試行のすべて）
 start_us=$(now_us)
 end_us=$(awk -v s="$start_us" -v w="$WT_WAIT" 'BEGIN{printf "%d", s + w * 1000000}')
 # aborted は起動環境の同名変数で権限の確かめが飛ばないよう、ここで初期化する
@@ -166,10 +174,10 @@ new_mode=-; new_wt=-; first=1; aborted=
 SHOW_DEADLINE_US=$end_us
 while :; do
   (( first )) || (( $(now_us) < end_us )) || break
-  first=0
-  read -r new_mode new_wt < <(show "$to") \
+  read -r new_mode new_wt < <(SHOW_REREAD=$(( ! first )) show "$to") \
     || { if (( $(now_us) >= end_us )); then aborted=1; new_mode=-; new_wt=-; break; fi
          die "cannot read the new conductor $to (check it in T3)$(show_err). Nothing was sent to the old conductor and the registration is unchanged"; }
+  first=0
   # 期限を超えて返った読み取りは worktree の有無の判定に使わない（呼び出しは残り時間で
   # 打ち切るが、期限の直前に返り切ることがある）
   (( $(now_us) > end_us )) && { new_wt=-; break; }

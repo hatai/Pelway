@@ -233,6 +233,36 @@ check "retry read killed at the limit: registration unchanged" [ "$(cat "$FILE")
 check "retry read killed at the limit: stderr reports the timeout" \
   grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
 
+# 待機上限 0 でも 1 回目の読み取りは行うが、正の下限で打ち切られる（timeout の期間 0 は
+# 打ち切り無効のため、残り 0 のままは渡さない。偽の t3 が応答を 4 秒遅らせる）
+printf 'mcp:launch:kept\n' > "$FILE"
+start=$SECONDS
+NEW_SHOW_DELAY=4 PELWAY_REBUILD_SHOW_FIRST_TIMEOUT=1 \
+  PELWAY_REBUILD_WT_WAIT=0 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "first read at zero limit: exits non-zero" [ "$rc" -ne 0 ]
+check "first read at zero limit: returns at the floor" [ "$(( SECONDS - start ))" -lt 3 ]
+check "first read at zero limit: reads once" \
+  [ "$(count "thread show $NEW --json")" -eq 1 ]
+check "first read at zero limit: nothing sent to either conductor" no_line "thread send"
+check "first read at zero limit: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+check "first read at zero limit: stderr reports the timeout" \
+  grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
+
+# 期限の直前に始まった読み直しも残り時間で打ち切る（1 回目は即応答し、2 回目が 4 秒遅延で
+# 期限にかかる）
+printf 'mcp:launch:kept\n' > "$FILE"
+start=$SECONDS
+NEW_WT="" NEW_SHOW_DELAY=4 NEW_SHOW_DELAY_FROM=2 \
+  PELWAY_REBUILD_WT_WAIT=0.6 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "reread killed near the limit: exits non-zero" [ "$rc" -ne 0 ]
+check "reread killed near the limit: returns at the deadline" [ "$(( SECONDS - start ))" -lt 3 ]
+check "reread killed near the limit: two reads" \
+  [ "$(count "thread show $NEW --json")" -eq 2 ]
+check "reread killed near the limit: nothing sent to either conductor" no_line "thread send"
+check "reread killed near the limit: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+check "reread killed near the limit: stderr reports the timeout" \
+  grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
+
 # 読み取りの中の lock のやり直しも残り時間に収める。やり直しの待ちを残りで切り詰め、
 # 期限を超える読み直しは始めない
 printf 'mcp:launch:kept\n' > "$FILE"
