@@ -128,15 +128,19 @@ read -r old_mode _ < <(show "$from") || die "cannot read the old conductor$(show
 [[ "$old_mode" != full-access ]] || die "the old conductor runs in full-access; fix it before rebuilding"
 
 # 1. 権限を確かめる。worktree のパスは立てた直後にまだ空のことがあるため、入るまで
-#    上限付きで読み直して待つ（待っている間、どのスレッドにも thread send は呼ばない）
-start=$SECONDS; end=$((start + WT_WAIT))
+#    上限付きで読み直して待つ（待っている間、どのスレッドにも thread send は呼ばない）。
+#    SECONDS は整数秒で実際の経過と最大 1 秒ずれるため、期限の判定は
+#    EPOCHREALTIME（秒.マイクロ秒）を整数化して行う
+start_us=${EPOCHREALTIME/./}
+end_us=$(awk -v s="$start_us" -v w="$WT_WAIT" 'BEGIN{printf "%d", s + w * 1000000}')
 while :; do
   read -r new_mode new_wt < <(show "$to") \
     || die "cannot read the new conductor $to (check it in T3)$(show_err). Nothing was sent to the old conductor and the registration is unchanged"
   # 期限を超えて返った読み取りは worktree の有無の判定に使わない（読み直しの間隔や、
   # show 内の lock のやり直しで期限をまたぐことがある）
-  (( SECONDS > end )) && { new_wt=-; break; }
-  [[ "$new_wt" != - || "$SECONDS" -ge "$end" ]] && break
+  (( ${EPOCHREALTIME/./} > end_us )) && { new_wt=-; break; }
+  [[ "$new_wt" != - ]] && break
+  (( ${EPOCHREALTIME/./} >= end_us )) && break
   sleep "$WT_INTERVAL"
 done
 echo "conductor-rebuild: new conductor $to runtimeMode=$new_mode worktree=$new_wt" >&2
@@ -153,7 +157,7 @@ if [[ "$new_mode" != "$old_mode" || "$new_mode" == full-access ]]; then
   exit 3
 fi
 if [[ "$new_wt" == - ]]; then
-  waited=$((SECONDS - start))
+  waited=$(( (${EPOCHREALTIME/./} - start_us) / 1000000 ))
   echo "conductor-rebuild: the new conductor $to still has no worktree after waiting ${waited}s (limit ${WT_WAIT}s); worktree がまだ無い（準備中か、worktree なしで立てられた）." >&2
   echo "conductor-rebuild: check the new conductor's worktree in the T3 window; if it was launched without a worktree, launch a replacement as below. Nothing was sent to the old conductor and the registration is unchanged." >&2
   echo "conductor-rebuild: launch a replacement with MCP t3_thread_launch (runtimeMode '$old_mode', workspaceStrategy worktree baseRef main), then run: $0 --from '$from' --to '<新指揮役のスレッド ID>'" >&2

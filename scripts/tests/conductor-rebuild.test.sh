@@ -185,7 +185,7 @@ check "worktree arrives while waiting: logs the last-read worktree" \
 # 読み直しの間隔が期限をまたいでパスが入っても、期限を超えて返った読み取りは受け入れずに止まる
 printf 'mcp:launch:kept\n' > "$FILE"
 NEW_WT="/home/u/.t3/worktrees/Pelway/too-late" NEW_WT_AFTER=2 \
-  PELWAY_REBUILD_WT_WAIT=2 PELWAY_REBUILD_WT_INTERVAL=3 run "" --from "$OLD" --to "$NEW"; rc=$?
+  PELWAY_REBUILD_WT_WAIT=1 PELWAY_REBUILD_WT_INTERVAL=1.5 run "" --from "$OLD" --to "$NEW"; rc=$?
 check "worktree after the limit: exits non-zero" [ "$rc" -ne 0 ]
 check "worktree after the limit: reread the new conductor" \
   [ "$(count "thread show $NEW --json")" -eq 2 ]
@@ -195,9 +195,23 @@ check "worktree after the limit: registration unchanged" [ "$(cat "$FILE")" = "m
 check "worktree after the limit: stderr reports the timeout" \
   grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
 
+# SECONDS の整数秒では期限と同じに見えるが実際の経過は上限を超えている境界でも、
+# 期限を超えて返った読み取りは受け入れずに止まる（上限 1 秒・間隔 1.1 秒で 2 回目にパス）
+printf 'mcp:launch:kept\n' > "$FILE"
+NEW_WT="/home/u/.t3/worktrees/Pelway/just-past" NEW_WT_AFTER=2 \
+  PELWAY_REBUILD_WT_WAIT=1 PELWAY_REBUILD_WT_INTERVAL=1.1 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "worktree just past the limit: exits non-zero" [ "$rc" -ne 0 ]
+check "worktree just past the limit: reread the new conductor" \
+  [ "$(count "thread show $NEW --json")" -eq 2 ]
+check "worktree just past the limit: nothing sent to either conductor" no_line "thread send"
+check "worktree just past the limit: no thread start" no_line "thread start"
+check "worktree just past the limit: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+check "worktree just past the limit: stderr reports the timeout" \
+  grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
+
 # 読み取りの中の lock のやり直しが期限をまたいだときも、その結果は受け入れずに止まる
 printf 'mcp:launch:kept\n' > "$FILE"
-NEW_LOCK_TIMES=1 PELWAY_REBUILD_SHOW_RETRY_SLEEP=2 \
+NEW_LOCK_TIMES=1 PELWAY_REBUILD_SHOW_RETRY_SLEEP=1.2 \
   PELWAY_REBUILD_WT_WAIT=1 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
 check "lock retry past the limit: exits non-zero" [ "$rc" -ne 0 ]
 check "lock retry past the limit: the late read is rejected" \
