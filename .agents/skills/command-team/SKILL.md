@@ -129,7 +129,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 | 条件 | レビュー担当（`agent-team.toml` の `[developers.<login>.priority.review]` の対応するキーの並び。登録情報は `[agents.<担当>]`。優先順位と登録情報は、委託・起動のたびに main の承認済みの版の `agent-team.toml` から読み、読めなければ委託・起動を止める。読んだ `[agents.<担当>].instance.review` が main の最新の版の `docs/dev-environment.md`（読めなければ委託・起動を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ、委託・起動を止める） |
 |---|---|
 | 通常 | `normal` の先頭から PR 番号の偶奇で交互（偶数は先頭、奇数は次）。使えない担当（下の確認ゲート）の番では `normal` の先頭の担当に回す |
-| 高リスク: `unsafe`、セキュリティの境界（認証・権限・承認・秘密情報・ネットワーク）、`.github/workflows/` の変更、`agent-team.toml` の `[agents.*].instance`・`[developers.*.priority.review]` の変更、pr-size の追加行が 400 を超える | `high_risk` の使えるもの全て |
+| 高リスク: `unsafe`、セキュリティの境界（認証・権限・承認・秘密情報・ネットワーク）、`.github/workflows/` の変更、`agent-team.toml` の変更、pr-size の追加行が 400 を超える | `high_risk` の使えるもの全て |
 | 抜き取り | PR 番号を 4 で割った余りが 0 の通常の PR には `sampling` の担当も付ける（ほかのレビュー担当の見落とし率の測定のため） |
 
 - この表の適用は指揮役だけでなく実装担当も行う。実装担当はこの表でレビュー委託（`delegate_task`）の担当と effort を決め、Assigned 行に写す（skill `implement-issue` の手順 8）。通常と抜き取りの判定は PR 番号だけで決まり、割り当ての記録への記入は不要（実装担当の分は省く。指揮役が立てた分だけ記録する）

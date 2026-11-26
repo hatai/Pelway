@@ -120,3 +120,20 @@ PR: #722
    - review-delegation-docs.test.sh に照合の文言の存在確認を 4 箇所分追加（委託ブロックのインスタンス名のピンの役目を照合が継いだ分）
    - PR 本文をこの head に合わせた（対象・最後に検証した sha・変更内容と対応表に round 7・8 の変更を追記）
 4. 仮定と解釈: なし
+
+## 実装者メモ（round 9）
+
+対象 head: <新規コミット>
+PR: #722
+
+レビュー指摘（head 360a3d19 で codex run=7178564202 approve・must-fix 0、claude run=7178461814 approve・must-fix 0・marked nit 3+文書のずれ 1）への対応:
+
+1. 詰まった箇所: なし
+2. must-fix の対応: なし（両担当 approve）
+3. 印の nit の対応:
+   - 高リスク・`security=yes` の両条件を「`agent-team.toml` の変更」に広げた（round 7 の `[agents.*].instance`、round 8 の `[developers.*.priority.review]` と同じ種類の経路が `[agents.*].models`・`effort.option` にも残るため、キーの列挙をやめて toml 全体に。レビュー側が示した代替案どおり）
+   - runbook の照合の文言ピンを、`t3_thread_launch`（起動を止める。の形）と「レビューを始める」（起動を止める）の形）で別々のチェックに分けた（`grep -qF` の存在確認では片方が消えても落ちなかったため）
+   - implement-issue:238 の括弧内の要約の「Claude を追加」を「`sampling` の担当を追加」に直した（command-team:133 の表と同じく担当を toml の `sampling` から読む形）
+   - agent-team.toml の冒頭コメントが古くなる指摘は、toml の中身が Issue #715 の対象外のため別の PR に回す（レビュー側も同じ扱い）
+4. 仮定と解釈:
+   - codex の out-of-scope: Devin CLI のレビュー利用可否について、`command-team` の「確認済み」の記載と `docs/dev-environment.md` の「秘密ファイル遮断の実測まで使用停止」の記載が食い違う。終わりの報告の `out-of-scope:` に書く

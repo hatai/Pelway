@@ -67,8 +67,10 @@ check instance_match_implement .agents/skills/implement-issue/SKILL.md \
   'main の最新の版の `docs/dev-environment.md`（読めなければ委託を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ'
 check instance_match_command_team .agents/skills/command-team/SKILL.md \
   'main の最新の版の `docs/dev-environment.md`（読めなければ委託・起動を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ'
-check instance_match_runbook docs/agents/grokbot-runbook.md \
-  'main の最新の版の `docs/dev-environment.md`（読めなければ起動を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ'
+check instance_match_runbook_launch docs/agents/grokbot-runbook.md \
+  'main の最新の版の `docs/dev-environment.md`（読めなければ起動を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ、起動を止める。'
+check instance_match_runbook_review docs/agents/grokbot-runbook.md \
+  'の節が名指すインスタンスと一致しなければ起動を止める）'
 check instance_match_spec docs/superpowers/specs/agent-team.md \
   'main の最新の版の `docs/dev-environment.md`（読めなければ委託・起動しない）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致するものだけを使う'
 

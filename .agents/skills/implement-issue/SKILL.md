@@ -235,7 +235,7 @@ PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、�
 
 ラウンドの数え方と上限は skill `command-team` の「レビューのラウンド」のとおり。同じ head は 1 ラウンドに数え、コンフリクトの解消を含まない main の取り込みだけで head が変わっても新しいラウンドにしない（main の取り込みで head が変わったときは、同じラウンドのままレビューをやり直す）。
 
-担当と effort は skill `command-team` の「レビュー担当と effort」の表で決める（通常は PR 番号の偶奇、高リスクは使える担当全て、抜き取りは PR 番号を 4 で割った余りが 0 のとき Claude を追加。自分が Devin CLI で実装した PR には Devin CLI を付けない）。差分が `unsafe` を足している、`.github/workflows/`・`scripts/agent-gh`・`AGENTS.md`・`.agents/skills/`・`docs/agents/` のどれかが変わっている、`agent-team.toml` の `[agents.*].instance`・`[developers.*.priority.review]` を変えている、認証・認可・トークン・鍵・暗号・sandbox・egress・gateway・テナント分離・監査に触れている、のどれかに当たるときは Assigned 行に `security=yes` を付ける。
+担当と effort は skill `command-team` の「レビュー担当と effort」の表で決める（通常は PR 番号の偶奇、高リスクは使える担当全て、抜き取りは PR 番号を 4 で割った余りが 0 のとき `sampling` の担当を追加。自分が Devin CLI で実装した PR には Devin CLI を付けない）。差分が `unsafe` を足している、`.github/workflows/`・`scripts/agent-gh`・`AGENTS.md`・`.agents/skills/`・`docs/agents/` のどれかが変わっている、`agent-team.toml` を変えている、認証・認可・トークン・鍵・暗号・sandbox・egress・gateway・テナント分離・監査に触れている、のどれかに当たるときは Assigned 行に `security=yes` を付ける。
 
 委託の直前に、main の最新の `docs/dev-environment.md` で、割り当てる担当と回し先の両方の節（「専用 home での確認」と「レビュー担当の Claude」）の `保留中:` の行の有無を確かめる。保留の間は、使えない担当の番をもう片方の担当に回し（Codex の保留なら Claude、Claude の保留なら Codex）、両方使えなければ人間に知らせる。
 
