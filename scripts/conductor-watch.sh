@@ -1118,7 +1118,7 @@ try:
     prev = json.load(open(snap_path))
     fetched = prev.get("fetched_at") if isinstance(prev, dict) else None
     if isinstance(fetched, (int, float)) and not isinstance(fetched, bool) \
-            and now - fetched < interval:
+            and 0 <= now - fetched < interval:
         sys.exit(0)
 except Exception:
     pass

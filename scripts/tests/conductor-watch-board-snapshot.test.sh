@@ -78,6 +78,7 @@ start_watch() {
   PELWAY_BOARD_QUEUE_DIR="$QUEUE" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
   PELWAY_PATROL_STATE="$ROOT/state/pelway/patrol-state.json" \
   PELWAY_BOARD_SNAPSHOT="$SNAP" PELWAY_BOARD_SNAPSHOT_INTERVAL="$interval" \
+  PELWAY_WATCH_NOW="${WATCH_NOW_FILE:-$ROOT/now-absent}" \
     bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
   WPID=$!
   wait "$WPID" 2>/dev/null; WPID=""
@@ -121,6 +122,15 @@ check "failed cycle logged" has "$ROOT/out.log" "BOARD snapshot"
 : > "$MOCK/gh-calls.log"
 INTERVAL=86400 start_watch 1
 check "fresh snapshot not refetched within interval" nhas "$MOCK/gh-calls.log" "item-list"
+
+# 5. fetched_at が未来の書き出しは「新しい」と扱わず取り直す。未来の時刻を新しいと
+#    扱うと、reader が broken と読む書き出しを見張りが更新せず、読み取りが止まる
+now_epoch=$(date +%s)
+python3 -c 'import json,sys; json.dump({"version": 1, "fetched_at": float(sys.argv[2]) + 3600, "items": []}, open(sys.argv[1], "w"))' "$SNAP" "$now_epoch"
+echo "$now_epoch" > "$ROOT/now"
+: > "$MOCK/gh-calls.log"
+WATCH_NOW_FILE="$ROOT/now" INTERVAL=86400 start_watch 1
+check "future fetched_at is refetched" has "$MOCK/gh-calls.log" "item-list"
 
 printf '\n'
 if ((${#failures[@]})); then
