@@ -58,7 +58,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 ## 制約
 
 - `pelway-dev` には GitHub App の Workflows 権限を付けない。`.github/workflows/` の変更は人間が行う（push で動く workflow は承認前に secret を読めるため）。例外は Workflows 権限が必要なため人間の名義でしか行えない操作だけで、現在は `actions.lock` の再生成（`ci(deps):` の PR のマージ前。実施は skill `command-team` の「マージ」）の 1 つ
-- PR 1 本の差分は追加 800 行・削除 2000 行まで（`mise run pr-size` が追加行と削除行を分けて数える）。`.gitattributes` で `linguist-generated` を付けたファイルは数えない。指揮役が Issue のコメントで超過を認め `pr-size-exception` ラベルを付けた PR は、レビューでは pr-size の失敗を must-fix に数えない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の例外の判断に回す（`pr-size-exception` 自体はマージの例外には加えない）
+- PR 1 本の差分は追加 800 行・削除 2000 行まで（`mise run pr-size` が追加行と削除行を分けて数える）。`.gitattributes` で `linguist-generated` を付けたファイルは数えない。指揮役が Issue のコメントで超過を認め `pr-size-exception` ラベルを付けた PR は、レビューでは pr-size の失敗を must-fix に数えない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の例外の判断に回す（`pr-size-exception` 自体は admin マージの対象には加えない）
 - 実装と調査のスレッドの同時枠の上限は、`agent-team.toml` の `[developers.<login>.slots]` が正本（GLM は実装と調査の合算、Devin CLI は実装の枠）。枠の消費数は、open な Issue の `agent:working` の数から、実際の停止を確認できるもの（補助記録の作業状態の印が停止中・再開処理中・再開待ちのもののうち、runbook の「ボードと巡回」の「枠の数え方」の手順で停止を確認できたものだけ。確認できないものは使用中として数える）を除いた数に、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）を加えたもの。GLM 枠と Devin CLI 枠の内訳は Issue の `agent:devin` ラベルの有無で判定する。実装の枠を超えた分は指揮役が順番待ちにする（満杯時の優先の判断は `docs/agents/command-team-details.md` の「調査（入口B）」）
 - GitHub Projects のボードの読み書きは人間の名義の `gh` で行う（読み取り `read:project`、書き込み `project` スコープ）。`scripts/agent-gh` は使わない（人間の名義で行う操作の既存の枠と同じ扱い）。スコープが無ければ巡回を止めて hatai に報告する
 - レビューの同時数の目安は、`agent-team.toml` の `[developers.<login>.review_limits]` が正本で、順番待ちの管理をしない。通常の PR のレビューは実装担当が委託するため全局管理はせず、実装担当は自分の PR のレビューを 1 件ずつ順に委託し、修正とレビューの繰り返しは直列に回す。指揮役が立てるレビュースレッド（指揮役自身の PR・外部投入）の同時数はこの目安内に収める。待ち時間や利用上限に実害が出たら、改善ループで見直す
@@ -74,7 +74,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - 指揮役が T3 のスレッドとして動いているとき、作業をさせるスレッド（実装・調査・レビュー）の作成はネイティブの `t3_thread_launch` で行う（T3 Connect の MCP や CLI のサブプロセスを経由しない）。指揮役が Grok Bot（クラウド）のときは T3 Connect の MCP の同じ操作を使う。実行中のスレッドへの指示送信（`t3_thread_send`）はこの限りではない
 - 終わったスレッドの片付け（settle）: PR を作ったスレッドはその PR をスレッドに紐付け（T3 の PR リンク）、マージで自動的に settle される。それ以外は、指揮役が毎回の巡回で、状態で決めた条件（`docs/agents/grokbot-runbook.md` の「9. 片付け」）に当たるものを `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドは settle しない（人間が再開しうるため）
 - main はルールセットで守る。必須チェックは `mise run verify` と `pr-size` の成功、承認は 1 件必須（Code Owners レビューの必須は外し、`pelway-review` の Approve で満たせる形）、新しいコミットで古い Approve を外す、「マージ前にブランチを最新化すること」を必須とする（Kodiak の直列キューと合わせて、チェックが通ったツリーとマージされるツリーを一致させる）。ルールセットの変更前後の値は「マージキュー」の表に転記する
-- エージェントの PR・指揮役が作った PR・hatai 自身が作った PR のいずれも、`pelway-review` の Approve と必須チェックと QA 合格コメントの後、指揮役が `automerge` ラベルを付けて Kodiak がマージする。hatai の admin マージの対象は、round 4 以降に達した PR（レビューのラウンド。round 4 以降も修正と再レビューを続けるが、マージは hatai の admin マージで行う）、`.github/` の下を変える PR、`fnox.toml` を変える PR の 3 つだけである（マージの例外はこれ以外に広げない。Kodiak が応答しない等のキューの切り戻しや、必須チェックが失敗したままの `pr-size-exception` は例外には加えず、hatai がこの 3 つのどれかに該当すると判断した PR だけが admin マージされる。`enforce_admins: false` を維持するのはこの例外のためである）
+- エージェントの PR・指揮役が作った PR・hatai 自身が作った PR のいずれも、`pelway-review` の Approve と必須チェックと QA 合格コメントの後、指揮役が `automerge` ラベルを付けて Kodiak がマージする。hatai の admin マージの対象は、round 4 以降に達した PR（レビューのラウンド。round 4 以降も修正と再レビューを続けるが、マージは hatai の admin マージで行う）、`.github/` の下を変える PR、`fnox.toml` を変える PR の 3 つだけである（admin マージの対象はこれ以外に広げない。Kodiak が応答しない等のキューの切り戻しや、必須チェックが失敗したままの `pr-size-exception` は対象に加えず、この 3 つのどれかに当たる PR だけが admin マージされる。`enforce_admins: false` を維持するのはこの admin マージのためである）
 
 ## マージキュー
 
@@ -93,7 +93,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 | 承認 | Code Owners（`* @hatai`）のレビューが必須 | 1 件必須（Code Owners レビュー必須は解除） |
 | マージ前のブランチ最新化 | 必須でない | 必須 |
 | stale な承認の取り消し（新しい push で承認を無効化） | — | 有効化する（新しいコミットで古い Approve を外す。hatai の決定、Issue #480。手順書は入っている前提で書く） |
-| `enforce_admins` | `false`（hatai の admin マージによる迂回が可能） | `false`（例外 PR の admin マージを残す） |
+| `enforce_admins` | `false`（hatai の admin マージによる迂回が可能） | `false`（admin マージの対象の PR の手動マージを残す） |
 | リポジトリのルールセット `main`（id 26958258） | `deletion`・`non_fast_forward` のみ | 同じ（ブランチ保護の必須チェック・承認・最新化とは別に維持） |
 
 ## 状態の表し方
@@ -118,7 +118,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - payload は `pelway.agent-watch/v1`。スレッド ID、ブランチ、`issue_number`（`agent/<番号>-` から取る）、`round`（スレッドの実行回数）、`report`（最後の返答が `キー: 値` 形式 8 行以内のときだけ、その本文）を含む
 - 同じ出来事からイベントを作るのは 1 回だけ。送れなかったものは送信待ちの列に残して送り直す（受け手には重複して届きうる）。受け手が直らない失敗（HTTP 400・404・413）を返したものは送り直さずに列から外す（受信箱には書かれる。受信箱に書けなかったものは、書けるまで状態に残して書き直す。上限 100 件で、超えたら古いものから捨てる）。送り直せる失敗が続く間は、送り直しの間隔を 30 秒から失敗のたびに倍にし、上限は 15 分（`docs/dev-environment.md`「pitchfork について」）。状態は `~/.local/state/pelway/agent-watch.json`（既定の場所。`XDG_STATE_HOME` を設定したときの場所は `docs/dev-environment.md`「pitchfork について」を参照）に置く
 - 同じ知らせを、T3 のスレッドとして動く指揮役のための受信箱（共有の git dir の `pelway/conductor-inbox.jsonl`）にも 1 行ずつ書き、ホストの登録ファイルに登録された指揮役のスレッドへ決まった文を送って起こす（Issue #555。人間が立てたスレッドの知らせで起こすのは `failed`・`waiting`・`stalled`・報告のある `finished` のときだけで、それ以外は受信箱に書くだけ。Issue #727。形は `docs/agents/notify-payloads.md`「指揮役の受信箱」、動き方は `docs/dev-environment.md`「pitchfork について」）
-- 修正が何回目かは、実装スレッドがレビューの委託回数で数える（skill `implement-issue`）。同じ head は 1 ラウンドに数え、コンフリクトの解消を含まない main の取り込みだけで head が変わっても新しいラウンドにしない。ラウンドの回数では止めず、must-fix が残る限り修正と再レビューを続ける。レビューの effort は、セキュリティと仕様の PR では 1 回目から上げておく（3 回目で改めて上げる運用はやめる）。人間のレビューによる修正（指揮役が `t3 thread send` で伝える）の回数も同じラウンド数に数える。レビューの `[文書のずれ]` の nit だけを直す round（skill `review-pr`・`implement-issue`）は、この回数に数えない（その後のレビューの委託も数えない）
+- 修正が何回目かは、実装スレッドがレビューの委託回数で数える（skill `implement-issue`）。同じ head は 1 ラウンドに数え、コンフリクトの解消を含まない main の取り込みだけで head が変わっても新しいラウンドにしない。ラウンドの回数では止めず、must-fix が残る限り修正と再レビューを続ける。round 4 以降のレビューでセキュリティ領域の must-fix が出たら止めて、hatai の判断に戻す。レビューの effort は、セキュリティと仕様の PR では 1 回目から上げておく（3 回目で改めて上げる運用はやめる）。人間のレビューによる修正（指揮役が `t3 thread send` で伝える）の回数も同じラウンド数に数える。レビューの `[文書のずれ]` の nit だけを直す round（skill `review-pr`・`implement-issue`）は、この回数に数えない（その後のレビューの委託も数えない）
 
 ## 停止・迷走への対処
 

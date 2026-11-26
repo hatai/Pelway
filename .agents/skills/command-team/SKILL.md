@@ -198,6 +198,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 - 仕様の穴（拒否リストや検知の規則から抜け道が出続けるもの）は仕様に戻し、ラウンドを 1 から数え直す。hatai の OK なしの数え直しは 1 回まで。
 - 人の作業待ちの項目は、その間は合格ではなく未検証として扱い、担当・期限・sha を記録する。ラウンドには数えない。
 - must-fix が残ったままマージしない。ラウンドの回数では止めず、must-fix が残る限り修正と再レビューを続ける。round 4 以降に進むこと自体に hatai の例外の判断は要らない。
+- round 4 以降のレビューでセキュリティ領域（上のリスト）の must-fix が出たら止めて、hatai の判断に戻す。must-fix の一覧と止まった head の sha を Issue に書く。手元にすでに修正があれば、worktree に置いたまま push も削除もしない。止まっている間は、指揮役も修正を中継しない。
 - 修正の継続に force push・PR のマージ・`.github/workflows/` の push・pr-size の例外のどれかが必要なときは、回数とは別に hatai の判断を待つ。
 - 判定が割れたときは「レビュー担当と effort」のとおり修正側（request-changes）を優先する。セキュリティの指摘は特に修正側を優先する。
 - `--no-verify` は使わない（commit のフックを止めない）。
@@ -247,13 +248,13 @@ hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終�
 - Approve と QA 合格のあとに許すのは、コンフリクトの解消を含まない main の取り込みだけ。指揮役は、取り込みのコミットに main 以外の差分がないことを確かめてからラベルを付ける（`git rev-list <Approve した sha>..<head> --no-merges ^origin/main` が 0 件。それ以外のコミットがあればレビューと QA をやり直す。Kodiak がブランチ最新化で作る main 取り込みのマージコミットはこの条件を壊さない）
 - コンフリクトを解消したときは変更として扱い、新しい head でレビューと QA をやり直す
 
-hatai が判断する例外（マージを hatai の admin マージで行う。これ以外には広げない）:
+admin マージの対象（マージを hatai の admin マージで行う。これ以外には広げない）:
 
 - round 4 以降に達した PR（レビューのラウンド。round 4 以降も修正と再レビューを続けるが、マージは hatai の admin マージで行う）
 - `.github/` の下を変える PR
 - `fnox.toml` を変える PR
 
-Kodiak が応答しない・詰まった場合（キューの切り戻し）と、必須チェックが失敗したままのマージ（`pr-size-exception`）は、マージの例外には加えない（例外は上の 3 つだけ。これ以外に広げない）。Kodiak でマージできないこれらの PR は、hatai が上の例外のどれかに該当すると判断したときだけ admin マージされる。`scripts/conductor-merge-queue.sh` は hatai の admin マージの補助として残す。
+Kodiak が応答しない・詰まった場合（キューの切り戻し）と、必須チェックが失敗したままのマージ（`pr-size-exception`）は、admin マージの対象には加えない（対象は上の 3 つだけ。これ以外に広げない）。Kodiak でマージできないこれらの PR は、上の 3 つのどれかに当たるときだけ admin マージされる。`scripts/conductor-merge-queue.sh` は hatai の admin マージの補助として残す。
 
 ラベルを付けたあと:
 
@@ -267,12 +268,12 @@ QA 合格コメント:
 - QA の合格は PR コメントで残す。PR 本文だけの「合格」は無効。形と、合格として数える条件（`pelway-qa[bot]` の Bot であること・投稿の後に編集されていないこと・1 行目・`sha:`・`run:`）と確かめ方のコマンドは、`docs/agents/qa-checklist.md` の「合格として数えるもの」に従う
 - 作成者の login だけでは足りない。実装担当の App（`pelway-dev`）など Issues・PR の書き込み権限を持つ名義は、ほかの名義のコメントを編集できるため、古い合格コメントの `sha:` を新しい head に書き換えると、作成者・1 行目・SHA の一致がすべて通ってしまう。編集されたコメントは、作成者が `pelway-qa[bot]` でも数えない
 - ほかの作成者のコメントは、本文の形と SHA が合っていても QA の合格に数えない。hatai の名義のコメントも QA の合格に数えず、`pelway-qa` の名義のコメントは hatai 本人の裏付けに数えない（Issue #480 の決定）
-- `pelway-qa` の名義で合格コメントを投稿できないあいだ（App のトークンが使えないなど）は、QA の合格をもとに `automerge` を付けない。ラベルを付けずに止め、hatai に報告する（admin マージの例外には加えない。例外は上の 3 つだけ）
+- `pelway-qa` の名義で合格コメントを投稿できないあいだ（App のトークンが使えないなど）は、QA の合格をもとに `automerge` を付けない。ラベルを付けずに止め、hatai に報告する（admin マージの対象には加えない。対象は上の 3 つだけ）
 - 指揮役は、コメントの `sha:` が PR の現在の head と一致することを確かめてからラベルを付ける（head が変わったら QA のやり直しを依頼する）
 
 マージ以外の PR・Issue への操作（base の変更、Draft の扱い、Issue のクローズ）は、先に「手当て・引き継ぎの前の確認」を通す。目印付きのコメント（`<!-- pr-size-exception -->`、`<!-- split-plan -->`）は人間の名義の `gh issue comment` で書く。レビュー担当は作成者が `hatai` であることで、実装担当（`pelway-dev`）や第三者のコメントと区別する。それ以外の GitHub の操作（読み取り、ラベル、ふつうのコメント）は `scripts/agent-gh dev` で行う。
 
-- pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の例外の判断に回す（マージの例外は上の 3 つだけで、pr-size-exception 自体は例外に加えない）。運用まわりの PR（主な変更先が skill `write-issue` の手順 4 の「運用まわりの Issue」の定義に当たる PR）が pr-size を超えたときは、例外を提案するより先に `<!-- split-plan -->` での分割を提案する（下の「分割を認めるとき」）。
+- pr-size の失敗が許されるのは、指揮役が Issue に行頭が `<!-- pr-size-exception -->` で始まるコメントで超過を認めた理由を書き、PR に `pr-size-exception` ラベルを付けたときだけ（`scripts/agent-gh dev pr edit <M> --add-label pr-size-exception`）。レビュー担当（skill `review-pr`）はラベルとコメントの両方を確かめてから、pr-size の失敗を must-fix に数えない。レビューの指示に例外の文を足さない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の例外の判断に回す（admin マージの対象は上の 3 つだけで、pr-size-exception 自体は対象に加えない）。運用まわりの PR（主な変更先が skill `write-issue` の手順 4 の「運用まわりの Issue」の定義に当たる PR）が pr-size を超えたときは、例外を提案するより先に `<!-- split-plan -->` での分割を提案する（下の「分割を認めるとき」）。
 - 必須チェックの完了待ち（ラベルを付ける前の CI 待ち、巡回での PR のベビーシット）は、ポーリングせず skill `pr-watch` の「待ち方」に従う（T3 のスレッドでは `watch_pull_request`）。マージの実行は Kodiak が行うため、指揮役がマージコマンドを叩くことはない。
 - skill `pr-watch` の `VERDICT green` は、その SHA でチェックが完走して通過していることの確認要素の 1 つ。上の「`automerge` ラベルを付ける条件」を置き換えない。
 - ブランチの最新化はルールセットが「マージ前にブランチを最新化すること」で必須とし、実行は Kodiak が行う。指揮役が `pr update-branch` で手動に取り込む操作は、手当スレッドでの衝突解消などの例外を除き原則しない。
