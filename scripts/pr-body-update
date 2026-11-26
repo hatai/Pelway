@@ -9,11 +9,13 @@
 書き換えるのは、その行の中で印（「最後に検証した sha」・HEAD）の直後にある sha（7〜40 桁の 16 進数。
 コロン・空白・開きバッククォートは挟まってよい）だけである。行の前後の文、ほかの行、改行コードは変わらない。
 節は `## <節名>` の見出しから次の見出し（# 〜 ######）までで、見出しは本文に 1 つだけ、印の付いた行は
-節に 1 つだけ無ければならない。決まった行が無い・複数あるときは何も書き換えずに、どの行が足りないかを
-stderr に出して終了コード 1（そのときは pr edit で本文にその行を足してからやり直す）。
+節に 1 つだけ無ければならない。HTML コメント（<!-- 〜 -->）の中の見出しや印は数えない（PR テンプレートの
+注釈は残してよいため）。決まった行が無い・複数あるときは何も書き換えずに、どの行が足りない・多いかを
+stderr に出して終了コード 1（そのときは stderr のとおりに本文を直してからやり直す。足りない行は足し、
+重なる行は除く）。
 GitHub との読み書きは scripts/agent-gh dev api だけを使う。本文は argv でなく --input のファイルで渡す
 （非 ASCII を argv で渡さない決まり。skill write-pull-request）。
-終了コード: 0 = 書き換えた、1 = 書き換えなかった（決まった行が無い・GitHub への読み書きの失敗）、
+終了コード: 0 = 書き換えた、1 = 書き換えなかった（決まった行の過不足か GitHub への読み書きの失敗）、
 2 = 引数の誤り
 """
 import json
@@ -35,9 +37,10 @@ USAGE = f"""usage: python3 -I scripts/pr-body-update <PR 番号> --verified <sha
 PR 本文の決まった 2 行を今の値に書き換える（{REPO} の PR）。
   「レビューと QA」の「最後に検証した sha」の行 → --verified の sha（40 桁）
   「対象」の HEAD の行                        → PR の現在の headRefOid
-書き換えるのは行の中の sha だけ。ほかの行は変えない。決まった行が本文に無い・複数あるときは
-何も書き換えずに、足りない行を stderr に出して終了コード 1。
-終了コード: 0 = 書き換えた、1 = 書き換えなかった、2 = 引数の誤り"""
+書き換えるのは行の中の sha だけ。ほかの行は変えない。決まった行（節の見出しや印の行）が本文に
+無い・複数あるときは何も書き換えずに、その行を stderr に出して終了コード 1（本文を直してからやり直す）。
+終了コード: 0 = 書き換えた、1 = 書き換えなかった（決まった行の過不足か GitHub への読み書きの失敗）、
+2 = 引数の誤り"""
 
 
 def die(msg, rc=1):
@@ -64,24 +67,51 @@ def where_at(found):
     return "" if not found else "（" + "・".join(f"{i + 1} 行目" for i in found) + "）"
 
 
+def uncommented(lines):
+    """HTML コメント（<!-- 〜 -->、複数行も含む）の中の文字を空白に替えた行のリストを返す（長さと行数は同じ）。
+    PR テンプレートの注釈は残してよいため（skill write-pull-request の手順 4）、注釈の中の見出しや印は数えない。"""
+    out, inside = [], False
+    for line in lines:
+        chars, k = [], 0
+        while k < len(line):
+            if inside:
+                if line.startswith("-->", k):
+                    chars.append("   ")
+                    inside = False
+                    k += 3
+                else:
+                    chars.append(" ")
+                    k += 1
+            elif line.startswith("<!--", k):
+                chars.append("    ")
+                inside = True
+                k += 4
+            else:
+                chars.append(line[k])
+                k += 1
+        out.append("".join(chars))
+    return out
+
+
 def rewrite(body, values):
     """本文 body の決まった 2 行の sha を TARGETS の順の値 values に書き換え、(新しい本文, 変更, 問題) を返す。
     変更は [(印, 古い sha, 新しい sha, 行番号)]。問題が 1 つでもあれば何も書き換えず (None, [], 問題) を返す。"""
     lines = body.split("\n")  # \r は行末に残るため、改行コードは join でそのまま戻る
+    view = uncommented(lines)  # 見出しと印はこの版で探し、書き換えは同じ位置で lines に施す
     changes, problems = [], []
     for (section, label), value in zip(TARGETS, values):
-        heads = [i for i, line in enumerate(lines) if re.fullmatch(r"## " + re.escape(section) + r"[ \t]*\r?", line)]
+        heads = [i for i, line in enumerate(view) if re.fullmatch(r"## " + re.escape(section) + r"[ \t]*\r?", line)]
         if len(heads) != 1:
             problems.append(f"「{section}」の見出しが本文に{how_many(heads)}{where_at(heads)}")
             continue
-        end = next((i for i in range(heads[0] + 1, len(lines)) if ANY_HEADING.fullmatch(lines[i])), len(lines))
+        end = next((i for i in range(heads[0] + 1, len(lines)) if ANY_HEADING.fullmatch(view[i])), len(lines))
         mark = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(label) + r"(?![A-Za-z0-9_])")
-        found = [i for i in range(heads[0] + 1, end) if mark.search(lines[i])]
+        found = [i for i in range(heads[0] + 1, end) if mark.search(view[i])]
         name = f" {label} " if label.isascii() else f"「{label}」"  # Latin の印の前後には空白を置く
         if len(found) != 1:
             problems.append(f"「{section}」に{name}の行が{how_many(found)}{where_at(found)}")
             continue
-        hits = list(re.finditer(mark.pattern + r"[ \t]*[:：]?[ \t]*`?(" + SHA + ")", lines[found[0]]))
+        hits = list(re.finditer(mark.pattern + r"[ \t]*[:：]?[ \t]*`?(" + SHA + ")", view[found[0]]))
         if len(hits) != 1:
             problems.append(f"「{section}」の{name}の行（{found[0] + 1} 行目）で、"
                             f"{name.lstrip()}の直後に sha が{how_many(hits)}")

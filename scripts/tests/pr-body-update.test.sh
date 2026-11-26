@@ -2,7 +2,8 @@
 # scripts/pr-body-update のテスト（Issue #809）。偽のリポジトリ（本物の scripts/pr-body-update と偽の
 # scripts/agent-gh）で、PR 本文の決まった 2 行（「レビューと QA」の最後に検証した sha、「対象」の HEAD）
 # だけが PR の headRefOid と指定した sha に書き換わること、決まった行が無いときは何も書き換えずに
-# 失敗してどの行が無いかを出すこと、日本語の本文を argv でなく --input のファイルで渡すことを確かめる。
+# 失敗してどの行が無いかを出すこと、日本語の本文を argv でなく --input のファイルで渡すこと、
+# テンプレートの HTML コメントの中を数えないことを確かめる。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -189,6 +190,50 @@ check "label lines outside their own section and longer words containing HEAD ar
 - 最後に検証した sha: \`$VER\`
 - 参考にした HEAD: \`5555555555555555555555555555555555555\`
 EOF
+
+# --- テンプレートの HTML コメント（<!-- 〜 -->、複数行も含む）は残してよい。注釈の中の見出しや印は数えない ---
+cat >"$MOCK/body" <<EOF
+## レビューと QA
+
+<!-- 事実と検証時点の sha のみ記載。未検証の項目は「未検証」と明記する -->
+- 実装者メモ: \`docs/worklogs/issue-809.md\`
+<!-- round 1 --> - 最後に検証した sha: \`3333333333333333333333333333333333333333\`
+
+## 対象
+
+<!-- ブランチ名と HEAD の sha -->
+- ブランチ: \`agent/809-pr-body-sha-tool\`
+<!-- HEAD: \`1111111111111111111111111111111111111111\` -->
+- HEAD: \`2222222222222222222222222222222222222222\` <!-- 前は HEAD: 4444444444444444444444444444444444444 -->
+<!--
+## 対象
+- HEAD: \`5555555555555555555555555555555555555\`
+-->
+EOF
+upd 740 --verified "$VER"; rc=$?
+check "HTML comments kept from the template: exit 0" eq "$rc" 0
+check "headings and labels inside HTML comments are not counted and the comments stay" cmp -s "$MOCK/body" - <<EOF
+## レビューと QA
+
+<!-- 事実と検証時点の sha のみ記載。未検証の項目は「未検証」と明記する -->
+- 実装者メモ: \`docs/worklogs/issue-809.md\`
+<!-- round 1 --> - 最後に検証した sha: \`$VER\`
+
+## 対象
+
+<!-- ブランチ名と HEAD の sha -->
+- ブランチ: \`agent/809-pr-body-sha-tool\`
+<!-- HEAD: \`1111111111111111111111111111111111111111\` -->
+- HEAD: \`$HEAD\` <!-- 前は HEAD: 4444444444444444444444444444444444444 -->
+<!--
+## 対象
+- HEAD: \`5555555555555555555555555555555555555\`
+-->
+EOF
+sed 's|^## 対象$|<!-- 閉じ忘れ|' <(sample "$OLD_HEAD" "$OLD_VER") >"$MOCK/body"; : >"$MOCK/calls.log"
+upd 743 --verified "$VER"; rc=$?
+check "an unclosed HTML comment hides what follows: fails without patching" fails_quietly "$rc"
+check "an unclosed HTML comment: stderr names the missing heading" has "$ROOT/err" '「対象」の見出しが本文に無い'
 
 # --- 改行コードと末尾の改行はそのまま残る ---
 sed 's/$/\r/' <(sample "$OLD_HEAD" "$OLD_VER") >"$MOCK/body"
