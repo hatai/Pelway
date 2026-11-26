@@ -189,6 +189,25 @@ push_role worklogs_memo dev origin HEAD
 [[ "$RC" == 0 && "$(remote_ref agent/worklogs)" == "$(work_git rev-parse HEAD)" ]] ||
   failures+=("push_worklogs_only_memo: memo commit not pushed: rc=$RC $ERR")
 
+# --- docs/worklogs/ の外のファイルを docs/worklogs/ の下へ移しただけの木は通さない ---
+# rename 検出が効くと diff の出力が移動先だけになり、外の削除を見落とすため、門は --no-renames で比べる。
+setup_repo rename_escape
+mkdir -p "$REPO_DIR/work/crates/x/tests"
+printf 'same contents for rename detection\n' >"$REPO_DIR/work/crates/x/tests/foo.rs"
+work_git add crates/x/tests/foo.rs
+(cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m implementation)
+(
+  cd "$REPO_DIR/work" || exit 1
+  bash "$RECORD" >/dev/null 2>&1
+)
+mkdir -p "$REPO_DIR/work/docs/worklogs"
+work_git mv crates/x/tests/foo.rs docs/worklogs/foo.rs
+(cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m 'move into worklogs')
+push_role rename_escape dev -u origin HEAD
+[[ "$RC" != 0 && "$ERR" == *'mise run verify'* ]] ||
+  failures+=("push_rename_escape: not stopped: rc=$RC $ERR")
+[[ -z "$(remote_ref agent/rename_escape)" ]] || failures+=("push_rename_escape: remote ref changed")
+
 # --- docs/worklogs/ の外が変わった HEAD には前の印を使わない ---
 setup_repo stale
 printf 'implementation\n' >"$REPO_DIR/work/code.txt"

@@ -37,8 +37,9 @@ for line in ${lines[@]+"${lines[@]}"}; do
   [[ "$tree" == "$marker" ]] && continue
 
   # 木どうしの差が docs/worklogs/ の下だけなら通す。ファイル名の空白や改行を壊さないよう NUL 区切りで読む。
+  # rename 検出は外す。外のファイルを docs/worklogs/ の下へ移したときに移動先だけが出て、外の削除を見落とさないため。
   diff_out="$PELWAY_AGENT_HOOKS_DIR/verify-gate-diff.out"
-  git --no-replace-objects diff --name-only -z "$marker" "$tree" -- >"$diff_out" 2>/dev/null ||
+  git --no-replace-objects diff-tree -r --no-renames --name-only -z "$marker" "$tree" >"$diff_out" 2>/dev/null ||
     stop_unverified "印の木と $rref へ送る木の差を読めません"
   only_worklogs=1
   saw_diff=0
