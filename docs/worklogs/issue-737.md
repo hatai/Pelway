@@ -13,3 +13,15 @@
 7. 詰まった箇所: 手順 6: push 後の必須チェックで `scripts/tests/agent-team-config.test.sh` の試験 3（instance names and models match current ops）が落ちた。原因はこの PR の変更ではなく、main の 7c36a927（Update agent-team.toml）が `agent-team.toml` のモデル一覧を変えたのに試験内の pin を更新しなかったため（main 自身の verify も同じ理由で落ちている。PR の CI は merge ref を検査するためこの PR でも落ちる）。main を取り込んだうえで pin を登録済みの新しい値（`zai-coding-plan/glm-5.4`・`swe-2-1-high`・`claude-opus-5-5`/`claude-sonnet-5-5`/`claude-haiku-5-5`）に追従させ、main の赤の直しもこの PR に含めた。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 2）
+
+対象 head: 5a07965f518587625af02bcd79da37789738a740（マージコミットを含む push のため re-sign 対象外・署名なし）
+
+レビュー（claude/opus/high、run 7188751463、verdict=request-changes、must-fix 2）への対応:
+
+1. must-fix 1（`~/.config/pelway-agent-notify` がどの sandbox の拒否リストにも無い）: 復号鍵と暗号文が同じディレクトリにあり `key_file` が絶対パスのため、読める sandbox から `fnox -c ... get` で復号できてしまう指摘は正しい（review_age 型をなぞったが、それと一対の拒否リストへの追加をなぞっていなかった）。リポジトリ側の 4 箇所（`.devin/config.json`、`scripts/agent-sandbox/devin-config.json`、opencode-plugin の `READ_DENY`、sandbox-shell の `masks`）に `~/.config/pelway-agent-notify` を足した。`masks` への追加は、`.config/fnox`・`.config/pelway-agent` が入っていない点とのずれに見えるが、あちらは sandbox の中の `agent-gh dev` が認証情報の復号に必要で隠せないのに対し、notify のディレクトリを読む必要のあるものはホスト側（agent-watch・`conductor-watch.sh`）だけ（`conductor-thread-id` の読み手を grep で確かめた。`patrol-state.json` は共有 git dir、outbox は `~/.local/state`）なので、ファイルシステム層で隠しても何も壊れない。リポジトリの外（レビュー担当 3 つと QA 担当）は、移し替え手順の手順 0 として「鍵を作る前に拒否を入れる」順序で docs に書いた。
+2. must-fix 2（`fnox.toml.bak` を消す段が無い）: 指摘どおりで、残したままだと dev の鍵宛ての暗号文が残り鍵分割が成り立たない。「確かめ方」のあとに .bak を消す段を足し、「戻し方」は .bak を消す前に限ると明記した。
+3. nit（`PELWAY_NOTIFY_FNOX_CONFIG` の空文字・相対パス、鍵 dir の `mkdir -p`）: agent-watch と同じく絶対パスのみ受け付ける形に揃え、それ以外は警告して既定の場所に作る。`mkdir -p` は設定ファイルと age 鍵の両方の親に効かせた（REVIEW 側も同じ形だったので同じ直し）。
+4. nit（移し替えループの pipefail 不在）: `get` の成否を先に確かめる形に直した（`pipefail` は対話シェルの状態を変えるので、値を一旦変数に受けて失敗時に止める形）。`set` 側の失敗は `set -e` の無い対話シェルでは検知できないままだが、`fnox set` 自体の成否は各イテレーションで目に見える形（終了コード）で残る。
+5. 確かめたこと: `masks` に `pelway-agent-notify` を足しても壊れるものが無いことは上記の読み手の確認で裏付けた。`.devin/config.json` など JSON の deny の書式は既存行に揃えた。シェルcheck・cargo test・JSON の構文は下の検証で通す。
