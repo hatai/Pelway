@@ -22,3 +22,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「手順 1」の「文書の節（見出しを `grep`）」の行に「箇条書きの項目は番号（手順 N）ではなく見出し・節名で指す（番号は編集でずれる）」を足す。
 
 使ったスキル: .agents/skills/implement-issue、.agents/skills/diagnosing-bugs（`verify-pelway/verify-run.test.sh` の失敗の切り分けに Phase 2。`scripts/red-check origin/main` で同じ失敗を再現し、環境起因と確かめた。この環境は `/tmp`・`/home` が nobody:nogroup の所有で、`dir_chain_safe` の「置き場より上は自分か root の持ち物」に反するため、書き込める場所の階層では必ず落ちる）。`mise run verify` は `script-test` 1/55（この試験のみ）で落ちたが、ほかの全段は通った。
+
+## 実装者メモ（round 2）
+
+対象 head: 5f4c96059214e4deb05cfc08845affc83ba3be29
+PR: #735
+
+レビュー指摘（run 7180293697 codex request-changes、head 12fee3a33b43095e2f9c42d3febb30159685cab1）への対応:
+
+1. 詰まった箇所: なし
+2. must-fix の対応:
+   - `scripts/conductor-rebuild`:133 期限を超えて返った `show` の結果にパスがあっても処理を進めていた → ループの先頭で `SECONDS > end` なら `worktreePath` を空に戻して待ちを抜ける形にした（読み取りの返りが期限をまたぐのは、間隔 `WT_INTERVAL` の超過と `show` 内の lock のやり直しの両方でありうる）。`runtimeMode` は進む・止まるの判定を変えないため、最後に読んだ値のままログに出す。試験を 2 件追加（`worktree after the limit`: 間隔 3 秒で 2 回目の読み取りにパスが入っても期限超過で止まる、`lock retry past the limit`: lock のやり直しが期限をまたいだ読み取りを受け入れない）
+3. nit の対応: なし（nit 0 件）。`[文書のずれ]` の印も無し
