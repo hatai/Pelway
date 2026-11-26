@@ -157,7 +157,7 @@ PR: #722
 
 ## 実装者メモ（round 11）
 
-対象 head: <新規コミット>
+対象 head: 2151a5aa4f246a64afb7c1c277b0bd9bd8e3c2a9
 PR: #722
 
 レビュー指摘（run 7180129626 claude request-changes、head 46a84bce）への対応:
