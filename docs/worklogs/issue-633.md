@@ -168,7 +168,7 @@ push 後のローカル verify で `term-ignoring read killed: returns after the
 
 ## 実装者メモ（round 11）
 
-対象 head: （push 後に記入）
+対象 head: f74a9949e0e97d55cf4f45900df7c814bc54e841
 PR: #735
 
 レビュー指摘（run 7185624610 codex request-changes・must-fix 1、run 7185625223 claude request-changes・must-fix 1。ともに head 6e4f22141d9253ebcd254b5b4efd42924394ea2b、同一趣旨の指摘）への対応。
