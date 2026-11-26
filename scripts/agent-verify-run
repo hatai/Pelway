@@ -4,10 +4,16 @@
 set -uo pipefail
 
 script_dir="$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-bash "$script_dir/agent-verify-invalidate" || exit 1
+# 同じ worktree で重なる verify を直列にする。印を消してから記録までの間に別の検証が入ると、
+# 先に成功した印が後の失敗のあとにも残るため。ロックはこの shell が持ち、子プロセスには fd を渡さない。
+git_dir="$(git rev-parse --git-dir 2>/dev/null)" || { echo "agent-verify-run: gitdir を解決できません" >&2; exit 1; }
+git_dir="$(CDPATH='' cd -- "$git_dir" 2>/dev/null && pwd -P)" || { echo "agent-verify-run: gitdir を絶対パスに解決できません" >&2; exit 1; }
+exec 9>"$git_dir/pelway-verify.lock"
+flock 9 || { echo "agent-verify-run: verify のロックを取れません" >&2; exit 1; }
+bash "$script_dir/agent-verify-invalidate" 9>&- || exit 1
 rc=0
-mise run verify-lint ::: verify-test ::: verify-static || rc=$?
+mise run verify-lint ::: verify-test ::: verify-static 9>&- || rc=$?
 if ((rc != 0)); then
   exit "$rc"
 fi
-bash "$script_dir/agent-verify-record"
+bash "$script_dir/agent-verify-record" 9>&-

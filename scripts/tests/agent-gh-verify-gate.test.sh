@@ -137,6 +137,27 @@ marker_tree="$(cat "$(marker_file)" 2>/dev/null)"
 [[ -n "$(work_git ls-tree "$marker_tree" ignored.txt)" ]] ||
   failures+=("record_index_ignored: tracked ignored file is missing")
 
+# --- assume-unchanged / skip-worktree が付いていても、印は index の古い内容ではなく実ファイルを映す ---
+setup_repo index_flags
+printf 'index content\n' >"$REPO_DIR/work/assumed.txt"
+printf 'skip content\n' >"$REPO_DIR/work/skipped.txt"
+work_git add assumed.txt skipped.txt
+(cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m implementation)
+work_git update-index --assume-unchanged assumed.txt
+work_git update-index --skip-worktree skipped.txt
+printf 'worktree content\n' >"$REPO_DIR/work/assumed.txt"
+printf 'skip worktree content\n' >"$REPO_DIR/work/skipped.txt"
+(
+  cd "$REPO_DIR/work" || exit 1
+  bash "$RECORD" >/dev/null 2>&1
+)
+rc=$?
+marker_tree="$(cat "$(marker_file)" 2>/dev/null)"
+[[ "$rc" == 0 && "$(work_git ls-tree "$marker_tree" assumed.txt | awk '{print $3}')" == "$(work_git hash-object assumed.txt)" ]] ||
+  failures+=("record_assume_unchanged: marker does not use the worktree content")
+[[ "$(work_git ls-tree "$marker_tree" skipped.txt | awk '{print $3}')" == "$(work_git hash-object skipped.txt)" ]] ||
+  failures+=("record_skip_worktree: marker does not use the worktree content")
+
 # mise の verify タスクは、検査の前に前回の印を消し、3 グループがすべて成功したときだけ印を残す。
 # 同じ木で再実行が失敗したとき、古い印で push が通らないことを合成の依存タスクで確かめる。
 verify_section="$(sed -n '/^\[tasks\.verify\]/,/^\[tasks\.verify-lint\]/p' mise.toml)"
@@ -149,7 +170,7 @@ cp "$VERIFY_RUN" "$MISE_TOY/scripts/agent-verify-run"
 cp "$INVALIDATE" "$MISE_TOY/scripts/agent-verify-invalidate"
 cat >"$MISE_TOY/mise.toml" <<'EOS'
 [tasks.verify-lint]
-run = "exit ${VERIFY_DEPS_RC:-0}"
+run = "sleep ${VERIFY_SLEEP:-0}; exit ${VERIFY_DEPS_RC:-0}"
 
 [tasks.verify-test]
 run = "true"
@@ -178,6 +199,18 @@ ERR="$(cat "$ROOT/flaky-push.err")"
   failures+=("push_after_same_tree_verify_failure: not stopped: rc=$RC $ERR")
 [[ -z "$("$REAL_GIT" --git-dir="$MISE_TOY/remote.git" rev-parse -q --verify refs/heads/agent/flaky-verify 2>/dev/null)" ]] ||
   failures+=("push_after_same_tree_verify_failure: remote ref changed")
+
+# 同じ worktree で成功と失敗の verify が重なっても直列になる。直列なら、後から始めた失敗が
+# 先の成功の記録を待ってから印を消すため、最後に印は残らない。
+(cd "$MISE_TOY" && VERIFY_SLEEP=2 MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-overlap-success.out" 2>&1) &
+overlap_first=$!
+sleep 0.5
+(cd "$MISE_TOY" && VERIFY_DEPS_RC=1 MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-overlap-failure.out" 2>&1)
+overlap_failure_rc=$?
+wait "$overlap_first"
+overlap_success_rc=$?
+[[ "$overlap_success_rc" == 0 && "$overlap_failure_rc" != 0 && ! -e "$MISE_TOY/.git/pelway-verify-tree" ]] ||
+  failures+=("mise_verify_overlap: success=$overlap_success_rc failure=$overlap_failure_rc marker=$(test -e "$MISE_TOY/.git/pelway-verify-tree" && echo present || echo missing)")
 
 # --- 印が無い push は止まり、理由と mise run verify の案内が出る ---
 setup_repo missing
