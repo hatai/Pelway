@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「時間軸のある名詞（HEAD・現在・最新）は、どの時点の値かを検査手順に合わせて書く」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/diagnosing-bugs`（verify の失敗の切り分け方針だけ。再現の失敗は無し）
+
+## 実装者メモ（round 2）
+
+対象 head: 774c1b29459f146e83f23ae61ae0176156c9fbda（この round の実装の実体を含むコミット。main の merge を含むため `agent-gh-resign` は署名付け替えを行わず、push 後も同じ SHA。このメモを含むコミットの親）
+
+1. 詰まった箇所: round 1 の CI は main 由来の `agent-team-config.test.sh` の失敗で verify が落ち、門そのものの結果まで読めなかった。レビューの指摘どおり main（ac5c9fc）を取り込んでからやり直す。
+2. 曖昧だった文: 「直し方: main の `scripts/agent-gh-resign:98` と同じく `git --no-replace-objects diff-tree -r --no-renames --name-only -z "$marker" "$tree"` にする（少なくとも `--no-renames` を付ける）。」（PR #832、claude_review の round 1）
+3. 仮定と解釈: `diff-tree` に 2 つの木を渡す形でも出力はパスだけなので、`--name-only` の出力形は変えずに `--no-renames` へ寄せる。`[文書のずれ]` の nit はこの PR が作った手順の不整合なので、同じ round で `implement-issue` skill に skip の扱いを足す。
+4. 足りなかった情報・検証手段: rename 検出で外の削除が隠れることは、同一内容のファイルを `git mv` で `docs/worklogs/` の下へ移したコミットをローカルの bare remote に push する試験で確かめる。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「検査器の差分表示を使う条件では、rename・copies・mode だけの変更を試験に入れる」を足す。
+
+使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/diagnosing-bugs`（CI 失敗の切り分け方針だけ）
