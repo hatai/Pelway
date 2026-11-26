@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「修正依頼」に「`.devin/config.json` が read-only で checkout できないときは、merge commit の木で内容を確かめ、そのファイルを除いて worktree をそろえる」を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 4）
+
+対象 head: 0678bacbb8038c426422333cf601c719c1e9a977
+
+1. 詰まった箇所: 手順 9（Request changes）: 判定が割れたときの修正継続と `automerge` の条件が複数の手順書に写っていた。レビューで指摘された 3 か所だけを直すと、巡回の箇条書き・ラベル定義・Dependabot の Action 更新の経路に同じ抜けが残るため、関連する `automerge` の経路を洗い直した。
+2. 曖昧だった文: 「round 4 以降に達した PR には automerge を付けず hatai に回す分岐を、実装担当が記録するレビューのラウンド数で確認できる形にしてください」（round 3 レビュー）
+3. 仮定と解釈: 「判定が割れたこと自体ではエスカレーションしない」を残しつつ、round 4 以降で request-changes 側にセキュリティ領域の must-fix がある場合だけ停止条件を先に当てる、と解釈した。`automerge` の round 判定は、実装担当の終わりの報告の `review:` のラウンド数を使う。Action 更新の Dependabot PR は `.github/` の下を変えるため admin マージの対象であり、`automerge` に進まないと解釈した。
+4. 足りなかった情報・検証手段: 文書の意味を判定する LLM judge はまだ無い。`rg` で `automerge` と「判定が割れ」のある経路を洗い、wording pin と `mise run verify` で確かめた。
+5. 改善案: skill `review-pr` のレビュー本文に round 4 以降の must-fix の領域を書く決まりを足すかを別 Issue で検討する（どの指摘が停止条件に当たるかを実装担当の読み取りだけに残さないため）。
+
+使ったスキル: implement-issue、write-pull-request
