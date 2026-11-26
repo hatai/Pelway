@@ -40,7 +40,7 @@
 
 ## 実装者メモ（round 4）
 
-対象 head: TBD（round 4 のコード commit の SHA を記録する）
+対象 head: 4e7f4f2e7ef333cf2f042090c938cc3a9ad4d276（マージコミットを含む push のため re-sign 対象外・署名なし）
 
 レビュー（claude/opus/high、run 7189912073、verdict=request-changes、must-fix 1）への対応:
 
