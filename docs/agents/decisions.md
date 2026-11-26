@@ -6,5 +6,5 @@
 |---|---|---|
 | t629u | レビューの修正ラウンドの回数では止めない。must-fix が残る限り、修正・push・再レビューを続ける。force push・マージ・`.github/workflows/` の push・pr-size の例外は、回数とは別に hatai が判断する。 | #725 |
 | issue-806 | `mise run pr-size` が上限を超えたときは push せず、Issue に分割案・手元の head の SHA・`git diff --stat origin/main...HEAD` の出力を書いて止まる。例外が認められたあとは、hatai の `<!-- pr-size-exception -->` コメントと PR の `pr-size-exception` ラベルを確かめて push し、手順を再開する。 | #806 |
-| issue-807 | `mise run verify` が exit 0 のとき、その HEAD の木の hash の印を git の外の手元に書き残す。`scripts/agent-gh <role> git push` は、push する HEAD の木がその印を持つときだけ通す。HEAD の木と印の木の差が `docs/worklogs/` の下だけなら直前の印を使ってよい。`PELWAY_AGENT_SKIP_VERIFY_GATE=1` のときは確かめずに通し、通したことを標準エラーに出す。 | #807 |
+| issue-807 | `mise run verify` が exit 0 のとき、その HEAD の木の hash の印を git の外の手元に書き残す。`scripts/agent-gh <role> git push` は、push する HEAD の木がその印を持つときだけ通す。HEAD の木と印の木の差が `docs/worklogs/` の下だけなら直前の印を使ってよいが、verify が失敗した木には以前の印を使えない。`PELWAY_AGENT_SKIP_VERIFY_GATE=1` のときは確かめずに通し、通したことを標準エラーに出す。 | #807 |
 | issue-811 | 利用の上限によるレビュー委託の failed は、上限が解けると自動で再開される。Guard が head のずれを止めるので手で予約しない。今の head を見てもらうには、上限が解けてから新しい委託記録を残して委託し直す。上限による failed は 2 回連続の failed に数えない。 | #811 |
