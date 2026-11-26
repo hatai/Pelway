@@ -29,7 +29,7 @@ index="$index_dir/index"
 # 一時 index は実際の index の複写から始める。追跡済みだが無視のパターンに当たるファイルと、
 # core.fileMode=false の環境で index に残っている実行権限を、印の木に残すため。
 real_index="$(git -C "$root" rev-parse --git-path index)" || fail "実際の index を解決できません"
-[[ ! -e "$real_index" ]] || cp -- "$real_index" "$index" || fail "実際の index を一時 index に複写できません"
+[[ ! -e "$real_index" ]] || cp -p -- "$real_index" "$index" || fail "実際の index を一時 index に複写できません"
 # assume-unchanged と skip-worktree は一時 index では外す。どちらも Git に現物の確認を省略させるため、
 # 残すと検査が読んだ作業ツリーではなく index の古い内容を印に入れられる。外すのは複写した一時 index
 # だけで、実際の index の印は変えない。例外は `.devin/config.json` だけ: agent-sandbox が読み取り専用で

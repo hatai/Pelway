@@ -1,47 +1,45 @@
 #!/usr/bin/env python3
 # mise run verify の本体（#807）。前回の印を消してから 3 グループを並列に検査し、
 # すべて成功したときだけ、検証した作業ツリーの木の印を残す。
-import fcntl, os, stat, subprocess, sys
+import fcntl, os, stat, subprocess, sys, tempfile
 
+def note(message):
+    print(f"agent-verify-run: {message}", file=sys.stderr)
 
 def fail(message):
-    print(f"agent-verify-run: {message}", file=sys.stderr)
+    note(message)
     sys.exit(1)
-
 
 def resolve_git_dir():
     try:
         out = subprocess.check_output(["git", "rev-parse", "--git-dir"], stderr=subprocess.DEVNULL, text=True)
     except (OSError, subprocess.CalledProcessError):
         fail("gitdir を解決できません")
-    path = os.path.realpath(out.strip())
-    if not out.strip() or not os.path.isdir(path):
+    # Git の出力の行末だけを取る。パスに含まれる空白は削らない。
+    out = out[:-1] if out.endswith("\n") else out
+    out = out[:-1] if out.endswith("\r") else out
+    path = os.path.realpath(out)
+    if not out or not os.path.isdir(path):
         fail("gitdir を絶対パスに解決できません")
     return path
 
-
-def marker_snapshot(path):
+def poison(path):
     try:
-        st = os.stat(path, follow_symlinks=False)
-    except FileNotFoundError:
-        return None
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".pelway-verify-invalid.")
+        os.close(fd)
+        os.replace(tmp, path)
     except OSError as e:
-        return ("unreadable", e.errno)
-    return (st.st_dev, st.st_ino, st.st_mode, st.st_mtime_ns, st.st_size)
+        note(f"verify の失敗の印を残せません: {e}")
 
-
-# ロックの準備に失敗した実行でも、始める前からあった同じ印は次の push に使わせない。
-# 印は record が一時ファイルから置き換えるため、待っている間に現れた新しい印は別の検証の結果として残す。
-def invalidate_unchanged_marker(path, snapshot):
-    if snapshot is None or marker_snapshot(path) != snapshot:
-        return
+def remove_file(path, message):
     try:
         os.unlink(path)
     except FileNotFoundError:
-        pass
+        return True
     except OSError as e:
-        print(f"agent-verify-run: 前回の印を消せません: {e}", file=sys.stderr)
-
+        note(f"{message}: {e}")
+        return False
+    return True
 
 def open_lock(path):
     try:
@@ -58,39 +56,49 @@ def open_lock(path):
         return None, "verify のロックファイルが信頼できる通常ファイルでない"
     return fd, None
 
+def lock_or_fail(lock_fd, lock_path):
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return
+    except BlockingIOError:
+        note(f"同じ worktree の別の verify を待っています（{lock_path}）")
+    except (KeyboardInterrupt, OSError) as e:
+        fail(f"verify のロックを取れません: {str(e) or '中断されました'}")
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    except (KeyboardInterrupt, OSError) as e:
+        fail(f"verify のロックを取れません: {str(e) or '中断されました'}")
 
 def main():
     script_dir = os.path.dirname(os.path.realpath(__file__))
     git_dir = resolve_git_dir()
     lock_path = os.path.join(git_dir, "pelway-verify.lock")
     marker_path = os.path.join(git_dir, "pelway-verify-tree")
-    marker_before_lock = marker_snapshot(marker_path)
+    poison_path = os.path.join(git_dir, "pelway-verify-invalid")
     lock_fd, error = open_lock(lock_path)
     if error is not None:
-        invalidate_unchanged_marker(marker_path, marker_before_lock)
+        poison(poison_path)
         fail(error)
     try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
-    except (KeyboardInterrupt, OSError) as e:
+        lock_or_fail(lock_fd, lock_path)
+    except SystemExit:
         os.close(lock_fd)
-        invalidate_unchanged_marker(marker_path, marker_before_lock)
-        fail(f"verify のロックを取れません: {e or '中断されました'}")
-
-    if subprocess.run(["bash", os.path.join(script_dir, "agent-verify-invalidate")], check=False).returncode != 0:
+        poison(poison_path)
+        raise
+    if not remove_file(marker_path, "前回の印を消せません") or not remove_file(poison_path, "verify の失敗の印を消せません"):
+        poison(poison_path)
         sys.exit(1)
     verify = subprocess.run(
         ["mise", "run", "verify-lint", ":::", "verify-test", ":::", "verify-static"], check=False
     ).returncode
     if verify != 0:
         sys.exit(verify if verify > 0 else 1)
-
     # 印を書く子にもロックの fd を渡す。親が中断されても、record が終わるまでは
     # 後の検証が入らず、古い成功の記録が後の失敗を上書きする順を防ぐ。
     record = subprocess.run(
         ["bash", os.path.join(script_dir, "agent-verify-record")], pass_fds=(lock_fd,), check=False
     ).returncode
     sys.exit(record if record >= 0 else 1)
-
 
 if __name__ == "__main__":
     main()

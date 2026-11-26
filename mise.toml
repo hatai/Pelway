@@ -341,7 +341,7 @@ description = "開発環境の一括確認（3 グループは並列実行）"
 # verify には含めない（check / build タスク自体は残す）。
 # agent-verify-run は前回の印を消してから 3 グループを並列に検査し、すべて通ったときだけ
 # 検証した作業ツリーの木の印を残す（#807。agent-gh の push の verify ゲートが確かめる）。
-run = "python3 scripts/agent-verify-run"
+run = "python3 -I scripts/agent-verify-run"
 
 # cargo fmt / clippy と、ツールチェーン・hk.pkl の構文を確かめる。
 [tasks.verify-lint]

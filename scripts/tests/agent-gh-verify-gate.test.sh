@@ -6,7 +6,6 @@ set -uo pipefail
 AGENT_GH="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/agent-gh"
 RECORD="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/agent-verify-record"
 VERIFY_RUN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/agent-verify-run"
-INVALIDATE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/agent-verify-invalidate"
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 failures=()
@@ -94,10 +93,7 @@ push_role() {
 
 # --- 印の記録: 成功時は検証した作業ツリー（commit 後に HEAD になる木）の hash を残す ---
 setup_repo record
-(
-  cd "$REPO_DIR/work" || exit 1
-  bash "$RECORD" >/dev/null 2>&1
-)
+(cd "$REPO_DIR/work" && bash "$RECORD" >/dev/null 2>&1)
 rc=$?
 [[ "$rc" == 0 && -f "$(marker_file)" ]] || failures+=("record_clean: exit $rc or marker missing")
 [[ "$(cat "$(marker_file)" 2>/dev/null)" == "$(work_git rev-parse 'HEAD^{tree}')" ]] ||
@@ -105,10 +101,7 @@ rc=$?
 printf 'implementation\n' >"$REPO_DIR/work/code.txt"
 mkdir -p "$REPO_DIR/work/docs/worklogs"
 printf 'memo\n' >"$REPO_DIR/work/docs/worklogs/issue-807.md"
-(
-  cd "$REPO_DIR/work" || exit 1
-  bash "$RECORD" >/dev/null 2>&1
-)
+(cd "$REPO_DIR/work" && bash "$RECORD" >/dev/null 2>&1)
 rc=$?
 work_git add code.txt docs/worklogs/issue-807.md
 (cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m implementation)
@@ -126,10 +119,7 @@ work_git add tool.sh .gitignore
 work_git add -f ignored.txt
 (cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m implementation)
 work_git config core.fileMode false
-(
-  cd "$REPO_DIR/work" || exit 1
-  bash "$RECORD" >/dev/null 2>&1
-)
+(cd "$REPO_DIR/work" && bash "$RECORD" >/dev/null 2>&1)
 rc=$?
 marker_tree="$(cat "$(marker_file)" 2>/dev/null)"
 [[ "$rc" == 0 && "$(work_git ls-tree "$marker_tree" tool.sh | awk '{print $1}')" == 100755 ]] ||
@@ -147,10 +137,7 @@ work_git update-index --assume-unchanged assumed.txt
 work_git update-index --skip-worktree skipped.txt
 printf 'worktree content\n' >"$REPO_DIR/work/assumed.txt"
 printf 'skip worktree content\n' >"$REPO_DIR/work/skipped.txt"
-(
-  cd "$REPO_DIR/work" || exit 1
-  bash "$RECORD" >/dev/null 2>&1
-)
+(cd "$REPO_DIR/work" && bash "$RECORD" >/dev/null 2>&1)
 rc=$?
 marker_tree="$(cat "$(marker_file)" 2>/dev/null)"
 [[ "$rc" == 0 && "$(work_git ls-tree "$marker_tree" assumed.txt | awk '{print $3}')" == "$(work_git hash-object assumed.txt)" ]] ||
@@ -161,13 +148,12 @@ marker_tree="$(cat "$(marker_file)" 2>/dev/null)"
 # mise の verify タスクは、検査の前に前回の印を消し、3 グループがすべて成功したときだけ印を残す。
 # 同じ木で再実行が失敗したとき、古い印で push が通らないことを合成の依存タスクで確かめる。
 verify_section="$(sed -n '/^\[tasks\.verify\]/,/^\[tasks\.verify-lint\]/p' mise.toml)"
-grep -qF 'run = "python3 scripts/agent-verify-run"' <<<"$verify_section" ||
+grep -qF 'run = "python3 -I scripts/agent-verify-run"' <<<"$verify_section" ||
   failures+=("mise_verify_hookup: verify task does not call agent-verify-run")
 MISE_TOY="$ROOT/mise-verify-result"
 mkdir -p "$MISE_TOY/scripts"
 cp "$RECORD" "$MISE_TOY/scripts/agent-verify-record"
 cp "$VERIFY_RUN" "$MISE_TOY/scripts/agent-verify-run"
-cp "$INVALIDATE" "$MISE_TOY/scripts/agent-verify-invalidate"
 cat >"$MISE_TOY/scripts/verify-lint-toy" <<'EOS'
 #!/usr/bin/env bash
 if [[ -n "${VERIFY_TOUCH_BEFORE_EXIT:-}" ]]; then
@@ -209,10 +195,12 @@ ERR="$(cat "$ROOT/flaky-push.err")"
   failures+=("push_after_same_tree_verify_failure: remote ref changed")
 
 # 同じ worktree で成功と失敗の verify が重なっても直列になる。直列なら、後から始めた失敗が
-# 先の成功の記録を待ってから印を消すため、最後に印は残らない。
-(cd "$MISE_TOY" && VERIFY_SLEEP=2 MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-overlap-success.out" 2>&1) &
+# 先の成功の記録を待ってから印を消すため、最後に印は残らない。試験用タスクの到達を合図にする。
+overlap_started="$ROOT/mise-overlap-started"
+rm -f "$overlap_started"
+(cd "$MISE_TOY" && VERIFY_TOUCH_BEFORE_EXIT="$overlap_started" VERIFY_SLEEP=2 MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-overlap-success.out" 2>&1) &
 overlap_first=$!
-sleep 0.5
+for ((i = 0; i < 100; i++)); do [[ -e "$overlap_started" ]] && break; sleep 0.1; done
 (cd "$MISE_TOY" && VERIFY_DEPS_RC=1 MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-overlap-failure.out" 2>&1)
 overlap_failure_rc=$?
 wait "$overlap_first"
@@ -220,19 +208,35 @@ overlap_success_rc=$?
 [[ "$overlap_success_rc" == 0 && "$overlap_failure_rc" != 0 && ! -e "$MISE_TOY/.git/pelway-verify-tree" ]] ||
   failures+=("mise_verify_overlap: success=$overlap_success_rc failure=$overlap_failure_rc marker=$(test -e "$MISE_TOY/.git/pelway-verify-tree" && echo present || echo missing)")
 
-# ロックファイルが symlink なら、リンク先を切り詰めず、前回の印も再利用させない。
+# ロックファイルが symlink なら、リンク先を切り詰めない。前回の印は残っても、
+# verify の失敗の印があるため push では再利用できない。
 lock_path="$MISE_TOY/.git/pelway-verify.lock"
 marker_path="$MISE_TOY/.git/pelway-verify-tree"
+poison_path="$MISE_TOY/.git/pelway-verify-invalid"
 lock_target="$ROOT/verify-lock-target"
 printf 'important\n' >"$lock_target"
 rm -f "$lock_path"
 ln -s "$lock_target" "$lock_path"
-printf '0000000000000000000000000000000000000000\n' >"$marker_path"
+"$REAL_GIT" -C "$MISE_TOY" rev-parse 'HEAD^{tree}' >"$marker_path"
 (cd "$MISE_TOY" && MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-lock-symlink.out" 2>&1)
 rc=$?
-[[ "$rc" != 0 && "$(cat "$lock_target")" == important && ! -e "$marker_path" ]] ||
-  failures+=("verify_lock_symlink: rc=$rc target=$(cat "$lock_target" 2>/dev/null) marker=$(test -e "$marker_path" && echo present || echo missing)")
-rm -f "$lock_path"
+[[ "$rc" != 0 && "$(cat "$lock_target")" == important && -e "$marker_path" && -e "$poison_path" ]] ||
+  failures+=("verify_lock_symlink: rc=$rc target=$(cat "$lock_target" 2>/dev/null) marker=$(test -e "$marker_path" && echo present || echo missing) poison=$(test -e "$poison_path" && echo present || echo missing)")
+(cd "$MISE_TOY" && PELWAY_AGENT_SKIP_RESIGN=1 bash "$AGENT_GH" dev git push origin HEAD:refs/heads/agent/lock-poison >"$ROOT/lock-poison-push.out" 2>"$ROOT/lock-poison-push.err")
+RC=$?
+ERR="$(cat "$ROOT/lock-poison-push.err")"
+[[ "$RC" != 0 && "$ERR" == *'印を無効化できませんでした'* ]] ||
+  failures+=("push_lock_poison: not stopped: rc=$RC $ERR")
+rm -f "$lock_path" "$poison_path" "$marker_path"
+
+# gitdir のパスの末尾に空白があっても、Git が返した同じパスに印を書く。
+space_gitdir="$ROOT/gitdir-with-trailing-space "
+cp -a "$MISE_TOY/.git" "$space_gitdir"
+rm -f "$space_gitdir/pelway-verify-tree"
+(cd "$MISE_TOY" && GIT_DIR="$space_gitdir" MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-space-gitdir.out" 2>&1)
+rc=$?
+[[ "$rc" == 0 && -f "$space_gitdir/pelway-verify-tree" ]] ||
+  failures+=("verify_space_gitdir: rc=$rc marker=$(test -f "$space_gitdir/pelway-verify-tree" && echo present || echo missing)")
 
 # 親だけが中断されても record がロックを持ち続ける。record の確定を遅らせ、
 # 途中で再実行した失敗側が record の終了を待ってから印を消すことを確かめる。
@@ -256,7 +260,7 @@ exit "$rc"
 EOS
 cat >"$FAKE_PYTHON_BIN/python3" <<'EOS'
 #!/usr/bin/env bash
-[[ "${1:-}" != scripts/agent-verify-run || -z "${VERIFY_RUNNER_PID_FILE:-}" ]] || printf '%s\n' "$$" >"$VERIFY_RUNNER_PID_FILE"
+[[ "${1:-}" != -I || "${2:-}" != scripts/agent-verify-run || -z "${VERIFY_RUNNER_PID_FILE:-}" ]] || printf '%s\n' "$$" >"$VERIFY_RUNNER_PID_FILE"
 exec "$FAKE_PYTHON3_REAL" "$@"
 EOS
 chmod +x "$FAKE_MV_BIN/mv" "$FAKE_PYTHON_BIN/python3"
@@ -298,25 +302,27 @@ push_role missing dev -u origin HEAD
 # --- 検証した木と同じ HEAD は通る ---
 setup_repo exact
 printf 'implementation\n' >"$REPO_DIR/work/code.txt"
-(
-  cd "$REPO_DIR/work" || exit 1
-  bash "$RECORD" >/dev/null 2>&1
-)
+(cd "$REPO_DIR/work" && bash "$RECORD" >/dev/null 2>&1)
 work_git add code.txt
 (cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m implementation)
 push_role exact dev -u origin HEAD
 [[ "$RC" == 0 && "$(remote_ref agent/exact)" == "$(work_git rev-parse HEAD)" ]] ||
   failures+=("push_exact_marker: not pushed: rc=$RC $ERR")
 
+# gitdir に書けず印を無効化できない状態では、正しい印が残っていても止める。
+chmod a-w "$REPO_DIR/work/.git"
+push_role readonly_gate dev origin HEAD:refs/heads/agent/readonly-gate
+chmod u+w "$REPO_DIR/work/.git"
+[[ "$RC" != 0 && "$ERR" == *'印を無効化できない状態'* ]] ||
+  failures+=("push_readonly_gitdir: not stopped: rc=$RC $ERR")
+[[ -z "$(remote_ref agent/readonly-gate)" ]] || failures+=("push_readonly_gitdir: remote ref changed")
+
 # --- HEAD と印の差が docs/worklogs/ の下だけなら通す（実装コミットとメモコミットの両方） ---
 setup_repo worklogs
 printf 'implementation\n' >"$REPO_DIR/work/code.txt"
 mkdir -p "$REPO_DIR/work/docs/worklogs"
 printf 'memo\n' >"$REPO_DIR/work/docs/worklogs/issue-807.md"
-(
-  cd "$REPO_DIR/work" || exit 1
-  bash "$RECORD" >/dev/null 2>&1
-)
+(cd "$REPO_DIR/work" && bash "$RECORD" >/dev/null 2>&1)
 work_git add code.txt
 (cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m implementation)
 push_role worklogs_impl dev -u origin HEAD
@@ -335,10 +341,7 @@ mkdir -p "$REPO_DIR/work/crates/x/tests"
 printf 'same contents for rename detection\n' >"$REPO_DIR/work/crates/x/tests/foo.rs"
 work_git add crates/x/tests/foo.rs
 (cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m implementation)
-(
-  cd "$REPO_DIR/work" || exit 1
-  bash "$RECORD" >/dev/null 2>&1
-)
+(cd "$REPO_DIR/work" && bash "$RECORD" >/dev/null 2>&1)
 mkdir -p "$REPO_DIR/work/docs/worklogs"
 work_git mv crates/x/tests/foo.rs docs/worklogs/foo.rs
 (cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m 'move into worklogs')
@@ -350,10 +353,7 @@ push_role rename_escape dev -u origin HEAD
 # --- docs/worklogs/ の外が変わった HEAD には前の印を使わない ---
 setup_repo stale
 printf 'implementation\n' >"$REPO_DIR/work/code.txt"
-(
-  cd "$REPO_DIR/work" || exit 1
-  bash "$RECORD" >/dev/null 2>&1
-)
+(cd "$REPO_DIR/work" && bash "$RECORD" >/dev/null 2>&1)
 work_git add code.txt
 (cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m implementation)
 printf 'unverified change\n' >>"$REPO_DIR/work/code.txt"
