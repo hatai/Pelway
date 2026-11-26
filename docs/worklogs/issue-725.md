@@ -47,3 +47,15 @@
 5. 改善案: skill `review-pr` のレビュー本文に round 4 以降の must-fix の領域を書く決まりを足すかを別 Issue で検討する（どの指摘が停止条件に当たるかを実装担当の読み取りだけに残さないため）。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 5）
+
+対象 head: 12006098e8ef6b1328190ad3b4cbe4db46e198f4
+
+1. 詰まった箇所: 手順 9（Request changes）: round 4 以降に達したかを、数え直しうる現在のラウンド数と混ぜない記録が必要だった。指揮役だけがレビューを進める PR には実装担当の終わりの報告が無いため、報告を参照する形では判定できなかった。
+2. 曖昧だった文: 「指揮役自身の PR も含め、初回の付与と付け直しの前に、対象外であることを信頼できる記録で確認する手順を書いてください」（round 4 レビュー）
+3. 仮定と解釈: ラウンドサマリーは各ラウンドの結果への対応で必ず残る記録と解釈し、round 4 到達には現在値ではなく履歴の最大 `<R>` を使う。実装担当のいない PR では指揮役が同じ形のサマリーを残す。サマリーが読めない・未編集のものが無い・編集済みのものがあるときは、対象外とみなさず `needs-human` で人間に確かめる。QA の依頼は admin マージの判定から切り離し、正本の条件のうち admin マージの対象に当たらないことと QA の合格だけが欠けている PR を QA 待ちにする。同じ SHA の合格が出てから、admin マージの対象を hatai に回す。
+4. 足りなかった情報・検証手段: 文書の意味を判定する LLM judge はまだ無い。`verify-run.test.sh` は `/tmp` の所有者が `nobody`（uid 65534）の環境で失敗したが、変更を退避しなくても `TMPDIR=/dev/shm/pelway-verify-tmp` で同じテストが通ることを確かめたうえで、同じ `TMPDIR` で `mise run verify` → `exit=0`、`script-test: 61 tests ok`、`Finished in 185.78s`。`mise run pr-size` → `+147 / -44`、上限内。round 4 の claude 委託は停止条件のため中断済みで、レビュー投稿は無かった。
+5. 改善案: round 4 到達の判定（作成者・編集有無・最大 `<R>`）を conductor 用の helper に切り出し、手書きの API 照合の漏れを減らす。
+
+使ったスキル: implement-issue、write-pull-request、brainstorming
