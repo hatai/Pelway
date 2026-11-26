@@ -23,9 +23,10 @@ check() {
 }
 
 # 条件 (a): security=yes のレビューが gpt-6.2-sol の行に含まれている。
-# 委託のたびに使う材料に security の有無が加わっている。
+# 委託のたびに使う材料に security の有無が加わっている（上の effort の規則の材料に
+# 加える形で書かれている）。
 check a_materials .agents/skills/command-team/SKILL.md \
-  'security-review を行うかどうか、レビューの回数'
+  '上の材料（追加行数、高リスクかどうか、レビューの回数）に security-review を行うかどうかを加えて'
 check a_sol_row .agents/skills/command-team/SKILL.md \
   'security=yes のレビュー（Assigned 行に `security=yes` がある、または skill `review-pr` の手順 2 で security-review を行う条件のどれかに当たる）'
 
