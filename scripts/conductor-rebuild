@@ -230,7 +230,7 @@ printf '%s' "$STOP" | "$T3" thread send --wait "$from" - >/dev/null \
   || die "failed to stop the old conductor; the new conductor $to is waiting and the registration is unchanged"
 
 # 3. 新しい指揮役に引き継ぎを指示する
-START="あなたは新しい指揮役。skill command-team と docs/agents/conductor-context.md の「恒久交代」に従い、旧指揮役（スレッド $from）から引き継ぐ。引き継ぎ確認（GitHub の実状態、patrol-state、巡回記録、実行中スレッドの照合）を済ませて操作権限を受け取ったら、旧指揮役のスレッドを t3_thread_organize で settle し、巡回の scheduled task を作り直す（runbook の「指揮役の定期巡回（スケジュール起床）」）。確認が完了しない場合は権限を受け取らず、hatai に知らせる。"
+START="あなたは新しい指揮役。skill command-team と docs/agents/conductor-context.md の「恒久交代」に従い、旧指揮役（スレッド $from）から引き継ぐ。引き継ぎ確認（GitHub の実状態、patrol-state、巡回記録、実行中スレッドの照合）を済ませて操作権限を受け取ったら、旧指揮役のスレッドを t3_thread_organize で settle し、巡回の scheduled task を作り直し、patrol-state.json の conductor_thread_id を書き込み手順の --claim-conductor で自分のスレッド ID にする（runbook の「指揮役の定期巡回（スケジュール起床）」）。確認が完了しない場合は権限を受け取らず、hatai に知らせる。"
 printf '%s' "$START" | "$T3" thread send "$to" - >/dev/null \
   || die "the old conductor is stopped, but sending the handover to $to failed; send it by hand. The registration is unchanged"
 

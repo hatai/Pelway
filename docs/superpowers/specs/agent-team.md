@@ -117,7 +117,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
     - `ci-failed-twice`: `agent/` ブランチで verify が 2 回続けて失敗した（5 分ごとに `gh run list` で確かめる）
 - payload は `pelway.agent-watch/v1`。スレッド ID、ブランチ、`issue_number`（`agent/<番号>-` から取る）、`round`（スレッドの実行回数）、`report`（最後の返答が `キー: 値` 形式 8 行以内のときだけ、その本文）を含む
 - 同じ出来事からイベントを作るのは 1 回だけ。送れなかったものは送信待ちの列に残して送り直す（受け手には重複して届きうる）。受け手が直らない失敗（HTTP 400・404・413）を返したものは送り直さずに列から外す（受信箱には書かれる。受信箱に書けなかったものは、書けるまで状態に残して書き直す。上限 100 件で、超えたら古いものから捨てる）。送り直せる失敗が続く間は、送り直しの間隔を 30 秒から失敗のたびに倍にし、上限は 15 分（`docs/dev-environment.md`「pitchfork について」）。状態は `~/.local/state/pelway/agent-watch.json`（既定の場所。`XDG_STATE_HOME` を設定したときの場所は `docs/dev-environment.md`「pitchfork について」を参照）に置く
-- 同じ知らせを、T3 のスレッドとして動く指揮役のための受信箱（共有の git dir の `pelway/conductor-inbox.jsonl`）にも 1 行ずつ書き、ホストの登録ファイルに登録された指揮役のスレッドへ決まった文を送って起こす（Issue #555。形は `docs/agents/notify-payloads.md`「指揮役の受信箱」、動き方は `docs/dev-environment.md`「pitchfork について」）
+- 同じ知らせを、T3 のスレッドとして動く指揮役のための受信箱（共有の git dir の `pelway/conductor-inbox.jsonl`）にも 1 行ずつ書き、ホストの登録ファイルに登録された指揮役のスレッドへ決まった文を送って起こす（Issue #555。人間が立てたスレッドの知らせで起こすのは `failed`・`waiting`・`stalled`・報告のある `finished` のときだけで、それ以外は受信箱に書くだけ。Issue #727。形は `docs/agents/notify-payloads.md`「指揮役の受信箱」、動き方は `docs/dev-environment.md`「pitchfork について」）
 - 修正が何回目かは、実装スレッドがレビューの委託回数で数える（skill `implement-issue`）。同じ head は 1 ラウンドに数え、コンフリクトの解消を含まない main の取り込みだけで head が変わっても新しいラウンドにしない。ラウンドの上限は 4 回で、round 3 の must-fix が残れば round 4 には入らず止まる（別 Issue に回せる領域の指摘は除く。分類はレビュー役が行う）。round 4 に入るのは hatai が例外と判断した PR だけ。レビューの effort は、セキュリティと仕様の PR では 1 回目から上げておく（3 回目で改めて上げる運用はやめる）。人間のレビューによる修正（指揮役が `t3 thread send` で伝える）の回数も同じ上限に数える。レビューの `[文書のずれ]` の nit だけを直す round（skill `review-pr`・`implement-issue`）は、この回数に数えない（その後のレビューの委託も数えない）。印の nit だけを直す round は、この PR で通算 2 回まで。印の nit が残っていて通算 3 回目が要るときは（その前のレビューの判定によらず）、3 回目には入らず、止まる条件としてエスカレーションする
 
 ## 停止・迷走への対処
@@ -158,7 +158,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 
 - イベントごとの対応表は `docs/agents/grokbot-runbook.md`、毎サイクルの判断の手順は skill `command-team`
 - Grok Bot のルーティンとメモリには「この runbook を読んで従う」とだけ書く
-- 見張りと状態は、リポジトリのスクリプト（`pelway-agent-watch`、代行時は `scripts/conductor-watch.sh`）と `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。巡回状態の補助記録 `patrol-state.json` だけは、sandbox 内の指揮役からも読み書きできるよう、リポジトリの共有 git dir（`git rev-parse --git-common-dir`）内の `pelway/` に置く（git の管理対象外。Issue #477）
+- 見張りと状態は、リポジトリのスクリプト（`pelway-agent-watch`、代行時は `scripts/conductor-watch.sh`）と `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。巡回状態の補助記録 `patrol-state.json` と指揮役が持つ項目の記録 `patrol-items.json` は、sandbox 内の指揮役からも読み書きできるよう、リポジトリの共有 git dir（`git rev-parse --git-common-dir`）内の `pelway/` に置く（git の管理対象外。Issue #477）
 
 ## 改善ループ
 

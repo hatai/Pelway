@@ -20,6 +20,7 @@ failures=()
 MOCK="$ROOT/mock"
 mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$MOCK" "$ROOT/state/pelway"
 cp "$REPO/scripts/conductor-watch.sh" "$ROOT/repo/scripts/"
+cp "$REPO/scripts/patrol-state-update" "$ROOT/repo/scripts/"
 git init -q "$ROOT/repo"
 PELWAY="$ROOT/repo/.git/pelway"
 STATE="$PELWAY/patrol-state.json"
@@ -107,6 +108,7 @@ run_cycles() {
   ( if [[ -n "${MEM_KB:-}" ]]; then ulimit -v "$MEM_KB" || exit 97; fi
     MOCK="$MOCK" SLEEP_MAX="$1" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
       T3_BIN="$ROOT/bin/t3" PELWAY_BOARD_QUEUE_DIR="$ROOT/queue" \
+      PELWAY_WATCH_PS_UPDATE_TIMEOUT="${PS_TIMEOUT:-30}" \
       exec setsid bash "$ROOT/repo/scripts/conductor-watch.sh" ) >>"$ROOT/out.log" 2>&1 &
   WPID=$!
   for ((i = 0; i < 100; i++)); do kill -0 "$WPID" 2>/dev/null || break; /bin/sleep 0.1; done
@@ -219,16 +221,18 @@ run_cycles 1
 check "9: an old FIFO patrol-state does not block the migration (10 seconds)" in_time
 check "9: the patrol-state is written back as a regular file" written
 
-# 試験 10: 書き戻しの一時ファイルは、成功しても置き換えに失敗しても（置き場がディレクトリ）残らない。
+# 試験 10: 書き戻しの一時ファイルは、成功しても置き換えに失敗しても（置き場がディレクトリ）残らない。共通の書き込み手順 scripts/patrol-state-update が残すロックファイル `patrol-state.json.lock` は一時ファイルではないので数えない。
 reset; seed "$STATE"
 run_cycles 2
 check "10: no temporary file is left after a write-back" \
-  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name patrol-state.json | wc -l)" "0"
+  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name 'patrol-state.json*' | wc -l)" "0"
 reset; mkdir "$STATE"
-run_cycles 1
+run_cycles 2
 check "10: the cycle finishes within 10 seconds" in_time
 check "10: no temporary file is left after a failed replace" \
-  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name patrol-state.json | wc -l)" "0"
+  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name 'patrol-state.json*' | wc -l)" "0"
+check "10: the failed write-back is reported with its reason" has "$ROOT/out.log" "reason=write-failed"
+check "10: the failed write-back is reported once while it persists" eq "$(grep -c 'PATROL-STATE write-failed' "$ROOT/out.log")" "1"
 
 # 試験 11: 記録が JSON として読めても辞書でない（[]）なら、空の記録として扱い、巡回を止めずに書き戻す。
 reset; printf '[]\n' > "$STATE"
@@ -297,7 +301,7 @@ check "15: waiting_since survives three cycles" eq "$(since61)" "$SEEDED_SINCE"
 check "15: the skipped write-back is logged once" \
   eq "$(grep -c 'WATCHER patrol-state-write-skipped .*reason=too-large' "$ROOT/out.log")" "1"
 check "15: no temporary file is left" \
-  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name patrol-state.json | wc -l)" "0"
+  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name 'patrol-state.json*' | wc -l)" "0"
 seed "$STATE"
 run_cycles 1
 check "15: the write-back resumes once the record fits" has "$ROOT/out.log" "WATCHER patrol-state-write-recovered"
@@ -318,7 +322,7 @@ check "16: the deeply nested record is kept byte-identical" cmp -s "$STATE" "$RO
 check "16: the conductor's items survive three cycles" eq "$(task_id)" "seeded"
 check "16: waiting_since survives three cycles" eq "$(since61)" "$SEEDED_SINCE"
 check "16: no temporary file is left" \
-  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name patrol-state.json | wc -l)" "0"
+  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name 'patrol-state.json*' | wc -l)" "0"
 
 # 試験 17: 読み取りはできるが整形で Python の再帰の上限を超える記録（2000 段の入れ子。読み取り上限より十分小さい）
 # でも、整形の例外で巡回を止めない。3 周回しても例外を出さず、理由の行を 1 回だけ出し、置き換えずに読めていた
@@ -334,7 +338,33 @@ check "17: the deeper record is kept byte-identical" cmp -s "$STATE" "$ROOT/deep
 check "17: the conductor's items survive three cycles" eq "$(task_id)" "seeded"
 check "17: waiting_since survives three cycles" eq "$(since61)" "$SEEDED_SINCE"
 check "17: no temporary file is left" \
-  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name patrol-state.json | wc -l)" "0"
+  eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name 'patrol-state.json*' | wc -l)" "0"
+
+# 試験 18: 共通の書き込み手順がタイムアウト内に応答しない回も、例外で巡回が止まらず、書き戻せなかった回と
+# 同じく理由の通知を出して見張り自身の state.json の保存まで進む（subprocess.run の TimeoutExpired は
+# 終了コードでの失敗と同じ扱い。起動失敗の OSError も同じ except に入る）。
+reset; seed "$STATE"
+cat > "$ROOT/repo/scripts/patrol-state-update" <<'EOF'
+import time
+time.sleep(60)
+EOF
+PS_TIMEOUT=1 run_cycles 2
+PS_TIMEOUT=""
+check "18: the cycles finish within 10 seconds" in_time
+check "18: the timed-out write-back is reported with its reason" has "$ROOT/out.log" "reason=write-failed"
+check "18: the timeout is logged as an exception, not an exit code" \
+  has "$ROOT/out.log" "PATROL-STATE write-failed exc=TimeoutExpired"
+check "18: the same failure is reported once while it persists" \
+  eq "$(grep -c 'PATROL-STATE write-failed' "$ROOT/out.log")" "1"
+check "18: the watch still saves its own state" \
+  python3 -I -c 'import json,sys; json.load(open(sys.argv[1]))["patrol_at"]' "$ROOT/state/pelway/conductor-watch/state.json"
+check "18: the throttling state is saved for the next cycle" \
+  python3 -I -c 'import json,sys
+s=json.load(open(sys.argv[1]))
+w=s.get("ps_write_skipped")
+sys.exit(0 if isinstance(w, dict) and w.get("reason") == "write-failed" else 1)' "$ROOT/state/pelway/conductor-watch/state.json"
+check "18: the unchanged patrol-state record is kept" eq "$(task_id)" "seeded"
+cp "$REPO/scripts/patrol-state-update" "$ROOT/repo/scripts/"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

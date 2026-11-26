@@ -9,6 +9,15 @@ use crate::parse::parse_utc_epoch;
 /// 実行中のまま更新がないとき `stalled` にするまでの秒数。
 pub const NO_ACTIVITY_SECS: i64 = 45 * 60;
 
+/// JSON の値を、文字列なら `Some`、それ以外（欠落・null・数値など）は `None` にする。
+/// `createdBy` の型が変わっても一覧・詳細の読み取り自体は失敗させず、立て手不明に倒すため。
+fn as_opt_string<'de, D>(d: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<serde_json::Value>::deserialize(d)?.and_then(|v| v.as_str().map(str::to_string)))
+}
+
 /// `t3 thread list --json` の 1 要素。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ListedThread {
@@ -17,6 +26,11 @@ pub struct ListedThread {
     pub status: String,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
+    /// スレッドの立て手（`createdBy`。`"agent"` はエージェント、それ以外は人間として扱う。
+    /// `docs/agents/grokbot-runbook.md` の shared-worktree と同じ見分け）。項目が無い・
+    /// 文字列でないときは `None`（立て手不明）。
+    #[serde(default, rename = "createdBy", deserialize_with = "as_opt_string")]
+    pub created_by: Option<String>,
 }
 
 /// `t3 thread show --json` から読んだスレッドの詳細。
@@ -32,6 +46,8 @@ pub struct ThreadDetail {
     pub run_count: u32,
     pub pending_requests: u32,
     pub last_assistant_text: Option<String>,
+    /// `ListedThread::created_by` と同じ項目を詳細からも読む（無い・読めないときは `None`）。
+    pub created_by: Option<String>,
 }
 
 /// スレッドごとに覚えておく前回の値。
@@ -63,8 +79,18 @@ pub struct State {
     pub outbox_backoff: Option<crate::outbox::Backoff>,
     /// 指揮役の受信箱に書けなかった payload（古い順）。次の周回で、新しい知らせより先に書き直す。
     /// `None` はこの項目の無い更新前の版の状態で、送信待ちの列の知らせを受信箱に書けたかが分からない。
+    /// 要素は payload そのものに留める。別の形に包むと、更新前の版に戻したときに
+    /// 包んだ形のまま受信箱に書かれて、読み手が拾えない行になる。
     #[serde(default)]
     pub inbox_pending: Option<Vec<serde_json::Value>>,
+    /// `inbox_pending` に残した知らせの元のスレッドの立て手（thread_id → `createdBy`）。
+    /// 追記に失敗した時点で判明していた立て手を残す。残さないと、追記をやり直す回では
+    /// 完了済みスレッドの詳細を取り直さないため、立て手不明として起こす側に倒れてしまう。
+    /// 立て手は payload に入れずこの別項目に持つ（上の `inbox_pending` の形の約束）。
+    /// キューから外れたスレッドの項目（全部書けた・上限で外れた）は消し、キューに残る
+    /// 知らせの元のスレッドの分だけを残す。
+    #[serde(default)]
+    pub inbox_pending_creators: BTreeMap<String, String>,
     /// 前回指揮役を起こしたときの、指揮役の既読の位置（補助記録の `inbox_offset`）。
     /// 既読の位置がここから進むまで、重ねて起こさない。
     #[serde(default)]
@@ -207,6 +233,7 @@ mod tests {
             id: id.into(),
             status: status.into(),
             updated_at: updated_at.into(),
+            created_by: None,
         }
     }
 

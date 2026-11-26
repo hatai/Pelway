@@ -15,8 +15,9 @@ MOCK="$ROOT/mock"
 QUEUE="$ROOT/queue"
 mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$MOCK" "$ROOT/state" "$QUEUE"
 
-# 本物の conductor-watch.sh をコピーした偽リポジトリ（scripts/agent-gh をモックに差し替える）
+# 本物の conductor-watch.sh と patrol-state-update（書き戻しの共通手順）をコピーした偽リポジトリ（scripts/agent-gh をモックに差し替える）
 cp "$REPO/scripts/conductor-watch.sh" "$ROOT/repo/scripts/"
+cp "$REPO/scripts/patrol-state-update" "$ROOT/repo/scripts/"
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env bash
 # モック: 巡回の取得は常に空（キュー処理とは無関係）。

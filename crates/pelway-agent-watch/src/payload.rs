@@ -56,6 +56,7 @@ mod tests {
             run_count,
             pending_requests: 0,
             last_assistant_text: last.map(Into::into),
+            created_by: None,
         }
     }
 
