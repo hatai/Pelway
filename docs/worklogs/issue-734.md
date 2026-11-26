@@ -57,3 +57,15 @@
 5. 改善案: `mise.toml` の `[tasks.verify-static]` の上のコメントに「中身を変えたら `docs/dev-environment.md` の CI の表も直す」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（PR-2 round 2）
+
+対象 head: 4d89a29e0ec092619c831beef106592d39197af2
+
+1. 詰まった箇所: #743 のマージの後、`origin/main` を merge で取り込み、PR の base を `agent/734-client-tooling` から main に替えた。衝突は無かった。`verify.yml` は base が main の PR だけで動くので、ここまで #744 の必須チェックは走っていなかった。
+2. 曖昧だった文: 「`registerOctaneElectronMain` を呼んでいない」（Issue #734 の受け入れ条件）。README の注意書きにも関数名は出ないので、`git grep` が何も出さないことで確かめられる。
+3. 仮定と解釈: #743 で入った `ignoreScripts = true` の下でも、Electron 45 は初めて起動したときに本体を取ってくる（`Downloading Electron binary...`）。postinstall に頼らないので、`ignoreScripts` と両立する。
+4. 足りなかった情報・検証手段: 依存を新しいキャッシュで入れ直したあと、ビルド版の窓をデバッグポートから読み、文言と、画面から見えるのが `invoke`/`on` だけであることを確かめ直した（WSLg）。
+5. 改善案: `docs/agents/grokbot-runbook.md` の分割の節に「積んだ PR は base が main でないあいだ必須チェックが走らないので、親のマージの後に base を main に替えてからレビューを委託する」を足す。
+
+使ったスキル: `.agents/skills/implement-issue`
