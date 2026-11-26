@@ -40,6 +40,11 @@ check b_example_command .agents/skills/review-pr/SKILL.md \
 check b_example_no_command .agents/skills/review-pr/SKILL.md \
   'error: 手順 <番号> <節の名前>: <満たせなかった完了の基準>（失敗したコマンドなし）'
 
+# 条件 (b)-4: 既存の定型の error 行（設定の不備・wrong runtime・checks timeout）が
+# 新しい 2 形式より優先すると明記されている。
+check b_precedence .agents/skills/review-pr/SKILL.md \
+  '既存の定型を優先し、この 2 形式を当てはめない'
+
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
   exit 1
