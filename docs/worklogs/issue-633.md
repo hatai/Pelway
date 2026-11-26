@@ -165,3 +165,16 @@ PR: #735
 試験の更新・追加: 「interval past the limit: logs the last-read values」「first read at zero limit: logs the killed-read values」を追加（計 177 件 pass）
 
 push 後のローカル verify で `term-ignoring read killed: returns after the grace` が 1 度落ちた（cargo test との並走負荷で、打ち切り経路の戻り ~1.6 秒に対し上限 4 秒がタイトすぎた）→ 5 件の時間チェック（read/retry read/first read/reread killed、term-ignoring）の偽の遅延を 8 秒・戻り上限を 6 秒に広げた。打ち切り経路は遅延の完了を待たないため試験時間は増えず、打ち切られない経路（8 秒超）との区別は保たれる
+
+## 実装者メモ（round 11）
+
+対象 head: （push 後に記入）
+PR: #735
+
+レビュー指摘（run 7185624610 codex request-changes・must-fix 1、run 7185625223 claude request-changes・must-fix 1。ともに head 6e4f22141d9253ebcd254b5b4efd42924394ea2b、同一趣旨の指摘）への対応。
+
+1. 詰まった箇所: なし
+2. must-fix の対応:
+   - `scripts/tests/conductor-rebuild.test.sh`:224（両者同一趣旨）e705d4dc で広げた 5 件の時間検査（224・240・255・274 行は 3 秒未満 → 6 秒未満、313 行は 4 秒未満 → 6 秒未満。偽の遅延は 4・6 秒 → 8 秒）が「確かめ方を弱める変更」に当たるのに PR 本文の見出しに載っていない → 見出しの下に 5 件の行を追加。変更前後の閾値・偽の遅延・理由（`cargo test` との並走負荷で打ち切り経路の戻りが 4 秒の上限を超えた）・確かめが失われない理由（打ち切られない経路は 8 秒以上かかるので 6 秒未満との区別は保たれる）を記載。広げ方そのものは妥当との評価で、コードの変更はなし
+3. nit の対応: なし（claude の `interval past the limit` の負荷への余裕の指摘は印なし → 直さない）
+4. 仮定と解釈: なし
