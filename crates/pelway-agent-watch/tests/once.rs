@@ -2475,3 +2475,80 @@ fn quiet_lines_after_reading_do_not_revive_pending_wake() {
         stderr(&out)
     );
 }
+
+#[test]
+fn pending_wake_is_not_resent_after_failure_and_stays_quiet() {
+    let sb = Sandbox::new("wake-839-pending-fail");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let run = |sb: &Sandbox| {
+        let out = sb
+            .command(&["--once"])
+            .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "300")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "stderr: {}", stderr(&out));
+        out
+    };
+    let send_calls = |sb: &Sandbox| {
+        fs::read_to_string(sb.t3_calls())
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| l.starts_with("t3 thread send"))
+            .count()
+    };
+    run(&sb);
+    assert_eq!(send_calls(&sb), 1);
+    // 最短間隔の内に b の failed。指揮役はまだ読んでいない（既読は 0 のまま）
+    b_fails_at(&sb, "2026-11-10T16:30:00Z");
+    run(&sb);
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
+
+    // 間隔がたったが既読が進んでいない: 印は残し、印だけを確かめる周では理由のログを出さない
+    backdate_last_wake(&sb);
+    for _ in 0..2 {
+        let out = run(&sb);
+        assert!(!stderr(&out).contains("WAKE"), "{}", stderr(&out));
+    }
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    assert_eq!(send_calls(&sb), 1);
+
+    // 既読が進んだ周で送りに失敗した: 印を消し、次の周回で送り直さない
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    sb.fake("t3-send-fail", "");
+    let out = run(&sb);
+    assert!(stderr(&out).contains("WAKE failed"), "{}", stderr(&out));
+    assert!(read_state(&sb)["wake_pending"].is_null());
+    let out = run(&sb);
+    assert!(!stderr(&out).contains("WAKE"), "{}", stderr(&out));
+    assert_eq!(send_calls(&sb), 2);
+}
+
+#[test]
+fn pending_wake_is_dropped_when_unregistered() {
+    let sb = Sandbox::new("wake-839-pending-unregistered");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let run = |sb: &Sandbox| {
+        sb.command(&["--once"])
+            .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "300")
+            .output()
+            .unwrap()
+    };
+    run(&sb);
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    b_fails_at(&sb, "2026-11-10T16:30:00Z");
+    run(&sb);
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    // 登録を外した（代行の終わり）: 後に回した起こしも取り消す
+    fs::remove_file(
+        sb.root
+            .join("home/.config/pelway-agent-notify/conductor-thread-id"),
+    )
+    .unwrap();
+    let out = run(&sb);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(read_state(&sb)["wake_pending"].is_null());
+}

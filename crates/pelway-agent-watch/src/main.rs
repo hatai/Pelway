@@ -381,10 +381,10 @@ impl Watcher {
             }
         } else if self.state.wake_pending.is_some() {
             // 新しい知らせの無い周回でも、後に回した起こし（起こし待ちの印）を確かめる（Issue #839）。
-            // 受信箱の行数は、何も書かずに追記の手続きで数える
-            match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &[]) {
-                Ok(total) => self.maybe_wake(&t3, total, &[]),
-                Err(e) => eprintln!("agent-watch: WAKE skipped reason=inbox-unreadable {e}"),
+            // 受信箱の行数は、何も書かずに追記の手続きで数える。書けない受信箱は、知らせを書く
+            // 周回で `inbox append failed` として出るので、ここでは印を残したまま黙って次の周回に回す
+            if let Ok(total) = io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &[]) {
+                self.maybe_wake(&t3, total, &[]);
             }
         }
 
@@ -474,19 +474,29 @@ impl Watcher {
     /// スレッドの立て手。Issue #727）で、起こし待ちの印だけを確かめる周では空。
     /// 判定は `classify_notices`（指揮役自身の知らせ・同じ承認待ちの繰り返しを除く）と
     /// `decide_wake`（最短間隔・既読の位置）で行う（Issue #839）。
-    /// 失敗しても記録を進めず、次の機会に改めて試みる（再送の列は持たない）。
+    /// 送れなかったときは記録を進めず、起こし待ちの印も消し、次の新しい知らせで改めて試みる
+    /// （再送の列は持たない）。印だけを確かめる周（`notices` が空）では、起こさなかった理由の
+    /// ログを出さない（印が残る間、周回ごとに同じ行が増えないように）。
     fn maybe_wake(&mut self, t3: &std::path::Path, inbox_lines: u64, notices: &[WakeNotice]) {
+        let log = |reason: &str| {
+            if !notices.is_empty() {
+                eprintln!("agent-watch: WAKE skipped reason={reason}");
+            }
+        };
         // 宛先はホスト側の登録ファイルからだけ読む（sandbox から書ける補助記録の値は使わない）
         let registered = match io::read_conductor_file(&io::conductor_file()) {
-            Ok(Some(text)) => match parse_conductor_file(&text) {
-                Some(id) => id,
-                None => return, // 登録が空（登録が無いのと同じ）
-            },
-            Ok(None) => return, // 登録が無い（指揮役が T3 のスレッドとして動いていない）
+            Ok(Some(text)) => parse_conductor_file(&text),
+            Ok(None) => None,
             Err(_) => {
-                eprintln!("agent-watch: WAKE skipped reason=conductor-file-unreadable");
+                log("conductor-file-unreadable");
                 return;
             }
+        };
+        let Some(registered) = registered else {
+            // 登録が無い・空（指揮役が T3 のスレッドとして動いていない）。起こす宛先が無いので、
+            // 後に回した起こしも取り消す
+            self.state.wake_pending = None;
+            return;
         };
         // 前回の起こしの記録は、そのときの宛先にだけ使う（指揮役が替わったら一度も起こしていない扱い）
         let same_target = self.state.last_wake_thread_id.as_deref() == Some(registered.as_str());
@@ -512,18 +522,18 @@ impl Watcher {
                 Ok(info) => info.inbox_offset,
                 Err(e) if e.contains("too large") => {
                     // 書きかけ・壊れているのと見分けられるよう、上限超えは別の理由で出す
-                    eprintln!("agent-watch: WAKE skipped reason=patrol-state-too-large");
+                    log("patrol-state-too-large");
                     return;
                 }
                 Err(_) => {
-                    eprintln!("agent-watch: WAKE skipped reason=patrol-state-unreadable");
+                    log("patrol-state-unreadable");
                     return;
                 }
             };
         // 既読の位置は受信箱の行数を超えられない。超える値（書き損じ・sandbox からの書き換え）は
         // 使わず保存もしない（保存すると、補助記録を直しても以後の起こしが止まり続けるため）
         if inbox_offset > inbox_lines {
-            eprintln!("agent-watch: WAKE skipped reason=offset-out-of-range");
+            log("offset-out-of-range");
             return;
         }
         let history = WakeHistory {
@@ -552,7 +562,11 @@ impl Watcher {
                     self.state.last_wake_thread_id = Some(thread_id);
                     self.state.wake_pending = None;
                 }
-                Err(why) => eprintln!("agent-watch: WAKE failed {why}"),
+                Err(why) => {
+                    eprintln!("agent-watch: WAKE failed {why}");
+                    // 送り直さない（次の新しい知らせで改めて試みる）
+                    self.state.wake_pending = None;
+                }
             },
             WakeDecision::Cooldown => {
                 if self.state.wake_pending.is_none() {
@@ -569,10 +583,10 @@ impl Watcher {
             }
             WakeDecision::NoConductor | WakeDecision::Nothing => {}
             WakeDecision::InvalidThreadId => {
-                eprintln!("agent-watch: WAKE skipped reason=invalid-thread-id");
+                log("invalid-thread-id");
             }
             WakeDecision::NotYetRead => {
-                eprintln!("agent-watch: WAKE skipped reason=not-yet-read");
+                log("not-yet-read");
             }
         }
     }
