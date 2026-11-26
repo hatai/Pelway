@@ -178,3 +178,6 @@ PR: #721
 ## 実装者メモ（round 17）
 対象 head: 89f5baa（レビュー run 7179213078＝claude の must-fix 1 件・nit 2 件）。must-fix: 公開前に巡回記録に残す決まりから §651 の引き継ぎ（指揮役が items の欠落を直して公開する経路）が抜けていた → §651 に「欠落を直して公開するときは §610 と同じく公開の前に巡回記録に残して結果を追記する」を追加し、初回判定の対象を「移行・復旧・引き継ぎでの作り直しのどれでも」に拡げた。復旧の作り直しでも公開のあと旧置き場の items を消す段を追加（旧記録は復活しうるため記録が本体）。nit: 「決まりが入る前の移行」の文言は patrol-items.json と同じ変更で入るため生じないとして外し「記録の欠落と区別できない」に改めた。PR 本文の worklog の round 範囲・対象 head を更新
 使ったスキル: .agents/skills/implement-issue
+## 実装者メモ（round 18）
+対象 head: db3167e（レビュー run 7179485181＝claude の must-fix 1 件・nit 3 件）。must-fix: ふだんの操作（印・組・return_status など）で patrol-items.json が無い回に items へ書くと、ファイルが記録無し・旧置き場残しのまま直接できる経路が残っていた → §608 に「無い・読めない回は直接作らず、先に移行（積極的に確かめられるとき）か復旧の作り直しを行う」を追加し、§610 の初回判定の対象を「公開する経路はすべて記録を残す決まり」に拡げた。nit: specs/agent-team.md に patrol-items.json の置き場を追記（「だけは」が patrol-state.json だけを指していた）。PR 本文の worklog 範囲・実装コミット・runbook の項を head に揃えた。round 16〜17 でテストの関数定義・変数代入を 1 行にまとめたのは行数調整（検査とアサーションは不変）
+使ったスキル: .agents/skills/implement-issue
