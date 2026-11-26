@@ -25,3 +25,4 @@
 3. nit（`PELWAY_NOTIFY_FNOX_CONFIG` の空文字・相対パス、鍵 dir の `mkdir -p`）: agent-watch と同じく絶対パスのみ受け付ける形に揃え、それ以外は警告して既定の場所に作る。`mkdir -p` は設定ファイルと age 鍵の両方の親に効かせた（REVIEW 側も同じ形だったので同じ直し）。
 4. nit（移し替えループの pipefail 不在）: `get` の成否を先に確かめる形に直した（`pipefail` は対話シェルの状態を変えるので、値を一旦変数に受けて失敗時に止める形）。`set` 側の失敗は `set -e` の無い対話シェルでは検知できないままだが、`fnox set` 自体の成否は各イテレーションで目に見える形（終了コード）で残る。
 5. 確かめたこと: `masks` に `pelway-agent-notify` を足しても壊れるものが無いことは上記の読み手の確認で裏付けた。`.devin/config.json` など JSON の deny の書式は既存行に揃えた。シェルcheck・cargo test・JSON の構文は下の検証で通す。
+6. 詰まった箇所（2 回目の main 衝突）: main の d1c177fa（PR #830）が同じ試験 pin を更新したが、claude のモデル一覧が `"claude-opus-5-5". "claude-sonnet-5-5"` とピリオドで TOML・Python ともに構文が壊れており、main の verify は再び赤。取り込みのコンフリクト解消でカンマのこちら側を採用したため、この PR のマージで main の赤も直る（マージコミット 6bff0875）。
