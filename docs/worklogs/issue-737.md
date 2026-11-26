@@ -2,7 +2,7 @@
 
 ## 実装者メモ（round 1）
 
-対象 head: f279cc907d0e8a3469999c82969bb97330b5194a
+対象 head: 20c3296acf292bab2fafc7772f5a969b98e1f47b
 
 1. 曖昧だった文: 「空・相対パスなど不正な値が渡されたときの挙動」は受け入れ条件が「既定に戻す」か「送らない（reason=no-secret）」かの選択を委ねていた。後者を採った（`notify_fnox_config()` が `None` を返し、`send` は秘密が無いときと同じ経路で `mode=not-sent reason=no-secret` になる）。前者は、typo のパスに値を載せたまま送信が続く気づきにくさがあり、退避させる方が安全と判断した。選択は `io.rs` の doc コメントと `docs/dev-environment.md` の両方に書いた。
 2. 仮定と解釈: 「絶対パス」の判定は `Path::is_absolute` で行い、値が空文字列・相対パスのときは設定として使わない（既定にも戻さない）。未設定と「セットしたが不正」は区別される（未設定 → 既定、不正 → 送らない）。エージェントが書き換えられる環境変数で相対パスを許すと、起動元の cwd によって指す場所が変わるため。
@@ -10,5 +10,6 @@
 4. 詰まった箇所: `agent-accounts.sh` で、すでに `[providers.age]` 形式の通知設定がある環境を再実行したときの扱い。ウィザードが無断で鍵の形式を書き替えると値が取り出せなくなるので、書き替えず警告だけ出して `docs/dev-environment.md` の移し替え手順に誘導する形にした（同じステージで `providers.notify_age` の有無を見て登録の可否を決める）。
 5. 足りなかった情報・検証手段: `fnox set` で `if_missing = "ignore"` のような既存の secret 定義の属性を保ったまま再登録する手段は確認できなかった。`fnox set` は `{ provider, value }` の形で書くため、移し替えの手順でもその形になる。`agent-watch` は `fnox get` で直接読むので `if_missing` の有無は送信の動作に影響しないが、`fnox exec` 経由で読む運用があれば挙動が変わる。
 6. 改善案: `notify_fnox_config()` は送信のたびに環境変数を読み直す実装にした。無効値のときに起動時に 1 回だけ警告を出す手もあるが、起動中に直された場合に気づけない。読み直す形なら環境変数の修正が次の送信でそのまま効く。
+7. 詰まった箇所: 手順 6: push 後の必須チェックで `scripts/tests/agent-team-config.test.sh` の試験 3（instance names and models match current ops）が落ちた。原因はこの PR の変更ではなく、main の 7c36a927（Update agent-team.toml）が `agent-team.toml` のモデル一覧を変えたのに試験内の pin を更新しなかったため（main 自身の verify も同じ理由で落ちている。PR の CI は merge ref を検査するためこの PR でも落ちる）。main を取り込んだうえで pin を登録済みの新しい値（`zai-coding-plan/glm-5.4`・`swe-2-1-high`・`claude-opus-5-5`/`claude-sonnet-5-5`/`claude-haiku-5-5`）に追従させ、main の赤の直しもこの PR に含めた。
 
 使ったスキル: implement-issue
