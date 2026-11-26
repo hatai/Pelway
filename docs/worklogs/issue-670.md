@@ -92,12 +92,24 @@ PR: #679
 
 ## 実装者メモ（round 10）
 
-対象 head: 31c163014c8f9436f5e8ad9b986ac16c4b6d81d1
+対象 head: 31c16301a42ffbb682b6a259226864b4d2836370
 
 1. 詰まった箇所: 手順 6: 前回まで使っていた `/tmp/opencode/pelway-impl-670` の worktree が /tmp の掃除で消えていた。ブランチを checkout 済みの T3 の worktree（`agent-670-thread-contac-32364811e97d5c13`・round 6〜9 を進めたもの）は読み取り専用で merge を書けなかったため、`git worktree add --detach` で `/tmp/opencode/pelway-impl-670` を d1c24a5e から作り直し、merge・解消・verify を行い `HEAD:agent/670-thread-contacts-ledger` 指定で push する
 2. 曖昧だった文: 「Bring the checked-out branch up to date with `main` using this repository's convention, resolve every conflict while preserving the intent of both sides」（T3 のコンフリクト通知）
 3. 仮定と解釈: トップレベル項目の表の衝突（main 側の `conductor_thread_id`・`anomalies`・`needs_conductor_claim` の 3 行と、こちらの `thread_contacts` 行が同じ末尾位置に追加）は両側残しで解決した（main の 3 行の後に `thread_contacts` 行を置く）。並行の round 6〜9 のコミット（1fc9d50d の main 取り込み・f38d4588・d1c24a5e）は代替スレッドによるもので、内容は破棄せずそのまま引き継いだ
-4. 足りなかった情報・検証手段: 代替スレッドの round 6〜9 のうち round 6〜8 のメモ本文（worklog は round 9 まで存在）。merge コミット 1fc9d50d の衝突解消の意図はコミットメッセージから読んだ
+4. 足りなかった情報・検証手段: 代替スレッドの round 6〜9 のうち round 6・8 のメモ本文（worklog には round 1〜5・7・9 のメモがあり、round 6・8 のメモは無い）。merge コミット 1fc9d50d の衝突解消の意図はコミットメッセージから読んだ
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「作業 worktree が消えた場合は `git worktree add --detach` で再作成し、push は `HEAD:<ブランチ>` 指定で行う」を足す
+
+使ったスキル: implement-issue
+
+## 実装者メモ（round 11）
+
+対象 head: （実装コミットの push 後に記入）
+
+1. 詰まった箇所: なし。review round 10（codex・claude とも approve・must-fix 0）の印つき nit 4 件（通算 2 回目の印 nit の round）に対応した
+2. 曖昧だった文: 「docs/worklogs/issue-670.md:95 の「対象 head」は完全 SHA 31c16301a42ffbb682b6a259226864b4d2836370 が解決可」（review round 10 codex の nit）
+3. 仮定と解釈: メモ round 10 の対象 head は SHA を打ち間違えていた（31c163014c8f9… 正しくは 31c16301a42ff…）ため完全 SHA に直した。「worklog は round 9 まで存在」は round 6・8 のメモが無い事実と合わなかったため「round 1〜5・7・9 のメモがあり、round 6・8 のメモは無い」に直した。runbook の帳簿の保持の文言は「通常の書き戻しの場合」に限ると明記し、読めない記録の回に巡回スクリプトが新しい記録で置き換える例外（トップレベル項目の表の前の段落）を参照した
+4. 足りなかった情報・検証手段: 印つき nit の round の通算回数（round 9 が 1 回目・この round が 2 回目で、上限の 2 回に収まる）の数え方。PR 本文の行数は merge-base からの差分で数え直した
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 5 に「対象 head は `git rev-parse HEAD` の出力を写す（手打ちしない）」を足す
 
 使ったスキル: implement-issue
