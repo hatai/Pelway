@@ -85,7 +85,7 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 
 `agent-team.toml`（共有の担当登録情報）は git 追跡ファイルだが、worktree の基点が古いと worktree に無いことがある。その場合 conductor-watch.sh が枠を読めず `SLOTS` を出せなくなる。worktree 作成時に `scripts/worktree-setup` が本体の checkout から揃える:
 
-- **T3 Code**: `t3.json` の `runOnWorktreeCreate` アクション `worktree-setup` が worktree 作成時に `scripts/worktree-setup` を実行する（`async: false`。`T3CODE_PROJECT_ROOT` が本体の checkout、`T3CODE_WORKTREE_PATH` が worktree、実行の cwd は worktree）。T3 のアクションはマシンごとにインポートするため、**環境を構えたら Settings → Projects → Actions で `t3.json` のアクションを取り込む**（一度取り込んだ環境では後続の t3.json の変更は自動では反映されないため、変えたら取り込み直す）
+- **T3 Code**: `t3.json` の `runOnWorktreeCreate` スクリプト `worktree-setup` が worktree 作成時に走る（`async: false`）。command は `"${T3CODE_PROJECT_ROOT:?}/scripts/worktree-setup"` と絶対パスで指定してあり、**実行されるのは常に本体の checkout にある版**で、worktree 側（PR の head）に置かれた `scripts/worktree-setup` はアクションからは実行しない。レビュー・修正ラウンドの worktree は PR の head から作られるため、worktree 内のファイルをホスト権限で動かすと PR のコードがそのまま sandbox の外で走ってしまう — この回避として本体の checkout を信頼できる版に保つ前提とし、アクションはそこだけを実行する（`T3CODE_PROJECT_ROOT` が本体の checkout、`T3CODE_WORKTREE_PATH` が worktree）。T3 のアクションはマシンごとにインポートするため、**環境を構えたら Settings → Projects → Actions で `t3.json` のアクションを取り込む**（一度取り込んだ環境では後続の t3.json の変更は自動では反映されないため、変えたら取り込み直す）
 - **conductor-rebuild**: 新しい指揮役の worktree に `agent-team.toml` が無ければ本体の checkout から写し、写せなければ旧指揮役を止める前に止まる
 - **Claude Code・Codex の worktreeinclude 機構**: `.worktreeinclude` に `agent-team.local.toml` を列挙（追跡しないファイルの持ち越し用。追跡ファイルの `agent-team.toml` は列挙しない。T3 Code はこのファイルを読まない）
 

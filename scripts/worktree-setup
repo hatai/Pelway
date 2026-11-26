@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # worktree 作成時の準備（Issue #804）。T3 の runOnWorktreeCreate（t3.json）と
-# conductor-rebuild、Claude Code・Codex の worktreeinclude 機構から呼ぶ。
+# conductor-rebuild から呼ぶ。
 #
 # 本体の checkout から worktree に、許可リストの設定ファイルだけを写す。
 # 基点のコミットが古くて追跡ファイルが worktree に無い場合の補填と、追跡しない
@@ -55,14 +55,31 @@ done
 [[ -n "$src" ]] || src="${T3CODE_PROJECT_ROOT:-}"
 [[ -n "$dst" ]] || dst="${T3CODE_WORKTREE_PATH:-$PWD}"
 if [[ -z "$src" ]]; then
-  # T3 の外（手動・worktreeinclude 経由）では、このスクリプトを含む checkout を本体とみなす
-  src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  # T3 の外（手動実行）では、このスクリプトを含む checkout を本体とみなす
+  src="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 
 [[ -d "$src" ]] || die "--from の checkout が無い: $src"
 [[ -d "$dst" ]] || die "--dest の worktree が無い: $dst"
 # 書き先を物理パスに固定する（dst 自身が symlink でも、書くのは辿った先の中だけ）
-dst="$(cd "$dst" && pwd -P)"
+dst="$(CDPATH='' cd "$dst" && pwd -P)"
+
+# 写す先が repo の外に出ないことを確かめる（写す元と先が repo の外に出ない、の受け入れ条件）。
+# dst は --from と同じ repo の worktree の最上位でなければならない。最上位でない場所や
+# repo の外のディレクトリ（$HOME・/tmp など）への書き出しをここで止める。
+top_dst="$(git -C "$dst" rev-parse --show-toplevel 2>/dev/null)" \
+  || die "--dest が git の worktree でない: $dst"
+top_dst="$(CDPATH='' cd "$top_dst" && pwd -P)"
+[[ "$top_dst" == "$dst" ]] \
+  || die "--dest が worktree の最上位でない（$dst の属する worktree の最上位は $top_dst）"
+common_src="$(git -C "$src" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+  || die "--from が git の checkout でない: $src"
+common_dst="$(git -C "$dst" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+  || die "--dest が git の worktree でない: $dst"
+common_src="$(CDPATH='' cd "$common_src" && pwd -P)"
+common_dst="$(CDPATH='' cd "$common_dst" && pwd -P)"
+[[ "$common_src" == "$common_dst" ]] \
+  || die "--dest が --from と同じ repo の worktree でない"
 
 copied=0
 for name in agent-team.toml agent-team.local.toml; do

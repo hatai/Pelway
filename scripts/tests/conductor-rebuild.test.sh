@@ -120,18 +120,26 @@ check "logs the new conductor's runtimeMode and worktree" \
 check "existing agent-team.toml untouched" same "$NEW_WT_PATH/agent-team.toml" "$(cat "$REPO/agent-team.toml")"
 
 # worktree に agent-team.toml が無いときは本体の checkout から写してから進む（Issue #804）
+# worktree-setup は dst が repo の worktree か確かめるため、本物の worktree を作り、
+# agent-team.toml だけを消して「無い」状態にする
 MAIN_CO="$(dirname "$(git -C "$REPO/scripts" rev-parse --path-format=absolute --git-common-dir)")"
-FRESH_WT="$ROOT/fresh-wt"; mkdir -p "$FRESH_WT"
-printf 'mcp:launch:kept\n' > "$FILE"
-NEW_WT="$FRESH_WT" run "" --from "$OLD" --to "$NEW"; rc=$?
-check "missing toml in worktree: succeeds" [ "$rc" -eq 0 ]
-check "missing toml in worktree: copies agent-team.toml from main checkout" \
-  [ -f "$FRESH_WT/agent-team.toml" ] && cmp -s "$MAIN_CO/agent-team.toml" "$FRESH_WT/agent-team.toml"
-check "missing toml in worktree: logs the copy" \
-  grep -q "agent-team.toml" "$ROOT/err"
-check "missing toml in worktree: still stops the old conductor" \
-  [ "$(count "thread send --wait $OLD -")" -eq 1 ]
-check "missing toml in worktree: registers the new conductor" [ "$(cat "$FILE")" = "$NEW" ]
+FRESH_WT="$ROOT/fresh-wt"
+if git -C "$REPO" worktree add -q --detach "$FRESH_WT" HEAD 2>/dev/null; then
+  rm -f "$FRESH_WT/agent-team.toml"
+  printf 'mcp:launch:kept\n' > "$FILE"
+  NEW_WT="$FRESH_WT" run "" --from "$OLD" --to "$NEW"; rc=$?
+  check "missing toml in worktree: succeeds" [ "$rc" -eq 0 ]
+  check "missing toml in worktree: copies agent-team.toml from main checkout" \
+    bash -c "[ -f '$FRESH_WT/agent-team.toml' ] && cmp -s '$MAIN_CO/agent-team.toml' '$FRESH_WT/agent-team.toml'"
+  check "missing toml in worktree: logs the copy" \
+    grep -q "agent-team.toml" "$ROOT/err"
+  check "missing toml in worktree: still stops the old conductor" \
+    [ "$(count "thread send --wait $OLD -")" -eq 1 ]
+  check "missing toml in worktree: registers the new conductor" [ "$(cat "$FILE")" = "$NEW" ]
+  git -C "$REPO" worktree remove --force "$FRESH_WT"
+else
+  echo "skip missing-toml copy checks: git worktree add failed here"
+fi
 
 # worktree のパスが存在しない（写せない）ときは、旧指揮役を止める前に止まる
 printf 'mcp:launch:kept\n' > "$FILE"

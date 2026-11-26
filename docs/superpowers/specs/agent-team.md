@@ -74,7 +74,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - 指揮役が T3 のスレッドとして動いているとき、作業をさせるスレッド（実装・調査・レビュー）の作成はネイティブの `t3_thread_launch` で行う（T3 Connect の MCP や CLI のサブプロセスを経由しない）。指揮役が Grok Bot（クラウド）のときは T3 Connect の MCP の同じ操作を使う。実行中のスレッドへの指示送信（`t3_thread_send`）はこの限りではない
 - 終わったスレッドの片付け（settle）: PR を作ったスレッドはその PR をスレッドに紐付け（T3 の PR リンク）、マージで自動的に settle される。それ以外は、指揮役が毎回の巡回で、状態で決めた条件（`docs/agents/grokbot-runbook.md` の「9. 片付け」）に当たるものを `t3_thread_organize`（`action: settle`）で settle する。`needs-human` 中のスレッドは settle しない（人間が再開しうるため）
 - main はルールセットで守る。必須チェックは `mise run verify` と `pr-size` の成功、承認は 1 件必須（Code Owners レビューの必須は外し、`pelway-review` の Approve で満たせる形）、新しいコミットで古い Approve を外す、「マージ前にブランチを最新化すること」を必須とする（Kodiak の直列キューと合わせて、チェックが通ったツリーとマージされるツリーを一致させる）。ルールセットの変更前後の値は「マージキュー」の表に転記する
-- エージェントの PR・指揮役が作った PR・hatai 自身が作った PR のいずれも、`pelway-review` の Approve と必須チェックと QA 合格コメントの後、指揮役が `automerge` ラベルを付けて Kodiak がマージする。hatai の admin マージの対象は、round 4 以降の例外 PR（ラウンドの上限は skill `command-team` の「レビューのラウンド」）、`.github/` の下を変える PR、`fnox.toml` を変える PR の 3 つだけである（マージの例外はこれ以外に広げない。Kodiak が応答しない等のキューの切り戻しや、必須チェックが失敗したままの `pr-size-exception` は例外には加えず、hatai がこの 3 つのどれかに該当すると判断した PR だけが admin マージされる。`enforce_admins` を維持するのはこの例外のためである）
+- エージェントの PR・指揮役が作った PR・hatai 自身が作った PR のいずれも、`pelway-review` の Approve と必須チェックと QA 合格コメントの後、指揮役が `automerge` ラベルを付けて Kodiak がマージする。hatai の admin マージの対象は、round 4 以降の例外 PR（ラウンドの上限は skill `command-team` の「レビューのラウンド」）、`.github/` の下を変える PR、`fnox.toml` を変える PR の 3 つだけである（マージの例外はこれ以外に広げない。Kodiak が応答しない等のキューの切り戻しや、必須チェックが失敗したままの `pr-size-exception` は例外には加えず、hatai がこの 3 つのどれかに該当すると判断した PR だけが admin マージされる。`enforce_admins: false` を維持するのはこの例外のためである）
 
 ## 開発者ごとの上書き（agent-team.local.toml）
 

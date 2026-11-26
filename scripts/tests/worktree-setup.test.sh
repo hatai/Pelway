@@ -108,19 +108,40 @@ run_setup --from "$ROOT/main" --dest "$ROOT/wt7"
 hash_after="$(cd "$ROOT/main" && find . -type f ! -path './.git/*' | sort | xargs sha256sum | sha256sum)"
 check "7: main checkout is never modified" [ "$hash_before" = "$hash_after" ]
 
-# 8. t3.json: worktree 作成時に scripts/worktree-setup を走らせる runOnWorktreeCreate の
-# アクションが 1 つあり、async=false（終わるまで worktree を使わせない）
+# 7b. --dest は --from と同じ repo の worktree の最上位でなければならない（repo の外への
+# 書き出しを止める。repo でないディレクトリ・worktree 内の途中の階層・別 repo は拒否）
+mkdir -p "$ROOT/outside"
+run_setup --from "$ROOT/main" --dest "$ROOT/outside"; rc=$?
+check "7b: non-repo dest is refused" [ "$rc" -ne 0 ]
+check "7b: nothing written outside" [ ! -e "$ROOT/outside/agent-team.toml" ] && [ ! -e "$ROOT/outside/agent-team.local.toml" ]
+mkdir -p "$ROOT/wt/sub"
+run_setup --from "$ROOT/main" --dest "$ROOT/wt/sub"; rc=$?
+check "7b: worktree subdir dest is refused" [ "$rc" -ne 0 ]
+check "7b: nothing written to subdir" [ ! -e "$ROOT/wt/sub/agent-team.toml" ]
+git -C "$ROOT" init -q other
+git -C "$ROOT/other" config user.name test && git -C "$ROOT/other" config user.email test@example.invalid
+git -C "$ROOT/other" commit -qm init --allow-empty
+run_setup --from "$ROOT/main" --dest "$ROOT/other"; rc=$?
+check "7b: different repo's checkout is refused" [ "$rc" -ne 0 ]
+check "7b: nothing written to other repo" [ ! -e "$ROOT/other/agent-team.toml" ]
+
+# 8. t3.json: worktree 作成時に worktree-setup を走らせる runOnWorktreeCreate の
+# スクリプトが 1 つあり、async=false（終わるまで worktree を使わせない）。command は
+# worktree 側のファイルを実行しないよう、本体の checkout を指す $T3CODE_PROJECT_ROOT の
+# 絶対パスでなければならない（worktree からの相対パスだと PR が差し替えた版が走る）
 python3 -I - "$REPO/t3.json" <<'PY' >"$ROOT/t3-check" 2>&1 || echo FAIL >"$ROOT/t3-check"
 import json, sys
 d = json.load(open(sys.argv[1]))
-acts = [a for a in d.get("actions", []) if a.get("runOnWorktreeCreate")]
-assert len(acts) == 1, f"runOnWorktreeCreate actions: {len(acts)}"
+acts = [a for a in d.get("scripts", []) if a.get("runOnWorktreeCreate")]
+assert len(acts) == 1, f"runOnWorktreeCreate scripts: {len(acts)}"
 a = acts[0]
-assert a.get("type") == "script" and a.get("script") == "scripts/worktree-setup", a
+cmd = a.get("command", "")
+assert "T3CODE_PROJECT_ROOT" in cmd, f"command is not anchored at the main checkout: {cmd}"
+assert "scripts/worktree-setup" in cmd, cmd
 assert a.get("async") is False, a
 print("ok")
 PY
-check "8: t3.json has exactly one runOnWorktreeCreate action for scripts/worktree-setup with async=false" \
+check "8: t3.json has exactly one runOnWorktreeCreate script calling the main checkout's worktree-setup with async=false" \
   has "$ROOT/t3-check" "ok"
 check "8: the script path exists" [ -x "$REPO/scripts/worktree-setup" ]
 
@@ -130,11 +151,23 @@ check "9: .worktreeinclude lists agent-team.local.toml" \
 check "9: .worktreeinclude does not list agent-team.toml" \
   bash -c "! grep -qx 'agent-team.toml' '$REPO/.worktreeinclude'"
 
-# 10. agent-team.local.toml は gitignore 済みで、hk の pre-commit でコミットを止める
+# 10. agent-team.local.toml は gitignore 済み・未追跡で、hk の pre-commit がコミットを実際に止める
 check "10: .gitignore covers agent-team.local.toml" \
   bash -c "grep -qx 'agent-team.local.toml' '$REPO/.gitignore'"
-check "10: hk guard blocks committing it" \
-  bash -c "grep -q 'agent-team.local.toml' '$REPO/hk.pkl' && grep -q 'glob = List(\"agent-team.local.toml\")' '$REPO/hk.pkl'"
+check "10: repo does not track agent-team.local.toml" \
+  bash -c "! git -C '$REPO' ls-files --error-unmatch agent-team.local.toml >/dev/null 2>&1"
+# 文言の grep だけでは hook の設定ミスを見逃すため、一時 repo で実際にコミットを試す
+git -C "$ROOT" init -q hkrepo
+git -C "$ROOT/hkrepo" config user.name test && git -C "$ROOT/hkrepo" config user.email test@example.invalid
+cp "$REPO/hk.pkl" "$ROOT/hkrepo/hk.pkl"
+echo 'local' > "$ROOT/hkrepo/agent-team.local.toml"
+git -C "$ROOT/hkrepo" add -f agent-team.local.toml hk.pkl
+if command -v hk >/dev/null 2>&1; then
+  ( CDPATH='' cd "$ROOT/hkrepo" && hk run pre-commit --step no_agent_team_local ) >"$ROOT/hk-out" 2>&1; rc=$?
+  check "10: hk pre-commit blocks agent-team.local.toml" [ "$rc" -ne 0 ]
+else
+  echo "skip hk pre-commit check: hk not on PATH"
+fi
 
 # 11. 雛形 agent-team.local.toml.example が存在し、重ねても validate を通る
 # （雛形の有効な記述を実際に local として重ねて確かめる。コメントだけでも良いが、

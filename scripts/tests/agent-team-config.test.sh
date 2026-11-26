@@ -420,6 +420,10 @@ check "18: warns about dropped review_limits entry" has "$ROOT/err" "developers.
 check "18: warns about dropped priority entries" has "$ROOT/err" "developers.dev.priority.review"
 check "18: warns codex became unusable" bash -c "grep -F 'developers.dev.use' '$ROOT/err' | grep -q codex"
 check "18: warnings name keys not the value list" bash -c "! grep -q 'opencode.*devin.*codex.*claude' '$ROOT/err'"
+bash "$CFG" effective dev "$ROOT/agent-team.toml" >"$ROOT/out" 2>/dev/null; rc=$?
+check "18: effective exits 0" eq "$rc" "0"
+check "18: effective replaces use" \
+  python3 -I -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['developers']['dev']['use'] == ['opencode','devin','claude'], d['developers']['dev']['use']" "$ROOT/out"
 rm "$ROOT/agent-team.local.toml"
 
 # 19: 上書きできない項目は警告を出して無視する（重ねた結果は共有のまま）
@@ -468,20 +472,32 @@ check "20: merged-invalid: prints nothing" eq "$(grep -c . "$ROOT/out")" "0"
 check "20: merged-invalid: error names the key" has "$ROOT/err" "developers.dev.slots.devin"
 rm "$ROOT/agent-team.local.toml"
 
-# 21: local が TOML として読めないときは非 0 で止まる（共有が有効でも採用しない）
-echo '[developers.dev' > "$ROOT/agent-team.local.toml"
-v_run "$ROOT/agent-team.toml"; rc=$?
-check "21: unreadable local fails" eq "$rc" "1"
+# 21: 重ねた結果の検証エラーはキー名と理由だけで、local に書いた値を出さない
+# （local は開発者が書く追跡しないファイルで、値を標準エラーに出す決まりは無い）
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[developers.dev.priority.review]
+high_risk = ["LEAKED_MARKER_ID_9f2"]
+EOF
+s_run "$ROOT/agent-team.toml"; rc=$?
+check "21: merged-invalid exits 1" eq "$rc" "1"
+check "21: error names the key" has "$ROOT/err" "developers.dev.priority.review.high_risk"
+check "21: local value never leaks to stderr" bash -c "! grep -q 'LEAKED_MARKER_ID_9f2' '$ROOT/err'"
 rm "$ROOT/agent-team.local.toml"
 
-# 22: 共有の toml の検証は local より先に止まる（共有側の違反に local は関係ない）
+# 22: local が TOML として読めないときは非 0 で止まる（共有が有効でも採用しない）
+echo '[developers.dev' > "$ROOT/agent-team.local.toml"
+v_run "$ROOT/agent-team.toml"; rc=$?
+check "22: unreadable local fails" eq "$rc" "1"
+rm "$ROOT/agent-team.local.toml"
+
+# 23: 共有の toml の検証は local より先に止まる（共有側の違反に local は関係ない）
 cat > "$ROOT/agent-team.local.toml" <<'EOF'
 [developers.dev]
 use = ["opencode", "devin", "codex", "claude"]
 EOF
 v_run "$ROOT/unknown.toml"; rc=$?
-check "22: broken shared still fails first" eq "$rc" "1"
-check "22: shared errors reported on shared file" bash -c "grep -qF '$ROOT/unknown.toml' '$ROOT/err' && grep -q zed '$ROOT/err'"
+check "23: broken shared still fails first" eq "$rc" "1"
+check "23: shared errors reported on shared file" bash -c "grep -qF '$ROOT/unknown.toml' '$ROOT/err' && grep -q zed '$ROOT/err'"
 rm "$ROOT/agent-team.local.toml" "$ROOT/agent-team.toml"
 
 if ((${#failures[@]})); then
