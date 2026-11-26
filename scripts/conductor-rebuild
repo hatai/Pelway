@@ -100,9 +100,12 @@ SHOW_RETRIES="${PELWAY_REBUILD_SHOW_RETRIES:-3}"
 SHOW_RETRY_SLEEP="${PELWAY_REBUILD_SHOW_RETRY_SLEEP:-1}"
 # 待機上限 0 など残り時間が尽きたあとでも必ず 1 回は行う読み取りに渡す正の上限（秒）。
 # timeout の期間 0 は打ち切り無効のため、残り 0 以下の読み取りにはこの下限を渡す。
-# その下限自体が 0 や非数では期間 0 と同じ意味になるので、正の有限値だけを受け付ける
+# その下限自体が 0 や非数では期間 0 と同じ意味になるので、正の数だけを受け付ける。
+# 接尾辞の付く値（1d・5m など）は timeout の日・分の期間になるため、数字だけの形で検査する
+# （awk の数値変換は文字列の先頭だけで成功するため v+0 では接尾辞を落とせない）
 SHOW_FIRST_TIMEOUT="${PELWAY_REBUILD_SHOW_FIRST_TIMEOUT:-2}"
-awk -v v="$SHOW_FIRST_TIMEOUT" 'BEGIN{exit !(v+0 > 0 && v+0 < 1e308)}' \
+[[ "$SHOW_FIRST_TIMEOUT" =~ ^[0-9]+(\.[0-9]+)?$ ]] \
+  && awk -v v="$SHOW_FIRST_TIMEOUT" 'BEGIN{exit !(v+0 > 0)}' \
   || die "PELWAY_REBUILD_SHOW_FIRST_TIMEOUT must be a positive number of seconds (got '$SHOW_FIRST_TIMEOUT')"
 
 # 最後の thread show の生の出力（"database is locked" の判定に stderr が要るためファイルに受ける）

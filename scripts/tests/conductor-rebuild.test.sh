@@ -274,6 +274,17 @@ check "zero first timeout: makes no t3 calls" no_line "thread show"
 check "zero first timeout: nothing sent to either conductor" no_line "thread send"
 check "zero first timeout: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
 
+# 1 回目の読み取りの上限に timeout の期間接尾辞（d=日・m=分）や非数を指定したときも、
+# 読み取りの前に拒否する（awk の数値変換は先頭だけで成功するため 1d は 1 と読めてしまう）
+for bad in 1d 5m abc; do
+  printf 'mcp:launch:kept\n' > "$FILE"
+  PELWAY_REBUILD_SHOW_FIRST_TIMEOUT="$bad" run "" --from "$OLD" --to "$NEW"; rc=$?
+  check "first timeout $bad: exits non-zero" [ "$rc" -ne 0 ]
+  check "first timeout $bad: makes no t3 calls" no_line "thread show"
+  check "first timeout $bad: nothing sent to either conductor" no_line "thread send"
+  check "first timeout $bad: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+done
+
 # 打ち切りの TERM に応答しない読み取りも、猶予のあとの強制終了で期限に戻る
 # （偽の t3 が TERM を無視して 6 秒遅らせる。期限の TERM のあと KILL で落ちる）
 printf 'mcp:launch:kept\n' > "$FILE"

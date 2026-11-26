@@ -115,3 +115,19 @@ PR: #735
 4. 仮定と解釈: `timeout -k` の猶予は 1 秒とし、待ちの上限は「120 秒＋猶予」と文書に書いた（codex の指摘どおり 1 回目の読み取りの例外も併記）。KILL 猶予の経路を試験するため偽 t3 に `NEW_TERM_IGNORE`（TERM を無視する）を足した。`%.0f` は gawk では `%d` と同じ結果になるためこのホストでは差が出ないが、mawk 環境での 32 ビット頭打ちへの移植性の修正として入れた（codex の must-fix どおり）
 
 試験の更新・追加: 「zero first timeout」（下限 0 を拒否。読み取り・送信なし・登録不変）、「term-ignoring read killed」（TERM を無視する偽 t3 でも KILL 猶予で期限に戻る。戻り時刻を `SECONDS` で検査）、「clock past int32」（時計を +3×10^9 μs ずらしても期限内の worktree を受理して進む）。`scripts/red-check 6f1f666 --keep scripts/tests/conductor-rebuild.test.sh` で前の実装だと「zero first timeout」4 件と「term-ignoring read killed: returns after the grace」が落ちることを確かめた（「clock past int32」はこのホストの awk が gawk のため落ちない回帰固定。「first read at zero limit: returns at the floor」は旧実装に `-k` が無く TERM 到達のタイミング次第で遅れる経路が残るため、稀に落ちる。新実装では KILL で打ち切られるため確定的）
+
+## 実装者メモ（round 8・印の nit だけを直す round。通算 1 回目）
+
+対象 head: （push 後に記入）
+PR: #735
+
+レビュー指摘（run 7184499800 codex approve・`[文書のずれ]` の印付き nit 1 件、run 7184500403 claude approve・印なし nit 1 件。ともに head 6608d3056c36b977eea17a3b66a72166c28c742c）への対応。両者とも approve のため、印の nit だけを直す round（修正回数の上限に数えない。この PR では通算 1 回目）として入った。
+
+1. 詰まった箇所: なし
+2. 印付き nit の対応:
+   - `[文書のずれ]`（codex、`scripts/conductor-rebuild`:105）初回の上限は秒数と書いているが、`awk` の `v+0` 変換は文字列の先頭だけで成功するため `1d` が 1 として検査を通り、そのまま `timeout` に渡ると 1 日の期間になる → 接尾辞の付く値を落とせるよう、`[[ =~ ^[0-9]+(\.[0-9]+)?$ ]]` で入力全体を数字だけの形に検査してから `awk` で正の値か確かめる 2 段にした（接尾辞・符号・指数・inf をすべて拒否。`v+0` だけでは接尾辞を落とせない）
+3. nit の対応:
+   - 印なし nit（codex の `PELWAY_REBUILD_NOW_US_OFFSET` を算術式に入れる前に整数に限定、claude の上限値の例。security-review の `[入力の検査]` の所見も `[文書のずれ]` でないため対象外）は決まりどおり直さない
+4. 仮定と解釈: 受理する書式は「数字だけの十進の秒」（`1`・`0.5` など。`.5` や `1.` は形に合わず拒否）とした。`timeout` が受理する `1e3` や `inf` も形に合わないため拒否するが、秒数としての意味は検査と消費側でそろう形に限定する指摘の意図どおり
+
+試験の更新・追加: 「first timeout <値>」（`1d`・`5m`・`abc` を拒否。読み取り・送信なし・登録不変。計 167 件 pass）。`scripts/red-check 6608d30 --keep scripts/tests/conductor-rebuild.test.sh` で前の実装だと `1d`・`5m` の 8 件が落ちることを確かめた（`abc` は旧実装でも `v+0` が 0 になり拒否されるため落ちない。「term-ignoring read killed: returns after the grace」は旧実装に `-k` が無く TERM が効かない読み取りが稀に遅れる経路が残るため、稀に落ちる）
