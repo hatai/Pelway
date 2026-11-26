@@ -47,3 +47,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「検査の成功を示す印では、成功時だけでなく再検査の失敗時の扱いも書く」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/receiving-code-review`
+
+## 実装者メモ（round 5）
+
+対象 head: aa0ad24233e0e7fac89d445620168a18e413d85c（この round の変更を含むコミット。署名付け替えの対象外の merge・mode 変更が履歴にあるため push 後も同じ SHA。このメモを含むコミットの親）
+
+1. 詰まった箇所: 印の無効化を入れると、同じ worktree で成功と失敗の verify が重なったときの終了順まで印の意味に効くことが分かった。
+2. 曖昧だった文: 「作業ツリーごとに印の無効化から検証の終了と記録までを直列化し、同じ木で成功と失敗が重なる場合を試験してください。」（PR #832、codex_review の round 2）
+3. 仮定と解釈: flock は失敗させず待つものと読み、gitdir のロックで無効化から記録までを囲う。`assume-unchanged`・`skip-worktree` は一時 index では外して実ファイルを読むが、sandbox が読み取り専用で結び付ける `.devin/config.json` だけは index の内容を使う例外にした。
+4. 足りなかった情報・検証手段: 重なりは成功側を遅らせて失敗側と同時に走らせる合成タスクで、index の印は実ファイルと index の内容が違う試験で確かめた。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「検査の印では同時実行とローカルの index フラグの扱いも書く」を足す。
+
+使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/receiving-code-review`
