@@ -23,7 +23,7 @@
     }
   },
   "scripts": {
-    "lint": "node_modules/.bin/bun lint"
+    "lint": "node scripts/canary-bun.mjs lint"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "catalog:",

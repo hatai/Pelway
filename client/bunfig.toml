@@ -2,6 +2,9 @@
 [install]
 # 版は package.json に書いたとおりに固定する。
 exact = true
+# 依存の postinstall は走らせない（bun は既定で npm の bun などの postinstall を許すので、明示して止める）。
+# canary の bun は scripts/canary-bun.mjs が OS ごとの本体を直接起動する。
+ignoreScripts = true
 # 公開から 7 日（604800 秒）以上経った版だけを入れる。
 minimumReleaseAge = 604800
 # 例外: Octane の一式はほぼ毎日出る beta で、7 日待つと peer の組がそろわない。
