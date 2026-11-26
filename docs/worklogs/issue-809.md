@@ -11,3 +11,15 @@
 5. 改善案: `.github/pull_request_template.md` の「レビューと QA」と「対象」のコメントに ``最後に検証した sha: `<sha>` `` と ``HEAD: `<sha>` `` の行を書くよう注記すると、初回の本文から道具が読める形になる。`.agents/skills/implement-issue/SKILL.md` の「決まり（毎回守る）」に「sandbox 下の作業ツリーは `.devin/` が読み取り専用のため、`.devin/` を変えた main を取り込めないことがある。取り込めないときはそのまま push し、衝突は引き継ぎの作業ツリーで解消する」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/diagnosing-bugs`（`mise run verify` の失敗の切り分けに Phase 2。`scripts/red-check HEAD`・`origin/main` で変更を退避して再現した。1 回だけ現れた `pelway-agent-watch` の `send_deadline_covers_secrets_and_curl`（1 回目）と `scripts/tests/conductor-rebuild.test.sh` の「term-ignoring read killed: returns after the grace」（3 回目）は、単独実行とほかの回では通ったので一過性）
+
+## 実装者メモ（round 2）
+
+対象 head: 6fe9d8250beca82cadeba78648cb79b0d51a0668
+
+1. 詰まった箇所: 手順 8: 割り当ての指示に「codex_review は利用上限（2026-11-28 14:00 JST まで）」とあったので、確認ゲートの決まりどおり codex の番を Claude に回し、`claude_review` だけに委託した。直後に指揮役から PR #840 のコメントで「codex の利用上限記録は古い。マージには Codex の approve が必須で Claude/Devin では代用しない」と訂正があり、指揮役が head 70d5433e に codex_review を委託した（run 7194967460）。`orchestrator_capabilities` では `devin_review` が `Provider instance is disabled.` で子タスクを起動できない。
+2. 曖昧だった文: 「HTML コメントは残してよい。」（`.agents/skills/write-pull-request/SKILL.md` の手順 4）— テンプレートの「対象」の注釈 `<!-- ブランチ名と HEAD の sha -->` には HEAD の語があり、注釈を残した本文では round 1 の道具は「HEAD の行が 2 つある」と止まった（Claude のレビュー run 7194801754 の `[文書のずれ]` の nit）。
+3. 仮定と解釈: 上の nit は `.github/pull_request_template.md` の注釈を書き換える提案だったが、この PR ではテンプレートを変えずに道具を直した（HTML コメントの中の見出しや印は数えない）。`.github/` の下を変える PR は Kodiak ではマージできず hatai の admin マージになるため（skill `command-team` の「マージ」）。テンプレートに 2 行の形を書くことは round 1 の改善案のまま残す。もう 1 件の nit（手順 7 の終了コードと直し方）は指摘どおり文を書き換えた。印の無い nit（push 直後の API が前の head を返す可能性）は直していない。
+4. 足りなかった情報・検証手段: 変異（コメントを空白に替えるときの幅を 1 文字にする）が最初の試験では生き残った。同じ行で注釈が印の前に来る本文（`<!-- round 1 --> - 最後に検証した sha: ...`）を試験に足して倒した。`mise run verify` は round 2 でも落ちるのが同じ 2 本だけ（環境起因の `verify-run.test.sh` と base 起因の `agent-team-config.test.sh`）で、一過性の失敗は無かった。
+5. 改善案: `.agents/skills/command-team/SKILL.md` の「レビュー担当と effort」に「保留以外の理由（利用上限など）で担当が使えないときの扱い」を書く。割り当ての記録が古いと、実装担当が代用してよいかを判断する材料が無い。
+
+使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/mutation-testing`（手動の変異 17 種の生き残りの解釈に「What Results Mean」。差分がミューテーションテスト対象の crate に触らないため `mise run mutants:diff` は対象外）
