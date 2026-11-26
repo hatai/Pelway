@@ -123,7 +123,7 @@ PR: #722
 
 ## 実装者メモ（round 9）
 
-対象 head: <新規コミット>
+対象 head: 1bba35f2cf1b7594c0e63fee2d9f43471f516329
 PR: #722
 
 レビュー指摘（head 360a3d19 で codex run=7178564202 approve・must-fix 0、claude run=7178461814 approve・must-fix 0・marked nit 3+文書のずれ 1）への対応:
