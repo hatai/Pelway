@@ -20,7 +20,7 @@ export function secureWebPreferences(preload: string) {
     allowRunningInsecureContent: false,
     experimentalFeatures: false,
     webviewTag: false,
-    // 綴りの検査は使わない。有効だと辞書を外から取りに行きうる。
+    // 画面の綴りの検査を切る。辞書の取得はこの設定では止まらず、disableSpellChecker（セッションの一覧を空にする）が止める。
     spellcheck: false,
   } as const satisfies WebPreferences;
 }
@@ -78,9 +78,11 @@ export function denyAllPermissions(
 }
 
 /**
- * 綴りの検査の辞書の一覧を空にする。既定のセッションは作られた時点で辞書を読み始め、
- * 手元に無ければ外（Google の配信サーバー）から取ってくるので、窓を開く前に呼ぶ。
- * webPreferences の spellcheck: false は画面の側の設定で、この取得は止めない。
+ * 綴りの検査の辞書の一覧を空にする。Hunspell を使う環境（Linux・Windows の一部）では、既定のセッションは
+ * 作られた時点で辞書を読み始め、手元に無ければ外（Google の配信サーバー）から取ってくる。macOS は OS の
+ * 綴りの検査を使うので、この呼び出しは何もしない。
+ * 既定のセッションを最初に読む処理の中で、イベントループに戻る前に呼ぶ（辞書のファイルを探すタスクの返信が
+ * 先に動くと取得が始まる）。webPreferences の spellcheck: false は画面の側の設定で、この取得は止めない。
  */
 export function disableSpellChecker(session: Pick<Session, "setSpellCheckerLanguages">): void {
   session.setSpellCheckerLanguages([]);

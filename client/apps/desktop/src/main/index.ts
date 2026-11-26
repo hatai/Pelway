@@ -37,6 +37,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // 既定のセッションを最初に読むこの行で、await を挟まずに辞書の一覧を空にする（動かさない）。
   disableSpellChecker(session.defaultSession);
   denyAllPermissions(session.defaultSession);
   protocol.handle(APP_SCHEME, (request) => {
