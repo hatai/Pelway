@@ -28,13 +28,13 @@ base_toml() {
   cat <<'EOF'
 [agents.opencode]
 instance = { implement = "opencode", investigate = "opencode" }
-models = ["zai-coding-plan/glm-5.3"]
+models = ["zai-coding-plan/glm-5.4"]
 effort = { option = "variant", raise = ["low", "default", "high", "max"] }
 assign_label = ""
 
 [agents.devin]
 instance = { implement = "acpRegistry_devin", review = "devin_review" }
-models = ["swe-2-high"]
+models = ["swe-2-1-high"]
 effort = { option = "thought_level", raise = ["medium", "high", "max"] }
 assign_label = "agent:devin"
 
@@ -46,7 +46,7 @@ assign_label = ""
 
 [agents.claude]
 instance = { review = "claude_review" }
-models = ["claude-opus-5-5"]
+models = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
 effort = { option = "effort", raise = ["low", "medium", "high", "xhigh", "max"] }
 assign_label = ""
 EOF
