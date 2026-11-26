@@ -51,3 +51,4 @@ must-fix への対応:
 9. agent-team-config.test.sh の引数渡しミス・方向逆の試験を修正
 10. 文書の文言 pin を board-patrol-docs.test.sh に追加（条件8: 上書き表・effective・needs-decision・worktree-setup）
 11. agent-team.md の「値を出さない」を診断出力に限定（nit もあわせて）
+push した head: 11e8051f
