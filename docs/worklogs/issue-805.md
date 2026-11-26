@@ -11,3 +11,15 @@
 5. 改善案: `docs/agents/decisions.md` の「運用の決定」に「ID は既存の識別子を使い、無ければ反映する Issue 番号から作る」を足した（今回実施済み）。
 
 使ったスキル: implement-issue、writing-for-agents、write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: c8ce01b88d714e8108b4b4aad6a2cf01e4f52101
+
+1. 詰まった箇所: `.agents/skills/implement-issue/SKILL.md` の決まり: codex の must-fix は、決定を優先する範囲と参照する版の両方が未定義だった。main 取り込みでは main 側が `agent-team-config.test.sh` の同じ区切り誤りを先に直していたため、取り込み後の木は変わらず、重複したテスト修正は diff から外れた。round 2 の verify は `conductor-watch-decision.test.sh` が並行実行時だけ落ち、単独実行は pass、再実行した全体 verify は pass だった。
+2. 曖昧だった文: 「該当する決定があるときは、その決定を手順書と同じ根拠として扱う。」（`.agents/skills/implement-issue/SKILL.md` の「決まり」）
+3. 仮定と解釈: 「個別承認」は force push・マージ・`.github/workflows/` の push・pr-size の例外など hatai が個別に判断する既存の承認と解釈した。decisions.md は手順書全体に優先するのではなく、直接食い違う運用手順だけに優先すると読み、main の承認済みの版を参照する形にした。
+4. 足りなかった情報・検証手段: 「個別承認」の語の定義は手順書に無く、t629u の決定文と既存の例外の扱いから意味を補った。文言の意味の判定はレビュー担当に委ねるため、該当文は PR 本文に引用し直す。
+5. 改善案: 今回の指摘で両スキルの文を、main の承認済みの版を読むこと・既存の確認と承認を適用すること・直接食い違う手順に限って優先することの 3 点が分かる形に直した（今回実施済み）。
+
+使ったスキル: implement-issue、receiving-code-review、writing-for-agents、diagnosing-bugs、write-pull-request
