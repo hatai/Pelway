@@ -27,6 +27,7 @@ START_WANT="あなたは新しい指揮役。skill command-team と docs/agents/
 # NEW_WT_AFTER=<n> で新しい指揮役の worktreePath を n 回目の thread show から返す（立てた直後の準備中の演出）。
 # NEW_SHOW_DELAY=<秒> で新しい指揮役の thread show の応答を遅らせる（期限までに終わらない読み取りの演出）。
 # NEW_SHOW_DELAY_FROM=<n> で遅らせるのを n 回目以降の呼び出しに限る（既定 1＝全部）。
+# NEW_TERM_IGNORE=1 で新しい指揮役の読み取りが TERM を無視する（打ち切りが KILL まで要る演出）。
 # NEW_CORRUPT=1 で新しい指揮役の thread show が終了コード 0 かつ JSON でない出力（"database is locked" を含む）を返す。
 # T3_LOCK_TIMES=<n>（全部の呼び出し）・NEW_LOCK_TIMES=<n>（新しい指揮役の呼び出しだけ）で
 # 先頭 n 回の thread show を "database is locked"（標準エラー・終了コード 1）にする。
@@ -40,6 +41,7 @@ case "$1 $2" in
     kn=0; if [[ "$3" == *new* ]]; then
       kn=$(( $(cat "$LOG.show-new" 2>/dev/null || echo 0) + 1 )); echo "$kn" > "$LOG.show-new"
     fi
+    [[ "$3" == *new* && -n "${NEW_TERM_IGNORE:-}" ]] && trap '' TERM
     [[ "$3" == *new* && -n "${NEW_SHOW_DELAY:-}" && "$kn" -ge "${NEW_SHOW_DELAY_FROM:-1}" ]] && sleep "$NEW_SHOW_DELAY"
     if [[ "$3" == *new* && -n "${NEW_CORRUPT:-}" ]]; then
       echo 'not-json database is locked'; exit 0
@@ -262,6 +264,38 @@ check "reread killed near the limit: nothing sent to either conductor" no_line "
 check "reread killed near the limit: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
 check "reread killed near the limit: stderr reports the timeout" \
   grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
+
+# 1 回目の読み取りの上限に 0（timeout では打ち切り無効の意味になる値）を指定したときは、
+# 読み取りの前に拒否する
+printf 'mcp:launch:kept\n' > "$FILE"
+PELWAY_REBUILD_SHOW_FIRST_TIMEOUT=0 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "zero first timeout: exits non-zero" [ "$rc" -ne 0 ]
+check "zero first timeout: makes no t3 calls" no_line "thread show"
+check "zero first timeout: nothing sent to either conductor" no_line "thread send"
+check "zero first timeout: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+
+# 打ち切りの TERM に応答しない読み取りも、猶予のあとの強制終了で期限に戻る
+# （偽の t3 が TERM を無視して 6 秒遅らせる。期限の TERM のあと KILL で落ちる）
+printf 'mcp:launch:kept\n' > "$FILE"
+start=$SECONDS
+NEW_WT="" NEW_SHOW_DELAY=6 NEW_TERM_IGNORE=1 \
+  PELWAY_REBUILD_WT_WAIT=0.6 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "term-ignoring read killed: exits non-zero" [ "$rc" -ne 0 ]
+check "term-ignoring read killed: returns after the grace" [ "$(( SECONDS - start ))" -lt 4 ]
+check "term-ignoring read killed: reads once" \
+  [ "$(count "thread show $NEW --json")" -eq 1 ]
+check "term-ignoring read killed: nothing sent to either conductor" no_line "thread send"
+check "term-ignoring read killed: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+check "term-ignoring read killed: stderr reports the timeout" \
+  grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
+
+# 単調時計が符号付き 32 ビットを超えたホスト（稼働約 36 分以上。mawk の %d はそこで
+# 頭打ちする）でも、期限内に返った worktree を受理して進む
+printf 'mcp:launch:kept\n' > "$FILE"
+PELWAY_REBUILD_NOW_US_OFFSET=3000000000 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "clock past int32: succeeds" [ "$rc" -eq 0 ]
+check "clock past int32: stops the old conductor once" [ "$(count "thread send --wait $OLD -")" -eq 1 ]
+check "clock past int32: registers the new conductor" [ "$(cat "$FILE")" = "$NEW" ]
 
 # 読み取りの中の lock のやり直しも残り時間に収める。やり直しの待ちを残りで切り詰め、
 # 期限を超える読み直しは始めない

@@ -97,3 +97,21 @@ PR: #735
 4. 仮定と解釈: 「1 回目は必ず読む」の下限は、既定 120 秒の待機に対して無視できる大きさで、実際の `t3 thread show`（ローカルの読み取り）に足りる 2 秒とし、試験から縮められるよう環境変数にした。下限で打ち切られた読み取りは lock を出さない失敗として扱われ、時間切れの経路に進む（`WT_WAIT=0` かつ応答なしでも時間切れの案内が出る）
 
 試験の更新・追加: 「first read at zero limit」（上限 0・遅延 4 秒・下限 1 秒で、読み取りが下限で打ち切られ時間切れを報告して戻る。読み取り 1 回・送信なし・登録不変）、「reread killed near the limit」（期限直前に始まった読み直しも残り時間で打ち切る。読み取り 2 回）。`scripts/red-check f700de5 --keep scripts/tests/conductor-rebuild.test.sh` で前の実装だと「first read at zero limit」が落ちることを確かめた（「reread killed」は旧実装でも打ち切りが効く経路のため回帰固定として残る）
+
+## 実装者メモ（round 7）
+
+対象 head: （push 後に記入）
+PR: #735
+
+レビュー指摘（run 7184068054 codex request-changes・must-fix 2、run 7184068644 claude approve・印付き nit 1 件。ともに head 6f1f666ca2fa873624f73cfdd3a2581d99751eb7。両者の印付き nit は同一項目）への対応。判定が割れたため request-changes 側を優先した。
+
+1. 詰まった箇所: なし
+2. must-fix の対応:
+   - `scripts/conductor-rebuild`:135 (a) `PELWAY_REBUILD_SHOW_FIRST_TIMEOUT=0` を指定すると `timeout` の期間 0（打ち切り無効）に戻る → 起動時に正の有限値か検査し、0・負・非数・inf は読み取りの前に拒否（`awk` で `v+0 > 0 && v+0 < 1e308` 以外を die）。(b) `timeout` は TERM しか送らず、TERM を無視する t3 なら戻らない → 全ての打ち切り付き読み取りに `timeout -k 1`（TERM の 1 秒後に KILL）を付けた
+   - `scripts/conductor-rebuild`:171 `end_us` の算出を `awk` の `%d` で出しており、mawk では符号付き 32 ビットに頭打ち（稼働約 36 分で時計が上限を超え、期限内の結果をすべて拒否する）→ `%.0f` で出力。試験から時計をずらせるよう `PELWAY_REBUILD_NOW_US_OFFSET`（μs の加算、試験用）を `now_us` に足した
+3. nit の対応:
+   - `[文書のずれ]`（両者同一、`scripts/conductor-rebuild`:22）環境変数一覧に `PELWAY_REBUILD_SHOW_FIRST_TIMEOUT` が無い → 一覧に追加（併せて新設の `PELWAY_REBUILD_NOW_US_OFFSET` も記載）
+   - 印なし nit（claude の 1 件 — 1 回目読み取りの下限による最大待ちの非単調性）は、待ちが 120 秒を超えないための下限であり意図どおりのため直さない
+4. 仮定と解釈: `timeout -k` の猶予は 1 秒とし、待ちの上限は「120 秒＋猶予」と文書に書いた（codex の指摘どおり 1 回目の読み取りの例外も併記）。KILL 猶予の経路を試験するため偽 t3 に `NEW_TERM_IGNORE`（TERM を無視する）を足した。`%.0f` は gawk では `%d` と同じ結果になるためこのホストでは差が出ないが、mawk 環境での 32 ビット頭打ちへの移植性の修正として入れた（codex の must-fix どおり）
+
+試験の更新・追加: 「zero first timeout」（下限 0 を拒否。読み取り・送信なし・登録不変）、「term-ignoring read killed」（TERM を無視する偽 t3 でも KILL 猶予で期限に戻る。戻り時刻を `SECONDS` で検査）、「clock past int32」（時計を +3×10^9 μs ずらしても期限内の worktree を受理して進む）。`scripts/red-check 6f1f666 --keep scripts/tests/conductor-rebuild.test.sh` で前の実装だと「zero first timeout」4 件と「term-ignoring read killed: returns after the grace」が落ちることを確かめた（「clock past int32」はこのホストの awk が gawk のため落ちない回帰固定。「first read at zero limit: returns at the floor」は旧実装に `-k` が無く TERM 到達のタイミング次第で遅れる経路が残るため、稀に落ちる。新実装では KILL で打ち切られるため確定的）

@@ -25,6 +25,9 @@
 #   PELWAY_REBUILD_SHOW_RETRIES      読み取りの thread show が "database is locked" で
 #                                    失敗したときのやり直しの上限（回。既定 3）
 #   PELWAY_REBUILD_SHOW_RETRY_SLEEP  そのやり直しの間（秒。既定 1）
+#   PELWAY_REBUILD_SHOW_FIRST_TIMEOUT  残り時間が尽きたあとも必ず行う 1 回目の読み取りの
+#                                    上限（秒。既定 2。正の数以外は起動時に拒否）
+#   PELWAY_REBUILD_NOW_US_OFFSET     単調時計への加算（マイクロ秒。試験用。既定 0）
 # やり直すのは読み取りの thread show だけ。thread send は二重送信を防ぐためやり直さない。
 # 旧指揮役の settle と巡回の scheduled task の作り直しは、新しい指揮役が引き継ぎの確認の後に行う
 # （t3 CLI には settle が無い。権限は確認の完了で移る）。
@@ -96,8 +99,11 @@ WT_INTERVAL="${PELWAY_REBUILD_WT_INTERVAL:-2}"
 SHOW_RETRIES="${PELWAY_REBUILD_SHOW_RETRIES:-3}"
 SHOW_RETRY_SLEEP="${PELWAY_REBUILD_SHOW_RETRY_SLEEP:-1}"
 # 待機上限 0 など残り時間が尽きたあとでも必ず 1 回は行う読み取りに渡す正の上限（秒）。
-# timeout の期間 0 は打ち切り無効のため、残り 0 以下の読み取りにはこの下限を渡す
+# timeout の期間 0 は打ち切り無効のため、残り 0 以下の読み取りにはこの下限を渡す。
+# その下限自体が 0 や非数では期間 0 と同じ意味になるので、正の有限値だけを受け付ける
 SHOW_FIRST_TIMEOUT="${PELWAY_REBUILD_SHOW_FIRST_TIMEOUT:-2}"
+awk -v v="$SHOW_FIRST_TIMEOUT" 'BEGIN{exit !(v+0 > 0 && v+0 < 1e308)}' \
+  || die "PELWAY_REBUILD_SHOW_FIRST_TIMEOUT must be a positive number of seconds (got '$SHOW_FIRST_TIMEOUT')"
 
 # 最後の thread show の生の出力（"database is locked" の判定に stderr が要るためファイルに受ける）
 SHOW_OUT="$(mktemp)"; SHOW_ERR="$(mktemp)"
@@ -105,7 +111,7 @@ trap 'rm -f "$SHOW_OUT" "$SHOW_ERR"' EXIT
 
 # 経過時間はロケールに左右されない単調時計で測る（EPOCHREALTIME は壁時計で、
 # 小数点がコンマのロケールでは整数化に使えないため）
-now_us() { /usr/bin/python3 -I -c 'import time; print(int(time.monotonic() * 1000000))'; }
+now_us() { echo $(( $(/usr/bin/python3 -I -c 'import time; print(int(time.monotonic() * 1000000))') + ${PELWAY_REBUILD_NOW_US_OFFSET:-0} )); }
 
 # sleep <a 秒>・<b マイクロ秒> の小さい方だけ待つ（b が 0 以下なら待たない）。
 # 読み直しの間隔とやり直しの待ちを残り時間内に収めるために使う
@@ -132,7 +138,8 @@ show() {
       if (( rem <= 0 )) && { (( tries > 0 )) || [[ "${SHOW_REREAD:-0}" == 1 ]]; }; then
         return 1
       fi
-      timeout "$(awk -v u="$rem" -v m="$SHOW_FIRST_TIMEOUT" 'BEGIN{s=u/1000000; print (s>0)?s:m}')" \
+      # TERM に応答しない読み取りも戻るよう、KILL の猶予（-k）を付ける
+      timeout -k 1 "$(awk -v u="$rem" -v m="$SHOW_FIRST_TIMEOUT" 'BEGIN{s=u/1000000; print (s>0)?s:m}')" \
         "$T3" thread show "$1" --json >"$SHOW_OUT" 2>"$SHOW_ERR" || rc=$?
     else
       "$T3" thread show "$1" --json >"$SHOW_OUT" 2>"$SHOW_ERR" || rc=$?
@@ -168,7 +175,9 @@ read -r old_mode _ < <(show "$from") || die "cannot read the old conductor$(show
 #    の待ちは残り時間で切り詰め、読み取りの呼び出し自体も残り時間で打ち切る
 #    （show の SHOW_DEADLINE_US。初回・読み直し・再試行のすべて）
 start_us=$(now_us)
-end_us=$(awk -v s="$start_us" -v w="$WT_WAIT" 'BEGIN{printf "%d", s + w * 1000000}')
+# 期限はシェルが扱える範囲の整数として保持する（mawk の %d は符号付き 32 ビットに
+# 頭打ちするため %.0f で出す）
+end_us=$(awk -v s="$start_us" -v w="$WT_WAIT" 'BEGIN{printf "%.0f", s + w * 1000000}')
 # aborted は起動環境の同名変数で権限の確かめが飛ばないよう、ここで初期化する
 new_mode=-; new_wt=-; first=1; aborted=
 SHOW_DEADLINE_US=$end_us
