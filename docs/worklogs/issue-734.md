@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「4. 規模を見積もり、分ける」に「新しいディレクトリの土台は、設定ファイル（package.json・tsconfig・ツールの設定）を 1 つ 10〜40 行で数え、試験は実装の 1.2 倍で見込む」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（PR-1 round 2）
+
+対象 head: a47f0a5dbba04924032db6355080f2cbb83828e6
+
+1. 詰まった箇所: `client/package.json` の `trustedDependencies: ["bun"]`: Codex の must-fix（canary の postinstall は、OS ごとの本体が無いと registry から取り直し、lock の sha512 と照合しない）。新しいキャッシュ（`BUN_INSTALL_CACHE_DIR`）で postinstall を止めて入れ直すと、`bun install` が `bun/bin/bun.exe` に本体を置き、`1.4.6-canary.1+0966e99d8` で動いた。`trustedDependencies` を外した。
+2. 曖昧だった文: 「分け方は hatai が決めました（#734 のコメントの分割案）」（PR #743 の本文）。分割案のコメントは `pelway-dev` 名義で、レビュー担当は hatai 名義の `<!-- split-plan -->` だけを分割の根拠に数える。hatai が文面を選び、hatai 名義で #734 に投稿した。
+3. 仮定と解釈: `@oven/bun-<OS>` の例外は hatai の split-plan で認められたので、#734 の受け入れ条件をそれに合わせて直した。ADR 0014 の文は #745 で直す（split-plan の「後続の Issue」）。
+4. 足りなかった情報・検証手段: 手元の bun のキャッシュは、前の postinstall が置き換えた本体を持っていた（ハードリンク）。キャッシュを分けないと、postinstall なしで本体が置かれるかを確かめられなかった。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」の pr-size の行に「分けるときは、hatai 名義の `<!-- split-plan -->` が Issue に入るまでレビューを委託しない（レビュー担当は実装担当の分割案を根拠に数えない）」を足す。
+
+使ったスキル: `.agents/skills/implement-issue`
