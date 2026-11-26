@@ -89,6 +89,38 @@ check cond6_command_team_slots .agents/skills/command-team/SKILL.md \
   '`SLOTS` の行' \
   'キューに置けるファイル名'
 
+# 条件7（Issue #715）: 上限と登録情報の正本が agent-team.toml であることが、
+# 対象の 5 文書のそれぞれに参照として書かれている。
+check cond7_toml_ref_spec docs/superpowers/specs/agent-team.md \
+  'agent-team.toml'
+check cond7_toml_ref_runbook docs/agents/grokbot-runbook.md \
+  'agent-team.toml'
+check cond7_toml_ref_command_team .agents/skills/command-team/SKILL.md \
+  'agent-team.toml'
+check cond7_toml_ref_implement_issue .agents/skills/implement-issue/SKILL.md \
+  'agent-team.toml'
+check cond7_toml_ref_details docs/agents/command-team-details.md \
+  'agent-team.toml'
+
+# 条件7b: command-team-details の調査の数え方に、停止中・再開処理中・再開待ちの
+# 除外と agent:devin による内訳がある。
+check cond7b_details_count docs/agents/command-team-details.md \
+  '停止中・再開処理中・再開待ち' \
+  'agent:devin'
+
+# 条件7c: runbook の「3. 同時数と順番待ち」で、実装・調査の枠の使用数は
+# 見張りが公開する slots.json で見る形になっている。
+check cond7c_runbook_slots docs/agents/grokbot-runbook.md \
+  '`slots.json`' \
+  '[developers.<login>.slots]' \
+  '巡回記録の割り当て表'
+
+# 条件7d: 使用数か上限を確認できないとき（toml を読めないときを含む）は
+# 割り当てない決まりが、runbook の枠の数え方にある。
+check cond7d_runbook_no_assign docs/agents/grokbot-runbook.md \
+  '使用数か上限を確認できなければ'
+
+
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
   exit 1
