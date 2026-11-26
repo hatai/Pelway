@@ -1,51 +1,85 @@
 #!/usr/bin/env python3
 # mise run verify の本体（#807）。前回の印を消してから 3 グループを並列に検査し、
 # すべて成功したときだけ、検証した作業ツリーの木の印を残す。
-import fcntl, os, stat, subprocess, sys, tempfile
+import fcntl, hashlib, os, stat, subprocess, sys, tempfile
 
-def note(message):
-    print(f"agent-verify-run: {message}", file=sys.stderr)
-
-def fail(message):
-    note(message)
-    sys.exit(1)
+def note(message): print(f"agent-verify-run: {message}", file=sys.stderr)
+def fail(message): note(message); sys.exit(1)
 
 def resolve_git_dir():
     try:
-        out = subprocess.check_output(["git", "rev-parse", "--git-dir"], stderr=subprocess.DEVNULL, text=True)
+        out = subprocess.check_output(["git", "rev-parse", "--git-dir"], stderr=subprocess.DEVNULL)
     except (OSError, subprocess.CalledProcessError):
         fail("gitdir を解決できません")
-    # Git の出力の行末だけを取る。パスに含まれる空白は削らない。
-    out = out[:-1] if out.endswith("\n") else out
-    out = out[:-1] if out.endswith("\r") else out
-    path = os.path.realpath(out)
+    # Git はパスをバイト列のまま返し、行の区切りの LF だけを末尾に足す。CR はパスの一部なので削らない。
+    out = out[:-1] if out.endswith(b"\n") else out
+    path = os.path.realpath(os.fsdecode(out))
     if not out or not os.path.isdir(path):
         fail("gitdir を絶対パスに解決できません")
     return path
 
-def poison(path):
+def marker_fingerprint(path):
     try:
+        with open(path, "rb") as f:
+            return "sha256:" + hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return "none"
+
+def external_poison_path(git_dir):
+    home = os.environ.get("HOME")
+    if not home: return None
+    base = os.environ.get("XDG_STATE_HOME") or os.path.join(home, ".local", "state")
+    key = hashlib.sha256(os.fsencode(git_dir)).hexdigest()
+    return os.path.join(base, "pelway-verify", key)
+
+def write_poison(path, selector, make_dir=False):
+    try:
+        if make_dir: os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".pelway-verify-invalid.")
-        os.close(fd)
+        with os.fdopen(fd, "w", encoding="ascii") as f:
+            f.write(selector + "\n")
         os.replace(tmp, path)
-    except OSError as e:
-        note(f"verify の失敗の印を残せません: {e}")
+        return True
+    except OSError: return False
+
+def poison(path, selector, external_path):
+    paths = [(path, False)] + ([(external_path, True)] if external_path else [])
+    if not any([write_poison(p, selector, make) for p, make in paths]): note("verify の失敗の印を残せません")
 
 def remove_file(path, message):
-    try:
-        os.unlink(path)
-    except FileNotFoundError:
-        return True
+    try: os.unlink(path)
+    except FileNotFoundError: return True
     except OSError as e:
         note(f"{message}: {e}")
         return False
     return True
 
+def invalidate_marker(path):
+    try: st = os.lstat(path)
+    except FileNotFoundError: return True
+    except OSError as e:
+        note(f"前回の印を消せません: {e}")
+        return False
+    if not stat.S_ISREG(st.st_mode): return True
+    try:
+        os.unlink(path)
+        return True
+    except OSError: pass
+    try:
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW), "wb"): pass
+        return True
+    except OSError: pass
+    try:
+        os.chmod(path, 0, follow_symlinks=False)
+        return True
+    except OSError as e:
+        note(f"前回の印を消せません: {e}")
+        return False
+
 def open_lock(path):
     try:
         fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-    except OSError as e:
-        return None, f"verify のロックファイルを開けません: {e}"
+    except OSError as e: return None, f"verify のロックファイルを開けません: {e}"
     try:
         st = os.fstat(fd)
     except OSError as e:
@@ -75,18 +109,30 @@ def main():
     lock_path = os.path.join(git_dir, "pelway-verify.lock")
     marker_path = os.path.join(git_dir, "pelway-verify-tree")
     poison_path = os.path.join(git_dir, "pelway-verify-invalid")
+    external_poison = external_poison_path(git_dir)
+    start_fingerprint = marker_fingerprint(marker_path)
     lock_fd, error = open_lock(lock_path)
     if error is not None:
-        poison(poison_path)
+        poison(poison_path, start_fingerprint, external_poison)
         fail(error)
+    lock_acquired = False
     try:
         lock_or_fail(lock_fd, lock_path)
+        lock_acquired = True
+        invalidated = invalidate_marker(marker_path)
+        poison_removed = invalidated and remove_file(poison_path, "verify の失敗の印を消せません")
+        external_removed = poison_removed and (external_poison is None or remove_file(external_poison, "verify の失敗の印を消せません"))
     except SystemExit:
         os.close(lock_fd)
-        poison(poison_path)
+        poison(poison_path, start_fingerprint, external_poison)
         raise
-    if not remove_file(marker_path, "前回の印を消せません") or not remove_file(poison_path, "verify の失敗の印を消せません"):
-        poison(poison_path)
+    except KeyboardInterrupt:
+        if lock_acquired: invalidate_marker(marker_path)
+        os.close(lock_fd)
+        poison(poison_path, start_fingerprint, external_poison)
+        fail("verify が中断されました")
+    if not (invalidated and poison_removed and external_removed):
+        poison(poison_path, marker_fingerprint(marker_path), external_poison)
         sys.exit(1)
     verify = subprocess.run(
         ["mise", "run", "verify-lint", ":::", "verify-test", ":::", "verify-static"], check=False

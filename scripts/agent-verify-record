@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mise run verify が成功したとき、検証した作業ツリーの木の hash を git の外の手元（この worktree の gitdir）に残す（#807）。
+# mise run verify が成功したとき、検証した作業ツリーの木の hash と検証ごとの乱数 verify-id を git の外の手元（この worktree の gitdir）に残す（#807）。
 # 次に作るコミットが検証した内容だけを含むなら、そのコミットの木はここで残す hash と一致する。実装者メモだけの差は
 # scripts/agent-gh-verify-gate が docs/worklogs/ の例外として扱う。
 # 一時 index は実際の index の複写から始めて作業ツリー全体を入れて write-tree するため、verify を commit の前に回す
@@ -56,7 +56,9 @@ env GIT_INDEX_FILE="$index" git -C "$root" add -A || fail "作業ツリーを一
 tree="$(env GIT_INDEX_FILE="$index" git -C "$root" write-tree)" || fail "作業ツリーの木の hash を作れません"
 [[ "$tree" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || fail "作業ツリーの木の hash の形を判定できません"
 
+verify_id="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+[[ "$verify_id" =~ ^[0-9a-f]{32}$ ]] || fail "印の検証 ID を作れません"
 out_tmp="$(mktemp "$git_dir/pelway-verify-tree.XXXXXX")" || fail "印の一時ファイルを作れません"
-printf '%s\n' "$tree" >"$out_tmp" || fail "印の一時ファイルに書けません"
+printf '%s\nverify-id:%s\n' "$tree" "$verify_id" >"$out_tmp" || fail "印の一時ファイルに書けません"
 mv -f -- "$out_tmp" "$git_dir/pelway-verify-tree" || fail "印を $git_dir/pelway-verify-tree に置けません"
 out_tmp=""

@@ -15,23 +15,37 @@ stop_unverified() {
   exit 1
 }
 
-git_dir=""
-marker_path=""
-marker=""
-marker_ready=0
+git_dir="" marker_path="" marker="" marker_ready=0 poison_one=""
+read_poison_file() {
+  poison_one=""
+  [[ -e "$1" || -L "$1" ]] || return 0
+  [[ -f "$1" && ! -L "$1" && -r "$1" ]] || stop_unverified "verify の失敗の印が読める通常ファイルではありません"
+  IFS= read -r poison_one <"$1" || poison_one=""
+  [[ "$poison_one" == none || "$poison_one" =~ ^sha256:[0-9a-f]{64}$ ]] || stop_unverified "verify の失敗の印の形を判定できません"
+}
+
 read_marker() {
   ((marker_ready)) && return 0
   git_dir="$(git rev-parse --git-dir 2>/dev/null)" || stop_unverified "gitdir を解決できません"
   git_dir="$(CDPATH='' cd -- "$git_dir" 2>/dev/null && pwd -P)" || stop_unverified "gitdir を絶対パスに解決できません"
   marker_path="$git_dir/pelway-verify-tree"
   poison_path="$git_dir/pelway-verify-invalid"
-  [[ ! -e "$poison_path" && ! -L "$poison_path" ]] || stop_unverified "前回の verify は印を無効化できませんでした"
+  state_base="${XDG_STATE_HOME:-${HOME:+$HOME/.local/state}}"
+  [[ -n "$state_base" ]] || stop_unverified "verify の失敗の印を確かめられません"
+  state_key="$(printf '%s' "$git_dir" | sha256sum | cut -d' ' -f1)"; external_poison_path="$state_base/pelway-verify/$state_key"
+  poison_selectors=""
+  read_poison_file "$poison_path"; [[ -z "$poison_one" ]] || poison_selectors+=" $poison_one"
+  read_poison_file "$external_poison_path"; [[ -z "$poison_one" ]] || poison_selectors+=" $poison_one"
   [[ -e "$marker_path" || -L "$marker_path" ]] || stop_unverified "印 $marker_path がありません"
   [[ -f "$marker_path" && ! -L "$marker_path" && -r "$marker_path" ]] || stop_unverified "印 $marker_path が読める通常ファイルではありません"
   probe="$(mktemp "$git_dir/pelway-verify-write.XXXXXX" 2>/dev/null)" || stop_unverified "印を無効化できない状態です"
   rm -f -- "$probe" 2>/dev/null || stop_unverified "印を無効化できない状態です"
-  marker="$(head -n 1 "$marker_path")"
-  [[ "$marker" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || stop_unverified "印 $marker_path の形を判定できません"
+  mapfile -t marker_lines < <(head -n 3 "$marker_path")
+  [[ "${#marker_lines[@]}" == 2 ]] || stop_unverified "印 $marker_path の形を判定できません"
+  marker="${marker_lines[0]}"
+  [[ "$marker" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ && "${marker_lines[1]}" =~ ^verify-id:[0-9a-f]{32}$ ]] || stop_unverified "印 $marker_path の形を判定できません"
+  marker_fp="sha256:$(sha256sum <"$marker_path" | cut -d' ' -f1)"
+  [[ "$poison_selectors" != *" $marker_fp"* ]] || stop_unverified "前回の verify はこの印を無効化しました"
   [[ "$(git --no-replace-objects cat-file -t "$marker" 2>/dev/null)" == tree ]] || stop_unverified "印の木 $marker を読めません"
   marker_ready=1
 }
@@ -41,9 +55,7 @@ mapfile -t lines
 for line in ${lines[@]+"${lines[@]}"}; do
   [[ -n "$line" ]] || continue
   read -r _lref lsha rref rsha extra <<<"$line"
-  if [[ -z "${rsha:-}" || -n "${extra:-}" || ! "$lsha" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
-    stop_unverified "pre-push の入力の行を判定できません（$line）"
-  fi
+  [[ -n "${rsha:-}" && -z "${extra:-}" && "$lsha" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || stop_unverified "pre-push の入力の行を判定できません（$line）"
   [[ "$lsha" =~ ^0+$ || "$rref" != refs/heads/* ]] && continue # 削除とブランチ以外は確かめない
   read_marker
   tree="$(git --no-replace-objects rev-parse -q --verify "$lsha^{tree}" 2>/dev/null)" ||
@@ -55,8 +67,7 @@ for line in ${lines[@]+"${lines[@]}"}; do
   diff_out="$PELWAY_AGENT_HOOKS_DIR/verify-gate-diff.out"
   git --no-replace-objects diff-tree -r --no-renames --name-only -z "$marker" "$tree" >"$diff_out" 2>/dev/null ||
     stop_unverified "印の木と $rref へ送る木の差を読めません"
-  only_worklogs=1
-  saw_diff=0
+  only_worklogs=1 saw_diff=0
   while IFS= read -r -d '' path; do
     saw_diff=1
     case "$path" in
@@ -64,8 +75,6 @@ for line in ${lines[@]+"${lines[@]}"}; do
       *) only_worklogs=0; break ;;
     esac
   done <"$diff_out"
-  if ((only_worklogs && saw_diff)); then
-    continue
-  fi
+  ((only_worklogs && saw_diff)) && continue
   stop_unverified "$rref へ送る木が印の木と違い、差は docs/worklogs/ の下だけではありません"
 done
