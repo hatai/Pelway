@@ -2,7 +2,7 @@
 
 ## 実装者メモ（round 1）
 
-対象 head: 47bdfde8baad29dc3ca71f8b04d3ba4d3f97ebef
+対象 head: d1a979c554151ab2961ac82faa2624fbb5aa3975
 
 1. 詰まった箇所: 手順 4: 受け入れ条件の「合成データのテストで 4 件の扱いを確かめる」の主語が曖昧で、見張り（書き出し側）と指揮役（読み取り側）のどちらを試験するかで迷った。読み取り側は LLM エージェントの手順なので決定的に試験できず、`scripts/board-snapshot-read` という検証用の読み取り手順を新設してそこに 4 件の分岐（正常・stale・broken・missing）を持たせる設計にした。
 2. 曖昧だった文: 「巡回はボードの Todo を `gh project item-list` の返却順（全件取得、上限で打ち切らない）で読み、`ready-for-agent` 付きを並び順に割り当てる。」（docs/agents/grokbot-runbook.md「2. ボードと巡回」）
