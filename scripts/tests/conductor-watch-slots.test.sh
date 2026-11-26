@@ -5,18 +5,15 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ROOT="$(mktemp -d)"
-WPID=""
+WPID=""; failures=()
 trap '[[ -n "${WPID:-}" ]] && kill "$WPID" 2>/dev/null; rm -rf "$ROOT"' EXIT
-failures=()
 
 MOCK="$ROOT/mock"
 mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$MOCK" "$ROOT/state/pelway" "$ROOT/repo/.git/pelway" "$ROOT/queue"
 
 cp "$REPO/scripts/"{conductor-watch.sh,agent-team-config} "$ROOT/repo/scripts/"  # 本物を置く偽リポジトリ（agent-gh はモックに差し替える）
 git init -q "$ROOT/repo"
-STATE="$ROOT/repo/.git/pelway/patrol-state.json"
-ISTATE="$ROOT/repo/.git/pelway/patrol-items.json"
-SLOTS="$ROOT/state/pelway/conductor-watch/slots.json"
+STATE="$ROOT/repo/.git/pelway/patrol-state.json"; ISTATE="$ROOT/repo/.git/pelway/patrol-items.json"; SLOTS="$ROOT/state/pelway/conductor-watch/slots.json"
 
 cat > "$ROOT/repo/scripts/agent-gh" <<'EOF'  # モック: 呼び出しを記録し、issue list / pr list / label-events の読み取りだけに答える（issues.json が無いときは失敗―取得失敗の再現。読み取り以外は exit 9）
 #!/usr/bin/env bash
@@ -158,8 +155,7 @@ it[k] = it.setdefault(k,[])+[json.loads(v)] if k=="implement_thread" else json.l
 json.dump(d,open(p,"w"),ensure_ascii=False,indent=2,sort_keys=True)' "$1" "$2" "$3" "$4"; }  # <file> の items[<issue>] に <key>=<JSON> を書く（implement_thread は一覧に追加）
 
 mark()         { jput "$ISTATE" "$1" work_state "{\"state\": \"$2\"}"; }  # 作業状態の印（bind/set_rollback も patrol-items.json に書く。litem だけが旧置き場の patrol-state.json）
-bind()         { jput "$ISTATE" "$1" implement_thread "{\"pr\": \"${3:-none}\", \"thread_id\": \"$2\", \"branch\": \"agent/x\"}"; }; set_rollback() { jput "$ISTATE" "$1" rollback "{\"assignment_id\": \"a\", \"started_at\": \"t\", \"steps_done\": []}"; }
-litem() { jput "$STATE" "$1" work_state "{\"state\": \"$2\"}"; jput "$STATE" "$1" implement_thread "{\"pr\": \"none\", \"thread_id\": \"$3\", \"branch\": \"agent/x\"}"; }  # litem だけが旧置き場（patrol-state.json）に書く
+bind()         { jput "$ISTATE" "$1" implement_thread "{\"pr\": \"${3:-none}\", \"thread_id\": \"$2\", \"branch\": \"agent/x\"}"; }; set_rollback() { jput "$ISTATE" "$1" rollback "{\"assignment_id\": \"a\", \"started_at\": \"t\", \"steps_done\": []}"; }; litem() { jput "$STATE" "$1" work_state "{\"state\": \"$2\"}"; jput "$STATE" "$1" implement_thread "{\"pr\": \"none\", \"thread_id\": \"$3\", \"branch\": \"agent/x\"}"; }
 
 : > "$ROOT/out.log"; : > "$MOCK/gh-calls.log"
 
