@@ -33,3 +33,21 @@ must-fix への対応:
 
 nit への対応（全 6 件対応）: ヘッダコメントの呼び出し元の修正、conductor-rebuild.test.sh の `cmp -s` を check の中へ、試験 18 に effective の use 置き換え確認を追加、cd に `CDPATH=''`、試験 10 に `git ls-files --error-unmatch` による未追跡確認（CI で no_agent_team_local ステップが走らない多層防御）、`agent-team-config` が切れた symlink・通常ファイルでない local を警告して重ねない形に変更
 
+
+## レビュー対応（round 3）
+
+対象 head: b77ff9ea
+レビュー: claude_review（run=7196572338）は approve、codex_review（gpt-6.2-sol / reasoningEffort=high、run=7196538461）は verdict: request-changes（must-fix 11、nit 2）。割れたため request-changes 側を優先して対応
+
+must-fix への対応:
+1. worktree-setup のコピーを原子的に — `cat >` による追従・中途半端な上書きを避け、`( set -o noclobber; cat -- "$from" >"$to" )`（O_EXCL、切れた symlink を追わない）に
+2. local の symlink 拒否 — `os.path.isfile` は symlink 先を見るため `isfile and not islink` に（conductor-watch.sh も同じ判定に）
+3. cascade_use が local が明示したキーまで落としていた → local が書いたキーは共有由来の参照だけ落とす形に追跡を分けた（試験 25）
+4. 型の無い値（配列・表）が str_list を通り抜ける経路を検証で塞ぐ
+5. warn_required を検証の前に出す順に（use が高リスク担当を全て外したとき、エラーの前に担当不足の警告が出る。試験 26）
+6. conductor-rebuild が agent-team.toml 有無で分岐していた → 毎回 worktree-setup を通し local を持ち越す。rebuild 試験の NEW_WT を本物の `git worktree add` に
+7. t3.json の command を `bash -c '"${T3CODE_PROJECT_ROOT:?}/scripts/worktree-setup"'` に（既定シェルに依らず POSIX 展開を効かせる）
+8. docs の「local から読む」記述を修正 — priority/models は `effective`（重ねた結果）、instance.review・effort.option・承認規則は本体の toml から（implement-issue, command-team, grokbot-runbook ×2, dev-environment）
+9. agent-team-config.test.sh の引数渡しミス・方向逆の試験を修正
+10. 文書の文言 pin を board-patrol-docs.test.sh に追加（条件8: 上書き表・effective・needs-decision・worktree-setup）
+11. agent-team.md の「値を出さない」を診断出力に限定（nit もあわせて）

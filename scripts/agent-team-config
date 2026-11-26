@@ -315,6 +315,7 @@ def merge_developers(doc, tbl, login):
             warn(key, "表でない（無視）")
             continue
         use_overridden = False
+        local_names = {"slots": set(), "review_limits": set(), "priority": set()}
         for k, v in d.items():
             kkey = f"{key}.{k}"
             if k == "use":
@@ -322,25 +323,34 @@ def merge_developers(doc, tbl, login):
                 use_overridden = True
             elif k in ("slots", "review_limits"):
                 merge_limit(cur, k, v)
+                if isinstance(v, dict):
+                    local_names[k] |= set(v)
             elif k == "priority":
                 merge_priority(cur, v, kkey)
+                if isinstance(v, dict):
+                    for r, conds in v.items():
+                        if isinstance(conds, dict):
+                            local_names["priority"] |= {(r, c) for c in conds}
             else:
                 warn(kkey, "上書きできない項目（無視）")
         if use_overridden:
-            cascade_use(cur, key)
+            cascade_use(cur, key, local_names)
 
 
-def cascade_use(dev, key):
+def cascade_use(dev, key, local_names):
     """use が丸ごと置き換わったあと、新しい use に無い担当への参照を
     重ねた結果から落とす（上限・優先順位に残ると検証で止まり、
     「使えない担当を外す」という本来の上書きが書けなくなる）。
-    落とした項目はキー名つきで警告する。"""
+    落とすのは共有から継いだ項目だけで、local が明示した項目は残して
+    検証にかける（黙って消すと誤った設定を見逃す）。落とした項目は
+    キー名つきで警告する。"""
     use = dev.get("use")
-    keep = set(use) if isinstance(use, list) else set()
+    keep = {n for n in use if isinstance(n, str)} if isinstance(use, list) else set()
     for k in ("slots", "review_limits"):
         t = dev.get(k)
         if isinstance(t, dict):
-            for name in [n for n in t if n not in keep]:
+            for name in [n for n in t
+                         if n not in keep and n not in local_names[k]]:
                 del t[name]
                 warn(f"{key}.{k}.{name}", "新しい use に無い担当の項目を落とす")
     prio = dev.get("priority")
@@ -349,12 +359,14 @@ def cascade_use(dev, key):
             if not isinstance(conds, dict):
                 continue
             for cond, lst in conds.items():
-                if isinstance(lst, list):
-                    kept = [n for n in lst if n in keep]
-                    if kept != lst:
-                        conds[cond] = kept
-                        warn(f"{key}.priority.{role}.{cond}",
-                             "新しい use に無い担当を並びから落とす")
+                if (role, cond) in local_names["priority"] or \
+                        not isinstance(lst, list):
+                    continue
+                kept = [n for n in lst if isinstance(n, str) and n in keep]
+                if kept != lst:
+                    conds[cond] = kept
+                    warn(f"{key}.priority.{role}.{cond}",
+                         "新しい use に無い担当を並びから落とす")
 
 
 def merge_limit(dev, k, v):
@@ -401,10 +413,20 @@ def warn_required(doc, logins):
     # 扱いは実装役が needs-decision で指揮役に上げる）。値ではなくキー名と理由だけを出す
     for login in logins:
         d = doc.get("developers", {}).get(login)
-        if isinstance(d, dict) and "codex" not in (d.get("use") or []):
+        if not isinstance(d, dict):
+            continue
+        use = d.get("use") or []
+        if "codex" not in use:
             warn(f"developers.{login}.use",
                  "codex が使えないが、マージには現在の head への codex の有効な approve が要る"
                  "（共有の規則は local では下げられない。扱いは指揮役の needs-decision）")
+        hr = (d.get("priority") or {}).get("review")
+        if isinstance(hr, dict):
+            hr_list = hr.get("high_risk")
+            if isinstance(hr_list, list) and not [n for n in hr_list if n in use]:
+                warn(f"developers.{login}.priority.review.high_risk",
+                     "use に入る高リスクのレビュー担当が無い"
+                     "（Issue #804 の未決事項。扱いは指揮役の needs-decision）")
 
 
 def emit_warnings(label):
@@ -430,23 +452,26 @@ def load_effective(path, login):
     doc = load(path)
     validate_doc(doc, path)
     lpath = os.path.join(os.path.dirname(os.path.abspath(path)), LOCAL_NAME)
-    if not os.path.isfile(lpath):
+    if os.path.islink(lpath) or not os.path.isfile(lpath):
         if os.path.lexists(lpath):
-            # 切れた symlink・通常ファイルでないものは重ねず、理由だけ警告する
-            warn(LOCAL_NAME, "通常ファイルでないため重ねない")
+            # symlink（本体以外のファイルを指しうる）や通常ファイルでないものは
+            # 重ねず、理由だけ警告する。isfile は symlink をたどるため先に islink で弾く
+            warn(LOCAL_NAME, "symlink か通常ファイルでないため重ねない")
             emit_warnings(lpath)
         return doc
     local = load(lpath)
     merged = merge_local(copy.deepcopy(doc), local, login)
+    emit_warnings(lpath)
+    # 必須の役に当たる担当不足の警告は検証より先に出す（検証で止まる場合にも
+    # needs-decision へ引き継げる根拠を残す）
+    warn_required(merged, [login] if login is not None else
+                  [x for x in merged.get("developers", {})])
     emit_warnings(lpath)
     # local の値をエラーに出さない（キー名と理由だけ）
     global show_values
     show_values = False
     validate_doc(merged, f"{path} (+{LOCAL_NAME})")
     show_values = True
-    warn_required(merged, [login] if login is not None else
-                  [x for x in merged.get("developers", {})])
-    emit_warnings(lpath)
     return merged
 
 

@@ -15,9 +15,11 @@ FILE="$ROOT/home/.config/pelway-agent-notify/conductor-thread-id"
 OLD="mcp:launch:old-conductor"
 NEW="mcp:launch:new-conductor"
 NEW_WT_PATH="$ROOT/new-conductor-wt"
-# 新しい指揮役の worktree（通常は追跡ファイルの agent-team.toml を持つ）は実在の
-# ディレクトリにする（Issue #804 の整備確認がファイルの有無を見るため）
-mkdir -p "$NEW_WT_PATH" && cp "$REPO/agent-team.toml" "$NEW_WT_PATH/"
+# 新しい指揮役の worktree は本物の worktree にする（conductor-rebuild は毎回
+# worktree-setup を通して agent-team の設定を揃え、worktree-setup は dst が
+# 本体と同じ repo のリンク済み worktree であることを確かめるため）
+git -C "$REPO" worktree add -q --detach "$NEW_WT_PATH" HEAD
+trap 'rm -rf "$ROOT"; git -C "$REPO" worktree remove --force "$NEW_WT_PATH" 2>/dev/null; git -C "$REPO" worktree remove --force "$ROOT/late-wt" 2>/dev/null' EXIT
 
 # 期待する本文（スクリプトの決まった文と完全一致で比べる）
 STOP_WANT="恒久交代を始める（docs/agents/conductor-context.md の「恒久交代」）。案件を進める操作（スレッドの起動・指示、マージ、ラベル、コメント、ステータス変更）を止め、引き継ぎの記録を指揮役の作業ログと patrol-state.json に書き出して、このターンを終える。以後は操作しない。scheduled task や起こしで起きても、巡回も patrol-state.json の書き込みもせずにターンを終える。"
@@ -116,8 +118,10 @@ check "handover message is exactly the fixed text" same "$LOG.send-stdin.new-con
 check "registers the new conductor" [ "$(cat "$FILE")" = "$NEW" ]
 check "logs the new conductor's runtimeMode and worktree" \
   grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=auto-accept-edits worktree=$NEW_WT_PATH" "$ROOT/err"
-# worktree に既にある agent-team.toml は上書きしない
+# worktree に既にある agent-team.toml は上書きしない（worktree-setup が skip する）
 check "existing agent-team.toml untouched" same "$NEW_WT_PATH/agent-team.toml" "$(cat "$REPO/agent-team.toml")"
+# agent-team.toml があっても worktree-setup を通す（local の持ち越しのため）
+check "setup ran to carry agent-team.local.toml" grep -q "worktree-setup:" "$ROOT/err"
 
 # worktree に agent-team.toml が無いときは本体の checkout から写してから進む（Issue #804）
 # worktree-setup は dst が repo の worktree か確かめるため、本物の worktree を作り、
@@ -220,7 +224,7 @@ check "no worktree until the limit: tells how to continue" \
 
 # worktree のパスが読み直しの途中で入ったときは、権限の確かめ以降に進む
 printf 'mcp:launch:kept\n' > "$FILE"
-mkdir -p "$ROOT/late-wt" && cp "$REPO/agent-team.toml" "$ROOT/late-wt/"
+git -C "$REPO" worktree add -q --detach "$ROOT/late-wt" HEAD
 NEW_WT="$ROOT/late-wt" NEW_WT_AFTER=3 \
   PELWAY_REBUILD_WT_WAIT=30 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
 check "worktree arrives while waiting: succeeds" [ "$rc" -eq 0 ]

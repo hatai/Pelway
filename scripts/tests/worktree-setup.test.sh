@@ -42,7 +42,7 @@ check "1: copies agent-team.local.toml" [ -f "$ROOT/wt/agent-team.local.toml" ]
 check "1: local content is identical" cmp -s "$ROOT/main/agent-team.local.toml" "$ROOT/wt/agent-team.local.toml"
 check "1: does not copy unrelated tracked files" [ ! -e "$ROOT/wt/unrelated.txt" ]
 check "1: does not copy other local files" [ ! -e "$ROOT/wt/fnox.local.toml" ]
-check "1: stderr has no secret value" bash -c '! grep -q sekret "$ROOT/err" && ! grep -q sekret "$ROOT/out"'
+check "1: stderr has no secret value" bash -c '! grep -q sekret "$1/err" && ! grep -q sekret "$1/out"' _ "$ROOT"
 
 # 2. 既にあるものは上書きしない（追跡ファイルでも、手で置いた local でも）
 echo 'mine' > "$ROOT/wt/agent-team.toml"
@@ -67,7 +67,7 @@ mv "$ROOT/main/agent-team.toml" "$ROOT/main/team.bak"
 run_setup --from "$ROOT/main" --dest "$ROOT/wt3"; rc=$?
 check "4: missing main agent-team.toml fails" [ "$rc" -ne 0 ]
 check "4: names the missing file" has "$ROOT/err" "agent-team.toml"
-check "4: nothing written" bash -c 'test -z "$(ls -A "$ROOT/wt3" | grep -v "^\.git$")"'
+check "4: nothing written" bash -c 'test -z "$(ls -A "$1" | grep -v "^\.git$")"' _ "$ROOT/wt3"
 mv "$ROOT/main/team.bak" "$ROOT/main/agent-team.toml"
 
 # 5. 本体側が symlink・ディレクトリのときは写さずに失敗する
@@ -113,7 +113,7 @@ check "7: main checkout is never modified" [ "$hash_before" = "$hash_after" ]
 mkdir -p "$ROOT/outside"
 run_setup --from "$ROOT/main" --dest "$ROOT/outside"; rc=$?
 check "7b: non-repo dest is refused" [ "$rc" -ne 0 ]
-check "7b: nothing written outside" [ ! -e "$ROOT/outside/agent-team.toml" ] && [ ! -e "$ROOT/outside/agent-team.local.toml" ]
+check "7b: nothing written outside" bash -c '[ ! -e "$1/outside/agent-team.toml" ] && [ ! -e "$1/outside/agent-team.local.toml" ]' _ "$ROOT"
 mkdir -p "$ROOT/wt/sub"
 run_setup --from "$ROOT/main" --dest "$ROOT/wt/sub"; rc=$?
 check "7b: worktree subdir dest is refused" [ "$rc" -ne 0 ]
@@ -124,6 +124,14 @@ git -C "$ROOT/other" commit -qm init --allow-empty
 run_setup --from "$ROOT/main" --dest "$ROOT/other"; rc=$?
 check "7b: different repo's checkout is refused" [ "$rc" -ne 0 ]
 check "7b: nothing written to other repo" [ ! -e "$ROOT/other/agent-team.toml" ]
+
+# 7c. 逆向きも拒否する: --from は本体の checkout（リンク済み worktree は不可）、
+# --dest は本体の checkout でないリンク済み worktree（本体へは書かない）
+run_setup --from "$ROOT/wt" --dest "$ROOT/wt2"; rc=$?
+check "7c: linked worktree as --from is refused" [ "$rc" -ne 0 ]
+run_setup --from "$ROOT/main" --dest "$ROOT/main"; rc=$?
+check "7c: main checkout as --dest is refused" [ "$rc" -ne 0 ]
+check "7c: main checkout was not written" bash -c '[ "$(cat "$1/main/agent-team.local.toml")" = "local" ]' _ "$ROOT"
 
 # 8. t3.json: worktree 作成時に worktree-setup を走らせる runOnWorktreeCreate の
 # スクリプトが 1 つあり、async=false（終わるまで worktree を使わせない）。command は
@@ -144,6 +152,14 @@ PY
 check "8: t3.json has exactly one runOnWorktreeCreate script calling the main checkout's worktree-setup with async=false" \
   has "$ROOT/t3-check" "ok"
 check "8: the script path exists" [ -x "$REPO/scripts/worktree-setup" ]
+# 8b. command の文字列の一致だけでなく、T3 と同じ形（シェルで command を実行）で
+# 実際に本体の checkout のスクリプトが起きて worktree に写されることを確かめる
+git worktree add -q "$ROOT/wt8" "$old" --detach
+mkdir -p "$ROOT/main/scripts" && cp "$REPO/scripts/worktree-setup" "$ROOT/main/scripts/"
+cmd="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["scripts"][0]["command"])' "$REPO/t3.json")"
+T3CODE_PROJECT_ROOT="$ROOT/main" T3CODE_WORKTREE_PATH="$ROOT/wt8" bash -c "$cmd" >"$ROOT/out" 2>"$ROOT/err"; rc=$?
+check "8b: the stored command runs the setup" [ "$rc" -eq 0 ]
+check "8b: file copied via the stored command" [ -f "$ROOT/wt8/agent-team.toml" ]
 
 # 9. .worktreeinclude: agent-team.local.toml を持ち越し、agent-team.toml は書かない
 check "9: .worktreeinclude lists agent-team.local.toml" \
@@ -156,18 +172,22 @@ check "10: .gitignore covers agent-team.local.toml" \
   bash -c "grep -qx 'agent-team.local.toml' '$REPO/.gitignore'"
 check "10: repo does not track agent-team.local.toml" \
   bash -c "! git -C '$REPO' ls-files --error-unmatch agent-team.local.toml >/dev/null 2>&1"
-# 文言の grep だけでは hook の設定ミスを見逃すため、一時 repo で実際にコミットを試す
+# 文言の grep だけでは hook の設定ミスを見逃すため、一時 repo で実際にコミットを試す。
+# 先に対象外のファイルだけで hook が通ることを確かめてから、対象ファイルを足して
+# 止まることを確かめる（hk の起動・設定の読み込みが失敗しても合格にならないように）
+check "10: hk is on PATH" command -v hk
 git -C "$ROOT" init -q hkrepo
 git -C "$ROOT/hkrepo" config user.name test && git -C "$ROOT/hkrepo" config user.email test@example.invalid
 cp "$REPO/hk.pkl" "$ROOT/hkrepo/hk.pkl"
+echo x > "$ROOT/hkrepo/unrelated.txt"
+git -C "$ROOT/hkrepo" add hk.pkl unrelated.txt
+( CDPATH='' cd "$ROOT/hkrepo" && hk run pre-commit --step no_agent_team_local ) >"$ROOT/hk-ok" 2>&1; rc=$?
+check "10: hk pre-commit passes with no local file staged" [ "$rc" -eq 0 ]
 echo 'local' > "$ROOT/hkrepo/agent-team.local.toml"
-git -C "$ROOT/hkrepo" add -f agent-team.local.toml hk.pkl
-if command -v hk >/dev/null 2>&1; then
-  ( CDPATH='' cd "$ROOT/hkrepo" && hk run pre-commit --step no_agent_team_local ) >"$ROOT/hk-out" 2>&1; rc=$?
-  check "10: hk pre-commit blocks agent-team.local.toml" [ "$rc" -ne 0 ]
-else
-  echo "skip hk pre-commit check: hk not on PATH"
-fi
+git -C "$ROOT/hkrepo" add -f agent-team.local.toml
+( CDPATH='' cd "$ROOT/hkrepo" && hk run pre-commit --step no_agent_team_local ) >"$ROOT/hk-out" 2>&1; rc=$?
+check "10: hk pre-commit blocks agent-team.local.toml" [ "$rc" -ne 0 ]
+check "10: hk block names the rule" has "$ROOT/hk-out" "agent-team.local.toml"
 
 # 11. 雛形 agent-team.local.toml.example が存在し、重ねても validate を通る
 # （雛形の有効な記述を実際に local として重ねて確かめる。コメントだけでも良いが、

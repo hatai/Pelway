@@ -59,25 +59,45 @@ if [[ -z "$src" ]]; then
   src="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 
+# 環境に GIT_DIR・GIT_WORK_TREE があると検査対象がずれるため捨てる
+unset GIT_DIR GIT_WORK_TREE
+
 [[ -d "$src" ]] || die "--from の checkout が無い: $src"
 [[ -d "$dst" ]] || die "--dest の worktree が無い: $dst"
-# 書き先を物理パスに固定する（dst 自身が symlink でも、書くのは辿った先の中だけ）
+# 両側を物理パスに固定する（symlink を辿った先で比べ、書くのも辿った先の中だけ）
+src="$(CDPATH='' cd "$src" && pwd -P)"
 dst="$(CDPATH='' cd "$dst" && pwd -P)"
 
-# 写す先が repo の外に出ないことを確かめる（写す元と先が repo の外に出ない、の受け入れ条件）。
-# dst は --from と同じ repo の worktree の最上位でなければならない。最上位でない場所や
-# repo の外のディレクトリ（$HOME・/tmp など）への書き出しをここで止める。
+# 写す元と先が repo の外に出ないことを確かめる（写す元と先が repo の外に出ない、の
+# 受け入れ条件）。src は本体の checkout（git-dir が git-common-dir そのものの最上位。
+# リンク済み worktree は写す元にしない）、dst は同じ repo に登録されたリンク済み
+# worktree の最上位。逆向き（local のある worktree → 本体）や repo の外への書き出しを止める。
+top_src="$(git -C "$src" rev-parse --show-toplevel 2>/dev/null)" \
+  || die "--from が git の checkout でない: $src"
+top_src="$(CDPATH='' cd "$top_src" && pwd -P)"
+[[ "$top_src" == "$src" ]] \
+  || die "--from が checkout の最上位でない: $src"
+gd_src="$(git -C "$src" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
+  || die "--from の git-dir が読めない: $src"
+common_src="$(git -C "$src" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+  || die "--from の git-common-dir が読めない: $src"
+gd_src="$(CDPATH='' cd "$gd_src" && pwd -P)"
+common_src="$(CDPATH='' cd "$common_src" && pwd -P)"
+[[ "$gd_src" == "$common_src" ]] \
+  || die "--from が本体の checkout でない（リンク済み worktree は写す元にしない）: $src"
 top_dst="$(git -C "$dst" rev-parse --show-toplevel 2>/dev/null)" \
   || die "--dest が git の worktree でない: $dst"
 top_dst="$(CDPATH='' cd "$top_dst" && pwd -P)"
 [[ "$top_dst" == "$dst" ]] \
   || die "--dest が worktree の最上位でない（$dst の属する worktree の最上位は $top_dst）"
-common_src="$(git -C "$src" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
-  || die "--from が git の checkout でない: $src"
+gd_dst="$(git -C "$dst" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
+  || die "--dest の git-dir が読めない: $dst"
 common_dst="$(git -C "$dst" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
-  || die "--dest が git の worktree でない: $dst"
-common_src="$(CDPATH='' cd "$common_src" && pwd -P)"
+  || die "--dest の git-common-dir が読めない: $dst"
+gd_dst="$(CDPATH='' cd "$gd_dst" && pwd -P)"
 common_dst="$(CDPATH='' cd "$common_dst" && pwd -P)"
+[[ "$gd_dst" != "$common_dst" ]] \
+  || die "--dest がリンク済み worktree でない（本体の checkout には書かない）: $dst"
 [[ "$common_src" == "$common_dst" ]] \
   || die "--dest が --from と同じ repo の worktree でない"
 
@@ -103,8 +123,18 @@ for name in agent-team.toml agent-team.local.toml; do
     echo "worktree-setup: skip $name（本体側が通常ファイルでない）"
     continue
   fi
-  cp -- "$from" "$to"
-  copied=$((copied + 1))
-  echo "worktree-setup: copied $name"
+  # 存在の確認と作成を分けない: noclobber のリダイレクト（O_EXCL|O_CREAT）で
+  # 「無いときだけ作る」を一操作にする。同名が並行して作られても上書きせず、
+  # 切れた symlink の先にも追従して書かない。
+  if ( set -o noclobber; cat -- "$from" >"$to" ) 2>/dev/null; then
+    copied=$((copied + 1))
+    echo "worktree-setup: copied $name"
+  elif [[ -e "$to" || -L "$to" ]]; then
+    echo "worktree-setup: skip $name（worktree 側に既にある）"
+  elif [[ "$name" == agent-team.toml ]]; then
+    die "worktree 側に $name を作れない（書き込みに失敗）"
+  else
+    echo "worktree-setup: skip $name（worktree 側への書き込みに失敗）"
+  fi
 done
 echo "worktree-setup: ok（写した $copied 件）"

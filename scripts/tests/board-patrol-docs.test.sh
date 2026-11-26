@@ -102,6 +102,26 @@ check cond7_toml_ref_implement_issue .agents/skills/implement-issue/SKILL.md \
 check cond7_toml_ref_details docs/agents/command-team-details.md \
   'agent-team.toml'
 
+# 条件8（Issue #804）: 開発者ごとの上書き（agent-team.local.toml）の表・重ねた結果を
+# 読む規則・未決事項（needs-decision への引き継ぎ）が正本に書かれている。
+check cond8_override_table docs/superpowers/specs/agent-team.md \
+  'agent-team.local.toml' \
+  '上書き可' \
+  '上書き不可' \
+  'needs-decision'
+check cond8_merged_read_implement .agents/skills/implement-issue/SKILL.md \
+  'agent-team.local.toml' \
+  'effective'
+check cond8_merged_read_command_team .agents/skills/command-team/SKILL.md \
+  'agent-team.local.toml' \
+  'effective'
+check cond8_merged_read_runbook docs/agents/grokbot-runbook.md \
+  'agent-team.local.toml' \
+  'effective'
+check cond8_setup_doc docs/dev-environment.md \
+  'agent-team.local.toml' \
+  'worktree-setup'
+
 # 条件7b: command-team-details の調査の数え方に、停止中・再開処理中・再開待ちの
 # 除外と agent:devin による内訳がある。
 check cond7b_details_count docs/agents/command-team-details.md \

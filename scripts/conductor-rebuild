@@ -224,14 +224,14 @@ if [[ "$new_wt" == - ]]; then
   exit 1
 fi
 
-# 新しい指揮役の worktree に agent-team.toml が揃っていることを確かめる（Issue #804）。
-# 基点が古くて worktree に無いときは本体の checkout から写す。写せなければ
-# 旧指揮役を止める前にここで止まる（枠を読めない conductor に引き継がせない）
-if [[ ! -f "$new_wt/agent-team.toml" ]]; then
-  echo "conductor-rebuild: $new_wt に agent-team.toml が無いため本体の checkout から写す" >&2
-  T3CODE_PROJECT_ROOT="$project" "$(dirname "$0")/worktree-setup" --dest "$new_wt" >&2 \
-    || die "cannot provide agent-team.toml in the new conductor's worktree $new_wt; nothing was sent to the old conductor and the registration is unchanged"
-fi
+# 新しい指揮役の worktree に agent-team の設定を揃える（Issue #804）。
+# worktree-setup は worktree に無い agent-team.toml を本体の checkout から写し、
+# 追跡しない agent-team.local.toml も本体にあれば持ち越す（T3 のアクションを
+# 取り込んでいない環境でも、開発者ごとの上限・担当の上書きを失わない）。
+# worktree-setup が失敗したり写せなければ、旧指揮役を止める前にここで止まる
+# （枠を読めない conductor に引き継がせない）
+T3CODE_PROJECT_ROOT="$project" "$(dirname "$0")/worktree-setup" --dest "$new_wt" >&2 \
+  || die "cannot provision agent-team.toml/agent-team.local.toml in the new conductor's worktree $new_wt; nothing was sent to the old conductor and the registration is unchanged"
 [[ -f "$new_wt/agent-team.toml" ]] \
   || die "agent-team.toml is missing in the new conductor's worktree $new_wt; nothing was sent to the old conductor and the registration is unchanged"
 

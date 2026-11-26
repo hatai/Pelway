@@ -3,7 +3,7 @@
   "scripts": [
     {
       "name": "worktree-setup",
-      "command": "\"${T3CODE_PROJECT_ROOT:?}/scripts/worktree-setup\"",
+      "command": "bash -c '\"${T3CODE_PROJECT_ROOT:?}/scripts/worktree-setup\"'",
       "icon": "configure",
       "runOnWorktreeCreate": true,
       "async": false

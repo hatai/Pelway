@@ -500,6 +500,42 @@ check "23: broken shared still fails first" eq "$rc" "1"
 check "23: shared errors reported on shared file" bash -c "grep -qF '$ROOT/unknown.toml' '$ROOT/err' && grep -q zed '$ROOT/err'"
 rm "$ROOT/agent-team.local.toml" "$ROOT/agent-team.toml"
 
+# 24: local が symlink のときは（先が通常ファイルでも）重ねずに警告する
+write_case "$ROOT/l24.toml" < <(dev_case)
+ln -s /etc/hostname "$ROOT/agent-team.local.toml"
+s_run "$ROOT/l24.toml"; rc=$?
+check "24: symlink local: slots exits 0" eq "$rc" "0"
+check "24: symlink local: warns and does not overlay" has "$ROOT/err" "agent-team.local.toml"
+check "24: symlink local: output unchanged" eq "$(grep -cx 'devin 4' "$ROOT/out")" "1"
+rm "$ROOT/agent-team.local.toml"
+
+# 25: use から外した担当の項目を local が明示したときは、黙って落とさず検証にかける
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[developers.dev]
+use = ["opencode", "devin", "claude"]
+
+[developers.dev.slots]
+codex = 5
+
+[developers.dev.priority.review]
+high_risk = ["claude"]
+EOF
+s_run "$ROOT/l24.toml"; rc=$?
+check "25: explicit out-of-use slot is validated, not dropped" eq "$rc" "1"
+check "25: error names the key" has "$ROOT/err" "developers.dev.slots.codex"
+rm "$ROOT/agent-team.local.toml"
+
+# 26: use が高リスクのレビュー担当を全て外すとき、検証で止まる前に
+# 担当不足の警告（needs-decision への引き継ぎの根拠）が出る
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[developers.dev]
+use = ["opencode", "devin"]
+EOF
+s_run "$ROOT/l24.toml"; rc=$?
+check "26: emptied high_risk fails validation" eq "$rc" "1"
+check "26: staffing warning precedes the failure" has "$ROOT/err" "高リスクのレビュー担当"
+rm "$ROOT/agent-team.local.toml"
+
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
   exit 1

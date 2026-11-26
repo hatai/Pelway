@@ -711,7 +711,7 @@ if os.path.isfile("agent-team.toml"):
                 # 開発者ごとの上書き（agent-team.local.toml、Issue #804）が重なっているときは
                 # その存在を 1 行で出す。上書きできる・できない項目の決まりは
                 # agent-team.md の「開発者ごとの上書き」。出すのはあるときだけ
-                if os.path.isfile("agent-team.local.toml"):
+                if os.path.isfile("agent-team.local.toml") and not os.path.islink("agent-team.local.toml"):
                     slots_lines.append("SLOTS overlay agent-team.local.toml")
                 slots_st, slots_reason, slots_sig = "ok", None, "|".join(slots_lines)
         except Exception as e:
