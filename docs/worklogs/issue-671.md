@@ -67,3 +67,13 @@
 5. 改善案: .agents/skills/implement-issue/SKILL.md の手順 6 の pr-size の段落に「pre-push ゲートがあるため、上限を超えた head は push できない。手元のコミットの SHA と行数を Issue に書いて止める」と書くと、相談のための push を試みずに済む
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 10）
+対象 head: b742f4a4（1660f9f5 の codex request-changes への修正。claude は同 head で approve）
+1. 詰まった箇所: main（#721 の patrol-items.json/slots）との merge で、SLOTS 公開コードが使う `secrets` が本体 import 行から落ち（自動マージで当方の行が残った）、conductor-watch-slots が 28 件失敗。import に足して解消。同試験が偽リポジトリに patrol-state-update をコピーしていなかったため共通手順の呼び出しが常に失敗し、さらに 2 件（state.json の updated_at の欠落）に残った — コピーに追加して解消
+2. 曖昧だった文: なし（must-fix「呼び出し時の例外を write-failed として扱う」はそのまま実装）
+3. 仮定と解釈: タイムアウトの試験を可能にするため、`PELWAY_WATCH_*` の試験用差し替えの慣例（`PELWAY_WATCH_HEARTBEAT_SECS` など）に合わせて `PELWAY_WATCH_PS_UPDATE_TIMEOUT` を足した（既定 30 秒は不変）。起動失敗の OSError は偽リポジトリで再現できる形が無い（`sys.executable` 自体の起動失敗のみ）ため、試験はタイムアウト経路だけにした — 同じ except 節で OSError も拾う。印の無い nit（子プロセスへの `-I`、security-review でも同じ指摘）は前 round と同じく決まりどおり対象外
+4. 足りなかった情報・検証手段: なし
+5. 改善案: script-test の逐次実行でも patrol-state-update.test.sh が 1 回だけ落ちることがあった（直後の 2 回の単独実行と script-test 再実行では全パス。時刻依存のフレークの可能性）
+
+使ったスキル: implement-issue
