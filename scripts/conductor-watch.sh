@@ -1195,6 +1195,15 @@ for it in raw_items:
 
 body = {"version": 1, "fetched_at": now,
         "project": f"users/{OWNER}/projects/{NUM}", "items": items}
+payload = json.dumps(body, ensure_ascii=False)
+# 容量の契約は reader（scripts/board-snapshot-read）と同じ 4 MiB。
+# 上限を超えた書き出しは reader が必ず broken と読むため、公開すると
+# 有効な前回分が失われる。超えたときは公開せず前回分を残す
+# （PELWAY_BOARD_SNAPSHOT_MAX_BYTES はテスト用）
+try: max_bytes = int(os.environ.get("PELWAY_BOARD_SNAPSHOT_MAX_BYTES") or 4194304)
+except ValueError: max_bytes = 4194304
+if len(payload.encode("utf-8")) > max_bytes:
+    failed("too-large")
 # 一時ファイルは予測不能な名前を O_EXCL|O_NOFOLLOW で作り、置き換えで公開する
 # （symlink で外のファイルを上書きさせない。書き込み途中を読ませない）。
 d = os.path.dirname(os.path.abspath(snap_path)) or "/"
@@ -1205,7 +1214,7 @@ try:
 except OSError:
     failed("write")
 with os.fdopen(fd, "w") as f:
-    json.dump(body, f, ensure_ascii=False)
+    f.write(payload)
 try:
     os.replace(os.path.join(d, tmp), os.path.join(d, name))
 except OSError:

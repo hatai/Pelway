@@ -16,7 +16,8 @@
 reason の意味:
 - missing: 書き出しが無い（見張りが一度も書いていない・置き場が違う）
 - broken: 書き出しが読めない・形が違う（symlink や通常でないファイルを含む。
-  たどって読まない）・未来の時刻が書かれている
+  たどって読まない）・所有者が自分でない・時計のずれ（60 秒）を超える
+  未来の時刻が書かれている
 - stale: 書き出しが古すぎる（取得時刻が PELWAY_BOARD_SNAPSHOT_MAX_AGE 秒を
   超えて古い。既定 960 秒 = 巡回間隔 8 分の 2 倍。runbook の節と同じ値で、
   変えるときは両方を直す）
@@ -25,6 +26,7 @@ reason の意味:
 - PELWAY_BOARD_SNAPSHOT: 読む書き出しのパス（既定 /tmp/pelway-board-snapshot.json）
 - PELWAY_BOARD_SNAPSHOT_MAX_AGE: 新しいとみなす上限の秒数（既定 960）
 - PELWAY_BOARD_SNAPSHOT_NOW: 「今」の epoch 秒（既定は現在時刻）
+- PELWAY_BOARD_SNAPSHOT_EXPECT_UID: 所有者と比べる uid（既定は自分の euid）
 """
 import json
 import math
@@ -47,8 +49,10 @@ def envfloat(name, default):
 
 
 def out(obj, rc):
-    json.dump(obj, sys.stdout, ensure_ascii=False)
-    sys.stdout.write("\n")
+    # 出力は必ず JSON 1 件。標準出力に触れる前に全体を組み立ててから 1 回で書く
+    # （単独のサロゲートを含む文字列があると、途中まで書いて失敗し、
+    # 成功の出力の後ろに失敗の JSON が続いてしまう。ensure_ascii で ASCII に限る）
+    sys.stdout.write(json.dumps(obj, ensure_ascii=True) + "\n")
     sys.exit(rc)
 
 
@@ -94,6 +98,19 @@ def _main():
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode):
             fail("broken", detail="not-regular", path=path)
+        # 所有者が自分でなければ壊れた書き出しとして扱う。共有の置き場では
+        # 別の uid の利用者が見張りより先に書き出しを置け、sticky bit で
+        # 見張りの置き換えが効かなくなる。所有者を確かめないと偽の列
+        # （着手の合図の Todo・停止の Backlog）を本物と読んでしまう。
+        # 同じ uid でこの場所に書ける者は、既存のボード更新キューに要求を
+        # 置ける者と同じ信頼の前提の内側にある（runbook の節）。
+        expect = os.environ.get("PELWAY_BOARD_SNAPSHOT_EXPECT_UID")
+        try:
+            euid = int(expect) if expect else os.geteuid()
+        except ValueError:
+            euid = os.geteuid()
+        if st.st_uid != euid:
+            fail("broken", detail="foreign-owner", path=path)
         data = f.read(SNAP_MAX + 1)
     if len(data) > SNAP_MAX:
         fail("broken", detail="too-large", path=path)

@@ -152,6 +152,37 @@ PY
 run_read
 check "draft issue without number is ok" test "$rc" -eq 0
 
+# 8. 所有者が自分でない書き出しは broken（detail: foreign-owner）にする。
+# 共有の置き場では別の uid の利用者が見張りより先に書き出しを置け、
+# sticky bit で見張りの置き換えが効かなくなる。所有者を確かめないと、
+# 偽の列（着手の合図の Todo・停止の Backlog）を本物と読んでしまう。
+# 比べる uid は PELWAY_BOARD_SNAPSHOT_EXPECT_UID で差し替える（テスト用）。
+write_ok_snapshot $((NOW - 60))
+export PELWAY_BOARD_SNAPSHOT_EXPECT_UID=99999
+run_read
+check "foreign-owner: exit nonzero" test "$rc" -ne 0
+check "foreign-owner: reason is broken" test "$(jqv 'd["reason"]')" = "broken"
+check "foreign-owner: detail is foreign-owner" test "$(jqv 'd.get("detail")')" = "foreign-owner"
+check "foreign-owner: items not exposed" test "$(jqv '"items" not in d')" = "True"
+own_uid="$(id -u)"
+export PELWAY_BOARD_SNAPSHOT_EXPECT_UID="$own_uid"
+run_read
+check "owner match: exit 0" test "$rc" -eq 0
+unset PELWAY_BOARD_SNAPSHOT_EXPECT_UID
+
+# 9. 単独のサロゲートを含む文字列が書き出しにあっても、出力は JSON 1 件に保つ。
+# Python の JSON 読み取りと文字列の型検査は通るが UTF-8 の標準出力には書けないため、
+# 成功の出力の途中に失敗の JSON が続くと、出力が JSON 1 件にならない
+python3 -I - "$SNAP" "$NOW" <<'PY'
+import json, sys
+items = [{"id": "PVTI_s", "type": "Issue", "number": 1, "status": "Todo\ud800",
+          "labels": [], "assignees": []}]
+json.dump({"version": 1, "fetched_at": float(sys.argv[2]) - 60, "items": items}, open(sys.argv[1], "w"))
+PY
+run_read
+check "surrogate: stdout is a single valid json" python3 -c 'import json,sys; json.loads(open(sys.argv[1], encoding="utf-8").read())' "$ROOT/out.json"
+check "surrogate: no traceback" test ! -s "$ROOT/err.txt"
+
 printf '\n'
 if ((${#failures[@]})); then
   printf 'failed: %s\n' "${failures[@]}" >&2

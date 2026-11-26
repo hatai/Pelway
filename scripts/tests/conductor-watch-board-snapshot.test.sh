@@ -2,8 +2,10 @@
 # scripts/conductor-watch.sh のボード読み取りスナップショット（Issue #814）のテスト。
 # モック gh が item-list の応答を返し、見張りが人間名義の gh でボードを読んで
 # スナップショット JSON を書き出すこと、取得に失敗した巡回では前の書き出しが
-# 残ること（消えない・空にならない）、新しい書き出しがあるうちは取り直さない
-# ことを確かめる。本物のボードには触れない。
+# 残ること（消えない・空にならない）、間隔の管理はプロセス内の記憶だけで行い
+# 共有の書き出しの内容では取り直しを止めないこと、打ち切られた応答は件数で
+# 取り直すこと、容量の上限を超える書き出しは公開しないことを確かめる。
+# 本物のボードには触れない。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -121,6 +123,7 @@ start_watch() {
   PELWAY_PATROL_STATE="$ROOT/state/pelway/patrol-state.json" \
   PELWAY_BOARD_SNAPSHOT="$SNAP" PELWAY_BOARD_SNAPSHOT_INTERVAL="$interval" \
   PELWAY_BOARD_SNAPSHOT_FIRST_LIMIT="${FIRST_LIMIT:-}" \
+  PELWAY_BOARD_SNAPSHOT_MAX_BYTES="${MAXBYTES:-}" \
     bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
   WPID=$!
   wait "$WPID" 2>/dev/null; WPID=""
@@ -199,6 +202,19 @@ before="$(cat "$SNAP")"
 BADITEM=1 INTERVAL=0 start_watch 2
 check "bad item not published" test "$(cat "$SNAP")" = "$before"
 check "bad item logged" has "$ROOT/out.log" "snapshot-failed"
+
+# 9. 書き出しが上限（reader と同じ 4 MiB。試験では PELWAY_BOARD_SNAPSHOT_MAX_BYTES で
+#    小さくする）を超えるときは公開せず、前の書き出しを残して理由を記録する。
+#    上限を超えた書き出しで前回分を置き換えると、reader はそれを必ず broken と
+#    読むため、有効な前回分が失われる（容量の契約は writer と reader で同じ）
+before="$(cat "$SNAP")"
+: > "$ROOT/out.log"
+INTERVAL=0 MAXBYTES=10 start_watch 2
+check "oversized snapshot not published" test "$(cat "$SNAP")" = "$before"
+check "oversized logged with reason too-large" has "$ROOT/out.log" "snapshot-failed reason=too-large"
+# 上限を戻せば次の巡回で公開できる（止まり続けない）
+INTERVAL=0 start_watch 2
+check "publish resumes after limit restored" test "$(jqv '[i["number"] for i in d["items"]]' "$SNAP")" = "[810, 811, 812]"
 
 printf '\n'
 if ((${#failures[@]})); then
