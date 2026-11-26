@@ -117,3 +117,15 @@
 5. 改善案: `client/README.md` に「外へ通信する Electron の既定（綴りの辞書など）は、空のプロファイル（`--user-data-dir`）で起動して確かめる」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（PR-2 round 7）
+
+対象 head: 6f40bb44abea2088c57f56358526c7c29ce62c93
+
+1. 詰まった箇所: `client/apps/desktop/src/main/security.ts` のコメント: 23 行目の `spellcheck: false` の説明「有効だと辞書を外から取りに行きうる」が、round 6 で分かった事実（取得を決めるのはセッションの辞書の一覧）と食い違っていた（Claude の `[文書のずれ]`）。`disableSpellChecker` の説明は、macOS では何もしないことが抜けていた（Codex の `[文書のずれ]`）。両方を直した。
+2. 曖昧だった文: 「窓を開く前に呼ぶ」（`disableSpellChecker` の説明）。止まるのは、既定のセッションを最初に読んだのと同じ同期の処理の中で一覧を空にしたときだけ（Claude の nit）。説明を「イベントループに戻る前に呼ぶ」に替え、`index.ts` の呼び出しの行にも動かさない理由を書いた。
+3. 仮定と解釈: 印の無い nit のうち、同じコメントの書き直しに入る呼ぶ時機の条件だけを一緒に直した。試験名の範囲（Codex）と `canary-bun.mjs` の自動試験（Claude）は直していない。
+4. 足りなかった情報・検証手段: macOS で何もしないことは Electron のソース（Codex のレビューの出典）に頼っている。macOS では起動していない。
+5. 改善案: `client/README.md` に「外へ通信する Electron の既定を止める処理は、`app.whenReady` の最初の同期の処理に置き、前に `await` を入れない」を足す。
+
+使ったスキル: `.agents/skills/implement-issue`
