@@ -22,7 +22,10 @@ run_setup() { bash "$REPO/scripts/worktree-setup" "$@" >"$ROOT/out" 2>"$ROOT/err
 # 一時の git リポジトリ: 初回コミットには agent-team.toml を置かず、2 回目で追加する
 # （基点が古い worktree に追跡ファイルが無い状況を作る）
 git -C "$ROOT" init -q main
-cd "$ROOT/main" && git commit -qm init --allow-empty && old="$(git rev-parse HEAD)"
+git -C "$ROOT/main" config user.name test
+git -C "$ROOT/main" config user.email test@example.invalid
+cd "$ROOT/main" || exit 1 # ここより下の echo はこのディレクトリへの書き込み（失敗時に呼び出し元の cwd を汚さない）
+git commit -qm init --allow-empty && old="$(git rev-parse HEAD)"
 echo '[agents.x]' > agent-team.toml
 echo 'use = []' > unrelated.txt
 git add agent-team.toml unrelated.txt && git commit -qm add-toml
