@@ -171,8 +171,10 @@ check "no worktree until the limit: stderr has the waited seconds" \
   grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
 check "no worktree until the limit: stderr gives the undecided cause and the T3 window check" \
   all_err "$ROOT/err" "準備中" "worktree なしで立てられ" "T3"
+# 最後に読んだ値を出す。期限の境目で読み取りが打ち切られたときは権限は読めず - と出る
+# （読み取りの所要時間は環境差があるため、どちらかに固定しない）
 check "no worktree until the limit: logs the last-read values" \
-  grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=auto-accept-edits worktree=-" "$ROOT/err"
+  grep -qE "conductor-rebuild: new conductor $NEW runtimeMode=(auto-accept-edits|-) worktree=-" "$ROOT/err"
 check "no worktree until the limit: tells how to continue" \
   all_err "$ROOT/err" "t3_thread_launch" "--to"
 

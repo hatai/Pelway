@@ -145,4 +145,6 @@ PR: #735
 3. nit の対応: なし（codex 0 件。claude の 1 件は同じ指摘を含むが印なし — `[文書のずれ]` でないため対象外）
 4. 仮定と解釈: 「実用的な上限」は 60 秒とした。下限は残りが尽きたあとの 1 回目の読み取りを締める猶予で、既定 2 秒に対し十分な幅。これ以上を指定する運用は意図が無いため、運用の値ではなく異常系として起動時に拒否する形にした
 
-試験の更新・追加: 「first timeout <400-digit>」「first timeout 61」（ともに拒否。読み取り・送信なし・登録不変。計 175 件 pass）。`scripts/red-check 0ec024d --keep scripts/tests/conductor-rebuild.test.sh` で前の実装だとこの 2 グループ 8 件が落ちることを確かめた（「no worktree until the limit: logs the last-read values」が 1 件、経過秒の表示の境目の競合で稀に落ちる既存の試験。変更とは無関係）
+試験の更新・追加: 「first timeout <400-digit>」「first timeout 61」（ともに拒否。読み取り・送信なし・登録不変。計 175 件 pass）。`scripts/red-check 0ec024d --keep scripts/tests/conductor-rebuild.test.sh` で前の実装だとこの 2 グループ 8 件が落ちることを確かめた
+
+push 後の CI で既存の「no worktree until the limit: logs the last-read values」が落ちた（red-check でも稀に見えていた境目の競合）: 期限の境目で最後の読み取りが打ち切られると権限は読めずログが `runtimeMode=-` になるが、試験は `auto-accept-edits` に固定していた。読み取りの所要時間は環境差があるため、境目のどちら側に落ちるかは決まらない。`runtimeMode=(auto-accept-edits|-)` のどちらでも受ける形に直した（値は読み取りの結果か - だけで、欠落や別の値は引き続き落ちる）
