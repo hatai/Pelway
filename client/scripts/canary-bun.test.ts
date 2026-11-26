@@ -41,12 +41,17 @@ describe("findCanaryBinary", () => {
     expect(findCanaryBinary(client, TARGET, "linux")).toBeUndefined();
   });
 
-  test("client/node_modules の中のシンボリックリンクが外を指すときは返さない", () => {
+  test("client/node_modules の中の包みの bin が外を指すときは返さない", () => {
     const { root, client } = makeTree();
-    const outside = join(root, "outside", `bun-${TARGET}`);
-    makeBinaryPackage(outside);
-    mkdirSync(join(client, "node_modules", "@oven"), { recursive: true });
-    symlinkSync(outside, join(client, "node_modules", "@oven", `bun-${TARGET}`), "dir");
+    // 包みは中に実体で置き（解決は中で成功する）、bin だけを外へ向ける。
+    // Windows でも権限の要らないジャンクションで作る（POSIX では type は無視されシンボリックリンクになる）。
+    const outsideBin = join(root, "outside", "bin");
+    mkdirSync(outsideBin, { recursive: true });
+    writeFileSync(join(outsideBin, "bun"), "");
+    const pkg = join(client, "node_modules", "@oven", `bun-${TARGET}`);
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), `{"name":"@oven/bun-${TARGET}"}`);
+    symlinkSync(outsideBin, join(pkg, "bin"), "junction");
     expect(findCanaryBinary(client, TARGET, "linux")).toBeUndefined();
   });
 
