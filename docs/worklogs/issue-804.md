@@ -21,7 +21,7 @@ PR: （draft PR の番号）
 
 ## レビュー対応（round 2）
 
-対象 head: <新しい head>
+対象 head: 40e1df20
 レビュー: claude_review（claude-opus-5-5 / effort=high、run=7195782538）の verdict: request-changes（must-fix 5、nit 6）
 
 must-fix への対応:
