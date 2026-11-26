@@ -26,6 +26,8 @@
 
 ## 実装者メモ（round 3）
 
+対象 head: f64a8efaf7e00c9a75817ed2e0a425d58e13e653（この round の変更を含むコミット。`scripts/agent-gh-resign` は main の merge コミットがあるため署名付け替えを行わず、push 後も同じ SHA。このメモを完成させるコミットの親）
+
 1. 詰まった箇所: round 2 の Approve に残った `[文書のずれ]` は、調査の報告 PR が `docs/worklogs/` だけの差でも、印の無い worktree では新しい門に止められるという不整合だった。
 2. 曖昧だった文: 「investigate-bug の報告 PR を出す段にどちらで push するかを足し、dev-environment.md:88 に「印が無ければ docs/worklogs/ の下だけの差でも止まる」を足す。」（PR #832、claude_review の round 2）
 3. 仮定と解釈: 調査の報告 PR も実装と同じく、原則は `mise run verify` を成功させて印を残してから push する。調査と無関係の失敗が変わらないときだけ `PELWAY_AGENT_SKIP_VERIFY_GATE=1` を使い、PR 本文に残す。
