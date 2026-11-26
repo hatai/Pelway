@@ -93,3 +93,15 @@
 5. 改善案: `client/README.md` の列挙を、最初のチャンネルを足す Issue で `packages/contracts` の型の注記に移し、README からはその型を指すだけにする。
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（PR-2 round 5）
+
+対象 head: 9b5462cf9cb345c159d7a4c9953ec3331c86c7bc
+
+1. 詰まった箇所: hatai の指示（「codex を待つ間に nit を対応して」）で、#744 と #743 のレビューの印の無い nit をまとめて直した。`security.ts` の遷移の判定は、Electron 45 の `will-navigate`・`will-redirect` で非推奨の 2 番目の `url` 引数を読んでいたので、1 番目の引数 `details.url` に替え、`will-frame-navigate` にも同じ判定をかけた。試験の偽物は、`details.url` と違う値を非推奨の引数に入れて、どちらを読んでいるかを見分ける形にした。
+2. 曖昧だった文: 「frame-ancestors は `<meta>` の CSP では無視される」（Claude の nit）。`protocol.handle` の応答のヘッダーで出す案もあったが、窓は他のページに埋め込まれないので、消すだけにした。CSP の試験に、`frame-ancestors` を書かないことを足した。
+3. 仮定と解釈: `spellcheck` は使わないので `false` にした（後続の Issue に回す案もあったが、1 行で決まるのでここで決めた）。`canary-bun.mjs` は、本体の実パスが `client/node_modules` の下にあるときだけ起動する。web の tsconfig から bun の型（Node の型を含む）を外し、試験のファイルは `tsconfig.test.json` で見る。`trustedDependencies: []` は `ignoreScripts` に重ねて置いた。
+4. 足りなかった情報・検証手段: 外の `node_modules` にだけ本体があるときの確認は、スクラッチに `bun` と `@oven/bun-linux-x64` を置いた木を作って行った（exit 1）。スクリーンショットは引き続き API で貼れない。
+5. 改善案: `client/README.md` の「道具」に、tsconfig の 4 つ（base・node・web・test）の分け方を書き足す（最初に画面の Issue を立てるときに）。
+
+使ったスキル: `.agents/skills/implement-issue`
