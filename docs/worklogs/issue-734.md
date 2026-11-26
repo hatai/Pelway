@@ -81,3 +81,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「`git grep` で使っていないことを確かめる条件は、文書がその名前を挙げると空にならないので、対象をコードのファイルに絞る（`-- '*.ts' '*.tsx'`）」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（PR-2 round 4）
+
+対象 head: 3f745a735de7471d4af2a866e5702f1238b0015a
+
+1. 詰まった箇所: `client/README.md` の「IPC のチャンネルを足すとき」: round 3 で名前を外した列挙が、`app` のヘルパー（バージョン・名前・パス・終了）を落とし、「画面」が renderer の意味と紛らわしかった（Claude の `[文書のずれ]` の nit）。「アプリの情報と終了」を足し、`screen` は「ディスプレイの情報」と書いた。
+2. 曖昧だった文: 「組み込みの `octane:*` のチャンネルに頼るフックとヘルパー（…）は使わない」（`client/README.md`）。「など」を外すと列挙がすべてに読めるので、`@octanejs/electron` の `OctaneElectronAPI` の 7 つのまとまり（app・window・dialog・shell・clipboard・nativeTheme・screen）を全部書いた。
+3. 仮定と解釈: `[文書のずれ]` の印の nit だけを直した（README と PR 本文の実装者メモの round の表記）。
+4. 足りなかった情報・検証手段: なし。`git grep -n -E 'useWindowState|useNativeTheme|windowControls' client/` は出力なし、`mise run verify` は exit 0。
+5. 改善案: `client/README.md` の列挙を、最初のチャンネルを足す Issue で `packages/contracts` の型の注記に移し、README からはその型を指すだけにする。
+
+使ったスキル: `.agents/skills/implement-issue`
