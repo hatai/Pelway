@@ -45,7 +45,7 @@ jobs:
 
       # mise.toml の全ツール（rust など）は入れず、このジョブで使う CLI だけを --locked で入れる。
       - name: Setup mise (official action)
-        uses: jdx/mise-action@v5.2.7
+        uses: jdx/mise-action@v5.2.9
         with:
           version: v2026.11.5
           install: false
@@ -92,7 +92,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup mise (official action)
-        uses: jdx/mise-action@v5.2.7
+        uses: jdx/mise-action@v5.2.9
         with:
           version: v2026.11.5
           install: false
