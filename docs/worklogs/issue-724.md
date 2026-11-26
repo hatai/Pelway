@@ -24,3 +24,15 @@
 5. 改善案: `.agents/skills/review-pr/SKILL.md` の「終わりの報告」に、`error:` 行の定型の一覧と新 2 形式の優先順位を表 1 つにまとめる（本文が長くなったため）。
 
 使ったスキル: implement-issue, write-pull-request
+
+## 実装者メモ（round 3）
+
+対象 head: 85120f1303cb0b66afcf9d4de6750c1ca54311f0
+
+1. 詰まった箇所: `mise run verify`: 既知の環境起因 6 件（verify-pelway。round 1 のメモの 1 を参照）に加え、`scripts/tests/conductor-watch-decision.test.sh` の test 16 が 1 件失敗した。単独再実行では all passed（exit=0）で、実行ごとに失敗箇所が変わるため環境起因の揺らぎと判断した。自分の 2 本のテストは verify の中で両方 `ok`。`mise run pr-size`: `+136 / -1`。
+2. 曖昧だった文: 「上の材料に security-review を行うかどうかを加えた材料（…）」と書くか、「上と同じ」を消す（PR #730 の round 2 の Codex レビューの nit）— 2 つの案のどちらでも reviewer の指摘は解消する。Claude の nit は「次の表の条件に従って」など表で確認する書き方を提案していた。
+3. 仮定と解釈: この round は Approve の後の `[文書のずれ]` の nit のみを直す round（implement-issue 手順 9「Approve のとき」1。修正の回数の上限に数えない）と解釈した。選んだ解釈は Codex 案の「上の材料（追加行数、高リスクかどうか、レビューの回数）に security-review を行うかどうかを加えて」（Claude 案の表参照の書き換えより、直前の effort の規則との対応関係が明示されるため）。wording pin `a_materials` を新しい文言に合わせた。
+4. 足りなかった情報・検証手段: conductor-watch-decision の test 16 の揺らぎの原因（並行実行の負荷かタイミング依存か）を切り分ける手段が無い。単独実行で通ることしか確認できない。
+5. 改善案: `scripts/tests/conductor-watch-decision.test.sh` の test 16 に、タイミング依存と思われる箇所の待ちの明記（失敗が verify の並行実行でだけ起きる場合の再現条件）。
+
+使ったスキル: implement-issue
