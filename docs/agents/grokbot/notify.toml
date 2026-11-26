@@ -1,0 +1,38 @@
+# Grok Bot の webhook に届く通知の送り手の一覧（#737）。
+# 値（webhook の URL・鍵そのもの）は書かない。書くのは送り手の名前、schema、
+# 秘密の出どころ（GitHub Secret 名、または fnox 設定のパスとキー名）、受け手のルーティン名だけ。
+# 受け手のルーティンは Grok Bot 側の設定でリポジトリには現れない。名前と持ち主は
+# 開発リードの棚卸し（#740、2026-11-26 時点）に依る。payload の中身は docs/agents/notify-payloads.md。
+
+[[senders]]
+# pitchfork で常駐する見張り役（crates/pelway-agent-watch）。T3 のスレッドの状態変化を送る。
+name = "agent-watch"
+schema = "pelway.agent-watch/v1"
+receiver_routine = "Pelway エージェント完了通知" # webhook ルーティン。持ち主は開発リード
+
+[senders.secret_source]
+kind = "fnox"
+config = "~/.config/pelway-agent-notify/fnox.toml" # 上書きは環境変数 PELWAY_NOTIFY_FNOX_CONFIG（絶対パスのみ）
+keys = ["PELWAY_NOTIFY_WEBHOOK_URL", "PELWAY_NOTIFY_WEBHOOK_KEY"]
+# 値は通知専用の age 鍵（既定 ~/.config/pelway-agent-notify/age.txt）で暗号化する。人ごと。
+
+[[senders]]
+# .github/workflows/notify-grokbot.yml。PR・レビュー・CI の出来事を送る。
+name = "notify-grokbot"
+schema = "pelway.github-notify/v2"
+receiver_routine = "GitHub 通知の受け口" # 名前は棚卸し時点で未確認。持ち主は開発リード（未確認）
+
+[senders.secret_source]
+kind = "github-secrets"
+names = ["GROKBOT_WEBHOOK_URL", "GROKBOT_WEBHOOK_AUTH"] # 共通の webhook 1 つ（案C）。人ごとではない
+
+# Claude Code のフック（schema とキー名は #741 で決まる。決まったら下を有効にする）
+# [[senders]]
+# name = "claude-code-hook"
+# schema = "<#741 で決める>"
+# receiver_routine = "Claude Code の知らせの受け口" # 名前は棚卸し時点で未確認。持ち主は Claude Code 通知係
+#
+# [senders.secret_source]
+# kind = "fnox"
+# config = "~/.config/pelway-agent-notify/fnox.toml" # agent-watch と同じ通知用の設定
+# keys = ["<#741 で決める>"]
