@@ -39,6 +39,7 @@ pub fn parse_show(json: &str) -> Result<ThreadDetail, String> {
         run_count: count("runCount"),
         pending_requests: count("pendingRequestCount"),
         last_assistant_text,
+        created_by: text("createdBy"),
     })
 }
 
@@ -92,5 +93,49 @@ mod tests {
         assert_eq!(d.branch, None);
         assert_eq!(d.pending_requests, 1);
         assert_eq!(d.last_assistant_text, None);
+    }
+
+    #[test]
+    fn list_reads_created_by() {
+        let l = parse_list(
+            r#"[{"threadId":"a","status":"completed","updatedAt":"t","createdBy":"user"},
+                {"threadId":"b","status":"running","updatedAt":"t","createdBy":"agent"}]"#,
+        )
+        .unwrap();
+        assert_eq!(l[0].created_by.as_deref(), Some("user"));
+        assert_eq!(l[1].created_by.as_deref(), Some("agent"));
+    }
+
+    #[test]
+    fn list_missing_or_odd_created_by_is_none() {
+        let l = parse_list(
+            r#"[{"threadId":"a","status":"completed","updatedAt":"t"},
+                {"threadId":"b","status":"running","updatedAt":"t","createdBy":null},
+                {"threadId":"c","status":"running","updatedAt":"t","createdBy":42}]"#,
+        )
+        .unwrap();
+        assert_eq!(l[0].created_by, None);
+        assert_eq!(l[1].created_by, None);
+        assert_eq!(l[2].created_by, None);
+    }
+
+    #[test]
+    fn show_reads_created_by() {
+        let d = parse_show(r#"{"thread":{"threadId":"a","status":"completed","updatedAt":"t","branch":null,
+          "providerInstanceId":"opencode","model":"m","runCount":1,"pendingRequestCount":0,"link":"l",
+          "createdBy":"user","creationSource":"ui"},"messages":[]}"#)
+        .unwrap();
+        assert_eq!(d.created_by.as_deref(), Some("user"));
+    }
+
+    #[test]
+    fn show_missing_or_odd_created_by_is_none() {
+        for json in [
+            r#"{"thread":{"threadId":"a","status":"completed","updatedAt":"t"},"messages":[]}"#,
+            r#"{"thread":{"threadId":"a","status":"completed","updatedAt":"t","createdBy":null},"messages":[]}"#,
+            r#"{"thread":{"threadId":"a","status":"completed","updatedAt":"t","createdBy":42},"messages":[]}"#,
+        ] {
+            assert_eq!(parse_show(json).unwrap().created_by, None, "{json}");
+        }
     }
 }

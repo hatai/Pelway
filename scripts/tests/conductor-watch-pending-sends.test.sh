@@ -16,6 +16,7 @@ export MOCK  # モックの t3・sleep が応答ファイルを見つけるた�
 T0=1764000000  # 巡回時刻の基準（PELWAY_WATCH_NOW に書き込む epoch 秒）
 mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$MOCK" "$ROOT/state/pelway" "$ROOT/queue"
 cp "$REPO/scripts/conductor-watch.sh" "$ROOT/repo/scripts/"
+cp "$REPO/scripts/patrol-state-update" "$ROOT/repo/scripts/"
 git init -q "$ROOT/repo"
 PELWAY="$ROOT/repo/.git/pelway"
 STATE="$PELWAY/patrol-state.json"

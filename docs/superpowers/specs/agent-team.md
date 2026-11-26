@@ -1,6 +1,6 @@
 # AI 開発チームの運用仕様
 
-指揮役（正本は Grok Bot）・T3 Code・opencode（glm-5.3）・Devin CLI（SWE-2）・Codex・Claude で組む開発チームの運用ルール。人間の手間を最小にし、品質を保ち、指揮役のトークン消費を抑えることを目的とする。この文書は体制と上限の正本で、イベントごとの対応は `docs/agents/grokbot-runbook.md`、指揮役の判断の手順は skill `command-team` に置く。
+指揮役（正本は Grok Bot）・T3 Code・opencode・Devin CLI・Codex・Claude で組む開発チームの運用ルール。人間の手間を最小にし、品質を保ち、指揮役のトークン消費を抑えることを目的とする。この文書は体制の正本で、同時数の上限と担当の登録情報（T3 の provider インスタンス名・モデル）の正本は `agent-team.toml` に置く。イベントごとの対応は `docs/agents/grokbot-runbook.md`、指揮役の判断の手順は skill `command-team` に置く。
 
 ## 役割と GitHub 上の名義
 
@@ -8,8 +8,8 @@
 |---|---|---|---|
 | 人間（濱田さん） | — | `hatai` | 本人 |
 | 指揮 | Grok Bot（クラウド）。動かないときは人間が指名したエージェントが代行する（runbook の「代行」） | — | T3 Connect 経由の MCP |
-| 実装 | T3 スレッド・opencode `zai-coding-plan/glm-5.3`・Devin CLI（`acpRegistry_devin`、`swe-2-high`） | GitHub App `pelway-dev`（`pelway-dev[bot]`） | App のインストールトークン（呼び出しごとに発行） |
-| レビュー | 実装担当からのレビュー委託（`delegate_task` の子タスク）・Codex（`codex_review`）・Devin CLI（`devin_review`、通常の PR の Codex とのローテーションと高リスクの PR）と Claude（`claude_review`、高リスクの PR と抜き取り）。指揮役がレビュースレッドを立てるのは、指揮役自身の PR と外部投入（`docs/agents/command-team-details.md` の「外部からのレビュースレッド投入」）の分だけ | GitHub App `pelway-review`（`pelway-review[bot]`） | App のインストールトークン（呼び出しごとに発行） |
+| 実装 | T3 スレッド・opencode・Devin CLI（登録情報は `agent-team.toml` の `[agents]`） | GitHub App `pelway-dev`（`pelway-dev[bot]`） | App のインストールトークン（呼び出しごとに発行） |
+| レビュー | 実装担当からのレビュー委託（`delegate_task` の子タスク）・Codex・Devin CLI（通常の PR の Codex とのローテーションと高リスクの PR）と Claude（高リスクの PR と抜き取り。登録情報は `agent-team.toml` の `[agents]`）。指揮役がレビュースレッドを立てるのは、指揮役自身の PR と外部投入（`docs/agents/command-team-details.md` の「外部からのレビュースレッド投入」）の分だけ | GitHub App `pelway-review`（`pelway-review[bot]`） | App のインストールトークン（呼び出しごとに発行） |
 
 App は 2 つに分ける。同じ名義では自分の PR を Approve できないため。App の秘密鍵と ID は `~/.config/pelway-agent/fnox.toml` に age で暗号化して置き、`scripts/agent-gh` が呼び出しごとにトークンを発行する。
 
@@ -59,12 +59,12 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 
 - `pelway-dev` には GitHub App の Workflows 権限を付けない。`.github/workflows/` の変更は人間が行う（push で動く workflow は承認前に secret を読めるため）。例外は Workflows 権限が必要なため人間の名義でしか行えない操作だけで、現在は `actions.lock` の再生成（`ci(deps):` の PR のマージ前。実施は skill `command-team` の「マージ」）の 1 つ
 - PR 1 本の差分は追加 800 行・削除 2000 行まで（`mise run pr-size` が追加行と削除行を分けて数える）。`.gitattributes` で `linguist-generated` を付けたファイルは数えない。指揮役が Issue のコメントで超過を認め `pr-size-exception` ラベルを付けた PR は、レビューでは pr-size の失敗を must-fix に数えない。pr-size の失敗したままの PR は必須チェックを通らないため Kodiak ではマージできず、`automerge` ラベルは付けずに hatai の例外の判断に回す（`pr-size-exception` 自体はマージの例外には加えない）
-- GLM の実装スレッドと調査スレッドは合算して同時に 3 本まで、Devin CLI の実装スレッドは同時に 6 本まで。枠の消費数は、open な Issue の `agent:working` の数から、作業状態の印が停止中・再開処理中・再開待ちのもの（runbook の「ボードと巡回」）を除いた数に、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）を加えたもの。GLM 枠と Devin CLI 枠の内訳は Issue の `agent:devin` ラベルの有無で判定する。実装の枠を超えた分は指揮役が順番待ちにする（満杯時の優先の判断は `docs/agents/command-team-details.md` の「調査（入口B）」）
+- 実装と調査のスレッドの同時枠の上限は、`agent-team.toml` の `[developers.<login>.slots]` が正本（GLM は実装と調査の合算、Devin CLI は実装の枠）。枠の消費数は、open な Issue の `agent:working` の数から、実際の停止を確認できるもの（補助記録の作業状態の印が停止中・再開処理中・再開待ちのもののうち、runbook の「ボードと巡回」の「枠の数え方」の手順で停止を確認できたものだけ。確認できないものは使用中として数える）を除いた数に、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）を加えたもの。GLM 枠と Devin CLI 枠の内訳は Issue の `agent:devin` ラベルの有無で判定する。実装の枠を超えた分は指揮役が順番待ちにする（満杯時の優先の判断は `docs/agents/command-team-details.md` の「調査（入口B）」）
 - GitHub Projects のボードの読み書きは人間の名義の `gh` で行う（読み取り `read:project`、書き込み `project` スコープ）。`scripts/agent-gh` は使わない（人間の名義で行う操作の既存の枠と同じ扱い）。スコープが無ければ巡回を止めて hatai に報告する
-- レビューの同時数（Codex 2 本、Devin CLI 2 本、Claude 1 本）は目安で、順番待ちの管理をしない。通常の PR のレビューは実装担当が委託するため全局管理はせず、実装担当は自分の PR のレビューを 1 件ずつ順に委託し、修正とレビューの繰り返しは直列に回す。指揮役が立てるレビュースレッド（指揮役自身の PR・外部投入）の同時数はこの目安内に収める。待ち時間や利用上限に実害が出たら、改善ループで見直す
+- レビューの同時数の目安は、`agent-team.toml` の `[developers.<login>.review_limits]` が正本で、順番待ちの管理をしない。通常の PR のレビューは実装担当が委託するため全局管理はせず、実装担当は自分の PR のレビューを 1 件ずつ順に委託し、修正とレビューの繰り返しは直列に回す。指揮役が立てるレビュースレッド（指揮役自身の PR・外部投入）の同時数はこの目安内に収める。待ち時間や利用上限に実害が出たら、改善ループで見直す
 - GLM は終日使う。時間帯による使用制限はない。Devin CLI のセッションに時間帯・時間量の上限はない
-- Devin CLI のスレッドは `mode` を `smart` までに限って立てる（`bypass` は使わない）。レビュー用の `devin_review` ではこの上限は要らず、sandbox のため権限モードは Autonomous 一択になる（「レビュー担当の権限」）。レビューへの使用は、OS レベル sandbox とドメイン許可リストで GitHub 以外への通信と任意コマンドの影響を実行時に遮断した `devin_review` に限る（手順上のルールだけでは外部通信を遮断できず、PR の説明や差分に埋め込まれた攻撃者制御の指示でレビュー環境の情報を外部へ送信しうるため）
-- 実装の振り分け: 仕様が固まった実装は GLM と Devin CLI の空いている方（同時に空いていれば Devin CLI 優先）、曖昧で長い調査・デバッグ系は GLM、「Devin CLI のハーネスごと任せる」チケットは SWE-2 一任（人間の明示か指揮役の判断）。条件と effort（Devin CLI は `thought_level`）の値は skill `command-team` に置く
+- Devin CLI のスレッドは `mode` を `smart` までに限って立てる（`bypass` は使わない）。レビュー用の Devin CLI インスタンスではこの上限は要らず、sandbox のため権限モードは Autonomous 一択になる（「レビュー担当の権限」）。レビューへの使用は、OS レベル sandbox とドメイン許可リストで GitHub 以外への通信と任意コマンドの影響を実行時に遮断したレビュー用インスタンスに限る（手順上のルールだけでは外部通信を遮断できず、PR の説明や差分に埋め込まれた攻撃者制御の指示でレビュー環境の情報を外部へ送信しうるため）
+- 実装の振り分け: 条件（定型・小規模、通常、曖昧で長い調査・デバッグ系、「Devin CLI のハーネスごと任せる」チケット。判定と effort は skill `command-team` に置く）ごとの担当の優先順位は、`agent-team.toml` の `[developers.<login>.priority.implement]`（開発者ごとの表）が正本。担当の登録情報（T3 の provider インスタンス名・モデル・effort の option と段）は `[agents.<id>]` に置く
 - Devin CLI に割り当てた Issue には `agent:devin` ラベルを付け、GitHub 上で担当が見えるようにする（`agent:working` と同じタイミングで付け外し。一覧は `docs/agents/triage-labels.md`）
 - SWE-2 は Devin CLI のプランの無料枠で使う。プランの無料モードの同時セッション上限（現在 2 本）は Devin Cloud のセッションの制限で、Devin CLI 経由のスレッドには適用されない。無料枠を超える利用が必要になったら、有料枠の追加か上限の見直しを改善ループで判断する
 - Issue の書き方（タイトル、本文の見出し、受け入れ条件、分割、`ready-for-agent` の前のゲート、差し戻されたときの直し方）は skill `write-issue` に置く。`.github/ISSUE_TEMPLATE/agent-task.yml` はその写しで、空の Issue は作れない（`blank_issues_enabled: false`）
@@ -117,7 +117,7 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
     - `ci-failed-twice`: `agent/` ブランチで verify が 2 回続けて失敗した（5 分ごとに `gh run list` で確かめる）
 - payload は `pelway.agent-watch/v1`。スレッド ID、ブランチ、`issue_number`（`agent/<番号>-` から取る）、`round`（スレッドの実行回数）、`report`（最後の返答が `キー: 値` 形式 8 行以内のときだけ、その本文）を含む
 - 同じ出来事からイベントを作るのは 1 回だけ。送れなかったものは送信待ちの列に残して送り直す（受け手には重複して届きうる）。受け手が直らない失敗（HTTP 400・404・413）を返したものは送り直さずに列から外す（受信箱には書かれる。受信箱に書けなかったものは、書けるまで状態に残して書き直す。上限 100 件で、超えたら古いものから捨てる）。送り直せる失敗が続く間は、送り直しの間隔を 30 秒から失敗のたびに倍にし、上限は 15 分（`docs/dev-environment.md`「pitchfork について」）。状態は `~/.local/state/pelway/agent-watch.json`（既定の場所。`XDG_STATE_HOME` を設定したときの場所は `docs/dev-environment.md`「pitchfork について」を参照）に置く
-- 同じ知らせを、T3 のスレッドとして動く指揮役のための受信箱（共有の git dir の `pelway/conductor-inbox.jsonl`）にも 1 行ずつ書き、ホストの登録ファイルに登録された指揮役のスレッドへ決まった文を送って起こす（Issue #555。形は `docs/agents/notify-payloads.md`「指揮役の受信箱」、動き方は `docs/dev-environment.md`「pitchfork について」）
+- 同じ知らせを、T3 のスレッドとして動く指揮役のための受信箱（共有の git dir の `pelway/conductor-inbox.jsonl`）にも 1 行ずつ書き、ホストの登録ファイルに登録された指揮役のスレッドへ決まった文を送って起こす（Issue #555。人間が立てたスレッドの知らせで起こすのは `failed`・`waiting`・`stalled`・報告のある `finished` のときだけで、それ以外は受信箱に書くだけ。Issue #727。形は `docs/agents/notify-payloads.md`「指揮役の受信箱」、動き方は `docs/dev-environment.md`「pitchfork について」）
 - 修正が何回目かは、実装スレッドがレビューの委託回数で数える（skill `implement-issue`）。同じ head は 1 ラウンドに数え、コンフリクトの解消を含まない main の取り込みだけで head が変わっても新しいラウンドにしない。ラウンドの上限は 4 回で、round 3 の must-fix が残れば round 4 には入らず止まる（別 Issue に回せる領域の指摘は除く。分類はレビュー役が行う）。round 4 に入るのは hatai が例外と判断した PR だけ。レビューの effort は、セキュリティと仕様の PR では 1 回目から上げておく（3 回目で改めて上げる運用はやめる）。人間のレビューによる修正（指揮役が `t3 thread send` で伝える）の回数も同じ上限に数える。レビューの `[文書のずれ]` の nit だけを直す round（skill `review-pr`・`implement-issue`）は、この回数に数えない（その後のレビューの委託も数えない）。印の nit だけを直す round は、この PR で通算 2 回まで。印の nit が残っていて通算 3 回目が要るときは（その前のレビューの判定によらず）、3 回目には入らず、止まる条件としてエスカレーションする
 
 ## 停止・迷走への対処
@@ -136,19 +136,20 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - レビュー担当は PR のコードを実行しない。PR の head は worktree に取り出さずに読み、verify と pr-size は PR のチェック（CI）の結果で判断する（PR のコードはレビュー担当の秘密鍵を読めるため）
 - 通常の PR のレビューは、実装担当のスレッドが `delegate_task` でレビュー専用プロバイダーの子タスクとして委託する（`role: "review"`、権限は `auto-accept-edits`、worktree は独立 checkout。手順は skill `implement-issue`）。委託の子がレビュー専用プロバイダーの sandbox（ネットワークを GitHub だけに絞る権限プロファイル）を継承することを、`docs/dev-environment.md` の確認手順で確かめてから使う
 - 指揮役が立てるレビュースレッド（指揮役自身の PR・外部投入）は、従来どおりトップレベルのスレッドとして worktree を main から立てる（runbook の「レビューを始める」）
-- レビュースレッドは T3 の Codex インスタンス `codex_review` で動かす。ネットワークは `api.github.com` と `github.com` だけに絞る（Codex の `network_proxy` と、レビュー担当専用の home `~/.codex-review/config.toml` の権限プロファイル `review`。T3 の MCP サーバーと Codex の GitHub 連携もこの home で止める。設定は `docs/dev-environment.md` の「レビュー担当の Codex」）
+- レビュースレッドは Codex のレビュー用インスタンス（`agent-team.toml` の `[agents.codex].instance.review`）で動かす。ネットワークは `api.github.com` と `github.com` だけに絞る（Codex の `network_proxy` と、レビュー担当専用の home `~/.codex-review/config.toml` の権限プロファイル `review`。T3 の MCP サーバーと Codex の GitHub 連携もこの home で止める。設定は `docs/dev-environment.md` の「レビュー担当の Codex」）
 - レビュースレッドは T3 の権限 `auto-accept-edits`（Codex の `workspaceWrite`）で立てる。`full-access` ではコマンドが sandbox の外で動き、ネットワークの制限が効かない。この権限では `.git` が読み取り専用になるので、PR の側のファイルは GitHub API で読む
-- Claude のレビュースレッドは T3 の Claude インスタンス `claude_review` で動かす。skill `review-pr` をそのまま使い、使えるコマンドを読み取り系の `git` と `scripts/agent-gh review` に絞り、ネットワークを `api.github.com` と `github.com` だけに絞る。設定と確認の方法は `docs/dev-environment.md` の「レビュー担当の Claude」。確認が済むまでは使わない
-- Devin CLI のレビュースレッドは T3 の Devin CLI インスタンス `devin_review` で動かす。skill `review-pr` をそのまま使い、権限モードは Devin CLI 公式 sandbox の Autonomous 一択になる（`bypass` は使わない）。`devin_review` は起動ラッパーで `DEVIN_SANDBOX=true` と専用設定（ドメイン許可リスト・permissions deny）を付けて立ち上がり、GitHub 以外への通信とワークスペース外への書き込みを実行時に遮断する。仕組みと採用の条件（確認の記録）は `docs/dev-environment.md` の「レビュー担当の Devin CLI」
+- Claude のレビュースレッドは Claude のレビュー用インスタンス（`agent-team.toml` の `[agents.claude].instance.review`）で動かす。skill `review-pr` をそのまま使い、使えるコマンドを読み取り系の `git` と `scripts/agent-gh review` に絞り、ネットワークを `api.github.com` と `github.com` だけに絞る。設定と確認の方法は `docs/dev-environment.md` の「レビュー担当の Claude」。確認が済むまでは使わない
+- Devin CLI のレビュースレッドは Devin CLI のレビュー用インスタンス（`agent-team.toml` の `[agents.devin].instance.review`）で動かす。skill `review-pr` をそのまま使い、権限モードは Devin CLI 公式 sandbox の Autonomous 一択になる（`bypass` は使わない）。このインスタンスは起動ラッパーで `DEVIN_SANDBOX=true` と専用設定（ドメイン許可リスト・permissions deny）を付けて立ち上がり、GitHub 以外への通信とワークスペース外への書き込みを実行時に遮断する。仕組みと採用の条件（確認の記録）は `docs/dev-environment.md` の「レビュー担当の Devin CLI」
+- 委託・起動で読んだ `[agents.<担当>].instance.review` は、main の最新の版の `docs/dev-environment.md`（読めなければ委託・起動しない）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致するものだけを使う。一致しなければ委託・起動しない
 - Devin CLI が実装した PR には Devin CLI のレビューを付けない。同じモデル系列が自分の出力を採点する偏りを避ける
 - 指揮役はレビューを兼ねない。指揮役が作った PR もレビュースレッドに回す
 - CI 上で動かす助言セキュリティレビューの起動の認可と実行の隔離は `docs/agents/ci-security-review.md` に定める
 
 ## 実装担当の権限
 
-- 実装スレッド（T3 の worktree スレッドで動く opencode と Devin CLI の `acpRegistry_devin`）は OS レベルの sandbox の中で動かす。遮断は `scripts/agent-sandbox/sandbox-shell`（bwrap）が行い、エージェント側の権限設定は補助層とする。仕組み・導入・確認の方法は `docs/dev-environment.md` の「実装担当の sandbox」
+- 実装スレッド（T3 の worktree スレッドで動く opencode と Devin CLI の実装用インスタンス（`agent-team.toml` の `[agents.devin].instance.implement`））は OS レベルの sandbox の中で動かす。遮断は `scripts/agent-sandbox/sandbox-shell`（bwrap）が行い、エージェント側の権限設定は補助層とする。仕組み・導入・確認の方法は `docs/dev-environment.md` の「実装担当の sandbox」
 - opencode の実装スレッドは、グローバルプラグイン `pelway-sandbox` が全シェルコマンドを bwrap 経由にし、ファイルツールの worktree 外への書き込みと秘匿パスの読み取りを拒否する。適用は `~/.t3/worktrees/` 配下のセッションに限る
-- Devin CLI の実装スレッドは、`acpRegistry_devin` の `commandPath` に指定した `devin-impl` ラッパーが `devin acp` プロセス自体を bwrap で包んで起動する。Devin 内蔵の `--sandbox` は、exec の通信先が GitHub 系のみになる挙動のため実装スレッドでは使わない（レビュー担当の `devin_review` とは別方式）。exec のコマンドは `.devin/hooks.v1.json` のフックでネストした sandbox に送り、`credentials.toml` 等の devin 用資格情報を agent のコマンドから分離する
+- Devin CLI の実装スレッドは、実装用インスタンスの `commandPath` に指定した `devin-impl` ラッパーが `devin acp` プロセス自体を bwrap で包んで起動する。Devin 内蔵の `--sandbox` は、exec の通信先が GitHub 系のみになる挙動のため実装スレッドでは使わない（レビュー用インスタンスとは別方式）。exec のコマンドは `.devin/hooks.v1.json` のフックでネストした sandbox に送り、`credentials.toml` 等の devin 用資格情報を agent のコマンドから分離する
 - sandbox 内では、書き込みはセッションの worktree・共有 git dir・`/tmp`・ツールキャッシュに限られ、`sudo` 等の昇格はできず、`~/.ssh`・`~/.gnupg`・`/mnt` 等の秘匿パスは見えない。共有 git dir の `config`・`hooks/` は read-only のまま
 - ネットワークは制限しない（hatai の判断。調査の自由度を優先し、現時点では許可リストにしない）
 - 実装スレッドの T3 権限モード（runtimeMode）は sandbox と独立して選んでよい。bwrap が境界を担うため、承認プロンプトの有無がホストへの影響範囲を変えない
@@ -158,13 +159,13 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 
 - イベントごとの対応表は `docs/agents/grokbot-runbook.md`、毎サイクルの判断の手順は skill `command-team`
 - Grok Bot のルーティンとメモリには「この runbook を読んで従う」とだけ書く
-- 見張りと状態は、リポジトリのスクリプト（`pelway-agent-watch`、代行時は `scripts/conductor-watch.sh`）と `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。巡回状態の補助記録 `patrol-state.json` だけは、sandbox 内の指揮役からも読み書きできるよう、リポジトリの共有 git dir（`git rev-parse --git-common-dir`）内の `pelway/` に置く（git の管理対象外。Issue #477）
+- 見張りと状態は、リポジトリのスクリプト（`pelway-agent-watch`、代行時は `scripts/conductor-watch.sh`）と `~/.local/state/pelway/` に置く。セッションの一時フォルダに置かない。巡回状態の補助記録 `patrol-state.json` と指揮役が持つ項目の記録 `patrol-items.json` は、sandbox 内の指揮役からも読み書きできるよう、リポジトリの共有 git dir（`git rev-parse --git-common-dir`）内の `pelway/` に置く（git の管理対象外。Issue #477）
 
 ## 改善ループ
 
 - 対象は指揮役・実装担当（opencode＋GLM、Devin CLI＋SWE-2）・レビュー担当（Codex、Devin CLI、Claude）の両側
 - 材料は、実装担当が残す実装者メモ（`docs/worklogs/issue-<N>.md`、skill `implement-issue` の手順 5）を一次情報とし、レビューの指摘・差し戻しとセッションの記録で裏を取る。食い違ったら成果物とセッションの記録を優先する
-- 学びとルールは両方のツールが読む共有層（`AGENTS.md`、`.agents/skills/`、`docs/`）だけに書く。`.claude/skills/<name>` は `.agents/skills/<name>` へのシンボリックリンクにし、差分ゼロを確かめる
+- 学びとルールは両方のツールが読む共有層（`AGENTS.md`、`.agents/skills/`、`docs/`、`agent-team.toml`）だけに書く。`.claude/skills/<name>` は `.agents/skills/<name>` へのシンボリックリンクにし、差分ゼロを確かめる
 - 効果は GLM と SWE-2 の成果物でも測る（同じ種類のレビュー指摘・差し戻しの減少）。古い学び・矛盾する学びは改善のたびに直すか消す
 - 手順は skill `command-team` の手順 4
 

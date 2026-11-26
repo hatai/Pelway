@@ -1,0 +1,461 @@
+#!/usr/bin/env python3
+"""patrol-state.json の共通の書き込み手順（Issue #671）。
+
+補助記録 patrol-state.json への書き込みはすべてこの手順に集約する。指揮役スレッドの
+巡回での書き戻し（オフセット・scheduled_task_id など。items の記録先は
+patrol-items.json で、patrol-state.json の items に触れるのは旧キーの整理
+（消去）のときだけ）も、見張り（scripts/conductor-watch.sh）の subjects の
+書き戻しも、ここを通る。直接の書き換え（python の json.dump や echo の
+リダイレクト）は行わない。
+
+保護（ロックを取って読み直した現在値に対して行う）:
+
+- 名乗ったスレッド ID が記録の conductor_thread_id と一致しない書き込みは適用せず、
+  試みを anomalies に記録する（旧指揮役スレッドが残って書き込んだ場合の上書きを防ぐ）。
+  conductor_thread_id そのものも保護する: patch での変更・削除・無効化は
+  --writer・--writer-thread のどちらの名乗りでも拒否する（同じ値の書き戻しは除く）。
+  引き継ぎ・交代・登録で指揮役の ID を記録するときだけ --claim-conductor を使う
+- watch_log_offset・inbox_offset を現行値より小さい値へ書き戻す変更（巻き戻り）は
+  拒否し、試みを anomalies に記録する。ログの切り詰めなどで意図して小さい値に
+  戻すときだけ --allow-offset-regression を付け、適用のうえ anomalies に記録する
+- 状態ファイルが JSON のオブジェクトとして読めないときは、空として上書きしない。
+  元のファイルを <state>.unreadable-<時刻> にコピーして anomalies に記録する
+  （コピーなので、回復状態が原子的に書き戻されるまで読めない元ファイルが
+  正規パスに残り、中断しても正規パスは空にならない）。--claim-conductor 以外の
+  --writer-thread の書き込みと、オフセットを書く書き込み
+  （--allow-offset-regression なし）は拒否する（照合を確かめられないため）。
+  拒否・回復途中の記録には needs_conductor_claim を立て、--claim-conductor の
+  回復書き込みが来るまで拒否が続く
+- 正規パス・ロックパスが信頼できる通常ファイルでないときは中身を読まず写さず
+  扱わない: O_NOFOLLOW・fstat で通常ファイル・自己所有・リンク数 1・巡回の read_ps
+  と同じ 4 MiB 上限を確かめ、1 回読んだバイト列を解析と unreadable の退避の両方に使う。
+  symlink・FIFO・他人所有・巨大な正規パスは state-untrusted として anomalies
+  に記録し unreadable と同じ照合不能の扱い、ロックパスの不適合は失敗（rc 1）。
+  ホストのファイルへの symlink 差し替えで中身が漏れないようにするため
+- anomalies はこの手順だけが記録する項目。patch が書いたものは採らず、base の
+  記録に今回の記録を追記したものだけを結果に入れる（注入・消去を防ぐ）
+- 親ディレクトリ（正規パスの 1 つ上。既定は共有 git dir の pelway/）は、そのさらに
+  1 つ上を基点として symlink をたどらずに開き（O_DIRECTORY|O_NOFOLLOW）、ディレクトリで
+  自分の所有であることを確かめる。ディレクトリの作成・ロック・正規パス・退避・一時
+  ファイル・置き換えはすべてそのディレクトリの記述子を基準に行う（巡回の open_ps_dir と
+  同じ検査。確かめた後に親が symlink に差し替えられても、記述子は元のディレクトリを
+  指し続けるため、リンク先には何も作らない・書かない）。開けない・確かめられないときは
+  何も書かず終了コード 1
+- 通常ファイルを読めるはずなのに開く・読むのに失敗したとき（一時的な入出力エラーや
+  権限）は、種類の不適合とは分けて扱う。読めなかった内容を空として書き直すと持ち主・
+  オフセット・未配送の指示が消えるため、正規パスを保ったまま何も書かず終了コード 1。
+  次の書き込みは元の記録から再開する
+- 保護を通った適用結果（末尾の改行を含む）が 4 MiB（読み取り上限と同じ）を超えるか
+  整形できないときは書き込まず、元の記録を保つ。終了コードは 4（上限超過）・
+  5（整形できない）。巡回はこの終了コードを書き戻さなかった理由として報告する。
+  拒否の記録（anomalies への追記）を足すと上限を超えるときも元の記録を保つが、
+  その場合の終了コードは 3 で、試みを記録できなかったことを stderr に書く
+
+入力は標準入力の merge patch（RFC 7386。オブジェクトは深く併合し、null は鍵を消す。
+patch のオブジェクトは既存値がオブジェクトでなくても空のオブジェクトに再帰的に
+併合する — この点は RFC 7386 と同じで、中の null は常に「鍵を消す」になる）。
+RFC 7386 に無い拡張は、最上位が JSON 配列のときは併合の列として順に適用する点
+だけである — 鍵の集合ごとの置き換えは [{"<k>": null}, {"<k>": <新しい値>}] の形で
+表す。最上位がオブジェクトでも配列でもない入力は受け付けない。
+
+使い方:
+  patrol-state-update [--state PATH] (--writer-thread TID | --writer NAME)
+                      [--claim-conductor] [--allow-offset-regression]
+
+  --state          状態ファイルのパス。省略時は環境変数 PELWAY_PATROL_STATE、
+                   それも無ければ共有 git dir（--git-common-dir）内の
+                   pelway/patrol-state.json
+  --writer-thread  書き手のスレッド ID（指揮役スレッドからの書き込み）
+  --writer         スレッドを持たない書き手の名前（conductor-watch など）
+  --claim-conductor  記録の conductor_thread_id を名乗ったスレッド ID にする
+                   （引き継ぎ・交代・回復・初回登録の書き込みだけに使う。
+                   conductor_thread_id はこのフラグでだけ変更できる）
+  --allow-offset-regression  オフセットの巻き戻しを anomalies に記録して適用する
+
+終了コード: 0 = 適用、2 = 引数・入力の誤り、3 = 保護による拒否（anomalies に記録。
+上限超過で記録できなかったときは stderr にそう書く）、4 = 結果が上限を超えるため
+書き込まなかった、5 = 結果を整形できないため書き込まなかった、
+1 = それ以外の入出力・ロック・親ディレクトリの失敗。
+"""
+import copy
+import errno
+import fcntl
+import json
+import os
+import secrets
+import stat
+import subprocess
+import sys
+import time
+from datetime import datetime
+
+OFFSET_KEYS = ("watch_log_offset", "inbox_offset")
+ANOMALY_MAX = 100
+LOCK_TIMEOUT_SECS = 10.0
+STATE_MAX_BYTES = 4 * 1024 * 1024  # 読み取りと書き込みの上限（4 MiB）。conductor-watch.sh の read_ps と同じ値。変えるときは両方を直す
+LOCK_RETRY_SECS = 0.1
+
+
+def die(msg, rc):
+    print(f"patrol-state-update: {msg}", file=sys.stderr)
+    sys.exit(rc)
+
+
+def parse_args(argv):
+    opts = {"state": os.environ.get("PELWAY_PATROL_STATE", ""),
+            "writer": None, "writer_thread": None,
+            "claim": False, "allow_reg": False}
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--state" and i + 1 < len(argv):
+            opts["state"] = argv[i + 1]; i += 2
+        elif a == "--writer" and i + 1 < len(argv):
+            opts["writer"] = argv[i + 1]; i += 2
+        elif a == "--writer-thread" and i + 1 < len(argv):
+            opts["writer_thread"] = argv[i + 1]; i += 2
+        elif a == "--claim-conductor":
+            opts["claim"] = True; i += 1
+        elif a == "--allow-offset-regression":
+            opts["allow_reg"] = True; i += 1
+        elif a in ("-h", "--help"):
+            print(__doc__); sys.exit(0)
+        else:
+            die(f"unknown or incomplete argument: {a}", 2)
+    if bool(opts["writer"]) == bool(opts["writer_thread"]):
+        die("書き手の名乗りは --writer-thread か --writer のどちらか 1 つを指定する", 2)
+    if opts["claim"] and not opts["writer_thread"]:
+        die("--claim-conductor には --writer-thread が必要", 2)
+    if not opts["state"]:
+        try:
+            r = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                               capture_output=True, text=True, timeout=10)
+            common = r.stdout.strip() if r.returncode == 0 else ""
+        except Exception:
+            common = ""
+        if not common:
+            die("state path unresolved: --state か PELWAY_PATROL_STATE で指定する", 2)
+        opts["state"] = os.path.join(common, "pelway", "patrol-state.json")
+    return opts
+
+
+def merge(dst, patch):
+    # merge patch（RFC 7386）: null は鍵を消し、それ以外は置き換える。
+    # patch のオブジェクトは、既存値がオブジェクトでなくても常に再帰的に併合する
+    # （既存値を {} として扱う。この点は RFC 7386 と同じ — そのため patch の中の
+    # null は常に「鍵を消す」で、値として残ることはない）。
+    if not isinstance(dst, dict):
+        dst = {}
+    for k, v in patch.items():
+        if v is None:
+            dst.pop(k, None)
+        elif isinstance(v, dict):
+            if not isinstance(dst.get(k), dict):
+                dst[k] = {}
+            merge(dst[k], v)
+        else:
+            dst[k] = v
+    return dst
+
+
+def open_dir(path):
+    # 親ディレクトリを、信頼できる基点（その 1 つ上）から symlink をたどらずに開き、
+    # ディレクトリで自分の所有であることを確かめる。巡回（conductor-watch.sh）の open_ps_dir と
+    # 同じ検査（変えるときは両方を直す）。以降のファイル操作はすべて戻り値の記述子を基準に
+    # 行う。確かめた後に親が symlink に差し替えられても、記述子は元のディレクトリを指し続ける。
+    base, name = os.path.split(os.path.dirname(os.path.abspath(path)))
+    os.makedirs(base, exist_ok=True)
+    bfd = os.open(base, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        try: os.mkdir(name, dir_fd=bfd)
+        except FileExistsError: pass
+        dfd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=bfd)
+    finally:
+        os.close(bfd)
+    st = os.fstat(dfd)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
+        os.close(dfd); raise OSError("patrol-state dir not usable")
+    return dfd
+
+
+def encode_capped(obj):
+    # 書き込むバイト列（末尾に改行）を返す。結果が読み取り上限を超えるか整形できないときは
+    # 書き込まない（次の巡回で読めない大きさの記録にしない）。字下げは入れ子が深いほど膨らみ、
+    # 上限内の記録でも全体を一度に整形するとメモリを使い切るため、少しずつ整形して UTF-8 の
+    # 累計バイト数を数え、上限を超えた時点で打ち切る（巡回の read_ps が読める形と同じ出力）。
+    # 整形が例外で止まる記録（json.loads は C の再帰の上限まで読めるが、整形は Python の再帰の
+    # 上限で RecursionError になる深い入れ子など）も書き込まない。
+    parts, size = [], 1  # 末尾の改行の分
+    try:
+        for chunk in json.JSONEncoder(ensure_ascii=False, indent=2, sort_keys=True).iterencode(obj):
+            b = chunk.encode("utf-8"); size += len(b)
+            if size > STATE_MAX_BYTES: return "too-large", None
+            parts.append(b)
+    except Exception:
+        return "unencodable", None
+    return None, b"".join(parts) + b"\n"
+
+
+def atomic_write(dfd, name, data):
+    # 検査済みの親ディレクトリ（dfd）を基準に、同じディレクトリの一時ファイルからの置き換えで
+    # 書く。置き場が symlink・FIFO なら、指す先ではなくそれ自体を置き換える。一時ファイルは
+    # 予測できない名前を O_EXCL|O_NOFOLLOW・0600 で作る（置き換えた記録はこの一時ファイルその
+    # ものであるため、umask によらず許可ビットは 0600 を超えない）。
+    tmp = f".patrol-state-{secrets.token_hex(8)}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+    except BaseException:
+        try: os.unlink(tmp, dir_fd=dfd)
+        except OSError: pass
+        raise
+
+
+def main():
+    opts = parse_args(sys.argv[1:])
+    who = opts["writer_thread"] or opts["writer"]
+
+    raw = sys.stdin.read()
+    if not raw.strip():
+        die("merge patch を標準入力に渡す（JSON オブジェクト、またはオブジェクトの配列）", 2)
+    try:
+        doc = json.loads(raw)
+    except Exception as e:
+        die(f"merge patch が JSON として読めない: {e}", 2)
+    patches = doc if isinstance(doc, list) else [doc]
+    for p in patches:
+        if not isinstance(p, dict):
+            die("merge patch の各要素は JSON オブジェクトでなければならない", 2)
+
+    state = opts["state"]
+    name = os.path.basename(state)
+    # 親ディレクトリを確かめて以降は、その記述子を基準にだけ操作する（open_dir のコメント）。
+    # 呼び出し元が巡回（conductor-watch.sh）のとき、巡回が親を確かめる時点と手順が使う時点は
+    # 別なので、パスを受け渡すだけでは確かめた後の差し替えを防げない。手順自身が確かめ直す。
+    try:
+        dfd = open_dir(state)
+    except OSError as e:
+        die(f"patrol-state の親ディレクトリを確かめられない: {os.path.dirname(os.path.abspath(state))} ({e})", 1)
+
+    def taken(nm):  # 親ディレクトリ（dfd）に nm があるか。symlink はたどらない
+        try:
+            os.stat(nm, dir_fd=dfd, follow_symlinks=False); return True
+        except FileNotFoundError:
+            return False
+    # 状態ファイルは書き込みのたびに os.replace で差し替わるため、ファイルそのものではなく
+    # 別のロックファイル（<state>.lock。差し替わらない）を flock で取る。
+    # O_NOFOLLOW・fstat でロックパスも検査する（symlink だとロックがリンク先の別ファイルに掛かる）
+    try:
+        lock_fd = os.open(name + ".lock",
+                          os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
+    except OSError as e:
+        die(f"patrol-state lock のパスを開けない: {e}", 1)
+    lst = os.fstat(lock_fd)
+    if not stat.S_ISREG(lst.st_mode) or lst.st_uid != os.geteuid() or \
+            lst.st_nlink != 1:
+        os.close(lock_fd)
+        die("patrol-state lock のパスが信頼できる通常ファイルでない", 1)
+    deadline = time.time() + LOCK_TIMEOUT_SECS
+    while True:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.time() >= deadline:
+                die("could not acquire patrol-state lock within timeout", 1)
+            time.sleep(LOCK_RETRY_SECS)
+
+    try:
+        # 前の起動がロックの中で SIGKILL などで止まると atomic_write の一時ファイルが残る。
+        # 一時ファイルはロックの中でしか作らないので、ロックを取った今のうちに残りを消す。
+        # unlink はディレクトリ項目そのものを外すだけでリンク先には触れない。
+        for entry in os.listdir(dfd):
+            if entry.startswith(".patrol-state-") and entry.endswith(".tmp"):
+                try:
+                    os.unlink(entry, dir_fd=dfd)
+                except OSError:
+                    pass
+        # 正規パスは O_RDONLY|O_NOFOLLOW|O_NONBLOCK で 1 回だけ開き、fstat で
+        # 通常ファイル・自己所有・リンク数 1・サイズ上限を確かめ、その fd から
+        # 読んだバイト列を解析と退避の両方に使う（二度読まない。不適合な
+        # symlink・FIFO 等は読まず写さず、種類だけ記録して照合不能として拒否する）
+        base, unreadable, untrusted_reason, raw_state = {}, False, None, None
+        try:
+            sfd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+        except FileNotFoundError:
+            sfd = None
+        except OSError as e:
+            # 種類の不適合（symlink・開くと失敗するソケットなど）は中身を読まず照合不能として
+            # 扱う。それ以外（一時的な入出力エラー・権限）は正常なパスを読めなかった場合なので、
+            # 種類の不適合とは分けて、正規パスを保ったまま何も書かずに終える。読めなかった内容を
+            # 空として書き直すと、持ち主・オフセット・未配送の指示が消えるため。
+            if e.errno == errno.ELOOP: untrusted_reason = "symlink"
+            elif e.errno == errno.ENXIO: untrusted_reason = "not-regular"
+            else: die(f"patrol-state を開けない: {e}", 1)
+            sfd = None
+        if sfd is not None:
+            try:
+                sst = os.fstat(sfd)
+                if not stat.S_ISREG(sst.st_mode):
+                    untrusted_reason = "not-regular"
+                elif sst.st_uid != os.geteuid():
+                    untrusted_reason = "not-owned"
+                elif sst.st_nlink != 1:
+                    untrusted_reason = "hardlinked"
+                elif sst.st_size > STATE_MAX_BYTES:
+                    untrusted_reason = "too-large"
+                else:
+                    raw_state = os.read(sfd, STATE_MAX_BYTES + 1)
+                    if len(raw_state) > STATE_MAX_BYTES:
+                        untrusted_reason = "too-large"
+                        raw_state = None
+            except OSError as e:
+                # 通常ファイルと確かめた後に読み取りに失敗した。上と同じく正規パスを保って終える
+                die(f"patrol-state を読めない: {e}", 1)
+            finally:
+                os.close(sfd)
+        if raw_state is not None:
+            try:
+                loaded = json.loads(raw_state)
+                if isinstance(loaded, dict):
+                    base = loaded
+                else:
+                    unreadable = True
+            except Exception:
+                unreadable = True
+
+        try:
+            result = copy.deepcopy(base)
+        except RecursionError:
+            # 入れ子が深すぎて複製できない記録は整形もできないため、書き込まずに終える
+            die("結果を整形できないため書き込みません（入れ子が深すぎる）: 元の記録を保ちました", 5)
+        for p in patches:
+            result = merge(result, p)
+
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        notes = []
+        if unreadable:
+            # 読めない状態を空として上書きすると、持ち主の照合とオフセットの照合が
+            # ともに素通りし元の中身も残らない。元のファイルを退避し、照合を
+            # 確かめられない書き込みは拒否する（--claim-conductor の回復書き込みを除く）。
+            # 退避は移動ではなくコピー: 回復状態が下の atomic_write で原子的に
+            # 書き戻されるまで、読めない元ファイルを正規パスに残す。退避と書き戻しの
+            # 間で中断されても、正規パスには「読めない元ファイル」か「回復を待つ
+            # 新しい状態」のどちらかが残り、次回は初回作成扱いにならない。
+            # 退避するのは上で検査した fd から読んだバイト列そのもの（二度読まない）。
+            stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+            backup = f"{name}.unreadable-{stamp}"
+            n = 0
+            while taken(backup):
+                n += 1
+                backup = f"{name}.unreadable-{stamp}.{n}"
+            atomic_write(dfd, backup, raw_state)
+            notes.append({"kind": "state-unreadable", "writer": who,
+                          "backup": backup, "at": now_iso})
+        if untrusted_reason:
+            # 正規パスが信頼できる通常ファイルでなかった。中身は読んでいないので
+            # 退避コピーは作らず、種類だけ記録する
+            notes.append({"kind": "state-untrusted", "reason": untrusted_reason,
+                          "writer": who, "at": now_iso})
+
+        # needs_conductor_claim は unreadable・untrusted からの回復途中の印。立てるのは
+        # この手順だけ、下ろすのは --claim-conductor の回復書き込みだけ
+        # （patch からの操作は受け付けない）。
+        unverifiable_state = unreadable or untrusted_reason is not None
+        if opts["claim"]:
+            result.pop("needs_conductor_claim", None)
+        elif unverifiable_state or base.get("needs_conductor_claim"):
+            result["needs_conductor_claim"] = True
+        else:
+            result.pop("needs_conductor_claim", None)
+
+        refuse = []
+        unverifiable = unverifiable_state or bool(base.get("needs_conductor_claim"))
+        if unverifiable and not opts["claim"]:
+            if opts["writer_thread"]:
+                keys = sorted({k for p in patches for k in p})
+                refuse.append({"kind": "owner-unverifiable", "writer": who,
+                               "keys": keys, "at": now_iso})
+            offs = [k for k in OFFSET_KEYS if any(k in p for p in patches)]
+            if offs and not opts["allow_reg"]:
+                refuse.append({"kind": "offset-unverifiable", "writer": who,
+                               "keys": offs, "at": now_iso})
+        if not opts["claim"]:
+            rec = base.get("conductor_thread_id")
+            # conductor_thread_id は --claim-conductor でだけ変更できる。通常の patch
+            # による削除・無効化・別の値への変更は、登録の有無や書き手の種類
+            # （--writer・--writer-thread）にかかわらず拒否する。この項目が失われると
+            # 後続の持ち主照合が素通りになるため。同じ値の書き戻しは変更にならない。
+            if any("conductor_thread_id" in p for p in patches) and \
+                    result.get("conductor_thread_id") != rec:
+                refuse.append({"kind": "conductor-id-change-refused", "writer": who,
+                               "recorded": rec, "at": now_iso})
+            if opts["writer_thread"] and isinstance(rec, str) and rec and \
+                    rec != opts["writer_thread"]:
+                keys = sorted({k for p in patches for k in p})
+                refuse.append({"kind": "conductor-mismatch", "writer": who,
+                               "recorded": rec, "keys": keys, "at": now_iso})
+        if opts["writer_thread"] and opts["claim"]:
+            # 引き継ぎ・交代の名乗り: 記録の持ち主は名乗ったスレッドに移る
+            # （patch が別の値を書こうとしても、名乗った値が優先される）
+            result["conductor_thread_id"] = opts["writer_thread"]
+
+        for k in OFFSET_KEYS:
+            # 検査するのは patch が実際に書き換える鍵だけ。既存ファイルの値が
+            # 変な型でも、この書き込みがその鍵に触れなければ関係しない。
+            if not any(k in p for p in patches):
+                continue
+            cur, new = base.get(k), result.get(k)
+            if isinstance(new, bool) or not isinstance(new, int) or new < 0:
+                refuse.append({"kind": "invalid-offset", "key": k, "value": new,
+                               "writer": who, "at": now_iso})
+            elif isinstance(cur, int) and not isinstance(cur, bool) and new < cur:
+                entry = {"key": k, "from": cur, "to": new, "writer": who, "at": now_iso}
+                if opts["allow_reg"]:
+                    notes.append({"kind": "offset-regression", **entry})
+                else:
+                    refuse.append({"kind": "offset-regression-refused", **entry})
+
+        if refuse:
+            out = copy.deepcopy(base)
+            if unverifiable_state:
+                out["needs_conductor_claim"] = True
+            anoms = out.get("anomalies")
+            anoms = anoms if isinstance(anoms, list) else []
+            out["anomalies"] = (anoms + notes + refuse)[-ANOMALY_MAX:]
+            kinds = ", ".join(r["kind"] for r in refuse)
+            # 拒否の記録も上限を超えるなら書かない（元の記録を保つ）。拒否自体は有効
+            skip, data = encode_capped(out)
+            if skip:
+                die(f"refused ({kinds}) by {who}; 記録に追記すると上限を超えるため試みは記録されていません ({skip})", 3)
+            atomic_write(dfd, name, data)
+            die(f"refused ({kinds}) by {who}; attempt recorded in anomalies", 3)
+
+        # anomalies はこの手順だけが記録する項目。patch が書いたものは採らず、
+        # base の記録に今回の notes を追記したものだけを結果に入れる（注入・消去を防ぐ）
+        anoms = base.get("anomalies")
+        anoms = anoms if isinstance(anoms, list) else []
+        if anoms or notes:
+            result["anomalies"] = (anoms + notes)[-ANOMALY_MAX:]
+        else:
+            result.pop("anomalies", None)
+        # 上限の検査はロックの中で併合した結果に対して行う。呼び出し元が読んだ時点の記録では、
+        # その後に別の書き手が足した項目を見られない。超えたときは元の記録を保つ。
+        skip, data = encode_capped(result)
+        if skip:
+            die(f"not written ({skip}): 元の記録を保ちました", 4 if skip == "too-large" else 5)
+        atomic_write(dfd, name, data)
+        print(f"patrol-state-update: applied {state}", file=sys.stderr)
+        return 0
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+        os.close(dfd)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

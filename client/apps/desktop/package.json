@@ -1,0 +1,23 @@
+{
+  "name": "@pelway/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build"
+  },
+  "dependencies": {
+    "@octanejs/electron": "catalog:",
+    "@pelway/contracts": "workspace:*",
+    "@pelway/core": "workspace:*",
+    "@pelway/ui": "workspace:*",
+    "octane": "catalog:"
+  },
+  "devDependencies": {
+    "electron": "catalog:",
+    "electron-vite": "catalog:",
+    "vite": "catalog:"
+  }
+}

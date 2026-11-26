@@ -33,6 +33,7 @@ failures=()
 MOCK="$ROOT/mock"
 mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$MOCK" "$ROOT/state"
 cp "$REPO/scripts/conductor-watch.sh" "$ROOT/repo/scripts/"
+cp "$REPO/scripts/patrol-state-update" "$ROOT/repo/scripts/"
 git init -q "$ROOT/repo"
 PELWAY="$ROOT/repo/.git/pelway"
 STATE="$PELWAY/patrol-state.json"
