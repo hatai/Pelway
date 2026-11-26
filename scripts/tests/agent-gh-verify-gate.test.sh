@@ -5,6 +5,8 @@ set -uo pipefail
 
 AGENT_GH="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/agent-gh"
 RECORD="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/agent-verify-record"
+VERIFY_RUN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/agent-verify-run"
+INVALIDATE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/agent-verify-invalidate"
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 failures=()
@@ -113,14 +115,38 @@ work_git add code.txt docs/worklogs/issue-807.md
 [[ "$rc" == 0 && "$(cat "$(marker_file)" 2>/dev/null)" == "$(work_git rev-parse 'HEAD^{tree}')" ]] ||
   failures+=("record_worktree: marker does not match the tree committed after verify")
 
-# mise の verify タスクは、依存タスクの後で印の記録を呼ぶ。依存タスクが失敗したときは run の段に進まず、
-# 成功したときだけ印ができる。合成の依存タスクに、リポジトリの verify タスクの節をそのままつないで確かめる。
+# --- 実際の index の追跡情報を引き継ぐ: core.fileMode=false でも実行権限が残り、
+# 無視のパターンに当たる追跡済みファイルも印の木に入る ---
+setup_repo index_details
+printf '#!/usr/bin/env bash\nexit 0\n' >"$REPO_DIR/work/tool.sh"
+chmod +x "$REPO_DIR/work/tool.sh"
+printf 'ignored-but-tracked\n' >"$REPO_DIR/work/ignored.txt"
+printf 'ignored.txt\n' >"$REPO_DIR/work/.gitignore"
+work_git add tool.sh .gitignore
+work_git add -f ignored.txt
+(cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m implementation)
+work_git config core.fileMode false
+(
+  cd "$REPO_DIR/work" || exit 1
+  bash "$RECORD" >/dev/null 2>&1
+)
+rc=$?
+marker_tree="$(cat "$(marker_file)" 2>/dev/null)"
+[[ "$rc" == 0 && "$(work_git ls-tree "$marker_tree" tool.sh | awk '{print $1}')" == 100755 ]] ||
+  failures+=("record_index_mode: executable mode is not preserved")
+[[ -n "$(work_git ls-tree "$marker_tree" ignored.txt)" ]] ||
+  failures+=("record_index_ignored: tracked ignored file is missing")
+
+# mise の verify タスクは、検査の前に前回の印を消し、3 グループがすべて成功したときだけ印を残す。
+# 同じ木で再実行が失敗したとき、古い印で push が通らないことを合成の依存タスクで確かめる。
 verify_section="$(sed -n '/^\[tasks\.verify\]/,/^\[tasks\.verify-lint\]/p' mise.toml)"
-grep -qF 'run = "bash scripts/agent-verify-record"' <<<"$verify_section" ||
-  failures+=("mise_verify_hookup: verify task does not call agent-verify-record")
+grep -qF 'run = "bash scripts/agent-verify-run"' <<<"$verify_section" ||
+  failures+=("mise_verify_hookup: verify task does not call agent-verify-run")
 MISE_TOY="$ROOT/mise-verify-result"
 mkdir -p "$MISE_TOY/scripts"
 cp "$RECORD" "$MISE_TOY/scripts/agent-verify-record"
+cp "$VERIFY_RUN" "$MISE_TOY/scripts/agent-verify-run"
+cp "$INVALIDATE" "$MISE_TOY/scripts/agent-verify-invalidate"
 cat >"$MISE_TOY/mise.toml" <<'EOS'
 [tasks.verify-lint]
 run = "exit ${VERIFY_DEPS_RC:-0}"
@@ -134,17 +160,24 @@ run = "true"
 EOS
 sed -n '/^\[tasks\.verify\]/,/^\[tasks\.verify-lint\]/p' mise.toml | sed '$d' >>"$MISE_TOY/mise.toml"
 "$REAL_GIT" init -q -b main "$MISE_TOY"
-(cd "$MISE_TOY" && "$REAL_GIT" -c user.name=test -c user.email=test@example.com commit -q --allow-empty -m init)
+"$REAL_GIT" init -q --bare -b main "$MISE_TOY/remote.git"
+(cd "$MISE_TOY" && as 'pelway-dev[bot]' commit -q --allow-empty -m init)
+"$REAL_GIT" -C "$MISE_TOY" remote add origin "$MISE_TOY/remote.git"
 (cd "$MISE_TOY" && MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-verify-success.out" 2>&1)
 rc=$?
 [[ "$rc" == 0 && -f "$MISE_TOY/.git/pelway-verify-tree" ]] ||
   failures+=("mise_verify_success: exit $rc or marker missing")
-first_marker="$(cat "$MISE_TOY/.git/pelway-verify-tree")"
-printf 'unverified change\n' >"$MISE_TOY/change.txt"
 (cd "$MISE_TOY" && VERIFY_DEPS_RC=1 MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-verify-failure.out" 2>&1)
 rc=$?
-[[ "$rc" != 0 && -f "$MISE_TOY/.git/pelway-verify-tree" && "$(cat "$MISE_TOY/.git/pelway-verify-tree")" == "$first_marker" ]] ||
-  failures+=("mise_verify_failure: exit $rc or marker changed")
+[[ "$rc" != 0 && ! -e "$MISE_TOY/.git/pelway-verify-tree" ]] ||
+  failures+=("mise_verify_failure: exit $rc or stale marker remains")
+(cd "$MISE_TOY" && PELWAY_AGENT_SKIP_RESIGN=1 bash "$AGENT_GH" dev git push origin HEAD:refs/heads/agent/flaky-verify >"$ROOT/flaky-push.out" 2>"$ROOT/flaky-push.err")
+RC=$?
+ERR="$(cat "$ROOT/flaky-push.err")"
+[[ "$RC" != 0 && "$ERR" == *'mise run verify'* ]] ||
+  failures+=("push_after_same_tree_verify_failure: not stopped: rc=$RC $ERR")
+[[ -z "$("$REAL_GIT" --git-dir="$MISE_TOY/remote.git" rev-parse -q --verify refs/heads/agent/flaky-verify 2>/dev/null)" ]] ||
+  failures+=("push_after_same_tree_verify_failure: remote ref changed")
 
 # --- 印が無い push は止まり、理由と mise run verify の案内が出る ---
 setup_repo missing
@@ -234,6 +267,41 @@ push_role review_role review -u origin HEAD
 [[ "$RC" != 0 && "$ERR" == *'mise run verify'* ]] ||
   failures+=("push_review_role: not stopped: rc=$RC $ERR")
 [[ -z "$(remote_ref agent/review_role)" ]] || failures+=("push_review_role: remote ref changed")
+
+# --- ブランチの削除とタグだけの push は印が無くても通し、ブランチ更新を含む push は止める ---
+setup_repo delete_only
+printf 'implementation\n' >"$REPO_DIR/work/code.txt"
+work_git add code.txt
+(cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m implementation)
+(cd "$REPO_DIR/work" && PELWAY_AGENT_SKIP_RESIGN=1 PELWAY_AGENT_SKIP_VERIFY_GATE=1 bash "$AGENT_GH" dev git push -q -u origin HEAD >/dev/null 2>"$ROOT/delete-only-seed.err")
+[[ "$?" == 0 && -n "$(remote_ref agent/delete_only)" ]] ||
+  failures+=("push_delete_only_seed: remote branch was not created: $(cat "$ROOT/delete-only-seed.err")")
+rm -f "$(marker_file)"
+(cd "$REPO_DIR/work" && PELWAY_AGENT_SKIP_RESIGN=1 bash "$AGENT_GH" dev git push origin ":refs/heads/agent/delete_only" >"$ROOT/delete-only.out" 2>"$ROOT/delete-only.err")
+RC=$?
+ERR="$(cat "$ROOT/delete-only.err")"
+[[ "$RC" == 0 && -z "$(remote_ref agent/delete_only)" ]] ||
+  failures+=("push_delete_only: branch deletion not passed: rc=$RC $ERR")
+
+setup_repo tag_only
+printf 'implementation\n' >"$REPO_DIR/work/code.txt"
+work_git add code.txt
+(cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m implementation)
+work_git tag verify-gate-tag
+push_role tag_only dev origin refs/tags/verify-gate-tag
+[[ "$RC" == 0 && -n "$("$REAL_GIT" --git-dir="$REPO_DIR/remote.git" rev-parse -q --verify refs/tags/verify-gate-tag 2>/dev/null)" ]] ||
+  failures+=("push_tag_only: tag-only push not passed: rc=$RC $ERR")
+
+setup_repo mixed_tag_branch
+printf 'implementation\n' >"$REPO_DIR/work/code.txt"
+work_git add code.txt
+(cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m implementation)
+work_git tag mixed-tag
+push_role mixed_tag_branch dev origin refs/tags/mixed-tag HEAD:refs/heads/agent/mixed_tag_branch
+[[ "$RC" != 0 && "$ERR" == *'mise run verify'* ]] ||
+  failures+=("push_mixed_tag_branch: not stopped: rc=$RC $ERR")
+[[ -z "$("$REAL_GIT" --git-dir="$REPO_DIR/remote.git" rev-parse -q --verify refs/tags/mixed-tag 2>/dev/null)" && -z "$(remote_ref agent/mixed_tag_branch)" ]] ||
+  failures+=("push_mixed_tag_branch: remote refs changed")
 
 # --- PELWAY_AGENT_SKIP_VERIFY_GATE は 1 のときだけ外れる。0 では外れない ---
 setup_repo skip_zero

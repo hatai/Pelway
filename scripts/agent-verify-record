@@ -25,7 +25,10 @@ cleanup() {
 trap cleanup EXIT
 
 index="$index_dir/index"
-# 一時 index は空から始める。無視するファイルは commit に入らないため含めず、それ以外の作業ツリー全体を記録する。
+# 一時 index は実際の index の複写から始める。追跡済みだが無視のパターンに当たるファイルと、
+# core.fileMode=false の環境で index に残っている実行権限を、印の木に残すため。
+real_index="$(git -C "$root" rev-parse --git-path index)" || fail "実際の index を解決できません"
+[[ ! -e "$real_index" ]] || cp -- "$real_index" "$index" || fail "実際の index を一時 index に複写できません"
 env GIT_INDEX_FILE="$index" git -C "$root" add -A || fail "作業ツリーを一時 index に読めません"
 tree="$(env GIT_INDEX_FILE="$index" git -C "$root" write-tree)" || fail "作業ツリーの木の hash を作れません"
 [[ "$tree" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || fail "作業ツリーの木の hash の形を判定できません"

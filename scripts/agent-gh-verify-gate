@@ -15,13 +15,21 @@ stop_unverified() {
   exit 1
 }
 
-git_dir="$(git rev-parse --git-dir 2>/dev/null)" || stop_unverified "gitdir を解決できません"
-git_dir="$(CDPATH='' cd -- "$git_dir" 2>/dev/null && pwd -P)" || stop_unverified "gitdir を絶対パスに解決できません"
-marker_path="$git_dir/pelway-verify-tree"
-[[ -r "$marker_path" ]] || stop_unverified "印 $marker_path がありません"
-marker="$(head -n 1 "$marker_path")"
-[[ "$marker" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || stop_unverified "印 $marker_path の形を判定できません"
-[[ "$(git --no-replace-objects cat-file -t "$marker" 2>/dev/null)" == tree ]] || stop_unverified "印の木 $marker を読めません"
+git_dir=""
+marker_path=""
+marker=""
+marker_ready=0
+read_marker() {
+  ((marker_ready)) && return 0
+  git_dir="$(git rev-parse --git-dir 2>/dev/null)" || stop_unverified "gitdir を解決できません"
+  git_dir="$(CDPATH='' cd -- "$git_dir" 2>/dev/null && pwd -P)" || stop_unverified "gitdir を絶対パスに解決できません"
+  marker_path="$git_dir/pelway-verify-tree"
+  [[ -r "$marker_path" ]] || stop_unverified "印 $marker_path がありません"
+  marker="$(head -n 1 "$marker_path")"
+  [[ "$marker" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || stop_unverified "印 $marker_path の形を判定できません"
+  [[ "$(git --no-replace-objects cat-file -t "$marker" 2>/dev/null)" == tree ]] || stop_unverified "印の木 $marker を読めません"
+  marker_ready=1
+}
 
 # 行を先に全部読む（比較のコマンドに、残りの入力を読ませないため）。
 mapfile -t lines
@@ -32,6 +40,7 @@ for line in ${lines[@]+"${lines[@]}"}; do
     stop_unverified "pre-push の入力の行を判定できません（$line）"
   fi
   [[ "$lsha" =~ ^0+$ || "$rref" != refs/heads/* ]] && continue # 削除とブランチ以外は確かめない
+  read_marker
   tree="$(git --no-replace-objects rev-parse -q --verify "$lsha^{tree}" 2>/dev/null)" ||
     stop_unverified "$rref へ送る $lsha の木を読めません"
   [[ "$tree" == "$marker" ]] && continue
