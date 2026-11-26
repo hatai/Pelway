@@ -360,11 +360,18 @@ depends = ["hk-check", "fnox-check", "pitchfork-check", "deny-check", "shellchec
 
 # client/（Electron と Octane の画面。ADR 0014）のタスク。手順は client/README.md。
 [tasks."client:bootstrap"]
-description = "client/ の依存を bun.lock どおりに入れる"
+description = "client/ の依存を bun.lock どおりに入れる（Electron の本体は初めて起動したときに取ってくる）"
 dir = "{{config_root}}/client"
 run = "bun install --frozen-lockfile"
 
+[tasks."client:dev"]
+description = "Electron の開発版を起動する"
+depends = ["client:bootstrap"]
+dir = "{{config_root}}/client/apps/desktop"
+run = "bun run dev"
+
 # 整形・lint・型検査・試験。verify-static（CI の static ジョブ）から回す。
+# 試験は electron を起動しないので、Electron の本体は取ってこない。
 [tasks."client:verify"]
 description = "client/ の整形・lint（canary の bun lint）・型検査・試験"
 dir = "{{config_root}}/client"

@@ -4,13 +4,16 @@ Pelway のデスクトップアプリ（Electron）と、その画面（Octane�
 
 ## 構成
 
-| パス                                 | 中身                                                                                  |
-| ------------------------------------ | ------------------------------------------------------------------------------------- |
-| `packages/contracts/`                | IPC のチャンネルの一覧（`src/ipc.ts`）                                                |
-| `packages/core/`                     | `pelway-client-core` を TypeScript に移したもの（今は空）                             |
-| `packages/ui/`                       | 自前の UI 部品                                                                        |
-| `packages/tokens/`・`packages/i18n/` | デザイントークンの CSS 変数と、画面の文言（今は空）                                   |
-| `test/`                              | `bun test` の前に読むもの（happy-dom と、Octane のコンパイラを通す bun のプラグイン） |
+| パス                                 | 中身                                                                                                             |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `apps/desktop/src/main/`             | Electron の main。窓、セキュリティの既定（`security.ts`）、同梱の資産を出す `pelway://app/`（`app-protocol.ts`） |
+| `apps/desktop/src/preload/`          | 画面に出す IPC の橋（`bridge.ts`）。`packages/contracts` で宣言したチャンネルだけを通す                          |
+| `apps/desktop/src/renderer/`         | 画面の殻。CSP は `index.html` に書く                                                                             |
+| `packages/contracts/`                | IPC のチャンネルの一覧（`src/ipc.ts`）                                                                           |
+| `packages/core/`                     | `pelway-client-core` を TypeScript に移したもの（今は空）                                                        |
+| `packages/ui/`                       | 自前の UI 部品                                                                                                   |
+| `packages/tokens/`・`packages/i18n/` | デザイントークンの CSS 変数と、画面の文言（今は空）                                                              |
+| `test/`                              | `bun test` の前に読むもの（happy-dom と、Octane のコンパイラを通す bun のプラグイン）                            |
 
 ## 道具
 
@@ -23,7 +26,8 @@ Pelway のデスクトップアプリ（Electron）と、その画面（Octane�
 リポジトリの直下で次を実行する。
 
 ```bash
-mise run client:bootstrap   # 依存を入れる
+mise run client:bootstrap   # 依存を入れる（Electron の本体は初めて起動したときに取ってくる）
+mise run client:dev         # Electron の開発版を起動する
 mise run client:verify      # 整形・lint・型検査・試験（mise run verify からも回る）
 ```
 
@@ -35,3 +39,7 @@ bun run lint       # canary の bun lint
 bun check          # 型検査
 bun test           # 試験
 ```
+
+## IPC のチャンネルを足すとき
+
+`packages/contracts/src/ipc.ts` に宣言し、main のハンドラ（送り元を `isTrustedSender` で確かめる）、preload、画面の模擬（`@octanejs/electron` の `installElectronBridge`）を同じ変更で直す。`@octanejs/electron` から使うのは、`invoke`/`on` だけで動くフック（`useInvoke`・`useInvokeState`・`useIpcEvent`）と試験用の模擬だけで、組み込みの `octane:*` のチャンネルに頼るもの（`useWindowState`・`useNativeTheme` など）は使わない。
