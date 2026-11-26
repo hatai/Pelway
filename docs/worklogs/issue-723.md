@@ -107,3 +107,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 に「事実の誤りを指す nit は、印が無くても hatai に直すかを聞く」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 10）
+
+対象 head: 08dc349d0e08afeec270631536dc6c5aa6ee794c
+
+1. 詰まった箇所: PR #731 の codex の must-fix（claude は `[文書のずれ]` の nit）: round 9 で「Releases とタグを読むには Contents の read が要り、ホストが乗っ取られるとソースが読まれうる」と書いたが、hatai/Pelway は公開リポジトリなので、今は認証なしで読め、ソースの露出も新しくない。
+2. 曖昧だった文: 「Releases とタグを読むには Contents の read が要り」（round 9 で自分が書いた ADR の文）。リポジトリが非公開であることを暗に前提にしていた。
+3. 仮定と解釈: 公開のあいだ（権限を足さずに読め、トークンは主にレート制限のため）と、非公開にしたとき（Contents の read が要り、ソースが読まれうる）に分けて書いた。round 9 の 3 の「事実として書いた」は、非公開のときに限る事実だったと訂正する。
+4. 足りなかった情報・検証手段: Releases・タグ・attestation に要る権限は、トークンで実際に呼んで確かめていない（GitHub の文書とリポジトリの `visibility` に拠った）。取りに行く仕組みの Issue で実測する。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 4 の「確認の手順の条件」に「権限や公開範囲についての事実を書くときは、対象のリポジトリの `visibility` を確かめてから書く」を足す。
+
+使ったスキル: implement-issue
