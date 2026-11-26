@@ -96,3 +96,15 @@ pr-size: +179 / -0（追加の上限 800、削除の上限 2000）
 
 - 素の `mise run verify` は 2026-11-26 22:50:31 JST に終了（269.27 秒）。失敗は `make_run_dir` の 4 件と `locks_dir_ready` の 2 件で、`/tmp` の所有者が uid 65534 に見えることが原因（Issue #692）。
 - `TMPDIR=/verify-tmp` での再実行は 2026-11-26 22:54:11 JST に終了（202.13 秒）。`/verify-tmp` は `/`（uid 1000 所有の書き込み可 tmpfs）直下に作った自分所有のディレクトリ。`verify-run.test.sh` は自身のケース用に `mktemp -d` を使い、TMPDIR の場所を変えても検査ロジックは変わらない。
+
+## 実装者メモ（round 2）
+
+対象 head: 942f0b31b7ffcffed95d04567f6d9a2105d08736 のレビュー指摘への対応。
+
+1. 詰まった箇所: レビュー指摘と対応。must-fix 5 件のうち 4 件は `docs/research/microsandbox.md` の 4（試す段階の計画）にあり、本番の fnox 設定と鍵を VM に渡す案、既存の共有 git dir を書き込み可で渡す案、`msb self uninstall` の後に `msb df` を実行する順序、初回起動のイメージ取得を許可に含めていない点だった。試行専用の保存先・試験専用のクローン・試験専用の資格情報に分け、`config`・`config.worktree`・`hooks/` への書き込み拒否をエージェントの起動より先に確かめる順序に直した。残る 1 件は Issue へのコメントで、必要な許可と実機試用を保留した理由を Issue #836 に残した。nit のうち `[文書のずれ]` の 1 件（bwrap の書き込み先に `/tmp` がある）は 2 の表に反映した。印の無い nit のうち `[issue-1701]` の出典 URL だけは、受け入れ条件の「microsandbox の欄に出典 URL が付いている」に関わるため出典一覧に足した。ほかの印の無い nit（結論の範囲、この worklog のパスの一般化）は直していない。この round の `mise run verify` は `TMPDIR=/verify-tmp` で exit 0（2026-11-27 00:09:00 JST に終了、307.85 秒、`script-test: 59 tests ok`）。差分は文書だけで環境が変わらないため、素の実行は繰り返していない。
+2. 曖昧だった文: 「試験専用のクローンで共有 Git ディレクトリを独立させ、現行の bwrap が保護する `config`、`config.worktree`、`hooks/` の書き込み拒否を、エージェントの起動より先に確認してください。」（PR #842 の codex のレビュー、must-fix）
+3. 仮定と解釈: 試験専用のクローンの中で worktree を作り、Pelway と同じ構成（`.git` ポインタと共有 git dir）で確かめると解釈した。`config.worktree` は worktree にだけできるため。採らなかった解釈: worktree を作らない単純な clone で確かめる。「試験専用の資格情報」は `PELWAY_AGENT_FNOX_CONFIG` で指す試験用の fnox 設定と鍵と解釈した（`scripts/agent-gh` がこの環境変数で設定ファイルを切り替えるため）。
+4. 足りなかった情報・検証手段: `msb self uninstall --yes` が保存先全体を削除することは、文書（`docs/cli/management.mdx`）には「msb・libkrunfw・コマンドのリンク」としか書かれておらず、ソース（`crates/cli/lib/commands/self_cmd.rs` の `uninstall_all`）からしか分からなかった。`MSB_HOME` で試行専用にした保存先を `msb self uninstall` が対象にするかは、起動しないと確認できない（未確認）。
+5. 改善案: `docs/research/docker-sandboxes.md` の「4. 実際に試す段階の計画」にも同じ指摘が当たりうる（本番の `~/.config/pelway-agent` をマウントする案 (b)、既存の worktree での検証 (b)）。`sbx` を試す Issue を立てるときに見直す。`.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に、実機で試す計画を書く Issue では本番の環境と資格情報から分けることを受け入れ条件に含める例を足す。
+
+使ったスキル: `implement-issue`、`write-pull-request`、`ja-text-communication`
