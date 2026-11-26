@@ -137,3 +137,20 @@ PR: #722
    - agent-team.toml の冒頭コメントが古くなる指摘は、toml の中身が Issue #715 の対象外のため別の PR に回す（レビュー側も同じ扱い）
 4. 仮定と解釈:
    - codex の out-of-scope: Devin CLI のレビュー利用可否について、`command-team` の「確認済み」の記載と `docs/dev-environment.md` の「秘密ファイル遮断の実測まで使用停止」の記載が食い違う。終わりの報告の `out-of-scope:` に書く
+
+## 実装者メモ（round 10）
+
+対象 head: <新規コミット>
+PR: #722
+
+レビュー指摘（head 70996e1a で codex run=7179732392 approve・must-fix 0・nit 0、claude run=7179732924 approve・must-fix 0・marked nit 2+文書のずれ 1）への対応:
+
+1. 詰まった箇所: なし
+2. must-fix の対応: なし（両担当 approve）
+3. 印の nit の対応:
+   - 高リスク・`security=yes` の条件の文言に存在確認を追加（review-delegation-docs.test.sh: `agent-team.toml` の変更・を変えている、の 2 ピン）
+   - `instance_match_runbook_review` のピンを「main の最新の版」の指定まで含む文言に広げた（後半だけだと照合先の版の指定が消えても落ちないため）
+   - docs/agents/skill-helpers.md:32 の高リスク判定の列挙を、command-team「レビュー担当と effort」の表の高リスクの条件を参照する形に直した（toml の変更が抜けていた）
+4. 仮定と解釈:
+   - codex の out-of-scope: Devin CLI のレビュー利用可否について、`command-team` の「確認済み」と `docs/dev-environment.md` の「秘密ファイル遮断の実測まで使用停止」が食い違う。終わりの報告の `out-of-scope:` に書く
+   - claude の out-of-scope: review-pr の security-review の起動条件と HIGH の表に agent-team.toml が無い。終わりの報告の `out-of-scope:` に書く

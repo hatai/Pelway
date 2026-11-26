@@ -70,9 +70,15 @@ check instance_match_command_team .agents/skills/command-team/SKILL.md \
 check instance_match_runbook_launch docs/agents/grokbot-runbook.md \
   'main の最新の版の `docs/dev-environment.md`（読めなければ起動を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ、起動を止める。'
 check instance_match_runbook_review docs/agents/grokbot-runbook.md \
-  'の節が名指すインスタンスと一致しなければ起動を止める）'
+  'main の最新の版の `docs/dev-environment.md`（読めなければ起動を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ起動を止める）'
 check instance_match_spec docs/superpowers/specs/agent-team.md \
   'main の最新の版の `docs/dev-environment.md`（読めなければ委託・起動しない）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致するものだけを使う'
+
+# toml だけを変える PR が高リスク・security=yes の条件を抜ける経路を閉じた文言（round 7〜9 の指摘）。
+check highrisk_toml_command_team .agents/skills/command-team/SKILL.md \
+  '`agent-team.toml` の変更、pr-size の追加行が 400 を超える'
+check security_yes_toml_implement .agents/skills/implement-issue/SKILL.md \
+  '`agent-team.toml` を変えている、認証・認可・トークン・鍵・暗号・sandbox・egress・gateway・テナント分離・監査に触れている'
 
 # 人間のアカウントで投稿する道具で hatai の判断を書く条件。
 check agents_human_account AGENTS.md \
