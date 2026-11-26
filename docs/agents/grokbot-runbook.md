@@ -564,7 +564,7 @@ sandbox の中から置き換えられる場所なので、conductor-watch.sh �
 | `scheduled_task_id` | 現行の巡回の scheduled task の ID |
 | `inbox_offset` | 受信箱 `conductor-inbox.jsonl` の既読の位置（行番号）。agent-watch は、前回の起こしの後にこの値が進んでいなければ、次の起こしを送らない（Issue #555）。起こしの宛先はこの記録には置かない（sandbox から書けるため。`pelway-agent-watch --register`） |
 | `pending_thread_sends` | send 不通で未配送のままのスレッド指示の一覧。要素は `to`（宛先のスレッド）・`what`（指示の種類）・`since`（送れなくなった時刻。オフセット付きの ISO 8601） |
-| `conductor_thread_id` | 現指揮役のスレッド ID。引き継ぎ・交代・回復・初回登録で指揮役が書き込み手順の `--claim-conductor` で自分の値にする（この項目は `--claim-conductor` でだけ変わり、通常の patch での変更・削除・無効化は拒否される）。一致しないスレッドからの書き込みは適用されず `anomalies` に記録される（Issue #671） |
+| `conductor_thread_id` | 現指揮役のスレッド ID。引き継ぎ・交代・回復・初回登録で指揮役が書き込み手順の `--claim-conductor` で自分の値にする（この項目は `--claim-conductor` でだけ変わり、通常の patch での変更・削除・無効化は拒否される）。一致しないスレッドからの書き込みは適用されず `anomalies` に記録される（記録の保存が上限を超えるときは記録されない。Issue #671） |
 | `anomalies` | 書き込み手順が記録した異常の一覧（`conductor-mismatch`・`conductor-id-change-refused`・`offset-regression`・`offset-regression-refused`・`invalid-offset`・`state-unreadable`・`state-untrusted`・`owner-unverifiable`・`offset-unverifiable`。直近 100 件まで）。巡回は新しい項目を見つけたら巡回記録に残す。`anomalies` は書き込み手順だけが書く項目で、patch からの追記・消去は受け付けない |
 | `needs_conductor_claim` | 状態ファイルが読めなかった・正規パスが信頼できる通常ファイルでなかった場合の回復途中の印。書き込み手順が立て、`--claim-conductor` の回復書き込みだけが下ろす（patch からの操作は受け付けない）。立っている間は `--claim-conductor` 以外の `--writer-thread` の書き込みと、オフセットを書く書き込みが拒否される（`--allow-offset-regression` を付けた、スレッド ID を名乗らない書き手のオフセットの書き込みは適用される。比較元が無いときは初期値がそのまま保存され、現行の整数より小さい値に変わるときだけ巻き戻しの記録が付く） |
 
@@ -587,7 +587,7 @@ sandbox の中から置き換えられる場所なので、conductor-watch.sh �
 
 手順は merge patch（RFC 7386。オブジェクトは深く併合し、`null` は鍵を消す。patch のオブジェクトは既存値がオブジェクトでなくても空のオブジェクトに再帰的に併合する — この点は RFC 7386 と同じで、中の `null` は常に「鍵を消す」になる）を標準入力に取り、RFC 7386 に無い拡張として、最上位が JSON 配列のときは併合の列として順に適用する（最上位がオブジェクトでも配列でもない入力は受け付けない）。ロックを取って現在値を読み直してから併合し、保護を通った結果だけを原子的に書き戻す。名乗りは `--writer-thread <スレッド ID>`（指揮役スレッド）か `--writer <名前>`（スレッドを持たない書き手。巡回スクリプトは `conductor-watch`）のどちらかを必ず付ける。
 
-保護（拒否された書き込みは適用されず、試みは `anomalies` に記録される）:
+保護（拒否された書き込みは適用されず、試みは `anomalies` に記録される。記録の保存が上限を超えるときは試みが記録されない）:
 
 - `--writer-thread` の名乗りが記録の `conductor_thread_id` と一致しない書き込み。引き継ぎ・交代で新指揮役が自分の ID にするときだけ `--claim-conductor` を付ける（patch が別の ID を書こうとしても名乗った ID が入る）
 - `conductor_thread_id` そのものを patch で変更・削除・無効化する書き込み（`--writer`・`--writer-thread` のどちらの名乗りでも拒否し、`conductor-id-change-refused` として記録する。同じ値の書き戻しは除く）。この項目は `--claim-conductor` でだけ変わる — この項目が失われると後続の持ち主照合が素通りになるため

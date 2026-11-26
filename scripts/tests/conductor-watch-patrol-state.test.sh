@@ -356,6 +356,11 @@ check "18: the timeout is logged as an exception, not an exit code" \
   has "$ROOT/out.log" "PATROL-STATE write-failed exc=TimeoutExpired"
 check "18: the watch still saves its own state" \
   python3 -I -c 'import json,sys; json.load(open(sys.argv[1]))["patrol_at"]' "$ROOT/state/pelway/conductor-watch/state.json"
+check "18: the throttling state is saved for the next cycle" \
+  python3 -I -c 'import json,sys
+s=json.load(open(sys.argv[1]))
+w=s.get("ps_write_skipped")
+sys.exit(0 if isinstance(w, dict) and w.get("reason") == "write-failed" else 1)' "$ROOT/state/pelway/conductor-watch/state.json"
 check "18: the unchanged patrol-state record is kept" eq "$(task_id)" "seeded"
 cp "$REPO/scripts/patrol-state-update" "$ROOT/repo/scripts/"
 
