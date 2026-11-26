@@ -536,6 +536,29 @@ check "26: emptied high_risk fails validation" eq "$rc" "1"
 check "26: staffing warning precedes the failure" has "$ROOT/err" "高リスクのレビュー担当"
 rm "$ROOT/agent-team.local.toml"
 
+# 27: local の use の型が違うときは、担当不足の警告を読む前に検証が
+# キー名つきで止める（traceback で落ちない）
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[developers.dev]
+use = 1
+EOF
+s_run "$ROOT/l24.toml"; rc=$?
+check "27: non-list use fails validation" eq "$rc" "1"
+check "27: no traceback" bash -c "! grep -q Traceback '$ROOT/err'"
+check "27: error names developers.dev.use" has "$ROOT/err" "developers.dev.use"
+rm "$ROOT/agent-team.local.toml"
+
+# 28: local の priority の型が違うときも同じく検証がキー名つきで止める
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[developers.dev]
+priority = 1
+EOF
+s_run "$ROOT/l24.toml"; rc=$?
+check "28: non-table priority fails validation" eq "$rc" "1"
+check "28: no traceback" bash -c "! grep -q Traceback '$ROOT/err'"
+check "28: error names developers.dev.priority" has "$ROOT/err" "developers.dev.priority"
+rm "$ROOT/agent-team.local.toml" "$ROOT/l24.toml"
+
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
   exit 1

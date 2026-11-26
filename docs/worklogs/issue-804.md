@@ -48,7 +48,17 @@ must-fix への対応:
 6. conductor-rebuild が agent-team.toml 有無で分岐していた → 毎回 worktree-setup を通し local を持ち越す。rebuild 試験の NEW_WT を本物の `git worktree add` に
 7. t3.json の command を `bash -c '"${T3CODE_PROJECT_ROOT:?}/scripts/worktree-setup"'` に（既定シェルに依らず POSIX 展開を効かせる）
 8. docs の「local から読む」記述を修正 — priority/models は `effective`（重ねた結果）、instance.review・effort.option・承認規則は本体の toml から（implement-issue, command-team, grokbot-runbook ×2, dev-environment）
-9. agent-team-config.test.sh の引数渡しミス・方向逆の試験を修正
+9. `worktree-setup.test.sh` の引数渡しミス（`$1` 未渡し）と方向の逆だった試験（7c）を修正
 10. 文書の文言 pin を board-patrol-docs.test.sh に追加（条件8: 上書き表・effective・needs-decision・worktree-setup）
 11. agent-team.md の「値を出さない」を診断出力に限定（nit もあわせて）
 push した head: 11e8051f
+
+## レビュー対応（round 4）
+
+対象 head: 140ffc6f
+レビュー: claude_review（run=round4）は verdict: request-changes（must-fix 1、nit 2）。codex_review は委託環境の設定の不備（`mcp__t3_code__pull_request_review` 公開）で failed、再送中
+
+must-fix への対応:
+1. warn_required を validate_doc の前に移したため型未検証の重ねた結果を読み、`use = 1` で TypeError、`priority = 1` で AttributeError になっていた → warn_required 内で `use` が list でない・`priority`/`priority.review` が dict でないときは警告を飛ばす形に（型の誤りは後続の検証がキー名つきで止める）。試験 27・28 で traceback が出ずキー名を名指すことを確かめる
+
+nit への対応: worktree-setup:126-128 のコメントに「noclobber が防ぐのは通常ファイルの上書き」を明記。worklog round 3 の項目 4・9 の記述を実態に合わせて修正

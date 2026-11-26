@@ -415,12 +415,17 @@ def warn_required(doc, logins):
         d = doc.get("developers", {}).get(login)
         if not isinstance(d, dict):
             continue
+        # 型の合わない値（use が list でない、priority/review が dict でない）は
+        # 後続の validate_doc がキー名つきで止めるため、ここでは読まずに警告を飛ばす
         use = d.get("use") or []
+        if not isinstance(use, list):
+            continue
         if "codex" not in use:
             warn(f"developers.{login}.use",
                  "codex が使えないが、マージには現在の head への codex の有効な approve が要る"
                  "（共有の規則は local では下げられない。扱いは指揮役の needs-decision）")
-        hr = (d.get("priority") or {}).get("review")
+        prio = d.get("priority")
+        hr = prio.get("review") if isinstance(prio, dict) else None
         if isinstance(hr, dict):
             hr_list = hr.get("high_risk")
             if isinstance(hr_list, list) and not [n for n in hr_list if n in use]:

@@ -124,8 +124,9 @@ for name in agent-team.toml agent-team.local.toml; do
     continue
   fi
   # 存在の確認と作成を分けない: noclobber のリダイレクト（O_EXCL|O_CREAT）で
-  # 「無いときだけ作る」を一操作にする。同名が並行して作られても上書きせず、
-  # 切れた symlink の先にも追従して書かない。
+  # 「無いときだけ作る」を一操作にする。同名の通常ファイルが並行して作られても
+  # 上書きせず、切れた symlink の先にも追従して書かない（既存が FIFO などの
+  # 通常ファイルでない名前は O_EXCL の対象外だが、前の検査で飛ばしている）。
   if ( set -o noclobber; cat -- "$from" >"$to" ) 2>/dev/null; then
     copied=$((copied + 1))
     echo "worktree-setup: copied $name"
