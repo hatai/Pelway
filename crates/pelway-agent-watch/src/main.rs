@@ -295,13 +295,11 @@ impl Watcher {
             .unwrap_or_else(|| self.state.outbox.clone())
             .iter()
             .map(|item| {
-                let (p, wrapped_creator) = pending_notice_parts(item);
-                let stored = wrapped_creator.or_else(|| {
-                    p.get("thread_id")
-                        .and_then(Value::as_str)
-                        .and_then(|id| self.state.inbox_pending_creators.get(id).cloned())
-                });
-                (p, stored)
+                let stored = item
+                    .get("thread_id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| self.state.inbox_pending_creators.get(id).cloned());
+                (item.clone(), stored)
             })
             .collect();
         to_inbox.extend(payloads.iter().map(|(p, _)| (p.clone(), None)));
@@ -554,24 +552,6 @@ impl Watcher {
         }
         out
     }
-}
-
-/// 再試行の記録を（受信箱に書く payload, 記録されていた立て手）に戻す。
-/// 記録の要素は payload そのものが正の形で、`{ "notice": <payload>, "created_by": ... }` に
-/// 包んだ中間の版の記録は payload と立て手に戻す。どちらの形でもないものは、payload その
-/// もの・立て手なしとして扱い、その周の一覧・詳細から立て手を取り直す。
-fn pending_notice_parts(item: &Value) -> (Value, Option<String>) {
-    if item.get("schema").is_none()
-        && let Some(p) = item.get("notice").filter(|n| n.is_object())
-    {
-        return (
-            p.clone(),
-            item.get("created_by")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-        );
-    }
-    (item.clone(), None)
 }
 
 /// ログ用の短い識別（秘密と返答の本文は含めない）。
