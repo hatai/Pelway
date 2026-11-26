@@ -195,7 +195,7 @@ PR: #735
 
 ## 実装者メモ（round 13）
 
-対象 head: （push 後に記入）
+対象 head: 4f6fe25b8d119cc7710dba995524032e9f7221f3
 PR: #735
 
 レビュー指摘（run 7186069347 claude approve・`[文書のずれ]` の印付き nit 1、head fcb3839e7651d5750156d528b38e8585f3ecc615。codex run 7186068716 はまだ返っていない）への対応。印の nit だけを直す round（通算 3 回目）。
