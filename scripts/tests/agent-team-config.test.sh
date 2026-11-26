@@ -46,7 +46,7 @@ assign_label = ""
 
 [agents.claude]
 instance = { review = "claude_review" }
-models = ["claude-opus-5-5". "claude-sonnet-5-5", "claude-haiku-5-5"]
+models = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
 effort = { option = "effort", raise = ["low", "medium", "high", "xhigh", "max"] }
 assign_label = ""
 EOF
@@ -91,7 +91,7 @@ want = {
     ),
     "claude": (
         {"review": "claude_review"},
-        ["claude-opus-5-5". "claude-sonnet-5-5", "claude-haiku-5-5"],
+        ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
     ),
 }
 bad = [
