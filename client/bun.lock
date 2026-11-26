@@ -34,9 +34,6 @@
       },
     },
   },
-  "trustedDependencies": [
-    "bun",
-  ],
   "catalog": {
     "@happy-dom/global-registrator": "21.0.4",
     "@octanejs/testing-library": "0.1.77",
