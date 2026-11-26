@@ -10,8 +10,8 @@
 
 ```mermaid
 flowchart LR
- subgraph CL["クライアント（設計・未実装）"]
-  GUI["ネイティブGUI<br/>Rust＋Slint（採用案・実機試験前）"]
+ subgraph CL["クライアント（設計・未実装。デスクトップは ADR 0014 で Electron に置き換え）"]
+  GUI["ネイティブGUI<br/>Rust＋Slint（D1 まで。ADR 0014 で Electron に置き換え）"]
   WEB["ブラウザUI<br/>TS＋Octane/DOM（推奨案）"]
   CORE["共通核 Rust client-core / WASM<br/>保存: rusqlite / IndexedDB"]
  end
@@ -44,7 +44,7 @@ flowchart LR
 
 - 実線は国内の本体。破線は利用者が選んだ場合だけ使う外部経路で、本体の「国外送信なし」の保証に含めない。外部から取り込んだ成果物のPelway側コピーは国内に保存する。
 - server・runner・gatewayは最低3つの別プロセス（Linuxコンテナ）。初版は別のメッセージブローカーを使わずDBキュー。
-- 初版の必須でないもの：wiki・RAG（pgvector）、常時VM。将来候補：OpenTelemetry。未選定：日本語全文検索（pg_bigm、Tantivy/Lindera）。比較対象：egui。icedとGPUIは読み上げの制約で初版の採用比較から除外。
+- 初版の必須でないもの：wiki・RAG（pgvector）、常時VM。将来候補：OpenTelemetry。未選定：日本語全文検索（pg_bigm、Tantivy/Lindera）。比較対象：egui。icedとGPUIは読み上げの制約で初版の採用比較から除外。クライアントの比較は [ADR 0014](adr/0014-desktop-client-electron.md)（デスクトップアプリは Electron で Web UI を包む）で終えた。
 
 ## 2. 依頼から処理・外部送信までの流れと権限の関門
 
@@ -85,7 +85,7 @@ flowchart TD
 
 - U01：S1（取消と送出の競合）の実装と検証。
 - U04：連携先の実条件（照会APIの有無、データの地域など）。
-- U05：国内設置機材、認証・TLS、鍵と復旧、Slint固定版とrmcpの依存・ライセンス、3OSの日本語入力と読み上げ。
+- U05：国内設置機材、認証・TLS、鍵と復旧、Slint固定版とrmcpの依存・ライセンス、3OSの日本語入力と読み上げ。Slint固定版の確認は D1 までの範囲に限る（[ADR 0014](adr/0014-desktop-client-electron.md)）。
 - U06：取消遷移の行単位（採用推奨・未確認）。
 - U07：停止要求済み外部runの確認期限と担当。
 - LAN公開とローカル認証方式も未決（01-architecture.md §ch01-s05）。

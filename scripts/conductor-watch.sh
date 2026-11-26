@@ -109,9 +109,17 @@ fi
 while true; do
   # threads.json は python 側で取得の成功を確かめてから差し替える（失敗で前回の一覧を消さない）。
   # T3 の失敗はスレッドに基づく判定をせず（格上げは判定しない）、Issue・PR の失敗は patrol-state.json を書き換えない（Issue なら DECISION の検知もしない）
+  # T3 一覧の取得開始時刻も記録する（SLOTS の記録の時刻は、使用数の根拠のうち最も古い
+  # 取得開始時刻にする）。記録に失敗した回は、前回の値が読めるまま残っていても渡さない。
+  tat="$(if [[ -n "${PELWAY_WATCH_NOW:-}" && -r "$PELWAY_WATCH_NOW" ]]; then cat "$PELWAY_WATCH_NOW"; else date +%s; fi)"
+  if printf '%s' "$tat" > "$D/threads-at"; then PELWAY_WATCH_THREADS_AT="$tat"; else PELWAY_WATCH_THREADS_AT=""; fi
   "$T3_BIN" thread list --json > "$D/threads.json.new" 2> "$D/threads.err"; trc=$?
   # GitHub からの取得に失敗したらファイルを消す（空の実状態と区別する。python 側で取得失敗と扱い、
   # 巡回状態の記録を書き換えさせない）。
+  # SLOTS の記録の時刻の一部に使う Issue 一覧の取得開始時刻（同上）。
+  iat="$(if [[ -n "${PELWAY_WATCH_NOW:-}" && -r "$PELWAY_WATCH_NOW" ]]; then cat "$PELWAY_WATCH_NOW"; else date +%s; fi)"
+  if printf '%s' "$iat" > "$D/issues-at"; then PELWAY_WATCH_ISSUES_AT="$iat"; else PELWAY_WATCH_ISSUES_AT=""; fi
+  export PELWAY_WATCH_THREADS_AT PELWAY_WATCH_ISSUES_AT
   scripts/agent-gh dev issue list --state all --limit "$IL" --json number,state,labels > "$D/issues.json" 2>/dev/null || rm -f "$D/issues.json"
   scripts/agent-gh dev pr list --state all --limit "$PL" --json number,state,isDraft,headRefName,reviewDecision,statusCheckRollup > "$D/prs.json" 2>/dev/null || rm -f "$D/prs.json"
   # ラベルイベント（issues/events は PR のラベルイベントも含む）。付け外しの裏付け検査
@@ -137,7 +145,8 @@ cur = {"threads": {}, "prs": {}, "since": {} if prev is None else prev.get("sinc
        "heartbeat_at": 0 if prev is None else prev.get("heartbeat_at", 0),
        "thread_list": None if prev is None else prev.get("thread_list"),
        "pending_sends": None if prev is None else prev.get("pending_sends"),
-       "ps_write_skipped": None if prev is None else prev.get("ps_write_skipped")}
+       "ps_write_skipped": None if prev is None else prev.get("ps_write_skipped"),
+       "slots": None if prev is None else prev.get("slots")}
 # ラベル操作の裏付け検査（Issue #405、2026-11-17 の要件変更）。actor だけでは判定しない
 # （エージェントが hatai のトークンで gh を動かすと、タイムラインの actor が hatai に
 # なることがあるため）。needs-human の解除と automerge の付け外しを、イベント時刻の前
@@ -186,6 +195,17 @@ except Exception: prs = []; prs_ok = False
 # 巡回の時刻。PELWAY_WATCH_NOW が指すファイルに epoch 秒が書かれていればそれを使う（テスト用）。
 try: now = float(open(os.environ["PELWAY_WATCH_NOW"]).read().strip())
 except Exception: now = time.time()
+# Issue 一覧の取得開始時刻（巡回ループが、今巡回の記録に書けたときだけ環境変数で渡す。
+# SLOTS の updated_at に使う）。渡らない回は補わない: 残った古いファイルの値を拾って
+# 遅れた取得に新しい時刻を付けないため、status: ok を公開しない。
+try: issues_at = float(os.environ["PELWAY_WATCH_ISSUES_AT"])
+except Exception: issues_at = None
+# T3 のスレッド一覧の取得開始時刻（同じく記録できた回だけ渡る。updated_at は両者の古い方）。
+try: threads_at = float(os.environ["PELWAY_WATCH_THREADS_AT"])
+except Exception: threads_at = None
+# 巡回の印。state.json と slots.json の両方に書き、一致すれば記録が最新の巡回のものと
+# 読み手が分かる（公開に失敗した回は state.json の印だけが進む）。
+cur["patrol_at"] = now
 def stamp(ts): return datetime.fromtimestamp(ts).isoformat(timespec="seconds")
 def stampable(ts):  # 地方時の年の範囲を外れる時刻は、読めない since と同じく数に入れないための確かめ
     try:
@@ -233,8 +253,10 @@ ps_name = os.path.basename(sys.argv[2])
 try: ps_dfd = open_ps_dir(sys.argv[2])
 except OSError: ps_dfd = None
 def read_ps():  # read_request と同じく通常ファイル・待ち・量に限る
+    return read_named(ps_name)
+def read_named(name):  # 同じディレクトリにあるほかの記録（patrol-items.json）も同じ形で読む
     if ps_dfd is None: raise OSError("patrol-state dir not usable")
-    fd = os.open(ps_name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=ps_dfd)
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=ps_dfd)
     with os.fdopen(fd, "rb") as f:
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode) or st.st_size > PS_MAX:
@@ -290,7 +312,8 @@ def gh_json(*args):
 # 見張りが動いていることを示す行（Issue #504）。HEARTBEAT_SECS ごとに 1 行。
 # PELWAY_WATCH_HEARTBEAT_SECS で差し替えられる（テスト用）。
 HEARTBEAT_SECS = env_secs("PELWAY_WATCH_HEARTBEAT_SECS", 600)
-if now - (cur["heartbeat_at"] or 0) >= HEARTBEAT_SECS:
+hb = now - (cur["heartbeat_at"] or 0) >= HEARTBEAT_SECS
+if hb:
     print(f"HEARTBEAT at={stamp(now)}", flush=True)
     cur["heartbeat_at"] = now
 # 未配送のスレッド指示（patrol-state.json の pending_thread_sends）の滞留（Issue #669）。
@@ -627,6 +650,129 @@ try: ps = json.loads(read_ps())
 except Exception: ps = {}
 if not isinstance(ps, dict): ps = {}
 if not isinstance(ps.get("subjects"), dict): ps["subjects"] = {}
+# 指揮役が持つ項目（items）は patrol-items.json に置く（巡回の書き戻しで巻き戻らないよう
+# patrol-state.json と別記録にする。置き場の規則・移行手順・旧置き場を読まない決まりは
+# runbook「10. 巡回状態の補助記録」）。無い・読めない回は空として扱いすべて使用中に倒す。
+try: items = json.loads(read_named("patrol-items.json"))["items"]
+except Exception: items = {}
+if not isinstance(items, dict): items = {}
+# SLOTS 行（Issue #714）。実装・調査に使っている枠の数を agent-team.toml の上限と突き
+# 合わせて出す。判断の正本は watch.log の行でなく、見張り自身が巡回ごとに書き直す
+# slots.json（決まりは runbook「3. 同時数と順番待ち」）。
+# agent-team.toml が無いときは SLOTS を出さない。使用数を確かめられない巡回は
+# SLOTS error <理由> だけを出す（直前の巡回の行が残ったまま使われないようにする）。
+# 出すのは、使用数または状態が前回から変わったときと HEARTBEAT の巡回。Issue を持た
+# ない調査（入口B）は数えない。数えるのは open で agent:working の付いた Issue で、
+# agent:devin は devin、ほかは opencode。
+# 停止の印（停止中・再開処理中・再開待ち）が付いたものは裏付けを取ってから除く
+# （stop_verified は runbook「3. 同時数と順番待ち」の「実際の停止を確認できるもの」と同じ決まり）。
+slots_st = "unavailable"; slots_reason = "agent-team.toml not in worktree"
+slots_usage = None; slots_lines = None; slots_sig = "unavailable"
+if os.path.isfile("agent-team.toml"):
+    if issues is None:
+        slots_st, slots_reason = "error", "issue-list-failed"
+    elif len(issues) >= issue_limit:
+        slots_st, slots_reason = "error", "issue-list-limit"
+    elif issues_at is None or threads_at is None:
+        # 取得開始時刻が記録できなかった回は、時刻の新しさで鮮度を誤魔化さないよう公開しない。
+        slots_st, slots_reason = "error", "fetch-time-missing"
+    else:
+        try:
+            r = subprocess.run(["scripts/agent-team-config", "slots", "hatai"],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+            if r.returncode != 0:
+                reason = next((ln.strip() for ln in r.stderr.splitlines() if ln.strip()), None) or f"exit={r.returncode}"
+                slots_st, slots_reason = "error", reason[:160]
+            else:
+                limits = {}
+                for ln in r.stdout.splitlines():
+                    p = ln.split()
+                    if len(p) == 2 and p[1].isdigit(): limits[p[0]] = int(p[1])
+                marks = set()
+                for n, it in items.items():
+                    ws = it.get("work_state") if isinstance(it, dict) else None
+                    # 枠を空ける印は停止中・再開処理中・再開待ち（起動前の待機は枠を消費しない―
+                    # 消費していると待機中のものが上限を超えて並んだときどれも起動に進めない）。
+                    # 起動を試みた回は rollback の割り当て ID が残り照合が終わるまで使用中。
+                    if isinstance(ws, dict) and ws.get("state") in ("停止中", "再開処理中", "再開待ち"):
+                        marks.add(str(n))
+                impl = {}
+                for t in threads:
+                    if not isinstance(t, dict): continue
+                    tm = re.match(r"^\[実装\] #(\d+) ", t.get("title") or "")
+                    if tm: impl.setdefault(tm.group(1), []).append(t)
+                stopped = ("completed", "failed", "interrupted", "cancelled")
+                def is_stopped(t): return t.get("status") in stopped or t.get("archived")
+                by_id = {t.get("threadId"): t for t in threads if isinstance(t, dict)}
+                def bound_ids(it):
+                    # implement_thread の組から結び付いたスレッド ID を全部挙げる。読めない組があれば None。
+                    ids = []
+                    for pair in it.get("implement_thread") or []:
+                        if isinstance(pair, dict): tid = pair.get("thread_id")
+                        elif isinstance(pair, (list, tuple)) and len(pair) >= 2: tid = pair[1]
+                        else: tid = None
+                        if not isinstance(tid, str) or not tid: return None
+                        ids.append(tid)
+                    return ids or None
+                def stop_verified(n):
+                    # 印の裏付け。組の thread_id と一覧の [実装] #<番号> のスレッドがどれも
+                    # 動いていないことの両方を確かめる。組が無い・組のスレッドが一覧に無い
+                    # （引き継ぎ先が一時的に欠ける回を含む）・rollback が残る・動いているものが
+                    # 残るものは使用中。
+                    it = items.get(n)
+                    if not isinstance(it, dict) or it.get("rollback") is not None: return False
+                    ids = bound_ids(it)
+                    if ids is None: return False
+                    if any(i not in by_id or not is_stopped(by_id[i]) for i in ids): return False
+                    ts = impl.get(n)
+                    if not ts: return False
+                    return all(is_stopped(t) for t in ts)
+                used = {name: 0 for name in limits}
+                for iss in issues:
+                    if not isinstance(iss, dict) or iss.get("state") != "OPEN": continue
+                    labs = {lb.get("name") for lb in (iss.get("labels") or []) if isinstance(lb, dict)}
+                    n = str(iss.get("number"))
+                    if "agent:working" not in labs or (n in marks and stop_verified(n)): continue
+                    who = "devin" if "agent:devin" in labs else "opencode"
+                    if who in used: used[who] += 1
+                slots_usage = {n: {"used": used[n], "limit": lim} for n, lim in limits.items()}
+                slots_lines = [f"SLOTS{' over' if used[n] > lim else ''} {n} {used[n]}/{lim}" for n, lim in limits.items()]
+                slots_st, slots_reason, slots_sig = "ok", None, "|".join(slots_lines)
+        except Exception as e:
+            slots_st, slots_reason = "error", f"agent-team-config failed ({type(e).__name__})"
+if slots_st != "ok": slots_sig = f"{slots_st}|{slots_reason}"
+emit = None
+if slots_st == "ok": emit = slots_lines
+elif slots_st == "error": emit = [f"SLOTS error {slots_reason}"]
+if emit is not None and (cur["slots"] != slots_sig or hb):
+    for ln in emit: print(ln, flush=True)
+cur["slots"] = slots_sig
+# 指揮役の照合用の記録（Issue #714）。キューに書けるファイル名がそのまま watch.log の行に
+# なるため、行の見た目だけでは出どころを区別できない。巡回ごとに最新の判定を書き直し、
+# 直前の巡回の結果が残って使われないようにする。読み手の規約は runbook「3. 同時数と順番待ち」。
+ats = [t for t in (issues_at, threads_at) if t is not None]
+rec = {"updated_at": min(ats) if ats else now, "patrol_at": now, "status": slots_st}
+if slots_reason is not None: rec["reason"] = slots_reason
+if slots_usage is not None: rec["usage"] = slots_usage
+# 同じディレクトリの一時ファイルからの置き換えで公開し、読み手に空・書きかけの記録が
+# 見えないようにする（write_ps と同じ形）。先に前回の記録を外してから公開する―
+# 公開に失敗した回に残ると、読み手が鮮度の条件の内側で古い status:ok を使い続ける。
+# 書けない巡回はそのまま次へ進める（外れた・古い記録は読み手の規約どおり実測に戻る）。
+try:
+    try: os.unlink(os.path.join(d, "slots.json"))
+    except FileNotFoundError: pass
+    tmp = os.path.join(d, f".slots.{secrets.token_hex(8)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f: json.dump(rec, f, ensure_ascii=False)
+        os.replace(tmp, os.path.join(d, "slots.json"))
+    except BaseException:
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
+except Exception:
+    pass
+json.dump(cur, open(sp, "w"))
 # 取得に成功し、かつどちらの一覧も打ち切られていない（件数が上限に達していない）ときだけ更新する。
 if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr_limit:
     pr_of = {}
@@ -783,6 +929,15 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
     cur["due_warned"] = {k: v for k, v in cur["due_warned"].items() if k in new_subj}
     cur["stall_notified"] = {k: v for k, v in cur["stall_notified"].items() if k in new_subj}
     ps["updated_at"] = now_iso
+    # 書き戻す直前に記録を読み直し、巡回が持つ項目（subjects と updated_at）だけを載せ替えて、
+    # 読んでから書き戻すまでの間に指揮役が書いた項目を消さないようにする（items は別記録）。
+    # 読み直せなかった回は読んだ時点の記録のまま書く。
+    try: latest_ps = json.loads(read_ps())
+    except Exception: latest_ps = None
+    if isinstance(latest_ps, dict):
+        latest_ps["subjects"] = ps["subjects"]
+        latest_ps["updated_at"] = ps["updated_at"]
+        ps = latest_ps
     # 書き戻さなかった回（親ディレクトリを確かめられない・上限を超える・整形できない）は理由の行を出す。続く間は
     # HEARTBEAT_SECS ごと（理由が変わればすぐ）に出し直し、書き戻せた回に回復の行を 1 つ出す。
     why = write_ps(ps)
