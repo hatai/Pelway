@@ -29,7 +29,7 @@
 
 ## 実装者メモ（round 3）
 
-対象 head: TBD（round 3 のコード commit の SHA を記録する）
+対象 head: 122967dec7384b59fee5bc42666425df4ea31c48（マージコミットを含む push のため re-sign 対象外・署名なし）
 
 レビュー（claude/opus/high、run 7189553436、verdict=request-changes、must-fix 1、文書のずれ nit 2、out-of-scope 1）への対応:
 
