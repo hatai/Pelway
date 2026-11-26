@@ -1,12 +1,12 @@
 <a id="ch02-s01"></a>
 # 02 技術比較と依存採用案
 
-確定要件はRustベースのWindows/macOS/Linuxネイティブ、非WebViewを既定、ブラウザ対応、日英対応。外観を変えない。以下の採用は文書上の案で、組込み済み・試験済みを意味しない。
+確定要件はRustベースのWindows/macOS/Linuxネイティブ、非WebViewを既定、ブラウザ対応、日英対応。外観を変えない。（[ADR 0014](../../../adr/0014-desktop-client-electron.md) で置き換え：デスクトップアプリは Electron で Web UI を包み、「Rustベースのネイティブ、非WebViewを既定」の要件は捨てる。サーバーは Rust のまま。）以下の採用は文書上の案で、組込み済み・試験済みを意味しない。
 
 <a id="ch02-s02"></a>
 ## ネイティブUI
 
-推奨はSlint、対照はegui。GPUIはWindows読み上げの阻害から初版の採用比較では保留する。UI担当と技術担当の案としてSlintを採用案とする（実機試験と固定版ライセンスの確認まで未確定）。公式issueの存在は、固定版で現在も再現する証拠ではないため、実機で再確認する。
+（[ADR 0014](../../../adr/0014-desktop-client-electron.md) で置き換え：この節の Slint の採用案は D1 までに限り、デスクトップアプリは Electron にする。）推奨はSlint、対照はegui。GPUIはWindows読み上げの阻害から初版の採用比較では保留する。UI担当と技術担当の案としてSlintを採用案とする（実機試験と固定版ライセンスの確認まで未確定）。公式issueの存在は、固定版で現在も再現する証拠ではないため、実機で再確認する。
 
 <a id="ch02-s03"></a>
 ### 確認日と版
@@ -118,7 +118,7 @@ UI担当の[input/ui.md](../sources/v0.6/fixed/pelway-technical-docs/input/ui.md
 | LLM・埋め込み | 採用：提供元のAPI（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)） | MVPはBYOK（Z.ai・OpenAI）で測る。一般提供の既定は日本リージョンのある提供元を別に選ぶ。ローカル推論（llama.cpp、日本語model、ruri-v3）はその選定の候補に残す |
 | MCP | MVP前に検証 | rmcp。tool annotationsは信頼しない（[ADR 0004](../../../adr/0004-declared-action-tiers.md)） |
 | 認証 | MVP前に検証 | webauthn-rs（passkey）とopenidconnect-rs（顧客IdP）をaxumに組み込む。Ory Kratos/Hydraは将来候補。Keto・OpenFGA・SpiceDBは12の外部権限サービス不要の方針により採らない |
-| クライアント | MVP前に検証 | A1にTauri＋Octane（+React。Webと画面共有）を比較候補として加える。Slint issue #3867・#10861の再現、ts-rsまたはspecta、wasm-opt |
+| クライアント | MVP前に検証 | （[ADR 0014](../../../adr/0014-desktop-client-electron.md) で Electron＋Octane に決定。比較は終了）A1にTauri＋Octane（+React。Webと画面共有）を比較候補として加える。Slint issue #3867・#10861の再現、ts-rsまたはspecta、wasm-opt |
 | バックアップ | MVP前に検証 | pgBackRest。保存期間は件数指定か別の削除処理で14日上限を守る。2.59.3以上 |
 | 監査 | MVP前に検証 | `prev_hash`の鎖を残し、最新hashと行数に署名したcheckpointをDB管理者と別の場所へ保存する。形式と鍵・保管先の分離は[ADR 0007](../../../adr/0007-signed-audit-checkpoints.md)、下書き実装`crates/pelway-audit-checkpoint`で改ざん検出を検証済み |
 | 外部エージェント | MVP後 | ACPによるClaude Code・Codex等の接続は、BYOKと同じ契約者の責任による例外の枠で扱う。LLMゲートウェイの実装の後に入れる（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)） |
@@ -131,4 +131,4 @@ UI担当の[input/ui.md](../sources/v0.6/fixed/pelway-technical-docs/input/ui.md
 
 [Discord CTO本人の投稿](https://x.com/svishnevskiy/status/2118081920194203799)は保存済み公開投稿の取得記録で確認した（今回の差分レビューで新規取得したものではない）。2026-11-05 05:44（日本時間）の投稿は、Electron/React NativeからRustへの移行方針とGPUI採用を説明し、ユーザー試験は今後とする。移行完了や一般配布まで確認したとはしない。一方、「1.3GB→300MB」の同条件のメモリ比較は未検証。移行方針と数値の確からしさを分け、どちらもPelwayのUI採用根拠や性能保証へ転用しない。取得証拠はreviews/discord-primary-post-evidence.txt。
 
-[市場調査の一次資料と未確認範囲](../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md) を参照。Rust・非WebViewはユーザー要件として維持し、自分たちの07の測定で判断する。
+[市場調査の一次資料と未確認範囲](../sources/v0.6/fixed/pelway-technical-docs/research/existing-chat-and-agent-oss.md) を参照。Rust・非WebViewはユーザー要件として維持し、自分たちの07の測定で判断する（[ADR 0014](../../../adr/0014-desktop-client-electron.md) で置き換え：この要件は捨て、デスクトップアプリは Electron にする）。

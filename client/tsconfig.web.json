@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "octane",
+    "types": []
+  },
+  "include": [
+    "apps/desktop/src/renderer/**/*.ts",
+    "apps/desktop/src/renderer/**/*.tsx",
+    "packages/ui/src/**/*.ts",
+    "packages/ui/src/**/*.tsx"
+  ],
+  "exclude": ["**/*.test.ts", "**/*.test.tsx"]
+}
