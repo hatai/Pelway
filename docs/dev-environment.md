@@ -230,7 +230,7 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 
 値は通知専用の age 鍵（既定 `~/.config/pelway-agent-notify/age.txt`）で暗号化する。provider を `age` ではなく `notify_age` という名前にするのは、fnox のグローバル設定（`~/.config/fnox/config.toml`）の `[providers.age]`（鍵ファイルの指定が無い）とのマージで鍵の指定が曖昧にならないためで、`review_age`（「鍵の分割（review 用の fnox 設定と age 鍵）」）と同じ考え方。`key_file` を明示するので、`~/.config/fnox` が読めない実行環境でも復号できる（以前は dev と同じ `~/.config/fnox/age.txt` 1 つで dev の App 鍵と webhook の URL・鍵の両方が復号できた。#737 の鍵分割）。
 
-**`~/.config/pelway-agent-notify` は全担当の sandbox で読み取り拒否にする。** 復号鍵（`age.txt`）と暗号文（`fnox.toml`）が同じディレクトリにあり、`key_file` は絶対パスで書かれているため、このディレクトリが読める sandbox の中から `fnox -c ~/.config/pelway-agent-notify/fnox.toml get` で webhook の URL と鍵を復号できる（以前は復号に拒否済みの `~/.config/fnox/age.txt` が要った）。`agent-gh` が読む `~/.config/fnox`・`~/.config/pelway-agent` と違い、sandbox の中の担当が読む必要のあるものは置かない（`conductor-thread-id` を読むのはホスト側の agent-watch と `scripts/conductor-watch.sh` だけ）ため、ディレクトリごと拒否する。実装担当側はリポジトリの設定（`.devin/config.json`・`scripts/agent-sandbox/devin-config.json`・`scripts/agent-sandbox/opencode-plugin/index.js` の `READ_DENY`・`scripts/agent-sandbox/sandbox-shell` の `masks`）に列挙する。レビュー担当（`devin_review`・`claude_review`・`codex_review`）と QA 担当の拒否リストはリポジトリの外の設定なので、hatai が「通知用の age 鍵への移し替え」の手順 0 で適用する。
+**`~/.config/pelway-agent-notify` は全担当の sandbox で読み取り拒否にする。** 復号鍵（`age.txt`）と暗号文（`fnox.toml`）が同じディレクトリにあり、`key_file` は絶対パスで書かれているため、このディレクトリが読める sandbox の中から `fnox -c ~/.config/pelway-agent-notify/fnox.toml get` で webhook の URL と鍵を復号できる（以前は復号に拒否済みの `~/.config/fnox/age.txt` が要った）。`agent-gh` が読む `~/.config/fnox`・`~/.config/pelway-agent` と違い、sandbox の中の担当が読む必要のあるものは置かない（`conductor-thread-id` を読むのはホスト側の agent-watch と `scripts/conductor-watch.sh` だけ）ため、ディレクトリごと拒否する。実装担当側はリポジトリの設定（`.devin/config.json`・`scripts/agent-sandbox/devin-config.json`・`scripts/agent-sandbox/opencode-plugin/index.js` の `READ_DENY`・`scripts/agent-sandbox/sandbox-shell` の `masks`）に列挙する。ただし `scripts/agent-sandbox/` の 3 つは `scripts/setup/agent-sandbox.sh` でホストに写した版が使われるため、写し直して初めて効く（`.devin/config.json` だけは worktree の版が読まれる）。レビュー担当（`devin_review`・`claude_review`・`codex_review`）の拒否リストはリポジトリの外の設定なので、hatai が「通知用の age 鍵への移し替え」の手順 0 で適用する（QA 担当は実装担当のインスタンスで動くため、実装担当側の拒否で済む）。
 
 設定ファイルの形（`scripts/setup/agent-accounts.sh` の「通知用の fnox 設定と age 鍵を作る」が新規にはこの形で作る）:
 
@@ -255,12 +255,17 @@ printf '%s' '<鍵>'  | fnox -c ~/.config/pelway-agent-notify/fnox.toml set --pro
 `~/.config/pelway-agent-notify/fnox.toml` が `[providers.age]`（鍵ファイルの指定が無く、`~/.config/fnox/age.txt` で復号する形）の環境を、通知専用の鍵に移す。値は一切表示しない（`fnox get` の出力は変数とパイプで次の `fnox set` に渡す）。agent-watch は送信のたびに設定を読み直すので、移し替えのあと再起動は要らない。
 
 ```bash
-# 0. 先にリポジトリの外の拒否リストを更新する（鍵を作る前に入れる）
+# 0. 先に拒否リストを更新する（鍵を作る前に入れる）
+#    リポジトリ側: 本体の checkout でこの PR を含む main を取り込み、
+#      bash scripts/setup/agent-sandbox.sh
+#    を流し直して、ホストに写した版（~/.config/opencode/plugins/pelway-sandbox/ の
+#    sandbox-shell と index.js、~/.config/devin-impl/config.json）を更新する
+#    （.devin/config.json は worktree の版が読まれるので、この写し直しだけが要る）。
+#    リポジトリの外（hatai が適用）:
 #    - ~/.config/devin-review/config.json の permissions.deny に "Read(~/.config/pelway-agent-notify/**)"
 #    - ~/.claude-review/settings.json の permissions.deny に "Read(~/.config/pelway-agent-notify/**)"
 #    - /etc/codex/requirements.toml の deny_read に "/home/hatai/.config/pelway-agent-notify"
-#    - QA 担当の sandbox の拒否リストにも ~/.config/pelway-agent-notify（~/.config/pelway-agent-qa と同じ扱い）
-#    実装担当側（.devin/config.json・scripts/agent-sandbox/）はリポジトリの変更で済んでいる。
+#    QA 担当は実装担当のインスタンスで動く（読み取りは dev 名義）ため、実装担当側の拒否で済む。
 
 # 1. 通知専用の鍵ペアを作る（秘密鍵は表示しない）
 (umask 077 && age-keygen -o ~/.config/pelway-agent-notify/age.txt)
@@ -320,7 +325,7 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 | `~/.codex-review/auth.json` | `~/.codex/auth.json` への symlink（ログインは hatai の Codex と共有する） |
 | `~/.codex-review/config.toml` の `[permissions.review]` | ファイルは読み取り（`codex sandbox -P review` で動かしたコマンドは `/tmp` だけ書ける。T3 のスレッドでは worktree にも書ける。Issue #589）、ネットワークは `api.github.com` と `github.com` だけ（SOCKS は使わない） |
 | `~/.codex-review/config.toml` の `[features]` と `[mcp_servers.*]` | `apps`・`plugins`・`remote_plugin`・`hooks` を `false` にする。`[mcp_servers.t3-code]` と `[mcp_servers.t3-code-direct]` を `enabled = false`（`url` は設定の読み込みのための仮の値 `http://127.0.0.1:1/mcp`）にする。最上位のキーに `web_search = "disabled"` を書く。`[projects.*]` の信頼設定は書かない（worktree の `.codex/` を読ませない） |
-| `/etc/codex/requirements.toml`（#449 で追加。hatai が root で作る） | `[permissions.filesystem]` の `deny_read` に秘密パス 5 件（`~/.config/fnox`・`~/.config/pelway-agent`・`~/.config/pelway-agent-qa`・`~/.ssh`・`~/.config/gh`）を列挙する。requirements 層の設定で、ユーザーの `config.toml` に書いても効かない。このマシン（単一ユーザー）の全 codex セッションに適用される |
+| `/etc/codex/requirements.toml`（#449 で追加。hatai が root で作る） | `[permissions.filesystem]` の `deny_read` に秘密パス 6 件（`~/.config/fnox`・`~/.config/pelway-agent`・`~/.config/pelway-agent-qa`・`~/.config/pelway-agent-notify`・`~/.ssh`・`~/.config/gh`）を列挙する（通知用は #737、「通知用の age 鍵への移し替え」の手順 0 で足す）。requirements 層の設定で、ユーザーの `config.toml` に書いても効かない。このマシン（単一ユーザー）の全 codex セッションに適用される |
 
 `deny_read` は sandbox ポリシー（FileSystemSandboxPolicy）に Deny エントリとして渡り、sandboxed なコマンドから当該パスが読めなくなる（codex 0.169.0 の `codex-rs/config/src/filesystem_constraints.rs` と `requirements_layers/permissions.rs` による。パスは絶対パスで書く）。
 
@@ -367,7 +372,7 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 - `CODEX_HOME` が `/home/hatai/.codex-review` になっている
 - `scripts/agent-gh review api /rate_limit` が成功する
 - GitHub 以外への通信（`scripts/agent-gh review api --hostname example.com /`、`curl https://example.com`）が遮断される
-- 秘密の置き場 5 パス（`/etc/codex/requirements.toml` の `deny_read`）が読めない（`test -r` が 1）。`codex sandbox -P review` は `deny_read` を使わないので、この項目は確認用の子タスクの中で確かめる
+- 秘密の置き場 6 パス（`/etc/codex/requirements.toml` の `deny_read`）が読めない（`test -r` が 1）。`codex sandbox -P review` は `deny_read` を使わないので、この項目は確認用の子タスクの中で確かめる
 - 確認のあとの `~/.codex-review/config.toml` に、`[projects.` で始まる表が無い（T3 と Codex の app-server は sandbox の外でこのファイルに書けるため。信頼設定が入ると worktree の `.codex/` が読まれる）
 - `~/.codex-review` に書き込めない（`touch ~/.codex-review/config.toml` と、新しいファイルの `touch` が拒否される）。止める設定がこのファイルに集まっているため、書き込めると次のセッションで設定を戻せる
 - `mise run codex-review-check` が ok
@@ -383,7 +388,7 @@ worktree への書き込みは、今は通る（権限プロファイル `review
 | 場所 | 設定 |
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.claude_review` | `driver: claudeAgent`、`config` の `homePath` に `/home/hatai/.claude-review`（UI のフィールド名は「CLAUDE_CONFIG_DIR path」。子プロセスの環境変数 `CLAUDE_CONFIG_DIR` になる。`config.environment` は claudeAgent の config スキーマに無いキーで無視される） |
-| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`・`git ls-tree`・`git cat-file`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` は `gh` には引数をそのまま渡し、`git` には許可リストと引数検査の両方を通った呼び出しを Git に渡すため、ワイルドカードは `auth token`・`repo clone`・許可リストの `git` サブコマンド全般などを許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す（QA 用の `Read(~/.config/pelway-agent-qa/**)` も、下の「QA 担当の GitHub App（pelway-qa）」の手順 5 で足してある）。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す。#306 では `sandbox.filesystem.denyWrite` に `"~/"` を入れ、ホームの下（worktree・共有 `.git`・`$HOME`・`~/.config`・`~/.claude-review` 自身）への書き込みを sandbox で拒否する。実測で書けたのは sandbox の一時フォルダ（`$TMPDIR`。実体は `/tmp/claude-1000` で、uid ごとに 1 つのためレビュー専用ではない）で、`/tmp` 直下は拒否された。ホームの外のほかの場所（`/dev/shm`・`/var/tmp` など）は測っていない。許可した読み取り系 `git` の `--output=<path>` や `git grep -O<コマンド>` で起動したコマンドも、この拒否を受ける。T3 が渡す MCP サーバーのツールは、`permissions.deny` に `mcp__t3-code` と `mcp__t3-code-direct`（サーバー名だけで、そのサーバーの全ツール）を書いて使えなくする（理由は「レビュー担当の Codex」と同じ）。claude.ai のコネクタ（外部のサービスへ送信できるツールを含む）は、`env` の `ENABLE_CLAUDEAI_MCP_SERVERS=false` で止める。組み込みのツールのうち、ほかのセッションや claude.ai へ送れるもの（`SendMessage`・`RemoteTrigger`・`Artifact`・`ShareOnboardingGuide`・`PushNotification`・`DesignSync`・`PublishPlugin`）は `permissions.deny` に書く（`WebFetch`・`WebSearch` は前から deny にあり、サブエージェントにも効く）。アカウントから同期されるプラグインの MCP サーバーは、`env` の `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` で読み込ませない（接続に失敗しているだけの状態は、セッションの途中で接続が戻りうるので、止めたことにならない）。下の `hooks.PermissionRequest` は承認要求を拒否するが、これに頼ってプラグインのツールを残さない |
+| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`・`git ls-tree`・`git cat-file`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` は `gh` には引数をそのまま渡し、`git` には許可リストと引数検査の両方を通った呼び出しを Git に渡すため、ワイルドカードは `auth token`・`repo clone`・許可リストの `git` サブコマンド全般などを許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す（QA 用の `Read(~/.config/pelway-agent-qa/**)` も、下の「QA 担当の GitHub App（pelway-qa）」の手順 5 で足してある。#737 で通知用の `Read(~/.config/pelway-agent-notify/**)` も 6 件目として足す。「通知用の age 鍵への移し替え」の手順 0）。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す。#306 では `sandbox.filesystem.denyWrite` に `"~/"` を入れ、ホームの下（worktree・共有 `.git`・`$HOME`・`~/.config`・`~/.claude-review` 自身）への書き込みを sandbox で拒否する。実測で書けたのは sandbox の一時フォルダ（`$TMPDIR`。実体は `/tmp/claude-1000` で、uid ごとに 1 つのためレビュー専用ではない）で、`/tmp` 直下は拒否された。ホームの外のほかの場所（`/dev/shm`・`/var/tmp` など）は測っていない。許可した読み取り系 `git` の `--output=<path>` や `git grep -O<コマンド>` で起動したコマンドも、この拒否を受ける。T3 が渡す MCP サーバーのツールは、`permissions.deny` に `mcp__t3-code` と `mcp__t3-code-direct`（サーバー名だけで、そのサーバーの全ツール）を書いて使えなくする（理由は「レビュー担当の Codex」と同じ）。claude.ai のコネクタ（外部のサービスへ送信できるツールを含む）は、`env` の `ENABLE_CLAUDEAI_MCP_SERVERS=false` で止める。組み込みのツールのうち、ほかのセッションや claude.ai へ送れるもの（`SendMessage`・`RemoteTrigger`・`Artifact`・`ShareOnboardingGuide`・`PushNotification`・`DesignSync`・`PublishPlugin`）は `permissions.deny` に書く（`WebFetch`・`WebSearch` は前から deny にあり、サブエージェントにも効く）。アカウントから同期されるプラグインの MCP サーバーは、`env` の `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` で読み込ませない（接続に失敗しているだけの状態は、セッションの途中で接続が戻りうるので、止めたことにならない）。下の `hooks.PermissionRequest` は承認要求を拒否するが、これに頼ってプラグインのツールを残さない |
 | socat | Claude Code の sandbox（Linux）が使う。`mise.toml` の `conda:socat` で `mise install`（`mise bootstrap`）が入れる。apt と sudo は要らない |
 | ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
 | `~/.claude-review/settings.json` の `hooks.PermissionRequest` | matcher `*` で `/home/hatai/.claude-review/hooks/deny-permission-request.sh` を呼ぶ。承認要求になる場面ごとに、人間に聞かずに拒否を返す。拒否のメッセージは、sandbox の遮断ではないこと、Bash なら単純なコマンドに分けて送り直すことをモデルに伝える。フックは worktree の外に絶対パスで置く（委託のレビューは PR の作者のコミットの checkout で動くため、リポジトリの中に置くと PR が差し替えられる） |
@@ -474,7 +479,7 @@ Codex・Claude のレビュー担当と違い、Devin CLI にはネットワー�
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.devin_review` | `driver: acpRegistry`、`agentId: devin`、`config.commandPath: /home/hatai/.local/bin/devin-review`。acpRegistry は `<commandPath> acp` の形で起動し、registry の起動引数はそのまま渡る |
 | `/home/hatai/.local/bin/devin-review` | `env DEVIN_SANDBOX=true devin --config /home/hatai/.config/devin-review/config.json "$@"` を exec する起動ラッパー。`devin acp` は `--sandbox` フラグを受け付けず、ACP サーバは `DEVIN_SANDBOX` 環境変数で sandbox を有効化する |
-| `/home/hatai/.config/devin-review/config.json` | `devin_review` 専用のユーザー設定（`devin --config` で差し替え）。`sandbox.allowed_domains: ["**.github.com"]` で github.com とそのサブドメインだけを許可。`permissions.deny` に `edit`・`write`・`mcp__*`・`Exec(sudo)`・`Exec(rm)`・秘密パスの `Read(...)` を、`Fetch` は GitHub 以外を `ask` にして重ね防御する。#449 では `Read(...)` の列挙に `~/.config/fnox/**` と `~/.config/pelway-agent/**` を足す（`~/.ssh/**`・`~/.config/gh/**` は当初からあり）。deny に入れたパスは bwrap がコマンドから隠すため `test -r` も非 0 になる |
+| `/home/hatai/.config/devin-review/config.json` | `devin_review` 専用のユーザー設定（`devin --config` で差し替え）。`sandbox.allowed_domains: ["**.github.com"]` で github.com とそのサブドメインだけを許可。`permissions.deny` に `edit`・`write`・`mcp__*`・`Exec(sudo)`・`Exec(rm)`・秘密パスの `Read(...)` を、`Fetch` は GitHub 以外を `ask` にして重ね防御する。#449 では `Read(...)` の列挙に `~/.config/fnox/**` と `~/.config/pelway-agent/**` を足す（`~/.ssh/**`・`~/.config/gh/**` は当初からあり）。#737 で通知用の `~/.config/pelway-agent-notify/**` も足す（「通知用の age 鍵への移し替え」の手順 0）。deny に入れたパスは bwrap がコマンドから隠すため `test -r` も非 0 になる |
 
 sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbrew/bin/bwrap`）と `socat`（`mise.toml` の `conda:socat`）で、どちらか欠けるとセッションは起動を拒否する（fail-closed）。sandbox 配下では exec が許可リスト経由の組み込みプロキシを通り、ワークスペース以外のファイルシステムは読み取り専用になり、`Read(...)` deny のパスはコマンドから隠される。
 
@@ -504,7 +509,7 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 
 ## レビュー担当の秘密ファイルの遮断と鍵の分割（#449）
 
-レビュー担当（`devin_review`・`claude_review`・`codex_review`）の sandbox から、秘密の置き場を読めないようにする。対象は 4 パス（QA 用の `~/.config/pelway-agent-qa` は、下の「QA 担当の GitHub App（pelway-qa）」の手順 5 で 5 つ目として各担当の拒否リストに足す）: `~/.config/fnox`（age 秘密鍵 `age.txt` と fnox のグローバル設定）・`~/.config/pelway-agent`（dev 用の fnox 設定。`PELWAY_DEV_*` と `PELWAY_LLM_API_KEY` が同じ age 鍵で暗号化されて同居していた）・`~/.ssh`・`~/.config/gh`。これらはすべて実体のあるディレクトリでなければならない（symlink だと devin の bwrap が exec を全滅させる）。
+レビュー担当（`devin_review`・`claude_review`・`codex_review`）の sandbox から、秘密の置き場を読めないようにする。対象は 4 パス（QA 用の `~/.config/pelway-agent-qa` は、下の「QA 担当の GitHub App（pelway-qa）」の手順 5 で 5 つ目として、通知用の `~/.config/pelway-agent-notify` は「通知用の age 鍵への移し替え」の手順 0 で 6 つ目として、各担当の拒否リストに足す）: `~/.config/fnox`（age 秘密鍵 `age.txt` と fnox のグローバル設定）・`~/.config/pelway-agent`（dev 用の fnox 設定。`PELWAY_DEV_*` と `PELWAY_LLM_API_KEY` が同じ age 鍵で暗号化されて同居していた）・`~/.ssh`・`~/.config/gh`。これらはすべて実体のあるディレクトリでなければならない（symlink だと devin の bwrap が exec を全滅させる）。
 
 ### hatai が手で適用する変更（リポジトリ外の設定。反映は hatai が行う）
 
@@ -536,6 +541,8 @@ deny_read = [
   "/home/hatai/.config/gh",
 ]
 ```
+
+通知用の `~/.config/pelway-agent-notify`（#737 で足す 6 つ目）も各担当の拒否リストに入れる（`~/.config/devin-review/config.json`・`~/.claude-review/settings.json` では `"Read(~/.config/pelway-agent-notify/**)"`、`/etc/codex/requirements.toml` では `"/home/hatai/.config/pelway-agent-notify"`）。手順は「通知用の age 鍵への移し替え」の手順 0。
 
 ### 適用の順序（番号付き・橋渡し付き）
 

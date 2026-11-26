@@ -25,4 +25,15 @@
 3. nit（`PELWAY_NOTIFY_FNOX_CONFIG` の空文字・相対パス、鍵 dir の `mkdir -p`）: agent-watch と同じく絶対パスのみ受け付ける形に揃え、それ以外は警告して既定の場所に作る。`mkdir -p` は設定ファイルと age 鍵の両方の親に効かせた（REVIEW 側も同じ形だったので同じ直し）。
 4. nit（移し替えループの pipefail 不在）: `get` の成否を先に確かめる形に直した（`pipefail` は対話シェルの状態を変えるので、値を一旦変数に受けて失敗時に止める形）。`set` 側の失敗は `set -e` の無い対話シェルでは検知できないままだが、`fnox set` 自体の成否は各イテレーションで目に見える形（終了コード）で残る。
 5. 確かめたこと: `masks` に `pelway-agent-notify` を足しても壊れるものが無いことは上記の読み手の確認で裏付けた。`.devin/config.json` など JSON の deny の書式は既存行に揃えた。シェルcheck・cargo test・JSON の構文は下の検証で通す。
-6. 詰まった箇所（2 回目の main 衝突）: main の d1c177fa（PR #830）が同じ試験 pin を更新したが、claude のモデル一覧が `"claude-opus-5-5". "claude-sonnet-5-5"` とピリオドで TOML・Python ともに構文が壊れており、main の verify は再び赤。取り込みのコンフリクト解消でカンマのこちら側を採用したため、この PR のマージで main の赤も直る（マージコミット 6bff0875）。
+6. 詰まった箇所（2 回目の main 衝突）: main の d1c177fa（PR #830）が同じ試験 pin を更新したが、claude のモデル一覧が `"claude-opus-5-5". "claude-sonnet-5-5"` とピリオドで TOML・Python ともに構文が壊れており、main の verify は再び赤。取り込みのコンフリクト解消でカンマのこちら側を採用したため、この PR のマージで main の赤も直る（マージコミット 6bff0875。なおその後 main でも ac5c9fce で同じ直しが入った）。
+
+## 実装者メモ（round 3）
+
+対象 head: TBD（round 3 のコード commit の SHA を記録する）
+
+レビュー（claude/opus/high、run 7189553436、verdict=request-changes、must-fix 1、文書のずれ nit 2、out-of-scope 1）への対応:
+
+1. must-fix（手順 0 の「実装担当側はリポジトリの変更で済んでいる」が正しくない）: `scripts/agent-sandbox/` の 3 つは `scripts/setup/agent-sandbox.sh` が `install` でホストに写した版（`~/.config/opencode/plugins/pelway-sandbox/{sandbox-shell,index.js}`・`~/.config/devin-impl/config.json`）が使われるため、写し直すまで新しい拒否は効かない。指摘は正しい（devin-impl の `--config` は `~/.config/devin-impl/config.json` を指す）。手順 0 の先頭に「本体 checkout でこの PR を含む main を取り込み、`bash scripts/setup/agent-sandbox.sh` を流し直す」段を足し、鍵を作る前に済ませる順序にした。233 行目も「写し直して初めて効く（`.devin/config.json` だけは worktree の版が読まれる）」に修正。
+2. nit[文書のずれ]（「QA 担当の拒否リスト」の行）: QA は判定の投稿に `agent-gh qa` を、読み取りには `dev` 名義を使い、委託は実装担当のインスタンスで動く（command-team の「読み取りの `<role>` は委託先の名義で…それ以外（QA を含む）は `dev`」）ため、実装担当側の拒否で済む。行を消し、その旨をコメントに書いた。
+3. nit[文書のずれ]（拒否リストの正本の節に 6 つ目が無い）: 列挙をすべて 6 パスに追従した（`deny_read` の例・「秘密パス 5 件」→ 6 件・claude_review の `Read(...)` 列挙・devin-review の列挙・#449 の節の対象パスの説明）。#449 の節のコードブロックはその手順当時の追加分として残し、6 つ目の書き方と手順 0 への参照を節の末尾に足した。
+4. out-of-scope（指揮役の T3 スレッドの sandbox が未対象）: レビュー担当が「この PR 以前からの隙間」と切り分けた。指揮役は旧設定でも dev の鍵で復号できたため今回の分割で悪化していない。対応はこの PR の対象外としてメモだけ残す。
