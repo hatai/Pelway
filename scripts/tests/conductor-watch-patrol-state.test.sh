@@ -108,6 +108,7 @@ run_cycles() {
   ( if [[ -n "${MEM_KB:-}" ]]; then ulimit -v "$MEM_KB" || exit 97; fi
     MOCK="$MOCK" SLEEP_MAX="$1" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
       T3_BIN="$ROOT/bin/t3" PELWAY_BOARD_QUEUE_DIR="$ROOT/queue" \
+      PELWAY_WATCH_PS_UPDATE_TIMEOUT="${PS_TIMEOUT:-30}" \
       exec setsid bash "$ROOT/repo/scripts/conductor-watch.sh" ) >>"$ROOT/out.log" 2>&1 &
   WPID=$!
   for ((i = 0; i < 100; i++)); do kill -0 "$WPID" 2>/dev/null || break; /bin/sleep 0.1; done
@@ -338,6 +339,25 @@ check "17: the conductor's items survive three cycles" eq "$(task_id)" "seeded"
 check "17: waiting_since survives three cycles" eq "$(since61)" "$SEEDED_SINCE"
 check "17: no temporary file is left" \
   eq "$(find "$PELWAY" -mindepth 1 -maxdepth 1 ! -name 'patrol-state.json*' | wc -l)" "0"
+
+# 試験 18: 共通の書き込み手順がタイムアウト内に応答しない回も、例外で巡回が止まらず、書き戻せなかった回と
+# 同じく理由の通知を出して見張り自身の state.json の保存まで進む（subprocess.run の TimeoutExpired は
+# 終了コードでの失敗と同じ扱い。起動失敗の OSError も同じ except に入る）。
+reset; seed "$STATE"
+cat > "$ROOT/repo/scripts/patrol-state-update" <<'EOF'
+import time
+time.sleep(60)
+EOF
+PS_TIMEOUT=1 run_cycles 1
+PS_TIMEOUT=""
+check "18: the cycle finishes within 10 seconds" in_time
+check "18: the timed-out write-back is reported with its reason" has "$ROOT/out.log" "reason=write-failed"
+check "18: the timeout is logged as an exception, not an exit code" \
+  has "$ROOT/out.log" "PATROL-STATE write-failed exc=TimeoutExpired"
+check "18: the watch still saves its own state" \
+  python3 -I -c 'import json,sys; json.load(open(sys.argv[1]))["patrol_at"]' "$ROOT/state/pelway/conductor-watch/state.json"
+check "18: the unchanged patrol-state record is kept" eq "$(task_id)" "seeded"
+cp "$REPO/scripts/patrol-state-update" "$ROOT/repo/scripts/"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

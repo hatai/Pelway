@@ -2,9 +2,11 @@
 """patrol-state.json の共通の書き込み手順（Issue #671）。
 
 補助記録 patrol-state.json への書き込みはすべてこの手順に集約する。指揮役スレッドの
-巡回での書き戻し（オフセット・items・scheduled_task_id など）も、見張り
-（scripts/conductor-watch.sh）の subjects の書き戻しも、ここを通る。直接の
-書き換え（python の json.dump や echo のリダイレクト）は行わない。
+巡回での書き戻し（オフセット・scheduled_task_id など。items の記録先は
+patrol-items.json で、patrol-state.json の items に触れるのは旧キーの整理
+（消去）のときだけ）も、見張り（scripts/conductor-watch.sh）の subjects の
+書き戻しも、ここを通る。直接の書き換え（python の json.dump や echo の
+リダイレクト）は行わない。
 
 保護（ロックを取って読み直した現在値に対して行う）:
 

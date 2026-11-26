@@ -910,13 +910,21 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
     # HEARTBEAT_SECS ごと（理由が変わればすぐ）に出し直し、書き戻せた回に回復の行を 1 つ出す。
     # 上限（4 MiB）と整形の検査は手順がロックの中で併合した結果に対して行い、結果を終了コードで返す
     # （4 = 上限超過、5 = 整形できない。どちらも元の記録が残る）。巡回はその結果を理由として報告する。
-    why, r = ("dir-invalid" if ps_dfd is None else None), None
+    why, r, wexc = ("dir-invalid" if ps_dfd is None else None), None, None
     if why is None:
-        r = subprocess.run([sys.executable, "scripts/patrol-state-update",
-                            "--writer", "conductor-watch", "--state", ps_path],
-                           input=json.dumps(patch), text=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=30)
-        why = {0: None, 4: "too-large", 5: "unencodable"}.get(r.returncode, "write-failed")
+        # 手順が応答しない（タイムアウト）・起動自体に失敗した（OSError）回も書き戻せなかった回として扱い、
+        # 理由の通知・間引きと state.json の保存に進む（例外で巡回が止まらないようにする）。
+        # PELWAY_WATCH_PS_UPDATE_TIMEOUT は試験用の差し替え。
+        try:
+            r = subprocess.run([sys.executable, "scripts/patrol-state-update",
+                                "--writer", "conductor-watch", "--state", ps_path],
+                               input=json.dumps(patch), text=True,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                               timeout=env_secs("PELWAY_WATCH_PS_UPDATE_TIMEOUT", 30))
+            why = {0: None, 4: "too-large", 5: "unencodable"}.get(r.returncode, "write-failed")
+        except (subprocess.TimeoutExpired, OSError) as e:
+            wexc = e
+            why = "write-failed"
     wsk = cur["ps_write_skipped"] if isinstance(cur["ps_write_skipped"], dict) else None
     if why is None:
         if wsk: print(f"WATCHER patrol-state-write-recovered since={stamp(wsk['since'])} after={int(now - wsk['since'])}s", flush=True)
@@ -925,7 +933,10 @@ if issues is not None and prs_ok and len(issues) < issue_limit and len(prs) < pr
         wsk = {"since": now if wsk is None else wsk["since"], "notified_at": now, "reason": why}
         print(f"WATCHER patrol-state-write-skipped since={stamp(wsk['since'])} reason={why} max={PS_MAX}", flush=True)
         if why == "write-failed":
-            print(f"PATROL-STATE write-failed rc={r.returncode} err={(r.stderr or '').strip()[:160]}", flush=True)
+            if r is not None:
+                print(f"PATROL-STATE write-failed rc={r.returncode} err={(r.stderr or '').strip()[:160]}", flush=True)
+            else:
+                print(f"PATROL-STATE write-failed exc={type(wexc).__name__}: {str(wexc)[:160]}", flush=True)
     cur["ps_write_skipped"] = wsk
     json.dump(cur, open(sp, "w"))
 PY
