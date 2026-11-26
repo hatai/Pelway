@@ -105,8 +105,7 @@ EOF
 write_toml
 
 mock_issues() { printf '%s\n' "$1" > "$MOCK/issues.json"; }; mock_prs() { printf '%s\n' "$1" > "$MOCK/prs.json"; }
-mock_threads() { printf '%s\n' "${1:-[]}" > "$MOCK/threads.json"; }
-mock_threads
+mock_threads() { printf '%s\n' "${1:-[]}" > "$MOCK/threads.json"; }; mock_threads
 
 iss() { python3 -I -c 'import json,sys
 print(json.dumps({"number": int(sys.argv[1]), "state": sys.argv[2],
@@ -134,10 +133,7 @@ run_cycles() {  # 各ケースの新規出力だけを対象にするため、�
   wait "$WPID" 2>/dev/null; WPID=""
 }
 
-check() {
-  local name="$1"; shift
-  if "$@"; then printf 'ok   %s\n' "$name"; else printf 'FAIL %s\n' "$name"; failures+=("$name"); fi
-}
+check() { local name="$1"; shift; if "$@"; then printf 'ok   %s\n' "$name"; else printf 'FAIL %s\n' "$name"; failures+=("$name"); fi; }
 
 has() { grep -Eq "$2" "$1"; }; nhas() { ! grep -Eq "$2" "$1"; }; calls() { wc -l < "$MOCK/gh-calls.log"; }
 get() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[2]));
