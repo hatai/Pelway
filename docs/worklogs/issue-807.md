@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「既存の作業経路を止める門では、例外を使う側の手順も受け入れ条件に入れる」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（round 4）
+
+対象 head: e39fee2711f8d5db98ff92b3113b0f4c6b8c7084（この round の変更を含むコミット。新しい実行ファイルの mode 変更と main の merge コミットがあるため `agent-gh-resign` は署名付け替えを行わず、push 後も同じ SHA。このメモを含むコミットの親）
+
+1. 詰まった箇所: `mise run verify` は依存タスクの成功後にだけ印を書いていたため、同じ木で再実行が失敗しても前回の印が残り、古い成功を根拠に push が通った。
+2. 曖昧だった文: 「検査の開始時に印を無効化し、すべて成功したときだけ更新してください。scripts/tests/agent-gh-verify-gate.test.sh:142–147 は別の木で失敗させ、古い印が残ることを確認しています。同一の木で成功後に失敗し、push が止まる試験を追加してください。」（PR #832、codex_review の round 1）
+3. 仮定と解釈: mise の依存タスクは並列で、個別の依存タスクより前に一度だけ走る段を直接には置けないと読み、`verify` タスクは `scripts/agent-verify-run` を呼ぶ形にした。この script が先に印を消し、3 グループを `mise run` の複数タスク実行で並列に回し、全部成功したときだけ印を残す。CI は 3 グループを直接呼ぶため、この変更で CI の単位は変えない。
+4. 足りなかった情報・検証手段: `core.fileMode=false` で index に残る実行権限と、無視のパターンに当たる追跡済みファイルは、空の一時 index では再現できない。実際の index を複写してから作業ツリーを取り込み、実行権限と追跡済みファイルが残ることを試験で確かめた。push の門では、削除・タグだけ・タグとブランチ更新の混合をローカルの bare remote への実際の push で確かめた。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「検査の成功を示す印では、成功時だけでなく再検査の失敗時の扱いも書く」を足す。
+
+使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/receiving-code-review`
