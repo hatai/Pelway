@@ -46,7 +46,7 @@
 4. 足りなかった情報・検証手段: `core.fileMode=false` で index に残る実行権限と、無視のパターンに当たる追跡済みファイルは、空の一時 index では再現できない。実際の index を複写してから作業ツリーを取り込み、実行権限と追跡済みファイルが残ることを試験で確かめた。push の門では、削除・タグだけ・タグとブランチ更新の混合をローカルの bare remote への実際の push で確かめた。
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「検査の成功を示す印では、成功時だけでなく再検査の失敗時の扱いも書く」を足す。
 
-使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/receiving-code-review`
+使ったスキル: `.agents/skills/implement-issue`、ユーザーレベルの `receiving-code-review`
 
 ## 実装者メモ（round 5）
 
@@ -58,4 +58,4 @@
 4. 足りなかった情報・検証手段: 重なりは成功側を遅らせて失敗側と同時に走らせる合成タスクで、index の印は実ファイルと index の内容が違う試験で確かめた。
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「検査の印では同時実行とローカルの index フラグの扱いも書く」を足す。
 
-使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/receiving-code-review`
+使ったスキル: `.agents/skills/implement-issue`、ユーザーレベルの `receiving-code-review`

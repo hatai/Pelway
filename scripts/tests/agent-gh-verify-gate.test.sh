@@ -161,16 +161,24 @@ marker_tree="$(cat "$(marker_file)" 2>/dev/null)"
 # mise の verify タスクは、検査の前に前回の印を消し、3 グループがすべて成功したときだけ印を残す。
 # 同じ木で再実行が失敗したとき、古い印で push が通らないことを合成の依存タスクで確かめる。
 verify_section="$(sed -n '/^\[tasks\.verify\]/,/^\[tasks\.verify-lint\]/p' mise.toml)"
-grep -qF 'run = "bash scripts/agent-verify-run"' <<<"$verify_section" ||
+grep -qF 'run = "python3 scripts/agent-verify-run"' <<<"$verify_section" ||
   failures+=("mise_verify_hookup: verify task does not call agent-verify-run")
 MISE_TOY="$ROOT/mise-verify-result"
 mkdir -p "$MISE_TOY/scripts"
 cp "$RECORD" "$MISE_TOY/scripts/agent-verify-record"
 cp "$VERIFY_RUN" "$MISE_TOY/scripts/agent-verify-run"
 cp "$INVALIDATE" "$MISE_TOY/scripts/agent-verify-invalidate"
+cat >"$MISE_TOY/scripts/verify-lint-toy" <<'EOS'
+#!/usr/bin/env bash
+if [[ -n "${VERIFY_TOUCH_BEFORE_EXIT:-}" ]]; then
+  touch "$VERIFY_TOUCH_BEFORE_EXIT"
+fi
+sleep "${VERIFY_SLEEP:-0}"
+exit "${VERIFY_DEPS_RC:-0}"
+EOS
 cat >"$MISE_TOY/mise.toml" <<'EOS'
 [tasks.verify-lint]
-run = "sleep ${VERIFY_SLEEP:-0}; exit ${VERIFY_DEPS_RC:-0}"
+run = "bash scripts/verify-lint-toy"
 
 [tasks.verify-test]
 run = "true"
@@ -211,6 +219,71 @@ wait "$overlap_first"
 overlap_success_rc=$?
 [[ "$overlap_success_rc" == 0 && "$overlap_failure_rc" != 0 && ! -e "$MISE_TOY/.git/pelway-verify-tree" ]] ||
   failures+=("mise_verify_overlap: success=$overlap_success_rc failure=$overlap_failure_rc marker=$(test -e "$MISE_TOY/.git/pelway-verify-tree" && echo present || echo missing)")
+
+# ロックファイルが symlink なら、リンク先を切り詰めず、前回の印も再利用させない。
+lock_path="$MISE_TOY/.git/pelway-verify.lock"
+marker_path="$MISE_TOY/.git/pelway-verify-tree"
+lock_target="$ROOT/verify-lock-target"
+printf 'important\n' >"$lock_target"
+rm -f "$lock_path"
+ln -s "$lock_target" "$lock_path"
+printf '0000000000000000000000000000000000000000\n' >"$marker_path"
+(cd "$MISE_TOY" && MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-lock-symlink.out" 2>&1)
+rc=$?
+[[ "$rc" != 0 && "$(cat "$lock_target")" == important && ! -e "$marker_path" ]] ||
+  failures+=("verify_lock_symlink: rc=$rc target=$(cat "$lock_target" 2>/dev/null) marker=$(test -e "$marker_path" && echo present || echo missing)")
+rm -f "$lock_path"
+
+# 親だけが中断されても record がロックを持ち続ける。record の確定を遅らせ、
+# 途中で再実行した失敗側が record の終了を待ってから印を消すことを確かめる。
+FAKE_MV_BIN="$ROOT/bin-slow-mv"
+FAKE_PYTHON_BIN="$ROOT/bin-python"
+mkdir -p "$FAKE_MV_BIN" "$FAKE_PYTHON_BIN"
+REAL_MV="$(command -v mv)"
+REAL_PYTHON3="$(command -v python3)"
+cat >"$FAKE_MV_BIN/mv" <<'EOS'
+#!/usr/bin/env bash
+is_verify_mv=0
+[[ "$*" == *pelway-verify-tree* ]] && is_verify_mv=1
+if ((is_verify_mv)); then
+  touch "$FAKE_MV_STARTED"
+  for ((i = 0; i < 100; i++)); do [[ -e "$FAKE_MV_ALLOW" ]] && break; sleep 0.1; done
+fi
+"$FAKE_MV_REAL" "$@"
+rc=$?
+((is_verify_mv)) && touch "$FAKE_MV_DONE"
+exit "$rc"
+EOS
+cat >"$FAKE_PYTHON_BIN/python3" <<'EOS'
+#!/usr/bin/env bash
+[[ "${1:-}" != scripts/agent-verify-run || -z "${VERIFY_RUNNER_PID_FILE:-}" ]] || printf '%s\n' "$$" >"$VERIFY_RUNNER_PID_FILE"
+exec "$FAKE_PYTHON3_REAL" "$@"
+EOS
+chmod +x "$FAKE_MV_BIN/mv" "$FAKE_PYTHON_BIN/python3"
+mv_started="$ROOT/verify-record-mv-started" mv_allow="$ROOT/verify-record-mv-allow" mv_done="$ROOT/verify-record-mv-done"
+second_started="$ROOT/verify-second-started" first_pid="$ROOT/verify-first.pid" second_pid="$ROOT/verify-second.pid"
+rm -f "$mv_started" "$mv_allow" "$mv_done" "$second_started" "$first_pid" "$second_pid" "$marker_path"
+(cd "$MISE_TOY" && PATH="$FAKE_PYTHON_BIN:$FAKE_MV_BIN:$PATH" FAKE_PYTHON3_REAL="$REAL_PYTHON3" VERIFY_RUNNER_PID_FILE="$first_pid" FAKE_MV_STARTED="$mv_started" FAKE_MV_ALLOW="$mv_allow" FAKE_MV_DONE="$mv_done" FAKE_MV_REAL="$REAL_MV" MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-interrupted-first.out" 2>&1) &
+first_verify=$!
+for ((i = 0; i < 100; i++)); do [[ -e "$mv_started" ]] && break; sleep 0.1; done
+first_runner="$(cat "$first_pid" 2>/dev/null)"
+kill_rc=1
+[[ -n "$first_runner" ]] && kill -KILL "$first_runner" 2>/dev/null && kill_rc=0
+wait "$first_verify"
+first_verify_rc=$?
+(cd "$MISE_TOY" && PATH="$FAKE_PYTHON_BIN:$PATH" FAKE_PYTHON3_REAL="$REAL_PYTHON3" VERIFY_RUNNER_PID_FILE="$second_pid" VERIFY_DEPS_RC=1 VERIFY_TOUCH_BEFORE_EXIT="$second_started" MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-interrupted-second.out" 2>&1) &
+second_verify=$!
+for ((i = 0; i < 100; i++)); do [[ -e "$second_pid" ]] && break; sleep 0.1; done
+second_runner="$(cat "$second_pid" 2>/dev/null)"
+sleep 2
+second_started_early=0
+[[ -e "$second_started" ]] && second_started_early=1
+touch "$mv_allow"
+wait "$second_verify"
+second_verify_rc=$?
+[[ "$kill_rc" == 0 && "$first_verify_rc" != 0 && -n "$second_runner" && "$second_started_early" == 0 && -e "$mv_done" && -e "$second_started" && "$second_verify_rc" != 0 && ! -e "$marker_path" ]] ||
+  failures+=("verify_record_inherits_lock: kill=$kill_rc first=$first_verify_rc second=$second_verify_rc early=$second_started_early runner=${second_runner:-none} mv_done=$(test -e "$mv_done" && echo yes || echo no) second=$(test -e "$second_started" && echo yes || echo no) marker=$(test -e "$marker_path" && echo present || echo missing)")
+
 
 # --- 印が無い push は止まり、理由と mise run verify の案内が出る ---
 setup_repo missing

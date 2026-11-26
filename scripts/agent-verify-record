@@ -2,8 +2,9 @@
 # mise run verify が成功したとき、検証した作業ツリーの木の hash を git の外の手元（この worktree の gitdir）に残す（#807）。
 # 次に作るコミットが検証した内容だけを含むなら、そのコミットの木はここで残す hash と一致する。実装者メモだけの差は
 # scripts/agent-gh-verify-gate が docs/worklogs/ の例外として扱う。
-# 一時 index に作業ツリー全体（無視するファイルを除く）を入れて write-tree するため、verify を commit の前に回す
-# 通常の手順でも、commit 後の HEAD の木と同じ印になる。
+# 一時 index は実際の index の複写から始めて作業ツリー全体を入れて write-tree するため、verify を commit の前に回す
+# 通常の手順でも、commit 後の HEAD の木と同じ印になる。追跡済みのファイルは無視のパターンに当たっても
+# 印に含める。`.devin/config.json` に skip-worktree が付いているときだけ、作業ツリーではなく index の内容を記録する。
 set -euo pipefail
 
 fail() {

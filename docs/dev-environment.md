@@ -83,7 +83,7 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 
 ## agent-gh の push の門
 
-- `mise run verify` は `scripts/agent-verify-run` を実行し、その worktree の gitdir（`.git/`、linked worktree ではその gitdir）にあるロックで同じ worktree の検証を直列にしてから、前回の印を消し、3 グループを並列に検査する。すべて成功したときだけ `scripts/agent-verify-record` が、検証した作業ツリーの木の hash を同じ gitdir の `pelway-verify-tree` に残す。検査が失敗したときは前回の印も残らない。
+- `mise run verify` は `scripts/agent-verify-run` を実行し、その worktree の gitdir（`.git/`、linked worktree ではその gitdir）にあるロックで同じ worktree の検証を直列にしてから、前回の印を消し、3 グループを並列に検査する。すべて成功したときだけ `scripts/agent-verify-record` が、検証した作業ツリーの木の hash を同じ gitdir の `pelway-verify-tree` に残す。検査が失敗したときは前回の印も残らない。印には、追跡済みのファイルは無視のパターンに当たっても入る。`.devin/config.json` に skip-worktree が付いているときだけ、そのファイルは作業ツリーではなく index の内容を記録する。
 - `scripts/agent-gh dev git push` と `scripts/agent-gh review git push` は、pre-push フックの中で `scripts/agent-gh-verify-gate` を呼び、送信先のブランチを作成または更新するときだけ、送るブランチの木が印の木と一致するかを確かめる。ブランチの削除だけ・タグだけの push は印なしでも通す。印が無い・形が違う・木が違うブランチの作成または更新は止まり、停止の理由と `mise run verify` を実行する案内を標準エラーに出す。
 - 送るブランチの木と印の木の差が `docs/worklogs/` の下だけなら push を通す。実装者メモは verify の後に commit するための例外である。この例外は印があるときだけ効き、印が無ければ `docs/worklogs/` の下だけの差でも止まる。
 - `PELWAY_AGENT_SKIP_VERIFY_GATE=1` を付けた push はこの門を確かめずに通し、通したことを標準エラーに出す。CI の verify が正本であることは変わらない。

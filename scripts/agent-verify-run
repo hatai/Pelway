@@ -1,19 +1,96 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # mise run verify の本体（#807）。前回の印を消してから 3 グループを並列に検査し、
 # すべて成功したときだけ、検証した作業ツリーの木の印を残す。
-set -uo pipefail
+import fcntl, os, stat, subprocess, sys
 
-script_dir="$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# 同じ worktree で重なる verify を直列にする。印を消してから記録までの間に別の検証が入ると、
-# 先に成功した印が後の失敗のあとにも残るため。ロックはこの shell が持ち、子プロセスには fd を渡さない。
-git_dir="$(git rev-parse --git-dir 2>/dev/null)" || { echo "agent-verify-run: gitdir を解決できません" >&2; exit 1; }
-git_dir="$(CDPATH='' cd -- "$git_dir" 2>/dev/null && pwd -P)" || { echo "agent-verify-run: gitdir を絶対パスに解決できません" >&2; exit 1; }
-exec 9>"$git_dir/pelway-verify.lock"
-flock 9 || { echo "agent-verify-run: verify のロックを取れません" >&2; exit 1; }
-bash "$script_dir/agent-verify-invalidate" 9>&- || exit 1
-rc=0
-mise run verify-lint ::: verify-test ::: verify-static 9>&- || rc=$?
-if ((rc != 0)); then
-  exit "$rc"
-fi
-bash "$script_dir/agent-verify-record" 9>&-
+
+def fail(message):
+    print(f"agent-verify-run: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def resolve_git_dir():
+    try:
+        out = subprocess.check_output(["git", "rev-parse", "--git-dir"], stderr=subprocess.DEVNULL, text=True)
+    except (OSError, subprocess.CalledProcessError):
+        fail("gitdir を解決できません")
+    path = os.path.realpath(out.strip())
+    if not out.strip() or not os.path.isdir(path):
+        fail("gitdir を絶対パスに解決できません")
+    return path
+
+
+def marker_snapshot(path):
+    try:
+        st = os.stat(path, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        return ("unreadable", e.errno)
+    return (st.st_dev, st.st_ino, st.st_mode, st.st_mtime_ns, st.st_size)
+
+
+# ロックの準備に失敗した実行でも、始める前からあった同じ印は次の push に使わせない。
+# 印は record が一時ファイルから置き換えるため、待っている間に現れた新しい印は別の検証の結果として残す。
+def invalidate_unchanged_marker(path, snapshot):
+    if snapshot is None or marker_snapshot(path) != snapshot:
+        return
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        print(f"agent-verify-run: 前回の印を消せません: {e}", file=sys.stderr)
+
+
+def open_lock(path):
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    except OSError as e:
+        return None, f"verify のロックファイルを開けません: {e}"
+    try:
+        st = os.fstat(fd)
+    except OSError as e:
+        os.close(fd)
+        return None, f"verify のロックファイルを確かめられません: {e}"
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_nlink != 1:
+        os.close(fd)
+        return None, "verify のロックファイルが信頼できる通常ファイルでない"
+    return fd, None
+
+
+def main():
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    git_dir = resolve_git_dir()
+    lock_path = os.path.join(git_dir, "pelway-verify.lock")
+    marker_path = os.path.join(git_dir, "pelway-verify-tree")
+    marker_before_lock = marker_snapshot(marker_path)
+    lock_fd, error = open_lock(lock_path)
+    if error is not None:
+        invalidate_unchanged_marker(marker_path, marker_before_lock)
+        fail(error)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    except (KeyboardInterrupt, OSError) as e:
+        os.close(lock_fd)
+        invalidate_unchanged_marker(marker_path, marker_before_lock)
+        fail(f"verify のロックを取れません: {e or '中断されました'}")
+
+    if subprocess.run(["bash", os.path.join(script_dir, "agent-verify-invalidate")], check=False).returncode != 0:
+        sys.exit(1)
+    verify = subprocess.run(
+        ["mise", "run", "verify-lint", ":::", "verify-test", ":::", "verify-static"], check=False
+    ).returncode
+    if verify != 0:
+        sys.exit(verify if verify > 0 else 1)
+
+    # 印を書く子にもロックの fd を渡す。親が中断されても、record が終わるまでは
+    # 後の検証が入らず、古い成功の記録が後の失敗を上書きする順を防ぐ。
+    record = subprocess.run(
+        ["bash", os.path.join(script_dir, "agent-verify-record")], pass_fds=(lock_fd,), check=False
+    ).returncode
+    sys.exit(record if record >= 0 else 1)
+
+
+if __name__ == "__main__":
+    main()
