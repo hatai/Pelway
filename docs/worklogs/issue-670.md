@@ -89,3 +89,15 @@ PR: #679
 5. 改善案: `docs/agents/grokbot-runbook.md` の「9. 片付け」の除外の語「止まっているもの」を、「5. イベントごとの対応」の「送り先の照合」の 2 の「止まったもの」と同じ意味と分かる語にそろえる。`.agents/skills/implement-issue/SKILL.md` の手順 9「Approve のとき」に QA の依頼方法を書く（round 7 の改善案と同じ）
 
 使ったスキル: .agents/skills/implement-issue
+
+## 実装者メモ（round 10）
+
+対象 head: 31c163014c8f9436f5e8ad9b986ac16c4b6d81d1
+
+1. 詰まった箇所: 手順 6: 前回まで使っていた `/tmp/opencode/pelway-impl-670` の worktree が /tmp の掃除で消えていた。ブランチを checkout 済みの T3 の worktree（`agent-670-thread-contac-32364811e97d5c13`・round 6〜9 を進めたもの）は読み取り専用で merge を書けなかったため、`git worktree add --detach` で `/tmp/opencode/pelway-impl-670` を d1c24a5e から作り直し、merge・解消・verify を行い `HEAD:agent/670-thread-contacts-ledger` 指定で push する
+2. 曖昧だった文: 「Bring the checked-out branch up to date with `main` using this repository's convention, resolve every conflict while preserving the intent of both sides」（T3 のコンフリクト通知）
+3. 仮定と解釈: トップレベル項目の表の衝突（main 側の `conductor_thread_id`・`anomalies`・`needs_conductor_claim` の 3 行と、こちらの `thread_contacts` 行が同じ末尾位置に追加）は両側残しで解決した（main の 3 行の後に `thread_contacts` 行を置く）。並行の round 6〜9 のコミット（1fc9d50d の main 取り込み・f38d4588・d1c24a5e）は代替スレッドによるもので、内容は破棄せずそのまま引き継いだ
+4. 足りなかった情報・検証手段: 代替スレッドの round 6〜9 のうち round 6〜8 のメモ本文（worklog は round 9 まで存在）。merge コミット 1fc9d50d の衝突解消の意図はコミットメッセージから読んだ
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「作業 worktree が消えた場合は `git worktree add --detach` で再作成し、push は `HEAD:<ブランチ>` 指定で行う」を足す
+
+使ったスキル: implement-issue
