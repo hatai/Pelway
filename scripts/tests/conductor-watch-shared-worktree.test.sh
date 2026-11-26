@@ -13,6 +13,7 @@ failures=()
 MOCK="$ROOT/mock"
 mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$MOCK/show" "$ROOT/state"
 cp "$REPO/scripts/conductor-watch.sh" "$ROOT/repo/scripts/"
+cp "$REPO/scripts/patrol-state-update" "$ROOT/repo/scripts/"
 git init -q "$ROOT/repo"
 
 # モックの agent-gh: 一覧は空、それ以外は失敗する（この試験はスレッドだけを見る）。
