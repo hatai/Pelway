@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""PR 本文の決まった行を今の値に書き換える（Issue #809）。
+
+  python3 -I scripts/pr-body-update <PR 番号> --verified <sha>
+
+修正の round のたびに手で書き換えていた PR 本文の 2 行を、1 つのコマンドで書き換える。
+  - 「レビューと QA」の節にある「最後に検証した sha」の行 → --verified に渡した sha
+  - 「対象」の節にある HEAD の行                        → PR の現在の headRefOid
+書き換えるのは、その行の中で印（「最後に検証した sha」・HEAD）の直後にある sha（7〜40 桁の 16 進数。
+コロン・空白・開きバッククォートは挟まってよい）だけである。行の前後の文、ほかの行、改行コードは変わらない。
+節は `## <節名>` の見出しから次の見出し（# 〜 ######）までで、見出しは本文に 1 つだけ、印の付いた行は
+節に 1 つだけ無ければならない。決まった行が無い・複数あるときは何も書き換えずに、どの行が足りないかを
+stderr に出して終了コード 1（そのときは pr edit で本文にその行を足してからやり直す）。
+GitHub との読み書きは scripts/agent-gh dev api だけを使う。本文は argv でなく --input のファイルで渡す
+（非 ASCII を argv で渡さない決まり。skill write-pull-request）。
+終了コード: 0 = 書き換えた、1 = 書き換えなかった（決まった行が無い・GitHub への読み書きの失敗）、
+2 = 引数の誤り
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+REPO = "hatai/Pelway"
+# (節名, 行を見分ける印)。順に --verified の sha、PR の headRefOid を当てる。節の見出しは `## <節名>`
+TARGETS = (("レビューと QA", "最後に検証した sha"), ("対象", "HEAD"))
+SHA = r"[0-9a-fA-F]{7,40}(?![0-9a-fA-F])"  # 直後も 16 進数のときは切らずに不合格にする
+FULL_SHA = re.compile(r"[0-9a-fA-F]{40}")
+ANY_HEADING = re.compile(r"#{1,6}(?:[ \t].*)?\r?$")
+
+USAGE = f"""usage: python3 -I scripts/pr-body-update <PR 番号> --verified <sha>
+
+PR 本文の決まった 2 行を今の値に書き換える（{REPO} の PR）。
+  「レビューと QA」の「最後に検証した sha」の行 → --verified の sha（40 桁）
+  「対象」の HEAD の行                        → PR の現在の headRefOid
+書き換えるのは行の中の sha だけ。ほかの行は変えない。決まった行が本文に無い・複数あるときは
+何も書き換えずに、足りない行を stderr に出して終了コード 1。
+終了コード: 0 = 書き換えた、1 = 書き換えなかった、2 = 引数の誤り"""
+
+
+def die(msg, rc=1):
+    print(f"pr-body-update: {msg}", file=sys.stderr)
+    sys.exit(rc)
+
+
+def agent_gh(*args):
+    """scripts/agent-gh dev api <args...> を呼び、その CompletedProcess（出力は UTF-8）を返す。"""
+    gh = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-gh")
+    try:
+        return subprocess.run([gh, "dev", "api", *args], capture_output=True, encoding="utf-8")
+    except OSError as e:
+        die(f"scripts/agent-gh を実行できません: {e}")
+
+
+def how_many(found):
+    """見つかったものの個数の言い回し: 0 なら「無い」、それ以外は「 N つある」（直前に空白を置く）。"""
+    return "無い" if not found else f" {len(found)} つある"
+
+
+def where_at(found):
+    """見つかった行番号の一覧の言い回し: 「（3 行目・4 行目）」。無ければ空文字列。"""
+    return "" if not found else "（" + "・".join(f"{i + 1} 行目" for i in found) + "）"
+
+
+def rewrite(body, values):
+    """本文 body の決まった 2 行の sha を TARGETS の順の値 values に書き換え、(新しい本文, 変更, 問題) を返す。
+    変更は [(印, 古い sha, 新しい sha, 行番号)]。問題が 1 つでもあれば何も書き換えず (None, [], 問題) を返す。"""
+    lines = body.split("\n")  # \r は行末に残るため、改行コードは join でそのまま戻る
+    changes, problems = [], []
+    for (section, label), value in zip(TARGETS, values):
+        heads = [i for i, line in enumerate(lines) if re.fullmatch(r"## " + re.escape(section) + r"[ \t]*\r?", line)]
+        if len(heads) != 1:
+            problems.append(f"「{section}」の見出しが本文に{how_many(heads)}{where_at(heads)}")
+            continue
+        end = next((i for i in range(heads[0] + 1, len(lines)) if ANY_HEADING.fullmatch(lines[i])), len(lines))
+        mark = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(label) + r"(?![A-Za-z0-9_])")
+        found = [i for i in range(heads[0] + 1, end) if mark.search(lines[i])]
+        name = f" {label} " if label.isascii() else f"「{label}」"  # Latin の印の前後には空白を置く
+        if len(found) != 1:
+            problems.append(f"「{section}」に{name}の行が{how_many(found)}{where_at(found)}")
+            continue
+        hits = list(re.finditer(mark.pattern + r"[ \t]*[:：]?[ \t]*`?(" + SHA + ")", lines[found[0]]))
+        if len(hits) != 1:
+            problems.append(f"「{section}」の{name}の行（{found[0] + 1} 行目）で、"
+                            f"{name.lstrip()}の直後に sha が{how_many(hits)}")
+            continue
+        hit = hits[0]
+        lines[found[0]] = lines[found[0]][:hit.start(1)] + value + lines[found[0]][hit.end(1):]
+        changes.append((label, hit.group(1), value, found[0] + 1))
+    return (None, [], problems) if problems else ("\n".join(lines), changes, [])
+
+
+def main():
+    if hasattr(sys.stdout, "reconfigure"):  # 出力先のロケールが UTF-8 でなくても、報告を例外で終わらせない
+        sys.stdout.reconfigure(errors="backslashreplace")
+    pr, verified, args = None, None, sys.argv[1:]
+    while args:
+        a = args.pop(0)
+        if a in ("-h", "--help"):
+            print(USAGE)
+            return 0
+        if a == "--verified" and args:
+            verified = args.pop(0)
+        elif a.startswith("-") or pr is not None:
+            die(f"引数を認識できません: {a}\n{USAGE.splitlines()[0]}", 2)
+        else:
+            pr = a
+    if pr is None or not pr.isascii() or not pr.isdigit():
+        die(f"PR 番号を指定してください\n{USAGE.splitlines()[0]}", 2)
+    if verified is None or not FULL_SHA.fullmatch(verified):
+        die(f"--verified には 40 桁の sha を指定してください\n{USAGE.splitlines()[0]}", 2)
+
+    got = agent_gh(f"repos/{REPO}/pulls/{pr}")
+    if got.returncode != 0:
+        sys.stderr.write(got.stderr)
+        die(f"PR #{pr} を読めません")
+    try:
+        data = json.loads(got.stdout)
+        head, url = data["head"]["sha"], data["html_url"]
+    except (ValueError, KeyError, TypeError):
+        die(f"PR #{pr} の応答を読めません")
+    if not isinstance(head, str) or not FULL_SHA.fullmatch(head):
+        die(f"PR #{pr} の headRefOid が読めません（head: {head!r}）")
+    body = data.get("body") or ""  # 本文が空なら、決まった行が無いものとして扱う
+    new_body, changes, problems = rewrite(body, (verified.lower(), head.lower()))
+    if problems:
+        die(f"PR #{pr} の本文を書き換えませんでした:\n  - " + "\n  - ".join(problems))
+    # 日本語の本文は argv で渡せないため、--input のファイルに書く（終わったら消す）
+    fd, path = tempfile.mkstemp(suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"body": new_body}, f, ensure_ascii=False)
+        sent = agent_gh("--method", "PATCH", f"repos/{REPO}/pulls/{pr}", "--input", path)
+    finally:
+        os.unlink(path)
+    if sent.returncode != 0:
+        sys.stderr.write(sent.stderr)
+        die(f"PR #{pr} の本文を書き換えられませんでした")
+    print(f"pr-body-update: PR #{pr} の本文を書き換えました（{url}）")
+    for label, old, new, no in changes:
+        print(f"  {no} 行目 {label}: {old} → {new}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -204,7 +204,7 @@ EOF
 
 ローカルのブランチ名が push 先と違うとき（手順 6 で `HEAD:<PRブランチ>` に push したとき。PR を作る前に止まった作業を別名の作業ツリーで引き継いだ場合）は、`pr create` に `--head <PRブランチ>` を付け、push 先のブランチを PR の head に指定する。`--head` を省くと gh はローカルの別名に当たる remote のブランチを探し、それは `origin` に無いため、非対話では PR を作れない。作成後に `scripts/agent-gh dev pr view <PR 番号> --json headRefName --jq .headRefName` が、最初の指示に書かれた push 先の `<PRブランチ>` と同じことを確かめ、違えば止まる条件と同じ扱いにする。
 
-修正依頼の場合は PR を作り直さない。push したあと `scripts/agent-gh dev pr edit` で本文の「レビューと QA」と「対象」の sha を更新する。
+修正依頼の場合は PR を作り直さない。push したあと `python3 -I scripts/pr-body-update <PR 番号> --verified <sha>` で本文の「レビューと QA」の最後に検証した sha（`--verified` には、手順 6 で確かめて実装者メモの「対象 head」に記入した push 後の SHA を渡す）と「対象」の HEAD（PR の現在の `headRefOid`）を書き換える。書き換わるのはこの 2 行の sha だけで、行の前後の文とほかの行は変わらない（行の形は skill `write-pull-request` の手順 4）。決まった行が本文に無い・複数あるときは何も書き換えずに非 0 で終わるので、stderr に出た行を `scripts/agent-gh dev pr edit <PR 番号> --body-file` で本文に足してからやり直す。
 
 PR 本文の「レビューと QA」には round の履歴を書かず、実装者メモ（`docs/worklogs/issue-<N>.md`）を指す 1 行と、最後に検証した sha だけを書く。round の履歴の正本は実装者メモとする（round サマリーのコメント（手順 9）は別に残す）。
 
