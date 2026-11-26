@@ -7,7 +7,7 @@ description: "Use when acting as the conductor (指揮役) of the AI dev team: a
 
 AI 開発チームの指揮役が、毎サイクル実行する判断の手順。
 
-- 体制・役割の正本は `docs/superpowers/specs/agent-team.md`、同時数の上限の正本は `agent-team.toml`
+- 体制・役割の正本は `docs/superpowers/specs/agent-team.md`、同時数の上限の正本は `agent-team.toml`（追跡しない `agent-team.local.toml` の開発者ごとの上書きを重ねた結果。決まりは agent-team.md「開発者ごとの上書き」）
 - イベントごとの対応表は `docs/agents/grokbot-runbook.md`
 - このスキルは、その 2 つの間で指揮役が下す判断（振り分け、エスカレーション、改善ループ、代行）を決める
 
@@ -26,7 +26,7 @@ AI 開発チームの指揮役が、毎サイクル実行する判断の手順�
   Assigned: role=implement agent=<opencode|devin> model=<モデル名> effort=<effort>
   ```
 
-  実装の値は、`agent=` は担当の id、`model=` は `agent-team.toml` の `[agents.<担当>].models` のモデル、`effort=` は `[agents.<担当>].effort.raise` の段の値にする（起動時は `effort.option` の option に effort を写す）。
+  実装の値は、`agent=` は担当の id、`model=` は `agent-team.toml` の `[agents.<担当>].models` のモデル、`effort=` は `[agents.<担当>].effort.raise` の段の値にする（起動時は `effort.option` の option に effort を写す）。実装・調査の役割で読む登録情報（`models`・`effort.raise`・`instance.implement`・`instance.investigate`）と優先順位・上限は、`agent-team.local.toml` の開発者ごとの上書きを重ねた結果（`scripts/agent-team-config effective <login>` の出力）を正とする。
 
   スキル改訂の Issue（skill `improve-skills` の入口Aで起票されたもの）を割り当てるときは、1 行目を「Issue #<N> を実装する。skill implement-issue と skill improve-skills に従う。」にする。実装担当は implement-issue の手順に加えて、improve-skills の入口B以降の手順を読む（入口Bの指定は improve-skills の本文が担う）。
 
@@ -110,7 +110,7 @@ Issue を割り当てる直前に、runbook の「割り当て・停止・再開
 
 ### 実装のモデルと effort
 
-条件ごとの担当は `agent-team.toml` の `[developers.<login>.priority.implement]` の対応するキーの先頭から枠の空いているものを選ぶ。選んだ担当の provider インスタンス名・モデル・effort の option と段の一覧は `[agents.<担当>]` の登録情報から読む（起動の形は runbook の「実装を始める」）。
+条件ごとの担当は `agent-team.toml` の `[developers.<login>.priority.implement]` の対応するキーの先頭から枠の空いているものを選ぶ（優先順位・枠・登録情報は `agent-team.local.toml` の上書きを重ねた結果）。選んだ担当の provider インスタンス名・モデル・effort の option と段の一覧は `[agents.<担当>]` の登録情報から読む（起動の形は runbook の「実装を始める」）。
 
 | 条件 | 担当と effort |
 |---|---|

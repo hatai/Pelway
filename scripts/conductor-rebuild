@@ -224,6 +224,17 @@ if [[ "$new_wt" == - ]]; then
   exit 1
 fi
 
+# 新しい指揮役の worktree に agent-team.toml が揃っていることを確かめる（Issue #804）。
+# 基点が古くて worktree に無いときは本体の checkout から写す。写せなければ
+# 旧指揮役を止める前にここで止まる（枠を読めない conductor に引き継がせない）
+if [[ ! -f "$new_wt/agent-team.toml" ]]; then
+  echo "conductor-rebuild: $new_wt に agent-team.toml が無いため本体の checkout から写す" >&2
+  T3CODE_PROJECT_ROOT="$project" "$(dirname "$0")/worktree-setup" --dest "$new_wt" >&2 \
+    || die "cannot provide agent-team.toml in the new conductor's worktree $new_wt; nothing was sent to the old conductor and the registration is unchanged"
+fi
+[[ -f "$new_wt/agent-team.toml" ]] \
+  || die "agent-team.toml is missing in the new conductor's worktree $new_wt; nothing was sent to the old conductor and the registration is unchanged"
+
 # 2. 旧指揮役を止める
 STOP="恒久交代を始める（docs/agents/conductor-context.md の「恒久交代」）。案件を進める操作（スレッドの起動・指示、マージ、ラベル、コメント、ステータス変更）を止め、引き継ぎの記録を指揮役の作業ログと patrol-state.json に書き出して、このターンを終える。以後は操作しない。scheduled task や起こしで起きても、巡回も patrol-state.json の書き込みもせずにターンを終える。"
 printf '%s' "$STOP" | "$T3" thread send --wait "$from" - >/dev/null \

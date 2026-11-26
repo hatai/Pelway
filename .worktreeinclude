@@ -1,0 +1,5 @@
+# Claude Code・Codex の worktreeinclude 機構が worktree に持ち越す追跡しないファイル
+# （Issue #804。T3 Code はこのファイルを読まず、t3.json の runOnWorktreeCreate が担う）。
+# 追跡ファイルの agent-team.toml はここに書かない: 追跡ファイルを include すると
+# 両方を持つ worktree で差分が出るため（基点が古い worktree の補填は scripts/worktree-setup が行う）。
+agent-team.local.toml

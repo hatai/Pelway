@@ -14,7 +14,10 @@ LOG="$ROOT/t3-calls"
 FILE="$ROOT/home/.config/pelway-agent-notify/conductor-thread-id"
 OLD="mcp:launch:old-conductor"
 NEW="mcp:launch:new-conductor"
-NEW_WT_PATH="/home/u/.t3/worktrees/Pelway/conductor"
+NEW_WT_PATH="$ROOT/new-conductor-wt"
+# 新しい指揮役の worktree（通常は追跡ファイルの agent-team.toml を持つ）は実在の
+# ディレクトリにする（Issue #804 の整備確認がファイルの有無を見るため）
+mkdir -p "$NEW_WT_PATH" && cp "$REPO/agent-team.toml" "$NEW_WT_PATH/"
 
 # 期待する本文（スクリプトの決まった文と完全一致で比べる）
 STOP_WANT="恒久交代を始める（docs/agents/conductor-context.md の「恒久交代」）。案件を進める操作（スレッドの起動・指示、マージ、ラベル、コメント、ステータス変更）を止め、引き継ぎの記録を指揮役の作業ログと patrol-state.json に書き出して、このターンを終える。以後は操作しない。scheduled task や起こしで起きても、巡回も patrol-state.json の書き込みもせずにターンを終える。"
@@ -85,6 +88,7 @@ run() {
   rm -f "$LOG" "$LOG".*; [[ -n "${1:-}" ]] && touch "$LOG.$1"
   shift || true
   HOME="$ROOT/home" T3_BIN="$ROOT/t3" LOG="$LOG" PELWAY_REBUILD_ALLOW_WORKTREE=1 \
+    NEW_WT="${NEW_WT-$NEW_WT_PATH}" \
     bash "$REPO/scripts/conductor-rebuild" "$@" >"$ROOT/out" 2>"$ROOT/err"
 }
 check() {
@@ -112,6 +116,31 @@ check "handover message is exactly the fixed text" same "$LOG.send-stdin.new-con
 check "registers the new conductor" [ "$(cat "$FILE")" = "$NEW" ]
 check "logs the new conductor's runtimeMode and worktree" \
   grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=auto-accept-edits worktree=$NEW_WT_PATH" "$ROOT/err"
+# worktree に既にある agent-team.toml は上書きしない
+check "existing agent-team.toml untouched" same "$NEW_WT_PATH/agent-team.toml" "$(cat "$REPO/agent-team.toml")"
+
+# worktree に agent-team.toml が無いときは本体の checkout から写してから進む（Issue #804）
+MAIN_CO="$(dirname "$(git -C "$REPO/scripts" rev-parse --path-format=absolute --git-common-dir)")"
+FRESH_WT="$ROOT/fresh-wt"; mkdir -p "$FRESH_WT"
+printf 'mcp:launch:kept\n' > "$FILE"
+NEW_WT="$FRESH_WT" run "" --from "$OLD" --to "$NEW"; rc=$?
+check "missing toml in worktree: succeeds" [ "$rc" -eq 0 ]
+check "missing toml in worktree: copies agent-team.toml from main checkout" \
+  [ -f "$FRESH_WT/agent-team.toml" ] && cmp -s "$MAIN_CO/agent-team.toml" "$FRESH_WT/agent-team.toml"
+check "missing toml in worktree: logs the copy" \
+  grep -q "agent-team.toml" "$ROOT/err"
+check "missing toml in worktree: still stops the old conductor" \
+  [ "$(count "thread send --wait $OLD -")" -eq 1 ]
+check "missing toml in worktree: registers the new conductor" [ "$(cat "$FILE")" = "$NEW" ]
+
+# worktree のパスが存在しない（写せない）ときは、旧指揮役を止める前に止まる
+printf 'mcp:launch:kept\n' > "$FILE"
+NEW_WT="$ROOT/no-such-wt" run "" --from "$OLD" --to "$NEW"; rc=$?
+check "unwritable worktree: exits non-zero" [ "$rc" -ne 0 ]
+check "unwritable worktree: nothing sent to either conductor" no_line "thread send"
+check "unwritable worktree: no thread start" no_line "thread start"
+check "unwritable worktree: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+check "unwritable worktree: stderr names agent-team.toml" grep -qF "agent-team.toml" "$ROOT/err"
 
 # --to なし: 何も作らず、t3_thread_launch で立てて --to で実行し直す手順を出して止まる
 printf 'mcp:launch:kept\n' > "$FILE"
@@ -183,7 +212,8 @@ check "no worktree until the limit: tells how to continue" \
 
 # worktree のパスが読み直しの途中で入ったときは、権限の確かめ以降に進む
 printf 'mcp:launch:kept\n' > "$FILE"
-NEW_WT="/home/u/.t3/worktrees/Pelway/late" NEW_WT_AFTER=3 \
+mkdir -p "$ROOT/late-wt" && cp "$REPO/agent-team.toml" "$ROOT/late-wt/"
+NEW_WT="$ROOT/late-wt" NEW_WT_AFTER=3 \
   PELWAY_REBUILD_WT_WAIT=30 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
 check "worktree arrives while waiting: succeeds" [ "$rc" -eq 0 ]
 check "worktree arrives while waiting: reread the new conductor 3 times" \
@@ -194,7 +224,7 @@ check "worktree arrives while waiting: sends the handover" \
   [ "$(count "thread send $NEW -")" -eq 1 ]
 check "worktree arrives while waiting: registers the new conductor" [ "$(cat "$FILE")" = "$NEW" ]
 check "worktree arrives while waiting: logs the last-read worktree" \
-  grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=auto-accept-edits worktree=/home/u/.t3/worktrees/Pelway/late" "$ROOT/err"
+  grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=auto-accept-edits worktree=$ROOT/late-wt" "$ROOT/err"
 
 # 読み直しの間隔が残り時間を超えるときは、期限を過ぎる読み取りを始めずに止まる
 printf 'mcp:launch:kept\n' > "$FILE"

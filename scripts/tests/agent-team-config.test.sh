@@ -346,6 +346,144 @@ s_run "$ROOT/midbad.toml"; rc=$?
 check "15: slots with mid-list bad limit fails" eq "$rc" "1"
 check "15: slots prints nothing on mid-list bad limit" eq "$(grep -c . "$ROOT/out")" "0"
 
+# ── agent-team.local.toml の重ね合わせ（Issue #804）────────────────
+# 重ねた結果の検証は共有の toml と同じ規則に掛ける。上書きできる項目だけが
+# 重なり、上書きできない項目はキー名つきの警告（値は出さない）を出して無視される。
+dev_case() {  # 共通の開発者の表（use 4 種・上限・優先順位を持つ有効な形）
+  cat <<'EOF'
+[developers.dev]
+use = ["opencode", "devin", "codex", "claude"]
+[developers.dev.slots]
+opencode = 1
+devin = 4
+[developers.dev.review_limits]
+codex = 1
+devin = 1
+claude = 1
+[developers.dev.priority.implement]
+normal = ["devin", "opencode"]
+[developers.dev.priority.review]
+normal = ["codex", "devin"]
+high_risk = ["codex"]
+EOF
+}
+
+# 16: local が無いときは slots の出力が今までと同じ（上書きの前の値）
+write_case "$ROOT/l16.toml" < <(dev_case)
+s_run "$ROOT/l16.toml"; rc=$?
+check "16: no local: slots exits 0" eq "$rc" "0"
+check "16: no local: devin 4" eq "$(grep -cx 'devin 4' "$ROOT/out")" "1"
+
+# 17: 上限・優先順位・モデルが local で重なり、slots・effective に出る
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[agents.devin]
+models = ["swe-2-high"]
+[agents.devin.effort]
+raise = ["high"]
+
+[developers.dev.slots]
+devin = 9
+
+[developers.dev.priority.implement]
+normal = ["opencode", "devin"]
+EOF
+# local は <file> と同じディレクトリから読む。$ROOT/agent-team.local.toml として置くため
+# 共有側も同じ名前で $ROOT に置く
+cp "$ROOT/l16.toml" "$ROOT/agent-team.toml"
+s_run "$ROOT/agent-team.toml"; rc=$?
+check "17: slots exits 0 with local" eq "$rc" "0"
+check "17: slots reflects overridden limit" eq "$(grep -cx 'devin 9' "$ROOT/out")" "1"
+bash "$CFG" effective dev "$ROOT/agent-team.toml" >"$ROOT/out" 2>"$ROOT/err"; rc=$?
+check "17: effective exits 0" eq "$rc" "0"
+check "17: effective shows replaced priority" \
+  python3 -I -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['developers']['dev']['priority']['implement']['normal'] == ['opencode','devin']" "$ROOT/out"
+check "17: effective shows narrowed models" \
+  python3 -I -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['agents']['devin']['models'] == ['swe-2-high'] and d['agents']['devin']['effort']['raise'] == ['high']" "$ROOT/out"
+check "17: effective shows only the caller developer" bash -c "grep -q '\"dev\"' '$ROOT/out'"
+check "17: effective omits other developers tables" \
+  python3 -I -c "import json,sys; d=json.load(open(sys.argv[1])); assert list(d['developers']) == ['dev']" "$ROOT/out"
+rm "$ROOT/agent-team.local.toml"
+
+# 18: use から担当を外すと、外した担当への参照（上限・優先順位の並び）が重ねた結果から
+# 落ちる。その項目の警告（キー名つき）が出る。優先順位の並びが空になる条件は、
+# local が並びを置き換えて埋める必要がある（埋めなければ重ねた結果の検証で止まる）
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[developers.dev]
+use = ["opencode", "devin", "claude"]
+
+[developers.dev.priority.review]
+high_risk = ["claude"]
+EOF
+s_run "$ROOT/agent-team.toml"; rc=$?
+check "18: slots exits 0 after dropping codex" eq "$rc" "0"
+check "18: warns about dropped review_limits entry" has "$ROOT/err" "developers.dev.review_limits.codex"
+check "18: warns about dropped priority entries" has "$ROOT/err" "developers.dev.priority.review"
+check "18: warns codex became unusable" bash -c "grep -F 'developers.dev.use' '$ROOT/err' | grep -q codex"
+check "18: warnings name keys not the value list" bash -c "! grep -q 'opencode.*devin.*codex.*claude' '$ROOT/err'"
+rm "$ROOT/agent-team.local.toml"
+
+# 19: 上書きできない項目は警告を出して無視する（重ねた結果は共有のまま）
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[agents.devin]
+assign_label = "agent:mine"
+[agents.devin.effort]
+option = "ULTRA_OPTION"
+[agents.devin.instance]
+review = "EVIL_INSTANCE"
+[agents.newagent]
+instance = { implement = "x" }
+
+[developers.dev.bogus]
+x = 1
+[developers.dev.priority.implement]
+newcond = ["devin"]
+
+[developers.other]
+use = ["devin"]
+
+[unknown_top]
+y = 1
+EOF
+bash "$CFG" effective dev "$ROOT/agent-team.toml" >"$ROOT/out" 2>"$ROOT/err"; rc=$?
+check "19: forbidden keys: still exits 0" eq "$rc" "0"
+for k in "agents.devin.assign_label" "agents.devin.effort.option" "agents.devin.instance.review" \
+         "agents.newagent" "developers.dev.bogus" "developers.dev.priority.implement.newcond" \
+         "developers.other" "unknown_top"; do
+  check "19: warns about $k" has "$ROOT/err" "$k"
+done
+check "19: warnings never leak values" bash -c "! grep -qE 'ULTRA_OPTION|EVIL_INSTANCE|agent:mine' '$ROOT/err'"
+check "19: merged result keeps shared instance.review" bash -c "grep -q devin_review '$ROOT/out' && ! grep -q EVIL_INSTANCE '$ROOT/out'"
+check "19: merged result keeps shared effort.option" has "$ROOT/out" "thought_level"
+check "19: merged result keeps shared assign_label" has "$ROOT/out" "agent:devin"
+rm "$ROOT/agent-team.local.toml"
+
+# 20: 重ねた結果が共有と同じ検証を通れないときは非 0 で止まり、slots の標準出力は空
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[developers.dev.slots]
+devin = 0
+EOF
+s_run "$ROOT/agent-team.toml"; rc=$?
+check "20: merged-invalid: slots exits 1" eq "$rc" "1"
+check "20: merged-invalid: prints nothing" eq "$(grep -c . "$ROOT/out")" "0"
+check "20: merged-invalid: error names the key" has "$ROOT/err" "developers.dev.slots.devin"
+rm "$ROOT/agent-team.local.toml"
+
+# 21: local が TOML として読めないときは非 0 で止まる（共有が有効でも採用しない）
+echo '[developers.dev' > "$ROOT/agent-team.local.toml"
+v_run "$ROOT/agent-team.toml"; rc=$?
+check "21: unreadable local fails" eq "$rc" "1"
+rm "$ROOT/agent-team.local.toml"
+
+# 22: 共有の toml の検証は local より先に止まる（共有側の違反に local は関係ない）
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[developers.dev]
+use = ["opencode", "devin", "codex", "claude"]
+EOF
+v_run "$ROOT/unknown.toml"; rc=$?
+check "22: broken shared still fails first" eq "$rc" "1"
+check "22: shared errors reported on shared file" bash -c "grep -qF '$ROOT/unknown.toml' '$ROOT/err' && grep -q zed '$ROOT/err'"
+rm "$ROOT/agent-team.local.toml" "$ROOT/agent-team.toml"
+
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
   exit 1

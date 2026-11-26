@@ -406,6 +406,35 @@ check "slots.json status error with stale fetch time" slot_eq status error
 run_cycles 1
 check "slots.json recovers after stale file removed" slot_eq status ok
 
+# --- 13g. agent-team.local.toml の上書きが枠に反映され、その存在が SLOTS の行で出る（Issue #804） ---
+cat > "$ROOT/repo/agent-team.local.toml" <<'EOF'
+[developers.hatai.slots]
+devin = 2
+EOF
+run_cycles 1
+check "overlay narrows devin limit" has "$ROOT/out.log" '^SLOTS devin 1/2$'
+check "overlay presence line emitted" has "$ROOT/out.log" '^SLOTS overlay agent-team.local.toml$'
+check "slots.json reflects overlaid limit" slot_eq usage.devin.limit 2
+
+# --- 13h. local を外すと共有の上限に戻り、overlay の行も出なくなる ---
+rm "$ROOT/repo/agent-team.local.toml"
+run_cycles 1
+check "removing local restores shared limit" has "$ROOT/out.log" '^SLOTS devin 1/6$'
+check "no overlay line without local" nhas "$ROOT/out.log" '^SLOTS overlay '
+
+# --- 13i. local を重ねた結果が検証を通らない → SLOTS error（共有の規則で止まる） ---
+cat > "$ROOT/repo/agent-team.local.toml" <<'EOF'
+[developers.hatai.slots]
+devin = 0
+EOF
+run_cycles 1
+check "invalid local emits SLOTS error" has "$ROOT/out.log" '^SLOTS error '
+check "no usage emitted on invalid local" nhas "$ROOT/out.log" '^SLOTS (over )?[a-z]+ [0-9]+/[0-9]+$'
+check "slots.json status error on invalid local" slot_eq status error
+rm "$ROOT/repo/agent-team.local.toml"
+run_cycles 1
+check "slots.json recovers after local removed" slot_eq status ok
+
 # --- 14. 見張りは GitHub に書き込まない（agent-gh は読み取りだけ、素の gh も呼ばない） ---
 if grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/events)" "$MOCK/gh-calls.log" | grep -q .; then
   printf 'FAIL %s\n' "no non-read agent-gh calls"

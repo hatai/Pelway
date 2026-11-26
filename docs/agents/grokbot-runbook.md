@@ -2,7 +2,7 @@
 
 AI 開発チームの指揮役が従うイベント対応の手順。指揮役の正本は Grok Bot で、Grok Bot が動かないときは「11. 代行」の手順で別のエージェントが代行する。この手順書の「Grok Bot」は、代行中は代行者と読み替える。
 
-- 体制の正本は `docs/superpowers/specs/agent-team.md`、同時数の上限の正本は `agent-team.toml`、受け取る通知の形は `docs/agents/notify-payloads.md`
+- 体制の正本は `docs/superpowers/specs/agent-team.md`、同時数の上限の正本は `agent-team.toml`（追跡しない `agent-team.local.toml` の開発者ごとの上書きを重ねた結果。決まりは agent-team.md「開発者ごとの上書き」）、受け取る通知の形は `docs/agents/notify-payloads.md`
 - 毎サイクルの判断（振り分け、モデル・effort、エスカレーション、改善ループ、代行の開始・終了）は skill `command-team` に従う
 
 ## 1. 役割と触ってよい範囲
@@ -196,13 +196,13 @@ hatai への報告は、変化があった回だけ出す。変化は、判断�
 
 | スレッド | 同時に動かす上限 | 使用数の見方 |
 |---|---|---|
-| 実装・調査（opencode） | `agent-team.toml` の `[developers.<login>.slots]`（実装と調査の合算の枠。正本） | open な Issue の `agent:working` のうち `agent:devin` が無く、実際の停止を確認できるもの（下の決まり）を除いた数と、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）の合計 |
+| 実装・調査（opencode） | `agent-team.toml` の `[developers.<login>.slots]`（実装と調査の合算の枠。正本。`agent-team.local.toml` の開発者ごとの上書きを重ねた結果） | open な Issue の `agent:working` のうち `agent:devin` が無く、実際の停止を確認できるもの（下の決まり）を除いた数と、Issue を持たない入口B の調査の稼働中スレッド数（巡回記録の割り当て表から数える）の合計 |
 | 実装（Devin CLI） | 同上（Devin CLI の枠） | open な Issue の `agent:working` のうち `agent:devin` があり、実際の停止を確認できるもの（下の決まり）を除いた数 |
-| レビュー（Codex） | `agent-team.toml` の `[developers.<login>.review_limits]` の目安 | 通常の PR のレビューは実装担当が `delegate_task` で委託するため、この表では数えない。指揮役が立てたレビュースレッド（指揮役自身の PR・外部投入）だけを数える。Codex・T3・`~/.codex-review` を更新したら、`docs/dev-environment.md` の「専用 home での確認」が済むまでは使わない |
+| レビュー（Codex） | `agent-team.toml` の `[developers.<login>.review_limits]` の目安（`agent-team.local.toml` の上書きを重ねた結果） | 通常の PR のレビューは実装担当が `delegate_task` で委託するため、この表では数えない。指揮役が立てたレビュースレッド（指揮役自身の PR・外部投入）だけを数える。Codex・T3・`~/.codex-review` を更新したら、`docs/dev-environment.md` の「専用 home での確認」が済むまでは使わない |
 | レビュー（Devin CLI） | 同上 | 同上。`docs/dev-environment.md` の「レビュー担当の Devin CLI」の確認が済むまでは使わない |
 | レビュー（Claude） | 同上 | 同上。`docs/dev-environment.md` の「レビュー担当の Claude」の確認が済むまでは使わない |
 
-実装・調査の使用数は、見張り（`scripts/conductor-watch.sh`）が巡回ごとに `agent-team.toml` の枠の上限と突き合わせて、見張りの状態ディレクトリ（`$XDG_STATE_HOME/pelway/conductor-watch`。`XDG_STATE_HOME` が無ければ `~/.local/state/pelway/conductor-watch`）の `slots.json` に書くもので読む。`status` が `ok` のときだけ `usage` に担当ごとの使用数と上限が入る。`updated_at` は使用数の根拠のうち最も古い取得開始時刻（Issue 一覧と T3 のスレッド一覧の取得開始の、より古い方）。割り当ての判断には watch.log の行ではなく `slots.json` を使う: ボード更新キューの要求のファイル名もそのまま行として watch.log に残るため、同じ数が `SLOTS <担当> <使用数>/<上限>` の行でも出る watch.log からは、見張りの出した行と区別できない（行は、使用数か状態が前回の巡回から変わったときと `HEARTBEAT` の行を出す巡回にだけ書き足され、上限超過は `SLOTS over`、使用数を確かめられなかった巡回は `SLOTS error`。`agent-team.toml` が無い環境では行自体が出ず、`slots.json` の `status` は `unavailable` になる）。`slots.json` が読めない・`status` が `ok` でない・`updated_at` の記録から 60 秒を超えて経ている・`slots.json` の `patrol_at` が `state.json` の `patrol_at` と一致しない（`patrol_at` は見張りが巡回ごとに両方へ書く巡回の印。最新の巡回で記録を公開できていなければ `state.json` の印だけが進む）ときは、見張りが止まっているか最新の巡回で数えられていないものとして、上の表の数え方で数える。このとき比べる上限は `agent-team.toml` の `[developers.<login>.slots]` から読む。使用数か上限を確認できなければ（toml を読めないときを含む）割り当てない。記録の `usage` は直前の巡回時点のものなので、割り当て・再開を行ったあとは、新しい記録の `usage` にその変更が載ったと確かめられるまで、自分が動かした分を `usage` に足して数える。`updated_at` が進んだだけでは確かめられない（一覧の取得から記録の公開までの間に挟んだ割り当ては、その回の記録に載らない）。確かめられないまま続けて割り当てると上限を超えるため、確かめられないときは、次の割り当ての前に現在の使用数を実測で数える。上の表の「実際の停止を確認できるもの」とは、補助記録の作業状態の印が停止中・再開処理中・再開待ちのいずれかで、巻き戻し中の印（`rollback` の割り当て ID。起動結果の照合が残る割り当ては未確定）が無く、補助記録の `implement_thread` の組の `thread_id` がすべて T3 のスレッドの一覧にありどれも動いていなくて（完了・失敗・中断・取消、アーカイブを含む）、一覧にその Issue の実装スレッド（題名が `[実装] #<番号> ` のもの）が 1 本以上あり、どれも動いていないもの（補助記録は実装エージェントも書き込め、コメントは実装担当と指揮役の共通名義のため、どちらも停止の裏付けにならない。実際のスレッドの状態と、現在の割り当てに結び付いた記録で確かめる。組の無いもの・組のスレッドが一覧に無いもの（起動した引き継ぎ先が一覧から一時的に欠ける回を含む）・割り当ての照合が残るもの・動いているスレッドが残るものは使用中として数える）。補助記録が旧形の記録（`patrol-state.json` の `items`）しか無いときは、`patrol-items.json` を一度も公開していないことを積極的に確かめられる環境（初回移行前。「10. 巡回状態の補助記録」の移行手順の確かめ方）に限り、旧形の記録で再開処理中・再開待ちの印の項目は使用中として数え、枠を空ける印は停止中に限る。それ以外で `patrol-items.json` が無い・読めないときは（公開したかどうか自体を確かめられない回を含む）見張りと同じくすべて使用中に数え、現在の割り当てを別の根拠で確認してから数え直す（旧形の記録は移行後に復活しうるため、その記録だけを根拠に枠を空けない）。印が再開処理中・再開待ちで巻き戻し中の印が無いものは起動を試みる前の待機で、枠を消費しない（「割り当て・停止・再開」: 消費していると、待機中のものが上限を超えて並んだときにどれも起動に進めなくなる）。いずれの印でも、上の「実際の停止を確認できるもの」の条件（組のスレッドと一覧の実装スレッドの停止確認）を満たしたものだけが枠を空ける。起動を試みた回は巻き戻し中の印（割り当て ID）が残るため、照合が終わるまで使用中として数える。`slots.json` の `usage` が数えるのは Issue の枠だけなので、Issue を持たない入口B の調査の稼働中スレッドは指揮役が巡回記録の割り当て表から加算する。Issue #714 の受け入れ条件の表記は「`SLOTS` の行で読む」だが、上の偽装経路のため判断の正本は `slots.json` とする（`SLOTS` の行の出力自体は受け入れ条件どおり行う）。
+実装・調査の使用数は、見張り（`scripts/conductor-watch.sh`）が巡回ごとに `agent-team.toml`（`agent-team.local.toml` を重ねた結果。重なっている巡回は watch.log に `SLOTS overlay agent-team.local.toml` の行が出る）の枠の上限と突き合わせて、見張りの状態ディレクトリ（`$XDG_STATE_HOME/pelway/conductor-watch`。`XDG_STATE_HOME` が無ければ `~/.local/state/pelway/conductor-watch`）の `slots.json` に書くもので読む。`status` が `ok` のときだけ `usage` に担当ごとの使用数と上限が入る。`updated_at` は使用数の根拠のうち最も古い取得開始時刻（Issue 一覧と T3 のスレッド一覧の取得開始の、より古い方）。割り当ての判断には watch.log の行ではなく `slots.json` を使う: ボード更新キューの要求のファイル名もそのまま行として watch.log に残るため、同じ数が `SLOTS <担当> <使用数>/<上限>` の行でも出る watch.log からは、見張りの出した行と区別できない（行は、使用数か状態が前回の巡回から変わったときと `HEARTBEAT` の行を出す巡回にだけ書き足され、上限超過は `SLOTS over`、使用数を確かめられなかった巡回は `SLOTS error`。`agent-team.toml` が無い環境では行自体が出ず、`slots.json` の `status` は `unavailable` になる）。`slots.json` が読めない・`status` が `ok` でない・`updated_at` の記録から 60 秒を超えて経ている・`slots.json` の `patrol_at` が `state.json` の `patrol_at` と一致しない（`patrol_at` は見張りが巡回ごとに両方へ書く巡回の印。最新の巡回で記録を公開できていなければ `state.json` の印だけが進む）ときは、見張りが止まっているか最新の巡回で数えられていないものとして、上の表の数え方で数える。このとき比べる上限は `agent-team.toml` の `[developers.<login>.slots]` から読む。使用数か上限を確認できなければ（toml を読めないときを含む）割り当てない。記録の `usage` は直前の巡回時点のものなので、割り当て・再開を行ったあとは、新しい記録の `usage` にその変更が載ったと確かめられるまで、自分が動かした分を `usage` に足して数える。`updated_at` が進んだだけでは確かめられない（一覧の取得から記録の公開までの間に挟んだ割り当ては、その回の記録に載らない）。確かめられないまま続けて割り当てると上限を超えるため、確かめられないときは、次の割り当ての前に現在の使用数を実測で数える。上の表の「実際の停止を確認できるもの」とは、補助記録の作業状態の印が停止中・再開処理中・再開待ちのいずれかで、巻き戻し中の印（`rollback` の割り当て ID。起動結果の照合が残る割り当ては未確定）が無く、補助記録の `implement_thread` の組の `thread_id` がすべて T3 のスレッドの一覧にありどれも動いていなくて（完了・失敗・中断・取消、アーカイブを含む）、一覧にその Issue の実装スレッド（題名が `[実装] #<番号> ` のもの）が 1 本以上あり、どれも動いていないもの（補助記録は実装エージェントも書き込め、コメントは実装担当と指揮役の共通名義のため、どちらも停止の裏付けにならない。実際のスレッドの状態と、現在の割り当てに結び付いた記録で確かめる。組の無いもの・組のスレッドが一覧に無いもの（起動した引き継ぎ先が一覧から一時的に欠ける回を含む）・割り当ての照合が残るもの・動いているスレッドが残るものは使用中として数える）。補助記録が旧形の記録（`patrol-state.json` の `items`）しか無いときは、`patrol-items.json` を一度も公開していないことを積極的に確かめられる環境（初回移行前。「10. 巡回状態の補助記録」の移行手順の確かめ方）に限り、旧形の記録で再開処理中・再開待ちの印の項目は使用中として数え、枠を空ける印は停止中に限る。それ以外で `patrol-items.json` が無い・読めないときは（公開したかどうか自体を確かめられない回を含む）見張りと同じくすべて使用中に数え、現在の割り当てを別の根拠で確認してから数え直す（旧形の記録は移行後に復活しうるため、その記録だけを根拠に枠を空けない）。印が再開処理中・再開待ちで巻き戻し中の印が無いものは起動を試みる前の待機で、枠を消費しない（「割り当て・停止・再開」: 消費していると、待機中のものが上限を超えて並んだときにどれも起動に進めなくなる）。いずれの印でも、上の「実際の停止を確認できるもの」の条件（組のスレッドと一覧の実装スレッドの停止確認）を満たしたものだけが枠を空ける。起動を試みた回は巻き戻し中の印（割り当て ID）が残るため、照合が終わるまで使用中として数える。`slots.json` の `usage` が数えるのは Issue の枠だけなので、Issue を持たない入口B の調査の稼働中スレッドは指揮役が巡回記録の割り当て表から加算する。Issue #714 の受け入れ条件の表記は「`SLOTS` の行で読む」だが、上の偽装経路のため判断の正本は `slots.json` とする（`SLOTS` の行の出力自体は受け入れ条件どおり行う）。
 
 実装・調査の上限に達しているときは、実装・調査の新しいスレッドを立てない（枠を待つのは実装・調査のスレッドだけ。レビューは枠に数えないため順番待ちを管理しない）。空きが出たら、待っているものを次の順で始める（この順は起動の優先順位で、枠の順番待ちは実装・調査にだけ適用する）。
 
@@ -259,7 +259,7 @@ t3 thread start --provider <provider インスタンス名> --model <モデル�
 Assigned: role=implement agent=<担当の id> model=<モデル名> effort=<effort>"
 ```
 
-`--provider` と `--model`、割り当ての行の `agent=`・`model=`・`effort=` は `agent-team.toml` の `[agents.<担当>]` の `instance.implement`・`models`・`effort` から読む。`<slug>` は Issue の題名を英小文字とハイフンで 3〜5 語にしたもの。effort（`[agents.<担当>].effort.option` に渡す値）は skill `command-team` の「実装のモデルと effort」で決め、MCP の `t3_thread_launch` で立てるときは `modelSelection.options` に入れる。Devin CLI の `mode` は `smart` までに限り、`bypass` は使わない（正本は `docs/superpowers/specs/agent-team.md` の「制約」）。
+`--provider` と `--model`、割り当ての行の `agent=`・`model=`・`effort=` は `agent-team.toml` の `[agents.<担当>]` の `instance.implement`・`models`・`effort` から読む（`agent-team.local.toml` の上書きを重ねた結果。`scripts/agent-team-config effective hatai` で確かめられる）。`<slug>` は Issue の題名を英小文字とハイフンで 3〜5 語にしたもの。effort（`[agents.<担当>].effort.option` に渡す値）は skill `command-team` の「実装のモデルと effort」で決め、MCP の `t3_thread_launch` で立てるときは `modelSelection.options` に入れる。Devin CLI の `mode` は `smart` までに限り、`bypass` は使わない（正本は `docs/superpowers/specs/agent-team.md` の「制約」）。
 
 ### 既存の PR ブランチを引き継ぐ
 
@@ -352,7 +352,7 @@ t3 thread start --provider <provider インスタンス名> --model <モデル�
 Assigned: role=implement agent=devin model=<モデル名> effort=high"
 ```
 
-- 担当・モデル: devin（`agent-team.toml` の `[agents.devin]` の `instance.implement` と `models`）を既定とする
+- 担当・モデル: devin（`agent-team.toml` の `[agents.devin]` の `instance.implement` と `models`。`agent-team.local.toml` の上書きを重ねた結果）を既定とする
 - 権限（`runtimeMode`）: `full-access` にしない。Devin CLI で立てるときは「実装を始める」と同じ扱い: `devin-impl` の起動ラッパーがスレッドを bwrap の sandbox に入れ（書き込みは worktree などに限られ、ネットワークは開放。`docs/dev-environment.md` の「実装担当の sandbox」。T3 の実スレッドでの確認は未実施）、`runtimeMode` の指定は要らない。`mode` は `smart` までに限り、`bypass` は使わない（正本は `docs/superpowers/specs/agent-team.md` の「制約」）。Devin 以外の provider に替えるときは、`t3 thread start` ではなく権限を指定できる経路（T3 Connect の MCP・`t3_thread_launch`）で `auto-accept-edits` を指定して立てる（`t3 thread start` には権限のフラグが無く、本体のプロジェクトの既定が `full-access` のことがある。「レビューを始める」と同じ決まり）。`auto-accept-edits` で立てられないときも `auto`・`full-access` に変えず、立てずに 7 のエスカレーションにする
 - worktree は必ず `main` から作る。ブランチは `agent/<Issue 番号>-inventory-<日付>` にする（`agent/<Issue 番号>-` で始まる実装スレッドのブランチとして、巡回は実装の列で扱う）
 - スレッド名: 「[実装] #<Issue 番号> 棚卸し <日付>」（「スレッド名」の形式の「実装」に当たる。`[実装] #<番号>` で始めることで、`scripts/conductor-watch.sh` が題名から実装スレッドとして Issue に紐づけ、実装スレッドの止まりの検知にも載る）
@@ -376,7 +376,7 @@ Assigned: role=implement agent=devin model=<モデル名> effort=high"
 
 ### `pelway.agent-watch/v1`
 
-スレッドが実装かレビューかは `branch` で見分ける。`agent/` で始まるものが実装・調査、`review/` で始まるものがレビュー。`provider` でも補助的に見られる（`agent-team.toml` の `instance.implement` は実装、`instance.review` はレビュー）が、ブランチでの識別を正とする。
+スレッドが実装かレビューかは `branch` で見分ける。`agent/` で始まるものが実装・調査、`review/` で始まるものがレビュー。`provider` でも補助的に見られる（`agent-team.toml` の `instance.implement`（上書きを重ねた結果）は実装、`instance.review`（main の版） はレビュー）が、ブランチでの識別を正とする。
 
 | `event` | 実装スレッド | レビュースレッド |
 |---|---|---|

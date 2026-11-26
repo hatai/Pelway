@@ -1,0 +1,12 @@
+{
+  "actions": [
+    {
+      "name": "worktree-setup",
+      "description": "worktree に agent-team.toml を揃え、agent-team.local.toml を本体の checkout から持ち越す（Issue #804）",
+      "runOnWorktreeCreate": true,
+      "async": false,
+      "type": "script",
+      "script": "scripts/worktree-setup"
+    }
+  ]
+}

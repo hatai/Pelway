@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# worktree 作成時の準備（Issue #804）。T3 の runOnWorktreeCreate（t3.json）と
+# conductor-rebuild、Claude Code・Codex の worktreeinclude 機構から呼ぶ。
+#
+# 本体の checkout から worktree に、許可リストの設定ファイルだけを写す。
+# 基点のコミットが古くて追跡ファイルが worktree に無い場合の補填と、追跡しない
+# 開発者ごとの上書き（agent-team.local.toml）の持ち越しを、1 つの手順で行う。
+#
+# 写すもの（この 2 つだけ。増やすときはこのリストに追加する）:
+#   agent-team.toml        worktree に無いとき本体から写す（無いと conductor が枠を読めない）。
+#                          本体にも無ければ失敗する
+#   agent-team.local.toml  本体にあって worktree に無いとき写す。本体にも無ければ何もしない
+#
+# 使い方:
+#   scripts/worktree-setup [--from <本体 checkout>] [--dest <worktree>]
+#   --from 既定: $T3CODE_PROJECT_ROOT（T3 がアクションに渡す本体の checkout）。
+#                無ければこのスクリプトを含む checkout の最上位
+#   --dest 既定: $T3CODE_WORKTREE_PATH（T3 がアクションに渡す worktree）。
+#                無ければ現在のディレクトリ
+#
+# 決まり:
+#   - worktree 側に同名のもの（ファイル・symlink・ディレクトリ問わず）があれば写さない
+#   - 本体側が symlink か通常ファイルでないものは写さない。agent-team.toml については失敗する
+#   - 写すのはリストの 2 つの basename だけで、worktree の外側には書かない
+#   - 写した結果とスキップの理由は標準出力に、失敗の理由は標準エラーに出す（値は出さない）
+# 終了コード: 0 = 成功、1 = 必要なものが写せない・場所が不正、2 = 引数の誤り
+set -euo pipefail
+
+usage_text="usage: $0 [--from <本体 checkout>] [--dest <worktree>]"
+
+die() { echo "worktree-setup: $*" >&2; exit 1; }
+usage() { echo "$usage_text" >&2; exit 2; }
+
+case "${1:-}" in
+  -h|--help)
+    cat <<EOF
+$usage_text
+
+本体の checkout（--from）から worktree（--dest）へ、許可リストの設定ファイルを写す。
+worktree 側に同名のものがあれば上書きしない。
+EOF
+    exit 0
+    ;;
+esac
+
+src="" dst=""
+while (($#)); do
+  case "$1" in
+    --from) (($# >= 2)) || usage; src="$2"; shift 2 ;;
+    --dest) (($# >= 2)) || usage; dst="$2"; shift 2 ;;
+    *) usage ;;
+  esac
+done
+
+[[ -n "$src" ]] || src="${T3CODE_PROJECT_ROOT:-}"
+[[ -n "$dst" ]] || dst="${T3CODE_WORKTREE_PATH:-$PWD}"
+if [[ -z "$src" ]]; then
+  # T3 の外（手動・worktreeinclude 経由）では、このスクリプトを含む checkout を本体とみなす
+  src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
+
+[[ -d "$src" ]] || die "--from の checkout が無い: $src"
+[[ -d "$dst" ]] || die "--dest の worktree が無い: $dst"
+# 書き先を物理パスに固定する（dst 自身が symlink でも、書くのは辿った先の中だけ）
+dst="$(cd "$dst" && pwd -P)"
+
+copied=0
+for name in agent-team.toml agent-team.local.toml; do
+  to="$dst/$name"
+  from="$src/$name"
+  if [[ -e "$to" || -L "$to" ]]; then
+    echo "worktree-setup: skip $name（worktree 側に既にある）"
+    continue
+  fi
+  if [[ ! -e "$from" && ! -L "$from" ]]; then
+    if [[ "$name" == agent-team.toml ]]; then
+      die "本体の checkout に $name が無い（worktree にも無いため conductor が枠を読めない）"
+    fi
+    echo "worktree-setup: skip $name（本体にも無い任意ファイル）"
+    continue
+  fi
+  if [[ -L "$from" || ! -f "$from" ]]; then
+    if [[ "$name" == agent-team.toml ]]; then
+      die "本体の $name が通常ファイルでない（symlink やディレクトリは写さない）"
+    fi
+    echo "worktree-setup: skip $name（本体側が通常ファイルでない）"
+    continue
+  fi
+  cp -- "$from" "$to"
+  copied=$((copied + 1))
+  echo "worktree-setup: copied $name"
+done
+echo "worktree-setup: ok（写した $copied 件）"
