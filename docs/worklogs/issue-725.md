@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「Request changes」の 1 に「既存の停止条件を直す変更では、回数だけの条件と中身による条件を分けて確認する」を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 3）
+
+対象 head: 3f85fa3a042efaf6772bad2ac720674af45c5173
+
+1. 詰まった箇所: 手順 9（修正依頼）: `.devin/config.json` が sandbox の read-only bind mount で、`git merge` と checkout が EROFS で失敗した。`git merge-tree`・一時 index・`commit-tree` で merge commit を作り、worktree は `.devin/config.json` 以外を checkout してそろえた。同ファイルは実行中 sandbox の mount 内容が main の新しい 1 行を含まないままなので、コミットに含めないよう index に skip-worktree を置いた。
+2. 曖昧だった文: 「main の取り込みは merge で行い、各 hunk を解消する前に、両側の変更の意図を一次情報（コミット・PR・Issue）まで遡って確かめる」（`.agents/skills/implement-issue/SKILL.md`「修正依頼」）
+3. 仮定と解釈: `command-team` の衝突では main（PR #829）の「例外が認められる前の上限超過の差分を push せずに止まる」手順を採り、この PR の「admin マージの対象」の表現と round 4 以降のセキュリティ停止条件を残す。`implement-issue` の衝突でも main の pr-size の表と手順を採りつつ、round 4 以降のセキュリティ停止の行を残す。どちらも両立する変更と解釈し、片方を落とす解消はしなかった。Approve に付いた `[文書のずれ]` の nit は、手順 9「Approve のとき」のとおり今回の head で直す。
+4. 足りなかった情報・検証手段: read-only mount のため、worktree の `.devin/config.json` の実体を merge commit の木と同じ内容にできなかった。ただしそのファイルはこの PR の main との差分に含まれず、main 側の内容は merge commit の木と `scripts/agent-sandbox/devin-config.json` で確認した。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「修正依頼」に「`.devin/config.json` が read-only で checkout できないときは、merge commit の木で内容を確かめ、そのファイルを除いて worktree をそろえる」を足す。
+
+使ったスキル: implement-issue、write-pull-request
