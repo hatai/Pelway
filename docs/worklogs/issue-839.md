@@ -27,3 +27,17 @@ Codex のレビュー（run 7195593112）は利用上限に当たって失敗し
 5. 改善案: skill `implement-issue` の手順 9 の「`failed` の扱い」に、「`error:` が利用上限（usage limit）のときは、`checks timeout` と同じく同じラウンドに数えず、上限が戻る時刻の後に再委託する」と書き足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 3）
+
+対象 head: 62dce996b3c432ec2a94ff73492d35f80eba2f23
+
+round 2 のレビューは判定が割れた（codex: request-changes で must-fix 4 件、claude: approve）。修正側の must-fix 4 件と、`[文書のずれ]` の nit（codex 1 件、claude 1 件）を直した。追加行が 901 行になり上限の 800 を超えたので、hatai に例外を認めてもらった（`pr-size-exception` のラベルと、Issue のコメント 7196570238）。
+
+1. 詰まった箇所: `crates/pelway-agent-watch/src/main.rs` の `maybe_wake`: 起こし待ちの印の値は、受信箱の末尾ではなく、起こすに足る最後の行の位置にする必要があった。知らせは受信箱の末尾に、並びの順に 1 行ずつ書いてあるので、`classify_notices` が最後の起こすに足る知らせの位置（`NoticeBatch::Worthy(last)`）を返し、末尾からの差で行数を出した。
+2. 曖昧だった文: 「実行回数の有無を T3 の読み取りから起こしの判定まで保持してください。既存のペイロードとの互換性も踏まえ」（codex の round 2 のレビューの must-fix 1）。payload の `round` の型は変えず、起こしの判定の入口で 0 を「round が無い」とみなすことにした。T3 は承認待ちのあるスレッドに 1 以上の実行回数を返すので、0 は欠落か読めない値のときだけ。
+3. 仮定と解釈: 起こすに足る新しい知らせを起こせなかったときは、最短間隔の内に限らず、`not-yet-read`・補助記録が読めない・既読が範囲外のときも起こし待ちの印に入れる（claude の nit 1 にも当たる）。`invalid-thread-id` のときは、宛先が使えないので入れない。送れなかったとき（`WAKE failed`）は、これまでどおり印を消す。最短間隔は送り終えた時刻から数え、秒の切り捨ての分を見込んで、ちょうど設定の秒数の差もまだ間隔の内とした。
+4. 足りなかった情報・検証手段: 承認待ちの round を起こしの成否が決まる前に記録する件（claude の round 2 の nit 2。印の無い nit）は直していない。T3 の `runCount` が承認待ちのたびに変わらない値かどうかは、実機では確かめていない。
+5. 改善案: skill `implement-issue` の手順 6 の「上限を超えたら」に、「修正 round で超える見込みが立った時点で、実装の前に指揮役か hatai に例外を相談してよい」と書き足す。
+
+使ったスキル: implement-issue
