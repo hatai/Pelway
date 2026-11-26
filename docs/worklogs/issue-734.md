@@ -35,3 +35,15 @@
 5. 改善案: `client/README.md` の「道具」に「依存の postinstall は走らせない（`bunfig.toml` の `ignoreScripts`）。postinstall が要る依存を足すときは、その理由と照合の仕方を ADR 0014 に書いてから許す」を足す（#745 で ADR に書く）。
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（PR-1 round 4）
+
+対象 head: a06ddced9e4885a727974aedcbcf7398a8b7bad9
+
+1. 詰まった箇所: `docs/dev-environment.md`: Claude の round 3 の `[文書のずれ]` の nit。ツールの表に Node と bun が無く、pre-commit の列挙に `client_fmt` が無く、CI の表の `verify-static` の中身に `client:verify` が無かった。3 か所に足した。
+2. 曖昧だった文: 「`verify-static`（hk / fnox / pitchfork / cargo-deny / shellcheck）」（`docs/dev-environment.md` の CI の表）。`mise.toml` の `verify-static` を変えたとき、どの文書が中身を列挙しているかを探す手段が無く、レビューで見つかった。
+3. 仮定と解釈: `[文書のずれ]` の印の nit だけを直した。印の無い nit（`canary-bun.mjs` が `client/node_modules` の外の同名の包みを解決しうること、`"trustedDependencies": []` も置くこと）は直していない。Codex の round 3 は利用の上限で失敗し、hatai の判断で Claude の結果だけで進めた。
+4. 足りなかった情報・検証手段: `mise run verify` の 1 回目は `shellcheck` が `Terminated` で落ちた（指摘は 0 件）。単独で回すと 0 findings、2 回目の `mise run verify` は exit 0。
+5. 改善案: `mise.toml` の `[tasks.verify-static]` の上のコメントに「中身を変えたら `docs/dev-environment.md` の CI の表も直す」を足す。
+
+使ったスキル: `.agents/skills/implement-issue`
