@@ -26,6 +26,7 @@ START_WANT="あなたは新しい指揮役。skill command-team と docs/agents/
 # NEW_NOMODE=1 のとき、新しい指揮役の thread show は runtimeMode を返さない。
 # NEW_WT_AFTER=<n> で新しい指揮役の worktreePath を n 回目の thread show から返す（立てた直後の準備中の演出）。
 # NEW_SHOW_DELAY=<秒> で新しい指揮役の thread show の応答を遅らせる（期限までに終わらない読み取りの演出）。
+# NEW_SHOW_DELAY_FROM=<n> で遅らせるのを n 回目以降の呼び出しに限る（既定 1＝全部）。
 # NEW_CORRUPT=1 で新しい指揮役の thread show が終了コード 0 かつ JSON でない出力（"database is locked" を含む）を返す。
 # T3_LOCK_TIMES=<n>（全部の呼び出し）・NEW_LOCK_TIMES=<n>（新しい指揮役の呼び出しだけ）で
 # 先頭 n 回の thread show を "database is locked"（標準エラー・終了コード 1）にする。
@@ -39,7 +40,7 @@ case "$1 $2" in
     kn=0; if [[ "$3" == *new* ]]; then
       kn=$(( $(cat "$LOG.show-new" 2>/dev/null || echo 0) + 1 )); echo "$kn" > "$LOG.show-new"
     fi
-    [[ "$3" == *new* && -n "${NEW_SHOW_DELAY:-}" ]] && sleep "$NEW_SHOW_DELAY"
+    [[ "$3" == *new* && -n "${NEW_SHOW_DELAY:-}" && "$kn" -ge "${NEW_SHOW_DELAY_FROM:-1}" ]] && sleep "$NEW_SHOW_DELAY"
     if [[ "$3" == *new* && -n "${NEW_CORRUPT:-}" ]]; then
       echo 'not-json database is locked'; exit 0
     fi
@@ -158,7 +159,7 @@ check "--to equal to --from makes no t3 calls" [ ! -s "$LOG" ]
 # worktree のパスが上限まで空のままのときは、旧指揮役にも新指揮役にも何も送らず、
 # 宛先の登録も変えずに止まる（試験では上限・間隔を小さく上書きする）
 printf 'mcp:launch:kept\n' > "$FILE"
-NEW_WT="" PELWAY_REBUILD_WT_WAIT=1 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
+NEW_WT="" PELWAY_REBUILD_WT_WAIT=0.6 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
 check "no worktree until the limit: exits non-zero" [ "$rc" -ne 0 ]
 check "no worktree until the limit: rereads the new conductor" [ "$(count "thread show $NEW --json")" -gt 1 ]
 check "no worktree until the limit: nothing sent to either conductor" no_line "thread send"
@@ -191,7 +192,7 @@ check "worktree arrives while waiting: logs the last-read worktree" \
 # 読み直しの間隔が残り時間を超えるときは、期限を過ぎる読み取りを始めずに止まる
 printf 'mcp:launch:kept\n' > "$FILE"
 NEW_WT="/home/u/.t3/worktrees/Pelway/too-late" NEW_WT_AFTER=2 \
-  PELWAY_REBUILD_WT_WAIT=1 PELWAY_REBUILD_WT_INTERVAL=1.5 run "" --from "$OLD" --to "$NEW"; rc=$?
+  PELWAY_REBUILD_WT_WAIT=0.6 PELWAY_REBUILD_WT_INTERVAL=1.5 run "" --from "$OLD" --to "$NEW"; rc=$?
 check "interval past the limit: exits non-zero" [ "$rc" -ne 0 ]
 check "interval past the limit: does not read past the deadline" \
   [ "$(count "thread show $NEW --json")" -eq 1 ]
@@ -201,25 +202,42 @@ check "interval past the limit: registration unchanged" [ "$(cat "$FILE")" = "mc
 check "interval past the limit: stderr reports the timeout" \
   grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
 
-# 読み取りが期限までに終わらない（応答が期限を過ぎて返る）ときは、その結果を受け入れずに
-# 止まる（整数秒では期限と同じに見える境界。偽の t3 が応答を 1.1 秒遅らせる）
+# 期限までに終わらない読み取りは残り時間で打ち切られ、時間切れを報告して戻る
+# （偽の t3 が応答を 4 秒遅らせる。上限 0.6 秒で打ち切られ、3 秒以内に戻ることを確かめる）
 printf 'mcp:launch:kept\n' > "$FILE"
-NEW_WT="/home/u/.t3/worktrees/Pelway/just-past" NEW_WT_AFTER=1 NEW_SHOW_DELAY=1.1 \
-  PELWAY_REBUILD_WT_WAIT=1 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
-check "read finishes past the limit: exits non-zero" [ "$rc" -ne 0 ]
-check "read finishes past the limit: the late read is rejected" \
+start=$SECONDS
+NEW_WT="/home/u/.t3/worktrees/Pelway/hung" NEW_WT_AFTER=1 NEW_SHOW_DELAY=4 \
+  PELWAY_REBUILD_WT_WAIT=0.6 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "read killed at the limit: exits non-zero" [ "$rc" -ne 0 ]
+check "read killed at the limit: returns at the deadline" [ "$(( SECONDS - start ))" -lt 3 ]
+check "read killed at the limit: reads once" \
   [ "$(count "thread show $NEW --json")" -eq 1 ]
-check "read finishes past the limit: nothing sent to either conductor" no_line "thread send"
-check "read finishes past the limit: no thread start" no_line "thread start"
-check "read finishes past the limit: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
-check "read finishes past the limit: stderr reports the timeout" \
+check "read killed at the limit: nothing sent to either conductor" no_line "thread send"
+check "read killed at the limit: no thread start" no_line "thread start"
+check "read killed at the limit: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+check "read killed at the limit: stderr reports the timeout" \
+  grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
+
+# やり直しの読み取りも残り時間で打ち切る（1 回目は lock で即失敗し、やり直しの 2 回目が
+# 4 秒遅延で期限にかかる）
+printf 'mcp:launch:kept\n' > "$FILE"
+start=$SECONDS
+NEW_LOCK_TIMES=1 NEW_SHOW_DELAY=4 NEW_SHOW_DELAY_FROM=2 PELWAY_REBUILD_SHOW_RETRY_SLEEP=0.1 \
+  PELWAY_REBUILD_WT_WAIT=0.6 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "retry read killed at the limit: exits non-zero" [ "$rc" -ne 0 ]
+check "retry read killed at the limit: returns at the deadline" [ "$(( SECONDS - start ))" -lt 3 ]
+check "retry read killed at the limit: retried once" \
+  [ "$(count "thread show $NEW --json")" -eq 2 ]
+check "retry read killed at the limit: nothing sent to either conductor" no_line "thread send"
+check "retry read killed at the limit: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+check "retry read killed at the limit: stderr reports the timeout" \
   grep -qE "still has no worktree after waiting [0-9]+s" "$ROOT/err"
 
 # 読み取りの中の lock のやり直しも残り時間に収める。やり直しの待ちを残りで切り詰め、
 # 期限を超える読み直しは始めない
 printf 'mcp:launch:kept\n' > "$FILE"
 NEW_LOCK_TIMES=1 PELWAY_REBUILD_SHOW_RETRY_SLEEP=1.2 \
-  PELWAY_REBUILD_WT_WAIT=1 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
+  PELWAY_REBUILD_WT_WAIT=0.6 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
 check "lock retry past the limit: exits non-zero" [ "$rc" -ne 0 ]
 check "lock retry past the limit: does not retry past the deadline" \
   [ "$(count "thread show $NEW --json")" -eq 1 ]
@@ -232,7 +250,7 @@ check "lock retry past the limit: stderr reports the timeout" \
 loc="$(locale -a 2>/dev/null | grep -iEx 'fr_FR|de_DE|nl_NL|it_IT|fi_FI|da_DK|sv_SE|pl_PL|pt_BR|tr_TR|es_ES|ru_RU' | head -1)"
 if [[ -n "$loc" ]]; then
   printf 'mcp:launch:kept\n' > "$FILE"
-  LC_ALL="$loc" NEW_WT="" PELWAY_REBUILD_WT_WAIT=1 PELWAY_REBUILD_WT_INTERVAL=0.1 \
+  LC_ALL="$loc" NEW_WT="" PELWAY_REBUILD_WT_WAIT=0.6 PELWAY_REBUILD_WT_INTERVAL=0.1 \
     run "" --from "$OLD" --to "$NEW"; rc=$?
   check "comma-decimal locale ($loc): exits non-zero" [ "$rc" -ne 0 ]
   check "comma-decimal locale ($loc): nothing sent to either conductor" no_line "thread send"
@@ -283,6 +301,16 @@ check "corrupt output: does not retry the new conductor" \
   [ "$(count "thread show $NEW --json")" -eq 1 ]
 check "corrupt output: nothing sent to either conductor" no_line "thread send"
 check "corrupt output: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+
+# 起動環境に同名の変数 aborted があるときも、権限の確かめを飛ばさない（aborted はスクリプト内で
+# 初期化する。飛ばすと権限の合わないスレッドに引き継ぎの指示が届く）
+printf 'mcp:launch:kept\n' > "$FILE"
+aborted=1 NEW_MODE=full-access run "" --from "$OLD" --to "$NEW"; rc=$?
+check "ambient aborted: still rejects full-access" [ "$rc" -eq 3 ]
+check "ambient aborted: nothing sent to the old conductor" no_line "thread send --wait $OLD"
+check "ambient aborted: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+aborted=1 run "" --from "$OLD" --to "$NEW"; rc=$?
+check "ambient aborted: normal run still succeeds" [ "$rc" -eq 0 ]
 
 # worktree が無く、かつ権限も合わないときは、権限の失敗（exit 3）で止まる
 printf 'mcp:launch:kept\n' > "$FILE"
