@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「止まる条件」に「pr-size の止まりのコメントの行頭を `<!-- pr-size-stop -->` とする」を足し、再開表の照合を SHA と文面の一致ではなく目印で行えるようにする。
 
 使ったスキル: implement-issue, writing-for-agents, ja-text-communication, stop-ai-slop-jp
+
+## 実装者メモ（round 3）
+
+対象 head: 1a1055f480703293403d8e2b379e903affc1dd42
+
+1. 詰まった箇所: 手順 9: Approve の `[文書のずれ]` nit で、command-team の承認コメントの条件だけが `行頭` で、implement-issue とゲートの `本文先頭` にずれていることが残った。
+2. 曖昧だった文: 「行頭が `<!-- pr-size-exception -->` で始まるコメント」（`.agents/skills/command-team/SKILL.md`「マージ」）
+3. 仮定と解釈: `行頭` はコメント全体の本文先頭を指すと解釈し、ゲートの `startswith` と同じ意味になるよう `本文先頭` にそろえた。選ばなかった解釈: コメント中のどれかの行の先頭でも承認とみなす。
+4. 足りなかった情報・検証手段: 目印の一致を行単位と本文単位のどちらで書くかの用語の置き場が無く、今回は `scripts/agent-gh-pr-size-gate` の `startswith` を一次情報にした。確認は `bash scripts/tests/pr-size-stop-docs.test.sh` の文言の存在確認。
+5. 改善案: `GLOSSARY.md` に「本文先頭: 文字列全体の先頭。複数行の文書では 2 行目以降の行頭を含まない」を足し、承認コメントや状態行の一致条件で同じ語を使う。
+
+使ったスキル: implement-issue, writing-for-agents, ja-text-communication, stop-ai-slop-jp
