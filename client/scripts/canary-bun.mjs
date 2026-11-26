@@ -3,9 +3,9 @@
 // 置き換え前のままになる。代わりに、bun.lock の sha512 で照合して入った OS ごとの本体
 // `@oven/bun-<OS>` の実行ファイルを直接起動する。見つからなければ失敗する。
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 
 function target() {
   const arch = { x64: "x64", arm64: "aarch64" }[process.arch];
@@ -27,7 +27,15 @@ try {
 } catch {
   binary = undefined;
 }
-if (binary === undefined || !existsSync(binary)) {
+// client/node_modules の外（親のディレクトリ・NODE_PATH など）で見つかった本体は、bun.lock で照合していないので使わない。
+function insideClientModules(path) {
+  try {
+    return realpathSync(path).startsWith(realpathSync(join(import.meta.dirname, "..", "node_modules")) + sep);
+  } catch {
+    return false;
+  }
+}
+if (binary === undefined || !existsSync(binary) || !insideClientModules(binary)) {
   console.error(`canary-bun: ${name} の実行ファイルが見つからない。mise run client:bootstrap で入れ直す。`);
   process.exit(1);
 }
