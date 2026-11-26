@@ -10,7 +10,6 @@ trap 'rm -rf "$ROOT"' EXIT
 failures=()
 # 利用者の git 設定に左右されないよう、global / system の設定を読ませない。
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
-export XDG_STATE_HOME="$ROOT/state"
 BIN="$ROOT/bin"
 mkdir -p "$BIN"
 REAL_GIT="$(command -v git)"
@@ -64,6 +63,11 @@ work_git() { "$REAL_GIT" -C "$REPO_DIR/work" "$@"; }
 remote_ref() { "$REAL_GIT" --git-dir="$REPO_DIR/remote.git" rev-parse -q --verify "refs/heads/$1"; }
 marker_file() { printf '%s\n' "$REPO_DIR/work/.git/pelway-verify-tree"; }
 marker_tree_file() { sed -n '1p' "$1"; }
+started_count() {
+  shopt -s nullglob
+  local entries=("$1"/*)
+  printf '%s\n' "${#entries[@]}"
+}
 # push_role <name> <role> <git push の引数...>: 標準出力を OUT、標準エラーを ERR、終了コードを RC に入れる。
 push_role() {
   local name="$1" role="$2"; shift 2
@@ -119,7 +123,8 @@ verify_section="$(sed -n '/^\[tasks\.verify\]/,/^\[tasks\.verify-lint\]/p' mise.
 grep -qF 'run = "python3 -I scripts/agent-verify-run"' <<<"$verify_section" ||
   failures+=("mise_verify_hookup: verify task does not call agent-verify-run")
 MISE_TOY="$ROOT/mise-verify-result"
-mkdir -p "$MISE_TOY/scripts"; cp "$RECORD" "$MISE_TOY/scripts/agent-verify-record"; cp "$VERIFY_RUN" "$MISE_TOY/scripts/agent-verify-run"
+mkdir -p "$MISE_TOY/scripts"; cp "$RECORD" "$MISE_TOY/scripts/agent-verify-record"; cp "$VERIFY_RUN" "$MISE_TOY/scripts/agent-verify-run"; cp "$(dirname "$RECORD")/agent-verify-paths.sh" "$MISE_TOY/scripts/agent-verify-paths.sh"
+printf '/.pelway-verify/\n' >"$MISE_TOY/.gitignore"
 cat >"$MISE_TOY/scripts/verify-lint-toy" <<'EOS'
 #!/usr/bin/env bash
 [[ -z "${VERIFY_TOUCH_BEFORE_EXIT:-}" ]] || touch "$VERIFY_TOUCH_BEFORE_EXIT"
@@ -162,20 +167,34 @@ wait "$overlap_first"; overlap_success_rc=$?
 [[ "$overlap_success_rc" == 0 && "$overlap_failure_rc" != 0 && ! -e "$MISE_TOY/.git/pelway-verify-tree" ]] ||
   failures+=("mise_verify_overlap: success=$overlap_success_rc failure=$overlap_failure_rc marker=$(test -e "$MISE_TOY/.git/pelway-verify-tree" && echo present || echo missing)")
 # ロックファイルが symlink なら、リンク先を切り詰めない。前回の印は残っても、
-# verify の失敗の印があるため push では再利用できない。
-lock_path="$MISE_TOY/.git/pelway-verify.lock"; marker_path="$MISE_TOY/.git/pelway-verify-tree"; poison_path="$MISE_TOY/.git/pelway-verify-invalid"; lock_target="$ROOT/verify-lock-target"
+# verify の開始の記録があるため push では再利用できない。読めない印は inode の指紋でも止まる。
+lock_path="$MISE_TOY/.git/pelway-verify.lock"; marker_path="$MISE_TOY/.git/pelway-verify-tree"; lock_target="$ROOT/verify-lock-target"
 printf 'important\n' >"$lock_target"; rm -f "$lock_path"; ln -s "$lock_target" "$lock_path"
 printf '%s\nverify-id:0123456789abcdef0123456789abcdef\n' "$("$REAL_GIT" -C "$MISE_TOY" rev-parse 'HEAD^{tree}')" >"$marker_path"
+chmod 000 "$marker_path"
 (cd "$MISE_TOY" && MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-lock-symlink.out" 2>&1); rc=$?
-[[ "$rc" != 0 && "$(cat "$lock_target")" == important && -e "$marker_path" && -e "$poison_path" ]] ||
-  failures+=("verify_lock_symlink: rc=$rc target=$(cat "$lock_target" 2>/dev/null) marker=$(test -e "$marker_path" && echo present || echo missing) poison=$(test -e "$poison_path" && echo present || echo missing)")
+chmod 600 "$marker_path"
+[[ "$rc" != 0 && "$(cat "$lock_target")" == important && -e "$marker_path" && "$(started_count "$MISE_TOY/.pelway-verify/started")" -ge 1 ]] ||
+  failures+=("verify_lock_symlink: rc=$rc target=$(cat "$lock_target" 2>/dev/null) marker=$(test -e "$marker_path" && echo present || echo missing) started=$(started_count "$MISE_TOY/.pelway-verify/started")")
 (cd "$MISE_TOY" && PELWAY_AGENT_SKIP_RESIGN=1 bash "$AGENT_GH" dev git push origin HEAD:refs/heads/agent/lock-poison >"$ROOT/lock-poison-push.out" 2>"$ROOT/lock-poison-push.err"); RC=$?; ERR="$(cat "$ROOT/lock-poison-push.err")"
 [[ "$RC" != 0 && "$ERR" == *'前回の verify はこの印を無効化しました'* ]] ||
   failures+=("push_lock_poison: not stopped: rc=$RC $ERR")
-rm -f "$lock_path" "$poison_path" "$marker_path"
+rm -f "$lock_path" "$marker_path"; rm -rf "$MISE_TOY/.pelway-verify"
+# 開始の記録を残せないときは検査を始めず、前回の印も無効化しない。
+mkdir "$MISE_TOY/.pelway-verify"; chmod a-w "$MISE_TOY/.pelway-verify"
+printf '%s\nverify-id:0123456789abcdef0123456789abcdef\n' "$("$REAL_GIT" -C "$MISE_TOY" rev-parse 'HEAD^{tree}')" >"$marker_path"
+start_touch="$ROOT/verify-start-touch"; rm -f "$start_touch"
+(cd "$MISE_TOY" && VERIFY_TOUCH_BEFORE_EXIT="$start_touch" MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-start-unwritable.out" 2>&1); rc=$?
+[[ "$rc" != 0 && ! -e "$start_touch" && -f "$marker_path" ]] ||
+  failures+=("verify_start_unwritable: rc=$rc touch=$(test -e "$start_touch" && echo present || echo missing) marker=$(test -e "$marker_path" && echo present || echo missing)")
+chmod u+w "$MISE_TOY/.pelway-verify"; rm -rf "$MISE_TOY/.pelway-verify"
+(cd "$MISE_TOY" && MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-start-recovered.out" 2>&1); recovered_rc=$?
+[[ "$recovered_rc" == 0 && -f "$marker_path" ]] ||
+  failures+=("verify_start_recovered: rc=$recovered_rc marker=$(test -e "$marker_path" && echo present || echo missing)")
+rm -f "$marker_path"; rm -rf "$MISE_TOY/.pelway-verify"
 # gitdir のパスの末尾に空白や CR があっても、3 経路が Git が返した同じパスを使う。
 special_n=0
-for suffix in ' ' $'\r'; do
+for suffix in ' ' $'\r' $'\n'; do
   special_n=$((special_n + 1)); weird_gitdir="$ROOT/gitdir-with-special$suffix"
   cp -a "$MISE_TOY/.git" "$weird_gitdir"; rm -f "$weird_gitdir/pelway-verify-tree"
   (cd "$MISE_TOY" && GIT_DIR="$weird_gitdir" MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-special-gitdir.out" 2>&1)
@@ -185,6 +204,22 @@ for suffix in ' ' $'\r'; do
   [[ "$rc" == 0 && "$push_rc" == 0 && -f "$weird_gitdir/pelway-verify-tree" ]] ||
     failures+=("verify_special_gitdir: verify=$rc push=$push_rc suffix=$(printf %q "$suffix") marker=$(test -f "$weird_gitdir/pelway-verify-tree" && echo present || echo missing) err=$(cat "$ROOT/special-push.err")")
 done
+# hardlink や FIFO の印は通常ファイルとして扱わず、中身を切り詰めたり FIFO を開いたりしない。
+printf '%s\nverify-id:0123456789abcdef0123456789abcdef\n' "$("$REAL_GIT" -C "$MISE_TOY" rev-parse 'HEAD^{tree}')" >"$marker_path"
+hardlink_copy="$ROOT/marker-hardlink"; ln "$marker_path" "$hardlink_copy"; before="$(cat "$hardlink_copy")"
+(cd "$MISE_TOY" && VERIFY_DEPS_RC=1 MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-marker-hardlink.out" 2>&1); rc=$?
+[[ "$rc" != 0 && "$(cat "$hardlink_copy")" == "$before" && "$(stat -c %h "$marker_path")" == 2 ]] ||
+  failures+=("verify_marker_hardlink: rc=$rc links=$(stat -c %h "$marker_path" 2>/dev/null) content=$(cat "$hardlink_copy" 2>/dev/null)")
+rm -f "$marker_path" "$hardlink_copy"; mkfifo "$marker_path"
+(cd "$MISE_TOY" && VERIFY_DEPS_RC=1 timeout 10 mise run verify >"$ROOT/mise-marker-fifo.out" 2>&1); rc=$?
+[[ "$rc" != 0 && "$rc" != 124 ]] || failures+=("verify_marker_fifo: rc=$rc")
+rm -f "$marker_path"; rm -rf "$MISE_TOY/.pelway-verify"
+# 記録先がディレクトリなら、成功とせず一時印をその中へ移さない。
+mkdir "$marker_path"
+(cd "$MISE_TOY" && bash "$RECORD" >"$ROOT/record-directory.out" 2>"$ROOT/record-directory.err"); rc=$?
+[[ "$rc" != 0 && -d "$marker_path" && "$(cat "$ROOT/record-directory.err")" == *'置けません'* ]] ||
+  failures+=("record_marker_directory: rc=$rc err=$(cat "$ROOT/record-directory.err")")
+rmdir "$marker_path"
 # 親だけが中断されても record がロックを持ち続ける。record の確定を遅らせ、
 # 途中で再実行した失敗側が record の終了を待ってから印を消すことを確かめる。
 FAKE_MV_BIN="$ROOT/bin-slow-mv"; FAKE_PYTHON_BIN="$ROOT/bin-python"; mkdir -p "$FAKE_MV_BIN" "$FAKE_PYTHON_BIN"; REAL_MV="$(command -v mv)"; REAL_PYTHON3="$(command -v python3)"
@@ -206,10 +241,10 @@ cat >"$FAKE_PYTHON_BIN/python3" <<'EOS'
 exec "$FAKE_PYTHON3_REAL" "$@"
 EOS
 chmod +x "$FAKE_MV_BIN/mv" "$FAKE_PYTHON_BIN/python3"
-# ロック待ちを中断した実行の失敗の印は、開始前にあった印だけを指す。
+# ロック待ちを中断した実行の開始の記録は、開始前にあった印だけを指す。
 # あとで確定した別の成功の印では push を止めない。
 interrupt_started="$ROOT/mise-interrupt-started" interrupt_first_pid="$ROOT/interrupt-first.pid" interrupt_second_pid="$ROOT/interrupt-second.pid"
-rm -f "$interrupt_started" "$interrupt_first_pid" "$interrupt_second_pid" "$poison_path" "$marker_path"
+rm -f "$interrupt_started" "$interrupt_first_pid" "$interrupt_second_pid" "$marker_path"; rm -rf "$MISE_TOY/.pelway-verify"
 (cd "$MISE_TOY" && bash "$RECORD" >/dev/null 2>&1)
 (cd "$MISE_TOY" && PATH="$FAKE_PYTHON_BIN:$PATH" FAKE_PYTHON3_REAL="$REAL_PYTHON3" VERIFY_RUNNER_PID_FILE="$interrupt_first_pid" VERIFY_TOUCH_BEFORE_EXIT="$interrupt_started" VERIFY_SLEEP=3 MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-interrupt-success.out" 2>&1) &
 interrupt_first=$!
@@ -223,8 +258,8 @@ wait "$interrupt_second"; interrupted_rc=$?
 wait "$interrupt_first"; interrupt_success_rc=$?
 (cd "$MISE_TOY" && as 'pelway-dev[bot]' add -A && as 'pelway-dev[bot]' commit -q --allow-empty -m interrupted-verified-files)
 (cd "$MISE_TOY" && PELWAY_AGENT_SKIP_RESIGN=1 bash "$AGENT_GH" dev git push origin HEAD:refs/heads/agent/interrupted-success >"$ROOT/interrupted-push.out" 2>"$ROOT/interrupted-push.err"); RC=$?; ERR="$(cat "$ROOT/interrupted-push.err")"
-[[ "$interrupt_success_rc" == 0 && "$interrupted_rc" != 0 && -s "$poison_path" && -f "$marker_path" && "$RC" == 0 ]] ||
-  failures+=("verify_interrupted_waiting: success=$interrupt_success_rc interrupted=$interrupted_rc poison=$(test -e "$poison_path" && echo present || echo missing) push=$RC $ERR")
+[[ "$interrupt_success_rc" == 0 && "$interrupted_rc" != 0 && "$(started_count "$MISE_TOY/.pelway-verify/started")" -ge 1 && -f "$marker_path" && "$RC" == 0 ]] ||
+  failures+=("verify_interrupted_waiting: success=$interrupt_success_rc interrupted=$interrupted_rc started=$(started_count "$MISE_TOY/.pelway-verify/started") push=$RC $ERR")
 mv_started="$ROOT/verify-record-mv-started" mv_allow="$ROOT/verify-record-mv-allow" mv_done="$ROOT/verify-record-mv-done"; second_started="$ROOT/verify-second-started" first_pid="$ROOT/verify-first.pid" second_pid="$ROOT/verify-second.pid"
 rm -f "$mv_started" "$mv_allow" "$mv_done" "$second_started" "$first_pid" "$second_pid" "$marker_path"
 (cd "$MISE_TOY" && PATH="$FAKE_PYTHON_BIN:$FAKE_MV_BIN:$PATH" FAKE_PYTHON3_REAL="$REAL_PYTHON3" VERIFY_RUNNER_PID_FILE="$first_pid" FAKE_MV_STARTED="$mv_started" FAKE_MV_ALLOW="$mv_allow" FAKE_MV_DONE="$mv_done" FAKE_MV_REAL="$REAL_MV" MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-interrupted-first.out" 2>&1) &
@@ -261,6 +296,19 @@ work_git add code.txt; (cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m
 push_role exact dev -u origin HEAD
 [[ "$RC" == 0 && "$(remote_ref agent/exact)" == "$(work_git rev-parse HEAD)" ]] ||
   failures+=("push_exact_marker: not pushed: rc=$RC $ERR")
+# 開始の記録は印の世代ごとに効く。別世代の記録は残っていても、今の印を指す記録だけが止める。
+state_dir="$REPO_DIR/work/.pelway-verify/started"; attempt=0123456789abcdef0123456789abcdef
+printf 'old generation
+' >"$state_dir/0000000000000000000000000000000000000000000000000000000000000000.$attempt"
+push_role generation_old dev origin HEAD:refs/heads/agent/generation-old
+[[ "$RC" == 0 ]] || failures+=("push_generation_old: stopped by another generation: rc=$RC $ERR")
+marker_fp="$(sha256sum <"$(marker_file)" | cut -d' ' -f1)"
+printf 'failed generation
+' >"$state_dir/$marker_fp.$attempt"
+push_role generation_match dev origin HEAD:refs/heads/agent/generation-match
+[[ "$RC" != 0 && "$ERR" == *'前回の verify はこの印を無効化しました'* ]] ||
+  failures+=("push_generation_match: not stopped: rc=$RC $ERR")
+rm -f "$state_dir/$marker_fp.$attempt"
 # gitdir に書けず印を無効化できない状態では、正しい印が残っていても止める。
 chmod a-w "$REPO_DIR/work/.git"
 push_role readonly_gate dev origin HEAD:refs/heads/agent/readonly-gate
