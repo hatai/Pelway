@@ -367,6 +367,24 @@ impl Watcher {
             }
         }
 
+        // キューに残った知らせの分だけ立て手を残す。全件書けた場合・上限で古い
+        // 知らせが外れた場合・キューが空の場合は、対応する項目も消す
+        // （残し続けると、追記の失敗が繰り返されるたびに状態ファイルが増え続ける）
+        let live: std::collections::BTreeSet<String> = self
+            .state
+            .inbox_pending
+            .iter()
+            .flatten()
+            .filter_map(|p| {
+                p.get("thread_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect();
+        self.state
+            .inbox_pending_creators
+            .retain(|id, _| live.contains(id));
+
         for (payload, tag) in payloads {
             eprintln!("agent-watch: queued {tag}");
             outbox::push(&mut self.state.outbox, payload);

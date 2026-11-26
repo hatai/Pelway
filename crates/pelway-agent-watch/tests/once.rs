@@ -1340,6 +1340,81 @@ fn inbox_retry_keeps_resolved_creator() {
         "{}",
         stderr(&out)
     );
+    // 書き直せてキューが空になったので、立て手の記録も消える
+    let state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
+    assert_eq!(
+        state["inbox_pending_creators"].as_object().unwrap().len(),
+        0,
+        "{state}"
+    );
+}
+
+#[test]
+fn inbox_pending_creators_pruned_with_queue() {
+    // 立て手の記録は、キューに残る知らせの元のスレッドの分だけ残る:
+    // 追記に失敗して上限を超えて古い知らせが外れた分（とキューに無い古い項目）は消え、
+    // 書き直せてキューが空になったら全部消える
+    let sb = Sandbox::new("inbox-creators-pruned");
+    sb.fake("list.json", "[]");
+    let pending: Vec<String> = (0..101)
+        .map(|i| {
+            format!(
+                r#"{{"schema":"pelway.agent-watch/v1","event":"finished","thread_id":"mcp:p{i}","report":null}}"#
+            )
+        })
+        .collect();
+    let creators: Vec<String> = (0..101)
+        .map(|i| format!(r#""mcp:p{i}":"user""#))
+        .chain(std::iter::once(r#""mcp:old":"user""#.to_string()))
+        .collect();
+    fs::write(
+        sb.state_file(),
+        format!(
+            r#"{{"initialized":true,"threads":{{}},"inbox_pending":[{}],"inbox_pending_creators":{{{}}},"ci_notified":{{}}}}"#,
+            pending.join(","),
+            creators.join(",")
+        ),
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    // 追記を失敗させる: 101 件がキューに戻り、上限（100 件）でいちばん古い mcp:p0 が外れる
+    fs::create_dir_all(sb.pelway_dir()).unwrap();
+    std::os::unix::fs::symlink(sb.root.join("elsewhere"), sb.inbox()).unwrap();
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
+    assert_eq!(
+        state["inbox_pending"].as_array().unwrap().len(),
+        100,
+        "{state}"
+    );
+    let m = state["inbox_pending_creators"].as_object().unwrap();
+    assert_eq!(m.len(), 100, "{state}");
+    assert!(
+        !m.contains_key("mcp:p0") && !m.contains_key("mcp:old"),
+        "{state}"
+    );
+    assert_eq!(m["mcp:p100"], "user", "{state}");
+    // 受信箱を直すと全部書けて、立て手の記録は空になる
+    fs::remove_file(sb.inbox()).unwrap();
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(inbox_events(&sb).len(), 100);
+    let state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap();
+    assert_eq!(
+        state["inbox_pending"].as_array().unwrap().len(),
+        0,
+        "{state}"
+    );
+    assert_eq!(
+        state["inbox_pending_creators"].as_object().unwrap().len(),
+        0,
+        "{state}"
+    );
 }
 
 #[test]
