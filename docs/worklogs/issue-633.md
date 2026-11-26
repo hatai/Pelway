@@ -118,7 +118,7 @@ PR: #735
 
 ## 実装者メモ（round 8・印の nit だけを直す round。通算 1 回目）
 
-対象 head: （push 後に記入）
+対象 head: dd60f92f6cbfb59ab8ca0bb635ece0c7a25a93c0
 PR: #735
 
 レビュー指摘（run 7184499800 codex approve・`[文書のずれ]` の印付き nit 1 件、run 7184500403 claude approve・印なし nit 1 件。ともに head 6608d3056c36b977eea17a3b66a72166c28c742c）への対応。両者とも approve のため、印の nit だけを直す round（修正回数の上限に数えない。この PR では通算 1 回目）として入った。
