@@ -13,7 +13,7 @@ hatai が、デスクトップアプリを Electron にすると決めた。画�
 - Windows・macOS・Linux の 3 つの OS に配る。
 - Electron は外枠（窓、メニュー、OS との連携、資格情報の保存）だけを担い、業務のロジックや承認の判定は持たない。承認の確定はこれまでどおりオンラインの server だけで行う（[04](../technical/v0.7/body/04-data-api-realtime.md)）。
 - サーバー側（server: axum、runner、gateway、DB 層）と `pelway-contract` の契約は変えない。
-- 切り替えの時期：D1（友人デモ通し）は今の Slint のクライアント（`pelway-client-ui`）で仕上げる。Electron の作業は D1 の後に始める。D3（社内で毎日使える最小版）は Electron に切り替えてから出す。
+- 切り替えの時期：D1（友人デモ通し）は今の Slint のクライアント（`pelway-client-ui`）で仕上げる。Electron の作業は D1 の後に始める。ただし `client/` の土台（ディレクトリ、道具の設定、最小の窓、検査）だけは D1 の前に作る。土台は `pelway-client-ui`・`pelway-client-core`・`dev-client-probe` にも D1 の作業にも触れない。D3（社内で毎日使える最小版）は Electron に切り替えてから出す。
 
 ## 検討した案
 
@@ -33,19 +33,19 @@ hatai が、デスクトップアプリを Electron にすると決めた。画�
 
 ## 共通核（pelway-client-core）
 
-進み具合で決める。十分できていれば WASM にして Web UI から使う（v0.7 A2 の「状態と同期はRust/WASM」のまま）。ほとんどできていなければ TypeScript に移し、Rust 版は Slint の廃止と一緒にやめる。どちらに当てはまるかは、Electron の土台の Issue を立てるときに hatai が確かめ、この節に書き足す。進み具合の評価は #723 のコメント（`adr-0014-research`）にある。
+TypeScript に移す。WASM にはしない（v0.7 A2 の「状態と同期はRust/WASM」を置き換える）。置き場所は `client/packages/core/` で、Rust 版は Slint の廃止と一緒にやめる。進み具合の評価は #723 のコメント（`adr-0014-research`）にある。
 
-どちらの場合も、契約の型の正本は `crates/pelway-contract` のままにし、TS の型は ts-rs で書き出す（[slint-tauri-client-measurements.md](../research/slint-tauri-client-measurements.md) 7 節）。
+契約の型の正本は `crates/pelway-contract` のままにし、TS の型は ts-rs で書き出す（[slint-tauri-client-measurements.md](../research/slint-tauri-client-measurements.md) 7 節）。
 
 ## Web UI のフレームワーク
 
-Octane（[octanejs/octane](https://github.com/octanejs/octane)。MIT。React の書き方をコンパイルする方式。[oss-platform-and-client.md](../research/oss-platform-and-client.md) 6.5 節、[08](../technical/v0.7/body/08-decisions-open.md) の A2 の行）を使い、版は完全に固定する。React も UI ライブラリも使わない。UI 部品（ボタン、入力欄、一覧、ダイアログ、メニュー、トーストなど）は自前で作る。08 の「A2 の Web UI（Octane）で実装時に決める事項」のうち、「React の併用」は「使わない」で決まり。それ以外は Electron の土台の Issue で決める。
+Octane（[octanejs/octane](https://github.com/octanejs/octane)。MIT。React の書き方をコンパイルする方式。[oss-platform-and-client.md](../research/oss-platform-and-client.md) 6.5 節、[08](../technical/v0.7/body/08-decisions-open.md) の A2 の行）を使い、版は完全に固定する。React も UI ライブラリも使わない。UI 部品（ボタン、入力欄、一覧、ダイアログ、メニュー、トーストなど）は自前で作る。08 の「A2 の Web UI（Octane）で実装時に決める事項」のうち、「React の併用」は「使わない」で決まり。ビルド基盤（Vite。electron-vite の中で使う）とテスト（`@octanejs/testing-library`）は「運用の仕組み」の「決定」に書いた。それ以外は、その事項に初めて触れる Issue で決める。
 
 自前の UI 部品にすると、次の作業を自分たちで持つ。決定は変えず、工数の見込みに入れる。
 
 - アクセシビリティ：ダイアログのフォーカスの閉じ込めと戻し、メニューと一覧の矢印キー操作、`aria-*` の付け方。部品ごとに NVDA・VoiceOver・Orca での確認が要る。
 - IME：入力欄とメンション候補で、変換中の Enter・Esc を扱う（QA-APR-01・QA-MEN-01。今は `pelway-client-core` の `on_key`）。`compositionstart`／`compositionend` と `isComposing` の扱いを、3 つの OS の差を含めて試す。
-- 仮想スクロール：会話の一覧は行ごとに高さが違う。可変高の仮想リスト（高さの測り直し、下端への追従、上への読み足し）を自前で作るか、Octane の移植版（`@octanejs/tanstack-virtual` など）を使うかは、Electron の土台の Issue で決める。
+- 仮想スクロール：会話の一覧は行ごとに高さが違う。可変高の仮想リスト（高さの測り直し、下端への追従、上への読み足し）を自前で作るか、Octane の移植版（`@octanejs/tanstack-virtual` など）を使うかは、会話の一覧を作る Issue で決める。
 - テーマとトークン：4 つのテーマとデザイントークン（`docs/design-system/tokens/pelway.tokens.json`）を CSS 変数に落とす仕組み。
 
 ## ディレクトリ構成
@@ -67,9 +67,9 @@ client/                 Web と Electron（Node。版は mise で固定）
   apps/
     desktop/            Electron アプリ
       src/main/         窓、IPC（ドメインごと）、CSP・権限・信頼する出どころ、トークンの保存（safeStorage）、自動更新
-      src/preload/      contextBridge で出す API は 1 つ。main から来た値を解読してから画面に渡す
+      src/preload/      contextBridge で出す橋は 1 つ（宣言したチャンネルだけを通す invoke/on）。main から来た値を解読してから画面に渡す
       src/renderer/     画面の殻と features/<domain>/（承認、判断待ち、会話、設定など）
-    web/                ブラウザ版（同じ部品を使う。時期は別に決める）
+    web/                ブラウザ版（同じ部品を使う。`client/apps/web` は今は作らない。作る時期は別に決める）
   packages/
     contracts/          pelway-contract から書き出した TS の型（生成物）と、IPC のチャンネルの一覧と送り受けの型
     core/               pelway-client-core を TS に移したもの（承認カードの状態機械、判断待ちの盤、on_key）。DOM も Electron も使わない
@@ -80,8 +80,9 @@ client/                 Web と Electron（Node。版は mise で固定）
 
 - 型の流れ：`crates/pelway-contract` が正本。ts-rs で `client/packages/contracts/src/generated/` に書き出し、`.gitattributes` で `linguist-generated` を付ける。CI で書き出し直し、差分が無いことを確かめる。
 - IPC：チャンネルの一覧と送り受けの型は `packages/contracts` の 1 か所で宣言する。main はドメインごとのファイルで受け、引数を解読する前に送り元を確かめる。チャンネルを足すときは、宣言・main・preload・画面の模擬を同じ変更で直す。
-- client-core：TS に移すなら `client/packages/core/` に置き、Rust の試験（`crates/pelway-client-core/tests/*.rs`）と同じ振る舞いの試験を `*.test.ts` で持つ。WASM にする場合だけ、`client/packages/core/` は Rust の WASM を包む薄い層になる。
-- 依存の向き：`apps/desktop/src/renderer` → `packages/ui`・`packages/core`・`packages/contracts`。`packages/ui` → `packages/tokens`・`packages/i18n`。`packages/core` → `packages/contracts` だけ。逆向きの import と、renderer から main・preload への import はリンターで止める。
+- `@octanejs/electron`：画面の側のフック（`useInvoke`・`useIpcEvent` など）と、試験用の模擬（`installElectronBridge`）だけを使う。preload と main は自前で書く。preload は、このパッケージのフックが読む形の橋（`invoke`/`on`）を出すが、通すのは `packages/contracts` で宣言したチャンネルだけにする。`registerOctaneElectronMain` と `exposeOctaneElectron` は使わず、組み込みの `octane:*` のチャンネル（`shell.openExternal`・クリップボードなどを確認なしで呼べる）を登録しない。
+- client-core：`client/packages/core/` に置き、Rust の試験（`crates/pelway-client-core/tests/*.rs`）と同じ振る舞いの試験を `*.test.ts` で持つ。
+- 依存の向き：`apps/desktop/src/renderer` → `packages/ui`・`packages/core`・`packages/contracts`。`packages/ui` → `packages/tokens`・`packages/i18n`。`packages/core` → `packages/contracts` だけ。逆向きの import と、renderer から main・preload への import は `bun lint` の規則で止める。
 
 ## 運用の仕組み
 
@@ -95,18 +96,24 @@ client/                 Web と Electron（Node。版は mise で固定）
 - **CI の必須チェック**：既存の `verify.yml` の必須チェック名「mise run verify」は変えない。client の検査は `mise run verify` の下に足し、同じジョブで回す。
 - **workflow の変更の扱い**：`verify.yml`・`nightly.yml`・`dependabot.yml` の変更と `desktop-release.yml` の追加は、hatai の admin マージが要る別の Issue にする。
 - **agent の運用とのつなぎ**：実装は worktree の T3 スレッドで行い、PR とレビューは `scripts/agent-gh` を使う。署名の鍵と environment（署名を入れるとき）、タグの push、公開、配布用の読み取り専用トークンの作成とホストへの登録は hatai が行う。
+- **Node とパッケージマネージャ**：Node は 26.13.1（LTS）、パッケージマネージャは bun の安定版 1.4.5 にし、どちらも `mise.toml` で固定して `mise-bump.yml` で上げる。mise の Node は開発の道具（electron-vite・Vite・Octane のコンパイラ）を動かすためのもので、アプリの中で動く Node は Electron に同梱のもの。install・`bun fmt`・`bun check`・`bun test` は mise の bun で回す。
+- **依存の版**：版は `exact` で固定し、bun の catalog で `client/package.json` の 1 か所にまとめる。`client/bunfig.toml` の `minimumReleaseAge` で、公開から 7 日以上経った版だけを入れる。例外は `octane`・`@octanejs/*`・`@tsrx/*`（Octane はほぼ毎日出る beta で、7 日待つと peer の組がそろわない）と `bun`（下の lint の canary）だけ。TypeScript は Octane の peer の範囲に入る 6.0.3 にする。
+- **ビルド**：`client/apps/desktop` を electron-vite で作り、renderer の設定に Octane の Vite プラグインを入れる。preload は `sandbox: true` で読めるよう 1 つのファイルにまとめる。
+- **lint と format**：lint は `bun lint`、format は `bun fmt` にする。`bun lint` は bun の安定版にまだ無いので、日付つきの canary 版（npm の `bun@<版>-canary.<日付>.<n>`）を `client/package.json` の devDependency にして lockfile で固定し、`bun run lint` から呼ぶ。`bun lint` が安定版に入ったら、mise の bun を上げて canary の依存を外す。`bun fmt` の対象は `client/` の下だけにし、`hk.pkl` の pre-commit で `bun fmt --check`（直さずに検査だけ）を回す。typos は今のまま全体にかける。
+- **型検査**：`bun check` で回す。Octane の JSX の型を `bun check` が扱えないときは、Octane の `octane-tsc` に替える。
+- **単体の試験**：`bun test` で回し、`*.test.ts` を対象のファイルの隣に置く。Octane の部品は、Octane のコンパイラを `environment: 'client'` で通す bun のプラグインと、happy-dom・`@octanejs/testing-library` で試験する。main の試験では `electron` を `mock.module` で模擬する。
+- **client の検査**：`mise run client:verify`（`bun install --frozen-lockfile`・`bun fmt --check`・`bun run lint`・`bun check`・`bun test`）にまとめ、`mise run verify` から呼ぶ。
 
-### 土台の Issue で決める案
+### 運用の Issue で決める案
 
-次は案で、Electron の土台の Issue と、その後の運用の Issue で採るかを決める。
+次は案で、Electron の土台の後の運用の Issue で採るかを決める。
 
-- **ビルド**：`client/apps/desktop` を electron-vite で作り、electron-builder で包む。作るものは Windows の NSIS、macOS の dmg と zip、Linux の AppImage。OS ごとに GitHub の runner を分ける。作ったあとの検査（fuse の値、asar の完全性、ライセンスの一覧、sha256、更新の manifest、Linux は xvfb の下での起動）を `mise run desktop:verify-package` にまとめる。
+- **パッケージ作り**：electron-builder で包む。作るものは Windows の NSIS、macOS の dmg と zip、Linux の AppImage。OS ごとに GitHub の runner を分ける。作ったあとの検査（fuse の値、asar の完全性、ライセンスの一覧、sha256、更新の manifest、Linux は xvfb の下での起動）を `mise run desktop:verify-package` にまとめる。
 - **段階的な公開**：更新の manifest の `stagingPercentage` を使う。割合だけを変え、SHA-512 と大きさが変わらないことを確かめるタスク（`mise run desktop:rollout`）を用意する。Caddy は `latest*.yml` をキャッシュさせず（`no-store`）、本体は版ごとに名前を変えて上書きしない。
 - **リリースと版**：SemVer。版は `client/apps/desktop/package.json` に持ち、サーバーの crate の版とは分ける。タグは `desktop-vX.Y.Z`。変更点は PR ごとの断片（`client/changelog.d/`）に書き、リリースの準備の PR で `client/CHANGELOG.md` にまとめる。release の workflow は、最初にタグと package.json の版が合うかを確かめ、タグの実行を 1 列に並べる。配る本体ごとに artifact attestation を付ける（「決定」の配布経路で、ホストが確かめるもの）。preflight のチェックリストを `mise run desktop:preflight` にする。
-- **CI の中身**：Biome、型検査、vitest、electron-vite のビルド、preload の検査、`pelway-contract` から書き出した TS の型の差分を、`client/` か `crates/pelway-contract` が変わったときだけ回す。3 つの OS の署名なしのパッケージ作りと起動の検査は `nightly.yml` に足す。リリースは新しい `desktop-release.yml`（タグと手動の dry-run）。actions は今と同じく SHA で固定する（`actions.lock`）。
-- **試験**：単体は vitest（node と jsdom）で、`*.test.ts` を対象のファイルの隣に置く。E2E は Playwright の Electron 対応で作ったアプリを動かし、サーバーは `pelway-contract` の fixture を返す偽のサーバーにする。本物のサーバーにつなぐ試験は手動のときだけ回す。Windows のインストーラーと更新の E2E は、配布を始めるときに足す。
-- **lint と format**：Biome を第一の候補にする。`hk.pkl` の pre-commit に足す（今の hk の方針どおり、直さずに検査だけ）。typos は今のまま全体にかける。使っていないコードの検出（knip）と、型の抜けを「減る方向にだけ」縛る仕組みは、土台ができてから決める。
-- **パッケージマネージャと Node**：bun を候補にする。Node とパッケージマネージャの版は `mise.toml` で固定し、`mise-bump.yml` で上げる。
+- **CI の中身**：electron-vite のビルド、preload の検査、`pelway-contract` から書き出した TS の型の差分を、`client/` か `crates/pelway-contract` が変わったときだけ回す（lint・format・型検査・単体の試験は「決定」の client の検査で回す）。3 つの OS の署名なしのパッケージ作りと起動の検査は `nightly.yml` に足す。リリースは新しい `desktop-release.yml`（タグと手動の dry-run）。actions は今と同じく SHA で固定する（`actions.lock`）。
+- **E2E**： Playwright の Electron 対応で作ったアプリを動かし、サーバーは `pelway-contract` の fixture を返す偽のサーバーにする。本物のサーバーにつなぐ試験は手動のときだけ回す。Windows のインストーラーと更新の E2E は、配布を始めるときに足す。
+- **lint の追加の検査**：使っていないコードの検出（knip）と、型の抜けを「減る方向にだけ」縛る仕組みは、土台ができてから決める。
 - **依存の更新**：`.github/dependabot.yml` に npm の項目を足し、今の cargo・actions と同じく cooldown を 7 日にする。Electron の major は別のグループにする。`osv-scanner.toml` の対象に JS の lockfile を足す。npm の依存の監査とライセンスの検査は、cargo-deny と別に足す。
 - **クラッシュとログ**：main のログは秘密（トークン、Authorization など）を伏せてから、ユーザーデータのフォルダに回しながら書く。クラッシュダンプは手元に残すだけで、外へ送らない。終了の記録で「きれいに終わらなかった」ことを次の起動で見分け、画面に出す。不具合のときは、利用者が「診断情報を書き出す」でログとダンプを zip にして手で渡す。D3 では分析のイベントを外へ送らない。
 - **開発環境**：`mise run client:dev` で、ローカルの Pelway サーバーと Electron の開発版を一緒に起動する（常駐させるものは `pitchfork.toml` で扱う）。`mise run client:bootstrap` で依存を入れる。画面の確認は開発版で行う。
@@ -132,12 +139,12 @@ Electron 公式の[セキュリティチェックリスト](https://www.electron
 | 12 | Verify WebView options before creation | 採る | `<webview>` を使わないので、作られようとしたら止める |
 | 13 | Disable or limit navigation | 採る | `will-navigate` で同梱の資産以外への遷移を止める |
 | 14 | Disable or limit creation of new windows | 採る | `setWindowOpenHandler` で新しい窓を開かせない |
-| 15 | Do not use `shell.openExternal` with untrusted content | 採る | チャットのリンクを外で開くのは https だけ。AI Bot の発言のリンクは確認を挟む |
+| 15 | Do not use `shell.openExternal` with untrusted content | 採る | チャットのリンクを外で開くのは https だけ。AI Bot の発言のリンクは確認を挟む。`@octanejs/electron` の組み込みの `octane:*` のチャンネル（URL を確かめずに `shell.openExternal` を呼ぶ）は登録しない |
 | 16 | Use a current version of Electron | 採る | サポート中の版を使い、依存の更新の流れに乗せる |
-| 17 | Validate the `sender` of all IPC messages | 採る | main の IPC ですべて送り元を確かめる |
+| 17 | Validate the `sender` of all IPC messages | 採る | main の IPC ですべて送り元を確かめる。送り元を確かめない `@octanejs/electron` の main の登録（`registerOctaneElectronMain`）は使わない |
 | 18 | Avoid usage of the `file://` protocol | 採る | 同梱の資産は独自のスキームで出す |
 | 19 | Check which fuses you can change | 採る | `RunAsNode` など使わない fuse を切り、asar の完全性の検査を有効にする |
-| 20 | Do not expose Electron APIs to untrusted web content | 採る | preload の `contextBridge` で出すのは用途ごとの関数だけ。`ipcRenderer` をそのまま出さない |
+| 20 | Do not expose Electron APIs to untrusted web content | 採る | preload の `contextBridge` で出すのは、`packages/contracts` で宣言したチャンネルだけを通す `invoke`/`on` の橋 1 つ。`ipcRenderer` をそのまま出さない |
 
 server 側の検査（Origin、CSRF、WebSocket の認証。v0.7 [04](../technical/v0.7/body/04-data-api-realtime.md)）は、Electron から来る要求にも省かない。
 
