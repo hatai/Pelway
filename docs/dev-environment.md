@@ -230,6 +230,8 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 
 値は通知専用の age 鍵（既定 `~/.config/pelway-agent-notify/age.txt`）で暗号化する。provider を `age` ではなく `notify_age` という名前にするのは、fnox のグローバル設定（`~/.config/fnox/config.toml`）の `[providers.age]`（鍵ファイルの指定が無い）とのマージで鍵の指定が曖昧にならないためで、`review_age`（「鍵の分割（review 用の fnox 設定と age 鍵）」）と同じ考え方。`key_file` を明示するので、`~/.config/fnox` が読めない実行環境でも復号できる（以前は dev と同じ `~/.config/fnox/age.txt` 1 つで dev の App 鍵と webhook の URL・鍵の両方が復号できた。#737 の鍵分割）。
 
+**`~/.config/pelway-agent-notify` は全担当の sandbox で読み取り拒否にする。** 復号鍵（`age.txt`）と暗号文（`fnox.toml`）が同じディレクトリにあり、`key_file` は絶対パスで書かれているため、このディレクトリが読める sandbox の中から `fnox -c ~/.config/pelway-agent-notify/fnox.toml get` で webhook の URL と鍵を復号できる（以前は復号に拒否済みの `~/.config/fnox/age.txt` が要った）。`agent-gh` が読む `~/.config/fnox`・`~/.config/pelway-agent` と違い、sandbox の中の担当が読む必要のあるものは置かない（`conductor-thread-id` を読むのはホスト側の agent-watch と `scripts/conductor-watch.sh` だけ）ため、ディレクトリごと拒否する。実装担当側はリポジトリの設定（`.devin/config.json`・`scripts/agent-sandbox/devin-config.json`・`scripts/agent-sandbox/opencode-plugin/index.js` の `READ_DENY`・`scripts/agent-sandbox/sandbox-shell` の `masks`）に列挙する。レビュー担当（`devin_review`・`claude_review`・`codex_review`）と QA 担当の拒否リストはリポジトリの外の設定なので、hatai が「通知用の age 鍵への移し替え」の手順 0 で適用する。
+
 設定ファイルの形（`scripts/setup/agent-accounts.sh` の「通知用の fnox 設定と age 鍵を作る」が新規にはこの形で作る）:
 
 ```toml
@@ -250,9 +252,16 @@ printf '%s' '<鍵>'  | fnox -c ~/.config/pelway-agent-notify/fnox.toml set --pro
 
 ### 通知用の age 鍵への移し替え（既存環境・hatai が手で行う）
 
-`~/.config/pelway-agent-notify/fnox.toml` が `[providers.age]`（鍵ファイルの指定が無く、`~/.config/fnox/age.txt` で復号する形）の環境を、通知専用の鍵に移す。値は一切表示しない（`fnox get` の出力はパイプで次の `fnox set` に渡す）。agent-watch は送信のたびに設定を読み直すので、移し替えのあと再起動は要らない。
+`~/.config/pelway-agent-notify/fnox.toml` が `[providers.age]`（鍵ファイルの指定が無く、`~/.config/fnox/age.txt` で復号する形）の環境を、通知専用の鍵に移す。値は一切表示しない（`fnox get` の出力は変数とパイプで次の `fnox set` に渡す）。agent-watch は送信のたびに設定を読み直すので、移し替えのあと再起動は要らない。
 
 ```bash
+# 0. 先にリポジトリの外の拒否リストを更新する（鍵を作る前に入れる）
+#    - ~/.config/devin-review/config.json の permissions.deny に "Read(~/.config/pelway-agent-notify/**)"
+#    - ~/.claude-review/settings.json の permissions.deny に "Read(~/.config/pelway-agent-notify/**)"
+#    - /etc/codex/requirements.toml の deny_read に "/home/hatai/.config/pelway-agent-notify"
+#    - QA 担当の sandbox の拒否リストにも ~/.config/pelway-agent-notify（~/.config/pelway-agent-qa と同じ扱い）
+#    実装担当側（.devin/config.json・scripts/agent-sandbox/）はリポジトリの変更で済んでいる。
+
 # 1. 通知専用の鍵ペアを作る（秘密鍵は表示しない）
 (umask 077 && age-keygen -o ~/.config/pelway-agent-notify/age.txt)
 notify_recipient="$(age-keygen -y ~/.config/pelway-agent-notify/age.txt)"
@@ -272,10 +281,13 @@ EOF
 )
 
 # 3. 値を新しい鍵で登録し直す（古い設定は ~/.config/fnox/age.txt で復号できる）
+#    get が失敗したときに空の値を登録しないよう、先に読み取りの成否を確かめる
 for name in PELWAY_NOTIFY_WEBHOOK_URL PELWAY_NOTIFY_WEBHOOK_KEY; do
-  fnox -c ~/.config/pelway-agent-notify/fnox.toml.bak get "$name" |
-    fnox -c ~/.config/pelway-agent-notify/fnox.toml set --provider notify_age "$name" >/dev/null
+  value="$(fnox -c ~/.config/pelway-agent-notify/fnox.toml.bak get "$name")" ||
+    { echo "古い設定から $name が読めない。移し替えを止める" >&2; break; }
+  printf '%s' "$value" | fnox -c ~/.config/pelway-agent-notify/fnox.toml set --provider notify_age "$name" >/dev/null
 done
+unset value
 ```
 
 **確かめ方（名前とパスだけ出す。値は出さない）**:
@@ -285,7 +297,13 @@ fnox -c ~/.config/pelway-agent-notify/fnox.toml list                      # PELW
 fnox -c ~/.config/pelway-agent-notify/fnox.toml get PELWAY_NOTIFY_WEBHOOK_URL >/dev/null  # 新しい鍵で復号できる
 ```
 
-**戻し方**: 退避した設定を戻し、通知専用の鍵を消す:
+**4. 確かめたあと退避を消す**: `fnox.toml.bak` には dev の鍵（`~/.config/fnox/age.txt`）宛ての暗号文が残る。残しておくと dev の鍵を持つものが webhook の秘密を復号でき、鍵の分割が成り立たないため、確かめ方が通ったら消す:
+
+```bash
+rm ~/.config/pelway-agent-notify/fnox.toml.bak
+```
+
+**戻し方**: `fnox.toml.bak` を消す前に限る（消したあとは戻せない）。退避した設定を戻し、通知専用の鍵を消す:
 
 ```bash
 mv ~/.config/pelway-agent-notify/fnox.toml.bak ~/.config/pelway-agent-notify/fnox.toml

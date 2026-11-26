@@ -215,7 +215,16 @@ DEV_AGE_KEY="$HOME/.config/fnox/age.txt"
 REVIEW_CFG="${PELWAY_AGENT_FNOX_CONFIG_REVIEW:-$HOME/.config/pelway-agent-review/fnox.toml}"
 REVIEW_AGE_KEY="$HOME/.config/pelway-agent-review/age.txt"
 # 通知の秘密は dev とも review とも別の設定・通知専用の age 鍵に置く（#737）。agent-watch はこちらを読む。
-NOTIFY_CFG="${PELWAY_NOTIFY_FNOX_CONFIG:-$HOME/.config/pelway-agent-notify/fnox.toml}"
+# PELWAY_NOTIFY_FNOX_CONFIG は agent-watch（io.rs の notify_fnox_config）と同じく絶対パスのみ受け付ける。
+# 空文字・相対パスは使わない（その値では agent-watch も送らないため、警告して既定の場所に作る）。
+NOTIFY_CFG="$HOME/.config/pelway-agent-notify/fnox.toml"
+if [[ -v PELWAY_NOTIFY_FNOX_CONFIG ]]; then
+  if [[ "$PELWAY_NOTIFY_FNOX_CONFIG" == /* ]]; then
+    NOTIFY_CFG="$PELWAY_NOTIFY_FNOX_CONFIG"
+  else
+    warn "PELWAY_NOTIFY_FNOX_CONFIG は絶対パスでないため使わない（agent-watch もこの値では送らない）: $PELWAY_NOTIFY_FNOX_CONFIG"
+  fi
+fi
 NOTIFY_AGE_KEY="$HOME/.config/pelway-agent-notify/age.txt"
 ENV_FILE="/nonexistent/pelway-agent-accounts.env" # 値は .env ではなく fnox に置く
 
@@ -330,7 +339,8 @@ if [[ -f "$NOTIFY_CFG" ]]; then
   grep -q 'providers\.notify_age' "$NOTIFY_CFG" ||
     warn "この設定は旧形式（dev と同じ age 鍵を共有）。docs/dev-environment.md の「通知用の age 鍵への移し替え」で専用の鍵に移す"
 else
-  mkdir -p "$(dirname "$NOTIFY_CFG")"
+  # NOTIFY_CFG を別のディレクトリに上書きしていても NOTIFY_AGE_KEY は既定の場所なので、両方の親を作る。
+  mkdir -p "$(dirname "$NOTIFY_CFG")" "$(dirname "$NOTIFY_AGE_KEY")"
   if [[ -f "$NOTIFY_AGE_KEY" ]]; then
     note "age 鍵は作成済み"
   else
@@ -378,7 +388,8 @@ say "レビュー担当の秘密は dev と別の設定・別の age 鍵に置�
 if [[ -f "$REVIEW_CFG" ]]; then
   note "$REVIEW_CFG は作成済み"
 else
-  mkdir -p "$(dirname "$REVIEW_CFG")"
+  # REVIEW_CFG を別のディレクトリに上書きしていても REVIEW_AGE_KEY は既定の場所なので、両方の親を作る。
+  mkdir -p "$(dirname "$REVIEW_CFG")" "$(dirname "$REVIEW_AGE_KEY")"
   if [[ -f "$REVIEW_AGE_KEY" ]]; then
     note "age 鍵は作成済み"
   else
