@@ -95,3 +95,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 の「Approve のとき」に「`[文書のずれ]` の nit を直すときは、同じ段落の規則の文と、人の手順の文を分けて書く」を足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 9）
+
+対象 head: 655b7a7b8ea50239a1fc1add28c6655e46450ddd
+
+1. 詰まった箇所: `docs/adr/0014-desktop-client-electron.md` の配布経路: 「Releases を読むだけの fine-grained トークン」は作れない（claude の nit。round 2 から残っていた）。hatai の指示で直した。
+2. 曖昧だった文: 「ホストに置くのは読み取り専用の fine-grained トークン 1 つだけ。」（Issue #723「未決事項」の 8）。どの権限で足りるかを書いていなかった。
+3. 仮定と解釈: Releases とタグの読み取りには Contents の read が要り、それはリポジトリの中身全体を読めることを事実として書いた。その範囲を受け入れるかの判断は書いていない（hatai の決定は「読み取り専用のトークン 1 つ」のまま）。
+4. 足りなかった情報・検証手段: attestation の API に要る権限は手元で確かめていない（取りに行く仕組みの Issue に残した）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 に「事実の誤りを指す nit は、印が無くても hatai に直すかを聞く」を足す。
+
+使ったスキル: implement-issue
