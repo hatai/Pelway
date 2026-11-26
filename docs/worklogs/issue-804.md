@@ -62,3 +62,4 @@ must-fix への対応:
 1. warn_required を validate_doc の前に移したため型未検証の重ねた結果を読み、`use = 1` で TypeError、`priority = 1` で AttributeError になっていた → warn_required 内で `use` が list でない・`priority`/`priority.review` が dict でないときは警告を飛ばす形に（型の誤りは後続の検証がキー名つきで止める）。試験 27・28 で traceback が出ずキー名を名指すことを確かめる
 
 nit への対応: worktree-setup:126-128 のコメントに「noclobber が防ぐのは通常ファイルの上書き」を明記。worklog round 3 の項目 4・9 の記述を実態に合わせて修正
+push した head: 4fd35bab
