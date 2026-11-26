@@ -47,7 +47,7 @@
 使ったスキル: implement-issue
 ## 実装者メモ（round 5・印の nit のみ）
 
-対象 head: <push 後に記入>
+対象 head: 59ec13e9275bfe2590f341e3bc1a25769bc0cc77
 
 1. 詰まった箇所: round 4 で両担当 approve だったが、`[文書のずれ]` の nit が両者に残っていた（同じ 2 件: PR 本文「立て手の見分け方」の `scripts/conductor-watch.sh` への誤参照 → `docs/agents/grokbot-runbook.md` の shared-worktree の項へ、round 2 メモの「同ファイルに足すよう挙がっていたが」の括弧 → 実際の指定どおりの記述へ）。Claude には印の無い nit が 1 件（`pending_notice_parts` の包んだ形を読む分岐は main に入っていない中間コミットだけが書いた形で、通る試験が無い）あり、選択肢のうち「分岐を消して payload そのものと別項目の立て手だけで組む」を採った（中間コミットは main に入らないため互換の対象外。試験を足す方は消せない記録を維持することになり不採用）。
 2. 仮定と解釈: PR 本文の nit は GitHub 上の本文だけの修正（push を伴わない）。コードとメモの修正は head を動かすため、同じ round に畳んだ。包んだ形の分岐を消すと、その形で残った状態ファイルは payload としてそのまま書き直されるが、その形を書いた版は main に入らず、対象の状態ファイルは存在しないはずと判断した。
