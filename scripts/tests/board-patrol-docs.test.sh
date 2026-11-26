@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # ボード（GitHub Projects）主導の処理の流れ（Issue #290）の正本 5 文書の
 # 必須文言を固定するテスト。
-# 位置づけ: このスクリプトは「必須文言が正本 5 文書に存在する」という観測可能な
-# 事実だけを確かめる決定的な検査（wording pin）であり、受け入れ条件の意味や仕様の整合性は評価しない
-# （AGENTS.md「LLM judges」: 自然言語の意味の評価は rubric 付きの LLM judge が担い、
-# 決定的な検査は観測可能な効果に限る。語句が残っていれば矛盾した記述でも通るため、
-# 意味の確認は PR 本文での引用と skill review-pr のレビューで行う）。
+# 位置づけ: このスクリプトは「必須文言が正本 5 文書に存在する」という観測可能な事実だけを
+# 確かめる決定的な検査（wording pin）。語句が残っていれば矛盾した記述でも通るため、意味・仕様の
+# 整合性の確認は PR 本文での引用と skill review-pr のレビューで行う（AGENTS.md「LLM judges」）。
 # 文言を変えるときはこのテストと同じ PR で直す。
 set -uo pipefail
 
@@ -76,6 +74,20 @@ check cond5_write_issue_board .agents/skills/write-issue/SKILL.md \
   'ready-for-agent' \
   'サブ Issue' \
   'Todo'
+
+# 条件6（Issue #714）: 枠の使用数は見張りの SLOTS の判定（watch.log の行と同じ数を書く
+# slots.json）で読むことが、runbook の「3. 同時数と順番待ち」・「割り当て・停止・再開」と、
+# skill command-team の「1. サイクルの始め」に書かれている。
+check cond6_runbook_slots_lines docs/agents/grokbot-runbook.md \
+  '`SLOTS <担当> <使用数>/<上限>` の行' \
+  '`SLOTS over`' \
+  '`SLOTS error`' \
+  '`slots.json`' \
+  'Issue の枠の使用数は見張りの `slots.json`'
+check cond6_command_team_slots .agents/skills/command-team/SKILL.md \
+  '`slots.json`' \
+  '`SLOTS` の行' \
+  'キューに置けるファイル名'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2
