@@ -34,8 +34,5 @@
     "bun": "catalog:",
     "octane": "catalog:",
     "typescript": "catalog:"
-  },
-  "trustedDependencies": [
-    "bun"
-  ]
+  }
 }

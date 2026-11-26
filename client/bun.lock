@@ -50,9 +50,6 @@
       },
     },
   },
-  "trustedDependencies": [
-    "bun",
-  ],
   "catalog": {
     "@happy-dom/global-registrator": "21.0.4",
     "@octanejs/electron": "0.0.54",
