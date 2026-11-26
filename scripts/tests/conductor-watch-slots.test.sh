@@ -143,9 +143,9 @@ check() {
 }
 
 has() { grep -Eq "$2" "$1"; }; nhas() { ! grep -Eq "$2" "$1"; }; calls() { wc -l < "$MOCK/gh-calls.log"; }
-get() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[2]));  # 記録の <key> の値を取り出す（jq 風のパス）
+get() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[2]));
 for k in sys.argv[1].split("."): d=d[k]
-print(d)' "$1" "$2"; }
+print(d)' "$1" "$2"; }  # 記録の <key> の値を取り出す（jq 風のパス）
 slot_eq() { [[ "$(get "$1" "$SLOTS")" == "$2" ]]; }; ps_eq() { [[ "$(get "$1" "$STATE")" == "$2" ]]; }
 
 jput() { python3 -I -c 'import json,sys
@@ -157,7 +157,7 @@ it=d.setdefault("items",{}).setdefault(n,{})
 it[k] = it.setdefault(k,[])+[json.loads(v)] if k=="implement_thread" else json.loads(v)
 json.dump(d,open(p,"w"),ensure_ascii=False,indent=2,sort_keys=True)' "$1" "$2" "$3" "$4"; }  # <file> の items[<issue>] に <key>=<JSON> を書く（implement_thread は一覧に追加）
 
-mark()         { jput "$ISTATE" "$1" work_state "{\"state\": \"$2\"}"; }  # 作業状態の印（bind/set_rollback/litem も patrol-items.json。旧置き場 litem だけ patrol-state.json）
+mark()         { jput "$ISTATE" "$1" work_state "{\"state\": \"$2\"}"; }  # 作業状態の印（bind/set_rollback も patrol-items.json に書く。litem だけが旧置き場の patrol-state.json）
 bind()         { jput "$ISTATE" "$1" implement_thread "{\"pr\": \"${3:-none}\", \"thread_id\": \"$2\", \"branch\": \"agent/x\"}"; }
 set_rollback() { jput "$ISTATE" "$1" rollback "{\"assignment_id\": \"a\", \"started_at\": \"t\", \"steps_done\": []}"; }
 litem() { jput "$STATE" "$1" work_state "{\"state\": \"$2\"}"; jput "$STATE" "$1" implement_thread "{\"pr\": \"none\", \"thread_id\": \"$3\", \"branch\": \"agent/x\"}"; }
