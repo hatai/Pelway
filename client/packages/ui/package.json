@@ -1,0 +1,11 @@
+{
+  "name": "@pelway/ui",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "octane": "catalog:"
+  }
+}

@@ -1,0 +1,34 @@
+# client/ の bun の設定（ADR 0014）。
+[install]
+# 版は package.json に書いたとおりに固定する。
+exact = true
+# 公開から 7 日（604800 秒）以上経った版だけを入れる。
+minimumReleaseAge = 604800
+# 例外: Octane の一式はほぼ毎日出る beta で、7 日待つと peer の組がそろわない。
+# bun は lint だけに使う日付つきの canary 版（@oven/bun-* はその OS ごとの本体）。
+minimumReleaseAgeExcludes = [
+  "octane",
+  "@octanejs/electron",
+  "@octanejs/testing-library",
+  "@tsrx/oxc",
+  "bun",
+  "@oven/bun-linux-x64",
+  "@oven/bun-linux-x64-musl",
+  "@oven/bun-linux-aarch64",
+  "@oven/bun-linux-aarch64-musl",
+  "@oven/bun-linux-x64-android",
+  "@oven/bun-linux-aarch64-android",
+  "@oven/bun-darwin-x64",
+  "@oven/bun-darwin-aarch64",
+  "@oven/bun-windows-x64",
+  "@oven/bun-windows-aarch64",
+  "@oven/bun-freebsd-x64",
+  "@oven/bun-freebsd-aarch64",
+]
+
+[fmt]
+# 日本語の説明を含む行が多いので、折り返しの幅を広げる。
+printWidth = 120
+
+[test]
+preload = ["./test/happy-dom.ts", "./test/octane-plugin.ts"]
