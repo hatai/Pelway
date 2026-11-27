@@ -52,3 +52,6 @@ mutants.out/
 
 # verify の開始・失敗の記録（scripts/agent-verify-run。検証対象の木に含めない）
 /.pelway-verify/
+
+# ユーザー個人のプロジェクト指示（Claude Code の CLAUDE.local.md。コミットしない）
+CLAUDE.local.md

@@ -95,9 +95,46 @@ pub struct State {
     /// 既読の位置がここから進むまで、重ねて起こさない。
     #[serde(default)]
     pub last_wake_inbox_offset: Option<u64>,
-    /// 前回起こした指揮役のスレッド ID。登録が替わったら、`last_wake_inbox_offset` は使わない。
+    /// 前回起こした指揮役のスレッド ID。登録が替わったら、`last_wake_inbox_offset` と
+    /// `last_wake_at` は使わない。
     #[serde(default)]
     pub last_wake_thread_id: Option<String>,
+    /// 前回指揮役を起こした時刻（UNIX 秒）。ここから起こしの最短間隔の間は起こさない（Issue #839）。
+    #[serde(default)]
+    pub last_wake_at: Option<i64>,
+    /// 起こすに足る知らせを起こせず、後に回している（起こし待ちの印。Issue #839。最短間隔の内・
+    /// 既読が進んでいない・補助記録が読めない・既読が範囲外のときに付ける）。値は、後に回した
+    /// 知らせのうち最後のものまでの受信箱の行数（数えきれなかったとき・受信箱が自分の追記以外で変わって印の行番号を確かめられないときは
+    /// `u64::MAX`）。起こせる周回で、
+    /// 新しい知らせが無くても 1 回起こす（指揮役の既読の位置がこの行数に追いついていれば取り消す）。
+    #[serde(default)]
+    pub wake_pending: Option<u64>,
+    /// 最後に数えた受信箱の行数（Issue #839）。知らせを受信箱に書いた周と、印だけの周で受信箱の
+    /// 同一性が変わっていたときに数える。数えている間に受信箱が変わった・数え直せないときは None。
+    /// 印だけの周で、補助記録の既読の位置が範囲内かを確かめるのに使う。
+    #[serde(default)]
+    pub inbox_lines: Option<u64>,
+    /// `inbox_lines` を数えたときの受信箱の同一性（デバイス・inode・大きさ・mtime・ctime）。
+    /// 印だけの周で受信箱がこれと違えば、数え直す（書き換えられた受信箱で古い行数を使わない）。
+    /// 知らせを書く周でも、書く前の同一性と比べ、違えば（自分の追記以外で受信箱が変わった）
+    /// 印と新しい知らせの行番号を不明にする。
+    #[serde(default)]
+    pub inbox_identity: Option<[u64; 5]>,
+    /// 受信箱が自分の追記以外で変わったのを見分けた（Issue #839）。その間の指揮役の既読の位置は、
+    /// いまの受信箱の同じ中身を指すと確かめられないので、新しい知らせと印の行番号を不明にし、
+    /// 既読による取り消しをせず、印が立っている間は前回の起こしの基準を使わない（印の間に
+    /// 送った起こしの位置も含む。重ねての起こしは最短間隔だけで絞る）。
+    /// 起こしを送った後に、指揮役の既読の位置がそのときから変わったら消す。
+    #[serde(default)]
+    pub inbox_rewritten: bool,
+    /// `inbox_rewritten` の間に起こしを送ったときの、指揮役の既読の位置。
+    #[serde(default)]
+    pub rewritten_wake_offset: Option<u64>,
+    /// スレッドごとに、起こしに数えた最後の承認待ち（`waiting`）の round（Issue #839）。
+    /// 同じスレッドの同じ round の承認待ちは、2 件目から起こしに数えない。
+    /// 一覧の記録（`threads`）から外れたスレッドの項目は消す。
+    #[serde(default)]
+    pub wake_waiting_rounds: BTreeMap<String, u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
