@@ -567,15 +567,25 @@ pub fn append_inbox(path: &Path, lines: &[String]) -> Result<InboxCount, String>
         // O_APPEND の書き込みの直後の位置は、いま書いた行の終わり
         ends.push(file.stream_position().map_err(|e| e.to_string())?);
     }
+    count_open_inbox(&mut file, &ends)
+}
+
+/// 開いた受信箱を先頭から、固定の上限（`INBOX_MAX_BYTES` + 1 MiB）の内で数える（書いた後に
+/// 足された行も行数に入る）。数える前と後で同一性が違えば（数えている間に変わった）、行数は
+/// 数えたときの受信箱に対応しないので `stable` を false にする。
+fn count_open_inbox(file: &mut fs::File, ends: &[u64]) -> Result<InboxCount, String> {
+    use std::io::Seek;
+    let before = identity_of(file)?;
     file.rewind().map_err(|e| e.to_string())?;
-    // EOF まで、固定の上限（`INBOX_MAX_BYTES` + 1 MiB）の内で読む（書いた後に足された行も行数に入る）
     let (total, at) =
-        pelway_agent_watch::inbox::count_lines_at(&file, &ends, INBOX_MAX_BYTES + 1024 * 1024)
+        pelway_agent_watch::inbox::count_lines_at(&*file, ends, INBOX_MAX_BYTES + 1024 * 1024)
             .map_err(|e| e.to_string())?;
+    let identity = identity_of(file)?;
     Ok(InboxCount {
         total,
         line_numbers: at,
-        identity: identity_of(&file)?,
+        identity,
+        stable: identity == before,
     })
 }
 
@@ -583,21 +593,52 @@ pub fn append_inbox(path: &Path, lines: &[String]) -> Result<InboxCount, String>
 pub struct InboxCount {
     pub total: u64,
     pub line_numbers: Vec<Option<u64>>,
-    pub identity: [u64; 3],
+    /// 数えた後の受信箱の同一性（`inbox_identity` と同じ形）。
+    pub identity: InboxIdentity,
+    /// 数えている間に受信箱が変わらなかったか（変わったら `total` は使わない）。
+    pub stable: bool,
 }
 
-fn identity_of(file: &fs::File) -> Result<[u64; 3], String> {
+/// 受信箱の同一性: デバイス・inode・大きさ・更新時刻（mtime）・状態変更時刻（ctime。どちらも
+/// ナノ秒）。大きさを変えない書き換えも、時刻で見分ける。
+pub type InboxIdentity = [u64; 5];
+
+fn identity_of(file: &fs::File) -> Result<InboxIdentity, String> {
     use std::os::unix::fs::MetadataExt;
     let m = file.metadata().map_err(|e| e.to_string())?;
-    Ok([m.dev(), m.ino(), m.len()])
+    let ns = |s: i64, n: i64| {
+        (s as u64)
+            .wrapping_mul(1_000_000_000)
+            .wrapping_add(n as u64)
+    };
+    Ok([
+        m.dev(),
+        m.ino(),
+        m.len(),
+        ns(m.mtime(), m.mtime_nsec()),
+        ns(m.ctime(), m.ctime_nsec()),
+    ])
 }
 
-/// 受信箱の同一性（デバイス・inode・大きさ）。中身は読まない。最後に数えたときと同じなら、
-/// そのときの行数をそのまま使える（Issue #839）。
-pub fn inbox_identity(path: &Path) -> Result<[u64; 3], String> {
+/// 受信箱の同一性。中身は読まない。最後に数えたときと同じなら、そのときの行数をそのまま
+/// 使える（Issue #839）。
+pub fn inbox_identity(path: &Path) -> Result<InboxIdentity, String> {
     let (dir, name) = split_pelway_path(path)?;
     let dirf = open_pelway_dir(dir, false)?;
     identity_of(&open_in_pelway(&dirf, name, libc::O_RDONLY)?)
+}
+
+/// 受信箱を読むだけで数える（作らない・末尾を補わない。`append_inbox` と同じ開き方の確かめと
+/// 読む量の上限は保つ）。起こし待ちの印だけを確かめる周の数え直しに使う（Issue #839）。
+pub fn count_inbox(path: &Path) -> Result<InboxCount, String> {
+    let (dir, name) = split_pelway_path(path)?;
+    let dirf = open_pelway_dir(dir, false)?;
+    let mut file = open_in_pelway(&dirf, name, libc::O_RDONLY)?;
+    let len = file.metadata().map_err(|e| e.to_string())?.len();
+    if len > INBOX_MAX_BYTES {
+        return Err("inbox is too large".to_string());
+    }
+    count_open_inbox(&mut file, &[])
 }
 
 /// 補助記録（`patrol-state.json`）の大きさの上限。これを超えるものは読まない。

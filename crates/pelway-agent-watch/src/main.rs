@@ -362,9 +362,8 @@ impl Watcher {
                 .collect();
             match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &lines) {
                 Ok(count) => {
-                    self.state.inbox_lines = Some(count.total);
-                    self.state.inbox_identity = Some(count.identity);
-                    self.maybe_wake(&t3, Some(count.total), &notices, &count.line_numbers);
+                    self.remember_inbox_count(&count);
+                    self.maybe_wake(&t3, self.state.inbox_lines, &notices, &count.line_numbers);
                 }
                 Err(e) => {
                     eprintln!("agent-watch: ERROR inbox append failed: {e}");
@@ -387,17 +386,13 @@ impl Watcher {
             }
         } else if self.state.wake_pending.is_some() {
             // 新しい知らせの無い周回でも、後に回した起こし（起こし待ちの印）を確かめる（Issue #839）。
-            // 判定には印の値と補助記録だけを使い、受信箱は読まない（印が残る間、周回ごとに受信箱を
-            // 数え直さない）。既読の位置の範囲は、最後に数えた受信箱の行数で確かめる。受信箱が
-            // そのときと違えば（切り詰め・置き換え・追記）、上限の内で数え直してから使う
+            // 既読の位置の範囲は、最後に数えた受信箱の行数で確かめる。受信箱がそのときから
+            // 変わっていなければ（同一性が同じ）受信箱を読まない（印が残る間、周回ごとに数え直さない）。
+            // 変わっていれば（切り詰め・置き換え・書き換え・追記）、読むだけで上限の内で数え直す
             let inbox = self.pelway_dir.join(INBOX_FILE);
-            let same = io::inbox_identity(&inbox).ok() == self.state.inbox_identity;
-            if !same {
-                match io::append_inbox(&inbox, &[]) {
-                    Ok(count) => {
-                        self.state.inbox_lines = Some(count.total);
-                        self.state.inbox_identity = Some(count.identity);
-                    }
+            if io::inbox_identity(&inbox).ok() != self.state.inbox_identity {
+                match io::count_inbox(&inbox) {
+                    Ok(count) => self.remember_inbox_count(&count),
                     Err(_) => {
                         self.state.inbox_lines = None;
                         self.state.inbox_identity = None;
@@ -626,6 +621,18 @@ impl Watcher {
                 log("not-yet-read");
                 defer(&mut self.state);
             }
+        }
+    }
+
+    /// 数えた受信箱の行数と同一性を残す。数えている間に受信箱が変わっていたら、行数は
+    /// 不明とする（範囲を確かめられないので、既読の位置を使わない）。
+    fn remember_inbox_count(&mut self, count: &io::InboxCount) {
+        if count.stable {
+            self.state.inbox_lines = Some(count.total);
+            self.state.inbox_identity = Some(count.identity);
+        } else {
+            self.state.inbox_lines = None;
+            self.state.inbox_identity = None;
         }
     }
 

@@ -2596,15 +2596,16 @@ fn pending_position_is_last_worthy_line_in_batch() {
 
 #[test]
 fn cooldown_counts_from_when_the_wake_was_sent() {
-    // 送るのに 3 秒かかった。最短間隔 2 秒は、送り終えた時刻から数える
+    // 送るのに 8 秒かかった。最短間隔 4 秒は、送り終えた時刻から数える（送り始めた時刻から
+    // 数えると、次の周回は間隔の外になる。負荷で次の周回の起動が遅れても 4 秒の内に収まる）
     let sb = Sandbox::new("wake-839-sent-at");
     one_event(&sb);
     sb.conductor("mcp:conductor-1");
     sb.patrol_state(r#"{"inbox_offset":0}"#);
-    sb.fake("t3-send-sleep", "3");
+    sb.fake("t3-send-sleep", "8");
     let run = |sb: &Sandbox| {
         sb.command(&["--once"])
-            .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "2")
+            .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "4")
             .output()
             .unwrap()
     };
@@ -2617,15 +2618,19 @@ fn cooldown_counts_from_when_the_wake_was_sent() {
 }
 
 #[test]
-fn pending_only_cycles_do_not_read_the_inbox() {
-    // 起こし待ちの印だけを確かめる周は、受信箱を読まない（数え直さない）。受信箱が読めない
-    // （所有者以外に権限がある）状態でも、間隔がたてば印の値で判定して起こす
+fn pending_only_recount_reads_an_inbox_it_cannot_append_to() {
+    // 起こし待ちの印だけを確かめる周は、受信箱が変わったときだけ、読むだけで数え直す。
+    // 追記できない（所有者以外に権限がある）受信箱でも、読むだけの数え直しで起こす
     let sb = Sandbox::new("wake-839-no-recount");
     wake_then_defer_b_failure(&sb, 1);
-    fs::set_permissions(sb.inbox(), fs::Permissions::from_mode(0o644)).unwrap();
+    let counted = read_state(&sb)["inbox_identity"].clone();
     backdate_last_wake(&sb);
+    fs::set_permissions(sb.inbox(), fs::Permissions::from_mode(0o644)).unwrap();
     let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+    // 権限の変更で ctime が変わったので、読むだけで数え直して同一性を取り直した
+    assert_ne!(read_state(&sb)["inbox_identity"], counted);
+    assert_eq!(read_state(&sb)["inbox_lines"], 2);
 }
 
 #[test]
@@ -2663,4 +2668,36 @@ fn pending_only_cycle_recounts_a_changed_inbox() {
     sb.patrol_state(r#"{"inbox_offset":1}"#);
     let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
+
+#[test]
+fn pending_only_cycle_recounts_a_same_size_rewrite() {
+    // 大きさを変えずに書き換えた受信箱（改行 1 つを別の文字に）も、数え直す
+    let sb = Sandbox::new("wake-839-same-size");
+    wake_then_defer_b_failure(&sb, 1);
+    let text = fs::read_to_string(sb.inbox())
+        .unwrap()
+        .replacen('\n', " ", 1);
+    fs::write(sb.inbox(), text).unwrap();
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    backdate_last_wake(&sb);
+    run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1);
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
+}
+
+#[test]
+fn pending_only_recount_does_not_change_the_inbox() {
+    // 数え直しは読むだけ: 末尾の書きかけの断片を改行で閉じず、消えた受信箱を作らない
+    let sb = Sandbox::new("wake-839-read-only");
+    wake_then_defer_b_failure(&sb, 1);
+    let mut text = fs::read_to_string(sb.inbox()).unwrap();
+    text.push_str("{\"partial\"");
+    fs::write(sb.inbox(), &text).unwrap();
+    backdate_last_wake(&sb);
+    run_cooldown(&sb);
+    assert_eq!(fs::read_to_string(sb.inbox()).unwrap(), text);
+    fs::remove_file(sb.inbox()).unwrap();
+    run_cooldown(&sb);
+    assert!(!sb.inbox().exists());
 }
