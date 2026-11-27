@@ -69,3 +69,17 @@ round 4 のレビューでは、codex と claude がそろって同じ must-fix 
 5. 改善案: skill `implement-issue` の手順 4 に、「判定の入力を減らす変更（読むのをやめる・数えるのをやめる）では、その入力に頼っていた検査を一覧にして、残るかを確かめる」と書き足す。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 6）
+
+対象 head: d6447add0b1e381f9fffc2a3a0338c9a7c11f441
+
+round 5 のレビューは、codex が request-changes（must-fix 1 件）、claude が approve（`[文書のずれ]` の nit 1 件）だった。codex の must-fix と claude の nit を直した。
+
+1. 詰まった箇所: `mise run verify`: 1 回目は `scripts/tests/conductor-watch-board-queue.test.sh` が落ちた（`FAIL no-item produces .error` など）。この差分は scripts に触れていない。単独で 2 回走らせると FAIL は 0 件で、全体をやり直すと exit=0 だった。たまに落ちるテストと見て先へ進んだ。
+2. 曖昧だった文: 「ファイルの同一性と変更の有無を確認できる記録を行数に結び付け、変更時だけ上限付きで確かめ直す」（codex の round 5 のレビューの must-fix）。同一性は、デバイス・inode・大きさの 3 つにした。中身は読まない。
+3. 仮定と解釈: 印だけの周では、受信箱の同一性が最後に数えたときと同じなら、そのときの行数を使う。違えば上限の内で数え直し、数え直せなければ行数を不明にする（既読の位置を使わない）。大きさが変わらない書き換え（同じ長さの別の中身）は見分けられないが、正規の書き手は agent-watch だけで、受信箱に追記するだけなので、受け入れた。
+4. 足りなかった情報・検証手段: 同じ長さで中身を書き換えた受信箱の扱いは、テストしていない。
+5. 改善案: `docs/dev-environment.md` の「指揮役の受信箱と起こし」に、「受信箱は agent-watch が追記するだけで、ほかの書き手が切り詰め・書き換えをしない」という前提を、1 か所にまとめて書く。
+
+使ったスキル: implement-issue
