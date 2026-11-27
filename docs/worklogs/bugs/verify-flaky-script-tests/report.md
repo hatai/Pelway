@@ -115,7 +115,7 @@ Issue の対象外だったため調査だけの予定でしたが、開発リ�
 - 回帰テスト（`scripts/tests/conductor-watch-ensure.test.sh`）に次の 3 つを入れました。
   1. ensure が、`scripts/conductor-watch.sh` を引数に並べるだけのプロセスと、リポジトリの外の写しの見張りを選ばないこと。unit の外の見張りを置き換えるのと同じ 1 回の実行で確かめます（systemd・fallback の両方）。修正前（main の版）では 4 つの確認が落ちて、修正後は通ります。
   2. `./scripts/conductor-watch.sh` と手で起動した見張りが置き換わること。空白を含む checkout で続けて実行しても見張りが 1 本のままであること。この PR の最初の版（相対パスの前置きと空白を扱えていなかった）では 10 の確認が落ちて、修正後は通ります。
-  3. conductor-watch の実際の試験（`conductor-watch-slots.test.sh`：単体の PID への kill。`conductor-watch-stall.test.sh`：`setsid` で起こした見張りのプロセスグループごとの kill）を、ensure の管理対象の見張りと並行して通しても、試験が通り、試験が立てた見張りが残らず、管理対象の見張りが残ること。これは修正の前後で変わらない、将来への見張りです（修正前の ensure でも通ります）。
+  3. conductor-watch の実際の試験（`conductor-watch-slots.test.sh`：単体の PID への kill。`conductor-watch-stall.test.sh`：試験 18 で、時間切れになった巡回への実際の停止処理 `kill -KILL -- -PGID` を通し、見張りと別名の子が別の PID で存在したことと停止後にグループが空であることを確かめる）を、ensure の管理対象の見張りと並行して通しても、試験が通り、試験が立てた見張りが残らず、管理対象の見張りが残ること。これは修正の前後で変わらない、将来への見張りです（修正前の ensure でも通ります）。
 - 修正前後で同じ実験を比べました（最終版の修正で実施）。ユーザー・pid・mount の名前空間の中で、slots の試験と `bash scripts/shellcheck.sh` を走らせている間、本物の ensure（`systemctl` はモック）を 0.1 秒間隔で実行し続けます。
 
 | 版 | 反復 | slots の試験 | `bash scripts/shellcheck.sh` | ensure の実行 | ensure の kill |
