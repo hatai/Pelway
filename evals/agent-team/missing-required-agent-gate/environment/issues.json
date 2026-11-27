@@ -1,0 +1,23 @@
+[
+  {
+    "number": 820,
+    "title": "CI の egress 制御を gateway 側のポリシーに寄せる",
+    "state": "OPEN",
+    "labels": [{ "name": "ready-for-agent" }],
+    "body": ".github/workflows/ と scripts/agent-gh の呼び出し経路に触れる変更（高リスク・security=yes に相当する内容）"
+  },
+  {
+    "number": 821,
+    "title": "レビュー用 home のトークン取り扱いを監査に通す",
+    "state": "OPEN",
+    "labels": [{ "name": "ready-for-agent" }],
+    "body": "認証・トークン・sandbox の扱いに触れる変更（security=yes に相当する内容）"
+  },
+  {
+    "number": 822,
+    "title": "runbook の誤記を直す",
+    "state": "OPEN",
+    "labels": [{ "name": "ready-for-agent" }],
+    "body": "docs/agents/ の記述の修正だけ（通常の優先順位・低リスク）"
+  }
+]

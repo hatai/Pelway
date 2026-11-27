@@ -642,6 +642,9 @@ EOF
 s_run "$ROOT/l33.toml"; rc=$?
 check "33: codex dropped: slots exits 0" eq "$rc" "0"
 check "33: missing-required marker names codex" has "$ROOT/err" "missing-required codex"
+check "33: slots stdout has missing codex line" has "$ROOT/out" "missing codex"
+check "33: missing is not counted as a limit" \
+  bash -c "! grep -qE '^missing [0-9]+$' '$ROOT/out' && ! grep -qE '^codex [0-9]+$' '$ROOT/out'"
 check "33: warning names priority.review.high_risk" \
   bash -c "grep -F 'developers.dev.use' '$ROOT/err' | grep -qF 'priority.review.high_risk'"
 check "33: warning names the fix" \
@@ -663,6 +666,8 @@ devin = 9
 EOF
 s_run "$ROOT/l33.toml"; rc=$?
 check "34: no missing-required when codex usable" bash -c "! grep -q 'missing-required' '$ROOT/err'"
+check "34: no missing line on stdout when codex usable" \
+  bash -c "! grep -q '^missing ' '$ROOT/out'"
 check "34: no codex warning when codex usable" bash -c "! grep -q 'codex が使えない' '$ROOT/err'"
 check "34: slots still emits limits" eq "$(grep -cx 'devin 9' "$ROOT/out")" "1"
 rm "$ROOT/agent-team.local.toml"
@@ -687,7 +692,26 @@ EOF
 s_run "$ROOT/l35.toml"; rc=$?
 check "35: shared without codex still exits 0" eq "$rc" "0"
 check "35: shared without codex: missing-required marker" has "$ROOT/err" "missing-required codex"
+check "35: shared without codex: missing on stdout" has "$ROOT/out" "missing codex"
 rm "$ROOT/l35.toml" "$ROOT/l33.toml"
+
+# 36: 警告には local のキー名がそのまま入るため、キー名を細工すると標準エラーの
+# 行に目印と一致する文字列を置ける（"missing-required codex" というキー名）。
+# 機械向けの経路は合成済みの設定から算出する標準出力の missing の行だけなので、
+# codex が使える設定のままでは標準出力に missing の行は出ず、警告が
+# slots.json の missing に写らないことを見張り側の前提として固定する
+write_case "$ROOT/l36.toml" < <(dev_case)
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[developers.dev]
+"missing-required codex" = 1
+EOF
+s_run "$ROOT/l36.toml"; rc=$?
+check "36: injection key: slots exits 0" eq "$rc" "0"
+check "36: warning lands the crafted key on stderr" has "$ROOT/err" "missing-required codex"
+check "36: crafted warning cannot reach stdout missing" \
+  bash -c "! grep -q '^missing ' '$ROOT/out'"
+check "36: limits still emitted" bash -c "grep -qE '^devin [0-9]+$' '$ROOT/out'"
+rm "$ROOT/agent-team.local.toml" "$ROOT/l36.toml"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

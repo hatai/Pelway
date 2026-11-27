@@ -104,7 +104,7 @@ local を置く場所: 本体の checkout に置くと worktree 作成時に `sc
 
 - 表は深く重ね、配列は丸ごと置き換える。上書きできない項目は「`<file>: warning: <キー>: <理由>`」を標準エラーに出して無視する。警告と検証エラーには local の値を出さず、キー名と理由だけを出す（`effective` などの正常な出力には、設計どおり重ねた結果の値が入る）。黙って適用も黙って無視もしない
 - 重ねた結果は共有の toml と同じ検証を通す。通らなければ `validate`・`slots`・`effective` は非 0 で止まる（共有の規則を local が下げることはできない）。use から担当を外したとき、その担当への共有から継いだ参照（`slots`・`review_limits`・`priority` 内の並び）は重ねた結果から落ちる（残すと検証で止まり、外す上書き自体が書けなくなるため。落とした項目も警告する）。local が明示した項目は落とさずに検証にかける。優先順位の並びが空になる条件は、local が並びを置き換えて埋める
-- 共有の規則で必須の役に当たる担当が local の use で使えなくなるとき（例: codex を外す）は、キー名と直し方（codex を `use` に戻すか、人が担当を割り当て直す）つきの警告を出す（自動で別の担当に回さない）。足りない必須の担当は、見張りの `slots.json` の `missing` と watch.log の `SLOTS missing <担当>` の行に出る。codex が使えないあいだ、マージに要る「GitHub 上の現在の head への codex の有効な approve」は取れず、`priority.review.high_risk` の並びを local で書き換えてもこの関門は下げられないため、指揮役は高リスク・security=yes の仕事の着手を止める（それ以外の優先順位の仕事は止めない）。扱いは実装役が `needs-decision` で指揮役に上げる
+- 共有の規則で必須の役に当たる担当が local の use で使えなくなるとき（例: codex を外す）は、キー名と直し方（codex を `use` に戻すか、人が担当を割り当て直す）つきの警告を出す（自動で別の担当に回さない）。足りない必須の担当は、`slots` の標準出力の `missing <担当>` の行から見張りが `slots.json` の `missing` と watch.log の `SLOTS missing <担当>` の行に写す（機械向けの経路は標準出力の行。警告のキー名には local のキー名が入るため、見張りは標準エラーからは拾わない）。codex が使えないあいだ、マージに要る「GitHub 上の現在の head への codex の有効な approve」は取れず、`priority.review.high_risk` の並びを local で書き換えてもこの関門は下げられないため、指揮役は高リスク・security=yes の仕事の着手を止める（それ以外の優先順位の仕事は止めない）。この approve の関門は、優先順位の表で選ばれる担当とは独立した、すべてのマージの条件（正本は skill `command-team` の「マージ」）。扱いは実装役が `needs-decision` で指揮役に上げる
 
 ## マージキュー
 

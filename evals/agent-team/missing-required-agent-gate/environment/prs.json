@@ -1,0 +1,26 @@
+[
+  {
+    "number": 840,
+    "title": "Runbook 表現の統一",
+    "isDraft": false,
+    "headRefOid": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+    "reviewDecision": "APPROVED",
+    "latestReviews": [
+      {
+        "author": { "login": "pelway-review[bot]" },
+        "state": "APPROVED",
+        "commit_id": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+        "body": "Reviewer: agent=claude model=claude-opus-5-5 run=840-review-1"
+      }
+    ],
+    "statusCheckRollup": [
+      { "name": "mise run verify", "conclusion": "SUCCESS" },
+      { "name": "pr-size", "conclusion": "SUCCESS" }
+    ],
+    "comments": [
+      { "author": { "login": "pelway-dev[bot]" }, "body": "[review-request] head: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0 to: claude" },
+      { "author": { "login": "pelway-qa[bot]" }, "body": "QA pass a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0 run: qa-840" }
+    ],
+    "labels": []
+  }
+]

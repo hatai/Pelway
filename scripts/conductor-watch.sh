@@ -718,15 +718,19 @@ if os.path.isfile("agent-team.toml"):
                 if "agent-team.local.toml: overlay applied" in r.stderr:
                     slots_lines.append("SLOTS overlay agent-team.local.toml")
                 # 共有の規則で必須の役に当たるのに使えない担当（Issue #804。use から
-                # 外された codex など）を、枠の算出に使った実行の missing-required の
-                # 印から拾って SLOTS missing の行と slots.json の missing に載せる。
+                # 外された codex など）を、枠の算出に使った実行が標準出力に出した
+                # 「missing <担当>」の行から拾って SLOTS missing の行と slots.json の
+                # missing に載せる。標準エラーの missing-required の警告は拾わない
+                # （警告には local のキー名がそのまま入り、キー名に目印と一致する
+                # 文字列を置けるため。合成済みの設定から算出した担当名だけが出る
+                # 標準出力の行はその影響を受けない）。
                 # codex が載るあいだ高リスク・security=yes の仕事の着手は止まる
                 # （マージに要る codex の approve が取れない。runbook「3. 同時数と順番待ち」）
                 slots_missing = []
-                for ln in r.stderr.splitlines():
-                    mm = re.search(r"missing-required (\S+)", ln)
-                    if mm and mm.group(1) not in slots_missing:
-                        slots_missing.append(mm.group(1))
+                for ln in r.stdout.splitlines():
+                    p = ln.split()
+                    if len(p) == 2 and p[0] == "missing" and p[1] not in slots_missing:
+                        slots_missing.append(p[1])
                 for n in slots_missing:
                     slots_lines.append(f"SLOTS missing {n}")
                 slots_st, slots_reason, slots_sig = "ok", None, "|".join(slots_lines)

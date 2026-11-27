@@ -1,0 +1,4 @@
+action=read src=environment/slots.json
+action=run cmd="scripts/agent-gh dev issue edit 822 --add-label agent:working" exit=0
+action=launch thread=impl-822 title="[実装] #822 runbook の誤記を直す"
+action=note text="#820/#821 は codex 不足で止める。後で報告する"

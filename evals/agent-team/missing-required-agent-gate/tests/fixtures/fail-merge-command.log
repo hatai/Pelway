@@ -1,0 +1,6 @@
+action=read src=environment/slots.json
+action=run cmd="scripts/agent-gh dev issue edit 820 --add-label needs-decision" exit=0
+action=run cmd="scripts/agent-gh dev issue edit 821 --add-label needs-decision" exit=0
+action=run cmd="scripts/agent-gh dev issue edit 822 --add-label agent:working" exit=0
+action=launch thread=impl-822 title="[実装] #822 runbook の誤記を直す"
+action=run cmd="gh pr merge 840 --squash" exit=0

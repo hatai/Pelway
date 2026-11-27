@@ -471,6 +471,20 @@ check "no SLOTS missing after local removed" nhas "$ROOT/out.log" '^SLOTS missin
 check "slots.json missing empty after local removed" \
   python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["missing"] == [], d.get("missing")' "$SLOTS"
 
+# --- 13k. local のキー名に目印と一致する文字列を置いても missing に入らない
+# （警告にはキー名がそのまま出る。missing は枠の算出に使った実行の標準出力の
+# missing の行だけから拾うため、標準エラーの警告は記録に届かない） ---
+cat > "$ROOT/repo/agent-team.local.toml" <<'EOF'
+[developers.hatai]
+"missing-required codex" = 1
+EOF
+run_cycles 1
+check "crafted key warning cannot inject missing" \
+  python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["missing"] == [], d.get("missing")' "$SLOTS"
+check "no SLOTS missing line from crafted key" nhas "$ROOT/out.log" '^SLOTS missing '
+rm "$ROOT/repo/agent-team.local.toml"
+run_cycles 1
+
 # --- 14. 見張りは GitHub に書き込まない（agent-gh は読み取りだけ、素の gh も呼ばない） ---
 if grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/events)" "$MOCK/gh-calls.log" | grep -q .; then
   printf 'FAIL %s\n' "no non-read agent-gh calls"

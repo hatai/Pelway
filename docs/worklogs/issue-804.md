@@ -120,8 +120,8 @@ push した head: 2eb2dca6（main 取り込み）
 レビュー: codex_review（run=804-review-round10-codex、review 6086699065）は request-changes（must-fix 5、nit 2）。usage limit のあと自動で resume されて戻った
 
 must-fix への対応:
-1. worktree-setup の最終名の存在確認と配置が絶対パスの `to` を使い、検査した fd と結びついていなかった → src 側も `exec {srcdir}<"$src"` で検査前に fd 固定し、git の検査・存在確認・配置をすべて `/proc/self/fd/` 起点に。コピーは dir_fd 基点の python 手続きに集約
-2. 一時ファイルが予測可能な名前で、配置が名前の再解決だった → 乱数つきの一時名を O_EXCL|O_NOFOLLOW で作り、開いた fd を保持したまま `/proc/self/fd/<tfd>` から os.link で公開（一時名が差し替わっても自分が書いた inode だけが出る）。失敗時は finally で自分の一時名を消す（試験 5c に残り無しの確認を追加）
+1. worktree-setup の最終名の存在確認と配置が絶対パスの `to` を使い、検査した fd と結びついていなかった → src 側も `exec {srcdir}<"$src"` で検査前に fd 固定し、存在確認と配置を `/proc/self/fd/` 起点に（登録一覧の取得が fd 起点になったのは round 11）。コピーは dir_fd 基点の python 手続きに集約
+2. 一時ファイルが予測可能な名前で、配置が名前の再解決だった → 乱数つきの一時名を O_EXCL|O_NOFOLLOW で作り、開いた fd を保持したまま `/proc/self/fd/<tfd>` から os.link で公開（公開されるのは自分が書いた inode だけ）。失敗時は finally で一時名を消す（この時点の後始末は照合なしの unlink で、名差し替え時に他処理のファイルを消しうる隙間が残っていた。round 11 で実体照合に、round 12 で無名 inode 化して後始末自体を消した。試験 5c に残り無しの確認を追加）
 3. コピー元の open がブロックし得た（FIFO 化で型検査に届かない）→ O_NOFOLLOW|O_NONBLOCK で開いてから S_ISREG を確かめる
 4. agent-team-config の load_local_fd が開いた後の OSError・UTF-8 エラーを捕捉せずトレースバック → TOML 構文エラーと同じ「ファイル名と固定の理由」で fail
 5. 2eb2dca6 の必須チェックが lint・test 取り消し → この対応の push で対象 head の CI を通し直す（ローカルでは対象試験すべて pass。verify-run.test.sh と gateway の試験はこの環境固有の失敗で差分と無関係）
@@ -136,7 +136,7 @@ push した head: a5bc8bac（round 10 の対応）
 
 must-fix への対応:
 1. worktree 登録の照合がパス文字列で、登録一覧の取得も $src パス起点だった → 登録一覧を srcdir の fd 起点で取り、照合はディレクトリの実体（`stat -L` の dev:ino）で行う。作業ツリーの移動が検査と重なった場合は拒否、検査後の移動は fd が同じ実体を追うため写す先は登録した実体のまま（コメントに明記）
-2. 一時ファイルの後始末が名前の再解決で他の処理のファイルを消し得、削除失敗を捨てて成功になり得た → 後始末は一時名の実体照合（dev:ino が自分の tfd と一致するときだけ unlink、一致しなければ触らない）にし、後始末の失敗は成功として返さない（終了コード 10 → die）。コピー手続きは worktree-setup-copy に分離して失敗経路を直接試験できる形に（試験 5d: 公開失敗後に一時ファイルが残らず既存ファイルを触らない）
+2. 一時ファイルの後始末が名前の再解決で他の処理のファイルを消し得、削除失敗を捨てて成功になり得た → 後始末は一時名の実体照合（dev:ino が自分の tfd と一致するときだけ unlink、一致しなければ触らない）にし、後始末の失敗は成功として返さない（終了コード 10 → die）。コピー手続きは worktree-setup-copy に分離して失敗経路を直接試験できる形に（試験 5d: 公開失敗後に一時ファイルが残らず既存ファイルを触らない）（この時点でも照合と削除が別操作のため、間に名差し替えが入れば他処理のファイルを消しうる隙間が残っていた。round 12 で O_TMPFILE の無名 inode に変え、後始末とその失敗経路自体を消した）
 3. 両側ディレクトリを通常のリダイレクトで開いていたため、パスが FIFO に変わると書き手を待って止まり得た → O_DIRECTORY|O_NOFOLLOW|O_NONBLOCK で開く python の起動段を挟み、fd を env 引き継ぎで自分自身を起動し直す形に（待たずに種類も同時に確かめられる。引数の再解釈を避けるため起動し直しは env の値だけを見る）
 4. conductor-rebuild.test.sh が実際の本体 checkout に local を書いていた（不在判定と書き込みの間に開発者が保存すると切り詰めて消す、dangling symlink で存在確認をすり抜ける）→ 試験専用の一時リポジトリに本体・worktree・local を作り、実際の開発者設定を使わない形に
 
@@ -146,9 +146,25 @@ nit への対応: local の不正 UTF-8 で非 0・ファイル名と固定の�
 
 指揮役経由の決定: local で codex を use から外すことを許す・代替レビュー担当は立てない・validate は通す。codex が無い環境では指揮役が高リスクと security=yes を着手前に止める。マージ関門は toml ではなく GitHub 上の今の head への codex の approve。追加の受け入れ条件 3 件への対応:
 
-1. 見張りの SLOTS 行に足りない必須の担当を出す → agent-team-config が `missing-required <担当>` の印を標準エラーに出し（shared のみ・local ありの両経路）、conductor-watch.sh が `SLOTS missing <担当>` の行と slots.json の `missing`（status ok の記録にだけ載る、空は「確かめた上で不足なし」）に写す
+1. 見張りの SLOTS 行に足りない必須の担当を出す → agent-team-config が `missing-required <担当>` の警告を標準エラーに出し（shared のみ・local ありの両経路）、conductor-watch.sh が `SLOTS missing <担当>` の行と slots.json の `missing`（status ok の記録にだけ載る、空は「確かめた上で不足なし」）に写す（round 12 で機械向けの経路は `slots` の標準出力の `missing <担当>` の行に替わった。警告のキー名には local のキー名が入るため、標準エラーの行からの部分一致は拾えたが、local のキー名を細工すると実際には不足していない担当を記録に載せられてしまうため）
 2. 警告・エラー文に priority.review.high_risk と直し方（codex を use に戻す／人が割り当て直す）を書く → warn_required の両警告を更新
-3. 試験で固定: codex を外すと高リスクの着手が止まる（missing-required の印・SLOTS missing・slots.json missing + command-team/runbook の着手停止の決まり）、local で high_risk を変えても Codex approve なしにマージできない（high_risk を張り替えても codex の approve 関門の警告が残る。関門は toml でなく GitHub 側）、低リスクは止まらない（通常の優先順位は missing で止めない決まりと、枠の計上が変わらない試験）。偽装した SLOTS missing 行は slots.json を変えないことも固定
+3. 試験で固定: codex を外すと高リスクの着手が止まる・local で high_risk を変えても Codex approve なしにマージできない・低リスクは止まらない → round 12 で、指揮役の操作結果まで確かめる評価として evals/agent-team/missing-required-agent-gate を追加（codex 不足下で高リスク・security=yes の着手をせず・needs-decision に上げ・低リスクは割り当て・codex approve の無い PR に automerge を付けないことをアクションログで採点）。文面の存在確認は board-patrol-docs 系の文言 pin、枠の計上が変わらないことは conductor-watch-slots の試験で固定（偽装した SLOTS missing 行は slots.json を変えないことも含む）
 
-運用変更（指揮役）: 以降のレビュー委託は指揮役が t3_thread_launch で立てる。実装側は delegate_task で起動せず、レビューが要る時点で state/next に head・round を書いて止まる
+運用変更（指揮役）: 以降のレビュー委託は指揮役が t3_thread_launch で立てる。実装側は delegate_task で起動せず、レビューが要る時点で state/next に head・round を書いて止まる（後に取り消し。instanceId `codex_review` / `claude_review` を使う限り実装側の delegate_task で立ててよい元の運用に戻った。汎用の `codex` / `claude` instanceId では立てない、modelSelection には instanceId と model の両方を渡す）
+
+## レビュー対応（round 12）
+
+対象 head: a1cb3291
+レビュー: codex_review（run=804-review-round12b-codex）は request-changes（must-fix 5、nit 2）。初回の委託は対象 head が古くなったため task_cancel、2 回目で投稿
+
+must-fix への対応:
+1. worktree-setup-copy の一時ファイルが名前を持っていた → O_TMPFILE の無名 inode に変更。名前を持たないため「実体照合と unlink の間に名差し替え」という他処理のファイルを消しうる隙間が構造上消え、後始末の経路自体も無くなった（削除失敗を成功として返す終了コード 10 の経路も同時に消滅。終了コード 7 の意味は「無名の一時 inode を作れない」に、9 は読み書き・リンクの失敗に）
+2. conductor-watch が `missing-required` を標準エラーから部分一致で読んでいた → local のキー名（そのまま警告に載る）を「missing-required codex」と細工すると、実際には不足していない担当を slots.json の missing に載せられてしまう。agent-team-config の `slots` が機械向けに標準出力へ `missing <担当>` の行を出す（load_effective が LAST_MISSING を保持）形に替え、conductor-watch は標準出力の `^missing (\S+)$` だけを読む。標準エラーの `missing-required` 警告は人向けの記述として残す
+3. codex を local で use から外したとき、優先順位の表が別のレビュー担当を指すとその担当の approve でマージできてしまう → command-team の「マージ」に「現在の head への codex 担当の有効な Approve（`Reviewer: agent=codex` の委託記録が要る）」を優先順位の表・local に関係なく必須と明記。Issue の割り当ての可否でも、現状の slots.json の missing（記録が無効なら effective を取り直す）で高リスク・security=yes を止める参照を追記
+4. implement-issue が必須担当の不足を見ていなかった → 「止まる条件」に行追加（effective・slots の missing-required で、高リスク・security=yes・レビュー委託対象なら委託せず Draft のまま人に委ねる。解消の選択肢は codex を use に戻す・人が担当を割り当て直す・待つ）。手順 8 の委託前に `effective` で確かめる段と、手順 9 の Draft 解除前の再確認を追加
+5. 追加の受け入れ条件 3 件を試験で固定 → evals/agent-team/missing-required-agent-gate を新設（codex 不足下で高リスク・security=yes の着手・再開をせず needs-decision に上げ、低リスクは割り当て、codex approve の無い PR に automerge・マージコマンドを使わないこと。fail 系 6・pass 系 4 の fixture、agent-gh・T3 の呼び出しログで採点）。文言 pin は board-patrol-docs に条件6cとして追加
+
+nit への対応: grokbot-runbook の missing の段落に usage と同じ記録の有効条件（読めない・ok でない・missing キー無し・updated_at が 60 秒より古い・patrol_at が state.json と違うときは effective を取り直す）を適用。worklog の round 10・11・12 の機構の記述をコードの保証範囲に合わせて訂正（このセクション内で畳み込み）
+
+あわせて: agent-team-config の試験 33–35 を標準出力の `missing <担当>` の行を確かめる形に拡張し、細工した警告のキー名が標準出力の missing に届かない試験 36、conductor-watch-slots に細工キーで slots.json の missing を汚せない試験 13k を追加
 

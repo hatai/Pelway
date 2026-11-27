@@ -11,19 +11,17 @@
 #   1. コピー元を dir_fd 基点で O_NOFOLLOW|O_NONBLOCK に開く（symlink を
 #      たどらず、FIFO に変わっても書き手を待たない）。開いた fd が通常
 #      ファイルのときだけ読む
-#   2. 一時名は乱数つきで O_EXCL|O_NOFOLLOW に作る（予測不能・自分専有・
-#      symlink は作らない）
-#   3. 公開は、書き終えた fd を /proc/self/fd 経由でリンクする（一時名や
-#      最終名が並行して差し替わっても、公開されるのは自分が書いた inode
-#      だけで、既存名は上書きしない）
-#   4. 後始末は、一時名の参照先が自分が作った実体（dev:ino 一致）のときだけ
-#      unlink する（別の処理が置いたファイルは消さない）。後始末に失敗
-#      した場合は成功として返さない
+#   2. 書き込み先は O_TMPFILE で作る無名の inode（名前を持たないため、
+#      名前の差し替えは原理的に起きず、後始末の照合・unlink 自体が要らない。
+#      公開に失敗しても fd を閉じれば inode は自動で消える）
+#   3. 公開は、書き終えた fd を /proc/self/fd 経由でリンクする（最終名が
+#      並行して差し替わっても、公開されるのは自分が書いた inode だけで、
+#      既存名は上書きしない。FileExistsError なら既に最終名がある）
 #
 # 終了コード: 0 写した / 4 コピー元が無い / 5 コピー元を開けない（権限等） /
 #   6 コピー元が通常ファイルでない（symlink・FIFO・ディレクトリ等） /
-#   7 一時名を作れない / 8 最終名が既に現れた / 9 読み書き・リンクの失敗 /
-#   10 後始末の失敗（一時ファイルが残りうる）
+#   7 無名の一時 inode を作れない（ファイルシステムが O_TMPFILE に
+#     対応しない場合を含む）/ 8 最終名が既に現れた / 9 読み書き・リンクの失敗
 import errno
 import os
 import stat
@@ -42,9 +40,8 @@ except OSError as e:
 if not stat.S_ISREG(os.fstat(sfd).st_mode):
     sys.exit(6)
 
-tmp = f"{name}.worktree-setup.{os.getpid()}.{os.urandom(4).hex()}.tmp"
 try:
-    tfd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+    tfd = os.open(".", os.O_TMPFILE | os.O_WRONLY | os.O_CLOEXEC,
                   0o644, dir_fd=ddir)
 except OSError:
     sys.exit(7)
@@ -70,25 +67,10 @@ try:
         except OSError:
             rc = 9
 finally:
-    try:
-        os.close(sfd)
-    except OSError:
-        pass
-    # 一時名の参照先が自分の作った実体か確かめてから消す。一致しなければ
-    # 別の処理のものなので触らない（自分の一時名は既に外されている）
-    try:
-        st = os.stat(tmp, dir_fd=ddir, follow_symlinks=False)
-        tf = os.fstat(tfd)
-        if st.st_ino == tf.st_ino and st.st_dev == tf.st_dev:
-            os.unlink(tmp, dir_fd=ddir)
-    except FileNotFoundError:
-        pass
-    except OSError:
-        if rc == 0:
-            rc = 10
-    try:
-        os.close(tfd)
-    except OSError:
-        pass
+    for fd in (sfd, tfd):
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 sys.exit(rc)

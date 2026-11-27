@@ -176,10 +176,11 @@ for name in agent-team.toml agent-team.local.toml; do
   fi
   # コピー本体は dir_fd 基点の 1 つの python 手続き（worktree-setup-copy）
   # に任せる。コピー元は検査した srcdir から O_NOFOLLOW|O_NONBLOCK で開き、
-  # 公開は書いた実体の fd から link、後始末は一時名の実体照合つき unlink。
+  # 書き込み先は O_TMPFILE の無名 inode（名前を持たないため名差し替え・
+  # 後始末の経路が要らない）、公開は書いた実体の fd から link。
   #   終了コード: 0 写した / 4 本体にも無い / 5 本体側を開けない（権限等） /
-  #   6 本体側が通常ファイルでない / 7 一時名を作れない / 8 最終名が現れた /
-  #   9 読み書き・リンクの失敗 / 10 後始末の失敗
+  #   6 本体側が通常ファイルでない / 7 無名の一時 inode を作れない /
+  #   8 最終名が現れた / 9 読み書き・リンクの失敗
   rc=0
   python3 -I "$(dirname "${BASH_SOURCE[0]}")/worktree-setup-copy" \
     "$dstdir" "$srcdir" "$name" || rc=$?
@@ -199,8 +200,6 @@ for name in agent-team.toml agent-team.local.toml; do
       echo "worktree-setup: skip $name（本体側が通常ファイルでない）" ;;
     8)
       echo "worktree-setup: skip $name（worktree 側に既にある）" ;;
-    10)
-      die "worktree 側の一時ファイルの後始末に失敗（$name）" ;;
     *)
       # 本体に通常ファイルとしてある設定は枠・担当の決まりになるため、写せなければ
       # どちらの名前でも失敗とする（写せないまま交代すると、枠を読めない・上書きを

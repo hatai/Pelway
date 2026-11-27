@@ -4,7 +4,8 @@
 # 使い方:
 #   scripts/agent-team-config validate [<file>]          検証する。<file> の既定はルートの agent-team.toml
 #   scripts/agent-team-config slots <login> [<file>]     その開発者の実装・調査の枠を「<担当> <上限>」で 1 行 1 つ出す
-#                                                        （validate と同じ検証を通してから出す。違反があれば非 0 で標準出力は空）
+#                                                        （validate と同じ検証を通してから出す。違反があれば非 0 で標準出力は空。
+#                                                        必須の役に当たる担当の不足は枠の行のあとの「missing <担当>」の行で出る）
 #   scripts/agent-team-config effective <login> [<file> [<local-file>]]
 #                                                        重ねた結果（その開発者の表と担当の登録情報）を JSON で出す。
 #                                                        手順書・skill で toml を直接読む代わりに使う。<local-file> は
@@ -39,7 +40,14 @@ subcommands:
   slots <login> [<file>]   開発者 <login>（GitHub の login）の実装・調査の同時枠を
                             「<担当> <上限>」で 1 行 1 つ、ファイルの並びどおりに出す。
                             validate と同じ検証を通してから出し、違反があれば
-                            標準出力には何も出さずに終了コード 1 で止まる
+                            標準出力には何も出さずに終了コード 1 で止まる。
+                            共有の規則で必須の役に当たる担当が使えないとき
+                            （local で use から外された codex など）は、枠の行のあとに
+                            「missing <担当>」の行を 1 行 1 つ出す（見張りが
+                            slots.json の missing に写す機械向けの経路。
+                            標準エラーの missing-required の警告は人が読むもので、
+                            警告には local のキー名が入るため機械向けの判定は
+                            この行だけを読む）
   effective <login> [<file> [<local-file>]]
                             重ねた結果を JSON で出す（agents の登録情報と、その
                             developers.<login> の表だけ）。手順書・skill で
@@ -505,11 +513,18 @@ def load_local_fd(fobj, label):
         fail(f"{label}: 開けない・読めない（{type(e).__name__}）")
 
 
+# load_effective が最後に確かめた必須の担当の不足（機械向けの経路に使う。
+# 標準エラーの missing-required の警告は人が読むもので、警告に local の
+# キー名がそのまま入るため機械向けの判定にはこの一覧を使う）
+LAST_MISSING = []
+
+
 def load_effective(path, login, lpath=None):
     """共有の toml を検証し、local（あれば）を重ねて重ねた結果を検証して返す。
     local が無ければ共有の doc をそのまま返す（従来どおり）。login は slots・effective の
     呼び出し側の開発者（自分以外の表は無視）。validate では None。
     lpath を渡すと <file> と同じディレクトリの代わりにそのパスを local として読む"""
+    global LAST_MISSING
     doc = load(path)
     validate_doc(doc, path)
     if lpath is None:
@@ -528,6 +543,7 @@ def load_effective(path, login, lpath=None):
         emit_warnings(path)
         for n in missing:
             sys.stderr.write(f"{path}: missing-required {n}\n")
+        LAST_MISSING = missing
         return doc
     local = load_local_fd(lf, lpath)
     merged = merge_local(copy.deepcopy(doc), local, login)
@@ -536,13 +552,14 @@ def load_effective(path, login, lpath=None):
     # 枠の算出に使った実行の出力から確かめられるように stderr に出す
     sys.stderr.write(f"{lpath}: overlay applied\n")
     # 必須の役に当たる担当不足の警告は検証より先に出す（検証で止まる場合にも
-    # needs-decision へ引き継げる根拠を残す）。missing-required の行は、見張りが
-    # SLOTS missing の行と slots.json の missing に写す機械向けの同名の印
+    # needs-decision へ引き継げる根拠を残す）。missing-required の行は人が読む警告
+    # で、機械向けの経路は LAST_MISSING と slots サブコマンドの missing の行
     missing = warn_required(merged, [login] if login is not None else
                             [x for x in merged.get("developers", {})])
     emit_warnings(lpath)
     for n in missing:
         sys.stderr.write(f"{lpath}: missing-required {n}\n")
+    LAST_MISSING = missing
     # local の値をエラーに出さない（キー名と理由だけ）
     global show_values
     show_values = False
@@ -575,6 +592,12 @@ def do_slots(login, path):
         fail(f"{path}: developers.{login} の表が無い")
     for name, v in devs[login]["slots"].items():
         print(f"{name} {v}")
+    # 必須の役に当たる担当の不足は「missing <担当>」の行で標準出力に出す。
+    # 標準エラーの missing-required の警告には local のキー名がそのまま
+    # 入るため、見張り（slots.json の missing）など機械向けの判定は
+    # 警告ではなくこの行を読む（合成済みの設定から算出した値だけが出る）
+    for n in LAST_MISSING:
+        print(f"missing {n}")
 
 
 def do_effective(login, path, lpath=None):

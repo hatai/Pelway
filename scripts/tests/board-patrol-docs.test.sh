@@ -107,6 +107,26 @@ check cond6b_spec_missing_gate docs/superpowers/specs/agent-team.md \
   'codex を `use` に戻すか、人が担当を割り当て直す' \
   'priority.review.high_risk'
 
+# 条件6c（Issue #804・hatai 決定の追加条件）: マージには現在の head への codex の
+# 有効な Approve が優先順位の表と独立して要ることが command-team の「マージ」に、
+# codex が欠けるあいだ委託・Draft 解除をせず Draft のまま人に委ねる分岐が
+# implement-issue に、missing の機械向けの経路が標準出力の `missing <担当>` の行
+# であることが runbook と仕様に書かれている。
+check cond6c_command_team_merge_gate .agents/skills/command-team/SKILL.md \
+  '`automerge` ラベルを付ける条件' \
+  'codex 担当の有効な Approve' \
+  'Reviewer: agent=codex' \
+  'codex の委託記録が無い'
+check cond6c_implement_issue_draft_kept .agents/skills/implement-issue/SKILL.md \
+  'missing-required' \
+  'PR は Draft のまま' \
+  'Draft を解除せず'
+check cond6c_runbook_missing_channel docs/agents/grokbot-runbook.md \
+  '`missing <担当>` の行'
+check cond6c_spec_missing_channel docs/superpowers/specs/agent-team.md \
+  '`missing <担当>` の行' \
+  'すべてのマージの条件'
+
 # 条件7（Issue #715）: 上限と登録情報の正本が agent-team.toml であることが、
 # 対象の 5 文書のそれぞれに参照として書かれている。
 check cond7_toml_ref_spec docs/superpowers/specs/agent-team.md \

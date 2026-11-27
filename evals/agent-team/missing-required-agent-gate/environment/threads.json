@@ -1,0 +1,14 @@
+[
+  {
+    "threadId": "impl-820",
+    "title": "[実装] #820 CI の egress 制御を gateway 側のポリシーに寄せる",
+    "status": "completed",
+    "archived": false
+  },
+  {
+    "threadId": "conductor-self",
+    "title": "[指揮] conductor",
+    "status": "running",
+    "archived": false
+  }
+]

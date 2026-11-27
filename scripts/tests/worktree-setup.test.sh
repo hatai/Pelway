@@ -107,7 +107,8 @@ check "5c: local write failure: names agent-team.local.toml" has "$ROOT/err" "ag
 check "5c: no partial local left" [ ! -e "$ROOT/wt5c/agent-team.local.toml" ]
 check "5c: no leftover temp" bash -c '! ls "$1"/agent-team.local.toml.worktree-setup.*.tmp >/dev/null 2>&1' _ "$ROOT/wt5c"
 
-# 5d. 公開が失敗したあとも、一時名を作った実体だけを後始末する（既に最終名が
+# 5d. 公開が失敗したあとも一時物は残らない（書き込み先は O_TMPFILE の無名
+# inode で名前を持たないため、名差し替え・後始末の経路自体が無い。既に最終名が
 # ある場合は FileExistsError で失敗する経路）。worktree-setup-copy を直接
 # 呼んで確かめる
 git worktree add -q "$ROOT/wt5d" "$old" --detach
