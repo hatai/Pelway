@@ -2,10 +2,10 @@
 # scripts/pr-body-update のテスト（Issue #809）。偽のリポジトリ（本物の scripts/pr-body-update と偽の
 # scripts/agent-gh）で、PR 本文の決まった 2 行（「レビューと QA」の最後に検証した sha、「対象」の HEAD）
 # だけが PR の headRefOid と指定した sha に書き換わること、決まった行が無いときは何も書き換えずに
-# 失敗してどの行が無いかを出すこと、日本語の本文を argv でなく --input のファイルで渡すこと、
-# テンプレートの HTML コメントの中を数えないことを確かめる。Markdown のコード（インラインコード・フェンス付き
-# ブロック）を本文の構造として数えないこと、sha の直後に英数字が続く語を sha にしないこと、読み取りの後に PR が
-# 変わったら書き換えないことも確かめる。
+# 失敗してどの行が無いかを出すこと、日本語の本文を argv でなく --input のファイルで渡すことを確かめる。
+# 印はコードの外（HTML コメント・コードブロック・インラインコード・字下げされた行の中を除く）にあるものだけを
+# 数えること、sha の直後に英数字が続く語を sha にしないこと、読み取りの後に PR が変わったら書き換えないことも
+# 確かめる。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -84,10 +84,23 @@ eq() { [[ "$1" == "$2" ]]; }
 has() { grep -q -- "$2" "$1"; }
 has_all() { local f="$1"; shift; local w; for w in "$@"; do grep -q -- "$w" "$f" || return 1; done; }
 no_nonascii() { ! LC_ALL=C grep -q '[^[:space:][:print:]]' "$1"; }
-# fails_quietly <終了コード>: 0 でなく、PATCH を送っていない（upd の直後に使う）
+# fails_quietly <終了コード>: 0 でなく、PATCH を送っていない
 fails_quietly() { (( $1 != 0 )) && [[ "$(patches)" == 0 ]]; }
 # bad_args [args...]: 終了コード 2 で、agent-gh を呼ばない
 bad_args() { local rc=0; upd "$@" || rc=$?; [[ "$rc" == 2 && ! -s "$MOCK/calls.log" ]]; }
+# put_body: 標準入力の本文を GitHub 側に置き、呼び出しの記録を空にする。期待値の元として $ROOT/given にも残す
+put_body() { cat >"$MOCK/body"; cp "$MOCK/body" "$ROOT/given"; : >"$MOCK/calls.log"; }
+# expected_body [sed の式...]: 置いた本文の OLD_HEAD と OLD_VER（追加の差分があればそれも）を HEAD と VER に
+# 替えた本文（書き換えの期待値）を標準出力に出す
+expected_body() { sed -e "s|$OLD_HEAD|$HEAD|g" -e "s|$OLD_VER|$VER|g" "$@" "$ROOT/given"; }
+# verify_on <PR 番号>: VER を --verified にして本体を 1 回実行し、終了コードを rc に残して返す
+verify_on() { upd "$1" --verified "$VER"; rc=$?; return "$rc"; }
+# expect_ok <PR 番号> <名前> [sed の式...]: 実行して、終了コード 0 で PATCH が 1 回、GitHub 側の本文が期待値どおり
+expect_ok() { local pr="$1" name="$2"; shift 2; verify_on "$pr"; check "$name" ok_as "$@"; }
+ok_as() { (( rc == 0 )) && [[ "$(patches)" == 1 ]] && cmp -s "$MOCK/body" <(expected_body "$@"); }
+# expect_fail <PR 番号> <名前> <stderr にあるべき文字列...>: 実行して、0 以外で PATCH が無く、stderr にその文字列がある
+expect_fail() { local pr="$1" name="$2"; shift 2; verify_on "$pr"; check "$name" fails_with "$@"; }
+fails_with() { (( rc != 0 )) && [[ "$(patches)" == 0 ]] && has_all "$ROOT/err" "$@"; }
 
 OLD_HEAD=2222222222222222222222222222222222222222
 OLD_VER=3333333333333333333333333333333333333333
@@ -132,187 +145,134 @@ EOF
 }
 
 # --- 書き換わること（Issue #809 受け入れ条件 1）と、ほかの行が変わらないこと（受け入れ条件 3） ---
-sample "$OLD_HEAD" "$OLD_VER" >"$MOCK/body"
-: >"$MOCK/calls.log"
-upd 743 --verified "$VER"; rc=$?
+sample "$OLD_HEAD" "$OLD_VER" | put_body
+verify_on 743
 check "exit 0 on success" eq "$rc" 0
-check "HEAD line becomes headRefOid and the verified line becomes the given sha" cmp -s "$MOCK/body" <(sample "$HEAD" "$VER")
-check "diff before and after has only the two fixed lines on each side" eq "$(diff <(sample "$OLD_HEAD" "$OLD_VER") "$MOCK/body" | grep -c '^[<>]')" 4
+check "HEAD line becomes headRefOid and the verified line becomes the given sha" ok_as
+check "diff before and after has only the two fixed lines on each side" eq "$(diff "$ROOT/given" "$MOCK/body" | grep -c '^[<>]')" 4
 check "the decoy lines outside the two sections are untouched" has "$MOCK/body" '0000000000000000000000000000000000000000'
 check "reads twice (before planning and right before the write) and patches once" eq "$(grep -c '^dev$' "$MOCK/calls.log")" 3
 check "stdout reports the PR and the new values" has_all "$ROOT/out" 743 "$HEAD" "$VER"
 upd 743 --verified "${VER^^}"
-check "an uppercase --verified is written in lowercase" cmp -s "$MOCK/body" <(sample "$HEAD" "$VER")
+check "an uppercase --verified is written in lowercase" cmp -s "$MOCK/body" <(expected_body)
 
 # --- 日本語の本文はファイル経由で渡す（受け入れ条件 4。skill write-pull-request の決まり） ---
 check "no non-ASCII bytes in the argv of any call" no_nonascii "$MOCK/calls.log"
-check "PATCH sends the whole new body through --input" cmp -s <(jq -j .body "$MOCK/patch-input.json") <(sample "$HEAD" "$VER")
+check "PATCH sends the whole new body through --input" cmp -s <(jq -j .body "$MOCK/patch-input.json") <(expected_body)
 check "the temporary input file is removed" bash -c '[[ -n "$1" && ! -e "$1" ]]' _ "$(input_file)"
 
 # --- 書き換えるのは印の直後の sha だけ。コロン・バッククォート・行の前後の文・短い sha はそのまま残る ---
-cat >"$MOCK/body" <<EOF
+put_body <<EOF
 ## レビューと QA
 
-実装者メモ: \`docs/worklogs/issue-633.md\`（round 1〜13）。最後に検証した sha: \`82b37ac\`。
+実装者メモ: \`docs/worklogs/issue-633.md\`（round 1〜13）。最後に検証した sha: \`fedcba9\`。
 
 ## 対象
 
-- HEAD: 6940d00（Kodiak のマージコミット）
+- HEAD: 0123456（Kodiak のマージコミット）
 EOF
-upd 633 --verified "$VER"; rc=$?
-check "variant forms: exit 0" eq "$rc" 0
-check "only the sha after each label is replaced" cmp -s "$MOCK/body" - <<EOF
-## レビューと QA
-
-実装者メモ: \`docs/worklogs/issue-633.md\`（round 1〜13）。最後に検証した sha: \`$VER\`。
-
-## 対象
-
-- HEAD: $HEAD（Kodiak のマージコミット）
-EOF
+expect_ok 633 "variant forms: only the sha after each label is replaced" -e "s|fedcba9|$VER|" -e "s|HEAD: 0123456|HEAD: $HEAD|"
 
 # --- 印は自分の節の中だけで探す。前の節・後ろの節にある同じ形の行や、HEAD を含む長い単語は書き換えない ---
-cat >"$MOCK/body" <<EOF
+put_body <<EOF
 ## 変更内容
 
 - HEAD: \`1111111111111111111111111111111111111111\`
 
 ## 対象
 
-- HEAD: \`2222222222222222222222222222222222222222\`
+- HEAD: \`$OLD_HEAD\`
 - OVERHEAD: \`4444444444444444444444444444444444444\`
 
 ## レビューと QA
 
-- 最後に検証した sha: \`3333333333333333333333333333333333333333\`
+- 最後に検証した sha: \`$OLD_VER\`
 - 参考にした HEAD: \`5555555555555555555555555555555555555\`
 EOF
-upd 745 --verified "$VER"; rc=$?
-check "sections in another order: exit 0" eq "$rc" 0
-check "label lines outside their own section and longer words containing HEAD are left alone" cmp -s "$MOCK/body" - <<EOF
-## 変更内容
-
-- HEAD: \`1111111111111111111111111111111111111111\`
-
-## 対象
-
-- HEAD: \`$HEAD\`
-- OVERHEAD: \`4444444444444444444444444444444444444\`
-
-## レビューと QA
-
-- 最後に検証した sha: \`$VER\`
-- 参考にした HEAD: \`5555555555555555555555555555555555555\`
-EOF
+expect_ok 745 "sections in another order: lines outside their own section and longer words containing HEAD are left alone"
 
 # --- テンプレートの HTML コメント（<!-- 〜 -->、複数行も含む）は残してよい。注釈の中の見出しや印は数えない ---
-cat >"$MOCK/body" <<EOF
+put_body <<EOF
 ## レビューと QA
 
 <!-- 事実と検証時点の sha のみ記載。未検証の項目は「未検証」と明記する -->
 - 実装者メモ: \`docs/worklogs/issue-809.md\`
-<!-- round 1 --> - 最後に検証した sha: \`3333333333333333333333333333333333333333\`
+- <!-- round 1 --> 最後に検証した sha: \`$OLD_VER\`
 
 ## 対象
 
 <!-- ブランチ名と HEAD の sha -->
 - ブランチ: \`agent/809-pr-body-sha-tool\`
-<!-- HEAD: \`1111111111111111111111111111111111111111\` -->
-- HEAD: \`2222222222222222222222222222222222222222\` <!-- 前は HEAD: 4444444444444444444444444444444444444 -->
 <!--
 ## 対象
 - HEAD: \`5555555555555555555555555555555555555\`
 -->
-EOF
-upd 740 --verified "$VER"; rc=$?
-check "HTML comments kept from the template: exit 0" eq "$rc" 0
-check "headings and labels inside HTML comments are not counted and the comments stay" cmp -s "$MOCK/body" - <<EOF
-## レビューと QA
-
-<!-- 事実と検証時点の sha のみ記載。未検証の項目は「未検証」と明記する -->
-- 実装者メモ: \`docs/worklogs/issue-809.md\`
-<!-- round 1 --> - 最後に検証した sha: \`$VER\`
-
-## 対象
-
-<!-- ブランチ名と HEAD の sha -->
-- ブランチ: \`agent/809-pr-body-sha-tool\`
 <!-- HEAD: \`1111111111111111111111111111111111111111\` -->
-- HEAD: \`$HEAD\` <!-- 前は HEAD: 4444444444444444444444444444444444444 -->
-<!--
-## 対象
-- HEAD: \`5555555555555555555555555555555555555\`
--->
+- HEAD: \`$OLD_HEAD\` <!-- 前は HEAD: 4444444444444444444444444444444444444 -->
 EOF
-sed '26i<!-- 閉じ忘れ' <(sample "$OLD_HEAD" "$OLD_VER") >"$MOCK/body"; : >"$MOCK/calls.log"
-upd 743 --verified "$VER"; rc=$?
-check "an unclosed HTML comment opened above the heading hides what follows: fails without patching" fails_quietly "$rc"
-check "an unclosed HTML comment: stderr names the missing heading" has "$ROOT/err" '「対象」の見出しが本文に無い'
+expect_ok 740 "HTML comments kept from the template: headings and labels inside them are not counted and the comments stay"
+sed '26i<!-- 閉じ忘れ' <(sample "$OLD_HEAD" "$OLD_VER") | put_body
+expect_fail 743 "an unclosed HTML comment opened above the heading hides what follows" '「対象」の見出しが本文に無い'
 
 # --- Markdown のコードは本文の構造ではない（レビュー round 2 の must-fix）---
-# インラインコードの中の `<!--` や `-->` は注釈の開き・閉じとして数えない
-cat >"$MOCK/body" <<EOF
+# コメントの外では、インラインコードの中の `<!--` や `-->` は注釈の開き・閉じとして数えない
+put_body <<EOF
 ## 変更内容
 
 - \`<!--\` は HTML コメントの開始の記号（インラインコードの中は注釈として数えない）
+- 閉じる記号 \`-->\` も同じ
 
 ## レビューと QA
 
-- 最後に検証した sha: \`3333333333333333333333333333333333333333\`
+- 最後に検証した sha: \`$OLD_VER\`
 
 ## 対象
 
-<!--
-\`HEAD: 8888888888888888888888888888888888888888\`
-\`-->\` HEAD: \`9999999999999999999999999999999999999999\`
--->
-- HEAD: \`2222222222222222222222222222222222222222\`
+- HEAD: \`$OLD_HEAD\`
 EOF
-upd 746 --verified "$VER"; rc=$?
-check "comment signs inside inline code are not comment signs: exit 0" eq "$rc" 0
-check "comment signs inside inline code: only the real lines change" cmp -s "$MOCK/body" - <<EOF
+expect_ok 746 "comment signs inside inline code are not comment signs: only the real lines change"
+# 行頭から始まった注釈は、バッククォートで囲んだ `-->` でもその行で閉じる（GitHub の表示と同じ）
+put_body <<EOF
+## レビューと QA
+
+- 最後に検証した sha: \`$OLD_VER\`
+
+## 対象
+
+<!-- 注釈の中では終端が最優先: \`-->\` で閉じる
+HEAD: \`$OLD_HEAD\`
+EOF
+expect_ok 750 "inside a comment the terminator wins over backticks: the comment line stays and the real line changes"
+# 行をまたぐインラインコードの中の `<!--` は注釈として数えない
+put_body <<EOF
 ## 変更内容
 
-- \`<!--\` は HTML コメントの開始の記号（インラインコードの中は注釈として数えない）
+- \`<!--
+  は注釈の開始\` の記号（行をまたぐインラインコード）
 
 ## レビューと QA
 
-- 最後に検証した sha: \`$VER\`
+- 最後に検証した sha: \`$OLD_VER\`
 
 ## 対象
 
-<!--
-\`HEAD: 8888888888888888888888888888888888888888\`
-\`-->\` HEAD: \`9999999999999999999999999999999999999999\`
--->
-- HEAD: \`$HEAD\`
+- HEAD: \`$OLD_HEAD\`
 EOF
+expect_ok 751 "an inline code span continued on the next line: only the real lines change"
+# 行をまたぐインラインコードは、新しいリスト項目の行には及ばない
+put_body <<EOF
+## レビューと QA
+
+- 最後に検証した sha: \`$OLD_VER\`
+
+## 対象
+
+- 閉じていないバッククォート \`abc
+- HEAD: \`$OLD_HEAD\`
+EOF
+expect_ok 754 "an unclosed backtick does not run into the next list item: only the real lines change"
 # フェンス付きコードブロック（``` か ~~~）の中の見出し・印・注釈は数えない
-cat >"$MOCK/body" <<'EOF'
-## 変更内容
-
-```md
-## レビューと QA
-- 最後に検証した sha: `0000000000000000000000000000000000000000`
-<!-- フェンスの中の注釈
-```
-
-~~~text
-## 対象
-- HEAD: `1111111111111111111111111111111111111111`
-~~~
-
-## レビューと QA
-
-- 最後に検証した sha: `3333333333333333333333333333333333333333`
-
-## 対象
-
-- HEAD: `2222222222222222222222222222222222222222`
-EOF
-upd 747 --verified "$VER"; rc=$?
-check "headings and labels inside fenced code blocks are not counted: exit 0" eq "$rc" 0
-check "fenced code blocks stay and only the real lines change" cmp -s "$MOCK/body" - <<EOF
+put_body <<EOF
 ## 変更内容
 
 \`\`\`md
@@ -328,78 +288,106 @@ check "fenced code blocks stay and only the real lines change" cmp -s "$MOCK/bod
 
 ## レビューと QA
 
-- 最後に検証した sha: \`$VER\`
+- 最後に検証した sha: \`$OLD_VER\`
 
 ## 対象
 
-- HEAD: \`$HEAD\`
+- HEAD: \`$OLD_HEAD\`
 EOF
+expect_ok 747 "headings and labels inside fenced code blocks are not counted: only the real lines change"
+
+# --- 印はコードの外になければならない（レビュー round 3 の must-fix）。コード例や字下げされた行を決まった行にしない ---
+put_body <<EOF
+## レビューと QA
+
+- 書き方の例: \`最後に検証した sha: abcdef0\`（インラインコードの中は候補にしない）
+
+## 対象
+
+- 書き方の例は \`HEAD: abcdef0\` と書く
+EOF
+expect_fail 748 "only examples with the label inside inline code: both real lines are reported missing" \
+  '「レビューと QA」に「最後に検証した sha」の行が無い' '「対象」に HEAD の行が無い'
+put_body <<EOF
+## レビューと QA
+
+- 書き方の例: \`最後に検証した sha: abcdef0\`
+- 最後に検証した sha: \`$OLD_VER\`
+
+## 対象
+
+- ブランチ: \`agent/809-HEAD-fix\`
+- 書き方の例は \`HEAD: abcdef0\` と書く
+    HEAD: 9999999999999999999999999999999999999999
+- HEAD: \`$OLD_HEAD\`
+EOF
+expect_ok 749 "examples and a real line in both sections: only the real lines are updated and the examples stay"
+put_body <<EOF
+## レビューと QA
+
+最後に検証した sha: $OLD_VER（バッククォート無し）
+
+## 対象
+
+- 旧形式の例 \`HEAD: abcdef0\` → 新形式: HEAD: $OLD_HEAD
+EOF
+expect_ok 752 "a label outside code: only the sha after the label outside code changes"
+# 行の途中から始まった注釈は `-->` で閉じ、その後ろは表示される（行頭から始まった注釈とは扱いが違う）
+put_body <<EOF
+## レビューと QA
+
+- 最後に検証した sha: \`$OLD_VER\`
+
+## 対象
+
+- メモ <!-- 始まり
+  続き --> HEAD: \`9999999999999999999999999999999999999999\`
+- HEAD: \`$OLD_HEAD\`
+EOF
+expect_fail 753 "a comment started mid-line ends at its terminator and the HEAD after it is counted" '「対象」に HEAD の行が 2 つある（8 行目・9 行目）'
 
 # --- 改行コードと末尾の改行はそのまま残る ---
-sed 's/$/\r/' <(sample "$OLD_HEAD" "$OLD_VER") >"$MOCK/body"
-upd 744 --verified "$VER"
-check "CRLF is kept on every line" cmp -s "$MOCK/body" <(sed 's/$/\r/' <(sample "$HEAD" "$VER"))
-printf '%s' "$(sample "$OLD_HEAD" "$OLD_VER")" >"$MOCK/body"
-upd 744 --verified "$VER"
-check "a body without a trailing newline stays without one" cmp -s "$MOCK/body" <(printf '%s' "$(sample "$HEAD" "$VER")")
-{ sample "$OLD_HEAD" "$OLD_VER"; echo; } >"$MOCK/body"
-upd 744 --verified "$VER"
-check "a trailing blank line is kept" cmp -s "$MOCK/body" <({ sample "$HEAD" "$VER"; echo; })
+sed 's/$/\r/' <(sample "$OLD_HEAD" "$OLD_VER") | put_body
+expect_ok 744 "CRLF is kept on every line"
+printf '%s' "$(sample "$OLD_HEAD" "$OLD_VER")" | put_body
+expect_ok 744 "a body without a trailing newline stays without one"
+{ sample "$OLD_HEAD" "$OLD_VER"; echo; } | put_body
+expect_ok 744 "a trailing blank line is kept"
 
 # --- 決まった行が無いときは書き換えずに失敗し、どの行が無いかを出す（受け入れ条件 2） ---
-# without <sed のスクリプト>: sample の本文に sed を当てたものを GitHub 側に置き、呼び出しの記録を空にする
-without() { sed "$1" <(sample "$OLD_HEAD" "$OLD_VER") >"$MOCK/body"; : >"$MOCK/calls.log"; }
+# without <sed のスクリプト>: sample の本文に sed を当てたものを GitHub 側に置く
+without() { sed "$1" <(sample "$OLD_HEAD" "$OLD_VER") | put_body; }
 NO_HEAD='「対象」に HEAD の行が無い'
 NO_VER='「レビューと QA」に「最後に検証した sha」の行が無い'
+NO_SHA_HEAD='で、HEAD の直後に sha が無い'
+NO_SHA_VER='で、「最後に検証した sha」の直後に sha が無い'
 without '/^- HEAD：/d'
-upd 743 --verified "$VER"; rc=$?
-check "missing HEAD line: fails without patching" fails_quietly "$rc"
-check "missing HEAD line: body untouched" cmp -s "$MOCK/body" <(sed '/^- HEAD：/d' <(sample "$OLD_HEAD" "$OLD_VER"))
-check "missing HEAD line: stderr names the missing line" has "$ROOT/err" "$NO_HEAD"
+expect_fail 743 "missing HEAD line" "$NO_HEAD"
 without '/最後に検証した sha：/d'
-upd 743 --verified "$VER"; rc=$?
-check "missing verified line: fails without patching" fails_quietly "$rc"
-check "missing verified line: stderr names the missing line" has "$ROOT/err" "$NO_VER"
+expect_fail 743 "missing verified line" "$NO_VER"
 without '/^- HEAD：/d; /最後に検証した sha：/d'
-upd 743 --verified "$VER"; rc=$?
-check "both lines missing: fails without patching" fails_quietly "$rc"
-check "both lines missing: both are reported in one run" has_all "$ROOT/err" "$NO_HEAD" "$NO_VER"
+expect_fail 743 "both lines missing: both are reported in one run" "$NO_HEAD" "$NO_VER"
 without '/^## 対象$/d'
-upd 743 --verified "$VER"; rc=$?
-check "missing section heading: fails without patching" fails_quietly "$rc"
-check "missing section heading: stderr names the section" has "$ROOT/err" '「対象」の見出しが本文に無い'
+expect_fail 743 "missing section heading" '「対象」の見出しが本文に無い'
 without '26a## 対象'
-upd 743 --verified "$VER"; rc=$?
-check "two section headings: fails without patching" fails_quietly "$rc"
-check "two section headings: stderr names both line numbers" has "$ROOT/err" '「対象」の見出しが本文に 2 つある（26 行目・27 行目）'
+expect_fail 743 "two section headings" '「対象」の見出しが本文に 2 つある（26 行目・27 行目）'
 without '29a\- HEAD：`4444444444444444444444444444444444444`'
-upd 743 --verified "$VER"; rc=$?
-check "two HEAD lines: fails without patching" fails_quietly "$rc"
-check "two HEAD lines: stderr names both line numbers" has "$ROOT/err" '「対象」に HEAD の行が 2 つある（29 行目・30 行目）'
+expect_fail 743 "two HEAD lines" '「対象」に HEAD の行が 2 つある（29 行目・30 行目）'
 without '29s/.*/- HEAD：マージコミット 6940d00 が先端/'
-upd 743 --verified "$VER"; rc=$?
-check "HEAD line without a sha right after the label: fails without patching" fails_quietly "$rc"
-check "HEAD line without a sha right after the label: stderr names the line" has "$ROOT/err" '「対象」の HEAD の行（29 行目）で、HEAD の直後に sha が無い'
+expect_fail 743 "HEAD line without a sha right after the label" '「対象」の HEAD の行（29 行目）'"$NO_SHA_HEAD"
 without '19s/.*/- 最後に検証した sha：`3333333333333333333333333333333333333333`（round 1 の最後に検証した sha：`2222222222222222222222222222222222222222`）/'
-upd 743 --verified "$VER"; rc=$?
-check "two shas right after the label: fails without patching" fails_quietly "$rc"
-check "two shas right after the label: stderr says so" has "$ROOT/err" '「レビューと QA」の「最後に検証した sha」の行（19 行目）で、「最後に検証した sha」の直後に sha が 2 つある'
+expect_fail 743 "two labels on one line" '「レビューと QA」の「最後に検証した sha」の行（19 行目）に「最後に検証した sha」が 2 つある'
 # sha の直後に英数字が続く語（2222222xyz など）と 41 桁以上の並びは sha にしない（レビュー round 2 の must-fix）
 without '29s/.*/- HEAD：`2222222xyz`/'
-upd 743 --verified "$VER"; rc=$?
-check "sha-like token followed by other letters on the HEAD line: fails without patching" fails_quietly "$rc"
-check "sha-like token followed by other letters on the HEAD line: stderr says there is no sha" has "$ROOT/err" '「対象」の HEAD の行（29 行目）で、HEAD の直後に sha が無い'
+expect_fail 743 "sha-like token followed by other letters on the HEAD line" '「対象」の HEAD の行（29 行目）'"$NO_SHA_HEAD"
+without '29s/.*/- HEAD：2222222xyz/'
+expect_fail 743 "sha-like token without backticks on the HEAD line" '「対象」の HEAD の行（29 行目）'"$NO_SHA_HEAD"
 without '19s/.*/- 最後に検証した sha：`3333333wxyz`/'
-upd 743 --verified "$VER"; rc=$?
-check "sha-like token followed by other letters on the verified line: fails without patching" fails_quietly "$rc"
-check "sha-like token followed by other letters on the verified line: stderr says there is no sha" has "$ROOT/err" '「レビューと QA」の「最後に検証した sha」の行（19 行目）で、「最後に検証した sha」の直後に sha が無い'
+expect_fail 743 "sha-like token followed by other letters on the verified line" '「レビューと QA」の「最後に検証した sha」の行（19 行目）'"$NO_SHA_VER"
 without '29s/.*/- HEAD：`22222222222222222222222222222222222222222`/'
-upd 743 --verified "$VER"; rc=$?
-check "a token of 41 hex digits is not a sha: fails without patching" fails_quietly "$rc"
-printf '' >"$MOCK/body"; : >"$MOCK/calls.log"
-upd 743 --verified "$VER"; rc=$?
-check "empty body: fails without patching" fails_quietly "$rc"
-check "empty body: both headings are reported missing" has_all "$ROOT/err" '「レビューと QA」の見出しが本文に無い' '「対象」の見出しが本文に無い'
+expect_fail 743 "a token of 41 hex digits is not a sha" '「対象」の HEAD の行（29 行目）'"$NO_SHA_HEAD"
+printf '' | put_body
+expect_fail 743 "empty body: both headings are reported missing" '「レビューと QA」の見出しが本文に無い' '「対象」の見出しが本文に無い'
 
 # --- 引数の誤り ---
 : >"$MOCK/calls.log"
@@ -410,41 +398,32 @@ check "verified sha must be 40 hex digits: exit 2" bad_args 743 --verified "${VE
 check "unknown option: exit 2" bad_args 743 --verified "$VER" --force
 
 # --- GitHub への読み書きの失敗 ---
-sample "$OLD_HEAD" "$OLD_VER" >"$MOCK/body"
-: >"$MOCK/calls.log"
-(export MOCK_READ_FAIL=1; upd 743 --verified "$VER"); rc=$?
-check "read failure: exit 1" eq "$rc" 1
-check "read failure: the error is passed through" has "$ROOT/err" "injected read failure"
-check "read failure: nothing is patched" eq "$(patches)" 0
-(export MOCK_PATCH_FAIL=1; upd 743 --verified "$VER"); rc=$?
+sample "$OLD_HEAD" "$OLD_VER" | put_body
+(export MOCK_READ_FAIL=1; verify_on 743); rc=$?
+check "read failure: exit 1, the error is passed through, nothing is patched" bash -c '(( $1 == 1 )) && grep -q "injected read failure" "$2" && [[ "$(cat "$3")" == 0 ]]' _ "$rc" "$ROOT/err" <(patches)
+(export MOCK_PATCH_FAIL=1; verify_on 743); rc=$?
 check "PATCH failure: exit 1 and the error is passed through" bash -c '(( $1 == 1 )) && grep -q "injected patch failure" "$2"' _ "$rc" "$ROOT/err"
 echo not-a-sha >"$MOCK/head"
 : >"$MOCK/calls.log"
-upd 743 --verified "$VER"; rc=$?
-check "headRefOid that is not a sha: fails without patching" fails_quietly "$rc"
-check "headRefOid that is not a sha: exit 1" eq "$rc" 1
+verify_on 743
+check "headRefOid that is not a sha: exit 1 and nothing is patched" bash -c '(( $1 == 1 )) && [[ "$(cat "$2")" == 0 ]]' _ "$rc" <(patches)
 echo "$HEAD" >"$MOCK/head"
 
 # --- 読み取りの後に PR が変わったら書き換えない（書き込みの直前にもう一度読む。レビュー round 2 の must-fix） ---
-sample "$OLD_HEAD" "$OLD_VER" >"$MOCK/body"
-: >"$MOCK/calls.log"
-(export MOCK_CHANGE=body; upd 743 --verified "$VER"); rc=$?
-check "body edited by someone else after the read: fails without patching" fails_quietly "$rc"
-check "body edited after the read: the other edit is kept" cmp -s "$MOCK/body" <(sample "$OLD_HEAD" "$OLD_VER"; echo "- 別の担当が編集した行")
+sample "$OLD_HEAD" "$OLD_VER" | put_body
+(export MOCK_CHANGE=body; verify_on 743); rc=$?
+check "body edited after the read: fails without patching and the other edit is kept" bash -c '(( $1 != 0 )) && [[ "$(cat "$2")" == 0 ]] && cmp -s "$3" <(cat "$4"; echo "- 別の担当が編集した行")' _ "$rc" <(patches) "$MOCK/body" "$ROOT/given"
 check "body edited after the read: stderr says the PR changed" has "$ROOT/err" "読み取った後に変わった"
-sample "$OLD_HEAD" "$OLD_VER" >"$MOCK/body"
-(export MOCK_CHANGE=head; upd 743 --verified "$VER"); rc=$?
+sample "$OLD_HEAD" "$OLD_VER" | put_body
+(export MOCK_CHANGE=head; verify_on 743); rc=$?
 check "head moved after the read: fails without patching" fails_quietly "$rc"
-check "head moved after the read: body untouched" cmp -s "$MOCK/body" <(sample "$OLD_HEAD" "$OLD_VER")
 check "head moved after the read: stderr says the PR changed" has "$ROOT/err" "読み取った後に変わった"
 echo "$HEAD" >"$MOCK/head"
-(export MOCK_PATCH_HEAD=1; upd 743 --verified "$VER"); rc=$?
-check "head moved at the moment of the write: exit 1" eq "$rc" 1
-check "head moved at the moment of the write: stderr says to run again" has "$ROOT/err" "もう一度実行"
+(export MOCK_PATCH_HEAD=1; verify_on 743); rc=$?
+check "head moved at the moment of the write: exit 1 and stderr says to run again" bash -c '(( $1 == 1 )) && grep -q "もう一度実行" "$2"' _ "$rc" "$ROOT/err"
 echo "$HEAD" >"$MOCK/head"
-(export MOCK_PATCH_BODY=1; upd 743 --verified "$VER"); rc=$?
-check "GitHub returns a body different from the one sent: exit 1" eq "$rc" 1
-check "GitHub returns a different body: stderr says to check the body on GitHub" has "$ROOT/err" "GitHub が返した本文が送った内容と違います"
+(export MOCK_PATCH_BODY=1; verify_on 743); rc=$?
+check "GitHub returns a different body: exit 1 and stderr says to check it on GitHub" bash -c '(( $1 == 1 )) && grep -q "GitHub が返した本文が送った内容と違います" "$2"' _ "$rc" "$ROOT/err"
 
 # --- 使い方 ---
 : >"$MOCK/calls.log"
