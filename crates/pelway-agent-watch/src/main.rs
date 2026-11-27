@@ -364,7 +364,11 @@ impl Watcher {
                 Ok(count) => {
                     // 最後に数えたときから、自分の追記の前に受信箱が変わっていた（前の受信箱で読んだ
                     // 既読の位置が、いまの受信箱の同じ中身を指すと確かめられない）
-                    let rewritten = Some(count.before_write) != self.state.inbox_identity;
+                    if Some(count.before_write) != self.state.inbox_identity {
+                        self.state.inbox_rewritten = true;
+                    }
+                    // 書き換えを見分けてから起こしを送るまでは、周をまたいで不明として扱う
+                    let rewritten = self.state.inbox_rewritten;
                     if rewritten {
                         self.forget_pending_line();
                     }
@@ -405,6 +409,7 @@ impl Watcher {
             // 変わっていれば（切り詰め・置き換え・書き換え・追記）、読むだけで上限の内で数え直す
             let inbox = self.pelway_dir.join(INBOX_FILE);
             if io::inbox_identity(&inbox).ok() != self.state.inbox_identity {
+                self.state.inbox_rewritten = true;
                 self.forget_pending_line();
                 match io::count_inbox(&inbox) {
                     Ok(count) => self.remember_inbox_count(&count),
@@ -610,6 +615,8 @@ impl Watcher {
                     self.state.last_wake_inbox_offset = Some(inbox_offset);
                     // 最短間隔は送り終えた時刻から数える（送るのにかかった時間の分、次の起こしを早めない）
                     self.state.last_wake_at = Some(now_epoch());
+                    // 指揮役はいまの受信箱を読み直すので、ここからの既読の位置はいまの受信箱に対応する
+                    self.state.inbox_rewritten = false;
                     self.state.last_wake_thread_id = Some(thread_id);
                     self.state.wake_pending = None;
                 }

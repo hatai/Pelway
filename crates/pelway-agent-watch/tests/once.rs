@@ -2817,3 +2817,62 @@ fn quiet_notice_cycle_forgets_pending_line_after_rewrite() {
     let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 2, "{}", stderr(&out));
 }
+
+#[test]
+fn rewrite_seen_on_a_quiet_cycle_is_kept_until_the_next_wake() {
+    // 書き換えを見分けた周には、指揮役自身の finished だけが来た（印も起こす知らせも無い）。
+    // 次の周の b の failed は、前の受信箱で読んだ既読の位置（4）で取り消さずに起こす
+    let sb = Sandbox::new("wake-839-rewrite-kept");
+    let list = |b: &str, conductor: &str| {
+        format!(
+            r#"[{{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}},
+  {{"threadId":"mcp:b","status":"{b}","updatedAt":"2026-11-10T16:30:00Z"}},
+  {{"threadId":"mcp:conductor-1","status":"{conductor}","updatedAt":"2026-11-10T16:40:00Z"}}]"#
+        )
+    };
+    sb.fake("list.json", &list("running", "running"));
+    sb.fake("show-mcp_a.json", SHOW_A_DONE);
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "running", "2026-11-10T16:30:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "running", "2026-11-10T16:40:00Z", 0),
+    );
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{
+  "mcp:a":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:b":{"status":"running","updated_at":"2026-11-10T16:30:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:30:00Z"},
+  "mcp:conductor-1":{"status":"running","updated_at":"2026-11-10T16:40:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:40:00Z"}},
+  "ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1);
+    // 前の受信箱は 4 行で、指揮役はそこまで読んだ。その後、受信箱は 2 行に戻された
+    let first = fs::read_to_string(sb.inbox()).unwrap();
+    sb.patrol_state(r#"{"inbox_offset":4}"#);
+    fs::write(sb.inbox(), format!("{first}{{\"other\":1}}\n")).unwrap();
+    // 書き換えを見分ける周: 指揮役自身の finished だけ
+    sb.fake("list.json", &list("running", "completed"));
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "completed", "2026-11-10T16:40:00Z", 0),
+    );
+    run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1);
+    // 次の周: b の failed が 4 行目に入る
+    backdate_last_wake(&sb);
+    sb.fake("list.json", &list("failed", "completed"));
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    let out = run_cooldown(&sb);
+    assert_eq!(inbox_lines(&sb), 4);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
