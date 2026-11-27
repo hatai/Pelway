@@ -372,7 +372,8 @@ impl Watcher {
                     {
                         self.mark_inbox_rewritten();
                     }
-                    // 書き換えを見分けてから起こしを送るまでは、周をまたいで不明として扱う
+                    // 書き換えの印が立っている間（起こした後に指揮役が既読の位置を書き直すまで）は、
+                    // 周をまたいで不明として扱う
                     let rewritten = self.state.inbox_rewritten;
                     if rewritten {
                         self.forget_pending_line();
@@ -682,8 +683,8 @@ impl Watcher {
 
     /// 起こし待ちの印の行番号を不明（最大の値）にする。印を付けた後に、自分の追記以外で受信箱が
     /// 変わった（切り詰め・書き換え・挿入）と、印の行番号と既読の位置が同じ中身を指すと確かめられ
-    /// ないため。既読による取り消し（`already-read`）はしなくなり、既読が前回の起こしの位置より
-    /// 進んでいれば起こす。
+    /// ないため。既読による取り消し（`already-read`）はしなくなる。書き換えの印が立っている間は
+    /// 前回の起こしの位置とも比べないので、最短間隔の後に起こす。
     fn forget_pending_line(&mut self) {
         if self.state.wake_pending.is_some() {
             self.state.wake_pending = Some(u64::MAX);
