@@ -33,7 +33,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | Issue が依存するリポジトリ外の成果物（関連情報の URL・抜粋）に到達できない | 到達できなかった成果物の名前と、試した手順（URL へのアクセス結果、抜粋に欠けている部分） |
 | Issue の未決事項に挙がっておらず、避けて進めることもできず、受け入れ条件の成否に関わる判断が必要 | 必要な判断の内容と、避けられない理由。判断を仰ぐ相手（起票者か人間） |
 | Issue の未決事項に決定権者の指定（例: 「hatai が決める」）があり、その決定待ちの部分が避けて進められない | 決定を仰ぐ相手と、決定待ちの未決事項の内容。実装者の判断で代替案を選んで進めず、決定が記録されるのを待つ |
-| `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）、手元の head の SHA、`git diff --stat origin/main...HEAD` の出力。push せずに止まる。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
+| `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）、手元の head の SHA、`git diff --stat origin/main...HEAD` の出力。push せずに止まる。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる。分けるときは、Issue に hatai 名義の `<!-- split-plan -->` が入るまでレビューを委託しない（手順 6・8） |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 | sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
 | 委託したレビューが `failed` で、`error:` が `設定の不備:` で始まる（レビュー担当の環境の確認で外したツールが残っている。skill `review-pr` の「決まり」）。再委託しない | `error:` の行と、委託した担当。手順 9「投稿後の `設定の不備:` の記録」で確かめた投稿の有無（投稿前と確認／記録を残した（記録の内容）／投稿を特定できず `review: unknown` で記録） |
@@ -173,6 +173,7 @@ scripts/agent-gh dev git push origin HEAD
 - 差分がミューテーションテスト対象の crate（`.cargo/mutants.toml` の examine_globs）のロジックに触れるときは、`mise run mutants:diff` も回し、結果（生き残りと対応）を実装者メモに書く。生き残りの分析は輸入スキル `mutation-testing`（下の「輸入スキル」の節）。
 - `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたときは、例外が認められる前に push しない。`scripts/agent-gh-pr-size-gate` は例外の無い上限超過の push を止めるため、Draft PR を作るための push もしない。
 - 上限を超えたら、「止まる条件」の表の pr-size の行のとおり止まる。Issue のコメントには、分割案（PR ごとの範囲と見込み行数）、手元の head の SHA（`git rev-parse HEAD`）、`git diff --stat origin/main...HEAD` の出力を書く。
+- 分けるとき（分割が認められて PR を複数に分けて出すとき）は、Issue に hatai 名義の `<!-- split-plan -->` のコメントが入るまでレビューを委託しない（手順 8）。「止まる条件」の表の pr-size の行の決まりである。レビュー担当は hatai 名義の `<!-- split-plan -->` だけを分割の根拠に数え、実装担当が止まりのコメントに書いた分割案は数えないため（skill `review-pr` の手順 1）。
 - 例外が認められたあとに再開するときは、push 先のリポジトリとブランチを head とする開いた PR に `pr-size-exception` ラベルがあり、その PR が閉じる Issue に hatai が書いた本文先頭が `<!-- pr-size-exception -->` のコメントがあることを確かめてから push する。PR がまだ無いときはラベルを付けられずゲートが通らないため、例外だけでは push できず、分割または人間の判断を待つ。push したら、push 後の SHA を手順 5 のメモの「対象 head」に記入し、メモだけを独立したコミットにして push し、その後の head の必須チェックを確かめて手順 8 から再開する。縮小の指示が来たら、手順 9 の「修正依頼」として同じブランチで直す。
 - 積み上げ PR（分割計画で親 PR のブランチに積む PR。GitHub 上の base が main ではない PR）では `bash scripts/pr-size.sh --base <親ブランチ>` で測る。`mise run pr-size` は base=origin/main が既定のため、そのまま使うと親 PR の差分まで数えてしまい、上限超過で誤って止まる・例外扱いになる。
 
@@ -225,6 +226,11 @@ PR を作るたびに、T3 のスレッドにそのスレッドの PR を全部�
 ### 8. レビューを委託する
 
 差分が `scripts/agent-gh` を変えるとき、または `.claude/`・`.mcp.json`・`.codex/`・`.devin/`・`.cursor/`・`.cursorrules`・`.windsurf/`・`.windsurfrules`・`.agents/skills/review-pr/`・`.agents/skills/security-review/`・`.agents/skills/pr-watch/`・どのディレクトリの `AGENT.md`・`AGENTS.md`・`AGENTS.local.md`・`AGENTS.override.md`・`CLAUDE.md` を足す・変えるときはレビューを委託しない（後者はレビュー担当のツールの設定や従う手順を、委託の子が読む PR の版で差し替えうるため。`.devin/` は Devin CLI がプロジェクト層として読む config・hooks・rules・skills、`.windsurf/`・`.windsurfrules`・`AGENT.md`・`AGENTS.local.md`・`.cursor/`・`.cursorrules` は互換で読まれる経路、`.agents/skills/pr-watch/` は `review-pr` が待ち方の手順として従わせるスキル）。指揮役が main から立てるレビュースレッドに回るのを待ち、最後の返答を下の「ターンの終わりの状態の行」の `state: waiting-conductor` にして終える（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
+
+分けて出した PR と積み上げ PR（手順 6）は、次の条件がそろうまでレビューを委託しない。そろうのを待つあいだは `waiting-conductor` で終め、`next:` に待っているものを書く。分けて出した PR では hatai 名義の `<!-- split-plan -->` が Issue に入るのを、積み上げ PR では親 PR のマージを指揮役が検知して「続きをやり直す」を送るのを待つ。自分では委託も `watch_pull_request` もしない。
+
+- 分けて出した PR: Issue に hatai 名義の `<!-- split-plan -->` のコメントがあること（手順 6 の pr-size の項）。`scripts/agent-gh dev issue view <N> --json comments --jq '.comments[] | {author: .author.login, body}'` で、行頭が `<!-- split-plan -->` で `author.login` が `hatai` のコメントを確かめる。
+- 積み上げ PR: 親 PR のマージの後、main を merge で取り込み、push の前に GitHub 上の base（`scripts/agent-gh dev pr view <PR 番号> --json baseRefName --jq .baseRefName`）が main になっていることを確かめ、なっていなければ `scripts/agent-gh dev pr edit <PR 番号> --base main` で替えてから push していること。base が main でないあいだは必須チェックが走らず、下の `required-checks` は 2（待ち）のままになる。決まりの正本は skill `command-team` の「分割を認めるとき」。
 
 PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。対象 head で verify が fail、必須チェックが未完了、または例外が承認されていない pr-size の失敗（例外判断が未着を含む）のときは委託しない（レビュー担当（skill `review-pr` の手順 2）は verify の fail と例外の無い pr-size の fail を must-fix に数えるため、内容を読む前に結論が決まり、委託が空振りになる）。例外が承認された pr-size の失敗は通過に数えるため、委託の可否は GitHub 上のチェックの見た目ではなく下の終了コードに従う。通過は、委託の直前に同梱の helper `.agents/skills/implement-issue/required-checks <PR 番号>` を実行し、その終了コードで確かめる（標準出力は 2 つのチェックの判定 `<名前>: <pass|fail|pending>`。同じ名前の行の集計と pr-size の例外の扱いは skill `review-pr` の手順 2 と同じ。`bucket` の `skipping` を pass、`cancel` を fail に数えることと、閉じる Issue をリポジトリと番号の組で照会することは helper だけの規則で、helper の冒頭のコメントに書いてある）。
 
