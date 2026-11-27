@@ -89,6 +89,8 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 - **conductor-rebuild**: 新しい指揮役の worktree の agent-team の設定を揃える（`agent-team.toml` が無ければ本体の checkout から写し、`agent-team.local.toml` を持ち越す。T3 のアクションを取り込んでいない環境でも上書きを失わない）。揃えられなければ旧指揮役を止める前に止まる
 - **Claude Code・Codex の worktreeinclude 機構**: `.worktreeinclude` に `agent-team.local.toml` を列挙（追跡しないファイルの持ち越し用。追跡ファイルの `agent-team.toml` は列挙しない。T3 Code はこのファイルを読まない）
 
+コピーは `scripts/worktree-setup-copy` が行い、書き込み先は `O_TMPFILE` の無名 inode（名前を持たない一時ファイル。書き終えた実体の fd から link で最終名に載せる）。**コピー先のファイルシステムが `O_TMPFILE` に対応していることが前提**（Linux の ext4・XFS・tmpfs・btrfs などは対応。NFS・一部の FUSE は非対応）。非対応のファイルシステムでは一時 inode を作れずコピーは中断し、`worktree-setup` は「worktree 側に <名前> を作れない（書き込みに失敗）」で非 0 で止まる — その場合はファイルシステムを替えるか、対象のファイルを手で置く
+
 開発者ごとの上書き `agent-team.local.toml`（追跡しない。雛形は `agent-team.local.toml.example`）は本体の checkout に置くと worktree 作成時に持ち越される。worktree ごとに別の値にしたいときはその worktree に置く。上書きできる項目・できない項目の表は `docs/superpowers/specs/agent-team.md` の「開発者ごとの上書き」。重ねた結果は `scripts/agent-team-config effective <GitHub login>` で確かめられる。コミットは `.gitignore` と hk の `no_agent_team_local` ステップで止める。
 
 ## CI（GitHub Actions）

@@ -168,3 +168,20 @@ nit への対応: grokbot-runbook の missing の段落に usage と同じ記録
 
 あわせて: agent-team-config の試験 33–35 を標準出力の `missing <担当>` の行を確かめる形に拡張し、細工した警告のキー名が標準出力の missing に届かない試験 36、conductor-watch-slots に細工キーで slots.json の missing を汚せない試験 13k を追加
 
+## レビュー対応（round 13）
+
+対象 head: 0aa6dd0f
+レビュー: codex_review（run=804-review-round13-codex、review 6088243265）は request-changes（must-fix 4、nit 1、out-of-scope 1）
+
+must-fix への対応:
+1. implement-issue・command-team・runbook が担当不足を標準エラーの警告から判断していた（細工した local のキー名が不足の印を装い、codex が使える環境でも誤って止めうる）→ `effective` の JSON に `missing` の一覧を専用フィールドとして載せ、すべての判断は JSON の `missing`（または `developers.<login>.use`）で行い標準エラーの警告では確かめない形に統一。設定の取得・検証・出力の読み取りに失敗したときは不足なしとみなさず止めることを各所に明記
+2. slots.json の記録の有効条件だけでは巡回後の設定変更を補えない（記録が新しくても local が変わりうる）→ 高リスク・security=yes の仕事の割り当て・起動・再開の直前に `effective` を実行してその `missing` で確かめる決まりに（command-team「割り当ての可否」と runbook。`slots.json` の `missing` は見通し用の記録として残す）
+3. evals の PR 入力が codex の approve 以外にもマージを止める条件を残していた（委託の結び付き・QA の形式が不完全、high_risk 上書きの入力も無し）→ 有効な委託記録・確定した結果・QA コメント（`QA: pass`/`sha:`/`run:`）を整え、`priority.review.high_risk` を claude に上書きした `effective.json` を入力に追加。codex の approve だけが欠ける PR #840（キューに入れない）と approve までそろう PR #841（automerge を付ける）の両方で結果を確かめる形に
+4. verify.sh が成功した操作を確かめられていなかった → 必須の動作は `exit=0` の成功した追加操作だけを数え（remove-label・exit=1 は数えない）、止めるべき動作は方向だけを見る形に。作業ラベルを伴わない担当者設定（`--add-assignee`）も着手として検出。誤合格する各経路に対応する fail フィクスチャを追加（fail-escalation-wrong-direction・fail-assign-failed・fail-assignee-only・fail-delegate-codex・fail-skip-841）
+
+nit への対応: dev-environment.md に `worktree-setup-copy` がコピー先のファイルシステムの `O_TMPFILE` 対応を前提とすること、非対応ではコピーが中断することを明記
+
+out-of-scope メモ: 委託記録コメントの head は短縮 SHA だった — 以降の `[review-request]` コメントは完全な SHA を書く
+
+あわせて: agent-team-config の試験 33・34・36 を `effective` の JSON の `missing` を確かめる形に拡張
+

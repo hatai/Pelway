@@ -1,0 +1,20 @@
+{
+  "_source": "scripts/agent-team-config effective hatai — agent-team.local.toml で developers.hatai.use から codex を外し、priority.review.high_risk を claude に書き換えた上書きを重ねた結果",
+  "missing": ["codex"],
+  "developers": {
+    "hatai": {
+      "use": ["opencode", "devin", "claude"],
+      "slots": { "opencode": 3, "devin": 6 },
+      "review_limits": { "codex": 2, "claude": 2, "devin": 1 },
+      "priority": {
+        "implement": { "default": ["opencode"], "small": ["opencode"] },
+        "investigate": { "default": ["opencode"] },
+        "review": {
+          "default": ["claude"],
+          "high_risk": ["claude"],
+          "small": ["claude"]
+        }
+      }
+    }
+  }
+}

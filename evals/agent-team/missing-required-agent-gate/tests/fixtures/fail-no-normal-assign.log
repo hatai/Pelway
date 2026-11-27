@@ -1,4 +1,5 @@
 action=read src=environment/slots.json
 action=run cmd="scripts/agent-gh dev issue edit 820 --add-label needs-decision" exit=0
 action=run cmd="scripts/agent-gh dev issue edit 821 --add-label needs-decision" exit=0
+action=run cmd="scripts/agent-gh dev pr edit 841 --add-label automerge" exit=0
 action=report to=human body="missing codex のため #820/#821 は停止"

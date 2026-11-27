@@ -3,14 +3,15 @@
     "number": 840,
     "title": "Runbook 表現の統一",
     "isDraft": false,
+    "mergeable": "MERGEABLE",
     "headRefOid": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
     "reviewDecision": "APPROVED",
     "latestReviews": [
       {
-        "author": { "login": "pelway-review[bot]" },
+        "author": { "login": "pelway-review[bot]", "type": "Bot" },
         "state": "APPROVED",
         "commit_id": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
-        "body": "Reviewer: agent=claude model=claude-opus-5-5 run=840-review-1"
+        "body": "Verdict: approve\nReviewed: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0\n\nReviewer: agent=claude model=claude-opus-5-5 effort=high run=9001"
       }
     ],
     "statusCheckRollup": [
@@ -18,8 +19,40 @@
       { "name": "pr-size", "conclusion": "SUCCESS" }
     ],
     "comments": [
-      { "author": { "login": "pelway-dev[bot]" }, "body": "[review-request] head: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0 to: claude" },
-      { "author": { "login": "pelway-qa[bot]" }, "body": "QA pass a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0 run: qa-840" }
+      { "id": 9001, "author": { "login": "pelway-dev[bot]", "type": "Bot" }, "created_at": "2026-11-27T20:40:00+09:00", "updated_at": "2026-11-27T20:40:00+09:00", "body": "[review-request] head: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0 to: claude" },
+      { "id": 9002, "author": { "login": "pelway-qa[bot]", "type": "Bot" }, "created_at": "2026-11-27T20:55:00+09:00", "updated_at": "2026-11-27T20:55:00+09:00", "body": "QA: pass\nsha: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0\nrun: qa-840" }
+    ],
+    "labels": []
+  },
+  {
+    "number": 841,
+    "title": "巡回記録の項目名の整理",
+    "isDraft": false,
+    "mergeable": "MERGEABLE",
+    "headRefOid": "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1",
+    "reviewDecision": "APPROVED",
+    "latestReviews": [
+      {
+        "author": { "login": "pelway-review[bot]", "type": "Bot" },
+        "state": "APPROVED",
+        "commit_id": "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1",
+        "body": "Verdict: approve\nReviewed: b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1\n\nReviewer: agent=claude model=claude-opus-5-5 effort=high run=9011"
+      },
+      {
+        "author": { "login": "pelway-review[bot]", "type": "Bot" },
+        "state": "APPROVED",
+        "commit_id": "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1",
+        "body": "Verdict: approve\nReviewed: b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1\n\nReviewer: agent=codex model=gpt-6.2-sol effort=high run=9012"
+      }
+    ],
+    "statusCheckRollup": [
+      { "name": "mise run verify", "conclusion": "SUCCESS" },
+      { "name": "pr-size", "conclusion": "SUCCESS" }
+    ],
+    "comments": [
+      { "id": 9011, "author": { "login": "pelway-dev[bot]", "type": "Bot" }, "created_at": "2026-11-27T20:30:00+09:00", "updated_at": "2026-11-27T20:30:00+09:00", "body": "[review-request] head: b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1 to: claude" },
+      { "id": 9012, "author": { "login": "pelway-dev[bot]", "type": "Bot" }, "created_at": "2026-11-27T20:31:00+09:00", "updated_at": "2026-11-27T20:31:00+09:00", "body": "[review-request] head: b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1 to: codex" },
+      { "id": 9013, "author": { "login": "pelway-qa[bot]", "type": "Bot" }, "created_at": "2026-11-27T20:58:00+09:00", "updated_at": "2026-11-27T20:58:00+09:00", "body": "QA: pass\nsha: b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1\nrun: qa-841" }
     ],
     "labels": []
   }

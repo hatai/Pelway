@@ -118,9 +118,10 @@ check cond6c_command_team_merge_gate .agents/skills/command-team/SKILL.md \
   'Reviewer: agent=codex' \
   'codex の委託記録が無い'
 check cond6c_implement_issue_draft_kept .agents/skills/implement-issue/SKILL.md \
-  'missing-required' \
+  '`missing`' \
   'PR は Draft のまま' \
-  'Draft を解除せず'
+  'Draft を解除せず' \
+  '不足なしとみなさ'
 check cond6c_runbook_missing_channel docs/agents/grokbot-runbook.md \
   '`missing <担当>` の行'
 check cond6c_spec_missing_channel docs/superpowers/specs/agent-team.md \

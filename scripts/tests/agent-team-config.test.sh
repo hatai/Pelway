@@ -656,6 +656,8 @@ check "33: codex approve still required despite rewritten high_risk" \
 bash "$CFG" effective dev "$ROOT/l33.toml" >"$ROOT/out" 2>/dev/null
 check "33: codex absent from effective reviewers" \
   python3 -I -c "import json,sys; d=json.load(open(sys.argv[1]))['developers']['dev']; assert 'codex' not in d['use'] and 'codex' not in str(d['priority']['review'])" "$ROOT/out"
+check "33: effective JSON has missing codex" \
+  python3 -I -c "import json,sys; assert json.load(open(sys.argv[1]))['missing'] == ['codex']" "$ROOT/out"
 rm "$ROOT/agent-team.local.toml"
 
 # 34: codex が使える（local が use を変えない）ときは missing-required の印も
@@ -670,6 +672,9 @@ check "34: no missing line on stdout when codex usable" \
   bash -c "! grep -q '^missing ' '$ROOT/out'"
 check "34: no codex warning when codex usable" bash -c "! grep -q 'codex が使えない' '$ROOT/err'"
 check "34: slots still emits limits" eq "$(grep -cx 'devin 9' "$ROOT/out")" "1"
+bash "$CFG" effective dev "$ROOT/l33.toml" >"$ROOT/out" 2>/dev/null
+check "34: effective JSON missing is empty" \
+  python3 -I -c "import json,sys; assert json.load(open(sys.argv[1]))['missing'] == []" "$ROOT/out"
 rm "$ROOT/agent-team.local.toml"
 
 # 35: local が無くても missing-required の検査は共有の doc に掛かる
@@ -711,6 +716,9 @@ check "36: warning lands the crafted key on stderr" has "$ROOT/err" "missing-req
 check "36: crafted warning cannot reach stdout missing" \
   bash -c "! grep -q '^missing ' '$ROOT/out'"
 check "36: limits still emitted" bash -c "grep -qE '^devin [0-9]+$' '$ROOT/out'"
+bash "$CFG" effective dev "$ROOT/l36.toml" >"$ROOT/out" 2>/dev/null
+check "36: crafted warning cannot reach effective missing" \
+  python3 -I -c "import json,sys; assert json.load(open(sys.argv[1]))['missing'] == []" "$ROOT/out"
 rm "$ROOT/agent-team.local.toml" "$ROOT/l36.toml"
 
 if ((${#failures[@]})); then

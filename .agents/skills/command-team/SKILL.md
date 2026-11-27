@@ -109,7 +109,7 @@ PR がすでにあり、そのブランチが `origin` にある引き継ぎ・�
 
 Issue を割り当てる直前に、runbook の「割り当て・停止・再開」の blocker の確認を通す。割り当てを止める条件、Issue に残すコメント、順番を変えるとき、割り当てた後に blocker が開き直したとき、見張りに確認を組み込むときの決まりも、同じ節が正本。
 
-高リスク（下の「レビュー担当と effort」の高リスクの条件に当たる仕事）と security=yes の仕事は、さらに必須の担当の確認を通す: 見張りの `slots.json` の `missing`（正本。無い・古い・`missing` のキーの無い記録では `scripts/agent-team-config effective <login>` の `missing-required` の警告で確かめる）に codex があれば割り当て・起動・再開を止める。マージには GitHub 上の現在の head への codex の有効な approve が要り、`agent-team.local.toml` で `use` や `priority.review.high_risk` を書き換えてもこの関門は下げられないため、始めてもマージに辿り着けない。止まっているあいだの扱いは `needs-decision` で人間に上げ、直し方（codex を `use` に戻すか、人が担当を割り当て直す）を伝える。通常の優先順位の仕事はこの確認では止めない（Issue #804 の hatai 決定）。
+高リスク（下の「レビュー担当と effort」の高リスクの条件に当たる仕事）と security=yes の仕事は、さらに必須の担当の確認を通す: 割り当て・起動・再開の直前に `scripts/agent-team-config effective <login>` を実行し、JSON の `missing` に codex があれば止める。判定は JSON の `missing`（または `developers.<login>.use` の値）で行い、標準エラーの `missing-required` の警告では確かめない（警告には local のキー名がそのまま入るため、細工したキー名が不足の印を装いうる）。`effective` の実行が失敗する（toml を取得できない・検証を通らない・出力を読めない）ときは不足なしとみなさず、確かめられるまで止める。見張りの `slots.json` の `missing` は見通し用の記録で、記録が新しくても巡回のあとに local が変わりうるため、この確認の代わりにはしない。マージには GitHub 上の現在の head への codex の有効な approve が要り、`agent-team.local.toml` で `use` や `priority.review.high_risk` を書き換えてもこの関門は下げられないため、始めてもマージに辿り着けない。止まっているあいだの扱いは `needs-decision` で人間に上げ、直し方（codex を `use` に戻すか、人が担当を割り当て直す）を伝える。通常の優先順位の仕事はこの確認では止めない（Issue #804 の hatai 決定）。
 
 ### 実装のモデルと effort
 

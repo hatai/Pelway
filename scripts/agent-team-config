@@ -50,11 +50,14 @@ subcommands:
                             この行だけを読む）
   effective <login> [<file> [<local-file>]]
                             重ねた結果を JSON で出す（agents の登録情報と、その
-                            developers.<login> の表だけ）。手順書・skill で
-                            toml を直接読む代わりに使う。<local-file> を渡すと
+                            developers.<login> の表、必須の役に当たる担当の不足を
+                            載せる missing の一覧）。手順書・skill で toml を
+                            直接読む代わりに使う。<local-file> を渡すと
                             <file> と同じディレクトリの代わりにそれを重ねる
                             （共有は main の承認済みの版、local は本体の checkout
-                            の版を重ねるときに使う）
+                            の版を重ねるときに使う）。missing は slots と同じ
+                            機械向けの経路で、標準エラーの警告ではなく JSON の
+                            値だけを読む
 
 local の上書き: 表は深く重ね、配列（use・models・priority.*.*・effort.raise）は
 丸ごと置き換える。上書きできない項目（instance.review・effort.option・assign_label・
@@ -605,8 +608,13 @@ def do_effective(login, path, lpath=None):
     devs = doc.get("developers", {})
     if not isinstance(devs.get(login), dict):
         fail(f"{path}: developers.{login} の表が無い")
+    # missing は LAST_MISSING（合成済みの設定から算出した不足）を載せる専用
+    # フィールド。標準エラーの missing-required の警告には local のキー名が
+    # そのまま入るため、機械向けの判定は警告ではなくこの値（または slots
+    # サブコマンドの missing の行）を読む
     print(json.dumps({"agents": doc.get("agents", {}),
-                      "developers": {login: devs[login]}},
+                      "developers": {login: devs[login]},
+                      "missing": LAST_MISSING},
                      ensure_ascii=False, indent=2, sort_keys=True))
 
 
