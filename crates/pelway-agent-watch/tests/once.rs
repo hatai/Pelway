@@ -2596,12 +2596,12 @@ fn pending_position_is_last_worthy_line_in_batch() {
 
 #[test]
 fn cooldown_counts_from_when_the_wake_was_sent() {
-    // 送るのに 2 秒かかった。最短間隔 2 秒は、送り終えた時刻から数える
+    // 送るのに 3 秒かかった。最短間隔 2 秒は、送り終えた時刻から数える
     let sb = Sandbox::new("wake-839-sent-at");
     one_event(&sb);
     sb.conductor("mcp:conductor-1");
     sb.patrol_state(r#"{"inbox_offset":0}"#);
-    sb.fake("t3-send-sleep", "2");
+    sb.fake("t3-send-sleep", "3");
     let run = |sb: &Sandbox| {
         sb.command(&["--once"])
             .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "2")
@@ -2614,4 +2614,16 @@ fn cooldown_counts_from_when_the_wake_was_sent() {
     b_fails_at(&sb, "2026-11-10T16:30:00Z");
     let out = run(&sb);
     assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+}
+
+#[test]
+fn pending_only_cycles_do_not_read_the_inbox() {
+    // 起こし待ちの印だけを確かめる周は、受信箱を読まない（数え直さない）。受信箱が読めない
+    // （所有者以外に権限がある）状態でも、間隔がたてば印の値で判定して起こす
+    let sb = Sandbox::new("wake-839-no-recount");
+    wake_then_defer_b_failure(&sb, 1);
+    fs::set_permissions(sb.inbox(), fs::Permissions::from_mode(0o644)).unwrap();
+    backdate_last_wake(&sb);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
 }

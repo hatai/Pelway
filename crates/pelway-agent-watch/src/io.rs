@@ -533,9 +533,11 @@ fn split_pelway_path(path: &Path) -> Result<(&Path, &str), String> {
 const INBOX_MAX_BYTES: u64 = 256 * 1024 * 1024;
 
 /// 受信箱に、1 件 1 行で追記する（ファイルは 0600。1 行を 1 回の書き込みで書く）。
-/// 書いたあとの受信箱の行数を、同じ fd で数えて返す（path を開き直さない）。
-pub fn append_inbox(path: &Path, lines: &[String]) -> Result<u64, String> {
-    use std::io::{Read, Seek};
+/// 書いたあとの受信箱の行数と、書いた各行の行番号（数えきれなかった行は None）を、同じ fd で
+/// 数えて返す（path を開き直さない）。行番号は、書いた直後のファイルの位置から数えるので、
+/// その後にほかの書き手が足した行を含まない（`inbox::count_lines_at`）。
+pub fn append_inbox(path: &Path, lines: &[String]) -> Result<(u64, Vec<Option<u64>>), String> {
+    use std::io::Seek;
     let (dir, name) = split_pelway_path(path)?;
     let dirf = open_pelway_dir(dir, true)?;
     let mut file = open_in_pelway(&dirf, name, libc::O_RDWR | libc::O_APPEND | libc::O_CREAT)?;
@@ -556,24 +558,18 @@ pub fn append_inbox(path: &Path, lines: &[String]) -> Result<u64, String> {
             file.write_all(b"\n").map_err(|e| e.to_string())?;
         }
     }
+    let mut ends = Vec::with_capacity(lines.len());
     for line in lines {
         let mut buf = line.clone();
         buf.push('\n');
         file.write_all(buf.as_bytes()).map_err(|e| e.to_string())?;
+        // O_APPEND の書き込みの直後の位置は、いま書いた行の終わり
+        ends.push(file.stream_position().map_err(|e| e.to_string())?);
     }
     file.rewind().map_err(|e| e.to_string())?;
-    // EOF まで、固定の上限（`INBOX_MAX_BYTES` + 1 MiB）の内で読む（書いた後に足された行も数えに入る）
-    let mut file = file.take(INBOX_MAX_BYTES + 1024 * 1024);
-    let mut count = 0u64;
-    let mut chunk = [0u8; 8192];
-    loop {
-        let n = file.read(&mut chunk).map_err(|e| e.to_string())?;
-        if n == 0 {
-            break;
-        }
-        count += chunk[..n].iter().filter(|&&b| b == b'\n').count() as u64;
-    }
-    Ok(count)
+    // EOF まで、固定の上限（`INBOX_MAX_BYTES` + 1 MiB）の内で読む（書いた後に足された行も行数に入る）
+    pelway_agent_watch::inbox::count_lines_at(&file, &ends, INBOX_MAX_BYTES + 1024 * 1024)
+        .map_err(|e| e.to_string())
 }
 
 /// 補助記録（`patrol-state.json`）の大きさの上限。これを超えるものは読まない。

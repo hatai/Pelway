@@ -36,6 +36,41 @@ pub fn inbox_line(payload: &Value) -> String {
     out
 }
 
+/// 受信箱を先頭から `limit` バイトまで読み、改行の数（行数）と、`ends` の各バイト位置（その行の
+/// 終わり。昇順）までの行数を数える。`limit` までに届かなかった位置は `None`（数えきれない）。
+/// 自分が書いた行の位置は、書いた直後のファイルの位置で渡す。その後にほかの書き手が足した行は、
+/// 自分の行の番号に入らない（Issue #839）。
+pub fn count_lines_at(
+    reader: impl std::io::Read,
+    ends: &[u64],
+    limit: u64,
+) -> std::io::Result<(u64, Vec<Option<u64>>)> {
+    use std::io::Read;
+    let mut reader = reader.take(limit);
+    let mut at = vec![None; ends.len()];
+    let (mut offset, mut count, mut next) = (0u64, 0u64, 0usize);
+    let mut chunk = [0u8; 8192];
+    loop {
+        let n = reader.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        for &b in &chunk[..n] {
+            while next < ends.len() && ends[next] <= offset {
+                at[next] = Some(count);
+                next += 1;
+            }
+            offset += 1;
+            count += u64::from(b == b'\n');
+        }
+    }
+    while next < ends.len() && ends[next] <= offset {
+        at[next] = Some(count);
+        next += 1;
+    }
+    Ok((count, at))
+}
+
 /// 起こしに要る値。宛先はホスト側の登録ファイル（sandbox から書けない）から、
 /// 既読の位置は補助記録（sandbox の中の指揮役が書く）から読む。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -196,8 +231,9 @@ pub struct WakeHistory {
     pub last_offset: Option<u64>,
     /// 前回起こした時刻（UNIX 秒）。一度も起こしていなければ None。
     pub last_at: Option<i64>,
-    /// 最短間隔の間に起こすに足る知らせが来て、起こしを後に回している（起こし待ちの印）。
-    /// 値は、後に回した知らせのうち最後のものまでの受信箱の行数（起こすに足る行がそこまである）。
+    /// 起こすに足る知らせを起こせず、後に回している（起こし待ちの印。最短間隔の内・既読が進んで
+    /// いない・補助記録が読めない・既読が範囲外のとき）。値は、後に回した知らせのうち最後のもの
+    /// までの受信箱の行数（起こすに足る行がそこまである。数えきれなかったときは `u64::MAX`）。
     pub pending: Option<u64>,
 }
 
@@ -683,5 +719,20 @@ mod tests {
             &mut rounds,
         );
         assert!(rounds.is_empty());
+    }
+
+    #[test]
+    fn line_numbers_ignore_lines_written_after_ours() {
+        // 自分が 2 行目まで書いた後に、ほかの書き手が 2 行足した: 自分の行は 2 行目のまま
+        let (total, at) = count_lines_at(&b"a\nb\nc\nd\n"[..], &[2, 4], 1 << 20).unwrap();
+        assert_eq!(total, 4);
+        assert_eq!(at, vec![Some(1), Some(2)]);
+    }
+
+    #[test]
+    fn line_number_past_the_read_limit_is_unknown() {
+        // 読む上限（3 バイト）までに、6 バイト目で終わる行まで数えきれない
+        let (_, at) = count_lines_at(&b"a\nb\nc\n"[..], &[2, 6], 3).unwrap();
+        assert_eq!(at, vec![Some(1), None]);
     }
 }

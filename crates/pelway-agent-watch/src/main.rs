@@ -361,7 +361,7 @@ impl Watcher {
                 })
                 .collect();
             match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &lines) {
-                Ok(total) => self.maybe_wake(&t3, total, &notices),
+                Ok((total, at)) => self.maybe_wake(&t3, Some(total), &notices, &at),
                 Err(e) => {
                     eprintln!("agent-watch: ERROR inbox append failed: {e}");
                     let pending = self.state.inbox_pending.get_or_insert_default();
@@ -383,12 +383,9 @@ impl Watcher {
             }
         } else if self.state.wake_pending.is_some() {
             // 新しい知らせの無い周回でも、後に回した起こし（起こし待ちの印）を確かめる（Issue #839）。
-            // 受信箱の行数は、行を足さない追記の手続きで数える（受信箱が無ければ空で作り、末尾の
-            // 改行の欠けた断片は改行で閉じる）。書けない受信箱は、知らせを書く
-            // 周回で `inbox append failed` として出るので、ここでは印を残したまま黙って次の周回に回す
-            if let Ok(total) = io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &[]) {
-                self.maybe_wake(&t3, total, &[]);
-            }
+            // 判定には印の値と補助記録だけを使い、受信箱は読まない（印が残る間、周回ごとに受信箱を
+            // 数え直さない）
+            self.maybe_wake(&t3, None, &[], &[]);
         }
 
         // 承認待ちの記録は、一覧の記録に残るスレッドの分だけを持つ
@@ -480,7 +477,15 @@ impl Watcher {
     /// 送れなかったときは記録を進めず、起こし待ちの印も消し、次の新しい知らせで改めて試みる
     /// （再送の列は持たない）。印だけを確かめる周（`notices` が空）では、起こさなかった理由の
     /// ログを出さない（印が残る間、周回ごとに同じ行が増えないように）。
-    fn maybe_wake(&mut self, t3: &std::path::Path, inbox_lines: u64, notices: &[WakeNotice]) {
+    /// `inbox_lines` はその周に数えた受信箱の行数（印だけを確かめる周では数えないので None）、
+    /// `line_numbers` は `notices` の各知らせを書いた行の番号（数えきれなかったものは None）。
+    fn maybe_wake(
+        &mut self,
+        t3: &std::path::Path,
+        inbox_lines: Option<u64>,
+        notices: &[WakeNotice],
+        line_numbers: &[Option<u64>],
+    ) {
         let log = |reason: &str| {
             if !notices.is_empty() {
                 eprintln!("agent-watch: WAKE skipped reason={reason}");
@@ -504,12 +509,16 @@ impl Watcher {
         // 前回の起こしの記録は、そのときの宛先にだけ使う（指揮役が替わったら一度も起こしていない扱い）
         let same_target = self.state.last_wake_thread_id.as_deref() == Some(registered.as_str());
         let batch = classify_notices(notices, &registered, &mut self.state.wake_waiting_rounds);
-        // 起こすに足る新しい知らせのうち最後のものまでの受信箱の行数（知らせは受信箱の末尾に、
-        // 並びの順に 1 行ずつ書いてある）
+        // 起こすに足る新しい知らせのうち最後のものを書いた行の番号。数えきれなかったときは、
+        // 読み終えたと判定しないよう最大の値にする
         let fresh_upto = match batch {
-            NoticeBatch::Worthy(last) => {
-                Some(inbox_lines.saturating_sub((notices.len() - 1 - last) as u64))
-            }
+            NoticeBatch::Worthy(last) => Some(
+                line_numbers
+                    .get(last)
+                    .copied()
+                    .flatten()
+                    .unwrap_or(u64::MAX),
+            ),
             _ => None,
         };
         // 起こせなかった新しい知らせを、起こし待ちの印に入れる（後の周回で確かめ直す）
@@ -545,8 +554,9 @@ impl Watcher {
                 }
             };
         // 既読の位置は受信箱の行数を超えられない。超える値（書き損じ・sandbox からの書き換え）は
-        // 使わず保存もしない（保存すると、補助記録を直しても以後の起こしが止まり続けるため）
-        if inbox_offset > inbox_lines {
+        // 使わず保存もしない（保存すると、補助記録を直しても以後の起こしが止まり続けるため）。
+        // 受信箱を数えない印だけの周では確かめない（送るのは既読が印の値より小さいときだけ）
+        if inbox_lines.is_some_and(|lines| inbox_offset > lines) {
             log("offset-out-of-range");
             defer(&mut self.state);
             return;
@@ -564,7 +574,8 @@ impl Watcher {
         match decide_wake(&info, &history, fresh_upto, now_epoch(), cooldown) {
             WakeDecision::Send(thread_id) => match io::wake(t3, &thread_id, WAKE_MESSAGE) {
                 Ok(()) => {
-                    eprintln!("agent-watch: WAKE sent inbox_lines={inbox_lines}");
+                    let lines = inbox_lines.map_or("-".to_string(), |n| n.to_string());
+                    eprintln!("agent-watch: WAKE sent inbox_lines={lines}");
                     self.state.last_wake_inbox_offset = Some(inbox_offset);
                     // 最短間隔は送り終えた時刻から数える（送るのにかかった時間の分、次の起こしを早めない）
                     self.state.last_wake_at = Some(now_epoch());
