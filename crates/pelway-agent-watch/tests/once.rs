@@ -2627,3 +2627,21 @@ fn pending_only_cycles_do_not_read_the_inbox() {
     let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 2, "{}", stderr(&out));
 }
+
+#[test]
+fn pending_only_cycle_checks_offset_range() {
+    // 印だけを確かめる周でも、受信箱の末尾を超える既読の位置は使わない（印も基準も変えない）
+    let sb = Sandbox::new("wake-839-pending-range");
+    wake_then_defer_b_failure(&sb, 1);
+    let before = read_state(&sb)["last_wake_inbox_offset"].clone();
+    sb.patrol_state(r#"{"inbox_offset":5}"#);
+    backdate_last_wake(&sb);
+    run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1);
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    assert_eq!(read_state(&sb)["last_wake_inbox_offset"], before);
+    // 補助記録が直れば、新しい知らせが無くても起こす
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}

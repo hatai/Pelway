@@ -361,7 +361,10 @@ impl Watcher {
                 })
                 .collect();
             match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &lines) {
-                Ok((total, at)) => self.maybe_wake(&t3, Some(total), &notices, &at),
+                Ok((total, at)) => {
+                    self.state.inbox_lines = Some(total);
+                    self.maybe_wake(&t3, Some(total), &notices, &at);
+                }
                 Err(e) => {
                     eprintln!("agent-watch: ERROR inbox append failed: {e}");
                     let pending = self.state.inbox_pending.get_or_insert_default();
@@ -384,8 +387,8 @@ impl Watcher {
         } else if self.state.wake_pending.is_some() {
             // 新しい知らせの無い周回でも、後に回した起こし（起こし待ちの印）を確かめる（Issue #839）。
             // 判定には印の値と補助記録だけを使い、受信箱は読まない（印が残る間、周回ごとに受信箱を
-            // 数え直さない）
-            self.maybe_wake(&t3, None, &[], &[]);
+            // 数え直さない）。既読の位置の範囲は、最後に数えた受信箱の行数で確かめる
+            self.maybe_wake(&t3, self.state.inbox_lines, &[], &[]);
         }
 
         // 承認待ちの記録は、一覧の記録に残るスレッドの分だけを持つ
@@ -477,7 +480,7 @@ impl Watcher {
     /// 送れなかったときは記録を進めず、起こし待ちの印も消し、次の新しい知らせで改めて試みる
     /// （再送の列は持たない）。印だけを確かめる周（`notices` が空）では、起こさなかった理由の
     /// ログを出さない（印が残る間、周回ごとに同じ行が増えないように）。
-    /// `inbox_lines` はその周に数えた受信箱の行数（印だけを確かめる周では数えないので None）、
+    /// `inbox_lines` は受信箱の行数（印だけを確かめる周では、最後に数えた行数。数えたことが無ければ None）、
     /// `line_numbers` は `notices` の各知らせを書いた行の番号（数えきれなかったものは None）。
     fn maybe_wake(
         &mut self,
@@ -555,8 +558,8 @@ impl Watcher {
             };
         // 既読の位置は受信箱の行数を超えられない。超える値（書き損じ・sandbox からの書き換え）は
         // 使わず保存もしない（保存すると、補助記録を直しても以後の起こしが止まり続けるため）。
-        // 受信箱を数えない印だけの周では確かめない（送るのは既読が印の値より小さいときだけ）
-        if inbox_lines.is_some_and(|lines| inbox_offset > lines) {
+        // 行数が分からないとき（数えたことが無い）は、範囲を確かめられないので使わない
+        if inbox_lines.is_none_or(|lines| inbox_offset > lines) {
             log("offset-out-of-range");
             defer(&mut self.state);
             return;
