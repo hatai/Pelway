@@ -62,6 +62,14 @@ else
   cp "$REPO/scripts/"{conductor-watch.sh,patrol-state-update} "$ROOT/trepo-stall/scripts/"
   cp "$REPO/scripts/tests/conductor-watch-slots.test.sh" "$ROOT/trepo-slots/scripts/tests/"
   cp "$REPO/scripts/tests/conductor-watch-stall.test.sh" "$ROOT/trepo-stall/scripts/tests/"
+  # グループ停止の検査が回す見張り用: trepo-stall を git init して agent-gh のモックを置く
+  # （見張りは自分のリポジトリの scripts/agent-gh を呼ぶ）。
+  git init -q "$ROOT/trepo-stall"
+  cat > "$ROOT/trepo-stall/scripts/agent-gh" <<'EOF'
+#!/usr/bin/env bash
+echo '[]'
+EOF
+  chmod +x "$ROOT/trepo-stall/scripts/agent-gh"
 
   # 見張りが呼ぶ外部コマンドのモック。巡回の成否は問わない（動作検査はプロセスの
   # 生死だけを見る）ため、どちらも空の一覧を返すだけにする。
@@ -76,7 +84,7 @@ EOF
   chmod +x "$ROOT/repo/scripts/agent-gh" "$ROOT/bin/t3"
 
   # systemctl を除いた最小 PATH。ここに無いコマンドは名前空間内で「無い」扱いになる。
-  for t in bash sh env setsid pgrep ps mkdir cp chmod dirname python3 cat grep sed tr cut wc sleep flock kill ls head tail awk date git mktemp rm ln touch chown sha256sum rmdir; do
+  for t in bash sh env setsid pgrep ps mkdir cp chmod dirname python3 cat grep sed tr cut wc sleep flock kill ls head tail awk date git mktemp rm ln touch chown sha256sum rmdir mkfifo; do
     p="$(command -v "$t" 2>/dev/null)" && ln -s "$p" "$ROOT/sysbin/$t"
   done
 
@@ -158,13 +166,27 @@ stop_decoys() { kill "$argpid" "$copypid" 2>/dev/null; wait "$argpid" "$copypid"
 wait_gone() {  # <pid>: 終わるのを上限付きで待つ（生き残った場合に wait で止まらないようにする）
   local i; for i in {1..25}; do kill -0 "$1" 2>/dev/null || return 0; sleep 0.2; done; return 1
 }
-t_test_kills() {  # <mode>: conductor-watch の実際の試験（slots: 単体 PID の kill。stall: プロセスグループの kill）を、ensure の管理対象の見張り（p1）と並行して通す。試験が通ること、試験が立てた見張りが残らないこと、p1 が残ることを確かめる
+t_test_kills() {  # <mode>: conductor-watch の実際の試験（slots: 単体 PID の kill）と実際の停止処理（stall の試験が使うプロセスグループへの kill -KILL -- -PGID）を、ensure の管理対象の見張り（p1）と並行して通す。試験が通ること、試験が立てた見張りが残らないこと、p1 が残ることを確かめる
   # 試験側の偽リポジトリは git init されるため、patrol-state の置き場は試験に既定の判定を任せる
   env -u PELWAY_PATROL_STATE bash "$ROOT/trepo-slots/scripts/tests/conductor-watch-slots.test.sh" >"$MOCK/slots.out" 2>&1
   t "$1: slots test passes beside managed watch"  eq "$?" "0"
   env -u PELWAY_PATROL_STATE bash "$ROOT/trepo-stall/scripts/tests/conductor-watch-stall.test.sh" >"$MOCK/stall.out" 2>&1
   t "$1: stall test passes beside managed watch"  eq "$?" "0"
   t "$1: test watchers all stopped"               waitn 1
+  # 正常終了する巡回では stall の試験のグループ停止を通らないため、子を持つ試験用の見張りに
+  # その停止処理（kill -KILL -- -PGID。stall の試験の 15・93 行）をそのまま通す。子の 1 つは
+  # 見張りと別名（inbox-sleeper）にする: 名前で数える検査は別名の子を見逃すため、残りは
+  # プロセスグループで確かめる。
+  env -u PELWAY_PATROL_STATE setsid bash -c \
+    'bash "$1" >>"$MOCK/groupkill.out" 2>&1 & (exec -a inbox-sleeper sleep 300) & wait' \
+    _ "$ROOT/trepo-stall/scripts/conductor-watch.sh" &
+  gpid=$!
+  for i in {1..25}; do pgrep -g "$gpid" -f inbox-sleeper >/dev/null 2>&1 && break; sleep 0.2; done
+  t "$1: group-kill target has a differently-named child" test -n "$(pgrep -g "$gpid" -f inbox-sleeper)"
+  kill -KILL -- -"$gpid" 2>/dev/null
+  wait "$gpid" 2>/dev/null  # 起動元は自分の子なので回収しておく（zombie は pgrep -g に数えられる）
+  for i in {1..15}; do [[ -z "$(pgrep -g "$gpid" 2>/dev/null)" ]] && break; sleep 0.2; done
+  t "$1: group kill stops test watcher and all children" eq "$(pgrep -g "$gpid" 2>/dev/null || true)" ""
   t "$1: ensure-managed watch kept beside the tests' kills"  eq "$(kill -0 "$p1" 2>/dev/null; echo $?)" "0"
 }
 

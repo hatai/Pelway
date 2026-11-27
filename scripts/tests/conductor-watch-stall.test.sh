@@ -245,6 +245,7 @@ check "13: the cycle finishes within 10 seconds" in_time
 # 試験 14: 受信箱が FIFO なら、開いて止まらず、10 秒以内にその回を終える。
 reset; stopped 55
 mkfifo "$INBOX"
+check "14: the inbox is a FIFO" test -p "$INBOX"
 run_cycles 1
 check "14: a FIFO inbox does not block the cycle (10 seconds)" in_time
 check "14: the patrol state is still updated" eq "$(sget 55 waiting_on)" "conductor"

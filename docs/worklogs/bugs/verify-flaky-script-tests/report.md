@@ -148,7 +148,7 @@ Issue の対象外だったため調査だけの予定でしたが、開発リ�
 
 - ensure の systemd が無い経路（128 行・135 行）も同じ `watch_pids` を使うため、同じ巻き込みがありました。この修正で同時に狭まります。
 - `conductor-watch-ensure.test.sh` が「環境の負荷で間欠失敗する」と作業ログに繰り返し書かれています（`docs/worklogs/issue-161.md`、`issue-202.md`、`issue-265.md`、`issue-330.md`、`issue-405.md`、`issue-411.md`、`issue-470.md`）。この試験の見張りも同じ文字列を持ち、pid の名前空間は親から見えるため、同じ原因である可能性があります。確かめてはいません。
-- `scripts/tests/conductor-watch-ensure.test.sh` は `PELWAY_BOARD_QUEUE_DIR` を設定しません。試験の見張りが本物のボード Status 更新のキュー（`/tmp/pelway-board-queue`）を見ます。2026-11-26 22:30 時点のキューには `gh-read` による失敗の記録はありませんでした（完了 11 件、失敗 1 件は `bad-shape`）。この修正には含めていません。
+- `scripts/tests/conductor-watch-ensure.test.sh` は `PELWAY_BOARD_QUEUE_DIR` を設定していませんでした（修正前の観測）。試験の見張りが本物のボード Status 更新のキュー（`/tmp/pelway-board-queue`）を見ます。2026-11-26 22:30 時点のキューには `gh-read` による失敗の記録はありませんでした（完了 11 件、失敗 1 件は `bad-shape`）。この修正で、名前空間の中のすべての起動が試験用のキュー（`PELWAY_BOARD_QUEUE_DIR`）を使うようにしました。
 
 ## 未解決の問い
 
