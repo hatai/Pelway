@@ -124,3 +124,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「検査の失敗を記録する仕組みでは、記録自体を書けない場合と成功後の掃除に失敗する場合の扱いも書く」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`、ユーザーレベルの `receiving-code-review`
+
+## 実装者メモ（round 12）
+
+対象 head: ce3bef07f9a2094944bf00f2ef6ed692c76d128a（この round の変更を含むコミット。署名付け替えの対象外の merge・過去の実行ファイルの mode 変更が履歴にあるため push 後も同じ SHA。このメモを含むコミットの親）
+
+1. 詰まった箇所: 権限が無く読めない印は stat の指紋で記録するが、権限が回復すると読み取りは内容の指紋へ変わり、開始時の記録と照合できず同じ世代の印を無効化できないまま残りえた。
+2. 曖昧だった文: 「開始記録を保存できなかった場合の無効化には、同じ印を見落とす条件が残っています。」（PR #832、codex_review の round 12、review 6082869609）
+3. 仮定と解釈: 世代は内容の指紋と stat の指紋の両方で追い、無効化ではどちらかが一致すれば同じ世代と読んだ。両方の保存先への記録と無効化の両方に失敗する経路は技術的に無くせないため、警告を出す運用例外として残し、Issue #807 の受け入れ条件を `scripts/agent-gh dev issue rewrite` で更新してそろえた。`agent-verify-record` では `.pelway-verify` と `started` が symlink のとき印を書かず、umask を 077 にした。
+4. 足りなかった情報・検証手段: chmod 0 の印が検証の途中で読めるようになっても同じ世代として無効化されること、`any` の記録が印をすべて止めること、symlink の `started` では record が拒否することを regression test で確かめた。全体は `TMPDIR=/dev/shm/p807-round12 mise run verify`（236.16 秒）で確かめた（script-test 62 tests ok）。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「検査の印の世代を指す識別子では、権限や読み方の変化で識別子が変わらないかを書く」を足す。
+
+使ったスキル: `.agents/skills/implement-issue`、ユーザーレベルの `receiving-code-review`
