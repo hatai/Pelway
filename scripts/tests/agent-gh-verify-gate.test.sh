@@ -202,6 +202,31 @@ rm -rf "$MISE_TOY/.git/pelway-verify-started"; : >"$MISE_TOY/.git/pelway-verify-
 [[ "$rc" != 0 && ! -e "$start_touch" && ! -e "$marker_path" ]] ||
   failures+=("verify_all_state_unwritable: rc=$rc touch=$(test -e "$start_touch" && echo present || echo missing) marker=$(test -e "$marker_path" && echo present || echo missing)")
 rm -rf "$MISE_TOY/.git/pelway-verify-started"; chmod u+w "$MISE_TOY/.pelway-verify"; rm -rf "$MISE_TOY/.pelway-verify" "$marker_path"
+mkdir "$MISE_TOY/.pelway-verify"; chmod a-w "$MISE_TOY/.pelway-verify"
+printf '%s
+verify-id:0123456789abcdef0123456789abcdef
+' "$("$REAL_GIT" -C "$MISE_TOY" rev-parse 'HEAD^{tree}')" >"$marker_path"
+chmod 000 "$marker_path"
+rm -rf "$MISE_TOY/.git/pelway-verify-started"; : >"$MISE_TOY/.git/pelway-verify-started"
+: >"$lock_path"; chmod 600 "$lock_path"
+readability_lock_held="$ROOT/readability-lock-held"; readability_lock_release="$ROOT/readability-lock-release"; rm -f "$readability_lock_held" "$readability_lock_release"
+LOCK_HELD="$readability_lock_held" LOCK_RELEASE="$readability_lock_release" flock -x "$lock_path" -c 'touch "$LOCK_HELD"; while [[ ! -e "$LOCK_RELEASE" ]]; do sleep 0.05; done' &
+readability_manual_lock=$!
+for ((i = 0; i < 100; i++)); do [[ -e "$readability_lock_held" ]] && break; sleep 0.05; done
+(cd "$MISE_TOY" && MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-readability-restore.out" 2>&1) &
+readability_verify=$!
+readability_waited=0
+for ((i = 0; i < 100; i++)); do
+  if grep -q '印を無効化するため verify のロックを待っています' "$ROOT/mise-readability-restore.out" 2>/dev/null; then readability_waited=1; break; fi
+  sleep 0.05
+done
+chmod 600 "$marker_path"
+touch "$readability_lock_release"
+wait "$readability_manual_lock" 2>/dev/null; readability_lock_rc=$?
+wait "$readability_verify"; readability_verify_rc=$?
+[[ "$readability_waited" == 1 && "$readability_lock_rc" == 0 && "$readability_verify_rc" != 0 && ! -e "$marker_path" ]] ||
+  failures+=("verify_readability_restored: waited=$readability_waited lock=$readability_lock_rc verify=$readability_verify_rc marker=$(test -e "$marker_path" && echo present || echo missing)")
+rm -rf "$MISE_TOY/.git/pelway-verify-started"; chmod u+w "$MISE_TOY/.pelway-verify"; rm -rf "$MISE_TOY/.pelway-verify" "$marker_path"
 mkdir "$MISE_TOY/.git/pelway-verify-started"; chmod 000 "$MISE_TOY/.git/pelway-verify-started"
 (cd "$MISE_TOY" && MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-cleanup-fails.out" 2>&1); cleanup_verify_rc=$?
 chmod 700 "$MISE_TOY/.git/pelway-verify-started"
@@ -229,8 +254,8 @@ printf '%s\nverify-id:fedcba9876543210fedcba9876543210\n' "$("$REAL_GIT" -C "$MI
 touch "$lock_release"
 wait "$manual_lock" 2>/dev/null; manual_lock_rc=$?
 wait "$lock_generation_verify"; lock_generation_rc=$?
-[[ "$manual_lock_rc" == 0 && -n "$start_base" && "$lock_generation_rc" != 0 && ! -e "$marker_path" ]] ||
-  failures+=("verify_lock_generation_unwritable: lock=$manual_lock_rc verify=$lock_generation_rc start=${start_base:-none} marker=$(test -e "$marker_path" && echo present || echo missing)")
+[[ "$manual_lock_rc" == 0 && -n "$start_base" && "$lock_generation_rc" != 0 && ! -e "$marker_path" && "$(grep -c 'Traceback' "$ROOT/mise-lock-generation.out" 2>/dev/null)" == 0 ]] ||
+  failures+=("verify_lock_generation_unwritable: lock=$manual_lock_rc verify=$lock_generation_rc start=${start_base:-none} marker=$(test -e "$marker_path" && echo present || echo missing) traceback=$(grep -c 'Traceback' "$ROOT/mise-lock-generation.out" 2>/dev/null)")
 chmod u+w "$MISE_TOY/.pelway-verify/started" 2>/dev/null
 rm -rf "$MISE_TOY/.git/pelway-verify-started" "$MISE_TOY/.pelway-verify"; rm -f "$marker_path"
 # gitdir のパスの末尾に空白や CR があっても、3 経路が Git が返した同じパスを使う。
@@ -356,6 +381,12 @@ push_role generation_match dev origin HEAD:refs/heads/agent/generation-match
 [[ "$RC" != 0 && "$ERR" == *'前回の verify はこの印を無効化しました'* ]] ||
   failures+=("push_generation_match: not stopped: rc=$RC $ERR")
 rm -f "$state_dir/$marker_fp.$attempt"
+printf 'unknown generation
+' >"$state_dir/any.$attempt"
+push_role generation_any dev origin HEAD:refs/heads/agent/generation-any
+[[ "$RC" != 0 && "$ERR" == *'前回の verify はこの印を無効化しました'* ]] ||
+  failures+=("push_generation_any: not stopped: rc=$RC $ERR")
+rm -f "$state_dir/any.$attempt"
 # gitdir に書けず印を無効化できない状態では、正しい印が残っていても止める。
 chmod a-w "$REPO_DIR/work/.git"
 push_role readonly_gate dev origin HEAD:refs/heads/agent/readonly-gate
@@ -389,6 +420,11 @@ printf 'implementation\n' >"$REPO_DIR/work/code.txt"
 work_git add code.txt; (cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m implementation)
 mkdir -p "$ROOT/control-target/started"; chmod 700 "$ROOT/control-target" "$ROOT/control-target/started"
 rm -rf "$REPO_DIR/work/.pelway-verify"; ln -s "$ROOT/control-target" "$REPO_DIR/work/.pelway-verify"
+rm -rf "$ROOT/control-target/started"
+(cd "$REPO_DIR/work" && bash "$RECORD" >"$ROOT/record-control-symlink.out" 2>"$ROOT/record-control-symlink.err"); record_symlink_rc=$?
+[[ "$record_symlink_rc" != 0 && ! -e "$ROOT/control-target/started" ]] ||
+  failures+=("record_control_symlink: rc=$record_symlink_rc target_started=$(test -e "$ROOT/control-target/started" && echo present || echo missing)")
+mkdir -p "$ROOT/control-target/started"; chmod 700 "$ROOT/control-target/started"
 push_role control_symlink dev -u origin HEAD
 [[ "$RC" != 0 && "$ERR" == *'信頼できるディレクトリではありません'* ]] ||
   failures+=("push_control_symlink: not stopped: rc=$RC $ERR")

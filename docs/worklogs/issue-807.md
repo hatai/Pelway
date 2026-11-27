@@ -96,7 +96,7 @@
 1. 詰まった箇所: 失敗の印を 1 つのファイルに上書きする限り、世代の異なる verify が互いの失敗記録を消し、古い成功の印を復活させる経路が残った。
 2. 曖昧だった文: 「失敗状態を永続化し、書き込み復旧後に古い印が使えないようにする」（PR #832、codex_review の round 4）
 3. 仮定と解釈: 失敗状態は成功の印とは別の intent log（無効化の意図を残す記録）と読み、worktree の `.pelway-verify/started/` に `<fingerprint>.<random>` 名で世代ごとに置く。正規の印は内容の sha256、読めない・壊れた印は lstat metadata の sha256 で指す。記録を作れない場合は verify を始めず、成功した verify は自分の記録だけを消す。push の門は現在の印に対応する記録だけを拒否し、他世代の記録は新しい成功を止めない。
-4. 足りなかった情報・検証手段: CR/LF を含む gitdir 経路、chmod 0 の印、symlink lock、読み取り専用 gitdir、verify 中断、同時実行の世代競合を個別の手動確認に頼らず、gate の regression test 61 件で確かめた。全体は `TMPDIR=/dev/shm/p807 mise run verify`（181.89 秒）で確かめた。
+4. 足りなかった情報・検証手段: CR/LF を含む gitdir 経路、chmod 0 の印、symlink lock、読み取り専用 gitdir、verify 中断、同時実行の世代競合を個別の手動確認に頼らず、script-test の 61 本（verify ゲートの試験を含む）で確かめた。全体は `TMPDIR=/dev/shm/p807 mise run verify`（181.89 秒）で確かめた。
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「検査の印では、中断・権限回復・複数世代の同時実行について、どの状態をどこに残すかを書く」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`、ユーザーレベルの `receiving-code-review`

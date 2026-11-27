@@ -6,6 +6,7 @@
 # 通常の手順でも、commit 後の HEAD の木と同じ印になる。追跡済みのファイルは無視のパターンに当たっても
 # 印に含める。`.devin/config.json` に skip-worktree が付いているときだけ、作業ツリーではなく index の内容を記録する。
 set -euo pipefail
+umask 077
 
 fail() {
   echo "agent-verify-record: $1" >&2
@@ -25,6 +26,8 @@ git_rev_path --show-toplevel || fail "作業ツリーのルートを解決でき
 physical_path "$REPLY" || fail "作業ツリーのルートを絶対パスに解決できません"
 root="$REPLY"
 
+[[ ! -L "$root/.pelway-verify" && ! -L "$root/.pelway-verify/started" ]] ||
+  fail "verify の開始の記録のディレクトリが symlink のため印を書き残せません"
 mkdir -p -- "$root/.pelway-verify/started" || fail "verify の開始の記録のディレクトリを作れません"
 
 index_dir="$(mktemp -d)" || fail "一時 index のディレクトリを作れません"
