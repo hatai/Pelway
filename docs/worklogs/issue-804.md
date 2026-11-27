@@ -76,3 +76,4 @@ must-fix への対応:
 4. docs: レビュー担当・モデル選定の重ねた結果の読み方を「main の承認済みの版（API 取得）を土台に本体の checkout の local を重ね、本体の checkout のスクリプトで effective を走らせる」に統一（implement-issue, command-team ×2, grokbot-runbook ×2。ブランチの toml・local・スクリプトで自己選択できない形に）。effective に <local-file> 引数を追加
 
 nit への対応: 試験 8b を worktree を cwd にして実行、ヘルプの「値を出さない」を警告・検証エラーに限定、conductor-rebuild.test.sh の skip を失敗に、worklog round 3 の項目 4 を実態どおりに
+push した head: dcd6b652（round 5 の対応）
