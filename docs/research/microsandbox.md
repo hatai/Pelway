@@ -35,7 +35,7 @@ Issue #836。microsandbox は導入せず、公式リポジトリー（`superrad
 - Issue #47（closed）でも、メンテナーは「WSL2 はもう推奨しない。動くには動くが、WHP で動く正式版がある」と書いています [issue-47]。
 - Windows ネイティブ版（WHP を使う）は「プレビュー」です [windows-trouble] [cli-overview]。`HypervisorPlatform` の Windows 機能が要ります。WSL2 のワークスペースを Windows 版に渡す経路は、この調査では採りません。Windows 機能の変更は Issue の止まる条件に当たり、WHP 固有の不具合の報告もあるためです（例: AMD Ryzen で VM が起動中に triple fault する報告 [issue-1095]）。
 
-**見込みの結論**：minisforum は glibc と KVM の条件を満たし、残る操作は `kvm` グループへの追加と見込みます（`/dev/kvm` はこのスレッドからは見えず、現在のホストでのデバイスの有無・読み書き可否・グループ追加で十分かは未確認です。追加は過去のパーミッション記録に基づく見込みです）。ただし upstream は WSL2 を試験対象外とし、優先度も下げています。minisforum の WSL2 カーネル（`6.18.58.1-microsoft-standard-WSL2`）で microVM が起動するかは、実際に起動するまで分かりません。
+**見込みの結論**：minisforum は glibc の条件を満たし、KVM はモジュールが読み込み済みです（`/dev/kvm` の有無は未確認）。残る操作は `kvm` グループへの追加と見込みます（現在のホストでのデバイスの有無・読み書き可否・グループ追加で十分かは未確認です。追加は過去のパーミッション記録に基づく見込みです）。ただし upstream は WSL2 を試験対象外とし、優先度も下げています。minisforum の WSL2 カーネル（`6.18.58.1-microsoft-standard-WSL2`）で microVM が起動するかは、実際に起動するまで分かりません。
 
 ## 2. 今の bwrap 方式・Docker Sandboxes との比べ
 
@@ -83,7 +83,7 @@ Issue #836。microsandbox は導入せず、公式リポジトリー（`superrad
 | 2 | **`kvm` グループへの追加** | 上の 2。`sudo usermod -aG kvm hatai` と、反映のための再ログイン（WSL の再起動を含みうる） |
 | 3 | **イメージの取得などの外部通信** | 上の 4。Docker Hub などの OCI レジストリへの通信（検証 (a) の `msb run alpine` による取得を含む）。独自イメージを作る場合は、ビルドツールの導入とその通信 |
 | 4 | **試す範囲** | 本番の T3 スレッドでは使わない。リポジトリーは試験専用のクローン、保存先は試行専用のディレクトリーを使う。本番の資格情報（`~/.config/pelway-agent`・`~/.config/fnox`）は VM に渡さない。試験専用の資格情報は、置き場所だけでなく中身でも本番と別にする: GitHub は試験用のリポジトリにだけインストールした別の GitHub App の鍵を使い、pelway-dev・pelway-review の鍵は試験用の fnox 設定にも入れない（App の秘密鍵はその App の全インストール先のトークンを発行できるため、別の age 鍵で暗号化しただけの設定は試験専用とみなさない。`scripts/agent-gh` と `scripts/setup/agent-accounts.sh`）。モデルのキーは試行のために発行し、終わったら失効させる。(f) の検証は、T3 の接続の資格情報を VM に渡さず、本番の T3 の acpRegistry も変えない形に限る。`install.sh` と `msb self uninstall` は使わない |
-| 5 | **サインイン・統計送信の扱い** | 不要です。ローカル利用にアカウントは要らず、統計送信も見つかっていません。試行では `allowed_backends` に `["local"]` を必須設定とし、実行先を選べるコマンド（sandbox・volume・snapshot 系と引数なしの `context`）にだけ `--local` を付けて、リモート（microsandbox のクラウド）での実行を拒否します。`MSB_CONFIG_PATH` には試行設定の絶対パスを指定し（引き継いだ値は使わない）、`/etc/microsandbox/managed.json` が許可先や保存先を上書きしていないことを最初の書き込みの前に確かめます [configuration] [cloud-connect] [config-path] [managed-config] [msb-selector] |
+| 5 | **サインイン・統計送信の扱い** | 不要です。ローカル利用にアカウントは要らず、統計送信も見つかっていません。試行では `allowed_backends` に `["local"]` を必須設定とし、実行先を選べるコマンド（sandbox・volume・snapshot 系と引数なしの `context`）にだけ `--local` を付けて、リモート（microsandbox のクラウド）での実行を拒否します。`MSB_CONFIG_PATH` には試行設定の絶対パスを指定し（引き継いだ値は使わない）、親シェルから残る `MSB_PATH`・`MSB_LIBKRUNFW_PATH`・`MSB_AGENTD_PATH` は取り除きます。`/etc/microsandbox/managed.json` が許可先や保存先を上書きしていないことは、最初の `msb` 呼び出し（引数なしの `doctor` を含む）の前に確かめます [configuration] [cloud-connect] [config-path] [managed-config] [msb-selector] [msb-paths] |
 | 6 | **片付けの手順** | 上の 7。削除対象は試行で作成した VM と試行専用のディレクトリーに限る（一覧に試行外の VM が出るときは何も消さない）。`msb self uninstall` は使わない（コマンドリンクとシェル設定に触れ、削除対象が実行時の `MSB_HOME` で決まるため）。`sudo gpasswd -d hatai kvm` も含みます |
 
 ### 採否の判定材料にする検証
@@ -104,7 +104,7 @@ microsandbox を選ぶ理由:
 
 - Pelway の方針と条件に合います。Docker に依存せず、アカウントもサインインも要らず、ライセンスは Apache-2.0 です。利用状況の送信も見つかりません。`sbx` が持つ Docker Inc. のプロプライエタリ製品への依存・Docker アカウント・テレメトリ（opt-out）という課題がありません [docker-sandboxes]。
 - 分離は bwrap より強い面があります。ゲストは独立したカーネルで動き、ホストのファイルシステムはマウントしたもの以外は見えず、ネットワークはホスト側のポリシーで検査されます [isolation] [sec-net]。
-- minisforum は glibc と KVM の条件を満たし、残るは `kvm` グループへの追加と見込みます（`/dev/kvm` のデバイスの有無・現在の読み書き可否・グループ追加で十分かは、このスレッドからは見えないため未確認。追加は過去のパーミッション記録に基づく見込みです）。
+- minisforum は glibc の条件を満たし、KVM はモジュールが読み込み済みです（`/dev/kvm` の有無は未確認）。残るは `kvm` グループへの追加と見込みます（現在の読み書き可否・グループ追加で十分かは、このスレッドからは見えないため未確認。追加は過去のパーミッション記録に基づく見込みです）。
 
 試すのを待つ理由:
 
