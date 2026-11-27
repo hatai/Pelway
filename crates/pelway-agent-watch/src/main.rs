@@ -24,8 +24,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use pelway_agent_watch::ci::{ci_should_notify, runs_belong_to_pr};
 use pelway_agent_watch::format_utc;
 use pelway_agent_watch::inbox::{
-    INBOX_FILE, PATROL_STATE_FILE, PatrolInfo, WAKE_MESSAGE, WakeDecision, WakeNotice, decide_wake,
-    inbox_line, parse_conductor_file, parse_patrol_state,
+    INBOX_FILE, NoticeBatch, PATROL_STATE_FILE, PatrolInfo, WAKE_MESSAGE, WakeDecision,
+    WakeHistory, WakeNotice, classify_notices, decide_wake, inbox_line, parse_conductor_file,
+    parse_patrol_state,
 };
 use pelway_agent_watch::outbox::{self, Outcome};
 use pelway_agent_watch::payload::build_payload;
@@ -33,6 +34,8 @@ use pelway_agent_watch::watch::{Event, StallReason, State, ThreadDetail, needs_d
 use serde_json::Value;
 
 const DEFAULT_POLL_SECS: u64 = 30;
+/// 起こしの最短間隔の既定（秒）。`PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS` で変えられる（Issue #839）。
+const DEFAULT_WAKE_COOLDOWN_SECS: i64 = 5 * 60;
 const CI_INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// 1 周の webhook の送信の期限。期限が残る間は次の知らせを送り始め、秘密を読む fnox・curl・送り直しの待ちは
 /// 期限で止める（`io::send`）ので、1 周の送信は列の長さによらず 45 秒以内に収まる。期限までに送れなかった知らせは列に残る。
@@ -158,6 +161,15 @@ fn poll_interval() -> Duration {
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_POLL_SECS);
     Duration::from_secs(secs)
+}
+
+/// 起こしの最短間隔（秒）。読めない値は既定にする。
+fn wake_cooldown_secs() -> i64 {
+    std::env::var("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS")
+        .ok()
+        .and_then(|s| s.parse::<i64>().ok())
+        .filter(|s| *s >= 0)
+        .unwrap_or(DEFAULT_WAKE_COOLDOWN_SECS)
 }
 
 struct Watcher {
@@ -338,12 +350,45 @@ impl Watcher {
                             .and_then(Value::as_str)
                             .unwrap_or_default()
                             .to_string(),
+                        round: p
+                            .get("round")
+                            .and_then(Value::as_u64)
+                            .and_then(|r| u32::try_from(r).ok())
+                            // T3 が実行回数を返さないと 0 になる。0 は round として数えない
+                            .filter(|r| *r > 0),
                         has_report: p.get("report").is_some_and(Value::is_string),
                     }
                 })
                 .collect();
             match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &lines) {
-                Ok(total) => self.maybe_wake(&t3, total, &notices),
+                Ok(count) => {
+                    // 最後に数えたときから、自分の追記の前に受信箱が変わっていた（前の受信箱で読んだ
+                    // 既読の位置が、いまの受信箱の同じ中身を指すと確かめられない）
+                    // 一度も数えていない（この版を初めて動かした）ときは、書き換えと見なさない
+                    if self
+                        .state
+                        .inbox_identity
+                        .is_some_and(|known| known != count.before_write)
+                    {
+                        self.mark_inbox_rewritten();
+                    }
+                    // 書き換えの印が立っている間（起こした後に指揮役が既読の位置を書き直すまで）は、
+                    // 周をまたいで不明として扱う
+                    let rewritten = self.state.inbox_rewritten;
+                    if rewritten {
+                        self.forget_pending_line();
+                    }
+                    self.remember_inbox_count(&count);
+                    // 受信箱が書き換えられていた・数えている間に変わったときは、書いた行の番号を
+                    // 既読と比べられないので不明にする（既読による取り消しをしない）
+                    let unknown = vec![None; count.line_numbers.len()];
+                    let at = if count.stable && !rewritten {
+                        &count.line_numbers
+                    } else {
+                        &unknown
+                    };
+                    self.maybe_wake(&t3, self.state.inbox_lines, &notices, at);
+                }
                 Err(e) => {
                     eprintln!("agent-watch: ERROR inbox append failed: {e}");
                     let pending = self.state.inbox_pending.get_or_insert_default();
@@ -363,7 +408,30 @@ impl Watcher {
                     }
                 }
             }
+        } else if self.state.wake_pending.is_some() {
+            // 新しい知らせの無い周回でも、後に回した起こし（起こし待ちの印）を確かめる（Issue #839）。
+            // 既読の位置の範囲は、最後に数えた受信箱の行数で確かめる。受信箱がそのときから
+            // 変わっていなければ（同一性が同じ）受信箱を読まない（印が残る間、周回ごとに数え直さない）。
+            // 変わっていれば（切り詰め・置き換え・書き換え・追記）、読むだけで上限の内で数え直す
+            let inbox = self.pelway_dir.join(INBOX_FILE);
+            if io::inbox_identity(&inbox).ok() != self.state.inbox_identity {
+                if self.state.inbox_identity.is_some() {
+                    self.mark_inbox_rewritten();
+                }
+                self.forget_pending_line();
+                match io::count_inbox(&inbox) {
+                    Ok(count) => self.remember_inbox_count(&count),
+                    Err(_) => self.forget_inbox_count(),
+                }
+            }
+            self.maybe_wake(&t3, self.state.inbox_lines, &[], &[]);
         }
+
+        // 承認待ちの記録は、一覧の記録に残るスレッドの分だけを持つ
+        let threads = &self.state.threads;
+        self.state
+            .wake_waiting_rounds
+            .retain(|id, _| threads.contains_key(id));
 
         // キューに残った知らせの分だけ立て手を残す。全件書けた場合・上限で古い
         // 知らせが外れた場合・キューが空の場合は、対応する項目も消す
@@ -440,31 +508,71 @@ impl Watcher {
         }
     }
 
-    /// 受信箱に書いたあと、ホストの登録ファイルに登録されたいまの指揮役を起こす。
-    /// 前回の起こしの後に指揮役の既読の位置（補助記録の `inbox_offset`）が進んでいなければ、重ねて起こさない。
-    /// `notices` はその周に受信箱へ書いた知らせの要約（種類と元のスレッドの立て手。Issue #727）。
-    /// 失敗しても記録を進めず、次の新しい知らせで改めて試みる（再送の列は持たない）。
-    fn maybe_wake(&mut self, t3: &std::path::Path, inbox_lines: u64, notices: &[WakeNotice]) {
+    /// 受信箱に書いたあと（または起こし待ちの印があるとき）、ホストの登録ファイルに登録された
+    /// いまの指揮役を起こす。`notices` はその周に受信箱へ書いた知らせの要約（種類・round・元の
+    /// スレッドの立て手。Issue #727）で、起こし待ちの印だけを確かめる周では空。
+    /// 判定は `classify_notices`（指揮役自身の知らせ・同じ承認待ちの繰り返しを除く）と
+    /// `decide_wake`（最短間隔・既読の位置）で行う（Issue #839）。
+    /// 送れなかったときは記録を進めず、起こし待ちの印も消し、次の新しい知らせで改めて試みる
+    /// （再送の列は持たない）。印だけを確かめる周（`notices` が空）では、起こさなかった理由の
+    /// ログを出さない（印が残る間、周回ごとに同じ行が増えないように。印を取り消す `already-read` と、
+    /// 起こしを送ったときのログは出る）。
+    /// `inbox_lines` は受信箱の行数（印だけを確かめる周では、最後に数えた行数。行数が不明なら None）、
+    /// `line_numbers` は `notices` の各知らせを書いた行の番号（数えきれなかったものは None）。
+    fn maybe_wake(
+        &mut self,
+        t3: &std::path::Path,
+        inbox_lines: Option<u64>,
+        notices: &[WakeNotice],
+        line_numbers: &[Option<u64>],
+    ) {
+        let log = |reason: &str| {
+            if !notices.is_empty() {
+                eprintln!("agent-watch: WAKE skipped reason={reason}");
+            }
+        };
         // 宛先はホスト側の登録ファイルからだけ読む（sandbox から書ける補助記録の値は使わない）
         let registered = match io::read_conductor_file(&io::conductor_file()) {
-            Ok(Some(text)) => match parse_conductor_file(&text) {
-                Some(id) => Some(id),
-                None => return, // 登録が空（登録が無いのと同じ）
-            },
-            Ok(None) => return, // 登録が無い（指揮役が T3 のスレッドとして動いていない）
+            Ok(Some(text)) => parse_conductor_file(&text),
+            Ok(None) => None,
             Err(_) => {
-                eprintln!("agent-watch: WAKE skipped reason=conductor-file-unreadable");
+                log("conductor-file-unreadable");
                 return;
             }
         };
-        // 知らせの元が登録された指揮役自身だけの回（指揮役の巡回の終わりなど）は起こさない。
-        // 起こすと、巡回の終わり → 知らせ → 起こし → 巡回、を繰り返すため。
-        if !notices.is_empty()
-            && notices
-                .iter()
-                .all(|n| Some(n.thread_id.as_str()) == registered.as_deref())
-        {
-            eprintln!("agent-watch: WAKE skipped reason=own-event");
+        let Some(registered) = registered else {
+            // 登録が無い・空（指揮役が T3 のスレッドとして動いていない）。起こす宛先が無いので、
+            // 後に回した起こしも取り消す
+            self.state.wake_pending = None;
+            return;
+        };
+        // 前回の起こしの記録は、そのときの宛先にだけ使う（指揮役が替わったら一度も起こしていない扱い）
+        let same_target = self.state.last_wake_thread_id.as_deref() == Some(registered.as_str());
+        let batch = classify_notices(notices, &registered, &mut self.state.wake_waiting_rounds);
+        // 起こすに足る新しい知らせのうち最後のものを書いた行の番号。数えきれなかったときは、
+        // 読み終えたと判定しないよう最大の値にする
+        let fresh_upto = match batch {
+            NoticeBatch::Worthy(last) => Some(
+                line_numbers
+                    .get(last)
+                    .copied()
+                    .flatten()
+                    .unwrap_or(u64::MAX),
+            ),
+            _ => None,
+        };
+        // 起こせなかった新しい知らせを、起こし待ちの印に入れる（後の周回で確かめ直す）
+        let defer = |state: &mut State| state.wake_pending = state.wake_pending.max(fresh_upto);
+        if fresh_upto.is_none() && self.state.wake_pending.is_none() {
+            // 知らせの元が指揮役自身だけの回（巡回の終わりなど）は起こさない。起こすと、
+            // 巡回の終わり → 知らせ → 起こし → 巡回、を繰り返すため
+            let reason = match batch {
+                NoticeBatch::OwnOnly => "own-event",
+                NoticeBatch::RepeatWaiting => "repeat-waiting",
+                NoticeBatch::HumanNonUrgent => "human-non-urgent",
+                NoticeBatch::Empty | NoticeBatch::Worthy(_) => return,
+            };
+            eprintln!("agent-watch: WAKE skipped reason={reason}");
             return;
         }
         // 既読の位置は補助記録から読む。無い・書きかけ・壊れているときは、その回は起こさない
@@ -475,49 +583,132 @@ impl Watcher {
                 Ok(info) => info.inbox_offset,
                 Err(e) if e.contains("too large") => {
                     // 書きかけ・壊れているのと見分けられるよう、上限超えは別の理由で出す
-                    eprintln!("agent-watch: WAKE skipped reason=patrol-state-too-large");
+                    log("patrol-state-too-large");
+                    defer(&mut self.state);
                     return;
                 }
                 Err(_) => {
-                    eprintln!("agent-watch: WAKE skipped reason=patrol-state-unreadable");
+                    log("patrol-state-unreadable");
+                    defer(&mut self.state);
                     return;
                 }
             };
         // 既読の位置は受信箱の行数を超えられない。超える値（書き損じ・sandbox からの書き換え）は
-        // 使わず保存もしない（保存すると、補助記録を直しても以後の起こしが止まり続けるため）
-        if inbox_offset > inbox_lines {
-            eprintln!("agent-watch: WAKE skipped reason=offset-out-of-range");
+        // 使わず保存もしない（保存すると、補助記録を直しても以後の起こしが止まり続けるため）。
+        // 行数が分からないとき（数えたことが無い・数えている間に受信箱が変わった・数え直せない）は、
+        // 範囲を確かめられないので使わない（同じ `offset-out-of-range` を出す）
+        if inbox_lines.is_none_or(|lines| inbox_offset > lines) {
+            log("offset-out-of-range");
+            defer(&mut self.state);
             return;
         }
-        // 前回の起こしの基準は、そのときの宛先にだけ使う（指揮役が替わったら一度も起こしていない扱い）
-        let last_wake = self
-            .state
-            .last_wake_inbox_offset
-            .filter(|_| self.state.last_wake_thread_id == registered);
+        // 受信箱の書き換えを見分けた後に起こしを送り、その後で指揮役の既読の位置が変わった
+        // （指揮役がいまの受信箱を読み、既読の位置を書き直した）なら、書き換えの印を消す。
+        // 前回の起こしの基準は書き換え前の受信箱の既読の位置なので、残さない
+        if self.state.inbox_rewritten
+            && self
+                .state
+                .rewritten_wake_offset
+                .is_some_and(|at| at != inbox_offset)
+        {
+            self.state.inbox_rewritten = false;
+            self.state.rewritten_wake_offset = None;
+            self.state.last_wake_inbox_offset = None;
+        }
+        let history = WakeHistory {
+            // 書き換えの印が立っている間は、前回の起こしの基準を使わない（印の間に送った起こしの位置も
+            // 含む。重ねての起こしは最短間隔だけで絞る）
+            last_offset: self
+                .state
+                .last_wake_inbox_offset
+                .filter(|_| same_target && !self.state.inbox_rewritten),
+            last_at: self.state.last_wake_at.filter(|_| same_target),
+            pending: self.state.wake_pending,
+        };
         let info = PatrolInfo {
-            conductor_thread_id: registered,
+            conductor_thread_id: Some(registered),
             inbox_offset,
         };
-        match decide_wake(&info, last_wake, notices) {
+        let cooldown = wake_cooldown_secs();
+        match decide_wake(&info, &history, fresh_upto, now_epoch(), cooldown) {
             WakeDecision::Send(thread_id) => match io::wake(t3, &thread_id, WAKE_MESSAGE) {
                 Ok(()) => {
-                    eprintln!("agent-watch: WAKE sent inbox_lines={inbox_lines}");
+                    let lines = inbox_lines.map_or("-".to_string(), |n| n.to_string());
+                    eprintln!("agent-watch: WAKE sent inbox_lines={lines}");
                     self.state.last_wake_inbox_offset = Some(inbox_offset);
+                    // 最短間隔は送り終えた時刻から数える（送るのにかかった時間の分、次の起こしを早めない）
+                    self.state.last_wake_at = Some(now_epoch());
+                    // 書き換えを見分けている間の起こしでは、書き換えの印を残す（指揮役は保存済みの
+                    // 既読の位置から読むので、起こしただけでは、既読の位置がいまの受信箱に対応すると
+                    // 言えない）。そのときの既読の位置を残し、指揮役がそれを書き直したら印を消す
+                    if self.state.inbox_rewritten {
+                        self.state.rewritten_wake_offset = Some(inbox_offset);
+                    }
                     self.state.last_wake_thread_id = Some(thread_id);
+                    self.state.wake_pending = None;
                 }
-                Err(why) => eprintln!("agent-watch: WAKE failed {why}"),
+                Err(why) => {
+                    eprintln!("agent-watch: WAKE failed {why}");
+                    // 送り直さない（次の新しい知らせで改めて試みる）
+                    self.state.wake_pending = None;
+                }
             },
-            WakeDecision::NoConductor => {}
-            WakeDecision::InvalidThreadId => {
-                eprintln!("agent-watch: WAKE skipped reason=invalid-thread-id");
+            WakeDecision::Cooldown => {
+                if self.state.wake_pending.is_none() {
+                    eprintln!("agent-watch: WAKE deferred reason=cooldown");
+                }
+                defer(&mut self.state);
             }
-            WakeDecision::HumanNonUrgent => {
-                eprintln!("agent-watch: WAKE skipped reason=human-non-urgent");
+            WakeDecision::AlreadyRead => {
+                eprintln!("agent-watch: WAKE skipped reason=already-read");
+                self.state.wake_pending = None;
+            }
+            WakeDecision::NoConductor | WakeDecision::Nothing => {}
+            WakeDecision::InvalidThreadId => {
+                log("invalid-thread-id");
             }
             WakeDecision::NotYetRead => {
-                eprintln!("agent-watch: WAKE skipped reason=not-yet-read");
+                log("not-yet-read");
+                defer(&mut self.state);
             }
         }
+    }
+
+    /// 受信箱の書き換えを見分けた。前の受信箱について残した既読の位置（`rewritten_wake_offset`）は、
+    /// いまの受信箱の既読の位置と比べられないので捨てる（次に起こしを送ったときに取り直す）。
+    fn mark_inbox_rewritten(&mut self) {
+        self.state.inbox_rewritten = true;
+        self.state.rewritten_wake_offset = None;
+    }
+
+    /// 起こし待ちの印の行番号を不明（最大の値）にする。印を付けた後に、自分の追記以外で受信箱が
+    /// 変わった（切り詰め・書き換え・挿入）と、印の行番号と既読の位置が同じ中身を指すと確かめられ
+    /// ないため。既読による取り消し（`already-read`）はしなくなる。書き換えの印が立っている間は
+    /// 前回の起こしの位置とも比べないので、最短間隔の後に起こす。
+    fn forget_pending_line(&mut self) {
+        if self.state.wake_pending.is_some() {
+            self.state.wake_pending = Some(u64::MAX);
+        }
+    }
+
+    /// 数えた受信箱の行数と同一性を残す。数えている間に受信箱が変わっていたら、行数は
+    /// 不明とする（範囲を確かめられないので、既読の位置を使わない）。
+    fn remember_inbox_count(&mut self, count: &io::InboxCount) {
+        if count.stable {
+            self.state.inbox_lines = Some(count.total);
+            self.state.inbox_identity = Some(count.identity);
+        } else {
+            self.forget_inbox_count();
+        }
+    }
+
+    /// 数えた行数が使えない（数えている間に受信箱が変わった・数え直せない）。行数と同一性を不明に
+    /// し、書き換えを見分けたことを残す。同一性が無いだけだと、次の周で「一度も数えていない」と
+    /// 取り違え、見分けた変化を忘れてしまうため。
+    fn forget_inbox_count(&mut self) {
+        self.state.inbox_lines = None;
+        self.state.inbox_identity = None;
+        self.mark_inbox_rewritten();
     }
 
     /// `agent/` ブランチの PR で verify が続けて失敗していれば `stalled(ci-failed-twice)`。
@@ -562,4 +753,58 @@ fn tag(payload: &Value) -> String {
         payload["thread_id"].as_str().unwrap_or(""),
         payload["branch"].as_str().unwrap_or("-")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn watcher() -> Watcher {
+        Watcher {
+            opts: Options {
+                cycles: None,
+                dry_run: true,
+                project: PathBuf::from("."),
+            },
+            pelway_dir: PathBuf::new(),
+            host: String::new(),
+            state_path: PathBuf::new(),
+            state: State::default(),
+            last_ci: None,
+        }
+    }
+
+    fn count(stable: bool) -> io::InboxCount {
+        io::InboxCount {
+            total: 3,
+            line_numbers: Vec::new(),
+            identity: [1, 2, 3, 4, 5],
+            stable,
+            before_write: [1, 2, 3, 4, 5],
+        }
+    }
+
+    #[test]
+    fn unstable_count_marks_the_inbox_rewritten() {
+        // 数えている間に受信箱が変わった: 行数を不明にし、書き換えを見分けたことを残す
+        // （次の周で「一度も数えていない」と取り違えて、変化を忘れない）
+        let mut w = watcher();
+        w.state.inbox_identity = Some([9, 9, 9, 9, 9]);
+        w.state.inbox_lines = Some(10);
+        w.state.rewritten_wake_offset = Some(4);
+        w.remember_inbox_count(&count(false));
+        assert_eq!(w.state.inbox_lines, None);
+        assert_eq!(w.state.inbox_identity, None);
+        assert!(w.state.inbox_rewritten);
+        assert_eq!(w.state.rewritten_wake_offset, None);
+    }
+
+    #[test]
+    fn stable_count_does_not_mark_the_inbox_rewritten() {
+        let mut w = watcher();
+        w.remember_inbox_count(&count(true));
+        assert_eq!(w.state.inbox_lines, Some(3));
+        assert_eq!(w.state.inbox_identity, Some([1, 2, 3, 4, 5]));
+        assert!(!w.state.inbox_rewritten);
+    }
 }
