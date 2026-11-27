@@ -11,3 +11,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「決まり」の「素の `gh` と素の `git push` は使わない」を「素の `gh` と、ネットワークへ出る素の git（`fetch`・`pull`・`push`）は使わない」に直す。
 
 使ったスキル: `implement-issue`、`write-pull-request`（Draft PR の作成）、`ja-text-communication`
+
+## 実装者メモ（round 2）
+
+対象 head: 1246e82c1ec0f28ef657794146694123b2779323
+
+1. 詰まった箇所: `scripts/agent-gh` の `issue_rewrite_check_args`・`issue_rewrite`（round 1 の実装）: 入力ファイルを検査したあとに同じパスを gh に渡していた。検査後に本文ファイルが空になると、空の本文が送られて Issue の本文が消える（Codex の must-fix 1）。本文とコメントを `cat --` で一時ファイルに写し、写しを検査して送るようにした。読み直しの比較はコマンド置換で末尾の改行をすべて除いていた（Codex の must-fix 2）。写しに gh の `--jq` が足す改行 1 つを足したものと `cmp` で比べるようにした。
+2. 曖昧だった文: 「出力形式が足した改行だけを取り除き、本文自身の改行は保持して比較してください」（PR #837 の round 1 のレビュー、Codex の must-fix 2）。読み直した出力から改行を取り除く代わりに、渡した本文の写しに同じ改行を足して比べた（GNU 専用の `head -c -1` に頼らないため）。結果は同じになる。
+3. 仮定と解釈: `[文書のずれ]` の nit は Codex と Claude で同じ 2 か所（skill の手順 7 の「0 以外で終わったとき」の説明と、`--help` の「本文とコメントが空のとき」）だったので、両方を直した。Claude の印の無い nit（`cat` の `--`）は must-fix 1 の中で直した。main の取り込みはしていない（`mergeable` が MERGEABLE で、main の変更はこの PR のファイルに触れない）。
+4. 足りなかった情報・検証手段: 本物の GitHub が `gh issue edit --body-file` の本文の末尾の改行を正規化するかは、末尾の改行が 2 つ以上の本文では確かめていない。読み取りだけでは、リポジトリの Issue・PR 842 件の本文のうち末尾の改行が 2 つ以上のものが 101 件あった（#834 は 3 つ、#833 は 6 つ）。末尾の改行 1 つが保たれることは round 1 の実行で確かめた。正規化されていれば終了コード 6 でコメントは付かない。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「『同じであること』を条件に書くときは、比べないでよい差（末尾の改行・空白など）を明記する。書かなければバイト単位で同じこととする」を足す。
+
+使ったスキル: `implement-issue`、`write-pull-request`、`ja-text-communication`
