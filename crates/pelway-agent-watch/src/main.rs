@@ -362,8 +362,19 @@ impl Watcher {
                 .collect();
             match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &lines) {
                 Ok(count) => {
+                    // 最後に数えたときから、自分の追記の前に受信箱が変わっていた
+                    if Some(count.before_write) != self.state.inbox_identity {
+                        self.forget_pending_line();
+                    }
                     self.remember_inbox_count(&count);
-                    self.maybe_wake(&t3, self.state.inbox_lines, &notices, &count.line_numbers);
+                    // 数えている間に変わったときは、書いた行の番号も確かでない
+                    let unknown = vec![None; count.line_numbers.len()];
+                    let at = if count.stable {
+                        &count.line_numbers
+                    } else {
+                        &unknown
+                    };
+                    self.maybe_wake(&t3, self.state.inbox_lines, &notices, at);
                 }
                 Err(e) => {
                     eprintln!("agent-watch: ERROR inbox append failed: {e}");
@@ -391,6 +402,7 @@ impl Watcher {
             // 変わっていれば（切り詰め・置き換え・書き換え・追記）、読むだけで上限の内で数え直す
             let inbox = self.pelway_dir.join(INBOX_FILE);
             if io::inbox_identity(&inbox).ok() != self.state.inbox_identity {
+                self.forget_pending_line();
                 match io::count_inbox(&inbox) {
                     Ok(count) => self.remember_inbox_count(&count),
                     Err(_) => {
@@ -621,6 +633,16 @@ impl Watcher {
                 log("not-yet-read");
                 defer(&mut self.state);
             }
+        }
+    }
+
+    /// 起こし待ちの印の行番号を不明（最大の値）にする。印を付けた後に、自分の追記以外で受信箱が
+    /// 変わった（切り詰め・書き換え・挿入）と、印の行番号と既読の位置が同じ中身を指すと確かめられ
+    /// ないため。既読による取り消し（`already-read`）はしなくなり、既読が前回の起こしの位置より
+    /// 進んでいれば起こす。
+    fn forget_pending_line(&mut self) {
+        if self.state.wake_pending.is_some() {
+            self.state.wake_pending = Some(u64::MAX);
         }
     }
 

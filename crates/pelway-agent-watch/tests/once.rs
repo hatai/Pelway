@@ -2663,7 +2663,11 @@ fn pending_only_cycle_recounts_a_changed_inbox() {
     backdate_last_wake(&sb);
     run_cooldown(&sb);
     assert_eq!(sends(&sb), 1);
-    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    assert_eq!(
+        read_state(&sb)["wake_pending"],
+        u64::MAX,
+        "印は消さず、受信箱が変わったので値は不明"
+    );
     // 補助記録が直れば起こす
     sb.patrol_state(r#"{"inbox_offset":1}"#);
     let out = run_cooldown(&sb);
@@ -2683,7 +2687,11 @@ fn pending_only_cycle_recounts_a_same_size_rewrite() {
     backdate_last_wake(&sb);
     run_cooldown(&sb);
     assert_eq!(sends(&sb), 1);
-    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    assert_eq!(
+        read_state(&sb)["wake_pending"],
+        u64::MAX,
+        "印は消さず、受信箱が変わったので値は不明"
+    );
 }
 
 #[test]
@@ -2700,4 +2708,18 @@ fn pending_only_recount_does_not_change_the_inbox() {
     fs::remove_file(sb.inbox()).unwrap();
     run_cooldown(&sb);
     assert!(!sb.inbox().exists());
+}
+
+#[test]
+fn pending_line_is_unknown_after_the_inbox_is_rewritten() {
+    // 印を付けた後に受信箱が書き換えられ、後に回した failed（2 行目）が 3 行目に移った。
+    // 指揮役が 2 行目まで読んでいても（範囲内）、未読の failed のために起こす
+    let sb = Sandbox::new("wake-839-shifted");
+    wake_then_defer_b_failure(&sb, 1);
+    let text = fs::read_to_string(sb.inbox()).unwrap();
+    fs::write(sb.inbox(), format!("{{\"inserted\":1}}\n{text}")).unwrap();
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    backdate_last_wake(&sb);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
 }

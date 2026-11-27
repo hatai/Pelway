@@ -544,6 +544,8 @@ pub fn append_inbox(path: &Path, lines: &[String]) -> Result<InboxCount, String>
     let mut file = open_in_pelway(&dirf, name, libc::O_RDWR | libc::O_APPEND | libc::O_CREAT)?;
     // 報告の本文を書くので、所有者以外にも権限があった受信箱には書かない
     owner_only(&file)?;
+    // 書く前の同一性（最後に数えたときから、ほかの書き手が受信箱を変えたかの見分けに使う）
+    let before_write = identity_of(&file)?;
     let len = file.metadata().map_err(|e| e.to_string())?.len();
     if len > INBOX_MAX_BYTES {
         return Err("inbox is too large".to_string());
@@ -567,13 +569,17 @@ pub fn append_inbox(path: &Path, lines: &[String]) -> Result<InboxCount, String>
         // O_APPEND の書き込みの直後の位置は、いま書いた行の終わり
         ends.push(file.stream_position().map_err(|e| e.to_string())?);
     }
-    count_open_inbox(&mut file, &ends)
+    count_open_inbox(&mut file, &ends, Some(before_write))
 }
 
 /// 開いた受信箱を先頭から、固定の上限（`INBOX_MAX_BYTES` + 1 MiB）の内で数える（書いた後に
 /// 足された行も行数に入る）。数える前と後で同一性が違えば（数えている間に変わった）、行数は
 /// 数えたときの受信箱に対応しないので `stable` を false にする。
-fn count_open_inbox(file: &mut fs::File, ends: &[u64]) -> Result<InboxCount, String> {
+fn count_open_inbox(
+    file: &mut fs::File,
+    ends: &[u64],
+    before_write: Option<InboxIdentity>,
+) -> Result<InboxCount, String> {
     use std::io::Seek;
     let before = identity_of(file)?;
     file.rewind().map_err(|e| e.to_string())?;
@@ -586,6 +592,7 @@ fn count_open_inbox(file: &mut fs::File, ends: &[u64]) -> Result<InboxCount, Str
         line_numbers: at,
         identity,
         stable: identity == before,
+        before_write: before_write.unwrap_or(before),
     })
 }
 
@@ -595,8 +602,10 @@ pub struct InboxCount {
     pub line_numbers: Vec<Option<u64>>,
     /// 数えた後の受信箱の同一性（`inbox_identity` と同じ形）。
     pub identity: InboxIdentity,
-    /// 数えている間に受信箱が変わらなかったか（変わったら `total` は使わない）。
+    /// 数えている間に受信箱が変わらなかったか（変わったら `total` と `line_numbers` は使わない）。
     pub stable: bool,
+    /// 書く前（読むだけのときは数える前）の受信箱の同一性。
+    pub before_write: InboxIdentity,
 }
 
 /// 受信箱の同一性: デバイス・inode・大きさ・更新時刻（mtime）・状態変更時刻（ctime。どちらも
@@ -638,7 +647,7 @@ pub fn count_inbox(path: &Path) -> Result<InboxCount, String> {
     if len > INBOX_MAX_BYTES {
         return Err("inbox is too large".to_string());
     }
-    count_open_inbox(&mut file, &[])
+    count_open_inbox(&mut file, &[], None)
 }
 
 /// 補助記録（`patrol-state.json`）の大きさの上限。これを超えるものは読まない。
