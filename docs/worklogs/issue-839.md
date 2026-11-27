@@ -125,3 +125,17 @@ round 8 のレビューは、codex が request-changes（must-fix 1 件、`[文�
 5. 改善案: round 8 のメモの改善案と同じ。受信箱の書き手についての前提を、`docs/dev-environment.md` に 1 か所で書く。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 10）
+
+対象 head: d743e16827cf472c3b85d6bebcb8415c1cff3ad7
+
+round 9 のレビューは、claude が approve（`[文書のずれ]` の nit 1 件と、印の無い nit 1 件）で、codex は利用上限で失敗した（投稿なし。表示は 14:22 まで）。文書だけを直した。コードは round 9 から変えていない。
+
+1. 詰まった箇所: codex の利用上限で、round 9 のレビューの結果がそろわなかった。14:22 を過ぎてから、この head で codex と claude に委託し直す。
+2. 曖昧だった文: 「同じ周に書いた新しい知らせの行番号も、同じ理由で不明として扱う。」（`docs/dev-environment.md` の「起こしの最短間隔」、round 9 の版）。印があるときだけの決まりとして読めたので、印の有無にかかわらない決まりとして書き直した。
+3. 仮定と解釈: 受信箱の書き手についての前提（agent-watch の追記だけ、ほかの書き手は書き換えない）と、前提が崩れたことを見分けられる範囲（同一性の比較まで。確かめてから使うまでの間は見分けない）を、`docs/dev-environment.md` の同じ項に書いた。
+4. 足りなかった情報・検証手段: 文書だけの変更なので、`mise run verify` は回していない（round 9 の head 7c5ec603 で exit=0）。
+5. 改善案: skill `implement-issue` の手順 9 の「`failed` の扱い」に、利用上限で失敗したときは、上限が戻る時刻を過ぎてから同じラウンドのまま再委託する、と書き足す（round 2 のメモの 5 と同じ）。
+
+使ったスキル: implement-issue
