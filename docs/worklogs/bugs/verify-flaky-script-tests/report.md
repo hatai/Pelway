@@ -123,7 +123,7 @@ Issue の対象外だったため調査だけの予定でしたが、開発リ�
 | 修正前（origin/main の ensure） | 12 | 12 回すべて失敗 | 12 回すべて `Terminated` | 177 回 | 132 回 |
 | 修正後（この PR の最終版） | 64 | 64 回すべて通過 | 64 回すべて通過 | 3494 回 | 0 回 |
 
-- ローカルの `mise run verify` は 5 回走らせました（いずれも `TMPDIR=/dev/shm/p808`。理由は PR 本文に書いてあります）。1 回目（2026-11-27 00:20〜00:24）は `shellcheck の試験` だけが `FAIL mise run shellcheck failed (exit 1)` と `FAIL mise run shellcheck reported '<none>' files checked, want 86` で落ちました。出力は 1. と同じ形です（このときは 3. の観測をしていなかったため、送信元は記録されていません）。2 回目（09:48〜09:52）、3 回目（10:08〜10:12）、4 回目（11:17〜11:20）、5 回目（最終版での実行。時刻は PR 本文に書きます）は exit 0 でした。
+- ローカルの `mise run verify` は 7 回走らせました（いずれも `TMPDIR=/dev/shm/p808`。理由は PR 本文に書いてあります）。1 回目（2026-11-27 00:20〜00:24）は `shellcheck の試験` だけが `FAIL mise run shellcheck failed (exit 1)` と `FAIL mise run shellcheck reported '<none>' files checked, want 86` で落ちました。出力は 1. と同じ形です（このときは 3. の観測をしていなかったため、送信元は記録されていません）。2 回目（09:48〜09:52）、3 回目（10:08〜10:12）、4 回目（11:17〜11:20）は exit 0 でした。5 回目は round 3 の修正版で、6 回目は round 4 の修正版で、7 回目は round 5 の修正版での実行です（いずれも exit 0。時刻は PR 本文に書きます）。
 
 修正が実際の kill を止めるには、指揮役が実行する ensure の版がこの修正を含む必要があります。マージのあとに、指揮役が使う checkout で main を取り込んでください。それまでは、開発機では従来どおりの巻き込みが続くと推定されます。
 
