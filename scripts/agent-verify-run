@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # mise run verify の本体（#807）。検証の開始を worktree の状態ファイルに残してから、
 # 前回の印を消して 3 グループを検査し、すべて成功したときだけ新しい印を残す。
-import fcntl, hashlib, os, re, secrets, stat, subprocess, sys
+import fcntl, hashlib, os, re, secrets, stat, subprocess, sys, time
 
 MARKER_RE = re.compile(rb"^(?:[0-9a-f]{40}|[0-9a-f]{64})\nverify-id:[0-9a-f]{32}\n$")
 MARKER_SIZES = (84, 108)
 MARKER_MAX = max(MARKER_SIZES)
+RECORD_NAME_RE = re.compile(r"^(?:[0-9a-f]{64}|none|any)\.[0-9a-f]{32}$")
 
 def note(message): print(f"agent-verify-run: {message}", file=sys.stderr)
 def fail(message): note(message); sys.exit(1)
@@ -44,14 +45,17 @@ def marker_fingerprint(path):
     data = read_marker(path)
     if data is not None: return hashlib.sha256(data).hexdigest()
     # 読めない印も、その inode と更新時刻で世代を指す。権限の回復後に同じ印を通さないため。
+    # 印が無いことと、状態を取得できないことは区別する。取得できない世代は any で保守的に止める。
     try: st = os.lstat(path)
-    except OSError: return "none"
+    except FileNotFoundError: return "none"
+    except OSError: return "any"
     key = f"stat:{st.st_dev}:{st.st_ino}:{st.st_size}:{int(st.st_mtime)}".encode()
     return hashlib.sha256(key).hexdigest()
 
-def open_child_dir(parent_fd, name):
-    try: os.mkdir(name, 0o700, dir_fd=parent_fd)
-    except OSError: pass
+def open_child_dir(parent_fd, name, create):
+    if create:
+        try: os.mkdir(name, 0o700, dir_fd=parent_fd)
+        except OSError: pass
     fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
     st = os.fstat(fd)
     if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) & 0o022:
@@ -59,13 +63,18 @@ def open_child_dir(parent_fd, name):
         raise OSError(f"{name} が信頼できるディレクトリではありません")
     return fd
 
-def open_started_dir(root):
+def open_started_dir(root, create=True):
     root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        control_fd = open_child_dir(root_fd, ".pelway-verify")
-        try: return open_child_dir(control_fd, "started")
+        control_fd = open_child_dir(root_fd, ".pelway-verify", create)
+        try: return open_child_dir(control_fd, "started", create)
         finally: os.close(control_fd)
     finally: os.close(root_fd)
+
+def open_fallback_dir(git_dir, create=True):
+    git_fd = os.open(git_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try: return open_child_dir(git_fd, "pelway-verify-started", create)
+    finally: os.close(git_fd)
 
 def write_start(dir_fd, name):
     try:
@@ -74,17 +83,67 @@ def write_start(dir_fd, name):
         finally: os.close(fd)
         os.fsync(dir_fd)
         return True
+    except FileExistsError:
+        # 記録の意味はファイル名だけに入る。ロック前後で同じ世代を指したときは既存の記録で足りる。
+        return True
     except OSError as e:
         note(f"verify の開始の記録を残せません: {e}")
         return False
 
-def remove_start(dir_fd, name):
-    try: os.unlink(name, dir_fd=dir_fd)
-    except FileNotFoundError: return True
+def write_fallback(git_dir, name):
+    try:
+        fallback_fd = open_fallback_dir(git_dir, create=True)
     except OSError as e:
-        note(f"verify の開始の記録を消せません: {e}")
+        note(f"gitdir の失敗の記録も残せません: {e}")
         return False
-    return True
+    try: return write_start(fallback_fd, name)
+    finally: os.close(fallback_fd)
+
+def cleanup_dir(dir_fd, cutoff_ns, own_verify_id):
+    ok = True
+    try: names = os.listdir(dir_fd)
+    except OSError: return False
+    for name in names:
+        match = RECORD_NAME_RE.fullmatch(name)
+        if match is None: continue
+        remove = name.rsplit(".", 1)[1] == own_verify_id
+        if not remove:
+            try: st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+            except OSError:
+                ok = False
+                continue
+            remove = st.st_mtime_ns <= cutoff_ns
+        if not remove: continue
+        try: os.unlink(name, dir_fd=dir_fd)
+        except FileNotFoundError: pass
+        except OSError: ok = False
+    try: os.fsync(dir_fd)
+    except OSError: ok = False
+    return ok
+
+def cleanup_started(root, git_dir, cutoff_ns, own_verify_id):
+    ok = True
+    try:
+        started_fd = open_started_dir(root, create=False)
+    except OSError:
+        started_fd = None
+        ok = False
+    if started_fd is not None:
+        try:
+            if not cleanup_dir(started_fd, cutoff_ns, own_verify_id): ok = False
+        finally: os.close(started_fd)
+    fallback_path = os.path.join(git_dir, "pelway-verify-started")
+    if os.path.lexists(fallback_path):
+        try:
+            fallback_fd = open_fallback_dir(git_dir, create=False)
+        except OSError:
+            fallback_fd = None
+            ok = False
+        if fallback_fd is not None:
+            try:
+                if not cleanup_dir(fallback_fd, cutoff_ns, own_verify_id): ok = False
+            finally: os.close(fallback_fd)
+    return ok
 
 def invalidate_marker(path):
     try: st = os.lstat(path)
@@ -133,23 +192,44 @@ def main():
     git_dir = git_path(["--git-dir"], "gitdir")
     lock_path = os.path.join(git_dir, "pelway-verify.lock")
     marker_path = os.path.join(git_dir, "pelway-verify-tree")
+    verify_id = secrets.token_hex(16)
+
+    # ロック待ちで中断されても、開始時点の世代を無効化できるよう先に記録する。
+    # 主たる保存先に書けないときも、書けるなら gitdir の予備に残してから失敗にする。
     start_fingerprint = marker_fingerprint(marker_path)
+    start_name = f"{start_fingerprint}.{verify_id}"
     try:
-        started_fd = open_started_dir(root)
+        started_fd = open_started_dir(root, create=True)
+        open_error = None
     except OSError as e:
-        fail(f"verify の開始の記録を残せないため verify を開始しません: {e}")
-    start_name = f"{start_fingerprint}.{secrets.token_hex(16)}"
-    if not write_start(started_fd, start_name):
-        os.close(started_fd)
-        sys.exit(1)
+        started_fd = None
+        open_error = e
+    started = started_fd is not None and write_start(started_fd, start_name)
+    if not started:
+        write_fallback(git_dir, start_name)
+        if started_fd is not None: os.close(started_fd)
+        detail = f": {open_error}" if open_error is not None else ""
+        fail(f"verify の開始の記録を残せないため verify を開始しません{detail}")
+
     lock_fd, error = open_lock(lock_path)
     if error is not None:
         os.close(started_fd)
         fail(error)
     lock_acquired = False
+    invalidated = False
     try:
         lock_or_fail(lock_fd, lock_path)
         lock_acquired = True
+        lock_time_ns = time.time_ns()
+        # ロック待ちの間に印は別の世代へ変わりうる。無効化の対象は、
+        # ロックを取った時点の世代で記録し直す。
+        lock_fingerprint = marker_fingerprint(marker_path)
+        lock_name = f"{lock_fingerprint}.{verify_id}"
+        if not write_start(started_fd, lock_name):
+            write_fallback(git_dir, lock_name)
+            os.close(lock_fd)
+            os.close(started_fd)
+            fail("ロック取得時点の開始の記録を残せないため verify を開始しません")
         invalidated = invalidate_marker(marker_path)
     except SystemExit:
         os.close(lock_fd)
@@ -171,10 +251,15 @@ def main():
         sys.exit(verify if verify > 0 else 1)
     # 印を書く子にもロックの fd を渡す。親が中断されても、record が終わるまでは
     # 後の検証が入らず、古い成功の記録が後の失敗を上書きする順を防ぐ。
+    # verify-id は親が開始記録に使った値をそのまま渡す。親が中断されて子だけが
+    # 印を確定したときは、門が同じ verify-id の開始記録でその印を拒否できる。
+    record_env = os.environ.copy()
+    record_env["PELWAY_VERIFY_ID"] = verify_id
     record = subprocess.run(
-        ["bash", os.path.join(script_dir, "agent-verify-record")], pass_fds=(lock_fd,), check=False
+        ["bash", os.path.join(script_dir, "agent-verify-record")], pass_fds=(lock_fd,), env=record_env, check=False
     ).returncode
-    if record == 0: remove_start(started_fd, start_name)
+    if record == 0 and not cleanup_started(root, git_dir, lock_time_ns, verify_id):
+        fail("verify の開始の記録を消せません")
     sys.exit(record if record >= 0 else 1)
 
 if __name__ == "__main__":

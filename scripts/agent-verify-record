@@ -68,8 +68,11 @@ env GIT_INDEX_FILE="$index" git -C "$root" rm -r --cached --ignore-unmatch -q --
 tree="$(env GIT_INDEX_FILE="$index" git -C "$root" write-tree)" || fail "作業ツリーの木の hash を作れません"
 [[ "$tree" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || fail "作業ツリーの木の hash の形を判定できません"
 
-verify_id="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
-[[ "$verify_id" =~ ^[0-9a-f]{32}$ ]] || fail "印の検証 ID を作れません"
+verify_id="${PELWAY_VERIFY_ID:-}"
+if [[ -z "$verify_id" ]]; then
+  verify_id="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+fi
+[[ "$verify_id" =~ ^[0-9a-f]{32}$ ]] || fail "印の検証 ID の形を判定できません"
 out_tmp="$(mktemp "$git_dir/pelway-verify-tree.XXXXXX")" || fail "印の一時ファイルを作れません"
 printf '%s\nverify-id:%s\n' "$tree" "$verify_id" >"$out_tmp" || fail "印の一時ファイルに書けません"
 mv -fT -- "$out_tmp" "$git_dir/pelway-verify-tree" || fail "印を $git_dir/pelway-verify-tree に置けません"

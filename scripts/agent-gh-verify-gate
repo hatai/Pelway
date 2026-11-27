@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # agent-gh の push の verify ゲート（#807）。scripts/agent-gh の一時 pre-push フックから bash で呼ばれる。
-# 印は一度だけ開いて木と verify-id を同じ内容から読み、開始の記録が同じ印の指紋を指すときは止める。
+# 印は同じ fd から検査・読み取りし、開始の記録が同じ印の指紋か verify-id を指すときは止める。
 set -euo pipefail
 
 # 印と木の比較で refs/replace の置き換えを使わない。Git は転送では置き換えを使わず本体を送るため。
@@ -16,9 +16,9 @@ stop_unverified() {
 verify_script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 . "$verify_script_dir/agent-verify-paths.sh"
 
-git_dir="" root="" marker_path="" marker="" marker_ready=0
+git_dir="" root="" marker_path="" marker="" verify_id="" marker_fp="" stat_fp=""
 read_marker() {
-  ((marker_ready)) && return 0
+  [[ -z "$marker" ]] || return 0
   git_rev_path --git-dir || stop_unverified "gitdir を解決できません"
   physical_path "$REPLY" || stop_unverified "gitdir を絶対パスに解決できません"
   git_dir="$REPLY"
@@ -27,41 +27,47 @@ read_marker() {
   root="$REPLY"
   marker_path="$git_dir/pelway-verify-tree"
   [[ -e "$marker_path" || -L "$marker_path" ]] || stop_unverified "印 $marker_path がありません"
-  [[ -f "$marker_path" && ! -L "$marker_path" && -r "$marker_path" && -O "$marker_path" ]] ||
-    stop_unverified "印 $marker_path が信頼できる通常ファイルではありません"
-  stat_out="$(stat -c '%h %s %d:%i:%s:%Y' -- "$marker_path" 2>/dev/null)" || stop_unverified "印 $marker_path を確かめられません"
-  links="${stat_out%% *}"; stat_rest="${stat_out#* }"; size="${stat_rest%% *}"; stat_key="${stat_rest#* }"
-  [[ "$links" == 1 && ( "$size" == 84 || "$size" == 108 ) ]] || stop_unverified "印 $marker_path の形を判定できません"
   probe="$(mktemp "$git_dir/pelway-verify-write.XXXXXX" 2>/dev/null)" || stop_unverified "印を無効化できない状態です"
   rm -f -- "$probe" 2>/dev/null || stop_unverified "印を無効化できない状態です"
-  # 木と verify-id は同じ一回の読み取りから取る。読み直しで別世代の行を混ぜない。
-  marker_content="$(timeout 2 head -c 109 -- "$marker_path" 2>/dev/null && printf x)" || stop_unverified "印 $marker_path を読めません"
-  marker_content="${marker_content%x}"
-  [[ "$marker_content" == *$'\n'* ]] || stop_unverified "印 $marker_path の形を判定できません"
-  marker="${marker_content%%$'\n'*}"
-  rest="${marker_content#*$'\n'}"
-  verify_id="${rest%$'\n'}"
-  [[ "$rest" == "$verify_id"$'\n' && "$marker" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ && "$verify_id" =~ ^verify-id:[0-9a-f]{32}$ ]] ||
+  # 属性と内容は同じ fd から取る。パスの検査と読み直しで別世代を混ぜず、NUL を落とさない。
+  marker_info="$(python3 -I "$verify_script_dir/agent-verify-marker-read" "$marker_path" 2>/dev/null)" ||
     stop_unverified "印 $marker_path の形を判定できません"
-  marker_fp="$(printf '%s' "$marker_content" | sha256sum | cut -d' ' -f1)"
-  stat_fp="$(printf 'stat:%s' "$stat_key" | sha256sum | cut -d' ' -f1)"
-  control_dir="$root/.pelway-verify"; state_dir="$control_dir/started"
-  control_mode="$(stat -c %a -- "$control_dir" 2>/dev/null)" || control_mode=""
-  state_mode="$(stat -c %a -- "$state_dir" 2>/dev/null)" || state_mode=""
-  [[ -d "$control_dir" && ! -L "$control_dir" && -O "$control_dir" && -d "$state_dir" && ! -L "$state_dir" && -O "$state_dir" && -r "$state_dir" && -x "$state_dir" && -n "$control_mode" && -n "$state_mode" ]] ||
-    stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
-  (( (8#$control_mode & 022) == 0 && (8#$state_mode & 022) == 0 )) ||
-    stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
-  shopt -s nullglob
-  for start_file in "$state_dir"/*; do
-    base="${start_file##*/}"
-    target="${base%%.*}"
-    attempt="${base#*.}"
-    [[ ( "$target" == "$marker_fp" || "$target" == "$stat_fp" ) && "$attempt" =~ ^[0-9a-f]{32}$ ]] &&
-      stop_unverified "前回の verify はこの印を無効化しました"
-  done
+  IFS=$'\t' read -r marker verify_id marker_fp stat_fp extra <<<"$marker_info"
+  [[ -z "${extra:-}" && "$marker" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ && "$verify_id" =~ ^[0-9a-f]{32}$ && "$marker_fp" =~ ^[0-9a-f]{64}$ && "$stat_fp" =~ ^[0-9a-f]{64}$ ]] ||
+    stop_unverified "印 $marker_path の形を判定できません"
+
+  scan_started_dir "$git_dir/pelway-verify-started" 0
+  scan_started_dir "$root/.pelway-verify/started" 1
   [[ "$(git --no-replace-objects cat-file -t "$marker" 2>/dev/null)" == tree ]] || stop_unverified "印の木 $marker を読めません"
-  marker_ready=1
+}
+
+scan_started_dir() {
+  local dir="$1" required="$2"
+  if [[ ! -e "$dir" && ! -L "$dir" ]]; then
+    ((required)) && stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
+    return 0
+  fi
+  [[ -d "$dir" && ! -L "$dir" && -O "$dir" && -r "$dir" && -x "$dir" ]] ||
+    stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
+  local mode
+  mode="$(stat -c %a -- "$dir" 2>/dev/null)" || stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
+  (( (8#$mode & 022) == 0 )) || stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
+  if ((required)); then
+    local state_probe
+    state_probe="$(mktemp "$dir/probe.XXXXXX" 2>/dev/null)" || stop_unverified "verify の開始の記録を残せない状態です"
+    rm -f -- "$state_probe" 2>/dev/null || stop_unverified "verify の開始の記録を残せない状態です"
+  fi
+  shopt -s nullglob
+  local start_file base target attempt
+  for start_file in "$dir"/*; do
+    base="${start_file##*/}"
+    if [[ "$base" =~ ^([0-9a-f]{64}|none|any)\.([0-9a-f]{32})$ ]]; then
+      target="${BASH_REMATCH[1]}"; attempt="${BASH_REMATCH[2]}"
+      [[ "$target" == any || "$target" == "$marker_fp" || "$target" == "$stat_fp" || "$attempt" == "$verify_id" ]] &&
+        stop_unverified "前回の verify はこの印を無効化しました"
+    fi
+  done
+  return 0
 }
 
 # 行を先に全部読む（比較のコマンドに、残りの入力を読ませないため）。

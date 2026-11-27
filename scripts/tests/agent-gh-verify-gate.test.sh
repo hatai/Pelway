@@ -187,7 +187,11 @@ start_touch="$ROOT/verify-start-touch"; rm -f "$start_touch"
 (cd "$MISE_TOY" && VERIFY_TOUCH_BEFORE_EXIT="$start_touch" MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-start-unwritable.out" 2>&1); rc=$?
 [[ "$rc" != 0 && ! -e "$start_touch" && -f "$marker_path" ]] ||
   failures+=("verify_start_unwritable: rc=$rc touch=$(test -e "$start_touch" && echo present || echo missing) marker=$(test -e "$marker_path" && echo present || echo missing)")
-chmod u+w "$MISE_TOY/.pelway-verify"; rm -rf "$MISE_TOY/.pelway-verify"
+chmod u+w "$MISE_TOY/.pelway-verify"
+(cd "$MISE_TOY" && PELWAY_AGENT_SKIP_RESIGN=1 bash "$AGENT_GH" dev git push origin HEAD:refs/heads/agent/start-unwritable-before-verify >"$ROOT/start-unwritable-push.out" 2>"$ROOT/start-unwritable-push.err"); RC=$?; ERR="$(cat "$ROOT/start-unwritable-push.err")"
+[[ "$RC" != 0 && "$ERR" == *'前回の verify はこの印を無効化しました'* ]] ||
+  failures+=("verify_start_unwritable_push: failure was not persisted: rc=$RC $ERR")
+rm -rf "$MISE_TOY/.pelway-verify"
 (cd "$MISE_TOY" && MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-start-recovered.out" 2>&1); recovered_rc=$?
 [[ "$recovered_rc" == 0 && -f "$marker_path" ]] ||
   failures+=("verify_start_recovered: rc=$recovered_rc marker=$(test -e "$marker_path" && echo present || echo missing)")
@@ -232,7 +236,12 @@ if ((is_verify_mv)); then
   for ((i = 0; i < 100; i++)); do [[ -e "$FAKE_MV_ALLOW" ]] && break; sleep 0.1; done
 fi
 "$FAKE_MV_REAL" "$@"; rc=$?
-((is_verify_mv)) && touch "$FAKE_MV_DONE"
+if ((is_verify_mv)); then
+  touch "$FAKE_MV_DONE"
+  if [[ -n "${FAKE_MV_RELEASE:-}" ]]; then
+    for ((i = 0; i < 100; i++)); do [[ -e "$FAKE_MV_RELEASE" ]] && break; sleep 0.1; done
+  fi
+fi
 exit "$rc"
 EOS
 cat >"$FAKE_PYTHON_BIN/python3" <<'EOS'
@@ -260,9 +269,9 @@ wait "$interrupt_first"; interrupt_success_rc=$?
 (cd "$MISE_TOY" && PELWAY_AGENT_SKIP_RESIGN=1 bash "$AGENT_GH" dev git push origin HEAD:refs/heads/agent/interrupted-success >"$ROOT/interrupted-push.out" 2>"$ROOT/interrupted-push.err"); RC=$?; ERR="$(cat "$ROOT/interrupted-push.err")"
 [[ "$interrupt_success_rc" == 0 && "$interrupted_rc" != 0 && "$(started_count "$MISE_TOY/.pelway-verify/started")" -ge 1 && -f "$marker_path" && "$RC" == 0 ]] ||
   failures+=("verify_interrupted_waiting: success=$interrupt_success_rc interrupted=$interrupted_rc started=$(started_count "$MISE_TOY/.pelway-verify/started") push=$RC $ERR")
-mv_started="$ROOT/verify-record-mv-started" mv_allow="$ROOT/verify-record-mv-allow" mv_done="$ROOT/verify-record-mv-done"; second_started="$ROOT/verify-second-started" first_pid="$ROOT/verify-first.pid" second_pid="$ROOT/verify-second.pid"
-rm -f "$mv_started" "$mv_allow" "$mv_done" "$second_started" "$first_pid" "$second_pid" "$marker_path"
-(cd "$MISE_TOY" && PATH="$FAKE_PYTHON_BIN:$FAKE_MV_BIN:$PATH" FAKE_PYTHON3_REAL="$REAL_PYTHON3" VERIFY_RUNNER_PID_FILE="$first_pid" FAKE_MV_STARTED="$mv_started" FAKE_MV_ALLOW="$mv_allow" FAKE_MV_DONE="$mv_done" FAKE_MV_REAL="$REAL_MV" MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-interrupted-first.out" 2>&1) &
+mv_started="$ROOT/verify-record-mv-started" mv_allow="$ROOT/verify-record-mv-allow" mv_done="$ROOT/verify-record-mv-done" mv_release="$ROOT/verify-record-mv-release"; second_started="$ROOT/verify-second-started" first_pid="$ROOT/verify-first.pid" second_pid="$ROOT/verify-second.pid"
+rm -f "$mv_started" "$mv_allow" "$mv_done" "$mv_release" "$second_started" "$first_pid" "$second_pid" "$marker_path"
+(cd "$MISE_TOY" && PATH="$FAKE_PYTHON_BIN:$FAKE_MV_BIN:$PATH" FAKE_PYTHON3_REAL="$REAL_PYTHON3" VERIFY_RUNNER_PID_FILE="$first_pid" FAKE_MV_STARTED="$mv_started" FAKE_MV_ALLOW="$mv_allow" FAKE_MV_DONE="$mv_done" FAKE_MV_RELEASE="$mv_release" FAKE_MV_REAL="$REAL_MV" MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-interrupted-first.out" 2>&1) &
 first_verify=$!
 for ((i = 0; i < 100; i++)); do [[ -e "$mv_started" ]] && break; sleep 0.1; done
 first_runner="$(cat "$first_pid" 2>/dev/null)"
@@ -277,9 +286,12 @@ sleep 2
 second_started_early=0
 [[ -e "$second_started" ]] && second_started_early=1
 touch "$mv_allow"
+for ((i = 0; i < 100; i++)); do [[ -e "$mv_done" ]] && break; sleep 0.1; done
+(cd "$MISE_TOY" && PELWAY_AGENT_SKIP_RESIGN=1 bash "$AGENT_GH" dev git push origin HEAD:refs/heads/agent/interrupted-child-marker >"$ROOT/interrupted-child-push.out" 2>"$ROOT/interrupted-child-push.err"); child_push_rc=$?; child_push_err="$(cat "$ROOT/interrupted-child-push.err")"
+touch "$mv_release"
 wait "$second_verify"; second_verify_rc=$?
-[[ "$kill_rc" == 0 && "$first_verify_rc" != 0 && -n "$second_runner" && "$second_started_early" == 0 && -e "$mv_done" && -e "$second_started" && "$second_verify_rc" != 0 && ! -e "$marker_path" ]] ||
-  failures+=("verify_record_inherits_lock: kill=$kill_rc first=$first_verify_rc second=$second_verify_rc early=$second_started_early runner=${second_runner:-none} mv_done=$(test -e "$mv_done" && echo yes || echo no) second=$(test -e "$second_started" && echo yes || echo no) marker=$(test -e "$marker_path" && echo present || echo missing)")
+[[ "$kill_rc" == 0 && "$first_verify_rc" != 0 && -n "$second_runner" && "$second_started_early" == 0 && -e "$mv_done" && "$child_push_rc" != 0 && "$child_push_err" == *'前回の verify はこの印を無効化しました'* && -e "$second_started" && "$second_verify_rc" != 0 && ! -e "$marker_path" ]] ||
+  failures+=("verify_record_inherits_lock: kill=$kill_rc first=$first_verify_rc second=$second_verify_rc early=$second_started_early runner=${second_runner:-none} mv_done=$(test -e "$mv_done" && echo yes || echo no) child_push=$child_push_rc $child_push_err second=$(test -e "$second_started" && echo yes || echo no) marker=$(test -e "$marker_path" && echo present || echo missing)")
 # --- 印が無い push は止まり、理由と mise run verify の案内が出る ---
 setup_repo missing
 printf 'new implementation\n' >"$REPO_DIR/work/code.txt"
@@ -324,6 +336,17 @@ push_role readonly_after dev origin HEAD:refs/heads/agent/readonly-after
 [[ "$readonly_verify_rc" != 0 && "$RC" != 0 && "$ERR" == *'前回の verify はこの印を無効化しました'* ]] ||
   failures+=("verify_readonly_gitdir: verify=$readonly_verify_rc push=$RC $ERR")
 [[ -z "$(remote_ref agent/readonly-after)" ]] || failures+=("verify_readonly_gitdir: remote ref changed")
+# ロックを取った後に印の unlink が失敗したときは、ロック取得時点の世代を指す記録で止める。
+# gitdir そのものを書けなくすると lock file を作れないため、lock file を先に作り、dir だけ書けなくする。
+lock_file="$REPO_DIR/work/.git/pelway-verify.lock"
+rm -f "$lock_file"; : >"$lock_file"; chmod 600 "$lock_file"
+chmod a-w "$REPO_DIR/work/.git"
+(cd "$REPO_DIR/work" && "$VERIFY_RUN" >"$ROOT/invalidate-fails-verify.out" 2>&1); invalidate_verify_rc=$?
+chmod u+w "$REPO_DIR/work/.git"
+push_role invalidate_fails dev origin HEAD:refs/heads/agent/invalidate-fails
+[[ "$invalidate_verify_rc" != 0 && "$RC" != 0 && "$ERR" == *'前回の verify はこの印を無効化しました'* ]] ||
+  failures+=("verify_invalidate_fails: verify=$invalidate_verify_rc push=$RC $ERR")
+[[ -z "$(remote_ref agent/invalidate-fails)" ]] || failures+=("verify_invalidate_fails: remote ref changed")
 # --- HEAD と印の差が docs/worklogs/ の下だけなら通す（実装コミットとメモコミットの両方） ---
 setup_repo worklogs
 printf 'implementation\n' >"$REPO_DIR/work/code.txt"
