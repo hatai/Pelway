@@ -436,8 +436,7 @@ run_cycles 1
 check "slots.json recovers after local removed" slot_eq status ok
 
 # --- 13j. local で codex を外すと SLOTS missing codex と slots.json の missing に出る
-# （Issue #804。必須の役の不足。高リスク・security=yes の着手を止める材料で、
-# 通常の優先順位の枠の計上は変わらない） ---
+# （Issue #804。必須の役の不足。通常の優先順位の枠の計上は変わらない） ---
 cat > "$ROOT/repo/agent-team.local.toml" <<'EOF'
 [developers.hatai]
 use = ["opencode", "devin", "claude"]
@@ -472,8 +471,7 @@ check "slots.json missing empty after local removed" \
   python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["missing"] == [], d.get("missing")' "$SLOTS"
 
 # --- 13k. local のキー名に目印と一致する文字列を置いても missing に入らない
-# （警告にはキー名がそのまま出る。missing は枠の算出に使った実行の標準出力の
-# missing の行だけから拾うため、標準エラーの警告は記録に届かない） ---
+# （missing は標準出力の missing の行だけから拾うため標準エラーの警告は届かない） ---
 cat > "$ROOT/repo/agent-team.local.toml" <<'EOF'
 [developers.hatai]
 "missing-required codex" = 1

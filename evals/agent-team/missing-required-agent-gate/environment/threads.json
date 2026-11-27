@@ -1,35 +1,7 @@
 [
-  {
-    "threadId": "impl-820",
-    "title": "[実装] #820 CI の egress 制御を gateway 側のポリシーに寄せる",
-    "status": "completed",
-    "archived": false
-  },
-  {
-    "threadId": "conductor-self",
-    "title": "[指揮] conductor",
-    "status": "running",
-    "archived": false
-  },
-  {
-    "threadId": "rev-840-claude",
-    "title": "[レビュー] #840 Runbook 表現の統一",
-    "status": "completed",
-    "archived": false,
-    "lastReport": "pr: #840\nverdict: approve\nrun=9001"
-  },
-  {
-    "threadId": "rev-841-claude",
-    "title": "[レビュー] #841 巡回記録の項目名の整理",
-    "status": "completed",
-    "archived": false,
-    "lastReport": "pr: #841\nverdict: approve\nrun=9011"
-  },
-  {
-    "threadId": "rev-841-codex",
-    "title": "[レビュー] #841 巡回記録の項目名の整理 (codex)",
-    "status": "completed",
-    "archived": false,
-    "lastReport": "pr: #841\nverdict: approve\nrun=9012"
-  }
+  { "threadId": "impl-820", "title": "[実装] #820 CI の egress 制御を gateway 側のポリシーに寄せる", "status": "completed", "archived": false },
+  { "threadId": "conductor-self", "title": "[指揮] conductor", "status": "running", "archived": false },
+  { "threadId": "rev-840-claude", "title": "[レビュー] #840 Runbook 表現の統一", "status": "completed", "archived": false, "lastReport": "pr: #840\nverdict: approve\nrun=9001" },
+  { "threadId": "rev-841-claude", "title": "[レビュー] #841 巡回記録の項目名の整理", "status": "completed", "archived": false, "lastReport": "pr: #841\nverdict: approve\nrun=9011" },
+  { "threadId": "rev-841-codex", "title": "[レビュー] #841 巡回記録の項目名の整理 (codex)", "status": "completed", "archived": false, "lastReport": "pr: #841\nverdict: approve\nrun=9012" }
 ]

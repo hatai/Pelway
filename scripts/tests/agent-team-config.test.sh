@@ -387,8 +387,7 @@ devin = 9
 [developers.dev.priority.implement]
 normal = ["opencode", "devin"]
 EOF
-# local は <file> と同じディレクトリから読む。$ROOT/agent-team.local.toml として置くため
-# 共有側も同じ名前で $ROOT に置く
+# local は <file> と同じディレクトリから読む（共有側も $ROOT に同じ名前で置く）
 cp "$ROOT/l16.toml" "$ROOT/agent-team.toml"
 s_run "$ROOT/agent-team.toml"; rc=$?
 check "17: slots exits 0 with local" eq "$rc" "0"
@@ -405,8 +404,8 @@ check "17: effective omits other developers tables" \
 rm "$ROOT/agent-team.local.toml"
 
 # 18: use から担当を外すと、外した担当への参照（上限・優先順位の並び）が重ねた結果から
-# 落ちる。その項目の警告（キー名つき）が出る。優先順位の並びが空になる条件は、
-# local が並びを置き換えて埋める必要がある（埋めなければ重ねた結果の検証で止まる）
+# 落ち、項目の警告（キー名つき）が出る。並びが空になるときは local が並びを置き換えて
+# 埋める必要がある（埋めなければ重ねた結果の検証で止まる）
 cat > "$ROOT/agent-team.local.toml" <<'EOF'
 [developers.dev]
 use = ["opencode", "devin", "claude"]
@@ -473,7 +472,6 @@ check "20: merged-invalid: error names the key" has "$ROOT/err" "developers.dev.
 rm "$ROOT/agent-team.local.toml"
 
 # 21: 重ねた結果の検証エラーはキー名と理由だけで、local に書いた値を出さない
-# （local は開発者が書く追跡しないファイルで、値を標準エラーに出す決まりは無い）
 cat > "$ROOT/agent-team.local.toml" <<'EOF'
 [developers.dev.priority.review]
 high_risk = ["LEAKED_MARKER_ID_9f2"]
@@ -525,8 +523,7 @@ check "25: explicit out-of-use slot is validated, not dropped" eq "$rc" "1"
 check "25: error names the key" has "$ROOT/err" "developers.dev.slots.codex"
 rm "$ROOT/agent-team.local.toml"
 
-# 26: use が高リスクのレビュー担当を全て外すとき、検証で止まる前に
-# 担当不足の警告（needs-decision への引き継ぎの根拠）が出る
+# 26: use が高リスクのレビュー担当を全て外すとき、検証で止まる前に担当不足の警告が出る
 cat > "$ROOT/agent-team.local.toml" <<'EOF'
 [developers.dev]
 use = ["opencode", "devin"]
@@ -538,8 +535,7 @@ check "26: warning names the fix" bash -c "grep -F 'priority.review.high_risk' '
 check "26: warning names human reassignment" bash -c "grep -F 'priority.review.high_risk' '$ROOT/err' | grep -qF '割り当て直す'"
 rm "$ROOT/agent-team.local.toml"
 
-# 27: local の use の型が違うときは、担当不足の警告を読む前に検証が
-# キー名つきで止める（traceback で落ちない）
+# 27: local の use の型が違うときは、警告を読む前に検証がキー名つきで止める
 cat > "$ROOT/agent-team.local.toml" <<'EOF'
 [developers.dev]
 use = 1
@@ -562,11 +558,9 @@ check "28: error names developers.dev.priority" has "$ROOT/err" "developers.dev.
 rm "$ROOT/agent-team.local.toml" "$ROOT/l24.toml"
 
 # 29: effective に別々の shared と local を渡せる（main の承認済みの版を土台に
-# 本体の checkout の local を重ねる読み方。レビュー担当選定でブランチの版を
-# 使わないため）
+# 本体の checkout の local を重ねる読み方）
 write_case "$ROOT/shared29.toml" < <(dev_case)
-# 共有と同じディレクトリに local を置いておき、明示した <local-file> だけが
-# 読まれる（同じディレクトリの方は重ならない）ことを確かめる
+# 共有と同じディレクトリに local を置き、明示した <local-file> だけが読まれることを確かめる
 cat > "$ROOT/agent-team.local.toml" <<'EOF'
 [developers.dev.slots]
 devin = 9
@@ -584,8 +578,7 @@ check "29: local applied from the explicit path" bash -c "grep -qF '\"devin\": 2
 check "29: sibling local not applied when <local-file> given" bash -c "! grep -qF '\"devin\": 9' '$ROOT/out'"
 rm "$ROOT/some-dir.local.toml" "$ROOT/shared29.toml" "$ROOT/agent-team.local.toml"
 
-# 29b: 明示した <local-file> が無いときも、共有と同じディレクトリの local は
-# 重ならない（常に本体のパスを渡す手順に対応）
+# 29b: 明示した <local-file> が無いときも、共有と同じディレクトリの local は重ならない
 write_case "$ROOT/shared29b.toml" < <(dev_case)
 cat > "$ROOT/agent-team.local.toml" <<'EOF'
 [developers.dev.slots]
@@ -616,8 +609,7 @@ check "32: no traceback" bash -c "! grep -q Traceback '$ROOT/err'"
 check "32: names the local file" has "$ROOT/err" "agent-team.local.toml"
 rm "$ROOT/agent-team.local.toml" "$ROOT/l32.toml"
 
-# 30: local が FIFO（ブロックする特殊ファイル）でも open が待たずに
-# 「通常ファイルでない」として重ねない
+# 30: local が FIFO（ブロックする特殊ファイル）でも open が待たずに重ねない
 write_case "$ROOT/l30.toml" < <(dev_case)
 mkfifo "$ROOT/agent-team.local.toml"
 timeout 10 bash "$CFG" slots dev "$ROOT/l30.toml" > "$ROOT/out" 2>"$ROOT/err"; rc=$?
@@ -626,10 +618,9 @@ check "30: fifo local warns" has "$ROOT/err" "通常ファイルでない"
 rm "$ROOT/agent-team.local.toml" "$ROOT/l30.toml"
 
 # 33: local で codex を外しても（高リスクの並びを使える担当に張り替えて有効な形でも）、
-# 必須の役の不足として codex が missing-required の印と警告に出る。
-# 警告は priority.review.high_risk と直し方（codex を use に戻す／人が割り当て直す）を
-# 名指す。local で high_risk の並びを書き換えても、マージに要る codex の approve の
-# 関門は消えない（関門は toml でなく GitHub 上の現在の head への approve）
+# 必須の役の不足として codex が missing-required の印と警告に出る。警告は
+# priority.review.high_risk と直し方（codex を use に戻す／人が割り当て直す）を名指す。
+# local で high_risk を書き換えても codex の approve の関門は消えない
 write_case "$ROOT/l33.toml" < <(dev_case)
 cat > "$ROOT/agent-team.local.toml" <<'EOF'
 [developers.dev]
@@ -660,8 +651,7 @@ check "33: effective JSON has missing codex" \
   python3 -I -c "import json,sys; assert json.load(open(sys.argv[1]))['missing'] == ['codex']" "$ROOT/out"
 rm "$ROOT/agent-team.local.toml"
 
-# 34: codex が使える（local が use を変えない）ときは missing-required の印も
-# codex の警告も出ず、通常の優先順位の仕事は止まらない
+# 34: codex が使える（local が use を変えない）ときは印も警告も出ず低リスクは止まらない
 cat > "$ROOT/agent-team.local.toml" <<'EOF'
 [developers.dev.slots]
 devin = 9
@@ -678,7 +668,6 @@ check "34: effective JSON missing is empty" \
 rm "$ROOT/agent-team.local.toml"
 
 # 35: local が無くても missing-required の検査は共有の doc に掛かる
-# （共有の toml が codex を落としていても同じ印・警告が出る）
 write_case "$ROOT/l35.toml" <<'EOF'
 [developers.dev]
 use = ["opencode", "devin", "claude"]
@@ -702,9 +691,8 @@ rm "$ROOT/l35.toml" "$ROOT/l33.toml"
 
 # 36: 警告には local のキー名がそのまま入るため、キー名を細工すると標準エラーの
 # 行に目印と一致する文字列を置ける（"missing-required codex" というキー名）。
-# 機械向けの経路は合成済みの設定から算出する標準出力の missing の行だけなので、
-# codex が使える設定のままでは標準出力に missing の行は出ず、警告が
-# slots.json の missing に写らないことを見張り側の前提として固定する
+# missing は標準出力の missing の行だけから拾うので、codex が使える設定では
+# 警告が slots.json の missing に写らないことを見張り側の前提として固定する
 write_case "$ROOT/l36.toml" < <(dev_case)
 cat > "$ROOT/agent-team.local.toml" <<'EOF'
 [developers.dev]
