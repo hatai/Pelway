@@ -154,6 +154,38 @@ check "unwritable worktree: no thread start" no_line "thread start"
 check "unwritable worktree: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
 check "unwritable worktree: stderr names agent-team.toml" grep -qF "agent-team.toml" "$ROOT/err"
 
+# 共有の agent-team.toml が既にある worktree への local の配置に失敗するときも、
+# 旧指揮役に停止を送る前に止まり、登録を保つ
+# （この試験は本体の checkout に local を書く必要がある。リンク済み worktree
+# から見て本体が read-only マウントの環境では本体側の用意ができず、シナリオを
+# 組めないため明示的に skip する。CI のようにチェックアウトが本体そのものの
+# 環境では動く）
+FRESH_WT2="$ROOT/fresh-wt2"
+main_local_ready=""
+if [[ -e "$MAIN_CO/agent-team.local.toml" ]]; then
+  main_local_ready=exists
+elif printf '# test local\n' > "$MAIN_CO/agent-team.local.toml" 2>/dev/null; then
+  main_local_ready=created
+fi
+if [[ -z "$main_local_ready" ]]; then
+  echo "skip local write failure: 本体の checkout が書けない環境のため未検証"
+elif git -C "$REPO" worktree add -q --detach "$FRESH_WT2" HEAD 2>/dev/null; then
+  # wt 側は読み取り専用にして local の配置だけを失敗させる
+  chmod a-w "$FRESH_WT2"
+  printf 'mcp:launch:kept\n' > "$FILE"
+  NEW_WT="$FRESH_WT2" run "" --from "$OLD" --to "$NEW"; rc=$?
+  chmod u+w "$FRESH_WT2"
+  check "local write failure: exits non-zero" [ "$rc" -ne 0 ]
+  check "local write failure: nothing sent to either conductor" no_line "thread send"
+  check "local write failure: no thread start" no_line "thread start"
+  check "local write failure: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+  check "local write failure: stderr names agent-team.local.toml" grep -qF "agent-team.local.toml" "$ROOT/err"
+  git -C "$REPO" worktree remove --force "$FRESH_WT2"
+else
+  check "local write failure: fixture worktree created" false
+fi
+[[ "$main_local_ready" = created ]] && rm -f "$MAIN_CO/agent-team.local.toml"
+
 # --to なし: 何も作らず、t3_thread_launch で立てて --to で実行し直す手順を出して止まる
 printf 'mcp:launch:kept\n' > "$FILE"
 run "" --from "$OLD"; rc=$?

@@ -102,7 +102,7 @@ claude_review が head 20f521df を approve（review 6084536692）。あわせ�
 must-fix への対応:
 1. implement-issue:257 の API 取得が相対パス `scripts/agent-gh` で実装ブランチの版が走り、取得結果自体を改ざんできた → 本体の checkout の `scripts/agent-gh` を使い、保護値（`instance.review`・`effort.option`）も同じ取得版から読む形に
 2. command-team:129 が「承認の必須条件は agent-team.toml から読む」と toml に無い値を参照していた → TOML から読む値を `instance.review`・`effort.option` に限定し、承認の必須条件は command-team の「マージ」を参照する形に（runbook:217 も同様）
-3. worktree-setup の dst 検査がパス文字列に紐づき、検査と書き込みの間で差し替え可能 → dst ディレクトリを検査前に fd で開き（`exec {dstdir}<"$dst"`）、以降の全書き込みを `/proc/self/fd/$dstdir/` 経由に固定。dst の実パスは `readlink` で再解決して登録照合に使う
+3. worktree-setup の dst 検査がパス文字列に紐づき、検査と書き込みの間で差し替え可能 → dst ディレクトリを検査前に fd で開き（`exec {dstdir}<"$dst"`）、一時ファイルの作成を `/proc/self/fd/$dstdir/` 経由に固定。dst の実パスは `readlink` で再解決して登録照合に使う（最終名の存在確認と配置が fd 起点になるのは round 10 の対応）
 4. local のコピー失敗が成功扱いで返っていた → 配置失敗は die で止める。コピーは noclobber な一時名 `name.worktree-setup.$$.tmp` 経由で `ln -T` 配置に変更（試験 5c: 書き込み不可の wt で非 0・ファイル名を含むエラー・部分的な残り無し）
 5. `open_local` が「不在」と「無視（symlink・特殊ファイル）」と「読み取り障害」を区別していなかった → ENOENT は不在、symlink・非通常ファイルは警告して重ねず、権限・I/O エラーは値を出さずに非 0 で止める（試験 31: 読み取り不可 local で非 0・トレースバック無し・ファイル名を含む）
 
@@ -113,3 +113,18 @@ push した head: 2959f974（round 8 の対応）
 
 main が 64 コミット先行していたため `origin/main` をマージ（2eb2dca6、コンフリクトなし）。`.devin/config.json` は worktree で read-only マウントのため、作業は一時 worktree で実施して push、本体側は `update-index --skip-worktree` で同ファイルを固定して追随。取り込み後の 5 試験ファイルすべて pass。マージコミットは API 署名にできないため署名なし（既知の扱い）。
 push した head: 2eb2dca6（main 取り込み）
+
+## レビュー対応（round 10）
+
+対象 head: 2eb2dca6
+レビュー: codex_review（run=804-review-round10-codex、review 6086699065）は request-changes（must-fix 5、nit 2）。usage limit のあと自動で resume されて戻った
+
+must-fix への対応:
+1. worktree-setup の最終名の存在確認と配置が絶対パスの `to` を使い、検査した fd と結びついていなかった → src 側も `exec {srcdir}<"$src"` で検査前に fd 固定し、git の検査・存在確認・配置をすべて `/proc/self/fd/` 起点に。コピーは dir_fd 基点の python 手続きに集約
+2. 一時ファイルが予測可能な名前で、配置が名前の再解決だった → 乱数つきの一時名を O_EXCL|O_NOFOLLOW で作り、開いた fd を保持したまま `/proc/self/fd/<tfd>` から os.link で公開（一時名が差し替わっても自分が書いた inode だけが出る）。失敗時は finally で自分の一時名を消す（試験 5c に残り無しの確認を追加）
+3. コピー元の open がブロックし得た（FIFO 化で型検査に届かない）→ O_NOFOLLOW|O_NONBLOCK で開いてから S_ISREG を確かめる
+4. agent-team-config の load_local_fd が開いた後の OSError・UTF-8 エラーを捕捉せずトレースバック → TOML 構文エラーと同じ「ファイル名と固定の理由」で fail
+5. 2eb2dca6 の必須チェックが lint・test 取り消し → この対応の push で対象 head の CI を通し直す（ローカルでは対象試験すべて pass。verify-run.test.sh と gateway の試験はこの環境固有の失敗で差分と無関係）
+
+nit への対応: worklog の round-8 記述を実態どおりに訂正、conductor-rebuild.test.sh に「共有設定が既にある wt への local 配置失敗で登録を保つ」試験を追加（本体の checkout が書けない環境では明示的に skip）
+

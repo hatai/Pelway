@@ -483,10 +483,15 @@ def open_local(path):
 
 
 def load_local_fd(fobj, label):
+    # 開く段階の失敗は open_local が扱う。ここでは開いた後の失敗（読み込み中の
+    # I/O エラーや不正な UTF-8）も TOML 構文エラーと同じ形で報告する。
+    # 値は出さず、ファイル名と固定の理由だけ
     try:
         return tomllib.load(fobj)
     except tomllib.TOMLDecodeError as e:
         fail(f"{label}: TOML として読めない（{e}）")
+    except (OSError, UnicodeDecodeError) as e:
+        fail(f"{label}: 開けない・読めない（{type(e).__name__}）")
 
 
 def load_effective(path, login, lpath=None):

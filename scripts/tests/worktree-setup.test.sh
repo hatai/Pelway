@@ -105,6 +105,7 @@ chmod u+w "$ROOT/wt5c"
 check "5c: local write failure: exits non-zero" [ "$rc" -ne 0 ]
 check "5c: local write failure: names agent-team.local.toml" has "$ROOT/err" "agent-team.local.toml"
 check "5c: no partial local left" [ ! -e "$ROOT/wt5c/agent-team.local.toml" ]
+check "5c: no leftover temp" bash -c '! ls "$1"/agent-team.local.toml.worktree-setup.*.tmp >/dev/null 2>&1' _ "$ROOT/wt5c"
 
 # 6. --dest の既定は $T3CODE_WORKTREE_PATH、--from の既定は $T3CODE_PROJECT_ROOT
 git worktree add -q "$ROOT/wt6" "$old" --detach
