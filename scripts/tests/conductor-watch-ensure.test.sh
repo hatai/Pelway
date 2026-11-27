@@ -7,12 +7,18 @@
 # systemd の経路はモックの systemctl（start が unit の ExecStart を読んで setsid で起きる）
 # で試す。本物の Restart= による自動復旧は環境依存のため、このテストの対象外。
 # 動作検査は unshare で名前空間が作れない環境では飛ばす。
+# Issue #808: ensure はコマンドラインに scripts/conductor-watch.sh を持つプロセスをすべて「見張り」
+# に数えていたため、shellcheck の検査（スクリプトのパスを引数に並べる）や、conductor-watch の
+# 試験が一時ディレクトリに置いた写しの見張りまで kill していた。ensure がそれらを選ばないこと
+# （名前空間の中）と、逆に conductor-watch の試験が本番と同じ形の見張りを止めないこと（名前空間の外）を
+# 確かめる。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENSURE="$REPO/scripts/conductor-watch-ensure.sh"
 ROOT="$(mktemp -d)"
-trap 'rm -rf "$ROOT"' EXIT
+prod=""   # 下の「テストが本番の見張りを止めない」で立てる、本番と同じ形のプロセス
+trap '[[ -n "$prod" ]] && kill "$prod" 2>/dev/null; rm -rf "$ROOT"' EXIT
 failures=()
 
 check() {
@@ -118,6 +124,24 @@ t() { local n="$1"; shift; if "$@"; then echo "ok   $n"; else echo "FAIL $n"; fi
 eq() { [[ "$1" == "$2" ]]; }
 neq() { [[ "$1" != "$2" ]]; }
 has() { grep -q "$2" "$1"; }
+# 見張りではないのに scripts/conductor-watch.sh をコマンドラインに持つ 2 つの形（Issue #808）。
+# ensure がどちらも選ばないことを、unit 外・切り離し前の見張りを置き換えるのと同じ 1 回の実行で確かめる。
+# count / pids は広いパターンのままなので、decoy は数える処理のあとに立てて、数える前に片付ける。
+argpid=""; copypid=""
+start_decoys() {  # 1) shellcheck の検査と同じ形（スクリプトのパスを引数に並べるだけ） 2) リポジトリの外の写しの見張り（conductor-watch の試験と同じ形）
+  local d="$ROOT/elsewhere/tmp.a1B2c3/repo/scripts"
+  bash -c 'exec -a "shellcheck --severity=warning scripts/agent-gh scripts/conductor-watch.sh scripts/agent-team-config" sleep 300' >/dev/null 2>&1 &
+  argpid=$!
+  mkdir -p "$d"
+  printf '#!/usr/bin/env bash\nwhile :; do sleep 30; done\n' >"$d/conductor-watch.sh"
+  bash "$d/conductor-watch.sh" >/dev/null 2>&1 &
+  copypid=$!
+}
+t_decoys() {  # <mode>: どちらも生きていること
+  t "$1: argument-only process kept"   eq "$(kill -0 "$argpid" 2>/dev/null; echo $?)" "0"
+  t "$1: out-of-repo watch copy kept"  eq "$(kill -0 "$copypid" 2>/dev/null; echo $?)" "0"
+}
+stop_decoys() { kill "$argpid" "$copypid" 2>/dev/null; wait "$argpid" "$copypid" 2>/dev/null; argpid=""; copypid=""; }
 
 if [[ "$MODE" == systemd ]]; then
   bash "$ENS" >"$MOCK/out.log" 2>&1
@@ -135,9 +159,12 @@ if [[ "$MODE" == systemd ]]; then
   waitn 2
   foreign="$(pgrep -f 'conductor-watch\.sh' | grep -vx "$p1" | head -1)"
   t "systemd: foreign watch present"     waitn 2
+  start_decoys
   bash "$ENS" >>"$MOCK/out.log" 2>&1
   t "systemd: foreign watch killed"      eq "$(kill -0 "$foreign" 2>/dev/null; echo $?)" "1"
   t "systemd: unit watch kept"           eq "$(kill -0 "$p1" 2>/dev/null; echo $?)" "0"
+  t_decoys systemd
+  stop_decoys
   t "systemd: count back to 1"           waitn 1
   kill "$p1" 2>/dev/null; wait0
   bash "$ENS" >>"$MOCK/out.log" 2>&1
@@ -154,15 +181,19 @@ else
   t "fallback: second ensure keeps 1"    waitn 1
   bash "$ENS" >>"$MOCK/out.log" 2>&1
   t "fallback: third ensure keeps 1"     waitn 1
-  # セッションを切り離していない見張り（nohup & 相当）は切り離した形に置き換える
-  bash "$ROOT/repo/scripts/conductor-watch.sh" >/dev/null 2>&1 &
+  # セッションを切り離していない見張り（nohup & 相当）は切り離した形に置き換える。
+  # 相対パスで起動した形で確かめる（ensure は見張しのスクリプトを、起動したときの cwd から解決する）。
+  (cd "$ROOT/repo" && exec bash scripts/conductor-watch.sh) >/dev/null 2>&1 &
   fragile=$!
   waitn 2
   t "fallback: fragile watch present"    waitn 2
+  start_decoys
   bash "$ENS" >>"$MOCK/out.log" 2>&1
   wait "$fragile" 2>/dev/null
   t "fallback: fragile watch replaced"   eq "$(kill -0 "$fragile" 2>/dev/null; echo $?)" "1"
   t "fallback: leader watch kept"        eq "$(kill -0 "$p1" 2>/dev/null; echo $?)" "0"
+  t_decoys fallback
+  stop_decoys
   t "fallback: count back to 1"          waitn 1
   # 切り離して起きた見張りが 2 つあるときは後からのものを落として 1 つにする
   setsid -f bash "$ROOT/repo/scripts/conductor-watch.sh" >/dev/null 2>&1
@@ -191,6 +222,22 @@ EOF
     fi
   done
 fi
+
+# --- テストが本番の見張りを止めないこと（名前空間の外） ---
+# 本番の見張りと同じ形（<リポジトリ>/scripts/conductor-watch.sh をセッションを切り離して起動した
+# プロセス）を 1 つ立て、conductor-watch の試験を 1 本その横で通りで動かしても残ることを確かめる
+# （Issue #808）。中身は sleep だけなので GitHub・T3 には触れない。5 分で自分で終わる（この試験が
+# kill されても残らない）。横で走らせる試験の成否はここでは問わない（script-test が別に判定する）。
+P="$ROOT/prod/repo/scripts"
+mkdir -p "$P"
+printf '#!/usr/bin/env bash\nsleep 300\n' >"$P/conductor-watch.sh"
+setsid bash "$P/conductor-watch.sh" >/dev/null 2>&1 </dev/null &
+prod=$!
+check "unit-shaped watch is running"          kill -0 "$prod"
+bash "$REPO/scripts/tests/conductor-watch-slots.test.sh" >"$ROOT/inner.out" 2>&1
+check "conductor-watch test ran beside it"    grep -qE '^(all passed|[0-9]+ failed)$' "$ROOT/inner.out"
+check "unit-shaped watch survives the test"   kill -0 "$prod"
+kill "$prod" 2>/dev/null; wait "$prod" 2>/dev/null; prod=""
 
 if ((${#failures[@]})); then
   printf '\n%d failure(s): %s\n' "${#failures[@]}" "${failures[*]}"
