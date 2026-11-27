@@ -535,8 +535,9 @@ const INBOX_MAX_BYTES: u64 = 256 * 1024 * 1024;
 /// 受信箱に、1 件 1 行で追記する（ファイルは 0600。1 行を 1 回の書き込みで書く）。
 /// 書いたあとの受信箱の行数と、書いた各行の行番号（数えきれなかった行は None）を、同じ fd で
 /// 数えて返す（path を開き直さない）。行番号は、書いた直後のファイルの位置から数えるので、
-/// その後にほかの書き手が足した行を含まない（`inbox::count_lines_at`）。
-pub fn append_inbox(path: &Path, lines: &[String]) -> Result<(u64, Vec<Option<u64>>), String> {
+/// その後にほかの書き手が足した行を含まない（`inbox::count_lines_at`）。数えたときの受信箱の
+/// 同一性（`inbox_identity` と同じ形）も返す。
+pub fn append_inbox(path: &Path, lines: &[String]) -> Result<InboxCount, String> {
     use std::io::Seek;
     let (dir, name) = split_pelway_path(path)?;
     let dirf = open_pelway_dir(dir, true)?;
@@ -568,8 +569,35 @@ pub fn append_inbox(path: &Path, lines: &[String]) -> Result<(u64, Vec<Option<u6
     }
     file.rewind().map_err(|e| e.to_string())?;
     // EOF まで、固定の上限（`INBOX_MAX_BYTES` + 1 MiB）の内で読む（書いた後に足された行も行数に入る）
-    pelway_agent_watch::inbox::count_lines_at(&file, &ends, INBOX_MAX_BYTES + 1024 * 1024)
-        .map_err(|e| e.to_string())
+    let (total, at) =
+        pelway_agent_watch::inbox::count_lines_at(&file, &ends, INBOX_MAX_BYTES + 1024 * 1024)
+            .map_err(|e| e.to_string())?;
+    Ok(InboxCount {
+        total,
+        line_numbers: at,
+        identity: identity_of(&file)?,
+    })
+}
+
+/// 受信箱を数えた結果。
+pub struct InboxCount {
+    pub total: u64,
+    pub line_numbers: Vec<Option<u64>>,
+    pub identity: [u64; 3],
+}
+
+fn identity_of(file: &fs::File) -> Result<[u64; 3], String> {
+    use std::os::unix::fs::MetadataExt;
+    let m = file.metadata().map_err(|e| e.to_string())?;
+    Ok([m.dev(), m.ino(), m.len()])
+}
+
+/// 受信箱の同一性（デバイス・inode・大きさ）。中身は読まない。最後に数えたときと同じなら、
+/// そのときの行数をそのまま使える（Issue #839）。
+pub fn inbox_identity(path: &Path) -> Result<[u64; 3], String> {
+    let (dir, name) = split_pelway_path(path)?;
+    let dirf = open_pelway_dir(dir, false)?;
+    identity_of(&open_in_pelway(&dirf, name, libc::O_RDONLY)?)
 }
 
 /// 補助記録（`patrol-state.json`）の大きさの上限。これを超えるものは読まない。

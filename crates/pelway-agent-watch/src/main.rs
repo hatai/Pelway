@@ -361,9 +361,10 @@ impl Watcher {
                 })
                 .collect();
             match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &lines) {
-                Ok((total, at)) => {
-                    self.state.inbox_lines = Some(total);
-                    self.maybe_wake(&t3, Some(total), &notices, &at);
+                Ok(count) => {
+                    self.state.inbox_lines = Some(count.total);
+                    self.state.inbox_identity = Some(count.identity);
+                    self.maybe_wake(&t3, Some(count.total), &notices, &count.line_numbers);
                 }
                 Err(e) => {
                     eprintln!("agent-watch: ERROR inbox append failed: {e}");
@@ -387,7 +388,22 @@ impl Watcher {
         } else if self.state.wake_pending.is_some() {
             // 新しい知らせの無い周回でも、後に回した起こし（起こし待ちの印）を確かめる（Issue #839）。
             // 判定には印の値と補助記録だけを使い、受信箱は読まない（印が残る間、周回ごとに受信箱を
-            // 数え直さない）。既読の位置の範囲は、最後に数えた受信箱の行数で確かめる
+            // 数え直さない）。既読の位置の範囲は、最後に数えた受信箱の行数で確かめる。受信箱が
+            // そのときと違えば（切り詰め・置き換え・追記）、上限の内で数え直してから使う
+            let inbox = self.pelway_dir.join(INBOX_FILE);
+            let same = io::inbox_identity(&inbox).ok() == self.state.inbox_identity;
+            if !same {
+                match io::append_inbox(&inbox, &[]) {
+                    Ok(count) => {
+                        self.state.inbox_lines = Some(count.total);
+                        self.state.inbox_identity = Some(count.identity);
+                    }
+                    Err(_) => {
+                        self.state.inbox_lines = None;
+                        self.state.inbox_identity = None;
+                    }
+                }
+            }
             self.maybe_wake(&t3, self.state.inbox_lines, &[], &[]);
         }
 

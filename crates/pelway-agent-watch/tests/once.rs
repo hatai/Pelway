@@ -2645,3 +2645,22 @@ fn pending_only_cycle_checks_offset_range() {
     let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 2, "{}", stderr(&out));
 }
+
+#[test]
+fn pending_only_cycle_recounts_a_changed_inbox() {
+    // 最後に数えた後に受信箱が切り詰められた（2 行 → 1 行）。印だけを確かめる周は数え直し、
+    // 切り詰めた後の末尾を超える既読の位置（2）で印を消さない
+    let sb = Sandbox::new("wake-839-truncated");
+    wake_then_defer_b_failure(&sb, 1);
+    let first = fs::read_to_string(sb.inbox()).unwrap();
+    fs::write(sb.inbox(), format!("{}\n", first.lines().next().unwrap())).unwrap();
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    backdate_last_wake(&sb);
+    run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1);
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    // 補助記録が直れば起こす
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}

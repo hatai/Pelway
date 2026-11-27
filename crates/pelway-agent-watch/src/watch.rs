@@ -112,6 +112,10 @@ pub struct State {
     /// 印だけの周で、補助記録の既読の位置が範囲内かを確かめるのに使う。
     #[serde(default)]
     pub inbox_lines: Option<u64>,
+    /// `inbox_lines` を数えたときの受信箱の同一性（デバイス・inode・大きさ）。印だけの周で
+    /// 受信箱がこれと違えば、数え直す（切り詰められた受信箱で古い行数を使わない）。
+    #[serde(default)]
+    pub inbox_identity: Option<[u64; 3]>,
     /// スレッドごとに、起こしに数えた最後の承認待ち（`waiting`）の round（Issue #839）。
     /// 同じスレッドの同じ round の承認待ちは、2 件目から起こしに数えない。
     /// 一覧の記録（`threads`）から外れたスレッドの項目は消す。
