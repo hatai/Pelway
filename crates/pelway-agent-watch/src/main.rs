@@ -582,7 +582,8 @@ impl Watcher {
             };
         // 既読の位置は受信箱の行数を超えられない。超える値（書き損じ・sandbox からの書き換え）は
         // 使わず保存もしない（保存すると、補助記録を直しても以後の起こしが止まり続けるため）。
-        // 行数が分からないとき（数えたことが無い）は、範囲を確かめられないので使わない
+        // 行数が分からないとき（数えたことが無い・数えている間に受信箱が変わった・数え直せない）は、
+        // 範囲を確かめられないので使わない（同じ `offset-out-of-range` を出す）
         if inbox_lines.is_none_or(|lines| inbox_offset > lines) {
             log("offset-out-of-range");
             defer(&mut self.state);

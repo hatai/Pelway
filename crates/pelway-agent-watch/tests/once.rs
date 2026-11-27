@@ -2697,8 +2697,9 @@ fn pending_only_cycle_recounts_a_same_size_rewrite() {
 #[test]
 fn pending_only_recount_does_not_change_the_inbox() {
     // 数え直しは読むだけ: 末尾の書きかけの断片を改行で閉じず、消えた受信箱を作らない
+    // （既読は 0 のままにして、印が残る周を続ける）
     let sb = Sandbox::new("wake-839-read-only");
-    wake_then_defer_b_failure(&sb, 1);
+    wake_then_defer_b_failure(&sb, 0);
     let mut text = fs::read_to_string(sb.inbox()).unwrap();
     text.push_str("{\"partial\"");
     fs::write(sb.inbox(), &text).unwrap();
@@ -2708,6 +2709,22 @@ fn pending_only_recount_does_not_change_the_inbox() {
     fs::remove_file(sb.inbox()).unwrap();
     run_cooldown(&sb);
     assert!(!sb.inbox().exists());
+    // どちらの周も印だけを確かめる周だった（印は残っている）
+    assert!(!read_state(&sb)["wake_pending"].is_null());
+}
+
+#[test]
+fn pending_only_cycle_does_not_recount_an_unchanged_inbox() {
+    // 受信箱が最後に数えたときから変わっていなければ、印だけの周は数え直さない
+    // （状態ファイルの行数だけを書き換えておき、そのまま残ることで見分ける）
+    let sb = Sandbox::new("wake-839-no-recount-unchanged");
+    wake_then_defer_b_failure(&sb, 1);
+    let mut state = read_state(&sb);
+    state["inbox_lines"] = 9.into();
+    write_state(&sb, &state);
+    backdate_last_wake(&sb);
+    run_cooldown(&sb);
+    assert_eq!(read_state(&sb)["inbox_lines"], 9);
 }
 
 #[test]
