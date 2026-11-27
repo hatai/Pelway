@@ -167,3 +167,17 @@ round 11 のレビューは、codex が request-changes（must-fix 1 件、`[文
 5. 改善案: `docs/agents/grokbot-runbook.md` の「起きたときは」に、受信箱の行数が `inbox_offset` より少ないときは先頭から読み直す、と書き足す（今回は範囲を広げないため見送った）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 13）
+
+対象 head: b5786dc6d3544c501dff54c583058b13020cd760
+
+round 12 のレビューは、codex が request-changes（must-fix 2 件、`[文書のずれ]` の nit 1 件）、claude が request-changes（must-fix 1 件、`[文書のずれ]` の nit 1 件、印の無い nit 1 件）だった。すべて直した。
+
+1. 詰まった箇所: `crates/pelway-agent-watch/src/main.rs`: round 12 で「一度も数えていないときは書き換えと見なさない」にしたが、同一性が無いのは、数えている間に受信箱が変わったときと数え直せなかったときも同じだった（claude の must-fix）。その 2 つでは `forget_inbox_count` で書き換えの印を立て、次の周で初回と取り違えないようにした。受信箱が続けて書き換えられたときは、前の受信箱で残した既読の位置（`rewritten_wake_offset`）を捨てる（codex の must-fix 1）。
+2. 曖昧だった文: 「既読と確認できた連続部分の末尾を復旧位置にし、対応が分からなければ先頭から読むよう手順を直してください。」（codex の round 12 のレビューの must-fix 2）。runbook の `inbox_offset` の説明を、切り詰め・置き換えの直後に、先頭から既読と確かめられた連続する行の末尾（分からなければ 0）へ書き直す、に直した。
+3. 仮定と解釈: 数えている間の変化は結合テストでは起こしにくいので、`main.rs` に単体テスト（`unstable_count_marks_the_inbox_rewritten`）を足した。`main.rs` に単体テストを置くのはこの PR が初めて。
+4. 足りなかった情報・検証手段: 受信箱がその場でローテートされる筋書き（claude の失敗の筋道）そのものは、テストで再現していない。
+5. 改善案: round 8 のメモの改善案と同じ。
+
+使ったスキル: implement-issue
