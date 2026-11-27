@@ -93,6 +93,19 @@ check "5c: required file still copied" [ -f "$ROOT/wt5/agent-team.toml" ]
 check "5c: symlink local not copied" [ ! -e "$ROOT/wt5/agent-team.local.toml" ]
 rm "$ROOT/main/agent-team.local.toml"; mv "$ROOT/main/local.bak" "$ROOT/main/agent-team.local.toml"
 
+# 5c. 本体に通常ファイルの local があるのに worktree 側へ配置できないときは
+# 非 0 で止まる（枠・担当の上書きを失ったまま交代させない）
+git worktree add -q "$ROOT/wt5c" "$old" --detach
+# agent-team.toml だけ先に置き、local の配置が失敗する状況にする
+# （本体の agent-team.local.toml は前の試験のものが残っている）
+cp "$ROOT/main/agent-team.toml" "$ROOT/wt5c/"
+chmod a-w "$ROOT/wt5c"
+run_setup --from "$ROOT/main" --dest "$ROOT/wt5c"; rc=$?
+chmod u+w "$ROOT/wt5c"
+check "5c: local write failure: exits non-zero" [ "$rc" -ne 0 ]
+check "5c: local write failure: names agent-team.local.toml" has "$ROOT/err" "agent-team.local.toml"
+check "5c: no partial local left" [ ! -e "$ROOT/wt5c/agent-team.local.toml" ]
+
 # 6. --dest の既定は $T3CODE_WORKTREE_PATH、--from の既定は $T3CODE_PROJECT_ROOT
 git worktree add -q "$ROOT/wt6" "$old" --detach
 ( cd "$ROOT/wt6" && T3CODE_PROJECT_ROOT="$ROOT/main" T3CODE_WORKTREE_PATH="$ROOT/wt6" run_setup ); rc=$?

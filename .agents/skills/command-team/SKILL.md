@@ -126,7 +126,7 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 
 ### レビュー担当と effort
 
-| 条件 | レビュー担当（`[developers.<login>.priority.review]` の対応するキーの並びと `[agents.<担当>]` の登録情報。優先順位の並び・使える担当・モデルは委託・起動のたびに開発者の `agent-team.local.toml` を重ねた結果（`scripts/agent-team-config effective <login>`。土台は main の承認済みの版の toml、local とスクリプトは本体の checkout の版で、skill `implement-issue` の手順 8 と同じ読み方）から読み、`instance.review`・`effort.option`・承認の必須条件は main の承認済みの版の `agent-team.toml` から読み、読めなければ委託・起動を止める。読んだ `[agents.<担当>].instance.review` が main の最新の版の `docs/dev-environment.md`（読めなければ委託・起動を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ、委託・起動を止める） |
+| 条件 | レビュー担当（`[developers.<login>.priority.review]` の対応するキーの並びと `[agents.<担当>]` の登録情報。優先順位の並び・使える担当・モデルは委託・起動のたびに開発者の `agent-team.local.toml` を重ねた結果（`scripts/agent-team-config effective <login>`。土台は main の承認済みの版の toml、local とスクリプトは本体の checkout の版で、skill `implement-issue` の手順 8 と同じ読み方）から読み、`instance.review`・`effort.option` は main の承認済みの版の `agent-team.toml` から読み（承認の必須条件は toml には無いため「マージ」の決まりを使い）、読めなければ委託・起動を止める。読んだ `[agents.<担当>].instance.review` が main の最新の版の `docs/dev-environment.md`（読めなければ委託・起動を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ、委託・起動を止める） |
 |---|---|
 | 通常 | `normal` の先頭から PR 番号の偶奇で交互（偶数は先頭、奇数は次）。使えない担当（下の確認ゲート）の番では `normal` の先頭の担当に回す |
 | 高リスク: `unsafe`、セキュリティの境界（認証・権限・承認・秘密情報・ネットワーク）、`.github/workflows/` の変更、`agent-team.toml` の変更、pr-size の追加行が 400 を超える | `high_risk` の使えるもの全て |

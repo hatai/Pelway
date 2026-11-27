@@ -66,7 +66,7 @@ esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 exec python3 -I - "$ROOT" "$@" <<'PY'
-import copy, json, os, stat, sys, tomllib
+import copy, errno, json, os, stat, sys, tomllib
 
 root, argv = sys.argv[1], sys.argv[2:]
 roles = ("implement", "investigate", "review")
@@ -466,16 +466,20 @@ def open_local(path):
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return None
-    except OSError:
-        return False
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            return False
+        # 読み取り障害（権限・I/O エラーなど）は「無い」とは扱わず、
+        # 共有値で黙って進ませず非 0 で止める（値は出さない）
+        fail(f"{LOCAL_NAME}: 開けない・読めない（{type(e).__name__}）")
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             os.close(fd)
             return False
         return os.fdopen(fd, "rb")
-    except OSError:
+    except OSError as e:
         os.close(fd)
-        return False
+        fail(f"{LOCAL_NAME}: 開けない・読めない（{type(e).__name__}）")
 
 
 def load_local_fd(fobj, label):
@@ -507,6 +511,9 @@ def load_effective(path, login, lpath=None):
     local = load_local_fd(lf, lpath)
     merged = merge_local(copy.deepcopy(doc), local, login)
     emit_warnings(lpath)
+    # 実際に重ねたことを、見張り（conductor-watch.sh の SLOTS overlay の行）が
+    # 枠の算出に使った実行の出力から確かめられるように stderr に出す
+    sys.stderr.write(f"{lpath}: overlay applied\n")
     # 必須の役に当たる担当不足の警告は検証より先に出す（検証で止まる場合にも
     # needs-decision へ引き継げる根拠を残す）
     warn_required(merged, [login] if login is not None else

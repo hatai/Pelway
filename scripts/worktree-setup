@@ -64,9 +64,16 @@ unset GIT_DIR GIT_WORK_TREE
 
 [[ -d "$src" ]] || die "--from の checkout が無い: $src"
 [[ -d "$dst" ]] || die "--dest の worktree が無い: $dst"
-# 両側を物理パスに固定する（symlink を辿った先で比べ、書くのも辿った先の中だけ）
+# 書き込み先のディレクトリを先に fd で固定する。以後の dst 側の検査・存在確認・
+# 書き込みはすべて /proc/self/fd 経由でこの fd 起点に行い、検査したディレクトリと
+# 書き込み先を同一のものに結びつける（パスが並行して差し替わっても検査した
+# ディレクトリを見る）。exec のエラーを捨てる 2>/dev/null は付けられない
+# （引数なしの exec はリダイレクトが永続するため、以後の標準エラーが消える）
+exec {dstdir}<"$dst"
+# fd の指す先の物理パス（symlink を辿った先で比べ、書くのも辿った先の中だけ）
+dst="$(readlink "/proc/self/fd/$dstdir")" \
+  || die "--dest のパスが解決できない"
 src="$(CDPATH='' cd "$src" && pwd -P)"
-dst="$(CDPATH='' cd "$dst" && pwd -P)"
 
 # 写す元と先が repo の外に出ないことを確かめる（写す元と先が repo の外に出ない、の
 # 受け入れ条件）。src は本体の checkout（git-dir が git-common-dir そのものの最上位。
@@ -85,14 +92,14 @@ gd_src="$(CDPATH='' cd "$gd_src" && pwd -P)"
 common_src="$(CDPATH='' cd "$common_src" && pwd -P)"
 [[ "$gd_src" == "$common_src" ]] \
   || die "--from が本体の checkout でない（リンク済み worktree は写す元にしない）: $src"
-top_dst="$(git -C "$dst" rev-parse --show-toplevel 2>/dev/null)" \
+top_dst="$(git -C "/proc/self/fd/$dstdir" rev-parse --show-toplevel 2>/dev/null)" \
   || die "--dest が git の worktree でない: $dst"
 top_dst="$(CDPATH='' cd "$top_dst" && pwd -P)"
 [[ "$top_dst" == "$dst" ]] \
   || die "--dest が worktree の最上位でない（$dst の属する worktree の最上位は $top_dst）"
-gd_dst="$(git -C "$dst" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
+gd_dst="$(git -C "/proc/self/fd/$dstdir" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
   || die "--dest の git-dir が読めない: $dst"
-common_dst="$(git -C "$dst" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+common_dst="$(git -C "/proc/self/fd/$dstdir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
   || die "--dest の git-common-dir が読めない: $dst"
 gd_dst="$(CDPATH='' cd "$gd_dst" && pwd -P)"
 common_dst="$(CDPATH='' cd "$common_dst" && pwd -P)"
@@ -116,10 +123,6 @@ done < <(git -C "$src" worktree list --porcelain)
 [[ -n "$registered" ]] \
   || die "--dest が本体側の worktree 登録に無い: $dst"
 
-# 検査したディレクトリを fd で保持する。以下の書き込みは /proc/self/fd 経由の
-# この fd 起点に限り、検査後に dst のパスが差し替わっても検査したディレクトリの
-# 外には書かない
-exec {dstdir}<"$dst" || die "--dest のディレクトリを開けない: $dst"
 
 copied=0
 for name in agent-team.toml agent-team.local.toml; do
@@ -143,18 +146,26 @@ for name in agent-team.toml agent-team.local.toml; do
     echo "worktree-setup: skip $name（本体側が通常ファイルでない）"
     continue
   fi
-  # 検査したディレクトリの fd 起点に一時名で書き終えてから配置する。
-  # noclobber（O_EXCL|O_CREAT）は途中失敗を最終名に残さない一時名の作成に使い、
-  # 配置は ln -T（リンクは既存名を上書きせず、最終名がディレクトリや
+  # 検査したディレクトリの fd 起点に一時名で書き終えてから配置する。コピー元は
+  # リンクをたどらずに開き（O_NOFOLLOW）、開いたものが通常ファイルのときだけ
+  # 読む。noclobber（O_EXCL|O_CREAT）は途中失敗を最終名に残さない一時名の作成に
+  # 使い、配置は ln -T（リンクは既存名を上書きせず、最終名がディレクトリや
   # ディレクトリへの symlink に並行して差し替わってもその中には作らない）で行う。
-  # これでコピー元を読めない
-  # 場合や書き込みが途中で失敗した場合に、空・書きかけの設定が最終名に残らない
+  # これでコピー元を読めない場合や書き込みが途中で失敗した場合に、空・書きかけの
+  # 設定が最終名に残らない
   tmp="$name.worktree-setup.$$.tmp"
   tmp_fd="/proc/self/fd/$dstdir/$tmp"
-  to_fd="/proc/self/fd/$dstdir/$name"
   ok=""
-  if ( set -o noclobber; cat -- "$from" >"$tmp_fd" ) 2>/dev/null; then
-    if ln -T "$tmp_fd" "$to_fd" 2>/dev/null; then
+  if ( set -o noclobber; python3 -I - "$from" >"$tmp_fd" <<'INNER'
+import os, stat, sys
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_NOFOLLOW)
+if not stat.S_ISREG(os.fstat(fd).st_mode):
+    sys.exit(3)
+with os.fdopen(fd, "rb") as f:
+    sys.stdout.buffer.write(f.read())
+INNER
+  ) 2>/dev/null; then
+    if ln -T "$tmp_fd" "$to" 2>/dev/null; then
       ok=1
     fi
     rm -f "$tmp_fd"
@@ -164,10 +175,11 @@ for name in agent-team.toml agent-team.local.toml; do
     echo "worktree-setup: copied $name"
   elif [[ -e "$to" || -L "$to" ]]; then
     echo "worktree-setup: skip $name（worktree 側に既にある）"
-  elif [[ "$name" == agent-team.toml ]]; then
-    die "worktree 側に $name を作れない（書き込みに失敗）"
   else
-    echo "worktree-setup: skip $name（worktree 側への書き込みに失敗）"
+    # 本体に通常ファイルとしてある設定は枠・担当の決まりになるため、写せなければ
+    # どちらの名前でも失敗とする（写せないまま交代すると、枠を読めない・上書きを
+    # 失う conductor に引き継がせることになる）
+    die "worktree 側に $name を作れない（書き込みに失敗）"
   fi
 done
 echo "worktree-setup: ok（写した $copied 件）"

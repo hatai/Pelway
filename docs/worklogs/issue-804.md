@@ -93,3 +93,18 @@ push した head: 3a18d45e（round 6 の対応）
 ## レビュー対応（round 7 の nit）
 
 claude_review が head 20f521df を approve（review 6084536692）。あわせて挙がった nit 3 件への対応: ヘッダコメントと usage_text に <local-file> 引数を追記、試験 29 に「明示した <local-file> だけが読まれ共有と同じディレクトリの local は重ならない」確認を追加、worklog の試験 30 の範囲の記述を訂正
+
+## レビュー対応（round 8）
+
+対象 head: 058e034f
+レビュー: codex_review（run=7212000131、review 6084606669）は request-changes（must-fix 5、nit 2）。claude_review は 20f521df で approve 済み
+
+must-fix への対応:
+1. implement-issue:257 の API 取得が相対パス `scripts/agent-gh` で実装ブランチの版が走り、取得結果自体を改ざんできた → 本体の checkout の `scripts/agent-gh` を使い、保護値（`instance.review`・`effort.option`）も同じ取得版から読む形に
+2. command-team:129 が「承認の必須条件は agent-team.toml から読む」と toml に無い値を参照していた → TOML から読む値を `instance.review`・`effort.option` に限定し、承認の必須条件は command-team の「マージ」を参照する形に（runbook:217 も同様）
+3. worktree-setup の dst 検査がパス文字列に紐づき、検査と書き込みの間で差し替え可能 → dst ディレクトリを検査前に fd で開き（`exec {dstdir}<"$dst"`）、以降の全書き込みを `/proc/self/fd/$dstdir/` 経由に固定。dst の実パスは `readlink` で再解決して登録照合に使う
+4. local のコピー失敗が成功扱いで返っていた → 配置失敗は die で止める。コピーは noclobber な一時名 `name.worktree-setup.$$.tmp` 経由で `ln -T` 配置に変更（試験 5c: 書き込み不可の wt で非 0・ファイル名を含むエラー・部分的な残り無し）
+5. `open_local` が「不在」と「無視（symlink・特殊ファイル）」と「読み取り障害」を区別していなかった → ENOENT は不在、symlink・非通常ファイルは警告して重ねず、権限・I/O エラーは値を出さずに非 0 で止める（試験 31: 読み取り不可 local で非 0・トレースバック無し・ファイル名を含む）
+
+nit への対応: 試験 29 を拡張（明示した <local-file> が無いとき共有と同じディレクトリの local は重ならないことを確認する試験 29b）、conductor-watch.sh の overlay 表示を別途開く判定から `effective`/`slots` 実行の stderr の applied マーカー（`<local>: overlay applied`）読み取りに変更
+

@@ -710,19 +710,10 @@ if os.path.isfile("agent-team.toml"):
                 slots_lines = [f"SLOTS{' over' if used[n] > lim else ''} {n} {used[n]}/{lim}" for n, lim in limits.items()]
                 # 開発者ごとの上書き（agent-team.local.toml、Issue #804）が重なっているときは
                 # その存在を 1 行で出す。上書きできる・できない項目の決まりは
-                # agent-team.md の「開発者ごとの上書き」。出すのはあるときだけ
-                # 適用側（agent-team-config）と同じ判定: リンクをたどらずに開き、
-                # 開いた fd が通常ファイルのときだけ「重なった」と表示する
-                _applied = False
-                try:
-                    _fd = os.open("agent-team.local.toml", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-                    try:
-                        _applied = stat.S_ISREG(os.fstat(_fd).st_mode)
-                    finally:
-                        os.close(_fd)
-                except OSError:
-                    _applied = False
-                if _applied:
+                # agent-team.md の「開発者ごとの上書き」。出すのはあるときだけ。
+                # 表示は「この巡回で枠を算出した実行が実際に重ねた」かどうかに
+                # 合わせる（枠の算出後に別途開くと、巡回中の追加・削除で食い違う）
+                if "agent-team.local.toml: overlay applied" in r.stderr:
                     slots_lines.append("SLOTS overlay agent-team.local.toml")
                 slots_st, slots_reason, slots_sig = "ok", None, "|".join(slots_lines)
         except Exception as e:

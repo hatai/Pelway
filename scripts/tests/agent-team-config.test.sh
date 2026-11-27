@@ -582,6 +582,29 @@ check "29: local applied from the explicit path" bash -c "grep -qF '\"devin\": 2
 check "29: sibling local not applied when <local-file> given" bash -c "! grep -qF '\"devin\": 9' '$ROOT/out'"
 rm "$ROOT/some-dir.local.toml" "$ROOT/shared29.toml" "$ROOT/agent-team.local.toml"
 
+# 29b: 明示した <local-file> が無いときも、共有と同じディレクトリの local は
+# 重ならない（常に本体のパスを渡す手順に対応）
+write_case "$ROOT/shared29b.toml" < <(dev_case)
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[developers.dev.slots]
+devin = 9
+EOF
+bash "$CFG" effective dev "$ROOT/shared29b.toml" "$ROOT/no-such.local.toml" > "$ROOT/out" 2>"$ROOT/err"; rc=$?
+check "29b: explicit missing local exits 0" eq "$rc" "0"
+check "29b: sibling local not applied" bash -c "! grep -qF '\"devin\": 9' '$ROOT/out'"
+rm "$ROOT/shared29b.toml" "$ROOT/agent-team.local.toml"
+
+# 31: local が読み取り障害（権限）のときは「無い」ではなく非 0 で止まる
+write_case "$ROOT/l31.toml" < <(dev_case)
+echo '[developers.dev]' > "$ROOT/agent-team.local.toml"
+chmod 000 "$ROOT/agent-team.local.toml"
+s_run "$ROOT/l31.toml"; rc=$?
+chmod 644 "$ROOT/agent-team.local.toml"
+check "31: unreadable local exits non-zero" eq "$rc" "1"
+check "31: no traceback" bash -c "! grep -q Traceback '$ROOT/err'"
+check "31: names the local file" has "$ROOT/err" "agent-team.local.toml"
+rm "$ROOT/agent-team.local.toml" "$ROOT/l31.toml"
+
 # 30: local が FIFO（ブロックする特殊ファイル）でも open が待たずに
 # 「通常ファイルでない」として重ねない
 write_case "$ROOT/l30.toml" < <(dev_case)
