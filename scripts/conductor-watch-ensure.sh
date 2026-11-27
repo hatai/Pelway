@@ -52,7 +52,7 @@ fi
 watch_pids() {
   local p r script real
   for p in $(pgrep -f '^([^ ]*/)?(ba)?sh (.*[/])?scripts/conductor-watch\.sh$' | grep -vx -e "$$" -e "${PPID:-0}" || true); do
-    { IFS= read -r -d '' _ && IFS= read -r -d '' script && ! IFS= read -r -d ''; } <"/proc/$p/cmdline" 2>/dev/null || continue
+    { IFS= read -r -d '' _ && IFS= read -r -d '' script && ! IFS= read -r -d ''; } 2>/dev/null <"/proc/$p/cmdline" || continue
     if [[ "$script" == /* ]]; then
       real="$(cd -P "${script%/*}" 2>/dev/null && pwd)/${script##*/}" || continue
     else

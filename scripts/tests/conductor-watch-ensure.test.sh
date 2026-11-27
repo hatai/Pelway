@@ -11,8 +11,9 @@
 # に数えていたため、shellcheck の検査（スクリプトのパスを引数に並べる）や、conductor-watch の
 # 試験が一時ディレクトリに置いた写しの見張りまで kill していた。名前空間の中で、ensure がそれらを
 # 選ばないこと（見張りを置き換えるのと同じ 1 回の実行で確かめる）、相対パス（`./scripts/…`）で
-# 起動した見張りや空白を含む checkout の見張りを見失わないこと、逆に conductor-watch の試験が
-# 止めるのに使う kill の形では ensure の管理対象の見張りが残ることを確かめる。
+# 起動した見張りや空白を含む checkout の見張りを見失わないこと、逆に、実運用の conductor-watch
+# の試験（自分の見張りを止める片付けを持つもの）を管理対象の見張りと並行して通しても、
+# その見張りが残ることを確かめる。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -50,11 +51,17 @@ elif ! unshare -U -r -m -p -f --mount-proc true 2>/dev/null; then
   echo "skip behavior: unshare (user+pid+mount namespace) unavailable"
 else
   mkdir -p "$ROOT/repo/scripts" "$ROOT/bin" "$ROOT/sysbin" "$ROOT/systemd-bin" \
-           "$ROOT/state" "$ROOT/config" "$ROOT/home" "$ROOT/mock"
+           "$ROOT/state" "$ROOT/config" "$ROOT/home" "$ROOT/mock" "$ROOT/queue"
   cp "$REPO/scripts/conductor-watch.sh" "$ENSURE" "$ROOT/repo/scripts/"
   cp "$REPO/scripts/patrol-state-update" "$ROOT/repo/scripts/"
-  # conductor-watch の試験が見張りを止めるときの kill の形（モックの sleep）を、試験のファイルから取り出す
-  cp "$REPO/scripts/tests/conductor-watch-slots.test.sh" "$ROOT/slots.test.sh"
+  # 実運用の見張りを止める 2 つの試験（slots: 単体 PID の kill。stall: プロセスグループの kill）を
+  # 名前空間の中で実際に通すため、試験ごとの偽リポジトリに置く。各試験は REPO/scripts から
+  # 自分で写すため、写す側の scripts には試験が読むスクリプトを本物のまま置く。
+  mkdir -p "$ROOT/trepo-slots/scripts/tests" "$ROOT/trepo-stall/scripts/tests"
+  cp "$REPO/scripts/"{conductor-watch.sh,agent-team-config,patrol-state-update} "$ROOT/trepo-slots/scripts/"
+  cp "$REPO/scripts/"{conductor-watch.sh,patrol-state-update} "$ROOT/trepo-stall/scripts/"
+  cp "$REPO/scripts/tests/conductor-watch-slots.test.sh" "$ROOT/trepo-slots/scripts/tests/"
+  cp "$REPO/scripts/tests/conductor-watch-stall.test.sh" "$ROOT/trepo-stall/scripts/tests/"
 
   # 見張りが呼ぶ外部コマンドのモック。巡回の成否は問わない（動作検査はプロセスの
   # 生死だけを見る）ため、どちらも空の一覧を返すだけにする。
@@ -69,7 +76,7 @@ EOF
   chmod +x "$ROOT/repo/scripts/agent-gh" "$ROOT/bin/t3"
 
   # systemctl を除いた最小 PATH。ここに無いコマンドは名前空間内で「無い」扱いになる。
-  for t in bash sh env setsid pgrep ps mkdir cp chmod dirname python3 cat grep sed tr cut wc sleep flock kill ls head tail awk date; do
+  for t in bash sh env setsid pgrep ps mkdir cp chmod dirname python3 cat grep sed tr cut wc sleep flock kill ls head tail awk date git mktemp rm ln touch chown sha256sum rmdir; do
     p="$(command -v "$t" 2>/dev/null)" && ln -s "$p" "$ROOT/sysbin/$t"
   done
 
@@ -106,23 +113,26 @@ EOF
 set -u
 MODE="$1"
 export HOME="$ROOT/home" XDG_STATE_HOME="$ROOT/state" XDG_CONFIG_HOME="$ROOT/config" MOCK="$ROOT/mock"
-# fake repo は git 管理でなく最小 PATH に git も無いため、patrol-state の置き場は
+# fake repo は git 管理でないため、patrol-state の置き場は
 # 環境変数で明示する（他の conductor-watch テストと同じやり方）。
 export PELWAY_PATROL_STATE="$ROOT/state/pelway/patrol-state.json"
+# 見張りは既定で実運用のボード更新キュー（/tmp/pelway-board-queue）を開く。キューはマウント
+# 名前空間で分かれないため、名前空間内のすべての起動が試験用のキューを使うように固定する
+# （gh が PATH に無いため、実運用の未処理の依頼を読んだ見張りはそれを失敗扱いで消す）。
+export PELWAY_BOARD_QUEUE_DIR="$ROOT/queue"
 if [[ "$MODE" == systemd ]]; then
   export PATH="$ROOT/bin:$ROOT/systemd-bin:$ROOT/sysbin"
 else
   export PATH="$ROOT/bin:$ROOT/sysbin"
 fi
 ENS="$ROOT/repo/scripts/conductor-watch-ensure.sh"
-SLT="$ROOT/slots.test.sh"
 LOGD="$ROOT/state/pelway/conductor-watch"
 UNIT="$ROOT/config/systemd/user/pelway-conductor-watch.service"
 
-count() { pgrep -f 'conductor-watch\.sh' | wc -l | tr -d ' '; }
+count() { pgrep -fc "${1:-conductor-watch\.sh}"; }   # 見張りは巡回の中で自分と同じコマンドラインの subshell を瞬間的に作るため、数は一瞬多く数えられる
 pids()  { pgrep -f 'conductor-watch\.sh' | head -1; }
 wait0() { local i; for i in 1 2 3 4 5 6 7 8 9 10; do [[ "$(count)" == 0 ]] && return 0; sleep 0.2; done; return 1; }
-waitn() { local i; for i in {1..15}; do [[ "$(count)" == "$1" ]] && return 0; sleep 0.2; done; [[ "$(count)" == "$1" ]]; }
+waitn() { local want="$1" pat="${2:-conductor-watch\.sh}" i; for i in {1..15}; do [[ "$(count "$pat")" == "$want" ]] && return 0; sleep 0.2; done; [[ "$(count "$pat")" == "$want" ]]; }
 t() { local n="$1"; shift; if "$@"; then echo "ok   $n"; else echo "FAIL $n"; fi }
 eq() { [[ "$1" == "$2" ]]; }
 neq() { [[ "$1" != "$2" ]]; }
@@ -148,24 +158,13 @@ stop_decoys() { kill "$argpid" "$copypid" 2>/dev/null; wait "$argpid" "$copypid"
 wait_gone() {  # <pid>: 終わるのを上限付きで待つ（生き残った場合に wait で止まらないようにする）
   local i; for i in {1..25}; do kill -0 "$1" 2>/dev/null || return 0; sleep 0.2; done; return 1
 }
-t_test_kills() {  # <mode>: conductor-watch の試験が見張りを止めるときの kill の形を、ensure の管理対象の見張り（p1）の横で実行して、p1 が残ること
-  local d="$ROOT/elsewhere/tmp.d4E5f6/repo/scripts" tw i
-  mkdir -p "$d" "$MOCK/tbin"
-  # 試験のファイルから、モックの sleep（SLEEP_MAX 回目に親へ TERM を送る）をそのまま取り出す
-  awk '/^cat > "\$ROOT\/bin\/sleep" <<.EOF.$/{f=1; next} f && /^EOF$/{exit} f' "$SLT" >"$MOCK/tbin/sleep"
-  chmod +x "$MOCK/tbin/sleep"
-  t "$1: mock sleep taken from the conductor-watch test"  test -x "$MOCK/tbin/sleep"
-  t "$1: mock sleep sends TERM to its parent (as in the test file)"  has "$MOCK/tbin/sleep" 'kill -TERM "\$PPID"'
-  printf '#!/usr/bin/env bash\nwhile :; do sleep 30; done\n' >"$d/conductor-watch.sh"
-  MOCK="$MOCK" SLEEP_MAX=1 PATH="$MOCK/tbin:$PATH" bash "$d/conductor-watch.sh" >/dev/null 2>&1 &
-  tw=$!
-  wait_gone "$tw" && wait "$tw" 2>/dev/null
-  t "$1: test-shaped watch stopped by its mock sleep"   eq "$?" "143"
-  # 試験の EXIT trap と片付けの形: kill "$WPID" と kill -KILL -- -"$WPID"
-  bash "$d/conductor-watch.sh" >/dev/null 2>&1 & tw=$!
-  kill "$tw" 2>/dev/null; wait "$tw" 2>/dev/null
-  bash "$d/conductor-watch.sh" >/dev/null 2>&1 & tw=$!
-  kill -KILL -- -"$tw" 2>/dev/null; kill -KILL "$tw" 2>/dev/null; wait "$tw" 2>/dev/null
+t_test_kills() {  # <mode>: conductor-watch の実際の試験（slots: 単体 PID の kill。stall: プロセスグループの kill）を、ensure の管理対象の見張り（p1）と並行して通す。試験が通ること、試験が立てた見張りが残らないこと、p1 が残ることを確かめる
+  # 試験側の偽リポジトリは git init されるため、patrol-state の置き場は試験に既定の判定を任せる
+  env -u PELWAY_PATROL_STATE bash "$ROOT/trepo-slots/scripts/tests/conductor-watch-slots.test.sh" >"$MOCK/slots.out" 2>&1
+  t "$1: slots test passes beside managed watch"  eq "$?" "0"
+  env -u PELWAY_PATROL_STATE bash "$ROOT/trepo-stall/scripts/tests/conductor-watch-stall.test.sh" >"$MOCK/stall.out" 2>&1
+  t "$1: stall test passes beside managed watch"  eq "$?" "0"
+  t "$1: test watchers all stopped"               waitn 1
   t "$1: ensure-managed watch kept beside the tests' kills"  eq "$(kill -0 "$p1" 2>/dev/null; echo $?)" "0"
 }
 
@@ -248,7 +247,7 @@ else
   t "fallback: spaces in path: first ensure exits 0"    eq "$?" "0"
   bash "$S/conductor-watch-ensure.sh" >"$MOCK/space2.log" 2>&1
   t "fallback: spaces in path: second ensure exits 0"   eq "$?" "0"
-  t "fallback: spaces in path: one watch"               eq "$(pgrep -fc 'with space/repo/.*conductor-watch\.sh')" "1"
+  t "fallback: spaces in path: one watch"               waitn 1 'with space/repo/.*conductor-watch\.sh'
   t "fallback: spaces in path: second run adopts it"    has "$MOCK/space2.log" "すでに動いています"
   sp="$(pgrep -f 'with space/repo/.*conductor-watch\.sh' | head -1)"; kill "$sp" 2>/dev/null
   for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$sp" 2>/dev/null || break; sleep 0.2; done
