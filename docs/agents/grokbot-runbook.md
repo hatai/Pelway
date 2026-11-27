@@ -556,7 +556,7 @@ sandbox の中から置き換えられる場所なので、conductor-watch.sh �
 |---|---|
 | `watch_log_offset` | `watch.log` の既読の位置（行番号） |
 | `scheduled_task_id` | 現行の巡回の scheduled task の ID |
-| `inbox_offset` | 受信箱 `conductor-inbox.jsonl` の既読の位置（行番号）。agent-watch は、前回の起こしの後にこの値が進んでいなければ、次の起こしを送らない（Issue #555）。起こしの宛先はこの記録には置かない（sandbox から書けるため。`pelway-agent-watch --register`） |
+| `inbox_offset` | 受信箱 `conductor-inbox.jsonl` の既読の位置（行番号）。agent-watch は、前回の起こしの後にこの値が進んでいなければ、次の起こしを送らない（Issue #555）。受信箱が agent-watch の追記以外で変わった（切り詰め・置き換え）ときは、その前のこの値を起こしの基準に使わず、起こした後にこの値が書き直されるまで、既読による起こしの取り消しもしない（Issue #839）。受信箱を切り詰め・置き換えたら、この値をいまの受信箱の行数に合わせて書き直す。起こしの宛先はこの記録には置かない（sandbox から書けるため。`pelway-agent-watch --register`） |
 | `pending_thread_sends` | send 不通で未配送のままのスレッド指示の一覧。要素は `to`（宛先のスレッド）・`what`（指示の種類）・`since`（送れなくなった時刻。オフセット付きの ISO 8601） |
 | `conductor_thread_id` | 現指揮役のスレッド ID。引き継ぎ・交代・回復・初回登録で指揮役が書き込み手順の `--claim-conductor` で自分の値にする（この項目は `--claim-conductor` でだけ変わり、通常の patch での変更・削除・無効化は拒否される）。一致しないスレッドからの書き込みは適用されず `anomalies` に記録される（記録の保存が上限を超えるときは記録されない。Issue #671） |
 | `anomalies` | 書き込み手順が記録した異常の一覧（`conductor-mismatch`・`conductor-id-change-refused`・`offset-regression`・`offset-regression-refused`・`invalid-offset`・`state-unreadable`・`state-untrusted`・`owner-unverifiable`・`offset-unverifiable`。直近 100 件まで）。巡回は新しい項目を見つけたら巡回記録に残す。`anomalies` は書き込み手順だけが書く項目で、patch からの追記・消去は受け付けない |

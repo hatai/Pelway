@@ -2697,13 +2697,12 @@ fn pending_only_cycle_recounts_a_same_size_rewrite() {
 #[test]
 fn pending_only_recount_does_not_change_the_inbox() {
     // 数え直しは読むだけ: 末尾の書きかけの断片を改行で閉じず、消えた受信箱を作らない
-    // （既読は 0 のままにして、印が残る周を続ける）
+    // （最短間隔の内に留めて、印が残る周を続ける）
     let sb = Sandbox::new("wake-839-read-only");
     wake_then_defer_b_failure(&sb, 0);
     let mut text = fs::read_to_string(sb.inbox()).unwrap();
     text.push_str("{\"partial\"");
     fs::write(sb.inbox(), &text).unwrap();
-    backdate_last_wake(&sb);
     run_cooldown(&sb);
     assert_eq!(fs::read_to_string(sb.inbox()).unwrap(), text);
     fs::remove_file(sb.inbox()).unwrap();
@@ -2875,4 +2874,13 @@ fn rewrite_seen_on_a_quiet_cycle_is_kept_until_the_next_wake() {
     let out = run_cooldown(&sb);
     assert_eq!(inbox_lines(&sb), 4);
     assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+    // 指揮役が既読の位置を新しい受信箱に合わせて戻した（4 → 2）あとに、また b の failed が来た。
+    // 書き換え前の既読の位置（4）を起こしの基準に残さないので、間隔の後に起こす
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    backdate_last_wake(&sb);
+    let mut state = read_state(&sb);
+    state["threads"]["mcp:b"]["status"] = "running".into();
+    write_state(&sb, &state);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 3, "{}", stderr(&out));
 }

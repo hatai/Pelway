@@ -364,7 +364,12 @@ impl Watcher {
                 Ok(count) => {
                     // 最後に数えたときから、自分の追記の前に受信箱が変わっていた（前の受信箱で読んだ
                     // 既読の位置が、いまの受信箱の同じ中身を指すと確かめられない）
-                    if Some(count.before_write) != self.state.inbox_identity {
+                    // 一度も数えていない（この版を初めて動かした）ときは、書き換えと見なさない
+                    if self
+                        .state
+                        .inbox_identity
+                        .is_some_and(|known| known != count.before_write)
+                    {
                         self.state.inbox_rewritten = true;
                     }
                     // 書き換えを見分けてから起こしを送るまでは、周をまたいで不明として扱う
@@ -409,7 +414,9 @@ impl Watcher {
             // 変わっていれば（切り詰め・置き換え・書き換え・追記）、読むだけで上限の内で数え直す
             let inbox = self.pelway_dir.join(INBOX_FILE);
             if io::inbox_identity(&inbox).ok() != self.state.inbox_identity {
-                self.state.inbox_rewritten = true;
+                if self.state.inbox_identity.is_some() {
+                    self.state.inbox_rewritten = true;
+                }
                 self.forget_pending_line();
                 match io::count_inbox(&inbox) {
                     Ok(count) => self.remember_inbox_count(&count),
@@ -597,8 +604,25 @@ impl Watcher {
             defer(&mut self.state);
             return;
         }
+        // 受信箱の書き換えを見分けた後に起こしを送り、その後で指揮役の既読の位置が変わった
+        // （指揮役がいまの受信箱を読み、既読の位置を書き直した）なら、書き換えの印を消す。
+        // 前回の起こしの基準は書き換え前の受信箱の既読の位置なので、残さない
+        if self.state.inbox_rewritten
+            && self
+                .state
+                .rewritten_wake_offset
+                .is_some_and(|at| at != inbox_offset)
+        {
+            self.state.inbox_rewritten = false;
+            self.state.rewritten_wake_offset = None;
+            self.state.last_wake_inbox_offset = None;
+        }
         let history = WakeHistory {
-            last_offset: self.state.last_wake_inbox_offset.filter(|_| same_target),
+            // 書き換えを見分けている間は、書き換え前の既読の位置を前回の起こしの基準に使わない
+            last_offset: self
+                .state
+                .last_wake_inbox_offset
+                .filter(|_| same_target && !self.state.inbox_rewritten),
             last_at: self.state.last_wake_at.filter(|_| same_target),
             pending: self.state.wake_pending,
         };
@@ -615,8 +639,12 @@ impl Watcher {
                     self.state.last_wake_inbox_offset = Some(inbox_offset);
                     // 最短間隔は送り終えた時刻から数える（送るのにかかった時間の分、次の起こしを早めない）
                     self.state.last_wake_at = Some(now_epoch());
-                    // 指揮役はいまの受信箱を読み直すので、ここからの既読の位置はいまの受信箱に対応する
-                    self.state.inbox_rewritten = false;
+                    // 書き換えを見分けている間の起こしでは、書き換えの印を残す（指揮役は保存済みの
+                    // 既読の位置から読むので、起こしただけでは、既読の位置がいまの受信箱に対応すると
+                    // 言えない）。そのときの既読の位置を残し、指揮役がそれを書き直したら印を消す
+                    if self.state.inbox_rewritten {
+                        self.state.rewritten_wake_offset = Some(inbox_offset);
+                    }
                     self.state.last_wake_thread_id = Some(thread_id);
                     self.state.wake_pending = None;
                 }
