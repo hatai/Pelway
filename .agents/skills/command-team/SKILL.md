@@ -278,7 +278,7 @@ QA 合格コメント:
 - 必須チェックの完了待ち（ラベルを付ける前の CI 待ち、巡回での PR のベビーシット）は、ポーリングせず skill `pr-watch` の「待ち方」に従う（T3 のスレッドでは `watch_pull_request`）。マージの実行は Kodiak が行うため、指揮役がマージコマンドを叩くことはない。
 - skill `pr-watch` の `VERDICT green` は、その SHA でチェックが完走して通過していることの確認要素の 1 つ。上の「`automerge` ラベルを付ける条件」を置き換えない。
 - ブランチの最新化はルールセットが「マージ前にブランチを最新化すること」で必須とし、実行は Kodiak が行う。指揮役が `pr update-branch` で手動に取り込む操作は、手当スレッドでの衝突解消などの例外を除き原則しない。
-- 別の PR に積んだ PR は、土台の PR に `automerge` ラベルを付ける前に、後の PR の base を main に替える（`scripts/agent-gh dev pr edit <後の PR> --base main`）。base のままだと、リポジトリのブランチ自動削除で土台のブランチが消えたときに後の PR が閉じることがあり、閉じた PR は base を替えられない。
+- 別の PR に積んだ PR（後の PR）の base は、親 PR（前の PR）のマージの前には替えない（下の「分割を認めるとき」）。親 PR のマージで head ブランチが削除されると、GitHub はそのブランチを base にする open な PR の base を、親 PR の base（main）へ自動で替える。`automerge` ラベルを付ける時点で、積んだ PR の base が main であることを確かめる（base が親 PR のブランチのままだと、マージ先が main にならない）。
 - 複数の PR に `automerge` ラベルを付けてよい。Kodiak が直列に 1 本ずつマージする。ただしラベルを付ける時点で各 PR が上の条件を満たしていることを確かめる。
 - PR ができたら mergeable を確かめる（`scripts/agent-gh dev pr view <M> --json mergeable`）。`CONFLICTING` の PR には GitHub が `pull_request` の workflow を動かさず、チェックが 1 つも付かない。実装担当に「main を取り込んで衝突を解消し、verify を通す」を送る。`automerge` ラベルを付けた後に Kodiak がマージできなかったときは、runbook の「マージキュー待ちの PR」に従う。
 - マージしたら Issue から `agent:working` と `agent:devin` を外し、人間に報告する。マージの検知は notify-grokbot の `pull_request`（`merged: true`）の通知と巡回で行う。
@@ -287,7 +287,9 @@ QA 合格コメント:
 
 ### 分割を認めるとき
 
-実装担当が pr-size の超過で止まったときは、止まりのコメントに書かれた分割案・手元の head の SHA・`git diff --stat origin/main...HEAD` の出力を使い、分割案が追加行の境目できれいに分かれるかを見る。分かれるときは、分割を認める。Issue に、行頭が `<!-- split-plan -->` で始まるコメントで、PR ごとの範囲と、その PR で確かめる受け入れ条件を表にして書く。受け入れ条件は skill `write-issue` の「受け入れ条件の書き方」に従う。レビュー担当（skill `review-pr`）は、この表でそれぞれの PR を判定する。後の PR は前の PR のブランチに積ませ、前の PR のマージの前に base を main に替える（上の「マージ」の積んだ PR の項）。運用まわりの PR が pr-size を超えたときは、例外（`<!-- pr-size-exception -->`）の提案より先にこの分割を提案する。
+実装担当が pr-size の超過で止まったときは、止まりのコメントに書かれた分割案・手元の head の SHA・`git diff --stat origin/main...HEAD` の出力を使い、分割案が追加行の境目できれいに分かれるかを見る。分かれるときは、分割を認める。Issue に、行頭が `<!-- split-plan -->` で始まるコメントで、PR ごとの範囲と、その PR で確かめる受け入れ条件を表にして書く。受け入れ条件は skill `write-issue` の「受け入れ条件の書き方」に従う。レビュー担当（skill `review-pr`）は、この表でそれぞれの PR を判定する。運用まわりの PR が pr-size を超えたときは、例外（`<!-- pr-size-exception -->`）の提案より先にこの分割を提案する。
+
+後の PR は前の PR（親 PR）のブランチに積ませる。積んだ PR は base が main でないあいだ、必須チェック（`mise run verify` と `pr-size`）が走らない（`.github/workflows/verify.yml` は base が main の PR だけで動く）。base は親 PR のマージの前には替えない（上の「マージ」の積んだ PR の項）。親 PR のマージの後に実装担当が main を merge で取り込み、push の前に GitHub 上の base が main になっていることを確かめ、なっていなければ `scripts/agent-gh dev pr edit <後の PR> --base main` で替えてから push し、必須チェックが通ってからレビューを委託する（skill `implement-issue` の手順 8）。指揮役は親 PR のマージを検知して実装担当へ再開を指示し、レビュー・マージの段階で積んだ PR の base が main になっていることを確認する。base が main でない PR にはレビュースレッドを立てず、`automerge` も付けない。
 
 ### 利用上限で止まったとき
 
