@@ -108,3 +108,8 @@ must-fix への対応:
 
 nit への対応: 試験 29 を拡張（明示した <local-file> が無いとき共有と同じディレクトリの local は重ならないことを確認する試験 29b）、conductor-watch.sh の overlay 表示を別途開く判定から `effective`/`slots` 実行の stderr の applied マーカー（`<local>: overlay applied`）読み取りに変更
 push した head: 2959f974（round 8 の対応）
+
+## main 取り込み（round 9 と round 10 の間）
+
+main が 64 コミット先行していたため `origin/main` をマージ（2eb2dca6、コンフリクトなし）。`.devin/config.json` は worktree で read-only マウントのため、作業は一時 worktree で実施して push、本体側は `update-index --skip-worktree` で同ファイルを固定して追随。取り込み後の 5 試験ファイルすべて pass。マージコミットは API 署名にできないため署名なし（既知の扱い）。
+push した head: 2eb2dca6（main 取り込み）
