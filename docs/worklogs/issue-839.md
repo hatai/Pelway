@@ -83,3 +83,17 @@ round 5 のレビューは、codex が request-changes（must-fix 1 件）、cla
 5. 改善案: `docs/dev-environment.md` の「指揮役の受信箱と起こし」に、「受信箱は agent-watch が追記するだけで、ほかの書き手が切り詰め・書き換えをしない」という前提を、1 か所にまとめて書く。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 7）
+
+対象 head: baf56a5567547b3adbd2b90de14403e4d3de65dd
+
+round 6 のレビューは、codex が request-changes（must-fix 2 件）、claude が approve（`[文書のずれ]` の nit 1 件と、印の無い nit 2 件）だった。codex の must-fix 2 件と claude の `[文書のずれ]` を直した。印の無い nit 2 件（読むだけの数え直し、同一性に時刻を足すこと）も、codex の must-fix と同じ直し方で満たした。
+
+1. 詰まった箇所: `mise run verify`: 1 回目は `cooldown_counts_from_when_the_wake_was_sent` が落ちた。verify はビルドを並列に走らせるので、負荷で次の周回の起動が 2 秒の最短間隔より遅れた。送信の待ちを 8 秒、最短間隔を 4 秒に広げた。修正の前の実装（1cd1c6b4）に `scripts/red-check` で当てて、落ちることを確かめた（exit=101）。
+2. 曖昧だった文: 「同一ファイル記述子の走査前後で変更を検出した場合は、行数を不明として保留と基準を維持してください。」（codex の round 6 のレビューの must-fix 1）。同一性（デバイス・inode・大きさ・mtime・ctime）を数える前と後で取り、違えば行数を不明にした。
+3. 仮定と解釈: 既存の結合テスト `pending_only_cycles_do_not_read_the_inbox` は、権限を変えて追記できない受信箱を作っていた。権限の変更で ctime が変わり、数え直しが起きるようになったので、読むだけの数え直しで起こすことを確かめる中身に変え、`pending_only_recount_reads_an_inbox_it_cannot_append_to` に改名した。「受信箱が変わっていなければ読まない」ことを直接確かめるテストは無くなったので、PR 本文の「確かめ方を弱める変更」に書いた。
+4. 足りなかった情報・検証手段: 「受信箱が変わっていなければ読まない」ことを、外から観察する方法が無い（ファイルの時刻と中身を変えずに、読んだかどうかを見分けられない）。
+5. 改善案: `crates/pelway-agent-watch/tests/once.rs` の偽の t3 に、呼ばれた時刻を記録する仕組みを足すと、時刻に頼るテストを待ち時間の長さに頼らず書ける。
+
+使ったスキル: implement-issue
