@@ -22,7 +22,7 @@ EOF
 
 # 偽の gh。`gh token generate` はトークンを返す。それ以外は引数を CALL_LOG に追記して、次の 3 つに応じる。
 #   issue edit <N> --body-file <F>         F の中身を Issue の本文にする。FAKE_GH_EDIT_NOOP なら何も書き換えずに成功を返す。
-#                                          FAKE_GH_TRIM_NL なら末尾の改行を全部落として保存する。
+#                                          FAKE_GH_TRIM_NL なら末尾の改行を 1 つに整えて保存する（渡した本文の末尾の改行が 3 つなら 1 つ）。
 #                                          FAKE_GH_CLOBBER_BODY なら読む前に ORIG_BODY のファイルを空にする
 #   issue view <N> --json body --jq .body  今の本文を出す（本物の --jq と同じく末尾に改行を 1 つ足す）。
 #                                          FAKE_GH_DROP_COPY のときは読む前に本文の写しを消す
