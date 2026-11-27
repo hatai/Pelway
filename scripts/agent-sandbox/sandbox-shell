@@ -146,6 +146,7 @@ done
 masks=(
   "$home/.ssh" "$home/.gnupg" "$home/.docker" "$home/.kube" "$home/.aws"
   "$home/.config/gh" "$home/.config/opencode" "$home/.config/devin"
+  "$home/.config/pelway-agent-notify"
   "$home/.local/share/devin" "$home/.t3/userdata"
 )
 for m in "${masks[@]}"; do

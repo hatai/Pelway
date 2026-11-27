@@ -25,6 +25,7 @@ const READ_DENY = [
   `${HOME}/.config/devin`,
   `${HOME}/.config/fnox`,
   `${HOME}/.config/pelway-agent`,
+  `${HOME}/.config/pelway-agent-notify`,
   `${HOME}/.local/share/devin`,
   `${HOME}/.local/bin`,
   `${HOME}/.t3/userdata`,
