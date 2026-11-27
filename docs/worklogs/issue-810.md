@@ -35,3 +35,15 @@
 5. 改善案: `docs/agents/skill-helpers.md` の「テストの置き場と実行方法」に「試験は `TMPDIR` に空白を含むパスを指定しても通るように書く（呼び出しの引数を 1 行の文字列に組み立てて比べない）」を足す。
 
 使ったスキル: `implement-issue`、`write-pull-request`、`ja-text-communication`
+
+## 実装者メモ（round 4）
+
+対象 head: f434b4f6c512b69c7f9028c505d7b2bb7a180b9d
+
+1. 詰まった箇所: `scripts/agent-gh` の `issue_rewrite` のエラー文と、ファイル冒頭のコメント・`--help` の終了コード 6 の説明（round 3 の実装）: 「読み直した本文が渡した本文と違う」場合だけを書いていて、比べる材料を読めない場合も同じ 6 で返す実装と食い違っていた（Codex の `[文書のずれ]` の nit）。「読み直した本文と渡した本文の一致を確認できなかった」に揃えた。`scripts/tests/agent-gh-issue-rewrite.test.sh` の `FAKE_GH_TRIM_NL` の説明も、偽 gh の動き（末尾の改行を 1 つに整えて保存する）と食い違っていた（同 nit）。
+2. 曖昧だった文: 「有効な Approve のレビュー（複数の担当ならその全員）の nit に、行頭が `[文書のずれ]` のものが残っていれば、`pr ready` の前に直す」（skill `implement-issue` の「Approve のとき」）。Claude の nit はなしで、Codex に印の付いた nit が 2 件あったため、両方を直してから Draft を解除することにした。
+3. 仮定と解釈: この round の変更は文面だけ（コメント・ヘルプ・エラー文・試験の説明）で、終了コードと gh の呼び出しは変わらない。印の nit だけを直す round の通算 1 回目として数えた。push で head が動くため両担当の Approve は現 head に向かなくなり、差分が `scripts/agent-gh` を含むことから、レビューは指揮役のレビュースレッドでやり直しになる。
+4. 足りなかった情報・検証手段: エラー文やヘルプの文面を確かめる試験は無い（試験は終了コードと呼び出しだけを見る）。変更した文面は `scripts/agent-gh --help` の出力と、試験と同じ偽の fnox・gh で `copy_unreadable` と同じ場面を実行したときの標準エラー出力を読んで確かめた。
+5. 改善案: `.agents/skills/command-team/SKILL.md` の「レビューのラウンド」に、Approve 後の `[文書のずれ]` の修正がコメント・ヘルプ・文書だけのとき（試験と実行の経路が変わらないこと）に、再レビューの範囲をどう決めるかを書く。
+
+使ったスキル: `implement-issue`、`write-pull-request`、`ja-text-communication`
