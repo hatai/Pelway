@@ -2874,13 +2874,26 @@ fn rewrite_seen_on_a_quiet_cycle_is_kept_until_the_next_wake() {
     let out = run_cooldown(&sb);
     assert_eq!(inbox_lines(&sb), 4);
     assert_eq!(sends(&sb), 2, "{}", stderr(&out));
-    // 指揮役が既読の位置を新しい受信箱に合わせて戻した（4 → 2）あとに、また b の failed が来た。
-    // 書き換え前の既読の位置（4）を起こしの基準に残さないので、間隔の後に起こす
-    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    let b_fails_again = |sb: &Sandbox| {
+        let mut state = read_state(sb);
+        state["threads"]["mcp:b"]["status"] = "running".into();
+        write_state(sb, &state);
+    };
+    // 起こしの後、指揮役が既読の位置を書き直す前に、受信箱がもう一度書き換えられた（ほかの書き手が
+    // 1 行足した）。指揮役はその受信箱の 5 行目まで読み、また b の failed が来た。前の受信箱で
+    // 記録した既読の位置（4）との違いでは、書き換えの印を消さない
+    let text = fs::read_to_string(sb.inbox()).unwrap();
+    fs::write(sb.inbox(), format!("{text}{{\"other\":2}}\n")).unwrap();
+    sb.patrol_state(r#"{"inbox_offset":5}"#);
     backdate_last_wake(&sb);
-    let mut state = read_state(&sb);
-    state["threads"]["mcp:b"]["status"] = "running".into();
-    write_state(&sb, &state);
+    b_fails_again(&sb);
     let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 3, "{}", stderr(&out));
+    // 指揮役が既読の位置を新しい受信箱に合わせて戻した（5 → 2）あとに、また b の failed が来た。
+    // 書き換え前の既読の位置を起こしの基準に残さないので、間隔の後に起こす
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    backdate_last_wake(&sb);
+    b_fails_again(&sb);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 4, "{}", stderr(&out));
 }

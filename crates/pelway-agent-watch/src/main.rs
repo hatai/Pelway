@@ -370,7 +370,7 @@ impl Watcher {
                         .inbox_identity
                         .is_some_and(|known| known != count.before_write)
                     {
-                        self.state.inbox_rewritten = true;
+                        self.mark_inbox_rewritten();
                     }
                     // 書き換えを見分けてから起こしを送るまでは、周をまたいで不明として扱う
                     let rewritten = self.state.inbox_rewritten;
@@ -415,7 +415,7 @@ impl Watcher {
             let inbox = self.pelway_dir.join(INBOX_FILE);
             if io::inbox_identity(&inbox).ok() != self.state.inbox_identity {
                 if self.state.inbox_identity.is_some() {
-                    self.state.inbox_rewritten = true;
+                    self.mark_inbox_rewritten();
                 }
                 self.forget_pending_line();
                 match io::count_inbox(&inbox) {
@@ -673,6 +673,13 @@ impl Watcher {
                 defer(&mut self.state);
             }
         }
+    }
+
+    /// 受信箱の書き換えを見分けた。前の受信箱について残した既読の位置（`rewritten_wake_offset`）は、
+    /// いまの受信箱の既読の位置と比べられないので捨てる（次に起こしを送ったときに取り直す）。
+    fn mark_inbox_rewritten(&mut self) {
+        self.state.inbox_rewritten = true;
+        self.state.rewritten_wake_offset = None;
     }
 
     /// 起こし待ちの印の行番号を不明（最大の値）にする。印を付けた後に、自分の追記以外で受信箱が
