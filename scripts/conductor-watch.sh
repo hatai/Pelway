@@ -715,7 +715,7 @@ if os.path.isfile("agent-team.toml"):
                 # 開いた fd が通常ファイルのときだけ「重なった」と表示する
                 _applied = False
                 try:
-                    _fd = os.open("agent-team.local.toml", os.O_RDONLY | os.O_NOFOLLOW)
+                    _fd = os.open("agent-team.local.toml", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
                     try:
                         _applied = stat.S_ISREG(os.fstat(_fd).st_mode)
                     finally:

@@ -75,5 +75,16 @@ must-fix への対応:
 3. agent-team-config: local を O_NOFOLLOW で開き開いた fd が通常ファイルか確かめてから解析（確認と読み込みの間の置き換え経路を閉じる）。conductor-watch.sh の overlay 表示も同じ判定に
 4. docs: レビュー担当・モデル選定の重ねた結果の読み方を「main の承認済みの版（API 取得）を土台に本体の checkout の local を重ね、本体の checkout のスクリプトで effective を走らせる」に統一（implement-issue, command-team ×2, grokbot-runbook ×2。ブランチの toml・local・スクリプトで自己選択できない形に）。effective に <local-file> 引数を追加
 
-nit への対応: 試験 8b を worktree を cwd にして実行、ヘルプの「値を出さない」を警告・検証エラーに限定、conductor-rebuild.test.sh の skip を失敗に、worklog round 3 の項目 4 を実態どおりに
+nit への対応: 試験 8b を worktree を cwd にして実行、ヘルプの「値を出さない」を警告・検証エラーに限定、conductor-rebuild.test.sh の skip を失敗に（実際の適用は round 6 の対応で）、worklog round 3 の項目 4 を実態どおりに
 push した head: dcd6b652（round 5 の対応）
+
+## レビュー対応（round 6）
+
+対象 head: 998365ee
+レビュー: claude_review（run=round6、review 6084426321）は request-changes（must-fix 2、nit 2）。codex_review は委託環境の設定の不備で 2 回連続 failed
+
+must-fix への対応:
+1. effective の <local-file> 省略時に `<file>` と同じディレクトリ（手順では一時ディレクトリ）の local が読まれるため自己選択に戻る → 手順を「`<本体の checkout>/agent-team.local.toml` を必ず渡す」に変更（implement-issue:257。無ければ共有の値に戻る）
+2. local の O_NOFOLLOW open が O_NONBLOCK を欠き、FIFO の local で見張りの本ループが停止する → agent-team-config・conductor-watch.sh の両方に O_NONBLOCK を追加（試験 30: FIFO local が待たずに警告して重ねない）
+
+nit への対応: worktree-setup の配置を `ln -T` に（最終名がディレクトリへの差し替えでもその中に作らない）＋コメント修正。conductor-rebuild.test.sh の skip→fail は前回の commit に入っていなかったため今回適用し、round 5 の worklog 記述をその旨に修正

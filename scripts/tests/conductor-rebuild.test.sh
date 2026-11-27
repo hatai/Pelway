@@ -142,7 +142,7 @@ if git -C "$REPO" worktree add -q --detach "$FRESH_WT" HEAD 2>/dev/null; then
   check "missing toml in worktree: registers the new conductor" [ "$(cat "$FILE")" = "$NEW" ]
   git -C "$REPO" worktree remove --force "$FRESH_WT"
 else
-  echo "skip missing-toml copy checks: git worktree add failed here"
+  check "missing toml in worktree: fixture worktree created" false
 fi
 
 # worktree のパスが存在しない（写せない）ときは、旧指揮役を止める前に止まる

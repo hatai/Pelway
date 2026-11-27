@@ -460,7 +460,7 @@ def open_local(path):
     ないものは False）。開く操作自体でリンクを拒否し、開いた fd が
     通常ファイルか確かめるため、確認と読み込みの間に置き換わる経路が無い"""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return None
     except OSError:

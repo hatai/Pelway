@@ -575,6 +575,15 @@ check "29: effective with explicit local exits 0" eq "$rc" "0"
 check "29: local applied from the explicit path" bash -c "grep -qF '\"devin\": 2' '$ROOT/out'"
 rm "$ROOT/some-dir.local.toml" "$ROOT/shared29.toml"
 
+# 30: local が FIFO（ブロックする特殊ファイル）でも open が待たずに
+# 「通常ファイルでない」として重ねない
+write_case "$ROOT/l30.toml" < <(dev_case)
+mkfifo "$ROOT/agent-team.local.toml"
+timeout 10 bash "$CFG" slots dev "$ROOT/l30.toml" > "$ROOT/out" 2>"$ROOT/err"; rc=$?
+check "30: fifo local does not hang" eq "$rc" "0"
+check "30: fifo local warns" has "$ROOT/err" "通常ファイルでない"
+rm "$ROOT/agent-team.local.toml" "$ROOT/l30.toml"
+
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
   exit 1
