@@ -97,3 +97,17 @@ round 6 のレビューは、codex が request-changes（must-fix 2 件）、cla
 5. 改善案: `crates/pelway-agent-watch/tests/once.rs` の偽の t3 に、呼ばれた時刻を記録する仕組みを足すと、時刻に頼るテストを待ち時間の長さに頼らず書ける。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 8）
+
+対象 head: e3bc50ffaa4aca8f95ae8a807780ea49e28ad7c6
+
+round 7 のレビューは、codex が request-changes（must-fix 1 件、`[文書のずれ]` の nit 2 件）、claude が approve（`[文書のずれ]` の nit 2 件と、印の無い nit 1 件）だった。すべて直した。
+
+1. 詰まった箇所: `crates/pelway-agent-watch/src/main.rs`: 受信箱が書き換えられて行がずれると、印に残した行番号と既読の位置が違う中身を指す。追記の前の同一性（`InboxCount::before_write`）が最後に数えたときと違うとき、または印だけの周で同一性が変わっていたときは、印の値を不明（最大の値）にした（`forget_pending_line`）。数えている間に受信箱が変わった周の行番号も、不明として扱う。
+2. 曖昧だった文: 「保留した通知の位置と既読位置が同じ内容に対するものと確かめられる場合にだけ `AlreadyRead` で取り消してください。」（codex の round 7 のレビューの must-fix）。「確かめられる」を、印を付けたときから、自分の追記以外で受信箱が変わっていないこと（同一性が続いていること）と読んだ。
+3. 仮定と解釈: round 7 のメモの 4 で「受信箱が変わっていなければ読まない」ことを外から見分けられないと書いたのは誤りだった（claude の指摘）。状態ファイルの行数だけを書き換えておき、数え直されずにそのまま残ることで見分けられる。結合テスト `pending_only_cycle_does_not_recount_an_unchanged_inbox` を足した。
+4. 足りなかった情報・検証手段: そのテストは、この版より前の実装（`inbox_lines` が無い）に当てても、項目が無いせいで落ちるだけなので、数え直しの退行を止めることの確認にはならない。修正の前の実装に当てた確かめは行っていない。
+5. 改善案: round 4 から、受信箱が sandbox から書き換えられる場合の抜けが、毎 round 新しく見つかっている。受信箱を書き換えられる前提での守りを、どこまでこの Issue の範囲にするかを、`docs/dev-environment.md` の「指揮役の受信箱と起こし」に前提として書いておく（agent-watch だけが追記し、ほかの書き手は書き換えない、を前提にするかどうか）。
+
+使ったスキル: implement-issue
