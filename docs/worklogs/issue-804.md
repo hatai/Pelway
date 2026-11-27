@@ -127,4 +127,4 @@ must-fix への対応:
 5. 2eb2dca6 の必須チェックが lint・test 取り消し → この対応の push で対象 head の CI を通し直す（ローカルでは対象試験すべて pass。verify-run.test.sh と gateway の試験はこの環境固有の失敗で差分と無関係）
 
 nit への対応: worklog の round-8 記述を実態どおりに訂正、conductor-rebuild.test.sh に「共有設定が既にある wt への local 配置失敗で登録を保つ」試験を追加（本体の checkout が書けない環境では明示的に skip）
-
+push した head: a5bc8bac（round 10 の対応）
