@@ -185,3 +185,15 @@ out-of-scope メモ: 委託記録コメントの head は短縮 SHA だった �
 
 あわせて: agent-team-config の試験 33・34・36 を `effective` の JSON の `missing` を確かめる形に拡張
 
+## レビュー対応（round 14）
+
+対象 head: 4f6122e1
+レビュー: codex_review（run=804-review-round14-codex、review 6088484671）は request-changes（must-fix 4、nit 1）
+
+must-fix への対応:
+1. 指揮役が自分で立てるレビュー（指揮役自身の PR・外部投入）の経路が委託記録・スレッドを `missing` の確認なしに残せていた（`:340` の `effective` はモデル選択だけに使っていた）→ runbook「レビューを始める」で立てる前に `effective` の JSON `missing` を確かめ、立てようとする担当が `missing` にあるときは委託記録もスレッドも残さない決まりに（codex なら代理を振らず人に上げる）。`:340` のモデル読み出しでも同じ `missing` で起動を止める記述を追加。command-team「マージ」の codex 委託記録を後から残す経路にも同じ確認を追加（`missing` に codex・`effective` を確かめられないときは委託せず `needs-decision`）
+2. slots.json の記録が新しくても巡回後に上限が変わりうる（記録が 1/3 を示す間に開発者が上限を 1 に下げても古い上限で起動しうる）→ 比べる上限は記録の有効性に関わらず、割り当て・起動・再開の直前に `effective` の `[developers.<login>.slots]` から読む決まりに（記録の `usage` の上限は巡回時点の値として判断の根拠から外す）。`:220` の不足判定も記録を正本とする記述をやめ、判断のたびに最新の `effective` の `missing` に従う形に統一
+3. evals で PR #840・#841 ともレビュー実行の結果の受領記録が無く（command-team:246 の「結果の報告」）、`effective.json` が実際の出力と違う形だった（`agents` キー欠落・実在しない `priority.review.default`）→ threads.json にレビュースレッドの完了記録（`verdict: approve` + `run=` で委託記録の ID と結び付く受領）を追加し、`effective.json` は実際の `agent-team.toml` と local オーバーレイ（codex を `use` から外し `priority.review` を書き換えたもの）から `effective` を実行した実出力に置き換え
+4. verify.sh が行全体の部分文字列で照合していた（`--add-label=work` の等号の形が空白のパターンに当たらず、`:57` は automerge の除去も追加として数えていた）→ `action=run` の行をコマンドと終了コードに分け、コマンドはトークンに分けて照合する形に（サブコマンドは先頭の語の最初の出現で識別、`--<flag> <値>` と `--<flag>=<値>` の両方を認め、文字列値のフラグの直後は照合しない）。等号の形の違反・pass、automerge の除去、操作と無関係な文字列を含む記録のフィクスチャを追加（全 21 本）
+
+nit への対応: PR body を現在の差分・検証範囲に更新（対象 sha・変更内容に必須担当チェックと評価ケースを反映）

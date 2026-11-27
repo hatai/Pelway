@@ -1,20 +1,138 @@
 {
-  "_source": "scripts/agent-team-config effective hatai — agent-team.local.toml で developers.hatai.use から codex を外し、priority.review.high_risk を claude に書き換えた上書きを重ねた結果",
-  "missing": ["codex"],
+  "agents": {
+    "claude": {
+      "assign_label": "",
+      "effort": {
+        "option": "effort",
+        "raise": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "instance": {
+        "review": "claude_review"
+      },
+      "models": [
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5"
+      ]
+    },
+    "codex": {
+      "assign_label": "",
+      "effort": {
+        "option": "reasoningEffort",
+        "raise": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "instance": {
+        "review": "codex_review"
+      },
+      "models": [
+        "gpt-6.2-sol",
+        "gpt-6.1-terra",
+        "gpt-6-luna"
+      ]
+    },
+    "devin": {
+      "assign_label": "agent:devin",
+      "effort": {
+        "option": "thought_level",
+        "raise": [
+          "medium",
+          "high",
+          "max"
+        ]
+      },
+      "instance": {
+        "implement": "acpRegistry_devin",
+        "review": "devin_review"
+      },
+      "models": [
+        "swe-2-1-high"
+      ]
+    },
+    "opencode": {
+      "assign_label": "",
+      "effort": {
+        "option": "variant",
+        "raise": [
+          "low",
+          "default",
+          "high",
+          "max"
+        ]
+      },
+      "instance": {
+        "implement": "opencode",
+        "investigate": "opencode"
+      },
+      "models": [
+        "zai-coding-plan/glm-5.4"
+      ]
+    }
+  },
   "developers": {
     "hatai": {
-      "use": ["opencode", "devin", "claude"],
-      "slots": { "opencode": 3, "devin": 6 },
-      "review_limits": { "codex": 2, "claude": 2, "devin": 1 },
       "priority": {
-        "implement": { "default": ["opencode"], "small": ["opencode"] },
-        "investigate": { "default": ["opencode"] },
+        "implement": {
+          "ambiguous": [
+            "opencode"
+          ],
+          "harness": [
+            "devin"
+          ],
+          "normal": [
+            "devin",
+            "opencode"
+          ],
+          "small": [
+            "opencode"
+          ]
+        },
+        "investigate": {
+          "default": [
+            "opencode"
+          ]
+        },
         "review": {
-          "default": ["claude"],
-          "high_risk": ["claude"],
-          "small": ["claude"]
+          "high_risk": [
+            "claude",
+            "devin"
+          ],
+          "normal": [
+            "claude",
+            "devin"
+          ],
+          "sampling": [
+            "claude"
+          ]
         }
-      }
+      },
+      "review_limits": {
+        "claude": 1,
+        "devin": 2
+      },
+      "slots": {
+        "devin": 6,
+        "opencode": 3
+      },
+      "use": [
+        "opencode",
+        "devin",
+        "claude"
+      ]
     }
-  }
+  },
+  "missing": [
+    "codex"
+  ]
 }
