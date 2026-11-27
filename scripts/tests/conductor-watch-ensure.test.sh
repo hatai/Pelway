@@ -9,16 +9,16 @@
 # 動作検査は unshare で名前空間が作れない環境では飛ばす。
 # Issue #808: ensure はコマンドラインに scripts/conductor-watch.sh を持つプロセスをすべて「見張り」
 # に数えていたため、shellcheck の検査（スクリプトのパスを引数に並べる）や、conductor-watch の
-# 試験が一時ディレクトリに置いた写しの見張りまで kill していた。ensure がそれらを選ばないこと
-# （名前空間の中）と、逆に conductor-watch の試験が本番と同じ形の見張りを止めないこと（名前空間の外）を
-# 確かめる。
+# 試験が一時ディレクトリに置いた写しの見張りまで kill していた。名前空間の中で、ensure がそれらを
+# 選ばないこと（見張りを置き換えるのと同じ 1 回の実行で確かめる）、相対パス（`./scripts/…`）で
+# 起動した見張りや空白を含む checkout の見張りを見失わないこと、逆に conductor-watch の試験が
+# 止めるのに使う kill の形では ensure の管理対象の見張りが残ることを確かめる。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENSURE="$REPO/scripts/conductor-watch-ensure.sh"
 ROOT="$(mktemp -d)"
-prod=""   # 下の「テストが本番の見張りを止めない」で立てる、本番と同じ形のプロセス
-trap '[[ -n "$prod" ]] && kill "$prod" 2>/dev/null; rm -rf "$ROOT"' EXIT
+trap 'rm -rf "$ROOT"' EXIT
 failures=()
 
 check() {
@@ -53,6 +53,8 @@ else
            "$ROOT/state" "$ROOT/config" "$ROOT/home" "$ROOT/mock"
   cp "$REPO/scripts/conductor-watch.sh" "$ENSURE" "$ROOT/repo/scripts/"
   cp "$REPO/scripts/patrol-state-update" "$ROOT/repo/scripts/"
+  # conductor-watch の試験が見張りを止めるときの kill の形（モックの sleep）を、試験のファイルから取り出す
+  cp "$REPO/scripts/tests/conductor-watch-slots.test.sh" "$ROOT/slots.test.sh"
 
   # 見張りが呼ぶ外部コマンドのモック。巡回の成否は問わない（動作検査はプロセスの
   # 生死だけを見る）ため、どちらも空の一覧を返すだけにする。
@@ -67,7 +69,7 @@ EOF
   chmod +x "$ROOT/repo/scripts/agent-gh" "$ROOT/bin/t3"
 
   # systemctl を除いた最小 PATH。ここに無いコマンドは名前空間内で「無い」扱いになる。
-  for t in bash sh env setsid pgrep ps mkdir dirname python3 cat grep sed tr cut wc sleep flock kill ls head tail awk date; do
+  for t in bash sh env setsid pgrep ps mkdir cp chmod dirname python3 cat grep sed tr cut wc sleep flock kill ls head tail awk date; do
     p="$(command -v "$t" 2>/dev/null)" && ln -s "$p" "$ROOT/sysbin/$t"
   done
 
@@ -113,6 +115,7 @@ else
   export PATH="$ROOT/bin:$ROOT/sysbin"
 fi
 ENS="$ROOT/repo/scripts/conductor-watch-ensure.sh"
+SLT="$ROOT/slots.test.sh"
 LOGD="$ROOT/state/pelway/conductor-watch"
 UNIT="$ROOT/config/systemd/user/pelway-conductor-watch.service"
 
@@ -142,6 +145,29 @@ t_decoys() {  # <mode>: どちらも生きていること
   t "$1: out-of-repo watch copy kept"  eq "$(kill -0 "$copypid" 2>/dev/null; echo $?)" "0"
 }
 stop_decoys() { kill "$argpid" "$copypid" 2>/dev/null; wait "$argpid" "$copypid" 2>/dev/null; argpid=""; copypid=""; }
+wait_gone() {  # <pid>: 終わるのを上限付きで待つ（生き残った場合に wait で止まらないようにする）
+  local i; for i in {1..25}; do kill -0 "$1" 2>/dev/null || return 0; sleep 0.2; done; return 1
+}
+t_test_kills() {  # <mode>: conductor-watch の試験が見張りを止めるときの kill の形を、ensure の管理対象の見張り（p1）の横で実行して、p1 が残ること
+  local d="$ROOT/elsewhere/tmp.d4E5f6/repo/scripts" tw i
+  mkdir -p "$d" "$MOCK/tbin"
+  # 試験のファイルから、モックの sleep（SLEEP_MAX 回目に親へ TERM を送る）をそのまま取り出す
+  awk '/^cat > "\$ROOT\/bin\/sleep" <<.EOF.$/{f=1; next} f && /^EOF$/{exit} f' "$SLT" >"$MOCK/tbin/sleep"
+  chmod +x "$MOCK/tbin/sleep"
+  t "$1: mock sleep taken from the conductor-watch test"  test -x "$MOCK/tbin/sleep"
+  t "$1: mock sleep sends TERM to its parent (as in the test file)"  has "$MOCK/tbin/sleep" 'kill -TERM "\$PPID"'
+  printf '#!/usr/bin/env bash\nwhile :; do sleep 30; done\n' >"$d/conductor-watch.sh"
+  MOCK="$MOCK" SLEEP_MAX=1 PATH="$MOCK/tbin:$PATH" bash "$d/conductor-watch.sh" >/dev/null 2>&1 &
+  tw=$!
+  wait_gone "$tw" && wait "$tw" 2>/dev/null
+  t "$1: test-shaped watch stopped by its mock sleep"   eq "$?" "143"
+  # 試験の EXIT trap と片付けの形: kill "$WPID" と kill -KILL -- -"$WPID"
+  bash "$d/conductor-watch.sh" >/dev/null 2>&1 & tw=$!
+  kill "$tw" 2>/dev/null; wait "$tw" 2>/dev/null
+  bash "$d/conductor-watch.sh" >/dev/null 2>&1 & tw=$!
+  kill -KILL -- -"$tw" 2>/dev/null; kill -KILL "$tw" 2>/dev/null; wait "$tw" 2>/dev/null
+  t "$1: ensure-managed watch kept beside the tests' kills"  eq "$(kill -0 "$p1" 2>/dev/null; echo $?)" "0"
+}
 
 if [[ "$MODE" == systemd ]]; then
   bash "$ENS" >"$MOCK/out.log" 2>&1
@@ -154,6 +180,8 @@ if [[ "$MODE" == systemd ]]; then
   p1="$(pids)"
   bash "$ENS" >>"$MOCK/out.log" 2>&1
   t "systemd: second ensure keeps 1"     waitn 1
+  t_test_kills systemd
+  t "systemd: count back to 1 after test kills"  waitn 1
   # unit 外で動く見張りは、kill しても復旧しない形のため unit に置き換える
   setsid -f bash "$ROOT/repo/scripts/conductor-watch.sh" >/dev/null 2>&1
   waitn 2
@@ -181,15 +209,18 @@ else
   t "fallback: second ensure keeps 1"    waitn 1
   bash "$ENS" >>"$MOCK/out.log" 2>&1
   t "fallback: third ensure keeps 1"     waitn 1
+  t_test_kills fallback
+  t "fallback: count back to 1 after test kills"  waitn 1
   # セッションを切り離していない見張り（nohup & 相当）は切り離した形に置き換える。
-  # 相対パスで起動した形で確かめる（ensure は見張しのスクリプトを、起動したときの cwd から解決する）。
-  (cd "$ROOT/repo" && exec bash scripts/conductor-watch.sh) >/dev/null 2>&1 &
+  # `./scripts/…` の相対パスで起動した形で確かめる（見張りは起動してすぐリポジトリのルートへ cd する。
+  # ensure は見張りのスクリプトを、その cd のあとの cwd から求める）。
+  (cd "$ROOT/repo" && exec bash ./scripts/conductor-watch.sh) >/dev/null 2>&1 &
   fragile=$!
   waitn 2
   t "fallback: fragile watch present"    waitn 2
   start_decoys
   bash "$ENS" >>"$MOCK/out.log" 2>&1
-  wait "$fragile" 2>/dev/null
+  wait_gone "$fragile" && wait "$fragile" 2>/dev/null   # 置き換わらなかった場合に試験が止まらないようにする
   t "fallback: fragile watch replaced"   eq "$(kill -0 "$fragile" 2>/dev/null; echo $?)" "1"
   t "fallback: leader watch kept"        eq "$(kill -0 "$p1" 2>/dev/null; echo $?)" "0"
   t_decoys fallback
@@ -209,6 +240,18 @@ else
   t "fallback: restarted pid differs"    neq "$p2" "$p1"
   t "fallback: watch has own session"    eq "$(ps -o sid= -p "$p2" | tr -d ' ')" "$p2"
   t "fallback: log file exists"          test -f "$LOGD/watch.log"
+  # 空白を含む checkout: 連続して実行しても、ensure は自分が起動した見張りを見失わず 1 本のまま
+  # （Issue #808。引数は /proc の NUL 区切りで読み、パスは物理パスで比べる）
+  S="$ROOT/with space/repo/scripts"; mkdir -p "$S"
+  cp "$ROOT/repo/scripts/"{conductor-watch.sh,agent-gh,patrol-state-update} "$S/"; cp "$ENS" "$S/conductor-watch-ensure.sh"
+  bash "$S/conductor-watch-ensure.sh" >"$MOCK/space1.log" 2>&1
+  t "fallback: spaces in path: first ensure exits 0"    eq "$?" "0"
+  bash "$S/conductor-watch-ensure.sh" >"$MOCK/space2.log" 2>&1
+  t "fallback: spaces in path: second ensure exits 0"   eq "$?" "0"
+  t "fallback: spaces in path: one watch"               eq "$(pgrep -fc 'with space/repo/.*conductor-watch\.sh')" "1"
+  t "fallback: spaces in path: second run adopts it"    has "$MOCK/space2.log" "すでに動いています"
+  sp="$(pgrep -f 'with space/repo/.*conductor-watch\.sh' | head -1)"; kill "$sp" 2>/dev/null
+  for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$sp" 2>/dev/null || break; sleep 0.2; done
 fi
 EOF
 
@@ -222,22 +265,6 @@ EOF
     fi
   done
 fi
-
-# --- テストが本番の見張りを止めないこと（名前空間の外） ---
-# 本番の見張りと同じ形（<リポジトリ>/scripts/conductor-watch.sh をセッションを切り離して起動した
-# プロセス）を 1 つ立て、conductor-watch の試験を 1 本その横で通りで動かしても残ることを確かめる
-# （Issue #808）。中身は sleep だけなので GitHub・T3 には触れない。5 分で自分で終わる（この試験が
-# kill されても残らない）。横で走らせる試験の成否はここでは問わない（script-test が別に判定する）。
-P="$ROOT/prod/repo/scripts"
-mkdir -p "$P"
-printf '#!/usr/bin/env bash\nsleep 300\n' >"$P/conductor-watch.sh"
-setsid bash "$P/conductor-watch.sh" >/dev/null 2>&1 </dev/null &
-prod=$!
-check "unit-shaped watch is running"          kill -0 "$prod"
-bash "$REPO/scripts/tests/conductor-watch-slots.test.sh" >"$ROOT/inner.out" 2>&1
-check "conductor-watch test ran beside it"    grep -qE '^(all passed|[0-9]+ failed)$' "$ROOT/inner.out"
-check "unit-shaped watch survives the test"   kill -0 "$prod"
-kill "$prod" 2>/dev/null; wait "$prod" 2>/dev/null; prod=""
 
 if ((${#failures[@]})); then
   printf '\n%d failure(s): %s\n' "${#failures[@]}" "${failures[*]}"

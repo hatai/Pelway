@@ -29,27 +29,37 @@ command -v pgrep >/dev/null 2>&1 || { echo "conductor-watch-ensure: pgrep があ
 
 # このリポジトリの checkout: このスクリプトの置き場所と、git が読めるときは主 checkout と各 worktree。
 # 置き換えの対象にする「見張り」は、その中の scripts/conductor-watch.sh を動かすプロセスだけ。
-REPO_ROOTS=("$(cd "$HERE/.." && pwd)")
+# パスは symlink や `.`・`..` を解決した物理パスで揃える。
+REPO_ROOTS=("$(cd -P "$HERE/.." && pwd)")
 if command -v git >/dev/null 2>&1; then
   while IFS= read -r line; do
-    [[ "$line" == "worktree "* && -d "${line#worktree }" ]] && REPO_ROOTS+=("${line#worktree }")
+    [[ "$line" == "worktree "* ]] || continue
+    r="$(cd -P "${line#worktree }" 2>/dev/null && pwd)" && REPO_ROOTS+=("$r")
   done < <(git -C "$HERE" worktree list --porcelain 2>/dev/null || true)
 fi
 
-# 見張りは、コマンドラインが「<bash のパス> <このリポジトリの scripts>/conductor-watch.sh」の 2 つだけの
-# プロセス。pgrep -f はコマンドライン全体への部分一致なので、広いパターンで選ぶと、このスクリプトの
+# 見張りは、コマンドラインが「<bash のパス> <…>/scripts/conductor-watch.sh」の 2 つだけのプロセス。
+# pgrep -f はコマンドライン全体への部分一致なので、広いパターンで選ぶと、このスクリプトの
 # パスを引数に並べるだけの別の仕事（shellcheck の検査など）や、試験が一時ディレクトリに置いた写しまで
-# 「見張り」に数えて kill してしまう（Issue #808）。相対パスで起動された見張りは、見張しが自分で
-# cd したあとの cwd（リポジトリのルート）から解決する。
+# 「見張り」に数えて kill してしまう（Issue #808）。pgrep は候補を見つけるためだけに使い、
+# コマンドラインは /proc の NUL 区切りで読み直して、引数がスクリプト 1 つのものだけを残す
+# （空白を含む checkout も、引数を取り違えずに扱える）。スクリプトのパスは、親ディレクトリを
+# cd -P で解決した物理パスで checkout と比べる。相対パスで起動された見張りは、起動してすぐ
+# リポジトリのルートへ cd するため（conductor-watch.sh）、そのあとの cwd にある
+# scripts/conductor-watch.sh とみなす。
 # ensure 自身（conductor-watch-ensure.sh）はパターンに一致しないが、呼び出し方によっては
 # 自分や直近の親が紛れ込む可能性があるため除いて数える。
 watch_pids() {
-  local p r script
-  for p in $(pgrep -f '^[^ ]*bash ([^ ]*/)?scripts/conductor-watch\.sh$' | grep -vx -e "$$" -e "${PPID:-0}" || true); do
-    { IFS= read -r -d '' _ && IFS= read -r -d '' script; } <"/proc/$p/cmdline" 2>/dev/null || continue
-    [[ "$script" == /* ]] || script="$(cd -P "/proc/$p/cwd" 2>/dev/null && pwd)/$script"
+  local p r script real
+  for p in $(pgrep -f '^([^ ]*/)?(ba)?sh (.*[/])?scripts/conductor-watch\.sh$' | grep -vx -e "$$" -e "${PPID:-0}" || true); do
+    { IFS= read -r -d '' _ && IFS= read -r -d '' script && ! IFS= read -r -d ''; } <"/proc/$p/cmdline" 2>/dev/null || continue
+    if [[ "$script" == /* ]]; then
+      real="$(cd -P "${script%/*}" 2>/dev/null && pwd)/${script##*/}" || continue
+    else
+      real="$(cd -P "/proc/$p/cwd" 2>/dev/null && pwd)/scripts/conductor-watch.sh" || continue
+    fi
     for r in "${REPO_ROOTS[@]}"; do
-      [[ "$script" == "$r"/scripts/conductor-watch.sh ]] && { echo "$p"; break; }
+      [[ "$real" == "$r/scripts/conductor-watch.sh" ]] && { echo "$p"; break; }
     done
   done
 }
