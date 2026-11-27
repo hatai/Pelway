@@ -84,8 +84,8 @@ eq() { [[ "$1" == "$2" ]]; }
 has() { grep -q -- "$2" "$1"; }
 has_all() { local f="$1"; shift; local w; for w in "$@"; do grep -q -- "$w" "$f" || return 1; done; }
 no_nonascii() { ! LC_ALL=C grep -q '[^[:space:][:print:]]' "$1"; }
-# fails_quietly <終了コード>: 0 でなく、PATCH を送っていない
-fails_quietly() { (( $1 != 0 )) && [[ "$(patches)" == 0 ]]; }
+# fails_quietly <終了コード>: 0 でなく、PATCH を送っていない。GitHub 側の本文も置いたまま
+fails_quietly() { (( $1 != 0 )) && [[ "$(patches)" == 0 ]] && cmp -s "$MOCK/body" "$ROOT/given"; }
 # bad_args [args...]: 終了コード 2 で、agent-gh を呼ばない
 bad_args() { local rc=0; upd "$@" || rc=$?; [[ "$rc" == 2 && ! -s "$MOCK/calls.log" ]]; }
 # put_body: 標準入力の本文を GitHub 側に置き、呼び出しの記録を空にする。期待値の元として $ROOT/given にも残す
@@ -100,7 +100,7 @@ expect_ok() { local pr="$1" name="$2"; shift 2; verify_on "$pr"; check "$name" o
 ok_as() { (( rc == 0 )) && [[ "$(patches)" == 1 ]] && cmp -s "$MOCK/body" <(expected_body "$@"); }
 # expect_fail <PR 番号> <名前> <stderr にあるべき文字列...>: 実行して、0 以外で PATCH が無く、stderr にその文字列がある
 expect_fail() { local pr="$1" name="$2"; shift 2; verify_on "$pr"; check "$name" fails_with "$@"; }
-fails_with() { (( rc != 0 )) && [[ "$(patches)" == 0 ]] && has_all "$ROOT/err" "$@"; }
+fails_with() { (( rc != 0 )) && [[ "$(patches)" == 0 ]] && cmp -s "$MOCK/body" "$ROOT/given" && has_all "$ROOT/err" "$@"; }
 
 OLD_HEAD=2222222222222222222222222222222222222222
 OLD_VER=3333333333333333333333333333333333333333
