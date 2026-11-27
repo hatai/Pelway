@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/command-team/SKILL.md` の「レビュー担当と effort」に「保留以外の理由（利用上限など）で担当が使えないときの扱い」を書く。割り当ての記録が古いと、実装担当が代用してよいかを判断する材料が無い。
 
 使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/mutation-testing`（手動の変異 17 種の生き残りの解釈に「What Results Mean」。差分がミューテーションテスト対象の crate に触らないため `mise run mutants:diff` は対象外）
+
+## 実装者メモ（round 3）
+
+対象 head: ff6d2393853ca6e51a2a510da8b236266ca69086
+
+1. 詰まった箇所: 手順 8〜9: head 15f9f2fc のレビューで判定が割れた（Claude が approve、Codex が request-changes の must-fix 3 件）。Issue にそれぞれの要点をコメントし、修正側の must-fix を直す round にした。
+2. 曖昧だった文: 「書き込み直前に本文と head を照合し、変わっていれば止めてください。API で照合と更新を一体にできない場合は、同時編集を避ける手順と残る競合の範囲を明記してください。」（Codex のレビュー run 7206801692 の must-fix）— この API が条件付き更新を受け付けるかは、どこにも書き方が無い。
+3. 仮定と解釈: PR #840 に `If-Match` を付けた PATCH（本文は同じ内容）を試すと `HTTP 400`（`Conditional request headers are not allowed in unsafe requests unless supported by the endpoint`）が返ったため、照合と更新は一体にできないと判断した。書き込みの直前にもう一度読んで本文と head を照合し、書き込みの応答の head と本文も確かめる形にした。残る競合（読み直しから書き込みまでの間に重なった本文の編集は上書きされる）を道具の説明と skill implement-issue の手順 7 に書いた。「Markdown のコードの文脈」は、フェンス付きコードブロックの中を数えないことと、インラインコードの中の `<!--`・`-->` を注釈の記号にしないことと解した（sha を書く形がインラインコードのため、インラインコードの中身は数える）。Claude の印の無い nit（閉じ忘れの注釈の試験が、見出しの行ごと消しているため弱い）は、同じ処理を書き直す中で試験を強くした。
+4. 足りなかった情報・検証手段: 手動の変異 26 種がすべて試験で倒せることを確かめた。最初は「書き込みの後に GitHub が返した本文を確かめない」と「注釈の中のインラインコードを空白に替えない」の 2 種が生き残ったので、試験を足した。`mise run verify` は round 3 でも落ちるのが同じ 2 本だけ（一過性の失敗は無し）だった。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 8 に「担当が使えるかは、割り当ての記録だけでなく `orchestrator_capabilities` の `canRunChildTask` と `constraints` でも確かめる。割り当ての記録の利用上限が古いことがあり、使えない担当は `Provider instance is disabled.` と出る」を足す。
+
+使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/mutation-testing`（手動の変異 26 種の生き残りの解釈に「What Results Mean」）
