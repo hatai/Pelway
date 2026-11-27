@@ -226,7 +226,7 @@ check "default path is state dir: ok=true" test "$(jqv 'd["ok"]')" = "True"
 # 運用で使う公開先はホストだけが更新できる場所（sandbox から読み取り専用）に限る。
 # この検査は PELWAY_BOARD_SNAPSHOT_ALLOW_WRITABLE を付けずに行う。
 write_ok_snapshot $((NOW - 60))
-ALLOW_WRITABLE= run_read
+ALLOW_WRITABLE='' run_read
 check "writable file location: exit nonzero" test "$rc" -ne 0
 check "writable file location: reason is broken" test "$(jqv 'd["reason"]')" = "broken"
 check "writable file location: detail is writable-location" test "$(jqv 'd["detail"]')" = "writable-location"
@@ -235,7 +235,7 @@ check "writable file location: items not exposed" test "$(jqv '"items" in d')" =
 # ファイル自体を書き込み不可にしても、親ディレクトリが書き込み可なら拒否する
 # （親で置き換えられるため）
 chmod 444 "$SNAP"
-ALLOW_WRITABLE= run_read
+ALLOW_WRITABLE='' run_read
 check "writable parent dir: detail is writable-location" test "$(jqv 'd["detail"]')" = "writable-location"
 chmod 644 "$SNAP"
 
@@ -245,7 +245,7 @@ chmod 644 "$SNAP"
 mkdir -p "$ROOT/chain/pelway/conductor-watch"
 cp "$SNAP" "$ROOT/chain/pelway/conductor-watch/board-snapshot.json"
 chmod 555 "$ROOT/chain/pelway/conductor-watch"
-SNAP="$ROOT/chain/pelway/conductor-watch/board-snapshot.json" ALLOW_WRITABLE= run_read
+SNAP="$ROOT/chain/pelway/conductor-watch/board-snapshot.json" ALLOW_WRITABLE='' run_read
 check "writable grandparent: detail is writable-location" test "$(jqv 'd["detail"]')" = "writable-location"
 chmod 755 "$ROOT/chain/pelway/conductor-watch"  # trap の rm が片付けられるように戻す
 
