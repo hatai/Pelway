@@ -65,13 +65,14 @@ Issue #836。microsandbox は導入せず、公式リポジトリー（`superrad
 ### 手順の概略
 
 1. 試行専用のディレクトリー `<MSB_TRIAL>`（例: `~/.microsandbox-trial`）を作り、GitHub Releases から手で導入します。`install.sh` は使いません。このスクリプトは、保存先を `MSB_HOME` で変えられても、既存の `~/.local/bin/msb`・`~/.local/bin/microsandbox` のシンボリックリンクを新しい導入に付け替え、リンクを作らない選択肢がありません [install-sh]。手順は `install.sh` の `install` 相当の部分だけを写します。`<版>` のリリースから `microsandbox-linux-x86_64.tar.gz` と `checksums.sha256` を取得し、`sha256sum -c` で検証します。展開して `msb` を `<MSB_TRIAL>/bin/msb` に `install -m 755` で置き、`<MSB_TRIAL>/bin/microsandbox` を `msb` へのシンボリックリンクにします。`libkrunfw.so.<版>` を `<MSB_TRIAL>/lib/` に置き、`libkrunfw.so.<ABI>` と `libkrunfw.so` のシンボリックリンクを張ります [install-sh]。`<MSB_TRIAL>` は `chmod 700` にします（umask が 002 だと保存先が group-writable になり、v0.7.12 以降はそのディレクトリーを保存先として拒否されます）[issue-2003]。sudo は不要で、シェルの起動ファイルは書き換えません。
-   以降の手順で `msb` と書くときは、`<MSB_TRIAL>/bin/msb` に `MSB_HOME=<MSB_TRIAL>` を前置して呼ぶものを指します（試行の間、シェルで `export MSB_HOME=<MSB_TRIAL>` しておくのと同じです）[versions-doc]。microsandbox の保存先は、空でない `MSB_HOME`、未設定なら `~/.microsandbox` の順に決まります [resolve-home]。`MSB_HOME` を引き継がないシェルでフルパスで呼ぶと、既定の `~/.microsandbox` に書き込みます。
+   試行の必須設定として `<MSB_TRIAL>/config.json` に `{"allowed_backends": ["local"]}` を書きます。`MSB_HOME` が切り替えるのは保存先だけで、CLI の実行先（ローカルか microsandbox のクラウドか）は別に決まります。実行先は明示の `--local`・`--remote`、managed `active_profile`、`MSB_BACKEND`、`MSB_PROFILE`、保存済み `active_profile`、ローカル実行 の順で選ばれるため、クラウド利用時の環境設定と有効な資格情報が残るシェルではリモートが選ばれえます [cloud-connect]。`allowed_backends: ["local"]` はリモートでの実行自体を拒否しますが、実行中の接続は切り替えないため、実行先の固定は両方で行います（設定による拒否と、`--local` の明示）。
+   以降の手順で `msb` と書くときは、`<MSB_TRIAL>/bin/msb` に `MSB_HOME=<MSB_TRIAL>` を前置し、さらにグローバルフラグの `--local` を付けて呼ぶものを指します（例: `MSB_HOME=<MSB_TRIAL> <MSB_TRIAL>/bin/msb --local ps -a`）[versions-doc]。microsandbox の保存先は、空でない `MSB_HOME`、未設定なら `~/.microsandbox` の順に決まります [resolve-home]。`MSB_HOME` を引き継がないシェルでフルパスで呼ぶと、既定の `~/.microsandbox` に書き込みます。
 2. `sudo usermod -aG kvm hatai` で `kvm` グループに追加します。反映にはログインし直しが要ります [linux-trouble]。WSL ではディストロの再起動（`wsl --shutdown`）も要る可能性があります。
-3. `msb doctor` で `/dev/kvm` の読み書きを確認します [linux-trouble]。
+3. `msb doctor` で `/dev/kvm` の読み書きを確認します [linux-trouble]。`msb context` で CLI の実行先がローカルであることを確かめます（`msb context` はコマンドがどこで動くかを表示します）[cloud-connect]。リモートを向いていたら手順を進めず、環境設定と資格情報が残らないシェルでやり直します。
 4. `msb pull alpine` でイメージを取得します（Docker Hub などの OCI レジストリへの通信）[image-cmd]。
 5. 資格情報を渡さずに確認します（下の (a)〜(d)）。
 6. 試験用のリポジトリと試験専用の資格情報で、git の操作・`agent-gh`・エージェントの起動を確認します（下の (e)〜(g)）。
-7. 片付けます。`msb ps -a` で残っている sandbox を確かめ、あれば `msb rm --force <名前>` で消します。`msb df --verbose` で項目ごとの名前とパスを確認します（引数なしの `msb df` は種類別の集計だけで、試行で作った項目だけかは分かりません）[storage-df]。`<MSB_TRIAL>` の実体（`realpath`）と `ls -la` の中身が試行で作ったものだけであることを確認してから、`rm -rf -- <MSB_TRIAL>` を実行します。`msb self uninstall --yes` は使いません。このコマンドは保存先のディレクトリー全体の削除に加えて、`~/.local/bin` のコマンドリンクの削除と、ホストのシェル設定の古い記述の整理を行い、削除対象は実行ファイルの場所ではなく実行時の `MSB_HOME` で決まるためです [self-uninstall] [resolve-home]。`sudo gpasswd -d hatai kvm` でグループから外します。
+7. 片付けます。`msb ps -a` の一覧が試行で作った sandbox だけであることを確かめ、試行のものだけに `msb rm --force <名前>` で消します（実行先の固定は手順 1 と同じで、`msb ps`・`msb rm` は選択中の実行先に届くため、一覧に試行外の VM が出るときは何も消さず止めます）[cloud-connect]。`msb df --verbose` で項目ごとの名前とパスを確認します（引数なしの `msb df` は種類別の集計だけで、試行で作った項目だけかは分かりません）[storage-df]。`<MSB_TRIAL>` の実体（`realpath`）と `ls -la` の中身が試行で作ったものだけであることを確認してから、`rm -rf -- <MSB_TRIAL>` を実行します。`msb self uninstall --yes` は使いません。このコマンドは保存先のディレクトリー全体の削除に加えて、`~/.local/bin` のコマンドリンクの削除と、ホストのシェル設定の古い記述の整理を行い、削除対象は実行ファイルの場所ではなく実行時の `MSB_HOME` で決まるためです [self-uninstall] [resolve-home]。`sudo gpasswd -d hatai kvm` でグループから外します。
 
 ### hatai に頼む許可の一覧
 
@@ -81,14 +82,14 @@ Issue #836。microsandbox は導入せず、公式リポジトリー（`superrad
 | 2 | **`kvm` グループへの追加** | 上の 2。`sudo usermod -aG kvm hatai` と、反映のための再ログイン（WSL の再起動を含みうる） |
 | 3 | **イメージの取得などの外部通信** | 上の 4。Docker Hub などの OCI レジストリへの通信（検証 (a) の `msb run alpine` による取得を含む）。独自イメージを作る場合は、ビルドツールの導入とその通信 |
 | 4 | **試す範囲** | 本番の T3 スレッドでは使わない。リポジトリーは試験専用のクローン、保存先は試行専用のディレクトリーを使う。本番の資格情報（`~/.config/pelway-agent`・`~/.config/fnox`）は VM に渡さない。試験専用の資格情報は、置き場所だけでなく中身でも本番と別にする: GitHub は試験用のリポジトリにだけインストールした別の GitHub App の鍵を使い、pelway-dev・pelway-review の鍵は試験用の fnox 設定にも入れない（App の秘密鍵はその App の全インストール先のトークンを発行できるため、別の age 鍵で暗号化しただけの設定は試験専用とみなさない。`scripts/agent-gh` と `scripts/setup/agent-accounts.sh`）。モデルのキーは試行のために発行し、終わったら失効させる。(f) の検証は、T3 の接続の資格情報を VM に渡さず、本番の T3 の acpRegistry も変えない形に限る。`install.sh` と `msb self uninstall` は使わない |
-| 5 | **サインイン・統計送信の扱い** | 不要です。ローカル利用にアカウントは要らず、統計送信も見つかっていません。managed cloud を使わない場合は、`allowed_backends` に `["local"]` を設定して固定できます [configuration] |
-| 6 | **片付けの手順** | 上の 7。試行専用のディレクトリーだけを削除する。`msb self uninstall` は使わない（コマンドリンクとシェル設定に触れ、削除対象が実行時の `MSB_HOME` で決まるため）。`sudo gpasswd -d hatai kvm` も含みます |
+| 5 | **サインイン・統計送信の扱い** | 不要です。ローカル利用にアカウントは要らず、統計送信も見つかっていません。試行では `allowed_backends` に `["local"]` を必須設定とし、実行先を選べるコマンドには `--local` を付けて、リモート（microsandbox のクラウド）での実行を拒否します [configuration] [cloud-connect] |
+| 6 | **片付けの手順** | 上の 7。削除対象は試行で作成した VM と試行専用のディレクトリーに限る（一覧に試行外の VM が出るときは何も消さない）。`msb self uninstall` は使わない（コマンドリンクとシェル設定に触れ、削除対象が実行時の `MSB_HOME` で決まるため）。`sudo gpasswd -d hatai kvm` も含みます |
 
 ### 採否の判定材料にする検証
 
 - (a) WSL2 の上で microVM が起動するか（`msb doctor`、`msb run alpine`）。`msb run` は、イメージが保存先に無ければレジストリから取得します [images-overview]
 - (b) bind mount 上の挙動。ELF の `execve`（#2121）、symlink の作り替え（#2063）、実行ビット（#742）。試したあとホスト側の `git status` が汚れていないか
-- (c) 試験専用のクローン（既存のリポジトリーの共有 git dir を使わない、独立した clone）に `git config extensions.worktreeConfig true` を設定し、その中で worktree を作ります。worktree と共有 git dir をホストと同じ絶対パスでマウントし、`ro` の重ねを確かめます。エージェントを起動する前に、共有 git dir の `config`・`config.worktree`・`hooks/` と、worktree で `git rev-parse --git-path config.worktree` が示すファイルへの書き込みが拒否されることを確認します。`extensions.worktreeConfig` を有効にすると、Git は worktree 固有の `worktrees/<id>/config.worktree`（共有 git dir の下）を読むため、一覧の `config.worktree` だけでは保護を確かめられません [git-worktree]。現行の bwrap が守っている対象と、worktree 固有の設定ファイルです。拒否されなければ、そこで止めて残りの検証はしません
+- (c) 試験専用のクローン（既存のリポジトリーの共有 git dir を使わない、独立した clone）に `git config extensions.worktreeConfig true` を設定し、その中で worktree を作ります。試験用クローンの両方の worktree で `git config --worktree` に無害な設定（例: `git config --worktree msb.trial true`）を保存し、`config.worktree` の実体を作ります。`git worktree add` は元の worktree に `config.worktree` がなければコピー先のファイルを作らず、`git rev-parse --git-path config.worktree` が返すパスにも実体がないままでは、`ro` で重ねる検査対象ができないためです [git-worktree]。worktree と共有 git dir をホストと同じ絶対パスでマウントし、`ro` の重ねを確かめます。エージェントを起動する前に、ゲストから worktree 固有の `config.worktree` を読めることを確かめてから、共有 git dir の `config`・`config.worktree`・`hooks/` と `config.worktree` への書き込みが拒否されることを確認します。`extensions.worktreeConfig` を有効にすると、Git は worktree 固有の `worktrees/<id>/config.worktree`（共有 git dir の下）を読むため、一覧の `config.worktree` だけでは保護を確かめられません [git-worktree]。現行の bwrap が守っている対象と、worktree 固有の設定ファイルです。拒否されなければ、そこで止めて残りの検証はしません
 - (d) 既定のネットワークで crates.io・GitHub・一般のサイトに届くか。T3 の MCP サーバーへの到達経路（`host` の許可、`--vsock`）は成り立つか
 - (e) (c) が通った後に、試験用のリポジトリに対して `git status`・`git commit`・`scripts/agent-gh dev git push` と `agent-gh-resign` が通るか。資格情報は試験専用のもの（`PELWAY_AGENT_FNOX_CONFIG` で指す試験用の fnox 設定と鍵）を使い、本番の `~/.config/pelway-agent` と `~/.config/fnox` は使いません。試験用の fnox 設定には、試験用のリポジトリにだけインストールした別の GitHub App の秘密鍵を入れます。pelway-dev・pelway-review の鍵は入れません（App の鍵は全インストール先のトークンを発行できるため、pelway-dev の鍵を別の age 鍵で暗号化した設定では VM 内のコードが hatai/Pelway への書き込みトークンを得られます）
 - (f) `msb exec <name> --stream -- <command>` が VM 内のコマンドの stdio をホスト側に中継できるか。T3 の acpRegistry の `commandPath` に置く形（`msb exec <name> --stream -- opencode acp` を呼ぶラッパー）を想定した確認ですが、本番の T3 の設定は変えず、ACP のクライアントを直接呼んで確かめます。T3 の接続の資格情報（`T3_ACP_MCP_AUTHORIZATION` など。現行の bwrap はエージェントのコマンドから外しています）を VM に渡す形や、本番の T3 の acpRegistry を変える検証は、別の許可が要ります。VM 内の opencode でモデルを呼ぶ場合は、試行のために発行して終わったら失効させるキーを使います
@@ -127,7 +128,7 @@ WSL2 で動くかだけを先に知りたい場合は、検証 (a) だけで済�
 ## 出典
 
 - [docker-sandboxes] 本リポジトリ `docs/research/docker-sandboxes.md`（`sbx` の列の出典。bwrap 方式の列は同文書が `scripts/agent-sandbox/sandbox-shell` と `docs/dev-environment.md` に基づくとしている）
-- [git-worktree] https://github.com/git/git/blob/v2.51.0/Documentation/git-worktree.adoc#L322-L333 （`extensions.worktreeConfig` と worktree 固有の `config.worktree`）
+- [git-worktree] https://github.com/git/git/blob/v2.51.0/Documentation/git-worktree.adoc#L322-L333 （`extensions.worktreeConfig` と worktree 固有の `config.worktree`）。`git worktree add` が `config.worktree` を複製しない条件は https://github.com/git/git/blob/v2.51.0/builtin/worktree.c#L361-L377
 - [readme] https://github.com/superradcompany/microsandbox/blob/0dad6d434ea94fbf74c9f02a88cd9ff12f8420ff/README.md （beta の明記・要件・導入方法・起動時間の脚注）
 - [linux-trouble] https://github.com/superradcompany/microsandbox/blob/0dad6d434ea94fbf74c9f02a88cd9ff12f8420ff/docs/troubleshooting/linux.mdx （glibc・`/dev/kvm`・`kvm` グループ・入れ子の仮想化）
 - [windows-trouble] https://github.com/superradcompany/microsandbox/blob/0dad6d434ea94fbf74c9f02a88cd9ff12f8420ff/docs/troubleshooting/windows.mdx （Windows 版がプレビュー・WHP）
