@@ -420,10 +420,7 @@ impl Watcher {
                 self.forget_pending_line();
                 match io::count_inbox(&inbox) {
                     Ok(count) => self.remember_inbox_count(&count),
-                    Err(_) => {
-                        self.state.inbox_lines = None;
-                        self.state.inbox_identity = None;
-                    }
+                    Err(_) => self.forget_inbox_count(),
                 }
             }
             self.maybe_wake(&t3, self.state.inbox_lines, &[], &[]);
@@ -618,7 +615,8 @@ impl Watcher {
             self.state.last_wake_inbox_offset = None;
         }
         let history = WakeHistory {
-            // 書き換えを見分けている間は、書き換え前の既読の位置を前回の起こしの基準に使わない
+            // 書き換えの印が立っている間は、前回の起こしの基準を使わない（印の間に送った起こしの位置も
+            // 含む。重ねての起こしは最短間隔だけで絞る）
             last_offset: self
                 .state
                 .last_wake_inbox_offset
@@ -699,9 +697,17 @@ impl Watcher {
             self.state.inbox_lines = Some(count.total);
             self.state.inbox_identity = Some(count.identity);
         } else {
-            self.state.inbox_lines = None;
-            self.state.inbox_identity = None;
+            self.forget_inbox_count();
         }
+    }
+
+    /// 数えた行数が使えない（数えている間に受信箱が変わった・数え直せない）。行数と同一性を不明に
+    /// し、書き換えを見分けたことを残す。同一性が無いだけだと、次の周で「一度も数えていない」と
+    /// 取り違え、見分けた変化を忘れてしまうため。
+    fn forget_inbox_count(&mut self) {
+        self.state.inbox_lines = None;
+        self.state.inbox_identity = None;
+        self.mark_inbox_rewritten();
     }
 
     /// `agent/` ブランチの PR で verify が続けて失敗していれば `stalled(ci-failed-twice)`。
@@ -746,4 +752,58 @@ fn tag(payload: &Value) -> String {
         payload["thread_id"].as_str().unwrap_or(""),
         payload["branch"].as_str().unwrap_or("-")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn watcher() -> Watcher {
+        Watcher {
+            opts: Options {
+                cycles: None,
+                dry_run: true,
+                project: PathBuf::from("."),
+            },
+            pelway_dir: PathBuf::new(),
+            host: String::new(),
+            state_path: PathBuf::new(),
+            state: State::default(),
+            last_ci: None,
+        }
+    }
+
+    fn count(stable: bool) -> io::InboxCount {
+        io::InboxCount {
+            total: 3,
+            line_numbers: Vec::new(),
+            identity: [1, 2, 3, 4, 5],
+            stable,
+            before_write: [1, 2, 3, 4, 5],
+        }
+    }
+
+    #[test]
+    fn unstable_count_marks_the_inbox_rewritten() {
+        // 数えている間に受信箱が変わった: 行数を不明にし、書き換えを見分けたことを残す
+        // （次の周で「一度も数えていない」と取り違えて、変化を忘れない）
+        let mut w = watcher();
+        w.state.inbox_identity = Some([9, 9, 9, 9, 9]);
+        w.state.inbox_lines = Some(10);
+        w.state.rewritten_wake_offset = Some(4);
+        w.remember_inbox_count(&count(false));
+        assert_eq!(w.state.inbox_lines, None);
+        assert_eq!(w.state.inbox_identity, None);
+        assert!(w.state.inbox_rewritten);
+        assert_eq!(w.state.rewritten_wake_offset, None);
+    }
+
+    #[test]
+    fn stable_count_does_not_mark_the_inbox_rewritten() {
+        let mut w = watcher();
+        w.remember_inbox_count(&count(true));
+        assert_eq!(w.state.inbox_lines, Some(3));
+        assert_eq!(w.state.inbox_identity, Some([1, 2, 3, 4, 5]));
+        assert!(!w.state.inbox_rewritten);
+    }
 }
