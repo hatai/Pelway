@@ -14,7 +14,7 @@
 
 ## 受け入れ条件「導入・設定変更・サインインを何もしていない」の確認
 
-実装スレッド（agent-sandbox 内）で 3 回実行した。いずれも同じ結果。
+実装スレッド（agent-sandbox 内）で 5 回実行した。いずれも同じ結果。
 
 ```text
 $ command -v msb
@@ -118,5 +118,17 @@ pr-size: +179 / -0（追加の上限 800、削除の上限 2000）
 3. 仮定と解釈: `<MSB_TRIAL>` は試行のためだけの保存先で、導入した実行ファイルとランタイムデータを同じ木に置くと解釈した。インストーラーが `~/.local/bin` に置くコマンドリンクは試行では作らないため、後片付けでリンクの削除もシェル設定の清掃も要らない。`config.worktree` の拒否確認は、worktree 機能（`extensions.worktreeConfig`）を試験専用のクローンで有効にした上で行うと解釈した（worktree を作らないと `config.worktree` のファイルが生成されないため）。「試験専用の資格情報」は、試験用のリポジトリにだけインストールした別の GitHub App の秘密鍵を `PELWAY_AGENT_FNOX_CONFIG` で指す試験用の fnox 設定に入れたものと解釈した（レビューの「別の GitHub App の鍵で、pelway-dev・pelway-review の鍵は使わない」に従う）。採らなかった解釈: pelway-dev の鍵を別の age 鍵で暗号化し直した設定。GitHub App の秘密鍵はその App の全インストール先のトークンを発行できるため、試験用のリポジトリを pelway-dev のインストール先に足すだけで本番への書き込みが可能になり、試験専用とは呼べない。(f) は「T3 の接続の資格情報を渡さない形に限る」方を選んだ（もう一方の選択肢「使う T3 と資格情報の受け渡しを許可の一覧に足す」は、本番の T3 の acpRegistry を変える検証を許可に含めることになり、「本番の T3 スレッドでは使わない」と矛盾が残るため）。
 4. 足りなかった情報・検証手段: `install.sh` の挙動（リンクの上書き、`MSB_HOME` で変えられるのは保存先のみ）と `msb self uninstall` の挙動（`clean_legacy_shell_config` による `~/.profile`・`.bashrc`・`.zshrc`・fish conf の清掃、`resolve_home()` による削除対象の決定）は文書になく、`scripts/install.sh` と `crates/cli/lib/commands/self_cmd.rs`・`crates/utils/lib/lib.rs` のソースからしか分からなかった。`msb df` の `--verbose` が個別パスを出すことは `crates/cli/lib/commands/storage.rs` から確かめた。worktree ごとの `config.worktree` は git v2.51.0 の `git-worktree.adoc`（`extensions.worktreeConfig` と `worktrees/<id>/config.worktree`）で位置を確かめた。GitHub App の鍵が全インストール先のトークンを発行できることは `scripts/agent-gh` と `scripts/setup/agent-accounts.sh`（dev・review・notify を別の App・別の age 鍵で分けている構成）から確かめた。
 5. 改善案: 「サードパーティーのツールの導入・削除を文書に書くとき、インストーラーや uninstall コマンドの副作用（コマンドリンク・シェル設定・既存ファイルの上書き）を先にソースで確かめる」ことと、「試験専用の資格情報を要求するときは置き場所ではなく中身（どの App・どの鍵・失効させるか）で定める」ことを `.agents/skills/write-issue/SKILL.md` またはこの調査型 Issue の例に書く。現行の docker-sandboxes の「試す段階の計画」も `sbx` コマンドの削除系の副作用と試験用の資格情報の中身を確かめておくと、この指摘の形を防げる。
+
+使ったスキル: `implement-issue`、`ja-text-communication`
+
+## 実装者メモ（round 4）
+
+対象 head: 00f7dbeaffda0f8143d3f328d2cdc95e5e9212d6 とその上の実装者メモのコミット
+
+1. 詰まった箇所: レビュー指摘と対応。round 3 の codex のレビューの must-fix 2 件（いずれも `docs/research/microsandbox.md` の 4）に対応した。実行先の固定: `MSB_HOME` は保存先の切り替えだけで、CLI の実行先は別に決まる。`<MSB_TRIAL>/config.json` に `{"allowed_backends": ["local"]}` を試行の必須設定とし、以降の `msb` の呼び出しにはすべてグローバルフラグの `--local` を付ける決まりに変え、手順 3 に `msb context` で実行先がローカルであることを確かめる確認を足した。片付けは `msb ps -a` の一覧が試行で作った sandbox だけのときに限り `msb rm --force` を使い、試行外の VM が出たら何も消さず止めると明記した（許可表 #5・#6 も合わせて直した）。`config.worktree` の実体: `git worktree add` は元の worktree に `config.worktree` がなければコピー先のファイルを作らないため、検証 (c) で試験用クローンの両方の worktree に `git config --worktree` で無害な設定を保存して実体を作る手順を足し、ゲストからそのファイルを読めることを確かめてから書き込み拒否を確かめる順序にした。指揮役の指示で round 3 の must-fix の修正に進んだため、round 3 の時点で止まる条件に当たり Issue に記録した後、この修正を行った。`[文書のずれ]` の nit 2 件（Issue #836 の許可依頼を最新の計画に合わせた版に差し替え、worklog の実行回数を 3 回から 5 回に修正）も直した。ほかの nit（checksums.sha256 の項目の照合、ホスト側の接続確認に試行専用サービスを使う）は直していない。
+2. 曖昧だった文: なし（レビューの指摘は具体的で、直し方も示されていた）。
+3. 仮定と解釈: 実行先の固定は「`allowed_backends: ["local"]` の必須設定」と「`--local` の明示」の両方で行うと解釈した。レビューはどちらかを求めていたが、`allowed_backends` だけでは実行中の接続が切り替わらず、`--local` だけでは設定を忘れた呼び出しを防げないため、両方を試行の決まりにした。`config.worktree` の実体を作る設定は、git が読んでも動作に影響しない無害なキー（`msb.trial`）を両方の worktree に書く形と解釈した（`git worktree add` が複製するのは元の worktree のファイルだけで、新しい worktree 側のファイルは別途作る必要があるため）。
+4. 足りなかった情報・検証手段: `--local`・`--remote` がサブコマンドごとのフラグではなく CLI のグローバルフラグであることは `crates/cli/bin/main.rs`（`#[arg(long, global = true)]`）から確かめた。実行先の選択順（明示フラグ > managed `active_profile` > `MSB_BACKEND` > `MSB_PROFILE` > 保存済み `active_profile` > ローカル実行）と `allowed_backends` の挙動は `docs/cloud/connect.mdx`、削除が選択中の実行先に届くことは `crates/cli/lib/commands/remove.rs`（`selected_context().sandboxes().remove`）で確かめた。`git worktree add` の `config.worktree` の複製条件は git v2.51.0 の `builtin/worktree.c`（`copy_filtered_worktree_config` が `file_exists` を見る）で確かめた。
+5. 改善案: 実機で試す計画を書く調査型 Issue では、「実行先（ローカルかクラウドか）の固定」と「検査対象のファイルが手順の時点で実在すること」の確認を受け入れ条件の例に足す（round 3 の止まり方のコメントにも同じ案を書いた）。
 
 使ったスキル: `implement-issue`、`ja-text-communication`
