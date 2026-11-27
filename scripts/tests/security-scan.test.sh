@@ -14,6 +14,7 @@
 set -uo pipefail
 
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/security-scan.sh"
+ROOT="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
 failures=()
 
 work="$(mktemp -d)"
@@ -44,11 +45,21 @@ done
 # 結果は REPLY_LOG（標準出力と標準エラー）と REPLY_SUMMARY（ジョブサマリー）に入る。
 run_case() {
   local name="$1" tool="$2" stub_rc="$3" stub_json="$4" want_rc="$5"
-  local summary="$work/summary-$name.md" rc
+  local summary="$work/summary-$name.md" rc scan_base_set=0 scan_base_value=""
+  # 呼び出し側で一時指定した SECURITY_SCAN_BASE_SHA だけを使い、外の環境の値は外す。
+  if [[ -v SECURITY_SCAN_BASE_SHA ]]; then
+    scan_base_set=1
+    scan_base_value="$SECURITY_SCAN_BASE_SHA"
+  fi
+  local -a scan_base_env=()
+  if [[ "$scan_base_set" == 1 ]]; then
+    scan_base_env=("SECURITY_SCAN_BASE_SHA=$scan_base_value")
+  fi
   : >"$summary"
-  REPLY_LOG="$(cd "$work" && PATH="$work/bin:$PATH" STUB_RC="$stub_rc" STUB_JSON="$stub_json" \
-    GITHUB_STEP_SUMMARY="$summary" SECURITY_SCAN_OUT="$work/out-$name" STUB_ARGS="$work/args-$name" \
-    bash "$SCRIPT" "$tool" 2>&1)"
+  REPLY_LOG="$(cd "$work" && env -u SECURITY_SCAN_BASE_SHA PATH="$work/bin:$PATH" \
+    STUB_RC="$stub_rc" STUB_JSON="$stub_json" GITHUB_STEP_SUMMARY="$summary" \
+    SECURITY_SCAN_OUT="$work/out-$name" STUB_ARGS="$work/args-$name" \
+    "${scan_base_env[@]}" bash "$SCRIPT" "$tool" 2>&1)"
   rc=$?
   REPLY_SUMMARY="$(cat "$summary")"
   if [[ "$rc" != "$want_rc" ]]; then
@@ -118,6 +129,18 @@ summary_bytes="$(wc -c <"$work/summary-gitleaks-many.md")"
 # gitleaks の値を伏せる --redact と、semgrep の利用状況の送信を止める --metrics=off を外さない。
 want_contains gitleaks-redact "$(cat "$work/args-gitleaks-clean")" "--redact"
 want_contains gitleaks-merge-diff "$(cat "$work/args-gitleaks-clean")" "--log-opts=-m HEAD"
+# PR では base（SECURITY_SCAN_BASE_SHA）から HEAD までのコミットだけを走査する。
+base="0123456789abcdef0123456789abcdef01234567"
+SECURITY_SCAN_BASE_SHA="$base" run_case gitleaks-pr-range gitleaks 0 "[]" 0
+want_contains gitleaks-pr-range "$(cat "$work/args-gitleaks-pr-range")" "--log-opts=-m $base..HEAD"
+# base が SHA の形でなければ、ツールを呼ばずに引数の誤り（2）で止める。空文字も未設定ではなく不正値。
+SECURITY_SCAN_BASE_SHA="main; rm -rf /" run_case gitleaks-bad-base gitleaks 0 "[]" 2
+want_contains gitleaks-bad-base "$REPLY_LOG" "::error::SECURITY_SCAN_BASE_SHA"
+[[ ! -e "$work/args-gitleaks-bad-base" ]] || failures+=("gitleaks-bad-base: gitleaks was called")
+SECURITY_SCAN_BASE_SHA="0123456" run_case gitleaks-short-base gitleaks 0 "[]" 2
+[[ ! -e "$work/args-gitleaks-short-base" ]] || failures+=("gitleaks-short-base: gitleaks was called")
+SECURITY_SCAN_BASE_SHA="" run_case gitleaks-empty-base gitleaks 0 "[]" 2
+[[ ! -e "$work/args-gitleaks-empty-base" ]] || failures+=("gitleaks-empty-base: gitleaks was called")
 # -m では同じ場所の値が複数のコミットで重ねて出るため、場所の重複を除いた数もサマリーに出す。
 gitleaks_dup='[{"RuleID":"r","File":"a.txt","StartLine":3,"Commit":"1111111111111111"},{"RuleID":"r","File":"a.txt","StartLine":3,"Commit":"2222222222222222"}]'
 run_case gitleaks-dup gitleaks 2 "$gitleaks_dup" 4
@@ -146,6 +169,9 @@ want_absent semgrep-info "$REPLY_LOG" "::error"
 # 知らない重大度は失敗させる側に倒す（Registry の規則が新しい重大度を使っても見逃さない）。
 semgrep_unknown='{"results":[{"check_id":"z","path":"c.rs","start":{"line":3},"extra":{"severity":"CRITICAL"}}],"errors":[]}'
 run_case semgrep-unknown-severity semgrep 1 "$semgrep_unknown" 4
+# SECURITY_SCAN_BASE_SHA は gitleaks だけが使う。semgrep では、形が違っても検証で止まらずツールを呼ぶ。
+SECURITY_SCAN_BASE_SHA="main; rm -rf /" run_case semgrep-bad-base semgrep 0 '{"results":[],"errors":[]}' 0
+[[ -e "$work/args-semgrep-bad-base" ]] || failures+=("semgrep-bad-base: semgrep was not called")
 # uses: のタグ参照は actions.lock が SHA を固定するため、mutable-action-tag の規則は使わない。
 want_contains semgrep-exclude-rule "$(cat "$work/args-semgrep-clean")" $'--exclude-rule\nyaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag'
 run_case semgrep-error semgrep 2 "" 2
@@ -212,11 +238,26 @@ STUB_INFO=$'Scanned /w/a\nError during extraction: x/Cargo.lock file and found 1
 want_contains osv-hit-odd-path "$REPLY_LOG" "::error::osv-scanner: 検出 1 件"
 STUB_STDERR="$osv_diag" run_case osv-error-quiet osv-scanner 127 "" 127
 want_absent osv-error-quiet "$REPLY_LOG" "FAKEPASSWORD"
+# osv-scanner でも SECURITY_SCAN_BASE_SHA の形は検証しない。
+SECURITY_SCAN_BASE_SHA="main; rm -rf /" run_case osv-bad-base osv-scanner 0 '{"results":[]}' 0
+[[ -e "$work/args-osv-bad-base" ]] || failures+=("osv-bad-base: osv-scanner was not called")
 # ロックファイルが 1 つも見つからない（128）は設定の誤りとして失敗させる。
 run_case osv-nopkg osv-scanner 128 "" 128
 
 # ---- 引数の誤り
 run_case bad-tool nope 0 "" 2
+
+# ---- workflow の配線の presence check（意味の検査は上の引数テスト）
+workflow_text="$(cat "$ROOT/.github/workflows/security-scan.yml")"
+want_contains workflow-pr-step "$workflow_text" '- name: Scan (gitleaks git, pull_request)'
+want_contains workflow-pr-if "$workflow_text" "if: github.event_name == 'pull_request'"
+want_contains workflow-base-env "$workflow_text" 'SECURITY_SCAN_BASE_SHA: ${{ github.event.pull_request.base.sha }}'
+want_contains workflow-full-step "$workflow_text" '- name: Scan (gitleaks git, full history)'
+want_contains workflow-full-if "$workflow_text" "if: github.event_name != 'pull_request'"
+want_contains workflow-fetch-depth "$workflow_text" 'fetch-depth: 0'
+base_env_count="$(grep -cF 'SECURITY_SCAN_BASE_SHA: ${{ github.event.pull_request.base.sha }}' \
+  "$ROOT/.github/workflows/security-scan.yml" || true)"
+[[ "$base_env_count" == 1 ]] || failures+=("workflow-base-env: count $base_env_count, want 1")
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}"
