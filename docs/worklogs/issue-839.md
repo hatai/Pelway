@@ -111,3 +111,17 @@ round 7 のレビューは、codex が request-changes（must-fix 1 件、`[文�
 5. 改善案: round 4 から、受信箱が sandbox から書き換えられる場合の抜けが、毎 round 新しく見つかっている。受信箱を書き換えられる前提での守りを、どこまでこの Issue の範囲にするかを、`docs/dev-environment.md` の「指揮役の受信箱と起こし」に前提として書いておく（agent-watch だけが追記し、ほかの書き手は書き換えない、を前提にするかどうか）。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 9）
+
+対象 head: 7c5ec603fb2cfe2dc97854c55d998c76ed078606
+
+round 8 のレビューは、codex が request-changes（must-fix 1 件、`[文書のずれ]` の nit 2 件）、claude が approve（印の無い nit 1 件、`[文書のずれ]` の nit 1 件）だった。すべて直した。範囲を絞るかを hatai に確かめ、このまま直し続けることになった。
+
+1. 詰まった箇所: `crates/pelway-agent-watch/src/main.rs` の知らせを書く周: 受信箱が自分の追記以外で変わっていたとき、印は不明にしていたが、同じ周に書いた新しい知らせの行番号はそのまま使っていた。新しい知らせの行番号も不明にした（`fresh_line_is_unknown_after_the_inbox_is_rewritten`）。
+2. 曖昧だった文: 「行の対応を確かめられない間は保留を残してください。」（codex の round 8 のレビューの must-fix）。同一性を確かめてから使うまでの間の書き換えも挙がっているが、その間を埋める手段（受信箱のロックなど）は agent-watch 以外の書き手が従わないと効かない。この round では、書く前・数える前後・印だけの周の同一性の比較で見分けられる範囲を直した。
+3. 仮定と解釈: 知らせを書く周で印の行番号を不明にする経路（claude の印の無い nit）は、その経路の行を一時的に外すと `quiet_notice_cycle_forgets_pending_line_after_rewrite` が落ちることを確かめた。
+4. 足りなかった情報・検証手段: 同一性の確かめと使用の間の書き換え（TOCTOU）は、テストで再現していない。
+5. 改善案: round 8 のメモの改善案と同じ。受信箱の書き手についての前提を、`docs/dev-environment.md` に 1 か所で書く。
+
+使ったスキル: implement-issue
