@@ -129,6 +129,17 @@ check "7b: nothing written to other repo" [ ! -e "$ROOT/other/agent-team.toml" ]
 # --dest は本体の checkout でないリンク済み worktree（本体へは書かない）
 run_setup --from "$ROOT/wt" --dest "$ROOT/wt2"; rc=$?
 check "7c: linked worktree as --from is refused" [ "$rc" -ne 0 ]
+
+# 7d. 登録済み worktree の管理 dir を指す .git ファイルを持つ未登録の
+# ディレクトリは、メタデータの検査を通るように見えても本体側の登録に載らない
+# ため拒否する
+git -C "$ROOT/main" worktree add -q "$ROOT/real-wt7d" "$old" --detach
+mkdir -p "$ROOT/ghost-wt"
+cp "$ROOT/real-wt7d/.git" "$ROOT/ghost-wt/.git"
+run_setup --from "$ROOT/main" --dest "$ROOT/ghost-wt"; rc=$?
+check "7d: unregistered dir with valid metadata: exits non-zero" [ "$rc" -ne 0 ]
+check "7d: no copy into unregistered dir" [ ! -f "$ROOT/ghost-wt/agent-team.toml" ]
+git -C "$ROOT/main" worktree remove --force "$ROOT/real-wt7d"
 run_setup --from "$ROOT/main" --dest "$ROOT/main"; rc=$?
 check "7c: main checkout as --dest is refused" [ "$rc" -ne 0 ]
 check "7c: main checkout was not written" bash -c '[ "$(cat "$1/main/agent-team.local.toml")" = "local" ]' _ "$ROOT"
@@ -157,8 +168,8 @@ check "8: the script path exists" [ -x "$REPO/scripts/worktree-setup" ]
 git worktree add -q "$ROOT/wt8" "$old" --detach
 mkdir -p "$ROOT/main/scripts" && cp "$REPO/scripts/worktree-setup" "$ROOT/main/scripts/"
 cmd="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["scripts"][0]["command"])' "$REPO/t3.json")"
-T3CODE_PROJECT_ROOT="$ROOT/main" T3CODE_WORKTREE_PATH="$ROOT/wt8" bash -c "$cmd" >"$ROOT/out" 2>"$ROOT/err"; rc=$?
-check "8b: the stored command runs the setup" [ "$rc" -eq 0 ]
+( cd "$ROOT/wt8" && T3CODE_PROJECT_ROOT="$ROOT/main" T3CODE_WORKTREE_PATH="$ROOT/wt8" bash -c "$cmd" ) >"$ROOT/out" 2>"$ROOT/err"; rc=$?
+check "8b: the stored command runs the setup (cwd=worktree)" [ "$rc" -eq 0 ]
 check "8b: file copied via the stored command" [ -f "$ROOT/wt8/agent-team.toml" ]
 
 # 9. .worktreeinclude: agent-team.local.toml を持ち越し、agent-team.toml は書かない

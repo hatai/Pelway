@@ -559,6 +559,22 @@ check "28: no traceback" bash -c "! grep -q Traceback '$ROOT/err'"
 check "28: error names developers.dev.priority" has "$ROOT/err" "developers.dev.priority"
 rm "$ROOT/agent-team.local.toml" "$ROOT/l24.toml"
 
+# 29: effective に別々の shared と local を渡せる（main の承認済みの版を土台に
+# 本体の checkout の local を重ねる読み方。レビュー担当選定でブランチの版を
+# 使わないため）
+write_case "$ROOT/shared29.toml" < <(dev_case)
+cat > "$ROOT/some-dir.local.toml" <<'EOF'
+[developers.dev]
+use = ["opencode", "devin", "codex", "claude"]
+
+[developers.dev.slots]
+devin = 2
+EOF
+bash "$CFG" effective dev "$ROOT/shared29.toml" "$ROOT/some-dir.local.toml" > "$ROOT/out" 2>"$ROOT/err"; rc=$?
+check "29: effective with explicit local exits 0" eq "$rc" "0"
+check "29: local applied from the explicit path" bash -c "grep -qF '\"devin\": 2' '$ROOT/out'"
+rm "$ROOT/some-dir.local.toml" "$ROOT/shared29.toml"
+
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
   exit 1

@@ -43,7 +43,7 @@ must-fix への対応:
 1. worktree-setup のコピーを原子的に — `cat >` による追従・中途半端な上書きを避け、`( set -o noclobber; cat -- "$from" >"$to" )`（O_EXCL、切れた symlink を追わない）に
 2. local の symlink 拒否 — `os.path.isfile` は symlink 先を見るため `isfile and not islink` に（conductor-watch.sh も同じ判定に）
 3. cascade_use が local が明示したキーまで落としていた → local が書いたキーは共有由来の参照だけ落とす形に追跡を分けた（試験 25）
-4. `cascade_use` が配列・表などの list でない `use` を `in` で読んで TypeError になる経路を `isinstance` で塞ぐ
+4. `cascade_use` で `use` の要素に配列・表（hashable でない値）が混ざると `set()` が TypeError になる経路を、str の要素だけ取る形（`{n for n in use if isinstance(n, str)}`。priority の並びにも同じ絞り込み）で塞ぐ
 5. warn_required を検証の前に出す順に（use が高リスク担当を全て外したとき、エラーの前に担当不足の警告が出る。試験 26）
 6. conductor-rebuild が agent-team.toml 有無で分岐していた → 毎回 worktree-setup を通し local を持ち越す。rebuild 試験の NEW_WT を本物の `git worktree add` に
 7. t3.json の command を `bash -c '"${T3CODE_PROJECT_ROOT:?}/scripts/worktree-setup"'` に（既定シェルに依らず POSIX 展開を効かせる）
@@ -63,3 +63,16 @@ must-fix への対応:
 
 nit への対応: worktree-setup:126-128 のコメントに「noclobber が防ぐのは通常ファイルの上書き」を明記。worklog round 3 の項目 4・9 の記述を実態に合わせて修正
 push した head: e2de46a0（round 4 の対応は b334064a）
+
+## レビュー対応（round 5）
+
+対象 head: 29e084c1
+レビュー: codex_review（gpt-6.2-sol / reasoningEffort=high、run=7211295476）は request-changes（must-fix 3、nit 2）、claude_review（claude-opus-5-5 / effort=high、run=7211295991）は request-changes（must-fix 1、nit 3）
+
+must-fix への対応:
+1. worktree-setup: dst が本体側の worktree 登録（git worktree list）に載ることを確かめる検査を追加（登録済み worktree の管理 dir を指す .git を持つ未登録ディレクトリを拒否。試験 7d）
+2. worktree-setup: 検査したディレクトリを fd で保持し、/proc/self/fd 起点の一時名に noclobber で書き終えてから ln で配置（既存名を上書きせず、失敗時に最終名を残さない）
+3. agent-team-config: local を O_NOFOLLOW で開き開いた fd が通常ファイルか確かめてから解析（確認と読み込みの間の置き換え経路を閉じる）。conductor-watch.sh の overlay 表示も同じ判定に
+4. docs: レビュー担当・モデル選定の重ねた結果の読み方を「main の承認済みの版（API 取得）を土台に本体の checkout の local を重ね、本体の checkout のスクリプトで effective を走らせる」に統一（implement-issue, command-team ×2, grokbot-runbook ×2。ブランチの toml・local・スクリプトで自己選択できない形に）。effective に <local-file> 引数を追加
+
+nit への対応: 試験 8b を worktree を cwd にして実行、ヘルプの「値を出さない」を警告・検証エラーに限定、conductor-rebuild.test.sh の skip を失敗に、worklog round 3 の項目 4 を実態どおりに

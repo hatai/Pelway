@@ -37,16 +37,20 @@ subcommands:
                             「<担当> <上限>」で 1 行 1 つ、ファイルの並びどおりに出す。
                             validate と同じ検証を通してから出し、違反があれば
                             標準出力には何も出さずに終了コード 1 で止まる
-  effective <login> [<file>]
+  effective <login> [<file> [<local-file>]]
                             重ねた結果を JSON で出す（agents の登録情報と、その
                             developers.<login> の表だけ）。手順書・skill で
-                            toml を直接読む代わりに使う
+                            toml を直接読む代わりに使う。<local-file> を渡すと
+                            <file> と同じディレクトリの代わりにそれを重ねる
+                            （共有は main の承認済みの版、local は本体の checkout
+                            の版を重ねるときに使う）
 
 local の上書き: 表は深く重ね、配列（use・models・priority.*.*・effort.raise）は
 丸ごと置き換える。上書きできない項目（instance.review・effort.option・assign_label・
 担当 id の追加・他の開発者の表・知らない最上位キー・共有の toml に無い条件名）は、
 「<file>: warning: <キー>: <理由>」を標準エラーに出して無視する。
-警告にも出力にも値は出さず、キー名と理由だけを出す。
+警告と検証エラーには値を出さず、キー名と理由だけを出す（effective の JSON
+には重ねた結果の値が出る）。
 EOF
   exit 0
 }
@@ -59,7 +63,7 @@ esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 exec python3 -I - "$ROOT" "$@" <<'PY'
-import copy, json, os, sys, tomllib
+import copy, json, os, stat, sys, tomllib
 
 root, argv = sys.argv[1], sys.argv[2:]
 roles = ("implement", "investigate", "review")
@@ -450,21 +454,54 @@ def validate_doc(doc, label):
         sys.exit(1)
 
 
-def load_effective(path, login):
+def open_local(path):
+    """local をリンクをたどらずに開き、通常ファイルのときだけ読み込み用の
+    ファイルオブジェクトを返す（無ければ None、symlink や通常ファイルで
+    ないものは False）。開く操作自体でリンクを拒否し、開いた fd が
+    通常ファイルか確かめるため、確認と読み込みの間に置き換わる経路が無い"""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return False
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            os.close(fd)
+            return False
+        return os.fdopen(fd, "rb")
+    except OSError:
+        os.close(fd)
+        return False
+
+
+def load_local_fd(fobj, label):
+    try:
+        return tomllib.load(fobj)
+    except tomllib.TOMLDecodeError as e:
+        fail(f"{label}: TOML として読めない（{e}）")
+
+
+def load_effective(path, login, lpath=None):
     """共有の toml を検証し、local（あれば）を重ねて重ねた結果を検証して返す。
     local が無ければ共有の doc をそのまま返す（従来どおり）。login は slots・effective の
-    呼び出し側の開発者（自分以外の表は無視）。validate では None。"""
+    呼び出し側の開発者（自分以外の表は無視）。validate では None。
+    lpath を渡すと <file> と同じディレクトリの代わりにそのパスを local として読む"""
     doc = load(path)
     validate_doc(doc, path)
-    lpath = os.path.join(os.path.dirname(os.path.abspath(path)), LOCAL_NAME)
-    if os.path.islink(lpath) or not os.path.isfile(lpath):
-        if os.path.lexists(lpath):
+    if lpath is None:
+        lpath = os.path.join(os.path.dirname(os.path.abspath(path)), LOCAL_NAME)
+    lf = open_local(lpath)
+    if lf is not None and lf is not False:
+        pass
+    else:
+        if lf is False or os.path.lexists(lpath):
             # symlink（本体以外のファイルを指しうる）や通常ファイルでないものは
-            # 重ねず、理由だけ警告する。isfile は symlink をたどるため先に islink で弾く
+            # 重ねず、理由だけ警告する
             warn(LOCAL_NAME, "symlink か通常ファイルでないため重ねない")
             emit_warnings(lpath)
         return doc
-    local = load(lpath)
+    local = load_local_fd(lf, lpath)
     merged = merge_local(copy.deepcopy(doc), local, login)
     emit_warnings(lpath)
     # 必須の役に当たる担当不足の警告は検証より先に出す（検証で止まる場合にも
@@ -506,8 +543,8 @@ def do_slots(login, path):
         print(f"{name} {v}")
 
 
-def do_effective(login, path):
-    doc = load_effective(path, login)
+def do_effective(login, path, lpath=None):
+    doc = load_effective(path, login, lpath)
     devs = doc.get("developers", {})
     if not isinstance(devs.get(login), dict):
         fail(f"{path}: developers.{login} の表が無い")
@@ -528,8 +565,10 @@ elif mode == "slots":
         sys.exit(2)
     do_slots(argv[1], argv[2] if len(argv) == 3 else f"{root}/agent-team.toml")
 elif mode == "effective":
-    if len(argv) not in (2, 3):
-        sys.stderr.write("usage: agent-team-config effective <login> [<file>]\n")
+    if len(argv) not in (2, 3, 4):
+        sys.stderr.write("usage: agent-team-config effective <login> [<file> [<local-file>]]\n")
         sys.exit(2)
-    do_effective(argv[1], argv[2] if len(argv) == 3 else f"{root}/agent-team.toml")
+    do_effective(argv[1],
+                 argv[2] if len(argv) >= 3 else f"{root}/agent-team.toml",
+                 argv[3] if len(argv) == 4 else None)
 PY
