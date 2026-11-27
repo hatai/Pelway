@@ -103,47 +103,67 @@ def cleanup_dir(dir_fd, cutoff_ns, own_verify_id):
     ok = True
     try: names = os.listdir(dir_fd)
     except OSError: return False
+    own_names = []
     for name in names:
         match = RECORD_NAME_RE.fullmatch(name)
         if match is None: continue
-        remove = name.rsplit(".", 1)[1] == own_verify_id
-        if not remove:
-            try: st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
-            except OSError:
-                ok = False
-                continue
-            remove = st.st_mtime_ns <= cutoff_ns
-        if not remove: continue
+        if name.rsplit(".", 1)[1] == own_verify_id:
+            own_names.append(name)
+            continue
+        try: st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        except OSError:
+            ok = False
+            continue
+        if st.st_mtime_ns > cutoff_ns: continue
         try: os.unlink(name, dir_fd=dir_fd)
         except FileNotFoundError: pass
         except OSError: ok = False
+    if not ok: return False
     try: os.fsync(dir_fd)
-    except OSError: ok = False
+    except OSError: return False
+    for name in own_names:
+        try: os.unlink(name, dir_fd=dir_fd)
+        except FileNotFoundError: pass
+        except OSError: ok = False
     return ok
 
 def cleanup_started(root, git_dir, cutoff_ns, own_verify_id):
-    ok = True
-    try:
-        started_fd = open_started_dir(root, create=False)
-    except OSError:
-        started_fd = None
-        ok = False
-    if started_fd is not None:
-        try:
-            if not cleanup_dir(started_fd, cutoff_ns, own_verify_id): ok = False
-        finally: os.close(started_fd)
     fallback_path = os.path.join(git_dir, "pelway-verify-started")
     if os.path.lexists(fallback_path):
         try:
             fallback_fd = open_fallback_dir(git_dir, create=False)
         except OSError:
-            fallback_fd = None
-            ok = False
-        if fallback_fd is not None:
-            try:
-                if not cleanup_dir(fallback_fd, cutoff_ns, own_verify_id): ok = False
-            finally: os.close(fallback_fd)
-    return ok
+            return False
+        try:
+            if not cleanup_dir(fallback_fd, cutoff_ns, own_verify_id): return False
+        finally: os.close(fallback_fd)
+    try:
+        started_fd = open_started_dir(root, create=False)
+    except OSError:
+        return False
+    try: return cleanup_dir(started_fd, cutoff_ns, own_verify_id)
+    finally: os.close(started_fd)
+
+def invalidate_same_generation(path, expected_fingerprint):
+    current_fingerprint = marker_fingerprint(path)
+    if expected_fingerprint != "any" and current_fingerprint != expected_fingerprint:
+        return True
+    return invalidate_marker(path)
+
+def invalidate_unrecorded(lock_path, marker_path, expected_fingerprint):
+    lock_fd, error = open_lock(lock_path)
+    if error is not None:
+        note(error)
+        return False
+    try:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        except (KeyboardInterrupt, OSError) as e:
+            note(f"verify のロックを取れず印を無効化できません: {str(e) or '中断されました'}")
+            return False
+        return invalidate_same_generation(marker_path, expected_fingerprint)
+    finally:
+        os.close(lock_fd)
 
 def invalidate_marker(path):
     try: st = os.lstat(path)
@@ -206,7 +226,9 @@ def main():
         open_error = e
     started = started_fd is not None and write_start(started_fd, start_name)
     if not started:
-        write_fallback(git_dir, start_name)
+        fallback_written = write_fallback(git_dir, start_name)
+        if not fallback_written:
+            invalidate_unrecorded(lock_path, marker_path, start_fingerprint)
         if started_fd is not None: os.close(started_fd)
         detail = f": {open_error}" if open_error is not None else ""
         fail(f"verify の開始の記録を残せないため verify を開始しません{detail}")
@@ -226,7 +248,9 @@ def main():
         lock_fingerprint = marker_fingerprint(marker_path)
         lock_name = f"{lock_fingerprint}.{verify_id}"
         if not write_start(started_fd, lock_name):
-            write_fallback(git_dir, lock_name)
+            fallback_written = write_fallback(git_dir, lock_name)
+            if not fallback_written:
+                invalidate_same_generation(marker_path, lock_fingerprint)
             os.close(lock_fd)
             os.close(started_fd)
             fail("ロック取得時点の開始の記録を残せないため verify を開始しません")

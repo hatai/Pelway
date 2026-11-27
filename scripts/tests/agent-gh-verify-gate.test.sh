@@ -180,7 +180,7 @@ chmod 600 "$marker_path"
 [[ "$RC" != 0 && "$ERR" == *'前回の verify はこの印を無効化しました'* ]] ||
   failures+=("push_lock_poison: not stopped: rc=$RC $ERR")
 rm -f "$lock_path" "$marker_path"; rm -rf "$MISE_TOY/.pelway-verify"
-# 開始の記録を残せないときは検査を始めず、前回の印も無効化しない。
+# 開始の記録を残せないときは検査を始めない。予備に残せるときは印を残し、予備にも残せないときは印を消す。
 mkdir "$MISE_TOY/.pelway-verify"; chmod a-w "$MISE_TOY/.pelway-verify"
 printf '%s\nverify-id:0123456789abcdef0123456789abcdef\n' "$("$REAL_GIT" -C "$MISE_TOY" rev-parse 'HEAD^{tree}')" >"$marker_path"
 start_touch="$ROOT/verify-start-touch"; rm -f "$start_touch"
@@ -195,7 +195,44 @@ rm -rf "$MISE_TOY/.pelway-verify"
 (cd "$MISE_TOY" && MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-start-recovered.out" 2>&1); recovered_rc=$?
 [[ "$recovered_rc" == 0 && -f "$marker_path" ]] ||
   failures+=("verify_start_recovered: rc=$recovered_rc marker=$(test -e "$marker_path" && echo present || echo missing)")
-rm -f "$marker_path"; rm -rf "$MISE_TOY/.pelway-verify"
+rm -rf "$MISE_TOY/.pelway-verify"; mkdir "$MISE_TOY/.pelway-verify"; chmod a-w "$MISE_TOY/.pelway-verify"
+printf '%s\nverify-id:0123456789abcdef0123456789abcdef\n' "$("$REAL_GIT" -C "$MISE_TOY" rev-parse 'HEAD^{tree}')" >"$marker_path"
+rm -rf "$MISE_TOY/.git/pelway-verify-started"; : >"$MISE_TOY/.git/pelway-verify-started"
+(cd "$MISE_TOY" && VERIFY_TOUCH_BEFORE_EXIT="$start_touch" MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-all-state-unwritable.out" 2>&1); rc=$?
+[[ "$rc" != 0 && ! -e "$start_touch" && ! -e "$marker_path" ]] ||
+  failures+=("verify_all_state_unwritable: rc=$rc touch=$(test -e "$start_touch" && echo present || echo missing) marker=$(test -e "$marker_path" && echo present || echo missing)")
+rm -rf "$MISE_TOY/.git/pelway-verify-started"; chmod u+w "$MISE_TOY/.pelway-verify"; rm -rf "$MISE_TOY/.pelway-verify" "$marker_path"
+mkdir "$MISE_TOY/.git/pelway-verify-started"; chmod 000 "$MISE_TOY/.git/pelway-verify-started"
+(cd "$MISE_TOY" && MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-cleanup-fails.out" 2>&1); cleanup_verify_rc=$?
+chmod 700 "$MISE_TOY/.git/pelway-verify-started"
+(cd "$MISE_TOY" && PELWAY_AGENT_SKIP_RESIGN=1 bash "$AGENT_GH" dev git push origin HEAD:refs/heads/agent/cleanup-fails >"$ROOT/cleanup-fails-push.out" 2>"$ROOT/cleanup-fails-push.err"); RC=$?; ERR="$(cat "$ROOT/cleanup-fails-push.err")"
+[[ "$cleanup_verify_rc" != 0 && -f "$marker_path" && "$RC" != 0 && "$ERR" == *'前回の verify はこの印を無効化しました'* ]] ||
+  failures+=("verify_cleanup_fails: verify=$cleanup_verify_rc push=$RC $ERR")
+rm -rf "$MISE_TOY/.git/pelway-verify-started" "$MISE_TOY/.pelway-verify"; rm -f "$marker_path"
+: >"$lock_path"; chmod 600 "$lock_path"
+printf '%s\nverify-id:0123456789abcdef0123456789abcdef\n' "$("$REAL_GIT" -C "$MISE_TOY" rev-parse 'HEAD^{tree}')" >"$marker_path"
+lock_held="$ROOT/manual-lock-held"; lock_release="$ROOT/manual-lock-release"; rm -f "$lock_held" "$lock_release"
+LOCK_HELD="$lock_held" LOCK_RELEASE="$lock_release" flock -x "$lock_path" -c 'touch "$LOCK_HELD"; while [[ ! -e "$LOCK_RELEASE" ]]; do sleep 0.05; done' &
+manual_lock=$!
+for ((i = 0; i < 100; i++)); do [[ -e "$lock_held" ]] && break; sleep 0.05; done
+(cd "$MISE_TOY" && MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-lock-generation.out" 2>&1) &
+lock_generation_verify=$!
+start_base=""
+for ((i = 0; i < 100; i++)); do
+  for entry in "$MISE_TOY/.pelway-verify/started"/*; do [[ -e "$entry" ]] && start_base="${entry##*/}"; done
+  [[ -n "$start_base" ]] && break
+  sleep 0.05
+done
+chmod a-w "$MISE_TOY/.pelway-verify/started"
+: >"$MISE_TOY/.git/pelway-verify-started"
+printf '%s\nverify-id:fedcba9876543210fedcba9876543210\n' "$("$REAL_GIT" -C "$MISE_TOY" rev-parse 'HEAD^{tree}')" >"$marker_path"
+touch "$lock_release"
+wait "$manual_lock" 2>/dev/null; manual_lock_rc=$?
+wait "$lock_generation_verify"; lock_generation_rc=$?
+[[ "$manual_lock_rc" == 0 && -n "$start_base" && "$lock_generation_rc" != 0 && ! -e "$marker_path" ]] ||
+  failures+=("verify_lock_generation_unwritable: lock=$manual_lock_rc verify=$lock_generation_rc start=${start_base:-none} marker=$(test -e "$marker_path" && echo present || echo missing)")
+chmod u+w "$MISE_TOY/.pelway-verify/started" 2>/dev/null
+rm -rf "$MISE_TOY/.git/pelway-verify-started" "$MISE_TOY/.pelway-verify"; rm -f "$marker_path"
 # gitdir のパスの末尾に空白や CR があっても、3 経路が Git が返した同じパスを使う。
 special_n=0
 for suffix in ' ' $'\r' $'\n'; do
