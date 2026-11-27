@@ -209,3 +209,4 @@ must-fix への対応:
 委託照合メモ: `[review-request]` コメントの 1 行目は `[review-request] head: <SHA> to: <担当>` の形で書く（7219209381 に `to:` が無かった）
 pr-size 凍結との関係: 例外は現行の差分サイズ（+2565）までの承認のため、verify.sh・フィクスチャ・本ファイルを圧縮して上限内に収めて push する
 round 16 途上の指摘（codex が上限到達で投稿前に停止）: 採点器が文書の形式が認める引用符なしの題名から対象番号を読めなかった → `title=` の値は行末まで読み外側の引用符だけを剥がす形に直し、`fail-launch-unquoted` を追加
+round 17（GLM・review 6091157807、must-fix 1）: `fail-launch-unquoted` に格上げ行が無く、起動照合が壊れても別の欠落で落ちるため検出を分離できていなかった → #820・#821 の needs-decision 行を足して違反を起動だけに限定。nit（文書のずれ）として雛形の `non_risk`（共有に無い条件名）を `normal` に、PR 本文の sha・記録 round・フィクスチャ数を更新

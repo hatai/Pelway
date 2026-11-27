@@ -32,4 +32,4 @@
 # [developers.<自分の GitHub login>.review_limits]
 # codex = 1                                 # レビューに回せる数の目安を変える
 # [developers.<自分の GitHub login>.priority.implement]
-# non_risk = ["opencode"]                   # 条件の並びを自分の環境に合わせる
+# normal = ["opencode"]                      # 条件の並びを自分の環境に合わせる（共有の条件名だけ有効）
