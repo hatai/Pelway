@@ -10,6 +10,14 @@
 # - URL・鍵は curl の引数とエラー出力に出さない（--config - で標準入力から渡す）
 
 name: notify-grokbot
+run-name: >-
+  ${{
+    (
+      (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') &&
+      format('notify #{0} {1}', github.event.pull_request.number, github.event.action)
+    ) ||
+    format('notify {0} {1}', github.event_name, github.run_id)
+  }}
 
 on:
   # Grok Bot が動く必要のあるイベントだけ（docs/superpowers/specs/agent-team.md「GitHub からの通知」）。
@@ -124,58 +132,95 @@ jobs:
           set -eu
           echo "::notice::Skipping Grok Bot notification: review author_association=${AUTHOR_ASSOC:-none} login=${COMMENTER_LOGIN:-unknown} is not OWNER/MEMBER/COLLABORATOR."
 
-      # synchronize だけ、同じ PR・同じ head sha の通知がすでに送られたかを
-      # この workflow の過去 run から調べる（#481 の決定: 同じ PR・同じ head sha
-      # では 1 回だけ通知する）。「送った」は、Send notification step が成功した
-      # run があるかで判定する。job の concurrency で同じ head の run は直列に
-      # なるため、ここで見える過去 run はすべて完了済み。
-      # API の呼び出しに失敗したら送る側に倒す（重複は許容し、取りこぼしはしない）。
+      # synchronize だけ、同じ PR・同じ head sha の通知がすでに届いたかを
+      # この workflow の過去 run から調べる。「届いた」は webhook が 2xx を返し、
+      # Record delivery step が成功したこと。調べられないときは送る側に倒す。
       - name: Check duplicate notification
         id: dedup
         if: github.event.action == 'synchronize' && steps.gate.outputs.should_send == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           DEDUP_PR: ${{ github.event.pull_request.number }}
-          DEDUP_BRANCH: ${{ github.event.pull_request.head.ref }}
           DEDUP_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          # shellcheck disable=SC2016 # jq の --arg/--argjson 変数はシングルクォート内で参照するのが正しい
-          # 同じ head branch・同じ head sha の pull_request run（自分自身を除く）。
-          # pull_requests が埋まっている run では PR 番号でも照合する（同じ
-          # ブランチを別の PR に再利用したとき旧 PR の送信記録で抑止しないため）。
-          # 空の run が多いため、空のときは branch+sha だけで照合する。
-          # 照合は直近 100 件（per_page=100 の 1 ページ）まで。それより前の送信は
-          # 見えず再送になるが、fail-open（重複は許容し取りこぼしはしない）の設計。
-          if ! runs="$(gh api \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/notify-grokbot.yml/runs?event=pull_request&status=completed&per_page=100" 2>/dev/null \
-            | jq -r --arg branch "$DEDUP_BRANCH" --arg sha "$DEDUP_SHA" --arg pr "$DEDUP_PR" --argjson self "$GITHUB_RUN_ID" \
-              '[.workflow_runs[] | select(.id != $self and .head_branch == $branch and .head_sha == $sha and ((.pull_requests | length) == 0 or any(.pull_requests[]; .number == ($pr | tonumber)))) | .id] | .[]')"; then
-            echo "::warning::dedup check failed (could not list workflow runs); sending notification anyway."
-            echo "duplicate=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          # shellcheck disable=SC2016 # jq 変数はシングルクォート内で参照するのが正しい
+          deadline=$(( $(date +%s) + 120 ))
+          expected_title="notify #${DEDUP_PR} synchronize"
           duplicate=false
-          # 再実行（rerun）は同じ run id の新しい attempt で走る。status=completed の
-          # 一覧には実行中の自分は載らず id でも除いているため、自分だけ別に
-          # filter=all（全 attempt の job）で調べる。過去 attempt の Send notification
-          # が成功していれば送信済み。現在 attempt の Send step は未実行なので
-          # conclusion が null で数えられない。
-          sent_own="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=all&per_page=100" 2>/dev/null \
-            | jq '[.jobs[].steps[] | select(.name == "Send notification" and .conclusion == "success")] | length')" || sent_own=0
-          if [ "${sent_own:-0}" -gt 0 ]; then
-            duplicate=true
-          fi
-          while IFS= read -r run_id && [ "$duplicate" = false ]; do
-            [ -n "$run_id" ] || continue
-            # 候補 run も filter=all にする。再実行済みの run では最新 attempt が
-            # dedup で send を skip していても、過去 attempt の送信で判定するため。
-            sent="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?filter=all&per_page=100" 2>/dev/null \
-              | jq '[.jobs[].steps[] | select(.name == "Send notification" and .conclusion == "success")] | length')" || sent=0
-            if [ "${sent:-0}" -gt 0 ]; then
+
+          retry_wait() {
+            case "$1" in
+              0) sleep 2 ;;
+              1) sleep 4 ;;
+              2) sleep 8 ;;
+            esac
+          }
+
+          api_get() {
+            endpoint="$1"
+            filter="$2"
+            label="$3"
+            attempt=0
+            while [ "$attempt" -le 3 ]; do
+              if [ "$(date +%s)" -ge "$deadline" ]; then
+                echo "::warning::dedup check reached the 120-second budget; sending notification unless confirmed delivery is found." >&2
+                return 1
+              fi
+              if output="$(timeout 10s gh api --paginate "$endpoint" 2>/dev/null | jq -s -c -e "$filter" 2>/dev/null)"; then
+                printf '%s' "$output"
+                return 0
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "::warning::dedup could not fetch $label; sending notification unless confirmed delivery is found." >&2
+                return 1
+              fi
+              echo "dedup: retrying $label (attempt $((attempt + 2)) of 4)" >&2
+              retry_wait "$attempt"
+              attempt=$((attempt + 1))
+            done
+            return 1
+          }
+
+          runs_filter='if (length > 0 and ([.[] | ((.workflow_runs | type) == "array" and (.total_count | type) == "number")] | all)) then {total_count_max: ([.[].total_count] | max), runs: [.[].workflow_runs[]]} else error end'
+          jobs_filter='if (length > 0 and ([.[] | ((.jobs | type) == "array")] | all)) then [.[].jobs[]] else error end'
+
+          if own_jobs="$(api_get "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=all&per_page=100" "$jobs_filter" "jobs for own run")"; then
+            sent_own="$(jq '[.[] | .steps[]? | select(.name == "Record delivery" and .conclusion == "success")] | length' <<<"$own_jobs")"
+            if [ "${sent_own:-0}" -gt 0 ]; then
               duplicate=true
             fi
-          done <<<"$runs"
+          fi
+
+          if [ "$duplicate" = false ]; then
+            if ! runs_json="$(api_get "repos/$GITHUB_REPOSITORY/actions/workflows/notify-grokbot.yml/runs?event=pull_request&status=completed&head_sha=$DEDUP_SHA&per_page=100&exclude_pull_requests=true" "$runs_filter" "workflow runs")"; then
+              echo "duplicate=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            total_count_max="$(jq '.total_count_max' <<<"$runs_json")"
+            run_count="$(jq '.runs | length' <<<"$runs_json")"
+            if [ "${total_count_max:-0}" -gt 1000 ] || [ "${run_count:-0}" -ge 1000 ]; then
+              echo "::warning::dedup workflow-run search reached the 1000-item boundary; sending notification unless confirmed delivery is found." >&2
+            fi
+            invalid_count="$(jq '[.runs[] | select((.id | type) != "number" or (.event | type) != "string" or (.head_sha | type) != "string" or (.display_title | type) != "string")] | length' <<<"$runs_json")"
+            if [ "${invalid_count:-0}" -gt 0 ]; then
+              echo "::warning::dedup workflow-run search returned malformed entries; sending notification unless confirmed delivery is found." >&2
+            fi
+            while IFS= read -r run_id; do
+              [ -n "$run_id" ] || continue
+              if [ "$(date +%s)" -ge "$deadline" ]; then
+                echo "::warning::dedup check reached the 120-second budget; sending notification unless confirmed delivery is found." >&2
+                break
+              fi
+              if candidate_jobs="$(api_get "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?filter=all&per_page=100" "$jobs_filter" "jobs for candidate run $run_id")"; then
+                sent="$(jq '[.[] | .steps[]? | select(.name == "Record delivery" and .conclusion == "success")] | length' <<<"$candidate_jobs")"
+                if [ "${sent:-0}" -gt 0 ]; then
+                  duplicate=true
+                  break
+                fi
+              fi
+            done < <(jq -r --arg title "$expected_title" --arg sha "$DEDUP_SHA" --argjson self "$GITHUB_RUN_ID" '[.runs[] | select((.id | type) == "number" and .id != $self and .event == "pull_request" and .head_sha == $sha and .display_title == $title)] | sort_by((.created_at // ""), .id) | reverse | .[].id' <<<"$runs_json")
+          fi
           echo "duplicate=$duplicate" >> "$GITHUB_OUTPUT"
 
       - name: Note duplicate-head skip
@@ -191,9 +236,9 @@ jobs:
       # ${{ }} は run: に直接書かず、必要な値はすべてこの step の env: 経由で渡す。
       # 数値（pr_number）と真偽値（merged）は --argjson、値が空なら null。
       - name: Send notification
-        # dedup（Check duplicate notification step）はこの step 名で過去 run の
-        # 送信を照合する。step 名を変えるときは照合側の "Send notification" も
-        # 合わせる。
+        id: send
+        # 送信が 2xx で確認できたかは delivered output に残し、直後の
+        # Record delivery step が後の run から見える送信済みの印になる。
         # 3つのゲートを通ったときだけ送る:
         #   1) gate step: Secret あり・fork 由来ではない（should_send）
         #   2) env.COMMENT_ALLOWED: レビューは投稿者の
@@ -284,11 +329,24 @@ jobs:
           curl_exit=$?
           set -e
 
+          delivered=false
           if [ "$curl_exit" -ne 0 ]; then
             echo "::warning::Grok Bot notification was not delivered (curl exit $curl_exit; no HTTP status)."
           else
             case "$http_code" in
-              2??) echo "Grok Bot notification delivered. HTTP status: $http_code" ;;
+              2??)
+                delivered=true
+                echo "Grok Bot notification delivered. HTTP status: $http_code"
+                ;;
               *) echo "::warning::Grok Bot webhook responded with HTTP status $http_code." ;;
             esac
           fi
+          echo "delivered=$delivered" >> "$GITHUB_OUTPUT"
+
+      # 2xx が確認できたときだけ成功する送信済みの印。後の run は jobs API で
+      # この step の成功を見る。秘密値や応答本文は書かない。
+      - name: Record delivery
+        if: steps.send.outputs.delivered == 'true'
+        run: |
+          set -eu
+          echo "Delivery confirmed by HTTP 2xx."
