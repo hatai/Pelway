@@ -181,3 +181,17 @@ round 12 のレビューは、codex が request-changes（must-fix 2 件、`[文
 5. 改善案: round 8 のメモの改善案と同じ。
 
 使ったスキル: implement-issue
+
+## 実装者メモ（round 14）
+
+対象 head: 8d7af62bbbd43d84dd775eda8481ef325b283898
+
+round 13 のレビューは、codex が request-changes（must-fix 1 件、`[文書のずれ]` の nit 1 件）、claude が approve（`[文書のずれ]` の nit 1 件。codex の nit と同じ箇所）だった。どれも文書とコメントの修正で、コードの振る舞いは変えていない。
+
+1. 詰まった箇所: `docs/agents/grokbot-runbook.md` の `inbox_offset` の説明: 受信箱の置き換えと既読の位置の書き直しが、実行中の巡回の書き戻しと重なる筋書き（codex）。置き換えの前に実行中の巡回の書き戻しを待ち、両方を直し終えるまで次の巡回を始めない、と書いた。
+2. 曖昧だった文: 「受信箱を変更する前に実行中の巡回の書き戻しが終わるのを待ち、受信箱と既読位置の両方の復旧が済むまで次の巡回を始めない手順を明記してください。」（codex の round 13 のレビューの must-fix）。runbook の同じ行に、手順の順番として書いた。
+3. 仮定と解釈: 文書とコメントだけの変更なので、`mise run verify` は回さず、`cargo fmt --check` とビルドだけを確かめた（round 13 の head b5786dc6 で verify は exit=0）。
+4. 足りなかった情報・検証手段: 巡回と受信箱の置き換えが重なる筋書きは、agent-watch のテストの範囲外で、確かめていない。
+5. 改善案: round 8 のメモの改善案と同じ。
+
+使ったスキル: implement-issue
