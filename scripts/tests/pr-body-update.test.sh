@@ -437,8 +437,14 @@ expect_fail 755 "a non-heading line cannot cut a continued code span: examples s
 without '19s/.*/例 `code\n``x` 最後に検証した sha: `'$OLD_VER'` という行/; 29s/.*/例 `code\n``x` HEAD: `'$OLD_HEAD'` という行/'
 expect_ok 756 "a marker right after the closing run on the same line is rewritten at the right position"
 # --- リスト項目・引用の中のフェンス付きコードは構造を解かず、その節の書き換えを止める（同上）---
-without '29s/.*/- ~~~text\n  HEAD: abcdef0\n  ~~~/'
+without '29a\- ~~~text\n  HEAD: abcdef0\n  ~~~/'
 expect_fail 757 "a fence inside a list item stops the section even with a real line elsewhere" 'フェンス付きコード'
+# バッククォートのフェンスはインラインコードとして隠れるため、隠す前の生の行で見る（レビュー round 6 の must-fix）
+without '19s/.*/> ```text\n> 最後に検証した sha: abcdef0\n> ```/; 29s/.*/- ```text\n  - HEAD: abcdef0\n  ```/'
+expect_fail 758 "backtick fences inside list and quote containers stop the section" 'フェンス付きコード'
+# 引用の段落の継続行は行をまたぐインラインコードを切らない（同上）
+without '19s/.*/> 例 `code\n> 最後に検証した sha: abcdef0`/; 29s/.*/> 例 `code\n> HEAD: abcdef0`/'
+expect_fail 759 "a quote continuation line cannot cut a code span: examples stay hidden" "$NO_VER" "$NO_HEAD"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}" >&2
