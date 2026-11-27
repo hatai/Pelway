@@ -183,7 +183,9 @@ issue_rewrite() {
   fi
   # gh の --jq は値の末尾に改行を 1 つ足して出す。渡した本文の写しに同じ改行を足したものとバイト単位で比べる
   # （出力が足した改行だけを除いて比べるのと同じ。本文自身の末尾の改行も比べる）。
-  if ! { cat -- "$issue_rewrite_body"; printf '\n'; } | cmp -s - "$readback"; then
+  # 等しいと判定するのは、両辺を最後まで読めて一致したときだけにする。写しを読めないときは `&&` で受けて比べを
+  # 失敗させ、読み直した本文を読めないときは cmp が 0 以外で失敗する。どちらもコメントを付けない。
+  if ! { cat -- "$issue_rewrite_body" && printf '\n'; } | cmp -s - "$readback"; then
     echo "agent-gh: Issue #$issue_rewrite_n を読み直した本文が渡した本文と違います。コメントは付けません" >&2
     exit 6
   fi

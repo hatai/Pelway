@@ -24,11 +24,13 @@ EOF
 #   issue edit <N> --body-file <F>         F の中身を Issue の本文にする。FAKE_GH_EDIT_NOOP なら何も書き換えずに成功を返す。
 #                                          FAKE_GH_TRIM_NL なら末尾の改行を全部落として保存する。
 #                                          FAKE_GH_CLOBBER_BODY なら読む前に ORIG_BODY のファイルを空にする
-#   issue view <N> --json body --jq .body  今の本文を出す（本物の --jq と同じく末尾に改行を 1 つ足す）
+#   issue view <N> --json body --jq .body  今の本文を出す（本物の --jq と同じく末尾に改行を 1 つ足す）。
+#                                          FAKE_GH_DROP_COPY のときは読む前に本文の写しを消す
 #   issue comment <N> --body-file <F>      F の中身を CALL_LOG.comment に写す。FAKE_GH_CLOBBER_COMMENT なら読む前に
 #                                          ORIG_COMMENT のファイルを別の文に差し替える
 # FAKE_GH_FAIL_EDIT・FAKE_GH_FAIL_VIEW・FAKE_GH_FAIL_COMMENT で、その呼び出しだけを失敗させる。
 # FAKE_GH_CLOBBER_* は、agent-gh が入力を検査した後で別のプロセスが入力ファイルを変えたことにする。
+# FAKE_GH_DROP_COPY は、編集のあとで本文の写しが読めなくなり、Issue の本文が空になったことにする。
 # ほかの呼び出し（実装前に gh へそのまま渡される `issue rewrite` など）は引数を記録して終了コード 0。
 cat >"$BIN/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -47,7 +49,10 @@ case "${1:-} ${2:-}" in
   "issue edit")
     [[ -z "${FAKE_GH_FAIL_EDIT:-}" ]] || exit 1
     [[ -z "${FAKE_GH_CLOBBER_BODY:-}" ]] || : >"$ORIG_BODY"
-    if [[ -n "${FAKE_GH_EDIT_NOOP:-}" ]]; then
+    if [[ -n "${FAKE_GH_DROP_COPY:-}" ]]; then
+      printf '%s\n' "$body_file" >"$CALL_LOG.body_copy"
+      : >"$STATE.body"
+    elif [[ -n "${FAKE_GH_EDIT_NOOP:-}" ]]; then
       :
     elif [[ -n "${FAKE_GH_TRIM_NL:-}" ]]; then
       printf '%s\n' "$(cat -- "$body_file")" >"$STATE.body"
@@ -57,6 +62,7 @@ case "${1:-} ${2:-}" in
     ;;
   "issue view")
     [[ -z "${FAKE_GH_FAIL_VIEW:-}" ]] || exit 1
+    [[ -z "${FAKE_GH_DROP_COPY:-}" ]] || rm -f -- "$(cat -- "$CALL_LOG.body_copy")"
     cat -- "$STATE.body"
     printf '\n'
     ;;
@@ -145,6 +151,12 @@ FAKE_GH_EDIT_NOOP=1 run readback_differs dev issue rewrite 42 --body-file "$BODY
 FAKE_GH_FAIL_VIEW=1 run view_fails dev issue rewrite 42 --body-file "$BODY" --comment-file "$COMMENT"
 [[ "$RC" != 0 ]] || failures+=("view_fails: exit 0")
 [[ "$(calls view_fails)" == "$EDIT"$'\n'"$VIEW" ]] || failures+=("view_fails: calls are '$(calls view_fails)'")
+# 比べるときに本文の写しを読めないときは、比べに失敗したものとしてコメントを付けない。読み直した Issue 本文が
+# 空で、比べる両側が改行 1 バイトだけになっても、同じにはしない。
+FAKE_GH_DROP_COPY=1 run copy_unreadable dev issue rewrite 42 --body-file "$BODY" --comment-file "$COMMENT"
+[[ "$RC" == 6 ]] || failures+=("copy_unreadable: exit $RC, want 6")
+[[ "$(calls copy_unreadable)" == "$EDIT"$'\n'"$VIEW" ]] || failures+=("copy_unreadable: calls are '$(calls copy_unreadable)'")
+[[ ! -e "$ROOT/copy_unreadable.log.comment" ]] || failures+=("copy_unreadable: comment posted")
 
 # コメントだけが失敗したときは 0 以外で終わる（本文は書き換わっている）
 FAKE_GH_FAIL_COMMENT=1 run comment_fails dev issue rewrite 42 --body-file "$BODY" --comment-file "$COMMENT"
