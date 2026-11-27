@@ -5,17 +5,20 @@
 #   scripts/agent-team-config validate [<file>]          検証する。<file> の既定はルートの agent-team.toml
 #   scripts/agent-team-config slots <login> [<file>]     その開発者の実装・調査の枠を「<担当> <上限>」で 1 行 1 つ出す
 #                                                        （validate と同じ検証を通してから出す。違反があれば非 0 で標準出力は空）
-#   scripts/agent-team-config effective <login> [<file>] 重ねた結果（その開発者の表と担当の登録情報）を JSON で出す。
-#                                                        手順書・skill で toml を直接読む代わりに使う
+#   scripts/agent-team-config effective <login> [<file> [<local-file>]]
+#                                                        重ねた結果（その開発者の表と担当の登録情報）を JSON で出す。
+#                                                        手順書・skill で toml を直接読む代わりに使う。<local-file> は
+#                                                        共有と別の場所の local を重ねるときに使う
 #   scripts/agent-team-config -h | --help                この使い方を出す
 # 終了コード: 0 = 成功、1 = 検証の失敗・TOML として読めない・読み出せない、2 = 引数の誤り・ファイルが無い
-# agent-team.local.toml（追跡しない開発者ごとの上書き）は <file> と同じディレクトリから読む。
+# agent-team.local.toml（追跡しない開発者ごとの上書き）は <file> と同じディレクトリから読む
+# （effective に <local-file> を渡したときはそちらから読む）。
 # 上書きできる項目とできない項目の表は docs/superpowers/specs/agent-team.md「開発者ごとの上書き」。
 # 上書きできない項目はキー名と理由を標準エラーに警告して無視する（黙って適用も黙って無視もしない）。
 # TOML は python3 の tomllib で読み、scripts/conductor-watch.sh と同じ python3 -I で起動する。
 set -uo pipefail
 
-usage_text="usage: $0 <validate [<file>] | slots <login> [<file>] | effective <login> [<file>]>"
+usage_text="usage: $0 <validate [<file>] | slots <login> [<file>] | effective <login> [<file> [<local-file>]]>"
 
 usage() { echo "$usage_text" >&2; exit 2; }
 

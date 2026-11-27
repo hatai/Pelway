@@ -563,6 +563,12 @@ rm "$ROOT/agent-team.local.toml" "$ROOT/l24.toml"
 # 本体の checkout の local を重ねる読み方。レビュー担当選定でブランチの版を
 # 使わないため）
 write_case "$ROOT/shared29.toml" < <(dev_case)
+# 共有と同じディレクトリに local を置いておき、明示した <local-file> だけが
+# 読まれる（同じディレクトリの方は重ならない）ことを確かめる
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[developers.dev.slots]
+devin = 9
+EOF
 cat > "$ROOT/some-dir.local.toml" <<'EOF'
 [developers.dev]
 use = ["opencode", "devin", "codex", "claude"]
@@ -573,7 +579,8 @@ EOF
 bash "$CFG" effective dev "$ROOT/shared29.toml" "$ROOT/some-dir.local.toml" > "$ROOT/out" 2>"$ROOT/err"; rc=$?
 check "29: effective with explicit local exits 0" eq "$rc" "0"
 check "29: local applied from the explicit path" bash -c "grep -qF '\"devin\": 2' '$ROOT/out'"
-rm "$ROOT/some-dir.local.toml" "$ROOT/shared29.toml"
+check "29: sibling local not applied when <local-file> given" bash -c "! grep -qF '\"devin\": 9' '$ROOT/out'"
+rm "$ROOT/some-dir.local.toml" "$ROOT/shared29.toml" "$ROOT/agent-team.local.toml"
 
 # 30: local が FIFO（ブロックする特殊ファイル）でも open が待たずに
 # 「通常ファイルでない」として重ねない

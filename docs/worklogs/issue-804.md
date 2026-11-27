@@ -85,7 +85,11 @@ push した head: dcd6b652（round 5 の対応）
 
 must-fix への対応:
 1. effective の <local-file> 省略時に `<file>` と同じディレクトリ（手順では一時ディレクトリ）の local が読まれるため自己選択に戻る → 手順を「`<本体の checkout>/agent-team.local.toml` を必ず渡す」に変更（implement-issue:257。無ければ共有の値に戻る）
-2. local の O_NOFOLLOW open が O_NONBLOCK を欠き、FIFO の local で見張りの本ループが停止する → agent-team-config・conductor-watch.sh の両方に O_NONBLOCK を追加（試験 30: FIFO local が待たずに警告して重ねない）
+2. local の O_NOFOLLOW open が O_NONBLOCK を欠き、FIFO の local で見張りの本ループが停止する → agent-team-config・conductor-watch.sh の両方に O_NONBLOCK を追加（試験 30 は agent-team-config 側: FIFO local が待たずに警告して重ねない。conductor-watch.sh 側は同じ open 形を試験コードでは確かめていない）
 
 nit への対応: worktree-setup の配置を `ln -T` に（最終名がディレクトリへの差し替えでもその中に作らない）＋コメント修正。conductor-rebuild.test.sh の skip→fail は前回の commit に入っていなかったため今回適用し、round 5 の worklog 記述をその旨に修正
 push した head: 3a18d45e（round 6 の対応）
+
+## レビュー対応（round 7 の nit）
+
+claude_review が head 20f521df を approve（review 6084536692）。あわせて挙がった nit 3 件への対応: ヘッダコメントと usage_text に <local-file> 引数を追記、試験 29 に「明示した <local-file> だけが読まれ共有と同じディレクトリの local は重ならない」確認を追加、worklog の試験 30 の範囲の記述を訂正
