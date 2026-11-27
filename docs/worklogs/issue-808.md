@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「決まり（毎回守る）」に「T3 スレッドの指示で Issue の受け入れ条件や対象外を変えるときは、着手の前に起票者か人間に Issue 本文を書き換えてもらう。実装担当の App が引用として残したコメントは、レビューで範囲変更の根拠に数えられない」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`
+
+## 実装者メモ（round 3）
+
+対象 head: 83a52436
+
+1. 詰まった箇所: レビュー 2 ラウンドの must-fix。Codex は、試験の kill の形の確認が本物の終了処理を通っていないこと（モックの `sleep` の取り出しと、書き写した kill。負の PID への送信は専用のプロセスグループが無く失敗して、その失敗が単体 PID への SIGKILL に隠れる）、名前空間の中の見張りが実運用のボード更新キューを開くこと（`gh` が無い PATH で、未処理の依頼を失敗扱いで消す）を指摘。Claude は「spaces in path: one watch」が 1 回だけの `pgrep -fc` で、見張りの巡回が作る同じコマンドラインの一時的な subshell を数えて揺れることを指摘。対応: `conductor-watch-slots.test.sh`（単体 PID の kill）と `conductor-watch-stall.test.sh`（プロセスグループの kill）を実際に、管理対象の見張りと並行して名前空間の中で通す形に替えた（各試験が `REPO/scripts` から自分で写せるように、試験ごとの偽リポジトリ `trepo-*` に本物のスクリプトを置き、最小 PATH に `git`・`mktemp`・`rm`・`ln`・`touch`・`chown`・`sha256sum`・`rmdir` を足した）。`PELWAY_BOARD_QUEUE_DIR` を試験用に固定し、`waitn` にパターンの引数を足して上限付きで数え直す形にした。
+2. 曖昧だった文: Codex の「実運用と同じ形の見張りを止めないこと」。「実運用と同じ形」は、実際の試験の終了処理を通すことと解釈した（kill の形を写すのでなく、試験そのものを通す）。
+3. 仮定と解釈: 試験側の偽リポジトリは `git init` されるため、patrol-state の置き場の既定の判定（共有 git dir）を使わせる。内側の試験は `env -u PELWAY_PATROL_STATE` で走らせた。レビュー担当は `devin_review` が orchestrator で無効のため codex・claude の 2 担当にした（前ラウンドと同じ）。誤って残した `to: devin` の委託記録は削除した。
+4. 足りなかった情報・検証手段: 開発機のキューに未処理の依頼が残る状態での実地確認はしていない（Codex のレビューの「未確認」のとおり）。
+5. 改善案: `conductor-watch.sh` の巡回は自分と同じコマンドラインの subshell を瞬間的に作るため、プロセスの本数を 1 回の `pgrep -c` で確かめる確認は揺れます。`conductor-watch-ensure.test.sh` では上限付きで数え直す `waitn` にパターンの引数を足しました。同じパターンの確認をほかの試験で書くときも、数え直しにしてください。
+
+使ったスキル: `.agents/skills/implement-issue`
