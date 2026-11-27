@@ -310,13 +310,11 @@ push_role exact dev -u origin HEAD
   failures+=("push_exact_marker: not pushed: rc=$RC $ERR")
 # 開始の記録は印の世代ごとに効く。別世代の記録は残っていても、今の印を指す記録だけが止める。
 state_dir="$REPO_DIR/work/.pelway-verify/started"; attempt=0123456789abcdef0123456789abcdef
-printf 'old generation
-' >"$state_dir/0000000000000000000000000000000000000000000000000000000000000000.$attempt"
+printf 'old generation\n' >"$state_dir/0000000000000000000000000000000000000000000000000000000000000000.$attempt"
 push_role generation_old dev origin HEAD:refs/heads/agent/generation-old
 [[ "$RC" == 0 ]] || failures+=("push_generation_old: stopped by another generation: rc=$RC $ERR")
 marker_fp="$(sha256sum <"$(marker_file)" | cut -d' ' -f1)"
-printf 'failed generation
-' >"$state_dir/$marker_fp.$attempt"
+printf 'failed generation\n' >"$state_dir/$marker_fp.$attempt"
 push_role generation_match dev origin HEAD:refs/heads/agent/generation-match
 [[ "$RC" != 0 && "$ERR" == *'前回の verify はこの印を無効化しました'* ]] ||
   failures+=("push_generation_match: not stopped: rc=$RC $ERR")
@@ -347,6 +345,17 @@ push_role invalidate_fails dev origin HEAD:refs/heads/agent/invalidate-fails
 [[ "$invalidate_verify_rc" != 0 && "$RC" != 0 && "$ERR" == *'前回の verify はこの印を無効化しました'* ]] ||
   failures+=("verify_invalidate_fails: verify=$invalidate_verify_rc push=$RC $ERR")
 [[ -z "$(remote_ref agent/invalidate-fails)" ]] || failures+=("verify_invalidate_fails: remote ref changed")
+# .pelway-verify そのものが symlink なら、リンク先の started が正しい形でも止める。
+setup_repo control_symlink
+printf 'implementation\n' >"$REPO_DIR/work/code.txt"
+(cd "$REPO_DIR/work" && bash "$RECORD" >/dev/null 2>&1)
+work_git add code.txt; (cd "$REPO_DIR/work" && as 'pelway-dev[bot]' commit -q -m implementation)
+mkdir -p "$ROOT/control-target/started"; chmod 700 "$ROOT/control-target" "$ROOT/control-target/started"
+rm -rf "$REPO_DIR/work/.pelway-verify"; ln -s "$ROOT/control-target" "$REPO_DIR/work/.pelway-verify"
+push_role control_symlink dev -u origin HEAD
+[[ "$RC" != 0 && "$ERR" == *'信頼できるディレクトリではありません'* ]] ||
+  failures+=("push_control_symlink: not stopped: rc=$RC $ERR")
+[[ -z "$(remote_ref agent/control_symlink)" ]] || failures+=("push_control_symlink: remote ref changed")
 # --- HEAD と印の差が docs/worklogs/ の下だけなら通す（実装コミットとメモコミットの両方） ---
 setup_repo worklogs
 printf 'implementation\n' >"$REPO_DIR/work/code.txt"

@@ -37,8 +37,18 @@ read_marker() {
     stop_unverified "印 $marker_path の形を判定できません"
 
   scan_started_dir "$git_dir/pelway-verify-started" 0
+  validate_trusted_dir "$root/.pelway-verify"
   scan_started_dir "$root/.pelway-verify/started" 1
   [[ "$(git --no-replace-objects cat-file -t "$marker" 2>/dev/null)" == tree ]] || stop_unverified "印の木 $marker を読めません"
+}
+
+validate_trusted_dir() {
+  local dir="$1"
+  [[ -d "$dir" && ! -L "$dir" && -O "$dir" && -r "$dir" && -x "$dir" ]] ||
+    stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
+  local mode
+  mode="$(stat -c %a -- "$dir" 2>/dev/null)" || stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
+  (( (8#$mode & 022) == 0 )) || stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
 }
 
 scan_started_dir() {
@@ -47,11 +57,7 @@ scan_started_dir() {
     ((required)) && stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
     return 0
   fi
-  [[ -d "$dir" && ! -L "$dir" && -O "$dir" && -r "$dir" && -x "$dir" ]] ||
-    stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
-  local mode
-  mode="$(stat -c %a -- "$dir" 2>/dev/null)" || stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
-  (( (8#$mode & 022) == 0 )) || stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
+  validate_trusted_dir "$dir"
   if ((required)); then
     local state_probe
     state_probe="$(mktemp "$dir/probe.XXXXXX" 2>/dev/null)" || stop_unverified "verify の開始の記録を残せない状態です"
