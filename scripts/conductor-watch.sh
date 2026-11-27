@@ -1100,7 +1100,8 @@ PY
   # 既定 240）ごとに必ず取り直す。前の書き出しは読まない（共有の置き場の内容を
   # 鮮度の判定に信じない）。
   # 取得に失敗した巡回は前の書き出しを残し、失敗を BOARD snapshot-failed の行で出す。
-  # 書き出し先はキューと同じく利用者が書ける場所にあるため、一時ファイルは
+  # 書き出し先は見張りの状態ディレクトリ（ホストだけが更新できる場所。
+  # runbook の節）。利用者が書ける場所でもあるため、一時ファイルは
   # 予測不能な名前を O_EXCL|O_NOFOLLOW で作ってから置き換える。
   if [[ -n "$SNAP" ]]; then
   snap_interval="${PELWAY_BOARD_SNAPSHOT_INTERVAL:-240}"
@@ -1197,7 +1198,7 @@ for it in raw_items:
 
 body = {"version": 1, "fetched_at": now,
         "project": f"users/{OWNER}/projects/{NUM}", "items": items}
-payload = json.dumps(body, ensure_ascii=False)
+payload = json.dumps(body, ensure_ascii=False, allow_nan=False)
 # 容量の契約は reader（scripts/board-snapshot-read）と同じ 4 MiB。
 # 上限を超えた書き出しは reader が必ず broken と読むため、公開すると
 # 有効な前回分が失われる。超えたときは公開せず前回分を残す

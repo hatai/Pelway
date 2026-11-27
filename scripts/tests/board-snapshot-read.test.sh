@@ -23,6 +23,7 @@ check() {
 # run_read: 環境を固定して reader を実行し、stdout を $ROOT/out.json、終了コードを rc に残す
 run_read() {
   PELWAY_BOARD_SNAPSHOT="$SNAP" PELWAY_BOARD_SNAPSHOT_NOW="$NOW" \
+    PELWAY_BOARD_SNAPSHOT_ALLOW_WRITABLE="${ALLOW_WRITABLE-1}" \
     python3 "$READER" > "$ROOT/out.json" 2> "$ROOT/err.txt"
   rc=$?
 }
@@ -130,12 +131,16 @@ check "missing: exit nonzero" test "$rc" -ne 0
 check "missing: ok=false" test "$(jqv 'd["ok"]')" = "False"
 check "missing: reason is missing" test "$(jqv 'd["reason"]')" = "missing"
 
-# 5. symlink・通常でないファイルは broken として扱う（たどって読まない）
+# 5. symlink・通常でないファイルは broken として扱う（たどって読まない）。
+# リンク先は有効な書き出しにする: 壊れた JSON へのリンクでは、たどって読んでも
+# 同じ終了コードになり、リンクを開く段階で拒否したことと区別が付かないため
 write_ok_snapshot $((NOW - 60))
+cp "$SNAP" "$ROOT/target-outside"
 ln -sf "$ROOT/target-outside" "$SNAP.link"
-printf 'x' > "$ROOT/target-outside"
 SNAP="$SNAP.link" run_read
-check "symlink is not followed (missing target ok but link itself rejected or treated safely)" test "$rc" -ne 0
+check "symlink is rejected: exit nonzero" test "$rc" -ne 0
+check "symlink is rejected: detail is not-openable" test "$(jqv 'd["detail"]')" = "not-openable"
+check "symlink is rejected: items not exposed" test "$(jqv '"items" in d')" = "False"
 
 # 6. 空の items は正常（ボードが空なら 0 件は正しい）
 echo '{"version": 1, "fetched_at": '"$((NOW - 10))"', "items": []}' > "$SNAP"
@@ -210,10 +215,39 @@ mkdir -p "$ROOT/state/pelway/conductor-watch"
 write_ok_snapshot $((NOW - 60))
 cp "$SNAP" "$ROOT/state/pelway/conductor-watch/board-snapshot.json"
 rm -f "$SNAP"
-( cd "$ROOT" && XDG_STATE_HOME="$ROOT/state" HOME="$ROOT/nohome" PELWAY_BOARD_SNAPSHOT_NOW="$NOW"     python3 "$READER" > "$ROOT/out.json" 2> "$ROOT/err.txt" )
+( cd "$ROOT" && XDG_STATE_HOME="$ROOT/state" HOME="$ROOT/nohome" PELWAY_BOARD_SNAPSHOT_NOW="$NOW"     PELWAY_BOARD_SNAPSHOT_ALLOW_WRITABLE=1 python3 "$READER" > "$ROOT/out.json" 2> "$ROOT/err.txt" )
 rc=$?
 check "default path is state dir: exit 0" test "$rc" -eq 0
 check "default path is state dir: ok=true" test "$(jqv 'd["ok"]')" = "True"
+
+# 13. 公開先が指揮役側から書き換えられる場所（ファイル・親ディレクトリのいずれかが
+# 書き込み可）にある書き出しは broken（detail: writable-location）にする。
+# 所有者の検査では同じ uid の別のエージェントの変更を区別できないため、
+# 運用で使う公開先はホストだけが更新できる場所（sandbox から読み取り専用）に限る。
+# この検査は PELWAY_BOARD_SNAPSHOT_ALLOW_WRITABLE を付けずに行う。
+write_ok_snapshot $((NOW - 60))
+ALLOW_WRITABLE= run_read
+check "writable file location: exit nonzero" test "$rc" -ne 0
+check "writable file location: reason is broken" test "$(jqv 'd["reason"]')" = "broken"
+check "writable file location: detail is writable-location" test "$(jqv 'd["detail"]')" = "writable-location"
+check "writable file location: items not exposed" test "$(jqv '"items" in d')" = "False"
+
+# ファイル自体を書き込み不可にしても、親ディレクトリが書き込み可なら拒否する
+# （親で置き換えられるため）
+chmod 444 "$SNAP"
+ALLOW_WRITABLE= run_read
+check "writable parent dir: detail is writable-location" test "$(jqv 'd["detail"]')" = "writable-location"
+chmod 644 "$SNAP"
+
+# 親を書き込み不可にしても、祖父母が書き込み可なら拒否する
+# （チェーンのどこかで差し替えられるため。/tmp 配下は最終的に /tmp が
+# 書き込み可のため、許可無しでは必ず拒否される = 正しい拒否）
+mkdir -p "$ROOT/chain/pelway/conductor-watch"
+cp "$SNAP" "$ROOT/chain/pelway/conductor-watch/board-snapshot.json"
+chmod 555 "$ROOT/chain/pelway/conductor-watch"
+SNAP="$ROOT/chain/pelway/conductor-watch/board-snapshot.json" ALLOW_WRITABLE= run_read
+check "writable grandparent: detail is writable-location" test "$(jqv 'd["detail"]')" = "writable-location"
+chmod 755 "$ROOT/chain/pelway/conductor-watch"  # trap の rm が片付けられるように戻す
 
 printf '\n'
 if ((${#failures[@]})); then

@@ -176,7 +176,8 @@ check "snapshot type readable" test "$(jqv 'd["items"][2]["type"]' "$SNAP")" = "
 check "snapshot has no body/title" test "$(jqv '"title" not in d["items"][0] and "body" not in d["items"][0]' "$SNAP")" = "True"
 
 # 2. reader（scripts/board-snapshot-read）がその書き出しを正常と読める
-PELWAY_BOARD_SNAPSHOT="$SNAP" python3 "$REPO/scripts/board-snapshot-read" > "$ROOT/read.json"
+# （テストの置き場は書き込み可の tmp のため、書き込み可否の検査は外す）
+PELWAY_BOARD_SNAPSHOT="$SNAP" PELWAY_BOARD_SNAPSHOT_ALLOW_WRITABLE=1 python3 "$REPO/scripts/board-snapshot-read" > "$ROOT/read.json"
 check "reader accepts written snapshot" test "$(jqv 'd["ok"]' "$ROOT/read.json")" = "True"
 
 # 3. item-list が失敗する巡回では前の書き出しが残る（消えない・空にならない）

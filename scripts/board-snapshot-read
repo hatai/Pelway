@@ -31,6 +31,7 @@ reason の意味:
 - PELWAY_BOARD_SNAPSHOT_MAX_AGE: 新しいとみなす上限の秒数（既定 960）
 - PELWAY_BOARD_SNAPSHOT_NOW: 「今」の epoch 秒（既定は現在時刻）
 - PELWAY_BOARD_SNAPSHOT_EXPECT_UID: 所有者と比べる uid（既定は自分の euid）
+- PELWAY_BOARD_SNAPSHOT_ALLOW_WRITABLE: 公開先の書き込み可否の検査を外す（運用では使わない）
 """
 import json
 import math
@@ -115,6 +116,37 @@ def _main():
             euid = os.geteuid()
         if st.st_uid != euid:
             fail("broken", detail="foreign-owner", path=path)
+        # 公開先が指揮役側から書き換えられる場所にあれば壊れた書き出しとして扱う。
+        # 所有者の検査では同じ uid の別のエージェントの変更を区別できない。
+        # ファイルそのものだけでなく親ディレクトリも確かめる: チェーンのどこかが
+        # 書き込み可なら、そこで差し替えた偽の書き出しを本物と読んでしまう。
+        # 運用で使う公開先はホストだけが更新できる場所（sandbox から読み取り専用）
+        # に限る（runbook の節。PELWAY_BOARD_SNAPSHOT_ALLOW_WRITABLE はテスト用）。
+        if not os.environ.get("PELWAY_BOARD_SNAPSHOT_ALLOW_WRITABLE"):
+            chain = [path]
+            parent = os.path.dirname(os.path.abspath(path))
+            while True:
+                chain.append(parent)
+                # マウントポイントで止める: マウントポイントのディレクトリは
+                # マウントに固定されていて rename・unlink できない（EBUSY）ため、
+                # その上のディレクトリが書き込み可でも配下の解決を差し替えられない
+                # （sandbox の / は書き込み可の tmpfs だが、/home の ro マウントの
+                # 配下はこの規則で守られる）。マウントポイント自身は確かめる:
+                # その中身（マウントされたファイルシステムの根）の書き込み可否は
+                # 配下の項目の差し替えに効く
+                if os.path.ismount(parent):
+                    break
+                up = os.path.dirname(parent)
+                if up == parent:
+                    break
+                parent = up
+            for comp in chain:
+                try:
+                    writable = os.access(comp, os.W_OK, effective_ids=True)
+                except OSError:
+                    writable = False
+                if writable:
+                    fail("broken", detail="writable-location", path=path)
         data = f.read(SNAP_MAX + 1)
     if len(data) > SNAP_MAX:
         fail("broken", detail="too-large", path=path)
