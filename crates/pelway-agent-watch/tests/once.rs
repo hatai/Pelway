@@ -2761,3 +2761,59 @@ fn fresh_line_is_unknown_after_the_inbox_is_rewritten() {
     let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 2, "{}", stderr(&out));
 }
+
+#[test]
+fn quiet_notice_cycle_forgets_pending_line_after_rewrite() {
+    // b の failed（2 行目）を後に回したあと、受信箱の先頭に 1 行が差し込まれた。
+    // その後、指揮役自身の finished だけが来た周（知らせを書く周）でも、印の行番号は不明になり、
+    // 既読 2 で取り消さずに起こす
+    let sb = Sandbox::new("wake-839-quiet-after-insert");
+    let list = |b: &str, conductor: &str| {
+        format!(
+            r#"[{{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}},
+  {{"threadId":"mcp:b","status":"{b}","updatedAt":"2026-11-10T16:30:00Z"}},
+  {{"threadId":"mcp:conductor-1","status":"{conductor}","updatedAt":"2026-11-10T16:40:00Z"}}]"#
+        )
+    };
+    sb.fake("list.json", &list("running", "running"));
+    sb.fake("show-mcp_a.json", SHOW_A_DONE);
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "running", "2026-11-10T16:30:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "running", "2026-11-10T16:40:00Z", 0),
+    );
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{
+  "mcp:a":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:b":{"status":"running","updated_at":"2026-11-10T16:30:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:30:00Z"},
+  "mcp:conductor-1":{"status":"running","updated_at":"2026-11-10T16:40:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:40:00Z"}},
+  "ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    run_cooldown(&sb);
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    sb.fake("list.json", &list("failed", "running"));
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    run_cooldown(&sb);
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    let text = fs::read_to_string(sb.inbox()).unwrap();
+    fs::write(sb.inbox(), format!("{{\"inserted\":1}}\n{text}")).unwrap();
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    backdate_last_wake(&sb);
+    sb.fake("list.json", &list("failed", "completed"));
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "completed", "2026-11-10T16:40:00Z", 0),
+    );
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
