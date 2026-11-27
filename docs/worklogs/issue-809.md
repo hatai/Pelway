@@ -47,3 +47,15 @@
 5. 改善案: hatai の指示（t629u）で運用が変わったなら、`.agents/skills/implement-issue/SKILL.md` の「止まる条件」と `.agents/skills/command-team/SKILL.md` の「レビューのラウンド」の上限を更新する。更新までの間は、割り当ての指示に「ラウンド上限は無視する」と書いておくと、実装担当が止まるかどうかの判断に迷わない。
 
 使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/mutation-testing`（手動の変異 38 種の生き残りの解釈に「What Results Mean」）
+
+## 実装者メモ（round 5）
+
+対象 head: 0ce7354ee5bc6de90ded39798922a39982e5879d
+
+1. 詰まった箇所: 手順 9: Codex の round 4 のレビュー（run 7211569851、aa8043f4 に request-changes、must-fix 2 件）。Claude の round 4 のレビューは委託済みだったが投稿が無く、指摘は Codex の 2 件だけを直した。`git merge origin/main` は round 1 と同じく `.devin/config.json` の `Read-only file system` で止まるため、main が変えた範囲（`scripts/pr-body-update`・`implement-issue/SKILL.md`）はこのブランチの変更と重ならないことを diff で確かめ、取り込まずに進めた。
+2. 曖昧だった文: 「ブロックの始まり」の判定 — Markdown のどの規則に合わせるかはレビューにも仕様にも書かれていない。
+3. 仮定と解釈: CommonMark のブロック生成の規則に合わせた（見出しは `#` の後ろに空白か行末、バッククォートのフェンスの info 文字列に `` ` `` は含めない、段落は箇条書きでは `-`・`+`・`*` と `1.` だけで切れる、字下げ 4 以上では切れない）。箇条書きの中で開いたフェンスは容器ごとの解析が要るため、その構造を含む節は書き換えずに止める形にした。インラインコードを隠すときは文字数を保つ（違う長さのバッククォート列を 1 空白に潰すと位置がずれるため）。
+4. 足りなかった情報・検証手段: 新しい試験 3 件が修正前の head で落ちること（`scripts/red-check HEAD`）と、修正後で通ることを確かめた。`mise run verify` は 2 回走らせ、1 回目は `target/` がビルドの途中で消える環境起因の失敗（`aws-lc-sys` の .o 作成と rustc の一時 dir）、2 回目は落ちるのが同じ 2 本だけ（`verify-run.test.sh` と `agent-team-config.test.sh`）だった。
+5. 改善案: 指摘の「節の中の例をコードの文脈から守る」問題は、PR 本文を生成する側（テンプレート・skill）で例をフェンス付きコードに置く形にすれば、道具側の構文解析をこれ以上育てなくて済む。
+
+使ったスキル: `.agents/skills/implement-issue`
