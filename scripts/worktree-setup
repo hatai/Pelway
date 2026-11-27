@@ -43,6 +43,7 @@ EOF
     ;;
 esac
 
+if [[ -z "${WS_SRCFD:-}" ]]; then
 src="" dst=""
 while (($#)); do
   case "$1" in
@@ -62,16 +63,45 @@ fi
 # 環境に GIT_DIR・GIT_WORK_TREE があると検査対象がずれるため捨てる
 unset GIT_DIR GIT_WORK_TREE
 
-[[ -d "$src" ]] || die "--from の checkout が無い: $src"
-[[ -d "$dst" ]] || die "--dest の worktree が無い: $dst"
 # 読み書きの基点になる両側のディレクトリを先に fd で固定する。以後の検査・
-# 存在確認・コピーはすべて /proc/self/fd 経由でこれらの fd 起点に行い、
+# 存在確認・コピーはすべてこの fd 起点（dir_fd か /proc/self/fd 経由）に行い、
 # 検査したディレクトリと読み書き先を同一のものに結びつける（パスが並行して
-# 差し替わっても検査したディレクトリを見る）。exec のエラーを捨てる
-# 2>/dev/null は付けられない（引数なしの exec はリダイレクトが永続するため、
-# 以後の標準エラーが消える）
-exec {dstdir}<"$dst"
-exec {srcdir}<"$src"
+# 差し替わっても検査したディレクトリを見る）。
+# ディレクトリは O_DIRECTORY|O_NOFOLLOW|O_NONBLOCK で開く。通常のリダイレクト
+# で開くと、開く時点でパスが名前付きパイプに変わっている場合に書き手を待って
+# 後続の検査に届かず、同期実行の T3 アクションや指揮役の交代が止まる。
+# ディレクトリ専用の開き方なら待たずに種類も同時に確かめられる（symlink は
+# たどらず、通常のディレクトリだけを開く）。bash のリダイレクトではこれらの
+# フラグを付けられないため、python で開いて fd を env 経由で引き継ぎ、
+# 自分自身を起動し直す（起動し直しは引数の再解釈を避けるため env の
+# WS_SRCFD/WS_DSTFD/WS_SRC/WS_DST だけを見る）
+  exec python3 -I - "${BASH_SOURCE[0]}" "$src" "$dst" <<'INNER'
+import errno, os, sys
+script, src, dst = sys.argv[1:4]
+def opendir(path, side):
+    try:
+        return os.open(path, os.O_RDONLY | os.O_DIRECTORY |
+                       os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        print(f"worktree-setup: {side} が無い: {path}", file=sys.stderr)
+        sys.exit(1)
+    except OSError as e:
+        why = "通常のディレクトリでない（symlink や FIFO は開かない）" \
+            if e.errno in (errno.ENOTDIR, errno.ELOOP) else "開けない"
+        print(f"worktree-setup: {side} が{why}: {path}", file=sys.stderr)
+        sys.exit(1)
+dfd = opendir(dst, "--dest の worktree")
+sfd = opendir(src, "--from の checkout")
+os.set_inheritable(dfd, True)
+os.set_inheritable(sfd, True)
+os.environ.update(WS_SRC=src, WS_DST=dst,
+                  WS_SRCFD=str(sfd), WS_DSTFD=str(dfd))
+os.execvp("bash", ["bash", script])
+INNER
+fi
+
+src="${WS_SRC}"; dst="${WS_DST}"
+srcdir="${WS_SRCFD}"; dstdir="${WS_DSTFD}"
 # fd の指す先の物理パス（symlink を辿った先で比べ、書くのも辿った先の中だけ）
 dst="$(readlink "/proc/self/fd/$dstdir")" \
   || die "--dest のパスが解決できない"
@@ -112,17 +142,24 @@ common_dst="$(CDPATH='' cd "$common_dst" && pwd -P)"
   || die "--dest が --from と同じ repo の worktree でない"
 
 # dst が本体側の worktree 登録（git worktree list）に載ることを確かめる。
-# メタデータだけが残った未登録のディレクトリへの書き出しを止める
+# メタデータだけが残った未登録のディレクトリへの書き出しを止める。
+# 登録一覧の取得も開いた srcdir 起点にし、照合はパスの文字列ではなく
+# ディレクトリの実体（dev:ino）で行う（登録先と書き込み先が同一の実体か
+# を確かめる）。登録エントリのパスが消えている・動いた場合はその項目を
+# 読み飛ばす。作業ツリーの移動がこの検査と重なると登録先と書き込み先の
+# 実体がずれるため拒否する（検査後の移動では、fd が追うのは同じ実体の
+# ディレクトリだけなので写す先は登録した実体のまま）
+dst_id="$(stat -Lc '%d:%i' "/proc/self/fd/$dstdir")" \
+  || die "--dest の実体が確かめられない: $dst"
 registered=""
 while IFS= read -r wline; do
   case "$wline" in
     "worktree "*)
       wp="${wline#worktree }"
-      [[ -d "$wp" ]] || continue
-      wp="$(CDPATH='' cd "$wp" && pwd -P)"
-      [[ "$wp" == "$dst" ]] && { registered=1; break; } ;;
+      wid="$(stat -Lc '%d:%i' "$wp" 2>/dev/null)" || continue
+      [[ "$wid" == "$dst_id" ]] && { registered=1; break; } ;;
   esac
-done < <(git -C "$src" worktree list --porcelain)
+done < <(git -C "/proc/self/fd/$srcdir" worktree list --porcelain)
 [[ -n "$registered" ]] \
   || die "--dest が本体側の worktree 登録に無い: $dst"
 
@@ -137,67 +174,15 @@ for name in agent-team.toml agent-team.local.toml; do
     echo "worktree-setup: skip $name（worktree 側に既にある）"
     continue
   fi
-  # コピー本体は dir_fd 基点の 1 つの python 手続きで行う。コピー元は検査した
-  # srcdir から O_NOFOLLOW|O_NONBLOCK で開き（FIFO に変わっても待たず、
-  # 型の検査で弾く）、一時名は予測不能な乱数つきで O_EXCL|O_NOFOLLOW に作り、
-  # 公開は「書いた実体」の fd（/proc/self/fd の symlink 経由の link）で行うため
-  # 一時名や最終名が並行して差し替わっても、公開されるのは自分が書いた
-  # inode だけで既存名は上書きしない。失敗時は finally で自分の一時名を消すため
-  # 空・書きかけの設定が残らない
+  # コピー本体は dir_fd 基点の 1 つの python 手続き（worktree-setup-copy）
+  # に任せる。コピー元は検査した srcdir から O_NOFOLLOW|O_NONBLOCK で開き、
+  # 公開は書いた実体の fd から link、後始末は一時名の実体照合つき unlink。
   #   終了コード: 0 写した / 4 本体にも無い / 5 本体側を開けない（権限等） /
   #   6 本体側が通常ファイルでない / 7 一時名を作れない / 8 最終名が現れた /
-  #   9 読み書き・リンクの失敗
+  #   9 読み書き・リンクの失敗 / 10 後始末の失敗
   rc=0
-  python3 -I - "$dstdir" "$srcdir" "$name" <<'INNER' || rc=$?
-import errno, os, stat, sys
-ddir, sdir, name = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
-try:
-    sfd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=sdir)
-except FileNotFoundError:
-    sys.exit(4)
-except OSError as e:
-    sys.exit(6 if e.errno == errno.ELOOP else 5)
-if not stat.S_ISREG(os.fstat(sfd).st_mode):
-    sys.exit(6)
-tmp = f"{name}.worktree-setup.{os.getpid()}.{os.urandom(4).hex()}.tmp"
-try:
-    tfd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                  0o644, dir_fd=ddir)
-except OSError:
-    sys.exit(7)
-try:
-    try:
-        while True:
-            chunk = os.read(sfd, 1 << 20)
-            if not chunk:
-                break
-            view = memoryview(chunk)
-            while view:
-                view = view[os.write(tfd, view):]
-    except OSError:
-        sys.exit(9)
-    try:
-        os.link(f"/proc/self/fd/{tfd}", name,
-                dst_dir_fd=ddir, follow_symlinks=True)
-    except FileExistsError:
-        sys.exit(8)
-    except OSError:
-        sys.exit(9)
-finally:
-    try:
-        os.close(sfd)
-    except OSError:
-        pass
-    try:
-        os.close(tfd)
-    except OSError:
-        pass
-    try:
-        os.unlink(tmp, dir_fd=ddir)
-    except OSError:
-        pass
-sys.exit(0)
-INNER
+  python3 -I "$(dirname "${BASH_SOURCE[0]}")/worktree-setup-copy" \
+    "$dstdir" "$srcdir" "$name" || rc=$?
   case "$rc" in
     0)
       copied=$((copied + 1))
@@ -214,6 +199,8 @@ INNER
       echo "worktree-setup: skip $name（本体側が通常ファイルでない）" ;;
     8)
       echo "worktree-setup: skip $name（worktree 側に既にある）" ;;
+    10)
+      die "worktree 側の一時ファイルの後始末に失敗（$name）" ;;
     *)
       # 本体に通常ファイルとしてある設定は枠・担当の決まりになるため、写せなければ
       # どちらの名前でも失敗とする（写せないまま交代すると、枠を読めない・上書きを

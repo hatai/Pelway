@@ -107,6 +107,19 @@ check "5c: local write failure: names agent-team.local.toml" has "$ROOT/err" "ag
 check "5c: no partial local left" [ ! -e "$ROOT/wt5c/agent-team.local.toml" ]
 check "5c: no leftover temp" bash -c '! ls "$1"/agent-team.local.toml.worktree-setup.*.tmp >/dev/null 2>&1' _ "$ROOT/wt5c"
 
+# 5d. 公開が失敗したあとも、一時名を作った実体だけを後始末する（既に最終名が
+# ある場合は FileExistsError で失敗する経路）。worktree-setup-copy を直接
+# 呼んで確かめる
+git worktree add -q "$ROOT/wt5d" "$old" --detach
+echo 'already' > "$ROOT/wt5d/agent-team.local.toml"
+exec {wt5dfd}<"$ROOT/wt5d" {main5dfd}<"$ROOT/main"
+python3 -I "$REPO/scripts/worktree-setup-copy" \
+  "$wt5dfd" "$main5dfd" agent-team.local.toml 2>/dev/null; rc=$?
+exec {wt5dfd}<&- {main5dfd}<&-
+check "5d: publish failure exits 8" [ "$rc" -eq 8 ]
+check "5d: no leftover temp on publish failure" bash -c '! ls "$1"/agent-team.local.toml.worktree-setup.*.tmp >/dev/null 2>&1' _ "$ROOT/wt5d"
+check "5d: existing file untouched" [ "$(cat "$ROOT/wt5d/agent-team.local.toml")" = "already" ]
+
 # 6. --dest の既定は $T3CODE_WORKTREE_PATH、--from の既定は $T3CODE_PROJECT_ROOT
 git worktree add -q "$ROOT/wt6" "$old" --detach
 ( cd "$ROOT/wt6" && T3CODE_PROJECT_ROOT="$ROOT/main" T3CODE_WORKTREE_PATH="$ROOT/wt6" run_setup ); rc=$?
@@ -180,7 +193,7 @@ check "8: the script path exists" [ -x "$REPO/scripts/worktree-setup" ]
 # 8b. command の文字列の一致だけでなく、T3 と同じ形（シェルで command を実行）で
 # 実際に本体の checkout のスクリプトが起きて worktree に写されることを確かめる
 git worktree add -q "$ROOT/wt8" "$old" --detach
-mkdir -p "$ROOT/main/scripts" && cp "$REPO/scripts/worktree-setup" "$ROOT/main/scripts/"
+mkdir -p "$ROOT/main/scripts" && cp "$REPO/scripts/worktree-setup" "$REPO/scripts/worktree-setup-copy" "$ROOT/main/scripts/"
 cmd="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["scripts"][0]["command"])' "$REPO/t3.json")"
 ( cd "$ROOT/wt8" && T3CODE_PROJECT_ROOT="$ROOT/main" T3CODE_WORKTREE_PATH="$ROOT/wt8" bash -c "$cmd" ) >"$ROOT/out" 2>"$ROOT/err"; rc=$?
 check "8b: the stored command runs the setup (cwd=worktree)" [ "$rc" -eq 0 ]

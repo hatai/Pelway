@@ -605,6 +605,15 @@ check "31: no traceback" bash -c "! grep -q Traceback '$ROOT/err'"
 check "31: names the local file" has "$ROOT/err" "agent-team.local.toml"
 rm "$ROOT/agent-team.local.toml" "$ROOT/l31.toml"
 
+# 32: local が不正な UTF-8 のときも非 0 で止まり、ファイル名と固定の理由だけ出る
+write_case "$ROOT/l32.toml" < <(dev_case)
+printf '\xff\xfe[developers.dev]\n' > "$ROOT/agent-team.local.toml"
+s_run "$ROOT/l32.toml"; rc=$?
+check "32: invalid utf-8 local exits non-zero" eq "$rc" "1"
+check "32: no traceback" bash -c "! grep -q Traceback '$ROOT/err'"
+check "32: names the local file" has "$ROOT/err" "agent-team.local.toml"
+rm "$ROOT/agent-team.local.toml" "$ROOT/l32.toml"
+
 # 30: local が FIFO（ブロックする特殊ファイル）でも open が待たずに
 # 「通常ファイルでない」として重ねない
 write_case "$ROOT/l30.toml" < <(dev_case)

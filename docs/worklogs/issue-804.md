@@ -128,3 +128,17 @@ must-fix への対応:
 
 nit への対応: worklog の round-8 記述を実態どおりに訂正、conductor-rebuild.test.sh に「共有設定が既にある wt への local 配置失敗で登録を保つ」試験を追加（本体の checkout が書けない環境では明示的に skip）
 push した head: a5bc8bac（round 10 の対応）
+
+## レビュー対応（round 11）
+
+対象 head: 16d69d42
+レビュー: codex_review（run=804-review-round11c-codex、review 6087143233）は request-changes（must-fix 4、nit 2）。初回・2 回目の委託は head 移動と CI 未確定で投稿保留、3 回目で投稿
+
+must-fix への対応:
+1. worktree 登録の照合がパス文字列で、登録一覧の取得も $src パス起点だった → 登録一覧を srcdir の fd 起点で取り、照合はディレクトリの実体（`stat -L` の dev:ino）で行う。作業ツリーの移動が検査と重なった場合は拒否、検査後の移動は fd が同じ実体を追うため写す先は登録した実体のまま（コメントに明記）
+2. 一時ファイルの後始末が名前の再解決で他の処理のファイルを消し得、削除失敗を捨てて成功になり得た → 後始末は一時名の実体照合（dev:ino が自分の tfd と一致するときだけ unlink、一致しなければ触らない）にし、後始末の失敗は成功として返さない（終了コード 10 → die）。コピー手続きは worktree-setup-copy に分離して失敗経路を直接試験できる形に（試験 5d: 公開失敗後に一時ファイルが残らず既存ファイルを触らない）
+3. 両側ディレクトリを通常のリダイレクトで開いていたため、パスが FIFO に変わると書き手を待って止まり得た → O_DIRECTORY|O_NOFOLLOW|O_NONBLOCK で開く python の起動段を挟み、fd を env 引き継ぎで自分自身を起動し直す形に（待たずに種類も同時に確かめられる。引数の再解釈を避けるため起動し直しは env の値だけを見る）
+4. conductor-rebuild.test.sh が実際の本体 checkout に local を書いていた（不在判定と書き込みの間に開発者が保存すると切り詰めて消す、dangling symlink で存在確認をすり抜ける）→ 試験専用の一時リポジトリに本体・worktree・local を作り、実際の開発者設定を使わない形に
+
+nit への対応: local の不正 UTF-8 で非 0・ファイル名と固定の理由だけが出る試験（32）を追加、worklog round 8/10 の記述をコードの保証範囲に合わせて訂正
+
