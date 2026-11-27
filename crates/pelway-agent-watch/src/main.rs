@@ -362,14 +362,17 @@ impl Watcher {
                 .collect();
             match io::append_inbox(&self.pelway_dir.join(INBOX_FILE), &lines) {
                 Ok(count) => {
-                    // 最後に数えたときから、自分の追記の前に受信箱が変わっていた
-                    if Some(count.before_write) != self.state.inbox_identity {
+                    // 最後に数えたときから、自分の追記の前に受信箱が変わっていた（前の受信箱で読んだ
+                    // 既読の位置が、いまの受信箱の同じ中身を指すと確かめられない）
+                    let rewritten = Some(count.before_write) != self.state.inbox_identity;
+                    if rewritten {
                         self.forget_pending_line();
                     }
                     self.remember_inbox_count(&count);
-                    // 数えている間に変わったときは、書いた行の番号も確かでない
+                    // 受信箱が書き換えられていた・数えている間に変わったときは、書いた行の番号を
+                    // 既読と比べられないので不明にする（既読による取り消しをしない）
                     let unknown = vec![None; count.line_numbers.len()];
-                    let at = if count.stable {
+                    let at = if count.stable && !rewritten {
                         &count.line_numbers
                     } else {
                         &unknown

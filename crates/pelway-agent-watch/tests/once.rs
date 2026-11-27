@@ -2740,3 +2740,24 @@ fn pending_line_is_unknown_after_the_inbox_is_rewritten() {
     let out = run_cooldown(&sb);
     assert_eq!(sends(&sb), 2, "{}", stderr(&out));
 }
+
+#[test]
+fn fresh_line_is_unknown_after_the_inbox_is_rewritten() {
+    // 印が無い状態で、受信箱が 1 行に切り詰められてから新しい failed が 2 行目に書かれた。
+    // 前の受信箱で読んだ既読の位置（2）は、新しい受信箱の同じ中身を指すと確かめられないので、
+    // 既読として取り消さず起こす
+    let sb = Sandbox::new("wake-839-fresh-after-rewrite");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    run_cooldown(&sb);
+    let first = fs::read_to_string(sb.inbox()).unwrap();
+    fs::write(sb.inbox(), format!("{first}{{\"other\":1}}\n")).unwrap();
+    // 前の受信箱（2 行）を読み終えたあと、1 行に切り詰められた
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    fs::write(sb.inbox(), &first).unwrap();
+    backdate_last_wake(&sb);
+    b_fails_at(&sb, "2026-11-10T16:30:00Z");
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
