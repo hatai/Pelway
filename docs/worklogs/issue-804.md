@@ -107,4 +107,4 @@ must-fix への対応:
 5. `open_local` が「不在」と「無視（symlink・特殊ファイル）」と「読み取り障害」を区別していなかった → ENOENT は不在、symlink・非通常ファイルは警告して重ねず、権限・I/O エラーは値を出さずに非 0 で止める（試験 31: 読み取り不可 local で非 0・トレースバック無し・ファイル名を含む）
 
 nit への対応: 試験 29 を拡張（明示した <local-file> が無いとき共有と同じディレクトリの local は重ならないことを確認する試験 29b）、conductor-watch.sh の overlay 表示を別途開く判定から `effective`/`slots` 実行の stderr の applied マーカー（`<local>: overlay applied`）読み取りに変更
-
+push した head: 2959f974（round 8 の対応）
