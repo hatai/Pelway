@@ -416,8 +416,14 @@ def merge_priority(dev, v, key):
 
 
 def warn_required(doc, logins):
-    # 共有の規則で必須の役に当たる担当が使えなくなるときの警告（Issue #804 の未決事項。
-    # 扱いは実装役が needs-decision で指揮役に上げる）。値ではなくキー名と理由だけを出す
+    """共有の規則で必須の役に当たる担当が使えなくなっているときの警告を出し、
+    足りない必須の担当の id を返す（見張りが SLOTS missing の行と slots.json の
+    missing に載せる材料）。必須の役は共有の規則側の条件で、local では下げられない:
+    - codex: マージには GitHub 上の現在の head への codex の有効な approve が要る。
+      codex が使えないあいだ高リスク・security=yes の仕事は始めてもマージに
+      辿り着けないため、指揮役はその着手を止める（通常の優先順位の仕事は止めない）
+    値ではなくキー名と理由だけを出す"""
+    missing = []
     for login in logins:
         d = doc.get("developers", {}).get(login)
         if not isinstance(d, dict):
@@ -428,17 +434,22 @@ def warn_required(doc, logins):
         if not isinstance(use, list):
             continue
         if "codex" not in use:
+            if "codex" not in missing:
+                missing.append("codex")
             warn(f"developers.{login}.use",
-                 "codex が使えないが、マージには現在の head への codex の有効な approve が要る"
-                 "（共有の規則は local では下げられない。扱いは指揮役の needs-decision）")
+                 "codex が使えないと priority.review.high_risk の高リスク"
+                 "（security=yes を含む）の仕事は着手できず、マージにも現在の head への"
+                 " codex の有効な approve が要る（共有の規則は local では下げられない）。"
+                 "直し方: codex を use に戻すか、人が担当を割り当て直す")
         prio = d.get("priority")
         hr = prio.get("review") if isinstance(prio, dict) else None
         if isinstance(hr, dict):
             hr_list = hr.get("high_risk")
             if isinstance(hr_list, list) and not [n for n in hr_list if n in use]:
                 warn(f"developers.{login}.priority.review.high_risk",
-                     "use に入る高リスクのレビュー担当が無い"
-                     "（Issue #804 の未決事項。扱いは指揮役の needs-decision）")
+                     "use に入る高リスクのレビュー担当が無い。"
+                     "直し方: codex を use に戻すか、人が担当を割り当て直す")
+    return missing
 
 
 def emit_warnings(label):
@@ -503,6 +514,7 @@ def load_effective(path, login, lpath=None):
     validate_doc(doc, path)
     if lpath is None:
         lpath = os.path.join(os.path.dirname(os.path.abspath(path)), LOCAL_NAME)
+    logins = [login] if login is not None else [x for x in doc.get("developers", {})]
     lf = open_local(lpath)
     if lf is not None and lf is not False:
         pass
@@ -512,6 +524,10 @@ def load_effective(path, login, lpath=None):
             # 重ねず、理由だけ警告する
             warn(LOCAL_NAME, "symlink か通常ファイルでないため重ねない")
             emit_warnings(lpath)
+        missing = warn_required(doc, logins)
+        emit_warnings(path)
+        for n in missing:
+            sys.stderr.write(f"{path}: missing-required {n}\n")
         return doc
     local = load_local_fd(lf, lpath)
     merged = merge_local(copy.deepcopy(doc), local, login)
@@ -520,10 +536,13 @@ def load_effective(path, login, lpath=None):
     # 枠の算出に使った実行の出力から確かめられるように stderr に出す
     sys.stderr.write(f"{lpath}: overlay applied\n")
     # 必須の役に当たる担当不足の警告は検証より先に出す（検証で止まる場合にも
-    # needs-decision へ引き継げる根拠を残す）
-    warn_required(merged, [login] if login is not None else
-                  [x for x in merged.get("developers", {})])
+    # needs-decision へ引き継げる根拠を残す）。missing-required の行は、見張りが
+    # SLOTS missing の行と slots.json の missing に写す機械向けの同名の印
+    missing = warn_required(merged, [login] if login is not None else
+                            [x for x in merged.get("developers", {})])
     emit_warnings(lpath)
+    for n in missing:
+        sys.stderr.write(f"{lpath}: missing-required {n}\n")
     # local の値をエラーに出さない（キー名と理由だけ）
     global show_values
     show_values = False

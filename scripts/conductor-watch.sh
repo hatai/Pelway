@@ -629,7 +629,9 @@ except Exception: items = {}
 if not isinstance(items, dict): items = {}
 # SLOTS 行（Issue #714）。実装・調査に使っている枠の数を agent-team.toml の上限と突き
 # 合わせて出す。判断の正本は watch.log の行でなく、見張り自身が巡回ごとに書き直す
-# slots.json（決まりは runbook「3. 同時数と順番待ち」）。
+# slots.json（決まりは runbook「3. 同時数と順番待ち」）。共有の規則で必須の役に
+# 当たるのに使えない担当は `SLOTS missing <担当>` の行と slots.json の missing に
+# 出す（Issue #804。指揮役は missing の codex で高リスク・security=yes の着手を止める）。
 # agent-team.toml が無いときは SLOTS を出さない。使用数を確かめられない巡回は
 # SLOTS error <理由> だけを出す（直前の巡回の行が残ったまま使われないようにする）。
 # 出すのは、使用数または状態が前回から変わったときと HEARTBEAT の巡回。Issue を持た
@@ -638,7 +640,7 @@ if not isinstance(items, dict): items = {}
 # 停止の印（停止中・再開処理中・再開待ち）が付いたものは裏付けを取ってから除く
 # （stop_verified は runbook「3. 同時数と順番待ち」の「実際の停止を確認できるもの」と同じ決まり）。
 slots_st = "unavailable"; slots_reason = "agent-team.toml not in worktree"
-slots_usage = None; slots_lines = None; slots_sig = "unavailable"
+slots_usage = None; slots_lines = None; slots_sig = "unavailable"; slots_missing = None
 if os.path.isfile("agent-team.toml"):
     if issues is None:
         slots_st, slots_reason = "error", "issue-list-failed"
@@ -715,6 +717,18 @@ if os.path.isfile("agent-team.toml"):
                 # 合わせる（枠の算出後に別途開くと、巡回中の追加・削除で食い違う）
                 if "agent-team.local.toml: overlay applied" in r.stderr:
                     slots_lines.append("SLOTS overlay agent-team.local.toml")
+                # 共有の規則で必須の役に当たるのに使えない担当（Issue #804。use から
+                # 外された codex など）を、枠の算出に使った実行の missing-required の
+                # 印から拾って SLOTS missing の行と slots.json の missing に載せる。
+                # codex が載るあいだ高リスク・security=yes の仕事の着手は止まる
+                # （マージに要る codex の approve が取れない。runbook「3. 同時数と順番待ち」）
+                slots_missing = []
+                for ln in r.stderr.splitlines():
+                    mm = re.search(r"missing-required (\S+)", ln)
+                    if mm and mm.group(1) not in slots_missing:
+                        slots_missing.append(mm.group(1))
+                for n in slots_missing:
+                    slots_lines.append(f"SLOTS missing {n}")
                 slots_st, slots_reason, slots_sig = "ok", None, "|".join(slots_lines)
         except Exception as e:
             slots_st, slots_reason = "error", f"agent-team-config failed ({type(e).__name__})"
@@ -732,6 +746,9 @@ ats = [t for t in (issues_at, threads_at) if t is not None]
 rec = {"updated_at": min(ats) if ats else now, "patrol_at": now, "status": slots_st}
 if slots_reason is not None: rec["reason"] = slots_reason
 if slots_usage is not None: rec["usage"] = slots_usage
+# missing は必須の役に当たる担当の不足（枠の算出に使った実行が出したもの）。
+# 空の一覧は「確かめた上で不足なし」。status が ok でない記録には載せない
+if slots_missing is not None: rec["missing"] = slots_missing
 # 同じディレクトリの一時ファイルからの置き換えで公開し、読み手に空・書きかけの記録が
 # 見えないようにする（write_ps と同じ形）。先に前回の記録を外してから公開する―
 # 公開に失敗した回に残ると、読み手が鮮度の条件の内側で古い status:ok を使い続ける。

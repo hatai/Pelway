@@ -534,6 +534,8 @@ EOF
 s_run "$ROOT/l24.toml"; rc=$?
 check "26: emptied high_risk fails validation" eq "$rc" "1"
 check "26: staffing warning precedes the failure" has "$ROOT/err" "高リスクのレビュー担当"
+check "26: warning names the fix" bash -c "grep -F 'priority.review.high_risk' '$ROOT/err' | grep -qF 'use に戻す'"
+check "26: warning names human reassignment" bash -c "grep -F 'priority.review.high_risk' '$ROOT/err' | grep -qF '割り当て直す'"
 rm "$ROOT/agent-team.local.toml"
 
 # 27: local の use の型が違うときは、担当不足の警告を読む前に検証が
@@ -622,6 +624,70 @@ timeout 10 bash "$CFG" slots dev "$ROOT/l30.toml" > "$ROOT/out" 2>"$ROOT/err"; r
 check "30: fifo local does not hang" eq "$rc" "0"
 check "30: fifo local warns" has "$ROOT/err" "通常ファイルでない"
 rm "$ROOT/agent-team.local.toml" "$ROOT/l30.toml"
+
+# 33: local で codex を外しても（高リスクの並びを使える担当に張り替えて有効な形でも）、
+# 必須の役の不足として codex が missing-required の印と警告に出る。
+# 警告は priority.review.high_risk と直し方（codex を use に戻す／人が割り当て直す）を
+# 名指す。local で high_risk の並びを書き換えても、マージに要る codex の approve の
+# 関門は消えない（関門は toml でなく GitHub 上の現在の head への approve）
+write_case "$ROOT/l33.toml" < <(dev_case)
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[developers.dev]
+use = ["opencode", "devin", "claude"]
+
+[developers.dev.priority.review]
+normal = ["claude", "devin"]
+high_risk = ["claude", "devin"]
+EOF
+s_run "$ROOT/l33.toml"; rc=$?
+check "33: codex dropped: slots exits 0" eq "$rc" "0"
+check "33: missing-required marker names codex" has "$ROOT/err" "missing-required codex"
+check "33: warning names priority.review.high_risk" \
+  bash -c "grep -F 'developers.dev.use' '$ROOT/err' | grep -qF 'priority.review.high_risk'"
+check "33: warning names the fix" \
+  bash -c "grep -F 'developers.dev.use' '$ROOT/err' | grep -qF 'use に戻す'"
+check "33: warning names human reassignment" \
+  bash -c "grep -F 'developers.dev.use' '$ROOT/err' | grep -qF '割り当て直す'"
+check "33: codex approve still required despite rewritten high_risk" \
+  bash -c "grep -F 'developers.dev.use' '$ROOT/err' | grep -qF 'codex の有効な approve'"
+bash "$CFG" effective dev "$ROOT/l33.toml" >"$ROOT/out" 2>/dev/null
+check "33: codex absent from effective reviewers" \
+  python3 -I -c "import json,sys; d=json.load(open(sys.argv[1]))['developers']['dev']; assert 'codex' not in d['use'] and 'codex' not in str(d['priority']['review'])" "$ROOT/out"
+rm "$ROOT/agent-team.local.toml"
+
+# 34: codex が使える（local が use を変えない）ときは missing-required の印も
+# codex の警告も出ず、通常の優先順位の仕事は止まらない
+cat > "$ROOT/agent-team.local.toml" <<'EOF'
+[developers.dev.slots]
+devin = 9
+EOF
+s_run "$ROOT/l33.toml"; rc=$?
+check "34: no missing-required when codex usable" bash -c "! grep -q 'missing-required' '$ROOT/err'"
+check "34: no codex warning when codex usable" bash -c "! grep -q 'codex が使えない' '$ROOT/err'"
+check "34: slots still emits limits" eq "$(grep -cx 'devin 9' "$ROOT/out")" "1"
+rm "$ROOT/agent-team.local.toml"
+
+# 35: local が無くても missing-required の検査は共有の doc に掛かる
+# （共有の toml が codex を落としていても同じ印・警告が出る）
+write_case "$ROOT/l35.toml" <<'EOF'
+[developers.dev]
+use = ["opencode", "devin", "claude"]
+[developers.dev.slots]
+opencode = 1
+devin = 4
+[developers.dev.review_limits]
+devin = 1
+claude = 1
+[developers.dev.priority.implement]
+normal = ["devin", "opencode"]
+[developers.dev.priority.review]
+normal = ["claude", "devin"]
+high_risk = ["claude", "devin"]
+EOF
+s_run "$ROOT/l35.toml"; rc=$?
+check "35: shared without codex still exits 0" eq "$rc" "0"
+check "35: shared without codex: missing-required marker" has "$ROOT/err" "missing-required codex"
+rm "$ROOT/l35.toml" "$ROOT/l33.toml"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"

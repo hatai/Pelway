@@ -142,3 +142,13 @@ must-fix への対応:
 
 nit への対応: local の不正 UTF-8 で非 0・ファイル名と固定の理由だけが出る試験（32）を追加、worklog round 8/10 の記述をコードの保証範囲に合わせて訂正
 
+## 未決事項の決着と受け入れ条件の追加（hatai 決定 2026-11-27 20:08 JST、Issue #804 comment 7216736209）
+
+指揮役経由の決定: local で codex を use から外すことを許す・代替レビュー担当は立てない・validate は通す。codex が無い環境では指揮役が高リスクと security=yes を着手前に止める。マージ関門は toml ではなく GitHub 上の今の head への codex の approve。追加の受け入れ条件 3 件への対応:
+
+1. 見張りの SLOTS 行に足りない必須の担当を出す → agent-team-config が `missing-required <担当>` の印を標準エラーに出し（shared のみ・local ありの両経路）、conductor-watch.sh が `SLOTS missing <担当>` の行と slots.json の `missing`（status ok の記録にだけ載る、空は「確かめた上で不足なし」）に写す
+2. 警告・エラー文に priority.review.high_risk と直し方（codex を use に戻す／人が割り当て直す）を書く → warn_required の両警告を更新
+3. 試験で固定: codex を外すと高リスクの着手が止まる（missing-required の印・SLOTS missing・slots.json missing + command-team/runbook の着手停止の決まり）、local で high_risk を変えても Codex approve なしにマージできない（high_risk を張り替えても codex の approve 関門の警告が残る。関門は toml でなく GitHub 側）、低リスクは止まらない（通常の優先順位は missing で止めない決まりと、枠の計上が変わらない試験）。偽装した SLOTS missing 行は slots.json を変えないことも固定
+
+運用変更（指揮役）: 以降のレビュー委託は指揮役が t3_thread_launch で立てる。実装側は delegate_task で起動せず、レビューが要る時点で state/next に head・round を書いて止まる
+

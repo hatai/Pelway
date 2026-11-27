@@ -22,7 +22,11 @@
 
 # [developers.<自分の GitHub login>]  # 自分の表だけ。他の開発者の表は無視される
 # use = ["opencode", "devin", "claude"]     # 使えない担当を外す（外した担当への参照は
-#                                           # 上限・優先順位からも落ちる）
+#                                           # 上限・優先順位からも落ちる）。
+#                                           # codex を外してもよいが、そのあいだ
+#                                           # 高リスク・security=yes の仕事は着手できず
+#                                           # （マージに codex の approve が要る）、
+#                                           # 見張りの SLOTS missing に出る
 # [developers.<自分の GitHub login>.slots]
 # devin = 2                                 # 実装・調査の同時枠を下げる・変える
 # [developers.<自分の GitHub login>.review_limits]

@@ -89,6 +89,24 @@ check cond6_command_team_slots .agents/skills/command-team/SKILL.md \
   '`SLOTS` の行' \
   'キューに置けるファイル名'
 
+# 条件6b（Issue #804）: 必須の役に当たる担当の不足は、見張りの SLOTS missing の行と
+# slots.json の missing に出ることが runbook に、codex が欠けるあいだ高リスク・
+# security=yes の着手を止める決まりと直し方が command-team と仕様に書かれている。
+check cond6b_runbook_missing docs/agents/grokbot-runbook.md \
+  '`SLOTS missing <担当>`' \
+  '`missing-required`' \
+  'security=yes' \
+  'codex の有効な approve'
+check cond6b_command_team_missing_gate .agents/skills/command-team/SKILL.md \
+  '`missing`' \
+  'missing-required' \
+  'codex を `use` に戻すか、人が担当を割り当て直す' \
+  'security=yes'
+check cond6b_spec_missing_gate docs/superpowers/specs/agent-team.md \
+  'SLOTS missing' \
+  'codex を `use` に戻すか、人が担当を割り当て直す' \
+  'priority.review.high_risk'
+
 # 条件7（Issue #715）: 上限と登録情報の正本が agent-team.toml であることが、
 # 対象の 5 文書のそれぞれに参照として書かれている。
 check cond7_toml_ref_spec docs/superpowers/specs/agent-team.md \
