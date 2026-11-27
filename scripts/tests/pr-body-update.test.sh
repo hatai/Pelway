@@ -3,7 +3,9 @@
 # scripts/agent-gh）で、PR 本文の決まった 2 行（「レビューと QA」の最後に検証した sha、「対象」の HEAD）
 # だけが PR の headRefOid と指定した sha に書き換わること、決まった行が無いときは何も書き換えずに
 # 失敗してどの行が無いかを出すこと、日本語の本文を argv でなく --input のファイルで渡すこと、
-# テンプレートの HTML コメントの中を数えないことを確かめる。
+# テンプレートの HTML コメントの中を数えないことを確かめる。Markdown のコード（インラインコード・フェンス付き
+# ブロック）を本文の構造として数えないこと、sha の直後に英数字が続く語を sha にしないこと、読み取りの後に PR が
+# 変わったら書き換えないことも確かめる。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -20,8 +22,11 @@ cp "$TOOL" "$FAKE/scripts/"
 
 # 偽の scripts/agent-gh。GitHub 側の PR の状態（body: 本文、head: PR の headRefOid）を $MOCK に持つ。
 #   dev api repos/hatai/Pelway/pulls/<N>                             → {body, head.sha, html_url} を返す
-#   dev api --method PATCH repos/hatai/Pelway/pulls/<N> --input <F> → <F> の body を保存して返す
+#   dev api --method PATCH repos/hatai/Pelway/pulls/<N> --input <F> → <F> の body を保存して {body, head.sha} を返す
 # MOCK_READ_FAIL・MOCK_PATCH_FAIL があるときはその呼び出しが終了コード 1。ほかの呼び出しは終了コード 9。
+# MOCK_CHANGE=body|head があるとき、2 回目の GET の前に本文の末尾に 1 行足すか head を替える（別の編集・push の重なり）。
+# MOCK_PATCH_HEAD があるとき、PATCH の応答の head は書き込みの直前に進んだ別の値になる。
+# MOCK_PATCH_BODY があるとき、PATCH の応答の本文は送った本文と違う（末尾に改行が 1 つ多い）ものになる。
 # 引数は $MOCK/calls.log に 1 行 1 引数で残る（呼び出しの区切りは空行）。
 cat >"$FAKE/scripts/agent-gh" <<'EOF'
 #!/usr/bin/env bash
@@ -41,13 +46,22 @@ done
 n="${endpoint##*/}"
 if [[ "$method" == GET && -z "$input" ]]; then
   [[ -z "${MOCK_READ_FAIL:-}" ]] || { echo "injected read failure" >&2; exit 1; }
+  gets=$(( $(cat "$MOCK/gets" 2>/dev/null || echo 0) + 1 ))
+  echo "$gets" >"$MOCK/gets"
+  if ((gets == 2)) && [[ -n "${MOCK_CHANGE:-}" ]]; then
+    [[ "${MOCK_CHANGE}" != *body* ]] || echo "- 別の担当が編集した行" >>"$MOCK/body"
+    [[ "${MOCK_CHANGE}" != *head* ]] || echo 4444444444444444444444444444444444444 >"$MOCK/head"
+  fi
   jq -n --rawfile body "$MOCK/body" --arg head "$(cat "$MOCK/head")" --arg n "$n" \
     '{body: $body, head: {sha: $head}, html_url: ("https://github.com/hatai/Pelway/pull/" + $n)}'
 elif [[ "$method" == PATCH && -n "$input" ]]; then
   [[ -z "${MOCK_PATCH_FAIL:-}" ]] || { echo "injected patch failure" >&2; exit 1; }
   cp "$input" "$MOCK/patch-input.json"
   jq -j .body "$input" >"$MOCK/body"
-  jq -n --rawfile body "$MOCK/body" '{body: $body}'
+  cp "$MOCK/body" "$MOCK/resp-body"
+  [[ -z "${MOCK_PATCH_BODY:-}" ]] || printf '\n' >>"$MOCK/resp-body"
+  [[ -z "${MOCK_PATCH_HEAD:-}" ]] || echo 5555555555555555555555555555555555555 >"$MOCK/head"
+  jq -n --rawfile body "$MOCK/resp-body" --arg head "$(cat "$MOCK/head")" '{body: $body, head: {sha: $head}}'
 else
   exit 9
 fi
@@ -57,7 +71,7 @@ echo 6940d00be0179d3157f73ff912ff5ef3a333189e >"$MOCK/head"
 
 # upd [args...]: リポジトリの外（$ROOT。本体は自分の置き場所の隣の agent-gh を使う）から本体を実行して
 # 終了コードを返す。出力は $ROOT/out・$ROOT/err。一時ファイルは TMPDIR に作られる
-upd() { (cd "$ROOT" && MOCK="$MOCK" timeout 30 python3 -I "$FAKE/scripts/pr-body-update" "$@") >"$ROOT/out" 2>"$ROOT/err"; }
+upd() { : >"$MOCK/gets"; (cd "$ROOT" && MOCK="$MOCK" timeout 30 python3 -I "$FAKE/scripts/pr-body-update" "$@") >"$ROOT/out" 2>"$ROOT/err"; }
 # patches: 偽の agent-gh が受けた PATCH の回数
 patches() { grep -c '^PATCH$' "$MOCK/calls.log" || true; }
 # input_file: --input に渡したファイルのパス
@@ -125,7 +139,7 @@ check "exit 0 on success" eq "$rc" 0
 check "HEAD line becomes headRefOid and the verified line becomes the given sha" cmp -s "$MOCK/body" <(sample "$HEAD" "$VER")
 check "diff before and after has only the two fixed lines on each side" eq "$(diff <(sample "$OLD_HEAD" "$OLD_VER") "$MOCK/body" | grep -c '^[<>]')" 4
 check "the decoy lines outside the two sections are untouched" has "$MOCK/body" '0000000000000000000000000000000000000000'
-check "reads once and patches once" eq "$(grep -c '^dev$' "$MOCK/calls.log")" 2
+check "reads twice (before planning and right before the write) and patches once" eq "$(grep -c '^dev$' "$MOCK/calls.log")" 3
 check "stdout reports the PR and the new values" has_all "$ROOT/out" 743 "$HEAD" "$VER"
 upd 743 --verified "${VER^^}"
 check "an uppercase --verified is written in lowercase" cmp -s "$MOCK/body" <(sample "$HEAD" "$VER")
@@ -230,10 +244,96 @@ check "headings and labels inside HTML comments are not counted and the comments
 - HEAD: \`5555555555555555555555555555555555555\`
 -->
 EOF
-sed 's|^## 対象$|<!-- 閉じ忘れ|' <(sample "$OLD_HEAD" "$OLD_VER") >"$MOCK/body"; : >"$MOCK/calls.log"
+sed '26i<!-- 閉じ忘れ' <(sample "$OLD_HEAD" "$OLD_VER") >"$MOCK/body"; : >"$MOCK/calls.log"
 upd 743 --verified "$VER"; rc=$?
-check "an unclosed HTML comment hides what follows: fails without patching" fails_quietly "$rc"
+check "an unclosed HTML comment opened above the heading hides what follows: fails without patching" fails_quietly "$rc"
 check "an unclosed HTML comment: stderr names the missing heading" has "$ROOT/err" '「対象」の見出しが本文に無い'
+
+# --- Markdown のコードは本文の構造ではない（レビュー round 2 の must-fix）---
+# インラインコードの中の `<!--` や `-->` は注釈の開き・閉じとして数えない
+cat >"$MOCK/body" <<EOF
+## 変更内容
+
+- \`<!--\` は HTML コメントの開始の記号（インラインコードの中は注釈として数えない）
+
+## レビューと QA
+
+- 最後に検証した sha: \`3333333333333333333333333333333333333333\`
+
+## 対象
+
+<!--
+\`HEAD: 8888888888888888888888888888888888888888\`
+\`-->\` HEAD: \`9999999999999999999999999999999999999999\`
+-->
+- HEAD: \`2222222222222222222222222222222222222222\`
+EOF
+upd 746 --verified "$VER"; rc=$?
+check "comment signs inside inline code are not comment signs: exit 0" eq "$rc" 0
+check "comment signs inside inline code: only the real lines change" cmp -s "$MOCK/body" - <<EOF
+## 変更内容
+
+- \`<!--\` は HTML コメントの開始の記号（インラインコードの中は注釈として数えない）
+
+## レビューと QA
+
+- 最後に検証した sha: \`$VER\`
+
+## 対象
+
+<!--
+\`HEAD: 8888888888888888888888888888888888888888\`
+\`-->\` HEAD: \`9999999999999999999999999999999999999999\`
+-->
+- HEAD: \`$HEAD\`
+EOF
+# フェンス付きコードブロック（``` か ~~~）の中の見出し・印・注釈は数えない
+cat >"$MOCK/body" <<'EOF'
+## 変更内容
+
+```md
+## レビューと QA
+- 最後に検証した sha: `0000000000000000000000000000000000000000`
+<!-- フェンスの中の注釈
+```
+
+~~~text
+## 対象
+- HEAD: `1111111111111111111111111111111111111111`
+~~~
+
+## レビューと QA
+
+- 最後に検証した sha: `3333333333333333333333333333333333333333`
+
+## 対象
+
+- HEAD: `2222222222222222222222222222222222222222`
+EOF
+upd 747 --verified "$VER"; rc=$?
+check "headings and labels inside fenced code blocks are not counted: exit 0" eq "$rc" 0
+check "fenced code blocks stay and only the real lines change" cmp -s "$MOCK/body" - <<EOF
+## 変更内容
+
+\`\`\`md
+## レビューと QA
+- 最後に検証した sha: \`0000000000000000000000000000000000000000\`
+<!-- フェンスの中の注釈
+\`\`\`
+
+~~~text
+## 対象
+- HEAD: \`1111111111111111111111111111111111111111\`
+~~~
+
+## レビューと QA
+
+- 最後に検証した sha: \`$VER\`
+
+## 対象
+
+- HEAD: \`$HEAD\`
+EOF
 
 # --- 改行コードと末尾の改行はそのまま残る ---
 sed 's/$/\r/' <(sample "$OLD_HEAD" "$OLD_VER") >"$MOCK/body"
@@ -284,6 +384,18 @@ without '19s/.*/- 最後に検証した sha：`333333333333333333333333333333333
 upd 743 --verified "$VER"; rc=$?
 check "two shas right after the label: fails without patching" fails_quietly "$rc"
 check "two shas right after the label: stderr says so" has "$ROOT/err" '「レビューと QA」の「最後に検証した sha」の行（19 行目）で、「最後に検証した sha」の直後に sha が 2 つある'
+# sha の直後に英数字が続く語（2222222xyz など）と 41 桁以上の並びは sha にしない（レビュー round 2 の must-fix）
+without '29s/.*/- HEAD：`2222222xyz`/'
+upd 743 --verified "$VER"; rc=$?
+check "sha-like token followed by other letters on the HEAD line: fails without patching" fails_quietly "$rc"
+check "sha-like token followed by other letters on the HEAD line: stderr says there is no sha" has "$ROOT/err" '「対象」の HEAD の行（29 行目）で、HEAD の直後に sha が無い'
+without '19s/.*/- 最後に検証した sha：`3333333wxyz`/'
+upd 743 --verified "$VER"; rc=$?
+check "sha-like token followed by other letters on the verified line: fails without patching" fails_quietly "$rc"
+check "sha-like token followed by other letters on the verified line: stderr says there is no sha" has "$ROOT/err" '「レビューと QA」の「最後に検証した sha」の行（19 行目）で、「最後に検証した sha」の直後に sha が無い'
+without '29s/.*/- HEAD：`22222222222222222222222222222222222222222`/'
+upd 743 --verified "$VER"; rc=$?
+check "a token of 41 hex digits is not a sha: fails without patching" fails_quietly "$rc"
 printf '' >"$MOCK/body"; : >"$MOCK/calls.log"
 upd 743 --verified "$VER"; rc=$?
 check "empty body: fails without patching" fails_quietly "$rc"
@@ -300,11 +412,11 @@ check "unknown option: exit 2" bad_args 743 --verified "$VER" --force
 # --- GitHub への読み書きの失敗 ---
 sample "$OLD_HEAD" "$OLD_VER" >"$MOCK/body"
 : >"$MOCK/calls.log"
-(MOCK_READ_FAIL=1 upd 743 --verified "$VER"); rc=$?
+(export MOCK_READ_FAIL=1; upd 743 --verified "$VER"); rc=$?
 check "read failure: exit 1" eq "$rc" 1
 check "read failure: the error is passed through" has "$ROOT/err" "injected read failure"
 check "read failure: nothing is patched" eq "$(patches)" 0
-(MOCK_PATCH_FAIL=1 upd 743 --verified "$VER"); rc=$?
+(export MOCK_PATCH_FAIL=1; upd 743 --verified "$VER"); rc=$?
 check "PATCH failure: exit 1 and the error is passed through" bash -c '(( $1 == 1 )) && grep -q "injected patch failure" "$2"' _ "$rc" "$ROOT/err"
 echo not-a-sha >"$MOCK/head"
 : >"$MOCK/calls.log"
@@ -312,6 +424,27 @@ upd 743 --verified "$VER"; rc=$?
 check "headRefOid that is not a sha: fails without patching" fails_quietly "$rc"
 check "headRefOid that is not a sha: exit 1" eq "$rc" 1
 echo "$HEAD" >"$MOCK/head"
+
+# --- 読み取りの後に PR が変わったら書き換えない（書き込みの直前にもう一度読む。レビュー round 2 の must-fix） ---
+sample "$OLD_HEAD" "$OLD_VER" >"$MOCK/body"
+: >"$MOCK/calls.log"
+(export MOCK_CHANGE=body; upd 743 --verified "$VER"); rc=$?
+check "body edited by someone else after the read: fails without patching" fails_quietly "$rc"
+check "body edited after the read: the other edit is kept" cmp -s "$MOCK/body" <(sample "$OLD_HEAD" "$OLD_VER"; echo "- 別の担当が編集した行")
+check "body edited after the read: stderr says the PR changed" has "$ROOT/err" "読み取った後に変わった"
+sample "$OLD_HEAD" "$OLD_VER" >"$MOCK/body"
+(export MOCK_CHANGE=head; upd 743 --verified "$VER"); rc=$?
+check "head moved after the read: fails without patching" fails_quietly "$rc"
+check "head moved after the read: body untouched" cmp -s "$MOCK/body" <(sample "$OLD_HEAD" "$OLD_VER")
+check "head moved after the read: stderr says the PR changed" has "$ROOT/err" "読み取った後に変わった"
+echo "$HEAD" >"$MOCK/head"
+(export MOCK_PATCH_HEAD=1; upd 743 --verified "$VER"); rc=$?
+check "head moved at the moment of the write: exit 1" eq "$rc" 1
+check "head moved at the moment of the write: stderr says to run again" has "$ROOT/err" "もう一度実行"
+echo "$HEAD" >"$MOCK/head"
+(export MOCK_PATCH_BODY=1; upd 743 --verified "$VER"); rc=$?
+check "GitHub returns a body different from the one sent: exit 1" eq "$rc" 1
+check "GitHub returns a different body: stderr says to check the body on GitHub" has "$ROOT/err" "GitHub が返した本文が送った内容と違います"
 
 # --- 使い方 ---
 : >"$MOCK/calls.log"

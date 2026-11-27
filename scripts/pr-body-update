@@ -6,13 +6,19 @@
 修正の round のたびに手で書き換えていた PR 本文の 2 行を、1 つのコマンドで書き換える。
   - 「レビューと QA」の節にある「最後に検証した sha」の行 → --verified に渡した sha
   - 「対象」の節にある HEAD の行                        → PR の現在の headRefOid
-書き換えるのは、その行の中で印（「最後に検証した sha」・HEAD）の直後にある sha（7〜40 桁の 16 進数。
-コロン・空白・開きバッククォートは挟まってよい）だけである。行の前後の文、ほかの行、改行コードは変わらない。
+書き換えるのは、その行の中で印（「最後に検証した sha」・HEAD）の直後にある sha（7〜40 桁の 16 進数で、
+直後に英数字や _ が続かない語。コロン・空白・開きバッククォートは挟まってよい）だけである。行の前後の文、
+ほかの行、改行コードは変わらない。
 節は `## <節名>` の見出しから次の見出し（# 〜 ######）までで、見出しは本文に 1 つだけ、印の付いた行は
-節に 1 つだけ無ければならない。HTML コメント（<!-- 〜 -->）の中の見出しや印は数えない（PR テンプレートの
-注釈は残してよいため）。決まった行が無い・複数あるときは何も書き換えずに、どの行が足りない・多いかを
-stderr に出して終了コード 1（そのときは stderr のとおりに本文を直してからやり直す。足りない行は足し、
-重なる行は除く）。
+節に 1 つだけ無ければならない。本文の構造として数えないもの: HTML コメント（<!-- 〜 -->。PR テンプレートの
+注釈は残してよいため）と、コードブロック（``` か ~~~ のフェンスの内側。例示の見出しや印になるため）。
+インラインコード（`...`）の中の <!-- と --> は注釈の記号として数えない。
+決まった行が無い・複数あるときは何も書き換えずに、どの行が足りない・多いかを stderr に出して終了コード 1
+（そのときは stderr のとおりに本文を直してからやり直す。足りない行は足し、重なる行は除く）。
+同時編集: この API は条件付き更新（If-Match）を受け付けないため、書き込む直前に PR を読み直し、最初の
+読み取りから本文か head が変わっていれば書き込まない。書き込みの応答の head と本文も確かめる。読み直しから
+書き込みまでの間（1 秒未満）に重なった本文の編集は上書きで消えるため、この道具が動いている間はその PR の
+本文を編集しないこと。
 GitHub との読み書きは scripts/agent-gh dev api だけを使う。本文は argv でなく --input のファイルで渡す
 （非 ASCII を argv で渡さない決まり。skill write-pull-request）。
 終了コード: 0 = 書き換えた、1 = 書き換えなかった（決まった行の過不足か GitHub への読み書きの失敗）、
@@ -28,9 +34,10 @@ import tempfile
 REPO = "hatai/Pelway"
 # (節名, 行を見分ける印)。順に --verified の sha、PR の headRefOid を当てる。節の見出しは `## <節名>`
 TARGETS = (("レビューと QA", "最後に検証した sha"), ("対象", "HEAD"))
-SHA = r"[0-9a-fA-F]{7,40}(?![0-9a-fA-F])"  # 直後も 16 進数のときは切らずに不合格にする
+SHA = r"[0-9a-fA-F]{7,40}(?![0-9A-Za-z_])"  # 直後に英数字や _ が続く語（2222222xyz など）は sha にしない
 FULL_SHA = re.compile(r"[0-9a-fA-F]{40}")
 ANY_HEADING = re.compile(r"#{1,6}(?:[ \t].*)?\r?$")
+FENCE_OPEN = re.compile(r" {0,3}(`{3,}|~{3,})(.*)\r?")
 
 USAGE = f"""usage: python3 -I scripts/pr-body-update <PR 番号> --verified <sha>
 
@@ -39,6 +46,8 @@ PR 本文の決まった 2 行を今の値に書き換える（{REPO} の PR）�
   「対象」の HEAD の行                        → PR の現在の headRefOid
 書き換えるのは行の中の sha だけ。ほかの行は変えない。決まった行（節の見出しや印の行）が本文に
 無い・複数あるときは何も書き換えずに、その行を stderr に出して終了コード 1（本文を直してからやり直す）。
+書き込む直前に PR を読み直し、読み取った後に本文か head が変わっていれば書き込まない。その間に重なった
+本文の編集は上書きで消えるため、この道具が動いている間はその PR の本文を編集しないこと。
 終了コード: 0 = 書き換えた、1 = 書き換えなかった（決まった行の過不足か GitHub への読み書きの失敗）、
 2 = 引数の誤り"""
 
@@ -57,6 +66,20 @@ def agent_gh(*args):
         die(f"scripts/agent-gh を実行できません: {e}")
 
 
+def read_pr(pr):
+    """PR の (本文, headRefOid, URL) を返す。読めなければ終わる。"""
+    got = agent_gh(f"repos/{REPO}/pulls/{pr}")
+    if got.returncode != 0:
+        sys.stderr.write(got.stderr)
+        die(f"PR #{pr} を読めません")
+    try:
+        data = json.loads(got.stdout)
+        body, head, url = data["body"], data["head"]["sha"], data["html_url"]
+    except (ValueError, KeyError, TypeError):
+        die(f"PR #{pr} の応答を読めません")
+    return (body if isinstance(body, str) else ""), head, url  # 本文が空なら、決まった行が無いものとして扱う
+
+
 def how_many(found):
     """見つかったものの個数の言い回し: 0 なら「無い」、それ以外は「 N つある」（直前に空白を置く）。"""
     return "無い" if not found else f" {len(found)} つある"
@@ -67,29 +90,54 @@ def where_at(found):
     return "" if not found else "（" + "・".join(f"{i + 1} 行目" for i in found) + "）"
 
 
-def uncommented(lines):
-    """HTML コメント（<!-- 〜 -->、複数行も含む）の中の文字を空白に替えた行のリストを返す（長さと行数は同じ）。
-    PR テンプレートの注釈は残してよいため（skill write-pull-request の手順 4）、注釈の中の見出しや印は数えない。"""
-    out, inside = [], False
+def code_span_end(line, k):
+    """line[k:] がバッククォートの並びで始まるとき、それと同じ長さの並びで閉じるインラインコードの直後の位置を
+    返す。閉じが同じ行に無ければ -1（この並びは通常の文字として扱う）。"""
+    n = len(line) - k - len(line[k:].lstrip("`"))
+    for m in re.finditer(r"`+", line[k + n:]):
+        if len(m.group()) == n:
+            return k + n + m.end()
+    return -1
+
+
+def unquoted(lines):
+    """見出しや印を数えるための本文（行のリスト。長さと行数は元のまま）を返す。数えたくない部分を空白に替える:
+    コードブロック（フェンスの行も含む）と HTML コメント（複数行も含む）。インラインコードの中は HTML コメントの
+    開き・閉じとして数えない（コード例に `<!--` と書いても、後ろの節が消えないようにするため）。"""
+    out, fence, inside = [], "", False
     for line in lines:
-        chars, k = [], 0
-        while k < len(line):
-            if inside:
-                if line.startswith("-->", k):
-                    chars.append("   ")
-                    inside = False
-                    k += 3
+        m = FENCE_OPEN.fullmatch(line) if not fence and not inside else None
+        if m and not (m[1][0] == "`" and "`" in m[2]):  # バッククォートのフェンスは、情報文字列に ` を含まない
+            fence = m[1]
+            out.append(" " * len(line))
+        elif fence:
+            out.append(" " * len(line))
+            if re.fullmatch(r" {0,3}" + re.escape(fence[0]) + f"{{{len(fence)},}}[ \t]*\r?", line):
+                fence = ""
+        else:
+            chars, k = [], 0
+            while k < len(line):
+                if line[k] == "`" and (end := code_span_end(line, k)) >= 0:
+                    # インラインコードは注釈の外でも中でも飛ばす（注釈の中は空白に替える。外では sha を書く形のため
+                    # 中身ごとそのまま）
+                    chars.append(" " * (end - k) if inside else line[k:end])
+                    k = end
+                elif inside:
+                    if line.startswith("-->", k):
+                        chars.append("   ")
+                        inside = False
+                        k += 3
+                    else:
+                        chars.append(" ")
+                        k += 1
+                elif line.startswith("<!--", k):
+                    chars.append("    ")
+                    inside = True
+                    k += 4
                 else:
-                    chars.append(" ")
+                    chars.append(line[k])
                     k += 1
-            elif line.startswith("<!--", k):
-                chars.append("    ")
-                inside = True
-                k += 4
-            else:
-                chars.append(line[k])
-                k += 1
-        out.append("".join(chars))
+            out.append("".join(chars))
     return out
 
 
@@ -97,7 +145,7 @@ def rewrite(body, values):
     """本文 body の決まった 2 行の sha を TARGETS の順の値 values に書き換え、(新しい本文, 変更, 問題) を返す。
     変更は [(印, 古い sha, 新しい sha, 行番号)]。問題が 1 つでもあれば何も書き換えず (None, [], 問題) を返す。"""
     lines = body.split("\n")  # \r は行末に残るため、改行コードは join でそのまま戻る
-    view = uncommented(lines)  # 見出しと印はこの版で探し、書き換えは同じ位置で lines に施す
+    view = unquoted(lines)  # 見出しと印はこの版で探し、書き換えは同じ位置で lines に施す
     changes, problems = [], []
     for (section, label), value in zip(TARGETS, values):
         heads = [i for i, line in enumerate(view) if re.fullmatch(r"## " + re.escape(section) + r"[ \t]*\r?", line)]
@@ -142,21 +190,18 @@ def main():
     if verified is None or not FULL_SHA.fullmatch(verified):
         die(f"--verified には 40 桁の sha を指定してください\n{USAGE.splitlines()[0]}", 2)
 
-    got = agent_gh(f"repos/{REPO}/pulls/{pr}")
-    if got.returncode != 0:
-        sys.stderr.write(got.stderr)
-        die(f"PR #{pr} を読めません")
-    try:
-        data = json.loads(got.stdout)
-        head, url = data["head"]["sha"], data["html_url"]
-    except (ValueError, KeyError, TypeError):
-        die(f"PR #{pr} の応答を読めません")
+    body, head, url = read_pr(pr)
     if not isinstance(head, str) or not FULL_SHA.fullmatch(head):
         die(f"PR #{pr} の headRefOid が読めません（head: {head!r}）")
-    body = data.get("body") or ""  # 本文が空なら、決まった行が無いものとして扱う
     new_body, changes, problems = rewrite(body, (verified.lower(), head.lower()))
     if problems:
         die(f"PR #{pr} の本文を書き換えませんでした:\n  - " + "\n  - ".join(problems))
+    # 書き込む直前に読み直す（ファイルの先頭の「同時編集」）。読み取りの後に別の編集や push が重なると、
+    # 古い本文で上書きしたり古い HEAD を書いたりすることになるため、変わっていれば書き込まない。
+    body_now, head_now, _ = read_pr(pr)
+    if (body_now, head_now) != (body, head):
+        changed = "・".join(w for w, c in (("本文", body_now != body), ("head", head_now != head)) if c)
+        die(f"PR #{pr} は読み取った後に変わったため書き換えませんでした（{changed}）。もう一度実行してください")
     # 日本語の本文は argv で渡せないため、--input のファイルに書く（終わったら消す）
     fd, path = tempfile.mkstemp(suffix=".json")
     try:
@@ -168,6 +213,16 @@ def main():
     if sent.returncode != 0:
         sys.stderr.write(sent.stderr)
         die(f"PR #{pr} の本文を書き換えられませんでした")
+    try:
+        after = json.loads(sent.stdout)
+        written, head_after = after["body"], after["head"]["sha"]
+    except (ValueError, KeyError, TypeError):
+        die(f"PR #{pr} の本文を書き換えましたが、応答を読めません。GitHub で本文を確かめてください")
+    if head_after != head:
+        die(f"PR #{pr} の本文は書き換えましたが、書き込みの時点で head が {head_after} に進んでいました。"
+            "もう一度実行してください")
+    if written != new_body:
+        die(f"PR #{pr} の本文は書き換えましたが、GitHub が返した本文が送った内容と違います。GitHub で本文を確かめてください")
     print(f"pr-body-update: PR #{pr} の本文を書き換えました（{url}）")
     for label, old, new, no in changes:
         print(f"  {no} 行目 {label}: {old} → {new}")

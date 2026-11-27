@@ -18,7 +18,7 @@ GitHub PR のタイトルと説明本文を書く・直す手順。
 - マージは依頼されたときのみ実行してよい。`scripts/agent-gh dev git push` / `scripts/agent-gh dev git fetch` はしてよい。
 - worktree の外への書き込みは、許可が出ても実行しない。
 - `rm -rf` は、許可が出ても実行しない。
-- 使ってよいネット / `gh` は `gh pr list` / `gh pr view` / `gh pr create` / `gh pr edit` / `gh issue view` / `gh issue comment` / `gh issue edit` / `gh search repos` / `gh search code` だけ。これ以外のネット接続はしない。
+- 使ってよいネット / `gh` は `gh pr list` / `gh pr view` / `gh pr create` / `gh pr edit` / `gh issue view` / `gh issue comment` / `gh issue edit` / `gh search repos` / `gh search code` だけ。例外は `gh api` のうち、対象リポジトリの PR の読み取りとその PR のタイトル・本文の更新に限る（`repos/<owner>/<repo>/pulls/<番号>` への GET と PATCH だけ。手順 3 のタイトルの設定と、手順 4 の `python3 -I scripts/pr-body-update` が `scripts/agent-gh dev api` で行うもの）。これ以外のネット接続はしない。
 - AI 開発チームのエージェントは、`gh` を `scripts/agent-gh dev` 経由で実行する（例: `scripts/agent-gh dev pr create ...`）。素の `gh` で作った PR は作成者が hatai になり、hatai が Approve できないため、ブランチ保護を迂回しないとマージできない。
 - AI 開発チームのエージェントが作る PR は Draft にする（`--draft`）。
 - 日本語を含む文字列（PR タイトル・本文・コメント・Issue 本文等）は、exec のコマンド引数（`--title "..."` など）に書かず、必ずファイル経由（`--body-file`、`api --input` 等）で渡す。実装担当の sandbox では exec 引数の日本語が `\uXXXX` エスケープのまま実行環境に届き、エスケープ文字列がそのままタイトルや本文に載る障害が繰り返されているため（PR #311・#314・#319 で発生）。
