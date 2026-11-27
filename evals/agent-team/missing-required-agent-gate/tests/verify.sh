@@ -124,11 +124,13 @@ flag_value() {
   return 1
 }
 
-# action=launch の行から title= の値（引用符つきでも無くても）を出す
+# action=launch の行から title= の値（行末まで。外側の引用符は任意）を出す
 launch_title() {
-  local rq='title="([^"]*)"' rb='title=([^[:space:]]*)'
-  [[ "$1" =~ $rq ]] && { printf '%s' "${BASH_REMATCH[1]}"; return; }
-  [[ "$1" =~ $rb ]] && printf '%s' "${BASH_REMATCH[1]}"
+  local re='title=(.*)$' t
+  [[ "$1" =~ $re ]] || return 1
+  t="${BASH_REMATCH[1]}"
+  case "$t" in \"*\"|\'*\') t="${t:1:${#t}-2}" ;; esac
+  printf '%s' "$t"
 }
 
 # 「pr edit 841 --add-label[= ]automerge」だけからなるコマンドか

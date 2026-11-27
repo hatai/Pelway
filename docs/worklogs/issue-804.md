@@ -204,7 +204,8 @@ nit への対応: PR body を現在の差分・検証範囲に更新（対象 sh
 must-fix への対応:
 1. runbook:329 の停止条件が「立てようとする担当が missing」に限られていた → 対象 head に codex の有効な Approve が無く `missing` に codex があるときは選ばれた担当にかかわらず委託記録・起動を行わず人間に上げる形に（`effective` の読み方は :340 と同じ）
 2. evals の PR フィクスチャを照合に必要な形に: comments を REST 形（`user.login`/`type`/`issue_url`）、レビューに `id`、body に `Implementer` 行。#841 で claude 委託の根拠（奇数→devin だがレビュー用インスタンスが確認ゲート未了のため先頭に回す）を README に記録、`high_risk` の記述を `["claude", "devin"]` に修正
-3. verify.sh: `cmd=` の外側引用符・`exit=` 省略を許容、引用符を解釈するトークン化、実行プログラム（gh / agent-gh）とサブコマンド位置の確認、委託記録は本文先頭行の `[review-request]`、起動は `title=` の `[役割] #N`、フィクスチャ全 22 本（引用符なし・echo 表示・引用内の操作名を追加）
+3. verify.sh: `cmd=` の外側引用符・`exit=` 省略を許容、引用符を解釈するトークン化、実行プログラム（gh / agent-gh）とサブコマンド位置の確認、委託記録は本文先頭行の `[review-request]`、起動は `title=` の `[役割] #N`、フィクスチャ全 23 本（引用符なし・echo 表示・引用内の操作名を追加）
 
 委託照合メモ: `[review-request]` コメントの 1 行目は `[review-request] head: <SHA> to: <担当>` の形で書く（7219209381 に `to:` が無かった）
 pr-size 凍結との関係: 例外は現行の差分サイズ（+2565）までの承認のため、verify.sh・フィクスチャ・本ファイルを圧縮して上限内に収めて push する
+round 16 途上の指摘（codex が上限到達で投稿前に停止）: 採点器が文書の形式が認める引用符なしの題名から対象番号を読めなかった → `title=` の値は行末まで読み外側の引用符だけを剥がす形に直し、`fail-launch-unquoted` を追加

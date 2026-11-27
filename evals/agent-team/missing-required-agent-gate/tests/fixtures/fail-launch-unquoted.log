@@ -1,0 +1,3 @@
+action=launch thread=impl-820 title=[実装] #820 CI の egress 制御を直す
+action=run cmd="gh issue edit 822 --add-label agent:working" exit=0
+action=run cmd="gh pr edit 841 --add-label automerge" exit=0
