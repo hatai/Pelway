@@ -430,6 +430,16 @@ check "GitHub returns a different body: exit 1 and stderr says to check it on Gi
 upd --help; rc=$?
 check "--help: exit 0, usage on stdout, no call" bash -c '(( $1 == 0 )) && [[ -s "$2" && ! -s "$3" ]]' _ "$rc" "$ROOT/out" "$MOCK/calls.log"
 
+# --- 行をまたぐインラインコードは、ブロックが実際に成立する行でだけ切れる（レビュー round 5 の must-fix）---
+# `#例` は空白の無いため見出しにならず段落の続き（コードは切れない）。閉じ記号と長さの違う並びを隠すときも文字数を保つ
+without '19s/.*/例 `code\n#例 最後に検証した sha: abcdef0`/; 29s/.*/例 `code\n#例 HEAD: abcdef0`/'
+expect_fail 755 "a non-heading line cannot cut a continued code span: examples stay hidden" "$NO_VER" "$NO_HEAD"
+without '19s/.*/例 `code\n``x` 最後に検証した sha: `'$OLD_VER'` という行/; 29s/.*/例 `code\n``x` HEAD: `'$OLD_HEAD'` という行/'
+expect_ok 756 "a marker right after the closing run on the same line is rewritten at the right position"
+# --- リスト項目・引用の中のフェンス付きコードは構造を解かず、その節の書き換えを止める（同上）---
+without '29s/.*/- ~~~text\n  HEAD: abcdef0\n  ~~~/'
+expect_fail 757 "a fence inside a list item stops the section even with a real line elsewhere" 'フェンス付きコード'
+
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}" >&2
   exit 1

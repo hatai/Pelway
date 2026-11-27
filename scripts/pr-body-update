@@ -12,7 +12,8 @@ sha」・HEAD という語）を含む行は節に 1 つだけ、その行の中
 直後に英数字や _ が続かない語。コロン・空白は挟まってよく、sha はバッククォートで囲んでもよい）だけである。
 行の前後の文、ほかの行、改行コードは変わらない。
 決まった行が無い・複数あるときは何も書き換えずに、どの行が足りない・多いかを stderr に出して終了コード 1
-（そのときは stderr のとおりに本文を直してからやり直す。足りない行は足し、重なる行は除く）。
+（そのときは stderr のとおりに本文を直してからやり直す。足りない行は足し、重なる行は除く。節の中に
+リスト項目・引用の中のフェンス付きコードを見つけたときも、その構造を解かず同様に書き換えない）。
 同時編集: この API は条件付き更新（If-Match）を受け付けないため、書き込む直前に PR を読み直し、最初の
 読み取りから本文か head が変わっていれば書き込まない。書き込みの応答の head と本文も確かめる。読み直しと
 書き込みの間には競合が残る（書き込みの前に GitHub App のトークンを発行するなど、時間がかかることがある）。
@@ -40,6 +41,8 @@ HIT = re.compile(r"[ \t]*[:：]?[ \t]*(?:`(" + SHA + ")`|(" + SHA + "))")
 FULL_SHA = re.compile(r"[0-9a-fA-F]{40}")
 ANY_HEADING = re.compile(r"#{1,6}(?:[ \t].*)?\r?$")
 FENCE_OPEN = re.compile(r" {0,3}(`{3,}|~{3,})(.*)\r?")
+# リスト項目・引用の中で開くフェンス（中の行の字下げの対応までは追わない。節に 1 つでもあれば書き換えない）
+CONTAINER_FENCE = re.compile(r" {0,3}(?:(?:[-+*]|\d{1,9}[.)])[ \t]+|>[ \t]*)+(`{3,}|~{3,})(.*)\r?")
 
 USAGE = __doc__.splitlines()[0]  # --help はこのファイルの先頭の説明（__doc__）を出す
 
@@ -101,10 +104,13 @@ def indent_width(line):
 
 
 def starts_block(line):
-    """行が新しいブロック（リスト項目・見出し・フェンス付きコード・行頭の注釈、字下げされたコード、空行）を
-    始めるとき True。行をまたぐインラインコードは同じ段落の続きの行にだけ及ぶため、そこで切れる。"""
-    return (not line.strip() or indent_width(line) >= 4 or FENCE_OPEN.match(line) is not None
-            or re.match(r" {0,3}(?:[-+*][ \t]|\d{1,9}[.)][ \t]|#|<!--)", line) is not None)
+    """行が新しいブロック（リスト項目・見出し・フェンス付きコード・行頭の注釈・引用・空行）を
+    始めるとき True。行をまたぐインラインコードは同じ段落の続きの行にだけ及ぶためそこで切れる。
+    ブロックが実際に成立する形だけを数える（# の後ろに空白の無い `#例`、情報文字列に ` を含む
+    フェンス、4 字以上の字下げは段落を分けない。順序付きリストは `1.` だけが段落を分ける）。"""
+    m = FENCE_OPEN.match(line)
+    return (not line.strip() or (m is not None and not (m[1][0] == "`" and "`" in m[2]))
+            or re.match(r" {0,3}(?:#{1,6}(?:[ \t]|\r?$)|[-+*][ \t]|1[.)][ \t]|>|<!--)", line) is not None)
 
 
 def unquoted(lines):
@@ -149,11 +155,9 @@ def unquoted(lines):
                         chars.append(" ")
                         k += 1
                 elif code_n:  # 行をまたいだインラインコード。同じ長さの並びで閉じる
+                    chars.append(" " * (run or 1))  # 閉じ記号と長さの違う並びも文字数を保つ
                     if run == code_n:
-                        chars.append(" " * run)
                         code_n = 0
-                    else:
-                        chars.append(" ")
                     k += max(run, 1)
                 elif line.startswith("<!--", k):
                     chars.append("    ")
@@ -192,6 +196,11 @@ def rewrite(body, values):
             problems.append(f"「{section}」の見出しが本文に{how_many(heads)}{where_at(heads)}")
             continue
         end = next((i for i in range(heads[0] + 1, len(lines)) if ANY_HEADING.fullmatch(view[i])), len(lines))
+        blocked = [i for i in range(heads[0] + 1, end)
+                   if (m := CONTAINER_FENCE.match(view[i])) and not (m[1][0] == "`" and "`" in m[2])]
+        if blocked:  # リスト項目・引用の中のフェンスは構造を解かず、その節の書き換えを止める
+            problems.append(f"「{section}」にリスト項目・引用の中のフェンス付きコード{where_at(blocked)}があるため書き換えません")
+            continue
         mark = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(label) + r"(?![A-Za-z0-9_])")
         found = [i for i in range(heads[0] + 1, end) if mark.search(view[i])]
         name = f" {label} " if label.isascii() else f"「{label}」"  # Latin の印の前後には空白を置く
