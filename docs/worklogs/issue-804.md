@@ -88,3 +88,4 @@ must-fix への対応:
 2. local の O_NOFOLLOW open が O_NONBLOCK を欠き、FIFO の local で見張りの本ループが停止する → agent-team-config・conductor-watch.sh の両方に O_NONBLOCK を追加（試験 30: FIFO local が待たずに警告して重ねない）
 
 nit への対応: worktree-setup の配置を `ln -T` に（最終名がディレクトリへの差し替えでもその中に作らない）＋コメント修正。conductor-rebuild.test.sh の skip→fail は前回の commit に入っていなかったため今回適用し、round 5 の worklog 記述をその旨に修正
+push した head: 3a18d45e（round 6 の対応）
