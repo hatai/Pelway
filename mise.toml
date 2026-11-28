@@ -33,6 +33,10 @@ typos = "1.52.0"
 # CI（GitHub Actions）の workflow 静的 lint。担当が公式リリースを確認の上でピン。
 # 出典: https://github.com/jdx/jactionlint/releases/latest （v2.5.0）
 jactionlint = "2.5.0"
+# workflow YAML の構造をテストから確かめる YAML parser。actions.lock の照合自体は
+# jactionlint が担い、yq は workflow 配線テストだけに使う。担当が公式リリースを確認の上でピン。
+# 出典: https://github.com/mikefarah/yq/releases/tag/v4.54.3
+yq = "4.54.3"
 # CI のカバレッジ増減表示（octocov）。担当が公式リリースを確認の上でピン。
 # 出典: https://github.com/k1LoW/octocov/releases/tag/v0.83.5
 # 短縮名 octocov は mise レジストリに無い（tool not found）。octocov 向けの packslip
@@ -280,6 +284,12 @@ printf '%s\\n' "$warn_out" | bash scripts/deny-warn-extract.sh >&2
 description = "PR の差分行数を数え、800 行を超えたら失敗する（linguist-generated とバイナリは除く）"
 run = "bash scripts/pr-size.sh"
 
+# workflow の uses: と .github/workflows/actions.lock の照合。jactionlint の
+# actions-lock / unpinned-uses / yaml-syntax を offline・no-ignores で実行する。
+[tasks.actions-lock-check]
+description = "workflow の uses: と .github/workflows/actions.lock の一致を jactionlint で確かめる（verify-static に含まれる）"
+run = "bash scripts/actions-lock-check.sh"
+
 # scripts/ 以下の bash・sh のスクリプト全部の shellcheck 検査（Issue #265・#621）。
 # demo-check 一式（scripts/demo-check/*.sh）は severity 既定、それ以外は --severity=warning。
 # 本体は scripts/shellcheck.sh（検査したファイルの数を合格時に 1 行出す）。
@@ -357,8 +367,8 @@ depends = ["test", "script-test"]
 # cargo-deny は cargo metadata と Cargo.lock を読むだけでコンパイルしない。
 # shellcheck もシェルスクリプトの静的解析のためコンパイルを伴わない）。
 [tasks.verify-static]
-description = "cargo をコンパイルに使わない検査（hk / fnox / pitchfork / cargo-deny / shellcheck / client）"
-depends = ["hk-check", "fnox-check", "pitchfork-check", "deny-check", "shellcheck", "client:verify"]
+description = "cargo をコンパイルに使わない検査（hk / fnox / pitchfork / cargo-deny / actions-lock / shellcheck / client）"
+depends = ["hk-check", "fnox-check", "pitchfork-check", "deny-check", "actions-lock-check", "shellcheck", "client:verify"]
 
 # client/（Electron と Octane の画面。ADR 0014）のタスク。手順は client/README.md。
 [tasks."client:bootstrap"]
