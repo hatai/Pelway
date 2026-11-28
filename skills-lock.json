@@ -302,6 +302,13 @@
       "skillPath": "skills/mbx/SKILL.md",
       "computedHash": "8202a3bc661e229b81a99295883f80ddae2bd6aeda192a56d1716f5f77186c7d"
     },
+    "merge-risk": {
+      "source": "warpdotdev/common-skills",
+      "commit": "8792394ff1b655e0af451b8fabb68ef0cfcbd208",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/merge-risk/SKILL.md",
+      "computedHash": "a52ef0604140e50204a14a78e040fa432db555650d71d84c8535808ec3abb47c"
+    },
     "meta-cognition-parallel": {
       "source": "actionbook/rust-skills",
       "sourceType": "github",
