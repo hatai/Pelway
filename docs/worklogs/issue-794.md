@@ -17,3 +17,15 @@
 - 候補の出どころ: `docs/worklogs/issue-794.md` round 1「改善案」
 - 対象の改善点: `.agents/skills/review-pr` に領域別の「報告するもの」「報告しないもの」「既定の重さ」を読む手順が無かった（手順の欠落）
 - 期待する変化: レビュー担当が領域固有の must-fix を見落とす手戻りと、範囲外・証拠の無い nit を繰り返す手戻りが減る
+
+## 実装者メモ（round 2）
+
+対象 head: 6b93e81bf31ba7585e4a331d50e8773da988d743
+
+1. 詰まった箇所: 手順 9: サブエージェントへの設計入力が conflict 時の優先順と既定値変更時の理由記録を欠いていたため、最初の Spec レビューに誤報が出た。完全な設計を渡して再実行し、誤報と実指摘を分けた。
+2. 曖昧だった文: 「2 回目以降の round では、前回レビューした sha（`Reviewed:` の行）から今の head までの差分と、前回の must-fix が直ったかを見る。」（`.agents/skills/review-pr/SKILL.md`「2 回目以降の round」）
+3. 仮定と解釈: 観点ファイル選択の差分は、この既存の round 範囲と同じであり、main の取り込みを除く例外と `diverged` 時の全体レビューも引き継ぐと解釈した。「Rust の inline unit test」は `.rs` ファイルの差分に限定すると解釈した。
+4. 足りなかった情報・検証手段: glob の一致を機械的に確かめる helper が無く、root-only 変更や `.rs` 限定の回帰は wording pin でしか確かめられない。
+5. 改善案: `.agents/skills/review-pr/SKILL.md` の「2 回目以降の round」を「レビュー対象の差分」という見出しに分け、初回・再レビュー・観点ファイル選択が同じ正本を参照できるようにする。
+
+使ったスキル: implement-issue, write-pull-request, code-review, `.agents/skills/tdd`（seam: `scripts/tests/review-perspective-docs.test.sh` の presence check）
