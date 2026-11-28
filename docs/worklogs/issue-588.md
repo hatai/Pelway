@@ -27,7 +27,7 @@ hatai との設計インタビューで、RedisInsight 方式の run 照合と P
 - `mise exec -- jactionlint`: pass。
 - `mise run verify`: fail。失敗したのは `.agents/skills/verify-pelway/verify-run.test.sh` で、この差分と関係ない cargo shim / `CARGO_HOME` の環境問題。単独実行でも同じ `cargo_target_dir` の確認で exit 2 だった。この変更の `gh-notify-samples.test.sh` は verify の中でも pass した。
 - `mise run script-test`: fail。失敗は verify と同じ `.agents/skills/verify-pelway/verify-run.test.sh` だけで、ほかの 61 件は pass。
-- PR サイズ: `+767 / -49`（上限 +800 / -2000 以内）。
+- PR サイズ: `+764 / -49`（上限 +800 / -2000 以内）。
 
 ## マージ後に確かめること
 

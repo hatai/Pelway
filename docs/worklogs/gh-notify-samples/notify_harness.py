@@ -460,9 +460,6 @@ class Harness:
         r2 = self.scenario("repeat-second", progressed, run_id=OWN_ID + 1)
         self.check("dedup repeated same head sends first and skips second", r1["sends"] and r2["duplicate"], f"first={r1['output']} second={r2['output']}")
 
-        calls = r["calls"] or self.scenario("query-shape", empty_scenario)["calls"]
-        run_calls = [c for c in calls if "/actions/workflows/" in c["endpoint"]]
-        job_calls = [c for c in calls if "/actions/runs/" in c["endpoint"]]
         qshape = self.scenario("query-shape2", empty_scenario)
         run_calls = [c for c in qshape["calls"] if "/actions/workflows/" in c["endpoint"]]
         job_calls = [c for c in qshape["calls"] if "/actions/runs/" in c["endpoint"]]
