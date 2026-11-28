@@ -114,7 +114,7 @@ scripts/agent-gh review pr checks <N> --json name,bucket
 
 #### 領域別のレビュー観点ファイル
 
-差分が次の領域に触れるときは、対応する観点ファイルを読む。これらのファイルは助言ではなく、報告するもの・報告しないもの・既定の重さを決める規範である。「報告しないもの」は nit にも書かない。ただし、中央の `review-pr` が must-fix と定める受け入れ条件・正しさ・セキュリティ・検証弱化、および security-review の結論は常に優先し、観点ファイルで下げない。観点ファイルは、中央の表に明示されない領域固有の欠陥でも、証拠があれば must-fix にできる。
+差分が次の領域に触れるときは、対応する観点ファイルを読む。これらのファイルは助言ではなく、報告するもの・報告しないもの・既定の重さを決める規範である。「報告しないもの」は nit にも書かない。ただし、中央の `review-pr` が must-fix と定めるすべての規則、および security-review の結論は常に優先し、観点ファイルで下げない。観点ファイルは、中央の表に明示されない領域固有の欠陥でも、証拠があれば must-fix にできる。
 
 | 領域 | 観点ファイル |
 |---|---|
@@ -124,9 +124,9 @@ scripts/agent-gh review pr checks <N> --json name,bucket
 
 選び方:
 
-1. そのレビューで検査する差分の変更パスを得る。初回は PR 全体、再レビューでは前回の `Reviewed:` の SHA から今回の head までの差分を使う。削除・rename では、削除前・rename 前後両方のパスで判定する。
+1. そのレビューで検査する差分の変更パスを得る。初回は PR 全体、再レビューでは「2 回目以降の round」で定める差分を使う。削除・rename では、削除前・rename 前後両方のパスで判定する。
 2. main の版にある3つの観点ファイルの front matter だけを読む。読むのはレビュー時点の main の版で、PR が変更・追加した版ではない。実装担当のレビュー委託で立てられたときは GitHub API で main の版を読む。
-3. `paths` の glob に1つでも一致したファイルを選ぶ。glob は repository root に固定した gitignore 風の書式で、先頭の `/` は root、`*` は `/` をまたがず、`**` は `/` をまたぐ。除外パターンと brace expansion は使わない。さらに、diff が `#[cfg(test)]`・`#[test]`・`#[tokio::test]` 自体、またはそれらの test module・test function の中の行を変更しているときは `tests` も選ぶ。
+3. `paths` の glob に1つでも一致したファイルを選ぶ。glob は repository root に固定した gitignore 風の書式で、先頭の `/` は root、`*` は `/` をまたがず、`**` は `/` をまたぐ。除外パターンと brace expansion は使わない。root の `Cargo.toml`・`Cargo.lock`、`mise.toml`、`.github/workflows/`、`deny.toml` だけの変更では、3つの観点ファイルを適用しない。さらに、diff が Rust ファイル（`.rs`）の `#[cfg(test)]`・`#[test]`・`#[tokio::test]` 自体、またはそれらの test module・test function の中の行を変更しているときは `tests` も選ぶ。
 4. 選ばれたファイルの本文だけを main の版で読む。複数選ばれたときは全て適用する。同じ指摘について「報告する」と「報告しない」が衝突したら報告する側を優先し、`default_class` が衝突したら must-fix、`attention` が衝突したら高い段階を優先する。
 5. レビュー本文の `## 検査` に適用した観点ファイルを書く。順は `db-contracts-and-migrations`、`tests`、`client-ui` に固定し、無いときは `観点ファイル: なし` と書く。
 

@@ -9,13 +9,6 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 failures=()
 
-require_file() {
-  local file="$1"
-  if [[ ! -f "$ROOT/$file" ]]; then
-    failures+=("missing: $file")
-  fi
-}
-
 # check <name> <file> <pattern...> — すべての pattern が file にあれば合格。
 check() {
   local name="$1" file="$2"
@@ -35,10 +28,6 @@ check() {
 db_file='docs/agents/review/db-contracts-and-migrations.md'
 tests_file='docs/agents/review/tests.md'
 ui_file='docs/agents/review/client-ui.md'
-
-require_file "$db_file"
-require_file "$tests_file"
-require_file "$ui_file"
 
 check_common() {
   local name="$1" file="$2" perspective="$3" default_class="$4"
@@ -91,6 +80,9 @@ check review_pr_references .agents/skills/review-pr/SKILL.md \
   'docs/agents/review/tests.md' \
   'docs/agents/review/client-ui.md' \
   'front matter だけを読む' \
+  '中央の `review-pr` が must-fix と定めるすべての規則' \
+  'root の `Cargo.toml`・`Cargo.lock`、`mise.toml`、`.github/workflows/`、`deny.toml` だけの変更では' \
+  'diff が Rust ファイル（`.rs`）の `#[cfg(test)]`' \
   '選ばれたファイルの本文だけを main の版で読む' \
   '観点ファイル: なし' \
   '`#[cfg(test)]`' \
@@ -100,7 +92,7 @@ check review_pr_references .agents/skills/review-pr/SKILL.md \
   'verdict: failed'
 
 if ((${#failures[@]})); then
-  printf 'FAIL %s\n' "${failures[@]}"
+  printf 'FAIL: %s\n' "${failures[@]}" >&2
   exit 1
 fi
-echo ok
+echo 'review-perspective-docs: ok'
