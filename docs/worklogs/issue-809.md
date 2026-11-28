@@ -9,7 +9,7 @@
 - 失敗の筋: フェンス付きコード・インラインコード・HTML 注釈・行頭 4 空白の字下げの中にある印を正式な行と取り違え、コード例の sha を書き換える。
   確かめ方: 各構造の中に印を置いた入力の試験（`pr-body-update.test.sh`）
 - 失敗の筋: PR を読んでから PATCH するまでの間に本文や head が変わり、古い内容を上書きする・違う head に書き込む。
-  確かめ方: 「head moved after the read」「body changed after the read」の試験（再読み取りで終了コード 1・PATCH 0 回）
+  確かめ方: 「head moved after the read」「body edited after the read: *」の試験（再読み取りで終了コード 1・PATCH 0 回）
 - 失敗の筋: PR 番号・`--verified` の形式が不正（数字以外・40 桁でない）で別の対象に届く。
   確かめ方: 引数検査の試験（終了コード 2）
 - 失敗の筋: 一時ファイル（`--input` 用）や子プロセスの起動経路（シェル解釈・ファイルの残り）で秘密や本文が漏れる。
@@ -65,7 +65,7 @@ head 70d5433e のレビュー（approve と nit）で見つかった筋: テン�
 head 15f9f2fc のレビュー（Codex must-fix 3 件）で足した筋: 書き込み直前の照合不足（読み取りから PATCH までに変わった本文を上書き）、フェンス・インラインコードの中の印、sha の語の境界。
 
 - 失敗の筋: 読み直しをしないと、読み取りと PATCH の間に変わった本文・head をそのまま上書きする。
-  確かめ方: 「head moved after the read」「body changed after the read」の試験 + PATCH 応答の head と本文の照合
+  確かめ方: 「head moved after the read」「body edited after the read: *」の試験 + PATCH 応答の head と本文の照合
 - 失敗の筋: sha の直後に英数字や `_` が続く語（`2222222xyz`）や 41 桁以上の並びを sha として書き換える。
   確かめ方: 語の境界の試験（両方の行で何も書き換えない）
 
