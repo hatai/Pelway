@@ -244,38 +244,34 @@ run_case osv-nopkg osv-scanner 128 "" 128
 # ---- 引数の誤り
 run_case bad-tool nope 0 "" 2
 
-# ---- workflow の配線の presence check（意味の検査は上の引数テスト）
-# step の字下げの境界で切り出し、env が pull_request 用 step の中にあることを確かめる。
-workflow_step_block() {
-  local step_name="$1" line found=0
-  while IFS= read -r line; do
-    if [[ "$line" == "      - name: $step_name" ]]; then
-      found=1
-      printf '%s\n' "$line"
-      continue
-    fi
-    if ((found)); then
-      [[ "$line" == "      - "* ]] && break
-      [[ "$line" =~ ^[[:space:]]{0,5}[^#[:space:]] ]] && break
-      printf '%s\n' "$line"
-    fi
-  done <"$ROOT/.github/workflows/security-scan.yml"
+# ---- workflow の配線の構造テスト（意味の検査は上の引数テスト）
+# yq で YAML を parse し、pull_request 用 step object の if/run/env と full-history 用 step object を確かめる。
+workflow_file="$ROOT/.github/workflows/security-scan.yml"
+workflow_step_count() {
+  local step_name="$1"
+  STEP_NAME="$step_name" yq -r \
+    '[.jobs.gitleaks.steps[] | select(.name == env(STEP_NAME))] | length' "$workflow_file"
 }
-workflow_text="$(cat "$ROOT/.github/workflows/security-scan.yml")"
-pr_step="$(workflow_step_block 'Scan (gitleaks git, pull_request)')"
-full_step="$(workflow_step_block 'Scan (gitleaks git, full history)')"
-[[ -n "$pr_step" ]] || failures+=("workflow-pr-step: missing step")
-[[ -n "$full_step" ]] || failures+=("workflow-full-step: missing step")
-want_contains workflow-pr-if "$pr_step" "        if: github.event_name == 'pull_request'"
-want_contains workflow-base-env "$pr_step" '          SECURITY_SCAN_BASE_SHA: ${{ github.event.pull_request.base.sha }}'
-want_contains workflow-pr-run "$pr_step" '        run: mise exec -- bash scripts/security-scan.sh gitleaks'
-want_contains workflow-full-if "$full_step" "        if: github.event_name != 'pull_request'"
-want_contains workflow-full-run "$full_step" '        run: mise exec -- bash scripts/security-scan.sh gitleaks'
-want_absent workflow-full-no-base "$full_step" 'SECURITY_SCAN_BASE_SHA'
-want_contains workflow-fetch-depth "$workflow_text" 'fetch-depth: 0'
-base_env_count="$(grep -cF 'SECURITY_SCAN_BASE_SHA: ${{ github.event.pull_request.base.sha }}' \
-  "$ROOT/.github/workflows/security-scan.yml" || true)"
-[[ "$base_env_count" == 1 ]] || failures+=("workflow-base-env: count $base_env_count, want 1")
+workflow_step_field() {
+  local step_name="$1" expression="$2"
+  STEP_NAME="$step_name" yq -r \
+    ".jobs.gitleaks.steps[] | select(.name == env(STEP_NAME)) | $expression" "$workflow_file"
+}
+want_exact() {
+  [[ "$2" == "$3" ]] || failures+=("$1: got $(printf '%q' "$2"), want $(printf '%q' "$3")")
+}
+
+pr_step='Scan (gitleaks git, pull_request)'
+full_step='Scan (gitleaks git, full history)'
+want_exact workflow-pr-step-count "$(workflow_step_count "$pr_step")" 1
+want_exact workflow-full-step-count "$(workflow_step_count "$full_step")" 1
+want_exact workflow-pr-if "$(workflow_step_field "$pr_step" '.["if"]')" "github.event_name == 'pull_request'"
+want_exact workflow-base-env "$(workflow_step_field "$pr_step" '.env.SECURITY_SCAN_BASE_SHA')" '${{ github.event.pull_request.base.sha }}'
+want_exact workflow-pr-run "$(workflow_step_field "$pr_step" '.run')" 'mise exec -- bash scripts/security-scan.sh gitleaks'
+want_exact workflow-full-if "$(workflow_step_field "$full_step" '.["if"]')" "github.event_name != 'pull_request'"
+want_exact workflow-full-run "$(workflow_step_field "$full_step" '.run')" 'mise exec -- bash scripts/security-scan.sh gitleaks'
+want_exact workflow-full-no-base "$(workflow_step_field "$full_step" '.env.SECURITY_SCAN_BASE_SHA')" 'null'
+want_exact workflow-fetch-depth "$(workflow_step_field 'Checkout' '.with["fetch-depth"]')" '0'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}"

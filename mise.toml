@@ -33,6 +33,10 @@ typos = "1.52.0"
 # CI（GitHub Actions）の workflow 静的 lint。担当が公式リリースを確認の上でピン。
 # 出典: https://github.com/jdx/jactionlint/releases/latest （v2.5.0）
 jactionlint = "2.5.0"
+# workflow YAML の構造をテストから確かめる YAML parser。actions.lock の照合自体は
+# jactionlint が担い、yq は workflow 配線テストだけに使う。担当が公式リリースを確認の上でピン。
+# 出典: https://github.com/mikefarah/yq/releases/tag/v4.54.3
+yq = "4.54.3"
 # CI のカバレッジ増減表示（octocov）。担当が公式リリースを確認の上でピン。
 # 出典: https://github.com/k1LoW/octocov/releases/tag/v0.83.5
 # 短縮名 octocov は mise レジストリに無い（tool not found）。octocov 向けの packslip

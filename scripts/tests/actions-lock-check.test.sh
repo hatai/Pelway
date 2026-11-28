@@ -9,7 +9,7 @@ failures=()
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 fixture="$work/repo"
-mkdir -p "$work/home" "$work/xdg-config"
+mkdir -p "$work/home" "$work/xdg-config" "$work/xdg-cache"
 git init -q "$fixture"
 mkdir -p "$fixture/.github/workflows"
 
@@ -55,11 +55,19 @@ reset_fixture() {
   write_workflow
 }
 
+copy_new_workflow() {
+  cp "$fixture/.github/workflows/a.yml" "$fixture/.github/workflows/new.yml"
+}
+
+write_config() {
+  cat >"$fixture/.github/jactionlint.yaml"
+}
+
 reply_out=""
 run_check() {
   local name="$1" want_rc="$2" rc
   reply_out="$(cd "$fixture" && HOME="$work/home" XDG_CONFIG_HOME="$work/xdg-config" \
-    PATH="$PATH" bash "$SCRIPT" 2>&1)"
+    XDG_CACHE_HOME="$work/xdg-cache" PATH="$PATH" bash "$SCRIPT" 2>&1)"
   rc=$?
   if [[ "$rc" != "$want_rc" ]]; then
     failures+=("$name: exit $rc, want $want_rc: $reply_out")
@@ -108,7 +116,7 @@ want_contains inconsistent-lock "$reply_out" '[actions-lock]'
 
 # lock に onboard されていない新しい workflow は失敗する。
 reset_fixture
-cp "$fixture/.github/workflows/a.yml" "$fixture/.github/workflows/new.yml"
+copy_new_workflow
 run_check new-workflow 1
 want_contains new-workflow "$reply_out" '[unpinned-uses]'
 
@@ -128,8 +136,8 @@ want_contains inline-ignore "$reply_out" '[unpinned-uses]'
 
 # 設定ファイルで rules を off にしても、明示した rule 選択による検査は止められない。
 reset_fixture
-cp "$fixture/.github/workflows/a.yml" "$fixture/.github/workflows/new.yml"
-cat >"$fixture/.github/jactionlint.yaml" <<'EOF_CFG'
+copy_new_workflow
+write_config <<'EOF_CFG'
 rules:
   actions-lock: off
   unpinned-uses: off
@@ -140,8 +148,8 @@ want_contains config-off "$reply_out" '[unpinned-uses]'
 
 # 設定ファイルで rule を警告に下げても、controlled な空の設定を使うため失敗する。
 reset_fixture
-cp "$fixture/.github/workflows/a.yml" "$fixture/.github/workflows/new.yml"
-cat >"$fixture/.github/jactionlint.yaml" <<'EOF_CFG'
+copy_new_workflow
+write_config <<'EOF_CFG'
 rules:
   actions-lock: warn
   unpinned-uses: warn
@@ -152,8 +160,8 @@ want_contains config-warn "$reply_out" '[unpinned-uses]'
 
 # 設定ファイルの policy で tag を許可しても、controlled な空の設定を使うため失敗する。
 reset_fixture
-cp "$fixture/.github/workflows/a.yml" "$fixture/.github/workflows/new.yml"
-cat >"$fixture/.github/jactionlint.yaml" <<'EOF_CFG'
+copy_new_workflow
+write_config <<'EOF_CFG'
 rules:
   unpinned-uses:
     policies:
