@@ -162,14 +162,14 @@ Electron 公式の[セキュリティチェックリスト](https://www.electron
 
 D1 の中で #766 の子 Issue の順に廃止する。それまで `pelway-client-ui`・`dev-client-probe`・`deny.toml` の slint の台帳（#229）は今のまま残す。
 
-1. #825 で `dev-client-probe` を消す
-2. #826 で `pelway-client-ui` を消し、`deny.toml` の slint の台帳とライセンスの例外、`.agents/skills/slint/` を外す
+1. #825 で `dev-client-probe` を消す（#751 のマージの後に着手）
+2. #826 で `pelway-client-ui` を消し、`deny.toml` の slint の台帳とライセンスの例外、`.agents/skills/slint/` を外す（#333・#820 のマージと #754 の後に着手し、#229 を閉じる）
 3. #752 の TypeScript 版がマージされた後、#827 で Rust 版 `pelway-client-core` を消す
 4. #828 で workflow の Slint のビルド用 `libfontconfig1-dev` を外す（workflow の変更なので hatai が扱う）
 
 ## 未決
 
-- 署名を入れる時期と方式（Windows の証明書、macOS の Apple Developer Program と notarize）。入れると決めるのは hatai。決めたら、残してある置き場所（タグのときだけ使える environment）に鍵を登録し、macOS の自動更新も足す。
+- 署名の方式（Windows の証明書、macOS の Apple Developer Program と notarize）と、D3 の中で署名を入れる段階。D3 で署名付きの配布物を作ることは決定済み（「配布とライセンス表示」）。方式を決めるのは hatai。決めたら、残してある置き場所（タグのときだけ使える environment）に鍵を登録し、macOS の自動更新も足す。
 
 ## v0.7 との関係
 

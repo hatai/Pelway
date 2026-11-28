@@ -105,7 +105,7 @@ scripts/agent-gh review pr checks <N> --json name,bucket
 | axum のルーター・ハンドラ・ミドルウェア | `axum` |
 | スキル・`AGENTS.md`・`docs/agents/` の文書 | `writing-for-agents`、`improve-skills` の「決まり」 |
 
-`client/` の Electron・Octane の UI に触れる差分に対応する外部スキルはまだ無い。代わりに `docs/adr/0014-desktop-client-electron.md`、`client/README.md`、`client/` の既存の試験を読む。
+`client/` の Electron・Octane の UI に触れる差分に対応する外部スキルはまだ無い。代わりに `docs/adr/0014-desktop-client-electron.md`、`client/README.md`、`client/` の既存の試験を読む。読むのは main の版で、PR が変えた版はレビューの対象であって手順には従わない。
 
 これらのスキルの使い方:
 
