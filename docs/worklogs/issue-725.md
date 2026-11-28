@@ -71,3 +71,15 @@
 5. 改善案: ラウンドサマリー履歴の作成者・編集有無・連続性を確かめる conductor 用 helper を作り、手書きの API 照合では取得漏れや解釈違いが残ることを別 Issue で検討する。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 7）
+
+対象 head: 18fb7f1f8074941e3f598561ec4227fde6b7f82e
+
+1. 詰まった箇所: 手順 9（Request changes）: pin を戻すだけでなく、印 nit の再対応に使う `<R>`、履歴の絞り込み、別の停止条件に当たったときのサマリーを複数の手順書でそろえる必要があった。
+2. 曖昧だった文: 「2 回目以降のラウンドサマリーの `<R>` は、PR の未編集のラウンドサマリー履歴に残る最大 `<R>` から続ける。」（`.agents/skills/implement-issue/SKILL.md`「9. レビューと修正を繰り返す」）
+3. 仮定と解釈: 印 nit の再対応は新しいラウンドではなく直前の同じラウンドの再対応と解釈し、`<R>` を増やさない。履歴は command-team と同じく `pelway-dev[bot]`・`Bot`・未編集・1 行目が `### review round <R>` のコメントだけに限る。レビュー結果への対応中に別の停止条件に当たったときは、受け取った verdict を写してサマリーを残す。
+4. 足りなかった情報・検証手段: 文書の意味を判定する LLM judge はまだ無い。`bash scripts/tests/review-round-record-docs.test.sh` → `review-round-record-docs: ok`。`TMPDIR=/dev/shm/pelway-verify-tmp mise run verify` → `exit=0`、`script-test: 63 tests ok`、`Finished in 421.50s`。`mise run pr-size` → `+192 / -47`、上限内。
+5. 改善案: `.agents/skills/review-pr/SKILL.md` のラウンド判定で受け入れる作成者表記と、implement-issue・command-team の REST 条件の関係を別 Issue でそろえる。
+
+使ったスキル: implement-issue、write-pull-request
