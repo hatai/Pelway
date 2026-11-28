@@ -86,8 +86,8 @@ build_payload() {
 #   3. dedup（Check duplicate notification step + Send step if）:
 #                      synchronize で、同じ PR・同じ head sha を送った過去
 #                      run があるときは送らない（第3引数 dup=true で再現）。
-#                      dedup は過去 run の送信を step 名 "Send notification" で
-#                      照合するため、workflow の Send step 名を変えるときは
+#                      dedup は過去 run の送信を step 名 "Record delivery" で
+#                      照合するため、workflow の Record delivery step 名を変えるときは
 #                      dedup step の照合文字列も合わせること
 gate_decision() {
   local ev="$1" event_name="$2" dup="${3:-false}"
@@ -324,11 +324,17 @@ main() {
     'merged=null' 'conclusion=null' 'workflow_name=null' \
     "run_url=$own_run_url" 'actor=example-admin' || failures=$((failures + 1))
 
+  # --- workflow から抽出した dedup / Send / Record delivery の実行テスト。
+  #     偽 gh・偽 curl・偽 sleep・偽 date は notify_harness.py が用意する ---
+  if ! python3 "$samples_dir/notify_harness.py" run-tests; then
+    failures=$((failures + 1))
+  fi
+
   if [ "$failures" -ne 0 ]; then
     echo "$failures check(s) FAILED"
     exit 1
   fi
-  echo "all checks passed (workflow static + 11 gate decisions + 7 payload assemblies)"
+  echo "all checks passed (workflow static + 11 gate decisions + 7 payload assemblies + extracted-step behavior)"
 }
 
 main "$@"

@@ -18,6 +18,7 @@
 | [cargo-deny](https://embarkstudios.github.io/cargo-deny/) | 依存クレートの脆弱性（RustSec）・ライセンス・重複・取得元の検査 | 採用。`mise.toml` で 0.20.2 を固定し、ポリシーは `deny.toml` に置く。`verify-static`（CI の static ジョブ）で実行 |
 | Node・[bun](https://bun.sh) | `client/`（Electron と Octane の画面。ADR 0014）の開発の道具 | 採用。`mise.toml` で Node 26.13.1（LTS）と bun 1.4.5 を固定する。依存の入れ方・整形・lint・型検査・試験は `client/README.md`。`client:verify` タスク（`verify-static`・CI の static ジョブ）で実行 |
 | [shellcheck](https://github.com/koalaman/shellcheck) | シェルスクリプトの静的検査 | 採用。`mise.toml` で 0.11.0 を固定し、`shellcheck` タスク（`verify-static`・CI の static ジョブ）が `scripts/` 以下で 1 行目が `#!` で始まり `bash` か `sh` を含むファイル全部を検査する。demo-check 一式（`scripts/demo-check/*.sh`）は severity 既定、それ以外は `--severity=warning`（info・style 級は対象外。Issue #265・#621） |
+| [yq](https://github.com/mikefarah/yq) | YAML parser | 採用。workflow 配線テストが step object を構造的に確かめるために `mise.toml` で 4.54.3 を固定する。actions.lock の照合自体は jactionlint が担う |
 
 ## セットアップ手順（初回）
 
@@ -63,6 +64,7 @@ mise bootstrap    # 上の1〜3を順に実行
 | `mise run pitchfork-check` | pitchfork のバージョン確認と、`pitchfork.toml` に `agent-watch` が定義されていることの確認 |
 | `mise run conductor-rebuild -- --from <旧指揮役のスレッド ID> --to <新指揮役のスレッド ID>` | 指揮役を立て直す（新指揮役は MCP の `t3_thread_launch` で main の専用 worktree に立ててから `--to` に渡す。`docs/agents/conductor-context.md` の「恒久交代」）。hatai がホストの本体 checkout で実行する（worktree からは止まる） |
 | `mise run deny-check` | `cargo deny check`（依存クレートの検査。`verify-static` に含まれる。設定は `deny.toml`（ゲート）と `deny-warn.toml`（unmaintained / unsound の警告表示）） |
+| `mise run actions-lock-check` | `scripts/actions-lock-check.sh`（workflow の `uses:` と `.github/workflows/actions.lock` の照合。`verify-static` に含まれる） |
 | `mise run shellcheck` | `scripts/shellcheck.sh`（`scripts/` 以下の bash・sh のスクリプト全部の静的検査。`scripts/demo-check/*.sh` は severity 既定、それ以外は `--severity=warning`。指摘 0 件で通り、検査したファイルの数を出す。`verify-static` に含まれる） |
 | `mise run demo-check` | デモ受入前の 4 段階検査（`scripts/demo-check/run.sh`。受入は引数なしの全段階実行だけ有効。canary 段階は成果物が無いと未検証で失敗するため、製品をビルドしたあとに実行する） |
 | `mise run demo-check-selftest` | demo-check の自己テスト（`script-test` 経由で `verify-test` にも含まれる） |
@@ -106,7 +108,7 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 
 | ジョブ | チェック名 | 実行する mise タスク | cargo |
 |---|---|---|---|
-| `static` | `static (hk / fnox / pitchfork)` | `verify-static`（hk / fnox / pitchfork / cargo-deny / shellcheck / client）＋ `mise exec -- jactionlint` | 使わない（cargo-deny は cargo metadata を読むだけでコンパイルしない） |
+| `static` | `static (hk / fnox / pitchfork)` | `verify-static`（hk / fnox / pitchfork / cargo-deny / actions-lock / shellcheck / client）＋ `mise exec -- jactionlint` | 使わない（cargo-deny は cargo metadata を読むだけでコンパイルしない） |
 | `lint` | `lint (fmt / clippy)` | `verify-lint` | clippy |
 | `test` | `test (cargo test)` | `verify-test` | test |
 | `coverage` | `octocov (coverage diff)` | `coverage` タスク ＋ `k1LoW/octocov-action`（octocov 本体は v0.83.5 に固定） | 計測ビルド |
@@ -201,10 +203,11 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 
 | ジョブ | ツールと版 | 対象 | 導入 |
 |---|---|---|---|
-| `gitleaks (secrets)` | Gitleaks 8.30.1（MIT） | HEAD から辿れる git 履歴全体。マージコミットの差分（競合解消で足した行）も含める（`--log-opts="-m HEAD"`、checkout は `fetch-depth: 0`） | `mise.security.toml`（`MISE_ENV=security`）と `mise.security.lock` |
+| `gitleaks (secrets)` | Gitleaks 8.30.1（MIT） | Pull Request では `<base>..HEAD`、main への push・手動実行・手元では HEAD から辿れる git 履歴全体。マージコミットの差分（競合解消で足した行）も含める（checkout は `fetch-depth: 0`） | `mise.security.toml`（`MISE_ENV=security`）と `mise.security.lock` |
 | `semgrep (code patterns)` | Semgrep CE 1.186.0（LGPL-2.1） | 作業ツリーのファイル（`tests/` の下を含む。リポジトリ直下の `.semgrepignore` が Semgrep の組み込みの既定の除外パターンを置き換え、今はここでは何も除外しない。ファイルの大きさやバイナリかどうか、未追跡のファイルへの `.gitignore` による Semgrep の選別は残る）。ルールセットは `p/rust`・`p/github-actions`・`r/bash`（`github-actions-mutable-action-tag` を除く） | 公式イメージ `semgrep/semgrep` を digest 固定した job コンテナ |
 | `osv-scanner (dependencies)` | OSV-Scanner 2.7.1（Apache-2.0） | 作業ツリーのロックファイル（今は `Cargo.lock`） | `mise.security.toml` と `mise.security.lock` |
 
+- Gitleaks の範囲: `security-scan.yml` は Pull Request の step にだけ `SECURITY_SCAN_BASE_SHA: ${{ github.event.pull_request.base.sha }}` を渡し、`scripts/security-scan.sh` は `--log-opts="-m <base>..HEAD"` で走査する。`HEAD` は checkout 後の HEAD（Pull Request では通常 GitHub が作る合成 merge commit）で、範囲には PR のコミットと合成 merge commit が入る。main への push・手動実行・手元ではこの変数を設定せず、`--log-opts="-m HEAD"` で履歴全体を走査する。変数が設定されているときは空文字を含めて小文字 40 桁の 16 進だけを受け付け、不正なら gitleaks を起動せず終了コード 2 で止める。Semgrep と OSV-Scanner はこの変数を検証しない。base の解決や git の実行に失敗したときは標準エラーの検査で失敗にするが、有効な range にコミットが無いときは走査対象が無いだけなので成功とする。
 - 秘密の値は出さない: Gitleaks は `--redact` で値を伏せ、サマリーには規則・場所・コミットだけを書く。`-m` で同じ値が複数のマージコミットに重ねて出るため、サマリーには規則と場所の重複を除いた数も書く。
 - Gitleaks は CLI を直接実行し、`gitleaks-action` は使わない。Action は v2 以降、独自の EULA（改変の禁止、Organization のリポジトリではライセンスキーが必要）で配布されている。CLI 本体は MIT で、版の固定も mise の checksum で揃えられる。
 - Semgrep は Registry のルールをログインなしで取得し、`--metrics=off` で利用状況の送信を止める。Registry のルールセットは実行のたびに最新を取り、版は固定されない（イメージの digest が固定するのはエンジンと依存だけ）。同じコミットでも、日によって検出が変わりうる。WARNING 以上の規則が Registry に増えると、コードを変えなくてもジョブが失敗しうる。Registry のルールは Semgrep Rules License v1.0 で配布されている。利用は「自社の内部の業務目的」に限られ、ルールの再配布とサービスとしての提供は禁じられている（出典: https://semgrep.dev/legal/rules-license ）。このリポジトリでは、自分のコードを CI で検査するために使うだけで、ルールを複製してリポジトリに置かない。秘密情報向けのルールセットは入れない（秘密の検出は Gitleaks が担い、Semgrep は一致した行をそのまま出すため）。
@@ -214,7 +217,9 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
   - OSV-Scanner は、OSV データベースの他の出所（GHSA など）も見る（今は `Cargo.lock` だけを照合する）。
   - cargo-deny は `deny.toml` の ignore と警告の扱いを持ち、必須チェックの一部である。
   - OSV-Scanner には `deny.toml` の ignore が効かない。cargo-deny で ignore した勧告のうち告知でないもの（今は rsa の RUSTSEC-2023-0071）は、`osv-scanner.toml` にも同じ理由で書く。
-- Semgrep の `yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag` は `--exclude-rule` で使わない。この規則は `uses:` がコミット SHA でないことを検出するが、このリポジトリは `uses:` をタグで参照し、SHA を `.github/workflows/actions.lock`（`gh actions-lock` が生成）で固定する。
+- Semgrep の `yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag` は `--exclude-rule` で使わない。この規則は `uses:` がコミット SHA でないことを検出するが、このリポジトリは外部 action の mutable ref（タグ・ブランチ）を `.github/workflows/actions.lock`（`gh actions-lock` が生成）で固定する。
+- `mise run actions-lock-check`（`scripts/actions-lock-check.sh`。`verify-static` の一部で、CI の `static` ジョブで走る）は、jactionlint の `actions-lock`・`unpinned-uses`・`yaml-syntax` を offline かつ `--no-ignores` で実行し、`--config-file /dev/null` で lint 設定を読まず、`--strict-exit` で警告も失敗にする。workflow の mutable ref が actions.lock に載っていること、同じ参照が `dependencies` に有効な固定コミットを持つこと、actions.lock と workflow 群が正確に一致すること、workflow と actions.lock の YAML が読めることを確かめる。owner/repo の大文字・小文字は区別せず、ref とサブパスは区別する。inline ignore や lint 設定でこの検査は外せない。足りないとき・古いときは、agent は `scripts/agent-gh dev actions-lock`、人間は `gh actions-lock` で lock を作り直す。
+- `uses:` の形ごとの扱い: `owner/repo@<40 桁コミット SHA>` は immutable なので lock 無しで使える。`./path` の local action と local reusable workflow は同じリポジトリの同じコミットの中身なので対象外。外部 reusable workflow と `docker://` イメージは actions.lock に表現できないため、reusable workflow は完全なコミット SHA、docker イメージは `sha256` digest で直接固定する。
 - 除外（`.gitleaks.toml`・`.semgrepignore`・`osv-scanner.toml`）は、1 件ずつ理由を書いて足す。`.semgrepignore` を消すと、Semgrep は組み込みの既定の除外一覧（`tests/`・`test/`・`vendor/` など）に戻る。そのため、ファイルは中身が空でも残す。既存の検出を理由に、ルールの無効化や除外の範囲を広げない。
   - Gitleaks の除外は `.gitleaks.toml` の `[[allowlists]]` に書く（`[extend] useDefault = true` で組み込みの規則はそのまま使う）。1 つの allowlist は `condition = "AND"` にし、`targetRules`（規則）・`paths`（ダミー値を置いたファイル。`^…$` で 1 ファイルずつ）・`regexes`（既知のダミー値そのもの。`^…$` で値全体を書き、検出された値に当てる）のすべてに合うものだけを許す。行番号を使わないため、ファイルの行がずれても CI は落ちない。同じファイルの別の値は除外されない。値の形（桁数・文字種）だけの除外は書かない。
   - `.gitleaksignore`（「コミット:ファイル:規則:行」や「ファイル:規則:行」の指紋）は使わない。指紋は行番号を含むため、行がずれると同じ値が別の検出として出直す。新しいダミー値を除外するときは、そのファイルとその値を書いた allowlist を足すか、既存の allowlist の値をそのまま使う。
