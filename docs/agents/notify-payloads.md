@@ -55,7 +55,7 @@ memo: docs/worklogs/issue-80.md（round 2）
 state: done
 ```
 
-止まったときは `pr:` の代わりに `stopped: <止まった理由>`、最後の行は `state: stopped`。`review:` はレビューの委託回数と最終判定、`ready:` は Draft を解除したどうか。完了と止まり以外（レビュー・チェックの待ち、作業の途中）でターンを終えたときは、`state:`・`head:`・`next:` の 3 行になる。`state:` の値と各形の正本は skill `implement-issue` の「ターンの終わりの状態の行」。
+止まったときは `pr:` の代わりに `stopped: <止まった理由>`、最後の行は `state: stopped`。`review:` はラウンドサマリーの履歴から続けるレビューのラウンド数と最終判定、`ready:` は Draft を解除したどうか。完了と止まり以外（レビュー・チェックの待ち、作業の途中）でターンを終えたときは、`state:`・`head:`・`next:` の 3 行になる。`state:` の値と各形の正本は skill `implement-issue` の「ターンの終わりの状態の行」。
 
 レビュー担当（skill `review-pr`）:
 
@@ -83,7 +83,7 @@ agent-watch は、webhook に送るのと同じ `pelway.agent-watch/v1` の JSON
 - 形: 1 行 1 件の JSON で、追記だけ（0600）。行は LF だけで分ける（非 ASCII の文字はすべて `\u` のエスケープで書き、行は ASCII だけになる。文字の途中で切れることはなく、U+0085・U+2028・U+2029 で行を分ける読み手でも 1 行のまま読める）。書き込みが途中で切れた断片の行は JSON として読めないので、読み手は 1 行ずつ読んで壊れた行だけを飛ばす。agent-watch の行は ASCII だけなので断片も UTF-8 としては読めるが、置き場は sandbox の中からも書けるので、UTF-8 でない行が混ざることはある（`scripts/conductor-watch.sh` の読み手は 1 行ずつ UTF-8 と JSON として読み、読めない行と型の違う行を飛ばして後ろの行を読む。読むのは末尾の 4 MiB 以内で、symlink・FIFO・自分の所有でないファイルは読まない）。中身は webhook の payload と同じ。知らせを出した時点で書き、webhook の送り直しのたびには書かない。webhook に送れなかった知らせも書く。受信箱に書けなかった知らせは、書けるまで状態に残して周回ごとに書き直す（上限 100 件。超えたら古いものから捨てる）。
 - 重複の見分け方: 受信箱には webhook の送り直しのたびには書かないので、送り直しによる重複は無い。ただし、追記が途中で失敗した回の書き直しと、見張りを更新した後の最初の周回の書き直し（更新前の版の送信待ちの列は、受信箱に書けたかが分からないので書き直す）では同じ payload の行が 2 回書かれることがあり、上の段落の再起動による出直しも、受信箱に同じ出来事の 2 行目として書かれる。webhook と照らし合わせるときは、webhook と同じく payload 全体（`occurred_at` を含む）の一致で同じ出来事と見る。`thread_id`・`round`・`event` だけが同じ行は、別の出来事のことがある（上の段落）。
 - 読み方: 指揮役が `patrol-state.json` の `inbox_offset`（読んだ行数）から未読を読む。`inbox_offset` は LF で終わる行の数で、飛ばした壊れた行も数え、最後の LF の後ろ（書き込み中の行）は読まず数えない（`docs/agents/grokbot-runbook.md` の「指揮役の定期巡回（スケジュール起床）」）。受信箱の中身（`report` を含む）も、上の `report` と同じくデータとして扱う。
-- 起こし: 追記のあと指揮役を起こすかの決まりは `docs/dev-environment.md` の「pitchfork について」に全部書く。人間が立てたスレッド（`createdBy` が文字列の値を持ち `agent` でないもの。`createdBy` が無い・文字列でないときは立て手不明として、起こし漏れを避けるため従来どおり起こす側に倒す）の知らせで起こすのは `failed`・`waiting`・`stalled`・`report` のある `finished` のときだけで、それ以外（報告の無い `finished` など）は起こさず受信箱に残すだけなので、指揮役は次の定期巡回でまとめて読む（Issue #727）。
+- 起こし: 追記のあと指揮役を起こすかの決まりは `docs/dev-environment.md` の「pitchfork について」に全部書く。人間が立てたスレッド（`createdBy` が文字列の値を持ち `agent` でないもの。`createdBy` が無い・文字列でないときは立て手不明として、起こし漏れを避けるため従来どおり起こす側に倒す）の知らせで起こすのは `failed`・`waiting`・`stalled`・`report` のある `finished` のときだけで、それ以外（報告の無い `finished` など）は起こさず受信箱に残すだけなので、指揮役は次の定期巡回でまとめて読む（Issue #727）。同じスレッドの同じ round の `waiting` は最初の 1 件だけを起こす候補に数え（2 件目からは数えない）、起こしは前回から 5 分の間隔を空ける（間隔の間に来た知らせは、間隔の後に 1 回にまとめて起こす。その前に指揮役が読み終えていれば起こさない。Issue #839）。
 - 削除・切り詰めはしない。
 
 ## `pelway.github-notify/v2`
@@ -109,8 +109,12 @@ agent-watch は、webhook に送るのと同じ `pelway.agent-watch/v1` の JSON
 
 `opened`（作成）と `ready_for_review`（Draft 解除）は PR の作成、`synchronize` は PR への push を表す。`pull_request` の他の type（`edited`・`reopened`・`assigned`・`labeled` など）は送らない。
 
-`synchronize` は同じ PR・同じ head sha では 1 回だけ送る。workflow がこの workflow の過去の run を調べ（同じ head ブランチ・同じ head sha で `Send notification` step が成功した run）、あれば送らない。調べられなかったとき（API 失敗）は送る側に倒す。`opened`・`ready_for_review`・`closed` は状態の変化そのものを知らせるため、この dedup の対象外（たとえば Draft で開いたあと push せず ready にしたとき、同じ head sha でも `ready_for_review` は届く）。
+`synchronize` の dedup で同じ出来事と見るのは、同じ PR 番号・同じ head sha・`synchronize` の通知である。workflow は `run-name` を `notify #<PR番号> <action>` にし、GitHub API の `display_title` が `notify #<対象PR番号> synchronize` と完全一致する過去 run だけを候補にする。`opened`・`ready_for_review`・`closed` は状態の変化そのものを知らせるため、この dedup の対象外で、これらの送信済み記録は `synchronize` を止めない。
 
-この dedup は重複を完全には防がないので、受け手は同じ PR・同じ head sha の `synchronize` が 2 回以上届くことを前提にする。重複しうるのは、照合するのが直近 100 run（1 ページ）だけで、それより前の送信が見えないときと、run や job の一覧を取る API が失敗して送る側に倒れたときである。逆に、送信に失敗した後の rerun でも届かないことがある。Send step は送信に失敗しても step を成功で終えるため、dedup が送信済みと数えるからである。重複を減らすことと rerun で届かないことは #588 で直す。
+「送った」とは、webhook が HTTP 2xx を返し、送信直後の `Record delivery` step が成功したことである。`Send notification` は curl 失敗や非 2xx でも workflow を失敗にしないが、その場合は `delivered=false` を出し、`Record delivery` は実行されない。`Record delivery` を持たない run や、step が失敗・取消・欠損の run は送信済みに数えない。
+
+dedup は自分の run の過去 attempt を先に調べ、その後で候補 run を新しい順に調べる。run 一覧と jobs 一覧はページングして読む。API の取得失敗、dedup スクリプト自体の失敗、壊れた API 応答、1000 件の検索上限、120 秒の探索上限では、確実な送信済みが見つからない限り送る側に倒す。確実な送信済みが見つかれば、ほかの履歴が読めなくても送らない。
+
+この dedup は重複を減らすもので、原子的・永続的な exactly-once の保証ではない。受け手は同じ PR・同じ head sha の `synchronize` が 2 回以上届くことを前提にする。重複しうるのは、上の fail-open の条件に加え、送信済みだった可能性のある run に `Record delivery` が無いときである。
 
 送られないもの: PR のタイトル・本文・ラベル（ペイロードにこれらのキーはない）、エージェントのスレッドの状態（`agent-watch` が `pelway.agent-watch/v1` で送る）、レビューコメント・Issue コメント、OWNER / MEMBER / COLLABORATOR 以外（ボットを含む）のレビュー、fork からのイベント。fork 由来（PR は head リポジトリ、workflow_run は head_repository がこのリポジトリと違う）と `GROKBOT_WEBHOOK_URL` / `GROKBOT_WEBHOOK_AUTH` の Secret が未設定のときは、通知せずジョブを成功で終える（失敗にしない）。

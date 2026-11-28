@@ -89,6 +89,45 @@ check cond6_command_team_slots .agents/skills/command-team/SKILL.md \
   '`SLOTS` の行' \
   'キューに置けるファイル名'
 
+# 条件6b（Issue #804）: 必須の役に当たる担当の不足は、見張りの SLOTS missing の行と
+# slots.json の missing に出ることが runbook に、codex が欠けるあいだ高リスク・
+# security=yes の着手を止める決まりと直し方が command-team と仕様に書かれている。
+check cond6b_runbook_missing docs/agents/grokbot-runbook.md \
+  '`SLOTS missing <担当>`' \
+  '`missing-required`' \
+  'security=yes' \
+  'codex の有効な approve'
+check cond6b_command_team_missing_gate .agents/skills/command-team/SKILL.md \
+  '`missing`' \
+  'missing-required' \
+  'codex を `use` に戻すか、人が担当を割り当て直す' \
+  'security=yes'
+check cond6b_spec_missing_gate docs/superpowers/specs/agent-team.md \
+  'SLOTS missing' \
+  'codex を `use` に戻すか、人が担当を割り当て直す' \
+  'priority.review.high_risk'
+
+# 条件6c（Issue #804・hatai 決定の追加条件）: マージには現在の head への codex の
+# 有効な Approve が優先順位の表と独立して要ることが command-team の「マージ」に、
+# codex が欠けるあいだ委託・Draft 解除をせず Draft のまま人に委ねる分岐が
+# implement-issue に、missing の機械向けの経路が標準出力の `missing <担当>` の行
+# であることが runbook と仕様に書かれている。
+check cond6c_command_team_merge_gate .agents/skills/command-team/SKILL.md \
+  '`automerge` ラベルを付ける条件' \
+  'codex 担当の有効な Approve' \
+  'Reviewer: agent=codex' \
+  'codex の委託記録が無い'
+check cond6c_implement_issue_draft_kept .agents/skills/implement-issue/SKILL.md \
+  '`missing`' \
+  'PR は Draft のまま' \
+  'Draft を解除せず' \
+  '不足なしとみなさ'
+check cond6c_runbook_missing_channel docs/agents/grokbot-runbook.md \
+  '`missing <担当>` の行'
+check cond6c_spec_missing_channel docs/superpowers/specs/agent-team.md \
+  '`missing <担当>` の行' \
+  'すべてのマージの条件'
+
 # 条件7（Issue #715）: 上限と登録情報の正本が agent-team.toml であることが、
 # 対象の 5 文書のそれぞれに参照として書かれている。
 check cond7_toml_ref_spec docs/superpowers/specs/agent-team.md \
@@ -101,6 +140,26 @@ check cond7_toml_ref_implement_issue .agents/skills/implement-issue/SKILL.md \
   'agent-team.toml'
 check cond7_toml_ref_details docs/agents/command-team-details.md \
   'agent-team.toml'
+
+# 条件8（Issue #804）: 開発者ごとの上書き（agent-team.local.toml）の表・重ねた結果を
+# 読む規則・未決事項（needs-decision への引き継ぎ）が正本に書かれている。
+check cond8_override_table docs/superpowers/specs/agent-team.md \
+  'agent-team.local.toml' \
+  '上書き可' \
+  '上書き不可' \
+  'needs-decision'
+check cond8_merged_read_implement .agents/skills/implement-issue/SKILL.md \
+  'agent-team.local.toml' \
+  'effective'
+check cond8_merged_read_command_team .agents/skills/command-team/SKILL.md \
+  'agent-team.local.toml' \
+  'effective'
+check cond8_merged_read_runbook docs/agents/grokbot-runbook.md \
+  'agent-team.local.toml' \
+  'effective'
+check cond8_setup_doc docs/dev-environment.md \
+  'agent-team.local.toml' \
+  'worktree-setup'
 
 # 条件7b: command-team-details の調査の数え方に、停止中・再開処理中・再開待ちの
 # 除外と agent:devin による内訳がある。

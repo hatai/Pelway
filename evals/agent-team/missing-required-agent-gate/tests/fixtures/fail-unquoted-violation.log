@@ -1,0 +1,5 @@
+action=read src=environment/effective.json
+action=run cmd=gh issue edit 820 --add-label agent:working exit=0
+action=run cmd=gh issue edit 821 --add-label needs-decision exit=0
+action=run cmd=gh issue edit 822 --add-label agent:working exit=0
+action=run cmd=gh pr edit 841 --add-label automerge exit=0

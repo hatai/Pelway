@@ -96,7 +96,7 @@ skill `command-team` から、特定の条件でだけ必要になる詳細を�
 
 ### 調査の担当と effort
 
-- 担当は `agent-team.toml` の `[developers.<login>.priority.investigate]`（開発者ごとの表の調査の優先順位）。実装スレッドと合算した同時枠（上限は `[developers.<login>.slots]` が正本）で数える。数え方は正本（`docs/superpowers/specs/agent-team.md` の「制約」）どおり: open な Issue の `agent:working` のうち、実際の停止を確認できないものの数（作業状態の印が停止中・再開処理中・再開待ちのものも、runbook の「枠の数え方」の手順で停止を確認できるものだけを除く。起動結果の照合が残るもの・一覧に同じ Issue の実装スレッドが無いものなど、停止を確認できないものは使用中として数える。補助記録は実装エージェントにも書き込めるため印だけでは除かない）と、Issue を持たない入口B の調査の稼働中スレッドの数（巡回記録の割り当て表から数える）の合計。担当ごとの内訳は Issue の `agent:devin` ラベルの有無で判定する
+- 担当は `agent-team.toml` の `[developers.<login>.priority.investigate]`（開発者ごとの表の調査の優先順位。`agent-team.local.toml` の上書きを重ねた結果）。実装スレッドと合算した同時枠（上限は `[developers.<login>.slots]` が正本。同じく上書きを重ねた結果）で数える。数え方は正本（`docs/superpowers/specs/agent-team.md` の「制約」）どおり: open な Issue の `agent:working` のうち、実際の停止を確認できないものの数（作業状態の印が停止中・再開処理中・再開待ちのものも、runbook の「枠の数え方」の手順で停止を確認できるものだけを除く。起動結果の照合が残るもの・一覧に同じ Issue の実装スレッドが無いものなど、停止を確認できないものは使用中として数える。補助記録は実装エージェントにも書き込めるため印だけでは除かない）と、Issue を持たない入口B の調査の稼働中スレッドの数（巡回記録の割り当て表から数える）の合計。担当ごとの内訳は Issue の `agent:devin` ラベルの有無で判定する
 - 枠が満杯のときは指揮役が優先度を判断する。原則として、本番インシデントの調査をほかの実装や調査より先に置く
 - effort は、調査は読み取り中心のため既定。対象が広い（複数のクレートやサブシステムにまたがる等）場合は 1 段上げる
 - 割り当ての記録の表には、役割 investigate で書く。調査の行には、表の列に加えて調査スレッドの `thread_id`・作業ブランチ・報告 PR の番号（起動時は `none`。下の「調査の引き渡し」で書く）を書く（起動時の書き方は runbook の「4. 仕事の始め方」の「調査を始める」。報告 PR を引き継いで立てたスレッドの行は、起動時に報告 PR の番号を書く。書き方は同じ節の「既存の PR ブランチを引き継ぐ」）
@@ -144,7 +144,7 @@ hatai の指摘の伝達:
 
 - Dependabot が立てた依存更新の PR（`dependencies` ラベル、`build(deps):` で始まるコミット）のうち、minor と patch は、通常の PR と同じレビュー（skill `review-pr`）とマージの決まりで扱う。Dependabot の PR に `automerge` ラベルを付けるのも指揮役だけであり、Kodiak の `merge.automerge_dependencies`（レビューなしの自動マージ）は使わない。
 - Dependabot の major と 0.x の更新は直接処理しない。移行 Issue（更新の影響範囲と検証内容を書く。skill `write-issue`）を切って通常フロー（入口A）へ回し、Dependabot の PR 自体はクローズせず残す（クローズは人間の操作）。
-- Action の更新の PR（`ci(deps):` で始まるコミット）では、Dependabot は `.github/workflows/actions.lock` を作り直さないため、指揮役が `automerge` ラベルを付ける前にその PR のブランチを checkout して `gh actions-lock` を実行し、生成し直した `actions.lock` を同じブランチに push してから CI の通過を確かめる（`gh actions-lock` は人間の名義の `gh` 拡張で、App のトークンでは動かせない）。この操作は、Workflows 権限が必要なために人間の名義で行う例外の 1 つで、例外の正本は `docs/superpowers/specs/agent-team.md` の「制約」。
+- Action の更新の PR（`ci(deps):` で始まるコミット）では、Dependabot は `.github/workflows/actions.lock` を作り直さないため、マージの判断の前にその PR のブランチを checkout して `gh actions-lock` を実行し、生成し直した `actions.lock` を同じブランチに push してから CI の通過を確かめる（`gh actions-lock` は人間の名義の `gh` 拡張で、App のトークンでは動かせない）。この操作は、Workflows 権限が必要なために人間の名義で行う例外の 1 つで、例外の正本は `docs/superpowers/specs/agent-team.md` の「制約」。`.github/` の下を変えるので admin マージの対象に当たり、指揮役は `automerge` ラベルを付けず hatai の admin マージに回す。
 
 ## レビュー担当の段階移行
 

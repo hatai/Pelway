@@ -2,7 +2,7 @@ schema_version: "1.1"
 name: feat-agent-gh-qa-role
 expected_outcome: |
   PR タイトルは変更内容(qa ロール追加)を表す日本語で、回次や Issue ID だけのタイトルではない。
-  PR 本文は .github/pull_request_template.md の6セクション(概要/変更内容/確認方法・検証/レビューとQA/対象外/対象)を diff の事実で埋めている。
+  PR 本文は .github/pull_request_template.md の8セクション(概要/変更内容/確認方法・検証/失敗の筋/リスクとセキュリティへの影響/レビューとQA/対象外/対象)を diff の事実で埋めている。
   対象セクションに現在の HEAD sha(21e9b7fb98463e1abfb919b5064bd9c94fa99151)を正しく記載する。
   commands.md のコマンド列では、日本語を含む文字列をコマンド引数に直書きせずファイル経由(--body-file、api --input 等)で渡す形である。
   実行していない検証を検証済みと書かない。

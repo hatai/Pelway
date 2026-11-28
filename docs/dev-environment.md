@@ -18,6 +18,7 @@
 | [cargo-deny](https://embarkstudios.github.io/cargo-deny/) | 依存クレートの脆弱性（RustSec）・ライセンス・重複・取得元の検査 | 採用。`mise.toml` で 0.20.2 を固定し、ポリシーは `deny.toml` に置く。`verify-static`（CI の static ジョブ）で実行 |
 | Node・[bun](https://bun.sh) | `client/`（Electron と Octane の画面。ADR 0014）の開発の道具 | 採用。`mise.toml` で Node 26.13.1（LTS）と bun 1.4.5 を固定する。依存の入れ方・整形・lint・型検査・試験は `client/README.md`。`client:verify` タスク（`verify-static`・CI の static ジョブ）で実行 |
 | [shellcheck](https://github.com/koalaman/shellcheck) | シェルスクリプトの静的検査 | 採用。`mise.toml` で 0.11.0 を固定し、`shellcheck` タスク（`verify-static`・CI の static ジョブ）が `scripts/` 以下で 1 行目が `#!` で始まり `bash` か `sh` を含むファイル全部を検査する。demo-check 一式（`scripts/demo-check/*.sh`）は severity 既定、それ以外は `--severity=warning`（info・style 級は対象外。Issue #265・#621） |
+| [yq](https://github.com/mikefarah/yq) | YAML parser | 採用。workflow 配線テストが step object を構造的に確かめるために `mise.toml` で 4.54.3 を固定する。actions.lock の照合自体は jactionlint が担う |
 
 ## セットアップ手順（初回）
 
@@ -63,6 +64,7 @@ mise bootstrap    # 上の1〜3を順に実行
 | `mise run pitchfork-check` | pitchfork のバージョン確認と、`pitchfork.toml` に `agent-watch` が定義されていることの確認 |
 | `mise run conductor-rebuild -- --from <旧指揮役のスレッド ID> --to <新指揮役のスレッド ID>` | 指揮役を立て直す（新指揮役は MCP の `t3_thread_launch` で main の専用 worktree に立ててから `--to` に渡す。`docs/agents/conductor-context.md` の「恒久交代」）。hatai がホストの本体 checkout で実行する（worktree からは止まる） |
 | `mise run deny-check` | `cargo deny check`（依存クレートの検査。`verify-static` に含まれる。設定は `deny.toml`（ゲート）と `deny-warn.toml`（unmaintained / unsound の警告表示）） |
+| `mise run actions-lock-check` | `scripts/actions-lock-check.sh`（workflow の `uses:` と `.github/workflows/actions.lock` の照合。`verify-static` に含まれる） |
 | `mise run shellcheck` | `scripts/shellcheck.sh`（`scripts/` 以下の bash・sh のスクリプト全部の静的検査。`scripts/demo-check/*.sh` は severity 既定、それ以外は `--severity=warning`。指摘 0 件で通り、検査したファイルの数を出す。`verify-static` に含まれる） |
 | `mise run demo-check` | デモ受入前の 4 段階検査（`scripts/demo-check/run.sh`。受入は引数なしの全段階実行だけ有効。canary 段階は成果物が無いと未検証で失敗するため、製品をビルドしたあとに実行する） |
 | `mise run demo-check-selftest` | demo-check の自己テスト（`script-test` 経由で `verify-test` にも含まれる） |
@@ -81,6 +83,18 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 - 一時的に無効化するには `HK=0` を付ける（例: `HK=0 git commit ...`）。hk の既定動作。
 - 初回の `hk` 実行は `hk.pkl` の `amends` URL から GitHub 経由で Pkl パッケージを取得するため**ネットワークが必要**（2回目以降はキャッシュ）。
 
+## worktree の agent-team.toml と agent-team.local.toml（Issue #804）
+
+`agent-team.toml`（共有の担当登録情報）は git 追跡ファイルだが、worktree の基点が古いと worktree に無いことがある。その場合 conductor-watch.sh が枠を読めず `SLOTS` を出せなくなる。worktree 作成時に `scripts/worktree-setup` が本体の checkout から揃える:
+
+- **T3 Code**: `t3.json` の `runOnWorktreeCreate` スクリプト `worktree-setup` が worktree 作成時に走る（`async: false`）。command は `bash -c '"${T3CODE_PROJECT_ROOT:?}/scripts/worktree-setup"'` と bash 経由の絶対パスで指定してあり（開発者の既定シェルが fish などでも POSIX 展開が効く）、**実行されるのは常に本体の checkout にある版**で、worktree 側（PR の head）に置かれた `scripts/worktree-setup` はアクションからは実行しない。レビュー・修正ラウンドの worktree は PR の head から作られるため、worktree 内のファイルをホスト権限で動かすと PR のコードがそのまま sandbox の外で走ってしまう — この回避として本体の checkout を信頼できる版に保つ前提とし、アクションはそこだけを実行する（`T3CODE_PROJECT_ROOT` が本体の checkout、`T3CODE_WORKTREE_PATH` が worktree）。T3 のアクションはマシンごとにインポートするため、**環境を構えたら Settings → Projects → Actions で `t3.json` のアクションを取り込む**（一度取り込んだ環境では後続の t3.json の変更は自動では反映されないため、変えたら取り込み直す）
+- **conductor-rebuild**: 新しい指揮役の worktree の agent-team の設定を揃える（`agent-team.toml` が無ければ本体の checkout から写し、`agent-team.local.toml` を持ち越す。T3 のアクションを取り込んでいない環境でも上書きを失わない）。揃えられなければ旧指揮役を止める前に止まる
+- **Claude Code・Codex の worktreeinclude 機構**: `.worktreeinclude` に `agent-team.local.toml` を列挙（追跡しないファイルの持ち越し用。追跡ファイルの `agent-team.toml` は列挙しない。T3 Code はこのファイルを読まない）
+
+コピーは `scripts/worktree-setup-copy` が行い、書き込み先は `O_TMPFILE` の無名 inode（名前を持たない一時ファイル。書き終えた実体の fd から link で最終名に載せる）。**コピー先のファイルシステムが `O_TMPFILE` に対応していることが前提**（Linux の ext4・XFS・tmpfs・btrfs などは対応。NFS・一部の FUSE は非対応）。非対応のファイルシステムでは一時 inode を作れずコピーは中断し、`worktree-setup` は「worktree 側に <名前> を作れない（書き込みに失敗）」で非 0 で止まる — その場合はファイルシステムを替えるか、対象のファイルを手で置く
+
+開発者ごとの上書き `agent-team.local.toml`（追跡しない。雛形は `agent-team.local.toml.example`）は本体の checkout に置くと worktree 作成時に持ち越される。worktree ごとに別の値にしたいときはその worktree に置く。上書きできる項目・できない項目の表は `docs/superpowers/specs/agent-team.md` の「開発者ごとの上書き」。重ねた結果は `scripts/agent-team-config effective <GitHub login>` で確かめられる。コミットは `.gitignore` と hk の `no_agent_team_local` ステップで止める。
+
 ## CI（GitHub Actions）
 
 ### 規約：CI とローカルで同じ検査を行う
@@ -94,7 +108,7 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 
 | ジョブ | チェック名 | 実行する mise タスク | cargo |
 |---|---|---|---|
-| `static` | `static (hk / fnox / pitchfork)` | `verify-static`（hk / fnox / pitchfork / cargo-deny / shellcheck / client）＋ `mise exec -- jactionlint` | 使わない（cargo-deny は cargo metadata を読むだけでコンパイルしない） |
+| `static` | `static (hk / fnox / pitchfork)` | `verify-static`（hk / fnox / pitchfork / cargo-deny / actions-lock / shellcheck / client）＋ `mise exec -- jactionlint` | 使わない（cargo-deny は cargo metadata を読むだけでコンパイルしない） |
 | `lint` | `lint (fmt / clippy)` | `verify-lint` | clippy |
 | `test` | `test (cargo test)` | `verify-test` | test |
 | `coverage` | `octocov (coverage diff)` | `coverage` タスク ＋ `k1LoW/octocov-action`（octocov 本体は v0.83.5 に固定） | 計測ビルド |
@@ -189,10 +203,11 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 
 | ジョブ | ツールと版 | 対象 | 導入 |
 |---|---|---|---|
-| `gitleaks (secrets)` | Gitleaks 8.30.1（MIT） | HEAD から辿れる git 履歴全体。マージコミットの差分（競合解消で足した行）も含める（`--log-opts="-m HEAD"`、checkout は `fetch-depth: 0`） | `mise.security.toml`（`MISE_ENV=security`）と `mise.security.lock` |
+| `gitleaks (secrets)` | Gitleaks 8.30.1（MIT） | Pull Request では `<base>..HEAD`、main への push・手動実行・手元では HEAD から辿れる git 履歴全体。マージコミットの差分（競合解消で足した行）も含める（checkout は `fetch-depth: 0`） | `mise.security.toml`（`MISE_ENV=security`）と `mise.security.lock` |
 | `semgrep (code patterns)` | Semgrep CE 1.186.0（LGPL-2.1） | 作業ツリーのファイル（`tests/` の下を含む。リポジトリ直下の `.semgrepignore` が Semgrep の組み込みの既定の除外パターンを置き換え、今はここでは何も除外しない。ファイルの大きさやバイナリかどうか、未追跡のファイルへの `.gitignore` による Semgrep の選別は残る）。ルールセットは `p/rust`・`p/github-actions`・`r/bash`（`github-actions-mutable-action-tag` を除く） | 公式イメージ `semgrep/semgrep` を digest 固定した job コンテナ |
 | `osv-scanner (dependencies)` | OSV-Scanner 2.7.1（Apache-2.0） | 作業ツリーのロックファイル（今は `Cargo.lock`） | `mise.security.toml` と `mise.security.lock` |
 
+- Gitleaks の範囲: `security-scan.yml` は Pull Request の step にだけ `SECURITY_SCAN_BASE_SHA: ${{ github.event.pull_request.base.sha }}` を渡し、`scripts/security-scan.sh` は `--log-opts="-m <base>..HEAD"` で走査する。`HEAD` は checkout 後の HEAD（Pull Request では通常 GitHub が作る合成 merge commit）で、範囲には PR のコミットと合成 merge commit が入る。main への push・手動実行・手元ではこの変数を設定せず、`--log-opts="-m HEAD"` で履歴全体を走査する。変数が設定されているときは空文字を含めて小文字 40 桁の 16 進だけを受け付け、不正なら gitleaks を起動せず終了コード 2 で止める。Semgrep と OSV-Scanner はこの変数を検証しない。base の解決や git の実行に失敗したときは標準エラーの検査で失敗にするが、有効な range にコミットが無いときは走査対象が無いだけなので成功とする。
 - 秘密の値は出さない: Gitleaks は `--redact` で値を伏せ、サマリーには規則・場所・コミットだけを書く。`-m` で同じ値が複数のマージコミットに重ねて出るため、サマリーには規則と場所の重複を除いた数も書く。
 - Gitleaks は CLI を直接実行し、`gitleaks-action` は使わない。Action は v2 以降、独自の EULA（改変の禁止、Organization のリポジトリではライセンスキーが必要）で配布されている。CLI 本体は MIT で、版の固定も mise の checksum で揃えられる。
 - Semgrep は Registry のルールをログインなしで取得し、`--metrics=off` で利用状況の送信を止める。Registry のルールセットは実行のたびに最新を取り、版は固定されない（イメージの digest が固定するのはエンジンと依存だけ）。同じコミットでも、日によって検出が変わりうる。WARNING 以上の規則が Registry に増えると、コードを変えなくてもジョブが失敗しうる。Registry のルールは Semgrep Rules License v1.0 で配布されている。利用は「自社の内部の業務目的」に限られ、ルールの再配布とサービスとしての提供は禁じられている（出典: https://semgrep.dev/legal/rules-license ）。このリポジトリでは、自分のコードを CI で検査するために使うだけで、ルールを複製してリポジトリに置かない。秘密情報向けのルールセットは入れない（秘密の検出は Gitleaks が担い、Semgrep は一致した行をそのまま出すため）。
@@ -202,7 +217,9 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
   - OSV-Scanner は、OSV データベースの他の出所（GHSA など）も見る（今は `Cargo.lock` だけを照合する）。
   - cargo-deny は `deny.toml` の ignore と警告の扱いを持ち、必須チェックの一部である。
   - OSV-Scanner には `deny.toml` の ignore が効かない。cargo-deny で ignore した勧告のうち告知でないもの（今は rsa の RUSTSEC-2023-0071）は、`osv-scanner.toml` にも同じ理由で書く。
-- Semgrep の `yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag` は `--exclude-rule` で使わない。この規則は `uses:` がコミット SHA でないことを検出するが、このリポジトリは `uses:` をタグで参照し、SHA を `.github/workflows/actions.lock`（`gh actions-lock` が生成）で固定する。
+- Semgrep の `yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag` は `--exclude-rule` で使わない。この規則は `uses:` がコミット SHA でないことを検出するが、このリポジトリは外部 action の mutable ref（タグ・ブランチ）を `.github/workflows/actions.lock`（`gh actions-lock` が生成）で固定する。
+- `mise run actions-lock-check`（`scripts/actions-lock-check.sh`。`verify-static` の一部で、CI の `static` ジョブで走る）は、jactionlint の `actions-lock`・`unpinned-uses`・`yaml-syntax` を offline かつ `--no-ignores` で実行し、`--config-file /dev/null` で lint 設定を読まず、`--strict-exit` で警告も失敗にする。workflow の mutable ref が actions.lock に載っていること、同じ参照が `dependencies` に有効な固定コミットを持つこと、actions.lock と workflow 群が正確に一致すること、workflow と actions.lock の YAML が読めることを確かめる。owner/repo の大文字・小文字は区別せず、ref とサブパスは区別する。inline ignore や lint 設定でこの検査は外せない。足りないとき・古いときは、agent は `scripts/agent-gh dev actions-lock`、人間は `gh actions-lock` で lock を作り直す。
+- `uses:` の形ごとの扱い: `owner/repo@<40 桁コミット SHA>` は immutable なので lock 無しで使える。`./path` の local action と local reusable workflow は同じリポジトリの同じコミットの中身なので対象外。外部 reusable workflow と `docker://` イメージは actions.lock に表現できないため、reusable workflow は完全なコミット SHA、docker イメージは `sha256` digest で直接固定する。
 - 除外（`.gitleaks.toml`・`.semgrepignore`・`osv-scanner.toml`）は、1 件ずつ理由を書いて足す。`.semgrepignore` を消すと、Semgrep は組み込みの既定の除外一覧（`tests/`・`test/`・`vendor/` など）に戻る。そのため、ファイルは中身が空でも残す。既存の検出を理由に、ルールの無効化や除外の範囲を広げない。
   - Gitleaks の除外は `.gitleaks.toml` の `[[allowlists]]` に書く（`[extend] useDefault = true` で組み込みの規則はそのまま使う）。1 つの allowlist は `condition = "AND"` にし、`targetRules`（規則）・`paths`（ダミー値を置いたファイル。`^…$` で 1 ファイルずつ）・`regexes`（既知のダミー値そのもの。`^…$` で値全体を書き、検出された値に当てる）のすべてに合うものだけを許す。行番号を使わないため、ファイルの行がずれても CI は落ちない。同じファイルの別の値は除外されない。値の形（桁数・文字種）だけの除外は書かない。
   - `.gitleaksignore`（「コミット:ファイル:規則:行」や「ファイル:規則:行」の指紋）は使わない。指紋は行番号を含むため、行がずれると同じ値が別の検出として出直す。新しいダミー値を除外するときは、そのファイルとその値を書いた allowlist を足すか、既存の allowlist の値をそのまま使う。
@@ -224,6 +241,105 @@ debuginfo を落としても検査の中身（clippy の警告もテストの結
 - 対象外: PR の会話欄に書いた普通のコメント（issue_comment）は通知しない。fork から来た PR へのコメントを安全に見分けられないため。あとで足す場合は、`pull-requests: read` で PR を調べて fork を除く形にし、別の PR で行う。
 - 手動実行（workflow_dispatch）は `event: "test"` のテスト通知を 1 通送る。送信の失敗（タイムアウト・HTTP エラー）で CI は落ちない。
 
+## 通知用の秘密（agent-watch の fnox 設定と age 鍵）
+
+見張り役 `agent-watch` が Grok Bot の webhook に送るときに読む秘密（`PELWAY_NOTIFY_WEBHOOK_URL`・`PELWAY_NOTIFY_WEBHOOK_KEY`）は、通知用の fnox 設定に置く。開発者ごとの設定なので、場所は環境変数 `PELWAY_NOTIFY_FNOX_CONFIG` で変えられる（絶対パスのみ。既定は `~/.config/pelway-agent-notify/fnox.toml`。空文字・相対パスは設定として使わず、秘密が無いときと同じく送らない）。
+
+値は通知専用の age 鍵（既定 `~/.config/pelway-agent-notify/age.txt`）で暗号化する。provider を `age` ではなく `notify_age` という名前にするのは、fnox のグローバル設定（`~/.config/fnox/config.toml`）の `[providers.age]`（鍵ファイルの指定が無い）とのマージで鍵の指定が曖昧にならないためで、`review_age`（「鍵の分割（review 用の fnox 設定と age 鍵）」）と同じ考え方。`key_file` を明示するので、`~/.config/fnox` が読めない実行環境でも復号できる（以前は dev と同じ `~/.config/fnox/age.txt` 1 つで dev の App 鍵と webhook の URL・鍵の両方が復号できた。#737 の鍵分割）。
+
+**`~/.config/pelway-agent-notify` は全担当の sandbox で読み取り拒否にする。** 復号鍵（`age.txt`）と暗号文（`fnox.toml`）が同じディレクトリにあり、`key_file` は絶対パスで書かれているため、このディレクトリが読める sandbox の中から `fnox -c ~/.config/pelway-agent-notify/fnox.toml get` で webhook の URL と鍵を復号できる（以前は復号に拒否済みの `~/.config/fnox/age.txt` が要った）。`agent-gh` が読む `~/.config/fnox`・`~/.config/pelway-agent` と違い、sandbox の中の担当が読む必要のあるものは置かない（`conductor-thread-id` を読むのはホスト側の agent-watch と `scripts/conductor-watch.sh` だけ）ため、ディレクトリごと拒否する。実装担当側はリポジトリの設定（`.devin/config.json`・`scripts/agent-sandbox/devin-config.json`・`scripts/agent-sandbox/opencode-plugin/index.js` の `READ_DENY`・`scripts/agent-sandbox/sandbox-shell` の `masks`）に列挙する。ただし `scripts/agent-sandbox/` の 3 つは `scripts/setup/agent-sandbox.sh` でホストに写した版が使われるため、写し直したうえで動いているエージェントのプロセスを起動し直して（T3 の再起動で）初めて効く（`.devin/config.json` だけは worktree の版が読まれる）。レビュー担当（`devin_review`・`claude_review`・`codex_review`）の拒否リストはリポジトリの外の設定なので、hatai が「通知用の age 鍵への移し替え」の手順 0 で適用する（QA 担当は実装担当のインスタンスで動くため、実装担当側の拒否で済む）。
+
+設定ファイルの形（`scripts/setup/agent-accounts.sh` の「通知用の fnox 設定と age 鍵を作る」が新規にはこの形で作る）:
+
+```toml
+[providers.notify_age]
+type = "age"
+key_file = "/home/<ユーザー>/.config/pelway-agent-notify/age.txt"
+recipients = ["<age-keygen -y で出る公開鍵>"]
+
+[secrets]
+```
+
+webhook の値は自分の Grok Bot の webhook ルーティンが発行したものを `fnox set` で登録する（値は画面に出さない）:
+
+```bash
+printf '%s' '<URL>' | fnox -c ~/.config/pelway-agent-notify/fnox.toml set --provider notify_age PELWAY_NOTIFY_WEBHOOK_URL
+printf '%s' '<鍵>'  | fnox -c ~/.config/pelway-agent-notify/fnox.toml set --provider notify_age PELWAY_NOTIFY_WEBHOOK_KEY
+```
+
+### 通知用の age 鍵への移し替え（既存環境・hatai が手で行う）
+
+`~/.config/pelway-agent-notify/fnox.toml` が `[providers.age]`（鍵ファイルの指定が無く、`~/.config/fnox/age.txt` で復号する形）の環境を、通知専用の鍵に移す。値は一切表示しない（`fnox get` の出力は変数とパイプで次の `fnox set` に渡す）。agent-watch は送信のたびに設定を読み直すので、移し替えのあと再起動は要らない。
+
+```bash
+# 0. 先に拒否リストを更新する（鍵を作る前に入れる）
+#    リポジトリ側: 本体の checkout でこの PR を含む main を取り込み、
+#      bash scripts/setup/agent-sandbox.sh
+#    を流し直して、ホストに写した版（~/.config/opencode/plugins/pelway-sandbox/ の
+#    sandbox-shell と index.js、~/.config/devin-impl/config.json）を更新する
+#    （.devin/config.json は worktree の版が読まれるので、この写し直しだけが要る）。
+#    リポジトリの外（hatai が適用）:
+#    - ~/.config/devin-review/config.json の permissions.deny に "Read(~/.config/pelway-agent-notify/**)"
+#    - ~/.claude-review/settings.json の permissions.deny に "Read(~/.config/pelway-agent-notify/**)"
+#    - /etc/codex/requirements.toml の deny_read に "/home/hatai/.config/pelway-agent-notify"
+#    QA 担当は実装担当のインスタンスで動く（読み取りは dev 名義）ため、実装担当側の拒否で済む。
+#
+#    最後に T3 を再起動する。写し直したファイル・書き換えた設定が効くのは
+#    プロセスの起動時だけ（opencode の READ_DENY は plugin の import 時、
+#    devin-impl の --config と devin_review・codex_review の設定も起動時に読む）
+#    ため、動いているままのエージェントは古い拒否で動き続ける。再起動のあと、
+#    各担当の新しいスレッドで ls ~/.config/pelway-agent-notify を試し、
+#    中身が見えないことを確かめてから手順 1 に進む（test -r は使わない。
+#    denyRead で隠したディレクトリでも access(2) は 0 を返しうる）。
+
+# 1. 通知専用の鍵ペアを作る（秘密鍵は表示しない）
+(umask 077 && age-keygen -o ~/.config/pelway-agent-notify/age.txt)
+notify_recipient="$(age-keygen -y ~/.config/pelway-agent-notify/age.txt)"
+
+# 2. 古い設定を退避してから、通知専用の鍵の設定に作り替える
+cp -p ~/.config/pelway-agent-notify/fnox.toml ~/.config/pelway-agent-notify/fnox.toml.bak
+(umask 077 && cat >~/.config/pelway-agent-notify/fnox.toml <<EOF
+# agent-watch が Grok Bot の webhook に送るときの秘密。値は通知専用の age 鍵で暗号化されている。
+# agent-watch は環境変数 PELWAY_NOTIFY_FNOX_CONFIG でこの場所を変えられる。
+[providers.notify_age]
+type = "age"
+key_file = "$HOME/.config/pelway-agent-notify/age.txt"
+recipients = ["$notify_recipient"]
+
+[secrets]
+EOF
+)
+
+# 3. 値を新しい鍵で登録し直す（古い設定は ~/.config/fnox/age.txt で復号できる）
+#    get が失敗したときに空の値を登録しないよう、先に読み取りの成否を確かめる
+for name in PELWAY_NOTIFY_WEBHOOK_URL PELWAY_NOTIFY_WEBHOOK_KEY; do
+  value="$(fnox -c ~/.config/pelway-agent-notify/fnox.toml.bak get "$name")" ||
+    { echo "古い設定から $name が読めない。移し替えを止める" >&2; break; }
+  printf '%s' "$value" | fnox -c ~/.config/pelway-agent-notify/fnox.toml set --provider notify_age "$name" >/dev/null
+done
+unset value
+```
+
+**確かめ方（名前とパスだけ出す。値は出さない）**:
+
+```bash
+fnox -c ~/.config/pelway-agent-notify/fnox.toml list                      # PELWAY_NOTIFY_* の 2 名だけが載る
+fnox -c ~/.config/pelway-agent-notify/fnox.toml get PELWAY_NOTIFY_WEBHOOK_URL >/dev/null  # 新しい鍵で復号できる
+```
+
+**4. 確かめたあと退避を消す**: `fnox.toml.bak` には dev の鍵（`~/.config/fnox/age.txt`）宛ての暗号文が残る。残しておくと dev の鍵を持つものが webhook の秘密を復号でき、鍵の分割が成り立たないため、確かめ方が通ったら消す:
+
+```bash
+rm ~/.config/pelway-agent-notify/fnox.toml.bak
+```
+
+**戻し方**: `fnox.toml.bak` を消す前に限る（消したあとは戻せない）。退避した設定を戻し、通知専用の鍵を消す:
+
+```bash
+mv ~/.config/pelway-agent-notify/fnox.toml.bak ~/.config/pelway-agent-notify/fnox.toml
+rm -f ~/.config/pelway-agent-notify/age.txt
+```
+
 ## レビュー担当の Codex（codex_review）
 
 AI 開発チームのレビュースレッドは、T3 の Codex インスタンス `codex_review` で動かす（`docs/superpowers/specs/agent-team.md` の「レビュー担当の権限」）。`codex_review` はほかの Codex と home（`CODEX_HOME`）を分け、レビュー担当専用の `~/.codex-review` で動かす。レビュー担当（`codex_review`・`claude_review` のどちらも）が `scripts/agent-gh review` で読む fnox の設定は、環境変数 `PELWAY_AGENT_FNOX_CONFIG_REVIEW`（既定 `~/.config/pelway-agent-review/fnox.toml`）。`PELWAY_REVIEW_APP_ID` などの `PELWAY_REVIEW_*` の秘密はこのファイルに載る（dev 用の `PELWAY_AGENT_FNOX_CONFIG`・`~/.config/pelway-agent/fnox.toml` とは分離）。このマシンでの設定は次のとおり。
@@ -234,7 +350,7 @@ AI 開発チームのレビュースレッドは、T3 の Codex インスタン�
 | `~/.codex-review/auth.json` | `~/.codex/auth.json` への symlink（ログインは hatai の Codex と共有する） |
 | `~/.codex-review/config.toml` の `[permissions.review]` | ファイルは読み取り（`codex sandbox -P review` で動かしたコマンドは `/tmp` だけ書ける。T3 のスレッドでは worktree にも書ける。Issue #589）、ネットワークは `api.github.com` と `github.com` だけ（SOCKS は使わない） |
 | `~/.codex-review/config.toml` の `[features]` と `[mcp_servers.*]` | `apps`・`plugins`・`remote_plugin`・`hooks` を `false` にする。`[mcp_servers.t3-code]` と `[mcp_servers.t3-code-direct]` を `enabled = false`（`url` は設定の読み込みのための仮の値 `http://127.0.0.1:1/mcp`）にする。最上位のキーに `web_search = "disabled"` を書く。`[projects.*]` の信頼設定は書かない（worktree の `.codex/` を読ませない） |
-| `/etc/codex/requirements.toml`（#449 で追加。hatai が root で作る） | `[permissions.filesystem]` の `deny_read` に秘密パス 5 件（`~/.config/fnox`・`~/.config/pelway-agent`・`~/.config/pelway-agent-qa`・`~/.ssh`・`~/.config/gh`）を列挙する。requirements 層の設定で、ユーザーの `config.toml` に書いても効かない。このマシン（単一ユーザー）の全 codex セッションに適用される |
+| `/etc/codex/requirements.toml`（#449 で追加。hatai が root で作る） | `[permissions.filesystem]` の `deny_read` に秘密パス 6 件（`~/.config/fnox`・`~/.config/pelway-agent`・`~/.config/pelway-agent-qa`・`~/.config/pelway-agent-notify`・`~/.ssh`・`~/.config/gh`）を列挙する（通知用は #737、「通知用の age 鍵への移し替え」の手順 0 で足す）。requirements 層の設定で、ユーザーの `config.toml` に書いても効かない。このマシン（単一ユーザー）の全 codex セッションに適用される |
 
 `deny_read` は sandbox ポリシー（FileSystemSandboxPolicy）に Deny エントリとして渡り、sandboxed なコマンドから当該パスが読めなくなる（codex 0.169.0 の `codex-rs/config/src/filesystem_constraints.rs` と `requirements_layers/permissions.rs` による。パスは絶対パスで書く）。
 
@@ -281,7 +397,7 @@ gh 2.91 以降はテレメトリ（使用状況の送信）が初期設定で有
 - `CODEX_HOME` が `/home/hatai/.codex-review` になっている
 - `scripts/agent-gh review api /rate_limit` が成功する
 - GitHub 以外への通信（`scripts/agent-gh review api --hostname example.com /`、`curl https://example.com`）が遮断される
-- 秘密の置き場 5 パス（`/etc/codex/requirements.toml` の `deny_read`）が読めない（`test -r` が 1）。`codex sandbox -P review` は `deny_read` を使わないので、この項目は確認用の子タスクの中で確かめる
+- 秘密の置き場 6 パス（`/etc/codex/requirements.toml` の `deny_read`）が読めない（`test -r` が 1）。`codex sandbox -P review` は `deny_read` を使わないので、この項目は確認用の子タスクの中で確かめる
 - 確認のあとの `~/.codex-review/config.toml` に、`[projects.` で始まる表が無い（T3 と Codex の app-server は sandbox の外でこのファイルに書けるため。信頼設定が入ると worktree の `.codex/` が読まれる）
 - `~/.codex-review` に書き込めない（`touch ~/.codex-review/config.toml` と、新しいファイルの `touch` が拒否される）。止める設定がこのファイルに集まっているため、書き込めると次のセッションで設定を戻せる
 - `mise run codex-review-check` が ok
@@ -297,7 +413,7 @@ worktree への書き込みは、今は通る（権限プロファイル `review
 | 場所 | 設定 |
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.claude_review` | `driver: claudeAgent`、`config` の `homePath` に `/home/hatai/.claude-review`（UI のフィールド名は「CLAUDE_CONFIG_DIR path」。子プロセスの環境変数 `CLAUDE_CONFIG_DIR` になる。`config.environment` は claudeAgent の config スキーマに無いキーで無視される） |
-| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`・`git ls-tree`・`git cat-file`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` は `gh` には引数をそのまま渡し、`git` には許可リストと引数検査の両方を通った呼び出しを Git に渡すため、ワイルドカードは `auth token`・`repo clone`・許可リストの `git` サブコマンド全般などを許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す（QA 用の `Read(~/.config/pelway-agent-qa/**)` も、下の「QA 担当の GitHub App（pelway-qa）」の手順 5 で足してある）。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す。#306 では `sandbox.filesystem.denyWrite` に `"~/"` を入れ、ホームの下（worktree・共有 `.git`・`$HOME`・`~/.config`・`~/.claude-review` 自身）への書き込みを sandbox で拒否する。実測で書けたのは sandbox の一時フォルダ（`$TMPDIR`。実体は `/tmp/claude-1000` で、uid ごとに 1 つのためレビュー専用ではない）で、`/tmp` 直下は拒否された。ホームの外のほかの場所（`/dev/shm`・`/var/tmp` など）は測っていない。許可した読み取り系 `git` の `--output=<path>` や `git grep -O<コマンド>` で起動したコマンドも、この拒否を受ける。T3 が渡す MCP サーバーのツールは、`permissions.deny` に `mcp__t3-code` と `mcp__t3-code-direct`（サーバー名だけで、そのサーバーの全ツール）を書いて使えなくする（理由は「レビュー担当の Codex」と同じ）。claude.ai のコネクタ（外部のサービスへ送信できるツールを含む）は、`env` の `ENABLE_CLAUDEAI_MCP_SERVERS=false` で止める。組み込みのツールのうち、ほかのセッションや claude.ai へ送れるもの（`SendMessage`・`RemoteTrigger`・`Artifact`・`ShareOnboardingGuide`・`PushNotification`・`DesignSync`・`PublishPlugin`）は `permissions.deny` に書く（`WebFetch`・`WebSearch` は前から deny にあり、サブエージェントにも効く）。アカウントから同期されるプラグインの MCP サーバーは、`env` の `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` で読み込ませない（接続に失敗しているだけの状態は、セッションの途中で接続が戻りうるので、止めたことにならない）。下の `hooks.PermissionRequest` は承認要求を拒否するが、これに頼ってプラグインのツールを残さない |
+| `~/.claude-review/settings.json` | sandbox を有効にし、ネットワークの許可先を `api.github.com` と `github.com` だけにする。使えるコマンドは読み取り系の `git`（`git show`・`git diff`・`git log`・`git grep`・`git ls-tree`・`git cat-file`）と、`scripts/agent-gh review` を使う gh サブコマンド単位の形（`api`・`issue view`・`pr view`・`pr diff`・`pr checks`・`pr review`・`run list`・`run view`）に絞る（`scripts/agent-gh review *` のワイルドカードは使わない。`agent-gh` は `gh` には引数をそのまま渡し、`git` には許可リストと引数検査の両方を通った呼び出しを Git に渡すため、ワイルドカードは `auth token`・`repo clone`・許可リストの `git` サブコマンド全般などを許してしまう）。ファイルの書き込みを拒否する。deny は念のためラッパー経由の形でも書く（`git *`・`pr checkout *`・`alias *`・`auth *`・`repo *`・`gist *`）。#449 ではさらに `permissions.deny` に秘密パスの `Read(...)` 4 件（`~/.config/fnox/**`・`~/.config/pelway-agent/**`・`~/.ssh/**`・`~/.config/gh/**`）を足す（QA 用の `Read(~/.config/pelway-agent-qa/**)` も、下の「QA 担当の GitHub App（pelway-qa）」の手順 5 で足してある。#737 で通知用の `Read(~/.config/pelway-agent-notify/**)` も 6 件目として足す。「通知用の age 鍵への移し替え」の手順 0）。Claude Code 2.1.x は `Read(...)` deny を `sandbox.filesystem.denyRead` にマージし、sandboxed なコマンドにはファイルシステム層（bwrap）でも隠す。#306 では `sandbox.filesystem.denyWrite` に `"~/"` を入れ、ホームの下（worktree・共有 `.git`・`$HOME`・`~/.config`・`~/.claude-review` 自身）への書き込みを sandbox で拒否する。実測で書けたのは sandbox の一時フォルダ（`$TMPDIR`。実体は `/tmp/claude-1000` で、uid ごとに 1 つのためレビュー専用ではない）で、`/tmp` 直下は拒否された。ホームの外のほかの場所（`/dev/shm`・`/var/tmp` など）は測っていない。許可した読み取り系 `git` の `--output=<path>` や `git grep -O<コマンド>` で起動したコマンドも、この拒否を受ける。T3 が渡す MCP サーバーのツールは、`permissions.deny` に `mcp__t3-code` と `mcp__t3-code-direct`（サーバー名だけで、そのサーバーの全ツール）を書いて使えなくする（理由は「レビュー担当の Codex」と同じ）。claude.ai のコネクタ（外部のサービスへ送信できるツールを含む）は、`env` の `ENABLE_CLAUDEAI_MCP_SERVERS=false` で止める。組み込みのツールのうち、ほかのセッションや claude.ai へ送れるもの（`SendMessage`・`RemoteTrigger`・`Artifact`・`ShareOnboardingGuide`・`PushNotification`・`DesignSync`・`PublishPlugin`）は `permissions.deny` に書く（`WebFetch`・`WebSearch` は前から deny にあり、サブエージェントにも効く）。アカウントから同期されるプラグインの MCP サーバーは、`env` の `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1` で読み込ませない（接続に失敗しているだけの状態は、セッションの途中で接続が戻りうるので、止めたことにならない）。下の `hooks.PermissionRequest` は承認要求を拒否するが、これに頼ってプラグインのツールを残さない |
 | socat | Claude Code の sandbox（Linux）が使う。`mise.toml` の `conda:socat` で `mise install`（`mise bootstrap`）が入れる。apt と sudo は要らない |
 | ログイン | `CLAUDE_CONFIG_DIR=~/.claude-review claude` で一度ログインする（人間が行う） |
 | `~/.claude-review/settings.json` の `hooks.PermissionRequest` | matcher `*` で `/home/hatai/.claude-review/hooks/deny-permission-request.sh` を呼ぶ。承認要求になる場面ごとに、人間に聞かずに拒否を返す。拒否のメッセージは、sandbox の遮断ではないこと、Bash なら単純なコマンドに分けて送り直すことをモデルに伝える。フックは worktree の外に絶対パスで置く（委託のレビューは PR の作者のコミットの checkout で動くため、リポジトリの中に置くと PR が差し替えられる） |
@@ -388,7 +504,7 @@ Codex・Claude のレビュー担当と違い、Devin CLI にはネットワー�
 |---|---|
 | `~/.t3/userdata/settings.json` の `providerInstances.devin_review` | `driver: acpRegistry`、`agentId: devin`、`config.commandPath: /home/hatai/.local/bin/devin-review`。acpRegistry は `<commandPath> acp` の形で起動し、registry の起動引数はそのまま渡る |
 | `/home/hatai/.local/bin/devin-review` | `env DEVIN_SANDBOX=true devin --config /home/hatai/.config/devin-review/config.json "$@"` を exec する起動ラッパー。`devin acp` は `--sandbox` フラグを受け付けず、ACP サーバは `DEVIN_SANDBOX` 環境変数で sandbox を有効化する |
-| `/home/hatai/.config/devin-review/config.json` | `devin_review` 専用のユーザー設定（`devin --config` で差し替え）。`sandbox.allowed_domains: ["**.github.com"]` で github.com とそのサブドメインだけを許可。`permissions.deny` に `edit`・`write`・`mcp__*`・`Exec(sudo)`・`Exec(rm)`・秘密パスの `Read(...)` を、`Fetch` は GitHub 以外を `ask` にして重ね防御する。#449 では `Read(...)` の列挙に `~/.config/fnox/**` と `~/.config/pelway-agent/**` を足す（`~/.ssh/**`・`~/.config/gh/**` は当初からあり）。deny に入れたパスは bwrap がコマンドから隠すため `test -r` も非 0 になる |
+| `/home/hatai/.config/devin-review/config.json` | `devin_review` 専用のユーザー設定（`devin --config` で差し替え）。`sandbox.allowed_domains: ["**.github.com"]` で github.com とそのサブドメインだけを許可。`permissions.deny` に `edit`・`write`・`mcp__*`・`Exec(sudo)`・`Exec(rm)`・秘密パスの `Read(...)` を、`Fetch` は GitHub 以外を `ask` にして重ね防御する。#449 では `Read(...)` の列挙に `~/.config/fnox/**` と `~/.config/pelway-agent/**` を足す（`~/.ssh/**`・`~/.config/gh/**` は当初からあり）。#737 で通知用の `~/.config/pelway-agent-notify/**` も足す（「通知用の age 鍵への移し替え」の手順 0）。deny に入れたパスは bwrap がコマンドから隠すため `test -r` も非 0 になる |
 
 sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbrew/bin/bwrap`）と `socat`（`mise.toml` の `conda:socat`）で、どちらか欠けるとセッションは起動を拒否する（fail-closed）。sandbox 配下では exec が許可リスト経由の組み込みプロキシを通り、ワークスペース以外のファイルシステムは読み取り専用になり、`Read(...)` deny のパスはコマンドから隠される。
 
@@ -418,7 +534,7 @@ sandbox の前提ツールは `bwrap`（linuxbrew の `/home/linuxbrew/.linuxbre
 
 ## レビュー担当の秘密ファイルの遮断と鍵の分割（#449）
 
-レビュー担当（`devin_review`・`claude_review`・`codex_review`）の sandbox から、秘密の置き場を読めないようにする。対象は 4 パス（QA 用の `~/.config/pelway-agent-qa` は、下の「QA 担当の GitHub App（pelway-qa）」の手順 5 で 5 つ目として各担当の拒否リストに足す）: `~/.config/fnox`（age 秘密鍵 `age.txt` と fnox のグローバル設定）・`~/.config/pelway-agent`（dev 用の fnox 設定。`PELWAY_DEV_*` と `PELWAY_LLM_API_KEY` が同じ age 鍵で暗号化されて同居していた）・`~/.ssh`・`~/.config/gh`。これらはすべて実体のあるディレクトリでなければならない（symlink だと devin の bwrap が exec を全滅させる）。
+レビュー担当（`devin_review`・`claude_review`・`codex_review`）の sandbox から、秘密の置き場を読めないようにする。対象は 4 パス（QA 用の `~/.config/pelway-agent-qa` は、下の「QA 担当の GitHub App（pelway-qa）」の手順 5 で 5 つ目として、通知用の `~/.config/pelway-agent-notify` は「通知用の age 鍵への移し替え」の手順 0 で 6 つ目として、各担当の拒否リストに足す）: `~/.config/fnox`（age 秘密鍵 `age.txt` と fnox のグローバル設定）・`~/.config/pelway-agent`（dev 用の fnox 設定。`PELWAY_DEV_*` と `PELWAY_LLM_API_KEY` が同じ age 鍵で暗号化されて同居していた）・`~/.ssh`・`~/.config/gh`。これらはすべて実体のあるディレクトリでなければならない（symlink だと devin の bwrap が exec を全滅させる）。
 
 ### hatai が手で適用する変更（リポジトリ外の設定。反映は hatai が行う）
 
@@ -450,6 +566,8 @@ deny_read = [
   "/home/hatai/.config/gh",
 ]
 ```
+
+通知用の `~/.config/pelway-agent-notify`（#737 で足す 6 つ目）も各担当の拒否リストに入れる（`~/.config/devin-review/config.json`・`~/.claude-review/settings.json` では `"Read(~/.config/pelway-agent-notify/**)"`、`/etc/codex/requirements.toml` では `"/home/hatai/.config/pelway-agent-notify"`）。手順は「通知用の age 鍵への移し替え」の手順 0。
 
 ### 適用の順序（番号付き・橋渡し付き）
 
@@ -825,14 +943,17 @@ container run --rm alpine echo hello   # hello 程度の smoke
   | `pitchfork logs agent-watch` | ログ（送ったイベントと HTTP ステータス。秘密と返答の本文は出さない） |
 
 - 状態は `$XDG_STATE_HOME/pelway/agent-watch.json`（未設定なら `~/.local/state/pelway/agent-watch.json`）に置く。初めて起動したときは既存のスレッドを記録するだけで、通知しない。webhook に送れなかった通知は状態の送信待ちの列に残り、古い順に送り直す。受け手が直らない失敗（HTTP 400・404・413）を返した通知は、送り直さずに列から外して `mode=send-dropped http=<コード>` を 1 行残し、下の期限が残っていれば同じ周回で次の通知を送る（期限までに送り終えなかった通知は列に残る）。外した通知も指揮役の受信箱には書かれる（受信箱に書けなかった通知は、書けるまで状態に残して書き直す。上限 100 件で、超えたら古いものから捨てる。下の「指揮役の受信箱と起こし」）。送り直せる失敗（ほかの HTTP ステータス・接続の失敗・秘密が無い・下の期限での打ち切り）では、通知を列に残してその周回の送信をやめ、次に送るまで間隔を空ける（`outbox retry_after=<秒>s` を 1 行残す）。間隔は 30 秒から失敗のたびに倍にし、上限は 15 分、送れたら 30 秒に戻す。間隔は失敗が分かった時刻から数える。間隔を空けている間に出た通知も列の後ろに並び、時刻が来たら古い順に送る。間隔と次に送る時刻は状態ファイルに保存するので、再起動しても引き継ぐ。1 周の送信には、送信の開始から 40 秒の期限を置く。秘密を読む `fnox`（1 件につき URL と鍵の 2 回、1 回の上限 30 秒）・curl（1 回の上限 10 秒、2 秒おいて最大 2 回まで送り直す）・送り直しの待ちはすべて期限の内で行い、`fnox` と curl の制限は起動の直前に期限からの残り時間で決め、期限を過ぎたものは止めて、その通知を列に残す（`mode=send-failed reason=deadline` を 1 行残す。期限の直前に送り始めた通知の打ち切りも、送り直せる失敗として間隔を空ける）。残りが 1 ミリ秒未満なら `fnox` と curl を起動せず、次の通知も送り始めない。そのため 1 周の webhook の送信は、列の長さによらず 45 秒以内に収まる。
+- webhook の秘密（URL と鍵）は通知用の fnox 設定から読む。場所は既定 `~/.config/pelway-agent-notify/fnox.toml` で、環境変数 `PELWAY_NOTIFY_FNOX_CONFIG` に絶対パスを渡せばそちらを読む（複数人開発で、開発者ごとに自分の設定に向けるため。場所だけが変わり、読むキー名 `PELWAY_NOTIFY_WEBHOOK_URL`・`PELWAY_NOTIFY_WEBHOOK_KEY` は変わらない）。未設定なら既定のまま。空文字・絶対パスでない値は設定として使わず、その場所の読み取りも既定への戻しもせず、秘密が無いときと同じく送らずに送信待ちの列に残す（`mode=not-sent reason=no-secret`）。設定の値は通知専用の age 鍵（既定 `~/.config/pelway-agent-notify/age.txt`）で暗号化する。作り方と既存環境の移し替えは「通知用の秘密（agent-watch の fnox 設定と age 鍵）」を参照。
 - 起動してよいのは本体 checkout だけ。worktree にも同じ `pitchfork.toml` の定義があるが、worktree から起動されたときは起動元（実行時のカレントディレクトリ）の `git rev-parse --git-dir` と `--git-common-dir` の差で検出して理由を 1 行ログに出して終わる。見張り対象の `--project` が起動元の checkout の toplevel と一致しないときも、本体から別の checkout を見張る起動になるため同じく理由を 1 行出して終わる。同時に動かせるのは 1 つだけで、状態ディレクトリの `agent-watch.lock`（0600）を flock で取り、取れなければ理由を 1 行出して終わる（いずれも終了コード 0。agent-worktree-prune と同じ決まり。拒否のログにはパスの種類だけを書き、中身や環境変数は出さない）。
-- 指揮役の受信箱と起こし（Issue #555）: 知らせを出すたびに、webhook と同じ JSON を共有の git dir の `pelway/conductor-inbox.jsonl` に 1 行ずつ追記する（形は `docs/agents/notify-payloads.md` の「指揮役の受信箱」）。受信箱に書けなくても webhook の送信と見張りは続け、ログに 1 行残す。書けなかった知らせは状態ファイルに残し、次の周回から、その周回の新しい知らせより先に書き直す（上限 100 件。超えたら古いものから捨てる）。その項目（`inbox_pending`）が無い更新前の版の状態ファイルでは、送信待ちの列の知らせを受信箱に書けたかが分からないので、更新後の最初の周回で列の写しも書き直す（書けていた知らせは受信箱に 2 行になる）。`pelway/` は sandbox の中のエージェントも書ける場所で、agent-watch はホストの権限で動くので、`pelway/` が symlink・自分の所有でないディレクトリのとき、受信箱が symlink・FIFO などの通常ファイルでないもの・自分の所有でないもの・ハードリンクが 2 本以上あるもののときは書かない（`O_NOFOLLOW`・`O_NONBLOCK` で開き、開いた fd で種類・所有者・リンク数を確かめる。前からある受信箱に所有者以外の権限があれば書かない（0600 に直しても、すでに他人が開いている fd からは読めるため。webhook の送信は続ける）。`scripts/conductor-watch.sh` のボード Status 更新キューと同じ型）。前回の追記が途中で失敗して改行の無い断片が残っていれば、追記の前に改行で閉じ、次の知らせを独立した 1 行にする（行の形・断片の行・UTF-8・読み手の扱いは `docs/agents/notify-payloads.md` の「指揮役の受信箱」）。受信箱が 256 MiB を超えているときは、書かず、行数も数えず、その回は起こさない（`inbox append failed: inbox is too large` を 1 行残す。webhook の送信は続ける）。`patrol-state.json` は、symlink・FIFO などの種類・所有者・リンク数を同じく確かめ（権限は見ない。conductor-watch の移行と書き戻しは記録を作るときに 0600 を指定するが、それより前の版が既定の umask で書いた記録は、次に書き戻されるまで広い権限のまま残るため）、256 KiB を超えるものは読まない（`WAKE skipped reason=patrol-state-too-large`）。追記のあと、次の決まりで指揮役を起こす（判定の順は、登録ファイル → own-event → 補助記録 → 既読の位置の範囲 → スレッド ID の形 → 知らせの種類と元のスレッドの立て手 → 既読が進んだか。ログに出るのは最初に当たった理由だけ）。
-  - 宛先は、ホスト側の登録ファイル `~/.config/pelway-agent-notify/conductor-thread-id`（webhook の秘密の設定と同じ置き場で、sandbox の中からは書けない）を毎回読み直す。登録は hatai がホストの端末で、インストールした見張り役で行う: 代行の指揮役を始めるときに `~/.local/bin/pelway-agent-watch --register '<スレッド ID>'`（スレッド ID は、指揮役が伝えた値をそのまま貼らず、hatai がホスト側の T3 の画面か `t3 thread list --json` の `threadId` で確かめ、値が ASCII の英数字と `:`・`_`・`-`・`.`・`%` だけで、先頭が `-` でないことを見てから、単一引用符で囲んで渡す。`--register` の文字の検査は、シェルが行を解釈した後にしか働かないため）、終えるときに `--unregister`、確かめるときに `--show-registration`（見張りは始めない）。worktree の中のスクリプトや `cargo run` は sandbox の中のエージェントが書き換えられるので、ホストでは実行しない（インストールは本体 checkout で `mise run agent-watch-install`。指揮役は本体 checkout の作業ツリーを書けない専用の worktree で立てるが、共有 git dir の `index`・`refs/` は worktree のスレッドからも書けるので、ホストで実行する前の確かめは `docs/agents/conductor-context.md` の「恒久交代」に従う）。登録する値は、受信箱の `thread_id` と同じ文字列（`t3 thread list --json` の `threadId`）にする。`--register` は文字の種類だけを確かめ、表記は確かめない。違う表記を登録すると、知らせの元が指揮役自身かの判定が一致せず、`t3 thread send` がその表記を受け付けるなら、指揮役の巡回の終わりの知らせでも起こすので「起こし → 巡回 → 起こし」が続く（受け付けなければ、起こしは毎回 `WAKE failed` になる）。そうなったら `--unregister` で止め、正しい表記で登録し直す。登録ファイルの位置がディレクトリなら登録は失敗し、それ以外（symlink・FIFO など）はたどらずに置き換える。読むときも symlink をたどらず、FIFO で止まらず、通常ファイル・自分の所有でなければ使わない（`WAKE skipped reason=conductor-file-unreadable`）。ファイルが無いときは起こさない。`patrol-state.json` に `conductor_thread_id` が書かれていても使わない。値の先頭が `-`、または英数字と `:`・`_`・`-`・`.`・`%` 以外を含む、または 256 文字を超えるときは使わない（`WAKE skipped reason=invalid-thread-id`。`--register` も同じ規則で登録を拒む）。`patrol-state.json` は既読の位置（`inbox_offset`）だけに使い、無い・読めない（書きかけ・壊れている・`inbox_offset` が 0 以上の整数でない。項目が無いときは 0 として扱う）ときはその回は起こさず `WAKE skipped reason=patrol-state-unreadable` を 1 行残す。その回の知らせの元がすべて登録された指揮役自身のスレッド（payload の `thread_id` と登録値の完全一致で見る）（指揮役の巡回の終わりなど）のときも起こさない（`WAKE skipped reason=own-event`。起こすと、巡回の終わりと起こしを繰り返すため）。
-  - 知らせの種類と元のスレッドの立て手でも絞る（Issue #727）: 元のスレッドの立て手は `t3 thread list --json` と `t3 thread show --json` の `createdBy` で見る（詳細を取ったスレッドは show の値を優先し、無ければ一覧の値を使う。受信箱への追記に失敗した知らせは、判明していた立て手を状態の別項目 `inbox_pending_creators` に thread_id で残し（キューに残る知らせの元のスレッドの分だけを残し、キューから外れた分は消す）、追記し直す回でも同じ判定をする。再試行の記録の要素は payload そのものに留め、別の形には包まない。包んだ形で残すと、更新前の版に戻したときに包んだ形のまま受信箱に書かれて、読み手が拾えない行になるため）。`createdBy` が `agent` でない値（`user` など）を持つスレッド（人間が立てたスレッド）の知らせで起こすのは、`failed`・`waiting`・`stalled`、または `report` の行のある `finished` のときだけ。それ以外（報告の無い `finished`・`cancelled` など）は、その回の知らせがすべてこの形なら起こさず `WAKE skipped reason=human-non-urgent` を 1 行残す（「その回の知らせ」には、登録された指揮役自身のスレッドの知らせを数えない。起こさないのは、自身の知らせを除いた残りが、起こさない種類の人間の知らせだけのときに限り、起こす条件を満たす知らせが 1 件でも残れば従来どおり起こす）。起こさなかった知らせも受信箱には残るので、指揮役は次の定期巡回でまとめて読む。`createdBy` が無い・文字列でないときは、起こし漏れを避けるため人間が立てたものとは扱わず、従来どおり起こす
-  - 前回起こしたときの指揮役の既読の位置（`patrol-state.json` の `inbox_offset`）を状態ファイル（`last_wake_inbox_offset`）に持ち、既読の位置がそこから進んでいなければ重ねて起こさない（`WAKE skipped reason=not-yet-read`）。1 行でも読み進めていれば、次の知らせで起こす。基準は起こした宛先と組で持ち、登録が替わったら一度も起こしていない扱いにする。既読の位置が受信箱の行数を超えているとき（書き損じ・書き換え）は、その回は起こさず基準にも残さない（`WAKE skipped reason=offset-out-of-range`）。
+- 指揮役の受信箱と起こし（Issue #555）: 知らせを出すたびに、webhook と同じ JSON を共有の git dir の `pelway/conductor-inbox.jsonl` に 1 行ずつ追記する（形は `docs/agents/notify-payloads.md` の「指揮役の受信箱」）。受信箱に書けなくても webhook の送信と見張りは続け、ログに 1 行残す。書けなかった知らせは状態ファイルに残し、次の周回から、その周回の新しい知らせより先に書き直す（上限 100 件。超えたら古いものから捨てる）。その項目（`inbox_pending`）が無い更新前の版の状態ファイルでは、送信待ちの列の知らせを受信箱に書けたかが分からないので、更新後の最初の周回で列の写しも書き直す（書けていた知らせは受信箱に 2 行になる）。`pelway/` は sandbox の中のエージェントも書ける場所で、agent-watch はホストの権限で動くので、`pelway/` が symlink・自分の所有でないディレクトリのとき、受信箱が symlink・FIFO などの通常ファイルでないもの・自分の所有でないもの・ハードリンクが 2 本以上あるもののときは書かない（`O_NOFOLLOW`・`O_NONBLOCK` で開き、開いた fd で種類・所有者・リンク数を確かめる。前からある受信箱に所有者以外の権限があれば書かない（0600 に直しても、すでに他人が開いている fd からは読めるため。webhook の送信は続ける）。`scripts/conductor-watch.sh` のボード Status 更新キューと同じ型）。前回の追記が途中で失敗して改行の無い断片が残っていれば、追記の前に改行で閉じ、次の知らせを独立した 1 行にする（行の形・断片の行・UTF-8・読み手の扱いは `docs/agents/notify-payloads.md` の「指揮役の受信箱」）。受信箱が 256 MiB を超えているときは、書かず、行数も数えず、その回は起こさない（`inbox append failed: inbox is too large` を 1 行残す。webhook の送信は続ける）。`patrol-state.json` は、symlink・FIFO などの種類・所有者・リンク数を同じく確かめ（権限は見ない。conductor-watch の移行と書き戻しは記録を作るときに 0600 を指定するが、それより前の版が既定の umask で書いた記録は、次に書き戻されるまで広い権限のまま残るため）、256 KiB を超えるものは読まない（`WAKE skipped reason=patrol-state-too-large`）。追記のあと、次の決まりで指揮役を起こす（判定の順は、登録ファイル → 知らせの分類（own-event・repeat-waiting・human-non-urgent。起こし待ちの印があるときは、分類で止めずに先へ進む） → 補助記録 → 既読の位置の範囲 → スレッド ID の形 → 最短間隔 → 既読が進んだか → 読み終えたか。ログに出るのは最初に当たった理由だけ）。
+  - 宛先は、ホスト側の登録ファイル `~/.config/pelway-agent-notify/conductor-thread-id`（webhook の秘密の設定と同じ置き場で、sandbox の中からは書けない）を毎回読み直す。登録は hatai がホストの端末で、インストールした見張り役で行う: 代行の指揮役を始めるときに `~/.local/bin/pelway-agent-watch --register '<スレッド ID>'`（スレッド ID は、指揮役が伝えた値をそのまま貼らず、hatai がホスト側の T3 の画面か `t3 thread list --json` の `threadId` で確かめ、値が ASCII の英数字と `:`・`_`・`-`・`.`・`%` だけで、先頭が `-` でないことを見てから、単一引用符で囲んで渡す。`--register` の文字の検査は、シェルが行を解釈した後にしか働かないため）、終えるときに `--unregister`、確かめるときに `--show-registration`（見張りは始めない）。worktree の中のスクリプトや `cargo run` は sandbox の中のエージェントが書き換えられるので、ホストでは実行しない（インストールは本体 checkout で `mise run agent-watch-install`。指揮役は本体 checkout の作業ツリーを書けない専用の worktree で立てるが、共有 git dir の `index`・`refs/` は worktree のスレッドからも書けるので、ホストで実行する前の確かめは `docs/agents/conductor-context.md` の「恒久交代」に従う）。登録する値は、受信箱の `thread_id` と同じ文字列（`t3 thread list --json` の `threadId`）にする。`--register` は文字の種類だけを確かめ、表記は確かめない。違う表記を登録すると、知らせの元が指揮役自身かの判定が一致せず、`t3 thread send` がその表記を受け付けるなら、指揮役の巡回の終わりの知らせでも起こすので「起こし → 巡回 → 起こし」が続く（受け付けなければ、起こしは毎回 `WAKE failed` になる）。そうなったら `--unregister` で止め、正しい表記で登録し直す。登録ファイルの位置がディレクトリなら登録は失敗し、それ以外（symlink・FIFO など）はたどらずに置き換える。読むときも symlink をたどらず、FIFO で止まらず、通常ファイル・自分の所有でなければ使わない（`WAKE skipped reason=conductor-file-unreadable`）。ファイルが無いときは起こさない。`patrol-state.json` に `conductor_thread_id` が書かれていても使わない。値の先頭が `-`、または英数字と `:`・`_`・`-`・`.`・`%` 以外を含む、または 256 文字を超えるときは使わない（`WAKE skipped reason=invalid-thread-id`。`--register` も同じ規則で登録を拒む）。`patrol-state.json` は既読の位置（`inbox_offset`）だけに使い、無い・読めない（書きかけ・壊れている・`inbox_offset` が 0 以上の整数でない。項目が無いときは 0 として扱う）ときはその回は起こさず `WAKE skipped reason=patrol-state-unreadable` を 1 行残す。その回の知らせの元がすべて登録された指揮役自身のスレッド（payload の `thread_id` と登録値の完全一致で見る）（指揮役の巡回の終わりなど）のときも起こさない（`WAKE skipped reason=own-event`。起こすと、巡回の終わりと起こしを繰り返すため。下の起こし待ちの印があるときは、この周でも印のために起こすことがある）。
+  - 知らせの種類と元のスレッドの立て手でも絞る（Issue #727）: 元のスレッドの立て手は `t3 thread list --json` と `t3 thread show --json` の `createdBy` で見る（詳細を取ったスレッドは show の値を優先し、無ければ一覧の値を使う。受信箱への追記に失敗した知らせは、判明していた立て手を状態の別項目 `inbox_pending_creators` に thread_id で残し（キューに残る知らせの元のスレッドの分だけを残し、キューから外れた分は消す）、追記し直す回でも同じ判定をする。再試行の記録の要素は payload そのものに留め、別の形には包まない。包んだ形で残すと、更新前の版に戻したときに包んだ形のまま受信箱に書かれて、読み手が拾えない行になるため）。`createdBy` が `agent` でない値（`user` など）を持つスレッド（人間が立てたスレッド）の知らせで起こすのは、`failed`・`waiting`・`stalled`、または `report` の行のある `finished` のときだけ。それ以外（報告の無い `finished`・`cancelled` など）は、その回の知らせがすべてこの形なら起こさず `WAKE skipped reason=human-non-urgent` を 1 行残す（起こし待ちの印があるときは、印のために起こすことがある）（「その回の知らせ」には、登録された指揮役自身のスレッドの知らせを数えない。起こさないのは、自身の知らせを除いた残りが、起こさない種類の人間の知らせだけのときに限り、起こす条件を満たす知らせが 1 件でも残れば従来どおり起こす）。起こさなかった知らせも受信箱には残るので、指揮役は次の定期巡回でまとめて読む。`createdBy` が無い・文字列でないときは、起こし漏れを避けるため人間が立てたものとは扱わず、従来どおり起こす
+  - 前回起こしたときの指揮役の既読の位置（`patrol-state.json` の `inbox_offset`）を状態ファイル（`last_wake_inbox_offset`）に持ち、既読の位置がそこから進んでいなければ重ねて起こさない（`WAKE skipped reason=not-yet-read`）。起こすに足る知らせは起こし待ちの印に入り（下の「起こしの最短間隔」の項）、1 行でも読み進めていれば、次の周回で起こす。基準は起こした宛先と組で持ち、登録が替わったら一度も起こしていない扱いにする。既読の位置が受信箱の行数を超えているとき（書き損じ・書き換え）は、その回は起こさず基準にも残さない（`WAKE skipped reason=offset-out-of-range`。受信箱の行数が分からないとき（数えている間に受信箱が変わった・数え直せない）も、範囲を確かめられないので同じ理由で起こさない。印だけの周での行数の確かめ方は、下の「起こしの最短間隔」の項）。
+  - 同じ承認待ちでは 1 回しか起こさない（Issue #839）: 承認待ち（`waiting`）の知らせは、承認待ちの件数が 0 から増えるたびに出るので、同じスレッドの同じ round で何度も来る。起こしに数えるのは、スレッドと round（payload の `round`）の組ごとに最初の 1 件だけで、2 件目からは受信箱に書くだけにする。その回の知らせ（指揮役自身のものを除く）で起こすに足るものが、この繰り返しだけなら起こさず `WAKE skipped reason=repeat-waiting` を 1 行残す（起こし待ちの印があるときは、印のために起こすことがある）。スレッドごとに数えた最後の round を状態ファイル（`wake_waiting_rounds`）に持ち、一覧の記録から外れたスレッドの分は消す。`round` の無い・0 の承認待ち（T3 が実行回数を返さなかったもの）は、組を作れないので毎回数える
+  - 起こしの最短間隔（Issue #839）: 前回起こしを送り終えてから 5 分（`PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS` で秒数を変えられる。0 以上の整数でなければ既定の 300。時刻は秒で切り捨てるので、ちょうど 300 秒の差もまだ間隔の内とする）は起こさない。その間に起こすに足る知らせが来たら、起こし待ちの印（状態ファイルの `wake_pending`。値は、起こすに足る知らせのうち最後のものを書いた行の番号。書いた直後のファイルの位置から数えるので、同じ周でその後ろに書いた起こさない行も、ほかの書き手が後から足した行も含めない。数えきれなかったときは、読み終えたと判定しないよう最大の値にする）を付ける。印がまだ無かったときだけ `WAKE deferred reason=cooldown` を 1 行残す。`failed`・`stalled` も例外にしない。間隔がたった周回で、新しい知らせが無くても 1 回起こし、印を消す。ただしその時点で指揮役の既読の位置が、印の値に追いついていれば（定期巡回などで読み終えている。その後に足された起こさない行（指揮役自身の `finished` など）だけが未読でも同じ）、起こさずに印を消し `WAKE skipped reason=already-read` を 1 行残す。起こすに足る新しい知らせが、最短間隔のほかに、既読が進んでいない（`not-yet-read`）・補助記録が読めない・既読の位置が範囲外のために起こせなかったときも、同じ印を付ける（印が既にあれば、値を大きい方にする）。印は、起こせるか取り消すまで残し、新しい知らせの無い周回のたびに確かめ直す。この確かめ直しの周回では、既読の位置の範囲を、最後に数えた受信箱の行数（状態ファイルの `inbox_lines`）で確かめ、範囲外なら印も基準も変えない。行数と一緒に、数えたときの受信箱の同一性（デバイス・inode・大きさ・mtime・ctime。`inbox_identity`）を持つ。受信箱の同一性がそのときと同じなら受信箱を読まない（印が残る間、周回ごとに数え直さないように）。違っていれば（切り詰め・置き換え・書き換え・追記）、読むだけで（作らず、末尾の断片も補わずに）上限の内で数え直してから使う。数えている間に受信箱が変わったとき・数え直せないときは、範囲を確かめられないので、既読の位置を使わない。印を付けた後に、自分の追記以外で受信箱が変わった（切り詰め・書き換え・挿入。知らせを書く周では、書く前の同一性が最後に数えたときと違うことで見分ける）ときは、印の行番号と既読の位置が同じ中身を指すと確かめられないので、印の値を不明（最大の値）にする。印は既読では取り消さず、前回の起こしの位置とも比べずに（書き換えの印の間は基準を使わない）、最短間隔の後に起こす。印の有無にかかわらず、知らせを書く周で書く前の同一性が最後に数えたときと違えば、その周に書いた新しい知らせの行番号も、同じ理由で不明として扱う。書き換えを見分けたことは状態ファイル（`inbox_rewritten`）に残し、周をまたいで新しい知らせと印の行番号を不明にし、印が立っている間は前回の起こしの基準を使わない（印の間に送った起こしの位置も含む。重ねての起こしは最短間隔だけで絞る）。指揮役は起こされても保存済みの既読の位置から読むので、起こしを送っただけでは印を消さない。印の間に起こしを送ったときの既読の位置を残し（`rewritten_wake_offset`）、指揮役がその後に既読の位置を書き直したら（いまの受信箱を読んだ）、印と前回の起こしの基準を消す。受信箱がまた書き換えられたら、残した既読の位置は前の受信箱のものなので捨て、次の起こしで取り直す。一度も数えていないとき（この版を初めて動かしたとき）は、書き換えと見なさない。数えたが行数が使えないとき（数えている間に受信箱が変わった・数え直せない）は、書き換えを見分けたものとして印を立てる。受信箱の書き手についての前提: 受信箱に書くのは agent-watch の追記だけで、ほかの書き手は切り詰め・書き換え・挿入をしない。agent-watch はこの前提が崩れたことを、書く前・数える前後・印だけの周の同一性の比較で見分けられる範囲でだけ見分け、見分けたときは既読による取り消しをしない側に倒す。同一性を確かめてから使うまでの間の書き換えは見分けない。この確かめ直しの周回では、起こさなかった理由のログも出さない（`already-read` で印を取り消したときと、起こしを送ったときのログは出る）。登録ファイルが無い・空のとき（`--unregister` の後など）は、起こす宛先が無いので印を消す。前回起こした時刻（`last_wake_at`）は `last_wake_inbox_offset` と同じく宛先と組で使い、登録が替わったら一度も起こしていない扱いにする。前回起こした時刻がいまより後（時計が戻った）なら、間隔はたったものとして扱う
   - 送るのは決まった文だけで（`t3 thread send <スレッド> -`、本文は標準入力。知らせの中身は含めない）、実行中のスレッドには次のターンとして届く。一覧・詳細・起こしに使う `t3` は同じもので、`T3_BIN` が指定されていればそれ、無ければ動いている T3 サーバーと同じ実行ファイル、それも無ければ PATH の `t3`（PATH の `t3` は版がサーバーと食い違うと失敗し、`ServerOwnsDatabaseError` で拒まれることもあるため）。サーバーの実行ファイルとして受け入れるのは、`/proc/<pid>/exe` の向き先が `$HOME/.t3/wsl-runtime/` の下の `t3` で、自分の所有の通常ファイルのものだけ（`scripts/conductor-watch.sh` の部分一致の規則より狭い。agent-watch はホストの権限で実行するので、sandbox から書ける場所に置かれた偽物を選ばないため）。
   - `run`・`wake` を通る外部コマンド（`t3`・`gh`・`git`・`hostname`）は `timeout -k 5 30` で包む（30 秒で SIGTERM、さらに 5 秒で SIGKILL。終了処理で固まった子で見張りが止まらないため）。webhook の送信の `fnox` と curl はこれを通らず、`timeout -s KILL` で包む。制限は上の状態の項の 1 周の送信の期限までの残り時間（`fnox` は 30 秒との短い方）で、過ぎたら猶予なしに SIGKILL で止める（curl は加えて `--connect-timeout 2 --max-time 10` で区切る）。
-  - 送れなかったら `WAKE failed <理由>`（理由は `exit=<終了コード>`・`exit=signal`・`spawn:`・`stdin:`・`wait:` のどれか）を 1 行残すだけで送り直さず、次の新しい知らせで改めて試みる。知らせは受信箱に残り、指揮役の巡回が読む。
+  - 送れなかったら `WAKE failed <理由>`（理由は `exit=<終了コード>`・`exit=signal`・`spawn:`・`stdin:`・`wait:` のどれか）を 1 行残すだけで送り直さず、次の新しい知らせで改めて試みる（起こし待ちの印も消す）。知らせは受信箱に残り、指揮役の巡回が読む。
   - `patrol-state.json` は sandbox の中のエージェントが書けるので、`inbox_offset` を書き換えれば重ねての起こしの抑止は外れる。逆に、受信箱の行数以内で実際より先の値に書き換えると、起こしたときにその値が基準に残り、補助記録を正しい値に戻しても、既読の位置がその値を超えるまで起こしは送られない（知らせは受信箱に残り、定期巡回が読む）。その場合も送られるのは、決まった文を、hatai が登録した 1 つのスレッドへ、知らせ 1 件につき最大 1 回だけである。
 - 送らずに試すには `cargo run -p pelway-agent-watch -- --once --dry-run`（新しいイベントの payload を標準出力に出す。状態ファイルは読むだけで書き換えず、受信箱にも書かず、起こしも送らない）。
 - 再起動のあとの自動起動: `pitchfork.toml` の `agent-watch` には `boot_start = true` を付けてあり、login 時に起動する pitchfork の supervisor（`pitchfork supervisor run --boot`）が agent-watch を起動する。起動時の supervisor は作業ディレクトリを持たず、読むのはユーザーの設定（`~/.config/pitchfork/config.toml`）と、その `[namespaces]` に登録されたプロジェクト（とその全 worktree）の `pitchfork.toml` だけなので、次の 3 つを PC 側で入れておく。3 つともリポジトリの外の設定で、hatai が OK のうえで手で行う。

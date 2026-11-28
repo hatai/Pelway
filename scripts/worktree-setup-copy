@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+# worktree-setup から呼ばれるコピー手続き（Issue #804）。
+# 検査・存在確認が済んだあとの、設定ファイル 1 件のコピーだけを行う。
+#
+# 引数: <dst-dir-fd> <src-dir-fd> <basename>
+#   両側とも呼び出し元が開いて引き継いだディレクトリの fd。パスは一切使わず、
+#   dir_fd 基点の操作だけで済ませる（パスが並行して差し替わっても、読み書き
+#   するのは開いた実体の中だけ）
+#
+# 手順:
+#   1. コピー元を dir_fd 基点で O_NOFOLLOW|O_NONBLOCK に開く（symlink を
+#      たどらず、FIFO に変わっても書き手を待たない）。開いた fd が通常
+#      ファイルのときだけ読む
+#   2. 書き込み先は O_TMPFILE で作る無名の inode（名前を持たないため、
+#      名前の差し替えは原理的に起きず、後始末の照合・unlink 自体が要らない。
+#      公開に失敗しても fd を閉じれば inode は自動で消える）
+#   3. 公開は、書き終えた fd を /proc/self/fd 経由でリンクする（最終名が
+#      並行して差し替わっても、公開されるのは自分が書いた inode だけで、
+#      既存名は上書きしない。FileExistsError なら既に最終名がある）
+#
+# 終了コード: 0 写した / 4 コピー元が無い / 5 コピー元を開けない（権限等） /
+#   6 コピー元が通常ファイルでない（symlink・FIFO・ディレクトリ等） /
+#   7 無名の一時 inode を作れない（ファイルシステムが O_TMPFILE に
+#     対応しない場合を含む）/ 8 最終名が既に現れた / 9 読み書き・リンクの失敗
+import errno
+import os
+import stat
+import sys
+
+ddir, sdir, name = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+if os.path.basename(name) != name:
+    sys.exit(2)
+
+try:
+    sfd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=sdir)
+except FileNotFoundError:
+    sys.exit(4)
+except OSError as e:
+    sys.exit(6 if e.errno == errno.ELOOP else 5)
+if not stat.S_ISREG(os.fstat(sfd).st_mode):
+    sys.exit(6)
+
+try:
+    tfd = os.open(".", os.O_TMPFILE | os.O_WRONLY | os.O_CLOEXEC,
+                  0o644, dir_fd=ddir)
+except OSError:
+    sys.exit(7)
+
+rc = 0
+try:
+    try:
+        while True:
+            chunk = os.read(sfd, 1 << 20)
+            if not chunk:
+                break
+            view = memoryview(chunk)
+            while view:
+                view = view[os.write(tfd, view):]
+    except OSError:
+        rc = 9
+    if rc == 0:
+        try:
+            os.link(f"/proc/self/fd/{tfd}", name,
+                    dst_dir_fd=ddir, follow_symlinks=True)
+        except FileExistsError:
+            rc = 8
+        except OSError:
+            rc = 9
+finally:
+    for fd in (sfd, tfd):
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+sys.exit(rc)

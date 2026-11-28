@@ -60,10 +60,27 @@ semgrep_configs=(--config p/rust --config p/github-actions --config r/bash
 rc=0
 case "$tool" in
   gitleaks)
-    # HEAD から辿れる履歴だけを走査する（checkout の他ブランチやローカルの ref は対象外）。
+    # 走査する範囲:
+    #   - SECURITY_SCAN_BASE_SHA が設定されているとき（workflow の pull_request が渡す PR の
+    #     base のコミット SHA）: <base>..HEAD。PR の base から辿れないコミット（PR のコミットと、
+    #     checkout した合成のマージコミット）だけを走査する。main の履歴は main への push の
+    #     走査で見るため、PR ごとに全履歴を見直さない
+    #   - 未設定のとき（main への push・workflow_dispatch・手元の実行）: HEAD から辿れる履歴全体。
+    #     checkout の他ブランチやローカルの ref は対象外
+    # gitleaks だけが使う値のため、この分岐で検証する。git log の引数に渡すため、
+    # 設定されている場合は空文字を含め、40 桁の小文字 16 進でなければ引数の誤りとして止める。
+    range="HEAD"
+    if [[ -v SECURITY_SCAN_BASE_SHA ]]; then
+      base_sha="$SECURITY_SCAN_BASE_SHA"
+      if [[ ! "$base_sha" =~ ^[0-9a-f]{40}$ ]]; then
+        echo "::error::SECURITY_SCAN_BASE_SHA が 40 桁の小文字 16 進のコミット SHA ではありません" >&2
+        exit 2
+      fi
+      range="$base_sha..HEAD"
+    fi
     # -m: git log は既定でマージコミットの差分を出さないため、競合解消で足した行が漏れる。
     # 各親との差分を出させて走査する（同じ値が複数のコミットで重ねて出る）。
-    gitleaks git --redact --no-banner --log-level error --exit-code 2 --log-opts="-m HEAD" \
+    gitleaks git --redact --no-banner --log-level error --exit-code 2 --log-opts="-m $range" \
       --report-format json --report-path "$report" . 2>"$errfile" || rc=$?
     found_rc=2
     ;;
