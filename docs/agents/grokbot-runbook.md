@@ -83,9 +83,9 @@ sandbox に止められた操作（書き込み・実行・ネットワークな
 
 ### マージの条件
 
-PR に `automerge` ラベルを付けてよいのは、skill `command-team` の「マージ」の「`automerge` ラベルを付ける条件」がすべてそろったときだけ。条件の列挙と確かめ方はそこが正本で、この手順書には写さない（有効な Approve、その Approve の委託の結果が確定していること、PR に `needs-human` が無いこと、`[文書のずれ]` の nit が残っていないこと、必須チェック、Draft でも `WIP:` でもないこと、現在の head と同じ SHA の `pelway-qa` の合格、admin マージの対象に当たらないこと、Approve と QA の合格の後の push がコンフリクトの解消を含まない main の取り込みだけであること、衝突を解消したらレビューと QA をやり直すこと、などを含む）。admin マージの対象に当たる PR には `automerge` を付けず、hatai の admin マージに回す。
+PR に `automerge` ラベルを付けてよいのは、skill `command-team` の「マージ」の「`automerge` ラベルを付ける条件」がすべてそろったときだけ。条件の列挙と確かめ方はそこが正本で、この手順書には写さない（有効な Approve、その Approve の委託の結果が確定していること、PR に `needs-human` が無いこと、`[文書のずれ]` の nit が残っていないこと、必須チェック、Draft でも `WIP:` でもないこと、現在の head と同じ SHA の `pelway-qa` の合格、admin マージの対象に当たらないこと、Approve と QA の合格の後の push がコンフリクトの解消を含まない main の取り込みだけであること、衝突を解消したらレビューと QA をやり直すこと、などを含む）。admin マージの対象に当たる PR には `automerge` を付けず、QA の合格のあと（下の段落）に hatai の admin マージに回す。
 
-正本の条件のうち、admin マージの対象に当たらないことと QA の合格（現在の head と同じ SHA の `pelway-qa` の合格コメント。形と数え方は `docs/agents/qa-checklist.md`）だけが欠けている PR は QA 待ちである。`automerge` を付けず、QA に確認を頼む。同じ SHA の QA の合格が出たら、admin マージの対象に当たる PR は hatai の admin マージに回し、当たらない PR は `automerge` の条件の確認に進める。巡回スクリプトはこの PR にも `waiting_on=merge` を出すが、実際の待ち先は QA として扱う。
+正本の条件のうち「admin マージの対象に当たらないこと」を除く条件が、QA の合格以外はそろっている PR は QA 待ちである。`automerge` の対象か admin マージの対象かは QA の合格のあとに分ける。QA の合格とは、現在の head と同じ SHA の `pelway-qa` の合格コメントで、形と数え方は `docs/agents/qa-checklist.md` に従う。`automerge` を付けず、QA に確認を頼む。同じ SHA の QA の合格が出たら、admin マージの対象に当たる PR は hatai の admin マージに回し、当たらない PR は `automerge` の条件の確認に進める。巡回スクリプトはこの PR にも `waiting_on=merge` を出すが、実際の待ち先は QA として扱う。
 
 ### マージキュー待ちの PR
 
@@ -405,14 +405,14 @@ Assigned: role=implement agent=devin model=<モデル名> effort=high"
 
 実装担当のレビュー委託の子スレッドは `t3 thread list` に現れない（委託の結果は実装スレッドが処理する）。この表の「レビュースレッド」は、指揮役が立てたトップレベルのレビュースレッドのこと。
 
-指揮役が立てたレビュースレッドの結果を処理するとき、外部投入で実装スレッドに結果を送る PR 以外では、レビューの結果への対応を進める前に、指揮役が skill `implement-issue` の手順 9 と同じ形のラウンドサマリーを `scripts/agent-gh dev pr comment` で PR に残す。外部投入で実装スレッドに結果を送る PR では実装担当が残す。ラウンドサマリーは現在のラウンド数と round 4 到達の記録に使うため、省略しない。
+指揮役が立てたレビュースレッドの結果を処理するとき、結果を実装スレッドに送るときは実装担当が残し、結果を送らずに止めるときと実装スレッドに送らない PR では指揮役が残す。指揮役が残すときは、レビューの結果への対応を進める前に、skill `implement-issue` の手順 9 と同じ形のラウンドサマリーを `scripts/agent-gh dev pr comment` で PR に残す。`<R>` の続け方も同じ手順 9 に従う。ラウンドサマリーはレビューのラウンドの記録と round 4 到達の記録に使うため、省略しない。
 
 レビューの verdict ごとの対応:
 
 | `verdict` | すること |
 |---|---|
 | `approve` | その head の必要な実行（skill `implement-issue` の手順 8 の「必要な実行」。必要な担当は、その head に向けて立てたレビュースレッドの担当と「レビュー担当と effort」の表で要る担当で、担当ごとに、その head に向けた委託記録の実行のうち `DISMISSED` でない投稿をちょうど 1 件持つ最新のもの）のすべてから報告を受け、そのすべての実行の投稿がその head にちょうど 1 件ずつあるまでは、最初の `approve` で次に進まず残りの報告を待つ。そろったら、指揮役自身の PR なら、Ready for review と必須チェックと QA 合格コメントが揃っていることを確かめて skill `command-team` の「マージ」に進む。外部投入なら、すべてが `approve` のときだけ「PR #<M> は Approve された。skill implement-issue の手順 9 の『Approve のとき』から進める（`[文書のずれ]` の nit が残っていれば先に直す）。」を実装スレッドに送り、行を改めて、実行ごとに `run <ID>: approve` をデータとして添える。複数のレビュー担当を付けた PR で判定が割れたらマージせず、request-changes 側の指摘を優先して修正に進ませる（skill `command-team` の「レビュー担当と effort」）。ただし round 4 以降のレビューで request-changes 側にセキュリティ領域の must-fix があるときは修正に進ませず、skill `command-team` の「レビューのラウンド」の停止条件に従って hatai の判断に戻す |
-| `request-changes` | 外部投入なら「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を実装スレッドに送り、行を改めて、報告を受けた実行ごとに `run <ID>: <approve|request-changes>` をデータとして添える（修正ラウンドは実装スレッドが数える）。ただし round 4 以降のレビューで request-changes 側にセキュリティ領域の must-fix があるときは修正を中継せず、skill `command-team` の「レビューのラウンド」の停止条件に従って hatai の判断に戻す |
+| `request-changes` | 外部投入なら「PR #<M> のレビューの must-fix を直す。skill implement-issue に従う。」を実装スレッドに送り、行を改めて、報告を受けた実行ごとに `run <ID>: <approve|request-changes>` をデータとして添える（修正ラウンドは実装スレッドが数える）。ただし round 4 以降のレビューで request-changes 側にセキュリティ領域の must-fix があるときは修正を中継しない。修正を中継しないときは、指揮役がラウンドサマリーを残してから hatai の判断に戻す（skill `command-team` の「レビューのラウンド」の停止条件）。`must-fix:` には未対応のまま止まる旨を書く |
 | `failed` | `error: checks timeout` なら、verify の完了を待ってから新しいレビュースレッドを立てる（回数に数えない）。`error: wrong runtime` なら、権限を `auto-accept-edits`・worktree にして立て直す（回数に数えない）。`error:` が `設定の不備:` で始まるなら、先に投稿の有無を確かめて対象 PR に `[review-invalid]` の記録を残し、PR に `needs-human` を付けてから（確かめ方と形は skill `implement-issue` の手順 9「投稿後の `設定の不備:` の記録」）、立て直さずに 7 のエスカレーションにする（同じ環境では同じ結果になるため）。それ以外は新しいレビュースレッドを 1 回だけ立て直し、2 回目なら 7 のエスカレーション |
 
 通常の PR のレビューの verdict（approve / request-changes / failed）は実装スレッドが処理する（skill `implement-issue` の手順 9）。指揮役は、実装スレッドの終わりの報告（`review:` と `ready:` の行）と GitHub の PR の状態（`pelway-review` の最新レビューとチェック）で進み具合を見る。
@@ -652,7 +652,7 @@ T3 のスレッドは pull 型で、`completed` で終わると、通常の指�
 | `grokbot`（指揮役が書いたもの） | 24 時間 | Grok Bot の承認・判断が出たか |
 | `implement` | 6 時間 | 実装スレッドが動いているか（停滞は 45 分検知にもある。レビュー委託の子の完了待ちを含む） |
 | `review` | 24 時間 | レビュー担当が動いているか（滞留 24 時間の対応と同じ目安。skill `command-team` の「レビュー待ちの滞留」） |
-| `merge` | 1 時間 | マージの条件（「2. ボードと巡回」の「マージの条件」）が揃っているのに未マージのままではないか。正本の条件のうち admin マージの対象に当たらないことと QA の合格だけが欠けていれば QA 待ちとして扱う |
+| `merge` | 1 時間 | マージの条件（「2. ボードと巡回」の「マージの条件」）が揃っているのに未マージのままではないか。正本の条件のうち「admin マージの対象に当たらないこと」を除く条件が QA の合格以外そろっていれば QA 待ちとして扱う |
 | `conductor` | 1 時間 | 指揮役の判断・割り当てが先送りになっていないか |
 
 目安は運用実績で見直す。巡回スクリプトが既定値として同じ値を持つため、変えるときはこの表とスクリプトの両方を直す。

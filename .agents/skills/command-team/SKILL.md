@@ -124,7 +124,7 @@ Issue を割り当てる直前に、runbook の「割り当て・停止・再開
 | コア部分（`crates/pelway-contract`、承認・状態遷移・権限）、`unsafe` を含む・含みうる変更 | 選んだ担当の effort を `effort.raise` の先頭から 3 番目の値にする |
 | 同じ Issue の修正の指示が 2 回を超えた（3 回目以降の修正に入る）。数えるのは、レビューの本物の must-fix に基づく指示だけ（分割計画が無い時期の誤判定や、再起動による自動の再開は数えない） | `t3_thread_configure` で `effort.option` の値を `effort.raise` の順で 1 段上げる。最後の値でも直らなければ、`normal` の先頭の担当に替え、その担当の `effort.raise` の最後の値にする（すでにその担当のときは替えない）。Issue に理由をコメントする |
 
-runbook と仕様の `round`（スレッドの実行回数）は、誤判定や再起動による再開でも増える。指揮役は `round` を目安にとどめ、effort の引き上げは上の表の「修正の指示の回数」で判断する。ここで数える「修正の指示の回数」と、実装側がレビューの委託回数で数えるレビューのラウンド（下の「レビューのラウンド」）は別の数え方である。
+runbook と仕様の `round`（スレッドの実行回数）は、誤判定や再起動による再開でも増える。指揮役は `round` を目安にとどめ、effort の引き上げは上の表の「修正の指示の回数」で判断する。ここで数える「修正の指示の回数」と、実装側がラウンドサマリーの履歴から続けるレビューのラウンド（下の「レビューのラウンド」）は別の数え方である。
 
 ### レビュー担当と effort
 
@@ -199,12 +199,12 @@ runbook と仕様の `round`（スレッドの実行回数）は、誤判定や�
 - セキュリティ領域が誤って回されていたら、マージを止める。
 - セキュリティ以外の must-fix には、具体的な失敗の筋道を書く。
 - 仕様の穴（拒否リストや検知の規則から抜け道が出続けるもの）は仕様に戻し、ラウンドを 1 から数え直す。hatai の OK なしの数え直しは 1 回まで。
-- ラウンドを数え直しても、round 4 到達の記録は残す。round 4 以降に達したかは、現在のラウンド数ではなく、ラウンドサマリーの履歴に残る最大の `<R>` で判定する。最大が 4 以上なら、後で 1 から数え直しても round 4 以降に達した PR のままとする。ラウンドサマリーは round 4 到達の記録にも使うので、実装担当の PR では skill `implement-issue`、実装担当のいない PR では runbook のとおり、各ラウンドの結果への対応のたびに残す。
+- ラウンドを数え直しても、round 4 到達の記録は残す。round 4 以降に達したかは、現在のラウンド数ではなく、連続したラウンドサマリーの履歴に残る最大の `<R>` で判定する。最大が 4 以上なら、後で 1 から数え直しても round 4 以降に達した PR のままとする。履歴は、1 から最大 `<R>` までの各番号が少なくとも 1 件あるときだけ連続とする（同じ番号が複数あるのは同じラウンドの再対応として許す）。ラウンドサマリーは round 4 到達の記録にも使うので、実装担当の PR では skill `implement-issue`、実装担当のいない PR では runbook のとおり、止まる経路も含めて各ラウンドの結果への対応のたびに残す。履歴を読めない・編集されたサマリーがある・番号の欠けがあるときは round 数を確かめられないので、automerge の対象外と判断せず `needs-human` で人間に確かめる。
 - 人の作業待ちの項目は、その間は合格ではなく未検証として扱い、担当・期限・sha を記録する。ラウンドには数えない。
 - must-fix が残ったままマージしない。ラウンドの回数では止めず、must-fix が残る限り修正と再レビューを続ける。round 4 以降に進むこと自体に hatai の例外の判断は要らない。
-- round 4 以降のレビューでセキュリティ領域（上のリスト）の must-fix が出たら止めて、hatai の判断に戻す。must-fix の一覧と止まった head の sha を Issue に書く。手元にすでに修正があれば、worktree に置いたまま push も削除もしない。止まっている間は、指揮役も修正を中継しない。
+- round 4 以降のレビューでセキュリティ領域（上のリスト）の must-fix が出たら、そのラウンドのサマリーを PR に残してから止めて、hatai の判断に戻す。`must-fix:` には未対応のまま止まる旨を書く。must-fix の一覧と止まった head の sha を Issue に書く。手元にすでに修正があれば、worktree に置いたまま push も削除もしない。止まっている間は、指揮役も修正を中継しない。
 - 修正の継続に force push・PR のマージ・`.github/workflows/` の push・pr-size の例外のどれかが必要なときは、回数とは別に hatai の判断を待つ。
-- 判定が割れたときは「レビュー担当と effort」のとおり修正側（request-changes）を優先する。セキュリティの指摘は特に修正側を優先する。ただし round 4 以降のレビューで request-changes 側にセキュリティ領域の must-fix があるときは、修正に進まず上の停止条件に従って hatai の判断に戻す。
+- 判定が割れたときは「レビュー担当と effort」のとおり修正側（request-changes）を優先する。セキュリティの指摘は特に修正側を優先する。ただし round 4 以降のレビューで request-changes 側にセキュリティ領域の must-fix があるときは、修正に進まず、そのラウンドのサマリーを PR に残してから上の停止条件に従って hatai の判断に戻す。
 - `--no-verify` は使わない（commit のフックを止めない）。
 - 見張り（conductor-watch）は、別 Issue に回した件数を数える。QA があとで抜き出して確かめる。
 
@@ -242,7 +242,7 @@ hatai へのレビュー依頼（「hatai 待ち」の定型コメント・終�
 
 `automerge` ラベルを付ける条件（初回の付与と付け直しの両方で、すべて確かめてから付ける）:
 
-- admin マージの対象（下の 3 つ）に当たらないこと。当たる PR には `automerge` を付けず、hatai の admin マージに回す。round 4 以降に達したかは、実装担当の終わりの報告のラウンド数ではなく、ラウンドサマリーの履歴で確かめる。初回の付与と付け直しの前に、対象 PR のコメントを `scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<M>/comments` で読み、REST の `user.login` が `pelway-dev[bot]` で `user.type` が `Bot`、`created_at` と `updated_at` が同じ（未編集の）コメントのうち、1 行目が `### review round <R>` のものが 1 件以上あり、その最大 `<R>` が 3 以下であることを確かめる。最大 `<R>` が 4 以上なら round 4 以降に達した PR とする。コメントを読めない、未編集のラウンドサマリーが 1 件も無い、または編集されたラウンドサマリーが 1 件でもあるときは、`automerge` を付けずに `needs-human` で人間に確かめる
+- admin マージの対象（下の 3 つ）に当たらないこと。当たる PR には `automerge` を付けず、hatai の admin マージに回す。round 4 以降に達したかは、実装担当の終わりの報告のラウンド数ではなく、ラウンドサマリーの履歴で確かめる。初回の付与と付け直しの前に、対象 PR のコメントを `scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<M>/comments` で読み、REST の `user.login` が `pelway-dev[bot]` で `user.type` が `Bot`、`created_at` と `updated_at` が同じ（未編集の）コメントのうち、1 行目が `### review round <R>` のものが 1 件以上あり、その最大 `<R>` が 3 以下であることを確かめる。最大 `<R>` が 4 以上なら round 4 以降に達した PR とする。コメントを読めない、未編集のラウンドサマリーが 1 件も無い、編集されたラウンドサマリーが 1 件でもある、または 1 から最大 `<R>` までの番号に欠けがあるときは、`automerge` を付けずに `needs-human` で人間に確かめる
 - 有効な Approve（上の「hatai のレビューの扱い」）がある。未解消の `[review-invalid]` の記録があればこの条件を満たさない
 - 現在の head への codex 担当の有効な Approve がある（実行の投稿の末尾行が `Reviewer: agent=codex ` で始まるもののうち、有効な Approve の条件を満たすもの。マージの関門は toml ではなく GitHub 上の approve で、上の「レビュー担当と effort」の表・`agent-team.toml`・`agent-team.local.toml` の `use`・`priority.review`（high_risk を含む）の変更ではこの条件を下げられない。Issue #804 の hatai 決定）。現在の head に向けた codex の委託記録が無い（優先順位の表で codex が選ばれていない PR）ときは、委託記録を残す前に `scripts/agent-team-config effective <login>` を実行し、その JSON の `missing` で codex の可否を確かめる（判定は JSON の `missing`・`developers.<login>.use` で行い、`slots.json` の記録や標準エラーの警告は使わない）。codex が使えるときだけ委託記録を残して codex のレビュースレッドを立て、その実行の結果の確定を待つ（レビュースレッドの立て方は runbook「4. 仕事の始め方」の「レビューを始める」）。`missing` に codex がある・`effective` を実行できない・出力を読めないときは委託記録もスレッドも残さず、ほかの担当を代理に振らないで `needs-decision` で人間に上げる（codex が使えないあいだはこの条件を満たせず、ラベルは付けない）
 - その Approve を投稿したレビューの委託の結果が確定している: 現在の head の必要な実行（skill `implement-issue` の手順 8 の「必要な実行」。必要な担当は委託の時点で上の「レビュー担当と effort」の表で決まり、その head に向けた委託記録のある担当も含む。担当ごとに、その head に向けた委託記録の実行のうち、`DISMISSED` でない投稿をちょうど 1 件持つ最新のもの。そうした実行の無い担当が残れば確定しない）のすべてから結果の報告を受け、そのすべての実行の投稿が現在の head を向いてちょうど 1 件ずつあり、さらに現在の head を向いた `pelway-review[bot]` の `APPROVED`・`CHANGES_REQUESTED` の投稿（dismiss されたものを除く）のすべてが、結果の報告を受けた実行の投稿（skill `implement-issue` の手順 8 の「実行の投稿」。委託記録の ID と末尾行の `run=` で結び付き、実行ごとにちょうど 1 件）である。結果の報告は、実装スレッドの終わりの報告（`state: done`）では `pr:` の行がその head を指し、`review:` の行の `run` にその実行の ID があること、指揮役が立てたレビュースレッドでは、その実行（スレッドを立てる前に残した委託記録の ID）から `verdict: approve` か `verdict: request-changes` の報告を受けていること。指揮役は、報告の ID ごとに、委託記録（対象 PR のコメント（REST の `issue_url` が `/issues/<M>` で終わる）で、`user.login` が `pelway-dev[bot]`、1 行目が `[review-request] head: <その head> to: <担当>`。skill `implement-issue` の手順 8 の「実行の投稿」の最後の文の定義）と、その実行の投稿の `id`・`state`・`commit_id` を GitHub で確かめる。必要な実行のうち報告の無いもの（まだ投稿していない・実行中のものを含む）が 1 つでも、報告の無い実行の投稿・どの実行にも結び付かない投稿（末尾行に `run=` が無いものを含む）が現在の head に 1 件でもあれば、先に結果の確定した担当の Approve がそろっていても、最新のレビューが `APPROVED` でもキュー投入の承認に使わない。結び付かない投稿は、skill `implement-issue` の手順 9「結び付かない投稿の取り消し」のとおり hatai の dismiss を待つ（レビュー担当は投稿の後に `設定の不備:` で失敗を報告することがあり、同じ App の名義で複数の担当が投稿するため。skill `review-pr` の「決まり」）

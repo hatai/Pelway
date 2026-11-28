@@ -55,7 +55,7 @@ memo: docs/worklogs/issue-80.md（round 2）
 state: done
 ```
 
-止まったときは `pr:` の代わりに `stopped: <止まった理由>`、最後の行は `state: stopped`。`review:` はレビューの委託回数と最終判定、`ready:` は Draft を解除したどうか。完了と止まり以外（レビュー・チェックの待ち、作業の途中）でターンを終えたときは、`state:`・`head:`・`next:` の 3 行になる。`state:` の値と各形の正本は skill `implement-issue` の「ターンの終わりの状態の行」。
+止まったときは `pr:` の代わりに `stopped: <止まった理由>`、最後の行は `state: stopped`。`review:` はラウンドサマリーの履歴から続けるレビューのラウンド数と最終判定、`ready:` は Draft を解除したどうか。完了と止まり以外（レビュー・チェックの待ち、作業の途中）でターンを終えたときは、`state:`・`head:`・`next:` の 3 行になる。`state:` の値と各形の正本は skill `implement-issue` の「ターンの終わりの状態の行」。
 
 レビュー担当（skill `review-pr`）:
 
