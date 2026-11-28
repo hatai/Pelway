@@ -40,6 +40,18 @@ bun check          # 型検査
 bun test           # 試験
 ```
 
+## TypeScript の型エラーラチェット
+
+まだ tsconfig で有効化できない TypeScript の厳格化オプションは、`client:type-ratchet` でエラー件数を `type-ratchet-baseline.json` 以下に縛る。普段は `mise run client:verify`（したがって `mise run verify`）から回る。エラーが増えたときは失敗し、減ったときも基準値を更新するまでは失敗する。
+
+```bash
+mise run client:type-ratchet                  # 基準値どおりか検査する
+mise run client:type-ratchet-update           # 減った件数だけを基準値へ反映する
+mise run client:type-ratchet-add <option>     # 新しい compiler option を現在の件数で追加する
+```
+
+更新は悪化した件数を自動で基準値へ入れない。悪化と改善が混ざったときは改善分だけが書き込まれ、悪化が残る限り終了コードは失敗になる。ファイルを rename したときは、基準値のパスを同じ変更で手動で移す。オプションのエラーが 0 件になったら、ラチェットで縛り続けず、tsconfig で有効化して基準値から外す。0 件のオプションは `client:type-ratchet-add` に拒否される。
+
 ## IPC のチャンネルを足すとき
 
 `packages/contracts/src/ipc.ts` に宣言し、main のハンドラ（送り元を `isTrustedSender` で確かめる）、preload、画面の模擬（`@octanejs/electron` の `installElectronBridge`）を同じ変更で直す。`@octanejs/electron` から使うのは、`invoke`/`on` だけで動くフック（`useInvoke`・`useInvokeState`・`useIpcEvent`）と試験用の模擬だけで、組み込みの `octane:*` のチャンネルに頼るフックとヘルパー（アプリの情報と終了・窓の状態と操作・テーマ・ダイアログ・シェル・クリップボード・ディスプレイの情報）は使わない。
