@@ -11,3 +11,15 @@
 5. 改善案: `docs/agents/external-skills.md` の「取り込みの手順」に「輸入スキルをローカル管理へ切り替えるときは実体を退避し、`skills remove` の後に復元する」と足す
 
 使ったスキル: `implement-issue`、`write-pull-request`、`.agents/skills/writing-for-agents`、`tdd`（seam: 受け入れ条件の presence check）、`executing-plans`
+
+## 実装者メモ（round 2）
+
+対象 head: 84172c894c99716425d831bb973b32c95679b57d
+
+1. 詰まった箇所: `.agents/skills/investigate-bug/SKILL.md`: 「最後に動いた版」で回帰かが不明だが版が判明している場合の扱いが抜けていた
+2. 曖昧だった文: 「回帰かが「はい」のときだけ記入する。回帰かが「いいえ」なら「該当なし」、」（`.agents/skills/investigate-bug/SKILL.md` 手順 1）
+3. 仮定と解釈: 回帰かが不明でも、最後に動いた版が判明していれば証拠として記録する解釈を選んだ。記録しない解釈は採らなかった
+4. 足りなかった情報・検証手段: `pr-size` が `.agents/skills` を生成物として除外する `.gitattributes` の有無を、事前に確認していなかった
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「スキルをローカル管理へ切り替えたときは `.gitattributes` の生成物指定を見直す」と足す
+
+使ったスキル: `implement-issue`、`write-pull-request`、`code-review`、`receiving-code-review`
