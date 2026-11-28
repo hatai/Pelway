@@ -69,7 +69,7 @@ mise bootstrap    # 上の1〜3を順に実行
 | `mise run demo-check` | デモ受入前の 4 段階検査（`scripts/demo-check/run.sh`。受入は引数なしの全段階実行だけ有効。canary 段階は成果物が無いと未検証で失敗するため、製品をビルドしたあとに実行する） |
 | `mise run demo-check-selftest` | demo-check の自己テスト（`script-test` 経由で `verify-test` にも含まれる） |
 | `mise run verify-lint` / `verify-test` / `verify-static` | 検査の 3 グループ（cargo でコンパイルするのは `verify-lint` と `verify-test` の 2 つだけ） |
-| `mise run verify` | 上記 3 グループの一括確認（依存タスクは**並列**実行） |
+| `mise run verify` | 上記 3 グループの一括確認（`scripts/agent-verify-run` が 3 グループを並列に実行し、すべて通ったときだけ印を残す。下の「agent-gh の push の門」） |
 | `mise exec -- hk fix` | 修正の適用（ワークツリー。ステージはしない） |
 
 Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要求する状態（依存追加後の未コミットなど）では失敗する。その場合は依存を意図した変更か確認してコミットすること。
@@ -94,6 +94,13 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 コピーは `scripts/worktree-setup-copy` が行い、書き込み先は `O_TMPFILE` の無名 inode（名前を持たない一時ファイル。書き終えた実体の fd から link で最終名に載せる）。**コピー先のファイルシステムが `O_TMPFILE` に対応していることが前提**（Linux の ext4・XFS・tmpfs・btrfs などは対応。NFS・一部の FUSE は非対応）。非対応のファイルシステムでは一時 inode を作れずコピーは中断し、`worktree-setup` は「worktree 側に <名前> を作れない（書き込みに失敗）」で非 0 で止まる — その場合はファイルシステムを替えるか、対象のファイルを手で置く
 
 開発者ごとの上書き `agent-team.local.toml`（追跡しない。雛形は `agent-team.local.toml.example`）は本体の checkout に置くと worktree 作成時に持ち越される。worktree ごとに別の値にしたいときはその worktree に置く。上書きできる項目・できない項目の表は `docs/superpowers/specs/agent-team.md` の「開発者ごとの上書き」。重ねた結果は `scripts/agent-team-config effective <GitHub login>` で確かめられる。コミットは `.gitignore` と hk の `no_agent_team_local` ステップで止める。
+
+## agent-gh の push の門
+
+- `mise run verify` は `scripts/agent-verify-run` を実行する。検証を始める前に、worktree の `.pelway-verify/started/` に、開始時点の印の指紋（読めない印は inode と更新時刻の指紋、印が無ければ `none`、状態を取得できなければ `any`）と検証ごとの乱数 `verify-id` を持つ開始の記録を原子的に作る。主たる保存先に書けないときは gitdir の `pelway-verify-started/` に同じ記録を残してから失敗し、どちらにも書けないときは検査を始めず、gitdir で無効化できるときは verify のロックの下で同じ世代の印を消す。同じ世代かは、内容の指紋に加えて inode と更新時刻の指紋でも確かめるため、印の読み取り権限だけが回復しても見落とさない。無効化もできないときは、所有者ならディレクトリへの書き込み権が無くても効く chmod で印を読めない状態にする。読めない印は門が形を判定できず信用しないため、記録先を直して verify をやり直すまで push は止まる。読めない状態にもできないときは、その旨を警告して終わる。記録を残せたときだけ、その worktree の gitdir（`.git/`、linked worktree ではその gitdir）にあるロックで同じ worktree の検証を直列にし、ロックを取った時点の印の指紋でも記録してから前回の印を消し、3 グループを並列に検査する。すべて成功したときだけ `scripts/agent-verify-record` が、検証した作業ツリーの木の hash を 1 行目、開始記録と同じ `verify-id` を 2 行目に書いた印を同じ gitdir の `pelway-verify-tree` に残す。成功した検証は自分の記録と、ロック取得より前の古い記録を消し、ロック取得より後に始まった別の検証の記録は残す。掃除では自分の記録を最後に消し、ほかの掃除に失敗したときは自分の記録を残して失敗にする。失敗や中断では開始の記録が残り、門はその記録が指す世代の印と、同じ verify-id の印を止める。対象が `any` の記録は、すべての印を止める。切り詰めで通常ファイルの中身を書き換えることはせず、正規の印は unlink で消し、unlink できないときは世代を確かめたうえで chmod で読めない状態にする。通常ファイルでない・所有者や hardlink 数の違う印には触れない。印には、追跡済みのファイルは無視のパターンに当たっても入る。`.pelway-verify/` は印の木には入れない。`.devin/config.json` に skip-worktree が付いているときだけ、そのファイルは作業ツリーではなく index の内容を記録する。
+- `scripts/agent-gh dev git push` と `scripts/agent-gh review git push` は、pre-push フックの中で `scripts/agent-gh-verify-gate` を呼び、送信先のブランチを作成または更新するときだけ、送るブランチの木が印の木と一致するかを確かめる。門は印を一度だけ開き、同じ fd から通常ファイル・所有者・hardlink 数・サイズ・内容と両方の指紋を確かめる。`.pelway-verify/started/` と gitdir の `pelway-verify-started/` を読み、記録の指紋が現在の印の内容か stat の指紋と一致するとき、記録の対象が `any` のとき、または記録の乱数が印の `verify-id` と同じときは止める。別の世代を指す記録が残っていても、あとで成功した検証の新しい印は止めない。印が無い・形が違う・読み取りや無効化の状態が信頼できないブランチの作成または更新は止まり、停止の理由と `mise run verify` を実行する案内を標準エラーに出す。ブランチの削除だけ・タグだけの push は印なしでも通す。
+- 送るブランチの木と印の木の差が `docs/worklogs/` の下だけなら push を通す。実装者メモは verify の後に commit するための例外である。この例外は印があるときだけ効き、印が無ければ `docs/worklogs/` の下だけの差でも止まる。
+- `PELWAY_AGENT_SKIP_VERIFY_GATE=1` を付けた push はこの門を確かめずに通し、通したことを標準エラーに出す。CI の verify が正本であることは変わらない。
 
 ## CI（GitHub Actions）
 
@@ -875,7 +882,7 @@ fi
 - 設定はリポジトリ直下の `deny.toml`（ゲート）と `deny-warn.toml`（unmaintained / unsound の警告表示）。実行は `mise run deny-check` で、`verify-static`（CI の `static` ジョブ）に含まれる。cargo をコンパイルに使わない（`cargo metadata` と `Cargo.lock` を読むだけ）。警告行への組み立て（advisory の ID の抜き出しを含む）は `scripts/deny-warn-extract.sh` が担い、`scripts/tests/deny-warn-extract.test.sh`（`script-test` 経由）が cargo-deny の実際の出力を写した固定サンプルで確かめる。
 - 検査内容とポリシー（詳細は `deny.toml` のコメント）:
   - **advisories**: RustSec の脆弱性（vulnerability）が 1 件でもあれば失敗。yanked 版も失敗。unmaintained / unsound は検査を失敗させず、`deny-check` タスクの第2段（`deny-warn.toml` で all として検出し、結果を警告として表示して終了コード 0 で終える）で毎回警告に出す（0.20.2 の設定スキーマに警告レベルが無いための代替。既知の 5 件は `ignore` の台帳 + フォロー Issue #229 で管理）。
-  - **licenses**: allow リストは現在の依存ツリーで実際に使われているライセンスだけ（棚卸し表: `docs/worklogs/issue-168.md`）。MPL-2.0 と slint の `LicenseRef-Slint-Royalty-free-2.0` は hatai の判断で許可（#168。GPL 系は許可しない）。ワークスペース内クレート（license 宣言なし・`publish = false`）は `[licenses.private]` で対象外。
+  - **licenses**: allow リストは現在の依存ツリーで実際に使われているライセンスだけ（棚卸し表: `docs/worklogs/issue-168.md`）。MPL-2.0 と slint の `LicenseRef-Slint-Royalty-free-2.0` は hatai の判断で許可（#168。GPL 系は許可しない）。slint は廃止予定の過渡的な依存で、台帳と例外は #826 で外す。ワークスペース内クレート（license 宣言なし・`publish = false`）は `[licenses.private]` で対象外。
   - **bans**: 同一クレートの複数版は警告（解消は上流の更新待ち）。ワイルドカード指定（`version = "*"`、version なしの path 依存）は失敗。ワークスペース内の path 依存には `version = "0.0.0"` を付ける。
   - **sources**: 取得元は crates.io のみ。git 依存・別のレジストリは失敗。
 - **例外の足し方**: `deny.toml` の `ignore`（advisories）・allow リスト（licenses）に足すときは、理由と解消用のフォロー Issue の番号を必ず添える。`unused-ignored-advisory = "allow"` は `unmaintained = "none"` と組み合わせた台帳運用のため、エントリが未使用になっても警告が出ない。フォロー Issue を閉じたらエントリを削除する。ライセンスを追加するときは worklog の棚卸し表も更新する。

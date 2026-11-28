@@ -343,13 +343,15 @@ description = "見張り役 pelway-agent-watch を ~/.local/bin にインスト�
 run = "cargo install --path crates/pelway-agent-watch --locked --root ~/.local --force"
 
 [tasks.verify]
-description = "開発環境の一括確認（依存タスクは並列実行）"
+description = "開発環境の一括確認（3 グループは並列実行）"
 # 検査は 3 つのグループに分ける。CI でも同じグループを 1 ジョブずつ走らせる
-# （docs/dev-environment.md「CI（GitHub Actions）」を参照）。分け方の 이유는
+# （docs/dev-environment.md「CI（GitHub Actions）」を参照）。分け方の理由は
 # cargo でコンパイルするグループを 2 つに絞って、依存クレートの二重コンパイル
 # を避けること。check は clippy に含まれ、build は test が同じ成果物を作るため
 # verify には含めない（check / build タスク自体は残す）。
-depends = ["verify-lint", "verify-test", "verify-static"]
+# agent-verify-run は前回の印を消してから 3 グループを並列に検査し、すべて通ったときだけ
+# 検証した作業ツリーの木の印を残す（#807。agent-gh の push の verify ゲートが確かめる）。
+run = "python3 -I scripts/agent-verify-run"
 
 # cargo fmt / clippy と、ツールチェーン・hk.pkl の構文を確かめる。
 [tasks.verify-lint]

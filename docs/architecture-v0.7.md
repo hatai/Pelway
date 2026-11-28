@@ -10,10 +10,10 @@
 
 ```mermaid
 flowchart LR
- subgraph CL["クライアント（設計・未実装。デスクトップは ADR 0014 で Electron に置き換え）"]
-  GUI["ネイティブGUI<br/>Rust＋Slint（D1 まで。ADR 0014 で Electron に置き換え）"]
-  WEB["ブラウザUI<br/>TS＋Octane/DOM（推奨案）"]
-  CORE["共通核 Rust client-core / WASM<br/>保存: rusqlite / IndexedDB"]
+ subgraph CL["クライアント（Electron の土台は存在。画面・通信・E2E は未完成）"]
+  GUI["Electron<br/>main / preload / renderer"]
+  WEB["Web UI<br/>TS＋Octane/DOM（Electron とブラウザで共有）"]
+  CORE["共通核 TypeScript packages/core"]
  end
  subgraph JP["日本国内のローカル本体（設置場所は未確認・外向き通信は既定で拒否）"]
   API["server: tokio + axum<br/>認証・権限・承認の最終判定"]
@@ -27,7 +27,7 @@ flowchart LR
  end
  EXT["利用者が選ぶ外部サービス（例：Claude Code・Cursor・Datadog・Google Workspace）<br/>国外で処理・保存される可能性あり"]
  BR["local bridge / CLI（将来案・方式未決）"]
- GUI --> CORE
+ GUI --> WEB
  WEB --> CORE
  CORE -->|"loopback HTTP/WebSocket<br/>（合成データ試験のみ）"| API
  API --> DB
@@ -85,7 +85,7 @@ flowchart TD
 
 - U01：S1（取消と送出の競合）の実装と検証。
 - U04：連携先の実条件（照会APIの有無、データの地域など）。
-- U05：国内設置機材、認証・TLS、鍵と復旧、Slint固定版とrmcpの依存・ライセンス、3OSの日本語入力と読み上げ。Slint固定版の確認は D1 までの範囲に限る（[ADR 0014](adr/0014-desktop-client-electron.md)）。
+- U05：国内設置機材、認証・TLS、鍵と復旧、Electronとnpm依存・rmcpの依存・ライセンス・NOTICE/SBOM、3OSの日本語入力と読み上げ（[ADR 0014](adr/0014-desktop-client-electron.md)）。
 - U06：取消遷移の行単位（採用推奨・未確認）。
 - U07：停止要求済み外部runの確認期限と担当。
 - LAN公開とローカル認証方式も未決（01-architecture.md §ch01-s05）。

@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# mise run verify が成功したとき、検証した作業ツリーの木の hash と検証ごとの乱数 verify-id を git の外の手元（この worktree の gitdir）に残す（#807）。
+# 次に作るコミットが検証した内容だけを含むなら、そのコミットの木はここで残す hash と一致する。実装者メモだけの差は
+# scripts/agent-gh-verify-gate が docs/worklogs/ の例外として扱う。
+# 一時 index は実際の index の複写から始めて作業ツリー全体を入れて write-tree するため、verify を commit の前に回す
+# 通常の手順でも、commit 後の HEAD の木と同じ印になる。追跡済みのファイルは無視のパターンに当たっても
+# 印に含める。`.devin/config.json` に skip-worktree が付いているときだけ、作業ツリーではなく index の内容を記録する。
+set -euo pipefail
+umask 077
+
+fail() {
+  echo "agent-verify-record: $1" >&2
+  exit 1
+}
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "git の作業ツリーの中ではないため印を書き残せません"
+
+verify_script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+. "$verify_script_dir/agent-verify-paths.sh"
+
+git_rev_path --git-dir || fail "gitdir を解決できません"
+physical_path "$REPLY" || fail "gitdir を絶対パスに解決できません"
+git_dir="$REPLY"
+
+git_rev_path --show-toplevel || fail "作業ツリーのルートを解決できません"
+physical_path "$REPLY" || fail "作業ツリーのルートを絶対パスに解決できません"
+root="$REPLY"
+
+[[ ! -L "$root/.pelway-verify" && ! -L "$root/.pelway-verify/started" ]] ||
+  fail "verify の開始の記録のディレクトリが symlink のため印を書き残せません"
+mkdir -p -- "$root/.pelway-verify/started" || fail "verify の開始の記録のディレクトリを作れません"
+
+index_dir="$(mktemp -d)" || fail "一時 index のディレクトリを作れません"
+out_tmp=""
+cleanup() {
+  rm -rf -- "$index_dir"
+  [[ -z "$out_tmp" || ! -e "$out_tmp" ]] || rm -f -- "$out_tmp"
+}
+trap cleanup EXIT
+
+index="$index_dir/index"
+# 一時 index は実際の index の複写から始める。追跡済みだが無視のパターンに当たるファイルと、
+# core.fileMode=false の環境で index に残っている実行権限を、印の木に残すため。
+real_index="$(git -C "$root" rev-parse --git-path index)" || fail "実際の index を解決できません"
+[[ ! -e "$real_index" ]] || cp -p -- "$real_index" "$index" || fail "実際の index を一時 index に複写できません"
+# assume-unchanged と skip-worktree は一時 index では外す。どちらも Git に現物の確認を省略させるため、
+# 残すと検査が読んだ作業ツリーではなく index の古い内容を印に入れられる。外すのは複写した一時 index
+# だけで、実際の index の印は変えない。例外は `.devin/config.json` だけ: agent-sandbox が読み取り専用で
+# 結び付けるため、main の取り込みで index と現物が一時的に違っても作業ツリー側を直せない。
+assume_list="$index_dir/assume-unchanged"
+skip_list="$index_dir/skip-worktree"
+: >"$assume_list"
+: >"$skip_list"
+while IFS= read -r -d '' entry; do
+  tag="${entry:0:1}"
+  path="${entry:2}"
+  case "$tag" in
+    h|s) printf '%s\0' "$path" >>"$assume_list" ;;
+  esac
+  case "$tag" in
+    S|s) [[ "$path" == .devin/config.json ]] || printf '%s\0' "$path" >>"$skip_list" ;;
+  esac
+done < <(env GIT_INDEX_FILE="$index" git -C "$root" ls-files -v -z)
+[[ ! -s "$assume_list" ]] || env GIT_INDEX_FILE="$index" git -C "$root" update-index --no-assume-unchanged -z --stdin <"$assume_list" ||
+  fail "一時 index の assume-unchanged を外せません"
+[[ ! -s "$skip_list" ]] || env GIT_INDEX_FILE="$index" git -C "$root" update-index --no-skip-worktree -z --stdin <"$skip_list" ||
+  fail "一時 index の skip-worktree を外せません"
+env GIT_INDEX_FILE="$index" git -C "$root" add -A || fail "作業ツリーを一時 index に読めません"
+env GIT_INDEX_FILE="$index" git -C "$root" rm -r --cached --ignore-unmatch -q -- .pelway-verify ||
+  fail "verify の開始の記録を印の木から外せません"
+tree="$(env GIT_INDEX_FILE="$index" git -C "$root" write-tree)" || fail "作業ツリーの木の hash を作れません"
+[[ "$tree" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || fail "作業ツリーの木の hash の形を判定できません"
+
+verify_id="${PELWAY_VERIFY_ID:-}"
+if [[ -z "$verify_id" ]]; then
+  verify_id="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+fi
+[[ "$verify_id" =~ ^[0-9a-f]{32}$ ]] || fail "印の検証 ID の形を判定できません"
+out_tmp="$(mktemp "$git_dir/pelway-verify-tree.XXXXXX")" || fail "印の一時ファイルを作れません"
+printf '%s\nverify-id:%s\n' "$tree" "$verify_id" >"$out_tmp" || fail "印の一時ファイルに書けません"
+mv -fT -- "$out_tmp" "$git_dir/pelway-verify-tree" || fail "印を $git_dir/pelway-verify-tree に置けません"
+out_tmp=""

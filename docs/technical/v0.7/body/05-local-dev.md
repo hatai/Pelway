@@ -8,7 +8,7 @@
 
 | 項目 | Windows | macOS | Linux |
 |---|---|---|---|
-| GUI build/run | Windows MSVCのRustとWindows SDK | macOSのRustとApple SDK | Linux native toolchain |
+| GUI build/run | WindowsのElectron・Node・bun | macOSのElectron・Node・bun | LinuxのElectron・Node・bun |
 | backend/tool | WSL 2内PodmanまたはDocker Engine | Apple container。Intel/未対応OSの代替はPodman machineを別審査 | rootless Podman |
 | CPU | x86_64/ARM64を別targetとして確認 | Apple containerはApple silicon。Intel Macへそのまま使わない | x86_64/ARM64を別imageで確認 |
 | native試験 | Microsoft IME、NVDA、通知、clipboard、DPI | 日本語入力、VoiceOver、通知、権限、Retina | fcitx5/IBus、Orca、X11/Wayland、font |
@@ -28,7 +28,7 @@ Docker Desktopの要件と費用条件をPodman/Docker Engineへ転用しない�
 <a id="ch05-s04"></a>
 ## macOSとApple container
 
-[apple/container](https://github.com/apple/container)の公式資料に従いApple siliconとmacOS 26を想定する。対象releaseのサポート範囲は実装直前に再照合。Linux containerを軽量VMで動かす構成であり、Rust GUIやApple固有APIはmacOS hostに残る。
+[apple/container](https://github.com/apple/container)の公式資料に従いApple siliconとmacOS 26を想定する。対象releaseのサポート範囲は実装直前に再照合。Linux containerを軽量VMで動かす構成であり、ElectronのGUIやApple固有APIはmacOS hostに残る。
 
 [BUILDING.md](https://github.com/apple/container/blob/main/BUILDING.md)のvmnet関連制約を確認し、作業ディレクトリ例は同期外の `~/projects` とする。ただしディレクトリ名だけでiCloud等の同期外を保証しない。内部専用network、複数containerの起動順、DNS、port公開、rootless性、GPU可用性は要確認。Apple containerへDocker Composeの設定がそのまま使えるとはしない。
 
@@ -52,8 +52,8 @@ Linuxはrootless Podmanを推奨。X11/Wayland、fcitx5/IBusを別試験にす�
 |---|---|---|
 | domain単体 | Linux containerとhost | 9状態、hash固定、scope、順序、承認失効 |
 | 結合 | ローカルcontainer群 | DB/outbox、lease/fence、疑似agent、応答断・再起動・重複・権限取消 |
-| GUI | 3OS host | Slintとeguiの同一fixture。headless試験だけでIME/読み上げ合格にしない |
-| Web | host browser | DOM、WASM、focus、composition、アクセシビリティ、snapshot再同期 |
+| GUI | 3OS host | Electronの画面を実機で確認する。headless試験だけでIME/読み上げ合格にしない |
+| Web | host browserまたはElectronのrenderer | DOM、JavaScript、TypeScript core、focus、composition、アクセシビリティ、snapshot再同期 |
 | 国内境界・連携例外 | host/VM/container全体 | 10の通信観測と11のscope逸脱・取消試験 |
 
 既存計画の応答断20回、再承認20回、権限取消の条件別試験を減らさない。試験実行は別承認後で、現在は未実施。

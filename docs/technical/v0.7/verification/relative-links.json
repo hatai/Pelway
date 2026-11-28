@@ -21,6 +21,10 @@
   },
   {
     "from": "body/02-stack-comparison.md",
+    "to": "../../../adr/0014-desktop-client-electron.md"
+  },
+  {
+    "from": "body/02-stack-comparison.md",
     "to": "../sources/v0.6/fixed/pelway-technical-docs/input/ui.md"
   },
   {
@@ -169,10 +173,6 @@
   },
   {
     "from": "body/08-decisions-open.md",
-    "to": "../../../adr/0014-desktop-client-electron.md"
-  },
-  {
-    "from": "body/08-decisions-open.md",
     "to": "../../../adr/0002-designated-approver-and-expiry.md"
   },
   {
@@ -186,10 +186,6 @@
   {
     "from": "body/08-decisions-open.md",
     "to": "../../../adr/0014-desktop-client-electron.md"
-  },
-  {
-    "from": "body/08-decisions-open.md",
-    "to": "../../../research/slint-royalty-free-license.md"
   },
   {
     "from": "body/08-decisions-open.md",

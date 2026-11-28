@@ -16,7 +16,7 @@
 
 | 論点 | 一次資料 | 限界 |
 |---|---|---|
-| Slint | [license](https://github.com/slint-ui/slint/blob/master/LICENSE.md)、[大規模list/a11y issue](https://github.com/slint-ui/slint/issues/3867) | issueの存在は再現/未修正の永久保証ではない。固定配布版で再確認 |
+| Slint | [license](https://github.com/slint-ui/slint/blob/master/LICENSE.md)、[大規模list/a11y issue](https://github.com/slint-ui/slint/issues/3867) | 過去の検討の出典。issueの存在は再現/未修正の永久保証ではない。廃止予定のため固定配布版の再確認は行わない |
 | egui | [公式repo](https://github.com/emilk/egui) | IME/selection/a11yは対象OSとbackend次第 |
 | iced/GPUI | [iced a11y PR](https://github.com/iced-rs/iced/pull/3281)、[GPUI Windows読み上げissue](https://github.com/zed-industries/zed/issues/41138) | 現状制約の調査根拠。版更新時は再確認 |
 | Windows | [WSL install](https://learn.microsoft.com/en-us/windows/wsl/install)、[Docker Desktop条件](https://docs.docker.com/desktop/setup/install/windows-install/) | Desktop条件をWSL内Engine/Podmanへそのまま外挿しない |
@@ -52,14 +52,14 @@ Discord役職の追加確認は市場レビューM-01の[公式companyページ]
 | rmcp（MCP公式Rust SDK） | 条件付き依存採用案 | crates.io 3.9.0（2026-11-05） | crate表記はApache-2.0。ただしLICENSE本文は「MITからApache-2.0へ移行中。再許諾の同意がない旧寄稿はMITのまま」 | [LICENSE](https://github.com/modelcontextprotocol/rust-sdk/blob/main/LICENSE)、[Cargo.toml](https://github.com/modelcontextprotocol/rust-sdk/blob/main/Cargo.toml) | Apache-2.0とMITの両方の条文を同梱する前提で考える | 固定版でMIT部分がどこか。単純に「Apache-2.0のみ」と書かない |
 | llama.cpp | LLM adapterの第一候補 | repo master | MIT | [LICENSE](https://github.com/ggml-org/llama.cpp/blob/master/LICENSE) | 著作権表示と許諾文 | モデル・tokenizerの許諾は別台帳（08:A7）。同梱する依存（ggml等）の条文 |
 | rig | 必要なら小範囲（02:92） | repo main | MIT | [LICENSE](https://github.com/0xPlaygrounds/rig/blob/main/LICENSE) | 同上 | 使う範囲が決まるまで未判定 |
-| Slint | 採用案（実機試験と固定版ライセンス確認まで未確定） | crates.io 1.18.1（2026-09-21） | `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0` | [LICENSE.md](https://github.com/slint-ui/slint/blob/master/LICENSE.md) | Royalty-freeならAboutSlint等の表示条件（02:24〜34） | **要確認（濱田さん判断・法務確認）**：どの許諾を選ぶか、固定版同梱の条文、UI拡張を外に開かない設計の維持 |
+| Slint | 廃止予定の過渡的な依存（#826で削除） | crates.io 1.18.1（2026-09-21） | `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0` | [LICENSE.md](https://github.com/slint-ui/slint/blob/master/LICENSE.md) | 現行依存が残る間は条文を台帳に残す | #826で依存を外す。新たな許諾選択や法務確認は行わない |
 | egui | 対照 | repo main | MIT OR Apache-2.0 | [LICENSE-APACHE](https://github.com/emilk/egui/blob/main/LICENSE-APACHE)、[Cargo.toml](https://github.com/emilk/egui/blob/main/Cargo.toml) | 選んだ方の条文。default fontsは別条件 | フォントの条文 |
-| wasm-bindgen | Web同期核のWASM化 | repo main | MIT OR Apache-2.0（Cargo.toml） | [LICENSE-APACHE](https://github.com/wasm-bindgen/wasm-bindgen/blob/main/LICENSE-APACHE)（旧 rustwasm/wasm-bindgen からリダイレクト） | 同上 | 固定版の条文 |
+| wasm-bindgen | 不採用の調査対象（A2のRust/WASM案。共通核はTypeScriptへ移す） | repo main | MIT OR Apache-2.0（Cargo.toml） | [LICENSE-APACHE](https://github.com/wasm-bindgen/wasm-bindgen/blob/main/LICENSE-APACHE)（旧 rustwasm/wasm-bindgen からリダイレクト） | `dev-client-probe` の直接依存（#825 で crate ごと消える）。配布物には入らない | 不採用のため追加確認は行わない |
 | TypeScript | Web（ビルド時） | repo main | Apache-2.0 | [LICENSE.txt](https://github.com/microsoft/TypeScript/blob/main/LICENSE.txt) | 配布物に含めるならNOTICE確認 | 実行時には同梱しない想定（仮定） |
 | Octane | Web DOM UI | repo main | MIT | [LICENSE](https://github.com/octanejs/octane/blob/main/LICENSE) | 著作権表示と許諾文 | 固定版の条文 |
 | pgvector、pg_bigm、Tantivy/Lindera | 比較候補のみ（02:89〜90） | 未調査 | 未確認 | — | — | 導入を決めたときに台帳へ追加 |
 
-rmcpは移行中のMIT部分を残すため「Apache-2.0のみ」としない。Slintの許諾は濱田さんの選択と法務確認待ち。sqlx、wasm-bindgenの出典は移管後URLであり、旧URLのリダイレクト到達は固定版の真正性を保証しない。
+rmcpは移行中のMIT部分を残すため「Apache-2.0のみ」としない。Slintは廃止予定の過渡的な依存なので、新たな許諾選択はしない。sqlxの出典は移管後URLであり、旧URLのリダイレクト到達は固定版の真正性を保証しない。wasm-bindgenは不採用のため、固定版の条文確認は行わない。
 
 <a id="ch09-s06"></a>
 ## レビューへ提示する証拠の範囲

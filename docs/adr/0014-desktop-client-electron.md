@@ -4,6 +4,8 @@ status: accepted
 
 # デスクトップアプリは Electron で Web UI を包み、サーバーは Rust のままにする
 
+> 2026-11-26 改訂: hatai が Slint をやめ、D1（友人デモ通し）から Electron で作ると決めた。この改訂は、その決定を切り替えの時期・Slint の廃止順・配布・通信の記述へ反映する。
+
 hatai が、デスクトップアプリを Electron にすると決めた。画面は Web の技術（ブラウザ版と同じもの）で作り、Electron はそれを包む外枠だけを担う。server・runner・gateway などのサーバー側は、これまでどおり Rust で作る。理由は開発の速さで、Rust だけで画面まで作り切るのは時間がかかりすぎると判断した。この ADR は、[技術仕様 v0.7](../technical/v0.7/README.md) の A1（Rust非WebViewのSlint GUI。[08 の「継承する技術選定」](../technical/v0.7/body/08-decisions-open.md)）と、[02](../technical/v0.7/body/02-stack-comparison.md) 冒頭の「Rustベースの…ネイティブ、非WebViewを既定」の要件を置き換える。
 
 ## 決定
@@ -13,7 +15,7 @@ hatai が、デスクトップアプリを Electron にすると決めた。画�
 - Windows・macOS・Linux の 3 つの OS に配る。
 - Electron は外枠（窓、メニュー、OS との連携、資格情報の保存）だけを担い、業務のロジックや承認の判定は持たない。承認の確定はこれまでどおりオンラインの server だけで行う（[04](../technical/v0.7/body/04-data-api-realtime.md)）。
 - サーバー側（server: axum、runner、gateway、DB 層）と `pelway-contract` の契約は変えない。
-- 切り替えの時期：D1（友人デモ通し）は今の Slint のクライアント（`pelway-client-ui`）で仕上げる。Electron の作業は D1 の後に始める。ただし `client/` の土台（ディレクトリ、道具の設定、最小の窓、検査）だけは D1 の前に作る。土台は `pelway-client-ui`・`pelway-client-core`・`dev-client-probe` にも D1 の作業にも触れない。D3（社内で毎日使える最小版）は Electron に切り替えてから出す。
+- 切り替えの時期：D1（友人デモ通し）から Electron で作る。`client/` の土台（ディレクトリ、道具の設定、最小の窓、検査）は既にある。Electron 版の画面・サーバーとの通信・E2E はまだ完成していないので、D1 に向けた実装 Issue で完成させる。Slint の `pelway-client-ui` は凍結し、新しい機能は足さず、D1 の中で #766 の順で消す。D3（社内で毎日使える最小版）も Electron で出す。
 
 ## 検討した案
 
@@ -21,7 +23,7 @@ hatai が、デスクトップアプリを Electron にすると決めた。画�
 |---|---|---|
 | Electron | 採る | 情報量が多く、安定している。Chromium を同梱するので、3 つの OS で表示と日本語入力の挙動がそろいやすい（同梱の効果は未実測） |
 | Tauri v2 | 採らない | 軽く、外枠を Rust で書けるが、OS ごとの WebView（WebView2・WKWebView・WebKitGTK）で表示と挙動が分かれる。Linux の日本語のインライン変換は wry が既定で無効にしている（[slint-tauri-client-measurements.md](../research/slint-tauri-client-measurements.md) 5 節）。情報量も Electron より少ない |
-| Slint の継続（v0.7 の A1） | D1 までだけ使う | 画面をブラウザ版と別に作る二重実装になり、開発が遅い |
+| Slint の継続（v0.7 の A1） | 採らない（2026-11-26 にやめた） | 画面をブラウザ版と別に作る二重実装になり、開発が遅い |
 | GPUI・Dioxus・egui | 採らない | 比較の Issue（#423・#428・#430・#431・#434）は、この決定で目的がなくなったので閉じた |
 
 ## 捨てる要件と代わり
@@ -33,7 +35,7 @@ hatai が、デスクトップアプリを Electron にすると決めた。画�
 
 ## 共通核（pelway-client-core）
 
-TypeScript に移す。WASM にはしない（v0.7 A2 の「状態と同期はRust/WASM」を置き換える）。置き場所は `client/packages/core/` で、Rust 版は Slint の廃止と一緒にやめる。進み具合の評価は #723 のコメント（`adr-0014-research`）にある。
+TypeScript に移す。WASM にはしない（v0.7 A2 の「状態と同期はRust/WASM」を置き換える）。置き場所は `client/packages/core/` で、Rust 版は TypeScript 版（#752）のマージ後に #827 で消す。進み具合の評価は #723 のコメント（`adr-0014-research`）にある。
 
 契約の型の正本は `crates/pelway-contract` のままにし、TS の型は ts-rs で書き出す（[slint-tauri-client-measurements.md](../research/slint-tauri-client-measurements.md) 7 節）。
 
@@ -59,9 +61,9 @@ Cargo.toml              Rust のワークスペース（crates/*。変えない�
 crates/
   pelway-contract/      契約の型の正本。ts-rs で TS の型を書き出す（feature を足す）
   pelway-http/ ほか      サーバー側（変えない）
-  pelway-client-ui/     Slint。D1 の後に廃止
-  pelway-client-core/   Slint 用の核。Slint の廃止と一緒に廃止（TS 版は client/packages/core）
-  dev-client-probe/     D1 の後に廃止
+  pelway-client-ui/     Slint。D1 の中で #826 で廃止
+  pelway-client-core/   Slint 用の核。#752 の TypeScript 版のマージ後に #827 で廃止（TS 版は client/packages/core）
+  dev-client-probe/     D1 の中で #825 で廃止
 client/                 Web と Electron（Node。版は mise で固定）
   package.json          workspaces（apps/*・packages/*）
   apps/
@@ -78,6 +80,7 @@ client/                 Web と Electron（Node。版は mise で固定）
     i18n/               画面の文言（ja・en）
 ```
 
+- workflow の Slint のビルド用 `libfontconfig1-dev` は、#825・#826・#827 の後の #828 で外す。
 - 型の流れ：`crates/pelway-contract` が正本。ts-rs で `client/packages/contracts/src/generated/` に書き出し、`.gitattributes` で `linguist-generated` を付ける。CI で書き出し直し、差分が無いことを確かめる。
 - IPC：チャンネルの一覧と送り受けの型は `packages/contracts` の 1 か所で宣言する。main はドメインごとのファイルで受け、引数を解読する前に送り元を確かめる。チャンネルを足すときは、宣言・main・preload・画面の模擬を同じ変更で直す。
 - `@octanejs/electron`：画面の側のフック（`useInvoke`・`useIpcEvent` など）と、試験用の模擬（`installElectronBridge`）だけを使う。preload と main は自前で書く。preload は、このパッケージのフックが読む形の橋（`invoke`/`on`）を出すが、通すのは `packages/contracts` で宣言したチャンネルだけにする。`registerOctaneElectronMain` と `exposeOctaneElectron` は使わず、組み込みの `octane:*` のチャンネル（`shell.openExternal`・クリップボードなどを確認なしで呼べる）を登録しない。
@@ -101,7 +104,7 @@ client/                 Web と Electron（Node。版は mise で固定）
 - **ビルド**：`client/apps/desktop` を electron-vite で作り、renderer の設定に Octane の Vite プラグインを入れる。preload は `sandbox: true` で読めるよう 1 つのファイルにまとめる。
 - **lint と format**：lint は `bun lint`、format は `bun fmt` にする。`bun lint` は bun の安定版にまだ無いので、日付つきの canary 版（npm の `bun@<版>-canary.<日付>.<n>`）を `client/package.json` の devDependency にして lockfile で固定し、`bun run lint` から呼ぶ。依存の postinstall は走らせない（`client/bunfig.toml` の `ignoreScripts = true` と、`client/package.json` の `trustedDependencies: []`）。canary の postinstall は本体が無いと lockfile で照合せずに取り直すので、使わない。代わりに `client/scripts/canary-bun.ts` が、lockfile の sha512 で照合して入った本体 `@oven/bun-<OS>` を直接起動し、本体が見つからないときと `client/node_modules` の外にあるときは失敗する。`bun lint` が安定版に入ったら、mise の bun を上げて canary の依存を外す。`bun fmt` の対象は `client/` の下だけにし、`hk.pkl` の pre-commit で `bun fmt --check`（直さずに検査だけ）を回す。typos は今のまま全体にかける。
 - **型検査**：`bun check` で回す。Octane の JSX の型を `bun check` が扱えないときは、Octane の `octane-tsc` に替える。
-- **単体の試験**：`bun test` で回し、`*.test.ts` を対象のファイルの隣に置く。Octane の部品は、Octane のコンパイラを `environment: 'client'` で通す bun のプラグインと、happy-dom・`@octanejs/testing-library` で試験する。main の試験では `electron` を読み込まず、対象の関数にセッションや WebContents の代わりの物（試験に要るメソッドだけを持つ物）を渡す（`client/apps/desktop/src/main/security.test.ts`）。
+- **単体の試験**：`bun test` で回し、`*.test.ts`・`*.test.tsx` を対象のファイルの隣に置く。Octane の部品は、Octane のコンパイラを `environment: 'client'` で通す bun のプラグインと、happy-dom・`@octanejs/testing-library` で試験する。main の試験では `electron` を読み込まず、対象の関数にセッションや WebContents の代わりの物（試験に要るメソッドだけを持つ物）を渡す（`client/apps/desktop/src/main/security.test.ts`）。
 - **client の検査**：`mise run client:verify`（`bun install --frozen-lockfile`・`bun fmt --check`・`bun run lint`・`bun check`・`bun test`）にまとめ、`mise run verify` から呼ぶ。
 
 ### 運用の Issue で決める案
@@ -131,7 +134,7 @@ Electron 公式の[セキュリティチェックリスト](https://www.electron
 | 4 | Enable process sandboxing | 採る | `sandbox: true` |
 | 5 | Handle session permission requests from remote content | 採る | `setPermissionRequestHandler` で、使う権限（通知など）だけを許し、ほかは拒否 |
 | 6 | Do not disable `webSecurity` | 採る | 変えない |
-| 7 | Define a Content Security Policy | 採る | `script-src 'self'`。接続先は自前の server だけ |
+| 7 | Define a Content Security Policy | 採る | `script-src 'self'`。renderer から直接 fetch する接続先は CSP の `connect-src` で自前の server だけに絞る |
 | 8 | Do not enable `allowRunningInsecureContent` | 採る | 変えない |
 | 9 | Do not enable experimental features | 採る | 変えない |
 | 10 | Do not use `enableBlinkFeatures` | 採る | 使わない |
@@ -146,22 +149,27 @@ Electron 公式の[セキュリティチェックリスト](https://www.electron
 | 19 | Check which fuses you can change | 採る | `RunAsNode` など使わない fuse を切り、asar の完全性の検査を有効にする |
 | 20 | Do not expose Electron APIs to untrusted web content | 採る | preload の `contextBridge` で出すのは、`packages/contracts` で宣言したチャンネルだけを通す `invoke`/`on` の橋 1 つ。`ipcRenderer` をそのまま出さない |
 
-server 側の検査（Origin、CSRF、WebSocket の認証。v0.7 [04](../technical/v0.7/body/04-data-api-realtime.md)）は、Electron から来る要求にも省かない。
+画面と server の業務通信は、renderer から直接 fetch する。server は CORS の Origin 許可リストで Electron の renderer を限定し、renderer は CSP の `connect-src` で接続先を自前の server に絞る（#817）。現時点の土台の CSP には `connect-src` がまだ無く、通信の実装も未完成なので、この方針を実装済みとは読まない。server 側の検査（Origin、CSRF、WebSocket の認証。v0.7 [04](../technical/v0.7/body/04-data-api-realtime.md)）は、Electron から来る要求にも省かない。
 
 ## 配布とライセンス表示
 
 - 3 つの OS の配布物は CI の同じ sha から作り、sha256 を一緒に出す（#551 の条件を Electron 向けに書き換えて引き継ぐ）。
 - About から開くサードパーティライセンスの一覧には、Electron・Chromium・Node.js と npm の依存を入れる。画面側に Rust を残さない（共通核は TypeScript に移す）ので、Rust の依存（cargo-about）は含めない。
-- Slint の Royalty-free の条件（AboutSlint の表示）は、Slint をやめた時点で要らなくなる。
-- 最初は署名なしで配る。自動更新は Windows と Linux だけで、配布経路は国内ホストが GitHub Releases を取りに行く形（「運用の仕組み」の「決定」）。署名の選択肢の調査は #723 のコメント（`adr-0014-research`）にある。
+- Slint の Royalty-free の条件（AboutSlint の表示）は、Slint を廃止した後は要らない。依存が残る間は `deny.toml` の台帳を維持し、#826 で依存と一緒に外す。
+- D1 は署名なしの開発版を `mise run client:dev` で動かす。D1 の配布物は作らない。D3 の配布では最初は署名なしで行い、署名付きの配布物と自動更新を D3 の対象として整える。自動更新は Windows と Linux だけで、配布経路は国内ホストが GitHub Releases を取りに行く形（「運用の仕組み」の「決定」）。署名の選択肢の調査は #723 のコメント（`adr-0014-research`）にある。
 
 ## Slint の廃止の時期
 
-D1 の後に廃止する。それまで `pelway-client-ui`・`dev-client-probe`・`deny.toml` の slint の台帳（#229）は今のまま残す。廃止は別の Issue で行う。
+D1 の中で #766 の子 Issue の順に廃止する。それまで `pelway-client-ui`・`dev-client-probe`・`deny.toml` の slint の台帳（#229）は今のまま残す。
+
+1. #825 で `dev-client-probe` を消す（#751 のマージの後に着手）
+2. #826 で `pelway-client-ui` を消し、`deny.toml` の slint の台帳とライセンスの例外、`.agents/skills/slint/` を外す（#333・#820 のマージと #754 の後に着手し、#229 を閉じる）
+3. #752 の TypeScript 版がマージされた後、#827 で Rust 版 `pelway-client-core` を消す
+4. #828 で workflow の Slint のビルド用 `libfontconfig1-dev` を外す（workflow の変更なので hatai が扱う）
 
 ## 未決
 
-- 署名を入れる時期と方式（Windows の証明書、macOS の Apple Developer Program と notarize）。入れると決めるのは hatai。決めたら、残してある置き場所（タグのときだけ使える environment）に鍵を登録し、macOS の自動更新も足す。
+- 署名の方式（Windows の証明書、macOS の Apple Developer Program と notarize）と、D3 の中で署名を入れる段階。D3 で署名付きの配布物を作ることは決定済み（「配布とライセンス表示」）。方式を決めるのは hatai。決めたら、残してある置き場所（タグのときだけ使える environment）に鍵を登録し、macOS の自動更新も足す。
 
 ## v0.7 との関係
 

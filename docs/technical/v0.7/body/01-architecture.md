@@ -9,9 +9,9 @@
 ```mermaid
 flowchart LR
  subgraph JP[日本国内設置ホスト・管理ネットワーク：未検証の前提]
-  GUI[Rust + Slint GUI]
-  WEB[ブラウザ DOM UI]
-  CORE[Rust client-core / WASM]
+  GUI[Electron main/preload/renderer]
+  WEB[Octane Web UI/DOM]
+  CORE[TypeScript packages/core]
   subgraph APP[ローカル本体・外向き既定拒否]
    API[server: axum / 認証と承認]
    DB[(PostgreSQL / outbox / 監査)]
@@ -31,7 +31,7 @@ flowchart LR
   AG[Claude Code / Cursor等]
   TOOL[Datadog / Google Workspace等]
  end
- GUI --> CORE
+ GUI --> WEB
  WEB --> CORE
  CORE -->|loopback HTTP/WS（合成データ試験）| API
  API --> DB
@@ -61,8 +61,8 @@ flowchart LR
 
 | 部品 | 実行 | ビルド・試験 |
 |---|---|---|
-| ネイティブGUI | 各ホストの通常プロセス | Windows MSVC、macOSのSDK、Linuxのネイティブ環境。IME、GPU、通知、読み上げはホストで試す |
-| Web UIとWASM | ホストブラウザ | 静的資源のビルドはコンテナ可。ブラウザ機能の試験はホスト |
+| Electronデスクトップ | 各ホストの通常プロセス | OSごとの Electron・Node・bun の開発環境。IME、GPU、通知、読み上げはホストで試す |
+| Web UIとTypeScript core | ホストブラウザまたはElectronのrenderer | 静的資源のビルドはコンテナ可。DOM・JavaScript・ブラウザ機能の試験はホスト |
 | server、runner、gateway | Linuxコンテナ。論理境界として別プロセス | Linux向けイメージ。最低3プロセスであり「2プロセス」とは呼ばない |
 | sandbox controller | 信頼するホスト/コンテナランタイム側の限定API | 任意のruntime socketをBotやsandboxへ公開しない |
 | DB、ファイル、推論 | Linux側。GPU推論がホストAPIを要する場合は国内ホストの別プロセス | CPU別イメージとdriverを検証。macOSのGPUをLinuxコンテナから当然使えるとはしない |

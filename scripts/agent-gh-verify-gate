@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# agent-gh の push の verify ゲート（#807）。scripts/agent-gh の一時 pre-push フックから bash で呼ばれる。
+# 印は同じ fd から検査・読み取りし、開始の記録が同じ印の指紋か verify-id を指すときは止める。
+set -euo pipefail
+
+# 印と木の比較で refs/replace の置き換えを使わない。Git は転送では置き換えを使わず本体を送るため。
+export GIT_NO_REPLACE_OBJECTS=1
+
+stop_unverified() {
+  local reason="$1"
+  echo "agent-gh: push を止めました: verify が通った木の印を確認できません（$reason）" >&2
+  echo "agent-gh: mise run verify を成功させてから push してください。確かめずに通すときは PELWAY_AGENT_SKIP_VERIFY_GATE=1" >&2
+  exit 1
+}
+
+verify_script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+. "$verify_script_dir/agent-verify-paths.sh"
+
+git_dir="" root="" marker_path="" marker="" verify_id="" marker_fp="" stat_fp=""
+read_marker() {
+  [[ -z "$marker" ]] || return 0
+  git_rev_path --git-dir || stop_unverified "gitdir を解決できません"
+  physical_path "$REPLY" || stop_unverified "gitdir を絶対パスに解決できません"
+  git_dir="$REPLY"
+  git_rev_path --show-toplevel || stop_unverified "worktree のルートを解決できません"
+  physical_path "$REPLY" || stop_unverified "worktree のルートを絶対パスに解決できません"
+  root="$REPLY"
+  marker_path="$git_dir/pelway-verify-tree"
+  [[ -e "$marker_path" || -L "$marker_path" ]] || stop_unverified "印 $marker_path がありません"
+  probe="$(mktemp "$git_dir/pelway-verify-write.XXXXXX" 2>/dev/null)" || stop_unverified "印を無効化できない状態です"
+  rm -f -- "$probe" 2>/dev/null || stop_unverified "印を無効化できない状態です"
+  # 属性と内容は同じ fd から取る。パスの検査と読み直しで別世代を混ぜず、NUL を落とさない。
+  marker_info="$(python3 -I "$verify_script_dir/agent-verify-marker-read" "$marker_path" 2>/dev/null)" ||
+    stop_unverified "印 $marker_path の形を判定できません"
+  IFS=$'\t' read -r marker verify_id marker_fp stat_fp extra <<<"$marker_info"
+  [[ -z "${extra:-}" && "$marker" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ && "$verify_id" =~ ^[0-9a-f]{32}$ && "$marker_fp" =~ ^[0-9a-f]{64}$ && "$stat_fp" =~ ^[0-9a-f]{64}$ ]] ||
+    stop_unverified "印 $marker_path の形を判定できません"
+
+  scan_started_dir "$git_dir/pelway-verify-started" 0
+  validate_trusted_dir "$root/.pelway-verify"
+  scan_started_dir "$root/.pelway-verify/started" 1
+  [[ "$(git --no-replace-objects cat-file -t "$marker" 2>/dev/null)" == tree ]] || stop_unverified "印の木 $marker を読めません"
+}
+
+validate_trusted_dir() {
+  local dir="$1"
+  [[ -d "$dir" && ! -L "$dir" && -O "$dir" && -r "$dir" && -x "$dir" ]] ||
+    stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
+  local mode
+  mode="$(stat -c %a -- "$dir" 2>/dev/null)" || stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
+  (( (8#$mode & 022) == 0 )) || stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
+}
+
+scan_started_dir() {
+  local dir="$1" required="$2"
+  if [[ ! -e "$dir" && ! -L "$dir" ]]; then
+    ((required)) && stop_unverified "verify の開始の記録が信頼できるディレクトリではありません"
+    return 0
+  fi
+  validate_trusted_dir "$dir"
+  if ((required)); then
+    local state_probe
+    state_probe="$(mktemp "$dir/probe.XXXXXX" 2>/dev/null)" || stop_unverified "verify の開始の記録を残せない状態です"
+    rm -f -- "$state_probe" 2>/dev/null || stop_unverified "verify の開始の記録を残せない状態です"
+  fi
+  shopt -s nullglob
+  local start_file base target attempt
+  for start_file in "$dir"/*; do
+    base="${start_file##*/}"
+    if [[ "$base" =~ ^([0-9a-f]{64}|none|any)\.([0-9a-f]{32})$ ]]; then
+      target="${BASH_REMATCH[1]}"; attempt="${BASH_REMATCH[2]}"
+      [[ "$target" == any || "$target" == "$marker_fp" || "$target" == "$stat_fp" || "$attempt" == "$verify_id" ]] &&
+        stop_unverified "前回の verify はこの印を無効化しました"
+    fi
+  done
+  return 0
+}
+
+# 行を先に全部読む（比較のコマンドに、残りの入力を読ませないため）。
+mapfile -t lines
+for line in ${lines[@]+"${lines[@]}"}; do
+  [[ -n "$line" ]] || continue
+  read -r _lref lsha rref rsha extra <<<"$line"
+  [[ -n "${rsha:-}" && -z "${extra:-}" && "$lsha" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || stop_unverified "pre-push の入力の行を判定できません（$line）"
+  [[ "$lsha" =~ ^0+$ || "$rref" != refs/heads/* ]] && continue # 削除とブランチ以外は確かめない
+  read_marker
+  tree="$(git --no-replace-objects rev-parse -q --verify "$lsha^{tree}" 2>/dev/null)" ||
+    stop_unverified "$rref へ送る $lsha の木を読めません"
+  [[ "$tree" == "$marker" ]] && continue
+
+  # 木どうしの差が docs/worklogs/ の下だけなら通す。ファイル名の空白や改行を壊さないよう NUL 区切りで読む。
+  # rename 検出は外す。外のファイルを docs/worklogs/ の下へ移したときに移動先だけが出て、外の削除を見落とさないため。
+  diff_out="$PELWAY_AGENT_HOOKS_DIR/verify-gate-diff.out"
+  git --no-replace-objects diff-tree -r --no-renames --name-only -z "$marker" "$tree" >"$diff_out" 2>/dev/null ||
+    stop_unverified "印の木と $rref へ送る木の差を読めません"
+  only_worklogs=1 saw_diff=0
+  while IFS= read -r -d '' path; do
+    saw_diff=1
+    case "$path" in
+      docs/worklogs/*) ;;
+      *) only_worklogs=0; break ;;
+    esac
+  done <"$diff_out"
+  ((only_worklogs && saw_diff)) && continue
+  stop_unverified "$rref へ送る木が印の木と違い、差は docs/worklogs/ の下だけではありません"
+done

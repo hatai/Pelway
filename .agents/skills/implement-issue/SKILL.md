@@ -127,7 +127,7 @@ EOF
 
 テストが最初から通ったら、そのテストは条件を確かめていない。書き直す。テストが red にならない、または実行ごとに red が揺らぐときは、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 1〜2 で切り分けてから書き直す。
 
-差分が `crates/pelway-client-ui/` に触れる round では、テストを書く前に `docs/client-ui-testing.md`（Slint のテスト用 backend の探索・レイアウトの stretch・文字の計測・ListView の仮想化の挙動と、その出典）を読む。そこに無い Slint の挙動を前提にするときは、crate のソースで確かめてから書く。
+差分が `client/` の Electron・Octane の UI に触れる round では、テストを書く前に `docs/client-ui-testing.md`（`client:verify` と `bun test` の範囲、happy-dom・`@octanejs/testing-library`、main/preload/CSP の単体試験の決まり）を読む。そこに無い Electron・Octane の振る舞いを前提にするときは、`client/` の既存のコードと試験で確かめてから書く。
 
 確かめ方が確認の手順の条件（文書に、ある決まりや手順が書かれていること。skill `write-issue` の「受け入れ条件の書き方」）は、テストを書かずに次のとおり扱う。
 
@@ -182,7 +182,7 @@ scripts/agent-gh dev git push origin HEAD
 - ローカルのブランチ名が PR ブランチと違うとき（runbook「4. 仕事の始め方」→「既存の PR ブランチを引き継ぐ」で立てた `<PRブランチ>-r<N>`、修正 round を任せた子の作業ツリー）は、この手順の push（実装コミットの push と、後段の実装者メモの push の両方）を `scripts/agent-gh dev git push origin HEAD:<PRブランチ>` に置き換える。`origin HEAD` のままではローカルと同名の別の remote ブランチができ、既存の PR は更新されない。
 - push の前の段で PR ブランチの remote の先端をもう一度 fetch し、修正の間にまた進んでいれば（`scripts/agent-gh dev git merge-base --is-ancestor origin/<ブランチ> HEAD` が非 0）、`scripts/agent-gh dev git merge origin/<ブランチ>` で取り込み、`mise run verify` をやり直してから push する。手元にコミットがあるので、ここでは fast-forward できない。merge はコミットの後に行うため、作業ツリーに残る未コミットの変更は手順 5 のメモ（`docs/worklogs/issue-<N>.md`）だけで、main の変更と重ならない。衝突したら手順 9 の「修正依頼」の解消の決まりに従う。rebase や force push はしない。
 - `mise run verify` の出力は 1 万行を超え、手元で約 2〜3 分かかる（ビルドのキャッシュが冷えているときや他のビルドと競合するときは 20 分を超える）。コマンドの時間制限を 10 分（600 秒）にするか、バックグラウンドで実行して完了の通知を待つ。出力はファイルに書き出し、全部は読まない。読むのは終了コード、`grep -nE 'FAIL|ERROR' <scratchpad>/verify.log` の行、最後の要約の行（`tail -n 3 <scratchpad>/verify.log`。通れば `Finished in <秒>s`）だけにする。
-- `mise run verify` が失敗したらコミットしない。直してからやり直す。失敗が自分の変更と無関係に見えるとき（実行ごとに失敗箇所が変わる・ツールチェーンの再インストールを伴うなど）は、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 2（再現と最小化）で切り分ける。変更を退避した同じツリーで再現する失敗は環境起因として、verify の内訳と再現確認を PR 本文の「確認方法/検証」に書いて先へ進めてよい。退避で解消する失敗は自分の変更によるもので、直す。
+- `mise run verify` が失敗したらコミットしない。直してからやり直す。失敗が自分の変更と無関係に見えるとき（実行ごとに失敗箇所が変わる・ツールチェーンの再インストールを伴うなど）は、輸入スキル `diagnosing-bugs`（下の「輸入スキル」の節）の Phase 2（再現と最小化）で切り分ける。変更を退避した同じツリーで再現する失敗は環境起因として、verify の内訳と再現確認を PR 本文の「確認方法/検証」に書いて先へ進めてよい。このとき verify は成功の印を残さない。開始の記録を残せないときは検査を始めず、記録を残した後の失敗では、その記録が指す世代の印と同じ verify-id の印を門が受け付けず、対象が `any` の記録はすべての印を止めるため、push は `PELWAY_AGENT_SKIP_VERIFY_GATE=1` を付けて行い、そのことも PR 本文の「確認方法/検証」に書く。開始の記録と印の無効化の両方に失敗したときは、verify が印を読めない状態にするため門は止まり、記録先を直して verify をやり直す。退避で解消する失敗は自分の変更によるもので、直す。
 - 差分がミューテーションテスト対象の crate（`.cargo/mutants.toml` の examine_globs）のロジックに触れるときは、`mise run mutants:diff` も回し、結果（生き残りと対応）を実装者メモに書く。生き残りの分析は輸入スキル `mutation-testing`（下の「輸入スキル」の節）。
 - `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたときは、例外が認められる前に push しない。`scripts/agent-gh-pr-size-gate` は例外の無い上限超過の push を止めるため、Draft PR を作るための push もしない。
 - 上限を超えたら、「止まる条件」の表の pr-size の行のとおり止まる。Issue のコメントには、分割案（PR ごとの範囲と見込み行数）、手元の head の SHA（`git rev-parse HEAD`）、`git diff --stat origin/main...HEAD` の出力を書く。
