@@ -60,7 +60,7 @@
 
 使ったスキル: implement-issue、write-pull-request、brainstorming、diagnosing-bugs
 
-## 実装者メモ（round 5 続き）
+## 実装者メモ（round 6）
 
 対象 head: 31d52e6901299704f6d5ce3c26d2ffb42e0658b6
 
