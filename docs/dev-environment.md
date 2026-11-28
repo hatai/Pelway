@@ -67,7 +67,7 @@ mise bootstrap    # 上の1〜3を順に実行
 | `mise run demo-check` | デモ受入前の 4 段階検査（`scripts/demo-check/run.sh`。受入は引数なしの全段階実行だけ有効。canary 段階は成果物が無いと未検証で失敗するため、製品をビルドしたあとに実行する） |
 | `mise run demo-check-selftest` | demo-check の自己テスト（`script-test` 経由で `verify-test` にも含まれる） |
 | `mise run verify-lint` / `verify-test` / `verify-static` | 検査の 3 グループ（cargo でコンパイルするのは `verify-lint` と `verify-test` の 2 つだけ） |
-| `mise run verify` | 上記 3 グループの一括確認（依存タスクは**並列**実行） |
+| `mise run verify` | 上記 3 グループの一括確認（`scripts/agent-verify-run` が 3 グループを並列に実行し、すべて通ったときだけ印を残す。下の「agent-gh の push の門」） |
 | `mise exec -- hk fix` | 修正の適用（ワークツリー。ステージはしない） |
 
 Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要求する状態（依存追加後の未コミットなど）では失敗する。その場合は依存を意図した変更か確認してコミットすること。

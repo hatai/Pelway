@@ -202,6 +202,16 @@ rm -rf "$MISE_TOY/.git/pelway-verify-started"; : >"$MISE_TOY/.git/pelway-verify-
 [[ "$rc" != 0 && ! -e "$start_touch" && ! -e "$marker_path" ]] ||
   failures+=("verify_all_state_unwritable: rc=$rc touch=$(test -e "$start_touch" && echo present || echo missing) marker=$(test -e "$marker_path" && echo present || echo missing)")
 rm -rf "$MISE_TOY/.git/pelway-verify-started"; chmod u+w "$MISE_TOY/.pelway-verify"; rm -rf "$MISE_TOY/.pelway-verify" "$marker_path"
+# 開始の記録も印の無効化もできないときは検査を始めず、その旨を出力する。印は残る。
+mkdir "$MISE_TOY/.pelway-verify"; chmod a-w "$MISE_TOY/.pelway-verify"
+printf '%s\nverify-id:0123456789abcdef0123456789abcdef\n' "$("$REAL_GIT" -C "$MISE_TOY" rev-parse 'HEAD^{tree}')" >"$marker_path"
+rm -rf "$MISE_TOY/.git/pelway-verify-started"; : >"$MISE_TOY/.git/pelway-verify-started"
+printf 'important\n' >"$lock_target"; rm -f "$lock_path"; ln -s "$lock_target" "$lock_path"
+rm -f "$start_touch"
+(cd "$MISE_TOY" && VERIFY_TOUCH_BEFORE_EXIT="$start_touch" MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-invalidate-unwritable.out" 2>&1); rc=$?
+[[ "$rc" != 0 && ! -e "$start_touch" && -e "$marker_path" && "$(grep -c '前回の印を無効化できず、古い印が残っています' "$ROOT/mise-invalidate-unwritable.out" 2>/dev/null)" != 0 ]] ||
+  failures+=("verify_invalidate_unwritable_warns: rc=$rc touch=$(test -e "$start_touch" && echo present || echo missing) marker=$(test -e "$marker_path" && echo present || echo missing) warn=$(grep -c '前回の印を無効化できず' "$ROOT/mise-invalidate-unwritable.out" 2>/dev/null)")
+rm -f "$lock_path"; rm -rf "$MISE_TOY/.git/pelway-verify-started"; chmod u+w "$MISE_TOY/.pelway-verify"; rm -rf "$MISE_TOY/.pelway-verify" "$marker_path"
 mkdir "$MISE_TOY/.pelway-verify"; chmod a-w "$MISE_TOY/.pelway-verify"
 printf '%s
 verify-id:0123456789abcdef0123456789abcdef
@@ -256,6 +266,33 @@ wait "$manual_lock" 2>/dev/null; manual_lock_rc=$?
 wait "$lock_generation_verify"; lock_generation_rc=$?
 [[ "$manual_lock_rc" == 0 && -n "$start_base" && "$lock_generation_rc" != 0 && ! -e "$marker_path" && "$(grep -c 'Traceback' "$ROOT/mise-lock-generation.out" 2>/dev/null)" == 0 ]] ||
   failures+=("verify_lock_generation_unwritable: lock=$manual_lock_rc verify=$lock_generation_rc start=${start_base:-none} marker=$(test -e "$marker_path" && echo present || echo missing) traceback=$(grep -c 'Traceback' "$ROOT/mise-lock-generation.out" 2>/dev/null)")
+chmod u+w "$MISE_TOY/.pelway-verify/started" 2>/dev/null
+rm -rf "$MISE_TOY/.git/pelway-verify-started" "$MISE_TOY/.pelway-verify"; rm -f "$marker_path"
+# ロック取得後の記録に失敗し、印の無効化にも失敗したときも、その旨を出力する。印は残る。
+: >"$lock_path"; chmod 600 "$lock_path"
+printf '%s\nverify-id:0123456789abcdef0123456789abcdef\n' "$("$REAL_GIT" -C "$MISE_TOY" rev-parse 'HEAD^{tree}')" >"$marker_path"
+rm -f "$lock_held" "$lock_release"
+LOCK_HELD="$lock_held" LOCK_RELEASE="$lock_release" flock -x "$lock_path" -c 'touch "$LOCK_HELD"; while [[ ! -e "$LOCK_RELEASE" ]]; do sleep 0.05; done' &
+lock_warn_manual=$!
+for ((i = 0; i < 100; i++)); do [[ -e "$lock_held" ]] && break; sleep 0.05; done
+(cd "$MISE_TOY" && MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-lock-invalidate-fails.out" 2>&1) &
+lock_warn_verify=$!
+warn_start=""
+for ((i = 0; i < 100; i++)); do
+  for entry in "$MISE_TOY/.pelway-verify/started"/*; do [[ -e "$entry" ]] && warn_start=1; done
+  [[ -n "$warn_start" ]] && break
+  sleep 0.05
+done
+chmod a-w "$MISE_TOY/.pelway-verify/started"
+rm -rf "$MISE_TOY/.git/pelway-verify-started"; : >"$MISE_TOY/.git/pelway-verify-started"
+printf '%s\nverify-id:fedcba9876543210fedcba9876543210\n' "$("$REAL_GIT" -C "$MISE_TOY" rev-parse 'HEAD^{tree}')" >"$marker_path"
+chmod a-w "$MISE_TOY/.git"
+touch "$lock_release"
+wait "$lock_warn_manual" 2>/dev/null; lock_warn_manual_rc=$?
+wait "$lock_warn_verify"; lock_warn_rc=$?
+chmod u+w "$MISE_TOY/.git"
+[[ "$lock_warn_manual_rc" == 0 && -n "$warn_start" && "$lock_warn_rc" != 0 && -e "$marker_path" && "$(grep -c '前回の印を無効化できず、古い印が残っています' "$ROOT/mise-lock-invalidate-fails.out" 2>/dev/null)" != 0 ]] ||
+  failures+=("verify_lock_invalidate_fails_warns: lock=$lock_warn_manual_rc verify=$lock_warn_rc start=${warn_start:-none} marker=$(test -e "$marker_path" && echo present || echo missing) warn=$(grep -c '前回の印を無効化できず' "$ROOT/mise-lock-invalidate-fails.out" 2>/dev/null)")
 chmod u+w "$MISE_TOY/.pelway-verify/started" 2>/dev/null
 rm -rf "$MISE_TOY/.git/pelway-verify-started" "$MISE_TOY/.pelway-verify"; rm -f "$marker_path"
 # gitdir のパスの末尾に空白や CR があっても、3 経路が Git が返した同じパスを使う。
