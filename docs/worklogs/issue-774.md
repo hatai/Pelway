@@ -36,7 +36,7 @@
 
 ## 実装者メモ（round 1）
 
-対象 head: 2a7e8468daa55ce0732a48388bbc8f882d473ca7
+対象 head: 56f613e978b0cea74027af3dbe1c01805a64fd23
 
 1. 詰まった箇所: 手順 4 / `client/scripts/type-ratchet.ts`: tsc の複数行診断の字下げ行を形式外として扱いすぎ、初回の実機確認が fail closed で止まった。頭の行だけを数え、字下げの続き行は件数に入れない形にした。
 2. 曖昧だった文: 「`mise run verify` から回る → `mise tasks deps verify`」（Issue #774 の「受け入れ条件」）
