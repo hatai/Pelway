@@ -59,3 +59,51 @@ push 後の修正: スナップショットの鮮度判定が `now - fetched < i
 5. 改善案: スクリプトのテストで tmp に作った連鎖ディレクトリのモードを 555 にすると trap の rm が片付けられず警告が出る。片付けの前にモードを戻すか、テスト用の一時ディレクトリの片付けに `chmod -R u+w` を挟む流儀があると共有点になる
 
 使ったスキル: implement-issue。輸入スキルはなし
+
+## 失敗の筋（実装前）
+
+実装に入る前の段階で、差分の構造（見張りが gh でボードを読み、共有のファイルに書き出し、指揮役がそれを読む）から想定できた筋を round 1〜5 のメモとレビュー指摘から整理したもの。
+
+- 失敗の筋: エージェント（指揮役と同じ uid・共有の置き場に書ける主体）が偽の書き出しを置くと、指揮役が偽のカード（着手の合図の Todo・停止の Backlog）を本物と読み、割り当てや停止を偽の情報に基づいて判断する
+  確かめ方: reader の所有者の検査（`scripts/tests/board-snapshot-read.test.sh` 試験 8「foreign-owner」）、公開先の書き込み可否の検査（同試験 12「writable-location」の否定 3 本・試験 13 の読み取り専用マウントの肯定と書き込み可の対照）、runbook「ボード読み取りスナップショット」の真正性の扱い（承認は GitHub で読み直す）
+- 失敗の筋: gh の応答が `--limit` で打ち切られると、欠けた一覧を完全なものとして公開し、載っていないカードを「無い」と読んでしまう
+  確かめ方: writer の打ち切り検知と totalCount による取り直し（`scripts/tests/conductor-watch-board-snapshot.test.sh` 試験 4）
+- 失敗の筋: 型や番号の読めないカードを含む応答をそのまま公開すると、欠けたデータが指揮役の判断に届く
+  確かめ方: カードの型検査の fail-closed（同試験 bad-item の系）、reader の型と有限性の検査（`scripts/tests/board-snapshot-read.test.sh` 試験 9・10）
+- 失敗の筋: 書き出しの失敗（容量・符号化・置き換え）で前回分が消える・空になると、読めない期間にボードに依存する処理が止まる
+  確かめ方: 取得失敗で前回分が残ること（`scripts/tests/conductor-watch-board-snapshot.test.sh` 試験 2）、容量の上限（同試験 9）、非 UTF-8 ロケールの符号化（同試験 11）
+- 失敗の筋: symlink や FIFO など通常でないファイルをたどって読むと、外のファイルを読む・待ち続ける
+  確かめ方: reader の O_NOFOLLOW と S_ISREG（`scripts/tests/board-snapshot-read.test.sh` symlink・FIFO の系）、writer の O_EXCL|O_NOFOLLOW の一時ファイル（`scripts/tests/conductor-watch-board-snapshot.test.sh` 試験 6）
+
+## 失敗の筋（round 5 の最終）
+
+round 5 の最終 head（d10c9f63）に対する筋と、その確かめ方。round 1〜5 のレビューで挙がった筋の最終的な対応を含む。
+
+- 失敗の筋: 公開先が指揮役側から書き込み可の場所（`/tmp`・書き込み可の tmpfs 上のチェーンなど）にあると、エージェントが偽の書き出しを直接置ける・既存の書き出しを書き換えられる
+  確かめ方: reader は公開先の fd のマウントの `ST_RDONLY` を主条件に確かめ、読み取り専用でないマウントでは公開先と親ディレクトリのチェーンを最初のマウントポイントまでたどり、書き込み可なら `broken`（detail `writable-location`）で拒否（`scripts/board-snapshot-read` :125-163、`scripts/tests/board-snapshot-read.test.sh` 試験 12 の否定 3 本・試験 13 の bwrap による読み取り専用マウントの肯定と書き込み可の対照。実機では `~/.local/state/pelway/` の実ファイルが通り `/tmp` の同じファイルが拒否されることを確認）
+- 失敗の筋: 所有者の uid がずれた書き出し（置き場の取り違え・uid の写像の違い）を読むと、検査を通らないはずの入力が届く
+  確かめ方: 所有者が実効 uid と違えば `broken`（detail `foreign-owner`）（`scripts/tests/board-snapshot-read.test.sh` 試験 8）
+- 失敗の筋: 鮮度の判定に前の書き出しの `fetched_at` を使うと、偽の新しい書き出しで取り直しが止まり、偽のカードが本物に戻らない
+  確かめ方: 間隔は見張りのプロセス内の記憶だけで管理し前の書き出しは読まない（`scripts/tests/conductor-watch-board-snapshot.test.sh` 試験 5「forged fresh snapshot does not suppress refetch」）
+- 失敗の筋: 未来の `fetched_at` を「新しい」と読むと、reader が拒否する書き出しを見張りが更新しなくなる
+  確かめ方: 時計のずれ（60 秒）を超える未来は `broken`（`scripts/tests/board-snapshot-read.test.sh` 未来時刻の系・writer 側の future fetched_at is refetched）
+- 失敗の筋: 書き込み途中の内容を指揮役が読む、symlink 経由で外のファイルを上書きする
+  確かめ方: 一時ファイルは予測不能な名前を O_EXCL|O_NOFOLLOW で作り、書き切ってから置き換える（`scripts/tests/conductor-watch-board-snapshot.test.sh` 試験 6・symlink の系）
+- 失敗の筋: 非有限数（NaN・Infinity）や非 UTF-8 のバイト列で、標準 JSON として無効な書き出し・読めない出力になる
+  確かめ方: writer は UTF-8 と `allow_nan=False` で書き、reader は有限性と型を検査（`scripts/tests/conductor-watch-board-snapshot.test.sh` 試験 11、`scripts/tests/board-snapshot-read.test.sh` 試験 9・10）
+- 失敗の筋: gh の応答の打ち切り・型の読めないカードで欠けた一覧を完全として公開する
+  確かめ方: totalCount による取り直しと fail-closed（`scripts/tests/conductor-watch-board-snapshot.test.sh` 試験 4・bad-item の系）
+- 失敗の筋: 取得や書き出しの失敗で前回分が消え、読めない期間にボードに依存する処理が止まる
+  確かめ方: 失敗した巡回は前の書き出しを残す（`scripts/tests/conductor-watch-board-snapshot.test.sh` 試験 2・9）、runbook「ボード読み取りスナップショット」の `ok: false` の手当て
+
+## 実装者メモ（round 6）
+
+対象 head: 9d1bdea134b80ed1976da6e79733e18fcd5afa50
+
+1. 詰まった箇所: env の `-u` オプションは代入列の途中に置くとコマンド名として扱われる。テストで `env -u` を足した直後に試験 10 が落ちて気づき、オプションは先頭に置く形に直した（テスト自身が検知した）
+2. 曖昧だった文: 「読み取り専用のチェーンを受け付ける肯定の自動試験」（GLM round 5）は `unshare` の例で書かれていたが、この環境では `unshare -rm` が権限の写像で使えず、bwrap の読み取り専用 bind マウントで代替した。bwrap 内で bind チェーンの親が読み取り専用になり、実機と同じ positive 経路（`ok: true`）を自動で確かめられた。書き込み可の bind の対照（`writable-location` で拒否）も同じ仕込みで足し、退化の両方向を CI で検知できる
+3. 仮定と解釈: 「共有の置き場」を前提にした古い文の書き直しは、字面の消去ではなく多層防御の理由づけ（置き場の取り違え・マウントの写像のずれに備える）への置き換えと解釈した。理由が残ることで、次の読み手が同じ前提に戻らない
+4. 足りなかった情報・検証手段: H31 の参照行は GLM の指摘（:148）と実際の節の位置（:146）がずれていたが、節の見出しの実位置に合わせた。行番号の参照は節の挿入でずれるため、今後は節名で引く方が保守しやすい
+5. 改善案: なし
+
+使ったスキル: implement-issue。輸入スキルはなし
