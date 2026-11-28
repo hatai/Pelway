@@ -87,6 +87,7 @@ Skills and docs state facts only: rules, procedures, definitions, current state.
 
 ### Skill helpers
 
+- A skill's verifiable steps may ship as an executable helper (local-managed skills only).
 - A skill's helper ships with its test, bundled in the same directory as `SKILL.md` (local-managed skills only).
 - Scope, test placement and execution, and treatment in both skill trees follow `docs/agents/skill-helpers.md`.
 
@@ -110,7 +111,3 @@ Issues are tracked in GitHub Issues (hatai/Pelway) via the `gh` CLI. See `docs/a
 ### Domain docs
 
 - Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root, created lazily. See `docs/agents/domain.md`.
-
-### Skill helpers
-
-- A skill's verifiable steps may ship as an executable helper (local-managed skills only).
