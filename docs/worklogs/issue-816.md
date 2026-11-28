@@ -35,3 +35,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「`docs/technical/v0.7/body` を変える差分では `python3 docs/technical/v0.7/verification/verify.py` を実行し、生成物の差分を同じ PR に入れる」を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 4）
+
+対象 head: db252cb02fc330a019894dab54c62524deba666d
+
+1. 詰まった箇所: `docs/technical/v0.7/body/09-sources.md`: wasm-bindgen は「不採用の調査対象」だが `dev-client-probe` の直接依存として残っており、台帳の列の意味（配布物に入るか）と字義（依存の有無）がずれていた。
+2. 曖昧だった文: 「ブラウザ版を先行し、将来はRust製デスクトップアプリを想定します」（README など 7 ファイル）
+3. 仮定と解釈: 公開・計画の現行文書は ADR 0014 の決定（D1 から Electron、ブラウザ版は時期を別に決める）に合わせて主文を直す。`docs/planning/input-ui.md`・`docs/planning/input/technical-input.md` は入力担当が出した記録で、後から決定に合わせて書き換えるものではないと解釈して残した。
+4. 足りなかった情報・検証手段: 台帳の行と実際の依存（Cargo.toml）の突き合わせは人手で、依存を消すタイミングで台帳を直す検査は無い。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の受け入れ条件の書き方に「依存の台帳の記述は Cargo.toml と突き合わせる」を足す。
+
+使ったスキル: implement-issue、write-pull-request
