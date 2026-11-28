@@ -14,6 +14,10 @@ hatai との設計インタビューで、RedisInsight 方式の run 照合と P
 
 使ったスキル: grilling、brainstorming、writing-plans、executing-plans、test-driven-development、implement-issue
 
+## 実装者メモ（round 2）
+
+レビューで指摘された重要点を直した。dedup step 自体に `continue-on-error` を付けて構造的な fail-open にし、API timeout と retry sleep を残り budget に合わせて切り詰めた。fail-open テストは終了コードと `duplicate=false` を確認し、偽 `timeout` / `sleep` / `curl` の引数まで記録して確認するようにした。`total_count` の 1000 件境界と `Record delivery` の固定文も確認対象に入れた。
+
 ## 検証
 
 - `bash scripts/tests/gh-notify-samples.test.sh`: pass。workflow から抽出した dedup・Send・Record delivery を偽 `gh`・`curl`・`sleep`・`date` で実行し、合成データの確認はすべて pass。

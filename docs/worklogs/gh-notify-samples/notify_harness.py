@@ -95,13 +95,13 @@ def job(steps):
     return {"id": 1, "run_id": 1, "name": "notify-grokbot", "status": "completed", "conclusion": "success", "steps": steps}
 
 
-def runs_pages(pages):
-    total = sum(len(p) for p in pages)
+def runs_pages(pages, total_count=None):
+    total = sum(len(p) for p in pages) if total_count is None else total_count
     return [{"total_count": total, "workflow_runs": p} for p in pages]
 
 
 def jobs_pages(pages):
-    total = len(pages)
+    total = sum(len(p) for p in pages)
     return [{"total_count": total, "jobs": p} for p in pages]
 
 
@@ -177,6 +177,14 @@ def fake_date():
     state_path = Path(os.environ["FAKE_DATE_STATE"])
     n = int(state_path.read_text()) if state_path.exists() else 0
     state_path.write_text(str(n + 1))
+    values = os.environ.get("FAKE_DATE_VALUES", "")
+    if values:
+        seq = [int(x) for x in values.split(",") if x]
+        if n < len(seq):
+            print(seq[n])
+            return 0
+        print(seq[-1] + (n - len(seq) + 1) * int(os.environ.get("FAKE_DATE_STEP", "0")))
+        return 0
     start = int(os.environ.get("FAKE_DATE_START", "1700000000"))
     step_n = int(os.environ.get("FAKE_DATE_STEP", "0"))
     print(start + n * step_n)
@@ -198,7 +206,8 @@ class Harness:
         harness = Path(__file__).resolve()
         for name, cmd in (("gh", "fake-gh"), ("curl", "fake-curl"), ("date", "fake-date")):
             write_exe(self.bin / name, f"#!/usr/bin/env bash\nexec python3 -I {harness} {cmd} \"$@\"\n")
-        write_exe(self.bin / "sleep", "#!/usr/bin/env bash\nexit 0\n")
+        write_exe(self.bin / "sleep", "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"${FAKE_SLEEP_LOG:-/dev/null}\"\nexit 0\n")
+        write_exe(self.bin / "timeout", "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"${FAKE_TIMEOUT_LOG:-/dev/null}\"\nif [ \"${FAKE_TIMEOUT_FORCE_EXIT:-}\" = 124 ]; then exit 124; fi\nshift\nexec \"$@\"\n")
         self.failures = []
 
     def cleanup(self):
@@ -217,6 +226,8 @@ class Harness:
             "FAKE_GH_STATE": str(case / "gh-state.json"),
             "FAKE_GH_LOG": str(case / "gh-calls.jsonl"),
             "FAKE_DATE_STATE": str(case / "date-state"),
+            "FAKE_SLEEP_LOG": str(case / "sleep-log"),
+            "FAKE_TIMEOUT_LOG": str(case / "timeout-log"),
             "FAKE_DATE_START": "1700000000",
             "GH_TOKEN": "dummy-token",
             "GITHUB_REPOSITORY": "example-org/pelway",
@@ -226,12 +237,14 @@ class Harness:
         })
         return env
 
-    def scenario(self, name, data, date_step="0", run_id=OWN_ID):
+    def scenario(self, name, data, date_step="0", run_id=OWN_ID, date_values=""):
         case = self.tmp / name
         case.mkdir()
         (case / "scenario.json").write_text(json.dumps(data))
         env = self.env(case, run_id)
         env["FAKE_DATE_STEP"] = date_step
+        if date_values:
+            env["FAKE_DATE_VALUES"] = date_values
         output = case / "github-output"
         env["GITHUB_OUTPUT"] = str(output)
         p = subprocess.run(["bash", str(self.extracted / "dedup.sh")], env=env, text=True, capture_output=True)
@@ -240,13 +253,13 @@ class Harness:
         log = case / "gh-calls.jsonl"
         if log.exists():
             calls = [json.loads(x) for x in log.read_text().splitlines()]
-        return {"rc": p.returncode, "stdout": p.stdout, "stderr": p.stderr, "output": text, "duplicate": "duplicate=true" in text, "calls": calls}
+        return {"rc": p.returncode, "stdout": p.stdout, "stderr": p.stderr, "output": text, "duplicate": p.returncode == 0 and "duplicate=true" in text, "sends": p.returncode == 0 and "duplicate=false" in text, "calls": calls, "case": case}
 
     def run_dedup_tests(self):
         title = f"notify #{PR} synchronize"
         empty_scenario = {"runs": {"pages": runs_pages([[]])}, f"jobs:{OWN_ID}": {"pages": empty_jobs()}}
         r = self.scenario("no-history", empty_scenario)
-        self.check("dedup no history sends", r["rc"] == 0 and not r["duplicate"], r["stderr"])
+        self.check("dedup no history sends", r["sends"], r["stderr"])
 
         cand = run_obj(1001, title)
         s = copy.deepcopy(empty_scenario)
@@ -281,28 +294,28 @@ class Harness:
         for x in others:
             s[f"jobs:{x['id']}"] = {"pages": positive_jobs()}
         r = self.scenario("nonmatching", s)
-        self.check("dedup ignores other PR/action/legacy", not r["duplicate"], r["stderr"])
+        self.check("dedup ignores other PR/action/legacy", r["sends"], r["stderr"])
 
         s = copy.deepcopy(empty_scenario)
         cand = run_obj(3101, title)
         s["runs"] = {"pages": runs_pages([[cand]])}
         s["jobs:3101"] = {"pages": jobs_pages([[job([step("Send notification", "success")])]])}
         r = self.scenario("legacy-send", s)
-        self.check("dedup ignores legacy Send success", not r["duplicate"])
+        self.check("dedup ignores legacy Send success", r["sends"])
 
         s = copy.deepcopy(empty_scenario)
         cand = run_obj(3201, title)
         s["runs"] = {"pages": runs_pages([[cand]])}
         s["jobs:3201"] = {"pages": jobs_pages([[job([step("Record delivery", "failure")])]])}
         r = self.scenario("record-failure", s)
-        self.check("dedup ignores failed Record delivery", not r["duplicate"])
+        self.check("dedup ignores failed Record delivery", r["sends"])
 
         s = copy.deepcopy(empty_scenario)
         cand = run_obj(3202, title)
         s["runs"] = {"pages": runs_pages([[cand]])}
         s["jobs:3202"] = {"pages": jobs_pages([[job([step("Record delivery", "cancelled")])]])}
         r = self.scenario("record-cancelled", s)
-        self.check("dedup ignores cancelled Record delivery", not r["duplicate"])
+        self.check("dedup ignores cancelled Record delivery", r["sends"])
 
         s = copy.deepcopy(empty_scenario)
         s[f"jobs:{OWN_ID}"]["fail"] = 9
@@ -330,7 +343,7 @@ class Harness:
         s["runs"] = {"pages": runs_pages([[cand]])}
         s["jobs:3501"] = {"fail": 9}
         r = self.scenario("jobs-fail-open", s)
-        self.check("dedup sends after candidate jobs failure without positive", not r["duplicate"])
+        self.check("dedup sends after candidate jobs failure without positive", r["sends"])
 
         s = copy.deepcopy(empty_scenario)
         cand = run_obj(3601, title)
@@ -343,61 +356,84 @@ class Harness:
         s = copy.deepcopy(empty_scenario)
         s["runs"]["fail"] = 9
         r = self.scenario("list-fail-open", s)
-        self.check("dedup sends after persistent run list failure", not r["duplicate"])
+        self.check("dedup sends after persistent run list failure", r["sends"])
         self.check("dedup persistent failure warns without endpoint", "::warning::" in r["stderr"] and "repos/" not in r["stderr"], r["stderr"])
+        sleep_log = (r["case"] / "sleep-log").read_text() if (r["case"] / "sleep-log").exists() else ""
+        timeout_log = (r["case"] / "timeout-log").read_text() if (r["case"] / "timeout-log").exists() else ""
+        self.check("dedup retry backoff is 2 4 8 seconds", sleep_log.splitlines() == ["2", "4", "8"], sleep_log)
+        run_list_timeouts = [x for x in timeout_log.splitlines() if "/actions/workflows/" in x]
+        self.check("dedup wraps gh api in timeout 10s", len(run_list_timeouts) == 4 and all(x.startswith("10s gh api --paginate ") for x in run_list_timeouts), timeout_log)
 
         s = copy.deepcopy(empty_scenario)
         s["runs"]["malformed"] = True
         r = self.scenario("malformed", s)
-        self.check("dedup treats malformed JSON as failure", not r["duplicate"])
+        self.check("dedup treats malformed JSON as failure", r["sends"])
 
         s = copy.deepcopy(empty_scenario)
         many = [run_obj(4000 + i, f"notify #{PR} opened") for i in range(1000)]
         pages = [many[i:i + 100] for i in range(0, 1000, 100)]
         s["runs"] = {"pages": runs_pages(pages)}
         r = self.scenario("cap", s)
-        self.check("dedup sends at 1000-item cap without positive", not r["duplicate"])
+        self.check("dedup sends at 1000-item cap without positive", r["sends"])
 
         s = copy.deepcopy(empty_scenario)
         s["runs"] = {"pages": runs_pages([[]])}
         r = self.scenario("budget", s, date_step="200")
-        self.check("dedup sends after time budget", not r["duplicate"])
+        self.check("dedup sends after time budget", r["sends"])
         self.check("dedup time budget warns", "::warning::" in r["stderr"], r["stderr"])
+
+        s = copy.deepcopy(empty_scenario)
+        r = self.scenario("timeout-clamped", s, date_values="1000,1000,1115")
+        timeout_log = (r["case"] / "timeout-log").read_text() if (r["case"] / "timeout-log").exists() else ""
+        timeout_lines = timeout_log.splitlines()
+        self.check("dedup clamps api timeout to remaining budget", r["sends"] and len(timeout_lines) >= 2 and timeout_lines[1].startswith("5s gh api --paginate "), timeout_log)
+
+        s = copy.deepcopy(empty_scenario)
+        s["runs"]["fail"] = 9
+        r = self.scenario("sleep-clamped", s, date_values="1000,1000,1000,1119,1121")
+        sleep_log = (r["case"] / "sleep-log").read_text() if (r["case"] / "sleep-log").exists() else ""
+        self.check("dedup clamps retry sleep to remaining budget", r["sends"] and sleep_log.splitlines() == ["1"], sleep_log)
 
         s = copy.deepcopy(empty_scenario)
         cand = run_obj(3701, title, sha=OTHER_SHA)
         s["runs"] = {"pages": runs_pages([[cand]])}
         s["jobs:3701"] = {"pages": positive_jobs()}
         r = self.scenario("different-sha", s)
-        self.check("dedup ignores different head sha", not r["duplicate"])
+        self.check("dedup ignores different head sha", r["sends"])
 
         s = copy.deepcopy(empty_scenario)
         malformed_run = {"id": "3801", "event": "pull_request", "head_sha": SHA}
         s["runs"] = {"pages": runs_pages([[malformed_run]])}
         r = self.scenario("malformed-entry", s)
-        self.check("dedup malformed run entry stays fail-open", not r["duplicate"])
+        self.check("dedup malformed run entry stays fail-open", r["sends"])
 
         s = copy.deepcopy(empty_scenario)
         s[f"jobs:{OWN_ID}"]["fail"] = 9
         r = self.scenario("own-fail-open", s)
-        self.check("dedup sends after own jobs failure without positive", not r["duplicate"])
+        self.check("dedup sends after own jobs failure without positive", r["sends"])
 
         s = copy.deepcopy(empty_scenario)
         s["runs"]["empty_output"] = True
         r = self.scenario("empty-runs-output", s)
-        self.check("dedup treats empty run-list output as failure", not r["duplicate"])
+        self.check("dedup treats empty run-list output as failure", r["sends"])
 
         s = copy.deepcopy(empty_scenario)
         s["runs"]["missing_array"] = True
         r = self.scenario("missing-runs-array", s)
-        self.check("dedup treats missing workflow_runs array as failure", not r["duplicate"])
+        self.check("dedup treats missing workflow_runs array as failure", r["sends"])
 
         s = copy.deepcopy(empty_scenario)
         cand = run_obj(3901, title)
         s["runs"] = {"pages": runs_pages([[cand]])}
         s["jobs:3901"] = {"missing_array": True}
         r = self.scenario("missing-jobs-array", s)
-        self.check("dedup treats missing jobs array as failure", not r["duplicate"])
+        self.check("dedup treats missing jobs array as failure", r["sends"])
+
+        s = copy.deepcopy(empty_scenario)
+        few = [run_obj(3950 + i, f"notify #{PR} opened") for i in range(10)]
+        s["runs"] = {"pages": runs_pages([few], total_count=1001)}
+        r = self.scenario("total-count-over-cap", s)
+        self.check("dedup sends when total_count exceeds 1000", r["sends"])
 
         s = copy.deepcopy(empty_scenario)
         positive = run_obj(4000, title, created="2026-01-02T00:00:00Z")
@@ -422,7 +458,7 @@ class Harness:
         progressed["runs"] = {"pages": runs_pages([[first_run]])}
         progressed[f"jobs:{OWN_ID}"] = {"pages": positive_jobs()}
         r2 = self.scenario("repeat-second", progressed, run_id=OWN_ID + 1)
-        self.check("dedup repeated same head sends first and skips second", not r1["duplicate"] and r2["duplicate"], f"first={r1['output']} second={r2['output']}")
+        self.check("dedup repeated same head sends first and skips second", r1["sends"] and r2["duplicate"], f"first={r1['output']} second={r2['output']}")
 
         calls = r["calls"] or self.scenario("query-shape", empty_scenario)["calls"]
         run_calls = [c for c in calls if "/actions/workflows/" in c["endpoint"]]
@@ -480,10 +516,14 @@ class Harness:
             got = out.read_text() if out.exists() else ""
             ok = p.returncode == 0 and f"delivered={'true' if want else 'false'}" in got
             self.check(f"send {label} delivered={want}", ok, p.stderr + got)
-            leak = "WEBHOOK-CANARY" in p.stdout + p.stderr + got or "AUTH-CANARY" in p.stdout + p.stderr + got
+            argv_text = (case / "curl-args").read_text() if (case / "curl-args").exists() else "missing curl argv log"
+            leak_text = p.stdout + p.stderr + got + argv_text
+            leak = "WEBHOOK-CANARY" in leak_text or "AUTH-CANARY" in leak_text
             self.check(f"send {label} does not leak secrets", not leak)
-        rec = subprocess.run(["bash", str(self.extracted / "record.sh")], text=True, capture_output=True)
-        self.check("Record delivery prints only fixed confirmation", rec.returncode == 0 and "Delivery confirmed by HTTP 2xx." in rec.stdout and "CANARY" not in rec.stdout)
+        rec_env = os.environ.copy()
+        rec_env.update({"WEBHOOK_URL": "https://secret.example/WEBHOOK-CANARY", "WEBHOOK_AUTH": "Bearer AUTH-CANARY"})
+        rec = subprocess.run(["bash", str(self.extracted / "record.sh")], env=rec_env, text=True, capture_output=True)
+        self.check("Record delivery prints only fixed confirmation", rec.returncode == 0 and rec.stdout == "Delivery confirmed by HTTP 2xx.\n" and rec.stderr == "")
 
     def run_static_tests(self):
         text = WORKFLOW.read_text()
@@ -493,6 +533,8 @@ class Harness:
         self.check("workflow still has no checkout or uses", "actions/checkout" not in text and not re.search(r"^\s+uses:", text, re.M))
         rec_section = text[text.find("- name: Record delivery"):]
         self.check("Record delivery has no continue-on-error", "continue-on-error" not in rec_section)
+        dedup_section = text[text.find("- name: Check duplicate notification"):text.find("- name: Note duplicate-head skip")]
+        self.check("dedup is structurally fail-open", "continue-on-error: true" in dedup_section)
         self.check("Send notification has id send", re.search(r"- name: Send notification\n\s+id: send", text) is not None)
 
     def run(self):

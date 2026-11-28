@@ -137,6 +137,8 @@ jobs:
       # Record delivery step が成功したこと。調べられないときは送る側に倒す。
       - name: Check duplicate notification
         id: dedup
+        # 想定外の実装エラーでも通知を落とさない。duplicate=true が無ければ Send に進む。
+        continue-on-error: true
         if: github.event.action == 'synchronize' && steps.gate.outputs.should_send == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -150,11 +152,20 @@ jobs:
           duplicate=false
 
           retry_wait() {
+            wait_seconds=0
             case "$1" in
-              0) sleep 2 ;;
-              1) sleep 4 ;;
-              2) sleep 8 ;;
+              0) wait_seconds=2 ;;
+              1) wait_seconds=4 ;;
+              2) wait_seconds=8 ;;
             esac
+            remaining=$((deadline - $(date +%s)))
+            if [ "$remaining" -le 0 ]; then
+              return 1
+            fi
+            if [ "$wait_seconds" -gt "$remaining" ]; then
+              wait_seconds="$remaining"
+            fi
+            sleep "$wait_seconds"
           }
 
           api_get() {
@@ -163,11 +174,16 @@ jobs:
             label="$3"
             attempt=0
             while [ "$attempt" -le 3 ]; do
-              if [ "$(date +%s)" -ge "$deadline" ]; then
+              remaining=$((deadline - $(date +%s)))
+              if [ "$remaining" -le 0 ]; then
                 echo "::warning::dedup check reached the 120-second budget; sending notification unless confirmed delivery is found." >&2
                 return 1
               fi
-              if output="$(timeout 10s gh api --paginate "$endpoint" 2>/dev/null | jq -s -c -e "$filter" 2>/dev/null)"; then
+              api_timeout=10
+              if [ "$remaining" -lt "$api_timeout" ]; then
+                api_timeout="$remaining"
+              fi
+              if output="$(timeout "${api_timeout}s" gh api --paginate "$endpoint" 2>/dev/null | jq -s -c -e "$filter" 2>/dev/null)"; then
                 printf '%s' "$output"
                 return 0
               fi
@@ -176,7 +192,10 @@ jobs:
                 return 1
               fi
               echo "dedup: retrying $label (attempt $((attempt + 2)) of 4)" >&2
-              retry_wait "$attempt"
+              if ! retry_wait "$attempt"; then
+                echo "::warning::dedup check reached the 120-second budget; sending notification unless confirmed delivery is found." >&2
+                return 1
+              fi
               attempt=$((attempt + 1))
             done
             return 1

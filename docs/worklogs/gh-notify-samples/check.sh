@@ -86,8 +86,8 @@ build_payload() {
 #   3. dedup（Check duplicate notification step + Send step if）:
 #                      synchronize で、同じ PR・同じ head sha を送った過去
 #                      run があるときは送らない（第3引数 dup=true で再現）。
-#                      dedup は過去 run の送信を step 名 "Send notification" で
-#                      照合するため、workflow の Send step 名を変えるときは
+#                      dedup は過去 run の送信を step 名 "Record delivery" で
+#                      照合するため、workflow の Record delivery step 名を変えるときは
 #                      dedup step の照合文字列も合わせること
 gate_decision() {
   local ev="$1" event_name="$2" dup="${3:-false}"

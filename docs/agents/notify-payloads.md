@@ -113,7 +113,7 @@ agent-watch は、webhook に送るのと同じ `pelway.agent-watch/v1` の JSON
 
 「送った」とは、webhook が HTTP 2xx を返し、送信直後の `Record delivery` step が成功したことである。`Send notification` は curl 失敗や非 2xx でも workflow を失敗にしないが、その場合は `delivered=false` を出し、`Record delivery` は実行されない。`Record delivery` を持たない run や、step が失敗・取消・欠損の run は送信済みに数えない。
 
-dedup は自分の run の過去 attempt を先に調べ、その後で候補 run を新しい順に調べる。run 一覧と jobs 一覧はページングして読む。API の取得失敗、壊れた API 応答、1000 件の検索上限、120 秒の探索上限では、確実な送信済みが見つからない限り送る側に倒す。確実な送信済みが見つかれば、ほかの履歴が読めなくても送らない。
+dedup は自分の run の過去 attempt を先に調べ、その後で候補 run を新しい順に調べる。run 一覧と jobs 一覧はページングして読む。API の取得失敗、dedup スクリプト自体の失敗、壊れた API 応答、1000 件の検索上限、120 秒の探索上限では、確実な送信済みが見つからない限り送る側に倒す。確実な送信済みが見つかれば、ほかの履歴が読めなくても送らない。
 
 この dedup は重複を減らすもので、原子的・永続的な exactly-once の保証ではない。受け手は同じ PR・同じ head sha の `synchronize` が 2 回以上届くことを前提にする。重複しうるのは、上の fail-open の条件に加え、送信済みだった可能性のある run に `Record delivery` が無いときである。
 
