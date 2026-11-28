@@ -31,3 +31,15 @@
   確かめ方: `client/scripts/type-ratchet.test.ts` の「更新は悪化分を書かず、改善を書いても悪化が残れば失敗する」。
 - 失敗の筋: verify の依存配線が外れ、ラチェットが検査経路から回らない。
   確かめ方: `client/scripts/type-ratchet.test.ts` の「client:type-ratchet が bootstrap と client:verify の間に入り、verify-static から回る」と `mise tasks deps verify-static` の出力。
+
+## 実装者メモ（round 1）
+
+対象 head: 2a7e8468daa55ce0732a48388bbc8f882d473ca7
+
+1. 詰まった箇所: 手順 4 / `client/scripts/type-ratchet.ts`: tsc の複数行診断の字下げ行を形式外として扱いすぎ、初回の実機確認が fail closed で止まった。頭の行だけを数え、字下げの続き行は件数に入れない形にした。
+2. 曖昧だった文: 「`mise run verify` から回る → `mise tasks deps verify`」（Issue #774 の「受け入れ条件」）
+3. 仮定と解釈: verify の構造は変えず、hatai の決定どおり `verify-static` の依存と `mise run verify` の成功を証拠にした。`bun check` の診断は client/ からの相対パスで出る前提にし、診断の続き行は字下げ行として読み飛ばし、頭の行だけを数える解釈にした。
+4. 足りなかった情報・検証手段: 複数行診断を安定して出す実機入力は既存コードに無かったため、`TS2322` の実出力で字下げ行の形を確かめた。
+5. 改善案: `docs/superpowers/specs/agent-team.md` の「実装担当」に「テストを先に書くときは、検査対象の出力が複数行になる既存例を実機で先に確かめる」と足す。
+
+使ったスキル: implement-issue、write-pull-request、brainstorming、grilling
