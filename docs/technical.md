@@ -306,7 +306,6 @@ AI社員（Bot）が生成した発言の本文は、チャンネルへ保存・
 
 ## 8. 未決事項
 
-- Rustデスクトップの作り方（Tauriなど）と、出す時期（[ADR 0014](adr/0014-desktop-client-electron.md) で決定：Electron で Web UI を包む。D1 から Electron で作り、D3 も Electron で出す）
 - 実行環境の提供元（E2B、Fly.io、Cloudflare Containers など）。料金は§9。AI Botの作業場をどのくらい長く残すかで向き不向きが変わる
 - 日本国内でのデータ保存・推論が必要になる顧客をどう扱うか
 - 外への通信の許可先を、誰がどの単位で決めるか

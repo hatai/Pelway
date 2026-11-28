@@ -35,6 +35,6 @@
 ## 5. この文書の試験で確かめられないもの
 
 - `mise run client:dev` での起動は、GUI がある環境で人が確かめる。現在の期待値は、窓に「Electron と Octane の土台が動いています。」と出ること。手順は verify-pelway の `features/client-ui.md`。
-- 現在の `client:verify` は Electron を起動しない。Playwright の Electron E2E は #762 で作る。E2E ができるまで、実際の Chromium の描画・OS 連携・ウィンドウの挙動を `bun test` で合格にしない。
+- Playwright の Electron E2E は #762 で作る。E2E ができるまで、実際の Chromium の描画・OS 連携・ウィンドウの挙動を `bun test` で合格にしない。
 - 実機の IME・文字選択・NVDA・VoiceOver・Orca は 3 OS で確かめる。happy-dom の試験はその代わりにならない。
 - サーバーとの通信は #333・#817、サーバーと開発版の同時起動は #757 で進める。通信の実装ができるまで、画面操作がサーバーへ届くことをこの文書の単体試験で合格にしない。
