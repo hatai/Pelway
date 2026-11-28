@@ -3,8 +3,8 @@
 # モック gh が item-list の応答を返し、見張りが人間名義の gh でボードを読んで
 # スナップショット JSON を書き出すこと、取得に失敗した巡回では前の書き出しが
 # 残ること（消えない・空にならない）、間隔の管理はプロセス内の記憶だけで行い
-# 共有の書き出しの内容では取り直しを止めないこと、打ち切られた応答は件数で
-# 取り直すこと、容量の上限を超える書き出しは公開しないことを確かめる。
+# 前の書き出しの内容では取り直しを止めないこと（置き場の取り違えへの多層防御）、
+# 打ち切られた応答は件数で取り直すこと、容量の上限を超える書き出しは公開しないことを確かめる。
 # 本物のボードには触れない。
 set -uo pipefail
 
@@ -136,10 +136,12 @@ start_watch() {
   local interval="${INTERVAL:-0}" mock_fail="${RFAIL:-}" mock_truncate="${TRUNC:-}" mock_bad="${BADITEM:-}"
   echo 0 > "$MOCK/sleeps"
   local snapvar=(PELWAY_BOARD_SNAPSHOT="$SNAP")
-  [[ -n "${NOSNAPVAR:-}" ]] && snapvar=()
+  # 指定しない起動では呼び出し元からの引き継ぎも外す（env -u は先頭に置く）
+  local unsetvar=()
+  [[ -n "${NOSNAPVAR:-}" ]] && snapvar=() && unsetvar=(-u PELWAY_BOARD_SNAPSHOT)
   local locenv=()
   [[ -n "${LOCALE_ASCII:-}" ]] && locenv=(LC_ALL=C PYTHONUTF8=0)
-  env "${locenv[@]}" \
+  env "${unsetvar[@]}" "${locenv[@]}" \
   MOCK="$MOCK" SLEEP_MAX="$1" MOCK_READ_FAIL="$mock_fail" MOCK_TRUNCATE="$mock_truncate" MOCK_BAD_ITEM="$mock_bad" MOCK_NONASCII="${NONASCII:-}" UTF8HACK="${UTF8HACK:-}" \
   PELWAY_BOARD_QUEUE_DIR="$QUEUE" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
   PELWAY_PATROL_STATE="$ROOT/state/pelway/patrol-state.json" \
@@ -193,8 +195,8 @@ INTERVAL=86400 start_watch 4
 n_calls=$(grep -c "item-list" "$MOCK/gh-calls.log" || true)
 check "within interval only one fetch per process" test "$n_calls" -eq 1
 
-# 5. 偽の新しい書き出し（エージェントが共有の置き場に置ける）があっても取り直す。
-#    鮮度の判定に共有の書き出しの内容を使わない（使うと、偽の fetched_at で
+# 5. 偽の新しい書き出し（置き場を取り違えた構成で置かれうる）があっても取り直す。
+#    鮮度の判定に前の書き出しの内容を使わない（使うと、偽の fetched_at で
 #    取り直しが止まり、偽のカードが本物に戻らない）
 now_epoch=$(date +%s)
 python3 -c 'import json,sys; json.dump({"version": 1, "fetched_at": float(sys.argv[2]), "items": [{"id": "FAKE", "type": "Issue", "number": 999, "status": "Todo", "labels": ["ready-for-agent"], "assignees": []}]}, open(sys.argv[1], "w"))' "$SNAP" "$now_epoch"
@@ -204,7 +206,7 @@ check "forged fresh snapshot does not suppress refetch" has "$MOCK/gh-calls.log"
 check "forged snapshot replaced with real data" test "$(jqv '[i["number"] for i in d["items"]]' "$SNAP")" = "[810, 811, 812]"
 
 # 6. 書き出し先に FIFO が置かれていても見張りは止まらず、通常ファイルに置き換わる
-#    （共有の置き場に別の利用者が名前付きパイプを作っても、巡回がそこで待ち続けない）
+#    （置き場の取り違えや事故で名前付きパイプがあっても、巡回がそこで待ち続けない）
 rm -f "$SNAP"
 mkfifo "$SNAP"
 INTERVAL=0 start_watch 2

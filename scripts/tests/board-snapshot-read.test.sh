@@ -158,9 +158,9 @@ run_read
 check "draft issue without number is ok" test "$rc" -eq 0
 
 # 8. 所有者が自分でない書き出しは broken（detail: foreign-owner）にする。
-# 共有の置き場では別の uid の利用者が見張りより先に書き出しを置け、
-# sticky bit で見張りの置き換えが効かなくなる。所有者を確かめないと、
-# 偽の列（着手の合図の Todo・停止の Backlog）を本物と読んでしまう。
+# 多層防御: 置き場の取り違えやマウントの写像のずれで別の uid の書き出しを
+# 読む構成になると、所有者を確かめない限り、偽の列（着手の合図の Todo・
+# 停止の Backlog）を本物と読んでしまう。
 # 比べる uid は PELWAY_BOARD_SNAPSHOT_EXPECT_UID で差し替える（テスト用）。
 write_ok_snapshot $((NOW - 60))
 export PELWAY_BOARD_SNAPSHOT_EXPECT_UID=99999
@@ -189,8 +189,9 @@ check "surrogate: stdout is a single valid json" python3 -c 'import json,sys; js
 check "surrogate: no traceback" test ! -s "$ROOT/err.txt"
 
 # 10. DraftIssue の number は型検査を通らない値（非有限数）であってはならない。
-# DraftIssue は番号を持たないため number の検査を飛ばすが、値が在ればそのまま
-# 成功結果にコピーされ、非有限数は標準 JSON として無効な表記で出力される
+# reader は DraftIssue も含めて number を「無いか正の整数」に限る。
+# 限らないと、値がそのまま成功結果にコピーされ、非有限数は標準 JSON として
+# 無効な表記で出力される
 python3 -I - "$SNAP" "$NOW" <<'PY'
 import json, sys
 items = [{"id": "PVTI_d", "type": "DraftIssue", "number": float("nan"), "status": "Todo", "labels": [], "assignees": []}]
@@ -215,12 +216,12 @@ mkdir -p "$ROOT/state/pelway/conductor-watch"
 write_ok_snapshot $((NOW - 60))
 cp "$SNAP" "$ROOT/state/pelway/conductor-watch/board-snapshot.json"
 rm -f "$SNAP"
-( cd "$ROOT" && XDG_STATE_HOME="$ROOT/state" HOME="$ROOT/nohome" PELWAY_BOARD_SNAPSHOT_NOW="$NOW"     PELWAY_BOARD_SNAPSHOT_ALLOW_WRITABLE=1 python3 "$READER" > "$ROOT/out.json" 2> "$ROOT/err.txt" )
+( cd "$ROOT" && env -u PELWAY_BOARD_SNAPSHOT XDG_STATE_HOME="$ROOT/state" HOME="$ROOT/nohome" PELWAY_BOARD_SNAPSHOT_NOW="$NOW" PELWAY_BOARD_SNAPSHOT_ALLOW_WRITABLE=1 python3 "$READER" > "$ROOT/out.json" 2> "$ROOT/err.txt" )
 rc=$?
 check "default path is state dir: exit 0" test "$rc" -eq 0
 check "default path is state dir: ok=true" test "$(jqv 'd["ok"]')" = "True"
 
-# 13. 公開先が指揮役側から書き換えられる場所（ファイル・親ディレクトリのいずれかが
+# 12. 公開先が指揮役側から書き換えられる場所（ファイル・親ディレクトリのいずれかが
 # 書き込み可）にある書き出しは broken（detail: writable-location）にする。
 # 所有者の検査では同じ uid の別のエージェントの変更を区別できないため、
 # 運用で使う公開先はホストだけが更新できる場所（sandbox から読み取り専用）に限る。
@@ -248,6 +249,34 @@ chmod 555 "$ROOT/chain/pelway/conductor-watch"
 SNAP="$ROOT/chain/pelway/conductor-watch/board-snapshot.json" ALLOW_WRITABLE='' run_read
 check "writable grandparent: detail is writable-location" test "$(jqv 'd["detail"]')" = "writable-location"
 chmod 755 "$ROOT/chain/pelway/conductor-watch"  # trap の rm が片付けられるように戻す
+
+# 13. positive: チェーン全体が読み取り専用のマウントにある書き出しは受け付ける。
+# 否定の試験だけでは「常に拒否する退化」に気づけないため、bwrap で読み取り専用の
+# bind マウントを作って確かめる（bwrap の無い環境では飛ばす）。
+# 対照として、同じ配置を書き込み可の bind にすると拒否されることも確かめる
+write_ok_snapshot $((NOW - 60))
+mkdir -p "$ROOT/rochain/pelway/conductor-watch"
+cp "$SNAP" "$ROOT/rochain/pelway/conductor-watch/board-snapshot.json"
+if command -v bwrap >/dev/null 2>&1 && bwrap --dev-bind / / true 2>/dev/null; then
+  bwrap --die-with-parent --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
+    --ro-bind "$ROOT/rochain" /tmp/rochain \
+    --setenv PELWAY_BOARD_SNAPSHOT /tmp/rochain/pelway/conductor-watch/board-snapshot.json \
+    --setenv PELWAY_BOARD_SNAPSHOT_NOW "$NOW" \
+    python3 "$READER" > "$ROOT/out.json" 2> "$ROOT/err.txt"
+  rc=$?
+  check "readonly mount: exit 0" test "$rc" -eq 0
+  check "readonly mount: ok=true" test "$(jqv 'd["ok"]')" = "True"
+  bwrap --die-with-parent --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
+    --bind "$ROOT/rochain" /tmp/rwchain \
+    --setenv PELWAY_BOARD_SNAPSHOT /tmp/rwchain/pelway/conductor-watch/board-snapshot.json \
+    --setenv PELWAY_BOARD_SNAPSHOT_NOW "$NOW" \
+    python3 "$READER" > "$ROOT/out.json" 2> "$ROOT/err.txt"
+  rc=$?
+  check "writable mount control: exit nonzero" test "$rc" -ne 0
+  check "writable mount control: detail is writable-location" test "$(jqv 'd["detail"]')" = "writable-location"
+else
+  check "readonly mount: skip (bwrap unavailable)" true
+fi
 
 printf '\n'
 if ((${#failures[@]})); then

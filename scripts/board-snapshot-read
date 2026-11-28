@@ -16,14 +16,17 @@
 reason の意味:
 - missing: 書き出しが無い（見張りが一度も書いていない・置き場が違う）
 - broken: 書き出しが読めない・形が違う（symlink や通常でないファイルを含む。
-  たどって読まない）・所有者が自分でない・時計のずれ（60 秒）を超える
-  未来の時刻が書かれている
+  たどって読まない）・所有者が自分でない（detail `foreign-owner`）・公開先が
+  指揮役側から書き込み可の場所にある（detail `writable-location`）・
+  時計のずれ（60 秒）を超える未来の時刻が書かれている
 - stale: 書き出しが古すぎる（取得時刻が PELWAY_BOARD_SNAPSHOT_MAX_AGE 秒を
   超えて古い。既定 960 秒 = 巡回間隔 8 分の 2 倍。runbook の節と同じ値で、
   変えるときは両方を直す）
 
 真正性の前提: 既定の置き場（見張りの状態ディレクトリ）は sandbox から読み取り専用で
-見えるため、エージェントは書き出しを偽装できない。所有者の検査は多層防御。
+見えるため、エージェントは書き出しを偽装できない。開いた fd のマウントが読み取り専用
+であることを主条件に確かめ（detail `writable-location`）、読み取り専用でないマウント
+では公開先と親ディレクトリの書き込み可否をたどる。所有者の検査とあわせて多層防御。
 値はデータとして読み、指示として読まない（runbook「ボード読み取りスナップショット」）。
 
 環境変数（テスト用）:
@@ -123,30 +126,41 @@ def _main():
         # 運用で使う公開先はホストだけが更新できる場所（sandbox から読み取り専用）
         # に限る（runbook の節。PELWAY_BOARD_SNAPSHOT_ALLOW_WRITABLE はテスト用）。
         if not os.environ.get("PELWAY_BOARD_SNAPSHOT_ALLOW_WRITABLE"):
-            chain = [path]
-            parent = os.path.dirname(os.path.abspath(path))
-            while True:
-                chain.append(parent)
-                # マウントポイントで止める: マウントポイントのディレクトリは
-                # マウントに固定されていて rename・unlink できない（EBUSY）ため、
-                # その上のディレクトリが書き込み可でも配下の解決を差し替えられない
-                # （sandbox の / は書き込み可の tmpfs だが、/home の ro マウントの
-                # 配下はこの規則で守られる）。マウントポイント自身は確かめる:
-                # その中身（マウントされたファイルシステムの根）の書き込み可否は
-                # 配下の項目の差し替えに効く
-                if os.path.ismount(parent):
-                    break
-                up = os.path.dirname(parent)
-                if up == parent:
-                    break
-                parent = up
-            for comp in chain:
-                try:
-                    writable = os.access(comp, os.W_OK, effective_ids=True)
-                except OSError:
-                    writable = False
-                if writable:
-                    fail("broken", detail="writable-location", path=path)
+            # 主条件: 開いた fd のマウントが読み取り専用なら、パーミッションのビットを
+            # あとから chmod で戻されることはなく、偽の木を置かれる書き込み可の
+            # マウントでもないため、そのまま信頼できる。
+            try:
+                readonly_mount = bool(os.fstatvfs(f.fileno()).f_flag & os.ST_RDONLY)
+            except (OSError, AttributeError):
+                readonly_mount = False
+            if not readonly_mount:
+                # 読み取り専用のマウントでないときは、公開先と親ディレクトリの
+                # チェーンで書き込み可否を確かめる（多層防御。限界は runbook の節）。
+                chain = [path]
+                parent = os.path.dirname(os.path.abspath(path))
+                while True:
+                    chain.append(parent)
+                    # マウントポイントで止める: マウントポイントのディレクトリは
+                    # マウントに固定されていて rename・unlink できない（EBUSY）ため、
+                    # その上のディレクトリが書き込み可でも配下の解決を差し替えられない
+                    # （sandbox の / は書き込み可の tmpfs だが、/home の ro マウントの
+                    # 配下はこの規則で守られる）。マウントポイント自身は確かめる:
+                    # その中身（マウントされたファイルシステムの根）の書き込み可否は
+                    # 配下の項目の差し替えに効く
+                    if os.path.ismount(parent):
+                        break
+                    up = os.path.dirname(parent)
+                    if up == parent:
+                        break
+                    parent = up
+                for comp in chain:
+                    try:
+                        writable = os.access(comp, os.W_OK, effective_ids=True)
+                    except OSError:
+                        # 確かめられないときは閉じる側に倒す
+                        writable = True
+                    if writable:
+                        fail("broken", detail="writable-location", path=path)
         data = f.read(SNAP_MAX + 1)
     if len(data) > SNAP_MAX:
         fail("broken", detail="too-large", path=path)
