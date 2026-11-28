@@ -113,4 +113,4 @@ Issues are tracked in GitHub Issues (hatai/Pelway) via the `gh` CLI. See `docs/a
 
 ### Skill helpers
 
-- A skill's verifiable steps may ship as an executable helper.
+- A skill's verifiable steps may ship as an executable helper (local-managed skills only).
