@@ -10,4 +10,16 @@
 4. 足りなかった情報・検証手段: GUI を出せる環境が無いため、`mise run client:dev` の手動起動確認は未実施。文書は「verify-run の合否に入れない補助手順」として書いた。
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「検査してコミットし、行数を確かめてから push する」に「Linux sandbox で `/tmp` の所有者が uid 65534 のときは `TMPDIR=/dev/shm/<issue>` を使う」を足す。
 
-使ったスキル: `.agents/skills/implement-issue`、`.agents/skills/write-pull-request`
+使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 2）
+
+対象 head: 9aed4e57dbc61343c49aa7e5780b9c35830b17dc
+
+1. 詰まった箇所: `docs/technical/v0.7/body/08-decisions-open.md`: A2 で元の決定文を残しつつ、置き換え後の共通核を注記で示す形を確認した。
+2. 曖昧だった文: 「[技術仕様 v0.7](../technical/v0.7/README.md) の本文は消さず、この ADR で置き換えた箇所（08 の U05・A1・A2、02 の冒頭・「ネイティブUI」・クライアントの行・「Discordの事例」、07 の比較とメモリ目標）に注記を入れる。」（ADR 0014「v0.7 との関係」）
+3. 仮定と解釈: Issue #816 はスキル改善ではなく Electron 決定への文書同期なので、`improve-skills` 手順 7 の引き渡し記録は付けない。改訂日と決定日の記述は AGENTS.md の「Facts over history」より Issue の受け入れ条件を優先する。
+4. 足りなかった情報・検証手段: 範囲限定 grep の残存行の分類は、行ごとの表か分類ごとの代表例かが Issue 本文だけでは読み分けにくい。分類ごとに対象行を示す表を PR 本文へ足す。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「残存行の分類を求める条件では、行ごとか分類ごとかを指定する」を足す。
+
+使ったスキル: implement-issue、write-pull-request
