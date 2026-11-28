@@ -1,0 +1,12 @@
+action=read src=environment/slots.json
+action=read src=environment/effective.json
+action=read src=environment/issues.json
+action=read src=environment/threads.json
+action=read src=environment/prs.json
+action=run cmd="scripts/agent-gh dev issue edit 820 --add-label needs-decision" exit=0
+action=run cmd="scripts/agent-gh dev issue edit 821 --add-label needs-decision" exit=0
+action=run cmd="scripts/agent-gh dev issue edit 822 --add-label agent:working" exit=0
+action=launch thread=impl-822 title="[実装] #822 runbook の誤記を直す"
+action=run cmd="scripts/agent-gh dev pr edit 841 --add-label automerge" exit=0
+action=log path=docs/worklogs/conductor.md body="issue=#820 issue=#821 stopped: missing codex（needs-decision）。issue=#822 assigned。pr=#840 codex approve なし automerge 見送り。pr=#841 automerge"
+action=report to=human body="missing codex: #820/#821 を needs-decision。#822 は着手。#840 は codex approve 待ち。#841 をキューへ"

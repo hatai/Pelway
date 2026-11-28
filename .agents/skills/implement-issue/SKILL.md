@@ -33,13 +33,14 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | Issue が依存するリポジトリ外の成果物（関連情報の URL・抜粋）に到達できない | 到達できなかった成果物の名前と、試した手順（URL へのアクセス結果、抜粋に欠けている部分） |
 | Issue の未決事項に挙がっておらず、避けて進めることもできず、受け入れ条件の成否に関わる判断が必要 | 必要な判断の内容と、避けられない理由。判断を仰ぐ相手（起票者か人間） |
 | Issue の未決事項に決定権者の指定（例: 「hatai が決める」）があり、その決定待ちの部分が避けて進められない | 決定を仰ぐ相手と、決定待ちの未決事項の内容。実装者の判断で代替案を選んで進めず、決定が記録されるのを待つ |
-| `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）、手元の head の SHA、`git diff --stat origin/main...HEAD` の出力。push せずに止まる。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる |
+| `mise run pr-size` が追加 800 行または削除 2000 行の上限を超える | 分割案（PR ごとの範囲と見込み行数）、手元の head の SHA、`git diff --stat origin/main...HEAD` の出力。push せずに止まる。行数を合わせるためにテスト・受け入れ条件の確認・説明を削らない。重複の除去で収まらなければ、その時点で止まる。分けるときは、Issue に hatai 名義の `<!-- split-plan -->` が入るまでレビューを委託しない（手順 6・8） |
 | 作業に `.github/workflows/` の変更が必要（`pelway-dev` には workflow を push する権限がない） | 必要な変更の内容。人間が行う |
 | sandbox が操作を拒否した（worktree 外への書き込み・実行・ネットワークなど） | 止められた操作とコマンド、エラー文。抜け道（`systemd-run`・`nohup`・別のシェル等）は使わない |
 | 委託したレビューが `failed` で、`error:` が `設定の不備:` で始まる（レビュー担当の環境の確認で外したツールが残っている。skill `review-pr` の「決まり」）。再委託しない | `error:` の行と、委託した担当。手順 9「投稿後の `設定の不備:` の記録」で確かめた投稿の有無（投稿前と確認／記録を残した（記録の内容）／投稿を特定できず `review: unknown` で記録） |
 | 委託の結果を投稿に結び付けられない（手順 9: 報告を受けた実行の投稿が 0 件・2 件以上・状態の不一致のまま、または報告を待つ実行が無いのに、現在の head に報告を受けた実行の投稿でない `pelway-review[bot]` の `APPROVED`・`CHANGES_REQUESTED` の投稿（どの実行にも結び付かない投稿と、報告を確かめられない実行の投稿）が残る。PR にも `needs-human` を付ける） | 委託記録の ID と担当、見つかった投稿の id・`commit_id`・`state`・末尾行。報告を受けた実行の投稿でない投稿が残るときは、hatai にその投稿の dismiss を頼むこと（手順 9「結び付かない投稿の取り消し」） |
 | 手順 8 の helper `required-checks` が、実行し直しても続けて 3（判定できない）を返した | 2 回の実行の標準エラー出力と、対象の PR 番号 |
 | レビューの委託が `runtimeMode: "auto-accept-edits"` で受け付けられず、子タスクが作られなかった。`auto`・`full-access` に変えて委託し直さない | 委託の指定（`target`・`runtimeMode`）と、返ったエラー文 |
+| 合成済みの設定で必須の役に当たる担当が使えない（手順 8・9 の `effective` の JSON の `missing` に担当が入る）のに、レビューの委託または Draft の解除に進もうとした。PR は Draft のまま、委託も解除もしない（codex が使えないあいだは現在の head への codex の有効な Approve が取れず、skill `command-team` の「マージ」の条件を満たせないため。優先順位の表で選ばれたほかの担当の結果では代えない） | `missing` に入った担当と、それを出した実行の対象（login・ファイル）。Draft のまま置いた PR の番号と、人が選ぶ選択肢（codex を `use` に戻す・人が担当を割り当て直す・codex の復帰を待つ） |
 | round 3 のレビュー結果に must-fix が残った（別 Issue に回せる側の指摘は除く。4 回目の修正には入らない。round 4 に入るのは hatai の例外の判断だけ。skill `command-team` の「レビューのラウンド」）、`[文書のずれ]` の nit だけを直す round を通算 2 回終えた後に、また印の nit が残った（通算 3 回目には入らない）、委託が 2 回連続で `failed`（`checks timeout` と `wrong runtime` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort）。must-fix が残ったときは、must-fix の一覧と止まった head の sha。手元にすでに修正があれば worktree に置いたまま push も削除もしない |
 
 止まり方（止まった時点で、どの手順の途中でも手順 5 の形で実装者メモを書き、Issue のコメントに続けて貼る。メモを push しないので `docs/worklogs/` には書かなくてよい）:
@@ -173,6 +174,7 @@ scripts/agent-gh dev git push origin HEAD
 - 差分がミューテーションテスト対象の crate（`.cargo/mutants.toml` の examine_globs）のロジックに触れるときは、`mise run mutants:diff` も回し、結果（生き残りと対応）を実装者メモに書く。生き残りの分析は輸入スキル `mutation-testing`（下の「輸入スキル」の節）。
 - `mise run pr-size` はコミット済みの差分だけを数える。必ずコミットの後、push の前に実行する。追加 800 行または削除 2000 行の上限を超えたときは、例外が認められる前に push しない。`scripts/agent-gh-pr-size-gate` は例外の無い上限超過の push を止めるため、Draft PR を作るための push もしない。
 - 上限を超えたら、「止まる条件」の表の pr-size の行のとおり止まる。Issue のコメントには、分割案（PR ごとの範囲と見込み行数）、手元の head の SHA（`git rev-parse HEAD`）、`git diff --stat origin/main...HEAD` の出力を書く。
+- 分けるとき（分割が認められて PR を複数に分けて出すとき）は、Issue に hatai 名義の `<!-- split-plan -->` のコメントが入るまでレビューを委託しない（手順 8）。「止まる条件」の表の pr-size の行の決まりである。レビュー担当は hatai 名義の `<!-- split-plan -->` だけを分割の根拠に数え、実装担当が止まりのコメントに書いた分割案は数えないため（skill `review-pr` の手順 1）。
 - 例外が認められたあとに再開するときは、push 先のリポジトリとブランチを head とする開いた PR に `pr-size-exception` ラベルがあり、その PR が閉じる Issue に hatai が書いた本文先頭が `<!-- pr-size-exception -->` のコメントがあることを確かめてから push する。PR がまだ無いときはラベルを付けられずゲートが通らないため、例外だけでは push できず、分割または人間の判断を待つ。push したら、push 後の SHA を手順 5 のメモの「対象 head」に記入し、メモだけを独立したコミットにして push し、その後の head の必須チェックを確かめて手順 8 から再開する。縮小の指示が来たら、手順 9 の「修正依頼」として同じブランチで直す。
 - 積み上げ PR（分割計画で親 PR のブランチに積む PR。GitHub 上の base が main ではない PR）では `bash scripts/pr-size.sh --base <親ブランチ>` で測る。`mise run pr-size` は base=origin/main が既定のため、そのまま使うと親 PR の差分まで数えてしまい、上限超過で誤って止まる・例外扱いになる。
 
@@ -226,6 +228,11 @@ PR を作るたびに、T3 のスレッドにそのスレッドの PR を全部�
 
 差分が `scripts/agent-gh` を変えるとき、または `.claude/`・`.mcp.json`・`.codex/`・`.devin/`・`.cursor/`・`.cursorrules`・`.windsurf/`・`.windsurfrules`・`.agents/skills/review-pr/`・`.agents/skills/security-review/`・`.agents/skills/pr-watch/`・どのディレクトリの `AGENT.md`・`AGENTS.md`・`AGENTS.local.md`・`AGENTS.override.md`・`CLAUDE.md` を足す・変えるときはレビューを委託しない（後者はレビュー担当のツールの設定や従う手順を、委託の子が読む PR の版で差し替えうるため。`.devin/` は Devin CLI がプロジェクト層として読む config・hooks・rules・skills、`.windsurf/`・`.windsurfrules`・`AGENT.md`・`AGENTS.local.md`・`.cursor/`・`.cursorrules` は互換で読まれる経路、`.agents/skills/pr-watch/` は `review-pr` が待ち方の手順として従わせるスキル）。指揮役が main から立てるレビュースレッドに回るのを待ち、最後の返答を下の「ターンの終わりの状態の行」の `state: waiting-conductor` にして終える（委託の子の worktree は PR の head の checkout になるため、レビュー担当が PR の版の `scripts/agent-gh` を実行してしまう）。
 
+分けて出した PR と積み上げ PR（手順 6）は、次の条件がそろうまでレビューを委託しない。そろうのを待つあいだは `waiting-conductor` で終め、`next:` に待っているものを書く。分けて出した PR では hatai 名義の `<!-- split-plan -->` が Issue に入るのを、積み上げ PR では親 PR のマージを指揮役が検知して「続きをやり直す」を送るのを待つ。自分では委託も `watch_pull_request` もしない。
+
+- 分けて出した PR: Issue に hatai 名義の `<!-- split-plan -->` のコメントがあること（手順 6 の pr-size の項）。`scripts/agent-gh dev issue view <N> --json comments --jq '.comments[] | {author: .author.login, body}'` で、行頭が `<!-- split-plan -->` で `author.login` が `hatai` のコメントを確かめる。
+- 積み上げ PR: 親 PR のマージの後、main を merge で取り込み、push の前に GitHub 上の base（`scripts/agent-gh dev pr view <PR 番号> --json baseRefName --jq .baseRefName`）が main になっていることを確かめ、なっていなければ `scripts/agent-gh dev pr edit <PR 番号> --base main` で替えてから push していること。base が main でないあいだは必須チェックが走らず、下の `required-checks` は 2（待ち）のままになる。決まりの正本は skill `command-team` の「分割を認めるとき」。
+
 PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、レビューを委託する。対象 head で verify が fail、必須チェックが未完了、または例外が承認されていない pr-size の失敗（例外判断が未着を含む）のときは委託しない（レビュー担当（skill `review-pr` の手順 2）は verify の fail と例外の無い pr-size の fail を must-fix に数えるため、内容を読む前に結論が決まり、委託が空振りになる）。例外が承認された pr-size の失敗は通過に数えるため、委託の可否は GitHub 上のチェックの見た目ではなく下の終了コードに従う。通過は、委託の直前に同梱の helper `.agents/skills/implement-issue/required-checks <PR 番号>` を実行し、その終了コードで確かめる（標準出力は 2 つのチェックの判定 `<名前>: <pass|fail|pending>`。同じ名前の行の集計と pr-size の例外の扱いは skill `review-pr` の手順 2 と同じ。`bucket` の `skipping` を pass、`cancel` を fail に数えることと、閉じる Issue をリポジトリと番号の組で照会することは helper だけの規則で、helper の冒頭のコメントに書いてある）。
 
 - 0（通過）: 委託記録（下の「委託記録」の段落）を残してから、`delegate_task` を呼ぶ
@@ -256,7 +263,7 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 | claude | `[agents.claude].instance.review` | `[agents.claude].models` のモデル | `{"<[agents.claude].effort.option>": "<effort>"}` |
 | devin | `[agents.devin].instance.review` | `[agents.devin].models` のモデル | `mode` のみ受け付ける（省略してよい。effort の option は渡せず、effort の引き上げはできない） |
 
-表と担当の決定で読む `agent-team.toml` の値（`priority.review` による担当の決定と `[agents.<担当>]` の登録情報）は、作業ツリーの版ではなく main の承認済みの版から読む（`scripts/agent-gh dev api -H "Accept: application/vnd.github.raw" "repos/hatai/Pelway/contents/agent-team.toml?ref=main"`。実装のブランチが toml を変えていても、レビューの隔離を担うインスタンスの選択には main の版を使う）。読めなければ委託を止める。読んだ `[agents.<担当>].instance.review` が main の最新の版の `docs/dev-environment.md`（読めなければ委託を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ、委託を止める。
+担当の決定（`priority.review` の条件ごとの並びと使える担当）とモデル（`[agents.<担当>].models`）は、呼び出し側の開発者の `agent-team.local.toml` を重ねた結果から読む。重ねる土台は、レビューされるブランチの版ではなく main の承認済みの版にする（実装担当が自分の worktree の toml・local・`scripts/agent-team-config` を使うと、レビューされる PR 自身が担当とモデルを選べてしまう）。読み方: `MAIN_CO="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"`（本体の checkout。自分の作業ツリーではない）として、一時ファイルに `"$MAIN_CO/scripts/agent-gh" dev api -H "Accept: application/vnd.github.raw" "repos/hatai/Pelway/contents/agent-team.toml?ref=main"` の出力を置く（`scripts/agent-gh` も本体の版を使う。相対パスだと実装のブランチの版が走り、取得結果自体を改ざんできる）。`"$MAIN_CO/scripts/agent-team-config" effective <login> <一時の toml> "$MAIN_CO/agent-team.local.toml"` を走らせる（local のパスは、無い場合もこの形で必ず渡す。省くと `<一時の toml>` と同じディレクトリの `agent-team.local.toml` が既定で読まれ、その場所は実装担当が書き込めるため自己選択に戻る。無ければ共有の値に戻るだけ。local が無ければ共有の値。上書きできる項目は `docs/superpowers/specs/agent-team.md` の「開発者ごとの上書き」）。読めなければ委託を止める。レビューの隔離を担う値（`instance.review`）と `effort.option` は上書きできないため、重ねた結果ではなく先に取得した同じ main の版から読む（承認の必須条件は toml には無いため、command-team の「マージ」の決まりを使う）。マージの判定に使う「レビューに要した担当の集合」は、指揮役がこの同じ読み方で自分の側から計算し直す（実装担当の読んだ集合は委託の記録にだけ使い、判定には使わない）。読んだ `[agents.<担当>].instance.review` が main の最新の版の `docs/dev-environment.md`（読めなければ委託を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ、委託を止める。重ねた結果で共有の規則の必須の役に当たる担当が使えないとき（`effective` の JSON の `missing` に codex が入る。判定は `missing` か `developers.<login>.use` の値で行い、標準エラーの警告では確かめない — 警告には local のキー名がそのまま入るため、細工したキー名が不足の印を装いうる）は、レビューを委託せず PR は Draft のままにし、「止まる条件」の表の行どおり止まる（codex が使えないあいだは現在の head への codex の有効な Approve が取れず、マージの条件を満たせない — skill `command-team` の「マージ」。優先順位の表でほかの担当が選ばれていても回さず、その担当の結果で Draft を解除させない。割り当て直しと codex の復帰待ちのどちらにするかは人が決める。`priority.review` を local で変えてもこの関門は下げられない）。`effective` の実行自体が失敗する（toml を取得できない・検証を通らない・出力を読めない）ときは不足なしとみなさず、確かめられないまま委託・Draft の解除に進まない（読めなければ委託を止める決まりと同じ扱い）。
 
 `delegate_task` の呼び出しは、次のブロックを丸ごと写し、`<...>` を上の表と割り当ての行で埋める。`role`・`runtimeMode`・`isolation` は担当によらず同じ値で、省かない（省くと子が sandbox の外の権限で動き、レビュー担当は `error: wrong runtime` で止まる）。devin の `options` は `{}` にする。委託が拒否されても `auto`・`full-access` に変えない。`auto-accept-edits` で委託できないときは、委託せずに止まる（「止まる条件」の行。状態の行は `stopped`）。
 
@@ -375,13 +382,14 @@ Approve のとき:
 
 1. 有効な Approve のレビュー（複数の担当ならその全員）の nit に、行頭が `[文書のずれ]` のものが残っていれば、`pr ready` の前に直す。手順 5（実装者メモ）と手順 6（verify・コミット・push）をやり直し、ラウンドサマリーをコメントしてから、手順 8 でレビューを再委託し、この「Approve のとき」をやり直す。`[文書のずれ]` の nit だけを直す round は、上の修正の回数の上限（3 回目のレビュー結果で止まる）に数えない（その後のレビューの委託も数えず、effort も上げない）。印の nit だけを直す round は、この PR で通算 2 回まで。印の nit が残っていて通算 3 回目が要るときは（その前のレビューの判定によらず）、3 回目には入らず、止まる条件の形でエスカレーションする
 2. ラウンドサマリーを PR にコメントする（下の形）
-3. Draft を解除する（レビュー担当の App には権限がないため、実装担当が行う）
+3. Draft の解除の直前に、手順 8 と同じ読み方（main の承認済みの版を土台に本体の `agent-team.local.toml` を重ねる `effective` の実行）で必須の役に当たる担当の不足を確かめる。設定は委託のあとにも変わりうるため、委託時の確認では代えない。判定は JSON の `missing`（標準エラーの警告では確かめない）で、実行が失敗したときは不足なしとみなさず解除しない。`missing` に担当が入れば、Approve は揃っていても Draft を解除せず、「止まる条件」の表の行どおり止まる
+4. Draft を解除する（レビュー担当の App には権限がないため、実装担当が行う）
 
 ```bash
 scripts/agent-gh dev pr ready <PR 番号>
 ```
 
-4. 手順 10 に進む
+5. 手順 10 に進む
 
 1 で直したとき以外は、Approve の後は PR に push しない。実装者メモのみのコミットでも head が動き、command-team のマージ規則によりレビューのやり直しになる。メモの追記が必要なときは、修正 round の手順 5・6（レビュー委託の前）で行う。
 

@@ -81,6 +81,18 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 - 一時的に無効化するには `HK=0` を付ける（例: `HK=0 git commit ...`）。hk の既定動作。
 - 初回の `hk` 実行は `hk.pkl` の `amends` URL から GitHub 経由で Pkl パッケージを取得するため**ネットワークが必要**（2回目以降はキャッシュ）。
 
+## worktree の agent-team.toml と agent-team.local.toml（Issue #804）
+
+`agent-team.toml`（共有の担当登録情報）は git 追跡ファイルだが、worktree の基点が古いと worktree に無いことがある。その場合 conductor-watch.sh が枠を読めず `SLOTS` を出せなくなる。worktree 作成時に `scripts/worktree-setup` が本体の checkout から揃える:
+
+- **T3 Code**: `t3.json` の `runOnWorktreeCreate` スクリプト `worktree-setup` が worktree 作成時に走る（`async: false`）。command は `bash -c '"${T3CODE_PROJECT_ROOT:?}/scripts/worktree-setup"'` と bash 経由の絶対パスで指定してあり（開発者の既定シェルが fish などでも POSIX 展開が効く）、**実行されるのは常に本体の checkout にある版**で、worktree 側（PR の head）に置かれた `scripts/worktree-setup` はアクションからは実行しない。レビュー・修正ラウンドの worktree は PR の head から作られるため、worktree 内のファイルをホスト権限で動かすと PR のコードがそのまま sandbox の外で走ってしまう — この回避として本体の checkout を信頼できる版に保つ前提とし、アクションはそこだけを実行する（`T3CODE_PROJECT_ROOT` が本体の checkout、`T3CODE_WORKTREE_PATH` が worktree）。T3 のアクションはマシンごとにインポートするため、**環境を構えたら Settings → Projects → Actions で `t3.json` のアクションを取り込む**（一度取り込んだ環境では後続の t3.json の変更は自動では反映されないため、変えたら取り込み直す）
+- **conductor-rebuild**: 新しい指揮役の worktree の agent-team の設定を揃える（`agent-team.toml` が無ければ本体の checkout から写し、`agent-team.local.toml` を持ち越す。T3 のアクションを取り込んでいない環境でも上書きを失わない）。揃えられなければ旧指揮役を止める前に止まる
+- **Claude Code・Codex の worktreeinclude 機構**: `.worktreeinclude` に `agent-team.local.toml` を列挙（追跡しないファイルの持ち越し用。追跡ファイルの `agent-team.toml` は列挙しない。T3 Code はこのファイルを読まない）
+
+コピーは `scripts/worktree-setup-copy` が行い、書き込み先は `O_TMPFILE` の無名 inode（名前を持たない一時ファイル。書き終えた実体の fd から link で最終名に載せる）。**コピー先のファイルシステムが `O_TMPFILE` に対応していることが前提**（Linux の ext4・XFS・tmpfs・btrfs などは対応。NFS・一部の FUSE は非対応）。非対応のファイルシステムでは一時 inode を作れずコピーは中断し、`worktree-setup` は「worktree 側に <名前> を作れない（書き込みに失敗）」で非 0 で止まる — その場合はファイルシステムを替えるか、対象のファイルを手で置く
+
+開発者ごとの上書き `agent-team.local.toml`（追跡しない。雛形は `agent-team.local.toml.example`）は本体の checkout に置くと worktree 作成時に持ち越される。worktree ごとに別の値にしたいときはその worktree に置く。上書きできる項目・できない項目の表は `docs/superpowers/specs/agent-team.md` の「開発者ごとの上書き」。重ねた結果は `scripts/agent-team-config effective <GitHub login>` で確かめられる。コミットは `.gitignore` と hk の `no_agent_team_local` ステップで止める。
+
 ## agent-gh の push の門
 
 - `mise run verify` は `scripts/agent-verify-run` を実行する。検証を始める前に、worktree の `.pelway-verify/started/` に、開始時点の印の指紋（読めない印は inode と更新時刻の指紋、印が無ければ `none`、状態を取得できなければ `any`）と検証ごとの乱数 `verify-id` を持つ開始の記録を原子的に作る。主たる保存先に書けないときは gitdir の `pelway-verify-started/` に同じ記録を残してから失敗し、どちらにも書けないときは検査を始めず、gitdir で無効化できるときは verify のロックの下で同じ世代の印を消す。同じ世代かは、内容の指紋に加えて inode と更新時刻の指紋でも確かめるため、印の読み取り権限だけが回復しても見落とさない。無効化もできないときは古い印を取り消せないため、記録先と印の状態を直してからやり直す。記録を残せたときだけ、その worktree の gitdir（`.git/`、linked worktree ではその gitdir）にあるロックで同じ worktree の検証を直列にし、ロックを取った時点の印の指紋でも記録してから前回の印を消し、3 グループを並列に検査する。すべて成功したときだけ `scripts/agent-verify-record` が、検証した作業ツリーの木の hash を 1 行目、開始記録と同じ `verify-id` を 2 行目に書いた印を同じ gitdir の `pelway-verify-tree` に残す。成功した検証は自分の記録と、ロック取得より前の古い記録を消し、ロック取得より後に始まった別の検証の記録は残す。掃除では自分の記録を最後に消し、ほかの掃除に失敗したときは自分の記録を残して失敗にする。失敗や中断では開始の記録が残り、門はその記録が指す世代の印と、同じ verify-id の印を止める。対象が `any` の記録は、すべての印を止める。印を消せなくても開始の記録がその世代を止めるため、切り詰めや chmod で通常ファイルの中身を書き換えない。印には、追跡済みのファイルは無視のパターンに当たっても入る。`.pelway-verify/` は印の木には入れない。`.devin/config.json` に skip-worktree が付いているときだけ、そのファイルは作業ツリーではなく index の内容を記録する。

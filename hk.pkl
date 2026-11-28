@@ -44,6 +44,13 @@ steps {
   // docs/**・assets/** は上の exclude で対象外（凍結文書を書き換えない方針に合わせる）。
   ["typos"] = Builtins.typos
 
+  // agent-team.local.toml は追跡しない開発者ごとの上書き（Issue #804）。
+  // gitignore と併せて、git add -f などによる誤コミットをコミット時に止める。
+  ["no_agent_team_local"] {
+    glob = List("agent-team.local.toml")
+    check = "echo 'agent-team.local.toml はコミットしない（雛形は agent-team.local.toml.example）' >&2 && exit 1"
+  }
+
   // client/ の整形の検査（bun fmt。ADR 0014）。対象は client/ の下だけ。
   ["client_fmt"] {
     glob = List("client/**")

@@ -1,0 +1,194 @@
+# Issue #836 の作業ログ
+
+## 実装者メモ（round 1）
+
+対象 head: b99f0411736411fd72530241b4550dd2e6c5b3a6
+
+1. 詰まった箇所: 手順 6: 素の `git commit` でコミットを作ってしまい、`scripts/agent-gh dev git push` に「pelway-dev[bot] 以外の名義のコミット」と止められた。push 前だったので `git reset --soft HEAD~1` で戻し、`scripts/agent-gh dev git commit` で作り直した。手順 6: `mise run verify` が `.agents/skills/verify-pelway/verify-run.test.sh` の 6 件で失敗した（下の「`mise run verify` の記録」。Issue #692 と同じ環境起因）。調査: 1 回目の取得で、ソース候補の抽出条件を `crates/*/src/` にしたところ、microsandbox の crate は `lib/` 配置で CLI のソースが取れなかった。2 回目で取り直した。調査: GitHub の検索 API で `repo:containers/libkrun ...` が HTTP 422 だった（リポジトリーは `libkrun/libkrun` に移っている）。新しい名前で検索し直した。
+2. 曖昧だった文: 「`docs/research/README.md` に新しい文書の行がある（ほかの文書の載せ方に合わせる。載せる決まりが無ければ不要）」（Issue #836 の受け入れ条件）。`docker-sandboxes.md` は README の表に載っていない。一方、skill `write-issue` の手順 1 には「結果は `docs/research/<slug>.md` に出典付きで書き、`docs/research/README.md` の表に 1 行足す」とある。
+3. 仮定と解釈: README の行は足した（載せる決まりがあるため）。`coding-agent-concurrency-config.md` の行と同じく「開発環境の道具の調査で、v0.7 の技術選定には含めない」と注記した。`docker-sandboxes.md` の行は足していない（Issue が求めていないため）。「minisforum で確認（コマンドと日時 JST）」の日時は、調査文書に書かずこの worklog に置いた（PR #693 のレビューで時系列の記述を指摘されたため）。ネットワークは `scripts/agent-gh dev` 経由の GitHub だけを使った（skill `implement-issue` の決まり）。そのため docs サイト（`https://docs.microsandbox.dev/`）と `https://microsandbox.dev/` は取得していない。公式リポジトリーの `docs/` を出典にして、URL は固定 commit のファイルを指した。採らなかった解釈: docs サイトを Web で取得して確認する（Issue の関連情報に URL があるが、上の決まりに反するため）。
+4. 足りなかった情報・検証手段: bind mount 上の ELF の `execve` の回帰（microsandbox の Issue #2121）が v0.8.3 で残るか。公開 Issue と修正 PR が未解決であることと、v0.8.1〜v0.8.3 のリリースノートに修正の記載が無いことしか分からなかった（起動しないと確かめられない）。microsandbox の `stat-virt`・`host-perms` の既定値の明文（文書には選択肢の列挙だけで、Issue #2063 の報告から既定を推定した）。`mise run verify` を素のままで通す手段（`/tmp` の所有者が sandbox 内で uid 65534 に見える）。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「決まり」に「GitHub 外の公式文書を取得してよいか。読めないときはリポジトリ内の同源の文書を固定 commit で出典にすること」を足す。`.agents/skills/write-issue/SKILL.md` の手順 1 に「`docs/research/README.md` に載せる対象（v0.7 の技術選定以外の、開発環境の道具の調査を含むか）」を明記する。
+
+使ったスキル: `implement-issue`、`write-pull-request`、`ja-text-communication`、`.agents/skills/research`（背景エージェントは立てず、同じ方針（一次情報・出典付き）で実装者が調査した）
+
+## 受け入れ条件「導入・設定変更・サインインを何もしていない」の確認
+
+実装スレッド（agent-sandbox 内）で 5 回実行した。いずれも同じ結果。
+
+```text
+$ command -v msb
+（出力なし）
+exit=1
+$ command -v microsandbox
+（出力なし）
+exit=1
+$ id -nG
+hatai nogroup
+exit=0
+```
+
+- 2026-11-26 20:44:43 JST、21:43:43 JST、21:56:44 JST、23:18:07 JST と 2026-11-27 00:09:12 JST。いずれも上と同じ結果。
+- 21:43:43 JST の追加分: `test -e ~/.microsandbox` は exit=1。`ls -l ~/.local/bin/msb ~/.local/bin/microsandbox` は両方とも `No such file or directory`。`getent group kvm` は `kvm:x:993:`（所属者なし）。
+- microsandbox・Docker・Kiri・WSL・Windows 機能の導入と設定変更、sudo、再起動、外部サービスへのサインインはしていない。GitHub は `scripts/agent-gh dev api` と `scripts/agent-gh dev git`（fetch・commit・push）だけを使った。公式リポジトリは clone せず、GitHub API でファイルを読んだ。
+
+## minisforum で確認：調査文書の根拠コマンドと日時
+
+`docs/research/microsandbox.md` の「minisforum で確認」の項目は、次のコマンドで確かめた。実装スレッド（agent-sandbox 内）で実行した。
+
+```text
+$ uname -a
+Linux minisforum 6.18.58.1-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Tue Oct 27 00:24:11 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+$ lsb_release -ds
+Ubuntu 24.04.5 LTS
+$ getconf GNU_LIBC_VERSION
+glibc 2.39
+$ lsmod | grep -E '^kvm'
+kvm_amd                   -2  -2
+kvm                       -2  -2
+$ grep -w kvm /proc/misc
+232 kvm
+$ grep -m1 '^flags' /proc/cpuinfo
+（flags に hypervisor・svm・avx2・bmi1・bmi2・movbe を含む）
+$ getent group kvm
+kvm:x:993:
+$ id -nG
+hatai nogroup
+$ ls -l /dev/kvm
+ls: cannot access '/dev/kvm': No such file or directory
+$ git rev-parse --show-toplevel --git-dir --git-common-dir
+/home/hatai/.t3/worktrees/Pelway/agent-836-microsandbox--cad860c4594c4ee2
+/home/hatai/repos/hatai/Pelway/.git/worktrees/agent-836-microsandbox--cad860c4594c4ee2
+/home/hatai/repos/hatai/Pelway/.git
+$ git worktree list | wc -l
+263
+$ find <worktree> -path <worktree>/target -prune -o -type l -print | wc -l
+108
+```
+
+- 2026-11-26 20:44:43 JST に `uname`・`lsb_release`・`lsmod`・`id`・`id -nG`・`command -v`・`ls -l /dev/kvm`・`/proc/misc`、`grep -c -w -E 'svm|vmx' /proc/cpuinfo`（結果は 24）を実行した。`lsmod` はこの 1 回だけである。21:43:43 JST に `uname`・`lsb_release`・`getconf GNU_LIBC_VERSION`・`stat -f -c '%T' /home/hatai /tmp`（両方とも `ext2/ext3`）・`nproc`（24）・`free -g`（合計 38 GiB）・`/proc/cpuinfo` の flags（`hypervisor`・`svm`）・git のパスを実行した。21:56:44 JST に `umask`（0022）・祖先ディレクトリの所有と mode・`du -sh /home/hatai/repos/hatai/Pelway/.git`（178M）・`du -sh --exclude=target <worktree>`（21M）・worktree の通常ファイルの数（1571）・symlink の数（108）を実行した。
+- `lsmod` は stderr に libkmod の「could not open '/sys/module/.../holders'」行を出す（sandbox 内で `/sys` が見えないため）。stdout の 2 行は #689 の記録と同じ。
+- `/dev/kvm` は実装担当の sandbox の内側からは見えない（`/dev` が最小構成）。ホスト側で `root:kvm`・`crw-rw----` で存在する記録は `docs/research/docker-sandboxes.md`。
+- `/proc/cpuinfo` の flags のうち `avx2`・`bmi1`・`bmi2`・`movbe` は、read ツールと grep ツールで `/proc/cpuinfo` を直接読んで確かめた（2026-11-26 JST。シェルを使っていないため時刻は記録していない）。
+- `/home` は sandbox 内では `nobody:nogroup` に見える（`stat -c '%U:%G'`）。理由は確認していない。`/home/hatai` は `750 hatai:hatai`。
+
+## GitHub からの取得
+
+- `scripts/agent-gh dev api` で `superradcompany/microsandbox`（commit `0dad6d434ea94fbf74c9f02a88cd9ff12f8420ff`）の文書・ソース・公開 Issue・PR・リリース・セキュリティ勧告と、`superradcompany/libkrunfw`（commit `f0493b6f1873ed6031bc0bb87568db0095a6d3b6`）を読んだ。公開 Issue と PR 49 件（うち PR 3 件）の本文とコメント、PR 5 件の merge 状態、リリース 4 件（v0.8.3・v0.8.2・v0.8.1・v0.7.16）、セキュリティ勧告 14 件を取得した。
+- 取得スクリプトと生データは作業用の一時領域（`/tmp/opencode/issue-836/`）に置いた。リポジトリにはコミットしていない。
+
+## `mise run verify` の記録
+
+実装スレッド（agent-sandbox 内）で実行した。
+
+```text
+$ stat -c '%u %a %n' / /tmp
+1000 755 /
+65534 1777 /tmp
+$ mise run verify
+（.agents/skills/verify-pelway/verify-run.test.sh の 6 件が失敗）exit=1
+$ mkdir -p /verify-tmp && chmod 700 /verify-tmp
+$ TMPDIR=/verify-tmp mise run verify
+（全タスク成功、script-test: 59 tests ok）exit=0
+$ mise run pr-size
+pr-size: +179 / -0（追加の上限 800、削除の上限 2000）
+```
+
+- 素の `mise run verify` は 2026-11-26 22:50:31 JST に終了（269.27 秒）。失敗は `make_run_dir` の 4 件と `locks_dir_ready` の 2 件で、`/tmp` の所有者が uid 65534 に見えることが原因（Issue #692）。
+- `TMPDIR=/verify-tmp` での再実行は 2026-11-26 22:54:11 JST に終了（202.13 秒）。`/verify-tmp` は `/`（uid 1000 所有の書き込み可 tmpfs）直下に作った自分所有のディレクトリ。`verify-run.test.sh` は自身のケース用に `mktemp -d` を使い、TMPDIR の場所を変えても検査ロジックは変わらない。
+
+## 実装者メモ（round 2）
+
+対象 head: 942f0b31b7ffcffed95d04567f6d9a2105d08736 のレビュー指摘への対応。
+
+1. 詰まった箇所: レビュー指摘と対応。must-fix 5 件のうち 4 件は `docs/research/microsandbox.md` の 4（試す段階の計画）にあり、本番の fnox 設定と鍵を VM に渡す案、既存の共有 git dir を書き込み可で渡す案、`msb self uninstall` の後に `msb df` を実行する順序、初回起動のイメージ取得を許可に含めていない点だった。試行専用の保存先・試験専用のクローン・試験専用の資格情報に分け、`config`・`config.worktree`・`hooks/` への書き込み拒否をエージェントの起動より先に確かめる順序に直した。残る 1 件は Issue へのコメントで、必要な許可と実機試用を保留した理由を Issue #836 に残した。nit のうち `[文書のずれ]` の 1 件（bwrap の書き込み先に `/tmp` がある）は 2 の表に反映した。印の無い nit のうち `[issue-1701]` の出典 URL だけは、受け入れ条件の「microsandbox の欄に出典 URL が付いている」に関わるため出典一覧に足した。ほかの印の無い nit（結論の範囲、この worklog のパスの一般化）は直していない。この round の `mise run verify` は `TMPDIR=/verify-tmp` で exit 0（2026-11-27 00:09:00 JST に終了、307.85 秒、`script-test: 59 tests ok`）。差分は文書だけで環境が変わらないため、素の実行は繰り返していない。
+2. 曖昧だった文: 「試験専用のクローンで共有 Git ディレクトリを独立させ、現行の bwrap が保護する `config`、`config.worktree`、`hooks/` の書き込み拒否を、エージェントの起動より先に確認してください。」（PR #842 の codex のレビュー、must-fix）
+3. 仮定と解釈: 試験専用のクローンの中で worktree を作り、Pelway と同じ構成（`.git` ポインタと共有 git dir）で確かめると解釈した。`config.worktree` は worktree にだけできるため。採らなかった解釈: worktree を作らない単純な clone で確かめる。「試験専用の資格情報」は `PELWAY_AGENT_FNOX_CONFIG` で指す試験用の fnox 設定と鍵と解釈した（`scripts/agent-gh` がこの環境変数で設定ファイルを切り替えるため）。
+4. 足りなかった情報・検証手段: `msb self uninstall --yes` が保存先全体を削除することは、文書（`docs/cli/management.mdx`）には「msb・libkrunfw・コマンドのリンク」としか書かれておらず、ソース（`crates/cli/lib/commands/self_cmd.rs` の `uninstall_all`）からしか分からなかった。`MSB_HOME` で試行専用にした保存先を `msb self uninstall` が対象にするかは、round 3 のレビュー指摘を受けてソースで確かめた: `resolve_base_dir()` は `resolve_home()` を呼び、空でない `MSB_HOME` をそのまま使い、未設定なら `~/.microsandbox` になる（`crates/cli/lib/commands/self_cmd.rs`・`crates/utils/lib/lib.rs` の `resolve_home()`）。削除対象は実行ファイルの場所ではなく実行時の `MSB_HOME` で決まる。
+5. 改善案: `docs/research/docker-sandboxes.md` の「4. 実際に試す段階の計画」にも同じ指摘が当たりうる（本番の `~/.config/pelway-agent` をマウントする案 (b)、既存の worktree での検証 (b)）。`sbx` を試す Issue を立てるときに見直す。`.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に、実機で試す計画を書く Issue では本番の環境と資格情報から分けることを受け入れ条件に含める例を足す。
+
+使ったスキル: `implement-issue`、`write-pull-request`、`ja-text-communication`
+
+## 実装者メモ（round 3）
+
+対象 head: 6be1fb531e8ee5ec3b59cf789d2fa7bc80e1e067
+
+1. 詰まった箇所: レビュー指摘と対応（codex の must-fix 3 件と claude の must-fix 1 件。いずれも `docs/research/microsandbox.md` の 4 に集中）。codex の指摘: 導入手順が `install.sh` を使う前提で、既存の `~/.local/bin/msb`・`~/.local/bin/microsandbox` のリンクを書き替えてしまう点（手順 1 を GitHub Releases からの手動導入に置き替え、試行専用ディレクトリー `<MSB_TRIAL>` を導入）。後片付けが `msb self uninstall --yes` 依存で、コマンドリンクの削除と旧形式のシェル設定の清掃まで行う点（`msb ps -a`・`msb rm --force`・`msb df --verbose` で個別に消し、`<MSB_TRIAL>` を `rm -rf` する手順に置き替え）。確認 (c) が `.git/config` と `.git/hooks/` の拒否だけで、worktree ごとの `config.worktree`（`.git/worktrees/<id>/config.worktree`）を抜いていた点（`git config extensions.worktreeConfig true` の設定と `git rev-parse --git-path config.worktree` で位置を確認する手順を追加）。claude の指摘: 「試験専用の資格情報」が置き場所だけで決まっていて、pelway-dev の秘密鍵を別の age 鍵で暗号化した試験用の fnox 設定でも満たせてしまう点（許可表 #4 と検証 (e) で、試験用のリポジトリにだけインストールした別の GitHub App の鍵に限定し、pelway-dev・pelway-review の鍵は試験用設定にも入れないと明記。モデルのキーは試行のために発行して失効させるものに限定）。(f) が T3 の接続の資格情報を VM に渡す検証で、本番の T3 の acpRegistry を変える点（(f) を資格情報を渡さない・本番の T3 を変えない形に限定し、渡す形は別の許可が要ると明記）。nit のうち `[文書のずれ]` の 2 件（行 44 の出典を `[volumes]` から `[sec-fs]` に、README 27 行の判定一覧を v0.7 選定の文書に限定）と worklog の実行記録の欠落（23:18:07・00:09:12 の分を追記）は直した。`MSB_HOME` を全呼び出しで前置する nit は手順 1 の置き替えで吸収した。この round の `mise run verify` は `TMPDIR=/verify-tmp` で exit 0（2026-11-27 10:15 JST に終了、176.18 秒、`script-test: 59 tests ok`）。round 2 と同じく `/tmp` の所有者が uid 65534 に見える環境起因（Issue #692）のため TMPDIR を分けた。差分は文書だけで、素の実行は繰り返していない。
+2. 曖昧だった文: 「削除の対象は install の場所ではなく `MSB_HOME`（既定 `~/.microsandbox`）であることをまず明記し、`self uninstall` ではなく、保存先の個別ディレクトリと `~/.microsandbox` の残りを消す手順に置き替えてください。」（PR #842 の codex のレビュー、must-fix）「個別ディレクトリ」と「`~/.microsandbox` の残り」の対応関係が分かりにくいが、削除対象は実行時の `MSB_HOME` で決まるため、試行専用に分けた `<MSB_TRIAL>` ごと `rm -rf` する形と解釈した。`msb df` の非 verbose 表示が種類ごとの集計で個別パスを出さない点も指摘されており、`--verbose` の記述を足した。
+3. 仮定と解釈: `<MSB_TRIAL>` は試行のためだけの保存先で、導入した実行ファイルとランタイムデータを同じ木に置くと解釈した。インストーラーが `~/.local/bin` に置くコマンドリンクは試行では作らないため、後片付けでリンクの削除もシェル設定の清掃も要らない。`config.worktree` の拒否確認は、worktree 機能（`extensions.worktreeConfig`）を試験専用のクローンで有効にした上で行うと解釈した（worktree を作らないと `config.worktree` のファイルが生成されないため）。「試験専用の資格情報」は、試験用のリポジトリにだけインストールした別の GitHub App の秘密鍵を `PELWAY_AGENT_FNOX_CONFIG` で指す試験用の fnox 設定に入れたものと解釈した（レビューの「別の GitHub App の鍵で、pelway-dev・pelway-review の鍵は使わない」に従う）。採らなかった解釈: pelway-dev の鍵を別の age 鍵で暗号化し直した設定。GitHub App の秘密鍵はその App の全インストール先のトークンを発行できるため、試験用のリポジトリを pelway-dev のインストール先に足すだけで本番への書き込みが可能になり、試験専用とは呼べない。(f) は「T3 の接続の資格情報を渡さない形に限る」方を選んだ（もう一方の選択肢「使う T3 と資格情報の受け渡しを許可の一覧に足す」は、本番の T3 の acpRegistry を変える検証を許可に含めることになり、「本番の T3 スレッドでは使わない」と矛盾が残るため）。
+4. 足りなかった情報・検証手段: `install.sh` の挙動（リンクの上書き、`MSB_HOME` で変えられるのは保存先のみ）と `msb self uninstall` の挙動（`clean_legacy_shell_config` による `~/.profile`・`.bashrc`・`.zshrc`・fish conf の清掃、`resolve_home()` による削除対象の決定）は文書になく、`scripts/install.sh` と `crates/cli/lib/commands/self_cmd.rs`・`crates/utils/lib/lib.rs` のソースからしか分からなかった。`msb df` の `--verbose` が個別パスを出すことは `crates/cli/lib/commands/storage.rs` から確かめた。worktree ごとの `config.worktree` は git v2.51.0 の `git-worktree.adoc`（`extensions.worktreeConfig` と `worktrees/<id>/config.worktree`）で位置を確かめた。GitHub App の鍵が全インストール先のトークンを発行できることは `scripts/agent-gh` と `scripts/setup/agent-accounts.sh`（dev・review・notify を別の App・別の age 鍵で分けている構成）から確かめた。
+5. 改善案: 「サードパーティーのツールの導入・削除を文書に書くとき、インストーラーや uninstall コマンドの副作用（コマンドリンク・シェル設定・既存ファイルの上書き）を先にソースで確かめる」ことと、「試験専用の資格情報を要求するときは置き場所ではなく中身（どの App・どの鍵・失効させるか）で定める」ことを `.agents/skills/write-issue/SKILL.md` またはこの調査型 Issue の例に書く。現行の docker-sandboxes の「試す段階の計画」も `sbx` コマンドの削除系の副作用と試験用の資格情報の中身を確かめておくと、この指摘の形を防げる。
+
+使ったスキル: `implement-issue`、`ja-text-communication`
+
+## 実装者メモ（round 4）
+
+対象 head: 00f7dbeaffda0f8143d3f328d2cdc95e5e9212d6 とその上の実装者メモのコミット
+
+1. 詰まった箇所: レビュー指摘と対応。round 3 の codex のレビューの must-fix 2 件（いずれも `docs/research/microsandbox.md` の 4）に対応した。実行先の固定: `MSB_HOME` は保存先の切り替えだけで、CLI の実行先は別に決まる。`<MSB_TRIAL>/config.json` に `{"allowed_backends": ["local"]}` を試行の必須設定とし、実行先を選べるコマンドにはグローバルフラグの `--local` を付け、実行先を選べないコマンドはフラグなしで呼ぶ決まりに変え（round 4 の codex のレビューで、`doctor`・`pull`・`df` などは v0.8.3 が処理前に `--local` を拒否すると分かり、さらに修正した）、手順 3 に `msb context` で実行先がローカルであることを確かめる確認を足した。片付けは `msb ps -a` の一覧が試行で作った sandbox だけのときに限り `msb rm --force` を使い、試行外の VM が出たら何も消さず止めると明記した（許可表 #5・#6 も合わせて直した）。`config.worktree` の実体: `git worktree add` は元の worktree に `config.worktree` がなければコピー先のファイルを作らないため、検証 (c) で試験用クローンの両方の worktree に `git config --worktree` で無害な設定を保存して実体を作る手順を足し、ゲストからそのファイルを読めることを確かめてから書き込み拒否を確かめる順序にした。指揮役の指示で round 3 の must-fix の修正に進んだため、round 3 の時点で止まる条件に当たり Issue に記録した後、この修正を行った。`[文書のずれ]` の nit 2 件（Issue #836 の許可依頼を最新の計画に合わせた版に差し替え、worklog の実行回数を 3 回から 5 回に修正）も直した。ほかの nit（checksums.sha256 の項目の照合、ホスト側の接続確認に試行専用サービスを使う）は直していない。
+2. 曖昧だった文: なし（レビューの指摘は具体的で、直し方も示されていた）。
+3. 仮定と解釈: 実行先の固定は「`allowed_backends: ["local"]` の必須設定」と「実行先を選べるコマンドでの `--local` の明示」の両方で行うと解釈した。レビューはどちらかを求めていたが、`allowed_backends` だけでは実行中の接続が切り替わらず、`--local` だけでは設定を忘れた呼び出しを防げないため、両方を試行の決まりにした。round 4 のレビューで `--local` が実行先を選べるコマンドに限られると分かり、実行先を選べないコマンドはフラグなしで呼び、同じ環境で `msb context` がローカルを示すことを先に確かめる形に直した。`config.worktree` の実体を作る設定は、git が読んでも動作に影響しない無害なキー（`msb.trial`）を両方の worktree に書く形と解釈した（`git worktree add` が複製するのは元の worktree のファイルだけで、新しい worktree 側のファイルは別途作る必要があるため）。
+4. 足りなかった情報・検証手段: `--local`・`--remote` がサブコマンドごとのフラグではなく CLI のグローバルフラグであることは `crates/cli/bin/main.rs`（`#[arg(long, global = true)]`）から確かめた。実行先の選択順（明示フラグ > managed `active_profile` > `MSB_BACKEND` > `MSB_PROFILE` > 保存済み `active_profile` > ローカル実行）と `allowed_backends` の挙動は `docs/cloud/connect.mdx`、削除が選択中の実行先に届くことは `crates/cli/lib/commands/remove.rs`（`selected_context().sandboxes().remove`）で確かめた。`git worktree add` の `config.worktree` の複製条件は git v2.51.0 の `builtin/worktree.c`（`copy_filtered_worktree_config` が `file_exists` を見る）で確かめた。round 4 のレビュー後にさらに確かめたこと: `--local`・`--remote` を受け付けるコマンドは `supports_destination_selector`（sandbox・volume・snapshot 系と、引数なしの `context`）だけで、非対応コマンドは処理の前に `resolve_cli_context` で実行先を解決する（`crates/cli/bin/main.rs`）。設定ファイルのパスは `MSB_CONFIG_PATH` が `<保存先>/config.json` より優先され（`sdk/rust/lib/config/mod.rs` の `config_path()`）、管理設定は Linux では `/etc/microsandbox/managed.json` に置かれ、ユーザー設定と CLI・SDK の指定より優先される（`sdk/rust/lib/config/persistence.rs` と `docs/enterprise/managed-configuration.mdx`）。
+5. 改善案: 実機で試す計画を書く調査型 Issue では、「実行先（ローカルかクラウドか）の固定」と「検査対象のファイルが手順の時点で実在すること」の確認を受け入れ条件の例に足す（round 3 の止まり方のコメントにも同じ案を書いた）。
+
+使ったスキル: `implement-issue`、`ja-text-communication`
+
+## 実装者メモ（round 5）
+
+対象 head: 2471c723bca1ac18f4227eb86009442ee2285566 とその上の実装者メモのコミット
+
+1. 詰まった箇所: レビュー指摘と対応。round 4 の codex・claude のレビューの must-fix（実行先の固定は両者で同じ指摘、claude は手順 3 の確認方法と `MSB_CONFIG_PATH` の確認を追加）と nit に対応した。`--local` の範囲: すべての `msb` 呼び出しに `--local` を付ける決まりは誤りで、実行先を選べるコマンド（sandbox・volume・snapshot 系と引数なしの `context`）に限られる。`doctor`・`pull`・`df` など非対応のコマンドは処理前に実行先を解決するため、フラグなしで呼ぶ条件として「同じ環境で `msb context` がローカルを示すこと」を手順 3・7 に明記した。手順 3 の `msb context` はフラグなしで呼ぶ（`--local` を付けると選ばれた実行先として必ずローカルを表示するため、環境の解決結果を確かめられない）。claude の指摘: (c) で「共有 git dir の `config`・`config.worktree`・`hooks/` と `config.worktree`」と同名が 2 回並んだ書き方を「worktree 固有の `config.worktree`（`worktrees/<id>/config.worktree`）」に戻し、(d) の `host`（または `private`・`all`）の許可は接続確認の専用 VM に限り、(e)〜(g) は既定のネットワークポリシー（ホスト自身と私網を拒否）の VM で動かすと明記した。`MSB_CONFIG_PATH`: 引き継いだ値があると試行の `config.json` が読まれず、既存設定の `home`・`paths` が `--local` であっても試行外の保存先を使わせるため、呼び出し規約に `MSB_CONFIG_PATH=<MSB_TRIAL>/config.json` の明示を足し、管理設定 `/etc/microsandbox/managed.json` が許可先・保存先を上書きしていないことの確認を最初の書き込みの前（手順 3）に足した。nit: `/dev/kvm` の現在の読み書き可否とグループ追加で十分かを未確認に修正（1・5）、`sha256sum -c` の失敗時に展開前に止めることを明記（手順 1）。round 4 のメモの `msb` 呼び出し規約の記述（「すべてに `--local`」）も修正した。Issue #836 の許可依頼（#issuecomment-7196146692）も `MSB_CONFIG_PATH`・`managed.json`・`--local` の範囲を反映した版に更新した。
+2. 曖昧だった文: なし（レビューの指摘は具体的で、直し方も示されていた）。
+3. 仮定と解釈: 実行先を選べないコマンドへの対策は「フラグを付けない」のではなく「呼ぶ環境を `msb context` で確かめたものに限定する」と解釈した。`doctor` などはバックエンドを作らなくても動くが、`pull`・`df` は実行先を解決して動くため、環境側の確認でカバーする。`MSB_CONFIG_PATH` は「絶対パスで明示する」を選び、「引き継いだ値を外す」は併記の代替とした（明示の方がシェルの履歴に残り、再現性が高いため）。
+4. 足りなかった情報・検証手段: `--local` を受け付けるコマンドの範囲は `crates/cli/bin/main.rs` の `supports_destination_selector` と、非対応コマンドが処理前に `resolve_cli_context` で実行先を解決する経路から確かめた。設定ファイルの解決は `sdk/rust/lib/config/mod.rs` の `config_path()`（`MSB_CONFIG_PATH` 優先）、管理設定の優先順位とパスは `docs/enterprise/managed-configuration.mdx` と `sdk/rust/lib/config/persistence.rs` の `ManagedConfig::path()`（Linux: `/etc/microsandbox/managed.json`）から確かめた。
+5. 改善案: ツールの導入手順を文書にするとき、「全コマンドに安全のためのフラグを付ける」書き方は、フラグを受け付けないコマンドの存在を先にソースで確かめてからにする。環境変数で指す設定ファイルがあるツールでは、その変数の引き継ぎと管理設定（管理者による強制設定）のレイヤーの有無も必須設定と一緒に確認する。
+
+使ったスキル: `implement-issue`、`ja-text-communication`
+
+## 実装者メモ（round 6）
+
+対象 head: 08e3be2e4b9595fd2134bc81f5ffc5768ac9d934 とその上の実装者メモのコミット
+
+1. 詰まった箇所: レビュー指摘と対応。round 5 の codex のレビューの must-fix 2 件と nit 2 件に対応した（claude は approve）。管理設定の確認の順序: 引数なしの `msb doctor` も管理設定を含む設定で解決した `home` が既存のディレクトリーなら一時ディレクトリーと複製検査用ファイルを書くため、「管理設定と試行設定の確認」を最初の `msb` 呼び出しの前に移し、手順 3 を「環境側の条件の確認 → `msb doctor` → `msb context`」の順に変えた。実行ファイルの固定: フルパスで試行用 CLI を呼んでも親シェルの `MSB_PATH`・`MSB_LIBKRUNFW_PATH`・`MSB_AGENTD_PATH` が実行時の設定に入るため、呼び出し規約に 3 変数の除去（`env -u`）を足し、`msb doctor` の報告する実行ファイル・ライブラリーが `<MSB_TRIAL>` の下のものかを VM 起動前に確かめる確認を足した。nit: 環境の表の判定列を観測の範囲に修正（カーネルモジュールは読み込み済み、`/dev/kvm` の有無と読み書き可否は未確認、`kvm` グループ追加は過去の記録に基づく見込み）し、`sha256sum -c` はアーカイブ名に対応する行だけに絞る指定にした。Issue #836 の許可依頼も同じ順序と指定に更新した。さらに claude の nit（`doctor`・`self` は `is_backend_independent_command` で実行先を解決しない、手順 3 は context を doctor より先に）に対応し、文書の対象を実行先を解決するコマンドに絞り、手順 3 を「ファイルの確認 → `msb context` → `msb doctor`」の順にした。あわせて claude の approve に付いた [文書のずれ] nit 2 件（許可表 #5 を「最初の `msb` 呼び出しの前に」に合わせ `MSB_PATH` 系の除去も明記、見込みの結論を「glibc の条件を満たし、KVM はモジュールが読み込み済み（`/dev/kvm` の有無は未確認）」に修正）も直した。
+2. 曖昧だった文: なし（レビューの指摘は具体的で、直し方も示されていた）。
+3. 仮定と解釈: 環境変数の除去は「値を試行用に向ける」ではなく「取り除く」を選んだ（`MSB_PATH` などを試行用パスに向けてもよいが、取り除く方が残存指定の混入を構造的に防げるため）。取り除けないシェルでは試行専用の環境で行う、を代替として併記した。
+4. 足りなかった情報・検証手段: `doctor` が解決した `home` に一時ファイルを書くことは `sdk/rust/lib/setup/host.rs` の `diagnose()`・`probe_root_clone()`（`tempdir_in(base)` と検査用ファイルの `write_all`）から確かめた。`MSB_PATH`・`MSB_LIBKRUNFW_PATH`・`MSB_AGENTD_PATH` が実行時の設定に入ることは `sdk/rust/lib/config/mod.rs` の `PathsConfigPatch::from_env_or_sdk` から確かめた。`checksums.sha256` が全成果物の一覧であることは `.github/workflows/release.yml` と `install.sh` の照合部分（対象の行だけを使う）から確かめた。
+5. 改善案: 診断コマンド（`doctor` のような読み取りに見えるコマンド）も書き込みをする場合があるため、「読み取り専用の確認」と書く前に、そのコマンドが何を解決し何に触れるかをソースで確かめる習慣を調査型 Issue の例に足す。
+
+使ったスキル: `implement-issue`、`ja-text-communication`
+
+## 実装者メモ（round 7）
+
+対象 head: 1fabc7e071b8777f2814a16ee06df3c68569d8d9（round 6 の nit 修正のコミットを含む）の上の nit 修正
+
+1. 詰まった箇所: レビュー指摘と対応。round 7 の codex・claude のレビューはともに approve（must-fix なし）で、両者に同じ [文書のずれ] nit が残った。(1) 125 行の「両方とも … `kvm` グループが要ります」は観測範囲を超えていたため、「`sbx` は `kvm` グループへの所属が公式の条件」「microsandbox の公式の条件は `/dev/kvm` の読み書きで、グループはその手段。要るかは `uaccess` の ACL の可能性を残して未確認、過去の記録に基づく見込みでは要る」に分けて書き直し、グループ追加を前提にしていた手順 2・許可表 #2 も見込みの条件にそろえた（122・127 行は claude のとおり試す計画の記述のまま）。(2) 「検証 (a) だけ先に試す」の説明に、許可表 #5 の条件と手順 3 の確認が適用されること（(a) の `msb doctor` が最初の `msb` 呼び出しのため、管理設定と環境変数の確認はその前に要る）を明記した。許可表 #5 の `--local` の説明に、実行先を確かめる `msb context` は手順 3 のとおりフラグなしで呼ぶことを添えた。
+2. 曖昧だった文: なし（レビューの指摘は具体的で、直し方も示されていた）。
+3. 仮定と解釈: `kvm` グループの扱いは「公式の条件（`sbx`）」と「読み書きの手段で要るかは未確認・過去の記録に基づく見込み（microsandbox）」に分けた。許可依頼の #2 のコメントは既に見込みの条件で書かれていたため、Issue コメントの更新はなし。
+4. 足りなかった情報・検証手段: `sbx` の `kvm` グループ条件は `docs/research/docker-sandboxes.md`（19・25 行）、microsandbox の手段としての説明は [linux-trouble] と手順 2 の `uaccess` の記述から。
+5. 改善案: 「ツール X の条件」と書くときは、その公式の条件と「多くの環境で使われる手段」を分け、導入手順の見出しに操作名を置くときも「見込みでは要る操作」の条件を添える。
+
+使ったスキル: `implement-issue`、`ja-text-communication`
+
+## 実装者メモ（round 8）
+
+対象 head: c84afd2daf60af9e0fb2763f954c788523589021 の上の must-fix 修正
+
+1. 詰まった箇所: レビュー指摘と対応。round 8 の codex のレビュー（run 7216422828）は request-changes（must-fix 1、claude は 11/30 まで使用上限のため委託なし）。must-fix: 手順 2 と許可表 #2 で追加を条件付きにしたのに、片付け（手順 7・許可表 #6・Issue の許可依頼 #5）の `gpasswd -d` は無条件で、試行前や試行中に別用途で所属していた `kvm` グループを消してしまう。手順 2 に試行前の `id -nG` の記録を足し、片付けの削除を「この試行で追加したときだけ」に限定して 3 か所をそろえた。nit: 127 行の「`msb doctor` は最初の `msb` 呼び出し」が手順 3 の順序（設定の確認 → `msb context` → `msb doctor`）とずれていたため、最初の呼び出しはフラグなしの `msb context` として書き直した。
+2. 曖昧だった文: なし。
+3. 仮定と解釈: 所属の記録は追加の直前（手順 2 の中）に置いた。試行の開始全体の前に記録する手もあるが、追加を行う手順の中に置く方が手順どうしの参照が減り、追加を省いたとき記録も要らないことが自然になるため。
+4. 足りなかった情報・検証手段: `gpasswd -d` の挙動はレビュー指摘の man ページ参照（shadow 4.17.4）のとおり所属を 1 つ消すだけで、追加時の文脈を持たないため、区別は記録に頼る。
+5. 改善案: 「追加を条件付きにする」修正を入れたときは、対になる「戻す・消す」操作にも同じ条件が要る。追加・削除は別の手順・別の表に散っていることが多いので、片方を変えたらもう片方の条件も必ず確かめる。
+
+使ったスキル: `implement-issue`、`ja-text-communication`
+
+## 実装者メモ（round 9）
+
+対象 head: f843ade6425842e94ab965b86758c36b23d42e94 の上の must-fix 修正
+
+1. 詰まった箇所: レビュー指摘と対応。round 9 の codex のレビュー（指揮役が t3_thread_launch で立てた review/842-x9、投稿 run=mcp:launch:44500229…）は request-changes（must-fix 1）。must-fix: ユーザー名なしの `id -nG` は実行中のセッションの所属だけを出すため、別用途で追加済みでも再ログイン前のシェルでは `kvm` が記録に出ず、片付けで既存の所属を消しうる。手順 2 の記録を `id -nG hatai`（アカウントの所属。coreutils の `id` のマニュアル）に変え、「既に所属していれば追加も削除も省く」を明記し、手順 7・許可表 #6・Issue の許可依頼 #5 も同じ確かめ方にそろえた。
+2. 曖昧だった文: なし（前回の nit「最初の `msb` 呼び出し」は解消とレビューが確認）。
+3. 仮定と解釈: 確かめるコマンドは `id -nG hatai` とした（`getent group kvm` でも所属者は読めるが、目的のアカウントの所属を調べる `id -nG <ユーザー>` の方が操作の対象と一致し、レビューの示した形でもあるため）。実際のグループ変更や sudo は行わない（文書のみの Issue）。
+4. 足りなかった情報・検証手段: `id -nG` がセッションの所属を出すことは `coreutils` のマニュアル（`id` の項）、`usermod -aG` が既存の所属を保持することは shadow のソース・man から（いずれもレビューの参照 URL で確かめた）。
+5. 改善案: 「環境の状態を記録してから変更する」手順では、記録するコマンドが「実行中のセッションの見え方」か「永続の状態」かを区別する。再ログインで反映される設定は、記録には永続側（アカウント・DB）の確認を使う。
+
+使ったスキル: `implement-issue`、`ja-text-communication`
