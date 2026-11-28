@@ -50,12 +50,12 @@
 
 ## 実装者メモ（round 5）
 
-対象 head: 12006098e8ef6b1328190ad3b4cbe4db46e198f4
+対象 head: f4703ab0c8d8401805abb2a1aa233584857d4fea
 
-1. 詰まった箇所: 手順 9（Request changes）: round 4 以降に達したかを、数え直しうる現在のラウンド数と混ぜない記録が必要だった。指揮役だけがレビューを進める PR には実装担当の終わりの報告が無いため、報告を参照する形では判定できなかった。
+1. 詰まった箇所: 手順 9（Request changes / 修正依頼）: round 4 到達の記録を終わりの報告ではなく履歴で確かめる必要があった。main 取り込みでは implement-issue が衝突し、main の split-plan 待ち・必須担当不足の停止と、この PR の回数上限撤廃を両立させた。
 2. 曖昧だった文: 「指揮役自身の PR も含め、初回の付与と付け直しの前に、対象外であることを信頼できる記録で確認する手順を書いてください」（round 4 レビュー）
-3. 仮定と解釈: ラウンドサマリーは各ラウンドの結果への対応で必ず残る記録と解釈し、round 4 到達には現在値ではなく履歴の最大 `<R>` を使う。実装担当のいない PR では指揮役が同じ形のサマリーを残す。サマリーが読めない・未編集のものが無い・編集済みのものがあるときは、対象外とみなさず `needs-human` で人間に確かめる。QA の依頼は admin マージの判定から切り離し、正本の条件のうち admin マージの対象に当たらないことと QA の合格だけが欠けている PR を QA 待ちにする。同じ SHA の合格が出てから、admin マージの対象を hatai に回す。
-4. 足りなかった情報・検証手段: 文書の意味を判定する LLM judge はまだ無い。`verify-run.test.sh` は `/tmp` の所有者が `nobody`（uid 65534）の環境で失敗したが、変更を退避しなくても `TMPDIR=/dev/shm/pelway-verify-tmp` で同じテストが通ることを確かめたうえで、同じ `TMPDIR` で `mise run verify` → `exit=0`、`script-test: 61 tests ok`、`Finished in 185.78s`。`mise run pr-size` → `+147 / -44`、上限内。round 4 の claude 委託は停止条件のため中断済みで、レビュー投稿は無かった。
+3. 仮定と解釈: round 4 到達は現在値ではなく未編集のラウンドサマリー履歴の最大 `<R>` で判定し、実装担当のいない PR は指揮役が残す。衝突では main の round 3 停止行は Issue #725 の撤廃対象なので戻さず、委託連続 failed は独立行に保ち、split-plan 待ちと missing 担当の行は残した。QA は admin マージの判定から切り離し、同じ SHA の合格後に対象を hatai に回す。
+4. 足りなかった情報・検証手段: 文書の意味を判定する LLM judge はまだ無い。`/tmp` の所有者が `nobody`（uid 65534）のため verify-run.test.sh は TMPDIR 無しで失敗したが（Issue #808 報告の未解決の問い）、`mkdir -p /dev/shm/pelway-verify-tmp` した同じ実行内で `TMPDIR=/dev/shm/pelway-verify-tmp mise run verify` → `exit=0`、`script-test: 63 tests ok`、`Finished in 257.87s`。`mise run pr-size` → `+159 / -44`、上限内。
 5. 改善案: round 4 到達の判定（作成者・編集有無・最大 `<R>`）を conductor 用の helper に切り出し、手書きの API 照合の漏れを減らす。
 
-使ったスキル: implement-issue、write-pull-request、brainstorming
+使ったスキル: implement-issue、write-pull-request、brainstorming、diagnosing-bugs
