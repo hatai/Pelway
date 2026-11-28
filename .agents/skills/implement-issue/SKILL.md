@@ -40,6 +40,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | 委託の結果を投稿に結び付けられない（手順 9: 報告を受けた実行の投稿が 0 件・2 件以上・状態の不一致のまま、または報告を待つ実行が無いのに、現在の head に報告を受けた実行の投稿でない `pelway-review[bot]` の `APPROVED`・`CHANGES_REQUESTED` の投稿（どの実行にも結び付かない投稿と、報告を確かめられない実行の投稿）が残る。PR にも `needs-human` を付ける） | 委託記録の ID と担当、見つかった投稿の id・`commit_id`・`state`・末尾行。報告を受けた実行の投稿でない投稿が残るときは、hatai にその投稿の dismiss を頼むこと（手順 9「結び付かない投稿の取り消し」） |
 | 手順 8 の helper `required-checks` が、実行し直しても続けて 3（判定できない）を返した | 2 回の実行の標準エラー出力と、対象の PR 番号 |
 | レビューの委託が `runtimeMode: "auto-accept-edits"` で受け付けられず、子タスクが作られなかった。`auto`・`full-access` に変えて委託し直さない | 委託の指定（`target`・`runtimeMode`）と、返ったエラー文 |
+| 合成済みの設定で必須の役に当たる担当が使えない（手順 8・9 の `effective` の JSON の `missing` に担当が入る）のに、レビューの委託または Draft の解除に進もうとした。PR は Draft のまま、委託も解除もしない（codex が使えないあいだは現在の head への codex の有効な Approve が取れず、skill `command-team` の「マージ」の条件を満たせないため。優先順位の表で選ばれたほかの担当の結果では代えない） | `missing` に入った担当と、それを出した実行の対象（login・ファイル）。Draft のまま置いた PR の番号と、人が選ぶ選択肢（codex を `use` に戻す・人が担当を割り当て直す・codex の復帰を待つ） |
 | round 3 のレビュー結果に must-fix が残った（別 Issue に回せる側の指摘は除く。4 回目の修正には入らない。round 4 に入るのは hatai の例外の判断だけ。skill `command-team` の「レビューのラウンド」）、`[文書のずれ]` の nit だけを直す round を通算 2 回終えた後に、また印の nit が残った（通算 3 回目には入らない）、委託が 2 回連続で `failed`（`checks timeout` と `wrong runtime` は数えない） | どれが起きたかと、試したこと（レビュー結果の回数・担当・effort）。must-fix が残ったときは、must-fix の一覧と止まった head の sha。手元にすでに修正があれば worktree に置いたまま push も削除もしない |
 
 止まり方（止まった時点で、どの手順の途中でも手順 5 の形で実装者メモを書き、Issue のコメントに続けて貼る。メモを push しないので `docs/worklogs/` には書かなくてよい）:
@@ -262,7 +263,7 @@ Assigned: role=review agent=<codex|claude|devin> model=<モデル名> effort=<ef
 | claude | `[agents.claude].instance.review` | `[agents.claude].models` のモデル | `{"<[agents.claude].effort.option>": "<effort>"}` |
 | devin | `[agents.devin].instance.review` | `[agents.devin].models` のモデル | `mode` のみ受け付ける（省略してよい。effort の option は渡せず、effort の引き上げはできない） |
 
-表と担当の決定で読む `agent-team.toml` の値（`priority.review` による担当の決定と `[agents.<担当>]` の登録情報）は、作業ツリーの版ではなく main の承認済みの版から読む（`scripts/agent-gh dev api -H "Accept: application/vnd.github.raw" "repos/hatai/Pelway/contents/agent-team.toml?ref=main"`。実装のブランチが toml を変えていても、レビューの隔離を担うインスタンスの選択には main の版を使う）。読めなければ委託を止める。読んだ `[agents.<担当>].instance.review` が main の最新の版の `docs/dev-environment.md`（読めなければ委託を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ、委託を止める。
+担当の決定（`priority.review` の条件ごとの並びと使える担当）とモデル（`[agents.<担当>].models`）は、呼び出し側の開発者の `agent-team.local.toml` を重ねた結果から読む。重ねる土台は、レビューされるブランチの版ではなく main の承認済みの版にする（実装担当が自分の worktree の toml・local・`scripts/agent-team-config` を使うと、レビューされる PR 自身が担当とモデルを選べてしまう）。読み方: `MAIN_CO="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"`（本体の checkout。自分の作業ツリーではない）として、一時ファイルに `"$MAIN_CO/scripts/agent-gh" dev api -H "Accept: application/vnd.github.raw" "repos/hatai/Pelway/contents/agent-team.toml?ref=main"` の出力を置く（`scripts/agent-gh` も本体の版を使う。相対パスだと実装のブランチの版が走り、取得結果自体を改ざんできる）。`"$MAIN_CO/scripts/agent-team-config" effective <login> <一時の toml> "$MAIN_CO/agent-team.local.toml"` を走らせる（local のパスは、無い場合もこの形で必ず渡す。省くと `<一時の toml>` と同じディレクトリの `agent-team.local.toml` が既定で読まれ、その場所は実装担当が書き込めるため自己選択に戻る。無ければ共有の値に戻るだけ。local が無ければ共有の値。上書きできる項目は `docs/superpowers/specs/agent-team.md` の「開発者ごとの上書き」）。読めなければ委託を止める。レビューの隔離を担う値（`instance.review`）と `effort.option` は上書きできないため、重ねた結果ではなく先に取得した同じ main の版から読む（承認の必須条件は toml には無いため、command-team の「マージ」の決まりを使う）。マージの判定に使う「レビューに要した担当の集合」は、指揮役がこの同じ読み方で自分の側から計算し直す（実装担当の読んだ集合は委託の記録にだけ使い、判定には使わない）。読んだ `[agents.<担当>].instance.review` が main の最新の版の `docs/dev-environment.md`（読めなければ委託を止める）の「レビュー担当の Codex」「レビュー担当の Claude」「レビュー担当の Devin CLI」の節が名指すインスタンスと一致しなければ、委託を止める。重ねた結果で共有の規則の必須の役に当たる担当が使えないとき（`effective` の JSON の `missing` に codex が入る。判定は `missing` か `developers.<login>.use` の値で行い、標準エラーの警告では確かめない — 警告には local のキー名がそのまま入るため、細工したキー名が不足の印を装いうる）は、レビューを委託せず PR は Draft のままにし、「止まる条件」の表の行どおり止まる（codex が使えないあいだは現在の head への codex の有効な Approve が取れず、マージの条件を満たせない — skill `command-team` の「マージ」。優先順位の表でほかの担当が選ばれていても回さず、その担当の結果で Draft を解除させない。割り当て直しと codex の復帰待ちのどちらにするかは人が決める。`priority.review` を local で変えてもこの関門は下げられない）。`effective` の実行自体が失敗する（toml を取得できない・検証を通らない・出力を読めない）ときは不足なしとみなさず、確かめられないまま委託・Draft の解除に進まない（読めなければ委託を止める決まりと同じ扱い）。
 
 `delegate_task` の呼び出しは、次のブロックを丸ごと写し、`<...>` を上の表と割り当ての行で埋める。`role`・`runtimeMode`・`isolation` は担当によらず同じ値で、省かない（省くと子が sandbox の外の権限で動き、レビュー担当は `error: wrong runtime` で止まる）。devin の `options` は `{}` にする。委託が拒否されても `auto`・`full-access` に変えない。`auto-accept-edits` で委託できないときは、委託せずに止まる（「止まる条件」の行。状態の行は `stopped`）。
 
@@ -381,13 +382,14 @@ Approve のとき:
 
 1. 有効な Approve のレビュー（複数の担当ならその全員）の nit に、行頭が `[文書のずれ]` のものが残っていれば、`pr ready` の前に直す。手順 5（実装者メモ）と手順 6（verify・コミット・push）をやり直し、ラウンドサマリーをコメントしてから、手順 8 でレビューを再委託し、この「Approve のとき」をやり直す。`[文書のずれ]` の nit だけを直す round は、上の修正の回数の上限（3 回目のレビュー結果で止まる）に数えない（その後のレビューの委託も数えず、effort も上げない）。印の nit だけを直す round は、この PR で通算 2 回まで。印の nit が残っていて通算 3 回目が要るときは（その前のレビューの判定によらず）、3 回目には入らず、止まる条件の形でエスカレーションする
 2. ラウンドサマリーを PR にコメントする（下の形）
-3. Draft を解除する（レビュー担当の App には権限がないため、実装担当が行う）
+3. Draft の解除の直前に、手順 8 と同じ読み方（main の承認済みの版を土台に本体の `agent-team.local.toml` を重ねる `effective` の実行）で必須の役に当たる担当の不足を確かめる。設定は委託のあとにも変わりうるため、委託時の確認では代えない。判定は JSON の `missing`（標準エラーの警告では確かめない）で、実行が失敗したときは不足なしとみなさず解除しない。`missing` に担当が入れば、Approve は揃っていても Draft を解除せず、「止まる条件」の表の行どおり止まる
+4. Draft を解除する（レビュー担当の App には権限がないため、実装担当が行う）
 
 ```bash
 scripts/agent-gh dev pr ready <PR 番号>
 ```
 
-4. 手順 10 に進む
+5. 手順 10 に進む
 
 1 で直したとき以外は、Approve の後は PR に push しない。実装者メモのみのコミットでも head が動き、command-team のマージ規則によりレビューのやり直しになる。メモの追記が必要なときは、修正 round の手順 5・6（レビュー委託の前）で行う。
 

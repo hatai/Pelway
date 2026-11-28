@@ -81,6 +81,18 @@ Cargo 系タスクはすべて `--locked` 付き。`Cargo.lock` が更新を要�
 - 一時的に無効化するには `HK=0` を付ける（例: `HK=0 git commit ...`）。hk の既定動作。
 - 初回の `hk` 実行は `hk.pkl` の `amends` URL から GitHub 経由で Pkl パッケージを取得するため**ネットワークが必要**（2回目以降はキャッシュ）。
 
+## worktree の agent-team.toml と agent-team.local.toml（Issue #804）
+
+`agent-team.toml`（共有の担当登録情報）は git 追跡ファイルだが、worktree の基点が古いと worktree に無いことがある。その場合 conductor-watch.sh が枠を読めず `SLOTS` を出せなくなる。worktree 作成時に `scripts/worktree-setup` が本体の checkout から揃える:
+
+- **T3 Code**: `t3.json` の `runOnWorktreeCreate` スクリプト `worktree-setup` が worktree 作成時に走る（`async: false`）。command は `bash -c '"${T3CODE_PROJECT_ROOT:?}/scripts/worktree-setup"'` と bash 経由の絶対パスで指定してあり（開発者の既定シェルが fish などでも POSIX 展開が効く）、**実行されるのは常に本体の checkout にある版**で、worktree 側（PR の head）に置かれた `scripts/worktree-setup` はアクションからは実行しない。レビュー・修正ラウンドの worktree は PR の head から作られるため、worktree 内のファイルをホスト権限で動かすと PR のコードがそのまま sandbox の外で走ってしまう — この回避として本体の checkout を信頼できる版に保つ前提とし、アクションはそこだけを実行する（`T3CODE_PROJECT_ROOT` が本体の checkout、`T3CODE_WORKTREE_PATH` が worktree）。T3 のアクションはマシンごとにインポートするため、**環境を構えたら Settings → Projects → Actions で `t3.json` のアクションを取り込む**（一度取り込んだ環境では後続の t3.json の変更は自動では反映されないため、変えたら取り込み直す）
+- **conductor-rebuild**: 新しい指揮役の worktree の agent-team の設定を揃える（`agent-team.toml` が無ければ本体の checkout から写し、`agent-team.local.toml` を持ち越す。T3 のアクションを取り込んでいない環境でも上書きを失わない）。揃えられなければ旧指揮役を止める前に止まる
+- **Claude Code・Codex の worktreeinclude 機構**: `.worktreeinclude` に `agent-team.local.toml` を列挙（追跡しないファイルの持ち越し用。追跡ファイルの `agent-team.toml` は列挙しない。T3 Code はこのファイルを読まない）
+
+コピーは `scripts/worktree-setup-copy` が行い、書き込み先は `O_TMPFILE` の無名 inode（名前を持たない一時ファイル。書き終えた実体の fd から link で最終名に載せる）。**コピー先のファイルシステムが `O_TMPFILE` に対応していることが前提**（Linux の ext4・XFS・tmpfs・btrfs などは対応。NFS・一部の FUSE は非対応）。非対応のファイルシステムでは一時 inode を作れずコピーは中断し、`worktree-setup` は「worktree 側に <名前> を作れない（書き込みに失敗）」で非 0 で止まる — その場合はファイルシステムを替えるか、対象のファイルを手で置く
+
+開発者ごとの上書き `agent-team.local.toml`（追跡しない。雛形は `agent-team.local.toml.example`）は本体の checkout に置くと worktree 作成時に持ち越される。worktree ごとに別の値にしたいときはその worktree に置く。上書きできる項目・できない項目の表は `docs/superpowers/specs/agent-team.md` の「開発者ごとの上書き」。重ねた結果は `scripts/agent-team-config effective <GitHub login>` で確かめられる。コミットは `.gitignore` と hk の `no_agent_team_local` ステップで止める。
+
 ## CI（GitHub Actions）
 
 ### 規約：CI とローカルで同じ検査を行う

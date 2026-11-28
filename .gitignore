@@ -14,6 +14,10 @@ fnox.local.toml
 .fnox.local.toml
 .config/fnox.local.toml
 
+# 開発者ごとの agent-team 上書き（Issue #804。環境依存の値を含むためコミットしない。
+# hk の pre-commit でも add -f による誤コミットを止める）
+agent-team.local.toml
+
 # mise / hk 個人用オーバーライド
 mise.local.toml
 .mise.local.toml

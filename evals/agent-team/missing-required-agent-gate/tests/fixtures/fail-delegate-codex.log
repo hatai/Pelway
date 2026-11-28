@@ -1,0 +1,8 @@
+action=read src=environment/slots.json
+action=read src=environment/prs.json
+action=run cmd="scripts/agent-gh dev issue edit 820 --add-label needs-decision" exit=0
+action=run cmd="scripts/agent-gh dev issue edit 821 --add-label needs-decision" exit=0
+action=run cmd="scripts/agent-gh dev issue edit 822 --add-label agent:working" exit=0
+action=run cmd="scripts/agent-gh dev pr comment 840 --body '[review-request] head: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0 to: codex'" exit=0
+action=launch thread=rev-840-codex title="[レビュー] #840 codex"
+action=run cmd="scripts/agent-gh dev pr edit 841 --add-label automerge" exit=0
