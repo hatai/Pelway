@@ -18,14 +18,14 @@ This codebase is yours: what it's for and how it's built are your call, and you'
 
 ### Prior art first
 
-- Present the approaches to the user as options, each with what to adopt and what to drop and why, and wait for their choice.
+- Before implementing a feature you are unfamiliar with, present the approaches to the user as options, each with what to adopt and what to drop and why, and wait for their choice.
 - Implement the chosen approach in this codebase's own code: borrow the design, write the code fresh.
 - `gh search repos` and `gh search code` are allowed even where an agent's network access is otherwise restricted.
 - An agent running autonomously (no user in the session) waits for the choice this way: it posts the comparison as a comment on the issue, adds the `needs-human` label, and stops.
 
 ### Code over docs
 
-- In your final reply, point out each inconsistency you found between the documentation and the code.
+- When a repository's documentation and its existing code disagree, in your final reply point out each inconsistency you found between the documentation and the code.
 
 ### LLM judges
 
@@ -79,7 +79,7 @@ Skills and docs state facts only: rules, procedures, definitions, current state.
 
 ### Triage labels
 
-- Default canonical labels: needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix. See `docs/agents/triage-labels.md`.
+- Default canonical labels: needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix.
 
 ### Domain docs
 
@@ -107,6 +107,10 @@ Skills and docs state facts only: rules, procedures, definitions, current state.
 ### Issue tracker
 
 Issues are tracked in GitHub Issues (hatai/Pelway) via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+- See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
