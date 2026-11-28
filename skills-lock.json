@@ -302,6 +302,13 @@
       "skillPath": "skills/mbx/SKILL.md",
       "computedHash": "8202a3bc661e229b81a99295883f80ddae2bd6aeda192a56d1716f5f77186c7d"
     },
+    "merge-risk": {
+      "source": "warpdotdev/common-skills",
+      "commit": "8792394ff1b655e0af451b8fabb68ef0cfcbd208",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/merge-risk/SKILL.md",
+      "computedHash": "a52ef0604140e50204a14a78e040fa432db555650d71d84c8535808ec3abb47c"
+    },
     "meta-cognition-parallel": {
       "source": "actionbook/rust-skills",
       "sourceType": "github",
@@ -623,13 +630,6 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/to-tickets/SKILL.md",
       "computedHash": "17496514c92954f68eacdf2b1221e2ddb39fa231b83f03c70bc7d4422f704b2d"
-    },
-    "triage": {
-      "source": "mattpocock/skills",
-      "commit": "5863806dd4e15c63174bee4e7515a4256792ecfa",
-      "sourceType": "github",
-      "skillPath": "skills/engineering/triage/SKILL.md",
-      "computedHash": "4342a07c9ebe0696713ec93a883c46e56503a587a34d824fabab5ca61e3bdfbb"
     },
     "unsafe-checker": {
       "source": "actionbook/rust-skills",
