@@ -58,3 +58,15 @@
 5. 改善案: `.agents/skills/review-pr/SKILL.md` の「2 回目以降の round」を「レビュー対象の差分」という見出しに分け、初回・再レビュー・観点ファイル選択が同じ正本を参照できるようにする。
 
 使ったスキル: implement-issue, write-pull-request, code-review, `.agents/skills/tdd`（seam: `scripts/tests/review-perspective-docs.test.sh` の presence check）
+
+## 実装者メモ（round 3）
+
+対象 head: defc31c3c375c11ed9670883f856f914483db1fe
+
+1. 詰まった箇所: 手順 6: main の取り込みで `review-pr` の must-fix 表と検査欄が衝突した。main の「失敗の筋」要件とこの PR の観点ファイル要件を両方残した。また、merge commit を含む push は `agent-gh-resign` が署名付け替えできず、後続コミットも署名なしのままになった。
+2. 曖昧だった文: 「Draft PR を作る前に `## 失敗の筋（最終）` を書く。」（`.agents/skills/implement-issue/SKILL.md`「7. Draft PR を作る」）
+3. 仮定と解釈: この PR は新しい要件が main に入る前に作られているが、レビューは main の規則で行われるため、失敗の筋を遡って記録する。`review-pr` は記録時刻の証明を求めないため、実装前・round 2・最終の内容を現在の差分に合わせて残す解釈を選んだ。
+4. 足りなかった情報・検証手段: PR 本文が新しい template の必須欄を満たすかを push 前に機械的に確かめる helper が無い。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「修正依頼」に「main の取り込みで PR template か review-pr が変わったときは、新しい必須欄を PR 本文と作業ログに反映してからレビューに戻る」を足す。
+
+使ったスキル: implement-issue, write-pull-request, fix-merge-conflicts
