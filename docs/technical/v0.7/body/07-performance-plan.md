@@ -28,12 +28,12 @@
 | 指標 | 測定・評価 |
 |---|---|
 | GUIメモリ | Win private working set/commit、macOS footprint、Linux PSS/RSSを別々に記録。異なるOSの数値を同一尺度として順位付けしない |
-| Webメモリ | renderer、WASM、workerの範囲を示し、他tab・ブラウザ共有分の扱いを記録 |
+| Webメモリ | rendererのJavaScript、worker、Electronのmain/renderer/GPU/utilityプロセスの範囲を示し、他tab・ブラウザ共有分の扱いを記録 |
 | 全体メモリ | GUI、server、runner、gateway、DB、sandbox、LLM、Linux VMの重複しない合計と各内訳。LLM有/無を別表 |
 | 描画 | 60Hz条件でframe p95 16.7ms以下を仮目標。スクリーンリーダーon/off双方、文字200%拡大、高コントラストの各条件を分けて測る |
 | IME入力 | 確定Enter誤送信0、文字欠落0、caretと候補位置の誤り0を必須機能条件とする |
 | 履歴・コピー | 中間挿入で読んだ位置が飛ばない、画面外を含む選択の欠落0、読み上げとfocus対象が一致 |
-| 起動・再接続 | 最初の操作可能表示まで、差分同期完了まで、WASM転送/展開サイズを測定。上限値は機材決定後に設定し、未決を0にしない |
+| 起動・再接続 | 最初の操作可能表示まで、差分同期完了まで、rendererに配るJavaScript bundleの大きさを測定。上限値は機材決定後に設定し、未決を0にしない |
 | sandbox・推論 | 起動/停止/再開時間、tokens/s、first token、context長、peak RAM/VRAMをCPU/量子化別に記録 |
 | 国内境界 | 10のD試験。全体通信を観測し、許可済み連携以外へ本体データが出ないか検証 |
 

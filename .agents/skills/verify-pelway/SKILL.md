@@ -41,9 +41,9 @@ description: "Pelway のデモのバックエンド（pelway-http の HTTP API �
 - 空のデータから使える状態まで: マイグレーションは無い（保存はメモリだけ）。テスト用データは起動時のデモ seed（ワークスペース `ws-demo-01`、チャンネル `ch-demo-anken-b`「案件B」、田中 `m-tanaka`・山本 `m-yamamoto`・佐藤 `m-sato`・ハル `m-hal`（bot）、過去の発言 3 件）。
 - 使える合図: 実際に待ち受けたポートを書いた標準出力（証拠の `server.stdout`）が 1 行だけで `demo-serve ready addr=127.0.0.1:<1〜65535> pid=<pid> llm=script` の形（`pid` が起動した子の PID と一致すること）、2 章の環境チェック（PID・バイナリ・待ち受けの照合）を通ったこと、そのあと seed を HTTP で読めること（`GET /v1/workspaces/ws-demo-01/channels?actor=m-tanaka` がチャンネル 1 件でメンバーの ID が `m-hal,m-sato,m-tanaka,m-yamamoto`、`GET /v1/channels/ch-demo-anken-b/messages?actor=m-tanaka&after_seq=0` が 3 件）。ポートが開いただけでは合図にしない。
 
-- クライアント: 失敗（起動口なし、#560 未マージ）。起動できるクライアントのバイナリが無く、画面と HTTP の通信も main では未結線。テスト用 backend の範囲での確かめ方は `features/client-ui.md`（run の合否には入れない）。
+- クライアント: 失敗（依存機能が未完成）。Electron の開発版の土台はあるが、サーバーとの同時起動（#757）、クライアント通信（#333・#817）、Electron E2E（#762）が未完成で、利用者の道筋は通せない。GUI がある環境で人が開発版の起動だけを確かめる手順は `features/client-ui.md`（run の合否には入れない）。
 
-失敗: クライアントは常に失敗（起動口なし、#560 未マージ）。道具が無い。同じ target の `demo-serve` が動いている、またはロックが取れない。ビルドが通らない（`build.log`）。5 秒以内に ready 行が出ない、または ready 行の `pid` が起動した子と違う。seed のチャンネル・メンバーの ID・件数が違う（テスト用データが無い）。
+失敗: クライアントは常に失敗（依存機能が未完成）。道具が無い。同じ target の `demo-serve` が動いている、またはロックが取れない。ビルドが通らない（`build.log`）。5 秒以内に ready 行が出ない、または ready 行の `pid` が起動した子と違う。seed のチャンネル・メンバーの ID・件数が違う（テスト用データが無い）。
 
 二重起動を拒むことの確かめ方（QA）:
 
