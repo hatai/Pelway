@@ -81,7 +81,7 @@ Show counts and a one-line summary per item. Let the maintainer pick.
    | Reach | Only the reporter or one internal maintainer is known to need it | A narrow role or unusual setup within the affected population | Multiple roles or many users or teams within the affected population | Most of the affected population in normal use |
    | Fit | Conflicts with confirmed product direction, ADRs, security boundaries, or operational canon | Requires a new product pattern or weakens an existing separation | Fits when adapted to existing patterns | Directly extends confirmed direction, ADRs, MVP patterns, or operational canon |
    | UX | Makes the main workflow harder, noisier, or more confusing for most of the affected population | Usable mainly by experts or administrators; adds visible complexity for narrow benefit | Neutral or optional; users can ignore it | Makes common request, decision, approval, handoff, or operational tasks clearer or easier |
-   | Cost | Broad change across security, tenancy, audit, data contracts, protocols, multiple surfaces, migration, or a new external service | Several surfaces or new ongoing operational, permission, or integration complexity | One surface with moderate implementation and tests, or a small contract or UI addition | Small change reusing existing mechanisms, one surface, no migration, no new dependency |
+   | Cost | Any change in security, tenancy, audit, data contracts, protocols, migration, or a new external service | Multiple ordinary surfaces or new ongoing operational, permission, or integration complexity, without the score-0 categories | One surface with moderate implementation and tests, or a small contract or UI addition | Small change reusing existing mechanisms, one surface, no migration, no new dependency |
 
    Cost is inverse: 3 means low cost. A "surface" is a coherent change area such as the Rust server, database, client UI, gateway or external integration, or AI development-team operations.
 
@@ -93,18 +93,18 @@ Show counts and a one-line summary per item. Let the maintainer pick.
 
    Otherwise sum Impact, Reach, Fit, UX, and Cost into a 0–15 value score. The value score is a comparison aid only, not a priority. Do not map it automatically to priority labels, triage states, or `wontfix`, and do not emit a priority-label recommendation from it.
 
-   Use this template for the assessment. Keep the headings, field names, fixed values, and column names in English; write evidence, unknowns, questions, and explanations in the language of the issue.
+   Use this template for the assessment. Write the `Score` cell as the integer `0`, `1`, `2`, or `3`, or as `unknown` when material evidence is missing. A numeric score may have `assumed` confidence, but a materially unknown dimension uses `unknown` in both `Score` and `Confidence`. If any dimension has `Score` `unknown`, the value score is incomplete. Keep the headings, field names, fixed values, and column names in English; write evidence, unknowns, questions, and explanations in the language of the issue.
 
    ```markdown
    ## Feature assessment
 
    | Dimension | Score | Confidence | Evidence |
    |---|---:|---|---|
-   | Impact | 2/3 | confirmed | ... |
-   | Reach | 1/3 | assumed | ... |
-   | Fit | 3/3 | confirmed | ... |
-   | UX | 2/3 | assumed | ... |
-   | Cost | 2/3 | assumed | ... |
+   | Impact | 2 | confirmed | ... |
+   | Reach | 1 | assumed | ... |
+   | Fit | 3 | confirmed | ... |
+   | UX | 2 | assumed | ... |
+   | Cost | 2 | assumed | ... |
 
    **Value score:** 10/15 — comparison aid only, not a priority.
    **Unknowns:** ...
