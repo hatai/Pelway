@@ -9,6 +9,7 @@ failures=()
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 fixture="$work/repo"
+mkdir -p "$work/home" "$work/xdg-config"
 git init -q "$fixture"
 mkdir -p "$fixture/.github/workflows"
 
@@ -57,7 +58,8 @@ reset_fixture() {
 reply_out=""
 run_check() {
   local name="$1" want_rc="$2" rc
-  reply_out="$(cd "$fixture" && PATH="$PATH" bash "$SCRIPT" 2>&1)"
+  reply_out="$(cd "$fixture" && HOME="$work/home" XDG_CONFIG_HOME="$work/xdg-config" \
+    PATH="$PATH" bash "$SCRIPT" 2>&1)"
   rc=$?
   if [[ "$rc" != "$want_rc" ]]; then
     failures+=("$name: exit $rc, want $want_rc: $reply_out")
@@ -135,6 +137,30 @@ rules:
 EOF_CFG
 run_check config-off 1
 want_contains config-off "$reply_out" '[unpinned-uses]'
+
+# 設定ファイルで rule を警告に下げても、controlled な空の設定を使うため失敗する。
+reset_fixture
+cp "$fixture/.github/workflows/a.yml" "$fixture/.github/workflows/new.yml"
+cat >"$fixture/.github/jactionlint.yaml" <<'EOF_CFG'
+rules:
+  actions-lock: warn
+  unpinned-uses: warn
+  yaml-syntax: warn
+EOF_CFG
+run_check config-warn 1
+want_contains config-warn "$reply_out" '[unpinned-uses]'
+
+# 設定ファイルの policy で tag を許可しても、controlled な空の設定を使うため失敗する。
+reset_fixture
+cp "$fixture/.github/workflows/a.yml" "$fixture/.github/workflows/new.yml"
+cat >"$fixture/.github/jactionlint.yaml" <<'EOF_CFG'
+rules:
+  unpinned-uses:
+    policies:
+      "*": any
+EOF_CFG
+run_check config-policy 1
+want_contains config-policy "$reply_out" '[unpinned-uses]'
 
 # reusable workflow は actions.lock に表現できないため、タグ参照は失敗する。
 reset_fixture
