@@ -20,7 +20,10 @@ AI 開発チームに渡す Issue のタイトルと本文を書く・直す手�
 - 本文の見出しは下の「本文の構成」の 8 つをこの順で全部書く。書くことが無い見出しも消さず「なし」と書く。
 - 本文の構成の正本はこのスキル。`.github/ISSUE_TEMPLATE/agent-task.yml` はその写しなので、見出しを変えるときは両方を同じ PR で直す。
 - Issue の正本は本文。決まったこと・直したことはコメントで済ませず、本文に書き直す。コメントは経緯と、目印（`<!-- split-plan -->`、`<!-- pr-size-exception -->`）だけに使う。
-- AI 開発チームのエージェントは `scripts/agent-gh dev issue create` で立てる。Web のフォームを通らない起票でも、このスキルの形にそろえる。
+- AI 開発チームのエージェントは `scripts/agent-gh dev` 経由で立てる。Web のフォームを通らない起票でも、このスキルの形にそろえる。
+- Issue を起票したら、起票作業を完了とする前に必ずマイルストーンに紐づける。`ready-for-agent` を付ける前に GitHub から読み返して空でないことを確かめる。マイルストーンの無い Issue は後回し扱いになる。
+- マイルストーンは次の順で選ぶ。親 Issue・元 Issue・関連 PR にあればそれを継承する。なければ open なマイルストーンの説明文と Issue の目的の対応で選ぶ。チーム運用・開発基盤・見張りの Issue では `D0 開発の土台・見張り` を選ぶ。複数に見えるときは、選んだものと却下したものを本文に書く。
+- open なマイルストーンに適切なものが無いときは、新しいマイルストーンを作成する。同じ題名の closed なマイルストーンがあるときは新しく作らず、`needs-human` を付けて人間に確認する。
 - 起票しただけでは `ready-for-agent` を付けない。手順 6 のゲートを通ってから付ける（付けるのは人間。指揮役は人間に委任されたときだけ）。
 - `ready-for-agent` は GitHub Projects のボードへの掲載条件でもある。ラベルを付けた Issue はボードの Backlog に自動で載り、人間がカードを Todo へ動かすことが着手の合図になる（ラベルそのものは着手の合図ではなく、着手後も外さない）。サブ Issue の自動追加など `ready-for-agent` の無いカードは、Todo へ動かされても処理対象にならない。
 
@@ -74,13 +77,70 @@ grep -n "<製品の概念の語>" GLOSSARY.md
 本文は heredoc で渡す。
 
 ```bash
-scripts/agent-gh dev issue create --title "..." --body-file - <<'EOF'
+scripts/agent-gh dev issue create --title "..." --milestone "<ASCII のマイルストーン名>" --body-file - <<'EOF'
 ### 目的
 ...
 EOF
 ```
 
-タイトルに非 ASCII を含めるときは argv に渡せない（`\uXXXX` に潰れて agent-gh が拒否する）。タイトルと本文を JSON ファイルに書き、`scripts/agent-gh dev api repos/{owner}/{repo}/issues -X POST --input <file>` で起票する。
+タイトルやマイルストーン名に非 ASCII を含めるときは argv に渡せない（`\uXXXX` に潰れて agent-gh が拒否する）。このリポジトリのマイルストーン名は日本語を含むため、通常はタイトルと本文とマイルストーン番号を JSON ファイルに書き、`scripts/agent-gh dev api repos/{owner}/{repo}/issues -X POST --input <file>` で起票する。REST API の `milestone` フィールドにはマイルストーンの番号を入れる。
+
+```json
+{
+  "title": "<タイトル>",
+  "body": "### 目的\n...",
+  "milestone": 8
+}
+```
+
+#### マイルストーンに紐づける
+
+起票前に、open と closed のマイルストーンを確認する。
+
+```bash
+scripts/agent-gh dev api 'repos/hatai/Pelway/milestones?state=all' --jq '.[] | {number,title,state}'
+```
+
+既存の open なマイルストーンを使うときは、その番号を REST API の `milestone` フィールドに入れる。ASCII の題名のマイルストーンに限り、CLI の `--milestone "<題名>"` でも指定できる。
+
+既存の open なマイルストーンを使って起票したときも、起票直後に読み返す。空なら同じ番号で設定し直し、確認できるまで起票完了の報告と `ready-for-agent` の判断に進まない。読み返しと設定し直しのコマンドは下の手順 3〜4 と同じである。
+
+open なマイルストーンに適切なものが無いときは、次の順で行う。
+
+1. マイルストーンを付けずに Issue を作成する。この状態は起票作業の内側に限り許される。
+2. 新しいマイルストーンを JSON ファイルで作成する。題名は Issue の題名をそのまま写さず、成果物か到達状態が分かる短い日本語にする。`state` は `open`、`due_on` は指定が無い限り書かない。`description` には `対象: <このマイルストーンに入る作業の範囲>`、`閉じる条件: 含む Issue がすべて closed で merged PR に紐づく`、`作成の起点: #<Issue 番号>` の 3 行を書く。`D0`〜`D3` のような計画の番号はエージェントが新しく採番しない。
+
+   ```json
+   {
+     "title": "<成果物か到達状態が分かる短い日本語>",
+     "state": "open",
+     "description": "対象: <このマイルストーンに入る作業の範囲>\n閉じる条件: 含む Issue がすべて closed で merged PR に紐づく\n作成の起点: #<Issue 番号>"
+   }
+   ```
+
+   ```bash
+   scripts/agent-gh dev api repos/hatai/Pelway/milestones -X POST --input <file> --jq .number
+   ```
+
+3. 返った番号で Issue を更新する。
+
+   ```json
+   {"milestone": <マイルストーン番号>}
+   ```
+
+   ```bash
+   scripts/agent-gh dev api repos/hatai/Pelway/issues/<Issue 番号> -X PATCH --input <file>
+   ```
+
+4. 次のコマンドで読み返し、番号が返ることを確かめる。空なら設定し直す。確認できるまで、起票完了の報告と `ready-for-agent` の判断に進まない。
+
+   ```bash
+   scripts/agent-gh dev issue view <Issue 番号> --json milestone --jq '.milestone.number // empty'
+   ```
+
+5. 作成したときは、既存の open なマイルストーンが合わなかった理由を Issue 本文に書き、起票直後のコメントで作成したマイルストーンの番号と題名、合わなかった理由、人間が後から題名と `description` を修正できることを `@hatai` に通知する。`needs-human` は付けず、判断待ちにしない。
+
+マイルストーン作成に失敗したときは、近いマイルストーンに仮で付けない。作成しようとした題名と `description`、API のエラー、人間に作成してほしいことを Issue コメントに書き、`needs-human` を付けて止まる。
 
 #### 一つに決まる書き方
 
