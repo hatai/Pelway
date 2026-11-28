@@ -29,7 +29,7 @@
 1. 詰まった箇所: 手順 8・9: 手順 8 への追加だけでは「止まる条件」の 2 回連続 failed の例外列挙と食い違うため、同じ除外を止まる条件にも足し、手順 9 は手順 8 への参照に留めた。
 2. 曖昧だった文: 「`implement-issue` の手順 8 に、利用の上限による failed の扱い（自動の再開、Guard、手で予約しない、委託し直す時機、2 回連続の数え方）が書いてある」（Issue #811「受け入れ条件」）
 3. 仮定と解釈: 「手順 8 に書く」を本文の記述の置き場と解釈し、手順 9 では扱いを複写せず参照だけにした。選ばなかった解釈: 手順 9 にも同じ説明を全文で書く。
-4. 足りなかった情報・検証手段: 利用の上限の failed を実際に起こす検証手段はなく、確認は wording pin と引用による意味の照合まで。`delegate_task` の limit-resume の確認は #734 の記録を根拠にする。初回の `mise run verify` は sandbox の `/tmp` が nobody 所有で `verify-run.test.sh` に落ちたため、同じ exec で作った `/verify-tmp` を `TMPDIR` にしてやり直した。
+4. 足りなかった情報・検証手段: 利用の上限の failed を実際に起こす検証手段はなく、確認は wording pin と引用による意味の照合まで。`delegate_task` の limit-resume の確認は #734 の記録を根拠にする。初回の `mise run verify` は sandbox の `/tmp` が nobody 所有で `verify-run.test.sh` に落ちたため、自分が所有する一時ディレクトリを `TMPDIR` にしてやり直した。
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「別の手順で扱う失敗は、再委託・停止条件との関係を受け入れ条件に書く」を足す。
 
 使ったスキル: implement-issue, writing-for-agents, write-pull-request
