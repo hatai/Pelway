@@ -136,3 +136,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「検査の印の世代を指す識別子では、権限や読み方の変化で識別子が変わらないかを書く」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`、ユーザーレベルの `receiving-code-review`
+
+## 実装者メモ（round 13）
+
+対象 head: 6cfa04810cf09d8ba90d22b5ee5198ca503111a5（この round の変更を含むコミット。署名付け替えの対象外の merge・過去の実行ファイルの mode 変更が履歴にあるため push 後も同じ SHA。このメモを含むコミットの親）
+
+1. 詰まった箇所: 受け入れ条件 5 の「その旨を出力し」を確かめる試験が無く、警告の文言が消えても気づけなかった。運用例外そのものは、記録先が両方とも書けない状態では失敗を永続化する手段が物理的に無く、実装では無くせない。
+2. 曖昧だった文: 「hatai に例外の可否を確認し（needs-human）、認められたら docs/agents/decisions.md:9 に反映する。」（PR #832、glm_review の round 13、review 6095204808）
+3. 仮定と解釈: 決定の例外は実装担当とレビュー担当では決められないと読み、警告を固定する試験 2 件（開始前とロック取得後）と `[文書のずれ]` の nit を直したうえで、例外の可否は hatai の判断に委ねる。承認の記録が付くまでは `needs-human` で止め、承認されたら decisions.md の issue-807 の行に例外を反映する。
+4. 足りなかった情報・検証手段: `.pelway-verify` を書けなくし予備を通常ファイルにしてロックを symlink にした開始前の失敗と、ロック取得後に gitdir を書けなくして unlink を失敗させた失敗の両方で、終了コードが 0 以外・印が残り・警告の文言が出力にあることを regression test で確かめた。全体は `TMPDIR=/dev/shm/p807-r13v mise run verify`（402.74 秒）で確かめた（script-test 63 tests ok）。
+5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「運用例外を受け入れ条件に書くときは、決定者の承認をどこに記録するかも書く」を足す。
+
+使ったスキル: `.agents/skills/implement-issue`、ユーザーレベルの `receiving-code-review`
