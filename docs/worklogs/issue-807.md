@@ -211,3 +211,17 @@
 5. 改善案: .agents/skills/implement-issue/SKILL.md の「実装者メモを書く」に「round の開始時に main の最新の SKILL.md を読み直し、レビューの基準の追加を確かめる」を足すと、round の途中で main に入った基準の見落としが減る
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 16）
+
+対象 head: 075c76d51638f3e9d597c7f461d3089264919640
+
+1. 詰まった箇所: 手順 9: round 15 のメモを手順 5 の形で書いていなかった（GLM の [文書のずれ] nit）。5 項目の形に書き直し、「失敗の筋の見直し（round 15）」を足した
+2. 曖昧だった文: 「実装担当は、この印の nit を Approve のときも直してから Ready にする」（.agents/skills/review-pr/SKILL.md「レビューのラウンド」）
+3. 仮定と解釈: docs/dev-environment.md の「切り詰めや chmod で書き換えない」は、round 14 で chmod に倒す実装に変えたとき直し忘れた文だと解釈した。切り詰めないことと正規でない印に触れないことを残し、chmod の部分だけをコードに合わせる直し方を選び、文ごと消す直し方は選ばなかった
+4. 足りなかった情報・検証手段: なし（文書の修正だけで、確かめる手段は verify で足りた）
+5. 改善案: .agents/skills/implement-issue/SKILL.md の「実装者メモを書く」に、round のメモが形に合っているかをコミットの前に確かめる一文があると、形のずれをレビューで指摘される往復が減る
+
+使ったスキル: implement-issue
+
+対応した [文書のずれ] の nit（round 16・GLM 6095882893）: docs/dev-environment.md:100 の chmod の文言、round 15 メモの形、失敗の筋の見直し（round 15）の欠落、PR 本文の「確認方法/検証」の古さ（最初のコマンドの mkdir と TMPDIR のずれ、pr-size の数値）。あわせて PR 本文の availability の誤記と mise.toml の半角スペースも直した。verify: TMPDIR=/dev/shm/p807-r16v mise run verify → exit 0（script-test 68 tests ok、276.76s、対象 head で実行）
