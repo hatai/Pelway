@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# worktree 作成時の準備（Issue #804）。T3 の runOnWorktreeCreate（t3.json）と
+# conductor-rebuild から呼ぶ。
+#
+# 本体の checkout から worktree に、許可リストの設定ファイルだけを写す。
+# 基点のコミットが古くて追跡ファイルが worktree に無い場合の補填と、追跡しない
+# 開発者ごとの上書き（agent-team.local.toml）の持ち越しを、1 つの手順で行う。
+#
+# 写すもの（この 2 つだけ。増やすときはこのリストに追加する）:
+#   agent-team.toml        worktree に無いとき本体から写す（無いと conductor が枠を読めない）。
+#                          本体にも無ければ失敗する
+#   agent-team.local.toml  本体にあって worktree に無いとき写す。本体にも無ければ何もしない
+#
+# 使い方:
+#   scripts/worktree-setup [--from <本体 checkout>] [--dest <worktree>]
+#   --from 既定: $T3CODE_PROJECT_ROOT（T3 がアクションに渡す本体の checkout）。
+#                無ければこのスクリプトを含む checkout の最上位
+#   --dest 既定: $T3CODE_WORKTREE_PATH（T3 がアクションに渡す worktree）。
+#                無ければ現在のディレクトリ
+#
+# 決まり:
+#   - worktree 側に同名のもの（ファイル・symlink・ディレクトリ問わず）があれば写さない
+#   - 本体側が symlink か通常ファイルでないものは写さない。agent-team.toml については失敗する
+#   - 写すのはリストの 2 つの basename だけで、worktree の外側には書かない
+#   - 写した結果とスキップの理由は標準出力に、失敗の理由は標準エラーに出す（値は出さない）
+# 終了コード: 0 = 成功、1 = 必要なものが写せない・場所が不正、2 = 引数の誤り
+set -euo pipefail
+
+usage_text="usage: $0 [--from <本体 checkout>] [--dest <worktree>]"
+
+die() { echo "worktree-setup: $*" >&2; exit 1; }
+usage() { echo "$usage_text" >&2; exit 2; }
+
+case "${1:-}" in
+  -h|--help)
+    cat <<EOF
+$usage_text
+
+本体の checkout（--from）から worktree（--dest）へ、許可リストの設定ファイルを写す。
+worktree 側に同名のものがあれば上書きしない。
+EOF
+    exit 0
+    ;;
+esac
+
+if [[ -z "${WS_SRCFD:-}" ]]; then
+src="" dst=""
+while (($#)); do
+  case "$1" in
+    --from) (($# >= 2)) || usage; src="$2"; shift 2 ;;
+    --dest) (($# >= 2)) || usage; dst="$2"; shift 2 ;;
+    *) usage ;;
+  esac
+done
+
+[[ -n "$src" ]] || src="${T3CODE_PROJECT_ROOT:-}"
+[[ -n "$dst" ]] || dst="${T3CODE_WORKTREE_PATH:-$PWD}"
+if [[ -z "$src" ]]; then
+  # T3 の外（手動実行）では、このスクリプトを含む checkout を本体とみなす
+  src="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
+
+# 環境に GIT_DIR・GIT_WORK_TREE があると検査対象がずれるため捨てる
+unset GIT_DIR GIT_WORK_TREE
+
+# 読み書きの基点になる両側のディレクトリを先に fd で固定する。以後の検査・
+# 存在確認・コピーはすべてこの fd 起点（dir_fd か /proc/self/fd 経由）に行い、
+# 検査したディレクトリと読み書き先を同一のものに結びつける（パスが並行して
+# 差し替わっても検査したディレクトリを見る）。
+# ディレクトリは O_DIRECTORY|O_NOFOLLOW|O_NONBLOCK で開く。通常のリダイレクト
+# で開くと、開く時点でパスが名前付きパイプに変わっている場合に書き手を待って
+# 後続の検査に届かず、同期実行の T3 アクションや指揮役の交代が止まる。
+# ディレクトリ専用の開き方なら待たずに種類も同時に確かめられる（symlink は
+# たどらず、通常のディレクトリだけを開く）。bash のリダイレクトではこれらの
+# フラグを付けられないため、python で開いて fd を env 経由で引き継ぎ、
+# 自分自身を起動し直す（起動し直しは引数の再解釈を避けるため env の
+# WS_SRCFD/WS_DSTFD/WS_SRC/WS_DST だけを見る）
+  exec python3 -I - "${BASH_SOURCE[0]}" "$src" "$dst" <<'INNER'
+import errno, os, sys
+script, src, dst = sys.argv[1:4]
+def opendir(path, side):
+    try:
+        return os.open(path, os.O_RDONLY | os.O_DIRECTORY |
+                       os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        print(f"worktree-setup: {side} が無い: {path}", file=sys.stderr)
+        sys.exit(1)
+    except OSError as e:
+        why = "通常のディレクトリでない（symlink や FIFO は開かない）" \
+            if e.errno in (errno.ENOTDIR, errno.ELOOP) else "開けない"
+        print(f"worktree-setup: {side} が{why}: {path}", file=sys.stderr)
+        sys.exit(1)
+dfd = opendir(dst, "--dest の worktree")
+sfd = opendir(src, "--from の checkout")
+os.set_inheritable(dfd, True)
+os.set_inheritable(sfd, True)
+os.environ.update(WS_SRC=src, WS_DST=dst,
+                  WS_SRCFD=str(sfd), WS_DSTFD=str(dfd))
+os.execvp("bash", ["bash", script])
+INNER
+fi
+
+src="${WS_SRC}"; dst="${WS_DST}"
+srcdir="${WS_SRCFD}"; dstdir="${WS_DSTFD}"
+# fd の指す先の物理パス（symlink を辿った先で比べ、書くのも辿った先の中だけ）
+dst="$(readlink "/proc/self/fd/$dstdir")" \
+  || die "--dest のパスが解決できない"
+src="$(readlink "/proc/self/fd/$srcdir")" \
+  || die "--from のパスが解決できない"
+
+# 写す元と先が repo の外に出ないことを確かめる（写す元と先が repo の外に出ない、の
+# 受け入れ条件）。src は本体の checkout（git-dir が git-common-dir そのものの最上位。
+# リンク済み worktree は写す元にしない）、dst は同じ repo に登録されたリンク済み
+# worktree の最上位。逆向き（local のある worktree → 本体）や repo の外への書き出しを止める。
+top_src="$(git -C "/proc/self/fd/$srcdir" rev-parse --show-toplevel 2>/dev/null)" \
+  || die "--from が git の checkout でない: $src"
+top_src="$(CDPATH='' cd "$top_src" && pwd -P)"
+[[ "$top_src" == "$src" ]] \
+  || die "--from が checkout の最上位でない: $src"
+gd_src="$(git -C "/proc/self/fd/$srcdir" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
+  || die "--from の git-dir が読めない: $src"
+common_src="$(git -C "/proc/self/fd/$srcdir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+  || die "--from の git-common-dir が読めない: $src"
+gd_src="$(CDPATH='' cd "$gd_src" && pwd -P)"
+common_src="$(CDPATH='' cd "$common_src" && pwd -P)"
+[[ "$gd_src" == "$common_src" ]] \
+  || die "--from が本体の checkout でない（リンク済み worktree は写す元にしない）: $src"
+top_dst="$(git -C "/proc/self/fd/$dstdir" rev-parse --show-toplevel 2>/dev/null)" \
+  || die "--dest が git の worktree でない: $dst"
+top_dst="$(CDPATH='' cd "$top_dst" && pwd -P)"
+[[ "$top_dst" == "$dst" ]] \
+  || die "--dest が worktree の最上位でない（$dst の属する worktree の最上位は $top_dst）"
+gd_dst="$(git -C "/proc/self/fd/$dstdir" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
+  || die "--dest の git-dir が読めない: $dst"
+common_dst="$(git -C "/proc/self/fd/$dstdir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+  || die "--dest の git-common-dir が読めない: $dst"
+gd_dst="$(CDPATH='' cd "$gd_dst" && pwd -P)"
+common_dst="$(CDPATH='' cd "$common_dst" && pwd -P)"
+[[ "$gd_dst" != "$common_dst" ]] \
+  || die "--dest がリンク済み worktree でない（本体の checkout には書かない）: $dst"
+[[ "$common_src" == "$common_dst" ]] \
+  || die "--dest が --from と同じ repo の worktree でない"
+
+# dst が本体側の worktree 登録（git worktree list）に載ることを確かめる。
+# メタデータだけが残った未登録のディレクトリへの書き出しを止める。
+# 登録一覧の取得も開いた srcdir 起点にし、照合はパスの文字列ではなく
+# ディレクトリの実体（dev:ino）で行う（登録先と書き込み先が同一の実体か
+# を確かめる）。登録エントリのパスが消えている・動いた場合はその項目を
+# 読み飛ばす。作業ツリーの移動がこの検査と重なると登録先と書き込み先の
+# 実体がずれるため拒否する（検査後の移動では、fd が追うのは同じ実体の
+# ディレクトリだけなので写す先は登録した実体のまま）
+dst_id="$(stat -Lc '%d:%i' "/proc/self/fd/$dstdir")" \
+  || die "--dest の実体が確かめられない: $dst"
+registered=""
+while IFS= read -r wline; do
+  case "$wline" in
+    "worktree "*)
+      wp="${wline#worktree }"
+      wid="$(stat -Lc '%d:%i' "$wp" 2>/dev/null)" || continue
+      [[ "$wid" == "$dst_id" ]] && { registered=1; break; } ;;
+  esac
+done < <(git -C "/proc/self/fd/$srcdir" worktree list --porcelain)
+[[ -n "$registered" ]] \
+  || die "--dest が本体側の worktree 登録に無い: $dst"
+
+
+copied=0
+for name in agent-team.toml agent-team.local.toml; do
+  # 存在確認から配置まで worktree 側はすべて dstdir の fd 起点（/proc/self/fd）
+  # にする。元の絶対パスは表示にだけ使い、検査したディレクトリと書き込み先が
+  # 同一であることを保つ
+  to="/proc/self/fd/$dstdir/$name"
+  if [[ -e "$to" || -L "$to" ]]; then
+    echo "worktree-setup: skip $name（worktree 側に既にある）"
+    continue
+  fi
+  # コピー本体は dir_fd 基点の 1 つの python 手続き（worktree-setup-copy）
+  # に任せる。コピー元は検査した srcdir から O_NOFOLLOW|O_NONBLOCK で開き、
+  # 書き込み先は O_TMPFILE の無名 inode（名前を持たないため名差し替え・
+  # 後始末の経路が要らない）、公開は書いた実体の fd から link。
+  #   終了コード: 0 写した / 4 本体にも無い / 5 本体側を開けない（権限等） /
+  #   6 本体側が通常ファイルでない / 7 無名の一時 inode を作れない /
+  #   8 最終名が現れた / 9 読み書き・リンクの失敗
+  rc=0
+  python3 -I "$(dirname "${BASH_SOURCE[0]}")/worktree-setup-copy" \
+    "$dstdir" "$srcdir" "$name" || rc=$?
+  case "$rc" in
+    0)
+      copied=$((copied + 1))
+      echo "worktree-setup: copied $name" ;;
+    4)
+      if [[ "$name" == agent-team.toml ]]; then
+        die "本体の checkout に $name が無い（worktree にも無いため conductor が枠を読めない）"
+      fi
+      echo "worktree-setup: skip $name（本体にも無い任意ファイル）" ;;
+    6)
+      if [[ "$name" == agent-team.toml ]]; then
+        die "本体の $name が通常ファイルでない（symlink やディレクトリは写さない）"
+      fi
+      echo "worktree-setup: skip $name（本体側が通常ファイルでない）" ;;
+    8)
+      echo "worktree-setup: skip $name（worktree 側に既にある）" ;;
+    *)
+      # 本体に通常ファイルとしてある設定は枠・担当の決まりになるため、写せなければ
+      # どちらの名前でも失敗とする（写せないまま交代すると、枠を読めない・上書きを
+      # 失う conductor に引き継がせることになる）
+      die "worktree 側に $name を作れない（書き込みに失敗）" ;;
+  esac
+done
+echo "worktree-setup: ok（写した $copied 件）"

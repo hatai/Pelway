@@ -173,7 +173,7 @@ check fail_closed_r6_command_team .agents/skills/command-team/SKILL.md \
   '結果の報告を受けた実行の投稿' \
   '`[review-invalid-resolved]`'
 check fail_closed_r6_runbook docs/agents/grokbot-runbook.md \
-  '立てる前に、対象 PR に委託記録' \
+  '確かめられたあと、対象 PR に委託記録' \
   '最新のレビューでは照合しない'
 
 # 失敗した実行の投稿は末尾行の run= で選び、判別できない投稿は review: unknown に進める。解消コメントは

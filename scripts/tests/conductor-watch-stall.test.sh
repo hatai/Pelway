@@ -11,6 +11,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ROOT="$(mktemp -d)"
 WPID=""
+LAST_WPID=""
 # 巡回は setsid で自分のプロセスグループに入れて動かし、止めるときは python の子ごと止める
 trap '[[ -n "${WPID:-}" ]] && kill -KILL -- -"$WPID" 2>/dev/null; rm -rf "$ROOT"' EXIT
 failures=()
@@ -89,8 +90,13 @@ run_cycles() {
   WPID=$!
   for ((i = 0; i < 100; i++)); do kill -0 "$WPID" 2>/dev/null || break; /bin/sleep 0.1; done
   RUN_RC=0
-  if kill -0 "$WPID" 2>/dev/null; then kill -KILL -- -"$WPID" 2>/dev/null; RUN_RC=1; fi
-  wait "$WPID" 2>/dev/null; WPID=""
+  if kill -0 "$WPID" 2>/dev/null; then
+    # 時間切れで実際にグループ停止を送る直前に、グループのメンバーを記録する
+    # （見張りと別名の子がいたことを試験 18 で確かめる）。
+    pgrep -g "$WPID" -a > "$MOCK/group-members" 2>/dev/null || true
+    kill -KILL -- -"$WPID" 2>/dev/null; RUN_RC=1
+  fi
+  wait "$WPID" 2>/dev/null; LAST_WPID="$WPID"; WPID=""
 }
 
 sget() {
@@ -245,6 +251,7 @@ check "13: the cycle finishes within 10 seconds" in_time
 # 試験 14: 受信箱が FIFO なら、開いて止まらず、10 秒以内にその回を終える。
 reset; stopped 55
 mkfifo "$INBOX"
+check "14: the inbox is a FIFO" test -p "$INBOX"
 run_cycles 1
 check "14: a FIFO inbox does not block the cycle (10 seconds)" in_time
 check "14: the patrol state is still updated" eq "$(sget 55 waiting_on)" "conductor"
@@ -286,6 +293,26 @@ ev 58 '"mcp:impl-58"' "$WR" '"2026-11-20T10:01:00Z"'
 run_cycles 1
 check "17: a valid line in the last 4 MiB is read" eq "$(sget 58 waiting_on)" "implement"
 check "10-17: no writes to GitHub or threads" no_writes
+
+# 試験 18: 巡回が時間切れのとき、実際の停止処理（run_cycles の kill -KILL -- -$WPID）が
+# 見張りと別名の子をまとめて終わらせる。正常終了する巡回ではこの分岐を通らないため、
+# 応答しない t3 で巡回を止めて通す。停止の直前に記録したグループで、見張りと別名の子が
+# 別の PID で存在したことと、停止後にグループが空であることを確かめる。
+group_empty() { local i; for i in {1..15}; do [[ -z "$(pgrep -g "$1" 2>/dev/null)" ]] && return 0; /bin/sleep 0.2; done; return 1; }
+reset; stopped 59
+cat > "$ROOT/bin/t3" <<'EOF'
+#!/usr/bin/env bash
+# 応答しない t3。/bin/sleep を絶対パスで呼び、モックの sleep（SLEEP_MAX で親に TERM を
+# 送る）を通らない。
+exec /bin/sleep 600
+EOF
+chmod +x "$ROOT/bin/t3"
+run_cycles 2
+check "18: a hung patrol is stopped on timeout (real group kill)" eq "$RUN_RC" "1"
+check "18: pre-kill group had the watcher"                        has "$MOCK/group-members" 'conductor-watch\.sh'
+check "18: pre-kill group had a differently-named child"          has "$MOCK/group-members" 'sleep'
+check "18: watcher and child were different members"              le 2 "$(wc -l < "$MOCK/group-members")"
+check "18: the group is empty after the real group kill"          group_empty "$LAST_WPID"
 
 if ((${#failures[@]})); then
   printf '\n%d failed\n' "${#failures[@]}"
