@@ -4,17 +4,17 @@
 
 This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it.
 
-## 規則と既定
+## Rules and defaults
 
-このファイルの規則は「変えてはいけない規則」と「既定」に分かれる。規則ではない参照と現状の説明は「案内」に置く。規則の強さは文言ではなく所属する節で決まる。
+The rules in this file are divided into hard rules and defaults. References and descriptions of current state that are not rules go in `Guidance`. A rule's strength is determined by the section it belongs to, not by its wording.
 
-「変えてはいけない規則」は、エージェントが自分では変えられない規則である。人間の統制と監査可能性（判断と証跡をあとから確かめられること）、安全とセキュリティ、外部との約束、不可逆な操作を守る。task prompt、Issue、レビュー、skill、docs と衝突したときは作業を止め、衝突した規則を示して hatai の判断を待つ。強弱が読めない規則は、分類を変える決定があるまで「変えてはいけない規則」として扱う。
+Hard rules are rules an agent cannot change on its own. They are limited to rules that protect human control and auditability — the ability to check decisions and evidence after the fact — safety and security, external commitments, and irreversible operations. When a hard rule conflicts with a task prompt, an Issue, a review, a skill, or a doc, stop work, name the conflicting rule, and wait for hatai's judgment. A rule whose strength is unclear is treated as a hard rule until a decision changes its classification.
 
-「既定」は、明示された指示がないときに従う規則である。hatai の直接指示、hatai 名義の決定コメント、または `ready-for-agent` の付いた Issue の本文が既定と違うときは、その指示に従う。指揮役・実装担当・レビュー担当の指示だけでは既定を外れない。既定を外れたときは、外した既定・根拠・範囲を書く。実装では実装者メモと PR 本文、調査では調査報告、それ以外の作業では最終回答に書く。
+Defaults are rules you follow when no explicit instruction says otherwise. When hatai's direct instruction, a decision comment authored by hatai, or the body of an Issue labeled `ready-for-agent` departs from a default, follow that instruction. Instructions from the conductor, an implementer, or a reviewer alone do not set aside a default. When you depart from a default, record which default, the authorizing instruction, and the scope: in the implementer memo and the PR body for implementation, in the investigation report for investigations, in the final reply for other work.
 
-規則とその分類を恒久的に変えるには、hatai の明示した決定が要る。決定は、変更内容を明示した Issue への `ready-for-agent`、または hatai 名義の決定コメントで確認できるようにする。一回の運用例外は、その規則が例外手続きと決定者を明記しているときだけ使う。明記がなければ恒久的な変更と同じ決定を待つ。この節を変えるときも同じ決定が要る。
+Permanently changing a rule or its classification requires hatai's explicit decision, verifiable as a `ready-for-agent` label on an Issue stating the change or as a decision comment authored by hatai. A one-off operational exception applies only where the rule itself names the exception procedure and its decision-maker; otherwise wait for the same decision as a permanent change. Changing this section requires the same decision.
 
-## 変えてはいけない規則
+## Hard rules
 
 ### Prior art first
 
@@ -46,12 +46,12 @@ This codebase is yours: what it's for and how it's built are your call, and you'
 - The conductor (Grok Bot, or a substitute agent named by the human) follows `docs/agents/grokbot-runbook.md` for events and the `command-team` skill for routing, escalation, merging, the improvement loop, and substitution.
 - Shared rules and skills live only where every tool reads them: `AGENTS.md`, `agent-team.toml`, `.agents/skills/`, `docs/`. After a change, `diff -r .claude/skills/<name> .agents/skills/<name>` must be empty.
 - Agents run `gh` and `git` against GitHub through `scripts/agent-gh <dev|review>`, never through plain `gh`, so that PRs are authored by the GitHub App `pelway-dev[bot]` and reviews by the GitHub App `pelway-review[bot]`. The exceptions are the human's fallback `gh pr merge --admin` — merges are done by Kodiak, and the manual merge applies only to the exception PRs hatai judges (the canonical rule is the `command-team` skill's "マージ") — and the conductor's marker comments (`<!-- pr-size-exception -->`, `<!-- split-plan -->`), which reviewers trust only when authored by `hatai` (see the `command-team` skill).
-- 署名付け替えを止めるときは `PELWAY_AGENT_SKIP_RESIGN=1` を使う。
+- To stop re-signing, use `PELWAY_AGENT_SKIP_RESIGN=1`.
 - A PR is merged only when all of these hold for its current head: a valid approval from `pelway-review`, the required checks passing, and a QA pass comment by the GitHub App `pelway-qa` that names the same SHA and the run QA checked. A PR is not treated as passed before QA has checked that SHA. The conductor adds `automerge` only then (see `docs/agents/qa-checklist.md` and the `command-team` skill, "マージ").
 - An overrun of the PR size limit requires the conductor's approval with the `pr-size-exception` label.
-- 人間のアカウントで投稿する道具（T3 の `comment_on_issue` など）で hatai の判断を書くのは、hatai がその文面か選択肢を明示して選んだときだけで、中身を補うときは先に文面を見せて確かめる。
+- Write hatai's judgment through tools that post under the human's account (such as T3's `comment_on_issue`) only when hatai has explicitly chosen the wording or the option; when supplementing the content, show the wording first and confirm.
 
-## 既定
+## Defaults
 
 ### Prior art first
 
@@ -91,7 +91,7 @@ Skills and docs state facts only: rules, procedures, definitions, current state.
 - A skill's helper ships with its test, bundled in the same directory as `SKILL.md` (local-managed skills only).
 - Scope, test placement and execution, and treatment in both skill trees follow `docs/agents/skill-helpers.md`.
 
-## 案内
+## Guidance
 
 ### LLM judges
 
@@ -101,7 +101,7 @@ Skills and docs state facts only: rules, procedures, definitions, current state.
 
 - The form `.github/ISSUE_TEMPLATE/agent-task.yml` mirrors the `write-issue` skill.
 - See the entry points in `docs/superpowers/specs/agent-team.md`.
-- `scripts/agent-gh` の `git push` は、成功後に `scripts/agent-gh-resign` が署名なしコミットを `createCommitOnBranch`（GitHub API）で作り直した署名付きコミットへ ref を付け替える（GitHub App の Verified 署名）。ローカルの署名設定（`commit.gpgsign`）は App 名義のコミットには適用しない。API で表現できない変更（新規の実行ファイル・mode 変更・symlink・submodule・マージ・空コミット）を含む push は署名なしのままになる。
+- After a successful `git push` through `scripts/agent-gh`, `scripts/agent-gh-resign` rewrites unsigned commits into signed commits recreated with `createCommitOnBranch` (the GitHub API) and moves the ref to them (the GitHub App's Verified signature). Local signing configuration (`commit.gpgsign`) is not applied to commits authored by the App. A push containing changes the API cannot represent (new executable files, mode changes, symlinks, submodules, merges, empty commits) remains unsigned.
 - Labels and who sets them: `docs/agents/triage-labels.md`.
 
 ### Issue tracker

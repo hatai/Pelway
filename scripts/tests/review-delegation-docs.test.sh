@@ -80,9 +80,9 @@ check highrisk_toml_command_team .agents/skills/command-team/SKILL.md \
 check security_yes_toml_implement .agents/skills/implement-issue/SKILL.md \
   '`agent-team.toml` を変えている、認証・認可・トークン・鍵・暗号・sandbox・egress・gateway・テナント分離・監査に触れている'
 
-# 人間のアカウントで投稿する道具で hatai の判断を書く条件。
+# 人間のアカウントで投稿する道具で hatai の判断を書く条件（AGENTS.md の英語化に合わせてピンを英語に直した）。
 check agents_human_account AGENTS.md \
-  '人間のアカウントで投稿する道具（T3 の `comment_on_issue` など）で hatai の判断を書くのは、hatai がその文面か選択肢を明示して選んだときだけ'
+  'Write hatai'\''s judgment through tools that post under the human'\''s account (such as T3'\''s `comment_on_issue`) only when hatai has explicitly chosen the wording or the option'
 
 # レビュー委託の標準手順に fail-closed のツール一覧チェックが明記されている（Issue #581）。
 # チェックに失敗したレビュー（error: が 設定の不備: で始まる verdict: failed）は結果を採用しない。
