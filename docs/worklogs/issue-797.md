@@ -2,7 +2,7 @@
 
 ## 実装者メモ（round 1）
 
-対象 head: 468311c5d6ca941ca8487ec526bf44b8fd9b567f
+対象 head: 4bd585996b8b4612c3ebbb553fef2e30538c35fb
 
 1. 詰まった箇所: なし（分類の判断は着手前の面談で hatai が全部決めた）
 2. 曖昧だった文: 「This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it.」（AGENTS.md「Ownership」）— `yours` の主体が書かれていない。規則として分類できないため、面談の決定どおり分類枠の外の導入文とした
