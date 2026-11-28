@@ -81,7 +81,7 @@ check review_pr_references .agents/skills/review-pr/SKILL.md \
   'docs/agents/review/client-ui.md' \
   'front matter だけを読む' \
   '中央の `review-pr` が must-fix と定めるすべての規則' \
-  'root の `Cargo.toml`・`Cargo.lock`、`mise.toml`、`.github/workflows/`、`deny.toml` だけの変更では' \
+  'root の `Cargo.toml`・`Cargo.lock`、`mise.toml`、`.github/workflows/`、`deny.toml` だけの変更では、3つの観点ファイルを適用しない' \
   'diff が Rust ファイル（`.rs`）の `#[cfg(test)]`' \
   '選ばれたファイルの本文だけを main の版で読む' \
   '観点ファイル: なし' \
@@ -89,7 +89,9 @@ check review_pr_references .agents/skills/review-pr/SKILL.md \
   '`#[test]`' \
   '`#[tokio::test]`' \
   '削除前・rename 前後両方のパス' \
-  'verdict: failed'
+  '黙って適用を省略せず `verdict: failed` で報告する' \
+  'いずれかの観点ファイルに明示された must-fix を最優先とし' \
+  '`default_class` は `must-fix`・`nit`'
 
 if ((${#failures[@]})); then
   printf 'FAIL: %s\n' "${failures[@]}" >&2

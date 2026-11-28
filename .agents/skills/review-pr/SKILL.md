@@ -139,7 +139,7 @@ diff が示さない網羅性の不足や表現の好みは nit にする。
 1. そのレビューで検査する差分の変更パスを得る。初回は PR 全体、再レビューでは「2 回目以降の round」で定める差分を使う。削除・rename では、削除前・rename 前後両方のパスで判定する。
 2. main の版にある3つの観点ファイルの front matter だけを読む。読むのはレビュー時点の main の版で、PR が変更・追加した版ではない。実装担当のレビュー委託で立てられたときは GitHub API で main の版を読む。
 3. `paths` の glob に1つでも一致したファイルを選ぶ。glob は repository root に固定した gitignore 風の書式で、先頭の `/` は root、`*` は `/` をまたがず、`**` は `/` をまたぐ。除外パターンと brace expansion は使わない。root の `Cargo.toml`・`Cargo.lock`、`mise.toml`、`.github/workflows/`、`deny.toml` だけの変更では、3つの観点ファイルを適用しない。さらに、diff が Rust ファイル（`.rs`）の `#[cfg(test)]`・`#[test]`・`#[tokio::test]` 自体、またはそれらの test module・test function の中の行を変更しているときは `tests` も選ぶ。
-4. 選ばれたファイルの本文だけを main の版で読む。複数選ばれたときは全て適用する。同じ指摘について「報告する」と「報告しない」が衝突したら報告する側を優先し、`default_class` が衝突したら must-fix、`attention` が衝突したら高い段階を優先する。
+4. 選ばれたファイルの本文だけを main の版で読む。複数選ばれたときは全て適用する。同じ指摘について「報告する」と「報告しない」が衝突したら報告する側を優先する。must-fix・nit の区分が領域間で衝突したときは、いずれかの観点ファイルに明示された must-fix を最優先とし、次に明示された nit とし、どの観点ファイルにも列挙されない境界事例だけを `default_class` で決める。`default_class` 同士が衝突したら must-fix、`attention` が衝突したら高い段階を優先する。
 5. レビュー本文の `## 検査` に適用した観点ファイルを書く。順は `db-contracts-and-migrations`、`tests`、`client-ui` に固定し、無いときは `観点ファイル: なし` と書く。
 
 front matter の `default_class` は、観点ファイルに列挙されていない境界事例の既定区分である。既定値を変えるときは、その指摘行の本文に理由を書く。`attention` の意味は次のとおり:
@@ -150,7 +150,7 @@ front matter の `default_class` は、観点ファイルに列挙されてい�
 | MEDIUM | 対象ファイルの変更箇所と、直接関係する定義・呼び出し元を読む。同種の洗い出しは変更ファイルの中に留める |
 | LOW | 対象ファイルの変更箇所だけを読む。中央の must-fix 規則で必要な場合を除き、周辺まで広げない |
 
-main の観点ファイルが存在しない、front matter の区切りが無い、`name`・`paths`・`default_class`・`attention` のどれかが無い、`paths` が空、または `default_class`・`attention` が許可された値でないときは、黙って適用を省略せず `verdict: failed` で報告する。
+main の観点ファイルが存在しない、front matter の区切りが無い、`name`・`paths`・`default_class`・`attention` のどれかが無い、`paths` が空、または `default_class`・`attention` が許可された値（`default_class` は `must-fix`・`nit`、`attention` は `HIGH`・`MEDIUM`・`LOW`）でないときは、黙って適用を省略せず `verdict: failed` で報告する。
 
 ### 3. 指摘を 2 種類に分ける
 

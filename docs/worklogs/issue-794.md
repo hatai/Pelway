@@ -28,6 +28,8 @@
   確かめ方: `.agents/skills/review-pr/SKILL.md` の「領域別のレビュー観点ファイル」で main の版を読む手順を確認し、presence check で front matter を先に読む文言を確かめる。
 - 失敗の筋: 再レビューで観点ファイル選択だけが main の merge commit や `diverged` の例外を無視すると、レビュー本体と違う差分に対して観点を選び、適用漏れや余計な適用が起きる。
   確かめ方: `.agents/skills/review-pr/SKILL.md` で観点ファイル選択が「2 回目以降の round」の差分を参照することを確認する。
+- 失敗の筋: 複数領域にまたがる指摘の must-fix・nit の優先順が未定義だと、同じ指摘の重さが読み手やレビューごとに揺れ、領域固有の欠陥を nit に下げたり逆に過剰な must-fix にしたりする。
+  確かめ方: `bash scripts/tests/review-perspective-docs.test.sh` で「明示された must-fix を最優先」の文言を確かめ、PR 本文に引用した衝突解決の規則をレビュー担当が読む。
 
 ## 実装者メモ（round 1）
 

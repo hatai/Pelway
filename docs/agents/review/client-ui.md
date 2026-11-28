@@ -33,7 +33,7 @@ attention: HIGH
 
 ## 報告しないもの
 
-- PR が悪化させていない既存の visual・accessibility・design の不足は報告しない。全局的な invariant を壊す場合・新しい UI を誤解させる場合は報告し、それ以外は一度だけ follow-up に送る。
+- PR が悪化させていない既存の visual・accessibility・design の不足は報告しない。全局的な invariant を壊す場合・新しい UI を誤解させる場合は報告し、それ以外はレビューに載せない。必要ならレビューの外で別 Issue にする。
 - 範囲外の design や accessibility の希望を毎 round の nit に繰り返し置かない。現行の diff で悪化した場合は報告する。
 - 再現条件の無い Slint 内部動作の一般論は書かない。現在の UI invariant と結び付く具体例がある場合は報告する。
 - font・OS・描画環境の差を考慮しない pixel-perfect の差異は報告しない。計測可能な invariant に反する場合は報告する。
