@@ -14,7 +14,12 @@ LOG="$ROOT/t3-calls"
 FILE="$ROOT/home/.config/pelway-agent-notify/conductor-thread-id"
 OLD="mcp:launch:old-conductor"
 NEW="mcp:launch:new-conductor"
-NEW_WT_PATH="/home/u/.t3/worktrees/Pelway/conductor"
+NEW_WT_PATH="$ROOT/new-conductor-wt"
+# 新しい指揮役の worktree は本物の worktree にする（conductor-rebuild は毎回
+# worktree-setup を通して agent-team の設定を揃え、worktree-setup は dst が
+# 本体と同じ repo のリンク済み worktree であることを確かめるため）
+git -C "$REPO" worktree add -q --detach "$NEW_WT_PATH" HEAD
+trap 'rm -rf "$ROOT"; git -C "$REPO" worktree remove --force "$NEW_WT_PATH" 2>/dev/null; git -C "$REPO" worktree remove --force "$ROOT/late-wt" 2>/dev/null' EXIT
 
 # 期待する本文（スクリプトの決まった文と完全一致で比べる）
 STOP_WANT="恒久交代を始める（docs/agents/conductor-context.md の「恒久交代」）。案件を進める操作（スレッドの起動・指示、マージ、ラベル、コメント、ステータス変更）を止め、引き継ぎの記録を指揮役の作業ログと patrol-state.json に書き出して、このターンを終える。以後は操作しない。scheduled task や起こしで起きても、巡回も patrol-state.json の書き込みもせずにターンを終える。"
@@ -85,6 +90,7 @@ run() {
   rm -f "$LOG" "$LOG".*; [[ -n "${1:-}" ]] && touch "$LOG.$1"
   shift || true
   HOME="$ROOT/home" T3_BIN="$ROOT/t3" LOG="$LOG" PELWAY_REBUILD_ALLOW_WORKTREE=1 \
+    NEW_WT="${NEW_WT-$NEW_WT_PATH}" \
     bash "$REPO/scripts/conductor-rebuild" "$@" >"$ROOT/out" 2>"$ROOT/err"
 }
 check() {
@@ -112,6 +118,64 @@ check "handover message is exactly the fixed text" same "$LOG.send-stdin.new-con
 check "registers the new conductor" [ "$(cat "$FILE")" = "$NEW" ]
 check "logs the new conductor's runtimeMode and worktree" \
   grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=auto-accept-edits worktree=$NEW_WT_PATH" "$ROOT/err"
+# worktree に既にある agent-team.toml は上書きしない（worktree-setup が skip する）
+check "existing agent-team.toml untouched" same "$NEW_WT_PATH/agent-team.toml" "$(cat "$REPO/agent-team.toml")"
+# agent-team.toml があっても worktree-setup を通す（local の持ち越しのため）
+check "setup ran to carry agent-team.local.toml" grep -q "worktree-setup:" "$ROOT/err"
+
+# worktree に agent-team.toml が無いときは本体の checkout から写してから進む（Issue #804）
+# worktree-setup は dst が repo の worktree か確かめるため、本物の worktree を作り、
+# agent-team.toml だけを消して「無い」状態にする
+MAIN_CO="$(dirname "$(git -C "$REPO/scripts" rev-parse --path-format=absolute --git-common-dir)")"
+FRESH_WT="$ROOT/fresh-wt"
+if git -C "$REPO" worktree add -q --detach "$FRESH_WT" HEAD 2>/dev/null; then
+  rm -f "$FRESH_WT/agent-team.toml"
+  printf 'mcp:launch:kept\n' > "$FILE"
+  NEW_WT="$FRESH_WT" run "" --from "$OLD" --to "$NEW"; rc=$?
+  check "missing toml in worktree: succeeds" [ "$rc" -eq 0 ]
+  check "missing toml in worktree: copies agent-team.toml from main checkout" \
+    bash -c "[ -f '$FRESH_WT/agent-team.toml' ] && cmp -s '$MAIN_CO/agent-team.toml' '$FRESH_WT/agent-team.toml'"
+  check "missing toml in worktree: logs the copy" \
+    grep -q "agent-team.toml" "$ROOT/err"
+  check "missing toml in worktree: still stops the old conductor" \
+    [ "$(count "thread send --wait $OLD -")" -eq 1 ]
+  check "missing toml in worktree: registers the new conductor" [ "$(cat "$FILE")" = "$NEW" ]
+  git -C "$REPO" worktree remove --force "$FRESH_WT"
+else
+  check "missing toml in worktree: fixture worktree created" false
+fi
+
+# worktree のパスが存在しない（写せない）ときは、旧指揮役を止める前に止まる
+printf 'mcp:launch:kept\n' > "$FILE"
+NEW_WT="$ROOT/no-such-wt" run "" --from "$OLD" --to "$NEW"; rc=$?
+check "unwritable worktree: exits non-zero" [ "$rc" -ne 0 ]
+check "unwritable worktree: nothing sent to either conductor" no_line "thread send"
+check "unwritable worktree: no thread start" no_line "thread start"
+check "unwritable worktree: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+check "unwritable worktree: stderr names agent-team.toml" grep -qF "agent-team.toml" "$ROOT/err"
+
+# 共有の agent-team.toml が既にある worktree への local の配置に失敗するときも、
+# 旧指揮役に停止を送る前に止まり、登録を保つ。
+# 本体の checkout に local を書く必要があるため、実際の本体は使わず試験専用の
+# 一時リポジトリに本体と作業ツリーを作る（実際の開発者設定を切り詰めたり
+# 消したりしない）
+FIX_MAIN="$ROOT/fix-main"; FIX_WT="$ROOT/fix-wt"
+if git init -q "$FIX_MAIN"   && git -C "$FIX_MAIN" config user.name test   && git -C "$FIX_MAIN" config user.email test@example.invalid   && mkdir -p "$FIX_MAIN/scripts"   && cp "$REPO/scripts/conductor-rebuild" "$REPO/scripts/worktree-setup"        "$REPO/scripts/worktree-setup-copy" "$FIX_MAIN/scripts/"   && printf '[agents.opencode]\ninstance.implement = "x"\n' > "$FIX_MAIN/agent-team.toml"   && git -C "$FIX_MAIN" add -A && git -C "$FIX_MAIN" commit -qm init   && git -C "$FIX_MAIN" worktree add -q --detach "$FIX_WT"   && printf '# test local\n' > "$FIX_MAIN/agent-team.local.toml"; then
+  # wt 側は読み取り専用にして local の配置だけを失敗させる
+  chmod a-w "$FIX_WT"
+  printf 'mcp:launch:kept\n' > "$FILE"
+  rm -f "$LOG" "$LOG".*
+  HOME="$ROOT/home" T3_BIN="$ROOT/t3" LOG="$LOG" PELWAY_REBUILD_ALLOW_WORKTREE=1     NEW_WT="$FIX_WT"     bash "$FIX_MAIN/scripts/conductor-rebuild" --from "$OLD" --to "$NEW"       >"$ROOT/out" 2>"$ROOT/err"; rc=$?
+  chmod u+w "$FIX_WT"
+  check "local write failure: exits non-zero" [ "$rc" -ne 0 ]
+  check "local write failure: nothing sent to either conductor" no_line "thread send"
+  check "local write failure: no thread start" no_line "thread start"
+  check "local write failure: registration unchanged" [ "$(cat "$FILE")" = "mcp:launch:kept" ]
+  check "local write failure: stderr names agent-team.local.toml" grep -qF "agent-team.local.toml" "$ROOT/err"
+  git -C "$FIX_MAIN" worktree remove --force "$FIX_WT"
+else
+  check "local write failure: fixture repo created" false
+fi
 
 # --to なし: 何も作らず、t3_thread_launch で立てて --to で実行し直す手順を出して止まる
 printf 'mcp:launch:kept\n' > "$FILE"
@@ -183,7 +247,8 @@ check "no worktree until the limit: tells how to continue" \
 
 # worktree のパスが読み直しの途中で入ったときは、権限の確かめ以降に進む
 printf 'mcp:launch:kept\n' > "$FILE"
-NEW_WT="/home/u/.t3/worktrees/Pelway/late" NEW_WT_AFTER=3 \
+git -C "$REPO" worktree add -q --detach "$ROOT/late-wt" HEAD
+NEW_WT="$ROOT/late-wt" NEW_WT_AFTER=3 \
   PELWAY_REBUILD_WT_WAIT=30 PELWAY_REBUILD_WT_INTERVAL=0.1 run "" --from "$OLD" --to "$NEW"; rc=$?
 check "worktree arrives while waiting: succeeds" [ "$rc" -eq 0 ]
 check "worktree arrives while waiting: reread the new conductor 3 times" \
@@ -194,7 +259,7 @@ check "worktree arrives while waiting: sends the handover" \
   [ "$(count "thread send $NEW -")" -eq 1 ]
 check "worktree arrives while waiting: registers the new conductor" [ "$(cat "$FILE")" = "$NEW" ]
 check "worktree arrives while waiting: logs the last-read worktree" \
-  grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=auto-accept-edits worktree=/home/u/.t3/worktrees/Pelway/late" "$ROOT/err"
+  grep -qF "conductor-rebuild: new conductor $NEW runtimeMode=auto-accept-edits worktree=$ROOT/late-wt" "$ROOT/err"
 
 # 読み直しの間隔が残り時間を超えるときは、期限を過ぎる読み取りを始めずに止まる
 printf 'mcp:launch:kept\n' > "$FILE"

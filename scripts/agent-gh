@@ -4,6 +4,8 @@
 #   scripts/agent-gh review <gh の引数...>     レビュー担当 GitHub App pelway-review
 #   scripts/agent-gh qa comment <番号> --body-file <path|->   QA 担当 GitHub App pelway-qa（この形だけ許可）
 #   scripts/agent-gh <dev|review> git <git の引数...>   その名義の認証で git を実行する
+#   scripts/agent-gh dev issue rewrite <番号> --body-file <path|-> --comment-file <path|->   Issue の本文を書き換え、読み直して
+#       渡した本文と同じことを確かめてからコメントを付ける（#810）
 #   scripts/agent-gh -h | --help               使い方を標準出力に出して終了コード 0（fnox も gh も呼ばない）
 # git push は、push するコミットの名義が pelway-<dev|review>[bot] でなければ止める（#613。一時ディレクトリの pre-push フック）。
 # dev 役の git push は、同じフックの中で Git が送るブランチの更新ごとに差分を scripts/pr-size.sh で測り、上限（追加 800 行・
@@ -13,8 +15,11 @@
 # 参照もフォールバックもさせない（#522。レビュー sandbox が ~/.config/gh を読めないのと、人間のトークンへの
 # 黙ったフォールバックを防ぐため）。一時ディレクトリは終了時に消す。
 # qa は許可リスト方式で、上の 1 形以外の呼び出し（ラベル・Approve・マージ・編集・削除など）はトークン発行前に終了コード 2 で拒否する。
+# dev issue rewrite は、書き換えに失敗したとき・読み直した本文と渡した本文の一致を確認できなかったときはコメントを付けない（本文かコメントが空の
+# ときは何も送らずに拒む）。本文とコメントは一時ファイルに写してから検査し、その写しを送る。読み直した本文は、gh の --jq が
+# 足す末尾の改行を除いてバイト単位で比べる。
 # qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持たない（~/.config/pelway-agent-qa/fnox.toml を指す。未設定は終了コード 3）。
-# 終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない（qa の PELWAY_AGENT_FNOX_CONFIG 未設定を含む）、5 = 引数に \uXXXX エスケープ混入、それ以外は gh / git の終了コード（--help / -h は 0）
+# 終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しと dev issue rewrite の空の入力を含む）、3 = トークンを取れない（qa の PELWAY_AGENT_FNOX_CONFIG 未設定を含む）、4 = 署名の付け替えに失敗、5 = 引数に \uXXXX エスケープ混入、6 = 読み直した Issue 本文と渡した本文の一致を確認できなかった、それ以外は gh / git の終了コード（--help / -h は 0）
 set -euo pipefail
 # コマンド置換 $(...) の中でも set -e を効かせる（app_token 内の secret の失敗で止めるため）。
 shopt -s inherit_errexit
@@ -36,7 +41,7 @@ review_fnox_config="${PELWAY_AGENT_FNOX_CONFIG_REVIEW:-$HOME/.config/pelway-agen
 # 確認・取り込みの操作に絞る。コマンドを引数に取って実行するもの（rebase・bisect・submodule など）は入れない。
 git_allowed_subcommands=(add branch checkout commit diff fetch log ls-files ls-remote merge merge-base pull push restore rev-parse show status switch)
 
-usage() { echo "usage: $0 <dev|review> [git] <args...> | $0 qa comment <番号> --body-file <path|->" >&2; exit 2; }
+usage() { echo "usage: $0 <dev|review> [git] <args...> | $0 qa comment <番号> --body-file <path|-> | $0 dev issue rewrite <番号> --body-file <path|-> --comment-file <path|->" >&2; exit 2; }
 
 # 終了時に消すパス（gh 隔離用の一時ディレクトリ）。呼び出しはすべて subshell の外で行う。
 # app_token の秘密鍵一時ファイルはここに入れない: app_token は token="$(app_token ...)" の
@@ -108,18 +113,106 @@ qa_check_args() {
   fi
 }
 
+# 引数（役割の後）が dev issue rewrite の形（`issue rewrite ...`）で始まるか。
+is_issue_rewrite() { [[ "${1:-}" == issue && "${2:-}" == rewrite ]]; }
+
+# dev issue rewrite の引数が `issue rewrite <番号> --body-file <path|-> --comment-file <path|->` の 1 形であることを
+# 確かめる（qa_check_args と同じ考え方）。本文とコメントは一時ファイルに写し、写しを調べて送る（検査の後に入力
+# ファイルが変わっても、検査した内容だけが届く）。読めないファイルと空のファイル（空白だけを含む）は、何も
+# 送る前に終了コード 2 で拒む（空の本文で Issue の本文を消さないため）。トークン発行の前に呼ぶ。
+# 結果は issue_rewrite_n（番号）・issue_rewrite_body・issue_rewrite_comment（写しのパス。終了時に消す）に入れる。
+issue_rewrite_check_args() {
+  if [[ $# -ne 7 || "$1" != issue || "$2" != rewrite || "$4" != --body-file || "$6" != --comment-file || ! "$3" =~ ^[0-9]+$ ]]; then
+    echo "usage: $0 dev issue rewrite <番号> --body-file <path|-> --comment-file <path|->" >&2
+    exit 2
+  fi
+  if [[ "$5" == - && "$7" == - ]]; then
+    echo "agent-gh: --body-file と --comment-file の両方に -（標準入力）は渡せません" >&2
+    exit 2
+  fi
+  issue_rewrite_n="$3"
+  local item flag path copy text
+  for item in "--body-file=$5" "--comment-file=$7"; do
+    flag="${item%%=*}"
+    path="${item#*=}"
+    copy="$(mktemp)"
+    cleanup_paths+=("$copy")
+    if [[ "$path" == - ]]; then
+      cat >"$copy" || { echo "agent-gh: $flag の標準入力を読めません" >&2; exit 2; }
+    else
+      [[ -f "$path" && -r "$path" ]] || { echo "agent-gh: $flag のファイルを読めません" >&2; exit 2; }
+      # `--` を付ける: `-` で始まる相対パスを cat のオプションとして読ませない
+      cat -- "$path" >"$copy" || { echo "agent-gh: $flag のファイルを読めません" >&2; exit 2; }
+    fi
+    text="$(cat -- "$copy")"
+    [[ -n "${text//[[:space:]]/}" ]] || { echo "agent-gh: $flag のファイルが空です" >&2; exit 2; }
+    if [[ "$flag" == --body-file ]]; then
+      issue_rewrite_body="$copy"
+    else
+      issue_rewrite_comment="$copy"
+    fi
+  done
+}
+
+# gh_failed <終了コード>: gh の失敗で終わる。通信の失敗（タイムアウトなど）のときは、失敗と出ても要求が GitHub 側で
+# 済んでいることがあるため、GitHub 上で確かめさせる。
+gh_failed() {
+  echo "agent-gh: gh が失敗したため終わります。通信の失敗のときは要求が GitHub 側で済んでいることがあるため、GitHub 上で確かめてください" >&2
+  exit "$1"
+}
+
+# dev issue rewrite: Issue の本文を書き換え、読み直して渡した本文と同じことを確かめてからコメントを付ける（#810）。
+# 書き換えに失敗したとき・読み直した本文と渡した本文の一致を確認できなかったときは、コメントを付けずに終わる
+# （書き換えられなかったのに「書き直した」のコメントだけが付くのを防ぐ）。gh が失敗したときは gh の終了コード、
+# gh が成功したのに一致を確認できなかったとき（本文が違う、比べる材料を読めない）は 6 で返る。コメントだけが
+# 失敗したときは本文は書き換わっている（その旨を出す）。
+# token は呼び出し元で発行済み。本文とコメントは gh に写しのファイルのパスで渡し、中身を argv には載せない。
+issue_rewrite() {
+  local readback rc=0
+  run_gh issue edit "$issue_rewrite_n" --body-file "$issue_rewrite_body" || rc=$?
+  if ((rc)); then
+    echo "agent-gh: Issue #$issue_rewrite_n の本文を書き換えられませんでした。コメントは付けません" >&2
+    gh_failed "$rc"
+  fi
+  readback="$(mktemp)"
+  cleanup_paths+=("$readback")
+  rc=0
+  run_gh issue view "$issue_rewrite_n" --json body --jq .body >"$readback" || rc=$?
+  if ((rc)); then
+    echo "agent-gh: Issue #$issue_rewrite_n の本文は書き換えましたが、読み直せなかったためコメントを付けません" >&2
+    gh_failed "$rc"
+  fi
+  # gh の --jq は値の末尾に改行を 1 つ足して出す。渡した本文の写しに同じ改行を足したものとバイト単位で比べる
+  # （出力が足した改行だけを除いて比べるのと同じ。本文自身の末尾の改行も比べる）。
+  # 等しいと判定するのは、両辺を最後まで読めて一致したときだけにする。写しを読めないときは `&&` で受けて比べを
+  # 失敗させ、読み直した本文を読めないときは cmp が 0 以外で失敗する。どちらもコメントを付けない。
+  if ! { cat -- "$issue_rewrite_body" && printf '\n'; } | cmp -s - "$readback"; then
+    echo "agent-gh: Issue #$issue_rewrite_n の読み直した本文と渡した本文の一致を確認できませんでした。コメントは付けません" >&2
+    exit 6
+  fi
+  rc=0
+  run_gh issue comment "$issue_rewrite_n" --body-file "$issue_rewrite_comment" || rc=$?
+  if ((rc)); then
+    echo "agent-gh: Issue #$issue_rewrite_n の本文は書き換わりましたが、コメントを付けられませんでした" >&2
+    gh_failed "$rc"
+  fi
+  exit "$rc"
+}
+
 # --help / -h の本体。使い方を標準出力に出して終了コード 0 で返る。
 # builtin しか使わず fnox も gh も呼ばないので、PATH や認証情報が無い環境でも動く。
 help() {
   printf '%s\n' \
     "usage: $0 <dev|review> [git] <args...>" \
     "       $0 qa comment <番号> --body-file <path|->" \
+    "       $0 dev issue rewrite <番号> --body-file <path|-> --comment-file <path|->" \
     "" \
     "エージェントの名義で gh / git を実行する。" \
     "  $0 dev <gh の引数...>               実装担当 GitHub App pelway-dev" \
     "  $0 review <gh の引数...>            レビュー担当 GitHub App pelway-review" \
     "  $0 <dev|review> git <git の引数...>  その名義の認証で git を実行する" \
     "  $0 qa comment <番号> --body-file <path|->   QA 担当 GitHub App pelway-qa（この形だけ許可）" \
+    "  $0 dev issue rewrite <番号> --body-file <path|-> --comment-file <path|->   Issue の本文を書き換え、読み直して渡した本文と同じことを確かめてからコメントを付ける" \
     "  $0 -h | --help                      この使い方を標準出力に出して終了する" \
     "" \
     "呼ばれるたびに App のインストールトークン（1 時間有効）を発行し、GH_TOKEN として子プロセスにだけ渡す。画面には出さない。" \
@@ -127,8 +220,9 @@ help() {
     "git push は、push するコミット（origin の追跡 ref から辿れないもの）の author と committer がその役割の App（pelway-<dev|review>[bot]）でなければ止める。確認を外す引数は受け付けない: サブコマンドは許可リスト（git_allowed_subcommands）の名前と完全一致するものだけ、グローバルオプションは無し、転送のコマンドのオプション（--upload-pack・--receive-pack・--exec）と push の --no-verify は拒否。範囲は手元の追跡 ref（refs/remotes/origin/*）で決まるため、追跡 ref を手元で動かした経路と、git が起動する別プロセス（設定の diff・merge のドライバなど）を経由する経路は対象外。" \
     "dev の git push は、同じ pre-push フックで Git が送るブランチの更新ごとに差分を scripts/pr-size.sh で測り、上限（追加 800 行・削除 2000 行）を超えたら、接続先の GitHub リポジトリの PR に pr-size-exception ラベルがあり、その PR が閉じる Issue に hatai の行頭が <!-- pr-size-exception --> のコメントがあるときだけ通す（--dry-run の試行も同じ検査を通る）。" \
     "qa は dev / review と違い PELWAY_AGENT_FNOX_CONFIG に既定値を持ちません（~/.config/pelway-agent-qa/fnox.toml を指してください）。" \
+    "dev issue rewrite は、gh issue edit で本文を書き換えたあと読み直し、渡した本文（--body-file）と同じときだけ --comment-file の文でコメントを付けます。書き換えに失敗したとき・読み直した本文と渡した本文の一致を確認できなかったときはコメントを付けません。本文とコメントはファイルで渡します（片方だけ - で標準入力）。本文かコメントのどちらかが空（空白だけを含む）のときは何も送らず終了コード 2 です。本文とコメントは一時ファイルに写してから検査し、その写しを gh に渡します。読み直した本文は、gh の --jq が足す末尾の改行を除いて、渡した本文とバイト単位で比べます。" \
     "非 ASCII の文字列は argv 経由で渡せません（\\uXXXX に潰れます）。--body-file / api --input / git commit -F などファイル経由で渡してください。" \
-    "終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しを含む）、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、それ以外は gh / git の終了コード"
+    "終了コード: 2 = 役割・引数の誤り（qa の許可外の呼び出しと dev issue rewrite の空の入力を含む）、3 = トークンを取れない、4 = 署名の付け替えに失敗、5 = 引数に \\uXXXX エスケープ混入、6 = 読み直した Issue 本文と渡した本文の一致を確認できなかった（コメントは付かない）、それ以外は gh / git の終了コード"
   exit 0
 }
 
@@ -239,6 +333,11 @@ for arg in "$@"; do
   fi
 done
 
+# dev issue rewrite は、引数と入力ファイルをトークン発行の前に確かめる（qa_check_args と同じ）。
+if [[ "$role" == dev ]] && is_issue_rewrite "$@"; then
+  issue_rewrite_check_args "$@"
+fi
+
 # gh / git を呼ぶロールでは、gh の設定を空の一時ディレクトリに隔離する（#522）。
 # -h / --help と役割の誤り（usage の exit 2）では何も作らない。
 case "$role" in
@@ -277,6 +376,10 @@ case "$role" in
     ;;
   *) usage ;;
 esac
+
+if [[ "$role" == dev ]] && is_issue_rewrite "$@"; then
+  issue_rewrite
+fi
 
 # push_targets 用: $1=-- と --no- と =<値> を除いたオプション名が $2=正規形と一致するか
 # 判定する（$3=一意に特定できる最短の長さ）。長いオプションは一意な接頭辞で省略でき、

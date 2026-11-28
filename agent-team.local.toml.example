@@ -1,0 +1,35 @@
+# agent-team.local.toml の雛形（Issue #804）。
+# このファイルを agent-team.local.toml に写して、自分の環境に合わせて書き換える。
+# 本体の checkout と worktree の両方で同じ内容を使いたいときは本体側に置く
+# （worktree 作成時に scripts/worktree-setup が持ち越す）。
+# 追跡しない（.gitignore 済み・hk の pre-commit でコミットを止める）。
+#
+# 上書きできる項目・できない項目の表は docs/superpowers/specs/agent-team.md の
+# 「開発者ごとの上書き」。重ねた結果は
+#   scripts/agent-team-config effective <自分の GitHub login>
+# で確かめられる。上書きできない項目はキー名つきの警告を出して無視される。
+
+# 使う担当とその優先度・上限。agents・developers の表は共有の toml の上に深く重ねる。
+# 配列（use・models・priority 内の並び・effort.raise）は丸ごと置き換わる。
+
+# [agents.devin]
+# models = ["swe-2-high"]            # この担当に投げるモデルの許可リストを絞る
+# [agents.devin.effort]
+# raise = ["high"]                   # 実装の引き上げ先の許可リストを絞る
+# [agents.devin.instance]
+# implement = "Devin CLI (mine)"     # 自分の環境の provider インスタンス名に合わせる
+#                                    # （instance.review は共有。local では上書きできない）
+
+# [developers.<自分の GitHub login>]  # 自分の表だけ。他の開発者の表は無視される
+# use = ["opencode", "devin", "claude"]     # 使えない担当を外す（外した担当への参照は
+#                                           # 上限・優先順位からも落ちる）。
+#                                           # codex を外してもよいが、そのあいだ
+#                                           # 高リスク・security=yes の仕事は着手できず
+#                                           # （マージに codex の approve が要る）、
+#                                           # 見張りの SLOTS missing に出る
+# [developers.<自分の GitHub login>.slots]
+# devin = 2                                 # 実装・調査の同時枠を下げる・変える
+# [developers.<自分の GitHub login>.review_limits]
+# codex = 1                                 # レビューに回せる数の目安を変える
+# [developers.<自分の GitHub login>.priority.implement]
+# normal = ["opencode"]                      # 条件の並びを自分の環境に合わせる（共有の条件名だけ有効）

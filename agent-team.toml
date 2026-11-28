@@ -9,6 +9,11 @@
 # - 上限の数え方と順番待ちの運用の正本は、変更が入るまで
 #   docs/superpowers/specs/agent-team.md「制約」と docs/agents/grokbot-runbook.md
 #   「3. 同時数と順番待ち」。このファイルは同じ値をコードから読める形にしたもの。
+# - 開発者ごとの上書きは、追跡しない agent-team.local.toml に書く（雛形は
+#   agent-team.local.toml.example、上書きできる項目・できない項目の表は
+#   agent-team.md「開発者ごとの上書き」、Issue #804）。local は共有の規則を
+#   下げられず、上書きできない項目は警告を出して無視される。重ねた結果は
+#   scripts/agent-team-config effective <login> で確かめられる。
 
 # ── 担当の登録情報（全開発者で共有）───────────────────────────────────
 # 各担当に置くもの:
