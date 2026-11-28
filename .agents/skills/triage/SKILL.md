@@ -71,6 +71,47 @@ Show counts and a one-line summary per item. Let the maintainer pick.
 
 2. **Recommend.** Tell the maintainer your category and state recommendation with reasoning, plus a brief codebase summary relevant to the request (including whether it's already implemented). Wait for direction.
 
+   For an enhancement issue that needs evaluation, score it before making the recommendation. Do not score bugs, PRs, already-implemented duplicates, or quick state overrides. Score the unmet need behind the request, using the smallest coherent implementation direction that would satisfy it. Impact, Reach, and UX assess the outcome if that need is met; Fit and Cost assess that implementation direction. Cost includes implementation, review, migration, operation, maintenance, and permission-management burden. If independent needs are bundled in one issue, split them through grilling or score only the central coherent need and mark the rest as out of scope for that assessment.
+
+   Identify the affected population before scoring: for product features, the target users and teams; for internal or operational improvements, the maintainers, operators, reviewers, or AI development-team members affected. Record that population in the evidence.
+
+   | Dimension | 0 | 1 | 2 | 3 |
+   |---|---|---|---|---|
+   | Impact | No meaningful improvement for the affected population | Small convenience; saves occasional manual effort | Removes recurring friction or prevents mistakes in an important workflow | Enables a core product, development, or operational workflow, especially request, decision, approval, or handoff work |
+   | Reach | Only the reporter or one internal maintainer is known to need it | A narrow role or unusual setup within the affected population | Multiple roles or many users or teams within the affected population | Most of the affected population in normal use |
+   | Fit | Conflicts with confirmed product direction, ADRs, security boundaries, or operational canon | Requires a new product pattern or weakens an existing separation | Fits when adapted to existing patterns | Directly extends confirmed direction, ADRs, MVP patterns, or operational canon |
+   | UX | Makes the main workflow harder, noisier, or more confusing for most of the affected population | Usable mainly by experts or administrators; adds visible complexity for narrow benefit | Neutral or optional; users can ignore it | Makes common request, decision, approval, handoff, or operational tasks clearer or easier |
+   | Cost | Broad change across security, tenancy, audit, data contracts, protocols, multiple surfaces, migration, or a new external service | Several surfaces or new ongoing operational, permission, or integration complexity | One surface with moderate implementation and tests, or a small contract or UI addition | Small change reusing existing mechanisms, one surface, no migration, no new dependency |
+
+   Cost is inverse: 3 means low cost. A "surface" is a coherent change area such as the Rust server, database, client UI, gateway or external integration, or AI development-team operations.
+
+   Assign confidence as `confirmed`, `assumed`, or `unknown` from the weakest material evidence for that dimension. Use `confirmed` when the material facts are verifiable, `assumed` when they depend on inference, and `unknown` when a material fact needed to evaluate the dimension is missing. If material evidence is missing, mark that dimension `unknown` instead of forcing a numeric score. `unknown` is not zero. If any material dimension is `unknown`, write the value score as:
+
+   ```markdown
+   **Value score:** incomplete — material evidence is missing.
+   ```
+
+   Otherwise sum Impact, Reach, Fit, UX, and Cost into a 0–15 value score. The value score is a comparison aid only, not a priority. Do not map it automatically to priority labels, triage states, or `wontfix`, and do not emit a priority-label recommendation from it.
+
+   Use this template for the assessment. Keep the headings, field names, fixed values, and column names in English; write evidence, unknowns, questions, and explanations in the language of the issue.
+
+   ```markdown
+   ## Feature assessment
+
+   | Dimension | Score | Confidence | Evidence |
+   |---|---:|---|---|
+   | Impact | 2/3 | confirmed | ... |
+   | Reach | 1/3 | assumed | ... |
+   | Fit | 3/3 | confirmed | ... |
+   | UX | 2/3 | assumed | ... |
+   | Cost | 2/3 | assumed | ... |
+
+   **Value score:** 10/15 — comparison aid only, not a priority.
+   **Unknowns:** ...
+   ```
+
+   Write `None` when there are no unknowns. When the outcome is applied, put the latest `Feature assessment` immediately after the triage disclaimer and before the outcome-specific content. Do not put it inside the agent brief contract. If the outcome is `needs-triage` without a comment, do not post the assessment. Update the assessment after grilling when new information changes it. When the maintainer asks to compare multiple enhancement requests, present a side-by-side table with one row per issue containing the five dimension scores, the value score or `incomplete`, and the main unknowns. When writing a rejection to `.out-of-scope/`, record the durable reason in prose; do not require the numeric assessment table there.
+
 3. **Verify the claim.** Before any grilling, check that the claim holds up. For a bug, reproduce it from the reporter's steps. For a PR, confirm the diff does what it claims: check it out, run the relevant tests or commands. Report what happened: confirmed (with code path), failed, or insufficient detail (a strong `needs-info` signal). A confirmed verification makes a much stronger agent brief.
 
 4. **Grill (if needed).** If the request needs fleshing out, call the Skill tool twice, for "grilling" and "domain-modeling", and grill it into shape a round of questions at a time, sharpening domain terms and updating `GLOSSARY.md`/ADRs inline as decisions land.

@@ -36,7 +36,7 @@ scripts/agent-gh review pr diff <N>
 scripts/agent-gh review issue view <Issue 番号> --json body
 ```
 
-バグ・インシデントの調査の報告の PR（ブランチが `agent/investigate-` で始まる）には、基準になる Issue が無い。この場合は Issue 本文の取得と下の `<!-- split-plan -->` の確認を省き、報告ファイルを基準にする: 報告が skill `investigate-bug` の手順 5 の形式（症状、修正済みか、再現、根本原因、修正案、未解決の問い）で `docs/worklogs/bugs/<slug>/report.md` に保存されており、脆弱性の疑いで止めた調査の詳細が混ざっていないことを確かめる。
+バグ・インシデントの調査の報告の PR（ブランチが `agent/investigate-` で始まる）には、基準になる Issue が無い。この場合は Issue 本文の取得と下の `<!-- split-plan -->` の確認を省き、報告ファイルを基準にする: 報告が skill `investigate-bug` の手順 5 の形式（報告の読み取り（期待、実際、対象、場所、版、時刻、頻度、回帰か、最後に動いた版、重さ）、症状、修正済みか、再現、根本原因、修正案、未解決の問い、使ったスキル）で `docs/worklogs/bugs/<slug>/report.md` に保存されており、脆弱性の疑いで止めた調査の詳細が混ざっていないことを確かめる。
 
 それ以外の PR は、Issue 番号を `closingIssuesReferences` から取る（無ければ PR 本文の `Part of #<N>` などから取る）。Issue の「受け入れ条件」と「対象外」がレビューの基準になる。
 
