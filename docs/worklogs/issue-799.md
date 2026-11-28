@@ -10,7 +10,7 @@
 4. 足りなかった情報・検証手段: `skills remove` には lock エントリだけを外して実体を残す選択肢が見つからず、退避・除去・復元で確かめる必要があった
 5. 改善案: `docs/agents/external-skills.md` の「取り込みの手順」に「輸入スキルをローカル管理へ切り替えるときは実体を退避し、`skills remove` の後に復元する」と足す
 
-使ったスキル: `implement-issue`、`write-pull-request`、`.agents/skills/writing-for-agents`、`tdd`（seam: 受け入れ条件の presence check）、`executing-plans`
+使ったスキル: implement-issue、write-pull-request、improve-skills（`.agents/skills/improve-skills/SKILL.md`）、writing-for-agents（`.agents/skills/writing-for-agents/SKILL.md`）。ユーザーレベルの `executing-plans`・`tdd` も補助に使ったが、チームの正式な skill ではない
 
 ## 実装者メモ（round 2）
 
@@ -22,4 +22,23 @@
 4. 足りなかった情報・検証手段: `pr-size` が `.agents/skills` を生成物として除外する `.gitattributes` の有無を、事前に確認していなかった
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「スキルをローカル管理へ切り替えたときは `.gitattributes` の生成物指定を見直す」と足す
 
-使ったスキル: `implement-issue`、`write-pull-request`、`code-review`、`receiving-code-review`
+使ったスキル: implement-issue、write-pull-request、improve-skills（`.agents/skills/improve-skills/SKILL.md`）。ユーザーレベルの `code-review`・`receiving-code-review` もレビュー補助に使ったが、チームの正式な skill ではない
+
+## 実装者メモ（round 3）
+
+対象 head: 0f9456477f8b411de45078d84fa1d84a6dd08509
+
+1. 詰まった箇所: `.agents/skills/triage/SKILL.md`: `unknown` の Score 欄と incomplete の条件が、数値例だけのテンプレートでは一意に読めなかった
+2. 曖昧だった文: 「If material evidence is missing, mark that dimension `unknown` instead of forcing a numeric score.」（`.agents/skills/triage/SKILL.md` 手順 2）
+3. 仮定と解釈: `unknown` は Score と Confidence の両方に書き、assumed の数値評価とは分ける解釈を選んだ。unknown でも 0 に丸める解釈は採らなかった
+4. 足りなかった情報・検証手段: improve-skills 入口B の引き渡し記録が必要なことを、round 1 の時点で確認していなかった
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 2 に「自前スキルの改訂 Issue では improve-skills 入口B も読む」と足す
+
+使ったスキル: implement-issue、write-pull-request、improve-skills（`.agents/skills/improve-skills/SKILL.md`）。ユーザーレベルの `code-review`・`receiving-code-review` もレビュー補助に使ったが、チームの正式な skill ではない
+
+### improve-skills 手順 7 の引き渡し記録
+
+- 候補の出どころ: Issue #799 の目的と受け入れ条件、hatai との設計確認、`docs/worklogs/issue-799.md` round 1・round 2 の指摘
+- 対象の改善点: triage・investigate-bug。手順の欠落（要望の採点、版・回帰・頻度・重さの記録）と、review-pr との重複のずれ
+- 期待する変化: enhancement の比較で maintainer が根拠を読み返す手戻りが減り、不具合調査の最初の往復で版・回帰・頻度の聞き漏れが減る
+
