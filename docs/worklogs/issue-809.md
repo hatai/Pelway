@@ -156,7 +156,7 @@ head 2d22c017 のレビュー（Codex must-fix 2 件）で足した筋: バッ�
 
 ## 実装者メモ（round 6）
 
-対象 head: 019b8d935d46137d651198c9ff835b5415252fb0
+対象 head: 968c92313ba1a7de1aa6c7fbadd4a59c006568c3
 
 1. 詰まった箇所: `mise run pr-size` が +813/-4 で上限（800）を 13 超えた。skill の決まり（重複だけ削り、試験や説明は削らない）に従い、指揮役の判断を仰ぐために push して Issue #809 に停止報告・分割案・round 6 の記録を書いて `needs-human` で止まった。hatai の `<!-- pr-size-exception -->`（11/27 23:43 JST）とラベルで例外が成立し、指揮役が停滞でないことを確認したので再開した。main の取り込みは `git merge` が `.devin/config.json` の読み取り専用で止まるため、`git merge-tree --write-tree` で木を作り、競合（`.agents/skills/write-pull-request/SKILL.md`。main が「失敗の筋」「リスクとセキュリティへの影響」の節を足して番号が繰り上がった）をこのブランチの追記文の付け替えで解き、一時 index と `commit-tree` で merge コミット（019b8d93。`agent-gh-resign` は merge を作り直せないため署名なし）を push した。
 2. 曖昧だった文: 「失敗の筋」はこの作業の開始時点では skill・テンプレートに無い欄で、main に 062c139e で入った後の取り込みで要る形になった。round 1〜6 分を遡って書くとき、各「見直し」「最終」の内容はその round の実装者メモとレビュー（run の ID）から写すことにした。
