@@ -24,7 +24,7 @@ check() {
 # レビュー担当（手順 1・2）: 自分の出した must-fix を再判定し、初回でも撤回済みの指摘は出さない。
 check reviewer_rejudge_own_findings .agents/skills/review-pr/SKILL.md \
   '前のラウンドまでに自分（`Reviewer:` の行の `agent=` が同じ担当）が出した must-fix のうち、「## 別 Issue」に回した指摘を除き、まだ直ったとも撤回ともされていないものを再判定し、それぞれを「残る」「直った」「撤回」の 1 つに分ける' \
-  'ほかの担当が出した must-fix は再判定しない' \
+  'ほかの担当が出した must-fix は「残る」「直った」「撤回」に分けず' \
   '自分の初回のレビューでも must-fix にしない'
 # レビュー担当（手順 2）: 反論は根拠としてだけ確かめる。hatai のものは未編集だけ。2 回目は実装担当のだけ読まない。
 check reviewer_rebuttal_is_evidence .agents/skills/review-pr/SKILL.md \
@@ -52,7 +52,8 @@ check reviewer_withdrawal_ledger .agents/skills/review-pr/SKILL.md \
   'その PR で撤回した指摘の全件を書く台帳で、担当ごとに分けない' \
   '撤回の正本は過去のレビュー全部である' \
   '撤回の根拠となった部分がその後の差分で変わったときだけ、新しい指摘として再び出せる' \
-  '再び出した指摘は新しい指摘として扱い、実装担当の反論はその指摘につきもう 1 回できる'
+  '再び出した指摘は新しい指摘として扱い、実装担当の反論はその指摘につきもう 1 回できる' \
+  'hatai の決定による撤回は再び出さない'
 
 # 実装担当（手順 9）: 反論の根拠・形・回数。
 check implementer_rebuttal_form .agents/skills/implement-issue/SKILL.md \
