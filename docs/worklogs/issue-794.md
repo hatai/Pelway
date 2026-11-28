@@ -1,5 +1,34 @@
 # Issue #794 の作業ログ
 
+## 失敗の筋（実装前）
+
+- 失敗の筋: 対象パスの glob や inline unit test の補足が狭すぎると、DB・試験・クライアント UI を変更した PR でも対応する観点ファイルが選ばれず、領域固有の欠陥を見落とす。
+  確かめ方: `bash scripts/tests/review-perspective-docs.test.sh` で対象パスと inline test 補足の文言を確かめ、PR 本文に引用した `review-pr` の選択手順をレビュー担当が読む。
+- 失敗の筋: 「報告しないもの」と中央の must-fix の優先順が曖昧だと、報告してはいけない範囲外の指摘を nit に載せたり、逆に観点ファイルの表現を根拠に中央の must-fix を下げたりする。
+  確かめ方: `bash scripts/tests/review-perspective-docs.test.sh` で中央ルール優先と fail-closed の文言を確かめ、PR 本文に引用した規範をレビュー担当が読む。
+- 失敗の筋: 観点ファイルを PR の版から読むと、その PR で規則を弱めた変更が自分自身のレビュー規則を差し替え、検査を迂回できる。
+  確かめ方: `.agents/skills/review-pr/SKILL.md` の「領域別のレビュー観点ファイル」で main の版を読む手順を確認し、presence check で front matter を先に読む文言を確かめる。
+
+## 失敗の筋の見直し（round 2）
+
+- 失敗の筋: root の `Cargo.toml`・`Cargo.lock`、`mise.toml`、`.github/workflows/`、`deny.toml` だけの変更でも、差分中の文字列が偶然 inline test の条件に見えると試験領域が発動し、レビュー範囲が不必要に広がる。
+  確かめ方: `bash scripts/tests/review-perspective-docs.test.sh` で root-only 変更の除外と Rust ファイル限定の文言を確かめる。
+- 失敗の筋: 再レビューで観点ファイル選択だけが main の merge commit や `diverged` の例外を無視すると、レビュー本体と違う差分に対して観点を選び、適用漏れや余計な適用が起きる。
+  確かめ方: `.agents/skills/review-pr/SKILL.md` で観点ファイル選択が「2 回目以降の round」の差分を参照することを確認する。
+
+## 失敗の筋（round 2 の最終）
+
+- 失敗の筋: 対象パスの glob や inline unit test の補足が狭すぎると、DB・試験・クライアント UI を変更した PR でも対応する観点ファイルが選ばれず、領域固有の欠陥を見落とす。
+  確かめ方: `bash scripts/tests/review-perspective-docs.test.sh` で対象パスと inline test 補足の文言を確かめ、PR 本文に引用した `review-pr` の選択手順をレビュー担当が読む。
+- 失敗の筋: 対象パスの glob や inline unit test の補足が広すぎると、root-only 変更や Rust ではない文書の変更にまで試験領域が発動し、レビュー範囲が不必要に広がる。
+  確かめ方: `bash scripts/tests/review-perspective-docs.test.sh` で root-only 変更の除外と Rust ファイル限定の文言を確かめる。
+- 失敗の筋: 「報告しないもの」と中央の must-fix の優先順が曖昧だと、報告してはいけない範囲外の指摘を nit に載せたり、逆に観点ファイルの表現を根拠に中央の must-fix を下げたりする。
+  確かめ方: `bash scripts/tests/review-perspective-docs.test.sh` で中央ルール優先と fail-closed の文言を確かめ、PR 本文に引用した規範をレビュー担当が読む。
+- 失敗の筋: 観点ファイルを PR の版から読むと、その PR で規則を弱めた変更が自分自身のレビュー規則を差し替え、検査を迂回できる。
+  確かめ方: `.agents/skills/review-pr/SKILL.md` の「領域別のレビュー観点ファイル」で main の版を読む手順を確認し、presence check で front matter を先に読む文言を確かめる。
+- 失敗の筋: 再レビューで観点ファイル選択だけが main の merge commit や `diverged` の例外を無視すると、レビュー本体と違う差分に対して観点を選び、適用漏れや余計な適用が起きる。
+  確かめ方: `.agents/skills/review-pr/SKILL.md` で観点ファイル選択が「2 回目以降の round」の差分を参照することを確認する。
+
 ## 実装者メモ（round 1）
 
 対象 head: 507149f0b5f5622766890dbe4372410a036e7300
