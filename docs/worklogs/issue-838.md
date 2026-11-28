@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md`の「6. 検査してコミットし、行数を確かめてから push する」に「workflow 変更を既に含む branch では `PELWAY_AGENT_SKIP_RESIGN=1` を使い、resign を試さない」と書く
 
 使ったスキル: implement-issue、code-review、receiving-code-review
+
+## 実装者メモ（round 3）
+
+対象 head: `698fe3b0a6a99c01b0d401919490c3a3c044d880`
+
+1. 詰まった箇所: `scripts/tests/security-scan.test.sh`: yq には jq の `--arg` が無く、step 名は `env(STEP_NAME)` で渡した。検証: `mise run verify` は exit 0（script-test 62/62）。
+2. 曖昧だった文: 「pull_request では workflow が base SHA を渡す → `scripts/tests/security-scan.test.sh`」（Issue #838「受け入れ条件」）
+3. 仮定と解釈: 受け入れの根拠は文言の presence ではなく YAML を parse した step object の `if`・`run`・`env` を確かめることと解釈した。yq は workflow 配線テストだけに使い、actions.lock の照合には使わない。
+4. 足りなかった情報・検証手段: 現在の mise で `mise lock` を全生成すると既存ツールの baseline platform entry も増えたため、生成した lock から yq の entry だけを採用し、`mise install --locked yq` で lock の整合を確かめた。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md`の「6. 検査してコミットし、行数を確かめてから push する」に「`mise.toml` にツールを足したときは `mise.lock` の差分がそのツールに必要な entry に限られるかを確かめ、無関係な platform entry の再生成を混ぜない」と書く
+
+使ったスキル: implement-issue、receiving-code-review
