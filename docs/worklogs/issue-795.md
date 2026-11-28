@@ -28,14 +28,9 @@
 - 失敗の筋: `write-pull-request` の評価ケースが 6 セクションのまま残り、スキルと評価の期待値が食い違う
   確かめ方: `rg -n '6セクション|テンプレート6' .agents/skills/write-pull-request/evals/` が一致を返さないことを確かめる
 - 失敗の筋: PR #840 と同じ箇所を変えるため、マージ順によって `write-pull-request` のセクション一覧や sha 行の規則が片方だけの姿に戻る
-  確かめ方: PR 作成時に PR #840 が open の Draft で main に未マージであることを `scripts/agent-gh dev pr view 840 --json state,isDraft,mergedAt` で確かめ、main の同箇所にこの変更と冲突する差分がないことを `git diff HEAD...origin/main -- .agents/skills/write-pull-request/SKILL.md` で確かめる
+  確かめ方: PR 作成時に PR #840 が open の Draft で main に未マージであることを `scripts/agent-gh dev pr view 840 --json state,isDraft,mergedAt` で確かめ、main の同箇所にこの変更と冲突する差分がないことを `git diff HEAD..origin/main -- .agents/skills/write-pull-request/SKILL.md` で確かめる
 
 実装前の筋のうち外したものはない。実装中に新たな筋は見つからなかった。
-
-## 失敗の筋の見直し（round 2）
-
-- 失敗の筋: PR #840 と main の確認に使う 2 点 diff が自分の変更を含み、main 側の変更を確かめたことにならない
-  確かめ方: `git diff HEAD...origin/main -- .agents/skills/write-pull-request/SKILL.md` が merge-base から main 側への差分だけを示すことを読み、実際の出力を確かめる
 
 ## 実装者メモ（round 1）
 
@@ -49,12 +44,29 @@
 
 使ったスキル: implement-issue, write-pull-request, review-pr, improve-skills
 
+## 失敗の筋の見直し（round 2）
+
+- 失敗の筋: PR #840 と main の確認に使う 2 点 diff が自分の変更を含み、main 側の変更を確かめたことにならない
+  確かめ方: `git diff HEAD...origin/main -- .agents/skills/write-pull-request/SKILL.md` が merge-base から main 側への差分だけを示すことを読み、実際の出力を確かめる
+
 ## 失敗の筋（round 2 の最終）
 
+- 失敗の筋: PR テンプレートに欄だけが増え、`write-pull-request` が書き方を説明しないため、今後の PR 本文で空欄や形式だけの記入が残る
+  確かめ方: `.github/pull_request_template.md` に 2 つの欄と必須形式、`.agents/skills/write-pull-request/SKILL.md` に書き方と例があることを読み、`bash scripts/tests/pr-failure-risk-docs.test.sh` で必須文言の存在を確かめる
+- 失敗の筋: `implement-issue` に実装前の記録手順が入らず、失敗の筋が PR 作成時の後付けになる
+  確かめ方: `.agents/skills/implement-issue/SKILL.md` の手順 4 と手順 7 に実装前・round ごとの見直し・最終版の記録があることを読み、`bash scripts/tests/pr-failure-risk-docs.test.sh` で必須文言の存在を確かめる
+- 失敗の筋: レビュー規則の境界が曖昧で、網羅性の好みまで must-fix になり、修正 round が終わらない
+  確かめ方: `.agents/skills/review-pr/SKILL.md` に構造的な欠落と diff から示せる矛盾だけを must-fix にし、網羅性の好みを nit にする境界があることを読み、`bash scripts/tests/pr-failure-risk-docs.test.sh` で必須文言の存在を確かめる
+- 失敗の筋: リスク欄の案内が不十分で、攻撃手順や未修正の弱点の詳細が公開の PR 本文に書かれる
+  確かめ方: `.github/pull_request_template.md` と `.agents/skills/write-pull-request/SKILL.md` に攻撃手順や未修正の弱点の詳細を書かない旨があることを読み、`bash scripts/tests/pr-failure-risk-docs.test.sh` で必須文言の存在を確かめる
+- 失敗の筋: `write-pull-request` の評価ケースが 6 セクションのまま残り、スキルと評価の期待値が食い違う
+  確かめ方: `rg -n '6セクション|テンプレート6' .agents/skills/write-pull-request/evals/` が一致を返さないことを確かめる
+- 失敗の筋: PR #840 と同じ箇所を変えるため、マージ順によって `write-pull-request` のセクション一覧や sha 行の規則が片方だけの姿に戻る
+  確かめ方: PR #840 が open の Draft で main に未マージであることを `scripts/agent-gh dev pr view 840 --json state,isDraft,mergedAt` で確かめ、main 側の同箇所の差分がないことを `git diff HEAD...origin/main -- .agents/skills/write-pull-request/SKILL.md` で確かめる
 - 失敗の筋: PR #840 と main の確認に使う 2 点 diff が自分の変更を含み、main 側の変更を確かめたことにならない
   確かめ方: `git diff HEAD...origin/main -- .agents/skills/write-pull-request/SKILL.md` を実行し、main 側の差分が無い出力（0 行）を確かめる
 
-round 1 の最終版にあるほかの筋は、この round の差分でも残す。消した筋はない。
+round 1 の最終版にある筋は、この round の差分でも残す。消した筋はない。
 
 ## 実装者メモ（round 2）
 
@@ -66,4 +78,13 @@ round 1 の最終版にあるほかの筋は、この round の差分でも残�
 4. 足りなかった情報・検証手段: 指摘を受けた時点でコマンドの意味を実際の出力と突き合わせる確認
 5. 改善案: docs/worklogs/issue-795.mdの「失敗の筋（最終）」に「main 側だけを見るときは 3 点 diff を使う」を足す
 
-使ったスキル: implement-issue, receiving-code-review
+使ったスキル: implement-issue
+
+## 失敗の筋の見直し（round 3）
+
+- 失敗の筋: 採用していないスキル名を実装者メモに書くと、メモの記録とリポジトリの採用表が食い違う
+  確かめ方: `docs/agents/external-skills.md` と `.agents/skills/` を読み、採用表に無いスキル名が「使ったスキル」に残っていないことを確かめる
+- 失敗の筋: round ごとの最終版を後から書き換えると、レビュー時点の記録と履歴が食い違う
+  確かめ方: round 1 の最終版を当時の記録のまま残し、修正は round 2 以降の最終版だけに入っていることを読む
+- 失敗の筋: round 2 の記録が round 1 の実装者メモより前にあると、作業ログの時系列を読み違える
+  確かめ方: 見出しの順が実装前、round 1、round 2、round 3 の順になっていることを読む
