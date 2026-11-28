@@ -305,6 +305,7 @@ git -C "$REMOTE_DIR" cat-file -p "$(git -C "$REMOTE_DIR" rev-parse refs/heads/ag
 
 # --- 9. upstream の無いローカルブランチから HEAD:<dst> で push すると、dst の署名を付け直す（#641） ---
 # scripts/agent-gh dev git push を通す。トークンと名義は偽の fnox・gh から取る。
+# この試験は署名の付け替えに絞るため、verify の門（#807）は外す。門の既定の動きは agent-gh-verify-gate.test.sh で確かめる。
 AGENT_GH="$(dirname "$SCRIPT")/agent-gh"
 git -C "$REPO" switch -qc agent/x-r8 origin/main
 git -C "$REPO" branch -q --unset-upstream 2>/dev/null || true
@@ -312,7 +313,7 @@ echo r8 >"$REPO/r8.txt"
 git -C "$REPO" add r8.txt
 git -C "$REPO" commit -qm "feat: r8"
 : >"$CALL_LOG"
-(cd "$REPO" && PELWAY_AGENT_FNOX_CONFIG="$ROOT/fnox.toml" bash "$AGENT_GH" dev git push -q origin HEAD:agent/x \
+(cd "$REPO" && PELWAY_AGENT_FNOX_CONFIG="$ROOT/fnox.toml" PELWAY_AGENT_SKIP_VERIFY_GATE=1 bash "$AGENT_GH" dev git push -q origin HEAD:agent/x \
   >"$ROOT/push_head_dst.out" 2>"$ROOT/push_head_dst.err")
 RC=$?
 [[ "$RC" == 0 ]] || failures+=("push_head_dst: exit $RC, want 0 ($(cat "$ROOT/push_head_dst.err"))")
