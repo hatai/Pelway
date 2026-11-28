@@ -4,17 +4,17 @@ AI 開発チームが PR にスクリーンショットなどの画像を添え�
 
 ## 前提
 
-- GitHub App のトークンでは画像を添付できない。`gh pr comment` や `gh pr edit` の `--attach` は `attaching files requires write access to the repository` で失敗する。
+- この手順では、GitHub App のトークンでは画像を添付できないものとして扱う。根拠は公開仕様の確認ではなく、`pelway-dev` のトークンを使う `gh` で `gh pr comment` や `gh pr edit` の `--attach` が `attaching files requires write access to the repository` で失敗した観測である。
 - 人間のアカウントで投稿する道具は、hatai が文面か選択肢を明示して選んだときだけ使う。実装担当は hatai の名義でコマンドを実行しない。
 
 ## 手順
 
-1. 実装担当が画像を用意する。画像ファイルは hatai から見えるパスに置き、PR 番号・ファイルのパス・alt テキスト・コメントの文面を hatai に示す。PR がまだ無ければ、先に Draft PR を作る。
+1. 実装担当が画像を用意する。画像ファイルとコメント文のファイルは hatai から見えるパスに置き、PR 番号・画像ファイルのパス・コメント文のファイルのパス・alt テキスト・コメントの文面を hatai に示す。PR がまだ無ければ、先に Draft PR を作る。
 2. hatai に hatai 名義のコメントでの添付を確かめる。実装担当は、hatai が実行するコマンドとコメント文をそのまま示し、hatai の確認なしに人間名義の道具を使わない。
-3. hatai は次の形で画像を添付する。`<N>` は PR 番号、`<path>` は画像ファイルのパス、`<alt>` は画像の代替テキスト。このコマンドは hatai の名義で実行するため、例外的に素の `gh` を使う。
+3. hatai は次の形で画像を添付する。`<N>` は PR 番号、`<path>` は画像ファイルのパス、`<alt>` は画像の代替テキスト、`<body-path>` は hatai が確認したコメント文を入れたファイルのパス。実装担当は `<path>`・`<alt>`・`<body-path>` に改行と単一引用符を含まない値を選び、hatai はいずれかに改行か単一引用符があれば実行せず拒否する。このコマンドは hatai 本人が自分の名義で実行するため、エージェントの `scripts/agent-gh` の規則の対象外として素の `gh` を使う。
 
    ```bash
-   gh pr comment <N> --attach '<path>#<alt>'
+   gh pr comment <N> --body-file '<body-path>' --attach '<path>#<alt>'
    ```
 
 4. 実装担当は、hatai のコメントの URL を GitHub から読み、PR 本文からそのコメントを指す。PR 本文の編集は `scripts/agent-gh dev pr edit` で行う。

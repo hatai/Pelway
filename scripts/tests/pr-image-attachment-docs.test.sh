@@ -24,7 +24,8 @@ check attachment_doc docs/agents/pr-image-attachments.md \
   'attaching files requires write access to the repository' \
   '実装担当が画像を用意する' \
   'hatai に hatai 名義のコメントでの添付を確かめる' \
-  "gh pr comment <N> --attach '<path>#<alt>'" \
+  "gh pr comment <N> --body-file '<body-path>' --attach '<path>#<alt>'" \
+  '単一引用符を含まない値を選び' \
   'PR 本文からそのコメントを指す' \
   '人間のアカウントで投稿する道具は、hatai が文面か選択肢を明示して選んだときだけ使う'
 

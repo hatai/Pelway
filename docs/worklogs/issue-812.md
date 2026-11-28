@@ -9,6 +9,17 @@
 - 失敗の筋: `gh pr comment <N> --attach '<path>#<alt>'` の引用符を落とすと、利用者が `<alt>` の前の `#` を shell のコメントの開始と混ぜて写し、添付が失敗する。
   確かめ方: 同じテストで、引用符を含むコマンド例の文言の存在を確かめる。
 
+## 失敗の筋（round 1 の最終）
+
+- 失敗の筋: 手順書だけを追加し、`write-issue` や `implement-issue` から参照が無いと、スクリーンショットを求める Issue を書くときと実装するときの両方で手順に辿り着けない
+  確かめ方: `.agents/skills/write-issue/SKILL.md` と `.agents/skills/implement-issue/SKILL.md` の引用箇所を読み、`bash scripts/tests/pr-image-attachment-docs.test.sh` で必須文言の存在を確かめる
+- 失敗の筋: `gh pr comment <N> --attach '<path>#<alt>'` の引用符を落とすと、利用者が `<alt>` の前の `#` を shell のコメントの開始と混ぜて写し、添付が失敗する
+  確かめ方: `docs/agents/pr-image-attachments.md` のコマンド例を読み、`bash scripts/tests/pr-image-attachment-docs.test.sh` で引用符を含むコマンド例の存在を確かめる
+- 失敗の筋: 実装担当が人間名義の道具を使えるように読める文面だと、hatai が文面を選んでいない投稿が hatai 名義で出る
+  確かめ方: `docs/agents/pr-image-attachments.md` の前提と手順 2 を読み、実装担当はコマンドと文面を示すだけで hatai が実行することを確かめる
+- 失敗の筋: コメント URL を確かめる前に PR 本文へ画像の添付済みと書くと、画像の証拠が無い PR が通ったように見える
+  確かめ方: `docs/agents/pr-image-attachments.md` の手順 4〜5 を読み、URL を確かめるまで添付済みと書かないことを確かめる
+
 ## 実装者メモ（round 1）
 
 対象 head: 795bbb473b97e25221b92540fd447b03f5b41a7a
@@ -20,3 +31,31 @@
 5. 改善案: `.agents/skills/command-team/SKILL.md` の「レビュー担当と effort」に「既定は `medium`」と書く（この値は `agent-team.toml` の `effort.raise` と Issue #670 のメモの解釈にそろえる）。
 
 使ったスキル: implement-issue、write-pull-request、writing-for-agents、stop-ai-slop-jp、ja-text-communication、diagnosing-bugs
+
+## 失敗の筋の見直し（round 2）
+
+- 失敗の筋: hatai に確認させたコメント文がコマンドに渡されず、画像だけのコメントが投稿される。
+  確かめ方: `docs/agents/pr-image-attachments.md` のコマンド例に `--body-file` があることを `bash scripts/tests/pr-image-attachment-docs.test.sh` で確かめる。
+- 失敗の筋: `<path>`・`<alt>`・`<body-path>` に単一引用符が入ると、hatai に示したコマンドの引用符が閉じ、残りが shell で実行される。
+  確かめ方: 同じテストで、実装担当が改行と単一引用符を含まない値を選び、hatai がそれらを拒否条件にする文言の存在を確かめる。
+- 失敗の筋: `素の gh` を例外と書くと AGENTS.md の例外一覧と食い違い、実装担当が素の `gh` を使ってよいと読む。
+  確かめ方: 手順 3 が hatai 本人の実行をエージェントの規則の対象外と書くことを確認する。
+- 失敗の筋: App 全般の仕様のように書くと、観測だけの根拠を公開仕様と誤認する。
+  確かめ方: 前提が `pelway-dev` のトークンでの観測に限定し、公開仕様の確認ではないと書くことを確認する。
+
+## 失敗の筋（round 2 の最終）
+
+- 失敗の筋: 手順書だけを追加し、`write-issue` や `implement-issue` から参照が無いと、スクリーンショットを求める Issue を書くときと実装するときの両方で手順に辿り着けない。
+  確かめ方: `.agents/skills/write-issue/SKILL.md` と `.agents/skills/implement-issue/SKILL.md` の引用箇所を読み、`bash scripts/tests/pr-image-attachment-docs.test.sh` で必須文言の存在を確かめる。
+- 失敗の筋: hatai に確認させたコメント文がコマンドに渡されず、画像だけのコメントが投稿される。
+  確かめ方: `docs/agents/pr-image-attachments.md` のコマンド例に `--body-file` があることを `bash scripts/tests/pr-image-attachment-docs.test.sh` で確かめる。
+- 失敗の筋: `<path>`・`<alt>`・`<body-path>` に単一引用符が入ると、hatai に示したコマンドの引用符が閉じ、残りが shell で実行される。
+  確かめ方: 同じテストで、実装担当が改行と単一引用符を含まない値を選び、hatai がそれらを拒否条件にする文言の存在を確かめる。
+- 失敗の筋: 実装担当が人間名義の道具を使えるように読める文面だと、hatai が文面を選んでいない投稿が hatai 名義で出る。
+  確かめ方: `docs/agents/pr-image-attachments.md` の前提と手順 2 を読み、実装担当はコマンドと文面を示すだけで hatai が実行することを確かめる。
+- 失敗の筋: `素の gh` を例外と書くと AGENTS.md の例外一覧と食い違い、実装担当が素の `gh` を使ってよいと読む。
+  確かめ方: 手順 3 が hatai 本人の実行をエージェントの規則の対象外と書くことを確認する。
+- 失敗の筋: App 全般の仕様のように書くと、観測だけの根拠を公開仕様と誤認する。
+  確かめ方: 前提が `pelway-dev` のトークンでの観測に限定し、公開仕様の確認ではないと書くことを確認する。
+- 失敗の筋: コメント URL を確かめる前に PR 本文へ画像の添付済みと書くと、画像の証拠が無い PR が通ったように見える。
+  確かめ方: `docs/agents/pr-image-attachments.md` の手順 4〜5 を読み、URL を確かめるまで添付済みと書かないことを確かめる。
