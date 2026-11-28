@@ -631,13 +631,6 @@
       "skillPath": "skills/engineering/to-tickets/SKILL.md",
       "computedHash": "17496514c92954f68eacdf2b1221e2ddb39fa231b83f03c70bc7d4422f704b2d"
     },
-    "triage": {
-      "source": "mattpocock/skills",
-      "commit": "5863806dd4e15c63174bee4e7515a4256792ecfa",
-      "sourceType": "github",
-      "skillPath": "skills/engineering/triage/SKILL.md",
-      "computedHash": "4342a07c9ebe0696713ec93a883c46e56503a587a34d824fabab5ca61e3bdfbb"
-    },
     "unsafe-checker": {
       "source": "actionbook/rust-skills",
       "sourceType": "github",
