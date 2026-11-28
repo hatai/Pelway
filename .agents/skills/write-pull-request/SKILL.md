@@ -18,7 +18,7 @@ GitHub PR のタイトルと説明本文を書く・直す手順。
 - マージは依頼されたときのみ実行してよい。`scripts/agent-gh dev git push` / `scripts/agent-gh dev git fetch` はしてよい。
 - worktree の外への書き込みは、許可が出ても実行しない。
 - `rm -rf` は、許可が出ても実行しない。
-- 使ってよいネット / `gh` は `gh pr list` / `gh pr view` / `gh pr create` / `gh pr edit` / `gh issue view` / `gh issue comment` / `gh issue edit` / `gh search repos` / `gh search code` だけ。これ以外のネット接続はしない。
+- 使ってよいネット / `gh` は `gh pr list` / `gh pr view` / `gh pr create` / `gh pr edit` / `gh issue view` / `gh issue comment` / `gh issue edit` / `gh search repos` / `gh search code` だけ。例外は `gh api` のうち、対象リポジトリの PR の読み取りとその PR のタイトル・本文の更新に限る（`repos/<owner>/<repo>/pulls/<番号>` への GET と PATCH だけ。手順 3 のタイトルの設定と、手順 4 の `python3 -I scripts/pr-body-update` が `scripts/agent-gh dev api` で行うもの）。これ以外のネット接続はしない。
 - AI 開発チームのエージェントは、`gh` を `scripts/agent-gh dev` 経由で実行する（例: `scripts/agent-gh dev pr create ...`）。素の `gh` で作った PR は作成者が hatai になり、hatai が Approve できないため、ブランチ保護を迂回しないとマージできない。
 - AI 開発チームのエージェントが作る PR は Draft にする（`--draft`）。
 - 日本語を含む文字列（PR タイトル・本文・コメント・Issue 本文等）は、exec のコマンド引数（`--title "..."` など）に書かず、必ずファイル経由（`--body-file`、`api --input` 等）で渡す。実装担当の sandbox では exec 引数の日本語が `\uXXXX` エスケープのまま実行環境に届き、エスケープ文字列がそのままタイトルや本文に載る障害が繰り返されているため（PR #311・#314・#319 で発生）。
@@ -99,9 +99,9 @@ scripts/agent-gh dev api --method PATCH /repos/hatai/Pelway/pulls/<PR 番号> --
    ```
 
    影響を考えるときは、認可と読める人の規則、秘密と認証情報、データの境界とプライバシー、ファイルシステムと外部通信、GitHub Actions・CI・フック、agent の指示と信頼できない入力、入力の上限とリソース枯渇、データの消失と整合性を例に確かめる。影響が大きいほど、対応と根拠を具体的に書く。状態を変える変更や簡単には戻せない変更では、戻し方か回復方法を `対応:` に書く。攻撃手順、悪用できる入力、未修正の弱点の詳細は書かない。該当なしのときは `- なし（理由: <理由>）` と書く。
-6. **レビューと QA** — 事実と sha のみ記載(下のルール参照)。round の履歴は書かない。実装担当の PR では、実装者メモ（`docs/worklogs/issue-<N>.md`）を指す 1 行と、最後に検証した sha だけを書く(implement-issue 手順 7)。
+6. **レビューと QA** — 事実と sha のみ記載(下のルール参照)。round の履歴は書かない。実装担当の PR では、実装者メモ（`docs/worklogs/issue-<N>.md`）を指す 1 行と、最後に検証した sha だけを書く(implement-issue 手順 7)。最後に検証した sha は ``最後に検証した sha: `<sha>` `` の形で 1 行に書く(修正の round では `python3 -I scripts/pr-body-update` がこの行と「対象」の HEAD の行の sha を今の値に書き換える。implement-issue 手順 7。印の語はコードの外に置き、バッククォートで囲むのは sha だけにする。道具はコードの中の印を数えない)。
 7. **対象外** — この PR で触れていないこと、後回しにしたこと。
-8. **対象** — ブランチ名と、手順 1 で取った現在の HEAD sha。実装担当の PR は末尾に `Implementer:` 行を置く。値は指揮役の指示の `Assigned:` 行から `role=implement` を除いて写し、指示に `Assigned:` 行が無いときは `model=unknown effort=unknown` とする(書式は implement-issue 手順 7)。
+8. **対象** — ブランチ名と、手順 1 で取った現在の HEAD sha。HEAD の sha は ``HEAD: `<sha>` `` の形で 1 行に書く(前の項の道具がこの行を書き換えるため。テンプレートの HTML コメントは残してよい。道具は注釈の中の語を数えない)。実装担当の PR は末尾に `Implementer:` 行を置く。値は指揮役の指示の `Assigned:` 行から `role=implement` を除いて写し、指示に `Assigned:` 行が無いときは `model=unknown effort=unknown` とする(書式は implement-issue 手順 7)。
 
 失敗の筋は「どう壊れるか」、リスクとセキュリティへの影響は「壊れたときや悪用されたときの影響」を書く。同じ事象でも、観点が違えば両方に書いてよい。
 
