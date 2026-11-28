@@ -59,3 +59,15 @@
   確かめ方: 前提が `pelway-dev` のトークンでの観測に限定し、公開仕様の確認ではないと書くことを確認する。
 - 失敗の筋: コメント URL を確かめる前に PR 本文へ画像の添付済みと書くと、画像の証拠が無い PR が通ったように見える。
   確かめ方: `docs/agents/pr-image-attachments.md` の手順 4〜5 を読み、URL を確かめるまで添付済みと書かないことを確かめる。
+
+## 実装者メモ（round 2）
+
+対象 head: 987d6c407df5da8cc79e91f5f0299a0346735182
+
+1. 詰まった箇所: 手順 9: devin のレビュー子タスクは `CHANGES_REQUESTED` を投稿したが、完了報告に `pr:` / `verdict:` / `must-fix:` が無かった。投稿は現在の head と委託記録に一致したため、報告を確かめられない実行の投稿と解釈し、`CHANGES_REQUESTED` の must-fix を結び付かない投稿の決まりで対応した。検証は `TMPDIR=/dev/shm/p812-r2 mise run verify` で exit=0、`script-test: 69 tests ok`、`Finished in 283.45s`。
+2. 曖昧だった文: 「path と alt に `'` を含めないことを実装担当の確認と hatai の拒否条件に書くか、shell の quoting を明示する」（devin のレビュー）。
+3. 仮定と解釈: 手作業で写すコマンドでは shell の quoting の説明より、改行と単一引用符を含まない値に限定する方が確かめやすいと解釈した。`pelway-dev` のトークンでの観測を GitHub App 全般の公開仕様と区別し、「この手順では扱う」形にした。素の `gh` は例外を増やすのではなく、hatai 本人の実行はエージェントの規則の対象外と書く形にした。
+4. 足りなかった情報・検証手段: Devin 子タスクの完了報告から最後の判定行が欠ける原因と、`verdict: failed` のラウンドサマリーを履歴の `<R>` に数えるかの正本が無い。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 9 に「投稿済みだが完了報告の判定行が無い実行の扱い」と、「`verdict: failed` のラウンドサマリーが履歴の `<R>` に与える影響」を足す。
+
+使ったスキル: implement-issue、write-pull-request、ja-text-communication、stop-ai-slop-jp
