@@ -210,6 +210,8 @@ Implementer: agent=<opencode|devin> model=<モデル名> effort=<effort>
 
 修正依頼で effort が変わったときは、「対象」の行を新しい値に書き換える。
 
+受け入れ条件がスクリーンショットや画像の添付を求めるときは、PR 本文に画像の証拠を書く前に `docs/agents/pr-image-attachments.md` の手順に従う。
+
 ```bash
 scripts/agent-gh dev pr create --draft --title "wip" --body-file - <<'EOF'
 ...
