@@ -149,14 +149,33 @@ def cleanup_started(root, git_dir, cutoff_ns, own_verify_id):
     try: return cleanup_dir(started_fd, cutoff_ns, own_verify_id)
     finally: os.close(started_fd)
 
-def invalidate_same_generation(path, expected_fingerprint, expected_stat_fingerprint):
+def generation_needs_invalidation(path, expected_fingerprint, expected_stat_fingerprint):
+    if expected_fingerprint == "any": return True
     current_fingerprint, current_stat_fingerprint = marker_generation(path)
-    if expected_fingerprint != "any":
-        same_generation = current_fingerprint == expected_fingerprint
-        if expected_stat_fingerprint is not None and current_stat_fingerprint == expected_stat_fingerprint:
-            same_generation = True
-        if not same_generation and current_fingerprint != "any": return True
+    if current_fingerprint == "any": return True
+    if current_fingerprint == expected_fingerprint: return True
+    return expected_stat_fingerprint is not None and current_stat_fingerprint == expected_stat_fingerprint
+
+def invalidate_same_generation(path, expected_fingerprint, expected_stat_fingerprint):
+    if not generation_needs_invalidation(path, expected_fingerprint, expected_stat_fingerprint): return True
     return invalidate_marker(path)
+
+def neutralize_same_generation(path, expected_fingerprint, expected_stat_fingerprint):
+    # unlink できないときの最後の手段。chmod はディレクトリへの書き込み権を要らず所有者なら効くため、
+    # gitdir に書けない状態でも印を読めなくできる。読めない印は門が形を判定できず信用しない。
+    if not generation_needs_invalidation(path, expected_fingerprint, expected_stat_fingerprint): return True
+    try: st = os.lstat(path)
+    except FileNotFoundError: return True
+    except OSError as e:
+        note(f"前回の印を読めない状態にできません: {e}")
+        return False
+    if not valid_marker_stat(st): return True
+    try:
+        os.chmod(path, 0)
+        return True
+    except OSError as e:
+        note(f"前回の印を読めない状態にできません: {e}")
+        return False
 
 def invalidate_unrecorded(lock_path, marker_path, expected_fingerprint, expected_stat_fingerprint):
     lock_fd, error = open_lock(lock_path)
@@ -239,13 +258,19 @@ def main():
     started = started_fd is not None and write_start(started_fd, start_name)
     if not started:
         fallback_written = write_fallback(git_dir, start_name)
-        marker_invalidated = True
+        secured = True
+        neutralized = False
         if not fallback_written:
-            marker_invalidated = invalidate_unrecorded(lock_path, marker_path, start_fingerprint, start_stat_fingerprint)
+            secured = invalidate_unrecorded(lock_path, marker_path, start_fingerprint, start_stat_fingerprint)
+            if not secured:
+                secured = neutralize_same_generation(marker_path, start_fingerprint, start_stat_fingerprint)
+                neutralized = secured
         if started_fd is not None: os.close(started_fd)
         detail = f": {open_error}" if open_error is not None else ""
-        if not marker_invalidated:
-            detail += "。前回の印を無効化できず、古い印が残っています。印を消すか記録先を直して verify をやり直すまで push しないでください"
+        if not secured:
+            detail += "。前回の印を無効化できず、読めない状態にもできませんでした。古い印が残っています。印を消すか記録先を直して verify をやり直すまで push しないでください"
+        elif neutralized:
+            detail += "。前回の印は読めない状態にしました。記録先を直して verify をやり直すまで push は止まります"
         fail(f"verify の開始の記録を残せないため verify を開始しません{detail}")
 
     lock_fd, error = open_lock(lock_path)
@@ -264,12 +289,18 @@ def main():
         lock_name = f"{lock_fingerprint}.{verify_id}"
         if not write_start(started_fd, lock_name):
             fallback_written = write_fallback(git_dir, lock_name)
-            marker_invalidated = True
+            secured = True
+            neutralized = False
             if not fallback_written:
-                marker_invalidated = invalidate_same_generation(marker_path, lock_fingerprint, lock_stat_fingerprint)
+                secured = invalidate_same_generation(marker_path, lock_fingerprint, lock_stat_fingerprint)
+                if not secured:
+                    secured = neutralize_same_generation(marker_path, lock_fingerprint, lock_stat_fingerprint)
+                    neutralized = secured
             detail = ""
-            if not marker_invalidated:
-                detail = "。前回の印を無効化できず、古い印が残っています。印を消すか記録先を直して verify をやり直すまで push しないでください"
+            if not secured:
+                detail = "。前回の印を無効化できず、読めない状態にもできませんでした。古い印が残っています。印を消すか記録先を直して verify をやり直すまで push しないでください"
+            elif neutralized:
+                detail = "。前回の印は読めない状態にしました。記録先を直して verify をやり直すまで push は止まります"
             fail(f"ロック取得時点の開始の記録を残せないため verify を開始しません{detail}")
         invalidated = invalidate_marker(marker_path)
     except SystemExit:

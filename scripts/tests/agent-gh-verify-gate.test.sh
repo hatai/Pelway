@@ -209,9 +209,15 @@ rm -rf "$MISE_TOY/.git/pelway-verify-started"; : >"$MISE_TOY/.git/pelway-verify-
 printf 'important\n' >"$lock_target"; rm -f "$lock_path"; ln -s "$lock_target" "$lock_path"
 rm -f "$start_touch"
 (cd "$MISE_TOY" && VERIFY_TOUCH_BEFORE_EXIT="$start_touch" MISE_TRUSTED_CONFIG_PATHS="$MISE_TOY/mise.toml" mise run verify >"$ROOT/mise-invalidate-unwritable.out" 2>&1); rc=$?
-[[ "$rc" != 0 && ! -e "$start_touch" && -e "$marker_path" && "$(grep -c '前回の印を無効化できず、古い印が残っています' "$ROOT/mise-invalidate-unwritable.out" 2>/dev/null)" != 0 ]] ||
-  failures+=("verify_invalidate_unwritable_warns: rc=$rc touch=$(test -e "$start_touch" && echo present || echo missing) marker=$(test -e "$marker_path" && echo present || echo missing) warn=$(grep -c '前回の印を無効化できず' "$ROOT/mise-invalidate-unwritable.out" 2>/dev/null)")
-rm -f "$lock_path"; rm -rf "$MISE_TOY/.git/pelway-verify-started"; chmod u+w "$MISE_TOY/.pelway-verify"; rm -rf "$MISE_TOY/.pelway-verify" "$marker_path"
+[[ "$rc" != 0 && ! -e "$start_touch" && -e "$marker_path" && ! -r "$marker_path" && "$(grep -c '前回の印は読めない状態にしました' "$ROOT/mise-invalidate-unwritable.out" 2>/dev/null)" != 0 ]] ||
+  failures+=("verify_invalidate_unwritable_warns: rc=$rc touch=$(test -e "$start_touch" && echo present || echo missing) marker=$(test -e "$marker_path" && echo present || echo missing) readable=$(test -r "$marker_path" && echo yes || echo no) warn=$(grep -c '読めない状態にしました' "$ROOT/mise-invalidate-unwritable.out" 2>/dev/null)")
+# 記録先を直すだけでは印は読めないままなので、verify をやり直さない push は門が止める。
+rm -f "$lock_path"; rm -rf "$MISE_TOY/.git/pelway-verify-started"; chmod u+w "$MISE_TOY/.pelway-verify"
+mkdir "$MISE_TOY/.pelway-verify/started" 2>/dev/null; chmod 700 "$MISE_TOY/.pelway-verify" "$MISE_TOY/.pelway-verify/started"
+(cd "$MISE_TOY" && PELWAY_AGENT_SKIP_RESIGN=1 bash "$AGENT_GH" dev git push origin HEAD:refs/heads/agent/invalidate-unwritable >"$ROOT/invalidate-unwritable-push.out" 2>"$ROOT/invalidate-unwritable-push.err"); RC=$?; ERR="$(cat "$ROOT/invalidate-unwritable-push.err")"
+[[ "$RC" != 0 && "$ERR" == *'verify が通った木の印を確認できません'* ]] ||
+  failures+=("verify_invalidate_unwritable_push: not stopped after repair: rc=$RC $ERR")
+rm -rf "$MISE_TOY/.pelway-verify" "$marker_path"
 mkdir "$MISE_TOY/.pelway-verify"; chmod a-w "$MISE_TOY/.pelway-verify"
 printf '%s
 verify-id:0123456789abcdef0123456789abcdef
@@ -291,10 +297,15 @@ touch "$lock_release"
 wait "$lock_warn_manual" 2>/dev/null; lock_warn_manual_rc=$?
 wait "$lock_warn_verify"; lock_warn_rc=$?
 chmod u+w "$MISE_TOY/.git"
-[[ "$lock_warn_manual_rc" == 0 && -n "$warn_start" && "$lock_warn_rc" != 0 && -e "$marker_path" && "$(grep -c '前回の印を無効化できず、古い印が残っています' "$ROOT/mise-lock-invalidate-fails.out" 2>/dev/null)" != 0 ]] ||
-  failures+=("verify_lock_invalidate_fails_warns: lock=$lock_warn_manual_rc verify=$lock_warn_rc start=${warn_start:-none} marker=$(test -e "$marker_path" && echo present || echo missing) warn=$(grep -c '前回の印を無効化できず' "$ROOT/mise-lock-invalidate-fails.out" 2>/dev/null)")
-chmod u+w "$MISE_TOY/.pelway-verify/started" 2>/dev/null
-rm -rf "$MISE_TOY/.git/pelway-verify-started" "$MISE_TOY/.pelway-verify"; rm -f "$marker_path"
+[[ "$lock_warn_manual_rc" == 0 && -n "$warn_start" && "$lock_warn_rc" != 0 && -e "$marker_path" && ! -r "$marker_path" && "$(grep -c '前回の印は読めない状態にしました' "$ROOT/mise-lock-invalidate-fails.out" 2>/dev/null)" != 0 ]] ||
+  failures+=("verify_lock_invalidate_fails_warns: lock=$lock_warn_manual_rc verify=$lock_warn_rc start=${warn_start:-none} marker=$(test -e "$marker_path" && echo present || echo missing) readable=$(test -r "$marker_path" && echo yes || echo no) warn=$(grep -c '読めない状態にしました' "$ROOT/mise-lock-invalidate-fails.out" 2>/dev/null)")
+# gitdir を直し記録のディレクトリを残しただけでは印は読めないままなので、verify をやり直さない push は門が止める。
+rm -rf "$MISE_TOY/.git/pelway-verify-started"
+chmod u+w "$MISE_TOY/.pelway-verify/started" 2>/dev/null; chmod 700 "$MISE_TOY/.pelway-verify/started" 2>/dev/null
+(cd "$MISE_TOY" && PELWAY_AGENT_SKIP_RESIGN=1 bash "$AGENT_GH" dev git push origin HEAD:refs/heads/agent/lock-invalidate-fails >"$ROOT/lock-invalidate-fails-push.out" 2>"$ROOT/lock-invalidate-fails-push.err"); RC=$?; ERR="$(cat "$ROOT/lock-invalidate-fails-push.err")"
+[[ "$RC" != 0 && "$ERR" == *'verify が通った木の印を確認できません'* ]] ||
+  failures+=("verify_lock_invalidate_fails_push: not stopped after repair: rc=$RC $ERR")
+rm -rf "$MISE_TOY/.pelway-verify"; rm -f "$marker_path"
 # gitdir のパスの末尾に空白や CR があっても、3 経路が Git が返した同じパスを使う。
 special_n=0
 for suffix in ' ' $'\r' $'\n'; do
