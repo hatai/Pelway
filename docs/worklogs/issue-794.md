@@ -72,3 +72,15 @@
 5. 改善案: `.agents/skills/implement-issue/SKILL.md` の「修正依頼」に「main の取り込みで PR template か review-pr が変わったときは、新しい必須欄を PR 本文と作業ログに反映してからレビューに戻る」を足す。
 
 使ったスキル: implement-issue, write-pull-request, fix-merge-conflicts
+
+## 実装者メモ（round 4）
+
+対象 head: 516ea52a93b9098142078834392eb7b73130b311
+
+1. 詰まった箇所: 手順 5: `mise run verify` が2度続けて環境起因で失敗した。1度目は TMPDIR の使い回しと shell の umask 002 で `mkdir -p` が group-writable な親を作り、verify-pelway の sticky-parent 規則に正しく拒否された。`/dev/shm` 配下を毎回新しく作り `chmod 755` する必要がある。2度目は `pelway-agent-watch` の `pending_only_recount_reads_an_inbox_it_cannot_append_to` が並列の全体実行でだけ失敗し（`git rev-parse: exit 126`）、単体では3回とも pass、再実行した全体でも pass した。今回の差分は docs と shell のみで Rust の試験に影響しないため flake と判断した。
+2. 曖昧だった文: 「報告しないもの」は nit にも書かない、の規範と、観点ファイルの「follow-up に送る」「判断を送る」の関係。レビュー担当にはその出力通道が無い。
+3. 仮定と解釈: 送り先の動詞は「報告しない」指針の説明であってレビュー出力への指示ではないと解釈し、「レビューの外で別 Issue」「判断は委託者に委ねる」「指摘の本文に書く」という実在の通道に沿う表現にそろえた。区分衝突は「明示された must-fix ＞ 明示された nit ＞ default_class（衝突時は must-fix）」の全順序とした。main の版を読む規則の重複指摘は、PR が自分のレビュー規則を差し替える経路を塞ぐ中心規則で失敗の筋の確かめ方が依存しているため、意図的な強調として変えない判断をした。
+4. 足りなかった情報・検証手段: wording pin が確かめる規則に一意に対応するかを機械的に確かめる手段が無く、今回レビューで弱い pin が見つかった。
+5. 改善案: `.agents/skills/verify-pelway/SKILL.md` または implement-issue に「TMPDIR は実行ごとに新しく作り、親が group-writable にならないよう chmod する（shell の umask が 002 の環境では `mkdir -p` だけでは 775 になる）」を足す。
+
+使ったスキル: implement-issue, write-pull-request
