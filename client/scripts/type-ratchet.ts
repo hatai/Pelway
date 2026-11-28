@@ -56,6 +56,8 @@ export function parseDiagnostics(stdout: string): Diagnostic[] {
     if (match === null) {
       // tsc の長い診断は、診断の頭の行に続く字下げ行に分かれる。件数には数えずに読み飛ばす。
       if (/^\s/.test(rawLine)) continue;
+      // GitHub Actions では bun check が同じ診断を workflow command でも出す。件数は tsc 形式の行だけで数える。
+      if (rawLine.startsWith("::error file=")) continue;
       throw new Error(`bun check の stdout の形式が想定と違います: ${rawLine}`);
     }
     if (seen.has(rawLine)) continue;

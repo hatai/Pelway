@@ -52,6 +52,18 @@ describe("parseDiagnostics", () => {
     const multiline = `${TS4111}\n  Type 'undefined' is not assignable to type 'string'.\n`;
     expect(parseDiagnostics(multiline)).toHaveLength(1);
   });
+
+  test("GitHub Actions の注釈行は tsc 形式の重複として読み飛ばす", () => {
+    const annotation =
+      "::error file=client/apps/desktop/src/main/index.ts,line=17,col=63,endLine=17,endColumn=84,title=TS4111::Property 'ELECTRON_RENDERER_URL' comes from an index signature, so it must be accessed with ['ELECTRON_RENDERER_URL'].";
+    expect(parseDiagnostics(`${TS4111}\n${annotation}\n`)).toHaveLength(1);
+  });
+
+  test("GitHub Actions の注釈行だけでは診断件数にしない", () => {
+    const annotation =
+      "::error file=client/apps/desktop/src/main/index.ts,line=17,col=63,endLine=17,endColumn=84,title=TS4111::Property 'ELECTRON_RENDERER_URL' comes from an index signature, so it must be accessed with ['ELECTRON_RENDERER_URL'].";
+    expect(parseDiagnostics(`${annotation}\n`)).toHaveLength(0);
+  });
 });
 
 describe("compareBaseline", () => {

@@ -31,6 +31,8 @@
   確かめ方: `client/scripts/type-ratchet.test.ts` の「更新は悪化分を書かず、改善を書いても悪化が残れば失敗する」。
 - 失敗の筋: verify の依存配線が外れ、ラチェットが検査経路から回らない。
   確かめ方: `client/scripts/type-ratchet.test.ts` の「client:type-ratchet が bootstrap と client:verify の間に入り、verify-static から回る」と `mise tasks deps verify-static` の出力。
+- 失敗の筋: GitHub Actions で `bun check` が同じ診断を workflow command としても出し、形式外行としてラチェットが止まる、または注釈行を別件として数える。
+  確かめ方: `client/scripts/type-ratchet.test.ts` の「GitHub Actions の注釈行は tsc 形式の重複として読み飛ばす」「GitHub Actions の注釈行だけでは診断件数にしない」と、`GITHUB_ACTIONS=true node scripts/type-ratchet.ts` の終了コード 0。
 
 ## 実装者メモ（round 1）
 
@@ -41,5 +43,6 @@
 3. 仮定と解釈: verify の構造は変えず、hatai の決定どおり `verify-static` の依存と `mise run verify` の成功を証拠にした。`bun check` の診断は client/ からの相対パスで出る前提にし、診断の続き行は字下げ行として読み飛ばし、頭の行だけを数える解釈にした。
 4. 足りなかった情報・検証手段: 複数行診断を安定して出す実機入力は既存コードに無かったため、`TS2322` の実出力で字下げ行の形を確かめた。
 5. 改善案: `docs/superpowers/specs/agent-team.md` の「実装担当」に「テストを先に書くときは、検査対象の出力が複数行になる既存例を実機で先に確かめる」と足す。
+6. 詰まった箇所: CI の static ジョブ / `client:type-ratchet`: GitHub Actions では `bun check` が同じ診断を workflow command（`::error file=...`）としても出し、最初の実装が形式外行として fail closed で止まった。tsc 形式の行だけを件数にし、注釈行は重複として読み飛ばす形にした。注釈行だけでは件数にしない。
 
 使ったスキル: implement-issue、write-pull-request、brainstorming、grilling
