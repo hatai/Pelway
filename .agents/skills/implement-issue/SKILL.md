@@ -142,7 +142,7 @@ EOF
 ```markdown
 ## 実装者メモ（round <R>）
 
-対象 head: <メモを含むコミットの親、つまりこの round の実装の実体を含む最後のコミットの SHA（手順 6 で実装コミットを push した後、署名付け替え後の SHA を記入する）。終わりの報告を出さない round（途中経過・停止）では書かない>
+対象 head: <メモを含むコミットの親、つまりこの round の実装の実体を含む最後のコミットの SHA（手順 6 で実装コミットを push した後、署名付け替え後の SHA を記入する。反論だけで直すものが無い round では、手順 6 のとおりメモのコミットの親）。終わりの報告を出さない round（途中経過・停止）では書かない>
 
 1. 詰まった箇所: <手順の番号かファイルのパス>: <何が起きたか>
 2. 曖昧だった文: 「<skill・Issue・AGENTS.md・docs の文をそのまま引用>」（<ファイルのパスと見出し>）
@@ -388,17 +388,17 @@ Request changes のとき:
 
 反論するとき:
 
-- 根拠は、レビュー担当が head の版を読んで確かめられる事実（head の行、仕組み、出典）に限る。優先度・範囲・好み（「別 Issue にすべき」「重要度が低い」など）は根拠にできない。領域の分類は上の 1 のとおりレビュー役の判定に従う。
-- 反論は 1 つの指摘につき PR ごとに 1 回まで。「残る」と判定された指摘は直す。直さないときは「止まる条件」の表で止まる。反論をした round も、ほかの round と同じくラウンドに数える。
-- 何回目でも must-fix に残る領域（認可・秘密と認証情報・データの境界・外への通信・入力の上限とリソース枯渇・データの消失と整合性・守りを外すこと。skill `command-team` の「レビューのラウンド」）の must-fix への反論では撤回されない。レビューに「残る（セキュリティ領域のため hatai の判断が要る）」と書かれたら、「止まる条件」の表で止まる。
-- hatai の `[rebuttal]` のコメント（作成者 `hatai`）が出た指摘は直さない。再レビューで「撤回（hatai の決定）」とされる。その round で直すものが無ければ、手順 6 のとおり実装者メモのコミットだけを push して再委託する。
-- 反論は PR の専用コメントに、答えるレビューより後に投稿する（`scripts/agent-gh dev pr comment <PR 番号> --body-file -`）。指摘ごとに、そのレビュー本文の must-fix の行頭 `<file>:<line>` と指摘文の引用を一字一句で書き、根拠には確かめた head の sha と、根拠の種類（head の行、仕組み、出典）を添える。形は次のとおり。<レビューの URL> は答えるレビューで、`scripts/agent-gh dev api repos/hatai/Pelway/pulls/<PR 番号>/reviews --jq '.[] | {user: .user.login, state, submitted_at, html_url}'` で読む。
+- 根拠は、レビュー担当が head の版を読んで確かめられる事実（head の行、仕組み、出典）に限る。出典は、レビュー担当が読める場所（リポジトリ内のファイルか GitHub 上のページ）に限る。優先度・範囲・好み（「別 Issue にすべき」「重要度が低い」など）は根拠にできない。領域の分類は上の 1 のとおりレビュー役の判定に従う。
+- 自分の反論は 1 つの指摘につき PR ごとに 1 回まで。「残る」と判定された指摘は直す。直さないときは「止まる条件」の表で止まる。反論をした round も、ほかの round と同じくラウンドに数える。
+- 上の 1 に挙げた、3 回目以降も must-fix に残る領域の must-fix への反論では撤回されない。レビューの `[残る]` の行に「セキュリティ領域のため hatai の判断が要る」と書かれたら、「止まる条件」の表で止まる。
+- hatai の反論が出た指摘は直さない。再レビューで「撤回（hatai の決定）」とされる。その round で直すものが無ければ、手順 6 のとおり実装者メモのコミットだけを push して再委託する。hatai の反論は、PR のコメントを読んで確かめる（`scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<PR 番号>/comments --jq '.[] | select(.user.login == "hatai") | {created_at, updated_at, body}'`）。数えるのは、1 行目が `[rebuttal] review: ` で始まり、`created_at` と `updated_at` が同じ（投稿の後に編集されていない）ものだけだ。
+- 反論は PR の専用コメントに、その round の push を済ませたあとに投稿する（`scripts/agent-gh dev pr comment <PR 番号> --body-file -`）。指摘ごとに、そのレビュー本文の must-fix の行頭 `<file>:<line>` と指摘文の引用を一字一句で書き、根拠には push 後の head の sha と、根拠の種類（head の行、仕組み、出典）を添える。形は次のとおり。<レビューの URL> は答えるレビューで、`scripts/agent-gh dev api --paginate repos/hatai/Pelway/pulls/<PR 番号>/reviews --jq '.[] | {user: .user.login, state, submitted_at, html_url, body}'` で読む。
 
   ```
   [rebuttal] review: <レビューの URL>
   head: <sha>
   - <file>:<line>「<指摘文の引用>」
-    根拠: <head の行 | 仕組み | 出典> <確かめた内容。行なら <file>:<line>、出典ならパスと節か URL>
+    根拠: <head の行 | 仕組み | 出典> <確かめた内容。行なら <file>:<line>、出典ならリポジトリ内のパスと節か GitHub 上のページの URL>
   ```
 
 修正依頼（CONFLICTING の解消など、レビュー結果を介さない修正指示）のとき:
@@ -435,7 +435,7 @@ hatai の指示がこの手順と食い違うとき（例: 「nit 対応して�
 ### review round <R>
 Reviewer: agent=<担当> model=<モデル名> effort=<effort>
 verdict: approve | request-changes（must-fix <件数>）
-must-fix: <対応した内容。直さずに反論した指摘は「反論した」と書く。Approve のときは「なし」>
+must-fix: <対応した内容。直さずに反論した指摘は「反論した」と書く（hatai の反論によるものは「hatai が反論した」と書く）。Approve のときは「なし」>
 別 Issue: <別 Issue に回した指摘と理由 1 行。無ければ「なし」>
 ```
 
