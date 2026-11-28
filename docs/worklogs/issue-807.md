@@ -1,5 +1,20 @@
 # Issue #807 の作業ログ
 
+## 失敗の筋（実装前）
+
+（round 15 に遡って記録。実装の開始は round 1）
+
+- 失敗の筋: verify が失敗・中断しても前回の成功の印が残り、検査を通っていない木の push が通る
+  確かめ方: `scripts/tests/agent-gh-verify-gate.test.sh`（同じ木で成功のあとに失敗したときの停止、中断の試験）
+- 失敗の筋: 同じ worktree で verify が同時に走り、成功と失敗の終了順で印の意味が変わる
+  確かめ方: `scripts/tests/agent-gh-verify-gate.test.sh`（成功と失敗の重なりの試験、ロックの試験）
+- 失敗の筋: 失敗を記録する場所に書けない・印を消せない状態で、失敗が残らず復旧後に古い印で push が通る
+  確かめ方: `scripts/tests/agent-gh-verify-gate.test.sh`（開始の記録を書けない試験）
+- 失敗の筋: symlink・hardlink・他人所有の印やロックやディレクトリを信頼し、壊れた状態を正しい印と誤認する
+  確かめ方: `scripts/tests/agent-gh-verify-gate.test.sh`（symlink のロックとディレクトリ、印の属性の試験）
+- 失敗の筋: rename 検出で外のファイルを `docs/worklogs/` に移しただけの木を例外と誤認し、検査を通っていない push が通る
+  確かめ方: `scripts/tests/agent-gh-verify-gate.test.sh`（rename の例外のすり抜けの試験）
+
 ## 実装者メモ（round 1）
 
 対象 head: 5f75c49121df02ca346ed9e6a7b50dd355d60b33（この round の実装の実体を含むコミット。`scripts/agent-gh-resign` による署名付け替え後の SHA。このメモを含むコミットの親）
@@ -155,8 +170,26 @@
 
 1. 詰まった箇所: 開始の記録を両方の保存先に書けず印の無効化にも失敗したとき、失敗を永続化する手段が無いように見えたが、unlink はディレクトリへの書き込み権が要るのに対し chmod は所有権だけで効く。gitdir に書けない状態でも、印を読めない状態にできる。
 2. 曖昧だった文: 「記録先が両方書けず無効化も失敗した場合も、古い印で push が通らないようにしてください（たとえば push 側の門が印を信用しない、または失敗を安全側に倒す、など）」（hatai の決定、開発リード経由の伝達）
-3. 仮定と解釈: 運用例外は認められないと読み、無効化（unlink）に失敗したときは世代を確かめたうえで chmod 0 で印を読めなくする。門は読めない印の形を判定できず信用しないため、復旧後も verify をやり直すまで push は止まる。読めない状態にもできない残りの経路は、読み取り専用ファイルシステム（門の gitdir への probe 書き込みが既に止める）か他人所有の印（門が既に拒否する）だけで、古い有効な印が通る経路は残らない。中断も、ロックの保持者がいればその verify が無効化済みか新しい印を書くため覆い、いなければ flock は即座に取れる。
+3. 仮定と解釈: 運用例外は認められないと読み、無効化（unlink）に失敗したときは世代を確かめたうえで chmod 0 で印を読めなくする。門は読めない印の形を判定できず信用しないため、復旧後も verify をやり直すまで push は止まる。読めない状態にもできない残りの経路は、読み取り専用ファイルシステムか immutable な属性だけで、ソフトウェアで触れ得る故障では古い印が通らない。読み取り専用の間は門の gitdir への probe 書き込みが止めるが、書き込みが復旧したあとに残った印は門を通りうるため、その窓は物理的な限界として残る。中断も、ロックの保持者がいればその verify が無効化済みか新しい印を書くため覆い、いなければ flock は即座に取れる。
 4. 足りなかった情報・検証手段: 開始前の失敗（保存先と予備に書けずロックが symlink）とロック取得後の失敗（記録を書けず gitdir への unlink も失敗）の両方で、印が読めない状態になり、記録先を直しただけの push が門に止められることを regression test で確かめた。全体は `TMPDIR=/dev/shm/p807-r14v mise run verify`（318.31 秒）で確かめた（script-test 65 tests ok）。
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「状態を消せないときの代替として、読めなくする・使えなくする操作が別の権限で効かないかを書く」を足す。
 
 使ったスキル: `.agents/skills/implement-issue`、ユーザーレベルの `receiving-code-review`
+
+## 失敗の筋（round 15 の最終）
+
+- 失敗の筋: verify が失敗・中断しても前回の成功の印が残り、検査を通っていない木の push が通る
+  確かめ方: `scripts/tests/agent-gh-verify-gate.test.sh`（同じ木で成功のあとに失敗したときの停止、親だけ中断・ロック待ちの中断の試験）
+- 失敗の筋: 同じ worktree で verify が同時に走り、成功と失敗の終了順で印の意味が変わる
+  確かめ方: `scripts/tests/agent-gh-verify-gate.test.sh`（成功と失敗の重なり、ロック取得後の世代の記録の試験）
+- 失敗の筋: 開始の記録を両方の保存先に書けず印の無効化にも失敗し、復旧後に古い印で push が通る
+  確かめ方: `scripts/tests/agent-gh-verify-gate.test.sh` の verify_invalidate_unwritable_warns・verify_lock_invalidate_fails_warns（開始前とロック取得後の 2 経路で、印が読めない状態になり、記録先を直しただけの push が止まることを確かめる）
+- 失敗の筋: 読めない印の権限が検証の途中で回復し、記録した世代と照合できず同じ印を無効化しそこなう
+  確かめ方: `scripts/tests/agent-gh-verify-gate.test.sh` の verify_readability_restored（stat の指紋でも世代を照合することを確かめる）
+- 失敗の筋: 別の世代の印を誤って消す・読めなくし、あとで成功した検証の印まで失効させる
+  確かめ方: `scripts/tests/agent-gh-verify-gate.test.sh`（世代の変わる試験と、別世代の記録が新しい成功を止めない push の試験）
+- 失敗の筋: symlink・hardlink・他人所有の印やロックやディレクトリを信頼し、壊れた状態を正しい印と誤認する
+  確かめ方: `scripts/tests/agent-gh-verify-gate.test.sh`（symlink のロックと `.pelway-verify`、印の属性、record の symlink 拒否の試験）
+- 失敗の筋: rename 検出で外のファイルを `docs/worklogs/` に移しただけの木を例外と誤認する
+  確かめ方: `scripts/tests/agent-gh-verify-gate.test.sh`（rename の例外のすり抜けの試験）
+- 外した筋: 読み取り専用ファイルシステムや immutable な属性で unlink と chmod の両方が効かない状態（ソフトウェアで触れ得ない物理的な限界で、読み取り専用の間は門の probe 書き込みが止め、復旧後の窓は警告で運用に知らせるだけになる）

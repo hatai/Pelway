@@ -345,7 +345,7 @@ run = "cargo install --path crates/pelway-agent-watch --locked --root ~/.local -
 [tasks.verify]
 description = "開発環境の一括確認（3 グループは並列実行）"
 # 検査は 3 つのグループに分ける。CI でも同じグループを 1 ジョブずつ走らせる
-# （docs/dev-environment.md「CI（GitHub Actions）」を参照）。分け方の 이유는
+# （docs/dev-environment.md「CI（GitHub Actions）」を参照）。分け方の 理由は
 # cargo でコンパイルするグループを 2 つに絞って、依存クレートの二重コンパイル
 # を避けること。check は clippy に含まれ、build は test が同じ成果物を作るため
 # verify には含めない（check / build タスク自体は残す）。

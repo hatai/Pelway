@@ -16,6 +16,8 @@ docs/design-system/tokens/check-v4-result.json linguist-generated=true
 # このリポジトリで書いている skill はベンダー扱いにせず、行数に数え、差分も折りたたまない。
 .agents/skills/implement-issue/** -linguist-generated
 .agents/skills/review-pr/** -linguist-generated
+.agents/skills/investigate-bug/** -linguist-generated
+.agents/skills/triage/** -linguist-generated
 .agents/skills/write-pull-request/** -linguist-generated
 .agents/skills/pr-watch/** -linguist-generated
 .agents/skills/verify-pelway/** -linguist-generated

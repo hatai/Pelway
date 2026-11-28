@@ -172,10 +172,18 @@ def neutralize_same_generation(path, expected_fingerprint, expected_stat_fingerp
     if not valid_marker_stat(st): return True
     try:
         os.chmod(path, 0)
-        return True
     except OSError as e:
         note(f"前回の印を読めない状態にできません: {e}")
         return False
+    # モードを持たない・chmod を無視するファイルシステムで黙って効かないことがあるため、
+    # 読み直して確かめる。読めるなら門も読めるため、読めない状態にできたことにはならない。
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return True
+    os.close(fd)
+    note("前回の印を読めない状態にできません: chmod のあとも読めます")
+    return False
 
 def invalidate_unrecorded(lock_path, marker_path, expected_fingerprint, expected_stat_fingerprint):
     lock_fd, error = open_lock(lock_path)

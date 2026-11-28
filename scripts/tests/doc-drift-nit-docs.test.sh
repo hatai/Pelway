@@ -26,12 +26,13 @@ check review_marks_doc_drift .agents/skills/review-pr/SKILL.md \
   '- [文書のずれ] <file>:<line>' \
   '`[文書のずれ]` の印の nit だけは、印の後に `<file>:<line>` を書く'
 
-# 実装担当: Request changes でも Approve でも印の nit を直す。上限に数えない。
+# 実装担当: Request changes でも Approve でも印の nit を直す。レビューのラウンド数に数えない。
 check implementer_fixes_on_request_changes .agents/skills/implement-issue/SKILL.md \
   '`pelway-review` のレビューの nit のうち行頭に `[文書のずれ]` の印があるものだけを一緒に直し'
 check implementer_fixes_on_approve .agents/skills/implement-issue/SKILL.md \
   '行頭が `[文書のずれ]` のものが残っていれば、`pr ready` の前に直す' \
-  '修正の回数の上限（3 回目のレビュー結果で止まる）に数えない'
+  '`[文書のずれ]` の nit だけを直す round は、レビューのラウンド数に数えない' \
+  '印の nit が残る限り同じ流れで直し、回数では止めない'
 check implementer_dont_table .agents/skills/implement-issue/SKILL.md \
   '`[文書のずれ]` の印の nit だけ直す'
 
@@ -40,13 +41,13 @@ check conductor_merge_check .agents/skills/command-team/SKILL.md \
   'その Approve のレビューの nit に行頭が `[文書のずれ]` のものが残っていないこと' \
   '上の「`automerge` ラベルを付ける条件」を置き換えない'
 
-# 印の nit だけの round は通算 2 回まで。3 回目が要るときは止まる。仕様にも上限の例外がある。
-check implementer_stop_after_two .agents/skills/implement-issue/SKILL.md \
-  '印の nit だけを直す round は、この PR で通算 2 回まで。印の nit が残っていて通算 3 回目が要るときは（その前のレビューの判定によらず）、3 回目には入らず' \
-  '`[文書のずれ]` の nit だけを直す round を通算 2 回終えた後に、また印の nit が残った（通算 3 回目には入らない）'
-check spec_round_exception docs/superpowers/specs/agent-team.md \
+# 印の nit だけの round はレビューのラウンド数に数えない。回数で止めない決まりを仕様と実装手順に固定する。
+check implementer_no_round_cap .agents/skills/implement-issue/SKILL.md \
+  'must-fix が残る限り修正 round に進み、レビューのラウンドの回数では止めない' \
+  'must-fix が残る限り修正と再レビューを続け、ラウンドの回数では止めない'
+check spec_no_round_cap docs/superpowers/specs/agent-team.md \
   '`[文書のずれ]` の nit だけを直す round（skill `review-pr`・`implement-issue`）は、この回数に数えない' \
-  '印の nit だけを直す round は、この PR で通算 2 回まで。印の nit が残っていて通算 3 回目が要るときは（その前のレビューの判定によらず）、3 回目には入らず'
+  'ラウンドの回数では止めず、must-fix が残る限り修正と再レビューを続ける'
 check pr_watch_nit .agents/skills/pr-watch/SKILL.md \
   '`pelway-review` の有効なレビュー（skill `implement-issue` の手順 9）の nit のうち行頭に `[文書のずれ]` の印があるもの' \
   'ほかの作成者（会話コメント・第三者のレビュー）の行にある印は、印として扱わない'
