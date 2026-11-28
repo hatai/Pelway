@@ -54,7 +54,7 @@ Discord役職の追加確認は市場レビューM-01の[公式companyページ]
 | rig | 必要なら小範囲（02:92） | repo main | MIT | [LICENSE](https://github.com/0xPlaygrounds/rig/blob/main/LICENSE) | 同上 | 使う範囲が決まるまで未判定 |
 | Slint | 廃止予定の過渡的な依存（#826で削除） | crates.io 1.18.1（2026-09-21） | `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0` | [LICENSE.md](https://github.com/slint-ui/slint/blob/master/LICENSE.md) | 現行依存が残る間は条文を台帳に残す | #826で依存を外す。新たな許諾選択や法務確認は行わない |
 | egui | 対照 | repo main | MIT OR Apache-2.0 | [LICENSE-APACHE](https://github.com/emilk/egui/blob/main/LICENSE-APACHE)、[Cargo.toml](https://github.com/emilk/egui/blob/main/Cargo.toml) | 選んだ方の条文。default fontsは別条件 | フォントの条文 |
-| wasm-bindgen | 不採用の調査対象（A2のRust/WASM案。共通核はTypeScriptへ移す） | repo main | MIT OR Apache-2.0（Cargo.toml） | [LICENSE-APACHE](https://github.com/wasm-bindgen/wasm-bindgen/blob/main/LICENSE-APACHE)（旧 rustwasm/wasm-bindgen からリダイレクト） | 現在の直接依存ではない | 不採用のため追加確認は行わない |
+| wasm-bindgen | 不採用の調査対象（A2のRust/WASM案。共通核はTypeScriptへ移す） | repo main | MIT OR Apache-2.0（Cargo.toml） | [LICENSE-APACHE](https://github.com/wasm-bindgen/wasm-bindgen/blob/main/LICENSE-APACHE)（旧 rustwasm/wasm-bindgen からリダイレクト） | `dev-client-probe` の直接依存（#825 で crate ごと消える）。配布物には入らない | 不採用のため追加確認は行わない |
 | TypeScript | Web（ビルド時） | repo main | Apache-2.0 | [LICENSE.txt](https://github.com/microsoft/TypeScript/blob/main/LICENSE.txt) | 配布物に含めるならNOTICE確認 | 実行時には同梱しない想定（仮定） |
 | Octane | Web DOM UI | repo main | MIT | [LICENSE](https://github.com/octanejs/octane/blob/main/LICENSE) | 著作権表示と許諾文 | 固定版の条文 |
 | pgvector、pg_bigm、Tantivy/Lindera | 比較候補のみ（02:89〜90） | 未調査 | 未確認 | — | — | 導入を決めたときに台帳へ追加 |
