@@ -28,9 +28,14 @@
 - 失敗の筋: `write-pull-request` の評価ケースが 6 セクションのまま残り、スキルと評価の期待値が食い違う
   確かめ方: `rg -n '6セクション|テンプレート6' .agents/skills/write-pull-request/evals/` が一致を返さないことを確かめる
 - 失敗の筋: PR #840 と同じ箇所を変えるため、マージ順によって `write-pull-request` のセクション一覧や sha 行の規則が片方だけの姿に戻る
-  確かめ方: PR 作成時に PR #840 が open の Draft で main に未マージであることを `scripts/agent-gh dev pr view 840 --json state,isDraft,mergedAt` で確かめ、main の同箇所にこの変更と冲突する差分がないことを `git diff HEAD..origin/main -- .agents/skills/write-pull-request/SKILL.md` で確かめる
+  確かめ方: PR 作成時に PR #840 が open の Draft で main に未マージであることを `scripts/agent-gh dev pr view 840 --json state,isDraft,mergedAt` で確かめ、main の同箇所にこの変更と冲突する差分がないことを `git diff HEAD...origin/main -- .agents/skills/write-pull-request/SKILL.md` で確かめる
 
 実装前の筋のうち外したものはない。実装中に新たな筋は見つからなかった。
+
+## 失敗の筋の見直し（round 2）
+
+- 失敗の筋: PR #840 と main の確認に使う 2 点 diff が自分の変更を含み、main 側の変更を確かめたことにならない
+  確かめ方: `git diff HEAD...origin/main -- .agents/skills/write-pull-request/SKILL.md` が merge-base から main 側への差分だけを示すことを読み、実際の出力を確かめる
 
 ## 実装者メモ（round 1）
 
