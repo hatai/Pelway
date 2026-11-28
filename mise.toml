@@ -382,13 +382,35 @@ depends = ["client:bootstrap"]
 dir = "{{config_root}}/client/apps/desktop"
 run = "bun run dev"
 
+# TypeScript の未導入の厳格化オプションのエラー件数を、type-ratchet-baseline.json 以下に縛る。
+[tasks."client:type-ratchet"]
+description = "client/ の TypeScript 厳格化オプションの型エラーラチェット"
+depends = ["client:bootstrap"]
+dir = "{{config_root}}/client"
+run = "node scripts/type-ratchet.ts"
+
+# 改善した件数だけを基準値へ反映する。悪化した件数は反映しない。
+[tasks."client:type-ratchet-update"]
+description = "client/ の型エラーラチェット基準値を改善分だけ下げる"
+depends = ["client:bootstrap"]
+dir = "{{config_root}}/client"
+run = "node scripts/type-ratchet.ts --write"
+
+# 新しい厳格化オプションを現在の件数で基準値へ追加する。0 件なら追加しない。
+[tasks."client:type-ratchet-add"]
+description = "client/ の型エラーラチェットに TypeScript compiler option を追加する"
+depends = ["client:bootstrap"]
+dir = "{{config_root}}/client"
+usage = 'arg "<option>" help="追加する TypeScript compiler option"'
+run = 'node scripts/type-ratchet.ts --add="${usage_option?}"'
+
 # 整形・lint・型検査・試験。verify-static（CI の static ジョブ）から回す。
 # 試験は electron を起動しないので、Electron の本体は取ってこない。
 [tasks."client:verify"]
 description = "client/ の整形・lint（canary の bun lint）・型検査・試験"
+depends = ["client:type-ratchet"]
 dir = "{{config_root}}/client"
 run = [
-  "bun install --frozen-lockfile",
   "bun fmt --check",
   "bun run lint",
   "bun check",

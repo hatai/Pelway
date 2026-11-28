@@ -1,0 +1,5 @@
+{
+  "noPropertyAccessFromIndexSignature": {
+    "apps/desktop/src/main/index.ts": 1
+  }
+}
