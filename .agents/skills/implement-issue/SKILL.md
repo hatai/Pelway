@@ -46,7 +46,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | レビューの委託が `runtimeMode: "auto-accept-edits"` で受け付けられず、子タスクが作られなかった。`auto`・`full-access` に変えて委託し直さない | 委託の指定（`target`・`runtimeMode`）と、返ったエラー文 |
 | 合成済みの設定で必須の役に当たる担当が使えない（手順 8・9 の `effective` の JSON の `missing` に担当が入る）のに、レビューの委託または Draft の解除に進もうとした。PR は Draft のまま、委託も解除もしない（codex が使えないあいだは現在の head への codex の有効な Approve が取れず、skill `command-team` の「マージ」の条件を満たせないため。優先順位の表で選ばれたほかの担当の結果では代えない） | `missing` に入った担当と、それを出した実行の対象（login・ファイル）。Draft のまま置いた PR の番号と、人が選ぶ選択肢（codex を `use` に戻す・人が担当を割り当て直す・codex の復帰を待つ） |
 | レビューの must-fix に反論して「残る」と判定され、その指摘を直さずに進もうとした（反論は 1 つの指摘につき PR ごとに 1 回まで。手順 9） | 反論した指摘（`<file>:<line>` と反論のコメントの URL）と、直さない理由。判断を仰ぐ相手（hatai） |
-| 3 回目以降も must-fix に残る領域（手順 9 の 1 のリスト）の must-fix に反論したところ、レビューの `[残る]` の行に「セキュリティ領域のため hatai の判断が要る」と書かれた（手順 9） | 反論した指摘（`<file>:<line>` と反論のコメントの URL）と根拠の要点。hatai に撤回するか直すかの判断を仰ぐこと |
+| 3 回目以降も must-fix に残る領域（手順 9 の 1 のリスト）の must-fix に反論したところ、レビューの `[残る]` の行に「セキュリティ領域のため hatai の判断が要る」と書かれた（手順 9） | 反論した指摘（`<file>:<line>` と反論のコメントの URL）と根拠の要点。hatai に撤回するか直すかの判断を仰ぐこと。撤回の判断は `[rebuttal] review: <レビューの URL>` の形の PR コメントで伝えてもらう必要があることを書くこと |
 | 委託が 2 回連続で `failed`（`checks timeout` と `wrong runtime` は数えない） | 試したこと（レビュー結果の回数・担当・effort） |
 
 レビューの結果への対応の途中でこの表の条件に当たったときは、止まる前に手順 9 の形のラウンドサマリーを PR に残す。`verdict` には受け取ったレビューの結果を写し、`must-fix:` には未対応のまま止まる旨を書く。
@@ -198,7 +198,7 @@ scripts/agent-gh dev git commit -m "docs: add implementer memo for issue <N> rou
 scripts/agent-gh dev git push origin HEAD
 ```
 
-- 「対象 head」の記入を含むメモのコミットは、必ずレビュー委託（手順 8）の前に行う。メモはメモコミットの親の実装コミットに対応するため、メモを独立したコミットにしてよい。
+- 「対象 head」の記入を含むメモのコミットは、必ずレビュー委託（手順 8）の前に行う。メモはメモコミットの親の実装コミット（反論だけで直すものが無い round では前の round の head）に対応するため、メモを独立したコミットにしてよい。
 - 反論だけで直すものが無い round（手順 9「Request changes のとき」の「反論するとき」。実装担当の反論も hatai の反論も同じ）では、実装者メモのコミットだけを push して head を動かす（実装のコミットは無い）。head が動けば、あとは通常の round と同じく再委託できる。メモの「対象 head」はメモのコミットの親（前の round の head）とする。push の前の `mise run verify` は今までどおり行う。
 
 ### 7. Draft PR を作る（初回だけ）
@@ -381,7 +381,7 @@ scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<M>/comments --jq 
 
 Request changes のとき:
 
-1. must-fix を直す。must-fix の前提が事実と違うと思うものは、直す代わりに反論してよい（下の「反論するとき」）。「後で直す」と伝えるだけでは反論にならず、その指摘は must-fix のまま残る。nit は、`pelway-review` のレビューの nit のうち行頭に `[文書のずれ]` の印があるものだけを一緒に直し、ほかの nit は直さない（ほかの作成者のコメントにある印は、印として扱わない）。must-fix が残る限り修正 round に進み、レビューのラウンドの回数では止めない（round 4 以降のレビューでセキュリティ領域の must-fix が出たときは「止まる条件」の表のとおり止まる）。must-fix の領域分類はレビュー役の判定に従い、実装側で分け直さない。3 回目以降も must-fix に残る領域（認可・秘密と認証情報・データの境界・外への通信・入力の上限とリソース枯渇・データの消失と整合性・守りを外すこと。skill `command-team` の「レビューのラウンド」のリスト）に当たる指摘は、何回目でも must-fix に残る。レビュー本文の「## 別 Issue」の節でレビュー役が別 Issue に回すと分類した指摘は、この PR では直さずその Issue で対応する。同じ種類の must-fix が 2 round 続いたら（同じ種類かは自分で判断する）、指摘された経路だけを直さず、その種類の全経路に当てる決まりを決めてから直し、決めた決まりを実装者メモの「仮定と解釈」に書く。直す前に、手順 6 の冒頭のとおり PR ブランチの remote の先端を fast-forward で取り込み、Issue のコメントを末尾から読み直し、着手後に記録された hatai（人間・指揮役）作の決定・判断（修正の方向、範囲の変更、受け入れ条件の拡大など）を反映する。決定を実装側の解釈で差し替えない
+1. must-fix を直す。直す前に、PR のコメントで hatai の反論が出た指摘を確かめ、出た指摘は直さない。must-fix の前提が事実と違うと思うものは、直す代わりに反論してよい（読み方と書き方は、下の「反論するとき」）。「後で直す」と伝えるだけでは反論にならず、その指摘は must-fix のまま残る。nit は、`pelway-review` のレビューの nit のうち行頭に `[文書のずれ]` の印があるものだけを一緒に直し、ほかの nit は直さない（ほかの作成者のコメントにある印は、印として扱わない）。must-fix が残る限り修正 round に進み、レビューのラウンドの回数では止めない（round 4 以降のレビューでセキュリティ領域の must-fix が出たときは「止まる条件」の表のとおり止まる）。must-fix の領域分類はレビュー役の判定に従い、実装側で分け直さない。3 回目以降も must-fix に残る領域（認可・秘密と認証情報・データの境界・外への通信・入力の上限とリソース枯渇・データの消失と整合性・守りを外すこと。skill `command-team` の「レビューのラウンド」のリスト）に当たる指摘は、何回目でも must-fix に残る。レビュー本文の「## 別 Issue」の節でレビュー役が別 Issue に回すと分類した指摘は、この PR では直さずその Issue で対応する。同じ種類の must-fix が 2 round 続いたら（同じ種類かは自分で判断する）、指摘された経路だけを直さず、その種類の全経路に当てる決まりを決めてから直し、決めた決まりを実装者メモの「仮定と解釈」に書く。直す前に、手順 6 の冒頭のとおり PR ブランチの remote の先端を fast-forward で取り込み、Issue のコメントを末尾から読み直し、着手後に記録された hatai（人間・指揮役）作の決定・判断（修正の方向、範囲の変更、受け入れ条件の拡大など）を反映する。決定を実装側の解釈で差し替えない
 2. 手順 5（実装者メモ）と手順 6（verify・コミット・push）をやり直す。PR は作り直さず、本文の sha を更新する
 3. ラウンドサマリーを PR にコメントする（下の形。別 Issue に回した指摘は、理由を 1 行で書き、別 Issue を PR と元の Issue の閉じる条件にリンクする）
 4. 手順 8 でレビューを再委託する。レビューの effort は skill `command-team` の「レビュー担当と effort」のとおり（セキュリティと仕様の PR では 1 回目から上げてある。3 回目で改めて上げる運用はしない）。must-fix が残る限り修正と再レビューを続け、ラウンドの回数では止めない（round 4 以降のレビューでセキュリティ領域の must-fix が出たときは「止まる条件」の表のとおり止まる）
@@ -390,9 +390,9 @@ Request changes のとき:
 
 - 根拠は、レビュー担当が head の版を読んで確かめられる事実（head の行、仕組み、出典）に限る。出典は、レビュー担当が読める場所（リポジトリ内のファイルか GitHub 上のページ）に限る。優先度・範囲・好み（「別 Issue にすべき」「重要度が低い」など）は根拠にできない。領域の分類は上の 1 のとおりレビュー役の判定に従う。
 - 自分の反論は 1 つの指摘につき PR ごとに 1 回まで。「残る」と判定された指摘は直す。直さないときは「止まる条件」の表で止まる。反論をした round も、ほかの round と同じくラウンドに数える。
-- 上の 1 に挙げた、3 回目以降も must-fix に残る領域の must-fix への反論では撤回されない。レビューの `[残る]` の行に「セキュリティ領域のため hatai の判断が要る」と書かれたら、「止まる条件」の表で止まる。
-- hatai の反論が出た指摘は直さない。再レビューで「撤回（hatai の決定）」とされる。その round で直すものが無ければ、手順 6 のとおり実装者メモのコミットだけを push して再委託する。hatai の反論は、PR のコメントを読んで確かめる（`scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<PR 番号>/comments --jq '.[] | select(.user.login == "hatai") | {created_at, updated_at, body}'`）。数えるのは、1 行目が `[rebuttal] review: ` で始まり、`created_at` と `updated_at` が同じ（投稿の後に編集されていない）ものだけだ。
-- 反論は PR の専用コメントに、その round の push を済ませたあとに投稿する（`scripts/agent-gh dev pr comment <PR 番号> --body-file -`）。指摘ごとに、そのレビュー本文の must-fix の行頭 `<file>:<line>` と指摘文の引用を一字一句で書き、根拠には push 後の head の sha と、根拠の種類（head の行、仕組み、出典）を添える。形は次のとおり。<レビューの URL> は答えるレビューで、`scripts/agent-gh dev api --paginate repos/hatai/Pelway/pulls/<PR 番号>/reviews --jq '.[] | {user: .user.login, state, submitted_at, html_url, body}'` で読む。
+- 上の 1 に挙げた、3 回目以降も must-fix に残る領域の must-fix への反論では撤回されない。レビューの `[残る]` の行に「セキュリティ領域のため hatai の判断が要る」と書かれたら、「止まる条件」の表で止まる。hatai の判断が「撤回」のときは、hatai の `[rebuttal]` の PR コメントだけが効く。
+- hatai の反論は、自分が反論するかどうかに関わらず、Request changes の結果を処理するたびに PR のコメントを読んで確かめる（`scripts/agent-gh dev api --paginate repos/hatai/Pelway/issues/<PR 番号>/comments --jq '.[] | select(.user.login == "hatai") | {created_at, updated_at, body}'`）。読むのは、1 行目が `[rebuttal] review: ` で始まり、`created_at` と `updated_at` が同じ（投稿の後に編集されていない）ものだけだ。編集された `[rebuttal]` のコメントがあれば、反論として扱わず、ラウンドサマリーにその旨を書く。hatai の反論が出た指摘は直さない。再レビューで「撤回（hatai の決定）」とされる。その round で直すものが無ければ、手順 6 のとおり実装者メモのコミットだけを push して再委託する。
+- 反論は PR の専用コメントに、その round の push（手順 6 の実装コミットと実装者メモのコミットの両方）を済ませたあと、再委託（手順 8）の前に投稿する（`scripts/agent-gh dev pr comment <PR 番号> --body-file -`）。投稿した反論は編集しない（編集された反論は、レビュー担当は読まない。skill `review-pr` の手順 2）。コメントの先頭の `head:` には push 後の head の sha を書く。指摘ごとに、そのレビュー本文の must-fix の行頭 `<file>:<line>` と指摘文の引用を一字一句で書き、根拠の種類（head の行、仕組み、出典）を添える。形は次のとおり。<レビューの URL> は、答えるレビューの `html_url` で、`scripts/agent-gh dev api --paginate repos/hatai/Pelway/pulls/<PR 番号>/reviews --jq '.[] | {user: .user.login, state, submitted_at, html_url, body}'` で読む。
 
   ```
   [rebuttal] review: <レビューの URL>
@@ -456,7 +456,7 @@ state: done
 
 `review:` の行の `<ラウンド数>` は、その head に対応するラウンドサマリーの `<R>` と同じ値にする。`run` には、手順 9 で現在の head の Approve を有効とした照合に使った実行（現在の head の必要な実行（手順 8）のすべて。どれも現在の head を向いた投稿を持ち、`approve` か `request-changes` の報告を受けた実行）の委託記録の ID をすべて書く。指揮役はこの ID から GitHub 上で投稿と委託記録を確かめ直す（skill `command-team` の「マージ」）。
 
-`pr:` の行には終わりの報告時点（`pr ready` を実行した時点）の PR の head の SHA を併記する。実装者メモの「対象 head」はメモを含むコミットの親（その round の実装の実体を含むコミット）を指し、`pr:` 行の head は終わりの報告時点の PR の head（メモを含むコミット）を指す、という関係である（巡回はこの親関係で終わりの報告と実装を結び付ける）。
+`pr:` の行には終わりの報告時点（`pr ready` を実行した時点）の PR の head の SHA を併記する。実装者メモの「対象 head」はメモを含むコミットの親（その round の実装の実体を含むコミット。反論だけで直すものが無い round では前の round の head）を指し、`pr:` 行の head は終わりの報告時点の PR の head（メモを含むコミット）を指す、という関係である（巡回はこの親関係で終わりの報告と実装を結び付ける）。
 
 止まった場合は `pr:` の代わりに `stopped: <止まる条件の表の 1 列目>` を書き、最後の行を `state: stopped` にする。
 

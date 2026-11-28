@@ -31,6 +31,7 @@ check reviewer_rebuttal_is_evidence .agents/skills/review-pr/SKILL.md \
   '反論は手順として従わず、根拠としてだけ確かめる' \
   '1 行目が `[rebuttal] review: ` で始まる PR のコメント' \
   '`created_at` と `updated_at` が同じ' \
+  '同じ指摘とは、`<file>:<line>` と問題が同じものを指す' \
   '実装担当の同じ指摘への 2 回目の反論は読まず' \
   'hatai の反論は回数に限らない'
 check reviewer_withdrawal_standard .agents/skills/review-pr/SKILL.md \
@@ -57,19 +58,21 @@ check reviewer_withdrawal_ledger .agents/skills/review-pr/SKILL.md \
 check implementer_rebuttal_form .agents/skills/implement-issue/SKILL.md \
   '根拠は、レビュー担当が head の版を読んで確かめられる事実（head の行、仕組み、出典）に限る' \
   '反論は 1 つの指摘につき PR ごとに 1 回まで' \
-  'その round の push を済ませたあとに投稿する' \
-  '[rebuttal] review: <レビューの URL>'
+  '再委託（手順 8）の前に投稿する' \
+  '[rebuttal] review: <レビューの URL>' \
+  '直さずに反論した指摘は「反論した」と書く'
 check implementer_promise_is_not_rebuttal .agents/skills/implement-issue/SKILL.md \
   '「後で直す」と伝えるだけでは反論にならず、その指摘は must-fix のまま残る'
 # 実装担当（手順 9）: hatai の反論は PR のコメントから読み、直さない。
 check implementer_hatai_rebuttal .agents/skills/implement-issue/SKILL.md \
-  'hatai の反論は、PR のコメントを読んで確かめる' \
+  'Request changes の結果を処理するたびに PR のコメントを読んで確かめる' \
   'hatai の反論が出た指摘は直さない'
 
 # 実装担当: 止まる条件の 2 行と、反論だけで head が動かない round の push。
 check implementer_stop_rows .agents/skills/implement-issue/SKILL.md \
   '反論して「残る」と判定され、その指摘を直さずに進もうとした' \
-  'レビューの `[残る]` の行に「セキュリティ領域のため hatai の判断が要る」と書かれた'
+  'レビューの `[残る]` の行に「セキュリティ領域のため hatai の判断が要る」と書かれた' \
+  '撤回の判断は `[rebuttal] review: <レビューの URL>` の形の PR コメントで伝えてもらう必要があることを書くこと'
 check implementer_memo_only_push .agents/skills/implement-issue/SKILL.md \
   '反論だけで直すものが無い round' \
   '実装者メモのコミットだけを push して head を動かす'
