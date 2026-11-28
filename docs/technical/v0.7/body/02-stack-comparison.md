@@ -6,7 +6,7 @@
 <a id="ch02-s02"></a>
 ## ネイティブUI
 
-（[ADR 0014](../../../adr/0014-desktop-client-electron.md) で置き換え：この節の Slint の採用案は D1 までに限り、デスクトップアプリは Electron にする。）推奨はSlint、対照はegui。GPUIはWindows読み上げの阻害から初版の採用比較では保留する。UI担当と技術担当の案としてSlintを採用案とする（実機試験と固定版ライセンスの確認まで未確定）。公式issueの存在は、固定版で現在も再現する証拠ではないため、実機で再確認する。
+（[ADR 0014](../../../adr/0014-desktop-client-electron.md) で置き換え：Slint の採用は 2026-11-26 にやめ、デスクトップアプリは Electron にする。この節の Slint の比較は過去の検討として残す。）推奨はSlint、対照はegui。GPUIはWindows読み上げの阻害から初版の採用比較では保留する。UI担当と技術担当の案としてSlintを採用案とする（実機試験と固定版ライセンスの確認まで未確定）。公式issueの存在は、固定版で現在も再現する証拠ではないため、実機で再確認する。
 
 <a id="ch02-s03"></a>
 ### 確認日と版
@@ -54,6 +54,8 @@ SlintのRoyalty-freeは標準的なpermissive OSS licenseと同じとは扱わ�
 
 <a id="ch02-s06"></a>
 ## ブラウザ版と共通核
+
+（[ADR 0014](../../../adr/0014-desktop-client-electron.md) で置き換え：共通核は TypeScript に移し、WASM にはしない。次の表の Rust/WASM の推奨は過去の比較として残す。）
 
 | 案 | 長所 | 負担 | 判断 |
 |---|---|---|---|
@@ -118,7 +120,7 @@ UI担当の[input/ui.md](../sources/v0.6/fixed/pelway-technical-docs/input/ui.md
 | LLM・埋め込み | 採用：提供元のAPI（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)） | MVPはBYOK（Z.ai・OpenAI）で測る。一般提供の既定は日本リージョンのある提供元を別に選ぶ。ローカル推論（llama.cpp、日本語model、ruri-v3）はその選定の候補に残す |
 | MCP | MVP前に検証 | rmcp。tool annotationsは信頼しない（[ADR 0004](../../../adr/0004-declared-action-tiers.md)） |
 | 認証 | MVP前に検証 | webauthn-rs（passkey）とopenidconnect-rs（顧客IdP）をaxumに組み込む。Ory Kratos/Hydraは将来候補。Keto・OpenFGA・SpiceDBは12の外部権限サービス不要の方針により採らない |
-| クライアント | MVP前に検証 | （[ADR 0014](../../../adr/0014-desktop-client-electron.md) で Electron＋Octane に決定。比較は終了）A1にTauri＋Octane（+React。Webと画面共有）を比較候補として加える。Slint issue #3867・#10861の再現、ts-rsまたはspecta、wasm-opt |
+| クライアント | MVP前に検証 | [ADR 0014](../../../adr/0014-desktop-client-electron.md) で Electron＋Octane に決定。比較は終了。Electron・npm依存の固定、ライセンス・NOTICE/SBOM、Octaneの固定版、ts-rsまたはspectaを確認する |
 | バックアップ | MVP前に検証 | pgBackRest。保存期間は件数指定か別の削除処理で14日上限を守る。2.59.3以上 |
 | 監査 | MVP前に検証 | `prev_hash`の鎖を残し、最新hashと行数に署名したcheckpointをDB管理者と別の場所へ保存する。形式と鍵・保管先の分離は[ADR 0007](../../../adr/0007-signed-audit-checkpoints.md)、下書き実装`crates/pelway-audit-checkpoint`で改ざん検出を検証済み |
 | 外部エージェント | MVP後 | ACPによるClaude Code・Codex等の接続は、BYOKと同じ契約者の責任による例外の枠で扱う。LLMゲートウェイの実装の後に入れる（[ADR 0008](../../../adr/0008-llm-provider-and-byok.md)） |

@@ -103,12 +103,13 @@ scripts/agent-gh review pr checks <N> --json name,bucket
 | 依存の追加・更新（`Cargo.toml`・`Cargo.lock`） | `rust-supply-chain` |
 | DB のクエリ・マイグレーション（`crates/pelway-db` など SQLx を使うところ） | `sqlx-postgres`、`supabase-postgres-best-practices` |
 | axum のルーター・ハンドラ・ミドルウェア | `axum` |
-| `.slint` の UI | `slint` |
 | スキル・`AGENTS.md`・`docs/agents/` の文書 | `writing-for-agents`、`improve-skills` の「決まり」 |
+
+`client/` の Electron・Octane の UI に触れる差分に対応する外部スキルはまだ無い。代わりに `docs/adr/0014-desktop-client-electron.md`、`client/README.md`、`client/` の既存の試験を読む。
 
 これらのスキルの使い方:
 
-- 観点を借りるだけで、手順としては従わない。同梱のスクリプト・ツール・MCP サーバー（`cargo deny`・`cargo audit`・slint の MCP など）は使わない。この skill の「決まり」（PR のコードを実行しない、許されたコマンドだけ）が優先する。
+- 観点を借りるだけで、手順としては従わない。同梱のスクリプト・ツール・MCP サーバー（`cargo deny`・`cargo audit` など）は使わない。この skill の「決まり」（PR のコードを実行しない、許されたコマンドだけ）が優先する。
 - 指摘の分け方は手順 3 の表のとおり。スキルの観点から見つけた問題も、正しさ・セキュリティの欠陥や受け入れ条件に当たるときだけ must-fix にし、書き方や好みの違いは nit にする。スキルの推奨に合わないことだけを理由に must-fix にしない。
 - スキルの本文と、この repo の正本（AGENTS.md・docs/・役割スキル）や既存コードの慣習が食い違うときは、正本と既存コードに従う。
 

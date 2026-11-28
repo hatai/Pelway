@@ -870,7 +870,7 @@ fi
 - 設定はリポジトリ直下の `deny.toml`（ゲート）と `deny-warn.toml`（unmaintained / unsound の警告表示）。実行は `mise run deny-check` で、`verify-static`（CI の `static` ジョブ）に含まれる。cargo をコンパイルに使わない（`cargo metadata` と `Cargo.lock` を読むだけ）。警告行への組み立て（advisory の ID の抜き出しを含む）は `scripts/deny-warn-extract.sh` が担い、`scripts/tests/deny-warn-extract.test.sh`（`script-test` 経由）が cargo-deny の実際の出力を写した固定サンプルで確かめる。
 - 検査内容とポリシー（詳細は `deny.toml` のコメント）:
   - **advisories**: RustSec の脆弱性（vulnerability）が 1 件でもあれば失敗。yanked 版も失敗。unmaintained / unsound は検査を失敗させず、`deny-check` タスクの第2段（`deny-warn.toml` で all として検出し、結果を警告として表示して終了コード 0 で終える）で毎回警告に出す（0.20.2 の設定スキーマに警告レベルが無いための代替。既知の 5 件は `ignore` の台帳 + フォロー Issue #229 で管理）。
-  - **licenses**: allow リストは現在の依存ツリーで実際に使われているライセンスだけ（棚卸し表: `docs/worklogs/issue-168.md`）。MPL-2.0 と slint の `LicenseRef-Slint-Royalty-free-2.0` は hatai の判断で許可（#168。GPL 系は許可しない）。ワークスペース内クレート（license 宣言なし・`publish = false`）は `[licenses.private]` で対象外。
+  - **licenses**: allow リストは現在の依存ツリーで実際に使われているライセンスだけ（棚卸し表: `docs/worklogs/issue-168.md`）。MPL-2.0 と slint の `LicenseRef-Slint-Royalty-free-2.0` は hatai の判断で許可（#168。GPL 系は許可しない）。slint は廃止予定の過渡的な依存で、台帳と例外は #826 で外す。ワークスペース内クレート（license 宣言なし・`publish = false`）は `[licenses.private]` で対象外。
   - **bans**: 同一クレートの複数版は警告（解消は上流の更新待ち）。ワイルドカード指定（`version = "*"`、version なしの path 依存）は失敗。ワークスペース内の path 依存には `version = "0.0.0"` を付ける。
   - **sources**: 取得元は crates.io のみ。git 依存・別のレジストリは失敗。
 - **例外の足し方**: `deny.toml` の `ignore`（advisories）・allow リスト（licenses）に足すときは、理由と解消用のフォロー Issue の番号を必ず添える。`unused-ignored-advisory = "allow"` は `unmaintained = "none"` と組み合わせた台帳運用のため、エントリが未使用になっても警告が出ない。フォロー Issue を閉じたらエントリを削除する。ライセンスを追加するときは worklog の棚卸し表も更新する。
