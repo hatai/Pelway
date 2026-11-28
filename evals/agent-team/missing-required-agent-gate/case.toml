@@ -1,0 +1,5 @@
+name = "missing-required-agent-gate"
+incident = "2026-11-27 Issue #804・PR #833。agent-team.local.toml で codex を use から外す上書きを hatai が許したあとの関門（Issue #804 のコメント 7216736209、PR #833 の codex レビュー round 12 の指摘）"
+layer = "regression"
+judge = "deterministic"
+tags = ["conductor", "slots", "merge", "agent-team-local-toml"]

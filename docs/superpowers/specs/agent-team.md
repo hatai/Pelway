@@ -76,6 +76,36 @@ App は 2 つに分ける。同じ名義では自分の PR を Approve できな
 - main はルールセットで守る。必須チェックは `mise run verify` と `pr-size` の成功、承認は 1 件必須（Code Owners レビューの必須は外し、`pelway-review` の Approve で満たせる形）、新しいコミットで古い Approve を外す、「マージ前にブランチを最新化すること」を必須とする（Kodiak の直列キューと合わせて、チェックが通ったツリーとマージされるツリーを一致させる）。ルールセットの変更前後の値は「マージキュー」の表に転記する
 - エージェントの PR・指揮役が作った PR・hatai 自身が作った PR のいずれも、`pelway-review` の Approve と必須チェックと QA 合格コメントの後、admin マージの対象に当たらなければ指揮役が `automerge` ラベルを付けて Kodiak がマージする。admin マージの対象に当たる PR には `automerge` を付けない。hatai の admin マージの対象は、round 4 以降に達した PR（レビューのラウンド。round 4 以降も修正と再レビューを続けるが、マージは hatai の admin マージで行う）、`.github/` の下を変える PR、`fnox.toml` を変える PR の 3 つだけである（admin マージの対象はこれ以外に広げない。Kodiak が応答しない等のキューの切り戻しや、必須チェックが失敗したままの `pr-size-exception` は対象に加えず、この 3 つのどれかに当たる PR だけが admin マージされる。`enforce_admins: false` を維持するのはこの admin マージのためである）
 
+## 開発者ごとの上書き（agent-team.local.toml）
+
+`agent-team.toml` は共有の登録情報として git で追跡し、開発者ごとの差分は追跡しない `agent-team.local.toml` に書いて共有の上に重ねる（Issue #804。雛形は `agent-team.local.toml.example`）。local は `agent-team.toml` と同じディレクトリ（チェックアウトの最上位）に置き、`scripts/agent-team-config` の `validate`・`slots`・`effective` が常に重ねた結果を読む。手順書・skill 側の参照は、`instance.review` など「上書きできない」項目を除き、toml の直接読みではなく重ねた結果（`effective` の出力）を正とする。`conductor-watch.sh` は local が重なっている巡回に `SLOTS overlay agent-team.local.toml` の行を出す。
+
+local を置く場所: 本体の checkout に置くと worktree 作成時に `scripts/worktree-setup`（T3 の `runOnWorktreeCreate` または `conductor-rebuild` から起動）が worktree に持ち越す。worktree ごとに別の値にしたいときはその worktree に置く。追跡しないため、`.worktreeinclude` にも列挙してある（Claude Code・Codex の worktreeinclude 機構用。`agent-team.toml` は追跡ファイルのため列挙しない）。
+
+上書きできる項目・できない項目:
+
+| 項目 | 扱い |
+|---|---|
+| `developers.<自分>.use` | 上書き可（配列は丸ごと置き換え。外した担当への参照は上限・優先順位からも落ちる） |
+| `developers.<自分>.slots.<担当>` | 上書き可（表は深く重ねる。1 以上の整数・use・役割の整合は重ねた結果の検証が掛ける） |
+| `developers.<自分>.review_limits.<担当>` | 上書き可（同上） |
+| `developers.<自分>.priority.<役割>.<既存の条件名>` | 上書き可（並びは丸ごと置き換え。共有の toml に無い役割・条件名は警告して無視） |
+| `agents.<既存の担当>.models` | 上書き可（一覧は丸ごと置き換え） |
+| `agents.<既存の担当>.effort.raise` | 上書き可（値の許可リストを丸ごと置き換え。option の名前自体は共有） |
+| `agents.<既存の担当>.instance.implement`・`.investigate` | 上書き可（その環境の provider インスタンス名に合わせる） |
+| `agents.<既存の担当>.instance.review` | 上書き不可（レビュー担当の隔離の前提。main の最新の版と dev-environment.md の照合に使う共有の値） |
+| `agents.<既存の担当>.effort.option` | 上書き不可（委託の引数の組み立て規則は共有） |
+| `agents.<既存の担当>.assign_label` | 上書き不可（割り当てのラベルは共有） |
+| `agents.<新しい id>`・`developers.<共有に無い login>` | 追加不可（警告して無視。共有の toml の PR で追加する） |
+| `developers.<他の開発者>`（slots・effective の呼び出し側以外の表） | 上書き不可（警告して無視） |
+| 上記以外のキー・知らない最上位キー | 警告して無視 |
+
+上書きの扱いと未決事項:
+
+- 表は深く重ね、配列は丸ごと置き換える。上書きできない項目は「`<file>: warning: <キー>: <理由>`」を標準エラーに出して無視する。警告と検証エラーには local の値を出さず、キー名と理由だけを出す（`effective` などの正常な出力には、設計どおり重ねた結果の値が入る）。黙って適用も黙って無視もしない
+- 重ねた結果は共有の toml と同じ検証を通す。通らなければ `validate`・`slots`・`effective` は非 0 で止まる（共有の規則を local が下げることはできない）。use から担当を外したとき、その担当への共有から継いだ参照（`slots`・`review_limits`・`priority` 内の並び）は重ねた結果から落ちる（残すと検証で止まり、外す上書き自体が書けなくなるため。落とした項目も警告する）。local が明示した項目は落とさずに検証にかける。優先順位の並びが空になる条件は、local が並びを置き換えて埋める
+- 共有の規則で必須の役に当たる担当が local の use で使えなくなるとき（例: codex を外す）は、キー名と直し方（codex を `use` に戻すか、人が担当を割り当て直す）つきの警告を出す（自動で別の担当に回さない）。足りない必須の担当は、`slots` の標準出力の `missing <担当>` の行から見張りが `slots.json` の `missing` と watch.log の `SLOTS missing <担当>` の行に写す（機械向けの経路は標準出力の行。警告のキー名には local のキー名が入るため、見張りは標準エラーからは拾わない）。codex が使えないあいだ、マージに要る「GitHub 上の現在の head への codex の有効な approve」は取れず、`priority.review.high_risk` の並びを local で書き換えてもこの関門は下げられないため、指揮役は高リスク・security=yes の仕事の着手を止める（それ以外の優先順位の仕事は止めない）。この approve の関門は、優先順位の表で選ばれる担当とは独立した、すべてのマージの条件（正本は skill `command-team` の「マージ」）。扱いは実装役が `needs-decision` で指揮役に上げる
+
 ## マージキュー
 
 マージキューとして Kodiak のホスト版（GitHub App。セルフホストはしない）を採用する。マージ待ち・ブランチ更新・マージ実行をキューに任せ、実装スレッドと指揮役がマージ完了まで張り付く負担をなくす。App のインストールとルールセットの変更は hatai の操作であり、リポジトリに届けるのは設定ファイルと文書である。

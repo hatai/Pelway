@@ -406,6 +406,83 @@ check "slots.json status error with stale fetch time" slot_eq status error
 run_cycles 1
 check "slots.json recovers after stale file removed" slot_eq status ok
 
+# --- 13g. agent-team.local.toml の上書きが枠に反映され、その存在が SLOTS の行で出る（Issue #804） ---
+cat > "$ROOT/repo/agent-team.local.toml" <<'EOF'
+[developers.hatai.slots]
+devin = 2
+EOF
+run_cycles 1
+check "overlay narrows devin limit" has "$ROOT/out.log" '^SLOTS devin 1/2$'
+check "overlay presence line emitted" has "$ROOT/out.log" '^SLOTS overlay agent-team.local.toml$'
+check "slots.json reflects overlaid limit" slot_eq usage.devin.limit 2
+
+# --- 13h. local を外すと共有の上限に戻り、overlay の行も出なくなる ---
+rm "$ROOT/repo/agent-team.local.toml"
+run_cycles 1
+check "removing local restores shared limit" has "$ROOT/out.log" '^SLOTS devin 1/6$'
+check "no overlay line without local" nhas "$ROOT/out.log" '^SLOTS overlay '
+
+# --- 13i. local を重ねた結果が検証を通らない → SLOTS error（共有の規則で止まる） ---
+cat > "$ROOT/repo/agent-team.local.toml" <<'EOF'
+[developers.hatai.slots]
+devin = 0
+EOF
+run_cycles 1
+check "invalid local emits SLOTS error" has "$ROOT/out.log" '^SLOTS error '
+check "no usage emitted on invalid local" nhas "$ROOT/out.log" '^SLOTS (over )?[a-z]+ [0-9]+/[0-9]+$'
+check "slots.json status error on invalid local" slot_eq status error
+rm "$ROOT/repo/agent-team.local.toml"
+run_cycles 1
+check "slots.json recovers after local removed" slot_eq status ok
+
+# --- 13j. local で codex を外すと SLOTS missing codex と slots.json の missing に出る
+# （Issue #804。必須の役の不足。通常の優先順位の枠の計上は変わらない） ---
+cat > "$ROOT/repo/agent-team.local.toml" <<'EOF'
+[developers.hatai]
+use = ["opencode", "devin", "claude"]
+
+[developers.hatai.review_limits]
+claude = 1
+
+[developers.hatai.priority.review]
+normal = ["claude"]
+EOF
+mock_issues "$(jarr "$(iss 11 OPEN agent:working)" "$(iss 12 OPEN agent:working)")"
+run_cycles 1
+check "SLOTS missing codex emitted" has "$ROOT/out.log" '^SLOTS missing codex$'
+check "usage lines still emitted with missing" has "$ROOT/out.log" '^SLOTS opencode 2/3$'
+check "overlay line also emitted" has "$ROOT/out.log" '^SLOTS overlay agent-team.local.toml$'
+check "slots.json status stays ok" slot_eq status ok
+check "slots.json missing lists codex" \
+  python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["missing"] == ["codex"], d.get("missing")' "$SLOTS"
+# キューの要求のファイル名で偽装した SLOTS missing の行は記録を変えない
+touch "$ROOT/queue/"$'\n'"SLOTS missing opencode"$'\n'".json"
+run_cycles 1
+check "forged missing line appears but record unchanged" has "$ROOT/out.log" '^SLOTS missing opencode$'
+check "slots.json missing still codex after forged line" \
+  python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["missing"] == ["codex"], d.get("missing")' "$SLOTS"
+rm -f "$ROOT/queue/"$'\n'"SLOTS missing opencode"$'\n'".json"
+# local を外すと missing は空に戻る
+rm "$ROOT/repo/agent-team.local.toml"
+set_now 1700007000   # HEARTBEAT の巡回（行が必ず出る）
+run_cycles 1
+check "no SLOTS missing after local removed" nhas "$ROOT/out.log" '^SLOTS missing '
+check "slots.json missing empty after local removed" \
+  python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["missing"] == [], d.get("missing")' "$SLOTS"
+
+# --- 13k. local のキー名に目印と一致する文字列を置いても missing に入らない
+# （missing は標準出力の missing の行だけから拾うため標準エラーの警告は届かない） ---
+cat > "$ROOT/repo/agent-team.local.toml" <<'EOF'
+[developers.hatai]
+"missing-required codex" = 1
+EOF
+run_cycles 1
+check "crafted key warning cannot inject missing" \
+  python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["missing"] == [], d.get("missing")' "$SLOTS"
+check "no SLOTS missing line from crafted key" nhas "$ROOT/out.log" '^SLOTS missing '
+rm "$ROOT/repo/agent-team.local.toml"
+run_cycles 1
+
 # --- 14. 見張りは GitHub に書き込まない（agent-gh は読み取りだけ、素の gh も呼ばない） ---
 if grep -vE "^(dev issue list |dev pr list |dev api /repos/hatai/Pelway/issues/events)" "$MOCK/gh-calls.log" | grep -q .; then
   printf 'FAIL %s\n' "no non-read agent-gh calls"

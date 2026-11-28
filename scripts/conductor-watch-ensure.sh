@@ -8,7 +8,8 @@
 # 「正しい形」でない見張り（unit 外・セッション切り離し無し）は、kill しても復旧しないまま
 # 残るため、その形のプロセスに置き換える。正しい形で動いているものはそのまま採用し、
 # 二重起動しない。起動対象は worktree から呼ばれても worktree の消去で死なないよう、
-# 主 checkout（git の共通トップ）の conductor-watch.sh を優先する。
+# 主 checkout（git の共通トップ）の conductor-watch.sh を優先する。置き換えの対象にする
+# 「見張り」は、このリポジトリの checkout の scripts/conductor-watch.sh を動かすプロセスだけ。
 # 使い方: scripts/conductor-watch-ensure.sh
 set -u -o pipefail
 
@@ -26,9 +27,42 @@ fi
 
 command -v pgrep >/dev/null 2>&1 || { echo "conductor-watch-ensure: pgrep がありません" >&2; exit 1; }
 
+# このリポジトリの checkout: このスクリプトの置き場所と、git が読めるときは主 checkout と各 worktree。
+# 置き換えの対象にする「見張り」は、その中の scripts/conductor-watch.sh を動かすプロセスだけ。
+# パスは symlink や `.`・`..` を解決した物理パスで揃える。
+REPO_ROOTS=("$(cd -P "$HERE/.." && pwd)")
+if command -v git >/dev/null 2>&1; then
+  while IFS= read -r line; do
+    [[ "$line" == "worktree "* ]] || continue
+    r="$(cd -P "${line#worktree }" 2>/dev/null && pwd)" && REPO_ROOTS+=("$r")
+  done < <(git -C "$HERE" worktree list --porcelain 2>/dev/null || true)
+fi
+
+# 見張りは、コマンドラインが「<bash のパス> <…>/scripts/conductor-watch.sh」の 2 つだけのプロセス。
+# pgrep -f はコマンドライン全体への部分一致なので、広いパターンで選ぶと、このスクリプトの
+# パスを引数に並べるだけの別の仕事（shellcheck の検査など）や、試験が一時ディレクトリに置いた写しまで
+# 「見張り」に数えて kill してしまう（Issue #808）。pgrep は候補を見つけるためだけに使い、
+# コマンドラインは /proc の NUL 区切りで読み直して、引数がスクリプト 1 つのものだけを残す
+# （空白を含む checkout も、引数を取り違えずに扱える）。スクリプトのパスは、親ディレクトリを
+# cd -P で解決した物理パスで checkout と比べる。相対パスで起動された見張りは、起動してすぐ
+# リポジトリのルートへ cd するため（conductor-watch.sh）、そのあとの cwd にある
+# scripts/conductor-watch.sh とみなす。
 # ensure 自身（conductor-watch-ensure.sh）はパターンに一致しないが、呼び出し方によっては
 # 自分や直近の親が紛れ込む可能性があるため除いて数える。
-watch_pids() { pgrep -f "conductor-watch\.sh" | grep -vx -e "$$" -e "${PPID:-0}" || true; }
+watch_pids() {
+  local p r script real
+  for p in $(pgrep -f '^([^ ]*/)?(ba)?sh (.*[/])?scripts/conductor-watch\.sh$' | grep -vx -e "$$" -e "${PPID:-0}" || true); do
+    { IFS= read -r -d '' _ && IFS= read -r -d '' script && ! IFS= read -r -d ''; } 2>/dev/null <"/proc/$p/cmdline" || continue
+    if [[ "$script" == /* ]]; then
+      real="$(cd -P "${script%/*}" 2>/dev/null && pwd)/${script##*/}" || continue
+    else
+      real="$(cd -P "/proc/$p/cwd" 2>/dev/null && pwd)/scripts/conductor-watch.sh" || continue
+    fi
+    for r in "${REPO_ROOTS[@]}"; do
+      [[ "$real" == "$r/scripts/conductor-watch.sh" ]] && { echo "$p"; break; }
+    done
+  done
+}
 
 ppid_of() { ps -o ppid= -p "$1" 2>/dev/null | tr -d ' '; }
 is_leader() { [[ -n "$1" ]] && [[ "$(ps -o sid= -p "$1" 2>/dev/null | tr -d ' ')" == "$1" ]]; }

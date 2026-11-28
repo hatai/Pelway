@@ -34,6 +34,7 @@ case "$1 $2" in
   "thread show") cat "$F/show-${3//:/_}.json" ;;
   "thread send")
     [ -e "$F/t3-send-fail" ] && exit 1
+    sleep "$(cat "$F/t3-send-sleep" 2>/dev/null || echo 0)"
     echo "$3 $4" >> "$F/t3-send-args"
     cat >> "$F/t3-send-stdin" ;;
   *) exit 2 ;;
@@ -151,6 +152,8 @@ done
         cmd.args(args)
             .args(["--project", "."])
             .env("PELWAY_AGENT_WATCH_POLL_SECS", "0")
+            // 起こしの最短間隔は既定で 0（間隔の試験だけが値を変える）
+            .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "0")
             .env("PATH", path)
             .env("FAKE_DIR", self.root.join("fake"))
             // 起こしに使う t3 は偽物に向ける（この PC で動いている本物の T3 サーバーを呼ばない）
@@ -2186,4 +2189,711 @@ fn notice_not_in_inbox_survives_permanent_rejection() {
     assert_eq!(sent_threads(&sb), ["mcp:a", "mcp:b"]);
     assert!(outbox_threads(&sb).is_empty());
     assert_eq!(thread_ids(inbox_events(&sb).iter()), ["mcp:a", "mcp:b"]);
+}
+
+// ---- 空振りの起こしを減らす（Issue #839） ----
+
+/// 実行回数（round）と承認待ちの件数を指定した show の JSON。
+fn show_round(id: &str, status: &str, updated: &str, pending: u32, round: u32) -> String {
+    format!(
+        r#"{{"thread":{{"threadId":"{id}","status":"{status}","updatedAt":"{updated}","branch":"agent/80-x",
+  "providerInstanceId":"opencode","model":"m","runCount":{round},"pendingRequestCount":{pending},"link":"l","createdBy":"agent"}},
+  "messages":[{{"role":"assistant","text":"state: working\nhead: none\nnext: 手順 4"}}]}}"#
+    )
+}
+
+fn read_state(sb: &Sandbox) -> serde_json::Value {
+    serde_json::from_str(&fs::read_to_string(sb.state_file()).unwrap()).unwrap()
+}
+
+fn write_state(sb: &Sandbox, state: &serde_json::Value) {
+    fs::write(sb.state_file(), state.to_string()).unwrap();
+}
+
+fn sends(sb: &Sandbox) -> usize {
+    sb.read_fake("t3-send-args").lines().count()
+}
+
+/// 指揮役 `mcp:conductor-1` と、承認待ちを繰り返す実装スレッド `mcp:d` の一覧と状態を作る。
+/// d の停滞（no-activity）は記録済みにしておき、承認待ちの知らせだけが出るようにする。
+fn conductor_and_waiting_thread(sb: &Sandbox) {
+    sb.fake(
+        "list.json",
+        r#"[{"threadId":"mcp:conductor-1","status":"completed","updatedAt":"2026-11-10T16:10:00Z","createdBy":"agent"},
+  {"threadId":"mcp:d","status":"running","updatedAt":"2026-11-10T16:10:00Z","createdBy":"agent"}]"#,
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show_round("mcp:conductor-1", "completed", "2026-11-10T16:10:00Z", 0, 1),
+    );
+    sb.fake(
+        "show-mcp_d.json",
+        &show_round("mcp:d", "running", "2026-11-10T16:10:00Z", 1, 1),
+    );
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{
+  "mcp:conductor-1":{"status":"completed","updated_at":"2026-11-10T16:10:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:d":{"status":"running","updated_at":"2026-11-10T16:10:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:10:00Z"}},
+  "ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+}
+
+/// 次の周回で、指揮役の巡回が終わり（finished）、d がまた承認待ちになる（同じ round）ように状態を戻す。
+fn conductor_finishes_and_d_waits_again(sb: &Sandbox) {
+    let mut state = read_state(sb);
+    state["threads"]["mcp:conductor-1"]["status"] = "running".into();
+    state["threads"]["mcp:d"]["pending_requests"] = 0.into();
+    write_state(sb, &state);
+}
+
+fn inbox_lines(sb: &Sandbox) -> usize {
+    inbox_events(sb).len()
+}
+
+#[test]
+fn own_finished_and_repeated_waiting_do_not_wake() {
+    let sb = Sandbox::new("wake-839-repeat");
+    conductor_and_waiting_thread(&sb);
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    // 1 周目: d の round 1 の最初の承認待ちでは起こす
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+
+    // 2〜5 周目: 指揮役が受信箱を読み終え（既読が進む）、自分の finished と d の同じ round の
+    // 承認待ちだけが続けて来る。受信箱には書くが、何回来ても起こしは増えない
+    for cycle in 2..=5 {
+        sb.patrol_state(&format!(r#"{{"inbox_offset":{}}}"#, inbox_lines(&sb)));
+        conductor_finishes_and_d_waits_again(&sb);
+        let before = inbox_lines(&sb);
+        let out = sb.run_with(&["--once"]);
+        assert!(out.status.success(), "cycle {cycle}: {}", stderr(&out));
+        assert_eq!(inbox_lines(&sb), before + 2, "cycle {cycle}");
+        assert_eq!(sends(&sb), 1, "cycle {cycle}: {}", stderr(&out));
+        assert!(
+            stderr(&out).contains("WAKE skipped reason=repeat-waiting"),
+            "cycle {cycle}: {}",
+            stderr(&out)
+        );
+    }
+
+    // d が次の round に進んでからの承認待ちでは、また起こす
+    sb.patrol_state(&format!(r#"{{"inbox_offset":{}}}"#, inbox_lines(&sb)));
+    sb.fake(
+        "show-mcp_d.json",
+        &show_round("mcp:d", "running", "2026-11-10T16:10:00Z", 1, 2),
+    );
+    let mut state = read_state(&sb);
+    state["threads"]["mcp:d"]["pending_requests"] = 0.into();
+    write_state(&sb, &state);
+    let out = sb.run_with(&["--once"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
+
+/// 起こしの最短間隔を 300 秒にして 1 周だけ走らせ、成功したことを確かめる。
+fn run_cooldown(sb: &Sandbox) -> Output {
+    let out = sb
+        .command(&["--once"])
+        .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "300")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    out
+}
+
+/// b が失敗する一覧と詳細にし、状態では b を実行中に戻す（次の周回で b の failed が出る）。
+fn b_fails_at(sb: &Sandbox, updated: &str) {
+    sb.fake(
+        "list.json",
+        &format!(
+            r#"[{{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}},
+  {{"threadId":"mcp:b","status":"failed","updatedAt":"{updated}"}}]"#
+        ),
+    );
+    sb.fake("show-mcp_b.json", &show("mcp:b", "failed", updated, 0));
+    let mut state = read_state(sb);
+    state["threads"]["mcp:b"]["status"] = "running".into();
+    write_state(sb, &state);
+}
+
+/// 前回の起こしを、最短間隔より前のことにする。
+fn backdate_last_wake(sb: &Sandbox) {
+    let mut state = read_state(sb);
+    let at = state["last_wake_at"]
+        .as_i64()
+        .expect("last_wake_at is recorded");
+    state["last_wake_at"] = (at - 1000).into();
+    write_state(sb, &state);
+}
+
+/// a の finished で 1 回起こし、最短間隔の内に b の failed を後に回す（受信箱 2 行、印の値は 2）。
+/// `read` は b の failed の前に指揮役が読んだ行数（補助記録の `inbox_offset`）。
+fn wake_then_defer_b_failure(sb: &Sandbox, read: u64) -> Output {
+    one_event(sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    let out = run_cooldown(sb);
+    assert_eq!(sends(sb), 1, "{}", stderr(&out));
+    sb.patrol_state(&format!(r#"{{"inbox_offset":{read}}}"#));
+    b_fails_at(sb, "2026-11-10T16:30:00Z");
+    let out = run_cooldown(sb);
+    assert_eq!(sends(sb), 1, "{}", stderr(&out));
+    assert_eq!(read_state(sb)["wake_pending"], 2);
+    out
+}
+
+#[test]
+fn notices_within_cooldown_wake_once_after_it() {
+    let sb = Sandbox::new("wake-839-cooldown");
+    // 最短間隔の内に、指揮役が読み終えてから b の failed が来た: 起こさず、起こし待ちの印を付ける
+    let out = wake_then_defer_b_failure(&sb, 1);
+    assert_eq!(inbox_lines(&sb), 2);
+    assert!(
+        stderr(&out).contains("WAKE deferred reason=cooldown"),
+        "{}",
+        stderr(&out)
+    );
+
+    // 新しい知らせの無い周回でも、最短間隔の内なら起こさない
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+
+    // 最短間隔がたった: 新しい知らせが無くても、溜まった分で 1 回だけ起こす
+    backdate_last_wake(&sb);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+    assert!(read_state(&sb)["wake_pending"].is_null());
+
+    // 次の周回では、もう起こさない
+    backdate_last_wake(&sb);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
+
+#[test]
+fn pending_wake_is_dropped_when_conductor_already_read() {
+    let sb = Sandbox::new("wake-839-already-read");
+    wake_then_defer_b_failure(&sb, 1);
+
+    // 最短間隔の間に、指揮役が定期巡回で受信箱を末尾まで読んだ: 溜まった起こしは送らずに取り消す
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    backdate_last_wake(&sb);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("WAKE skipped reason=already-read"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(read_state(&sb)["wake_pending"].is_null());
+}
+
+#[test]
+fn quiet_lines_after_reading_do_not_revive_pending_wake() {
+    // 起こし待ちの間に指揮役が読み終え、その後に起こさない行（指揮役自身の finished）だけが
+    // 足されても、溜まった起こしは送らない（未読は起こさない行だけ）
+    let sb = Sandbox::new("wake-839-quiet-after-read");
+    let list = |b: &str, conductor: &str| {
+        format!(
+            r#"[{{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}},
+  {{"threadId":"mcp:b","status":"{b}","updatedAt":"2026-11-10T16:30:00Z"}},
+  {{"threadId":"mcp:conductor-1","status":"{conductor}","updatedAt":"2026-11-10T16:40:00Z"}}]"#
+        )
+    };
+    sb.fake("list.json", &list("running", "running"));
+    sb.fake("show-mcp_a.json", SHOW_A_DONE);
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "running", "2026-11-10T16:30:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "running", "2026-11-10T16:40:00Z", 0),
+    );
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{
+  "mcp:a":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:b":{"status":"running","updated_at":"2026-11-10T16:30:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:30:00Z"},
+  "mcp:conductor-1":{"status":"running","updated_at":"2026-11-10T16:40:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:40:00Z"}},
+  "ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    // a の finished で起こす
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+    // 最短間隔の内に b の failed: 後に回す
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    sb.fake("list.json", &list("failed", "running"));
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+    assert_eq!(inbox_lines(&sb), 2);
+    // 指揮役が末尾（2 行）まで読み、そのあと自分の巡回の finished が足された
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    sb.fake("list.json", &list("failed", "completed"));
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "completed", "2026-11-10T16:40:00Z", 0),
+    );
+    let out = run_cooldown(&sb);
+    assert_eq!(inbox_lines(&sb), 3);
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+    // 最短間隔がたっても、未読は起こさない行だけなので送らない
+    backdate_last_wake(&sb);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("WAKE skipped reason=already-read"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn pending_wake_is_not_resent_after_failure_and_stays_quiet() {
+    let sb = Sandbox::new("wake-839-pending-fail");
+    let send_calls = |sb: &Sandbox| {
+        fs::read_to_string(sb.t3_calls())
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| l.starts_with("t3 thread send"))
+            .count()
+    };
+    // 最短間隔の内に b の failed。指揮役はまだ読んでいない（既読は 0 のまま）
+    wake_then_defer_b_failure(&sb, 0);
+
+    // 間隔がたったが既読が進んでいない: 印は残し、印だけを確かめる周では理由のログを出さない
+    backdate_last_wake(&sb);
+    for _ in 0..2 {
+        let out = run_cooldown(&sb);
+        assert!(!stderr(&out).contains("WAKE"), "{}", stderr(&out));
+    }
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    assert_eq!(send_calls(&sb), 1);
+
+    // 既読が進んだ周で送りに失敗した: 印を消し、次の周回で送り直さない
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    sb.fake("t3-send-fail", "");
+    let out = run_cooldown(&sb);
+    assert!(stderr(&out).contains("WAKE failed"), "{}", stderr(&out));
+    assert!(read_state(&sb)["wake_pending"].is_null());
+    let out = run_cooldown(&sb);
+    assert!(!stderr(&out).contains("WAKE"), "{}", stderr(&out));
+    assert_eq!(send_calls(&sb), 2);
+}
+
+#[test]
+fn pending_wake_is_dropped_when_unregistered() {
+    let sb = Sandbox::new("wake-839-pending-unregistered");
+    wake_then_defer_b_failure(&sb, 1);
+    // 登録を外した（代行の終わり）: 後に回した起こしも取り消す
+    fs::remove_file(
+        sb.root
+            .join("home/.config/pelway-agent-notify/conductor-thread-id"),
+    )
+    .unwrap();
+    run_cooldown(&sb);
+    assert!(read_state(&sb)["wake_pending"].is_null());
+}
+
+#[test]
+fn waiting_without_run_count_is_not_treated_as_repeat() {
+    // T3 が runCount を返さない（payload の round は 0）承認待ちは、組を作らず毎回数える
+    let sb = Sandbox::new("wake-839-no-run-count");
+    conductor_and_waiting_thread(&sb);
+    let no_round =
+        show_round("mcp:d", "running", "2026-11-10T16:10:00Z", 1, 1).replace("\"runCount\":1,", "");
+    sb.fake("show-mcp_d.json", &no_round);
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    sb.run_with(&["--once"]);
+    sb.patrol_state(&format!(r#"{{"inbox_offset":{}}}"#, inbox_lines(&sb)));
+    conductor_finishes_and_d_waits_again(&sb);
+    let out = sb.run_with(&["--once"]);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
+
+#[test]
+fn deferred_notice_survives_unreadable_patrol_state() {
+    // 最短間隔の内に来た知らせは、補助記録が一時的に読めない周でも起こし待ちに入る
+    let sb = Sandbox::new("wake-839-patrol-gone");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    run_cooldown(&sb);
+    fs::remove_file(sb.pelway_dir().join("patrol-state.json")).unwrap();
+    b_fails_at(&sb, "2026-11-10T16:30:00Z");
+    run_cooldown(&sb);
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    // 補助記録が直り（1 行目まで読んだ）、間隔がたった: 新しい知らせが無くても起こす
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    backdate_last_wake(&sb);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
+
+#[test]
+fn pending_position_is_last_worthy_line_in_batch() {
+    // 同じ周に b の failed（2 行目）と指揮役自身の finished（3 行目）を書いた。
+    // 指揮役が 2 行目まで読めば、3 行目が未読でも起こさない
+    let sb = Sandbox::new("wake-839-batch-tail");
+    let list = |b: &str, conductor: &str| {
+        format!(
+            r#"[{{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}},
+  {{"threadId":"mcp:b","status":"{b}","updatedAt":"2026-11-10T16:30:00Z"}},
+  {{"threadId":"mcp:conductor-1","status":"{conductor}","updatedAt":"2026-11-10T16:40:00Z"}}]"#
+        )
+    };
+    sb.fake("list.json", &list("running", "running"));
+    sb.fake("show-mcp_a.json", SHOW_A_DONE);
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{
+  "mcp:a":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:b":{"status":"running","updated_at":"2026-11-10T16:30:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:30:00Z"},
+  "mcp:conductor-1":{"status":"running","updated_at":"2026-11-10T16:40:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:40:00Z"}},
+  "ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "running", "2026-11-10T16:30:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "running", "2026-11-10T16:40:00Z", 0),
+    );
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    run_cooldown(&sb);
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    sb.fake("list.json", &list("failed", "completed"));
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "completed", "2026-11-10T16:40:00Z", 0),
+    );
+    run_cooldown(&sb);
+    assert_eq!(inbox_lines(&sb), 3);
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    backdate_last_wake(&sb);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+}
+
+#[test]
+fn cooldown_counts_from_when_the_wake_was_sent() {
+    // 送るのに 8 秒かかった。最短間隔 4 秒は、送り終えた時刻から数える（送り始めた時刻から
+    // 数えると、次の周回は間隔の外になる。負荷で次の周回の起動が遅れても 4 秒の内に収まる）
+    let sb = Sandbox::new("wake-839-sent-at");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    sb.fake("t3-send-sleep", "8");
+    let run = |sb: &Sandbox| {
+        sb.command(&["--once"])
+            .env("PELWAY_AGENT_WATCH_WAKE_COOLDOWN_SECS", "4")
+            .output()
+            .unwrap()
+    };
+    run(&sb);
+    assert_eq!(sends(&sb), 1);
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    b_fails_at(&sb, "2026-11-10T16:30:00Z");
+    let out = run(&sb);
+    assert_eq!(sends(&sb), 1, "{}", stderr(&out));
+}
+
+#[test]
+fn pending_only_recount_reads_an_inbox_it_cannot_append_to() {
+    // 起こし待ちの印だけを確かめる周は、受信箱が変わったときだけ、読むだけで数え直す。
+    // 追記できない（所有者以外に権限がある）受信箱でも、読むだけの数え直しで起こす
+    let sb = Sandbox::new("wake-839-no-recount");
+    wake_then_defer_b_failure(&sb, 1);
+    let counted = read_state(&sb)["inbox_identity"].clone();
+    backdate_last_wake(&sb);
+    fs::set_permissions(sb.inbox(), fs::Permissions::from_mode(0o644)).unwrap();
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+    // 権限の変更で ctime が変わったので、読むだけで数え直して同一性を取り直した
+    assert_ne!(read_state(&sb)["inbox_identity"], counted);
+    assert_eq!(read_state(&sb)["inbox_lines"], 2);
+}
+
+#[test]
+fn pending_only_cycle_checks_offset_range() {
+    // 印だけを確かめる周でも、受信箱の末尾を超える既読の位置は使わない（印も基準も変えない）
+    let sb = Sandbox::new("wake-839-pending-range");
+    wake_then_defer_b_failure(&sb, 1);
+    let before = read_state(&sb)["last_wake_inbox_offset"].clone();
+    sb.patrol_state(r#"{"inbox_offset":5}"#);
+    backdate_last_wake(&sb);
+    run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1);
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    assert_eq!(read_state(&sb)["last_wake_inbox_offset"], before);
+    // 補助記録が直れば、新しい知らせが無くても起こす
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
+
+#[test]
+fn pending_only_cycle_recounts_a_changed_inbox() {
+    // 最後に数えた後に受信箱が切り詰められた（2 行 → 1 行）。印だけを確かめる周は数え直し、
+    // 切り詰めた後の末尾を超える既読の位置（2）で印を消さない
+    let sb = Sandbox::new("wake-839-truncated");
+    wake_then_defer_b_failure(&sb, 1);
+    let first = fs::read_to_string(sb.inbox()).unwrap();
+    fs::write(sb.inbox(), format!("{}\n", first.lines().next().unwrap())).unwrap();
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    backdate_last_wake(&sb);
+    run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1);
+    assert_eq!(
+        read_state(&sb)["wake_pending"],
+        u64::MAX,
+        "印は消さず、受信箱が変わったので値は不明"
+    );
+    // 補助記録が直れば起こす
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
+
+#[test]
+fn pending_only_cycle_recounts_a_same_size_rewrite() {
+    // 大きさを変えずに書き換えた受信箱（改行 1 つを別の文字に）も、数え直す
+    let sb = Sandbox::new("wake-839-same-size");
+    wake_then_defer_b_failure(&sb, 1);
+    let text = fs::read_to_string(sb.inbox())
+        .unwrap()
+        .replacen('\n', " ", 1);
+    fs::write(sb.inbox(), text).unwrap();
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    backdate_last_wake(&sb);
+    run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1);
+    assert_eq!(
+        read_state(&sb)["wake_pending"],
+        u64::MAX,
+        "印は消さず、受信箱が変わったので値は不明"
+    );
+}
+
+#[test]
+fn pending_only_recount_does_not_change_the_inbox() {
+    // 数え直しは読むだけ: 末尾の書きかけの断片を改行で閉じず、消えた受信箱を作らない
+    // （最短間隔の内に留めて、印が残る周を続ける）
+    let sb = Sandbox::new("wake-839-read-only");
+    wake_then_defer_b_failure(&sb, 0);
+    let mut text = fs::read_to_string(sb.inbox()).unwrap();
+    text.push_str("{\"partial\"");
+    fs::write(sb.inbox(), &text).unwrap();
+    run_cooldown(&sb);
+    assert_eq!(fs::read_to_string(sb.inbox()).unwrap(), text);
+    fs::remove_file(sb.inbox()).unwrap();
+    run_cooldown(&sb);
+    assert!(!sb.inbox().exists());
+    // どちらの周も印だけを確かめる周だった（印は残っている）
+    assert!(!read_state(&sb)["wake_pending"].is_null());
+}
+
+#[test]
+fn pending_only_cycle_does_not_recount_an_unchanged_inbox() {
+    // 受信箱が最後に数えたときから変わっていなければ、印だけの周は数え直さない
+    // （状態ファイルの行数だけを書き換えておき、そのまま残ることで見分ける）
+    let sb = Sandbox::new("wake-839-no-recount-unchanged");
+    wake_then_defer_b_failure(&sb, 1);
+    let mut state = read_state(&sb);
+    state["inbox_lines"] = 9.into();
+    write_state(&sb, &state);
+    backdate_last_wake(&sb);
+    run_cooldown(&sb);
+    assert_eq!(read_state(&sb)["inbox_lines"], 9);
+}
+
+#[test]
+fn pending_line_is_unknown_after_the_inbox_is_rewritten() {
+    // 印を付けた後に受信箱が書き換えられ、後に回した failed（2 行目）が 3 行目に移った。
+    // 指揮役が 2 行目まで読んでいても（範囲内）、未読の failed のために起こす
+    let sb = Sandbox::new("wake-839-shifted");
+    wake_then_defer_b_failure(&sb, 1);
+    let text = fs::read_to_string(sb.inbox()).unwrap();
+    fs::write(sb.inbox(), format!("{{\"inserted\":1}}\n{text}")).unwrap();
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    backdate_last_wake(&sb);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
+
+#[test]
+fn fresh_line_is_unknown_after_the_inbox_is_rewritten() {
+    // 印が無い状態で、受信箱が 1 行に切り詰められてから新しい failed が 2 行目に書かれた。
+    // 前の受信箱で読んだ既読の位置（2）は、新しい受信箱の同じ中身を指すと確かめられないので、
+    // 既読として取り消さず起こす
+    let sb = Sandbox::new("wake-839-fresh-after-rewrite");
+    one_event(&sb);
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    run_cooldown(&sb);
+    let first = fs::read_to_string(sb.inbox()).unwrap();
+    fs::write(sb.inbox(), format!("{first}{{\"other\":1}}\n")).unwrap();
+    // 前の受信箱（2 行）を読み終えたあと、1 行に切り詰められた
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    fs::write(sb.inbox(), &first).unwrap();
+    backdate_last_wake(&sb);
+    b_fails_at(&sb, "2026-11-10T16:30:00Z");
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
+
+#[test]
+fn quiet_notice_cycle_forgets_pending_line_after_rewrite() {
+    // b の failed（2 行目）を後に回したあと、受信箱の先頭に 1 行が差し込まれた。
+    // その後、指揮役自身の finished だけが来た周（知らせを書く周）でも、印の行番号は不明になり、
+    // 既読 2 で取り消さずに起こす
+    let sb = Sandbox::new("wake-839-quiet-after-insert");
+    let list = |b: &str, conductor: &str| {
+        format!(
+            r#"[{{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}},
+  {{"threadId":"mcp:b","status":"{b}","updatedAt":"2026-11-10T16:30:00Z"}},
+  {{"threadId":"mcp:conductor-1","status":"{conductor}","updatedAt":"2026-11-10T16:40:00Z"}}]"#
+        )
+    };
+    sb.fake("list.json", &list("running", "running"));
+    sb.fake("show-mcp_a.json", SHOW_A_DONE);
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "running", "2026-11-10T16:30:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "running", "2026-11-10T16:40:00Z", 0),
+    );
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{
+  "mcp:a":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:b":{"status":"running","updated_at":"2026-11-10T16:30:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:30:00Z"},
+  "mcp:conductor-1":{"status":"running","updated_at":"2026-11-10T16:40:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:40:00Z"}},
+  "ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    run_cooldown(&sb);
+    sb.patrol_state(r#"{"inbox_offset":1}"#);
+    sb.fake("list.json", &list("failed", "running"));
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    run_cooldown(&sb);
+    assert_eq!(read_state(&sb)["wake_pending"], 2);
+    let text = fs::read_to_string(sb.inbox()).unwrap();
+    fs::write(sb.inbox(), format!("{{\"inserted\":1}}\n{text}")).unwrap();
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    backdate_last_wake(&sb);
+    sb.fake("list.json", &list("failed", "completed"));
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "completed", "2026-11-10T16:40:00Z", 0),
+    );
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+}
+
+#[test]
+fn rewrite_seen_on_a_quiet_cycle_is_kept_until_the_next_wake() {
+    // 書き換えを見分けた周には、指揮役自身の finished だけが来た（印も起こす知らせも無い）。
+    // 次の周の b の failed は、前の受信箱で読んだ既読の位置（4）で取り消さずに起こす
+    let sb = Sandbox::new("wake-839-rewrite-kept");
+    let list = |b: &str, conductor: &str| {
+        format!(
+            r#"[{{"threadId":"mcp:a","status":"completed","updatedAt":"2026-11-10T16:10:00Z"}},
+  {{"threadId":"mcp:b","status":"{b}","updatedAt":"2026-11-10T16:30:00Z"}},
+  {{"threadId":"mcp:conductor-1","status":"{conductor}","updatedAt":"2026-11-10T16:40:00Z"}}]"#
+        )
+    };
+    sb.fake("list.json", &list("running", "running"));
+    sb.fake("show-mcp_a.json", SHOW_A_DONE);
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "running", "2026-11-10T16:30:00Z", 0),
+    );
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "running", "2026-11-10T16:40:00Z", 0),
+    );
+    fs::write(
+        sb.state_file(),
+        r#"{"initialized":true,"threads":{
+  "mcp:a":{"status":"running","updated_at":"2026-11-10T16:00:00Z","run_count":1,"pending_requests":0,"stalled_for":null},
+  "mcp:b":{"status":"running","updated_at":"2026-11-10T16:30:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:30:00Z"},
+  "mcp:conductor-1":{"status":"running","updated_at":"2026-11-10T16:40:00Z","run_count":1,"pending_requests":0,"stalled_for":"2026-11-10T16:40:00Z"}},
+  "ci_notified":{}}"#,
+    )
+    .unwrap();
+    sb.conductor("mcp:conductor-1");
+    sb.patrol_state(r#"{"inbox_offset":0}"#);
+    run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1);
+    // 前の受信箱は 4 行で、指揮役はそこまで読んだ。その後、受信箱は 2 行に戻された
+    let first = fs::read_to_string(sb.inbox()).unwrap();
+    sb.patrol_state(r#"{"inbox_offset":4}"#);
+    fs::write(sb.inbox(), format!("{first}{{\"other\":1}}\n")).unwrap();
+    // 書き換えを見分ける周: 指揮役自身の finished だけ
+    sb.fake("list.json", &list("running", "completed"));
+    sb.fake(
+        "show-mcp_conductor-1.json",
+        &show("mcp:conductor-1", "completed", "2026-11-10T16:40:00Z", 0),
+    );
+    run_cooldown(&sb);
+    assert_eq!(sends(&sb), 1);
+    // 次の周: b の failed が 4 行目に入る
+    backdate_last_wake(&sb);
+    sb.fake("list.json", &list("failed", "completed"));
+    sb.fake(
+        "show-mcp_b.json",
+        &show("mcp:b", "failed", "2026-11-10T16:30:00Z", 0),
+    );
+    let out = run_cooldown(&sb);
+    assert_eq!(inbox_lines(&sb), 4);
+    assert_eq!(sends(&sb), 2, "{}", stderr(&out));
+    let b_fails_again = |sb: &Sandbox| {
+        let mut state = read_state(sb);
+        state["threads"]["mcp:b"]["status"] = "running".into();
+        write_state(sb, &state);
+    };
+    // 起こしの後、指揮役が既読の位置を書き直す前に、受信箱がもう一度書き換えられた（ほかの書き手が
+    // 1 行足した）。指揮役はその受信箱の 5 行目まで読み、また b の failed が来た。前の受信箱で
+    // 記録した既読の位置（4）との違いでは、書き換えの印を消さない
+    let text = fs::read_to_string(sb.inbox()).unwrap();
+    fs::write(sb.inbox(), format!("{text}{{\"other\":2}}\n")).unwrap();
+    sb.patrol_state(r#"{"inbox_offset":5}"#);
+    backdate_last_wake(&sb);
+    b_fails_again(&sb);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 3, "{}", stderr(&out));
+    // 指揮役が既読の位置を新しい受信箱に合わせて戻した（5 → 2）あとに、また b の failed が来た。
+    // 書き換え前の既読の位置を起こしの基準に残さないので、間隔の後に起こす
+    sb.patrol_state(r#"{"inbox_offset":2}"#);
+    backdate_last_wake(&sb);
+    b_fails_again(&sb);
+    let out = run_cooldown(&sb);
+    assert_eq!(sends(&sb), 4, "{}", stderr(&out));
 }
