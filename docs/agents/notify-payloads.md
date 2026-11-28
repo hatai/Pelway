@@ -109,8 +109,12 @@ agent-watch は、webhook に送るのと同じ `pelway.agent-watch/v1` の JSON
 
 `opened`（作成）と `ready_for_review`（Draft 解除）は PR の作成、`synchronize` は PR への push を表す。`pull_request` の他の type（`edited`・`reopened`・`assigned`・`labeled` など）は送らない。
 
-`synchronize` は同じ PR・同じ head sha では 1 回だけ送る。workflow がこの workflow の過去の run を調べ（同じ head ブランチ・同じ head sha で `Send notification` step が成功した run）、あれば送らない。調べられなかったとき（API 失敗）は送る側に倒す。`opened`・`ready_for_review`・`closed` は状態の変化そのものを知らせるため、この dedup の対象外（たとえば Draft で開いたあと push せず ready にしたとき、同じ head sha でも `ready_for_review` は届く）。
+`synchronize` の dedup で同じ出来事と見るのは、同じ PR 番号・同じ head sha・`synchronize` の通知である。workflow は `run-name` を `notify #<PR番号> <action>` にし、GitHub API の `display_title` が `notify #<対象PR番号> synchronize` と完全一致する過去 run だけを候補にする。`opened`・`ready_for_review`・`closed` は状態の変化そのものを知らせるため、この dedup の対象外で、これらの送信済み記録は `synchronize` を止めない。
 
-この dedup は重複を完全には防がないので、受け手は同じ PR・同じ head sha の `synchronize` が 2 回以上届くことを前提にする。重複しうるのは、照合するのが直近 100 run（1 ページ）だけで、それより前の送信が見えないときと、run や job の一覧を取る API が失敗して送る側に倒れたときである。逆に、送信に失敗した後の rerun でも届かないことがある。Send step は送信に失敗しても step を成功で終えるため、dedup が送信済みと数えるからである。重複を減らすことと rerun で届かないことは #588 で直す。
+「送った」とは、webhook が HTTP 2xx を返し、送信直後の `Record delivery` step が成功したことである。`Send notification` は curl 失敗や非 2xx でも workflow を失敗にしないが、その場合は `delivered=false` を出し、`Record delivery` は実行されない。`Record delivery` を持たない run や、step が失敗・取消・欠損の run は送信済みに数えない。
+
+dedup は自分の run の過去 attempt を先に調べ、その後で候補 run を新しい順に調べる。run 一覧と jobs 一覧はページングして読む。API の取得失敗、dedup スクリプト自体の失敗、壊れた API 応答、1000 件の検索上限、120 秒の探索上限では、確実な送信済みが見つからない限り送る側に倒す。確実な送信済みが見つかれば、ほかの履歴が読めなくても送らない。
+
+この dedup は重複を減らすもので、原子的・永続的な exactly-once の保証ではない。受け手は同じ PR・同じ head sha の `synchronize` が 2 回以上届くことを前提にする。重複しうるのは、上の fail-open の条件に加え、送信済みだった可能性のある run に `Record delivery` が無いときである。
 
 送られないもの: PR のタイトル・本文・ラベル（ペイロードにこれらのキーはない）、エージェントのスレッドの状態（`agent-watch` が `pelway.agent-watch/v1` で送る）、レビューコメント・Issue コメント、OWNER / MEMBER / COLLABORATOR 以外（ボットを含む）のレビュー、fork からのイベント。fork 由来（PR は head リポジトリ、workflow_run は head_repository がこのリポジトリと違う）と `GROKBOT_WEBHOOK_URL` / `GROKBOT_WEBHOOK_AUTH` の Secret が未設定のときは、通知せずジョブを成功で終える（失敗にしない）。
