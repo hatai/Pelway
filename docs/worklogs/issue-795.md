@@ -48,3 +48,22 @@
 5. 改善案: .agents/skills/implement-issue/SKILL.mdの「検査してコミットし、行数を確かめてから push する」に「所有権が root に見えない sandbox では verify-run・conductor 系テストが環境起因で失敗しうる」を足す
 
 使ったスキル: implement-issue, write-pull-request, review-pr, improve-skills
+
+## 失敗の筋（round 2 の最終）
+
+- 失敗の筋: PR #840 と main の確認に使う 2 点 diff が自分の変更を含み、main 側の変更を確かめたことにならない
+  確かめ方: `git diff HEAD...origin/main -- .agents/skills/write-pull-request/SKILL.md` を実行し、main 側の差分が無い出力（0 行）を確かめる
+
+round 1 の最終版にあるほかの筋は、この round の差分でも残す。消した筋はない。
+
+## 実装者メモ（round 2）
+
+対象 head: b0d5e1a44ca681b18afed7420e12e6bd27cab01b
+
+1. 詰まった箇所: docs/worklogs/issue-795.md: main 側変更の確認に 2 点 diff を書いており、自分の変更を差分に含んでいた
+2. 曖昧だった文: 「main の同箇所にこの変更と冲突する差分がないことを `git diff HEAD..origin/main -- .agents/skills/write-pull-request/SKILL.md` で確かめる」（docs/worklogs/issue-795.md「失敗の筋（最終）」）
+3. 仮定と解釈: main 側だけの差分を見る意図と仮定した。3 点 diff で merge-base から main 側を見る解釈を選び、自分の変更を含む 2 点 diff を残す解釈は選ばなかった
+4. 足りなかった情報・検証手段: 指摘を受けた時点でコマンドの意味を実際の出力と突き合わせる確認
+5. 改善案: docs/worklogs/issue-795.mdの「失敗の筋（最終）」に「main 側だけを見るときは 3 点 diff を使う」を足す
+
+使ったスキル: implement-issue, receiving-code-review
