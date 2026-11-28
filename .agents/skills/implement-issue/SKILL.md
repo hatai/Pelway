@@ -45,7 +45,7 @@ AI 開発チームの実装担当が、GitHub Issue 1 件を Draft PR 1 本に�
 | 手順 8 の helper `required-checks` が、実行し直しても続けて 3（判定できない）を返した | 2 回の実行の標準エラー出力と、対象の PR 番号 |
 | レビューの委託が `runtimeMode: "auto-accept-edits"` で受け付けられず、子タスクが作られなかった。`auto`・`full-access` に変えて委託し直さない | 委託の指定（`target`・`runtimeMode`）と、返ったエラー文 |
 | 合成済みの設定で必須の役に当たる担当が使えない（手順 8・9 の `effective` の JSON の `missing` に担当が入る）のに、レビューの委託または Draft の解除に進もうとした。PR は Draft のまま、委託も解除もしない（codex が使えないあいだは現在の head への codex の有効な Approve が取れず、skill `command-team` の「マージ」の条件を満たせないため。優先順位の表で選ばれたほかの担当の結果では代えない） | `missing` に入った担当と、それを出した実行の対象（login・ファイル）。Draft のまま置いた PR の番号と、人が選ぶ選択肢（codex を `use` に戻す・人が担当を割り当て直す・codex の復帰を待つ） |
-| 委託が 2 回連続で `failed`（`checks timeout` と `wrong runtime` は数えない） | 試したこと（レビュー結果の回数・担当・effort） |
+| 委託が 2 回連続で `failed`（`checks timeout`・`wrong runtime`・利用の上限による `failed` は数えない） | 試したこと（レビュー結果の回数・担当・effort） |
 
 レビューの結果への対応の途中でこの表の条件に当たったときは、止まる前に手順 9 の形のラウンドサマリーを PR に残す。`verdict` には受け取ったレビューの結果を写し、`must-fix:` には未対応のまま止まる旨を書く。
 
@@ -254,6 +254,8 @@ PR の必須チェック（`mise run verify` と `pr-size`）が通ったら、�
 
 レビュー担当もチェックが終わるまで待ってからレビューする。委託した子が `error: checks timeout` を報告したときも、同じラウンドとして数えずに完了を待って再委託する。
 
+利用の上限による failed は、上限が解けると自動で再開される。Guard が head のずれを止めるので、手で予約しない。今の head を見てもらうには、上限が解けてから新しい委託記録を残して委託し直す。上限による failed は 2 回連続の failed に数えない。
+
 ラウンドの数え方は skill `command-team` の「レビューのラウンド」のとおり。同じ head は 1 ラウンドに数え、コンフリクトの解消を含まない main の取り込みだけで head が変わっても新しいラウンドにしない（main の取り込みで head が変わったときは、同じラウンドのままレビューをやり直す）。修正のラウンドの回数では止めない。
 
 担当と effort は skill `command-team` の「レビュー担当と effort」の表で決める（通常は PR 番号の偶奇、高リスクは使える担当全て、抜き取りは PR 番号を 4 で割った余りが 0 のとき `sampling` の担当を追加。自分が Devin CLI で実装した PR には Devin CLI を付けない）。差分が `unsafe` を足している、`.github/workflows/`・`scripts/agent-gh`・`AGENTS.md`・`.agents/skills/`・`docs/agents/` のどれかが変わっている、`agent-team.toml` を変えている、認証・認可・トークン・鍵・暗号・sandbox・egress・gateway・テナント分離・監査に触れている、のどれかに当たるときは Assigned 行に `security=yes` を付ける。
@@ -405,7 +407,7 @@ scripts/agent-gh dev pr ready <PR 番号>
 
 1 で直したとき以外は、Approve の後は PR に push しない。実装者メモのみのコミットでも head が動き、command-team のマージ規則によりレビューのやり直しになる。メモの追記が必要なときは、修正 round の手順 5・6（レビュー委託の前）で行う。
 
-複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する（セキュリティの指摘は特に修正側を優先する。skill `command-team` の「レビューのラウンド」）。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（判定が割れたこと自体ではエスカレーションしない）。ただし round 4 以降のレビューで request-changes 側の must-fix にセキュリティ領域の指摘があるときは、手順 9 の形のラウンドサマリーを PR に残してから、「止まる条件」の表のとおり止まる。委託の子が `failed` を報告したら、`error: checks timeout` は待って同じラウンドを数えずに再委託し、`error: wrong runtime` は手順 8 のブロックと突き合わせて委託の設定を直し、同じラウンドを数えずに再委託する。`error:` が `設定の不備:` で始まるときは再委託せずに止まる（止まる条件）。それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
+複数のレビュー担当の判定が割れたら（approve と request-changes が混ざったら）、修正側（request-changes）の指摘を優先して対応する（セキュリティの指摘は特に修正側を優先する。skill `command-team` の「レビューのラウンド」）。Issue にそれぞれの要点をコメントし、request-changes 側の must-fix に対応する修正 round をそのまま進める（判定が割れたこと自体ではエスカレーションしない）。ただし round 4 以降のレビューで request-changes 側の must-fix にセキュリティ領域の指摘があるときは、手順 9 の形のラウンドサマリーを PR に残してから、「止まる条件」の表のとおり止まる。委託の子が `failed` を報告したら、`error: checks timeout` は待って同じラウンドを数えずに再委託し、`error: wrong runtime` は手順 8 のブロックと突き合わせて委託の設定を直し、同じラウンドを数えずに再委託する。利用の上限による failed は手順 8 の扱いに従う。`error:` が `設定の不備:` で始まるときは再委託せずに止まる（止まる条件）。それ以外は 1 回だけ再委託する（2 回連続で止まる条件）。
 
 hatai の指示がこの手順と食い違うとき（例: 「nit 対応して。レビューは不要」）は、指示の範囲だけを行い、省いた手順（must-fix の修正・再レビュー・`pr ready` など）を、最後の返答の前のメッセージで名指しする。
 

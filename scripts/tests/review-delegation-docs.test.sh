@@ -46,6 +46,16 @@ check implementer_checks_timeout .agents/skills/implement-issue/SKILL.md \
 check runbook_checks_timeout docs/agents/grokbot-runbook.md \
   '`error: checks timeout` なら'
 
+# 利用の上限による failed は自動で再開されるため、手で予約せず、連続 failed に数えない。
+check implementer_limit_resume .agents/skills/implement-issue/SKILL.md \
+  '利用の上限による failed は、上限が解けると自動で再開される' \
+  'Guard が head のずれを止めるので、手で予約しない' \
+  '今の head を見てもらうには、上限が解けてから新しい委託記録を残して委託し直す' \
+  '上限による failed は 2 回連続の failed に数えない' \
+  '委託が 2 回連続で `failed`（`checks timeout`・`wrong runtime`・利用の上限による `failed` は数えない）'
+check implementer_limit_resume_step9 .agents/skills/implement-issue/SKILL.md \
+  '利用の上限による failed は手順 8 の扱いに従う'
+
 # 実装担当は PR 外の所見を終わりの報告に書き、公開の Issue を立てない。
 check implementer_out_of_scope .agents/skills/implement-issue/SKILL.md \
   'PR 外の所見を受けたら、終わりの報告（指揮役か hatai あて）の `out-of-scope:` の行に書き、公開の Issue は立てない'
