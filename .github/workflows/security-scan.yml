@@ -40,7 +40,7 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-          # 履歴全体を走査するため全コミットを取得する。
+          # pull_request では base から HEAD まで、それ以外では履歴全体を走査するため全コミットを取得する。
           fetch-depth: 0
 
       # mise.toml の全ツール（rust など）は入れず、このジョブで使う CLI だけを --locked で入れる。
@@ -60,7 +60,18 @@ jobs:
       - name: Install gitleaks
         run: mise install --locked aqua:gitleaks/gitleaks
 
-      - name: Scan (gitleaks git)
+      # pull_request では PR の base のコミット SHA を渡し、base..HEAD（PR のコミットと合成の
+      # マージコミット）だけを走査する。値は run: に埋め込まず env で渡す（スクリプトが SHA の形を確かめる）。
+      - name: Scan (gitleaks git, pull_request)
+        if: github.event_name == 'pull_request'
+        env:
+          SECURITY_SCAN_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: mise exec -- bash scripts/security-scan.sh gitleaks
+
+      # push（main）と workflow_dispatch では SECURITY_SCAN_BASE_SHA を設定せず、HEAD から辿れる
+      # 履歴全体を走査する。env を無条件に書くと、pull_request 以外では空文字が設定されてしまう。
+      - name: Scan (gitleaks git, full history)
+        if: github.event_name != 'pull_request'
         run: mise exec -- bash scripts/security-scan.sh gitleaks
 
   # Semgrep CE は公式イメージ（semgrep/semgrep:1.186.0、LGPL-2.1）を digest で固定して使う。
