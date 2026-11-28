@@ -23,3 +23,15 @@
 5. 改善案: `.agents/skills/write-issue/SKILL.md` の「受け入れ条件の書き方」に「残存行の分類を求める条件では、行ごとか分類ごとかを指定する」を足す。
 
 使ったスキル: implement-issue、write-pull-request
+
+## 実装者メモ（round 3）
+
+対象 head: b59cd141d9b37aa9a930d27ac940cb3dfe6777b8
+
+1. 詰まった箇所: `docs/technical/v0.7/verification/verify.py`: 本文の注記をリンクなしの文にしたとき、見出し・アンカーは変わらなくても相対リンクの件数が変わり、生成物（relative-links.json・static-checks.json）の再生成が要ることがレビューで初めて分かった。
+2. 曖昧だった文: 「v0.7 本文の見出し・明示アンカー・リンク構造が保たれている」（Issue #816 の受け入れ条件）
+3. 仮定と解釈: 「リンク構造」を見出し間の導線の骨格と読み、注記内のリンク増減は構造の変更に当たらないと解釈していた。受け入れ条件は相対リンクの件数まで含めており、変わった場合は verify.py を実行して生成物を同じ PR で更新する。README 系の「Rust デスクトップ」の主文は受け入れ条件外の文書でプロダクト判断を含むため別 Issue に回し、`docs/agents/external-skills.md` の参照は #826 でそろえる。
+4. 足りなかった情報・検証手段: v0.7 の body を変える PR で verify.py の再生成が要るかを、コミットの前に気づく検査が無い。nightly の docs-v07 は生成物を書き出すだけで、コミット済みの JSON と比べない。
+5. 改善案: `.agents/skills/implement-issue/SKILL.md` の手順 6 に「`docs/technical/v0.7/body` を変える差分では `python3 docs/technical/v0.7/verification/verify.py` を実行し、生成物の差分を同じ PR に入れる」を足す。
+
+使ったスキル: implement-issue、write-pull-request
