@@ -126,6 +126,7 @@ run_cycles() {
     PELWAY_WATCH_HEARTBEAT_SECS="${2:-600}" PELWAY_WATCH_PENDING_SENDS_SECS="${3:-1800}" \
     XDG_STATE_HOME="$ROOT/state" \
     PATH="$ROOT/bin:$PATH" T3_BIN="$ROOT/bin/t3" PELWAY_BOARD_QUEUE_DIR="$ROOT/queue" \
+    PELWAY_BOARD_SNAPSHOT="" \
     bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
   WPID=$!
   wait "$WPID" 2>/dev/null; WPID=""

@@ -116,6 +116,9 @@ export HOME="$ROOT/home" XDG_STATE_HOME="$ROOT/state" XDG_CONFIG_HOME="$ROOT/con
 # fake repo は git 管理でないため、patrol-state の置き場は
 # 環境変数で明示する（他の conductor-watch テストと同じやり方）。
 export PELWAY_PATROL_STATE="$ROOT/state/pelway/patrol-state.json"
+# ボード読み取りスナップショットの書き出しを止める（人間名義の gh を呼ばせない。
+# このテストは起動の形だけを確かめる）
+export PELWAY_BOARD_SNAPSHOT=""
 # 見張りは既定で実運用のボード更新キュー（/tmp/pelway-board-queue）を開く。キューはマウント
 # 名前空間で分かれないため、名前空間内のすべての起動が試験用のキューを使うように固定する
 # （gh が PATH に無いため、実運用の未処理の依頼を読んだ見張りはそれを失敗扱いで消す）。

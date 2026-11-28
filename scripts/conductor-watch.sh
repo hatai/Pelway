@@ -9,11 +9,22 @@
 # runbook の「ボード Status 更新キュー」。実行するのは gh project の読み取り
 # （view・field-list・item-list）と item-edit だけで、人間名義の gh が使われる
 # （エージェント環境から人間名義 gh は使えないため、ホスト側のこの常駐で処理する）。
+# 巡回のたびに（間隔の制御あり）、人間名義の gh でボードを読み、Todo の並び順と
+# 各カードの Status などをスナップショット JSON（$PELWAY_BOARD_SNAPSHOT、既定
+# $XDG_STATE_HOME/pelway/conductor-watch/board-snapshot.json）に書き出す（runbook の「ボード読み取り
+# スナップショット」。指揮役はそれを scripts/board-snapshot-read で読む）。
+# 取得に失敗した巡回は前の書き出しを残す（消さない・空にしない）。
 # GitHub への書き込みはほかに 1 つだけ: needs-decision が 15 分決まらず指揮役が動いていない Issue に、scripts/agent-gh dev で
 # コメントを書き、needs-decision を needs-human に替える（Issue #602。runbook の「指揮役の定期巡回（スケジュール起床）」）。
 # 使い方: scripts/conductor-watch-ensure.sh で起動する（冪等の起動入口。止めるまで 30 秒ごとに見る）
 D="${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch"; mkdir -p "$D"
 Q="${PELWAY_BOARD_QUEUE_DIR:-/tmp/pelway-board-queue}"; mkdir -p "$Q"
+# ボード読み取りスナップショットの書き出し先（runbook の「ボード読み取りスナップショット」）。
+# 既定は見張りの状態ディレクトリ。共有の /tmp とは違い、sandbox からは読み取り専用で
+# 見えるため、エージェントは書き出しを偽装できない（slots.json と同じ経路）。
+# PELWAY_BOARD_SNAPSHOT を空にすると書き出し自体を止める（テスト用。
+# 人間名義の gh を呼ばせない）。
+SNAP="${PELWAY_BOARD_SNAPSHOT-${XDG_STATE_HOME:-$HOME/.local/state}/pelway/conductor-watch/board-snapshot.json}"
 # 一覧の 1 回の取得上限。件数が上限に達した巡回は打ち切りの可能性があるため、
 # python 側で巡回状態を更新しない（窓外の対象を消したり誤判定したりしない）。
 IL=1000; PL=1000
@@ -106,6 +117,10 @@ if [[ -z "$T3_BIN" ]]; then
     esac
   done
 fi
+# スナップショットの取得間隔はプロセスの中の記憶だけで管理する。
+# 前の書き出しの内容は鮮度の判定に使わない（置き場の取り違えへの多層防御。
+# 使うと、偽の fetched_at で取り直しが止まりうる）。
+snap_last_fetch=0
 while true; do
   # threads.json は python 側で取得の成功を確かめてから差し替える（失敗で前回の一覧を消さない）。
   # T3 の失敗はスレッドに基づく判定をせず（格上げは判定しない）、Issue・PR の失敗は patrol-state.json を書き換えない（Issue なら DECISION の検知もしない）
@@ -1108,5 +1123,147 @@ for name, req in pending:
     else:
         fail(name, "item-edit", rc=(r.returncode if r else -1))
 PY
+  # ボード読み取りスナップショット: 人間名義の gh で item-list を読み、
+  # 指揮役が sandbox から読める JSON を原子的に書き出す（runbook の
+  # 「ボード読み取りスナップショット」）。間隔（PELWAY_BOARD_SNAPSHOT_INTERVAL 秒、
+  # 既定 240）ごとに必ず取り直す。前の書き出しは読まない（置き場の取り違えへの
+  # 多層防御。内容を鮮度の判定に信じない）。
+  # 取得に失敗した巡回は前の書き出しを残し、失敗を BOARD snapshot-failed の行で出す。
+  # 書き出し先は見張りの状態ディレクトリ（ホストだけが更新できる場所。
+  # runbook の節）。一時ファイルは書き込み途中を読ませないためと、
+  # symlink で外のファイルを上書きさせないために、予測不能な名前を
+  # O_EXCL|O_NOFOLLOW で作ってから置き換える。
+  if [[ -n "$SNAP" ]]; then
+  snap_interval="${PELWAY_BOARD_SNAPSHOT_INTERVAL:-240}"
+  [[ "$snap_interval" =~ ^[0-9]+$ ]] || snap_interval=240
+  now_epoch=$(date +%s)
+  if (( now_epoch - snap_last_fetch >= snap_interval )); then
+    snap_last_fetch=$now_epoch
+  python3 -I - "$SNAP" <<'PY' || true
+import json, os, secrets, subprocess, sys, time
+snap_path = sys.argv[1]
+OWNER, NUM = "hatai", "7"
+now = time.time()
+
+def failed(reason):
+    print(f"BOARD snapshot-failed reason={reason}", flush=True)
+    sys.exit(0)
+
+def fetch(limit):
+    # gh は limit の件数まで内部でページをたどる（返却順は変わらない）
+    try:
+        r = subprocess.run(["gh", "project", "item-list", NUM, "--owner", OWNER,
+                            "--format", "json", "--limit", str(limit)],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                           encoding="utf-8", errors="strict", timeout=60)
+    except Exception:
+        failed("gh-exec")
+    if r.returncode != 0:
+        failed("item-list")
+    try:
+        return json.loads(r.stdout)
+    except Exception:
+        failed("bad-json")
+
+def shape(d):
+    items = d.get("items") if isinstance(d, dict) else None
+    total = d.get("totalCount") if isinstance(d, dict) else None
+    if not isinstance(items, list) or not isinstance(total, int) or isinstance(total, bool):
+        failed("bad-shape")
+    return items, total
+
+# 最初の取得の上限（既定 1000。PELWAY_BOARD_SNAPSHOT_FIRST_LIMIT はテスト用）
+try: first_limit = int(os.environ.get("PELWAY_BOARD_SNAPSHOT_FIRST_LIMIT") or 1000)
+except ValueError: first_limit = 1000
+data = fetch(first_limit)
+raw_items, total = shape(data)
+# 上限で打ち切られた（totalCount が件数を超える）ときは、件数を上限に取り直す。
+# それでも足りなければ全カードを読めたと言えないため公開しない
+# （runbook の「ボード読み取りスナップショット」）。
+if len(raw_items) < total:
+    data = fetch(total)
+    raw_items, total = shape(data)
+    if len(raw_items) < total:
+        failed("truncated")
+
+def names(v):
+    # labels・assignees は gh の版で文字列の配列か {"name": ...} の配列かが違いうるため、
+    # どちらも名前の配列に正規化する。読めない要素は落とす（項目ごと捨てない）。
+    out = []
+    if isinstance(v, list):
+        for x in v:
+            if isinstance(x, str):
+                out.append(x)
+            elif isinstance(x, dict) and isinstance(x.get("name"), str):
+                out.append(x["name"])
+    return out
+
+items = []
+for it in raw_items:
+    if not isinstance(it, dict):
+        failed("bad-item")
+    c = it.get("content")
+    if not isinstance(c, dict):
+        failed("bad-item")
+    t = c.get("type")
+    # 型の読めない項目を落とした一覧は、欠けた一覧を完全なものとして指揮役に
+    # 渡すことになるため公開しない
+    if t not in ("Issue", "PullRequest", "DraftIssue"):
+        failed("bad-item")
+    e = {"id": it.get("id") if isinstance(it.get("id"), str) else "",
+         "type": t,
+         "status": it.get("status") if isinstance(it.get("status"), str) else None,
+         "labels": names(it.get("labels")),
+         "assignees": names(it.get("assignees"))}
+    if not e["id"]:
+        failed("bad-item")
+    if t in ("Issue", "PullRequest"):
+        n = c.get("number")
+        if not isinstance(n, int) or isinstance(n, bool) or n <= 0:
+            failed("bad-item")
+        e["number"] = n
+    if isinstance(c.get("repository"), str):
+        e["repository"] = c["repository"]
+    items.append(e)
+
+body = {"version": 1, "fetched_at": now,
+        "project": f"users/{OWNER}/projects/{NUM}", "items": items}
+payload = json.dumps(body, ensure_ascii=False, allow_nan=False)
+# 容量の契約は reader（scripts/board-snapshot-read）と同じ 4 MiB。
+# 上限を超えた書き出しは reader が必ず broken と読むため、公開すると
+# 有効な前回分が失われる。超えたときは公開せず前回分を残す
+# （PELWAY_BOARD_SNAPSHOT_MAX_BYTES はテスト用）
+try: max_bytes = int(os.environ.get("PELWAY_BOARD_SNAPSHOT_MAX_BYTES") or 4194304)
+except ValueError: max_bytes = 4194304
+if len(payload.encode("utf-8")) > max_bytes:
+    failed("too-large")
+# 一時ファイルは予測不能な名前を O_EXCL|O_NOFOLLOW で作り、置き換えで公開する
+# （symlink で外のファイルを上書きさせない。書き込み途中を読ませない）。
+d = os.path.dirname(os.path.abspath(snap_path)) or "/"
+name = os.path.basename(snap_path)
+tmp = f".snap-{os.getpid()}-{secrets.token_hex(8)}.tmp"
+# 容量を測った UTF-8 のバイト列をそのまま書く。ロケールの既定の文字コードに任せると、
+# UTF-8 以外の環境で読めないバイト列で前回分を置き換えうる。書き込みに失敗したときも
+# 前回分を残し、一時ファイルを片付ける
+try:
+    fd = os.open(os.path.join(d, tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+except OSError:
+    failed("write")
+try:
+    with os.fdopen(fd, "wb") as f:
+        f.write(payload.encode("utf-8"))
+except BaseException:
+    try: os.unlink(os.path.join(d, tmp))
+    except OSError: pass
+    failed("write")
+try:
+    os.replace(os.path.join(d, tmp), os.path.join(d, name))
+except OSError:
+    try: os.unlink(os.path.join(d, tmp))
+    except OSError: pass
+    failed("replace")
+PY
+  fi
+  fi
   sleep 30
 done

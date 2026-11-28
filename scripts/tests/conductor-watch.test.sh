@@ -92,7 +92,7 @@ EOF
 start_watch() {
   MOCK="$MOCK" SLEEP_MAX="${SLEEP_MAX:-}" MOCK_ISSUE_FAIL="${MOCK_ISSUE_FAIL:-}" \
   MOCK_PR_FAIL="${MOCK_PR_FAIL:-}" XDG_STATE_HOME="$ROOT/state" PATH="$ROOT/bin:$PATH" \
-  T3_BIN="${T3_BIN:-$ROOT/bin/t3}" \
+  T3_BIN="${T3_BIN:-$ROOT/bin/t3}" PELWAY_BOARD_SNAPSHOT="" \
     bash "$ROOT/repo/scripts/conductor-watch.sh" >>"$ROOT/out.log" 2>&1 &
   WPID=$!
 }
